@@ -5173,3 +5173,47 @@ class SystemConfig(Base):
             name="fk_system_config_updated_by",
         ),
     )
+
+
+class SkuPricingPolicy(Base):
+    """公司级定价纪律规则，按 SKU 当前库龄档位配置。
+
+    一档一行：折扣率（这一档最多能打几折）与目标利润率（这一档至少要留多少利润）。
+    档位由库龄触发，**不是**由 turnover_class 触发。
+    规则只进不退：改生效日期不能往回拨，每次变更都是「关旧行 + 开新行」，历史留档可追溯。
+    """
+
+    __tablename__ = "sku_pricing_policies"
+
+    policy_id = Column(Integer, primary_key=True, autoincrement=True)
+    min_age_days = Column(Integer, nullable=False)          # 库龄起点（含），从该天数起本行生效
+    tier_label = Column(String(32), nullable=False)         # 档位名（自解释形式，如「库龄≥60天」）
+    discount_rate = Column(Numeric(12, 8), nullable=False)  # 本档唯一折扣率
+    target_margin_rate = Column(Numeric(12, 8), nullable=False)  # 本档目标利润率
+    platform_basis = Column(String(32), nullable=False)     # 成本口径平台（底线是公司统一口径）
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    status = Column(String(16), nullable=False, default="active", server_default="active")
+    source = Column(String(128), nullable=True)
+    version = Column(String(64), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("min_age_days", "effective_from", name="uq_sku_pricing_policy_tier_start"),
+        CheckConstraint("min_age_days >= 0", name="ck_sku_pricing_policy_age_start"),
+        CheckConstraint("discount_rate >= 0 AND discount_rate <= 1", name="ck_sku_pricing_policy_discount_rate"),
+        CheckConstraint("target_margin_rate >= 0 AND target_margin_rate < 1", name="ck_sku_pricing_policy_target_margin"),
+        CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_sku_pricing_policy_window"),
+        CheckConstraint("status IN ('active', 'inactive')", name="ck_sku_pricing_policy_status"),
+        # 每个库龄档位至多一条「当前生效行」；schema 由表继承，Index 不接受 schema= 关键字
+        Index(
+            "uq_sku_pricing_policies_current",
+            "min_age_days",
+            unique=True,
+            postgresql_where=text("status = 'active' AND effective_to IS NULL"),
+        ),
+        Index("ix_sku_pricing_policy_scope", "min_age_days", "effective_from"),
+        {"schema": "finance"},
+    )

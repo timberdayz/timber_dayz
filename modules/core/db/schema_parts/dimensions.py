@@ -31,6 +31,10 @@ class DimPlatform(Base):
     fee_rate_source = Column(String(128), nullable=True)
     fee_rate_effective_from = Column(Date, nullable=True)
     fee_rate_version = Column(String(64), nullable=True)
+    # 默认达人佣金率：SKU 未单独设置 creator_commission_rate 时的兜底值
+    default_creator_commission_rate = Column(Numeric(12, 8), nullable=True)
+    # 平台其他成本率：恒等式反推值，**已含平台佣金率**，不重复计入底线分母
+    other_cost_rate = Column(Numeric(12, 8), nullable=True)
     platform_role = Column(String(16), nullable=False, default="source", server_default="source")
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -39,6 +43,9 @@ class DimPlatform(Base):
     __table_args__ = (
         UniqueConstraint("name", name="uq_dim_platforms_name"),
         CheckConstraint("platform_role IN ('sales', 'source', 'test')", name="ck_dim_platforms_role"),
+        CheckConstraint("default_fee_rate IS NULL OR (default_fee_rate >= 0 AND default_fee_rate <= 1)", name="ck_dim_platforms_fee_rate_range"),
+        CheckConstraint("default_creator_commission_rate IS NULL OR (default_creator_commission_rate >= 0 AND default_creator_commission_rate <= 1)", name="ck_dim_platforms_creator_commission_rate_range"),
+        CheckConstraint("other_cost_rate IS NULL OR (other_cost_rate >= 0 AND other_cost_rate < 1)", name="ck_dim_platforms_other_cost_rate_range"),
         {"schema": "core"},
     )
 
@@ -207,6 +214,10 @@ class DimErpSku(Base):
     selling_price_source = Column(String(64), nullable=True)
     selling_price_confirmed_at = Column(DateTime(timezone=True), nullable=True)
     turnover_class = Column(String(16), nullable=True)
+    # 该 SKU 的达人佣金率；NULL = 未单独设置，计算时取平台默认值兜底
+    creator_commission_rate = Column(Numeric(12, 8), nullable=True)
+    # 人工覆盖的最低售价；NULL = 由系统按成本线 / 纪律线自动计算
+    min_selling_price_override = Column(Numeric(18, 2), nullable=True)
     status = Column(String(32), nullable=False, default="active")
     source_file_id = Column(Integer, nullable=True)
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
@@ -220,6 +231,8 @@ class DimErpSku(Base):
         CheckConstraint("turnover_class IS NULL OR turnover_class IN ('fast', 'normal', 'slow')", name="ck_dim_erp_sku_turnover_class"),
         CheckConstraint("unit_volume_cbm IS NULL OR unit_volume_cbm >= 0", name="ck_dim_erp_sku_unit_volume_cbm"),
         Index("ix_dim_erp_sku_unit_volume_cbm", "unit_volume_cbm"),
+        CheckConstraint("creator_commission_rate IS NULL OR (creator_commission_rate >= 0 AND creator_commission_rate <= 1)", name="ck_dim_erp_sku_creator_commission_rate"),
+        CheckConstraint("min_selling_price_override IS NULL OR min_selling_price_override > 0", name="ck_dim_erp_sku_min_selling_price_override"),
         {"schema": "core"},
     )
 

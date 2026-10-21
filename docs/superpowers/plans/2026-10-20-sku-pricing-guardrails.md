@@ -295,10 +295,17 @@ def upgrade() -> None:
 
     bind = op.get_bind()
     for min_age_days, tier_label, discount_rate, target_margin_rate, platform_basis in POLICY_ROWS:
+        # ⚠️ 幂等守卫必须按「该档位是否已有当前生效行」判断，
+        # **不能**按「effective_from = CURRENT_DATE」判断——
+        # 后者在「昨天跑过 upgrade、今天再跑一次」时会判定为不存在，
+        # 于是插入一行 effective_from=今天 的重复档位，
+        # 直接撞 uq_sku_pricing_policies_current 部分唯一索引 → IntegrityError。
+        # 实测：把已有行的 effective_from 改成昨天再重跑 upgrade，
+        # 正确的守卫保持 4 行不变；日期守卫会插出 8 行并报错。
         exists = bind.execute(
             sa.text(
                 "SELECT 1 FROM finance.sku_pricing_policies "
-                "WHERE min_age_days = :m AND effective_from = CURRENT_DATE LIMIT 1"
+                "WHERE min_age_days = :m AND status = 'active' AND effective_to IS NULL LIMIT 1"
             ),
             {"m": min_age_days},
         ).scalar()
@@ -308,8 +315,7 @@ def upgrade() -> None:
                     "INSERT INTO finance.sku_pricing_policies "
                     "(min_age_days, tier_label, discount_rate, target_margin_rate, platform_basis, "
                     " effective_from, status, source, version) "
-                    "VALUES (:m, :l, :d, :t, :b, CURRENT_DATE, 'active', "
-                    " 'industry_benchmark_2026', 'v1')"
+                    "VALUES (:m, :l, :d, :t, :b, CURRENT_DATE, 'active', :s, :v)"
                 ),
                 {
                     "m": min_age_days,
@@ -317,6 +323,8 @@ def upgrade() -> None:
                     "d": discount_rate,
                     "t": target_margin_rate,
                     "b": platform_basis,
+                    "s": POLICY_SOURCE,
+                    "v": POLICY_VERSION,
                 },
             )
 
@@ -333,6 +341,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # 平台费率是**数据**校准（不是 schema 变更），必须一并还原，
+    # 否则 downgrade 之后平台佣金率还停在 7.37%/14.87%，与列被删掉的现实脱节。
+    # 只还原**仍带本次迁移标记**的行，避免覆盖掉后来的人工调整。
+    op.execute(sa.text(
+        "UPDATE core.dim_platforms SET default_fee_rate = 0.02, "
+        "fee_rate_source = 'manual', fee_rate_version = 'v1' "
+        "WHERE platform_code IN ('tiktok', 'shopee') "
+        "AND fee_rate_source = 'b_class_measured_2026_01_07' AND fee_rate_version = 'v2'"
+    ))
     op.execute(sa.text("DELETE FROM finance.sku_pricing_policies WHERE source = 'industry_benchmark_2026'"))
     if _has_table("sku_pricing_policies", "finance"):
         op.drop_table("sku_pricing_policies", schema="finance")
@@ -416,16 +433,36 @@ Expected: PASS.
 
 - [ ] **Step 6: 跑迁移并验证幂等**
 
+> ⚠️ **必须用 `alembic-current.ini`**。仓库有**两条** Alembic 链：
+> - `alembic.ini` → `script_location = migrations`：**只读的历史链**，
+>   `current_migrations/README.md` 明确写「never used by the deployment or application startup」；
+>   它的 head 是 `20260917_add_platform_label_fee`（一个「从未上生产」的遗留 revision）。
+> - `alembic-current.ini` → `script_location = current_migrations`：**活链**，
+>   部署与启动走的就是它，head 是 `current_schema_20260921_warehouse_storage_label_fee`。
+>
+> 裸跑 `python -m alembic upgrade heads` 会走**历史链**，把迁移应用到错误的链上。
+> 正确的命令：
+> ```powershell
+> python -m alembic -c alembic-current.ini heads
+> python -m alembic -c alembic-current.ini upgrade heads
+> python -m alembic -c alembic-current.ini downgrade -1
+> python -m alembic -c alembic-current.ini upgrade heads
+> ```
+> 正式环境由 `scripts/run_current_schema_migrations.py` 负责（含 schema 指纹、备份、锁等前置检查），
+> 本地验证用上面的 alembic 命令即可。
+
 Run:
 ```powershell
-python -m alembic upgrade heads
-python -m alembic downgrade -1
-python -m alembic upgrade heads
+python -m alembic -c alembic-current.ini heads
+python -m alembic -c alembic-current.ini upgrade heads
+python -m alembic -c alembic-current.ini downgrade -1
+python -m alembic -c alembic-current.ini upgrade heads
 ```
 
 Expected: 三步均无报错。验证后查库：
 
 ```sql
+SELECT version_num FROM public.current_schema_alembic_version;  -- current_schema_20261020_sku_pricing_guardrails
 SELECT count(*) FROM finance.sku_pricing_policies;              -- 4
 SELECT platform_code, default_fee_rate, default_creator_commission_rate, other_cost_rate
   FROM core.dim_platforms WHERE platform_code IN ('tiktok','shopee');
