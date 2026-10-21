@@ -51,6 +51,22 @@ python -m alembic -c alembic-current.ini upgrade head
 - **不要**用「去掉空格」的方式提高 SKU 匹配率（实测会让匹配变差）
 - **不要**在 SQL 视图里重写最低售价公式（见 Task 5）
 
+### 0.6 运行时形态（2026-10-22 实测补充）
+
+自动入库、刷新队列、调度**全部跑在 Docker 容器里**，代码来自**主工作区**的 bind mount：
+
+- `xihong_erp_celery_worker` / `xihong_erp_celery_beat`（Celery Beat 每 15 分钟跑 `auto_ingest_pending_files`，每分钟跑 `process_refresh_queue_task`）
+- `xihong_erp_postgres`（对外 15432，与本机直连同一个库）/ `xihong_erp_redis`
+
+**因此：**
+
+| 改动类型 | 生效方式 |
+|---|---|
+| DB 侧（迁移、配置项、模板）| 立刻生效 |
+| `backend/` 代码侧 | **必须合并到主工作区 + 重启 worker** 才生效 |
+
+worktree 里既没有 `data/`（gitignore），原始文件也读不到 —— 要跑入库/采集相关脚本，要么在主工作区跑，要么把 `data` 挂进 worktree。
+
 ---
 
 ## Task 1：发布 inventory 字段映射模板 v3（28 列）
@@ -185,10 +201,109 @@ SELECT count(*) FROM mart.inventory_snapshot_history;
 -- 期望：> 0
 ```
 
-- [ ] 2755 状态已改 `source_missing`
-- [ ] 2764 已入库，b_class 1226 行
-- [ ] 超时原因已查明并记录
-- [ ] `git commit -m "fix:作废妙手库存空壳文件记录并放行真实快照入库"`
+- [x] 2755 状态已改 `source_missing`
+- [x] 2764 已入库，b_class 1226 行
+- [x] 超时原因已查明并记录
+- [x] `git commit -m "fix:作废妙手库存空壳文件记录并放行真实快照入库"`
+
+---
+
+## Task 2 执行期发现（2026-10-22 实测，**改写了原计划的前提**）
+
+### 2.A 运行形态：自动入库跑在 Docker 里，代码不来自 worktree
+
+`docker ps` 实测：`xihong_erp_celery_worker` / `xihong_erp_celery_beat` / `xihong_erp_redis` / `xihong_erp_postgres` 全部 Up 8 小时。
+
+容器挂载（`/app`）：
+
+| 容器路径 | 宿主来源 |
+|---|---|
+| `/app/backend` | `F:\Vscode\python_programme\AI_code\xihong_erp\backend`（**主工作区**） |
+| `/app/data` | `F:\...\xihong_erp\data` |
+| `/app/sql`、`/app/modules`、`/app/migrations`、`/app/temp`、`/app/logs` | 主工作区对应目录 |
+
+**推论（两条都要记住）：**
+
+1. **worktree 里改的 `backend/` 代码不会进容器** —— 容器跑的是主工作区代码。worktree 里的代码改动要等合并到主工作区 + 重启 worker 才生效。
+2. **worktree 里没有 `data/`（gitignore），原始文件找不到** —— 要跑入库必须在主工作区跑，或把 `data` 挂进去。
+
+`core.refresh_queue_tasks` / `public.catalog_files` / `core.collection_configs` 都是**同一个库**（`localhost:15432`），所以 **DB 侧改动立刻生效**，代码侧不生效。
+
+### 2.B 「自动入库超时」的真正原因：不是慢，是**文件不存在 + 状态机死循环**
+
+原计划以为「11MB/1226 行数据量不大，45 分钟阈值理论上够用」。实测**完全不是超时**：
+
+`public.task_center_tasks` 里 2026-10-21 15:30 那次 `auto_ingest` 任务（id=1750）**耗时 0.24 秒**，结果是：
+
+```json
+{"file_id": 2755, "status": "blocked_template_update", "error_code": "FILE_MISSING",
+ "message": "文件不存在: [Errno 2] No such file or directory:
+             '/app/data/raw/2026/miaoshou_inventory_snapshot_20250914_134915.xlsx'",
+ "template_status": "file_missing", "governance_status": "parse_failed"}
+```
+
+**2755 的文件从未落盘**（23 字节，容器 `/app/data/raw/2026` 下没有 `20250914` 的任何文件）。
+
+「超时」是**下游症状**：`auto_ingest_pending_files` 先 `_claim_auto_ingest_files` 把 2755 置成 `processing`，然后 `process_single` 发现文件不存在直接返回，**但这条分支不写回文件状态**（只有 `template_status == 'update_required'` 分支才会 `_mark_file_template_update_required`）。于是 2755 永远卡在 `processing`：
+
+```
+claim → processing → 阻塞(FILE_MISSING) → 不写回 → 卡住
+  ↓ 45 分钟后
+_recover_stale_auto_ingest_records → 退回 pending → 下一轮又 claim → 又卡住 → 无限循环
+```
+
+实测证据：2755 的 `file_metadata.auto_ingest` 里 `last_recovered_at=2026-10-21T15:30:00`、`processing_started_at=2026-10-21T15:30:02` —— 差 2 秒，正是「刚被看门狗退回 pending、2 秒后又被领走」。
+
+**处置**：2755 置 `status='source_missing'`（仓库既有口径，`data_sync_cleanup_service.py:161`）。`auto_ingest_pending_files` 只捞 `status='pending'`，改成 `source_missing` 后彻底出队，死循环终止。实测确认 inventory 域最终只剩 `ingested=1` / `source_missing=1`。
+
+### 2.C 第二个断链（**原计划完全没预料到**）：刷新从未入队，库龄表一直空
+
+2764 于 16:15:05 入库成功（1226 行），但 `mart.inventory_age_current` 一直是 **0 行**。查 `core.refresh_queue_tasks`：**16:15 没有任何新任务**。
+
+根因在 `backend/services/event_listeners.py`：
+
+```python
+# 修复前
+task = asyncio.create_task(enqueue_refresh_for_data_ingested_event(event))
+```
+
+`asyncio.create_task` 把入队排进事件循环，而调用方是 Celery worker 里的 `asyncio.run(...)`——**收尾时 `asyncio.run` 会取消所有未完成的 task**。于是入队协程从未跑完，刷新从未入队。
+
+**关键佐证**：worker 日志里有 `[EventListener] PostgreSQL refresh enqueue task scheduled`，但**没有** `[EventListener] PostgreSQL refresh intent enqueued` —— 后者才是入队成功的标志。
+
+顺带发现：`run_pipeline_refresh_for_data_ingested_event`（唯一调用 `sync_inventory_skus` + `InventoryAgeRefreshService.refresh()` 的函数）**生产代码里从来没被调用过**，只有测试在调。`core.bridge_erp_sku_keys` 因此全是 `product-catalog` 源（1118 行），一条 `miaoshou` 源都没有——商品中心的 sku_id 映射因此缺料。
+
+**修复**（提交 `70420fe4`）：
+
+1. `event_listeners.py` 新增 `handle_data_ingested_async`，**await 到入队落库**；`handle_data_ingested` 加 `enqueue_refresh` 开关，无事件循环时用 `asyncio.run` 直接跑完
+2. `data_ingestion_service.py` 事件派发改调 `await event_listener.handle_data_ingested_async(event)`
+3. `refresh_queue_tasks.py` 的 inventory 分支补上 `sync_inventory_skus`（与原 inline 路径对齐），再刷库龄
+
+### 2.D 2764 是怎么进库的（**不是手工触发的**）
+
+模板 v3 在 **16:05:26** 发布（`core.field_mapping_templates.id=370`）。16:00 那轮复核用的还是旧模板 309（25 列），所以报「新增3个、匹配率89.3%」属正常。16:15 那轮 `auto_ingest_pending_files` 的 `_recover_template_update_required_files` 命中 v3（28 列），把 2764 退回 `pending`，**同一轮**就被领走并入库成功。
+
+> ⚠️ 因此「等一轮自动入库即可放行」这条原计划结论是成立的，但**前提是模板发布时间要早于复核时间**。发布模板后要等最多 15 分钟。
+
+### 2.E Task 2 实测验收结果
+
+| 检查项 | 期望 | 实测 |
+|---|---|---|
+| inventory 域 catalog_files 状态 | ingested=1 / source_missing=1 | ✅ `ingested=1`、`source_missing=1` |
+| `b_class.fact_miaoshou_inventory_snapshot` | 1226 | ✅ **1226** |
+| `semantic.fact_inventory_snapshot` | > 0 | ✅ **1226** |
+| `mart.inventory_snapshot_history` | > 0 | ✅ **1226**（snapshot_date=2026-09-14）|
+| `mart.inventory_snapshot_company_daily` | 1122 | ✅ **1122**（= 文件去重 SKU 数）|
+| `mart.inventory_age_current` | > 0（Task 4）| ✅ **495**（在库 qty>0 的 SKU）|
+| `age_anchor_date` | 2026-09-14 | ✅ **2026-09-14** |
+| `bucket` | 单帧只有 `0-30` | ✅ 只有 `0-30`（495）|
+| `reset_reason` | 单帧只有 `first_positive` | ✅ 只有 `first_positive`（495）|
+| join 命中率 | ≥ 95% | ✅ **99.80%**（494/495）|
+| `core.dim_erp_sku` | 随入库刷新 | 1121 → **1125** |
+| `core.bridge_erp_sku_keys` miaoshou 源 | > 0 | 0 → **1122** |
+
+`age_current=495` vs `age_history=1122` 的差额不是丢数据：`replay_snapshot_rows` 只在 `current_qty > 0` 时才产出 current 行。实测在库 495 个 SKU / 11190 件，零库存 627 个（合计 -6 件，源数据本身有微负）。
+
 
 ---
 
@@ -538,15 +653,15 @@ ORDER BY clearance_priority_score DESC LIMIT 5;
 |---|---|---|---|
 | 1 | inventory 域 published 模板恰好 1 行，`field_count = 28`、`version = 3` | Task 1 | ☑ **已过**（id=370） |
 | 2 | 字段映射模板自动选取命中 v3 | Task 1 | ☑ **已过** |
-| 3 | `catalog_files` inventory 无 `template_update_required` / `pending` / `processing` | Task 2 | ☐ |
-| 4 | `b_class.fact_miaoshou_inventory_snapshot` = 1226 行 | Task 2 | ☐ |
-| 5 | `semantic.fact_inventory_snapshot` / `mart.inventory_snapshot_history` > 0 | Task 2 | ☐ |
-| 6 | 自动入库当初超时的原因已查明并记录 | Task 2 | ☐ |
+| 3 | `catalog_files` inventory 无 `template_update_required` / `pending` / `processing` | Task 2 | ☑ **已过**（ingested=1 / source_missing=1）|
+| 4 | `b_class.fact_miaoshou_inventory_snapshot` = 1226 行 | Task 2 | ☑ **已过**（1226）|
+| 5 | `semantic.fact_inventory_snapshot` / `mart.inventory_snapshot_history` > 0 | Task 2 | ☑ **已过**（各 1226）|
+| 6 | 自动入库当初超时的原因已查明并记录 | Task 2 | ☑ **已过**（不是超时：文件不存在 + 状态机死循环，见 Task 2 执行期发现）|
 | 7 | `collection_configs.id=30`：`auto_prev_day` / `custom_date_* IS NULL` / `schedule_enabled=true` / `cron='0 9 * * 0,3'` / `batch_status='active'` | Task 3 | ☐ |
 | 8 | 新采集产物 `date_from` ≈ 采集当天（**绝不是 2026-03-23**） | Task 3 | ☐ |
 | 9 | APScheduler 有 `collection_config_30` 作业 | Task 3 | ☐ |
-| 10 | `mart.inventory_age_current` > 0，`age_anchor_date = 2026-09-14` | Task 4 | ☐ |
-| 11 | join 命中率 ≥ 95%（基线 99.64%） | Task 4 | ☐ |
+| 10 | `mart.inventory_age_current` > 0，`age_anchor_date = 2026-09-14` | Task 4 | ☑ **已过**（495 行，锚点 2026-09-14）|
+| 11 | join 命中率 ≥ 95%（基线 99.64%） | Task 4 | ☑ **已过**（99.80%）|
 | 12 | 第二帧后 `bucket` ≥ 2 个值 | Task 4 | ☐ |
 | 13 | `reset_reason` 分布已复核，采集频次结论已定 | Task 4 | ☐ |
 | 14 | `api.sku_clearance_ranking_module` 可查、一行一 SKU | Task 5 | ☐ |
