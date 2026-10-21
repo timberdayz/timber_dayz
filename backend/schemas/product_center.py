@@ -826,6 +826,8 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     reference_storage_days: Optional[int] = None
     reference_logistics_cost: Optional[float] = None
     reference_storage_cost: Optional[float] = None
+    # 贴单费：利润里会实扣这笔，缺了它前端那一列会显示 "-"
+    reference_label_fee: Optional[float] = None
     reference_cost_status: str = "ready"
     reference_cost_missing_reasons: list[str] = Field(default_factory=list)
     reference_logistics_missing_reasons: list[str] = Field(default_factory=list)

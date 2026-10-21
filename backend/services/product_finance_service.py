@@ -708,6 +708,9 @@ class ProductFinanceService:
         )
         result.update({
             "sku_id": sku.sku_id,
+            # 前端「参考贴单费」列读这个字段；不给的话列会显示 "-",
+            # 而利润里却实实在在扣了这笔（口径不一致，看着像白扣的钱）
+            "reference_label_fee": reference_label_fee,
             "assumption_profile_id": None,
             "assumption_version": ";".join(filter(None, (
                 f"sku-master-{sku.updated_at.date().isoformat()}" if sku.updated_at else "sku-master",

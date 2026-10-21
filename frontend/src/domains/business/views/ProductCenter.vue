@@ -363,7 +363,7 @@
                 :min="0"
                 :controls="false"
                 size="small"
-                @change="previewOperatingRow(row)" />
+                @input="scheduleOperatingPreview(row)" />
               <div v-if="isBelowFloor(row)" class="price-floor-hint">
                 低于最低售价 {{ money(row.min_selling_price) }}
               </div></template
@@ -375,7 +375,7 @@
                 :min="0"
                 :controls="false"
                 size="small"
-                @change="previewOperatingRow(row)" /></template
+                @input="scheduleOperatingPreview(row)" /></template
           ></el-table-column>
           <el-table-column label="采购成本" width="110"
             ><template #default="{ row }">{{
@@ -386,7 +386,7 @@
           <el-table-column label="参考物流" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
           <el-table-column label="参考仓储" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "storage") }}</template></el-table-column>
           <el-table-column label="参考贴单费" width="115"><template #default="{ row }">{{ referenceLabelFeeDisplay(row) }}</template></el-table-column>
-          <el-table-column label="广告费率" width="115"><template #default="{ row }"><div class="rate-cell"><el-input-number v-model="row.expected_ad_rate_pct" :min="0" :max="100" :step="0.1" :controls="false" size="small" @change="previewOperatingRow(row)" /><span class="rate-suffix">%</span></div></template></el-table-column>
+          <el-table-column label="广告费率" width="115"><template #default="{ row }"><div class="rate-cell"><el-input-number v-model="row.expected_ad_rate_pct" :min="0" :max="100" :step="0.1" :controls="false" size="small" @input="scheduleOperatingPreview(row)" /><span class="rate-suffix">%</span></div></template></el-table-column>
           <el-table-column label="平台费率" width="100"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
           <el-table-column label="平台费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
           <el-table-column label="达人佣金" width="120"><template #default="{ row }"><div class="rate-cell"><span>{{ percent(row.preview?.expected?.creator_commission_rate) }}</span></div>{{ money(row.preview?.expected?.creator_commission) }}</template></el-table-column>
@@ -1495,6 +1495,23 @@ const handleOperatingSpuChange = () => {
   clearOperatingSkuOutsideSpu();
   resetOperatingPage();
 };
+// 预计售价 / 优惠券 / 广告费率一改，下面的利润就该跟着变。
+// el-input-number 的 change 事件要等失焦或回车才触发，
+// 运营在格子里打完价直接看下一行的利润，就会看到**上一次的旧利润**。
+// 用 input 事件 + 每行 400ms 防抖：边打边更新，又不会每个键都打一次接口。
+const operatingPreviewTimers = new Map();
+const scheduleOperatingPreview = (row) => {
+  const key = row.sku_id;
+  const existing = operatingPreviewTimers.get(key);
+  if (existing) clearTimeout(existing);
+  operatingPreviewTimers.set(
+    key,
+    setTimeout(() => {
+      operatingPreviewTimers.delete(key);
+      previewOperatingRow(row);
+    }, 400),
+  );
+};
 const previewOperatingRow = async (row) => {
   try {
     const result = await productCenterApi.previewPlatformSkuProfit(operatingPayload(row));
@@ -2120,8 +2137,14 @@ const referenceCostDisplay = (row, kind) => {
     ambiguous_logistics_rule: "参考物流规则待指定默认",
   })[reason] || "待补资料";
 };
+// 优先用**试算里实际扣的金额**（preview.expected.label_fee），
+// 退而用行上的参考贴单费——两者口径不一致时，以实际扣款为准，
+// 否则会出现「列显示 -、利润却扣了钱」的错觉。
 const referenceLabelFee = (row) =>
-  row.reference_label_fee ?? row.expected_label_fee ?? null;
+  row.preview?.expected?.label_fee ??
+  row.reference_label_fee ??
+  row.expected_label_fee ??
+  null;
 const referenceLabelFeeDisplay = (row) => {
   const value = referenceLabelFee(row);
   return value == null ? "-" : money(value);
