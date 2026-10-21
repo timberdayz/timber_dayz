@@ -601,3 +601,118 @@ async def test_platform_fee_rate_and_sku_writes_are_audited(
             {"t": resource_type},
         )
         assert result.scalar() >= 1, resource_type
+
+
+# ---------------------------------------------------------------- SKU 资料页注入
+
+
+@pytest.mark.asyncio
+async def test_list_skus_injects_pricing_payload(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    """SKU 列表必须带出定价底线四列的数据，且数值与公式一致。"""
+    await pricing_seed()
+
+    resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
+    assert resp.status_code == 200, resp.text
+    row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
+    # 成本线 10/0.3542 = 28.23 > 纪律线 30*0.9 = 27.00
+    assert row["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+    assert row["min_selling_price_source"] == "cost_floor"
+    assert row["min_selling_price_is_override"] is False
+    assert row["current_discount_rate"] == pytest.approx(0.10)
+    assert row["clearance_max_discount_rate"] == pytest.approx(0.30)
+    assert row["pricing_tier_label"] == "日常"
+    # 测试库没有 mart 表 -> 回落日常档
+    assert row["pricing_tier_source"] == "fallback_no_age_data"
+    assert row["pricing_age_days"] is None
+    assert row["min_selling_price_missing_reasons"] == []
+    # SKU 没单独设佣金 -> 返回 None（前端输入框留空），兜底值单独给
+    assert row["creator_commission_rate"] is None
+    assert row["creator_commission_rate_fallback"] == pytest.approx(0.0606)
+
+
+@pytest.mark.asyncio
+async def test_list_skus_reflects_manual_override_and_creator_commission(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    """人工覆盖值与达人佣金率写进去后，列表算出的底线要跟着变。"""
+    await pricing_seed()
+
+    resp = await pg_async_client.patch(
+        "/api/skus/9001",
+        headers=pricing_auth_headers,
+        json={"creator_commission_rate": 0.15},
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
+    row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
+    # 10 / (1 - 0.2727 - 0.15 - 0.0467 - 0.0158 - 0.25) = 10 / 0.2648 = 37.76
+    assert row["min_selling_price"] == pytest.approx(37.76, abs=0.01)
+    assert row["min_selling_price_source"] == "cost_floor"
+    assert row["creator_commission_rate"] == pytest.approx(0.15)
+    # 兜底值仍是平台默认，不受 SKU 值影响
+    assert row["creator_commission_rate_fallback"] == pytest.approx(0.0606)
+
+    # 人工覆盖值可以低于成本线（人工有权拍板）
+    resp = await pg_async_client.patch(
+        "/api/skus/9001",
+        headers=pricing_auth_headers,
+        json={"min_selling_price_override": 20.0},
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
+    row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
+    assert row["min_selling_price"] == pytest.approx(20.0, abs=0.01)
+    assert row["min_selling_price_source"] == "manual_override"
+    assert row["min_selling_price_is_override"] is True
+    assert row["min_selling_price_override"] == pytest.approx(20.0, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_mart_age_lookup_works_when_table_exists_and_survives_when_not(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    """mart 表存在时真能取到库龄；不存在时回落日常档，**且事务不被 abort**。
+
+    这条同时守住三件事：
+    1. 库龄查询语句在 asyncpg 下真的能执行并取到数
+       （用 `= ANY(:keys)` 的话，类型推断失败会被 `except Exception` 静默吞掉，
+        库龄永远回落日常档且**没有任何报错**）；
+    2. `to_regclass` 短路分支生效（表不存在时不发出会失败的查询）；
+    3. 外层事务仍然可用——后续语句不抛 `InFailedSQLTransactionError`。
+    """
+    await pricing_seed()
+
+    # 1) mart 表存在且有一行：age_days=75 -> 命中 min_age_days=60 的「滞销30天」档
+    await pg_session.execute(text("CREATE SCHEMA IF NOT EXISTS mart"))
+    await pg_session.execute(text(
+        "CREATE TABLE IF NOT EXISTS mart.inventory_age_current ("
+        " product_sku text, age_days integer)"
+    ))
+    await pg_session.execute(text(
+        "INSERT INTO mart.inventory_age_current (product_sku, age_days) "
+        "VALUES ('TEST-SKU-1', 75)"
+    ))
+
+    resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
+    assert resp.status_code == 200, resp.text
+    row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
+    assert row["pricing_age_days"] == 75
+    assert row["pricing_tier_source"] == "age_data"
+    assert row["pricing_tier_label"] == "滞销30天"
+    assert row["current_discount_rate"] == pytest.approx(0.15)
+
+    # 2) mart 表没了：回落日常档，且事务仍然健康
+    await pg_session.execute(text("DROP SCHEMA mart CASCADE"))
+
+    resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
+    assert resp.status_code == 200, resp.text
+    row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
+    assert row["pricing_tier_source"] == "fallback_no_age_data"
+    assert row["pricing_age_days"] is None
+
+    # 3) 再查一次：若事务在上一步被 abort，这里会 500
+    again = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
+    assert again.status_code == 200, again.text

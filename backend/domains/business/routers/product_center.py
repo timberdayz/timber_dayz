@@ -1148,6 +1148,151 @@ async def bulk_save_spus(body: SpuBulkRequest, db: AsyncSession = Depends(get_as
     return BulkMutationResponse(created=created, updated=updated, items=[ProductCenterItem.model_validate(row) for row in rows])
 
 
+# ==================== SKU 定价底线：计算与注入 ====================
+#
+# 业务判断全部在 backend/services/product_pricing_service.py 的纯函数里，
+# 这里只做「ORM 行 → 标量」的适配与批量取数。
+
+
+# 库龄查询用**展开式绑定参数**（expanding=True），不用 `= ANY(:keys)`。
+# 原因：`ANY($1)` 在 asyncpg 下要求驱动能推断出数组类型，
+# 而 `text()` 没有类型信息，可能直接报「could not determine data type of parameter」，
+# 然后被 `except Exception` 静默吞掉——库龄永远回落「日常」档且**没有任何报错**。
+# expanding=True 会渲染成 `IN (?, ?, ...)`，逐个绑定字符串，asyncpg 无需推断数组类型。
+_AGE_LOOKUP_STMT = text(
+    "SELECT product_sku, MIN(age_days) AS age_days "
+    "FROM mart.inventory_age_current "
+    "WHERE product_sku IN :keys "
+    "GROUP BY product_sku"
+).bindparams(bindparam("keys", expanding=True))
+
+
+async def _load_age_days_by_sku(db: AsyncSession, sku_ids: list[int]) -> dict[int, int]:
+    """按 product_sku -> dim_erp_sku.sku_key 关联取当前库龄。
+
+    mart.inventory_age_current.sku_id 是 varchar 的平台侧 id，
+    与 dim_erp_sku.sku_id(integer) 不是一回事，必须走 product_sku -> sku_key。
+
+    ⚠️ 必须容错：mart 是 raw SQL 层（sql/mart/*.sql），不在 Base.metadata 里。
+    测试库的 conftest 只建 core/a_class/b_class/c_class/finance/ops 六个 schema，
+    没有 mart -> 裸查会抛 ProgrammingError。
+
+    ⚠️⚠️ **不能用「try/except 包住裸查」来容错**：PostgreSQL 里一条语句失败会让
+    **整个事务进入 aborted 状态**，后续所有语句都抛 `InFailedSQLTransactionError`。
+    那样「查不到就回落日常档」的承诺根本不成立——不是这里返回空 dict，
+    而是整个 `list_skus` / 候选接口在后面某处 500。
+
+    正确做法（两步）：
+    1. 先用 `SELECT to_regclass('mart.inventory_age_current')` 探测表是否存在——
+       不存在就**根本不发出那条会失败的查询**，事务毫发无损；
+    2. 万一表存在但查询仍失败（列变了、权限不足等），用 `db.begin_nested()` 开一个
+       SAVEPOINT 包住它，异常时只回滚到保存点，外层事务仍然可用。
+    """
+    if not sku_ids:
+        return {}
+    rows = (await db.execute(
+        select(DimErpSku.sku_id, DimErpSku.sku_key)
+        .where(DimErpSku.sku_id.in_(sku_ids))
+    )).all()
+    key_to_sku = {row.sku_key: row.sku_id for row in rows}
+    if not key_to_sku:
+        return {}
+    try:
+        async with db.begin_nested():
+            exists = (await db.execute(
+                text("SELECT to_regclass('mart.inventory_age_current')")
+            )).scalar()
+            if not exists:
+                # mart 层不存在：不发出会失败的查询，事务保持健康
+                return {}
+            age_rows = (await db.execute(
+                _AGE_LOOKUP_STMT,
+                {"keys": list(key_to_sku)},
+            )).all()
+    except Exception:
+        # 保存点回滚后外层事务仍可用：按无库龄处理，回落「日常」档
+        return {}
+    return {key_to_sku[row.product_sku]: row.age_days for row in age_rows if row.product_sku in key_to_sku}
+
+
+async def _pricing_context(db: AsyncSession, sku_ids: list[int]) -> dict:
+    """一次性把规则表、平台成本率、库龄读出来，供批量计算。"""
+    policies = await _current_policies(db)
+    policy_rows = [
+        {
+            "min_age_days": p.min_age_days,
+            "tier_label": p.tier_label,
+            "discount_rate": Decimal(str(p.discount_rate)),
+            "target_margin_rate": Decimal(str(p.target_margin_rate)),
+            "platform_basis": p.platform_basis,
+        }
+        for p in policies
+    ]
+    basis = policy_rows[0]["platform_basis"] if policy_rows else "tiktok"
+    platform = await db.get(DimPlatform, basis)
+    age_map = await _load_age_days_by_sku(db, sku_ids)
+    return {
+        "policies": policy_rows,
+        "platform": platform,
+        "age_days": age_map,
+    }
+
+
+def _compute_pricing_for_sku(
+    *,
+    context: dict,
+    sku_row,
+    linked_spu,
+) -> dict:
+    """ORM 适配层：把行数据喂给纯函数 `compute_sku_pricing`。
+
+    **这里不放任何业务判断**——降级链、取大、来源标记全在
+    `backend/services/product_pricing_service.py` 里（spec §5.1「实现时只写一处」）。
+    """
+    policies = context["policies"]
+    platform = context["platform"]
+    age_days = context["age_days"].get(sku_row.sku_id)
+
+    policy = select_age_tier(policies, age_days)
+    deepest = max(policies, key=lambda p: p["min_age_days"]) if policies else None
+
+    return compute_sku_pricing(
+        purchase_cost=sku_row.default_purchase_cost,
+        reference_selling_price=sku_row.reference_selling_price,
+        creator_commission_rate=sku_row.creator_commission_rate,
+        platform_creator_commission_rate=(
+            platform.default_creator_commission_rate if platform else None
+        ),
+        other_cost_rate=platform.other_cost_rate if platform else None,
+        spu_bound=linked_spu is not None,
+        spu_return_loss_rate=linked_spu.return_loss_rate if linked_spu else None,
+        spu_damage_rate=linked_spu.logistics_damage_rate if linked_spu else None,
+        policy=policy,
+        deepest_policy=deepest,
+        min_selling_price_override=sku_row.min_selling_price_override,
+        age_days=age_days,
+    )
+
+
+async def _compute_sku_min_selling_price(db: AsyncSession, sku_id: int) -> Decimal | None:
+    """单 SKU 的最低售价，供利润测算保存拦截复用。"""
+    sku_row = await db.get(DimErpSku, sku_id)
+    if sku_row is None:
+        return None
+    binding = (await db.execute(
+        select(BridgeSpuSku).where(
+            BridgeSpuSku.sku_id == sku_id,
+            BridgeSpuSku.binding_status == "active",
+            BridgeSpuSku.effective_to.is_(None),
+        )
+    )).scalars().first()
+    linked_spu = await db.get(DimSpu, binding.spu) if binding else None
+    context = await _pricing_context(db, [sku_id])
+    payload = _compute_pricing_for_sku(context=context, sku_row=sku_row, linked_spu=linked_spu)
+    value = payload["min_selling_price"]
+    return Decimal(str(value)) if value is not None else None
+
+
 @router.get("/api/skus", response_model=ProductCenterListResponse)
 async def list_skus(
     keyword: str | None = Query(None),
@@ -1189,6 +1334,8 @@ async def list_skus(
     for allocation, _confirmed_at in allocations:
         if allocation.sku_id not in actual_logistics and allocation.allocated_quantity:
             actual_logistics[allocation.sku_id] = float(allocation.allocated_amount / allocation.allocated_quantity)
+    # 定价底线：一次取齐规则表 / 平台成本率 / 库龄，循环内只做纯计算
+    pricing_context = await _pricing_context(db, [row.sku_id for row in rows])
     items = []
     for row in rows:
         payload = ProductCenterItem.model_validate(row).model_dump()
@@ -1202,6 +1349,11 @@ async def list_skus(
             "actual_storage_cost": None,
             "data_completeness": "complete" if all(value is not None for value in (row.default_purchase_cost, row.expected_logistics_cost, row.expected_storage_cost, linked_spu.logistics_damage_rate if linked_spu else None, linked_spu.return_loss_rate if linked_spu else None)) else "partial",
         })
+        payload.update(_compute_pricing_for_sku(
+            context=pricing_context,
+            sku_row=row,
+            linked_spu=linked_spu,
+        ))
         items.append(ProductCenterItem(**payload))
     return ProductCenterListResponse(data=items, page=page, page_size=page_size, total=total, total_pages=(total + page_size - 1) // page_size)
 
