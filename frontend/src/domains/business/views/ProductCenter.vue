@@ -389,6 +389,7 @@
           <el-table-column label="广告费率" width="115"><template #default="{ row }"><div class="rate-cell"><el-input-number v-model="row.expected_ad_rate_pct" :min="0" :max="100" :step="0.1" :controls="false" size="small" @change="previewOperatingRow(row)" /><span class="rate-suffix">%</span></div></template></el-table-column>
           <el-table-column label="平台费率" width="100"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
           <el-table-column label="平台费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
+          <el-table-column label="达人佣金" width="120"><template #default="{ row }"><div class="rate-cell"><span>{{ percent(row.preview?.expected?.creator_commission_rate) }}</span></div>{{ money(row.preview?.expected?.creator_commission) }}</template></el-table-column>
           <el-table-column label="预计广告费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.ad_cost) }}</template></el-table-column>
           <el-table-column label="继承货损率" width="110"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
           <el-table-column label="继承退货损失率" width="130"><template #default="{ row }">{{ percent(row.return_loss_rate) }}</template></el-table-column>
@@ -869,7 +870,9 @@ const loadingSkus = ref(false);
 const loadingBills = ref(false);
 
 // SKU 资料 tab 中视觉标记为可填项的列名（仅改表头颜色，不动字段必填校验）
-const skuOptionalColumnLabels = ["规格", "重量 kg", "箱规（件/箱）", "参考售价", "售价来源"];
+// ⚠️ 「参考售价」2026-10-21 起移出本列表：蓝色表头在数据表里读起来像可点击链接，
+// 而它其实是「这列可以不填」的标记，容易被误读。按要求改为与其他列一致的黑色。
+const skuOptionalColumnLabels = ["规格", "重量 kg", "箱规（件/箱）", "售价来源"];
 const skuHeaderCellStyle = ({ column }) => {
   if (skuOptionalColumnLabels.includes(column.label)) {
     return { color: "#79bbff", fontWeight: "normal" };

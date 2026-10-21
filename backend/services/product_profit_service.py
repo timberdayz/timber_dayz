@@ -138,12 +138,18 @@ def build_platform_profit_preview(
     expected_ad_rate: Decimal | int | float | None,
     return_rate: Decimal | int | float | None,
     damage_rate: Decimal | int | float | None,
+    creator_commission_rate: Decimal | int | float | None = None,
 ) -> dict[str, dict[str, Decimal | str | None]]:
     """Build side-by-side expected and actual-cost recost profit results.
 
     ``expected_ad_rate`` is interpreted as the share of pre-ad profit allocated
     to advertising (``ad_cost = pre_ad_profit × expected_ad_rate``), not as a
     fraction of revenue.
+
+    ``creator_commission_rate`` 是达人佣金率（占收入的百分比）。
+    达人佣金是**真实现金流出**，必须从利润里扣掉，否则利润会被系统性高估
+    （高估幅度 = 收入 × 佣金率）。
+    传 None 表示调用方没有这个口径，按 0 计（保持既有调用方的行为不变）。
     """
     def optional_money(value: Decimal | int | float | None) -> Decimal | None:
         return _money(value) if value is not None else None
@@ -162,13 +168,18 @@ def build_platform_profit_preview(
     expected_storage = optional_money(expected_storage_cost)
     expected_label_fee = optional_money(expected_label_fee)
     platform_fee = _money(revenue * Decimal(str(platform_fee_rate))) if revenue is not None and platform_fee_rate is not None else None
+    creator_commission = (
+        _money(revenue * Decimal(str(creator_commission_rate)))
+        if revenue is not None and creator_commission_rate is not None
+        else Decimal("0")
+    )
     return_loss = _money(revenue * Decimal(str(return_rate))) if revenue is not None and return_rate is not None else None
     damage_loss = _money(revenue * Decimal(str(damage_rate))) if revenue is not None and damage_rate is not None else None
 
     def _pre_ad_components(use_actual: bool) -> list[Decimal | None]:
         logistics = actual_logistics_cost if use_actual and actual_logistics_cost is not None else expected_logistics
         storage = actual_storage_cost if use_actual and actual_storage_cost is not None else expected_storage
-        return [purchase, logistics, storage, expected_label_fee, platform_fee, return_loss, damage_loss]
+        return [purchase, logistics, storage, expected_label_fee, platform_fee, creator_commission, return_loss, damage_loss]
 
     def _ad_cost_and_profit(use_actual: bool) -> tuple[Decimal | None, Decimal | None]:
         components = _pre_ad_components(use_actual)
@@ -206,6 +217,8 @@ def build_platform_profit_preview(
             "storage_cost": expected_storage,
             "label_fee": expected_label_fee,
             "platform_fee": platform_fee,
+            "creator_commission": creator_commission,
+            "creator_commission_rate": creator_commission_rate,
             "ad_cost": ad_cost,
             "return_loss": return_loss,
             "damage_loss": damage_loss,
@@ -219,6 +232,8 @@ def build_platform_profit_preview(
             "logistics_cost": actual_logistics,
             "storage_cost": actual_storage,
             "label_fee": expected_label_fee,
+            "creator_commission": creator_commission,
+            "creator_commission_rate": creator_commission_rate,
             "storage_cost_source": "actual_storage" if has_actual_storage else "expected_fallback",
             "profit": actual_profit,
             "margin_rate": (actual_profit / revenue).quantize(Decimal("0.00000001")) if actual_profit is not None and revenue else None,

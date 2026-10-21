@@ -814,6 +814,13 @@ class ProductFinanceService:
             expected_ad_rate=data.get("expected_ad_rate"),
             return_rate=spu.return_loss_rate if spu else None,
             damage_rate=spu.logistics_damage_rate if spu else None,
+            # 达人佣金：SKU 自己设的值优先，否则用所选平台的默认兜底
+            # （与「最低售价」用的是同一套回退规则，见 spec §4.1）
+            creator_commission_rate=(
+                sku.creator_commission_rate
+                if sku.creator_commission_rate is not None
+                else platform.default_creator_commission_rate
+            ),
         )
         result.update({
             "sku_id": sku.sku_id,

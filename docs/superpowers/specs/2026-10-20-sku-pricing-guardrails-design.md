@@ -219,8 +219,24 @@ shopee: 0.4165
 | 字段 | 利润测算 | 底线计算 |
 |---|---|---|
 | `default_fee_rate`（平台佣金率） | ✅ 用（`platform_fee = 净收入 × 该值`） | ❌ **不单独使用**（已含在 `other_cost_rate` 内） |
-| `default_creator_commission_rate` | ❌ 不用（利润测算公式无达人佣金项） | ✅ 用（作为底线基数的一部分） |
+| `default_creator_commission_rate` | ✅ 用（`creator_commission = 净收入 × 有效佣金率`） | ✅ 用（作为底线基数的一部分） |
 | `other_cost_rate` | ❌ 不用 | ✅ 用（作为底线基数的一部分） |
+
+> ⚠️ **2026-10-21 修正**：达人佣金原先**只进底线、不进利润测算**，导致同一屏上两个数用不同的成本基数
+> （底线含佣金、利润不含），利润被系统性高估 **收入 × 佣金率**。
+> 现在**两处用同一个有效佣金率**：
+> **SKU 自己设的 `creator_commission_rate` 优先，否则取所选平台的 `default_creator_commission_rate` 兜底**
+> ——与底线计算（§4.1）是同一套回退规则。
+> 影响：所有 SKU 的利润都下降「收入 × 佣金率」
+> （TikTok 默认 6.06%、Shopee 默认 1.11%；SKU 单独设过佣金率的按其值）。
+> **已保存的历史利润版本不重算**，报表里新旧口径并存（见 §10 已知限制）。
+>
+> 实现要点：
+> - `build_platform_profit_preview` 新增 `creator_commission_rate` 参数；
+>   传 `None` 表示调用方没有这个口径，**按 0 计**（不把利润变成 `None`），保持既有调用方行为不变
+> - 利润版本表新增 `finance.sku_profit_estimates.creator_commission` 列（迁移
+>   `current_schema_20261021_sku_pricing_creator_commission`）——利润数字必须能被解释
+> - 利润测算页新增「达人佣金」列，显示**实际使用的费率**与**金额**
 
 **「参与底线计算」的含义**：底线计算只读取**当前 `platform_basis` 指向的那个平台**的费率（当前为 tiktok）。其余平台的费率：
 - 仍被**利润测算**使用（利润测算按用户当前选择的平台取 `default_fee_rate`）
@@ -988,6 +1004,8 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 
 - 「预计售价」列右侧新增「最低售价」只读列（显示 `row.min_selling_price` + 来源 tag）
 - 另在「竞品价格」列右侧新增「当前可优惠」只读列（显示 `row.current_discount_rate`）与「清货极限」只读列（显示 `row.clearance_max_discount_rate`）
+- 「平台费用」列右侧新增「**达人佣金**」列，显示 `row.preview?.expected?.creator_commission_rate`（**实际使用的费率**）与 `row.preview?.expected?.creator_commission`（金额）——
+  这列是「利润为什么比直觉低」的答案，必须让人看得见，否则运营会怀疑利润算错了
   - **命名统一**：同一字段 `current_discount_rate` 在 SKU 资料页叫「常规可优惠」、在利润测算 tab 叫「当前可优惠」——**统一为「当前可优惠」**，SKU 资料页的列标题同步改名（它本来就在「常规可优惠」的位置上，改名后语义更准：它就是当前档位的折扣率）
   - `clearance_max_discount_rate` 已在 §5.5 下发，利润测算 tab 补上「清货极限」列，避免「拿到了字段但界面不显示」
 - **护栏只有一层**（纪律线已是最低售价的组成部分，不需要额外的黄色软提示）：
@@ -1179,6 +1197,7 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 | **未传字段继承旧行** | PUT 不传 `source` / `version` / `notes` 时，原地更新与关旧开新两条路径都保留旧行取值（否则迁移灌的 `source='industry_benchmark_2026'` 被覆盖成 None，`downgrade()` 删不掉种子行） |
 | 并发 PUT | 撞 `uq_sku_pricing_policies_current` 时返回 409 |
 | 护栏拦截 | 预计售价 < 最低售价 → 422 `below_min_selling_price`；≥ 则通过 |
+| **达人佣金计入利润** | 利润试算必须扣掉达人佣金（收入 × 有效佣金率）；不传佣金口径时**按 0 计而不是把利润变成 None**；利润版本表要落 `creator_commission` |
 | **护栏优先于缺资料** | 同时「低于底线」且「缺物流规则」时，返回的必须是 `below_min_selling_price`（更可执行的原因），不是 `cannot_save_profit_version`。⚠️ 这条**必须用「不写物流/仓储规则」的 seed 变体**才可观测——完整 seed 下 `missing_fields` 恒为 `[]`，护栏放前放后结果一样，测不出差别 |
 | **错误信封位置** | 422 响应体形如 `{"success": false, "error": {"code": 3001, "detail": {"code": "below_min_selling_price", ...}}, "message": ...}`。**顶层没有 `detail` 键**；结构化业务码在 `error.detail.code` |
 | **高价能存（seed 完整性探针）** | 预计售价 35（高于底线 28.23）→ estimates 返回 **201**。若返回 `cannot_save_profit_version`，说明 seed 缺物流规则 / 仓储规则 / 平台费率 |
@@ -1241,7 +1260,11 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 
 ## 9. 迁移
 
-文件：`current_migrations/versions/20261020_sku_pricing_guardrails.py`
+文件：
+- `current_migrations/versions/20261020_sku_pricing_guardrails.py`
+- `current_migrations/versions/20261021_sku_pricing_creator_commission.py`
+  （给 `finance.sku_profit_estimates` 加 `creator_commission` 列——
+  达人佣金计入利润后，利润版本必须能解释这笔佣金是怎么扣的）
 
 沿用 `20260916_sku_turnover_storage_rules_cny.py` 的幂等范式（`_has_table` / `_has_column` / `_has_constraint` / `_has_index` 守卫），并满足 `docs/DEVELOPMENT_RULES/DATABASE.md` §7.2 / §9.7 的迁移检查清单：
 

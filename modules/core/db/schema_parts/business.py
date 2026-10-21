@@ -996,6 +996,9 @@ class SkuProfitEstimate(Base):
     expected_storage_cost = Column(Numeric(18, 2), nullable=True)
     actual_storage_cost = Column(Numeric(18, 2), nullable=True)
     expected_label_fee = Column(Numeric(18, 2), nullable=True)
+    # 达人佣金：从利润里扣掉的真实现金流出，必须留痕，
+    # 否则利润版本里的利润数字无法被解释
+    creator_commission = Column(Numeric(18, 2), nullable=True)
     expected_profit = Column(Numeric(18, 2), nullable=True)
     expected_margin_rate = Column(Numeric(12, 8), nullable=True)
     actual_recost_profit = Column(Numeric(18, 2), nullable=True)

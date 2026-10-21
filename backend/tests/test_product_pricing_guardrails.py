@@ -847,3 +847,60 @@ async def test_guardrail_precedes_missing_fields_check(
     assert body["error"]["detail"]["min_selling_price"] == pytest.approx(28.23, abs=0.01)
 
 
+# ---------------------------------------------------------------- 达人佣金计入利润
+
+
+def test_creator_commission_is_deducted_from_profit():
+    """达人佣金是真实现金流出，必须从利润里扣掉。"""
+    from backend.services.product_profit_service import build_platform_profit_preview
+
+    common = dict(
+        expected_selling_price=Decimal("100"),
+        competitor_price=None,
+        seller_coupon_amount=None,
+        purchase_cost=Decimal("10"),
+        expected_logistics_cost=Decimal("5"),
+        expected_storage_cost=Decimal("5"),
+        expected_label_fee=Decimal("0"),
+        actual_logistics_cost=None,
+        actual_storage_cost=None,
+        platform_fee_rate=Decimal("0.0737"),
+        expected_ad_rate=Decimal("0"),
+        return_rate=Decimal("0"),
+        damage_rate=Decimal("0"),
+    )
+    without = build_platform_profit_preview(**common)
+    with_commission = build_platform_profit_preview(
+        **common, creator_commission_rate=Decimal("0.11")
+    )
+    # 不传 -> 按 0 计（既有调用方行为不变）
+    assert without["expected"]["creator_commission"] == Decimal("0")
+    # 收入 100 - 采购 10 - 物流 5 - 仓储 5 - 平台佣金 7.37 = 72.63
+    assert without["expected"]["profit"] == Decimal("72.63")
+    # 传 11% -> 收入 100 扣 11，利润同步降 11
+    assert with_commission["expected"]["creator_commission"] == Decimal("11.00")
+    assert with_commission["expected"]["profit"] == Decimal("61.63")
+    assert with_commission["expected"]["creator_commission_rate"] == Decimal("0.11")
+
+
+def test_creator_commission_none_does_not_block_profit():
+    """未提供佣金口径时不能把利润变成 None。"""
+    from backend.services.product_profit_service import build_platform_profit_preview
+
+    result = build_platform_profit_preview(
+        expected_selling_price=Decimal("50"),
+        competitor_price=None,
+        seller_coupon_amount=None,
+        purchase_cost=Decimal("10"),
+        expected_logistics_cost=Decimal("0"),
+        expected_storage_cost=Decimal("0"),
+        expected_label_fee=Decimal("0"),
+        actual_logistics_cost=None,
+        actual_storage_cost=None,
+        platform_fee_rate=Decimal("0"),
+        expected_ad_rate=Decimal("0"),
+        return_rate=Decimal("0"),
+        damage_rate=Decimal("0"),
+    )
+    assert result["expected"]["profit"] == Decimal("40.00")
+    assert result["expected"]["creator_commission"] == Decimal("0")

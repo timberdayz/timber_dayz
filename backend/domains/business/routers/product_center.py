@@ -2698,6 +2698,12 @@ async def list_platform_sku_profit_candidates(
             expected_ad_rate=expected_ad_rate,
             return_rate=assigned.return_loss_rate if assigned else None,
             damage_rate=assigned.logistics_damage_rate if assigned else None,
+            # 达人佣金：SKU 自己设的值优先，否则用所选平台的默认兜底
+            creator_commission_rate=(
+                row.creator_commission_rate
+                if row.creator_commission_rate is not None
+                else platform.default_creator_commission_rate
+            ),
         )
         items.append({
             "sku_id": row.sku_id, "sku_key": row.sku_key, "sku_name": row.sku_name, "specification": row.specification,            "spu": assigned_spu, "reference_selling_price": row.reference_selling_price,
@@ -2909,7 +2915,9 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
             assumption_version=values.get("assumption_version") or "platform-profit-workbench", scenario="base", calculation_basis=basis,
             selling_price=values["expected_selling_price"] if values.get("expected_selling_price") is not None else profile.reference_selling_price, coupon_amount=values.get("seller_coupon_amount", 0),
             expected_selling_price=values["expected_selling_price"] if values.get("expected_selling_price") is not None else profile.reference_selling_price, competitor_price=values.get("competitor_price"), expected_ad_rate=values.get("expected_ad_rate", 0),
-            platform_fee=section.get("platform_fee", preview["expected"].get("platform_fee")), expected_ad_cost=preview["expected"].get("ad_cost"),
+            platform_fee=section.get("platform_fee", preview["expected"].get("platform_fee")),
+            creator_commission=section.get("creator_commission", preview["expected"].get("creator_commission")),
+            expected_ad_cost=preview["expected"].get("ad_cost"),
             expected_logistics_cost=preview["expected"].get("logistics_cost"), actual_logistics_cost=preview.get("actual_logistics_cost"),
             expected_storage_cost=preview["expected"].get("storage_cost"), expected_label_fee=preview["expected"].get("label_fee"), actual_storage_cost=None,
             expected_profit=preview["expected"].get("profit"), expected_margin_rate=preview["expected"].get("margin_rate"),
