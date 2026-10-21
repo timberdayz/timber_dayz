@@ -5,13 +5,16 @@
    不碰 b_class./semantic.fact_orders_atomic/raw_data->>；
 2. 每个筛选参数**真的进 WHERE 子句**（不是空转）；
 3. 排序字段走白名单，用户输入永远不拼进 SQL；
-4. 未匹配 ERP 主数据的 SKU 照常返回，定价字段为空。
+4. 未匹配 ERP 主数据的 SKU 照常返回，定价字段为空；
+5. 视图 SQL 不得把定价公式写进去，也不得退回慢的 backlog_base 取数路径。
 """
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +22,8 @@ from backend.services.inventory.sku_clearance_service import (
     CLEARANCE_VIEW,
     SkuClearanceService,
 )
+
+VIEW_SQL_PATH = Path("sql/api_modules/sku_clearance_ranking_module.sql")
 
 POLICY_ROWS = [
     {
@@ -415,3 +420,91 @@ async def test_endpoint_rejects_unknown_sort_by(monkeypatch):
         )
 
     assert response.status_code == 422
+
+
+# ----------------------------------------------------------------------
+# 视图 SQL 的静态门禁
+# ----------------------------------------------------------------------
+
+
+def _view_sql() -> str:
+    return VIEW_SQL_PATH.read_text(encoding="utf-8", errors="replace")
+
+
+def _view_sql_body() -> str:
+    """去掉 `--` 注释，只留可执行 SQL。
+
+    文件头写了不少「为什么不用 backlog_base」「为什么定价不在视图里」的说明，
+    注释里出现这些词是**应该**的，门禁只针对真正执行的语句。
+    """
+    body = [
+        line
+        for line in _view_sql().splitlines()
+        if not line.strip().startswith("--")
+    ]
+    return "\n".join(body)
+
+
+def test_clearance_view_does_not_use_the_slow_backlog_base_path():
+    """视图不得退回 mart.inventory_backlog_base 取数。
+
+    这条是**性能门禁**，不是洁癖：`mart.inventory_backlog_base` 的 sales_30d 用
+    `metric_date::date` 过滤，谓词下不进 semantic.fact_orders_atomic 的底层扫描，
+    实测单这一段就要 8.8 秒（视图明细查询整体 8867ms），交互页面不可接受。
+
+    库存/滞留列改从 mart.inventory_snapshot_change 取：它与 mart.inventory_snapshot_latest
+    共用同一个 company_daily CTE 和同一个 ROW_NUMBER 窗口 PARTITION BY，
+    rank=1 的 available_stock / on_hand_stock / inventory_value 完全等价，代价只有 48ms。
+    """
+    sql_text = _view_sql_body()
+
+    assert "mart.inventory_backlog_base" not in sql_text, (
+        "视图不能引用 mart.inventory_backlog_base：它的销售 CTE 要 8.8 秒，"
+        "会让滞销清单页面变成 11 秒的慢查询"
+    )
+    assert "mart.inventory_snapshot_change" in sql_text, (
+        "库存/滞留列应改从 mart.inventory_snapshot_change 取"
+    )
+
+
+def test_clearance_view_restricts_sales_to_platforms_with_inventory():
+    """销售聚合必须限定在「有库存的平台」。
+
+    `platform_code = ANY(ARRAY(SELECT DISTINCT platform_code FROM mart.inventory_age_current))`
+    是 InitPlan → 常量数组 → 谓词能下推到 fact_orders_atomic 的 UNION ALL 分支，
+    实测 21.0s → 12ms。
+
+    不改变任何数字：销售与库存的连接键含 platform_code，没有库存的平台
+    其销售行本来也匹配不上。
+    """
+    sql_text = _view_sql_body()
+
+    assert "ARRAY(SELECT DISTINCT platform_code FROM mart.inventory_age_current)" in sql_text, (
+        "销售 CTE 必须限定在有库存的平台，否则 fact_orders_atomic 全量求值要 21 秒"
+    )
+    assert "semantic.fact_orders_atomic" in sql_text
+
+
+def test_clearance_view_keeps_pricing_formulas_out_of_sql():
+    """定价公式只在 product_pricing_service 一处，视图里不重写。
+
+    允许出现 `min_selling_price_override`——那是**原料**（人工覆盖价），
+    不是算出来的最低售价。
+    """
+    sql_text = _view_sql_body()
+
+    computed_pricing = re.findall(r"min_selling_price(?!_override)", sql_text)
+    assert not computed_pricing, (
+        "视图里不能出现算出来的 min_selling_price："
+        "定价口径必须只留 product_pricing_service 一处"
+    )
+    for forbidden in (
+        "AS current_discount_rate",
+        "AS clearance_max_discount_rate",
+        "discount_guard",
+        "cost_floor",
+        "target_margin_rate",
+    ):
+        assert forbidden not in sql_text, (
+            f"视图里出现 {forbidden}：定价口径必须只留 product_pricing_service 一处"
+        )

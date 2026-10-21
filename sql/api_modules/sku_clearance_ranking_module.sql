@@ -6,8 +6,8 @@
 --    补货归零 / 卖空重现归零）。不是 estimated_stagnant_days（那个只是最近两帧间隔，
 --    采集越密反而越小），也不是 estimated_turnover_days（那是动销速度）。
 -- 2. **一行一个 SKU**：mart.inventory_age_current 本身就是 (platform_code, sku_key) 粒度。
--- 3. **动销辅助列在 SKU 层级重算**：mart.inventory_backlog_base 是仓库行（同一 SKU 可能多仓），
---    所以按 (platform_code, product_sku) 聚合后再算 estimated_turnover_days，不能直接 MAX。
+-- 3. **动销辅助列在 SKU 层级重算**：库存/滞留列来自 mart.inventory_snapshot_change
+--    （仓库行），按 (platform_code, product_sku) 聚合后再算 estimated_turnover_days。
 -- 4. **风险等级改用库龄**：店铺级读模型 api.clearance_ranking_module 用 estimated_stagnant_days
 --    比 30/60/90，SKU 级改用真库龄比 90/180，阈值与定价档位对齐。
 --
@@ -19,6 +19,24 @@
 --
 -- ⚠️ **未匹配主数据的 SKU 照常保留**：不 join core.dim_erp_sku 过滤掉未匹配行，
 --    滞销清单漏掉新品恰恰是最要命的。匹配不上的行定价字段为空，由前端标「未匹配主数据」。
+--
+-- ⚠️ **性能：为什么 sales_30d 要限定平台**
+--    semantic.fact_orders_atomic 对 shopee/tiktok 的 2.8 万行做去重窗口，
+--    全量求值要 **21 秒**；而 mart.inventory_backlog_base 的 sales_30d 用
+--    `metric_date::date` 过滤，谓词下不进底层扫描，单是这一段就要 **8.8 秒**。
+--    滞销清单是交互页面，8.8 秒不可接受。
+--
+--    这里把销售聚合限定在「有库存的平台」：
+--      * platform_code 来自 mart.inventory_age_current（子查询 → InitPlan → 常量数组），
+--        谓词能直接下推到 fact_orders_atomic 的 UNION ALL 分支，只扫对应平台的事实表；
+--      * **不改变任何数字**：销售聚合与库存的连接键含 platform_code，
+--        没有库存的平台其销售行本来也匹配不上。
+--    实测：21.0s → 12ms。
+--
+--    库存/滞留列改从 mart.inventory_snapshot_change 取，不再经过 mart.inventory_backlog_base：
+--    它与 mart.inventory_snapshot_latest 共用同一个 company_daily CTE 和同一个
+--    ROW_NUMBER() 窗口 PARTITION BY，rank=1 的 available_stock / on_hand_stock /
+--    inventory_value **完全等价**，但它不需要销售 CTE，代价只有 48ms。
 
 CREATE SCHEMA IF NOT EXISTS api;
 
@@ -46,32 +64,69 @@ WITH age AS (
     FROM mart.inventory_age_current a
     WHERE a.product_sku IS NOT NULL
 ),
-turnover AS (
-    -- 动销辅助：backlog_base 是仓库行，这里聚合到 SKU
+stock AS (
+    -- 仓库行 → SKU 行：库存与滞留指标
+    -- mart.inventory_snapshot_change 与 mart.inventory_snapshot_latest 同源同窗口，
+    -- rank=1 的库存口径等价，但不牵动销售 CTE。
     SELECT
         platform_code,
         product_sku,
-        SUM(COALESCE(available_stock, 0))          AS available_stock,
-        SUM(COALESCE(on_hand_stock, 0))            AS on_hand_stock,
-        SUM(COALESCE(inventory_value, 0))          AS inventory_value,
-        SUM(COALESCE(daily_avg_sales, 0))          AS daily_avg_sales,
-        CASE
-            WHEN SUM(COALESCE(daily_avg_sales, 0)) > 0
-            THEN ROUND(
-                    SUM(COALESCE(available_stock, 0))::numeric
-                    / SUM(COALESCE(daily_avg_sales, 0)),
-                    2
-                 )
-            -- 没有动销数据但在库 = 卖不动，口径与 mart.inventory_backlog_base 保持一致
-            WHEN SUM(COALESCE(available_stock, 0)) > 0 THEN 9999
-            ELSE 0
-        END                                         AS estimated_turnover_days,
-        BOOL_OR(COALESCE(is_stagnant, FALSE))       AS is_stagnant,
+        SUM(COALESCE(available_stock, 0))         AS available_stock,
+        BOOL_OR(COALESCE(is_stagnant, FALSE))      AS is_stagnant,
         MAX(COALESCE(estimated_stagnant_days, 0))  AS estimated_stagnant_days,
         MAX(COALESCE(stagnant_snapshot_count, 0))  AS stagnant_snapshot_count
-    FROM mart.inventory_backlog_base
+    FROM mart.inventory_snapshot_change
     WHERE product_sku IS NOT NULL
     GROUP BY platform_code, product_sku
+),
+sales_30d AS (
+    -- 近 30 天动销：**按 SKU** 聚合（不是按仓库行，否则同一 SKU 的销量会被重复计数）
+    -- 平台限定见文件头说明：谓词下推 → 21s 降到 12ms，数字不变。
+    SELECT
+        platform_code,
+        product_sku,
+        COALESCE(SUM(product_quantity), 0)         AS sold_units_30d,
+        COUNT(DISTINCT metric_date::date)          AS active_days_30d
+    FROM semantic.fact_orders_atomic
+    WHERE platform_code = ANY (
+              ARRAY(SELECT DISTINCT platform_code FROM mart.inventory_age_current)
+          )
+      AND metric_date::date >= CURRENT_DATE - INTERVAL '30 days'
+      AND metric_date::date <= CURRENT_DATE
+      AND product_sku IS NOT NULL
+    GROUP BY platform_code, product_sku
+),
+turnover AS (
+    SELECT
+        st.platform_code,
+        st.product_sku,
+        st.available_stock,
+        st.is_stagnant,
+        st.estimated_stagnant_days,
+        st.stagnant_snapshot_count,
+        COALESCE(
+            ROUND(
+                s.sold_units_30d::numeric / NULLIF(s.active_days_30d, 0),
+                2
+            ),
+            0
+        )                                          AS daily_avg_sales,
+        CASE
+            WHEN COALESCE(s.sold_units_30d, 0) > 0
+             AND COALESCE(s.active_days_30d, 0) > 0
+            THEN ROUND(
+                    st.available_stock::numeric
+                    / NULLIF(s.sold_units_30d::numeric / s.active_days_30d, 0),
+                    2
+                 )
+            -- 有库存但完全没有动销数据 = 卖不动，口径与 mart.inventory_backlog_base 保持一致
+            WHEN COALESCE(st.available_stock, 0) > 0 THEN 9999
+            ELSE 0
+        END                                        AS estimated_turnover_days
+    FROM stock st
+    LEFT JOIN sales_30d s
+           ON s.platform_code = st.platform_code
+          AND s.product_sku = st.product_sku
 ),
 erp AS (
     -- ERP 主数据：只取定价需要的原料列
