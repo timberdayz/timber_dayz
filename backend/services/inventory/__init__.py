@@ -40,8 +40,13 @@ from backend.services.inventory.sales_outbound_service import (
     InventorySalesOutboundService,
     build_sale_ledger_entry,
 )
+from backend.services.inventory.sku_clearance_service import (
+    CLEARANCE_VIEW,
+    SkuClearanceService,
+)
 
 __all__ = [
+    "CLEARANCE_VIEW",
     "InventoryAdjustmentService",
     "InventoryAgingService",
     "InventoryBalanceService",
@@ -53,6 +58,7 @@ __all__ = [
     "InventoryOrderPostingService",
     "InventoryReconciliationService",
     "InventorySalesOutboundService",
+    "SkuClearanceService",
     "build_adjustment_ledger_entry",
     "build_layer_record",
     "build_receipt_ledger_entry",

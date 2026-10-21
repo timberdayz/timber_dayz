@@ -117,6 +117,10 @@ from backend.services.product_pricing_service import (
     resolve_policy_update,
     select_age_tier,
 )
+from backend.services.sku_pricing_policy_service import (
+    load_current_policies,
+    policy_current_predicate,
+)
 from backend.utils.exceptions import BusinessValidationError, ConflictError
 from modules.core.logger import get_logger
 from backend.services.feishu_projection_client import FeishuProjectionClient
@@ -2163,20 +2167,13 @@ async def update_product_warehouse(warehouse_code: str, body: ProductWarehouseUp
 
 
 def _policy_current_predicate():
-    return (
-        SkuPricingPolicy.status == "active",
-        SkuPricingPolicy.effective_to.is_(None),
-        SkuPricingPolicy.effective_from <= date.today(),
-    )
+    # 谓词的唯一来源在 backend/services/sku_pricing_policy_service.py：
+    # 商品中心与 SKU 级滞销清单共用同一组条件，避免两边口径分叉。
+    return policy_current_predicate()
 
 
 async def _current_policies(db: AsyncSession) -> list[SkuPricingPolicy]:
-    result = await db.execute(
-        select(SkuPricingPolicy)
-        .where(*_policy_current_predicate())
-        .order_by(SkuPricingPolicy.min_age_days)
-    )
-    return list(result.scalars().all())
+    return await load_current_policies(db)
 
 
 @router.get("/api/sku-pricing-policies", response_model=list[SkuPricingPolicyResponse])

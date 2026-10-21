@@ -3,7 +3,7 @@
 """
 
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -169,6 +169,72 @@ class InventoryAgingSummaryResponse(BaseModel):
     total_sku_count: int = 0
     total_quantity: int = 0
     total_value: float = 0.0
+
+
+class SkuClearanceRankingItemResponse(BaseModel):
+    """SKU 级滞销清单的一行。
+
+    库龄/库存/动销列来自只读视图 `api.sku_clearance_ranking_module`；
+    定价列（档位、折扣率、最低售价、清货回款）由 service 调
+    `backend/services/product_pricing_service.py` 的纯函数补齐——
+    **SQL 里不重写定价公式**，口径只有一处。
+    """
+
+    snapshot_date: Optional[date] = None
+    platform_code: str
+    product_sku: str
+    sku_key: Optional[str] = None
+    product_name: Optional[str] = None
+    current_qty: int = 0
+    on_hand_qty: int = 0
+    inventory_value: float = 0.0
+    warehouse_count: int = 0
+    age_anchor_date: Optional[date] = None
+    age_days: int = 0
+    age_bucket: Optional[str] = None
+    reset_reason: Optional[str] = None
+    estimated_turnover_days: Optional[float] = None
+    daily_avg_sales: Optional[float] = None
+    is_stagnant: Optional[bool] = None
+    estimated_stagnant_days: Optional[int] = None
+    stagnant_snapshot_count: Optional[int] = None
+    risk_level: str = "low"
+    clearance_priority_score: float = 0.0
+    sku_id: Optional[int] = None
+    default_purchase_cost: Optional[float] = None
+    reference_selling_price: Optional[float] = None
+    min_selling_price_override: Optional[float] = None
+    # —— 定价字段（service 用纯函数补齐）——
+    pricing_tier_label: Optional[str] = None
+    current_discount_rate: Optional[float] = None
+    current_target_margin_rate: Optional[float] = None
+    clearance_max_discount_rate: Optional[float] = None
+    min_selling_price: Optional[float] = None
+    min_selling_price_source: Optional[str] = None
+    clearance_recovery_amount: Optional[float] = None
+    # 未匹配 ERP 主数据的 SKU 照常返回，但定价字段为空，前端据此标「未匹配主数据」
+    pricing_matched_erp: bool = False
+
+
+class SkuClearanceRankingSummaryResponse(BaseModel):
+    sku_count: int = 0
+    total_quantity: int = 0
+    total_inventory_value: float = 0.0
+    by_risk_level: Dict[str, int] = Field(default_factory=dict)
+    by_age_bucket: Dict[str, int] = Field(default_factory=dict)
+    # 缺参考售价的 SKU 数：主数据缺口直接暴露在业务界面上，
+    # 运营一眼知道哪些滞销品算不出清货回款
+    missing_reference_price_count: int = 0
+
+
+class SkuClearanceRankingResponse(BaseModel):
+    summary: SkuClearanceRankingSummaryResponse = Field(
+        default_factory=SkuClearanceRankingSummaryResponse
+    )
+    items: List[SkuClearanceRankingItemResponse] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 100
+    offset: int = 0
 
 
 class InventoryBalanceSummaryResponse(BaseModel):

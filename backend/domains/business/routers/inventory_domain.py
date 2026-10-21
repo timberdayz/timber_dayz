@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ from backend.schemas.inventory import (
     InventoryOpeningBalanceCreateRequest,
     InventoryOpeningBalanceResponse,
     InventoryReconciliationResponse,
+    SkuClearanceRankingResponse,
 )
 from backend.services.inventory import (
     InventoryAdjustmentService,
@@ -33,6 +34,7 @@ from backend.services.inventory import (
     InventoryLedgerService,
     InventoryOpeningBalanceService,
     InventoryReconciliationService,
+    SkuClearanceService,
 )
 
 router = APIRouter(
@@ -315,4 +317,47 @@ async def get_inventory_aging_buckets(
         platform=platform,
         shop_id=shop_id,
         platform_sku=platform_sku,
+    )
+
+
+@router.get(
+    "/clearance-ranking",
+    response_model=SkuClearanceRankingResponse,
+    summary="SKU 级滞销清单（真库龄口径）",
+)
+async def get_sku_clearance_ranking(
+    min_age_days: Optional[int] = Query(60, ge=0, description="库龄下限（天）"),
+    max_age_days: Optional[int] = Query(None, ge=0, description="库龄上限（天）"),
+    risk_level: Optional[Literal["high", "medium", "low"]] = Query(
+        None, description="风险等级"
+    ),
+    platform_code: Optional[str] = Query(None, description="平台编码"),
+    keyword: Optional[str] = Query(None, description="SKU / 商品名关键词"),
+    sort_by: Literal[
+        "clearance_priority_score",
+        "age_days",
+        "inventory_value",
+        "estimated_turnover_days",
+    ] = Query("clearance_priority_score", description="排序字段"),
+    sort_order: Literal["asc", "desc"] = Query("desc", description="排序方向"),
+    limit: int = Query(100, ge=1, le=500, description="返回条数上限"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """SKU 级滞销清单。
+
+    只读端点（与既有 `/inventory/aging` 一致，不加 require_admin）。
+    库龄口径是 `mart.inventory_age_current.age_days`（真库龄），与商品中心定价同源。
+    """
+    service = SkuClearanceService(db)
+    return await service.get_sku_clearance_ranking(
+        min_age_days=min_age_days,
+        max_age_days=max_age_days,
+        risk_level=risk_level,
+        platform_code=platform_code,
+        keyword=keyword,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        limit=limit,
+        offset=offset,
     )
