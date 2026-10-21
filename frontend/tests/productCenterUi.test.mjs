@@ -191,6 +191,20 @@ test("最低售价在覆盖值未保存时提示「保存后生效」", () => {
   assert.match(source, /pending-override/);
 });
 
+test("达人佣金率带 % 后缀且说明只放在表头", () => {
+  // 输入框填的是百分数，界面必须有 % 才看得出「11 = 11%」
+  const commission = source.slice(
+    source.indexOf('label="达人佣金率"'),
+    source.indexOf('label="售价来源"'),
+  );
+  assert.match(commission, /rate-suffix/);
+  // 「留空表示不单独设置」不该每行重复一遍
+  assert.doesNotMatch(commission, /pricing-tier-hint/);
+  // 改成表头问号提示
+  assert.match(source, /pricing-header/);
+  assert.match(source, /留空表示不单独设置，按平台默认计算/);
+});
+
 test("利润测算页展示最低售价并拦截低于底线的预计售价", () => {
   assert.match(source, /row\.min_selling_price/);
   assert.match(source, /row\.current_discount_rate/);

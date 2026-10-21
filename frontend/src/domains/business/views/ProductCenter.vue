@@ -256,7 +256,7 @@
           ><el-table-column label="当前可优惠" width="110"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column
           ><el-table-column label="滞销可优惠" width="110"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column
           ><el-table-column label="最低售价" width="230"><template #default="{ row }"><div class="pricing-cell"><div class="pricing-cell-head"><span class="readonly-cell" :class="{ 'pending-override': pendingOverride(row) != null }">{{ pendingOverride(row) != null ? `保存后生效：${money(pendingOverride(row))}` : money(row.min_selling_price) }}</span><el-tag v-if="pendingOverride(row) == null" size="small" :type="pricingSourceTagType(row.min_selling_price_source)" :title="PRICING_SOURCE_TOOLTIPS[row.min_selling_price_source]">{{ pricingSourceLabel(row.min_selling_price_source) }}</el-tag><el-button v-if="row.min_selling_price_is_override || row.min_selling_price_override != null" link type="warning" @click="resetMinSellingPrice(row)">重置为自动值</el-button></div><el-input-number v-model="row.min_selling_price_override" :min="0.01" :precision="2" :controls="false" size="small" :placeholder="row.min_selling_price != null ? money(row.min_selling_price) : '自动'" @change="markDirty('sku', row)" /><div class="pricing-tier-hint">{{ row.pricing_tier_label || "-" }}<template v-if="row.pricing_age_days != null">（库龄 {{ row.pricing_age_days }} 天）</template><el-tag v-if="row.pricing_tier_source === 'fallback_no_age_data'" size="small" type="info">兜底</el-tag></div></div></template></el-table-column
-          ><el-table-column label="达人佣金率" width="125"><template #default="{ row }"><el-input-number :model-value="toPercent(row.creator_commission_rate)" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" :placeholder="row.creator_commission_rate_fallback != null ? percent(row.creator_commission_rate_fallback) : '按平台默认'" @update:model-value="row.creator_commission_rate = fromPercent($event, null); markDirty('sku', row)" /><div class="pricing-tier-hint">留空表示不单独设置，按平台默认计算</div></template></el-table-column
+          ><el-table-column label="达人佣金率" width="145"><template #header><el-tooltip content="留空表示不单独设置，按平台默认计算" placement="top"><span class="pricing-header">达人佣金率<el-icon class="pricing-header-help"><QuestionFilled /></el-icon></span></el-tooltip></template><template #default="{ row }"><div class="rate-cell"><el-input-number :model-value="toPercent(row.creator_commission_rate)" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" :placeholder="row.creator_commission_rate_fallback != null ? percent(row.creator_commission_rate_fallback) : '按平台默认'" @update:model-value="row.creator_commission_rate = fromPercent($event, null); markDirty('sku', row)" /><span class="rate-suffix">%</span></div></template></el-table-column
           ><el-table-column label="售价来源" width="120"><template #default="{ row }"><el-input v-model="row.selling_price_source" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="周转类型" width="120"><template #default="{ row }"><el-select v-model="row.turnover_class" size="small" placeholder="选择" @change="markDirty('sku', row)"><el-option label="快销商品（30天）" value="fast" /><el-option label="普通商品（60天）" value="normal" /><el-option label="慢销商品（90天）" value="slow" /></el-select></template></el-table-column
           ><el-table-column label="参考仓储天数" width="120"><template #default="{ row }">{{ referenceStorageDays(row.turnover_class) || "待设置" }}</template></el-table-column
@@ -854,7 +854,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Check, Plus } from "@element-plus/icons-vue";
+import { Check, Plus, QuestionFilled } from "@element-plus/icons-vue";
 import productCenterApi from "@/api/productCenter";
 import { useUserStore } from "@/stores/user";
 
@@ -2209,6 +2209,17 @@ onMounted(async () => {
   font-size: 12px;
   line-height: 1.5;
   color: var(--el-text-color-secondary);
+}
+/* 表头的问号提示：说明只说一次，不用每行重复 */
+.pricing-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.pricing-header-help {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  cursor: help;
 }
 /* 输入框有未保存的覆盖值：只读值那一行标成「待生效」 */
 .readonly-cell.pending-override {
