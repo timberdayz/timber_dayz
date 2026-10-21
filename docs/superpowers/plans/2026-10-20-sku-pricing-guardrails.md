@@ -12,6 +12,40 @@
 
 ---
 
+## 实施状态（2026-10-21 已执行完毕）
+
+10 个任务全部完成并提交。**下文的代码块与执行结果有出入时，以仓库实际代码为准**
+（每个任务完成后都有对应 commit）。
+
+| Task | 产出 | 提交 |
+|---|---|---|
+| 1 | `current_migrations/versions/20261020_sku_pricing_guardrails.py`、`modules/core/db/schema_parts/{dimensions,business}.py`、`modules/core/db/schema.py`、`backend/tests/test_sku_pricing_guardrails_contract.py` | `a1362a33` |
+| 2 | `backend/services/product_pricing_service.py`、`backend/tests/test_product_pricing_guardrails.py` | `492bdba1` |
+| 3 | `backend/schemas/product_center.py`、`backend/tests/test_product_center_schema_contract.py` | `f698b037` |
+| 4 | 规则表 4 个端点 + 平台成本率部分更新（`product_center.py`）、`backend/tests/conftest.py` 的 `pricing_seed` fixture | `92aa1cea` |
+| 5 | SKU 列表注入定价底线（`product_center.py`） | `c7138cb1` |
+| 6 | 利润测算护栏（`product_center.py`） | `52826fac` |
+| 7 | `frontend/src/api/productCenter.js`、`ProductCenter.vue` 定价设置抽屉（两子页） | `cf84dd3d` |
+| 8 | `ProductCenter.vue` SKU 资料页四列 | `d2c9ec93` |
+| 9 | `ProductCenter.vue` 利润测算护栏 | `d2c9ec93` |
+| 10 | 既有红测试收窄（`frontend/tests/productCenterUi.test.mjs`） | `cf84dd3d` |
+| — | 第 5 轮复审的修复（409 结构化异常 / 库龄查询日志 / 迁移常量契约测试） | `6fac1ebf` |
+
+**执行期发现并修掉的问题**（不在原计划里，都是实跑才暴露的）：
+
+1. **迁移的幂等守卫按日期判会炸** —— 「昨天跑过 upgrade、今天再跑一次」会插出重复档位，
+   撞 `uq_sku_pricing_policies_current`。改成按「该档位是否已有当前行」判定。
+2. **迁移命令会跑错链** —— 必须带 `-c alembic-current.ini`（见 §0.4 / Task 1 Step 6）。
+3. **seed 一次 flush 会撞外键** —— SQLAlchemy 的 UOW 不认裸 `ForeignKey`，必须按 FK 顺序逐个 flush。
+4. **`WarehouseStorageRule.billing_unit` 必须是 `'CNY/CBM/month'`** —— 仓库 CHECK 约束要求。
+5. **改档位边界只能改成「空闲」起点** —— 部分唯一索引保证一档一当前行（见 spec §5.1）。
+6. **pg 用例会跨用例污染** —— 端点内部 `db.commit()` 让 seed 被提交，
+   `pg_session` 的 teardown rollback 撤不掉 → 必须用 `pricing_seed` fixture 带清理。
+7. **`= ANY(:keys)` 在 asyncpg 下类型推断不可靠** —— 改用展开式绑定参数 `IN :keys` + `bindparam(expanding=True)`。
+8. **规则表 409 走 `HTTPException` 前端读不到结构化 reason** —— 改走 `ConflictError`。
+
+---
+
 ## 执行前必读
 
 ### 0.1 已知既有红测试（不是本次引入，勿混淆）
@@ -171,6 +205,39 @@ def test_migration_calibrates_platform_fee_rates():
     assert "0.4165" in source   # shopee 平台其他成本率
     assert "0.0606" in source   # tiktok 默认达人佣金率
     assert "0.0111" in source   # shopee 默认达人佣金率
+
+
+def test_migration_is_idempotent_guarded():
+    source = MIGRATION.read_text(encoding="utf-8")
+    for guard in ("_has_table", "_has_column", "_has_constraint", "_has_index"):
+        assert f"def {guard}" in source, guard
+
+
+def test_migration_module_imports_and_defines_its_constants():
+    """**真导入**迁移模块并校验常量。
+
+    纯源码 grep 抓不到「用了没定义的常量」这类真崩——
+    计划里的迁移块就曾引用了未定义的 POLICY_SOURCE，
+    而 grep 型契约测试照样 3 passed（假绿）。
+    导入一次模块 + 断言常量存在，成本极低但能挡住这类问题。
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("pricing_guardrails_migration", MIGRATION)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.revision == "current_schema_20261020_sku_pricing_guardrails"
+    assert module.down_revision == "current_schema_20260921_warehouse_storage_label_fee"
+    assert module.POLICY_SOURCE == "industry_benchmark_2026"
+    assert module.POLICY_VERSION == "v1"
+    assert len(module.POLICY_ROWS) == 4
+    assert {row[0] for row in module.POLICY_ROWS} == {0, 60, 90, 120}
+    assert set(module.PLATFORM_COST_RATES) == {"tiktok", "shopee"}
+    for values in module.PLATFORM_COST_RATES.values():
+        assert set(values) == {
+            "default_fee_rate", "default_creator_commission_rate", "other_cost_rate",
+        }
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -243,6 +310,15 @@ PLATFORM_COST_RATES = {
         "other_cost_rate": 0.4165,
     },
 }
+
+# ⚠️ 这三个常量**必须定义**：种子行与 downgrade 都要用。
+# 漏定义的话 `alembic upgrade heads` 直接 NameError，
+# 而纯 grep 型契约测试抓不到（假绿）——所以 Task 1 的契约测试里有一条
+# **真 import 迁移模块**并断言常量存在。
+PLATFORM_FEE_RATE_SOURCE = "b_class_measured_2026_01_07"
+PLATFORM_FEE_RATE_VERSION = "v2"
+POLICY_SOURCE = "industry_benchmark_2026"
+POLICY_VERSION = "v1"
 
 
 def upgrade() -> None:
@@ -352,10 +428,17 @@ def upgrade() -> None:
             sa.text(
                 "UPDATE core.dim_platforms SET default_fee_rate = :fee, "
                 "default_creator_commission_rate = :crea, other_cost_rate = :other, "
-                "fee_rate_source = 'b_class_measured_2026_01_07', fee_rate_version = 'v2' "
+                "fee_rate_source = :src, fee_rate_version = :ver "
                 "WHERE platform_code = :code AND platform_role = 'sales'"
             ),
-            {"code": platform_code, "fee": values["default_fee_rate"], "crea": values["default_creator_commission_rate"], "other": values["other_cost_rate"]},
+            {
+                "code": platform_code,
+                "fee": values["default_fee_rate"],
+                "crea": values["default_creator_commission_rate"],
+                "other": values["other_cost_rate"],
+                "src": PLATFORM_FEE_RATE_SOURCE,
+                "ver": PLATFORM_FEE_RATE_VERSION,
+            },
         )
 
 
@@ -1924,9 +2007,37 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
 > `WarehouseStorageRule` / `SkuPricingPolicy` 的其余必填列以仓库 ORM 定义为准
 > （`modules/core/db/schema_parts/`），实现时按 `inspect(Model).columns` 补齐。
 >
-> **这些 seed 放在 `backend/tests/conftest.py` 里**，做成一个共用 fixture：
+> **这些 seed 放在 `backend/tests/conftest.py` 里**，做成一个共用 fixture。
+> ⚠️ conftest **模块级**要加 `from sqlalchemy import text`
+> （仓库原有 conftest 只在 `pg_engine` 函数体内 import 过 `text`，模块级没有）。
 >
 > ```python
+> from sqlalchemy import text
+>
+> PRICING_SEED_CLEANUP_SQL = (
+>     # 子表先删，父表后删（FK 顺序）
+>     "DELETE FROM ops.feishu_projection_tasks "
+>     "WHERE business_key = '9001' "
+>     "OR business_key IN (SELECT profile_id::text FROM finance.sku_operating_profiles WHERE sku_id = 9001)",
+>     "DELETE FROM finance.sku_profit_estimates WHERE sku_id = 9001",
+>     # 审计：resource_id 有三种形态——纯 sku_id、平台 code、
+>     # 以及草稿/利润版本的复合 key（"tiktok:MY-01:9001"），所以用 user_id 兜底
+>     "DELETE FROM public.fact_audit_logs "
+>     "WHERE user_id = 1 OR resource_id = '9001' OR resource_id = 'tiktok' "
+>     "OR resource_id LIKE '%9001%' OR resource_type = 'sku_pricing_policy'",
+>     "DELETE FROM finance.sku_operating_profiles WHERE sku_id = 9001",
+>     "DELETE FROM finance.sku_pricing_policies",
+>     "DELETE FROM finance.logistics_provider_rules WHERE logistics_provider = 'TEST-LOG'",
+>     "DELETE FROM finance.warehouse_storage_rules WHERE warehouse_code = 'MY-01'",
+>     "DELETE FROM core.bridge_spu_sku WHERE sku_id = 9001",
+>     "DELETE FROM core.dim_erp_sku WHERE sku_id = 9001",
+>     "DELETE FROM core.dim_spu WHERE spu = 'TEST-SPU-1'",
+>     "DELETE FROM core.dim_warehouses WHERE warehouse_code = 'MY-01'",
+>     "DELETE FROM core.dim_platforms WHERE platform_code = 'tiktok'",
+>     "DELETE FROM core.dim_users WHERE user_id = 1",
+> )
+>
+>
 > @pytest_asyncio.fixture
 > async def pricing_seed(pg_session):
 >     """返回「种数据」的协程；用例结束后自动清理干净。"""
@@ -1938,22 +2049,20 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
 >     await pg_session.commit()
 > ```
 >
-> 用例里写 `await pricing_seed()` / `await pricing_seed(with_cost_rules=False)`。
+> 用例里写 `await pricing_seed()` / `await pricing_seed(with_cost_rules=False)`，
+> 并给**每个**用例的签名加上 `pricing_seed` 参数。
 >
 > ⚠️ **必须清理，这是实测踩到的坑**：`pg_engine` 是 **session 级**容器，
 > 而端点内部会 `db.commit()`——种下去的行会被**提交**，
 > `pg_session` 的 teardown `rollback()` **撤不掉**。
 > 不清理的话，下一个用例种同样的主键直接撞
 > `UniqueViolationError: duplicate key value violates unique constraint "dim_users_pkey"`。
-> 清理 SQL 按 FK 顺序（子表先删）：投影任务 → 利润版本 → 审计 → 经营档案 →
-> 规则表 → 物流/仓储规则 → SKU 绑定 → SKU → SPU → 仓库 → 平台 → 用户。
 >
 > ⚠️ **审计表的清理条件要覆盖三种 `resource_id` 形态**：
 > 纯 sku_id（`'9001'`）、平台 code（`'tiktok'`）、
 > 以及草稿/利润版本的复合 key（`'tiktok:MY-01:9001'`）。
 > 漏掉复合 key 的话，删 `dim_users` 会撞
 > `ForeignKeyViolationError: fact_audit_logs_user_id_fkey`。
-> 所以条件里加了 `user_id = 1`（本组用例的 mock 用户）与 `resource_id LIKE '%9001%'`。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -2165,6 +2274,29 @@ for key, value in values.items():
 ```
 
 并把 `default_creator_commission_rate` / `other_cost_rate` 加进 `PlatformFeeRateUpdateRequest`（Task 3 已加）。响应体补回这两项。
+
+⚠️ **同时给这个端点补 `response_model`**（AGENTS.md：新路由应声明 `response_model`；
+本端点虽然不是新路由，但本次改了它的返回体，不钉住契约就会「加字段忘了加契约 → 前端永远拿到 null」）：
+
+```python
+class PlatformFeeRateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    platform_code: str
+    default_fee_rate: Optional[float] = None
+    default_creator_commission_rate: Optional[float] = None
+    other_cost_rate: Optional[float] = None
+    fee_rate_effective_from: Optional[date] = None
+    fee_rate_source: Optional[str] = None
+    fee_rate_version: Optional[str] = None
+```
+
+路由改成 `@router.patch("/api/platforms/{platform_code}/fee-rate", response_model=PlatformFeeRateResponse)`，
+返回体用 `PlatformFeeRateResponse.model_validate(row)`（或等价的 dict）。
+
+> ⚠️ `PlatformFeeRateUpdateRequest.fee_rate_effective_from` 带 `default_factory=date.today`，
+> 所以「部分更新」必须用 `exclude_unset=True`——否则只改一项也会把生效日期刷成当天。
+> 测试要断言这一点：seed 给一个**非今日**的生效日期（如 `2026-09-01`），PATCH 后仍是它。
 
 `list_sku_operating_dimensions` 的 platforms 显式 dict（`product_center.py:2250-2252`）补两个新字段：
 
@@ -2865,6 +2997,10 @@ Expected: 新增两条 FAIL（既有那条 `preview:\s*null` 的失败与本任�
 `ProductCenter.vue`：
 
 1. 现有 `platformFeeDrawer` 改名 `pricingDrawer`，`title="定价设置"`，`size="720px"`，内含两个 `el-tab-pane`：
+   - ⚠️ **改名要一次改全**：`grep -n platformFeeDrawer frontend/src/domains/business/views/ProductCenter.vue`
+     命中 **14 处**（模板 6 处 + 脚本 8 处）。漏一处就是运行时 `undefined`。
+     实测改完的分布：模板 `v-model` / `el-form :model` / 各 `el-form-item` / footer 按钮，
+     脚本 `const pricingDrawer = reactive({...})` / `openPlatformFeeDrawer` / `savePlatformFeeRate`。
    - `平台成本率`：现有字段 + `默认达人佣金率`（`default_creator_commission_rate`）+ `平台其他成本率`（`other_cost_rate`）+ 只读「成本率合计」
      - **「成本率合计」= 平台佣金率 + 默认达人佣金率 + 平台其他成本率**（TikTok = 7.37% + 6.06% + 27.27% = **40.70%**），
        **仅作成本结构展示，不是底线基数**
@@ -3089,6 +3225,9 @@ const payloadSku = (row) => {
   delete payload.pricing_tier_label;
   delete payload.pricing_age_days;
   delete payload.pricing_tier_source;
+  // ⚠️ creator_commission_rate_fallback 也要剔除：它只是平台兜底值的展示，
+  // 不是 SKU 自己设的值，回提交上去会被当成「单独设置过佣金率」。
+  delete payload.creator_commission_rate_fallback;
   return payload;
 };
 ```

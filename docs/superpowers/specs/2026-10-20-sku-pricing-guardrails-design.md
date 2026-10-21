@@ -623,6 +623,12 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 
 若同一档位出现多行同时满足上述条件（理论上由 `PUT` 的「关旧开新」保证唯一；出现多行说明数据被绕过 API 直接改动，属数据异常），取 `effective_from` 最大者，并在实现中记 warning 日志。
 
+> ℹ️ **这条分支实际不可达**：`uq_sku_pricing_policies_current` 是部分唯一索引
+> （`UNIQUE(min_age_days) WHERE status='active' AND effective_to IS NULL`），
+> 数据库层面已经保证「每个库龄档位至多一条当前行」。
+> 因此**不实现**这段兜底逻辑与 warning 日志——数据异常应由索引报错暴露，
+> 而不是靠应用层静默挑一行。真要保留兜底，也应在**数据修复**脚本里做，而不是在读路径里。
+
 **版本化更新的多条路径**（`PUT /api/sku-pricing-policies/{min_age_days}`）：
 
 | 场景 | 行为 | 原因 |
@@ -657,12 +663,27 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 | 起点没变、生效日期也没变 | **原地 UPDATE 当前行**（不新建版本） |
 | 起点没变、生效日期更晚 | 关闭旧行 + 新建一行（跨期版本化） |
 | 起点没变、生效日期更早 | 422 拒绝（回溯变更超出范围） |
-| 新起点 + 生效日期的组合已被别的档位占用 | 409（撞 `UNIQUE(min_age_days, effective_from)`） |
+| **新起点已被别的档位占用** | 409（撞 `uq_sku_pricing_policies_current`） |
 | `effective_from` 晚于今日 | 422 拒绝（不支持未来生效） |
 
 **「改档位边界」就是一次普通的关旧开新**，不需要额外端点；`min_age_days` 变成新值即代表新档位。
 
-**为什么同日原地 UPDATE 不新建版本**：`UNIQUE(min_age_days, effective_from)` 只在「同档位 + 同一天」时冲突。改边界时 `min_age_days` 已变、跨期时 `effective_from` 已变，两者都不会撞——所以这两条路径都能安全地与旧行同一天生效。
+> ⚠️ **改边界只能改成「当前未被占用」的起点**。
+> `uq_sku_pricing_policies_current` 是**部分唯一索引**
+> （`UNIQUE(min_age_days) WHERE status='active' AND effective_to IS NULL`），
+> 它保证**每个库龄档位至多有一条当前行**。
+> 因此把边界改成任何一个**已有档位**的值（0/60/90/120…）必然 409——
+> 实测复现：`duplicate key value violates unique constraint "uq_sku_pricing_policies_current"，
+> DETAIL: Key (min_age_days)=(60) already exists`。
+>
+> 这不是缺陷，是「一个库龄起点只能有一档」这条业务规则��直接体现。
+> 但它**限制了运营能改的范围**：想把 60 改成 45 可以（45 空闲），
+> 想把 60 改成 30 就不行（30 已经是另一档）。
+> 界面上必须提示这一点，运营才会知道自己该先动哪一档。
+
+**为什么同日原地 UPDATE 不新建版本**：`UNIQUE(min_age_days, effective_from)` 只在「同档位 + 同一天」时冲突。
+改边界时 `min_age_days` 已变（走部分唯一索引的判定）、跨期时 `effective_from` 已变，两者都不会撞 `UNIQUE(min_age_days, effective_from)`——
+但**改边界仍可能撞 `uq_sku_pricing_policies_current`**（见上）。
 
 **同一天内的操作优先级**：只改率走原地 UPDATE；改边界或改生效日期走关旧开新。
 
@@ -673,8 +694,16 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 | `effective_from` 晚于今日 | 422 | 不支持未来生效的规则行 |
 | `effective_from` 小于当前行 | 422 | 回溯变更超出范围 |
 | 路径档位不存在 | 404 | 不能改一个不存在的档位 |
-| 新起点 + 生效日期的组合已被别的档位占用 | 409 | 撞 `UNIQUE(min_age_days, effective_from)` |
-| 撞 `uq_sku_pricing_policies_current` | 409 | 并发 `PUT` 同一档位（`IntegrityError` → `rollback` → 409，与 `bulk_save_skus` 的 409 模式一致） |
+| **新起点已被别的档位占用** | 409 | 撞 `uq_sku_pricing_policies_current`（每个档位至多一条当前行） |
+| 撞 `uq_sku_pricing_policies_current`（并发 `PUT` 同一档位） | 409 | `IntegrityError` → `rollback` → 409，与 `bulk_save_skus` 的 409 模式一致 |
+
+> ⚠️ **409 也要走结构化异常**（`ConflictError`，`http_status_code=409` + `detail` 原样透传），
+> 不能用 `HTTPException(status_code=409, detail="...")`：
+> 全局异常处理器会把 `HTTPException` 的 `detail` **拍平成字符串**，
+> 前端拿到的 `error.detail` 就是一段文本，读不到 `code` / `reason`，
+> 抽屉只能退回到带 `[3001]` 错误码前缀的 `message`。
+> 业务码：`pricing_policy_tier_exists`（该档位已有生效规则）、
+> `pricing_policy_conflict`（该库龄起点已被其它档位占用）。
 
 ### 5.2 平台成本率（扩展既有端点，不新增路由）
 
@@ -885,6 +914,9 @@ HTTP 422
 ```
 
 - 「库龄起点」列可编辑（改这一格就改了滞销阈值），「档位名」列可编辑
+  - ⚠️ **只能改成当前未被占用的起点**：每个库龄档位至多一条当前行
+    （`uq_sku_pricing_policies_current` 部分唯一索引），
+    改成任何已有档位的值都会 409。界面必须提示，否则运营会反复试错（见 §5.1）。
 - 编辑任一格 → 保存时提交 `PUT /api/sku-pricing-policies/{min_age_days}`（版本化更新，变更起点走 §5.1 的「档位起点变更」路径）
 - 表头需说明「库龄起点 = 从该天数起，本行规则生效」
 - **折扣率是本档位的唯一折扣率**——折扣力度完全由库龄档位触发，没有「同档位两个额度」
@@ -938,9 +970,12 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 - 编辑覆盖值 / 达人佣金率 → 写入对应行字段，走既有 `dirtyRows` + `/api/skus/bulk` 批量保存链路
 - 「重置为自动值」→ 把 `row.min_selling_price_override` 置 `null`，恢复自动计算
 - `blankSku()` 工厂（`ProductCenter.vue:925`）需同步新增 `creator_commission_rate: null` 与 `min_selling_price_override: null`，避免新建行携带未定义字段
-- `payloadSku()`（`ProductCenter.vue:1341`）当前展开整行，需**剔除只读计算字段** `current_discount_rate` / `clearance_max_discount_rate` / `min_selling_price` / `min_selling_price_source` / `min_selling_price_is_override` / `min_selling_price_missing_reasons` / `pricing_tier_label` / `pricing_age_days` / `pricing_tier_source`。
+- `payloadSku()`（`ProductCenter.vue:1341`）当前展开整行，需**剔除只读计算字段** `current_discount_rate` / `clearance_max_discount_rate` / `min_selling_price` / `min_selling_price_source` / `min_selling_price_is_override` / `min_selling_price_missing_reasons` / `pricing_tier_label` / `pricing_age_days` / `pricing_tier_source` / **`creator_commission_rate_fallback`**。
   - `SkuBulkItem` 未设 `model_config`，Pydantic v2 默认 `extra="ignore"`，多余字段不会报错，但会让每次批量保存把未修改的 `creator_commission_rate` / `min_selling_price_override` 原值重写一遍，产生无谓的审计记录。
   - **`min_selling_price_override` 与 `creator_commission_rate` 必须保留在 payload 中**——它们是**可写字段**。`SkuBulkItem` 用 `model_dump(exclude_unset=True)`，显式传 `null` 才会把覆盖值清空。二者都不属于上面的只读剔除清单。
+  - ⚠️ **`creator_commission_rate_fallback` 也要剔除**：它只是**平台兜底值的展示**
+    （SKU 资料页「达人佣金率」输入框的 placeholder），不是 SKU 自己设的值。
+    回提交上去会被当成「该 SKU 单独设置过佣金率」，把底线算错。
 
 ### 6.4 利润测算 tab 护栏
 
@@ -1205,15 +1240,29 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 
 - `upgrade()` 与 `downgrade()` **都要写**，且 `downgrade()` 同样幂等
 - 所有 `op.add_column()` / `op.create_index()` / `op.create_table()` / `op.create_check_constraint()` 都要有存在性守卫
-- 输出用 `safe_print()`，不用 `print()`
-- 验证链路：`alembic upgrade heads` → `alembic downgrade -1` → `alembic upgrade heads` 三步可重复执行无报错
+- 本迁移**不输出任何日志**（不涉及 `safe_print()` / `print()`）
+- 验证链路：`alembic -c alembic-current.ini upgrade heads` → `downgrade -1` → `upgrade heads` 三步可重复执行无报错
+  - ⚠️ **必须带 `-c alembic-current.ini`**：仓库有两条 Alembic 链。
+    `alembic.ini` 的 `script_location = migrations` 是**只读的历史链**（`current_migrations/README.md`：
+    「never used by the deployment or application startup」），head 是 `20260917_add_platform_label_fee`；
+    `alembic-current.ini` 才是**活链**（`script_location = current_migrations`），
+    head 是 `current_schema_20260921_warehouse_storage_label_fee`。
+    裸跑 `alembic upgrade heads` 会走错链。
 
 ```python
 revision = "current_schema_20261020_sku_pricing_guardrails"
 down_revision = "current_schema_20260921_warehouse_storage_label_fee"
 ```
 
-`downgrade()` 需要：删除 `finance.sku_pricing_policies` 表（含其索引与约束）、删除 `core.dim_platforms` 与 `core.dim_erp_sku` 的 4 个新列。注意 `down_revision` 指向 `current_schema_20260921_warehouse_storage_label_fee`——**实施时需再次确认当前 head**（迁移链存在多个分支时以 `alembic heads` 实际输出为准）。
+`downgrade()` 需要：删除 `finance.sku_pricing_policies` 表（含其索引与约束）、删除 `core.dim_platforms` 与 `core.dim_erp_sku` 的 4 个新列，
+并把平台费率**还原**为 `default_fee_rate = 0.02` / `fee_rate_source = 'manual'` / `fee_rate_version = 'v1'`
+（只还原**仍带本次迁移标记**的行，避免覆盖后来的人工调整）。
+注意 `down_revision` 指向 `current_schema_20260921_warehouse_storage_label_fee`——**实施时需再次确认当前 head**（迁移链存在多个分支时以 `alembic -c alembic-current.ini heads` 实际输出为准）。
+
+> ⚠️ **`downgrade()` 会丢弃全部档位（含运营后来自建的）**。
+> 规则表整表 DROP，运营通过 `POST /api/sku-pricing-policies` 建的档位（`source` 为空）一并消失。
+> 这是「回滚一个版本」的正常语义，但**上线前必须备份规则表**，
+> 且回滚后需要重新灌初始 4 档——迁移的 `upgrade()` 会自动补上（种子行按「该档位是否已有当前行」判定，可重复执行）。
 
 内容：
 1. 建 `finance.sku_pricing_policies` 表（含 5 个 CHECK、1 个 UNIQUE、2 个 INDEX，其中 `uq_sku_pricing_policies_current` 为部分唯一索引）
