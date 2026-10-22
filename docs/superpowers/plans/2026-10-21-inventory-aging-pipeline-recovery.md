@@ -942,3 +942,69 @@ node --test frontend/tests/inventoryAgingUi.test.mjs  # 15 pass / 0 fail
 | P1 | 补齐 `creator_commission_rate` | 目前只有 1 个 SKU 有值，其余走平台兜底（tiktok 6.06%），妙手真实佣金率大概率不是这个数 |
 | P2 | `semantic.fact_orders_atomic` 全量求值 21 秒 | 影响约 10 个 mart 视图（店铺级清仓看板也受影响）。根因是 `::date` 转换阻止谓词下推 + 底层事实表缺索引。**动共享 semantic 层，必须单独立项** |
 | P3 | 多平台库龄口径分叉 | 商品中心取 `MIN(age_days) GROUP BY product_sku`（跨平台最小），滞销清单取该 SKU 自己那行。今天只有妙手一个平台两者等价；接入第二个平台后两个页面会给出不同的档位与最低售价，且**不会报错** |
+
+## 采集前链路预验证（2026-10-22）
+
+真机采集由业务方操作。本节记录采集**之前**在本地完成的链路预验证，结论是：**代码已具备验收条件**，并给出验收时应看到的预期值。
+
+### 验证方法
+
+两个临时探针（跑完即删，不留在仓库）：
+
+1. **去重键探针**：用真实模板 370 配置 + 真实 `b_class` 行数据，调用真实 `DeduplicationService.calculate_data_hash`，比较两个不同 `metric_date` 下的 hash。
+2. **端到端回滚探针**：在**单个事务**里模拟一次真实采集落库（往 `b_class.fact_miaoshou_inventory_snapshot` 追加一份 `metric_date=2026-10-21` 的快照副本），跑**真实**的 `InventoryAgeRefreshService.refresh(force_full=True)`，读取 `mart.inventory_age_current` 结果，最后 `ROLLBACK`，并用指纹校验数据库回到原状。
+
+探针只读业务语义、全量回滚，验证后数据库行数与指纹逐字节一致（`495|9932a17881ff424d39c44bf3d89e`），无残留。
+
+### 关键发现
+
+**新采集会产生新行，而不是覆盖旧行。** 这是库龄能否推进的决定性一环：
+
+- 模板 370（published v3）的 `deduplication_fields` 是 `["*商品SKU", "*商品名称", "*规格", "仓库"]`，本身不含日期；
+- 但 `append_auto_date_identity_fields()` 会把 `field_parse_rules` 产出的日期身份字段自动并入 hash 身份，而模板的规则是 `metric_date ← __file_date_from__`；
+- 实测最终身份字段为 `['*商品SKU', '*商品名称', '*规格', '仓库', 'platform_code', 'shop_id', 'metric_date']`；
+- 同一行数据在 `metric_date=2026-09-14` 与 `2026-10-21` 下 hash 分别为 `fc6432475a900c02…` / `4a53c4d1df51fb4d…`，**不同** → 走 INSERT 而非 UPSERT。
+
+因此 `b_class` 会按 `(SKU, 仓库, 快照日)` 累积历史行，`mart.inventory_snapshot_company_daily` 每个 `sku_key` 出现两个 `snapshot_date`，库龄才有时间轴可重放。
+
+> 补充说明：`UPSERT_UPDATE_FIELDS["inventory"]` 不含 `metric_date`，因此**同一天重复采集同一文件**会走 UPSERT 覆盖同一行（`ingest_timestamp` 前移、`metric_date` 不变）——这正是「同一文件重跑 `replayed_key_count=0`」的来源，属已澄清的正确行为，不是缺陷。
+
+### 端到端探针结果
+
+| 观测点 | 采集前 | 模拟新采集后 |
+|---|---|---|
+| `b_class` 行数 / 不同 `metric_date` | 1226 / 1 | 2452 / 2 |
+| `mart.inventory_snapshot_company_daily` | 1122 | 2244 |
+| `replayed_key_count` | — | 1122 |
+| `mart.inventory_age_current` | 495 行，`age_days=0`，`bucket=0-30`，`reset_reason=first_positive` | **495 行，`age_days=37`，`bucket=31-60`，`reset_reason=continued`** |
+| `mart.inventory_age_history` | 1122 行（仅 2026-09-14） | 2244 行（2026-09-14 → 0-30；2026-10-21 → 31-60） |
+| 样本 `A-00001-BLACK` | — | 库存 97，锚点仍为 **2026-09-14**，`age_days=37` |
+
+**锚点不随采集日重置**（仍是首次有货日），只有库存数量增加或归零时才会重置——这正是「库龄」应有的语义：货一直压着，库龄就一直涨。
+
+### 业务方真机采集后的预期值
+
+采集日 2026-10-22，配置 30 的 `date_range_type=auto_prev_day` → `date_from = date_to = 2026-10-21` → `metric_date = 2026-10-21`（与 2026-09-15 那次采集得到 `metric_date=2026-09-14` 的规律一致）。
+
+| 指标 | 采集前 | 采集后（预期） |
+|---|---|---|
+| `mart.inventory_age_current.snapshot_date` | 2026-09-14 | **2026-10-21** |
+| `age_days` | 0 | **37** |
+| `bucket` | 0-30 | **31-60** |
+| `reset_reason` | first_positive | **continued** |
+| `mart.inventory_age_history` 行数 | 1122 | **2244** |
+| `mart.inventory_age_current` 行数 | 495 | 495（不增） |
+
+**以下情况仍显示 `0-30` 档，属于正确行为，不是 bug：**
+
+- 库存比上次**增加** → `reset_reason=stock_increase`，`age_days=0`，锚点重置为新快照日（补货归零）；
+- 上次为 0、本次有货 → `reset_reason=reappeared_after_zero`，`age_days=0`；
+- 库存为 0 → 不进 `age_current`（`reset_reason=zero_stock`）。
+
+### 采集前提条件（不满足则采集白跑）
+
+1. **妙手登录态**：`data/sessions/miaoshou/miaoshou_real_001/storage_state.json` 停在 2026-10-20 20:54，2026-10-19/20 的 `orders` 采集卡在图形验证码；本次走 `headed` 模式，可人工介入。
+2. **本地后端要能起来**：`backend/main.py:538` 的 cloud sync 启动检查在云端库 `127.0.0.1:15433` 连不通时会 `raise` 导致整体退出。官方入口是 `scripts/start_collection_formal.ps1`（会自动拉 SSH 隧道）；隧道拉不起来时可用 `scripts/start_local_collection_mode.ps1`（开发模式，不强制隧道可达）。
+3. **配置 30 同时含 `orders` 与 `inventory` 两个域**，`orders` 子域 shopee/tiktok 上次失败于验证码；`inventory` 域历史上成功过（2026-09-14）。
+4. **inventory 域的 granularity 会被强制归一为 `snapshot`**（`modules/apps.collection_center/landing_semantics.py:resolve_business_granularity`），所以配置里的 `granularity=weekly` 不影响落库表名；另有 `POST /api/data-sync/repair-inventory-snapshot-semantics` 兜底。
+5. **Docker 只保留基础设施**：`postgres` / `redis` / `celery_worker` / `celery_beat` 保持 healthy，`backend_api` / `backend_collector` 保持停止。
