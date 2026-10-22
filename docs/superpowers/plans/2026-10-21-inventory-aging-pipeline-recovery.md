@@ -816,6 +816,9 @@ HTTP 层验证时**第一次请求耗了 11 秒**（第二次 15 秒），交互
 | 20 | 滞销清单端点响应时间可接受（交互页面不能 11 秒）| ☑ **已过**（8867ms → 44.9ms，端点整体 ~90ms）|
 | 21 | 视图改造前后数字完全一致 | ☑ **已过**（495 行 × 24 列 CSV 逐格对比，0 差异）|
 | 22 | `backend/tests/data_pipeline` 无新增红测试 | ☑ **已过**（基线 25 failed / 386 passed → 当前 25 failed / 401 passed，**失败名单逐条 diff 0 差异**）|
+| 23 | 代码已合并到主工作区且容器跑的是新代码 | ☑ **已过**（fast-forward 零冲突；重启 worker/beat 后容器内三处代码均为新版）|
+| 24 | 「入库 → 事件 → 入队 → worker 消费 → 库龄重放」**全自动**跑通 | ☑ **已过**（任务 760/761 被 worker 自动消费；污染行被算回；全量重放后 0 差异；数据零膨胀）|
+| 25 | 定价两条线（成本底线 / 折扣护栏）都能命中且跨接口一致 | ☑ **已过**（护栏赢 8/8、成本线赢 8/8、商品中心 vs 滞销清单 16/16 一致）|
 
 ---
 
@@ -838,17 +841,104 @@ HTTP 层验证时**第一次请求耗了 11 秒**（第二次 15 秒），交互
 1. **Shopee / TikTok 库存本次不做** —— 采集映射里只有 `miaoshou.inventory`，另两张 b_class 表永久 0 行
 2. **历史 80280 行不可用** —— 形态不同（英文列名），灌进去在库量会算成 0，需另开任务清理
 3. **分档需要时间** —— 锚点 2026-09-14，60 天档最早 2026-11-13 前后生效，90 天档 12-13 前后，120 天档 2027-01-12 前后
-4. **纪律线本轮不生效** —— `reference_selling_price` 填充率 0.2%，「当前可优惠」目前只通过目标利润率影响底线
+4. **纪律线本轮基本不生效** —— `reference_selling_price` 原先只有 2/1125 个 SKU 有值，「当前可优惠」目前只通过目标利润率影响底线。**2026-10-22 已补 16 个测试值用于验证（见下节），业务方需替换为真实参考售价**
 5. **最低售价会明显下调** —— 分档解锁后示例降 29%，需业务方事先对齐
 6. **采集是否全自动** —— 取决于妙手账号能否免验证码登录（**本轮不采集**）
 7. **滞销清单现在全是「0-30 天 / 低风险 / 首次有货」** —— 只有一帧快照，`age_days` 全 0。分档、风险分层要等第二帧才有意义。当前前端库龄下限默认给 **0**（不是接口默认的 60），否则页面直接白屏。
-8. **「清货回款」整列现在都是「缺参考售价」** —— 495 个 SKU **全部**没有 `reference_selling_price`，回款算不出来。要让这一列有数，得先补参考售价主数据。
+8. **「清货回款」列大部分仍是「缺参考售价」** —— 补测试值后从 495 降到 **479** 个 SKU 仍缺参考售价，回款算不出来。补齐参考售价主数据是这一列有意义的前提。
 
 ---
 
-## 尚未合并到主工作区（需用户决定）
+## 合并到主工作区 + 容器内端到端验收（2026-10-22）
 
-| 提交 | 内容 | 不合并的后果 |
+### 合并
+
+`main` 的 HEAD `e4bd8e3f` 正好是特性分支的 merge-base → **纯 fast-forward，零冲突，不产生 merge commit**：
+
+```powershell
+git merge --ff-only feature/inventory-aging-pipeline-recovery
+```
+
+7 个提交、19 个文件全部落地。**用户自己的未提交改动 `modules/platforms/miaoshou/components/filters.py` 未被触碰**（已用 `git diff --name-only main..branch` 核对，分支不含该文件）。
+
+### 必须重启容器
+
+Docker worker 的 bind mount 指向**主工作区**（`F:\...\xihong_erp\backend -> /app/backend`），但 Python 进程启动时就已加载代码 —— **文件改了不会自动生效**：
+
+```powershell
+docker restart xihong_erp_celery_worker xihong_erp_celery_beat
+```
+
+### 端到端验收（在容器内跑，零假数据）
+
+**刻意避开了「重跑一次入库」**：`b_class.fact_miaoshou_inventory_snapshot` 是实体表，同一文件再入一次会灌重复行（1226 → 2452），等于污染刚清干净的历史数据。改为在容器内用**真实参数**（file_id=2764、真实 domain/granularity/row_count）触发真实事件。
+
+| # | 验证项 | 结果 |
 |---|---|---|
-| `70420fe4` | 库龄刷新从未入队的断链修复（`DATA_INGESTED` 事件改为 await 入队）| **Docker 里的 celery worker 跑的是主工作区代码**，不合并的话以后每次入库都不会自动刷新库龄，`mart.inventory_age_current` 会一直是当前这帧 |
-| `7ec66c9a` / 本次提交 | SKU 级滞销排名（视图 + service + 端点 + 前端页签）| 主工作区跑起来看不到新接口与新页签 |
+| ① | 容器内代码已是新版 | `data_ingestion_service.py:1129` = `await handle_data_ingested_async(event)`；`event_listeners.py:198` 有 `handle_data_ingested_async`；`refresh_queue_tasks.py:200` 有 `sync_inventory_skus` |
+| ② | **事件 → 入队**（旧代码必然丢的那一段） | 队列 724 → **725**，新增 id=760：`trigger_type=data_ingested`、`pipeline_name=data_ingested_refresh`、16 个 target 含 `mart.inventory_age_current/history`、context 带真实 file_id=2764 |
+| ③ | **worker 自动消费** | 任务 760：`started_at=06:14:00` → `finished_at=06:14:01`（**1.878 秒**），`attempt_count=1`，无 error；celery 日志 `process_refresh_queue_task succeeded` |
+| ④ | 刷新管道真的执行 | refresh_runner 日志里 16 个 target 全部 `attempt=1/2` 或 `1/1` |
+| ⑤ | **数据零膨胀** | b_class 1226 / mart_snapshot_history 1226 / dim_erp_sku 1125 / bridge_erp_sku_keys 2240 / age_current 495 —— 全部与合并前一致 |
+| ⑥ | 新端点 HTTP 层 | `GET /api/inventory/clearance-ranking` → 200；6 个非法参数全 422；3 个合法参数全 200；`GET /api/skus` → 200 |
+
+### 库龄重放是「真算」而不是「留着旧数据」——决定性实验
+
+第 ③ 次刷新时 `updated_at` 没变，一度以为重放没跑。查下来是**正确的增量语义**：
+
+```
+水位线 = MAX(last_ingest_timestamp) FROM mart.inventory_age_history   = 2026-10-21 16:15:04
+快照最新 = MAX(last_ingest_timestamp) FROM mart.inventory_snapshot_company_daily = 2026-10-21 16:15:04
+```
+
+同一个文件重跑 → 没有新数据 → `get_changed_keys()` 返回空 → `replayed_key_count=0`。**没有 bug**。
+
+为了正面证明重放能跑，造了一个「有变化」的场景（**测的正是生产上首次入库那条路径**）：
+
+1. 备份 `mart.inventory_age_current` 全量 495 行
+2. **故意污染一行**：`A-000` → `age_days=999, bucket=180+, reset_reason=CORRUPT_PROBE`
+3. `TRUNCATE mart.inventory_age_history` → 水位线变 NULL → 走「取全部 key」的全量重放分支
+4. 再触发一次事件 → 任务 761 **34.6 秒**完成（对比任务 760 的 1.878 秒，差 18 倍，正是「1122 个 key 全量重放」与「无事可做」的量级差）
+5. **污染行被算回**：`A-000` → `age_days=0, bucket=0-30, reset_reason=first_positive`
+   → 证明库龄是**从快照重算出来的**，不是硬编码、不是残留
+6. `age_history` 重建 1122 行、`age_current` 495 行、残留污染 **0** 条、`updated_at` = 本次刷新时刻
+7. 全量内容与刷新前**逐行逐列 0 差异**（同数据幂等）
+
+### 补测试用参考售价（业务方需替换为真实值）
+
+原状：`reference_selling_price` 只有 **2/1125** 个 SKU 有值，「折扣护栏」这条定价线基本算不出来。
+
+补了 **16 个 SKU**（`temp/backfill_reference_price.py`，备份在 `temp/reference_price_backup.json`，`--restore` 可一键还原）：
+
+| 分组 | 参考售价 | 期望结果 |
+|---|---|---|
+| 8 个「护栏赢」 | 采购成本 × 4 | 最低售价由**折扣护栏**决定（`min_selling_price_source = discount_guard`） |
+| 8 个「成本线赢」 | 采购成本 × 1 | 最低售价由**成本底线**决定（`min_selling_price_source = cost_floor`） |
+
+复验结果：
+
+- 护栏赢组 **8/8** 命中 `discount_guard` ✅
+- 成本线赢组 **8/8** 命中 `cost_floor` ✅
+- 商品中心 vs 滞销清单 **16/16 完全一致** ✅
+- `missing_reference_price_count` 495 → **479**
+- 「清货回款」列开始有真实数值 ✅
+
+⚠️ **这些是测试值，不是真实业务数据。** 例：`A-00001-BLACK` 因参考售价被设为 186，最低售价从 ¥128.56 变成 **¥167.40**（护栏生效把底线抬高了）。业务方在商品中心改成真实参考售价即可。
+
+### 合并后回归
+
+```powershell
+python -m pytest backend/tests/data_pipeline/test_sku_clearance_ranking.py \
+  backend/tests/data_pipeline/test_event_listeners.py \
+  backend/tests/test_refresh_queue_tasks.py -q      # 30 passed
+node --test frontend/tests/inventoryAgingUi.test.mjs  # 15 pass / 0 fail
+```
+
+### 后续建议（不在本轮范围）
+
+| 优先级 | 事项 | 说明 |
+|---|---|---|
+| P1 | 补齐真实参考售价主数据 | 决定「当前可优惠 / 折扣护栏」能不能真正生效，是业务录入不是开发 |
+| P1 | 补齐 `creator_commission_rate` | 目前只有 1 个 SKU 有值，其余走平台兜底（tiktok 6.06%），妙手真实佣金率大概率不是这个数 |
+| P2 | `semantic.fact_orders_atomic` 全量求值 21 秒 | 影响约 10 个 mart 视图（店铺级清仓看板也受影响）。根因是 `::date` 转换阻止谓词下推 + 底层事实表缺索引。**动共享 semantic 层，必须单独立项** |
+| P3 | 多平台库龄口径分叉 | 商品中心取 `MIN(age_days) GROUP BY product_sku`（跨平台最小），滞销清单取该 SKU 自己那行。今天只有妙手一个平台两者等价；接入第二个平台后两个页面会给出不同的档位与最低售价，且**不会报错** |
