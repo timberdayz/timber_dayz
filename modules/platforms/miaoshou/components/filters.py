@@ -66,15 +66,38 @@ class MiaoshouFilters(ComponentBase):
             return False
 
     async def _collapsed_summary_already_shows_all_selected(self, page: Any) -> bool:
+        """判断"订单状态"是否已选了多个状态（大概率已全选）。
+
+        妙手 jx-select 多选模式下，选中 ≥ 2 个状态时 selected-item 区域会
+        渲染：第 1 个状态标签（完整文本，如"待发货"）+ 1 个"+ N"折叠提示
+        标签（也是 jx-tag）。这里只看 DOM 结构，不依赖任何文本内容，
+        不会被 label 文本渲染方式、`+ 4` token 是否出现、状态标签是否
+        被截断等因素影响。
+        """
         try:
-            summary = page.get_by_text("订单状态", exact=True).first.locator("xpath=ancestor::*[1]").first
-            summary_text = " ".join(((await summary.text_content()) or "").split())
+            containers = page.locator(".jx-select")
+            count = await containers.count()
+            for i in range(count):
+                try:
+                    container = containers.nth(i)
+                    selected = container.locator(".jx-select__selected-item").first
+                    if await selected.count() == 0:
+                        continue
+                    tags = selected.locator(".jx-tag")
+                    tag_count = await tags.count()
+                    if tag_count < 2:
+                        continue
+                    # 检查是否存在以"+ "开头的折叠提示标签（妙手 jx-select
+                    # 选中 ≥ 2 个时会折叠成"+ N"标签）
+                    for j in range(tag_count):
+                        tag_text = (await tags.nth(j).text_content() or "").strip()
+                        if tag_text.startswith("+ "):
+                            return True
+                except Exception:
+                    continue
+            return False
         except Exception:
             return False
-
-        if self._ALL_STATUS_SUMMARY_TOKEN not in summary_text:
-            return False
-        return any(label in summary_text for label in self._KNOWN_ORDER_STATUS_LABELS)
 
     async def run(self, page: Any, filters: dict[str, Any] | None = None) -> ResultBase:  # type: ignore[override]
         filters = filters or {}
@@ -85,7 +108,18 @@ class MiaoshouFilters(ComponentBase):
             return ResultBase(success=True, message="ok", details={"select_all": select_all, "statuses": statuses, "skipped": True})
 
         trigger = page.get_by_role("combobox", name=re.compile(r"^订单状态\s*[:：]?$", re.IGNORECASE)).first
-        await trigger.click(timeout=1500)
+        # 全选状态下 selected-item 区域堆着 jx-tag,盖住 trigger(input)
+        # 的可点击区。force=True 穿透遮挡点击；万一还失败,重试 1 次。
+        clicked = False
+        for _ in range(2):
+            try:
+                await trigger.click(timeout=1500, force=True)
+                clicked = True
+                break
+            except Exception:
+                continue
+        if not clicked:
+            raise RuntimeError("无法点开订单状态下拉框")
         overlay = await self._wait_ready(page)
 
         if select_all:
