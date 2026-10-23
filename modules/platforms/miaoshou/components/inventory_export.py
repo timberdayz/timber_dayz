@@ -3,6 +3,7 @@
 流程:
   navigation → 仓库全选 → 搜索 → 等待结果 → 导出菜单 → 字段全选 → 触发导出 → page.expect_download → 落盘
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -10,12 +11,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from modules.components.export.base import ExportComponent, ExportMode, ExportResult, build_standard_output_root
+from modules.components.export.base import (
+    ExportComponent,
+    ExportMode,
+    ExportResult,
+    build_standard_output_root,
+)
 from modules.components.base import ExecutionContext
 from modules.components.navigation.base import TargetPage
 from modules.platforms.miaoshou.components.inventory_config import InventorySelectors
 from modules.platforms.miaoshou.components.navigation import MiaoshouNavigation
-from modules.platforms.miaoshou.components.warehouse_filters import MiaoshouWarehouseFilters
+from modules.platforms.miaoshou.components.warehouse_filters import (
+    MiaoshouWarehouseFilters,
+)
 from modules.utils.path_sanitizer import build_filename
 
 
@@ -24,7 +32,9 @@ class MiaoshouInventoryExport(ExportComponent):
     component_type = "export"
     data_domain = "inventory"
 
-    def __init__(self, ctx: ExecutionContext, selectors: InventorySelectors | None = None) -> None:
+    def __init__(
+        self, ctx: ExecutionContext, selectors: InventorySelectors | None = None
+    ) -> None:
         super().__init__(ctx)
         self.sel = selectors or InventorySelectors()
         self.navigation_component = MiaoshouNavigation(ctx, self.sel)
@@ -88,15 +98,23 @@ class MiaoshouInventoryExport(ExportComponent):
         await button.click(timeout=1500)
 
     async def _wait_search_results_ready(self, page: Any) -> None:
-        await page.get_by_text("SKU总数", exact=False).first.wait_for(state="visible", timeout=15000)
-        await page.get_by_text("库存总价值", exact=False).first.wait_for(state="visible", timeout=15000)
-        await page.get_by_role("button", name="导入/导出商品").first.wait_for(state="visible", timeout=15000)
+        await page.get_by_text("SKU总数", exact=False).first.wait_for(
+            state="visible", timeout=15000
+        )
+        await page.get_by_text("库存总价值", exact=False).first.wait_for(
+            state="visible", timeout=15000
+        )
+        await page.get_by_role("button", name="导入/导出商品").first.wait_for(
+            state="visible", timeout=15000
+        )
 
     async def _export_dialog(self, page: Any) -> Any:
         candidates = [
             page.get_by_role("dialog").filter(has_text="选择导出字段").last,
-            page.locator('.jx-overlay[style*="display: block"]').filter(has_text="选择导出字段").last,
-            page.locator('.jx-dialog:visible').filter(has_text="选择导出字段").last,
+            page.locator('.jx-overlay[style*="display: block"]')
+            .filter(has_text="选择导出字段")
+            .last,
+            page.locator(".jx-dialog:visible").filter(has_text="选择导出字段").last,
         ]
         for dialog in candidates:
             try:
@@ -111,7 +129,9 @@ class MiaoshouInventoryExport(ExportComponent):
         try:
             await button.wait_for(state="visible", timeout=3000)
         except Exception:
-            button = await self._first_visible_selector(page, self.sel.open_export_menu, timeout=3000)
+            button = await self._first_visible_selector(
+                page, self.sel.open_export_menu, timeout=3000
+            )
         if button is None:
             raise RuntimeError("导入/导出商品按钮不可见")
         await button.click(timeout=1500)
@@ -120,7 +140,9 @@ class MiaoshouInventoryExport(ExportComponent):
         try:
             await menu_item.wait_for(state="visible", timeout=3000)
         except Exception:
-            menu_item = await self._first_visible_selector(page, self.sel.menu_export_searched, timeout=3000)
+            menu_item = await self._first_visible_selector(
+                page, self.sel.menu_export_searched, timeout=3000
+            )
         if menu_item is None:
             raise RuntimeError("导出搜索的商品菜单项不可见")
         await menu_item.click(timeout=1500)
@@ -132,20 +154,28 @@ class MiaoshouInventoryExport(ExportComponent):
         try:
             await full_select.wait_for(state="visible", timeout=1500)
         except Exception:
-            full_select = container.locator("label:has-text('全选') input[type='checkbox']").first
+            full_select = container.locator(
+                "label:has-text('全选') input[type='checkbox']"
+            ).first
             await full_select.wait_for(state="attached", timeout=1500)
 
         checked = await self._is_checkbox_selected(full_select)
         if not checked:
             try:
-                await container.get_by_text("全选", exact=True).first.click(timeout=1000)
+                await container.get_by_text("全选", exact=True).first.click(
+                    timeout=1000
+                )
             except Exception:
                 await full_select.click(timeout=1000)
 
     async def _ensure_export_fields_all_selected(self, page: Any) -> None:
         dialog = await self._export_dialog(page)
-        await dialog.get_by_text("商品信息", exact=False).first.wait_for(state="visible", timeout=5000)
-        await dialog.get_by_text("其他信息", exact=False).first.wait_for(state="visible", timeout=5000)
+        await dialog.get_by_text("商品信息", exact=False).first.wait_for(
+            state="visible", timeout=5000
+        )
+        await dialog.get_by_text("其他信息", exact=False).first.wait_for(
+            state="visible", timeout=5000
+        )
 
         checkboxes = dialog.get_by_role("checkbox", name="全选")
         count = await checkboxes.count()
@@ -180,7 +210,9 @@ class MiaoshouInventoryExport(ExportComponent):
     async def _wait_export_progress_ready(self, page: Any) -> None:
         for text in self.sel.progress_texts:
             try:
-                await page.get_by_text(text, exact=False).first.wait_for(state="visible", timeout=3000)
+                await page.get_by_text(text, exact=False).first.wait_for(
+                    state="visible", timeout=3000
+                )
                 return
             except Exception:
                 continue
@@ -192,10 +224,14 @@ class MiaoshouInventoryExport(ExportComponent):
         except Exception:
             pass
 
-        out_root = build_standard_output_root(self.ctx, data_type="inventory", granularity="snapshot")
+        out_root = build_standard_output_root(
+            self.ctx, data_type="inventory", granularity="snapshot"
+        )
         out_root.mkdir(parents=True, exist_ok=True)
 
-        raw_name = getattr(download, "suggested_filename", None) or "inventory_snapshot.xlsx"
+        raw_name = (
+            getattr(download, "suggested_filename", None) or "inventory_snapshot.xlsx"
+        )
         tmp_path = out_root / raw_name
         await download.save_as(str(tmp_path))
 
@@ -204,7 +240,12 @@ class MiaoshouInventoryExport(ExportComponent):
 
         account = self.ctx.account or {}
         cfg = self.ctx.config or {}
-        account_label = account.get("label") or account.get("store_name") or account.get("username") or "unknown"
+        account_label = (
+            account.get("label")
+            or account.get("store_name")
+            or account.get("username")
+            or "unknown"
+        )
         shop_name = cfg.get("shop_name") or account.get("store_name") or "unknown_shop"
         target = out_root / build_filename(
             ts=datetime.now().strftime("%Y%m%d_%H%M%S"),
@@ -248,27 +289,30 @@ class MiaoshouInventoryExport(ExportComponent):
         def _on_pageerror(error: Any) -> None:
             if pageerror_event.is_set():
                 return
-            pageerror_payload.append({
-                "error": str(error),
-                "name": getattr(error, "name", None),
-                "stack": getattr(error, "stack", None),
-                "filename": (
-                    getattr(error, "filename", None)
-                    or getattr(error, "fileName", None)
-                ),
-                "lineno": (
-                    getattr(error, "lineno", None)
-                    or getattr(error, "lineNumber", None)
-                ),
-                "colno": (
-                    getattr(error, "colno", None)
-                    or getattr(error, "columnNumber", None)
-                ),
-            })
+            pageerror_payload.append(
+                {
+                    "error": str(error),
+                    "name": getattr(error, "name", None),
+                    "stack": getattr(error, "stack", None),
+                    "filename": (
+                        getattr(error, "filename", None)
+                        or getattr(error, "fileName", None)
+                    ),
+                    "lineno": (
+                        getattr(error, "lineno", None)
+                        or getattr(error, "lineNumber", None)
+                    ),
+                    "colno": (
+                        getattr(error, "colno", None)
+                        or getattr(error, "columnNumber", None)
+                    ),
+                }
+            )
             pageerror_event.set()
 
         page.on("pageerror", _on_pageerror)
         try:
+
             async def _do_download() -> Any:
                 async with page.expect_download(timeout=180000) as dl_info:
                     await self._trigger_export(page)
@@ -316,13 +360,17 @@ class MiaoshouInventoryExport(ExportComponent):
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
-            nav_result = await self.navigation_component.run(page, TargetPage.WAREHOUSE_CHECKLIST)
+            nav_result = await self.navigation_component.run(
+                page, TargetPage.WAREHOUSE_CHECKLIST
+            )
             if not nav_result.success:
                 raise RuntimeError(nav_result.message or "navigation failed")
 
             await self._ensure_popup_closed(page)
 
-            filter_result = await self.warehouse_filters_component.run(page, {"select_all": True})
+            filter_result = await self.warehouse_filters_component.run(
+                page, {"select_all": True}
+            )
             if not filter_result.success:
                 raise RuntimeError(filter_result.message or "warehouse filters failed")
 
@@ -334,6 +382,8 @@ class MiaoshouInventoryExport(ExportComponent):
             download = await self._expect_download_with_pageerror_guard(page)
 
             target = await self._wait_download_complete(page, download)
-            return ExportResult(success=True, message="download complete", file_path=str(target))
+            return ExportResult(
+                success=True, message="download complete", file_path=str(target)
+            )
         except Exception as e:
             return ExportResult(success=False, message=str(e), file_path=None)

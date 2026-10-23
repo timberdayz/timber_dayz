@@ -1,78 +1,107 @@
+"""妙手库存导出组件的行为测试。
+
+对齐上游 spec 2026-09-13 §7「mock page 注入，验证步骤调用序列与 ExportResult 形状」。
+
+做法：用**替身组件/替身方法**替换导出流程里的协作组件与各步骤方法，把调用记进
+共享的 `calls` 列表；断言的是**运行时的调用顺序与结果形状**，不是源码文本。
+
+为什么不用源码字符串断言：源码断言只会因为「代码被重排」而红，却抓不到
+「真实运行时行为变了」——spec §2.8 记录的正是这个失效模式。
+"""
+
+from __future__ import annotations
+
 from pathlib import Path
 
+import pytest
 
-SOURCE_PATH = Path("modules/platforms/miaoshou/components/inventory_export.py")
-
-
-def _source() -> str:
-    return SOURCE_PATH.read_text(encoding="utf-8")
-
-
-def test_inventory_export_navigates_to_warehouse_after_login():
-    source = _source()
-    assert "await self.navigation_component.run(page, TargetPage.WAREHOUSE_CHECKLIST)" in source
-    assert "page.goto(login_url" not in source
+from miaoshou_page_fakes import FakePage
+from modules.components.base import ExecutionContext, ResultBase
+from modules.platforms.miaoshou.components.inventory_export import (
+    MiaoshouInventoryExport,
+)
 
 
-def test_inventory_export_applies_warehouse_scope_filter_before_search():
-    source = _source()
-    filter_index = source.index("await self.warehouse_filters_component.run(page")
-    search_index = source.index("await self._click_search(page)")
-    assert filter_index < search_index
-
-
-def test_inventory_export_opens_export_dialog_and_selects_all_groups_before_export():
-    """dialog → 字段全选 → expect_download 必须在 run() 体内按序出现。
-
-    v4.20.0+ ID=621 修复后：``_trigger_export(page)`` 被提取到
-    ``_expect_download_with_pageerror_guard`` 内（race pageerror 监听），
-    所以严格按 source.index 顺序检查 ``_trigger_export`` 不再适用
-    （它现在在 helper 函数体内，helper 在 run() 之前定义）。
-    改为在 ``run()`` 体内检查 helper 调用顺序，并断言 ``_trigger_export``
-    不在 run() 体内出现（确保它只在 helper 内被调用，pageerror guard 包裹 click）。
-    """
-    source = _source()
-    # 提取 run() 函数体（在 "async def run" 之后到下一个 "async def " 或 "def " 之前）
-    run_start = source.index("async def run(self")
-    next_def = source.find("\n    async def ", run_start + 1)
-    next_def2 = source.find("\n    def ", run_start + 1)
-    next_def = min(
-        pos for pos in (next_def, next_def2, len(source)) if pos > run_start
-    )
-    run_body = source[run_start:next_def]
-    open_dialog = run_body.index("await self._open_export_dialog(page)")
-    ensure_fields = run_body.index("await self._ensure_export_fields_all_selected(page)")
-    helper_call = run_body.index("await self._expect_download_with_pageerror_guard(page)")
-    assert open_dialog < ensure_fields < helper_call, (
-        "run() 体内顺序必须是: open_dialog → ensure_fields → expect_download guard"
-    )
-    # _trigger_export 不应在 run() 体内出现（必须包裹在 helper 内，确保 pageerror guard）
-    assert "await self._trigger_export(page)" not in run_body, (
-        "_trigger_export(page) 不能直接出现在 run() 顶层 — "
-        "必须包裹在 _expect_download_with_pageerror_guard 内以保证 pageerror guard"
+def _ctx() -> ExecutionContext:
+    return ExecutionContext(
+        platform="miaoshou",
+        account={"label": "acc", "store_name": "shop"},
+        logger=None,
+        config={},
     )
 
 
-def test_inventory_export_treats_progress_as_intermediate_and_download_as_final_signal():
-    source = _source()
-    assert "await self._wait_export_progress_ready(page)" in source
-    assert "async with page.expect_download(" in source
-    assert "if not tmp_path.exists() or tmp_path.stat().st_size <= 0" in source
+def _component(calls: list[str]) -> MiaoshouInventoryExport:
+    """把各协作组件与步骤方法替换为替身，记录调用序列。"""
+    component = MiaoshouInventoryExport(_ctx())
+
+    async def _nav(page, target):
+        calls.append("navigation")
+        return ResultBase(success=True, message="ok")
+
+    async def _filters(page, filters):
+        calls.append("warehouse_filters")
+        return ResultBase(success=True, message="ok")
+
+    async def _search(page):
+        calls.append("search")
+
+    async def _results(page):
+        calls.append("search_results")
+
+    async def _open_dialog(page):
+        calls.append("open_export_dialog")
+
+    async def _fields(page):
+        calls.append("ensure_export_fields")
+
+    async def _download(page):
+        calls.append("expect_download")
+        return object()
+
+    async def _save(page, download):
+        calls.append("save_download")
+        return Path("inventory_snapshot.xlsx")
+
+    component.navigation_component.run = _nav
+    component.warehouse_filters_component.run = _filters
+    component._click_search = _search
+    component._wait_search_results_ready = _results
+    component._open_export_dialog = _open_dialog
+    component._ensure_export_fields_all_selected = _fields
+    component._expect_download_with_pageerror_guard = _download
+    component._wait_download_complete = _save
+    return component
 
 
-def test_inventory_export_uses_role_based_trigger_and_menuitem_for_export_dropdown():
-    source = _source()
-    assert 'page.get_by_role("button", name="导入/导出商品").first' in source
-    assert 'page.get_by_role("menuitem", name="导出搜索的商品").first' in source
+@pytest.mark.asyncio
+async def test_inventory_export_calls_stages_in_expected_order() -> None:
+    calls: list[str] = []
+    component = _component(calls)
+
+    result = await component.run(FakePage())
+
+    assert result.success is True
+    assert (result.file_path or "").endswith("inventory_snapshot.xlsx")
+    assert calls == [
+        "navigation",
+        "warehouse_filters",
+        "search",
+        "search_results",
+        "open_export_dialog",
+        "ensure_export_fields",
+        "expect_download",
+        "save_download",
+    ]
 
 
-def test_inventory_export_uses_unified_popup_close_not_keyboard_escape():
-    source = _source()
-    assert "_ensure_popup_closed" in source
-    assert 'page.keyboard.press("Escape")' not in source
+@pytest.mark.asyncio
+async def test_inventory_export_does_not_use_keyboard_escape_to_close_popups() -> None:
+    """关弹窗必须走统一的弹窗清理，不能用键盘 Escape 糊弄。"""
+    calls: list[str] = []
+    component = _component(calls)
+    page = FakePage()
 
+    await component.run(page)
 
-def test_inventory_export_uses_build_standard_output_root_and_build_filename():
-    source = _source()
-    assert "build_standard_output_root(self.ctx, data_type=\"inventory\", granularity=\"snapshot\")" in source
-    assert "build_filename(" in source
+    assert "Escape" not in page.keyboard.pressed

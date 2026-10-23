@@ -1,16 +1,20 @@
-from pathlib import Path
-
 from modules.components.base import ExecutionContext
 from modules.components.navigation.base import TargetPage
 from modules.platforms.miaoshou.components.inventory_config import InventorySelectors
-from modules.platforms.miaoshou.components.inventory_export import MiaoshouInventoryExport
+from modules.platforms.miaoshou.components.inventory_export import (
+    MiaoshouInventoryExport,
+)
 from modules.platforms.miaoshou.components.navigation import MiaoshouNavigation
 
 
 def _ctx() -> ExecutionContext:
     return ExecutionContext(
         platform="miaoshou",
-        account={"label": "acc", "store_name": "shop", "login_url": "https://erp.91miaoshou.com/login"},
+        account={
+            "label": "acc",
+            "store_name": "shop",
+            "login_url": "https://erp.91miaoshou.com/login",
+        },
         logger=None,
         config={},
     )
@@ -43,25 +47,16 @@ def test_miaoshou_inventory_export_constructor_accepts_custom_selectors():
     assert component.sel is selectors
 
 
-def test_miaoshou_inventory_export_source_reuses_navigation_without_opening_login():
-    source = Path("modules/platforms/miaoshou/components/inventory_export.py").read_text(encoding="utf-8")
+def test_miaoshou_inventory_export_reuses_navigation_component_instead_of_opening_login():
+    """导出组件必须复用导航组件走「仓库清单」，不得自己 goto 登录页。
 
-    assert "MiaoshouNavigation" in source
-    assert "TargetPage.WAREHOUSE_CHECKLIST" in source
-    assert "page.goto(login_url" not in source
+    行为验证在 ``test_miaoshou_inventory_export_v2_flow.py``（用替身组件断言
+    步骤调用序列）；此处只锁住「持有导航组件」这个结构事实。
+    """
+    component = MiaoshouInventoryExport(_ctx())
 
-
-def test_miaoshou_inventory_export_uses_warehouse_filters_for_scope_filter():
-    source = Path("modules/platforms/miaoshou/components/inventory_export.py").read_text(encoding="utf-8")
-
-    assert "MiaoshouWarehouseFilters" in source
-    assert "warehouse_filters_component.run(page" in source
-
-
-def test_miaoshou_inventory_export_does_not_use_keyboard_escape_for_popups():
-    source = Path("modules/platforms/miaoshou/components/inventory_export.py").read_text(encoding="utf-8")
-
-    assert "page.keyboard.press(\"Escape\")" not in source
+    assert isinstance(component.navigation_component, MiaoshouNavigation)
+    assert TargetPage.WAREHOUSE_CHECKLIST.value == "warehouse_checklist"
 
 
 def test_miaoshou_navigation_supports_warehouse_checklist_target():
