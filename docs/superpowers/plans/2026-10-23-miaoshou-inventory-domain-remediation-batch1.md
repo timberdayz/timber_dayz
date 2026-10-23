@@ -10,6 +10,31 @@
 
 ---
 
+## 0.1 计划评审修订记录（2026-10-23，第 1 轮独立评审）
+
+本计划经 1 轮独立评审（verifier，只读核验 + 实跑复现），结论 `ISSUES_FOUND (Blocker=2, Major=7, Minor=9)`，
+已全部处理：
+
+| 级别 | 问题 | 处理 |
+|---|---|---|
+| **BLOCKER** | Task 6 改的是 `create_adapter`（`:2792`），而**生产走 `_run_runtime_manifest_component`**（`:2785`）——A7/A8 生产不可达成 | Task 6 重写：主注入点改为 `_run_runtime_manifest_component`，并列出 7 个调用点、只给 3 个导出路径传参 |
+| **BLOCKER** | Task 2 的 `--apply` 在 **detached ORM 实例**上改字段再 commit → 静默 no-op，库没变却报「已处理」 | `_apply` 改为按主键 `session.get` 重新取出再改（评审已用 SQLite 复现该坑） |
+| MAJOR | 假对象无法复现形态 A：遮挡挂在永远不会被点的 locator 上 | 遮挡改挂到**真正会被点的触发器**；并让假对象区分 `force=True` 穿透与普通点击被拦截（对齐 Playwright 语义） |
+| MAJOR | 「5 个用例全红」的预期不成立 | 改为「4 红 + 1 绿」，并说明 t4 是防回归护栏 |
+| MAJOR | 层 C 用裸 `page.locator(".jx-select")` 全页扫描 → 别的 select 折叠态会**误判已全选**，导致导出数据范围错误 | 层 C 改为复用层 A 的 label→容器收敛，只检查「仓库」那一个 select；并补 t4 护栏用例 |
+| MAJOR | 组件侧保留 `_ensure_popup_closed` 与 spec §5.2 L1-2f 冲突 | 阶段事件改为如实记录，注明生产清理由执行器与导航阶段承担，重复轮子留 L4-2 收回 |
+| MAJOR | 6 个阶段只落实 2 个失败前缀 | 6 个阶段全部补齐前缀对照表 |
+| MAJOR | 新 `run()` 62 行 > `TESTING_AND_QUALITY.md:211` 的 50 行上限 | 拆成 5 个 ≤50 行的私有方法 + `_current_stage` 标记 |
+| MAJOR | CI 的 black/ruff 门禁对**每个改动文件**生效，而 6 个待改文件当前不合规 | 新增 **Task 0 Step 5**：先做一次纯格式化 + ruff 修复的独立 style 提交 |
+| MINOR | 文档格式与既有条目冲突 / `erp-mb-xs` 类不存在 / `npm run build` 缺 `cd frontend` / 未使用 import / 假对象重复实现 / 层 C 缺 `tag_count < 2` 守卫 | 逐条修正（见各 Task） |
+
+> 评审同时**确认通过**的部分（实施者不要改）：spec 与文档的行号引用逐条精确、
+> `create_adapter` 确实支持 `logger`/`step_callback` 透传、`RetryStrategy` 无循环 import、
+> DB 孤儿恰好 1 条、A10 基线 60 passed、`<el-collapse>` 无 `v-model` 在 element-plus 2.11.5
+> 下仍可展开。
+
+---
+
 ## 0. 适用范围
 
 ### 0.1 设计来源
@@ -88,6 +113,71 @@ Expected: `60 passed`（订单域 4 个红已在 `162f8bb0` 修好）。若不�
 ```powershell
 git switch -c feature/miaoshou-inventory-batch1
 ```
+
+- [ ] **Step 5: 先把本批次要动的文件过一遍 CI 的 black / ruff 门禁（独立 style 提交）**
+
+CI（`ci.yml:125-134`）对**每个改动的 Python 文件**执行 `black --quiet <file>` 后
+`git diff --exit-code`，不一致即红；`:139-145` 再跑 `ruff check`。
+`scripts/ci_changed_python_files.py:21` 的 `ALLOWED_PREFIXES` 含 `backend/` 与 `modules/`，
+**没有豁免**——只要动了这些文件，整文件就必须已经是 black 形态。
+
+实测（black 25.1.0 = CI 固定版本；ruff 用仓库 `pyproject.toml` 配置）本批次要动的文件中：
+
+| 文件 | 当前状态 |
+|---|---|
+| `modules/apps/collection_center/executor_v2.py` | black **would reformat**（diff 约 2400 行）；ruff **5 处违规**：`F821` @1233、`F841` @2047 / 2815 / 3002 / 5160 |
+| `modules/platforms/miaoshou/components/warehouse_filters.py` | black would reformat |
+| `modules/platforms/miaoshou/components/inventory_export.py` | black would reformat |
+| `modules/platforms/miaoshou/components/inventory_config.py` | black would reformat |
+| `backend/tests/test_miaoshou_warehouse_filters_contract.py` | black would reformat |
+| `backend/tests/test_miaoshou_inventory_export_v2_flow.py` | black would reformat |
+| `backend/services/active_collection_components.py` | ✅ 已合规 |
+| `backend/tests/test_miaoshou_inventory_export_contract.py` | ✅ 已合规 |
+
+因此先做**一次纯格式化提交**（无功能变更），再改功能：
+
+```powershell
+cd F:\Vscode\python_programme\AI_code\xihong_erp
+python -m black --line-length 88 `
+  modules/apps/collection_center/executor_v2.py `
+  modules/platforms/miaoshou/components/warehouse_filters.py `
+  modules/platforms/miaoshou/components/inventory_export.py `
+  modules/platforms/miaoshou/components/inventory_config.py `
+  backend/tests/test_miaoshou_warehouse_filters_contract.py `
+  backend/tests/test_miaoshou_inventory_export_v2_flow.py
+python -m ruff check --fix --unsafe-fixes modules/apps/collection_center/executor_v2.py
+python -m ruff check modules/apps/collection_center/executor_v2.py
+```
+
+Expected: ruff 剩 0 报错。`F821 GateResult` 是 postponed 注解（运行时无影响），`F841` 是未使用
+变量；**逐个确认修复不改变行为**（尤其 `:3002` 的 `last_error`，改名前先确认它确实没被读）。
+
+```powershell
+python -m pytest backend/tests/test_miaoshou_filters_component.py `
+  backend/tests/test_miaoshou_inventory_export_contract.py `
+  backend/tests/test_miaoshou_inventory_export_v2_flow.py `
+  backend/tests/test_miaoshou_inventory_pageerror_recovery.py `
+  backend/tests/test_miaoshou_purchase_export_contract.py `
+  backend/tests/test_miaoshou_purchase_export_v2_flow.py `
+  backend/tests/test_miaoshou_supporting_components_contract.py `
+  backend/tests/test_miaoshou_warehouse_filters_contract.py -q -p no:cacheprovider --no-header
+```
+
+Expected: 全绿（格式化不改变行为）。
+
+```powershell
+git add -- modules/apps/collection_center/executor_v2.py `
+           modules/platforms/miaoshou/components/warehouse_filters.py `
+           modules/platforms/miaoshou/components/inventory_export.py `
+           modules/platforms/miaoshou/components/inventory_config.py `
+           backend/tests/test_miaoshou_warehouse_filters_contract.py `
+           backend/tests/test_miaoshou_inventory_export_v2_flow.py
+git commit -m "style(采集): 本批次要改的文件过 CI 的 black 与 ruff 门禁"
+```
+
+> 这个提交是**纯机械变更**，diff 大但与业务无关——这是 CI 的硬要求，不是顺手清理。
+> `PRE_LAUNCH_RULES.md` 禁止的是「与上线无关的大范围重构」；格式化属于「要动这个文件
+> 就必须付的过门禁成本」。单独成 commit 后，评审时可以直接跳过这一段。
 
 ---
 
@@ -458,10 +548,19 @@ async def _collect_rows() -> List[Any]:
 
 
 async def _apply(rows: List[Any]) -> int:
+    """按主键重新查出来再改。
+
+    ⚠️ 不能直接改 `_collect_rows()` 返回的实例：那个 session 已关闭，
+    ORM 实例是 detached 的，对 detached 实例改字段再 `commit()` **不产生 UPDATE**——
+    脚本会打印「已处理 N 条」而库里没变（静默 no-op）。
+    """
     async with AsyncSessionLocal() as session:
         changed = 0
         for row in rows:
-            row.is_stable = False
+            target = await session.get(ComponentVersion, row.id)
+            if target is None:
+                continue
+            target.is_stable = False
             changed += 1
         await session.commit()
         return changed
@@ -561,19 +660,23 @@ Get-Content docs/guides/CANONICAL_RUNTIME_ISSUES.md -Encoding UTF8 -TotalCount 6
 
 - [ ] **Step 2: 在 `CANONICAL_RUNTIME_ISSUES.md` 新增条目**
 
-条目内容必须包含：
+**格式必须照既有条目**（该文档 `:85-108` 的写法）：`### \`组件名\`` 小节 + 以
+`- \`P0\` / \`P1\` 标题` 起头的条目 + 缩进的说明行。**不要用表格**。
 
-| 字段 | 值 |
+新增一个 `### \`miaoshou/inventory_export\`` 小节，内容必须覆盖这些要点（写成条目，不要写成表格）：
+
+| 要点 | 内容 |
 |---|---|
-| 组件 | `miaoshou/inventory_export` |
+| 优先级 | 建议 `P0`（线上任务失败） |
 | 现象 | 2026-10-23 11:56:35 任务失败，耗时 44s（含 23s 等验证码） |
-| 直接根因 | `warehouse_filters.py:95` `trigger.click(timeout=1500)` 被 `jx-select__selected-item jx-select__placeholder is-transparent` 拦截命中测试 |
+| 直接根因 | `warehouse_filters.py` 点击仓库范围下拉框时，`jx-select__selected-item jx-select__placeholder is-transparent` 拦截命中测试 → `Locator.click: Timeout 1500ms exceeded` |
 | 性质 | **flaky**（历史成功过：2026-09-14，见 `2026-10-21-inventory-aging-pipeline-recovery.md:1008`） |
 | 证据 | `logs/backend-local.out.log:364-389`；`core.collection_tasks` id=637；`core.collection_task_logs` id=3984 |
 | 域隔离 | 同期 task 636（orders）completed，域之间互不影响 |
 | 整改 | 见 spec `2026-10-23-miaoshou-inventory-domain-remediation-design.md` §5.2 L1-1 |
 
-同时补一条**订单域同类问题**的记录：订单状态 `filters.py` 的 `force=True` 修复曾以未提交改动存在并打挂 4 个既有单元测试，2026-10-23 已随 `162f8bb0` 修好入库。
+同时补一条**订单域同类问题**的记录：订单状态 `filters.py` 的 `force=True` 修复曾以未提交改动
+存在并打挂 4 个既有单元测试，2026-10-23 已随 `162f8bb0` 修好入库。
 
 - [ ] **Step 3: 更新 `CANONICAL_COMPONENT_STATUS.md`**
 
@@ -612,18 +715,20 @@ git commit -m "docs(采集): 登记妙手库存域 2026-10-23 失败与 flaky �
 
 **Files:**
 - Create: `backend/tests/miaoshou_page_fakes.py`（共享假对象）
+- Modify: `backend/tests/test_miaoshou_filters_component.py`（删掉本地 jx-select 假模型副本，改为 import 共享模块）
 - Modify: `backend/tests/test_miaoshou_warehouse_filters_contract.py`（从 22 行 contract 测试扩为行为测试）
 
 - [ ] **Step 0: 起点自检（已完成，2026-10-23）**
 
-本计划的「假对象模型 + 四层防护实现」配对已做过端到端自检（四条路径全部跑通）：
+本计划的「假对象模型 + 四层防护 + 层 C」配对已做过端到端自检，**5 条路径全部跑通**：
 
 | 用例 | 结果 |
 |---|---|
-| 形态 A（触发器被拦截） | 层 A 点容器成功，`container.clicked == 1` |
-| 层 A 不可用 | 层 B 生效，`click_calls == [(3000, True)]`（force=True 传到位） |
-| 形态 B（已全选 `["仓库A", "+ 4"]`） | 层 C 命中，`details.skipped is True` |
-| A/B/C 全失败 | 层 D 触发 `keyboard.pressed == ["Enter"]`，消息含 `warehouse_scope_open_failed` |
+| t1 层 A 治本 | 容器被点开（`container.clicked == 1`），触发器无需点击 |
+| t2 层 B 穿透 | `click_calls == [(3000, True)]` —— force=True 已传到点击上且穿透成功 |
+| t3 形态 B（已全选 `["仓库A", "+ 4"]`） | 层 C 命中，`details.skipped is True` |
+| t4 层 C 不误判 | 别的 select 处于 `"+ 9"` 折叠态时，仓库筛选**仍被正常执行** |
+| t5 层 D 兜底 | `keyboard.pressed == ["Enter"]`，消息含 `warehouse_scope_open_failed` |
 
 自检脚本未入库（临时文件，跑完即弃）。实现时若行为与上表不符，说明假对象或实现有偏差，**先查清再改**。
 
@@ -652,6 +757,17 @@ git commit -m "docs(采集): 登记妙手库存域 2026-10-23 失败与 flaky �
 `<input role="combobox">`，而 `.jx-select` 容器是它的**祖先**；假对象里容器配成
 被选中元素的**子节点**，调用形状一致、方向相反。实现者不要据此推断真实 DOM 结构，
 真实结构以批次 2 的 pwcli 取证为准。
+
+**不要造第二份 jx-select 假模型（评审纠正）**：`backend/tests/test_miaoshou_filters_component.py:101-165`
+已经有一套 jx-select 假模型（`_FakeTag` / `_FakeTagList` / `_FakeSelectedItem` /
+`_FakeJxSelect` / `_FakeJxSelectList`，随 `162f8bb0` 入库）。`PRE_LAUNCH_RULES.md:23`
+明确禁止「新增重复实现」。因此：
+
+- 本模块提供 `FakeTag` / `FakeTagList` / `FakeSelectedItem` / `FakeJxSelect` / `FakeJxSelectList`，
+  **并让 `test_miaoshou_filters_component.py` 改为从本模块 import，删掉它自己的 `_Fake*` 副本**；
+- 本任务的行为测试用例直接复用这套模型，不要另写一套。
+
+改动 `test_miaoshou_filters_component.py` 后必须重跑 A10 全量（它包含在 A10 集合里）。
 """
 from __future__ import annotations
 
@@ -762,7 +878,10 @@ class FakeLocator:
         if self.fail_clicks > 0:
             self.fail_clicks -= 1
             raise TimeoutError("locator.click: Timeout 1500ms exceeded")
-        if self.intercept_clicks:
+        if self.intercept_clicks and not force:
+            # 真实 Playwright 语义：命中测试被覆盖层拦截时普通 click 会超时，
+            # 而 force=True 会跳过 actionability 检查从而**穿透遮挡**。
+            # 这个区分是层 B 的行为测试能成立的前提。
             raise TimeoutError(
                 "locator.click: Timeout 1500ms exceeded\nCall log:\n"
                 '  - <div class="jx-select__selected-item jx-select__placeholder is-transparent">'
@@ -846,17 +965,30 @@ def _overlay(*, checked: bool = False) -> FakeLocator:
 def _page(
     *,
     trigger_intercepted: bool = False,
+    trigger_always_fails: bool = False,
+    label_available: bool = True,
     container_available: bool = True,
     overlay: FakeLocator | None = None,
     selected_tags: list[str] | None = None,
 ) -> FakePage:
-    trigger = FakeLocator(intercept_clicks=trigger_intercepted)
-    container = FakeLocator()
-    label_input = FakeLocator(
-        children={CONTAINER_XPATH: container} if container_available else {}
-    )
+    """构造妙手仓库清单页的假 page。
 
-    jx_select = FakeLocator(
+    ⚠️ **遮挡必须挂在 label_input 上**（评审纠正）：`_warehouse_scope_trigger` 的
+    **第一个**候选是 `page.get_by_label(re.compile("仓库"))`，假对象里它恒可见 →
+    直接返回。**真实页面上被遮挡的正是这个 input**（`.jx-select__input` 被
+    `.jx-select__selected-item` 盖住），所以形态 A 的拦截要挂在这里。
+
+    `trigger_intercepted`：普通 click 被覆盖层拦截，但 `force=True` 能穿透
+    （对应真实 Playwright 的 actionability 检查语义）。
+    `trigger_always_fails`：任何点击都失败（连 force 也失败）——用于逼出层 D。
+    """
+    label_input = FakeLocator(
+        visible=label_available,
+        count=1 if label_available else 0,
+        intercept_clicks=trigger_intercepted,
+        fail_clicks=99 if trigger_always_fails else 0,
+    )
+    container = FakeLocator(
         children={
             ".jx-select__selected-item": FakeLocator(
                 children={".jx-tag": FakeTagList(selected_tags or [])},
@@ -864,12 +996,18 @@ def _page(
             )
         }
     )
+    if container_available:
+        label_input.children = {CONTAINER_XPATH: container}
+
+    combobox_trigger = FakeLocator(
+        intercept_clicks=trigger_intercepted,
+        fail_clicks=99 if trigger_always_fails else 0,
+    )
 
     return FakePage(
         locators={
             "label:仓库": label_input,
-            "role:combobox:None": trigger,
-            ".jx-select": jx_select,
+            "role:combobox:None": combobox_trigger,
             "role:tooltip:None": overlay if overlay is not None else FakeLocator(count=0),
         }
     )
@@ -883,10 +1021,10 @@ def _container_of(page: FakePage) -> FakeLocator:
 
 ```python
 @pytest.mark.asyncio
-async def test_warehouse_filters_opens_dropdown_when_placeholder_intercepts_trigger_click() -> None:
-    """形态 A：空态 placeholder 遮挡触发器点击时，靠层 A（点容器外壳）仍能打开下拉。
+async def test_warehouse_filters_opens_dropdown_by_clicking_container_when_trigger_is_covered() -> None:
+    """层 A 治本：触发器被 placeholder 遮挡时，改点 .jx-select 容器外壳即可打开下拉。
 
-    这是线上 task 637 的复现用例。
+    这是线上 task 637 的复现用例——原实现点的是被遮挡的 input。
     """
     component = MiaoshouWarehouseFilters(_ctx())
     overlay = _overlay(checked=True)
@@ -895,22 +1033,25 @@ async def test_warehouse_filters_opens_dropdown_when_placeholder_intercepts_trig
     result = await component.run(page, {"select_all": True})
 
     assert result.success is True
+    # 层 A 生效：容器被点开
     assert _container_of(page).clicked == 1
+    # 组件不再依赖点那个被遮挡的触发器
+    assert page.locators["label:仓库"].click_calls == []
     assert overlay.get_by_role("checkbox", name="全选").clicked == 0
 
 
 @pytest.mark.asyncio
-async def test_warehouse_filters_falls_back_to_force_click_when_container_unavailable() -> None:
-    """层 A 不可用时，层 B 用 force=True 穿透遮挡。"""
+async def test_warehouse_filters_penetrates_cover_with_force_click_when_container_unavailable() -> None:
+    """层 B：容器定位不到时，用 force=True 穿透遮挡点触发器。"""
     component = MiaoshouWarehouseFilters(_ctx())
     overlay = _overlay(checked=True)
-    page = _page(trigger_intercepted=False, container_available=False, overlay=overlay)
+    page = _page(trigger_intercepted=True, container_available=False, overlay=overlay)
 
     result = await component.run(page, {"select_all": True})
 
     assert result.success is True
     trigger = page.locators["label:仓库"]
-    assert trigger.click_calls  # 层 B 至少点过一次触发器
+    assert trigger.click_calls == [(3000, True)]  # force=True 已传入，且穿透成功
 
 
 @pytest.mark.asyncio
@@ -926,11 +1067,34 @@ async def test_warehouse_filters_skips_dropdown_when_scope_already_all_selected(
 
 
 @pytest.mark.asyncio
+async def test_warehouse_filters_does_not_mistake_other_select_for_all_selected() -> None:
+    """层 C 不得误判：页面上**别的** jx-select 处于 "+ N" 折叠态时，
+    不能因此跳过仓库范围筛选（否则导出数据范围错误）。"""
+    component = MiaoshouWarehouseFilters(_ctx())
+    page = _page(overlay=_overlay(checked=True))
+    # 页面级存在另一个处于 "+ N" 折叠态的 jx-select（店铺 / 分类等）
+    page.locators[".jx-select"] = FakeLocator(
+        children={
+            ".jx-select__selected-item": FakeLocator(
+                children={".jx-tag": FakeTagList(["店铺A", "+ 9"])},
+                count=1,
+            )
+        }
+    )
+
+    result = await component.run(page, {"select_all": True})
+
+    assert result.success is True
+    assert result.details.get("skipped") is not True
+
+
+@pytest.mark.asyncio
 async def test_warehouse_filters_tries_keyboard_fallback_then_reports_stage_name() -> None:
     """A/B/C 全失败后触发层 D 键盘兜底，并给出带阶段名的失败信息。"""
     component = MiaoshouWarehouseFilters(_ctx())
     page = _page(
-        trigger_intercepted=True,
+        trigger_always_fails=True,
+        label_available=False,
         container_available=False,
         overlay=FakeLocator(count=0),
     )
@@ -951,14 +1115,30 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 python -m pytest backend/tests/test_miaoshou_warehouse_filters_contract.py -q -p no:cacheprovider --no-header
 ```
 
-Expected: **FAILED**（新增的 5 个行为用例应全部失败或因实现缺失而报错——层 A/B/C/D 与阶段名都还没实现；原有的 2 个 contract 断言应仍然通过）。
+Expected: **5 个行为用例中 4 个 FAILED**（t4 例外，见下），原有的 2 个 contract 断言仍然通过。逐条预期：
+
+| 用例 | 当前实现下的结果 | 原因 |
+|---|---|---|
+| t1 层 A 治本 | ❌ FAIL | 现行实现点的是被遮挡的触发器 → 组件返回 `success=False` |
+| t2 层 B 穿透 | ❌ FAIL | 现行点击是 `click(timeout=1500)`，**没有 `force=True`** → 遮挡拦截生效 → `success=False` |
+| t3 形态 B | ❌ FAIL | 现行实现没有「已全选」前置检测 → 去开下拉 → 找不到浮层 → `success=False` |
+| t4 层 C 不误判 | ✅ **PASS** | 现行实现**根本不跳过**，所以天然满足。它的价值是**防回归**：防止将来把层 C 写成裸 `.jx-select` 全页扫描 |
+| t5 层 D 兜底 | ❌ FAIL | 现行实现没有键盘兜底也没有阶段名 → 无 `Enter` 事件、消息不含 `warehouse_scope_open_failed` |
+
+> t4 在红灯阶段就是绿的，这是**有意的**：它是一道「数据正确性护栏」，
+> 锁住「别的 select 折叠态不得让仓库筛选被跳过」——写错层 C 会导致导出数据范围错误。
 
 - [ ] **Step 4: 提交（测试先行，红灯提交）**
 
 ```powershell
-git add -- backend/tests/miaoshou_page_fakes.py backend/tests/test_miaoshou_warehouse_filters_contract.py
+git add -- backend/tests/miaoshou_page_fakes.py `
+           backend/tests/test_miaoshou_filters_component.py `
+           backend/tests/test_miaoshou_warehouse_filters_contract.py
 git commit -m "test(妙手采集): 补库存域仓库筛选四层防护的行为测试"
 ```
+
+> 改了 `test_miaoshou_filters_component.py`（抽走重复的 jx-select 假模型）→ **必须重跑 A10 全量**，
+> 它在 A10 集合里。
 
 ---
 
@@ -968,7 +1148,15 @@ git commit -m "test(妙手采集): 补库存域仓库筛选四层防护的行为
 - Modify: `modules/platforms/miaoshou/components/inventory_config.py`
 - Modify: `modules/platforms/miaoshou/components/warehouse_filters.py`
 
-**明确不做**：不复用订单域 `filters.py` 的 `except Exception: continue` 吞异常写法（spec §2.3）；不复用其文本匹配式「已全选」判定。
+**明确不做**：
+
+- 不复用订单域 `filters.py` 的 `except Exception: continue` 吞异常写法（spec §2.3）。
+- **不复用订单域的「已全选」判定**：`162f8bb0` 之后订单域 `filters.py:68-100` 已经改成
+  DOM 结构判定（`.jx-select__selected-item` → `.jx-tag` → `"+ "` 前缀），与本任务的层 C
+  思路同构，但**它扫的是页面级 `.jx-select` 容器**（`:78` `page.locator(".jx-select")`）。
+  本任务的层 C **不照抄这一点**——见下面 Step 2 的说明：必须收敛到「仓库」那一个 select，
+  否则会误判别的 select 而跳过仓库筛选，导致**导出数据范围错误**。
+- 订单域那个文件本身**不动**（`filters.py` 已随 `162f8bb0` 入库，A10 基线依赖它）。
 
 - [ ] **Step 1: 在 `inventory_config.py` 增加防护参数**
 
@@ -1038,29 +1226,34 @@ from modules.platforms.miaoshou.components.inventory_config import InventorySele
     async def _scope_already_all_selected(self, page: Any) -> bool:
         """层 C：已全选前置检测（尽力而为，**不得作为唯一防线**）。
 
+        ⚠️ **不使用裸 `.jx-select` 全页扫描**（评审纠正）：仓库清单页可能有多个
+        jx-select（店铺 / 分类等），任一 select 处于 "+ N" 折叠态就会误判
+        「仓库已全选」→ 直接跳过开下拉 → **导出数据范围错误**。
+        必须复用层 A 的 label→容器收敛路径，**只检查「仓库」这一个 select**。
+
         仓库筛选是「全选仓库」单复选框；已全选时折叠区会渲染 "+ N" 折叠标签。
         ⚠️ 该 DOM 形态未经真实页面取证，可能恒为 False；因此只有命中才跳过，
         未命中一律继续走 A → B → D。
         """
+        container = await self._warehouse_scope_container(page)
+        if container is None:
+            return False
+
         try:
-            containers = page.locator(".jx-select")
-            total = await containers.count()
-            for index in range(total):
-                try:
-                    selected = containers.nth(index).locator(".jx-select__selected-item").first
-                    if await selected.count() == 0:
-                        continue
-                    tags = selected.locator(".jx-tag")
-                    tag_total = await tags.count()
-                    for tag_index in range(tag_total):
-                        text = (await tags.nth(tag_index).text_content() or "").strip()
-                        if text.startswith("+ "):
-                            return True
-                except Exception as e:
-                    self._log(f"[warehouse_filters] 层C 候选 {index} 判定失败: {e}")
-                    continue
+            selected = container.locator(".jx-select__selected-item").first
+            if await selected.count() == 0:
+                return False
+            tags = selected.locator(".jx-tag")
+            tag_count = await tags.count()
+            if tag_count < 2:
+                # 只有一个标签 = 只选了一项 ≠ 全选（与订单域 filters.py 的守卫一致）
+                return False
+            for tag_index in range(tag_count):
+                text = (await tags.nth(tag_index).text_content() or "").strip()
+                if text.startswith("+ "):
+                    return True
         except Exception as e:
-            self._log(f"[warehouse_filters] 层C 整体失败: {e}")
+            self._log(f"[warehouse_filters] 层C 判定失败: {e}")
         return False
 
     async def _force_click(self, trigger: Any) -> None:
@@ -1212,10 +1405,25 @@ Expected: 全绿（用例数 ≥ 60 + 新增）。
 
 - [ ] **Step 6: 代码规范自检**
 
+本批次要改的这些文件在 **Task 0 Step 5** 已经 black 化过；本步只需确认新增代码没有破坏合规状态：
+
 ```powershell
-python -m ruff check modules/platforms/miaoshou/components/warehouse_filters.py modules/platforms/miaoshou/components/inventory_config.py backend/tests/miaoshou_page_fakes.py
-python -m black --check --line-length 88 modules/platforms/miaoshou/components/warehouse_filters.py modules/platforms/miaoshou/components/inventory_config.py backend/tests/miaoshou_page_fakes.py
+python -m black --check --line-length 88 `
+  modules/platforms/miaoshou/components/warehouse_filters.py `
+  modules/platforms/miaoshou/components/inventory_config.py `
+  modules/platforms/miaoshou/components/inventory_export.py `
+  backend/tests/miaoshou_page_fakes.py `
+  backend/tests/test_miaoshou_warehouse_filters_contract.py
+python -m ruff check `
+  modules/platforms/miaoshou/components/warehouse_filters.py `
+  modules/platforms/miaoshou/components/inventory_config.py `
+  modules/platforms/miaoshou/components/inventory_export.py `
+  backend/tests/miaoshou_page_fakes.py `
+  backend/tests/test_miaoshou_warehouse_filters_contract.py
 ```
+
+Expected: 两者都无输出（通过）。若 black 报错，说明新增代码不符合格式 → **跑 black 就地修正**
+再提交（不要手改格式）。
 
 Expected: 两者都无输出（通过）。CI 会对改动的 Python 文件跑 black + ruff。
 
@@ -1230,12 +1438,41 @@ git commit -m "fix(妙手采集): 仓库范围下拉框加四层遮挡防护"
 
 ## Task 6: L1-2a/2b 执行器注入 logger 与 step_callback
 
-**为什么必须改执行器**：`executor_v2.py` 构造 `ExecutionContext` 时（`:2284-2288`）**既未传 `logger=` 也未传 `step_callback=`**；`python_component_adapter.py:123-131` 虽然支持这两个参数，但执行器里**所有** `create_adapter(...)` 调用都没有传。结果是 `ctx.logger` 与 `ctx.step_callback` 全为 `None` —— 组件写日志会 `AttributeError`，`report_step` 会在 `base.py:83-84` 提前 return，**一条事件都上报不了**。
+**为什么必须改执行器**：组件拿到的 `ExecutionContext` 由执行器构造，而生产路径上**既没传 `logger=` 也没传 `step_callback=`** → `ctx.logger` 与 `ctx.step_callback` 全为 `None`：组件写日志会 `AttributeError`，`report_step` 会在 `base.py:83-84` 提前 return，**一条事件都上报不了**。
+
+**生产路径到底是哪一条（评审纠正，2026-10-23 实测）**：
+
+```
+collection_tasks.py:681  resolver.resolve_task_manifests(...)
+  → component_runtime_resolver.py:151-155 返回 {"login":…, "exports_by_domain":…}
+  → 执行器拿到 runtime_manifests（非 None）
+  → executor_v2.py:2779  if runtime_manifests is not None:   ← 生产走这一支
+  → executor_v2.py:2785  export_result = await self._run_runtime_manifest_component(...)
+  → executor_v2.py:2364-2368  ctx = ExecutionContext(platform=…, account=…, config=…)   ← 注入点
+```
+
+`create_adapter(...)` 那一支（`:2792` / `:2868`）是 `runtime_manifests is None` 时的**兜底路径**，
+生产**不走**。只改它 = A7/A8 在生产不可达成。**两条都要改，但主注入点是
+`_run_runtime_manifest_component`。**
 
 **Files:**
 - Modify: `modules/apps/collection_center/executor_v2.py`
 
-- [ ] **Step 1: 在执行器里加一个 step 回调工厂**
+- [ ] **Step 1: 确认 `executor_v2.py` 已过 black / ruff 门禁**
+
+`executor_v2.py` 的整文件 black 重排与 5 处 ruff 违规修复，已在 **Task 0 Step 5** 以
+独立 style 提交完成。本任务只在其上叠加功能改动。
+
+改完后复核：
+
+```powershell
+python -m black --check --line-length 88 modules/apps/collection_center/executor_v2.py
+python -m ruff check modules/apps/collection_center/executor_v2.py
+```
+
+Expected: 两者都无输出。
+
+- [ ] **Step 2: 在执行器里加一个 step 回调工厂**
 
 在 `CollectionExecutorV2` 类里（`__init__` 之后）新增：
 
@@ -1251,12 +1488,13 @@ git commit -m "fix(妙手采集): 仓库范围下拉框加四层遮挡防护"
         复用既有的 status_callback（collection_tasks.py:1309-1315 的签名是
         `(task_id, progress, message, current_domain=None, details=None)`），
         其中 `details` 正是决定是否写入 core.collection_task_logs 的参数
-        （:1337-1342 仅在 details is not None 时写表）。
+        （:1337-1342 仅在 details is not None 时写表，
+        且 log_level = "error" if details.get("error") else "info"）。
 
         `details.step_id` 是前端 getStepLabel（CollectionTasks.vue:1145-1152）
         识别阶段名的字段，必须原样带上。
         """
-        if not self.status_callback:
+        if not self.status_callback or not task_id:
             return None
 
         async def _on_step(event_type: str, data: Dict[str, Any]) -> None:
@@ -1277,15 +1515,84 @@ git commit -m "fix(妙手采集): 仓库范围下拉框加四层遮挡防护"
         return _on_step
 ```
 
-- [ ] **Step 2: 在导出循环里把回调与 logger 注入 adapter**
+> **为什么不复用 `self._update_status`**：`_update_status`（`executor_v2.py:4669-4672`）
+> 负责维护 `self._task_progress_state` 的内存记账并推送 WebSocket 进度；
+> `report_step` 是**组件内部的阶段事件**，不该反过来改写任务级进度百分比，
+> 否则一个域内的 6 个阶段会把进度条来回抖动。两者分工不同，这里只写步骤日志。
 
-在 `executor_v2.py` 的导出循环（`:2791-2796` 那个 `else` 分支）把
+- [ ] **Step 3: 在生产注入点 `_run_runtime_manifest_component` 里注入**
+
+`executor_v2.py:2349-2372` 改成：
 
 ```python
-                        domain_adapter = create_adapter(platform=platform, account=account, config=export_params)
+    async def _run_runtime_manifest_component(
+        self,
+        *,
+        page,
+        manifest: Any,
+        account: Dict[str, Any],
+        config: Dict[str, Any],
+        run_args: Optional[List[Any]] = None,
+        run_kwargs: Optional[Dict[str, Any]] = None,
+        task_id: Optional[str] = None,
+        domain: Optional[str] = None,
+        progress: int = 0,
+    ):
+        """Execute a component resolved from a stable runtime manifest."""
+        from modules.components.base import ExecutionContext
+
+        component_class = self._load_runtime_manifest_component_class(manifest)
+        platform = getattr(manifest, "platform", None) or manifest.get("platform")
+        ctx = ExecutionContext(
+            platform=platform,
+            account=account,
+            logger=logger,
+            config=config,
+            step_callback=self._build_step_callback(
+                task_id or "", domain=domain, progress=progress
+            ),
+        )
+        component = component_class(ctx)
+        args = run_args or []
+        kwargs = run_kwargs or {}
+        return await component.run(page, *args, **kwargs)
 ```
 
-改成
+- [ ] **Step 4: 在 3 个导出调用点传参**
+
+`_run_runtime_manifest_component` 共 7 个调用点。**只有导出路径的 3 个需要传参**：
+
+| 调用点 | 用途 | 要传参吗 |
+|---|---|---|
+| `:1014` | 登录 | 否（登录已有自己的 `details={"step_id": "login", …}` 上报，见 `:1948`） |
+| `:2514` | 有头登录兜底 | 否 |
+| `:2633` | 登录 | 否 |
+| **`:2785`** | **导出（主路径）** | **是** |
+| **`:2861`** | **导出（验证码重试路径）** | **是** |
+| `:5163` | 登录 | 否 |
+| **`:5425`** | **导出（单域路径）** | **是** |
+
+`:2785` 改成：
+
+```python
+                        export_result = await self._run_runtime_manifest_component(
+                            page=page,
+                            manifest=export_manifest,
+                            account=account,
+                            config=export_params,
+                            task_id=task_id,
+                            domain=full_domain,
+                            progress=progress,
+                        )
+```
+
+`:2861` 同构（`domain=full_domain`）；`:5425` 用 `domain=data_domain`。
+`progress` 变量在这三处都在作用域内（导出循环里 `progress = 20 + int(70 * domain_index / …)`）。
+
+- [ ] **Step 5: 兜底路径 `create_adapter` 也注入**
+
+`runtime_manifests is None` 时走 `create_adapter(...)`（`:2792` / `:2868`）。虽然生产不走，
+但保持两条路径行为一致，避免以后切回时又出现「事件发不出去」：
 
 ```python
                         domain_adapter = create_adapter(
@@ -1299,42 +1606,45 @@ git commit -m "fix(妙手采集): 仓库范围下拉框加四层遮挡防护"
                         )
 ```
 
-同样改 `:2868` 那个重复的 `create_adapter` 调用（结构相同，`domain=full_domain`）。
+`python_component_adapter.py:435-449` 的 `create_adapter` 已声明 `logger` 与 `step_callback`
+参数并透传给 `ExecutionContext`（`:123-131`）——**无需改动该文件**。
 
-- [ ] **Step 3: `_execute_python_component` 路径本批次不改（写明理由）**
+- [ ] **Step 6: `_execute_python_component` 路径本批次不改（写明理由）**
 
-`executor_v2.py:2263` 的签名是 `_execute_python_component(self, page, adapter, component_type, params=None, component=None)`——**没有 `task_id`**。它的调用链上：
+`executor_v2.py:2263` 的签名是 `_execute_python_component(self, page, adapter, component_type, params=None, component=None)`——**没有 `task_id`**。5 个调用点里：
 
 | 调用点 | 作用域里有 `task_id` 吗 |
 |---|---|
-| `:1022`（登录） | 有 |
-| `:2527`（有头登录兜底） | 有 |
+| `:1022`（登录） | 有（`_execute_shared_login_phase` 的 keyword-only 参数，`:987`） |
+| `:2527`（有头登录兜底） | 有（`:2476` keyword-only） |
 | `:2641`（登录） | 有 |
 | `:2953`（`_execute_component` → `_execute_step`） | **无**——`_execute_step(self, page, step, component)`（`:3212`）也没有 |
 | `:5172`（登录） | 有 |
 
-要把 `task_id` 送进 `_execute_python_component`，得一路给 `_execute_component` 与 `_execute_step` 加参数——**改动面 3 层**，且 `_execute_step` 是通用步骤执行器，影响面远超本批次范围。
+要把 `task_id` 送进 `_execute_python_component`，得一路给 `_execute_component` 与
+`_execute_step` 加参数——**改动面 3 层**，且 `_execute_step` 是通用步骤执行器，影响面
+远超本批次范围。且库存域**不走**这条路径（见开头）。**本批次不要动它**，挂到批次 3。
 
-**关键事实：库存域走的不是这条路径。** `python_component_adapter.py:53-57` 把 `inventory` 域映射到 `MiaoshouInventoryExport`，导出流程经由 `executor_v2.py:2792` 的 `create_adapter(...).export(...)` 执行（`runtime_manifests is None` 的常规路径）。**Step 2 的 adapter 注入才是库存域的生产路径**，Step 2 做完 A8 即对库存域成立。
-
-`_execute_python_component` 的注入挂到**批次 3**，届时一并处理 `task_id` 穿线。**本批次不要动它。**
-
-- [ ] **Step 4: 确认 `create_adapter` 支持这两个参数**
-
-`python_component_adapter.py:435-449` 的 `create_adapter` 已声明 `logger` 与 `step_callback` 参数并透传给 `ExecutionContext`（`:123-131`）——**无需改动该文件**。
-
-- [ ] **Step 5: 验证事件真的落库**
+- [ ] **Step 7: 验证**
 
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE='1'
-python -m pytest backend/tests/test_miaoshou_filters_component.py backend/tests/test_miaoshou_inventory_export_contract.py -q -p no:cacheprovider --no-header
+python -m pytest backend/tests/test_miaoshou_filters_component.py `
+  backend/tests/test_miaoshou_inventory_export_contract.py `
+  backend/tests/test_miaoshou_inventory_export_v2_flow.py `
+  backend/tests/test_miaoshou_inventory_pageerror_recovery.py `
+  backend/tests/test_miaoshou_purchase_export_contract.py `
+  backend/tests/test_miaoshou_purchase_export_v2_flow.py `
+  backend/tests/test_miaoshou_supporting_components_contract.py `
+  backend/tests/test_miaoshou_warehouse_filters_contract.py -q -p no:cacheprovider --no-header
 ```
 
-Expected: 全绿（本次改动不影响既有组件行为）。
+Expected: 全绿。
 
-再确认 `logger` 变量在该作用域可见：`executor_v2.py` 顶部已有模块级 `logger`（`from modules.core.logger import get_logger`），`logger.info` 在 `:2280` 已被使用。✓
+再确认 `logger` 在该作用域可见：`executor_v2.py` 顶部已有模块级 `logger`
+（`from modules.core.logger import get_logger`），`logger.info` 在 `:2280` 已被使用 ✓。
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 8: 提交**
 
 ```powershell
 git add -- modules/apps/collection_center/executor_v2.py
@@ -1363,76 +1673,156 @@ git commit -m "feat(采集): 执行器向组件注入 logger 与步骤回调"
     STAGE_DOWNLOAD_SAVED = "download_saved"
 ```
 
-- [ ] **Step 2: 给 `run()` 加阶段事件**
+- [ ] **Step 2: 拆分 `run()` 并给 6 个阶段补齐事件与失败前缀**
 
-把 `inventory_export.py` 的 `run()` 改为：
+`run()` 现在会膨胀到 60+ 行，超过 `docs/DEVELOPMENT_RULES/TESTING_AND_QUALITY.md:211`
+的「函数 ≤50 行」上限（而 Task 9 准备把 `oversized_function` 定为 error 级别）。
+同时 6 个阶段必须有**各自**的失败前缀，否则 A7「错误消息含阶段名」只在 2/6 阶段成立。
+
+在 `inventory_export.py` 里加一个当前阶段标记：
+
+```python
+    def __init__(self, ctx: ExecutionContext, selectors: InventorySelectors | None = None) -> None:
+        super().__init__(ctx)
+        self.sel = selectors or InventorySelectors()
+        self.navigation_component = MiaoshouNavigation(ctx, self.sel)
+        self.warehouse_filters_component = MiaoshouWarehouseFilters(ctx, self.sel)
+        # 当前阶段名：失败时用它给步骤日志一个准确的 step_id
+        self._current_stage = self.STAGE_NAVIGATION_READY
+```
+
+（`__init__` 已有前四行，只补最后一行。）
+
+把 `run()` 改成下面这样——**拆成 5 个私有方法，每个 ≤50 行，每个阶段自带失败前缀**：
 
 ```python
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
-            await self.report_step(
-                "step_start", step_id=self.STAGE_NAVIGATION_READY, action="导航到仓库清单"
-            )
-            nav_result = await self.navigation_component.run(page, TargetPage.WAREHOUSE_CHECKLIST)
-            if not nav_result.success:
-                raise RuntimeError(
-                    f"navigation_failed: {nav_result.message or 'navigation failed'}"
-                )
-            await self.report_step(
-                "step_success", step_id=self.STAGE_NAVIGATION_READY, action="已到仓库清单"
-            )
-
-            await self._ensure_popup_closed(page)
-            await self.report_step(
-                "step_success", step_id=self.STAGE_POPUP_CLEARED, action="弹窗清理完成"
-            )
-
-            filter_result = await self.warehouse_filters_component.run(
-                page, {"select_all": True}
-            )
-            if not filter_result.success:
-                raise RuntimeError(
-                    f"warehouse_scope_failed: {filter_result.message or 'warehouse filters failed'}"
-                )
-
-            await self.report_step(
-                "step_start", step_id=self.STAGE_SEARCH_RESULTS_READY, action="搜索并等待结果"
-            )
-            await self._click_search(page)
-            await self._wait_search_results_ready(page)
-            await self.report_step(
-                "step_success", step_id=self.STAGE_SEARCH_RESULTS_READY, action="搜索结果就绪"
-            )
-
-            await self.report_step(
-                "step_start", step_id=self.STAGE_EXPORT_DIALOG_READY, action="打开导出弹窗"
-            )
-            await self._open_export_dialog(page)
-            await self._ensure_export_fields_all_selected(page)
-            await self.report_step(
-                "step_success", step_id=self.STAGE_EXPORT_DIALOG_READY, action="导出字段已全选"
-            )
-
-            await self.report_step(
-                "step_start", step_id=self.STAGE_DOWNLOAD_SAVED, action="触发导出并落盘"
-            )
-            download = await self._expect_download_with_pageerror_guard(page)
-            target = await self._wait_download_complete(page, download)
-            await self.report_step(
-                "step_success", step_id=self.STAGE_DOWNLOAD_SAVED, action="文件已落盘"
-            )
+            await self._navigate_to_warehouse_checklist(page)
+            await self._select_warehouse_scope(page)
+            await self._search_and_wait(page)
+            await self._open_export_dialog_and_select_all(page)
+            target = await self._export_and_save(page)
             return ExportResult(success=True, message="download complete", file_path=str(target))
         except Exception as e:
+            screenshot_path = await self._capture_failure_screenshot(page, "export")
+            message = str(e)
+            if screenshot_path:
+                message = f"{message} (screenshot: {screenshot_path})"
             await self.report_step(
                 "step_failed",
-                step_id=self.STAGE_DOWNLOAD_SAVED,
+                step_id=self._current_stage,
                 action="导出流程失败",
-                error=str(e),
+                error=message,
+                screenshot_path=screenshot_path or "",
             )
-            return ExportResult(success=False, message=str(e), file_path=None)
+            return ExportResult(success=False, message=message, file_path=None)
+
+    async def _navigate_to_warehouse_checklist(self, page: Any) -> None:
+        self._current_stage = self.STAGE_NAVIGATION_READY
+        await self.report_step(
+            "step_start", step_id=self.STAGE_NAVIGATION_READY, action="导航到仓库清单"
+        )
+        nav_result = await self.navigation_component.run(page, TargetPage.WAREHOUSE_CHECKLIST)
+        if not nav_result.success:
+            raise RuntimeError(
+                f"navigation_failed: {nav_result.message or 'navigation failed'}"
+            )
+        await self.report_step(
+            "step_success", step_id=self.STAGE_NAVIGATION_READY, action="已到仓库清单"
+        )
+
+        # 弹窗清理的**生产主责不在组件**：执行器在每域导出前调 close_popups，
+        # navigation 内部已有 stabilize_safe_notices 调用。组件侧这一份
+        # _ensure_popup_closed 是历史重复实现，收回统一机制属 L4-2（批次 4）。
+        # 本批次只保留调用（删掉会改变行为），并如实记录阶段事件。
+        self._current_stage = self.STAGE_POPUP_CLEARED
+        try:
+            await self._ensure_popup_closed(page)
+        except Exception as e:
+            raise RuntimeError(f"popup_cleanup_failed: {e}") from e
+        await self.report_step(
+            "step_success",
+            step_id=self.STAGE_POPUP_CLEARED,
+            action="弹窗清理阶段结束",
+        )
+
+    async def _select_warehouse_scope(self, page: Any) -> None:
+        self._current_stage = self.STAGE_WAREHOUSE_SCOPE_READY
+        await self.report_step(
+            "step_start", step_id=self.STAGE_WAREHOUSE_SCOPE_READY, action="仓库范围筛选"
+        )
+        filter_result = await self.warehouse_filters_component.run(
+            page, {"select_all": True}
+        )
+        if not filter_result.success:
+            raise RuntimeError(
+                f"warehouse_scope_failed: {filter_result.message or 'warehouse filters failed'}"
+            )
+        await self.report_step(
+            "step_success",
+            step_id=self.STAGE_WAREHOUSE_SCOPE_READY,
+            action="仓库范围已全选",
+        )
+
+    async def _search_and_wait(self, page: Any) -> None:
+        self._current_stage = self.STAGE_SEARCH_RESULTS_READY
+        await self.report_step(
+            "step_start", step_id=self.STAGE_SEARCH_RESULTS_READY, action="搜索并等待结果"
+        )
+        try:
+            await self._click_search(page)
+            await self._wait_search_results_ready(page)
+        except Exception as e:
+            raise RuntimeError(f"search_failed: {e}") from e
+        await self.report_step(
+            "step_success", step_id=self.STAGE_SEARCH_RESULTS_READY, action="搜索结果就绪"
+        )
+
+    async def _open_export_dialog_and_select_all(self, page: Any) -> None:
+        self._current_stage = self.STAGE_EXPORT_DIALOG_READY
+        await self.report_step(
+            "step_start", step_id=self.STAGE_EXPORT_DIALOG_READY, action="打开导出弹窗"
+        )
+        try:
+            await self._open_export_dialog(page)
+            await self._ensure_export_fields_all_selected(page)
+        except Exception as e:
+            raise RuntimeError(f"export_dialog_failed: {e}") from e
+        await self.report_step(
+            "step_success", step_id=self.STAGE_EXPORT_DIALOG_READY, action="导出字段已全选"
+        )
+
+    async def _export_and_save(self, page: Any) -> Path:
+        self._current_stage = self.STAGE_DOWNLOAD_SAVED
+        await self.report_step(
+            "step_start", step_id=self.STAGE_DOWNLOAD_SAVED, action="触发导出并落盘"
+        )
+        try:
+            download = await self._expect_download_with_pageerror_guard(page)
+            target = await self._wait_download_complete(page, download)
+        except Exception as e:
+            raise RuntimeError(f"download_failed: {e}") from e
+        await self.report_step(
+            "step_success", step_id=self.STAGE_DOWNLOAD_SAVED, action="文件已落盘"
+        )
+        return target
 ```
 
-> **注意（spec §5.2 L1-2f）**：弹窗清理的**生产主责在执行器**（`executor_v2.py:2776` 每域导出前 `close_popups`）。组件侧**不重复调用**清理，只在既有的 `await self._ensure_popup_closed(page)` 之后记录 `popup_cleared` 阶段事件。**不要**改用 `guard_overlays`（`base.py:116-140` 仅 `is_test_mode=True` 生效，生产会空转）。
+**6 个阶段 ↔ 失败前缀对照**（与 spec §5.2 的阶段表一一对应）：
+
+| step_id | 失败前缀 | 落在哪个方法 |
+|---|---|---|
+| `navigation_ready` | `navigation_failed` | `_navigate_to_warehouse_checklist` |
+| `popup_cleared` | `popup_cleanup_failed` | `_navigate_to_warehouse_checklist` |
+| `warehouse_scope_ready` | `warehouse_scope_failed` | `_select_warehouse_scope` |
+| `search_results_ready` | `search_failed` | `_search_and_wait` |
+| `export_dialog_ready` | `export_dialog_failed` | `_open_export_dialog_and_select_all` |
+| `download_saved` | `download_failed` | `_export_and_save` |
+
+> **不要改用 `guard_overlays`**（`base.py:116-140`）：它**仅在 `is_test_mode=True` 时生效**，
+> 拿它当生产清理手段会让 `popup_cleared` 阶段永远「成功」而什么都不做。
+> 组件侧生产可用的清理机制是 `stabilize_safe_notices`（`base.py:142-165`，无门控）。
 
 - [ ] **Step 3: 失败时落截图**
 
@@ -1466,25 +1856,10 @@ git commit -m "feat(采集): 执行器向组件注入 logger 与步骤回调"
             return None
 ```
 
-`inventory_export.py` 顶部补 `from pathlib import Path`（已有）与 `from datetime import datetime`（已有 `:9`）。若 `logger` 名字冲突，用 `self.logger`。
+`inventory_export.py` 顶部已有 `from pathlib import Path`（`:9`）与 `from datetime import datetime`（`:8`），无需补 import。
 
-在 `run()` 的 `except` 分支里，把截图路径带进错误信息：
-
-```python
-        except Exception as e:
-            screenshot_path = await self._capture_failure_screenshot(page, "export")
-            message = str(e)
-            if screenshot_path:
-                message = f"{message} (screenshot: {screenshot_path})"
-            await self.report_step(
-                "step_failed",
-                step_id=self.STAGE_DOWNLOAD_SAVED,
-                action="导出流程失败",
-                error=message,
-                screenshot_path=screenshot_path or "",
-            )
-            return ExportResult(success=False, message=message, file_path=None)
-```
+`run()` 的 `except` 分支（Step 2 已给出）会调用它，并把截图路径带进错误信息与步骤日志的
+`screenshot_path` 字段——**不要重复实现一遍**。
 
 - [ ] **Step 4: 给仓库筛选补同样的截图**
 
@@ -1827,10 +2202,12 @@ Expected: 全绿。
 - [ ] **Step 3: 前端构建**
 
 ```powershell
+cd F:\Vscode\python_programme\AI_code\xihong_erp\frontend
 npm run build
 ```
 
-Expected: 构建成功。
+Expected: 构建成功。（注意：**必须先 `cd frontend`**——仓库根的 `package.json` 的 `scripts`
+是空的，在根目录跑 `npm run build` 会报 Missing script。）
 
 - [ ] **Step 4: 手动验收 A1 / A7 / A8 / A12**
 
