@@ -51,6 +51,30 @@ function Test-GitAncestor {
     return $LASTEXITCODE -eq 0
 }
 
+function Invoke-GitPush {
+    param([string[]]$Arguments)
+
+    # git writes push progress to stderr. On Windows PowerShell 5 a captured
+    # native stderr becomes a terminating error while $ErrorActionPreference
+    # is "Stop", which used to abort the script right after the GitHub push
+    # and leave the two mirrors diverged. Capture stderr explicitly and hand
+    # the caller the real exit code instead.
+    $stderrPath = [System.IO.Path]::GetTempFileName()
+    try {
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            $null = & git @Arguments 2>$stderrPath
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        return $exitCode
+    } finally {
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Assert-MainSafety {
     $branch = Get-GitValue @("branch", "--show-current")
     if ($branch -ne "main") {
@@ -125,12 +149,10 @@ if (-not $Sync) {
     exit 0
 }
 
-& git push $GitHubUrl HEAD:refs/heads/main
-if ($LASTEXITCODE -ne 0) {
+if ((Invoke-GitPush @("push", $GitHubUrl, "HEAD:refs/heads/main")) -ne 0) {
     throw "GitHub push failed; CNB was not changed."
 }
-& git push $CnbUrl HEAD:refs/heads/main
-if ($LASTEXITCODE -ne 0) {
+if ((Invoke-GitPush @("push", $CnbUrl, "HEAD:refs/heads/main")) -ne 0) {
     throw "CNB push failed after GitHub accepted the commit. Re-run diagnostics before any retry."
 }
 
