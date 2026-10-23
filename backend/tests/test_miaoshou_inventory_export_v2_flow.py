@@ -105,3 +105,43 @@ async def test_inventory_export_does_not_use_keyboard_escape_to_close_popups() -
     await component.run(page)
 
     assert "Escape" not in page.keyboard.pressed
+
+
+@pytest.mark.asyncio
+async def test_inventory_export_reports_navigation_failure_with_stage_name() -> None:
+    """导航失败必须带阶段名，且不得继续往下走搜索。"""
+    calls: list[str] = []
+    component = _component(calls)
+
+    async def _failed_navigation(page, target):
+        calls.append("navigation")
+        return ResultBase(success=False, message="导航超时")
+
+    component.navigation_component.run = _failed_navigation
+
+    result = await component.run(FakePage())
+
+    assert result.success is False
+    assert "navigation_failed" in (result.message or "")
+    assert "search" not in calls
+
+
+@pytest.mark.asyncio
+async def test_inventory_export_reports_warehouse_scope_failure_with_stage_name() -> (
+    None
+):
+    """仓库范围筛选失败必须带阶段名，且不得继续往下走搜索。"""
+    calls: list[str] = []
+    component = _component(calls)
+
+    async def _failed_filters(page, filters):
+        calls.append("warehouse_filters")
+        return ResultBase(success=False, message="warehouse_scope_open_failed: 打不开")
+
+    component.warehouse_filters_component.run = _failed_filters
+
+    result = await component.run(FakePage())
+
+    assert result.success is False
+    assert "warehouse_scope_failed" in (result.message or "")
+    assert "search" not in calls
