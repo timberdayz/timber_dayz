@@ -78,6 +78,16 @@ PROGRESS_TEXTS: Final[Tuple[str, ...]] = (
 
 DATA_TYPE_DIR: Final[str] = "inventory"
 
+# ── 仓库范围下拉框（jx-select）防护参数 ──────────────────────────────
+# ⚠️ 改版风险：层 A 依赖 jx-select 的 DOM 结构（.jx-select / .jx-select__selected-item /
+#    .jx-tag），妙手前端改版会失效。批次 2 需用 pwcli 真实页面取证校正（《规范》§1 要求注明）。
+WAREHOUSE_SCOPE_TRIGGER_TIMEOUT_MS: Final[int] = 3000
+WAREHOUSE_SCOPE_OPEN_MAX_ATTEMPTS: Final[int] = 2
+WAREHOUSE_SCOPE_RETRY_BACKOFF_SECONDS: Final[float] = 0.5
+WAREHOUSE_SCOPE_CONTAINER_XPATH: Final[str] = (
+    "xpath=ancestor::*[contains(@class,'jx-select')][1]"
+)
+
 
 @dataclass(frozen=True)
 class InventorySelectors:
@@ -93,3 +103,7 @@ class InventorySelectors:
     close_poll_interval_ms: int = CLOSE_POLL_INTERVAL_MS
     progress_texts: Tuple[str, ...] = PROGRESS_TEXTS
     data_type_dir: str = DATA_TYPE_DIR
+    warehouse_scope_trigger_timeout_ms: int = WAREHOUSE_SCOPE_TRIGGER_TIMEOUT_MS
+    warehouse_scope_open_max_attempts: int = WAREHOUSE_SCOPE_OPEN_MAX_ATTEMPTS
+    warehouse_scope_retry_backoff_seconds: float = WAREHOUSE_SCOPE_RETRY_BACKOFF_SECONDS
+    warehouse_scope_container_xpath: str = WAREHOUSE_SCOPE_CONTAINER_XPATH
