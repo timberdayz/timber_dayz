@@ -4,6 +4,7 @@ Miaoshou ERP inventory (仓库清单) component config
 Centralizes base URL, deep-link paths and key selectors used by
 navigation/export. Mirrors the orders_config / purchase_config convention.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

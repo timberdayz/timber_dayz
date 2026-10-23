@@ -14,7 +14,9 @@ class MiaoshouWarehouseFilters(ComponentBase):
     component_type = "filters"
     data_domain = None
 
-    def __init__(self, ctx: ExecutionContext, selectors: InventorySelectors | None = None) -> None:
+    def __init__(
+        self, ctx: ExecutionContext, selectors: InventorySelectors | None = None
+    ) -> None:
         super().__init__(ctx)
         self.sel = selectors or InventorySelectors()
 
@@ -99,13 +101,17 @@ class MiaoshouWarehouseFilters(ComponentBase):
             try:
                 await full_select.wait_for(state="visible", timeout=2000)
             except Exception:
-                full_select = overlay.locator("label:has-text('全选') input[type='checkbox']").first
+                full_select = overlay.locator(
+                    "label:has-text('全选') input[type='checkbox']"
+                ).first
                 await full_select.wait_for(state="attached", timeout=2000)
 
             checked = await self._is_checkbox_selected(full_select)
             if not checked:
                 try:
-                    await overlay.get_by_text("全选", exact=True).first.click(timeout=1000)
+                    await overlay.get_by_text("全选", exact=True).first.click(
+                        timeout=1000
+                    )
                 except Exception:
                     await full_select.click(timeout=1000)
 

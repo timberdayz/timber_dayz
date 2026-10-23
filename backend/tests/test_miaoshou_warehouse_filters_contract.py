@@ -1,6 +1,8 @@
 from modules.components.base import ExecutionContext
 from modules.platforms.miaoshou.components.inventory_config import InventorySelectors
-from modules.platforms.miaoshou.components.warehouse_filters import MiaoshouWarehouseFilters
+from modules.platforms.miaoshou.components.warehouse_filters import (
+    MiaoshouWarehouseFilters,
+)
 
 
 def test_miaoshou_warehouse_filters_component_declares_miaoshou_platform():
