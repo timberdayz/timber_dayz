@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from miaoshou_page_fakes import FakeJxSelect, FakeJxSelectList
 from modules.components.base import ExecutionContext
 from modules.platforms.miaoshou.components.filters import MiaoshouFilters
 
@@ -36,12 +37,16 @@ class _FakeLocator:
     def first(self) -> "_FakeLocator":
         return self
 
-    async def wait_for(self, state: str = "visible", timeout: int | None = None) -> None:
+    async def wait_for(
+        self, state: str = "visible", timeout: int | None = None
+    ) -> None:
         if state == "visible" and self.raise_on_visible_wait:
             raise TimeoutError("locator remained hidden")
         self.wait_calls.append((state, timeout))
 
-    async def click(self, timeout: int | None = None, force: bool | None = None) -> None:
+    async def click(
+        self, timeout: int | None = None, force: bool | None = None
+    ) -> None:
         self.click_calls.append((timeout, force))
         if self.fail_clicks > 0:
             self.fail_clicks -= 1
@@ -82,7 +87,9 @@ class _FakeTooltip:
     def first(self) -> "_FakeTooltip":
         return self
 
-    async def wait_for(self, state: str = "visible", timeout: int | None = None) -> None:
+    async def wait_for(
+        self, state: str = "visible", timeout: int | None = None
+    ) -> None:
         self.wait_calls.append((state, timeout))
 
     def get_by_role(self, role: str, name=None):  # noqa: ANN001
@@ -98,73 +105,6 @@ class _FakeTooltip:
         raise AssertionError(f"unexpected tooltip.get_by_text({text!r})")
 
 
-class _FakeTag:
-    """模拟 jx-select 选中区里的单个 jx-tag。"""
-
-    def __init__(self, text: str) -> None:
-        self._text = text
-
-    async def text_content(self) -> str:
-        return self._text
-
-
-class _FakeTagList:
-    """模拟 .jx-select__selected-item 下的 .jx-tag 集合。"""
-
-    def __init__(self, tags: list[str]) -> None:
-        self._tags = tags
-
-    async def count(self) -> int:
-        return len(self._tags)
-
-    def nth(self, index: int) -> _FakeTag:
-        return _FakeTag(self._tags[index])
-
-
-class _FakeSelectedItem:
-    """模拟 jx-select 的选中项容器（.jx-select__selected-item）。"""
-
-    def __init__(self, tags: list[str]) -> None:
-        self._tags = tags
-
-    @property
-    def first(self) -> "_FakeSelectedItem":
-        return self
-
-    async def count(self) -> int:
-        return 1 if self._tags else 0
-
-    def locator(self, query: str) -> _FakeTagList:
-        if query == ".jx-tag":
-            return _FakeTagList(self._tags)
-        raise AssertionError(f"unexpected selected-item.locator({query!r})")
-
-
-class _FakeJxSelect:
-    """模拟妙手 jx-select 组件根节点。"""
-
-    def __init__(self, tags: list[str]) -> None:
-        self._tags = tags
-
-    def locator(self, query: str) -> _FakeSelectedItem:
-        if query == ".jx-select__selected-item":
-            return _FakeSelectedItem(self._tags)
-        raise AssertionError(f"unexpected jx-select.locator({query!r})")
-
-
-class _FakeJxSelectList:
-    """模拟 page.locator('.jx-select') 返回的集合。"""
-
-    def __init__(self, selects: list[_FakeJxSelect]) -> None:
-        self._selects = selects
-
-    async def count(self) -> int:
-        return len(self._selects)
-
-    def nth(self, index: int) -> _FakeJxSelect:
-        return self._selects[index]
-
-
 class _FakePage:
     def __init__(
         self,
@@ -178,7 +118,7 @@ class _FakePage:
         self.full_select = full_select
         self.tooltip = tooltip
         self.keyboard = _FakeKeyboard()
-        self._selects = [_FakeJxSelect(tags) for tags in (selects or [])]
+        self._selects = [FakeJxSelect(tags) for tags in (selects or [])]
 
     def get_by_role(self, role: str, name=None):  # noqa: ANN001
         if role == "combobox":
@@ -189,14 +129,16 @@ class _FakePage:
             return self.tooltip
         raise AssertionError(f"unexpected get_by_role({role!r}, {name!r})")
 
-    def locator(self, query: str) -> _FakeJxSelectList:
+    def locator(self, query: str) -> FakeJxSelectList:
         if query == ".jx-select":
-            return _FakeJxSelectList(self._selects)
+            return FakeJxSelectList(self._selects)
         raise AssertionError(f"unexpected page.locator({query!r})")
 
 
 @pytest.mark.asyncio
-async def test_miaoshou_filters_does_not_click_full_select_when_overlay_checkbox_is_already_selected() -> None:
+async def test_miaoshou_filters_does_not_click_full_select_when_overlay_checkbox_is_already_selected() -> (
+    None
+):
     component = MiaoshouFilters(_ctx())
     trigger = _FakeLocator()
     full_select = _FakeLocator(
@@ -215,7 +157,9 @@ async def test_miaoshou_filters_does_not_click_full_select_when_overlay_checkbox
 
 
 @pytest.mark.asyncio
-async def test_miaoshou_filters_clicks_full_select_when_overlay_checkbox_is_not_selected() -> None:
+async def test_miaoshou_filters_clicks_full_select_when_overlay_checkbox_is_not_selected() -> (
+    None
+):
     component = MiaoshouFilters(_ctx())
     trigger = _FakeLocator()
     full_select = _FakeLocator(
@@ -234,7 +178,9 @@ async def test_miaoshou_filters_clicks_full_select_when_overlay_checkbox_is_not_
 
 
 @pytest.mark.asyncio
-async def test_miaoshou_filters_uses_visible_overlay_instead_of_waiting_on_hidden_checkbox_input() -> None:
+async def test_miaoshou_filters_uses_visible_overlay_instead_of_waiting_on_hidden_checkbox_input() -> (
+    None
+):
     component = MiaoshouFilters(_ctx())
     trigger = _FakeLocator()
     hidden_checkbox = _FakeLocator(
@@ -260,14 +206,18 @@ async def test_miaoshou_filters_uses_visible_overlay_instead_of_waiting_on_hidde
 
 
 @pytest.mark.asyncio
-async def test_miaoshou_filters_skips_overlay_when_summary_already_shows_all_selected() -> None:
+async def test_miaoshou_filters_skips_overlay_when_summary_already_shows_all_selected() -> (
+    None
+):
     component = MiaoshouFilters(_ctx())
     trigger = _FakeLocator()
     full_select = _FakeLocator(
         checked=False,
         evaluate_checked=False,
     )
-    page = _FakePage(trigger=trigger, full_select=full_select, selects=[["待发货", "+ 4"]])
+    page = _FakePage(
+        trigger=trigger, full_select=full_select, selects=[["待发货", "+ 4"]]
+    )
 
     result = await component.run(page, {"select_all": True})
 
@@ -277,7 +227,9 @@ async def test_miaoshou_filters_skips_overlay_when_summary_already_shows_all_sel
 
 
 @pytest.mark.asyncio
-async def test_miaoshou_filters_retries_trigger_click_when_first_attempt_is_intercepted() -> None:
+async def test_miaoshou_filters_retries_trigger_click_when_first_attempt_is_intercepted() -> (
+    None
+):
     """全选状态下 jx-tag 遮住触发器：首次点击超时后应重试并最终打开下拉。"""
     component = MiaoshouFilters(_ctx())
     trigger = _FakeLocator(fail_clicks=1)
