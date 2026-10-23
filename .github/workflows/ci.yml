@@ -144,6 +144,14 @@ jobs:
             echo "No changed Python files for linting"
           fi
 
+      - name: Collection component lint
+        run: |
+          if [ -n "${{ steps.changed-python.outputs.files }}" ]; then
+            python scripts/lint_collection_components.py --paths "${{ steps.changed-python.outputs.files }}" --fail-on none
+          else
+            echo "No changed Python files for collection component lint"
+          fi
+
       - name: Type checking (critical modules only)
         if: matrix.python-version == '3.11'
         run: |

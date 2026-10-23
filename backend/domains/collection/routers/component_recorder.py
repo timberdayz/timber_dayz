@@ -19,7 +19,6 @@ import re
 import subprocess
 import sys
 import json
-import ast
 import threading
 from types import SimpleNamespace
 from pathlib import Path
@@ -33,6 +32,7 @@ from sqlalchemy import select
 
 from backend.dependencies.auth import require_admin
 from backend.models.database import get_db, get_async_db
+from backend.services.collection_component_lint import analyze_python_code
 from backend.services.component_test_service import ComponentTestService
 from backend.services.recorder_segment_validator import RecorderSegmentValidator
 from backend.services.steps_to_python import generate_python_code
@@ -51,7 +51,7 @@ from backend.schemas.component_recorder import (
     RecorderSaveRequest,
     GeneratePythonRequest,
 )
-from modules.core.db import ComponentVersion, ComponentTestHistory
+from modules.core.db import ComponentTestHistory
 
 logger = get_logger(__name__)
 
@@ -76,15 +76,17 @@ def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any])
     old_block_candidates = [
         (
             "        # TODO: 根据实际成功条件校验 (e.g. URL / element)\n"
-            "        return LoginResult(success=True, message=\"ok\")"
+            '        return LoginResult(success=True, message="ok")'
         ),
         (
             "    # TODO: 根据实际成功条件校验 (e.g. URL / element)\n"
-            "    return LoginResult(success=True, message=\"ok\")"
+            '    return LoginResult(success=True, message="ok")'
         ),
     ]
 
-    old_block = next((block for block in old_block_candidates if block in python_code), None)
+    old_block = next(
+        (block for block in old_block_candidates if block in python_code), None
+    )
     if old_block is None:
         return python_code
 
@@ -108,7 +110,9 @@ def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any])
         for val in url_contains_values:
             msg = f"登录后 URL 未包含预期片段: {val}"
             lines.append(f"{indent}if {val!r} not in current_url:")
-            lines.append(f"{indent}    return LoginResult(success=False, message={msg!r})")
+            lines.append(
+                f"{indent}    return LoginResult(success=False, message={msg!r})"
+            )
 
     # url_not_contains: 字符串或字符串列表
     url_not_contains = crit.get("url_not_contains")
@@ -124,7 +128,9 @@ def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any])
         for val in url_not_values:
             msg = f"登录后 URL 仍包含禁止片段: {val}"
             lines.append(f"{indent}if {val!r} in current_url:")
-            lines.append(f"{indent}    return LoginResult(success=False, message={msg!r})")
+            lines.append(
+                f"{indent}    return LoginResult(success=False, message={msg!r})"
+            )
 
     # element_visible_selector: 登录成功后应可见的关键元素
     elem_sel = crit.get("element_visible_selector")
@@ -134,12 +140,17 @@ def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any])
         lines.append(f"{indent}await expect(_succ_elem).to_be_visible(timeout=10000)")
 
     # 若未配置任何字段，保持默认行为（视为成功）
-    lines.append(f"{indent}return LoginResult(success=True, message=\"ok\")")
+    lines.append(f'{indent}return LoginResult(success=True, message="ok")')
 
     new_block = "\n".join(lines)
     updated = python_code.replace(old_block, new_block, 1)
-    if "expect(" in updated and "from playwright.async_api import expect" not in updated:
-        insert_at = updated.find("from modules.components.base import ExecutionContext, ResultBase")
+    if (
+        "expect(" in updated
+        and "from playwright.async_api import expect" not in updated
+    ):
+        insert_at = updated.find(
+            "from modules.components.base import ExecutionContext, ResultBase"
+        )
         if insert_at != -1:
             line_end = updated.find("\n", insert_at)
             updated = (
@@ -152,8 +163,10 @@ def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any])
 
 # ==================== 全局录制会话管理 ====================
 
+
 class RecorderSession:
     """录制会话管理(v4.8.0 仅 Inspector 模式)"""
+
     def __init__(self):
         self.active = False
         self.platform = None
@@ -177,7 +190,7 @@ class RecorderSession:
         self.gate_stage = None
         self.ready_to_record = False
         self.error_message = None
-    
+
     def start(self, platform: str, component_type: str, account_id: str):
         """开始录制会话"""
         self.active = True
@@ -191,24 +204,26 @@ class RecorderSession:
         self.ready_to_record = False
         self.error_message = None
         logger.info(f"Recording session started: {platform}/{component_type}")
-    
+
     def stop(self):
         """停止录制会话"""
         self.active = False
         logger.info(f"Recording session stopped: {len(self.steps)} steps recorded")
-    
+
     def add_step(self, step: Dict[str, Any]):
         """添加录制步骤"""
-        step['id'] = len(self.steps) + 1
+        step["id"] = len(self.steps) + 1
         self.steps.append(step)
         logger.debug(f"Step added: {step['action']}")
-    
+
     def cleanup_sync(self):
         """清理浏览器资源(同步)"""
         try:
             # 如果playwright_task是subprocess.Popen对象,终止进程
-            if self.playwright_task and hasattr(self.playwright_task, 'terminate'):
-                logger.info(f"Terminating Playwright subprocess (PID: {self.playwright_task.pid})")
+            if self.playwright_task and hasattr(self.playwright_task, "terminate"):
+                logger.info(
+                    f"Terminating Playwright subprocess (PID: {self.playwright_task.pid})"
+                )
                 self.playwright_task.terminate()
                 try:
                     self.playwright_task.wait(timeout=5)
@@ -217,25 +232,25 @@ class RecorderSession:
                     self.playwright_task.kill()
         except Exception as e:
             logger.error(f"Failed to cleanup subprocess: {e}", exc_info=True)
-        
+
         try:
             if self.page:
                 self.page.close()
         except Exception as e:
             logger.error(f"Failed to close page: {e}", exc_info=True)
-        
+
         try:
             if self.browser_context:
                 self.browser_context.close()
         except Exception as e:
             logger.error(f"Failed to close context: {e}", exc_info=True)
-        
+
         try:
             if self.browser:
                 self.browser.close()
         except Exception as e:
             logger.error(f"Failed to close browser: {e}", exc_info=True)
-    
+
     def clear(self):
         """清空会话"""
         self.active = False
@@ -309,7 +324,9 @@ def _write_recorder_runtime_status(status_file: Path, payload: Dict[str, Any]) -
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
-def _read_recorder_runtime_status(status_file: Optional[str]) -> Optional[Dict[str, Any]]:
+def _read_recorder_runtime_status(
+    status_file: Optional[str],
+) -> Optional[Dict[str, Any]]:
     if not status_file:
         return None
     path = Path(status_file)
@@ -336,7 +353,9 @@ def _build_verification_payload_from_runtime_status(
         "verification_type": runtime_status.get("verification_type"),
         "verification_id": verification_id,
         "owner_type": "recorder",
-        "owner_id": str(recorder_session.account_id or recorder_session.platform or "recorder"),
+        "owner_id": str(
+            recorder_session.account_id or recorder_session.platform or "recorder"
+        ),
         "phase": "login",
         "current_url": runtime_status.get("current_url"),
         "screenshot_url": runtime_status.get("verification_screenshot"),
@@ -386,10 +405,16 @@ def _normalize_login_steps_and_suggestions(
         lower_comment = comment.lower()
         sel_lower = selector.lower()
 
-        is_username_field = any(k in comment for k in ["账号", "用户名", "子账号", "邮箱", "手机号"]) or any(
+        is_username_field = any(
+            k in comment for k in ["账号", "用户名", "子账号", "邮箱", "手机号"]
+        ) or any(
             k in sel_lower for k in ["account", "username", "user", "email", "phone"]
         )
-        is_password_field = ("密码" in comment) or ("password" in lower_comment) or ("password" in sel_lower)
+        is_password_field = (
+            ("密码" in comment)
+            or ("password" in lower_comment)
+            or ("password" in sel_lower)
+        )
 
         # 默认不改动
         applied = False
@@ -457,128 +482,12 @@ def _normalize_login_steps_and_suggestions(
 # 关键反模式默认作为 error 阻断保存（可配置 LINT_BLOCK_SAVE_ON_ERROR=false 关闭阻断）
 def _analyze_python_code_for_lints(python_code: str) -> Dict[str, List[Dict[str, str]]]:
     """
-    对生成的 Python 代码做基础质量检查：
-    - 语法检查（ast.parse）-> errors
-    - 关键反模式（吞错、count+is_visible、.first/.nth、固定 sleep）-> errors，默认阻断保存
-    返回 errors / warnings 列表，供前端展示与保存门禁。
+    对生成的 Python 代码做基础质量检查。
+
+    规则实现已抽到 backend/services/collection_component_lint.py（唯一来源），
+    此处仅做转发，保证录制器行为零变化。
     """
-    errors: List[Dict[str, str]] = []
-    warnings: List[Dict[str, str]] = []
-
-    if not python_code:
-        return {"errors": errors, "warnings": warnings}
-
-    # 语法检查
-    try:
-        ast.parse(python_code)
-    except SyntaxError as e:
-        logger.error("Python syntax error in lint check: %s", e)
-        errors.append(
-            {
-                "type": "syntax_error",
-                "message": str(e),
-            }
-        )
-        return {"errors": errors, "warnings": warnings}
-
-    lines = python_code.splitlines()
-
-    def _has_reason_comment(i: int, reason_keywords: Tuple[str, ...]) -> bool:
-        """检查当前行及前两行是否存在“固定等待理由”注释。"""
-        start = max(0, i - 2)
-        for j in range(start, i + 1):
-            text = lines[j].strip().lower()
-            if not text.startswith("#"):
-                continue
-            if any(k.lower() in text for k in reason_keywords):
-                return True
-        return False
-
-    # wait_for_timeout：仅“无理由固定等待”作为 error；有明确理由给 warning（不阻断）
-    wait_timeout_indices = [i for i, line in enumerate(lines) if "wait_for_timeout(" in line]
-    unreasoned_wait_timeout = [
-        i
-        for i in wait_timeout_indices
-        if not _has_reason_comment(i, ("固定等待", "reason", "验证码", "回传", "动画", "节奏"))
-    ]
-    if unreasoned_wait_timeout:
-        errors.append(
-            {
-                "type": "wait_for_timeout_usage",
-                "message": f"检测到 {len(unreasoned_wait_timeout)} 处无理由 wait_for_timeout。请改为条件等待，或补充明确固定等待原因注释。",
-            }
-        )
-    elif wait_timeout_indices:
-        warnings.append(
-            {
-                "type": "wait_for_timeout_with_reason",
-                "message": f"检测到 {len(wait_timeout_indices)} 处有理由的 wait_for_timeout。建议评估是否可进一步改为条件等待。",
-            }
-        )
-
-    # sleep：仅无理由固定 sleep 阻断；有理由场景（如验证码回传节奏）给 warning
-    sleep_indices = [
-        i
-        for i, line in enumerate(lines)
-        if ("time.sleep(" in line or "asyncio.sleep(" in line)
-    ]
-    unreasoned_sleep = [
-        i
-        for i in sleep_indices
-        if not _has_reason_comment(i, ("固定等待", "验证码", "回传", "等待", "reason", "节奏", "动画"))
-    ]
-    if unreasoned_sleep:
-        errors.append(
-            {
-                "type": "fixed_sleep_usage",
-                "message": f"检测到 {len(unreasoned_sleep)} 处无理由固定 sleep。请优先使用条件等待；若确需固定延时，请注释说明原因。",
-            }
-        )
-    elif sleep_indices:
-        warnings.append(
-            {
-                "type": "fixed_sleep_with_reason",
-                "message": f"检测到 {len(sleep_indices)} 处有理由固定 sleep。建议评估是否可替换为条件等待。",
-            }
-        )
-    if re.search(r"count\(\)\s*>\s*0.*is_visible\(", python_code, flags=re.DOTALL):
-        errors.append(
-            {
-                "type": "count_is_visible_pattern",
-                "message": "检测到 count()+is_visible() 单次判断。请改为 expect()/wait_for() 可重试等待。",
-            }
-        )
-    if re.search(r"except\s+Exception\s*:\s*pass", python_code):
-        errors.append(
-            {
-                "type": "swallow_exception_pattern",
-                "message": "检测到 except Exception: pass。请改为记录上下文并返回可诊断错误，避免静默继续。",
-            }
-        )
-    first_nth_indices = [
-        i for i, line in enumerate(lines) if re.search(r"\.first\b|\.nth\(", line)
-    ]
-    unreasoned_first_nth = [
-        i
-        for i in first_nth_indices
-        if not _has_reason_comment(i, ("业务语义", "第n", "nth", "first-nth-justified", "有序", "第 "))
-    ]
-    if unreasoned_first_nth:
-        errors.append(
-            {
-                "type": "first_nth_usage",
-                "message": f"检测到 {len(unreasoned_first_nth)} 处无注释依据的 .first/.nth。请先收敛作用域，或补充业务语义注释后再使用。",
-            }
-        )
-    elif first_nth_indices:
-        warnings.append(
-            {
-                "type": "first_nth_with_reason",
-                "message": f"检测到 {len(first_nth_indices)} 处有注释依据的 .first/.nth，请确认该场景确有业务顺序语义。",
-            }
-        )
-
-    return {"errors": errors, "warnings": warnings}
+    return analyze_python_code(python_code)
 
 
 def _enrich_steps_semantics(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -640,14 +549,13 @@ def _enrich_steps_semantics(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]
 
 # ==================== API Endpoints ====================
 
+
 def _launch_inspector_recorder_subprocess(
-    account: Any,
-    platform: str,
-    component_type: str
+    account: Any, platform: str, component_type: str
 ):
     """
     [新模式] 使用 Inspector API + Trace 录制(v4.7.5)
-    
+
     功能:
     1. 使用 PersistentBrowserManager 创建持久化上下文
     2. 应用固定指纹(DeviceFingerprintManager)
@@ -655,7 +563,7 @@ def _launch_inspector_recorder_subprocess(
     4. 启动 Trace 录制
     5. 打开 Inspector(page.pause())
     6. 停止后解析 Trace 文件
-    
+
     优势:
     - 持久化会话:复用已登录状态
     - 固定指纹:降低检测风险
@@ -667,12 +575,12 @@ def _launch_inspector_recorder_subprocess(
 
         project_root = Path(get_project_root())
         script_path = project_root / "tools" / "launch_inspector_recorder.py"
-        
+
         # 构建输出目录
         temp_dir = project_root / "temp" / "recordings"
         temp_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         # Trace 文件路径
         trace_file = temp_dir / f"{platform}_{component_type}_{timestamp}_trace.zip"
         # 步骤输出文件路径
@@ -680,18 +588,21 @@ def _launch_inspector_recorder_subprocess(
         # 运行时状态文件路径
         status_file = temp_dir / f"{platform}_{component_type}_{timestamp}_status.json"
         # 验证码回填响应文件路径
-        response_file = temp_dir / f"{platform}_{component_type}_{timestamp}_verification_response.json"
-        
+        response_file = (
+            temp_dir
+            / f"{platform}_{component_type}_{timestamp}_verification_response.json"
+        )
+
         # 保存输出文件路径到session
         recorder_session.output_file = str(trace_file)
         recorder_session.steps_file = str(steps_file)
         recorder_session.recording_mode = "inspector"
         recorder_session.status_file = str(status_file)
         recorder_session.response_file = str(response_file)
-        
+
         # 准备账号信息（统一走 ComponentTestService，避免录制器与测试器账号结构漂移）
         account_info = ComponentTestService.prepare_account_info(account)
-        
+
         # 构建配置文件
         initial_status = _build_recorder_status_payload(
             state="starting",
@@ -706,60 +617,56 @@ def _launch_inspector_recorder_subprocess(
         _write_recorder_runtime_status(status_file, initial_status)
 
         config = {
-            'platform': platform,
-            'component_type': component_type,
-            'account_info': account_info,
-            'trace_file': str(trace_file),
-            'steps_file': str(steps_file),
-            'status_file': str(status_file),
-            'response_file': str(response_file),
-            'skip_login': component_type == 'login',  # login 组件不自动登录
-            'enable_trace': True,
-            'use_persistent_context': True,  # 使用持久化上下文
-            'use_fingerprint': True,  # 使用固定指纹
+            "platform": platform,
+            "component_type": component_type,
+            "account_info": account_info,
+            "trace_file": str(trace_file),
+            "steps_file": str(steps_file),
+            "status_file": str(status_file),
+            "response_file": str(response_file),
+            "skip_login": component_type == "login",  # login 组件不自动登录
+            "enable_trace": True,
+            "use_persistent_context": True,  # 使用持久化上下文
+            "use_fingerprint": True,  # 使用固定指纹
         }
-        
+
         # 保存配置文件
         config_file = temp_dir / f"{platform}_{component_type}_{timestamp}_config.json"
-        with open(config_file, 'w', encoding='utf-8') as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
-        
+
         # 构建命令
-        cmd = [
-            sys.executable,
-            str(script_path),
-            '--config', str(config_file)
-        ]
-        
+        cmd = [sys.executable, str(script_path), "--config", str(config_file)]
+
         logger.info(f"Starting Inspector recorder: {' '.join(cmd)}")
         logger.info(f"Trace will be saved to: {trace_file}")
         logger.info(f"Steps will be saved to: {steps_file}")
-        
+
         # 启动独立进程
         process = subprocess.Popen(
             cmd,
-            creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0
+            creationflags=(
+                subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+            ),
         )
-        
+
         # 保存进程引用和配置文件路径
         recorder_session.playwright_task = process
         recorder_session.config_file = str(config_file)
-        
+
         logger.info(f"Inspector recorder subprocess started with PID: {process.pid}")
-        
+
     except Exception as e:
         logger.error(f"Failed to launch Inspector recorder: {e}", exc_info=True)
         recorder_session.stop()
 
 
 def _launch_playwright_browser_subprocess(
-    account: Any,
-    platform: str,
-    component_type: str
+    account: Any, platform: str, component_type: str
 ):
     """
     v4.8.0: 启动 Inspector 录制器(唯一模式)
-    
+
     功能:
     1. 使用 PersistentBrowserManager 创建持久化上下文
     2. 应用固定指纹(DeviceFingerprintManager)
@@ -772,12 +679,11 @@ def _launch_playwright_browser_subprocess(
 
 @router.post("/recorder/start", response_model=RecorderStartResponse)
 async def start_recording(
-    request: RecorderStartRequest,
-    db: AsyncSession = Depends(get_async_db)
+    request: RecorderStartRequest, db: AsyncSession = Depends(get_async_db)
 ):
     """
     开始录制组件
-    
+
     功能:
     1. 验证账号存在
     2. 启动Playwright浏览器(后台任务)
@@ -787,15 +693,14 @@ async def start_recording(
     try:
         # 检查是否已有活跃会话
         if recorder_session.active:
-            return {
-                "success": False,
-                "message": "已有活跃的录制会话,请先停止"
-            }
-        
+            return {"success": False, "message": "已有活跃的录制会话,请先停止"}
+
         # 验证账号存在（优先店铺账号，兼容旧账号）
         account = None
         try:
-            from backend.services.shop_account_loader_service import get_shop_account_loader_service
+            from backend.services.shop_account_loader_service import (
+                get_shop_account_loader_service,
+            )
 
             shop_loader = get_shop_account_loader_service()
             payload = await shop_loader.load_shop_account_async(request.account_id, db)
@@ -822,7 +727,6 @@ async def start_recording(
         except Exception:
             account = None
 
-        
         if not account:
             return error_response(
                 code=ErrorCode.DATA_NOT_FOUND,
@@ -830,28 +734,26 @@ async def start_recording(
                 status_code=404,
                 recovery_suggestion="请检查店铺账号ID是否正确，或在账号管理中先添加店铺账号",
             )
-        
+
         # 启动录制会话
         recorder_session.start(
-            request.platform,
-            request.component_type,
-            request.account_id
+            request.platform, request.component_type, request.account_id
         )
-        
+
         # 启动Playwright浏览器(使用subprocess在独立进程中运行)
         # 在单独线程中启动subprocess,避免阻塞API响应
         thread = threading.Thread(
             target=_launch_playwright_browser_subprocess,
             args=(account, request.platform, request.component_type),
-            daemon=True
+            daemon=True,
         )
         thread.start()
-        
+
         logger.info(
             f"Recording started: {request.platform}/{request.component_type} "
             f"with account {request.account_id}"
         )
-        
+
         return {
             "success": True,
             "message": "录制流程已启动,正在进行录制前门禁检查...",
@@ -875,7 +777,7 @@ async def start_recording(
                 },
             },
         }
-    
+
     except HTTPException as he:
         logger.error(f"HTTPException in start_recording: {he.detail}", exc_info=True)
         raise he
@@ -892,14 +794,14 @@ async def start_recording(
 def _parse_inspector_output() -> Dict[str, Any]:
     """
     解析 Inspector 模式的输出(Trace 文件或步骤 JSON)
-    
+
     v4.7.5: 优先读取步骤 JSON 文件(由录制脚本生成)
     如果不存在,则解析 Trace 文件
-    
+
     Phase 11: 支持发现模式,返回完整的数据结构
     - 步骤模式: {"mode": "steps", "steps": [...]}
     - 发现模式: {"mode": "discovery", "open_action": {...}, "available_options": [...]}
-    
+
     Returns:
         Dict: 包含 mode 和相应数据的字典
     """
@@ -909,65 +811,67 @@ def _parse_inspector_output() -> Dict[str, Any]:
         if steps_path.exists():
             logger.info(f"Reading steps from JSON file: {steps_path}")
             try:
-                with open(steps_path, 'r', encoding='utf-8') as f:
+                with open(steps_path, "r", encoding="utf-8") as f:
                     steps_data = json.load(f)
-                
+
                 # Phase 11: 检查是否为发现模式
-                mode = steps_data.get('mode', 'steps')
-                
-                if mode == 'discovery':
-                    options_count = len(steps_data.get('available_options', []))
+                mode = steps_data.get("mode", "steps")
+
+                if mode == "discovery":
+                    options_count = len(steps_data.get("available_options", []))
                     logger.info(f"Loaded discovery mode: {options_count} options")
                     return {
-                        'mode': 'discovery',
-                        'open_action': steps_data.get('open_action'),
-                        'available_options': steps_data.get('available_options', []),
-                        'default_option': steps_data.get('default_option'),
-                        'test_config': steps_data.get('test_config', {}),  # Phase 12.2: 自动捕获的测试配置
+                        "mode": "discovery",
+                        "open_action": steps_data.get("open_action"),
+                        "available_options": steps_data.get("available_options", []),
+                        "default_option": steps_data.get("default_option"),
+                        "test_config": steps_data.get(
+                            "test_config", {}
+                        ),  # Phase 12.2: 自动捕获的测试配置
                     }
                 else:
-                    parsed_steps = steps_data.get('steps', [])
+                    parsed_steps = steps_data.get("steps", [])
                     logger.info(f"Loaded {len(parsed_steps)} steps from JSON file")
                     return {
-                        'mode': 'steps',
-                        'steps': parsed_steps,
+                        "mode": "steps",
+                        "steps": parsed_steps,
                     }
-                
+
             except Exception as e:
                 logger.error(f"Failed to read steps JSON: {e}", exc_info=True)
-    
+
     # 2. 备选:解析 Trace 文件
     if recorder_session.output_file:
         trace_path = Path(recorder_session.output_file)
-        if trace_path.exists() and trace_path.suffix == '.zip':
+        if trace_path.exists() and trace_path.suffix == ".zip":
             logger.info(f"Parsing trace file: {trace_path}")
             try:
                 from backend.utils.trace_parser import TraceParser
-                
+
                 parser = TraceParser()
                 result = parser.parse(str(trace_path))
-                
+
                 if result.success:
                     logger.info(f"Parsed {len(result.steps)} steps from trace file")
                     return {
-                        'mode': 'steps',
-                        'steps': result.steps,
+                        "mode": "steps",
+                        "steps": result.steps,
                     }
                 else:
                     logger.error(f"Trace parsing failed: {result.error}")
-                    
+
             except Exception as e:
                 logger.error(f"Failed to parse trace file: {e}", exc_info=True)
-    
+
     logger.warning("No valid output found for Inspector mode")
-    return {'mode': 'steps', 'steps': []}
+    return {"mode": "steps", "steps": []}
 
 
 @router.post("/recorder/stop")
 async def stop_recording():
     """
     停止录制(v4.7.5 支持 Inspector API)
-    
+
     功能:
     1. 等待subprocess结束
     2. 根据录制模式读取输出文件:
@@ -977,11 +881,8 @@ async def stop_recording():
     """
     try:
         if not recorder_session.active:
-            return {
-                "success": False,
-                "message": "当前没有活跃的录制会话"
-            }
-        
+            return {"success": False, "message": "当前没有活跃的录制会话"}
+
         # 等待subprocess结束(用户关闭浏览器)
         if recorder_session.playwright_task:
             logger.info("Waiting for Playwright subprocess to finish...")
@@ -993,52 +894,54 @@ async def stop_recording():
                 logger.error("Subprocess timeout, terminating...")
                 recorder_session.playwright_task.terminate()
                 recorder_session.playwright_task.wait(timeout=5)
-        
+
         # v4.8.0: 仅支持 Inspector 模式
         # Phase 11: 支持发现模式
         parsed_data = _parse_inspector_output()
-        
+
         # 更新 session 的步骤(兼容旧逻辑)
-        if parsed_data.get('mode') == 'discovery':
+        if parsed_data.get("mode") == "discovery":
             recorder_session.steps = []  # 发现模式没有 steps
-            steps_count = len(parsed_data.get('available_options', []))
+            steps_count = len(parsed_data.get("available_options", []))
         else:
-            recorder_session.steps = parsed_data.get('steps', [])
+            recorder_session.steps = parsed_data.get("steps", [])
             steps_count = len(recorder_session.steps)
-        
+
         # 关闭浏览器资源(清理subprocess引用)
         def cleanup_thread():
             try:
                 recorder_session.cleanup_sync()
             except Exception as e:
                 logger.error(f"Error during browser cleanup: {e}", exc_info=True)
-        
+
         threading.Thread(target=cleanup_thread, daemon=True).start()
-        
+
         # 停止录制
         recorder_session.stop()
-        
+
         # Phase 11: 根据模式返回不同的数据
-        mode = parsed_data.get('mode', 'steps')
-        
-        if mode == 'discovery':
+        mode = parsed_data.get("mode", "steps")
+
+        if mode == "discovery":
             logger.info(f"Recording stopped: {steps_count} options discovered")
             response = {
                 "success": True,
                 "message": f"录制已停止,共发现 {steps_count} 个选项",
                 "mode": "discovery",
                 "options_count": steps_count,
-                "open_action": parsed_data.get('open_action'),
-                "available_options": parsed_data.get('available_options', []),
-                "default_option": parsed_data.get('default_option'),
-                "test_config": parsed_data.get('test_config', {}),  # Phase 12.2: 自动捕获的测试配置
+                "open_action": parsed_data.get("open_action"),
+                "available_options": parsed_data.get("available_options", []),
+                "default_option": parsed_data.get("default_option"),
+                "test_config": parsed_data.get(
+                    "test_config", {}
+                ),  # Phase 12.2: 自动捕获的测试配置
             }
         else:
             logger.info(f"Recording stopped: {steps_count} steps recorded")
             steps = recorder_session.steps.copy()
             # 在 clear() 之前从会话取元数据并生成 Python 代码（仅 mode=steps 且存在 steps 时）
-            platform = getattr(recorder_session, 'platform', None) or ''
-            component_type = getattr(recorder_session, 'component_type', None) or ''
+            platform = getattr(recorder_session, "platform", None) or ""
+            component_type = getattr(recorder_session, "component_type", None) or ""
 
             # 根据 step_group 补充 step_type / scene_tags（6.6 步骤语义）
             steps = _enrich_steps_semantics(steps)
@@ -1051,14 +954,14 @@ async def stop_recording():
                     component_type=component_type,
                 )
 
-            python_code = ''
+            python_code = ""
             lint_errors: List[Dict[str, Any]] = []
             lint_warnings: List[Dict[str, Any]] = []
 
             if platform and component_type and steps:
                 try:
                     default_component_name = component_type
-                    _sc = getattr(recorder_session, 'success_criteria', None)
+                    _sc = getattr(recorder_session, "success_criteria", None)
                     python_code = generate_python_code(
                         platform=platform,
                         component_type=component_type,
@@ -1070,7 +973,9 @@ async def stop_recording():
                     lint_errors = lint_result.get("errors", [])
                     lint_warnings = lint_result.get("warnings", [])
                 except Exception as e:
-                    logger.error(f"Steps to Python generator failed: {e}", exc_info=True)
+                    logger.error(
+                        f"Steps to Python generator failed: {e}", exc_info=True
+                    )
 
             response = {
                 "success": True,
@@ -1087,7 +992,7 @@ async def stop_recording():
             }
         recorder_session.clear()
         return response
-    
+
     except Exception as e:
         logger.error(f"Failed to stop recording: {e}", exc_info=True)
         return error_response(
@@ -1129,7 +1034,11 @@ async def generate_python_from_steps(request: GeneratePythonRequest):
             component_type=request.component_type,
             component_name=comp_name,
             steps=steps,
-            success_criteria=request.success_criteria if isinstance(request.success_criteria, dict) else None,
+            success_criteria=(
+                request.success_criteria
+                if isinstance(request.success_criteria, dict)
+                else None
+            ),
         )
         lint_result = _analyze_python_code_for_lints(code)
         return {
@@ -1153,7 +1062,7 @@ async def generate_python_from_steps(request: GeneratePythonRequest):
 async def get_recording_steps():
     """
     获取录制步骤(用于前端轮询)
-    
+
     返回当前会话中录制的所有步骤
     """
     try:
@@ -1168,10 +1077,14 @@ async def get_recording_steps():
                 "active": recorder_session.active,
                 "steps": steps,
                 "steps_count": len(steps),
-                "started_at": recorder_session.started_at.isoformat() if recorder_session.started_at else None
-            }
+                "started_at": (
+                    recorder_session.started_at.isoformat()
+                    if recorder_session.started_at
+                    else None
+                ),
+            },
         }
-    
+
     except Exception as e:
         logger.error(f"Failed to get recording steps: {e}", exc_info=True)
         return error_response(
@@ -1235,7 +1148,11 @@ async def save_component(
             message="export 组件必须提供 data_domain。",
             status_code=400,
         )
-    if request.data_domain and request.data_domain in DATA_DOMAIN_SUB_TYPES and not request.sub_domain:
+    if (
+        request.data_domain
+        and request.data_domain in DATA_DOMAIN_SUB_TYPES
+        and not request.sub_domain
+    ):
         return error_response(
             code=ErrorCode.PARAMETER_INVALID,
             message=f"data_domain={request.data_domain} 有子类型，必须提供 sub_domain。",
@@ -1249,10 +1166,14 @@ async def save_component(
             and request.success_criteria
             and isinstance(request.success_criteria, dict)
         ):
-            code_to_write = _inject_login_success_criteria_block(code_to_write, request.success_criteria)
+            code_to_write = _inject_login_success_criteria_block(
+                code_to_write, request.success_criteria
+            )
 
         # 7.3.2 阻断层：对最终写盘代码进行校验，避免注入后绕过 lint
-        block_on_lint_error = os.environ.get("LINT_BLOCK_SAVE_ON_ERROR", "true").lower() == "true"
+        block_on_lint_error = (
+            os.environ.get("LINT_BLOCK_SAVE_ON_ERROR", "true").lower() == "true"
+        )
         if block_on_lint_error:
             lint_result = _analyze_python_code_for_lints(code_to_write)
             if lint_result.get("errors"):
@@ -1261,7 +1182,10 @@ async def save_component(
                     message="代码存在规范问题，请根据下方提示修复后再保存。",
                     status_code=400,
                     recovery_suggestion="修复 lint 报错后可重试保存；临时关闭门禁可设置环境变量 LINT_BLOCK_SAVE_ON_ERROR=false",
-                    data={"lint_errors": lint_result["errors"], "lint_warnings": lint_result.get("warnings", [])},
+                    data={
+                        "lint_errors": lint_result["errors"],
+                        "lint_warnings": lint_result.get("warnings", []),
+                    },
                 )
 
         component_name = build_component_name(
@@ -1275,11 +1199,15 @@ async def save_component(
         from modules.core.path_manager import get_project_root
 
         project_root = Path(get_project_root())
-        component_dir = project_root / "modules" / "platforms" / request.platform / "components"
+        component_dir = (
+            project_root / "modules" / "platforms" / request.platform / "components"
+        )
         component_dir.mkdir(parents=True, exist_ok=True)
 
         result = await db.execute(
-            select(ComponentVersion).where(ComponentVersion.component_name == component_name)
+            select(ComponentVersion).where(
+                ComponentVersion.component_name == component_name
+            )
         )
         existing_versions = result.scalars().all()
         versions = [v.version for v in existing_versions]
@@ -1287,12 +1215,16 @@ async def save_component(
         suffix = version_to_filename_suffix(next_ver)
         filename = f"{base_name}_{suffix}.py"
         file_path = component_dir / filename
-        relative_file_path = f"modules/platforms/{request.platform}/components/{filename}"
+        relative_file_path = (
+            f"modules/platforms/{request.platform}/components/{filename}"
+        )
 
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(code_to_write)
 
-        logger.info(f"Python component saved: {component_name} v{next_ver} -> {filename}")
+        logger.info(
+            f"Python component saved: {component_name} v{next_ver} -> {filename}"
+        )
 
         now = datetime.now(timezone.utc)
         new_version = ComponentVersion(
@@ -1315,7 +1247,9 @@ async def save_component(
             try:
                 cache_service = http_request.app.state.cache_service
                 await cache_service.invalidate("component_versions")
-                logger.debug("[Cache] component_versions invalidated after recorder save")
+                logger.debug(
+                    "[Cache] component_versions invalidated after recorder save"
+                )
             except Exception as ce:
                 logger.warning(f"[Cache] Failed to invalidate component_versions: {ce}")
 
@@ -1332,7 +1266,7 @@ async def save_component(
                 "file_path": relative_file_path,
             },
         }
-    
+
     except HTTPException as he:
         logger.error("Re-raising HTTPException from save_component: %s", he)
         raise he
@@ -1350,24 +1284,21 @@ async def save_component(
 async def add_recording_step(step: Dict[str, Any]):
     """
     添加录制步骤(由Playwright监听器调用)
-    
+
     这个endpoint用于后台服务推送录制的步骤
     """
     try:
         if not recorder_session.active:
-            return {
-                "success": False,
-                "message": "当前没有活跃的录制会话"
-            }
-        
+            return {"success": False, "message": "当前没有活跃的录制会话"}
+
         recorder_session.add_step(step)
-        
+
         return {
             "success": True,
-            "step_id": step.get('id'),
-            "steps_count": len(recorder_session.steps)
+            "step_id": step.get("id"),
+            "steps_count": len(recorder_session.steps),
         }
-    
+
     except Exception as e:
         logger.error(f"Failed to add recording step: {e}", exc_info=True)
         return error_response(
@@ -1376,26 +1307,40 @@ async def add_recording_step(step: Dict[str, Any]):
             status_code=500,
             recovery_suggestion="请确认录制会话处于活跃状态，稍后重试",
         )
+
+
 @router.get("/recorder/status", response_model=RecorderStatusResponse)
 async def get_recorder_status():
     """获取录制器状态"""
     runtime_status = _read_recorder_runtime_status(recorder_session.status_file)
     payload = _build_recorder_status_payload(
         state=runtime_status.get("state") if runtime_status else recorder_session.state,
-        gate_stage=runtime_status.get("gate_stage") if runtime_status else recorder_session.gate_stage,
-        ready_to_record=runtime_status.get("ready_to_record") if runtime_status else recorder_session.ready_to_record,
+        gate_stage=(
+            runtime_status.get("gate_stage")
+            if runtime_status
+            else recorder_session.gate_stage
+        ),
+        ready_to_record=(
+            runtime_status.get("ready_to_record")
+            if runtime_status
+            else recorder_session.ready_to_record
+        ),
         active=recorder_session.active,
         platform=recorder_session.platform,
         component_type=recorder_session.component_type,
         steps_count=len(recorder_session.steps),
         started_at=recorder_session.started_at,
-        error_message=(runtime_status or {}).get("error_message") or recorder_session.error_message,
+        error_message=(runtime_status or {}).get("error_message")
+        or recorder_session.error_message,
         verification_type=(runtime_status or {}).get("verification_type"),
         verification_screenshot=(runtime_status or {}).get("verification_screenshot"),
         verification_id=(runtime_status or {}).get("verification_id"),
         verification_message=(runtime_status or {}).get("verification_message"),
         verification_expires_at=(runtime_status or {}).get("verification_expires_at"),
-        verification_attempt_count=(runtime_status or {}).get("verification_attempt_count") or 0,
+        verification_attempt_count=(runtime_status or {}).get(
+            "verification_attempt_count"
+        )
+        or 0,
     )
     return {"success": True, "data": payload}
 
@@ -1405,7 +1350,10 @@ async def get_recorder_verification_screenshot():
     from fastapi.responses import FileResponse
 
     runtime_status = _read_recorder_runtime_status(recorder_session.status_file)
-    if not runtime_status or runtime_status.get("state") != "login_verification_pending":
+    if (
+        not runtime_status
+        or runtime_status.get("state") != "login_verification_pending"
+    ):
         return error_response(
             code=ErrorCode.PARAMETER_INVALID,
             message="当前录制流程不需要验证码截图",
@@ -1413,8 +1361,14 @@ async def get_recorder_verification_screenshot():
             recovery_suggestion="请先确认录制状态为等待验证码",
         )
 
-    filename = runtime_status.get("verification_screenshot") or "verification_screenshot.png"
-    status_dir = Path(recorder_session.status_file).parent if recorder_session.status_file else None
+    filename = (
+        runtime_status.get("verification_screenshot") or "verification_screenshot.png"
+    )
+    status_dir = (
+        Path(recorder_session.status_file).parent
+        if recorder_session.status_file
+        else None
+    )
     file_path = status_dir / filename if status_dir else None
     if not file_path or not file_path.exists():
         return error_response(
@@ -1447,7 +1401,10 @@ async def get_recorder_segment_artifact(name: str):
 @router.post("/recorder/resume")
 async def resume_recorder_verification(body: RecorderResumeRequest):
     runtime_status = _read_recorder_runtime_status(recorder_session.status_file)
-    if not runtime_status or runtime_status.get("state") != "login_verification_pending":
+    if (
+        not runtime_status
+        or runtime_status.get("state") != "login_verification_pending"
+    ):
         return error_response(
             code=ErrorCode.PARAMETER_INVALID,
             message="当前录制流程不在验证码回填状态",
@@ -1496,7 +1453,9 @@ async def resume_recorder_verification(body: RecorderResumeRequest):
             store = VerificationStateStore(
                 storage_path=_get_recorder_verification_store_path()
             )
-            existing_payload = _build_verification_payload_from_runtime_status(runtime_status or {})
+            existing_payload = _build_verification_payload_from_runtime_status(
+                runtime_status or {}
+            )
             if existing_payload:
                 store.save(existing_payload)
             submitted_payload = VerificationService(store=store).mark_submitted(
@@ -1505,10 +1464,15 @@ async def resume_recorder_verification(body: RecorderResumeRequest):
             if recorder_session.status_file:
                 updated_runtime_status = dict(runtime_status or {})
                 updated_runtime_status["state"] = submitted_payload["state"]
-                updated_runtime_status["verification_attempt_count"] = submitted_payload.get(
-                    "attempt_count", updated_runtime_status.get("verification_attempt_count", 0)
+                updated_runtime_status["verification_attempt_count"] = (
+                    submitted_payload.get(
+                        "attempt_count",
+                        updated_runtime_status.get("verification_attempt_count", 0),
+                    )
                 )
-                _write_recorder_runtime_status(Path(recorder_session.status_file), updated_runtime_status)
+                _write_recorder_runtime_status(
+                    Path(recorder_session.status_file), updated_runtime_status
+                )
         except Exception as e:
             logger.warning(f"Failed to mark recorder verification submitted: {e}")
 
