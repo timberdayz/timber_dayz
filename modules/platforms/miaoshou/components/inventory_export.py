@@ -32,6 +32,14 @@ class MiaoshouInventoryExport(ExportComponent):
     component_type = "export"
     data_domain = "inventory"
 
+    # 采集阶段名（写进步骤日志的 details.step_id，前端 getStepLabel 依赖它）
+    STAGE_NAVIGATION_READY = "navigation_ready"
+    STAGE_POPUP_CLEARED = "popup_cleared"
+    STAGE_WAREHOUSE_SCOPE_READY = "warehouse_scope_ready"
+    STAGE_SEARCH_RESULTS_READY = "search_results_ready"
+    STAGE_EXPORT_DIALOG_READY = "export_dialog_ready"
+    STAGE_DOWNLOAD_SAVED = "download_saved"
+
     def __init__(
         self, ctx: ExecutionContext, selectors: InventorySelectors | None = None
     ) -> None:
@@ -39,6 +47,8 @@ class MiaoshouInventoryExport(ExportComponent):
         self.sel = selectors or InventorySelectors()
         self.navigation_component = MiaoshouNavigation(ctx, self.sel)
         self.warehouse_filters_component = MiaoshouWarehouseFilters(ctx, self.sel)
+        # 当前阶段名：失败时用它给步骤日志一个准确的 step_id
+        self._current_stage = self.STAGE_NAVIGATION_READY
 
     async def _first_visible_selector(
         self, page: Any, selectors: tuple[str, ...], *, timeout: int = 1500
@@ -360,30 +370,150 @@ class MiaoshouInventoryExport(ExportComponent):
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
-            nav_result = await self.navigation_component.run(
-                page, TargetPage.WAREHOUSE_CHECKLIST
-            )
-            if not nav_result.success:
-                raise RuntimeError(nav_result.message or "navigation failed")
-
-            await self._ensure_popup_closed(page)
-
-            filter_result = await self.warehouse_filters_component.run(
-                page, {"select_all": True}
-            )
-            if not filter_result.success:
-                raise RuntimeError(filter_result.message or "warehouse filters failed")
-
-            await self._click_search(page)
-            await self._wait_search_results_ready(page)
-            await self._open_export_dialog(page)
-            await self._ensure_export_fields_all_selected(page)
-
-            download = await self._expect_download_with_pageerror_guard(page)
-
-            target = await self._wait_download_complete(page, download)
+            await self._navigate_to_warehouse_checklist(page)
+            await self._select_warehouse_scope(page)
+            await self._search_and_wait(page)
+            await self._open_export_dialog_and_select_all(page)
+            target = await self._export_and_save(page)
             return ExportResult(
                 success=True, message="download complete", file_path=str(target)
             )
         except Exception as e:
-            return ExportResult(success=False, message=str(e), file_path=None)
+            screenshot_path = await self._capture_failure_screenshot(page, "export")
+            message = str(e)
+            if screenshot_path:
+                message = f"{message} (screenshot: {screenshot_path})"
+            await self.report_step(
+                "step_failed",
+                step_id=self._current_stage,
+                action="导出流程失败",
+                error=message,
+                screenshot_path=screenshot_path or "",
+            )
+            return ExportResult(success=False, message=message, file_path=None)
+
+    async def _navigate_to_warehouse_checklist(self, page: Any) -> None:
+        self._current_stage = self.STAGE_NAVIGATION_READY
+        await self.report_step(
+            "step_start", step_id=self.STAGE_NAVIGATION_READY, action="导航到仓库清单"
+        )
+        nav_result = await self.navigation_component.run(
+            page, TargetPage.WAREHOUSE_CHECKLIST
+        )
+        if not nav_result.success:
+            raise RuntimeError(
+                f"navigation_failed: {nav_result.message or 'navigation failed'}"
+            )
+        await self.report_step(
+            "step_success", step_id=self.STAGE_NAVIGATION_READY, action="已到仓库清单"
+        )
+
+        # 弹窗清理的**生产主责不在组件**：执行器在每域导出前调 close_popups，
+        # navigation 内部已有 stabilize_safe_notices 调用。组件侧这一份
+        # _ensure_popup_closed 是历史重复实现，收回统一机制属 L4-2（批次 4）。
+        # 本批次只保留调用（删掉会改变行为），并如实记录阶段事件。
+        self._current_stage = self.STAGE_POPUP_CLEARED
+        try:
+            await self._ensure_popup_closed(page)
+        except Exception as e:
+            raise RuntimeError(f"popup_cleanup_failed: {e}") from e
+        await self.report_step(
+            "step_success",
+            step_id=self.STAGE_POPUP_CLEARED,
+            action="弹窗清理阶段结束",
+        )
+
+    async def _select_warehouse_scope(self, page: Any) -> None:
+        self._current_stage = self.STAGE_WAREHOUSE_SCOPE_READY
+        await self.report_step(
+            "step_start",
+            step_id=self.STAGE_WAREHOUSE_SCOPE_READY,
+            action="仓库范围筛选",
+        )
+        filter_result = await self.warehouse_filters_component.run(
+            page, {"select_all": True}
+        )
+        if not filter_result.success:
+            raise RuntimeError(
+                f"warehouse_scope_failed: {filter_result.message or 'warehouse filters failed'}"
+            )
+        await self.report_step(
+            "step_success",
+            step_id=self.STAGE_WAREHOUSE_SCOPE_READY,
+            action="仓库范围已全选",
+        )
+
+    async def _search_and_wait(self, page: Any) -> None:
+        self._current_stage = self.STAGE_SEARCH_RESULTS_READY
+        await self.report_step(
+            "step_start",
+            step_id=self.STAGE_SEARCH_RESULTS_READY,
+            action="搜索并等待结果",
+        )
+        try:
+            await self._click_search(page)
+            await self._wait_search_results_ready(page)
+        except Exception as e:
+            raise RuntimeError(f"search_failed: {e}") from e
+        await self.report_step(
+            "step_success",
+            step_id=self.STAGE_SEARCH_RESULTS_READY,
+            action="搜索结果就绪",
+        )
+
+    async def _open_export_dialog_and_select_all(self, page: Any) -> None:
+        self._current_stage = self.STAGE_EXPORT_DIALOG_READY
+        await self.report_step(
+            "step_start", step_id=self.STAGE_EXPORT_DIALOG_READY, action="打开导出弹窗"
+        )
+        try:
+            await self._open_export_dialog(page)
+            await self._ensure_export_fields_all_selected(page)
+        except Exception as e:
+            raise RuntimeError(f"export_dialog_failed: {e}") from e
+        await self.report_step(
+            "step_success",
+            step_id=self.STAGE_EXPORT_DIALOG_READY,
+            action="导出字段已全选",
+        )
+
+    async def _export_and_save(self, page: Any) -> Path:
+        self._current_stage = self.STAGE_DOWNLOAD_SAVED
+        await self.report_step(
+            "step_start", step_id=self.STAGE_DOWNLOAD_SAVED, action="触发导出并落盘"
+        )
+        try:
+            download = await self._expect_download_with_pageerror_guard(page)
+            target = await self._wait_download_complete(page, download)
+        except Exception as e:
+            raise RuntimeError(f"download_failed: {e}") from e
+        await self.report_step(
+            "step_success", step_id=self.STAGE_DOWNLOAD_SAVED, action="文件已落盘"
+        )
+        return target
+
+    async def _capture_failure_screenshot(self, page: Any, stage: str) -> str | None:
+        """失败时截图落盘到 ctx.config['task']['screenshot_dir']（对齐 TikTok products_export）。
+
+        截图失败不得影响主流程。
+        """
+        screenshot_dir = ""
+        config = self.ctx.config or {}
+        task_cfg = config.get("task") if isinstance(config, dict) else None
+        if isinstance(task_cfg, dict):
+            screenshot_dir = str(task_cfg.get("screenshot_dir") or "")
+        if not screenshot_dir:
+            return None
+
+        try:
+            target_dir = Path(screenshot_dir)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = target_dir / f"miaoshou_inventory_{stage}_{stamp}.png"
+            await page.screenshot(path=str(path))
+            return str(path)
+        except Exception as e:
+            logger = self.logger
+            if logger:
+                logger.warning(f"inventory export 截图失败（已忽略）: {e}")
+            return None

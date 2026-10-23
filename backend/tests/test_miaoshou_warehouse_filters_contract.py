@@ -39,6 +39,18 @@ def _overlay(*, checked: bool = False) -> FakeLocator:
     )
 
 
+def _container(selected_tags: list[str] | None) -> FakeLocator:
+    """构造 .jx-select 容器外壳，含选中区与 .jx-tag 集合。"""
+    return FakeLocator(
+        children={
+            ".jx-select__selected-item": FakeLocator(
+                children={".jx-tag": FakeTagList(selected_tags or [])},
+                count=1 if selected_tags else 0,
+            )
+        }
+    )
+
+
 def _page(
     *,
     trigger_intercepted: bool = False,
@@ -65,14 +77,7 @@ def _page(
         intercept_clicks=trigger_intercepted,
         fail_clicks=99 if trigger_always_fails else 0,
     )
-    container = FakeLocator(
-        children={
-            ".jx-select__selected-item": FakeLocator(
-                children={".jx-tag": FakeTagList(selected_tags or [])},
-                count=1 if selected_tags else 0,
-            )
-        }
-    )
+    container = _container(selected_tags)
     if container_available:
         label_input.children = {CONTAINER_XPATH: container}
 

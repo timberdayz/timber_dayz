@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from modules.apps.collection_center.retry_strategy import RetryStrategy
@@ -228,6 +230,24 @@ class MiaoshouWarehouseFilters(ComponentBase):
             except Exception:
                 continue
 
+    async def _ensure_scope_all_selected(self, overlay: Any) -> None:
+        """在下拉浮层里把「全选」勾上。"""
+        full_select = overlay.get_by_role("checkbox", name="全选").first
+        try:
+            await full_select.wait_for(state="visible", timeout=2000)
+        except Exception:
+            full_select = overlay.locator(
+                "label:has-text('全选') input[type='checkbox']"
+            ).first
+            await full_select.wait_for(state="attached", timeout=2000)
+
+        checked = await self._is_checkbox_selected(full_select)
+        if not checked:
+            try:
+                await overlay.get_by_text("全选", exact=True).first.click(timeout=1000)
+            except Exception:
+                await full_select.click(timeout=1000)
+
     async def run(self, page: Any, filters: dict[str, Any] | None = None) -> ResultBase:  # type: ignore[override]
         try:
             await self.report_step(
@@ -246,34 +266,50 @@ class MiaoshouWarehouseFilters(ComponentBase):
                     details={"select_all": True, "skipped": True},
                 )
 
-            full_select = overlay.get_by_role("checkbox", name="全选").first
-            try:
-                await full_select.wait_for(state="visible", timeout=2000)
-            except Exception:
-                full_select = overlay.locator(
-                    "label:has-text('全选') input[type='checkbox']"
-                ).first
-                await full_select.wait_for(state="attached", timeout=2000)
-
-            checked = await self._is_checkbox_selected(full_select)
-            if not checked:
-                try:
-                    await overlay.get_by_text("全选", exact=True).first.click(
-                        timeout=1000
-                    )
-                except Exception:
-                    await full_select.click(timeout=1000)
-
+            await self._ensure_scope_all_selected(overlay)
             await self._ensure_popup_closed(page)
             await self.report_step(
                 "step_success", step_id="warehouse_scope_ready", action="仓库范围已全选"
             )
             return ResultBase(success=True, message="ok", details={"select_all": True})
         except Exception as e:
+            screenshot_path = await self._capture_failure_screenshot(
+                page, "warehouse_scope"
+            )
+            message = str(e)
+            if screenshot_path:
+                message = f"{message} (screenshot: {screenshot_path})"
             await self.report_step(
                 "step_failed",
                 step_id="warehouse_scope_ready",
                 action="仓库范围筛选失败",
-                error=str(e),
+                error=message,
+                screenshot_path=screenshot_path or "",
             )
-            return ResultBase(success=False, message=str(e))
+            return ResultBase(success=False, message=message)
+
+    async def _capture_failure_screenshot(self, page: Any, stage: str) -> str | None:
+        """失败时截图落盘到 ctx.config['task']['screenshot_dir']。
+
+        截图失败不得影响主流程。
+        """
+        screenshot_dir = ""
+        config = self.ctx.config or {}
+        task_cfg = config.get("task") if isinstance(config, dict) else None
+        if isinstance(task_cfg, dict):
+            screenshot_dir = str(task_cfg.get("screenshot_dir") or "")
+        if not screenshot_dir:
+            return None
+
+        try:
+            target_dir = Path(screenshot_dir)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = target_dir / f"miaoshou_{stage}_{stamp}.png"
+            await page.screenshot(path=str(path))
+            return str(path)
+        except Exception as e:
+            logger = self.logger
+            if logger:
+                logger.warning(f"warehouse filters 截图失败（已忽略）: {e}")
+            return None
