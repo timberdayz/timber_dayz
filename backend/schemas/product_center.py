@@ -868,6 +868,10 @@ class FeishuProjectionInitializeRequest(BaseModel):
     spu_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
     sku_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
     platform_sku_profit_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    # 调价记录表：ERP 只往这里**新增**行，行归档由飞书机器人负责
+    price_adjust_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    # 调价记录表所在的**多维表格 token**。留空则回落到 FEISHU_PRODUCT_BASE_TOKEN。
+    price_adjust_base_token: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
 class ProfitEstimateCreateRequest(BaseModel):

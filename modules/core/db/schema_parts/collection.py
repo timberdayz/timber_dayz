@@ -889,6 +889,44 @@ class CloudSyncReceiveLog(Base):
     )
 
 
+class PriceAdjustBaseline(Base):
+    """最低售价变更通知的**基线**：上一次已处理的最低售价与定价输入快照。
+
+    为什么单独一张表、而不是挂在 ``core.dim_erp_sku`` 上：
+
+    商品中心的 SKU 主数据有一条「采集机 → 云端」的同步链路，
+    它对 ``core.dim_erp_sku`` 做的是 **TRUNCATE + 全量重灌**（保证两边完全一致）。
+    基线若住在那张表里，每次同步都会被抹成"从未处理过"：
+
+    - 系统重新建基线（不发通知）
+    - **同步窗口内真实发生的底线变化会被静默吞掉** —— 与"一个都不能漏"直接冲突
+
+    所以基线必须住在**不参与商品中心同步**的表里。``ops`` 域与
+    ``feishu_projection_tasks``（通知 outbox）同域，语义一致：
+    都是"通知进度状态"，不是"商品主数据"。
+
+    判据是「有没有行」而不是「价格列是不是 NULL」：
+    算不出最低售价的 SKU（缺采购成本 / 缺 SPU 率）它的基线价格本来就是 NULL，
+    但它同样被处理过、同样有上下文。
+    """
+
+    __tablename__ = "price_adjust_baselines"
+
+    sku_id = Column(Integer, primary_key=True, autoincrement=False)
+    # 上一次已处理的最低售价；NULL = 当时算不出底线（本身就是一个有效的基线状态）
+    last_notified_min_price = Column(Numeric(18, 2), nullable=True)
+    # 上一次已处理的定价输入快照（档位 / 库龄 / 成本 / 费率 / 参考售价 / 来源标记），
+    # 用于判断"这次为什么变"并区分"下架造成的跳高"这类语义上不成立的变更。
+    last_notified_context = Column(JSON_COMPAT, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_price_adjust_baselines_updated", "updated_at"),
+        {"schema": "ops"},
+    )
+
+
 class FeishuProjectionConfig(Base):
     """Non-secret identifiers for the product-center Feishu projection."""
 
@@ -899,6 +937,15 @@ class FeishuProjectionConfig(Base):
     spu_table_id = Column(String(64), nullable=True)
     sku_table_id = Column(String(64), nullable=True)
     platform_sku_profit_table_id = Column(String(64), nullable=True)
+    # 调价记录表：ERP 侧把最低售价变更**新增**成行的目标表。
+    # 与上面三张「状态镜像表」语义不同——镜像是覆盖更新，这里是只增不改，
+    # 行归档由飞书机器人负责，ERP 不管行去哪。
+    price_adjust_table_id = Column(String(64), nullable=True)
+    # 调价记录表所在的**多维表格 token**。
+    # 为什么要独立配置：调价记录表通常和三张状态镜像表**不在同一个多维表格**里
+    # （镜像表在 ERP 专用 base，调价记录表在团队协作 base）。
+    # 留空则回落到 FEISHU_PRODUCT_BASE_TOKEN（与镜像表同一个 base）。
+    price_adjust_base_token = Column(String(64), nullable=True)
     initialized_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String(32), nullable=False, default="pending")
     last_error = Column(Text, nullable=True)

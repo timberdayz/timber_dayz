@@ -113,9 +113,11 @@ from backend.services.product_profit_service import (
 from backend.services.product_pricing_service import (
     POLICY_REJECT_FUTURE,
     PolicyUpdateRejected,
-    compute_sku_pricing,
     resolve_policy_update,
-    select_age_tier,
+)
+from backend.services.product_pricing_query_service import (
+    compute_pricing_for_sku as _compute_pricing_for_sku,
+    load_pricing_context as _pricing_context,
 )
 from backend.services.sku_pricing_policy_service import (
     load_current_policies,
@@ -1159,129 +1161,16 @@ async def bulk_save_spus(body: SpuBulkRequest, db: AsyncSession = Depends(get_as
 #
 # 业务判断全部在 backend/services/product_pricing_service.py 的纯函数里，
 # 这里只做「ORM 行 → 标量」的适配与批量取数。
-
-
-# 库龄查询用**展开式绑定参数**（expanding=True），不用 `= ANY(:keys)`。
-# 原因：`ANY($1)` 在 asyncpg 下要求驱动能推断出数组类型，
-# 而 `text()` 没有类型信息，可能直接报「could not determine data type of parameter」，
-# 然后被 `except Exception` 静默吞掉——库龄永远回落「日常」档且**没有任何报错**。
-# expanding=True 会渲染成 `IN (?, ?, ...)`，逐个绑定字符串，asyncpg 无需推断数组类型。
-_AGE_LOOKUP_STMT = text(
-    "SELECT product_sku, MIN(age_days) AS age_days "
-    "FROM mart.inventory_age_current "
-    "WHERE product_sku IN :keys "
-    "GROUP BY product_sku"
-).bindparams(bindparam("keys", expanding=True))
-
-
-async def _load_age_days_by_sku(db: AsyncSession, sku_ids: list[int]) -> dict[int, int]:
-    """按 product_sku -> dim_erp_sku.sku_key 关联取当前库龄。
-
-    mart.inventory_age_current.sku_id 是 varchar 的平台侧 id，
-    与 dim_erp_sku.sku_id(integer) 不是一回事，必须走 product_sku -> sku_key。
-
-    ⚠️ 必须容错：mart 是 raw SQL 层（sql/mart/*.sql），不在 Base.metadata 里。
-    测试库的 conftest 只建 core/a_class/b_class/c_class/finance/ops 六个 schema，
-    没有 mart -> 裸查会抛 ProgrammingError。
-
-    ⚠️⚠️ **不能用「try/except 包住裸查」来容错**：PostgreSQL 里一条语句失败会让
-    **整个事务进入 aborted 状态**，后续所有语句都抛 `InFailedSQLTransactionError`。
-    那样「查不到就回落日常档」的承诺根本不成立——不是这里返回空 dict，
-    而是整个 `list_skus` / 候选接口在后面某处 500。
-
-    正确做法（两步）：
-    1. 先用 `SELECT to_regclass('mart.inventory_age_current')` 探测表是否存在——
-       不存在就**根本不发出那条会失败的查询**，事务毫发无损；
-    2. 万一表存在但查询仍失败（列变了、权限不足等），用 `db.begin_nested()` 开一个
-       SAVEPOINT 包住它，异常时只回滚到保存点，外层事务仍然可用。
-    """
-    if not sku_ids:
-        return {}
-    rows = (await db.execute(
-        select(DimErpSku.sku_id, DimErpSku.sku_key)
-        .where(DimErpSku.sku_id.in_(sku_ids))
-    )).all()
-    key_to_sku = {row.sku_key: row.sku_id for row in rows}
-    if not key_to_sku:
-        return {}
-    try:
-        async with db.begin_nested():
-            exists = (await db.execute(
-                text("SELECT to_regclass('mart.inventory_age_current')")
-            )).scalar()
-            if not exists:
-                # mart 层不存在：不发出会失败的查询，事务保持健康
-                return {}
-            age_rows = (await db.execute(
-                _AGE_LOOKUP_STMT,
-                {"keys": list(key_to_sku)},
-            )).all()
-    except Exception as exc:
-        # 保存点回滚后外层事务仍可用：按无库龄处理，回落「日常」档。
-        # ⚠️ 必须留日志：表不存在、列改名、权限不足、SQL 拼错、类型推断失败
-        # 全部退化成同一种「无库龄数据」，不记日志的话，库龄管道坏了运维无从发现。
-        logger.warning("pricing age lookup failed, falling back to the base tier: %s", exc)
-        return {}
-    return {key_to_sku[row.product_sku]: row.age_days for row in age_rows if row.product_sku in key_to_sku}
-
-
-async def _pricing_context(db: AsyncSession, sku_ids: list[int]) -> dict:
-    """一次性把规则表、平台成本率、库龄读出来，供批量计算。"""
-    policies = await _current_policies(db)
-    policy_rows = [
-        {
-            "min_age_days": p.min_age_days,
-            "tier_label": p.tier_label,
-            "discount_rate": Decimal(str(p.discount_rate)),
-            "target_margin_rate": Decimal(str(p.target_margin_rate)),
-            "platform_basis": p.platform_basis,
-        }
-        for p in policies
-    ]
-    basis = policy_rows[0]["platform_basis"] if policy_rows else "tiktok"
-    platform = await db.get(DimPlatform, basis)
-    age_map = await _load_age_days_by_sku(db, sku_ids)
-    return {
-        "policies": policy_rows,
-        "platform": platform,
-        "age_days": age_map,
-    }
-
-
-def _compute_pricing_for_sku(
-    *,
-    context: dict,
-    sku_row,
-    linked_spu,
-) -> dict:
-    """ORM 适配层：把行数据喂给纯函数 `compute_sku_pricing`。
-
-    **这里不放任何业务判断**——降级链、取大、来源标记全在
-    `backend/services/product_pricing_service.py` 里（spec §5.1「实现时只写一处」）。
-    """
-    policies = context["policies"]
-    platform = context["platform"]
-    age_days = context["age_days"].get(sku_row.sku_id)
-
-    policy = select_age_tier(policies, age_days)
-    deepest = max(policies, key=lambda p: p["min_age_days"]) if policies else None
-
-    return compute_sku_pricing(
-        purchase_cost=sku_row.default_purchase_cost,
-        reference_selling_price=sku_row.reference_selling_price,
-        creator_commission_rate=sku_row.creator_commission_rate,
-        platform_creator_commission_rate=(
-            platform.default_creator_commission_rate if platform else None
-        ),
-        other_cost_rate=platform.other_cost_rate if platform else None,
-        spu_bound=linked_spu is not None,
-        spu_return_loss_rate=linked_spu.return_loss_rate if linked_spu else None,
-        spu_damage_rate=linked_spu.logistics_damage_rate if linked_spu else None,
-        policy=policy,
-        deepest_policy=deepest,
-        min_selling_price_override=sku_row.min_selling_price_override,
-        age_days=age_days,
-    )
+#
+# 取数与计算适配层的**唯一实现**在
+# `backend/services/product_pricing_query_service.py`：
+# - `_pricing_context` = 该模块的 `load_pricing_context`
+# - `_compute_pricing_for_sku` = 该模块的 `compute_pricing_for_sku`
+#
+# 商品中心（这里）与最低售价变更通知（backend/services/price_adjust_notify_service.py）
+# 共用同一份取数（规则行 / 平台费率 / 库龄）与同一个计算函数，
+# 否则会出现「页面按日常档显示、通知却按滞销档发」的自相矛盾。
+# 口径一致是**结构性保证**（同一个函数被两边调用），不是靠一条容易跳过的 DB 测试。
 
 
 async def _compute_sku_min_selling_price(db: AsyncSession, sku_id: int) -> Decimal | None:
@@ -3296,9 +3185,18 @@ async def initialize_feishu_projection(body: FeishuProjectionInitializeRequest, 
     spu_table_id = body.spu_table_id or os.getenv("FEISHU_PRODUCT_SPU_TABLE_ID")
     sku_table_id = body.sku_table_id or os.getenv("FEISHU_PRODUCT_SKU_TABLE_ID")
     platform_sku_profit_table_id = body.platform_sku_profit_table_id or os.getenv("FEISHU_PRODUCT_PLATFORM_SKU_PROFIT_TABLE_ID")
+    price_adjust_table_id = body.price_adjust_table_id or os.getenv("FEISHU_PRODUCT_PRICE_ADJUST_TABLE_ID")
+    price_adjust_base_token = body.price_adjust_base_token or os.getenv("FEISHU_PRODUCT_PRICE_ADJUST_BASE_TOKEN")
     client = FeishuProjectionClient()
     try:
-        config = await FeishuProjectionService(db).initialize_tables(client, spu_table_id, sku_table_id, platform_sku_profit_table_id)
+        config = await FeishuProjectionService(db).initialize_tables(
+            client,
+            spu_table_id,
+            sku_table_id,
+            platform_sku_profit_table_id,
+            price_adjust_table_id,
+            price_adjust_base_token,
+        )
         await _write_product_center_audit(
             db, _user, action_type="initialize", resource_type="feishu_projection",
             resource_id=config.provider_code,
@@ -3308,7 +3206,14 @@ async def initialize_feishu_projection(body: FeishuProjectionInitializeRequest, 
     except RuntimeError as exc:
         await db.rollback()
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {"status": config.status, "spu_table_id": config.spu_table_id, "sku_table_id": config.sku_table_id, "platform_sku_profit_table_id": config.platform_sku_profit_table_id}
+    return {
+        "status": config.status,
+        "spu_table_id": config.spu_table_id,
+        "sku_table_id": config.sku_table_id,
+        "platform_sku_profit_table_id": config.platform_sku_profit_table_id,
+        "price_adjust_table_id": config.price_adjust_table_id,
+        "price_adjust_base_token": config.price_adjust_base_token,
+    }
 
 
 @router.get("/api/feishu-projection/status")

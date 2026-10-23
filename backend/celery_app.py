@@ -34,6 +34,7 @@ celery_app = Celery(
         "backend.tasks.scheduled_tasks",
         "backend.tasks.data_sync_tasks",  # [*] v4.19.1 恢复:数据同步任务模块
         "backend.tasks.refresh_queue_tasks",
+        "backend.tasks.price_adjust_notify_tasks",  # 最低售价变更检测与飞书通知
         "backend.tasks.image_extraction",  # [*] 图片提取任务模块
         # [WARN] v4.6.0 DSS架构重构:已删除mv_refresh(Metabase直接查询原始表,无需物化视图)
         # [WARN] v4.6.0 DSS架构重构:已删除c_class_calculation(C类数据由Metabase定时计算)
@@ -64,6 +65,7 @@ celery_app.conf.update(
         'backend.tasks.data_processing.*': {'queue': 'data_processing'},
         'backend.tasks.scheduled_tasks.*': {'queue': 'scheduled'},
         'backend.tasks.data_sync_tasks.*': {'queue': 'data_sync'},  # [*] v4.19.1 恢复:数据同步队列
+        'backend.tasks.price_adjust_notify_tasks.*': {'queue': 'scheduled'},
         'extract_product_images': {'queue': 'data_processing'},  # [*] 图片提取任务路由到 data_processing 队列
     },
     
@@ -131,6 +133,16 @@ celery_app.conf.beat_schedule = {
     'backup-database-daily': {
         'task': 'backend.tasks.scheduled_tasks.backup_database',
         'schedule': crontab(hour=3, minute=0),  # 每天3:00
+    },
+
+    # 最低售价变更检测与飞书通知（每天10:00）
+    # 为什么是每天一次而不是跟库龄采集同步触发：最低售价的输入有七类
+    # （库龄档位 / 采购成本 / 平台费率 / SPU 两率 / 参考售价 / 档位规则 / 人工覆盖），
+    # 只有库龄是周节奏，其余是事件驱动。每天全量比对一次 = 任何输入变化最迟当天被抓住。
+    # 时间定在 10:00，是给 09:00 的库存采集留出缓冲（采集当天库龄才会真的前进）。
+    'price-adjust-notify-daily': {
+        'task': 'backend.tasks.price_adjust_notify_tasks.detect_and_notify_price_adjustments',
+        'schedule': crontab(hour=10, minute=0),
     },
 }
 

@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>最低售价变更通知 · 实施完成版</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f7f5f0;
+    --card:#ffffff;
+    --line:#e9e3d6;
+    --line-soft:#f0ebe0;
+    --ink:#14171e;
+    --ink-2:#3a4256;
+    --muted:#7c7a72;
+    --primary:#2f6f5e;
+    --primary-soft:rgba(47,111,94,.08);
+    --accent:#c97b3f;
+    --accent-soft:rgba(201,123,63,.10);
+    --danger:#b06367;
+    --danger-soft:rgba(176,99,103,.10);
+    --shadow:0 2px 8px rgba(0,0,0,.04);
+  }
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+    font-size:14.5px;line-height:1.62;
+    background-image:
+      radial-gradient(ellipse 900px 480px at 8% -8%, rgba(47,111,94,.055), transparent 60%),
+      radial-gradient(ellipse 760px 420px at 96% 4%, rgba(201,123,63,.05), transparent 60%);
+    background-attachment:fixed;
+  }
+  .wrap{max-width:1040px;margin:0 auto;padding:0 24px 72px;}
+  @media(min-width:768px){.wrap{padding:0 32px 88px;}}
+
+  h1,h2,h3{font-family:'DM Serif Display','Songti SC',serif;font-weight:400;letter-spacing:-.005em;}
+  h1{font-size:32px;line-height:1.28;margin:0 0 12px;}
+  h2{font-size:24px;line-height:1.32;margin:0;}
+  h3{font-size:17px;line-height:1.4;margin:0;font-family:'Outfit','PingFang SC',sans-serif;font-weight:600;letter-spacing:0;}
+  .eyebrow{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--primary);font-weight:600;margin:0 0 10px;}
+  .lede{font-size:16px;color:var(--ink-2);margin:0 0 10px;max-width:76ch;}
+  .sub{font-size:14px;color:var(--muted);margin:0;}
+
+  section{margin-top:52px;}
+  @media(min-width:768px){section{margin-top:58px;}}
+  .sec-head{display:flex;align-items:flex-start;gap:14px;margin-bottom:20px;}
+  .sec-head .ico{flex:none;width:34px;height:34px;border-radius:10px;background:var(--primary-soft);color:var(--primary);display:grid;place-items:center;}
+  .sec-head p{margin:6px 0 0;color:var(--muted);font-size:13.5px;}
+
+  .hero{padding:54px 0 8px;}
+  .hero h1{max-width:20ch;}
+  .verdict{margin-top:24px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px 24px;box-shadow:var(--shadow);}
+  .verdict p{margin:0 0 10px;font-size:15px;color:var(--ink-2);}
+  .verdict p:last-child{margin-bottom:0;}
+  .verdict strong{color:var(--ink);font-weight:600;}
+  .hero-facts{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:22px;}
+  @media(min-width:768px){.hero-facts{grid-template-columns:repeat(4,1fr);}}
+  .fact{background:var(--card);padding:16px 18px;}
+  .fact .n{font-size:23px;font-weight:600;color:var(--primary);letter-spacing:-.01em;line-height:1.2;}
+  .fact.warn .n{color:var(--accent);}
+  .fact.bad .n{color:var(--danger);}
+  .fact .t{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.4;}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);}
+  .card + .card{margin-top:12px;}
+
+  .tbl-wrap{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow);}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  thead th{text-align:left;font-weight:600;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:#fbfaf7;padding:11px 16px;border-bottom:1px solid var(--line);white-space:nowrap;}
+  tbody td{padding:12px 16px;border-bottom:1px solid var(--line-soft);color:var(--ink-2);vertical-align:top;}
+  tbody tr:last-child td{border-bottom:none;}
+  td.k{color:var(--ink);font-weight:500;white-space:nowrap;}
+  .pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:20px;white-space:nowrap;}
+  .pill.down{background:var(--accent-soft);color:#8f5a2c;}
+  .pill.up{background:var(--primary-soft);color:var(--primary);}
+  .pill.bad{background:var(--danger-soft);color:var(--danger);}
+  .pill.mute{background:#f1eee6;color:var(--muted);}
+  code{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-2);}
+  .mono{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--ink);}
+
+  .tl{list-style:none;padding:0;margin:0;position:relative;}
+  .tl::before{content:"";position:absolute;left:92px;top:8px;bottom:8px;width:2px;background:var(--line);}
+  .tl li{position:relative;padding:0 0 20px 118px;min-height:34px;}
+  .tl li:last-child{padding-bottom:0;}
+  .tl .when{position:absolute;left:0;top:1px;width:78px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);}
+  .tl li::before{content:"";position:absolute;left:86px;top:6px;width:13px;height:13px;border-radius:50%;background:var(--bg);border:2px solid var(--line);}
+  .tl li.done::before{border-color:var(--primary);background:var(--primary);}
+  .tl li.next::before{border-color:var(--accent);}
+  .tl li.key::before{border-color:var(--danger);background:var(--danger);}
+  .tl .body strong{display:block;font-weight:600;color:var(--ink);}
+  .tl .body span{font-size:13px;color:var(--muted);}
+
+  .pipe-wrap{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 18px 16px;box-shadow:var(--shadow);}
+  .pipe-wrap svg{width:100%;height:auto;display:block;}
+  .pipe-note{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);font-size:13px;color:var(--muted);}
+  .pipe-note code{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--ink-2);}
+
+  .steps{display:grid;gap:12px;}
+  .step{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:start;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;box-shadow:var(--shadow);}
+  .step .dot{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;background:var(--primary);color:#fff;}
+  .step h3{margin-bottom:5px;}
+  .step p{margin:0 0 7px;color:var(--ink-2);font-size:13.5px;}
+  .step .meta{font-size:12px;color:var(--muted);}
+  .step .meta b{color:var(--ink-2);font-weight:600;}
+  .step.hot .dot{background:var(--accent);}
+
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;}
+  .chip{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 12px;font-size:13px;color:var(--ink-2);line-height:1.4;}
+  .chip b{color:var(--ink);font-weight:600;}
+  .chip.key{background:var(--primary-soft);border-color:rgba(47,111,94,.25);color:var(--ink);}
+  .chip.new{background:var(--accent-soft);border-color:rgba(201,123,63,.28);}
+  .arrow{display:grid;place-items:center;color:var(--muted);padding:0 2px;}
+
+  .ask{counter-reset:a;display:grid;gap:10px;}
+  .ask li{list-style:none;position:relative;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 18px 15px 52px;box-shadow:var(--shadow);font-size:13.5px;color:var(--ink-2);}
+  .ask li::before{counter-increment:a;content:counter(a);position:absolute;left:17px;top:14px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--primary);background:var(--primary-soft);border-radius:6px;width:22px;height:22px;display:grid;place-items:center;}
+  .ask li b{color:var(--ink);font-weight:600;display:block;margin-bottom:2px;font-size:14px;}
+  .ask li .rec{color:var(--primary);font-weight:500;}
+
+  .risk .r{padding:14px 0;border-top:1px solid var(--line);}
+  .risk .r:first-child{border-top:none;}
+  .risk .r-t{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap;}
+  .risk .r-t strong{font-size:14px;color:var(--ink);font-weight:600;}
+  .risk .lv{font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;}
+  .risk .lv.hi{color:var(--danger);}
+  .risk .lv.mid{color:var(--accent);}
+  .risk .lv.lo{color:var(--muted);}
+  .risk p{margin:4px 0 0;font-size:13.5px;color:var(--ink-2);}
+  .fix{margin-top:5px;font-size:12.5px;color:var(--muted);}
+  .fix b{color:var(--primary);font-weight:600;}
+
+  .note{background:var(--primary-soft);border-radius:12px;padding:14px 18px;font-size:13.5px;color:var(--ink-2);margin-top:14px;}
+  .note b{color:var(--primary);}
+  .note.warn{background:var(--accent-soft);}
+  .note.warn b{color:#8f5a2c;}
+  .note.bad{background:var(--danger-soft);}
+  .note.bad b{color:var(--danger);}
+
+  .corrected{display:grid;gap:0;grid-template-columns:1fr;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow);}
+  @media(min-width:768px){.corrected{grid-template-columns:1fr 1fr;}}
+  .corrected > div{padding:18px 20px;}
+  .corrected > div + div{border-top:1px solid var(--line);}
+  @media(min-width:768px){.corrected > div + div{border-top:none;border-left:1px solid var(--line);}}
+  .corrected .lbl{font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;margin-bottom:8px;}
+  .corrected .old .lbl{color:var(--danger);}
+  .corrected .new .lbl{color:var(--primary);}
+  .corrected p{margin:0;font-size:13.5px;color:var(--ink-2);}
+  .corrected p + p{margin-top:7px;}
+
+  footer{margin-top:54px;padding-top:20px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted);}
+  footer code{font-size:11.5px;}
+  .src{display:grid;gap:6px;margin-top:12px;}
+  .src div{display:grid;grid-template-columns:250px 1fr;gap:10px;align-items:baseline;}
+  @media(max-width:640px){.src div{grid-template-columns:1fr;gap:1px;}}
+  .src .p{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink-2);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ HERO ============ -->
+  <header class="hero">
+    <p class="eyebrow">商品中心 · 实施完成版</p>
+    <h1>要调价的，一个都不能漏</h1>
+    <p class="lede">关于「最低售价调整时把信息发到飞书多维表格、人工据此调价」的审查结论与落地方案。2026-10-23 已实现。</p>
+
+    <div class="verdict">
+      <p><strong>方向已确认：</strong>凡是最低售价发生变化的 SKU，<strong>全部通知，不做任何筛选</strong>。覆盖率是这个需求的核心，系统的职责是把"变了"这件事完整、可靠地送到人眼前，而不是替业务方判断"哪些值得看"。</p>
+      <p><strong>已落地：</strong>职责边界收敛到最简——<strong>ERP 只管"检测变化 → 存基线 → 推送新增行"，机器人管归档</strong>。飞书表结构已按此建成（19 个字段，0 条记录）。ERP 侧实现为：<strong>一张独立的基线表</strong>（价格 + 归因快照）、一个每天 10:00 跑的全量比对任务、一个只做新增的批量推送。<strong>行归档到哪、是否删除，ERP 一概不管。</strong></p>
+      <p><strong>口径一致是结构性保证：</strong>页面算价与通知算价调用的是<strong>同一个函数</strong>（<code>backend/services/product_pricing_query_service.py</code>），不是"照着写了两份"。</p>
+    </div>
+
+    <div class="hero-facts">
+      <div class="fact bad"><div class="n">0</div><div class="t">最低售价自动值的落库记录<br>每次访问重新计算</div></div>
+      <div class="fact"><div class="n">1 张表</div><div class="t">实现所需的全部新增状态<br>基线价 + 归因快照</div></div>
+      <div class="fact"><div class="n">19</div><div class="t">调价记录表字段（已建）<br>等 ERP 写入，只新增不更新</div></div>
+      <div class="fact"><div class="n">1,122</div><div class="t">当前 active SKU<br>其中 495 个在库龄表内</div></div>
+    </div>
+  </header>
+
+  <!-- ============ 1. 事实确认 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="ico">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+      </div>
+      <div>
+        <h2>一、事实确认：最低售价确实没有存储</h2>
+        <p>这是整个方案成立的前提，也是过去无法通知的根本原因。</p>
+      </div>
+    </div>
+
+    <div class="pipe-wrap">
+      <svg viewBox="0 0 1040 176" role="img" aria-label="最低售价的存储现状">
+        <defs>
+          <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#b7b2a5"/>
+          </marker>
+        </defs>
+
+        <rect x="8" y="42" width="210" height="62" rx="10" fill="#ffffff" stroke="#e9e3d6"/>
+        <text x="113" y="66" text-anchor="middle" font-family="Outfit, sans-serif" font-size="14" font-weight="600" fill="#14171e">库存快照 / 库龄 / 档位</text>
+        <text x="113" y="86" text-anchor="middle" font-family="Outfit, sans-serif" font-size="10.5" fill="#7c7a72">输入齐全</text>
+
+        <line x1="220" y1="73" x2="248" y2="73" stroke="#b7b2a5" stroke-width="1.6" marker-end="url(#ar2)"/>
+
+        <rect x="252" y="42" width="210" height="62" rx="10" fill="#ffffff" stroke="#e9e3d6"/>
+        <text x="357" y="66" text-anchor="middle" font-family="Outfit, sans-serif" font-size="14" font-weight="600" fill="#14171e">现场算出最低售价</text>
+        <text x="357" y="86" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#7c7a72">compute_sku_pricing</text>
+
+        <line x1="464" y1="73" x2="492" y2="73" stroke="#b7b2a5" stroke-width="1.6" marker-end="url(#ar2)"/>
+
+        <rect x="496" y="42" width="222" height="62" rx="10" fill="#fdf6f6" stroke="#b06367" stroke-dasharray="5 4"/>
+        <text x="607" y="66" text-anchor="middle" font-family="Outfit, sans-serif" font-size="14" font-weight="600" fill="#b06367">不落库 · 用完即弃</text>
+        <text x="607" y="86" text-anchor="middle" font-family="Outfit, sans-serif" font-size="10.5" fill="#b06367">没有"之前是多少"的痕迹</text>
+
+        <path d="M742 73 h48" stroke="#b7b2a5" stroke-width="1.6" marker-end="url(#ar2)"/>
+
+        <rect x="794" y="42" width="238" height="62" rx="10" fill="#f4f8f6" stroke="rgba(47,111,94,.35)"/>
+        <text x="913" y="66" text-anchor="middle" font-family="Outfit, sans-serif" font-size="14" font-weight="600" fill="#2f6f5e">唯一落库：人工覆盖值</text>
+        <text x="913" y="86" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#7c7a72">min_selling_price_override</text>
+
+        <path d="M496 128 h536" stroke="#c9c3b4" stroke-width="1" fill="none"/>
+        <path d="M496 128 v-6 M1032 128 v-6" stroke="#c9c3b4" stroke-width="1"/>
+        <text x="764" y="148" text-anchor="middle" font-family="Outfit, sans-serif" font-size="12" fill="#7c7a72">覆盖值一旦非空 → 最低售价 = 覆盖值，库龄变化对它零影响</text>
+        <text x="764" y="166" text-anchor="middle" font-family="Outfit, sans-serif" font-size="12" fill="#7c7a72">这类 SKU 由人工接管，天然不会产生变更通知（这是对的）</text>
+      </svg>
+      <p class="pipe-note">
+        换句话说：<strong>系统能回答"现在最低卖多少钱"，但从来没有回答过"比上次是高了还是低了"。</strong>所以"这次要调价"这件事必须靠新增一个比对基线来产生，不能靠"读现有数据"推导出来。
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 2. 修正上一轮 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="ico">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+      </div>
+      <div>
+        <h2>二、上一轮方案的三处修正</h2>
+        <p>方向确认后，有三点必须改。其中第三点是我上一轮的事实性错误，主动纠正。</p>
+      </div>
+    </div>
+
+    <div class="corrected">
+      <div class="old">
+        <div class="lbl">上一轮 · 已废弃</div>
+        <p><strong>按幅度筛：</strong>只通知变动 ≥5% 或 ≥X 元的，其余合并成日报。</p>
+        <p><strong>批量熔断：</strong>单次变更 SKU 数超阈值时只发汇总，不逐条推。</p>
+        <p><strong>日常聚合推送：</strong>把同类变更打包成一条消息推。</p>
+        <p>这三项都是在替业务方做取舍，会直接造成漏通知——与需求正相反。</p>
+      </div>
+      <div class="new">
+        <div class="lbl">修订后 · 唯一标准</div>
+        <p><strong>零遗漏：</strong>凡是最低售价这个数发生变化的 SKU，全部生成通知记录，一条不落。</p>
+        <p><strong>不做前置筛选：</strong>系统不判断"这条重不重要"，只负责完整投递。</p>
+        <p><strong>重要度交给视图：</strong>紧急程度作为<strong>字段</strong>写进表里（降 / 升 / 保护失效），由运营在飞书里排序、分流，而不是由系统在推送前丢掉。</p>
+        <p>这样既满足"全都要通知"，又让运营能自己按重要度安排处理顺序。</p>
+      </div>
+    </div>
+
+    <div class="note bad" style="margin-top:14px;">
+      <b>事实纠正：</b>上一轮我说"库龄管道刚补上数据时会一次产生 495 条噪音通知"，这个判断是错的。核对过代码后：<code>select_age_tier</code> 在 <code>age_days = None</code> 和 <code>age_days = 0</code> 时选出的<strong>都是第 1 档</strong>，所以库龄管道修复前后，所有 SKU 的最低售价数值<strong>完全相同</strong>（只有 <code>pricing_tier_source</code> 从"回落档"变成"按库龄"，那不是价格变化）。<strong>冷启动噪音为零</strong>，不需要"首帧静默"这类特殊处理。
+    </div>
+  </section>
+
+  <!-- ============ 3. 最小实现 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="ico">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+      </div>
+      <div>
+        <h2>三、台账确实简单：一张表 + 一个任务</h2>
+        <p>不需要独立的台账表，也不需要复杂的设计。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:12px;">新增状态：一张独立基线表 <span style="font-family:'Outfit',sans-serif;font-size:12.5px;font-weight:500;color:var(--primary);background:var(--primary-soft);border-radius:20px;padding:2px 10px;margin-left:8px;vertical-align:middle;">已建 · 已搬迁 1122 条</span></h3>
+      <div class="tbl-wrap" style="box-shadow:none;">
+        <table>
+          <thead><tr><th>字段</th><th>含义</th><th>空值代表什么</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="k mono">sku_id</td>
+              <td>基线主键，对应 <code>core.dim_erp_sku.sku_id</code></td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td class="k mono">last_notified_min_price</td>
+              <td>上次已处理的最低售价基线</td>
+              <td>NULL = <strong>当时算不出底线</strong>（它同样被处理过、同样有上下文，不等于"没处理过"）</td>
+            </tr>
+            <tr>
+              <td class="k mono">last_notified_context</td>
+              <td>上次的定价输入快照（归因用）</td>
+              <td>NULL = 还没建基线（首次运行，只建基线不通知）。<strong>必须有它</strong>——只存价格无法区分「库龄跨档」还是「采购成本变了」</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note warn">
+        <b>为什么不能挂在 SKU 表上（实施时才发现的定时炸弹）：</b>商品中心的 SKU 主数据有一条「采集机 → 云端」的同步链路，它对 <code>core.dim_erp_sku</code> 做的是 <strong>TRUNCATE + 全量重灌</strong>。基线若住在那张表里，<strong>每次同步都会被抹成"从未处理过"</strong>——系统重新建基线不发不说，而<strong>同步窗口内真实发生的底线变化会被静默吞掉</strong>，直接违反"一个都不能漏"。这种 bug 不报错、不告警，只会表现为"有些调价没通知"，很难查。所以基线搬到 <code>ops.price_adjust_baselines</code>：与通知 outbox 同域（都是"通知进度状态"而非"商品主数据"），且不参与商品中心同步。<strong>旧的两列已从 SKU 表删除</strong>——留着空列是隐患。
+      </div>
+
+      <h3 style="margin:22px 0 12px;">每日任务：全量重算 → 逐个比对 → 有差异就通知</h3>
+      <div class="flow">
+        <div class="chip"><b>取全部 active SKU</b><br>1,122 个</div>
+        <div class="arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <div class="chip"><b>批量算价</b><br>复用现有定价纯函数</div>
+        <div class="arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <div class="chip"><b>与基线表比对</b><br>逐个 SKU 比</div>
+        <div class="arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <div class="chip new"><b>有差异 → 新增一行</b><br>一条不落，只 create</div>
+        <div class="arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <div class="chip key"><b>推送成功后更新基线</b><br>顺序不能反</div>
+      </div>
+
+      <div class="note">
+        <b>比对基准是"上次已处理的价格"，不是"上次的价格"。</b>所以一个 SKU 从 ¥128.56 变到 ¥90.82 → 通知一次，基线更新为 90.82；之后每天都还是 90.82 → 不再重复通知；若某天补货导致库龄归零、底线回到 ¥128.56 → <b>再次通知</b>（这是"可以提价了"的信号，见第六节）。
+      </div>
+      <div class="note">
+        <b>算价走共享实现：</b>页面与通知都调 <code>backend/services/product_pricing_query_service.py</code> 的同一个函数——规则行、平台费率、库龄的取数口径也只有那一份。否则会出现「页面按日常档显示、通知却按滞销档发」的自相矛盾。
+      </div>
+      <div class="note warn">
+        <b>分两个事务：</b>① <strong>检测</strong>（算价 → 比对 → 产出变更集 → 静默推进基线 → 建 outbox 任务 → commit）；② <strong>投递</strong>（批量写入飞书 → <strong>成功后</strong>回写基线 → commit）。飞书写入是外部 IO，放在长事务里既慢又危险；投递失败时任务留在 outbox 里按指数退避重试，不与检测结果一起回滚。
+      </div>
+      <div class="note">
+        <b>唯一被排除的变更：下架造成的跳高。</b>库存清零 → SKU 从库龄表消失 → 库龄回落第 1 档（目标利润率最高）→ 底线跳回全档最高位。但这个品<strong>已经不卖了</strong>，底线高低没有业务含义，不排除的话机器人会持续收到"某个已下架的品，底线从 ¥90 涨到 ¥128"。判定：库龄来源从"按库龄"变成"无库龄回落"，<strong>且其它定价输入一个都没变</strong>。
+        <br><br>这不是"筛选"——排除的是语义上根本不成立的变更。<strong>但基线仍要静默推进</strong>，否则明天还会重复判定为同一次跳高，后续真实的变化反而被噪音挡住。
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4. 飞书侧结构 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="ico">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>
+      </div>
+      <div>
+        <h2>四、真正的难点在飞书：表结构怎么定</h2>
+        <p>这是全量通知方案里唯一需要动脑的地方，原因是多维表格有硬性容量限制。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:10px;">飞书的硬限制（2026-10-23 <strong>对真实表实测</strong>）</h3>
+      <div class="tbl-wrap" style="box-shadow:none;margin-bottom:16px;">
+        <table>
+          <thead><tr><th>约束</th><th>实测值</th><th>对方案的影响</th></tr></thead>
+          <tbody>
+            <tr><td class="k">写入端点<br><span class="mono">base/v3</span></td><td><strong><code>/open-apis/base/v3/bases/{base_token}/tables/{id}/records/batch_create</code></strong><br><span style="color:var(--muted);font-size:12.5px;">body key = <code>create_records</code></span></td><td>⚠️ 旧端点 <code>bitable/v1</code> 会被直接拒掉，见下方红框</td></tr>
+            <tr><td class="k">单表记录数上限<br><span class="mono">1254103</span></td><td><strong>20,000 条</strong></td><td>行被机器人归档后不构成风险（表内只留未处理行）</td></tr>
+            <tr><td class="k">单次批量添加上限</td><td><strong>200 条</strong><br><span style="color:var(--muted);font-size:12.5px;">实测：201 条 → <code>800010701 Array must contain at most 200 element(s)</code></span></td><td>分块（比旧版 bitable/v1 的 500 更严）</td></tr>
+            <tr><td class="k">批量新增接口频率</td><td><strong>50 次/秒</strong></td><td>不是瓶颈</td></tr>
+            <tr><td class="k">同表并发写<br><span class="mono">1254291</span></td><td><strong>不支持</strong></td><td>推送必须串行，批次间留 0.5~1 秒</td></tr>
+            <tr><td class="k">单表 / 视图数上限</td><td>100 表 / 200 视图</td><td>视图分流完全够用</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note bad">
+        <b>写完代码后对着真实表打了一轮，逮到两个会让功能 100% 失效的问题。</b>（详见第八节）
+        <br><br>
+        <b>① 写入端点用错了版本。</b>旧端点 <code>/open-apis/bitable/v1/apps/{token}/tables/{id}/records/batch_create</code> 会被飞书直接拒掉：
+        <code>99992402 field validation failed</code>——<strong>连只带主字段的最小请求都过不去</strong>，所以与字段内容无关，是端点本身的问题。已改为 <code>base/v3</code>（body key <code>create_records</code>），并由单元测试 <code>test_client_uses_base_v3_endpoint_and_create_records_key</code> 守着防止回退。
+        <br><br>
+        <b>② 单次上限不是 500，是 200。</b><code>base/v3</code> 的上限比旧版小，超限直接拒整批。
+        <br><br>
+        <b>③ 调价记录表不在镜像表那个 base 里。</b>实测该 base 下 12 张表，三张 ERP 状态镜像表<strong>一张都不在</strong>。所以 base token 必须能独立配置，否则 URL 里的 base 与表对不上，必然失败。
+      </div>
+
+      <h3 style="margin-bottom:10px;">所以：ERP 侧只管新增，不管更新也不管归档</h3>
+      <p style="margin:0 0 12px;font-size:13.5px;color:var(--ink-2);">职责边界已明确——机器人负责归档，<strong>行归档到哪、是否删除，ERP 一概不管</strong>。因此 ERP 的写入语义收敛到最简单的一种：<strong>每次最低售价发生变化，就新增一行</strong>。不做 search、不做 update、不管理 record_id。</p>
+      <div class="tbl-wrap" style="box-shadow:none;">
+        <table>
+          <thead><tr><th>方案</th><th>ERP 侧动作</th><th>表内实际行数</th><th>结论</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="k">A. 每次变更新增一行</td>
+              <td>只 create，一次调用</td>
+              <td class="k" style="color:var(--primary);">≈ 未处理待办数（几百~几千）</td>
+              <td><span class="pill up">采纳</span> 行被机器人归档后表不累积</td>
+            </tr>
+            <tr>
+              <td class="k">B. 每个 SKU 恒一行</td>
+              <td>先 search 再 create / update</td>
+              <td class="k">恒定 ≈ 1,100 行</td>
+              <td><span class="pill mute">不需要</span> 多一层 search 与 update 逻辑</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <b>纠正上一轮结论：</b>上一轮写"每次变更新增一行，一年约 18 万条，必然撞 20,000 上限"——这个判断的前提是行不归档。实际分工是<strong>机器人负责归档</strong>，所以表里只留尚未处理的行，容量是"在办待办数"而非"历史累计数"，<strong>不构成风险</strong>。A 方案比 B 更简单，且额外收获：<strong>同一 SKU 在归档前的多条变更记录天然形成变更历史</strong>，运营和机器人侧都能看到完整轨迹。
+      </div>
+      <div class="note warn">
+        <b>随之而来的一个必须处理的一致性问题：</b>既然 ERP 不做 update，就没有"重写旧行"这个动作，<strong>基线必须在推送成功之后才更新</strong>。否则飞书写失败（限流、网络抖动）时基线已被推进，那次变化就永久丢失——正是"该通知的没通知"。落地方式是复用现有 outbox：先落任务（带 payload 哈希做去重），投递成功后再回写基线。
+      </div>
+
+      <h3 style="margin:22px 0 10px;">待办表的字段 <span style="font-family:'Outfit',sans-serif;font-size:12.5px;font-weight:500;color:var(--primary);background:var(--primary-soft);border-radius:20px;padding:2px 10px;margin-left:8px;vertical-align:middle;">已建 · 19 个字段 · 端到端写通</span></h3>
+      <p style="margin:0 0 10px;font-size:13px;color:var(--muted);">已在「调价记录表」落地：base <code>UCRbbZSy2a3iXvsS7O8cxyBJnnb</code> / table <code>tblRDvcTUjfOLkBH</code>。主字段为 <strong>ERP SKU</strong>，是 ERP 与机器人侧识别商品的共同口径。<strong>生产 payload 已对着这张表实测写入并逐字段读回比对，14 个字段全部一致</strong>（含「变动时间」的时区语义）。</p>
+      <div class="tbl-wrap" style="box-shadow:none;">
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>作用</th></tr></thead>
+          <tbody>
+            <tr><td class="k">ERP SKU</td><td class="mono">text（主字段）</td><td>ERP 写入的唯一标识，机器人侧据此识别是哪个商品</td></tr>
+            <tr><td class="k">SPU · 商品名称 · 规格</td><td class="mono">text</td><td>定位商品</td></tr>
+            <tr><td class="k">平台</td><td class="mono">select</td><td>TikTok / Shopee / Amazon —— <strong>第一版不填</strong>（第一版按 SKU 粒度推送，平台粒度等售价数据源打通后再细化）</td></tr>
+            <tr><td class="k">上次最低售价 · 新最低售价</td><td class="mono">currency CNY</td><td>变化本身（两个数并列，运营一眼看出幅度）</td></tr>
+            <tr><td class="k">变动幅度</td><td class="mono">number %</td><td>ERP 计算写入。约定写小数（-0.29），飞书显示 -29%</td></tr>
+            <tr><td class="k">变动方向</td><td class="mono">select</td><td>下降 / 上升 / 保护失效 —— <strong>不用于筛选，只用于排序</strong></td></tr>
+            <tr><td class="k">变动原因</td><td class="mono">select</td><td>库龄档位变化 / 采购成本变化 / 平台费率变化 / 规则调整 / 参考售价补齐 / 数据缺失 / 人工覆盖</td></tr>
+            <tr><td class="k">库龄天数 · 命中档位</td><td class="mono">number / text</td><td>让人能自行复核</td></tr>
+            <tr><td class="k">当前售价</td><td class="mono">currency CNY</td><td>用于对照新底线判断该改成多少 —— <strong>第一版不填</strong>：目前没有可靠数据源（<code>SkuOperatingProfile.selling_price</code> 靠人工维护、覆盖率未知），<strong>填一个可能错的数比留空更危险</strong></td></tr>
+            <tr><td class="k">库存数量 · 库存金额</td><td class="mono">number / currency</td><td>定处理顺序</td></tr>
+            <tr><td class="k">变动时间</td><td class="mono">datetime</td><td>本次变化被发现的时间。ERP 建议写带时区 ISO 或毫秒时间戳</td></tr>
+            <tr><td class="k">完成</td><td class="mono">checkbox</td><td><strong>人工勾选。机器人监听本字段做归档</strong></td></tr>
+            <tr><td class="k">处理人</td><td class="mono">user</td><td>人工填写，机器人归档时可统计责任人</td></tr>
+            <tr><td class="k">备注</td><td class="mono">text</td><td>人工填写。勾选完成但无需实际改价时在此说明原因</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <b>刻意没加的两个字段：</b>① <strong>建议售价</strong>——它的算法（贴住新底线？按目标利润率反解？）还没有业务定义，给一个可能错的建议比不给更危险；等规则定了再加。② <strong>处理状态单选</strong>——只保留「完成」这一个触发点，机器人的监听逻辑最简单；要表达"无需改价"，勾完成并在备注写原因即可。
+      </div>
+      <div class="note">
+        <b>同理没加「是否亏本」字段：</b>它依赖「当前售价」，而当前售价的数据源不完整——加上去会大面积为空，反而误导。等售价数据源就绪再加。
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 5. 时序 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="ico">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      </div>
+      <div>
+        <h2>五、前提不变：今天做，也是空的</h2>
+        <p>方案能建好、能验收，但第一批真实通知要等第二帧数据。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <ol class="tl">
+        <li class="done">
+          <span class="when">2026-10-23</span>
+          <div class="body">
+            <strong>库龄只有 1 帧快照，最低售价不会变</strong>
+            <span>495 个 SKU，锚点 2026-09-14，全部 <code>age_days = 0</code>、落 0-30 档。最低售价不因库龄变动 → 通知表今天就是空的。</span>
+          </div>
+        </li>
+        <li class="next">
+          <span class="when">待办</span>
+          <div class="body">
+            <strong>打开妙手库存定时采集（周一 / 周四 09:00）</strong>
+            <span>采集配置仍为 <code>schedule_enabled=false</code>、<code>batch_status=draft</code>，日期窗口还停在 2026-03-23。<strong>没有第二帧就没有库龄变化</strong>，这是本方案的一号前置。</span>
+          </div>
+        </li>
+        <li class="next">
+          <span class="when">待办</span>
+          <div class="body">
+            <strong>采到第二帧</strong>
+            <span>库龄开始真实累加，档位开始有区分度。</span>
+          </div>
+        </li>
+        <li class="key">
+          <span class="when">11-13 前后</span>
+          <div class="body">
+            <strong>首批 SKU 跨过 60 天档 → 最低价批量下调</strong>
+            <span>示例 <code>A-00001-BLACK</code>：¥128.56 → ¥90.82（降 29%）。全量通知下，这一批会<strong>全部进表</strong>——表结构（方案 A）能扛住，运营的处理节奏则需要业务方自己安排。</span>
+          </div>
+        </li>
+        <li>
+          <span class="when">12-13</span>
+          <div class="body"><strong>跨过 90 天档</strong><span>目标利润率进一步放宽到 18%。</span></div>
+        </li>
+        <li>
+          <span class="when">2027-01-12</span>
+          <div class="body"><strong>跨过 120 天档（最深档）</strong><span>目标利润率 10%，此后再无新档。</span></div>
+        </li>
+      </ol>
+      <div class="note">
+        <b>因此验收方式要换：</b>不能等真实数据。上线后<strong>用人工造一次变化</strong>验收整条链路（例如临时改一次规则表的目标利润率，让所有 SKU 的底线动一次），确认"变了 → 进表 → 飞书收到 → 状态可改 → 停止催办"整条走通；验证完把基线表重建一次即可。
+      </div>
+      <div class="note warn">
+        <b>但上云之前还有一道硬门槛：</b>云端库目前<b>落后 5 个迁移</b>，缺定价规则表 <code>finance.sku_pricing_policies</code>、<code>core.dim_erp_sku</code> 也缺定价列 → <strong>云端 ERP 现在连最低售价都算不出来</strong>，定时任务即使开了也只能算出"全部算不出"。所以部署顺序必须是：<strong>先补迁移 → 再写飞书配置 → 最后开 beat</strong>。本地这一侧已经跑通（真实库 1,122 个 SKU、1122 条基线、0 通知 0 静默复跑通过），迁移补齐后云端就是同一套逻辑。
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 6. 两个方向 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="ico">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+      </div>
+      <div>
+        <h2>六、全量通知之后，必须把两种方向标清楚</h2>
+        <p>既然不筛选，就必须在表里让运营一眼分辨"这条是机会"还是"这条是亏本"。</p>
+      </div>
+    </div>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>方向</th><th>触发原因</th><th>含义</th><th>紧急度</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="k"><span class="pill down">底线下降</span></td>
+            <td>库龄跨档 → 目标利润率放宽 → 成本线下沉</td>
+            <td>可以更便宜卖了，<strong>主动降价清货</strong>的机会</td>
+            <td><span class="pill mute">机会型</span> 按库存金额排序处理</td>
+          </tr>
+          <tr>
+            <td class="k"><span class="pill bad">底线上升</span></td>
+            <td>补货 → 库龄归零 → 落回日常档 → 底线回升</td>
+            <td>若平台售价还停在旧低价，<strong>就是在亏本卖</strong></td>
+            <td><span class="pill bad">必须型</span> 需要立刻改价</td>
+          </tr>
+          <tr>
+            <td class="k"><span class="pill bad">保护失效</span></td>
+            <td>SPU 绑定解除、费率或成本缺失 → 最低价算不出来</td>
+            <td>底线保护没了，卖出即亏</td>
+            <td><span class="pill bad">最高</span> 需要补主数据</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note bad">
+      <b>第二条是全量通知真正立功的地方。</b>补货会让库龄归零、档位回落、底线从 ¥90.82 抬回 ¥128.56。如果平台上还挂着 ¥95 在卖，那是在亏本——而这件事在今天<strong>没有任何人会知道</strong>。只推"降价"方向的话，这类损失会一直静默发生。
+    </div>
+    <div class="note">
+      <b>关于"需要调价"的口径：</b>最低售价是<strong>底线</strong>，不是平台当前售价。底线降了，现价可能仍高于新底线（不必改）；底线升了，现价可能已低于新底线（必须改）。所以建议<strong>两个方向都进表</strong>，用上表的"紧急度"字段区分，而不是在推送前按"是否真的需要改价"过滤掉——这样既满足"全都要通知"，运营也能按紧急度安排顺序。
+    </div>
+  </section>
+
+  <!-- ============ 7. 已定结论 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="ico">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="9.5"/></svg>
+      </div>
+      <div>
+        <h2>七、四个问题的最终结论</h2>
+        <p>筛选和阈值的问题不需要问了，剩下这四个已全部拍板。</p>
+      </div>
+    </div>
+
+    <ol class="ask">
+      <li><b>飞书表用"恒一行"还是"每次变更加一行"？</b><span class="rec">每次变更加一行</span> —— 上一轮"一年 18 万条必然撞上限"的判断前提是行不归档；实际机器人负责归档，表里只留未处理的行。更重要的是：ERP 侧只新增就没有"重写旧行"这个补救动作，基线推进顺序就成了唯一的可靠性保障（见第八节）。归档前的多条记录还天然形成变更历史。</li>
+      <li><b>变更流水要不要在飞书里也能查？</b><span class="rec">要</span> —— 同一张表靠视图分流即可（待处理 / 已处理 / 按方向），不额外建表。</li>
+      <li><b>人工在哪改价、回执怎么确认？</b><span class="rec">飞书勾「完成」</span> —— ERP 不感知"这个 SKU 已接管"（人工接管体现在覆盖值上，覆盖值非空后库龄变化不再影响底线，天然不产生通知）。机器人监听「完成」列做归档，归档去向由机器人决定，ERP 一概不管。</li>
+      <li><b>通知的送达方式：只落表，还是也要机器人提醒？</b><span class="rec">先只落表</span> —— 表格自带视图和筛选，运营打开就有清单；机器人提醒属于额外的打扰手段，等确认运营真的会看表之后再加。</li>
+    </ol>
+  </section>
+
+  <!-- ============ 8. 风险 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="ico">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4M12 16h.01"/></svg>
+      </div>
+      <div>
+        <h2>八、风险与护栏</h2>
+        <p>在全量通知的前提下，风险点从"漏推"转成了"推坏"和"推了没人管"。以下护栏均已落地。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="risk">
+        <div class="r">
+          <div class="r-t"><span class="lv hi">高</span><strong>推送失败但基线已推进 → 永久丢通知</strong></div>
+          <p>ERP 侧只做新增、不做更新，没有"重写旧行"这个补救动作。<strong>若先更新基线、再推飞书</strong>，一旦飞书写入失败（限流 1254291、网络抖动、token 过期），基线已被推进，那次变化就永远不会再来一遍——正是最该通知的时候静默丢失。</p>
+          <p class="fix"><b>护栏：</b>复用现有 outbox（<code>ops.feishu_projection_tasks</code>）：先落任务、用 payload 哈希做去重，<strong>投递成功后才回写基线</strong>；失败任务保留在 outbox 里按指数退避重试。</p>
+        </div>
+        <div class="r">
+          <div class="r-t"><span class="lv lo">低</span><strong>飞书表撞 20,000 条上限</strong></div>
+          <p>上一轮评为高风险的前提是"行不归档"。实际分工是<strong>机器人负责归档</strong>，表内只留未处理的行，容量是"在办待办数"（几百~几千），不构成风险。</p>
+          <p class="fix"><b>护栏：</b>仍保留一个监控——表记录数接近 20,000 时告警，防止机器人归档失效时无声堆积。</p>
+        </div>
+        <div class="r">
+          <div class="r-t"><span class="lv hi">高</span><strong>同表并发写冲突</strong></div>
+          <p>官方明确同一张表不支持并发调用写接口（<code>1254291</code>），全量推送若并发会大面积失败。</p>
+          <p class="fix"><b>护栏：</b>推送串行执行、批次间留 0.5~1 秒；沿用现有 outbox 重试机制；开启 <code>ignore_consistency_check</code> 提升吞吐。</p>
+        </div>
+        <div class="r">
+          <div class="r-t"><span class="lv mid">中</span><strong>任务挂不上调度</strong></div>
+          <p>现有飞书投影<strong>没有独立 Celery 任务</strong>，投递是在商品中心 API 写入时用 <code>asyncio.create_task</code> 顺带触发的。最低售价变更没有任何 API 写入事件，顺带触发永远不会发生。</p>
+          <p class="fix"><b>护栏：</b>新任务挂到 Celery beat（<code>price-adjust-notify-daily</code>，每天 10:00，给 09:00 库存采集留缓冲），路由 <code>backend.tasks.price_adjust_notify_tasks.*</code> → <code>scheduled</code> 队列。</p>
+        </div>
+        <div class="r">
+          <div class="r-t"><span class="lv hi">高</span><strong>整批失败 → 已成功的块被重写，产出重复行</strong></div>
+          <p>批量新增按 200 条一块分批。若"整批一次调用、失败就把所有任务标 failed"，第 3 块失败时第 1、2 块（400 行）其实<strong>已经写进飞书了</strong>，却被一起标成 failed → 重试再写一遍。调价记录表是<strong>只增不改</strong>的，重复行不会被覆盖，只会一直堆着。</p>
+          <p class="fix"><b>护栏：</b>每块独立成败——失败只标记该块的任务，已成功的块照常置 completed。已由 <code>test_failed_chunk_does_not_rollback_already_created_chunks</code> 守着。</p>
+        </div>
+        <div class="r">
+          <div class="r-t"><span class="lv hi">高</span><strong>写入端点用错版本 → 100% 写不进表</strong></div>
+          <p>旧端点 <code>bitable/v1</code> 会被飞书直接拒掉：<code>99992402 field validation failed</code>，连只带主字段的最小请求都过不去。代码能跑、单元测试能过，但一条也写不进去——<strong>纯单测发现不了这个</strong>。</p>
+          <p class="fix"><b>护栏：</b>改用 <code>base/v3</code> + <code>create_records</code>；单元测试断言真实请求的 URL 与 body key；并保留「对真实表写一条再读回比对」的验收方式。</p>
+        </div>
+        <div class="r">
+          <div class="r-t"><span class="lv mid">中</span><strong>单次批量上限按 500 估 → 超限丢整批</strong></div>
+          <p><code>base/v3</code> 的上限是 <strong>200</strong>（实测 201 条被拒：<code>800010701 Array must contain at most 200 element(s)</code>），比旧版 bitable/v1 的 500 小。超限时飞书拒掉<strong>整批</strong>，代价是丢整批而不是丢一半。</p>
+          <p class="fix"><b>护栏：</b><code>FEISHU_BATCH_CREATE_LIMIT = 200</code>，分块推送、每块独立成败。</p>
+        </div>
+        <div class="r">
+          <div class="r-t"><span class="lv mid">中</span><strong>调价记录表配到了错误的 base</strong></div>
+          <p>调价记录表与三张状态镜像表<strong>不在同一个多维表格</strong>。若沿用镜像表的 base token 写表 id，URL 里的 base 与表对不上 → 必然失败。</p>
+          <p class="fix"><b>护栏：</b>新增 <code>ops.feishu_projection_configs.price_adjust_base_token</code>（留空回落 <code>FEISHU_PRODUCT_BASE_TOKEN</code>），由 <code>test_price_adjust_uses_its_own_base_token_when_configured</code> 守着。</p>
+        </div>
+        <div class="r">
+          <div class="r-t"><span class="lv mid">中</span><strong>人工接管后仍被催办</strong></div>
+          <p>覆盖值优先级最高，库龄变化不再影响底线，但系统仍按"库龄变了"反复推送。</p>
+          <p class="fix"><b>护栏：</b>覆盖值非空即视为人工接管，该 SKU 退出待办队列、不再产生变更记录。</p>
+        </div>
+        <div class="r">
+          <div class="r-t"><span class="lv lo">低</span><strong>首次运行的批量误报</strong></div>
+          <p>首次运行时基线表是空的，若不特殊处理会把 1,122 个 SKU 全部当成"变了"。</p>
+          <p class="fix"><b>护栏：</b>判据是"<strong>有没有基线行</strong>"而不是"价格列是不是 NULL"——算不出底线的 SKU 同样被处理过、同样有上下文，同样不算"首次"。首次运行只写基线不推送；此后仅对有基线且数值不同的 SKU 推送。<strong>注意这与库龄冷启动无关</strong>——冷启动本身不产生价格变化。</p>
+        </div>
+        <div class="r">
+          <div class="r-t"><span class="lv lo">低</span><strong>纪律线将来接管</strong></div>
+          <p>补齐参考售价后，库龄会多一条通过折扣率影响底线的路径，同一个"降价"背后原因不同。</p>
+          <p class="fix"><b>护栏：</b>原因字段强制区分成本线 / 纪律线 / 覆盖值三个来源。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 9. 路径 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="ico">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l2 7h7l-5.5 4 2 7-5.5-4L8 17l5.5-4H6z"/></svg>
+      </div>
+      <div>
+        <h2>九、已实施清单</h2>
+        <p>代码、表结构、调度全部落地；剩下的是运维配置与机器人侧配合。</p>
+      </div>
+    </div>
+
+    <div class="steps">
+      <div class="step hot">
+        <div class="dot">1</div>
+        <div>
+          <h3>独立基线表 + 每日比对任务</h3>
+          <p>新建 <code>ops.price_adjust_baselines</code>（<code>sku_id</code> 主键、<code>last_notified_min_price</code> Numeric 18,2、<code>last_notified_context</code> JSON 归因用）；<code>ops.feishu_projection_configs</code> 加 <code>price_adjust_table_id</code> 与 <code>price_adjust_base_token</code>。Celery 任务 <code>detect_and_notify_price_adjustments</code>，每天 10:00 全量算价并比对。</p>
+          <p class="meta"><b>迁移：</b><code>20261023_price_adjust_notification.py</code>（加配置列）+ <code>20261024_price_adjust_baseline_table.py</code>（建表 + 搬迁 1122 条旧基线 + 删掉 SKU 表上的旧两列，均幂等）。</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="dot">2</div>
+        <div>
+          <h3>共享定价实现（口径一致的结构性保证）</h3>
+          <p>新增 <code>backend/services/product_pricing_query_service.py</code>（取数 + 算价的唯一实现）与 <code>backend/services/inventory/inventory_age_query_service.py</code>（库龄取数的唯一实现）。商品中心路由与通知服务<strong>调用同一个函数</strong>。</p>
+          <p class="meta"><b>验证：</b><code>test_router_and_detection_share_one_pricing_implementation</code> 跑在 SQLite 上，<strong>不依赖 pg 容器</strong>，任何环境都能验证。</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="dot">3</div>
+        <div>
+          <h3>飞书只增不改的投递通道</h3>
+          <p>客户端加 <code>batch_create_records()</code>（<strong>base/v3</strong> 端点、<strong>200/批</strong>、串行、块间 0.6 秒、base token 可覆盖）；投影服务加 <code>_price_adjust_payload</code> / <code>_advance_price_adjust_baseline</code> / <code>_process_price_adjust_tasks</code>，与其它三种实体的 upsert 路径分开。</p>
+          <p class="meta"><b>关键：</b>每块独立成败，避免重试写出重复行；投递成功才回写基线。<strong>已对着真实表端到端验证：生产 payload 写入 → 读回 → 14 个字段逐字段一致。</strong></p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="dot">4</div>
+        <div>
+          <h3>由云端 ERP 发送（已拍板）</h3>
+          <p>采集机（<code>APP_RUNTIME_MODE=collector</code>）只做妙手采集落库与同步，<strong>不跑 beat</strong>；<strong>云端</strong>跑 <code>backend-api</code> + <code>celery-worker</code> + <code>celery-beat</code>，由它的每天 10:00 定时任务完成"算价 → 比对 → 推送飞书"。这也正是基线必须搬出 <code>core.dim_erp_sku</code> 的原因：同步链路每天 TRUNCATE 一次，基线住在那里就会每天漏一批变化。</p>
+          <p class="meta"><b>云端库本次不动</b>（按指示推迟到新版本部署时再验证）。部署时需按顺序做：① 补齐 <strong>5 个</strong>落后迁移（云端缺 <code>20261020_sku_pricing_guardrails</code>、<code>20261021_sku_pricing_creator_commission</code>、<code>20261021_inventory_template_v3</code>、<code>20261023_price_adjust_notification</code>、<code>20261024_price_adjust_baseline_table</code>）——<strong>不补则云端连最低售价都算不出来</strong>（缺定价规则表与 SKU 定价列）；② 写入飞书配置（表 id / base token / status=ready）；③ 填云端 <code>.env</code> 的飞书应用凭证；④ 最后开 beat。</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="dot">5</div>
+        <div>
+          <h3>待办：机器人侧配合 + 部署时补迁移</h3>
+          <p>① <strong>机器人监听「完成」列</strong>做归档，归档去向由机器人决定；② 打开妙手库存定时采集（<code>schedule_enabled=false</code>，当前仍是 draft）——<strong>没有第二帧就没有库龄变化</strong>；③ 三张状态镜像表的 base 未知（outbox 里 12 条 2026-09 的 sku/spu 任务因此投不出去，是既有缺口，与本功能无关）。</p>
+          <p class="meta"><b>验收方式：</b>不等真实数据，用人工造一次变化（例如临时改一次规则表的目标利润率）走通"变了 → 进表 → 飞书收到 → 勾完成 → 停止催办"整条链路，验证完把基线表重建一次即可。</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="dot">6</div>
+        <div>
+          <h3>凭证与云端配置已落地</h3>
+          <p>飞书应用凭证（<code>cli_a960b804ecf85bda</code>）已从 <code>F:/Work Tool</code> 项目里找到并<strong>写入本地与云端 <code>.env</code></strong>；云端 <code>ops.feishu_projection_configs</code> 已写入调价记录表的表 id / base token / <code>status=ready</code>，两个配置列与基线表也已按迁移的同一份 DDL 建好（幂等，部署时迁移会自动跳过）。</p>
+          <p class="meta"><b>已实测：</b>生产代码写入真实飞书表 → 读回 <strong>14 个字段全部一致</strong> → 删除测试行，表回到 0 条。<strong>云端还差 5 个迁移</strong>（缺定价规则表 → 云端算不出底线），按约定留到新版本部署时执行，然后开 beat。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p><strong>实现依据</strong>（仓库内可复核）：</p>
+    <div class="src">
+      <div><span class="p">backend/services/product_pricing_service.py</span><span>最低售价纯函数 <code>compute_sku_pricing</code> / <code>compute_min_selling_price</code> / <code>select_age_tier</code>（库龄为空与为 0 时同选第 1 档）</span></div>
+      <div><span class="p">backend/services/product_pricing_query_service.py</span><span><strong>新建</strong>：取数与算价的唯一实现（<code>load_pricing_context</code> / <code>compute_pricing_state</code> / <code>compute_pricing_for_sku</code>）</span></div>
+      <div><span class="p">backend/services/inventory/inventory_age_query_service.py</span><span><strong>新建</strong>：库龄取数的唯一实现（to_regclass 探测 + SAVEPOINT 容错）</span></div>
+      <div><span class="p">backend/services/price_adjust_notify_service.py</span><span><strong>新建</strong>：方向 / 幅度 / 归因 / 排除判定（纯函数）+ 取数比对与基线推进（服务类）</span></div>
+      <div><span class="p">backend/tasks/price_adjust_notify_tasks.py</span><span><strong>新建</strong>：每日任务，两段式（检测建任务 → 投递成功后回写基线），含在途去重闸</span></div>
+      <div><span class="p">backend/domains/business/routers/product_center.py</span><span><code>_compute_pricing_for_sku</code> / <code>_pricing_context</code> 已改为共享实现的 import 别名</span></div>
+      <div><span class="p">modules/core/db/schema_parts/dimensions.py</span><span><code>min_selling_price_override</code>（唯一落库的最低售价字段）</span></div>
+      <div><span class="p">modules/core/db/schema_parts/collection.py</span><span><strong>新建</strong> <code>PriceAdjustBaseline</code>（<code>ops.price_adjust_baselines</code>，schema=ops）+ <code>FeishuProjectionConfig</code> 的两个 price_adjust 配置列</span></div>
+      <div><span class="p">backend/services/feishu_projection_service.py</span><span>现有飞书 outbox 投影（配置 / 任务 / 投递日志）与覆盖式 upsert 语义；新增 price_adjust 只增不改分支</span></div>
+      <div><span class="p">backend/services/feishu_projection_client.py</span><span>新增 <code>batch_create_records()</code>：只新增、<strong>base/v3</strong> 端点、200/批、串行、块间 0.6 秒、base token 可覆盖</span></div>
+      <div><span class="p">backend/celery_app.py</span><span>beat 调度 <code>price-adjust-notify-daily</code>（每天 10:00）+ <code>scheduled</code> 队列路由</span></div>
+      <div><span class="p">backend/tests/test_price_adjust_notification.py</span><span>37 条非 pg 测试（纯函数 + SQLite 口径一致性 + 分块成败 + 基线时机 + 端点与 base token 断言 + 基线不落在会被同步的 SKU 表里）+ 1 条 pg_only 一致性测试</span></div>
+      <div><span class="p">current_migrations/versions/20261024_price_adjust_baseline_table.py</span><span><strong>新建</strong>：建 <code>ops.price_adjust_baselines</code> + 搬迁旧基线 + 删 SKU 表旧两列（幂等，downgrade 反向）</span></div>
+      <div><span class="p">docs/superpowers/specs/2026-10-23-min-price-change-notification-design.md</span><span>正式设计文档（本文的完整版，含真实表写入实测记录）</span></div>
+      <div><span class="p">docs/superpowers/specs/2026-10-20-sku-pricing-guardrails-design.md</span><span>最低售价定义、库龄阶梯、自动值不落库的原始决策</span></div>
+      <div><span class="p">docs/superpowers/plans/2026-10-21-inventory-aging-pipeline-recovery.md</span><span>库龄管道实测：495 行、锚点 2026-09-14、单帧、分档生效时间表</span></div>
+      <div><span class="p">飞书开放平台官方文档 + <strong>2026-10-23 真实表实测</strong></span><span>官方文档写的是旧端点 <code>/bitable/v1/app-table-record/batch_create</code>（1,000 条/次）；<strong>实测结论以实测为准</strong>：写入端点必须是 <code>/open-apis/base/v3/bases/{base_token}/tables/{table_id}/records/batch_create</code>（body key <code>create_records</code>，旧端点报 <code>99992402</code>）、<strong>单次上限 200</strong>（201 条报 <code>800010701</code>）、单表 20,000 条（<code>1254103</code>）、同表不可并发写（<code>1254291</code> → 串行 + 块间 0.6 秒）</span></div>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

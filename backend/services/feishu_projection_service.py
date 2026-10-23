@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import asyncio
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +23,26 @@ from modules.core.db import (
     SkuOperatingProfile,
 )
 
-from .feishu_projection_client import FeishuProjectionClient
+from .feishu_projection_client import (
+    FEISHU_BATCH_CREATE_LIMIT,
+    FEISHU_BATCH_WRITE_INTERVAL_SECONDS,
+    FeishuProjectionClient,
+)
+
+# 单轮投递最多处理多少条价格调整记录。
+# 飞书批量新增单次 500 条 → 这个上限对应 4 批。一次性全量铺开会让单次事务
+# 过长，且失败时整批回滚代价大。
+PRICE_ADJUST_DELIVERY_LIMIT = 2000
+
+
+def _to_float(value: Any) -> float | None:
+    """把 payload 里的数值转成 float（飞书 number 字段只吃 float）。"""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def projection_payload_hash(payload: dict[str, Any]) -> str:
@@ -82,7 +102,14 @@ class FeishuProjectionService:
             )
         ).scalar_one_or_none()
 
-    async def set_initialized(self, spu_table_id: str, sku_table_id: str, platform_sku_profit_table_id: str) -> FeishuProjectionConfig:
+    async def set_initialized(
+        self,
+        spu_table_id: str,
+        sku_table_id: str,
+        platform_sku_profit_table_id: str,
+        price_adjust_table_id: str | None = None,
+        price_adjust_base_token: str | None = None,
+    ) -> FeishuProjectionConfig:
         config = await self.get_config()
         if config is None:
             config = FeishuProjectionConfig(provider_code="feishu")
@@ -90,24 +117,50 @@ class FeishuProjectionService:
         config.spu_table_id = spu_table_id
         config.sku_table_id = sku_table_id
         config.platform_sku_profit_table_id = platform_sku_profit_table_id
+        if price_adjust_table_id:
+            config.price_adjust_table_id = price_adjust_table_id
+        if price_adjust_base_token:
+            config.price_adjust_base_token = price_adjust_base_token
         config.status = "ready"
         config.last_error = None
         config.initialized_at = datetime.now(timezone.utc)
         await self.db.flush()
         return config
 
-    async def initialize_tables(self, client: FeishuProjectionClient, spu_table_id: str | None = None, sku_table_id: str | None = None, platform_sku_profit_table_id: str | None = None) -> FeishuProjectionConfig:
+    async def initialize_tables(
+        self,
+        client: FeishuProjectionClient,
+        spu_table_id: str | None = None,
+        sku_table_id: str | None = None,
+        platform_sku_profit_table_id: str | None = None,
+        price_adjust_table_id: str | None = None,
+        price_adjust_base_token: str | None = None,
+    ) -> FeishuProjectionConfig:
         existing = await self.get_config()
         spu_table_id = spu_table_id or (existing.spu_table_id if existing else None)
         sku_table_id = sku_table_id or (existing.sku_table_id if existing else None)
-        platform_sku_profit_table_id = platform_sku_profit_table_id or (existing.platform_sku_profit_table_id if existing else None)
+        platform_sku_profit_table_id = platform_sku_profit_table_id or (
+            existing.platform_sku_profit_table_id if existing else None
+        )
+        price_adjust_table_id = price_adjust_table_id or (
+            existing.price_adjust_table_id if existing else None
+        )
+        price_adjust_base_token = price_adjust_base_token or (
+            existing.price_adjust_base_token if existing else None
+        )
         if not spu_table_id:
             spu_table_id = await client.create_table("ERP-SPU经营", _spu_table_fields())
         if not sku_table_id:
             sku_table_id = await client.create_table("ERP-SKU经营明细", _sku_table_fields())
         if not platform_sku_profit_table_id:
             platform_sku_profit_table_id = await client.create_table("ERP-平台SKU利润", _platform_sku_profit_table_fields())
-        return await self.set_initialized(spu_table_id, sku_table_id, platform_sku_profit_table_id)
+        return await self.set_initialized(
+            spu_table_id,
+            sku_table_id,
+            platform_sku_profit_table_id,
+            price_adjust_table_id,
+            price_adjust_base_token,
+        )
 
     async def status(self) -> dict[str, Any]:
         config = await self.get_config()
@@ -122,6 +175,8 @@ class FeishuProjectionService:
             "spu_table_id": config.spu_table_id if config else None,
             "sku_table_id": config.sku_table_id if config else None,
             "platform_sku_profit_table_id": config.platform_sku_profit_table_id if config else None,
+            "price_adjust_table_id": config.price_adjust_table_id if config else None,
+            "price_adjust_base_token": config.price_adjust_base_token if config else None,
             "status": config.status if config else "pending",
             "last_error": config.last_error if config else None,
             "tasks": {status: count for status, count in counts},
@@ -317,15 +372,149 @@ class FeishuProjectionService:
             "更新时间": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-    async def process_pending(self, limit: int = 50, client: FeishuProjectionClient | None = None) -> int:
-        config = await self.get_config()
-        if config is None or config.status != "ready" or not config.spu_table_id or not config.sku_table_id:
+    def _price_adjust_payload(self, task: FeishuProjectionTask) -> dict[str, Any]:
+        """把 outbox payload 组装成飞书「调价记录表」的行字段。
+
+        ⚠️ **「变动时间」不来自 payload**，而是取 outbox 任务的 `created_at`：
+        payload 的哈希是去重依据，若把每次都变的时间戳塞进 payload，
+        同一次变化重跑时哈希就不同，去重会失效。
+        """
+        payload = dict(task.payload_json or {})
+        changed_at = task.created_at or datetime.now(timezone.utc)
+
+        fields: dict[str, Any] = {
+            "ERP SKU": payload.get("sku_key"),
+            "SPU": payload.get("spu") or "",
+            "商品名称": payload.get("sku_name") or "",
+            "规格": payload.get("specification") or "",
+            "上次最低售价": _to_float(payload.get("old_min_selling_price")),
+            "新最低售价": _to_float(payload.get("new_min_selling_price")),
+            "变动幅度": payload.get("change_rate"),
+            "库龄天数": payload.get("age_days"),
+            "命中档位": payload.get("pricing_tier_label") or "",
+            "库存数量": payload.get("current_qty"),
+            "库存金额": _to_float(payload.get("inventory_value")),
+            "变动时间": changed_at.isoformat(),
+        }
+        # 单选字段在飞书 API 里是字符串数组
+        if payload.get("direction"):
+            fields["变动方向"] = [payload["direction"]]
+        if payload.get("reason"):
+            fields["变动原因"] = [payload["reason"]]
+        # 「平台」「当前售价」第一版不写：
+        #   平台——第一版按 SKU 粒度推送，平台粒度等售价数据源打通后再细化
+        #   当前售价——目前没有可靠数据源（平台 SKU 档案靠人工维护，覆盖率未知），
+        #            填一个可能错的数比留空更危险
+        return {key: value for key, value in fields.items() if value is not None}
+
+    async def _advance_price_adjust_baseline(self, task: FeishuProjectionTask) -> None:
+        """价格调整记录**投递成功后**推进基线。
+
+        顺序不能反：ERP 侧只新增、不更新，没有"重写旧行"这个补救动作。
+        先推基线再投递，一旦飞书写失败（限流 1254291、网络抖动、token 过期），
+        基线已被推进，那次变化就永远不会再被检出——最该通知的变化被静默吞掉。
+
+        实现本身复用 `PriceAdjustNotifyService.advance_baseline_for_sku`，
+        **不另写一份**——基线读写只有那一处实现。
+        """
+        payload = dict(task.payload_json or {})
+        sku_id = payload.get("sku_id")
+        context = payload.get("context")
+        if sku_id is None or not context:
+            return
+        from .price_adjust_notify_service import PriceAdjustNotifyService
+
+        await PriceAdjustNotifyService(self.db).advance_baseline_for_sku(
+            int(sku_id),
+            payload.get("new_min_selling_price"),
+            context,
+        )
+
+    async def _process_price_adjust_tasks(
+        self, config: FeishuProjectionConfig, client: FeishuProjectionClient
+    ) -> int:
+        """批量新增价格调整记录。
+
+        与其它三种实体分开处理：它们是**按业务键 upsert**（覆盖更新），
+        价格调整是**只增不改**（每次变化新增一行，行归档由飞书机器人负责）。
+        """
+        if not config.price_adjust_table_id:
             return 0
-        projection_client = client or FeishuProjectionClient()
+
         tasks = (
             await self.db.execute(
                 select(FeishuProjectionTask)
                 .where(
+                    FeishuProjectionTask.entity_type == "price_adjust",
+                    (FeishuProjectionTask.status == "pending")
+                    | (
+                        (FeishuProjectionTask.status == "failed")
+                        & (FeishuProjectionTask.next_retry_at <= datetime.now(timezone.utc))
+                    ),
+                )
+                .order_by(FeishuProjectionTask.created_at)
+                .limit(PRICE_ADJUST_DELIVERY_LIMIT)
+            )
+        ).scalars().all()
+        if not tasks:
+            return 0
+
+        completed = 0
+        # 调价记录表可能不在默认 base 里（它通常与三张状态镜像表分属不同多维表格）
+        target_base = config.price_adjust_base_token or client.base_token
+        # 按飞书单次上限分块，**每块独立成败**。
+        # ⚠️ 不能"整批一次调用、失败就把所有任务标 failed"：
+        # 第 3 块失败时，第 1、2 块其实已经写进飞书了，
+        # 但它们被一起标成 failed → 重试时再写一遍 → 飞书里出现重复行。
+        # 调价记录表是**只增不改**的，重复行不会被覆盖，只会一直堆着。
+        for offset in range(0, len(tasks), FEISHU_BATCH_CREATE_LIMIT):
+            chunk_tasks = tasks[offset:offset + FEISHU_BATCH_CREATE_LIMIT]
+            chunk_payloads = [self._price_adjust_payload(task) for task in chunk_tasks]
+            try:
+                await client.batch_create_records(
+                    config.price_adjust_table_id, chunk_payloads, target_base
+                )
+            except Exception as exc:  # noqa: BLE001
+                for task in chunk_tasks:
+                    await self.record_attempt(task, "failed", str(exc)[:1000])
+                continue
+
+            for task in chunk_tasks:
+                try:
+                    await self.record_attempt(task, "completed")
+                    await self._advance_price_adjust_baseline(task)
+                    completed += 1
+                except Exception as exc:  # noqa: BLE001
+                    await self.record_attempt(task, "failed", str(exc)[:1000])
+
+            # 同一张表不支持并发写（1254291）→ 块与块之间必须留间隔
+            if offset + FEISHU_BATCH_CREATE_LIMIT < len(tasks):
+                await asyncio.sleep(FEISHU_BATCH_WRITE_INTERVAL_SECONDS)
+        return completed
+
+
+
+    async def process_pending(self, limit: int = 50, client: FeishuProjectionClient | None = None) -> int:
+        config = await self.get_config()
+        if config is None:
+            return 0
+        projection_client = client or FeishuProjectionClient()
+
+        # 调价记录表**独立**投递：只要求它自己的表 id 配好。
+        # ⚠️ 不能把镜像表的检查放在它前面——三张状态镜像表和调价记录表分属不同
+        # 多维表格、配置上也互不依赖；镜像表 id 没配齐就整体 return 0 的话，
+        # 调价记录也会被一起卡住（一行都写不出去，且不报错）。
+        completed = await self._process_price_adjust_tasks(config, projection_client)
+
+        # 其余三种实体是「按业务键 upsert」，要求镜像表 id 齐全且配置已就绪
+        if config.status != "ready" or not config.spu_table_id or not config.sku_table_id:
+            return completed
+
+        tasks = (
+            await self.db.execute(
+                select(FeishuProjectionTask)
+                .where(
+                    FeishuProjectionTask.entity_type != "price_adjust",
                     (FeishuProjectionTask.status == "pending")
                     | (
                         (FeishuProjectionTask.status == "failed")
@@ -336,7 +525,6 @@ class FeishuProjectionService:
                 .limit(limit)
             )
         ).scalars().all()
-        completed = 0
         for task in tasks:
             try:
                 if task.entity_type == "sku":

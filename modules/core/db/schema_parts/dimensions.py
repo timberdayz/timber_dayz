@@ -218,6 +218,10 @@ class DimErpSku(Base):
     creator_commission_rate = Column(Numeric(12, 8), nullable=True)
     # 人工覆盖的最低售价；NULL = 由系统按成本线 / 纪律线自动计算
     min_selling_price_override = Column(Numeric(18, 2), nullable=True)
+    # ⚠️ 这里**不**放最低售价变更通知的基线。
+    # 商品中心的 SKU 主数据会被「采集机 → 云端」同步做 TRUNCATE + 全量重灌，
+    # 基线住在这张表里会被每次同步抹掉，同步窗口内的真实变化会被静默吞掉。
+    # 基线改放 `ops.price_adjust_baselines`（不参与商品中心同步）。
     status = Column(String(32), nullable=False, default="active")
     source_file_id = Column(Integer, nullable=True)
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
