@@ -3,6 +3,11 @@
 行为用例复现线上 task 637 / `7bb2a92e-a0eb-4129-ba5c-6237b852c909` 的失败路径：
 点击仓库范围下拉框时，`jx-select__selected-item jx-select__placeholder is-transparent`
 拦截命中测试 → `Locator.click: Timeout 1500ms exceeded`。
+
+取证依据（已落在本仓库，不需要真实页面环境）：
+- `logs/backend-local.out.log`（2026-10-23 11:56:35 真实 call log）
+- `output/playwright/work/miaoshou/finance-inventory-recording/inventory-02*`（2026-09-13 取证）
+- `modules/platforms/miaoshou/archive/export.py`（历史跑通过的 jx-select 实战写法）
 """
 
 from __future__ import annotations
@@ -16,7 +21,35 @@ from modules.platforms.miaoshou.components.warehouse_filters import (
     MiaoshouWarehouseFilters,
 )
 
-CONTAINER_XPATH = "xpath=ancestor::*[contains(@class,'jx-select')][1]"
+# 层 A 的容器候选（与 `inventory_config.py` 的顺序一致）：
+#   1. .jx-select__wrapper（归档实战验证过）
+#   2. .jx-select（精确 class token）
+#   3. contains(@class,'jx-select')（宽松兜底）
+WRAPPER_XPATH = (
+    "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), "
+    "' jx-select__wrapper ')][1]"
+)
+CONTAINER_XPATH = (
+    "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), "
+    "' jx-select ')][1]"
+)
+LOOSE_CONTAINER_XPATH = "xpath=ancestor::*[contains(@class,'jx-select')][1]"
+
+ALL_CONTAINER_CANDIDATES: tuple[str, ...] = (
+    WRAPPER_XPATH,
+    CONTAINER_XPATH,
+    LOOSE_CONTAINER_XPATH,
+)
+
+# 浮层的全部定位候选（生产实现按此顺序尝试）。全部指向同一个浮层对象，
+# 避免测试与「哪个候选先命中」耦合。
+OVERLAY_KEYS: tuple[str, ...] = (
+    "role:listbox:None",
+    ".jx-select-dropdown:visible",
+    ".jx-select__dropdown:visible",
+    ".jx-popper:visible",
+    "role:tooltip:None",
+)
 
 
 def _ctx() -> ExecutionContext:
@@ -57,6 +90,7 @@ def _page(
     trigger_always_fails: bool = False,
     label_available: bool = True,
     container_available: bool = True,
+    container_candidates: tuple[str, ...] = ALL_CONTAINER_CANDIDATES,
     overlay: FakeLocator | None = None,
     selected_tags: list[str] | None = None,
 ) -> FakePage:
@@ -67,9 +101,9 @@ def _page(
     直接返回。**真实页面上被遮挡的正是这个 input**（`.jx-select__input` 被
     `.jx-select__selected-item` 盖住），所以形态 A 的拦截要挂在这里。
 
-    `trigger_intercepted`：普通 click 被覆盖层拦截，但 `force=True` 能穿透
-    （对应真实 Playwright 的 actionability 检查语义）。
+    `trigger_intercepted`：普通 click 被覆盖层拦截，但 `force=True` 能穿透。
     `trigger_always_fails`：任何点击都失败（连 force 也失败）——用于逼出层 D。
+    `container_candidates`：哪些层 A 容器候选可用。
     """
     label_input = FakeLocator(
         visible=label_available,
@@ -77,28 +111,33 @@ def _page(
         intercept_clicks=trigger_intercepted,
         fail_clicks=99 if trigger_always_fails else 0,
     )
-    container = _container(selected_tags)
     if container_available:
-        label_input.children = {CONTAINER_XPATH: container}
+        container = _container(selected_tags)
+        label_input.children = {
+            candidate: container for candidate in container_candidates
+        }
 
     combobox_trigger = FakeLocator(
         intercept_clicks=trigger_intercepted,
         fail_clicks=99 if trigger_always_fails else 0,
     )
-
-    return FakePage(
-        locators={
-            "label:仓库": label_input,
-            "role:combobox:None": combobox_trigger,
-            "role:tooltip:None": (
-                overlay if overlay is not None else FakeLocator(count=0)
-            ),
-        }
-    )
+    overlay_locator = overlay if overlay is not None else FakeLocator(count=0)
+    locators: dict[str, object] = {
+        "label:仓库": label_input,
+        "role:combobox:None": combobox_trigger,
+    }
+    for key in OVERLAY_KEYS:
+        locators[key] = overlay_locator
+    return FakePage(locators=locators)
 
 
 def _container_of(page: FakePage) -> FakeLocator:
-    return page.locators["label:仓库"].children[CONTAINER_XPATH]
+    """取层 A 命中的容器（与 `_page` 的 container_candidates 保持一致）。"""
+    children = page.locators["label:仓库"].children
+    for candidate in (WRAPPER_XPATH, CONTAINER_XPATH, LOOSE_CONTAINER_XPATH):
+        if candidate in children:
+            return children[candidate]
+    raise AssertionError("no container candidate registered")
 
 
 def test_miaoshou_warehouse_filters_component_declares_miaoshou_platform():
@@ -134,6 +173,47 @@ async def test_warehouse_filters_opens_dropdown_by_clicking_container_when_trigg
     # 组件不再依赖点那个被遮挡的触发器
     assert page.locators["label:仓库"].click_calls == []
     assert overlay.get_by_role("checkbox", name="全选").clicked == 0
+
+
+@pytest.mark.asyncio
+async def test_warehouse_filters_prefers_jx_select_wrapper_container() -> None:
+    """层 A 首选 `.jx-select__wrapper`（归档 export.py 实战验证过的写法）。
+
+    只提供 wrapper 候选时也必须能点开下拉——证明首选路径本身成立，
+    不依赖后面的兜底候选。
+    """
+    component = MiaoshouWarehouseFilters(_ctx())
+    page = _page(
+        trigger_intercepted=True,
+        container_candidates=(WRAPPER_XPATH,),
+        overlay=_overlay(checked=True),
+    )
+
+    result = await component.run(page, {"select_all": True})
+
+    assert result.success is True
+    assert page.locators["label:仓库"].children[WRAPPER_XPATH].clicked == 1
+
+
+@pytest.mark.asyncio
+async def test_warehouse_filters_falls_back_to_loose_container_candidate() -> None:
+    """层 A 兜底：wrapper 与精确 token 都定位不到时，宽松候选仍能救回。
+
+    `contains(@class,'jx-select')` 会连带匹配 `jx-select__input` /
+    `jx-select__content`，所以它只能当**兜底**用，不能当首选——
+    点到内层容器仍落在 input 区域，会被 placeholder 再次遮挡。
+    """
+    component = MiaoshouWarehouseFilters(_ctx())
+    page = _page(
+        trigger_intercepted=True,
+        container_candidates=(LOOSE_CONTAINER_XPATH,),
+        overlay=_overlay(checked=True),
+    )
+
+    result = await component.run(page, {"select_all": True})
+
+    assert result.success is True
+    assert page.locators["label:仓库"].children[LOOSE_CONTAINER_XPATH].clicked == 1
 
 
 @pytest.mark.asyncio

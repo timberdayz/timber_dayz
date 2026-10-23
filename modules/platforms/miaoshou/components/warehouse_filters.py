@@ -51,20 +51,69 @@ class MiaoshouWarehouseFilters(ComponentBase):
 
         点容器外壳而不是被 selected-item 覆盖的 .jx-select__input，是形态 A 的治本手段。
         返回 None 表示层 A 不可用（DOM 形态未取证 / 改版），由层 B 兜底。
+
+        候选按证据强度排序（依据见 `inventory_config.py` 顶部取证说明）：
+        1. `.jx-select__wrapper` —— 归档 `export.py:368` 实战验证过能点开下拉
+        2. `.jx-select`（精确 class token）—— 最外层外壳
+        3. 宽松 `contains(@class,'jx-select')` —— 防改版兜底
         """
         try:
             label_input = page.get_by_label(re.compile(r"仓库", re.IGNORECASE)).first
             await label_input.wait_for(
                 state="visible", timeout=self.sel.warehouse_scope_trigger_timeout_ms
             )
-            container = label_input.locator(self.sel.warehouse_scope_container_xpath)
-            await container.wait_for(
+        except Exception as e:
+            self._log(f"[warehouse_filters] 层A 触发器定位不可用: {e}")
+            return None
+
+        xpaths = (
+            self.sel.warehouse_scope_wrapper_xpath,
+            self.sel.warehouse_scope_container_xpath,
+            self.sel.warehouse_scope_container_xpath_loose,
+        )
+        for xpath in xpaths:
+            try:
+                container = label_input.locator(xpath)
+                await container.wait_for(
+                    state="visible", timeout=self.sel.warehouse_scope_trigger_timeout_ms
+                )
+                return container
+            except Exception as e:
+                self._log(f"[warehouse_filters] 层A 容器候选不可用 ({xpath}): {e}")
+        return None
+
+    async def _scope_all_selected_root(self, page: Any) -> Any | None:
+        """层 C 专用的容器解析：优先取**最外层** `.jx-select`。
+
+        与层 A 分开的原因：层 A 点的是 `.jx-select__wrapper`（内层外壳），
+        而 `.jx-select__selected-item` 是 **`.jx-select`（最外层）的后代**
+        （证据：订单域 `filters.py:78-83` 用 `page.locator(".jx-select")`
+        再 `.locator(".jx-select__selected-item")` 命中）。
+        用层 A 的 wrapper 去查，可能查不到选中区 → 层 C 恒不命中。
+        """
+        try:
+            label_input = page.get_by_label(re.compile(r"仓库", re.IGNORECASE)).first
+            await label_input.wait_for(
                 state="visible", timeout=self.sel.warehouse_scope_trigger_timeout_ms
             )
-            return container
         except Exception as e:
-            self._log(f"[warehouse_filters] 层A 容器定位不可用: {e}")
+            self._log(f"[warehouse_filters] 层C 触发器定位不可用: {e}")
             return None
+
+        for xpath in (
+            self.sel.warehouse_scope_container_xpath,
+            self.sel.warehouse_scope_container_xpath_loose,
+            self.sel.warehouse_scope_wrapper_xpath,
+        ):
+            try:
+                container = label_input.locator(xpath)
+                await container.wait_for(
+                    state="visible", timeout=self.sel.warehouse_scope_trigger_timeout_ms
+                )
+                return container
+            except Exception as e:
+                self._log(f"[warehouse_filters] 层C 容器候选不可用 ({xpath}): {e}")
+        return None
 
     async def _scope_already_all_selected(self, page: Any) -> bool:
         """层 C：已全选前置检测（尽力而为，**不得作为唯一防线**）。
@@ -78,7 +127,7 @@ class MiaoshouWarehouseFilters(ComponentBase):
         ⚠️ 该 DOM 形态未经真实页面取证，可能恒为 False；因此只有命中才跳过，
         未命中一律继续走 A → B → D。
         """
-        container = await self._warehouse_scope_container(page)
+        container = await self._scope_all_selected_root(page)
         if container is None:
             return False
 
@@ -176,11 +225,24 @@ class MiaoshouWarehouseFilters(ComponentBase):
             ) from layer_b_error
 
     async def _wait_overlay_ready(self, page: Any) -> Any:
+        """定位已打开的仓库范围下拉浮层。
+
+        候选来源（依据见 `inventory_config.py` 顶部取证说明）：
+        - `role="listbox"`：真实 call log 里 input 声明了 `aria-haspopup="listbox"`
+          与 `aria-controls="jx-id-..."`，说明浮层是 listbox 角色
+        - `.jx-select-dropdown` / `.jx-select__dropdown` / `.jx-popper`：
+          归档 `export.py:386-390` 实战验证过的浮层 class
+        - `tooltip` / `el-select-dropdown` / `ant-select-dropdown`：历史兼容候选
+        """
         candidates = [
+            page.get_by_role("listbox").last,
+            *[
+                page.locator(selector).last
+                for selector in self.sel.warehouse_scope_overlay_selectors
+            ],
             page.get_by_role("tooltip").last,
             page.locator(".el-select-dropdown:visible").last,
             page.locator(".ant-select-dropdown:visible").last,
-            page.locator(".jx-select-dropdown:visible").last,
         ]
         for locator in candidates:
             try:
@@ -230,16 +292,32 @@ class MiaoshouWarehouseFilters(ComponentBase):
             except Exception:
                 continue
 
+    async def _find_full_select_checkbox(self, overlay: Any) -> Any:
+        """在浮层里找「全选」复选框。
+
+        候选顺序（依据见 `inventory_config.py` 顶部取证说明）：
+        1. `role="checkbox"` + 名称「全选」—— 语义定位
+        2. `label:has-text('全选') input[type='checkbox']` —— 历史兼容
+        3. `.jx-select-dropdown__header .jx-checkbox` → `.jx-checkbox__input`
+           —— 归档 `export.py:396-399` 实战写法（浮层头部就是「全选」行）
+        """
+        candidates = [
+            overlay.get_by_role("checkbox", name="全选").first,
+            overlay.locator("label:has-text('全选') input[type='checkbox']").first,
+            overlay.locator(self.sel.warehouse_scope_full_select_header_selector).first,
+        ]
+        for candidate in candidates:
+            try:
+                await candidate.wait_for(state="visible", timeout=2000)
+                return candidate
+            except Exception:
+                continue
+        # 最后的兜底：让调用方拿到一个能 raise 的 locator，错误信息更明确
+        return candidates[0]
+
     async def _ensure_scope_all_selected(self, overlay: Any) -> None:
         """在下拉浮层里把「全选」勾上。"""
-        full_select = overlay.get_by_role("checkbox", name="全选").first
-        try:
-            await full_select.wait_for(state="visible", timeout=2000)
-        except Exception:
-            full_select = overlay.locator(
-                "label:has-text('全选') input[type='checkbox']"
-            ).first
-            await full_select.wait_for(state="attached", timeout=2000)
+        full_select = await self._find_full_select_checkbox(overlay)
 
         checked = await self._is_checkbox_selected(full_select)
         if not checked:
