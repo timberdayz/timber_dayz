@@ -274,6 +274,10 @@
   margin-right: 4px;
 }
 
+.erp-mb-xs {
+  margin-bottom: 4px;
+}
+
 .erp-flex-spacer {
   flex: 1;
 }

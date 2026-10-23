@@ -399,11 +399,21 @@
             <el-descriptions-item v-if="detailTask.completed_domains?.length" label="已完成域">
               {{ (detailTask.completed_domains || []).join(', ') }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="detailTask.failed_domains?.length" label="失败域">
-              <span class="text-danger">{{ (detailTask.failed_domains || []).map(d => typeof d === 'object' ? d.domain || d.name : d).join(', ') }}</span>
+            <el-descriptions-item v-if="failedDomainRows.length" label="失败域">
+              <div v-for="row in failedDomainRows" :key="row.key" class="erp-mb-xs">
+                <span class="text-danger">{{ row.label }}</span>
+                <el-collapse v-if="row.error">
+                  <el-collapse-item name="domain-error">
+                    <template #title>
+                      <span class="text-danger">错误详情</span>
+                    </template>
+                    <pre class="detail-error">{{ row.error }}</pre>
+                  </el-collapse-item>
+                </el-collapse>
+              </div>
             </el-descriptions-item>
-            <el-descriptions-item v-if="detailTask.error_message" label="错误信息">
-              <span class="text-danger">{{ detailTask.error_message }}</span>
+            <el-descriptions-item v-if="primaryErrorMessage" label="错误信息">
+              <span class="text-danger">{{ primaryErrorMessage }}</span>
             </el-descriptions-item>
           </el-descriptions>
         </div>
@@ -487,6 +497,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CaretRight, Refresh, QuestionFilled } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
+import {
+  normalizeFailedDomains,
+  pickPrimaryErrorMessage
+} from './collectionTaskErrors.js'
 import PageHeader from '@/components/common/PageHeader.vue'
 import VerificationResumeDialog from '@/components/verification/VerificationResumeDialog.vue'
 import {
@@ -525,6 +539,9 @@ const statusFilter = ref('')
 const logsDialogVisible = ref(false)
 const detailDrawerVisible = ref(false)
 const detailTask = ref(null)
+// 任务详情抽屉：域级失败错误（后端已把完整 call log 写进 failed_domains[].error）
+const failedDomainRows = computed(() => normalizeFailedDomains(detailTask.value?.failed_domains))
+const primaryErrorMessage = computed(() => pickPrimaryErrorMessage(detailTask.value))
 const detailLogs = ref([])
 const detailLogsLoading = ref(false)
 const taskTableRef = ref(null)
