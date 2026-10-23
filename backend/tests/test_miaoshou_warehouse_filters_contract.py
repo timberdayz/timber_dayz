@@ -61,13 +61,21 @@ def _ctx() -> ExecutionContext:
     )
 
 
-def _overlay(*, checked: bool = False) -> FakeLocator:
-    """模拟已打开的下拉浮层，内含「全选」复选框与文字。"""
-    full_select = FakeLocator(checked=checked, evaluate_checked=checked)
+def _overlay(*, checked: bool = False, check_on_click: bool = False) -> FakeLocator:
+    """模拟已打开的下拉浮层，内含「全选」复选框与文字。
+
+    「全选」文字与复选框共用同一个对象：点击文字等价于点击复选框，
+    `check_on_click=True` 时点击后勾选态变为 true。
+    """
+    full_select = FakeLocator(
+        checked=checked,
+        evaluate_checked=checked,
+        check_on_click=check_on_click,
+    )
     return FakeLocator(
         children={
             "role:checkbox:全选": full_select,
-            "text:全选": FakeLocator(),
+            "text:全选": full_select,
         }
     )
 
@@ -288,3 +296,85 @@ async def test_warehouse_filters_tries_keyboard_fallback_then_reports_stage_name
     assert result.success is False
     assert page.keyboard.pressed == ["Enter"]
     assert "warehouse_scope_open_failed" in (result.message or "")
+
+
+# ── L2-3 检测层三分：pre-check / action / post-check ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_warehouse_filters_post_check_fails_when_full_select_stays_unchecked() -> (
+    None
+):
+    """post-check：动作后回读仍未选中 → 必须失败（动作成功 ≠ 业务成功）。
+
+    这是《规范》§3.5 的硬要求：勾选动作点了不等于勾上了。
+    """
+    component = MiaoshouWarehouseFilters(_ctx())
+    overlay = _overlay(checked=False)
+    page = _page(overlay=overlay)
+
+    result = await component.run(page, {"select_all": True})
+
+    assert result.success is False
+    assert "warehouse_scope_verify_failed" in (result.message or "")
+    assert overlay.get_by_role("checkbox", name="全选").clicked == 1
+
+
+@pytest.mark.asyncio
+async def test_warehouse_filters_post_check_passes_when_click_checked_the_box() -> None:
+    """post-check：勾选确实生效时必须成功返回。"""
+    component = MiaoshouWarehouseFilters(_ctx())
+    overlay = _overlay(checked=False, check_on_click=True)
+    page = _page(overlay=overlay)
+
+    result = await component.run(page, {"select_all": True})
+
+    assert result.success is True
+    assert result.details.get("skipped") is not True
+    assert overlay.get_by_role("checkbox", name="全选").checked is True
+
+
+@pytest.mark.asyncio
+async def test_warehouse_filters_pre_check_skips_dropdown_when_already_all_selected() -> (
+    None
+):
+    """pre-check：层 C 命中「已全选」时不开下拉、也不做勾选动作。"""
+    component = MiaoshouWarehouseFilters(_ctx())
+    overlay = _overlay(checked=False)
+    page = _page(overlay=overlay, selected_tags=["仓库A", "+ 4"])
+
+    result = await component.run(page, {"select_all": True})
+
+    assert result.success is True
+    assert result.details.get("skipped") is True
+    assert overlay.get_by_role("checkbox", name="全选").clicked == 0
+
+
+class _ClosingOverlay(FakeLocator):
+    """点「全选」后浮层关闭（模拟下拉被收起，回读不到勾选状态）。"""
+
+    def __init__(self) -> None:
+        box = FakeLocator(checked=False, evaluate_checked=False)
+        original_click = box.click
+
+        async def _click(timeout=None, force=None):
+            await original_click(timeout=timeout, force=force)
+            self.visible = False
+
+        box.click = _click  # type: ignore[method-assign]
+        super().__init__(children={"role:checkbox:全选": box, "text:全选": box})
+
+
+@pytest.mark.asyncio
+async def test_warehouse_filters_post_check_keeps_stage_prefix_when_overlay_closed() -> (
+    None
+):
+    """回读通道失败（下拉已关闭）也必须带 warehouse_scope_verify_failed 前缀。"""
+    component = MiaoshouWarehouseFilters(_ctx())
+    overlay = _ClosingOverlay()
+    page = _page(overlay=overlay)
+
+    result = await component.run(page, {"select_all": True})
+
+    assert result.success is False
+    assert "warehouse_scope_verify_failed" in (result.message or "")

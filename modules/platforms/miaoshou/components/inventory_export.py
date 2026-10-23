@@ -19,12 +19,219 @@ from modules.components.export.base import (
 )
 from modules.components.base import ExecutionContext
 from modules.components.navigation.base import TargetPage
+from modules.components.structured_error import (
+    StructuredError,
+    build_stage_error_message,
+)
 from modules.platforms.miaoshou.components.inventory_config import InventorySelectors
 from modules.platforms.miaoshou.components.navigation import MiaoshouNavigation
 from modules.platforms.miaoshou.components.warehouse_filters import (
     MiaoshouWarehouseFilters,
 )
 from modules.utils.path_sanitizer import build_filename
+
+# 失败诊断用的「定位信号」名（《规范》§3.5.1 结构化上下文的 matched_signal）。
+# 记录的是当时命中的定位信号/选择器候选名，不是具体 DOM 节点。
+SIGNAL_NAVIGATION_ROUTE = "warehouse_checklist_route"
+SIGNAL_POPUP_CLOSE = "popup_close_buttons"
+SIGNAL_WAREHOUSE_SCOPE = "warehouse_scope_select"
+SIGNAL_SEARCH_BUTTON = "role:button:搜索"
+SIGNAL_EXPORT_DIALOG = "选择导出字段"
+SIGNAL_EXPORT_DOWNLOAD = "page.expect_download"
+
+
+# ── 模块级实现 ───────────────────────────────────────────────────────
+# 组件类的行数上限是 500 行（docs/DEVELOPMENT_RULES/TESTING_AND_QUALITY.md §9），
+# 而本组件的流程较长；因此把「导出弹窗交互」「下载竞速守卫」等纯实现细节放在
+# 模块级函数里，类只保留编排与阶段语义。
+
+
+async def _first_visible_selector(
+    page: Any, selectors: tuple[str, ...], *, timeout: int = 1500
+) -> tuple[str, Any] | None:
+    """返回第一个可见的选择器及其 locator（供点击前重建 locator 用）。"""
+    for selector in selectors:
+        try:
+            locator = page.locator(selector).first
+            await locator.wait_for(state="visible", timeout=timeout)
+            return selector, locator
+        except Exception:
+            continue
+    return None
+
+
+async def _is_checkbox_selected(locator: Any) -> bool:
+    """判定复选框是否处于勾选态（aria-checked / class 含 checked / input:checked）。"""
+    try:
+        if await locator.is_checked():
+            return True
+    except Exception:
+        pass
+
+    try:
+        checked = await locator.evaluate(
+            """el => {
+                const root = el.closest(
+                    '[role="checkbox"], label, .ant-checkbox-wrapper, .arco-checkbox, .jx-checkbox, .el-checkbox'
+                ) || el;
+                return root.getAttribute('aria-checked') === 'true'
+                    || root.className.includes('checked')
+                    || !!root.querySelector('input[type="checkbox"]:checked');
+            }"""
+        )
+        return bool(checked)
+    except Exception:
+        return False
+
+
+async def _export_dialog(page: Any) -> Any:
+    """定位「选择导出字段」弹窗（每次调用都重新定位，不缓存 locator）。"""
+    candidates = [
+        page.get_by_role("dialog").filter(has_text="选择导出字段").last,
+        page.locator('.jx-overlay[style*="display: block"]')
+        .filter(has_text="选择导出字段")
+        .last,
+        page.locator(".jx-dialog:visible").filter(has_text="选择导出字段").last,
+    ]
+    for dialog in candidates:
+        try:
+            await dialog.wait_for(state="visible", timeout=3000)
+            return dialog
+        except Exception:
+            continue
+    raise RuntimeError("选择导出字段弹窗不可见")
+
+
+async def _wait_visible(locator: Any, *, timeout: int = 3000) -> bool:
+    """locator 在超时内是否可见（等待失败只算「不可见」，不算异常）。"""
+    visible = True
+    try:
+        await locator.wait_for(state="visible", timeout=timeout)
+    except Exception:
+        # 不可见属于「检测结果」而非错误：交由调用方产出可诊断信息
+        visible = False
+    return visible
+
+
+async def _detect_open_export_menu_source(
+    page: Any, sel: InventorySelectors
+) -> str | None:
+    """判定「导入/导出商品」按钮的定位来源。
+
+    返回 ``"role"``（role 定位命中）或命中的 CSS 选择器；都不可见时返回 None。
+    """
+    if await _wait_visible(page.get_by_role("button", name="导入/导出商品").first):
+        return "role"
+    found = await _first_visible_selector(page, sel.open_export_menu, timeout=3000)
+    return found[0] if found else None
+
+
+def _open_export_menu_locator(page: Any, source: str) -> Any:
+    """按定位来源重建「导入/导出商品」按钮 locator。"""
+    if source == "role":
+        return page.get_by_role("button", name="导入/导出商品").first
+    return page.locator(source).first
+
+
+async def _detect_export_searched_item_source(
+    page: Any, sel: InventorySelectors
+) -> str | None:
+    """判定「导出搜索的商品」菜单项的定位来源。"""
+    if await _wait_visible(page.get_by_role("menuitem", name="导出搜索的商品").first):
+        return "role"
+    found = await _first_visible_selector(page, sel.menu_export_searched, timeout=3000)
+    return found[0] if found else None
+
+
+def _export_searched_item_locator(page: Any, source: str) -> Any:
+    """按定位来源重建「导出搜索的商品」菜单项 locator。"""
+    if source == "role":
+        return page.get_by_role("menuitem", name="导出搜索的商品").first
+    return page.locator(source).first
+
+
+async def _ensure_group_check_all_selected(page: Any, sel: InventorySelectors) -> None:
+    """把第一个字段分组的「全选」勾上（重新定位弹窗，不跨步骤持有 locator）。"""
+    dialog = await _export_dialog(page)
+    check_all_text = sel.group_check_all_text
+    full_select = dialog.get_by_role("checkbox", name=check_all_text).first
+    try:
+        await full_select.wait_for(state="visible", timeout=1500)
+    except Exception:
+        full_select = dialog.locator(
+            f"label:has-text('{check_all_text}') input[type='checkbox']"
+        ).first
+        await full_select.wait_for(state="attached", timeout=1500)
+
+    checked = await _is_checkbox_selected(full_select)
+    if not checked:
+        try:
+            await dialog.get_by_text(check_all_text, exact=True).first.click(
+                timeout=1000
+            )
+        except Exception:
+            await full_select.click(timeout=1000)
+
+
+def _collect_pageerror_payload(error: Any) -> dict[str, Any]:
+    """提取 pageerror 的定位信息（stack / filename / lineno / colno / name）。"""
+    return {
+        "error": str(error),
+        "name": getattr(error, "name", None),
+        "stack": getattr(error, "stack", None),
+        "filename": getattr(error, "filename", None)
+        or getattr(error, "fileName", None),
+        "lineno": getattr(error, "lineno", None) or getattr(error, "lineNumber", None),
+        "colno": getattr(error, "colno", None) or getattr(error, "columnNumber", None),
+    }
+
+
+def _format_pageerror_message(payload: dict[str, Any]) -> str:
+    """pageerror 先到时的报错文案（含 filename/lineno/colno/name/stack）。"""
+    return (
+        f"export aborted by pageerror: filename={payload['filename']!r} "
+        f"lineno={payload['lineno']} colno={payload['colno']} "
+        f"name={payload['name']!r} stack={payload['stack']!r}"
+    )
+
+
+async def _cancel_pending_tasks(tasks: Any) -> None:
+    """取消并回收挂起任务（吞掉取消异常）。"""
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
+async def _download_triggering_export(page: Any, trigger: Any) -> Any:
+    """在 expect_download 上下文里触发导出，返回下载对象。"""
+    async with page.expect_download(timeout=180000) as dl_info:
+        await trigger(page)
+    return await dl_info.value
+
+
+async def _wait_download_or_pageerror(
+    download_task: Any,
+    pageerror_task: Any,
+    pageerror_payload: list[dict[str, Any]],
+) -> Any:
+    """谁先到谁赢：download 先到则返回它，pageerror 先到则抛 RuntimeError。"""
+    done, pending = await asyncio.wait(
+        {download_task, pageerror_task},
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    await _cancel_pending_tasks(pending)
+
+    if download_task in done:
+        return download_task.result()
+    # pageerror 赢了 — cancel download_task 后再 cancel 一次确保清理
+    if not download_task.done():
+        download_task.cancel()
+        await _cancel_pending_tasks([download_task])
+    raise RuntimeError(_format_pageerror_message(pageerror_payload[0]))
 
 
 class MiaoshouInventoryExport(ExportComponent):
@@ -49,40 +256,38 @@ class MiaoshouInventoryExport(ExportComponent):
         self.warehouse_filters_component = MiaoshouWarehouseFilters(ctx, self.sel)
         # 当前阶段名：失败时用它给步骤日志一个准确的 step_id
         self._current_stage = self.STAGE_NAVIGATION_READY
+        # 阶段失败时已经落盘的截图（避免 run() 结束时重复截图）
+        self._failure_screenshot: str | None = None
 
-    async def _first_visible_selector(
-        self, page: Any, selectors: tuple[str, ...], *, timeout: int = 1500
-    ) -> Any | None:
-        for selector in selectors:
-            try:
-                locator = page.locator(selector).first
-                await locator.wait_for(state="visible", timeout=timeout)
-                return locator
-            except Exception:
-                continue
-        return None
+    def _current_url(self, page: Any) -> str:
+        """取当前页面 URL（取不到就留空字符串，不得抛）。"""
+        return str(getattr(page, "url", "") or "")
 
-    async def _is_checkbox_selected(self, locator: Any) -> bool:
-        try:
-            if await locator.is_checked():
-                return True
-        except Exception:
-            pass
+    async def _stage_error(
+        self,
+        page: Any,
+        *,
+        prefix: str,
+        stage: str,
+        reason: str,
+        matched_signal: str = "",
+    ) -> RuntimeError:
+        """构造带结构化字段的阶段失败异常（《规范》§3.5.1）。
 
-        try:
-            checked = await locator.evaluate(
-                """el => {
-                    const root = el.closest(
-                        '[role="checkbox"], label, .ant-checkbox-wrapper, .arco-checkbox, .jx-checkbox, .el-checkbox'
-                    ) || el;
-                    return root.getAttribute('aria-checked') === 'true'
-                        || root.className.includes('checked')
-                        || !!root.querySelector('input[type="checkbox"]:checked');
-                }"""
-            )
-            return bool(checked)
-        except Exception:
-            return False
+        失败前缀（``prefix``）保持既有文案不变，后面追加结构化字段：
+        stage / status / reason / current_url / matched_signal / screenshot_path。
+        """
+        screenshot_path = await self._capture_failure_screenshot(page, stage)
+        self._failure_screenshot = screenshot_path
+        structured = StructuredError(
+            stage=stage,
+            status="failed",
+            reason=reason,
+            current_url=self._current_url(page),
+            matched_signal=matched_signal,
+            screenshot_path=screenshot_path or "",
+        )
+        return RuntimeError(build_stage_error_message(prefix, structured))
 
     async def _ensure_popup_closed(self, page: Any) -> None:
         for _ in range(self.sel.close_poll_max_rounds):
@@ -118,91 +323,60 @@ class MiaoshouInventoryExport(ExportComponent):
             state="visible", timeout=15000
         )
 
-    async def _export_dialog(self, page: Any) -> Any:
-        candidates = [
-            page.get_by_role("dialog").filter(has_text="选择导出字段").last,
-            page.locator('.jx-overlay[style*="display: block"]')
-            .filter(has_text="选择导出字段")
-            .last,
-            page.locator(".jx-dialog:visible").filter(has_text="选择导出字段").last,
-        ]
-        for dialog in candidates:
-            try:
-                await dialog.wait_for(state="visible", timeout=3000)
-                return dialog
-            except Exception:
-                continue
-        raise RuntimeError("选择导出字段弹窗不可见")
-
     async def _open_export_dialog(self, page: Any) -> None:
-        button = page.get_by_role("button", name="导入/导出商品").first
-        try:
-            await button.wait_for(state="visible", timeout=3000)
-        except Exception:
-            button = await self._first_visible_selector(
-                page, self.sel.open_export_menu, timeout=3000
-            )
-        if button is None:
+        """打开导出菜单 → 点「导出搜索的商品」→ 等弹窗可见。
+
+        每个交互都在**点击前重新定位**（不跨步骤持有 locator，《规范》§13.3）。
+        """
+        await self._click_open_export_menu(page)
+        await self._click_export_searched_item(page)
+        await _export_dialog(page)
+
+    async def _click_open_export_menu(self, page: Any) -> None:
+        """点开「导入/导出商品」按钮（点击前重新定位）。"""
+        source = await _detect_open_export_menu_source(page, self.sel)
+        if source is None:
             raise RuntimeError("导入/导出商品按钮不可见")
-        await button.click(timeout=1500)
+        await _open_export_menu_locator(page, source).click(timeout=1500)
 
-        menu_item = page.get_by_role("menuitem", name="导出搜索的商品").first
-        try:
-            await menu_item.wait_for(state="visible", timeout=3000)
-        except Exception:
-            menu_item = await self._first_visible_selector(
-                page, self.sel.menu_export_searched, timeout=3000
-            )
-        if menu_item is None:
+    async def _click_export_searched_item(self, page: Any) -> None:
+        """点「导出搜索的商品」菜单项（点击前重新定位）。"""
+        source = await _detect_export_searched_item_source(page, self.sel)
+        if source is None:
             raise RuntimeError("导出搜索的商品菜单项不可见")
-        await menu_item.click(timeout=1500)
-
-        await self._export_dialog(page)
-
-    async def _ensure_group_check_all_selected(self, container: Any) -> None:
-        full_select = container.get_by_role("checkbox", name="全选").first
-        try:
-            await full_select.wait_for(state="visible", timeout=1500)
-        except Exception:
-            full_select = container.locator(
-                "label:has-text('全选') input[type='checkbox']"
-            ).first
-            await full_select.wait_for(state="attached", timeout=1500)
-
-        checked = await self._is_checkbox_selected(full_select)
-        if not checked:
-            try:
-                await container.get_by_text("全选", exact=True).first.click(
-                    timeout=1000
-                )
-            except Exception:
-                await full_select.click(timeout=1000)
+        await _export_searched_item_locator(page, source).click(timeout=1500)
 
     async def _ensure_export_fields_all_selected(self, page: Any) -> None:
-        dialog = await self._export_dialog(page)
-        await dialog.get_by_text("商品信息", exact=False).first.wait_for(
-            state="visible", timeout=5000
-        )
-        await dialog.get_by_text("其他信息", exact=False).first.wait_for(
-            state="visible", timeout=5000
-        )
+        """把导出弹窗里各字段分组的「全选」都勾上。"""
+        dialog = await _export_dialog(page)
+        for title in self.sel.group_titles:
+            await dialog.get_by_text(title, exact=False).first.wait_for(
+                state="visible", timeout=5000
+            )
 
-        checkboxes = dialog.get_by_role("checkbox", name="全选")
+        checkboxes = dialog.get_by_role("checkbox", name=self.sel.group_check_all_text)
         count = await checkboxes.count()
         if count < 2:
             raise RuntimeError("导出字段全选复选框数量不足")
 
-        await self._ensure_group_check_all_selected(dialog.locator("xpath=.").first)
-        second_checkbox = checkboxes.nth(1)
-        if not await self._is_checkbox_selected(second_checkbox):
+        await _ensure_group_check_all_selected(page, self.sel)
+
+        # 关键交互前重新定位：弹窗可能因勾选动作被重渲染（《规范》§13.3）
+        dialog = await _export_dialog(page)
+        second_checkbox = dialog.get_by_role(
+            "checkbox", name=self.sel.group_check_all_text
+        ).nth(1)
+        if not await _is_checkbox_selected(second_checkbox):
             try:
                 await second_checkbox.click(timeout=1000)
             except Exception:
-                second_label = dialog.get_by_text("全选", exact=True).nth(1)
+                second_label = dialog.get_by_text(
+                    self.sel.group_check_all_text, exact=True
+                ).nth(1)
                 await second_label.click(timeout=1000)
 
     async def _trigger_export(self, page: Any) -> None:
-        dialog = await self._export_dialog(page)
+        dialog = await _export_dialog(page)
         button = None
         for selector in self.sel.export_buttons:
             try:
@@ -235,12 +409,13 @@ class MiaoshouInventoryExport(ExportComponent):
             pass
 
         out_root = build_standard_output_root(
-            self.ctx, data_type="inventory", granularity="snapshot"
+            self.ctx, data_type=self.sel.data_type_dir, granularity="snapshot"
         )
         out_root.mkdir(parents=True, exist_ok=True)
 
         raw_name = (
-            getattr(download, "suggested_filename", None) or "inventory_snapshot.xlsx"
+            getattr(download, "suggested_filename", None)
+            or f"{self.sel.data_type_dir}_snapshot.xlsx"
         )
         tmp_path = out_root / raw_name
         await download.save_as(str(tmp_path))
@@ -261,7 +436,7 @@ class MiaoshouInventoryExport(ExportComponent):
             ts=datetime.now().strftime("%Y%m%d_%H%M%S"),
             account_label=account_label,
             shop_name=shop_name,
-            data_type="inventory",
+            data_type=self.sel.data_type_dir,
             granularity="snapshot",
             suffix=tmp_path.suffix or ".xlsx",
         )
@@ -294,69 +469,23 @@ class MiaoshouInventoryExport(ExportComponent):
             asyncio.TimeoutError: expect_download timed out (180s).
         """
         pageerror_event = asyncio.Event()
-        pageerror_payload: list = []
+        pageerror_payload: list[dict[str, Any]] = []
 
         def _on_pageerror(error: Any) -> None:
             if pageerror_event.is_set():
                 return
-            pageerror_payload.append(
-                {
-                    "error": str(error),
-                    "name": getattr(error, "name", None),
-                    "stack": getattr(error, "stack", None),
-                    "filename": (
-                        getattr(error, "filename", None)
-                        or getattr(error, "fileName", None)
-                    ),
-                    "lineno": (
-                        getattr(error, "lineno", None)
-                        or getattr(error, "lineNumber", None)
-                    ),
-                    "colno": (
-                        getattr(error, "colno", None)
-                        or getattr(error, "columnNumber", None)
-                    ),
-                }
-            )
+            pageerror_payload.append(_collect_pageerror_payload(error))
             pageerror_event.set()
 
         page.on("pageerror", _on_pageerror)
         try:
-
-            async def _do_download() -> Any:
-                async with page.expect_download(timeout=180000) as dl_info:
-                    await self._trigger_export(page)
-                return await dl_info.value
-
-            download_task = asyncio.create_task(_do_download())
+            download_task = asyncio.create_task(
+                _download_triggering_export(page, self._trigger_export)
+            )
             pageerror_task = asyncio.create_task(pageerror_event.wait())
             try:
-                done, pending = await asyncio.wait(
-                    {download_task, pageerror_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for t in pending:
-                    t.cancel()
-                for t in pending:
-                    try:
-                        await t
-                    except (asyncio.CancelledError, Exception):
-                        pass
-
-                if download_task in done:
-                    return download_task.result()
-                # pageerror 赢了 — cancel download_task 后再 cancel 一次确保清理
-                if not download_task.done():
-                    download_task.cancel()
-                    try:
-                        await download_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
-                payload = pageerror_payload[0]
-                raise RuntimeError(
-                    f"export aborted by pageerror: filename={payload['filename']!r} "
-                    f"lineno={payload['lineno']} colno={payload['colno']} "
-                    f"name={payload['name']!r} stack={payload['stack']!r}"
+                return await _wait_download_or_pageerror(
+                    download_task, pageerror_task, pageerror_payload
                 )
             except BaseException:
                 if not download_task.done():
@@ -369,6 +498,7 @@ class MiaoshouInventoryExport(ExportComponent):
                 pass
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
+        self._failure_screenshot = None
         try:
             await self._navigate_to_warehouse_checklist(page)
             await self._select_warehouse_scope(page)
@@ -379,7 +509,10 @@ class MiaoshouInventoryExport(ExportComponent):
                 success=True, message="download complete", file_path=str(target)
             )
         except Exception as e:
-            screenshot_path = await self._capture_failure_screenshot(page, "export")
+            screenshot_path = (
+                self._failure_screenshot
+                or await self._capture_failure_screenshot(page, "export")
+            )
             message = str(e)
             if screenshot_path:
                 message = f"{message} (screenshot: {screenshot_path})"
@@ -401,8 +534,12 @@ class MiaoshouInventoryExport(ExportComponent):
             page, TargetPage.WAREHOUSE_CHECKLIST
         )
         if not nav_result.success:
-            raise RuntimeError(
-                f"navigation_failed: {nav_result.message or 'navigation failed'}"
+            raise await self._stage_error(
+                page,
+                prefix="navigation_failed",
+                stage=self.STAGE_NAVIGATION_READY,
+                reason=nav_result.message or "navigation failed",
+                matched_signal=SIGNAL_NAVIGATION_ROUTE,
             )
         await self.report_step(
             "step_success", step_id=self.STAGE_NAVIGATION_READY, action="已到仓库清单"
@@ -416,7 +553,14 @@ class MiaoshouInventoryExport(ExportComponent):
         try:
             await self._ensure_popup_closed(page)
         except Exception as e:
-            raise RuntimeError(f"popup_cleanup_failed: {e}") from e
+            error = await self._stage_error(
+                page,
+                prefix="popup_cleanup_failed",
+                stage=self.STAGE_POPUP_CLEARED,
+                reason=str(e),
+                matched_signal=SIGNAL_POPUP_CLOSE,
+            )
+            raise error from e
         await self.report_step(
             "step_success",
             step_id=self.STAGE_POPUP_CLEARED,
@@ -434,8 +578,12 @@ class MiaoshouInventoryExport(ExportComponent):
             page, {"select_all": True}
         )
         if not filter_result.success:
-            raise RuntimeError(
-                f"warehouse_scope_failed: {filter_result.message or 'warehouse filters failed'}"
+            raise await self._stage_error(
+                page,
+                prefix="warehouse_scope_failed",
+                stage=self.STAGE_WAREHOUSE_SCOPE_READY,
+                reason=filter_result.message or "warehouse filters failed",
+                matched_signal=SIGNAL_WAREHOUSE_SCOPE,
             )
         await self.report_step(
             "step_success",
@@ -454,7 +602,14 @@ class MiaoshouInventoryExport(ExportComponent):
             await self._click_search(page)
             await self._wait_search_results_ready(page)
         except Exception as e:
-            raise RuntimeError(f"search_failed: {e}") from e
+            error = await self._stage_error(
+                page,
+                prefix="search_failed",
+                stage=self.STAGE_SEARCH_RESULTS_READY,
+                reason=str(e),
+                matched_signal=SIGNAL_SEARCH_BUTTON,
+            )
+            raise error from e
         await self.report_step(
             "step_success",
             step_id=self.STAGE_SEARCH_RESULTS_READY,
@@ -470,7 +625,14 @@ class MiaoshouInventoryExport(ExportComponent):
             await self._open_export_dialog(page)
             await self._ensure_export_fields_all_selected(page)
         except Exception as e:
-            raise RuntimeError(f"export_dialog_failed: {e}") from e
+            error = await self._stage_error(
+                page,
+                prefix="export_dialog_failed",
+                stage=self.STAGE_EXPORT_DIALOG_READY,
+                reason=str(e),
+                matched_signal=SIGNAL_EXPORT_DIALOG,
+            )
+            raise error from e
         await self.report_step(
             "step_success",
             step_id=self.STAGE_EXPORT_DIALOG_READY,
@@ -486,7 +648,14 @@ class MiaoshouInventoryExport(ExportComponent):
             download = await self._expect_download_with_pageerror_guard(page)
             target = await self._wait_download_complete(page, download)
         except Exception as e:
-            raise RuntimeError(f"download_failed: {e}") from e
+            error = await self._stage_error(
+                page,
+                prefix="download_failed",
+                stage=self.STAGE_DOWNLOAD_SAVED,
+                reason=str(e),
+                matched_signal=SIGNAL_EXPORT_DOWNLOAD,
+            )
+            raise error from e
         await self.report_step(
             "step_success", step_id=self.STAGE_DOWNLOAD_SAVED, action="文件已落盘"
         )

@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 
@@ -104,6 +105,8 @@ class FakeLocator:
         intercept_clicks: bool = False,
         fail_clicks: int = 0,
         children: dict[str, Any] | None = None,
+        nth_children: dict[int, "FakeLocator"] | None = None,
+        check_on_click: bool = False,
     ) -> None:
         self.text = text
         self.visible = visible
@@ -113,6 +116,10 @@ class FakeLocator:
         self.intercept_clicks = intercept_clicks
         self.fail_clicks = fail_clicks
         self.children: dict[str, Any] = children or {}
+        # nth(i) 的分派表：未登记的下标仍返回自身（保持旧行为）
+        self.nth_children: dict[int, "FakeLocator"] = nth_children or {}
+        # 点击后自动变为勾选态（模拟真实页面的复选框交互）
+        self.check_on_click = check_on_click
         self.clicked = 0
         self.click_calls: list[tuple[int | None, bool | None]] = []
         self.wait_calls: list[tuple[str, int | None]] = []
@@ -120,14 +127,14 @@ class FakeLocator:
     # ── Locator 协议 ────────────────────────────────────────────────
     @property
     def first(self) -> "FakeLocator":
-        return self
+        return self.nth_children.get(0, self)
 
     @property
     def last(self) -> "FakeLocator":
         return self
 
     def nth(self, index: int) -> "FakeLocator":
-        return self
+        return self.nth_children.get(index, self)
 
     def locator(self, query: str) -> Any:
         return self.children.get(query, FakeLocator(count=0))
@@ -184,6 +191,27 @@ class FakeLocator:
                 " intercepts pointer events"
             )
         self.clicked += 1
+        if self.check_on_click:
+            # 真实页面：点击复选框后其勾选态变为 true
+            self.checked = True
+
+
+class FakeDownload:
+    """下载对象替身：save_as 落一个非空文件。"""
+
+    def __init__(
+        self,
+        suggested_filename: str = "inventory_snapshot.xlsx",
+        content: bytes = b"fake-export-bytes",
+    ) -> None:
+        self.suggested_filename = suggested_filename
+        self._content = content
+        self.saved_paths: list[str] = []
+
+    async def save_as(self, path: str) -> None:
+        self.saved_paths.append(path)
+        with open(path, "wb") as handle:
+            handle.write(self._content)
 
 
 class FakeKeyboard:
@@ -199,10 +227,15 @@ class FakeKeyboard:
 class FakePage:
     """Page 替身：按选择器字符串分发到 FakeLocator。"""
 
-    def __init__(self, *, locators: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self, *, locators: dict[str, Any] | None = None, url: str = ""
+    ) -> None:
         self.locators: dict[str, Any] = locators or {}
         self.keyboard = FakeKeyboard()
         self.waits: list[tuple[str, int | None]] = []
+        self.url = url
+        self.goto_calls: list[str] = []
+        self.screenshots: list[str] = []
 
     def locator(self, query: str) -> Any:
         return self.locators.get(query, FakeLocator(count=0))
@@ -216,5 +249,72 @@ class FakePage:
     def get_by_label(self, text: Any) -> Any:
         return self.locators.get("label:仓库", FakeLocator(count=0))
 
+    async def goto(
+        self, url: str, wait_until: str | None = None, timeout: int | None = None
+    ) -> None:
+        self.goto_calls.append(url)
+        self.url = url
+
+    async def screenshot(self, path: str = "", **kwargs: Any) -> None:
+        self.screenshots.append(path)
+        if path:
+            with open(path, "wb") as handle:
+                handle.write(b"fake-screenshot")
+
     async def wait_for_timeout(self, ms: int) -> None:
         self.waits.append(("timeout", ms))
+
+
+class FakeDownloadInfo:
+    """``expect_download`` 的 dl_info 替身：``value`` 是 awaitable。
+
+    ``download=None`` 时 Future 永不 resolve（模拟干等的下载），
+    ``download=<obj>`` 时立即 resolve（模拟下载先到）。
+    """
+
+    def __init__(self, download: Any = None) -> None:
+        self._future: asyncio.Future = asyncio.Future()
+        if download is not None:
+            self._future.set_result(download)
+
+    @property
+    def value(self) -> Any:
+        return self._future
+
+
+class _FakeExpectDownload:
+    """``expect_download`` 上下文管理器替身。"""
+
+    def __init__(self, page: "FakeDownloadPage") -> None:
+        self._page = page
+
+    async def __aenter__(self) -> FakeDownloadInfo:
+        return self._page.dl_info
+
+    async def __aexit__(self, *args: Any) -> bool:
+        return False
+
+
+class FakeDownloadPage(FakePage):
+    """带 pageerror 事件与 expect_download 的 page 替身。"""
+
+    def __init__(self, *, download: Any = None, url: str = "") -> None:
+        super().__init__(url=url)
+        self.handlers: dict[str, Any] = {}
+        self.dl_info = FakeDownloadInfo(download)
+
+    def on(self, event_name: str, handler: Any) -> None:
+        self.handlers[event_name] = handler
+
+    def remove_listener(self, event_name: str, handler: Any) -> None:
+        if self.handlers.get(event_name) is handler:
+            self.handlers.pop(event_name, None)
+
+    def expect_download(self, *, timeout: int | None = None) -> _FakeExpectDownload:
+        return _FakeExpectDownload(self)
+
+    def emit_pageerror(self, error: Any) -> None:
+        """触发 pageerror 事件（模拟页面 JS 抛错）。"""
+        handler = self.handlers.get("pageerror")
+        if handler is not None:
+            handler(error)

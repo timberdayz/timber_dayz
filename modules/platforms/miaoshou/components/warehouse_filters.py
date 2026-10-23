@@ -10,6 +10,17 @@ from modules.components.base import ComponentBase, ExecutionContext, ResultBase
 from modules.platforms.miaoshou.components.inventory_config import InventorySelectors
 
 
+async def _is_visible(locator: Any) -> bool:
+    """locator 当前是否可见（检测失败按「不可见」处理，不抛）。"""
+    visible = True
+    try:
+        visible = await locator.is_visible()
+    except Exception:
+        # 可见性检测失败按「不可见」处理，交由调用方继续走等待路径
+        visible = False
+    return visible
+
+
 class MiaoshouWarehouseFilters(ComponentBase):
     """仓库清单页面的仓库范围筛选器（全选仓库）。"""
 
@@ -182,20 +193,26 @@ class MiaoshouWarehouseFilters(ComponentBase):
             self._log(f"[warehouse_filters] 层D focus 失败: {e}")
         await page.keyboard.press("Enter")
 
-    async def _open_scope_dropdown(self, page: Any) -> Any | None:
-        """按 C → A → B → D 打开仓库范围下拉框，返回浮层容器。
+    async def _pre_check_scope_already_all_selected(self, page: Any) -> bool:
+        """pre-check：层 C「已全选」检测（命中即说明不需要再开下拉勾选）。
 
-        - C 已全选前置检测：命中即跳过开下拉（返回 None）
+        层 C 判定本身是**尽力而为**，只有命中才跳过；未命中一律继续走
+        A → B → D 四层防护（《规范》§3.5「前置检测」）。
+        """
+        if await self._scope_already_all_selected(page):
+            self._log("[warehouse_filters] 层C 命中已全选，跳过开下拉")
+            return True
+        return False
+
+    async def _open_scope_dropdown(self, page: Any) -> None:
+        """action：按 A → B → D 打开仓库范围下拉框。
+
         - A 点 .jx-select 容器外壳（治本）
         - B force=True 穿透 + 有界重试
         - D 键盘兜底（仅 A / B 均失败后触发）
 
         全部失败时抛 RuntimeError，消息带阶段名 warehouse_scope_open_failed。
         """
-        if await self._scope_already_all_selected(page):
-            self._log("[warehouse_filters] 层C 命中已全选，跳过开下拉")
-            return None
-
         trigger = await self._warehouse_scope_trigger(page)
 
         container = await self._warehouse_scope_container(page)
@@ -204,28 +221,31 @@ class MiaoshouWarehouseFilters(ComponentBase):
                 await container.click(
                     timeout=self.sel.warehouse_scope_trigger_timeout_ms
                 )
-                return await self._wait_overlay_ready(page)
+                await self._wait_overlay_ready(page)
+                return
             except Exception as e:
                 self._log(f"[warehouse_filters] 层A 打开下拉失败: {e}")
 
         try:
             await self._click_trigger_with_retry(trigger)
-            return await self._wait_overlay_ready(page)
+            await self._wait_overlay_ready(page)
+            return
         except Exception as e:
             self._log(f"[warehouse_filters] 层B 打开下拉失败: {e}")
             layer_b_error = e
 
         try:
             await self._keyboard_open(page, trigger)
-            return await self._wait_overlay_ready(page)
+            await self._wait_overlay_ready(page)
+            return
         except Exception as e:
             raise RuntimeError(
                 "warehouse_scope_open_failed: 层A/层B/层D 均无法打开仓库范围下拉框"
                 f"（层B: {layer_b_error}; 层D: {e}）"
             ) from layer_b_error
 
-    async def _wait_overlay_ready(self, page: Any) -> Any:
-        """定位已打开的仓库范围下拉浮层。
+    def _scope_overlay_candidates(self, page: Any) -> list[Any]:
+        """仓库范围下拉浮层的定位候选（按证据强度排序）。
 
         候选来源（依据见 `inventory_config.py` 顶部取证说明）：
         - `role="listbox"`：真实 call log 里 input 声明了 `aria-haspopup="listbox"`
@@ -234,7 +254,7 @@ class MiaoshouWarehouseFilters(ComponentBase):
           归档 `export.py:386-390` 实战验证过的浮层 class
         - `tooltip` / `el-select-dropdown` / `ant-select-dropdown`：历史兼容候选
         """
-        candidates = [
+        return [
             page.get_by_role("listbox").last,
             *[
                 page.locator(selector).last
@@ -244,13 +264,27 @@ class MiaoshouWarehouseFilters(ComponentBase):
             page.locator(".el-select-dropdown:visible").last,
             page.locator(".ant-select-dropdown:visible").last,
         ]
-        for locator in candidates:
+
+    async def _wait_overlay_ready(self, page: Any) -> Any:
+        """定位已打开的仓库范围下拉浮层（带可见性等待）。"""
+        for locator in self._scope_overlay_candidates(page):
             try:
                 await locator.wait_for(state="visible", timeout=2000)
                 return locator
             except Exception:
                 continue
         raise RuntimeError("仓库筛选下拉未出现")
+
+    async def _locate_scope_overlay(self, page: Any) -> Any:
+        """关键交互前**重新定位**仓库范围下拉浮层（《规范》§13.3）。
+
+        优先用「当前已可见」的候选（不等待、不改变时序）；都不可见时退回
+        带等待的 `_wait_overlay_ready`（与既有行为一致）。
+        """
+        for locator in self._scope_overlay_candidates(page):
+            if await _is_visible(locator):
+                return locator
+        return await self._wait_overlay_ready(page)
 
     async def _is_checkbox_selected(self, locator: Any) -> bool:
         try:
@@ -315,8 +349,12 @@ class MiaoshouWarehouseFilters(ComponentBase):
         # 最后的兜底：让调用方拿到一个能 raise 的 locator，错误信息更明确
         return candidates[0]
 
-    async def _ensure_scope_all_selected(self, overlay: Any) -> None:
-        """在下拉浮层里把「全选」勾上。"""
+    async def _ensure_scope_all_selected(self, page: Any) -> None:
+        """action 的一部分：在下拉浮层里把「全选」勾上。
+
+        浮层在关键交互前**重新定位**，不跨阶段持有 locator（《规范》§13.3）。
+        """
+        overlay = await self._locate_scope_overlay(page)
         full_select = await self._find_full_select_checkbox(overlay)
 
         checked = await self._is_checkbox_selected(full_select)
@@ -326,13 +364,39 @@ class MiaoshouWarehouseFilters(ComponentBase):
             except Exception:
                 await full_select.click(timeout=1000)
 
+    async def _post_check_scope_all_selected(self, page: Any) -> None:
+        """post-check：动作后**回读**「全选」复选框的勾选状态。
+
+        动作成功 ≠ 业务成功（《规范》§3.5.1）：没勾上就是失败，抛带阶段前缀的
+        错误 warehouse_scope_verify_failed。
+        """
+        selected = False
+        try:
+            overlay = await self._locate_scope_overlay(page)
+            full_select = await self._find_full_select_checkbox(overlay)
+            selected = await self._is_checkbox_selected(full_select)
+        except Exception as e:
+            # 回读通道本身失败（如浮层已关闭）同样按「未确认生效」处理
+            raise RuntimeError(
+                f"warehouse_scope_verify_failed: 回读「全选」勾选状态失败（{e}）"
+            ) from e
+        if not selected:
+            raise RuntimeError(
+                "warehouse_scope_verify_failed: 「全选」复选框回读仍未选中"
+            )
+
+    async def _action_select_scope_all(self, page: Any) -> None:
+        """action：打开仓库范围下拉框并勾上「全选」（A/B/C/D 四层防护保持不变）。"""
+        await self._open_scope_dropdown(page)
+        await self._ensure_scope_all_selected(page)
+
     async def run(self, page: Any, filters: dict[str, Any] | None = None) -> ResultBase:  # type: ignore[override]
         try:
             await self.report_step(
                 "step_start", step_id="warehouse_scope_ready", action="打开仓库范围筛选"
             )
-            overlay = await self._open_scope_dropdown(page)
-            if overlay is None:
+            # ── pre-check：已全选则不需要再开下拉勾选 ──
+            if await self._pre_check_scope_already_all_selected(page):
                 await self.report_step(
                     "step_success",
                     step_id="warehouse_scope_ready",
@@ -344,7 +408,12 @@ class MiaoshouWarehouseFilters(ComponentBase):
                     details={"select_all": True, "skipped": True},
                 )
 
-            await self._ensure_scope_all_selected(overlay)
+            # ── action：开下拉 + 勾「全选」 ──
+            await self._action_select_scope_all(page)
+
+            # ── post-check：回读勾选状态，确认真的生效 ──
+            await self._post_check_scope_all_selected(page)
+
             await self._ensure_popup_closed(page)
             await self.report_step(
                 "step_success", step_id="warehouse_scope_ready", action="仓库范围已全选"
