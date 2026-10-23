@@ -62,3 +62,23 @@ def is_archive_only_file(path_or_name: str) -> bool:
     if is_versioned_component_filename(filename):
         return False
     return is_legacy_component_filename(filename)
+
+
+def is_missing_component_file(
+    file_path: str, *, project_root: Path | None = None
+) -> bool:
+    """file_path 指向的组件文件是否已不可用。
+
+    判定：路径为空 / 位于 archive/ 目录 / 文件在磁盘上不存在。
+
+    用于发现「stable 记录指向已归档或缺失文件」的孤儿记录
+    （docs/guides/ACTIVE_COLLECTION_COMPONENTS.md「Archive 目录语义 → 前置条件」第 2 条：
+      没有 stable ComponentVersion.file_path 指向该文件）。
+    """
+    raw = str(file_path or "").replace("\\", "/").strip()
+    if not raw:
+        return True
+    if "/archive/" in raw:
+        return True
+    root = project_root or _default_project_root()
+    return not (root / raw).exists()
