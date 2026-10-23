@@ -1006,5 +1006,7 @@ node --test frontend/tests/inventoryAgingUi.test.mjs  # 15 pass / 0 fail
 1. **妙手登录态**：`data/sessions/miaoshou/miaoshou_real_001/storage_state.json` 停在 2026-10-20 20:54，2026-10-19/20 的 `orders` 采集卡在图形验证码；本次走 `headed` 模式，可人工介入。
 2. **本地后端要能起来**：`backend/main.py:538` 的 cloud sync 启动检查在云端库 `127.0.0.1:15433` 连不通时会 `raise` 导致整体退出。官方入口是 `scripts/start_collection_formal.ps1`（会自动拉 SSH 隧道）；隧道拉不起来时可用 `scripts/start_local_collection_mode.ps1`（开发模式，不强制隧道可达）。
 3. **配置 30 同时含 `orders` 与 `inventory` 两个域**，`orders` 子域 shopee/tiktok 上次失败于验证码；`inventory` 域历史上成功过（2026-09-14）。
+
+> **2026-10-23 更新**：同一数据域再次失败（flaky，非必现）。任务 `7bb2a92e-a0eb-4129-ba5c-6237b852c909`，失败于 `warehouse_filters.py` 点击仓库范围下拉框时被 `jx-select` 透明占位层拦截命中测试。根因与整改见 `docs/superpowers/specs/2026-10-23-miaoshou-inventory-domain-remediation-design.md`。
 4. **inventory 域的 granularity 会被强制归一为 `snapshot`**（`modules/apps.collection_center/landing_semantics.py:resolve_business_granularity`），所以配置里的 `granularity=weekly` 不影响落库表名；另有 `POST /api/data-sync/repair-inventory-snapshot-semantics` 兜底。
 5. **Docker 只保留基础设施**：`postgres` / `redis` / `celery_worker` / `celery_beat` 保持 healthy，`backend_api` / `backend_collector` 保持停止。

@@ -107,6 +107,37 @@
 - `P1` 日期相关前置链路需要真实页面复验  
   当前导出链路中仍有“重置时间 / 清空时间 / 直接填输入框”几种路径并存，需要在真实页面上验证哪条才是长期稳定路径。
 
+### `miaoshou/orders_export`
+
+- `P0` 订单状态筛选下拉框同样存在 `jx-select` 透明占位层拦截点击的问题  
+  2026-10-23 排查库存域失败时发现同类故障：订单状态 `filters.py` 的点击会被
+  `jx-select__selected-item jx-select__placeholder is-transparent` 拦截命中测试，
+  抛 `Locator.click: Timeout 1500ms exceeded`。  
+  该修复一度以未提交改动留在工作区，并打挂了 4 个既有单元测试（假对象不支持
+  `force=` 关键字，异常被 `except Exception` 吞掉），2026-10-23 已随 `162f8bb0`
+  修好入库，并改用 DOM 结构判定「是否已全选」。
+
+### `miaoshou/inventory_export`
+
+- `P0` 仓库范围下拉框被 `jx-select` 透明占位层拦截点击，线上任务失败  
+  2026-10-23 11:56:35 任务失败，耗时 44s（含 23s 等验证码）。直接根因：
+  `modules/platforms/miaoshou/components/warehouse_filters.py` 点击仓库范围下拉框时，
+  `jx-select__selected-item jx-select__placeholder is-transparent` 拦截命中测试 →
+  `Locator.click: Timeout 1500ms exceeded`。  
+  证据：
+  - `logs/backend-local.out.log:364-389`
+  - `core.collection_tasks` id=637
+  - `core.collection_task_logs` id=3984  
+  域隔离：同期 task 636（`orders`）状态为 `completed`，域之间互不影响。
+
+- `P0` 该故障是 flaky，非必现  
+  同一数据域历史上成功过（2026-09-14，见
+  `docs/superpowers/plans/2026-10-21-inventory-aging-pipeline-recovery.md` 第 1008 行），
+  因此问题长期未被提前发现。  
+  整改方向见
+  `docs/superpowers/specs/2026-10-23-miaoshou-inventory-domain-remediation-design.md` §5.2 L1-1
+  （仓库范围下拉框 C→A→B→D 四层遮挡防护）。
+
 ---
 
 ## 组合链路状态

@@ -60,7 +60,7 @@
 | `miaoshou/navigation` | 可测试 | 当前可作为轻量前置组件 |
 | `miaoshou/date_picker` | 可测试 | 可作为前置组件，但后续仍需真实页面收敛 |
 | `miaoshou/export` | 继续修 | 已修数据域口径、download await、count 判断、context download 清理，但 dropdown/dialog/iframe 复合链路仍最复杂 |
-| `miaoshou/inventory_export` | 可测试 | V2 canonical 独立精细类；warehouse_filters + 字段对话框；同步下载 |
+| `miaoshou/inventory_export` | 待复验 | V2 canonical 独立精细类；warehouse_filters + 字段对话框；同步下载。2026-10-23 已完成仓库范围下拉框四层遮挡防护（层 C 已全选前置检测 / 层 A 点容器外壳 / 层 B force 穿透 / 层 D 键盘兜底）与分阶段事件上报；待真实页面复验，层 A 的 CSS 需批次 2 取证校正 |
 | `miaoshou/purchase_export` | 可测试 | V2 canonical 独立精细类；异步导出 + 字段对话框 + 导出记录轮询 |
 
 ### 不应作为默认维护对象
