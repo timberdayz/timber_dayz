@@ -1,10 +1,11 @@
 # 妙手 Miaoshou 库存数据域采集整改设计（Miaoshou Inventory Domain Remediation）
 
 **日期:** 2026-10-23
-**状态:** 待实施（**第 2 稿**：已吸收独立评审结论，修正 20 处事实/引用/结构问题）
+**状态:** 待实施（**第 4 稿**：已完成 3 轮独立评审，批次 1 交付范围已通过事实校验与内部一致性校验）
 **定位:** 本 spec 解决「妙手库存数据域采集组件不可靠 / 不可诊断 / 不符合既有规范」，以及「规范与实现之间缺少强制连接导致债务复发」两个问题。**不改**采集配置链路的业务语义、粒度口径、入库链路与 Dashboard。
 **关联文档（规则来源，本 spec 只引用条款，不重复其内容）:**
 - `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` — 《采集脚本编写规范》（唯一成文编写依据，下文简称《规范》）
+- `docs/guides/COLLECTION_AUTHORING_RULES.md` — 采集编写工作流与 Authoring Sequence（pwcli 取证步骤来源）
 - `docs/guides/CANONICAL_COLLECTION_COMPONENTS.md` — canonical 组件规则
 - `docs/guides/ACTIVE_COLLECTION_COMPONENTS.md` — 活跃清单与 Archive 前置条件
 - `docs/guides/CANONICAL_COMPONENT_STATUS.md` — 组件阶段性状态
@@ -22,6 +23,7 @@
 | 初稿 | 2026-10-23 | 基于 2026-10-23 采集失败事件（task `7bb2a92e-a0eb-4129-ba5c-6237b852c909`）与本地库 `xihong_erp` 实测形成 |
 | 第 2 稿 | 2026-10-23 | 吸收第 1 轮独立评审（verifier）结论，修正 4 项必须修的事实错误、1 项设计缺陷、4 处交叉引用错位、验收缺口、3 条遗漏风险、11 处引用精度问题 |
 | 第 3 稿 | 2026-10-23 | 吸收第 2 轮复评（verifier，PARTIAL）结论，闭合 9 条定点修订：弹窗清理机制归属（`guard_overlays` 仅测试模式生效）、A9 文件集与上游 spec 定义的抵触、《规范》§2 违规归因（`_ensure_popup_closed` 内的 `count()+is_visible()`）、`.first` 计数 18→17、`report_step` 行号锚点、status_callback 真实签名与 `details.step_id` 契约、11:56:09 的 DB 证据指针、L2-10/L4-6 编号统一、L3-5 的批次与验收归属 |
+| 第 4 稿 | 2026-10-23 | 吸收第 3 轮终审（verifier，PARTIAL，评审轮次上限）结论：修正 §2.5 与 §1.1 关于「导航完成时刻」的自相矛盾、统一 C6 与 L3-4/§8 的口径表述（取「保存时报错 + 界面灰显」两者都做）、lint 覆盖链补入「扩展 `swallow_exception_pattern` 覆盖 `continue`/`return` 形态」、Authoring Sequence 归属改指 `COLLECTION_AUTHORING_RULES.md`、contract 测试文件标注由「新增」改为「修改」、`popup_cleared` 归属主体定为「复用 `navigation.py:83` 既有调用 + 组件在其后记录阶段事件」、层 D 降级为兜底并补 A12 与风险行、A9 补 `warehouse_filters_contract` 的实际判别要求、L4-4 清理范围补 `products`/`analytics` |
 
 ### 0.1 第 2 稿的关键修正（与初稿结论不同的地方）
 
@@ -79,7 +81,7 @@
 
 ### 2.1 直接根因：jx-select 的透明占位层拦截点击
 
-后端日志 `logs/backend-local.out.log:364-375` 的 Playwright call log：
+后端日志 `logs/backend-local.out.log:364-389` 的 Playwright call log：
 
 ```
 waiting for get_by_label(re.compile(r"仓库", re.IGNORECASE)).first
@@ -169,7 +171,7 @@ if not clicked:
 
 `docs/superpowers/plans/2026-10-21-inventory-aging-pipeline-recovery.md:1008` 记录：**「`inventory` 域历史上成功过（2026-09-14）」**。
 
-触发条件是「刚过完验证码 / 刚导航 / 选框尚未就绪」的时序窗口。本次时间线正好落在窗口内：登录完成 11:56:27 → 导航完成 11:56:33 → 失败 11:56:35（**8 秒内**）。
+触发条件是「刚过完验证码 / 刚导航 / 选框尚未就绪」的时序窗口。本次时间线正好落在窗口内：登录完成 11:56:27 →（11:56:33 为弹窗处理器初始化，**导航完成时刻无日志证据、属推断**）→ 失败 11:56:35（**登录成功到失败 8 秒内**）。
 
 **flaky 比必现失败更危险**：它会以「随机失败」形式反复出现，且每次伴随一次验证码等待（本次 44 秒总耗时中 23 秒在等验证码：11:55:51 → 11:56:14）。执行器对 export 域失败**不做自动重试**（`executor_v2.py:2813` `raise StepExecutionError` → `:2887 except Exception` → `:2890 failed_domains.append` → `:2894 continue`），因此每次 flaky 都等于整域失败。
 
@@ -370,7 +372,7 @@ error_screenshot_path None
 | **A** | 点击 **`.jx-select` 触发器容器**而非被覆盖的 `.jx-select__input` | 空态 placeholder | **需先按 label 关联定位到正确的那个 `.jx-select`**——页面可能存在多个 jx-select，不能用裸 `.jx-select`。做法：先 `get_by_label`/`get_by_text` 定位到「仓库」标签，再取其最近的 `.jx-select` 祖先容器。具体 CSS 需在批次 2 用 pwcli 取证后确定，**候选存放在 `inventory_config.py` 并注明改版风险**（《规范》§1） |
 | **B** | `click(force=True)` + 最多 1 次重试 | tags 堆积 | **不复用订单域那段代码**（其 `except Exception: continue` 吞异常，且 fake locator 不兼容，见 §2.3）。此处应显式捕获并记录失败原因，重试次数有上限，失败要带阶段名 |
 | **C** | 「已全选」前置检测：命中即跳过开下拉 | 两种形态都防 | **⚠️ 依赖 DOM 形态，未经验证**：订单域的判定基于「选中 ≥2 项才出现的 `+ N` 折叠标签」，而仓库筛选是**单个「全选」复选框**，已全选时 DOM 形态未知（可能只有 1 个 tag、无 `+ N`）⇒ 该判定**可能恒返回 False**。**批次 2 取证前，层 C 仅为尽力而为，不得作为唯一防线** |
-| **D** | 键盘兜底：focus + `Enter`/`ArrowDown` | 最后一道 | **工程兜底，《规范》未覆盖此场景**（《规范》§4 讲的是「悬停→内容出现→点击」，不含键盘兜底）。实现时需在取证后确认 `jx-select` 是否响应键盘 |
+| **D** | 键盘兜底：focus + `Enter`/`ArrowDown` | 最后一道 | **工程兜底，《规范》未覆盖此场景**（《规范》§4 讲的是「悬停→内容出现→点击」，不含键盘兜底）。**仅在 A/B/C 全部失败后才触发**，不作为独立尝试。实现时需在取证后确认 `jx-select` 是否响应键盘 |
 
 **定位器**：`get_by_label(re.compile(r"仓库"))` → 语义锚定形式。**注意**：订单域的 `get_by_role("combobox", name=...).first` 本身违反《规范》§16 表第 1 行（page 根作用域 + `.first`），**不要照抄**。目标形态是「先收敛作用域（label → 关联容器），再在容器内定位」。
 
@@ -438,7 +440,15 @@ ctx = ExecutionContext(
 | `ComponentBase.guard_overlays` | `base.py:116-140` → `miaoshou/components/overlay_guard.py` → `UniversalPopupHandler().close_safe_notices(platform="miaoshou")` | ❌ **仅 `is_test_mode=True` 生效**（`base.py:124-125` 直接 return）。**不可**作为生产机制，否则 `popup_cleared` 阶段永远「成功」而什么都不做 |
 | `ComponentBase.stabilize_safe_notices` | `base.py:142-165` | ✅ **无 test-mode 门控**，注释即「Best-effort **runtime** cleanup for platform-approved informational notices」。可作为组件侧生产可用的清理手段 |
 
-**结论**：`popup_cleared` 阶段记录「本阶段是否有可观测的清理动作」，生产由执行器 `close_popups` 承担，组件侧用 `stabilize_safe_notices` 补充（妙手 `popup_config.get_safe_notice_close_selectors()` 已有 4 条真实选择器）；`guard_overlays` 仅在测试模式使用。**不新增第 5 份 `_ensure_popup_closed`**（见 §5.6）。
+**结论（归属主体已定）**：`popup_cleared` 阶段**不重复执行清理**，只记录「本次采集是否发生了可观测的清理动作」。具体分工：
+
+| 主体 | 职责 |
+|---|---|
+| 执行器 | 生产路径的弹窗清理主责：`executor_v2.py:2776` 每域导出前 `close_popups` |
+| 组件 | 复用 `navigation.py:83` **已有的** `await self.stabilize_safe_notices(page, label="post-navigation cleanup")`（该调用已在 WAREHOUSE_CHECKLIST 分支的生产路径上执行），**在其后**记录 `popup_cleared` 阶段事件，不重复调用清理 |
+| `guard_overlays` | 仅 `is_test_mode=True` 使用 |
+
+妙手 `popup_config.get_safe_notice_close_selectors()` 已有 4 条真实选择器。**不新增第 5 份 `_ensure_popup_closed`**（见 §5.6）。
 
 **验收**：A7、A8
 
@@ -447,7 +457,7 @@ ctx = ExecutionContext(
 **改动文件（3 个，比初稿多 1 个）**：
 1. `backend/tests/test_miaoshou_inventory_export_v2_flow.py`
 2. `backend/tests/test_miaoshou_warehouse_filters_contract.py`
-3. **`backend/tests/test_miaoshou_inventory_export_contract.py`（新增，因 L2-7 依赖它）**
+3. **`backend/tests/test_miaoshou_inventory_export_contract.py`（修改：纳入 L1-3 改动范围，因 L2-7 依赖它；文件已存在且已提交）**
 
 - 把源码字符串断言改为 **mock page 行为测试**（对齐上游 spec §7 的原始要求，以及 `tests/unit/test_shopee_products_export.py` 的 1583 行范式）
 - **新增用例必须覆盖**：
@@ -478,7 +488,7 @@ ctx = ExecutionContext(
 
 > **「`warehouse_filters.py` 结构归位」已移出批次 2**，改挂批次 4 的 **L4-6**，与 §5.7 的「不在批次 1/2 执行此重命名」保持一致。
 
-**执行前提**：L2-1/L2-2 需要 pwcli 重新抓取真实页面 DOM 取证（《规范》Authoring Sequence 第 2 步）。**取证必须在有头模式、能人工处理验证码的环境下进行。**
+**执行前提**：L2-1/L2-2 需要 pwcli 重新抓取真实页面 DOM 取证（`docs/guides/COLLECTION_AUTHORING_RULES.md` 的 Authoring Sequence 第 2 步「Use `pwcli` to collect page evidence」）。**取证必须在有头模式、能人工处理验证码的环境下进行。**
 
 ### 5.4 L3：机制层（批次 1 出设计，批次 3 落地）
 
@@ -505,6 +515,7 @@ ctx = ExecutionContext(
 | 关键步骤缺 `report_step` | 🆕 需新增 | §5.3 / §13.4 |
 | 未接 `ctx.logger` | 🆕 需新增 | §13.4 |
 | 函数 > 50 行 / 类 > 500 行 | 🆕 需新增 | `TESTING_AND_QUALITY.md:211,213` |
+| **扩展 `swallow_exception_pattern` 覆盖 `except Exception: continue` / `return` 形态** | 🆕 需新增 | §2 / §13。**实测**：现规则正则 `except\s+Exception\s*:\s*pass` 只覆盖库存两文件 26 处中的 **4 处**，另 22 处不被任何现有或新增规则检出——不扩展则「阻止复发」目标仅覆盖 4/26，与 B1「零违反」不可达 |
 | 组件无 stable 记录 | 🆕 需新增（区别于「指向缺失文件」，后者已有 `MissingStableComponentFileError` 覆盖，见 `component_runtime_resolver.py:43-51`） | `ACTIVE_COLLECTION_COMPONENTS.md:75` |
 | stable 记录指向 `archive/` 或缺失文件 | 🆕 需新增（运行时已有守卫，CI 侧需前置） | 同上 |
 | 导航单信号（未做 URL + 元素双信号） | 🆕 需新增 | §13.2 |
@@ -543,7 +554,7 @@ ctx = ExecutionContext(
 
 **注意**：miaoshou 的 `orders` 是子域拆分（`orders_shopee_export` / `orders_tiktok_export`），校验逻辑需按 `build_component_name` 的真实语义实现，**不能简单按 `<domain>_export.py` 判存在**。
 
-**⚠️ 口径待确认**：C6 的判定是「保存时报错**或**界面明确提示」二选一，不唯一可判定。**需人工裁定取哪一种**（建议：保存时报错 + 界面灰显并注明「该平台暂不支持」，两者都做）。
+**⚠️ 口径（已按建议取定，§7.3 C6 与 §8 已同步）**：**保存时报错 + 界面灰显并注明「该平台暂不支持」，两者都做**。若实施时产品侧另有决定，需同步 C6 与 §8 风险行。
 
 #### L3-5 执行器失败语义分级（可选，低优先）
 
@@ -558,7 +569,7 @@ ctx = ExecutionContext(
 | L4-1 | 同平台内去重 + 平台无关算法下沉 | `_is_checkbox_selected`（判定算法，平台无关）、下载捕获、遮挡穿透、结构化错误 → `modules/components/` |
 | L4-2 | `popup_config` 填真实选择器 | 三个平台的 `get_close_selectors()` **当前全返回 `[]`**，机制存在但配置为空，导致组件各自造 `_ensure_popup_closed` 轮子。先用 pwcli 取证填充，再把组件内重复轮询收回统一机制 |
 | L4-3 | 三平台各自的 `_download_helpers.py` 合并 | tiktok(2.1KB) / shopee(7.3KB) 内容不同但功能重叠 |
-| L4-4 | `warehouse` vs `inventory` 域映射统一 | `python_component_adapter.py:54-55`：`warehouse` 指向**全仓不存在**的 `MiaoshouExport` 类，`inventory` 指向 `MiaoshouInventoryExport` —— 两个域打同一个页面 |
+| L4-4 | `warehouse` vs `inventory` 域映射统一 | `python_component_adapter.py:54-55`：`warehouse` 指向**全仓不存在**的 `MiaoshouExport` 类，`inventory` 指向 `MiaoshouInventoryExport` —— 两个域打同一个页面。**注**：`:53`（`products`）与 `:57`（`analytics`）同样映射到不存在的 `MiaoshouExport`，清理范围需一并覆盖 |
 | L4-5 | 订单域组件文件结构统一 | 当前为 `orders_export_base.py`（非 canonical 命名）+ `orders_shopee_export.py` + `orders_tiktok_export.py` |
 | L4-6 | `warehouse_filters.py` → `filters_inventory.py` 结构归位（与 §5.7 约定同步） | 见 §5.7 |
 
@@ -620,9 +631,10 @@ ctx = ExecutionContext(
 | A6 | 已全选态跳过下拉 | 行为测试覆盖形态 B 并通过 |
 | A7 | 失败可诊断 | 故意让某阶段失败 → 错误消息含阶段名；`report_step` 有记录；截图文件存在于 `ctx.config["task"]["screenshot_dir"]` |
 | A8 | 时间线可见步骤 | 任务详情「步骤时间线」出现组件写入的阶段条目（**前提：L1-2a/2b 已落地**） |
-| A9 | 测试形态升级 | 以下三个文件**不再包含源码字符串断言**：`backend/tests/test_miaoshou_inventory_export_v2_flow.py`、`backend/tests/test_miaoshou_warehouse_filters_contract.py`、`backend/tests/test_miaoshou_inventory_export_contract.py`；且 fake locator 支持 `force=`。**注**：`test_miaoshou_inventory_export_contract.py` 按上游 2026-09-13 spec §7 的定义本就是「静态读源文件 + 反射检查元数据」的 **contract 测试**，因此只要求移除**源码文本断言**（现存 6 处，行 49/50/51/57/58/64），**保留** L2-7 依赖的 `selectors.*` 实例断言（行 23/25/26） |
+| A9 | 测试形态升级 | 以下三个文件**不再包含源码字符串断言**：`backend/tests/test_miaoshou_inventory_export_v2_flow.py`、`backend/tests/test_miaoshou_warehouse_filters_contract.py`、`backend/tests/test_miaoshou_inventory_export_contract.py`；且 fake locator 支持 `force=`。<br>**注 1**：`test_miaoshou_inventory_export_contract.py` 按上游 2026-09-13 spec §7 的定义本就是「静态读源文件 + 反射检查元数据」的 **contract 测试**，因此只要求移除**源码文本断言**（现存 6 处，行 49/50/51/57/58/64），**保留** L2-7 依赖的 `selectors.*` 实例断言（行 23/25/26）。<br>**注 2**：`test_miaoshou_warehouse_filters_contract.py` 当前 22 行、**零源码字符串断言**，故「不含源码字符串断言」对它天然成立、无法判别；本项对它另有要求——**必须扩为覆盖形态 A / 形态 B 的行为测试**（当前该文件对本次失败的交互零覆盖） |
 | A10 | 不破坏其他域 | `python -m pytest backend/tests/test_miaoshou_filters_component.py backend/tests/test_miaoshou_inventory_export_contract.py backend/tests/test_miaoshou_inventory_export_v2_flow.py backend/tests/test_miaoshou_inventory_pageerror_recovery.py backend/tests/test_miaoshou_purchase_export_contract.py backend/tests/test_miaoshou_purchase_export_v2_flow.py backend/tests/test_miaoshou_supporting_components_contract.py backend/tests/test_miaoshou_warehouse_filters_contract.py -q -p no:cacheprovider` 全绿（**当前基线：`test_miaoshou_filters_component.py` 因 §2.3 的未提交改动 4 failed，批次 1 必须先修好或一并修掉**） |
 | A11 | 落库目标达成 | 产出文件被 `catalog_scanner` 扫描并入库 `b_class.fact_miaoshou_inventory_snapshot`（对应 §1.2 目标 4） |
+| A12 | 层 D 键盘兜底可达 | 行为测试中 A/B/C 均失败时，组件会尝试键盘兜底并给出可诊断的失败信息（可行性需批次 2 取证确认，见 §8 风险行） |
 
 > **A10 的命令形式**：仓库默认 shell 为 PowerShell 5.1，**不展开 `*` 通配符**（`pytest backend/tests/test_miaoshou_*` 会报 `file or directory not found`）。实施时必须显式列出文件，或用 `Get-ChildItem` 展开。
 
@@ -644,11 +656,11 @@ ctx = ExecutionContext(
 | # | 验收项 |
 |---|---|
 | C1 | lint 可对手写组件运行（不依赖录制器路径），且**复用** `component_recorder.py` 的既有 5 条规则，不重复实现 |
-| C2 | lint 覆盖 §5.4 L3-1 表中**全部** 🆕 需新增项（`report_step` 缺失 / 未接 logger / 函数与类超长 / 无 stable 记录 / stable 指向 archive 或缺失 / 导航单信号 / 缺重试预算），**逐项可验** |
+| C2 | lint 覆盖 §5.4 L3-1 表中**全部** 🆕 需新增项（`report_step` 缺失 / 未接 logger / 函数与类超长 / **扩展 `swallow_exception_pattern` 覆盖 `continue`/`return` 形态** / 无 stable 记录 / stable 指向 archive 或缺失 / 导航单信号 / 缺重试预算），**逐项可验** |
 | C3 | 告警模式运行一轮后，转为对新增/修改组件强制阻断 |
 | C4 | 《规范》补入三处空白（重试口径冲突以《规范》§6 为准修订上游 spec） |
 | C5 | 新增组件需过三门准入才进 active 清单 |
-| C6 | 勾选无组件的域时，**保存时报错**（口径已裁定，见 L3-4 ⚠️），或界面明确提示不再静默剪掉 |
+| C6 | 勾选无组件的域时，**保存时报错 + 界面灰显并注明「该平台暂不支持」**（口径已按 L3-4 的建议取定，§8 同步），不再静默剪掉 |
 | C7 | （L3-5，若实施）任务详情能区分「可重试」与「不可重试」失败，并给出建议动作 |
 
 ### 7.4 批次 4（L4）
@@ -673,11 +685,12 @@ ctx = ExecutionContext(
 | **L1-2 缺执行器改动则完全不生效**（§5.2） | `ctx.logger`/`ctx.step_callback` 为 None，A8 不可达成，且组件写日志会引入新的吞异常违规 | L1-2 明确拆为 a–f 六个子项，执行器改动与组件改动同批交付；A7/A8 依赖此前提 |
 | **L1-2f 选错弹窗清理机制会产出一个空转阶段**（§5.2） | `guard_overlays` 仅 `is_test_mode=True` 生效（`base.py:124-125` 直接 return），若作为生产机制，`popup_cleared` 阶段永远「成功」而什么都不做，时间线出现空阶段 | §5.2 L1-2f 已明确归属：生产由执行器 `close_popups`（`executor_v2.py:2776`）承担，组件侧用 `stabilize_safe_notices`（`base.py:142-165`，无门控）；A7 验收时确认该阶段确有可观测动作 |
 | 形态 A（点容器外壳）在真实页面上未必能打开下拉 | L1-1 的 A 层失效 | 四层防护逐级降级，A 失败自动落到 B；批次 2 用 pwcli 取证校正；A 层不可作为唯一防线 |
+| **层 D 键盘兜底可行性未知**（§5.2 L1-1 层 D） | `jx-select` 是否响应 `Enter`/`ArrowDown` 未验证；若无响应，形态 A/B 全部失败后没有最后一道防线 | 降级为「仅在 A/B/C 均失败后触发」；批次 2 取证确认；若不响应则移除并把失败原因直接暴露到 A7/A12 |
 | **层 C 的 DOM 形态未经验证**（§5.2 L1-1 层 C 注） | 「已全选」判定可能恒为 False，形同虚设 | 明确标注为「尽力而为，不得作为唯一防线」；批次 2 取证确认后再定是否保留 |
 | 改前端渲染 `d.error` 可能暴露内部路径/选择器 | 信息暴露 | 只在管理员可见的任务详情页展示（该页面本身是管理端） |
 | 清理孤儿 stable 记录时误删有效记录 | 运行时解析失败 | 只处理 `component_name='miaoshou/inventory_snapshot_export'` 且 `file_path` 已不存在的记录；执行前后各查一次并记录 |
 | **L2-5 导出阶段误抛 `VerificationRequiredError`** | 任务会长期挂在「等待验证码」，且没有验证码实际出现 | 抛点必须先有正向检测信号（不能「宁滥勿缺」）；设等待超时；批次 2 真实页面验证 |
-| **L3-4 跨前后端改动** | 前端过滤会改变妙手可勾选域集合（现 7 域全可选），可能与用户既有习惯冲突；且与 §1.3「域拆分规则一律不动」有解释空间 | 口径先由人工裁定（保存报错 + 界面灰显并注明）；实施前确认 §1.3 的边界表述 |
+| **L3-4 跨前后端改动** | 前端过滤会改变妙手可勾选域集合（现 7 域全可选），可能与用户既有习惯冲突；且与 §1.3「域拆分规则一律不动」有解释空间 | 口径已取定：**保存时报错 + 界面灰显并注明「该平台暂不支持」**（两者都做）；实施前需再确认 §1.3 的边界表述 |
 | lint 一次性阻断打挂流水线 | CI 红灯 | 批次 3 第一阶段告警模式 |
 | 批次 2 取证受验证码环境限制 | 延期 | 批次 1 的四层防护已覆盖 A/B 两形态，不阻塞业务恢复 |
 
