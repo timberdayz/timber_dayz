@@ -376,6 +376,46 @@ error_screenshot_path None
 
 **定位器**：`get_by_label(re.compile(r"仓库"))` → 语义锚定形式。**注意**：订单域的 `get_by_role("combobox", name=...).first` 本身违反《规范》§16 表第 1 行（page 根作用域 + `.first`），**不要照抄**。目标形态是「先收敛作用域（label → 关联容器），再在容器内定位」。
 
+##### L1-1 补充：2026-10-23 真实页面取证结论（本节取代上表的「待取证」部分）
+
+人工登录妙手后用 CDP 探针（`scripts/probe_miaoshou_warehouse_scope.py --cdp <port>`）
+直读真实 DOM，pwcli 录制产物在 `output/playwright/work/miaoshou/inventory_scope/`。
+
+| 事项 | 取证结论 | 对实现的影响 |
+|---|---|---|
+| 字段锚点 | `[data-field="warehouseIds"]`（与订单域 `[data-field='appOrderStatus']` 同款） | 层 A / 层 C **不再靠「仓库」文案猜最近祖先**，直接用 `data-field`；文案路径降级为改版兜底 |
+| 浮层结构 | 外层 `div.jx-select-dropdown.is-multiple` → `div.jx-select-dropdown__header`（「全选」）+ `ul.jx-select-dropdown__list[role=listbox]`（5 个仓库行） | 浮层根**必须取外层 `.jx-select-dropdown`**：`aria-controls` 指向内层 `ul`，而 `ul` 里**没有** header 的复选框 |
+| 「全选」复选框 | `label.jx-checkbox` > `input.jx-checkbox__original[type=checkbox]` + `span.jx-checkbox__label「全选」`；`get_by_role("checkbox", name="全选")` **命中 0 个** | 定位改为 `.jx-select-dropdown__header .jx-checkbox`（**label**）；**归档脚本里的 `.jx-checkbox__input` 是旧 class，已改为 `.jx-checkbox__original`**。⚠️ 实测 input **能定位（count=1）但点不到**（视觉隐藏，actionability 超时），可点击目标只有 label |
+| 已全选判据 | select 根节点 `modelvaluegroup` 属性：全选态 = `684506,563787,563786,381635,299699`，空态 = 空串；全选态另有 2 个 `.jx-tag`（首个仓库名 + 「+ 4」） | 层 C 优先用 `modelvaluegroup` 判据，`.jx-tag` 作兜底。**注意历史实现取 `.jx-select__selected-item` 的 `.first` 再数 tag，最多只能数到 1 → 恒不命中** |
+| 层 D 键盘兜底 | **实测有效**：焦点落到 `input.jx-select__input` 后按 `Enter`，`aria-expanded` 由 `false` 变 `true`，浮层真的弹出（`ArrowDown` 同样有效） | 层 D 保留，不再是「未知可行性」 |
+| ⭐ **数据语义** | **空态（不选任何仓库）与全选态的数据完全一致**：SKU 总数 1113、分页 56 页、表格「仓库」列内容逐行相同（空态本就是跨仓库混合） | **「显式勾全选」是可选交互，失败不得阻断采集**。它失败时降级为告警 + 留痕（`details.scope_all_selected=false` + 原因 + 截图），任务继续。历史成功批次（2026-10-21 入库 1226 行，含「仓库」列）走的本来就是空态 |
+
+> **这改变了 L1-1 的定位**：四层防护不再是「必须走通才能导出」的前置条件，
+> 而是「能走通就走、走了就留痕」的**可选增强**。真正需要防的是
+> 「一个可选 UI 交互失败，把整个采集任务拖垮」——这才是 2026-10-23 失败的
+> **业务根因**（当时的「勾全选」定位器从未命中过，post-check 只是把同一个
+> 错误又报了一遍）。
+
+##### L1-1 补充：端到端验证结论（2026-10-23，真实页面直跑组件）
+
+在人工登录的真实页面上直接跑 `MiaoshouWarehouseFilters`：
+
+```
+刷新页面 → 空态（modelvaluegroup=""）
+跑组件   → scope_all_selected=true
+运行后   → modelvaluegroup="684506,563787,563786,381635,299699"
+           .jx-tag=["菲律宾3店-时尚箱包", "+ 4"]
+再跑一次 → 命中 pre-check 被跳过（skipped=true）
+```
+
+**即：修复后的「勾全选」在真实页面上第一次就走通了**（此前从未成功过）。
+
+实测另发现「**点击 wrapper 是 toggle 语义**」：浮层已经开着时再点一次会把它
+**关掉**。因此层 A 点击前必须先做一次「浮层是否已可见」检测，已可见则直接
+复用、不再点击——否则会出现「点开 → 关掉 → 找不到浮层」的假失败。
+
+
+
 **超时**：`timeout=1500` → `3000`（《规范》§13.5；TikTok 组件用 3000）。
 
 **重试**：优先使用既有 `modules/apps/collection_center/retry_strategy.py:20` 的 `RetryStrategy`，**不自造内联重试循环**（《规范》§6 点名了 `RetryStrategy`）。

@@ -138,6 +138,49 @@
   `docs/superpowers/specs/2026-10-23-miaoshou-inventory-domain-remediation-design.md` §5.2 L1-1
   （仓库范围下拉框 C→A→B→D 四层遮挡防护）。
 
+- `P0` **真实页面取证（2026-10-23）推翻了此前的两个假设**  
+  人工登录妙手后用 CDP 探针取到仓库清单页的真实 DOM，结论如下：
+
+  1. **「勾全选」这个动作从来没有真正成功过**。浮层有两个可选根：
+     外层 `div.jx-select-dropdown` 与内层 `ul.jx-select-dropdown__list[role=listbox]`
+     （`aria-controls` 指向的是内层 `ul`）。历史实现把 `get_by_role("listbox")`
+     排在浮层候选**第一位**，于是拿到内层 `ul`——而「全选」复选框在**外层**
+     `div.jx-select-dropdown__header` 里，`ul` 内命中数为 **0**。
+     实测命中计数：`get_by_role("checkbox", name="全选")` = **0**；
+     `.jx-select-dropdown__header .jx-checkbox` 在外层 = **1**、在内层 `ul` = **0**。
+     这解释了为什么 2026-10-21 那次成功入库其实走的是**空态**。
+
+  2. **仓库筛选是可选筛选项，「不选 = 全选」**。空态（显示「请选择」）与
+     全选态（显示 `菲律宾3店-时尚箱包 × + 4`）的 SKU 总数（**1113**）、
+     分页（**56 页**）与表格「仓库」列内容**完全一致**，且空态的「仓库」列
+     本来就是跨仓库混合的。证据：
+     `output/playwright/work/miaoshou/inventory_scope/02-warehouse-page.png`（空态）
+     与 `1-open.png`（全选态）。
+
+  3. 因此**「显式勾全选」失败不应阻断整个采集任务**——它只是一个可选的
+     UI 交互，数据范围不受影响。2026-10-23 起该失败降级为告警 + 留痕
+     （`details.scope_all_selected=false` + 降级原因 + 截图），不再让任务整体失败。
+
+  4. 附带取证结论：仓库筛选字段有**稳定锚点** `[data-field='warehouseIds']`
+     （与订单域 `[data-field='appOrderStatus']` 同款），不再需要靠「仓库」
+     文案猜最近祖先；仓库 select 根节点带 `modelvaluegroup` 属性
+     （全选态 = `684506,563787,563786,381635,299699`，空态 = 空串），
+     可直接作为「是否已全选」的判据；「全选」复选框的**可点击目标是
+     `label.jx-checkbox`**——真实 input 的 class 是 `jx-checkbox__original`
+     （**不是**归档脚本里的 `jx-checkbox__input`），且它**虽然能定位却点不到**
+     （视觉隐藏，Playwright actionability 超时）；**层 D 键盘兜底实测有效**
+     （焦点落到 `input.jx-select__input` 后按 `Enter`，`aria-expanded` 由
+     `false` 变 `true`，浮层真的弹出）。
+
+  5. **端到端验证（2026-10-23，在人工登录的真实页面上直接跑组件）**：
+     刷新页面 → 空态（`modelvaluegroup=""`）→ 跑 `MiaoshouWarehouseFilters`
+     → 组件自行开下拉、点中「全选」、post-check 回读确认 →
+     `modelvaluegroup` 变为 `684506,563787,563786,381635,299699`、
+     `.jx-tag` 变为 `["菲律宾3店-时尚箱包", "+ 4"]`；再跑一次命中 pre-check 被跳过。
+     **即：修复后的「勾全选」在真实页面上第一次就走通了**（此前从未成功过）。
+     同时实测发现「点击 wrapper 是 toggle 语义」——浮层已开着时再点会把它关掉，
+     故层 A 点击前先做「浮层是否已可见」检测，已可见则直接复用。
+
 ---
 
 ## 组合链路状态

@@ -1,6 +1,6 @@
 # 采集组件 lint 阶段一基线快照
 
-> **快照日期**：2026-10-23
+> **快照日期**：2026-10-23（当日第二次刷新：库存域「仓库范围筛选」取证驱动修正之后）
 > **运行命令**：`python scripts/lint_collection_components.py --fail-on none`
 > **扫描范围**：`modules/platforms/**`（**排除 `archive/` 目录**）
 > **规则实现**：`backend/services/collection_component_lint.py`（唯一来源，录制器与 CLI 共用）
@@ -16,6 +16,12 @@
 - 下文的 error 数量是**存量历史违规**，不是「新增违规」；
 - 阶段二才会对**新增/修改**的组件强制阻断（判据见 §6），届时**历史违规不阻断**。
 
+> 2026-10-23 刷新说明：库存域「仓库范围筛选」组件按真实页面取证修正定位器时，
+> 顺带把该文件里 10 处 `.first`/`.nth` 补上了业务语义理由（转 warning）、
+> 去掉 2 处多余的 `except Exception: pass`、给 2 处固定等待补了「动画」理由，
+> 因此 `warehouse_filters.py` 的 error 从 14 处降到 11 处、warning 从 0 处升到 12 处。
+> 全仓库 error 由 395 条 / 677 处降到 **385 条 / 656 处**。
+
 ---
 
 ## 1. 总览
@@ -24,11 +30,11 @@
 |---|---|
 | 扫描文件数 | **62** |
 | 有命中的文件数 | **34** |
-| error 命中（条） | **395** |
-| error 命中（处） | **677** |
+| error 命中（条） | **385** |
+| error 命中（处） | **656** |
 | warning 命中（条） | **15** |
-| warning 命中（处） | **15** |
-| 命中合计（处） | **692** |
+| warning 命中（处） | **25** |
+| 命中合计（处） | **681** |
 
 > 「条」= 报告里的问题条目数；「处」= 展开到具体代码位置的违规点数。
 > 聚合型规则（如 `first_nth_usage`）一条对应多处，所以两者不等。
@@ -39,23 +45,28 @@
 
 | 规则 type | 级别 | 命中处数 | 命中文件数 |
 |---|---|---|---|
-| `swallow_exception_pattern` | error | 272 | 28 |
-| `first_nth_usage` | error | 217 | 22 |
-| `wait_for_timeout_usage` | error | 103 | 20 |
-| `oversized_function` | error | 28 | 13 |
+| `swallow_exception_pattern` | error | 266 | 27 |
+| `first_nth_usage` | error | 205 | 21 |
+| `wait_for_timeout_usage` | error | 102 | 19 |
+| `oversized_function` | error | 27 | 12 |
 | `missing_report_step` | error | 25 | 25 |
 | `count_is_visible_pattern` | error | 13 | 13 |
-| `missing_logger_usage` | warning | 10 | 10 |
 | `fixed_sleep_usage` | error | 8 | 4 |
-| `oversized_class` | error | 7 | 7 |
-| `single_signal_navigation` | warning | 5 | 5 |
+| `oversized_class` | error | 6 | 6 |
 | `missing_stable_component_record` | error | 4 | 4 |
+| `first_nth_with_reason` | warning | 10 | 1 |
+| `missing_logger_usage` | warning | 9 | 9 |
+| `single_signal_navigation` | warning | 4 | 4 |
+| `wait_for_timeout_with_reason` | warning | 2 | 1 |
 | `stable_points_to_archived_file` | error | 0 | 0 |
 | `invalid_ignore_comment` | error | 0 | 0 |
 | `syntax_error` | error | 0 | 0 |
 
-> `swallow_exception_pattern` 的 272 处里包含 AST 扩展新覆盖的 `except Exception: continue`
+> `swallow_exception_pattern` 的 266 处里包含 AST 扩展新覆盖的 `except Exception: continue`
 > 与 `except Exception: return` 形态——既有正则只覆盖 `pass` 形态。
+>
+> `first_nth_with_reason` / `wait_for_timeout_with_reason` 是**带业务语义理由**的同类命中，
+> 级别为 warning、不阻断——这是规则的既定放行路径（见 §7）。
 
 ---
 
@@ -63,21 +74,21 @@
 
 | # | 文件 | 命中处数 | 主要规则 |
 |---|---|---|---|
-| 1 | `modules/platforms/tiktok/components/date_picker.py` | 83 | swallow 38 / first_nth 22 / wait_for_timeout 14 |
-| 2 | `modules/platforms/shopee/components/date_picker.py` | 72 | swallow 31 / first_nth 17 / wait_for_timeout 16 |
-| 3 | `modules/platforms/shopee/components/products_export.py` | 64 | swallow 29 / wait_for_timeout 17 / first_nth 12 |
-| 4 | `modules/platforms/tiktok/components/login.py` | 55 | first_nth 22 / swallow 20 / wait_for_timeout 7 |
-| 5 | `modules/platforms/shopee/components/login.py` | 44 | first_nth 16 / swallow 13 / wait_for_timeout 7 |
-| 6 | `modules/platforms/tiktok/components/services_agent_export.py` | 43 | swallow 15 / first_nth 13 / wait_for_timeout 11 |
-| 7 | `modules/platforms/miaoshou/components/inventory_export.py` | 40 | first_nth 21 / swallow 16 / wait_for_timeout 1 |
-| 8 | `modules/platforms/miaoshou/components/date_picker.py` | 36 | swallow 20 / first_nth 10 / wait_for_timeout 4 |
-| 9 | `modules/platforms/miaoshou/components/warehouse_filters.py` | 26 | swallow 12 / first_nth 12 / wait_for_timeout 1 |
-| 10 | `modules/platforms/tiktok/components/products_export.py` | 26 | first_nth 12 / swallow 7 / wait_for_timeout 5 |
-| 11 | `modules/platforms/miaoshou/components/orders_export_base.py` | 25 | first_nth 13 / swallow 7 / wait_for_timeout 1 |
-| 12 | `modules/platforms/miaoshou/components/purchase_export.py` | 23 | first_nth 11 / swallow 6 / oversized_function 2 |
-| 13 | `modules/platforms/miaoshou/components/filters.py` | 22 | first_nth 13 / swallow 7 |
-| 14 | `modules/platforms/miaoshou/components/login.py` | 16 | swallow 6 / first_nth 6 / fixed_sleep 3 |
-| 15 | `modules/platforms/shopee/components/shop_switch.py` | 16 | wait_for_timeout 5 / swallow 5 / first_nth 3 |
+| 1 | `modules/platforms/tiktok/components/date_picker.py` | 82 | swallow / first_nth / wait_for_timeout |
+| 2 | `modules/platforms/shopee/components/date_picker.py` | 71 | swallow / first_nth / wait_for_timeout |
+| 3 | `modules/platforms/shopee/components/products_export.py` | 64 | swallow / wait_for_timeout / first_nth |
+| 4 | `modules/platforms/tiktok/components/login.py` | 55 | first_nth / swallow / wait_for_timeout |
+| 5 | `modules/platforms/shopee/components/login.py` | 44 | first_nth / swallow / wait_for_timeout |
+| 6 | `modules/platforms/tiktok/components/services_agent_export.py` | 43 | swallow / first_nth / wait_for_timeout |
+| 7 | `modules/platforms/miaoshou/components/inventory_export.py` | 36 | first_nth / swallow / wait_for_timeout |
+| 8 | `modules/platforms/miaoshou/components/date_picker.py` | 35 | swallow / first_nth / wait_for_timeout |
+| 9 | `modules/platforms/tiktok/components/products_export.py` | 26 | first_nth / swallow / wait_for_timeout |
+| 10 | `modules/platforms/miaoshou/components/orders_export_base.py` | 24 | first_nth / swallow / wait_for_timeout |
+| 11 | `modules/platforms/miaoshou/components/purchase_export.py` | 22 | first_nth / swallow / oversized_function |
+| 12 | `modules/platforms/miaoshou/components/filters.py` | 21 | first_nth / swallow |
+| 13 | `modules/platforms/miaoshou/components/login.py` | 16 | swallow / first_nth / fixed_sleep |
+| 14 | `modules/platforms/shopee/components/shop_switch.py` | 16 | wait_for_timeout / swallow / first_nth |
+| 15 | `modules/platforms/shopee/components/services_export_base.py` | 13 | swallow / first_nth |
 
 ---
 
@@ -85,18 +96,18 @@
 
 | 平台 | 文件数 | error 处数 | warning 处数 | 合计 |
 |---|---|---|---|---|
-| **miaoshou** | 19 | 190 | 6 | 196 |
+| **miaoshou** | 19 | 169 | 16 | 185 |
 | **shopee** | 19 | 230 | 4 | 234 |
 | **tiktok** | 16 | 249 | 4 | 253 |
 | amazon | 7 | 8 | 1 | 9 |
 | `modules/platforms/` 直属文件 | 1 | 0 | 0 | 0 |
-| **合计** | **62** | **677** | **15** | **692** |
+| **合计** | **62** | **656** | **25** | **681** |
 
 三个目标平台的对比：
 
 - **tiktok** 命中最多（253 处），其中吞异常 100 处、`.first/.nth` 77 处；
 - **shopee** 次之（234 处），吞异常 96 处、`wait_for_timeout` 49 处；
-- **miaoshou** 最少（196 处），但 `.first/.nth` 89 处是三个平台里最突出的问题；
+- **miaoshou** 最少（185 处），但 `.first/.nth` 77 处仍是三个平台里最突出的问题；
 - **amazon** 只有 9 处，主要是 4 个组件缺 `report_step`、3 个组件缺 stable 记录。
 
 ### 4.1 平台 × 规则（处数）

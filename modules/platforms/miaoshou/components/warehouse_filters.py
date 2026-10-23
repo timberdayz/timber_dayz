@@ -21,6 +21,119 @@ async def _is_visible(locator: Any) -> bool:
     return visible
 
 
+def _warehouse_label_input(page: Any) -> Any:
+    """「仓库」文案对应的表单输入（层 B 兜底路径的入口）。
+
+    `get_by_label` 在 Playwright 与测试替身里都是**惰性构造**——只产出
+    Locator、不做 DOM 查询，因此不会抛异常，这里不需要 try/except 包裹。
+    """
+    # 业务语义：按表单标签「仓库」定位输入控件，页面首个匹配即仓库筛选
+    return page.get_by_label(re.compile(r"仓库", re.IGNORECASE)).first
+
+
+def _field_scoped_select(page: Any, sel: InventorySelectors) -> Any:
+    """仓库 select 根节点：实证锚点 `[data-field='warehouseIds']` 下的 `.jx-select`。
+
+    锚点下**只有这一个** `.jx-select`，所以取第一个是确定的，不存在
+    「取到别的 select」的歧义（对比裸 `.jx-select` 全页扫描的风险）。
+    """
+    # 业务语义：锚点下唯一的 .jx-select
+    return page.locator(f"{sel.warehouse_scope_field_selector} .jx-select").first
+
+
+def _scope_container_candidates(page: Any, sel: InventorySelectors) -> list[Any]:
+    """层 A 的容器候选（按证据强度排序）。
+
+    1. `[data-field='warehouseIds'] .jx-select__wrapper` —— 实证锚点 + 归档验证过的点击目标
+    2. `[data-field='warehouseIds'] .jx-select` —— 实证锚点 + 最外层外壳
+    3~5. 「仓库」文案 → 最近 `.jx-select__wrapper` / `.jx-select` / 宽松兜底
+    """
+    field = sel.warehouse_scope_field_selector
+    label_input = _warehouse_label_input(page)
+    return [
+        # 业务语义：锚点下的 .jx-select__wrapper 唯一
+        page.locator(f"{field} .jx-select__wrapper").first,
+        _field_scoped_select(page, sel),
+        label_input.locator(sel.warehouse_scope_wrapper_xpath),
+        label_input.locator(sel.warehouse_scope_container_xpath),
+        label_input.locator(sel.warehouse_scope_container_xpath_loose),
+    ]
+
+
+def _scope_root_candidates(page: Any, sel: InventorySelectors) -> list[Any]:
+    """层 C 的根节点候选（实证锚点优先，文案兜底）。"""
+    label_input = _warehouse_label_input(page)
+    return [
+        _field_scoped_select(page, sel),
+        label_input.locator(sel.warehouse_scope_container_xpath),
+        label_input.locator(sel.warehouse_scope_container_xpath_loose),
+        label_input.locator(sel.warehouse_scope_wrapper_xpath),
+    ]
+
+
+def _scope_overlay_candidates(page: Any, sel: InventorySelectors) -> list[Any]:
+    """仓库范围下拉浮层的定位候选（按证据强度排序）。
+
+    2026-10-23 真实页面取证，浮层真实结构::
+
+        div.jx-select-dropdown.is-multiple.pro-select-popper
+          ├── div.jx-select-dropdown__header      ← 「全选」复选框在这里
+          └── div.jx-scrollbar
+                └── ul.jx-select-dropdown__list[role=listbox]   ← 5 个仓库行
+
+    ⚠️ `role="listbox"` 指的是**内层 ul**，它**不含** header 的复选框；
+    所以 `.jx-select-dropdown`（外层 div）必须排在 listbox **之前**，
+    否则「全选」复选框永远找不到（这正是历史实现失效的根因）。
+    """
+    return [
+        *[
+            page.locator(selector).last
+            for selector in sel.warehouse_scope_overlay_selectors
+        ],
+        page.get_by_role("listbox").last,
+        page.get_by_role("tooltip").last,
+        page.locator(".el-select-dropdown:visible").last,
+        page.locator(".ant-select-dropdown:visible").last,
+    ]
+
+
+def _full_select_checkbox_candidates(
+    overlay: Any, sel: InventorySelectors
+) -> list[Any]:
+    """「全选」复选框的候选定位。
+
+    2026-10-23 真实页面取证（浮层头部结构）::
+
+        div.jx-select-dropdown__header
+          └── label.jx-checkbox.jx-checkbox--small.is-checked.pro-checkbox
+                ├── input.jx-checkbox__original[type=checkbox]
+                └── span.jx-checkbox__label「全选」
+
+    ⚠️ 三个实测结论决定了候选顺序：
+
+    1. ``get_by_role("checkbox", name="全选")`` **命中 0 个**——复选框不是
+       ``role="checkbox"``，名字也不是「全选」（只有表格选择列的复选框叫
+       「选择所有行」/「选择当前行」）。
+    2. 必须传入**外层** ``.jx-select-dropdown`` 作为浮层根——取内层 listbox
+       会因为拿不到 header 而永远找不到「全选」。
+    3. **``input.jx-checkbox__original`` 能定位（count=1）但点不到**——它是
+       视觉隐藏的真实 input，Playwright 的 actionability 检查会超时。
+       实测**可点击目标是 ``label.jx-checkbox``**（点击后
+       ``modelvaluegroup`` 真的由 5 个仓库 ID 变空串，再点又恢复），
+       所以 label 排第一；input 只保留作兜底。
+    """
+    header = sel.warehouse_scope_full_select_header_selector
+    checkbox_input = sel.warehouse_scope_checkbox_input_selector
+    return [
+        # 业务语义：浮层头部只有一个「全选」复选框
+        overlay.locator(header).first,
+        # 业务语义：同一个复选框里的真实 input（隐藏，仅兜底）
+        overlay.locator(f"{header} {checkbox_input}").first,
+        # 业务语义：按无障碍角色兜底查找同名复选框
+        overlay.get_by_role("checkbox", name="全选").first,
+    ]
+
+
 class MiaoshouWarehouseFilters(ComponentBase):
     """仓库清单页面的仓库范围筛选器（全选仓库）。"""
 
@@ -36,10 +149,12 @@ class MiaoshouWarehouseFilters(ComponentBase):
 
     async def _warehouse_scope_trigger(self, page: Any) -> Any:
         candidates = [
-            page.get_by_label(re.compile(r"仓库", re.IGNORECASE)).first,
+            _warehouse_label_input(page),
+            # 业务语义：文案锚点之后的第一个 combobox/input
             page.get_by_text(re.compile(r"^仓库\s*:?$", re.IGNORECASE)).first.locator(
                 "xpath=following::*[@role='combobox' or self::input][1]"
             ),
+            # 业务语义：仓库筛选是页面上第一个 combobox（按 DOM 顺序）
             page.get_by_role("combobox").first,
         ]
         for locator in candidates:
@@ -58,99 +173,77 @@ class MiaoshouWarehouseFilters(ComponentBase):
             logger.info(message)
 
     async def _warehouse_scope_container(self, page: Any) -> Any | None:
-        """层 A：由「仓库」标签语义锚点收敛到所属 .jx-select 容器外壳。
+        """层 A：收敛到仓库筛选的 .jx-select 容器外壳。
 
         点容器外壳而不是被 selected-item 覆盖的 .jx-select__input，是形态 A 的治本手段。
-        返回 None 表示层 A 不可用（DOM 形态未取证 / 改版），由层 B 兜底。
 
-        候选按证据强度排序（依据见 `inventory_config.py` 顶部取证说明）：
-        1. `.jx-select__wrapper` —— 归档 `export.py:368` 实战验证过能点开下拉
-        2. `.jx-select`（精确 class token）—— 最外层外壳
-        3. 宽松 `contains(@class,'jx-select')` —— 防改版兜底
+        优先用**实证的稳定锚点** `[data-field='warehouseIds']`
+        （2026-10-23 真实页面取证），不再靠「仓库」文案猜最近祖先；
+        文案路径保留为妙手改版后的兜底。
+        返回 None 表示层 A 不可用，由层 B 兜底。
         """
-        try:
-            label_input = page.get_by_label(re.compile(r"仓库", re.IGNORECASE)).first
-            await label_input.wait_for(
-                state="visible", timeout=self.sel.warehouse_scope_trigger_timeout_ms
-            )
-        except Exception as e:
-            self._log(f"[warehouse_filters] 层A 触发器定位不可用: {e}")
-            return None
-
-        xpaths = (
-            self.sel.warehouse_scope_wrapper_xpath,
-            self.sel.warehouse_scope_container_xpath,
-            self.sel.warehouse_scope_container_xpath_loose,
-        )
-        for xpath in xpaths:
+        for locator in _scope_container_candidates(page, self.sel):
             try:
-                container = label_input.locator(xpath)
-                await container.wait_for(
+                await locator.wait_for(
                     state="visible", timeout=self.sel.warehouse_scope_trigger_timeout_ms
                 )
-                return container
+                return locator
             except Exception as e:
-                self._log(f"[warehouse_filters] 层A 容器候选不可用 ({xpath}): {e}")
+                self._log(f"[warehouse_filters] 层A 容器候选不可用: {e}")
         return None
 
     async def _scope_all_selected_root(self, page: Any) -> Any | None:
-        """层 C 专用的容器解析：优先取**最外层** `.jx-select`。
+        """层 C 专用的容器解析：仓库 select 根节点。
 
         与层 A 分开的原因：层 A 点的是 `.jx-select__wrapper`（内层外壳），
-        而 `.jx-select__selected-item` 是 **`.jx-select`（最外层）的后代**
-        （证据：订单域 `filters.py:78-83` 用 `page.locator(".jx-select")`
-        再 `.locator(".jx-select__selected-item")` 命中）。
-        用层 A 的 wrapper 去查，可能查不到选中区 → 层 C 恒不命中。
+        而选中区 / `modelvaluegroup` 在 **`.jx-select`（最外层）** 上
+        （2026-10-23 实测：`div.jx-select.jx-select--small.pro-select` 带
+        `modelvaluegroup="684506,563787,563786,381635,299699"`）。
         """
-        try:
-            label_input = page.get_by_label(re.compile(r"仓库", re.IGNORECASE)).first
-            await label_input.wait_for(
-                state="visible", timeout=self.sel.warehouse_scope_trigger_timeout_ms
-            )
-        except Exception as e:
-            self._log(f"[warehouse_filters] 层C 触发器定位不可用: {e}")
-            return None
-
-        for xpath in (
-            self.sel.warehouse_scope_container_xpath,
-            self.sel.warehouse_scope_container_xpath_loose,
-            self.sel.warehouse_scope_wrapper_xpath,
-        ):
+        for locator in _scope_root_candidates(page, self.sel):
             try:
-                container = label_input.locator(xpath)
-                await container.wait_for(
+                await locator.wait_for(
                     state="visible", timeout=self.sel.warehouse_scope_trigger_timeout_ms
                 )
-                return container
+                return locator
             except Exception as e:
-                self._log(f"[warehouse_filters] 层C 容器候选不可用 ({xpath}): {e}")
+                self._log(f"[warehouse_filters] 层C 容器候选不可用: {e}")
         return None
 
     async def _scope_already_all_selected(self, page: Any) -> bool:
         """层 C：已全选前置检测（尽力而为，**不得作为唯一防线**）。
 
-        ⚠️ **不使用裸 `.jx-select` 全页扫描**：仓库清单页可能有多个
-        jx-select（店铺 / 分类等），任一 select 处于 "+ N" 折叠态就会误判
-        「仓库已全选」→ 直接跳过开下拉 → **导出数据范围错误**。
-        必须复用层 A 的 label→容器收敛路径，**只检查「仓库」这一个 select**。
+        2026-10-23 真实页面取证（仓库清单页）：
 
-        仓库筛选是「全选仓库」单复选框；已全选时折叠区会渲染 "+ N" 折叠标签。
-        ⚠️ 该 DOM 形态未经真实页面取证，可能恒为 False；因此只有命中才跳过，
-        未命中一律继续走 A → B → D。
+        - 仓库 select 根节点 `div.jx-select` 带 `modelvaluegroup` 属性，
+          全选态 = ``"684506,563787,563786,381635,299699"``，空态 = 空串；
+        - 全选态渲染 **2 个** `.jx-tag`（首个仓库名 + 「+ N」折叠标签），空态 0 个。
+
+        ⚠️ **不使用裸 `.jx-select` 全页扫描**：仓库清单页有多个 jx-select
+        （商品SKU / 模糊匹配 / 中文名称…），任一 select 处于 "+ N" 折叠态就会误判
+        「仓库已全选」→ 直接跳过开下拉 → **导出数据范围错误**。
+        必须只检查「仓库」这一个 select。
         """
         container = await self._scope_all_selected_root(page)
         if container is None:
             return False
 
         try:
-            selected = container.locator(".jx-select__selected-item").first
-            if await selected.count() == 0:
-                return False
-            tags = selected.locator(".jx-tag")
+            selected_values = await container.get_attribute(
+                self.sel.warehouse_scope_selected_value_attr
+            )
+            if selected_values and selected_values.strip():
+                return True
+        except Exception as e:
+            self._log(f"[warehouse_filters] 层C 选中值属性读取失败: {e}")
+
+        try:
+            tags = container.locator(".jx-tag")
             tag_count = await tags.count()
             if tag_count < 2:
                 # 只有一个标签 = 只选了一项 ≠ 全选（与订单域 filters.py 的守卫一致）
                 return False
+            # 业务语义：遍历全部选中标签，逐个判断是否存在「+ N」折叠标签
             for tag_index in range(tag_count):
                 text = (await tags.nth(tag_index).text_content() or "").strip()
                 if text.startswith("+ "):
@@ -185,7 +278,9 @@ class MiaoshouWarehouseFilters(ComponentBase):
     async def _keyboard_open(self, page: Any, trigger: Any) -> None:
         """层 D：键盘兜底（**仅在层 A / 层 B 均失败后触发**）。
 
-        工程兜底，《规范》未覆盖此场景。jx-select 是否响应 Enter 需批次 2 取证确认。
+        ✅ **2026-10-23 真实页面实证有效**：把焦点落到
+        `input.jx-select__input` 后按 ``Enter``，``aria-expanded`` 由
+        ``false`` 变 ``true``、下拉浮层真的弹出（``ArrowDown`` 同样有效）。
         """
         try:
             await trigger.focus(timeout=self.sel.warehouse_scope_trigger_timeout_ms)
@@ -211,8 +306,19 @@ class MiaoshouWarehouseFilters(ComponentBase):
         - B force=True 穿透 + 有界重试
         - D 键盘兜底（仅 A / B 均失败后触发）
 
+        ⚠️ **点击 wrapper 是 toggle 语义**：浮层已经开着时再点一次会把它**关掉**。
+        所以先做一次「浮层是否已经可见」的检测，已可见就直接复用，不再点击
+        （2026-10-23 真实页面实测发现：上一轮残留的浮层会让层 A 点空）。
+
         全部失败时抛 RuntimeError，消息带阶段名 warehouse_scope_open_failed。
         """
+        existing = await self._find_visible_overlay(page)
+        if existing is not None:
+            self._log(
+                "[warehouse_filters] 仓库范围下拉已可见，直接复用（避免 toggle 关闭）"
+            )
+            return
+
         trigger = await self._warehouse_scope_trigger(page)
 
         container = await self._warehouse_scope_container(page)
@@ -244,26 +350,19 @@ class MiaoshouWarehouseFilters(ComponentBase):
                 f"（层B: {layer_b_error}; 层D: {e}）"
             ) from layer_b_error
 
-    def _scope_overlay_candidates(self, page: Any) -> list[Any]:
-        """仓库范围下拉浮层的定位候选（按证据强度排序）。
+    async def _find_visible_overlay(self, page: Any) -> Any | None:
+        """浮层**当前是否已经可见**（不等待、不改变时序）。
 
-        候选来源（依据见 `inventory_config.py` 顶部取证说明）：
-        - `role="listbox"`：真实 call log 里 input 声明了 `aria-haspopup="listbox"`
-          与 `aria-controls="jx-id-..."`，说明浮层是 listbox 角色
-        - `.jx-select-dropdown` / `.jx-select__dropdown` / `.jx-popper`：
-          归档 `export.py:386-390` 实战验证过的浮层 class
-        - `tooltip` / `el-select-dropdown` / `ant-select-dropdown`：历史兼容候选
+        用于避免「点击 wrapper 把已开着的浮层 toggle 关闭」。
         """
-        return [
-            page.get_by_role("listbox").last,
-            *[
-                page.locator(selector).last
-                for selector in self.sel.warehouse_scope_overlay_selectors
-            ],
-            page.get_by_role("tooltip").last,
-            page.locator(".el-select-dropdown:visible").last,
-            page.locator(".ant-select-dropdown:visible").last,
-        ]
+        for locator in _scope_overlay_candidates(page, self.sel):
+            if await _is_visible(locator):
+                return locator
+        return None
+
+    def _scope_overlay_candidates(self, page: Any) -> list[Any]:
+        """仓库范围下拉浮层的定位候选（见模块级同名说明）。"""
+        return _scope_overlay_candidates(page, self.sel)
 
     async def _wait_overlay_ready(self, page: Any) -> Any:
         """定位已打开的仓库范围下拉浮层（带可见性等待）。"""
@@ -313,6 +412,7 @@ class MiaoshouWarehouseFilters(ComponentBase):
             closed_any = False
             for selector in self.sel.popup_close_buttons:
                 try:
+                    # 业务语义：同类关闭按钮取第一个匹配即可
                     locator = page.locator(selector).first
                     if await locator.count() > 0 and await locator.is_visible():
                         await locator.click(timeout=500)
@@ -322,24 +422,14 @@ class MiaoshouWarehouseFilters(ComponentBase):
             if not closed_any:
                 break
             try:
+                # 固定等待：等弹层关闭动画结束再点下一个控件
                 await page.wait_for_timeout(self.sel.close_poll_interval_ms)
             except Exception:
                 continue
 
     async def _find_full_select_checkbox(self, overlay: Any) -> Any:
-        """在浮层里找「全选」复选框。
-
-        候选顺序（依据见 `inventory_config.py` 顶部取证说明）：
-        1. `role="checkbox"` + 名称「全选」—— 语义定位
-        2. `label:has-text('全选') input[type='checkbox']` —— 历史兼容
-        3. `.jx-select-dropdown__header .jx-checkbox` → `.jx-checkbox__input`
-           —— 归档 `export.py:396-399` 实战写法（浮层头部就是「全选」行）
-        """
-        candidates = [
-            overlay.get_by_role("checkbox", name="全选").first,
-            overlay.locator("label:has-text('全选') input[type='checkbox']").first,
-            overlay.locator(self.sel.warehouse_scope_full_select_header_selector).first,
-        ]
+        """在浮层里找「全选」复选框（候选构造见模块级同名说明）。"""
+        candidates = _full_select_checkbox_candidates(overlay, self.sel)
         for candidate in candidates:
             try:
                 await candidate.wait_for(state="visible", timeout=2000)
@@ -357,12 +447,22 @@ class MiaoshouWarehouseFilters(ComponentBase):
         overlay = await self._locate_scope_overlay(page)
         full_select = await self._find_full_select_checkbox(overlay)
 
-        checked = await self._is_checkbox_selected(full_select)
-        if not checked:
-            try:
-                await overlay.get_by_text("全选", exact=True).first.click(timeout=1000)
-            except Exception:
-                await full_select.click(timeout=1000)
+        if not await self._is_checkbox_selected(full_select):
+            await full_select.click(timeout=self.sel.warehouse_scope_trigger_timeout_ms)
+
+    async def _close_scope_dropdown(self, page: Any) -> None:
+        """关闭仓库范围下拉浮层（按 ESC）。
+
+        归档跑通脚本 `archive/export.py` 在勾完「全选」后就是用 ESC 收尾的：
+        点「全选」**不会**自动收起下拉，必须显式关掉，否则浮层会盖住
+        后续要点的「搜索」按钮。
+        """
+        try:
+            await page.keyboard.press("Escape")
+            # 固定等待：等下拉浮层的收起动画结束，避免盖住后续要点的按钮
+            await page.wait_for_timeout(300)
+        except Exception as e:
+            self._log(f"[warehouse_filters] ESC 关闭下拉失败（已忽略）: {e}")
 
     async def _post_check_scope_all_selected(self, page: Any) -> None:
         """post-check：动作后**回读**「全选」复选框的勾选状态。
@@ -391,6 +491,12 @@ class MiaoshouWarehouseFilters(ComponentBase):
         await self._ensure_scope_all_selected(page)
 
     async def run(self, page: Any, filters: dict[str, Any] | None = None) -> ResultBase:  # type: ignore[override]
+        """仓库范围筛选：pre-check → action → post-check。
+
+        ⚠️ **「显式勾选全选」失败不阻断采集**（2026-10-23 真实页面实证）：
+        仓库筛选是**可选**筛选项，**不选 = 全选**（空态与全选态的 SKU 总数、
+        分页、表格内容完全一致），详见 `_apply_scope_all`。
+        """
         try:
             await self.report_step(
                 "step_start", step_id="warehouse_scope_ready", action="打开仓库范围筛选"
@@ -405,35 +511,71 @@ class MiaoshouWarehouseFilters(ComponentBase):
                 return ResultBase(
                     success=True,
                     message="ok",
-                    details={"select_all": True, "skipped": True},
+                    details={
+                        "select_all": True,
+                        "skipped": True,
+                        "scope_all_selected": True,
+                    },
                 )
 
-            # ── action：开下拉 + 勾「全选」 ──
-            await self._action_select_scope_all(page)
-
-            # ── post-check：回读勾选状态，确认真的生效 ──
-            await self._post_check_scope_all_selected(page)
-
+            # ── action + post-check：开下拉 + 勾「全选」 + 回读确认 ──
+            details = await self._apply_scope_all(page)
+            await self._close_scope_dropdown(page)
             await self._ensure_popup_closed(page)
-            await self.report_step(
-                "step_success", step_id="warehouse_scope_ready", action="仓库范围已全选"
+
+            action_text = (
+                "仓库范围已全选"
+                if details.get("scope_all_selected")
+                else "仓库范围：显式全选失败，已按默认范围（全部仓库）继续"
             )
-            return ResultBase(success=True, message="ok", details={"select_all": True})
+            await self.report_step(
+                "step_success", step_id="warehouse_scope_ready", action=action_text
+            )
+            return ResultBase(success=True, message="ok", details=details)
         except Exception as e:
-            screenshot_path = await self._capture_failure_screenshot(
-                page, "warehouse_scope"
+            return await self._failure_result(page, e)
+
+    async def _apply_scope_all(self, page: Any) -> dict[str, Any]:
+        """执行「勾全选 + 回读确认」，失败**降级**而非抛错。
+
+        降级依据：仓库筛选是可选筛选项，**不选 = 全选**（2026-10-23 实测，
+        空态与全选态的 SKU 总数 / 分页 / 表格内容完全一致），且历史成功批次
+        走的就是空态。显式全选失败只降级为告警 + 留痕，不拖垮整个导出任务。
+        """
+        try:
+            await self._action_select_scope_all(page)
+            await self._post_check_scope_all_selected(page)
+        except Exception as e:
+            self._log(
+                "[warehouse_filters] 显式勾选「全选」失败，按默认范围"
+                f"（空态=全部仓库）继续采集：{e}"
             )
-            message = str(e)
-            if screenshot_path:
-                message = f"{message} (screenshot: {screenshot_path})"
-            await self.report_step(
-                "step_failed",
-                step_id="warehouse_scope_ready",
-                action="仓库范围筛选失败",
-                error=message,
-                screenshot_path=screenshot_path or "",
-            )
-            return ResultBase(success=False, message=message)
+            return {
+                "select_all": True,
+                "scope_all_selected": False,
+                "scope_degraded_reason": str(e),
+                "scope_degraded_note": (
+                    "空态=全部仓库（2026-10-23 实测），显式全选失败不影响数据范围"
+                ),
+            }
+        return {"select_all": True, "scope_all_selected": True}
+
+    async def _failure_result(self, page: Any, exc: Exception) -> ResultBase:
+        """失败路径：截图 + 阶段事件 + 失败结果。"""
+        screenshot_path = await self._capture_failure_screenshot(
+            page, "warehouse_scope"
+        )
+        message = str(exc)
+        if screenshot_path:
+            message = f"{message} (screenshot: {screenshot_path})"
+        await self.report_step(
+            "step_failed",
+            step_id="warehouse_scope_ready",
+            action="仓库范围筛选失败",
+            error=message,
+            screenshot_path=screenshot_path or "",
+        )
+        return ResultBase(success=False, message=message)
 
     async def _capture_failure_screenshot(self, page: Any, stage: str) -> str | None:
         """失败时截图落盘到 ctx.config['task']['screenshot_dir']。
