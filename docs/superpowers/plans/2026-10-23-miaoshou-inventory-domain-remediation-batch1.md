@@ -99,6 +99,7 @@ git switch -c feature/miaoshou-inventory-batch1
 - Create: `frontend/src/domains/collection/views/collection/collectionTaskErrors.js`
 - Create: `frontend/scripts/collectionTaskErrors.test.mjs`
 - Modify: `frontend/src/domains/collection/views/collection/CollectionTasks.vue:402-407`（模板）+ `<script setup>` 区块
+- Modify: `frontend/src/assets/erp-layout.css`（补 `.erp-mb-xs` 工具类）
 - Modify: `frontend/package.json`（新增 test script）
 
 - [ ] **Step 1: 写失败测试**
@@ -227,6 +228,11 @@ Expected: 6 passed。
 
 - [ ] **Step 5: 接入 Vue 模板**
 
+> **关于 `el-collapse` 不带 `v-model`**：Element Plus 2.11.5 的 `useCollapse` 里
+> `setActiveNames` 直接改内部 `activeNames` ref，`watch(props.modelValue)` 只在外部
+> 变化时重置——没有 `v-model` 时它是**非受控**的，点击仍能正常展开。**同一文件
+> `:424` 的时间线折叠已经是同样的无 `v-model` 用法**，照此保持一致即可，不必额外绑定。
+
 修改 `frontend/src/domains/collection/views/collection/CollectionTasks.vue`。
 
 先改模板 `:402-407`，把原来的「失败域」「错误信息」两项替换为：
@@ -269,7 +275,15 @@ const primaryErrorMessage = computed(() => pickPrimaryErrorMessage(detailTask.va
 
 - [ ] **Step 6: 注册 test script 并跑测试**
 
-在 `frontend/package.json` 的 `scripts` 段追加（注意保持 JSON 逗号正确）：
+先补工具类：`frontend/src/assets/erp-layout.css` 里有 `.erp-mr-xs`（`:273`），但**没有** `.erp-mb-xs`（全仓不存在）。在 `.erp-mr-xs` 后面加：
+
+```css
+.erp-mb-xs {
+  margin-bottom: 4px;
+}
+```
+
+再在 `frontend/package.json` 的 `scripts` 段追加（注意保持 JSON 逗号正确）：
 
 ```json
     "test:collection-task-errors": "node --test scripts/collectionTaskErrors.test.mjs",
@@ -299,6 +313,7 @@ cd F:\Vscode\python_programme\AI_code\xihong_erp
 git add -- frontend/src/domains/collection/views/collection/collectionTaskErrors.js `
            frontend/scripts/collectionTaskErrors.test.mjs `
            frontend/src/domains/collection/views/collection/CollectionTasks.vue `
+           frontend/src/assets/erp-layout.css `
            frontend/package.json
 git commit -m "feat(采集): 任务详情页展示域级采集错误"
 ```
@@ -1508,6 +1523,20 @@ git commit -m "feat(妙手采集): 库存域按阶段上报事件并在失败时
 - Modify: `backend/tests/test_miaoshou_inventory_export_v2_flow.py`（重写为行为测试）
 - Modify: `backend/tests/test_miaoshou_inventory_export_contract.py`（只移除源码文本断言，保留 `selectors.*` 实例断言）
 
+- [ ] **Step 0: 起点自检（已完成，2026-10-23）**
+
+替身法已用**真实生产代码**实测通过：
+
+| 断言 | 结果 |
+|---|---|
+| `calls == [navigation, warehouse_filters, search, search_results, open_export_dialog, ensure_export_fields, expect_download, save_download]` | 通过（顺序与现行 `run()` 完全一致） |
+| 导航失败时不进入 `search` | 通过 |
+| 筛选失败时不进入 `search` | 通过 |
+| `page.keyboard.pressed` 不含 `Escape` | 通过 |
+
+**依赖顺序**：本任务的两个失败用例断言 `navigation_failed` / `warehouse_scope_failed` 阶段名，
+而阶段名由 **Task 7** 落地。Task 7 未完成时这两个用例会红——这是**预期的依赖**，不是缺陷。
+
 - [ ] **Step 1: 重写 `test_miaoshou_inventory_export_v2_flow.py`**
 
 用 mock page 驱动 `MiaoshouInventoryExport.run()`，断言**调用顺序与结果形状**（不是源码文本）。骨架：
@@ -1516,6 +1545,9 @@ git commit -m "feat(妙手采集): 库存域按阶段上报事件并在失败时
 """妙手库存导出组件的行为测试（替代原源码字符串断言）。
 
 对齐上游 spec 2026-09-13 §7「mock page 注入，验证步骤调用序列与 ExportResult 形状」。
+
+做法：用**替身组件/替身方法**替换导出流程里的协作组件与各步骤方法，把调用记进
+共享的 `calls` 列表；断言的是**运行时的调用顺序与结果形状**，不是源码文本。
 """
 from __future__ import annotations
 
@@ -1526,8 +1558,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from miaoshou_page_fakes import FakeLocator, FakePage
-from modules.components.base import ExecutionContext
+from miaoshou_page_fakes import FakePage
+from modules.components.base import ExecutionContext, ResultBase
 from modules.platforms.miaoshou.components.inventory_export import MiaoshouInventoryExport
 
 
@@ -1540,34 +1572,124 @@ def _ctx() -> ExecutionContext:
     )
 
 
+def _component(calls: list[str]) -> MiaoshouInventoryExport:
+    """把各协作组件与步骤方法替换为替身，记录调用序列。"""
+    component = MiaoshouInventoryExport(_ctx())
+
+    async def _nav(page, target):
+        calls.append("navigation")
+        return ResultBase(success=True, message="ok")
+
+    async def _filters(page, filters):
+        calls.append("warehouse_filters")
+        return ResultBase(success=True, message="ok")
+
+    async def _search(page):
+        calls.append("search")
+
+    async def _results(page):
+        calls.append("search_results")
+
+    async def _open_dialog(page):
+        calls.append("open_export_dialog")
+
+    async def _fields(page):
+        calls.append("ensure_export_fields")
+
+    async def _download(page):
+        calls.append("expect_download")
+        return object()
+
+    async def _save(page, download):
+        calls.append("save_download")
+        return Path("inventory_snapshot.xlsx")
+
+    component.navigation_component.run = _nav
+    component.warehouse_filters_component.run = _filters
+    component._click_search = _search
+    component._wait_search_results_ready = _results
+    component._open_export_dialog = _open_dialog
+    component._ensure_export_fields_all_selected = _fields
+    component._expect_download_with_pageerror_guard = _download
+    component._wait_download_complete = _save
+    return component
+
+
+@pytest.mark.asyncio
+async def test_inventory_export_calls_stages_in_expected_order() -> None:
+    calls: list[str] = []
+    component = _component(calls)
+
+    result = await component.run(FakePage())
+
+    assert result.success is True
+    assert result.file_path.endswith("inventory_snapshot.xlsx")
+    assert calls == [
+        "navigation",
+        "warehouse_filters",
+        "search",
+        "search_results",
+        "open_export_dialog",
+        "ensure_export_fields",
+        "expect_download",
+        "save_download",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_inventory_export_reports_navigation_failure_with_stage_name() -> None:
-    component = MiaoshouInventoryExport(_ctx())
-    page = FakePage()
+    calls: list[str] = []
+    component = _component(calls)
 
-    # 让导航组件直接返回失败
     async def _failed_navigation(page, target):
-        from modules.components.base import ResultBase
-
+        calls.append("navigation")
         return ResultBase(success=False, message="导航超时")
 
     component.navigation_component.run = _failed_navigation
 
-    result = await component.run(page)
+    result = await component.run(FakePage())
 
     assert result.success is False
     assert "navigation_failed" in (result.message or "")
+    assert "search" not in calls
+
+
+@pytest.mark.asyncio
+async def test_inventory_export_reports_warehouse_scope_failure_with_stage_name() -> None:
+    calls: list[str] = []
+    component = _component(calls)
+
+    async def _failed_filters(page, filters):
+        calls.append("warehouse_filters")
+        return ResultBase(success=False, message="warehouse_scope_open_failed: 打不开")
+
+    component.warehouse_filters_component.run = _failed_filters
+
+    result = await component.run(FakePage())
+
+    assert result.success is False
+    assert "warehouse_scope_failed" in (result.message or "")
+    assert "search" not in calls
+
+
+@pytest.mark.asyncio
+async def test_inventory_export_does_not_use_keyboard_escape_to_close_popups() -> None:
+    calls: list[str] = []
+    component = _component(calls)
+    page = FakePage()
+
+    await component.run(page)
+
+    assert "Escape" not in page.keyboard.pressed
 ```
 
-再加三个用例（断言**序列**而非源码文本）：
+**为什么用替身而不是纯 mock page**：`page.expect_download()` 是 async context manager，
+真要 mock 出来需要模拟 `dl_info.value` 整套异步协议，成本高且脆。替身法同样验证
+「**步骤调用序列**」与「**ExportResult 形状**」——正是上游 spec §7 要求的两件事，
+而且对 `run()` 的重排敏感（把 `_click_search` 挪到筛选之前，`calls` 断言立刻失败）。
 
-| 用例 | 断言 |
-|---|---|
-| 仓库筛选先于搜索 | 记录 mock page 收到的调用序列，`warehouse_filters_component.run` 的序号 < 搜索按钮 click 的序号 |
-| 导出弹窗字段全选先于触发下载 | 序列里「字段全选」< 「expect_download」 |
-| 下载成功后返回 `file_path` | 断言 `result.success is True` 且 `result.file_path` 指向落盘路径 |
-
-实现要点：给 `FakePage` 记录调用序列（`page.calls: list[str]`），在假对象的关键方法上追加标记；`component.navigation_component` / `component.warehouse_filters_component` 用替身对象替换。
+**注意**：`_ensure_popup_closed(page)` 仍会真的跑在假 page 上（它遍历 20 个弹窗选择器，
+全部 `count()==0` 直接跳过）——这是有意保留的真实路径覆盖，不要把它也替身掉。
 
 - [ ] **Step 2: 移除 `test_miaoshou_inventory_export_contract.py` 的源码文本断言**
 
