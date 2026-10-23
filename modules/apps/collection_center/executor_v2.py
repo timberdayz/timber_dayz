@@ -813,6 +813,41 @@ class CollectionExecutorV2:
 
         logger.info("CollectionExecutorV2 initialized (Python components mode)")
 
+    def _build_step_callback(
+        self,
+        task_id: str,
+        domain: Optional[str] = None,
+        progress: int = 0,
+    ) -> Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]]:
+        """把组件的 report_step 事件接到任务步骤日志。
+
+        复用既有的 status_callback（collection_tasks.py:1309-1315 的签名是
+        ``(task_id, progress, message, current_domain=None, details=None)``），
+        其中 ``details`` 正是决定是否写入 core.collection_task_logs 的参数
+        （:1337-1342 仅在 details is not None 时写表，
+        且 log_level = "error" if details.get("error") else "info"）。
+
+        ``details.step_id`` 是前端 getStepLabel（CollectionTasks.vue:1145-1152）
+        识别阶段名的字段，必须原样带上。
+        """
+        if not self.status_callback or not task_id:
+            return None
+
+        async def _on_step(event_type: str, data: Dict[str, Any]) -> None:
+            payload = dict(data or {})
+            step_id = str(payload.get("step_id") or "unknown")
+            action = str(payload.get("action") or step_id)
+            payload["step_id"] = step_id
+            payload["event_type"] = event_type
+            message = f"[{event_type}] {action}"
+            try:
+                await self.status_callback(task_id, progress, message, domain, payload)
+            except TypeError:
+                # 兼容只接受 (task_id, progress, message) 的旧回调签名
+                await self.status_callback(task_id, progress, message)
+
+        return _on_step
+
     async def _run_with_main_account_session_lock(
         self,
         *,
@@ -2704,6 +2739,9 @@ class CollectionExecutorV2:
         config: Dict[str, Any],
         run_args: Optional[List[Any]] = None,
         run_kwargs: Optional[Dict[str, Any]] = None,
+        task_id: Optional[str] = None,
+        domain: Optional[str] = None,
+        progress: int = 0,
     ):
         """Execute a component resolved from a stable runtime manifest."""
         from modules.components.base import ExecutionContext
@@ -2713,7 +2751,11 @@ class CollectionExecutorV2:
         ctx = ExecutionContext(
             platform=platform,
             account=account,
+            logger=logger,
             config=config,
+            step_callback=self._build_step_callback(
+                task_id or "", domain=domain, progress=progress
+            ),
         )
         component = component_class(ctx)
         args = run_args or []
@@ -3206,10 +3248,19 @@ class CollectionExecutorV2:
                             manifest=export_manifest,
                             account=account,
                             config=export_params,
+                            task_id=task_id,
+                            domain=full_domain,
+                            progress=progress,
                         )
                     else:
                         domain_adapter = create_adapter(
-                            platform=platform, account=account, config=export_params
+                            platform=platform,
+                            account=account,
+                            config=export_params,
+                            logger=logger,
+                            step_callback=self._build_step_callback(
+                                task_id, domain=full_domain, progress=progress
+                            ),
                         )
                         export_result = await domain_adapter.export(
                             page=page,
@@ -3304,10 +3355,19 @@ class CollectionExecutorV2:
                                 manifest=export_manifest,
                                 account=account,
                                 config=export_params,
+                                task_id=task_id,
+                                domain=full_domain,
+                                progress=progress,
                             )
                         else:
                             domain_adapter = create_adapter(
-                                platform=platform, account=account, config=export_params
+                                platform=platform,
+                                account=account,
+                                config=export_params,
+                                logger=logger,
+                                step_callback=self._build_step_callback(
+                                    task_id, domain=full_domain, progress=progress
+                                ),
                             )
                             export_result = await domain_adapter.export(
                                 page=page, data_domain=domain
@@ -6099,10 +6159,19 @@ class CollectionExecutorV2:
                     manifest=export_manifest,
                     account=account,
                     config=params,
+                    task_id=task_id,
+                    domain=data_domain,
+                    progress=progress,
                 )
             else:
                 domain_adapter = create_adapter(
-                    platform=platform, account=account, config=params
+                    platform=platform,
+                    account=account,
+                    config=params,
+                    logger=logger,
+                    step_callback=self._build_step_callback(
+                        task_id, domain=data_domain, progress=progress
+                    ),
                 )
                 export_result = await domain_adapter.export(
                     page=domain_page,
