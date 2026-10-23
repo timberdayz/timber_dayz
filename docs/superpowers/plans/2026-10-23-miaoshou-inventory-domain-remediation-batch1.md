@@ -378,7 +378,8 @@ def is_missing_component_file(file_path: str, *, project_root: Path | None = Non
     判定：路径为空 / 位于 archive/ 目录 / 文件在磁盘上不存在。
 
     用于发现「stable 记录指向已归档或缺失文件」的孤儿记录
-    （docs/guides/ACTIVE_COLLECTION_COMPONENTS.md:75 的 Archive 前置条件）。
+    （docs/guides/ACTIVE_COLLECTION_COMPONENTS.md「Archive 目录语义 → 前置条件」第 2 条：
+      没有 stable ComponentVersion.file_path 指向该文件）。
     """
     raw = str(file_path or "").replace("\\", "/").strip()
     if not raw:
@@ -561,7 +562,9 @@ Get-Content docs/guides/CANONICAL_RUNTIME_ISSUES.md -Encoding UTF8 -TotalCount 6
 
 - [ ] **Step 3: 更新 `CANONICAL_COMPONENT_STATUS.md`**
 
-把 `miaoshou/inventory_export` 的状态标记更新为反映「已完成四层防护整改、等待真实页面复验」的状态。字段与措辞照该文档既有约定。
+该文档 `:57-64` 是一张「组件 / 当前状态 / 说明」的表，`miaoshou/inventory_export` 在 **`:63`**，当前状态为「可测试」。把这一行更新为反映「已完成四层防护整改、等待真实页面复验」的状态，说明列写清改动范围与未决项（层 A 的 CSS 待批次 2 取证）。
+
+措辞与该表既有风格保持一致（状态词用「可测试 / 继续修 / 待复验」这类既有取值，不要自造）。
 
 - [ ] **Step 4: 补注 flaky 记录**
 
@@ -596,6 +599,19 @@ git commit -m "docs(采集): 登记妙手库存域 2026-10-23 失败与 flaky �
 - Create: `backend/tests/miaoshou_page_fakes.py`（共享假对象）
 - Modify: `backend/tests/test_miaoshou_warehouse_filters_contract.py`（从 22 行 contract 测试扩为行为测试）
 
+- [ ] **Step 0: 起点自检（已完成，2026-10-23）**
+
+本计划的「假对象模型 + 四层防护实现」配对已做过端到端自检（四条路径全部跑通）：
+
+| 用例 | 结果 |
+|---|---|
+| 形态 A（触发器被拦截） | 层 A 点容器成功，`container.clicked == 1` |
+| 层 A 不可用 | 层 B 生效，`click_calls == [(3000, True)]`（force=True 传到位） |
+| 形态 B（已全选 `["仓库A", "+ 4"]`） | 层 C 命中，`details.skipped is True` |
+| A/B/C 全失败 | 层 D 触发 `keyboard.pressed == ["Enter"]`，消息含 `warehouse_scope_open_failed` |
+
+自检脚本未入库（临时文件，跑完即弃）。实现时若行为与上表不符，说明假对象或实现有偏差，**先查清再改**。
+
 - [ ] **Step 1: 创建共享假对象模块**
 
 创建 `backend/tests/miaoshou_page_fakes.py`：
@@ -615,6 +631,12 @@ git commit -m "docs(采集): 登记妙手库存域 2026-10-23 失败与 flaky �
 
 导入约定：`backend/tests` 下没有 `__init__.py`，pytest 会把该目录加入
 `sys.path`，因此同目录测试文件用 `from miaoshou_page_fakes import ...`。
+
+保真度说明：`locator()` / `get_by_role()` / `get_by_text()` 是**按字符串分发的查表**，
+不是真实 DOM 树。真实页面上 `get_by_label("仓库")` 命中的是 `.jx-select` 内部的
+`<input role="combobox">`，而 `.jx-select` 容器是它的**祖先**；假对象里容器配成
+被选中元素的**子节点**，调用形状一致、方向相反。实现者不要据此推断真实 DOM 结构，
+真实结构以批次 2 的 pwcli 取证为准。
 """
 from __future__ import annotations
 
@@ -968,6 +990,8 @@ from modules.components.base import ComponentBase, ExecutionContext, ResultBase
 from modules.platforms.miaoshou.components.inventory_config import InventorySelectors
 ```
 
+> **层次先例（实测）**：平台组件从 `modules.apps.collection_center.*` 取公共能力是仓库既有做法——`miaoshou/components/overlay_guard.py:6`（`UniversalPopupHandler`）、三个平台的 `login.py:10`（`VerificationRequiredError`）。`retry_strategy.py` 只依赖 `modules.core.logger`，**不构成循环导入**（2026-10-23 已实测 import 通过）。
+
 在类里新增以下方法（放在 `_is_checkbox_selected` 之后）：
 
 ```python
@@ -1262,34 +1286,23 @@ git commit -m "fix(妙手采集): 仓库范围下拉框加四层遮挡防护"
 
 同样改 `:2868` 那个重复的 `create_adapter` 调用（结构相同，`domain=full_domain`）。
 
-- [ ] **Step 3: 在 `_execute_python_component` 里也注入**
+- [ ] **Step 3: `_execute_python_component` 路径本批次不改（写明理由）**
 
-把 `:2284-2288` 的
+`executor_v2.py:2263` 的签名是 `_execute_python_component(self, page, adapter, component_type, params=None, component=None)`——**没有 `task_id`**。它的调用链上：
 
-```python
-                ctx = ExecutionContext(
-                    platform=(component or {}).get("platform", ""),
-                    account=account,
-                    config=config,
-                )
-```
+| 调用点 | 作用域里有 `task_id` 吗 |
+|---|---|
+| `:1022`（登录） | 有 |
+| `:2527`（有头登录兜底） | 有 |
+| `:2641`（登录） | 有 |
+| `:2953`（`_execute_component` → `_execute_step`） | **无**——`_execute_step(self, page, step, component)`（`:3212`）也没有 |
+| `:5172`（登录） | 有 |
 
-改成
+要把 `task_id` 送进 `_execute_python_component`，得一路给 `_execute_component` 与 `_execute_step` 加参数——**改动面 3 层**，且 `_execute_step` 是通用步骤执行器，影响面远超本批次范围。
 
-```python
-                ctx = ExecutionContext(
-                    platform=(component or {}).get("platform", ""),
-                    account=account,
-                    logger=logger,
-                    config=config,
-                    step_callback=self._build_step_callback(
-                        task_id,
-                        domain=(component or {}).get("data_domain"),
-                    ),
-                )
-```
+**关键事实：库存域走的不是这条路径。** `python_component_adapter.py:53-57` 把 `inventory` 域映射到 `MiaoshouInventoryExport`，导出流程经由 `executor_v2.py:2792` 的 `create_adapter(...).export(...)` 执行（`runtime_manifests is None` 的常规路径）。**Step 2 的 adapter 注入才是库存域的生产路径**，Step 2 做完 A8 即对库存域成立。
 
-> `_execute_python_component` 的签名里**没有** `task_id`。在签名上补一个 `task_id: Optional[str] = None` 参数，并在其内部用 `task_id or ""` 兜底。调用点（`:2641`、`:5172` 等）已有 `task_id` 变量，补上即可。
+`_execute_python_component` 的注入挂到**批次 3**，届时一并处理 `task_id` 穿线。**本批次不要动它。**
 
 - [ ] **Step 4: 确认 `create_adapter` 支持这两个参数**
 
@@ -1623,7 +1636,9 @@ cd F:\Vscode\python_programme\AI_code\xihong_erp
 Get-Content backend/domains/collection/routers/component_recorder.py -Encoding UTF8 | Select-Object -Skip 450 -First 140
 ```
 
-记录：`_analyze_python_code_for_lints` 的函数签名、5 条规则的 type 名与正则、以及 lint 结果如何挂到响应体上。
+记录：`_analyze_python_code_for_lints` 的函数签名、既有规则的 type 名与正则、以及 lint 结果如何挂到响应体上。
+
+**注意（实测，2026-10-23）**：除 spec 提到的 5 条规则外，同一处还有 **4 条 `_with_reason` 对应规则**——`wait_for_timeout_with_reason`（`:514`）、`fixed_sleep_with_reason`（`:540`）、`first_nth_with_reason`（`:576`），以及 `syntax_error`（`:478`）。也就是说「**有注释才放行**」的判定**已经实现**（`_with_reason` 是合规形态，不报违规）。设计新规则时**不要重复实现**这套「带理由注释则放行」的语义，直接沿用既有写法。
 
 - [ ] **Step 2: 写设计文档**
 
@@ -1640,7 +1655,7 @@ Get-Content backend/domains/collection/routers/component_recorder.py -Encoding U
 | 未接 `ctx.logger` | 新增 `missing_logger_usage` | warn | |
 | 函数 > 50 行 / 类 > 500 行 | 新增 `oversized_function` / `oversized_class` | error | 对齐 `TESTING_AND_QUALITY.md:211,213` |
 | 组件无 stable 记录 | 新增 `missing_stable_component_record` | error | |
-| stable 记录指向 `archive/` 或缺失文件 | 新增 `stable_points_to_archived_file` | error | 运行时已有守卫，CI 前置 |
+| stable 记录指向 `archive/` 或缺失文件 | 新增 `stable_points_to_archived_file` | error | 运行时已有守卫，CI 前置；判定复用 Task 2 落在 `backend/services/active_collection_components.py` 的 `is_missing_component_file` |
 | 导航单信号 | 新增 `single_signal_navigation` | warn | |
 | 缺重试预算声明 | 新增 `missing_retry_budget` | warn | |
 
