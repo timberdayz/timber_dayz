@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.services.collection_contracts import (
-    INCREMENTAL_RANGE_KEY,
+    INCREMENTAL_RANGE_END_KEY,
+    INCREMENTAL_RANGE_START_KEY,
     build_date_range_from_time_selection,
     build_execution_time_selection,
     count_collection_targets,
@@ -235,7 +236,10 @@ async def create_tasks_for_config(
         now=time_window_now,
     )
     if incremental_range:
-        normalized_date_range[INCREMENTAL_RANGE_KEY] = incremental_range
+        # 两个平铺的**字符串**键：任务的 date_range 契约是 Dict[str, str]，
+        # 塞嵌套 dict 会让任务列表接口 500。
+        normalized_date_range[INCREMENTAL_RANGE_START_KEY] = str(incremental_range["start"])
+        normalized_date_range[INCREMENTAL_RANGE_END_KEY] = str(incremental_range["end"])
 
     created_tasks: List[CollectionTask] = []
     for scope in scope_rows:

@@ -61,7 +61,8 @@ from modules.apps.collection_center.transition_gates import (
 )
 from modules.services.file_semantics import validate_file_semantics
 from backend.services.collection_contracts import (
-    INCREMENTAL_RANGE_KEY,
+    INCREMENTAL_RANGE_END_KEY,
+    INCREMENTAL_RANGE_START_KEY,
     build_execution_time_selection,
     count_collection_targets,
     normalize_collection_date_range,
@@ -394,12 +395,17 @@ def _build_runtime_task_params(
         params["source_time_selection"] = source_time_selection
         params["params"]["source_time_selection"] = source_time_selection
 
-    incremental_range = normalized_date_range.get(INCREMENTAL_RANGE_KEY)
-    if incremental_range:
-        # 库存域增量窗口：只有库存导出组件读这个键（外层与内层都放，
+    incremental_start = normalized_date_range.get(INCREMENTAL_RANGE_START_KEY)
+    incremental_end = normalized_date_range.get(INCREMENTAL_RANGE_END_KEY)
+    if incremental_start and incremental_end:
+        # 库存域增量窗口：只有库存导出组件读这两个键（外层与内层都放，
         # 因为两条执行路径拿到的 config 分别是外层 params 与 params["params"]）
-        params[INCREMENTAL_RANGE_KEY] = incremental_range
-        params["params"][INCREMENTAL_RANGE_KEY] = incremental_range
+        for key, value in (
+            (INCREMENTAL_RANGE_START_KEY, incremental_start),
+            (INCREMENTAL_RANGE_END_KEY, incremental_end),
+        ):
+            params[key] = value
+            params["params"][key] = value
 
     if execution_time_selection:
         params["time_selection"] = execution_time_selection

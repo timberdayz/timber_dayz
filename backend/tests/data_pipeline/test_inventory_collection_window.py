@@ -16,7 +16,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from backend.services.collection_contracts import (
-    INCREMENTAL_RANGE_KEY,
+    INCREMENTAL_RANGE_END_KEY,
+    INCREMENTAL_RANGE_START_KEY,
     normalize_collection_date_range,
 )
 from backend.services.inventory.inventory_collection_window_service import (
@@ -318,28 +319,34 @@ async def test_resolve_incremental_range_returns_none_without_watermark():
     assert result is None
 
 
-def test_incremental_range_key_survives_date_range_normalization():
-    """任务区间是所有数据域共享的 → 库存窗口必须走**专用键**透传，不能动共享区间。"""
-    window = {"start": "2026-10-23 00:00:00", "end": "2026-10-25 23:59:59"}
+def test_incremental_range_keys_survive_date_range_normalization():
+    """任务区间是所有数据域共享的 → 库存窗口必须走**专用键**透传，不能动共享区间。
+
+    键是**两个平铺字符串**（不是嵌套 dict）：任务响应的 date_range 契约是
+    Dict[str, str]，塞嵌套 dict 会让采集任务列表接口 500。
+    """
     normalized = normalize_collection_date_range(
         {
             "time_selection": {"mode": "preset", "preset": "yesterday"},
             "date_from": "2026-10-24",
             "date_to": "2026-10-25",
-            INCREMENTAL_RANGE_KEY: window,
+            INCREMENTAL_RANGE_START_KEY: "2026-10-23 00:00:00",
+            INCREMENTAL_RANGE_END_KEY: "2026-10-25 23:59:59",
         }
     )
 
-    assert normalized[INCREMENTAL_RANGE_KEY] == window
+    assert normalized[INCREMENTAL_RANGE_START_KEY] == "2026-10-23 00:00:00"
+    assert normalized[INCREMENTAL_RANGE_END_KEY] == "2026-10-25 23:59:59"
     # 共享区间仍由 time_selection 决定 → 订单域完全不受影响
     assert normalized["time_selection"]["mode"] == "preset"
     assert normalized["date_from"] == normalized["date_to"]
 
 
-def test_incremental_range_key_is_absent_when_not_resolved():
+def test_incremental_range_keys_are_absent_when_not_resolved():
     """没解出窗口时不能凭空造一个键。"""
     normalized = normalize_collection_date_range(
         {"time_selection": {"mode": "preset", "preset": "yesterday"}}
     )
 
-    assert INCREMENTAL_RANGE_KEY not in normalized
+    assert INCREMENTAL_RANGE_START_KEY not in normalized
+    assert INCREMENTAL_RANGE_END_KEY not in normalized

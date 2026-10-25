@@ -16,7 +16,17 @@ CREATE SCHEMA IF NOT EXISTS mart;
 --
 -- ⚠️ 本视图**删了列**（estimated_turnover_days / risk_level / clearance_priority_score 等），
 --    PostgreSQL 的 CREATE OR REPLACE VIEW 不允许删列 → 必须先 DROP 再建。
---    下游 api.* 视图依赖本视图，重建顺序必须是：先 DROP api.* → DROP 本视图 → 建本视图 → 建 api.*。
+--
+-- ⚠️⚠️ **DROP 顺序必须先删下游**：下面三个 api 视图都依赖本视图，
+--    只 DROP 本视图会被 PostgreSQL 拒绝：
+--      ERROR: cannot drop view mart.inventory_backlog_base
+--             because other objects depend on it
+--      HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+--    bootstrap 会按依赖顺序逐个执行各资产文件，**不会**先删下游 → 必须在这里自己删。
+--    （这三个视图互不依赖，删除顺序任意；它们各自的 SQL 文件会在本文件之后重建。）
+DROP VIEW IF EXISTS api.business_overview_inventory_backlog_module;
+DROP VIEW IF EXISTS api.inventory_backlog_summary_module;
+DROP VIEW IF EXISTS api.clearance_ranking_module;
 DROP VIEW IF EXISTS mart.inventory_backlog_base;
 CREATE OR REPLACE VIEW mart.inventory_backlog_base AS
 WITH latest AS (

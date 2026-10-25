@@ -468,6 +468,34 @@ DOS 只作参考；库龄保留为生命周期视角。
 | 4 | `/api/inventory-overview/summary` 500 | B4-2 重写汇总视图时删掉了 `high/medium/low_risk_sku_count`，概览服务还在读 | 视图补三个**去重 SKU 数**（卡片写「SKU 数」就不能给 SKU×仓 的行数），schema / service / 前端同步换新口径 |
 | 5 | `product_pricing_query_service` 里残留 `p["min_age_days"]` | 列名迁移时漏了一处生产代码 | 改成 `p["min_restock_days"]`（现在会直接 KeyError） |
 | **6** | **状态层 upsert 没有生产调用方** | `InventoryStateRefreshService` **只在测试里被调过** —— 采集完状态层不动 → 距上次进货天数永远不推进 → 增量窗口永远是同一个 → **闭环是断的** | `refresh_queue_tasks.py` 的 inventory 分支补上调用（顺序：同步 SKU 身份 → 状态层 upsert → 刷库龄）；状态层自己先刷一遍上游，不依赖调用方刷过 |
+| **7** | **基表 DROP 撞上下游依赖** | `mart.inventory_backlog_base` 删了列 → 必须 `DROP` 重建 → 但四个下游 api 视图依赖它 → PostgreSQL 拒绝（`cannot drop view ... because other objects depend on it`）→ 启动时的资产 bootstrap 整条链失败 → 资产指纹不更新 → **业务概览永久降级、相关 API 503** | ① 基表文件先 DROP 四个下游再 DROP 自己；② **积压资产组（基表 + 四个下游）整体收进 `clearance_ranking` 一个模块** —— 谁重建基表谁就能重建全部下游；③ 采集后刷新（refresh pipeline）的 inventory 域目标补齐四个下游。**三条执行路径（bootstrap / 采集后刷新 / 安全网自愈）全覆盖** |
+| **8** | **增量窗口撞 `date_range` 契约** | 我把增量窗口作为**嵌套 dict** 塞进任务的 `date_range`，但响应契约是 `Dict[str, str]` → FastAPI 响应校验失败 → **采集任务列表页 500** | 改成**两个平铺的字符串键** `inventory_incremental_range_start` / `..._end`，契约天然满足；并加契约测试锁住 |
+
+#### 8.10.7 资产链的「DROP 顺序」是一条硬规则（踩过两次的坑）
+
+`mart.inventory_backlog_base` 删了列 → PostgreSQL 的 `CREATE OR REPLACE VIEW` 不能删列 →
+**必须 DROP 重建** → DROP 会**连带删掉它的下游视图**。
+
+而「重建基表」这件事有**三条执行路径**，每条都只重建「自己计划里列出来的」目标：
+
+| 路径 | 谁触发 | 计划从哪来 |
+|---|---|---|
+| 启动/部署时的资产 bootstrap | `scripts/bootstrap_postgresql_dashboard.py` | `DASHBOARD_MODULE_TARGETS` 的模块 core_targets |
+| 采集后的刷新 | `refresh_queue_tasks` 的 refresh pipeline | `resolve_refresh_targets_for_source_table` 的依赖图 |
+| 安全网自愈 | `dashboard_safety_net_repair` | 同样来自模块 core_targets |
+
+→ **规则：基表与它的全部下游必须同属一个模块 / 同一条刷新目标列表。**
+少列一个，就会在「跑完之后某个视图 missing」的形式下复发。
+
+> 复现与验证方式（都已做成契约测试）：
+> `backend/tests/data_pipeline/test_inventory_backlog_asset_contract.py`
+> 1. 基表文件必须先 DROP 下游再 DROP 自己
+> 2. refresh pipeline 的 inventory 域目标必须带齐四个下游
+> 3. 基表与全部下游必须同属一个模块
+> 4. 增量窗口必须是两个平铺字符串键（不是嵌套 dict）
+
+**另一个坑：`celery worker` 挂载了代码但进程内是旧模块。**
+改了 SQL 资产 / 模块定义后必须**重启容器**，否则旧进程会一直用旧的模块定义删视图。
 
 #### 8.10.6 「可以开始采集了吗」的答案：**链路已闭环，但还没在真实页面上验过**
 

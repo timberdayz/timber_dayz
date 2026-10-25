@@ -456,7 +456,12 @@ def count_collection_targets(
 
 # 库存域增量窗口的**专用键**：只有库存导出组件读它。
 # 任务的日期区间是所有数据域共享的，改它会连带改掉订单域的范围 → 必须走专用键。
-INCREMENTAL_RANGE_KEY = "inventory_incremental_range"
+#
+# ⚠️ 必须是**两个平铺的字符串键**，不能是一个嵌套 dict：
+#    任务响应的 date_range 契约是 Dict[str, str]，塞嵌套 dict 会让
+#    FastAPI 响应校验失败 → 采集任务列表页直接 500。
+INCREMENTAL_RANGE_START_KEY = "inventory_incremental_range_start"
+INCREMENTAL_RANGE_END_KEY = "inventory_incremental_range_end"
 
 
 def normalize_collection_date_range(
@@ -466,8 +471,10 @@ def normalize_collection_date_range(
     if source.get("time_selection"):
         normalized = build_date_range_from_time_selection(source["time_selection"])
         normalized["time_selection"] = normalize_time_selection(time_selection=source["time_selection"])
-        if source.get(INCREMENTAL_RANGE_KEY):
-            normalized[INCREMENTAL_RANGE_KEY] = source[INCREMENTAL_RANGE_KEY]
+        if source.get(INCREMENTAL_RANGE_START_KEY):
+            normalized[INCREMENTAL_RANGE_START_KEY] = source[INCREMENTAL_RANGE_START_KEY]
+        if source.get(INCREMENTAL_RANGE_END_KEY):
+            normalized[INCREMENTAL_RANGE_END_KEY] = source[INCREMENTAL_RANGE_END_KEY]
         return normalized
 
     start_date = source.get("start_date") or source.get("start") or source.get("date_from") or ""
@@ -480,8 +487,10 @@ def normalize_collection_date_range(
     if end_date:
         normalized["end_date"] = end_date
         normalized["date_to"] = end_date
-    if source.get(INCREMENTAL_RANGE_KEY):
-        normalized[INCREMENTAL_RANGE_KEY] = source[INCREMENTAL_RANGE_KEY]
+    if source.get(INCREMENTAL_RANGE_START_KEY):
+        normalized[INCREMENTAL_RANGE_START_KEY] = source[INCREMENTAL_RANGE_START_KEY]
+    if source.get(INCREMENTAL_RANGE_END_KEY):
+        normalized[INCREMENTAL_RANGE_END_KEY] = source[INCREMENTAL_RANGE_END_KEY]
     return normalized
 
 

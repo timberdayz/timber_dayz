@@ -293,22 +293,23 @@ class MiaoshouInventoryDateFilter:
         )
 
 
-# 增量区间在执行配置里的键名
-INCREMENTAL_RANGE_CONFIG_KEY = "inventory_incremental_range"
+# 增量区间在执行配置里的键名（两个平铺的字符串键）
+# ⚠️ 必须与 backend/services/collection_contracts.py 的常量一致：
+#    任务的 date_range 契约是 Dict[str, str]，塞嵌套 dict 会让任务接口 500。
+INCREMENTAL_RANGE_START_KEY = "inventory_incremental_range_start"
+INCREMENTAL_RANGE_END_KEY = "inventory_incremental_range_end"
 
 
 def read_incremental_range(config: Any) -> Optional[tuple[str, str]]:
     """从执行配置里读增量区间；没配就是全量采集（返回 None）。
 
-    约定：``config["inventory_incremental_range"] = {"start": "...", "end": "..."}``
+    约定：``config["inventory_incremental_range_start"]`` 与
+    ``config["inventory_incremental_range_end"]`` 两个字符串键。
     """
     if not isinstance(config, dict):
         return None
-    payload = config.get(INCREMENTAL_RANGE_CONFIG_KEY)
-    if not isinstance(payload, dict):
-        return None
-    start = str(payload.get("start") or "").strip()
-    end = str(payload.get("end") or "").strip()
+    start = str(config.get(INCREMENTAL_RANGE_START_KEY) or "").strip()
+    end = str(config.get(INCREMENTAL_RANGE_END_KEY) or "").strip()
     if not start or not end:
         return None
     return start, end

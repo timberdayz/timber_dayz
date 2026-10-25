@@ -59,6 +59,8 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "api.b_cost_analysis_shop_month_module": ["mart.b_cost_shop_month"],
     "api.b_cost_analysis_order_detail_module": ["semantic.fact_orders_atomic"],
     "api.clearance_ranking_module": ["mart.inventory_backlog_base", "api.inventory_backlog_summary_module", "semantic.fact_orders_atomic"],
+    # SKU 级滞销清单：判据来自状态层（距上次进货天数），ERP 主数据补定价原料
+    "api.sku_clearance_ranking_module": ["mart.inventory_state", "semantic.fact_orders_atomic"],
 }
 
 SQL_TARGET_PATHS: dict[str, str] = {
@@ -112,6 +114,7 @@ SQL_TARGET_PATHS: dict[str, str] = {
     "api.b_cost_analysis_shop_month_module": "sql/api_modules/b_cost_analysis_shop_month_module.sql",
     "api.b_cost_analysis_order_detail_module": "sql/api_modules/b_cost_analysis_order_detail_module.sql",
     "api.clearance_ranking_module": "sql/api_modules/clearance_ranking_module.sql",
+    "api.sku_clearance_ranking_module": "sql/api_modules/sku_clearance_ranking_module.sql",
 }
 
 
@@ -226,8 +229,16 @@ def _extra_targets_for_refresh_domain(domain: str) -> list[str]:
             "api.business_overview_shop_racing_monthly_module",
         ]
     if domain == "inventory":
+        # ⚠️ 这四个 api 视图都依赖 `mart.inventory_backlog_base`，
+        #    而基表删列 → 必须 DROP 重建 → DROP 会连带删掉这四个下游。
+        #    refresh pipeline 只重建列出来的目标 → 少列一个就少重建一个，
+        #    表现为「采集跑完，业务概览的积压视图突然 missing」。
+        #    → 四个全带。
         return [
+            "api.business_overview_inventory_backlog_module",
+            "api.inventory_backlog_summary_module",
             "api.clearance_ranking_module",
+            "api.sku_clearance_ranking_module",
         ]
     return []
 
