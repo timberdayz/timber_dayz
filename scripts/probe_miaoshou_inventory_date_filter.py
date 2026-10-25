@@ -120,7 +120,9 @@ def _open_panel(page: Any) -> Any | None:
 
 def _panel_select_modelvalue(panel: Any) -> str:
     try:
-        return (panel.locator(".jx-select").first.get_attribute(VALUE_ATTR) or "").strip()
+        return (
+            panel.locator(".jx-select").first.get_attribute(VALUE_ATTR) or ""
+        ).strip()
     except Exception:
         return ""
 
@@ -204,7 +206,9 @@ def _probe_page(page: Any, start: str, end: str) -> int:
             "[probe] **登录态已失效**（被重定向回登录页）。"
             "请先用 pwcli 人工登录并保存状态，再重跑本探针。"
         )
-        page.screenshot(path=str(REPO_ROOT / "output" / "probe_inventory_date_filter.png"))
+        page.screenshot(
+            path=str(REPO_ROOT / "output" / "probe_inventory_date_filter.png")
+        )
         return 1
 
     _dump("页面上所有带 modelvaluegroup 的节点", _scan_value_attr_nodes(page))
@@ -215,7 +219,9 @@ def _probe_page(page: Any, start: str, end: str) -> int:
             "[probe] 没能打开筛选面板 —— 这是**取证失败**，不是结论。"
             "请把上面的 modelvaluegroup 节点清单和截图发我，我按真实结构改选择器。"
         )
-        page.screenshot(path=str(REPO_ROOT / "output" / "probe_inventory_date_filter.png"))
+        page.screenshot(
+            path=str(REPO_ROOT / "output" / "probe_inventory_date_filter.png")
+        )
         return 2
 
     _dump("维度下拉当前 modelvaluegroup", _panel_select_modelvalue(panel))
