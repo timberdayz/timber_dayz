@@ -602,10 +602,11 @@ async def test_process_refresh_queue_task_marks_failed_on_exception(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_process_refresh_queue_task_syncs_inventory_skus_before_age_refresh(monkeypatch):
-    """inventory 域刷新必须先同步 SKU 身份,再刷库龄。
+    """inventory 域刷新必须按「同步 SKU 身份 → 状态层 upsert → 刷库龄」的顺序。
 
-    少了 sync_inventory_skus,core.bridge_erp_sku_keys 就不会有 miaoshou 源的别名,
-    商品中心的 sku_id 映射与最低售价都会缺料。
+    - 少了 sync_inventory_skus,core.bridge_erp_sku_keys 就不会有 miaoshou 源的别名,
+      商品中心的 sku_id 映射与最低售价都会缺料。
+    - 少了状态层 upsert,「距上次进货天数」不推进 → 增量窗口永远是同一个 → 闭环是断的。
     """
     from backend.tasks import refresh_queue_tasks as task_module
 
@@ -652,6 +653,14 @@ async def test_process_refresh_queue_task_syncs_inventory_skus_before_age_refres
         async def invalidate(self, cache_type):
             return 0
 
+    class _FakeStateRefreshService:
+        def __init__(self, db):
+            self.db = db
+
+        async def refresh(self, force_full: bool = False):
+            calls.append("state_refresh")
+            return {"state_key_count": 1230}
+
     class _FakeAgeRefreshService:
         def __init__(self, db):
             self.db = db
@@ -680,6 +689,7 @@ async def test_process_refresh_queue_task_syncs_inventory_skus_before_age_refres
     monkeypatch.setattr(task_module, "execute_refresh_plan", _fake_execute_refresh_plan, raising=False)
     monkeypatch.setattr(task_module, "sync_inventory_skus", _fake_sync_inventory_skus, raising=False)
     monkeypatch.setattr(task_module, "InventoryAgeRefreshService", _FakeAgeRefreshService, raising=False)
+    monkeypatch.setattr(task_module, "InventoryStateRefreshService", _FakeStateRefreshService, raising=False)
     monkeypatch.setattr(task_module, "validate_refresh_result", _fake_validate_refresh_result, raising=False)
     monkeypatch.setattr(task_module, "get_cache_service", lambda: _FakeCacheService(), raising=False)
 
@@ -687,7 +697,9 @@ async def test_process_refresh_queue_task_syncs_inventory_skus_before_age_refres
 
     assert result["status"] == "success"
     assert ("sync_skus", 2764) in calls
+    assert "state_refresh" in calls
     assert "age_refresh" in calls
-    # 顺序:先同步 SKU 身份,再刷库龄
-    assert calls.index(("sync_skus", 2764)) < calls.index("age_refresh")
+    # 顺序:先同步 SKU 身份,再 upsert 状态层,最后刷库龄
+    assert calls.index(("sync_skus", 2764)) < calls.index("state_refresh")
+    assert calls.index("state_refresh") < calls.index("age_refresh")
 

@@ -5,6 +5,9 @@ import asyncio
 from backend.celery_app import celery_app
 from backend.models.database import AsyncSessionLocal, reset_async_engine_pool_for_new_loop
 from backend.services.data_pipeline.inventory_age_refresh_service import InventoryAgeRefreshService
+from backend.services.data_pipeline.inventory_state_refresh_service import (
+    InventoryStateRefreshService,
+)
 from backend.services.cache_service import get_cache_service
 from backend.services.data_pipeline.dashboard_bootstrap import (
     DASHBOARD_MODULE_TARGETS,
@@ -196,8 +199,11 @@ async def _async_process_refresh_queue_task() -> dict:
             refresh_status = extract_refresh_status(refresh_result)
             failed_targets = extract_failed_targets(refresh_result)
             if (task.context_json or {}).get("data_domain") == "inventory":
-                # 先同步 SKU 身份(miaoshou 别名桥),库龄刷新才拿得到 sku_id 映射
+                # 先同步 SKU 身份(miaoshou 别名桥),后面的刷新才拿得到 sku_id 映射
                 await sync_inventory_skus(db, source_file_id=context.get("file_id"))
+                # 状态层先 upsert：「距上次进货天数」的来源就是它。
+                # 不跑这一步 → 状态层不动 → 天数不推进 → 增量窗口永远是同一个。
+                await InventoryStateRefreshService(db).refresh(force_full=False)
                 await InventoryAgeRefreshService(db).refresh(force_full=False)
             if hasattr(db, "commit"):
                 await db.commit()

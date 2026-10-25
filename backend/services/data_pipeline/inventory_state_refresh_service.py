@@ -30,7 +30,10 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.services.data_pipeline.refresh_runner import execute_sql_target
+from backend.services.data_pipeline.refresh_runner import (
+    execute_refresh_plan,
+    execute_sql_target,
+)
 from backend.services.data_pipeline.refresh_registry import topologically_sort_targets
 
 INVENTORY_STATE_UPSTREAM_TARGETS = [
@@ -341,9 +344,20 @@ class InventoryStateRefreshService:
         )
 
     async def refresh(self, force_full: bool = False) -> dict:
-        """主流程：闸 1 的结果 → 闸 2 判定 → upsert 状态层。"""
+        """主流程：上游刷新 → 闸 1 的结果 → 闸 2 判定 → upsert 状态层。
+
+        上游（语义层 + 快照族）**自己先刷一遍**：这样本服务单独调用也站得住，
+        不依赖调用方恰好已经刷过上游（与库存库龄刷新服务同款写法）。
+        """
         if self.db is None:
             raise ValueError("AsyncSession is required for refresh execution")
+        await execute_refresh_plan(
+            self.db,
+            targets=INVENTORY_STATE_UPSTREAM_TARGETS,
+            pipeline_name="inventory_state_upstream_refresh",
+            trigger_source="manual",
+            context={"feature": "inventory_restock_days_state"},
+        )
         await self.ensure_runtime_assets()
         watermarks = {} if force_full else await self.get_watermarks()
         incoming_rows = await self.load_incoming_rows(watermarks)
