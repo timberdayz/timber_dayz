@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>库存域口径统一 · 落地结论与真问题</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#f7f5f0;
+    --card:#ffffff;
+    --line:#e9e3d6;
+    --line-soft:#f0ece2;
+    --text:#14171e;
+    --body:#3a4256;
+    --muted:#7c7a72;
+    --primary:#2f6f5e;
+    --primary-soft:rgba(47,111,94,.08);
+    --warn:#c97b3f;
+    --warn-soft:rgba(201,123,63,.10);
+    --bad:#b06367;
+    --bad-soft:rgba(176,99,103,.10);
+    --mono:'JetBrains Mono',monospace;
+    --sans:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+    --serif:'DM Serif Display','Songti SC',serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg);
+    color:var(--body);
+    font-family:var(--sans);
+    font-size:15px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:960px;margin:0 auto;padding:0 24px 96px}
+  section{margin-top:52px}
+
+  /* ── hero ── */
+  header{padding:56px 0 8px}
+  .kicker{
+    font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--primary);margin-bottom:14px
+  }
+  h1{
+    font-family:var(--serif);font-weight:400;font-size:34px;line-height:1.25;
+    color:var(--text);letter-spacing:-.005em;margin-bottom:16px
+  }
+  .lede{font-size:16px;color:var(--body);max-width:62ch}
+  .lede b{color:var(--text);font-weight:600}
+
+  .headrow{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+  .headrow h2{
+    font-family:var(--serif);font-weight:400;font-size:23px;color:var(--text);letter-spacing:-.003em
+  }
+  .headrow svg{color:var(--primary);flex:none}
+
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:20px 22px;box-shadow:0 2px 8px rgba(0,0,0,.04)
+  }
+
+  /* ── 结论条 ── */
+  .verdict{
+    background:var(--primary-soft);border:1px solid rgba(47,111,94,.18);
+    border-radius:16px;padding:18px 22px;display:flex;gap:14px;align-items:flex-start
+  }
+  .verdict svg{color:var(--primary);flex:none;margin-top:2px}
+  .verdict p{font-size:15px;color:var(--text)}
+  .verdict b{font-weight:600}
+
+  /* ── 指标条 ── */
+  .figures{
+    display:grid;grid-template-columns:repeat(12,1fr);gap:14px;margin-top:20px
+  }
+  .fig{
+    grid-column:span 3;background:var(--card);border:1px solid var(--line);
+    border-radius:14px;padding:16px 18px
+  }
+  .fig .n{
+    font-family:var(--mono);font-size:26px;font-weight:500;color:var(--text);
+    line-height:1.15;letter-spacing:-.02em
+  }
+  .fig .n small{font-size:14px;color:var(--muted);font-weight:400;margin-left:2px}
+  .fig .l{font-size:13px;color:var(--muted);margin-top:6px}
+  .fig.hot .n{color:var(--warn)}
+
+  /* ── 流程 ── */
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+  .node{
+    flex:1 1 0;min-width:150px;background:var(--card);border:1px solid var(--line);
+    border-radius:14px;padding:14px 16px;position:relative
+  }
+  .node .tag{
+    font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--primary);
+    text-transform:uppercase;margin-bottom:6px
+  }
+  .node .t{font-size:14px;color:var(--text);font-weight:600;line-height:1.45}
+  .node .d{font-size:13px;color:var(--muted);margin-top:5px;line-height:1.5}
+  .arrow{flex:0 0 30px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+  .node.branch{border-color:rgba(201,123,63,.35);background:var(--warn-soft)}
+  .node.branch .tag{color:var(--warn)}
+
+  /* ── bench ── */
+  .bench{display:grid;grid-template-columns:190px 1fr 116px;gap:14px;align-items:center;padding:9px 0}
+  .bench-label{font-size:14px;color:var(--text)}
+  .bench-track{height:18px;background:var(--line-soft);border-radius:6px;overflow:hidden}
+  .bench-fill{height:100%;background:var(--primary);border-radius:6px}
+  .bench-fill.old{background:var(--bad);opacity:.55}
+  .bench-fill.new{background:var(--primary)}
+  .bench-val{font-family:var(--mono);font-size:14px;text-align:right;color:var(--text);white-space:nowrap}
+  .bench-val small{color:var(--muted);font-size:12px}
+
+  /* ── 表 ── */
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{
+    text-align:left;font-weight:600;color:var(--muted);font-size:12.5px;
+    letter-spacing:.03em;padding:0 10px 9px;border-bottom:1px solid var(--line)
+  }
+  td{padding:11px 10px;border-bottom:1px solid var(--line-soft);vertical-align:top;color:var(--body)}
+  tr:last-child td{border-bottom:none}
+  td b{color:var(--text);font-weight:600}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--line-soft);padding:1px 5px;border-radius:4px;color:var(--text)}
+  .pill{
+    display:inline-block;font-size:11.5px;font-family:var(--mono);padding:2px 8px;border-radius:20px;
+    border:1px solid transparent;white-space:nowrap
+  }
+  .pill.fix{background:var(--primary-soft);color:var(--primary);border-color:rgba(47,111,94,.2)}
+  .pill.warn{background:var(--warn-soft);color:var(--warn);border-color:rgba(201,123,63,.22)}
+  .pill.bad{background:var(--bad-soft);color:var(--bad);border-color:rgba(176,99,103,.22)}
+
+  /* ── 静默失败 ── */
+  .fails{display:grid;gap:12px}
+  .fail{
+    display:grid;grid-template-columns:34px 1fr;gap:14px;align-items:start;
+    background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 18px
+  }
+  .fail .num{
+    font-family:var(--mono);font-size:13px;color:var(--warn);background:var(--warn-soft);
+    border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center
+  }
+  .fail h4{font-size:14.5px;color:var(--text);font-weight:600;margin-bottom:4px}
+  .fail p{font-size:13.5px;color:var(--muted)}
+  .fail p em{color:var(--warn);font-style:normal}
+
+  /* ── 规则表 ── */
+  .rules{display:grid;gap:0}
+  .rule{
+    display:grid;grid-template-columns:180px 1fr;gap:18px;padding:13px 0;
+    border-bottom:1px solid var(--line-soft);align-items:baseline
+  }
+  .rule:last-child{border-bottom:none}
+  .rule .c{font-size:14px;color:var(--text);font-weight:600}
+  .rule .c span{display:block;font-family:var(--mono);font-size:11.5px;color:var(--muted);font-weight:400;margin-top:3px}
+  .rule .v{font-size:14px;color:var(--body)}
+
+  /* ── KV ── */
+  .kv{display:grid;grid-template-columns:132px 1fr;row-gap:9px;column-gap:16px;margin:0}
+  .kv dt{color:var(--muted);font-size:13.5px;padding-bottom:7px;border-bottom:1px dashed var(--line)}
+  .kv dd{margin:0;color:var(--text);font-size:14px;padding-bottom:7px;border-bottom:1px dashed var(--line);font-family:var(--mono);font-size:13px}
+  .kv dd.txt{font-family:var(--sans);font-size:14px}
+
+  /* ── 待办 ── */
+  .todo{display:grid;gap:11px}
+  .t-item{
+    display:grid;grid-template-columns:22px 1fr;gap:12px;align-items:start;
+    font-size:14px;padding-bottom:11px;border-bottom:1px solid var(--line-soft)
+  }
+  .t-item:last-child{border-bottom:none;padding-bottom:0}
+  .t-item svg{color:var(--primary);margin-top:2px}
+  .t-item .who{
+    font-family:var(--mono);font-size:11px;letter-spacing:.06em;padding:1px 7px;border-radius:20px;
+    background:var(--line-soft);color:var(--muted);margin-left:8px;white-space:nowrap
+  }
+  .t-item b{color:var(--text);font-weight:600}
+
+  footer{
+    margin-top:60px;padding-top:22px;border-top:1px solid var(--line);
+    font-size:13px;color:var(--muted);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap
+  }
+  footer code{background:none;padding:0;color:var(--muted)}
+
+  @media (max-width:768px){
+    .wrap{padding:0 18px 64px}
+    header{padding:36px 0 4px}
+    h1{font-size:27px}
+    .fig{grid-column:span 6}
+    .bench{grid-template-columns:120px 1fr 76px;gap:10px}
+    .rule{grid-template-columns:1fr;gap:5px}
+    .kv{grid-template-columns:1fr;row-gap:2px}
+    .kv dt{border-bottom:none;padding-bottom:0}
+    .kv dd{border-bottom:1px dashed var(--line)}
+    .arrow{display:none}
+    .node{width:100%;flex:1 1 100%}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="kicker">库存域 · 口径统一</div>
+    <h1>滞销判据换血成「距上次进货天数」<br>落地后挖出的 5 个真问题与 1 处口径打架</h1>
+    <p class="lede">
+      业务定义落地为一条可执行的链路：<b>库存数量增加（进货）就清零计时，销售不重置</b>；
+      天数累加到档位门槛就用折扣库调整最低售价。门槛与折扣率<b>一个数字未动</b>。
+      本轮把这条链路从落盘层一直打通到商品定价与滞销清单，并发现原口径里
+      <b>「重度积压」把 613 个早已卖空的老品算成了压资金</b>。
+    </p>
+  </header>
+
+  <section style="margin-top:34px">
+    <div class="verdict">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      <p>
+        结论：<b>口径改造已落地、已实测、零回归</b>。
+        滞销清单与业务概览现在对同一批货给出同一个答案 —— 496 个重度积压 SKU，两处完全一致。
+        落地过程中修掉的 5 个真问题里有 3 个会直接产出错数（而不是报错）。
+      </p>
+    </div>
+
+    <div class="figures">
+      <div class="fig">
+        <div class="n">507</div>
+        <div class="l">滞销清单 SKU 数（在库 11,259 件）</div>
+      </div>
+      <div class="fig">
+        <div class="n">496<small> / 1109</small></div>
+        <div class="l">重度积压 SKU：修正后 / 修正前</div>
+      </div>
+      <div class="fig">
+        <div class="n">¥230,027</div>
+        <div class="l">在库总货值（档位分组合计一致）</div>
+      </div>
+      <div class="fig hot">
+        <div class="n">5</div>
+        <div class="l">落地时挖出并修掉的真问题</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+      <h2>判据主线：一条链路，四个环节</h2>
+    </div>
+    <div class="flow">
+      <div class="node">
+        <div class="tag">闸 1 · 妙手侧</div>
+        <div class="t">「更新时间」维度 + 区间</div>
+        <div class="d">只决定这次导出哪些行</div>
+      </div>
+      <div class="arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></div>
+      <div class="node">
+        <div class="tag">闸 2 · 我方侧</div>
+        <div class="t">库存总量增加？</div>
+        <div class="d">只有进货才推进计时基准</div>
+      </div>
+      <div class="arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></div>
+      <div class="node">
+        <div class="tag">计时</div>
+        <div class="t">距上次进货天数</div>
+        <div class="d">进货清零，销售不重置</div>
+      </div>
+      <div class="arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></div>
+      <div class="node branch">
+        <div class="tag">选档</div>
+        <div class="t">命中档位表门槛</div>
+        <div class="d">0 / 60 / 90 / 120 天 → 折扣率</div>
+      </div>
+    </div>
+    <p style="font-size:13.5px;color:var(--muted);margin-top:14px;max-width:70ch">
+      为什么不信妙手的时间戳：实测两批快照 1109 个共同 SKU×仓 —— 妙手「创建时间」是
+      <b>首次铺货时间</b>，补货不会重置它（1109/1109 行不变）；「更新时间」<b>每次写入都变</b>，连销售都会变
+      （0/1109 行相同），还会被一次 bulk UPDATE 把 535 行（43.7%）批量戳成同一时刻。
+      两者都不能当计时器 → 必须自己维护 <code>stock_added_at</code>。
+    </p>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="8" width="3" height="9" rx="1"/><rect x="14" y="5" width="3" height="12" rx="1"/></svg>
+      <h2>口径打架：积压统计把卖空的老品算成了压资金</h2>
+    </div>
+    <div class="card">
+      <p style="font-size:14px;margin-bottom:16px">
+        业务概览说「重度积压 1,109 个 SKU」，SKU 滞销清单说「≥180 天只有 496 个」。
+        差出来的 <b>613 个是早已卖空的老品</b> —— 它们没有任何资金占用，却占着「重度积压」的名额。
+      </p>
+      <div class="bench">
+        <span class="bench-label">重度积压 SKU（修正前）</span>
+        <div class="bench-track"><div class="bench-fill old" style="width:100%"></div></div>
+        <span class="bench-val">1,109</span>
+      </div>
+      <div class="bench">
+        <span class="bench-label">重度积压 SKU（修正后）</span>
+        <div class="bench-track"><div class="bench-fill new" style="width:44.7%"></div></div>
+        <span class="bench-val">496 <small>−55%</small></span>
+      </div>
+      <div class="bench">
+        <span class="bench-label">中度积压 SKU（90–180 天）</span>
+        <div class="bench-track"><div class="bench-fill new" style="width:0.36%"></div></div>
+        <span class="bench-val">4</span>
+      </div>
+      <div class="bench">
+        <span class="bench-label">积压基表：行数</span>
+        <div class="bench-track"><div class="bench-fill new" style="width:41.5%"></div></div>
+        <span class="bench-val">1,230 → 510</span>
+      </div>
+      <p style="font-size:13.5px;color:var(--muted);margin-top:14px;max-width:74ch">
+        改法收口在唯一源头 <code>mart.inventory_backlog_base</code>：积压只认
+        <b>还有库存</b> 且久未补货的货。三个下游视图全部继承，一次对齐。
+        货值几乎不受影响（零库存行残留货值合计 ¥495），<b>被打乱的是 SKU 数</b> —— 也就是运营做决策时看的那个数。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>
+      <h2>落地时挖出的 5 个真问题</h2>
+    </div>
+    <div class="card" style="padding:6px 22px 12px">
+      <table>
+        <thead>
+          <tr><th style="width:38%">现象</th><th style="width:34%">根因</th><th>处理</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>滞销视图的「只算有库存的仓」过滤没写</b><br><span style="color:var(--muted);font-size:13px">注释写了，SQL 没做</span></td>
+            <td>视图的 <code>state</code> CTE 与商品中心取数口径不一致</td>
+            <td>补上过滤，与商品中心<b>逐字对齐</b>；实测 507 共同 SKU、<b>0 个天数不一致</b></td>
+          </tr>
+          <tr>
+            <td><b>DOS 参考列永远是 null</b><br><span style="color:var(--muted);font-size:13px">前端一直显示「-」</span></td>
+            <td>service 读 <code>checklist_dos_sales90</code>，视图列名其实是 <code>checklist_sales_90d</code></td>
+            <td>改走唯一实现 <code>compute_dos</code>；500 行里 <b>366 行算得出</b></td>
+          </tr>
+          <tr>
+            <td><b>/api/inventory-overview/summary 直接 500</b></td>
+            <td>汇总视图重写时删掉了 risk 派生列，服务还在读</td>
+            <td>视图补三个<b>去重 SKU 数</b>（卡片写「SKU 数」就不能给行数），schema / 服务 / 前端同步</td>
+          </tr>
+          <tr>
+            <td><b>端点 sort_by 白名单与 service 不一致</b><br><span style="color:var(--muted);font-size:13px">旧值会 422 / 500</span></td>
+            <td>路由只改了参数名，忘了改 <code>Literal</code></td>
+            <td>白名单改为 <code>days_since_restock</code> / <code>inventory_value</code> / <code>current_qty</code>，补 422 用例</td>
+          </tr>
+          <tr>
+            <td><b>定价查询残留旧键名</b><br><span style="color:var(--muted);font-size:13px">直接 KeyError</span></td>
+            <td>档位列名迁移时漏了一处生产代码</td>
+            <td>改为 <code>min_restock_days</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:13.5px;color:var(--muted);margin-top:12px;max-width:74ch">
+      前 3 个不会报错，只会安静地给错数 —— 这类问题在报表上表现为「数字看着合理」，最难被发现。
+    </p>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+      <h2>B1：妙手的三处静默失败</h2>
+    </div>
+    <div class="fails">
+      <div class="fail">
+        <div class="num">1</div>
+        <div>
+          <h4>维度没切（默认是「创建时间」）</h4>
+          <p>同一区间，按更新时间 <em>147 个 SKU</em>，按创建时间只有 <em>3 个</em>。页面照常显示，不报错。</p>
+        </div>
+      </div>
+      <div class="fail">
+        <div class="num">2</div>
+        <div>
+          <h4>「确定」没点（区间填了没提交）</h4>
+          <p>筛选器仍是旧值，导出范围完全不对。而且「确定」<em>清空</em> 两个按钮长得几乎一样 ——
+            必须用完整 class 区分，只匹配 <code>is-plain</code> 会误点「清空」。</p>
+        </div>
+      </div>
+      <div class="fail">
+        <div class="num">3</div>
+        <div>
+          <h4>搜索没刷新</h4>
+          <p>拿到的还是上一次的结果。页面上不报错，只是什么都没变。</p>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <p style="font-size:14px;margin-bottom:12px">
+        处理方式：每一步都必须交出<b>可断言的落地证据</b>，拿不到就当失败 ——
+        <b>宁可失败，也不能拿错数据还显示成功</b>。
+      </p>
+      <div class="rules">
+        <div class="rule">
+          <div class="c">维度证据<span>modelvaluegroup</span></div>
+          <div class="v">以 <code>gmtModified</code> 开头 → 挡住「维度没切」</div>
+        </div>
+        <div class="rule">
+          <div class="c">区间证据<span>modelvaluegroup</span></div>
+          <div class="v">含目标起止时间 → 挡住「确定没点」</div>
+        </div>
+        <div class="rule">
+          <div class="c">结果证据<span>SKU总数</span></div>
+          <div class="v">大于 0 且不超过筛选前 → 挡住「搜索没刷新」</div>
+        </div>
+      </div>
+      <p style="font-size:13.5px;color:var(--muted);margin-top:14px">
+        没配置增量区间时<b>整段跳过</b> → 全量采集的行为一个字没变。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <h2>B3：水位线与断档补采的规则</h2>
+    </div>
+    <div class="card">
+      <p style="font-size:14px;margin-bottom:14px">
+        <b>水位线不另建表</b> = 该平台状态层的 <code>MAX(row_seen_at)</code>。用我方采集时钟而不是妙手时间戳 ——
+        妙手时间戳会被 bulk UPDATE 戳穿，拿它当水位线会跳过整段真实变更。
+        额外好处：水位线随状态层 upsert <b>天然推进</b>，不需要额外写路径。
+      </p>
+      <div class="rules">
+        <div class="rule">
+          <div class="c">custom 区间<span>用户显式指定</span></div>
+          <div class="v">原样使用，不裁剪、不回填 —— custom 是<b>一次性补数</b>，不是常态增量</div>
+        </div>
+        <div class="rule">
+          <div class="c">自动推进<span>未配置</span></div>
+          <div class="v">从水位线接着采，往前留 1 天重叠余量吸收两侧时钟偏差</div>
+        </div>
+        <div class="rule">
+          <div class="c">断档补采<span>距上次 &gt; 阈值</span></div>
+          <div class="v">起点向前拉到长窗口天数；水位线比长窗口更久时<b>以水位线为准</b>（收窄 = 静默漏采）</div>
+        </div>
+        <div class="rule">
+          <div class="c">失败期覆盖<span>上一批失败</span></div>
+          <div class="v">起点向前拉到失败批次起点，复用既有运行记录表，不新建水位线表</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      <h2>实测与验收</h2>
+    </div>
+    <div class="card">
+      <dl class="kv">
+        <dt>滞销清单</dt><dd>507 SKU · 在库 11,259 件 · 货值 ¥230,027.57</dd>
+        <dt>档位分组</dt><dd>≥60 天 7 个 ¥2,501.00 · ≥120 天 500 个 ¥227,526.57</dd>
+        <dt>库存概览</dt><dd>重度 496 SKU · 中度 4 SKU · 活跃 1 SKU</dd>
+        <dt>档位表</dt><dd class="txt">0/60/90/120 天 · 折扣率 0.10/0.15/0.20/0.30 · 目标毛利 0.25/0.22/0.18/0.10（一个数字未动）</dd>
+        <dt>回归</dt><dd class="txt">data_pipeline 25 failed / 457 passed —— 失败集与 HEAD 基线<b style="font-family:var(--sans)">逐条一致，零回归</b></dd>
+        <dt>新增测试</dt><dd class="txt">滞销清单 20 · 采集窗口 15 · 增量筛选 11 · 相关合计 182 全绿</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+      <h2>还需要你定 / 你来跑</h2>
+    </div>
+    <div class="todo">
+      <div class="t-item">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg>
+        <div><b>采集链接入方式</b>：窗口计算已就绪，但「运营怎么表达这次要用水位线窗口」是产品决策。
+          设计稿 §8.11.4 列了三个方案（配置开关 / 日期类型 / 每次都算），<span class="who">待拍板</span></div>
+      </div>
+      <div class="t-item">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg>
+        <div><b>B1 真实页面复验</b>：断言逻辑有单测守住，但选择器与维度下拉的交互必须在真实妙手页面上验一次。
+          复验通过前增量模式<span class="who">不要上线</span><span class="who">你来跑</span></div>
+      </div>
+      <div class="t-item">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg>
+        <div><b>B5 下架探测（零库存宽限期）</b>：你的需求描述里没有下架检测，属「商品中心自动化待拍板」那批。<span class="who">可砍</span></div>
+      </div>
+      <div class="t-item">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg>
+        <div><b>存量数据的用法</b>：现有状态层是首次观测补灌的（锚点 = 首次铺货时间），
+          只能验证机制，<b>不能用来论证商业影响</b>。</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>设计稿：<code>docs/superpowers/specs/2026-10-24-inventory-domain-rollout-worklist.md</code>（§8.10 / §8.11）</span>
+    <span>提交 <code>4f215f8a</code> · origin/main = cnb/main</span>
+  </footer>
+
+</div>
+</body>
+</html>
