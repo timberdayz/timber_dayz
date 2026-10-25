@@ -578,8 +578,25 @@ DOS 只作参考；库龄保留为生命周期视角。
 
 | 项 | 为什么没做 |
 |---|---|
-| 把窗口计算接进采集执行链 | 采集链已有 `date_range_type` 的 `dynamic:` 策略体系（`backend/services/collection_contracts.py`），接进去要先定「auto」策略怎么表达 —— **不能另起一套并行机制**（PRE_LAUNCH_RULES：禁止新增重复实现） |
+| 把窗口计算接进采集执行链 | 见 §8.11.4：需要先定「运营怎么表达『这次要用水位线窗口』」——这是**运营可见的产品决策**，不擅自改 |
 | B1 真实页面复验 | 需要真实妙手环境（Walter 自己跑） |
 | B5 零库存宽限期（下架探测） | Walter 的需求描述里没有下架检测；属「商品中心自动化待拍板」那批 |
 
+#### 8.11.4 接进采集执行链：三个方案（**待 Walter 拍板**）
 
+现状：`MiaoshouInventoryExport` 从 `ctx.config["inventory_incremental_range"]` 读增量区间，
+**没配就整段跳过**（全量采集行为不变）。所以只差「谁把这个键算出来放进任务参数」。
+
+算窗口需要 DB（读状态层水位线），而采集链的 `normalize_time_selection` /
+`build_date_range_from_time_selection` 都是**纯函数**（`backend/services/collection_time_window.py`），
+策略注册表 `DYNAMIC_STRATEGY_TO_GRANULARITY` 是**封闭集合**、且策略语义与平台无关
+（orders / products / inventory 共用）。把「库存水位线」塞进那个注册表会污染所有数据域 → 不做。
+
+| 方案 | 做法 | 代价 | 需要动的地方 |
+|---|---|---|---|
+| **A（建议）** | `core.collection_configs` 加一个**开关字段**（如 `incremental_enabled`），只对 `platform=miaoshou` + `data_domains 含 inventory` 生效 | 一次迁移 + 模型/API/前端多一个开关 | 新迁移 + `schema_parts/collection.py` + 配置 API/前端 + 执行器在建任务时算窗口 |
+| B | `date_range_type` 加一个新值（如 `auto_inventory`） | 要把新值塞进 `TIME_PRESET_TO_GRANULARITY` 等封闭映射里，且与「粒度」语义混在一起 | `collection_time_window.py` 的映射表 + 配置页下拉 + 执行器 |
+| C | 不做开关：**每次都算窗口**，配置里的日期区间只在「运营显式指定 custom」时优先 | 零配置成本，但运营失去「这次要采全量」的控制权 | 只改执行器 |
+
+> 三个方案都**只改库存域**：其它数据域的采集行为一律不变。
+> 不管选哪个，都**不能**把水位线策略塞进通用策略注册表（PRE_LAUNCH_RULES：禁止新增重复实现）。
