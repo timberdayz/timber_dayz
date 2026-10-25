@@ -19,7 +19,7 @@ from modules.platforms.miaoshou.components.inventory_date_filter import (
 )
 
 # 步骤日志用的定位信号名
-SIGNAL_DATE_FILTER = "date_filter:modelvaluegroup"
+SIGNAL_DATE_FILTER = "date_filter:dimension_text"
 SIGNAL_SEARCH_BUTTON = "role:button:搜索"
 
 
@@ -27,12 +27,36 @@ class MiaoshouInventoryIncrementalMixin:
     """增量采集编排：搜索前设好筛选器，搜索后断言结果集确实刷新了。
 
     没配置增量区间 → 整段流程跳过（**全量采集场景行为不变**）。
+
+    顺序（增量模式）
+    ----------------
+    1. 全选仓库
+    2. **搜索 #1** → 读到「SKU总数」当**基线**（筛选前的全量口径）
+    3. 设「更新时间维度 + 目标区间」
+    4. **搜索 #2** → 让筛选生效，再读一次「SKU总数」
+    5. 断言：筛选后总数不得超过基线
+
+    为什么必须多搜索一次
+    --------------------
+    仓库范围和日期区间是**两套独立筛选条件**：仓库选完不点搜索，页面上显示的
+    还是上一次的搜索结果。基线必须是「仓库已全选、时间未筛选」这个真实口径，
+    否则拿到的基线不准，筛选是否生效的断言就是假的。
     """
 
     STAGE_DATE_FILTER_READY = "date_filter_ready"
 
-    # 筛选**之前**的「SKU总数」：搜索后拿它断言结果集确实刷新了
+    # 筛选**之前**的「SKU总数」基线：搜索 #1 之后读，用来断言筛选是否生效
     _sku_total_before: int | None = None
+
+    def _incremental_enabled(self) -> bool:
+        """这次采集是不是增量模式（执行配置里带了增量区间）。"""
+        return read_incremental_range(self.ctx.config) is not None
+
+    async def _capture_baseline_total(self, page: Any) -> None:
+        """搜索 #1 之后读「SKU总数」当基线。"""
+        if not self._incremental_enabled():
+            return
+        self._sku_total_before = await self.date_filter_component.read_sku_total(page)
 
     async def _apply_incremental_date_filter(self, page: Any) -> None:
         """把筛选器设成「更新时间维度 + 目标区间」，并交出可断言的落地证据。"""
@@ -49,9 +73,6 @@ class MiaoshouInventoryIncrementalMixin:
         try:
             evidence = await self.date_filter_component.apply_incremental_range(
                 page, start=window[0], end=window[1]
-            )
-            self._sku_total_before = await self.date_filter_component.read_sku_total(
-                page
             )
         except Exception as e:
             error = await self._stage_error(
@@ -70,7 +91,7 @@ class MiaoshouInventoryIncrementalMixin:
         )
 
     async def _assert_search_refreshed(self, page: Any) -> None:
-        """搜索后断言结果集刷新了（只在增量模式下断言）。"""
+        """搜索 #2 之后断言结果集确实按筛选收窄了（只在增量模式断言）。"""
         if self._sku_total_before is None:
             return
         try:

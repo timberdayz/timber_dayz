@@ -510,8 +510,16 @@ class MiaoshouInventoryExport(MiaoshouInventoryIncrementalMixin, ExportComponent
         try:
             await self._navigate_to_warehouse_checklist(page)
             await self._select_warehouse_scope(page)
-            await self._apply_incremental_date_filter(page)
-            await self._search_and_wait(page)
+            if self._incremental_enabled():
+                # 增量模式：先搜索一次拿「筛选前」基线，再设筛选，再搜索一次让筛选生效。
+                # 仓库范围与日期区间是两套独立筛选条件 —— 仓库选完不搜索，
+                # 页面上还是上一次的搜索结果，基线必须重新搜出来才准。
+                await self._search_and_wait(page, phase="baseline")
+                await self._capture_baseline_total(page)
+                await self._apply_incremental_date_filter(page)
+                await self._search_and_wait(page, phase="incremental")
+            else:
+                await self._search_and_wait(page)
             await self._open_export_dialog_and_select_all(page)
             target = await self._export_and_save(page)
             return ExportResult(
@@ -600,12 +608,17 @@ class MiaoshouInventoryExport(MiaoshouInventoryIncrementalMixin, ExportComponent
             action="仓库范围已全选",
         )
 
-    async def _search_and_wait(self, page: Any) -> None:
+    async def _search_and_wait(self, page: Any, phase: str = "") -> None:
         self._current_stage = self.STAGE_SEARCH_RESULTS_READY
+        action = "搜索并等待结果"
+        if phase == "baseline":
+            action = "搜索并读取筛选前基线"
+        elif phase == "incremental":
+            action = "搜索并让时间区间生效"
         await self.report_step(
             "step_start",
             step_id=self.STAGE_SEARCH_RESULTS_READY,
-            action="搜索并等待结果",
+            action=action,
         )
         try:
             await self._click_search(page)
@@ -623,7 +636,7 @@ class MiaoshouInventoryExport(MiaoshouInventoryIncrementalMixin, ExportComponent
         await self.report_step(
             "step_success",
             step_id=self.STAGE_SEARCH_RESULTS_READY,
-            action="搜索结果就绪",
+            action="搜索结果就绪" if not phase else f"搜索结果就绪（{phase}）",
         )
 
     async def _open_export_dialog_and_select_all(self, page: Any) -> None:

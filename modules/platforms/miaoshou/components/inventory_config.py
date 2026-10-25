@@ -206,6 +206,50 @@ INVENTORY_DATE_FILTER_ROOT_SELECTORS: Final[Tuple[str, ...]] = (
 # 结果计数文本（断言「搜索确实刷新了」）
 INVENTORY_DATE_FILTER_SKU_TOTAL_TEXT: Final[str] = "SKU总数"
 
+# ── 真实页面结构（2026-10-26 失败现场 + 页面截图取证）─────────────────
+#
+# ⚠️ 上一版把筛选器当成「picker 面板 + 维度 select + 确定/清空按钮」，
+#    真实页面**根本没有那个面板**：
+#    - 时间维度是筛选栏里的**内联下拉**，触发器直接显示「创建时间」/「更新时间」
+#    - 下拉浮层里就两项：「创建时间」「更新时间」
+#    - 日期区间是**内联的两个输入框**（占位文字「开始时间」「结束时间」）
+#    - 填完**直接点「搜索」**，页面没有「确定」「清空」按钮
+#    → 上一版的 `.jx-picker-panel` 系列选择器全部落空，
+#      实测报「仓库清单日期筛选面板打不开」，采集在设置筛选这步就断了。
+#
+# 新策略：**以「可见文案」和「placeholder」为锚**，不赌 class 名。
+# class 是 jx-ui 的实现细节、随版本变；「创建时间 / 更新时间 / 开始时间 / 结束时间」
+# 是业务语义，稳定。用文案定位还能顺带拿到**人能读的落地证据**。
+#
+# 浮层里定位维度选项的容器候选（限定在浮层内找，避免点到别处的同名文字）
+INVENTORY_DATE_FILTER_DROPDOWN_CONTAINER_SELECTORS: Final[Tuple[str, ...]] = (
+    ".jx-select-dropdown",
+    ".jx-dropdown-menu",
+    ".ant-select-dropdown",
+    "[role='listbox']",
+)
+# 日期区间输入框：按 placeholder 认
+INVENTORY_DATE_FILTER_RANGE_START_PLACEHOLDERS: Final[Tuple[str, ...]] = (
+    "开始时间",
+    "开始日期",
+    "开始",
+)
+INVENTORY_DATE_FILTER_RANGE_END_PLACEHOLDERS: Final[Tuple[str, ...]] = (
+    "结束时间",
+    "结束日期",
+    "结束",
+)
+# 区间输入框的 class 兜底（真实页面没有 picker-panel，这几个是历史候选）
+INVENTORY_DATE_FILTER_RANGE_INPUT_SELECTOR: Final[str] = (
+    "input.jx-range-input, input[placeholder*='开始'], input[placeholder*='结束']"
+)
+# 维度下拉触发器：找到「创建时间 / 更新时间」文字后，向上找可点击的祖先
+INVENTORY_DATE_FILTER_TRIGGER_ANCESTOR_XPATHS: Final[Tuple[str, ...]] = (
+    "xpath=ancestor::*[contains(@class,'select')][1]",
+    "xpath=ancestor::*[contains(@class,'picker')][1]",
+    "xpath=..",
+)
+
 
 @dataclass(frozen=True)
 class InventorySelectors:
@@ -267,3 +311,16 @@ class InventorySelectors:
         INVENTORY_DATE_FILTER_ROOT_SELECTORS
     )
     inventory_date_filter_sku_total_text: str = INVENTORY_DATE_FILTER_SKU_TOTAL_TEXT
+    # 真实页面结构（2026-10-26 失败现场取证）：文案/placeholder 驱动
+    inventory_date_filter_dropdown_container_selectors: Tuple[str, ...] = (
+        INVENTORY_DATE_FILTER_DROPDOWN_CONTAINER_SELECTORS
+    )
+    inventory_date_filter_range_start_placeholders: Tuple[str, ...] = (
+        INVENTORY_DATE_FILTER_RANGE_START_PLACEHOLDERS
+    )
+    inventory_date_filter_range_end_placeholders: Tuple[str, ...] = (
+        INVENTORY_DATE_FILTER_RANGE_END_PLACEHOLDERS
+    )
+    inventory_date_filter_trigger_ancestor_xpaths: Tuple[str, ...] = (
+        INVENTORY_DATE_FILTER_TRIGGER_ANCESTOR_XPATHS
+    )
