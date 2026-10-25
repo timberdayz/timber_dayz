@@ -338,12 +338,12 @@
     <el-drawer
       v-model="detailDrawerVisible"
       title="任务详情"
-      size="520px"
+      size="min(720px, 92vw)"
       direction="rtl"
     >
       <template v-if="detailTask">
         <div class="task-detail-meta">
-          <el-descriptions :column="1" border size="small">
+          <el-descriptions :column="1" border size="small" label-width="128px">
             <el-descriptions-item label="平台">
               <el-tag :type="getPlatformTagType(detailTask.platform)" size="small">{{ detailTask.platform }}</el-tag>
             </el-descriptions-item>
@@ -366,20 +366,20 @@
             <el-descriptions-item v-if="detailTask.session_source" label="会话来源">
               {{ getSessionSourceLabel(detailTask.session_source) }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="detailTask.session_quality_source" label="??????">
+            <el-descriptions-item v-if="detailTask.session_quality_source" label="质量来源">
               {{ getSessionQualitySourceLabel(detailTask.session_quality_source) }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="detailTask.session_quality_score !== null && detailTask.session_quality_score !== undefined" label="??????">
+            <el-descriptions-item v-if="detailTask.session_quality_score !== null && detailTask.session_quality_score !== undefined" label="质量评分">
               {{ detailTask.session_quality_score }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="detailTask.session_quality_gate_passed !== null && detailTask.session_quality_gate_passed !== undefined" label="??????">
-              {{ detailTask.session_quality_gate_passed ? '???' : '???' }}
+            <el-descriptions-item v-if="detailTask.session_quality_gate_passed !== null && detailTask.session_quality_gate_passed !== undefined" label="质量门槛">
+              {{ detailTask.session_quality_gate_passed ? '通过' : '未通过' }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="detailTask.session_manual_seeded !== null && detailTask.session_manual_seeded !== undefined" label="??????">
-              {{ detailTask.session_manual_seeded ? '?' : '?' }}
+            <el-descriptions-item v-if="detailTask.session_manual_seeded !== null && detailTask.session_manual_seeded !== undefined" label="人工播种">
+              {{ detailTask.session_manual_seeded ? '是' : '否' }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="detailTask.session_protected !== null && detailTask.session_protected !== undefined" label="??????">
-              {{ detailTask.session_protected ? '???' : '???' }}
+            <el-descriptions-item v-if="detailTask.session_protected !== null && detailTask.session_protected !== undefined" label="会话保护">
+              {{ detailTask.session_protected ? '是' : '否' }}
             </el-descriptions-item>
             <el-descriptions-item v-if="detailTask.runtime_strategy_reason" label="会话策略原因">
               {{ getRuntimeStrategyReasonLabel(detailTask.runtime_strategy_reason) }}
@@ -1449,6 +1449,19 @@ onUnmounted(() => {
 /* 任务详情抽屉 */
 .task-detail-meta {
   margin-bottom: 20px;
+}
+
+/* label 列固定宽度：中文标签逐字竖排是宽度被挤没了，不是内容太长 */
+.task-detail-meta :deep(.el-descriptions__label) {
+  width: 128px;
+  white-space: nowrap;
+  word-break: keep-all;
+}
+
+/* 值列：URL / 错误串这类长内容要能断行，不能把表格撑破 */
+.task-detail-meta :deep(.el-descriptions__content) {
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .task-detail-timeline h4 {
