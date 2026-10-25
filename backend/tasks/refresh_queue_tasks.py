@@ -93,6 +93,12 @@ async def _invalidate_refresh_target_caches(targets: list[str]) -> None:
             await cache_service.invalidate_dashboard_business_overview()
         if "clearance_ranking" in modules:
             await cache_service.invalidate("dashboard_clearance_ranking")
+            # 业务概览的「库存积压」四张卡读的是 api.business_overview_inventory_backlog_module，
+            # 它的缓存键是 dashboard_inventory_backlog（TTL 300s）。
+            # 积压资产组归到 clearance_ranking 模块后，inventory 域刷新不再命中
+            # business_overview → invalidate_dashboard_business_overview() 不会被调用 →
+            # 这张卡会吃到上一轮采集的旧数据。显式补一次失效。
+            await cache_service.invalidate("dashboard_inventory_backlog")
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "[RefreshQueue] cache invalidation failed after refresh: %s",

@@ -703,3 +703,37 @@ async def test_process_refresh_queue_task_syncs_inventory_skus_before_age_refres
     assert calls.index(("sync_skus", 2764)) < calls.index("state_refresh")
     assert calls.index("state_refresh") < calls.index("age_refresh")
 
+
+def test_inventory_refresh_invalidates_inventory_backlog_cache(monkeypatch):
+    """积压资产组归到 clearance_ranking 模块后，业务概览的库存积压卡缓存也必须失效。
+
+    业务概览那四张卡读的是 api.business_overview_inventory_backlog_module，
+    缓存键是 dashboard_inventory_backlog（TTL 300s）。
+    积压视图不再属于 business_overview 模块 → invalidate_dashboard_business_overview()
+    不会被调用 → 这张卡会吃到上一轮采集的旧数据。
+    """
+    from backend.tasks import refresh_queue_tasks as task_module
+
+    invalidated = []
+
+    class _FakeCacheService:
+        async def invalidate_dashboard_business_overview(self):
+            invalidated.append("dashboard_business_overview")
+            return 0
+
+        async def invalidate(self, cache_type):
+            invalidated.append(cache_type)
+            return 0
+
+    monkeypatch.setattr(
+        task_module, "get_cache_service", lambda: _FakeCacheService(), raising=False
+    )
+
+    asyncio.run(
+        task_module._invalidate_refresh_target_caches(
+            ["api.business_overview_inventory_backlog_module"]
+        )
+    )
+
+    assert "dashboard_inventory_backlog" in invalidated
+    assert "dashboard_clearance_ranking" in invalidated
