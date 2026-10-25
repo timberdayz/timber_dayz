@@ -71,7 +71,9 @@ def test_expand_downstream_targets_includes_all_order_dashboard_dependents():
         "api.business_overview_comparison_platform_module",
         "api.business_overview_shop_racing_module",
         "api.business_overview_shop_racing_monthly_module",
-        "api.business_overview_inventory_backlog_module",
+        # 2026-10-24：滞销判据换成「库存停滞时长」→ 滞销模块不再依赖订单域，
+        # 但月度店铺排名仍然要订单数据，所以它仍在下游集合里。
+        "api.clearance_ranking_module",
     }
 
     assert expected_targets.issubset(set(targets))
@@ -79,6 +81,7 @@ def test_expand_downstream_targets_includes_all_order_dashboard_dependents():
     assert targets.index("mart.platform_day_kpi") < targets.index(
         "api.business_overview_comparison_platform_module"
     )
+    assert "api.business_overview_inventory_backlog_module" not in set(targets)
 
 
 def test_resolve_refresh_targets_for_shopee_orders_monthly_expands_cascade_dependents():

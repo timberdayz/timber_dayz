@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DOS 口径命名决策 · 西虹 ERP</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f7f5f0;--card:#fff;--line:#e9e3d6;--line-soft:#f0ebe0;
+ --ink:#14171e;--ink2:#3a4256;--muted:#7c7a72;
+ --primary:#2f6f5e;--p-soft:rgba(47,111,94,.08);
+ --warn:#c97b3f;--w-soft:rgba(201,123,63,.09);
+ --danger:#b06367;--d-soft:rgba(176,99,103,.09);--mono:'JetBrains Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+ font-size:14.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+ background:radial-gradient(760px 380px at 88% -8%,rgba(47,111,94,.055),transparent 62%),
+            radial-gradient(620px 320px at 4% 4%,rgba(201,123,63,.045),transparent 60%)}
+.wrap{position:relative;z-index:1;max-width:1120px;margin:0 auto;padding:64px 28px 96px}
+h1,h2{font-family:'DM Serif Display',Georgia,'Songti SC',serif;font-weight:400;letter-spacing:-.005em}
+h1{font-size:33px;line-height:1.25;margin-bottom:15px}
+h2{font-size:24px;margin-bottom:8px}
+h3{font-size:15.5px;font-weight:600}
+.lede{font-size:16.5px;color:var(--ink2);max-width:76ch}
+.kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;
+ letter-spacing:.13em;text-transform:uppercase;color:var(--primary);margin-bottom:12px}
+.kicker::before{content:"";width:18px;height:2px;background:var(--primary);border-radius:2px}
+.sec{margin-top:54px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px}
+.card+.card{margin-top:14px}
+code{font-family:var(--mono);font-size:12.5px;background:var(--p-soft);color:var(--primary);padding:1px 6px;border-radius:5px}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.t-ok{background:var(--p-soft);color:var(--primary)}
+.t-w{background:var(--w-soft);color:var(--warn)}
+.t-b{background:var(--d-soft);color:var(--danger)}
+.t-n{background:#f0ede6;color:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+ border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:26px}
+.stat{background:var(--card);padding:16px 18px}
+.stat .n{font-family:'DM Serif Display',serif;font-size:23px;line-height:1.2}
+.stat .n small{font-size:14px;color:var(--muted);margin-left:3px}
+.stat .l{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.45}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+ color:var(--muted);padding:0 12px 9px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink2);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td strong{color:var(--ink)}
+td.num,th.num{text-align:right;font-family:var(--mono);font-size:12.5px}
+.callout{border-radius:13px;padding:16px 18px;border:1px solid var(--line);background:var(--card)}
+.callout.w{background:var(--w-soft);border-color:rgba(201,123,63,.32)}
+.callout.o{background:var(--p-soft);border-color:rgba(47,111,94,.28)}
+.callout.b{background:var(--d-soft);border-color:rgba(176,99,103,.3)}
+.callout .ct{font-weight:600;font-size:14px;margin-bottom:5px;display:flex;align-items:center;gap:8px}
+.callout p{font-size:13.5px;color:var(--ink2)}
+.callout p+p{margin-top:8px}
+.matrix{display:grid;grid-template-columns:132px repeat(4,1fr);gap:8px;margin-top:6px}
+.mh{font-size:12px;color:var(--muted);display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.35;padding:4px}
+.mhl{font-size:12px;color:var(--muted);display:flex;align-items:center;justify-content:flex-end;text-align:right;
+ padding-right:8px;line-height:1.35}
+.mcell{border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:var(--card);min-height:96px}
+.mcell .mn{font-family:'DM Serif Display',serif;font-size:22px;line-height:1.1}
+.mcell .mn small{font-size:12px;color:var(--muted)}
+.mcell .ml{font-size:12.5px;font-weight:600;margin:4px 0 3px}
+.mcell .ma{font-size:11.5px;color:var(--muted);line-height:1.45}
+.mcell.g{background:rgba(47,111,94,.07);border-color:rgba(47,111,94,.28)}
+.mcell.y{background:rgba(201,123,63,.08);border-color:rgba(201,123,63,.3)}
+.mcell.r{background:rgba(176,99,103,.08);border-color:rgba(176,99,103,.3)}
+.mcell.b{background:rgba(107,125,140,.08);border-color:rgba(107,125,140,.28)}
+.mcell.z{background:#f4f2ec;border-style:dashed}
+ul.plain{list:none;padding:0;margin:6px 0 0}
+ul.plain li{padding:5px 0 5px 20px;position:relative;font-size:13.5px;color:var(--ink2)}
+ul.plain li::before{content:"";position:absolute;left:4px;top:13px;width:5px;height:5px;
+ border-radius:50%;background:var(--primary)}
+ul.plain li b{color:var(--ink)}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px}
+.panel{border:1px solid var(--line);border-radius:14px;padding:18px 20px;background:var(--card)}
+.panel.no{background:#fbf6f4;border-color:rgba(176,99,103,.3)}
+.panel.yes{background:#f4f9f6;border-color:rgba(47,111,94,.3)}
+.panel .ph{font-weight:600;font-size:14.5px;margin-bottom:4px;display:flex;align-items:center;gap:8px}
+.panel .ps{font-size:12.5px;color:var(--muted);margin-bottom:11px}
+footer{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);
+ font-size:12.5px;color:var(--muted);line-height:1.8}
+footer b{color:var(--ink2)}
+@media(max-width:900px){.stats{grid-template-columns:repeat(2,1fr)}.split{grid-template-columns:1fr}
+ .matrix{grid-template-columns:96px repeat(4,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="kicker">口径命名决策 · 2026-10-24</div>
+<h1>这个 DOS 不该叫「快捷 DOS」</h1>
+<p class="lede">
+系统里会有两种 DOS：一种用 ERP 订单数据算（正常 DOS），一种用妙手库存清单自带的销量列算（现在这个）。
+它们数值不同、依据不同，但名字都长得像「周转天数」。这次要把两个口径的命名一次定死，
+让后续任何 agent 看到字段名就知道它算的是什么、依据什么、能不能进结论。
+</p>
+
+<div class="stats">
+  <div class="stat"><div class="n">1113<small>/1113</small></div><div class="l">销量列全覆盖<br>可解析、整数、非负</div></div>
+  <div class="stat"><div class="n">0<small> 违例</small></div><div class="l">7≤30≤60≤90 严格单调<br>→ 是规范统计，不是估算</div></div>
+  <div class="stat"><div class="n">8<small>/37</small></div><div class="l">跨仓 SKU 各仓销量不同<br>→ 必须 SKU×仓 粒度</div></div>
+  <div class="stat"><div class="n">0<small> 行</small></div><div class="l">miaoshou 订单数据<br>订单口径 DOS 今天无原料</div></div>
+</div>
+
+<!-- ✅ 2026-10-24 晚间修正：DOS 定位 -->
+<section class="sec" style="margin-top:32px">
+<div class="callout w">
+  <div class="ct"><span class="tag t-w">DOS 定位 · 2026-10-24 晚间修正</span>DOS 降级为参考，不做全域使用</div>
+  <p>采集策略已定：<b>不再全量，只有配置采集 + 增量更新</b>。妙手「近 XX 天销量」是<b>行级存储快照</b>，只在那一行被写入时才刷新，增量批次实测只覆盖 <b>13.6%</b> 的 SKU（151 / 1113）→ <b>DOS 不作判定依据</b>。</p>
+  <p>→ 滞销判据改用<b>库存停滞时长</b>（今天 − 库存最后一次<b>真实变动</b>的时间，由落盘层行内容 diff 维护，不信妙手的时间戳）；DOS 保留在表里<b>作为参考值</b>，并明确标注「参考」。完整取证见 <code>output/dos-freshness-evidence.html</code>。</p>
+</div>
+</section>
+
+<section class="sec">
+<h2>为什么「快捷」是错的名字</h2>
+<p class="lede">「快捷」描述的是我们做这件事时省了多少事，不是一个指标是什么。三个具体后果。</p>
+
+<div class="card" style="margin-top:20px">
+<div class="callout b">
+  <div class="ct"><span class="tag t-b">误因</span>它暗示了一个错误的紧迫感</div>
+  <p>名字带「快捷 / 临时 / 近似」，后续 agent 会本能想「等订单口径修好就换成它」——于是两边各写一份口径。
+  而「唯一实现」纪律正是商品中心最低售价与滞销模块能对齐的前提，一旦分叉就会出现
+  「页面按日常档显示、通知却按滞销档发」这类自相矛盾。</p>
+</div>
+</div>
+
+<div class="card">
+<div class="callout w">
+  <div class="ct"><span class="tag t-w">误因</span>它其实冤枉了自己的数据</div>
+  <p>实测证明库存清单的销量列<strong>不是估算值</strong>：全量 1113 行 + 另一批次 1226 行，
+  <code>7 ≤ 30 ≤ 60 ≤ 90</code> 零违例，全整数、非负、跨批次自洽。
+  若是估算，长窗口出现回落是必然的。「近似」在事实层面就不成立。</p>
+</div>
+</div>
+
+<div class="card">
+<div class="callout b">
+  <div class="ct"><span class="tag t-b">误因</span>它把「口径差异」说成了「质量差异」</div>
+  <p>两个 DOS 的差别不在精度高低，而在<strong>依据的数据不同</strong>：平台侧统计的销量 vs ERP 重算的销量
+  （退款、取消、归属时间窗、时区都会造成差）。用「精确 vs 近似」描述，会让后续 agent 在做差异归因时找错方向。</p>
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>更要紧的是：这个方案其实是唯一能做仓库级 DOS 的方案</h2>
+<div class="card" style="margin-top:20px">
+<table>
+<thead><tr><th style="width:34%">事实</th><th>实测</th><th style="width:24%">后果</th></tr></thead>
+<tbody>
+<tr>
+  <td><strong>miaoshou 订单数据</strong><br><code>fact_miaoshou_orders_*</code></td>
+  <td>4 张表全部 <strong>0 行</strong></td>
+  <td><span class="tag t-b">订单口径无原料</span></td>
+</tr>
+<tr>
+  <td><strong>订单事实表没有仓库维度</strong><br><code>semantic.fact_orders_atomic</code></td>
+  <td>31012 行，仅 shopee / tiktok，<strong>无任何仓库列</strong></td>
+  <td><span class="tag t-b">订单口径只能到 SKU 级</span></td>
+</tr>
+<tr>
+  <td><strong>滞销决策需要仓库粒度</strong></td>
+  <td>37 个跨仓 SKU 中 <strong>8 个</strong>各仓销量不同<br><span class="mono" style="font-size:12px">HKR-GNH-Cream 菲律宾 s90=7 / 新加坡 s90=0</span></td>
+  <td><span class="tag t-ok">清单口径是唯一选择</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="callout o" style="margin-top:14px">
+  <div class="ct"><span class="tag t-ok">结论</span></div>
+  <p>仓库级 DOS 只能来自库存清单自带的销量列。订单口径 DOS 修好后能提供的是 SKU 级的<strong>交叉校验基准</strong>，
+  不是替代品。所以它不该被命名为「临时/快捷」，它是一个独立成立的口径。</p>
+</div>
+</section>
+
+<section class="sec">
+<h2>命名方案：沿用仓库已有的口径语言</h2>
+<p class="lede">
+仓库里已有 <code>docs/team-skills/sea-metrics-language/SKILL.md</code>，规定了三层口径
+（平台原生 / 系统统一 / 会议决策），并明确「不要把平台原生指标和系统统一指标混成一个结论」。
+这个决策直接沿用该词典词汇，不再另造「快捷」这类词。
+</p>
+
+<div class="card" style="margin-top:20px">
+<table>
+<thead><tr><th style="width:20%">口径</th><th style="width:32%">字段名</th><th style="width:26%">中文名</th><th>状态</th></tr></thead>
+<tbody>
+<tr>
+  <td><strong>清单口径</strong><br><span style="font-size:12px;color:var(--muted)">库存清单自带的销量列</span></td>
+  <td><code>checklist_dos_sales30</code></td>
+  <td>DOS-30（库存清单口径）</td>
+  <td><span class="tag t-w">observe</span><br><span style="font-size:12px;color:var(--muted)">可辅助讨论，不能单独支撑决策</span></td>
+</tr>
+<tr>
+  <td><strong>清单口径</strong></td>
+  <td><code>checklist_dos_sales90</code></td>
+  <td>DOS-90（库存清单口径）</td>
+  <td><span class="tag t-w">observe</span></td>
+</tr>
+<tr>
+  <td><strong>订单口径</strong><br><span style="font-size:12px;color:var(--muted)">ERP 订单事实表</span></td>
+  <td><code>order_dos_sales30</code></td>
+  <td>DOS-30（订单口径）</td>
+  <td><span class="tag t-b">blocked</span><br><span style="font-size:12px;color:var(--muted)">无 miaoshou 订单数据</span></td>
+</tr>
+<tr>
+  <td><strong>订单口径</strong></td>
+  <td><code>order_dos_sales90</code></td>
+  <td>DOS-90（订单口径）</td>
+  <td><span class="tag t-b">blocked</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="card">
+<h3 style="margin-bottom:10px">禁用名 —— 后续 agent 不得使用</h3>
+<table>
+<thead><tr><th style="width:36%">禁用</th><th>原因</th></tr></thead>
+<tbody>
+<tr><td><code>quick_dos</code> <code>fast_dos</code> <code>approx_dos</code></td><td>描述省事程度而非口径；暗示精度差（事实不成立）</td></tr>
+<tr><td><code>platform_dos_*</code></td><td><strong>与仓库既有 <code>platform_code</code> 语义冲突</strong>——本仓库 <code>platform_code</code> = shopee/tiktok/miaoshou（电商平台），用 <code>platform_</code> 会被读成「跨平台口径」</td></tr>
+<tr><td><code>dos_30d</code> <code>dos_90d</code> <code>dos_30</code></td><td><code>30d</code> 会被读成「DOS=30 天档」，实际含义是「用近 30 天销量窗口算」</td></tr>
+<tr><td>继续对外暴露 <code>estimated_turnover_days</code></td><td>该列今天装的是订单口径 DOS 且常年 9999 哨兵，名字完全不体现来源</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section class="sec">
+<h2>两个 DOS 的交叉：30 天窗口会误判</h2>
+<p class="lede">可用库存口径下 294 行两档都可算。<strong>1 行反直觉信号</strong>、<strong>零矛盾</strong>。</p>
+
+<div class="matrix" style="margin-top:22px">
+  <div></div>
+  <div class="mh">DOS-90 &lt;30</div>
+  <div class="mh">DOS-90 30–90</div>
+  <div class="mh">DOS-90 90–180</div>
+  <div class="mh">DOS-90 ≥180</div>
+
+  <div class="mhl">DOS-30 &lt;30</div>
+  <div class="mcell g"><div class="mn">24</div><div class="ml">两档都快断货</div><div class="ma">口径一致</div></div>
+  <div class="mcell y"><div class="mn">13</div><div class="ml">30 天说快断货</div><div class="ma">90 天说还能卖一阵</div></div>
+  <div class="mcell z"><div class="mn">0</div><div class="ml">—</div><div class="ma">不会出现</div></div>
+  <div class="mcell z"><div class="mn">0</div><div class="ml">—</div><div class="ma">不会出现</div></div>
+
+  <div class="mhl">DOS-30 30–90</div>
+  <div class="mcell y"><div class="mn">4</div><div class="ml">近期动销过</div><div class="ma">90 天平均摊薄了</div></div>
+  <div class="mcell g"><div class="mn">42</div><div class="ml">口径一致</div><div class="ma">正常积压</div></div>
+  <div class="mcell y"><div class="mn">24</div><div class="ml">口径接近</div><div class="ma">中度</div></div>
+  <div class="mcell y"><div class="mn">10</div><div class="ml">30 天说还能卖</div><div class="ma">90 天说重度积压</div></div>
+
+  <div class="mhl">DOS-30 ≥90</div>
+  <div class="mcell r"><div class="mn">1</div><div class="ml">近期有一波集中动销</div><div class="ma">30 天已回落，需单独标记</div></div>
+  <div class="mcell y"><div class="mn">25</div><div class="ml">口径接近</div><div class="ma">中度</div></div>
+  <div class="mcell y"><div class="mn">53</div><div class="ml">口径接近</div><div class="ma">中重度</div></div>
+  <div class="mcell r"><div class="mn">98</div><div class="ml">两档都重度积压</div><div class="ma">真正的滞销</div></div>
+</div>
+
+<div class="callout o" style="margin-top:18px">
+  <div class="ct"><span class="tag t-ok">可用结论</span></div>
+  <p><strong>不矛盾</strong>：DOS-30 判「&lt;30 天」的 37 行，在 DOS-90 口径下没有一行落到 ≥180 天，
+  30 天口径不会把快断货误判成重度积压。<br>
+  <strong>30 天会误判滞销</strong>：有 74 行近 90 天卖过但近 30 天没动，30 天窗口会直接判成滞销，90 天窗口能识别出来。
+  → <strong>滞销判定用 DOS-90，DOS-30 只作补货信号与辅助列。</strong></p>
+</div>
+</section>
+
+<section class="sec">
+<h2>分档阈值与货值</h2>
+<div class="card" style="margin-top:20px">
+<table>
+<thead><tr><th style="width:30%">DOS-90 档</th><th class="num" style="width:14%">行数</th><th class="num" style="width:20%">货值</th><th class="num" style="width:12%">占比</th><th>业务含义</th></tr></thead>
+<tbody>
+<tr><td><span class="tag t-w">A</span> &lt; 30 天</td><td class="num">30</td><td class="num">¥9,886.54</td><td class="num">4.4%</td><td>快断货 → <strong>补货信号</strong>，不是滞销</td></tr>
+<tr><td><span class="tag t-n">B</span> 30–90 天</td><td class="num">84</td><td class="num">¥48,504.97</td><td class="num">21.3%</td><td>正常周转偏慢</td></tr>
+<tr><td><span class="tag t-w">C</span> 90–180 天</td><td class="num">93</td><td class="num">¥36,779.27</td><td class="num">16.2%</td><td>中度滞销 → 进滞销榜</td></tr>
+<tr><td><span class="tag t-b">D</span> ≥ 180 天</td><td class="num">161</td><td class="num">¥95,123.31</td><td class="num">41.9%</td><td>重度积压 → 进滞销榜</td></tr>
+<tr><td><span class="tag t-n">—</span> 不可算</td><td class="num">745</td><td class="num">¥36,906.48</td><td class="num">16.2%</td><td>零销量 141 行有库存 / 无库存</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="split" style="margin-top:14px">
+<div class="panel">
+  <div class="ph">零销量必须独立标记</div>
+  <div class="ps">不能塞成 9999 哨兵</div>
+  <ul class="plain">
+    <li>近 90 天销量 = 0 共 <b>673 行</b>，其中有库存 <b>141 行</b></li>
+    <li>零销量积压货值 <b>¥36,477.36</b></li>
+    <li>仓库分布：新加坡 92 / 马来仓 31 / 菲律宾3店 10 / 菲律宾维修工具 5 / 菲律宾1店 3</li>
+    <li>状态标签：<code>zero_sales</code> / <code>no_stock</code> / <code>computable</code></li>
+  </ul>
+</div>
+<div class="panel">
+  <div class="ph">口径 ≠ 分档，页面上要分开</div>
+  <div class="ps">两个容易读错的地方</div>
+  <ul class="plain">
+    <li><b>口径（窗口）</b> DOS-30 / DOS-90 = 销量取多长的窗口 → 表格<b>列</b></li>
+    <li><b>分档（严重度）</b> &lt;30 / 30–90 / 90–180 / ≥180 → <b>状态标签 / 色阶</b></li>
+    <li>现有 <code>estimated_turnover_days ≥ 30/60/90</code> 是严重度分档，与 DOS-30 的「30」不是一回事</li>
+    <li>顶部三卡当前 30/60/90 三个数字完全相同（217787.41）——同一值切三刀且被 9999 污染 → 去掉「60天+」假卡</li>
+  </ul>
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>落地时必须一起做的几件事</h2>
+<div class="card" style="margin-top:20px">
+<ul class="plain">
+  <li><b>语义层需暴露销量列</b>：<code>semantic.fact_inventory_snapshot</code> 目前没有任何 sales 列，<code>mart</code> 层只有 <code>daily_avg_sales</code>（来自订单口径）→ 落地 DOS 必须先在语义层投影 4 个销量窗口</li>
+  <li><b>唯一实现</b>：DOS 计算收敛到一处（纯函数 + 唯一取数路径），滞销模块与商品中心最低售价都调它</li>
+  <li><b>禁止哨兵</b>：DOS 不可算时返回 NULL + 独立状态标签，不允许 9999</li>
+  <li><b>改名清单</b>：对外字段 <code>estimated_turnover_days</code> → <code>order_dos_sales30</code>；新增 <code>checklist_dos_sales30</code> / <code>checklist_dos_sales90</code></li>
+  <li><b>指标词典登记</b>：按 <code>sea-metrics-language</code> 强制流程登记进 <code>references/metrics-dictionary.md</code> 与 <code>references/metric-status.md</code>；该 skill 在仓库有<strong>两份完全相同</strong>的副本（<code>team-skills-bundle/</code> 与 <code>docs/team-skills/</code>），需同步</li>
+</ul>
+</div>
+
+<div class="card">
+<h3 style="margin-bottom:10px">SQL 取值备忘</h3>
+<table>
+<thead><tr><th style="width:26%">项</th><th>写法</th></tr></thead>
+<tbody>
+<tr><td>销量列<br><span style="font-size:12px;color:var(--muted)">无 <code>*</code> 前缀</span></td><td><code>COALESCE(NULLIF(raw_data-&gt;&gt;'近90天销量数据',''),'0')::numeric</code></td></tr>
+<tr><td>单价列<br><span style="font-size:12px;color:var(--muted)">键名含真换行</span></td><td><code>raw_data -&gt;&gt; ('*单价' || chr(10) || '（元）')</code></td></tr>
+<tr><td>SKU 列<br><span style="font-size:12px;color:var(--muted)">带 <code>*</code> 前缀</span></td><td><code>COALESCE(NULLIF(raw_data-&gt;&gt;'*商品SKU',''),'')</code></td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<footer>
+<p><b>数据基线</b>：<code>b_class.fact_miaoshou_inventory_snapshot</code>，file 3004，1113 行，metric_date 2026-09-01；
+另一批次 file 2764（1226 行）用于交叉验证单调性。</p>
+<p><b>设计文档</b>：<code>docs/superpowers/specs/2026-10-24-dos-metric-naming-and-caliber-design.md</code></p>
+<p><b>关联</b>：<code>2026-10-24-miaoshou-inventory-incremental-collection-design.md</code>（增量采集）·
+<code>2026-10-21-sku-level-clearance-ranking-design.md</code>（SKU 级滞销排名）·
+<code>docs/team-skills/sea-metrics-language/SKILL.md</code>（指标语言规范）</p>
+</footer>
+
+</div>
+</body>
+</html>

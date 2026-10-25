@@ -5189,7 +5189,7 @@ class SkuPricingPolicy(Base):
     __tablename__ = "sku_pricing_policies"
 
     policy_id = Column(Integer, primary_key=True, autoincrement=True)
-    min_age_days = Column(Integer, nullable=False)          # 库龄起点（含），从该天数起本行生效
+    min_restock_days = Column(Integer, nullable=False)          # 库龄起点（含），从该天数起本行生效
     tier_label = Column(String(32), nullable=False)         # 档位名（自解释形式，如「库龄≥60天」）
     discount_rate = Column(Numeric(12, 8), nullable=False)  # 本档唯一折扣率
     target_margin_rate = Column(Numeric(12, 8), nullable=False)  # 本档目标利润率
@@ -5204,8 +5204,8 @@ class SkuPricingPolicy(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("min_age_days", "effective_from", name="uq_sku_pricing_policy_tier_start"),
-        CheckConstraint("min_age_days >= 0", name="ck_sku_pricing_policy_age_start"),
+        UniqueConstraint("min_restock_days", "effective_from", name="uq_sku_pricing_policy_tier_start"),
+        CheckConstraint("min_restock_days >= 0", name="ck_sku_pricing_policy_age_start"),
         CheckConstraint("discount_rate >= 0 AND discount_rate <= 1", name="ck_sku_pricing_policy_discount_rate"),
         CheckConstraint("target_margin_rate >= 0 AND target_margin_rate < 1", name="ck_sku_pricing_policy_target_margin"),
         CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_sku_pricing_policy_window"),
@@ -5213,10 +5213,10 @@ class SkuPricingPolicy(Base):
         # 每个库龄档位至多一条「当前生效行」；schema 由表继承，Index 不接受 schema= 关键字
         Index(
             "uq_sku_pricing_policies_current",
-            "min_age_days",
+            "min_restock_days",
             unique=True,
             postgresql_where=text("status = 'active' AND effective_to IS NULL"),
         ),
-        Index("ix_sku_pricing_policy_scope", "min_age_days", "effective_from"),
+        Index("ix_sku_pricing_policy_scope", "min_restock_days", "effective_from"),
         {"schema": "finance"},
     )

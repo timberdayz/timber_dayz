@@ -186,6 +186,15 @@ mapped AS (
             raw_data->>'inventory_value',
             raw_data->>'Inventory Value'
         ) AS inventory_value_raw,
+        -- 行级时间戳：妙手「更新时间 / 创建时间」是北京时间墙上时间，
+        -- 必须显式按 Asia/Shanghai 解释（数据库会话时区是 UTC）。
+        NULLIF(BTRIM(raw_data->>'更新时间'), '') AS observed_at_raw,
+        NULLIF(BTRIM(raw_data->>'创建时间'), '') AS created_at_raw,
+        -- 妙手仓库清单自带的滚动销量窗口。键名无 * 前缀。
+        raw_data->>'近7天销量数据' AS sales_7d_raw,
+        raw_data->>'近30天销量数据' AS sales_30d_raw,
+        raw_data->>'近60天销量数据' AS sales_60d_raw,
+        raw_data->>'近90天销量数据' AS sales_90d_raw,
         raw_data,
         header_columns,
         data_hash,
@@ -428,6 +437,38 @@ cleaned AS (
                 ''
             )::numeric
         END AS inventory_value,
+        -- 行级「最后修改时间」：库存停滞时长的时间基准。
+        -- 非标准格式一律落 NULL（不得让整批查询失败）。
+        CASE
+            WHEN observed_at_raw ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}$'
+            THEN observed_at_raw::timestamp AT TIME ZONE 'Asia/Shanghai'
+            ELSE NULL
+        END AS observed_at,
+        -- 行级「记录创建时间」：商品在该仓的库存记录首次创建时间。
+        CASE
+            WHEN created_at_raw ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}$'
+            THEN created_at_raw::timestamp AT TIME ZONE 'Asia/Shanghai'
+            ELSE NULL
+        END AS created_at,
+        -- 窗口销量：缺失必须落 NULL 而不是 0。
+        -- 「销量列不存在」（shopee / tiktok / 该行没有这列）= 不可算；
+        -- 「销量列存在且为 0」= 真的零销量。两者必须可区分。
+        CASE
+            WHEN sales_7d_raw IS NULL THEN NULL
+            ELSE NULLIF(REGEXP_REPLACE(REPLACE(sales_7d_raw, ',', ''), '[^0-9.-]', '', 'g'), '')::numeric
+        END AS checklist_sales_7d,
+        CASE
+            WHEN sales_30d_raw IS NULL THEN NULL
+            ELSE NULLIF(REGEXP_REPLACE(REPLACE(sales_30d_raw, ',', ''), '[^0-9.-]', '', 'g'), '')::numeric
+        END AS checklist_sales_30d,
+        CASE
+            WHEN sales_60d_raw IS NULL THEN NULL
+            ELSE NULLIF(REGEXP_REPLACE(REPLACE(sales_60d_raw, ',', ''), '[^0-9.-]', '', 'g'), '')::numeric
+        END AS checklist_sales_60d,
+        CASE
+            WHEN sales_90d_raw IS NULL THEN NULL
+            ELSE NULLIF(REGEXP_REPLACE(REPLACE(sales_90d_raw, ',', ''), '[^0-9.-]', '', 'g'), '')::numeric
+        END AS checklist_sales_90d,
         raw_data,
         header_columns,
         data_hash,
@@ -475,6 +516,19 @@ SELECT
     data_hash,
     ingest_timestamp,
     currency_code,
-    file_id
+    file_id,
+    -- ↓ 新增列必须追加在末尾（CREATE OR REPLACE VIEW 不允许改变已有列的位置）
+    -- 行级「最后修改时间」。没有该列的平台（shopee / tiktok）回落到批次业务日期。
+    COALESCE(
+        observed_at,
+        metric_date::timestamp AT TIME ZONE 'Asia/Shanghai'
+    ) AS observed_at,
+    -- 行级「记录创建时间」。没有该列的平台落 NULL（表示「取不到」，不是「1970」）。
+    created_at,
+    -- 窗口销量（妙手仓库清单自带）。缺失落 NULL = 该行不可算。
+    checklist_sales_7d,
+    checklist_sales_30d,
+    checklist_sales_60d,
+    checklist_sales_90d
 FROM deduplicated
 WHERE rn = 1;

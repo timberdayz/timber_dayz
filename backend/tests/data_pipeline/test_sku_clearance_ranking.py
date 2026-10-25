@@ -27,14 +27,14 @@ VIEW_SQL_PATH = Path("sql/api_modules/sku_clearance_ranking_module.sql")
 
 POLICY_ROWS = [
     {
-        "min_age_days": 0,
+        "min_restock_days": 0,
         "tier_label": "日常",
         "discount_rate": Decimal("0.10"),
         "target_margin_rate": Decimal("0.25"),
         "platform_basis": "tiktok",
     },
     {
-        "min_age_days": 60,
+        "min_restock_days": 60,
         "tier_label": "滞销30天",
         "discount_rate": Decimal("0.15"),
         "target_margin_rate": Decimal("0.22"),
@@ -71,17 +71,10 @@ def _row(**overrides):
         "on_hand_qty": 10,
         "inventory_value": 1000.0,
         "warehouse_count": 1,
-        "age_anchor_date": date(2026, 9, 14),
-        "age_days": 0,
-        "age_bucket": "0-30",
-        "reset_reason": "first_positive",
-        "estimated_turnover_days": 9999,
-        "daily_avg_sales": 0,
-        "is_stagnant": False,
-        "estimated_stagnant_days": 0,
-        "stagnant_snapshot_count": 0,
-        "risk_level": "low",
-        "clearance_priority_score": 680.0,
+        # 主判据：距上次进货天数
+        "days_since_restock": 0,
+        # DOS 参考原料：近 90 天窗口销量
+        "checklist_sales_90d": 90,
         "sku_id": 1001,
         "default_purchase_cost": 46.5,
         "reference_selling_price": None,
@@ -96,8 +89,7 @@ def _build_service(
     *,
     rows=None,
     summary=None,
-    risk_rows=None,
-    bucket_rows=None,
+    tier_rows=None,
     pricing_inputs=None,
     policy_rows=None,
     platform=None,
@@ -107,14 +99,13 @@ def _build_service(
 
     async def fake_fetch_rows(query, params):
         captured.append((query, dict(params)))
+        # 顺序要紧：档位分组查询里也有 count(*) AS sku_count，必须先判它
+        if "AS tier_index" in query:
+            return tier_rows or []
         if "count(*) AS sku_count" in query:
             return [summary or {"sku_count": 0, "total_quantity": 0,
                                 "total_inventory_value": 0,
                                 "missing_reference_price_count": 0}]
-        if "GROUP BY risk_level" in query:
-            return risk_rows or []
-        if "GROUP BY age_bucket" in query:
-            return bucket_rows or []
         return rows or []
 
     async def fake_load_pricing_inputs(_rows):
@@ -152,39 +143,36 @@ async def test_query_only_touches_the_clearance_view(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_min_age_days_filter_is_applied_not_a_noop(monkeypatch):
+async def test_min_restock_days_filter_is_applied_not_a_noop(monkeypatch):
     service, captured = _build_service(monkeypatch, rows=[_row()])
 
-    await service.get_sku_clearance_ranking(min_age_days=120)
+    await service.get_sku_clearance_ranking(min_restock_days=120)
 
     detail_queries = [q for q, _ in captured if "ORDER BY" in q]
     assert detail_queries, "应该有带排序的明细查询"
-    assert "age_days >= :min_age_days" in detail_queries[0]
+    assert "days_since_restock >= :min_restock_days" in detail_queries[0]
     params = [p for q, p in captured if "ORDER BY" in q][0]
-    assert params["min_age_days"] == 120
+    assert params["min_restock_days"] == 120
 
 
 @pytest.mark.asyncio
-async def test_risk_level_and_max_age_filters_are_applied(monkeypatch):
+async def test_max_restock_days_and_other_filters_are_applied(monkeypatch):
     service, captured = _build_service(monkeypatch, rows=[_row()])
 
     await service.get_sku_clearance_ranking(
-        min_age_days=30,
-        max_age_days=180,
-        risk_level="high",
+        min_restock_days=30,
+        max_restock_days=180,
         platform_code="miaoshou",
         keyword="SKU-A",
     )
 
     detail = [q for q, _ in captured if "ORDER BY" in q][0]
     params = [p for q, p in captured if "ORDER BY" in q][0]
-    assert "age_days >= :min_age_days" in detail
-    assert "age_days <= :max_age_days" in detail
-    assert "risk_level = :risk_level" in detail
+    assert "days_since_restock >= :min_restock_days" in detail
+    assert "days_since_restock <= :max_restock_days" in detail
     assert "platform_code = :platform_code" in detail
     assert "product_sku ILIKE :keyword" in detail
-    assert params["max_age_days"] == 180
-    assert params["risk_level"] == "high"
+    assert params["max_restock_days"] == 180
     assert params["platform_code"] == "miaoshou"
     assert params["keyword"] == "%SKU-A%"
 
@@ -203,10 +191,10 @@ async def test_unsupported_sort_by_is_rejected_and_never_reaches_sql(monkeypatch
 async def test_sort_by_whitelist_maps_to_known_columns(monkeypatch):
     service, captured = _build_service(monkeypatch, rows=[_row()])
 
-    await service.get_sku_clearance_ranking(sort_by="age_days", sort_order="asc")
+    await service.get_sku_clearance_ranking(sort_by="days_since_restock", sort_order="asc")
 
     detail = [q for q, _ in captured if "ORDER BY" in q][0]
-    assert "ORDER BY age_days ASC" in detail
+    assert "ORDER BY days_since_restock ASC" in detail
 
 
 @pytest.mark.asyncio
@@ -220,8 +208,6 @@ async def test_summary_counts_missing_reference_price(monkeypatch):
             "total_inventory_value": 3000.0,
             "missing_reference_price_count": 2,
         },
-        risk_rows=[{"risk_level": "low", "c": 3}],
-        bucket_rows=[{"age_bucket": "0-30", "c": 3}],
     )
 
     result = await service.get_sku_clearance_ranking()
@@ -231,8 +217,6 @@ async def test_summary_counts_missing_reference_price(monkeypatch):
     assert result.summary.total_quantity == 30
     assert result.summary.total_inventory_value == 3000.0
     assert result.summary.missing_reference_price_count == 2
-    assert result.summary.by_risk_level == {"low": 3}
-    assert result.summary.by_age_bucket == {"0-30": 3}
 
 
 @pytest.mark.asyncio
@@ -251,7 +235,7 @@ async def test_unmatched_erp_sku_is_kept_with_empty_pricing(monkeypatch):
         pricing_inputs={},
     )
 
-    result = await service.get_sku_clearance_ranking(min_age_days=0)
+    result = await service.get_sku_clearance_ranking(min_restock_days=0)
 
     assert len(result.items) == 1
     item = result.items[0]
@@ -264,10 +248,10 @@ async def test_unmatched_erp_sku_is_kept_with_empty_pricing(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pricing_uses_pure_function_and_reports_tier(monkeypatch):
-    """定价字段由 product_pricing_service 的纯函数补齐，档位按库龄命中。"""
+    """定价字段由 product_pricing_service 的纯函数补齐，档位按距上次进货天数命中。"""
     service, _ = _build_service(
         monkeypatch,
-        rows=[_row(age_days=70, age_bucket="31-60", risk_level="low")],
+        rows=[_row(days_since_restock=70)],
         pricing_inputs={
             1001: {
                 "creator_commission_rate": None,
@@ -279,7 +263,7 @@ async def test_pricing_uses_pure_function_and_reports_tier(monkeypatch):
         platform=_fake_platform(),
     )
 
-    result = await service.get_sku_clearance_ranking(min_age_days=0)
+    result = await service.get_sku_clearance_ranking(min_restock_days=0)
 
     item = result.items[0]
     assert item.pricing_tier_label == "滞销30天"
@@ -295,7 +279,7 @@ async def test_pricing_uses_pure_function_and_reports_tier(monkeypatch):
 async def test_clearance_recovery_amount_uses_current_discount(monkeypatch):
     service, _ = _build_service(
         monkeypatch,
-        rows=[_row(age_days=70, reference_selling_price=100.0, current_qty=10)],
+        rows=[_row(days_since_restock=70, reference_selling_price=100.0, current_qty=10)],
         pricing_inputs={
             1001: {
                 "creator_commission_rate": None,
@@ -307,7 +291,7 @@ async def test_clearance_recovery_amount_uses_current_discount(monkeypatch):
         platform=_fake_platform(),
     )
 
-    result = await service.get_sku_clearance_ranking(min_age_days=0)
+    result = await service.get_sku_clearance_ranking(min_restock_days=0)
 
     # 100 * (1 - 0.15) * 10 = 850.00
     assert result.items[0].clearance_recovery_amount == pytest.approx(850.0)
@@ -350,8 +334,6 @@ async def test_endpoint_returns_full_payload(monkeypatch):
                 sku_count=1,
                 total_quantity=10,
                 total_inventory_value=1000.0,
-                by_risk_level={"low": 1},
-                by_age_bucket={"0-30": 1},
                 missing_reference_price_count=1,
             ),
             items=[
@@ -360,11 +342,7 @@ async def test_endpoint_returns_full_payload(monkeypatch):
                     product_sku="SKU-A",
                     current_qty=10,
                     inventory_value=1000.0,
-                    age_days=0,
-                    age_bucket="0-30",
-                    reset_reason="first_positive",
-                    risk_level="low",
-                    clearance_priority_score=680.0,
+                    days_since_restock=70,
                 )
             ],
             total=1,
@@ -378,7 +356,7 @@ async def test_endpoint_returns_full_payload(monkeypatch):
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         response = await client.get(
             "/api/inventory/clearance-ranking",
-            params={"min_age_days": 90, "risk_level": "high", "limit": 20},
+            params={"min_restock_days": 90, "limit": 20},
         )
 
     assert response.status_code == 200
@@ -386,8 +364,7 @@ async def test_endpoint_returns_full_payload(monkeypatch):
     assert payload["total"] == 1
     assert payload["summary"]["missing_reference_price_count"] == 1
     assert payload["items"][0]["product_sku"] == "SKU-A"
-    assert captured["min_age_days"] == 90
-    assert captured["risk_level"] == "high"
+    assert captured["min_restock_days"] == 90
     assert captured["limit"] == 20
 
 
@@ -420,6 +397,145 @@ async def test_endpoint_rejects_unknown_sort_by(monkeypatch):
         )
 
     assert response.status_code == 422
+
+
+# ----------------------------------------------------------------------
+# 档位分组（门槛来自档位表）
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_summary_groups_skus_by_policy_tier(monkeypatch):
+    """汇总要按**档位表门槛**分组，门槛与档位名都取自 policy_rows。"""
+    service, _ = _build_service(
+        monkeypatch,
+        rows=[_row(days_since_restock=70)],
+        summary={
+            "sku_count": 2,
+            "total_quantity": 20,
+            "total_inventory_value": 300.0,
+            "missing_reference_price_count": 0,
+        },
+        tier_rows=[
+            {"tier_index": 0, "sku_count": 1, "inventory_value": 100.0},
+            {"tier_index": 1, "sku_count": 1, "inventory_value": 200.0},
+        ],
+    )
+
+    result = await service.get_sku_clearance_ranking(min_restock_days=0)
+
+    tiers = result.summary.restock_tiers
+    assert len(tiers) == 2
+    assert tiers[0].min_restock_days == 0
+    assert tiers[0].tier_label == "日常"
+    assert tiers[0].sku_count == 1
+    assert tiers[0].inventory_value == pytest.approx(100.0)
+    assert tiers[1].min_restock_days == 60
+    assert tiers[1].tier_label == "滞销30天"
+    assert tiers[1].sku_count == 1
+    assert tiers[1].inventory_value == pytest.approx(200.0)
+
+
+@pytest.mark.asyncio
+async def test_tier_thresholds_are_bound_as_parameters_not_inlined(monkeypatch):
+    """门槛走参数绑定 —— 档位表里改个门槛，不该需要改代码。"""
+    service, captured = _build_service(monkeypatch, rows=[_row()])
+
+    await service.get_sku_clearance_ranking(min_restock_days=0)
+
+    tier_queries = [(q, p) for q, p in captured if "AS tier_index" in q]
+    assert tier_queries, "应该有档位分组查询"
+    query, params = tier_queries[0]
+    assert params["bound_0"] == 0
+    assert params["bound_1"] == 60
+    assert ":bound_1" in query
+    assert "days_since_restock >= 60" not in query
+
+
+@pytest.mark.asyncio
+async def test_tier_label_never_reaches_sql_text(monkeypatch):
+    """tier_label 是运营填的自由文本，拼进 SQL 就是注入。"""
+    service, captured = _build_service(monkeypatch, rows=[_row()])
+
+    await service.get_sku_clearance_ranking(min_restock_days=0)
+
+    for query, _params in captured:
+        assert "日常" not in query
+        assert "滞销30天" not in query
+
+
+# ----------------------------------------------------------------------
+# DOS 参考值
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dos_reference_value_uses_the_canonical_implementation(monkeypatch):
+    """DOS 必须走 inventory_dos_service：45 ÷ (30 ÷ 90) = 135 天。"""
+    service, _ = _build_service(
+        monkeypatch,
+        rows=[_row(current_qty=45, checklist_sales_90d=30)],
+    )
+
+    result = await service.get_sku_clearance_ranking(min_restock_days=0)
+
+    assert result.items[0].checklist_dos_sales90 == pytest.approx(135.0)
+
+
+@pytest.mark.asyncio
+async def test_dos_reference_value_is_none_when_not_computable(monkeypatch):
+    """销量取不到 → DOS 是 None（不可算），不是 0、也不是哨兵值。"""
+    service, _ = _build_service(
+        monkeypatch,
+        rows=[_row(current_qty=45, checklist_sales_90d=None)],
+    )
+
+    result = await service.get_sku_clearance_ranking(min_restock_days=0)
+
+    assert result.items[0].checklist_dos_sales90 is None
+
+
+# ----------------------------------------------------------------------
+# 端点的排序白名单
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_endpoint_accepts_new_sort_fields_and_rejects_legacy_ones(monkeypatch):
+    """端点的 sort_by 白名单必须与 service 一致（旧值要 422，不能 500）。"""
+    from httpx import ASGITransport, AsyncClient
+    from fastapi import FastAPI
+
+    from backend.dependencies.auth import get_current_user
+    from backend.domains.business.routers import inventory_domain
+    from backend.models.database import get_async_db
+
+    app = FastAPI()
+    app.include_router(inventory_domain.router)
+
+    async def override_get_async_db():
+        yield None
+
+    async def override_current_user():
+        return type("U", (), {"user_id": 1, "id": 1, "roles": []})()
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        accepted = await client.get(
+            "/api/inventory/clearance-ranking",
+            params={"sort_by": "days_since_restock"},
+        )
+        legacy = await client.get(
+            "/api/inventory/clearance-ranking",
+            params={"sort_by": "age_days"},
+        )
+
+    # service 拿不到真实 db 时返回空结果，但**不应该**因为 sort_by 报错
+    assert accepted.status_code == 200
+    assert legacy.status_code == 422
 
 
 # ----------------------------------------------------------------------
@@ -462,15 +578,15 @@ def test_clearance_view_does_not_use_the_slow_backlog_base_path():
         "视图不能引用 mart.inventory_backlog_base：它的销售 CTE 要 8.8 秒，"
         "会让滞销清单页面变成 11 秒的慢查询"
     )
-    assert "mart.inventory_snapshot_change" in sql_text, (
-        "库存/滞留列应改从 mart.inventory_snapshot_change 取"
+    assert "mart.inventory_state" in sql_text, (
+        "主判据应改从 mart.inventory_state 取（距上次进货天数）"
     )
 
 
 def test_clearance_view_restricts_sales_to_platforms_with_inventory():
     """销售聚合必须限定在「有库存的平台」。
 
-    `platform_code = ANY(ARRAY(SELECT DISTINCT platform_code FROM mart.inventory_age_current))`
+    `platform_code = ANY(ARRAY(SELECT DISTINCT platform_code FROM mart.inventory_state))`
     是 InitPlan → 常量数组 → 谓词能下推到 fact_orders_atomic 的 UNION ALL 分支，
     实测 21.0s → 12ms。
 
@@ -479,7 +595,7 @@ def test_clearance_view_restricts_sales_to_platforms_with_inventory():
     """
     sql_text = _view_sql_body()
 
-    assert "ARRAY(SELECT DISTINCT platform_code FROM mart.inventory_age_current)" in sql_text, (
+    assert "ARRAY(SELECT DISTINCT platform_code FROM mart.inventory_state)" in sql_text, (
         "销售 CTE 必须限定在有库存的平台，否则 fact_orders_atomic 全量求值要 21 秒"
     )
     assert "semantic.fact_orders_atomic" in sql_text

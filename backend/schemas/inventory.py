@@ -189,17 +189,12 @@ class SkuClearanceRankingItemResponse(BaseModel):
     on_hand_qty: int = 0
     inventory_value: float = 0.0
     warehouse_count: int = 0
-    age_anchor_date: Optional[date] = None
-    age_days: int = 0
-    age_bucket: Optional[str] = None
-    reset_reason: Optional[str] = None
-    estimated_turnover_days: Optional[float] = None
-    daily_avg_sales: Optional[float] = None
-    is_stagnant: Optional[bool] = None
-    estimated_stagnant_days: Optional[int] = None
-    stagnant_snapshot_count: Optional[int] = None
-    risk_level: str = "low"
-    clearance_priority_score: float = 0.0
+    # 距上次进货天数：主判据（补货才重新开始计时，销售不重置）
+    days_since_restock: Optional[int] = None
+    # 可售天数（DOS）参考值：由 inventory_dos_service 唯一实现算出，
+    # 分子=可用库存，分母=近 90 天窗口销量。分母不随每次采集刷新，
+    # **仅供参考，不参与任何判定**；算不出来时为 None（不是 0，也不是哨兵值）。
+    checklist_dos_sales90: Optional[float] = None
     sku_id: Optional[int] = None
     default_purchase_cost: Optional[float] = None
     reference_selling_price: Optional[float] = None
@@ -216,12 +211,25 @@ class SkuClearanceRankingItemResponse(BaseModel):
     pricing_matched_erp: bool = False
 
 
+class SkuClearanceTierStat(BaseModel):
+    """按「距上次进货天数」分档的统计。
+
+    门槛与档位名**来自档位表**（`finance.sku_pricing_policies`），
+    前端不硬编码任何门槛数字 —— 运营改档位，这里跟着变。
+    """
+
+    min_restock_days: int
+    tier_label: str
+    sku_count: int = 0
+    inventory_value: float = 0.0
+
+
 class SkuClearanceRankingSummaryResponse(BaseModel):
     sku_count: int = 0
     total_quantity: int = 0
     total_inventory_value: float = 0.0
-    by_risk_level: Dict[str, int] = Field(default_factory=dict)
-    by_age_bucket: Dict[str, int] = Field(default_factory=dict)
+    # 分档统计：门槛 / 档位名 / SKU 数 / 压资金额
+    restock_tiers: List[SkuClearanceTierStat] = Field(default_factory=list)
     # 缺参考售价的 SKU 数：主数据缺口直接暴露在业务界面上，
     # 运营一眼知道哪些滞销品算不出清货回款
     missing_reference_price_count: int = 0

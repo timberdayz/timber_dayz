@@ -326,19 +326,19 @@ async def get_inventory_aging_buckets(
     summary="SKU 级滞销清单（真库龄口径）",
 )
 async def get_sku_clearance_ranking(
-    min_age_days: Optional[int] = Query(60, ge=0, description="库龄下限（天）"),
-    max_age_days: Optional[int] = Query(None, ge=0, description="库龄上限（天）"),
-    risk_level: Optional[Literal["high", "medium", "low"]] = Query(
-        None, description="风险等级"
+    min_restock_days: Optional[int] = Query(
+        60, ge=0, description="距上次进货天数下限（天）"
     ),
-    platform_code: Optional[str] = Query(None, description="平台编码"),
+    max_restock_days: Optional[int] = Query(
+        None, ge=0, description="距上次进货天数上限（天）"
+    ),
+platform_code: Optional[str] = Query(None, description="平台编码"),
     keyword: Optional[str] = Query(None, description="SKU / 商品名关键词"),
     sort_by: Literal[
-        "clearance_priority_score",
-        "age_days",
+        "days_since_restock",
         "inventory_value",
-        "estimated_turnover_days",
-    ] = Query("clearance_priority_score", description="排序字段"),
+        "current_qty",
+    ] = Query("days_since_restock", description="排序字段"),
     sort_order: Literal["asc", "desc"] = Query("desc", description="排序方向"),
     limit: int = Query(100, ge=1, le=500, description="返回条数上限"),
     offset: int = Query(0, ge=0, description="偏移量"),
@@ -347,13 +347,13 @@ async def get_sku_clearance_ranking(
     """SKU 级滞销清单。
 
     只读端点（与既有 `/inventory/aging` 一致，不加 require_admin）。
-    库龄口径是 `mart.inventory_age_current.age_days`（真库龄），与商品中心定价同源。
+    主判据是**距上次进货天数**（`mart.inventory_state.days_since_restock`），
+    与商品中心定价同源；档位门槛来自档位表 `finance.sku_pricing_policies`。
     """
     service = SkuClearanceService(db)
     return await service.get_sku_clearance_ranking(
-        min_age_days=min_age_days,
-        max_age_days=max_age_days,
-        risk_level=risk_level,
+        min_restock_days=min_restock_days,
+        max_restock_days=max_restock_days,
         platform_code=platform_code,
         keyword=keyword,
         sort_by=sort_by,

@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>库存「更新时间」筛选 · 真实页面取证结论</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f7f5f0; --card:#fff; --line:#e9e3d6; --line-soft:#f0ebe0;
+  --ink:#14171e; --ink2:#3a4256; --muted:#7c7a72;
+  --primary:#2f6f5e; --primary-soft:rgba(47,111,94,.08);
+  --warn:#c97b3f; --warn-soft:rgba(201,123,63,.09);
+  --danger:#b06367; --danger-soft:rgba(176,99,103,.09);
+  --mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+  font-size:14.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(760px 380px at 88% -8%,rgba(47,111,94,.055),transparent 62%),
+             radial-gradient(620px 320px at 4% 4%,rgba(201,123,63,.045),transparent 60%)}
+.wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:64px 28px 96px}
+h1,h2{font-family:'DM Serif Display',Georgia,'Songti SC',serif;font-weight:400;letter-spacing:-.005em}
+h1{font-size:33px;line-height:1.25;margin-bottom:15px}
+h2{font-size:24px;margin-bottom:8px}
+.lede{font-size:16.5px;color:var(--ink2);max-width:74ch}
+.kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--primary);margin-bottom:12px}
+.kicker::before{content:"";width:18px;height:2px;background:var(--primary);border-radius:2px}
+.sec{margin-top:56px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px}
+.card+.card{margin-top:14px}
+.mono{font-family:var(--mono)}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.tag-ok{background:var(--primary-soft);color:var(--primary)}
+.tag-warn{background:var(--warn-soft);color:var(--warn)}
+.tag-bad{background:var(--danger-soft);color:var(--danger)}
+code{font-family:var(--mono);font-size:12.5px;background:var(--primary-soft);color:var(--primary);
+  padding:1px 6px;border-radius:5px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:26px}
+.stat{background:var(--card);padding:16px 18px}
+.stat .n{font-family:'DM Serif Display',serif;font-size:25px;line-height:1.15}
+.stat .n small{font-size:14px;color:var(--muted);margin-left:3px}
+.stat .l{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.45}
+
+/* steps */
+.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+.steps li{position:relative;padding:0 0 26px 62px;counter-increment:s}
+.steps li::before{content:counter(s);position:absolute;left:0;top:0;width:40px;height:40px;
+  border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;
+  justify-content:center;font-weight:600;font-size:16px}
+.steps li::after{content:"";position:absolute;left:20px;top:42px;bottom:2px;width:2px;
+  background:linear-gradient(var(--primary),rgba(47,111,94,.2))}
+.steps li:last-child{padding-bottom:0}
+.steps li:last-child::after{display:none}
+.steps .st{font-size:15.5px;font-weight:600;margin-bottom:3px}
+.steps .sd{font-size:13.5px;color:var(--ink2)}
+.steps .ev{margin-top:9px;background:#fbfaf7;border:1px solid var(--line-soft);border-radius:10px;
+  padding:10px 13px;font-family:var(--mono);font-size:11.5px;color:var(--ink2);line-height:1.75;
+  overflow-x:auto;white-space:pre}
+.steps .ev b{color:var(--primary)}
+
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);padding:0 12px 9px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink2);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td strong{color:var(--ink)}
+.kv{display:grid;grid-template-columns:150px 1fr;row-gap:9px;column-gap:16px;margin:0;font-size:13px}
+.kv dt{color:var(--muted);border-bottom:1px dashed var(--line);padding-bottom:7px}
+.kv dd{margin:0;border-bottom:1px dashed var(--line);padding-bottom:7px;font-family:var(--mono);font-size:12px}
+
+.bench{display:grid;grid-template-columns:190px 1fr 96px;gap:14px;align-items:center;padding:7px 0}
+.bench+.bench{border-top:1px dashed var(--line-soft)}
+.bench-label{font-size:13.5px;color:var(--ink2)}
+.bench-label b{color:var(--ink)}
+.bench-track{height:17px;background:var(--line-soft);border-radius:6px;overflow:hidden}
+.bench-fill{height:100%;border-radius:6px;background:var(--primary)}
+.bench-fill.soft{background:rgba(47,111,94,.32)}
+.bench-fill.bad{background:var(--danger)}
+.bench-fill.warn{background:var(--warn)}
+.bench-val{font-family:var(--mono);font-size:12.5px;text-align:right;color:var(--ink2)}
+
+.callout{border-radius:13px;padding:16px 18px;border:1px solid var(--line);background:var(--card)}
+.callout.warn{background:var(--warn-soft);border-color:rgba(201,123,63,.32)}
+.callout.ok{background:var(--primary-soft);border-color:rgba(47,111,94,.28)}
+.callout.bad{background:var(--danger-soft);border-color:rgba(176,99,103,.3)}
+.callout .ct{font-weight:600;font-size:14px;margin-bottom:5px;display:flex;align-items:center;gap:8px}
+.callout p{font-size:13.5px;color:var(--ink2)}
+.callout p+p{margin-top:8px}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.cmp .card{margin:0}
+.figcap{font-size:12.5px;color:var(--muted);margin-top:10px;text-align:center}
+@media(max-width:860px){
+  .wrap{padding:40px 18px 64px}.stats{grid-template-columns:1fr 1fr}.cmp{grid-template-columns:1fr}
+  h1{font-size:26px}h2{font-size:21px}body{font-size:14px}
+  .steps li{padding-left:50px}.steps li::before{width:34px;height:34px;font-size:14px}
+  .steps li::after{left:17px;top:36px}.bench{grid-template-columns:120px 1fr 76px;gap:9px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">真实页面取证结论 · 2026-10-24</div>
+  <h1>你指出的那个点是对的，而且比想象的更严格：<br>「更新时间」是<em>一个下拉维度</em>，日期只是它的第二个参数</em></h1>
+  <p class="lede">
+    录制产物已逐张核对（01 空态 → 05 导出菜单），并趁浏览器会话还活着，用只读 CDP 探针取到了真实 DOM 事实。
+    结论：<strong>必须先把维度切到「更新时间」，再操作日期控件，再点「确定」，最后点「搜索」——四步缺一不可</strong>。
+    这不是组件实现细节，而是妙手页面本身的交互契约。
+  </p>
+  <div class="stats">
+    <div class="stat"><div class="n">gmtModified</div><div class="l">「更新时间」的真实维度码<br>与「创建时间」<b>gmtCreate</b> 区分</div></div>
+    <div class="stat"><div class="n">4<small>步</small></div><div class="l">切维度 → 填区间 → 点确定 → 点搜索<br>任一步缺失则筛选不生效</div></div>
+    <div class="stat"><div class="n">147<small>/147</small></div><div class="l">录制的 9/4~10/8 窗口<br>库内回放命中 <b>147 个 SKU</b>，完全吻合</div></div>
+    <div class="stat"><div class="n">3<small>/148</small></div><div class="l">若维度误用「创建时间」<br>只会命中 3 行 —— 静默错误</div></div>
+  </div>
+</header>
+
+<!-- ① 核心结论 -->
+<section class="sec">
+  <div class="kicker">① 核心发现</div>
+  <h2>一个字段同时承载「维度 + 区间」</h2>
+  <p class="lede" style="margin-bottom:18px">
+    录制的 01 空态截图里，筛选框默认显示的是<b>「创建时间」</b>，日期区是空的。
+    你必须先把这个下拉改成「更新时间」，日期区才成为你要的那一维。
+  </p>
+
+  <div class="card">
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">筛选区 DOM 实测（CDP 探针读取）</div>
+    <div class="kv">
+      <dt>字段锚点</dt><dd>[data-field='dateRangeType-dateRangeValue']</dd>
+      <dt>子结构</dt><dd>div.jx-select（维度下拉） + div.jx-date-editor.jx-date-editor--datetimerange（日期区间）</dd>
+      <dt>维度下拉</dt><dd>div.jx-select[modelvaluegroup=...] ← 维度与区间都在这一个属性里</dd>
+      <dt>当前值</dt><dd>gmtModified,2026-09-04 00:00:00,2026-10-08 23:59:59</dd>
+      <dt>日期输入</dt><dd>input.jx-range-input ×2（role=combobox, placeholder=开始时间/结束时间）</dd>
+      <dt>日期面板</dt><dd>div.jx-picker-panel.jx-date-range-picker.has-sidebar.has-time</dd>
+      <dt>面板快捷项</dt><dd>button.jx-picker-panel__shortcut ×5（今天/昨天/近7天/近30天/近90天）</dd>
+      <dt>面板页脚</dt><dd>button.jx-picker-panel__link-btn（清空 / 确定）</dd>
+      <dt>搜索按钮</dt><dd>button.jx-button--primary.pro-button.J_queryFormSearch（type=submit）</dd>
+    </div>
+  </div>
+
+  <div class="callout bad" style="margin-top:14px">
+    <div class="ct">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--danger)"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+      最危险的失败模式：维度选错，筛选照样"成功"
+    </div>
+    <p>如果组件只填日期、没先切维度，妙手会用<b>「创建时间」</b>去筛 —— 结果依然是一份看起来正常的清单，
+    但语义完全错误，而且<b>不报任何错</b>。</p>
+    <p>实测：同样的 9/4~10/8 窗口，按「更新时间」筛命中 147 个 SKU，按「创建时间」筛只命中 <b>3 个</b>。
+    差了 49 倍，而页面表现都是"筛选成功"。</p>
+  </div>
+</section>
+
+<!-- ② 时序 -->
+<section class="sec">
+  <div class="kicker">② 正确时序</div>
+  <h2>四步，每一步都有可断言的落地信号</h2>
+  <p class="lede" style="margin-bottom:18px">
+    组件必须按这个顺序执行，每步之后都验证 DOM 状态再往下走 —— 不能靠 sleep。
+  </p>
+  <ol class="steps">
+    <li>
+      <div class="st">把维度切到「更新时间」</div>
+      <div class="sd">点开 <code>[data-field='dateRangeType-dateRangeValue'] .jx-select__wrapper</code>，
+        在浮层 <code>li.jx-select-dropdown__item</code> 里点文案为「更新时间」的那一项。浮层根是
+        <code>div.jx-select-dropdown.pro-select-popper</code>（内层 ul 是 listbox，选项才是 li）。
+        <b>这一步不做，日期区间筛的是「创建时间」。</b></div>
+      <div class="ev"><b>落地信号</b>  div.jx-select 的 modelvaluegroup 变成
+gmtModified,2026-09-04 00:00:00,2026-10-08 23:59:59
+<b>兜底判据</b>  浮层里 li.jx-select-dropdown__item.is-selected 的文案 == "更新时间"
+<b>失败模式</b>  modelvaluegroup 仍是 gmtCreate,...  → 维度没切成功，必须重试不能继续</div>
+    </li>
+    <li>
+      <div class="st">填入起止时间</div>
+      <div class="sd">点第一个 <code>input.jx-range-input</code>（placeholder=开始时间）唤起日期面板，
+        填 <code>2026-09-04 00:00:00</code>；第二个（placeholder=结束时间）填 <code>2026-10-08 23:59:59</code>。
+        面板是 <code>div.jx-picker-panel.jx-date-range-picker.has-sidebar.has-time</code>，带 5 个快捷项可替代手填。</div>
+      <div class="ev"><b>落地信号</b>  两个 input 的 value == 期望值
+<b>注意</b>      此刻 modelvaluegroup <b>还没变</b> —— 只改了输入框的值，组件内部模型未提交</div>
+    </li>
+    <li>
+      <div class="st">点「确定」提交区间</div>
+      <div class="sd">面板页脚 <code>button.jx-picker-panel__link-btn</code>，文案「确定」
+        （同级还有一个「清空」是 text 样式，<b>不要选错</b>）。</div>
+      <div class="ev"><b>落地信号</b>  modelvaluegroup 更新为新值
+<b>实测证据</b>  改完 input 未点确定 → modelvaluegroup 仍是旧值；
+             点确定 → 变为 gmtModified,2026-09-01 00:00:00,2026-10-08 23:59:59
+<b>失败模式</b>  跳过这步 → 日期永远不生效，且不报错</div>
+    </li>
+    <li>
+      <div class="st">点「搜索」执行筛选</div>
+      <div class="sd">点 <code>button.J_queryFormSearch</code>（type=submit，class 含 pro-button jx-button--primary）。
+        现有组件的 <code>_click_search</code> 找的是 <code>get_by_role("button", name="搜索")</code>，
+        实测页面上确实存在这个按钮，<b>可沿用，但建议加 <code>J_queryFormSearch</code> 作为更稳的 class 兜底</b>。</div>
+      <div class="ev"><b>落地信号</b>  「SKU总数」和「库存总价值」文本刷新为新值
+<b>录制实测</b>  搜索前 1112 / 226239.10  →  搜索后 147 / 31230.57</div>
+    </li>
+  </ol>
+</section>
+
+<!-- ③ 数据验证 -->
+<section class="sec">
+  <div class="kicker">③ 数据侧交叉验证</div>
+  <h2>录制的窗口，库内回放对上了</h2>
+  <p class="lede" style="margin-bottom:18px">
+    04 号截图的实际筛选区间是 <b>2026-09-04 00:00:00 ~ 2026-10-08 23:59:59</b>（不是你原截图的 9/1~9/4）。
+    用这个真实区间回放已落库的 file 3004：
+  </p>
+  <div class="card">
+    <div class="bench"><span class="bench-label">全量（无筛选）</span><div class="bench-track"><div class="bench-fill bad" style="width:100%"></div></div><span class="bench-val">1113 行</span></div>
+    <div class="bench"><span class="bench-label">按<b>更新时间</b> 9/4~10/8</span><div class="bench-track"><div class="bench-fill" style="width:13.3%"></div></div><span class="bench-val">148 行</span></div>
+    <div class="bench"><span class="bench-label">按<b>创建时间</b> 9/4~10/8</span><div class="bench-track"><div class="bench-fill warn" style="width:.3%"></div></div><span class="bench-val">3 行</span></div>
+    <p class="figcap">
+      录制的 04 号截图显示 SKU总数 <b>147</b> / 库存总数量 <b>1507</b> —— 库内回放得 147 个去重 SKU / 148 行，
+      <b>去重 SKU 数完全吻合</b>（148 行含 1 个跨仓 SKU，故行数比 SKU 多 1）。
+    </p>
+  </div>
+
+  <div class="cmp" style="margin-top:14px">
+    <div class="card">
+      <div class="fhead" style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <h3 style="font-size:15.5px">被时间窗筛掉的 965 行去哪了</h3>
+      </div>
+      <p style="font-size:13.5px;color:var(--ink2)">
+        它们的「更新时间」分布在 <b>2025-01 至 2026-10</b>，其中 2026-10 有 347 行、2026-09 有 4 行，
+        更早的散落在 2025 全年到 2026-08。
+      </p>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">
+        这正是增量采集要抓的那批：<b>窗口内被刷新过的行</b>。全量 1113 行里，9/4~10/8 只有 148 行。
+      </p>
+    </div>
+    <div class="card">
+      <div class="fhead" style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <h3 style="font-size:15.5px">01 空态的数字也对得上</h3>
+      </div>
+      <p style="font-size:13.5px;color:var(--ink2)">
+        01 号截图（未筛选）：SKU总数 <b>1112</b> / 库存总数量 <b>11095</b> / 库存总价值 <b>226239.10</b>。
+        库内 file 3004 全量：<b>1113 行</b> / 库存总量 <b>11109</b>。
+      </p>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:8px">
+        差 1 行 / 14 件库存 —— 是<b>采集时刻到录制时刻之间平台的实时变动</b>（录制在 14:17，采集在 04:39）。
+        数量级完全一致，说明导出的是同一份数据源。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ④ 实现要点 -->
+<section class="sec">
+  <div class="kicker">④ 落到组件上</div>
+  <h2>四条硬要求</h2>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table>
+      <thead><tr><th style="width:24%">要求</th><th style="width:40%">怎么做</th><th style="width:36%">为什么不能省</th></tr></thead>
+      <tbody>
+        <tr><td><strong>必须先切维度</strong></td>
+            <td>选 <code>[data-field='dateRangeType-dateRangeValue'] .jx-select__wrapper</code> 点开，
+                再在 <code>.jx-select-dropdown</code> 里点「更新时间」</td>
+            <td>默认是「创建时间」。不切 → 筛错维度，页面照样"成功"，静默错误</td></tr>
+        <tr><td><strong>必须点「确定」</strong></td>
+            <td>面板内 <code>.jx-picker-panel__footer</code> 里的「确定」按钮</td>
+            <td>实测：填完 input 不点确定，<code>modelvaluegroup</code> 不变，日期不生效</td></tr>
+        <tr><td><strong>每步都要断言</strong></td>
+            <td>切维度后断言 <code>modelvaluegroup</code> 以 <code>gmtModified</code> 开头；
+                点确定后断言区间已写入</td>
+            <td>妙手这两处<b>都不报错</b>，不断言就静默采空</td></tr>
+        <tr><td><strong>搜索后校验</strong></td>
+            <td>等「SKU总数」/「库存总价值」文本刷新，且 SKU 数 &gt; 0</td>
+            <td>筛选未生效时页面照常显示旧结果，不校验就会采到全量</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout ok" style="margin-top:14px">
+    <div class="ct">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--primary)"><path d="M20 6 9 17l-5-5"/></svg>
+      好消息：不需要新造轮子
+    </div>
+    <p>仓库域已有现成的 <code>date_picker.py</code>（<code>apply_custom_range</code> / <code>_range_input</code> / <code>_type_range_inputs</code>），
+      订单域的 <code>_ensure_date_range_from_config</code> 就是现成范式。
+      <b>但它们都要加一步「先切维度」</b> —— 因为「维度 + 区间」是妙手这两个页面共有的复合控件，
+      而订单页的日期字段是单维度的。这是本次唯一的新增能力。</p>
+  </div>
+</section>
+
+<!-- ⑤ 未决 -->
+<section class="sec">
+  <div class="kicker">⑤ 尚未取证</div>
+  <h2>还剩三件事</h2>
+  <div class="card">
+    <ol class="timeline" style="list-style:none;padding:0;margin:0;position:relative">
+      <li style="position:relative;padding:0 0 22px 34px">
+        <span style="position:absolute;left:2px;top:5px;width:14px;height:14px;border-radius:50%;background:var(--bg);border:2px solid var(--primary)"></span>
+        <b style="display:block;font-size:14.5px;margin-bottom:3px">「导出搜索的商品」在筛选态下导出的是不是筛选结果</b>
+        <p style="font-size:13.5px;color:var(--ink2)">这是增量的最后一环。若它导出的是全量，那时间筛选就白做了。
+          05 号截图只证明菜单存在，<b>没验证导出内容</b>。</p>
+      </li>
+      <li style="position:relative;padding:0 0 22px 34px">
+        <span style="position:absolute;left:2px;top:5px;width:14px;height:14px;border-radius:50%;background:var(--bg);border:2px solid var(--primary)"></span>
+        <b style="display:block;font-size:14.5px;margin-bottom:3px">维度下拉的浮层与「仓库」下拉是否同构</b>
+        <p style="font-size:13.5px;color:var(--ink2)">已确认同构（都是 <code>jx-select-dropdown</code> → ul[role=listbox] → li[role=option]），
+          但仓库下拉有 header「全选」，本下拉没有（只有 2 个选项）。</p>
+      </li>
+      <li style="position:relative;padding:0 0 0 34px">
+        <span style="position:absolute;left:2px;top:5px;width:14px;height:14px;border-radius:50%;background:var(--bg);border:2px solid var(--warn)"></span>
+        <b style="display:block;font-size:14.5px;margin-bottom:3px">快捷项「近7天/近30天」是否可用作采集入口</b>
+        <p style="font-size:13.5px;color:var(--ink2)">若可用，采集组件可以省掉日期输入，直接点快捷项 →
+          确定 → 搜索，稳定性会高得多。但快捷项是<b>相对今天</b>，与「水位线推进」的语义要另行对齐。</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+</div>
+</body>
+</html>

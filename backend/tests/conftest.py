@@ -294,14 +294,14 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
     await pg_session.flush()
 
     # 库龄档位规则：缺这 4 行 -> 最低售价算不出来 -> 护栏永不触发
-    for min_age_days, tier_label, discount_rate, target_margin_rate in (
+    for min_restock_days, tier_label, discount_rate, target_margin_rate in (
         (0, "日常", 0.10, 0.25),
         (60, "滞销30天", 0.15, 0.22),
         (90, "滞销60天", 0.20, 0.18),
         (120, "滞销60天以上", 0.30, 0.10),
     ):
         pg_session.add(SkuPricingPolicy(
-            min_age_days=min_age_days, tier_label=tier_label,
+            min_restock_days=min_restock_days, tier_label=tier_label,
             discount_rate=discount_rate, target_margin_rate=target_margin_rate,
             platform_basis="tiktok", effective_from=effective_from,
             status="active", source="test_seed", version="v1",

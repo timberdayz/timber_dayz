@@ -65,7 +65,7 @@ def test_product_center_item_exposes_pricing_fields_as_optional():
         "min_selling_price_override",
         "min_selling_price_missing_reasons",
         "pricing_tier_label",
-        "pricing_age_days",
+        "pricing_days_since_restock",
         "pricing_tier_source",
     ):
         assert name in fields, name
@@ -120,7 +120,7 @@ def test_profit_candidate_response_exposes_pricing_fields():
         "min_selling_price_override",
         "min_selling_price_missing_reasons",
         "pricing_tier_label",
-        "pricing_age_days",
+        "pricing_days_since_restock",
         "pricing_tier_source",
         "min_selling_price_below",
     ):
@@ -150,7 +150,7 @@ def test_orm_models_expose_pricing_columns_and_policy_table():
 
     policy_columns = {c.name for c in SkuPricingPolicy.__table__.columns}
     assert {
-        "policy_id", "min_age_days", "tier_label", "discount_rate",
+        "policy_id", "min_restock_days", "tier_label", "discount_rate",
         "target_margin_rate", "platform_basis", "effective_from", "effective_to",
         "status", "source", "version", "notes",
     } <= policy_columns

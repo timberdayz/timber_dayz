@@ -10,7 +10,7 @@ from backend.services.product_pricing_service import (
     compute_discount_guard,
     compute_min_selling_price,
     compute_sku_pricing,
-    select_age_tier,
+    select_restock_tier,
 )
 
 # tiktok 基准值（实测，见 spec §2.3 / §1.2）
@@ -20,9 +20,9 @@ RETURN_LOSS_RATE = Decimal("0.0467")
 DAMAGE_RATE = Decimal("0.0158")
 
 
-def _policy(min_age_days, label, discount_rate, target_margin_rate):
+def _policy(min_restock_days, label, discount_rate, target_margin_rate):
     return {
-        "min_age_days": min_age_days,
+        "min_restock_days": min_restock_days,
         "tier_label": label,
         "discount_rate": Decimal(str(discount_rate)),
         "target_margin_rate": Decimal(str(target_margin_rate)),
@@ -105,24 +105,24 @@ def test_discount_guard_is_none_without_reference_price():
     assert compute_discount_guard(reference_selling_price=None, discount_rate=Decimal("0.15")) is None
 
 
-def test_select_age_tier_picks_largest_boundary_not_exceeding_age():
+def test_select_restock_tier_picks_largest_boundary_not_exceeding_age():
     policies = [
         _policy(0, "日常", 0.10, 0.25),
         _policy(60, "滞销30天", 0.15, 0.22),
         _policy(90, "滞销60天", 0.20, 0.18),
         _policy(120, "滞销60天以上", 0.30, 0.10),
     ]
-    assert select_age_tier(policies, 30)["min_age_days"] == 0
-    assert select_age_tier(policies, 59)["min_age_days"] == 0
-    assert select_age_tier(policies, 60)["min_age_days"] == 60
-    assert select_age_tier(policies, 89)["min_age_days"] == 60
-    assert select_age_tier(policies, 90)["min_age_days"] == 90
-    assert select_age_tier(policies, 200)["min_age_days"] == 120
+    assert select_restock_tier(policies, 30)["min_restock_days"] == 0
+    assert select_restock_tier(policies, 59)["min_restock_days"] == 0
+    assert select_restock_tier(policies, 60)["min_restock_days"] == 60
+    assert select_restock_tier(policies, 89)["min_restock_days"] == 60
+    assert select_restock_tier(policies, 90)["min_restock_days"] == 90
+    assert select_restock_tier(policies, 200)["min_restock_days"] == 120
 
 
-def test_select_age_tier_falls_back_to_lowest_boundary_without_age():
+def test_select_restock_tier_falls_back_to_lowest_boundary_without_age():
     policies = [_policy(0, "日常", 0.10, 0.25), _policy(60, "滞销30天", 0.15, 0.22)]
-    assert select_age_tier(policies, None)["min_age_days"] == 0
+    assert select_restock_tier(policies, None)["min_restock_days"] == 0
 
 
 def test_min_selling_price_takes_the_maximum_of_three_lines():
@@ -160,7 +160,7 @@ def test_policy_update_creates_when_no_current_row():
 
     decision = resolve_policy_update(
         current=None,
-        requested={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
+        requested={"min_restock_days": 0, "effective_from": date(2026, 10, 20)},
         today=date(2026, 10, 20),
     )
     assert decision["action"] == "create"
@@ -173,8 +173,8 @@ def test_policy_update_same_day_updates_in_place():
     from backend.services.product_pricing_service import resolve_policy_update
 
     decision = resolve_policy_update(
-        current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
-        requested={"min_age_days": 0, "effective_from": date(2026, 10, 20), "discount_rate": 0.12},
+        current={"min_restock_days": 0, "effective_from": date(2026, 10, 20)},
+        requested={"min_restock_days": 0, "effective_from": date(2026, 10, 20), "discount_rate": 0.12},
         today=date(2026, 10, 20),
     )
     assert decision["action"] == "update"
@@ -189,8 +189,8 @@ def test_policy_update_closes_old_row_and_inserts_new():
     from backend.services.product_pricing_service import resolve_policy_update
 
     decision = resolve_policy_update(
-        current={"min_age_days": 0, "effective_from": date(2026, 10, 1)},
-        requested={"min_age_days": 0, "effective_from": date(2026, 10, 15)},
+        current={"min_restock_days": 0, "effective_from": date(2026, 10, 1)},
+        requested={"min_restock_days": 0, "effective_from": date(2026, 10, 15)},
         today=date(2026, 10, 20),
     )
     assert decision["action"] == "version"
@@ -198,19 +198,19 @@ def test_policy_update_closes_old_row_and_inserts_new():
 
 
 def test_policy_update_retier_when_boundary_changes():
-    """路径指向被编辑的档位，body 的 min_age_days 是新起点；两者不同 = 改边界。"""
+    """路径指向被编辑的档位，body 的 min_restock_days 是新起点；两者不同 = 改边界。"""
     from datetime import date
 
     from backend.services.product_pricing_service import resolve_policy_update
 
     decision = resolve_policy_update(
-        current={"min_age_days": 0, "effective_from": date(2026, 10, 1)},
-        requested={"min_age_days": 45, "effective_from": date(2026, 10, 1)},
+        current={"min_restock_days": 0, "effective_from": date(2026, 10, 1)},
+        requested={"min_restock_days": 45, "effective_from": date(2026, 10, 1)},
         today=date(2026, 10, 20),
     )
     assert decision["action"] == "retier"
     assert decision["close_current"] == date(2026, 10, 1)
-    assert decision["values"]["min_age_days"] == 45
+    assert decision["values"]["min_restock_days"] == 45
 
 
 def test_policy_update_rejects_future_and_backdated():
@@ -226,15 +226,15 @@ def test_policy_update_rejects_future_and_backdated():
     # 未来生效 -> 拒绝
     with pytest.raises(PolicyUpdateRejected):
         resolve_policy_update(
-            current={"min_age_days": 0, "effective_from": date(2026, 10, 1)},
-            requested={"min_age_days": 0, "effective_from": date(2026, 11, 1)},
+            current={"min_restock_days": 0, "effective_from": date(2026, 10, 1)},
+            requested={"min_restock_days": 0, "effective_from": date(2026, 11, 1)},
             today=date(2026, 10, 20),
         )
     # 回溯生效 -> 拒绝
     with pytest.raises(PolicyUpdateRejected):
         resolve_policy_update(
-            current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
-            requested={"min_age_days": 0, "effective_from": date(2026, 10, 1)},
+            current={"min_restock_days": 0, "effective_from": date(2026, 10, 20)},
+            requested={"min_restock_days": 0, "effective_from": date(2026, 10, 1)},
             today=date(2026, 10, 20),
         )
 
@@ -256,8 +256,8 @@ def test_policy_update_rejects_backdated_retier():
 
     with pytest.raises(PolicyUpdateRejected):
         resolve_policy_update(
-            current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
-            requested={"min_age_days": 60, "effective_from": date(2026, 10, 1)},
+            current={"min_restock_days": 0, "effective_from": date(2026, 10, 20)},
+            requested={"min_restock_days": 60, "effective_from": date(2026, 10, 1)},
             today=date(2026, 10, 20),
         )
 
@@ -269,13 +269,13 @@ def test_policy_update_retier_allows_same_day_boundary_change():
     from backend.services.product_pricing_service import resolve_policy_update
 
     decision = resolve_policy_update(
-        current={"min_age_days": 0, "effective_from": date(2026, 10, 20)},
-        requested={"min_age_days": 30, "effective_from": date(2026, 10, 20)},
+        current={"min_restock_days": 0, "effective_from": date(2026, 10, 20)},
+        requested={"min_restock_days": 30, "effective_from": date(2026, 10, 20)},
         today=date(2026, 10, 20),
     )
     assert decision["action"] == "retier"
     assert decision["close_current"] == date(2026, 10, 20)
-    assert decision["values"]["min_age_days"] == 30
+    assert decision["values"]["min_restock_days"] == 30
 
 
 # ---------------------------------------------------------------- 降级链（spec §4.4 / §8.1）
@@ -294,7 +294,7 @@ def _pricing(**overrides):
         "policy": _policy(0, "日常", 0.10, 0.25),
         "deepest_policy": _policy(120, "滞销60天以上", 0.30, 0.10),
         "min_selling_price_override": None,
-        "age_days": None,
+        "days_since_restock": None,
     }
     payload.update(overrides)
     return compute_sku_pricing(**payload)
@@ -307,8 +307,8 @@ def test_sku_pricing_happy_path_matches_spec_example():
     assert out["current_discount_rate"] == pytest.approx(0.10)
     assert out["clearance_max_discount_rate"] == pytest.approx(0.30)
     assert out["pricing_tier_label"] == "日常"
-    assert out["pricing_tier_source"] == "fallback_no_age_data"
-    assert out["pricing_age_days"] is None
+    assert out["pricing_tier_source"] == "fallback_no_restock_days"
+    assert out["pricing_days_since_restock"] is None
     assert out["min_selling_price_missing_reasons"] == []
 
 
@@ -390,7 +390,7 @@ def test_router_exposes_pricing_policy_routes():
     assert '@router.get("/api/sku-pricing-policies"' in source
     assert '@router.get("/api/sku-pricing-policies/current"' in source
     assert '@router.post("/api/sku-pricing-policies"' in source
-    assert '@router.put("/api/sku-pricing-policies/{min_age_days}"' in source
+    assert '@router.put("/api/sku-pricing-policies/{min_restock_days}"' in source
     # 四条端点都必须声明 response_model
     for line in source.splitlines():
         if "@router." in line and "sku-pricing-policies" in line:
@@ -408,7 +408,7 @@ async def test_pricing_policy_crud_and_versioned_update(
         "/api/sku-pricing-policies",
         headers=pricing_auth_headers,
         json={
-            "min_age_days": 30,
+            "min_restock_days": 30,
             "tier_label": "测试档",
             "discount_rate": 0.12,
             "target_margin_rate": 0.22,
@@ -422,14 +422,14 @@ async def test_pricing_policy_crud_and_versioned_update(
         "/api/sku-pricing-policies/current", headers=pricing_auth_headers
     )
     assert current.status_code == 200
-    assert any(row["min_age_days"] == 30 for row in current.json())
+    assert any(row["min_restock_days"] == 30 for row in current.json())
 
     # 未来生效日期 -> 422
     future = await pg_async_client.post(
         "/api/sku-pricing-policies",
         headers=pricing_auth_headers,
         json={
-            "min_age_days": 45,
+            "min_restock_days": 45,
             "tier_label": "未来档",
             "discount_rate": 0.12,
             "target_margin_rate": 0.22,
@@ -444,7 +444,7 @@ async def test_pricing_policy_crud_and_versioned_update(
         "/api/sku-pricing-policies",
         headers=pricing_auth_headers,
         json={
-            "min_age_days": 30,
+            "min_restock_days": 30,
             "tier_label": "测试档2",
             "discount_rate": 0.13,
             "target_margin_rate": 0.22,
@@ -459,7 +459,7 @@ async def test_pricing_policy_crud_and_versioned_update(
         "/api/sku-pricing-policies/30",
         headers=pricing_auth_headers,
         json={
-            "min_age_days": 30,
+            "min_restock_days": 30,
             "tier_label": "测试档",
             "discount_rate": 0.14,
             "target_margin_rate": 0.22,
@@ -471,7 +471,7 @@ async def test_pricing_policy_crud_and_versioned_update(
     current = await pg_async_client.get(
         "/api/sku-pricing-policies/current", headers=pricing_auth_headers
     )
-    rows = [row for row in current.json() if row["min_age_days"] == 30]
+    rows = [row for row in current.json() if row["min_restock_days"] == 30]
     assert len(rows) == 1
     assert rows[0]["discount_rate"] == pytest.approx(0.14)
 
@@ -483,7 +483,7 @@ async def test_pricing_policy_crud_and_versioned_update(
         "/api/sku-pricing-policies/30",
         headers=pricing_auth_headers,
         json={
-            "min_age_days": 45,
+            "min_restock_days": 45,
             "tier_label": "改边界档",
             "discount_rate": 0.15,
             "target_margin_rate": 0.22,
@@ -495,7 +495,7 @@ async def test_pricing_policy_crud_and_versioned_update(
     current = await pg_async_client.get(
         "/api/sku-pricing-policies/current", headers=pricing_auth_headers
     )
-    tiers = {row["min_age_days"] for row in current.json()}
+    tiers = {row["min_restock_days"] for row in current.json()}
     assert 45 in tiers
     assert 30 not in tiers
 
@@ -504,7 +504,7 @@ async def test_pricing_policy_crud_and_versioned_update(
         "/api/sku-pricing-policies/45",
         headers=pricing_auth_headers,
         json={
-            "min_age_days": 60,
+            "min_restock_days": 60,
             "tier_label": "冲突档",
             "discount_rate": 0.16,
             "target_margin_rate": 0.22,
@@ -524,7 +524,7 @@ async def test_pricing_policy_write_is_audited(
         "/api/sku-pricing-policies",
         headers=pricing_auth_headers,
         json={
-            "min_age_days": 77,
+            "min_restock_days": 77,
             "tier_label": "审计档",
             "discount_rate": 0.2,
             "target_margin_rate": 0.18,
@@ -627,8 +627,8 @@ async def test_list_skus_injects_pricing_payload(
     assert row["clearance_max_discount_rate"] == pytest.approx(0.30)
     assert row["pricing_tier_label"] == "日常"
     # 测试库没有 mart 表 -> 回落日常档
-    assert row["pricing_tier_source"] == "fallback_no_age_data"
-    assert row["pricing_age_days"] is None
+    assert row["pricing_tier_source"] == "fallback_no_restock_days"
+    assert row["pricing_days_since_restock"] is None
     assert row["min_selling_price_missing_reasons"] == []
     # SKU 没单独设佣金 -> 返回 None（前端输入框留空），兜底值单独给
     assert row["creator_commission_rate"] is None
@@ -688,22 +688,22 @@ async def test_mart_age_lookup_works_when_table_exists_and_survives_when_not(
     """
     await pricing_seed()
 
-    # 1) mart 表存在且有一行：age_days=75 -> 命中 min_age_days=60 的「滞销30天」档
+    # 1) mart 表存在且有一行：days_since_restock=75 -> 命中 min_restock_days=60 的「滞销30天」档
     await pg_session.execute(text("CREATE SCHEMA IF NOT EXISTS mart"))
     await pg_session.execute(text(
         "CREATE TABLE IF NOT EXISTS mart.inventory_age_current ("
-        " product_sku text, age_days integer)"
+        " product_sku text, days_since_restock integer)"
     ))
     await pg_session.execute(text(
-        "INSERT INTO mart.inventory_age_current (product_sku, age_days) "
+        "INSERT INTO mart.inventory_age_current (product_sku, days_since_restock) "
         "VALUES ('TEST-SKU-1', 75)"
     ))
 
     resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
     assert resp.status_code == 200, resp.text
     row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
-    assert row["pricing_age_days"] == 75
-    assert row["pricing_tier_source"] == "age_data"
+    assert row["pricing_days_since_restock"] == 75
+    assert row["pricing_tier_source"] == "restock_days"
     assert row["pricing_tier_label"] == "滞销30天"
     assert row["current_discount_rate"] == pytest.approx(0.15)
 
@@ -713,8 +713,8 @@ async def test_mart_age_lookup_works_when_table_exists_and_survives_when_not(
     resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
     assert resp.status_code == 200, resp.text
     row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
-    assert row["pricing_tier_source"] == "fallback_no_age_data"
-    assert row["pricing_age_days"] is None
+    assert row["pricing_tier_source"] == "fallback_no_restock_days"
+    assert row["pricing_days_since_restock"] is None
 
     # 3) 再查一次：若事务在上一步被 abort，这里会 500
     again = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
@@ -761,8 +761,8 @@ async def test_estimate_below_floor_is_rejected_but_draft_is_not(
     assert row["min_selling_price"] == pytest.approx(28.23, abs=0.01)
     assert row["min_selling_price_source"] == "cost_floor"
     # 库龄表在测试库不存在 -> 回落「日常」档
-    assert row["pricing_tier_source"] == "fallback_no_age_data"
-    assert row["pricing_age_days"] is None
+    assert row["pricing_tier_source"] == "fallback_no_restock_days"
+    assert row["pricing_days_since_restock"] is None
 
     payload = {
         "sku_id": row["sku_id"],

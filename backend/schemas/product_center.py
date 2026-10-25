@@ -287,7 +287,7 @@ class ProductCenterItem(BaseModel):
     min_selling_price_override: Optional[float] = None
     min_selling_price_missing_reasons: list[str] = Field(default_factory=list)
     pricing_tier_label: Optional[str] = None
-    pricing_age_days: Optional[int] = None
+    pricing_days_since_restock: Optional[int] = None
     pricing_tier_source: Optional[str] = None
 
 
@@ -847,7 +847,7 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     min_selling_price_override: Optional[float] = None
     min_selling_price_missing_reasons: list[str] = Field(default_factory=list)
     pricing_tier_label: Optional[str] = None
-    pricing_age_days: Optional[int] = None
+    pricing_days_since_restock: Optional[int] = None
     pricing_tier_source: Optional[str] = None
     min_selling_price_below: Optional[bool] = None
 
@@ -1087,7 +1087,7 @@ class SkuPricingPolicyBase(BaseModel):
 
 
 class SkuPricingPolicyCreateRequest(SkuPricingPolicyBase):
-    min_age_days: int = Field(ge=0)
+    min_restock_days: int = Field(ge=0)
 
 
 class SkuPricingPolicyUpdateRequest(BaseModel):
@@ -1106,7 +1106,7 @@ class SkuPricingPolicyUpdateRequest(BaseModel):
     target_margin_rate: float = Field(ge=0, lt=1)
     platform_basis: str = Field(min_length=1, max_length=32)
     effective_from: date
-    min_age_days: int = Field(ge=0)
+    min_restock_days: int = Field(ge=0)
     source: Optional[str] = Field(default=None, max_length=128)
     version: Optional[str] = Field(default=None, max_length=64)
     notes: Optional[str] = None
@@ -1116,5 +1116,5 @@ class SkuPricingPolicyResponse(SkuPricingPolicyBase):
     model_config = ConfigDict(from_attributes=True)
 
     policy_id: int
-    min_age_days: int
+    min_restock_days: int
     effective_to: Optional[date] = None

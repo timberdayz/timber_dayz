@@ -255,7 +255,7 @@
           ><el-table-column label="参考售价" width="115"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="当前可优惠" width="110"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column
           ><el-table-column label="滞销可优惠" width="110"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column
-          ><el-table-column label="最低售价" width="230"><template #default="{ row }"><div class="pricing-cell"><div class="pricing-cell-head"><span class="readonly-cell" :class="{ 'pending-override': pendingOverride(row) != null }">{{ pendingOverride(row) != null ? `保存后生效：${money(pendingOverride(row))}` : money(row.min_selling_price) }}</span><el-tag v-if="pendingOverride(row) == null" size="small" :type="pricingSourceTagType(row.min_selling_price_source)" :title="PRICING_SOURCE_TOOLTIPS[row.min_selling_price_source]">{{ pricingSourceLabel(row.min_selling_price_source) }}</el-tag><el-button v-if="row.min_selling_price_is_override || row.min_selling_price_override != null" link type="warning" @click="resetMinSellingPrice(row)">重置为自动值</el-button></div><el-input-number v-model="row.min_selling_price_override" :min="0.01" :precision="2" :controls="false" size="small" :placeholder="row.min_selling_price != null ? money(row.min_selling_price) : '自动'" @change="markDirty('sku', row)" /><div class="pricing-tier-hint">{{ row.pricing_tier_label || "-" }}<template v-if="row.pricing_age_days != null">（库龄 {{ row.pricing_age_days }} 天）</template><el-tag v-if="row.pricing_tier_source === 'fallback_no_age_data'" size="small" type="info">兜底</el-tag></div></div></template></el-table-column
+          ><el-table-column label="最低售价" width="230"><template #default="{ row }"><div class="pricing-cell"><div class="pricing-cell-head"><span class="readonly-cell" :class="{ 'pending-override': pendingOverride(row) != null }">{{ pendingOverride(row) != null ? `保存后生效：${money(pendingOverride(row))}` : money(row.min_selling_price) }}</span><el-tag v-if="pendingOverride(row) == null" size="small" :type="pricingSourceTagType(row.min_selling_price_source)" :title="PRICING_SOURCE_TOOLTIPS[row.min_selling_price_source]">{{ pricingSourceLabel(row.min_selling_price_source) }}</el-tag><el-button v-if="row.min_selling_price_is_override || row.min_selling_price_override != null" link type="warning" @click="resetMinSellingPrice(row)">重置为自动值</el-button></div><el-input-number v-model="row.min_selling_price_override" :min="0.01" :precision="2" :controls="false" size="small" :placeholder="row.min_selling_price != null ? money(row.min_selling_price) : '自动'" @change="markDirty('sku', row)" /><div class="pricing-tier-hint">{{ row.pricing_tier_label || "-" }}<template v-if="row.pricing_days_since_restock != null">（库龄 {{ row.pricing_days_since_restock }} 天）</template><el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag></div></div></template></el-table-column
           ><el-table-column label="达人佣金率" width="145"><template #header><el-tooltip content="留空表示不单独设置，按平台默认计算" placement="top"><span class="pricing-header">达人佣金率<el-icon class="pricing-header-help"><QuestionFilled /></el-icon></span></el-tooltip></template><template #default="{ row }"><div class="rate-cell"><el-input-number :model-value="toPercent(row.creator_commission_rate)" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" :placeholder="row.creator_commission_rate_fallback != null ? percent(row.creator_commission_rate_fallback) : '按平台默认'" @update:model-value="row.creator_commission_rate = fromPercent($event, null); markDirty('sku', row)" /><span class="rate-suffix">%</span></div></template></el-table-column
           ><el-table-column label="售价来源" width="120"><template #default="{ row }"><el-input v-model="row.selling_price_source" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="周转类型" width="120"><template #default="{ row }"><el-select v-model="row.turnover_class" size="small" placeholder="选择" @change="markDirty('sku', row)"><el-option label="快销商品（30天）" value="fast" /><el-option label="普通商品（60天）" value="normal" /><el-option label="慢销商品（90天）" value="slow" /></el-select></template></el-table-column
@@ -351,7 +351,7 @@
               ><span class="readonly-cell">{{ money(row.min_selling_price) }}</span>
               <div class="pricing-tier-hint">
                 {{ row.pricing_tier_label || "-" }}
-                <el-tag v-if="row.pricing_tier_source === 'fallback_no_age_data'" size="small" type="info">兜底</el-tag>
+                <el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag>
               </div>
               <div class="pricing-tier-hint">公司统一口径，不随平台/仓库变化</div></template
           ></el-table-column>
@@ -625,7 +625,7 @@
           <el-table :data="pricingDrawer.policies" size="small" border>
             <el-table-column label="库龄起点" width="120">
               <template #default="{ row }">
-                <el-input-number v-model="row.min_age_days" :min="0" :step="1" :precision="0" :controls="false" size="small" />
+                <el-input-number v-model="row.min_restock_days" :min="0" :step="1" :precision="0" :controls="false" size="small" />
               </template>
             </el-table-column>
             <el-table-column label="档位名" min-width="140">
@@ -1392,8 +1392,8 @@ const savePricingPolicies = async () => {
   saving.value = true;
   try {
     for (const row of pricingDrawer.policies) {
-      await productCenterApi.updateSkuPricingPolicy(row.min_age_days, {
-        min_age_days: row.min_age_days,
+      await productCenterApi.updateSkuPricingPolicy(row.min_restock_days, {
+        min_restock_days: row.min_restock_days,
         tier_label: row.tier_label,
         discount_rate: fromPercent(row.discount_rate_pct, null),
         target_margin_rate: fromPercent(row.target_margin_rate_pct, null),
@@ -1575,7 +1575,7 @@ const payloadSku = (row) => {
   // 剔除**只读计算字段**（服务端算出来的，提交回去没有意义）：
   // current_discount_rate / clearance_max_discount_rate / min_selling_price /
   // min_selling_price_source / min_selling_price_is_override /
-  // min_selling_price_missing_reasons / pricing_tier_label / pricing_age_days /
+  // min_selling_price_missing_reasons / pricing_tier_label / pricing_days_since_restock /
   // pricing_tier_source / creator_commission_rate_fallback
   // ⚠️ creator_commission_rate_fallback 也要剔除：它只是平台兜底值的展示，
   // 不是 SKU 自己设的值，回提交上去会被当成「单独设置过」。
@@ -1586,7 +1586,7 @@ const payloadSku = (row) => {
   delete payload.min_selling_price_is_override;
   delete payload.min_selling_price_missing_reasons;
   delete payload.pricing_tier_label;
-  delete payload.pricing_age_days;
+  delete payload.pricing_days_since_restock;
   delete payload.pricing_tier_source;
   delete payload.creator_commission_rate_fallback;
   // ⚠️ min_selling_price_override 与 creator_commission_rate 必须**保留**：

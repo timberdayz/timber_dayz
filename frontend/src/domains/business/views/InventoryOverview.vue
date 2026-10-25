@@ -19,13 +19,13 @@
 
     <el-row :gutter="20" class="stats-row">
       <el-col :span="8">
-        <el-card><el-statistic title="高风险SKU" :value="stats.high_risk_sku_count" /></el-card>
+        <el-card><el-statistic title="重度积压SKU" :value="stats.deep_stagnant_sku_count" /></el-card>
       </el-col>
       <el-col :span="8">
-        <el-card><el-statistic title="中风险SKU" :value="stats.medium_risk_sku_count" /></el-card>
+        <el-card><el-statistic title="中度积压SKU" :value="stats.mid_stagnant_sku_count" /></el-card>
       </el-col>
       <el-col :span="8">
-        <el-card><el-statistic title="低风险SKU" :value="stats.low_risk_sku_count" /></el-card>
+        <el-card><el-statistic title="活跃SKU" :value="stats.active_sku_count" /></el-card>
       </el-col>
     </el-row>
 
@@ -143,9 +143,9 @@ const stats = reactive({
   total_value: 0,
   low_stock_count: 0,
   out_of_stock_count: 0,
-  high_risk_sku_count: 0,
-  medium_risk_sku_count: 0,
-  low_risk_sku_count: 0,
+  deep_stagnant_sku_count: 0,
+  mid_stagnant_sku_count: 0,
+  active_sku_count: 0,
   platform_breakdown: []
 })
 

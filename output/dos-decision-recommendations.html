@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DOS 五项待拍板事项 · 建议稿</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f7f5f0;--card:#fff;--line:#e9e3d6;--line-soft:#f0ebe0;
+ --ink:#14171e;--ink2:#3a4256;--muted:#7c7a72;
+ --primary:#2f6f5e;--p-soft:rgba(47,111,94,.08);
+ --warn:#c97b3f;--w-soft:rgba(201,123,63,.09);
+ --danger:#b06367;--d-soft:rgba(176,99,103,.09);--mono:'JetBrains Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+ font-size:14.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+ background:radial-gradient(760px 380px at 88% -8%,rgba(47,111,94,.055),transparent 62%),
+            radial-gradient(620px 320px at 4% 4%,rgba(201,123,63,.045),transparent 60%)}
+.wrap{position:relative;z-index:1;max-width:1120px;margin:0 auto;padding:64px 28px 96px}
+h1,h2{font-family:'DM Serif Display',Georgia,'Songti SC',serif;font-weight:400;letter-spacing:-.005em}
+h1{font-size:33px;line-height:1.25;margin-bottom:15px}
+h2{font-size:24px;margin-bottom:8px}
+h3{font-size:15.5px;font-weight:600}
+.lede{font-size:16.5px;color:var(--ink2);max-width:78ch}
+.kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;
+ letter-spacing:.13em;text-transform:uppercase;color:var(--primary);margin-bottom:12px}
+.kicker::before{content:"";width:18px;height:2px;background:var(--primary);border-radius:2px}
+.sec{margin-top:50px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px}
+.card+.card{margin-top:14px}
+code{font-family:var(--mono);font-size:12.5px;background:var(--p-soft);color:var(--primary);padding:1px 6px;border-radius:5px}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.t-ok{background:var(--p-soft);color:var(--primary)}
+.t-w{background:var(--w-soft);color:var(--warn)}
+.t-b{background:var(--d-soft);color:var(--danger)}
+.t-n{background:#f0ede6;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+ color:var(--muted);padding:0 12px 9px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink2);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td strong{color:var(--ink)}
+td.num,th.num{text-align:right;font-family:var(--mono);font-size:12.5px}
+tr.total td{background:rgba(47,111,94,.06);font-weight:600;color:var(--ink)}
+tr.out td{color:var(--muted)}
+tr.hit td{background:rgba(176,99,103,.05)}
+.callout{border-radius:13px;padding:16px 18px;border:1px solid var(--line);background:var(--card)}
+.callout.w{background:var(--w-soft);border-color:rgba(201,123,63,.32)}
+.callout.o{background:var(--p-soft);border-color:rgba(47,111,94,.28)}
+.callout.b{background:var(--d-soft);border-color:rgba(176,99,103,.3)}
+.callout .ct{font-weight:600;font-size:14px;margin-bottom:5px;display:flex;align-items:center;gap:8px}
+.callout p{font-size:13.5px;color:var(--ink2)}
+.callout p+p{margin-top:8px}
+.decision{border:1px solid var(--line);border-radius:16px;background:var(--card);padding:0;overflow:hidden;margin-top:16px}
+.dhead{display:flex;align-items:center;gap:12px;padding:17px 22px;border-bottom:1px solid var(--line);
+ background:linear-gradient(90deg,rgba(47,111,94,.05),transparent)}
+.dno{font-family:'DM Serif Display',serif;font-size:26px;color:var(--primary);min-width:38px}
+.dtitle{font-weight:600;font-size:15.5px}
+.dsub{font-size:12.5px;color:var(--muted);margin-top:2px}
+.dbody{padding:18px 22px}
+ul.plain{list:none;padding:0;margin:6px 0 0}
+ul.plain li{padding:5px 0 5px 20px;position:relative;font-size:13.5px;color:var(--ink2)}
+ul.plain li::before{content:"";position:absolute;left:4px;top:13px;width:5px;height:5px;
+ border-radius:50%;background:var(--primary)}
+ul.plain li b{color:var(--ink)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px}
+.panel{border:1px solid var(--line);border-radius:13px;padding:16px 18px;background:var(--card)}
+.panel.no{background:#fbf6f4;border-color:rgba(176,99,103,.3)}
+.panel.yes{background:#f4f9f6;border-color:rgba(47,111,94,.3)}
+.panel .ph{font-weight:600;font-size:13.5px;margin-bottom:9px}
+.metric{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);
+ border:1px solid var(--line);border-radius:13px;overflow:hidden;margin-top:14px}
+.metric .m{background:var(--card);padding:14px 16px}
+.metric .mn{font-family:'DM Serif Display',serif;font-size:21px;line-height:1.2}
+.metric .ml{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.45}
+.bar{height:7px;border-radius:4px;background:var(--line-soft);overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;background:var(--primary)}
+.bar i.w{background:var(--warn)}
+.bar i.r{background:var(--danger)}
+footer{margin-top:58px;padding-top:22px;border-top:1px solid var(--line);
+ font-size:12.5px;color:var(--muted);line-height:1.8}
+footer b{color:var(--ink2)}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}.metric{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="kicker">待拍板事项 · 建议稿 · 2026-10-24</div>
+<h1>五件事，我的建议是这样</h1>
+<p class="lede">
+每一项都已用真实数据核算过，可直接当实施规格用。其中<strong>第 3 项藏着一个必须先修的问题</strong>，
+第 1 项如果照现有逻辑做，会让最该清的货享受日常折扣。
+</p>
+
+<div class="metric">
+  <div class="m"><div class="mn">395</div><div class="ml">建议进滞销榜的行数<br>货值 ¥168,379.94</div></div>
+  <div class="m"><div class="mn">138</div><div class="ml">零销量有库存<br>必须最深档，不能落日常</div></div>
+  <div class="m"><div class="mn">708</div><div class="ml">若沿用现有回落逻辑<br>会落进日常档的 SKU 数</div></div>
+</div>
+
+<!-- ✅ 2026-10-24 晚间修正：DOS 定位 -->
+<section class="sec" style="margin-top:32px">
+<div class="callout w">
+  <div class="ct"><span class="tag t-w">DOS 定位 · 2026-10-24 晚间修正</span>DOS 降级为参考，不做全域使用</div>
+  <p>采集策略已定：<b>不再全量，只有配置采集 + 增量更新</b>。妙手「近 XX 天销量」是<b>行级存储快照</b>，只在那一行被写入时才刷新，增量批次实测只覆盖 <b>13.6%</b> 的 SKU（151 / 1113）→ <b>DOS 不作判定依据</b>。</p>
+  <p>→ 滞销判据改用<b>库存停滞时长</b>（今天 − 库存最后一次<b>真实变动</b>的时间，由落盘层行内容 diff 维护，不信妙手的时间戳）；DOS 保留在表里<b>作为参考值</b>，并明确标注「参考」。完整取证见 <code>output/dos-freshness-evidence.html</code>。</p>
+</div>
+</section>
+
+<!-- 1 -->
+<section class="sec">
+<div class="decision">
+  <div class="dhead">
+    <div class="dno">1</div>
+    <div>
+      <div class="dtitle">DOS 分档阈值</div>
+      <div class="dsub">建议：90 / 180 两档进榜 · &lt;30 判快断货不进榜 · 零销量单独一档</div>
+    </div>
+  </div>
+  <div class="dbody">
+    <table>
+    <thead><tr><th style="width:38%">档</th><th class="num" style="width:14%">行数</th><th class="num" style="width:20%">货值</th><th>处理</th></tr></thead>
+    <tbody>
+    <tr class="hit"><td><span class="tag t-b">重度积压</span> DOS ≥ 180</td><td class="num">161</td><td class="num">¥95,123.31</td><td>进榜</td></tr>
+    <tr class="hit"><td><span class="tag t-w">中度滞销</span> DOS 90–180</td><td class="num">93</td><td class="num">¥36,779.27</td><td>进榜</td></tr>
+    <tr class="hit"><td><span class="tag t-b">零销量积压</span> 近 90 天销量 = 0 且有库存</td><td class="num">138</td><td class="num">¥36,411.48</td><td><b>进榜，排在最前</b></td></tr>
+    <tr class="total"><td>合计进榜</td><td class="num">395</td><td class="num">¥168,379.94</td><td></td></tr>
+    <tr class="out"><td>30–90 天</td><td class="num">84</td><td class="num">¥48,504.97</td><td>不进榜</td></tr>
+    <tr class="out"><td>&lt; 30 天 快断货</td><td class="num">30</td><td class="num">¥9,886.54</td><td>不进榜（见第 4 项）</td></tr>
+    </tbody>
+    </table>
+    <div class="callout b" style="margin-top:14px">
+      <div class="ct"><span class="tag t-b">必须一起改</span>零销量不能沿用「不可算 → 回落最小档」</div>
+      <p>现在的 <code>select_age_tier</code> 在 <code>age_days is None</code> 时回落到 <code>min_age_days</code> 最小的一行（日常档）。
+      按此逻辑会有 <b>708 个 SKU 落进日常档，其中 138 个是零销量有库存</b>（1597 件、货值 ¥36,411）——
+      <b>最该清的货反而享受日常折扣 0.10</b>。这是本次必须一并修掉的错配。</p>
+    </div>
+    <div class="callout o" style="margin-top:10px">
+      <div class="ct"><span class="tag t-ok">理由</span>零销量比 DOS ≥ 180 更严重</div>
+      <p>「90 天完全没卖」在任何分档下都是最坏的一档，必须单独成档并排在最前，而不是被当作「算不出来」。</p>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- 2 -->
+<section class="sec">
+<div class="decision">
+  <div class="dhead">
+    <div class="dno">2</div>
+    <div>
+      <div class="dtitle">DOS 库存口径</div>
+      <div class="dsub">建议：可用库存（货值仍用库存总量）</div>
+    </div>
+  </div>
+  <div class="dbody">
+    <div class="grid2">
+      <div class="panel yes">
+        <div class="ph">✓ 支持可用库存的理由</div>
+        <ul class="plain">
+          <li>两种口径差异极小：DOS&lt;30 是 <b>32 vs 30</b>；DOS≥180 是 <b>164 vs 161</b></li>
+          <li>DOS 回答「还能卖多少天」——分母是真实卖出的量，分子取<b>可售</b>的部分才自洽</li>
+          <li>预占与次品本就卖不掉，不该算进「还能卖多久」</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">但货值要用库存总量</div>
+        <ul class="plain">
+          <li>压着的钱包含预占与次品</li>
+          <li>所以：<b>分子（可用库存）</b>算 DOS，<b>金额（库存总量 × 单价）</b>算货值</li>
+          <li>与现状一致：<code>mart.inventory_backlog_base</code> 本来就是这样</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- 3 -->
+<section class="sec">
+<div class="decision">
+  <div class="dhead">
+    <div class="dno">3</div>
+    <div>
+      <div class="dtitle">商品中心最低售价用哪档</div>
+      <div class="dsub">建议：DOS-90 —— 但必须同时做三件事</div>
+    </div>
+  </div>
+  <div class="dbody">
+    <div class="callout w">
+      <div class="ct"><span class="tag t-w">先修</span>档位表的列名与标签本身就错位</div>
+      <p><code>finance.sku_pricing_policies</code>（就是之前没找到的那张档位表）按「库龄门槛」存，却用「滞销天数」做标签。
+      换成 DOS 后这个错位会更荒谬——<code>min_age_days</code> 变成 DOS 门槛，标签还是滞销天数。</p>
+    </div>
+    <table style="margin-top:12px">
+    <thead><tr><th class="num" style="width:18%">min_age_days</th><th style="width:26%">tier_label</th><th class="num" style="width:16%">discount_rate</th><th class="num">target_margin_rate</th></tr></thead>
+    <tbody>
+    <tr><td class="num">0</td><td>日常</td><td class="num">0.10</td><td class="num">0.25</td></tr>
+    <tr><td class="num">60</td><td>滞销30天</td><td class="num">0.15</td><td class="num">0.22</td></tr>
+    <tr><td class="num">90</td><td>滞销60天</td><td class="num">0.20</td><td class="num">0.18</td></tr>
+    <tr><td class="num">120</td><td>滞销60天以上</td><td class="num">0.30</td><td class="num">0.10</td></tr>
+    </tbody>
+    </table>
+
+    <h3 style="margin:18px 0 9px">三件事</h3>
+    <table>
+    <thead><tr><th style="width:22%">动作</th><th style="width:30%">做法</th><th>依据</th></tr></thead>
+    <tbody>
+    <tr><td><strong>① 列名改</strong></td><td><code>min_age_days</code> → <code>min_dos_days</code></td><td>否则「age」与 DOS 永远分不清，且与本次的 DOS 改名清单要合并做</td></tr>
+    <tr><td><strong>② 阈值重标定</strong></td><td>0/60/90/120（库龄）→ <b>0/30/90/180</b>（DOS）</td><td>与滞销模块对齐。沿用旧阈值命中 285/254/214 个 SKU；改后命中 338/254/161</td></tr>
+    <tr><td><strong>③ 零销量归档</strong></td><td>零销量有库存 → <b>最深滞销档</b></td><td>138 个 SKU，见第 1 项</td></tr>
+    </tbody>
+    </table>
+
+    <h3 style="margin:18px 0 9px">落档结果（1076 个库存快照 SKU）</h3>
+    <table>
+    <thead><tr><th style="width:34%">档</th><th class="num" style="width:14%">SKU</th><th style="width:40%">构成</th><th>进度</th></tr></thead>
+    <tbody>
+    <tr><td>日常</td><td class="num">600</td><td>DOS&lt;30 的 30 + 零销量无库存 495 + 无库存但有销量 75</td><td><div class="bar"><i style="width:56%"></i></div></td></tr>
+    <tr><td>滞销档1（DOS 30–90）</td><td class="num">84</td><td></td><td><div class="bar"><i class="w" style="width:8%"></i></div></td></tr>
+    <tr><td>滞销档2（DOS 90–180）</td><td class="num">93</td><td></td><td><div class="bar"><i class="w" style="width:9%"></i></div></td></tr>
+    <tr><td>滞销档3（DOS ≥ 180）</td><td class="num">161</td><td></td><td><div class="bar"><i class="r" style="width:15%"></i></div></td></tr>
+    <tr class="hit"><td>零销量有库存 → 最深档</td><td class="num">138</td><td>本次新增规则</td><td><div class="bar"><i class="r" style="width:13%"></i></div></td></tr>
+    </tbody>
+    </table>
+
+    <div class="callout o" style="margin-top:14px">
+      <div class="ct"><span class="tag t-ok">风险已排除</span>SKU 聚合规则不影响结果</div>
+      <p>商品中心是 SKU 粒度，DOS 是 SKU×仓 粒度。37 个多仓 SKU 中，
+      <b>合并口径与「取最差仓」口径在档位判定上完全一致</b>（分歧查询返回空）→ 聚合规则怎么选都不改变落档。
+      建议用<b>合并口径</b>（全仓总库存 ÷ 全仓总销量 × 90），因为定价是全国一价。</p>
+    </div>
+    <div class="callout" style="margin-top:10px">
+      <div class="ct"><span class="tag t-n">本次不动</span>档位参数本身</div>
+      <p>折扣率与目标毛利是商业决策，不是数据口径问题——本次只改「用什么指标选档」。
+      但需在词典记一笔：这 4 档的 <code>platform_basis</code> 均为 <code>tiktok</code>，<code>source</code> 为 <code>industry_benchmark_2026</code>。</p>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- 4 -->
+<section class="sec">
+<div class="decision">
+  <div class="dhead">
+    <div class="dno">4</div>
+    <div>
+      <div class="dtitle">快断货是否进滞销模块</div>
+      <div class="dsub">建议：不进 —— 改为表格上方一条可筛选提示</div>
+    </div>
+  </div>
+  <div class="dbody">
+    <ul class="plain">
+      <li>DOS &lt; 30 只有 <b>30 行 / ¥9,886.54（4.4% 货值）</b>，是<b>补货信号</b>，与「滞销」业务含义相反</li>
+      <li>混进同一张榜会出现「又缺货又滞销」的矛盾清单，运营会困惑</li>
+    </ul>
+    <div class="callout o" style="margin-top:12px">
+      <div class="ct"><span class="tag t-ok">形态建议</span>不加第 5 张顶部卡</div>
+      <p>顶部已 4 张卡，不宜再挤。改为在<b>表格上方一条提示</b>，点击切换筛选：<br>
+      「另有 <b>30</b> 个 SKU 库存不足 30 天（快断货，需补货）→」</p>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- 5 -->
+<section class="sec">
+<div class="decision">
+  <div class="dhead">
+    <div class="dno">5</div>
+    <div>
+      <div class="dtitle">指标词典登记</div>
+      <div class="dsub">建议：本次一并做 —— 这是唯一能真正防住后续 agent 混淆的机制</div>
+    </div>
+  </div>
+  <div class="dbody">
+    <table>
+    <thead><tr><th style="width:34%">文件</th><th>登记内容</th></tr></thead>
+    <tbody>
+    <tr><td><code>references/metrics-dictionary.md</code></td><td>4 个指标各一段：中文名 / 定义 / 公式 / 来源 / 适用范围 / 能证明什么 / <b>不能证明什么</b> / 状态</td></tr>
+    <tr><td><code>references/metric-status.md</code></td><td>4 行状态：清单口径 <code>observe</code>、订单口径 <code>blocked</code>（无 miaoshou 订单数据）</td></tr>
+    <tr><td><code>references/platform-mapping.md</code></td><td>新增「DOS」一节，写明<b>库存清单销量 vs ERP 订单销量</b>的差异来源（退款、取消、归属时间窗、时区）—— 该文件职责正是处理「名字相同但口径可能不同」的指标</td></tr>
+    </tbody>
+    </table>
+    <div class="callout w" style="margin-top:14px">
+      <div class="ct"><span class="tag t-w">注意</span>该 skill 有两份完全相同的副本</div>
+      <p>已用 SHA256 核对一致：<code>team-skills-bundle/sea-metrics-language/</code> 与 <code>docs/team-skills/sea-metrics-language/</code>。
+      改动必须<b>同步两份</b>，否则两处定义会漂移——这正是我们要防的问题本身。</p>
+    </div>
+  </div>
+</div>
+</section>
+
+<footer>
+<p><b>建议已写成可执行规格</b>：<code>docs/superpowers/specs/2026-10-24-dos-metric-naming-and-caliber-design.md</code> §6.1–§6.5</p>
+<p><b>数据基线</b>：<code>b_class.fact_miaoshou_inventory_snapshot</code>，file 3004，1113 行，metric_date 2026-09-01；
+档位表 <code>finance.sku_pricing_policies</code>；主数据 <code>core.dim_erp_sku</code>（active 1122）。</p>
+</footer>
+
+</div>
+</body>
+</html>

@@ -40,7 +40,7 @@ async def load_current_policies(db: AsyncSession) -> list[SkuPricingPolicy]:
     result = await db.execute(
         select(SkuPricingPolicy)
         .where(*policy_current_predicate())
-        .order_by(SkuPricingPolicy.min_age_days)
+        .order_by(SkuPricingPolicy.min_restock_days)
     )
     return list(result.scalars().all())
 
@@ -55,7 +55,7 @@ def to_policy_rows(policies) -> list[dict]:
 
     return [
         {
-            "min_age_days": p.min_age_days,
+            "min_restock_days": p.min_restock_days,
             "tier_label": p.tier_label,
             "discount_rate": Decimal(str(p.discount_rate)),
             "target_margin_rate": Decimal(str(p.target_margin_rate)),

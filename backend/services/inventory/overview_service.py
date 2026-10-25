@@ -197,9 +197,9 @@ class InventoryOverviewService:
                     text(
                         """
                         SELECT
-                            COALESCE(high_risk_sku_count, 0) AS high_risk_sku_count,
-                            COALESCE(medium_risk_sku_count, 0) AS medium_risk_sku_count,
-                            COALESCE(low_risk_sku_count, 0) AS low_risk_sku_count
+                            COALESCE(deep_stagnant_sku_count, 0) AS deep_stagnant_sku_count,
+                            COALESCE(mid_stagnant_sku_count, 0) AS mid_stagnant_sku_count,
+                            COALESCE(active_sku_count, 0) AS active_sku_count
                         FROM api.inventory_backlog_summary_module
                         LIMIT 1
                         """
@@ -215,9 +215,9 @@ class InventoryOverviewService:
             total_value=float(summary_row["total_value"] or 0.0),
             low_stock_count=int(summary_row["low_stock_count"] or 0),
             out_of_stock_count=int(summary_row["out_of_stock_count"] or 0),
-            high_risk_sku_count=int(risk_summary_row["high_risk_sku_count"]) if risk_summary_row else 0,
-            medium_risk_sku_count=int(risk_summary_row["medium_risk_sku_count"]) if risk_summary_row else 0,
-            low_risk_sku_count=int(risk_summary_row["low_risk_sku_count"]) if risk_summary_row else 0,
+            deep_stagnant_sku_count=int(risk_summary_row.get("deep_stagnant_sku_count") or 0) if risk_summary_row else 0,
+            mid_stagnant_sku_count=int(risk_summary_row.get("mid_stagnant_sku_count") or 0) if risk_summary_row else 0,
+            active_sku_count=int(risk_summary_row.get("active_sku_count") or 0) if risk_summary_row else 0,
             platform_breakdown=breakdown,
         )
 

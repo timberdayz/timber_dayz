@@ -8,6 +8,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
 from backend.models.database import AsyncSessionLocal
+from backend.services.inventory.inventory_dos_service import compute_dos
+from backend.services.inventory.inventory_restock_service import classify_restock_tier
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
 
 
@@ -544,19 +546,23 @@ def rank_inventory_backlog_rows(
     rows: list[dict[str, Any]],
     min_days: int = 30,
 ) -> list[dict[str, Any]]:
+    """按「距上次进货时长」筛选与排序。
+
+    2026-10-24：判据从 DOS 换成距上次进货时长——DOS 的分母（窗口销量）在增量模式下
+    只会刷新 13.6% 的 SKU，不能当判定依据；距上次进货时长是事件时刻，始终准确。
+    ``min_days`` 现在指**距上次进货天数门槛**。
+    """
     filtered = [
         dict(row)
         for row in rows
-        if (_to_optional_float(row.get("estimated_turnover_days")) or float("-inf")) >= min_days
+        if (_to_optional_float(row.get("days_since_restock")) or float("-inf")) >= min_days
     ]
     for row in filtered:
-        row["risk_level"] = row.get("risk_level") or _classify_inventory_backlog_risk(row)
-        row["clearance_priority_score"] = _inventory_backlog_priority_score(row)
+        row["restock_tier"] = _classify_inventory_backlog_restock_tier(row)
     filtered.sort(
         key=lambda row: (
-            _sort_numeric(row.get("clearance_priority_score")),
+            _sort_numeric(row.get("days_since_restock")),
             _sort_numeric(row.get("inventory_value")),
-            _sort_numeric(row.get("estimated_turnover_days")),
         ),
         reverse=True,
     )
@@ -588,112 +594,60 @@ def _inventory_sales_join_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
     )
 
 
-def _classify_inventory_backlog_risk(row: dict[str, Any]) -> str:
-    turnover_days = _to_float(row.get("estimated_turnover_days"))
-    stagnant_count = int(_to_float(row.get("stagnant_snapshot_count")))
-    if turnover_days >= 60 or stagnant_count >= 3:
-        return "high"
-    if turnover_days >= 30 or stagnant_count >= 2:
-        return "medium"
-    return "low"
+def _classify_inventory_backlog_restock_tier(row: dict[str, Any]) -> str:
+    """滞销档位：**走 inventory_restock_service 的唯一实现**，不在这里重写阈值。"""
+    days_since_restock = _to_optional_float(row.get("days_since_restock"))
+    return classify_restock_tier(int(days_since_restock) if days_since_restock is not None else None)
 
 
-def _inventory_backlog_priority_score(row: dict[str, Any]) -> float:
-    if row.get("clearance_priority_score") is not None:
-        return _to_float(row.get("clearance_priority_score"))
-    return round(
-        _to_float(row.get("inventory_value")) * 0.5
-        + _to_float(row.get("estimated_stagnant_days")) * 10
-        + _to_float(row.get("estimated_turnover_days")) * 2,
-        2,
+def _compute_checklist_dos_sales90(row: dict[str, Any]) -> float | None:
+    """DOS 参考值：**走 inventory_dos_service 的唯一实现**。
+
+    只作展示参考，不参与任何判定（分母在增量模式下不新鲜）。
+    """
+    value = compute_dos(
+        available_stock=row.get("available_stock"),
+        window_sales=row.get("checklist_sales_90d"),
+        window_days=90,
     )
+    return float(value) if value is not None else None
 
-
-def build_inventory_backlog_rows(
-    latest_rows: list[dict[str, Any]],
-    change_rows: list[dict[str, Any]],
-    sales_rows: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    change_by_key = {_inventory_snapshot_join_key(row): row for row in change_rows}
-    sales_by_key = {_inventory_sales_join_key(row): row for row in sales_rows}
-    backlog_rows: list[dict[str, Any]] = []
-
-    for latest_row in latest_rows:
-        change_row = change_by_key.get(_inventory_snapshot_join_key(latest_row), {})
-        sales_row = sales_by_key.get(_inventory_sales_join_key(latest_row), {})
-
-        available_stock = _to_optional_float(latest_row.get("available_stock")) or 0.0
-        sold_units_30d = _to_optional_float(sales_row.get("sold_units_30d")) or 0.0
-        active_days_30d = _to_optional_float(sales_row.get("active_days_30d")) or 0.0
-
-        if sold_units_30d > 0 and active_days_30d > 0:
-            daily_avg_sales = round(sold_units_30d / active_days_30d, 2)
-            estimated_turnover_days = round(available_stock / (sold_units_30d / active_days_30d), 0)
-        elif available_stock > 0:
-            daily_avg_sales = 0.0
-            estimated_turnover_days = 9999.0
-        else:
-            daily_avg_sales = 0.0
-            estimated_turnover_days = 0.0
-
-        backlog_row = {
-            "snapshot_date": latest_row.get("snapshot_date"),
-            "platform_code": latest_row.get("platform_code"),
-            "shop_id": latest_row.get("shop_id"),
-            "product_id": latest_row.get("product_id"),
-            "product_name": latest_row.get("product_name"),
-            "platform_sku": latest_row.get("platform_sku"),
-            "product_sku": latest_row.get("product_sku"),
-            "warehouse_name": latest_row.get("warehouse_name"),
-            "available_stock": available_stock,
-            "on_hand_stock": _to_optional_float(latest_row.get("on_hand_stock")) or 0.0,
-            "inventory_value": _to_optional_float(latest_row.get("inventory_value")) or 0.0,
-            "daily_avg_sales": daily_avg_sales,
-            "estimated_turnover_days": estimated_turnover_days,
-            "stock_delta": _to_optional_float(change_row.get("stock_delta")) or 0.0,
-            "inventory_value_delta": _to_optional_float(change_row.get("inventory_value_delta")) or 0.0,
-            "is_stagnant": bool(change_row.get("is_stagnant", False)),
-            "snapshot_gap_days": _to_optional_float(change_row.get("snapshot_gap_days")) or 0.0,
-            "estimated_stagnant_days": _to_optional_float(change_row.get("estimated_stagnant_days")) or 0.0,
-            "stagnant_snapshot_count": int(_to_optional_float(change_row.get("stagnant_snapshot_count")) or 0.0),
-        }
-        backlog_row["risk_level"] = _classify_inventory_backlog_risk(backlog_row)
-        backlog_row["clearance_priority_score"] = _inventory_backlog_priority_score(backlog_row)
-        backlog_rows.append(backlog_row)
-
-    return backlog_rows
 
 
 def summarize_inventory_backlog_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """滞销汇总（四张卡口径）：总库存价值 / 重度积压 / 中度积压 / 滞销占比。
+
+    2026-10-24：口径从「周转天数分档」换成「距上次进货时长分档」——
+    DOS 的分母（窗口销量）在增量模式下只会刷新 13.6% 的 SKU，不能当判定依据。
+    """
     total_value = sum(_to_optional_float(row.get("inventory_value")) or 0.0 for row in rows)
-    backlog_30d_value = sum(
+    deep_value = sum(
         (_to_optional_float(row.get("inventory_value")) or 0.0)
         for row in rows
-        if (_to_optional_float(row.get("estimated_turnover_days")) or 0.0) >= 30
+        if (_to_optional_float(row.get("days_since_restock")) or 0.0) >= 180
     )
-    backlog_60d_value = sum(
+    mid_value = sum(
         (_to_optional_float(row.get("inventory_value")) or 0.0)
         for row in rows
-        if (_to_optional_float(row.get("estimated_turnover_days")) or 0.0) >= 60
+        if 90 <= (_to_optional_float(row.get("days_since_restock")) or 0.0) < 180
     )
-    backlog_90d_value = sum(
-        (_to_optional_float(row.get("inventory_value")) or 0.0)
-        for row in rows
-        if (_to_optional_float(row.get("estimated_turnover_days")) or 0.0) >= 90
-    )
+    backlog_value = deep_value + mid_value
 
     return {
         "total_value": round(total_value, 2),
-        "backlog_30d_value": round(backlog_30d_value, 2),
-        "backlog_60d_value": round(backlog_60d_value, 2),
-        "backlog_90d_value": round(backlog_90d_value, 2),
-        "backlog_30d_ratio": round(backlog_30d_value * 100.0 / total_value, 2) if total_value else 0,
-        "backlog_60d_ratio": round(backlog_60d_value * 100.0 / total_value, 2) if total_value else 0,
-        "backlog_90d_ratio": round(backlog_90d_value * 100.0 / total_value, 2) if total_value else 0,
         "total_quantity": int(sum(_to_optional_float(row.get("available_stock")) or 0.0 for row in rows)),
-        "high_risk_sku_count": sum(1 for row in rows if row.get("risk_level") == "high"),
-        "medium_risk_sku_count": sum(1 for row in rows if row.get("risk_level") == "medium"),
-        "low_risk_sku_count": sum(1 for row in rows if row.get("risk_level") == "low"),
+        "deep_stagnant_value": round(deep_value, 2),
+        "deep_stagnant_ratio": round(deep_value * 100.0 / total_value, 2) if total_value else 0,
+        "mid_stagnant_value": round(mid_value, 2),
+        "mid_stagnant_ratio": round(mid_value * 100.0 / total_value, 2) if total_value else 0,
+        "backlog_value": round(backlog_value, 2),
+        "backlog_ratio": round(backlog_value * 100.0 / total_value, 2) if total_value else 0,
+        "active_row_count": sum(
+            1 for row in rows if (_to_optional_float(row.get("days_since_restock")) or 0.0) < 30
+        ),
+        "unknown_restock_row_count": sum(
+            1 for row in rows if row.get("days_since_restock") is None
+        ),
     }
 
 
@@ -1001,13 +955,18 @@ class PostgresqlDashboardService:
                 """
                 SELECT
                     SUM(inventory_value) AS total_value,
-                    SUM(CASE WHEN estimated_turnover_days >= 30 THEN inventory_value ELSE 0 END) AS backlog_30d_value,
-                    SUM(CASE WHEN estimated_turnover_days >= 60 THEN inventory_value ELSE 0 END) AS backlog_60d_value,
-                    SUM(CASE WHEN estimated_turnover_days >= 90 THEN inventory_value ELSE 0 END) AS backlog_90d_value,
                     SUM(available_stock) AS total_quantity,
-                    COUNT(*) FILTER (WHERE risk_level = 'high') AS high_risk_sku_count,
-                    COUNT(*) FILTER (WHERE risk_level = 'medium') AS medium_risk_sku_count,
-                    COUNT(*) FILTER (WHERE risk_level = 'low') AS low_risk_sku_count
+                    SUM(CASE WHEN days_since_restock >= 180 THEN inventory_value ELSE 0 END) AS deep_stagnant_value,
+                    SUM(
+                        CASE
+                            WHEN days_since_restock >= 90 AND days_since_restock < 180 THEN inventory_value
+                            ELSE 0
+                        END
+                    ) AS mid_stagnant_value,
+                    COUNT(*) FILTER (WHERE days_since_restock >= 180) AS deep_stagnant_row_count,
+                    COUNT(*) FILTER (WHERE days_since_restock >= 90 AND days_since_restock < 180) AS mid_stagnant_row_count,
+                    COUNT(*) FILTER (WHERE days_since_restock < 30) AS active_row_count,
+                    COUNT(*) FILTER (WHERE days_since_restock IS NULL) AS unknown_restock_row_count
                 FROM api.business_overview_inventory_backlog_module
                 WHERE snapshot_date >= :period_start
                   AND snapshot_date <= :period_end
@@ -1019,34 +978,41 @@ class PostgresqlDashboardService:
                 """
                 SELECT
                     total_value,
-                    backlog_30d_value,
-                    backlog_60d_value,
-                    backlog_90d_value,
                     total_quantity,
-                    high_risk_sku_count,
-                    medium_risk_sku_count,
-                    low_risk_sku_count
+                    deep_stagnant_value,
+                    mid_stagnant_value,
+                    deep_stagnant_row_count,
+                    mid_stagnant_row_count,
+                    active_row_count,
+                    unknown_restock_row_count
                 FROM api.inventory_backlog_summary_module
                 """,
                 {},
             )
         row = rows[0] if rows else {}
         total_value = _to_optional_float(row.get("total_value")) or 0.0
-        backlog_30d_value = _to_optional_float(row.get("backlog_30d_value")) or 0.0
-        backlog_60d_value = _to_optional_float(row.get("backlog_60d_value")) or 0.0
-        backlog_90d_value = _to_optional_float(row.get("backlog_90d_value")) or 0.0
+        deep_value = _to_optional_float(row.get("deep_stagnant_value")) or 0.0
+        mid_value = _to_optional_float(row.get("mid_stagnant_value")) or 0.0
+        backlog_value = deep_value + mid_value
         return {
             "total_value": round(total_value, 2),
-            "backlog_30d_value": round(backlog_30d_value, 2),
-            "backlog_60d_value": round(backlog_60d_value, 2),
-            "backlog_90d_value": round(backlog_90d_value, 2),
-            "backlog_30d_ratio": round(backlog_30d_value * 100.0 / total_value, 2) if total_value else 0,
-            "backlog_60d_ratio": round(backlog_60d_value * 100.0 / total_value, 2) if total_value else 0,
-            "backlog_90d_ratio": round(backlog_90d_value * 100.0 / total_value, 2) if total_value else 0,
             "total_quantity": int(_to_optional_float(row.get("total_quantity")) or 0.0),
-            "high_risk_sku_count": int(_to_optional_float(row.get("high_risk_sku_count")) or 0.0),
-            "medium_risk_sku_count": int(_to_optional_float(row.get("medium_risk_sku_count")) or 0.0),
-            "low_risk_sku_count": int(_to_optional_float(row.get("low_risk_sku_count")) or 0.0),
+            "deep_stagnant_value": round(deep_value, 2),
+            "deep_stagnant_ratio": round(deep_value * 100.0 / total_value, 2) if total_value else 0,
+            "mid_stagnant_value": round(mid_value, 2),
+            "mid_stagnant_ratio": round(mid_value * 100.0 / total_value, 2) if total_value else 0,
+            "backlog_value": round(backlog_value, 2),
+            "backlog_ratio": round(backlog_value * 100.0 / total_value, 2) if total_value else 0,
+            "deep_stagnant_row_count": int(
+                _to_optional_float(row.get("deep_stagnant_row_count")) or 0.0
+            ),
+            "mid_stagnant_row_count": int(
+                _to_optional_float(row.get("mid_stagnant_row_count")) or 0.0
+            ),
+            "active_row_count": int(_to_optional_float(row.get("active_row_count")) or 0.0),
+            "unknown_restock_row_count": int(
+                _to_optional_float(row.get("unknown_restock_row_count")) or 0.0
+            ),
         }
 
     async def _load_ranked_inventory_backlog_module_rows(
@@ -1058,7 +1024,7 @@ class PostgresqlDashboardService:
         period_start: date_cls | None = None,
         period_end: date_cls | None = None,
     ) -> list[dict[str, Any]]:
-        where_clauses = ["estimated_turnover_days >= :min_days"]
+        where_clauses = ["days_since_restock >= :min_days"]
         params: dict[str, Any] = {"min_days": min_days, "limit": limit}
         if period_start is not None and period_end is not None:
             where_clauses.append("snapshot_date >= :period_start")
@@ -1070,7 +1036,7 @@ class PostgresqlDashboardService:
             SELECT *
             FROM {source_table}
             WHERE {where_clause}
-            ORDER BY clearance_priority_score DESC, inventory_value DESC, estimated_turnover_days DESC
+            ORDER BY days_since_restock DESC, inventory_value DESC
             LIMIT :limit
             """.format(source_table=source_table, where_clause=" AND ".join(where_clauses)),
             params,
@@ -1078,8 +1044,9 @@ class PostgresqlDashboardService:
         ranked: list[dict[str, Any]] = []
         for index, row in enumerate(rows, start=1):
             normalized = dict(row)
-            normalized["risk_level"] = normalized.get("risk_level") or _classify_inventory_backlog_risk(normalized)
-            normalized["clearance_priority_score"] = normalized.get("clearance_priority_score") or _inventory_backlog_priority_score(normalized)
+            normalized["restock_tier"] = _classify_inventory_backlog_restock_tier(normalized)
+            # DOS 只作参考值：分母不新鲜，不参与判定，但运营需要这个量级感
+            normalized["checklist_dos_sales90"] = _compute_checklist_dos_sales90(normalized)
             normalized["rank"] = index
             ranked.append(normalized)
         return ranked

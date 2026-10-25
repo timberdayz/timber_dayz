@@ -8,6 +8,9 @@
 from pathlib import Path
 
 MIGRATION = Path("current_migrations/versions/20261020_sku_pricing_guardrails.py")
+RENAME_MIGRATION = Path(
+    "current_migrations/versions/20261025_sku_pricing_min_restock_days.py"
+)
 
 
 def test_migration_declares_pricing_policy_table_and_columns():
@@ -16,6 +19,7 @@ def test_migration_declares_pricing_policy_table_and_columns():
     assert 'revision = "current_schema_20261020_sku_pricing_guardrails"' in source
     assert 'down_revision = "current_schema_20260921_warehouse_storage_label_fee"' in source
     assert "sku_pricing_policies" in source
+    # 历史迁移不可动：它建表时用的就是旧列名，改名由后续的改名迁移负责
     assert "min_age_days" in source
     assert "tier_label" in source
     assert "discount_rate" in source
@@ -93,7 +97,7 @@ def test_orm_exposes_pricing_columns_and_policy_table():
 
     policy_columns = {c.name for c in SkuPricingPolicy.__table__.columns}
     assert {
-        "policy_id", "min_age_days", "tier_label", "discount_rate",
+        "policy_id", "min_restock_days", "tier_label", "discount_rate",
         "target_margin_rate", "platform_basis", "effective_from", "effective_to",
         "status", "source", "version", "notes",
     } <= policy_columns
@@ -126,3 +130,20 @@ def test_orm_policy_model_is_exported_from_schema_module():
 
     assert "SkuPricingPolicy" in schema_module.__all__
     assert hasattr(schema_module, "SkuPricingPolicy")
+
+
+def test_rename_migration_only_renames_the_column():
+    """改名迁移：**只改列名**，不建表、不改表、不动行数据。
+
+    门槛（0/60/90/120）与折扣率（0.10/0.15/0.20/0.30）是商业参数，
+    迁移里一旦出现 DML 就说明它越界了。
+    """
+    source = RENAME_MIGRATION.read_text(encoding="utf-8")
+
+    assert 'revision = "current_schema_20261025_sku_pricing_min_restock_days"' in source
+    assert 'down_revision = "current_schema_20261024_price_adjust_baseline_table"' in source
+    assert 'OLD_COLUMN = "min_age_days"' in source
+    assert 'NEW_COLUMN = "min_restock_days"' in source
+    assert "def downgrade" in source
+    for forbidden in ("create_table", "drop_table", "update(", "delete(", "insert "):
+        assert forbidden not in source, forbidden

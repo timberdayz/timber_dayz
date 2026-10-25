@@ -54,9 +54,10 @@ class InventoryOverviewSummaryResponse(BaseModel):
     total_value: float
     low_stock_count: int
     out_of_stock_count: int
-    high_risk_sku_count: int = 0
-    medium_risk_sku_count: int = 0
-    low_risk_sku_count: int = 0
+    # 距上次进货天数分档的**去重 SKU 数**（不是 SKU×仓 的行数）
+    deep_stagnant_sku_count: int = 0
+    mid_stagnant_sku_count: int = 0
+    active_sku_count: int = 0
     platform_breakdown: List[InventoryOverviewPlatformBreakdownResponse]
 
 

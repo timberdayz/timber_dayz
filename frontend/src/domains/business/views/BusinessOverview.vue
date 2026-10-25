@@ -988,34 +988,34 @@
             </el-col>
             <el-col :span="6">
               <div class="summary-item">
-                <div class="summary-label">30天+预计周转库存</div>
+                <div class="summary-label">重度积压（压180天以上）</div>
                 <div class="summary-value danger">
-                  {{ formatCurrency(inventorySummary.backlog_30d_value) }}
+                  {{ formatCurrency(inventorySummary.deep_stagnant_value) }}
                 </div>
                 <div class="summary-ratio">
-                  {{ inventorySummary.backlog_30d_ratio }}%
+                  {{ inventorySummary.deep_stagnant_ratio }}%
                 </div>
               </div>
             </el-col>
             <el-col :span="6">
               <div class="summary-item">
-                <div class="summary-label">60天+预计周转库存</div>
+                <div class="summary-label">中度积压（压90-180天）</div>
                 <div class="summary-value warning">
-                  {{ formatCurrency(inventorySummary.backlog_60d_value) }}
+                  {{ formatCurrency(inventorySummary.mid_stagnant_value) }}
                 </div>
                 <div class="summary-ratio">
-                  {{ inventorySummary.backlog_60d_ratio }}%
+                  {{ inventorySummary.mid_stagnant_ratio }}%
                 </div>
               </div>
             </el-col>
             <el-col :span="6">
               <div class="summary-item">
-                <div class="summary-label">90天+预计周转库存</div>
+                <div class="summary-label">滞销占比</div>
                 <div class="summary-value danger">
-                  {{ formatCurrency(inventorySummary.backlog_90d_value) }}
+                  {{ inventorySummary.backlog_ratio }}%
                 </div>
                 <div class="summary-ratio">
-                  {{ inventorySummary.backlog_90d_ratio }}%
+                  滞销货值 {{ formatCurrency(inventorySummary.backlog_value) }}
                 </div>
               </div>
             </el-col>
@@ -1050,29 +1050,60 @@
               align="right"
             />
             <el-table-column
-              prop="estimated_turnover_days"
-              label="预计周转天数"
+              prop="warehouse_name"
+              label="仓库"
+              width="130"
+              show-overflow-tooltip
+            />
+            <el-table-column
+              prop="days_since_restock"
+              label="距上次进货天数"
               width="100"
               align="right"
             >
               <template #default="{ row }">
-                <el-tag :type="getAgeTagType(row.estimated_turnover_days)" size="small">
-                  {{ row.estimated_turnover_days }}天
+                <el-tag :type="getRestockTagType(row.days_since_restock)" size="small">
+                  {{ row.days_since_restock ?? "-" }}天
                 </el-tag>
               </template>
             </el-table-column>
             <el-table-column
-              prop="estimated_stagnant_days"
-              label="估算积压天数"
-              width="120"
-              align="right"
-            />
+              prop="stock_added_at"
+              label="上次进货时间"
+              width="160"
+              align="center"
+            >
+              <template #default="{ row }">
+                {{ formatDateTime(row.stock_added_at) }}
+              </template>
+            </el-table-column>
             <el-table-column
-              prop="stagnant_snapshot_count"
-              label="连续积压快照数"
+              prop="restock_tier"
+              label="滞销状态"
               width="120"
+              align="center"
+            >
+              <template #default="{ row }">
+                <el-tag :type="getRestockTierTagType(row.restock_tier)" size="small">
+                  {{ getRestockTierLabel(row.restock_tier) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column
+              prop="checklist_dos_sales90"
+              label="可售天数（参考）"
+              width="130"
               align="right"
-            />
+            >
+              <template #default="{ row }">
+                <el-tooltip
+                  content="按最近一次采集到的近90天销量估算；分母只在那一行被写入时才刷新，不是实时动销速度，仅供参考"
+                  placement="top"
+                >
+                  <span>{{ row.checklist_dos_sales90 ?? "-" }}</span>
+                </el-tooltip>
+              </template>
+            </el-table-column>
             <el-table-column
               prop="inventory_value"
               label="积压价值"
@@ -1081,31 +1112,6 @@
             >
               <template #default="{ row }">
                 {{ formatCurrency(row.inventory_value) }}
-              </template>
-            </el-table-column>
-            <el-table-column
-              prop="risk_level"
-              label="风险等级"
-              width="100"
-              align="center"
-            >
-              <template #default="{ row }">
-                <el-tag
-                  :type="getCategoryTagType(row.risk_level)"
-                  size="small"
-                >
-                  {{ row.risk_level }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column
-              prop="clearance_priority_score"
-              label="清理优先级"
-              width="120"
-              align="right"
-            >
-              <template #default="{ row }">
-                {{ Number(row.clearance_priority_score || 0).toFixed(2) }}
               </template>
             </el-table-column>
           </el-table>
@@ -2303,18 +2309,21 @@ const sortedShopRacingData = computed(() => {
   return rows.map((row, index) => ({ ...row, rank: index + 1 }))
 })
 // 库存滞销
+// 2026-10-24：口径换成「距上次进货时长」——DOS 的分母在增量模式下不新鲜，
+// 只作参考值展示；入选 / 汇总卡 / 排序全部用距上次进货时长。
 const inventorySummary = ref({
   total_value: 0,
-  backlog_30d_value: 0,
-  backlog_30d_ratio: 0,
-  backlog_60d_value: 0,
-  backlog_60d_ratio: 0,
-  backlog_90d_value: 0,
-  backlog_90d_ratio: 0,
   total_quantity: 0,
-  backlog_30d_quantity: 0,
-  backlog_60d_quantity: 0,
-  backlog_90d_quantity: 0
+  deep_stagnant_value: 0,
+  deep_stagnant_ratio: 0,
+  mid_stagnant_value: 0,
+  mid_stagnant_ratio: 0,
+  backlog_value: 0,
+  backlog_ratio: 0,
+  deep_stagnant_row_count: 0,
+  mid_stagnant_row_count: 0,
+  active_row_count: 0,
+  unknown_restock_row_count: 0
 })
 const inventoryBacklogProducts = ref([])
 
@@ -2519,19 +2528,36 @@ const getAchievementColor = (rate) => {
   return '#F56C6C'
 }
 
-// 获取滞销天数标签类型
-const getAgeTagType = (days) => {
-  if (days >= 90) return 'danger'
-  if (days >= 60) return 'warning'
+// 距上次进货天数标签类型（阈值与后端 inventory_restock_service 一致：60 / 90 / 120）
+const getRestockTagType = (days) => {
+  if (days === null || days === undefined) return 'info'
+  if (days >= 120) return 'danger'
+  if (days >= 90) return 'warning'
   return 'info'
 }
 
-// 获取分类标签类型
-const getCategoryTagType = (category) => {
-  if (category === '90天+') return 'danger'
-  if (category === '60-90天') return 'warning'
-  if (category === '30-60天') return 'info'
-  return 'primary'
+// 滞销档位文案（后端 restock_tier 的中文映射）
+const RESTOCK_TIER_LABELS = {
+  unknown: '不可算',
+  active: '活跃',
+  light: '压60-90天',
+  mid: '压90-120天',
+  deep: '压120天以上'
+}
+const getRestockTierLabel = (tier) => RESTOCK_TIER_LABELS[tier] || tier || '-'
+const getRestockTierTagType = (tier) => {
+  if (tier === 'deep') return 'danger'
+  if (tier === 'mid') return 'warning'
+  return 'info'
+}
+
+// 时间戳格式化（最后库存变动时间）
+const formatDateTime = (value) => {
+  if (!value) return '-'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return String(value)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`
 }
 
 // 获取达成率标签类型

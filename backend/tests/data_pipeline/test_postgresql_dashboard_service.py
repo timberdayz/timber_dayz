@@ -669,39 +669,45 @@ def test_reduce_business_overview_comparison_rows_monthly():
 
 
 def test_rank_inventory_backlog_rows_filters_and_ranks():
+    """判据是「距上次进货时长」：门槛过滤 + 距上次进货天数降序 + 同档货值降序。"""
     result = rank_inventory_backlog_rows(
         [
-            {"platform_code": "shopee", "inventory_value": 50, "estimated_turnover_days": 20, "estimated_stagnant_days": 0, "stagnant_snapshot_count": 0},
-            {"platform_code": "tiktok", "inventory_value": 80, "estimated_turnover_days": 45, "estimated_stagnant_days": 10, "stagnant_snapshot_count": 1},
-            {"platform_code": "shopee", "inventory_value": 60, "estimated_turnover_days": 60, "estimated_stagnant_days": 14, "stagnant_snapshot_count": 2},
+            {"platform_code": "shopee", "inventory_value": 50, "days_since_restock": 20},
+            {"platform_code": "tiktok", "inventory_value": 80, "days_since_restock": 45},
+            {"platform_code": "shopee", "inventory_value": 60, "days_since_restock": 200},
         ],
         min_days=30,
     )
 
     assert len(result) == 2
     assert result[0]["inventory_value"] == 60
+    assert result[0]["days_since_restock"] == 200
     assert result[0]["rank"] == 1
     assert result[1]["rank"] == 2
-    assert "risk_level" in result[0]
-    assert "clearance_priority_score" in result[0]
+    assert "restock_tier" in result[0]
 
 
-def test_rank_inventory_backlog_rows_uses_risk_and_priority_fields():
+def test_rank_inventory_backlog_rows_exposes_restock_tier():
     result = rank_inventory_backlog_rows(
         [
-            {
-                "platform_code": "shopee",
-                "inventory_value": 100,
-                "estimated_turnover_days": 70,
-                "estimated_stagnant_days": 12,
-                "stagnant_snapshot_count": 3,
-            }
+            {"platform_code": "shopee", "inventory_value": 100, "days_since_restock": 200},
         ],
         min_days=30,
     )
 
-    assert result[0]["risk_level"] == "high"
-    assert result[0]["clearance_priority_score"] > 0
+    assert result[0]["restock_tier"] == "deep"
+
+
+def test_rank_inventory_backlog_rows_drops_unknown_restock_rows():
+    """距上次进货时长取不到的行不得静默当成「活跃」进榜。"""
+    result = rank_inventory_backlog_rows(
+        [
+            {"platform_code": "shopee", "inventory_value": 100, "days_since_restock": None},
+        ],
+        min_days=30,
+    )
+
+    assert result == []
 
 
 def test_reduce_annual_summary_kpi_rows_yearly():
@@ -1904,13 +1910,13 @@ async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_mod
             return [
                 {
                     "total_value": 400,
-                    "backlog_30d_value": 400,
-                    "backlog_60d_value": 100,
-                    "backlog_90d_value": 100,
                     "total_quantity": 110,
-                    "high_risk_sku_count": 1,
-                    "medium_risk_sku_count": 1,
-                    "low_risk_sku_count": 0,
+                    "deep_stagnant_value": 100,
+                    "mid_stagnant_value": 0,
+                    "deep_stagnant_row_count": 1,
+                    "mid_stagnant_row_count": 0,
+                    "active_row_count": 0,
+                    "unknown_restock_row_count": 0,
                 }
             ]
         if "FROM api.business_overview_inventory_backlog_module" in query:
@@ -1926,16 +1932,8 @@ async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_mod
                     "warehouse_name": "WH-1",
                     "available_stock": 10,
                     "inventory_value": 100,
-                    "daily_avg_sales": 0,
-                    "estimated_turnover_days": 100,
-                    "stock_delta": 0,
-                    "inventory_value_delta": 0,
-                    "is_stagnant": True,
-                    "snapshot_gap_days": 7,
-                    "estimated_stagnant_days": 14,
-                    "stagnant_snapshot_count": 3,
-                    "risk_level": "high",
-                    "clearance_priority_score": 1100,
+                    "days_since_restock": 200,
+                    "checklist_sales_90d": 3,
                 },
                 {
                     "snapshot_date": "2026-04-14",
@@ -1948,16 +1946,8 @@ async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_mod
                     "warehouse_name": "WH-1",
                     "available_stock": 100,
                     "inventory_value": 300,
-                    "daily_avg_sales": 2.0,
-                    "estimated_turnover_days": 50.0,
-                    "stock_delta": -5.0,
-                    "inventory_value_delta": -50.0,
-                    "is_stagnant": True,
-                    "snapshot_gap_days": 7,
-                    "estimated_stagnant_days": 7.0,
-                    "stagnant_snapshot_count": 1,
-                    "risk_level": "medium",
-                    "clearance_priority_score": 800,
+                    "days_since_restock": 45,
+                    "checklist_sales_90d": 30,
                 }
             ]
         raise AssertionError(f"unexpected query: {query}")
@@ -1971,33 +1961,32 @@ async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_mod
     assert "FROM mart.inventory_snapshot_latest" not in summary_query
     assert "FROM mart.inventory_snapshot_change" not in summary_query
     assert "FROM semantic.fact_orders_atomic" not in summary_query
-    assert "ORDER BY clearance_priority_score DESC" in rows_query
+    assert "ORDER BY days_since_restock DESC" in rows_query
+    assert "days_since_restock >= :min_days" in rows_query
     assert "LIMIT :limit" in rows_query
     assert rows_params == {"min_days": 45, "limit": 20}
     assert summary_params == {}
 
     assert result["summary"] == {
         "total_value": 400.0,
-        "backlog_30d_value": 400.0,
-        "backlog_60d_value": 100.0,
-        "backlog_90d_value": 100.0,
-        "backlog_30d_ratio": 100.0,
-        "backlog_60d_ratio": 25.0,
-        "backlog_90d_ratio": 25.0,
         "total_quantity": 110,
-        "high_risk_sku_count": 1,
-        "medium_risk_sku_count": 1,
-        "low_risk_sku_count": 0,
+        "deep_stagnant_value": 100.0,
+        "deep_stagnant_ratio": 25.0,
+        "mid_stagnant_value": 0.0,
+        "mid_stagnant_ratio": 0.0,
+        "backlog_value": 100.0,
+        "backlog_ratio": 25.0,
+        "deep_stagnant_row_count": 1,
+        "mid_stagnant_row_count": 0,
+        "active_row_count": 0,
+        "unknown_restock_row_count": 0,
     }
     assert [row["platform_sku"] for row in result["top_products"]] == ["SKU-2", "SKU-1"]
     assert result["top_products"][0]["rank"] == 1
-    assert result["top_products"][0]["risk_level"] == "high"
-    assert result["top_products"][1]["daily_avg_sales"] == 2.0
-    assert result["top_products"][1]["estimated_turnover_days"] == 50.0
-    assert result["top_products"][1]["stock_delta"] == -5.0
-    assert result["top_products"][1]["inventory_value_delta"] == -50.0
-    assert result["top_products"][1]["estimated_stagnant_days"] == 7.0
-    assert result["top_products"][1]["stagnant_snapshot_count"] == 1
+    assert result["top_products"][0]["restock_tier"] == "deep"
+    assert result["top_products"][0]["days_since_restock"] == 200
+    assert result["top_products"][1]["days_since_restock"] == 45
+    assert result["top_products"][1]["restock_tier"] == "active"
 
 
 @pytest.mark.asyncio
@@ -3561,7 +3550,13 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypat
                         inventory_value NUMERIC,
                         ingest_timestamp TIMESTAMP,
                         currency_code VARCHAR(3),
-                        data_hash VARCHAR(64)
+                        data_hash VARCHAR(64),
+                        observed_at TIMESTAMP,
+                        created_at TIMESTAMP,
+                        checklist_sales_7d NUMERIC,
+                        checklist_sales_30d NUMERIC,
+                        checklist_sales_60d NUMERIC,
+                        checklist_sales_90d NUMERIC
                     )
                     """
                 )
@@ -3638,12 +3633,33 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypat
                 "mart.inventory_snapshot_latest",
                 "mart.inventory_snapshot_change",
                 "mart.inventory_current",
+                "mart.inventory_state",
                 "mart.inventory_backlog_base",
                 "api.business_overview_inventory_backlog_module",
                 "api.inventory_backlog_summary_module",
                 "api.clearance_ranking_module",
             ):
                 await execute_sql_target(session, target)
+            await session.commit()
+            # 状态层必须在建表之后才有数据可插
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO mart.inventory_state (
+                        platform_code, sku_key, warehouse_name, platform_sku, product_sku,
+                        available_stock, on_hand_stock, reserved_stock, inventory_value,
+                        stock_added_at, row_seen_at, row_written_at
+                    )
+                    VALUES (
+                        'shopee', 'sku-a', 'main warehouse', 'sku-a', 'psku-a',
+                        450, 450, 0, 2250,
+                        TIMESTAMPTZ '2025-06-01 00:00:00+00',
+                        TIMESTAMPTZ '2026-03-01 00:00:00+00',
+                        TIMESTAMPTZ '2025-06-01 00:00:00+00'
+                    )
+                    """
+                )
+            )
             await session.commit()
 
         monkeypatch.setattr(
@@ -3659,9 +3675,9 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypat
         assert len(backlog["top_products"]) == 1
         assert backlog["top_products"][0]["platform_code"] == "shopee"
         assert backlog["top_products"][0]["rank"] == 1
-        assert "risk_level" in backlog["top_products"][0]
+        assert "restock_tier" in backlog["top_products"][0]
+        assert backlog["top_products"][0]["days_since_restock"] >= 90
         assert len(clearance) == 1
         assert clearance[0]["platform_code"] == "shopee"
-        assert clearance[0]["estimated_turnover_days"] >= 30
 
         await engine.dispose()

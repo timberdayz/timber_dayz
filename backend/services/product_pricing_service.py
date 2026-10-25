@@ -4,7 +4,7 @@
 - 所有金额用 Decimal；费率只做 Decimal(str(x)) 转换，**不得量化**
 - 平台佣金率已包含在 other_cost_rate 内，不得单独进入分母
 - 达人佣金率优先用 SKU 值，NULL 时由调用方传入平台默认值
-- 档位由当前库龄决定；库龄缺失回落 min_age_days 最小的一行
+- 档位由当前库龄决定；库龄缺失回落 min_restock_days 最小的一行
 
 本模块**不持有任何平台参数**——费率由调用方从 dim_platforms 读出后传入，
 避免平台口径变化时服务里的常量悄悄过期。
@@ -71,17 +71,17 @@ def compute_discount_guard(*, reference_selling_price, discount_rate) -> Optiona
     return _money(price * (Decimal("1") - rate))
 
 
-def select_age_tier(policies: Iterable[dict], age_days: Optional[int]) -> Optional[dict]:
-    """按库龄命中档位；库龄缺失时回落 min_age_days 最小的一行。"""
+def select_restock_tier(policies: Iterable[dict], days_since_restock: Optional[int]) -> Optional[dict]:
+    """按库龄命中档位；库龄缺失时回落 min_restock_days 最小的一行。"""
     rows = [p for p in policies if p is not None]
     if not rows:
         return None
-    if age_days is None:
-        return min(rows, key=lambda p: p["min_age_days"])
-    eligible = [p for p in rows if p["min_age_days"] <= age_days]
+    if days_since_restock is None:
+        return min(rows, key=lambda p: p["min_restock_days"])
+    eligible = [p for p in rows if p["min_restock_days"] <= days_since_restock]
     if not eligible:
-        return min(rows, key=lambda p: p["min_age_days"])
-    return max(eligible, key=lambda p: p["min_age_days"])
+        return min(rows, key=lambda p: p["min_restock_days"])
+    return max(eligible, key=lambda p: p["min_restock_days"])
 
 
 def compute_min_selling_price(
@@ -130,7 +130,7 @@ def compute_sku_pricing(
     policy,
     deepest_policy,
     min_selling_price_override,
-    age_days=None,
+    days_since_restock=None,
 ) -> dict:
     """单个 SKU 的完整定价字段。**纯函数**：无 ORM、无 DB、无 I/O。
 
@@ -227,8 +227,10 @@ def compute_sku_pricing(
         "min_selling_price_override": float(override) if override is not None else None,
         "min_selling_price_missing_reasons": all_reasons,
         "pricing_tier_label": policy["tier_label"] if policy else None,
-        "pricing_age_days": age_days,
-        "pricing_tier_source": "age_data" if age_days is not None else "fallback_no_age_data",
+        "pricing_days_since_restock": days_since_restock,
+        "pricing_tier_source": (
+        "restock_days" if days_since_restock is not None else "fallback_no_restock_days"
+    ),
     }
 
 
@@ -251,9 +253,9 @@ def resolve_policy_update(
     """规则表版本化更新的纯判定：返回 action 与要写入的字段。
 
     `current` 是**路径参数指向的档位**（被编辑的那一档）的当前行：
-    `{"min_age_days": int, "effective_from": date}`；该档位没有当前行时传 None。
+    `{"min_restock_days": int, "effective_from": date}`；该档位没有当前行时传 None。
 
-    `requested` 是请求体，其中 `min_age_days` 是**该档位的新起点**。
+    `requested` 是请求体，其中 `min_restock_days` 是**该档位的新起点**。
     因此「路径起点 != body 起点」= 运营在改库龄档位的边界，而不是调用方搞混。
 
     两条拒绝路径（与 spec §5.1 一致）：
@@ -272,7 +274,7 @@ def resolve_policy_update(
     IntegrityError(409)，而不是 spec §5.1 要求的 422。
     """
     requested_effective_from = requested["effective_from"]
-    requested_min_age = requested["min_age_days"]
+    requested_min_age = requested["min_restock_days"]
 
     if requested_effective_from > today:
         raise PolicyUpdateRejected(POLICY_REJECT_FUTURE)
@@ -280,14 +282,14 @@ def resolve_policy_update(
         return {"action": "create", "close_current": None, "values": dict(requested)}
 
     current_effective_from = current["effective_from"]
-    current_min_age = current["min_age_days"]
+    current_min_age = current["min_restock_days"]
 
     # 回溯生效一律拒绝——先于 retier / version 判定
     if requested_effective_from < current_effective_from:
         raise PolicyUpdateRejected(POLICY_REJECT_BACKDATED)
     if requested_min_age != current_min_age:
         # 改档位边界：关旧行 + 建新行（新行用新起点）。
-        # 新起点与生效日期的组合若已被占用，会撞 UNIQUE(min_age_days, effective_from) -> 409
+        # 新起点与生效日期的组合若已被占用，会撞 UNIQUE(min_restock_days, effective_from) -> 409
         return {
             "action": "retier",
             "close_current": requested_effective_from,

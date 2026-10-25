@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>库存域改造 · 业务版说明</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f7f5f0;--card:#fff;--line:#e9e3d6;--line-soft:#f0ebe0;
+ --ink:#14171e;--ink2:#3a4256;--muted:#7c7a72;
+ --primary:#2f6f5e;--p-soft:rgba(47,111,94,.08);
+ --warn:#c97b3f;--w-soft:rgba(201,123,63,.09);
+ --danger:#b06367;--d-soft:rgba(176,99,103,.09);--mono:'JetBrains Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+ font-size:14.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+ background:radial-gradient(760px 380px at 88% -8%,rgba(47,111,94,.055),transparent 62%),
+            radial-gradient(620px 320px at 4% 4%,rgba(201,123,63,.045),transparent 60%)}
+.wrap{position:relative;z-index:1;max-width:1140px;margin:0 auto;padding:64px 28px 96px}
+h1,h2{font-family:'DM Serif Display',Georgia,'Songti SC',serif;font-weight:400;letter-spacing:-.005em}
+h1{font-size:33px;line-height:1.25;margin-bottom:15px}
+h2{font-size:24px;margin-bottom:8px}
+h3{font-size:15.5px;font-weight:600}
+.lede{font-size:16.5px;color:var(--ink2);max-width:80ch}
+.kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;
+ letter-spacing:.13em;text-transform:uppercase;color:var(--primary);margin-bottom:12px}
+.kicker::before{content:"";width:18px;height:2px;background:var(--primary);border-radius:2px}
+.sec{margin-top:50px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px}
+.card+.card{margin-top:14px}
+code{font-family:var(--mono);font-size:12.5px;background:var(--p-soft);color:var(--primary);padding:1px 6px;border-radius:5px}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.t-ok{background:var(--p-soft);color:var(--primary)}
+.t-w{background:var(--w-soft);color:var(--warn)}
+.t-b{background:var(--d-soft);color:var(--danger)}
+.t-n{background:#f0ede6;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+ color:var(--muted);padding:0 12px 9px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink2);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td strong{color:var(--ink)}
+td.num,th.num{text-align:right;font-family:var(--mono);font-size:12.5px}
+.callout{border-radius:13px;padding:16px 18px;border:1px solid var(--line);background:var(--card)}
+.callout.w{background:var(--w-soft);border-color:rgba(201,123,63,.32)}
+.callout.o{background:var(--p-soft);border-color:rgba(47,111,94,.28)}
+.callout.b{background:var(--d-soft);border-color:rgba(176,99,103,.3)}
+.callout .ct{font-weight:600;font-size:14px;margin-bottom:5px;display:flex;align-items:center;gap:8px}
+.callout p{font-size:13.5px;color:var(--ink2)}
+.callout p+p{margin-top:8px}
+ul.plain{list:none;padding:0;margin:6px 0 0}
+ul.plain li{padding:5px 0 5px 20px;position:relative;font-size:13.5px;color:var(--ink2)}
+ul.plain li::before{content:"";position:absolute;left:4px;top:13px;width:5px;height:5px;
+ border-radius:50%;background:var(--primary)}
+ul.plain li b{color:var(--ink)}
+/* 业务对照 */
+.biz{border:1px solid var(--line);border-radius:15px;background:var(--card);overflow:hidden;margin-top:16px}
+.bizhead{display:grid;grid-template-columns:1fr 1fr;background:rgba(176,99,103,.06)}
+.bizhead .bh{padding:12px 20px;font-weight:600;font-size:13.5px}
+.bizhead .bh:first-child{color:var(--danger)}
+.bizhead .bh:last-child{color:var(--primary);border-left:1px solid var(--line)}
+.bizrow{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line-soft)}
+.bizrow .bc{padding:14px 20px;font-size:13.5px;color:var(--ink2)}
+.bizrow .bc:last-child{border-left:1px solid var(--line-soft);background:rgba(47,111,94,.035)}
+.bizrow .bl{font-weight:600;color:var(--ink);font-size:13px;margin-bottom:4px}
+/* 冲突示意 */
+.conflict{display:grid;grid-template-columns:1fr 84px 1fr;align-items:stretch;margin-top:18px}
+.cbox{border:1px solid var(--line);border-radius:14px;padding:17px 19px;background:var(--card)}
+.cbox.stag{border-color:rgba(176,99,103,.35);background:#fbf6f4}
+.cbox.short{border-color:rgba(201,123,63,.35);background:#fdf9f3}
+.cbox .ct2{font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px}
+.cbox .cw{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:9px;line-height:1.85}
+.cbox .cw b{color:var(--ink)}
+.cmid{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--muted);font-size:11px}
+.cmid .cs{font-size:19px;color:var(--danger)}
+.flow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:11px;margin-top:18px}
+.fnode{border:1px solid var(--line);border-radius:13px;padding:15px 16px;background:var(--card)}
+.fnode .fn{font-weight:600;font-size:13.5px;margin-bottom:6px}
+.fnode .fd{font-size:12.5px;color:var(--ink2);line-height:1.55}
+.fnode.ok{border-color:rgba(47,111,94,.4);background:rgba(47,111,94,.05)}
+.fnode.no{border-color:rgba(176,99,103,.3);background:rgba(176,99,103,.04)}
+.fnode .ft{display:inline-block;margin-top:9px;font-size:11.5px;font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+ border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:26px}
+.stat{background:var(--card);padding:16px 18px}
+.stat .n{font-family:'DM Serif Display',serif;font-size:23px;line-height:1.2}
+.stat .n small{font-size:14px;color:var(--muted);margin-left:3px}
+.stat .l{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.45}
+.work{border:1px solid var(--line);border-radius:15px;background:var(--card);padding:0;overflow:hidden;margin-top:13px}
+.whead{display:flex;align-items:center;gap:12px;padding:15px 20px;border-bottom:1px solid var(--line);
+ background:linear-gradient(90deg,rgba(47,111,94,.05),transparent)}
+.wno{font-family:'DM Serif Display',serif;font-size:23px;color:var(--primary);min-width:34px}
+.wtitle{font-weight:600;font-size:14.5px}
+.wsub{font-size:12.5px;color:var(--muted);margin-top:2px}
+.wbody{padding:16px 20px}
+footer{margin-top:58px;padding-top:22px;border-top:1px solid var(--line);
+ font-size:12.5px;color:var(--muted);line-height:1.8}
+footer b{color:var(--ink2)}
+@media(max-width:1000px){.conflict{grid-template-columns:1fr}.cmid{padding:10px 0;flex-direction:row}
+ .bizhead,.bizrow{grid-template-columns:1fr}.bizhead .bh:last-child,.bizrow .bc:last-child{border-left:none;border-top:1px solid var(--line)}
+ .flow{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="kicker">业务版说明 · 2026-10-24</div>
+<h1>我们要做的事，以及一个必须先解决的口径矛盾</h1>
+<p class="lede">
+先说业务目标：<strong>让运营在业务概览上看到的滞销数字是真的，并让「最低售价」这个动作只在有意义的时候发生。</strong><br><br>
+你提的那个问题——「A 仓滞销了，B 仓其实缺货，那这个 SKU 还要不要改价」——我实测了全量数据，
+<strong>这个场景真实存在，而且系统现在会做出错误动作</strong>。下面先讲工作内容，再讲这个矛盾怎么解。
+</p>
+
+<div class="stats">
+  <div class="stat"><div class="n">3</div><div class="l">现在就在给运营错误结论的问题<br>（假三档 / 9999 / 读到旧批次）</div></div>
+  <div class="stat"><div class="n">1</div><div class="l">真实命中「一仓积压 + 一仓缺货」的 SKU<br>系统现在会误发降价通知</div></div>
+  <div class="stat"><div class="n">0</div><div class="l">两仓同时有货的 SKU<br>合并口径与最差仓口径判定完全一致</div></div>
+  <div class="stat"><div class="n">395</div><div class="l">改造后进滞销榜的行<br>货值 ¥168,379.94</div></div>
+</div>
+
+<!-- ✅ 2026-10-24 晚间修正：DOS 定位 -->
+<section class="sec" style="margin-top:32px">
+<div class="callout w">
+  <div class="ct"><span class="tag t-w">DOS 定位 · 2026-10-24 晚间修正</span>DOS 降级为参考，不做全域使用</div>
+  <p>采集策略已定：<b>不再全量，只有配置采集 + 增量更新</b>。妙手「近 XX 天销量」是<b>行级存储快照</b>，只在那一行被写入时才刷新，增量批次实测只覆盖 <b>13.6%</b> 的 SKU（151 / 1113）→ <b>DOS 不作判定依据</b>。</p>
+  <p>→ 滞销判据改用<b>库存停滞时长</b>（今天 − 库存最后一次<b>真实变动</b>的时间，由落盘层行内容 diff 维护，不信妙手的时间戳）；DOS 保留在表里<b>作为参考值</b>，并明确标注「参考」。完整取证见 <code>output/dos-freshness-evidence.html</code>。</p>
+</div>
+</section>
+
+<section class="sec">
+<h2>一、现在运营看到的是什么，改完会看到什么</h2>
+
+<div class="biz" style="margin-top:20px">
+  <div class="bizhead">
+    <div class="bh">现在</div>
+    <div class="bh">改完</div>
+  </div>
+  <div class="bizrow">
+    <div class="bc">
+      <div class="bl">滞销看板顶部三张卡</div>
+      「30天积压」「60天积压」「90天积压」三个数字<strong>完全一样</strong>（217787.41）——因为是同一个数字切了三刀，
+      而且那个数字被 9999 占位值污染过。看板上「积压多久」毫无区分度。
+    </div>
+    <div class="bc">
+      <div class="bl">四张各说各话的卡</div>
+      总库存价值 / 滞销货值（可支撑天数超 180 天）/ 零销量积压货值 / 滞销占比。
+      每一张都能直接对应到「这笔钱压了多久」，不再有假数字。
+    </div>
+  </div>
+  <div class="bizrow">
+    <div class="bc">
+      <div class="bl">滞销名单</div>
+      按「预计周转天数」排序，但那个天数有 <strong>499 行是 9999</strong>（占位值），风险等级因此全标「高」，
+      「清理优先级」分数也是被占位值撑出来的假分数。运营按它排优先级，<strong>等于按噪声排序</strong>。
+    </div>
+    <div class="bc">
+      <div class="bl">滞销名单</div>
+      去掉占位值、假分数、假的风险等级，改成看三件真事：<strong>在哪个仓、还能卖多久、零销量还是慢销</strong>。
+      按「还能卖多久」降序排，同档内按压着的钱多少排。
+    </div>
+  </div>
+  <div class="bizrow">
+    <div class="bc">
+      <div class="bl">最低售价的档位</div>
+      按「库龄」选档，但库龄数据现在是坏的——全库最大只有 13 天，超过 30 天的 SKU <strong>一个都没有</strong>。
+      结果商品中心 56% 的 SKU 走兜底逻辑，档位标签全是「日常」。
+    </div>
+    <div class="bc">
+      <div class="bl">最低售价的档位</div>
+      改按「还能卖多久」选档，这个数是真的。档位会真实分化：<strong>日常 600 个 SKU、越滞销折扣越深、零销量进最深档</strong>。
+      这是本次最大的行为变化——以前所有 SKU 都拿日常折扣。
+    </div>
+  </div>
+  <div class="bizrow">
+    <div class="bc">
+      <div class="bl">每天的采集</div>
+      每天把 1113 行全量搬一遍，不管变没变。而且「最新」的数据其实读不到——最新的那批只能进 4 行，
+      其余 1109 行读的都是旧批次。
+    </div>
+    <div class="bc">
+      <div class="bl">每天的采集</div>
+      只搬有变化的行，变更按行级时间戳判断；「最新」能真正读到最新那批（实测 4 行 → <strong>469 行</strong>）。
+      采集更快、下游刷新更轻、断档时自动回退全量兜底。
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="sec">
+<h2>二、你的那个问题：矛盾真实存在</h2>
+<p class="lede">
+最低售价是 <strong>SKU 级</strong> 的（一个 SKU 一个价、一个底线），改价通知也是 SKU 级的。
+但库存证据是 <strong>仓级</strong> 的。于是一个价，要同时服务两种相反的诉求。
+</p>
+
+<div class="conflict">
+  <div class="cbox stag">
+    <div class="ct2"><span class="tag t-b">菲律宾仓库（维修工具）</span>积压</div>
+    <div class="cw">
+      库存 <b>215 件</b><br>
+      近90天销量 <b>6 件</b><br>
+      → 还能卖 <b>3225 天</b><br>
+      → 该降价清货
+    </div>
+  </div>
+  <div class="cmid">
+    <div class="cs">✕</div>
+    <div>同一个 SKU</div>
+    <div>一个价</div>
+  </div>
+  <div class="cbox short">
+    <div class="ct2"><span class="tag t-w">新加坡</span>缺货</div>
+    <div class="cw">
+      库存 <b>0 件</b><br>
+      近90天销量 <b>5 件</b><br>
+      → 卖得动却没货<br>
+      → 降价只会拉低补货后的毛利
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px">
+<div class="callout b">
+  <div class="ct"><span class="tag t-b">实测</span>这个 SKU 现在会被误判</div>
+  <p>合并口径：<code>215 ÷ (11 ÷ 90) = 1759 天</code> → 判重度积压 → <strong>触发降价通知</strong>。
+  但正确动作是<strong>把菲律宾的货调到新加坡</strong>——一次调拨同时解决积压和缺货，降价做不到这件事。</p>
+</div>
+</div>
+
+<div class="card">
+<h3 style="margin-bottom:10px">范围有多大</h3>
+<table>
+<thead><tr><th style="width:46%">情况</th><th class="num" style="width:18%">SKU 数</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>跨 2 个仓的 SKU</td><td class="num">37</td><td>全部只跨 2 仓</td></tr>
+<tr><td>其中：两仓都有货</td><td class="num"><strong>0</strong></td><td>所以「A 仓压 + B 仓也有货」的矛盾在库存层面不存在</td></tr>
+<tr><td>其中：1 仓有货 + 1 仓无货</td><td class="num">11</td><td>11 个 SKU 里只有 1 个的无货仓还卖得动</td></tr>
+<tr><td><strong>真正命中「积压 + 真缺货」</strong></td><td class="num"><strong>1</strong></td><td><code>HKR-LRI9-Squeezer-035</code></td></tr>
+</tbody>
+</table>
+<div style="margin-top:12px;font-size:13px;color:var(--muted)">
+另有 <strong>66 行 SKU 是「无货但有销量」</strong>（真缺货），其中最大的是
+<code>A-00009-BLACK</code> 新加坡仓：近30天卖 83 件、近90天卖 220 件、库存 0 —— 这是热销断货，不是滞销。
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>三、怎么解：SKU 级判档 + 仓级豁免</h2>
+<p class="lede">
+仓库里已经有一条同源的先例——<code>is_delisting_jump</code> 确立了「<strong>语义上不成立的变更不该通知</strong>」。
+本次是同一条原则的第二个应用。
+</p>
+
+<div class="card" style="margin-top:20px">
+<div class="callout o">
+  <div class="ct"><span class="tag t-ok">规则</span>仓级缺货豁免</div>
+  <p>SKU 级判滞销时，若该 SKU <strong>存在任何一个仓</strong>处于「有销量但没库存」或「还能卖不足 30 天」，
+  则<strong>档位封顶在次深档</strong>，不进最深折扣档。</p>
+</div>
+</div>
+
+<div class="flow">
+  <div class="fnode ok">
+    <div class="fn">① 算证据</div>
+    <div class="fd">DOS 唯一实现同时输出两层：<strong>SKU 级</strong>（合并各仓，给定价选档）+ <strong>仓级</strong>（逐仓，给运营看、给豁免判定）。</div>
+    <div class="ft" style="color:var(--primary)">已实测：两层在档位判定上零分歧</div>
+  </div>
+  <div class="fnode ok">
+    <div class="fn">② 判档 + 豁免</div>
+    <div class="fd">SKU 级 DOS 选档；再检查各仓，<strong>任一仓缺货或快断货就封顶次深档</strong>。</div>
+    <div class="ft" style="color:var(--primary)">缺货 = 这个 SKU 还有市场</div>
+  </div>
+  <div class="fnode ok">
+    <div class="fn">③ 出动作</div>
+    <div class="fd">滞销名单对「一仓有货、一仓缺货」的行给<strong>调拨建议</strong>，而不是只给降价；改价通知标注「因仓级缺货豁免」。</div>
+    <div class="ft" style="color:var(--primary)">调拨同时解决积压与缺货</div>
+  </div>
+</div>
+
+<div class="card">
+<h3 style="margin-bottom:10px">为什么不选别的做法</h3>
+<table>
+<thead><tr><th style="width:26%">做法</th><th>为什么不选</th></tr></thead>
+<tbody>
+<tr><td><strong>按仓分别定价</strong></td><td>跨平台电商的定价就是 SKU 级，妙手也没有这个能力，做不到</td></tr>
+<tr><td><strong>按最差的那个仓判档</strong></td><td>数学上更保守，但<strong>解决不了矛盾</strong>；且实测与合并口径判定完全一致，没有额外收益</td></tr>
+<tr><td><strong>只提示、不自动改价</strong></td><td>放弃了本可以自动化的清货收益；作为兜底保留（人工覆盖底价的功能已经有了）</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="card">
+<div class="callout w">
+  <div class="ct"><span class="tag t-w">注意</span>这不与「零销量进最深档」冲突</div>
+  <p>零销量仓的货是<strong>死的</strong>（没人要），就该最深档清掉；缺货仓的货是<strong>活的</strong>（有人要只是没货），
+  该用调拨解决、不该降价。两者的处理方向正好相反，所以规则不打架。</p>
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>四、完整工作清单</h2>
+
+<div class="work">
+  <div class="whead"><div class="wno">1</div><div><div class="wtitle">采集：只搬有变化的部分</div>
+  <div class="wsub">妙手「仓库清单」页增加「更新时间 + 日期区间」筛选，能按上次水位线接着采</div></div></div>
+  <div class="wbody">
+    <ul class="plain">
+      <li><b>妙手有两处静默失败</b>——维度没切、确定没点，页面照常显示不报错。所以每一步都要断言：切换后确认维度确实是「更新时间」、填完区间点「确定」后确认区间写进去了、点搜索后确认「SKU总数」变了且大于 0</li>
+      <li>不用「近7天/近30天」这种快捷项——那是相对今天，和「从上次水位线接着采」不是一回事，会漏采</li>
+      <li>配全量兜底：首次强制全量、断档超 3~5~7 天自动回退、周期性全量、上一批失败则下一批回退</li>
+      <li><b>必须和第 2 项一起上线</b>，否则「增量采到的数据进不了最新视图」会更严重</li>
+    </ul>
+  </div>
+</div>
+
+<div class="work">
+  <div class="whead"><div class="wno">2</div><div><div class="wtitle">落盘：让「最新」真的是最新</div>
+  <div class="wsub">从「批次级时间」改成「行级时间」，增量下也保持完整</div></div></div>
+  <div class="wbody">
+    <ul class="plain">
+      <li>每行带上自己的「更新时间」「创建时间」，下游按行级时间取最新</li>
+      <li>实测：最新批次进「最新视图」的贡献 <b>4 行 → 469 行</b></li>
+      <li>每个 SKU×仓 永远保持完整一行（增量下也不会缺）</li>
+      <li>不重采历史 2339 行（数据可回填），不订正历史批次日期（它只表示「这批的配置区间」，订正会丢可追溯性）</li>
+    </ul>
+  </div>
+</div>
+
+<div class="work">
+  <div class="whead"><div class="wno">3</div><div><div class="wtitle">DOS：把口径定死，并只写一份</div>
+  <div class="wsub">一个唯一实现，输出 SKU 级与仓级两层</div></div></div>
+  <div class="wbody">
+    <ul class="plain">
+      <li><b>先定义再命名</b>：DOS = 还能卖多少天（单位：天）；日均销量 = 件/天，是 DOS 公式的分母。两者恒等式实测零违例</li>
+      <li><b>命名标注来源</b>：<code>checklist_dos_sales30/90</code>（库存清单口径）、<code>order_dos_sales30/90</code>（订单口径，当前无数据）</li>
+      <li><b>禁用</b>：<code>quick_dos</code>（暗示精度差）、<code>platform_dos_*</code>（与仓库既有 <code>platform_code</code> 语义冲突）、<code>dos_30d</code>（会被读成档位）</li>
+      <li><b>不用占位值</b>：算不出就返回空 + 独立状态标签（零销量 / 无库存 / 可算），绝不再用 9999</li>
+      <li>登记进指标词典（两份副本都要改）——这是唯一能真正防住后续 agent 混淆的机制</li>
+    </ul>
+  </div>
+</div>
+
+<div class="work">
+  <div class="whead"><div class="wno">4</div><div><div class="wtitle">滞销模块：把假的换成真的</div>
+  <div class="wsub">业务概览的「库存积压与滞销风险」卡片</div></div></div>
+  <div class="wbody">
+    <ul class="plain">
+      <li><b>去掉</b>：风险等级、清理优先级、估算积压天数、连续积压快照数、「60天+」那张假卡</li>
+      <li><b>加上</b>：仓库、还能卖多久（30 天口径与 90 天口径）、近 90 天销量、滞销状态标签</li>
+      <li><b>顶部四张卡</b>：总库存价值 / 滞销货值 / 零销量积压货值 / 滞销占比</li>
+      <li><b>进榜的</b>：重度积压 161 行 + 中度滞销 93 行 + 零销量积压 138 行 = <b>395 行，货值 ¥168,379.94</b></li>
+      <li><b>零销量单独一档、排最前</b>——它比「还能卖 180 天以上」更严重</li>
+    </ul>
+  </div>
+</div>
+
+<div class="work">
+  <div class="whead"><div class="wno">5</div><div><div class="wtitle">商品中心最低售价：改用 DOS，并加缺货豁免</div>
+  <div class="wsub">与滞销模块共用同一份 DOS，不允许各写一套</div></div></div>
+  <div class="wbody">
+    <ul class="plain">
+      <li><b>档位表要改名</b>：现在这列叫「库龄门槛」但标签写的是「滞销天数」，本身是错位的。改成「可支撑天数门槛」，阈值重标定为 30/90/180 天</li>
+      <li><b>零销量 SKU 不能沿用「算不出就回落日常档」</b>——那会让 138 个最该清的 SKU 享受日常折扣</li>
+      <li><b>缺货豁免</b>：任一仓缺货或快断货 → 档位封顶次深档</li>
+      <li><b>改价通知要带仓级证据</b>，新增变动原因「仓级缺货豁免」</li>
+      <li><b>库龄不删</b>，改名「在库时长」：它回答「在仓里待了多久」，和 DOS 回答「还能卖多久」是两回事，实测两者不能互相替代</li>
+    </ul>
+  </div>
+</div>
+
+<div class="work">
+  <div class="whead"><div class="wno">6</div><div><div class="wtitle">配套（低优先级）</div>
+  <div class="wsub">对账、清理超时、飞书投影</div></div></div>
+  <div class="wbody">
+    <ul class="plain">
+      <li>周期全量档 + 增量与全量的差异对账报表</li>
+      <li>重写会超时的滞销排名接口</li>
+      <li>飞书 SKU/SPU 投影链路</li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<section class="sec">
+<h2>五、还需要你拍板的 8 件事（1–7 已定，8 待你拍板）</h2>
+<div class="card" style="margin-top:20px">
+<table>
+<thead><tr><th style="width:6%">#</th><th style="width:28%">事项</th><th style="width:34%">我的建议</th><th>依据</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td>DOS 分档阈值</td><td>90 / 180 两档进榜；&lt;30 天判快断货不进榜；零销量单独一档排最前</td><td>快断货仅 30 行 / 4.4% 货值，且是补货信号</td></tr>
+<tr><td class="num">2</td><td>DOS 库存口径</td><td>可用库存（货值仍用库存总量）</td><td>两种口径差异 ≤3 行</td></tr>
+<tr><td class="num">3</td><td>商品中心用哪档</td><td>DOS-90</td><td>30 天窗口对 74 行会误判成滞销</td></tr>
+<tr><td class="num">4</td><td>快断货是否进滞销榜</td><td>不进，改为表格上方一条可筛选提示</td><td>与「滞销」业务含义相反</td></tr>
+<tr><td class="num">5</td><td>指标词典登记</td><td>本次一并做（两份副本同步）</td><td>唯一能真正防住后续 agent 混淆的机制</td></tr>
+<tr><td class="num">6</td><td><b>DOS 的定位</b></td><td><b>降级为参考值，不做全域使用</b>；滞销判据改用<b>库存停滞时长</b></td><td>采集策略已定不再全量 → 「DOS 只认全量批次」不成立。实测增量只覆盖 13.6% SKU，分母是行级存储快照。停滞时长是事件时刻，增量下始终准确（详见 DOS 设计稿 §4.8 / §6.6）</td></tr>
+<tr><td class="num">7</td><td><b>商品中心最低售价的选档</b></td><td>✅ <b>定案：用「库存停滞时长」选档</b>（<code>min_age_days</code> → <code>min_stall_days</code>，阈值 0/30/90/180，折扣率不动）</td><td>商品中心要的是库龄这个<b>业务概念</b>，数据上对应「这批货多久没动」；原方案「换 DOS」是方向性错误。实测四档折扣<b>从未生效过</b>（1122 个 active SKU 全落日常档 0.10）；库龄锚点修好后 99% SKU 会被打到最深档，在卖的老品货值是真滞销的 5.8 倍</td></tr>
+<tr><td class="num">8</td><td><b>下架探测怎么做</b></td><td>❓ <b>待你拍板</b>（建议：零库存宽限期 + 商品档案状态取证 + 保留季度核对批次）</td><td>不再全量后，增量看不到被删/下架的 SKU → 幽灵行会让「总库存价值」虚高</td></tr>
+</tbody>
+</table>
+</div>
+<div class="card">
+<div class="callout o">
+  <div class="ct"><span class="tag t-ok">另需确认</span>第 6 项：缺货豁免的封顶方式</div>
+  <p>「封顶在次深档」是我给的建议。另一种做法是<strong>完全不降档</strong>（维持日常档），更保守但会放弃清货收益。
+  两种做法只差一个 SKU（<code>HKR-LRI9-Squeezer-035</code>），但规则要一次定清。</p>
+</div>
+</div>
+</section>
+
+<footer>
+<p><b>设计文档</b>：<code>docs/superpowers/specs/2026-10-24-dos-metric-naming-and-caliber-design.md</code>（§2.3 定义 · §2.5 两个层级 · §3 定价矛盾与解法 · §6 五项决策）</p>
+<p><b>工作清单</b>：<code>docs/superpowers/specs/2026-10-24-inventory-domain-rollout-worklist.md</code></p>
+<p><b>数据基线</b>：<code>b_class.fact_miaoshou_inventory_snapshot</code> file 3004，1113 行，metric_date 2026-09-01；
+跨仓矛盾实测基于 37 个多仓 SKU 全量核对。</p>
+</footer>
+
+</div>
+</body>
+</html>

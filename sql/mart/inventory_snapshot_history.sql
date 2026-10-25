@@ -24,5 +24,14 @@ SELECT
     currency_code,
     data_hash,
     NULLIF(to_jsonb(snapshot)->>'file_id', '')::integer AS source_file_id,
-    ingest_timestamp
+    ingest_timestamp,
+    -- ↓ 新增列必须追加在末尾（CREATE OR REPLACE VIEW 不允许改变已有列的位置）
+    -- 行级时间戳：库存停滞时长的时间基准
+    observed_at,
+    created_at,
+    -- 妙手仓库清单自带的滚动销量窗口（缺失为 NULL = 不可算）
+    checklist_sales_7d,
+    checklist_sales_30d,
+    checklist_sales_60d,
+    checklist_sales_90d
 FROM semantic.fact_inventory_snapshot AS snapshot;

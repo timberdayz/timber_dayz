@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>库存 DOS 指标验证 · 真实数据</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f7f5f0;--card:#fff;--line:#e9e3d6;--line-soft:#f0ebe0;
+ --ink:#14171e;--ink2:#3a4256;--muted:#7c7a72;
+ --primary:#2f6f5e;--p-soft:rgba(47,111,94,.08);
+ --warn:#c97b3f;--w-soft:rgba(201,123,63,.09);
+ --danger:#b06367;--d-soft:rgba(176,99,103,.09);--mono:'JetBrains Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+ font-size:14.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+ background:radial-gradient(760px 380px at 88% -8%,rgba(47,111,94,.055),transparent 62%),
+            radial-gradient(620px 320px at 4% 4%,rgba(201,123,63,.045),transparent 60%)}
+.wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:64px 28px 96px}
+h1,h2{font-family:'DM Serif Display',Georgia,'Songti SC',serif;font-weight:400;letter-spacing:-.005em}
+h1{font-size:33px;line-height:1.25;margin-bottom:15px}
+h2{font-size:24px;margin-bottom:8px}
+.lede{font-size:16.5px;color:var(--ink2);max-width:74ch}
+.kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;
+ letter-spacing:.13em;text-transform:uppercase;color:var(--primary);margin-bottom:12px}
+.kicker::before{content:"";width:18px;height:2px;background:var(--primary);border-radius:2px}
+.sec{margin-top:52px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px}
+.card+.card{margin-top:14px}
+code{font-family:var(--mono);font-size:12.5px;background:var(--p-soft);color:var(--primary);padding:1px 6px;border-radius:5px}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.t-ok{background:var(--p-soft);color:var(--primary)}
+.t-w{background:var(--w-soft);color:var(--warn)}
+.t-b{background:var(--d-soft);color:var(--danger)}
+.t-n{background:#f0ede6;color:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+ border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:26px}
+.stat{background:var(--card);padding:16px 18px}
+.stat .n{font-family:'DM Serif Display',serif;font-size:25px;line-height:1.15}
+.stat .n small{font-size:14px;color:var(--muted);margin-left:3px}
+.stat .l{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.45}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+ color:var(--muted);padding:0 12px 9px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink2);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td strong{color:var(--ink)}
+td.num,th.num{text-align:right;font-family:var(--mono);font-size:12.5px}
+.callout{border-radius:13px;padding:16px 18px;border:1px solid var(--line);background:var(--card)}
+.callout.w{background:var(--w-soft);border-color:rgba(201,123,63,.32)}
+.callout.o{background:var(--p-soft);border-color:rgba(47,111,94,.28)}
+.callout.b{background:var(--d-soft);border-color:rgba(176,99,103,.3)}
+.callout .ct{font-weight:600;font-size:14px;margin-bottom:5px;display:flex;align-items:center;gap:8px}
+.callout p{font-size:13.5px;color:var(--ink2)}
+/* DOS 阶梯 */
+.dos{display:grid;gap:8px;margin-top:6px}
+.drow{display:grid;grid-template-columns:150px 1fr 96px 92px;gap:14px;align-items:center}
+.dlabel{font-size:13px;color:var(--ink2);font-weight:500}
+.dtrack{height:30px;background:var(--line-soft);border-radius:7px;overflow:hidden;display:flex}
+.dseg{height:100%}
+.dval{font-family:var(--mono);font-size:13px;text-align:right;color:var(--ink)}
+.dmoney{font-family:var(--mono);font-size:12px;text-align:right;color:var(--muted)}
+.seg-a{background:#b06367}.seg-b{background:#c97b3f}.seg-c{background:#8a9a5b}
+.seg-d{background:#c9a227}.seg-e{background:#7a8b9a}.seg-f{background:#6b7d8c}
+.seg-z{background:#9aa5ad}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.cmp .card{margin:0}
+ul.plain{list-style:none;padding:0;margin:6px 0 0}
+ul.plain li{padding:5px 0 5px 20px;position:relative;font-size:13.5px;color:var(--ink2)}
+ul.plain li::before{content:"";position:absolute;left:4px;top:13px;width:5px;height:5px;
+ border-radius:50%;background:var(--primary);opacity:.55}
+.figcap{font-size:12.5px;color:var(--muted);margin-top:10px;text-align:center}
+.warnrow{background:rgba(176,99,103,.05)}
+@media(max-width:860px){.wrap{padding:40px 18px 64px}.stats{grid-template-columns:1fr 1fr}
+ h1{font-size:26px}h2{font-size:21px}body{font-size:14px}.cmp{grid-template-columns:1fr}
+ .drow{grid-template-columns:112px 1fr 62px;gap:9px}.dmoney{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">DOS 指标验证 · file 3004 · 2026-10-24</div>
+  <h1>用「近90天销量」算 DOS 是对的。<br>而且它挖出了<em>现在系统完全看不见的一类问题</em></h1>
+  <p class="lede">
+    你的方案我完全理解，而且用真实数据验过了：DOS = 当前库存 ÷（近90天销量 ÷ 90）。
+    算下来最关键的发现是——<strong>现有库存系统只回答「有多少货」，DOS 才回答「够不够卖」</strong>。
+    有 32 个商品正处在「按当前卖法，15 天内就要断货」的状态，而系统今天完全看不出来。
+  </p>
+  <div class="stats">
+    <div class="stat"><div class="n">513<small>行</small></div><div class="l">有货行（SKU×仓库）<br>其中 372 行可算 DOS</div></div>
+    <div class="stat"><div class="n">32<small>行</small></div><div class="l"><b>DOS &lt; 30 天 = 要断货</b><br>其中 14 行不足 15 天</div></div>
+    <div class="stat"><div class="n">305<small>行</small></div><div class="l">DOS ≥ 90 天 = 积压<br>货值 ¥96,079 + 零销量 ¥36,477</div></div>
+    <div class="stat"><div class="n">141<small>行</small></div><div class="l">有货但近90天零销量<br>真滞销，DOS 视为无穷</div></div>
+  </div>
+</header>
+
+<!-- ✅ 2026-10-24 晚间修正：DOS 定位 -->
+<section class="sec" style="margin-top:32px">
+<div class="callout w">
+  <div class="ct"><span class="tag t-w">DOS 定位 · 2026-10-24 晚间修正</span>DOS 降级为参考，不做全域使用</div>
+  <p>采集策略已定：<b>不再全量，只有配置采集 + 增量更新</b>。妙手「近 XX 天销量」是<b>行级存储快照</b>，只在那一行被写入时才刷新，增量批次实测只覆盖 <b>13.6%</b> 的 SKU（151 / 1113）→ <b>DOS 不作判定依据</b>。</p>
+  <p>→ 滞销判据改用<b>库存停滞时长</b>（今天 − 库存最后一次<b>真实变动</b>的时间，由落盘层行内容 diff 维护，不信妙手的时间戳）；DOS 保留在表里<b>作为参考值</b>，并明确标注「参考」。完整取证见 <code>output/dos-freshness-evidence.html</code>。</p>
+</div>
+</section>
+
+<!-- ① DOS 阶梯 -->
+<section class="sec">
+  <div class="kicker">① DOS 分布</div>
+  <h2>整个库存盘子按 DOS 看</h2>
+  <p class="lede" style="margin-bottom:20px">
+    横条是行数占比，颜色按业务含义分档（红=要断货，橙=偏慢，灰蓝=积压）。右侧是货值。
+  </p>
+  <div class="card">
+    <div class="dos">
+      <div class="drow"><span class="dlabel">DOS &lt; 15 天</span><div class="dtrack"><div class="seg-a" style="width:2.7%"></div></div><span class="dval">14 行</span><span class="dmoney">缺货风险</span></div>
+      <div class="drow"><span class="dlabel">15 ~ 30 天</span><div class="dtrack"><div class="seg-b" style="width:3.5%"></div></div><span class="dval">18 行</span><span class="dmoney">—</span></div>
+      <div class="drow"><span class="dlabel">30 ~ 60 天</span><div class="dtrack"><div class="seg-c" style="width:10.1%"></div></div><span class="dval">52 行</span><span class="dmoney">健康</span></div>
+      <div class="drow"><span class="dlabel">60 ~ 90 天</span><div class="dtrack"><div class="seg-d" style="width:6.2%"></div></div><span class="dval">32 行</span><span class="dmoney">偏慢</span></div>
+      <div class="drow"><span class="dlabel">90 ~ 180 天</span><div class="dtrack"><div class="seg-e" style="width:17.9%"></div></div><span class="dval">92 行</span><span class="dmoney">滞销</span></div>
+      <div class="drow"><span class="dlabel">180 天以上</span><div class="dtrack"><div class="seg-f" style="width:31.9%"></div></div><span class="dval">164 行</span><span class="dmoney">¥96,080</span></div>
+      <div class="drow"><span class="dlabel">近90天零销量</span><div class="dtrack"><div class="seg-z" style="width:27.4%"></div></div><span class="dval">141 行</span><span class="dmoney">¥36,477</span></div>
+    </div>
+    <div class="legend">
+      <span><i style="background:#b06367"></i>要断货（补货）</span>
+      <span><i style="background:#c97b3f"></i>偏慢</span>
+      <span><i style="background:#8a9a5b"></i>健康</span>
+      <span><i style="background:#c9a227"></i>周转变慢</span>
+      <span><i style="background:#7a8b9a"></i>滞销</span>
+      <span><i style="background:#6b7d8c"></i>严重积压</span>
+      <span><i style="background:#9aa5ad"></i>零销量</span>
+    </div>
+    <p class="figcap">总货值 ¥227,200.57 ｜ 缺货风险货值 ¥10,009.66（4.4%）｜ 积压合计 ¥132,556.97（58%）</p>
+  </div>
+</section>
+
+<!-- ② 缺货风险 -->
+<section class="sec">
+  <div class="kicker">② 新增能力</div>
+  <h2>「够不够卖」——这是现在系统完全没有的</h2>
+  <p class="lede" style="margin-bottom:18px">
+    库存快照只告诉你「新加坡仓 A-00009-BLACK 还有 1 件」。DOS 告诉你：<strong>它近 90 天卖了 220 件，还能卖 0.4 天</strong>。
+    这类商品现在既不出现在滞销榜，也不会触发任何告警。
+  </p>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table>
+      <thead><tr>
+        <th style="width:22%">商品 SKU</th><th style="width:20%">仓库</th>
+        <th class="num" style="width:11%">库存</th><th class="num" style="width:15%">近90天销量</th>
+        <th class="num" style="width:13%">DOS 天数</th><th style="width:19%">业务含义</th>
+      </tr></thead>
+      <tbody>
+        <tr class="warnrow"><td><strong>A-00009-BLACK</strong></td><td>新加坡</td><td class="num">1</td><td class="num">220</td><td class="num">0.4</td><td>几乎立刻断货</td></tr>
+        <tr class="warnrow"><td><strong>SBF004-PURPLE-035</strong></td><td>菲律宾1店</td><td class="num">1</td><td class="num">61</td><td class="num">1.5</td><td>几乎立刻断货</td></tr>
+        <tr class="warnrow"><td><strong>XH-HJJ-YXSB002</strong></td><td>新加坡</td><td class="num">1</td><td class="num">23</td><td class="num">3.9</td><td>一周内断货</td></tr>
+        <tr class="warnrow"><td><strong>XH-STB-001-Black</strong></td><td>新加坡</td><td class="num">1</td><td class="num">20</td><td class="num">4.5</td><td>一周内断货</td></tr>
+        <tr><td>A-00037-Black</td><td>新加坡</td><td class="num">3</td><td class="num">38</td><td class="num">7.1</td><td>一周内断货</td></tr>
+        <tr><td>HKR-XKB-035</td><td>菲律宾3店</td><td class="num">2</td><td class="num">21</td><td class="num">8.6</td><td>一周内断货</td></tr>
+        <tr><td>XH-HJJ-YXSB006</td><td>新加坡</td><td class="num">1</td><td class="num">10</td><td class="num">9.0</td><td>一周边缘</td></tr>
+        <tr><td>HJJ-XH-DMXK002</td><td>新加坡</td><td class="num">2</td><td class="num">17</td><td class="num">10.6</td><td>一周边缘</td></tr>
+        <tr><td>XH-1401-DH-Black-035</td><td>菲律宾3店</td><td class="num">1</td><td class="num">6</td><td class="num">15.0</td><td>半月内断货</td></tr>
+      </tbody>
+    </table>
+    <p class="figcap">完整 32 行，前 9 行按 DOS 升序 —— 全部是「卖得好但库存告急」的商品</p>
+  </div>
+  <div class="callout b" style="margin-top:14px">
+    <div class="ct">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--danger)"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+      现在的风险判断只覆盖了一半
+    </div>
+    <p>现有逻辑是「周转天数越长风险越高」（≥60 天判 high）。DOS 语义相同，但 <b>DOS &lt; 30 天的方向是反的</b>：
+    那是<b>要断货</b>，不是滞销。现在的风险分级只管「压太久」，完全不管「快卖完了」。</p>
+    <p>而这一半恰恰是更贵的错误——压久了是慢慢亏钱，断货是直接丢单。</p>
+  </div>
+</section>
+
+<!-- ③ 90天 vs 30天 -->
+<section class="sec">
+  <div class="kicker">③ 为什么是 90 天</div>
+  <h2>用近90天，不是一拍脑袋</h2>
+  <p class="lede" style="margin-bottom:18px">
+    同一份数据，用近 30 天和近 90 天各算一遍 DOS，差异大到足以改变结论。
+  </p>
+  <div class="cmp">
+    <div class="card">
+      <div class="fhead" style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><h3 style="font-size:15.5px">两个窗口的差异</h3></div>
+      <table>
+        <tbody>
+          <tr><td>判为「要断货」的行数</td><td class="num">90天: <strong>32</strong></td><td class="num">30天: 38</td></tr>
+          <tr><td>两个窗口 DOS 相差 ≥30 天</td><td class="num" colspan="2"><strong>179 行</strong>（占可算行 48%）</td></tr>
+          <tr><td>近90天卖过、近30天没卖</td><td class="num" colspan="2"><strong>74 行</strong> ← 30天口径会误判成滞销</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="fhead" style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><h3 style="font-size:15.5px">结论</h3></div>
+      <p style="font-size:13.5px;color:var(--ink2)">
+        近 30 天销量对<b>爆品和新品极不稳定</b>：一周没出货就能让日均掉一大截，
+        于是 DOS 忽高忽低。这 74 行「还在卖但最近没动」的商品，用 30 天窗口看是滞销，
+        用 90 天窗口看是正常。
+      </p>
+      <p style="font-size:13.5px;color:var(--ink2);margin-top:8px">
+        <b>90 天窗口更稳，且与库存决策的节奏匹配</b>——补货决策本来就看季度，不看周。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ④ DOS vs 库龄 -->
+<section class="sec">
+  <div class="kicker">④ 一个必须说清的区别</div>
+  <h2>DOS 不能替代库龄，两个都要留</h2>
+  <p class="lede" style="margin-bottom:18px">
+    我原本以为「库龄」可以改造成 DOS 的替代品。数据说不行——<strong>这两个指标几乎不相关</strong>。
+  </p>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table>
+      <thead><tr><th style="width:22%">DOS 分档</th><th style="width:26%">库龄分档（按记录创建时间）</th><th class="num" style="width:14%">行数</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr class="warnrow"><td><strong>DOS &lt; 30（要断货）</strong></td><td>库龄 180+</td><td class="num">32</td><td>老货，但正在断货 —— 该补货，不是该清仓</td></tr>
+        <tr><td>DOS 30~90（健康/偏慢）</td><td><strong>库龄 180+</strong></td><td class="num">82</td><td>老货但卖得动 —— 可能是重新上架的新机会</td></tr>
+        <tr><td>DOS 90~180（滞销）</td><td>库龄 180+</td><td class="num">91</td><td>老货且卖得慢 —— 真正该处理</td></tr>
+        <tr><td>DOS 180+（严重积压）</td><td>库龄 180+</td><td class="num">158</td><td>两个指标一致指向该处理</td></tr>
+        <tr><td>DOS 180+（严重积压）</td><td>库龄 31~90 / 91~180</td><td class="num">6</td><td>新货积压 —— 可能是备货过量，不是老库存问题</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout o" style="margin-top:14px">
+    <div class="ct">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--primary)"><path d="M20 6 9 17l-5-5"/></svg>
+      我的建议
+    </div>
+    <p><b>DOS 做库存域的主指标</b>（回答"还能卖多久"，直接驱动补货与清仓两个决策）；
+    <b>库龄保留但改名</b>（回答"这个货放了多久"，是商品生命周期视角，比如清仓时要不要打折）。
+    两者交叉着看才有价值：<b>库龄 180+ 但 DOS 只有 30~90 的 82 个商品</b>，是重新上架的候选，
+    这个名单现在系统给不出来。</p>
+  </div>
+</section>
+
+<!-- ⑤ 口径 -->
+<section class="sec">
+  <div class="kicker">⑤ 已经确认的口径问题</div>
+  <h2>不用纠结的三个点</h2>
+  <div class="card">
+    <ul class="plain">
+      <li><b>跨仓汇总还是按行算？</b> —— 实测<b>结果完全一致</b>（DOS&lt;30 都是 32 行，180+ 都是 164 行）。
+        这批数据里跨仓 SKU 都是「A 仓有货、B 仓没销量」的结构，两种口径等价。按 SKU×仓库 算最简单，就这么做。</li>
+      <li><b>落盘主键会不会冲突？</b> —— 1113 行 = 1113 个唯一 SKU×仓库 组合，零重复；
+        两批之间的 data_hash 也零冲突。增量 upsert 按 SKU×仓库 覆盖是安全的。</li>
+      <li><b>「近90天销量」的值从哪来？</b> —— 妙手仓库清单自带这一列，<b>已经完整采进库里</b>（1113 行 100% 有值）。
+        增量采集时它会跟着刷新，不需要额外的数据源。</li>
+    </ul>
+  </div>
+</section>
+
+</div>
+</body>
+</html>

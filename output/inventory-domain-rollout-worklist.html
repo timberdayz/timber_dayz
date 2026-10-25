@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>库存域改造 · 落地工作清单</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f7f5f0;--card:#fff;--line:#e9e3d6;--line-soft:#f0ebe0;
+ --ink:#14171e;--ink2:#3a4256;--muted:#7c7a72;
+ --primary:#2f6f5e;--p-soft:rgba(47,111,94,.08);
+ --warn:#c97b3f;--w-soft:rgba(201,123,63,.09);
+ --danger:#b06367;--d-soft:rgba(176,99,103,.09);--mono:'JetBrains Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+ font-size:14.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+ background:radial-gradient(760px 380px at 88% -8%,rgba(47,111,94,.055),transparent 62%),
+            radial-gradient(620px 320px at 4% 4%,rgba(201,123,63,.045),transparent 60%)}
+.wrap{position:relative;z-index:1;max-width:1140px;margin:0 auto;padding:64px 28px 96px}
+h1,h2{font-family:'DM Serif Display',Georgia,'Songti SC',serif;font-weight:400;letter-spacing:-.005em}
+h1{font-size:33px;line-height:1.25;margin-bottom:15px}
+h2{font-size:24px;margin-bottom:8px}
+h3{font-size:15.5px;font-weight:600}
+.lede{font-size:16.5px;color:var(--ink2);max-width:78ch}
+.kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;
+ letter-spacing:.13em;text-transform:uppercase;color:var(--primary);margin-bottom:12px}
+.kicker::before{content:"";width:18px;height:2px;background:var(--primary);border-radius:2px}
+.sec{margin-top:52px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px}
+.card+.card{margin-top:14px}
+code{font-family:var(--mono);font-size:12.5px;background:var(--p-soft);color:var(--primary);padding:1px 6px;border-radius:5px}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.t-ok{background:var(--p-soft);color:var(--primary)}
+.t-w{background:var(--w-soft);color:var(--warn)}
+.t-b{background:var(--d-soft);color:var(--danger)}
+.t-n{background:#f0ede6;color:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+ border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:26px}
+.stat{background:var(--card);padding:16px 18px}
+.stat .n{font-family:'DM Serif Display',serif;font-size:23px;line-height:1.2}
+.stat .n small{font-size:14px;color:var(--muted);margin-left:3px}
+.stat .l{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.45}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+ color:var(--muted);padding:0 12px 9px;border-bottom:1px solid var(--line)}
+td{padding:11px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink2);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td strong{color:var(--ink)}
+td.num,th.num{text-align:right;font-family:var(--mono);font-size:12.5px}
+.callout{border-radius:13px;padding:16px 18px;border:1px solid var(--line);background:var(--card)}
+.callout.w{background:var(--w-soft);border-color:rgba(201,123,63,.32)}
+.callout.o{background:var(--p-soft);border-color:rgba(47,111,94,.28)}
+.callout.b{background:var(--d-soft);border-color:rgba(176,99,103,.3)}
+.callout .ct{font-weight:600;font-size:14px;margin-bottom:5px;display:flex;align-items:center;gap:8px}
+.callout p{font-size:13.5px;color:var(--ink2)}
+.callout p+p{margin-top:8px}
+ul.plain{list:none;padding:0;margin:6px 0 0}
+ul.plain li{padding:5px 0 5px 20px;position:relative;font-size:13.5px;color:var(--ink2)}
+ul.plain li::before{content:"";position:absolute;left:4px;top:13px;width:5px;height:5px;
+ border-radius:50%;background:var(--primary)}
+ul.plain li b{color:var(--ink)}
+ul.dash{list:none;padding:0;margin:6px 0 0}
+ul.dash li{padding:4px 0 4px 18px;position:relative;font-size:13px;color:var(--ink2)}
+ul.dash li::before{content:"—";position:absolute;left:0;top:4px;color:var(--muted);font-size:12px}
+.wp{border:1px solid var(--line);border-radius:15px;background:var(--card);padding:19px 21px;margin-top:13px}
+.wp .wh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.wp .wn{font-family:'DM Serif Display',serif;font-size:20px;color:var(--primary)}
+.wp .wt{font-weight:600;font-size:14.5px}
+.wp .wd{font-size:13px;color:var(--muted);margin-bottom:11px;line-height:1.5}
+.wp .body{font-size:13.5px;color:var(--ink2)}
+.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:20px}
+.fnode{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:13px 14px;position:relative}
+.fnode .fn{font-family:var(--mono);font-size:11px;color:var(--primary);font-weight:500;letter-spacing:.06em}
+.fnode .ft{font-weight:600;font-size:13.5px;margin:4px 0 5px}
+.fnode .fd{font-size:11.5px;color:var(--muted);line-height:1.45}
+.fnode .dep{position:absolute;top:13px;right:13px;font-size:11px;color:var(--muted);font-family:var(--mono)}
+.fnode.hl{border-color:rgba(47,111,94,.45);background:rgba(47,111,94,.06)}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px}
+.panel{border:1px solid var(--line);border-radius:14px;padding:18px 20px;background:var(--card)}
+.panel.no{background:#fbf6f4;border-color:rgba(176,99,103,.3)}
+.panel.yes{background:#f4f9f6;border-color:rgba(47,111,94,.3)}
+.panel .ph{font-weight:600;font-size:14.5px;margin-bottom:4px}
+.panel .ps{font-size:12.5px;color:var(--muted);margin-bottom:11px}
+.cmprow{display:flex;gap:12px;align-items:flex-start;padding:11px 0;border-bottom:1px solid var(--line-soft)}
+.cmprow:last-child{border-bottom:none}
+.cmprow .cno{font-family:'DM Serif Display',serif;font-size:19px;color:var(--danger);min-width:34px}
+.cmprow .ct2{font-weight:600;font-size:14px}
+.cmprow .cd{font-size:12.5px;color:var(--muted);margin-top:3px}
+footer{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);
+ font-size:12.5px;color:var(--muted);line-height:1.8}
+footer b{color:var(--ink2)}
+@media(max-width:1000px){.flow{grid-template-columns:repeat(2,1fr)}.stats{grid-template-columns:repeat(2,1fr)}
+ .split{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="kicker">落地工作清单 · 2026-10-24</div>
+<h1>库存域改造：四件事，环环相扣</h1>
+<p class="lede">
+把妙手库存域从「每天全量搬 1113 行」改成「只搬有变化的行」，把下游取数从「批次级排序键」改成「行级时间戳」，
+再把<strong>滞销判据</strong>换成在增量模式下始终准确的<strong>库存停滞时长</strong>；
+DOS 保留在表里作<strong>参考值</strong>，不再拿它做判定。
+<br><br>先让数据能对得上，再让指标说得清，最后才谈改页面。
+</p>
+
+<div class="stats">
+  <div class="stat"><div class="n">3<small> 个</small></div><div class="l">现在就在给出错误结论的问题<br>优先级高于一切增量改造</div></div>
+  <div class="stat"><div class="n">8<small> 个工作包</small></div><div class="l">W1 采集 → W8 配套<br>分 B1–B5 五个批次</div></div>
+  <div class="stat"><div class="n">4<small> 行 → </small><small>469 行</small></div><div class="l">最新批次进 latest 的贡献<br>换排序键后的实测提升</div></div>
+  <div class="stat"><div class="n">8<small> 项</small></div><div class="l">等你拍板的决策<br>已定 7 项 / 待拍板 1 项</div></div>
+</div>
+
+<!-- ✅ 2026-10-24 晚间修正：DOS 定位 -->
+<section class="sec" style="margin-top:32px">
+<div class="callout w">
+  <div class="ct"><span class="tag t-w">DOS 定位 · 2026-10-24 晚间修正</span>DOS 降级为参考，不做全域使用</div>
+  <p>采集策略已定：<b>不再全量，只有配置采集 + 增量更新</b>。妙手「近 XX 天销量」是<b>行级存储快照</b>，只在那一行被写入时才刷新，增量批次实测只覆盖 <b>13.6%</b> 的 SKU（151 / 1113）→ <b>DOS 不作判定依据</b>。</p>
+  <p>→ 滞销判据改用<b>库存停滞时长</b>（今天 − 库存最后一次<b>真实变动</b>的时间，由落盘层行内容 diff 维护，不信妙手的时间戳）；DOS 保留在表里<b>作为参考值</b>，并明确标注「参考」。完整取证见 <code>output/dos-freshness-evidence.html</code>。</p>
+</div>
+</section>
+
+<section class="sec">
+<h2>先解决这三个「现在就是错的」</h2>
+<p class="lede">这三条不是「优化」，是当前系统就在给出错误结论——优先级高于一切增量改造。</p>
+
+<div class="card" style="margin-top:20px">
+<div class="cmprow">
+  <div class="cno">P1</div>
+  <div>
+    <div class="ct2">滞销模块顶部三张卡是假的 <span class="tag t-b">假三档</span></div>
+    <div class="cd"><code>backlog_30d</code> = <code>backlog_60d</code> = <code>backlog_90d</code> = <b>217787.41</b>，三个数字<b>完全相同</b>——同一值切三刀，且被 9999 哨兵污染。业务看板上的「30/60/90 天积压」毫无区分度。</div>
+  </div>
+</div>
+<div class="cmprow">
+  <div class="cno">P2</div>
+  <div>
+    <div class="ct2">滞销判定被 9999 哨兵污染 <span class="tag t-b">口径错</span></div>
+    <div class="cd"><code>mart.inventory_backlog_base</code> 有 <b>499 行</b> <code>estimated_turnover_days = 9999</code>（订单口径取自 <code>fact_orders_atomic</code>，该表无 miaoshou 数据）→ risk_level 全 high。整个滞销名单的排序和风险等级失真。</div>
+  </div>
+</div>
+<div class="cmprow">
+  <div class="cno">P3</div>
+  <div>
+    <div class="ct2">最新批次进不了「最新」视图 <span class="tag t-b">排序键错</span></div>
+    <div class="cd"><code>metric_date</code> 是批次级错戳 → 1113 行最新批次只贡献 <b>4 行</b>进 <code>mart.inventory_snapshot_latest</code>。下游所有取「最新」的逻辑都在读旧批次。</div>
+  </div>
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>工作包与依赖</h2>
+<div class="flow">
+  <div class="fnode hl"><div class="dep">B1</div><div class="fn">W1</div><div class="ft">采集层</div><div class="fd">加「更新时间 + 区间」筛选<br>新组件 + 行为测试</div></div>
+  <div class="fnode hl"><div class="dep">B2</div><div class="fn">W2</div><div class="ft">落盘层</div><div class="fd">行级 observed_at<br>状态层 upsert</div></div>
+  <div class="fnode"><div class="dep">B3</div><div class="fn">W3</div><div class="ft">水位线</div><div class="fd">自动推进<br>全量回退规则</div></div>
+  <div class="fnode hl"><div class="dep">B4</div><div class="fn">W4</div><div class="ft">DOS 口径</div><div class="fd">语义层暴露销量列<br>唯一实现 + 命名定稿</div></div>
+  <div class="fnode hl"><div class="dep">B4</div><div class="fn">W5·W6</div><div class="ft">使用方改造</div><div class="fd">滞销模块<br>商品中心最低售价</div></div>
+</div>
+
+<div class="card" style="margin-top:14px">
+<div class="callout b">
+  <div class="ct"><span class="tag t-b">硬约束 1</span>W1 与 W2 必须同批发布</div>
+  <p>单独上 W1 会让「增量批次进不了 latest」更严重——旧批次 metric_date 09-14 依然压过新批次。</p>
+</div>
+</div>
+<div class="card">
+<div class="callout o">
+  <div class="ct"><span class="tag t-ok">硬约束 2</span>DOS 唯一实现先于 W5 / W6</div>
+  <p>否则滞销模块与商品中心各写一份 DOS 口径，必然分叉——会出现「页面按日常档显示、通知却按滞销档发」这类自相矛盾。</p>
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>七个工作包</h2>
+
+<div class="wp">
+<div class="wh"><span class="wn">W1</span><span class="wt">采集层：加「更新时间 + 区间」筛选</span><span class="tag t-ok">B1</span><span class="tag t-n">低风险</span></div>
+<div class="wd">新增组件 <code>miaoshou/inventory_date_filter</code>，复用订单域同一套 <code>date_picker</code> 与采集配置字段，多一步「先切维度」。</div>
+<div class="body">
+<ul class="dash">
+<li>妙手两处<b>静默失败</b>——维度没切、点「确定」没点，页面照常显示不报错。每步都要断言：<code>modelvaluegroup</code> 以 <code>gmtModified</code> 开头 / 含目标区间 / 「SKU 总数」变化且 &gt; 0</li>
+<li>「确定」= <code>.is-plain</code>，「清空」= <code>.is-text</code> → <b>必须用完整 class 区分，否则误点清空</b></li>
+<li>维度选错也是静默失败：同区间按更新时间 147 SKU，按创建时间仅 3 SKU</li>
+<li>不用「近7天/近30天」快捷项作入口——相对今天 ≠ 从水位线接着采，会漏</li>
+</ul>
+</div>
+</div>
+
+<div class="wp">
+<div class="wh"><span class="wn">W2</span><span class="wt">落盘层：行级时间戳 + 状态层 upsert</span><span class="tag t-ok">B2</span><span class="tag t-n">低风险</span></div>
+<div class="wd">语义层新增 <code>observed_at</code> / <code>created_at</code>；<code>latest</code> / <code>current</code> 排序键改为 <code>observed_at DESC</code>；状态层每 SKU×仓 永续一行。</div>
+<div class="body">
+<table style="margin-top:4px">
+<thead><tr><th style="width:34%">排序键</th><th class="num" style="width:26%">最新批次贡献</th><th class="num">旧批次贡献</th></tr></thead>
+<tbody>
+<tr><td><code>metric_date</code>（现状）</td><td class="num"><b style="color:var(--danger)">4 行</b></td><td class="num">1226 行</td></tr>
+<tr><td><code>observed_at</code>（目标）</td><td class="num"><b style="color:var(--primary)">469 行</b></td><td class="num">761 行</td></tr>
+</tbody>
+</table>
+<div style="margin-top:11px;font-size:13px;color:var(--muted)">不新增物理列（平铺列已 100% 覆盖）；不订正历史 metric_date（新模型下它只表示「这批的配置区间」，订正会丢可追溯性）。</div>
+</div>
+</div>
+
+<div class="wp">
+<div class="wh"><span class="wn">W3</span><span class="wt">水位线与全量兜底</span><span class="tag t-w">B3</span><span class="tag t-w">中风险</span></div>
+<div class="wd">水位线表 + 自动推进 + 全量回退规则。四条必须配的规则：</div>
+<div class="body">
+<ul class="plain">
+<li>首次强制全量</li>
+<li>断档 &gt; 3~5~7 天 → 自动回退全量</li>
+<li>周期性全量兜底——<b>增量查不出删除/下架</b></li>
+<li>上一批失败 → 下一批回退全量</li>
+</ul>
+</div>
+</div>
+
+<div class="wp">
+<div class="wh"><span class="wn">W4</span><span class="wt">DOS 口径与命名</span><span class="tag t-w">B4</span><span class="tag t-ok">本次新定稿</span></div>
+<div class="wd">把 DOS 从「错口径 + 名字含糊」变成「口径清晰 + 唯一实现」。</div>
+<div class="body">
+<ul class="plain">
+<li><b>语义层暴露销量列</b>——<code>semantic.fact_inventory_snapshot</code> 目前<b>没有任何 sales 列</b>，必须先投影 <code>近7/30/60/90天销量数据</code></li>
+<li><b>DOS 计算唯一实现</b>（纯函数 + 唯一取数路径），滞销模块与商品中心最低售价都调它</li>
+<li><b>禁止哨兵</b>：不可算时返回 NULL + 独立状态标签（<code>zero_sales</code> / <code>no_stock</code> / <code>computable</code>）</li>
+<li><b>命名定稿</b>：<code>checklist_dos_sales30</code> / <code>checklist_dos_sales90</code>（清单口径，<code>observe</code>）；<code>order_dos_sales30</code> / <code>order_dos_sales90</code>（订单口径，<code>blocked</code>）</li>
+<li><b>禁用</b>：<code>quick_dos</code>（暗示精度差）· <code>platform_dos_*</code>（与 <code>platform_code</code> 语义冲突）· <code>dos_30d</code>（会被读成档位）</li>
+</ul>
+<div style="margin-top:10px;font-size:13px;color:var(--muted)">为什么 90 天当主口径：74 行「近90天卖过、近30天没动」会被 30 天窗口误判成滞销；且 DOS-30 判「&lt;30天」的 37 行，在 DOS-90 下无一落到 ≥180 天。</div>
+</div>
+</div>
+
+<div class="wp">
+<div class="wh"><span class="wn">W5</span><span class="wt">滞销模块改造</span><span class="tag t-w">B4</span></div>
+<div class="wd">把现在给出错误结论的模块，换成口径正确的版本。</div>
+<div class="body">
+<div class="split" style="margin-top:4px">
+<div class="panel no">
+<div class="ph">去掉（都是错的）</div>
+<div class="ps">假三档与污染字段</div>
+<ul class="dash">
+<li>风险等级 high/medium/low</li>
+<li>清理优先级（含 9999 的假分数）</li>
+<li>估算积压天数、连续积压快照数</li>
+<li>顶部「60天+」假卡</li>
+</ul>
+</div>
+<div class="panel yes">
+<div class="ph">新增</div>
+<div class="ps">说清依据</div>
+<ul class="dash">
+<li>仓库列（表格本来就是 SKU×仓 粒度）</li>
+<li>DOS-30、DOS-90</li>
+<li>近 90 天销量</li>
+<li>滞销状态标签（零销量独立标记）</li>
+</ul>
+</div>
+</div>
+<div style="margin-top:11px;font-size:13px;color:var(--muted)">顶部四张卡：总库存价值 / 滞销货值(DOS90&gt;180) / 零销量积压货值 / 滞销占比。排序：DOS-90 降序 + 同档货值降序。</div>
+</div>
+</div>
+
+<div class="wp">
+<div class="wh"><span class="wn">W6</span><span class="wt">商品中心最低售价改用 DOS</span><span class="tag t-w">B4 同批</span></div>
+<div class="wd"><code>select_age_tier(policies, age_days)</code> → 改用 DOS 档位。</div>
+<div class="body">
+<ul class="plain">
+<li><code>min_age_days</code>（库龄）与 DOS 天数<b>不是一回事</b>，换成 DOS 后覆盖商品会大幅变化，阈值需重新标定</li>
+<li>沿用 <code>product_pricing_query_service</code> 的<b>唯一实现</b>纪律——两边都调它，不允许任何一方自己再写一遍</li>
+</ul>
+</div>
+</div>
+
+<div class="wp">
+<div class="wh"><span class="wn">W7</span><span class="wt">配套</span><span class="tag t-n">低优先级</span></div>
+<div class="body">
+<ul class="dash">
+<li>周期全量档 + 增量/全量差异对账报表（B5）</li>
+<li><code>api.clearance_ranking_module</code> 重写（消除 statement timeout）</li>
+<li>飞书 sku/spu 投影链路（配表 ID + celery 定时扫 pending）</li>
+</ul>
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>全局验收（每批都要过）</h2>
+<div class="card" style="margin-top:20px">
+<ul class="plain">
+<li>采集测试面全绿（当前基线 <b>149 项</b>）</li>
+<li><code>black --line-length 88</code> / <code>ruff</code> 全过</li>
+<li>函数 ≤ 50 行、类 ≤ 500 行（<code>TESTING_AND_QUALITY.md</code> 硬门禁）</li>
+<li>lint 基线不劣化（当前全仓库 <b>385 条 / 656 处</b>）</li>
+<li>镜像同步走 <code>scripts/sync_main_mirrors.ps1</code> + 独立 worktree；origin/main 与 cnb/main 同 commit</li>
+</ul>
+</div>
+</section>
+
+<section class="sec">
+<h2>一次说清 DOS 和库龄的关系</h2>
+<p class="lede">这是最容易被后续 agent 弄混的一点，单独列。</p>
+<div class="card" style="margin-top:20px">
+<table>
+<thead><tr><th style="width:22%"></th><th style="width:39%">DOS</th><th style="width:39%">库龄（改名为「在库时长」）</th></tr></thead>
+<tbody>
+<tr><td><strong>回答什么</strong></td><td>这批货按当前卖法还能卖多久</td><td>这批货在仓里待了多久</td></tr>
+<tr><td><strong>用来干嘛</strong></td><td>补货 / 清仓决策</td><td>商品生命周期视角</td></tr>
+<tr><td><strong>能不能互相替代</strong></td><td><span class="tag t-b">不能</span></td><td><span class="tag t-b">不能</span></td></tr>
+</tbody>
+</table>
+<div class="callout w" style="margin-top:13px">
+  <div class="ct"><span class="tag t-w">实测</span></div>
+  <p>DOS 30–90 天但库龄 180+ 有 <b>82 行</b>（<b>重新上架候选</b>，现在系统给不出）· DOS &lt;30 全为库龄 180+ · DOS 180+ 但库龄 31–90 有 6 行<br>
+  → <b>两者都要留</b>，各司其职。</p>
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>等你拍板的 8 件事（1–7 已定，8 待你拍板）</h2>
+<div class="card" style="margin-top:20px">
+<table>
+<thead><tr><th style="width:6%">#</th><th style="width:26%">事项</th><th style="width:30%">建议</th><th>依据</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td>DOS 分档阈值</td><td>90 / 180 两档进滞销；&lt;30 天判快断货<b>不进榜</b></td><td>A 档仅 30 行 / 4.4% 货值，且是补货信号</td></tr>
+<tr><td class="num">2</td><td>DOS 库存口径</td><td>可用库存</td><td>两种口径差异 ≤3 行</td></tr>
+<tr><td class="num">3</td><td>商品中心用哪档</td><td>DOS-90</td><td>30 天窗口对 74 行会误判</td></tr>
+<tr><td class="num">4</td><td>快断货是否进滞销模块</td><td>不进，顶部单独提示</td><td>与「滞销」业务含义相反</td></tr>
+<tr><td class="num">5</td><td>指标词典登记</td><td>本次一并做</td><td>唯一能真正防住后续 agent 混淆的机制</td></tr>
+<tr><td class="num">6</td><td><b>DOS 的定位</b></td><td><b>降级为参考值，不做全域使用</b>；滞销判据改用<b>库存停滞时长</b></td><td>采集策略已定不再全量 → 「DOS 只认全量批次」不成立。实测增量只覆盖 13.6% SKU；停滞时长是事件时刻、不漂移、增量下始终准确（DOS 设计稿 §4.8 / §6.6）</td></tr>
+<tr><td class="num">7</td><td><b>商品中心最低售价的选档</b></td><td>✅ <b>定案：用「库存停滞时长」选档</b>（<code>min_age_days</code> → <code>min_stall_days</code>，阈值 0/30/90/180，折扣率不动）</td><td>商品中心要的是库龄这个<b>业务概念</b>，数据上对应「这批货多久没动」；原方案「换 DOS」是方向性错误。实测四档折扣<b>从未生效过</b>（1122 个 active SKU 全落日常档 0.10）；库龄锚点修好后 99% SKU 会被打到最深档，在卖的老品货值是真滞销的 5.8 倍</td></tr>
+<tr><td class="num">8</td><td><b>下架探测怎么做</b></td><td>❓ <b>待拍板</b>（建议：零库存宽限期 + 商品档案状态取证 + 季度核对批次）</td><td>不再全量后，增量查不出删除/下架 → 库存价值虚高</td></tr>
+</tbody>
+</table>
+</div>
+<div class="card">
+<div class="callout w">
+  <div class="ct"><span class="tag t-w">另外两个前置依赖</span>不阻塞 B1–B4，但决定 DOS 能否升级为 <code>stable</code></div>
+  <p><b>采 miaoshou 订单域</b>（P0-1）→ 订单口径 DOS 才有原料，也才能做清单口径 vs 订单口径的交叉校验<br>
+  <b>库龄锚点修正</b>（B4 内）→ <code>mart.inventory_age_current.age_days</code> 当前 max 仅 13 天、<code>&gt;30 天</code> 的 SKU 为 0，导致商品中心 56% SKU 走 <code>fallback_no_age_data</code> 兜底</p>
+</div>
+</div>
+</section>
+
+<footer>
+<p><b>工作清单文档</b>：<code>docs/superpowers/specs/2026-10-24-inventory-domain-rollout-worklist.md</code></p>
+<p><b>设计稿</b>：<code>2026-10-24-miaoshou-inventory-incremental-collection-design.md</code>（增量采集）·
+<code>2026-10-24-dos-metric-naming-and-caliber-design.md</code>（DOS 口径与命名）</p>
+<p><b>可视化</b>：<code>output/inventory-incremental-concept.html</code>（增量概念）·
+<code>output/inventory-updated-filter-evidence.html</code>（真实页面取证）·
+<code>output/clearance-module-concept-redesign.html</code>（滞销模块诊断）·
+<code>output/dos-naming-decision.html</code>（DOS 命名决策）</p>
+</footer>
+
+</div>
+</body>
+</html>

@@ -28,7 +28,8 @@ stagnant_before_month AS (
         m.ranking_month,
         h.platform_code,
         h.sku_key,
-        GREATEST(COALESCE(h.estimated_stagnant_days, 0), COALESCE(h.estimated_turnover_days, 0)) AS age_days,
+        -- 2026-10-24：滞销口径换成「距上次进货时长」（stock_changed_at 派生）
+        h.age_days,
         h.inventory_value
     FROM order_months m
     JOIN LATERAL (
@@ -36,9 +37,8 @@ stagnant_before_month AS (
             b.platform_code,
             COALESCE(NULLIF(BTRIM(b.platform_sku), ''), NULLIF(BTRIM(b.product_sku), ''), NULLIF(BTRIM(b.product_id), '')) AS sku_key,
             b.snapshot_date,
-            b.estimated_stagnant_days,
-            b.estimated_turnover_days,
-            GREATEST(COALESCE(b.estimated_stagnant_days, 0), COALESCE(b.estimated_turnover_days, 0)) AS age_days,
+            b.days_since_restock,
+            COALESCE(b.days_since_restock, 0) AS age_days,
             b.inventory_value
         FROM mart.inventory_backlog_base b
         WHERE b.snapshot_date < m.ranking_month
@@ -84,9 +84,10 @@ SELECT
     clearance_quantity,
     stagnant_sku_count,
     max_stagnant_age_days,
-    max_stagnant_age_days AS estimated_turnover_days,
+    -- 2026-10-24：DOS 已降级为参考值，不再出现在这个视图里
+    NULL::numeric AS estimated_turnover_days,
     NULL::numeric AS daily_avg_sales,
-    stagnant_sku_count AS stagnant_snapshot_count,
+    NULL::integer AS stagnant_snapshot_count,
     max_stagnant_age_days AS estimated_stagnant_days,
     CASE
         WHEN max_stagnant_age_days >= 180 THEN 'high'

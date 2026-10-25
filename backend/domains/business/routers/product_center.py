@@ -2069,7 +2069,7 @@ async def _current_policies(db: AsyncSession) -> list[SkuPricingPolicy]:
 async def list_sku_pricing_policies(db: AsyncSession = Depends(get_async_db)):
     """返回全部规则行（含历史），按档位起点、生效日期排序。"""
     rows = (await db.execute(
-        select(SkuPricingPolicy).order_by(SkuPricingPolicy.min_age_days, SkuPricingPolicy.effective_from)
+        select(SkuPricingPolicy).order_by(SkuPricingPolicy.min_restock_days, SkuPricingPolicy.effective_from)
     )).scalars().all()
     return [SkuPricingPolicyResponse.model_validate(row) for row in rows]
 
@@ -2097,7 +2097,7 @@ async def create_sku_pricing_policy(
         )
     existing = (await db.execute(
         select(SkuPricingPolicy).where(
-            SkuPricingPolicy.min_age_days == body.min_age_days,
+            SkuPricingPolicy.min_restock_days == body.min_restock_days,
             *_policy_current_predicate(),
         )
     )).scalars().first()
@@ -2131,14 +2131,14 @@ async def create_sku_pricing_policy(
     return SkuPricingPolicyResponse.model_validate(row)
 
 
-@router.put("/api/sku-pricing-policies/{min_age_days}", response_model=SkuPricingPolicyResponse)
+@router.put("/api/sku-pricing-policies/{min_restock_days}", response_model=SkuPricingPolicyResponse)
 async def update_sku_pricing_policy(
-    min_age_days: int,
+    min_restock_days: int,
     body: SkuPricingPolicyUpdateRequest,
     db: AsyncSession = Depends(get_async_db),
     _user=Depends(_require_platform_fee_editor),
 ):
-    """路径参数 = 被编辑的档位（旧起点），body 的 min_age_days = 该档位的新起点。
+    """路径参数 = 被编辑的档位（旧起点），body 的 min_restock_days = 该档位的新起点。
 
     两者不同 = 运营在改库龄档位的边界（改这一格就改了滞销阈值），不是调用方搞混。
 
@@ -2147,7 +2147,7 @@ async def update_sku_pricing_policy(
     """
     current = (await db.execute(
         select(SkuPricingPolicy).where(
-            SkuPricingPolicy.min_age_days == min_age_days,
+            SkuPricingPolicy.min_restock_days == min_restock_days,
             *_policy_current_predicate(),
         ).with_for_update()
     )).scalars().first()
@@ -2155,7 +2155,7 @@ async def update_sku_pricing_policy(
         raise HTTPException(status_code=404, detail="pricing policy tier not found")
 
     current_data = {
-        "min_age_days": current.min_age_days,
+        "min_restock_days": current.min_restock_days,
         "effective_from": current.effective_from,
     }
     try:

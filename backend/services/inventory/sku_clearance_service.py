@@ -2,9 +2,9 @@
 
 口径（docs/superpowers/specs/2026-10-21-sku-level-clearance-ranking-design.md）：
 
-- **库龄主口径** = `mart.inventory_age_current.age_days`（真库龄，累计口径）
+- **主判据** = 「距上次进货天数」（`mart.inventory_state.days_since_restock`）：补货才重新开始计时
   不是 `estimated_stagnant_days`（只是最近两帧间隔，采集越密反而越小），
-  也不是 `estimated_turnover_days`（动销速度）。
+  也不是 DOS（动销速度；分母不随每次采集刷新，只作参考）。
 - **数据源只有一个**：只读视图 `api.sku_clearance_ranking_module`。
   视图里出库龄 / 库存 / 动销 / ERP 关联 + 定价原料。
 - **定价字段在这里补齐**，调 `backend/services/product_pricing_service.py` 的纯函数
@@ -26,8 +26,10 @@ from backend.schemas.inventory import (
     SkuClearanceRankingItemResponse,
     SkuClearanceRankingResponse,
     SkuClearanceRankingSummaryResponse,
+    SkuClearanceTierStat,
 )
-from backend.services.product_pricing_service import compute_sku_pricing, select_age_tier
+from backend.services.inventory.inventory_dos_service import compute_dos
+from backend.services.product_pricing_service import compute_sku_pricing, select_restock_tier
 from backend.services.sku_pricing_policy_service import (
     load_current_policies,
     to_policy_rows,
@@ -39,13 +41,10 @@ CLEARANCE_VIEW = "api.sku_clearance_ranking_module"
 
 # 排序字段白名单：值是视图里的列名，**用户输入永远不直接拼进 SQL**。
 SORTABLE_COLUMNS: dict[str, str] = {
-    "clearance_priority_score": "clearance_priority_score",
-    "age_days": "age_days",
+    "days_since_restock": "days_since_restock",
     "inventory_value": "inventory_value",
-    "estimated_turnover_days": "estimated_turnover_days",
+    "current_qty": "current_qty",
 }
-
-RISK_LEVELS = ("high", "medium", "low")
 
 _SELECT_COLUMNS = """
     snapshot_date,
@@ -57,17 +56,9 @@ _SELECT_COLUMNS = """
     on_hand_qty,
     inventory_value,
     warehouse_count,
-    age_anchor_date,
-    age_days,
-    age_bucket,
-    reset_reason,
-    estimated_turnover_days,
-    daily_avg_sales,
-    is_stagnant,
-    estimated_stagnant_days,
-    stagnant_snapshot_count,
-    risk_level,
-    clearance_priority_score,
+    days_since_restock,
+    checklist_sales_90d,
+    sold_units_30d,
     sku_id,
     default_purchase_cost,
     reference_selling_price,
@@ -99,24 +90,20 @@ class SkuClearanceService:
     @staticmethod
     def _build_filters(
         *,
-        min_age_days: Optional[int],
-        max_age_days: Optional[int],
-        risk_level: Optional[str],
+        min_restock_days: Optional[int],
+        max_restock_days: Optional[int],
         platform_code: Optional[str],
         keyword: Optional[str],
     ) -> tuple[list[str], dict[str, Any]]:
         filters: list[str] = []
         params: dict[str, Any] = {}
 
-        if min_age_days is not None:
-            filters.append("age_days >= :min_age_days")
-            params["min_age_days"] = int(min_age_days)
-        if max_age_days is not None:
-            filters.append("age_days <= :max_age_days")
-            params["max_age_days"] = int(max_age_days)
-        if risk_level:
-            filters.append("risk_level = :risk_level")
-            params["risk_level"] = str(risk_level)
+        if min_restock_days is not None:
+            filters.append("days_since_restock >= :min_restock_days")
+            params["min_restock_days"] = int(min_restock_days)
+        if max_restock_days is not None:
+            filters.append("days_since_restock <= :max_restock_days")
+            params["max_restock_days"] = int(max_restock_days)
         if platform_code:
             filters.append("platform_code = :platform_code")
             params["platform_code"] = str(platform_code)
@@ -209,12 +196,11 @@ class SkuClearanceService:
     async def get_sku_clearance_ranking(
         self,
         *,
-        min_age_days: Optional[int] = 60,
-        max_age_days: Optional[int] = None,
-        risk_level: Optional[str] = None,
+        min_restock_days: Optional[int] = 60,
+        max_restock_days: Optional[int] = None,
         platform_code: Optional[str] = None,
         keyword: Optional[str] = None,
-        sort_by: str = "clearance_priority_score",
+        sort_by: str = "days_since_restock",
         sort_order: str = "desc",
         limit: int = 100,
         offset: int = 0,
@@ -227,9 +213,8 @@ class SkuClearanceService:
         direction = "ASC" if str(sort_order or "desc").lower() == "asc" else "DESC"
 
         filters, params = self._build_filters(
-            min_age_days=min_age_days,
-            max_age_days=max_age_days,
-            risk_level=risk_level,
+            min_restock_days=min_restock_days,
+            max_restock_days=max_restock_days,
             platform_code=platform_code,
             keyword=keyword,
         )
@@ -247,11 +232,12 @@ class SkuClearanceService:
             {**params, "limit": int(limit), "offset": int(offset)},
         )
 
-        summary = await self._build_summary(where_clause, params)
         pricing_inputs = await self._load_pricing_inputs(rows)
         policy_rows = await self._load_policy_rows()
         platform = await self._load_platform(policy_rows)
-        deepest = max(policy_rows, key=lambda p: p["min_age_days"]) if policy_rows else None
+        deepest = max(policy_rows, key=lambda p: p["min_restock_days"]) if policy_rows else None
+        # 汇总要按档位分组 → 必须先拿到档位表（policy_rows）
+        summary = await self._build_summary(where_clause, params, policy_rows)
 
         items = [
             self._build_item(
@@ -273,7 +259,10 @@ class SkuClearanceService:
         )
 
     async def _build_summary(
-        self, where_clause: str, params: dict[str, Any]
+        self,
+        where_clause: str,
+        params: dict[str, Any],
+        policy_rows: list[dict],
     ) -> SkuClearanceRankingSummaryResponse:
         """汇总是对**筛选后的全量**算的，不是只算当前页。"""
         total_rows = await self._fetch_rows(
@@ -290,37 +279,74 @@ class SkuClearanceService:
         )
         base = total_rows[0] if total_rows else {}
 
-        risk_rows = await self._fetch_rows(
-            f"""
-            SELECT risk_level, count(*) AS c
-            FROM {CLEARANCE_VIEW}
-            {where_clause}
-            GROUP BY risk_level
-            """,
-            dict(params),
-        )
-        bucket_rows = await self._fetch_rows(
-            f"""
-            SELECT age_bucket, count(*) AS c
-            FROM {CLEARANCE_VIEW}
-            {where_clause}
-            GROUP BY age_bucket
-            """,
-            dict(params),
-        )
-
         return SkuClearanceRankingSummaryResponse(
             sku_count=int(base.get("sku_count") or 0),
             total_quantity=int(base.get("total_quantity") or 0),
             total_inventory_value=float(base.get("total_inventory_value") or 0.0),
-            by_risk_level={
-                str(row.get("risk_level")): int(row.get("c") or 0) for row in risk_rows
-            },
-            by_age_bucket={
-                str(row.get("age_bucket")): int(row.get("c") or 0) for row in bucket_rows
-            },
+            restock_tiers=await self._build_restock_tiers(
+                where_clause, params, policy_rows
+            ),
             missing_reference_price_count=int(base.get("missing_reference_price_count") or 0),
         )
+
+    async def _build_restock_tiers(
+        self,
+        where_clause: str,
+        params: dict[str, Any],
+        policy_rows: list[dict],
+    ) -> list[SkuClearanceTierStat]:
+        """按**档位表门槛**分组统计 SKU 数与压资金额。
+
+        门槛一律走**参数绑定**：`tier_label` 是运营填的自由文本，
+        拼进 SQL 就是注入。分组边界与
+        `backend/services/product_pricing_service.py::select_restock_tier`
+        完全一致（命中「门槛 ≤ 天数」里最大的那个门槛）。
+        """
+        ordered = sorted(
+            (row for row in (policy_rows or []) if row is not None),
+            key=lambda row: int(row["min_restock_days"]),
+        )
+        if not ordered:
+            return []
+
+        bounds = [int(row["min_restock_days"]) for row in ordered]
+        case_sql = (
+            "CASE "
+            + " ".join(
+                f"WHEN days_since_restock >= :bound_{index} THEN {index}"
+                for index in range(len(bounds) - 1, 0, -1)
+            )
+            + " ELSE 0 END"
+        )
+        tier_params = {f"bound_{index}": value for index, value in enumerate(bounds)}
+        rows = await self._fetch_rows(
+            f"""
+            SELECT
+                {case_sql} AS tier_index,
+                count(*) AS sku_count,
+                COALESCE(SUM(inventory_value), 0) AS inventory_value
+            FROM {CLEARANCE_VIEW}
+            {where_clause}
+            GROUP BY 1
+            """,
+            {**params, **tier_params},
+        )
+        buckets = {int(row.get("tier_index") or 0): row for row in rows}
+
+        stats: list[SkuClearanceTierStat] = []
+        for index, policy in enumerate(ordered):
+            bucket = buckets.get(index, {})
+            stats.append(
+                SkuClearanceTierStat(
+                    min_restock_days=bounds[index],
+                    tier_label=str(
+                        policy.get("tier_label") or f"≥{bounds[index]}天"
+                    ),
+                    sku_count=int(bucket.get("sku_count") or 0),
+                    inventory_value=float(bucket.get("inventory_value") or 0.0),
+                )
+            )
+        return stats
 
     @staticmethod
     def _build_item(
@@ -332,7 +358,10 @@ class SkuClearanceService:
         platform: Optional[DimPlatform],
     ) -> SkuClearanceRankingItemResponse:
         sku_id = row.get("sku_id")
-        age_days = int(row.get("age_days") or 0)
+        days_since_restock = row.get("days_since_restock")
+        days_since_restock = (
+            int(days_since_restock) if days_since_restock is not None else None
+        )
 
         # 未匹配 ERP 主数据的 SKU：定价字段整体留空（spec §3.6）。
         # 这类 SKU 在视图里 LEFT JOIN 出来的采购成本/参考售价本来就是 NULL，
@@ -340,7 +369,7 @@ class SkuClearanceService:
         pricing_matched = sku_id is not None
 
         if pricing_matched:
-            policy = select_age_tier(policy_rows, age_days)
+            policy = select_restock_tier(policy_rows, days_since_restock)
             inputs = pricing_inputs.get(int(sku_id), {})
             pricing = compute_sku_pricing(
                 purchase_cost=row.get("default_purchase_cost"),
@@ -356,7 +385,7 @@ class SkuClearanceService:
                 policy=policy,
                 deepest_policy=deepest_policy,
                 min_selling_price_override=row.get("min_selling_price_override"),
-                age_days=age_days,
+                days_since_restock=days_since_restock,
             )
             target_margin_rate = float(policy["target_margin_rate"]) if policy else None
         else:
@@ -368,6 +397,14 @@ class SkuClearanceService:
                 "min_selling_price_source": "unavailable",
             }
             target_margin_rate = None
+
+        # DOS 参考值：**走 inventory_dos_service 的唯一实现**，与业务概览同一口径。
+        # 只作展示参考，不参与任何判定 —— 分母（近 90 天销量）在增量模式下不新鲜。
+        dos_days = compute_dos(
+            available_stock=row.get("current_qty"),
+            window_sales=row.get("checklist_sales_90d"),
+            window_days=90,
+        )
 
         recovery_amount = _compute_clearance_recovery_amount(
             reference_selling_price=row.get("reference_selling_price"),
@@ -385,33 +422,10 @@ class SkuClearanceService:
             on_hand_qty=int(row.get("on_hand_qty") or 0),
             inventory_value=float(row.get("inventory_value") or 0.0),
             warehouse_count=int(row.get("warehouse_count") or 0),
-            age_anchor_date=row.get("age_anchor_date"),
-            age_days=age_days,
-            age_bucket=row.get("age_bucket"),
-            reset_reason=row.get("reset_reason"),
-            estimated_turnover_days=(
-                float(row["estimated_turnover_days"])
-                if row.get("estimated_turnover_days") is not None
-                else None
+            days_since_restock=days_since_restock,
+            checklist_dos_sales90=(
+                float(dos_days) if dos_days is not None else None
             ),
-            daily_avg_sales=(
-                float(row["daily_avg_sales"]) if row.get("daily_avg_sales") is not None else None
-            ),
-            is_stagnant=(
-                bool(row["is_stagnant"]) if row.get("is_stagnant") is not None else None
-            ),
-            estimated_stagnant_days=(
-                int(row["estimated_stagnant_days"])
-                if row.get("estimated_stagnant_days") is not None
-                else None
-            ),
-            stagnant_snapshot_count=(
-                int(row["stagnant_snapshot_count"])
-                if row.get("stagnant_snapshot_count") is not None
-                else None
-            ),
-            risk_level=str(row.get("risk_level") or "low"),
-            clearance_priority_score=float(row.get("clearance_priority_score") or 0.0),
             sku_id=int(sku_id) if sku_id is not None else None,
             default_purchase_cost=(
                 float(row["default_purchase_cost"])

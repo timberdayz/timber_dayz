@@ -25,7 +25,7 @@
 
 ## Case 4: 库存风险高
 
-- 若 `inventory_backlog_60d_value` 或 `inventory_backlog_90d_value` 高：
+- 若 `mid_stagnant_value` 或 `deep_stagnant_value` 高：
   - 先识别清理优先 SKU
   - 再判断是否影响现金流和新品节奏
 

@@ -149,9 +149,9 @@
       <el-tab-pane label="滞销清单" name="clearance">
         <el-card class="filters-card">
           <el-form :inline="true" class="filters-form">
-            <el-form-item label="库龄下限(天)">
+            <el-form-item label="距上次进货天数下限">
               <el-input-number
-                v-model="clearanceFilters.min_age_days"
+                v-model="clearanceFilters.min_restock_days"
                 :min="0"
                 :max="3650"
                 :step="30"
@@ -159,9 +159,9 @@
                 style="width: 130px"
               />
             </el-form-item>
-            <el-form-item label="库龄上限(天)">
+            <el-form-item label="距上次进货天数上限">
               <el-input-number
-                v-model="clearanceFilters.max_age_days"
+                v-model="clearanceFilters.max_restock_days"
                 :min="0"
                 :max="3650"
                 :step="30"
@@ -169,13 +169,6 @@
                 placeholder="不限"
                 style="width: 130px"
               />
-            </el-form-item>
-            <el-form-item label="风险等级">
-              <el-select v-model="clearanceFilters.risk_level" clearable placeholder="全部" style="width: 120px">
-                <el-option label="高" value="high" />
-                <el-option label="中" value="medium" />
-                <el-option label="低" value="low" />
-              </el-select>
             </el-form-item>
             <el-form-item label="平台">
               <el-input
@@ -195,10 +188,9 @@
             </el-form-item>
             <el-form-item label="排序">
               <el-select v-model="clearanceFilters.sort_by" style="width: 150px">
-                <el-option label="清货优先级" value="clearance_priority_score" />
-                <el-option label="库龄天数" value="age_days" />
+                <el-option label="距上次进货天数" value="days_since_restock" />
                 <el-option label="库存金额" value="inventory_value" />
-                <el-option label="周转天数" value="estimated_turnover_days" />
+                <el-option label="在库数量" value="current_qty" />
               </el-select>
             </el-form-item>
             <el-form-item label="方向">
@@ -239,7 +231,7 @@
           </el-col>
           <el-col :span="6">
             <el-card>
-              <el-statistic title="高风险数" :value="clearanceHighRiskCount" />
+              <el-statistic title="重度积压数" :value="clearanceDeepTierCount" />
             </el-card>
           </el-col>
         </el-row>
@@ -254,33 +246,20 @@
         />
 
         <el-row :gutter="20" class="distribution-row">
-          <el-col :span="12">
+          <el-col :span="24">
             <el-card>
-              <template #header>风险分布</template>
-              <div v-for="item in clearanceRiskDistribution" :key="item.key" class="distribution-row-item">
-                <span class="distribution-label">{{ item.label }}</span>
-                <div class="distribution-track">
-                  <div
-                    class="distribution-fill"
-                    :style="{ width: item.percent + '%', backgroundColor: item.color }"
-                  />
-                </div>
-                <span class="distribution-value">{{ item.count }} SKU</span>
-              </div>
-            </el-card>
-          </el-col>
-          <el-col :span="12">
-            <el-card>
-              <template #header>库龄档位分布</template>
-              <div v-for="item in clearanceBucketDistribution" :key="item.key" class="distribution-row-item">
-                <span class="distribution-label">{{ item.key }}</span>
+              <template #header>滞销档位分布（门槛来自档位表）</template>
+              <div v-for="item in clearanceTierDistribution" :key="item.key" class="distribution-row-item">
+                <span class="distribution-label distribution-label-wide">{{ item.label }}</span>
                 <div class="distribution-track">
                   <div
                     class="distribution-fill"
                     :style="{ width: item.percent + '%', backgroundColor: '#2563eb' }"
                   />
                 </div>
-                <span class="distribution-value">{{ item.count }} SKU</span>
+                <span class="distribution-value">
+                  {{ item.count }} SKU · ¥{{ item.value.toFixed(2) }}
+                </span>
               </div>
             </el-card>
           </el-col>
@@ -289,51 +268,24 @@
         <el-card class="clearance-detail-card">
           <template #header>SKU 级滞销明细</template>
           <el-table :data="clearanceRows" v-loading="clearanceLoading" stripe>
-            <el-table-column prop="clearance_priority_score" label="优先级" width="90" align="right" />
+            <el-table-column prop="days_since_restock" label="距上次进货天数" width="120" align="right" />
             <el-table-column prop="platform_code" label="平台" width="100" />
             <el-table-column prop="product_sku" label="SKU" width="150" show-overflow-tooltip />
             <el-table-column prop="product_name" label="商品名" min-width="220" show-overflow-tooltip />
-            <el-table-column label="库龄" width="140">
-              <template #default="{ row }">
-                <div class="sku-cell">
-                  <div class="sku-primary">{{ row.age_days }} 天</div>
-                  <div class="sku-secondary">{{ row.age_bucket || '-' }}</div>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="起算日" width="110">
-              <template #default="{ row }">
-                {{ formatDate(row.age_anchor_date) }}
-              </template>
-            </el-table-column>
-            <el-table-column label="重置原因" width="110">
-              <template #default="{ row }">
-                <el-tag size="small" :type="tagType(row.reset_reason)">
-                  {{ resetReasonLabel(row.reset_reason) }}
-                </el-tag>
-              </template>
-            </el-table-column>
             <el-table-column prop="current_qty" label="可用库存" width="100" align="right" />
             <el-table-column label="库存金额" width="120" align="right">
               <template #default="{ row }">
                 {{ formatMoney(row.inventory_value) }}
               </template>
             </el-table-column>
-            <el-table-column label="周转天数" width="100" align="right">
+            <el-table-column prop="checklist_dos_sales90" label="可售天数（参考）" width="130" align="right">
               <template #default="{ row }">
-                {{ formatTurnoverDays(row.estimated_turnover_days) }}
-              </template>
-            </el-table-column>
-            <el-table-column label="日均销量" width="100" align="right">
-              <template #default="{ row }">
-                {{ formatQuantity(row.daily_avg_sales) }}
-              </template>
-            </el-table-column>
-            <el-table-column label="风险" width="90">
-              <template #default="{ row }">
-                <el-tag size="small" :type="riskTagType(row.risk_level)">
-                  {{ riskLabel(row.risk_level) }}
-                </el-tag>
+                <el-tooltip
+                  content="按最近一次采集到的近90天销量估算；分母只在那一行被写入时才刷新，不是实时动销速度，仅供参考"
+                  placement="top"
+                >
+                  <span>{{ row.checklist_dos_sales90 ?? '-' }}</span>
+                </el-tooltip>
               </template>
             </el-table-column>
             <el-table-column label="档位" width="110">
@@ -471,7 +423,7 @@ const historyDrawer = reactive({
 })
 
 // ------------------------------------------------------------------
-// 滞销清单（SKU 级，真库龄口径）
+// 滞销清单（SKU 级，主判据 = 距上次进货天数）
 // ------------------------------------------------------------------
 const clearanceLoading = ref(false)
 const clearanceLoaded = ref(false)
@@ -483,31 +435,24 @@ const clearanceSummary = reactive({
   sku_count: 0,
   total_quantity: 0,
   total_inventory_value: 0,
-  by_risk_level: {},
-  by_age_bucket: {},
+  // 分档统计：门槛 / 档位名 / SKU 数 / 压资金额（门槛与档位名由后端按档位表给出）
+  restock_tiers: [],
   missing_reference_price_count: 0
 })
 const clearanceFilters = reactive({
-  // 默认 0：当前库里只有单帧快照（age_days 全 0），用 60 会直接白屏。
-  // 接口默认值仍是 60（spec 口径），前端按真实数据现状给 0。
-  min_age_days: 0,
-  max_age_days: null,
-  risk_level: '',
+  // 默认 60：与后端接口默认值一致，也就是档位表第一个滞销门槛。
+  // 低于这个门槛的 SKU 属于「日常档」，本就不该出现在滞销清单里。
+  min_restock_days: 60,
+  max_restock_days: null,
   platform_code: '',
   keyword: '',
-  sort_by: 'clearance_priority_score',
+  sort_by: 'days_since_restock',
   sort_order: 'desc'
 })
 const clearancePage = reactive({
   limit: 50,
   offset: 0
 })
-
-const RISK_LEVEL_META = [
-  { key: 'high', label: '高风险', color: '#ef4444' },
-  { key: 'medium', label: '中风险', color: '#f59e0b' },
-  { key: 'low', label: '低风险', color: '#3b82f6' }
-]
 
 const resetReasonLabel = (reason) => {
   switch (reason) {
@@ -539,32 +484,6 @@ const tagType = (reason) => {
   }
 }
 
-const riskLabel = (risk) => {
-  switch (risk) {
-    case 'high':
-      return '高'
-    case 'medium':
-      return '中'
-    case 'low':
-      return '低'
-    default:
-      return risk || '-'
-  }
-}
-
-const riskTagType = (risk) => {
-  switch (risk) {
-    case 'high':
-      return 'danger'
-    case 'medium':
-      return 'warning'
-    case 'low':
-      return 'info'
-    default:
-      return 'info'
-  }
-}
-
 const formatDate = (value) => {
   if (!value) return '-'
   return String(value).slice(0, 10)
@@ -582,22 +501,6 @@ const formatPercent = (value) => {
   const num = Number(value)
   if (!Number.isFinite(num)) return '-'
   return `${Number((num * 100).toFixed(2))}%`
-}
-
-const formatQuantity = (value) => {
-  if (value === null || value === undefined || value === '') return '-'
-  const num = Number(value)
-  if (!Number.isFinite(num)) return '-'
-  return String(Number(num.toFixed(2)))
-}
-
-// 9999 是「有库存但完全没有动销数据」的哨兵值，直接显示会把运营吓一跳
-const formatTurnoverDays = (value) => {
-  if (value === null || value === undefined || value === '') return '-'
-  const num = Number(value)
-  if (!Number.isFinite(num)) return '-'
-  if (num >= 9999) return '无动销'
-  return `${num} 天`
 }
 
 const minSellingPriceSourceLabel = (source) => {
@@ -625,23 +528,33 @@ const filteredRows = computed(() => {
   })
 })
 
-const clearanceHighRiskCount = computed(() => {
-  return Number((clearanceSummary.by_risk_level || {}).high || 0)
+// 分档统计：门槛与档位名都由后端按档位表给出，前端不硬编码任何门槛数字
+const clearanceTierList = computed(() => {
+  const tiers = Array.isArray(clearanceSummary.restock_tiers) ? clearanceSummary.restock_tiers : []
+  return tiers.map((tier) => ({
+    label: `${tier.tier_label || '-'}（≥${tier.min_restock_days}天）`,
+    minRestockDays: Number(tier.min_restock_days || 0),
+    count: Number(tier.sku_count || 0),
+    value: Number(tier.inventory_value || 0)
+  }))
 })
 
-const clearanceRiskDistribution = computed(() => {
-  const byLevel = clearanceSummary.by_risk_level || {}
-  const counts = RISK_LEVEL_META.map((meta) => ({ ...meta, count: Number(byLevel[meta.key] || 0) }))
-  const max = Math.max(...counts.map((item) => item.count), 1)
-  return counts.map((item) => ({ ...item, percent: Math.round((item.count / max) * 100) }))
-})
-
-const clearanceBucketDistribution = computed(() => {
-  const byBucket = clearanceSummary.by_age_bucket || {}
-  const items = Object.entries(byBucket).map(([key, count]) => ({ key, count: Number(count || 0) }))
-  items.sort((a, b) => a.key.localeCompare(b.key))
+const clearanceTierDistribution = computed(() => {
+  const items = clearanceTierList.value
   const max = Math.max(...items.map((item) => item.count), 1)
-  return items.map((item) => ({ ...item, percent: Math.round((item.count / max) * 100) }))
+  return items.map((item) => ({
+    ...item,
+    key: item.label,
+    percent: Math.round((item.count / max) * 100)
+  }))
+})
+
+// 最深一档 = 重度积压（档位表门槛最高的那一档）
+const clearanceDeepTierCount = computed(() => {
+  const items = clearanceTierList.value
+  if (items.length === 0) return 0
+  const deepest = items.reduce((acc, item) => (item.minRestockDays > acc.minRestockDays ? item : acc))
+  return Number(deepest.count || 0)
 })
 
 const buildHistoryChart = async () => {
@@ -749,9 +662,8 @@ const reloadClearance = async () => {
   clearanceLoading.value = true
   try {
     const response = await inventoryDomainApi.getClearanceRanking({
-      min_age_days: clearanceFilters.min_age_days,
-      max_age_days: clearanceFilters.max_age_days ?? undefined,
-      risk_level: clearanceFilters.risk_level || undefined,
+      min_restock_days: clearanceFilters.min_restock_days,
+      max_restock_days: clearanceFilters.max_restock_days ?? undefined,
       platform_code: clearanceFilters.platform_code || undefined,
       keyword: clearanceFilters.keyword || undefined,
       sort_by: clearanceFilters.sort_by,
@@ -778,12 +690,11 @@ const queryClearance = async () => {
 
 const resetClearanceFilters = async () => {
   Object.assign(clearanceFilters, {
-    min_age_days: 0,
-    max_age_days: null,
-    risk_level: '',
+    min_restock_days: 60,
+    max_restock_days: null,
     platform_code: '',
     keyword: '',
-    sort_by: 'clearance_priority_score',
+    sort_by: 'days_since_restock',
     sort_order: 'desc'
   })
   clearancePage.offset = 0
@@ -894,6 +805,10 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   font-size: 13px;
   color: #374151;
+}
+
+.distribution-label-wide {
+  width: 200px;
 }
 
 .distribution-track {

@@ -4,7 +4,7 @@ CREATE OR REPLACE VIEW mart.inventory_snapshot_change AS
 -- Current runtime scope is company-level inventory.
 -- change detection compares company-aggregated snapshots and keeps shop_id as
 -- a reserved output field only.
-WITH company_daily AS (
+WITH ranked_rows AS (
     SELECT
         snapshot_date,
         platform_code,
@@ -15,22 +15,42 @@ WITH company_daily AS (
         product_sku,
         warehouse_name,
         warehouse_code,
-        SUM(available_stock) AS available_stock,
-        SUM(on_hand_stock) AS on_hand_stock,
-        SUM(inventory_value) AS inventory_value,
-        MAX(source_file_id) AS source_file_id,
-        MAX(ingest_timestamp) AS ingest_timestamp
+        available_stock,
+        on_hand_stock,
+        inventory_value,
+        source_file_id,
+        observed_at,
+        ingest_timestamp,
+        ROW_NUMBER() OVER (
+            PARTITION BY
+                snapshot_date,
+                platform_code,
+                COALESCE(platform_sku, ''),
+                COALESCE(product_sku, ''),
+                COALESCE(warehouse_name, '')
+            ORDER BY observed_at DESC NULLS LAST, ingest_timestamp DESC
+        ) AS day_rn
     FROM mart.inventory_snapshot_history
-    GROUP BY
+),
+company_daily AS (
+    SELECT
         snapshot_date,
         platform_code,
-        platform_sku,
-        product_sku,
-        warehouse_name,
         product_id,
         product_name,
+        platform_sku,
         sku_id,
-        warehouse_code
+        product_sku,
+        warehouse_name,
+        warehouse_code,
+        available_stock,
+        on_hand_stock,
+        inventory_value,
+        source_file_id,
+        observed_at,
+        ingest_timestamp
+    FROM ranked_rows
+    WHERE day_rn = 1
 ),
 ranked_history AS (
     SELECT
@@ -50,7 +70,7 @@ ranked_history AS (
         ingest_timestamp,
         ROW_NUMBER() OVER (
             PARTITION BY platform_code, COALESCE(platform_sku, ''), COALESCE(product_sku, ''), COALESCE(warehouse_name, '')
-            ORDER BY snapshot_date DESC, ingest_timestamp DESC
+            ORDER BY observed_at DESC NULLS LAST, ingest_timestamp DESC
         ) AS snapshot_rank
     FROM company_daily
 ),

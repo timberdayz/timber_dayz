@@ -20,6 +20,8 @@ WITH normalized AS (
         COALESCE(available_stock, 0) AS available_stock,
         COALESCE(on_hand_stock, 0) AS on_hand_stock,
         COALESCE(inventory_value, 0) AS inventory_value,
+        observed_at,
+        created_at,
         ingest_timestamp
     FROM mart.inventory_snapshot_history
 ),
@@ -32,7 +34,7 @@ deduplicated AS (
                 platform_code,
                 sku_key,
                 COALESCE(warehouse_name, '')
-            ORDER BY ingest_timestamp DESC
+            ORDER BY observed_at DESC NULLS LAST, ingest_timestamp DESC
         ) AS rn
     FROM normalized
     WHERE sku_key IS NOT NULL
@@ -51,6 +53,8 @@ daily_latest AS (
         available_stock,
         on_hand_stock,
         inventory_value,
+        observed_at,
+        created_at,
         ingest_timestamp
     FROM deduplicated
     WHERE rn = 1

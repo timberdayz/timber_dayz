@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DOS 数据新鲜度 · 实测定案</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f7f5f0;--card:#fff;--line:#e9e3d6;--line-soft:#f0ebe0;
+ --ink:#14171e;--ink2:#3a4256;--muted:#7c7a72;
+ --primary:#2f6f5e;--p-soft:rgba(47,111,94,.08);
+ --warn:#c97b3f;--w-soft:rgba(201,123,63,.09);
+ --danger:#b06367;--d-soft:rgba(176,99,103,.09);--mono:'JetBrains Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+ font-size:14.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+ background:radial-gradient(760px 380px at 88% -8%,rgba(176,99,103,.05),transparent 62%),
+            radial-gradient(620px 320px at 4% 4%,rgba(47,111,94,.045),transparent 60%)}
+.wrap{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:64px 28px 96px}
+h1,h2{font-family:'DM Serif Display',Georgia,'Songti SC',serif;font-weight:400;letter-spacing:-.005em}
+h1{font-size:33px;line-height:1.25;margin-bottom:15px}
+h2{font-size:24px;margin-bottom:8px}
+h3{font-size:15.5px;font-weight:600}
+.lede{font-size:16.5px;color:var(--ink2);max-width:78ch}
+.kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;
+ letter-spacing:.13em;text-transform:uppercase;color:var(--danger);margin-bottom:12px}
+.kicker::before{content:"";width:18px;height:2px;background:var(--danger);border-radius:2px}
+.sec{margin-top:50px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px}
+.card+.card{margin-top:14px}
+code{font-family:var(--mono);font-size:12.5px;background:var(--p-soft);color:var(--primary);padding:1px 6px;border-radius:5px}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.t-ok{background:var(--p-soft);color:var(--primary)}
+.t-w{background:var(--w-soft);color:var(--warn)}
+.t-b{background:var(--d-soft);color:var(--danger)}
+.t-n{background:#f0ede6;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+ color:var(--muted);padding:0 12px 9px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink2);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td strong{color:var(--ink)}
+td.num,th.num{text-align:right;font-family:var(--mono);font-size:12.5px}
+.callout{border-radius:13px;padding:16px 18px;border:1px solid var(--line);background:var(--card)}
+.callout.w{background:var(--w-soft);border-color:rgba(201,123,63,.32)}
+.callout.o{background:var(--p-soft);border-color:rgba(47,111,94,.28)}
+.callout.b{background:var(--d-soft);border-color:rgba(176,99,103,.3)}
+.callout .ct{font-weight:600;font-size:14px;margin-bottom:5px;display:flex;align-items:center;gap:8px}
+.callout p{font-size:13.5px;color:var(--ink2)}
+.callout p+p{margin-top:8px}
+ul.plain{list:none;padding:0;margin:6px 0 0}
+ul.plain li{padding:5px 0 5px 20px;position:relative;font-size:13.5px;color:var(--ink2)}
+ul.plain li::before{content:"";position:absolute;left:4px;top:13px;width:5px;height:5px;
+ border-radius:50%;background:var(--primary)}
+ul.plain li b{color:var(--ink)}
+ul.plain.warn li::before{background:var(--danger)}
+ul.plain.warn li b{color:var(--danger)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px}
+.four{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:8px}
+.panel{border:1px solid var(--line);border-radius:14px;padding:18px 20px;background:var(--card)}
+.panel.bad{background:#fbf6f4;border-color:rgba(176,99,103,.3)}
+.panel.good{background:#f4f9f6;border-color:rgba(47,111,94,.3)}
+.panel.mid{background:#fbf8f2;border-color:rgba(201,123,63,.32)}
+.panel .ph{font-weight:600;font-size:14.5px;margin-bottom:4px}
+.panel .ps{font-size:12.5px;color:var(--muted);margin-bottom:12px}
+.sample{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:#fbfaf7;margin-top:8px}
+.sample .sn{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.sample .sv{font-family:var(--DM Serif Display',serif;font-size:27px;margin-top:3px;line-height:1.15}
+.sample .sl{font-size:12px;color:var(--muted);margin-top:2px}
+.bar{height:9px;border-radius:5px;background:var(--line-soft);overflow:hidden;margin-top:9px}
+.bar>i{display:block;height:100%;border-radius:5px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:13.5px;color:var(--ink2);margin-top:10px}
+.kv b{color:var(--ink);font-family:var(--mono);font-size:12.5px}
+.steps{counter-reset:s;list-style:none;padding:0;margin:8px 0 0}
+.steps li{counter-increment:s;position:relative;padding:7px 0 7px 38px;font-size:13.5px;color:var(--ink2)}
+.steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:24px;height:24px;border-radius:50%;
+ background:var(--p-soft);color:var(--primary);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.steps li b{color:var(--ink)}
+.oldnew{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px}
+.oldnew .o{background:#fbf6f4;border:1px solid rgba(176,99,103,.3);border-radius:14px;padding:17px 19px}
+.oldnew .n{background:#f4f9f6;border:1px solid rgba(47,111,94,.3);border-radius:14px;padding:17px 19px}
+.oldnew .oh{font-weight:600;font-size:13.5px;color:var(--danger);margin-bottom:6px}
+.oldnew .nh{font-weight:600;font-size:13.5px;color:var(--primary);margin-bottom:6px}
+.oldnew p{font-size:13px;color:var(--ink2)}
+.oldnew del{color:var(--danger);text-decoration-color:rgba(176,99,103,.5)}
+footer{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+footer p+p{margin-top:7px}
+footer b{color:var(--ink2)}
+@media(max-width:860px){.two,.four,.oldnew{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="kicker">实测定案 · 2026-10-24 晚间</div>
+<h1>DOS 的分母到底新不新鲜</h1>
+<p class="lede">
+针对「库存清单只在库存数量更新时才更新，所以近 XX 天销量只是跟着刷新的附带值，DOS 不会实时刷新」
+这一质疑，做了三条实测：真实页面连查复验、两批 1109 个 SKU×仓 的交叉比对、以及增量模式误差模拟。
+<b>结论：质疑的方向成立，但有一环不成立；而且真实的后果比原判断更严重——原先那句「偏差可忽略」是错的，已作废。</b>
+</p>
+
+<section class="sec">
+<div class="callout b">
+  <div class="ct"><span class="tag t-b">定案 · 2026-10-24 晚间</span>DOS 降级为参考值，不做全域使用</div>
+  <p>
+  妙手「近 XX 天销量数据」是<b>行级存储快照</b>：那一行被写入时才刷新，没被写入就原封不动。
+  实测当前增量筛选（更新时间维度 2026-09-01~10-08）只返回 <b>151 个 SKU</b>，而全量是 <b>1113 行 / 56 页</b>
+  —— <b>86.4% 的行，销量停在上一轮全量采集的那一刻。</b>
+  </p>
+  <p>
+  模拟增量模式跑 2.5 天：<b>5.0% 的行 DOS90 判档不同</b>、<b>滞销漏判 37 行（货值 ¥2,164）</b>；
+  而且行越陈旧翻得越狠（更新时间距今 91–180 天的行，判档差异率 <b>32.2%</b>）。
+  </p>
+  <p><b>Walter 拍板</b>：采集策略已定 —— <b>不再全量</b>，只有「配置采集 + 增量更新」。
+  所以「DOS 只认全量批次」的前提<b>不成立</b>，那个方案<b>撤回</b>。
+  滞销模块里的 DOS <b>简化使用库存数据域采集到的数据，明确标注「参考」，不做全域使用</b>
+  ——不用它做入选、不用它做排序、不用它做汇总卡口径。</p>
+  <p><b>连带决定</b>：滞销判据改用<b>库存停滞时长</b>（今天 − 库存最后一次真实变动的时间），
+  由落盘层行内容 diff 维护、不信妙手的时间戳。DOS 保留在表里作参考值。详见第七、八节。</p>
+</div>
+</section>
+
+<section class="sec">
+<h2>一、三个必须分开看的问题</h2>
+<div class="card" style="margin-top:16px">
+<table>
+<thead><tr><th>问题</th><th>实测答案</th><th class="num">证据量</th></tr></thead>
+<tbody>
+<tr><td><strong>「更新时间」是行上的存储字段，还是每次查询刷新的？</strong></td>
+<td><span class="tag t-ok">存储字段</span> 同一页面同条件连查两次，20 行逐字相同 → 不是查询时生成的</td><td class="num">20 行 × 7 字段</td></tr>
+<tr><td><strong>行的刷新只由「库存数量变了」驱动吗？</strong></td>
+<td><span class="tag t-b">不是</span> 存在 93 行：库存数量纹丝不动，销量却变了 → 妙手在非库存变动时也会写行</td><td class="num">93 行 / 8.4%</td></tr>
+<tr><td><strong>那增量模式下 DOS 还能不能用？</strong></td>
+<td><span class="tag t-b">不能当判据</span> 只覆盖 13.6% 的 SKU，其余行的分母是陈旧的</td><td class="num">151 / 1113</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section class="sec">
+<h2>二、证据 A · 真实页面连查复验</h2>
+<p class="lede" style="margin-top:10px">妙手仓库清单页，筛选 = 更新时间维度 2026-09-01 ~ 2026-10-08。读一次 → 静置 30 秒、不做任何业务操作 → 点「搜索」同条件重查 → 再读一次。</p>
+<div class="card" style="margin-top:16px">
+<table>
+<thead><tr><th>字段</th><th class="num">两次查询之间发生变化的行</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>更新时间</td><td class="num">0 / 20</td><td>行状态稳定，不会因为「看一眼」就变</td></tr>
+<tr><td>创建时间</td><td class="num">0 / 20</td><td>—</td></tr>
+<tr><td>库存总量 / 可用库存</td><td class="num">0 / 20</td><td>没有业务动作，库存当然不变</td></tr>
+<tr><td>近90天销量 / 近30天销量 / 近7天销量</td><td class="num">0 / 20</td><td><strong>销量不会自己走动</strong> —— 它只在行被写入时刷新</td></tr>
+</tbody>
+</table>
+<div class="callout o" style="margin-top:16px">
+<div class="ct"><span class="tag t-ok">读法</span>这一条同时排除了两种误判</div>
+<p>① 排除「妙手每次导出都重算销量」——如果重算，两次查询的销量会因窗口前移而不同（实测完全相同）。<br>
+② 排除「更新时间被查询行为刷新」——如果刷新，两次的更新时间会差几十秒（实测完全相同）。</p>
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>三、证据 B · 两批 1109 个共同 SKU×仓 的交叉</h2>
+<p class="lede" style="margin-top:10px">file 2764（2026-10-21 采）与 file 3004（2026-10-24 采），共同 1109 个 SKU×仓。</p>
+<div class="card" style="margin-top:16px">
+<h3>四维交叉：更新时间 × 库存 × 近90天销量</h3>
+<table style="margin-top:10px">
+<thead><tr><th>更新时间</th><th>库存数量</th><th>近90天销量</th><th class="num">行数</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td>变了</td><td>变了</td><td>变了</td><td class="num">327</td><td>正常业务变动</td></tr>
+<tr><td>变了</td><td>变了</td><td>没变</td><td class="num">61</td><td>补货但窗口销量不变</td></tr>
+<tr><td>变了</td><td><strong>没变</strong></td><td>变了</td><td class="num"><strong>93</strong></td><td><strong>行被写了，但库存没动</strong></td></tr>
+<tr><td>变了</td><td>没变</td><td>没变</td><td class="num">628</td><td>行被写了，但库存和销量都没动</td></tr>
+</tbody>
+</table>
+<div class="callout w" style="margin-top:16px">
+<div class="ct"><span class="tag t-w">关键</span>「只变销量、更新时间没变」= 0 行</div>
+<p>这 93 行是<b>库存不变但销量变了</b>的行（货值 ¥13,560.33，销量差 −62 ~ +10，中位 −1）。
+说明妙手在<b>非库存变动</b>（批量编辑、改价、盘点等）时同样会写行并刷新销量列。</p>
+<p>→ 原判断里「库存清单更新，只会因为库存数量更新而更新」这一环，<b>在数据上不成立</b>。</p>
+</div>
+</div>
+
+<div class="card">
+<h3>⚠️ 附带发现：「更新时间变了」也不能直接当成业务变更</h3>
+<p style="font-size:13.5px;color:var(--ink2);margin-top:8px">
+file 2764 有 <b>535 行（43.7%）</b>的更新时间被一次性批量写成 <code>2026-05-08 10:36:36~39</code>
+（4 秒窗口，一次 bulk UPDATE）。同样这些行在 file 3004 里各自是真实更新时间，其中 <b>136 行等于创建时间</b>（从未修改过）。
+</p>
+<table style="margin-top:12px">
+<thead><tr><th>SKU</th><th>仓库</th><th>旧更新时间（2764）</th><th>新更新时间（3004）</th><th>库存 / 销量</th></tr></thead>
+<tbody>
+<tr><td><code>166851422928</code></td><td>新加坡</td><td>2026-05-08 10:36:36</td><td>2025-04-11 17:01:00</td><td>0→0 / 0→0</td></tr>
+<tr><td><code>1HJJ-XH-YSC034</code></td><td>新加坡</td><td>2026-05-08 10:36:37</td><td>2025-07-21 22:36:34</td><td>0→0 / 0→0</td></tr>
+<tr><td><code>A-00031-pink</code></td><td>新加坡</td><td>2026-08-29 11:24:38</td><td>2026-08-29 11:23:38</td><td>10→10 / <strong>9→5</strong></td></tr>
+</tbody>
+</table>
+<p style="font-size:12.5px;color:var(--muted);margin-top:10px">
+→ <b>变更判定必须我们自己做行内容比对，不能只信妙手的「更新时间」语义。</b>
+</p>
+</div>
+</section>
+
+<section class="sec">
+<h2>四、证据 C · 增量筛选只覆盖 13.6%</h2>
+<div class="two" style="margin-top:16px">
+<div class="panel bad">
+<div class="ph">全量</div>
+<div class="ps">不设日期筛选</div>
+<div class="sample">
+<div class="sn">SKU 总数</div>
+<div class="sv">1113</div>
+<div class="sl">56 页 · 库存总价值 ¥227,200.57</div>
+</div>
+<div class="sample">
+<div class="sn">每行的销量</div>
+<div class="sv">全是新的</div>
+<div class="sl">采集那一刻的真实近 90 天销量</div>
+</div>
+</div>
+<div class="panel mid">
+<div class="ph">增量（更新时间维度 2026-09-01~10-08）</div>
+<div class="ps">当前页面上实测</div>
+<div class="sample">
+<div class="sn">SKU 总数</div>
+<div class="sv">151</div>
+<div class="sl">库存总价值 ¥31,618.57</div>
+</div>
+<div class="sample">
+<div class="sn">其余 962 行的销量</div>
+<div class="sv">停在旧值</div>
+<div class="sl">上一轮全量采集的那一刻</div>
+</div>
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>五、增量模式模拟：DOS 会错多少</h2>
+<p class="lede" style="margin-top:10px">
+模拟设定：用已入库的两个批次（相隔 2.5 天）跑一次增量。
+「库存数量变过的行」用新批次的销量（会被重新采集刷新），其余行沿用旧批次的销量（陈旧），
+再与「全部用新批次销量」的全量口径逐行比判档。
+</p>
+
+<div class="card" style="margin-top:16px">
+<table>
+<thead><tr><th>指标</th><th class="num">结果</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><strong>DOS90 判档不一致</strong></td><td class="num"><strong>56 / 1109 行（5.0%）</strong></td><td>货值 ¥8,390.18，占总货值 3.7%</td></tr>
+<tr><td><strong>滞销漏判</strong>（全量算滞销、增量不算）</td><td class="num"><strong>37 行</strong></td><td>货值 ¥2,164.18 —— 会被漏出滞销榜</td></tr>
+<tr><td>滞销误判（全量不算、增量算）</td><td class="num">3 行</td><td>货值 ¥0.00</td></tr>
+<tr><td>增量必然漏掉的刷新（库存没变但销量变了）</td><td class="num">93 行（8.4%）</td><td>货值 ¥13,560.33</td></tr>
+</tbody>
+</table>
+<p style="font-size:13px;color:var(--ink2);margin-top:12px">档位迁移（全量 → 增量）Top 3：
+<span class="tag t-b">不可算 → 快断货(&lt;30)</span> 28 行 ·
+<span class="tag t-b">不可算 → ≥180</span> 12 行 ·
+<span class="tag t-w">≥180 → 90-180</span> 6 行</p>
+</div>
+
+<div class="card">
+<h3>误差随「行有多久没被刷新」放大</h3>
+<p style="font-size:13.5px;color:var(--ink2);margin-top:8px">同一个模拟（2.5 天窗口），按更新时间的陈旧程度分组看判档翻转率：</p>
+<table style="margin-top:10px">
+<thead><tr><th>更新时间距采集日</th><th class="num">行数</th><th class="num">货值</th><th class="num">漏刷新行</th><th class="num">判档差异行</th><th class="num">差异率</th></tr></thead>
+<tbody>
+<tr><td>≤ 7 天</td><td class="num">251</td><td class="num">¥137,278.23</td><td class="num">13</td><td class="num">7</td><td class="num">2.8%</td></tr>
+<tr><td>8–30 天</td><td class="num">194</td><td class="num">¥39,751.63</td><td class="num">14</td><td class="num">7</td><td class="num">3.6%</td></tr>
+<tr><td>31–90 天</td><td class="num">88</td><td class="num">¥22,064.23</td><td class="num">37</td><td class="num">13</td><td class="num">14.8%</td></tr>
+<tr><td>91–180 天</td><td class="num">90</td><td class="num">¥8,566.40</td><td class="num">29</td><td class="num"><strong>29</strong></td><td class="num"><strong>32.2%</strong></td></tr>
+<tr><td>&gt; 180 天</td><td class="num">486</td><td class="num">¥16,242.08</td><td class="num">0</td><td class="num">0</td><td class="num">0%</td></tr>
+</tbody>
+</table>
+<div style="margin-top:14px">
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:7px;font-size:12.5px;color:var(--muted)">
+<span style="width:74px">≤ 7 天</span><span style="flex:1" class="bar"><i style="width:8.7%;background:#8fae9f"></i></span><span style="width:52px;text-align:right;font-family:var(--mono)">2.8%</span>
+</div>
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:7px;font-size:12.5px;color:var(--muted)">
+<span style="width:74px">8–30 天</span><span style="flex:1" class="bar"><i style="width:11.2%;background:#c9a06a"></i></span><span style="width:52px;text-align:right;font-family:var(--mono)">3.6%</span>
+</div>
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:7px;font-size:12.5px;color:var(--muted)">
+<span style="width:74px">31–90 天</span><span style="flex:1" class="bar"><i style="width:46%;background:#c97b3f"></i></span><span style="width:52px;text-align:right;font-family:var(--mono)">14.8%</span>
+</div>
+<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--muted)">
+<span style="width:74px">91–180 天</span><span style="flex:1" class="bar"><i style="width:100%;background:#b06367"></i></span><span style="width:52px;text-align:right;font-family:var(--mono)">32.2%</span>
+</div>
+</div>
+<p style="font-size:12.5px;color:var(--muted);margin-top:12px">
+→ 增量模式长期运行时，陈旧行持续累积，误差<b>不会收敛</b>。
+（&gt; 180 天那组差异率为 0，是因为它们全是零销量死行，分母恒为 0，本来就判不出档。）
+</p>
+</div>
+</section>
+
+<section class="sec">
+<h2>六、被推翻的旧结论</h2>
+<div class="oldnew">
+<div class="o">
+<div class="oh">✕ 旧结论（已作废）</div>
+<p>「<del>实测偏差规模：可忽略。</del>」<br>
+「<del>『更新时间久远但销量非 0』只有 28 行、货值 ¥4,823.52，DOS 全落在 90~2160 天，会逃出滞销榜 0 行。</del>」<br>
+「<del>DOS 不需要为了『销量新鲜度』额外做全量兜底。</del>」</p>
+<p style="margin-top:10px;font-size:12.5px;color:var(--muted)">
+错在哪：那 28 行是在<b>全量采集</b>的批次上量的——全量采集时每一行的销量都是当次采到的真值。
+<b>增量模式下这个前提不成立。</b>
+</p>
+</div>
+<div class="n">
+<div class="nh">✓ 新结论</div>
+<p>① 妙手销量是<b>行级存储快照</b>，只在行被写入时刷新；不是查询时重算，也不是独立更新的数据。<br>
+② 行被写入<b>不只</b>由库存数量驱动（93 行反例），所以「只因库存数量更新而更新」不成立。<br>
+③ 增量批次只覆盖 <b>13.6%</b> 的 SKU → <b>增量批次产出的 DOS 不能当滞销判据</b>。<br>
+④ <b>Walter 拍板</b>：DOS <b>降级为参考值，不做全域使用</b>——不用它做入选、排序、汇总卡口径。<br>
+⑤ 滞销判据改用<b>库存停滞时长</b>（事件时刻，增量下始终准确）；<code>dos_as_of</code> / <code>dos_stale</code> 一律取消。</p>
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>七、DOS 定位 · 2026-10-24 晚间定案</h2>
+<div class="callout b" style="margin-top:16px">
+  <div class="ct"><span class="tag t-b">已拍板</span>DOS 降级为参考值，不做全域使用</div>
+  <p><b>采集策略已定</b>：后面<b>不再全量</b>，只有「配置采集 + 增量更新」。
+  → 「DOS 只认全量批次」的前提<b>不成立</b>，原方案 A <b>撤回</b>。</p>
+  <p><b>滞销模块里的 DOS</b>：简化使用库存数据域采集到的数据，<b>明确标注「参考」</b>，
+  <b>不做全域使用</b>——不用它做滞销入选、不用它做排序主键、不用它做汇总卡口径。</p>
+  <p><b>连带决定</b>：滞销判据改用<b>库存停滞时长</b>（见下节）。DOS 保留在表里作参考值。</p>
+</div>
+<div class="two" style="margin-top:14px">
+<div class="panel bad">
+<div class="ph">❌ 撤回 · A 只认全量批次</div>
+<div class="ps">前提已不成立</div>
+<p style="font-size:13px;color:var(--ink2)">要靠全量批次刷新 DOS 口径 → 而采集策略已定不再全量。
+这个方案在新策略下<b>无法执行</b>，只能撤回。</p>
+</div>
+<div class="panel bad">
+<div class="ph">❌ 撤回 · D 维持原样</div>
+<div class="ps">已被实测证伪</div>
+<p style="font-size:13px;color:var(--ink2)">增量批次也算 DOS、不标数据时点。
+= 5.0% 判档差异 + 滞销漏判 37 行。</p>
+</div>
+</div>
+<div class="two" style="margin-top:14px">
+<div class="panel mid">
+<div class="ph">⏸️ 待定 · B 改用订单域销量</div>
+<div class="ps">方向最正确，但现在没原料</div>
+<p style="font-size:13px;color:var(--ink2)">订单成交数不受库存行写入影响，天然新鲜。
+但 miaoshou 订单域从未入库（<code>fact_miaoshou_orders_*</code> 全 0 行），且订单表无仓库维度 → 只能 SKU 级。</p>
+<p style="font-size:12.5px;color:var(--warn);margin-top:10px">应单独立 P0-1，落地后与清单口径交叉校验</p>
+</div>
+<div class="panel good">
+<div class="ph">✅ 采用 · 停滞时长做判据</div>
+<div class="ps">本轮新定</div>
+<p style="font-size:13px;color:var(--ink2)">今天 − 库存数量<b>最后一次真实变动</b>的时间。
+事件时刻，不随窗口漂移；增量模式下<b>始终准确</b>；且不会被妙手的批量戳污染。</p>
+<p style="font-size:12.5px;color:var(--primary);margin-top:10px">详见下一节</p>
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>八、滞销判据换成「库存停滞时长」</h2>
+<p class="lede" style="margin-top:10px">
+DOS 降级为参考后，模块仍然要有入选标准。实测表明<b>库存停滞时长比 DOS 更适合当判据</b>——
+它是事件时刻，不会因为时间流逝而漂移。
+</p>
+<div class="card" style="margin-top:16px">
+<table>
+<thead><tr><th>维度</th><th>DOS（库存 ÷ 近90天销量）</th><th>库存停滞时长</th></tr></thead>
+<tbody>
+<tr><td>数据性质</td><td>流量近似 → <b>分母会漂移</b>（窗口前移就变）</td><td><b>事件时刻</b> → 不会漂移</td></tr>
+<tr><td>增量模式下的准确性</td><td>只对本次采到的 13.6% 行新鲜，其余停在旧值</td><td><b>始终准确</b>（增量只更新变动行，未变动的行本来就对）</td></tr>
+<tr><td>长期运行</td><td>陈旧行累积，误差不收敛（91–180 天桶差异率 32.2%）</td><td>单调增长，<b>不会漏判</b></td></tr>
+<tr><td>刚补货的新货</td><td><b>会误判</b>成老积压（近90天没卖）</td><td><b>不会</b>（刚变动过，停滞天数小）</td></tr>
+<tr><td>依赖谁维护</td><td>依赖妙手维护的销量列</td><td>只依赖<b>库存数量</b>，由落盘层自己 diff 出来</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="card">
+<h3>实测对照（file 3004 / 1113 行）</h3>
+<table style="margin-top:10px">
+<thead><tr><th>DOS ＼ 停滞</th><th class="num">活跃</th><th class="num">30–90</th><th class="num">90–180</th><th class="num">≥180</th></tr></thead>
+<tbody>
+<tr><td>零销量</td><td class="num">80</td><td class="num">17</td><td class="num">88</td><td class="num"><strong>488</strong></td></tr>
+<tr><td>不可算</td><td class="num">53</td><td class="num">19</td><td class="num">0</td><td class="num">0</td></tr>
+<tr><td>快断货</td><td class="num">29</td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+<tr><td>30–90</td><td class="num">78</td><td class="num">3</td><td class="num">0</td><td class="num">0</td></tr>
+<tr><td>90–180</td><td class="num">86</td><td class="num">7</td><td class="num">0</td><td class="num">0</td></tr>
+<tr><td>≥180</td><td class="num">120</td><td class="num">45</td><td class="num">0</td><td class="num">0</td></tr>
+</tbody>
+</table>
+<ul class="plain" style="margin-top:12px">
+<li><b>单调性成立</b>：DOS 判「快断货 / 30–90」的行里，<b>没有一行</b>是停滞 ≥180 天的 → 停滞时长判滞销的集合完全被 DOS 判滞销的集合包含</li>
+<li><b>DOS 会误判新货</b>：「DOS 说零销量/不可算、但停滞只有几天」的有 <b>169 行 / ¥12,098</b> —— 这些是刚补货刚上架的新货，DOS 口径会当成老积压</li>
+<li><b>覆盖更聚焦</b>：停滞时长判滞销覆盖 <b>10.9%</b> 货值，DOS 判滞销覆盖 <b>74.3%</b> 货值（DOS 的 90 天门槛对当前库存/销量结构太松）</li>
+<li><b>零销量不再需要独立档</b>：停滞 ≥180 天的 488 行本来就全部落在零销量，已被覆盖</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>分档映射</h3>
+<table style="margin-top:10px">
+<thead><tr><th>停滞天数</th><th>档</th><th>原 DOS 对应</th><th>动作</th></tr></thead>
+<tbody>
+<tr><td>&lt; 30</td><td>活跃</td><td>快断货（DOS&lt;30）</td><td><b>不进滞销榜</b></td></tr>
+<tr><td>30–90</td><td>观察</td><td>DOS 30–90</td><td>不进榜</td></tr>
+<tr><td>90–180</td><td>中度积压</td><td>DOS 90–180</td><td>进榜（中度）</td></tr>
+<tr><td>≥ 180</td><td>重度积压</td><td>DOS ≥180</td><td>进榜（重度）</td></tr>
+</tbody>
+</table>
+<div class="callout w" style="margin-top:14px">
+<div class="ct"><span class="tag t-w">实现要害</span><code>stock_changed_at</code> 必须由落盘层自己 diff 出来</div>
+<p>不能用妙手的「更新时间」——实测 file 2764 有 <b>535 行（43.7%）</b>的更新时间被一次 bulk UPDATE
+批量覆盖，而那批行的库存和销量<b>完全没变</b>。落盘层只认「库存数量真的变了」。
+现有两批对比中 388 行可算出真实变动时间，其余行从第二轮起完全自维护。</p>
+</div>
+</div>
+</section>
+
+<section class="sec">
+<h2>九、落到设计上的三条硬要求</h2>
+<div class="card" style="margin-top:16px">
+<ol class="steps">
+<li><b>变更判定双闸</b>：妙手「更新时间」筛选只用来<b>缩小候选集</b>；是否记为真变更由我方比对行内容
+（可用库存 / 库存总量 / 预占库存 / 近N天销量）决定。批量戳时间戳的行不进观测层，水位线也不被假变更推着走。</li>
+<li><b>变更判定双闸</b>：妙手「更新时间」筛选只用来<b>缩小候选集</b>；是否记为真变更由我方比对行内容
+（可用库存 / 库存总量 / 预占库存）决定。批量戳时间戳的行不进观测层，水位线也不被假变更推着走。</li>
+<li><b>滞销判据换成库存停滞时长</b>：<code>stock_changed_at</code> 由落盘层的行内容 diff 维护；
+滞销入选、汇总卡口径、排序主键全部改用它，<b>不再用 DOS</b>。</li>
+<li><b>DOS 保留为参考列并标注「参考」</b>：简化计算，不做口径时点管控（<code>dos_as_of</code> / <code>dos_stale</code> 一律取消）；
+指标词典里 DOS 条目必须写明「<b>不作判定依据</b>」与「能证明什么 / 不能证明什么」。</li>
+</ol>
+<div class="callout w" style="margin-top:16px">
+<div class="ct"><span class="tag t-w">连带修正</span>商品中心最低售价：本来就该用库龄，不该用 DOS</div>
+<p>商品中心的 <code>min_age_days</code> 存的<b>本来就是库龄门槛</b>——它要的就是库龄。
+早先「改用 DOS 选档」的建议是<b>方向性错误</b>，已撤回：名实不符要修的是 <code>tier_label</code> 文案，不是把数据源换掉。</p>
+<p>实测还查出两个更硬的问题：① <b>四档折扣从未生效过</b>——逐 SKU 复算 1122 个 active SKU，<b>全部命中日常档 0.10</b>
+（495 个 <code>age_days</code> 全在 0~13 天 + 627 个走 None 兜底，两条路都掉进最小门槛行）；
+② 锚点修好后库龄仍不够用——妙手「创建时间」是<b>首次铺货时间</b>，98.5% 的行 ≥180 天，
+直接选档会 <b>1060/1076 个 SKU（99%）落最深档</b>，而「还在卖的老品」430 行 / ¥187,980 是真滞销的 5.8 倍。</p>
+<p>→ <b>定案：商品中心也用「库存停滞时长」选档</b>（SKU 级取各仓最长），
+<code>min_age_days</code> → <code>min_stall_days</code>，标签改名，阈值 0/30/90/180，折扣率不动；
+与滞销模块<b>共用同一份实现</b>。</p>
+</div>
+</div>
+</section>
+
+<footer>
+<p><b>设计稿已同步</b>：<code>docs/superpowers/specs/2026-10-24-dos-metric-naming-and-caliber-design.md</code> §4.2.2（重写）/ §4.2.4 / §4.8（新增判据）/ §6.6（DOS 定位定案）/ §6.7（商品中心待定）/ §5 未决表；
+<code>2026-10-24-miaoshou-inventory-incremental-collection-design.md</code> §6.3（取消全量档）/ §6.5 / §10 风险表；
+<code>2026-10-24-inventory-domain-rollout-worklist.md</code> W3 / W4 / W6 / W7 / §6</p>
+<p><b>数据基线</b>：<code>b_class.fact_miaoshou_inventory_snapshot</code> — file 2764（1226 行，ingest 2026-10-21）·
+file 3004（1113 行，ingest 2026-10-24）· 共同 1109 个 SKU×仓</p>
+<p><b>真实页面取证</b>：妙手仓库清单（<code>erp.91miaoshou.com/warehouse/checklist</code>），
+筛选 = 更新时间维度 2026-09-01~10-08，SKU 总数 151 · CDP 只读探针，间隔 40 秒两次读取</p>
+</footer>
+
+</div>
+</body>
+</html>

@@ -3,8 +3,23 @@ CREATE SCHEMA IF NOT EXISTS mart;
 -- Best practice note:
 -- Avoid dynamic SQL for MV create/refresh inside SQL assets. To keep bootstrap idempotent,
 -- expose a stable VIEW and let deploy-time bootstrap decide whether to materialize.
+--
+-- 2026-10-24 改造（滞销判据换血）：
+--   1. **判据换成「距上次进货时长」**（days_since_restock = 今天 − 库存最后一次真实变动的时间）。
+--      妙手「近 XX 天销量」是行级存储快照，增量模式下只覆盖 13.6% 的 SKU，
+--      不能当判定依据；距上次进货时长是事件时刻，增量下始终准确。
+--   2. **删掉 9999 哨兵与两个假指标**：estimated_turnover_days（9999 当「卖不动」、
+--      0 当「没货」，两个都不是事实）、risk_level、clearance_priority_score。
+--   3. **SQL 层只放原子事实，不做除法、不做分档**：
+--      DOS 参考值（checklist_dos_*）与停滞档位（restock_tier）一律在 Python 的唯一实现里算，
+--      见 backend/services/inventory/inventory_restock_service.py 与 inventory_dos_service.py。
+--
+-- ⚠️ 本视图**删了列**（estimated_turnover_days / risk_level / clearance_priority_score 等），
+--    PostgreSQL 的 CREATE OR REPLACE VIEW 不允许删列 → 必须先 DROP 再建。
+--    下游 api.* 视图依赖本视图，重建顺序必须是：先 DROP api.* → DROP 本视图 → 建本视图 → 建 api.*。
+DROP VIEW IF EXISTS mart.inventory_backlog_base;
 CREATE OR REPLACE VIEW mart.inventory_backlog_base AS
-WITH latest_snapshot AS (
+WITH latest AS (
     SELECT
         snapshot_date,
         platform_code,
@@ -12,147 +27,91 @@ WITH latest_snapshot AS (
         product_id,
         product_name,
         platform_sku,
+        sku_id,
         product_sku,
         warehouse_name,
+        warehouse_code,
         available_stock,
         on_hand_stock,
         inventory_value
     FROM mart.inventory_snapshot_latest
 ),
-snapshot_change AS (
+state AS (
     SELECT
-        snapshot_date,
         platform_code,
-        shop_id,
-        product_id,
-        product_name,
-        platform_sku,
-        product_sku,
+        sku_key,
         warehouse_name,
-        stock_delta,
-        inventory_value_delta,
-        is_stagnant,
-        snapshot_gap_days,
-        estimated_stagnant_days,
-        stagnant_snapshot_count
-    FROM mart.inventory_snapshot_change
-),
-sales_30d AS (
-    SELECT
-        platform_code,
-        platform_sku,
-        product_sku,
-        COALESCE(SUM(product_quantity), 0) AS sold_units_30d,
-        COUNT(DISTINCT metric_date::date) AS active_days_30d
-    FROM semantic.fact_orders_atomic
-    WHERE metric_date::date >= CURRENT_DATE - INTERVAL '30 days'
-      AND metric_date::date <= CURRENT_DATE
-    GROUP BY platform_code, platform_sku, product_sku
+        stock_added_at,
+        row_seen_at,
+        row_written_at,
+        checklist_sales_7d,
+        checklist_sales_30d,
+        checklist_sales_60d,
+        checklist_sales_90d
+    FROM mart.inventory_state
 ),
 joined_backlog AS (
     SELECT
-        i.snapshot_date,
-        i.platform_code,
-        i.shop_id,
-        i.product_id,
-        i.product_name,
-        i.platform_sku,
-        i.product_sku,
-        i.warehouse_name,
-        i.available_stock,
-        i.on_hand_stock,
-        i.inventory_value,
-        COALESCE(s.sold_units_30d, 0) AS sold_units_30d,
-        COALESCE(s.active_days_30d, 0) AS active_days_30d,
-        COALESCE(c.stock_delta, 0) AS stock_delta,
-        COALESCE(c.inventory_value_delta, 0) AS inventory_value_delta,
-        COALESCE(c.is_stagnant, FALSE) AS is_stagnant,
-        COALESCE(c.snapshot_gap_days, 0) AS snapshot_gap_days,
-        COALESCE(c.estimated_stagnant_days, 0) AS estimated_stagnant_days,
-        COALESCE(c.stagnant_snapshot_count, 0) AS stagnant_snapshot_count
-    FROM latest_snapshot i
-    LEFT JOIN sales_30d s
-        ON i.platform_code = s.platform_code
-       AND COALESCE(i.platform_sku, '') = COALESCE(s.platform_sku, '')
-       AND COALESCE(i.product_sku, '') = COALESCE(s.product_sku, '')
-    LEFT JOIN snapshot_change c
-        ON i.platform_code = c.platform_code
-       AND COALESCE(i.platform_sku, '') = COALESCE(c.platform_sku, '')
-       AND COALESCE(i.product_sku, '') = COALESCE(c.product_sku, '')
-       AND COALESCE(i.warehouse_name, '') = COALESCE(c.warehouse_name, '')
-),
-turnover_enriched AS (
-    SELECT
-        base.snapshot_date,
-        base.platform_code,
-        base.shop_id,
-        base.product_id,
-        base.product_name,
-        base.platform_sku,
-        base.product_sku,
-        base.warehouse_name,
-        base.available_stock,
-        base.on_hand_stock,
-        base.inventory_value,
-        COALESCE(
-            ROUND(
-                base.sold_units_30d::numeric / NULLIF(base.active_days_30d, 0),
-                2
-            ),
-            0
-        ) AS daily_avg_sales,
+        l.snapshot_date,
+        l.platform_code,
+        l.shop_id,
+        l.product_id,
+        l.product_name,
+        l.platform_sku,
+        l.product_sku,
+        l.warehouse_name,
+        l.warehouse_code,
+        l.available_stock,
+        l.on_hand_stock,
+        l.inventory_value,
+        s.stock_added_at,
+        s.row_seen_at,
+        s.row_written_at,
+        s.checklist_sales_7d,
+        s.checklist_sales_30d,
+        s.checklist_sales_60d,
+        s.checklist_sales_90d,
         CASE
-            WHEN base.sold_units_30d > 0 AND base.active_days_30d > 0
-            THEN ROUND(
-                COALESCE(base.available_stock, 0)::numeric /
-                NULLIF(base.sold_units_30d::numeric / base.active_days_30d, 0),
-                0
-            )
-            WHEN COALESCE(base.available_stock, 0) > 0
-            THEN 9999
-            ELSE 0
-        END AS estimated_turnover_days,
-        base.stock_delta,
-        base.inventory_value_delta,
-        base.is_stagnant,
-        base.snapshot_gap_days,
-        base.estimated_stagnant_days,
-        base.stagnant_snapshot_count
-    FROM joined_backlog base
+            WHEN s.stock_added_at IS NULL THEN NULL
+            ELSE (CURRENT_DATE - s.stock_added_at::date)
+        END AS days_since_restock
+    FROM latest l
+    LEFT JOIN state s
+        ON s.platform_code = l.platform_code
+       AND s.sku_key = COALESCE(
+            NULLIF(l.platform_sku, ''),
+            NULLIF(l.product_sku, ''),
+            NULLIF(l.sku_id, ''),
+            NULLIF(l.product_id, '')
+       )
+       AND COALESCE(s.warehouse_name, '') = COALESCE(l.warehouse_name, '')
+    -- **只算还有库存的仓**：已卖空的 SKU 不压资金，不该算进积压。
+    -- 口径与 api.sku_clearance_ranking_module 的 state CTE 完全一致
+    -- （同一套过滤 + 同一套 SKU 级聚合），两张榜不会给出两个答案。
+    WHERE l.available_stock > 0
 )
 SELECT
-    base.snapshot_date,
-    base.platform_code,
-    base.shop_id,
-    base.product_id,
-    base.product_name,
-    base.platform_sku,
-    base.product_sku,
-    base.warehouse_name,
-    base.available_stock,
-    base.on_hand_stock,
-    base.inventory_value,
-    base.daily_avg_sales,
-    base.estimated_turnover_days,
-    base.stock_delta,
-    base.inventory_value_delta,
-    base.is_stagnant,
-    base.snapshot_gap_days,
-    base.estimated_stagnant_days,
-    base.stagnant_snapshot_count,
-    CASE
-        WHEN base.estimated_turnover_days >= 60
-        OR base.stagnant_snapshot_count >= 3
-        THEN 'high'
-        WHEN base.estimated_turnover_days >= 30
-        OR base.stagnant_snapshot_count >= 2
-        THEN 'medium'
-        ELSE 'low'
-    END AS risk_level,
-    (
-        COALESCE(base.inventory_value, 0) * 0.5
-        + base.estimated_stagnant_days * 10
-        + base.estimated_turnover_days * 2
-    ) AS clearance_priority_score
-FROM turnover_enriched base;
-
+    snapshot_date,
+    platform_code,
+    shop_id,
+    product_id,
+    product_name,
+    platform_sku,
+    product_sku,
+    warehouse_name,
+    warehouse_code,
+    available_stock,
+    on_hand_stock,
+    inventory_value,
+    -- 三个时间戳各司其职
+    stock_added_at,
+    row_seen_at,
+    row_written_at,
+    -- 距上次进货天数（日期差，不是口径；分档在 Python 唯一实现里做）
+    days_since_restock,
+    -- 妙手滚动销量窗口（参考值；NULL = 该行取不到）
+    checklist_sales_7d,
+    checklist_sales_30d,
+    checklist_sales_60d,
+    checklist_sales_90d
+FROM joined_backlog;

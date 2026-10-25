@@ -66,8 +66,8 @@ DIRECTION_UP = "上升"
 DIRECTION_PROTECTION_LOST = "保护失效"
 
 # 库龄来源标记（来自 product_pricing_service.compute_sku_pricing）
-TIER_SOURCE_AGE = "age_data"
-TIER_SOURCE_FALLBACK = "fallback_no_age_data"
+TIER_SOURCE_AGE = "restock_days"
+TIER_SOURCE_FALLBACK = "fallback_no_restock_days"
 
 # 归因上下文里保存的字段。刻意**不含时间戳**——outbox 的 payload 哈希是去重依据，
 # 时间戳每次都变会让同一次变化重跑时哈希不同、去重失效。
@@ -326,7 +326,7 @@ class PriceAdjustNotifyService:
         spu_by_sku = await self._load_spu_by_sku(sku_ids)
         platform = context["platform"]
         other_cost_rate = platform.other_cost_rate if platform else None
-        age_rows = context["age_rows"]
+        restock_rows = context["restock_rows"]
 
         states: dict[int, dict] = {}
         for row in sku_rows:
@@ -338,12 +338,12 @@ class PriceAdjustNotifyService:
             )
             pricing = state["pricing"]
             policy = state["policy"]
-            age_days = state["age_days"]
-            age_row = age_rows.get(row.sku_id)
+            days_since_restock = state["days_since_restock"]
+            restock_row = restock_rows.get(row.sku_id)
 
             snapshot = build_context(
                 pricing=pricing,
-                age_days=age_days,
+                age_days=days_since_restock,
                 target_margin_rate=policy["target_margin_rate"] if policy else None,
                 discount_rate=policy["discount_rate"] if policy else None,
                 purchase_cost=row.default_purchase_cost,
@@ -364,9 +364,9 @@ class PriceAdjustNotifyService:
                 "specification": row.specification,
                 "min_selling_price": pricing.get("min_selling_price"),
                 "context": snapshot,
-                "age_days": age_days,
-                "current_qty": age_row.get("current_qty") if age_row else None,
-                "inventory_value": age_row.get("inventory_value") if age_row else None,
+                "age_days": days_since_restock,
+                "current_qty": restock_row.get("current_qty") if restock_row else None,
+                "inventory_value": restock_row.get("inventory_value") if restock_row else None,
             }
         return states
 

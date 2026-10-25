@@ -18,9 +18,9 @@
 ## Review Metrics
 
 - inventory_total_value
-- inventory_backlog_30d_value
-- inventory_backlog_60d_value
-- inventory_backlog_90d_value
+- deep_stagnant_value
+- mid_stagnant_value
+- backlog_ratio
 - clearance_priority_score
 - stockout_qty
 - return reason

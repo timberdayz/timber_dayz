@@ -14,11 +14,14 @@
 | monthly_achievement_rate | no | yes | yes | no |
 | time_gap | no | yes | yes | no |
 | inventory_total_value | no | conditional | yes | no |
-| inventory_backlog_30d_value | no | conditional | yes | no |
-| inventory_backlog_60d_value | no | conditional | yes | no |
-| inventory_backlog_90d_value | no | conditional | yes | no |
+| deep_stagnant_value | no | conditional | yes | no |
+| mid_stagnant_value | no | conditional | yes | no |
+| backlog_ratio | no | conditional | yes | no |
 | clearance_priority_score | no | no | yes | no |
 | attach_rate | yes | conditional | conditional | no |
+| checklist_dos_sales30 | no | no | conditional | no |
+| checklist_dos_sales90 | no | no | conditional | no |
+| days_since_restock | conditional | yes | yes | no |
 | labor_efficiency | no | no | no | no |
 | roas | no | no | no | blocked |
 | mer | no | no | no | blocked |

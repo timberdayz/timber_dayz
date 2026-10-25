@@ -48,7 +48,7 @@ def _context(**overrides) -> dict:
         "min_selling_price": "128.56",
         "min_selling_price_source": "cost_floor",
         "min_selling_price_is_override": False,
-        "pricing_tier_source": "age_data",
+        "pricing_tier_source": "restock_days",
         "pricing_tier_label": "日常",
         "target_margin_rate": "0.25",
         "discount_rate": "0.10",
@@ -192,14 +192,14 @@ def test_delisting_jump_is_excluded():
     这个品已经不卖了，底线高低没有业务含义，不该通知。
     """
     prev = _context(
-        pricing_tier_source="age_data",
+        pricing_tier_source="restock_days",
         pricing_tier_label="滞销60天",
         target_margin_rate="0.18",
         discount_rate="0.20",
         age_days=95,
     )
     cur = _context(
-        pricing_tier_source="fallback_no_age_data",
+        pricing_tier_source="fallback_no_restock_days",
         pricing_tier_label="日常",
         target_margin_rate="0.25",
         discount_rate="0.10",
@@ -210,9 +210,9 @@ def test_delisting_jump_is_excluded():
 
 def test_delisting_jump_not_excluded_when_other_input_also_changed():
     """同时成本也变了 -> 这次变化不只是"下架"造成的 -> 仍然要通知。"""
-    prev = _context(pricing_tier_source="age_data", purchase_cost="45.20")
+    prev = _context(pricing_tier_source="restock_days", purchase_cost="45.20")
     cur = _context(
-        pricing_tier_source="fallback_no_age_data",
+        pricing_tier_source="fallback_no_restock_days",
         purchase_cost="51.00",
     )
     assert is_delisting_jump(prev, cur) is False
@@ -220,14 +220,14 @@ def test_delisting_jump_not_excluded_when_other_input_also_changed():
 
 def test_delisting_jump_not_excluded_when_age_record_still_present():
     """库龄记录还在（只是天数归零 = 补货）-> 滞销品复活，要通知。"""
-    prev = _context(pricing_tier_source="age_data", pricing_tier_label="滞销60天")
-    cur = _context(pricing_tier_source="age_data", pricing_tier_label="日常")
+    prev = _context(pricing_tier_source="restock_days", pricing_tier_label="滞销60天")
+    cur = _context(pricing_tier_source="restock_days", pricing_tier_label="日常")
     assert is_delisting_jump(prev, cur) is False
 
 
 def test_delisting_jump_not_excluded_when_previous_had_no_age_either():
-    prev = _context(pricing_tier_source="fallback_no_age_data")
-    cur = _context(pricing_tier_source="fallback_no_age_data")
+    prev = _context(pricing_tier_source="fallback_no_restock_days")
+    cur = _context(pricing_tier_source="fallback_no_restock_days")
     assert is_delisting_jump(prev, cur) is False
 
 
@@ -243,7 +243,7 @@ def test_build_context_serializes_decimal_as_string():
             "min_selling_price": 128.56,
             "min_selling_price_source": "cost_floor",
             "min_selling_price_is_override": False,
-            "pricing_tier_source": "age_data",
+            "pricing_tier_source": "restock_days",
             "pricing_tier_label": "日常",
             "min_selling_price_missing_reasons": [],
         },
@@ -271,7 +271,7 @@ def test_build_context_has_no_timestamp():
             "min_selling_price": 1.0,
             "min_selling_price_source": "cost_floor",
             "min_selling_price_is_override": False,
-            "pricing_tier_source": "age_data",
+            "pricing_tier_source": "restock_days",
             "pricing_tier_label": "日常",
             "min_selling_price_missing_reasons": [],
         },
@@ -385,14 +385,14 @@ async def test_delisting_jump_is_excluded_but_baseline_still_advances():
     后续真实变化也会被这坨噪音挡住。
     """
     prev = _context(
-        pricing_tier_source="age_data",
+        pricing_tier_source="restock_days",
         pricing_tier_label="滞销60天",
         target_margin_rate="0.18",
         discount_rate="0.20",
         age_days=95,
     )
     cur = _context(
-        pricing_tier_source="fallback_no_age_data",
+        pricing_tier_source="fallback_no_restock_days",
         pricing_tier_label="日常",
         target_margin_rate="0.25",
         discount_rate="0.10",
@@ -407,7 +407,7 @@ async def test_delisting_jump_is_excluded_but_baseline_still_advances():
     assert notify == []
     assert len(silent) == 1
     assert silent[0]["min_selling_price"] == 128.56
-    assert silent[0]["context"]["pricing_tier_source"] == "fallback_no_age_data"
+    assert silent[0]["context"]["pricing_tier_source"] == "fallback_no_restock_days"
 
 
 @pytest.mark.asyncio
@@ -522,7 +522,7 @@ async def _seed_pricing_fixture(session) -> int:
     session.add_all(
         [
             SkuPricingPolicy(
-                min_age_days=0,
+                min_restock_days=0,
                 tier_label="日常",
                 discount_rate=Decimal("0.10"),
                 target_margin_rate=Decimal("0.25"),
@@ -533,7 +533,7 @@ async def _seed_pricing_fixture(session) -> int:
                 source="test",
             ),
             SkuPricingPolicy(
-                min_age_days=60,
+                min_restock_days=60,
                 tier_label="滞销30天",
                 discount_rate=Decimal("0.15"),
                 target_margin_rate=Decimal("0.22"),
@@ -631,7 +631,7 @@ async def test_router_and_detection_share_one_pricing_implementation(core_sqlite
     assert router_payload["min_selling_price"] == detected
     # 没有库龄 → 回落第 1 档，两边都得是同一个档
     assert router_payload["pricing_tier_label"] == "日常"
-    assert router_payload["pricing_tier_source"] == "fallback_no_age_data"
+    assert router_payload["pricing_tier_source"] == "fallback_no_restock_days"
 
     # 首次跑：只建基线，不通知
     notify, silent = await service.detect_changes()

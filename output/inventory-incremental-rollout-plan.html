@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>库存增量采集改造 · 落地清单</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f7f5f0;--card:#fff;--line:#e9e3d6;--line-soft:#f0ebe0;
+ --ink:#14171e;--ink2:#3a4256;--muted:#7c7a72;
+ --primary:#2f6f5e;--p-soft:rgba(47,111,94,.08);
+ --warn:#c97b3f;--w-soft:rgba(201,123,63,.09);
+ --danger:#b06367;--d-soft:rgba(176,99,103,.09);--mono:'JetBrains Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+ font-size:14.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+ background:radial-gradient(760px 380px at 88% -8%,rgba(47,111,94,.055),transparent 62%),
+            radial-gradient(620px 320px at 4% 4%,rgba(201,123,63,.045),transparent 60%)}
+.wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:64px 28px 96px}
+h1,h2{font-family:'DM Serif Display',Georgia,'Songti SC',serif;font-weight:400;letter-spacing:-.005em}
+h1{font-size:33px;line-height:1.25;margin-bottom:15px}
+h2{font-size:24px;margin-bottom:8px}
+.lede{font-size:16.5px;color:var(--ink2);max-width:74ch}
+.kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;
+ letter-spacing:.13em;text-transform:uppercase;color:var(--primary);margin-bottom:12px}
+.kicker::before{content:"";width:18px;height:2px;background:var(--primary);border-radius:2px}
+.sec{margin-top:52px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px}
+.card+.card{margin-top:14px}
+code{font-family:var(--mono);font-size:12.5px;background:var(--p-soft);color:var(--primary);padding:1px 6px;border-radius:5px}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.t-ok{background:var(--p-soft);color:var(--primary)}
+.t-w{background:var(--w-soft);color:var(--warn)}
+.t-b{background:var(--d-soft);color:var(--danger)}
+.t-n{background:#f0ede6;color:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+ border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:26px}
+.stat{background:var(--card);padding:16px 18px}
+.stat .n{font-family:'DM Serif Display',serif;font-size:25px;line-height:1.15}
+.stat .n small{font-size:14px;color:var(--muted);margin-left:3px}
+.stat .l{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.45}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+ color:var(--muted);padding:0 12px 9px;border-bottom:1px solid var(--line)}
+td{padding:11px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink2);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td strong{color:var(--ink)}
+.bench{display:grid;grid-template-columns:180px 1fr 92px;gap:14px;align-items:center;padding:7px 0}
+.bench+.bench{border-top:1px dashed var(--line-soft)}
+.bench-label{font-size:13.5px;color:var(--ink2)}
+.bench-label b{color:var(--ink)}
+.bench-track{height:17px;background:var(--line-soft);border-radius:6px;overflow:hidden}
+.bench-fill{height:100%;border-radius:6px;background:var(--primary)}
+.bench-fill.bad{background:var(--danger)}
+.bench-fill.warn{background:var(--warn)}
+.bench-val{font-family:var(--mono);font-size:12.5px;text-align:right}
+.callout{border-radius:13px;padding:16px 18px;border:1px solid var(--line);background:var(--card)}
+.callout.w{background:var(--w-soft);border-color:rgba(201,123,63,.32)}
+.callout.o{background:var(--p-soft);border-color:rgba(47,111,94,.28)}
+.callout .ct{font-weight:600;font-size:14px;margin-bottom:5px;display:flex;align-items:center;gap:8px}
+.callout p{font-size:13.5px;color:var(--ink2)}
+.flow{display:grid;gap:0}
+.fn{border:1px solid var(--line);border-radius:13px;background:var(--card);padding:15px 18px;position:relative}
+.fn+.fn{margin-top:24px}
+.fn+.fn::before{content:"";position:absolute;left:50%;top:-24px;width:2px;height:24px;
+ background:linear-gradient(var(--primary),rgba(47,111,94,.25));transform:translateX(-50%)}
+.fn+.fn::after{content:"";position:absolute;left:50%;top:-7px;width:7px;height:7px;
+ border-right:2px solid var(--primary);border-bottom:2px solid var(--primary);transform:translateX(-50%) rotate(45deg)}
+.fh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.fh h3{font-size:15.5px;font-weight:600}
+.fb{font-size:13.5px;color:var(--ink2)}
+.figcap{font-size:12.5px;color:var(--muted);margin-top:10px;text-align:center}
+ul.plain{list-style:none;padding:0;margin:6px 0 0}
+ul.plain li{padding:5px 0 5px 20px;position:relative;font-size:13.5px;color:var(--ink2)}
+ul.plain li::before{content:"";position:absolute;left:4px;top:13px;width:5px;height:5px;
+ border-radius:50%;background:var(--primary);opacity:.55}
+@media(max-width:860px){.wrap{padding:40px 18px 64px}.stats{grid-template-columns:1fr 1fr}
+ h1{font-size:26px}h2{font-size:21px}body{font-size:14px}
+ .bench{grid-template-columns:120px 1fr 76px;gap:9px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">落地清单 · 2026-10-24</div>
+  <h1>最后一块拼图已补齐：<br><em>导出即筛选结果，增量链路全线成立</em></h1>
+  <p class="lede">
+    你的实测确认了「导出搜索的商品」导出的是点击搜索后确定时间范围内的商品 ——
+    这意味着时间筛选的结果<b>真的能落到文件里</b>，增量的最后一环闭合。
+    设计文档已写好（<code>docs/superpowers/specs/2026-10-24-miaoshou-inventory-incremental-collection-design.md</code>），
+    下面是落地顺序与关键决策。
+  </p>
+  <div class="stats">
+    <div class="stat"><div class="n">5<small>批次</small></div><div class="l">B1 采集 → B2 落盘 → B3 水位线<br>→ B4 派生层 → B5 兜底</div></div>
+    <div class="stat"><div class="n">B1+B2</div><div class="l">必须同批发布<br>否则增量批次更进不了 latest</div></div>
+    <div class="stat"><div class="n">0<small>新列</small></div><div class="l">行级时间<b>已在库里</b><br>「更新时间」平铺列 100% 覆盖</div></div>
+    <div class="stat"><div class="n">2339<small>行</small></div><div class="l">历史数据<b>不用重采</b><br>回填 observed_at 即可</div></div>
+  </div>
+</header>
+
+<!-- ✅ 2026-10-24 晚间修正：DOS 定位 -->
+<section class="sec" style="margin-top:32px">
+<div class="callout w">
+  <div class="ct"><span class="tag t-w">DOS 定位 · 2026-10-24 晚间修正</span>DOS 降级为参考，不做全域使用</div>
+  <p>采集策略已定：<b>不再全量，只有配置采集 + 增量更新</b>。妙手「近 XX 天销量」是<b>行级存储快照</b>，只在那一行被写入时才刷新，增量批次实测只覆盖 <b>13.6%</b> 的 SKU（151 / 1113）→ <b>DOS 不作判定依据</b>。</p>
+  <p>→ 滞销判据改用<b>库存停滞时长</b>（今天 − 库存最后一次<b>真实变动</b>的时间，由落盘层行内容 diff 维护，不信妙手的时间戳）；DOS 保留在表里<b>作为参考值</b>，并明确标注「参考」。完整取证见 <code>output/dos-freshness-evidence.html</code>。</p>
+</div>
+</section>
+
+<!-- ① 链路闭合 -->
+<section class="sec">
+  <div class="kicker">① 前提全齐</div>
+  <h2>增量链路的四个环节</h2>
+  <div class="flow">
+    <div class="fn">
+      <div class="fh"><h3>① 筛选语义</h3><span class="tag t-ok">已取证</span></div>
+      <div class="fb">「更新时间」是下拉维度（<code>gmtModified</code>），日期区间是它的第二参数。库内回放 9/4~10/8 得 147 个去重 SKU，与录制截图的「SKU总数 147」完全吻合。</div>
+    </div>
+    <div class="fn">
+      <div class="fh"><h3>② 交互时序</h3><span class="tag t-ok">已取证</span></div>
+      <div class="fb">切维度 → 填区间 → 点「确定」→ 点搜索。四步缺一不可，且<b>每处静默失败不报错</b>，必须断言 DOM 状态。</div>
+    </div>
+    <div class="fn">
+      <div class="fh"><h3>③ 导出语义</h3><span class="tag t-ok">你已实测</span></div>
+      <div class="fb">「导出搜索的商品」= 点击搜索后确定时间范围内的商品。<b>这一环补齐，时间筛选的结果真的能落进文件。</b></div>
+    </div>
+    <div class="fn">
+      <div class="fh"><h3>④ 落盘模型</h3><span class="tag t-w">待改造</span></div>
+      <div class="fb">观测层（只存变动）+ 状态层（upsert 永续完整）+ 派生层。行级 <code>observed_at</code> 取代批次级 <code>metric_date</code> 作为排序键。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ② 关键决策 -->
+<section class="sec">
+  <div class="kicker">② 三个关键决策</div>
+  <h2>设计里最重要的三处判断</h2>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table>
+      <thead><tr><th style="width:20%">决策</th><th style="width:44%">做法</th><th style="width:36%">依据</th></tr></thead>
+      <tbody>
+        <tr><td><strong>排序键改行级</strong><br><span class="tag t-b">根治</span></td>
+            <td>语义层新增 <code>observed_at</code>（取 <code>raw_data['更新时间']</code>），
+                <code>latest</code> / <code>current</code> 按它 DESC 排序</td>
+            <td>现状按 <code>metric_date</code> 排，最新批次 1113 行只贡献 <b>4 行</b>；
+                改后贡献 <b>469 行</b>。这是「新批次进不了 latest」的根治</td></tr>
+        <tr><td><strong>不新增物理列</strong><br><span class="tag t-ok">省事</span></td>
+            <td>只改语义层投影。<code>更新时间</code>/<code>创建时间</code> 平铺列
+                在 fact 表里<b>已 100% 覆盖</b>（1113 行非 NULL）</td>
+            <td>写入侧按 <code>header_columns</code> 动态建列，inventory 域表头名原样保留 ——
+                列早就有了，只是语义层没把它们投影出来</td></tr>
+        <tr><td><strong>历史不重采</strong><br><span class="tag t-ok">省事</span></td>
+            <td>两批 2339 行的 <code>raw_data</code> 都带「更新时间」，
+                直接回填算出 <code>observed_at</code> 重算视图</td>
+            <td>错戳的 <code>metric_date</code>（09-14 / 09-01）<b>保留原值</b>：
+                新模型下它只表示「这批采集的配置区间」，不再影响正确性；
+                订正反而丢失可追溯性</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ③ 收益 -->
+<section class="sec">
+  <div class="kicker">③ 改造后的实测收益</div>
+  <h2>三处数据，全部有基线可对照</h2>
+  <div class="cmp" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div class="card" style="margin:0">
+      <div class="fh"><h3>① 最新批次进 latest 的行数</h3></div>
+      <div class="bench"><span class="bench-label">现状 <code>metric_date</code> 排</span><div class="bench-track"><div class="bench-fill bad" style="width:.6%"></div></div><span class="bench-val">4 行</span></div>
+      <div class="bench"><span class="bench-label">改后 <code>observed_at</code> 排</span><div class="bench-track"><div class="bench-fill" style="width:100%"></div></div><span class="bench-val">469 行</span></div>
+      <p class="figcap">1230 个 SKU×仓 键中，新批次占比从 0.3% 升到 38%</p>
+    </div>
+    <div class="card" style="margin:0">
+      <div class="fh"><h3>② 库龄 &gt;30 天的 SKU 数</h3></div>
+      <div class="bench"><span class="bench-label">现状 <code>snapshot_date</code> 锚</span><div class="bench-track"><div class="bench-fill bad" style="width:1%"></div></div><span class="bench-val">0 个</span></div>
+      <div class="bench"><span class="bench-label">改用行级「创建时间」锚</span><div class="bench-track"><div class="bench-fill" style="width:100%"></div></div><span class="bench-val">1109 个</span></div>
+      <p class="figcap">180+ 桶 1096 行 —— 商品中心的 56% 兜底档可消除</p>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <div class="fh"><h3>③ 9999 哨兵值（513 个有货行）</h3></div>
+    <div class="bench"><span class="bench-label">现状（订单域无 miaoshou 数据）</span><div class="bench-track"><div class="bench-fill bad" style="width:100%"></div></div><span class="bench-val">499 行</span></div>
+    <div class="bench"><span class="bench-label">改用库存表自带「近30天销量」</span><div class="bench-track"><div class="bench-fill" style="width:58.1%"></div></div><span class="bench-val">可算 298 行</span></div>
+    <div class="bench"><span class="bench-label">剩余真零销量（真滞销）</span><div class="bench-track"><div class="bench-fill warn" style="width:41.9%"></div></div><span class="bench-val">215 行</span></div>
+    <p class="figcap">且近30/60/90 三档销量互相区分得开（290 行 30≠60）→ 30/60/90 天金额三档不再同值</p>
+  </div>
+</section>
+
+<!-- ④ 顺序 -->
+<section class="sec">
+  <div class="kicker">④ 实施顺序</div>
+  <h2>五个批次</h2>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table>
+      <thead><tr><th style="width:8%">批次</th><th style="width:40%">内容</th><th style="width:22%">依赖</th><th style="width:30%">风险 / 验收锚点</th></tr></thead>
+      <tbody>
+        <tr><td><strong>B1</strong></td><td>新增 <code>miaoshou/inventory_date_filter</code> 组件 + <code>inventory_export</code> 编排改造 + 行为测试</td><td>需真实页面复验</td><td><span class="tag t-ok">低</span> 只加筛选不改落盘</td></tr>
+        <tr><td><strong>B2</strong></td><td>语义层暴露 <code>observed_at</code>/<code>created_at</code>；<code>latest</code>/<code>current</code> 改排序键</td><td>无</td><td><span class="tag t-ok">低</span> 视图改动可回滚；最新批次贡献 ≥ 400 行</td></tr>
+        <tr><td><strong>B3</strong></td><td>水位线表 + 自动推进 + 断档回退全量</td><td>B1 B2</td><td><span class="tag t-w">中</span> 首次/断档必须回退全量</td></tr>
+        <tr><td><strong>B4</strong></td><td>库龄锚点修正 + 9999 拆分 + <code>clearance_ranking_module</code> 重写</td><td>B2</td><td><span class="tag t-w">中</span> 消除超时 + 9999 &lt; 250 行</td></tr>
+        <tr><td><strong>B5</strong></td><td>周期全量档 + 增量/全量差异对账</td><td>B3</td><td><span class="tag t-ok">低</span> 捕捉删除/下架的唯一解</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout w" style="margin-top:14px">
+    <div class="ct">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--warn)"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+      B1 与 B2 必须同批发布
+    </div>
+    <p>B1 单独上线会让问题<b>更严重</b>：增量批次只含少数行，而旧批次的 <code>metric_date</code>(09-14) 依然压过新批次，
+    于是新采的数据进不了 latest。两者必须同时生效。</p>
+  </div>
+</section>
+
+<!-- ⑤ 风险 -->
+<section class="sec">
+  <div class="kicker">⑤ 待你确认的三点</div>
+  <h2>设计里留给业务的问题</h2>
+  <div class="card">
+    <ul class="plain">
+      <li><b>创建时间 ≠ 入库时间</b> —— 库龄改用行级「创建时间」（该 SKU 在该仓的记录创建时间）。
+        若业务要严格 FIFO 口径，当前数据源不支持，需要入库流水数据。</li>
+      <li><b>库存销量 ≠ ERP 订单销量</b> —— 前者是妙手平台口径（按 SKU 在该仓），
+        后者是 ERP 口径（跨平台、按商品）。当前订单域从未入库，前者是唯一可用信号；
+        订单域修复后可校准。</li>
+      <li><b>快捷项「近7天/近30天」能否替代手填</b> —— 若可以，组件能省掉日期输入，稳定性高得多；
+        但快捷项相对今天，与「水位线推进」语义不同，窗口由平台决定而非配置决定。</li>
+    </ul>
+  </div>
+</section>
+
+</div>
+</body>
+</html>

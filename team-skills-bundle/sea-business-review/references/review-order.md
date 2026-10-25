@@ -41,9 +41,9 @@ GMV 变化后，立刻检查：
 检查：
 
 - `inventory_total_value`
-- `inventory_backlog_30d_value`
-- `inventory_backlog_60d_value`
-- `inventory_backlog_90d_value`
+- `deep_stagnant_value`
+- `mid_stagnant_value`
+- `backlog_ratio`
 - `clearance_priority_score`
 
 目标：回答“是否存在库存资金占用或清理压力”。

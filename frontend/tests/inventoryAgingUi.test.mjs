@@ -26,21 +26,33 @@ test('滞销清单前端 API 封装指向专用端点', () => {
 })
 
 test('滞销清单明细表列齐全', () => {
-  assert.match(viewSource, /prop="clearance_priority_score" label="优先级"/)
+  assert.match(viewSource, /prop="days_since_restock" label="距上次进货天数"/)
   assert.match(viewSource, /prop="product_sku" label="SKU"/)
   assert.match(viewSource, /prop="product_name" label="商品名"/)
-  assert.match(viewSource, /label="库龄"[\s\S]{0,200}?row\.age_days/)
-  assert.match(viewSource, /label="起算日"[\s\S]{0,200}?row\.age_anchor_date/)
-  assert.match(viewSource, /label="重置原因"/)
   assert.match(viewSource, /prop="current_qty" label="可用库存"/)
   assert.match(viewSource, /label="库存金额"[\s\S]{0,200}?row\.inventory_value/)
-  assert.match(viewSource, /label="周转天数"[\s\S]{0,200}?row\.estimated_turnover_days/)
-  assert.match(viewSource, /label="日均销量"[\s\S]{0,200}?row\.daily_avg_sales/)
-  assert.match(viewSource, /label="风险"[\s\S]{0,200}?row\.risk_level/)
+  assert.match(viewSource, /prop="checklist_dos_sales90" label="可售天数（参考）"/)
   assert.match(viewSource, /label="档位"[\s\S]{0,200}?row\.pricing_tier_label/)
   assert.match(viewSource, /label="当前可优惠"[\s\S]{0,200}?row\.current_discount_rate/)
   assert.match(viewSource, /label="最低售价"[\s\S]{0,300}?row\.min_selling_price/)
   assert.match(viewSource, /label="清货回款"[\s\S]{0,400}?row\.clearance_recovery_amount/)
+})
+
+test('滞销明细表不再渲染后端已删的旧口径字段', () => {
+  // 这些列后端视图已不再输出，渲染它们只会显示空白列
+  assert.doesNotMatch(viewSource, /row\.age_bucket/)
+  assert.doesNotMatch(viewSource, /row\.estimated_turnover_days/)
+  assert.doesNotMatch(viewSource, /row\.daily_avg_sales/)
+  assert.doesNotMatch(viewSource, /row\.risk_level/)
+  assert.doesNotMatch(viewSource, /label="起算日"/)
+  assert.doesNotMatch(viewSource, /prop="clearance_priority_score"/)
+})
+
+test('滞销清单不再按风险等级筛选', () => {
+  // 后端已删 risk_level 参数，前端继续传会被忽略但会误导运营
+  assert.doesNotMatch(viewSource, /clearanceFilters\.risk_level/)
+  assert.doesNotMatch(viewSource, /clearanceSummary\.by_risk_level/)
+  assert.doesNotMatch(viewSource, /clearanceSummary\.by_age_bucket/)
 })
 
 test('清货回款缺失时显示缺参考售价而不是占位符', () => {
@@ -60,27 +72,29 @@ test('缺参考售价的 SKU 数量在界面上有明确提示', () => {
   assert.match(viewSource, /个 SKU 缺参考售价，无法计算清货回款/)
 })
 
-test('滞销清单汇总卡覆盖 SKU 数 压资金额 在库数量 高风险数', () => {
+test('滞销清单汇总卡覆盖 SKU 数 压资金额 在库数量 重度积压数', () => {
   assert.match(viewSource, /title="滞销 SKU 数"/)
   assert.match(viewSource, /title="压资金额"/)
   assert.match(viewSource, /title="在库数量"/)
-  assert.match(viewSource, /title="高风险数"/)
-  assert.match(viewSource, /clearanceSummary\.by_risk_level \|\| \{\}\)\.high/)
+  assert.match(viewSource, /title="重度积压数"/)
+  assert.match(viewSource, /:value="clearanceDeepTierCount"/)
+  assert.match(viewSource, /clearanceSummary\.restock_tiers/)
 })
 
-test('风险分布与库龄档位分布来自汇总数据', () => {
-  assert.match(viewSource, /const clearanceRiskDistribution = computed/)
-  assert.match(viewSource, /const clearanceBucketDistribution = computed/)
-  assert.match(viewSource, /clearanceSummary\.by_risk_level/)
-  assert.match(viewSource, /clearanceSummary\.by_age_bucket/)
-  assert.match(viewSource, /<template #header>风险分布<\/template>/)
-  assert.match(viewSource, /<template #header>库龄档位分布<\/template>/)
+test('滞销档位分布来自汇总数据且门槛不写死在前端', () => {
+  assert.match(viewSource, /const clearanceTierDistribution = computed/)
+  assert.match(viewSource, /const clearanceTierList = computed/)
+  assert.match(viewSource, /clearanceSummary\.restock_tiers/)
+  assert.match(viewSource, /<template #header>滞销档位分布（门槛来自档位表）<\/template>/)
+  // 档位名与门槛都来自后端，前端不硬编码 0/60/90/120
+  assert.doesNotMatch(viewSource, /value="high"/)
+  assert.doesNotMatch(viewSource, /value="medium"/)
+  assert.doesNotMatch(viewSource, /value="low"/)
 })
 
 test('滞销清单筛选参数真的传给后端', () => {
-  assert.match(viewSource, /min_age_days: clearanceFilters\.min_age_days/)
-  assert.match(viewSource, /max_age_days: clearanceFilters\.max_age_days \?\? undefined/)
-  assert.match(viewSource, /risk_level: clearanceFilters\.risk_level \|\| undefined/)
+  assert.match(viewSource, /min_restock_days: clearanceFilters\.min_restock_days/)
+  assert.match(viewSource, /max_restock_days: clearanceFilters\.max_restock_days \?\? undefined/)
   assert.match(viewSource, /platform_code: clearanceFilters\.platform_code \|\| undefined/)
   assert.match(viewSource, /keyword: clearanceFilters\.keyword \|\| undefined/)
   assert.match(viewSource, /sort_by: clearanceFilters\.sort_by/)
@@ -89,22 +103,21 @@ test('滞销清单筛选参数真的传给后端', () => {
   assert.match(viewSource, /offset: clearancePage\.offset/)
 })
 
-test('库龄下限默认取 0 避免单帧数据白屏', () => {
-  assert.match(viewSource, /const clearanceFilters = reactive\(\{[\s\S]{0,200}?min_age_days: 0/)
+test('滞销天数下限默认取 60（档位表第一个滞销门槛）', () => {
+  assert.match(viewSource, /const clearanceFilters = reactive\(\{[\s\S]{0,300}?min_restock_days: 60/)
   assert.match(
     viewSource,
-    /resetClearanceFilters[\s\S]{0,400}?min_age_days: 0/,
+    /resetClearanceFilters[\s\S]{0,400}?min_restock_days: 60/,
   )
 })
 
-test('滞销清单支持按后端白名单字段排序', () => {
-  assert.match(viewSource, /value="clearance_priority_score"/)
-  assert.match(viewSource, /value="age_days"/)
+test('滞销清单排序只给后端白名单里的字段', () => {
+  assert.match(viewSource, /value="days_since_restock"/)
   assert.match(viewSource, /value="inventory_value"/)
-  assert.match(viewSource, /value="estimated_turnover_days"/)
-  assert.match(viewSource, /value="high"/)
-  assert.match(viewSource, /value="medium"/)
-  assert.match(viewSource, /value="low"/)
+  assert.match(viewSource, /value="current_qty"/)
+  assert.doesNotMatch(viewSource, /value="clearance_priority_score"/)
+  assert.doesNotMatch(viewSource, /value="age_days"/)
+  assert.doesNotMatch(viewSource, /value="estimated_turnover_days"/)
 })
 
 test('滞销清单分页按 offset 传给后端', () => {
@@ -129,8 +142,10 @@ test('未匹配 ERP 主数据的 SKU 在清单里标出来', () => {
   assert.match(viewSource, />未匹配主数据</)
 })
 
-test('周转哨兵值与最低售价来源都有可读展示', () => {
-  assert.match(viewSource, /const formatTurnoverDays[\s\S]{0,400}?return '无动销'/)
+test('周转哨兵值已彻底移除，最低售价来源仍有可读展示', () => {
+  // 9999 之类的哨兵值连同它专属的格式化函数一起删掉
+  assert.doesNotMatch(viewSource, /formatTurnoverDays/)
+  assert.doesNotMatch(viewSource, /无动销/)
   assert.match(viewSource, /row\.min_selling_price_source/)
   assert.match(viewSource, /const minSellingPriceSourceLabel/)
   assert.match(viewSource, /case 'cost_floor':\s*return '成本底线'/)

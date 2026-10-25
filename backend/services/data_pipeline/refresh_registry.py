@@ -31,7 +31,8 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "mart.inventory_age_history": ["mart.inventory_snapshot_company_daily"],
     "mart.inventory_age_current": ["mart.inventory_age_history"],
     "mart.inventory_current": ["semantic.fact_inventory_snapshot"],
-    "mart.inventory_backlog_base": ["mart.inventory_snapshot_latest", "mart.inventory_snapshot_change", "semantic.fact_orders_atomic"],
+    "mart.inventory_state": ["semantic.fact_inventory_snapshot"],
+    "mart.inventory_backlog_base": ["mart.inventory_snapshot_latest", "mart.inventory_state"],
     "mart.spu_operating_current": ["mart.inventory_age_current"],
     "mart.hr_shop_monthly_profit": ["semantic.fact_orders_atomic"],
     "mart.b_cost_shop_month": ["semantic.fact_orders_atomic"],
@@ -57,7 +58,7 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "api.b_cost_analysis_overview_module": ["mart.b_cost_shop_month"],
     "api.b_cost_analysis_shop_month_module": ["mart.b_cost_shop_month"],
     "api.b_cost_analysis_order_detail_module": ["semantic.fact_orders_atomic"],
-    "api.clearance_ranking_module": ["mart.inventory_backlog_base", "api.inventory_backlog_summary_module"],
+    "api.clearance_ranking_module": ["mart.inventory_backlog_base", "api.inventory_backlog_summary_module", "semantic.fact_orders_atomic"],
 }
 
 SQL_TARGET_PATHS: dict[str, str] = {
@@ -88,6 +89,7 @@ SQL_TARGET_PATHS: dict[str, str] = {
     "mart.inventory_age_history": "sql/mart/inventory_age_history.sql",
     "mart.inventory_age_current": "sql/mart/inventory_age_current.sql",
     "mart.inventory_current": "sql/mart/inventory_current.sql",
+    "mart.inventory_state": "sql/mart/inventory_state.sql",
     "mart.inventory_backlog_base": "sql/mart/inventory_backlog_base.sql",
     "mart.spu_operating_current": "sql/mart/spu_operating_current.sql",
     "mart.b_cost_shop_month": "sql/mart/b_cost_shop_month.sql",

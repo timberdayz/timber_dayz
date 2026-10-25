@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>业务概览 · 滞销模块业务概念重构</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f7f5f0;--card:#fff;--line:#e9e3d6;--line-soft:#f0ebe0;
+ --ink:#14171e;--ink2:#3a4256;--muted:#7c7a72;
+ --primary:#2f6f5e;--p-soft:rgba(47,111,94,.08);
+ --warn:#c97b3f;--w-soft:rgba(201,123,63,.09);
+ --danger:#b06367;--d-soft:rgba(176,99,103,.09);--mono:'JetBrains Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+ font-size:14.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+ background:radial-gradient(760px 380px at 88% -8%,rgba(47,111,94,.055),transparent 62%),
+            radial-gradient(620px 320px at 4% 4%,rgba(201,123,63,.045),transparent 60%)}
+.wrap{position:relative;z-index:1;max-width:1120px;margin:0 auto;padding:64px 28px 96px}
+h1,h2{font-family:'DM Serif Display',Georgia,'Songti SC',serif;font-weight:400;letter-spacing:-.005em}
+h1{font-size:33px;line-height:1.25;margin-bottom:15px}
+h2{font-size:24px;margin-bottom:8px}
+h3{font-size:15.5px;font-weight:600}
+.lede{font-size:16.5px;color:var(--ink2);max-width:76ch}
+.kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;
+ letter-spacing:.13em;text-transform:uppercase;color:var(--primary);margin-bottom:12px}
+.kicker::before{content:"";width:18px;height:2px;background:var(--primary);border-radius:2px}
+.sec{margin-top:54px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px}
+.card+.card{margin-top:14px}
+code{font-family:var(--mono);font-size:12.5px;background:var(--p-soft);color:var(--primary);padding:1px 6px;border-radius:5px}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.t-ok{background:var(--p-soft);color:var(--primary)}
+.t-w{background:var(--w-soft);color:var(--warn)}
+.t-b{background:var(--d-soft);color:var(--danger)}
+.t-n{background:#f0ede6;color:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+ border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:26px}
+.stat{background:var(--card);padding:16px 18px}
+.stat .n{font-family:'DM Serif Display',serif;font-size:23px;line-height:1.2}
+.stat .n small{font-size:14px;color:var(--muted);margin-left:3px}
+.stat .l{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.45}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+ color:var(--muted);padding:0 12px 9px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink2);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td strong{color:var(--ink)}
+td.num,th.num{text-align:right;font-family:var(--mono);font-size:12.5px}
+.callout{border-radius:13px;padding:16px 18px;border:1px solid var(--line);background:var(--card)}
+.callout.w{background:var(--w-soft);border-color:rgba(201,123,63,.32)}
+.callout.o{background:var(--p-soft);border-color:rgba(47,111,94,.28)}
+.callout.b{background:var(--d-soft);border-color:rgba(176,99,103,.3)}
+.callout .ct{font-weight:600;font-size:14px;margin-bottom:5px;display:flex;align-items:center;gap:8px}
+.callout p{font-size:13.5px;color:var(--ink2)}
+.callout p+p{margin-top:8px}
+/* 矩阵 */
+.matrix{display:grid;grid-template-columns:132px repeat(4,1fr);gap:8px;margin-top:6px}
+.mh{font-size:12px;color:var(--muted);display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.35;padding:4px}
+.mhl{font-size:12px;color:var(--muted);display:flex;align-items:center;justify-content:flex-end;text-align:right;
+ padding-right:8px;line-height:1.35}
+.mcell{border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:var(--card);min-height:96px}
+.mcell .mn{font-family:'DM Serif Display',serif;font-size:22px;line-height:1.1}
+.mcell .mn small{font-size:12px;color:var(--muted)}
+.mcell .ml{font-size:12.5px;font-weight:600;margin:4px 0 3px}
+.mcell .ma{font-size:11.5px;color:var(--muted);line-height:1.45}
+.mcell.g{background:rgba(47,111,94,.07);border-color:rgba(47,111,94,.28)}
+.mcell.y{background:rgba(201,123,63,.08);border-color:rgba(201,123,63,.3)}
+.mcell.r{background:rgba(176,99,103,.08);border-color:rgba(176,99,103,.3)}
+.mcell.b{background:rgba(107,125,140,.08);border-color:rgba(107,125,140,.28)}
+.mcell.z{background:#f4f2ec;border-style:dashed}
+ul.plain{list-style:none;padding:0;margin:6px 0 0}
+ul.plain li{padding:5px 0 5px 20px;position:relative;font-size:13.5px;color:var(--ink2)}
+ul.plain li::before{content:"";position:absolute;left:4px;top:13px;width:5px;height:5px;
+ border-radius:50%;background:var(--primary);opacity:.55}
+.figcap{font-size:12.5px;color:var(--muted);margin-top:12px;text-align:center}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.cmp .card{margin:0}
+.old{text-decoration:line-through;color:var(--muted)}
+.kv2{display:grid;gap:0}
+.kv2-row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
+ padding:9px 0;border-bottom:1px dashed var(--line-soft);font-size:13.5px;color:var(--ink2)}
+.kv2-row:last-child{border-bottom:none}
+.kv2-row .mono{font-size:12.5px;color:var(--ink);white-space:nowrap}
+@media(max-width:900px){.wrap{padding:40px 18px 64px}.stats{grid-template-columns:1fr 1fr}
+ h1{font-size:26px}h2{font-size:21px}body{font-size:14px}.cmp{grid-template-columns:1fr}
+ .matrix{grid-template-columns:1fr;gap:6px}
+ .mh,.mhl{justify-content:flex-start;text-align:left;padding:4px 2px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">业务概览 · 滞销模块 · 概念重构</div>
+  <h1>把「一个指标切三刀」<br>换成<em>两个独立指标交叉判断</em></h1>
+  <p class="lede">
+    范围收窄到业务概览的滞销模块后，改造反而更清楚了。现在顶部那三张卡
+    （30天+/60天+/90天+预计周转库存）<strong>是同一个数字切了三刀</strong>，
+    实测三个值完全相同（¥217,787.41 / ¥217,787.41 / ¥217,787.41）。
+    你提的 30天DOS 与 90天DOS 是<strong>两个不同销量窗口算出的两个不同指标</strong>——
+    这才是真正的分档。
+  </p>
+  <div class="stats">
+    <div class="stat"><div class="n">3<small>→ 2</small></div><div class="l">顶部汇总档位<br>假三档 → 真双指标</div></div>
+    <div class="stat"><div class="n">SKU<small>×</small>仓</div><div class="l">DOS 必须是这个粒度<br>妙手销量本就按仓给</div></div>
+    <div class="stat"><div class="n">9<small>格</small></div><div class="l">DOS90 × DOS30 交叉<br>每格一个明确动作</div></div>
+    <div class="stat"><div class="n">3<small>→ 0</small></div><div class="l">去掉不可信列<br>积压天数/快照数/假分数</div></div>
+  </div>
+</header>
+
+<!-- ✅ 2026-10-24 晚间修正：DOS 定位 -->
+<section class="sec" style="margin-top:32px">
+<div class="callout w">
+  <div class="ct"><span class="tag t-w">DOS 定位 · 2026-10-24 晚间修正</span>DOS 降级为参考，不做全域使用</div>
+  <p>采集策略已定：<b>不再全量，只有配置采集 + 增量更新</b>。妙手「近 XX 天销量」是<b>行级存储快照</b>，只在那一行被写入时才刷新，增量批次实测只覆盖 <b>13.6%</b> 的 SKU（151 / 1113）→ <b>DOS 不作判定依据</b>。</p>
+  <p>→ 滞销判据改用<b>库存停滞时长</b>（今天 − 库存最后一次<b>真实变动</b>的时间，由落盘层行内容 diff 维护，不信妙手的时间戳）；DOS 保留在表里<b>作为参考值</b>，并明确标注「参考」。完整取证见 <code>output/dos-freshness-evidence.html</code>。</p>
+</div>
+</section>
+
+<!-- ① 现状诊断 -->
+<section class="sec">
+  <div class="kicker">① 现状诊断</div>
+  <h2>现在这个模块有四处硬伤</h2>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table>
+      <thead><tr><th style="width:20%">位置</th><th style="width:38%">现在</th><th style="width:42%">实测证据</th></tr></thead>
+      <tbody>
+        <tr><td><strong>顶部三档卡</strong></td>
+            <td>30天+ / 60天+ / 90天+ 预计周转库存</td>
+            <td>三者取自<b>同一个</b> <code>estimated_turnover_days</code> 的三个切点；
+                实测值 <b>217787.41 / 217787.41 / 217787.41 完全相同</b>。
+                因为销量取不到（订单域无 miaoshou），全是 9999</td></tr>
+        <tr><td><strong>「预计周转天数」列</strong></td>
+            <td>表格里的核心指标</td>
+            <td>499 行是 9999 哨兵值；risk_level 由此全判 high，
+                <code>clearance_priority_score</code>（含 <code>周转天数×2</code>）直接主导整个排序</td></tr>
+        <tr><td><strong>表格缺仓库列</strong></td>
+            <td>数据本来就是 SKU×仓（1230 行 / 1122 个去重 SKU）</td>
+            <td>同 SKU 跨仓会显示成多行<b>看起来重复</b>，但看不出是哪仓。
+                例：XH-50L-Black-035 同时出现在新加坡、菲律宾3店、菲律宾维修工具三行</td></tr>
+        <tr><td><strong>积压天数相关列</strong></td>
+            <td>「估算积压天数」「连续积压快照数」</td>
+            <td>依赖快照序列，而系统目前<b>只有 2 个快照点</b>，这两个值不可信；
+                DOS 已经能表达「多久卖不动」</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ② 新指标 -->
+<section class="sec">
+  <div class="kicker">② 指标定义</div>
+  <h2>两个 DOS，SKU×仓粒度</h2>
+  <div class="cmp">
+    <div class="card">
+      <h3 style="margin-bottom:8px">DOS30（近期势头）</h3>
+      <p style="font-size:13.5px;color:var(--ink2)">
+        <code>可用库存 ÷ (近30天销量 ÷ 30)</code>
+      </p>
+      <p style="font-size:13px;color:var(--muted);margin-top:8px">
+        回答「按最近一个月的卖法，还能卖多久」。反映当下热度，反应快、噪音大。
+      </p>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:8px">DOS90（中期趋势）</h3>
+      <p style="font-size:13.5px;color:var(--ink2)">
+        <code>可用库存 ÷ (近90天销量 ÷ 90)</code>
+      </p>
+      <p style="font-size:13px;color:var(--muted);margin-top:8px">
+        回答「按一季度的平均卖法，还能卖多久」。稳定、可靠，是判定滞销的主依据。
+      </p>
+    </div>
+  </div>
+
+  <div class="callout o" style="margin-top:14px">
+    <div class="ct">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--primary)"><path d="M20 6 9 17l-5-5"/></svg>
+      为什么必须是 SKU×仓，而不是 SKU
+    </div>
+    <p>妙手给的「近90天销量」<b>本身就是按仓拆的</b>：37 个跨仓 SKU 里有 <b>8 个各仓销量不同</b>。
+    例如 HKR-GNH-Cream 在菲律宾维修工具仓近90天卖 7 件、在新加坡卖 0 件；
+    HKR-LRI9-Squeezer-035 是菲律宾 6 件 / 新加坡 5 件。</p>
+    <p>库存也是按仓的。两个都按仓，DOS 才能按行直接算，<b>不需要跨仓汇总</b>——
+    而汇总恰恰会掩盖「这个 SKU 在 A 仓压死、在 B 仓快断货」的调拨机会。</p>
+  </div>
+
+  <div class="callout w" style="margin-top:14px">
+    <div class="ct">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--warn)"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+      零销量要单独标，不能塞成 9999
+    </div>
+    <p>近90天销量 = 0 且有货的 <b>141 行</b>，DOS 在数学上是无穷大。这类行应当是<b>独立标记</b>（"零销量"），
+    而不是伪装成一个巨大的天数——现在的 9999 就是这么来的，它把全部 499 行有货商品都染成了 high 风险。</p>
+  </div>
+</section>
+
+<!-- ③ 交叉矩阵 -->
+<section class="sec">
+  <div class="kicker">③ 核心 · 二维交叉</div>
+  <h2>两个 DOS 交叉，每格给一个明确动作</h2>
+  <p class="lede" style="margin-bottom:18px">
+    现在的「风险等级」是单指标三档，丢掉了最重要的信息：<strong>两个窗口的差异本身就是信号</strong>。
+    DOS30 明显低于 DOS90 = 销量在回升；DOS30 明显高于 DOS90 = 销量在下滑。
+  </p>
+  <div class="card">
+    <div class="matrix">
+      <div class="mh"></div>
+      <div class="mh">DOS30 &lt; 30<br><span style="font-size:11px">卖得快</span></div>
+      <div class="mh">DOS30 30~90<br><span style="font-size:11px">正常</span></div>
+      <div class="mh">DOS30 &gt; 90<br><span style="font-size:11px">卖得慢</span></div>
+      <div class="mh">DOS30 零销量<br><span style="font-size:11px">近30天没动</span></div>
+
+      <div class="mhl">DOS90 &lt; 90<br><span style="font-size:11px">中期健康</span></div>
+      <div class="mcell g"><div class="mn">38</div><div class="ml">正常</div><div class="ma">卖得动，库存充足。不用管</div></div>
+      <div class="mcell g"><div class="mn">48</div><div class="ml">正常</div><div class="ma">稳定经营中</div></div>
+      <div class="mcell y"><div class="mn">25</div><div class="ml">在变慢 ⚠</div><div class="ma">原本好卖、最近慢了。<b>滞销前兆，要盯</b></div></div>
+      <div class="mcell y"><div class="mn">5</div><div class="ml">短期停摆</div><div class="ma">90天还好、近30天没动。看是不是断货了</div></div>
+
+      <div class="mhl">DOS90 90~180<br><span style="font-size:11px">中期偏慢</span></div>
+      <div class="mcell z"><div class="mn">0</div><div class="ml">（空档）</div><div class="ma">中期偏慢但近期卖得动——当前数据里没有这一类</div></div>
+      <div class="mcell y"><div class="mn">23</div><div class="ml">偏慢</div><div class="ma">周转已经慢下来，库存开始压</div></div>
+      <div class="mcell r"><div class="mn">53</div><div class="ml">稳定滞销</div><div class="ma">两个窗口都慢。<b>可以清仓</b></div></div>
+      <div class="mcell r"><div class="mn">16</div><div class="ml">已停售</div><div class="ma">近30天完全没动，滞销已定型</div></div>
+
+      <div class="mhl">DOS90 &gt; 180<br><span style="font-size:11px">中期积压</span></div>
+      <div class="mcell z"><div class="mn">0</div><div class="ml">（空档）</div><div class="ma">压着但最近好卖——罕见，值得单独看</div></div>
+      <div class="mcell y"><div class="mn">12</div><div class="ml">回升中 💡</div><div class="ma">压得久但最近在起量。<b>别急着清，先推一推</b></div></div>
+      <div class="mcell r"><div class="mn">99</div><div class="ml">压死货</div><div class="ma">两个窗口都慢且压得深。<b>清仓首选</b></div></div>
+      <div class="mcell r"><div class="mn">53</div><div class="ml">压死且停售</div><div class="ma">最该处理的一批</div></div>
+
+      <div class="mhl">近90天零销量</div>
+      <div class="mcell z" style="grid-column:2 / span 4"><div class="mn">141</div><div class="ml">真滞销（DOS 无穷）</div>
+        <div class="ma">有货但近90天一件没卖。<b>不是"算不出来"，是明确判定为滞销</b>——独立成一类，不要混进数值</div></div>
+    </div>
+    <p class="figcap">数字为 file 3004 实测（1113 行中有货 513 行；141 行零销量单独计）｜ 颜色：绿=正常 黄=需关注 红=该处理</p>
+  </div>
+
+  <div class="callout o" style="margin-top:14px">
+    <div class="ct">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--primary)"><path d="M20 6 9 17l-5-5"/></svg>
+      交叉矩阵比单指标多出来的价值
+    </div>
+    <p><b>「回升中」那 12 行</b>（DOS90&gt;180 但 DOS30 在 30~90）——它们滞销指标很高，
+    单看 90 天会被判成"压死货"直接清掉；加上 30 天窗口才发现<b>销量其实在回升</b>，
+    清掉就错��。<b>「在变慢」那 25 行</b>同理，是还没成滞销的前兆，现在能提前看到。</p>
+    <p>这两个名单用现在的单指标体系<b>一个都给不出来</b>。</p>
+  </div>
+</section>
+
+<!-- ④ 表格 -->
+<section class="sec">
+  <div class="kicker">④ 表格改造</div>
+  <h2>列的取舍</h2>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table>
+      <thead><tr><th style="width:22%">列</th><th style="width:14%">处理</th><th style="width:64%">理由</th></tr></thead>
+      <tbody>
+        <tr><td>排名 / 产品名称 / SKU</td><td><span class="tag t-n">保留</span></td><td>不变</td></tr>
+        <tr><td><strong>仓库</strong></td><td><span class="tag t-ok">新增</span></td>
+            <td>数据本来就是 SKU×仓，但没有这一列，同 SKU 跨仓显示成"重复行"。
+                加了之后调拨机会才看得出来</td></tr>
+        <tr><td>可用库存</td><td><span class="tag t-n">保留</span></td><td>不变</td></tr>
+        <tr><td><strong>DOS30</strong></td><td><span class="tag t-ok">新增</span></td><td>近期势头</td></tr>
+        <tr><td><strong>DOS90</strong></td><td><span class="tag t-ok">替换</span></td>
+            <td>替换掉「预计周转天数」（现在全是 9999 哨兵）</td></tr>
+        <tr><td><strong>近90天销量</strong></td><td><span class="tag t-ok">新增</span></td>
+            <td>DOS 的分子来源，零销量时显示"零销量"而不是空白</td></tr>
+        <tr><td><strong>滞销状态</strong></td><td><span class="tag t-ok">新增</span></td>
+            <td>交叉矩阵那 9 格的结论标签：正常 / 在变慢 / 偏慢 / 稳定滞销 / 回升中 / 压死货 / 零销量</td></tr>
+        <tr><td>积压价值</td><td><span class="tag t-n">保留</span></td><td>不变</td></tr>
+        <tr><td>风险等级（high/medium/low）</td><td><span class="tag t-b">去掉</span></td>
+            <td>单指标三档，信息量低于新的状态标签，且现在被 9999 污染</td></tr>
+        <tr><td>清理优先级（分数）</td><td><span class="tag t-b">去掉</span></td>
+            <td>公式含 9999 哨兵，主导排序却不可解释。改成<b>按 DOS90 降序、同档按货值降序</b>——可解释</td></tr>
+        <tr><td>估算积压天数 / 连续积压快照数</td><td><span class="tag t-b">去掉</span></td>
+            <td>依赖快照序列，当前只有 2 个快照点，值不可信；DOS 已覆盖其表达意图</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ⑤ 汇总卡 -->
+<section class="sec">
+  <div class="kicker">⑤ 顶部汇总卡</div>
+  <h2>从「假三档」到「真双指标 + 结构分解」</h2>
+  <div class="cmp">
+    <div class="card">
+      <h3 style="margin-bottom:12px;color:var(--muted);font-size:13px">现在</h3>
+      <div class="kv2">
+        <div class="kv2-row"><span>总库存价值</span><span class="mono">¥217,907.41</span></div>
+        <div class="kv2-row old"><span>30天+预计周转库存</span><span class="mono">¥217,787.41</span></div>
+        <div class="kv2-row old"><span>60天+预计周转库存</span><span class="mono">¥217,787.41</span></div>
+        <div class="kv2-row old"><span>90天+预计周转库存</span><span class="mono">¥217,787.41</span></div>
+      </div>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:12px">三个数一样，且把正常的货也算进去了</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:12px;color:var(--primary);font-size:13px">建议</h3>
+      <div class="kv2">
+        <div class="kv2-row"><span>总库存价值</span><span class="mono">¥227,200.57</span></div>
+        <div class="kv2-row"><span><b>滞销货值</b>（DOS90&gt;180）</span><span class="mono">¥96,079.61</span></div>
+        <div class="kv2-row"><span><b>零销量积压货值</b></span><span class="mono">¥36,477.36</span></div>
+        <div class="kv2-row"><span><b>滞销货值占比</b></span><span class="mono">58.3%</span></div>
+      </div>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:12px">四张卡各自独立、不重复，且都是真实可解释的口径</p>
+    </div>
+  </div>
+  <div class="callout w" style="margin-top:14px">
+    <div class="ct">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--warn)"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+      「60天+」那一张卡去掉了
+    </div>
+    <p>它是同一个数字的中间切点，在 DOS 双指标体系里没有对应物——
+    如果保留，会让人以为存在一个"60天档"，实际并不存在。</p>
+  </div>
+</section>
+
+<!-- ⑥ 待定 -->
+<section class="sec">
+  <div class="kicker">⑥ 待定</div>
+  <h2>三个需要你拍板的口径</h2>
+  <div class="card">
+    <ul class="plain">
+      <li><b>分档阈值</b> —— 上面用的是 30 / 90 / 180。DOS30&lt;30 是"要断货"、
+        DOS30 30~90 是"正常"，但 30 这条线直接决定「在变慢」那 25 行和「回升中」那 12 行的归属，
+        阈值挪一格名单就变。<b>这三个刻度需要按西虹实际的备货周期定。</b></li>
+      <li><b>库存口径：可用库存还是库存总量</b> —— 建议用<b>可用库存</b>（残次/暂存/预占卖不掉，
+        不该算进还能卖几天）。实测两者差异很小（47 行不同，可用库存占 99.4%），
+        但用可用库存在概念上更站得住。</li>
+      <li><b>「要断货」要不要进这个模块</b> —— DOS30&lt;30 的 32 行是<b>补货</b>信号，不是滞销信号。
+        按你"仅围绕滞销模块"的范围，我倾向<b>不放进滞销榜</b>，
+        只在顶部汇总卡加一张"待断货货值"提示，或者另开模块。<b>这样滞销榜才保持干净。</b></li>
+    </ul>
+  </div>
+</section>
+
+</div>
+</body>
+</html>
