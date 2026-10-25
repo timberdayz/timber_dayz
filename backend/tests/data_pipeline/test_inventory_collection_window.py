@@ -15,6 +15,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from backend.services.collection_contracts import (
+    INCREMENTAL_RANGE_KEY,
+    normalize_collection_date_range,
+)
 from backend.services.inventory.inventory_collection_window_service import (
     REASON_CUSTOM,
     REASON_FAILED_BACKFILL,
@@ -25,6 +29,7 @@ from backend.services.inventory.inventory_collection_window_service import (
     compute_collection_window,
     load_collection_watermark,
     load_last_failed_run_start,
+    resolve_incremental_range,
 )
 
 NOW = datetime(2026, 10, 25, 9, 0, tzinfo=timezone.utc)
@@ -262,3 +267,79 @@ async def test_last_failed_run_start_is_none_when_every_run_succeeded():
     value = await load_last_failed_run_start(session, 42)
 
     assert value is None
+
+
+# ----------------------------------------------------------------------
+# 接入链：决策 → 任务 date_range → 执行器 params
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resolve_incremental_range_uses_the_watermark_window():
+    """没有显式区间 → 用水位线窗口（运营零操作）。"""
+    session = _FakeSession(["mart.inventory_state", datetime(2026, 10, 24, 8, 0)])
+
+    result = await resolve_incremental_range(session, platform_code="miaoshou")
+
+    assert result is not None
+    assert result["reason"] == "watermark"
+    assert result["start"].startswith("2026-10-23")
+    assert result["end"].startswith("2026-10-25")
+
+
+@pytest.mark.asyncio
+async def test_resolve_incremental_range_prefers_the_operator_range():
+    """运营显式指定了区间 → 用它，不看水位线。"""
+    session = _FakeSession([])
+
+    result = await resolve_incremental_range(
+        session,
+        platform_code="miaoshou",
+        custom_range={"start": "2026-09-01 00:00:00", "end": "2026-09-30 23:59:59"},
+    )
+
+    assert result == {
+        "start": "2026-09-01 00:00:00",
+        "end": "2026-09-30 23:59:59",
+        "reason": "custom",
+        "gap_days": 0,
+    }
+    # custom 优先时**根本不该**去读水位线
+    assert session.executed == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_incremental_range_returns_none_without_watermark():
+    """没有水位线（首次采集）→ 不设筛选，导全量建基线。"""
+    session = _FakeSession([None])
+
+    result = await resolve_incremental_range(session, platform_code="shopee")
+
+    assert result is None
+
+
+def test_incremental_range_key_survives_date_range_normalization():
+    """任务区间是所有数据域共享的 → 库存窗口必须走**专用键**透传，不能动共享区间。"""
+    window = {"start": "2026-10-23 00:00:00", "end": "2026-10-25 23:59:59"}
+    normalized = normalize_collection_date_range(
+        {
+            "time_selection": {"mode": "preset", "preset": "yesterday"},
+            "date_from": "2026-10-24",
+            "date_to": "2026-10-25",
+            INCREMENTAL_RANGE_KEY: window,
+        }
+    )
+
+    assert normalized[INCREMENTAL_RANGE_KEY] == window
+    # 共享区间仍由 time_selection 决定 → 订单域完全不受影响
+    assert normalized["time_selection"]["mode"] == "preset"
+    assert normalized["date_from"] == normalized["date_to"]
+
+
+def test_incremental_range_key_is_absent_when_not_resolved():
+    """没解出窗口时不能凭空造一个键。"""
+    normalized = normalize_collection_date_range(
+        {"time_selection": {"mode": "preset", "preset": "yesterday"}}
+    )
+
+    assert INCREMENTAL_RANGE_KEY not in normalized

@@ -46,8 +46,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -86,6 +86,19 @@ def _shift(moment: datetime, days: int) -> datetime:
     return moment - timedelta(days=days)
 
 
+def _as_aware(moment: Optional[datetime]) -> Optional[datetime]:
+    """统一时区：naive 当 UTC 处理。
+
+    水位线来自 DB、``now`` 来自应用时钟，两边的 tzinfo 未必一致；
+    直接相减会抛 ``can't subtract offset-naive and offset-aware datetimes``。
+    """
+    if moment is None:
+        return None
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=timezone.utc)
+    return moment
+
+
 def _compute_auto_window(
     *,
     now: datetime,
@@ -101,6 +114,9 @@ def _compute_auto_window(
     """
     reasons: list[str] = []
     gap_days = 0
+    now = _as_aware(now)
+    watermark = _as_aware(watermark)
+    last_failed_start = _as_aware(last_failed_start)
 
     if watermark is None:
         # 从没采过 → 没有水位线可接，先采一段长窗口把基线铺出来
@@ -207,6 +223,52 @@ async def load_collection_watermark(
         return None
 
     return value if isinstance(value, datetime) else None
+
+
+async def resolve_incremental_range(
+    db: AsyncSession,
+    *,
+    platform_code: str,
+    custom_range: Optional[dict[str, Any]] = None,
+    config_id: Optional[int] = None,
+    now: Optional[datetime] = None,
+) -> Optional[dict[str, Any]]:
+    """决定库存增量采集这一次按哪个区间筛。
+
+    规则（2026-10-25 定案，运营零操作）：
+    1. **运营显式指定了区间** → 用它（一次性补数 / 指定窗口都走这条）
+    2. **没有水位线**（状态层还没有这个平台）→ 返回 None = **不设筛选，导全量建基线**
+       （与今天的全量行为一致，不会因为接了增量就丢掉基线）
+    3. 否则 → 水位线窗口（+ 断档补采 + 失败期覆盖）
+
+    返回 None = 不设筛选；否则返回
+    ``{"start": "YYYY-MM-DD HH:MM:SS", "end": ..., "reason": ..., "gap_days": ...}``
+    """
+    if custom_range:
+        start = str(custom_range.get("start") or "").strip()
+        end = str(custom_range.get("end") or "").strip()
+        if start and end:
+            return {"start": start, "end": end, "reason": "custom", "gap_days": 0}
+
+    watermark = await load_collection_watermark(db, platform_code)
+    if watermark is None:
+        return None
+
+    last_failed_start = None
+    if config_id is not None:
+        last_failed_start = await load_last_failed_run_start(db, config_id)
+
+    window = compute_collection_window(
+        now=now or datetime.now(timezone.utc),
+        watermark=watermark,
+        last_failed_start=last_failed_start,
+    )
+    return {
+        "start": window.start.strftime("%Y-%m-%d %H:%M:%S"),
+        "end": window.end.strftime("%Y-%m-%d %H:%M:%S"),
+        "reason": window.reason,
+        "gap_days": window.gap_days,
+    }
 
 
 async def load_last_failed_run_start(

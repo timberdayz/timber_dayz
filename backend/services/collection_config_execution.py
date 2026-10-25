@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.services.collection_contracts import (
+    INCREMENTAL_RANGE_KEY,
     build_date_range_from_time_selection,
     build_execution_time_selection,
     count_collection_targets,
@@ -31,6 +32,9 @@ from modules.core.db import (
 )
 from modules.core.logger import get_logger
 from backend.services.collection_task_status import ACTIVE_STATUSES
+from backend.services.inventory.inventory_collection_window_service import (
+    resolve_incremental_range,
+)
 
 
 logger = get_logger(__name__)
@@ -90,6 +94,59 @@ async def _resolve_runnable_scope_runtime(
         },
         skipped_targets,
     )
+
+
+async def _resolve_inventory_incremental_range(
+    db: AsyncSession,
+    *,
+    platform: str,
+    data_domains: List[str],
+    time_selection: Dict[str, Any],
+    config_id: int,
+    now: Optional[datetime],
+) -> Optional[Dict[str, Any]]:
+    """库存域这一次的采集窗口（只对含 inventory 的妙手任务生效）。
+
+    运营显式指定的区间优先；否则用状态层水位线算增量窗口；
+    没有水位线（首次采集）→ 返回 None = 不设筛选，导全量建基线。
+    """
+    if "inventory" not in (data_domains or []):
+        return None
+    if str(platform or "").lower() != "miaoshou":
+        return None
+
+    custom_range = None
+    if str((time_selection or {}).get("mode") or "").strip().lower() == "custom":
+        start_date = str((time_selection or {}).get("start_date") or "").strip()
+        end_date = str((time_selection or {}).get("end_date") or "").strip()
+        if start_date and end_date:
+            custom_range = {
+                "start": (
+                    f"{start_date} "
+                    f"{str((time_selection or {}).get('start_time') or '00:00:00')}"
+                ),
+                "end": (
+                    f"{end_date} "
+                    f"{str((time_selection or {}).get('end_time') or '23:59:59')}"
+                ),
+            }
+
+    resolved = await resolve_incremental_range(
+        db,
+        platform_code=str(platform or ""),
+        custom_range=custom_range,
+        config_id=config_id,
+        now=now,
+    )
+    if resolved:
+        logger.info(
+            "Config %s inventory incremental window: %s -> %s (%s)",
+            config_id,
+            resolved.get("start"),
+            resolved.get("end"),
+            resolved.get("reason"),
+        )
+    return resolved
 
 
 async def create_tasks_for_config(
@@ -166,6 +223,19 @@ async def create_tasks_for_config(
         normalized_date_range,
         granularity=effective_granularity,
     )
+
+    # 库存域接水位线增量窗口（方案 C：全自动，运营零操作）。
+    # 走**专用键**而不是改任务共享的日期区间 → 订单/采购域完全不受影响。
+    incremental_range = await _resolve_inventory_incremental_range(
+        db,
+        platform=config.platform,
+        data_domains=list(config.data_domains or []),
+        time_selection=time_selection,
+        config_id=config_id,
+        now=time_window_now,
+    )
+    if incremental_range:
+        normalized_date_range[INCREMENTAL_RANGE_KEY] = incremental_range
 
     created_tasks: List[CollectionTask] = []
     for scope in scope_rows:
