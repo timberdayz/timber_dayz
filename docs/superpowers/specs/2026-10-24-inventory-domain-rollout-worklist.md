@@ -366,7 +366,9 @@ DOS 只作参考；库龄保留为生命周期视角。
 | **B4-4 SKU 级清单链** | ✅ 视图（改判据、补 `available_stock > 0`）+ service + schema + 路由 + API 参数 + 前端全部换口径；落地时挖出 4 个真问题，见 §8.10.2 |
 | **W7 商品中心** | ✅ 列名 `min_age_days` → `min_restock_days`（**门槛 0/60/90/120、折扣率、目标毛利一律不动**）；`select_age_tier` → `select_restock_tier`；取数从库龄换成「距上次进货天数」；「缺料兜底」按 C 保留现状（§8.9.4） |
 | **指标词典** | ✅ `inventory_stall_days` → `days_since_restock`；三个**已不存在**的 `inventory_backlog_*_value` 换成真实存在的四个键；两份副本 7/7 SHA256 一致 |
-| **B1 / B3 / B5** | ⬜ 见 §3 与增量设计稿 §4 / §6 |
+| **B1 增量筛选组件** | ✅ 新组件 + 编排改造 + 行为测试（11 passed）；**真实页面复验待 Walter 跑**，见 §8.11.1 |
+| **B3 水位线与断档补采** | ✅ 窗口计算（纯函数）+ 水位线/失败期取数 + 测试（15 passed）；接进采集执行链待做，见 §8.11.3 |
+| **B5 下架探测** | ⬜ Walter 的需求描述里没有下架检测，属「商品中心自动化待拍板」那批 |
 
 ### 8.8 判据口径修正（2026-10-25 已落地）
 
@@ -519,4 +521,65 @@ DOS 只作参考；库龄保留为生命周期视角。
   - data_pipeline **25 failed / 442 passed** —— 与 HEAD 基线**逐条一致，零回归**
   - 定价护栏 10 failed + 10 errors、飞书通知 1 failed + 1 error —— 均为既有 asyncpg fixture 问题（`different loop`），与本项目无关
   - 库存相关 31 passed / 商品中心 83 passed / SKU 滞销清单 20 passed / 前端 inventoryAging 17 passed
+
+### 8.11 2026-10-25 晚间：B1（增量筛选组件）+ B3（水位线与断档补采）落地
+
+#### 8.11.1 B1 · 增量筛选组件
+
+新增 `modules/platforms/miaoshou/components/inventory_date_filter.py`：
+把仓库清单的筛选器设成「更新时间维度 + 自定义区间」，并交出**三类可断言的落地证据**：
+
+| 证据 | 判据 | 挡住哪种静默失败 |
+|---|---|---|
+| 维度 | 维度下拉的 `modelvaluegroup` 以 `gmtModified` 开头 | **维度没切**（默认「创建时间」：同区间 3 个 SKU vs 按更新时间 147 个） |
+| 区间 | 点完「确定」后筛选器根的 `modelvaluegroup` 含目标起止时间 | **「确定」没点**（区间填了没提交，筛选器还是旧值） |
+| 结果 | 搜索后「SKU总数」> 0 且不超过筛选前 | **搜索没刷新** / 筛选把范围清空 |
+
+- 「确定」= `button.jx-picker-panel__link-btn.is-plain`，「清空」= `...is-text`
+  → **必须用完整 class 区分**，只匹配 `is-plain` 会误点「清空」（第三种静默失败）。
+- 编排：新增 `MiaoshouInventoryIncrementalMixin`，把「搜索前设筛选 + 搜索后断言刷新」接进
+  `MiaoshouInventoryExport`。**没配 `ctx.config["inventory_incremental_range"]` 就整段跳过**
+  → 全量采集场景行为完全不变。
+- 行为测试 `backend/tests/test_miaoshou_inventory_date_filter.py`（11 项）：三条静默失败 +
+  确定/清空防呆 + 计数断言（空结果 / 反而变多 / 读不到）。
+
+> ⚠️ **未做真实页面复验**：断言逻辑有单测守住，但选择器与「维度下拉」的交互必须在
+> **真实妙手页面**上验一次 —— 这正是 §4 排期里 B1 标注的「需真实页面复验」风险。
+> 复验通过前，增量模式**不要上线**。
+
+#### 8.11.2 B3 · 水位线与断档补采
+
+新增 `backend/services/inventory/inventory_collection_window_service.py`。
+
+**水位线不另建表** = 该平台 `mart.inventory_state` 的 `MAX(row_seen_at)`：
+- 用**我方采集时钟**：妙手时间戳会被一次 bulk UPDATE 戳穿（535 行 / 43.7%），
+  拿它当水位线会**跳过整段真实变更**
+- 不建表的另一个好处：水位线**随状态层 upsert 天然推进**，不需要额外的写路径
+
+**窗口计算（纯函数）**：
+
+| 情形 | 窗口 | 理由 |
+|---|---|---|
+| 配置了 custom 区间 | **原样使用**（不裁剪、不回填） | custom 是**一次性补数**，用户意图最高 |
+| 未配置（自动推进） | `[水位线 − 重叠余量, now]` | 从上次采到的地方接着采 |
+| 断档（距今 > 阈值） | 起点再向前拉到 `now − 长窗口天数` | 断档越久，水位线精度越不可信 |
+| 上一批失败 | 起点向前拉到失败批次起点 | 失败期不能漏 |
+
+「长窗口补采」是**下限**，不是收窄：窗口起点 = `min(水位线 − 重叠余量, now − 长窗口天数)`。
+水位线比长窗口更久 → **以水位线为准** —— 收窄 = 跳过中间那几天 = 静默漏采，
+是这个模块最不能犯的错。
+
+失败期覆盖复用既有 `core.collection_config_runs`（有 `status` / `started_at`），
+**不需要新建水位线表**。
+
+测试 `backend/tests/data_pipeline/test_inventory_collection_window.py`（15 项）。
+
+#### 8.11.3 还没做的（下一轮）
+
+| 项 | 为什么没做 |
+|---|---|
+| 把窗口计算接进采集执行链 | 采集链已有 `date_range_type` 的 `dynamic:` 策略体系（`backend/services/collection_contracts.py`），接进去要先定「auto」策略怎么表达 —— **不能另起一套并行机制**（PRE_LAUNCH_RULES：禁止新增重复实现） |
+| B1 真实页面复验 | 需要真实妙手环境（Walter 自己跑） |
+| B5 零库存宽限期（下架探测） | Walter 的需求描述里没有下架检测；属「商品中心自动化待拍板」那批 |
+
 

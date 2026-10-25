@@ -158,6 +158,55 @@ WAREHOUSE_SCOPE_FULL_SELECT_HEADER_SELECTOR: Final[str] = (
 WAREHOUSE_SCOPE_CHECKBOX_INPUT_SELECTOR: Final[str] = ".jx-checkbox__original"
 
 
+# ── B1 增量采集：仓库清单「更新时间维度 + 自定义区间」筛选 ─────────────
+# 取证来源：2026-10-25 真实页面取证（CDP 探针）。
+#
+# ⚠️ 妙手这里有**三处静默失败**：维度没切、「确定」没点、搜索没刷新，
+#    页面都照常显示、不报错，只会安静地给你错数据。
+#    → 每一步都必须断言落地证据（见 inventory_date_filter.py）。
+#
+# 筛选器面板：点开「更新时间 / 创建时间」下拉后出现的面板
+INVENTORY_DATE_FILTER_PANEL_SELECTOR: Final[str] = ".jx-picker-panel"
+# 维度下拉（面板内的 jx-select）：它的 modelvaluegroup = 维度键
+INVENTORY_DATE_FILTER_DIMENSION_SELECT_SELECTOR: Final[str] = (
+    ".jx-picker-panel .jx-select"
+)
+# 维度键：妙手只有两项 —— 创建时间 gmtCreate / 更新时间 gmtModified
+# ⚠️ 维度选错是静默失败：同一区间按更新时间 147 个 SKU，按创建时间只有 3 个
+INVENTORY_DATE_FILTER_DIMENSION_MODIFIED: Final[str] = "gmtModified"
+INVENTORY_DATE_FILTER_DIMENSION_CREATE: Final[str] = "gmtCreate"
+INVENTORY_DATE_FILTER_DIMENSION_MODIFIED_LABEL: Final[str] = "更新时间"
+INVENTORY_DATE_FILTER_DIMENSION_CREATE_LABEL: Final[str] = "创建时间"
+# 维度下拉里的选项
+INVENTORY_DATE_FILTER_DIMENSION_OPTION_SELECTOR: Final[str] = (
+    ".jx-picker-panel .jx-select-dropdown li"
+)
+# 区间输入框（datetimerange 的两个 range input）
+INVENTORY_DATE_FILTER_RANGE_INPUT_SELECTOR: Final[str] = (
+    ".jx-picker-panel input.jx-range-input"
+)
+# 「确定」= link-btn + is-plain；「清空」= link-btn + is-text
+# ⚠️ **必须用完整 class 区分**，只匹配 is-plain 会误点「清空」，把区间清成空
+INVENTORY_DATE_FILTER_CONFIRM_SELECTOR: Final[str] = (
+    "button.jx-picker-panel__link-btn.is-plain"
+)
+INVENTORY_DATE_FILTER_CLEAR_SELECTOR: Final[str] = (
+    "button.jx-picker-panel__link-btn.is-text"
+)
+# 已应用筛选值的读取口：modelvaluegroup 属性
+# ⚠️ 与仓库筛选同一个属性名，但读的是**不同节点**：
+#    维度下拉上的是维度键（gmtModified…），筛选器根上的是已应用的区间
+INVENTORY_DATE_FILTER_VALUE_ATTR: Final[str] = "modelvaluegroup"
+# 筛选器根节点的候选（按证据强度排序，第一个取得到就用）
+INVENTORY_DATE_FILTER_ROOT_SELECTORS: Final[Tuple[str, ...]] = (
+    "[data-field='gmtModified']",
+    "[data-field='gmtCreate']",
+    ".jx-picker-panel",
+)
+# 结果计数文本（断言「搜索确实刷新了」）
+INVENTORY_DATE_FILTER_SKU_TOTAL_TEXT: Final[str] = "SKU总数"
+
+
 @dataclass(frozen=True)
 class InventorySelectors:
     base_url: str = BASE_URL
@@ -190,3 +239,31 @@ class InventorySelectors:
     warehouse_scope_checkbox_input_selector: str = (
         WAREHOUSE_SCOPE_CHECKBOX_INPUT_SELECTOR
     )
+    # ── B1 增量采集筛选器 ──
+    inventory_date_filter_panel_selector: str = INVENTORY_DATE_FILTER_PANEL_SELECTOR
+    inventory_date_filter_dimension_select_selector: str = (
+        INVENTORY_DATE_FILTER_DIMENSION_SELECT_SELECTOR
+    )
+    inventory_date_filter_dimension_modified: str = (
+        INVENTORY_DATE_FILTER_DIMENSION_MODIFIED
+    )
+    inventory_date_filter_dimension_create: str = INVENTORY_DATE_FILTER_DIMENSION_CREATE
+    inventory_date_filter_dimension_modified_label: str = (
+        INVENTORY_DATE_FILTER_DIMENSION_MODIFIED_LABEL
+    )
+    inventory_date_filter_dimension_create_label: str = (
+        INVENTORY_DATE_FILTER_DIMENSION_CREATE_LABEL
+    )
+    inventory_date_filter_dimension_option_selector: str = (
+        INVENTORY_DATE_FILTER_DIMENSION_OPTION_SELECTOR
+    )
+    inventory_date_filter_range_input_selector: str = (
+        INVENTORY_DATE_FILTER_RANGE_INPUT_SELECTOR
+    )
+    inventory_date_filter_confirm_selector: str = INVENTORY_DATE_FILTER_CONFIRM_SELECTOR
+    inventory_date_filter_clear_selector: str = INVENTORY_DATE_FILTER_CLEAR_SELECTOR
+    inventory_date_filter_value_attr: str = INVENTORY_DATE_FILTER_VALUE_ATTR
+    inventory_date_filter_root_selectors: Tuple[str, ...] = (
+        INVENTORY_DATE_FILTER_ROOT_SELECTORS
+    )
+    inventory_date_filter_sku_total_text: str = INVENTORY_DATE_FILTER_SKU_TOTAL_TEXT

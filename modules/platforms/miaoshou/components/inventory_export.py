@@ -24,6 +24,13 @@ from modules.components.structured_error import (
     build_stage_error_message,
 )
 from modules.platforms.miaoshou.components.inventory_config import InventorySelectors
+from modules.platforms.miaoshou.components.inventory_date_filter import (
+    MiaoshouInventoryDateFilter,
+)
+from modules.platforms.miaoshou.components.inventory_incremental_mixin import (
+    SIGNAL_SEARCH_BUTTON,
+    MiaoshouInventoryIncrementalMixin,
+)
 from modules.platforms.miaoshou.components.navigation import MiaoshouNavigation
 from modules.platforms.miaoshou.components.warehouse_filters import (
     MiaoshouWarehouseFilters,
@@ -35,7 +42,6 @@ from modules.utils.path_sanitizer import build_filename
 SIGNAL_NAVIGATION_ROUTE = "warehouse_checklist_route"
 SIGNAL_POPUP_CLOSE = "popup_close_buttons"
 SIGNAL_WAREHOUSE_SCOPE = "warehouse_scope_select"
-SIGNAL_SEARCH_BUTTON = "role:button:搜索"
 SIGNAL_EXPORT_DIALOG = "选择导出字段"
 SIGNAL_EXPORT_DOWNLOAD = "page.expect_download"
 
@@ -234,7 +240,7 @@ async def _wait_download_or_pageerror(
     raise RuntimeError(_format_pageerror_message(pageerror_payload[0]))
 
 
-class MiaoshouInventoryExport(ExportComponent):
+class MiaoshouInventoryExport(MiaoshouInventoryIncrementalMixin, ExportComponent):
     platform = "miaoshou"
     component_type = "export"
     data_domain = "inventory"
@@ -254,6 +260,7 @@ class MiaoshouInventoryExport(ExportComponent):
         self.sel = selectors or InventorySelectors()
         self.navigation_component = MiaoshouNavigation(ctx, self.sel)
         self.warehouse_filters_component = MiaoshouWarehouseFilters(ctx, self.sel)
+        self.date_filter_component = MiaoshouInventoryDateFilter(ctx, self.sel)
         # 当前阶段名：失败时用它给步骤日志一个准确的 step_id
         self._current_stage = self.STAGE_NAVIGATION_READY
         # 阶段失败时已经落盘的截图（避免 run() 结束时重复截图）
@@ -499,9 +506,11 @@ class MiaoshouInventoryExport(ExportComponent):
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         self._failure_screenshot = None
+        self._sku_total_before = None
         try:
             await self._navigate_to_warehouse_checklist(page)
             await self._select_warehouse_scope(page)
+            await self._apply_incremental_date_filter(page)
             await self._search_and_wait(page)
             await self._open_export_dialog_and_select_all(page)
             target = await self._export_and_save(page)
@@ -601,6 +610,7 @@ class MiaoshouInventoryExport(ExportComponent):
         try:
             await self._click_search(page)
             await self._wait_search_results_ready(page)
+            await self._assert_search_refreshed(page)
         except Exception as e:
             error = await self._stage_error(
                 page,

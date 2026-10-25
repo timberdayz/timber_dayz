@@ -66,6 +66,107 @@ _SELECT_COLUMNS = """
 """
 
 
+def _resolve_pricing(
+    row: dict,
+    *,
+    pricing_inputs: dict[int, dict],
+    policy_rows: list[dict],
+    deepest_policy: Optional[dict],
+    platform: Optional[DimPlatform],
+    days_since_restock: Optional[int],
+    pricing_matched: bool,
+) -> tuple[dict, Optional[float]]:
+    """算出一行的定价字段与目标利润率。
+
+    未匹配 ERP 主数据的 SKU：定价字段整体留空（spec §3.6）。
+    这类 SKU 在视图里 LEFT JOIN 出来的采购成本/参考售价本来就是 NULL，
+    硬算也只会得到一个「看起来能定价、其实没主数据支撑」的数字。
+    """
+    if not pricing_matched:
+        return (
+            {
+                "pricing_tier_label": None,
+                "current_discount_rate": None,
+                "clearance_max_discount_rate": None,
+                "min_selling_price": None,
+                "min_selling_price_source": "unavailable",
+            },
+            None,
+        )
+
+    policy = select_restock_tier(policy_rows, days_since_restock)
+    inputs = pricing_inputs.get(int(row.get("sku_id")), {})
+    pricing = compute_sku_pricing(
+        purchase_cost=row.get("default_purchase_cost"),
+        reference_selling_price=row.get("reference_selling_price"),
+        creator_commission_rate=inputs.get("creator_commission_rate"),
+        platform_creator_commission_rate=(
+            platform.default_creator_commission_rate if platform else None
+        ),
+        other_cost_rate=platform.other_cost_rate if platform else None,
+        spu_bound=bool(inputs.get("spu_bound")),
+        spu_return_loss_rate=inputs.get("spu_return_loss_rate"),
+        spu_damage_rate=inputs.get("spu_damage_rate"),
+        policy=policy,
+        deepest_policy=deepest_policy,
+        min_selling_price_override=row.get("min_selling_price_override"),
+        days_since_restock=days_since_restock,
+    )
+    target_margin_rate = float(policy["target_margin_rate"]) if policy else None
+    return pricing, target_margin_rate
+
+
+def _to_item_response(
+    row: dict,
+    *,
+    days_since_restock: Optional[int],
+    dos_days: Any,
+    pricing: dict,
+    target_margin_rate: Optional[float],
+    recovery_amount: Optional[float],
+    pricing_matched: bool,
+) -> SkuClearanceRankingItemResponse:
+    """把视图行 + 定价结果组装成响应对象。"""
+    sku_id = row.get("sku_id")
+    return SkuClearanceRankingItemResponse(
+        snapshot_date=row.get("snapshot_date"),
+        platform_code=str(row.get("platform_code") or ""),
+        product_sku=str(row.get("product_sku") or ""),
+        sku_key=row.get("sku_key"),
+        product_name=row.get("product_name"),
+        current_qty=int(row.get("current_qty") or 0),
+        on_hand_qty=int(row.get("on_hand_qty") or 0),
+        inventory_value=float(row.get("inventory_value") or 0.0),
+        warehouse_count=int(row.get("warehouse_count") or 0),
+        days_since_restock=days_since_restock,
+        checklist_dos_sales90=(float(dos_days) if dos_days is not None else None),
+        sku_id=int(sku_id) if sku_id is not None else None,
+        default_purchase_cost=(
+            float(row["default_purchase_cost"])
+            if row.get("default_purchase_cost") is not None
+            else None
+        ),
+        reference_selling_price=(
+            float(row["reference_selling_price"])
+            if row.get("reference_selling_price") is not None
+            else None
+        ),
+        min_selling_price_override=(
+            float(row["min_selling_price_override"])
+            if row.get("min_selling_price_override") is not None
+            else None
+        ),
+        pricing_tier_label=pricing.get("pricing_tier_label"),
+        current_discount_rate=pricing.get("current_discount_rate"),
+        current_target_margin_rate=target_margin_rate,
+        clearance_max_discount_rate=pricing.get("clearance_max_discount_rate"),
+        min_selling_price=pricing.get("min_selling_price"),
+        min_selling_price_source=pricing.get("min_selling_price_source"),
+        clearance_recovery_amount=recovery_amount,
+        pricing_matched_erp=pricing_matched,
+    )
+
+
 class SkuClearanceService:
     def __init__(self, db: AsyncSession | None):
         self.db = db
@@ -310,14 +411,7 @@ class SkuClearanceService:
             return []
 
         bounds = [int(row["min_restock_days"]) for row in ordered]
-        case_sql = (
-            "CASE "
-            + " ".join(
-                f"WHEN days_since_restock >= :bound_{index} THEN {index}"
-                for index in range(len(bounds) - 1, 0, -1)
-            )
-            + " ELSE 0 END"
-        )
+        case_sql = self._build_tier_case_sql(bounds)
         tier_params = {f"bound_{index}": value for index, value in enumerate(bounds)}
         rows = await self._fetch_rows(
             f"""
@@ -332,7 +426,29 @@ class SkuClearanceService:
             {**params, **tier_params},
         )
         buckets = {int(row.get("tier_index") or 0): row for row in rows}
+        return self._build_tier_stats(ordered, bounds, buckets)
 
+    @staticmethod
+    def _build_tier_case_sql(bounds: list[int]) -> str:
+        """构造按档位门槛分组的 CASE 片段。
+
+        门槛一律走**参数绑定**（:bound_0 / :bound_1 …）——
+        ``tier_label`` 是运营填的自由文本，拼进 SQL 就是注入。
+        """
+        return (
+            "CASE "
+            + " ".join(
+                f"WHEN days_since_restock >= :bound_{index} THEN {index}"
+                for index in range(len(bounds) - 1, 0, -1)
+            )
+            + " ELSE 0 END"
+        )
+
+    @staticmethod
+    def _build_tier_stats(
+        ordered: list[dict], bounds: list[int], buckets: dict[int, dict]
+    ) -> list[SkuClearanceTierStat]:
+        """把分组结果组装成档位统计（门槛与档位名都来自档位表）。"""
         stats: list[SkuClearanceTierStat] = []
         for index, policy in enumerate(ordered):
             bucket = buckets.get(index, {})
@@ -362,41 +478,17 @@ class SkuClearanceService:
         days_since_restock = (
             int(days_since_restock) if days_since_restock is not None else None
         )
-
-        # 未匹配 ERP 主数据的 SKU：定价字段整体留空（spec §3.6）。
-        # 这类 SKU 在视图里 LEFT JOIN 出来的采购成本/参考售价本来就是 NULL，
-        # 硬算也只会得到一个「看起来能定价、其实没主数据支撑」的数字。
         pricing_matched = sku_id is not None
 
-        if pricing_matched:
-            policy = select_restock_tier(policy_rows, days_since_restock)
-            inputs = pricing_inputs.get(int(sku_id), {})
-            pricing = compute_sku_pricing(
-                purchase_cost=row.get("default_purchase_cost"),
-                reference_selling_price=row.get("reference_selling_price"),
-                creator_commission_rate=inputs.get("creator_commission_rate"),
-                platform_creator_commission_rate=(
-                    platform.default_creator_commission_rate if platform else None
-                ),
-                other_cost_rate=platform.other_cost_rate if platform else None,
-                spu_bound=bool(inputs.get("spu_bound")),
-                spu_return_loss_rate=inputs.get("spu_return_loss_rate"),
-                spu_damage_rate=inputs.get("spu_damage_rate"),
-                policy=policy,
-                deepest_policy=deepest_policy,
-                min_selling_price_override=row.get("min_selling_price_override"),
-                days_since_restock=days_since_restock,
-            )
-            target_margin_rate = float(policy["target_margin_rate"]) if policy else None
-        else:
-            pricing = {
-                "pricing_tier_label": None,
-                "current_discount_rate": None,
-                "clearance_max_discount_rate": None,
-                "min_selling_price": None,
-                "min_selling_price_source": "unavailable",
-            }
-            target_margin_rate = None
+        pricing, target_margin_rate = _resolve_pricing(
+            row,
+            pricing_inputs=pricing_inputs,
+            policy_rows=policy_rows,
+            deepest_policy=deepest_policy,
+            platform=platform,
+            days_since_restock=days_since_restock,
+            pricing_matched=pricing_matched,
+        )
 
         # DOS 参考值：**走 inventory_dos_service 的唯一实现**，与业务概览同一口径。
         # 只作展示参考，不参与任何判定 —— 分母（近 90 天销量）在增量模式下不新鲜。
@@ -412,44 +504,14 @@ class SkuClearanceService:
             current_qty=row.get("current_qty"),
         )
 
-        return SkuClearanceRankingItemResponse(
-            snapshot_date=row.get("snapshot_date"),
-            platform_code=str(row.get("platform_code") or ""),
-            product_sku=str(row.get("product_sku") or ""),
-            sku_key=row.get("sku_key"),
-            product_name=row.get("product_name"),
-            current_qty=int(row.get("current_qty") or 0),
-            on_hand_qty=int(row.get("on_hand_qty") or 0),
-            inventory_value=float(row.get("inventory_value") or 0.0),
-            warehouse_count=int(row.get("warehouse_count") or 0),
+        return _to_item_response(
+            row,
             days_since_restock=days_since_restock,
-            checklist_dos_sales90=(
-                float(dos_days) if dos_days is not None else None
-            ),
-            sku_id=int(sku_id) if sku_id is not None else None,
-            default_purchase_cost=(
-                float(row["default_purchase_cost"])
-                if row.get("default_purchase_cost") is not None
-                else None
-            ),
-            reference_selling_price=(
-                float(row["reference_selling_price"])
-                if row.get("reference_selling_price") is not None
-                else None
-            ),
-            min_selling_price_override=(
-                float(row["min_selling_price_override"])
-                if row.get("min_selling_price_override") is not None
-                else None
-            ),
-            pricing_tier_label=pricing.get("pricing_tier_label"),
-            current_discount_rate=pricing.get("current_discount_rate"),
-            current_target_margin_rate=target_margin_rate,
-            clearance_max_discount_rate=pricing.get("clearance_max_discount_rate"),
-            min_selling_price=pricing.get("min_selling_price"),
-            min_selling_price_source=pricing.get("min_selling_price_source"),
-            clearance_recovery_amount=recovery_amount,
-            pricing_matched_erp=pricing_matched,
+            dos_days=dos_days,
+            pricing=pricing,
+            target_margin_rate=target_margin_rate,
+            recovery_amount=recovery_amount,
+            pricing_matched=pricing_matched,
         )
 
 
