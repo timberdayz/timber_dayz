@@ -467,6 +467,25 @@ DOS 只作参考；库龄保留为生命周期视角。
 | 3 | DOS 参考列**永远是 null** | service 读 `row["checklist_dos_sales90"]`，视图列名其实是 `checklist_sales_90d` | 改走 `inventory_dos_service.compute_dos`（唯一实现）；实测 500 行里 366 行算得出 |
 | 4 | `/api/inventory-overview/summary` 500 | B4-2 重写汇总视图时删掉了 `high/medium/low_risk_sku_count`，概览服务还在读 | 视图补三个**去重 SKU 数**（卡片写「SKU 数」就不能给 SKU×仓 的行数），schema / service / 前端同步换新口径 |
 | 5 | `product_pricing_query_service` 里残留 `p["min_age_days"]` | 列名迁移时漏了一处生产代码 | 改成 `p["min_restock_days"]`（现在会直接 KeyError） |
+| **6** | **状态层 upsert 没有生产调用方** | `InventoryStateRefreshService` **只在测试里被调过** —— 采集完状态层不动 → 距上次进货天数永远不推进 → 增量窗口永远是同一个 → **闭环是断的** | `refresh_queue_tasks.py` 的 inventory 分支补上调用（顺序：同步 SKU 身份 → 状态层 upsert → 刷库龄）；状态层自己先刷一遍上游，不依赖调用方刷过 |
+
+#### 8.10.6 「可以开始采集了吗」的答案：**链路已闭环，但还没在真实页面上验过**
+
+采集前必须知道的两件事：
+
+| 项 | 状态 |
+|---|---|
+| 落盘 → 状态层 upsert → 判据 → 档位 → 定价 | ✅ 闭环（本轮才补上状态层 upsert 的生产调用方，见 §8.10.2 第 6 条） |
+| 妙手页面上的「更新时间维度 + 区间」筛选 | ⚠️ **代码写完了，从没在真实页面上跑过** —— 选择器与维度下拉交互都没有真实证据 |
+| 端到端增量采集（真实页面 → 落盘 → 状态层推进） | ⚠️ **没跑过**：现有两批真实数据（file 2764 / 3004）都是**全量**采的 |
+
+→ **可以开始「人工跑一次采集」，但不要开自动调度。** 顺序：
+
+1. 重新登录妙手（现有登录态已失效，探针会明确报）
+2. 跑 `scripts/probe_miaoshou_inventory_date_filter.py` —— 只读取证，拿维度下拉的真实结构
+3. 按真实结构校正 `inventory_config.py` 的选择器
+4. 人工跑一次增量采集 → 检查状态层 `stock_added_at` 是否按预期推进
+5. 再考虑开调度
 
 #### 8.10.3 状态层字段「精简」的结论：**保留**（原建议撤回）
 
