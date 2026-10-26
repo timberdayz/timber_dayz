@@ -24,11 +24,15 @@ ingest 之后独立运行，不侵入采集流程；纯函数判定可写无 DB 
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time, timezone
 from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.services.data_pipeline.inventory_restock_timeline import (
+    replay_restock_timeline,
+)
 
 from backend.services.data_pipeline.refresh_runner import (
     execute_refresh_plan,
@@ -57,6 +61,35 @@ RESTOCK_SIGNAL_FIELD = "on_hand_stock"
 CHANGE_REASON_FIRST = "first_observation"
 CHANGE_REASON_RESTOCKED = "restocked"
 CHANGE_REASON_UNCHANGED = "unchanged"
+
+# 回放「上次进货时间」要读的行级事实（仓级 × 帧）
+_RESTOCK_ANCHOR_FRAMES_SQL = """
+    SELECT *
+    FROM (
+        SELECT
+            platform_code,
+            COALESCE(
+                NULLIF(BTRIM(platform_sku), ''),
+                NULLIF(BTRIM(product_sku), ''),
+                NULLIF(BTRIM(sku_id), ''),
+                NULLIF(BTRIM(product_id), '')
+            ) AS sku_key,
+            NULLIF(BTRIM(warehouse_name), '') AS warehouse_name,
+            metric_date AS snapshot_date,
+            on_hand_stock,
+            ingest_timestamp AS last_ingest_timestamp
+        FROM semantic.fact_inventory_snapshot
+    ) AS source_rows
+    WHERE source_rows.sku_key IS NOT NULL
+    ORDER BY snapshot_date ASC, last_ingest_timestamp ASC
+"""
+
+
+def _anchor_to_datetime(anchor: Optional[date]) -> Optional[datetime]:
+    """锚点日期 → 带时区的时刻（当天 00:00 UTC）。"""
+    if anchor is None:
+        return None
+    return datetime.combine(anchor, time.min, tzinfo=timezone.utc)
 
 
 def _num(value) -> Optional[float]:
@@ -259,8 +292,16 @@ class InventoryStateRefreshService:
         }
 
     @staticmethod
-    def build_state_row(incoming: dict, transition: dict) -> dict:
-        """把一行 + 闸 2 判定结果拼成状态层的一行。"""
+    def build_state_row(
+        incoming: dict,
+        transition: dict,
+        restock_anchor: Optional[datetime] = None,
+    ) -> dict:
+        """把一行 + 闸 2 判定结果拼成状态层的一行。
+
+        ``stock_added_at``（上次进货时间）**取共享回放给出的锚点**；
+        回放没有覆盖到这一行时，才退回闸 2 的判定结果。
+        """
         return {
             "platform_code": incoming["platform_code"],
             "sku_key": incoming["sku_key"],
@@ -279,7 +320,11 @@ class InventoryStateRefreshService:
             "checklist_sales_30d": incoming.get("checklist_sales_30d"),
             "checklist_sales_60d": incoming.get("checklist_sales_60d"),
             "checklist_sales_90d": incoming.get("checklist_sales_90d"),
-            "stock_added_at": transition["stock_added_at"],
+            "stock_added_at": (
+                restock_anchor
+                if restock_anchor is not None
+                else transition["stock_added_at"]
+            ),
             "created_at": incoming.get("created_at"),
             "row_seen_at": incoming.get("ingest_timestamp"),
             "row_written_at": incoming.get("observed_at"),
@@ -343,6 +388,31 @@ class InventoryStateRefreshService:
             rows,
         )
 
+    async def load_restock_anchors(self) -> dict[tuple[str, str], Optional[datetime]]:
+        """每个 SKU×仓 的「上次进货时间」—— **来自共享回放实现**。
+
+        为什么要回放而不是「跟状态层自己比」
+        ------------------------------------
+        状态层 2026-10-14 才建立，**它没见过的历史进货它不知道**。
+        第一次见到某个 SKU 时没有「上一批数量」可比，只能拿妙手商品创建时间凑数
+        → 实测同 498 个 SKU 算出 655~656 天，而快照回放算出 25~42 天，**0 行一致**。
+
+        所以「上次进货时间」改由共享实现
+        ``inventory_restock_timeline.replay_restock_timeline`` 逐帧回放给出
+        （读全部历史快照，能看见状态层建立之前的那次进货）。
+        """
+        if self.db is None:
+            raise ValueError("AsyncSession is required for refresh execution")
+        result = await self.db.execute(text(_RESTOCK_ANCHOR_FRAMES_SQL))
+        frames = [dict(row) for row in result.mappings().all()]
+        timelines = replay_restock_timeline(frames)
+        return {
+            (timeline.sku_key, timeline.warehouse_name): _anchor_to_datetime(
+                timeline.anchor_date
+            )
+            for timeline in timelines.values()
+        }
+
     async def refresh(self, force_full: bool = False) -> dict:
         """主流程：上游刷新 → 闸 1 的结果 → 闸 2 判定 → upsert 状态层。
 
@@ -363,6 +433,8 @@ class InventoryStateRefreshService:
         incoming_rows = await self.load_incoming_rows(watermarks)
         latest = pick_latest_per_key(incoming_rows)
         existing = await self.load_existing_state()
+        # 「上次进货时间」的唯一真相源：快照逐帧回放（库龄层用的是同一个实现）
+        restock_anchors = await self.load_restock_anchors()
 
         state_rows: list[dict] = []
         changed_count = 0
@@ -372,7 +444,10 @@ class InventoryStateRefreshService:
             )
             if transition["stock_changed"]:
                 changed_count += 1
-            state_rows.append(self.build_state_row(incoming, transition))
+            sku_key = str(incoming.get("sku_key") or "")
+            warehouse_name = str(incoming.get("warehouse_name") or "")
+            anchor = restock_anchors.get((sku_key, warehouse_name))
+            state_rows.append(self.build_state_row(incoming, transition, anchor))
 
         await self.persist_rows(state_rows)
         return {

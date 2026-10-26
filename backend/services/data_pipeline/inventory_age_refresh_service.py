@@ -13,6 +13,9 @@ from backend.services.data_pipeline.refresh_runner import (
     execute_sql_target,
 )
 from backend.services.data_pipeline.refresh_registry import topologically_sort_targets
+from backend.services.data_pipeline.inventory_restock_timeline import (
+    compute_restock_transition,
+)
 
 SNAPSHOT_INVENTORY_AGE_UPSTREAM_TARGETS = [
     "semantic.fact_inventory_snapshot",
@@ -40,48 +43,68 @@ def compute_age_transition(
     snapshot_date: date,
     previous_anchor_date: Optional[date] = None,
 ) -> dict:
-    if current_qty <= 0:
-        return {
-            "is_active": False,
-            "age_anchor_date": None,
-            "age_days": None,
-            "reset_reason": "zero_stock",
-        }
+    """逐帧判定 —— **实现已下沉到共享模块**，这里只做转出（向后兼容旧调用点）。
 
-    if previous_qty is None:
-        return {
-            "is_active": True,
-            "age_anchor_date": snapshot_date,
-            "age_days": 0,
-            "reset_reason": "first_positive",
-        }
+    判定规则只有一个定义：``inventory_restock_timeline.compute_restock_transition``。
+    状态层（``mart.inventory_state.stock_added_at``）与本层（``mart.inventory_age_*``）
+    共用它 → 两个层不会再各算各的。
+    """
+    return compute_restock_transition(
+        previous_qty=previous_qty,
+        current_qty=current_qty,
+        snapshot_date=snapshot_date,
+        previous_anchor_date=previous_anchor_date,
+    )
 
-    if previous_qty <= 0:
-        return {
-            "is_active": True,
-            "age_anchor_date": snapshot_date,
-            "age_days": 0,
-            "reset_reason": "reappeared_after_zero",
-        }
 
-    if current_qty > previous_qty:
-        return {
-            "is_active": True,
-            "age_anchor_date": snapshot_date,
-            "age_days": 0,
-            "reset_reason": "stock_increase",
-        }
-
-    anchor_date = previous_anchor_date or snapshot_date
+def _age_history_row(
+    row: dict,
+    transition: dict,
+    previous_qty: Optional[int],
+) -> dict:
+    """把一帧 + 判定结果拼成库龄历史行。"""
+    age_days = transition["age_days"]
     return {
-        "is_active": True,
-        "age_anchor_date": anchor_date,
-            "age_days": max((snapshot_date - anchor_date).days, 0),
-            "reset_reason": "continued",
-        }
+        "snapshot_date": row["snapshot_date"],
+        "platform_code": row["platform_code"],
+        "sku_key": row["sku_key"],
+        "platform_sku": row.get("platform_sku"),
+        "product_sku": row.get("product_sku"),
+        "sku_id": row.get("sku_id"),
+        "product_id": row.get("product_id"),
+        "product_name": row.get("product_name"),
+        "current_qty": int(row.get("on_hand_qty", 0) or 0),
+        "previous_qty": previous_qty,
+        "qty_delta": (
+            int(row.get("on_hand_qty", 0) or 0) - previous_qty
+            if previous_qty is not None
+            else int(row.get("on_hand_qty", 0) or 0)
+        ),
+        "age_anchor_date": transition["age_anchor_date"],
+        "age_days": age_days,
+        "bucket": bucket_age_days(age_days) if age_days is not None else None,
+        "reset_reason": transition["reset_reason"],
+        "on_hand_qty": int(row.get("on_hand_qty", 0) or 0),
+        "inventory_value": float(row.get("inventory_value", 0.0) or 0.0),
+        "warehouse_count": int(row.get("warehouse_count", 0) or 0),
+        "last_ingest_timestamp": row.get("last_ingest_timestamp"),
+    }
 
 
 def replay_snapshot_rows(rows: list[dict]) -> tuple[list[dict], dict | None]:
+    """回放一个 SKU 的历史帧 → 逐帧历史行 + 当前行。
+
+    判定内核**不在这里** —— 统一走共享实现
+    ``inventory_restock_timeline.compute_restock_transition``，
+    状态层（``mart.inventory_state.stock_added_at``）用的是同一个。
+
+    本层是 **SKU 级**（一个 SKU 一行），状态层是 **SKU×仓 级**
+    （各仓取最长汇总成 SKU 级）—— 粒度不同是业务需要：
+    滞销/定价看 SKU，积压看仓。
+
+    信号字段用 **库存总量**（``on_hand_qty``）：可用库存会被「取消订单」推高，
+    那是假进货。
+    """
     ordered_rows = sorted(
         rows,
         key=lambda row: (
@@ -95,41 +118,14 @@ def replay_snapshot_rows(rows: list[dict]) -> tuple[list[dict], dict | None]:
     previous_anchor_date: Optional[date] = None
 
     for row in ordered_rows:
-        current_qty = int(row.get("available_qty", 0) or 0)
-        transition = compute_age_transition(
+        transition = compute_restock_transition(
             previous_qty=previous_qty,
-            current_qty=current_qty,
+            current_qty=int(row.get("on_hand_qty", 0) or 0),
             snapshot_date=row["snapshot_date"],
             previous_anchor_date=previous_anchor_date,
         )
-        age_days = transition["age_days"]
-        bucket = bucket_age_days(age_days) if age_days is not None else None
-        history_row = {
-            "snapshot_date": row["snapshot_date"],
-            "platform_code": row["platform_code"],
-            "sku_key": row["sku_key"],
-            "platform_sku": row.get("platform_sku"),
-            "product_sku": row.get("product_sku"),
-            "sku_id": row.get("sku_id"),
-            "product_id": row.get("product_id"),
-            "product_name": row.get("product_name"),
-            "current_qty": current_qty,
-            "previous_qty": previous_qty,
-            "qty_delta": (
-                current_qty - previous_qty if previous_qty is not None else current_qty
-            ),
-            "age_anchor_date": transition["age_anchor_date"],
-            "age_days": age_days,
-            "bucket": bucket,
-            "reset_reason": transition["reset_reason"],
-            "on_hand_qty": int(row.get("on_hand_qty", 0) or 0),
-            "inventory_value": float(row.get("inventory_value", 0.0) or 0.0),
-            "warehouse_count": int(row.get("warehouse_count", 0) or 0),
-            "last_ingest_timestamp": row.get("last_ingest_timestamp"),
-        }
-        history_rows.append(history_row)
-
-        previous_qty = current_qty
+        history_rows.append(_age_history_row(row, transition, previous_qty))
+        previous_qty = int(row.get("on_hand_qty", 0) or 0)
         previous_anchor_date = transition["age_anchor_date"]
 
     current_row = None
@@ -237,6 +233,11 @@ class InventoryAgeRefreshService:
         platform_code: str,
         sku_key: str,
     ) -> list[dict]:
+        """读这个 SKU 的历史帧（SKU 级快照）。
+
+        信号字段用 ``on_hand_qty``（**库存总量**）—— 可用库存会被
+        「取消订单」推高，那不是进货。
+        """
         if self.db is None:
             raise ValueError("AsyncSession is required for refresh execution")
 
@@ -427,7 +428,9 @@ class InventoryAgeRefreshService:
         for item in changed_keys:
             platform_code = item["platform_code"]
             sku_key = item["sku_key"]
-            snapshot_rows = await self.load_snapshot_rows_for_key(platform_code, sku_key)
+            snapshot_rows = await self.load_snapshot_rows_for_key(
+                platform_code, sku_key
+            )
             history_rows, current_row = replay_snapshot_rows(snapshot_rows)
             await self.persist_replay_rows(
                 platform_code=platform_code,
