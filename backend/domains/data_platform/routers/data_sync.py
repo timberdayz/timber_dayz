@@ -64,6 +64,9 @@ def conditional_rate_limit(limit_str: str):
 MAX_CONCURRENT_SYNC_TASKS = asyncio.Semaphore(10)
 TEMPLATE_STATUS_CACHE_TTL_SECONDS = 180
 _template_status_cache: dict[tuple[Any, ...], tuple[float, Dict[str, Any]]] = {}
+# 概览接口里「就绪判定」的整体超时：读文件 + 比对表头是重活，
+# 拖过前端超时就会引发请求取消 → 会话收尾竞态 → 500（2026-10-26 线上事故）
+GOVERNANCE_READINESS_TIMEOUT_SECONDS = 8
 from backend.services.c_class_data_validator import get_c_class_data_validator
 from backend.services.data_loss_analyzer import (
     analyze_data_loss, check_data_loss_threshold,
@@ -3262,10 +3265,27 @@ async def get_governance_stats(
         #    method 'commit()' is already in progress
         #    → 整个接口 500(2026-10-26 线上事故:governance/stats 连报 4 次 500,
         #      页面上的「数据治理概览」整片变成 --)
-        readiness_list = await asyncio.gather(*[
-            _readiness_with_own_session(file_record.id)
-            for file_record in pending_files
-        ])
+        #
+        # ⚠️ 还要**超时保护**:就绪判定要全量解析 xls + 比对表头,几个 MB 的文件
+        #    就能把接口拖过前端超时(实测 /data-sync/files 最慢 15.6 秒)。
+        #    客户端超时 → 请求被取消 → 会话收尾竞态 → 又是 500。
+        #    超时就用「部分结果」返回,并打上 stats_stale 让前端提示用户。
+        readiness_timed_out = False
+        try:
+            readiness_list = await asyncio.wait_for(
+                asyncio.gather(*[
+                    _readiness_with_own_session(file_record.id)
+                    for file_record in pending_files
+                ]),
+                timeout=GOVERNANCE_READINESS_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[DataSync Governance] 就绪判定超过 %s 秒,概览按部分结果返回",
+                GOVERNANCE_READINESS_TIMEOUT_SECONDS,
+            )
+            readiness_list = []
+            readiness_timed_out = True
         for readiness in readiness_list:
             template_status = readiness.get("template_status")
             if readiness.get("should_auto_sync"):
@@ -3330,6 +3350,8 @@ async def get_governance_stats(
                 "template_update_required_count": template_update_required_count,
                 "missing_template_count": missing_template_count,
                 "semantic_anomaly_count": semantic_anomaly_count,
+                # 超时就绪判定没算完 → 数字是部分的，前端要提示用户
+                "stats_stale": readiness_timed_out,
             },
             message="数据治理统计查询成功"
         )

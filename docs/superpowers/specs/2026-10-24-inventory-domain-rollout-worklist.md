@@ -1340,3 +1340,82 @@ IllegalStateChangeError / InvalidRequestError
 > ⚠️ 口径提醒：状态层判「进货」用的是**库存总量**（`on_hand_stock`），
 > 不是可用库存 —— 订单占用/取消订单只动可用库存不动总量，
 > 用可用库存会把这类变动误判成进货。
+
+## 8.18 往深一层挖：500 的真正触发链是「接口慢 → 客户端超时 → 请求被取消」
+
+§8.16 定位到「并发共享会话」，但用它做对照实验时**复现不出 500**（同一场景修复前后都 200）。
+继续往下挖，发现 §8.16 只抓到了**竞态的形态**，没抓到**触发它的原因**。
+
+### 8.18.1 会话收尾的写法本身就是雷
+
+`backend/models/database.py` 的 `get_async_db`：
+
+```python
+try:
+    yield session
+    await session.commit()   # ← 自动提交
+except Exception:
+    await session.rollback()
+    raise
+finally:
+    await session.close()    # ← 紧接着就关
+```
+
+`close()` 会撞上「**还在进行中的** `commit()`」→
+`IllegalStateChangeError: Method 'close()' can't be called here; method 'commit()' is already in progress`
+
+**什么时候 commit 会「还在进行中」？** 客户端超时断开 → FastAPI 取消该请求 →
+`await session.commit()` 抛 `CancelledError`（它继承 `BaseException`，**不被** `except Exception` 捕获）
+→ 直接跳到 `finally` → 此时 commit 的异步 IO 还没结束 → `close()` 撞上去。
+
+### 8.18.2 那次请求为什么会被客户端超时取消
+
+概览接口要算每个待同步文件的「就绪判定」，而就绪判定 =
+**全量解析 xls + 逐列比对表头**。三个新文件里有一个 3.25 MB。
+
+- 实测 `GET /api/data-sync/files` 最慢 **15.6 秒**（日志里刷屏 `[HeaderChange] 匹配率 0.0%`）
+- 仓库里**本来就有**模板状态缓存（`_template_status_cache`，TTL 180 秒），
+  但它**只接在 `list_files` 上**，概览接口走的 `get_file_sync_readiness` **完全没走缓存**
+  → 每次刷新概览都要重新全量解析一遍
+
+→ 完整触发链：
+
+```
+采集注册 3 个 pending 文件（含 3.25 MB 的）
+  → 概览接口逐个全量解析 xls → 十几秒
+  → 前端 axios 超时 → 断开
+  → FastAPI 取消请求 → commit 被取消
+  → 收尾 close() 撞上还在进行的 commit → IllegalStateChangeError
+  → 500 → 页面概览整片变成 --，「同步全部可同步文件」按钮被禁用
+```
+
+§8.16 里「pending ≥2 才触发」只是**并发度**的门槛（pending=0 时 gather 空转），
+真正的门槛是**接口耗时超过客户端超时**。
+
+### 8.18.3 三层收口（每一层都能独立挡住这类事故）
+
+| 层 | 位置 | 作用 |
+|---|---|---|
+| **① 消除竞态源** | `data_sync.py` 的 `asyncio.gather` 改用独立会话 | 并发协程不再共享请求级 session（§8.16） |
+| **② 通用兜底** | `database.py` 的 `get_async_db` 收尾 | 关会话失败**只记日志不上抛** —— 收尾不该把一次本来正常的请求打成 500，**这一层挡住所有形态**（含未来未知的写法） |
+| **③ 治本** | service 层就绪判定缓存 + 概览接口超时保护 | 让接口不再慢到超时：<br>· `DataSyncService.get_file_sync_readiness` 加 180 秒缓存（文件/状态/修改时间进键）<br>· 概览接口给就绪判定加 8 秒整体超时，超时按部分结果返回并打 `stats_stale`（前端已有这个提示位） |
+
+**为什么第 ② 层最关键**：它不依赖「我们有没有写对」，而是**不让收尾异常改写请求结果**。
+哪怕将来有人又写出一种会触发竞态的写法，最坏也只是日志里多一条告警，而不是页面白板。
+
+### 8.18.4 每层都有对照实验
+
+| 对照实验 | 结果 |
+|---|---|
+| 把 ① 退回共享 session | 静态守卫立刻报出；`test_governance_stats_async_api.py` 的会话独立断言变红 |
+| 把 ② 的兜底删掉 | `test_async_db_session_teardown.py` 变红（1 failed） |
+| 就绪判定加缓存 | 同一批文件的第二次概览不再重新解析大文件 |
+
+### 8.18.5 顺带记下：数据库会话的两条通用规矩
+
+1. **收尾异常不上抛**（`get_async_db`）—— 收尾失败只说明「连接可能没干净归还」
+2. **并发上下文里不共享请求级会话**（`asyncio.gather` / `create_task`）——
+   每个协程自己开一个，或干脆把重活挪出 async（读文件用 `run_in_executor`）
+
+第 2 条现在有机器守卫（§8.16 的静态守卫，已挂进 `scripts/run_lint.py`），
+第 1 条有单测守着（`backend/tests/test_async_db_session_teardown.py`）。

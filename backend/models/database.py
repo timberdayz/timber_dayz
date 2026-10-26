@@ -452,7 +452,23 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
         await session.rollback()
         raise
     finally:
-        await session.close()
+        # ⚠️ 收尾**不能**把一次本来正常的请求打成 500。
+        #
+        # `close()` 会撞上「还在进行中的 commit」→ IllegalStateChangeError:
+        #   Method 'close()' can't be called here; method 'commit()' is already in progress
+        # 触发场景：客户端超时断开（请求被取消，commit 被取消但还没结束）、
+        # 或有协程并发用了这个会话。
+        #
+        # 2026-10-26 线上事故：governance/stats 因这个异常连报 4 次 500，
+        # 页面上的「数据治理概览」整片变成 --。
+        #
+        # 收尾失败只意味着「连接可能没干净归还」，不该改写本次请求的结果。
+        try:
+            await session.close()
+        except Exception:
+            logger.warning(
+                "数据库会话关闭失败（已忽略，不影响本次请求结果）", exc_info=True
+            )
 
 
 def init_db():

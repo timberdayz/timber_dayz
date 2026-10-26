@@ -28,6 +28,8 @@ from sqlalchemy import select, or_, func
 from datetime import datetime, timedelta, timezone
 import uuid
 import asyncio
+import copy
+import time
 
 from pathlib import Path
 import os
@@ -50,6 +52,50 @@ from backend.services.spreadsheet_normalization_service import (
 from modules.services.file_semantics import validate_file_semantics
 
 logger = get_logger(__name__)
+
+
+# ── 就绪判定缓存 ─────────────────────────────────────────────────────
+#
+# 「这个文件能不能自动同步」要**全量解析 xls + 逐列比对表头**才算得出来，
+# 一个 3 MB 的 xls 单独就要好几秒。数据治理概览接口要对每个待同步文件各算一次
+# → 不缓存的话，概览接口会慢到前端超时（实测 GET /data-sync/files 最慢 15.6 秒），
+# 而**客户端超时会让请求被取消**，进而触发会话收尾竞态（见 backend/models/database.py）。
+#
+# 键里带文件标识 + 状态 + 修改时间 + 表头行口径 → 文件或状态变了自然失效。
+# TTL 很短（180 秒），模板改动最多延迟一个 TTL。
+READINESS_CACHE_TTL_SECONDS = 180
+_readiness_cache: Dict[tuple, tuple] = {}
+
+
+def _readiness_cache_key(
+    catalog_file: CatalogFile, use_template_header_row: bool
+) -> tuple:
+    return (
+        getattr(catalog_file, "id", None),
+        getattr(catalog_file, "file_name", None),
+        getattr(catalog_file, "file_path", None),
+        getattr(catalog_file, "status", None),
+        getattr(catalog_file, "last_modified", None),
+        use_template_header_row,
+    )
+
+
+def _get_cached_readiness(cache_key: tuple) -> Optional[Dict[str, Any]]:
+    cached = _readiness_cache.get(cache_key)
+    if cached is None:
+        return None
+    expires_at, payload = cached
+    if expires_at <= time.monotonic():
+        _readiness_cache.pop(cache_key, None)
+        return None
+    return copy.deepcopy(payload)
+
+
+def _set_cached_readiness(cache_key: tuple, payload: Dict[str, Any]) -> None:
+    _readiness_cache[cache_key] = (
+        time.monotonic() + READINESS_CACHE_TTL_SECONDS,
+        copy.deepcopy(payload),
+    )
 
 
 class DataSyncService:
@@ -513,16 +559,23 @@ class DataSyncService:
                 "should_auto_sync": False,
             }
 
+        cache_key = _readiness_cache_key(catalog_file, use_template_header_row)
+        cached = _get_cached_readiness(cache_key)
+        if cached is not None:
+            return cached
+
         template_status = await self.evaluate_catalog_file_template_status(
             catalog_file,
             use_template_header_row=use_template_header_row,
         )
-        return {
+        payload = {
             "ready": template_status["template_status"] == "ready",
             **template_status,
             "file_id": catalog_file.id,
             "file_name": catalog_file.file_name,
         }
+        _set_cached_readiness(cache_key, payload)
+        return payload
 
     async def sync_single_file(
         self,
