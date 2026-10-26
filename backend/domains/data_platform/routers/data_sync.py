@@ -3179,6 +3179,30 @@ async def get_detailed_template_coverage(
         )
 
 
+async def _readiness_with_own_session(file_id: int) -> dict:
+    """在一个**独立**的数据库会话里算某个文件的同步就绪状态。
+
+    为什么要独立会话
+    --------------
+    ``AsyncSession`` **不是并发安全的**:同一个 session 被多个协程同时用,
+    一个协程的 ``commit()`` 会撞上另一个协程的 ``execute()`` / ``close()``,
+    抛出 ``IllegalStateChangeError``(2026-10-26 线上事故:
+    ``governance/stats`` 因 pending 文件 ≥2 而并发共享 session,连报 4 次 500,
+    页面上的「数据治理概览」整片变成 ``--``)。
+
+    每个协程自己开一个会话 → 互不干扰,并发度也保住了。
+
+    会话工厂在**函数体内**取(不是默认参数),这样测试可以 monkeypatch
+    模块级的 ``AsyncSessionLocal`` 换成自己的会话工厂。
+    """
+    session_factory = AsyncSessionLocal
+    async with session_factory() as own_db:
+        return await DataSyncService(own_db).get_file_sync_readiness(
+            file_id,
+            use_template_header_row=True,
+        )
+
+
 @router.get("/data-sync/governance/stats")
 async def get_governance_stats(
     db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2:改为异步会话
@@ -3221,7 +3245,6 @@ async def get_governance_stats(
         template_update_required_count = template_update_required_result.scalar() or 0
         missing_template_count = 0
         semantic_anomaly_count = 0
-        data_sync_service = DataSyncService(db)
 
         all_pending_files_result = await db.execute(
             select(CatalogFile).where(CatalogFile.status == 'pending')
@@ -3232,12 +3255,15 @@ async def get_governance_stats(
         )
 
         # [*] v6.x 修复:避免串行 N 次 await 把 governance/stats 拖到分钟级
-        # 受 pool_size 限制,gather 会自动串行化(不会超过 pool 容量)
+        # ⚠️ 每个协程必须**自己持有 session** —— 同一个 AsyncSession 被多个协程并发
+        #    使用是 SQLAlchemy 明令禁止的(Session 不是并发安全的):
+        #    一个协程在 commit() 时另一个在 execute()/close(),就会撞出
+        #    IllegalStateChangeError: Method 'close()' can't be called here;
+        #    method 'commit()' is already in progress
+        #    → 整个接口 500(2026-10-26 线上事故:governance/stats 连报 4 次 500,
+        #      页面上的「数据治理概览」整片变成 --)
         readiness_list = await asyncio.gather(*[
-            data_sync_service.get_file_sync_readiness(
-                file_record.id,
-                use_template_header_row=True,
-            )
+            _readiness_with_own_session(file_record.id)
             for file_record in pending_files
         ])
         for readiness in readiness_list:

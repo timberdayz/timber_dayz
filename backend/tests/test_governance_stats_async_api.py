@@ -67,6 +67,14 @@ async def governance_client(monkeypatch):
         raising=False,
     )
 
+    # 并发算就绪状态时,每个协程要**自己**开一个会话(不能共享请求级会话)。
+    # 这里把模块里的会话工厂换成本测试的 sqlite 工厂。
+    from backend.domains.data_platform.routers import data_sync as data_sync_module
+
+    monkeypatch.setattr(
+        data_sync_module, "AsyncSessionLocal", session_factory, raising=False
+    )
+
     app.dependency_overrides[get_async_db] = override_get_async_db
     app.dependency_overrides[get_current_user] = override_current_user
 

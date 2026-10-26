@@ -1165,3 +1165,127 @@ DETAIL: Process 4693 waits for AccessExclusiveLock on relation 1992999;
 
 > ⚠️ 这个取舍（以哪套为唯一真相源、要不要改粒度）**属于口径决策，未定**。
 > 在定下来之前，档位/折扣的输出维持现状（B）。
+
+## 8.16 「准备同步」时页面报内部错误：并发共享数据库会话（系统性修复 + 两道自动化守卫）
+
+### 8.16.1 现象
+
+Walter 采集完妙手 10-01~10-26 的「库存 + 订单」两个数据域，任务 645 显示**完成**，
+但到「数据治理 → 文件列表」准备做文件同步时，页面顶部弹出红色错误，
+「数据治理概览」七个卡片**整片显示 `--`**。
+
+### 8.16.2 取证：500 的来源与根因
+
+后端日志 `temp/logs/backend_main.log`（14:11:27 / 14:11:32 / 14:11:38 / 14:12:32 四次）：
+
+```
+[未处理异常] GET /api/data-sync/governance/stats - 错误类型: IllegalStateChangeError,
+错误消息: Method 'close()' can't be called here; method 'commit()' is already in progress
+and this would cause an unexpected state change to <SessionTransactionState.CLOSED: 5>
+```
+
+traceback 精确到 `backend/models/database.py:455 in get_async_db → await session.close()`：
+**请求结束时关会话，撞上了一个还在进行中的 `commit()`。**
+
+根因在 `backend/domains/data_platform/routers/data_sync.py`：
+
+```python
+data_sync_service = DataSyncService(db)          # ← 拿的是**请求级**会话
+readiness_list = await asyncio.gather(*[          # ← N 个协程并发
+    data_sync_service.get_file_sync_readiness(   # ← 每个协程都碰同一个 session
+        file_record.id, use_template_header_row=True,
+    )
+    for file_record in pending_files
+])
+```
+
+`AsyncSession` **不是并发安全的**（SQLAlchemy 明令禁止同一 session 被多协程同时用）。
+一个协程在 `commit()` 时另一个在 `execute()` / `close()` → 竞态 → 整个接口 500。
+
+**触发条件**：pending 文件数 ≥ 2 才会真的并发。
+之前 `pending_count = 0` → `gather` 空转 → 从不触发；
+2026-10-26 14:11:13 采集注册了 3006/3007/3008 三个 pending 文件 → **第一次触发**。
+
+复现（把三个 `get_file_sync_readiness` 放同一个 session 并发跑）立刻抛：
+
+```
+sqlalchemy.exc.InvalidRequestError: Method 'execute()' can't be called here;
+method 'commit()' is already in progress
+```
+
+—— 与线上的 `close()` 撞 `commit()` 是同一个竞态的两副面孔。
+
+### 8.16.3 为什么「同步」按钮像是坏了
+
+- `POST /api/data-sync/single`（真正建同步任务的那个接口）**实测 200 正常**
+  （ASGI 全栈复现 3006/3007/3008 三个文件都返回 200 并建出任务）
+- 页面上的红色错误来自**概览接口** `GET /api/data-sync/governance/stats` 500
+- 概览一挂，前端 `governanceStatsActionDisabled` 变 true → **「同步全部可同步文件」按钮被禁用**
+  → 想点的那一下点不动，人自然以为「同步」坏了
+
+### 8.16.4 修复：不是打补丁，是「这类错误不能再犯」
+
+Walter 的要求：**「不能修好一次，后续还会发生此类错误」**。所以做了三层：
+
+**① 本处修复**（与仓库既有惯例一致 —— `data_sync.py:1651` 早就有
+「每个协程使用独立的数据库会话，避免并发冲突」的写法）
+
+```python
+async def _readiness_with_own_session(file_id: int) -> dict:
+    session_factory = AsyncSessionLocal
+    async with session_factory() as own_db:
+        return await DataSyncService(own_db).get_file_sync_readiness(...)
+```
+
+`gather` 的实参里不再出现任何请求级会话 → 竞态消失，并发度也保住了。
+
+**② 静态守卫**（新）：`scripts/check_async_session_concurrency.py`
+
+AST 规则，扫 `backend/` `modules/` `scripts/`：
+
+- 识别**请求级会话变量**（形参注解是 `AsyncSession` / 默认值含 `get_async_db` / 名字像 db·session）
+- 识别**间接持有**（`X = SomeService(db)` → X 持有该会话）
+- 在 `asyncio.gather` / `asyncio.create_task` / `asyncio.ensure_future`
+  的实参里引用到它们 → 报错
+- `AsyncSessionLocal()` 属于**独立会话** → 豁免
+- 只认 `asyncio.xxx(...)` 属性形式 → 不会把业务里同名的 `create_task` 误判
+
+已挂进 `scripts/run_lint.py`（仓库唯一的 lint 入口）→ **CI 自动拦**。
+
+对照实验：把修复退回共享 session 写法 → 守卫立刻报出
+`[gather] 间接持有请求级会话的变量 'data_sync_service' 被并发调用 gather() 使用`。
+
+**③ 运行期巡检**（新）：`scripts/check_backend_session_race.py`
+
+静态守卫看不穿跨模块传递、藏在方法内部的共享 session、第三方封装。
+这一层从后端日志里捞 SQLAlchemy 的会话并发异常特征：
+
+```
+IllegalStateChangeError / InvalidRequestError
+  + "Method 'xxx()' can't be called here"
+  + "is already in progress"
+```
+
+只统计**带时间戳的事件行**（一次事故在日志里是几十行 traceback，只能算一次）。
+实测：把今天 14:11~14:12 那次事故捞出来 = 4 次（两个日志文件各 4 条），
+接口名、时间全对得上。
+
+**④ 两道守卫自己都有测试**：`backend/tests/test_async_session_concurrency_guard.py`
+（6 项：能抓到共享写法、不误报独立会话、不误报同名业务函数、巡检按事件计数不按 traceback 行数…）
+
+### 8.16.5 全仓审计结果
+
+修完之后跑静态守卫：**全仓 0 处**。
+另有两处 `asyncio.gather` 人工审过，确认安全：
+
+| 位置 | 为什么安全 |
+|---|---|
+| `backend/tasks/data_sync_tasks.py:282` | 每个协程自己 `AsyncSessionLocal()` 并在 `finally` 里 close |
+| `backend/domains/business/routers/dashboard_api_postgresql.py:612` | 看板 service 是无参单例，方法内部自开会话，不碰请求级会话 |
+
+### 8.16.6 顺带发现（未修，另记）
+
+- `GET /api/data-sync/files` 慢到 **15.6 秒**（3.25 MB 的 xls 每次都全量解析 + 比对表头，
+  日志里刷屏 `[HeaderChange] 匹配率 0.0%`）→ 读文件这种 CPU/IO 活儿放在 async 里阻塞事件循环
+- 8 个文件卡在 `status='processing'`（2025-09-14 的 purchase 旧文件，
+  错误信息「自动入库任务超时，已回退等待重试」）

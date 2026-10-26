@@ -23,7 +23,16 @@ def main() -> int:
         # - F7/F63: common runtime-ish issues (e.g., invalid format, syntax helpers)
         "--select=E9,F7,F63",
     ]
-    return subprocess.call(args, cwd=str(repo_root))
+    exit_code = subprocess.call(args, cwd=str(repo_root))
+
+    # 自定义门禁：并发上下文里共享数据库会话（SQLAlchemy Session 非并发安全）
+    # 2026-10-26 线上事故：governance/stats 连报 4 次 500，页面概览整片变成 --。
+    session_race = subprocess.call(
+        [sys.executable, "scripts/check_async_session_concurrency.py"],
+        cwd=str(repo_root),
+    )
+
+    return exit_code or session_race
 
 
 if __name__ == "__main__":
