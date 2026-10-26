@@ -53,6 +53,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import unquote_plus
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ACCOUNT = "miaoshou_real_001"
@@ -566,8 +567,43 @@ async def _verify_switch(component: Any, page: Any) -> dict[str, Any]:
         except Exception:
             result[key] = None
     result["date_panel"] = await _dump_date_panel(page)
+    result["search_request_dates"] = await _grab_search_dates(page)
     print(f"[probe] 筛选器整体验收：{result}")
     return result
+
+
+async def _grab_search_dates(page: Any) -> dict[str, Any]:
+    """点「搜索」并抓列表查询请求里的日期参数 —— **最硬的落地证据**。
+
+    妙手的日期条件就是请求里的
+    ``gmtCreateStart/End``（维度=创建时间）与 ``gmtModifiedStart/End``（维度=更新时间）。
+    """
+    captured: list[Any] = []
+
+    def listener(req: Any) -> None:
+        if "searchGoodsSkuWarehouseList" in req.url:
+            captured.append(req)
+
+    page.on("request", listener)
+    try:
+        await page.locator("button.J_queryFormSearch").first.click(timeout=10000)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"点搜索失败：{exc}"}
+    await page.wait_for_timeout(3500)
+    page.remove_listener("request", listener)
+    if not captured:
+        return {"error": "没抓到列表查询请求"}
+    try:
+        body = captured[-1].post_data or ""
+    except Exception:
+        body = ""
+    found = dict(
+        re.findall(
+            r"(gmtModifiedStart|gmtModifiedEnd|gmtCreateStart|gmtCreateEnd)=([^&]*)",
+            body,
+        )
+    )
+    return {key: unquote_plus(value) for key, value in found.items()}
 
 
 PANEL_SCRIPT = """

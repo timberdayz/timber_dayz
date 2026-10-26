@@ -125,6 +125,21 @@ class FakeDropdown(FakeNode):
         return FakeLocator(self.page, list(self.options))
 
 
+class FakeConfirm(FakeNode):
+    """日期面板里的「确定」。
+
+    真实页面（2026-10-26 取证）：**fill 之后它是 disabled**（点不动），
+    草稿提交（Tab 失焦）之后才变可用。
+    → 「disabled」是 **「picker 还没收到值」**的信号，
+      跟「页面根本没有确定按钮」是两回事，不能混为一谈。
+    """
+
+    async def is_disabled(self) -> bool:
+        if self.page.confirm_enabled_at_once:
+            return False
+        return not self.page.range_committed
+
+
 class FakeLocator:
     def __init__(self, page: "FakePage", nodes: list[FakeNode]) -> None:
         self.page = page
@@ -149,8 +164,23 @@ class FakeKeyboard:
 
     async def press(self, key: str) -> None:
         if key == "Escape":
+            was_panel_open = self.page.panel_open
             self.page.dropdown_open = False
             self.page.panel_open = False
+            if was_panel_open:
+                # 真实页面：Escape 会把**没提交**的值回滚掉（实测）
+                self.page.start_input.value = ""
+                self.page.end_input.value = ""
+        elif key == "Tab":
+            # 真实页面：Tab = 真实 blur → picker 收到值、「确定」变可用
+            # （实测：fill + Tab 之后搜索请求里的 gmtCreateStart/End 非空）
+            self.page.dropdown_open = False
+            self.page.range_committed = True
+            if self.page.panel_closes_on_blur:
+                self.page.panel_open = False
+            if self.page.rollback_on_blur:
+                self.page.start_input.value = ""
+                self.page.end_input.value = ""
 
 
 class FakePage:
@@ -164,10 +194,13 @@ class FakePage:
         dimension_takes_effect: bool = True,
         range_input_count: int = 2,
         confirm_present: bool = False,
+        confirm_enabled_at_once: bool = False,
+        panel_closes_on_blur: bool = True,
         fill_takes_effect: bool = True,
         sku_total_text: str = "SKU总数：1113",
         dimension_select_present: bool = True,
         table_header_present: bool = True,
+        rollback_on_blur: bool = False,
     ) -> None:
         self.dimension = dimension
         self.modified_option_present = modified_option_present
@@ -175,22 +208,12 @@ class FakePage:
         self.fill_takes_effect = fill_takes_effect
         self.dropdown_open = False
 
-        key = "gmtModified," if dimension == DIMENSION_MODIFIED else "gmtCreate,"
-        self.trigger_node = FakeNode(
-            self, text=dimension, attrs={"modelvaluegroup": key}
-        )
-        # 表格表头里的同名两列（**真实页面上它们排在浮层之前**）
-        self.header_create = FakeNode(self, text=DIMENSION_CREATE)
-        self.header_modified = FakeNode(self, text=DIMENSION_MODIFIED)
-        # 下拉浮层里的两个选项
-        self.option_create = FakeNode(self, text=DIMENSION_CREATE, requires_open=True)
-        self.option_modified = FakeNode(
-            self, text=DIMENSION_MODIFIED, requires_open=True
-        )
-        self.dropdown = FakeDropdown(self, self._dropdown_options())
+        self._build_dimension_nodes()
         self.start_input = FakeNode(self)
         self.end_input = FakeNode(self)
-        self.confirm_node = FakeNode(self, visible=confirm_present, requires_panel=True)
+        self.confirm_node = FakeConfirm(
+            self, visible=confirm_present, requires_panel=True
+        )
         # 日期选择面板：点开区间输入框后弹出，会挡住「搜索」按钮
         self.date_panel = FakeNode(self, requires_panel=True)
         self.root_node = FakeNode(self, attrs={"modelvaluegroup": ""})
@@ -201,8 +224,29 @@ class FakePage:
         self.dimension_select_present = dimension_select_present
         self.table_header_present = table_header_present
         self.panel_open = False
+        self.rollback_on_blur = rollback_on_blur
+        # 区间草稿有没有提交给 picker（提交之后「确定」才变可用）
+        self.range_committed = False
+        self.confirm_enabled_at_once = confirm_enabled_at_once
+        self.panel_closes_on_blur = panel_closes_on_blur
 
     # -- 交互副作用 ----------------------------------------------------
+    def _build_dimension_nodes(self) -> None:
+        """维度触发器 + 表格表头的同名两列 + 下拉浮层里的选项。"""
+        key = "gmtModified," if self.dimension == DIMENSION_MODIFIED else "gmtCreate,"
+        self.trigger_node = FakeNode(
+            self, text=self.dimension, attrs={"modelvaluegroup": key}
+        )
+        # 表格表头里的同名两列（**真实页面上它们排在浮层之前**）
+        self.header_create = FakeNode(self, text=DIMENSION_CREATE)
+        self.header_modified = FakeNode(self, text=DIMENSION_MODIFIED)
+        # 下拉浮层里的两个选项
+        self.option_create = FakeNode(self, text=DIMENSION_CREATE, requires_open=True)
+        self.option_modified = FakeNode(
+            self, text=DIMENSION_MODIFIED, requires_open=True
+        )
+        self.dropdown = FakeDropdown(self, self._dropdown_options())
+
     def _dropdown_options(self) -> list[FakeNode]:
         """浮层里实际有的选项（可模拟「没有更新时间」）。"""
         options = [self.option_create]
@@ -230,6 +274,7 @@ class FakePage:
             return
         if node is self.confirm_node:
             self.panel_open = False
+            self.range_committed = True
             return
 
     # -- Playwright 表面 ------------------------------------------------
@@ -399,12 +444,49 @@ async def test_fails_when_range_is_not_applied():
 
 @pytest.mark.asyncio
 async def test_clicks_confirm_when_page_does_have_it():
-    """页面**有**「确定」按钮时要点它（老版页面的兼容路径）。"""
-    page = FakePage(confirm_present=True)
+    """「确定」**可用**时要点它（老版页面：点它才算提交区间）。"""
+    page = FakePage(confirm_present=True, confirm_enabled_at_once=True)
 
     await _component().apply_incremental_range(page, start=START, end=END)
 
     assert page.confirm_node.clicks == 1
+
+
+@pytest.mark.asyncio
+async def test_does_not_click_confirm_while_it_is_still_disabled():
+    """真实页面：fill 之后「确定」是 disabled —— 这时候不能去点它。
+
+    disabled 说明 **picker 还没收到值**，是「区间没生效」的信号；
+    拿它当成功就是静默失败（增量采集悄悄变成全量采集）。
+    """
+    page = FakePage(confirm_present=True)
+
+    evidence = await _component().apply_incremental_range(page, start=START, end=END)
+
+    assert page.confirm_node.clicks == 0, "「确定」还 disabled 时不能点它"
+    assert page.range_committed is True, "得靠 Tab 失焦让 picker 收到值"
+    assert evidence.dimension == DIMENSION_MODIFIED
+
+
+@pytest.mark.asyncio
+async def test_closes_panel_with_confirm_after_blur_committed_the_range():
+    """Tab 提交了草稿但面板没关 → 此时「确定」变可用 → 再点它把面板收掉。"""
+    page = FakePage(confirm_present=True, panel_closes_on_blur=False)
+
+    evidence = await _component().apply_incremental_range(page, start=START, end=END)
+
+    assert page.confirm_node.clicks == 1
+    assert page.panel_open is False
+    assert evidence.dimension == DIMENSION_MODIFIED
+
+
+@pytest.mark.asyncio
+async def test_fails_when_panel_stays_open_after_every_way_to_close_it():
+    """面板怎么都收不掉 → 必须明确失败（不能带着开着的面板去点搜索）。"""
+    page = FakePage(confirm_present=False, panel_closes_on_blur=False)
+
+    with pytest.raises(RuntimeError, match="日期选择面板"):
+        await _component().apply_incremental_range(page, start=START, end=END)
 
 
 @pytest.mark.asyncio
@@ -437,7 +519,7 @@ async def test_fails_when_date_panel_cannot_be_closed():
     """面板收不起来 → 必须明确失败（否则采集会卡在点搜索上）。"""
     page = FakePage()
 
-    async def _never_close(page: Any) -> bool:
+    async def _never_close(page: Any, focus_node: Any = None) -> bool:
         return False
 
     component = _component()
@@ -445,6 +527,33 @@ async def test_fails_when_date_panel_cannot_be_closed():
 
     with pytest.raises(RuntimeError, match="日期选择面板"):
         await component.apply_incremental_range(page, start=START, end=END)
+
+
+@pytest.mark.asyncio
+async def test_fails_when_closing_panel_rolled_the_range_back():
+    """收面板把区间回滚了 → 必须明确失败。
+
+    这是最危险的一类静默失败：**增量采集悄悄变成全量采集**。
+    所以落地证据必须在**收面板之后**读，不能用填充瞬间读到的值。
+    """
+    page = FakePage(rollback_on_blur=True)
+
+    with pytest.raises(RuntimeError, match="区间未生效"):
+        await _component().apply_incremental_range(page, start=START, end=END)
+
+
+@pytest.mark.asyncio
+async def test_range_survives_panel_close_when_picker_accepted_it():
+    """picker 收到值（fill + blur）→ 收面板后区间还在 → 证据成立。"""
+    page = FakePage(rollback_on_blur=False)
+
+    evidence = await _component().apply_incremental_range(page, start=START, end=END)
+
+    assert evidence.dimension == DIMENSION_MODIFIED
+    assert START.split(" ")[0] in evidence.applied_range
+    assert END.split(" ")[0] in evidence.applied_range
+    assert page.start_input.value == START
+    assert page.end_input.value == END
 
 
 def test_assert_search_results_refreshed_rejects_growth():

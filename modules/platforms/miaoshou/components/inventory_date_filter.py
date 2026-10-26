@@ -298,19 +298,87 @@ class MiaoshouInventoryDateFilter(InventoryDimensionMixin):
                 return actual
         return await self._read_input_value(node)
 
-    async def _fill_range(self, page: Any, *, start: str, end: str) -> tuple[str, str]:
+    async def _fill_range(
+        self, page: Any, *, start: str, end: str
+    ) -> tuple[str, str, Any]:
         # 先把维度浮层收起来 —— 它正好盖在日期区间输入框上方，不收会点不到
         await self._close_dropdown(page)
         start_input, end_input = await self._find_range_inputs(page)
         start_value = await self._fill_one(start_input, start, start.split(" ")[0])
         end_value = await self._fill_one(end_input, end, end.split(" ")[0])
-        return start_value, end_value
+        return start_value, end_value, end_input
 
-    async def _click_confirm_if_present(self, page: Any) -> bool:
-        """点「确定」—— **页面没有这个按钮也不算失败**。
+    async def _date_panel_visible(self, page: Any) -> bool:
+        """日期选择面板（点开区间输入框后弹出）现在开着没有。"""
+        try:
+            locator = page.locator(self.sel.inventory_date_filter_date_panel_selector)
+            if await locator.count() == 0:
+                return False
+            return bool(await locator.first.is_visible())
+        except Exception:
+            return False
 
-        真实页面填完区间直接点「搜索」，没有「确定/清空」。
-        老版本组件把「确定」当成必经步骤，所以页面结构一变就整段失败。
+    async def _close_date_panel(self, page: Any, focus_node: Any = None) -> bool:
+        """把日期选择面板收起来 —— **必须收**，否则它挡着「搜索」按钮。
+
+        实测（2026-10-26）：点开区间输入框会弹出 ``.jx-picker-panel``，
+        面板开着时点「搜索」会一直被
+        ``… .jx-picker-panel__sidebar … intercepts pointer events`` 拦到超时。
+
+        怎么收很关键 —— 两种收法结果**完全相反**：
+
+        | 收法 | picker 接收到值吗 | 输入框里的值 |
+        |---|---|---|
+        | 按 **Escape** | ❌ 没收到（「确定」仍是 disabled） | **被回滚清空** |
+        | 按 **Tab**（真实 blur） | ✅ 收到（「确定」变可用） | **保留** |
+
+        证据：填完区间点搜索，抓到的请求参数是
+        ``gmtCreateStart=2026-10-01 00:00:00&gmtCreateEnd=2026-10-25 23:59:59``
+        —— 值真的进了筛选条件（维度=创建时间 → 落在 gmtCreate*；
+        维度=更新时间 → 落在 gmtModified*）。
+
+        所以这里的顺序是：
+        1. 「确定」**可用**就点它（点它才算提交草稿）
+        2. 把焦点拉回结束输入框，按 **Tab** 失焦
+           —— **不能用 Escape**（会把没提交的值回滚掉）
+        3. 面板还在 → 再点一次「确定」（草稿提交之后它才变可用）
+        4. 还是收不掉 → **明确失败**，不带着一个开着的面板去点搜索
+        """
+        if not await self._date_panel_visible(page):
+            return True
+        if await self._click_confirm_if_enabled(page):
+            await self._settle(page)
+            if not await self._date_panel_visible(page):
+                return True
+        if focus_node is not None:
+            try:
+                await focus_node.click(timeout=1500)
+            except Exception:
+                pass
+        try:
+            await page.keyboard.press("Tab")
+        except Exception:
+            pass
+        await self._settle(page)
+        if not await self._date_panel_visible(page):
+            return True
+        # 草稿提交之后「确定」才变可用 → 再点一次把面板收掉
+        if await self._click_confirm_if_enabled(page):
+            await self._settle(page)
+        return not await self._date_panel_visible(page)
+
+    async def _click_confirm_if_enabled(self, page: Any) -> bool:
+        """点日期面板里的「确定」—— 只在它**可见且可用**的时候点。
+
+        三种情况要分清（真实页面 2026-10-26 取证）：
+
+        - **页面没有这个按钮** → 返回 False，**不算失败**
+          （真实页面填完区间直接点「搜索」，筛选栏上没有「确定/清空」）。
+        - **按钮在、但 disabled** → 返回 False。fill 之后「确定」就带
+          ``is-disabled``（点不动）—— 这**不是**「页面没有确定按钮」，
+          而是 **「picker 还没收到值」**，属于区间没生效的信号，不能当成功。
+        - **「确定」可用** → 点它（点它才算提交草稿），返回 True。
+
         ⚠️ 必须要求**可见** —— 页面上有些隐藏面板里也放着同 class 的按钮。
         """
         try:
@@ -323,58 +391,29 @@ class MiaoshouInventoryDateFilter(InventoryDimensionMixin):
             try:
                 if not await node.is_visible():
                     continue
+                if await node.is_disabled():
+                    continue
                 await node.click(timeout=1500)
                 return True
             except Exception:
                 continue
         return False
 
-    async def _date_panel_visible(self, page: Any) -> bool:
-        """日期选择面板（点开区间输入框后弹出）现在开着没有。"""
-        try:
-            locator = page.locator(self.sel.inventory_date_filter_date_panel_selector)
-            if await locator.count() == 0:
-                return False
-            return bool(await locator.first.is_visible())
-        except Exception:
-            return False
+    async def _read_range_inputs(self, page: Any) -> tuple[str, str]:
+        """读筛选栏上**当前**两个区间输入框的值。
 
-    async def _close_date_panel(self, page: Any) -> bool:
-        """把日期选择面板收起来 —— **必须收**，否则它挡着「搜索」按钮。
-
-        实测（2026-10-26）：点开区间输入框会弹出 ``.jx-picker-panel``，
-        面板开着时点「搜索」会一直被
-        ``… .jx-picker-panel__sidebar … intercepts pointer events`` 拦到超时。
-
-        顺序：先试「确定」（有确定按钮说明草稿有效，点它才算提交），
-        确定不可用（``is-disabled``）就按 Escape 收起来 ——
-        **区间到底有没有生效另有判据**（见 spec §8.14）。
+        ⚠️ 必须在**收面板之后**读 —— 收面板会把没提交的值回滚掉，
+        填充瞬间读到的值不作数（2026-10-26 实测踩过）。
         """
-        if not await self._date_panel_visible(page):
-            return True
-        try:
-            confirm = page.locator(self.sel.inventory_date_filter_confirm_selector)
-            count = await confirm.count()
-        except Exception:
-            count = 0
-        for index in range(min(count, 4)):
-            node = confirm.nth(index)
-            try:
-                if not await node.is_visible():
-                    continue
-                if await node.is_disabled():
-                    continue
-                await node.click(timeout=1500)
-                await self._settle(page)
-                break
-            except Exception:
-                continue
-        try:
-            await page.keyboard.press("Escape")
-        except Exception:
-            pass
-        await self._settle(page)
-        return not await self._date_panel_visible(page)
+        start = await self._first_visible_by_placeholder(
+            page, self.sel.inventory_date_filter_range_start_placeholders
+        )
+        end = await self._first_visible_by_placeholder(
+            page, self.sel.inventory_date_filter_range_end_placeholders
+        )
+        start_value = await self._read_input_value(start) if start is not None else ""
+        end_value = await self._read_input_value(end) if end is not None else ""
+        return start_value, end_value
 
     async def _read_applied_range(self, page: Any) -> str:
         """读筛选器上已应用的区间（老路：``modelvaluegroup`` 属性）。"""
@@ -448,18 +487,21 @@ class MiaoshouInventoryDateFilter(InventoryDimensionMixin):
         ``start`` / ``end`` 用 ``YYYY-MM-DD HH:MM:SS`` 文本。
         """
         dimension = await self._switch_to_modified_dimension(page)
-        start_value, end_value = await self._fill_range(page, start=start, end=end)
+        start_value, end_value, end_node = await self._fill_range(
+            page, start=start, end=end
+        )
         # 填完必须把日期面板收起来 —— 它会挡住「搜索」按钮
-        if not await self._close_date_panel(page):
+        if not await self._close_date_panel(page, focus_node=end_node):
             raise RuntimeError(
                 "日期选择面板没收起来：它会挡住「搜索」按钮，采集会卡在点搜索上"
             )
-        await self._click_confirm_if_present(page)
+        # ⚠️ 收面板之后**重新读**输入框 —— 收面板会把没提交的值回滚掉
+        final_start, final_end = await self._read_range_inputs(page)
 
         applied = await self._read_applied_range(page)
         # 两条证据路径：输入框回填值（真实页面）/ 筛选器属性（老路径）
-        by_inputs = self._contains_time(start_value, start) and self._contains_time(
-            end_value, end
+        by_inputs = self._contains_time(final_start, start) and self._contains_time(
+            final_end, end
         )
         by_attribute = self._contains_time(applied, start) and self._contains_time(
             applied, end
@@ -467,12 +509,13 @@ class MiaoshouInventoryDateFilter(InventoryDimensionMixin):
         if not (by_inputs or by_attribute):
             raise RuntimeError(
                 f"区间未生效：期望含 {start} / {end}，"
-                f"输入框读到 {start_value!r} / {end_value!r}，筛选器读到 {applied!r}"
+                f"收面板后输入框读到 {final_start!r} / {final_end!r}，"
+                f"筛选器读到 {applied!r}（填充瞬间读到的是 {start_value!r} / {end_value!r}）"
             )
 
         return InventoryDateFilterEvidence(
             dimension=dimension,
-            applied_range=applied or f"{start_value},{end_value}",
+            applied_range=applied or f"{final_start},{final_end}",
             start=start,
             end=end,
         )
