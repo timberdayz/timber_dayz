@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>妙手库存增量筛选 · 这一轮到底修好了什么</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#f7f5f0;
+    --card:#ffffff;
+    --line:#e9e3d6;
+    --line-soft:#f0ece2;
+    --text:#14171e;
+    --body:#3a4256;
+    --muted:#7c7a72;
+    --primary:#2f6f5e;
+    --primary-soft:rgba(47,111,94,.08);
+    --warn:#c97b3f;
+    --warn-soft:rgba(201,123,63,.10);
+    --bad:#b06367;
+    --bad-soft:rgba(176,99,103,.10);
+    --mono:'JetBrains Mono',monospace;
+    --sans:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+    --serif:'DM Serif Display','Songti SC',serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg);color:var(--body);font-family:var(--sans);
+    font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased
+  }
+  .wrap{max-width:960px;margin:0 auto;padding:0 24px 96px}
+  section{margin-top:52px}
+
+  header{padding:56px 0 8px}
+  .kicker{
+    font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--primary);margin-bottom:14px
+  }
+  h1{
+    font-family:var(--serif);font-weight:400;font-size:34px;line-height:1.25;
+    color:var(--text);letter-spacing:-.005em;margin-bottom:16px
+  }
+  .lede{font-size:16px;color:var(--body);max-width:64ch}
+  .lede b{color:var(--text);font-weight:600}
+
+  .headrow{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+  .headrow h2{
+    font-family:var(--serif);font-weight:400;font-size:23px;color:var(--text);letter-spacing:-.003em
+  }
+  .headrow svg{color:var(--primary);flex:none}
+
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:20px 22px;box-shadow:0 2px 8px rgba(0,0,0,.04)
+  }
+  .verdict{
+    background:var(--primary-soft);border:1px solid rgba(47,111,94,.18);
+    border-radius:16px;padding:18px 22px
+  }
+  .verdict p{font-size:15px;color:var(--text)}
+  .verdict b{font-weight:600}
+
+  .figures{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;margin-top:20px}
+  .fig{
+    grid-column:span 3;background:var(--card);border:1px solid var(--line);
+    border-radius:14px;padding:16px 18px
+  }
+  .fig .n{
+    font-family:var(--mono);font-size:25px;font-weight:500;color:var(--text);
+    line-height:1.15;letter-spacing:-.02em
+  }
+  .fig .n small{font-size:14px;color:var(--muted);font-weight:400;margin-left:2px}
+  .fig .l{font-size:13px;color:var(--muted);margin-top:6px}
+  .fig.hot .n{color:var(--warn)}
+
+  /* 步骤链 */
+  .chain{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .step{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:16px 16px 18px;position:relative
+  }
+  .step .no{
+    font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--muted);
+    display:block;margin-bottom:8px
+  }
+  .step .t{font-size:14px;color:var(--text);font-weight:600;margin-bottom:6px}
+  .step .d{font-size:13px;color:var(--muted);line-height:1.55}
+  .step.bad{border-color:rgba(176,99,103,.28);background:var(--bad-soft)}
+  .step.bad .t{color:var(--bad)}
+  .step.good{border-color:rgba(47,111,94,.25);background:var(--primary-soft)}
+  .step.good .t{color:var(--primary)}
+
+  /* 对照表 */
+  table{width:100%;border-collapse:collapse;margin-top:4px}
+  th,td{
+    text-align:left;padding:11px 12px;border-bottom:1px solid var(--line-soft);
+    font-size:14px;vertical-align:top
+  }
+  th{
+    font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);font-weight:500;border-bottom:1px solid var(--line)
+  }
+  tr:last-child td{border-bottom:none}
+  td.mono,th.mono{font-family:var(--mono);font-size:12.5px}
+  .yes{color:var(--primary);font-weight:600}
+  .no{color:var(--bad);font-weight:600}
+  .rowbad td{background:var(--bad-soft)}
+  .rowgood td{background:var(--primary-soft)}
+
+  pre{
+    background:#14171e;color:#e6e3da;border-radius:12px;padding:16px 18px;
+    font-family:var(--mono);font-size:12.5px;line-height:1.75;overflow-x:auto
+  }
+  pre .k{color:#8fb8a8}
+  pre .g{color:#a8c98a}
+  pre .r{color:#e0908f}
+  pre .d{color:#8d8b80}
+
+  ul.ticks{list-style:none;display:grid;gap:9px;margin-top:4px}
+  ul.ticks li{display:flex;gap:10px;font-size:14px;align-items:flex-start}
+  ul.ticks li b{color:var(--text);font-weight:600}
+  ul.ticks .mk{
+    flex:none;width:18px;height:18px;border-radius:50%;margin-top:3px;
+    display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700
+  }
+  .mk.ok{background:var(--primary);color:#fff}
+  .mk.pend{background:#e7e1d4;color:var(--muted)}
+  .mk.no{background:var(--bad);color:#fff}
+
+  .note{
+    background:var(--warn-soft);border:1px solid rgba(201,123,63,.25);
+    border-radius:14px;padding:16px 18px;font-size:14px;color:var(--text)
+  }
+  .note b{font-weight:600}
+  .note .h{
+    font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--warn);
+    text-transform:uppercase;display:block;margin-bottom:7px
+  }
+
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13.5px}
+  .kv dt{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+  .kv dd{color:var(--text)}
+
+  footer{
+    margin-top:64px;padding-top:22px;border-top:1px solid var(--line);
+    font-size:12.5px;color:var(--muted)
+  }
+  @media (max-width:760px){
+    .figures,.chain{grid-template-columns:repeat(2,1fr)}
+    .fig{grid-column:span 1}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="kicker">Inventory Increment · B1 筛选组件</div>
+    <h1>「点了没反应」的三个坑，和这一轮真正修好的是什么</h1>
+    <p class="lede">
+      表面上都是同一句报错「维度未切到『更新时间』」，实际上是<b>三个完全不同的坑</b>，
+      叠在一起才让采集看起来像「点不动」。这一轮把它们逐个挖开、逐个修掉，
+      并且给每一步都补上了<b>能证伪的落地判据</b>——不再靠「页面看着正常」蒙混过关。
+    </p>
+  </header>
+
+  <section>
+    <div class="verdict">
+      <p>
+        <b>结论：</b>增量筛选组件（维度 + 区间）现在<b>端到端打通</b>了。
+        真实页面上量到的四项硬证据全部对上：维度切到了「更新时间」、区间在收面板之后仍然保留、
+        日期面板已收起、<b>点搜索时请求参数真的带上了 gmtModifiedStart / gmtModifiedEnd</b>。
+        剩下唯一挡路的是<b>妙手账号授权过期</b>——这必须人工重新登录，代码解决不了。
+      </p>
+    </div>
+
+    <div class="figures">
+      <div class="fig"><div class="n">3</div><div class="l">叠在一起的独立坑</div></div>
+      <div class="fig"><div class="n">22</div><div class="l">项行为测试（全部有牙齿）</div></div>
+      <div class="fig hot"><div class="n">8</div><div class="l">项会变红——退回旧写法时</div></div>
+      <div class="fig"><div class="n">0</div><div class="l">新增回归失败</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+      <h2>三次失败，三个不同的根因</h2>
+    </div>
+    <div class="chain">
+      <div class="step bad">
+        <span class="no">坑 1 · 12:07</span>
+        <div class="t">点到了表格表头</div>
+        <div class="d">全页按文字找「更新时间」，第一个命中是<b>表头的排序列</b>，不是下拉里的选项。点下去变成「按更新时间排序」，维度根本没切。</div>
+      </div>
+      <div class="step bad">
+        <span class="no">坑 2 · 12:50</span>
+        <div class="t">日期面板挡着搜索按钮</div>
+        <div class="d">填完区间弹出日期面板，它盖在「搜索」前面，点击被拦到超时——采集卡死在这一步。</div>
+      </div>
+      <div class="step bad">
+        <span class="no">坑 3 · 之后</span>
+        <div class="t">区间被自己收面板时弄丢</div>
+        <div class="d">用 <b>Escape</b> 收面板 → picker 把没提交的值<b>回滚清空</b>；而落地证据读的是填充瞬间的值 → <b>误判成成功</b>。增量采集悄悄变成全量采集。</div>
+      </div>
+      <div class="step good">
+        <span class="no">这一轮</span>
+        <div class="t">三个坑全部定位并修掉</div>
+        <div class="d">定位一律<b>限定范围</b>；收面板改用 <b>Tab</b>（真实 blur）；落地证据改成<b>状态变化之后再读</b>。</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
+      <h2>决定性对照实验：收面板的方式，决定区间活不活</h2>
+    </div>
+    <div class="card">
+      <p style="font-size:14px;margin-bottom:14px">
+        妙手的日期条件就在<b>点搜索时的请求参数</b>里。用它当判据（而不是看输入框长什么样），
+        两种收面板方式的结论<b>完全相反</b>：
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>收面板方式</th>
+            <th>picker 收到值吗</th>
+            <th>输入框里的值</th>
+            <th>点搜索时请求里的日期参数</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="rowbad">
+            <td><b>按 Escape</b></td>
+            <td class="no">否（「确定」仍是 disabled）</td>
+            <td class="no">被回滚清空</td>
+            <td class="mono no">空</td>
+          </tr>
+          <tr class="rowgood">
+            <td><b>按 Tab</b>（真实 blur）</td>
+            <td class="yes">是（「确定」变可用）</td>
+            <td class="yes">保留</td>
+            <td class="mono">gmtCreateStart=2026-10-01 00:00:00<br />gmtCreateEnd=2026-10-25 23:59:59</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="font-size:13px;color:var(--muted);margin-top:12px">
+        注：实验里没切维度，所以落在 gmtCreate*；维度 =「更新时间」时落在 gmtModified*。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+      <h2>端到端验收：真实页面上的四项硬证据</h2>
+    </div>
+    <pre><span class="d"># 真实妙手页面 · 探针 --mode verify</span>
+<span class="k">final_dimension</span>      = <span class="g">'更新时间'</span>
+<span class="k">range_start_value</span>    = <span class="g">'2026-10-01 00:00:00'</span>   <span class="d">← 收面板之后仍在</span>
+<span class="k">range_end_value</span>      = <span class="g">'2026-10-25 23:59:59'</span>   <span class="d">← 收面板之后仍在</span>
+<span class="k">date_panel</span>           = <span class="g">已收起（visible=False）</span>
+<span class="k">search_request_dates</span> = {
+    <span class="k">'gmtCreateStart'</span>:   <span class="r">''</span>,
+    <span class="k">'gmtCreateEnd'</span>:     <span class="r">''</span>,
+    <span class="k">'gmtModifiedStart'</span>: <span class="g">'2026-10-01 00:00:00'</span>,  <span class="d">← ★ 落在 gmtModified</span>
+    <span class="k">'gmtModifiedEnd'</span>:   <span class="g">'2026-10-25 23:59:59'</span>,
+}</pre>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+      <h2>为什么「限定范围」是硬规矩</h2>
+    </div>
+    <div class="card">
+      <p style="font-size:14px;margin-bottom:12px">
+        探针在真实页面上做了点击落点计算，同一句「更新时间」在页面上有<b>两个</b>命中，
+        而且<b>两个都可见</b>——所以「取第一个」必然出事：
+      </p>
+      <table>
+        <thead>
+          <tr><th>命中序号</th><th>元素</th><th>是什么</th><th>点下去会发生什么</th></tr>
+        </thead>
+        <tbody>
+          <tr class="rowbad">
+            <td class="mono">index 0</td>
+            <td class="mono">DIV.cell</td>
+            <td>表格<b>表头</b>的排序列</td>
+            <td class="no">只触发「按更新时间排序」，维度不变</td>
+          </tr>
+          <tr class="rowgood">
+            <td class="mono">index 1</td>
+            <td class="mono">LI.jx-select-dropdown__item</td>
+            <td>下拉浮层里的<b>真选项</b></td>
+            <td class="yes">维度真的切过去</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="font-size:13px;color:var(--muted);margin-top:12px">
+        修法：触发器用 <span class="mono">[modelvaluegroup*='gmt']</span> 认（维度键 gmtCreate / gmtModified 就挂在这上面，
+        表头没这个属性）；选项只在<b>可见的下拉浮层容器内</b>找。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+      <h2>测试是真的在守行为，不是摆设</h2>
+    </div>
+    <div class="card">
+      <ul class="ticks">
+        <li><span class="mk ok">✓</span><span><b>22 项行为测试</b>，假页面刻意复刻了真实页面的三个陷阱：表头同名、日期面板挡搜索、「确定」填完是 disabled。</span></li>
+        <li><span class="mk ok">✓</span><span><b>对照实验 1：</b>把收面板方式退回 Escape → <b>8 项变红</b>。</span></li>
+        <li><span class="mk ok">✓</span><span><b>对照实验 2：</b>把维度定位退回全页 <span class="mono">get_by_text(...).nth(0)</span> → 同样变红（表头被点 1 次、选项被点 0 次 → 报「维度未切到」）。</span></li>
+        <li><span class="mk ok">✓</span><span><b>妙手相关 172 项全绿</b>；data_pipeline 26 failed / 467 passed 与基线<b>逐条同名同序</b> → 零回归。</span></li>
+        <li><span class="mk ok">✓</span><span>black / ruff / 长度门禁（函数 ≤50 行、类 ≤500 行）全绿，主类 448 行。</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.9 4.9l2.9 2.9M16.2 16.2l2.9 2.9M2 12h4M18 12h4M4.9 19.1l2.9-2.9M16.2 7.8l2.9-2.9"/></svg>
+      <h2>现在还差什么：三步人工操作</h2>
+    </div>
+    <div class="card">
+      <ul class="ticks">
+        <li><span class="mk no">1</span><span><b>重新登录妙手</b>——弹窗原文「您的授权已经过期，请重新登录」，而且关掉又立刻弹回来、挡住所有点击。<br>
+          <span style="color:var(--muted)">页面本身还能打开（标题仍是「妙手-仓库清单」）、24 个 cookie 仍有效 → 过期的是<b>账号授权</b>，不是登录态。用采集中心的妙手「登录」动作即可，会自动刷新会话文件。</span></span></li>
+        <li><span class="mk no">2</span><span><b>重启后端</b>——当前后端进程是 12:04:51 启动的、<b>没带 --reload</b>，跑的还是今天修复前的老代码。<br>
+          <span class="mono" style="font-size:12.5px;display:block;margin-top:6px;color:var(--text)">python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8001 --loop asyncio</span>
+          <span style="color:var(--muted)">celery worker 已经重启过了，容器内确认是新代码，不用再动。</span></span></li>
+        <li><span class="mk no">3</span><span><b>人工跑一次采集</b>，建议用 <b>配置 30</b>（<span class="mono">auto_prev_day</span>）→ 库存窗口走<b>水位线窗口</b> = [2026-10-23, now]，这才是要验的增量路径。</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="note">
+      <span class="h">别直接跑配置 27</span>
+      <p>
+        配置 27 是 <b>custom 2026-10-01 → 2026-10-10</b>，属于<b>一次性补数</b>形态。
+        它会用这个区间去筛，但跑完之后<b>水位线会被推到「现在」</b>——
+        于是 10-24 04:39 之后那两天的变更，会被下一轮的窗口（从水位线−1 天起）跳过。
+        跑之前先想清楚这一段要不要漏。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="headrow">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16h10"/></svg>
+      <h2>跑完怎么验：看水位线有没有往前走</h2>
+    </div>
+    <div class="card">
+      <pre><span class="k">select</span> platform_code, <span class="k">count</span>(*), <span class="k">max</span>(row_seen_at), <span class="k">max</span>(stock_added_at)
+<span class="k">from</span> mart.inventory_state <span class="k">group by</span> platform_code;</pre>
+      <dl class="kv" style="margin-top:14px">
+        <dt>跑之前</dt><dd>miaoshou · 1230 行 · max(row_seen_at) = <b>2026-10-24 04:39:53+00</b> · max(stock_added_at) = 2026-10-14 04:00:13+00</dd>
+        <dt>判据 ①</dt><dd><b>max(row_seen_at) 往前走</b> → upsert 落库 + 水位线推进这条链通了</dd>
+        <dt>判据 ②</dt><dd><b>max(stock_added_at) 只在库存数量增加的行上推进</b>；不变或减少则不动（卖完不补货，只有补货才是新的开始）</dd>
+        <dt>判据 ③</dt><dd>任务日志出现 <span class="mono">Config 30 inventory incremental window: … (watermark)</span></dd>
+        <dt>判据 ④</dt><dd><b>导出行数明显少于全量 1113</b> —— 还是 1113 就说明区间又没生效</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <div class="note">
+      <span class="h">自动调度先别开</span>
+      <p>
+        现有 3 条妙手配置的 <span class="mono">schedule_enabled</span> <b>全部是关的，保持关着</b>。
+        筛选器这一环虽然通了，但<b>完整采集链路</b>（两次搜索 + 导出 + 落盘 + 状态层水位线推进）
+        还要在真实任务里跑一次、确认水位线真的在往前走，再谈开调度。
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    提交 <span class="mono">c8342006</span> · local / origin/main / cnb/main 三处同 commit ·
+    celery worker 已重启并确认容器内为新代码 ·
+    规格文档 <span class="mono">docs/superpowers/specs/2026-10-24-inventory-domain-rollout-worklist.md §8.14</span>
+  </footer>
+
+</div>
+</body>
+</html>
