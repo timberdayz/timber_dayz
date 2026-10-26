@@ -1137,8 +1137,25 @@ DETAIL: Process 4693 waits for AccessExclusiveLock on relation 1992999;
 - 一个进程要 `CREATE OR REPLACE VIEW`（排他锁），另一个在读视图 → 互等 → 死锁检测杀一个
 - **死锁双方抢的都是视图** → 视图本来就自动反映底层数据 → **数据没丢**
   （这两个视图现在的数据都是新的：ingest 05:32:39）
-- 根因：`refresh_runner` 里的 `_OPS_TABLES_LOCK` 是 **`asyncio.Lock`（进程内）**，
-  跨进程（uvicorn ↔ celery worker）完全无效
+
+**根因（2026-10-26 17:5x 更正）**：
+
+- 根因是**「刷新时重建视图」与「同时在读视图」抢同一张表的锁**：
+  `execute_sql_target` → `execute_sql_file` 执行视图的 SQL 文件（里面有
+  `CREATE OR REPLACE VIEW`）→ 要 **ACCESS EXCLUSIVE 排他锁**；
+  另一个进程（uvicorn 后端，用户在看页面）查同一视图 → 要 **ACCESS SHARE 共享锁**
+  → 互等 → PostgreSQL 死锁检测器杀一个
+- ⚠️ **此前写的「`_OPS_TABLES_LOCK` 是进程内 `asyncio.Lock`、跨进程无效」是误判**：
+  那个锁只保护「ops 四张日志表是否已建好」的一次性检查（`_OPS_TABLES_READY_SIGNATURE` 缓存），
+  **与视图重建、与本死锁都无关**
+- 但「进程内锁无法跨进程互斥」这个**一般性结论**依然成立 —— 只是它不是本次死锁的根因，
+  真正的互斥要在**数据库层**做（advisory lock）
+
+**为什么现有的重试救不回来**：`execute_sql_target` 的重试用的是
+`async with db.begin_nested()`（SAVEPOINT），只救**语句级**错误。
+而 PostgreSQL 的死锁是**事务级**失败 —— 事务被标记 aborted 后，
+SAVEPOINT 回滚无效，必须**回滚整个事务再重开**。
+所以现在死锁必然把任务打成 failed。
 
 ### 8.15.7 发现：两套「距上次进货天数」并存，且差了 19~656 天
 
