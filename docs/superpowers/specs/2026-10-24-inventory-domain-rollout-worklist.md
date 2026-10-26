@@ -905,3 +905,87 @@ page.get_by_text("更新时间", exact=True)  →  2 个可见命中
 > ⚠️ 仍然**先别开自动调度**（现有 3 条妙手配置的 `schedule_enabled` 还是关的）。
 > 组件这一环已经通了，但**完整增量采集链路**（两次搜索 + 区间生效 + 结果集刷新）
 > 还需要在真实任务里跑一次，确认状态层水位线真的在推进。
+
+---
+
+## 8.14 维度切通之后挖到的下一个坑：区间根本没进筛选条件
+
+§8.13 把维度切通了，真实页面验收也过了。但把验收范围从「维度」扩到
+「维度 + 区间」（直接调采集真正用的 ``apply_incremental_range``）之后，
+挖出**另一个更隐蔽的问题**。
+
+### 8.14.1 现象（真实页面取证）
+
+点开筛选栏的区间输入框，妙手会弹出一个**日期选择面板**：
+
+```html
+<div class="jx-picker-panel jx-date-range-picker has-sidebar has-time"
+     actualvisible="true" format="YYYY-MM-DD HH:mm:ss"
+     modelvalue="" isrange="false" clearable="true">
+  <div class="jx-picker-panel__sidebar">  今天 / 昨天 / 近7天 / 近30天 / 近90天 </div>
+  <div class="jx-picker-panel__body">      左右两个月 + 时间编辑器 </div>
+  <div class="jx-picker-panel__footer">
+    <button class="jx-button jx-button--small is-text jx-picker-panel__link-btn">清空</button>
+    <button aria-disabled="true" disabled=""
+            class="jx-button jx-button--small is-disabled is-plain jx-picker-panel__link-btn">确定</button>
+  </div>
+</div>
+```
+
+三个事实：
+
+| # | 事实 | 后果 |
+|---|---|---|
+| 1 | 往筛选栏 input 里 `fill()` 之后，面板的「确定」**仍是 disabled** | picker 的草稿没更新 → **区间大概率没进筛选器的 v-model** |
+| 2 | 按 Tab（真实 blur）之后，「确定」变**可用**，但面板同时关闭 | 想点「确定」来不及 —— 面板先关了 |
+| 3 | 面板**开着的时候**会挡住「搜索」按钮 | `click` 一直重试到超时 → 采集直接卡死在这 |
+
+> ⚠️ 现在的证据校验（读输入框回填值）**会把「区间没生效」误判成成功** ——
+> 因为输入框里确实写着日期，但妙手内部没收到。这正是要挡的那类静默失败：
+> **增量采集悄悄变成全量采集**。
+
+### 8.14.2 找到了最硬的落地判据：搜索请求的参数
+
+妙手点「搜索」打的是：
+
+```
+POST /api/warehouse/goods/searchGoodsSkuWarehouseList
+body = pageSize=20&page=1&hasLockedStockNum=&goodsName=&...&
+       gmtCreateStart=&gmtCreateEnd=&gmtModifiedStart=&gmtModifiedEnd=&...
+```
+
+**日期条件就是 `gmtCreateStart/End` 与 `gmtModifiedStart/End`** ——
+正好对应两个维度。所以「区间到底生效没有」不该看输入框长什么样，
+而该看**点搜索时请求里的 `gmtModifiedStart` / `gmtModifiedEnd` 是不是非空**。
+
+→ 这是后续修 `_fill_range` 时要用的验收判据（比 DOM 断言硬得多）。
+
+### 8.14.3 顺带发现：妙手授权已经过期（**阻断性**）
+
+探针在页面上撞到一个反复出现的 message box，点不掉：
+
+```
+<div role="dialog" class="jx-overlay-message-box">
+  <div class="jx-message-box__message"><p>您的授权已经过期，请重新登录</p></div>
+  … 取消 / 重新登录 …
+</div>
+```
+
+- 这个弹窗**每次被关掉又立刻弹回来**（授权确实过期，每次请求都触发）
+- 它会**挡住页面上任何点击**（Playwright 报 `… intercepts pointer events`）
+- 探针里 **SKU总数 恒为 0** 就是它造成的 —— 不是仓库没选，是**查不到数据**
+
+→ 采集时间点是 12:07（当时页面正常、有 1112 行数据），探针跑到 12:50 时授权已过期。
+→ **需要人工重新登录妙手**，否则探针与采集都不可信。
+
+### 8.14.4 待办（等授权恢复后做）
+
+1. 用「搜索请求里的 `gmtModifiedStart/End` 非空」当判据，
+   测出区间到底要**怎么填**才生效：
+   - 候选 A：`fill` + 真实 blur（Tab）→ 面板关闭、值进草稿
+   - 候选 B：fill 后在**面板里的编辑器**（`.jx-picker-panel input.jx-input__inner[placeholder='开始时间']`）也填一遍
+   - 候选 C：走**日历点选**（点开始日期格 → 点结束日期格 → 点「确定」）
+2. 改 `_fill_range`：填完必须**把面板收起来**（否则挡住「搜索」），
+   并且**落地证据改成读请求参数**，不再读输入框回填值
+3. `_click_confirm_if_present` 要区分「没有确定按钮」和「确定按钮是 disabled」，
+   后者是**区间没生效**的信号，不能当成功
