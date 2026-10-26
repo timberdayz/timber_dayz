@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>妙手库存采集组件 · 真实页面重校准</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#f7f5f0;
+    --card:#ffffff;
+    --line:#e9e3d6;
+    --line-soft:#f0ece2;
+    --text:#14171e;
+    --body:#3a4256;
+    --muted:#7c7a72;
+    --primary:#2f6f5e;
+    --primary-soft:rgba(47,111,94,.08);
+    --warn:#c97b3f;
+    --warn-soft:rgba(201,123,63,.10);
+    --bad:#b06367;
+    --bad-soft:rgba(176,99,103,.10);
+    --mono:'JetBrains Mono',monospace;
+    --sans:'Outfit','PingFang SC','Microsoft YaHei',sans-serif;
+    --serif:'DM Serif Display','Songti SC',serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg);
+    color:var(--body);
+    font-family:var(--sans);
+    font-size:15px;
+    line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1000px;margin:0 auto;padding:0 24px 96px}
+  section{margin-top:52px}
+
+  header{padding:56px 0 8px}
+  .kicker{
+    font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--primary);margin-bottom:14px
+  }
+  h1{
+    font-family:var(--serif);font-weight:400;font-size:34px;line-height:1.25;
+    color:var(--text);letter-spacing:-.005em;margin-bottom:16px
+  }
+  .lede{font-size:16px;max-width:66ch}
+  .lede b{color:var(--text);font-weight:600}
+
+  .headrow{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+  .headrow h2{
+    font-family:var(--serif);font-weight:400;font-size:23px;color:var(--text);letter-spacing:-.003em
+  }
+  .headrow .bar{width:4px;height:22px;background:var(--primary);border-radius:2px;flex:none}
+
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:20px 22px;box-shadow:0 2px 8px rgba(0,0,0,.04)
+  }
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:820px){.g2,.g3,.g4{grid-template-columns:1fr}}
+
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .stat .n{font-family:var(--serif);font-size:30px;line-height:1;color:var(--text)}
+  .stat .l{font-size:13px;color:var(--muted);margin-top:6px}
+  .stat.bad .n{color:var(--bad)}
+  .stat.good .n{color:var(--primary)}
+
+  .tag{
+    display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+    padding:2px 8px;border-radius:999px;background:var(--primary-soft);color:var(--primary);
+    border:1px solid rgba(47,111,94,.18)
+  }
+  .tag.bad{background:var(--bad-soft);color:var(--bad);border-color:rgba(176,99,103,.2)}
+  .tag.warn{background:var(--warn-soft);color:var(--warn);border-color:rgba(201,123,63,.22)}
+
+  pre{
+    font-family:var(--mono);font-size:12.5px;line-height:1.75;background:#14171e;color:#dfe4ee;
+    border-radius:12px;padding:16px 18px;overflow-x:auto
+  }
+  pre .bad{color:#f0a0a4}
+  pre .ok{color:#8fd0b4}
+  pre .dim{color:#8b93a7}
+
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{
+    text-align:left;font-weight:600;font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);padding:0 12px 9px 0;border-bottom:1px solid var(--line)
+  }
+  td{padding:11px 12px 11px 0;border-bottom:1px solid var(--line-soft);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--line-soft);padding:1px 6px;border-radius:5px;color:var(--text)}
+  .old{color:var(--bad)}
+  .new{color:var(--primary);font-weight:600}
+
+  /* 页面结构示意 */
+  .mock{background:#fbfaf7;border:1px solid var(--line);border-radius:12px;padding:14px;font-family:var(--mono);font-size:12.5px;line-height:2;overflow-x:auto}
+  .mock .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .chip{background:#fff;border:1px solid var(--line);border-radius:7px;padding:3px 10px;color:var(--body)}
+  .chip.hl{border-color:var(--primary);color:var(--primary);background:var(--primary-soft);font-weight:600}
+  .chip.bad{border-color:var(--bad);color:var(--bad);background:var(--bad-soft);font-weight:600}
+  .chip .sub{opacity:.6;font-size:11px}
+
+  .steps{counter-reset:s;list-style:none;padding:0}
+  .steps li{position:relative;padding:0 0 16px 38px;counter-increment:s}
+  .steps li::before{
+    content:counter(s);position:absolute;left:0;top:0;width:24px;height:24px;border-radius:50%;
+    background:var(--primary);color:#fff;font-family:var(--mono);font-size:12px;
+    display:flex;align-items:center;justify-content:center
+  }
+  .steps li::after{
+    content:'';position:absolute;left:11px;top:26px;bottom:0;width:2px;background:var(--line)
+  }
+  .steps li:last-child::after{display:none}
+  .steps li.bad::before{background:var(--bad)}
+  .steps li b{color:var(--text);display:block;margin-bottom:2px}
+  .steps li span{font-size:13.5px;color:var(--muted)}
+
+  .callout{
+    border-left:3px solid var(--warn);background:var(--warn-soft);
+    padding:14px 18px;border-radius:0 12px 12px 0;font-size:14.5px
+  }
+  .callout b{color:var(--text)}
+  .note{
+    border-left:3px solid var(--primary);background:var(--primary-soft);
+    padding:14px 18px;border-radius:0 12px 12px 0;font-size:14.5px
+  }
+  .note b{color:var(--text)}
+  ul.ticks{margin:10px 0 0;padding-left:20px}
+  ul.ticks li{margin-bottom:6px}
+  .muted{color:var(--muted);font-size:13.5px}
+  .hr{height:1px;background:var(--line);margin:0}
+  .foot{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">妙手库存域 · 采集组件校准</div>
+  <h1>上一版组件假设了一个<strong style="color:var(--bad)">根本不存在的面板</strong></h1>
+  <p class="lede">
+    2026-10-26 凌晨的失败现场告诉我们：妙手仓库清单的时间筛选器<b>不是</b> jx-ui 的 picker 面板，
+    而是筛选栏里的<b>内联下拉 + 内联日期区间</b>，而且<b>根本没有「确定 / 清空」按钮</b>。
+    组件把全部赌注押在 class 名上，一次页面改版就全线崩。
+  </p>
+</header>
+
+<section>
+  <div class="grid g4">
+    <div class="stat bad"><div class="n">8/8</div><div class="l">旧选择器全部落空</div></div>
+    <div class="stat"><div class="n">0</div><div class="l">搜索与导出曾被触达</div></div>
+    <div class="stat good"><div class="n">12</div><div class="l">组件行为测试（重写后）</div></div>
+    <div class="stat good"><div class="n">0</div><div class="l">回归新增失败</div></div>
+  </div>
+</section>
+
+<section>
+  <div class="headrow"><span class="bar"></span><h2>失败现场</h2></div>
+  <div class="card">
+    <p style="margin-bottom:12px">任务 <code>7b302e24</code>（妙手库存，2026-10-26 00:42）—— 步骤日志原文：</p>
+<pre><span class="dim">16:43:45</span>  [step_success] 仓库范围已全选
+<span class="dim">16:43:46</span>  [step_start]   设置更新时间维度与采集区间
+<span class="dim">16:44:06</span>  <span class="bad">[step_failed]  导出流程失败</span>
+                 reason=仓库清单日期筛选面板打不开
+                 matched_signal=date_filter:modelvaluegroup
+                 current_url=https://erp.91miaoshou.com/warehouse/checklist</pre>
+    <p style="margin-top:14px" class="muted">
+      断在<b>第 3 步</b>（设置时间筛选）。<b>搜索和导出根本没开始</b> —— 这也说明
+      「设置筛选」在旧实现里就是一道硬门槛，过不去整条采集链就废了。
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="headrow"><span class="bar"></span><h2>旧假设 vs 真实结构</h2></div>
+  <div class="grid g2">
+    <div class="card">
+      <span class="tag bad">旧 · 假设存在</span>
+      <div class="mock" style="margin-top:12px">
+        <div class="row"><span class="chip bad">.jx-picker-panel</span></div>
+        <div class="row"><span class="chip bad">.jx-picker-panel .jx-select</span></div>
+        <div class="row"><span class="chip bad">.jx-picker-panel .jx-select-dropdown li</span></div>
+        <div class="row"><span class="chip bad">.jx-picker-panel input.jx-range-input</span></div>
+        <div class="row"><span class="chip bad">button.jx-picker-panel__link-btn.is-plain</span><span class="sub">←「确定」</span></div>
+      </div>
+      <p class="muted" style="margin-top:12px">
+        全部押在 class 上。<b>class 是 UI 库的实现细节、随版本变</b>；
+        页面一改版，8 个选择器同时失效 → 必然报「面板打不开」。
+      </p>
+    </div>
+    <div class="card">
+      <span class="tag">真 · 页面实际长这样</span>
+      <div class="mock" style="margin-top:12px">
+        <div class="row"><span class="chip">仓库: 全选 ✕ +4</span><span class="chip">商品SKU ▾</span></div>
+        <div class="row"><span class="chip">是否有预占库存</span><span class="chip">可用库存 ▾</span></div>
+        <div class="row">
+          <span class="chip hl">创建时间 ▴</span>
+          <span class="chip">开始时间 ____</span><span class="chip">-</span><span class="chip">结束时间 ____</span>
+          <span class="chip">🔍 搜索</span><span class="chip">重置</span>
+        </div>
+        <div class="row" style="opacity:.85">
+          <span class="chip">创建时间</span><span class="chip hl">更新时间</span>
+          <span class="sub">← 下拉浮层里就这两项</span>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:12px">
+        维度是<b>内联下拉</b>（触发器直接显示当前维度名），日期区间是<b>内联两个输入框</b>，
+        填完<b>直接点「搜索」</b> —— <b>没有「确定 / 清空」按钮</b>。
+      </p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="headrow"><span class="bar"></span><h2>新策略：认文案，不认 class</h2></div>
+  <div class="card">
+    <table>
+      <thead><tr><th style="width:20%">环节</th><th style="width:32%">旧（猜 class）</th><th style="width:34%">新（认文案）</th><th>为什么</th></tr></thead>
+      <tbody>
+        <tr><td>维度下拉</td><td class="old"><code>.jx-picker-panel .jx-select</code></td><td class="new">找<b>可见</b>的「创建时间 / 更新时间」文字</td><td>文案是业务语义，稳定</td></tr>
+        <tr><td>维度落地证据</td><td class="old"><code>modelvaluegroup</code> 以 <code>gmtModified</code> 开头</td><td class="new">触发器文案变成「更新时间」</td><td>人能读、能看懂</td></tr>
+        <tr><td>浮层可见</td><td class="old">等 <code>.jx-picker-panel</code> 出现</td><td class="new">等「更新时间」<b>变得可见</b></td><td>浮层展开 = 它出现</td></tr>
+        <tr><td>区间输入框</td><td class="old"><code>.jx-picker-panel input.jx-range-input</code></td><td class="new"><code>input[placeholder*='开始时间']</code> / <code>'结束时间'</code></td><td>placeholder 就是语义</td></tr>
+        <tr><td>「确定」</td><td class="old"><b>必经步骤</b>，找不到就失败</td><td class="new"><b>可选</b>：有就点，没有不算失败</td><td>页面本来就没有</td></tr>
+        <tr><td>区间证据</td><td class="old">读筛选器根的 <code>modelvaluegroup</code></td><td class="new">输入框回填值（真实页面）/ 属性（老路径）</td><td>两条路径，取到哪条算哪条</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid g3" style="margin-top:14px">
+    <div class="card"><span class="tag">幂等</span><p style="margin-top:10px;font-size:14px">已经是「更新时间」就<b>不碰下拉</b> —— 你可能已经手动选过，重复点反而把状态点乱。</p></div>
+    <div class="card"><span class="tag">顺序无关</span><p style="margin-top:10px;font-size:14px">读当前维度前先 <code>Escape</code> 收起浮层，避免把浮层里的<b>选项</b>误当成触发器上的<b>当前值</b>。</p></div>
+    <div class="card"><span class="tag">格式自愈</span><p style="margin-top:10px;font-size:14px">填 <code>2026-10-01 00:00:00</code> 没落进去，自动降级成 <code>2026-10-01</code> 再试。</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="headrow"><span class="bar"></span><h2>流程改动：增量模式搜索两次</h2></div>
+  <div class="grid g2">
+    <div class="card">
+      <span class="tag bad">旧 · 基线是假的</span>
+      <ol class="steps" style="margin-top:16px">
+        <li class="bad"><b>全选仓库</b><span>仓库范围就位</span></li>
+        <li class="bad"><b>设筛选</b><span>读「SKU总数」当基线 ← 其实<b>已经是筛选后</b>的了</span></li>
+        <li class="bad"><b>搜索</b><span>再读一次总数 → 两者永远相等</span></li>
+        <li class="bad"><b>断言</b><span>「相等 → 只警告」分支 → <b>永远不报错</b></span></li>
+      </ol>
+    </div>
+    <div class="card">
+      <span class="tag">新 · 基线是真的</span>
+      <ol class="steps" style="margin-top:16px">
+        <li><b>全选仓库</b><span>仓库范围就位</span></li>
+        <li><b>搜索 #1</b><span>读「SKU总数」当基线（筛选前的真实口径）</span></li>
+        <li><b>设「更新时间 + 区间」</b><span>维度落地证据 + 区间落地证据</span></li>
+        <li><b>搜索 #2</b><span>让筛选生效，再读一次总数</span></li>
+        <li><b>断言</b><span>筛选后总数<b>不得超过</b>基线</span></li>
+      </ol>
+    </div>
+  </div>
+  <div class="note" style="margin-top:14px">
+    <b>为什么要多搜一次？</b> 仓库范围和日期区间是<b>两套独立筛选条件</b>：
+    仓库选完不点搜索，页面上显示的还是<b>上一次</b>的搜索结果 —— 拿它当基线，
+    断言就是自欺欺人。**全量模式仍然只搜索一次，行为完全不变。**
+  </div>
+</section>
+
+<section>
+  <div class="headrow"><span class="bar"></span><h2>顺带修掉的两个「假东西」</h2></div>
+  <div class="grid g2">
+    <div class="card">
+      <span class="tag warn">假断言</span>
+      <p style="margin-top:10px;font-size:14px">
+        <code>_sku_total_before</code> 原本在<b>筛选之后</b>才读 —— 基线和结果永远相等，
+        于是「筛选是否生效」这条断言永远走「只警告」分支，<b>形同虚设</b>。
+      </p>
+      <p class="muted" style="margin-top:8px">现在基线改到搜索 #1 之后读，断言才真正有牙齿。</p>
+    </div>
+    <div class="card">
+      <span class="tag warn">隐性 bug</span>
+      <p style="margin-top:10px;font-size:14px">
+        读输入框值时把 <code>input_value()</code>（<b>无参</b>）和
+        <code>get_attribute("value")</code>（<b>有参</b>）混用 —— 两者双双失败，
+        永远读到空值。
+      </p>
+      <p class="muted" style="margin-top:8px">这个 bug 在真实页面上也会让「区间没落进去」被误判。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="headrow"><span class="bar"></span><h2>取证探针也重写了</h2></div>
+  <div class="card">
+    <p>旧探针<b>也假设</b>了 <code>.jx-picker-panel</code> —— 所以它跟组件一起错，一直没能给出真证据。新探针：</p>
+    <ul class="ticks">
+      <li><b>不假设任何结构</b>，直接抓真实 DOM：维度元素（含 class 与 outerHTML）、所有 input 的 placeholder/class/type、「确定/清空/搜索/重置」按钮、下拉浮层结构</li>
+      <li><b>用组件自己的定位逻辑</b>跑一遍 <code>probe_state()</code> → 探针的结论就是组件的结论，不会再出现「探针能找到、组件找不到」</li>
+      <li>输出 <code>output/probe_inventory_date_filter.json</code> + 截图</li>
+      <li>只读保证不变：不 save 登录态、<b>不填区间、不点搜索、不点导出</b></li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="headrow"><span class="bar"></span><h2>前端：任务详情抽屉</h2></div>
+  <div class="grid g2">
+    <div class="card">
+      <span class="tag bad">旧</span>
+      <div class="mock" style="margin-top:12px">
+        <div class="row"><span class="chip bad" style="width:34px">平</span><span class="chip">miaoshou</span></div>
+        <div class="row"><span class="chip bad" style="width:34px">台</span><span class="chip">miaoshou_real_001</span></div>
+        <div class="row"><span class="chip bad" style="width:34px">状</span><span class="chip">失败</span></div>
+        <div class="row"><span class="chip bad" style="width:34px">创</span><span class="chip">2026/10/26 00:42:48</span></div>
+      </div>
+      <p class="muted" style="margin-top:12px">抽屉只有 <code>520px</code>，<code>el-descriptions</code> 又没固定 label 列宽 → 中文标签被挤成<b>一字一行</b>。</p>
+    </div>
+    <div class="card">
+      <span class="tag">新</span>
+      <div class="mock" style="margin-top:12px">
+        <div class="row"><span class="chip hl" style="width:110px">平台</span><span class="chip">miaoshou</span></div>
+        <div class="row"><span class="chip hl" style="width:110px">账号</span><span class="chip">miaoshou_real_001</span></div>
+        <div class="row"><span class="chip hl" style="width:110px">状态</span><span class="chip">失败</span></div>
+        <div class="row"><span class="chip hl" style="width:110px">创建时间</span><span class="chip">2026/10/26 00:42:48</span></div>
+      </div>
+      <p class="muted" style="margin-top:12px">抽屉 <code>min(720px, 92vw)</code> + <code>label-width=128px</code>，长 URL / 错误串能断行。</p>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <p><b>顺手修了 5 处源码里就是乱码的 label 与 3 处乱码值</b> —— 2026-05-18 那次提交加进来时编码就坏了，一直没人看见（这些字段平时没值，不显示）。</p>
+    <p class="muted" style="margin-top:8px">质量来源 / 质量评分 / 质量门槛 / 人工播种 / 会话保护 —— 现在是正常中文。</p>
+  </div>
+</section>
+
+<section>
+  <div class="headrow"><span class="bar"></span><h2>验收状态</h2></div>
+  <div class="card">
+    <table>
+      <thead><tr><th style="width:34%">项</th><th style="width:26%">结果</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>组件行为测试</td><td class="new">12 passed</td><td>新增：无「确定」按钮走通、幂等不碰下拉、浮层选项不误判</td></tr>
+        <tr><td>data_pipeline 回归</td><td class="new">25 failed / 468 passed</td><td>与基线<b>逐条一致</b> → 零回归</td></tr>
+        <tr><td>前端相关测试</td><td class="new">与 HEAD 一致</td><td>既有失败不变（已在独立 worktree 复验）</td></tr>
+        <tr><td>长度门禁</td><td class="new">通过</td><td>函数 ≤50 行、类 ≤500 行</td></tr>
+        <tr><td><b>真实页面复验</b></td><td class="tag warn" style="border:none">未做</td><td><b>页面已关闭</b>，必须等下一次登录后跑新探针</td></tr>
+      </tbody>
+    </table>
+    <div class="callout" style="margin-top:16px">
+      <b>⚠️ 复验通过前，先别开自动调度。</b>
+      这次改的是「<b>定位方式</b>」，不是「口径」；但没在真实页面上跑过一次，就仍然只是纸面正确。
+      现有 3 条妙手配置的 <code>schedule_enabled</code> 仍是关的，正好。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="headrow"><span class="bar"></span><h2>接下来你要做的</h2></div>
+  <div class="card">
+    <ol class="steps">
+      <li><b>重启后端 uvicorn 进程</b><span>celery worker 我已重启；你 local_console 起的那份还是旧代码</span></li>
+      <li><b>重新登录妙手 + 跑新探针</b><span>登录态已失效（探针实测跳回登录页）。跑完把 JSON 发我，我按真实 DOM 再校准一轮</span></li>
+      <li><b>人工跑一次增量采集</b><span>我查库确认水位线与 <code>stock_added_at</code> 按预期推进 → 再决定开不开调度</span></li>
+    </ol>
+  </div>
+</section>
+
+<div class="foot">
+  妙手库存域 · 采集组件按真实页面重校准 · 2026-10-26 ·
+  设计稿见 <code>docs/superpowers/specs/2026-10-24-inventory-domain-rollout-worklist.md</code> §8.12
+</div>
+
+</div>
+</body>
+</html>
