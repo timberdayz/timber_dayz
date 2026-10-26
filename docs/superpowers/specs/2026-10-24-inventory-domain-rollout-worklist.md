@@ -1289,3 +1289,54 @@ IllegalStateChangeError / InvalidRequestError
   日志里刷屏 `[HeaderChange] 匹配率 0.0%`）→ 读文件这种 CPU/IO 活儿放在 async 里阻塞事件循环
 - 8 个文件卡在 `status='processing'`（2025-09-14 的 purchase 旧文件，
   错误信息「自动入库任务超时，已回退等待重试」）
+
+## 8.17 这次采集其实**已经自动入库完成**了（Walter 不需要手动同步）
+
+§8.16 那个 500 查完之后，顺着时间线倒推，发现完整顺序是这样：
+
+| 时刻 | 发生了什么 |
+|---|---|
+| 14:07:37 | 任务 645 开始采集（库存 + 订单：shopee / tiktok） |
+| 14:11:13 | 三个文件注册进 `catalog_files`（状态 = pending） |
+| 14:11:21 | 采集完成，共 3 个文件 |
+| **14:11:27 / 14:11:32 / 14:11:38 / 14:12:32** | Walter 打开文件列表页 → `governance/stats` 500 ×4（pending ≥2 → gather 并发 → 竞态） |
+| **14:15:02** | **后台 auto_ingest 定时任务**（每 15 分钟一次）开始处理这三个 pending 文件 |
+| 14:15:04 ~ 14:15:19 | 三个文件**全部自动入库**完成 |
+| 14:15:04 / 14:15:15 | 刷新队列 1192 / 1193 两条任务 **completed** |
+
+→ **Walter 看到的那个「内部服务错误」，是旁边那块概览塌了，不是同步失败；
+   而同步在他报错之前/同时，已经由后台任务自动做完了。**
+
+### 8.17.1 入库结果
+
+| 文件 | 数据域 | 业务事实表 | 入库行数 |
+|---|---|---|---|
+| 3006 `miaoshou_inventory_snapshot_20261026_141113.xls`（3.25 MB） | inventory | `b_class.fact_miaoshou_inventory_snapshot` | **387 行** |
+| 3007 `shopee_orders_monthly_20261026_141113.xls`（1.05 MB） | orders:shopee | `b_class.fact_shopee_orders_monthly` | **1920 行** |
+| 3008 `tiktok_orders_monthly_20261026_141113.xls`（290 KB） | orders:tiktok | `b_class.fact_tiktok_orders_monthly` | **333 行** |
+
+三个文件的模板匹配结论（`get_file_sync_readiness` 实调）：
+
+| file_id | template_status | exact_match | semantic_match | should_auto_sync |
+|---|---|---|---|---|
+| 3006 | `ready` | ✅ | ✅ | ✅ |
+| 3007 | `alias_only`（别名漂移，非阻断） | ❌ | ❌ | ✅ |
+| 3008 | `ready` | ✅ | ✅ | ✅ |
+
+→ 三个都**能自动同步**，没有需要人工确认表头的阻塞项。
+
+### 8.17.2 状态层与库龄层也跟着推进了
+
+- `mart.inventory_state`：仍是 1230 行，其中 **387 行来自 file 3006**（upsert 生效，
+  2400 行没变、387 行被更新 —— 同一批 SKU×仓 覆盖写）
+- **`max(row_seen_at)`：2026-10-26 05:32:39 → 06:15:04+00**（= 14:15:04 本地）
+  → **水位线又往前推了一格**
+- **`max(stock_added_at)`：2026-10-14 04:00:13 → 2026-10-26 04:47:29+00**
+  → **有行被判定为「进货」，计时器按定义清零并重置**
+- `mart.inventory_age_current`：这次带来 309 行
+  → **44 行 `stock_increase`（清零重算）+ 213 行 `continued`（继续累加）**
+  → age_days 落在 0~30
+
+> ⚠️ 口径提醒：状态层判「进货」用的是**库存总量**（`on_hand_stock`），
+> 不是可用库存 —— 订单占用/取消订单只动可用库存不动总量，
+> 用可用库存会把这类变动误判成进货。
