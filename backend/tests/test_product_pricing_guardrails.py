@@ -102,7 +102,12 @@ def test_discount_guard_uses_current_tier_rate():
 
 
 def test_discount_guard_is_none_without_reference_price():
-    assert compute_discount_guard(reference_selling_price=None, discount_rate=Decimal("0.15")) is None
+    assert (
+        compute_discount_guard(
+            reference_selling_price=None, discount_rate=Decimal("0.15")
+        )
+        is None
+    )
 
 
 def test_select_restock_tier_picks_largest_boundary_not_exceeding_age():
@@ -147,7 +152,9 @@ def test_min_selling_price_prefers_manual_override():
 
 
 def test_min_selling_price_reports_unavailable_when_no_line():
-    result = compute_min_selling_price(cost_floor=None, discount_guard=None, manual_override=None)
+    result = compute_min_selling_price(
+        cost_floor=None, discount_guard=None, manual_override=None
+    )
     assert result["min_selling_price"] is None
     assert result["source"] == "unavailable"
     assert result["missing_reasons"]
@@ -174,7 +181,11 @@ def test_policy_update_same_day_updates_in_place():
 
     decision = resolve_policy_update(
         current={"min_restock_days": 0, "effective_from": date(2026, 10, 20)},
-        requested={"min_restock_days": 0, "effective_from": date(2026, 10, 20), "discount_rate": 0.12},
+        requested={
+            "min_restock_days": 0,
+            "effective_from": date(2026, 10, 20),
+            "discount_rate": 0.12,
+        },
         today=date(2026, 10, 20),
     )
     assert decision["action"] == "update"
@@ -280,6 +291,7 @@ def test_policy_update_retier_allows_same_day_boundary_change():
 
 # ---------------------------------------------------------------- 降级链（spec §4.4 / §8.1）
 
+
 def _pricing(**overrides):
     """完整输入的一组默认值；测试里只覆盖要破坏的那一项。"""
     payload = {
@@ -382,9 +394,10 @@ def test_sku_pricing_manual_override_wins_and_is_flagged():
 
 
 def test_router_exposes_pricing_policy_routes():
-    from pathlib import Path
 
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
     # 只匹配到路径为止的装饰器前缀：新路由必须声明 response_model（AGENTS.md 硬要求），
     # 精确匹配整个装饰器会因为多了 ", response_model=..." 而失配
     assert '@router.get("/api/sku-pricing-policies"' in source
@@ -688,16 +701,25 @@ async def test_mart_age_lookup_works_when_table_exists_and_survives_when_not(
     """
     await pricing_seed()
 
-    # 1) mart 表存在且有一行：days_since_restock=75 -> 命中 min_restock_days=60 的「滞销30天」档
+    # 1) 状态层存在且有一行：距上次进货 75 天 -> 命中 min_restock_days=60 的「滞销30天」档
+    # ⚠️ 必须建 `mart.inventory_state`（新判据的真实来源，列：sku_key/stock_added_at/
+    #    available_stock/inventory_value），**不是** `mart.inventory_age_current`：
+    #    后者是旧库龄口径（age_days），且真实表里根本没有 days_since_restock 这一列。
     await pg_session.execute(text("CREATE SCHEMA IF NOT EXISTS mart"))
-    await pg_session.execute(text(
-        "CREATE TABLE IF NOT EXISTS mart.inventory_age_current ("
-        " product_sku text, days_since_restock integer)"
-    ))
-    await pg_session.execute(text(
-        "INSERT INTO mart.inventory_age_current (product_sku, days_since_restock) "
-        "VALUES ('TEST-SKU-1', 75)"
-    ))
+    await pg_session.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS mart.inventory_state ("
+            " sku_key text, stock_added_at timestamp, available_stock numeric,"
+            " inventory_value numeric)"
+        )
+    )
+    await pg_session.execute(
+        text(
+            "INSERT INTO mart.inventory_state "
+            "(sku_key, stock_added_at, available_stock, inventory_value) "
+            "VALUES ('TEST-SKU-1', CURRENT_DATE - INTERVAL '75 days', 10, 300)"
+        )
+    )
 
     resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
     assert resp.status_code == 200, resp.text
@@ -722,15 +744,22 @@ async def test_mart_age_lookup_works_when_table_exists_and_survives_when_not(
 
 
 def test_profit_candidates_and_estimate_guardrail_wired():
-    from pathlib import Path
 
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
-    service = Path("backend/services/product_pricing_service.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    service = Path("backend/services/product_pricing_service.py").read_text(
+        encoding="utf-8"
+    )
     assert "below_min_selling_price" in source
     assert "min_selling_price_below" in source
     # 这三个字段由纯函数服务产出（路由只做 ORM 适配 + 合并），
     # 所以要在 service 里断言，而不是在路由里
-    for name in ("min_selling_price", "clearance_max_discount_rate", "current_discount_rate"):
+    for name in (
+        "min_selling_price",
+        "clearance_max_discount_rate",
+        "current_discount_rate",
+    ):
         assert name in service, name
 
 
@@ -782,8 +811,12 @@ async def test_estimate_below_floor_is_rejected_but_draft_is_not(
     #   拍平成字符串，所以必须走 APIException 路线才能保住 dict 结构。）
     assert body["success"] is False
     assert body["error"]["detail"]["code"] == "below_min_selling_price"
-    assert body["error"]["detail"]["min_selling_price"] == pytest.approx(28.23, abs=0.01)
-    assert body["error"]["detail"]["expected_selling_price"] == pytest.approx(0.01, abs=0.01)
+    assert body["error"]["detail"]["min_selling_price"] == pytest.approx(
+        28.23, abs=0.01
+    )
+    assert body["error"]["detail"]["expected_selling_price"] == pytest.approx(
+        0.01, abs=0.01
+    )
 
     draft = await pg_async_client.post(
         "/api/platform-sku-profit/drafts", headers=pricing_auth_headers, json=payload
@@ -844,7 +877,9 @@ async def test_guardrail_precedes_missing_fields_check(
     body = estimate.json()
     # 不能是 cannot_save_profit_version（缺物流规则 / 缺仓储规则）
     assert body["error"]["detail"]["code"] == "below_min_selling_price"
-    assert body["error"]["detail"]["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+    assert body["error"]["detail"]["min_selling_price"] == pytest.approx(
+        28.23, abs=0.01
+    )
 
 
 # ---------------------------------------------------------------- 达人佣金计入利润

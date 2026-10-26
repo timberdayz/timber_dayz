@@ -52,15 +52,21 @@ def test_reference_logistics_rule_remains_unresolved_for_zero_or_multiple_defaul
     }
     first = LogisticsProviderRule(rule_id=1, logistics_provider="Provider A", **common)
     second = LogisticsProviderRule(rule_id=2, logistics_provider="Provider B", **common)
-    assert ProductFinanceService._select_reference_logistics_rule(
-        [first, second], "US-WH-1", "sea"
-    ) is None
+    assert (
+        ProductFinanceService._select_reference_logistics_rule(
+            [first, second], "US-WH-1", "sea"
+        )
+        is None
+    )
 
     first.is_default = True
     second.is_default = True
-    assert ProductFinanceService._select_reference_logistics_rule(
-        [first, second], "US-WH-1", "sea"
-    ) is None
+    assert (
+        ProductFinanceService._select_reference_logistics_rule(
+            [first, second], "US-WH-1", "sea"
+        )
+        is None
+    )
 
 
 def test_logistics_provider_rule_default_is_part_of_create_and_patch_contracts():
@@ -83,7 +89,10 @@ def test_default_provider_rule_has_a_forward_only_schema_migration():
     ).read_text(encoding="utf-8")
 
     assert 'revision = "current_schema_20260919_logistics_rule_default"' in migration
-    assert 'down_revision = "current_schema_20260918_logistics_bill_currency_cny"' in migration
+    assert (
+        'down_revision = "current_schema_20260918_logistics_bill_currency_cny"'
+        in migration
+    )
     assert '"is_default"' in migration
     assert "uq_logistics_provider_rules_default_scope" in migration
 
@@ -114,7 +123,8 @@ def test_feishu_projection_initialize_and_retry_are_audited_before_commit_withou
         )
 
     audit_sections = [
-        source[source.index(start) : source.index(end)] for start, end, _action in endpoints
+        source[source.index(start) : source.index(end)]
+        for start, end, _action in endpoints
     ]
     for section in audit_sections:
         audit_call = section[section.index("await _write_product_center_audit(") :]
@@ -122,21 +132,35 @@ def test_feishu_projection_initialize_and_retry_are_audited_before_commit_withou
         assert "tenant_access_token" not in audit_call.lower()
 
 
-@pytest.mark.parametrize("request_type,payload", [
-    (LogisticsBillCreateRequest, {"bill_no": "B-1", "bill_date": date(2026, 9, 16), "total_amount": 1, "currency": "USD"}),
-    (LogisticsBillUpdateRequest, {"currency": "USD"}),
-])
+@pytest.mark.parametrize(
+    "request_type,payload",
+    [
+        (
+            LogisticsBillCreateRequest,
+            {
+                "bill_no": "B-1",
+                "bill_date": date(2026, 9, 16),
+                "total_amount": 1,
+                "currency": "USD",
+            },
+        ),
+        (LogisticsBillUpdateRequest, {"currency": "USD"}),
+    ],
+)
 def test_logistics_bill_write_contract_rejects_non_cny(request_type, payload):
     with pytest.raises(ValidationError, match="CNY"):
         request_type(**payload)
 
 
-@pytest.mark.parametrize(("basis", "unit"), [
-    ("volume", "CNY/CBM"),
-    ("weight", "CNY/KG"),
-    ("quantity", "CNY/unit"),
-    ("fixed", "CNY"),
-])
+@pytest.mark.parametrize(
+    ("basis", "unit"),
+    [
+        ("volume", "CNY/CBM"),
+        ("weight", "CNY/KG"),
+        ("quantity", "CNY/unit"),
+        ("fixed", "CNY"),
+    ],
+)
 def test_logistics_bill_line_uses_cny_unit_fixed_by_billing_basis(basis, unit):
     request = LogisticsBillLineRequest(
         sku_ids=[1], warehouse_code="WH-1", billing_basis=basis, line_total_amount=1
@@ -147,8 +171,11 @@ def test_logistics_bill_line_uses_cny_unit_fixed_by_billing_basis(basis, unit):
 def test_logistics_bill_line_rejects_unit_that_does_not_match_basis():
     with pytest.raises(ValidationError, match="billing_unit must be CNY/CBM"):
         LogisticsBillLineRequest(
-            sku_ids=[1], warehouse_code="WH-1", billing_basis="volume",
-            billing_unit="USD/CBM", line_total_amount=1,
+            sku_ids=[1],
+            warehouse_code="WH-1",
+            billing_basis="volume",
+            billing_unit="USD/CBM",
+            line_total_amount=1,
         )
 
 
@@ -160,19 +187,30 @@ def test_logistics_provider_rule_patch_is_a_true_partial_request():
 def test_logistics_provider_rule_patch_derives_unit_only_when_basis_changes():
     request = LogisticsProviderRuleUpdateRequest(billing_basis="weight")
     assert request.model_dump(exclude_unset=True) == {
-        "billing_basis": "weight", "billing_unit": "CNY/KG"
+        "billing_basis": "weight",
+        "billing_unit": "CNY/KG",
     }
 
 
 def test_finance_purchase_cost_queries_require_positive_cny_base_amount_for_foreign_currency():
-    source = Path("backend/services/product_finance_service.py").read_text(encoding="utf-8")
-    purchase_section = source[source.index("async def find_latest_purchase_cost"):source.index("async def prefetch_platform_sku_profit_inputs")]
-    prefetch_section = source[source.index("async def prefetch_platform_sku_profit_inputs"):source.index("actual_logistics: dict")]
+    source = Path("backend/services/product_finance_service.py").read_text(
+        encoding="utf-8"
+    )
+    purchase_section = source[
+        source.index("async def find_latest_purchase_cost") : source.index(
+            "async def prefetch_platform_sku_profit_inputs"
+        )
+    ]
+    prefetch_section = source[
+        source.index("async def prefetch_platform_sku_profit_inputs") : source.index(
+            "actual_logistics: dict"
+        )
+    ]
 
     for section in (purchase_section, prefetch_section):
         # CNY lines use their unit price. Foreign-currency lines are only CNY
         # costs after a positive converted base amount is present.
-        assert "POLine.currency == \"CNY\"" in section
+        assert 'POLine.currency == "CNY"' in section
         assert "POLine.unit_price" in section
         assert "POLine.base_amt" in section
         assert "POLine.base_amt > 0" in section
@@ -180,45 +218,68 @@ def test_finance_purchase_cost_queries_require_positive_cny_base_amount_for_fore
 
 
 def test_candidate_purchase_cost_falls_back_only_when_foreign_base_cost_is_missing():
-    router_source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    router_source = Path(
+        "backend/domains/business/routers/product_center.py"
+    ).read_text(encoding="utf-8")
     candidate_section = router_source[
-        router_source.index("async def list_platform_sku_profit_candidates"):
-        router_source.index('@router.post("/api/platform-sku-profit/preview")')
+        router_source.index(
+            "async def list_platform_sku_profit_candidates"
+        ) : router_source.index('@router.post("/api/platform-sku-profit/preview")')
     ]
 
     # The prefetch map contains only valid CNY-derived costs. A missing foreign
     # conversion must therefore use the SKU default, or remain incomplete.
-    assert 'purchase_cost = cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost' in candidate_section
-    assert 'purchase_cost=purchase_cost' in candidate_section
+    assert (
+        'purchase_cost = cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost'
+        in candidate_section
+    )
+    assert "purchase_cost=purchase_cost" in candidate_section
 
 
 def test_storage_rule_creation_locks_all_active_windows_and_rejects_overlap():
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
-    section = source[source.index("async def create_warehouse_storage_rule"):source.index("async def update_warehouse_storage_rule")]
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    section = source[
+        source.index("async def create_warehouse_storage_rule") : source.index(
+            "async def update_warehouse_storage_rule"
+        )
+    ]
 
-    assert "WarehouseStorageRule.status == \"active\"" in section
+    assert 'WarehouseStorageRule.status == "active"' in section
     assert "with_for_update()" in section
     assert "existing_rule.effective_from <= new_effective_to" in section
     assert "body.effective_from <= existing_effective_to" in section
-    assert "current_rule.effective_to = body.effective_from - timedelta(days=1)" in section
+    assert (
+        "current_rule.effective_to = body.effective_from - timedelta(days=1)" in section
+    )
 
 
 def test_product_center_sensitive_writes_emit_audit_logs_and_restrict_sales_fee_rates():
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "from modules.core.db import (" in source
     assert "FactAuditLog," in source
     assert "async def _write_product_center_audit" in source
     assert source.count("await _write_product_center_audit(") >= 4
-    fee_section = source[source.index("async def update_platform_fee_rate"):source.index('@router.get("/api/logistics-bills")')]
+    fee_section = source[
+        source.index("async def update_platform_fee_rate") : source.index(
+            '@router.get("/api/logistics-bills")'
+        )
+    ]
     assert 'row.platform_role != "sales"' in fee_section
 
 
 def test_storage_rule_patch_never_reactivates_historical_or_stopped_rule():
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
     section = source[
-        source.index("async def update_warehouse_storage_rule"):
-        source.index('@router.post("/api/product-warehouses"')
+        source.index("async def update_warehouse_storage_rule") : source.index(
+            '@router.post("/api/product-warehouses"'
+        )
     ]
 
     assert 'values.get("status") == "active"' in section
@@ -228,7 +289,9 @@ def test_storage_rule_patch_never_reactivates_historical_or_stopped_rule():
 
 def test_legacy_single_sku_bill_line_normalizes_to_cny_volume_contract():
     request = LogisticsBillLinesReplaceRequest(
-        lines=[LogisticsBillSkuLineRequest(sku_id=1, warehouse_code="WH-1", shipped_qty=2)]
+        lines=[
+            LogisticsBillSkuLineRequest(sku_id=1, warehouse_code="WH-1", shipped_qty=2)
+        ]
     )
     line = request.lines[0]
 
@@ -237,14 +300,17 @@ def test_legacy_single_sku_bill_line_normalizes_to_cny_volume_contract():
 
 
 def test_bill_line_service_defensively_normalizes_legacy_cny_unit():
-    source = Path("backend/services/product_finance_service.py").read_text(encoding="utf-8")
+    source = Path("backend/services/product_finance_service.py").read_text(
+        encoding="utf-8"
+    )
     section = source[
-        source.index("async def replace_bill_lines"):
-        source.index("async def replace_bill_purchase_orders")
+        source.index("async def replace_bill_lines") : source.index(
+            "async def replace_bill_purchase_orders"
+        )
     ]
 
     assert 'basis = line.get("billing_basis") or "volume"' in section
-    assert 'billing_unit = _CNY_BILLING_UNITS[basis]' in section
+    assert "billing_unit = _CNY_BILLING_UNITS[basis]" in section
     assert "billing_unit=billing_unit" in section
 
 
@@ -270,21 +336,50 @@ def test_logistics_bill_line_persistence_rejects_null_or_non_cny_units():
 
 
 def test_logistics_bill_writes_are_audited_once_by_canonical_endpoints():
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
     endpoint_bounds = [
-        ("async def supplement_purchase_order_line_cost", '@router.get("/api/purchase-orders/{po_id}")'),
-        ("async def create_logistics_provider_rule", '@router.patch("/api/logistics-provider-rules/{rule_id}")'),
-        ("async def update_logistics_provider_rule", '@router.get("/api/cost-assumption-profiles")'),
-        ("async def create_logistics_bill", '@router.post("/api/logistics-batches", status_code=201)'),
-        ("async def replace_logistics_bill_purchase_orders", '@router.put("/api/logistics-batches/{bill_id}/purchase-orders")'),
-        ("async def update_logistics_bill", '@router.patch("/api/logistics-batches/{bill_id}")'),
-        ("async def replace_logistics_bill_lines", '@router.put("/api/logistics-batches/{bill_id}/lines")'),
-        ("async def confirm_logistics_bill", '@router.post("/api/logistics-batches/{bill_id}/confirm")'),
-        ("async def void_logistics_bill", '@router.post("/api/logistics-batches/{bill_id}/void")'),
+        (
+            "async def supplement_purchase_order_line_cost",
+            '@router.get("/api/purchase-orders/{po_id}")',
+        ),
+        (
+            "async def create_logistics_provider_rule",
+            '@router.patch("/api/logistics-provider-rules/{rule_id}")',
+        ),
+        (
+            "async def update_logistics_provider_rule",
+            '@router.get("/api/cost-assumption-profiles")',
+        ),
+        (
+            "async def create_logistics_bill",
+            '@router.post("/api/logistics-batches", status_code=201)',
+        ),
+        (
+            "async def replace_logistics_bill_purchase_orders",
+            '@router.put("/api/logistics-batches/{bill_id}/purchase-orders")',
+        ),
+        (
+            "async def update_logistics_bill",
+            '@router.patch("/api/logistics-batches/{bill_id}")',
+        ),
+        (
+            "async def replace_logistics_bill_lines",
+            '@router.put("/api/logistics-batches/{bill_id}/lines")',
+        ),
+        (
+            "async def confirm_logistics_bill",
+            '@router.post("/api/logistics-batches/{bill_id}/confirm")',
+        ),
+        (
+            "async def void_logistics_bill",
+            '@router.post("/api/logistics-batches/{bill_id}/void")',
+        ),
     ]
 
     for start, end in endpoint_bounds:
-        section = source[source.index(start):source.index(end)]
+        section = source[source.index(start) : source.index(end)]
         assert "await _write_product_center_audit(" in section, start
 
     for alias in (
@@ -295,7 +390,9 @@ def test_logistics_bill_writes_are_audited_once_by_canonical_endpoints():
         "async def confirm_logistics_batch",
         "async def void_logistics_batch",
     ):
-        section = source[source.index(alias):source.find("\n@router", source.index(alias) + 1)]
+        section = source[
+            source.index(alias) : source.find("\n@router", source.index(alias) + 1)
+        ]
         assert "_write_product_center_audit" not in section, alias
 
 
@@ -322,35 +419,42 @@ def test_logistics_bill_header_is_cny_only_in_persistence_and_actual_cost_reads(
         encoding="utf-8"
     )
     single_lookup = source[
-        source.index("async def find_confirmed_logistics_cost"):
-        source.index("async def find_reference_logistics_cost")
+        source.index("async def find_confirmed_logistics_cost") : source.index(
+            "async def find_reference_logistics_cost"
+        )
     ]
     bulk_lookup = source[
-        source.index("async def prefetch_platform_sku_profit_inputs"):
-        source.index("async def preview_profit")
+        source.index("async def prefetch_platform_sku_profit_inputs") : source.index(
+            "async def preview_profit"
+        )
     ]
     assert single_lookup.count('LogisticsBill.currency == "CNY"') == 2
     assert bulk_lookup.count('LogisticsBill.currency == "CNY"') == 2
 
 
 def test_compatibility_operating_profile_writes_and_preview_reject_non_sales_platforms():
-    router_source = Path("backend/domains/business/routers/product_center.py").read_text(
-        encoding="utf-8"
-    )
+    router_source = Path(
+        "backend/domains/business/routers/product_center.py"
+    ).read_text(encoding="utf-8")
     dimensions = router_source[
-        router_source.index("async def _validate_operating_dimensions"):
-        router_source.index('@router.post("/api/sku-operating-profiles"')
+        router_source.index(
+            "async def _validate_operating_dimensions"
+        ) : router_source.index('@router.post("/api/sku-operating-profiles"')
     ]
-    assert 'platform is None or not platform.is_active or platform.platform_role != "sales"' in dimensions
+    # ⚠️ 断言前先把源码压成单行再比对：black 会把这个守卫条件拆成多行，
+    # 直接断言连续字面量会被纯格式化改动打断（守卫本身没变）。
+    guard = 'platform is None or not platform.is_active or platform.platform_role != "sales"'
+    assert guard in " ".join(dimensions.split())
 
     service_source = Path("backend/services/product_finance_service.py").read_text(
         encoding="utf-8"
     )
     preview = service_source[
-        service_source.index("async def preview_operating_profit"):
-        service_source.index("async def preview_platform_sku_profit")
+        service_source.index(
+            "async def preview_operating_profit"
+        ) : service_source.index("async def preview_platform_sku_profit")
     ]
-    assert 'platform is None or not platform.is_active or platform.platform_role != "sales"' in preview
+    assert guard in " ".join(preview.split())
 
 
 def test_compatibility_operating_profile_writes_are_audited_in_the_committing_transaction():
@@ -358,13 +462,25 @@ def test_compatibility_operating_profile_writes_are_audited_in_the_committing_tr
         encoding="utf-8"
     )
     endpoint_bounds = [
-        ("async def create_sku_operating_profile", '@router.patch("/api/sku-operating-profiles/{profile_id}"'),
-        ("async def update_sku_operating_profile", '@router.post("/api/sku-operating-profiles/bulk")'),
-        ("async def bulk_save_sku_operating_profiles", '@router.get("/api/sku-operating-profiles/{profile_id}"'),
-        ("async def save_sku_operating_profit", '@router.get("/api/sku-operating-profiles/{profile_id}/profit-estimates"'),
+        (
+            "async def create_sku_operating_profile",
+            '@router.patch("/api/sku-operating-profiles/{profile_id}"',
+        ),
+        (
+            "async def update_sku_operating_profile",
+            '@router.post("/api/sku-operating-profiles/bulk")',
+        ),
+        (
+            "async def bulk_save_sku_operating_profiles",
+            '@router.get("/api/sku-operating-profiles/{profile_id}"',
+        ),
+        (
+            "async def save_sku_operating_profit",
+            '@router.get("/api/sku-operating-profiles/{profile_id}/profit-estimates"',
+        ),
     ]
     for start, end in endpoint_bounds:
-        section = source[source.index(start):source.index(end)]
+        section = source[source.index(start) : source.index(end)]
         audit_index = section.index("await _write_product_center_audit(")
         assert audit_index < section.index("await db.commit()"), start
 
@@ -379,15 +495,21 @@ def test_product_master_and_legacy_profit_writes_are_audited_before_commit():
         ("async def update_spu", '@router.post("/api/spus/bulk"'),
         ("async def bulk_save_spus", '@router.get("/api/skus"'),
         ("async def create_sku", '@router.patch("/api/skus/{sku_id}"'),
-        ("async def update_sku", 'async def _apply_bulk_sku_spu_binding'),
+        ("async def update_sku", "async def _apply_bulk_sku_spu_binding"),
         ("async def bulk_save_skus", '@router.get("/api/spus/{spu}/skus"'),
-        ("async def create_cost_assumption", '@router.patch("/api/cost-assumption-profiles/{profile_id}"'),
-        ("async def update_cost_assumption", 'def _serialize_bill'),
+        (
+            "async def create_cost_assumption",
+            '@router.patch("/api/cost-assumption-profiles/{profile_id}"',
+        ),
+        ("async def update_cost_assumption", "def _serialize_bill"),
         ("async def create_profit_estimate", "async def save_baseline_product_profit"),
-        ("async def save_baseline_product_profit", "async def initialize_feishu_projection"),
+        (
+            "async def save_baseline_product_profit",
+            "async def initialize_feishu_projection",
+        ),
     ]
     for start, end in endpoint_bounds:
-        section = source[source.index(start):source.index(end)]
+        section = source[source.index(start) : source.index(end)]
         assert "await _write_product_center_audit(" in section, start
         assert section.index("await _write_product_center_audit(") < section.index(
             "await db.commit()"
@@ -400,11 +522,14 @@ def test_product_category_writes_are_audited_atomically_with_category_identity_a
         encoding="utf-8"
     )
     endpoint_bounds = [
-        ("async def create_product_category", '@router.patch("/api/product-categories/{category_code}"'),
+        (
+            "async def create_product_category",
+            '@router.patch("/api/product-categories/{category_code}"',
+        ),
         ("async def update_product_category", "async def _apply_spu_category"),
     ]
     for start, end in endpoint_bounds:
-        section = source[source.index(start):source.index(end)]
+        section = source[source.index(start) : source.index(end)]
         audit_index = section.index("await _write_product_center_audit(")
         assert audit_index < section.index("await db.commit()"), start
         assert 'resource_type="product_category"' in section
@@ -418,11 +543,12 @@ def test_platform_profit_save_only_persists_actual_recost_when_actual_cost_exist
         encoding="utf-8"
     )
     section = source[
-        source.index("async def save_platform_sku_profit_estimates"):
-        source.index('@router.get("/api/platform-sku-profit/estimates")')
+        source.index("async def save_platform_sku_profit_estimates") : source.index(
+            '@router.get("/api/platform-sku-profit/estimates")'
+        )
     ]
-    assert "preview.get(\"actual_logistics_cost\") is not None" in section
-    assert "preview.get(\"actual_storage_cost\") is not None" in section
+    assert 'preview.get("actual_logistics_cost") is not None' in section
+    assert 'preview.get("actual_storage_cost") is not None' in section
     assert 'versions.append(("actual_recost", preview["actual_recost"]))' in section
     assert 'preview["actual_recost"].get("completeness") != "estimated"' not in section
 
@@ -433,8 +559,9 @@ def test_spu_sku_binding_audits_both_historical_and_new_effective_bindings_befor
         encoding="utf-8"
     )
     section = source[
-        source.index("async def bind_spu_sku"):
-        source.index('@router.get("/api/purchase-orders")')
+        source.index("async def bind_spu_sku") : source.index(
+            '@router.get("/api/purchase-orders")'
+        )
     ]
 
     assert section.count("await _write_product_center_audit(") == 2
@@ -460,11 +587,17 @@ def test_product_warehouse_writes_are_audited_in_the_committing_transaction():
         encoding="utf-8"
     )
     endpoint_bounds = [
-        ("async def create_product_warehouse", '@router.patch("/api/product-warehouses/{warehouse_code}"'),
-        ("async def update_product_warehouse", '@router.patch("/api/platforms/{platform_code}/fee-rate"'),
+        (
+            "async def create_product_warehouse",
+            '@router.patch("/api/product-warehouses/{warehouse_code}"',
+        ),
+        (
+            "async def update_product_warehouse",
+            '@router.patch("/api/platforms/{platform_code}/fee-rate"',
+        ),
     ]
     for start, end in endpoint_bounds:
-        section = source[source.index(start):source.index(end)]
+        section = source[source.index(start) : source.index(end)]
         audit_index = section.index("await _write_product_center_audit(")
         assert audit_index < section.index("await db.commit()"), start
 
@@ -473,7 +606,11 @@ def test_product_center_audit_helper_records_identity_fields_without_secrets():
     source = Path("backend/domains/business/routers/product_center.py").read_text(
         encoding="utf-8"
     )
-    helper = source[source.index("async def _write_product_center_audit"):source.index("def _decimal_payload")]
+    helper = source[
+        source.index("async def _write_product_center_audit") : source.index(
+            "def _decimal_payload"
+        )
+    ]
     for field in ("user_id", "username", "action_type", "resource_type", "resource_id"):
         assert field in helper
     assert "password" not in helper.lower()
@@ -496,10 +633,13 @@ def test_direct_sku_volume_is_the_primary_reference_cost_measurement():
 
 
 def test_platform_profit_version_refuses_incomplete_inputs_with_structured_missing_fields():
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
     section = source[
-        source.index("async def save_platform_sku_profit_estimates"):
-        source.index('@router.get("/api/platform-sku-profit/estimates")')
+        source.index("async def save_platform_sku_profit_estimates") : source.index(
+            '@router.get("/api/platform-sku-profit/estimates")'
+        )
     ]
     assert "cannot_save_profit_version" in section
     assert "missing_fields" in section
@@ -512,7 +652,9 @@ def test_platform_profit_version_refuses_incomplete_inputs_with_structured_missi
 
 
 def test_platform_profit_draft_is_distinct_from_immutable_profit_versions():
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
     schema = Path("backend/schemas/product_center.py").read_text(encoding="utf-8")
     assert '"/api/platform-sku-profit/drafts"' in source
     assert "PlatformSkuProfitDraftRequest" in schema
@@ -521,12 +663,15 @@ def test_platform_profit_draft_is_distinct_from_immutable_profit_versions():
 
 def test_storage_rule_patch_accepts_material_changes_as_a_new_version():
     schema = Path("backend/schemas/product_center.py").read_text(encoding="utf-8")
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
     assert "unit_rate_cny: Optional[float]" in schema
     assert "effective_from: Optional[date]" in schema
     section = source[
-        source.index("async def update_warehouse_storage_rule"):
-        source.index("async def create_product_warehouse")
+        source.index("async def update_warehouse_storage_rule") : source.index(
+            "async def create_product_warehouse"
+        )
     ]
     assert "WarehouseStorageRule(" in section
     assert "storage_rule_versioned" in section
@@ -539,51 +684,75 @@ def test_storage_rule_version_window_is_validated_by_request_and_database_contra
             effective_from=date(2026, 9, 20),
             effective_to=date(2026, 9, 19),
         )
-    source = Path("modules/core/db/schema_parts/business.py").read_text(encoding="utf-8")
-    migration = Path("current_migrations/versions/20260920_sku_direct_volume_and_profit_drafts.py").read_text(encoding="utf-8")
+    source = Path("modules/core/db/schema_parts/business.py").read_text(
+        encoding="utf-8"
+    )
+    migration = Path(
+        "current_migrations/versions/20260920_sku_direct_volume_and_profit_drafts.py"
+    ).read_text(encoding="utf-8")
     assert "ck_warehouse_storage_rules_window" in source
     assert "ck_warehouse_storage_rules_window" in migration
-    router = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    router = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
     assert 'values["effective_to"] < next_effective_from' in router
 
 
 def test_platform_profit_draft_reuses_operating_scope_validation():
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
     section = source[
-        source.index("async def save_platform_sku_profit_draft"):
-        source.index("async def save_platform_sku_profit_estimates")
+        source.index("async def save_platform_sku_profit_draft") : source.index(
+            "async def save_platform_sku_profit_estimates"
+        )
     ]
     assert "await _validate_operating_dimensions(db, values)" in section
     assert "except IntegrityError" in section
 
 
 def test_missing_logistics_rate_is_reported_as_rule_configuration_not_sku_volume():
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
     candidates = source[
-        source.index("async def list_platform_sku_profit_candidates"):
-        source.index('@router.post("/api/platform-sku-profit/preview")')
+        source.index("async def list_platform_sku_profit_candidates") : source.index(
+            '@router.post("/api/platform-sku-profit/preview")'
+        )
     ]
-    assert 'cost_inputs["reference_logistics_rule"].freight_unit_rate is None' in candidates
+    assert (
+        'cost_inputs["reference_logistics_rule"].freight_unit_rate is None'
+        in candidates
+    )
 
 
 def test_candidate_preserves_valid_zero_purchase_cost_before_sku_fallback():
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
     candidates = source[
-        source.index("async def list_platform_sku_profit_candidates"):
-        source.index('@router.post("/api/platform-sku-profit/preview")')
+        source.index("async def list_platform_sku_profit_candidates") : source.index(
+            '@router.post("/api/platform-sku-profit/preview")'
+        )
     ]
-    assert 'cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost' in candidates
+    assert (
+        'cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost'
+        in candidates
+    )
 
 
 def test_platform_profit_projection_prefers_immutable_estimate_reference_costs():
-    source = Path("backend/services/feishu_projection_service.py").read_text(encoding="utf-8")
+    source = Path("backend/services/feishu_projection_service.py").read_text(
+        encoding="utf-8"
+    )
     payload = source[
-        source.index("async def _platform_sku_profit_payload"):
-        source.index("async def process_pending")
+        source.index("async def _platform_sku_profit_payload") : source.index(
+            "async def process_pending"
+        )
     ]
     assert 'SkuProfitEstimate.calculation_basis == "estimated"' in payload
-    assert 'estimate.expected_logistics_cost' in payload
-    assert 'estimate.expected_storage_cost' in payload
+    assert "estimate.expected_logistics_cost" in payload
+    assert "estimate.expected_storage_cost" in payload
 
 
 def test_warehouse_storage_rule_delete_endpoint_is_registered():
@@ -593,20 +762,28 @@ def test_warehouse_storage_rule_delete_endpoint_is_registered():
     delete_routes = [
         route
         for route in router.routes
-        if getattr(route, "methods", None) and "DELETE" in route.methods
+        if getattr(route, "methods", None)
+        and "DELETE" in route.methods
         and getattr(route, "path", "") == "/api/warehouse-storage-rules/{rule_id}"
     ]
-    assert delete_routes, "DELETE /api/warehouse-storage-rules/{rule_id} is not registered"
+    assert (
+        delete_routes
+    ), "DELETE /api/warehouse-storage-rules/{rule_id} is not registered"
 
 
 def test_warehouse_storage_rule_delete_keeps_patch_invariants_intact():
     """Deletion is additive: the patch path must still refuse to reactivate or version inactive rules."""
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
     update_section = source[
-        source.index("async def update_warehouse_storage_rule"):
-        source.index("async def delete_warehouse_storage_rule")
+        source.index("async def update_warehouse_storage_rule") : source.index(
+            "async def delete_warehouse_storage_rule"
+        )
     ]
-    assert 'values.get("status") == "active" and row.status != "active"' in update_section
+    assert (
+        'values.get("status") == "active" and row.status != "active"' in update_section
+    )
     assert "inactive storage rules cannot be reactivated" in update_section
     assert "inactive storage rules cannot be versioned" in update_section
 
@@ -638,9 +815,14 @@ async def test_warehouse_storage_rule_delete_removes_row_and_writes_audit():
 
     user = type("_U", (), {"user_id": 7, "username": "tester"})()
     rule = WarehouseStorageRule(
-        rule_id=42, warehouse_code="WH-1", billing_basis="volume",
-        billing_unit="CNY/CBM/month", unit_rate_cny=Decimal("100"),
-        effective_from=date(2026, 1, 1), status="active", version="v1",
+        rule_id=42,
+        warehouse_code="WH-1",
+        billing_basis="volume",
+        billing_unit="CNY/CBM/month",
+        unit_rate_cny=Decimal("100"),
+        effective_from=date(2026, 1, 1),
+        status="active",
+        version="v1",
     )
     session = _FakeSession(rule)
 
@@ -670,7 +852,9 @@ async def test_warehouse_storage_rule_delete_returns_404_when_row_missing():
     session = _FakeSession()
 
     with pytest.raises(HTTPException) as exc:
-        await pc_module.delete_warehouse_storage_rule(rule_id=999, db=session, _user=user)
+        await pc_module.delete_warehouse_storage_rule(
+            rule_id=999, db=session, _user=user
+        )
 
     assert exc.value.status_code == 404
     assert session.committed is False
@@ -683,10 +867,13 @@ def test_logistics_provider_rule_delete_endpoint_is_registered():
     delete_routes = [
         route
         for route in router.routes
-        if getattr(route, "methods", None) and "DELETE" in route.methods
+        if getattr(route, "methods", None)
+        and "DELETE" in route.methods
         and getattr(route, "path", "") == "/api/logistics-provider-rules/{rule_id}"
     ]
-    assert delete_routes, "DELETE /api/logistics-provider-rules/{rule_id} is not registered"
+    assert (
+        delete_routes
+    ), "DELETE /api/logistics-provider-rules/{rule_id} is not registered"
 
 
 @pytest.mark.asyncio
@@ -759,7 +946,9 @@ async def test_logistics_provider_rule_delete_returns_404_when_row_missing():
     session = _FakeSession()
 
     with pytest.raises(HTTPException) as exc:
-        await pc_module.delete_logistics_provider_rule(rule_id=999, db=session, _user=user)
+        await pc_module.delete_logistics_provider_rule(
+            rule_id=999, db=session, _user=user
+        )
 
     assert exc.value.status_code == 404
     assert session.committed is False

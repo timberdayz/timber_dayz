@@ -30,7 +30,9 @@ def _round_or_none(value: float | None, digits: int = 2) -> float | None:
 
 
 def _sum_present_values(rows: list[dict[str, Any]], key: str) -> float | None:
-    values = [_to_optional_float(row.get(key)) for row in rows if row.get(key) is not None]
+    values = [
+        _to_optional_float(row.get(key)) for row in rows if row.get(key) is not None
+    ]
     if not values:
         return None
     return sum(values)
@@ -42,7 +44,9 @@ def _to_optional_int(value: float | None) -> int | None:
     return int(value)
 
 
-def _percent_or_none(numerator: int | float | None, denominator: int | float | None) -> float | None:
+def _percent_or_none(
+    numerator: int | float | None, denominator: int | float | None
+) -> float | None:
     if numerator is None or denominator is None:
         return None
     if denominator > 0:
@@ -52,7 +56,9 @@ def _percent_or_none(numerator: int | float | None, denominator: int | float | N
     return None
 
 
-def _ratio_or_none(numerator: int | float | None, denominator: int | float | None) -> float | None:
+def _ratio_or_none(
+    numerator: int | float | None, denominator: int | float | None
+) -> float | None:
     if numerator is None or denominator is None:
         return None
     if denominator > 0:
@@ -90,7 +96,9 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
-def _month_time_progress_pct(period_month: date_cls, today: date_cls | None = None) -> float:
+def _month_time_progress_pct(
+    period_month: date_cls, today: date_cls | None = None
+) -> float:
     current_day = today or date_cls.today()
     selected_month = (period_month.year, period_month.month)
     current_month = (current_day.year, current_day.month)
@@ -104,7 +112,9 @@ def _month_time_progress_pct(period_month: date_cls, today: date_cls | None = No
     return round(current_day.day * 100.0 / days_in_month, 2)
 
 
-def _is_empty_period_rows(rows: list[dict[str, Any]], *, core_keys: tuple[str, ...]) -> bool:
+def _is_empty_period_rows(
+    rows: list[dict[str, Any]], *, core_keys: tuple[str, ...]
+) -> bool:
     if not rows:
         return True
     for row in rows:
@@ -118,7 +128,17 @@ def reduce_business_overview_kpi_rows(
     rows: list[dict[str, Any]],
     labor_efficiency: float | None = 0,
 ) -> dict[str, Any]:
-    if _is_empty_period_rows(rows, core_keys=("gmv", "order_count", "visitor_count", "page_views", "impressions", "profit")):
+    if _is_empty_period_rows(
+        rows,
+        core_keys=(
+            "gmv",
+            "order_count",
+            "visitor_count",
+            "page_views",
+            "impressions",
+            "profit",
+        ),
+    ):
         return {
             "gmv": 0,
             "order_count": 0,
@@ -234,8 +254,16 @@ def reduce_b_cost_analysis_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     else:
         net_margin_ref = None
 
-    platform_codes = {str(row.get("platform_code")) for row in rows if row.get("platform_code") is not None}
-    currency_codes = {str(row.get("currency_code")) for row in rows if row.get("currency_code") is not None}
+    platform_codes = {
+        str(row.get("platform_code"))
+        for row in rows
+        if row.get("platform_code") is not None
+    }
+    currency_codes = {
+        str(row.get("currency_code"))
+        for row in rows
+        if row.get("currency_code") is not None
+    }
 
     period_month = rows[0].get("period_month")
     platform_code = next(iter(platform_codes)) if len(platform_codes) == 1 else None
@@ -309,14 +337,22 @@ def _attach_shop_racing_change_fields(
     previous: dict[str, Any] | None,
 ) -> dict[str, Any]:
     previous = previous or {}
-    current_profit_margin = _profit_margin_value(current.get("profit"), current.get("gmv"))
-    previous_profit_margin = _profit_margin_value(previous.get("profit"), previous.get("gmv"))
+    current_profit_margin = _profit_margin_value(
+        current.get("profit"), current.get("gmv")
+    )
+    previous_profit_margin = _profit_margin_value(
+        previous.get("profit"), previous.get("gmv")
+    )
     current["gmv_previous"] = _to_optional_float(previous.get("gmv"))
     current["profit_previous"] = _to_optional_float(previous.get("profit"))
     current["order_count_previous"] = _to_optional_float(previous.get("order_count"))
-    current["avg_order_value_previous"] = _to_optional_float(previous.get("avg_order_value"))
+    current["avg_order_value_previous"] = _to_optional_float(
+        previous.get("avg_order_value")
+    )
     current["profit_margin_previous"] = previous_profit_margin
-    current["achievement_rate_previous"] = _to_optional_float(previous.get("achievement_rate"))
+    current["achievement_rate_previous"] = _to_optional_float(
+        previous.get("achievement_rate")
+    )
     current["gmv_change_rate"] = _change_pct(
         _to_optional_float(current.get("gmv")),
         _to_optional_float(previous.get("gmv")),
@@ -349,10 +385,16 @@ def _attach_traffic_change_fields(
     previous: dict[str, Any] | None,
 ) -> dict[str, Any]:
     previous = previous or {}
-    current["visitor_count_previous"] = _to_optional_float(previous.get("visitor_count"))
+    current["visitor_count_previous"] = _to_optional_float(
+        previous.get("visitor_count")
+    )
     current["page_views_previous"] = _to_optional_float(previous.get("page_views"))
-    current["uv_conversion_rate_previous"] = _to_optional_float(previous.get("uv_conversion_rate"))
-    current["pv_conversion_rate_previous"] = _to_optional_float(previous.get("pv_conversion_rate"))
+    current["uv_conversion_rate_previous"] = _to_optional_float(
+        previous.get("uv_conversion_rate")
+    )
+    current["pv_conversion_rate_previous"] = _to_optional_float(
+        previous.get("pv_conversion_rate")
+    )
     current["visitor_count_change_rate"] = _change_pct(
         _to_optional_float(current.get("visitor_count")),
         _to_optional_float(previous.get("visitor_count")),
@@ -403,7 +445,9 @@ def reduce_business_overview_comparison_rows(
     if target_sales_amount is None or metrics["sales_amount"]["today"] is None:
         achievement_rate = None
     elif target_sales_amount > 0:
-        achievement_rate = round(metrics["sales_amount"]["today"] * 100.0 / target_sales_amount, 2)
+        achievement_rate = round(
+            metrics["sales_amount"]["today"] * 100.0 / target_sales_amount, 2
+        )
     else:
         achievement_rate = None
 
@@ -504,7 +548,9 @@ def _platform_kpi_source_for_granularity(granularity: str) -> tuple[str, str]:
     raise ValueError("granularity must be daily, weekly or monthly")
 
 
-def _filter_rows_by_period_key(rows: list[dict[str, Any]], target_period: date_cls) -> list[dict[str, Any]]:
+def _filter_rows_by_period_key(
+    rows: list[dict[str, Any]], target_period: date_cls
+) -> list[dict[str, Any]]:
     matched: list[dict[str, Any]] = []
     for row in rows:
         period_value = row.get("period_key")
@@ -555,7 +601,8 @@ def rank_inventory_backlog_rows(
     filtered = [
         dict(row)
         for row in rows
-        if (_to_optional_float(row.get("days_since_restock")) or float("-inf")) >= min_days
+        if (_to_optional_float(row.get("days_since_restock")) or float("-inf"))
+        >= min_days
     ]
     for row in filtered:
         row["restock_tier"] = _classify_inventory_backlog_restock_tier(row)
@@ -597,7 +644,9 @@ def _inventory_sales_join_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
 def _classify_inventory_backlog_restock_tier(row: dict[str, Any]) -> str:
     """滞销档位：**走 inventory_restock_service 的唯一实现**，不在这里重写阈值。"""
     days_since_restock = _to_optional_float(row.get("days_since_restock"))
-    return classify_restock_tier(int(days_since_restock) if days_since_restock is not None else None)
+    return classify_restock_tier(
+        int(days_since_restock) if days_since_restock is not None else None
+    )
 
 
 def _compute_checklist_dos_sales90(row: dict[str, Any]) -> float | None:
@@ -613,14 +662,15 @@ def _compute_checklist_dos_sales90(row: dict[str, Any]) -> float | None:
     return float(value) if value is not None else None
 
 
-
 def summarize_inventory_backlog_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """滞销汇总（四张卡口径）：总库存价值 / 重度积压 / 中度积压 / 滞销占比。
 
     2026-10-24：口径从「周转天数分档」换成「距上次进货时长分档」——
     DOS 的分母（窗口销量）在增量模式下只会刷新 13.6% 的 SKU，不能当判定依据。
     """
-    total_value = sum(_to_optional_float(row.get("inventory_value")) or 0.0 for row in rows)
+    total_value = sum(
+        _to_optional_float(row.get("inventory_value")) or 0.0 for row in rows
+    )
     deep_value = sum(
         (_to_optional_float(row.get("inventory_value")) or 0.0)
         for row in rows
@@ -635,15 +685,25 @@ def summarize_inventory_backlog_rows(rows: list[dict[str, Any]]) -> dict[str, An
 
     return {
         "total_value": round(total_value, 2),
-        "total_quantity": int(sum(_to_optional_float(row.get("available_stock")) or 0.0 for row in rows)),
+        "total_quantity": int(
+            sum(_to_optional_float(row.get("available_stock")) or 0.0 for row in rows)
+        ),
         "deep_stagnant_value": round(deep_value, 2),
-        "deep_stagnant_ratio": round(deep_value * 100.0 / total_value, 2) if total_value else 0,
+        "deep_stagnant_ratio": (
+            round(deep_value * 100.0 / total_value, 2) if total_value else 0
+        ),
         "mid_stagnant_value": round(mid_value, 2),
-        "mid_stagnant_ratio": round(mid_value * 100.0 / total_value, 2) if total_value else 0,
+        "mid_stagnant_ratio": (
+            round(mid_value * 100.0 / total_value, 2) if total_value else 0
+        ),
         "backlog_value": round(backlog_value, 2),
-        "backlog_ratio": round(backlog_value * 100.0 / total_value, 2) if total_value else 0,
+        "backlog_ratio": (
+            round(backlog_value * 100.0 / total_value, 2) if total_value else 0
+        ),
         "active_row_count": sum(
-            1 for row in rows if (_to_optional_float(row.get("days_since_restock")) or 0.0) < 30
+            1
+            for row in rows
+            if (_to_optional_float(row.get("days_since_restock")) or 0.0) < 30
         ),
         "unknown_restock_row_count": sum(
             1 for row in rows if row.get("days_since_restock") is None
@@ -666,12 +726,16 @@ def rank_shop_racing_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ordered
 
 
-def rank_traffic_rows(rows: list[dict[str, Any]], dimension: str = "visitor") -> list[dict[str, Any]]:
+def rank_traffic_rows(
+    rows: list[dict[str, Any]], dimension: str = "visitor"
+) -> list[dict[str, Any]]:
     ordered = [dict(row) for row in rows]
     if dimension in {"pv", "page_views", "traffic", "shop", "account"}:
         ordered.sort(key=lambda row: _sort_numeric(row.get("page_views")), reverse=True)
     else:
-        ordered.sort(key=lambda row: _sort_numeric(row.get("visitor_count")), reverse=True)
+        ordered.sort(
+            key=lambda row: _sort_numeric(row.get("visitor_count")), reverse=True
+        )
     for index, row in enumerate(ordered, start=1):
         row["rank"] = index
     return ordered
@@ -778,7 +842,9 @@ def _normalize_period_start(value: str) -> date_cls:
     raise ValueError("Unsupported period/date format")
 
 
-def _resolve_business_overview_window(granularity: str, target_date: str) -> tuple[date_cls, date_cls]:
+def _resolve_business_overview_window(
+    granularity: str, target_date: str
+) -> tuple[date_cls, date_cls]:
     period_start = _normalize_period_start(target_date)
     normalized_granularity = str(granularity or "").strip().lower()
     if normalized_granularity == "daily":
@@ -803,11 +869,21 @@ def _start_of_next_month(day: date_cls) -> date_cls:
     return date_cls(day.year, day.month + 1, 1)
 
 
-def _resolve_store_analysis_effective_granularity(platform: str, granularity: str) -> str:
+def _resolve_store_analysis_effective_granularity(
+    platform: str, granularity: str
+) -> str:
     normalized_platform = str(platform or "").strip().lower()
     normalized_granularity = str(granularity or "").strip().lower()
-    if normalized_granularity not in {"daily", "weekly", "monthly", "quarterly", "yearly"}:
-        raise ValueError("granularity must be one of daily/weekly/monthly/quarterly/yearly")
+    if normalized_granularity not in {
+        "daily",
+        "weekly",
+        "monthly",
+        "quarterly",
+        "yearly",
+    }:
+        raise ValueError(
+            "granularity must be one of daily/weekly/monthly/quarterly/yearly"
+        )
     if normalized_granularity == "daily":
         return "hourly" if normalized_platform == "shopee" else "daily"
     if normalized_granularity == "yearly":
@@ -815,7 +891,9 @@ def _resolve_store_analysis_effective_granularity(platform: str, granularity: st
     return "daily"
 
 
-def _resolve_store_analysis_window(granularity: str, target_date: str) -> tuple[date_cls, date_cls]:
+def _resolve_store_analysis_window(
+    granularity: str, target_date: str
+) -> tuple[date_cls, date_cls]:
     period_start = _normalize_period_start(target_date)
     normalized_granularity = str(granularity or "").strip().lower()
     if normalized_granularity == "daily":
@@ -827,7 +905,9 @@ def _resolve_store_analysis_window(granularity: str, target_date: str) -> tuple[
         return month_start, _start_of_next_month(month_start) - timedelta(days=1)
     if normalized_granularity == "quarterly":
         quarter_start = _start_of_quarter(period_start)
-        quarter_end = _start_of_next_month(_start_of_next_month(_start_of_next_month(quarter_start))) - timedelta(days=1)
+        quarter_end = _start_of_next_month(
+            _start_of_next_month(_start_of_next_month(quarter_start))
+        ) - timedelta(days=1)
         return quarter_start, quarter_end
     if normalized_granularity == "yearly":
         year_start = date_cls(period_start.year, 1, 1)
@@ -889,12 +969,18 @@ class PostgresqlDashboardService:
                     ),
                     {"table_schema": table_schema, "table_name": table_name},
                 )
-                columns = {str(row[0]) for row in result.fetchall() if row and row[0] is not None}
+                columns = {
+                    str(row[0])
+                    for row in result.fetchall()
+                    if row and row[0] is not None
+                }
 
             self._column_cache[cache_key] = columns
             return columns
 
-    async def _fetch_rows(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _fetch_rows(
+        self, query: str, params: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         async with AsyncSessionLocal() as session:
             result = await session.execute(text(query), params)
             return [dict(row) for row in result.mappings().all()]
@@ -907,7 +993,9 @@ class PostgresqlDashboardService:
         timeout_ms: int,
     ) -> list[dict[str, Any]]:
         async with AsyncSessionLocal() as session:
-            await session.execute(text(f"SET LOCAL statement_timeout = {int(timeout_ms)}"))
+            await session.execute(
+                text(f"SET LOCAL statement_timeout = {int(timeout_ms)}")
+            )
             result = await session.execute(text(query), params)
             return [dict(row) for row in result.mappings().all()]
 
@@ -927,7 +1015,7 @@ class PostgresqlDashboardService:
             except ProgrammingError as exc:
                 await session.rollback()
                 orig_message = str(getattr(exc, "orig", exc)).lower()
-                if 'employee_identity_type' in orig_message:
+                if "employee_identity_type" in orig_message:
                     fallback = await session.execute(
                         text(
                             """
@@ -939,7 +1027,10 @@ class PostgresqlDashboardService:
                     )
                     value = fallback.scalar_one_or_none()
                     return int(value or 0)
-                if 'a_class.employees' in orig_message or 'relation "a_class.employees"' in orig_message:
+                if (
+                    "a_class.employees" in orig_message
+                    or 'relation "a_class.employees"' in orig_message
+                ):
                     return 0
                 raise
             value = result.scalar_one_or_none()
@@ -998,18 +1089,26 @@ class PostgresqlDashboardService:
             "total_value": round(total_value, 2),
             "total_quantity": int(_to_optional_float(row.get("total_quantity")) or 0.0),
             "deep_stagnant_value": round(deep_value, 2),
-            "deep_stagnant_ratio": round(deep_value * 100.0 / total_value, 2) if total_value else 0,
+            "deep_stagnant_ratio": (
+                round(deep_value * 100.0 / total_value, 2) if total_value else 0
+            ),
             "mid_stagnant_value": round(mid_value, 2),
-            "mid_stagnant_ratio": round(mid_value * 100.0 / total_value, 2) if total_value else 0,
+            "mid_stagnant_ratio": (
+                round(mid_value * 100.0 / total_value, 2) if total_value else 0
+            ),
             "backlog_value": round(backlog_value, 2),
-            "backlog_ratio": round(backlog_value * 100.0 / total_value, 2) if total_value else 0,
+            "backlog_ratio": (
+                round(backlog_value * 100.0 / total_value, 2) if total_value else 0
+            ),
             "deep_stagnant_row_count": int(
                 _to_optional_float(row.get("deep_stagnant_row_count")) or 0.0
             ),
             "mid_stagnant_row_count": int(
                 _to_optional_float(row.get("mid_stagnant_row_count")) or 0.0
             ),
-            "active_row_count": int(_to_optional_float(row.get("active_row_count")) or 0.0),
+            "active_row_count": int(
+                _to_optional_float(row.get("active_row_count")) or 0.0
+            ),
             "unknown_restock_row_count": int(
                 _to_optional_float(row.get("unknown_restock_row_count")) or 0.0
             ),
@@ -1038,15 +1137,21 @@ class PostgresqlDashboardService:
             WHERE {where_clause}
             ORDER BY days_since_restock DESC, inventory_value DESC
             LIMIT :limit
-            """.format(source_table=source_table, where_clause=" AND ".join(where_clauses)),
+            """.format(
+                source_table=source_table, where_clause=" AND ".join(where_clauses)
+            ),
             params,
         )
         ranked: list[dict[str, Any]] = []
         for index, row in enumerate(rows, start=1):
             normalized = dict(row)
-            normalized["restock_tier"] = _classify_inventory_backlog_restock_tier(normalized)
+            normalized["restock_tier"] = _classify_inventory_backlog_restock_tier(
+                normalized
+            )
             # DOS 只作参考值：分母不新鲜，不参与判定，但运营需要这个量级感
-            normalized["checklist_dos_sales90"] = _compute_checklist_dos_sales90(normalized)
+            normalized["checklist_dos_sales90"] = _compute_checklist_dos_sales90(
+                normalized
+            )
             normalized["rank"] = index
             ranked.append(normalized)
         return ranked
@@ -1119,11 +1224,15 @@ class PostgresqlDashboardService:
                         result = await session.execute(text(query), params)
                     except Exception:
                         await session.rollback()
-                        columns = await self._get_table_columns("a_class", "sales_targets_a")
+                        columns = await self._get_table_columns(
+                            "a_class", "sales_targets_a"
+                        )
                         year_month_value = period_start.strftime("%Y-%m")
                         if {"year_month", "target_sales_amount"}.issubset(columns):
                             target_filters = ""
-                            target_params: dict[str, Any] = {"year_month": year_month_value}
+                            target_params: dict[str, Any] = {
+                                "year_month": year_month_value
+                            }
                             if platform and "platform_code" in columns:
                                 target_filters += " AND LOWER(COALESCE(platform_code, '')) = LOWER(:platform)"
                                 target_params["platform"] = platform
@@ -1184,7 +1293,9 @@ class PostgresqlDashboardService:
                     except Exception:
                         await session.rollback()
                         try:
-                            columns = await self._get_table_columns("a_class", "sales_targets_a")
+                            columns = await self._get_table_columns(
+                                "a_class", "sales_targets_a"
+                            )
                             year_month_value = period_start.strftime("%Y-%m")
                             if {"year_month", "target_sales_amount"}.issubset(columns):
                                 result = await session.execute(
@@ -1258,7 +1369,9 @@ class PostgresqlDashboardService:
                     "period_end": period_end,
                 }
                 if platform:
-                    query += " AND LOWER(COALESCE(tb.platform_code, '')) = LOWER(:platform)"
+                    query += (
+                        " AND LOWER(COALESCE(tb.platform_code, '')) = LOWER(:platform)"
+                    )
                     params["platform"] = platform
                 if shop_id:
                     query += " AND tb.shop_id = :shop_id"
@@ -1282,14 +1395,16 @@ class PostgresqlDashboardService:
         """Use the same persisted expense and projected-labor sources as expense management."""
         year_month = period_month.strftime("%Y-%m")
         async with AsyncSessionLocal() as session:
-            effective_month = await LaborCostPolicyService(session).get_effective_month()
+            effective_month = await LaborCostPolicyService(
+                session
+            ).get_effective_month()
             use_projected_labor = bool(
                 effective_month is not None and year_month >= effective_month
             )
             params: dict[str, Any] = {"year_month": year_month}
             filters = ['"年月" = :year_month', '"删除时间" IS NULL']
             if platform:
-                filters.append('LOWER(COALESCE(platform_code, \'\')) = :platform_code')
+                filters.append("LOWER(COALESCE(platform_code, '')) = :platform_code")
                 params["platform_code"] = platform.lower()
             if shop_id:
                 filters.append('"店铺ID" = :shop_id')
@@ -1298,7 +1413,7 @@ class PostgresqlDashboardService:
             manual_result = await session.execute(
                 text(
                     f"""
-                    SELECT COALESCE(SUM(
+                    SELECT SUM(
                         CASE WHEN COALESCE("成本合计", 0) <> 0
                             THEN "成本合计"
                             ELSE COALESCE("租金", 0)
@@ -1309,20 +1424,26 @@ class PostgresqlDashboardService:
                                 + COALESCE("其他成本", 0)
                         END
                         - CASE WHEN :use_projected_labor THEN COALESCE("人力费用", 0) ELSE 0 END
-                    ), 0)
+                    )
                     FROM a_class.operating_costs
                     WHERE {' AND '.join(filters)}
                     """
                 ),
                 {**params, "use_projected_labor": use_projected_labor},
             )
-            manual_total = _to_optional_float(manual_result.scalar_one_or_none()) or 0.0
+            # ⚠️ 这里**不能**用 COALESCE(SUM(...), 0)：
+            # 「没有可见费用行」和「费用合计为 0」是两回事，前端要的是 None（显示 "--"，
+            # 并隐藏成本明细块），见 frontend/src/domains/business/views/BusinessOverview.vue。
+            # SUM 在无行时返回 NULL，正好用来区分这两种情况。
+            manual_total = _to_optional_float(manual_result.scalar_one_or_none())
             if not use_projected_labor:
                 return manual_total
 
             labor_filters = ["period_month = :year_month"]
             if platform:
-                labor_filters.append("LOWER(COALESCE(platform_code, '')) = :platform_code")
+                labor_filters.append(
+                    "LOWER(COALESCE(platform_code, '')) = :platform_code"
+                )
             if shop_id:
                 labor_filters.append("shop_id = :shop_id")
             if platform or shop_id:
@@ -1330,17 +1451,21 @@ class PostgresqlDashboardService:
             labor_result = await session.execute(
                 text(
                     f"""
-                    SELECT COALESCE(SUM(total_amount), 0)
+                    SELECT SUM(total_amount)
                     FROM finance.employee_labor_cost_allocations
                     WHERE {' AND '.join(labor_filters)}
                     """
                 ),
                 params,
             )
-            projected_total = _to_optional_float(labor_result.scalar_one_or_none()) or 0.0
-            return round(manual_total + projected_total, 2)
+            projected_total = _to_optional_float(labor_result.scalar_one_or_none())
+            if manual_total is None and projected_total is None:
+                return None
+            return round((manual_total or 0.0) + (projected_total or 0.0), 2)
 
-    def _business_overview_kpi_period_key(self, granularity: str, period_key: date_cls) -> date_cls:
+    def _business_overview_kpi_period_key(
+        self, granularity: str, period_key: date_cls
+    ) -> date_cls:
         if granularity == "daily":
             return period_key
         if granularity == "weekly":
@@ -1349,7 +1474,9 @@ class PostgresqlDashboardService:
             return date_cls(period_key.year, period_key.month, 1)
         raise ValueError("granularity must be daily, weekly or monthly")
 
-    def _previous_business_overview_kpi_period_key(self, granularity: str, period_key: date_cls) -> date_cls:
+    def _previous_business_overview_kpi_period_key(
+        self, granularity: str, period_key: date_cls
+    ) -> date_cls:
         current = self._business_overview_kpi_period_key(granularity, period_key)
         if granularity == "daily":
             return current - timedelta(days=1)
@@ -1365,7 +1492,9 @@ class PostgresqlDashboardService:
         shop_id: str | None = None,
     ) -> tuple[str, str, bool]:
         if shop_id:
-            source_table, period_column = _comparison_source_for_granularity(granularity)
+            source_table, period_column = _comparison_source_for_granularity(
+                granularity
+            )
             return source_table, period_column, True
         if granularity == "monthly":
             return "api.business_overview_kpi_module", "period_month", False
@@ -1379,9 +1508,11 @@ class PostgresqlDashboardService:
         platform: str | None = None,
         shop_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        source_table, period_column, includes_shop_id = self._business_overview_kpi_source(
-            granularity,
-            shop_id=shop_id,
+        source_table, period_column, includes_shop_id = (
+            self._business_overview_kpi_source(
+                granularity,
+                shop_id=shop_id,
+            )
         )
         shop_select = "shop_id," if includes_shop_id else "NULL::text AS shop_id,"
         query = """
@@ -1406,7 +1537,11 @@ class PostgresqlDashboardService:
                 profit
             FROM {source_table}
             WHERE {period_column} = :period_key
-        """.format(period_column=period_column, shop_select=shop_select, source_table=source_table)
+        """.format(
+            period_column=period_column,
+            shop_select=shop_select,
+            source_table=source_table,
+        )
         params: dict[str, Any] = {"period_key": period_key}
         if platform:
             query += " AND platform_code = :platform_code"
@@ -1471,11 +1606,7 @@ class PostgresqlDashboardService:
             """,
             {"table_names": table_names},
         )
-        return {
-            str(row.get("table_name"))
-            for row in rows
-            if row.get("table_name")
-        }
+        return {str(row.get("table_name")) for row in rows if row.get("table_name")}
 
     async def _load_business_overview_freshness_side(
         self,
@@ -1486,10 +1617,16 @@ class PostgresqlDashboardService:
         shop_id: str | None = None,
     ) -> dict[str, Any]:
         existing_tables = await self._fetch_existing_b_class_tables(table_names)
-        selected_tables = [table_name for table_name in table_names if table_name in existing_tables]
+        selected_tables = [
+            table_name for table_name in table_names if table_name in existing_tables
+        ]
         if platform:
             platform_prefix = f"fact_{platform.lower()}_"
-            selected_tables = [table_name for table_name in selected_tables if table_name.startswith(platform_prefix)]
+            selected_tables = [
+                table_name
+                for table_name in selected_tables
+                if table_name.startswith(platform_prefix)
+            ]
         if not selected_tables:
             return {
                 "side": side_name,
@@ -1581,8 +1718,14 @@ class PostgresqlDashboardService:
             warnings.append("orders freshness unavailable")
         if traffic_end is None:
             warnings.append("traffic freshness unavailable")
-        if orders_end is not None and traffic_end is not None and orders_end != traffic_end:
-            warnings.append(f"orders period_end_date {orders_end} lags traffic {traffic_end}")
+        if (
+            orders_end is not None
+            and traffic_end is not None
+            and orders_end != traffic_end
+        ):
+            warnings.append(
+                f"orders period_end_date {orders_end} lags traffic {traffic_end}"
+            )
 
         table_checks = []
         for side in (orders, traffic):
@@ -1593,7 +1736,8 @@ class PostgresqlDashboardService:
                 parsed_ingest = _as_utc(_parse_datetimeish(latest_ingest_timestamp))
                 if parsed_ingest is not None:
                     stale_hours = round(
-                        (datetime.now(timezone.utc) - parsed_ingest).total_seconds() / 3600,
+                        (datetime.now(timezone.utc) - parsed_ingest).total_seconds()
+                        / 3600,
                         2,
                     )
                     is_side_stale = stale_hours > 24
@@ -1603,13 +1747,16 @@ class PostgresqlDashboardService:
                         "table_name": table_name,
                         "side": side.get("side"),
                         "latest_ingest_timestamp": latest_ingest_timestamp,
-                        "latest_business_date": side.get("period_end_date") or side.get("latest_metric_date"),
+                        "latest_business_date": side.get("period_end_date")
+                        or side.get("latest_metric_date"),
                         "stale_hours": stale_hours,
                         "is_stale": is_side_stale,
                     }
                 )
                 if is_side_stale:
-                    warnings.append(f"{table_name} has no new ingest for {stale_hours}h")
+                    warnings.append(
+                        f"{table_name} has no new ingest for {stale_hours}h"
+                    )
 
         return {
             "orders": orders,
@@ -1632,8 +1779,12 @@ class PostgresqlDashboardService:
         if effective_target_date is None:
             raise ValueError("target_date or month is required")
         normalized_period = _normalize_period_start(effective_target_date)
-        period_key = self._business_overview_kpi_period_key(effective_granularity, normalized_period)
-        previous_period_key = self._previous_business_overview_kpi_period_key(effective_granularity, period_key)
+        period_key = self._business_overview_kpi_period_key(
+            effective_granularity, normalized_period
+        )
+        previous_period_key = self._previous_business_overview_kpi_period_key(
+            effective_granularity, period_key
+        )
 
         rows = await self._fetch_business_overview_kpi_rows(
             effective_granularity,
@@ -1648,7 +1799,9 @@ class PostgresqlDashboardService:
             shop_id=shop_id,
         )
         reduced = await self._reduce_business_overview_kpi_snapshot(rows, period_key)
-        previous_reduced = await self._reduce_business_overview_kpi_snapshot(previous_rows, previous_period_key)
+        previous_reduced = await self._reduce_business_overview_kpi_snapshot(
+            previous_rows, previous_period_key
+        )
         return self._attach_business_overview_kpi_changes(reduced, previous_reduced)
 
     async def get_business_overview_comparison(
@@ -1723,9 +1876,12 @@ class PostgresqlDashboardService:
         current_end = (
             current_start
             if granularity == "daily"
-            else current_start + timedelta(days=6)
-            if granularity == "weekly"
-            else (current_start + timedelta(days=31)).replace(day=1) - timedelta(days=1)
+            else (
+                current_start + timedelta(days=6)
+                if granularity == "weekly"
+                else (current_start + timedelta(days=31)).replace(day=1)
+                - timedelta(days=1)
+            )
         )
         target_summary = await self._load_target_summary(
             granularity=granularity,
@@ -1733,11 +1889,21 @@ class PostgresqlDashboardService:
             period_end=current_end,
             platform=platform,
         )
-        reduced["target"]["sales_amount"] = _round_or_none(target_summary["target_amount"], 2)
-        reduced["target"]["sales_quantity"] = _round_or_none(target_summary["target_quantity"], 2)
+        reduced["target"]["sales_amount"] = _round_or_none(
+            target_summary["target_amount"], 2
+        )
+        reduced["target"]["sales_quantity"] = _round_or_none(
+            target_summary["target_quantity"], 2
+        )
         reduced["target"]["achievement_rate"] = (
-            round(reduced["metrics"]["sales_amount"]["today"] * 100.0 / target_summary["target_amount"], 2)
-            if target_summary["target_amount"] and reduced["metrics"]["sales_amount"]["today"] is not None
+            round(
+                reduced["metrics"]["sales_amount"]["today"]
+                * 100.0
+                / target_summary["target_amount"],
+                2,
+            )
+            if target_summary["target_amount"]
+            and reduced["metrics"]["sales_amount"]["today"] is not None
             else None
         )
         return reduced
@@ -1752,10 +1918,14 @@ class PostgresqlDashboardService:
         period_start = None
         period_end = None
         if granularity and target_date:
-            period_start, period_end = _resolve_business_overview_window(granularity, target_date)
+            period_start, period_end = _resolve_business_overview_window(
+                granularity, target_date
+            )
         return {
             "summary": await (
-                self._load_inventory_backlog_summary(period_start=period_start, period_end=period_end)
+                self._load_inventory_backlog_summary(
+                    period_start=period_start, period_end=period_end
+                )
                 if period_start is not None and period_end is not None
                 else self._load_inventory_backlog_summary()
             ),
@@ -1781,8 +1951,13 @@ class PostgresqlDashboardService:
         period_end = None
         if target_date:
             normalized_target = _normalize_period_start(target_date)
-            period_start, period_end = _resolve_business_overview_window("monthly", str(normalized_target))
-        where_clauses = ["(CAST(:period_start AS date) IS NULL OR ranking_month >= CAST(:period_start AS date))", "(CAST(:period_end AS date) IS NULL OR ranking_month <= CAST(:period_end AS date))"]
+            period_start, period_end = _resolve_business_overview_window(
+                "monthly", str(normalized_target)
+            )
+        where_clauses = [
+            "(CAST(:period_start AS date) IS NULL OR ranking_month >= CAST(:period_start AS date))",
+            "(CAST(:period_end AS date) IS NULL OR ranking_month <= CAST(:period_end AS date))",
+        ]
         params: dict[str, Any] = {
             "min_days": min_days,
             "limit": limit,
@@ -1819,7 +1994,9 @@ class PostgresqlDashboardService:
             WHERE {where_clause}
             ORDER BY clearance_priority_score DESC, ranking_month DESC, clearance_amount DESC, clearance_quantity DESC, shop_name ASC
             LIMIT :limit
-            """.format(where_clause=" AND ".join(where_clauses)),
+            """.format(
+                where_clause=" AND ".join(where_clauses)
+            ),
             params,
         )
         ranked: list[dict[str, Any]] = []
@@ -1838,9 +2015,15 @@ class PostgresqlDashboardService:
     ) -> list[dict[str, Any]]:
         normalized_target_date = _normalize_period_start(target_date)
         normalized_granularity = str(granularity or "").strip().lower()
-        period_key = self._business_overview_kpi_period_key(normalized_granularity, normalized_target_date)
-        previous_period_key = self._previous_business_overview_kpi_period_key(normalized_granularity, period_key)
-        source_table = _business_overview_shop_racing_source_table(normalized_granularity)
+        period_key = self._business_overview_kpi_period_key(
+            normalized_granularity, normalized_target_date
+        )
+        previous_period_key = self._previous_business_overview_kpi_period_key(
+            normalized_granularity, period_key
+        )
+        source_table = _business_overview_shop_racing_source_table(
+            normalized_granularity
+        )
         where_clause = "src.granularity = :granularity AND src.period_key IN (:period_key, :previous_period_key)"
         params: dict[str, Any] = {
             "granularity": normalized_granularity,
@@ -1873,13 +2056,20 @@ class PostgresqlDashboardService:
         try:
             rows = await self._fetch_rows(query, params)
         except Exception:
-            rows = await self._fetch_rows_with_statement_timeout(query, params, timeout_ms=120000)
+            rows = await self._fetch_rows_with_statement_timeout(
+                query, params, timeout_ms=120000
+            )
 
         current_rows = [row for row in rows if _row_period_key(row) == period_key]
-        previous_rows = [row for row in rows if _row_period_key(row) == previous_period_key]
+        previous_rows = [
+            row for row in rows if _row_period_key(row) == previous_period_key
+        ]
 
         if group_by == "platform":
-            def group_platform(source_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+
+            def group_platform(
+                source_rows: list[dict[str, Any]],
+            ) -> dict[str, dict[str, Any]]:
                 grouped: dict[str, dict[str, Any]] = {}
                 for row in source_rows:
                     key = row["platform_code"]
@@ -1899,14 +2089,24 @@ class PostgresqlDashboardService:
                         },
                     )
                     grouped[key]["gmv"] += _to_optional_float(row.get("gmv")) or 0.0
-                    grouped[key]["profit"] += _to_optional_float(row.get("profit")) or 0.0
-                    grouped[key]["order_count"] += _to_optional_float(row.get("order_count")) or 0.0
-                    grouped[key]["target_amount"] += _to_optional_float(row.get("target_amount")) or 0.0
+                    grouped[key]["profit"] += (
+                        _to_optional_float(row.get("profit")) or 0.0
+                    )
+                    grouped[key]["order_count"] += (
+                        _to_optional_float(row.get("order_count")) or 0.0
+                    )
+                    grouped[key]["target_amount"] += (
+                        _to_optional_float(row.get("target_amount")) or 0.0
+                    )
                 for value in grouped.values():
                     if value["order_count"]:
-                        value["avg_order_value"] = round(value["gmv"] / value["order_count"], 2)
+                        value["avg_order_value"] = round(
+                            value["gmv"] / value["order_count"], 2
+                        )
                     if value["target_amount"]:
-                        value["achievement_rate"] = round(value["gmv"] * 100.0 / value["target_amount"], 2)
+                        value["achievement_rate"] = round(
+                            value["gmv"] * 100.0 / value["target_amount"], 2
+                        )
                 return grouped
 
             grouped = group_platform(current_rows)
@@ -1916,7 +2116,10 @@ class PostgresqlDashboardService:
             return rank_shop_racing_rows(list(grouped.values()))
 
         if group_by == "account":
-            def group_account(source_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+
+            def group_account(
+                source_rows: list[dict[str, Any]],
+            ) -> dict[str, dict[str, Any]]:
                 grouped: dict[str, dict[str, Any]] = {}
                 for row in source_rows:
                     account_id = row.get("shop_account_id")
@@ -1927,14 +2130,27 @@ class PostgresqlDashboardService:
                         [
                             part
                             for part in (
-                                (str(main_account_name).strip() if main_account_name else None),
-                                (str(account_store_name).strip() if account_store_name else None),
+                                (
+                                    str(main_account_name).strip()
+                                    if main_account_name
+                                    else None
+                                ),
+                                (
+                                    str(account_store_name).strip()
+                                    if account_store_name
+                                    else None
+                                ),
                             )
                             if part
                         ]
                     )
-                    fallback_name = display_name or account_store_name or account_id or "未匹配账号"
-                    key = account_id or f"unmatched::{row.get('platform_code') or 'unknown'}"
+                    fallback_name = (
+                        display_name or account_store_name or account_id or "未匹配账号"
+                    )
+                    key = (
+                        account_id
+                        or f"unmatched::{row.get('platform_code') or 'unknown'}"
+                    )
                     grouped.setdefault(
                         key,
                         {
@@ -1955,14 +2171,24 @@ class PostgresqlDashboardService:
                         },
                     )
                     grouped[key]["gmv"] += _to_optional_float(row.get("gmv")) or 0.0
-                    grouped[key]["profit"] += _to_optional_float(row.get("profit")) or 0.0
-                    grouped[key]["order_count"] += _to_optional_float(row.get("order_count")) or 0.0
-                    grouped[key]["target_amount"] += _to_optional_float(row.get("target_amount")) or 0.0
+                    grouped[key]["profit"] += (
+                        _to_optional_float(row.get("profit")) or 0.0
+                    )
+                    grouped[key]["order_count"] += (
+                        _to_optional_float(row.get("order_count")) or 0.0
+                    )
+                    grouped[key]["target_amount"] += (
+                        _to_optional_float(row.get("target_amount")) or 0.0
+                    )
                 for value in grouped.values():
                     if value["order_count"]:
-                        value["avg_order_value"] = round(value["gmv"] / value["order_count"], 2)
+                        value["avg_order_value"] = round(
+                            value["gmv"] / value["order_count"], 2
+                        )
                     if value["target_amount"]:
-                        value["achievement_rate"] = round(value["gmv"] * 100.0 / value["target_amount"], 2)
+                        value["achievement_rate"] = round(
+                            value["gmv"] * 100.0 / value["target_amount"], 2
+                        )
                 return grouped
 
             grouped = group_account(current_rows)
@@ -1983,7 +2209,9 @@ class PostgresqlDashboardService:
             }
             for row in previous_rows
         ]
-        previous_by_key = {_shop_racing_identity_key(row): row for row in previous_normalized_rows}
+        previous_by_key = {
+            _shop_racing_identity_key(row): row for row in previous_normalized_rows
+        }
 
         normalized_rows = []
         for row in current_rows:
@@ -2020,8 +2248,12 @@ class PostgresqlDashboardService:
     ) -> list[dict[str, Any]]:
         normalized_granularity = str(granularity or "").strip().lower()
         normalized_target_date = _normalize_period_start(target_date)
-        period_key = self._business_overview_kpi_period_key(normalized_granularity, normalized_target_date)
-        previous_period_key = self._previous_business_overview_kpi_period_key(normalized_granularity, period_key)
+        period_key = self._business_overview_kpi_period_key(
+            normalized_granularity, normalized_target_date
+        )
+        previous_period_key = self._previous_business_overview_kpi_period_key(
+            normalized_granularity, period_key
+        )
         query = """
             SELECT
                 :granularity AS granularity,
@@ -2054,10 +2286,15 @@ class PostgresqlDashboardService:
         rows = await self._fetch_rows(query, params)
 
         current_rows = [row for row in rows if _row_period_key(row) == period_key]
-        previous_rows = [row for row in rows if _row_period_key(row) == previous_period_key]
+        previous_rows = [
+            row for row in rows if _row_period_key(row) == previous_period_key
+        ]
 
         if dimension == "account":
-            def group_account(source_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+
+            def group_account(
+                source_rows: list[dict[str, Any]],
+            ) -> dict[str, dict[str, Any]]:
                 grouped: dict[str, dict[str, Any]] = {}
                 for row in source_rows:
                     account_id = row.get("shop_account_id")
@@ -2068,14 +2305,27 @@ class PostgresqlDashboardService:
                         [
                             part
                             for part in (
-                                (str(main_account_name).strip() if main_account_name else None),
-                                (str(account_store_name).strip() if account_store_name else None),
+                                (
+                                    str(main_account_name).strip()
+                                    if main_account_name
+                                    else None
+                                ),
+                                (
+                                    str(account_store_name).strip()
+                                    if account_store_name
+                                    else None
+                                ),
                             )
                             if part
                         ]
                     )
-                    fallback_name = display_name or account_store_name or account_id or "未匹配账号"
-                    key = account_id or f"unmatched::{row.get('platform_code') or 'unknown'}"
+                    fallback_name = (
+                        display_name or account_store_name or account_id or "未匹配账号"
+                    )
+                    key = (
+                        account_id
+                        or f"unmatched::{row.get('platform_code') or 'unknown'}"
+                    )
                     grouped.setdefault(
                         key,
                         {
@@ -2110,11 +2360,27 @@ class PostgresqlDashboardService:
                         grouped[key]["order_count"] += order_count
                         grouped[key]["_has_order_count"] = True
                 for value in grouped.values():
-                    rate_order_count = value.get("order_count") if value.pop("_has_order_count") else None
-                    rate_visitor_count = value.get("visitor_count") if value.pop("_has_visitor_count") else None
-                    rate_page_views = value.get("page_views") if value.pop("_has_page_views") else None
-                    value["uv_conversion_rate"] = _percent_or_none(rate_order_count, rate_visitor_count)
-                    value["pv_conversion_rate"] = _percent_or_none(rate_order_count, rate_page_views)
+                    rate_order_count = (
+                        value.get("order_count")
+                        if value.pop("_has_order_count")
+                        else None
+                    )
+                    rate_visitor_count = (
+                        value.get("visitor_count")
+                        if value.pop("_has_visitor_count")
+                        else None
+                    )
+                    rate_page_views = (
+                        value.get("page_views")
+                        if value.pop("_has_page_views")
+                        else None
+                    )
+                    value["uv_conversion_rate"] = _percent_or_none(
+                        rate_order_count, rate_visitor_count
+                    )
+                    value["pv_conversion_rate"] = _percent_or_none(
+                        rate_order_count, rate_page_views
+                    )
                     value["conversion_rate"] = value["uv_conversion_rate"]
                 return grouped
 
@@ -2131,19 +2397,26 @@ class PostgresqlDashboardService:
                     "shop_id": row.get("shop_id") or "unknown",
                     "visitor_count": _to_optional_float(row.get("visitor_count")),
                     "page_views": _to_optional_float(row.get("page_views")),
-                    "uv_conversion_rate": _to_optional_float(row.get("uv_conversion_rate")),
-                    "pv_conversion_rate": _to_optional_float(row.get("pv_conversion_rate")),
+                    "uv_conversion_rate": _to_optional_float(
+                        row.get("uv_conversion_rate")
+                    ),
+                    "pv_conversion_rate": _to_optional_float(
+                        row.get("pv_conversion_rate")
+                    ),
                 }
                 for row in previous_rows
             ]
-            previous_by_key = {_traffic_identity_key(row): row for row in previous_normalized_rows}
+            previous_by_key = {
+                _traffic_identity_key(row): row for row in previous_normalized_rows
+            }
             normalized_rows = []
             for row in current_rows:
                 normalized = {
                     "name": row.get("display_name")
                     or (
                         row.get("shop_id")
-                        if str(row.get("shop_id") or "").strip().lower() not in {"", "none", "unknown"}
+                        if str(row.get("shop_id") or "").strip().lower()
+                        not in {"", "none", "unknown"}
                         else "未匹配店铺"
                     ),
                     "platform_code": row.get("platform_code"),
@@ -2156,8 +2429,12 @@ class PostgresqlDashboardService:
                     "visitor_count": _to_optional_float(row.get("visitor_count")),
                     "page_views": _to_optional_float(row.get("page_views")),
                     "conversion_rate": _to_optional_float(row.get("conversion_rate")),
-                    "uv_conversion_rate": _to_optional_float(row.get("uv_conversion_rate")),
-                    "pv_conversion_rate": _to_optional_float(row.get("pv_conversion_rate")),
+                    "uv_conversion_rate": _to_optional_float(
+                        row.get("uv_conversion_rate")
+                    ),
+                    "pv_conversion_rate": _to_optional_float(
+                        row.get("pv_conversion_rate")
+                    ),
                 }
                 normalized_rows.append(
                     _attach_traffic_change_fields(
@@ -2348,7 +2625,9 @@ class PostgresqlDashboardService:
             "platform_code": normalized_platform,
             "shop_id": normalized_shop_id,
             "supports_hourly_daily": normalized_platform == "shopee",
-            "supported_daily_mode": "hourly" if normalized_platform == "shopee" else "daily",
+            "supported_daily_mode": (
+                "hourly" if normalized_platform == "shopee" else "daily"
+            ),
             "supported_long_range_mode": "monthly",
         }
 
@@ -2387,7 +2666,9 @@ class PostgresqlDashboardService:
         normalized_platform = str(platform or "").strip().lower()
         normalized_shop_id = str(shop_id or "").strip()
         requested_granularity = str(granularity or "").strip().lower()
-        period_start, period_end = _resolve_store_analysis_window(requested_granularity, target_date)
+        period_start, period_end = _resolve_store_analysis_window(
+            requested_granularity, target_date
+        )
 
         if requested_granularity in {"daily", "weekly", "monthly"}:
             trend_query = """
@@ -2474,7 +2755,9 @@ class PostgresqlDashboardService:
             "achievement_rate": achievement_rate,
             "profit": _round_or_none(profit, 2),
             "monthly_target": _to_optional_float(operational.get("monthly_target")),
-            "monthly_achievement_rate": _to_optional_float(operational.get("monthly_achievement_rate")),
+            "monthly_achievement_rate": _to_optional_float(
+                operational.get("monthly_achievement_rate")
+            ),
             "time_gap": _to_optional_float(operational.get("time_gap")),
             "operating_result": _to_optional_float(operational.get("operating_result")),
             "operating_result_text": operational.get("operating_result_text"),
@@ -2488,10 +2771,18 @@ class PostgresqlDashboardService:
         target_date: str,
     ) -> dict[str, Any]:
         previous_anchor = _previous_store_analysis_anchor(granularity, target_date)
-        current_overview = await self.get_store_analysis_overview(platform, shop_id, granularity, target_date)
-        current_summary = await self.get_store_analysis_traffic_summary(platform, shop_id, granularity, target_date)
-        previous_overview = await self.get_store_analysis_overview(platform, shop_id, granularity, previous_anchor)
-        previous_summary = await self.get_store_analysis_traffic_summary(platform, shop_id, granularity, previous_anchor)
+        current_overview = await self.get_store_analysis_overview(
+            platform, shop_id, granularity, target_date
+        )
+        current_summary = await self.get_store_analysis_traffic_summary(
+            platform, shop_id, granularity, target_date
+        )
+        previous_overview = await self.get_store_analysis_overview(
+            platform, shop_id, granularity, previous_anchor
+        )
+        previous_summary = await self.get_store_analysis_traffic_summary(
+            platform, shop_id, granularity, previous_anchor
+        )
 
         def _metric(current: Any, previous: Any) -> dict[str, Any]:
             cur = _to_optional_float(current)
@@ -2507,15 +2798,28 @@ class PostgresqlDashboardService:
             "current_period_label": current_overview.get("period_start"),
             "previous_period_label": previous_overview.get("period_start"),
             "metrics": {
-                "gmv": _metric(current_overview.get("gmv"), previous_overview.get("gmv")),
-                "order_count": _metric(current_overview.get("order_count"), previous_overview.get("order_count")),
-                "visitor_count": _metric(current_summary.get("visitor_count"), previous_summary.get("visitor_count")),
-                "page_views": _metric(current_summary.get("page_views"), previous_summary.get("page_views")),
+                "gmv": _metric(
+                    current_overview.get("gmv"), previous_overview.get("gmv")
+                ),
+                "order_count": _metric(
+                    current_overview.get("order_count"),
+                    previous_overview.get("order_count"),
+                ),
+                "visitor_count": _metric(
+                    current_summary.get("visitor_count"),
+                    previous_summary.get("visitor_count"),
+                ),
+                "page_views": _metric(
+                    current_summary.get("page_views"),
+                    previous_summary.get("page_views"),
+                ),
                 "page_views_per_visitor": _metric(
                     current_summary.get("page_views_per_visitor"),
                     previous_summary.get("page_views_per_visitor"),
                 ),
-                "profit": _metric(current_overview.get("profit"), previous_overview.get("profit")),
+                "profit": _metric(
+                    current_overview.get("profit"), previous_overview.get("profit")
+                ),
             },
         }
 
@@ -2527,7 +2831,9 @@ class PostgresqlDashboardService:
         target_date: str,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
-        period_start, period_end = _resolve_store_analysis_window(granularity, target_date)
+        period_start, period_end = _resolve_store_analysis_window(
+            granularity, target_date
+        )
         rows = await self._fetch_rows(
             """
             SELECT product_name, platform_sku, sales_amount, order_count, sales_volume, page_views, unique_visitors, conversion_rate
@@ -2568,7 +2874,9 @@ class PostgresqlDashboardService:
         granularity: str,
         target_date: str,
     ) -> dict[str, Any]:
-        period_start, period_end = _resolve_store_analysis_window(granularity, target_date)
+        period_start, period_end = _resolve_store_analysis_window(
+            granularity, target_date
+        )
         query = """
             SELECT period_start, period_end, visitor_count, page_views, conversion_rate, page_views_per_visitor
             FROM api.store_analysis_traffic_summary_module
@@ -2615,8 +2923,12 @@ class PostgresqlDashboardService:
         normalized_platform = str(platform or "").strip().lower()
         normalized_shop_id = str(shop_id or "").strip()
         requested_granularity = str(granularity or "").strip().lower()
-        effective_granularity = _resolve_store_analysis_effective_granularity(normalized_platform, requested_granularity)
-        period_start, period_end = _resolve_store_analysis_window(requested_granularity, target_date)
+        effective_granularity = _resolve_store_analysis_effective_granularity(
+            normalized_platform, requested_granularity
+        )
+        period_start, period_end = _resolve_store_analysis_window(
+            requested_granularity, target_date
+        )
 
         params: dict[str, Any] = {
             "platform_code": normalized_platform,
@@ -2657,7 +2969,9 @@ class PostgresqlDashboardService:
             page_views_value = _to_optional_float(row.get("page_views"))
             if visitor_count_value is not None and page_views_value is not None:
                 if visitor_count_value > 0:
-                    page_views_per_visitor = round(page_views_value / visitor_count_value, 2)
+                    page_views_per_visitor = round(
+                        page_views_value / visitor_count_value, 2
+                    )
                 elif visitor_count_value == 0 and page_views_value == 0:
                     page_views_per_visitor = 0
                 else:
@@ -2667,7 +2981,11 @@ class PostgresqlDashboardService:
 
             items.append(
                 {
-                    "period_key": row.get("period_key").isoformat() if row.get("period_key") is not None else None,
+                    "period_key": (
+                        row.get("period_key").isoformat()
+                        if row.get("period_key") is not None
+                        else None
+                    ),
                     "visitor_count": visitor_count_value,
                     "page_views": page_views_value,
                     "conversion_rate": None,
@@ -2731,7 +3049,9 @@ class PostgresqlDashboardService:
             "service_enriched_fields": [],
             "warnings": [],
         }
-        numeric_total_keys = tuple(key for key in total if key != "company_public_labor_cost")
+        numeric_total_keys = tuple(
+            key for key in total if key != "company_public_labor_cost"
+        )
         cost_statuses: list[str] = []
         for row in rows:
             for key in numeric_total_keys:
@@ -2747,7 +3067,9 @@ class PostgresqlDashboardService:
             else "projected" if cost_statuses else "legacy"
         )
 
-        month_end = (period_month + timedelta(days=31)).replace(day=1) - timedelta(days=1)
+        month_end = (period_month + timedelta(days=31)).replace(day=1) - timedelta(
+            days=1
+        )
         target_summary = await self._load_target_summary(
             granularity="monthly",
             period_start=period_month,
@@ -2776,9 +3098,12 @@ class PostgresqlDashboardService:
                 {"period_month": period_month.strftime("%Y-%m")},
             )
             if public_labor_rows:
-                public_labor_cost = _to_optional_float(
-                    public_labor_rows[0].get("company_public_labor_cost")
-                ) or 0.0
+                public_labor_cost = (
+                    _to_optional_float(
+                        public_labor_rows[0].get("company_public_labor_cost")
+                    )
+                    or 0.0
+                )
                 total["company_public_labor_cost"] = public_labor_cost
                 if total["total_labor_cost"] is not None:
                     total["total_labor_cost"] += public_labor_cost
@@ -2787,12 +3112,22 @@ class PostgresqlDashboardService:
             total["estimated_expenses"] = loaded_expenses
             meta["expenses_source"] = "expense_management_month_summary"
             meta["service_enriched_fields"].append("estimated_expenses")
-        if total["estimated_gross_profit"] is not None and total["estimated_expenses"] is not None:
-            total["operating_result"] = round(total["estimated_gross_profit"] - total["estimated_expenses"], 2)
-            meta["operating_result_source"] = "service_calculated_from_profit_and_expenses"
+        if (
+            total["estimated_gross_profit"] is not None
+            and total["estimated_expenses"] is not None
+        ):
+            total["operating_result"] = round(
+                total["estimated_gross_profit"] - total["estimated_expenses"], 2
+            )
+            meta["operating_result_source"] = (
+                "service_calculated_from_profit_and_expenses"
+            )
             meta["service_enriched_fields"].append("operating_result")
 
-        if total["monthly_total_achieved"] is not None and total["monthly_target"] is not None:
+        if (
+            total["monthly_total_achieved"] is not None
+            and total["monthly_target"] is not None
+        ):
             if total["monthly_target"] > 0:
                 total["monthly_achievement_rate"] = round(
                     total["monthly_total_achieved"] * 100.0 / total["monthly_target"], 2
@@ -2804,10 +3139,13 @@ class PostgresqlDashboardService:
             else:
                 total["monthly_achievement_rate"] = None
         else:
-            total["monthly_achievement_rate"] = _round_or_none(total["monthly_achievement_rate"], 2)
+            total["monthly_achievement_rate"] = _round_or_none(
+                total["monthly_achievement_rate"], 2
+            )
         if total["monthly_achievement_rate"] is not None:
             total["time_gap"] = round(
-                total["monthly_achievement_rate"] - _month_time_progress_pct(period_month),
+                total["monthly_achievement_rate"]
+                - _month_time_progress_pct(period_month),
                 2,
             )
             meta["service_enriched_fields"].append("time_gap")
@@ -2816,9 +3154,19 @@ class PostgresqlDashboardService:
         operating_result_missing = total["operating_result"] is None
         if operating_result_missing:
             total["operating_result"] = float("-inf")
-        total["operating_result_text"] = "盈利" if total["operating_result"] > 0 else "亏损"
-        total["monthly_order_count"] = int(total["monthly_order_count"]) if total["monthly_order_count"] is not None else None
-        total["today_order_count"] = int(total["today_order_count"]) if total["today_order_count"] is not None else None
+        total["operating_result_text"] = (
+            "盈利" if total["operating_result"] > 0 else "亏损"
+        )
+        total["monthly_order_count"] = (
+            int(total["monthly_order_count"])
+            if total["monthly_order_count"] is not None
+            else None
+        )
+        total["today_order_count"] = (
+            int(total["today_order_count"])
+            if total["today_order_count"] is not None
+            else None
+        )
         if operating_result_missing:
             total["operating_result"] = None
             total["operating_result_text"] = None
@@ -2945,7 +3293,9 @@ class PostgresqlDashboardService:
             period_end = period_start
         else:
             period_end = date_cls(period_start.year, 12, 1)
-        rows = await self._fetch_rows(query, {"period_start": period_start, "period_end": period_end})
+        rows = await self._fetch_rows(
+            query, {"period_start": period_start, "period_end": period_end}
+        )
         return reduce_annual_summary_kpi_rows(rows)
 
     async def get_annual_summary_trend(
@@ -2956,7 +3306,11 @@ class PostgresqlDashboardService:
         if granularity not in ("monthly", "yearly"):
             raise ValueError("granularity must be monthly or yearly")
         period_start = _normalize_period_start(period)
-        period_end = period_start if granularity == "monthly" else date_cls(period_start.year, 12, 1)
+        period_end = (
+            period_start
+            if granularity == "monthly"
+            else date_cls(period_start.year, 12, 1)
+        )
         return await self._fetch_rows(
             """
             SELECT *
@@ -2976,7 +3330,11 @@ class PostgresqlDashboardService:
         if granularity not in ("monthly", "yearly"):
             raise ValueError("granularity must be monthly or yearly")
         period_start = _normalize_period_start(period)
-        period_end = period_start if granularity == "monthly" else date_cls(period_start.year, 12, 1)
+        period_end = (
+            period_start
+            if granularity == "monthly"
+            else date_cls(period_start.year, 12, 1)
+        )
         return await self._fetch_rows(
             """
             SELECT *
@@ -2996,7 +3354,11 @@ class PostgresqlDashboardService:
         if granularity not in ("monthly", "yearly"):
             raise ValueError("granularity must be monthly or yearly")
         period_start = _normalize_period_start(period)
-        period_end = period_start if granularity == "monthly" else date_cls(period_start.year, 12, 1)
+        period_end = (
+            period_start
+            if granularity == "monthly"
+            else date_cls(period_start.year, 12, 1)
+        )
         return await self._fetch_rows(
             """
             SELECT *
@@ -3043,7 +3405,9 @@ class PostgresqlDashboardService:
         target_gmv = float(row[0]) if row and row[0] is not None else None
         target_orders = int(row[1]) if row and row[1] is not None else None
 
-        achieved = await self.get_annual_summary_kpi(granularity=granularity, period=period)
+        achieved = await self.get_annual_summary_kpi(
+            granularity=granularity, period=period
+        )
         achieved_gmv = achieved.get("gmv")
         if target_gmv is None or achieved_gmv is None:
             achievement_rate_gmv = None

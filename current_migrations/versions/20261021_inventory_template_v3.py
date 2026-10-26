@@ -138,6 +138,12 @@ def _build_bindings(base_bindings, new_columns):
 
 
 def _fetch_base_template(bind):
+    """返回用于复制 v3 的基线模板行；不存在时返回 None。
+
+    全新库上 `current_schema_20260805_current_schema_baseline` 只建 DDL、
+    不含字段映射目录数据，因此 id=309 不存在。此时直接返回 None，
+    由调用方跳过 v3 发布，而不是让整条迁移链中断。
+    """
     row = (
         bind.execute(
             text(
@@ -155,11 +161,6 @@ def _fetch_base_template(bind):
         .mappings()
         .first()
     )
-    if row is None:
-        raise RuntimeError(
-            f"基础模板 core.field_mapping_templates.id={BASE_TEMPLATE_ID} 不存在，"
-            "inventory 模板 v3 无法发布"
-        )
     return row
 
 
@@ -214,9 +215,7 @@ def _insert_v3(bind, base, columns, bindings):
             "template_name": NEW_TEMPLATE_NAME,
             "version": NEW_VERSION,
             "field_count": len(columns),
-            "notes": (
-                "2026-09 妙手导出新增 次品库存/暂存库存/备注,补齐到 28 列"
-            ),
+            "notes": ("2026-09 妙手导出新增 次品库存/暂存库存/备注,补齐到 28 列"),
             "sub_domain": base["sub_domain"],
             "header_row": base["header_row"],
             "sheet_name": base["sheet_name"],
@@ -250,6 +249,16 @@ def upgrade() -> None:
         return
 
     base = _fetch_base_template(bind)
+    if base is None:
+        # 全新库没有字段映射目录数据（静态基线只含 DDL），无基线模板可复制。
+        # 此时跳过 v3 发布：存量库/生产库行为不变（309 存在 → 正常发布），
+        # 全新库则等目录数据播种后再发布 v3。
+        print(
+            f"[inventory-template-v3] 基础模板 core.field_mapping_templates.id={BASE_TEMPLATE_ID} "
+            "不存在（全新库无目录数据），跳过 v3 发布。"
+        )
+        return
+
     columns = _build_columns(_as_list(base["header_columns"]))
     bindings = _build_bindings(_as_list(base["header_bindings"]), columns)
 

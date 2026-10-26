@@ -4,9 +4,11 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import SystemConfig
+from modules.core.logger import get_logger
 
 
 class LaborCostPolicyService:
@@ -29,11 +31,29 @@ class LaborCostPolicyService:
         return value
 
     async def get_effective_month(self) -> Optional[str]:
-        record = (
-            await self.db.execute(
-                select(SystemConfig).where(SystemConfig.config_key == self.CONFIG_KEY)
+        """读取人工成本策略的生效月份；未配置或读不到时返回 None。
+
+        ⚠️ **缺表必须降级而不是抛错**：看板概览等读路径会调用本方法，
+        而 `system_config` 属于可选配置表——部分初始化的库里可能还没有它。
+        读不到就按「未配置策略」处理（调用方退回手工成本口径），
+        不能让整个看板接口 500。
+        """
+        try:
+            record = (
+                await self.db.execute(
+                    select(SystemConfig).where(
+                        SystemConfig.config_key == self.CONFIG_KEY
+                    )
+                )
+            ).scalar_one_or_none()
+        except SQLAlchemyError as exc:
+            get_logger(__name__).warning(
+                "[LaborCostPolicy] failed to read %s, treating as unset: %s",
+                self.CONFIG_KEY,
+                exc,
             )
-        ).scalar_one_or_none()
+            await self.db.rollback()
+            return None
         if record is None or not str(record.config_value or "").strip():
             return None
         return self._validate_month(record.config_value)

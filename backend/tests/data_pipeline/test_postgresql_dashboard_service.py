@@ -143,7 +143,9 @@ def test_reduce_business_overview_kpi_rows_preserves_missing_pv_uv_funnel_inputs
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_kpi_reads_from_platform_month_kpi(monkeypatch):
+async def test_postgresql_dashboard_service_kpi_reads_from_platform_month_kpi(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -165,10 +167,13 @@ async def test_postgresql_dashboard_service_kpi_reads_from_platform_month_kpi(mo
         ]
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
     async def fake_load_active_employee_count(_period_key):
         return 0
 
-    monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+    monkeypatch.setattr(
+        service, "_load_active_employee_count", fake_load_active_employee_count
+    )
     result = await service.get_business_overview_kpi(month="2026-04-01", platform=None)
 
     assert result["gmv"] == 100
@@ -179,7 +184,9 @@ async def test_postgresql_dashboard_service_kpi_reads_from_platform_month_kpi(mo
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_monthly_kpi_supports_platform_filter(monkeypatch):
+async def test_postgresql_dashboard_service_monthly_kpi_supports_platform_filter(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -204,9 +211,13 @@ async def test_postgresql_dashboard_service_monthly_kpi_supports_platform_filter
         return 0
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
-    monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+    monkeypatch.setattr(
+        service, "_load_active_employee_count", fake_load_active_employee_count
+    )
 
-    result = await service.get_business_overview_kpi(month="2026-04-01", platform="shopee")
+    result = await service.get_business_overview_kpi(
+        month="2026-04-01", platform="shopee"
+    )
 
     assert result["gmv"] == 100
     assert len(captured) == 2
@@ -218,7 +229,9 @@ async def test_postgresql_dashboard_service_monthly_kpi_supports_platform_filter
 
 
 @pytest.mark.asyncio
-async def test_business_overview_data_freshness_flags_orders_lagging_traffic(monkeypatch):
+async def test_business_overview_data_freshness_flags_orders_lagging_traffic(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -258,14 +271,19 @@ async def test_business_overview_data_freshness_flags_orders_lagging_traffic(mon
     assert result["is_stale"] is True
     assert result["orders"]["period_end_date"] == date(2026, 6, 10)
     assert result["traffic"]["period_end_date"] == date(2026, 6, 16)
-    assert "orders period_end_date 2026-06-10 lags traffic 2026-06-16" in result["warnings"]
+    assert (
+        "orders period_end_date 2026-06-10 lags traffic 2026-06-16"
+        in result["warnings"]
+    )
     assert result["table_checks"][0]["table_name"] == "fact_shopee_orders_monthly"
     assert result["table_checks"][0]["is_stale"] is True
     assert captured[-1][1]["platform_code"] == "shopee"
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_kpi_returns_previous_period_changes(monkeypatch):
+async def test_postgresql_dashboard_service_kpi_returns_previous_period_changes(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -303,9 +321,13 @@ async def test_postgresql_dashboard_service_kpi_returns_previous_period_changes(
         return 2
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
-    monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+    monkeypatch.setattr(
+        service, "_load_active_employee_count", fake_load_active_employee_count
+    )
 
-    result = await service.get_business_overview_kpi(month="2026-04-01", platform="shopee")
+    result = await service.get_business_overview_kpi(
+        month="2026-04-01", platform="shopee"
+    )
 
     assert len(captured) == 2
     assert result["gmv"] == 200
@@ -316,7 +338,9 @@ async def test_postgresql_dashboard_service_kpi_returns_previous_period_changes(
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_kpi_shop_filter_reads_shop_mart(monkeypatch):
+async def test_postgresql_dashboard_service_kpi_shop_filter_reads_shop_mart(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -341,7 +365,9 @@ async def test_postgresql_dashboard_service_kpi_shop_filter_reads_shop_mart(monk
         return 0
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
-    monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+    monkeypatch.setattr(
+        service, "_load_active_employee_count", fake_load_active_employee_count
+    )
 
     result = await service.get_business_overview_kpi(
         month="2026-04-01",
@@ -357,7 +383,9 @@ async def test_postgresql_dashboard_service_kpi_shop_filter_reads_shop_mart(monk
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_kpi_supports_granularity_specific_platform_sources(monkeypatch):
+async def test_postgresql_dashboard_service_kpi_supports_granularity_specific_platform_sources(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -379,10 +407,13 @@ async def test_postgresql_dashboard_service_kpi_supports_granularity_specific_pl
         ]
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
     async def fake_load_active_employee_count(_period_key):
         return 0
 
-    monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+    monkeypatch.setattr(
+        service, "_load_active_employee_count", fake_load_active_employee_count
+    )
 
     result = await service.get_business_overview_kpi(
         granularity="daily",
@@ -399,7 +430,9 @@ async def test_postgresql_dashboard_service_kpi_supports_granularity_specific_pl
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_kpi_computes_labor_efficiency_from_employee_count(monkeypatch):
+async def test_postgresql_dashboard_service_kpi_computes_labor_efficiency_from_employee_count(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     async def fake_fetch_rows(query, params):
@@ -435,7 +468,9 @@ async def test_postgresql_dashboard_service_kpi_computes_labor_efficiency_from_e
 
 
 @pytest.mark.asyncio
-async def test_load_active_employee_count_falls_back_when_identity_column_missing(monkeypatch):
+async def test_load_active_employee_count_falls_back_when_identity_column_missing(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     class _OrigError(Exception):
@@ -485,7 +520,9 @@ async def test_load_active_employee_count_falls_back_when_identity_column_missin
 
 
 @pytest.mark.asyncio
-async def test_load_active_employee_count_returns_zero_when_employee_table_missing(monkeypatch):
+async def test_load_active_employee_count_returns_zero_when_employee_table_missing(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     class _OrigError(Exception):
@@ -519,7 +556,9 @@ async def test_load_active_employee_count_returns_zero_when_employee_table_missi
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_annual_summary_kpi_uses_platform_month_aggregate(monkeypatch):
+async def test_postgresql_dashboard_service_annual_summary_kpi_uses_platform_month_aggregate(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -549,15 +588,21 @@ async def test_postgresql_dashboard_service_inventory_backlog_honors_limit(monke
     async def fake_summary():
         return {"total_value": 1000}
 
-    async def fake_ranked_rows(*, source_table, min_days, limit, period_start=None, period_end=None):
+    async def fake_ranked_rows(
+        *, source_table, min_days, limit, period_start=None, period_end=None
+    ):
         assert source_table == "api.business_overview_inventory_backlog_module"
         assert min_days == 30
         return [{"rank": index} for index in range(1, limit + 1)]
 
     monkeypatch.setattr(service, "_load_inventory_backlog_summary", fake_summary)
-    monkeypatch.setattr(service, "_load_ranked_inventory_backlog_module_rows", fake_ranked_rows)
+    monkeypatch.setattr(
+        service, "_load_ranked_inventory_backlog_module_rows", fake_ranked_rows
+    )
 
-    result = await service.get_business_overview_inventory_backlog(min_days=30, limit=20)
+    result = await service.get_business_overview_inventory_backlog(
+        min_days=30, limit=20
+    )
 
     assert len(result["top_products"]) == 20
     assert result["top_products"][0]["rank"] == 1
@@ -565,20 +610,26 @@ async def test_postgresql_dashboard_service_inventory_backlog_honors_limit(monke
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_inventory_backlog_defaults_to_board_limit(monkeypatch):
+async def test_postgresql_dashboard_service_inventory_backlog_defaults_to_board_limit(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     async def fake_summary():
         return {"total_value": 1000}
 
-    async def fake_ranked_rows(*, source_table, min_days, limit, period_start=None, period_end=None):
+    async def fake_ranked_rows(
+        *, source_table, min_days, limit, period_start=None, period_end=None
+    ):
         assert source_table == "api.business_overview_inventory_backlog_module"
         assert min_days == 30
         assert limit == 20
         return [{"rank": 1}]
 
     monkeypatch.setattr(service, "_load_inventory_backlog_summary", fake_summary)
-    monkeypatch.setattr(service, "_load_ranked_inventory_backlog_module_rows", fake_ranked_rows)
+    monkeypatch.setattr(
+        service, "_load_ranked_inventory_backlog_module_rows", fake_ranked_rows
+    )
 
     result = await service.get_business_overview_inventory_backlog(min_days=30)
 
@@ -586,7 +637,9 @@ async def test_postgresql_dashboard_service_inventory_backlog_defaults_to_board_
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_inventory_backlog_filters_by_requested_period(monkeypatch):
+async def test_postgresql_dashboard_service_inventory_backlog_filters_by_requested_period(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured = {}
 
@@ -595,13 +648,17 @@ async def test_postgresql_dashboard_service_inventory_backlog_filters_by_request
         captured["summary_period_end"] = period_end
         return {"total_value": 1000}
 
-    async def fake_ranked_rows(*, source_table, min_days, limit, period_start=None, period_end=None):
+    async def fake_ranked_rows(
+        *, source_table, min_days, limit, period_start=None, period_end=None
+    ):
         captured["rows_period_start"] = period_start
         captured["rows_period_end"] = period_end
         return [{"rank": 1}]
 
     monkeypatch.setattr(service, "_load_inventory_backlog_summary", fake_summary)
-    monkeypatch.setattr(service, "_load_ranked_inventory_backlog_module_rows", fake_ranked_rows)
+    monkeypatch.setattr(
+        service, "_load_ranked_inventory_backlog_module_rows", fake_ranked_rows
+    )
 
     result = await service.get_business_overview_inventory_backlog(
         min_days=30,
@@ -672,9 +729,21 @@ def test_rank_inventory_backlog_rows_filters_and_ranks():
     """判据是「距上次进货时长」：门槛过滤 + 距上次进货天数降序 + 同档货值降序。"""
     result = rank_inventory_backlog_rows(
         [
-            {"platform_code": "shopee", "inventory_value": 50, "days_since_restock": 20},
-            {"platform_code": "tiktok", "inventory_value": 80, "days_since_restock": 45},
-            {"platform_code": "shopee", "inventory_value": 60, "days_since_restock": 200},
+            {
+                "platform_code": "shopee",
+                "inventory_value": 50,
+                "days_since_restock": 20,
+            },
+            {
+                "platform_code": "tiktok",
+                "inventory_value": 80,
+                "days_since_restock": 45,
+            },
+            {
+                "platform_code": "shopee",
+                "inventory_value": 60,
+                "days_since_restock": 200,
+            },
         ],
         min_days=30,
     )
@@ -690,7 +759,11 @@ def test_rank_inventory_backlog_rows_filters_and_ranks():
 def test_rank_inventory_backlog_rows_exposes_restock_tier():
     result = rank_inventory_backlog_rows(
         [
-            {"platform_code": "shopee", "inventory_value": 100, "days_since_restock": 200},
+            {
+                "platform_code": "shopee",
+                "inventory_value": 100,
+                "days_since_restock": 200,
+            },
         ],
         min_days=30,
     )
@@ -702,7 +775,11 @@ def test_rank_inventory_backlog_rows_drops_unknown_restock_rows():
     """距上次进货时长取不到的行不得静默当成「活跃」进榜。"""
     result = rank_inventory_backlog_rows(
         [
-            {"platform_code": "shopee", "inventory_value": 100, "days_since_restock": None},
+            {
+                "platform_code": "shopee",
+                "inventory_value": 100,
+                "days_since_restock": None,
+            },
         ],
         min_days=30,
     )
@@ -748,9 +825,13 @@ class _FetchOneResult:
 
 
 @pytest.mark.asyncio
-async def test_annual_summary_target_completion_reads_active_parent_targets(monkeypatch):
+async def test_annual_summary_target_completion_reads_active_parent_targets(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
-    service.get_annual_summary_kpi = AsyncMock(return_value={"gmv": 200000.0, "profit": 50000.0})
+    service.get_annual_summary_kpi = AsyncMock(
+        return_value={"gmv": 200000.0, "profit": 50000.0}
+    )
 
     class _Db:
         def __init__(self):
@@ -764,7 +845,9 @@ async def test_annual_summary_target_completion_reads_active_parent_targets(monk
 
     db = _Db()
 
-    result = await service.get_annual_summary_target_completion(db, "monthly", "2026-04")
+    result = await service.get_annual_summary_target_completion(
+        db, "monthly", "2026-04"
+    )
 
     assert "a_class.sales_targets" in db.statements[0]
     assert "sales_targets_a" not in db.statements[0]
@@ -808,7 +891,9 @@ def test_rank_shop_racing_rows_breaks_gmv_ties_by_profit_then_orders():
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_comparison_reads_from_platform_aggregate_source(monkeypatch):
+async def test_postgresql_dashboard_service_comparison_reads_from_platform_aggregate_source(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -837,7 +922,9 @@ async def test_postgresql_dashboard_service_comparison_reads_from_platform_aggre
             },
         ]
 
-    async def fake_load_target_summary(granularity, period_start, period_end, platform=None):
+    async def fake_load_target_summary(
+        granularity, period_start, period_end, platform=None
+    ):
         return {"target_amount": 6000, "target_quantity": 60}
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
@@ -852,7 +939,10 @@ async def test_postgresql_dashboard_service_comparison_reads_from_platform_aggre
     assert result["metrics"]["sales_amount"]["today"] == 5000
     assert result["target"]["sales_amount"] == 6000
     assert len(captured) == 1
-    assert all("FROM api.business_overview_comparison_platform_module" in query for query, _ in captured)
+    assert all(
+        "FROM api.business_overview_comparison_platform_module" in query
+        for query, _ in captured
+    )
     assert "period_key >= :range_start" in captured[0][0]
     assert "period_key <= :range_end" in captured[0][0]
     assert str(captured[0][1]["range_start"]) == "2026-03-01"
@@ -860,7 +950,9 @@ async def test_postgresql_dashboard_service_comparison_reads_from_platform_aggre
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_comparison_reuses_current_rows_for_monthly_average(monkeypatch):
+async def test_postgresql_dashboard_service_comparison_reuses_current_rows_for_monthly_average(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -889,7 +981,9 @@ async def test_postgresql_dashboard_service_comparison_reuses_current_rows_for_m
             },
         ]
 
-    async def fake_load_target_summary(granularity, period_start, period_end, platform=None):
+    async def fake_load_target_summary(
+        granularity, period_start, period_end, platform=None
+    ):
         return {"target_amount": 6000, "target_quantity": 60}
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
@@ -939,7 +1033,9 @@ async def test_postgresql_dashboard_service_comparison_uses_total_items_for_sale
             },
         ]
 
-    async def fake_load_target_summary(granularity, period_start, period_end, platform=None):
+    async def fake_load_target_summary(
+        granularity, period_start, period_end, platform=None
+    ):
         return {"target_amount": 6000, "target_quantity": 60}
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
@@ -958,7 +1054,9 @@ async def test_postgresql_dashboard_service_comparison_uses_total_items_for_sale
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_shop_racing_preserves_target_fields(monkeypatch):
+async def test_postgresql_dashboard_service_shop_racing_preserves_target_fields(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -993,7 +1091,9 @@ async def test_postgresql_dashboard_service_shop_racing_preserves_target_fields(
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_shop_racing_daily_keeps_generic_module(monkeypatch):
+async def test_postgresql_dashboard_service_shop_racing_daily_keeps_generic_module(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -1029,7 +1129,9 @@ async def test_postgresql_dashboard_service_shop_racing_daily_keeps_generic_modu
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_shop_racing_returns_previous_period_changes(monkeypatch):
+async def test_postgresql_dashboard_service_shop_racing_returns_previous_period_changes(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -1121,7 +1223,9 @@ async def test_postgresql_dashboard_service_shop_racing_returns_previous_period_
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_shop_racing_account_group_calculates_changes_after_aggregation(monkeypatch):
+async def test_postgresql_dashboard_service_shop_racing_account_group_calculates_changes_after_aggregation(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     async def fake_fetch_rows(query, params):
@@ -1206,7 +1310,9 @@ async def test_postgresql_dashboard_service_shop_racing_account_group_calculates
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_shop_racing_rate_fields_handle_zero_or_missing_previous(monkeypatch):
+async def test_postgresql_dashboard_service_shop_racing_rate_fields_handle_zero_or_missing_previous(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     async def fake_fetch_rows(query, params):
@@ -1255,7 +1361,9 @@ async def test_postgresql_dashboard_service_shop_racing_rate_fields_handle_zero_
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_shop_racing_prefers_resolved_display_name(monkeypatch):
+async def test_postgresql_dashboard_service_shop_racing_prefers_resolved_display_name(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -1325,7 +1433,9 @@ async def test_postgresql_dashboard_service_shop_racing_masks_unknown_name(monke
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_shop_racing_account_group_uses_shop_account_hierarchy(monkeypatch):
+async def test_postgresql_dashboard_service_shop_racing_account_group_uses_shop_account_hierarchy(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     async def fake_fetch_rows(query, params):
@@ -1386,7 +1496,9 @@ async def test_postgresql_dashboard_service_shop_racing_account_group_uses_shop_
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_shop_racing_platform_group_sums_profit(monkeypatch):
+async def test_postgresql_dashboard_service_shop_racing_platform_group_sums_profit(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     async def fake_fetch_rows(query, params):
@@ -1430,7 +1542,9 @@ async def test_postgresql_dashboard_service_shop_racing_platform_group_sums_prof
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_time_targets_without_duplicates(monkeypatch):
+async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_time_targets_without_duplicates(
+    monkeypatch,
+):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from testcontainers.postgres import PostgresContainer
@@ -1680,7 +1794,9 @@ async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_gap_for_past_month(monkeypatch):
+async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_gap_for_past_month(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     async def fake_fetch_rows(query, params):
@@ -1708,7 +1824,7 @@ async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_
                 "operating_result": -100,
                 "monthly_order_count": 4,
                 "today_order_count": 1,
-            }
+            },
         ]
 
     async def fake_load_target_summary(**kwargs):
@@ -1716,7 +1832,9 @@ async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
     monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
-    monkeypatch.setattr(service, "_load_operating_expenses_summary", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        service, "_load_operating_expenses_summary", AsyncMock(return_value=None)
+    )
     result = await service.get_business_overview_operational_metrics(
         month="2026-02-01",
         platform=None,
@@ -1729,7 +1847,9 @@ async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_gap_for_current_month(monkeypatch):
+async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_gap_for_current_month(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     class FakeDate(date):
@@ -1758,7 +1878,9 @@ async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
     monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
-    monkeypatch.setattr(service, "_load_operating_expenses_summary", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        service, "_load_operating_expenses_summary", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(dashboard_service_module, "date_cls", FakeDate)
     result = await service.get_business_overview_operational_metrics(
         month="2026-06-01",
@@ -1770,7 +1892,9 @@ async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_gap_for_future_month(monkeypatch):
+async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_gap_for_future_month(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     class FakeDate(date):
@@ -1799,7 +1923,9 @@ async def test_postgresql_dashboard_service_operational_metrics_recomputes_time_
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
     monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
-    monkeypatch.setattr(service, "_load_operating_expenses_summary", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        service, "_load_operating_expenses_summary", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(dashboard_service_module, "date_cls", FakeDate)
     result = await service.get_business_overview_operational_metrics(
         month="2026-07-01",
@@ -1842,7 +1968,9 @@ async def test_postgresql_dashboard_service_operational_metrics_returns_none_tim
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
     monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
-    monkeypatch.setattr(service, "_load_operating_expenses_summary", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        service, "_load_operating_expenses_summary", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(dashboard_service_module, "date_cls", FakeDate)
     result = await service.get_business_overview_operational_metrics(
         month="2026-06-01",
@@ -1854,7 +1982,9 @@ async def test_postgresql_dashboard_service_operational_metrics_returns_none_tim
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_operational_metrics_supports_shop_filter(monkeypatch):
+async def test_postgresql_dashboard_service_operational_metrics_supports_shop_filter(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -1900,7 +2030,9 @@ async def test_postgresql_dashboard_service_operational_metrics_supports_shop_fi
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_modules(monkeypatch):
+async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_modules(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -1948,16 +2080,26 @@ async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_mod
                     "inventory_value": 300,
                     "days_since_restock": 45,
                     "checklist_sales_90d": 30,
-                }
+                },
             ]
         raise AssertionError(f"unexpected query: {query}")
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
-    result = await service.get_business_overview_inventory_backlog(min_days=45, limit=20)
+    result = await service.get_business_overview_inventory_backlog(
+        min_days=45, limit=20
+    )
 
     assert len(captured) == 2
-    summary_query, summary_params = next((query, params) for query, params in captured if "FROM api.inventory_backlog_summary_module" in query)
-    rows_query, rows_params = next((query, params) for query, params in captured if "FROM api.business_overview_inventory_backlog_module" in query)
+    summary_query, summary_params = next(
+        (query, params)
+        for query, params in captured
+        if "FROM api.inventory_backlog_summary_module" in query
+    )
+    rows_query, rows_params = next(
+        (query, params)
+        for query, params in captured
+        if "FROM api.business_overview_inventory_backlog_module" in query
+    )
     assert "FROM mart.inventory_snapshot_latest" not in summary_query
     assert "FROM mart.inventory_snapshot_change" not in summary_query
     assert "FROM semantic.fact_orders_atomic" not in summary_query
@@ -1990,7 +2132,9 @@ async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_mod
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_clearance_ranking_reads_from_api_module(monkeypatch):
+async def test_postgresql_dashboard_service_clearance_ranking_reads_from_api_module(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -2031,13 +2175,20 @@ async def test_postgresql_dashboard_service_clearance_ranking_reads_from_api_mod
     assert "FROM b_class." not in query
     assert "ORDER BY clearance_priority_score DESC" in query
     assert "LIMIT :limit" in query
-    assert params == {"min_days": 45, "limit": 10, "period_start": None, "period_end": None}
+    assert params == {
+        "min_days": 45,
+        "limit": 10,
+        "period_start": None,
+        "period_end": None,
+    }
     assert result[0]["rank"] == 1
     assert result[0]["risk_level"] == "high"
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_clearance_ranking_filters_by_requested_period(monkeypatch):
+async def test_postgresql_dashboard_service_clearance_ranking_filters_by_requested_period(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -2065,7 +2216,9 @@ async def test_postgresql_dashboard_service_clearance_ranking_filters_by_request
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_comparison_loads_total_month_target_when_rows_have_none(monkeypatch):
+async def test_postgresql_dashboard_service_comparison_loads_total_month_target_when_rows_have_none(
+    monkeypatch,
+):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from testcontainers.postgres import PostgresContainer
@@ -2164,7 +2317,9 @@ async def test_postgresql_dashboard_service_comparison_loads_total_month_target_
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_operational_metrics_loads_total_targets_and_costs(monkeypatch):
+async def test_postgresql_dashboard_service_operational_metrics_loads_total_targets_and_costs(
+    monkeypatch,
+):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from testcontainers.postgres import PostgresContainer
@@ -2209,6 +2364,7 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
                         "营销费用" NUMERIC,
                         "水电费" NUMERIC,
                         "AI Token费用" NUMERIC,
+                        "人力费用" NUMERIC,
                         "其他成本" NUMERIC,
                         "成本合计" NUMERIC,
                         "删除时间" TIMESTAMP
@@ -2294,7 +2450,9 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_operational_metrics_respects_soft_deleted_expenses(monkeypatch):
+async def test_postgresql_dashboard_service_operational_metrics_respects_soft_deleted_expenses(
+    monkeypatch,
+):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from testcontainers.postgres import PostgresContainer
@@ -2334,6 +2492,7 @@ async def test_postgresql_dashboard_service_operational_metrics_respects_soft_de
                         "营销费用" NUMERIC,
                         "水电费" NUMERIC,
                         "AI Token费用" NUMERIC,
+                        "人力费用" NUMERIC,
                         "其他成本" NUMERIC,
                         "成本合计" NUMERIC,
                         "删除时间" TIMESTAMPTZ,
@@ -2452,7 +2611,9 @@ async def test_postgresql_dashboard_service_operational_metrics_respects_soft_de
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_load_target_summary_daily_without_platform_avoids_null_platform_sql_error(monkeypatch):
+async def test_load_target_summary_daily_without_platform_avoids_null_platform_sql_error(
+    monkeypatch,
+):
     from datetime import date
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -2549,7 +2710,9 @@ async def test_load_target_summary_daily_without_platform_avoids_null_platform_s
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_load_target_summary_monthly_platform_prefers_period_scoped_shop_rows(monkeypatch):
+async def test_load_target_summary_monthly_platform_prefers_period_scoped_shop_rows(
+    monkeypatch,
+):
     from datetime import date
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -2674,7 +2837,9 @@ def test_rank_traffic_rows_by_page_views():
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_traffic_ranking_uses_page_views_as_primary_traffic(monkeypatch):
+async def test_postgresql_dashboard_service_traffic_ranking_uses_page_views_as_primary_traffic(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -2729,7 +2894,9 @@ async def test_postgresql_dashboard_service_traffic_ranking_uses_page_views_as_p
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_traffic_ranking_prefers_resolved_display_name(monkeypatch):
+async def test_postgresql_dashboard_service_traffic_ranking_prefers_resolved_display_name(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     async def fake_fetch_rows(query, params):
@@ -2758,7 +2925,9 @@ async def test_postgresql_dashboard_service_traffic_ranking_prefers_resolved_dis
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_traffic_ranking_returns_previous_period_changes(monkeypatch):
+async def test_postgresql_dashboard_service_traffic_ranking_returns_previous_period_changes(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[tuple[str, dict[str, object]]] = []
 
@@ -2811,7 +2980,9 @@ async def test_postgresql_dashboard_service_traffic_ranking_returns_previous_per
 
 
 @pytest.mark.asyncio
-async def test_business_overview_shop_and_traffic_queries_share_display_identity_join(monkeypatch):
+async def test_business_overview_shop_and_traffic_queries_share_display_identity_join(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[str] = []
 
@@ -2834,14 +3005,19 @@ async def test_business_overview_shop_and_traffic_queries_share_display_identity
 
     assert len(captured) == 2
     for query in captured:
-        assert "LOWER(COALESCE(ds.platform_code, '')) = LOWER(COALESCE(src.platform_code, ''))" in query
+        assert (
+            "LOWER(COALESCE(ds.platform_code, '')) = LOWER(COALESCE(src.platform_code, ''))"
+            in query
+        )
         assert "COALESCE(sa.platform_shop_id, '') = COALESCE(src.shop_id, '')" in query
         assert "sa.id::text = COALESCE(src.shop_id, '')" in query
         assert "AS account_display_name" in query
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_traffic_ranking_account_group_uses_shop_account_hierarchy(monkeypatch):
+async def test_postgresql_dashboard_service_traffic_ranking_account_group_uses_shop_account_hierarchy(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     async def fake_fetch_rows(query, params):
@@ -2902,7 +3078,9 @@ async def test_postgresql_dashboard_service_traffic_ranking_account_group_uses_s
 
 
 @pytest.mark.asyncio
-async def test_store_analysis_traffic_summary_uses_page_views_per_visitor_instead_of_conversion_rate(monkeypatch):
+async def test_store_analysis_traffic_summary_uses_page_views_per_visitor_instead_of_conversion_rate(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
 
     async def fake_fetch_rows(query, params):
@@ -2934,7 +3112,9 @@ async def test_store_analysis_traffic_summary_uses_page_views_per_visitor_instea
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_daily(monkeypatch):
+async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_daily(
+    monkeypatch,
+):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from testcontainers.postgres import PostgresContainer
@@ -3147,10 +3327,13 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                 session_factory,
             )
             service = PostgresqlDashboardService()
+
             async def fake_load_active_employee_count(_period_key):
                 return 0
 
-            monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+            monkeypatch.setattr(
+                service, "_load_active_employee_count", fake_load_active_employee_count
+            )
             result = await service.get_business_overview_kpi("2026-03-01", None)
 
         assert result["gmv"] == 100
@@ -3167,7 +3350,9 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate(monkeypatch):
+async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate(
+    monkeypatch,
+):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from testcontainers.postgres import PostgresContainer
@@ -3312,10 +3497,13 @@ async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate
                 session_factory,
             )
             service = PostgresqlDashboardService()
+
             async def fake_load_active_employee_count(_period_key):
                 return 0
 
-            monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+            monkeypatch.setattr(
+                service, "_load_active_employee_count", fake_load_active_employee_count
+            )
             result = await service.get_business_overview_kpi("2026-03-01", None)
 
         assert result["gmv"] == 300

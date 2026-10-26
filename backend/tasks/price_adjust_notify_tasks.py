@@ -20,7 +20,10 @@ import asyncio
 from sqlalchemy import select
 
 from backend.celery_app import celery_app
-from backend.models.database import AsyncSessionLocal, reset_async_engine_pool_for_new_loop
+from backend.models.database import (
+    AsyncSessionLocal,
+    reset_async_engine_pool_for_new_loop,
+)
 from backend.services.feishu_projection_service import FeishuProjectionService
 from backend.services.price_adjust_notify_service import PriceAdjustNotifyService
 from modules.core.db import FeishuProjectionTask
@@ -153,4 +156,4 @@ async def _async_detect_and_enqueue_price_adjustments() -> dict:
 )
 def detect_and_notify_price_adjustments(self):  # noqa: ANN201
     reset_async_engine_pool_for_new_loop()
-    return asyncio.run(_async_detect_and_notify_price_adjustments())
+    return asyncio.run(_async_detect_and_enqueue_price_adjustments())

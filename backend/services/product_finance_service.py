@@ -53,7 +53,9 @@ def _unit_volume_cbm(sku: DimErpSku) -> Decimal:
     dimensions = (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)
     if any(value is None for value in dimensions):
         return Decimal("0")
-    return Decimal(str(dimensions[0] * dimensions[1] * dimensions[2])) / Decimal("1000000")
+    return Decimal(str(dimensions[0] * dimensions[1] * dimensions[2])) / Decimal(
+        "1000000"
+    )
 
 
 def _reference_unit_volume_cbm(sku: DimErpSku) -> Decimal | None:
@@ -76,7 +78,9 @@ class ProductFinanceService:
             raise ValueError("logistics bill not found")
         return bill
 
-    async def replace_bill_lines(self, bill: LogisticsBill, lines: list[dict]) -> list[LogisticsBillLine]:
+    async def replace_bill_lines(
+        self, bill: LogisticsBill, lines: list[dict]
+    ) -> list[LogisticsBillLine]:
         if bill.status != "draft":
             raise ValueError("only draft logistics bills can be edited")
         allowed_po_ids = set(
@@ -98,7 +102,9 @@ class ProductFinanceService:
             if po_id
         }
         if referenced_po_ids - allowed_po_ids:
-            raise ValueError("all logistics line purchase orders must be linked to the batch")
+            raise ValueError(
+                "all logistics line purchase orders must be linked to the batch"
+            )
         sku_ids = {
             sku_id
             for line in lines
@@ -109,17 +115,27 @@ class ProductFinanceService:
             )
             if sku_id is not None
         }
-        legacy_ids = [line.get("sku_id") for line in lines if line.get("sku_ids") is None]
+        legacy_ids = [
+            line.get("sku_id") for line in lines if line.get("sku_ids") is None
+        ]
         if len(legacy_ids) != len(set(legacy_ids)):
             raise ValueError("a logistics bill can contain each SKU only once")
         sku_rows = (
-            await self.db.execute(select(DimErpSku).where(DimErpSku.sku_id.in_(sku_ids)))
-        ).scalars().all()
+            (
+                await self.db.execute(
+                    select(DimErpSku).where(DimErpSku.sku_id.in_(sku_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
         skus = {sku.sku_id: sku for sku in sku_rows}
         if len(skus) != len(sku_ids):
             raise ValueError("one or more SKUs do not exist")
 
-        await self.db.execute(delete(LogisticsBillLine).where(LogisticsBillLine.bill_id == bill.bill_id))
+        await self.db.execute(
+            delete(LogisticsBillLine).where(LogisticsBillLine.bill_id == bill.bill_id)
+        )
         rows: list[LogisticsBillLine] = []
         allocation_specs_by_line: list[list[dict]] = []
         for index, line in enumerate(lines, start=1):
@@ -137,13 +153,24 @@ class ProductFinanceService:
                     }
                     for sku_id in line_sku_ids
                 ]
-            shipped_qty = sum((Decimal(str(item["shipped_qty"])) for item in allocation_specs), Decimal("0"))
+            shipped_qty = sum(
+                (Decimal(str(item["shipped_qty"])) for item in allocation_specs),
+                Decimal("0"),
+            )
             calculated_weight = sum(
-                (Decimal(str(skus[item["sku_id"]].weight_kg or 0)) * Decimal(str(item["shipped_qty"])) for item in allocation_specs),
+                (
+                    Decimal(str(skus[item["sku_id"]].weight_kg or 0))
+                    * Decimal(str(item["shipped_qty"]))
+                    for item in allocation_specs
+                ),
                 Decimal("0"),
             )
             calculated_volume = sum(
-                (_unit_volume_cbm(skus[item["sku_id"]]) * Decimal(str(item["shipped_qty"])) for item in allocation_specs),
+                (
+                    _unit_volume_cbm(skus[item["sku_id"]])
+                    * Decimal(str(item["shipped_qty"]))
+                    for item in allocation_specs
+                ),
                 Decimal("0"),
             )
             basis = line.get("billing_basis") or "volume"
@@ -154,19 +181,37 @@ class ProductFinanceService:
             if supplied_billing_unit not in (None, billing_unit):
                 raise ValueError(f"billing unit must be {billing_unit}")
             chargeable_quantity = {
-                "volume": Decimal(str(line.get("actual_total_volume_cbm"))) if line.get("actual_total_volume_cbm") is not None else calculated_volume,
-                "weight": Decimal(str(line.get("actual_total_weight_kg"))) if line.get("actual_total_weight_kg") is not None else calculated_weight,
+                "volume": (
+                    Decimal(str(line.get("actual_total_volume_cbm")))
+                    if line.get("actual_total_volume_cbm") is not None
+                    else calculated_volume
+                ),
+                "weight": (
+                    Decimal(str(line.get("actual_total_weight_kg")))
+                    if line.get("actual_total_weight_kg") is not None
+                    else calculated_weight
+                ),
                 "quantity": shipped_qty,
             }.get(basis, Decimal("1"))
             headhaul_cost = Decimal(str(line.get("headhaul_cost") or 0))
-            if line.get("billing_unit_rate") is not None and not headhaul_cost and basis != "fixed":
-                headhaul_cost = (chargeable_quantity * Decimal(str(line["billing_unit_rate"]))).quantize(Decimal("0.01"))
+            if (
+                line.get("billing_unit_rate") is not None
+                and not headhaul_cost
+                and basis != "fixed"
+            ):
+                headhaul_cost = (
+                    chargeable_quantity * Decimal(str(line["billing_unit_rate"]))
+                ).quantize(Decimal("0.01"))
             handling_cost = Decimal(str(line.get("handling_cost") or 0))
             last_mile_cost = Decimal(str(line.get("last_mile_cost") or 0))
             sensitive_surcharge = Decimal(str(line.get("sensitive_surcharge") or 0))
-            component_total = headhaul_cost + handling_cost + last_mile_cost + sensitive_surcharge
+            component_total = (
+                headhaul_cost + handling_cost + last_mile_cost + sensitive_surcharge
+            )
             supplied_total = line.get("line_total_amount")
-            if supplied_total is None or (Decimal(str(supplied_total)) == 0 and component_total):
+            if supplied_total is None or (
+                Decimal(str(supplied_total)) == 0 and component_total
+            ):
                 line_total = component_total
             elif basis == "fixed" and component_total == 0:
                 headhaul_cost = Decimal(str(supplied_total))
@@ -176,7 +221,10 @@ class ProductFinanceService:
             else:
                 line_total = Decimal(str(supplied_total))
             warehouse_code = line.get("warehouse_code")
-            if not warehouse_code or await self.db.get(DimWarehouse, warehouse_code) is None:
+            if (
+                not warehouse_code
+                or await self.db.get(DimWarehouse, warehouse_code) is None
+            ):
                 raise ValueError("warehouse is required and must exist")
             sku = skus[line_sku_ids[0]]
             calculated = build_logistics_sku_line(
@@ -227,52 +275,103 @@ class ProductFinanceService:
             for spec in allocation_specs:
                 item_sku = skus[spec["sku_id"]]
                 quantity = Decimal(str(spec["shipped_qty"]))
-                allocation_items.append({"sku_id": item_sku.sku_id, "po_id": spec.get("po_id"), "quantity": quantity, "volume_cbm": _unit_volume_cbm(item_sku) * quantity, "weight_kg": Decimal(str(item_sku.weight_kg or 0)) * quantity})
-            allocations = allocate_bill_line(line_amount=amount, basis=(basis if basis in {"volume", "weight", "quantity"} else "quantity"), items=allocation_items)
+                allocation_items.append(
+                    {
+                        "sku_id": item_sku.sku_id,
+                        "po_id": spec.get("po_id"),
+                        "quantity": quantity,
+                        "volume_cbm": _unit_volume_cbm(item_sku) * quantity,
+                        "weight_kg": Decimal(str(item_sku.weight_kg or 0)) * quantity,
+                    }
+                )
+            allocations = allocate_bill_line(
+                line_amount=amount,
+                basis=(
+                    basis if basis in {"volume", "weight", "quantity"} else "quantity"
+                ),
+                items=allocation_items,
+            )
             for allocation in allocations:
                 sku_id = allocation["sku_id"]
-                self.db.add(LogisticsBillLineAllocation(
-                    bill_line_id=row.line_id,
-                    sku_id=sku_id,
-                    po_id=next(item["po_id"] for item in allocation_items if item["sku_id"] == sku_id),
-                    allocated_quantity=next(item["quantity"] for item in allocation_items if item["sku_id"] == sku_id),
-                    allocation_ratio=allocation["allocation_ratio"],
-                    allocated_amount=allocation["allocated_amount"],
-                    allocation_basis=basis,
-                    mapping_status="confirmed",
-                ))
+                self.db.add(
+                    LogisticsBillLineAllocation(
+                        bill_line_id=row.line_id,
+                        sku_id=sku_id,
+                        po_id=next(
+                            item["po_id"]
+                            for item in allocation_items
+                            if item["sku_id"] == sku_id
+                        ),
+                        allocated_quantity=next(
+                            item["quantity"]
+                            for item in allocation_items
+                            if item["sku_id"] == sku_id
+                        ),
+                        allocation_ratio=allocation["allocation_ratio"],
+                        allocated_amount=allocation["allocated_amount"],
+                        allocation_basis=basis,
+                        mapping_status="confirmed",
+                    )
+                )
         return rows
 
-    async def replace_bill_purchase_orders(self, bill: LogisticsBill, po_ids: list[str]) -> list[LogisticsBillPurchaseOrder]:
+    async def replace_bill_purchase_orders(
+        self, bill: LogisticsBill, po_ids: list[str]
+    ) -> list[LogisticsBillPurchaseOrder]:
         if bill.status != "draft":
             raise ValueError("only draft logistics bills can be edited")
         unique_po_ids = list(dict.fromkeys(po_ids))
-        existing_po_ids = set((await self.db.execute(select(POHeader.po_id).where(POHeader.po_id.in_(unique_po_ids)))).scalars())
+        existing_po_ids = set(
+            (
+                await self.db.execute(
+                    select(POHeader.po_id).where(POHeader.po_id.in_(unique_po_ids))
+                )
+            ).scalars()
+        )
         if existing_po_ids != set(unique_po_ids):
             raise ValueError("one or more purchase orders do not exist")
-        await self.db.execute(delete(LogisticsBillPurchaseOrder).where(LogisticsBillPurchaseOrder.bill_id == bill.bill_id))
-        rows = [LogisticsBillPurchaseOrder(bill_id=bill.bill_id, po_id=po_id) for po_id in unique_po_ids]
+        await self.db.execute(
+            delete(LogisticsBillPurchaseOrder).where(
+                LogisticsBillPurchaseOrder.bill_id == bill.bill_id
+            )
+        )
+        rows = [
+            LogisticsBillPurchaseOrder(bill_id=bill.bill_id, po_id=po_id)
+            for po_id in unique_po_ids
+        ]
         self.db.add_all(rows)
         await self.db.flush()
         return rows
 
-    async def confirm_bill(self, bill: LogisticsBill, user_id: int | None) -> LogisticsBill:
+    async def confirm_bill(
+        self, bill: LogisticsBill, user_id: int | None
+    ) -> LogisticsBill:
         if bill.status != "draft":
             raise ValueError("only draft logistics bills can be confirmed")
         lines = (
-            await self.db.execute(
-                select(LogisticsBillLine).where(LogisticsBillLine.bill_id == bill.bill_id)
+            (
+                await self.db.execute(
+                    select(LogisticsBillLine).where(
+                        LogisticsBillLine.bill_id == bill.bill_id
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if not lines:
             raise ValueError("a logistics bill needs at least one SKU line")
-        validate_bill_total(bill.total_amount, [line.line_total_amount for line in lines])
+        validate_bill_total(
+            bill.total_amount, [line.line_total_amount for line in lines]
+        )
         bill.status = "confirmed"
         bill.confirmed_at = datetime.now(timezone.utc)
         bill.confirmed_by = user_id
         return bill
 
-    async def void_bill(self, bill: LogisticsBill, user_id: int | None, reason: str) -> LogisticsBill:
+    async def void_bill(
+        self, bill: LogisticsBill, user_id: int | None, reason: str
+    ) -> LogisticsBill:
         if bill.status != "confirmed":
             raise ValueError("only confirmed logistics bills can be voided")
         if bill.status == "voided":
@@ -283,38 +382,68 @@ class ProductFinanceService:
         bill.void_reason = reason
         return bill
 
-    async def find_active_assumption(self, destination: str | None, transport_type: str | None, as_of: date) -> ProductCostAssumptionProfile | None:
+    async def find_active_assumption(
+        self, destination: str | None, transport_type: str | None, as_of: date
+    ) -> ProductCostAssumptionProfile | None:
         base_filters = [
             ProductCostAssumptionProfile.active.is_(True),
             ProductCostAssumptionProfile.effective_from <= as_of,
-            (ProductCostAssumptionProfile.effective_to.is_(None)) | (ProductCostAssumptionProfile.effective_to >= as_of),
+            (ProductCostAssumptionProfile.effective_to.is_(None))
+            | (ProductCostAssumptionProfile.effective_to >= as_of),
         ]
         scopes = []
         if destination and transport_type:
-            scopes.extend([
-                (ProductCostAssumptionProfile.destination == destination, ProductCostAssumptionProfile.transport_type == transport_type),
-                (ProductCostAssumptionProfile.destination == destination, ProductCostAssumptionProfile.transport_type.is_(None)),
-                (ProductCostAssumptionProfile.destination.is_(None), ProductCostAssumptionProfile.transport_type == transport_type),
-            ])
+            scopes.extend(
+                [
+                    (
+                        ProductCostAssumptionProfile.destination == destination,
+                        ProductCostAssumptionProfile.transport_type == transport_type,
+                    ),
+                    (
+                        ProductCostAssumptionProfile.destination == destination,
+                        ProductCostAssumptionProfile.transport_type.is_(None),
+                    ),
+                    (
+                        ProductCostAssumptionProfile.destination.is_(None),
+                        ProductCostAssumptionProfile.transport_type == transport_type,
+                    ),
+                ]
+            )
         elif destination:
             scopes.append((ProductCostAssumptionProfile.destination == destination,))
         elif transport_type:
-            scopes.append((ProductCostAssumptionProfile.transport_type == transport_type,))
-        scopes.append((ProductCostAssumptionProfile.destination.is_(None), ProductCostAssumptionProfile.transport_type.is_(None)))
+            scopes.append(
+                (ProductCostAssumptionProfile.transport_type == transport_type,)
+            )
+        scopes.append(
+            (
+                ProductCostAssumptionProfile.destination.is_(None),
+                ProductCostAssumptionProfile.transport_type.is_(None),
+            )
+        )
         for scope in scopes:
-            statement = select(ProductCostAssumptionProfile).where(*base_filters, *scope).order_by(ProductCostAssumptionProfile.effective_from.desc())
+            statement = (
+                select(ProductCostAssumptionProfile)
+                .where(*base_filters, *scope)
+                .order_by(ProductCostAssumptionProfile.effective_from.desc())
+            )
             row = (await self.db.execute(statement)).scalars().first()
             if row is not None:
                 return row
         return None
 
-    async def find_confirmed_logistics_cost(self, sku_id: int, warehouse_code: str | None, transport_type: str | None) -> Decimal | None:
+    async def find_confirmed_logistics_cost(
+        self, sku_id: int, warehouse_code: str | None, transport_type: str | None
+    ) -> Decimal | None:
         allocated = (
             select(
                 func.sum(LogisticsBillLineAllocation.allocated_amount),
                 func.sum(LogisticsBillLineAllocation.allocated_quantity),
             )
-            .join(LogisticsBillLine, LogisticsBillLine.line_id == LogisticsBillLineAllocation.bill_line_id)
+            .join(
+                LogisticsBillLine,
+                LogisticsBillLine.line_id == LogisticsBillLineAllocation.bill_line_id,
+            )
             .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
             .where(
                 LogisticsBillLineAllocation.sku_id == sku_id,
@@ -325,12 +454,17 @@ class ProductFinanceService:
         if transport_type:
             allocated = allocated.where(LogisticsBill.transport_type == transport_type)
         if warehouse_code:
-            allocated = allocated.where(LogisticsBillLine.warehouse_code == warehouse_code)
+            allocated = allocated.where(
+                LogisticsBillLine.warehouse_code == warehouse_code
+            )
         allocated_amount, allocated_quantity = (await self.db.execute(allocated)).one()
         if allocated_quantity:
             return Decimal(str(allocated_amount)) / Decimal(str(allocated_quantity))
         statement = (
-            select(func.sum(LogisticsBillLine.line_total_amount), func.sum(LogisticsBillLine.shipped_qty))
+            select(
+                func.sum(LogisticsBillLine.line_total_amount),
+                func.sum(LogisticsBillLine.shipped_qty),
+            )
             .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
             .where(
                 LogisticsBillLine.sku_id == sku_id,
@@ -341,13 +475,17 @@ class ProductFinanceService:
         if transport_type:
             statement = statement.where(LogisticsBill.transport_type == transport_type)
         if warehouse_code:
-            statement = statement.where(LogisticsBillLine.warehouse_code == warehouse_code)
+            statement = statement.where(
+                LogisticsBillLine.warehouse_code == warehouse_code
+            )
         total_amount, total_quantity = (await self.db.execute(statement)).one()
         if total_quantity is None or not total_quantity:
             return None
         return Decimal(str(total_amount or 0)) / Decimal(str(total_quantity))
 
-    async def find_reference_logistics_cost(self, sku: DimErpSku, warehouse_code: str, transport_type: str) -> tuple[Decimal | None, LogisticsProviderRule | None]:
+    async def find_reference_logistics_cost(
+        self, sku: DimErpSku, warehouse_code: str, transport_type: str
+    ) -> tuple[Decimal | None, LogisticsProviderRule | None]:
         statement = select(LogisticsProviderRule).where(
             or_(
                 LogisticsProviderRule.warehouse_code == warehouse_code,
@@ -361,12 +499,15 @@ class ProductFinanceService:
             LogisticsProviderRule.is_sensitive.is_(False),
             LogisticsProviderRule.currency == "CNY",
             LogisticsProviderRule.effective_from <= date.today(),
-            (LogisticsProviderRule.effective_to.is_(None)) | (LogisticsProviderRule.effective_to >= date.today()),
+            (LogisticsProviderRule.effective_to.is_(None))
+            | (LogisticsProviderRule.effective_to >= date.today()),
         )
         rules = (await self.db.execute(statement)).scalars().all()
         if not rules:
             return None, None
-        rule = self._select_reference_logistics_rule(rules, warehouse_code, transport_type)
+        rule = self._select_reference_logistics_rule(
+            rules, warehouse_code, transport_type
+        )
         if rule is None:
             return None, None
         return self._reference_logistics_from_rule(sku, rule), rule
@@ -378,6 +519,7 @@ class ProductFinanceService:
         """Select one unambiguous current rule; never choose a tariff arbitrarily."""
         if not rules:
             return None
+
         def specificity(rule: LogisticsProviderRule) -> int:
             return int(rule.warehouse_code == warehouse_code) + int(
                 rule.transport_type == transport_type
@@ -385,9 +527,7 @@ class ProductFinanceService:
 
         highest_specificity = max(specificity(rule) for rule in rules)
         best_rules = [
-            rule
-            for rule in rules
-            if specificity(rule) == highest_specificity
+            rule for rule in rules if specificity(rule) == highest_specificity
         ]
         if len(best_rules) == 1:
             return best_rules[0]
@@ -412,29 +552,56 @@ class ProductFinanceService:
             measure = Decimal("1")
         else:
             return None
-        return (measure * Decimal(str(rule.freight_unit_rate))).quantize(Decimal("0.01"))
+        return (measure * Decimal(str(rule.freight_unit_rate))).quantize(
+            Decimal("0.01")
+        )
 
-    async def find_reference_storage_cost(self, sku: DimErpSku, warehouse_code: str) -> tuple[Decimal | None, WarehouseStorageRule | None]:
-        statement = select(WarehouseStorageRule).where(
-            WarehouseStorageRule.warehouse_code == warehouse_code,
-            WarehouseStorageRule.status == "active",
-            WarehouseStorageRule.effective_from <= date.today(),
-            (WarehouseStorageRule.effective_to.is_(None)) | (WarehouseStorageRule.effective_to >= date.today()),
-        ).order_by(WarehouseStorageRule.effective_from.desc(), WarehouseStorageRule.rule_id.desc())
+    async def find_reference_storage_cost(
+        self, sku: DimErpSku, warehouse_code: str
+    ) -> tuple[Decimal | None, WarehouseStorageRule | None]:
+        statement = (
+            select(WarehouseStorageRule)
+            .where(
+                WarehouseStorageRule.warehouse_code == warehouse_code,
+                WarehouseStorageRule.status == "active",
+                WarehouseStorageRule.effective_from <= date.today(),
+                (WarehouseStorageRule.effective_to.is_(None))
+                | (WarehouseStorageRule.effective_to >= date.today()),
+            )
+            .order_by(
+                WarehouseStorageRule.effective_from.desc(),
+                WarehouseStorageRule.rule_id.desc(),
+            )
+        )
         rule = (await self.db.execute(statement)).scalars().first()
         if rule is None:
             return None, None
         volume = _reference_unit_volume_cbm(sku)
-        return build_reference_storage_cost(unit_volume_cbm=volume, unit_rate_cny_per_cbm_month=rule.unit_rate_cny, turnover_class=sku.turnover_class), rule
+        return (
+            build_reference_storage_cost(
+                unit_volume_cbm=volume,
+                unit_rate_cny_per_cbm_month=rule.unit_rate_cny,
+                turnover_class=sku.turnover_class,
+            ),
+            rule,
+        )
 
     async def find_reference_label_fee(self, warehouse_code: str) -> Decimal | None:
         """Per-unit label fee derived from the receiving warehouse's storage rule."""
-        statement = select(WarehouseStorageRule).where(
-            WarehouseStorageRule.warehouse_code == warehouse_code,
-            WarehouseStorageRule.status == "active",
-            WarehouseStorageRule.effective_from <= date.today(),
-            (WarehouseStorageRule.effective_to.is_(None)) | (WarehouseStorageRule.effective_to >= date.today()),
-        ).order_by(WarehouseStorageRule.effective_from.desc(), WarehouseStorageRule.rule_id.desc())
+        statement = (
+            select(WarehouseStorageRule)
+            .where(
+                WarehouseStorageRule.warehouse_code == warehouse_code,
+                WarehouseStorageRule.status == "active",
+                WarehouseStorageRule.effective_from <= date.today(),
+                (WarehouseStorageRule.effective_to.is_(None))
+                | (WarehouseStorageRule.effective_to >= date.today()),
+            )
+            .order_by(
+                WarehouseStorageRule.effective_from.desc(),
+                WarehouseStorageRule.rule_id.desc(),
+            )
+        )
         rule = (await self.db.execute(statement)).scalars().first()
         if rule is None or rule.label_fee is None:
             return None
@@ -464,23 +631,27 @@ class ProductFinanceService:
             ),
         )
         row = (
-            await self.db.execute(
-                select(purchase_cost)
-                .join(POHeader, POHeader.po_id == POLine.po_id)
-                .where(
-                    POLine.platform_sku.in_(
-                        select(BridgeErpSkuKey.source_key).where(
-                            BridgeErpSkuKey.sku_id == sku.sku_id,
-                            BridgeErpSkuKey.active.is_(True),
-                            BridgeErpSkuKey.effective_to.is_(None),
+            (
+                await self.db.execute(
+                    select(purchase_cost)
+                    .join(POHeader, POHeader.po_id == POLine.po_id)
+                    .where(
+                        POLine.platform_sku.in_(
+                            select(BridgeErpSkuKey.source_key).where(
+                                BridgeErpSkuKey.sku_id == sku.sku_id,
+                                BridgeErpSkuKey.active.is_(True),
+                                BridgeErpSkuKey.effective_to.is_(None),
+                            )
                         )
+                        | (POLine.platform_sku == sku.sku_key),
+                        valid_purchase_cost,
                     )
-                    | (POLine.platform_sku == sku.sku_key),
-                    valid_purchase_cost,
+                    .order_by(POHeader.po_date.desc(), POLine.po_line_id.desc())
                 )
-                .order_by(POHeader.po_date.desc(), POLine.po_line_id.desc())
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         return Decimal(str(row)) if row is not None else None
 
     async def prefetch_platform_sku_profit_inputs(
@@ -504,7 +675,9 @@ class ProductFinanceService:
             )
         ).all()
         sku_by_source_key = {sku.sku_key: sku.sku_id for sku in skus}
-        sku_by_source_key.update({source_key: sku_id for sku_id, source_key in source_rows})
+        sku_by_source_key.update(
+            {source_key: sku_id for sku_id, source_key in source_rows}
+        )
         purchase_costs: dict[int, Decimal] = {}
         if sku_by_source_key:
             purchase_cost = case(
@@ -553,7 +726,11 @@ class ProductFinanceService:
                     func.sum(LogisticsBillLineAllocation.allocated_amount),
                     func.sum(LogisticsBillLineAllocation.allocated_quantity),
                 )
-                .join(LogisticsBillLine, LogisticsBillLine.line_id == LogisticsBillLineAllocation.bill_line_id)
+                .join(
+                    LogisticsBillLine,
+                    LogisticsBillLine.line_id
+                    == LogisticsBillLineAllocation.bill_line_id,
+                )
                 .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
                 .where(
                     LogisticsBillLineAllocation.sku_id.in_(sku_ids),
@@ -567,8 +744,12 @@ class ProductFinanceService:
         ).all()
         for item_sku_id, amount, quantity in allocated_rows:
             if quantity:
-                actual_logistics[item_sku_id] = Decimal(str(amount)) / Decimal(str(quantity))
-        missing_actual_ids = [sku_id for sku_id in sku_ids if sku_id not in actual_logistics]
+                actual_logistics[item_sku_id] = Decimal(str(amount)) / Decimal(
+                    str(quantity)
+                )
+        missing_actual_ids = [
+            sku_id for sku_id in sku_ids if sku_id not in actual_logistics
+        ]
         if missing_actual_ids:
             legacy_rows = (
                 await self.db.execute(
@@ -577,7 +758,10 @@ class ProductFinanceService:
                         func.sum(LogisticsBillLine.line_total_amount),
                         func.sum(LogisticsBillLine.shipped_qty),
                     )
-                    .join(LogisticsBill, LogisticsBill.bill_id == LogisticsBillLine.bill_id)
+                    .join(
+                        LogisticsBill,
+                        LogisticsBill.bill_id == LogisticsBillLine.bill_id,
+                    )
                     .where(
                         LogisticsBillLine.sku_id.in_(missing_actual_ids),
                         LogisticsBill.status == "confirmed",
@@ -590,48 +774,58 @@ class ProductFinanceService:
             ).all()
             for item_sku_id, amount, quantity in legacy_rows:
                 if quantity:
-                    actual_logistics[item_sku_id] = Decimal(str(amount or 0)) / Decimal(str(quantity))
+                    actual_logistics[item_sku_id] = Decimal(str(amount or 0)) / Decimal(
+                        str(quantity)
+                    )
 
         current_rules = (
-            await self.db.execute(
-                select(LogisticsProviderRule).where(
-                    or_(
-                        LogisticsProviderRule.warehouse_code == warehouse_code,
-                        LogisticsProviderRule.warehouse_code.is_(None),
-                    ),
-                    or_(
-                        LogisticsProviderRule.transport_type == transport_type,
-                        LogisticsProviderRule.transport_type.is_(None),
-                    ),
-                    LogisticsProviderRule.status == "active",
-                    LogisticsProviderRule.is_sensitive.is_(False),
-                    LogisticsProviderRule.currency == "CNY",
-                    LogisticsProviderRule.effective_from <= date.today(),
-                    (LogisticsProviderRule.effective_to.is_(None))
-                    | (LogisticsProviderRule.effective_to >= date.today()),
+            (
+                await self.db.execute(
+                    select(LogisticsProviderRule).where(
+                        or_(
+                            LogisticsProviderRule.warehouse_code == warehouse_code,
+                            LogisticsProviderRule.warehouse_code.is_(None),
+                        ),
+                        or_(
+                            LogisticsProviderRule.transport_type == transport_type,
+                            LogisticsProviderRule.transport_type.is_(None),
+                        ),
+                        LogisticsProviderRule.status == "active",
+                        LogisticsProviderRule.is_sensitive.is_(False),
+                        LogisticsProviderRule.currency == "CNY",
+                        LogisticsProviderRule.effective_from <= date.today(),
+                        (LogisticsProviderRule.effective_to.is_(None))
+                        | (LogisticsProviderRule.effective_to >= date.today()),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         logistics_rule = self._select_reference_logistics_rule(
             current_rules, warehouse_code, transport_type
         )
         logistics_rule_ambiguous = bool(current_rules) and logistics_rule is None
         storage_rule = (
-            await self.db.execute(
-                select(WarehouseStorageRule)
-                .where(
-                    WarehouseStorageRule.warehouse_code == warehouse_code,
-                    WarehouseStorageRule.status == "active",
-                    WarehouseStorageRule.effective_from <= date.today(),
-                    (WarehouseStorageRule.effective_to.is_(None))
-                    | (WarehouseStorageRule.effective_to >= date.today()),
-                )
-                .order_by(
-                    WarehouseStorageRule.effective_from.desc(),
-                    WarehouseStorageRule.rule_id.desc(),
+            (
+                await self.db.execute(
+                    select(WarehouseStorageRule)
+                    .where(
+                        WarehouseStorageRule.warehouse_code == warehouse_code,
+                        WarehouseStorageRule.status == "active",
+                        WarehouseStorageRule.effective_from <= date.today(),
+                        (WarehouseStorageRule.effective_to.is_(None))
+                        | (WarehouseStorageRule.effective_to >= date.today()),
+                    )
+                    .order_by(
+                        WarehouseStorageRule.effective_from.desc(),
+                        WarehouseStorageRule.rule_id.desc(),
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
         reference_label_fee = (
             Decimal(str(storage_rule.label_fee))
@@ -673,24 +867,44 @@ class ProductFinanceService:
         if sku is None:
             raise ValueError("SKU not found")
         purchase_cost = await self.find_latest_purchase_cost(sku)
-        confirmed_logistics = await self.find_confirmed_logistics_cost(sku.sku_id, data.get("warehouse_code"), data.get("transport_type"))
+        confirmed_logistics = await self.find_confirmed_logistics_cost(
+            sku.sku_id, data.get("warehouse_code"), data.get("transport_type")
+        )
         # Platform master data is the only active source for platform fees.
-        platform = await self.db.get(DimPlatform, data.get("platform_code")) if data.get("platform_code") else None
+        platform = (
+            await self.db.get(DimPlatform, data.get("platform_code"))
+            if data.get("platform_code")
+            else None
+        )
         platform_fee_rate = platform.default_fee_rate if platform is not None else None
         binding = (
-            await self.db.execute(
-                select(BridgeSpuSku).where(
-                    BridgeSpuSku.sku_id == sku.sku_id,
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+            (
+                await self.db.execute(
+                    select(BridgeSpuSku).where(
+                        BridgeSpuSku.sku_id == sku.sku_id,
+                        BridgeSpuSku.binding_status == "active",
+                        BridgeSpuSku.effective_to.is_(None),
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         spu = await self.db.get(DimSpu, binding.spu) if binding is not None else None
+        # 参考贴单费来自收货仓的仓储规则（与 preview_platform_sku_profit 同一口径）
+        reference_label_fee = (
+            await self.find_reference_label_fee(data["warehouse_code"])
+            if data.get("warehouse_code")
+            else None
+        )
         result = build_baseline_profit(
             selling_price=data["selling_price"],
             coupon_amount=data.get("coupon_amount"),
-            default_purchase_cost=purchase_cost if purchase_cost is not None else sku.default_purchase_cost,
+            default_purchase_cost=(
+                purchase_cost
+                if purchase_cost is not None
+                else sku.default_purchase_cost
+            ),
             confirmed_logistics_cost=confirmed_logistics,
             assumption_logistics_cost=(
                 data.get("expected_logistics_cost")
@@ -702,40 +916,91 @@ class ProductFinanceService:
                 if data.get("expected_storage_cost") is not None
                 else sku.expected_storage_cost
             ),
-            platform_fee_rate=(data.get("platform_fee_rate") if data.get("platform_fee_rate") is not None else platform_fee_rate),
+            platform_fee_rate=(
+                data.get("platform_fee_rate")
+                if data.get("platform_fee_rate") is not None
+                else platform_fee_rate
+            ),
             return_rate=spu.return_loss_rate if spu is not None else None,
             damage_rate=spu.logistics_damage_rate if spu is not None else None,
         )
-        result.update({
-            "sku_id": sku.sku_id,
-            # 前端「参考贴单费」列读这个字段；不给的话列会显示 "-",
-            # 而利润里却实实在在扣了这笔（口径不一致，看着像白扣的钱）
-            "reference_label_fee": reference_label_fee,
-            "assumption_profile_id": None,
-            "assumption_version": ";".join(filter(None, (
-                f"sku-master-{sku.updated_at.date().isoformat()}" if sku.updated_at else "sku-master",
-                f"platform-{platform.platform_code}-{platform.fee_rate_effective_from.isoformat()}" if platform is not None and platform.fee_rate_effective_from else f"platform-{platform.platform_code}" if platform is not None else "platform-missing",
-                f"warehouse-{data.get('warehouse_code')}" if data.get("warehouse_code") else None,
-            ))),
-            "spu_rate_version": f"spu-{spu.spu}-{spu.updated_at.date().isoformat()}" if spu is not None and spu.updated_at else None,
-            "cost_completeness": "complete" if all(value is not None for value in (
-                result.get("purchase_cost"),
-                result.get("logistics_cost"),
-                result.get("storage_cost"),
-                platform_fee_rate,
-                spu.logistics_damage_rate if spu is not None else None,
-                spu.return_loss_rate if spu is not None else None,
-            )) else "partial",
-            "confidence_level": sku.purchase_cost_confidence or "low",
-        })
+        result.update(
+            {
+                "sku_id": sku.sku_id,
+                # 前端「参考贴单费」列读这个字段；不给的话列会显示 "-",
+                # 而利润里却实实在在扣了这笔（口径不一致，看着像白扣的钱）
+                "reference_label_fee": reference_label_fee,
+                "assumption_profile_id": None,
+                "assumption_version": ";".join(
+                    filter(
+                        None,
+                        (
+                            (
+                                f"sku-master-{sku.updated_at.date().isoformat()}"
+                                if sku.updated_at
+                                else "sku-master"
+                            ),
+                            (
+                                f"platform-{platform.platform_code}-{platform.fee_rate_effective_from.isoformat()}"
+                                if platform is not None
+                                and platform.fee_rate_effective_from
+                                else (
+                                    f"platform-{platform.platform_code}"
+                                    if platform is not None
+                                    else "platform-missing"
+                                )
+                            ),
+                            (
+                                f"warehouse-{data.get('warehouse_code')}"
+                                if data.get("warehouse_code")
+                                else None
+                            ),
+                        ),
+                    )
+                ),
+                "spu_rate_version": (
+                    f"spu-{spu.spu}-{spu.updated_at.date().isoformat()}"
+                    if spu is not None and spu.updated_at
+                    else None
+                ),
+                "cost_completeness": (
+                    "complete"
+                    if all(
+                        value is not None
+                        for value in (
+                            result.get("purchase_cost"),
+                            result.get("logistics_cost"),
+                            result.get("storage_cost"),
+                            platform_fee_rate,
+                            spu.logistics_damage_rate if spu is not None else None,
+                            spu.return_loss_rate if spu is not None else None,
+                        )
+                    )
+                    else "partial"
+                ),
+                "confidence_level": sku.purchase_cost_confidence or "low",
+            }
+        )
         if purchase_cost is not None:
             result["purchase_cost_source"] = "purchase_order"
         if confirmed_logistics is None:
             result["logistics_cost_source"] = (
-                "sku_operating_expected_logistics" if data.get("expected_logistics_cost") is not None else "sku_expected_logistics" if sku.expected_logistics_cost is not None else "missing"
+                "sku_operating_expected_logistics"
+                if data.get("expected_logistics_cost") is not None
+                else (
+                    "sku_expected_logistics"
+                    if sku.expected_logistics_cost is not None
+                    else "missing"
+                )
             )
         result["storage_cost_source"] = (
-            "sku_operating_expected_storage" if data.get("expected_storage_cost") is not None else "sku_expected_storage" if sku.expected_storage_cost is not None else "missing"
+            "sku_operating_expected_storage"
+            if data.get("expected_storage_cost") is not None
+            else (
+                "sku_expected_storage"
+                if sku.expected_storage_cost is not None
+                else "missing"
+            )
         )
         return result
 
@@ -748,12 +1013,24 @@ class ProductFinanceService:
     async def preview_operating_profit(self, profile_id: int, data: dict) -> dict:
         profile = await self.get_operating_profile(profile_id)
         platform = await self.db.get(DimPlatform, profile.platform_code)
-        if platform is None or not platform.is_active or platform.platform_role != "sales":
+        if (
+            platform is None
+            or not platform.is_active
+            or platform.platform_role != "sales"
+        ):
             raise ValueError("active sales platform not found")
         sku_data = {
             "sku_id": profile.sku_id,
-            "selling_price": data.get("selling_price") if data.get("selling_price") is not None else profile.selling_price,
-            "coupon_amount": data.get("coupon_amount") if data.get("coupon_amount") is not None else profile.default_coupon_amount,
+            "selling_price": (
+                data.get("selling_price")
+                if data.get("selling_price") is not None
+                else profile.selling_price
+            ),
+            "coupon_amount": (
+                data.get("coupon_amount")
+                if data.get("coupon_amount") is not None
+                else profile.default_coupon_amount
+            ),
             "platform_code": profile.platform_code,
             "transport_type": data.get("transport_type") or profile.transport_type,
             "warehouse_code": profile.warehouse_code,
@@ -764,11 +1041,13 @@ class ProductFinanceService:
         if sku_data["selling_price"] is None:
             raise ValueError("selling_price is required for operating profile")
         result = await self.preview_profit(sku_data)
-        result.update({
-            "profile_id": profile.profile_id,
-            "platform_code": profile.platform_code,
-            "warehouse_code": profile.warehouse_code,
-        })
+        result.update(
+            {
+                "profile_id": profile.profile_id,
+                "platform_code": profile.platform_code,
+                "warehouse_code": profile.warehouse_code,
+            }
+        )
         return result
 
     async def preview_platform_sku_profit(self, data: dict) -> dict:
@@ -776,7 +1055,11 @@ class ProductFinanceService:
         if sku is None:
             raise ValueError("SKU not found")
         platform = await self.db.get(DimPlatform, data["platform_code"])
-        if platform is None or not platform.is_active or platform.platform_role != "sales":
+        if (
+            platform is None
+            or not platform.is_active
+            or platform.platform_role != "sales"
+        ):
             raise ValueError("active sales platform not found")
         if await self.db.get(DimWarehouse, data["warehouse_code"]) is None:
             raise ValueError("warehouse not found")
@@ -784,30 +1067,48 @@ class ProductFinanceService:
         transport_type = data.get("transport_type")
         if transport_type not in {"sea", "air", "rail"}:
             raise ValueError("transport_type must be selected")
-        actual_logistics = await self.find_confirmed_logistics_cost(sku.sku_id, data["warehouse_code"], transport_type)
-        reference_logistics, logistics_rule = await self.find_reference_logistics_cost(sku, data["warehouse_code"], transport_type)
-        reference_storage, storage_rule = await self.find_reference_storage_cost(sku, data["warehouse_code"])
-        reference_label_fee = await self.find_reference_label_fee(data["warehouse_code"])
+        actual_logistics = await self.find_confirmed_logistics_cost(
+            sku.sku_id, data["warehouse_code"], transport_type
+        )
+        reference_logistics, logistics_rule = await self.find_reference_logistics_cost(
+            sku, data["warehouse_code"], transport_type
+        )
+        reference_storage, storage_rule = await self.find_reference_storage_cost(
+            sku, data["warehouse_code"]
+        )
+        reference_label_fee = await self.find_reference_label_fee(
+            data["warehouse_code"]
+        )
         binding = (
-            await self.db.execute(
-                select(BridgeSpuSku).where(
-                    BridgeSpuSku.sku_id == sku.sku_id,
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+            (
+                await self.db.execute(
+                    select(BridgeSpuSku).where(
+                        BridgeSpuSku.sku_id == sku.sku_id,
+                        BridgeSpuSku.binding_status == "active",
+                        BridgeSpuSku.effective_to.is_(None),
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         spu = await self.db.get(DimSpu, binding.spu) if binding else None
         expected_selling_price = data.get("expected_selling_price")
         if expected_selling_price is None:
             expected_selling_price = sku.reference_selling_price
         if expected_selling_price is None:
-            raise ValueError("expected_selling_price or reference_selling_price is required")
+            raise ValueError(
+                "expected_selling_price or reference_selling_price is required"
+            )
         result = build_platform_profit_preview(
             expected_selling_price=expected_selling_price,
             competitor_price=data.get("competitor_price"),
             seller_coupon_amount=data.get("seller_coupon_amount"),
-            purchase_cost=purchase_cost if purchase_cost is not None else sku.default_purchase_cost,
+            purchase_cost=(
+                purchase_cost
+                if purchase_cost is not None
+                else sku.default_purchase_cost
+            ),
             expected_logistics_cost=reference_logistics,
             expected_storage_cost=reference_storage,
             expected_label_fee=reference_label_fee,
@@ -825,28 +1126,42 @@ class ProductFinanceService:
                 else platform.default_creator_commission_rate
             ),
         )
-        result.update({
-            "sku_id": sku.sku_id,
-            "spu": spu.spu if spu else None,
-            "platform_code": data["platform_code"],
-            "warehouse_code": data["warehouse_code"],
-            "platform_fee_rate": platform.default_fee_rate,
-            "actual_storage_cost": None,
-            "transport_type": transport_type,
-            "reference_logistics_cost": reference_logistics,
-            "reference_logistics_rule_id": logistics_rule.rule_id if logistics_rule else None,
-            "reference_storage_cost": reference_storage,
-            "reference_storage_rule_id": storage_rule.rule_id if storage_rule else None,
-            "reference_storage_rule_version": storage_rule.version if storage_rule else None,
-            "reference_label_fee": reference_label_fee,
-            "reference_storage_days": reference_storage_days(sku.turnover_class),
-            "currency": "CNY",
-            "actual_logistics_cost": actual_logistics,
-            "cost_completeness": "complete" if result["expected"].get("profit") is not None else "incomplete",
-        })
+        result.update(
+            {
+                "sku_id": sku.sku_id,
+                "spu": spu.spu if spu else None,
+                "platform_code": data["platform_code"],
+                "warehouse_code": data["warehouse_code"],
+                "platform_fee_rate": platform.default_fee_rate,
+                "actual_storage_cost": None,
+                "transport_type": transport_type,
+                "reference_logistics_cost": reference_logistics,
+                "reference_logistics_rule_id": (
+                    logistics_rule.rule_id if logistics_rule else None
+                ),
+                "reference_storage_cost": reference_storage,
+                "reference_storage_rule_id": (
+                    storage_rule.rule_id if storage_rule else None
+                ),
+                "reference_storage_rule_version": (
+                    storage_rule.version if storage_rule else None
+                ),
+                "reference_label_fee": reference_label_fee,
+                "reference_storage_days": reference_storage_days(sku.turnover_class),
+                "currency": "CNY",
+                "actual_logistics_cost": actual_logistics,
+                "cost_completeness": (
+                    "complete"
+                    if result["expected"].get("profit") is not None
+                    else "incomplete"
+                ),
+            }
+        )
         return result
 
-    async def save_operating_profit(self, profile_id: int, data: dict) -> SkuProfitEstimate:
+    async def save_operating_profit(
+        self, profile_id: int, data: dict
+    ) -> SkuProfitEstimate:
         profile = await self.get_operating_profile(profile_id)
         preview = await self.preview_operating_profit(profile_id, data)
         if data.get("selling_price") is not None:
@@ -860,10 +1175,18 @@ class ProductFinanceService:
             operating_profile_id=profile.profile_id,
             platform_code=profile.platform_code,
             warehouse_code=profile.warehouse_code,
-            assumption_version=data.get("assumption_version") or preview["assumption_version"],
+            assumption_version=data.get("assumption_version")
+            or preview["assumption_version"],
             scenario="base",
-            selling_price=preview["net_revenue"] + Decimal(str(data.get("coupon_amount") or profile.default_coupon_amount or 0)),
-            coupon_amount=data.get("coupon_amount") if data.get("coupon_amount") is not None else profile.default_coupon_amount or 0,
+            selling_price=preview["net_revenue"]
+            + Decimal(
+                str(data.get("coupon_amount") or profile.default_coupon_amount or 0)
+            ),
+            coupon_amount=(
+                data.get("coupon_amount")
+                if data.get("coupon_amount") is not None
+                else profile.default_coupon_amount or 0
+            ),
             purchase_cost=preview["purchase_cost"],
             purchase_cost_source=preview["purchase_cost_source"],
             logistics_cost=preview["logistics_cost"],
@@ -887,7 +1210,8 @@ class ProductFinanceService:
         preview = await self.preview_profit(data)
         row = SkuProfitEstimate(
             sku_id=preview["sku_id"],
-            assumption_version=data.get("assumption_version") or preview["assumption_version"],
+            assumption_version=data.get("assumption_version")
+            or preview["assumption_version"],
             scenario="base",
             selling_price=data["selling_price"],
             coupon_amount=data.get("coupon_amount", 0),

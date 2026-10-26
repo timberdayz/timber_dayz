@@ -58,7 +58,13 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          pip install pytest pytest-asyncio pytest-cov black==25.1.0 ruff mypy
+          # ⚠️ pytest/pytest-asyncio 必须**钉版本**，与 requirements.txt 声明保持一致。
+          # 不钉的话这行会把 requirements.txt 里的 pytest==7.4.3 / pytest-asyncio==0.21.1
+          # 升级成 1.x —— 1.x 移除了 conftest.py 里的 session 级 event_loop fixture 覆盖，
+          # session 级 async fixture（pg_engine）会绑到别的 event loop，
+          # 用到 testcontainers 的用例整片报
+          # "another operation is in progress" / "attached to a different loop"。
+          pip install "pytest==7.4.3" "pytest-asyncio==0.21.1" pytest-cov black==25.1.0 ruff mypy
           # 注意: pyproject.toml 只包含工具配置（black/ruff/pytest），不是可安装包
           # 项目依赖通过 requirements.txt 安装，不需要 pip install -e .
 

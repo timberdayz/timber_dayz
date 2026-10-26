@@ -280,7 +280,12 @@ async def test_resolve_incremental_range_uses_the_watermark_window():
     """没有显式区间 → 用水位线窗口（运营零操作）。"""
     session = _FakeSession(["mart.inventory_state", datetime(2026, 10, 24, 8, 0)])
 
-    result = await resolve_incremental_range(session, platform_code="miaoshou")
+    # ⚠️ 必须显式传 now：窗口终点就是「当前时间」，写死日期会让用例第二天开始必然失败。
+    result = await resolve_incremental_range(
+        session,
+        platform_code="miaoshou",
+        now=datetime(2026, 10, 25, 9, 30),
+    )
 
     assert result is not None
     assert result["reason"] == "watermark"
