@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import asyncio
 import uuid
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -332,6 +332,34 @@ async def _replace_step_details(
     )
 
 
+async def _target_view_kind(db: AsyncSession, target: str) -> Optional[str]:
+    """目标在库里是什么类型。
+
+    返回 ``'v'``=普通视图、``'m'``=物化视图、``None``=不存在（或不是视图）。
+
+    用 ``pg_class`` 目录查（一次索引查找，很便宜）。
+    """
+    if "." not in target:
+        return None
+    schema, name = target.split(".", 1)
+    try:
+        result = await db.execute(
+            text(
+                """
+                SELECT c.relkind
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = :schema AND c.relname = :name
+                """
+            ),
+            {"schema": schema, "name": name},
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    kind = result.scalar_one_or_none()
+    return kind if kind in ("v", "m") else None
+
+
 async def execute_sql_target(
     db: AsyncSession,
     target: str,
@@ -342,6 +370,7 @@ async def execute_sql_target(
     max_attempts: int = 1,
     retry_backoff_seconds: float = 0.0,
     resolve_dependencies: bool = False,
+    recreate_views: bool = False,
 ) -> str:
     active_run_id = run_id or f"run_{uuid.uuid4().hex}"
     await _ensure_ops_tables(db)
@@ -376,6 +405,27 @@ async def execute_sql_target(
             else:
                 sql_path = SQL_TARGET_PATHS[planned_target]
             last_sql_path = str(sql_path)
+            if not recreate_views and await _target_view_kind(db, planned_target) == "v":
+                # 普通视图的数据是**查询时实时算**的 → 数据刷新时根本不需要重建它。
+                # 而重建要走 CREATE OR REPLACE VIEW → 拿 ACCESS EXCLUSIVE 排他锁 →
+                # 期间**所有**并发读写都被挡住（商品中心保存会卡住），
+                # 两个刷新进程还会沿视图链 ABBA 死锁（2026-10-26 线上事故）。
+                # 视图**定义**变更请走 scripts/rebuild_views.py 显式重建。
+                logger.info(
+                    "[refresh_runner] run_id=%s target=%s 跳过重建（普通视图已存在，定义变更请走 rebuild_views）",
+                    active_run_id,
+                    planned_target,
+                )
+                await _insert_step_log(
+                    db,
+                    run_id=active_run_id,
+                    step_name="execute_sql_target",
+                    target_name=planned_target,
+                    status="skipped",
+                    details={"reason": "view_not_recreated_on_data_refresh"},
+                )
+                last_success_target = planned_target
+                continue
             attempts = max(1, max_attempts)
             for attempt in range(1, attempts + 1):
                 last_attempt = attempt
@@ -464,6 +514,7 @@ async def execute_refresh_plan(
     max_attempts: int = 1,
     retry_backoff_seconds: float = 0.0,
     preordered: bool = False,
+    recreate_views: bool = False,
 ) -> dict[str, Any]:
     run_id = f"run_{uuid.uuid4().hex}"
     ordered_targets = list(targets) if preordered else build_refresh_plan(targets)
@@ -506,6 +557,7 @@ async def execute_refresh_plan(
                 run_id=run_id,
                 max_attempts=max_attempts,
                 retry_backoff_seconds=retry_backoff_seconds,
+                recreate_views=recreate_views,
             )
         if failed_targets:
             await _update_run_log(db, run_id, "partial_failed")

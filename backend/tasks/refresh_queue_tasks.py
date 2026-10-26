@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from backend.celery_app import celery_app
 from backend.models.database import AsyncSessionLocal, reset_async_engine_pool_for_new_loop
@@ -170,6 +171,78 @@ async def _validate_refresh_with_repair(
     return final_report, retry_result
 
 
+# PostgreSQL 死锁（40P01）/ 序列化失败（40001）→ 值得重试
+_RETRYABLE_LOCK_SQLSTATES = {"40P01", "40001"}
+_RETRYABLE_LOCK_ERROR_NAMES = {"DeadlockDetectedError", "SerializationError"}
+# 锁冲突重试：死锁是**事务级**失败，回滚整个事务后重开
+LOCK_RETRY_ATTEMPTS = 3
+LOCK_RETRY_BACKOFF_SECONDS = 2.0
+
+
+def _is_retryable_lock_error(exc: BaseException) -> bool:
+    """是不是「值得重试」的锁冲突（死锁 / 序列化失败）。
+
+    为什么要在**整个刷新计划的外层**重试
+    ----------------------------------
+    死锁是**事务级**失败：PostgreSQL 把整个事务标记为 aborted 后，
+    SAVEPOINT（``db.begin_nested()``）回滚无效 —— 必须回滚**整个事务**再重开。
+    所以语句级的重试救不回来，必须把整个计划重跑一遍。
+    """
+    for candidate in (exc, getattr(exc, "orig", None)):
+        if candidate is None:
+            continue
+        sqlstate = (
+            getattr(candidate, "sqlstate", None)
+            or getattr(candidate, "pgcode", None)
+        )
+        if sqlstate in _RETRYABLE_LOCK_SQLSTATES:
+            return True
+        if type(candidate).__name__ in _RETRYABLE_LOCK_ERROR_NAMES:
+            return True
+    return False
+
+
+async def _run_plan_with_lock_retry(
+    db: Any,
+    task: Any,
+    targets: list[str],
+    context: dict[str, Any],
+) -> Any:
+    """跑刷新计划；遇到死锁就**回滚整个事务**后退避重试。
+
+    没有它，一次死锁就把刷新任务打成 failed（2026-10-26 线上事故）。
+    """
+    last_exc: BaseException | None = None
+    for attempt in range(1, LOCK_RETRY_ATTEMPTS + 1):
+        try:
+            return await execute_refresh_plan(
+                db,
+                targets=targets,
+                pipeline_name=task.pipeline_name,
+                trigger_source=getattr(task, "trigger_type", "data_ingested"),
+                context=context,
+                continue_on_error=True,
+                max_attempts=2,
+                retry_backoff_seconds=0.1,
+            )
+        except Exception as exc:  # noqa: BLE001
+            if not _is_retryable_lock_error(exc) or attempt >= LOCK_RETRY_ATTEMPTS:
+                raise
+            last_exc = exc
+            logger.warning(
+                "[RefreshQueue] 遇到锁冲突（死锁/序列化失败），第 %s/%s 次重试：%s",
+                attempt,
+                LOCK_RETRY_ATTEMPTS,
+                exc,
+            )
+            # 关键：死锁是事务级失败 → 必须回滚整个事务，SAVEPOINT 无效
+            if hasattr(db, "rollback"):
+                await db.rollback()
+            await asyncio.sleep(LOCK_RETRY_BACKOFF_SECONDS * attempt)
+    assert last_exc is not None
+    raise last_exc
+
+
 async def _async_process_refresh_queue_task() -> dict:
     db = AsyncSessionLocal()
     try:
@@ -191,16 +264,7 @@ async def _async_process_refresh_queue_task() -> dict:
             context = dict(task.context_json or {})
             modules = _modules_for_targets(targets)
             await _repair_dashboard_assets_if_needed(db, targets)
-            refresh_result = await execute_refresh_plan(
-                db,
-                targets=targets,
-                pipeline_name=task.pipeline_name,
-                trigger_source=getattr(task, "trigger_type", "data_ingested"),
-                context=context,
-                continue_on_error=True,
-                max_attempts=2,
-                retry_backoff_seconds=0.1,
-            )
+            refresh_result = await _run_plan_with_lock_retry(db, task, targets, context)
             run_id = extract_run_id(refresh_result)
             refresh_status = extract_refresh_status(refresh_result)
             failed_targets = extract_failed_targets(refresh_result)

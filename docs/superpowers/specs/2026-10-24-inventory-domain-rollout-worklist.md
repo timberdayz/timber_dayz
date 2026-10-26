@@ -1572,3 +1572,78 @@ finally:
 - 把状态层的 `stock_added_at` 退回「自己 upsert diff」→ 又变回 655~656 天
 - 共享模块 7 项单测覆盖：首次起算 / 进货清零 / 销售不重置 /
   **取消订单（只有可用库存涨）不算进货** / 各仓取最早 / 空仓不计入仓数 / 帧序
+
+## 8.20 死锁的两道对策（治本 + 兜底），以及「多人同时用商品中心」的并发结论
+
+§8.15.6 查清了死锁机制（两个刷新进程沿视图链 ABBA）。这一节落地修法，
+并把 Walter 关心的「多人同时用商品中心」做了实测。
+
+### 8.20.1 并发实测结论（2026-10-26）
+
+| 场景 | 结论 | 实测 |
+|---|---|---|
+| 多人同时**看**看板 | 安全 | 读视图拿 ACCESS SHARE，彼此兼容 |
+| 多人同时**改不同 SKU** | 安全 | 写落在表上，行级锁只锁那几行 → 不同行天然并行。两个事务各 **0.003 / 0.005 秒**完成 |
+| 多人同时**改同一个 SKU** | 安全（排队） | 后写的等先写的提交；真正的死锁要「甲按 A→B 改、乙按 B→A 改」才发生 |
+| **刷新进程重建视图时，商品中心保存** | **被挡住** | 持有 ACCESS EXCLUSIVE 时 UPDATE **3 秒未完成** |
+
+→ **风险不在「视图是普通视图」，在「每次数据刷新都重建视图」这个多余动作。**
+ACCESS EXCLUSIVE 期间**写和读都被挡**（看板转圈、商品中心保存卡住）。
+
+### 8.20.2 对策一（治本）：数据刷新不再重建普通视图
+
+普通视图的数据是**查询时实时算**的 → 数据刷新时根本没有东西可刷。
+而 `CREATE OR REPLACE VIEW` 要拿 ACCESS EXCLUSIVE 排他锁 → 挡住所有并发读写，
+两个刷新进程还会沿视图链 ABBA 死锁。
+
+改动（`backend/services/data_pipeline/refresh_runner.py`）：
+
+- `execute_sql_target` / `execute_refresh_plan` 新增 `recreate_views: bool = False`
+- 目标**是普通视图且已存在** → **跳过**（记 step log `status=skipped`，
+  `reason=view_not_recreated_on_data_refresh`）
+- 目标**不存在** → 仍然创建（否则下游查询直接失败）
+- 目标**是物化视图** → 仍然重建（它的数据是物理存的，刷新就是刷数据）
+
+**代价与配套**：改了 `sql/` 里的视图定义不再自动生效 →
+新增 `scripts/rebuild_views.py` 作为显式重建入口：
+
+```
+python scripts/rebuild_views.py                  # 重建全部视图（当前 47 个）
+python scripts/rebuild_views.py --target mart.inventory_state
+python scripts/rebuild_views.py --dry-run
+```
+
+它**单进程串行**执行（不会并发），按依赖顺序重建，重建期间会短暂挡住看板查询。
+
+### 8.20.3 对策二（兜底）：死锁当「可重试」，不当「失败」
+
+死锁不代表数据有问题，只代表「这次没抢到，重来」。
+
+改动（`backend/tasks/refresh_queue_tasks.py`）：
+
+- `_is_retryable_lock_error(exc)`：识别 PostgreSQL 死锁（sqlstate `40P01`）
+  与序列化失败（`40001`）
+- `_run_plan_with_lock_retry`：在**整个刷新计划的外层**重试：
+  捕获 → **`await db.rollback()`（回滚整个事务）** → 退避（2s × 次数）→ 重开事务重跑
+  最多 3 次
+
+**为什么必须放在外层**：死锁是**事务级**失败，PostgreSQL 把事务标记 aborted 后
+SAVEPOINT（`db.begin_nested()`）回滚无效 —— 语句级的重试救不回来。
+这也解释了为什么改动前的死锁**必然**把任务打成 failed。
+
+### 8.20.4 两道对策都有测试守着
+
+新增 `backend/tests/data_pipeline/test_refresh_view_skip_and_lock_retry.py`（9 项）：
+普通视图被跳过 / 物化视图仍重建 / 不存在的视图仍创建 / 显式重建强制重建 /
+死锁可重试 / 序列化失败可重试 / 普通错误不可重试 /
+**死锁 → 回滚整个事务 → 退避 → 重跑整个计划** / 普通错误不重试。
+
+对照实验：
+- 撤掉「跳过普通视图」的判断 → `test_data_refresh_skips_rebuilding_existing_plain_view` 变红
+- 撤掉「死锁重试」的判断 → `test_deadlock_rolls_back_whole_transaction_and_retries` 变红
+
+### 8.20.5 回归
+
+- data_pipeline + refresh_queue 全量：**26 failed / 500 passed**
+- 失败清单与基线**逐条一致**（stash 掉改动重跑后比对）→ **零回归**
+- ruff / 长度门禁通过
