@@ -243,12 +243,42 @@ INVENTORY_DATE_FILTER_RANGE_END_PLACEHOLDERS: Final[Tuple[str, ...]] = (
 INVENTORY_DATE_FILTER_RANGE_INPUT_SELECTOR: Final[str] = (
     "input.jx-range-input, input[placeholder*='开始'], input[placeholder*='结束']"
 )
-# 维度下拉触发器：找到「创建时间 / 更新时间」文字后，向上找可点击的祖先
-INVENTORY_DATE_FILTER_TRIGGER_ANCESTOR_XPATHS: Final[Tuple[str, ...]] = (
-    "xpath=ancestor::*[contains(@class,'select')][1]",
-    "xpath=ancestor::*[contains(@class,'picker')][1]",
-    "xpath=..",
+# ── 2026-10-26 第二次失败现场：全页搜索点到了表格表头 ──────────────
+#
+# 失败任务 5526faf9（2026-10-26 12:07:51）：
+#   date_filter_failed: reason=维度未切到「更新时间」（下拉触发器上的文案没变）
+#
+# 取证结论（探针 scripts/probe_miaoshou_inventory_date_filter.py，真实 DOM）：
+#   page.get_by_text("更新时间", exact=True)  →  **2 个**可见命中
+#     ├─ index 0: <div class="cell">更新时间</div>   ← **表格表头的排序列**
+#     └─ index 1: <li class="jx-select-dropdown__item">更新时间</li>  ← 真选项
+#   组件取 .nth(0) → 点到了**表头** → 触发表格排序「按更新时间排序」
+#   → 维度根本没切 → 报「维度未切到」。
+#
+# 也就是说：**表头和下拉选项同名**，全页 get_by_text 天然会命中表头。
+#
+# 维度下拉触发器（真实结构）：
+#   <div class="jx-select jx-select--small pro-select"
+#        fieldtype="select" modelvaluegroup="gmtCreate," style="width:100px">
+#     <div class="jx-select__wrapper jx-tooltip__trigger" tabindex="-1">
+#       <div class="jx-select__selection">
+#         <div class="jx-select__selected-item jx-select__placeholder">
+#           <span>创建时间</span>          ← 触发器上显示的当前维度
+#
+# → **维度键就在触发器的 modelvaluegroup 上**（gmtCreate / gmtModified），
+#    用它定位既能拿到触发器，又能天然排除表格表头（表头没有 modelvaluegroup）。
+INVENTORY_DATE_FILTER_DIMENSION_SELECT_SELECTOR: Final[str] = "[modelvaluegroup*='gmt']"
+# 触发器里真正可点的外壳（jx-select 的 wrapper）
+INVENTORY_DATE_FILTER_DIMENSION_WRAPPER_SELECTOR: Final[str] = ".jx-select__wrapper"
+# 下拉浮层里的选项（真实结构：li.jx-select-dropdown__item[role='option']）
+INVENTORY_DATE_FILTER_DIMENSION_OPTION_SELECTORS: Final[Tuple[str, ...]] = (
+    ".jx-select-dropdown li.jx-select-dropdown__item",
+    ".jx-select-dropdown [role='option']",
+    ".jx-dropdown-menu [role='option']",
+    "[role='listbox'] [role='option']",
 )
+# 结果计数的数字紧跟在「SKU总数」后面（不是容器里的任意一个数字）
+INVENTORY_DATE_FILTER_SKU_TOTAL_PATTERN: Final[str] = r"SKU总数[:：]?\s*([\d,]+)"
 
 
 @dataclass(frozen=True)
@@ -321,6 +351,16 @@ class InventorySelectors:
     inventory_date_filter_range_end_placeholders: Tuple[str, ...] = (
         INVENTORY_DATE_FILTER_RANGE_END_PLACEHOLDERS
     )
-    inventory_date_filter_trigger_ancestor_xpaths: Tuple[str, ...] = (
-        INVENTORY_DATE_FILTER_TRIGGER_ANCESTOR_XPATHS
+    # 2026-10-26 第二次取证：维度定位必须限定在触发器与下拉浮层内
+    inventory_date_filter_dimension_select_selector: str = (
+        INVENTORY_DATE_FILTER_DIMENSION_SELECT_SELECTOR
+    )
+    inventory_date_filter_dimension_wrapper_selector: str = (
+        INVENTORY_DATE_FILTER_DIMENSION_WRAPPER_SELECTOR
+    )
+    inventory_date_filter_dimension_option_selectors: Tuple[str, ...] = (
+        INVENTORY_DATE_FILTER_DIMENSION_OPTION_SELECTORS
+    )
+    inventory_date_filter_sku_total_pattern: str = (
+        INVENTORY_DATE_FILTER_SKU_TOTAL_PATTERN
     )

@@ -24,12 +24,18 @@
 1. **以可见文案 / placeholder 为锚**，不赌 class 名
    （class 是 jx-ui 的实现细节、随版本变；「创建时间 / 更新时间 / 开始时间 /
    结束时间」是业务语义，稳定）
-2. **幂等**：已经是「更新时间」就不碰下拉
+2. **定位必须限定范围** ← 2026-10-26 第二次失败（任务 5526faf9）补的
+   结果表格的**表头里也有「创建时间」「更新时间」两列**（可排序），
+   和下拉浮层里的选项**同名** → 全页 ``get_by_text("更新时间")`` 的第一个
+   命中是**表头**，点下去变成「按更新时间排序」，维度根本没切。
+   所以：触发器用维度键（``modelvaluegroup`` 里有 ``gmtCreate/gmtModified``）认，
+   选项只在**可见的下拉浮层容器内**找，读当前维度**只从触发器读**。
+   （详见 ``inventory_dimension_mixin.py``）
+3. **幂等**：已经是「更新时间」就不碰下拉
    （用户可能已经手动选过 —— 重复点反而会把状态点乱）
-3. **顺序无关**：读当前维度前先收起浮层，
-   避免把浮层里的选项误当成触发器上的当前值
-4. **「确定」可选**：页面没有就不点，**不算失败**
-5. **证据用可见文本**：触发器文案变成「更新时间」本身就是人能读的落地证据
+4. **顺序无关**：浮层已经开着就别再点触发器（再点一下反而把它关了）
+5. **「确定」可选**：页面没有就不点，**不算失败**
+6. **证据用可见文本**：触发器文案变成「更新时间」本身就是人能读的落地证据
 
 三处静默失败仍然必须挡住（页面照常显示、不报错，只会安静地给错数据）
 --------------------------------------------------------------------
@@ -51,12 +57,11 @@ from typing import Any, Optional
 
 from modules.components.base import ExecutionContext
 from modules.platforms.miaoshou.components.inventory_config import InventorySelectors
-
-_DIGITS = re.compile(r"(\d[\d,]*)")
-
-# 维度下拉的两个选项文案（既是触发器上的当前值，也是浮层里的选项）
-DIMENSION_CREATE = "创建时间"
-DIMENSION_MODIFIED = "更新时间"
+from modules.platforms.miaoshou.components.inventory_dimension_mixin import (
+    DIMENSION_CREATE,
+    DIMENSION_MODIFIED,
+    InventoryDimensionMixin,
+)
 
 
 @dataclass(frozen=True)
@@ -77,7 +82,7 @@ class InventoryDateFilterEvidence:
         return self.dimension == DIMENSION_MODIFIED
 
 
-class MiaoshouInventoryDateFilter:
+class MiaoshouInventoryDateFilter(InventoryDimensionMixin):
     """把仓库清单的筛选器设成「更新时间维度 + 自定义区间」。"""
 
     platform = "miaoshou"
@@ -119,7 +124,10 @@ class MiaoshouInventoryDateFilter:
     async def _visible_nodes(self, page: Any, label: str) -> list[Any]:
         """页面上可见的、文本命中 label 的节点。
 
-        先用严格匹配（触发器上的文案就是这两个词），失败再放宽。
+        ⚠️ **只用于页面上独一份的文案**（比如「SKU总数」）。
+        「创建时间 / 更新时间」**不能用它** —— 表格表头里也有一模一样的两列，
+        全页搜索会命中表头，点下去变成「按更新时间排序」，维度根本没切
+        （2026-10-26 任务 5526faf9 的真实失败原因）。
         """
         for exact in (True, False):
             try:
@@ -138,6 +146,10 @@ class MiaoshouInventoryDateFilter:
             if nodes:
                 return nodes
         return []
+
+    # ------------------------------------------------------------------
+    # 维度下拉：定位（**必须限定范围**）
+    # ------------------------------------------------------------------
 
     @staticmethod
     async def _read_attr(locator: Any, name: str) -> str:
@@ -166,23 +178,31 @@ class MiaoshouInventoryDateFilter:
     # 取值
     # ------------------------------------------------------------------
     async def read_sku_total(self, page: Any) -> Optional[int]:
-        """读页面上的「SKU总数」。读不到返回 None（**不等于 0**）。"""
+        """读页面上的「SKU总数」。读不到返回 None（**不等于 0**）。
+
+        ⚠️ 数字必须**紧跟在「SKU总数」后面**取。
+        页面同一块区域里还有「库存总数 / 库存总价值 / …」，全文取第一个数字
+        会取错（真实页面实测曾读到 0）。
+        """
+        pattern = re.compile(self.sel.inventory_date_filter_sku_total_pattern)
         try:
             element = page.get_by_text(
                 self.sel.inventory_date_filter_sku_total_text, exact=False
             ).first
-            text = (await element.text_content()) or ""
-            match = _DIGITS.search(text)
-            if match:
-                return int(match.group(1).replace(",", ""))
-            # 数字可能在标签的兄弟节点上 → 再看一层父节点
-            parent = element.locator("xpath=..")
-            parent_text = (await parent.text_content()) or ""
-            match = _DIGITS.search(parent_text)
-            if match:
-                return int(match.group(1).replace(",", ""))
         except Exception:
             return None
+        for candidate in (element, element.locator("xpath=..")):
+            try:
+                text = (await candidate.text_content()) or ""
+            except Exception:
+                continue
+            match = pattern.search(text)
+            if not match:
+                continue
+            try:
+                return int(match.group(1).replace(",", ""))
+            except ValueError:
+                continue
         return None
 
     async def _close_dropdown(self, page: Any) -> None:
@@ -197,77 +217,9 @@ class MiaoshouInventoryDateFilter:
             pass
         await self._settle(page)
 
-    async def read_current_dimension(self, page: Any) -> str:
-        """读筛选栏上**当前显示**的维度文案（'创建时间' / '更新时间'）。"""
-        await self._close_dropdown(page)
-        found: list[str] = []
-        for label in (DIMENSION_CREATE, DIMENSION_MODIFIED):
-            if await self._visible_nodes(page, label):
-                found.append(label)
-        if len(found) == 1:
-            return found[0]
-        if len(found) > 1:
-            # 两个都在：不是正常的收起状态 → 保守按「未切换」处理
-            return DIMENSION_CREATE
-        return ""
-
     # ------------------------------------------------------------------
     # 各步骤
     # ------------------------------------------------------------------
-    async def _open_dimension_dropdown(self, page: Any, current_label: str) -> None:
-        """点开时间维度下拉（点当前维度文案所在的可点击祖先）。"""
-        nodes = await self._visible_nodes(page, current_label)
-        if not nodes:
-            raise RuntimeError(
-                f"找不到时间维度下拉触发器（页面上看不到「{current_label}」）"
-            )
-        trigger = nodes[0]
-        for xpath in self.sel.inventory_date_filter_trigger_ancestor_xpaths:
-            try:
-                ancestor = trigger.locator(xpath).first
-                await ancestor.wait_for(state="visible", timeout=800)
-                await ancestor.click(timeout=1500)
-                await self._wait_dimension_option(page)
-                return
-            except Exception:
-                continue
-        await trigger.click(timeout=1500)
-        await self._wait_dimension_option(page)
-
-    async def _wait_dimension_option(self, page: Any) -> Any:
-        """等浮层展开 —— 判据是「更新时间」变得可见。
-
-        切换之前「更新时间」在页面上不可见（只有触发器显示「创建时间」），
-        所以「浮层展开」和「出现可见的更新时间选项」是同一件事。
-        """
-        for _ in range(20):
-            nodes = await self._visible_nodes(page, DIMENSION_MODIFIED)
-            if nodes:
-                return nodes[0]
-            await self._settle(page)
-        raise RuntimeError("时间维度下拉没有展开（看不到「更新时间」选项）")
-
-    async def _switch_to_modified_dimension(self, page: Any) -> str:
-        """把维度切到「更新时间」，并断言落地证据。"""
-        current = await self.read_current_dimension(page)
-        if current == DIMENSION_MODIFIED:
-            # 幂等：已经是「更新时间」→ 不碰下拉（用户可能已手动选过）
-            return current
-        if not current:
-            raise RuntimeError(
-                "读不到时间维度的当前值：页面上找不到「创建时间 / 更新时间」"
-            )
-
-        await self._open_dimension_dropdown(page, current)
-        option = await self._wait_dimension_option(page)
-        await option.click(timeout=1500)
-
-        for _ in range(12):
-            value = await self.read_current_dimension(page)
-            if value == DIMENSION_MODIFIED:
-                return value
-            await self._settle(page)
-        raise RuntimeError("维度未切到「更新时间」（下拉触发器上的文案没变）")
 
     async def _first_visible_by_placeholder(
         self, page: Any, placeholders: tuple[str, ...]
@@ -347,6 +299,8 @@ class MiaoshouInventoryDateFilter:
         return await self._read_input_value(node)
 
     async def _fill_range(self, page: Any, *, start: str, end: str) -> tuple[str, str]:
+        # 先把维度浮层收起来 —— 它正好盖在日期区间输入框上方，不收会点不到
+        await self._close_dropdown(page)
         start_input, end_input = await self._find_range_inputs(page)
         start_value = await self._fill_one(start_input, start, start.split(" ")[0])
         end_value = await self._fill_one(end_input, end, end.split(" ")[0])
@@ -357,19 +311,23 @@ class MiaoshouInventoryDateFilter:
 
         真实页面填完区间直接点「搜索」，没有「确定/清空」。
         老版本组件把「确定」当成必经步骤，所以页面结构一变就整段失败。
+        ⚠️ 必须要求**可见** —— 页面上有些隐藏面板里也放着同 class 的按钮。
         """
         try:
             confirm = page.locator(self.sel.inventory_date_filter_confirm_selector)
             count = await confirm.count()
         except Exception:
             return False
-        if count <= 0:
-            return False
-        try:
-            await confirm.first.click(timeout=1500)
-            return True
-        except Exception:
-            return False
+        for index in range(min(count, 4)):
+            node = confirm.nth(index)
+            try:
+                if not await node.is_visible():
+                    continue
+                await node.click(timeout=1500)
+                return True
+            except Exception:
+                continue
+        return False
 
     async def _read_applied_range(self, page: Any) -> str:
         """读筛选器上已应用的区间（老路：``modelvaluegroup`` 属性）。"""
@@ -405,7 +363,12 @@ class MiaoshouInventoryDateFilter:
         )
         try:
             confirm = page.locator(self.sel.inventory_date_filter_confirm_selector)
-            has_confirm = await confirm.count() > 0
+            has_confirm = False
+            count = await confirm.count()
+            for index in range(min(count, 4)):
+                if await confirm.nth(index).is_visible():
+                    has_confirm = True
+                    break
         except Exception:
             has_confirm = False
         return {

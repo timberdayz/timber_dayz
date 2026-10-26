@@ -5,7 +5,8 @@
 2. 区间没落进去
 3. 搜索没刷新 / 结果为空
 
-真实页面结构（2026-10-26 失败现场取证）：
+真实页面结构（2026-10-26 两次失败现场取证）
+------------------------------------------------
 - 时间维度是**内联下拉**，触发器直接显示「创建时间」/「更新时间」
 - 下拉浮层里就两项
 - 日期区间是**内联的两个输入框**（placeholder「开始时间」「结束时间」）
@@ -13,6 +14,12 @@
 
 → 所以「页面上没有确定按钮」必须算**成功路径**，不是失败。
 （旧版本把「确定」当必经步骤，页面结构一变就整段失败。）
+
+⚠️ 表格表头里也有**一模一样的**「创建时间」「更新时间」两列。
+   全页 ``get_by_text("更新时间")`` 的第一个命中是**表头**，不是下拉选项 ——
+   点下去变成「按更新时间排序」，维度根本没切
+   （2026-10-26 任务 5526faf9 的真实失败原因）。
+   所以下面的 FakePage **刻意复刻了这个同名陷阱**。
 """
 
 from __future__ import annotations
@@ -42,19 +49,23 @@ class FakeNode:
         visible: bool = True,
         value: str = "",
         attrs: Optional[dict] = None,
+        requires_open: bool = False,
     ) -> None:
         self.page = page
         self.text = text
         self.visible = visible
         self.value = value
         self.attrs = dict(attrs or {})
+        self.requires_open = requires_open
         self.clicks = 0
 
     async def is_visible(self) -> bool:
+        if self.requires_open and not self.page.dropdown_open:
+            return False
         return self.visible
 
     async def wait_for(self, state: str = "visible", timeout: int = 0) -> None:
-        if not self.visible:
+        if not await self.is_visible():
             raise RuntimeError("element not visible")
 
     async def click(self, timeout: int = 0) -> None:
@@ -69,6 +80,9 @@ class FakeNode:
     async def text_content(self) -> str:
         return self.text
 
+    async def inner_text(self) -> str:
+        return self.text
+
     async def input_value(self) -> str:
         return self.value
 
@@ -79,10 +93,24 @@ class FakeNode:
         return None
 
     def locator(self, selector: str) -> "FakeLocator":
-        # 「祖先」点击等价于点自己（真实页面里点祖先会冒泡到触发器）
-        if selector.startswith("xpath=ancestor"):
+        # 「祖先」/「父节点」/「wrapper」点击等价于点自己
+        # （真实页面里点祖先会冒泡到触发器）
+        if selector.startswith("xpath=ancestor") or selector == "xpath=..":
+            return FakeLocator(self.page, [self])
+        if "wrapper" in selector:
             return FakeLocator(self.page, [self])
         return FakeLocator(self.page, [])
+
+
+class FakeDropdown(FakeNode):
+    """下拉浮层容器：只有打开时才可见，里面装着两个选项。"""
+
+    def __init__(self, page: "FakePage", options: list[FakeNode]) -> None:
+        super().__init__(page, visible=True, requires_open=True)
+        self.options = options
+
+    def locator(self, selector: str) -> "FakeLocator":
+        return FakeLocator(self.page, list(self.options))
 
 
 class FakeLocator:
@@ -125,6 +153,8 @@ class FakePage:
         confirm_present: bool = False,
         fill_takes_effect: bool = True,
         sku_total_text: str = "SKU总数：1113",
+        dimension_select_present: bool = True,
+        table_header_present: bool = True,
     ) -> None:
         self.dimension = dimension
         self.modified_option_present = modified_option_present
@@ -132,19 +162,38 @@ class FakePage:
         self.fill_takes_effect = fill_takes_effect
         self.dropdown_open = False
 
-        self.trigger_node = FakeNode(self, text=dimension)
-        self.option_create = FakeNode(self, text=DIMENSION_CREATE)
-        self.option_modified = FakeNode(self, text=DIMENSION_MODIFIED)
+        key = "gmtModified," if dimension == DIMENSION_MODIFIED else "gmtCreate,"
+        self.trigger_node = FakeNode(
+            self, text=dimension, attrs={"modelvaluegroup": key}
+        )
+        # 表格表头里的同名两列（**真实页面上它们排在浮层之前**）
+        self.header_create = FakeNode(self, text=DIMENSION_CREATE)
+        self.header_modified = FakeNode(self, text=DIMENSION_MODIFIED)
+        # 下拉浮层里的两个选项
+        self.option_create = FakeNode(self, text=DIMENSION_CREATE, requires_open=True)
+        self.option_modified = FakeNode(
+            self, text=DIMENSION_MODIFIED, requires_open=True
+        )
+        self.dropdown = FakeDropdown(self, self._dropdown_options())
         self.start_input = FakeNode(self)
         self.end_input = FakeNode(self)
-        self.confirm_node = FakeNode(self)
+        self.confirm_node = FakeNode(self, visible=confirm_present)
         self.root_node = FakeNode(self, attrs={"modelvaluegroup": ""})
         self.sku_node = FakeNode(self, text=sku_total_text)
 
         self.range_inputs = [self.start_input, self.end_input][:range_input_count]
         self.confirm_present = confirm_present
+        self.dimension_select_present = dimension_select_present
+        self.table_header_present = table_header_present
 
     # -- 交互副作用 ----------------------------------------------------
+    def _dropdown_options(self) -> list[FakeNode]:
+        """浮层里实际有的选项（可模拟「没有更新时间」）。"""
+        options = [self.option_create]
+        if self.modified_option_present:
+            options.append(self.option_modified)
+        return options
+
     def on_click(self, node: FakeNode) -> None:
         if node is self.trigger_node:
             self.dropdown_open = True
@@ -153,6 +202,7 @@ class FakePage:
             if self.dimension_takes_effect:
                 self.dimension = DIMENSION_MODIFIED
                 self.trigger_node.text = DIMENSION_MODIFIED
+                self.trigger_node.attrs["modelvaluegroup"] = "gmtModified,"
             self.dropdown_open = False
             return
         if node is self.option_create:
@@ -163,6 +213,11 @@ class FakePage:
 
     # -- Playwright 表面 ------------------------------------------------
     def locator(self, selector: str) -> FakeLocator:
+        if "modelvaluegroup*='gmt'" in selector:
+            nodes = [self.trigger_node] if self.dimension_select_present else []
+            return FakeLocator(self, nodes)
+        if "jx-select-dropdown" in selector or "listbox" in selector:
+            return FakeLocator(self, [self.dropdown])
         if "placeholder*='开始时间'" in selector:
             return FakeLocator(self, [self.start_input] if self.range_inputs else [])
         if "placeholder*='结束时间'" in selector:
@@ -180,6 +235,12 @@ class FakePage:
     def get_by_text(self, text: str, exact: bool = False) -> FakeLocator:
         if text in (DIMENSION_CREATE, DIMENSION_MODIFIED):
             nodes: list[FakeNode] = []
+            # 真实页面：表格表头排在浮层之前 → 全页搜索第一个命中是表头
+            if self.table_header_present:
+                if text == DIMENSION_CREATE:
+                    nodes.append(self.header_create)
+                else:
+                    nodes.append(self.header_modified)
             if self.trigger_node.text == text:
                 nodes.append(self.trigger_node)
             if self.dropdown_open:
@@ -220,6 +281,35 @@ async def test_applies_modified_dimension_and_range_without_confirm_button():
 
 
 @pytest.mark.asyncio
+async def test_clicks_dropdown_option_not_table_header():
+    """表格表头里也有「更新时间」这一列 —— 点它只是排序，维度不会变。
+
+    这是 2026-10-26 任务 5526faf9 的真实失败原因：
+    全页 get_by_text 的第一个命中是表头，组件点下去 → 维度没切。
+    """
+    page = FakePage()
+    component = _component()
+
+    evidence = await component.apply_incremental_range(page, start=START, end=END)
+
+    assert evidence.dimension == DIMENSION_MODIFIED
+    assert page.option_modified.clicks == 1, "必须点下拉浮层里的「更新时间」选项"
+    assert page.header_modified.clicks == 0, "不能点表格表头（那是排序列）"
+
+
+@pytest.mark.asyncio
+async def test_reads_dimension_from_trigger_not_table_header():
+    """读当前维度必须读触发器，不能把表格表头算进来。"""
+    page = FakePage(dimension=DIMENSION_CREATE)
+    component = _component()
+
+    assert await component.read_current_dimension(page) == DIMENSION_CREATE
+
+    page.dropdown_open = True
+    assert await component.read_current_dimension(page) == DIMENSION_CREATE
+
+
+@pytest.mark.asyncio
 async def test_skips_dimension_switch_when_already_modified():
     """已经是「更新时间」→ 幂等，不该再去点下拉（用户可能已手动选过）。"""
     page = FakePage(dimension=DIMENSION_MODIFIED)
@@ -231,15 +321,12 @@ async def test_skips_dimension_switch_when_already_modified():
 
 
 @pytest.mark.asyncio
-async def test_reads_current_dimension_from_trigger_not_dropdown_option():
-    """浮层开着时读到的必须是**触发器**上的当前值，不是浮层里的选项。"""
-    page = FakePage(dimension=DIMENSION_CREATE)
-    component = _component()
+async def test_fails_when_dimension_select_is_missing():
+    """页面上找不到维度 select → 必须明确失败，不能默默采成「创建时间」。"""
+    page = FakePage(dimension_select_present=False)
 
-    # 模拟「用户已经打开了下拉但还没选」
-    page.dropdown_open = True
-
-    assert await component.read_current_dimension(page) == DIMENSION_CREATE
+    with pytest.raises(RuntimeError, match="触发器"):
+        await _component().apply_incremental_range(page, start=START, end=END)
 
 
 @pytest.mark.asyncio
@@ -299,6 +386,14 @@ async def test_reads_sku_total():
     page = FakePage(sku_total_text="SKU总数：11003 库存总价值（元）：223561.83")
 
     assert await _component().read_sku_total(page) == 11003
+
+
+@pytest.mark.asyncio
+async def test_reads_sku_total_picks_number_right_after_label():
+    """同一块区域里别的数字不能被当成 SKU 总数（真实页面上有库存总数/总价值）。"""
+    page = FakePage(sku_total_text="仓库清单 0 条记录 SKU总数：1112 库存总数：10971")
+
+    assert await _component().read_sku_total(page) == 1112
 
 
 def test_assert_search_results_refreshed_rejects_growth():

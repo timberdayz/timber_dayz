@@ -804,3 +804,104 @@ Walter 手动跑了一次妙手库存采集，失败。步骤日志原文：
 > ⚠️ **复验通过前，先别开自动调度**（现有 3 条妙手配置的 `schedule_enabled` 仍是关的）。
 > 这次改的是「定位方式」，不是「口径」；但**没在真实页面上跑过一次**，
 > 就仍然只是纸面正确。
+
+---
+
+## 8.13 2026-10-26 下午：第二次失败现场 —— 表格表头把下拉选项顶掉了
+
+Walter 重启电脑后重跑采集，仍然失败：
+
+```
+task_id = 5526faf9-05c2-4ffc-b889-16bfe572d39a
+date_filter_failed: stage=date_filter_ready status=failed
+reason=维度未切到「更新时间」（下拉触发器上的文案没变）
+matched_signal=date_filter:dimension_text
+```
+
+Walter 的现场描述：「可以准确打开创建时间和更新时间的框，但是最后点击只点击了创建时间的内容」。
+
+### 8.13.1 根因（真实 DOM 取证，不是推测）
+
+探针在**真实页面**上抓到的证据：
+
+```
+page.get_by_text("更新时间", exact=True)  →  2 个可见命中
+  ├─ index 0: <div class="cell">更新时间</div>          ← ★表格表头的排序列
+  │            <th class="jx-table_1_column_23_column_24 … is-sortable">
+  └─ index 1: <li class="jx-select-dropdown__item" role="option">更新时间</li>
+```
+
+**结果表格的表头里本来就有「创建时间」「更新时间」两列（可排序）**，
+和下拉浮层里的选项**同名**。组件原来取 `.nth(0)` → 点到的是**表头**
+→ 触发的是「按更新时间排序」→ 维度根本没切 → 报「维度未切到」。
+
+一句话：**全页 `get_by_text` 命中的是同名表头，不是下拉选项。**
+
+同一个根因还污染了「读当前维度」：全页找「创建时间/更新时间」会同时命中表头和触发器，
+判定永远落在「两个都在 → 保守按未切换处理」分支。
+
+### 8.13.2 修复：所有维度定位都**限定范围**
+
+| 动作 | 修复前（全页） | 修复后（限定范围） |
+|---|---|---|
+| 找触发器 | `get_by_text(维度文案)` | `[modelvaluegroup*='gmt']` —— 维度键挂在触发器根上（`modelvaluegroup="gmtCreate,"`），**表头没有这个属性** |
+| 读当前维度 | 全页找两个文案 | **只从触发器读**（先读维度键 `gmtCreate/gmtModified`，读不到再读文案） |
+| 找「更新时间」选项 | 全页找 → 命中表头 | **可见的下拉浮层容器内**找（`.jx-select-dropdown:visible` → `li.jx-select-dropdown__item`） |
+| 点触发器 | 找「创建时间」文字的祖先 | 点触发器内的 `.jx-select__wrapper` |
+
+关键结构（真实取证）：
+
+```html
+<!-- 触发器：维度键就在这儿 -->
+<div class="jx-select jx-select--small pro-select" fieldtype="select"
+     modelvaluegroup="gmtCreate," style="width:100px">
+  <div class="jx-select__wrapper jx-tooltip__trigger">
+    <div class="jx-select__selected-item jx-select__placeholder">
+      <span>创建时间</span>
+
+<!-- 下拉浮层（.jx-select-dropdown 有十几个，每个 select 一个） -->
+<div class="jx-select-dropdown pro-select-popper">
+  <div class="jx-scrollbar">
+    <div class="jx-select-dropdown__wrap jx-scrollbar__wrap">
+      <ul class="jx-scrollbar__view jx-select-dropdown__list" role="listbox">
+        <li class="jx-select-dropdown__item is-selected" role="option">创建时间 </li>
+        <li class="jx-select-dropdown__item" role="option">更新时间 </li>
+```
+
+⚠️ 维度那个下拉浮层在 DOM 里排在**很靠后**（十几个 select 依次排开）
+→ 扫描时必须先用 `:visible` 精准命中，不能指望按顺序扫到。
+
+### 8.13.3 顺带修掉的第三个假东西：`read_sku_total`
+
+原来读的是「包含 SKU总数 的那个元素的全文里的**第一个数字**」——
+那块区域里还有「库存总数 / 库存总价值 / …」，实测取到过 **0**。
+现在改成用正则**紧跟在「SKU总数」后面**取数
+（`SKU总数[:：]?\s*([\d,]+)`）。这条数字是「搜索有没有刷新」的判据，
+取错就等于这条断言没有牙齿。
+
+### 8.13.4 探针也修了两个自己的毛病
+
+| 毛病 | 后果 | 修法 |
+|---|---|---|
+| 把**外层包装**的 storage_state 喂给 Playwright | 顶层没有 `cookies` 键 → 实际 cookie 数 = 0 → 永远跳回登录页 → 被误判成「妙手把登录踢下线了」 | 按 `executor_v2` 的同一规则取**内层**（真凶在探针，不在妙手） |
+| 「提示」通知**异步弹出** | 关掉第一个之后 ~7 秒又来一个，挡住点击 | 持续巡检到**连续 3 轮安静**才算关完 |
+
+### 8.13.5 验收状态
+
+| 项 | 状态 |
+|---|---|
+| 组件行为测试 | **15 passed**（新增：点下拉选项而不是表头、读维度不把表头算进来、找不到维度 select 明确失败） |
+| 旧逻辑对照 | 把组件改回 2026-10-26 的定位逻辑 → 同样报错、表头被点 1 次、选项被点 0 次 → **新测试有牙齿** |
+| 妙手相关测试 | 99 passed（另 2 条 `test_collection_time_selection_contract` 是既有失败，基线复验一致） |
+| data_pipeline 回归 | **26 failed / 467 passed**，失败清单与 HEAD 基线**逐条同名同序** → 零回归 |
+| 长度门禁 | 函数 ≤50 行、类 ≤500 行 通过（主类 384 → 523 行，拆出 `inventory_dimension_mixin.py` 后回到 478 行） |
+| black / ruff | 通过 |
+| **真实页面复验** | ✅ **通过** —— 探针 `--mode verify` 在真实妙手页面上 `ok=True`，`final_dimension='更新时间'`，截图可见触发器已显示「更新时间」 |
+
+> ✅ 上一版 §8.12 里「⏳ 真实页面复验未做」这条**已闭环**：
+> §8.12 的修法（文案驱动）方向没错，但**定位范围**错了 —— 必须限定在触发器和浮层容器内。
+> 这次是在真实页面上跑通并截图确认的。
+
+> ⚠️ 仍然**先别开自动调度**（现有 3 条妙手配置的 `schedule_enabled` 还是关的）。
+> 组件这一环已经通了，但**完整增量采集链路**（两次搜索 + 区间生效 + 结果集刷新）
+> 还需要在真实任务里跑一次，确认状态层水位线真的在推进。
