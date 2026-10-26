@@ -525,19 +525,86 @@ async def _probe_page(page: Any, mode: str) -> int:
     return 0
 
 
+VERIFY_RANGE_START = "2026-10-01 00:00:00"
+VERIFY_RANGE_END = "2026-10-25 23:59:59"
+
+
 async def _verify_switch(component: Any, page: Any) -> dict[str, Any]:
-    """**真的**切一次维度，验收组件修好没有（不填区间、不点搜索）。"""
-    result: dict[str, Any] = {"ok": False, "error": None, "final_dimension": None}
+    """**真的**跑一遍采集真正用的入口，验收组件修好没有。
+
+    调的是 ``apply_incremental_range``（切维度 + 填区间 + 断言证据）——
+    和采集流程走的是同一条路。
+    **仍然不点「搜索」、不点「导出」**，所以不会触发任何导出行为。
+    """
+    result: dict[str, Any] = {
+        "ok": False,
+        "error": None,
+        "final_dimension": None,
+        "applied_range": None,
+        "range_start_value": None,
+        "range_end_value": None,
+    }
     try:
-        await component._switch_to_modified_dimension(page)
+        evidence = await component.apply_incremental_range(
+            page, start=VERIFY_RANGE_START, end=VERIFY_RANGE_END
+        )
         result["ok"] = True
+        result["applied_range"] = evidence.applied_range
     except Exception as exc:  # noqa: BLE001
         result["error"] = f"{type(exc).__name__}: {exc}"
     try:
         result["final_dimension"] = await component.read_current_dimension(page)
     except Exception as exc:  # noqa: BLE001
         result["final_dimension"] = f"<读取失败：{exc}>"
-    print(f"[probe] 维度切换验收：{result}")
+    for key, placeholder in (
+        ("range_start_value", "开始时间"),
+        ("range_end_value", "结束时间"),
+    ):
+        try:
+            node = await component._first_visible_by_placeholder(page, (placeholder,))
+            result[key] = await component._read_input_value(node) if node else None
+        except Exception:
+            result[key] = None
+    result["date_panel"] = await _dump_date_panel(page)
+    print(f"[probe] 筛选器整体验收：{result}")
+    return result
+
+
+PANEL_SCRIPT = """
+() => {
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    const st = window.getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none';
+  };
+  const brief = (el) => ({
+    tag: el.tagName,
+    cls: (el.className || '').toString().slice(0, 200),
+    text: (el.textContent || '').trim().slice(0, 30),
+    visible: visible(el),
+    html: el.outerHTML.slice(0, 300),
+  });
+  const panels = Array.from(document.querySelectorAll(
+    '.jx-picker-panel, [class*="picker-panel"], .jx-date-picker, [class*="date-range"]'
+  )).map(brief);
+  const buttons = Array.from(document.querySelectorAll('button, a[role="button"]'))
+    .filter((el) => {
+      const t = (el.textContent || '').trim();
+      return visible(el) && ['确定', '清空', '搜索', '重置'].some((k) => t.includes(k));
+    })
+    .map(brief);
+  return { panels, buttons };
+}
+"""
+
+
+async def _dump_date_panel(page: Any) -> dict[str, Any]:
+    """抓日期选择面板的结构（填完区间后会弹出来，可能挡住「搜索」按钮）。"""
+    try:
+        return await page.evaluate(f"({PANEL_SCRIPT})()")
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+    print(f"[probe] 筛选器整体验收：{result}")
     return result
 
 
