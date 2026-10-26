@@ -1043,3 +1043,125 @@ search_request_dates = {
 > ⚠️ 仍然**先别开自动调度**（现有 3 条妙手配置的 `schedule_enabled` 还是关的）：
 > 筛选器这一环通了，但**完整采集链路**（两次搜索 + 导出 + 落盘 + 状态层水位线推进）
 > 还需要在真实任务里跑一次，确认状态层水位线真的在往前走。
+
+## 8.15 端到端验收：增量采集真跑通了（2026-10-26 13:30）
+
+Walter 人工跑了一次配置 27（custom 2026-10-01 → 2026-10-10），
+任务 644（`3b38c158-4663-4627-a481-ac50b0d24c4a`）**completed**，1 个文件，83 秒。
+本节只记**已核实的事实**。
+
+### 8.15.1 区间真的生效了 —— 决定性证据是「行数变了」
+
+| 文件 | 妙手「更新时间」窗口 | 导出行数 |
+|---|---|---|
+| 3004（10-24 全量） | 2026-09-01 → 2026-09-30 | **1113 行** |
+| 3005（本次增量） | 2026-10-01 → 2026-10-10 | **48 行** |
+
+- 48 行的 `observed_at`（妙手侧更新时间）全部落在 2026-10-01 00:00 ~ **2026-10-10 07:47:03**
+- 同一个接口、同一个页面、同一个导出按钮：上次 1113 行，这次 48 行
+- → 区间若没生效，必然还是 1113 行。**这一条同时验掉了「维度没切」和「区间没落进去」两个坑。**
+
+任务日志留痕：`[step_success] 搜索结果就绪（incremental）`
+任务 `date_range` 里带的是**专用键**：
+`inventory_incremental_range_start = 2026-10-01 00:00:00` / `..._end = 2026-10-10 23:59:59`
+（没动共享区间 `date_range`，所以订单域不受影响）
+
+### 8.15.2 状态层：水位线推进了，闸 2 判定也正确
+
+- `mart.inventory_state`：1230 行，其中 **48 行 `source_file_id = 3005`**
+- `max(row_seen_at)`：2026-10-24 04:39:53 → **2026-10-26 05:32:39+00**（= 13:32:39 本地）
+- `max(stock_added_at)`：仍是 2026-10-14 04:00:13，**没动** —— 这是对的：
+  本次 48 行的 `on_hand_stock` 变化**全是减少或不变，没有一行是增加**
+  → 按「库存有增长才清零计时」的规则，就不该清零
+
+库龄层同步验证了这 48 行的行为：`reset_reason` 全是 `continued`（继续累加），
+没有一个被清成 `stock_increase`。
+
+### 8.15.3 下游全部刷新到新数据
+
+| 目标 | 行数 | 最新时间 |
+|---|---|---|
+| `b_class.fact_miaoshou_inventory_snapshot` | 2387 | max(file_id) = 3005 |
+| `semantic.fact_inventory_snapshot` | 2387 | ingest 05:32:39 |
+| `mart.inventory_state` | 1230 | 48 行来自 3005 |
+| `mart.inventory_age_current` | 494 | updated 05:33:54 |
+| `mart.inventory_age_history` | 2246 | created 05:33:54 |
+| `mart.inventory_snapshot_latest` / `_company_daily` / `_change` / `_history` | 1230 / 2246 / 1230 / 2387 | ingest 05:32:39 |
+| `mart.inventory_backlog_base` | 510 | row_seen_at 05:32:39 |
+| `mart.spu_operating_current` | 283 | — |
+| `api.inventory_age_summary_module` | 494 SKU / 10,797 件 / ¥213,114.31 | — |
+| 云端镜像 `fact_miaoshou_inventory_snapshot` | — | last_ingest 05:32:39, completed |
+
+### 8.15.4 档位与定价：数值一个没动，端到端对得上
+
+`finance.sku_pricing_policies` 4 行，门槛 / 折扣率 / 目标毛利**逐字未动**：
+
+| min_restock_days | tier_label | discount_rate | target_margin_rate |
+|---|---|---|---|
+| 0 | 日常 | 0.10 | 0.25 |
+| 60 | 滞销30天 | 0.15 | 0.22 |
+| 90 | 滞销60天 | 0.20 | 0.18 |
+| 120 | 滞销60天以上 | 0.30 | 0.10 |
+
+实调 `SkuClearanceService`（只读）返回：`days_since_restock = 656` →
+`tier_label = 滞销60天以上` → `current_discount_rate = 0.3` →
+`current_target_margin_rate = 0.1` → `min_selling_price = 90.87`（`cost_floor`）。
+
+### 8.15.5 UI 上那 8 条提示与库存无关
+
+`auto_ingest_20261026051502_92000222`（12:15 与 13:15 各一次，8/8 文件，partial_success）：
+8 条 warning 全是 `blocked_missing_template` / `NO_TEMPLATE`，
+file 2756~2763，文件名都是 `miaoshou_orders_*` / `miaoshou_purchase_*` 的 2025-09-14 旧文件。
+**没有一个是库存文件。**
+
+### 8.15.6 刷新队列那条任务标了 failed —— PostgreSQL 死锁（数据没丢）
+
+`core.refresh_queue_tasks` id=1191（05:32:40 入队，05:33:00 → 05:35:10 跑完）：
+
+```
+refresh pipeline partial_failed:
+  mart.inventory_backlog_base, mart.inventory_snapshot_history, semantic.fact_orders_atomic
+```
+
+`ops.pipeline_run_log` 里的原始报错：
+
+```
+asyncpg.exceptions.DeadlockDetectedError: deadlock detected
+DETAIL: Process 4693 waits for AccessExclusiveLock on relation 1992999;
+        blocked by process 4591.
+        Process 4591 waits for AccessShareLock on relation 1992994;
+```
+
+- relation 1992999 = `mart.inventory_snapshot_history`（**视图**）
+- relation 1992994 = `semantic.fact_inventory_snapshot`（**视图**）
+- 一个进程要 `CREATE OR REPLACE VIEW`（排他锁），另一个在读视图 → 互等 → 死锁检测杀一个
+- **死锁双方抢的都是视图** → 视图本来就自动反映底层数据 → **数据没丢**
+  （这两个视图现在的数据都是新的：ingest 05:32:39）
+- 根因：`refresh_runner` 里的 `_OPS_TABLES_LOCK` 是 **`asyncio.Lock`（进程内）**，
+  跨进程（uvicorn ↔ celery worker）完全无效
+
+### 8.15.7 发现：两套「距上次进货天数」并存，且差了 19~656 天
+
+**两套实现的规则完全相同**（有增长才清零；减少/不变就沿用），**差别只在
+「一个 SKU 第一次出现时从哪天起算」**：
+
+| | A. 库龄层 `mart.inventory_age_current` | B. 状态层 `mart.inventory_state.stock_added_at` |
+|---|---|---|
+| 比数量跟谁比 | 把快照按时间排队**逐帧**比 | 跟状态层里存的上一批数量比 |
+| 有增长 | 清零（`stock_increase`） | 清零（`restocked`） |
+| 减少 / 不变 | 沿用（`continued`） | 沿用（`unchanged`） |
+| **首次出现的起算点** | 它第一次出现的那一帧（`first_positive`） | **妙手「商品创建时间」**（`first_observation`） |
+| 实测同 458 个 SKU | **17 ~ 30 天** | **655 ~ 656 天** |
+
+- 458 行里 **0 行一致**，差值 19~656 天
+- 原因：状态层是 **2026-10-14 才建立的**，09-14 那次真实进货它没看见；
+  等它第一次看到这个 SKU 时已经没有参照，只能拿妙手「商品创建时间」凑数
+  —— 那是**上架时间**，跟进货是两回事
+- 消费方：`api.sku_clearance_ranking_module`（滞销/定价，`MAX(CURRENT_DATE - stock_added_at::date)`）
+  与 `mart.inventory_backlog_base`（积压，同一算法）→ **档位、折扣、最低售价、积压
+  四条链全部读的是 B**
+- 库龄层 A 的 `age_anchor_date` 只有三个取值（2026-09-01 / 09-14 / 10-01），
+  因为它只有这几帧快照可回放；204 行的 `stock_increase` 全部落在 2026-09-14 那一帧
+
+> ⚠️ 这个取舍（以哪套为唯一真相源、要不要改粒度）**属于口径决策，未定**。
+> 在定下来之前，档位/折扣的输出维持现状（B）。
