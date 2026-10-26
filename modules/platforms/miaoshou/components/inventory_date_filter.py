@@ -329,6 +329,53 @@ class MiaoshouInventoryDateFilter(InventoryDimensionMixin):
                 continue
         return False
 
+    async def _date_panel_visible(self, page: Any) -> bool:
+        """日期选择面板（点开区间输入框后弹出）现在开着没有。"""
+        try:
+            locator = page.locator(self.sel.inventory_date_filter_date_panel_selector)
+            if await locator.count() == 0:
+                return False
+            return bool(await locator.first.is_visible())
+        except Exception:
+            return False
+
+    async def _close_date_panel(self, page: Any) -> bool:
+        """把日期选择面板收起来 —— **必须收**，否则它挡着「搜索」按钮。
+
+        实测（2026-10-26）：点开区间输入框会弹出 ``.jx-picker-panel``，
+        面板开着时点「搜索」会一直被
+        ``… .jx-picker-panel__sidebar … intercepts pointer events`` 拦到超时。
+
+        顺序：先试「确定」（有确定按钮说明草稿有效，点它才算提交），
+        确定不可用（``is-disabled``）就按 Escape 收起来 ——
+        **区间到底有没有生效另有判据**（见 spec §8.14）。
+        """
+        if not await self._date_panel_visible(page):
+            return True
+        try:
+            confirm = page.locator(self.sel.inventory_date_filter_confirm_selector)
+            count = await confirm.count()
+        except Exception:
+            count = 0
+        for index in range(min(count, 4)):
+            node = confirm.nth(index)
+            try:
+                if not await node.is_visible():
+                    continue
+                if await node.is_disabled():
+                    continue
+                await node.click(timeout=1500)
+                await self._settle(page)
+                break
+            except Exception:
+                continue
+        try:
+            await page.keyboard.press("Escape")
+        except Exception:
+            pass
+        await self._settle(page)
+        return not await self._date_panel_visible(page)
+
     async def _read_applied_range(self, page: Any) -> str:
         """读筛选器上已应用的区间（老路：``modelvaluegroup`` 属性）。"""
         for selector in self.sel.inventory_date_filter_root_selectors:
@@ -402,6 +449,11 @@ class MiaoshouInventoryDateFilter(InventoryDimensionMixin):
         """
         dimension = await self._switch_to_modified_dimension(page)
         start_value, end_value = await self._fill_range(page, start=start, end=end)
+        # 填完必须把日期面板收起来 —— 它会挡住「搜索」按钮
+        if not await self._close_date_panel(page):
+            raise RuntimeError(
+                "日期选择面板没收起来：它会挡住「搜索」按钮，采集会卡在点搜索上"
+            )
         await self._click_confirm_if_present(page)
 
         applied = await self._read_applied_range(page)

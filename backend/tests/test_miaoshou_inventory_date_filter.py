@@ -50,6 +50,8 @@ class FakeNode:
         value: str = "",
         attrs: Optional[dict] = None,
         requires_open: bool = False,
+        requires_panel: bool = False,
+        disabled: bool = False,
     ) -> None:
         self.page = page
         self.text = text
@@ -57,12 +59,22 @@ class FakeNode:
         self.value = value
         self.attrs = dict(attrs or {})
         self.requires_open = requires_open
+        self.requires_panel = requires_panel
+        self.disabled = disabled
         self.clicks = 0
 
     async def is_visible(self) -> bool:
         if self.requires_open and not self.page.dropdown_open:
             return False
+        if self.requires_panel and not self.page.panel_open:
+            return False
         return self.visible
+
+    async def is_disabled(self) -> bool:
+        return self.disabled
+
+    async def count(self) -> int:
+        return 1
 
     async def wait_for(self, state: str = "visible", timeout: int = 0) -> None:
         if not await self.is_visible():
@@ -138,6 +150,7 @@ class FakeKeyboard:
     async def press(self, key: str) -> None:
         if key == "Escape":
             self.page.dropdown_open = False
+            self.page.panel_open = False
 
 
 class FakePage:
@@ -177,7 +190,9 @@ class FakePage:
         self.dropdown = FakeDropdown(self, self._dropdown_options())
         self.start_input = FakeNode(self)
         self.end_input = FakeNode(self)
-        self.confirm_node = FakeNode(self, visible=confirm_present)
+        self.confirm_node = FakeNode(self, visible=confirm_present, requires_panel=True)
+        # 日期选择面板：点开区间输入框后弹出，会挡住「搜索」按钮
+        self.date_panel = FakeNode(self, requires_panel=True)
         self.root_node = FakeNode(self, attrs={"modelvaluegroup": ""})
         self.sku_node = FakeNode(self, text=sku_total_text)
 
@@ -185,6 +200,7 @@ class FakePage:
         self.confirm_present = confirm_present
         self.dimension_select_present = dimension_select_present
         self.table_header_present = table_header_present
+        self.panel_open = False
 
     # -- 交互副作用 ----------------------------------------------------
     def _dropdown_options(self) -> list[FakeNode]:
@@ -198,6 +214,10 @@ class FakePage:
         if node is self.trigger_node:
             self.dropdown_open = True
             return
+        if node in (self.start_input, self.end_input):
+            # 真实页面：点开区间输入框会弹出日期选择面板
+            self.panel_open = True
+            return
         if node is self.option_modified:
             if self.dimension_takes_effect:
                 self.dimension = DIMENSION_MODIFIED
@@ -209,6 +229,7 @@ class FakePage:
             self.dropdown_open = False
             return
         if node is self.confirm_node:
+            self.panel_open = False
             return
 
     # -- Playwright 表面 ------------------------------------------------
@@ -218,16 +239,21 @@ class FakePage:
             return FakeLocator(self, nodes)
         if "jx-select-dropdown" in selector or "listbox" in selector:
             return FakeLocator(self, [self.dropdown])
+        # ⚠️ 「确定/清空」按钮的选择器里也含 jx-picker-panel → 必须先判它们
+        if "is-plain" in selector:
+            return FakeLocator(
+                self, [self.confirm_node] if self.confirm_present else []
+            )
+        if "is-text" in selector:
+            return FakeLocator(self, [])
+        if selector.strip() == ".jx-picker-panel":
+            return FakeLocator(self, [self.date_panel])
         if "placeholder*='开始时间'" in selector:
             return FakeLocator(self, [self.start_input] if self.range_inputs else [])
         if "placeholder*='结束时间'" in selector:
             return FakeLocator(self, [self.end_input] if self.range_inputs else [])
         if "jx-range-input" in selector:
             return FakeLocator(self, list(self.range_inputs))
-        if "is-plain" in selector:
-            return FakeLocator(
-                self, [self.confirm_node] if self.confirm_present else []
-            )
         if selector.startswith("[data-field="):
             return FakeLocator(self, [self.root_node])
         return FakeLocator(self, [])
@@ -394,6 +420,31 @@ async def test_reads_sku_total_picks_number_right_after_label():
     page = FakePage(sku_total_text="仓库清单 0 条记录 SKU总数：1112 库存总数：10971")
 
     assert await _component().read_sku_total(page) == 1112
+
+
+@pytest.mark.asyncio
+async def test_closes_date_panel_after_filling_range():
+    """日期面板开着会挡住「搜索」按钮 → 填完必须把它收起来。"""
+    page = FakePage()
+
+    await _component().apply_incremental_range(page, start=START, end=END)
+
+    assert page.panel_open is False, "填完区间后日期面板必须已收起"
+
+
+@pytest.mark.asyncio
+async def test_fails_when_date_panel_cannot_be_closed():
+    """面板收不起来 → 必须明确失败（否则采集会卡在点搜索上）。"""
+    page = FakePage()
+
+    async def _never_close(page: Any) -> bool:
+        return False
+
+    component = _component()
+    component._close_date_panel = _never_close  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="日期选择面板"):
+        await component.apply_incremental_range(page, start=START, end=END)
 
 
 def test_assert_search_results_refreshed_rejects_growth():

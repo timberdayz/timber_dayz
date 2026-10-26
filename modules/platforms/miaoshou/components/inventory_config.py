@@ -279,6 +279,9 @@ INVENTORY_DATE_FILTER_DIMENSION_OPTION_SELECTORS: Final[Tuple[str, ...]] = (
 )
 # 结果计数的数字紧跟在「SKU总数」后面（不是容器里的任意一个数字）
 INVENTORY_DATE_FILTER_SKU_TOTAL_PATTERN: Final[str] = r"SKU总数[:：]?\s*([\d,]+)"
+# 日期选择面板：点开区间输入框后弹出，**挡在「搜索」按钮前面**
+# （实测 2026-10-26：面板开着时点搜索一直报 intercepts pointer events 到超时）
+INVENTORY_DATE_FILTER_DATE_PANEL_SELECTOR: Final[str] = ".jx-picker-panel"
 
 
 @dataclass(frozen=True)
@@ -363,4 +366,7 @@ class InventorySelectors:
     )
     inventory_date_filter_sku_total_pattern: str = (
         INVENTORY_DATE_FILTER_SKU_TOTAL_PATTERN
+    )
+    inventory_date_filter_date_panel_selector: str = (
+        INVENTORY_DATE_FILTER_DATE_PANEL_SELECTOR
     )

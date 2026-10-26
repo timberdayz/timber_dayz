@@ -604,8 +604,6 @@ async def _dump_date_panel(page: Any) -> dict[str, Any]:
         return await page.evaluate(f"({PANEL_SCRIPT})()")
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
-    print(f"[probe] 筛选器整体验收：{result}")
-    return result
 
 
 def _load_storage_state(session_dir: Path) -> Optional[dict[str, Any]]:
