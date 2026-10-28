@@ -48,6 +48,153 @@ ORDER_OPTIONAL_FIELDS = {
 }
 
 
+# ==================== 模板匹配条件构造 (SSOT) ====================
+#
+# 匹配规则被两处复用:
+#   1. ``TemplateMatcher.find_best_template()`` —— 异步会话(同步/入库链路)
+#   2. ``find_best_template_sync()``             —— 同步会话(采集落库登记)
+#
+# 两边必须用**同一套**条件, 否则会出现「采集时登记的模板」与
+# 「入库时实际使用的模板」不一致 —— 那正是模板契约要消灭的问题。
+# 因此条件构造集中在这里, 调用方只负责执行查询。
+
+# 匹配层级名称 -> 命中后的日志说明
+MATCH_LEVEL_ACCOUNT_SCOPED = "account_scoped"
+MATCH_LEVEL_EXACT = "exact"
+MATCH_LEVEL_RELAXED_SUB_DOMAIN = "relaxed_sub_domain"
+
+
+def normalize_dimension_value(value: Optional[str]) -> Optional[str]:
+    """维度归一化: 空字符串与 None 等价。"""
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value or None
+
+
+def match_dimension_condition(column, value: Optional[str]):
+    """构造维度匹配条件。
+
+    Treat empty string as None so that 用户保存的空值和实际None一致.
+    """
+    if value is None:
+        return or_(column.is_(None), column == "")
+    return column == value
+
+
+def build_template_match_levels(
+    platform: str,
+    data_domain: str,
+    granularity: Optional[str] = None,
+    sub_domain: Optional[str] = None,
+    account: Optional[str] = None,
+) -> List[tuple]:
+    """按优先级构造模板匹配条件组。
+
+    返回 ``[(level_name, conditions), ...]``, 调用方按顺序逐级执行,
+    命中即返回。
+
+    * ``account_scoped``   账号/地区专属模板
+    * ``exact``            精确匹配(platform + data_domain [+ sub_domain] + granularity)
+    * ``relaxed_sub_domain``忽略 sub_domain(向后兼容; services 域不允许降级)
+    """
+    norm_granularity = normalize_dimension_value(granularity)
+    norm_sub_domain = normalize_dimension_value(sub_domain)
+    norm_account = normalize_dimension_value(account)
+    normalized_domain = str(data_domain or "").lower()
+
+    levels: List[tuple] = []
+
+    # Level 0: 账号/地区专属模板
+    if norm_account is not None:
+        level0_conditions = [
+            FieldMappingTemplate.platform == platform,
+            FieldMappingTemplate.data_domain == data_domain,
+            match_dimension_condition(FieldMappingTemplate.granularity, norm_granularity),
+            match_dimension_condition(FieldMappingTemplate.account, norm_account),
+            FieldMappingTemplate.status == "published",
+        ]
+        if norm_sub_domain is not None:
+            level0_conditions.append(
+                match_dimension_condition(FieldMappingTemplate.sub_domain, norm_sub_domain)
+            )
+        levels.append((MATCH_LEVEL_ACCOUNT_SCOPED, level0_conditions))
+
+    # Level 1: 精确匹配
+    level1_conditions = [
+        FieldMappingTemplate.platform == platform,
+        FieldMappingTemplate.data_domain == data_domain,
+        match_dimension_condition(FieldMappingTemplate.granularity, norm_granularity),
+        FieldMappingTemplate.status == "published",
+    ]
+    # [*] v4.16.0修复:只有当调用方提供了sub_domain时,才要求模板的sub_domain与之匹配
+    # 当文件没有sub_domain时,不添加sub_domain条件,允许匹配任何sub_domain的模板
+    if norm_sub_domain is not None:
+        level1_conditions.append(
+            match_dimension_condition(FieldMappingTemplate.sub_domain, norm_sub_domain)
+        )
+    levels.append((MATCH_LEVEL_EXACT, level1_conditions))
+
+    # Level 2: 忽略sub_domain(向后兼容)
+    # [*] v4.16.0修复:services域不允许忽略sub_domain(ai_assistant和agent表头完全不同)
+    level2_allowed = (
+        norm_granularity is not None
+        or (sub_domain is not None and normalized_domain != "services")
+    )
+    services_blocked = normalized_domain == "services" and norm_sub_domain is not None
+    if level2_allowed and not services_blocked:
+        levels.append(
+            (
+                MATCH_LEVEL_RELAXED_SUB_DOMAIN,
+                [
+                    FieldMappingTemplate.platform == platform,
+                    FieldMappingTemplate.data_domain == data_domain,
+                    match_dimension_condition(
+                        FieldMappingTemplate.granularity, norm_granularity
+                    ),
+                    FieldMappingTemplate.status == "published",
+                ],
+            )
+        )
+
+    return levels
+
+
+def find_best_template_sync(
+    session,
+    platform: str,
+    data_domain: str,
+    granularity: Optional[str] = None,
+    sub_domain: Optional[str] = None,
+    account: Optional[str] = None,
+):
+    """同步会话版本的模板查找(采集落库登记用)。
+
+    与 :meth:`TemplateMatcher.find_best_template` 使用同一套匹配条件,
+    保证「登记时记录的模板契约」与「入库时实际使用的模板」一致。
+    """
+    try:
+        for _level, conditions in build_template_match_levels(
+            platform=platform,
+            data_domain=data_domain,
+            granularity=granularity,
+            sub_domain=sub_domain,
+            account=account,
+        ):
+            stmt = (
+                select(FieldMappingTemplate)
+                .where(*conditions)
+                .order_by(desc(FieldMappingTemplate.version))
+            )
+            template = session.execute(stmt).scalars().first()
+            if template:
+                return template
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"[TemplateMatcher] 同步查找模板失败: {e}", exc_info=True)
+        return None
+
+
 class TemplateMatcher:
     """
     统一模板匹配服务
@@ -80,15 +227,10 @@ class TemplateMatcher:
 
         Treat empty string as None so that 用户保存的空值和实际None一致.
         """
-        if value is None:
-            return or_(column.is_(None), column == "")
-        return column == value
+        return match_dimension_condition(column, value)
 
     def _normalize_dimension(self, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        value = str(value).strip()
-        return value or None
+        return normalize_dimension_value(value)
 
     def _normalize_headers_for_compare(
         self,
@@ -112,8 +254,11 @@ class TemplateMatcher:
         data_domain: str,
         granularity: str,
         columns: List[str],
+        account: Optional[str] = None,
     ) -> List[str]:
-        alias_mapping = get_header_alias_mapping(platform, data_domain, granularity)
+        alias_mapping = get_header_alias_mapping(
+            platform, data_domain, granularity, account=account
+        )
         if not alias_mapping:
             return list(columns)
         return [alias_mapping.get(column, column) for column in columns]
@@ -160,97 +305,82 @@ class TemplateMatcher:
 
     async def find_best_template(
         self, 
-        platform: str, 
-        data_domain: str, 
+        platform: str,
+        data_domain: str,
         granularity: str = None,
-        sub_domain: str = None  # v4.5.1启用:支持子数据类型识别
+        sub_domain: str = None,  # v4.5.1启用:支持子数据类型识别
+        account: str = None,
     ) -> Optional[FieldMappingTemplate]:
         """
         查找最佳模板(v4.5.1增强版,v4.18.2异步支持)
         
         匹配策略(三级智能降级):
+        Level 0: 账号/地区专属模板(platform + data_domain + granularity + account)
         Level 1: 精确匹配(platform + data_domain + sub_domain + granularity)
         Level 2: 忽略sub_domain(向后兼容)
         Level 3: 忽略granularity(最宽松)
-        
+
         状态筛选:status = 'published'(只用已发布模板)
         版本选择:MAX(version)(最新版本)
-        
+
         Args:
             platform: 平台代码(必填)
             data_domain: 数据域(必填)
             granularity: 粒度(可选)
             sub_domain: 子域(可选,如ai_assistant/agent)
-        
+            account: 账号/地区(可选)。给出时优先匹配该账号的专属模板,
+                找不到再回落到通用模板 —— 这是「同一平台不同地区表头不一致」
+                各自使用一套模板的前提。
+
         Returns:
             FieldMappingTemplate对象 或 None
         """
         try:
             norm_granularity = self._normalize_dimension(granularity)
             norm_sub_domain = self._normalize_dimension(sub_domain)
+            norm_account = self._normalize_dimension(account)
 
-            # Level 1: 精确匹配(最优)
-            level1_conditions = [
-                FieldMappingTemplate.platform == platform,
-                FieldMappingTemplate.data_domain == data_domain,
-                self._match_dimension(FieldMappingTemplate.granularity, norm_granularity),
-                FieldMappingTemplate.status == 'published',
-            ]
+            # [*] 匹配条件集中在 build_template_match_levels, 与同步登记链路共用同一套规则
+            levels = build_template_match_levels(
+                platform=platform,
+                data_domain=data_domain,
+                granularity=granularity,
+                sub_domain=sub_domain,
+                account=account,
+            )
 
-            # [*] v4.16.0修复:只有当调用方提供了sub_domain时,才要求模板的sub_domain与之匹配
-            # 当文件没有sub_domain时,不添加sub_domain条件,允许匹配任何sub_domain的模板
-            if norm_sub_domain is not None:
-                level1_conditions.append(
-                    self._match_dimension(FieldMappingTemplate.sub_domain, norm_sub_domain)
+            for level_name, conditions in levels:
+                stmt = (
+                    select(FieldMappingTemplate)
+                    .where(*conditions)
+                    .order_by(desc(FieldMappingTemplate.version))
                 )
-            # else分支:不添加sub_domain条件,允许匹配任何sub_domain的模板(包括None)
 
-            stmt = select(FieldMappingTemplate).where(
-                *level1_conditions
-            ).order_by(desc(FieldMappingTemplate.version))
+                # [*] v4.18.2:支持异步会话
+                result = await self.db.execute(stmt)
+                template = result.scalars().first()
 
-            # [*] v4.18.2:支持异步会话
-            result = await self.db.execute(stmt)
-            template = result.scalars().first()
-            
-            if template:
+                if not template:
+                    continue
+
                 # [*] v4.19.5 优化:降低日志级别(INFO -> DEBUG),减少日志噪音
-                logger.debug(
-                    f"[Level 1] 精确匹配: {template.template_name} "
-                    f"(v{template.version}, {platform}/{data_domain}/{norm_sub_domain or 'None'}/{norm_granularity or 'None'})"
-                )
-                return template
-            
-            # Level 2: 忽略sub_domain(向后兼容)
-            # [*] v4.16.0修复:services域不允许忽略sub_domain(ai_assistant和agent表头完全不同)
-            # 对于services域,如果提供了sub_domain但没有匹配到模板,不应该降级匹配其他sub_domain的模板
-            if norm_granularity is not None or (sub_domain is not None and data_domain.lower() != 'services'):
-                # 对于services域,如果提供了sub_domain,不允许降级匹配
-                if data_domain.lower() == 'services' and norm_sub_domain is not None:
-                    # [*] v4.19.5 优化:降低日志级别
+                if level_name == MATCH_LEVEL_ACCOUNT_SCOPED:
                     logger.debug(
-                        f"[Level 2] services域已提供sub_domain={norm_sub_domain},不允许降级匹配其他sub_domain的模板"
+                        f"[Level 0] 账号专属模板: {template.template_name} "
+                        f"(v{template.version}, account={norm_account})"
+                    )
+                elif level_name == MATCH_LEVEL_EXACT:
+                    logger.debug(
+                        f"[Level 1] 精确匹配: {template.template_name} "
+                        f"(v{template.version}, {platform}/{data_domain}/{norm_sub_domain or 'None'}/{norm_granularity or 'None'})"
                     )
                 else:
-                    stmt = select(FieldMappingTemplate).where(
-                        FieldMappingTemplate.platform == platform,
-                        FieldMappingTemplate.data_domain == data_domain,
-                        self._match_dimension(FieldMappingTemplate.granularity, norm_granularity),
-                        FieldMappingTemplate.status == 'published'
-                    ).order_by(desc(FieldMappingTemplate.version))
-                    
-                    # [*] v4.18.2:支持异步会话
-                    result = await self.db.execute(stmt)
-                    template = result.scalars().first()
-                    
-                    if template:
-                        # [*] v4.19.5 优化:降低日志级别
-                        logger.debug(
-                            f"[Level 2] 模糊匹配(忽略sub_domain): {template.template_name} "
-                            f"(v{template.version}, {platform}/{data_domain}/{norm_granularity or 'None'})"
-                        )
-                        return template
-            
+                    logger.debug(
+                        f"[Level 2] 模糊匹配(忽略sub_domain): {template.template_name} "
+                        f"(v{template.version}, {platform}/{data_domain}/{norm_granularity or 'None'})"
+                    )
+                return template
+
             # Level 3(已禁用):忽略granularity的宽松匹配会导致错误模板,直接返回None
             logger.info(
                 f"[TemplateMatcher] 未找到严格匹配模板(platform={platform}, domain={data_domain}, "
@@ -260,7 +390,7 @@ class TemplateMatcher:
                 f"[TemplateMatcher] 未找到模板: {platform}/{data_domain}/{norm_sub_domain or 'ANY'}/{norm_granularity or 'ANY'}"
             )
             return None
-            
+
         except Exception as e:
             logger.error(f"[TemplateMatcher] 查找模板失败: {e}", exc_info=True)
             return None
@@ -495,7 +625,8 @@ class TemplateMatcher:
     async def detect_header_changes(
         self,
         template_id: int,
-        current_columns: List[str]
+        current_columns: List[str],
+        account: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         检测表头变化(v4.14.0安全版本,v4.18.2异步支持)
@@ -561,12 +692,14 @@ class TemplateMatcher:
                 template.data_domain,
                 template.granularity or "",
                 normalized_current,
+                account=account,
             )
             semantic_template = self._apply_header_aliases(
                 template.platform,
                 template.data_domain,
                 template.granularity or "",
                 normalized_template,
+                account=account,
             )
 
             # 使用归一化后的字段名进行比较
@@ -599,22 +732,59 @@ class TemplateMatcher:
                 current_columns=current_columns,
                 template_columns=template_columns,
             )
+            semantic_summary = semantic_contract.to_dict()
             if semantic_contract.has_contract:
-                semantic_summary = semantic_contract.to_dict()
-                if semantic_contract.should_block:
-                    change_classification = {
-                        "blocking_changes": semantic_contract.missing_required_keys,
-                        "non_blocking_changes": semantic_contract.missing_optional_keys
-                        + semantic_contract.extra_raw_fields,
-                    }
-                else:
-                    change_classification = {
-                        "blocking_changes": [],
-                        "non_blocking_changes": semantic_contract.missing_optional_keys
-                        + semantic_contract.extra_raw_fields,
-                    }
-            else:
-                semantic_summary = semantic_contract.to_dict()
+                # [*] 语义契约只做「补充」, 不再整体覆写 blocking/non_blocking 分类。
+                #
+                # 覆写会造成两个严重后果:
+                #   1) 真实的新增/删除字段被降级成非阻断 -> 「源文件新增了一列」这种
+                #      最典型的模板漂移永远不会再提示需要更新模板;
+                #   2) 当契约解析不出 required 语义键时(missing_required 恒非空),
+                #      blocking 里塞的是与本次漂移无关的假缺失, 判定结果与真实漂移脱钩
+                #      —— 实测 TikTok 月度流量: 100% 精确匹配仍报「缺 shop_id/visitor_count/page_views」。
+                base_blocking = list(change_classification.get("blocking_changes") or [])
+                base_non_blocking = list(
+                    change_classification.get("non_blocking_changes") or []
+                )
+                # [*] 模板里绑定了 optional 语义键、但文件没有的列, 缺失不阻断入库
+                # (例如「预估回款金额」), 降级为非阻断漂移。
+                optional_removed = {
+                    item
+                    for item in (semantic_contract.optional_removed_raw_fields or [])
+                    if item in removed_fields
+                }
+                if optional_removed:
+                    base_blocking = [
+                        item for item in base_blocking if item not in optional_removed
+                    ]
+                    base_non_blocking = [
+                        *base_non_blocking,
+                        *[
+                            item
+                            for item in removed_fields
+                            if item in optional_removed
+                        ],
+                    ]
+                contract_blocking = list(semantic_contract.missing_required_keys or [])
+                contract_non_blocking = [
+                    *(semantic_contract.missing_optional_keys or []),
+                    *(semantic_contract.extra_raw_fields or []),
+                ]
+                blocking_changes = list(
+                    dict.fromkeys([*base_blocking, *contract_blocking])
+                )
+                blocking_set = set(blocking_changes)
+                non_blocking_changes = [
+                    item
+                    for item in dict.fromkeys(
+                        [*base_non_blocking, *contract_non_blocking]
+                    )
+                    if item not in blocking_set
+                ]
+                change_classification = {
+                    "blocking_changes": blocking_changes,
+                    "non_blocking_changes": non_blocking_changes,
+                }
             
             # [*] v4.14.0安全版本:移除相似度匹配逻辑
             # 任何字段名变化都需要用户手动确认

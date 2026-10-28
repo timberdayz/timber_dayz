@@ -19,6 +19,20 @@ sys.path.insert(0, str(root_dir))
 from backend.celery_app import celery_app
 from backend.models.database import SessionLocal, reset_async_engine_pool_for_new_loop
 from modules.core.db import CatalogFile
+from backend.services.data_sync_status_semantics import (
+    GOVERNANCE_STATUS_MISSING_FAMILY,
+    GOVERNANCE_STATUS_MISSING_VARIANT,
+    TEMPLATE_STATUS_MISSING,
+    TEMPLATE_STATUS_MISSING_VARIANT,
+    is_breaking_drift,
+)
+from backend.services.data_sync_file_state_service import (
+    FILE_STATE_BLOCKED_MISSING_TEMPLATE,
+    FILE_STATE_BLOCKED_MISSING_VARIANT,
+    FILE_STATE_BLOCKED_SEMANTIC_CONTRACT,
+    FILE_STATE_BLOCKED_TEMPLATE_UPDATE,
+    resolve_file_disposition,
+)
 from sqlalchemy import select, text
 import logging
 
@@ -43,15 +57,34 @@ AUTO_INGEST_WATCHDOG_INTERVAL_MINUTES = max(
 AUTO_INGEST_TEMPLATE_RECHECK_MAX_FILES = max(
     1, int(os.getenv("AUTO_INGEST_TEMPLATE_RECHECK_MAX_FILES", "20"))
 )
+# [*] 重检扫描窗口倍数: 队列按「最近一次重检时间」轮转,
+# 扫描窗口必须大于单次处理上限, 否则永久阻塞的文件会一直占满前面的名额,
+# 把后面的文件饿死(实测: 27 个待更新文件里, analytics 的 2 个排在第 24/27 位, 永远不被重检)。
+AUTO_INGEST_TEMPLATE_RECHECK_SCAN_FACTOR = max(
+    1, int(os.getenv("AUTO_INGEST_TEMPLATE_RECHECK_SCAN_FACTOR", "5"))
+)
+# [*] 连续重检仍阻塞多少轮后, 降级为「需要人工处理模板」
+AUTO_INGEST_TEMPLATE_RECHECK_MAX_ROUNDS = max(
+    1, int(os.getenv("AUTO_INGEST_TEMPLATE_RECHECK_MAX_ROUNDS", "3"))
+)
 AUTO_INGEST_LOCK_KEY = int(os.getenv("AUTO_INGEST_LOCK_KEY", "928451203"))
 AUTO_INGEST_WATCHDOG_LOCK_KEY = int(os.getenv("AUTO_INGEST_WATCHDOG_LOCK_KEY", "928451204"))
 AUTO_INGEST_SOURCE = "scheduled_tasks.auto_ingest_pending_files"
+
+# [*] 文件状态 -> 自动入库任务的 blocked_* 标记
+_FILE_STATE_TO_BLOCKED_STATUS = {
+    FILE_STATE_BLOCKED_MISSING_VARIANT: "blocked_missing_variant",
+    FILE_STATE_BLOCKED_MISSING_TEMPLATE: "blocked_missing_template",
+    FILE_STATE_BLOCKED_SEMANTIC_CONTRACT: "blocked_semantic_contract",
+    FILE_STATE_BLOCKED_TEMPLATE_UPDATE: "blocked_template_update",
+}
 
 
 def _mark_file_template_update_required(
     file_record: CatalogFile,
     *,
     message: str | None,
+    status_info: dict | None = None,
 ) -> None:
     meta = dict(file_record.file_metadata or {})
     auto_meta = dict(meta.get("auto_ingest") or {})
@@ -62,6 +95,26 @@ def _mark_file_template_update_required(
     file_record.file_metadata = meta
     file_record.status = "template_update_required"
     file_record.error_message = message or "template update required before ingest"
+
+    # [*] 漂移快照: 记录「判定发生时」的模板版本与表头差异。
+    # 模板更新之后, 治理面板仍能回答「这个组合因为哪一列变化而过不了校验」。
+    if status_info:
+        try:
+            from backend.services.data_sync_template_drift_service import (
+                DataSyncTemplateDriftService,
+            )
+
+            DataSyncTemplateDriftService.persist_snapshot(
+                file_record,
+                status_info,
+                message=message,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[AutoIngest] persist template drift snapshot failed for %s: %s",
+                getattr(file_record, "file_name", None),
+                exc,
+            )
 
 
 def _int_env(name: str, default: int, *, minimum: int = 1) -> int:
@@ -325,12 +378,16 @@ def _recover_template_update_required_files(
     limit: int = AUTO_INGEST_TEMPLATE_RECHECK_MAX_FILES,
 ) -> Dict[str, int]:
     try:
+        # [*] 扫描窗口大于单次处理上限: 队列按「最近一次重检时间」轮转,
+        # 若只取最老的 N 个, 永久阻塞的文件会一直霸占名额, 把后面的文件饿死。
+        max_files = max(1, int(limit))
+        scan_limit = max_files * AUTO_INGEST_TEMPLATE_RECHECK_SCAN_FACTOR
         blocked_files = (
             db.execute(
                 select(CatalogFile)
                 .where(CatalogFile.status == "template_update_required")
                 .order_by(CatalogFile.first_seen_at.asc())
-                .limit(max(1, int(limit)))
+                .limit(scan_limit)
             )
             .scalars()
             .all()
@@ -341,6 +398,23 @@ def _recover_template_update_required_files(
 
     if not blocked_files:
         return {"checked": 0, "recovered": 0, "still_blocked": 0}
+
+    # [*] 轮转排序: 从未重检过的排最前, 其次按「最近一次重检时间」从早到晚。
+    # 这样每轮都会轮到不同的文件, 不会再出现「前面的僵尸把后面的饿死」。
+    def _recheck_sort_key(record):
+        metadata = getattr(record, "file_metadata", None) or {}
+        auto_meta = metadata.get("auto_ingest") if isinstance(metadata, dict) else None
+        auto_meta = auto_meta if isinstance(auto_meta, dict) else {}
+        last_rechecked = _parse_auto_ingest_timestamp(auto_meta.get("last_rechecked_at"))
+        epoch = datetime.min.replace(tzinfo=timezone.utc)
+        first_seen = getattr(record, "first_seen_at", None)
+        return (
+            last_rechecked or epoch,
+            first_seen if first_seen is not None else epoch,
+            getattr(record, "id", 0) or 0,
+        )
+
+    blocked_files = sorted(blocked_files, key=_recheck_sort_key)[:max_files]
 
     async def _load_readiness(file_ids: List[int]) -> Dict[int, Dict[str, Any]]:
         from backend.models.database import AsyncSessionLocal
@@ -394,6 +468,21 @@ def _recover_template_update_required_files(
             auto_meta["current_task_id"] = None
             auto_meta["last_template_status"] = readiness.get("template_status")
             auto_meta["last_governance_status"] = readiness.get("governance_status")
+            # [*] 漂移已解决: 快照移入历史, 不再占用当前漂移位。
+            # 历史文件可能本来就没有快照(快照功能上线前被标记的),
+            # 这时也要把「本次重检确认已放行」的信息留痕, 便于追溯。
+            previous_snapshot = meta.pop("template_drift", None)
+            resolved_snapshot = previous_snapshot or {
+                "detected_at": now.isoformat(),
+                "template_status": readiness.get("template_status"),
+                "governance_status": readiness.get("governance_status"),
+                "reason": "模板已更新，重检确认可正常入库",
+                "source_file_id": getattr(file_record, "id", None),
+                "source_file_name": getattr(file_record, "file_name", None),
+            }
+            auto_meta["last_resolved_drift"] = resolved_snapshot
+            auto_meta.pop("blocked_rounds", None)
+            auto_meta.pop("needs_manual_template_update", None)
             meta["auto_ingest"] = auto_meta
             file_record.file_metadata = meta
             file_record.status = "pending"
@@ -412,8 +501,37 @@ def _recover_template_update_required_files(
             auto_meta["current_task_id"] = None
             auto_meta["last_template_status"] = readiness.get("template_status")
             auto_meta["last_governance_status"] = readiness.get("governance_status")
+            # [*] 连续重检仍阻塞 -> 降级为「需要人工处理模板」, 避免永久静默占用队列
+            blocked_rounds = int(auto_meta.get("blocked_rounds") or 0) + 1
+            auto_meta["blocked_rounds"] = blocked_rounds
+            if blocked_rounds >= AUTO_INGEST_TEMPLATE_RECHECK_MAX_ROUNDS:
+                auto_meta["needs_manual_template_update"] = True
+                auto_meta["last_status"] = "needs_manual_template_update"
+                logger.warning(
+                    "[AutoIngest] 文件连续%d轮重检仍被模板阻塞, 降级为需人工处理模板: %s (%s)",
+                    blocked_rounds,
+                    getattr(file_record, "file_name", None),
+                    reason,
+                )
             meta["auto_ingest"] = auto_meta
             file_record.file_metadata = meta
+            # [*] 回填/刷新漂移快照: 让治理面板能展示「漂移发生时」的模板版本与表头差异
+            try:
+                from backend.services.data_sync_template_drift_service import (
+                    DataSyncTemplateDriftService,
+                )
+
+                DataSyncTemplateDriftService.persist_snapshot(
+                    file_record,
+                    readiness,
+                    message=str(reason),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "[AutoIngest] persist drift snapshot skipped for %s: %s",
+                    getattr(file_record, "file_name", None),
+                    exc,
+                )
             still_blocked += 1
 
     if recovered or still_blocked:
@@ -551,24 +669,23 @@ def _is_auto_ingest_blocked_status(status: str) -> bool:
 
 
 def _blocked_auto_ingest_status_for_readiness(readiness: Dict[str, Any]) -> str:
-    template_status = str(readiness.get("template_status") or "").strip()
-    governance_status = str(readiness.get("governance_status") or "").strip()
-    semantic_contract_status = str(
-        readiness.get("semantic_contract_status") or ""
-    ).strip()
-    if template_status == "missing_variant" or governance_status == "missing_variant":
-        return "blocked_missing_variant"
-    if (
-        template_status in {"missing", "missing_family"}
-        or governance_status == "missing_family"
-    ):
-        return "blocked_missing_template"
-    if (
-        semantic_contract_status == "breaking_drift"
-        or governance_status == "breaking_drift"
-    ):
-        return "blocked_semantic_contract"
-    return "blocked_template_update"
+    """自动入库的阻塞归类。
+
+    [*] 归类规则来自 :mod:`backend.services.data_sync_file_state_service`
+    (单一状态模型), 这里只做「状态 -> 任务明细里的 blocked_* 标记」的名字映射。
+    """
+    disposition = resolve_file_disposition(
+        template_status=readiness.get("template_status"),
+        governance_status=readiness.get("governance_status"),
+        semantic_contract_status=readiness.get("semantic_contract_status"),
+        should_auto_sync=readiness.get("should_auto_sync"),
+        template_update_required=bool(readiness.get("template_update_required")),
+        template_baseline=readiness.get("template_baseline"),
+        takeover=readiness.get("takeover"),
+    )
+    return _FILE_STATE_TO_BLOCKED_STATUS.get(
+        disposition["file_state"], "blocked_template_update"
+    )
 
 
 def _auto_ingest_result_message(item: Dict[str, Any]) -> str:
@@ -1281,6 +1398,7 @@ def auto_ingest_pending_files(max_files: int | None = None):
                                         _mark_file_template_update_required(
                                             file_record,
                                             message=update_message,
+                                            status_info=readiness,
                                         )
                                         await async_commit()
                                 return {

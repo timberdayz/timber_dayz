@@ -66,6 +66,9 @@ class FieldMappingTemplateService:
                     f"deduplication_fields必须是列表, 当前值: {deduplication_fields}"
                 )
 
+            # [*] 同维度可能存在多个 published 模板(历史脏数据)。
+            # 用 scalar_one_or_none() 会在这种数据上直接抛 MultipleResultsFound,
+            # 导致「保存模板」接口整体 500; 这里改成全量取出并全部归档。
             existing_result = await self.db.execute(
                 select(FieldMappingTemplate).where(
                     and_(
@@ -78,15 +81,18 @@ class FieldMappingTemplateService:
                     )
                 )
             )
-            existing = existing_result.scalar_one_or_none()
+            existing_templates = list(existing_result.scalars().all())
 
             archived_template_id = None
-            if existing:
-                new_version = existing.version + 1
-                existing.status = "archived"
-                existing.updated_at = datetime.now(timezone.utc)
-                self.db.add(existing)
-                archived_template_id = existing.id
+            if existing_templates:
+                new_version = max(
+                    (item.version or 0) for item in existing_templates
+                ) + 1
+                for existing in existing_templates:
+                    existing.status = "archived"
+                    existing.updated_at = datetime.now(timezone.utc)
+                    self.db.add(existing)
+                archived_template_id = existing_templates[0].id
             else:
                 new_version = 1
 

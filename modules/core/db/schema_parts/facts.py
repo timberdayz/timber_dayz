@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -17,6 +18,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
+
+from modules.core.catalog_status import CATALOG_FILE_STATUSES
 
 from .base import Base
 
@@ -328,7 +331,7 @@ class CatalogFile(Base):
 
     file_metadata = Column(JSON, nullable=True)
 
-    status = Column(String(64), nullable=False, default="pending")  # pending/validated/ingested/quarantined/failed/template_update_required
+    status = Column(String(64), nullable=False, default="pending")  # pending/processing/validated/ingested/partial_success/quarantined/failed/needs_shop/source_missing/template_update_required
     error_message = Column(Text, nullable=True)
 
     first_seen_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -344,5 +347,12 @@ class CatalogFile(Base):
         Index("ix_catalog_sub_domain", "sub_domain"),  # 子域查询
         Index("ix_catalog_storage_layer", "storage_layer"),  # 分层查询
         Index("ix_catalog_quality_score", "quality_score"),  # 质量筛选
+        # [*] status 取值约束: 合法状态集合由 modules.core.catalog_status 统一维护
+        CheckConstraint(
+            "status IN ({})".format(
+                ", ".join("'{}'".format(status) for status in CATALOG_FILE_STATUSES)
+            ),
+            name="ck_catalog_files_status",
+        ),
         UniqueConstraint("file_hash", name="uq_catalog_files_hash"),
     )

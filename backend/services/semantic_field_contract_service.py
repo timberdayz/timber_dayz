@@ -7,6 +7,12 @@ from sqlalchemy import select, or_
 from sqlalchemy.exc import SQLAlchemyError
 
 from modules.core.db import SemanticFieldContract
+from backend.services.data_sync_status_semantics import (
+    SEMANTIC_CONTRACT_STATUS_BREAKING_DRIFT,
+    SEMANTIC_CONTRACT_STATUS_NON_BREAKING_DRIFT,
+    SEMANTIC_CONTRACT_STATUS_NOT_CONFIGURED,
+    SEMANTIC_CONTRACT_STATUS_READY,
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +34,9 @@ class SemanticContractResult:
     extra_raw_fields: list[str] = field(default_factory=list)
     impact_descriptions: list[str] = field(default_factory=list)
     has_contract: bool = False
+    # [*] 模板里绑定了 optional 语义键、但当前文件没有的原始列名。
+    # 这类列的缺失不影响现有入库(例如「预估回款金额」), 属于非阻断漂移。
+    optional_removed_raw_fields: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +48,7 @@ class SemanticContractResult:
             "extra_raw_fields": self.extra_raw_fields,
             "impact_descriptions": self.impact_descriptions,
             "has_semantic_contract": self.has_contract,
+            "optional_removed_raw_fields": self.optional_removed_raw_fields,
         }
 
 
@@ -56,7 +66,10 @@ DEFAULT_CONTRACTS: dict[str, tuple[SemanticContractDefinition, ...]] = {
     ),
     "analytics": (
         SemanticContractDefinition("metric_date", "required", impact_description="业务概览流量无法按日期归集"),
-        SemanticContractDefinition("shop_id", "required", impact_description="业务概览无法按店铺归属流量"),
+        # [*] shop_id 降级为 optional: TikTok 流量导出格式里**没有店铺列**,
+        # 店铺归属来自 catalog_files.shop_id(文件元数据), 而不是表头。
+        # 之前把 shop_id 列为 required, 导致 analytics 契约永远 breaking_drift。
+        SemanticContractDefinition("shop_id", "optional", impact_description="业务概览无法按店铺归属流量"),
         SemanticContractDefinition("visitor_count", "required", impact_description="业务概览UV无法计算"),
         SemanticContractDefinition("page_views", "required", impact_description="业务概览PV无法计算"),
         SemanticContractDefinition("conversion_rate", "optional"),
@@ -92,6 +105,30 @@ ORDER_SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+# [*] analytics(流量)域的中文表头别名。
+# 用途: 让语义契约能从**平台原始表头**推断出语义键, 而不是只依赖模板里
+# 人工填写的 header_bindings。
+# 背景: 已发布模板里 header_bindings 的 semantic_key 覆盖率极低
+# (tiktok/analytics 71 个绑定只有 12 个有 semantic_key), 导致 required 语义键
+# 根本解析不出来 -> 契约状态恒为 breaking_drift(哪怕文件与模板 100% 一致)。
+ANALYTICS_SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "metric_date": ("日期", "统计日期", "交易日期", "日期时间", "date"),
+    "shop_id": ("店铺", "店铺id", "店铺名称", "shop_id", "shop id"),
+    "visitor_count": ("商品访客数", "访客数", "访客量", "访问用户数", "uv"),
+    "page_views": ("页面浏览次数", "页面浏览量", "页面浏览数", "商品浏览量", "浏览量", "pv"),
+    "conversion_rate": ("转化率", "conversion_rate"),
+    "order_count": ("订单数", "支付订单数", "成交订单数", "order_count"),
+    "gmv": ("gmv", "成交金额", "成交额", "交易额"),
+}
+
+
+# 按数据域组织的语义键别名表
+DOMAIN_SEMANTIC_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
+    "orders": ORDER_SEMANTIC_ALIASES,
+    "analytics": ANALYTICS_SEMANTIC_ALIASES,
+}
+
+
 class SemanticFieldContractService:
     def __init__(self, db):
         self.db = db
@@ -116,7 +153,11 @@ class SemanticFieldContractService:
             consumer=consumer,
         )
         if not definitions:
-            return SemanticContractResult(status="not_configured", should_block=False, has_contract=False)
+            return SemanticContractResult(
+                status=SEMANTIC_CONTRACT_STATUS_NOT_CONFIGURED,
+                should_block=False,
+                has_contract=False,
+            )
 
         current_set = {str(column) for column in current_columns}
         bindings = header_bindings or []
@@ -157,13 +198,24 @@ class SemanticFieldContractService:
         known_raw_columns.update(raw_to_semantic.keys())
         extra_raw_fields = [column for column in current_columns if str(column) not in known_raw_columns]
 
-        status = "ready"
+        # [*] 模板里绑定了 optional 语义键、但当前文件没有的原始列名。
+        # 这类列的缺失不阻断入库(例如「预估回款金额」), 属于非阻断漂移。
+        optional_semantic_keys = {
+            item.semantic_key for item in definitions if item.importance == "optional"
+        }
+        optional_removed_raw_fields = [
+            raw_name
+            for raw_name, semantic_key in raw_to_semantic.items()
+            if semantic_key in optional_semantic_keys and raw_name not in current_set
+        ]
+
+        status = SEMANTIC_CONTRACT_STATUS_READY
         should_block = False
         if missing_required:
-            status = "breaking_drift"
+            status = SEMANTIC_CONTRACT_STATUS_BREAKING_DRIFT
             should_block = True
         elif missing_optional or extra_raw_fields:
-            status = "non_breaking_drift"
+            status = SEMANTIC_CONTRACT_STATUS_NON_BREAKING_DRIFT
 
         impact_by_key = {
             item.semantic_key: item.impact_description
@@ -186,6 +238,7 @@ class SemanticFieldContractService:
             extra_raw_fields=extra_raw_fields,
             impact_descriptions=impact_descriptions,
             has_contract=True,
+            optional_removed_raw_fields=optional_removed_raw_fields,
         )
 
     @classmethod
@@ -195,12 +248,21 @@ class SemanticFieldContractService:
         data_domain: str | None,
         columns: list[str],
     ) -> set[str]:
-        if str(data_domain or "").strip().lower() != "orders":
+        """从原始表头推断语义键(按数据域的别名表)。
+
+        之前只处理 ``orders``, 导致 analytics/流量域的 required 语义键
+        (访客数/页面浏览量等) 只能依赖模板里人工填写的 header_bindings;
+        而实际覆盖率极低(tiktok/analytics 71 个绑定只有 12 个有 semantic_key),
+        契约状态因此恒为 breaking_drift —— 哪怕文件与模板 100% 一致。
+        """
+        domain = str(data_domain or "").strip().lower()
+        aliases_by_key = DOMAIN_SEMANTIC_ALIASES.get(domain)
+        if not aliases_by_key:
             return set()
         normalized_columns = {cls._normalize_alias(column) for column in columns}
         return {
             semantic_key
-            for semantic_key, aliases in ORDER_SEMANTIC_ALIASES.items()
+            for semantic_key, aliases in aliases_by_key.items()
             if any(cls._normalize_alias(alias) in normalized_columns for alias in aliases)
         }
 

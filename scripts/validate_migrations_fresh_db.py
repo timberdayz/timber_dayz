@@ -24,6 +24,10 @@ PG_USER = "migration_test_user"
 PG_PASSWORD = "migration_test_pass"
 PG_DB = "migration_test_db"
 IMAGE = "postgres:15"
+# 固定容器名：脚本被强杀时残留的容器会保留这个名字（而不是变成一堆
+# Docker 随机名），下一次运行启动前先清一次，既不会撞 name conflict，
+# 也不会让孤儿容器长期占着磁盘。
+TEMP_CONTAINER_NAME = "xihong_freshdb_migration_gate"
 DATA_SYNC_CRITICAL_COLUMNS: dict[str, set[str]] = {
     "core.data_quarantine": {"catalog_file_id"},
     "core.staging_orders": {"file_id"},
@@ -111,6 +115,8 @@ def build_temp_postgres_run_command(port: int) -> list[str]:
         "run",
         "--rm",
         "-d",
+        "--name",
+        TEMP_CONTAINER_NAME,
         "-e",
         f"POSTGRES_USER={PG_USER}",
         "-e",
@@ -121,6 +127,16 @@ def build_temp_postgres_run_command(port: int) -> list[str]:
         f"{port}:5432",
         IMAGE,
     ]
+
+
+def remove_leftover_temp_container(run_command=run) -> bool:
+    """清掉上一次运行被中断留下的同名容器（含匿名卷）。
+
+    没有这一步的话：脚本被强杀 → 容器残留 → 下次 `docker run` 直接报
+    name conflict，门禁从此再也跑不起来。
+    """
+    code, _ = run_command(["docker", "rm", "-f", "-v", TEMP_CONTAINER_NAME], timeout=30)
+    return code == 0
 
 
 def start_temp_postgres_container(
@@ -181,6 +197,9 @@ def main() -> int:
         safe_print(f"[WARN] 端口 {args.port} 已被占用，改用临时端口 {port}")
 
     safe_print(f"[INFO] 启动临时 Postgres 容器（端口 {port}）...")
+    # 先清上一次被中断留下的同名容器，避免 name conflict
+    if not remove_leftover_temp_container():
+        safe_print("[WARN] 清理同名残留容器失败（可能不存在），继续启动")
     try:
         container_id = start_temp_postgres_container(port)
     except RuntimeError as exc:
@@ -261,7 +280,9 @@ def main() -> int:
         return 0
     finally:
         safe_print("[INFO] 停止并删除临时容器...")
-        run(["docker", "stop", "-t", "3", container_id], timeout=10)
+        # 按名字删（容器 id 可能已经因 --rm 失效），并带上 -v：
+        # postgres:15 会建匿名卷，不删的话每次运行都漏一个卷（实测 17 个悬空卷）
+        run(["docker", "rm", "-f", "-v", TEMP_CONTAINER_NAME], timeout=30)
         safe_print("[OK] 临时容器已移除")
 
     return 0

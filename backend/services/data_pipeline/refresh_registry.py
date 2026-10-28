@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from modules.core.data_domains import DataDomain, data_domain_tokens_for, normalize_data_domain
+
 
 PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.alias_registry": [],
@@ -178,21 +180,26 @@ def _normalize_table_name(source_table_name: str | None) -> str:
     return raw_name
 
 
+#: 有刷新目标图的业务域(与 _base_targets_for_refresh_domain 的分支保持一致)
+_REFRESHABLE_DOMAINS = frozenset({"orders", "analytics", "products", "inventory", "services"})
+
+
 def _infer_refresh_domain(
     *,
     source_table_name: str | None,
     data_domain: str | None,
 ) -> str | None:
     table_name = _normalize_table_name(source_table_name)
-    normalized_domain = str(data_domain or "").strip().lower()
-    if normalized_domain == "traffic":
-        return "analytics"
-    if normalized_domain in {"orders", "analytics", "products", "inventory", "services"}:
+    # [D8] 归一数据域(traffic -> analytics)统一走 SSOT,不再在这里写死别名
+    normalized_domain = normalize_data_domain(data_domain)
+    if normalized_domain in _REFRESHABLE_DOMAINS:
         return normalized_domain
 
+    # [D8] analytics 的表名正则同时认新表名与历史 traffic 表名
+    analytics_tokens = data_domain_tokens_for(DataDomain.ANALYTICS.value)
     patterns = (
         ("orders", r"(^|_)orders(_|$)"),
-        ("analytics", r"(^|_)(analytics|traffic)(_|$)"),
+        ("analytics", r"(^|_)(%s)(_|$)" % "|".join(analytics_tokens)),
         ("products", r"(^|_)products(_|$)"),
         ("inventory", r"(^|_)inventory(_|$)"),
         ("services", r"(^|_)services(_|$)"),

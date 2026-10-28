@@ -37,6 +37,11 @@ from modules.core.db.schema import (
     DataQuarantine,
 )
 from modules.core.secrets_manager import get_secrets_manager
+from modules.core.data_domains import (
+    DataDomain,
+    canonicalize_data_domain,
+    data_domain_tokens_for,
+)
 from modules.core.logger import get_logger
 from modules.services.currency_service import normalize_amount_to_rmb
 from modules.services.platform_code_service import canonicalize_platform
@@ -437,10 +442,15 @@ def _try_set_domain_from_name(cf: 'CatalogFile') -> None:
         name = (cf.file_name or '').lower()
         path = (cf.file_path or '').lower()
         text = f"{name} {path}"
-        if '__analytics__' in name or ' analytics ' in text or name.endswith('_analytics.xlsx') or '__traffic__' in name or ' traffic ' in text or name.endswith('_traffic.xlsx'):
-            # v4.10.0更新:traffic域统一映射到analytics域
-            cf.data_domain = 'analytics'
-            return
+        # [D8] 兜底识别改走 SSOT：analytics 域同时认新命名与历史 traffic 命名
+        for token in data_domain_tokens_for(DataDomain.ANALYTICS.value):
+            if (
+                f"__{token}__" in name
+                or f" {token} " in text
+                or name.endswith(f"_{token}.xlsx")
+            ):
+                cf.data_domain = DataDomain.ANALYTICS.value
+                return
         if '__services__' in name or '__service__' in name or ' service ' in text:
             cf.data_domain = 'service'
             return
@@ -460,17 +470,20 @@ def _try_set_domain_from_df(cf: 'CatalogFile', df: pd.DataFrame) -> None:
                 'product': 'products',
                 'orders': 'orders',
                 'order': 'orders',
-                'traffic': 'analytics',  # v4.10.0更新:traffic域统一映射到analytics域
-                'analytics': 'analytics',
                 'service': 'service',
                 'services': 'service',
             }
             cf.data_domain = mapping.get(v)
+            # [D8] 走 SSOT 归一：traffic 等历史别名自动映射到 canonical 域
+            if not cf.data_domain:
+                canonical = canonicalize_data_domain(v)
+                if canonical:
+                    cf.data_domain = canonical
             if not cf.data_domain:
                 if v.startswith('services'):
                     cf.data_domain = 'service'
-                elif v.startswith('analytics') or v.startswith('traffic'):  # v4.10.0更新:traffic统一映射到analytics
-                    cf.data_domain = 'analytics'
+                elif v.startswith('analytics') or v.startswith('traffic'):
+                    cf.data_domain = DataDomain.ANALYTICS.value
     except Exception:
         pass
 

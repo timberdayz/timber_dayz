@@ -22,9 +22,70 @@ from typing import Dict, Any, Optional
 from modules.core.base_app import BaseApplication
 from modules.core.logger import get_logger
 from modules.core.path_manager import get_downloads_dir
+from modules.core.data_domains import DataDomain, normalize_data_domain
 from modules.utils.account_identity import resolve_account_session_id
 
 logger = get_logger(__name__)
+
+
+# ── 已归档模块的兼容层 ────────────────────────────────────────────────
+#
+# ``modules.platforms.shopee.components.config_registry`` 已于 2026-03-28
+# (448d0a62 feat:15) 与整套旧 Shopee 组件一起归档到
+# ``modules/platforms/shopee/archive/`` —— 新的组件体系不再需要「数据域 ->
+# 导出组件」的注册中心。
+#
+# 但本交互式 CLI 仍在引用它, 于是:
+#   * import 直接 ModuleNotFoundError
+#   * 异常又被外层 ``except`` 吞掉
+#   * ⇒ 该 CLI 的 Shopee 批量采集**每个域都静默失败**(自 2026-03-28 起)
+#
+# 这里保留同名 API, 但调用即给出明确的废弃提示 —— 不再静默失败。
+# 正式采集走 ``POST /api/collection/tasks`` -> ``CollectionExecutorV2``,
+# 不经过本 CLI。
+_DEPRECATED_CONFIG_REGISTRY_MESSAGE = (
+    "[DEPRECATED] 交互式 CLI 的 Shopee 组件化导出路径已废弃: "
+    "其依赖的配置注册中心已于 2026-03-28 随旧组件归档。"
+    "请改用采集任务 API(POST /api/collection/tasks)。"
+)
+
+
+class _DeprecatedShopeeComponentPath(RuntimeError):
+    """已归档的 Shopee 组件化导出路径。"""
+
+
+class _DeprecatedConfigRegistry:
+    """归档模块 ``config_registry`` 的替代物(调用即报废弃)。"""
+
+    @staticmethod
+    def get_export_component_class(domain):
+        raise _DeprecatedShopeeComponentPath(_DEPRECATED_CONFIG_REGISTRY_MESSAGE)
+
+    @staticmethod
+    def get_config_class(domain):
+        raise _DeprecatedShopeeComponentPath(_DEPRECATED_CONFIG_REGISTRY_MESSAGE)
+
+    @staticmethod
+    def get_navigation_target(domain):
+        raise _DeprecatedShopeeComponentPath(_DEPRECATED_CONFIG_REGISTRY_MESSAGE)
+
+    @staticmethod
+    def open_config_file(domain):
+        raise _DeprecatedShopeeComponentPath(_DEPRECATED_CONFIG_REGISTRY_MESSAGE)
+
+
+def _open_deprecated_config_file(domain: str) -> bool:
+    """替代已归档的 ``config_registry.open_config_file``。
+
+    不再打开编辑器(依赖已归档的注册中心), 但仍然告诉用户配置文件在哪 ——
+    配置本身还在, 用户手工编辑即可。
+    """
+    config_dir = Path("modules/platforms/shopee/components")
+    candidate = config_dir / f"{domain}_config.py"
+    print(_DEPRECATED_CONFIG_REGISTRY_MESSAGE)
+    print(f"[NOTE] 配置文件(请手工编辑): {candidate}")
+    return False
+
 
 class CollectionCenterApp(BaseApplication):
     """数据采集中心应用"""
@@ -1179,7 +1240,7 @@ class CollectionCenterApp(BaseApplication):
                 acct_id = resolve_account_session_id(account)
                 ctx = pb.get_or_create_persistent_context("miaoshou", str(acct_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
-                exec_ctx = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity, "data_domain": "traffic"}, logger=get_logger(__name__))
+                exec_ctx = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity, "data_domain": DataDomain.ANALYTICS.value}, logger=get_logger(__name__))
                 adapter = get_adapter("miaoshou", exec_ctx, allow_legacy_surface=True)
                 try: adapter.login().run(page)
                 except Exception: pass
@@ -1360,7 +1421,7 @@ class CollectionCenterApp(BaseApplication):
             input("按回车键返回...")
 
     def _run_miaoshou_platform_wide_batch(self):
-        """妙手ERP 平台批量采集(五大数据类型:products/traffic/services/orders/finance)。"""
+        """妙手ERP 平台批量采集(五大数据类型:products/analytics/services/orders/finance)。"""
         try:
             print("\n[BRAIN] 妙手ERP 批量采集"); print("=" * 40)
             # 选择数据域(默认仅商品表现+订单表现);支持一键预设覆盖
@@ -1373,7 +1434,7 @@ class CollectionCenterApp(BaseApplication):
                 dom_in = input("请输入选择的数字,用逗号分隔 (默认: 1,4): ").strip()
                 # 兼容中文逗号/空格
                 dom_in = dom_in.replace(',', ',').replace(' ', '')
-                idx_map = {"1":"products","2":"traffic","3":"services","4":"orders","5":"finance"}
+                idx_map = {"1":"products","2":DataDomain.ANALYTICS.value,"3":"services","4":"orders","5":"finance"}
                 default_keys = ["1","4"]
                 keys = dom_in.split(',') if dom_in else default_keys
                 domains = [idx_map[k] for k in keys if k in idx_map]
@@ -1404,7 +1465,8 @@ class CollectionCenterApp(BaseApplication):
             skip_reasons = {}
             tgt_map = {
                 'products': TargetPage.PRODUCTS_PERFORMANCE,
-                'traffic': TargetPage.TRAFFIC_OVERVIEW,
+                # [D8] 统一用 canonical 域名(traffic 域已废弃并入 analytics)
+                DataDomain.ANALYTICS.value: TargetPage.TRAFFIC_OVERVIEW,
                 'services': TargetPage.SERVICE_ANALYTICS,
                 'orders': TargetPage.ORDERS,
                 'finance': TargetPage.FINANCE,
@@ -1694,7 +1756,8 @@ class CollectionCenterApp(BaseApplication):
                 dm = {
                     "services": ("services", "服务表现", TargetPage.SERVICE_ANALYTICS),
                     "products": ("products", "商品表现", TargetPage.PRODUCTS_PERFORMANCE),
-                    "traffic": ("traffic", "流量表现", TargetPage.TRAFFIC_OVERVIEW),
+                    # [D8] 统一用 canonical 域名(traffic 域已废弃并入 analytics)
+                    DataDomain.ANALYTICS.value: (DataDomain.ANALYTICS.value, "流量表现", TargetPage.TRAFFIC_OVERVIEW),
                     "orders": ("orders", "订单表现(未实现)", TargetPage.ORDERS),
                     "finance": ("finance", "财务表现(未实现)", TargetPage.FINANCE),
                 }
@@ -1705,7 +1768,7 @@ class CollectionCenterApp(BaseApplication):
                 print("\n[DATA] 选择数据域(可多选):")
                 print("1. 服务表现 (services)")
                 print("2. 商品表现 (products)")
-                print("3. 流量表现 (traffic)")
+                print("3. 流量表现 (analytics)")
                 print("4. 订单表现 (orders)")
                 print("5. 财务表现 (finance)")
                 dom_in = input("请输入选择的数字,用逗号分隔 (如: 1,2,3 或 回车=默认商品+流量+服务): ").strip()
@@ -1713,12 +1776,12 @@ class CollectionCenterApp(BaseApplication):
                     dom_sel = {"1","2","3"}
                 else:
                     dom_sel = {s.strip() for s in dom_in.split(',') if s.strip() in {"1","2","3","4","5"}}
-                # 已实现:products/traffic/services;其余先跳过
+                # 已实现:products/analytics/services;其余先跳过
                 exec_domains = []  # (key, name, target)
                 if "2" in dom_sel:
                     exec_domains.append(("products", "商品表现", TargetPage.PRODUCTS_PERFORMANCE))
                 if "3" in dom_sel:
-                    exec_domains.append(("traffic", "流量表现", TargetPage.TRAFFIC_OVERVIEW))
+                    exec_domains.append((DataDomain.ANALYTICS.value, "流量表现", TargetPage.TRAFFIC_OVERVIEW))
                 if "1" in dom_sel:
                     exec_domains.append(("services", "服务表现", TargetPage.SERVICE_ANALYTICS))
                 if "4" in dom_sel:
@@ -1857,8 +1920,8 @@ class CollectionCenterApp(BaseApplication):
                         for region in regions:
                             # 逐数据域执行
                             for dom_key, dom_name, target in exec_domains:
-                                # 暂未实现的数据域直接跳过(已实现:products/traffic/services)
-                                if dom_key not in {"products", "traffic", "services"}:
+                                # 暂未实现的数据域直接跳过(已实现:products/analytics/services)
+                                if dom_key not in {"products", DataDomain.ANALYTICS.value, "services"}:
                                     print(f"  [NEXT] 区域: {region} · {dom_name} 暂未实现,跳过")
                                     continue
                                 total += 1
@@ -1871,7 +1934,7 @@ class CollectionCenterApp(BaseApplication):
                                     except Exception:
                                         account_label_norm = str(account_label)
                                     # 流量/服务 表现禁止在导航深链中携带时间参数,会导致导出按钮不出现
-                                    exec_ctx.config["nav_with_timerange"] = (dom_key not in {"traffic", "services"})
+                                    exec_ctx.config["nav_with_timerange"] = (dom_key not in {DataDomain.ANALYTICS.value, "services"})
 
                                     exec_ctx.config["shop_name"] = f"{account_label_norm}_{region.lower()}"
                                     exec_ctx.config["data_domain"] = dom_key
@@ -2520,8 +2583,9 @@ class CollectionCenterApp(BaseApplication):
             if input("确认开始? (y/n): ").strip().lower() not in ['y','yes','是']:
                 return
 
-            # 规范化域名,analytics -> traffic(与组件注册保持一致)
-            norm_domains = ["traffic" if d == "analytics" else d for d in domains]
+            # [D8] 规范化域名:统一用 canonical 域(traffic 域已废弃并入 analytics),
+            #      不再把 analytics 反向转回 traffic —— 采集侧产出的必须是 canonical 域
+            norm_domains = [normalize_data_domain(d) for d in domains]
 
             total_tasks = 0; ok_count = 0; fail_count = 0
             results_by_domain = {d: {"ok": 0, "fail": 0} for d in norm_domains}
@@ -2557,8 +2621,8 @@ class CollectionCenterApp(BaseApplication):
                             if not shops:
                                 print("  [WARN] 未拉取到店铺,跳过该账号")
                                 continue
-                            # Shopee 中仅执行已打通三类(products/traffic/services)
-                            ready_norm = ["products", "traffic", "services"]
+                            # Shopee 中仅执行已打通三类(products/analytics/services)
+                            ready_norm = ["products", DataDomain.ANALYTICS.value, "services"]
                             exec_norm = [d for d in norm_domains if d in ready_norm]
                             skipped_norm = [d for d in norm_domains if d not in ready_norm]
                             if skipped_norm:
@@ -2793,7 +2857,7 @@ class CollectionCenterApp(BaseApplication):
                 try:
                     from modules.components.base import ExecutionContext
                     from modules.services.platform_adapter import get_adapter
-                    from modules.platforms.shopee.components.config_registry import ConfigRegistry, DataDomain
+                    ConfigRegistry = _DeprecatedConfigRegistry  # 已归档模块的兼容层(见文件头说明)
                     from modules.core.logger import get_logger as _get_logger
 
                     # 默认数据域:services(服务表现,AI助手+人工聊天);后续可扩展为可选
@@ -2866,7 +2930,8 @@ class CollectionCenterApp(BaseApplication):
                 domain_map = {
                     "services": ("services", "服务表现"),
                     "products": ("products", "商品表现"),
-                    "traffic": ("traffic", "流量表现"),
+                    # [D8] 统一用 canonical 域名(traffic 域已废弃并入 analytics)
+                    DataDomain.ANALYTICS.value: (DataDomain.ANALYTICS.value, "流量表现"),
                     "orders": ("orders", "订单表现"),
                     "finance": ("finance", "财务表现"),
                 }
@@ -2875,7 +2940,7 @@ class CollectionCenterApp(BaseApplication):
                 print("\n[DATA] 选择数据域(可多选):")
                 print("1. 服务表现 (services)")
                 print("2. 商品表现 (products)")
-                print("3. 流量表现 (traffic)")
+                print("3. 流量表现 (analytics)")
                 print("4. 订单表现 (orders)")
                 print("5. 财务表现 (finance)")
                 print("请输入选择的数字,用逗号分隔 (如: 1,2,3 或 回车=已打通的三类): ", end="")
@@ -2884,7 +2949,7 @@ class CollectionCenterApp(BaseApplication):
                 domain_map_num = {
                     "1": ("services", "服务表现"),
                     "2": ("products", "商品表现"),
-                    "3": ("traffic", "流量表现"),
+                    "3": (DataDomain.ANALYTICS.value, "流量表现"),
                     "4": ("orders", "订单表现"),
                     "5": ("finance", "财务表现"),
                 }
@@ -2898,7 +2963,7 @@ class CollectionCenterApp(BaseApplication):
                 print("[FAIL] 未选择有效的数据域"); input("按回车键返回..."); return
 
             print(f"\n[OK] 已选择数据域: {', '.join([d[1] for d in selected_domains])}")
-            READY_KEYS = {"services", "products", "traffic"}
+            READY_KEYS = {"services", "products", DataDomain.ANALYTICS.value}
             exec_domains = [d for d in selected_domains if d[0] in READY_KEYS]
             skipped = [d[1] for d in selected_domains if d[0] not in READY_KEYS]
             if skipped:
@@ -2952,7 +3017,7 @@ class CollectionCenterApp(BaseApplication):
             from modules.services.shopee_playwright_exporter import ShopeePlaywrightExporter
             from modules.components.base import ExecutionContext
             from modules.services.platform_adapter import get_adapter
-            from modules.platforms.shopee.components.config_registry import ConfigRegistry, DataDomain
+            ConfigRegistry = _DeprecatedConfigRegistry  # 已归档模块的兼容层(见文件头说明)
             from modules.core.logger import get_logger as _get_logger
 
             total_tasks = 0; ok_count = 0; fail_count = 0
@@ -3144,7 +3209,7 @@ class CollectionCenterApp(BaseApplication):
         try:
             from modules.components.base import ExecutionContext
             from modules.services.platform_adapter import get_adapter
-            from modules.platforms.shopee.components.config_registry import ConfigRegistry, DataDomain
+            ConfigRegistry = _DeprecatedConfigRegistry  # 已归档模块的兼容层(见文件头说明)
             from modules.core.logger import get_logger as _get_logger
 
             # 根据数据域获取对应的导出组件
@@ -3201,7 +3266,7 @@ class CollectionCenterApp(BaseApplication):
                 # 执行导出
                 exporter = ExportCls(exec_ctx)
 
-                # Shopee: 组件化域(products/traffic/...)先导航到目标页面;services 由组件内部处理
+                # Shopee: 组件化域(products/analytics/...)先导航到目标页面;services 由组件内部处理
                 try:
                     if platform.lower() == 'shopee' and data_domain in (DataDomain.ANALYTICS, DataDomain.PRODUCTS, DataDomain.ORDERS, DataDomain.FINANCE):
                         from modules.platforms.shopee.components.navigation import ShopeeNavigation
@@ -3405,7 +3470,7 @@ class CollectionCenterApp(BaseApplication):
             from modules.services.shopee_playwright_exporter import ShopeePlaywrightExporter
             from modules.components.base import ExecutionContext
             from modules.services.platform_adapter import get_adapter
-            from modules.platforms.shopee.components.config_registry import ConfigRegistry, DataDomain
+            ConfigRegistry = _DeprecatedConfigRegistry  # 已归档模块的兼容层(见文件头说明)
             from modules.core.logger import get_logger as _get_logger
 
             total = 0; ok_count = 0; fail_count = 0
@@ -3937,9 +4002,11 @@ class CollectionCenterApp(BaseApplication):
             shop_id = input("请输入店铺ID(示例: 1234567890): ").strip() or "1234567890"
 
             # 数据类型与粒度选择(占位)
-            print("\n请选择数据类型: 1) traffic  2) product  3) order  4) finance  (默认1)")
+            # [D8] 数据类型即数据域,统一用 canonical 域名(traffic 域已废弃并入 analytics);
+            #      它同时是下载目录名与文件名前缀,产出必须是 canonical 域
+            print("\n请选择数据类型: 1) analytics  2) product  3) order  4) finance  (默认1)")
             dt_choice = (input("输入编号: ").strip() or "1")
-            data_type = {"1": "traffic", "2": "product", "3": "order", "4": "finance"}.get(dt_choice, "traffic")
+            data_type = {"1": DataDomain.ANALYTICS.value, "2": "product", "3": "order", "4": "finance"}.get(dt_choice, DataDomain.ANALYTICS.value)
 
             print("\n请选择粒度: 1) daily  2) weekly  3) monthly  (默认1)")
             gr_choice = (input("输入编号: ").strip() or "1")
@@ -4686,14 +4753,14 @@ class CollectionCenterApp(BaseApplication):
 
     def _quick_edit_analytics_config(self):
         """快速编辑 analytics 组件配置(使用智能配置注册中心)"""
-        from modules.platforms.shopee.components.config_registry import open_config_file
-        open_config_file("analytics")
+        
+        _open_deprecated_config_file("analytics")
         input("\n按回车键返回...")
 
     def _quick_edit_config(self, domain: str):
         """通用智能配置编辑方法"""
-        from modules.platforms.shopee.components.config_registry import open_config_file
-        open_config_file(domain)
+        
+        _open_deprecated_config_file(domain)
         input("\n按回车键返回...")
 
 
@@ -4702,7 +4769,7 @@ class CollectionCenterApp(BaseApplication):
         """一键所有平台批量采集:统一选择 -> 逐平台批量执行(Shopee/TikTok/妙手ERP)。
         - 仅调用各平台既有“平台级批量”实现;通过临时预设(_one_click_*)传参以免重复交互;
         - 统一时间范围选择:昨天/近7天/最近28/30天(TikTok/Miaoshou=28天;Shopee=30天)。
-        - 统一数据域:优先执行已打通的三类(products/traffic/services)。
+        - 统一数据域:优先执行已打通的三类(products/analytics/services)。
         """
         try:
             print("\n[COMPASS] 一键所有平台批量采集")
@@ -4754,9 +4821,10 @@ class CollectionCenterApp(BaseApplication):
                 }
 
             # 3) 统一数据域(按现状:Shopee/TikTok 执行三类;妙手ERP执行 商品+订单)
+            # [D8] 数据域统一用 canonical 名(traffic 域已废弃并入 analytics)
             default_domains = {
-                "shopee": ["products", "traffic", "services"],
-                "tiktok": ["products", "traffic", "services"],
+                "shopee": ["products", DataDomain.ANALYTICS.value, "services"],
+                "tiktok": ["products", DataDomain.ANALYTICS.value, "services"],
                 "miaoshou": ["products", "orders"],
             }
 
@@ -4767,7 +4835,7 @@ class CollectionCenterApp(BaseApplication):
                     print("  - amazon: 占位(跳过)")
                     continue
                 preset_preview = _make_preset(pf)
-                doms = ", ".join(default_domains.get(pf, ["products","traffic","services"]))
+                doms = ", ".join(default_domains.get(pf, ["products", DataDomain.ANALYTICS.value, "services"]))
                 print(f"  - {pf}: {preset_preview['start_date']} ~ {preset_preview['end_date']} · 域: {doms}")
 
             # 3.2)执行模式选择:顺序 或 并行(Beta 占位,当前回退为顺序)
@@ -4794,7 +4862,7 @@ class CollectionCenterApp(BaseApplication):
                         print("\n[STORE] Amazon 暂为占位,已跳过。")
                         continue
                     preset = _make_preset(pf)
-                    domains = default_domains.get(pf, ["products", "traffic", "services"])
+                    domains = default_domains.get(pf, ["products", DataDomain.ANALYTICS.value, "services"])
                     payload = {"platform": pf, "preset": preset, "domains": domains}
                     env = os.environ.copy()
                     try:
@@ -4914,7 +4982,7 @@ class CollectionCenterApp(BaseApplication):
                         print("\n[STORE] Amazon 暂为占位,已跳过。")
                         continue
                     preset = _make_preset(pf)
-                    domains = default_domains.get(pf, ["products", "traffic", "services"])
+                    domains = default_domains.get(pf, ["products", DataDomain.ANALYTICS.value, "services"])
                     payload = {"platform": pf, "preset": preset, "domains": domains}
                     env = os.environ.copy()
                     try:

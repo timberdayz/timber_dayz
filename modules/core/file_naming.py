@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Dict, Optional
 
 from backend.services.component_name_utils import DATA_DOMAIN_SUB_TYPES
+from modules.core.data_domains import CANONICAL_DATA_DOMAINS, normalize_data_domain
 
 
 class StandardFileName:
@@ -34,7 +35,9 @@ class StandardFileName:
     } | {'ai', 'assistant'}
     
     # 已知的数据域
-    KNOWN_DATA_DOMAINS = {'orders', 'products', 'services', 'traffic', 'finance', 'analytics', 'inventory', 'purchase'}  # v4.10.0更新:traffic域已废弃(兼容性保留),统一使用analytics域;v4.20.0+新增:purchase采购单数据域(Sep 14 partial_success修复)
+    # [D8] 只保留 canonical 域(traffic 是已废弃别名,归一为 analytics);
+    #      历史 `__traffic__` 文件由 parse() 内部归一兼容,见 modules/core/data_domains.py
+    KNOWN_DATA_DOMAINS = set(CANONICAL_DATA_DOMAINS)
     
     # 已知的粒度
     KNOWN_GRANULARITIES = {'daily', 'weekly', 'monthly', 'snapshot', 'hourly'}
@@ -75,7 +78,7 @@ class StandardFileName:
         if not timestamp:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        parts = [source_platform.lower(), data_domain.lower()]
+        parts = [source_platform.lower(), normalize_data_domain(data_domain)]
         
         if sub_domain:
             parts.append(sub_domain.lower())
@@ -126,7 +129,9 @@ class StandardFileName:
         
         metadata = {
             'source_platform': parts[0],
-            'data_domain': parts[1],
+            # [D8] 归一数据域:历史 `__traffic__` 文件在这里被映射为 analytics,
+            #      保证 KNOWN_DATA_DOMAINS 只留 canonical 域的同时不丢历史文件
+            'data_domain': normalize_data_domain(parts[1]),
             'sub_domain': '',
             'granularity': '',
             'timestamp': ''

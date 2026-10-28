@@ -24,6 +24,7 @@ from backend.services.data_pipeline.refresh_runner import (
 )
 from backend.services.product_center_service import sync_inventory_skus
 from backend.utils.events import AClassUpdatedEvent, DataIngestedEvent, MVRefreshedEvent
+from modules.core.data_domains import normalize_data_domain
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -56,15 +57,8 @@ DATA_INGESTED_PIPELINE_TARGETS: Dict[str, list[str]] = {
         "api.business_overview_traffic_ranking_module",
         "api.business_overview_operational_metrics_module",
     ],
-    "traffic": [
-        "mart.platform_day_kpi",
-        "mart.platform_week_kpi",
-        "api.business_overview_comparison_platform_module",
-        "api.business_overview_comparison_module",
-        "api.business_overview_shop_racing_monthly_module",
-        "api.business_overview_traffic_ranking_module",
-        "api.business_overview_operational_metrics_module",
-    ],
+    # [D8] 原独立的 "traffic" 条目已并入 "analytics"(traffic 域自 v4.10.0 起废弃),
+    #      两个 key 指向同一个业务域,保留两份会让刷新目标随时间各自漂移
     "products": [
         "api.clearance_ranking_module",
         "mart.spu_operating_current",
@@ -87,7 +81,10 @@ def determine_pipeline_targets_for_data_ingested(event: DataIngestedEvent) -> li
         granularity=event.granularity,
     )
     if not requested_targets:
-        requested_targets = list(DATA_INGESTED_PIPELINE_TARGETS.get(event.data_domain or "", []))
+        # [D8] 归一数据域(traffic -> analytics)后再取默认刷新目标
+        requested_targets = list(
+            DATA_INGESTED_PIPELINE_TARGETS.get(normalize_data_domain(event.data_domain), [])
+        )
     registered_targets = [target for target in requested_targets if target in SQL_TARGET_PATHS]
     dropped_targets = [target for target in requested_targets if target not in SQL_TARGET_PATHS]
     if dropped_targets:

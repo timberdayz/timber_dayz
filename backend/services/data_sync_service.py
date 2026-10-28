@@ -37,6 +37,13 @@ from modules.core.db import CatalogFile, FieldMappingTemplate
 from modules.core.logger import get_logger
 from backend.services.template_matcher import get_template_matcher
 from backend.services.template_family_service import get_template_resolver
+from backend.services.template_variant_takeover_service import (
+    resolve_baseline_for_file,
+)
+from backend.services.template_contract_service import (
+    read_template_contract,
+    resolve_valid_contract_template,
+)
 from backend.services.excel_parser import ExcelParser
 from backend.services.data_ingestion_service import DataIngestionService
 from backend.services.c_class_data_validator import get_c_class_data_validator
@@ -46,9 +53,15 @@ from backend.services.executor_manager import (
 from backend.services.data_sync_template_status_service import (
     DataSyncTemplateStatusService,
 )
-from backend.services.spreadsheet_normalization_service import (
-    get_spreadsheet_normalization_service,
+from backend.services.data_sync_cache_key import build_template_status_cache_key
+from backend.services.data_sync_status_semantics import governance_status_for
+from backend.services.data_sync_status_semantics import (
+    SEMANTIC_CONTRACT_STATUS_NON_BREAKING_DRIFT,
+    SEMANTIC_CONTRACT_STATUS_READY,
+    TEMPLATE_BASELINE_CROSS_FAMILY_VARIANT,
+    TEMPLATE_BASELINE_CURRENT,
 )
+from backend.services.spreadsheet_header_reader import get_spreadsheet_header_reader
 from modules.services.file_semantics import validate_file_semantics
 
 logger = get_logger(__name__)
@@ -70,13 +83,15 @@ _readiness_cache: Dict[tuple, tuple] = {}
 def _readiness_cache_key(
     catalog_file: CatalogFile, use_template_header_row: bool
 ) -> tuple:
-    return (
-        getattr(catalog_file, "id", None),
-        getattr(catalog_file, "file_name", None),
-        getattr(catalog_file, "file_path", None),
-        getattr(catalog_file, "status", None),
-        getattr(catalog_file, "last_modified", None),
-        use_template_header_row,
+    """就绪判定缓存键。
+
+    [*] 统一走 :func:`build_template_status_cache_key`, 与治理接口的行级缓存
+    共用同一把尺子 —— 否则两处会给出互相矛盾的结论。
+    """
+    return build_template_status_cache_key(
+        catalog_file,
+        None,
+        use_template_header_row=use_template_header_row,
     )
 
 
@@ -126,116 +141,28 @@ class DataSyncService:
         self.template_resolver = get_template_resolver(db)
         self.ingestion_service = DataIngestionService(db)
         self.template_status_service = DataSyncTemplateStatusService(db)
+        # [*] 统一读表头入口(判定链路与入库链路共用同一套解析规则)
+        self._header_reader = get_spreadsheet_header_reader(
+            log_prefix="DataSync",
+            executor_manager_factory=lambda: get_executor_manager(),
+        )
 
     def _resolve_runtime_spreadsheet_path(self, file_path: str) -> str:
+        """解析运行时可读的表格路径。
+
+        [*] 统一走 :mod:`backend.services.spreadsheet_header_reader` ——
+        与入库链路、治理路由共用同一套「安全路径解析 + 格式归一」规则。
+        """
         resolved_path = self._safe_resolve_path(file_path)
-        source_format = ExcelParser.detect_file_format(resolved_path)
-        if source_format in {"xls", "xlsx_with_ole", "html"}:
-            normalized = get_spreadsheet_normalization_service().normalize_for_runtime(
-                resolved_path,
-                source_format=source_format,
-            )
-            logger.info(
-                "[DataSync] 使用标准化副本读取文件: %s -> %s (converter=%s, cache_hit=%s)",
-                Path(resolved_path).name,
-                normalized.path.name,
-                normalized.converter,
-                normalized.cache_hit,
-            )
-            return str(normalized.path)
-        return str(resolved_path)
+        return self._header_reader.normalize_runtime_path(resolved_path)
 
     def _safe_resolve_path(self, file_path: str) -> str:
+        """安全解析文件路径(兼容绝对路径和相对路径)。
+
+        [*] 实现已收敛到 :mod:`backend.services.spreadsheet_header_reader`,
+        这里保留方法名作为**可打桩的接缝**(测试与调用方都依赖它)。
         """
-        安全解析文件路径(增强版:兼容绝对路径和相对路径)
-
-        支持:
-        - 绝对路径存在:直接使用
-        - 绝对路径不存在:尝试从路径中提取相对部分重新解析(兼容云端部署和环境迁移)
-        - 相对路径:从项目根目录解析
-        - 路径安全校验:限制在允许的根目录内
-        """
-        from modules.core.path_manager import (
-            get_project_root,
-            get_data_input_dir,
-            get_data_raw_dir,
-        )
-
-        project_root = get_project_root()
-        path_obj = Path(file_path)
-
-        # 如果是绝对路径
-        if path_obj.is_absolute():
-            # 如果绝对路径存在,直接使用
-            if path_obj.exists():
-                return str(path_obj)
-
-            # 绝对路径不存在,尝试从路径中提取相对部分(兼容旧数据和环境迁移)
-            # 例如:/path/to/project/data/raw/2025/file.xlsx -> data/raw/2025/file.xlsx
-            path_str = file_path.replace("\\", "/")
-
-            # 尝试查找 data/raw 或 data/input 等关键路径
-            key_paths = ["data/raw/", "data/input/", "downloads/", "temp/outputs/"]
-            for key_path in key_paths:
-                if key_path in path_str:
-                    idx = path_str.find(key_path)
-                    relative_path = path_str[idx:]
-                    resolved_path = project_root / relative_path
-                    if resolved_path.exists():
-                        logger.info(
-                            f"[DataSync] 从绝对路径提取相对路径: {file_path} -> {resolved_path}"
-                        )
-                        return str(resolved_path.resolve())
-
-            # 如果找不到关键路径,记录警告但仍返回原路径(可能需要人工处理)
-            logger.warning(f"[DataSync] 绝对路径不存在且无法提取相对路径: {file_path}")
-            return file_path
-
-        # 相对路径:从项目根目录解析
-        # [*] v4.19.8修复:先处理Windows路径分隔符,确保路径正确解析
-        file_path_normalized = file_path.replace("\\", "/")
-        resolved_path = project_root / file_path_normalized
-
-        # 检查路径是否在允许的根目录内
-        allowed_roots = [
-            get_data_input_dir(),
-            get_data_raw_dir(),
-            project_root / "downloads",
-            project_root / "temp",
-        ]
-
-        extra_allowed = os.getenv("DATA_SYNC_ALLOWED_ROOTS", "").strip()
-        if extra_allowed:
-            for token in [
-                part.strip() for part in extra_allowed.split(";") if part.strip()
-            ]:
-                candidate = Path(token)
-                allowed_roots.append(
-                    candidate if candidate.is_absolute() else (project_root / token)
-                )
-
-        resolved_str = str(resolved_path.resolve())
-        for root in allowed_roots:
-            root_str = str(root.resolve())
-            if resolved_str.startswith(root_str):
-                return resolved_str
-
-        strict_mode = os.getenv("DATA_SYNC_STRICT_ALLOWED_ROOTS", "false").lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
-        if strict_mode:
-            raise ValueError(
-                f"[SafePath] 文件路径不在允许的目录中: {file_path} -> {resolved_str}"
-            )
-
-        # 兼容旧数据：返回解析后的路径，但只做一次较轻提示，避免刷屏
-        logger.info(
-            f"[DataSync] 文件路径不在允许根目录内(已放行): {file_path} -> {resolved_str}"
-        )
-        return resolved_str
+        return self._header_reader.resolve_safe_path(file_path)
 
     @staticmethod
     def _touch_auto_meta(
@@ -339,6 +266,98 @@ class DataSyncService:
             return None
         return await self.db.get(FieldMappingTemplate, legacy_template_id)
 
+    async def _resolve_contract_template(
+        self, catalog_file: CatalogFile
+    ) -> Optional[FieldMappingTemplate]:
+        """取出文件自带的模板契约对应的模板行 —— 即「治理这个文件的模板」。
+
+        契约缺失(历史文件)、模板行已被删除、或模板行被原地改写过
+        (columns_hash 对不上)时返回 None, 由调用方回退到「当前已发布模板」。
+
+        为什么契约优先
+        --------------
+        没有契约的历史文件只能拿「当前最新已发布模板」当基准, 于是我们每升级一次
+        模板, 历史上按旧模板采集的文件全被判成结构漂移, 而且无法区分
+        「源文件变了」与「我们自己升级了模板」。
+
+        有了契约, 基准就是**采集当时生效的那一版模板** —— 我们自己升级模板
+        (v5 -> v6)不会让按 v5 采集的文件突然变成漂移, 源文件结构真的变了才会。
+        """
+        try:
+            return await resolve_valid_contract_template(self.db, catalog_file)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[DataSync] 读取模板契约失败 %s: %s",
+                getattr(catalog_file, "file_name", None),
+                exc,
+            )
+            return None
+    async def _resolve_governing_template(
+        self,
+        catalog_file: CatalogFile,
+        fallback: Optional[FieldMappingTemplate] = None,
+    ) -> Optional[FieldMappingTemplate]:
+        """解析「治理这个文件的模板」。
+
+        优先使用文件自带的模板契约 —— 也就是**采集当时生效的那一版模板**。
+        没有契约的历史文件才回退到当前已发布模板。
+
+        这样一来, 我们自己升级模板(v5 -> v6)不会让按 v5 采集的文件
+        突然变成「结构漂移」, 源文件结构真的变了才会被判定为漂移。
+        """
+        contract_template = await self._resolve_contract_template(catalog_file)
+        if contract_template is not None:
+            return contract_template
+        return fallback
+
+    async def _resolve_ingestion_baseline(
+        self,
+        catalog_file: CatalogFile,
+        *,
+        template: FieldMappingTemplate,
+        file_path: str,
+    ) -> tuple[Optional[FieldMappingTemplate], Optional[int]]:
+        """入库链路的比较基准(与判定链路同一把尺子)。
+
+        返回 ``(基准模板, 表头行)``; 没有接管发生时返回 ``(None, None)``,
+        调用方继续沿用「模板自带表头行」的既有逻辑。
+
+        为什么入库链路也要跑一遍
+        ----------------------
+        判定链路可能因为跨 family 接管而判定「通过」, 如果入库仍按本粒度模板的
+        表头行去读, 读到的会是另一行(比如「全部/全部/…」分组行)——
+        判定说通过、入库写进去垃圾, 比判定不过更危险。
+        """
+        try:
+            async def read_columns(row: int) -> List[str]:
+                header = await self._header_reader.read_columns(
+                    file_path,
+                    header_row=row,
+                    nrows=5,
+                )
+                if not getattr(header, "ok", False):
+                    return []
+                return list(header.columns or [])
+
+            baseline = await resolve_baseline_for_file(
+                self.db,
+                catalog_file=catalog_file,
+                published_template=template,
+                contract_template=None,
+                read_header=read_columns,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[DataSync] 入库基准解析失败 %s: %s",
+                getattr(catalog_file, "file_name", None),
+                exc,
+            )
+            return None, None
+
+        if baseline.get("baseline_kind") != TEMPLATE_BASELINE_CROSS_FAMILY_VARIANT:
+            return None, None
+        return baseline.get("baseline_template"), baseline.get("header_row")
+
     @staticmethod
     def _is_blocking_header_change(header_changes: Dict[str, Any]) -> bool:
         if not header_changes.get("detected"):
@@ -348,7 +367,10 @@ class DataSyncService:
         if header_changes.get("is_semantic_match", False):
             return False
         semantic_contract_status = header_changes.get("semantic_contract_status")
-        if semantic_contract_status in {"ready", "non_breaking_drift"}:
+        if semantic_contract_status in {
+            SEMANTIC_CONTRACT_STATUS_READY,
+            SEMANTIC_CONTRACT_STATUS_NON_BREAKING_DRIFT,
+        }:
             missing_required = header_changes.get("missing_required_keys") or []
             blocking_changes = header_changes.get("blocking_changes") or []
             if not missing_required and not blocking_changes:
@@ -359,19 +381,16 @@ class DataSyncService:
 
     @staticmethod
     def _normalize_governance_status(status: Dict[str, Any]) -> Dict[str, Any]:
+        """补齐 governance_status。
+
+        [*] 映射关系来自 :mod:`backend.services.data_sync_status_semantics`
+        (唯一 SSOT), 这里不再自带第二份映射表。
+        """
         if status.get("governance_status"):
             return status
-        template_status = status.get("template_status")
-        mapped = {
-            "ready": "ready",
-            "alias_only": "non_breaking_drift",
-            "update_required": "breaking_drift",
-            "missing_variant": "missing_variant",
-            "missing": "missing_family",
-            "file_missing": "file_missing",
-            "parse_failed": "parse_failed",
-        }.get(template_status, template_status or "unknown")
-        status["governance_status"] = mapped
+        status["governance_status"] = governance_status_for(
+            status.get("template_status")
+        )
         return status
 
     async def evaluate_catalog_file_template_status(
@@ -429,12 +448,21 @@ class DataSyncService:
             if legacy_template_id:
                 template = await self.db.get(FieldMappingTemplate, legacy_template_id)
 
-        template = template or await self.template_matcher.find_best_template(
+        published_template = template or await self.template_matcher.find_best_template(
             platform=catalog_file.platform_code,
             data_domain=catalog_file.data_domain,
             granularity=catalog_file.granularity,
             sub_domain=normalized_sub_domain,
+            account=(getattr(catalog_file, "account", None) or None),
         )
+
+        # [*] 模板契约优先: 用「采集当时生效的那一版模板」做基准。
+        # 表头行也必须按这一版来读 —— 否则读出来的列本身就是错的。
+        #
+        # 注意: 契约是否**真的**仍然解释这个文件, 要等读到表头才能判定
+        # (见下方基准判定段) —— 契约可能指向一个已经过时的模板。
+        contract_template = await self._resolve_contract_template(catalog_file)
+        template = contract_template or published_template
 
         if not template:
             status = await self.template_status_service.evaluate_catalog_file(
@@ -455,6 +483,8 @@ class DataSyncService:
                 "template_status": "ready",
                 "governance_status": "ready",
                 "has_template": True,
+                "template_id": getattr(template, "id", None),
+                "template_version": getattr(template, "version", None),
                 "template_name": template.template_name,
                 "template_header_row": getattr(template, "header_row", None),
                 "template_update_required": False,
@@ -479,21 +509,77 @@ class DataSyncService:
             if not file_exists:
                 raise FileNotFoundError(file_path)
 
-            header_row = 0
-            if (
-                use_template_header_row
-                and getattr(template, "header_row", None) is not None
-            ):
-                header_row = template.header_row
+            # [*] 统一读表头入口: 判定链路与入库链路读出的列必须同源
+            header_cache: Dict[int, Any] = {}
 
-            executor_manager = get_executor_manager()
-            df = await executor_manager.run_cpu_intensive(
-                ExcelParser.read_excel,
-                file_path,
-                header=header_row,
-                nrows=5,
-            )
-            current_columns = df.columns.tolist()
+            async def read_at(row: int):
+                if row not in header_cache:
+                    header_cache[row] = await self._header_reader.read_columns(
+                        file_path,
+                        header_row=row,
+                        nrows=5,
+                    )
+                return header_cache[row]
+
+            async def read_columns_at(row: int) -> List[str]:
+                cached = await read_at(row)
+                if not getattr(cached, "ok", False):
+                    return []
+                return list(cached.columns or [])
+
+            # ── 基准判定 ────────────────────────────────────────────
+            # 优先级: 契约(仍然解释得了文件) > 跨 family 接管 > 当前已发布模板
+            #
+            # 判定逻辑放在共享函数里 —— 判定链路与治理路由必须用同一把尺子,
+            # 否则治理面板显示「需要更新」而实际链路判定通过, 两边结论互相矛盾。
+            #
+            # 跨 family 接管是**增强项**: 变体表不可用(SQLite 测试库 / 未迁移的库)
+            # 时必须回退到「当前已发布模板」, 而不是让整条判定链路失败。
+            try:
+                baseline = await resolve_baseline_for_file(
+                    self.db,
+                    catalog_file=catalog_file,
+                    published_template=published_template,
+                    contract_template=contract_template,
+                    read_header=read_columns_at,
+                    use_template_header_row=use_template_header_row,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "[DataSync] 基准判定失败, 回退当前已发布模板 %s: %s",
+                    getattr(catalog_file, "file_name", None),
+                    exc,
+                )
+                fallback_row = (
+                    published_template.header_row
+                    if (
+                        use_template_header_row
+                        and published_template is not None
+                        and getattr(published_template, "header_row", None) is not None
+                    )
+                    else 0
+                )
+                baseline = {
+                    "baseline_template": None,
+                    "baseline_kind": TEMPLATE_BASELINE_CURRENT,
+                    "header_row": fallback_row,
+                    "header_columns": [],
+                    "takeover": None,
+                    "takeover_candidate": None,
+                    "contract_stale": False,
+                }
+            baseline_template = baseline["baseline_template"]
+            baseline_kind = baseline["baseline_kind"]
+            header_row = baseline["header_row"]
+            takeover_report = baseline["takeover"]
+            if baseline_template is not None:
+                template = baseline_template
+
+            header = await read_at(header_row)
+            if not header.ok:
+                raise ValueError(header.error or "文件读取失败")
+            df = header.dataframe
+            current_columns = list(header.columns)
             if hasattr(df, "head") and hasattr(df, "to_dict"):
                 sample_rows = df.head(3).fillna("").to_dict("records")
             else:
@@ -503,13 +589,18 @@ class DataSyncService:
                 template=template,
                 current_columns=current_columns,
                 sample_rows=sample_rows,
+                header_row=header_row,
+                takeover=takeover_report,
+                baseline_template_override=baseline_template,
+                baseline_kind_override=baseline_kind,
             )
             status = self._normalize_governance_status(status)
             if status.get("template_status") == "update_required":
                 status["update_reason"] = self._format_header_change_reason(
                     status.get("header_changes", {})
                 )
-                return status
+            status["template_id"] = getattr(template, "id", None)
+            status["template_version"] = getattr(template, "version", None)
             return status
         except Exception as exc:
             parse_error = exc
@@ -524,6 +615,8 @@ class DataSyncService:
             "template_status": "file_missing" if missing_file else "parse_failed",
             "governance_status": "parse_failed",
             "has_template": True,
+            "template_id": getattr(template, "id", None),
+            "template_version": getattr(template, "version", None),
             "template_name": template.template_name,
             "template_header_row": getattr(template, "header_row", None),
             "template_update_required": False,
@@ -720,6 +813,13 @@ class DataSyncService:
                 sub_domain=normalized_sub_domain,
             )
 
+            # [*] 模板契约优先: 用「采集当时生效的那一版模板」解释这个文件。
+            # 我们自己升级模板不应该让按旧模板采集的文件无法入库 ——
+            # 旧模板仍然能正确解释这个文件的结构。
+            contract_template = await self._resolve_contract_template(catalog_file)
+            if contract_template is not None:
+                template = contract_template
+
             if not template and only_with_template:
                 self._record_status(catalog_file, "skipped", "no_template")
                 await self.db.commit()
@@ -760,7 +860,39 @@ class DataSyncService:
                     )
 
                 # [*] v4.6.0重构:如果模板存在且use_template_header_row=True,严格执行模板表头行(不自动检测)
-                if (
+                #
+                # [D7] 跨 family 接管: 没有契约时, 先确认「这个文件该按哪一行的表头
+                # 解释」—— 必须与判定链路同一把尺子, 否则判定说「通过」、入库却按
+                # 另一行的表头读, 写进去的是垃圾数据。
+                ingestion_header_row: Optional[int] = None
+                if contract_template is None and template is not None:
+                    (
+                        ingestion_template,
+                        ingestion_header_row,
+                    ) = await self._resolve_ingestion_baseline(
+                        catalog_file,
+                        template=template,
+                        file_path=file_path,
+                    )
+                    if ingestion_template is not None:
+                        template = ingestion_template
+
+                if ingestion_header_row is not None:
+                    header_row = ingestion_header_row
+                    logger.info(
+                        "[DataSync] [STRICT] 使用接管变体的表头行: %s(严格模式,不自动检测)",
+                        header_row,
+                    )
+                    header = await self._header_reader.read_columns(
+                        file_path,
+                        header_row=header_row,
+                        nrows=100,
+                    )
+                    if not header.ok:
+                        raise ValueError(header.error or "文件读取失败")
+                    df = header.dataframe
+                    columns = list(header.columns)
+                elif (
                     use_template_header_row
                     and template
                     and hasattr(template, "header_row")
@@ -773,15 +905,16 @@ class DataSyncService:
                     )
 
                     # 直接使用模板指定的表头行读取文件
-                    # [*] v4.19.0更新:使用进程池执行CPU密集型操作(Excel读取),完全隔离事件循环
-                    executor_manager = get_executor_manager()
-                    df = await executor_manager.run_cpu_intensive(
-                        ExcelParser.read_excel,
+                    # [*] 统一读表头入口(与判定链路同源)
+                    header = await self._header_reader.read_columns(
                         file_path,
-                        header=header_row,  # 使用关键字参数
+                        header_row=header_row,
                         nrows=100,
                     )
-                    columns = df.columns.tolist()
+                    if not header.ok:
+                        raise ValueError(header.error or "文件读取失败")
+                    df = header.dataframe
+                    columns = list(header.columns)
 
                     # 验证表头匹配(可选,仅用于日志)
                     if (
@@ -821,15 +954,16 @@ class DataSyncService:
                         )
 
                     # 使用默认表头行读取文件
-                    # [*] v4.19.0更新:使用进程池执行CPU密集型操作(Excel读取),完全隔离事件循环
-                    executor_manager = get_executor_manager()
-                    df = await executor_manager.run_cpu_intensive(
-                        ExcelParser.read_excel,
+                    # [*] 统一读表头入口(与判定链路同源)
+                    header = await self._header_reader.read_columns(
                         file_path,
-                        header=header_row,  # 使用关键字参数
+                        header_row=header_row,
                         nrows=100,
                     )
-                    columns = df.columns.tolist()
+                    if not header.ok:
+                        raise ValueError(header.error or "文件读取失败")
+                    df = header.dataframe
+                    columns = list(header.columns)
 
                     # [*] v4.6.0重构:无模板时不进行自动检测,直接使用默认值0
                     # 原因:自动检测效果不佳,用户应该手动选择表头行并创建模板
@@ -877,7 +1011,9 @@ class DataSyncService:
             preview_template = await self._resolve_template_from_resolver_result(
                 preview_resolve_result
             )
-            if preview_template is not None:
+            if preview_template is not None and contract_template is None:
+                # [*] 有模板契约时不做纠正: 契约记录的是「采集当时生效的那一版模板」,
+                # 它才是这个文件的解释依据; 变体解析结果只用于没有契约的历史文件。
                 if not template or preview_template.id != template.id:
                     logger.info(
                         "[DataSync] resolver在预览后纠正模板: %s -> %s",
@@ -910,7 +1046,9 @@ class DataSyncService:
                 # [*] 检测表头变化(不进行相似度匹配,任何变化都需要用户确认)
                 # [*] v4.18.2:异步调用
                 header_changes = await self.template_matcher.detect_header_changes(
-                    template_id=template.id, current_columns=file_header_columns
+                    template_id=template.id,
+                    current_columns=file_header_columns,
+                    account=(getattr(catalog_file, "account", None) or None),
                 )
                 try:
                     readiness_status = await self.template_status_service.evaluate_catalog_file(
@@ -1015,7 +1153,10 @@ class DataSyncService:
                     semantic_contract_status = header_changes.get(
                         "semantic_contract_status"
                     )
-                    if semantic_contract_status == "non_breaking_drift":
+                    if (
+                        semantic_contract_status
+                        == SEMANTIC_CONTRACT_STATUS_NON_BREAKING_DRIFT
+                    ):
                         sync_mode = "semantic_drift_allowed"
 
                 # 如果表头完全匹配,使用模板的header_columns

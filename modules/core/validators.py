@@ -8,9 +8,17 @@
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
+from modules.core.data_domains import (
+    CANONICAL_DATA_DOMAINS,
+    normalize_data_domain as _normalize_data_domain,
+    is_valid_data_domain as _is_valid_data_domain,
+)
+
 # 白名单定义(Single Source of Truth)
 VALID_PLATFORMS = {'shopee', 'tiktok', 'miaoshou', 'amazon'}
-VALID_DATA_DOMAINS = {'orders', 'products', 'services', 'traffic', 'finance', 'analytics', 'inventory', 'purchase'}  # v4.10.0更新:traffic域已废弃(兼容性保留),统一使用analytics域;v4.20.0+新增:purchase采购单数据域(Sep 14 partial_success修复)
+# [D8] 数据域白名单只保留 canonical 域，traffic 属已废弃别名(归一为 analytics)
+#      SSOT: modules/core/data_domains.py —— 不要在这里另写字面量
+VALID_DATA_DOMAINS = set(CANONICAL_DATA_DOMAINS)
 VALID_GRANULARITIES = {'daily', 'weekly', 'monthly', 'snapshot', 'hourly'}
 VALID_SUB_DOMAINS = {'agent', 'ai_assistant', 'ai', ''}  # 空字符串表示无子域
 
@@ -73,7 +81,7 @@ class DataValidator:
                 error_message="数据域不能为空"
             )
         
-        normalized = domain.lower().strip()
+        normalized = normalize_data_domain(domain)
         
         if normalized not in VALID_DATA_DOMAINS:
             return ValidationResult(
@@ -211,8 +219,12 @@ def normalize_platform(platform: str) -> str:
 
 
 def normalize_data_domain(domain: str) -> str:
-    """标准化数据域(小写)"""
-    return domain.lower().strip() if domain else ''
+    """标准化数据域(小写 + 别名归一)。
+
+    [D8] 委托 SSOT `modules/core/data_domains.py`：
+    traffic 等历史别名会在这里被归一成 canonical 域(analytics)。
+    """
+    return _normalize_data_domain(domain)
 
 
 def normalize_granularity(granularity: str) -> str:
@@ -226,8 +238,8 @@ def is_valid_platform(platform: str) -> bool:
 
 
 def is_valid_data_domain(domain: str) -> bool:
-    """检查是否为有效数据域"""
-    return normalize_data_domain(domain) in VALID_DATA_DOMAINS
+    """检查是否为有效数据域(先做别名归一，再看是否落在 canonical 白名单内)"""
+    return _is_valid_data_domain(domain)
 
 
 def is_valid_granularity(granularity: str) -> bool:

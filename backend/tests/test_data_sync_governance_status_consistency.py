@@ -50,7 +50,18 @@ async def data_sync_client(tmp_path, monkeypatch):
         async def run_cpu_intensive(self, _fn, *_args, **_kwargs):
             return pd.DataFrame(columns=["订单编号", "金额"])
 
-    async def _fake_status(self, catalog_file, *, template=None, current_columns=None, sample_rows=None):
+    async def _fake_status(
+        self,
+        catalog_file,
+        *,
+        template=None,
+        current_columns=None,
+        sample_rows=None,
+        **_kwargs,
+    ):
+        # [*] **_kwargs: 判定链路会带上表头行/接管/基准来源等上下文参数,
+        # 打桩只关心「返回什么状态」, 不关心这些参数 ——
+        # 用 **kwargs 收下, 避免新增可选参数就打桩破裂。
         if "alias" in catalog_file.file_name:
             return {
                 "template_status": "alias_only",

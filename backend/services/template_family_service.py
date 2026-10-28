@@ -9,6 +9,12 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.semantic_field_registry import is_canonical_semantic_key, normalize_semantic_key
+from backend.services.template_variant_takeover import (
+    TAKEOVER_FLAG,
+    build_takeover_report,
+    evaluate_variant_takeover,
+    select_best_takeover,
+)
 from modules.core.db import (
     CatalogFile,
     FieldMappingTemplate,
@@ -197,6 +203,47 @@ def _variant_matches_sample_rows(
             continue
         return False
     return True
+
+
+def _account_dimension_matches(
+    family_account: Optional[str],
+    file_account: Optional[str],
+) -> bool:
+    """模板族的账号维度是否适用于该文件。
+
+    模板族绝大多数是 **account=None**(与店铺无关的通用模板),
+    而 ``catalog_files.account`` 是具体店铺 —— 所以 ``None`` 一侧表示「适用任意账号」。
+
+    实测本地库 34 个 family 全部 ``account=None``, 而文件的 account 是
+    ``chenzeweinbnb@163.com`` 之类的具体值 —— 若按字面相等判断,
+    「自家 family」永远匹配不上, 接管就会抢走自家文件的解释权。
+    """
+    if family_account is None:
+        return True
+    if file_account is None:
+        return False
+    return str(family_account) == str(file_account)
+
+
+def _variant_header_row_matches(
+    variant: dict[str, Any],
+    header_row: Optional[int],
+) -> bool:
+    """变体声明的表头行是否与实际读取的表头行一致。
+
+    ``header_columns`` 是按**某一行**读出来的, 只有与变体声明的行一致时,
+    比对结果才有意义。
+
+    * 变体没声明表头行 -> 视为「任意行可用」(无法证伪, 不阻塞)
+    * 调用方不知道实际行号 -> 同样放行(保持既有调用方行为)
+    """
+    variant_row = variant.get("header_row")
+    if variant_row is None or header_row is None:
+        return True
+    try:
+        return int(variant_row) == int(header_row)
+    except (TypeError, ValueError):
+        return False
 
 
 class TemplateFamilyService:
@@ -809,6 +856,31 @@ class TemplateResolver:
             header_columns=header_columns or [],
             sample_rows=sample_rows or [],
         )
+
+        # [D7] 本 family 内没有匹配变体时 -> 跨 family 兜底(同 platform + 同 data_domain)。
+        #
+        # 导出格式不一定跟着粒度走: tiktok 商品导出实际只有一种表结构(176 列),
+        # 但模板按粒度分别登记, monthly 的模板停留在旧版 38 列 ->
+        # monthly 的文件在 family 27 里匹配不到任何变体, 永远判漂移。
+        # 命中跨 family 变体时, 由它解释该文件, 并显式标注接管来源。
+        takeover_report = None
+        if selected_variant is None:
+            takeover = await self._select_cross_family_variant(
+                platform=platform,
+                data_domain=data_domain,
+                exclude_family_id=family.id,
+                header_row=header_row,
+                sheet_name=sheet_name,
+                header_columns=header_columns or [],
+                sample_rows=sample_rows or [],
+                granularity=granularity,
+                sub_domain=sub_domain,
+                account=account,
+            )
+            if takeover is not None:
+                selected_variant = takeover["variant"]
+                takeover_report = takeover["report"]
+
         governance_status = "ready" if selected_variant else "missing_variant"
         shadow_compare = await self._legacy_shadow_compare(
             platform=platform,
@@ -847,6 +919,9 @@ class TemplateResolver:
             "required_semantic_keys": required_semantic_keys,
             "hash_participating_semantic_keys": hash_participating_semantic_keys,
             "shadow_compare": shadow_compare,
+            # [D7] 跨 family 变体接管: 非空表示本文件是由**其他粒度**的变体解释的
+            "takeover": takeover_report,
+            "takeover_flag": TAKEOVER_FLAG if takeover_report else None,
         }
 
     def _select_variant(
@@ -889,6 +964,162 @@ class TemplateResolver:
             return None
         candidates.sort(key=lambda item: (-item[0], item[1], item[2]["id"]))
         return candidates[0][2]
+
+    async def list_cross_family_variants(
+        self,
+        *,
+        platform: str,
+        data_domain: str,
+        exclude_family_id: Optional[int] = None,
+        exclude_granularity: Optional[str] = None,
+        exclude_sub_domain: Optional[str] = None,
+        exclude_account: Optional[str] = None,
+        own_granularity: Optional[str] = None,
+        own_sub_domain: Optional[str] = None,
+        own_account: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """列出同 platform + 同 data_domain 下**所有** family 的 active 版本变体。
+
+        边界刻意收窄 —— 只允许同 ``platform`` + 同 ``data_domain``:
+        不同平台的导出格式不可类比, 跨平台接管一定会误判。
+
+        每项带 ``is_own_family`` 标记: 文件**自身所属**的 family 不算「其他 family」。
+        接管的前提是「自己家解释不了」—— 自身 family 的变体必须优先,
+        否则 monthly 的文件会被 daily 的变体抢走解释权。
+
+        ``exclude_*`` 用于排除指定维度下的 family; ``own_*`` 用于标记自身 family。
+        """
+        result = await self.db.execute(
+            select(FieldMappingTemplateFamily).where(
+                FieldMappingTemplateFamily.platform == platform,
+                FieldMappingTemplateFamily.data_domain == data_domain,
+            )
+        )
+        sibling_families = list(result.scalars().all())
+
+        collected: list[dict[str, Any]] = []
+        for sibling in sibling_families:
+            if exclude_family_id is not None and sibling.id == exclude_family_id:
+                continue
+            if (
+                exclude_granularity is not None
+                and sibling.granularity == exclude_granularity
+                and (sibling.sub_domain or None) == (exclude_sub_domain or None)
+                and _account_dimension_matches(sibling.account, exclude_account)
+            ):
+                continue
+            if sibling.active_version_id is None:
+                continue
+
+            family_payload, versions = await self.family_service.get_family_versions(
+                sibling.id
+            )
+            active_version = next(
+                (item for item in versions if item["status"] == "active"), None
+            )
+            if active_version is None:
+                continue
+
+            is_own_family = bool(
+                own_granularity is not None
+                and sibling.granularity == own_granularity
+                and (sibling.sub_domain or None) == (own_sub_domain or None)
+                and _account_dimension_matches(sibling.account, own_account)
+            )
+
+            _version_payload, variants = await self.family_service.get_version_variants(
+                active_version["id"]
+            )
+            for variant in variants:
+                collected.append(
+                    {
+                        "variant": variant,
+                        "family": family_payload,
+                        "version": active_version,
+                        "is_own_family": is_own_family,
+                    }
+                )
+        return collected
+
+    async def _select_cross_family_variant(
+        self,
+        *,
+        platform: str,
+        data_domain: str,
+        exclude_family_id: Optional[int],
+        header_row: Optional[int],
+        sheet_name: Optional[str],
+        header_columns: list[str],
+        sample_rows: list[dict[str, Any]],
+        granularity: Optional[str] = None,
+        sub_domain: Optional[str] = None,
+        account: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """跨 family 变体接管 (D7) —— 本 family 内没有匹配变体时的兜底。
+
+        在**同 platform + 同 data_domain** 的其他 family 里找能解释当前文件的变体。
+        命中门槛由 :mod:`backend.services.template_variant_takeover` 统一裁决:
+        ``required_headers`` 匹配率 >= 95% 且缺失列 <= 1。
+
+        表头行一致性
+        ------------
+        ``header_columns`` 是按**某个具体表头行**读出来的。变体各自声明了
+        ``header_row``, 只有当两者一致时, 比对结果才有意义 ——
+        否则是拿第 2 行的「全部.N」分组行去和第 3 行的真实指标名比对,
+        匹配率必然是 0。
+
+        注意: 这是**兜底**, 不是主路径。主路径是
+        :mod:`backend.services.template_variant_takeover_service` 的表头行感知
+        候选发现 —— 它会**按候选变体自己的 header_row 读表头**再评估。
+        """
+        candidates = await self.list_cross_family_variants(
+            platform=platform,
+            data_domain=data_domain,
+            exclude_family_id=exclude_family_id,
+            own_granularity=granularity,
+            own_sub_domain=sub_domain,
+            own_account=account,
+        )
+        evaluated: list[dict[str, Any]] = []
+        for candidate in candidates:
+            variant = candidate["variant"]
+            if not _variant_header_row_matches(variant, header_row):
+                continue
+            decision = evaluate_variant_takeover(variant, header_columns)
+            if decision is None:
+                continue
+            # 样本行校验: 与 family 内选择保持同一套硬约束
+            if sample_rows and not _variant_matches_sample_rows(
+                variant.get("field_parse_rules") or [], sample_rows
+            ):
+                continue
+            evaluated.append({**candidate, "decision": decision})
+
+        best = select_best_takeover(evaluated)
+        if best is None:
+            return None
+        if best.get("is_own_family"):
+            # 自家变体: 不是「接管」, 不应产出接管报告
+            return {
+                "variant": best["variant"],
+                "decision": best["decision"],
+                "report": None,
+                "family": best.get("family"),
+                "version": best.get("version"),
+            }
+
+        report = build_takeover_report(
+            best["decision"],
+            source_family=best["family"],
+            source_version=best["version"],
+        )
+        return {
+            "variant": best["variant"],
+            "decision": best["decision"],
+            "report": report,
+            "family": best["family"],
+            "version": best["version"],
+        }
 
     async def _legacy_shadow_compare(
         self,

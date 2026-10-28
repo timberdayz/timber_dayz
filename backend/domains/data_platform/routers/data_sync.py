@@ -35,12 +35,24 @@ from backend.models.database import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.data_sync_service import DataSyncService
+from backend.services.data_sync_cache_key import build_template_status_cache_key
+from backend.services.data_sync_status_semantics import governance_status_for
+from backend.services.data_sync_file_state_service import (
+    disposition_from_catalog_file,
+)
+from backend.services.spreadsheet_header_reader import get_spreadsheet_header_reader
+from backend.services.template_contract_service import (
+    resolve_valid_contract_template,
+)
+from backend.services.template_variant_takeover_service import (
+    resolve_baseline_for_file,
+)
 from backend.services.data_sync_cleanup_service import DataSyncCleanupService
 from backend.services.data_sync_template_status_service import (
     DataSyncTemplateStatusService,
 )
-from backend.services.spreadsheet_normalization_service import (
-    get_spreadsheet_normalization_service,
+from backend.services.data_sync_template_drift_service import (
+    DataSyncTemplateDriftService,
 )
 from backend.services.sync_progress_tracker import SyncProgressTracker
 from backend.services.sync_standardization_quality_service import (
@@ -562,15 +574,12 @@ def _infer_miaoshou_orders_business_platform(catalog_file: CatalogFile) -> str |
 def _build_template_status_cache_key(
     file_record: CatalogFile, template
 ) -> tuple[Any, ...]:
-    return (
-        getattr(file_record, "id", None),
-        getattr(file_record, "file_name", None),
-        getattr(file_record, "file_path", None),
-        getattr(template, "id", None),
-        getattr(template, "version", None),
-        getattr(template, "header_row", None),
-        getattr(file_record, "status", None),
-    )
+    """模板状态缓存键。
+
+    [*] 统一走 :func:`build_template_status_cache_key` —— 与就绪判定缓存
+    共用同一把尺子。原来这里少了 ``last_modified``, 文件内容换了仍会读到旧结论。
+    """
+    return build_template_status_cache_key(file_record, template)
 
 
 def _get_cached_template_status(cache_key: tuple[Any, ...]) -> Dict[str, Any] | None:
@@ -665,23 +674,19 @@ async def preview_file(
             None, lambda: PathLib(file_path).stat().st_size / (1024 * 1024)
         )
         preview_rows = 50 if file_size_mb > 10 else 100
-        runtime_file_path = file_path
-        runtime_source_format = ExcelParser.detect_file_format(PathLib(file_path))
-        if runtime_source_format in {"xls", "xlsx_with_ole", "html"}:
-            normalized = get_spreadsheet_normalization_service().normalize_for_runtime(
-                file_path,
-                source_format=runtime_source_format,
-            )
-            runtime_file_path = str(normalized.path)
 
-        # [*] v4.18.2修复:使用 run_in_executor 包装文件读取,避免阻塞事件循环
-        df = await loop.run_in_executor(
-            None,
-            ExcelParser.read_excel,
-            runtime_file_path,
-            request.header_row,  # [*] 直接使用用户选择的表头行
-            preview_rows,
+        # [*] 统一读表头入口: 与判定链路/入库链路同一套表头行口径与读取方式
+        header = await get_spreadsheet_header_reader(
+            log_prefix="Preview",
+            use_cpu_executor=False,
+        ).read_columns(
+            str(file_path),
+            header_row=request.header_row,
+            nrows=preview_rows,
         )
+        if not header.ok:
+            raise RuntimeError(header.error or "文件读取失败")
+        df = header.dataframe
 
         # 3. 规范化处理(合并单元格还原)
         normalization_report = {}
@@ -854,6 +859,7 @@ async def list_files(
         # 3. 检查模板匹配状态
         template_matcher = get_template_matcher(db)
         data_sync_service = DataSyncService(db)
+        drift_service = DataSyncTemplateDriftService(db)
         file_list = []
 
         # [*] v4.18.2修复:在循环外获取事件循环,避免重复获取
@@ -965,6 +971,20 @@ async def list_files(
                     )
                     _set_cached_template_status(cache_key, template_status_info)
 
+                # [*] 统一「模板待更新」口径: 持久化标记优先于实时重算。
+                # 文件一旦被标记为待更新, 就是一个尚未处理完的待办;
+                # 即使当前模板已经更新到能匹配该文件, 待办也不该凭空消失。
+                drift_state = drift_service.resolve_file_state(
+                    file_record, template_status_info
+                )
+                template_status_info = {
+                    **template_status_info,
+                    "template_update_required": drift_state["template_update_required"],
+                    "update_reason": drift_state["update_reason"],
+                    "drift_source": drift_state["drift_source"],
+                    "drift_snapshot": drift_state["drift_snapshot"],
+                }
+
             file_list.append(
                 {
                     "id": file_record.id,
@@ -1010,8 +1030,16 @@ async def list_files(
                         "template_update_required"
                     ],
                     "update_reason": template_status_info["update_reason"],
+                    "drift_source": template_status_info.get("drift_source"),
+                    "drift_snapshot": template_status_info.get("drift_snapshot"),
                     "template_name": template_status_info["template_name"],
                     "template_header_row": template_status_info["template_header_row"],
+                    # [*] 接管/基准信号: 让治理视图能区分「跨 family 接管」与「真漂移」
+                    "template_baseline": template_status_info.get("template_baseline"),
+                    "takeover": template_status_info.get("takeover"),
+                    "contract_stale": template_status_info.get("contract_stale"),
+                    "drift_origin": template_status_info.get("drift_origin"),
+                    "template_outdated": template_status_info.get("template_outdated"),
                     "shadow_compare": template_status_info.get("shadow_compare"),
                     "semantic_contract_status": template_status_info.get(
                         "semantic_contract_status"
@@ -1041,6 +1069,22 @@ async def list_files(
                         "semantic_repair_action"
                     ),
                     "status": file_record.status,
+                    # [*] 单一状态模型: 这个文件现在归谁处理、下一步做什么
+                    **disposition_from_catalog_file(
+                        file_record,
+                        template_status=template_status_info.get("template_status"),
+                        governance_status=template_status_info.get("governance_status"),
+                        semantic_contract_status=template_status_info.get(
+                            "semantic_contract_status"
+                        ),
+                        should_auto_sync=template_status_info.get("should_auto_sync"),
+                        template_update_required=template_status_info[
+                            "template_update_required"
+                        ],
+                        drift_source=template_status_info.get("drift_source"),
+                        template_baseline=template_status_info.get("template_baseline"),
+                        takeover=template_status_info.get("takeover"),
+                    ),
                 }
             )
 
@@ -3030,7 +3074,7 @@ async def get_detailed_template_coverage(
                     "template": template,
                 }
 
-        # 3. 查询所有文件的唯一组合(包括pending/failed/ingested,用于统计文件数)
+        # 3. 查询所有文件的唯一组合(包括pending/failed/ingested/模板待更新,用于统计文件数)
         files_stmt = (
             select(
                 CatalogFile.platform_code,
@@ -3043,8 +3087,8 @@ async def get_detailed_template_coverage(
                 CatalogFile.data_domain.isnot(None),
                 CatalogFile.granularity.isnot(None),
                 CatalogFile.status.in_(
-                    ["pending", "failed", "ingested"]
-                ),  # [*] 包括失败待修复的文件
+                    ["pending", "failed", "ingested", "template_update_required"]
+                ),  # [*] 包括失败待修复的文件与模板待更新的文件
             )
             .distinct()
         )
@@ -3079,8 +3123,23 @@ async def get_detailed_template_coverage(
         needs_update_list = []
         archived_compatibility_list = []
         template_status_service = DataSyncTemplateStatusService(db)
+        drift_service = DataSyncTemplateDriftService(db)
         detailed_coverage_missing_files: list[str] = []
         detailed_coverage_error_types: dict[str, int] = {}
+
+        # [*] 漂移分组: 「需要更新」待办的唯一来源。
+        # 不再依赖「用当前模板重新比对历史文件」——那样模板一更新, 待办就会凭空消失,
+        # 而真正被卡住的文件仍然滞留在 template_update_required 状态。
+        drift_groups = await drift_service.list_drift_groups()
+        drift_groups_by_key = {
+            (
+                group["platform"],
+                group["domain"],
+                group["granularity"],
+                group["sub_domain"],
+            ): group
+            for group in drift_groups
+        }
 
         for platform, domain, sub_domain, granularity in all_combinations:
             if not platform or not domain or not granularity:
@@ -3119,6 +3178,28 @@ async def get_detailed_template_coverage(
                 if candidate.status == "pending"
             ]
 
+            # [*] 漂移文件: 已被标记为「模板待更新」的文件。
+            # 它们是漂移证据的第一来源, 必须优先于已入库文件被选为示例文件。
+            drift_combo_file_result = await db.execute(
+                select(CatalogFile)
+                .where(
+                    CatalogFile.platform_code == platform,
+                    CatalogFile.data_domain == domain,
+                    CatalogFile.granularity == granularity,
+                    CatalogFile.sub_domain == sub_domain,
+                    CatalogFile.status == "template_update_required",
+                )
+                .order_by(CatalogFile.first_seen_at.desc())
+                .limit(20)
+            )
+            drift_combo_files = drift_combo_file_result.scalars().all()
+            valid_drift_combo_files = [
+                candidate
+                for candidate in drift_combo_files
+                if is_catalog_file_semantically_valid(candidate)
+                and to_absolute_path(candidate.file_path).exists()
+            ]
+
             combo_file_candidates_result = await db.execute(
                 select(CatalogFile)
                 .where(
@@ -3126,13 +3207,21 @@ async def get_detailed_template_coverage(
                     CatalogFile.data_domain == domain,
                     CatalogFile.granularity == granularity,
                     CatalogFile.sub_domain == sub_domain,
-                    CatalogFile.status.in_(["pending", "failed", "ingested"]),
+                    CatalogFile.status.in_(
+                        [
+                            "pending",
+                            "failed",
+                            "ingested",
+                            "template_update_required",
+                        ]
+                    ),
                 )
                 .order_by(
                     case(
-                        (CatalogFile.status == "pending", 0),
-                        (CatalogFile.status == "failed", 1),
-                        else_=2,
+                        (CatalogFile.status == "template_update_required", 0),
+                        (CatalogFile.status == "pending", 1),
+                        (CatalogFile.status == "failed", 2),
+                        else_=3,
                     ),
                     CatalogFile.first_seen_at.desc(),
                 )
@@ -3170,7 +3259,7 @@ async def get_detailed_template_coverage(
                 sub_domain=sub_domain,
             )
 
-            # [*] 统计该组合的文件数(包括pending/failed/ingested)
+            # [*] 统计该组合的文件数(包括pending/failed/ingested/模板待更新)
             # [*] v4.18.2:使用 await
             file_count_stmt = select(func.count(CatalogFile.id)).where(
                 CatalogFile.platform_code == platform,
@@ -3178,13 +3267,20 @@ async def get_detailed_template_coverage(
                 CatalogFile.granularity == granularity,
                 CatalogFile.sub_domain == sub_domain,
                 CatalogFile.status.in_(
-                    ["pending", "failed", "ingested"]
-                ),  # [*] 包括失败待修复的文件
+                    ["pending", "failed", "ingested", "template_update_required"]
+                ),  # [*] 包括失败待修复的文件与模板待更新的文件
             )
             file_count_result = await db.execute(file_count_stmt)
             file_count = file_count_result.scalar() or 0
             current_file_count = len(valid_current_combo_files)
             pending_file_count = len(valid_pending_combo_files)
+            # [*] 待处理文件数 = pending + failed + 模板待更新。
+            # 之前只看 pending/failed, 于是「所有文件都卡在模板待更新」的组合
+            # (current_file_count == 0) 会被当成「历史遗留组合」归档,
+            # 从「已覆盖 / 缺少模板 / 需要更新」三个页签里整体消失。
+            actionable_file_count = len(valid_current_combo_files) + len(
+                valid_drift_combo_files
+            )
 
             combo_info = {
                 "family_id": (
@@ -3212,14 +3308,21 @@ async def get_detailed_template_coverage(
                 template_status = "ready"
                 semantic_match = True
 
-                # [*] 获取该组合的一个示例文件(优先pending,其次failed,最后ingested)
+                # [*] 获取该组合的一个示例文件。
+                # 优先级: 漂移文件(模板待更新) > pending > failed > ingested。
                 # [*] v4.18.2:使用 await
                 sample_file_candidates = [
-                    *valid_current_combo_files,
+                    *valid_drift_combo_files,
+                    *[
+                        candidate
+                        for candidate in valid_current_combo_files
+                        if candidate not in valid_drift_combo_files
+                    ],
                     *[
                         candidate
                         for candidate in valid_combo_file_candidates
-                        if candidate not in valid_current_combo_files
+                        if candidate not in valid_drift_combo_files
+                        and candidate not in valid_current_combo_files
                     ],
                     *[
                         candidate
@@ -3252,47 +3355,97 @@ async def get_detailed_template_coverage(
 
                 if sample_file:
                     try:
-                        from backend.services.excel_parser import ExcelParser
+                        # [*] 统一读表头入口: 这里原先直接用 sample_file.file_path
+                        # (catalog_files 里存的是**相对路径**), 没有做路径解析,
+                        # 与判定链路/入库链路读到的可能不是同一个文件。
+                        sample_reader = get_spreadsheet_header_reader(
+                            log_prefix="Governance",
+                            use_cpu_executor=False,
+                        )
 
-                        # [*] v4.18.2修复:使用 run_in_executor 包装文件读取,避免阻塞事件循环
-                        loop = asyncio.get_running_loop()
-                        runtime_sample_path = str(sample_file.file_path)
-                        runtime_source_format = ExcelParser.detect_file_format(
-                            PathLib(runtime_sample_path)
+                        # [D7] 跨 family 接管(表头行感知): 治理视图必须与判定链路
+                        # 用同一把尺子 —— 否则面板显示「需要更新」而实际链路判定通过,
+                        # 两边结论互相矛盾。
+                        sample_header_cache = {}
+                        sample_takeover_report = None
+                        sample_header_row = template.header_row or 0
+
+                        async def _sample_read_at(row: int):
+                            if row not in sample_header_cache:
+                                sample_header_cache[row] = await sample_reader.read_header(
+                                    str(sample_file.file_path),
+                                    header_row=row,
+                                    nrows=5,
+                                )
+                            return sample_header_cache[row]
+
+                        async def _sample_read_columns(row: int):
+                            cached = await _sample_read_at(row)
+                            if not getattr(cached, "ok", False):
+                                return []
+                            return list(cached.columns or [])
+
+                        sample_contract_template = (
+                            await resolve_valid_contract_template(db, sample_file)
                         )
-                        if runtime_source_format in {"xls", "xlsx_with_ole", "html"}:
-                            normalized = get_spreadsheet_normalization_service().normalize_for_runtime(
-                                runtime_sample_path,
-                                source_format=runtime_source_format,
+                        try:
+                            sample_baseline = await resolve_baseline_for_file(
+                                db,
+                                catalog_file=sample_file,
+                                published_template=template,
+                                contract_template=sample_contract_template,
+                                read_header=_sample_read_columns,
                             )
-                            runtime_sample_path = str(normalized.path)
-                        df = await loop.run_in_executor(
-                            None,
-                            ExcelParser.read_excel,
-                            runtime_sample_path,
-                            template.header_row or 0,
-                            5,  # nrows=5
-                        )
-                        current_columns = df.columns.tolist()
+                        except Exception as exc:  # noqa: BLE001
+                            # 跨 family 接管是增强项, 查不到就按当前已发布模板走
+                            logger.warning(
+                                "[Governance] 基准判定失败, 回退当前已发布模板: %s", exc
+                            )
+                            sample_baseline = {
+                                "baseline_template": None,
+                                "baseline_kind": "current",
+                                "header_row": template.header_row or 0,
+                                "takeover": None,
+                            }
+                        sample_takeover_report = sample_baseline.get("takeover")
+                        sample_header_row = sample_baseline.get("header_row", 0)
+                        if sample_baseline.get("baseline_template") is not None:
+                            template = sample_baseline["baseline_template"]
+
+                        sample_header = await _sample_read_at(sample_header_row)
+                        if not sample_header.ok:
+                            raise RuntimeError(
+                                sample_header.error or "样本文件读取失败"
+                            )
+                        current_columns = list(sample_header.columns)
+                        sample_df = sample_header.dataframe
 
                         status_info = (
                             await template_status_service.evaluate_catalog_file(
                                 sample_file,
                                 template=template,
                                 current_columns=current_columns,
-                                sample_rows=df.head(3).fillna("").to_dict("records"),
+                                sample_rows=(
+                                    sample_df.head(3).fillna("").to_dict("records")
+                                    if sample_df is not None
+                                    and hasattr(sample_df, "head")
+                                    and hasattr(sample_df, "to_dict")
+                                    else []
+                                ),
+                                header_row=sample_header_row,
+                                takeover=sample_takeover_report,
+                                baseline_template_override=sample_baseline.get(
+                                    "baseline_template"
+                                ),
+                                baseline_kind_override=sample_baseline.get(
+                                    "baseline_kind"
+                                ),
                             )
                         )
                         template_status = status_info.get("template_status", "ready")
                         combo_info["governance_status"] = status_info.get(
                             "governance_status",
-                            {
-                                "ready": "ready",
-                                "alias_only": "non_breaking_drift",
-                                "update_required": "breaking_drift",
-                                "missing_variant": "missing_variant",
-                                "missing": "missing_family",
-                            }.get(template_status, combo_info["governance_status"]),
+                            governance_status_for(template_status),
                         )
                         semantic_match = status_info.get("semantic_match", False)
                         shadow_compare = (
@@ -3323,6 +3476,19 @@ async def get_detailed_template_coverage(
                                 detailed_coverage_error_types.get(error_type, 0) + 1
                             )
 
+                # [*] 漂移待办优先: 该组合存在被标记为「模板待更新」的文件时,
+                # 待办以漂移快照为准, 不以「用当前模板重新比对」的结果为准。
+                # 否则模板一旦更新, 待办会凭空消失, 而文件仍卡在那里。
+                drift_group = drift_groups_by_key.get(
+                    (platform, domain, granularity, sub_domain)
+                )
+                if drift_group:
+                    needs_update = True
+                    template_status = "update_required"
+                    combo_info["governance_status"] = "breaking_drift"
+                    # [*] 历史文件可能还没有漂移快照, 退回使用实时判定的原因
+                    update_reason = drift_group.get("update_reason") or update_reason
+
                 covered_row = {
                     **combo_info,
                     **sample_file_info,
@@ -3336,7 +3502,7 @@ async def get_detailed_template_coverage(
                     "shadow_compare": shadow_compare,
                 }
 
-                if combo_info["current_file_count"] == 0:
+                if actionable_file_count == 0:
                     archived_compatibility_list.append(covered_row)
                     continue
 
@@ -3349,12 +3515,22 @@ async def get_detailed_template_coverage(
                             **sample_file_info,
                             "template_id": template.id,
                             "template_name": template.template_name,
+                            "template_version": template.version,
+                            "template_status": template_status,
                             "update_reason": update_reason,
                             "shadow_compare": shadow_compare,
+                            # [*] 漂移快照: 供前端展示「漂移发生时」的模板版本与表头差异
+                            "drift_snapshot": (
+                                drift_group or {}
+                            ).get("drift_snapshot"),
+                            "drift_file_count": (drift_group or {}).get("file_count", 0),
+                            "drift_detected_at": (drift_group or {}).get(
+                                "detected_at"
+                            ),
                         }
                     )
             else:
-                if combo_info["current_file_count"] == 0:
+                if actionable_file_count == 0:
                     archived_compatibility_list.append(
                         {
                             **combo_info,
@@ -3552,12 +3728,12 @@ async def get_governance_stats(
         ]
         pending_count = len(pending_files)
         ready_to_sync_count = 0
-        template_update_required_result = await db.execute(
-            select(func.count(CatalogFile.id)).where(
-                CatalogFile.status == "template_update_required"
-            )
+        # [*] 统一口径: 「模板待更新」的文件数由漂移服务统一统计,
+        # 与文件列表页、模板治理页使用同一套判定规则。
+        drift_service = DataSyncTemplateDriftService(db)
+        template_update_required_count = (
+            await drift_service.count_files_requiring_update()
         )
-        template_update_required_count = template_update_required_result.scalar() or 0
         missing_template_count = 0
         semantic_anomaly_count = 0
 

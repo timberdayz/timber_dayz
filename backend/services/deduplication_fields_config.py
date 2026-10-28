@@ -13,6 +13,7 @@ v4.14.0新增:
 """
 
 from typing import List, Optional, Dict, Any
+from modules.core.data_domains import normalize_data_domain
 from modules.core.logger import get_logger
 from backend.services.semantic_field_registry import (
     is_canonical_semantic_key,
@@ -29,9 +30,9 @@ DEDUPLICATION_STRATEGY: Dict[str, str] = {
     "inventory": "UPSERT",  # 库存数据域使用UPSERT(更新而非重复插入)
     "orders": "UPSERT",  # [*] v4.16.0更新:订单数据域使用UPSERT(更新订单金额、数量等)
     "products": "UPSERT",  # [*] v4.16.0更新:产品数据域使用UPSERT(更新产品指标)
-    "traffic": "UPSERT",  # [*] v4.16.0更新:流量数据域使用UPSERT(更新流量指标)
     "services": "UPSERT",  # [*] v4.16.0更新:服务数据域使用UPSERT(更新服务指标)
     "analytics": "UPSERT",  # [*] v4.16.0更新:分析数据域使用UPSERT(更新分析指标)
+    # [D8] 原 "traffic" 条目已并入 "analytics"(traffic 域已废弃并入 analytics)
 }
 
 # [*] v4.15.0新增:UPSERT更新字段配置(统一配置,保持一致性)
@@ -69,13 +70,7 @@ UPSERT_UPDATE_FIELDS: Dict[str, List[str]] = {
         "period_start_time",
         "period_end_time",
     ],
-    "traffic": [
-        "raw_data",
-        "ingest_timestamp",
-        "file_id",
-        "header_columns",
-        "currency_code",
-    ],
+    # [D8] 原独立的 "traffic" 条目已并入 "analytics"(traffic 域已废弃并入 analytics)
     "services": [
         "raw_data",
         "ingest_timestamp",
@@ -97,7 +92,7 @@ DEFAULT_DEDUPLICATION_FIELDS: Dict[str, List[str]] = {
     "orders": ["order_id"],
     "products": ["platform_sku", "product_id", "metric_date"],
     "inventory": ["platform_sku", "product_id", "warehouse_name", "metric_date"],
-    "traffic": ["metric_date"],
+    # [D8] 原独立的 "traffic" 条目已并入 "analytics"(traffic 域已废弃并入 analytics)
     "services": ["service_id", "metric_date"],
     "analytics": ["metric_date"],
 }
@@ -165,6 +160,8 @@ def get_default_deduplication_fields(
         return fields
 
     # 使用数据域默认配置
+    # [D8] 归一数据域(traffic -> analytics),避免别名落到"未找到配置"分支
+    data_domain = normalize_data_domain(data_domain)
     if data_domain in DEFAULT_DEDUPLICATION_FIELDS:
         fields = DEFAULT_DEDUPLICATION_FIELDS[data_domain]
         logger.debug(f"[DedupFields] 使用数据域默认配置: {data_domain} -> {fields}")
@@ -285,7 +282,7 @@ def get_deduplication_strategy(data_domain: str) -> str:
         策略名称:'INSERT' 或 'UPSERT'(v4.16.0后默认返回'UPSERT')
     """
     strategy = DEDUPLICATION_STRATEGY.get(
-        data_domain, "UPSERT"
+        normalize_data_domain(data_domain), "UPSERT"
     )  # [*] v4.16.0更新:默认策略改为UPSERT
     logger.debug(f"[DedupStrategy] 数据域 {data_domain} 使用策略: {strategy}")
     return strategy
@@ -302,7 +299,7 @@ def get_upsert_update_fields(data_domain: str) -> List[str]:
         更新字段列表
     """
     fields = UPSERT_UPDATE_FIELDS.get(
-        data_domain,
+        normalize_data_domain(data_domain),
         ["raw_data", "ingest_timestamp", "file_id", "header_columns", "currency_code"],
     )
     logger.debug(f"[UpsertFields] 数据域 {data_domain} 的更新字段: {fields}")

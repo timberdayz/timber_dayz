@@ -43,6 +43,7 @@ from modules.core.validators import (
     is_valid_platform, is_valid_data_domain, is_valid_granularity,
     VALID_PLATFORMS, VALID_DATA_DOMAINS, VALID_GRANULARITIES
 )
+from modules.core.data_domains import data_domain_tokens
 
 logger = get_logger(__name__)
 
@@ -199,8 +200,10 @@ def _infer_domain_from_path(file_path: Path) -> Optional[str]:
     """从路径推断数据域（兼容旧测试辅助函数）。"""
     parts = [part.lower() for part in Path(file_path).parts]
     for part in parts:
-        if part in KNOWN_DATA_DOMAINS:
-            return part
+        # [D8] 归一后再比白名单：历史 `traffic` 目录段会被映射为 analytics
+        normalized = normalize_data_domain(part)
+        if normalized in KNOWN_DATA_DOMAINS:
+            return normalized
         if part == "metrics":
             return "metrics"
     return None
@@ -315,6 +318,70 @@ def _is_repaired_cache(file_path: Path) -> bool:
         return False
 
 
+def _capture_template_contract(
+    session,
+    *,
+    platform: str,
+    data_domain: str,
+    granularity: Optional[str] = None,
+    sub_domain: Optional[str] = None,
+    account: Optional[str] = None,
+    cache: Optional[dict] = None,
+) -> dict:
+    """采集落库时记录「生效模板契约」。
+
+    为什么必须在这里记录
+    -------------------
+    契约是后续表头比对的**基准**。判定时用文件自己记录的那一版模板,
+    而不是「当前最新已发布模板」—— 否则我们每升级一次模板,
+    历史上按旧模板采集的文件都会被误判成「结构漂移」,
+    系统也无法区分「源文件变了」与「我们自己升级了模板」。
+
+    返回值是可直接并入 ``file_metadata`` 的字典:
+    命中模板时为 ``{'template_contract': {...}}``, 否则为空字典。
+
+    失败不阻断登记: 契约缺失只会回退到旧口径, 不该让文件进不了目录。
+    """
+    try:
+        from backend.services.template_contract_service import build_template_contract
+        from backend.services.template_matcher import find_best_template_sync
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[AutoRegister] 模板契约依赖不可用, 跳过契约登记: %s", exc)
+        return {}
+
+    cache_key = (platform, data_domain, granularity, sub_domain, account)
+    template = None
+    if cache is not None and cache_key in cache:
+        template = cache[cache_key]
+    else:
+        template = find_best_template_sync(
+            session,
+            platform=platform,
+            data_domain=data_domain,
+            granularity=granularity,
+            sub_domain=sub_domain,
+            account=account,
+        )
+        if cache is not None:
+            cache[cache_key] = template
+
+    if template is None:
+        return {}
+
+    try:
+        contract = build_template_contract(template)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[AutoRegister] 生成模板契约失败: %s", exc)
+        return {}
+
+    if not contract:
+        return {}
+
+    from backend.services.template_contract_service import TEMPLATE_CONTRACT_KEY
+
+    return {TEMPLATE_CONTRACT_KEY: contract}
+
+
 def _fallback_parse_legacy(file_path: Path) -> Optional[dict]:
     """解析遗留命名(以日期开头或双下划线分隔的老格式)。
 
@@ -353,7 +420,8 @@ def _fallback_parse_legacy(file_path: Path) -> Optional[dict]:
         shop_id = legacy_parts[2] or None
         # 解析数据域与粒度(如果存在)
         if len(legacy_parts) >= 5:
-            domain = legacy_parts[3].lower()
+            # [D8] 归一：历史 `__traffic__` 段映射为 analytics
+            domain = normalize_data_domain(legacy_parts[3])
             # 兼容 services 子域
             if domain == "services" and len(legacy_parts) >= 6 and legacy_parts[4] in {"agent", "ai_assistant", "ai"}:
                 sub_domain = legacy_parts[4]
@@ -363,11 +431,12 @@ def _fallback_parse_legacy(file_path: Path) -> Optional[dict]:
                 granularity = legacy_parts[4].lower() if len(legacy_parts) >= 5 else None
 
     # 如仍缺失,从文件名整体字符串里搜索已知关键词
+    # [D8] 用 canonical + 历史别名一起匹配,命中后归一成 canonical 域
     lower_stem = stem.lower()
     if not domain:
-        for d in KNOWN_DATA_DOMAINS:
+        for d in data_domain_tokens():
             if f"_{d}_" in lower_stem or f"__{d}__" in lower_stem:
-                domain = d
+                domain = normalize_data_domain(d)
                 break
     if not granularity:
         for g in KNOWN_GRANULARITIES:
@@ -379,8 +448,10 @@ def _fallback_parse_legacy(file_path: Path) -> Optional[dict]:
     if not domain:
         for parent in file_path.parents:
             name = parent.name.lower()
-            if name in KNOWN_DATA_DOMAINS:
-                domain = name
+            # [D8] 归一后再比白名单：历史 `traffic` 目录名会被映射为 analytics
+            normalized = normalize_data_domain(name)
+            if normalized in KNOWN_DATA_DOMAINS:
+                domain = normalized
                 break
     if not granularity:
         for parent in file_path.parents:
@@ -449,6 +520,8 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
     registered = 0
     skipped = 0
     new_file_ids: List[int] = []
+    # [*] 模板契约缓存: 一次扫描里同一维度的模板只查一次
+    template_contract_cache: dict = {}
     
     try:
         # v4.3.5: 目录白名单 - 仅扫描data/raw/YYYY/年份分区
@@ -674,6 +747,17 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                         skipped += 1
                         continue
                     
+                    # 3.4 [*] 模板契约: 记录「这个文件是按哪一版模板采集的」
+                    template_contract_meta = _capture_template_contract(
+                        session,
+                        platform=norm_platform,
+                        data_domain=norm_domain,
+                        granularity=norm_granularity,
+                        sub_domain=norm_sub_domain or None,
+                        account=meta_for_resolver.get('account'),
+                        cache=template_contract_cache,
+                    )
+
                     # 3.5. [*] v4.17.3修复:计算文件哈希(包含shop_id和platform_code)
                     # 这样可以区分不同店铺/平台的相同内容文件
                     file_hash = _compute_sha256(
@@ -734,7 +818,10 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                         storage_layer='raw',
                         quality_score=quality_score,
                         meta_file_path=relative_meta_path,  # v4.18.0: 存储相对路径
-                        file_metadata={'shop_resolution': shop_resolution_meta},
+                        file_metadata={
+                            'shop_resolution': shop_resolution_meta,
+                            **template_contract_meta,
+                        },
                         
                         # 兼容性字段 - v4.3.5: 同样小写化
                         platform_code=norm_platform,
@@ -832,6 +919,17 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                             existing.status = 'pending'
                         elif not initial_shop_id and existing.status == 'pending':
                             existing.status = 'needs_shop'
+
+                        # [*] 模板契约: 重新登记意味着文件被重新采集过,
+                        # 契约应当刷新为「当前生效的模板版本」。
+                        if template_contract_meta:
+                            current_meta = (
+                                dict(existing.file_metadata)
+                                if isinstance(existing.file_metadata, dict)
+                                else {}
+                            )
+                            current_meta.update(template_contract_meta)
+                            existing.file_metadata = current_meta
                         
                         # [*] v4.17.3修复:更新file_hash(如果hash计算方式改变)
                         if existing.file_hash != file_hash:
@@ -1075,6 +1173,17 @@ def register_single_file(file_path: str) -> Optional[int]:
             )
             return None
         
+        # 4.5 [*] 模板契约: 记录「这个文件是按哪一版模板采集的」
+        # 契约是后续表头比对的基准; 缺契约时判定会回退到「当前最新已发布模板」。
+        template_contract_meta = _capture_template_contract(
+            session,
+            platform=norm_platform,
+            data_domain=norm_domain,
+            granularity=norm_granularity,
+            sub_domain=norm_sub_domain or None,
+            account=meta_for_resolver.get('account'),
+        )
+
         # 5. [*] v4.17.3修复:计算文件哈希(包含shop_id和platform_code)
         # 这样可以区分不同店铺/平台的相同内容文件
         file_hash = _compute_sha256(
@@ -1178,7 +1287,18 @@ def register_single_file(file_path: str) -> Optional[int]:
                 existing.status = 'pending'
             elif not initial_shop_id and existing.status == 'pending':
                 existing.status = 'needs_shop'
-            
+
+            # [*] 模板契约: 重新登记意味着文件被重新采集过,
+            # 契约应当刷新为「当前生效的模板版本」。
+            if template_contract_meta:
+                current_meta = (
+                    dict(existing.file_metadata)
+                    if isinstance(existing.file_metadata, dict)
+                    else {}
+                )
+                current_meta.update(template_contract_meta)
+                existing.file_metadata = current_meta
+
             # [*] v4.17.3修复:更新file_hash(如果hash计算方式改变)
             if existing.file_hash != file_hash:
                 logger.info(f"[AutoRegister] [v4.17.3] 更新file_hash: {file_path_obj.name} (旧hash: {existing.file_hash[:16] if existing.file_hash else 'None'}..., 新hash: {file_hash[:16]}...)")
@@ -1211,7 +1331,10 @@ def register_single_file(file_path: str) -> Optional[int]:
                 storage_layer='raw',
                 quality_score=quality_score,
                 meta_file_path=relative_meta_path,  # v4.18.0: 存储相对路径
-                file_metadata={'shop_resolution': shop_resolution_meta},
+                file_metadata={
+                    'shop_resolution': shop_resolution_meta,
+                    **template_contract_meta,
+                },
                 platform_code=norm_platform,
                 status=initial_status,
                 first_seen_at=datetime.now()

@@ -19,16 +19,18 @@ from datetime import date, datetime
 
 from modules.services.smart_date_parser import parse_date, detect_dayfirst
 from backend.services.field_mapping.type_detector import detect_date_range_format
+from modules.core.data_domains import normalize_data_domain
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
 # 日期字段列表(根据数据域不同)
 # 注意:DateTime字段保留时间部分,Date字段丢弃时间部分
+# [D8] traffic 域已废弃并入 analytics,原 traffic/analytics 两份条目合并为一份,
+#      不再保留同义的两个 key(否则两份内容会各自漂移)
 DATE_FIELDS_BY_DOMAIN = {
     "orders": ["order_time_utc", "order_date_local", "metric_date", "payment_time", "ship_time"],
     "products": ["metric_date", "launch_date"],
-    "traffic": ["metric_date"],
     "analytics": ["metric_date"],
     "services": ["service_date", "metric_date"],
 }
@@ -37,7 +39,6 @@ DATE_FIELDS_BY_DOMAIN = {
 DATETIME_FIELDS_BY_DOMAIN = {
     "orders": ["order_time_utc", "payment_time", "ship_time"],  # 这些字段需要保留时间
     "products": [],  # 产品指标通常只需要日期
-    "traffic": [],
     "analytics": [],
     "services": [],
 }
@@ -46,8 +47,9 @@ DATETIME_FIELDS_BY_DOMAIN = {
 NUMERIC_FIELDS_BY_DOMAIN = {
     "orders": ["total_amount", "subtotal", "shipping_fee", "tax_amount", "discount_amount", "refund_amount"],
     "products": ["price", "stock", "sales_amount"],
-    "traffic": ["page_views", "unique_visitors"],
-    "analytics": ["conversion_rate", "click_rate"],
+    # [D8] 原 traffic 的 page_views/unique_visitors 与 analytics 的
+    #      conversion_rate/click_rate 合并(同一数据域,取并集)
+    "analytics": ["page_views", "unique_visitors", "conversion_rate", "click_rate"],
     "services": ["amount"],
 }
 
@@ -252,6 +254,9 @@ def standardize_row(row: Dict[str, Any], domain: str, date_fields: Optional[List
     """
     standardized = row.copy()
     
+    # [D8] 归一数据域(traffic -> analytics),保证下面按域取配置时命中同一份
+    domain = normalize_data_domain(domain)
+    
     # 获取日期字段列表
     if date_fields is None:
         date_fields = DATE_FIELDS_BY_DOMAIN.get(domain, ["metric_date"])
@@ -379,6 +384,9 @@ def standardize_rows(rows: List[Dict[str, Any]], domain: str,
     """
     if not rows:
         return rows
+    
+    # [D8] 归一数据域(traffic -> analytics)
+    domain = normalize_data_domain(domain)
     
     # 检测日期格式偏好(从第一行采样)
     prefer_dayfirst = None

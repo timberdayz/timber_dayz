@@ -33,6 +33,9 @@ import asyncio
 from modules.core.db import CatalogFile
 from modules.core.logger import get_logger
 from backend.services.excel_parser import ExcelParser
+from backend.services.spreadsheet_header_reader import (
+    get_spreadsheet_header_reader,
+)
 from backend.services.executor_manager import (
     get_executor_manager,
 )  # v4.19.0新增:使用统一执行器管理器
@@ -254,138 +257,32 @@ class DataIngestionService:
             db: 异步数据库会话(AsyncSession)
         """
         self.db = db
+        # [*] 统一读表头入口(入库链路与判定链路共用同一套解析规则)
+        self._header_reader = get_spreadsheet_header_reader(
+            strict_allowed_roots=True,
+            log_prefix="Ingest",
+            executor_manager_factory=lambda: get_executor_manager(),
+        )
 
     def _safe_resolve_path(self, file_path: str) -> str:
+        """安全解析文件路径(兼容绝对路径和相对路径)。
+
+        [*] 实现已收敛到 :mod:`backend.services.spreadsheet_header_reader`,
+        与判定链路共用同一套解析规则; 这里保留方法名作为**可打桩的接缝**。
+
+        入库链路是严格模式: 路径不在允许根内直接抛错(判定链路默认宽松,
+        由 ``DATA_SYNC_STRICT_ALLOWED_ROOTS`` 控制)。
         """
-        安全解析文件路径(增强版:兼容绝对路径和相对路径)
-
-        Args:
-            file_path: 文件路径
-
-        Returns:
-            解析后的安全路径
-
-        支持:
-        - 绝对路径存在:直接使用
-        - 绝对路径不存在:尝试从路径中提取相对部分重新解析(兼容云端部署和环境迁移)
-        - 相对路径:从项目根目录解析
-        - 路径安全校验:限制在允许的根目录内
-        """
-        from modules.core.path_manager import (
-            get_project_root,
-            get_data_input_dir,
-            get_data_raw_dir,
-        )
-
-        project_root = get_project_root()
-        path_obj = Path(file_path)
-
-        # 允许的目录(使用统一路径管理)
-        allowed_dirs_paths = [
-            get_data_input_dir(),
-            get_data_raw_dir(),
-            project_root / "temp" / "outputs",
-            project_root / "downloads",
-        ]
-
-        # 如果是绝对路径
-        if path_obj.is_absolute():
-            # 如果绝对路径存在,验证后直接使用
-            if path_obj.exists():
-                resolved = path_obj.resolve()
-                # 验证路径在允许的目录中
-                for allowed_dir_path in allowed_dirs_paths:
-                    base_path = Path(allowed_dir_path).resolve()
-                    try:
-                        resolved.relative_to(base_path)
-                        return str(resolved)
-                    except ValueError:
-                        continue
-
-                # 额外检查:路径包含允许的目录名
-                file_path_normalized = str(resolved).lower().replace("\\", "/")
-                if any(
-                    key in file_path_normalized
-                    for key in ["data/raw", "data/input", "temp/outputs", "downloads"]
-                ):
-                    logger.info(f"[SafePath] 绝对路径通过额外检查: {file_path}")
-                    return str(resolved)
-
-            # 绝对路径不存在,尝试从路径中提取相对部分(兼容旧数据和环境迁移)
-            path_str = file_path.replace("\\", "/")
-            key_paths = ["data/raw/", "data/input/", "downloads/", "temp/outputs/"]
-            for key_path in key_paths:
-                if key_path in path_str:
-                    idx = path_str.find(key_path)
-                    relative_path = path_str[idx:]
-                    resolved_path = project_root / relative_path
-                    if resolved_path.exists():
-                        logger.info(
-                            f"[SafePath] 从绝对路径提取相对路径: {file_path} -> {resolved_path}"
-                        )
-                        return str(resolved_path.resolve())
-
-            # 如果找不到关键路径,记录警告
-            logger.warning(f"[SafePath] 绝对路径不存在且无法提取相对路径: {file_path}")
-            # 仍然尝试解析,以便后续错误处理可以给出更好的提示
-            resolved = path_obj.resolve() if path_obj.exists() else path_obj
-        else:
-            # 相对路径:从项目根目录解析
-            resolved = (project_root / file_path).resolve()
-
-        # 检查文件路径是否在允许的目录中
-        for allowed_dir_path in allowed_dirs_paths:
-            base_path = Path(allowed_dir_path).resolve()
-            try:
-                resolved.relative_to(base_path)
-                return str(resolved)
-            except ValueError:
-                continue
-
-        # 额外检查:如果路径包含允许的目录名(大小写不敏感,兼容路径拼写差异)
-        file_path_lower = str(resolved).lower()
-        file_path_normalized = file_path_lower.replace("\\", "/")
-
-        for allowed_dir_path in allowed_dirs_paths:
-            allowed_dir_str = str(allowed_dir_path)
-            allowed_dir_normalized = allowed_dir_str.lower().replace("\\", "/")
-            if allowed_dir_normalized in file_path_normalized:
-                if project_root:
-                    # v4.18.1修复:使用项目根目录名称动态获取,避免硬编码
-                    project_root_name = project_root.name.lower()
-                    project_key_parts = [project_root_name, "data", "downloads", "temp"]
-                    if any(part in file_path_normalized for part in project_key_parts):
-                        logger.info(
-                            f"[SafePath] 通过额外检查允许路径: {file_path} (允许目录: {allowed_dir_str})"
-                        )
-                        return str(resolved)
-
-        allowed_dirs_str = [str(d) for d in allowed_dirs_paths]
-        raise ValueError(
-            f"[SafePath] 文件路径不在允许的目录中: {file_path} (项目根目录: {project_root}, 允许目录: {allowed_dirs_str})"
-        )
+        return self._header_reader.resolve_safe_path(file_path)
 
     def _resolve_runtime_spreadsheet_path(self, file_path: str) -> str:
-        from backend.services.spreadsheet_normalization_service import (
-            get_spreadsheet_normalization_service,
-        )
+        """解析运行时可读的表格路径(必要时产出标准化副本)。
 
+        [*] 统一走 :mod:`backend.services.spreadsheet_header_reader` ——
+        与判定链路、治理路由共用同一套「安全路径解析 + 格式归一」规则。
+        """
         safe_path = self._safe_resolve_path(file_path)
-        source_format = ExcelParser.detect_file_format(Path(safe_path))
-        if source_format in {"xls", "xlsx_with_ole", "html"}:
-            normalized = get_spreadsheet_normalization_service().normalize_for_runtime(
-                safe_path,
-                source_format=source_format,
-            )
-            logger.info(
-                "[Ingest] 使用标准化副本读取文件: %s -> %s (converter=%s, cache_hit=%s)",
-                Path(safe_path).name,
-                normalized.path.name,
-                normalized.converter,
-                normalized.cache_hit,
-            )
-            return str(normalized.path)
-        return str(safe_path)
+        return self._header_reader.normalize_runtime_path(safe_path)
 
     async def ingest_data(
         self,
@@ -481,14 +378,15 @@ class DataIngestionService:
             header_param = None if header_row < 0 else header_row
             logger.info(f"[Ingest] 实际使用的表头行: header_param={header_param}")
 
-            # [*] v4.19.0更新:使用进程池执行CPU密集型操作(Excel读取),完全隔离事件循环
-            executor_manager = get_executor_manager()
-            df = await executor_manager.run_cpu_intensive(
-                ExcelParser.read_excel,
+            # [*] 统一读表头入口: 入库读出的列与判定链路同源
+            header = await self._header_reader.read_columns(
                 safe_path,
-                header=header_param,  # 使用关键字参数
+                header_row=header_param,
                 nrows=None,  # 读取完整文件(不限制行数)
             )
+            if not header.ok:
+                raise ValueError(header.error or "文件读取失败")
+            df = header.dataframe
 
             # [*] v4.18.2修复:使用 run_in_executor 包装文件大小获取,避免阻塞事件循环
             loop = asyncio.get_running_loop()
