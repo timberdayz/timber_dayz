@@ -28,6 +28,11 @@ from typing import Generator, AsyncGenerator
 from urllib.parse import urlparse, urlunparse
 import asyncio
 import logging
+import re
+
+#: 匹配 URL 的 scheme 前缀(含结尾的 ``://``)。
+#: 用于「只替换 scheme、其余原样保留」的重写。
+_URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://")
 
 # ==================== 从core导入统一Schema(Single Source of Truth) ====================
 
@@ -297,6 +302,15 @@ def get_async_database_url(database_url: str) -> str:
         raise ValueError(f"不支持的数据库类型: {scheme}")
 
     new_parsed = parsed._replace(scheme=new_scheme)
+    # [*] 必须**原样保留** scheme 之后的全部内容。
+    # urlparse/urlunparse 重建 URL 时会丢掉 ``//`` 分隔符 ——
+    # ``sqlite://`` 会被重建成 ``sqlite+aiosqlite:/``(单斜杠),
+    # SQLAlchemy 直接抛 "Could not parse SQLAlchemy URL";
+    # ``sqlite:///path/to.db`` 则会丢掉一个斜杠, 路径被当成 host。
+    # 所以这里只替换 scheme 前缀, ``//`` 与路径一字不改。
+    match = _URL_SCHEME_RE.match(database_url)
+    if match:
+        return f"{new_scheme}://{database_url[match.end():]}"
     return urlunparse(new_parsed)
 
 
@@ -366,7 +380,18 @@ from sqlalchemy import event
 
 @event.listens_for(async_engine.sync_engine, "connect")
 def set_search_path_on_connect(dbapi_connection, connection_record):
-    """每次连接建立时设置 search_path 和事务超时保护"""
+    """每次连接建立时设置 search_path 和事务超时保护。
+
+    [*] 这些语句是 **PostgreSQL 专有** 的, SQLite 不认
+    (``SET search_path TO ...`` 在 SQLite 上直接报
+    ``sqlite3.OperationalError: near "SET": syntax error``)。
+    所以必须按方言判断后再执行 —— 否则只要数据库地址不是 PostgreSQL,
+    每一次异步连接都会失败。
+    """
+    dialect_name = getattr(async_engine.sync_engine.dialect, "name", "")
+    if dialect_name != "postgresql":
+        return
+
     cursor = dbapi_connection.cursor()
     cursor.execute(
         "SET search_path TO public, b_class, a_class, c_class, core, finance"

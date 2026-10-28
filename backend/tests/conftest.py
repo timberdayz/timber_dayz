@@ -8,6 +8,8 @@
 """
 
 import asyncio
+import atexit
+import os
 from typing import AsyncGenerator, Generator
 
 import pytest
@@ -21,7 +23,86 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.dialects.postgresql import JSONB
 
-from modules.core.db import Base
+# ---------------------------------------------------------------------------
+# 护栏: 测试绝不能连上真实业务库
+# ---------------------------------------------------------------------------
+#
+# 为什么要这条护栏
+# ----------------
+# ``backend/utils/config.py`` 的 ``DATABASE_URL`` 默认值就是**真实业务库**
+# (``postgresql://erp_user:...@localhost:15432/xihong_erp``), 仓库根的 ``.env``
+# 里也是同一个地址。pytest 会加载 ``.env``, 于是**任何**导入了
+# ``backend.models.database`` 的测试, 拿到的都是能直连真实库的 engine。
+#
+# 真实后果(2026-10-28 实测):
+#   * 测试里跑了 ``scheduled_tasks.auto_ingest_pending_files``,
+#     它用**真实库**的 ``SessionLocal`` 重检了 21 个真实文件,
+#     把它们的持久化状态改回 ``template_update_required``,
+#     还把其中一个文件刚回填的模板契约整块抹掉了。
+#   * 脏数据进了真实库, 之后要靠人工回填才能恢复。
+#
+# 这类「测试写生产数据」的事故, 靠每次记得打桩是防不住的 ——
+# 必须有一道**默认生效**的兜底: 测试期间把 ``DATABASE_URL`` 指向隔离库,
+# 真的需要连库的测试用 ``pg_session``(testcontainers) 自己建库, 不受影响。
+#
+# 实现要点
+# --------
+# 1. 必须在**任何测试模块被导入之前**改掉环境变量 —— 因为
+#    ``backend.models.database`` 在 import 时就会 ``create_engine(DATABASE_URL)``,
+#    之后再改就晚了。所以这段放在 **conftest 模块顶层**(早于 collection),
+#    而不是 ``pytest_configure`` —— 后者虽然也早, 但 conftest 自身的模块级
+#    import 发生在它之前, 若那条 import 链拉起了 ``backend.utils.config``,
+#    ``Settings.DATABASE_URL`` 这个**类属性**就已经在 import 时求值完了。
+# 2. 隔离库是一个**一次性 PostgreSQL 容器**(testcontainers), 在这里就起好。
+#    端口必须是**随机**的: 固定端口在上一次会话异常退出后会残留
+#    (TimeWait / 端口被占), 下一次会话就起不来容器。
+#    随机端口 + testcontainers 的 ryuk 回收, 才是可重复的。
+# 3. 隔离库必须是 **PostgreSQL**: 本项目的表分布在 PG 的 schema 命名空间里
+#    (``core`` / ``a_class`` / ...), SQLite 根本建不出来
+#    (仓库自带的 ``sqlite_session`` fixture 就是因此一直是坏的)。
+# 4. 同时设置 ``XIHONG_TEST_ENV_GUARD`` 标记, 让
+#    ``backend.utils.project_env.load_project_env`` **不覆盖**护栏写好的隔离库地址 ——
+#    否则 ``backend/main.py`` 里的 ``load_project_env(project_root)``
+#    会把隔离库地址重新覆盖回 ``.env`` 里的真实业务库。
+#
+# 真实业务库地址(一旦匹配就说明护栏失效, 直接让测试失败):
+_REAL_DB_MARKERS = ("@localhost:15432/", "@127.0.0.1:15432/", "@postgres:5432/")
+
+from backend.utils.project_env import (  # noqa: E402  (必须早于 backend 其它模块)
+    TEST_DATABASE_URL_VAR,
+    TEST_ENV_GUARD_VAR,
+)
+
+
+def _start_isolated_postgres() -> str:
+    """起一个一次性 PostgreSQL 容器并返回连接串。"""
+    from testcontainers.postgres import PostgresContainer
+
+    container = PostgresContainer("postgres:15")
+    container.start()
+    atexit.register(_stop_container_quietly, container)
+    url = container.get_connection_url()
+    # testcontainers 默认返回 ``postgresql+psycopg2://``, 去掉驱动后缀
+    if url.startswith("postgresql+psycopg2://"):
+        url = "postgresql://" + url[len("postgresql+psycopg2://") :]
+    return url
+
+
+def _stop_container_quietly(container) -> None:
+    try:
+        container.stop()
+    except Exception:
+        pass
+
+
+# [*] 护栏必须在任何 backend 模块被 import 之前生效。
+# 隔离库地址写进**独立变量** ``XIHONG_TEST_DATABASE_URL``,
+# ``config.py`` 在护栏开启时只认它, 连 ``DATABASE_URL`` 都不采信。
+_ORIGINAL_DATABASE_URL = os.environ.get("DATABASE_URL")
+os.environ[TEST_DATABASE_URL_VAR] = _start_isolated_postgres()
+os.environ[TEST_ENV_GUARD_VAR] = "1"
+
+from modules.core.db import Base  # noqa: E402  (必须晚于上面的护栏设置)
 
 
 @compiles(JSONB, "sqlite")
@@ -29,10 +110,83 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
     return "JSON"
 
 
+def _is_real_database_url(url: str) -> bool:
+    return any(marker in url for marker in _REAL_DB_MARKERS)
+
+
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "pg_only: mark test to run only with PostgreSQL via testcontainers"
     )
+
+    if _ORIGINAL_DATABASE_URL and _is_real_database_url(_ORIGINAL_DATABASE_URL):
+        print(
+            "\n[测试护栏] DATABASE_URL 已重定向到隔离库(一次性 PostgreSQL 容器)"
+            "\n         真实业务库不会被测试读写；需要连库请用 pg_session fixture。\n"
+        )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _assert_database_guard_active():
+    """护栏自检 + 在隔离库里建出与生产一致的 schema。
+
+    这是**最后一道防线**。护栏本身失效(比如有人改了 ``load_project_env``)
+    时, 宁可让整个测试会话直接失败, 也不能让测试去读写真实数据 ——
+    2026-10-28 就因为测试连上真实库, 把 21 个真实文件的入库状态改坏了。
+
+    这里校验的是**引擎实际用的地址**(``backend.models.database.DATABASE_URL``),
+    而不是环境变量 —— 环境变量对了但引擎建得早, 一样会连上真实库。
+    """
+    from backend.utils.project_env import is_test_env_guarded
+
+    if not is_test_env_guarded():
+        pytest.fail(
+            "测试护栏未生效: XIHONG_TEST_ENV_GUARD 标记丢失。"
+            "测试绝不允许连上真实业务库。"
+        )
+
+    env_url = os.environ.get(TEST_DATABASE_URL_VAR, "")
+    if not env_url or _is_real_database_url(env_url):
+        pytest.fail(
+            f"测试护栏未生效: 隔离库地址异常 ({env_url})。"
+            "测试绝不允许连上真实业务库。"
+        )
+
+    from backend.models.database import ASYNC_DATABASE_URL, DATABASE_URL as engine_url
+
+    for label, url in (("同步 engine", engine_url), ("异步 engine", ASYNC_DATABASE_URL)):
+        if _is_real_database_url(url):
+            pytest.fail(
+                f"测试护栏未生效: {label} 指向真实业务库 ({url})。"
+                "测试绝不允许连上真实业务库。"
+            )
+
+    _create_isolated_schema(engine_url)
+    yield
+
+
+def _create_isolated_schema(database_url: str) -> None:
+    """在隔离库里建出与生产一致的 schema(各命名空间 + 全部表)。"""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from backend.models.database import get_async_database_url
+
+    async_url = get_async_database_url(database_url)
+    engine = create_async_engine(async_url)
+
+    async def _create():
+        async with engine.begin() as conn:
+            for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "ops"):
+                await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
+            await conn.run_sync(Base.metadata.create_all)
+        await engine.dispose()
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_create())
+    finally:
+        loop.close()
 
 
 @pytest.fixture(scope="session")
@@ -50,6 +204,33 @@ def clear_app_dependency_overrides():
     app.dependency_overrides.clear()
     yield
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def _restore_main_app_after_reload():
+    """防止 ``importlib.reload(backend.main)`` 的用例把 app 泄漏给后续用例。
+
+    ``backend/tests/test_runtime_mode_route_registration.py`` 与
+    ``test_shop_directory_api.py`` 会用 ``APP_RUNTIME_MODE`` 重载 ``backend.main``。
+    reload 会**重新执行模块体**, 于是 ``backend.main.app`` 变成一个
+    「按该模式注册路由」的**新对象**:
+    production 模式只注册 production 路由, 采集路由不在其中。
+
+    重载之后不恢复的话, 后续用例请求 ``/api/collection/*`` 会直接 404 ——
+    实测 ``test_task_center_collection_projection.py`` 就被这样带崩
+    (单独跑通过, 放在全量里就失败)。
+    """
+    import sys
+
+    main_module = sys.modules.get("backend.main")
+    if main_module is None:
+        yield
+        return
+
+    original_app = getattr(main_module, "app", None)
+    yield
+    if original_app is not None and getattr(main_module, "app", None) is not original_app:
+        main_module.app = original_app
 
 
 @pytest_asyncio.fixture

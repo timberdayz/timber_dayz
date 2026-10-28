@@ -238,6 +238,15 @@ def test_main_local_mode_disables_backend_reload(monkeypatch):
     monkeypatch.setattr(run_module.sys_platform, "system", lambda: "Windows")
     monkeypatch.setattr(run_module, "print_banner", lambda: None)
     monkeypatch.setattr(run_module, "safe_print", lambda *args, **kwargs: None)
+    # [*] 本地模式会起一个 `scripts/ensure_local_dev_admin.py` 子进程去**写库**
+    # (建本地管理员账号)。单元测试不该碰任何数据库 —— 这里直接桩掉。
+    # 注意: 这不是「为了让测试通过而放宽断言」, 而是让测试真正自足:
+    # 在护栏把 DATABASE_URL 指向隔离库之前, 这个子进程连的是**真实业务库**。
+    monkeypatch.setattr(
+        run_module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
     monkeypatch.setattr(run_module, "ensure_postgres_redis_docker", lambda project_root, with_celery=True: True)
     monkeypatch.setattr(run_module, "check_postgresql", lambda: True)
     monkeypatch.setattr(run_module, "ensure_postgresql_dashboard_assets", lambda project_root: True)
@@ -295,6 +304,15 @@ def test_local_collection_profile_uses_collector_runtime(monkeypatch):
     monkeypatch.setattr(run_module.sys_platform, "system", lambda: "Windows")
     monkeypatch.setattr(run_module, "print_banner", lambda: None)
     monkeypatch.setattr(run_module, "safe_print", lambda *args, **kwargs: None)
+    # [*] 本地模式会起一个 `scripts/ensure_local_dev_admin.py` 子进程去**写库**
+    # (建本地管理员账号)。单元测试不该碰任何数据库 —— 这里直接桩掉。
+    # 注意: 这不是「为了让测试通过而放宽断言」, 而是让测试真正自足:
+    # 在护栏把 DATABASE_URL 指向隔离库之前, 这个子进程连的是**真实业务库**。
+    monkeypatch.setattr(
+        run_module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
     monkeypatch.setattr(run_module, "ensure_postgres_redis_docker", lambda project_root, with_celery=True: True)
     monkeypatch.setattr(run_module, "check_postgresql", lambda: True)
     monkeypatch.setattr(run_module, "ensure_postgresql_dashboard_assets", lambda project_root: True)

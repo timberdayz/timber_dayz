@@ -5,7 +5,11 @@ from __future__ import annotations
 import asyncio
 from typing import Dict, Optional
 
-from backend.models.database import AsyncSessionLocal, SessionLocal
+from backend.models.database import (
+    AsyncSessionLocal,
+    SessionLocal,
+    reset_async_engine_pool_for_new_loop,
+)
 from backend.services.cloud_b_class_auto_sync_dispatch_service import (
     CloudBClassAutoSyncDispatchService,
 )
@@ -226,6 +230,11 @@ class EventListener:
                 asyncio.get_running_loop()
             except RuntimeError:
                 # 没有事件循环:就地跑完一次入队,保证刷新不会丢
+                # [*] 必须先丢掉旧事件循环遗留的池化连接 ——
+                # 否则 asyncpg 会拿着上一个 loop 的连接在新 loop 里用,
+                # 直接抛 "Event loop is closed" / "'NoneType' object has no attribute 'send'"。
+                # 仓库里所有「同步上下文 + asyncio.run」的入口都是这个写法。
+                reset_async_engine_pool_for_new_loop()
                 asyncio.run(enqueue_refresh_for_data_ingested_event(event))
             else:
                 # 有事件循环时只能尽力而为:调用方若是 asyncio.run(...),

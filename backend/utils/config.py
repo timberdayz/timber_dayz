@@ -5,6 +5,24 @@
 from typing import List
 import os
 
+from backend.utils.project_env import TEST_ENV_GUARD_VAR, is_test_env_guarded
+
+
+#: 测试期使用的隔离库(**兜底**地址)。
+#:
+#: 为什么不是 SQLite: 本项目的表分布在 PG 的 schema 命名空间里
+#: (``core`` / ``a_class`` / ...), SQLite 没有 schema 概念,
+#: ``CREATE TABLE core.xxx`` 直接报 "unknown database core"。
+#: 详见 ``backend.utils.project_env.isolated_database_url`` 的说明。
+#:
+#: 真正的地址由 ``backend/tests/conftest.py`` 在 pytest 启动时起一个**一次性
+#: PostgreSQL 容器**并写入 ``XIHONG_TEST_DATABASE_URL``;
+#: 这个常量只是「环境变量缺失时的兜底」——
+#: 它指向一个不存在的服务, 也就是说护栏一旦失效就是**连不上**,
+#: 而不是**连上真实库**(fail-closed)。
+_TEST_ISOLATED_DATABASE_URL = "postgresql://test:test@127.0.0.1:15445/test"
+
+
 class Settings:
     """应用配置"""
     
@@ -38,13 +56,27 @@ class Settings:
     # 支持环境变量切换数据库
     # 开发环境: SQLite
     # 生产环境: PostgreSQL
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        # 默认使用PostgreSQL(如果Docker运行)
-        # 使用5433端口避免与本地PostgreSQL冲突
-        "postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp"
-        # 回退到SQLite
-        # "sqlite:///F:/Vscode/python_programme/AI_code/xihong_erp/data/erp_system.db"
+    #
+    # [*] 测试期护栏: 强制隔离库, 无视 .env / 环境变量里的 DATABASE_URL。
+    # 详见本模块顶部 TEST_ENV_GUARD_VAR 的说明 ——
+    # 测试连上真实业务库曾经把 21 个真实文件的入库状态改坏过。
+    # 护栏开启时**只认** ``XIHONG_TEST_DATABASE_URL``(由 conftest 写入),
+    # 连环境变量里的 ``DATABASE_URL`` 都不采信 —— 否则改一下环境变量
+    # 就能把测试指回真实业务库。
+    DATABASE_URL: str = (
+        os.getenv(
+            "XIHONG_TEST_DATABASE_URL",
+            _TEST_ISOLATED_DATABASE_URL,
+        )
+        if is_test_env_guarded()
+        else os.getenv(
+            "DATABASE_URL",
+            # 默认使用PostgreSQL(如果Docker运行)
+            # 使用5433端口避免与本地PostgreSQL冲突
+            "postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp"
+            # 回退到SQLite
+            # "sqlite:///F:/Vscode/python_programme/AI_code/xihong_erp/data/erp_system.db"
+        )
     )
     DATABASE_ECHO: bool = os.getenv("DATABASE_ECHO", "false").lower() == "true"
     

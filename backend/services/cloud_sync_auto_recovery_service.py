@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import or_, select, text
 
@@ -191,8 +192,15 @@ class CloudSyncAutoRecoveryService:
             if first_seen_at > cutoff:
                 continue
 
+            file_id = int(file_record.id)
+            # [*] 修复: sync_single_file_task 的 task_id 是必填参数,
+            # 缺失会在 Celery 提交阶段抛 TypeError, 让整个兜底任务每分钟失败。
+            progress_task_id = f"single_file_{file_id}_{uuid4().hex[:8]}"
             task_result = sync_single_file_task.apply_async(
-                kwargs={"file_id": int(file_record.id)},
+                kwargs={
+                    "file_id": file_id,
+                    "task_id": progress_task_id,
+                },
                 queue="data_sync",
             )
             metadata = dict(getattr(file_record, "file_metadata", None) or {})
@@ -201,7 +209,14 @@ class CloudSyncAutoRecoveryService:
                 {
                     "last_status": "auto_enqueued",
                     "last_reason": "pending_catalog_file_overdue",
-                    "current_task_id": getattr(task_result, "id", None),
+                    # [*] current_task_id 必须与提交给 Celery 的 task_id 一致,
+                    # 否则 sync_single_file 会把「自己认领的文件」误判为并发冲突而跳过。
+                    "current_task_id": progress_task_id,
+                    "celery_task_id": getattr(task_result, "id", None),
+                    # [*] 认领: 立刻置 processing, 避免下一分钟的兜底任务重复入队。
+                    # 若 Celery 任务最终没跑起来, 看门狗会依据 processing_started_at 把它回退为 pending。
+                    "processing_started_at": now.isoformat(),
+                    "claimed_by": "auto_recovery",
                     "recovered_at": now.isoformat(),
                     "recovered_by": "auto_recovery",
                     "previous_status": "pending",
@@ -209,7 +224,8 @@ class CloudSyncAutoRecoveryService:
             )
             metadata["auto_ingest"] = auto_meta
             file_record.file_metadata = metadata
-            enqueued.append(int(file_record.id))
+            file_record.status = "processing"
+            enqueued.append(file_id)
 
         if enqueued:
             self.db.commit()

@@ -169,10 +169,55 @@ def test_cloud_sync_auto_recovery_enqueues_overdue_pending_catalog_files(monkeyp
 
     assert result["enqueued"] == 1
     assert result["file_ids"] == [2803]
-    assert enqueued == [{"kwargs": {"file_id": 2803}, "queue": "data_sync"}]
-    assert overdue.file_metadata["auto_ingest"]["current_task_id"] == "celery-2803"
-    assert overdue.file_metadata["auto_ingest"]["recovered_by"] == "auto_recovery"
+    assert len(enqueued) == 1
+    assert enqueued[0]["queue"] == "data_sync"
+    assert enqueued[0]["kwargs"]["file_id"] == 2803
+    assert enqueued[0]["kwargs"]["task_id"].startswith("single_file_2803_")
+    auto_meta = overdue.file_metadata["auto_ingest"]
+    # [*] current_task_id 必须与提交给 Celery 的 task_id 一致,
+    # 否则 sync_single_file 会把「自己认领的文件」误判为并发冲突而跳过。
+    assert auto_meta["current_task_id"] == enqueued[0]["kwargs"]["task_id"]
+    assert auto_meta["celery_task_id"] == "celery-2803"
+    assert auto_meta["claimed_by"] == "auto_recovery"
+    # [*] 入队即认领, 避免下一分钟的兜底任务重复入队。
+    assert overdue.status == "processing"
     assert session.committed is True
+
+
+def test_cloud_sync_auto_recovery_enqueue_matches_real_celery_task_signature(monkeypatch):
+    """兜底入队参数必须满足真实 Celery 任务签名。
+
+    celery 在 apply_async 提交阶段会用 ``Task.__header__`` 校验参数,
+    缺参数会抛 TypeError, 导致整个兜底任务每分钟失败一次且从不真正入队。
+    这里直接复用 celery 自己的校验器做断言, 杜绝同类签名漂移再次隐身。
+    """
+    from backend.tasks.data_sync_tasks import sync_single_file_task
+
+    overdue = _FakeCatalogFile(file_id=2806)
+    session = _FakeSession([overdue])
+    captured = {}
+
+    class _FakeTaskHandle:
+        id = "celery-2806"
+
+    def fake_apply_async(*, kwargs, queue=None):
+        captured["kwargs"] = kwargs
+        captured["queue"] = queue
+        return _FakeTaskHandle()
+
+    monkeypatch.setattr(
+        "backend.tasks.data_sync_tasks.sync_single_file_task.apply_async",
+        fake_apply_async,
+    )
+    service = CloudSyncAutoRecoveryService(session)
+
+    service.enqueue_overdue_pending_catalog_files(limit=10, overdue_minutes=10)
+
+    assert captured["kwargs"], "兜底任务必须真的入队"
+    # celery 提交时的同款校验: 缺参数会抛 TypeError
+    sync_single_file_task.__header__(**captured["kwargs"])
+    # 必须带 task_id, 否则 celery 提交阶段直接报错
+    assert "task_id" in captured["kwargs"]
 
 
 def test_cloud_sync_auto_recovery_does_not_enqueue_template_update_required_files(monkeypatch):
