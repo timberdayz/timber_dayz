@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timezone
 from typing import Any, Dict, Optional
 
 from sqlalchemy.exc import OperationalError
@@ -8,6 +9,7 @@ from modules.core.db import CatalogFile, FieldMappingTemplate
 from backend.services.template_contract_service import (
     describe_contract_baseline,
     is_contract_baseline_valid,
+    parse_contract_captured_at,
     read_template_contract,
     resolve_contract_template,
 )
@@ -66,6 +68,7 @@ class DataSyncTemplateStatusService:
         takeover: Optional[Dict[str, Any]] = None,
         baseline_template_override: Optional[FieldMappingTemplate] = None,
         baseline_kind_override: Optional[str] = None,
+        published_template: Optional[FieldMappingTemplate] = None,
     ) -> Dict[str, Any]:
         resolver_result = None
         try:
@@ -127,6 +130,25 @@ class DataSyncTemplateStatusService:
             # 因为契约是否**仍然解释得了文件**, 只有读到表头才知道。
             baseline_template = baseline_template_override
             baseline_kind = baseline_kind_override
+
+            # [*] 契约基准: 额外拿「当前已发布模板」做对照。
+            #
+            # 它有两个用途, 缺一不可:
+            #   1. 识别「我们自己升级过模板」(template_outdated) —— D7 的核心语义;
+            #      少了它, ``drift_origin`` 永远算成 ``source_change``,
+            #      治理面板就分不清「源文件变了」与「我们升级了模板」。
+            #   2. 契约失效时的**补救路径**(见文件末尾的契约晋升)。
+            if baseline_kind == TEMPLATE_BASELINE_CONTRACT:
+                if published_template is None:
+                    published_template = await self.template_matcher.find_best_template(
+                        platform=catalog_file.platform_code,
+                        data_domain=catalog_file.data_domain,
+                        granularity=catalog_file.granularity,
+                        sub_domain=normalized_sub_domain,
+                        account=normalized_account,
+                    )
+                if published_template is not None:
+                    current_template = published_template
         elif contract:
             candidate = await resolve_contract_template(self.db, contract)
             if candidate is not None and is_contract_baseline_valid(contract, candidate):
@@ -274,10 +296,101 @@ class DataSyncTemplateStatusService:
             and baseline_kind != TEMPLATE_BASELINE_CONTRACT
         )
 
+        # [*] 契约失效: 契约基准已经解释不了这个文件, 而当前已发布模板可以。
+        #
+        # 契约保证的是「采集**当时**那一版模板在解释这个文件」, 而不是
+        # 「那一版模板至今仍能解释它」。当源文件结构**先于**模板发生变化时,
+        # 契约指向的模板从此**不可能**再解释这个文件 ⇒ 判定永远停在结构漂移,
+        # 用户唯一能做的补救(把新字段补进模板并发布新版本)**完全不产生效果**。
+        #
+        # 实测(tiktok/analytics/monthly, 2026-10-29): 文件 29 列(含「商品卡 GMV」),
+        # 契约指向 v6(28 列) ⇒ 永久漂移; 用户发布 v8(29 列, 与文件 exact match)
+        # 后**仍然**永久漂移 —— 因为契约没变, 用户做对了却看不到任何效果。
+        #
+        # 所以: 契约基准判出结构漂移 = 证明契约已不是该文件的正确解释;
+        # 此时唯一还能修复的路径就是「当前已发布模板」(用户能改的那一版)。
+        #   * 当前已发布模板能解释 -> 漂移其实是被模板升级解决的, 放行,
+        #     并给出 ``contract_promotion`` 信号 —— 由落库链路把契约改写掉,
+        #     否则契约会继续把文件钉在旧模板上, 下一轮重检又被打回。
+        #   * 当前已发布模板也解释不了 -> 是源文件结构真变了, 保持「待更新」,
+        #     等人工更新模板 —— 与修复前结论一致, 绝不误放行。
+        #
+        # [*] 「事后追平」判据(D7 的既有设计不能被破坏)
+        #
+        # 光看「当前已发布模板能解释文件」是不够的 —— 那会把「我们顺手升级了模板」
+        # 也当成追平, 于是历史文件被悄悄改用新版(D7 明确禁止)。
+        # 两者在数据上完全同构(旧契约的列 + 新模板多一列), 唯一能区分的是**时序**:
+        #
+        #   * 当前已发布模板的诞生时刻 **晚于** 契约的采集时刻
+        #     => 这一版模板是在文件登记**之后**才存在的, 不可能是「登记时那一版」,
+        #        它只能是**为这个文件而追平**的 => 放行
+        #   * 当前已发布模板的诞生时刻 **早于或等于** 契约的采集时刻
+        #     => 它就是文件登记时那一版, 文件相对它漂移就是**源文件结构变了**
+        #        => 阻断, 等人工更新模板(D7 原语义不变)
+        #
+        # 拿不到时间戳(老契约没有 captured_at / 模板没有 created_at)时**保守阻断**。
+        if (
+            status == TEMPLATE_STATUS_UPDATE_REQUIRED
+            and baseline_kind == TEMPLATE_BASELINE_CONTRACT
+            and published_template is not None
+            and baseline_template is not None
+            and getattr(published_template, "id", None)
+            != getattr(baseline_template, "id", None)
+        ):
+            contract_captured_at = parse_contract_captured_at(contract)
+            published_created_at = getattr(published_template, "created_at", None)
+            if (
+                published_created_at is not None
+                and published_created_at.tzinfo is None
+            ):
+                # SQLite / naive datetime 统一按 UTC 处理 —— 只比较相对先后
+                published_created_at = published_created_at.replace(tzinfo=timezone.utc)
+            is_after_the_fact = (
+                contract_captured_at is not None
+                and published_created_at is not None
+                and published_created_at > contract_captured_at
+            )
+            if is_after_the_fact:
+                promoted = await self.evaluate_catalog_file(
+                    catalog_file,
+                    template=published_template,
+                    current_columns=current_columns,
+                    sample_rows=sample_rows,
+                    header_row=header_row,
+                    takeover=takeover_report,
+                    baseline_template_override=published_template,
+                    baseline_kind_override=TEMPLATE_BASELINE_CURRENT,
+                    published_template=published_template,
+                )
+                if promoted.get("template_status") in {
+                    TEMPLATE_STATUS_READY,
+                    TEMPLATE_STATUS_ALIAS_ONLY,
+                }:
+                    promoted["contract_promotion"] = {
+                        "from_template_id": getattr(baseline_template, "id", None),
+                        "from_template_version": getattr(
+                            baseline_template, "version", None
+                        ),
+                        "from_template_name": getattr(
+                            baseline_template, "template_name", None
+                        ),
+                        "to_template_id": getattr(published_template, "id", None),
+                        "to_template_version": getattr(
+                            published_template, "version", None
+                        ),
+                        "to_template_name": getattr(
+                            published_template, "template_name", None
+                        ),
+                        "reason": "契约基准已解释不了该文件, 当前已发布模板可以",
+                    }
+                    return promoted
+
         return {
             "template_status": status,
             "governance_status": governance_status,
             "has_template": True,
+            "template_id": getattr(comparison_template, "id", None),
+            "template_version": getattr(comparison_template, "version", None),
             "template_name": comparison_template.template_name,
             "template_header_row": getattr(comparison_template, "header_row", None),
             "template_update_required": update_required,

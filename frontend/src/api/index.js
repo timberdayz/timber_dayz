@@ -32,7 +32,8 @@ const TIMEOUTS = {
   dashboard: 70000, // Dashboard 查询70秒
   collection: 300000, // 数据采集300秒（5分钟）
   mapping: 90000, // 字段映射90秒
-  sync: 120000 // ⭐ v4.19.5 新增：数据同步120秒（2分钟）
+  sync: 120000, // ⭐ v4.19.5 新增：数据同步120秒（2分钟）
+  governance: 120000 // ⭐ 模板治理看板：逐组合读样本表头并比对，实测 18~43 秒
 }
 
 // ⭐ v6.0.0新增：不需要认证的接口列表
@@ -414,7 +415,13 @@ api.interceptors.request.use(
 
     // 根据API路径动态设置超时时间
     if (!config.timeout || config.timeout === TIMEOUTS.default) {
-      if (config.url.includes('/scan')) {
+      if (config.url.includes('/governance/detailed-coverage')) {
+        // ⭐ 模板治理看板：这个接口要对每个「平台×数据域×粒度」组合读一遍
+        // 样本文件的表头并逐列比对，实测 18~43 秒（27 个组合）。
+        // 默认 30 秒会让它**每次都超时**，前端随即回落到初始全 0 ——
+        // 页面于是显示「覆盖率 0%、已覆盖 0、需要更新 0」，而后端其实算得出结果。
+        config.timeout = TIMEOUTS.governance // 120秒
+      } else if (config.url.includes('/scan')) {
         config.timeout = TIMEOUTS.scan
       } else if (config.url.includes('/preview')) {
         config.timeout = TIMEOUTS.preview

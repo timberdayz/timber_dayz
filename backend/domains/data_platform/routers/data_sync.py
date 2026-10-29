@@ -3409,6 +3409,10 @@ async def get_detailed_template_coverage(
                             }
                         sample_takeover_report = sample_baseline.get("takeover")
                         sample_header_row = sample_baseline.get("header_row", 0)
+                        # [*] 当前已发布模板 —— 基准可能落到契约上, 但判定仍要
+                        #     拿它做对照(识别「我们自己升级过模板」+ 契约失效时的
+                        #     补救路径)。判定链路与治理路由必须用同一版模板。
+                        sample_published_template = template
                         if sample_baseline.get("baseline_template") is not None:
                             template = sample_baseline["baseline_template"]
 
@@ -3440,6 +3444,7 @@ async def get_detailed_template_coverage(
                                 baseline_kind_override=sample_baseline.get(
                                     "baseline_kind"
                                 ),
+                                published_template=sample_published_template,
                             )
                         )
                         template_status = status_info.get("template_status", "ready")

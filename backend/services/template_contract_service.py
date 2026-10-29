@@ -56,6 +56,15 @@ CONTRACT_SOURCE_COLLECTION = "collection_registration"
 # 契约里除了模板引用, 还要留痕「是被谁接管的」。
 CONTRACT_SOURCE_TAKEOVER = "cross_family_variant_takeover"
 
+# 契约来源: 契约晋升(模板升级后回写)
+#
+# 场景: 文件在采集当时就与当时的模板对不上(源文件结构先变了), 于是契约钉在
+# 旧模板上。用户随后把新字段补进模板并发布新版本 —— 新版本能解释这个文件,
+# 但契约仍指向旧模板, 于是判定永远停在「结构漂移」, 文件永远进不了入库队列。
+#
+# 契约晋升把契约改写成「当前能解释这个文件的那一版模板」, 让基准重新稳定。
+CONTRACT_SOURCE_PROMOTION = "contract_promotion"
+
 # columns_hash 的格式版本, 便于将来更换归一化策略时区分指纹
 _COLUMNS_HASH_VERSION = "v1"
 
@@ -163,6 +172,67 @@ def contract_template_id(contract: Optional[Dict[str, Any]]) -> Optional[int]:
         return int(template_id)
     except (TypeError, ValueError):
         return None
+
+
+def parse_contract_captured_at(
+    contract: Optional[Dict[str, Any]],
+) -> Optional[datetime]:
+    """取出契约的采集时刻(带时区)。
+
+    拿不到时返回 ``None`` —— 调用方据此**保守处理**(不认定「事后追平」)。
+    """
+    if not isinstance(contract, dict):
+        return None
+    raw = contract.get("captured_at")
+    if not raw:
+        return None
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def promote_template_contract(
+    catalog_file: Any,
+    template: Any,
+    *,
+    source: str = CONTRACT_SOURCE_PROMOTION,
+    takeover: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """把文件的契约晋升为「当前能解释它的那一版模板」。
+
+    为什么需要
+    ----------
+    契约的语义是「这个文件当年是按哪一版模板解释的」, 但它**只保证采集当时成立**。
+    当源文件结构先于模板发生变化时(采集时模板就解释不了这个文件), 契约指向的
+    模板从此再也不可能解释这个文件 —— 于是:
+
+    * 判定永远停在「结构漂移」
+    * 用户唯一能做的补救(把新字段补进模板并发布新版本)**不产生任何效果**
+    * 文件永远进不了入库队列
+
+    实测(tiktok/analytics/monthly, 2026-10-29): 文件 29 列(含「商品卡 GMV」),
+    契约指向 v6(28 列) ⇒ 永久漂移; 用户发布 v8(29 列)后仍漂移 —— 因为契约没变。
+
+    晋升把契约改写成新版本, 让基准重新稳定, 且留痕 ``source`` 以便事后追溯。
+
+    Returns:
+        写入的契约; 模板为空时返回 ``None``。
+    """
+    if catalog_file is None or template is None:
+        return None
+
+    contract = build_template_contract(
+        template,
+        source=source,
+        takeover=takeover,
+    )
+    if not contract:
+        return None
+    return write_template_contract(catalog_file, contract)
 
 
 async def resolve_contract_template(db, contract: Optional[Dict[str, Any]]):

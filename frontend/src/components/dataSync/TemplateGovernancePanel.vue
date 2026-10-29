@@ -10,7 +10,17 @@
       </div>
     </template>
 
-    <div class="governance-stats">
+    <el-alert
+      v-if="loadError"
+      type="error"
+      show-icon
+      :closable="false"
+      class="governance-card__alert"
+      title="治理统计加载失败"
+      :description="`${loadError}。下面的数值不是治理结论，请点击「刷新统计」重试。`"
+    />
+
+    <div v-else class="governance-stats">
       <div class="stat-item">
         <div class="stat-icon" style="background: #409EFF;">
           <el-icon><Document /></el-icon>
@@ -58,7 +68,12 @@
       </div>
     </div>
 
-    <el-tabs :model-value="activeTab" style="margin-top: 20px;" @update:model-value="$emit('update:active-tab', $event)">
+    <el-tabs
+      v-if="!loadError"
+      :model-value="activeTab"
+      style="margin-top: 20px;"
+      @update:model-value="$emit('update:active-tab', $event)"
+    >
       <el-tab-pane label="已覆盖模板" name="covered">
         <el-table :data="coveredRows" stripe border max-height="400">
           <el-table-column prop="platform" label="平台" width="100">
@@ -151,6 +166,11 @@ const props = defineProps({
   loading: {
     type: Boolean,
     default: false
+  },
+  // [*] 治理统计加载失败标记 —— 有了它, 空态与「真实是 0」才不会混淆
+  loadError: {
+    type: String,
+    default: ''
   },
   activeTab: {
     type: String,

@@ -43,13 +43,76 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# ── 读表头结果缓存 ───────────────────────────────────────────────────
+#
+# 为什么
+# ----
+# 模板治理看板(``GET /data-sync/governance/detailed-coverage``)要对每个
+# 「平台 × 数据域 × 粒度」组合各读一遍样本文件的表头并逐列比对 ——
+# 27 个组合 = 27 次 xls/xlsx 解析, 实测单次接口 **18~43 秒**。
+# 前端 axios 默认 30 秒超时 ⇒ 每次都超时, 页面回落到初始全 0,
+# 看起来像「覆盖率 0%、需要更新 0」(而后端其实算得出结果)。
+#
+# 读表头是纯 IO, 结果只取决于「文件内容 + 表头行 + 行数」⇒ 用
+# ``(路径, mtime, 大小, 表头行, 行数)`` 做键, **文件一变就自然失效**。
+#
+# 刻意**不**缓存整份看板结果 —— 那会让「刚更新完模板立刻刷新看板」拿到旧数据,
+# 反而制造出「我更新了模板但看板没变」的错觉。
+_HEADER_CACHE_TTL_SECONDS = 300.0
+_HEADER_CACHE_MAX_ENTRIES = 512
+_header_cache: Dict[Tuple[Any, ...], Tuple[float, "SpreadsheetHeader"]] = {}
+
+
+def _header_cache_key(
+    runtime_path: str,
+    header_row: Optional[int],
+    nrows: Optional[int],
+) -> Optional[Tuple[Any, ...]]:
+    """构造读表头缓存键; 文件不存在或取不到 stat 时返回 None(不缓存)。"""
+    try:
+        stat = os.stat(runtime_path)
+    except OSError:
+        return None
+    return (str(runtime_path), stat.st_mtime_ns, stat.st_size, header_row, nrows)
+
+
+def _get_cached_header(
+    cache_key: Optional[Tuple[Any, ...]],
+) -> Optional["SpreadsheetHeader"]:
+    if cache_key is None:
+        return None
+    entry = _header_cache.get(cache_key)
+    if entry is None:
+        return None
+    expires_at, header = entry
+    if expires_at <= time.monotonic():
+        _header_cache.pop(cache_key, None)
+        return None
+    return header
+
+
+def _set_cached_header(
+    cache_key: Optional[Tuple[Any, ...]],
+    header: "SpreadsheetHeader",
+) -> None:
+    if cache_key is None or header.error:
+        # 失败结果不缓存 —— 否则一次偶发读失败会被钉住几分钟
+        return
+    if len(_header_cache) >= _HEADER_CACHE_MAX_ENTRIES:
+        # 简单淘汰: 先清掉最早过期的
+        oldest = min(_header_cache.items(), key=lambda item: item[1][0])[0]
+        _header_cache.pop(oldest, None)
+    _header_cache[cache_key] = (time.monotonic() + _HEADER_CACHE_TTL_SECONDS, header)
 
 
 # 表头行口径: <0 表示「无表头行」(pandas header=None), 其余为 0-based 精确行
@@ -326,6 +389,13 @@ class SpreadsheetHeaderReader:
 
         header_param = None if header_row is not None and header_row < 0 else header_row
 
+        # [*] 读表头缓存(见模块头说明): 治理看板要对 27 个组合各读一遍样本表头,
+        #     不缓存就是 18~43 秒 —— 前端 30 秒超时, 页面回落到初始全 0。
+        cache_key = _header_cache_key(runtime_path, header_param, nrows)
+        cached_header = _get_cached_header(cache_key)
+        if cached_header is not None:
+            return cached_header
+
         try:
             source_format = ExcelParser.detect_file_format(Path(runtime_path))
         except Exception:  # noqa: BLE001
@@ -358,7 +428,7 @@ class SpreadsheetHeaderReader:
             except Exception:  # noqa: BLE001
                 columns = []
 
-        return SpreadsheetHeader(
+        header = SpreadsheetHeader(
             runtime_path=runtime_path,
             columns=columns,
             dataframe=df,
@@ -366,6 +436,8 @@ class SpreadsheetHeaderReader:
             source_format=source_format,
             normalized=bool(source_format in RUNTIME_NORMALIZATION_FORMATS),
         )
+        _set_cached_header(cache_key, header)
+        return header
 
 
 def get_spreadsheet_header_reader(

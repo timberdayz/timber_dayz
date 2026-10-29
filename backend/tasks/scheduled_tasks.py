@@ -18,7 +18,12 @@ sys.path.insert(0, str(root_dir))
 
 from backend.celery_app import celery_app
 from backend.models.database import SessionLocal, reset_async_engine_pool_for_new_loop
-from modules.core.db import CatalogFile
+from modules.core.db import CatalogFile, FieldMappingTemplate
+from backend.services.template_contract_service import (
+    CONTRACT_SOURCE_PROMOTION,
+    build_template_contract,
+    write_template_contract,
+)
 from backend.services.data_sync_status_semantics import (
     GOVERNANCE_STATUS_MISSING_FAMILY,
     GOVERNANCE_STATUS_MISSING_VARIANT,
@@ -373,6 +378,46 @@ def _recover_stale_auto_ingest_records(
     return {"tasks": recovered_tasks, "files": recovered_files}
 
 
+async def _build_promoted_contract(db_local, readiness: Dict[str, Any]):
+    """按判定链路的 ``contract_promotion`` 信号算出新契约(**不落库**)。
+
+    为什么单独一步
+    --------------
+    判定链路发现「契约指向的模板已经解释不了这个文件, 而当前已发布模板可以」时,
+    会给出 ``contract_promotion`` 信号。这里把新契约**算出来**交给外层同步会话
+    写入 —— 两个会话同时改同一行 ``file_metadata`` 会互相覆盖(后写的赢),
+    契约晋升会被外层的旧快照冲掉。
+
+    落库后契约就指向了「当前能解释这个文件的那一版模板」, 基准重新稳定;
+    否则契约会一直把文件钉在旧模板上, 下一轮重检又被打回。
+    """
+    promotion = (readiness or {}).get("contract_promotion")
+    if not isinstance(promotion, dict):
+        return None
+    to_template_id = promotion.get("to_template_id")
+    if to_template_id is None:
+        return None
+    try:
+        template = await db_local.get(FieldMappingTemplate, int(to_template_id))
+    except (TypeError, ValueError):
+        return None
+    if template is None:
+        return None
+    contract = build_template_contract(
+        template,
+        source=CONTRACT_SOURCE_PROMOTION,
+    )
+    if not contract:
+        return None
+    logger.info(
+        "[AutoIngest] 契约晋升: 模板 v%s -> v%s (%s)",
+        promotion.get("from_template_version"),
+        promotion.get("to_template_version"),
+        getattr(template, "template_name", None),
+    )
+    return contract
+
+
 def _recover_template_update_required_files(
     db,
     limit: int = AUTO_INGEST_TEMPLATE_RECHECK_MAX_FILES,
@@ -429,6 +474,14 @@ def _recover_template_update_required_files(
                     use_template_header_row=True,
                 )
                 results[file_id] = readiness if isinstance(readiness, dict) else {}
+                # [*] 契约晋升: 判定链路发现「契约基准已解释不了这个文件,
+                #     当前已发布模板可以」时, 会给出 contract_promotion 信号。
+                #     这里把新契约**算出来**(不落库) —— 落库由外层同步会话统一做,
+                #     否则两个会话同时改同一行 file_metadata 会互相覆盖。
+                results[file_id]["promoted_contract"] = await _build_promoted_contract(
+                    db_local,
+                    readiness,
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "[AutoIngest] template readiness recheck failed for file_id=%s: %s",
@@ -439,6 +492,7 @@ def _recover_template_update_required_files(
                 results[file_id] = {
                     "should_auto_sync": False,
                     "update_reason": str(exc),
+                    "promoted_contract": None,
                 }
             finally:
                 try:
@@ -485,6 +539,12 @@ def _recover_template_update_required_files(
             auto_meta.pop("needs_manual_template_update", None)
             meta["auto_ingest"] = auto_meta
             file_record.file_metadata = meta
+            # [*] 契约晋升落库: 契约基准已解释不了这个文件, 当前已发布模板可以 ——
+            #     把契约改写成当前版本, 否则契约会继续把文件钉在旧模板上,
+            #     下一轮重检又被打回(而且入库会按旧模板解析, 丢掉新增字段)。
+            promoted_contract = readiness.get("promoted_contract")
+            if promoted_contract:
+                write_template_contract(file_record, promoted_contract)
             file_record.status = "pending"
             file_record.error_message = None
             recovered += 1

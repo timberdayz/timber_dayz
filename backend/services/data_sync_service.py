@@ -659,14 +659,23 @@ class DataSyncService:
                 takeover=takeover_report,
                 baseline_template_override=baseline_template,
                 baseline_kind_override=baseline_kind,
+                # [*] 当前已发布模板 —— 判定链路用它识别「我们自己升级过模板」,
+                #     并在契约失效时作为补救路径(契约晋升)。
+                #     传进来而不是让判定链路自己查, 是为了省一次模板查询,
+                #     也为了保证两个调用点用的是同一版模板。
+                published_template=published_template,
             )
             status = self._normalize_governance_status(status)
             if status.get("template_status") == "update_required":
                 status["update_reason"] = self._format_header_change_reason(
                     status.get("header_changes", {})
                 )
-            status["template_id"] = getattr(template, "id", None)
-            status["template_version"] = getattr(template, "version", None)
+            status["template_id"] = status.get("template_id") or getattr(
+                template, "id", None
+            )
+            status["template_version"] = status.get("template_version") or getattr(
+                template, "version", None
+            )
             return status
         except Exception as exc:
             parse_error = exc

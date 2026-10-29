@@ -8,6 +8,7 @@
     <TemplateGovernancePanel
       :detailed-coverage="detailedCoverage"
       :loading="governanceLoading"
+      :load-error="governanceLoadError"
       :active-tab="activeTab"
       :get-platform-label="getPlatformLabel"
       @refresh="loadGovernanceStats"
@@ -367,6 +368,9 @@ const detailedCoverage = ref({
   missing: [],
   needs_update: [],
 })
+// [*] 治理统计加载失败标记 —— 空态与「真实是 0」必须区分开,
+//     否则接口一超时, 页面就显示「覆盖率 0%、需要更新 0」, 误导成治理已达标。
+const governanceLoadError = ref('')
 const activeTab = ref('covered')
 
 const getPlatformLabel = (platform) => {
@@ -510,10 +514,17 @@ const loadGovernanceStats = async () => {
     const detailedData = await api.getDetailedTemplateCoverage()
     if (detailedData) {
       detailedCoverage.value = detailedData
+      governanceLoadError.value = ''
+    } else {
+      // [*] 接口返回空也要当失败处理: 静默保留初始全 0 会让用户以为
+      //     「覆盖率 0%、需要更新 0」是真实结论, 而不是「没加载到数据」。
+      governanceLoadError.value = '治理统计接口未返回数据'
+      ElMessage.error(governanceLoadError.value)
     }
   } catch (error) {
     console.error('加载治理统计失败:', error)
-    ElMessage.error(error.message || '加载治理统计失败')
+    governanceLoadError.value = error?.message || '加载治理统计失败'
+    ElMessage.error(governanceLoadError.value)
   } finally {
     governanceLoading.value = false
   }
