@@ -218,6 +218,80 @@ def can_transition(from_status: Optional[str], to_status: Optional[str]) -> bool
     return str(to_status) in allowed
 
 
+# ── 「没有可用模板」的终态归属 ─────────────────────────────────────────
+#
+# 「无模板」是**确定性终态** —— 重试不会让模板凭空出现。
+#
+# 如果不落终态, 文件会一直卡在 ``processing``(进行中), 于是:
+#   看门狗看到 processing 且超过超时 -> 判成「任务卡死」-> 回退成 pending
+#   -> 兜底任务把 pending 当成「被漏掉的文件」再捞回来 -> 再次 processing
+#   => 无限重试闭环(实测: 8 个文件 2 天内产生 72 次完全无效的同步任务)。
+#
+# 落哪个终态取决于**源文件还在不在磁盘上**:
+#   * 源文件也没了 -> ``source_missing``(人工补文件; 补回来后人工重置即可)
+#   * 源文件还在   -> ``template_update_required``
+#     (人工建模板; 这个状态**自带轮转重检通道** —— 用户建好模板后系统会自动放行)
+#
+# 为什么不用「新建一个 needs_template 状态」: ``template_update_required``
+# 已经是 SSOT 里的合法状态(数据库有 CHECK 约束), 前端已有展示,
+# 而且是唯一具备自动恢复通道的终态 —— 复用它不需要数据库迁移。
+def resolve_template_blocked_catalog_status(*, source_exists: bool) -> str:
+    """「没有可用模板」的文件该落到哪个 ``catalog_files.status``。"""
+    if source_exists:
+        return CATALOG_FILE_STATUS_TEMPLATE_UPDATE_REQUIRED
+    return CATALOG_FILE_STATUS_SOURCE_MISSING
+
+
+def apply_template_blocked_state(
+    catalog_file: Any,
+    *,
+    target_status: str,
+    reason: str,
+    status_info: Optional[Dict[str, Any]] = None,
+) -> str:
+    """把「没有可用模板」的文件落到终态(纯写库, 不做 IO)。
+
+    为什么单独抽出来
+    --------------
+    落终态这件事有**两条链路**都要做:
+    * ``DataSyncService.mark_file_template_blocked`` —— 判定链路 + 入库链路
+    * ``CloudSyncAutoRecoveryService`` —— 兜底入队前的可行性预检(同步会话)
+
+    只有一处实现, 才不会出现「两把尺子」: 一条链路落 ``template_update_required``,
+    另一条落 ``source_missing``, 同一份数据被写成不同结论。
+
+    Args:
+        catalog_file: 目标文件记录(直接改它的 status / error_message / file_metadata)
+        target_status: 目标终态, 见
+            :func:`resolve_template_blocked_catalog_status`
+        reason: 落终态的原因(写进 error_message 与 auto_ingest.last_reason)
+        status_info: 判定上下文(readiness), 用于留痕 template_status / governance_status
+
+    Returns:
+        落到的终态
+    """
+    meta = (
+        catalog_file.file_metadata
+        if isinstance(getattr(catalog_file, "file_metadata", None), dict)
+        else {}
+    )
+    auto_meta = meta.get("auto_ingest")
+    if not isinstance(auto_meta, dict):
+        auto_meta = {}
+    auto_meta["last_status"] = target_status
+    auto_meta["last_reason"] = reason
+    # [*] 释放认领: 不清掉的话, 看门狗会把「自己认领的文件」当成别人正在跑的任务。
+    auto_meta["current_task_id"] = None
+    if status_info:
+        auto_meta["last_template_status"] = status_info.get("template_status")
+        auto_meta["last_governance_status"] = status_info.get("governance_status")
+    meta["auto_ingest"] = auto_meta
+    catalog_file.file_metadata = meta
+    catalog_file.status = target_status
+    catalog_file.error_message = reason
+    return target_status
+
+
 def _disposition(
     file_state: str,
     *,

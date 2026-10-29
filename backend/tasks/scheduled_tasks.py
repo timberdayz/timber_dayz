@@ -493,6 +493,9 @@ def _recover_template_update_required_files(
                 readiness.get("update_reason")
                 or readiness.get("message")
                 or readiness.get("error_code")
+                # [*] 已有更具体的报错就沿用它(比如「无模板(platform=…, domain=…)」),
+                #     别把信息降级成一句 error_code。
+                or getattr(file_record, "error_message", None)
                 or "template update required before ingest"
             )
             auto_meta["last_status"] = "template_update_required"
@@ -1418,13 +1421,48 @@ def auto_ingest_pending_files(max_files: int | None = None):
                                     "semantic_contract_status": readiness.get("semantic_contract_status"),
                                 }
                             if template_status == "missing":
+                                # [*] 「无模板」是**确定性终态** —— 必须落终态。
+                                #     只返回 blocked 结果而不改 catalog_files.status 的话,
+                                #     文件会一直卡在 processing, 被看门狗判成「任务超时」
+                                #     回退成 pending, 再被兜底任务捞回来 => 无限重试闭环。
+                                #     终态归属见 data_sync_file_state_service
+                                #     .resolve_template_blocked_catalog_status:
+                                #     源文件还在 -> template_update_required(人工建模板);
+                                #     源文件也没了 -> source_missing(人工补文件)。
+                                missing_message = readiness.get("message")
+                                async_get = getattr(db_local, "get", None)
+                                async_commit = getattr(db_local, "commit", None)
+                                landed_status = None
+                                if callable(async_get) and callable(async_commit):
+                                    file_record = await async_get(CatalogFile, file_id)
+                                    if file_record is not None:
+                                        # [*] 报错要说清「缺哪个平台/数据域/粒度的模板」,
+                                        #     否则用户只看到一句「无模板」, 不知道该建什么。
+                                        if not missing_message:
+                                            missing_message = (
+                                                "无模板(platform=%s, domain=%s, granularity=%s, "
+                                                "sub_domain=%s), 需人工创建模板"
+                                                % (
+                                                    getattr(file_record, "platform_code", None),
+                                                    getattr(file_record, "data_domain", None),
+                                                    getattr(file_record, "granularity", None),
+                                                    getattr(file_record, "sub_domain", None),
+                                                )
+                                            )
+                                        landed_status = await sync_service.mark_file_template_blocked(
+                                            file_record,
+                                            reason=missing_message,
+                                            status_info=readiness,
+                                        )
+                                        await async_commit()
                                 return {
                                     "success": False,
                                     "file_id": file_id,
                                     "file_name": readiness.get("file_name"),
                                     "status": _blocked_auto_ingest_status_for_readiness(readiness),
                                     "error_code": "NO_TEMPLATE",
-                                    "message": readiness.get("message") or "无模板",
+                                    "catalog_status": landed_status,
+                                    "message": missing_message,
                                 }
                             return {
                                 "success": False,

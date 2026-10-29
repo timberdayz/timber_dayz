@@ -62,6 +62,10 @@ from backend.services.data_sync_status_semantics import (
     TEMPLATE_BASELINE_CURRENT,
 )
 from backend.services.spreadsheet_header_reader import get_spreadsheet_header_reader
+from backend.services.data_sync_file_state_service import (
+    apply_template_blocked_state,
+    resolve_template_blocked_catalog_status,
+)
 from modules.services.file_semantics import validate_file_semantics
 
 logger = get_logger(__name__)
@@ -163,6 +167,68 @@ class DataSyncService:
         这里保留方法名作为**可打桩的接缝**(测试与调用方都依赖它)。
         """
         return self._header_reader.resolve_safe_path(file_path)
+
+    async def _source_file_exists(self, catalog_file: CatalogFile) -> bool:
+        """源文件(表格本体)是否还在磁盘上。
+
+        [*] 判定「没有可用模板」时必须先看源文件在不在 ——
+        源文件已经不在磁盘上的文件, 报「无模板」是误报,
+        正确结论是 ``source_missing``(人工补文件), 而不是「等模板」。
+        """
+        raw_path = getattr(catalog_file, "file_path", None)
+        if not raw_path:
+            return False
+        try:
+            file_path = self._resolve_runtime_spreadsheet_path(raw_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[DataSync] 解析源文件路径失败, 判定为缺失: %s (%s)",
+                raw_path,
+                exc,
+            )
+            return False
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(
+                None, lambda: Path(file_path).exists()
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[DataSync] 检查源文件是否存在失败: %s (%s)", file_path, exc)
+            return False
+
+    async def mark_file_template_blocked(
+        self,
+        catalog_file: CatalogFile,
+        *,
+        reason: str,
+        status_info: Optional[Dict[str, Any]] = None,
+        source_exists: Optional[bool] = None,
+    ) -> str:
+        """把「没有可用模板」的文件落到**终态**, 返回落到的 ``catalog_files.status``。
+
+        为什么必须落终态
+        ----------------
+        「无模板」是确定性结论, 重试不会改变它。如果只写 ``auto_ingest`` 元数据
+        而不动 ``catalog_files.status``, 文件会一直停在 ``processing``:
+        看门狗判成「任务超时」回退成 pending, 兜底任务再捞回来,
+        于是形成无限重试闭环(实测 8 个文件 2 天内 72 次无效同步)。
+
+        终态归属见
+        :func:`backend.services.data_sync_file_state_service.resolve_template_blocked_catalog_status`:
+        源文件还在 -> ``template_update_required``(人工建模板, 自带轮转重检通道);
+        源文件也没了 -> ``source_missing``(人工补文件)。
+        """
+        if source_exists is None:
+            source_exists = await self._source_file_exists(catalog_file)
+        target_status = resolve_template_blocked_catalog_status(
+            source_exists=bool(source_exists)
+        )
+        return apply_template_blocked_state(
+            catalog_file,
+            target_status=target_status,
+            reason=reason,
+            status_info=status_info,
+        )
 
     @staticmethod
     def _touch_auto_meta(
@@ -821,13 +887,42 @@ class DataSyncService:
                 template = contract_template
 
             if not template and only_with_template:
-                self._record_status(catalog_file, "skipped", "no_template")
+                # [*] 「无模板」是**确定性终态**, 不是瞬时故障 —— 重试不会让模板出现。
+                #     如果这里只写 auto_ingest 元数据而不动 catalog_files.status,
+                #     文件会一直卡在 processing:
+                #       看门狗判成「任务超时」-> 回退成 pending
+                #       -> 兜底任务把 pending 当成「被漏掉的文件」再捞回来
+                #       => 无限重试闭环
+                #     (实测: 8 个文件 2 天内产生 72 次完全无效的同步任务)
+                #
+                #     终态归属: 源文件还在 -> template_update_required(人工建模板,
+                #     自带轮转重检通道); 源文件也没了 -> source_missing(人工补文件)。
+                missing_reason = (
+                    f"无模板(platform={catalog_file.platform_code}, "
+                    f"domain={catalog_file.data_domain}, "
+                    f"granularity={catalog_file.granularity}, "
+                    f"sub_domain={catalog_file.sub_domain}), 需人工创建模板"
+                )
+                target_status = await self.mark_file_template_blocked(
+                    catalog_file,
+                    reason=missing_reason,
+                    status_info={
+                        "template_status": "missing",
+                        "governance_status": "missing_family",
+                    },
+                )
                 await self.db.commit()
 
                 logger.warning(
-                    f"[DataSync] [v4.16.0] [WARN] 文件{catalog_file.file_name}({file_id})无模板,跳过同步: "
-                    f"platform={catalog_file.platform_code}, domain={catalog_file.data_domain}, "
-                    f"granularity={catalog_file.granularity}, sub_domain={catalog_file.sub_domain}"
+                    "[DataSync] [v4.16.0] [WARN] 文件%s(%s)无模板, 已落终态 %s: "
+                    "platform=%s, domain=%s, granularity=%s, sub_domain=%s",
+                    catalog_file.file_name,
+                    file_id,
+                    target_status,
+                    catalog_file.platform_code,
+                    catalog_file.data_domain,
+                    catalog_file.granularity,
+                    catalog_file.sub_domain,
                 )
 
                 return {
@@ -835,7 +930,9 @@ class DataSyncService:
                     "file_id": file_id,
                     "file_name": catalog_file.file_name,
                     "status": "skipped",
-                    "message": f"无模板(platform={catalog_file.platform_code}, domain={catalog_file.data_domain}, granularity={catalog_file.granularity}, sub_domain={catalog_file.sub_domain})",
+                    "error_code": "NO_TEMPLATE",
+                    "catalog_status": target_status,
+                    "message": missing_reason,
                 }
 
             # 4. 设置processing状态(防止并发)

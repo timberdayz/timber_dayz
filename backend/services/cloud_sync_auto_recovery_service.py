@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import func, or_, select, text
 
-from modules.core.db import CatalogFile, CloudBClassSyncTask
+from backend.services.data_sync_file_state_service import (
+    apply_template_blocked_state,
+    resolve_template_blocked_catalog_status,
+)
+from backend.services.spreadsheet_header_reader import get_spreadsheet_header_reader
+from backend.services.template_contract_service import read_template_contract
+from modules.core.db import (
+    CatalogFile,
+    CloudBClassSyncTask,
+    FieldMappingTemplateFamily,
+)
 
 
 CLOUD_SYNC_RECOVERABLE_ERROR_CODES = {
@@ -161,6 +172,77 @@ class CloudSyncAutoRecoveryService:
             "file_ids": recovered,
         }
 
+    def _domain_has_template_family(self, file_record) -> bool:
+        """该文件所属数据域下是否还存在**任何**模板族。
+
+        [*] 保守判定(宁可放过, 不误伤):
+        跨 family 变体接管的边界是「同平台同数据域」
+        (见 ``backend/services/template_variant_takeover_service.py``),
+        所以只要同域下还有任何一个模板族, 就**不能**断定这个文件没有模板 ——
+        它可能被同域其它粒度的变体接管。
+        只有「同平台同数据域下一个族都没有」才是确定无模板。
+        """
+        platform = getattr(file_record, "platform_code", None) or getattr(
+            file_record, "source_platform", None
+        )
+        domain = getattr(file_record, "data_domain", None)
+        if not platform or not domain:
+            # 维度不全 -> 不下结论, 保守放行
+            return True
+        try:
+            count = self.db.execute(
+                select(func.count(FieldMappingTemplateFamily.id)).where(
+                    FieldMappingTemplateFamily.platform == platform,
+                    FieldMappingTemplateFamily.data_domain == domain,
+                )
+            ).scalar()
+        except Exception:  # noqa: BLE001
+            # 查不到就不下结论(宁可放过, 也不误伤有模板的文件)
+            return True
+        return bool(count)
+
+    def _source_file_exists(self, file_record) -> bool:
+        """源文件是否还在磁盘上。"""
+        raw_path = getattr(file_record, "file_path", None)
+        if not raw_path:
+            return False
+        try:
+            resolved = get_spreadsheet_header_reader(
+                log_prefix="AutoRecovery"
+            ).resolve_safe_path(raw_path)
+        except Exception:  # noqa: BLE001
+            return False
+        try:
+            return Path(resolved).exists()
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _precheck_ingest_feasible(self, file_record) -> tuple[bool, str | None]:
+        """兜底入队前的可行性预检。
+
+        返回 ``(是否值得入队, 不入队时的原因)``。
+
+        [*] 兜底通道的职责是「捞起被漏掉的文件」, 不是「把确定性失败的活
+            再塞回队列」。一个文件如果**确定**没有可用模板, 重试多少次都
+            不会成功 —— 让它进队列只会制造无限重试闭环
+            (实测: 8 个文件 2 天内 72 次完全无效的同步任务)。
+        """
+        # 1) 契约模板: 文件自带「采集当时生效的那一版模板」,
+        #    即使当前没有模板族也能解释这个文件
+        if read_template_contract(file_record):
+            return True, None
+        # 2) 同域还有模板族 -> 可能有同粒度族, 也可能被同域其它族接管
+        if self._domain_has_template_family(file_record):
+            return True, None
+        # 3) 确定无模板
+        reason = (
+            f"无模板(platform={getattr(file_record, 'platform_code', None)}, "
+            f"domain={getattr(file_record, 'data_domain', None)}, "
+            f"granularity={getattr(file_record, 'granularity', None)}, "
+            f"sub_domain={getattr(file_record, 'sub_domain', None)}), 需人工创建模板"
+        )
+        return False, reason
+
     def enqueue_overdue_pending_catalog_files(
         self,
         *,
@@ -180,6 +262,7 @@ class CloudSyncAutoRecoveryService:
         )
         files = list(result.scalars().all())
         enqueued: list[int] = []
+        blocked: list[int] = []
 
         for file_record in files:
             if getattr(file_record, "status", None) != "pending":
@@ -193,6 +276,26 @@ class CloudSyncAutoRecoveryService:
                 continue
 
             file_id = int(file_record.id)
+
+            # [*] 可行性预检: 确定无模板的文件**不入队**, 直接落终态。
+            #     否则它会被兜底反复捞起 -> 看门狗判超时 -> 回退 pending -> 无限循环。
+            feasible, blocked_reason = self._precheck_ingest_feasible(file_record)
+            if not feasible:
+                target_status = resolve_template_blocked_catalog_status(
+                    source_exists=self._source_file_exists(file_record)
+                )
+                apply_template_blocked_state(
+                    file_record,
+                    target_status=target_status,
+                    reason=blocked_reason or "无模板, 需人工创建模板",
+                    status_info={
+                        "template_status": "missing",
+                        "governance_status": "missing_family",
+                    },
+                )
+                blocked.append(file_id)
+                continue
+
             # [*] 修复: sync_single_file_task 的 task_id 是必填参数,
             # 缺失会在 Celery 提交阶段抛 TypeError, 让整个兜底任务每分钟失败。
             progress_task_id = f"single_file_{file_id}_{uuid4().hex[:8]}"
@@ -227,13 +330,15 @@ class CloudSyncAutoRecoveryService:
             file_record.status = "processing"
             enqueued.append(file_id)
 
-        if enqueued:
+        if enqueued or blocked:
             self.db.commit()
 
         return {
             "status": "success",
             "enqueued": len(enqueued),
             "file_ids": enqueued,
+            "blocked": len(blocked),
+            "blocked_file_ids": blocked,
         }
 
     def release_orphan_auto_ingest_locks(
