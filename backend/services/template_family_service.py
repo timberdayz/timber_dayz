@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import re
+import time
+import weakref
 from collections import defaultdict
 from typing import Any, Dict, Iterable, Optional
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, event, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.semantic_field_registry import is_canonical_semantic_key, normalize_semantic_key
@@ -25,6 +28,181 @@ from modules.core.db import (
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# 模板目录缓存 (2026-10-29)
+# ---------------------------------------------------------------------------
+# 问题
+# ----
+# 治理看板一次要解析 27 个组合, 而每个组合的解析会**递归**展开:
+#   resolve → get_family_versions → list_families → project_legacy_templates(写库 + commit)
+#   resolve → get_version_variants → get_family_versions → list_families → …
+#   resolve → list_cross_family_variants → 每个兄弟族都再来一遍
+# 实测一次看板请求打出 **3 万多次查询 + 1.5 万次 commit** ⇒ 13~17 秒。
+#
+# 做法(保守方案: 只加缓存, 不动查询结构, 不改判定口径)
+# ----------------------------------------------------
+# * 进程内缓存「模板目录」(族 / 版本 / 变体 / 文件计数), **只读不写库**;
+# * **目录一变, 缓存立即作废**:
+#     - 模板目录表(模板/族/版本/变体)写入 ⇒ 目录变了 ⇒ 缓存作废;
+#     - ``catalog_files`` 写入 ⇒ 文件计数变了 ⇒ 缓存作废;
+#   作废信号挂在**引擎级** ``after_cursor_execute`` 上 —— 只有真的执行了
+#   写 SQL 才算 ⇒ **不依赖"记得在某个路由里手动清缓存"**, 任何写入口都会触发;
+# * TTL(默认 10 分钟)只是兜底, 防住 ORM 之外的裸 SQL 改动;
+# * 缓存按**引擎(连接池)**分桶 ⇒ 同一个库的所有会话共享一份缓存,
+#   而"同一个 URL 但不同实例"的库(典型: 测试里各建各的 SQLite 内存库)
+#   **不会串味** ⇒ 真实库与测试隔离库、测试之间互不干扰。
+#
+# 口径不变: 缓存里放的就是原来算出来的同一份 payload, 判定逻辑一行没改。
+_CATALOG_GENERATION = 0
+_FILE_GENERATION = 0
+_CATALOG_CACHE_TTL_SECONDS = 600.0
+
+#: 目录表的表名片段(用于识别写 SQL)
+_CATALOG_TABLE_MARKERS = (
+    "field_mapping_templates",
+    "field_mapping_template_families",
+    "field_mapping_template_versions",
+    "field_mapping_template_variants",
+)
+
+
+def _bump_catalog_generation() -> None:
+    """模板目录(模板/族/版本/变体)发生写入 ⇒ 缓存作废。"""
+    global _CATALOG_GENERATION
+    _CATALOG_GENERATION += 1
+
+
+def _bump_file_generation() -> None:
+    """catalog_files 发生写入 ⇒ 文件计数过期 ⇒ 缓存作废。"""
+    global _FILE_GENERATION
+    _FILE_GENERATION += 1
+
+
+def _watch_engine_writes(engine: Any) -> None:
+    """监听引擎上的**真实写 SQL** —— 只有真的写了目录表才让缓存作废。
+
+    为什么不用 ORM 的 ``after_insert`` / ``after_update`` 钩子:
+    SQLAlchemy 2.0 会给「被重新赋了等值」的对象也派发 ``after_update``
+    (实测目录投影每跑一次就白触发 9 次) ⇒ 缓存永远不命中, 看板还是 13 秒。
+    引擎级的 ``after_cursor_execute`` 只在**真的执行了写 SQL** 时才触发,
+    既是精确信号, 又覆盖所有写入口(ORM / 裸 SQL / 批量语句)。
+    """
+
+    @event.listens_for(engine, "after_cursor_execute")
+    def _on_execute(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
+        head = statement.lstrip().lower()
+        if not head.startswith(("insert ", "update ", "delete ")):
+            return
+        if any(marker in head for marker in _CATALOG_TABLE_MARKERS):
+            _bump_catalog_generation()
+        elif "catalog_files" in head:
+            _bump_file_generation()
+
+
+class _TemplateCatalogCache:
+    """单个数据库上的模板目录缓存。
+
+    失效条件(任一命中即整体清空):
+      * 模板目录被写入(引擎级写 SQL 监听)
+      * catalog_files 被写入(引擎级写 SQL 监听)
+      * TTL 到期(兜底: 防住 ORM 之外的裸 SQL)
+    """
+
+    __slots__ = ("_entries", "_catalog_generation", "_file_generation", "_expires_at")
+
+    def __init__(self) -> None:
+        self._entries: dict[str, Any] = {}
+        self._catalog_generation = -1
+        self._file_generation = -1
+        self._expires_at = 0.0
+
+    def _is_stale(self) -> bool:
+        return (
+            self._catalog_generation != _CATALOG_GENERATION
+            or self._file_generation != _FILE_GENERATION
+            or time.monotonic() >= self._expires_at
+        )
+
+    def clear(self) -> None:
+        self._entries.clear()
+        self._catalog_generation = _CATALOG_GENERATION
+        self._file_generation = _FILE_GENERATION
+        self._expires_at = time.monotonic() + _CATALOG_CACHE_TTL_SECONDS
+
+    def get(self, key: str) -> Any:
+        if self._is_stale():
+            self.clear()
+        return self._entries.get(key)
+
+    def set(self, key: str, value: Any) -> None:
+        self._entries[key] = value
+
+
+#: 拿不到 bind 时的退化桶(不参与隔离, 但保证功能不挂)
+_FALLBACK_CACHE_KEY = object()
+
+#: 引擎 → 缓存桶。用 WeakKeyDictionary: 引擎被回收时缓存自动释放, 不留内存。
+_CATALOG_CACHES: "weakref.WeakKeyDictionary[Any, _TemplateCatalogCache]" = (
+    weakref.WeakKeyDictionary()
+)
+#: 已经挂过写监听的引擎(同一个引擎只挂一次)
+_WATCHED_ENGINES: "weakref.WeakSet[Any]" = weakref.WeakSet()
+
+
+def _ensure_watched(bind: Any) -> None:
+    """给引擎挂一次「写 SQL ⇒ 缓存作废」的监听。"""
+    try:
+        if bind in _WATCHED_ENGINES:
+            return
+        _WATCHED_ENGINES.add(bind)
+    except TypeError:
+        # 不可 weakref / 不可 hash 的对象 ⇒ 退化成"不挂监听"(只损失立即作废的及时性)
+        return
+    try:
+        _watch_engine_writes(bind)
+    except Exception:  # noqa: BLE001 - 监听失败只影响"立即作废"的及时性
+        logger.warning("[TemplateFamily] 目录缓存写监听挂载失败", exc_info=True)
+
+
+def _cache_for(db: AsyncSession) -> _TemplateCatalogCache:
+    """取当前数据库对应的缓存桶(按**引擎/连接池**隔离)。
+
+    为什么按引擎而不是按库地址:
+        ``sqlite+aiosqlite://`` 这类"空地址"的内存库, 每个测试自己建引擎,
+        地址字符串完全相同但**库内容不同** ⇒ 按地址分桶会让不同测试互相串味。
+        按引擎分桶才能保证"同一个库共享缓存、不同库各自分开"。
+    """
+    try:
+        bind = db.get_bind()
+    except Exception:  # noqa: BLE001 - 拿不到引擎就退化成"不分桶"
+        bind = None
+
+    key: Any = bind if bind is not None else _FALLBACK_CACHE_KEY
+    try:
+        cache = _CATALOG_CACHES.get(key)
+    except TypeError:
+        key = _FALLBACK_CACHE_KEY
+        cache = _CATALOG_CACHES.get(key)
+
+    if cache is None:
+        cache = _TemplateCatalogCache()
+        try:
+            _CATALOG_CACHES[key] = cache
+        except TypeError:
+            key = _FALLBACK_CACHE_KEY
+            _CATALOG_CACHES[key] = cache
+        if bind is not None:
+            _ensure_watched(bind)
+    return cache
+
+
+def clear_template_catalog_cache() -> None:
+    """手动清空所有模板目录缓存(测试/运维用)。"""
+    for cache in list(_CATALOG_CACHES.values()):
+        cache.clear()
+    _CATALOG_CACHES.clear()
 
 
 def _extract_semantic_key_sets(
@@ -246,6 +424,21 @@ def _variant_header_row_matches(
         return False
 
 
+def _assign_if_changed(target: Any, attr: str, value: Any) -> None:
+    """只在**值真的变了**时才写属性。
+
+    为什么必须这么做: JSON 列(``deduplication_fields`` / ``header_bindings`` /
+    ``legacy_template_ids`` / ``required_headers`` / ``parse_profile`` /
+    ``field_parse_rules``)每次赋值都会被 SQLAlchemy 标记为脏 —— 即使内容一模一样。
+    于是 ``project_legacy_templates`` 每跑一次就发出 9 条无意义的 UPDATE,
+    把「目录变了」的作废钩子无谓地触发 ⇒ 目录缓存永远不命中(看板还是 13 秒)。
+    """
+    current = getattr(target, attr, None)
+    if current == value:
+        return
+    setattr(target, attr, value)
+
+
 class TemplateFamilyService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -389,10 +582,14 @@ class TemplateFamilyService:
         else:
             version.version_no = newest.version or version.version_no
             version.template_name = newest.template_name
-            version.deduplication_fields = list(newest.deduplication_fields or [])
-            version.header_bindings = list(newest.header_bindings or [])
+            _assign_if_changed(version, "deduplication_fields", list(newest.deduplication_fields or []))
+            _assign_if_changed(version, "header_bindings", list(newest.header_bindings or []))
             version.notes = newest.notes
-            version.legacy_template_ids = [template.id for template in group if template.id is not None]
+            _assign_if_changed(
+                version,
+                "legacy_template_ids",
+                [template.id for template in group if template.id is not None],
+            )
 
         existing_variants_result = await self.db.execute(
             select(FieldMappingTemplateVariant).where(
@@ -430,9 +627,11 @@ class TemplateFamilyService:
             variant.match_priority = index + 1
             variant.header_row = template.header_row or 0
             variant.sheet_name_pattern = template.sheet_name
-            variant.required_headers = _required_headers(template)
-            variant.parse_profile = _build_parse_profile(template)
-            variant.field_parse_rules = list(template.field_parse_rules or [])
+            _assign_if_changed(variant, "required_headers", _required_headers(template))
+            _assign_if_changed(variant, "parse_profile", _build_parse_profile(template))
+            _assign_if_changed(
+                variant, "field_parse_rules", list(template.field_parse_rules or [])
+            )
             variant.source_legacy_template_id = template.id
             variant.template_name = template.template_name
 
@@ -515,6 +714,13 @@ class TemplateFamilyService:
         platform: Optional[str] = None,
         data_domain: Optional[str] = None,
     ) -> list[dict[str, Any]]:
+        # [*] 目录缓存: 命中就不重算(也不再重复投影 + commit)
+        cache = _cache_for(self.db)
+        cache_key = f"list_families|{platform}|{data_domain}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return copy.deepcopy(cached)
+
         await self.project_legacy_templates(platform=platform, data_domain=data_domain)
 
         stmt = select(FieldMappingTemplateFamily)
@@ -629,9 +835,18 @@ class TemplateFamilyService:
                 }
             )
         payload.sort(key=lambda item: (item["platform"], item["data_domain"], item["sub_domain"] or "", item["granularity"] or ""))
+        cache.set(cache_key, payload)
         return payload
 
     async def get_family_versions(self, family_id: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        # [*] 目录缓存: 版本/变体是纯目录数据, 目录一变立即作废
+        cache = _cache_for(self.db)
+        cache_key = f"get_family_versions|{family_id}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            family_cached, versions_cached = cached
+            return copy.deepcopy(family_cached), copy.deepcopy(versions_cached)
+
         family = await self.db.get(FieldMappingTemplateFamily, family_id)
         if family is None:
             raise ValueError(f"template family {family_id} not found")
@@ -724,9 +939,18 @@ class TemplateFamilyService:
                     "legacy_template_ids": list(version.legacy_template_ids or []),
                 }
             )
+        cache.set(cache_key, (family_payload, payload))
         return family_payload, payload
 
     async def get_version_variants(self, version_id: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        # [*] 目录缓存: 变体是纯目录数据
+        cache = _cache_for(self.db)
+        cache_key = f"get_version_variants|{version_id}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            version_cached, variants_cached = cached
+            return copy.deepcopy(version_cached), copy.deepcopy(variants_cached)
+
         version = await self.db.get(FieldMappingTemplateVersion, version_id)
         if version is None:
             raise ValueError(f"template version {version_id} not found")
@@ -756,6 +980,7 @@ class TemplateFamilyService:
             }
             for variant in variants
         ]
+        cache.set(cache_key, (version_payload, payload))
         return version_payload, payload
 
     @staticmethod
@@ -989,6 +1214,17 @@ class TemplateResolver:
 
         ``exclude_*`` 用于排除指定维度下的 family; ``own_*`` 用于标记自身 family。
         """
+        # [*] 目录缓存: 跨族变体清单是纯目录数据
+        cache = _cache_for(self.db)
+        cache_key = (
+            "list_cross_family_variants"
+            f"|{platform}|{data_domain}|{exclude_family_id}|{exclude_granularity}"
+            f"|{exclude_sub_domain}|{exclude_account}|{own_granularity}"
+            f"|{own_sub_domain}|{own_account}"
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return copy.deepcopy(cached)
         result = await self.db.execute(
             select(FieldMappingTemplateFamily).where(
                 FieldMappingTemplateFamily.platform == platform,
@@ -1039,6 +1275,7 @@ class TemplateResolver:
                         "is_own_family": is_own_family,
                     }
                 )
+        cache.set(cache_key, collected)
         return collected
 
     async def _select_cross_family_variant(

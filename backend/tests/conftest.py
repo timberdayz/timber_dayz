@@ -118,6 +118,12 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "pg_only: mark test to run only with PostgreSQL via testcontainers"
     )
+    config.addinivalue_line(
+        "markers",
+        "integration: 需要外部服务且会写数据的集成测试, 默认跳过。"
+        "启用需同时设置 XIHONG_RUN_INTEGRATION_TESTS=1、"
+        "XIHONG_INTEGRATION_DISPOSABLE=1、XIHONG_INTEGRATION_BASE_URL=<目标地址>",
+    )
 
     if _ORIGINAL_DATABASE_URL and _is_real_database_url(_ORIGINAL_DATABASE_URL):
         print(

@@ -3122,6 +3122,14 @@ async def get_detailed_template_coverage(
         missing_list = []
         needs_update_list = []
         archived_compatibility_list = []
+        # [*] 2026-10-29 口径修正: 「有模板的组合」/「没模板的组合」按**组合总体**计,
+        #     不再按「这个组合当前有没有待处理文件」把组合劈成两半。
+        #     之前分子只数 covered_list(有待处理文件的组合), 分母却数全部组合
+        #     ⇒ 全部文件都已入库时分子恒为 0, 覆盖率恒为 0%(与事实相反)。
+        archived_covered_list = []
+        archived_missing_list = []
+        covered_combination_count = 0
+        missing_combination_count = 0
         template_status_service = DataSyncTemplateStatusService(db)
         drift_service = DataSyncTemplateDriftService(db)
         detailed_coverage_missing_files: list[str] = []
@@ -3235,6 +3243,12 @@ async def get_detailed_template_coverage(
                 and to_absolute_path(candidate.file_path).exists()
             ]
             if combo_file_candidates and not valid_combo_file_candidates:
+                # [*] 文件在库里但磁盘上没有 —— 组合仍然计入总体(它属于"要覆盖"的集合),
+                #     只是这轮没法拿样本文件评估。
+                if (platform, domain, sub_domain or None, granularity) in template_combinations:
+                    covered_combination_count += 1
+                else:
+                    missing_combination_count += 1
                 continue
 
             # 查找模板([*] v4.18.2:添加 await)
@@ -3507,8 +3521,11 @@ async def get_detailed_template_coverage(
                     "shadow_compare": shadow_compare,
                 }
 
+                # [*] 有已发布模板 ⇒ 计入「已覆盖」总体(与有没有待处理文件无关)
+                covered_combination_count += 1
+
                 if actionable_file_count == 0:
-                    archived_compatibility_list.append(covered_row)
+                    archived_covered_list.append(covered_row)
                     continue
 
                 covered_list.append(covered_row)
@@ -3535,8 +3552,10 @@ async def get_detailed_template_coverage(
                         }
                     )
             else:
+                # [*] 没有已发布模板 ⇒ 计入「缺模板」总体
+                missing_combination_count += 1
                 if actionable_file_count == 0:
-                    archived_compatibility_list.append(
+                    archived_missing_list.append(
                         {
                             **combo_info,
                             "shadow_compare": resolve_result.get("shadow_compare"),
@@ -3553,36 +3572,76 @@ async def get_detailed_template_coverage(
         # 3. 计算统计
         # [*] v4.15.0修复:覆盖率应该基于所有模板,而不是基于文件组合
         # total_combinations = 所有模板数 + 缺少模板的文件组合数
-        total_combinations = len(template_combinations) + len(missing_list)
-        archived_compatibility_list = locals().get("archived_compatibility_list", [])
+        #
+        # [*] 2026-10-29 口径修正(覆盖率显示 0% 的根因):
+        #     统计的总体是「组合」(平台+数据域+子类型+粒度), 分子分母必须同源。
+        #     旧实现分子取 ``covered_list``(只含"当前有待处理文件"的组合),
+        #     分母却取 ``len(template_combinations) + len(missing_list)``(全部组合)
+        #     ⇒ 所有文件都已入库时, 27 个组合全部落进 archived 桶, 分子恒为 0
+        #     ⇒ 覆盖率恒为 0%, 而事实是 27/27 全部有模板。
+        #     现在分子 = 有已发布模板的组合数(covered_combination_count),
+        #     分母 = 有模板的 + 没模板的, 同一个总体。
+        total_combinations = covered_combination_count + missing_combination_count
+
+        # [*] 「有模板的组合」= 当前桶 + 历史归档桶(两者是同一类东西, 只是有没有待处理文件)
+        covered_rows_all = [*covered_list, *archived_covered_list]
+        missing_rows_all = [*missing_list, *archived_missing_list]
+
+        # 已覆盖页签: **每个组合恰好出现在一个页签里**(既有契约: 漂移组合不进「已覆盖」)
+        #   ready / non_breaking_drift —— 当前健康可用
+        #   missing_variant 且**没有样本文件** —— 模板已登记但还没采到文件(待采样),
+        #     不是缺陷(前端显示灰色「待采样」, 不计入「缺少变体」)
         current_covered_list = [
             item
-            for item in covered_list
+            for item in covered_rows_all
             if item.get("governance_status") in {"ready", "non_breaking_drift"}
+            or (
+                item.get("governance_status") == "missing_variant"
+                and not item.get("sample_file_id")
+            )
         ]
         current_missing_list = [
             item
-            for item in missing_list
+            for item in missing_rows_all
             if item.get("governance_status") == "missing_family"
         ]
+        # [*] 「缺少变体」只在**有样本文件**时才算真缺变体:
+        #     连样本文件都没有的组合(模板已登记但还没采到文件)不算缺陷,
+        #     前端把它显示成灰色的「待采样」, 与红色「缺少变体」区分开。
         missing_variant_rows = [
             {
                 **item,
                 "update_reason": item.get("update_reason") or "缺少当前有效变体",
             }
-            for item in covered_list
+            for item in covered_rows_all
             if item.get("governance_status") == "missing_variant"
-            and (item.get("current_file_count") or 0) > 0
             and item.get("sample_file_id")
         ]
+        # [*] 破坏性漂移: 模板与当前文件格式对不上 —— 无论文件是否还有待处理,
+        #     都是"需要出新版本模板"的待办, 所以按组合总体统计。
+        #     漂移快照字段(drift_snapshot/drift_file_count/...) 只在 needs_update_list
+        #     里有(它来自漂移快照), 历史归档的漂移组合没有快照 ⇒ 补空值保持形状一致。
         breaking_drift_rows = [
-            item
-            for item in needs_update_list
-            if item.get("governance_status") == "breaking_drift"
+            *[
+                item
+                for item in needs_update_list
+                if item.get("governance_status") == "breaking_drift"
+            ],
+            *[
+                {
+                    **item,
+                    "drift_snapshot": None,
+                    "drift_file_count": 0,
+                    "drift_detected_at": None,
+                }
+                for item in archived_covered_list
+                if item.get("governance_status") == "breaking_drift"
+            ],
         ]
         current_needs_update_list = [*breaking_drift_rows, *missing_variant_rows]
         archived_compatibility_list = [
-            *archived_compatibility_list,
+            *archived_covered_list,
+            *archived_missing_list,
             *[
                 item
                 for item in covered_list
@@ -3597,24 +3656,28 @@ async def get_detailed_template_coverage(
         ]
 
         covered_count = len(current_covered_list)
-        missing_count = len(current_missing_list)
+        # [*] 「有已发布模板的组合数」—— 覆盖率的分子。
+        #     与 covered_count 的差别: 需要出新版本模板的组合**也有模板**,
+        #     只是当前不可用, 所以它进「需要更新」而不是「已覆盖」。
+        template_backed_combinations = covered_combination_count
+        missing_count = missing_combination_count
         needs_update_count = len(breaking_drift_rows)
         missing_variant_count = len(missing_variant_rows)
-        breaking_drift_count = sum(
-            1
-            for item in current_needs_update_list
-            if item.get("governance_status") == "breaking_drift"
-        )
+        breaking_drift_count = len(breaking_drift_rows)
         non_breaking_drift_count = sum(
             1
-            for item in current_covered_list
+            for item in covered_rows_all
             if item.get("governance_status") == "non_breaking_drift"
         )
 
         # [*] v4.15.0修复:覆盖率 = 有模板的组合数 / 总组合数
         # 总组合数 = 所有模板数(已覆盖)+ 缺少模板的文件组合数(未覆盖)
+        # [*] 2026-10-29: 分子用「有已发布模板的组合数」, 不再用「已覆盖页签行数」——
+        #     否则需要更新模板的组合会同时把分子拉低, 覆盖率永远到不了 100%。
         coverage_percentage = (
-            (covered_count / total_combinations * 100) if total_combinations > 0 else 0
+            (template_backed_combinations / total_combinations * 100)
+            if total_combinations > 0
+            else 0
         )
 
         if detailed_coverage_missing_files:
@@ -3641,6 +3704,7 @@ async def get_detailed_template_coverage(
                 "summary": {
                     "total_combinations": total_combinations,
                     "covered_count": covered_count,
+                    "template_backed_combinations": template_backed_combinations,
                     "missing_count": missing_count,
                     "needs_update_count": needs_update_count,
                     "missing_variant_count": missing_variant_count,

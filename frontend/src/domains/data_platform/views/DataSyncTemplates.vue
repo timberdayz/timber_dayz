@@ -360,6 +360,7 @@ const detailedCoverage = ref({
   summary: {
     total_combinations: 0,
     covered_count: 0,
+    template_backed_combinations: 0,
     missing_count: 0,
     needs_update_count: 0,
     coverage_percentage: 0,

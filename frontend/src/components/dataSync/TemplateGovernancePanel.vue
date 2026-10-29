@@ -28,6 +28,11 @@
         <div class="stat-content">
           <div class="stat-label">模板覆盖率</div>
           <div class="stat-value">{{ summary.coverage_percentage || 0 }}%</div>
+          <!-- [*] 覆盖率分子 =「有已发布模板的组合数」, 与「已覆盖」行数差的是待更新模板的组合 -->
+          <div class="stat-hint">
+            {{ summary.template_backed_combinations || 0 }}/{{ summary.total_combinations || 0 }}
+            个组合有模板
+          </div>
         </div>
       </div>
       <div class="stat-item">
@@ -97,9 +102,18 @@
                 <el-icon><Refresh /></el-icon>
                 轻微漂移
               </el-tag>
-              <el-tag v-else-if="row.governance_status === 'missing_variant'" type="danger" size="small">
+              <el-tag
+                v-else-if="row.governance_status === 'missing_variant' && row.sample_file_id"
+                type="danger"
+                size="small"
+              >
                 <el-icon><Warning /></el-icon>
                 缺少变体
+              </el-tag>
+              <!-- [*] 没有样本文件的「缺变体」组合 = 模板已登记但还没采到文件, 不是缺陷 -->
+              <el-tag v-else-if="row.governance_status === 'missing_variant'" type="info" size="small">
+                <el-icon><Clock /></el-icon>
+                待采样
               </el-tag>
               <el-tag v-else type="success" size="small">
                 <el-icon><Check /></el-icon>
@@ -154,7 +168,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { Check, Document, Plus, Refresh, Warning } from '@element-plus/icons-vue'
+import { Check, Clock, Document, Plus, Refresh, Warning } from '@element-plus/icons-vue'
 
 import TemplateNeedsUpdateTable from './TemplateNeedsUpdateTable.vue'
 
@@ -239,5 +253,11 @@ const needsUpdateRows = computed(() => props.detailedCoverage?.current_needs_upd
   font-size: 24px;
   font-weight: 600;
   color: #303133;
+}
+
+.stat-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 2px;
 }
 </style>

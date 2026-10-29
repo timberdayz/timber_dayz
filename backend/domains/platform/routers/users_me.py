@@ -49,6 +49,34 @@ def _extract_bearer_token(request: Request) -> Optional[str]:
     return None
 
 
+def _resolve_current_session_id(request: Request) -> Optional[str]:
+    """解析「当前会话」的 ``session_id``。
+
+    [*] 必须用 JWT 里的 ``sid``, 不能用 ``sha256(token)``:
+    登录时创建的会话用的是 ``auth_service.create_token_pair`` 生成的
+    ``uuid4().hex``(= token 的 ``sid``), 见 ``auth.py`` 的 login 端点。
+    之前这里算的是 ``sha256(token)``, 与库里存的 ``session_id`` 永远对不上 ⇒
+      * ``GET /users/me/sessions`` 里 ``is_current`` 恒为 False(前端标不出当前会话);
+      * ``DELETE /users/me/sessions``(撤销所有其他会话)会把**当前会话也撤掉**
+        —— 用户点「退出其它设备」反而被整个踢下线。
+    口径与 ``backend/dependencies/auth.py::get_current_user`` 一致:
+    先取 ``sid``, 老 token 没有 ``sid`` 时才回退到 ``sha256(token)``。
+    """
+    token = _extract_bearer_token(request)
+    if not token:
+        return None
+    try:
+        from backend.services.auth_service import auth_service
+
+        payload = auth_service.verify_token(token)
+        session_id = payload.get("sid")
+        if session_id:
+            return str(session_id)
+    except Exception:  # noqa: BLE001 - token 非法时按老口径回退
+        pass
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def serialize_user_sessions(session_pairs):
     return [
         UserSessionResponse(
@@ -72,8 +100,7 @@ async def get_my_sessions(
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
-    token = _extract_bearer_token(request)
-    current_session_id = hashlib.sha256(token.encode()).hexdigest() if token else None
+    current_session_id = _resolve_current_session_id(request)
 
     result = await db.execute(
         select(UserSession)
@@ -156,8 +183,8 @@ async def revoke_other_sessions(
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
-    token = _extract_bearer_token(request)
-    if not token:
+    current_session_id = _resolve_current_session_id(request)
+    if not current_session_id:
         return error_response(
             code=ErrorCode.AUTH_REQUIRED,
             message="无法识别当前会话",
@@ -166,7 +193,6 @@ async def revoke_other_sessions(
             status_code=401,
         )
 
-    current_session_id = hashlib.sha256(token.encode()).hexdigest()
     result = await db.execute(
         select(UserSession).where(
             UserSession.user_id == current_user.user_id,
