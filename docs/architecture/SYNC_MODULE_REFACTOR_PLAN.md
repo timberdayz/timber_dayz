@@ -431,14 +431,40 @@ deduplication_fields 写法不一（订单号 vs order_id）
 
 | # | 动作 | 解决什么 | 谁做 | 优先级 |
 |---|------|---------|------|-------|
-| **P1** | **端到端幂等性验证**：同一源文件连续导入两次，断言第二次行数不增、`data_hash` 不变、唯一约束真的命中 | 目前只验到"闸门层"，**没验过"入库层"**。这是口径统一后的第一道验证 | 我 | **最高** |
+| **P1** | **端到端幂等性验证**：同一源文件连续导入两次，断言第二次行数不增、`data_hash` 不变、唯一约束真的命中 | 目前只验到"闸门层"，**没验过"入库层"**。这是口径统一后的第一道验证 | 我 | **最高** ✅ **已完成** |
 | **P2** | **109 个模板的 binding 语义映射人工确认**（95.9% pending） | 模板升级时的契约判定不准 ⇒ 误判/漏判"模板待确认" | 业务侧在工作台逐条点（第 1 批已备好） | 高 |
-| **P3** | **模板口径体检工具常态化**：把 `scripts/normalize_template_deduplication_fields.py` 的诊断能力做成只读巡检，定期跑、报"新模板是否踩坑" | 防止新模板再把度量字段写进 `deduplication_fields` | 我 | 高 |
+| **P3** | **模板口径体检工具常态化**：把 `scripts/normalize_template_deduplication_fields.py` 的诊断能力做成只读巡检，定期跑、报"新模板是否踩坑" | 防止新模板再把度量字段写进 `deduplication_fields` | 我 | 高（体检逻辑已有测试覆盖，巡检入口待做） |
 | **P4** | **CI 护栏：禁止哑测试** | 本次发现 4 个守卫长期 ENOENT 崩溃、断言从未执行 ⇒ 结论不可信 | 我 | 高 |
 | **P5** | **数据健康度巡检**：定期看"同一业务键多行"的**增量**（不是存量） | 重复问题在长大前被发现 | 我 | 中 |
 | **P6** | **服务层月窗口下推**（clearance-ranking 44s → 约 11s） | 数据涨一倍就撞 60s 超时预算 | 我（需改仓库分层规则或加接口层） | 中 |
 | **P7** | **`api.clearance_ranking_module` 恒 0 行**：`sku_key` 口径统一 | 报表恒空（既有生产缺陷） | 业务定口径 + 我实施 | 中 |
 | **P8** | **后端测试基线治理**（179 failed） | 长期红灯 ⇒ 真回归被淹没 | 另立专项 | 低（本轮范围外） |
+
+### 3.4.5 P1 验证结果（已完成，端到端证据）
+
+交付物：`backend/tests/test_data_hash_idempotency_contract.py`（4 项，隔离库全绿）。
+用**真实入库器** `RawDataImporter`（真实建表 + 真实 `ON CONFLICT`）跑，不是模拟。
+
+| 用例 | 断言 | 结果 |
+|------|------|------|
+| `test_same_data_imported_twice_stays_single_row` | 同一份数据导两次 ⇒ 第二次 `inserted=0, updated=1`，**行数保持 1**，`data_hash` 不变 | ✅ |
+| `test_different_source_headers_merge_into_one_row` | 源文件表头 `订单号` vs `订单编号`，模板都已归一为 `order_id` ⇒ **算出同一个 `data_hash`** ⇒ 落表**合并成 1 行** | ✅ |
+| `test_unnormalized_template_would_split_the_same_business` | **反证**：模板未归一（`['订单号','产品ID']`）⇒ hash 不同 ⇒ 同一笔业务被写成 **2 行** | ✅ |
+| `test_normalized_template_is_stable_under_health_check` | 归一后的模板是**稳定态**，体检脚本判定"无需改写" | ✅ |
+
+**这条测试证明的完整链路**：
+
+```
+模板去重字段已归一（只用语义键）
+   → calculate_data_hash 走语义解析（:144）
+      → 两个不同表头写法的源文件算出同一个 data_hash
+         → ON CONFLICT (platform_code, shop_id, data_domain, granularity, data_hash)（:1093）命中
+            → 同一笔业务在事实表里只有一行，重复导入不再增行
+```
+
+**结论**：**§3.4.2 的标准是成立的，而且可执行、可验证。**
+历史模板不归一会怎样，也被量化了：**同一笔业务两行**（第三个用例）。
+⇒ **"把模板口径统一"就是"让数据库唯一约束重新生效"**，这是往前看的真正抓手。
 
 ---
 
@@ -460,8 +486,9 @@ deduplication_fields 写法不一（订单号 vs order_id）
 
 - **不改 orders 域要求 order_id 的策略**。依据：模板 345 的 `header_columns` **确实含「订单号」列**（91 列，前 6 列为 `订单号/订单状态/售后状态/产品ID/平台SKU/SKU ID`），源文件表头为 `订单编号` 且 **100% 有值**（file 2829 / 3007 实测）；且 weekly 事实表**同一产品ID 最多 132 行**（不同订单）⇒ 必须靠订单号区分行，否则会互相覆盖。
 - **历史数据修复（`deduplication_fields`）已执行**，范围严格限定为"改写后复验两道闸门通过"的 5 个模板（§3.2.2）；`data_hash` 重算与事实表合并/清理**仍未授权、未执行**。
+- **但 `data_hash` 重算与事实表冗余行清理现在降级为「可选收尾」**（依据见 §3.4）：事实表的唯一索引 `uq_<表>_hash` **早就建好**，重复行之所以存在不是"没兜底"，而是"去重字段写法不统一导致身份证号算得不一样"。**把模板口径统一后，唯一约束自然重新生效**（§3.4.5 已用真实入库器端到端验证），新数据从此幂等。历史行不动也不会再无限增长。
 - **不自动推断 binding 的 `semantic_key`**。95.9% 的绑定处于 `pending`（§3.2.4），只能由用户在第 1 批做好的工作台逐条确认；自动推断会把第 3 批修掉的「假一致」重新制造出来。
-- **待确认**：`b_class.fact_*` 的唯一索引建议**未建**。建议索引形如 `(platform_code, shop_id, <业务键>)`，但必须先清理冗余行（`fact_shopee_orders_monthly` 5261 冗余行 / `fact_tiktok_orders_monthly` 852 冗余行），否则建索引会失败。
+- **待确认**：`b_class.fact_*` 的唯一索引**已存在**（`uq_<表>_hash`），无需新建；如后续要再加业务键维度的唯一索引，必须先清理冗余行（`fact_shopee_orders_monthly` 5261 冗余行 / `fact_tiktok_orders_monthly` 852 冗余行），否则建索引会失败。
 - **待确认**：weekly/monthly 事实表里 `订单号`/`平台SKU`/`SKU_ID` 三列 100% 为空——是"旧版模板遗留列"还是"当前口径要求"，需业务/数据侧确认后再决定 3.4 的宽表策略。
 - **待确认**：「数据更新成功」这条绿色提示**不在本仓库**（`frontend/src`、`backend`、`frontend/dist`、`git log --all -S` 全无此字面串）⇒ 来自当前代码库之外的产物（浏览器缓存的旧版前端 / Service Worker / 另一套前端）。需当时的浏览器截图 + Network 面板记录才能定位。
 - **待确认（生产缺陷，非本次引入）**：`api.clearance_ranking_module` 视图**恒返回 0 行**。订单侧 `sku_key` 优先取数字 `sku_id`（33,265 行全非空），backlog 侧取 `platform_sku`/`product_sku`/`product_id`（文字，仅 miaoshou 506 行），全历史两边交集 = 0 ⇒ `stagnant_before_month`/`shop_month` 恒空。需业务侧拍板口径。
