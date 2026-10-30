@@ -517,6 +517,7 @@ export const DOMAIN_COLUMN_SEMANTIC_OVERRIDES = {
   services: {
     客服id: 'service_id',
     客服编号: 'service_id',
+    日期期间: 'metric_date',
   },
   inventory: {
     '*商品sku': 'platform_sku',

@@ -67,6 +67,14 @@ class TemplateHashPolicyService:
     PERIOD_DATE_KEYS = ["metric_date", "period_start_date", "period_end_date"]
     PRODUCT_PERIOD_BOUNDARY_KEYS = ["period_start_date", "period_end_date"]
     ORDER_DETAIL_SUB_DOMAINS = {"detail", "details", "line", "lines", "order_detail", "order_lines"}
+    # 店铺级服务报表：一份数据就是「一个店铺一个周期」，源文件里没有客服维度列
+    # （表头形如 日期 / 服务的访客 / 已回答的问题 / …）。
+    # 这类报表的行身份由「店铺 + 周期」承担：
+    #   - 店铺 = ``shop_id``，属于系统范围字段，入库时自动进入 hash；
+    #   - 周期 = 下面的 ``services_date`` 组（metric_date / 周期起止）。
+    # 因此它们**不需要** service_id，也就不该被 ``services_identity`` 卡住。
+    # ⚠️ 只豁免这两个子域；有客服维度列的服务报表（sub_domain 为空或别的值）照旧要求 service_id。
+    SHOPI_LEVEL_SERVICES_SUB_DOMAINS = {"ai_assistant", "agent"}
 
     def __init__(self) -> None:
         self.semantic_hash_policy = SemanticHashPolicyService()
@@ -177,6 +185,34 @@ class TemplateHashPolicyService:
                 errors.append(legacy_error or message)
                 messages.append(message)
 
+        def add_satisfied_group(
+            *,
+            key: str,
+            label: str,
+            accepted_keys: List[str],
+            message: str,
+        ) -> None:
+            """登记一个**天然满足**的要求组。
+
+            用于「这类模板的行身份由系统范围字段（店铺）+ 周期承担」的场景：
+            仍然要在 ``requirement_groups`` 里出现（前端面板要显示出来），
+            但**不阻塞保存**，也不进 ``errors``。
+            """
+            requirement_groups.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "severity": "blocking",
+                    "requirement_type": "any_of",
+                    "accepted_keys": list(accepted_keys),
+                    "selected_keys": [],
+                    "missing_keys": [],
+                    "passed": True,
+                    "message": message,
+                    "legacy_error": None,
+                }
+            )
+
         if domain == "products" and grain == "daily":
             add_any_group(
                 key="products_identity",
@@ -283,12 +319,25 @@ class TemplateHashPolicyService:
                 message="inventory 需要选择 metric_date、period_start_date 或 period_end_date。",
             )
         elif domain == "services":
-            add_any_group(
-                key="services_identity",
-                label="服务身份字段",
-                accepted_keys=["service_id"],
-                message="services 需要选择 service_id。",
-            )
+            if sub_domain_key in self.SHOPI_LEVEL_SERVICES_SUB_DOMAINS:
+                # 店铺级报表：身份 = 店铺 + 周期，不需要 service_id。
+                add_satisfied_group(
+                    key="services_identity",
+                    label="服务身份字段（店铺级）",
+                    accepted_keys=["service_id"],
+                    message=(
+                        f"services {sub_domain_key} 是店铺级报表："
+                        "行身份由「店铺 + 周期」承担（店铺是系统范围字段，"
+                        "周期见下方统计日期），不需要 service_id。"
+                    ),
+                )
+            else:
+                add_any_group(
+                    key="services_identity",
+                    label="服务身份字段",
+                    accepted_keys=["service_id"],
+                    message="services 需要选择 service_id。",
+                )
             add_any_group(
                 key="services_date",
                 label="统计日期",

@@ -55,7 +55,7 @@
         <div class="template-deduplication-review-panel__group-title">已满足要求</div>
         <div class="template-deduplication-review-panel__tags">
           <el-tag v-for="group in passedGroups" :key="group.key" size="small" type="success">
-            {{ group.label }}已满足：{{ group.selected_keys?.join(' / ') }}
+            {{ group.label }}已满足：{{ group.selected_keys?.length ? group.selected_keys.join(' / ') : (group.message || '已满足') }}
           </el-tag>
         </div>
       </section>

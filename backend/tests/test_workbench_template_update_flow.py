@@ -196,12 +196,12 @@ class TestWorkbenchUpdateReachesSaveGate:
         )
         assert fixed.can_save, fixed.blocking_errors
 
-    def test_shop_level_services_template_reports_missing_service_id(self):
-        """店铺级服务报表（没有客服维度列）应当给出可执行的原因，
-        而不是一句看不懂的报错。
+    def test_shop_level_services_template_passes_without_service_id(self):
+        """店铺级服务报表（没有客服维度列）应当**能保存**。
 
-        这是**业务口径问题**：源文件里根本没有 service_id，
-        闸门要求它 ⇒ 只能由业务决定是否豁免（见方案文档 §3.5）。
+        这类报表一份数据就是「一个店铺一个周期」，源文件里根本没有客服维度列；
+        行身份由「店铺 + 周期」承担（店铺是系统范围字段，周期是 metric_date）。
+        业务已拍板：``ai_assistant`` / ``agent`` 两个子域豁免 ``service_id`` 要求。
         """
         header_columns = ["日期", "服务的访客", "已回答的问题", "好评比例"]
         bindings = _normalize_header_bindings(
@@ -223,9 +223,66 @@ class TestWorkbenchUpdateReachesSaveGate:
                 }
             ],
         )
-        assert not result.can_save
-        messages = " ".join(result.hash_policy.blocking_messages)
-        assert "service_id" in messages
+        assert result.can_save, result.blocking_errors
+
+        identity = next(
+            group
+            for group in result.hash_policy.requirement_groups
+            if group["key"] == "services_identity"
+        )
+        assert identity["passed"] is True
+        assert "service_id" in identity["message"]
+
+    def test_service_level_services_template_still_requires_service_id(self):
+        """豁免只针对店铺级子域；有客服维度的服务报表照旧要求 service_id。"""
+        header_columns = ["客服ID", "客服昵称", "日期", "被分配会话数"]
+        bindings = _normalize_header_bindings(
+            None, header_columns, {}, data_domain="services"
+        )
+        blocked = _assess(
+            data_domain="services",
+            granularity="daily",
+            sub_domain=None,
+            header_columns=header_columns,
+            header_bindings=bindings,
+            deduplication_fields=["metric_date"],
+        )
+        assert not blocked.can_save
+        missing = {g["key"] for g in blocked.hash_policy.missing_required_groups}
+        assert "services_identity" in missing
+
+        fixed = _assess(
+            data_domain="services",
+            granularity="daily",
+            sub_domain=None,
+            header_columns=header_columns,
+            header_bindings=bindings,
+            deduplication_fields=["service_id", "metric_date"],
+        )
+        assert fixed.can_save, fixed.blocking_errors
+
+    def test_agent_period_column_is_recognized_as_metric_date(self):
+        """客服维度报表的周期列（``日期期间``）必须进 hash。
+
+        一个文件只有一个周期行，**文件名带的是采集时间、不是周期**，
+        这个单元格是文件里唯一权威的周期来源。
+        不进 hash ⇒ 下一期报表算出同一个 hash ⇒ 把上一期的行覆盖掉。
+        """
+        bindings = _normalize_header_bindings(
+            None, ["日期期间", "访客数"], {}, data_domain="services"
+        )
+        by_raw = _bindings_by_raw(bindings)
+        assert by_raw["日期期间"]["semantic_key"] == "metric_date"
+
+        result = _assess(
+            data_domain="services",
+            granularity="monthly",
+            sub_domain="agent",
+            header_columns=["日期期间", "访客数"],
+            header_bindings=bindings,
+            deduplication_fields=["metric_date"],
+        )
+        assert result.can_save, result.blocking_errors
 
     def test_metric_field_in_deduplication_fields_is_rejected(self):
         """度量字段混进去重字段 ⇒ 必须被后端拦下（前端也会自动剔除，双保险）。"""
