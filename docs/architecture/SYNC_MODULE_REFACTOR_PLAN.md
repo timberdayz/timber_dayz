@@ -3,7 +3,7 @@
 > 状态：**第 1~4 批已全部落地并提交（本地，未 push）**；历史数据修复**脚本已交付但未执行**。
 > 审查范围：`backend/services/{template_hash_policy, semantic_hash_policy_service, semantic_field_registry, template_save_readiness_service, field_mapping_template_service, template_family_service, template_semantic_binding_backfill}.py`、`backend/domains/data_platform/routers/field_mapping_templates.py`、`frontend/src/components/dataSync/{TemplateUpdateWorkbenchDrawer,TemplateDeduplicationReviewPanel}.vue`、`frontend/src/domains/data_platform/utils/{deduplicationSelection,headerBindings}.js`
 > 取证方式：真实库只读查询 + 真实 HTTP 接口重放 + node 直跑前端真实模块 + 后端日志还原用户操作序列。全部结论标注了 `文件:行号`。
-> 交付提交：`3367d211`（第 1 批 前端止漏）、`f26248f0`（第 2 批 后端口径归一）、`b1b34dfe`（数据修复脚本）、`482705d6`（第 3 批 状态机与家族校验）、`f2b09f5c`（第 4 批 环境与可观测）。
+> 交付提交：`3367d211`（第 1 批 前端止漏）、`f26248f0`（第 2 批 后端口径归一）、`b1b34dfe`（数据修复脚本）、`482705d6`（第 3 批 状态机与家族校验）、`f2b09f5c`（第 4 批 环境与可观测）、`4cf795a1`（数据修复脚本增强 + 真实库执行）。
 
 ---
 
@@ -201,11 +201,23 @@
 2. **真实库当前生效的视图与仓库最终文件不等价**。`ops.pipeline_run_log` 显示 **2026-10-30 05:51 UTC（13:51 本地）** 有一次 `bootstrap_postgresql_dashboard.clearance_ranking` 自动重建，它读到的是当时工作区里**尚未写完的中间版本**。两者差异是实质性的：中间版本把 `b.platform_code = m.platform_code AND b.sku_key = m.sku_key` 放在 LATERAL 的 **JOIN ON** 侧，最终版本放在 LATERAL 子查询的 **WHERE** 侧 —— 后者才会先按 sku 过滤再按日期取最新，前者会先全局取最新一行再由 ON 过滤。CTE 结构（`order_months / order_sku_month / backlog_rows / stagnant_before_month / shop_month`）两者一致。
    ⇒ 对齐命令：`python scripts/rebuild_views.py --target api.clearance_ranking_module`（会短暂持有排他锁）。
 
+#### 视图重建对齐（2026-10-30，已执行）
+
+- 备份当前库内视图定义 → `C:\Users\...\AppData\Local\Temp\clearance_ranking_module_backup.sql`（4334 字符）。
+- 执行 `python scripts/rebuild_views.py --target api.clearance_ranking_module` ⇒ **成功 1 个、失败 0 个**。
+- **重建前后逐词对比**（语义 token 差异为空，逐词差异仅 8 词且全部是 DDL 外壳 `CREATE OR REPLACE VIEW ... AS` 与备份文件多出的一个分号；`WHERE 侧含 sku_key 匹配` 重建前后**均为 True**）。
+
+> ⚠️ **纠正上一版的错误结论**：先前判定"真实库视图与仓库文件不等价"是**误读** —— PostgreSQL 会把视图定义做字面量规范化存储（`btrim` 小写、`''::text`、`NOT (EXISTS (...))`、自动补表名限定与括号），这些是**存储格式差异**，不是语义差异。必须用逐词归一化或结果集对比来判断，不能靠字符串 diff。重建后库内定义与仓库文件**逐词等价**。
+- 重建后复测耗时：全量 **44.27s**、限 200 行 **47.24s**，与优化后的 42.5~43.7s 同一量级。
+- ⚠️ 视图**仍恒返回 0 行**（见 §5「待确认」），这是**既有生产缺陷**、非本次重建引入。
+
 ---
 
-## 3.1 数据修复诊断结论（2026-10-30，只读诊断，**未执行任何真实库变更**）
+## 3.1 数据修复诊断结论（2026-10-30，只读诊断；执行结果见 §3.2）
 
-脚本：`scripts/normalize_template_deduplication_fields.py`（干跑模式），验证：`backend/tests/test_normalize_template_deduplication_fields.py`（11 项，隔离库全绿）。
+脚本：`scripts/normalize_template_deduplication_fields.py`（干跑模式），验证：`backend/tests/test_normalize_template_deduplication_fields.py`（18 项，隔离库全绿）。
+
+> ⚠️ 本节记录的是**首轮诊断**（脚本初版，仅"表头名 → 语义键"替换）。脚本随后做了能力增强并**已对真实库执行**，见 §3.2。本节表格里的「可安全改写 2 个」是初版口径。
 
 **核心结论：历史模板的去重字段配置本身是错的，不只是"写法不统一"。**
 
@@ -222,7 +234,7 @@
 1. **把业务属性/度量列写进了去重字段** —— 如 `订单状态`、`满意度`、`聊天询问`、`被分配会话数`、`规格编号`、`规格名称`、`全球商品货号`、`状态`、`访客数`。这些列**无法区分行**，放进 Data Hash 只会让同一行在不同批次算出不同 hash（它们是值，不是身份）。
 2. **缺少域级必需身份键** —— 如 orders 域缺 `order_id`、products 域缺 `product_id`（或周期边界）、services 域缺 `service_id`。脚本已逐模板输出「还缺这些身份键」清单。
 
-⇒ **需要业务/数据侧确认后才能修**：脚本刻意**不**自动补齐缺失身份键（补哪个、从哪列补，是业务判断，不是机械映射）。
+⇒ **需要业务/数据侧确认后才能修**：初版脚本刻意**不**自动补齐缺失身份键（补哪个、从哪列补，是业务判断，不是机械映射）。§3.2 的增强版改为**受控补齐**：只有模板自身确实有数据来源（已确认绑定 / 解析规则）时才补，补齐后复验两道闸门。
 
 **事实表重复现状**（真实库实测，归因未完全坐实）：
 
@@ -236,6 +248,88 @@
 | `b_class.fact_tiktok_orders_monthly` | 4662 | 852 | 657 |
 
 ⚠️ **本脚本刻意不做 `data_hash` 重算**。原因：事实表是**展开后的宽表**（weekly 表 104 列里堆叠了至少 4 代模板表头，`订单号`/`平台SKU`/`SKU_ID` 三列 100% 为空，`订单编号`(#92) 98.5% 有值），无法按入库时的行结构逐字节重建；强行重算会与既有行的 hash 全部错位，把"重复"变成"两份不同 hash 的同一行"，需要配套的合并/清理决策与回滚方案，超出本次授权。
+
+---
+
+## 3.2 数据修复执行结果（2026-10-30，脚本增强 + 真实库已执行）
+
+### 3.2.1 脚本能力增强（`scripts/normalize_template_deduplication_fields.py`）
+
+初版只做"表头名 → 语义键"替换，命中率极低。本轮补齐四项能力：
+
+| # | 能力 | 说明 |
+|---|------|------|
+| E1 | **非身份字段剔除** | 表头名在语义字段注册表里**完全不存在**、也没有任何模板能给出映射 ⇒ 判为业务属性/度量，从去重字段中剔除。判定留痕（`evidence`：`binding_without_semantic_key` / `no_binding` / `semantic_metric`），并汇总成「被剔除的列名清单」供人工审阅 |
+| E2 | **业务列名提示（按域限定）** | `商品编号`→`product_id`、`规格编号`→`sku_id`（仅 products 域）、`客服id`→`service_id`（仅 services 域）。**只写在脚本内**，不改全局 registry —— registry 是全局语义契约，随手加别名会改变 `normalize_semantic_key` 行为，进而影响历史 hash 取值路径与前后端一致性测试 |
+| E3 | **受控自动补齐** | 域级必需身份键（orders→`order_id`、products→`product_id`、services→`service_id`…）缺失时，**只有"模板自身确实有数据来源"**才补：① 模板有已确认绑定指向该语义键；② 解析规则能产出该语义键。**绝不凭空造出没有数据的键**；补齐后必须复验两道闸门 |
+| E4 | **解析规则来源列保护** | 解析规则的 `source_column` 是**有数据**的（规则把这一列解析成某个语义键），不能当成"无效列"剔除。唯一派生键 ⇒ 改写；多派生键 ⇒ 判为多候选、保持原样 |
+
+其它口径修正：
+- 补齐 `sub_domain` 参与两道闸门判定（`orders` 明细子域的 `line_id`/`sku_id` 要求依赖它，初版恒传 `None`）。
+- 剔除后**不允许剩下空身份键集**；两道闸门（readiness + hash policy）复验不通过 ⇒ 整体跳过、不改写。
+
+### 3.2.2 真实库执行结果
+
+执行命令：`python scripts/normalize_template_deduplication_fields.py --apply --backup <备份>`（脚本自带 `--restore` 回滚；另有全量 253 模板快照做二次兜底）。
+
+**改动范围：253 个模板中仅 5 个 `deduplication_fields` 发生变化，248 个未动。**
+
+| 模板 | 域/粒度 | 状态 | 改前 | 改后 | 动作 |
+|------|---------|------|------|------|------|
+| 286 `tiktok_analytics__daily_v2` | analytics/daily | archived | `['日期']` | `['metric_date']` | 替换 |
+| 298 `tiktok_analytics__monthly_v2` | analytics/monthly | archived | `['日期']` | `['metric_date']` | 替换 |
+| 357 `tiktok_orders__daily_v4` | orders/daily | archived | `[..., '订单状态']` | `[...]` | 剔除 |
+| 359 `tiktok_orders__daily_v5` | orders/daily | **published** | `[..., '订单状态']` | `[...]` | 剔除 |
+| 364 `tiktok_analytics__monthly_v5` | analytics/monthly | archived | `['metric_date','退款金额']` | `['metric_date']` | 剔除 |
+
+**被剔除的列名清单（人工审阅）**：
+
+| 列名 | 涉及模板 | 证据 | 判定依据 |
+|------|---------|------|---------|
+| `订单状态` | 357、359 | `binding_without_semantic_key` | 该列的 binding `semantic_key = null`（从未被确认为任何语义键）；同表的 `订单号` → `order_id` 已确认。状态是**值**不是身份 |
+| `退款金额` | 364 | `binding_without_semantic_key` | 同上；`metric_date` 已确认，退款金额是**度量**不是身份 |
+
+### 3.2.3 执行后验证
+
+| 检查项 | 结果 |
+|--------|------|
+| 5 个改动模板的保存就绪闸门 `can_save` | ✅ 5/5 = True |
+| 5 个改动模板的 hash 策略 `passed` | ✅ 5/5 = True |
+| 改后 `resolved_keys` | 286/298=`['metric_date']`；357/359=`['order_id','platform_sku','product_id','sku_id']`；364=`['metric_date']` |
+| **幂等性**（重跑规划，待改写模板数） | ✅ **0** |
+| **家族 hash 口径一致性**（357 archived vs 359 published） | ✅ 字段对完全一致：`{'product_id':'产品ID','platform_sku':'平台SKU','sku_id':'SKU ID','order_id':'订单号'}`，`is_compatible=true`（此前因 `订单状态` 参与 hash 而不一致） |
+| 事实表是否被触碰 | ✅ 未触碰：`b_class.fact_*` 的 `ingest_timestamp` 最大值（2026-10-26 / 2026-10-29）**早于**本次写入时间（2026-10-30 06:32 UTC） |
+| **回滚演练**（`--restore` → 重新 `--apply`） | ✅ 回滚后 253 个模板与改前快照 **0 差异**；重新应用后与首次应用后的快照 **0 差异** ⇒ 改动**完全可逆且幂等** |
+
+### 3.2.4 剩余 109 个模板为什么不改（**不是脚本能力不足**）
+
+真实库 114 个配置了 `deduplication_fields` 的模板，根因分布：
+
+| 根因 | 模板数 | 说明 |
+|------|-------|------|
+| `deduplication_fields` 已全部是规范语义键，**且**绑定有 confirmed 语义键 | 14 | 本就合规，无需改写 |
+| `deduplication_fields` 已全部是规范语义键，**但绑定缺 confirmed 语义键** | 31 | 卡点在 `header_bindings`，不在去重字段 |
+| `deduplication_fields` 含表头名 | 69 | 其中 5 个可安全改写（见 §3.2.2），其余 64 个仍被绑定层卡住 |
+
+**全库 binding 复核状态分布（3703 条）**：
+
+| 状态 | 条数 | 带 canonical `semantic_key` |
+|------|------|----------------------------|
+| `pending` | 3558 | 0 |
+| `confirmed_semantic` | 143 | 143 |
+| `confirmed_non_semantic` | **2** | 0 |
+
+⇒ **95.9% 的绑定从未被确认**。这正是第 1 批前端工作台要解决的问题：**语义映射必须由用户在界面上逐条确认**，不能由脚本猜测。
+
+脚本**刻意不自动补 binding 的 `semantic_key`**：那只会把第 3 批刚修掉的「假一致」（推断即确认）重新制造出来。`semantic_review_source` 已能区分 `user` / `inferred`，自动推断出来的键不能当 `confirmed_semantic` 用。
+
+⇒ **剩余 109 个模板需要业务/数据侧在工作台确认字段映射后才能改写**，属人工确认范围，不是机械映射。
+
+### 3.2.5 仍未授权、未处理
+
+- **`data_hash` 重算**：仍未做（理由见 §3.1 末尾）。事实表里"同一业务键对应多个 `data_hash`"的冗余**依然存在**（`fact_shopee_orders_monthly` 26627 行 / 2807 组 / 5261 冗余行等），需要配套的合并/清理决策与回滚方案。
+- **事实表合并/清理**：未做。
+- **新增索引**：见 §5「待确认」，`b_class.fact_*` 的 `(platform_code, shop_id, <业务键>)` 唯一索引建议**未建**（需先清理冗余行）。
 
 ---
 
@@ -256,6 +350,10 @@
 ## 5. 明确不做 / 待确认
 
 - **不改 orders 域要求 order_id 的策略**。依据：模板 345 的 `header_columns` **确实含「订单号」列**（91 列，前 6 列为 `订单号/订单状态/售后状态/产品ID/平台SKU/SKU ID`），源文件表头为 `订单编号` 且 **100% 有值**（file 2829 / 3007 实测）；且 weekly 事实表**同一产品ID 最多 132 行**（不同订单）⇒ 必须靠订单号区分行，否则会互相覆盖。
-- **不执行历史数据修复**（本次用户明确暂不处理数据）。
+- **历史数据修复（`deduplication_fields`）已执行**，范围严格限定为"改写后复验两道闸门通过"的 5 个模板（§3.2.2）；`data_hash` 重算与事实表合并/清理**仍未授权、未执行**。
+- **不自动推断 binding 的 `semantic_key`**。95.9% 的绑定处于 `pending`（§3.2.4），只能由用户在第 1 批做好的工作台逐条确认；自动推断会把第 3 批修掉的「假一致」重新制造出来。
+- **待确认**：`b_class.fact_*` 的唯一索引建议**未建**。建议索引形如 `(platform_code, shop_id, <业务键>)`，但必须先清理冗余行（`fact_shopee_orders_monthly` 5261 冗余行 / `fact_tiktok_orders_monthly` 852 冗余行），否则建索引会失败。
 - **待确认**：weekly/monthly 事实表里 `订单号`/`平台SKU`/`SKU_ID` 三列 100% 为空——是"旧版模板遗留列"还是"当前口径要求"，需业务/数据侧确认后再决定 3.4 的宽表策略。
 - **待确认**：「数据更新成功」这条绿色提示**不在本仓库**（`frontend/src`、`backend`、`frontend/dist`、`git log --all -S` 全无此字面串）⇒ 来自当前代码库之外的产物（浏览器缓存的旧版前端 / Service Worker / 另一套前端）。需当时的浏览器截图 + Network 面板记录才能定位。
+- **待确认（生产缺陷，非本次引入）**：`api.clearance_ranking_module` 视图**恒返回 0 行**。订单侧 `sku_key` 优先取数字 `sku_id`（33,265 行全非空），backlog 侧取 `platform_sku`/`product_sku`/`product_id`（文字，仅 miaoshou 506 行），全历史两边交集 = 0 ⇒ `stagnant_before_month`/`shop_month` 恒空。需业务侧拍板口径。
+
