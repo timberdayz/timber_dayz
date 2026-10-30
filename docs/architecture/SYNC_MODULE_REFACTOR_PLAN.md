@@ -456,11 +456,11 @@ deduplication_fields 写法不一（订单号 vs order_id）
 |---|------|---------|------|-------|
 | **P1** | **端到端幂等性验证**：同一源文件连续导入两次，断言第二次行数不增、`data_hash` 不变、唯一约束真的命中 | 目前只验到"闸门层"，**没验过"入库层"**。这是口径统一后的第一道验证 | 我 | **最高** ✅ **已完成** |
 | **P2** | ~~109 个模板的 binding 语义映射人工确认~~ → **口径已纠正，见 §3.5** | 模板升级时的契约判定不准 ⇒ 误判/漏判"模板待确认" | 大部分已由「域限定列名识别 + 工作台自动归一」消解（42→103 个模板可保存）；services 店铺级豁免已按业务决定实施（§3.5.5） | 高 |
-| **P3** | **模板口径体检工具常态化**：把 `scripts/normalize_template_deduplication_fields.py` 的诊断能力做成只读巡检，定期跑、报"新模板是否踩坑" | 防止新模板再把度量字段写进 `deduplication_fields` | 我 | 高（体检逻辑已有测试覆盖，巡检入口待做） |
+| **P3** | **模板口径体检工具常态化**：把 `scripts/normalize_template_deduplication_fields.py` 的诊断能力做成只读巡检，定期跑、报"新模板是否踩坑" | 防止新模板再把度量字段写进 `deduplication_fields` | 我 | 高 ✅ **已完成**（§3.7） |
 | **P4** | **CI 护栏：禁止哑测试** | 本次发现 4 个守卫长期 ENOENT 崩溃、断言从未执行 ⇒ 结论不可信 | 我 | 高 ✅ **已完成**（§3.6） |
-| **P5** | **数据健康度巡检**：定期看"同一业务键多行"的**增量**（不是存量） | 重复问题在长大前被发现 | 我 | 中 |
-| **P6** | **服务层月窗口下推**（clearance-ranking 44s → 约 11s） | 数据涨一倍就撞 60s 超时预算 | 我（需改仓库分层规则或加接口层） | 中 |
-| **P7** | **`api.clearance_ranking_module` 恒 0 行**：`sku_key` 口径统一 | 报表恒空（既有生产缺陷） | 业务定口径 + 我实施 | 中 |
+| **P5** | **数据健康度巡检**：定期看"同一业务键多行"的**增量**（不是存量） | 重复问题在长大前被发现 | 我 | 中 ✅ **已完成**（§3.8） |
+| **P6** | **服务层月窗口下推**（clearance-ranking 44s → 约 11s） | 数据涨一倍就撞 60s 超时预算 | 我（需改仓库分层规则或加接口层） | 中 ⏸ **未做**（P7 已把查询压回 47.7s，但真正的热点在语义层的逐行别名解析，见 §3.9.7） |
+| **P7** | **`api.clearance_ranking_module` 恒 0 行**：`sku_key` 口径统一 | 报表恒空（既有生产缺陷） | 业务定口径 + 我实施 | 中 ✅ **已完成**（§3.9） |
 | **P8** | **后端测试基线治理**（179 failed） | 长期红灯 ⇒ 真回归被淹没 | 另立专项 | 低（本轮范围外） |
 
 ### 3.4.5 P1 验证结果（已完成，端到端证据）
@@ -677,6 +677,220 @@ deduplication_fields 写法不一（订单号 vs order_id）
 
 ---
 
+## 3.7 P3｜模板口径体检巡检（2026-10-31 第 10 轮）
+
+### 3.7.1 为什么需要它
+
+第 1~4 批把模板保存口径和 hash 闸门收紧了，但**闸门只在保存那一刻拦**。
+已经存在的模板、以及新建模板时误选的字段，如果没有定期巡检，
+就会一直烂在库里，直到某次同步把重复数据写进去才被发现。
+
+### 3.7.2 判定口径（**最容易做错的地方**）
+
+"过不了保存闸门"必须按**工作台提交口径**判断，**不能**拿库里的存量字段直接评估：
+
+| 工作台在提交前做了什么 | 对应实现 |
+|---|---|
+| 剔除**未确认**的表头列（用户没点过确认 ⇒ 不进 hash） | `build_workbench_effective_deduplication_fields` |
+| 剔除**解析规则派生**的字段（如文件伴生日期派生的 `metric_date`） | 同上 |
+| 剔除**不可参与 hash** 的度量字段 | 同上 |
+| 自动**补齐**该数据域必需的身份键（前提是文件里认得出这一列） | `TemplateHashPolicyService.required_identity_keys` |
+
+后端等价实现落在
+`backend/services/template_save_readiness_service.py::build_workbench_effective_deduplication_fields`，
+与前端两处逻辑一一对应：
+
+* `frontend/src/domains/data_platform/utils/deduplicationSelection.js` → `normalizeDeduplicationSelection`
+* `frontend/src/components/dataSync/TemplateUpdateWorkbenchDrawer.vue` → `mergeRecommendedIdentityFields`
+
+**域必需身份键的后端唯一口径** = `TemplateHashPolicyService.required_identity_keys`
+（products → `product_id`；orders → `order_id`；services → `service_id`，
+店铺级子域 `ai_assistant`/`agent` 豁免，见 §3.5.5）。
+前端 `DOMAIN_REQUIRED_IDENTITY_KEYS` 必须与它**逐字一致** ——
+不一致就会出现"工作台补了字段，闸门却不认"的荒唐状态。
+这份一致性由 `tests/unit/test_template_hash_hygiene_audit.py` 的**契约测试**守住。
+
+### 3.7.3 产出
+
+| 位置 | 作用 |
+|---|---|
+| `scripts/audit_template_hash_hygiene.py` | 只读体检脚本：按上面的口径评估每个模板，输出问题分类 + 明细；支持 `--json` / `--baseline` / `--strict` / `--fail-on-new` / `--status` / `--only-issues` |
+| `backend/services/template_hash_policy.py::required_identity_keys` | 域必需身份键的后端唯一口径来源 |
+| `backend/services/template_save_readiness_service.py::build_workbench_effective_deduplication_fields` | 工作台提交口径的后端等价实现 |
+| `tests/unit/test_template_hash_hygiene_audit.py` | **12 项自测**（含前后端契约校验、报告统计、基线对比） |
+| `.github/workflows/data-hash-audit.yml` | 定期入口：每周一 03:30 UTC + 手动触发；需要 `DATABASE_URL` secret（生产库只读），未配置时整体跳过而不是报错 |
+
+**失败策略**：只对**相对上一次巡检新增**的问题亮红灯（`--fail-on-new`）。
+存量欠账不该让巡检永远红 —— "永远红的 CI"和"永远绿的 CI"同样有害。
+
+### 3.7.4 问题分类
+
+| 分类 | 含义 | 级别 |
+|---|---|---|
+| `non_canonical_identity` | 去重字段还是表头名（`商品编号`），不是语义键 | 告警 |
+| `metric_in_identity` | 度量字段混进了去重字段（行身份会随状态漂移） | 告警 |
+| `missing_identity_key` | 缺该域必需的身份键（hash 口径不全） | 告警 |
+| `needs_renormalize` | 已有安全改写方案（跑归一脚本即可解） | 告警 |
+| `needs_manual_mapping` | 走工作台口径后仍过不了保存闸门 | **阻塞** |
+| `no_dedup_fields` | 没配去重字段（同步时回落到域默认口径） | 告警 |
+
+### 3.7.5 实测（真实库 253 个模板）
+
+| 分组 | 模板数 | 有问题 | 阻塞 |
+|---|---|---|---|
+| **published（在线模板）** | 27 | 12 | 4 |
+| archived（历史模板） | 226 | 206 | 156 |
+
+在线模板的 4 个阻塞项全部是 `products/weekly` 缺 `products_period_date` 要求组
+（与 §3.5.6「11 个模板是表头行设错」同源）。
+
+**这条巡检挖出来的一个关键事实**：去重字段写成中文表头名（`商品编号`）时，
+`calculate_data_hash` 里的 hash key 就是**中文表头名**；写成 `product_id` 时 key 是 `product_id`
+⇒ **同一笔业务在两个模板下算出两个不同的 hash** ⇒ 唯一索引
+`(platform_code, shop_id, data_domain, granularity, data_hash)` 拦不住跨模板重复。
+这就是"口径不统一"的真实危害，也是 §3.2.2 只改写 5 个模板的依据。
+
+---
+
+## 3.8 P5｜数据健康度巡检（2026-10-31 第 10 轮）
+
+### 3.8.1 为什么需要它
+
+`data_hash` 唯一索引只能保证"**同一个 hash** 不重复"，
+保证不了"**同一笔业务** 只有一行"。
+
+把 `订单状态` 这类**度量字段**写进 `deduplication_fields` 时，
+业务状态一变 → hash 变 → 库里多出一行"同一笔订单"。
+这种重复**不会触发任何报错**，只会悄悄把数据越攒越多、报表越算越歪。
+
+### 3.8.2 产出
+
+`scripts/audit_data_hash_health.py`（只读）：按**业务键**统计"同一笔业务出现了几行"。
+
+| 数据域 | 业务键 |
+|---|---|
+| orders | 平台 + 店铺 + 统计日期 + 订单号 |
+| products | 平台 + 店铺 + 统计日期 + 商品 ID |
+| services | 平台 + 店铺 + 子域 + 统计日期 + 服务日期 |
+
+支持 `--json` / `--baseline`（输出**增量**）/ `--strict` / `--fail-on-new`。
+
+### 3.8.3 实测（真实库）
+
+| 数据域 | 总行数 | 重复业务键 | 多出来的行 |
+|---|---|---|---|
+| orders | 33,265 | **4,409 组** | 4,955 |
+| products | 26,634 | 6 组 | 6 |
+| services | 368 | 1 组 | 1 |
+| **合计** | 60,267 | **4,416 组** | **4,962 行（约 8.2%）** |
+
+这是**存量**欠账（历史模板把度量字段写进了去重字段）。
+脚本的价值在于**看增量**：口径统一后新数据不再增长，存量随着模板修复逐步收敛。
+
+---
+
+## 3.9 P7｜`api.clearance_ranking_module` 恒 0 行：根因与修复（2026-10-31 第 10 轮）
+
+### 3.9.1 现象
+
+`api.clearance_ranking_module` 一直返回 **0 行** ⇒ 滞销榜页面恒空。
+
+### 3.9.2 根因 ①：两侧 `sku_key` 定义**不对称**
+
+| 侧 | 原 `sku_key` 定义 |
+|---|---|
+| 订单侧（`semantic.fact_orders_atomic`） | `sku_id → platform_sku → product_sku → product_id`（**`sku_id` 优先**） |
+| 积压侧（`mart.inventory_backlog_base`） | `platform_sku → product_sku → product_id`（**没有 `sku_id`**） |
+
+订单侧 `sku_id` 100% 有值（数字，如 `128245418676`），积压侧 100% 是文字
+（如 `HKR-SNH-White12-035`）⇒ **同一个 SKU 在两侧算出两个不同的 key** ⇒ 永远 join 不上。
+
+### 3.9.3 根因 ②：把「数据来源平台」当「销售渠道」做 join
+
+积压行的 `platform_code` 恒为 `miaoshou`（**数据来源是妙手 ERP**），
+订单行的 `platform_code` 是 `shopee` / `tiktok`（**销售渠道**）。
+原视图的 `b.platform_code = m.platform_code` 拿「来源」比「渠道」⇒ **恒不相等** ⇒ 恒 0 行。
+
+库存是**店铺的库存**，妙手只是管库存的系统；渠道属于订单侧。
+
+### 3.9.4 修复（`sql/api_modules/clearance_ranking_module.sql`）
+
+1. **两侧 `sku_key` 统一成同一个表达式**：`platform_sku → product_sku → product_id`。
+   为什么订单侧也去掉 `sku_id`：积压视图根本不提供 `sku_id` 列（它来自妙手 ERP 快照），
+   key 必须用**两侧都表达得出**的列来算，否则又变成不对称。
+   `sku_id` 只在 `platform_sku` / `product_sku` 都缺时才轮到，
+   而积压侧 `platform_sku` 100% 有值 ⇒ 这一档永远配不上，去掉它不改变任何结果。
+2. **join 只按 SKU 走**，并保留一条兜底规则：
+   * 积压行来自某个**销售渠道**（`platform_code` 出现在订单平台集合里）⇒ 只与该渠道的订单配对；
+   * 积压行来自 **ERP**（平台不在订单平台集合里）⇒ 与所有渠道的订单按 SKU 配对。
+
+### 3.9.5 结果
+
+| 口径 | 结果 |
+|---|---|
+| 修复前 | **0 行** |
+| 修复后 | **143 行**（10 个自然月 × shopee/tiktok × 各店铺） |
+
+命中量实测：订单侧 1,080 个 SKU 键、积压侧 503 个，
+按 SKU 关联命中 **537 对**（其中 **418 个积压 SKU** 真正进入榜单），
+按平台关联命中 **0 对**（= 根因 ② 的直接证据）。
+
+### 3.9.6 同根因的兄弟缺陷（**本次未改，记为遗留**）
+
+`api.sku_clearance_ranking_module` 的 `sold_units_30d` **恒为 0**：
+它的 `sales_30d` 用 `platform_code = ANY (SELECT DISTINCT platform_code FROM mart.inventory_state)`
+把订单平台限制成库存平台（= `miaoshou`），而订单里没有 `miaoshou` ⇒ 该 CTE 恒空。
+修法与本节一致（按 SKU 关联 + 平台规则）。
+**本次不动它**：它会改变 SKU 级滞销清单的动销量与 DOS 定价输入，属于另一个业务口径，需业务确认后单独发版。
+
+### 3.9.7 性能（**P6 仍未做，但已不再撞预算**）
+
+视图一旦真的把订单和积压连起来，耗时立刻从"空跑"变成"真算"，必须重新测。
+用 `EXPLAIN (ANALYZE, BUFFERS)` 逐节点定位后，做了两处**等价**优化：
+
+| 优化 | 说明 | 省下 |
+|---|---|---|
+| ① 平台兜底规则**预计算成布尔列** | 原来写在 LATERAL 里逐行判断（`NOT EXISTS (SELECT 1 FROM order_platforms ...)`），改成在 `backlog_rows` 里算好 `from_sales_channel` | **25s**（49.9s → 74s 那次回退的元凶） |
+| ② `order_platforms` **从 `order_months` 派生** | 原来为了拿"订单侧平台集合"又扫了一遍 `semantic.fact_orders_atomic`（原子视图每行都要跑一次店铺别名解析 ⇒ 一遍 24.4s）；`order_months` 本来就物化了，从它派生是零成本 | **24.4s** |
+
+| 定义 | 行数 | 耗时 |
+|---|---|---|
+| 旧定义（恒 0 行，等于没干活） | 0 | 43.8s |
+| 新定义 v1（兜底写在 LATERAL + 单独扫原子视图） | 143 | 69~76s ⚠️ 超 60s 预算 |
+| **新定义 v2（两处优化后）** | **143** | **47.7s** ✅ 在 60s 的 DB 预算内 |
+
+（dashboard 家族的 DB 预算是 60s，前端 axios 是 70s，见 `backend/utils/config.py`。）
+
+**剩下的 22s 在语义层，不在本视图**：
+`semantic.fact_orders_atomic` 为了解析店铺身份，对**每一行**都跑一次
+`Limit 1 + Sort` 的关联子查询（扫 `shop_account_aliases` + `shop_accounts`），
+33265 行 ⇒ 33265 次 ⇒ 约 22s。
+这才是 P6 该动的目标（把关联子查询换成一次性的别名映射 JOIN），
+但它属于**语义层**改动、影响所有下游视图，需另立专项评估影响面。
+
+**顺带排除的两个"看起来更快"但其实更慢的写法**（都实测过）：
+
+* 把 `MATERIALIZED` 改成 `NOT MATERIALIZED`：69.2s → 80.4s（月份窗口）/ 100.7s（全量），
+  因为 `order_months` 被引用两次，内联后要算两遍，而且外层月份窗口**推不下去**
+  （`ranking_month` 是 `date_trunc('month', metric_date)` 的计算列，推不到 `metric_date`）。
+* 把 LATERAL 里的 `NOT EXISTS` 换成预聚合的 `max_snapshot_date`：
+  结果**完全一致**（全量与月份窗口都逐行比对过），但耗时不变（68.6s vs 69.2s）⇒ 不是瓶颈，没采用。
+
+
+### 3.9.8 视图改动的落地方式（**发版时必看**）
+
+非生产环境 `AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP` 默认 **true**：
+后端重启时会自动把 `sql/` 资产重新灌进库 ⇒ 本地改完视图定义、重启后端即生效。
+
+**生产环境该开关为 false**（`should_auto_bootstrap_dashboard_on_startup("production")` 返回 False），
+所以发版后**必须显式重建视图**：
+
+```bash
+python scripts/rebuild_views.py --target api.clearance_ranking_module
+```
+
+---
+
 ## 4. 建议的实施顺序
 
 1. **第 1 批**（前端止漏）—— 独立提交，可立即解除当前阻塞。
@@ -702,5 +916,10 @@ deduplication_fields 写法不一（订单号 vs order_id）
 - **待确认**：`b_class.fact_*` 的唯一索引**已存在**（`uq_<表>_hash`），无需新建；如后续要再加业务键维度的唯一索引，必须先清理冗余行（`fact_shopee_orders_monthly` 5261 冗余行 / `fact_tiktok_orders_monthly` 852 冗余行），否则建索引会失败。
 - **待确认**：weekly/monthly 事实表里 `订单号`/`平台SKU`/`SKU_ID` 三列 100% 为空——是"旧版模板遗留列"还是"当前口径要求"，需业务/数据侧确认后再决定 3.4 的宽表策略。
 - **待确认**：「数据更新成功」这条绿色提示**不在本仓库**（`frontend/src`、`backend`、`frontend/dist`、`git log --all -S` 全无此字面串）⇒ 来自当前代码库之外的产物（浏览器缓存的旧版前端 / Service Worker / 另一套前端）。需当时的浏览器截图 + Network 面板记录才能定位。
-- **待确认（生产缺陷，非本次引入）**：`api.clearance_ranking_module` 视图**恒返回 0 行**。订单侧 `sku_key` 优先取数字 `sku_id`（33,265 行全非空），backlog 侧取 `platform_sku`/`product_sku`/`product_id`（文字，仅 miaoshou 506 行），全历史两边交集 = 0 ⇒ `stagnant_before_month`/`shop_month` 恒空。需业务侧拍板口径。
+- **✅ 已修复（2026-10-31，第 10 轮）**：`api.clearance_ranking_module` **恒返回 0 行**。根因是**两处代码缺陷**，不是数据没到位：① 两侧 `sku_key` 定义不对称（订单侧 `sku_id` 优先、积压侧 `platform_sku` 优先）；② join 条件拿「库存的数据来源平台 `miaoshou`」比「订单的销售渠道 `shopee`/`tiktok`」⇒ 恒不相等。修复后视图从 **0 行变成 143 行**，详见 §3.9。
+- **⚠️ 生产发版后必须显式重建视图**：生产环境 `AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false` ⇒ 改完 `sql/` 资产不会自动生效，要跑 `python scripts/rebuild_views.py --target api.clearance_ranking_module`（§3.9.8）。
+- **⏸ 仍未做**：P6 服务层月窗口下推。P7 已把滞销榜查询压回 **47.7s**（在 60s 的 DB 预算内），
+  但剩下的 22s 在**语义层**：`semantic.fact_orders_atomic` 对每一行都跑一次店铺别名解析
+  （33265 次关联子查询）。真正的优化对象是那里，需另立专项评估对所有下游视图的影响面（§3.9.7）。
+- **⏸ 同根因的兄弟缺陷（未改）**：`api.sku_clearance_ranking_module.sold_units_30d` 恒为 0（它把订单平台限制成库存平台），改法与 §3.9 一致，但它会改变 SKU 级滞销清单的动销量与 DOS 定价输入 ⇒ 需业务确认后单独发版（§3.9.6）。
 

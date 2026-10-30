@@ -1,0 +1,120 @@
+name: Data Hash Audit
+
+# 模板口径体检（P3）+ 数据健康度巡检（P5）的**定期入口**。
+#
+# 为什么单独一个工作流
+# ------------------
+# 这两个巡检都需要**真实数据库**（只读）：
+#   - P3 看模板的去重字段口径（core.field_mapping_templates）；
+#   - P5 看同一业务键在事实表里出现了几行（semantic 层）。
+# CI 的常规 job 跑在没有业务库的容器里 ⇒ 跑不了它们，只能靠这个带库的工作流。
+#
+# 两个巡检脚本都是**只读**的：不写库、不改数据。
+#
+# 失败策略
+# --------
+# 只对**相对上一次巡检新增**的问题亮红灯（--fail-on-new）：
+# 存量问题（历史模板欠账、历史重复行）不该让巡检一直红，
+# 否则时间一长就没人看这个工作流了 —— 那是"永远红的 CI"和"永远绿的 CI"同样有害。
+#
+# 需要的 secret
+# -------------
+# `DATABASE_URL`：生产库**只读**连接串。仓库里没有配置时本工作流会整体跳过（不报错）。
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每周一 03:30 UTC（北京时间 11:30）跑一次
+    - cron: "30 3 * * 1"
+
+jobs:
+  data-hash-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PYTHONUTF8: "1"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+
+      - name: Check database secret
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "[SKIP] 未配置 DATABASE_URL secret，本轮巡检跳过（不是失败）。"
+            echo "[SKIP] 需要一个生产库只读连接串：postgres://<user>:<pass>@<host>:<port>/<db>"
+            exit 0
+          fi
+
+      - name: Download previous report as baseline
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p baseline artifacts
+          PREV_RUN="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/data-hash-audit.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].id' 2>/dev/null || true)"
+          if [ -n "${PREV_RUN}" ] && [ "${PREV_RUN}" != "${GITHUB_RUN_ID}" ]; then
+            if gh run download "${PREV_RUN}" --name data-hash-audit-report --dir baseline 2>/dev/null; then
+              echo "found=true" >> "$GITHUB_OUTPUT"
+              echo "[INFO] 已下载上一次的报告作为基线（run=${PREV_RUN}）"
+            else
+              echo "found=false" >> "$GITHUB_OUTPUT"
+              echo "[INFO] 没有可用的上一次报告，本轮按全量报告处理"
+            fi
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "[INFO] 没有可用的上一次报告，本轮按全量报告处理"
+          fi
+
+      - name: Run template hygiene audit (P3)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          HAS_BASELINE: ${{ steps.baseline.outputs.found }}
+        run: |
+          if [ -z "${DATABASE_URL}" ]; then exit 0; fi
+          if [ "${HAS_BASELINE}" = "true" ] && [ -f baseline/template_hygiene.json ]; then
+            python scripts/audit_template_hash_hygiene.py \
+              --json artifacts/template_hygiene.json \
+              --baseline baseline/template_hygiene.json \
+              --fail-on-new
+          else
+            python scripts/audit_template_hash_hygiene.py \
+              --json artifacts/template_hygiene.json
+          fi
+
+      - name: Run data hash health audit (P5)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          HAS_BASELINE: ${{ steps.baseline.outputs.found }}
+        run: |
+          if [ -z "${DATABASE_URL}" ]; then exit 0; fi
+          if [ "${HAS_BASELINE}" = "true" ] && [ -f baseline/data_hash_health.json ]; then
+            python scripts/audit_data_hash_health.py \
+              --json artifacts/data_hash_health.json \
+              --baseline baseline/data_hash_health.json \
+              --fail-on-new
+          else
+            python scripts/audit_data_hash_health.py \
+              --json artifacts/data_hash_health.json
+          fi
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-hash-audit-report
+          path: artifacts/
+          if-no-files-found: ignore

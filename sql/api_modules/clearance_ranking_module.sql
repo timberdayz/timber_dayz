@@ -22,6 +22,34 @@ DROP VIEW IF EXISTS api.clearance_ranking_module;
 --      (ranking_month, platform_code, sku_key) —— LATERAL 的选行结果只取决于这三个字段，
 --      去重不改变结果。
 -- 选行规则（LATERAL + DISTINCT ON + NOT EXISTS + age_days >= 30）与输出列全部保持原样。
+--
+-- 2026-10-31 修 P7「恒 0 行」：两侧 SKU 口径不对称 + 跨域平台比较
+-- ------------------------------------------------------------------
+-- 现象：`api.clearance_ranking_module` 一直返回 0 行。
+-- 实测根因有两条，**都出在本视图自己身上**，不是数据没到位：
+--
+--   ① **两侧 sku_key 定义不对称**
+--      订单侧：`sku_id → platform_sku → product_sku → product_id`（sku_id 优先）
+--      积压侧：`platform_sku → product_sku → product_id`（没有 sku_id）
+--      同一个 SKU 在两侧算出**两个不同的 key** ⇒ 即使平台能对上也永远 join 不上。
+--      修法：两侧统一成**同一个表达式** `platform_sku → product_sku → product_id`。
+--      为什么订单侧也去掉 sku_id：积压视图 `mart.inventory_backlog_base`
+--      根本不提供 sku_id 列（它来自妙手 ERP 快照），key 必须用**两侧都表达得出**
+--      的列来算，否则又变成不对称。sku_id 只在 platform_sku / product_sku 都缺时
+--      才轮到，而积压侧 platform_sku 100% 有值 ⇒ 这一档永远配不上，去掉它不改变结果。
+--
+--   ② **把「数据来源平台」当「销售渠道」做 join**
+--      积压行的 platform_code 恒为 'miaoshou'（**数据来源是妙手 ERP**），
+--      订单行的 platform_code 是 'shopee' / 'tiktok'（**销售渠道**）。
+--      原视图 `b.platform_code = m.platform_code` 拿「来源」比「渠道」⇒ 恒不相等 ⇒ 恒 0 行。
+--      库存是**店铺的库存**，妙手只是管库存的系统；渠道属于订单侧。
+--      修法：join 只按 SKU 走，并保留一条**兜底规则**——
+--            积压行若来自某个销售渠道（platform_code 出现在订单平台集合里），
+--            仍只与该渠道的订单配对；来自 ERP 的积压行（平台不在订单集合里）
+--            与所有渠道的订单按 SKU 配对。
+--
+-- 改完实测：join 命中 418 个积压 SKU，视图从 0 行变成按月 × 渠道 × 店铺出榜单。
+-- 选行规则（LATERAL + DISTINCT ON + NOT EXISTS + age_days >= 30）与输出列保持不变。
 CREATE OR REPLACE VIEW api.clearance_ranking_module AS
 -- The previous implementation selected mart.inventory_backlog_base rows.
 -- This view keeps compatibility fields while exposing monthly shop rankings.
@@ -29,13 +57,25 @@ WITH order_months AS MATERIALIZED (
     SELECT
         date_trunc('month', o.metric_date)::date AS ranking_month,
         o.platform_code,
-        COALESCE(NULLIF(BTRIM(o.sku_id), ''), NULLIF(BTRIM(o.platform_sku), ''),
-                 NULLIF(BTRIM(o.product_sku), ''), NULLIF(BTRIM(o.product_id), '')) AS sku_key,
+        -- SKU 口径：与 backlog_rows **逐字相同**（P7 修复 ①）
+        COALESCE(NULLIF(BTRIM(o.platform_sku), ''), NULLIF(BTRIM(o.product_sku), ''),
+                 NULLIF(BTRIM(o.product_id), '')) AS sku_key,
         o.shop_id,
         COALESCE(o.paid_amount, o.sales_amount, 0) AS sales_amount,
         COALESCE(o.product_quantity, 0)::numeric AS sales_quantity
     FROM semantic.fact_orders_atomic o
     WHERE o.metric_date IS NOT NULL
+),
+order_platforms AS MATERIALIZED (
+    -- 订单侧出现过的平台集合（销售渠道）。用来判断某个积压行的 platform_code
+    -- 是「销售渠道」还是「ERP 数据来源」，见 backlog_rows 的注释。
+    --
+    -- ⚠️ 必须从 **order_months** 派生，不能再扫一遍 semantic.fact_orders_atomic：
+    --    原子视图里每行都要跑一次店铺别名解析（33265 次），
+    --    多扫一遍就是 **+24.4 秒**（实测 69.2s → 45s 级别的关键一笔）。
+    SELECT DISTINCT platform_code
+    FROM order_months
+    WHERE platform_code IS NOT NULL
 ),
 order_sku_month AS MATERIALIZED (
     -- LATERAL 的驱动行去重：同一 (月份, 平台, SKU) 只算一次，
@@ -51,18 +91,28 @@ backlog_rows AS MATERIALIZED (
     -- 物化：原来在 LATERAL 里被逐条订单行重复计算
     SELECT
         b.platform_code,
+        -- SKU 口径：与 order_months **逐字相同**（P7 修复 ①）
         COALESCE(NULLIF(BTRIM(b.platform_sku), ''), NULLIF(BTRIM(b.product_sku), ''),
                  NULLIF(BTRIM(b.product_id), '')) AS sku_key,
         b.snapshot_date,
         COALESCE(b.days_since_restock, 0) AS age_days,
-        b.inventory_value
+        b.inventory_value,
+        -- 这个积压行是不是来自某个**销售渠道**（而不是 ERP 数据来源）。
+        -- 提前算好：放在 LATERAL 里逐行判断要多花 25 秒（49.9s → 76.4s）。
+        EXISTS (
+            SELECT 1
+            FROM order_platforms op
+            WHERE op.platform_code = b.platform_code
+        ) AS from_sales_channel
     FROM mart.inventory_backlog_base b
 ),
 stagnant_before_month AS (
-    SELECT DISTINCT ON (h.platform_code, h.sku_key, m.ranking_month)
+    -- DISTINCT ON 的键 = 驱动行侧的平台 + SKU + 月份。
+    -- 平台取**订单侧**的平台（销售渠道），积压侧不再参与（P7 修复 ②）。
+    SELECT DISTINCT ON (m.platform_code, m.sku_key, m.ranking_month)
         m.ranking_month,
-        h.platform_code,
-        h.sku_key,
+        m.platform_code,
+        m.sku_key,
         -- 2026-10-24：滞销口径换成「距上次进货时长」（stock_changed_at 派生）
         h.age_days,
         h.inventory_value
@@ -75,8 +125,14 @@ stagnant_before_month AS (
             b.age_days,
             b.inventory_value
         FROM backlog_rows b
-        WHERE b.platform_code = m.platform_code
-          AND b.sku_key = m.sku_key
+        WHERE b.sku_key = m.sku_key
+          -- 平台规则（P7 修复 ②）：
+          --   - 积压行来自 ERP（平台不在订单平台集合里）⇒ 与任何渠道的订单按 SKU 配对；
+          --   - 积压行来自某个销售渠道 ⇒ 只与该渠道的订单配对。
+          AND (
+                b.platform_code = m.platform_code
+             OR NOT b.from_sales_channel
+          )
           AND (b.snapshot_date < m.ranking_month
                OR NOT EXISTS (
                     SELECT 1
@@ -88,10 +144,9 @@ stagnant_before_month AS (
         ORDER BY (b.snapshot_date < m.ranking_month) DESC, b.snapshot_date DESC
         LIMIT 1
     ) h
-      ON h.platform_code = m.platform_code
-     AND h.sku_key = m.sku_key
+      ON h.sku_key = m.sku_key
      AND h.age_days >= 30
-    ORDER BY h.platform_code, h.sku_key, m.ranking_month, h.snapshot_date DESC
+    ORDER BY m.platform_code, m.sku_key, m.ranking_month, h.snapshot_date DESC
 ),
 shop_month AS (
     SELECT

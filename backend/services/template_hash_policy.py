@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field as dataclass_field
 from typing import Any, Dict, Iterable, List, Set
 
 from backend.services.semantic_field_registry import (
@@ -17,7 +17,13 @@ from backend.services.semantic_field_registry import (
 from backend.services.semantic_hash_policy_service import SemanticHashPolicyService
 
 
-SYSTEM_SCOPE_FIELDS = ["platform_code", "shop_id", "data_domain", "granularity", "sub_domain"]
+SYSTEM_SCOPE_FIELDS = [
+    "platform_code",
+    "shop_id",
+    "data_domain",
+    "granularity",
+    "sub_domain",
+]
 SYSTEM_SCOPE_FIELD_SET = set(SYSTEM_SCOPE_FIELDS)
 FILE_DATE_SOURCE_COLUMNS = {"__file_date_from__", "__file_date_to__"}
 HOUR_IDENTITY_KEYS = {"period_start_time", "period_end_time"}
@@ -34,15 +40,17 @@ DATE_IDENTITY_KEYS = set(DATE_IDENTITY_KEY_ORDER)
 @dataclass(frozen=True)
 class HashPolicyResult:
     passed: bool
-    blocking_errors: List[str] = field(default_factory=list)
-    blocking_messages: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-    resolved_keys: List[str] = field(default_factory=list)
-    requirement_groups: List[Dict[str, Any]] = field(default_factory=list)
-    effective_components: Dict[str, Any] = field(default_factory=dict)
-    invalid_keys: List[str] = field(default_factory=list)
-    missing_required_groups: List[Dict[str, Any]] = field(default_factory=list)
-    sample_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    blocking_errors: List[str] = dataclass_field(default_factory=list)
+    blocking_messages: List[str] = dataclass_field(default_factory=list)
+    warnings: List[str] = dataclass_field(default_factory=list)
+    resolved_keys: List[str] = dataclass_field(default_factory=list)
+    requirement_groups: List[Dict[str, Any]] = dataclass_field(default_factory=list)
+    effective_components: Dict[str, Any] = dataclass_field(default_factory=dict)
+    invalid_keys: List[str] = dataclass_field(default_factory=list)
+    missing_required_groups: List[Dict[str, Any]] = dataclass_field(
+        default_factory=list
+    )
+    sample_diagnostics: Dict[str, Any] = dataclass_field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -54,7 +62,9 @@ class HashPolicyResult:
             "requirement_groups": [dict(group) for group in self.requirement_groups],
             "effective_components": dict(self.effective_components),
             "invalid_keys": list(self.invalid_keys),
-            "missing_required_groups": [dict(group) for group in self.missing_required_groups],
+            "missing_required_groups": [
+                dict(group) for group in self.missing_required_groups
+            ],
             "sample_diagnostics": dict(self.sample_diagnostics),
         }
 
@@ -66,7 +76,14 @@ class TemplateHashPolicyService:
     PRODUCT_DAILY_DATE_KEYS = ["metric_date"]
     PERIOD_DATE_KEYS = ["metric_date", "period_start_date", "period_end_date"]
     PRODUCT_PERIOD_BOUNDARY_KEYS = ["period_start_date", "period_end_date"]
-    ORDER_DETAIL_SUB_DOMAINS = {"detail", "details", "line", "lines", "order_detail", "order_lines"}
+    ORDER_DETAIL_SUB_DOMAINS = {
+        "detail",
+        "details",
+        "line",
+        "lines",
+        "order_detail",
+        "order_lines",
+    }
     # 店铺级服务报表：一份数据就是「一个店铺一个周期」，源文件里没有客服维度列
     # （表头形如 日期 / 服务的访客 / 已回答的问题 / …）。
     # 这类报表的行身份由「店铺 + 周期」承担：
@@ -75,6 +92,33 @@ class TemplateHashPolicyService:
     # 因此它们**不需要** service_id，也就不该被 ``services_identity`` 卡住。
     # ⚠️ 只豁免这两个子域；有客服维度列的服务报表（sub_domain 为空或别的值）照旧要求 service_id。
     SHOPI_LEVEL_SERVICES_SUB_DOMAINS = {"ai_assistant", "agent"}
+
+    def required_identity_keys(
+        self,
+        data_domain: str | None,
+        sub_domain: str | None = None,
+    ) -> List[str]:
+        """该数据域**必需**的身份键（闸门会卡住的那种）。
+
+        这是后端侧的**唯一口径来源**；前端 ``TemplateUpdateWorkbenchDrawer.vue``
+        的 ``DOMAIN_REQUIRED_IDENTITY_KEYS`` 必须与本方法保持一致
+        （由 ``tests/unit/test_template_hash_hygiene_audit.py`` 做契约校验）。
+
+        - products：必须能定位到 product_id；
+        - orders：必须能定位到 order_id（否则同一订单的不同行会互相覆盖）；
+        - services：必须能定位到 service_id；店铺级子域（ai_assistant / agent）
+          的行身份由「店铺 + 周期」承担，**不需要** service_id。
+        """
+        domain = (data_domain or "").lower()
+        if domain == "products":
+            return list(self.PRODUCT_REQUIRED_IDENTITY_KEYS)
+        if domain == "orders":
+            return ["order_id"]
+        if domain == "services":
+            if (sub_domain or "").lower() in self.SHOPI_LEVEL_SERVICES_SUB_DOMAINS:
+                return []
+            return ["service_id"]
+        return []
 
     def __init__(self) -> None:
         self.semantic_hash_policy = SemanticHashPolicyService()
@@ -252,7 +296,10 @@ class TemplateHashPolicyService:
                         "label": "周期字段",
                         "severity": "blocking",
                         "requirement_type": "any_of",
-                        "accepted_keys": ["metric_date", *self.PRODUCT_PERIOD_BOUNDARY_KEYS],
+                        "accepted_keys": [
+                            "metric_date",
+                            *self.PRODUCT_PERIOD_BOUNDARY_KEYS,
+                        ],
                         "selected_keys": ["metric_date"],
                         "missing_keys": [],
                         "passed": True,
@@ -377,7 +424,9 @@ class TemplateHashPolicyService:
         )
         warnings.extend(sample_warnings)
         missing_required_groups = [
-            group for group in requirement_groups if group.get("severity") == "blocking" and not group.get("passed")
+            group
+            for group in requirement_groups
+            if group.get("severity") == "blocking" and not group.get("passed")
         ]
 
         return HashPolicyResult(
@@ -406,7 +455,11 @@ class TemplateHashPolicyService:
         }
         for binding in header_bindings or []:
             semantic_key = normalize_semantic_key(binding.get("semantic_key"))
-            source_header = binding.get("source_header") or binding.get("raw_name") or binding.get("display_name")
+            source_header = (
+                binding.get("source_header")
+                or binding.get("raw_name")
+                or binding.get("display_name")
+            )
             if semantic_key and semantic_key in keys:
                 keys.add(str(semantic_key))
             if source_header in keys and semantic_key:
@@ -426,14 +479,23 @@ class TemplateHashPolicyService:
         """
         selected_keys = {
             semantic_key
-            for semantic_key in (normalize_semantic_key(field) for field in deduplication_fields or [])
+            for semantic_key in (
+                normalize_semantic_key(field) for field in deduplication_fields or []
+            )
             if semantic_key
         }
         derived_sources: Dict[str, str] = {}
         for rule in field_parse_rules or []:
-            semantic_key = normalize_semantic_key(rule.get("target_field") or rule.get("semantic_key") or rule.get("field"))
+            semantic_key = normalize_semantic_key(
+                rule.get("target_field")
+                or rule.get("semantic_key")
+                or rule.get("field")
+            )
             source_column = str(rule.get("source_column") or "").strip()
-            if semantic_key in selected_keys and source_column in FILE_DATE_SOURCE_COLUMNS:
+            if (
+                semantic_key in selected_keys
+                and source_column in FILE_DATE_SOURCE_COLUMNS
+            ):
                 derived_sources[semantic_key] = source_column
         return derived_sources
 
@@ -452,9 +514,14 @@ class TemplateHashPolicyService:
         source_rank: Dict[str, int] = {}
         for rule in field_parse_rules or []:
             semantic_key = normalize_semantic_key(
-                rule.get("target_field") or rule.get("semantic_key") or rule.get("field")
+                rule.get("target_field")
+                or rule.get("semantic_key")
+                or rule.get("field")
             )
-            if semantic_key not in DATE_IDENTITY_KEYS or not is_hash_identity_semantic_key(semantic_key):
+            if (
+                semantic_key not in DATE_IDENTITY_KEYS
+                or not is_hash_identity_semantic_key(semantic_key)
+            ):
                 continue
             source_column = str(rule.get("source_column") or "").strip()
             if not source_column:
@@ -504,7 +571,10 @@ class TemplateHashPolicyService:
             if not option.eligible:
                 invalid.add(semantic_key)
                 continue
-            if semantic_key not in confirmed_semantic_keys and semantic_key not in derived_semantic_keys:
+            if (
+                semantic_key not in confirmed_semantic_keys
+                and semantic_key not in derived_semantic_keys
+            ):
                 invalid.add(field_text)
         return invalid
 
@@ -544,16 +614,20 @@ class TemplateHashPolicyService:
 
         derived_identity_fields = [
             field
-            for field in (normalize_semantic_key(item) for item in deduplication_fields or [])
+            for field in (
+                normalize_semantic_key(item) for item in deduplication_fields or []
+            )
             if field in derived_keys
         ]
         derived_identity_fields = list(dict.fromkeys(derived_identity_fields))
         auto_date_identity_fields = [
-            field
-            for field in DATE_IDENTITY_KEY_ORDER
-            if field in auto_date_keys
+            field for field in DATE_IDENTITY_KEY_ORDER if field in auto_date_keys
         ]
-        final_fields = [*SYSTEM_SCOPE_FIELDS, *user_identity_fields, *auto_date_identity_fields]
+        final_fields = [
+            *SYSTEM_SCOPE_FIELDS,
+            *user_identity_fields,
+            *auto_date_identity_fields,
+        ]
         return {
             "system_scope_fields": list(SYSTEM_SCOPE_FIELDS),
             "user_identity_fields": user_identity_fields,
@@ -583,7 +657,10 @@ class TemplateHashPolicyService:
             semantic_key = normalize_semantic_key(field)
             if not semantic_key or semantic_key in seen:
                 continue
-            if semantic_key not in confirmed_keys and semantic_key not in DATE_IDENTITY_KEYS:
+            if (
+                semantic_key not in confirmed_keys
+                and semantic_key not in DATE_IDENTITY_KEYS
+            ):
                 continue
             seen.add(semantic_key)
             option = self.semantic_hash_policy.evaluate_option(
@@ -699,7 +776,9 @@ class TemplateHashPolicyService:
 
         selected = {
             semantic_key
-            for semantic_key in (normalize_semantic_key(field) for field in selected_identity_fields)
+            for semantic_key in (
+                normalize_semantic_key(field) for field in selected_identity_fields
+            )
             if semantic_key
         }
         confirmed_hour_keys = []
@@ -708,7 +787,11 @@ class TemplateHashPolicyService:
             if not is_confirmed_semantic_binding(binding):
                 continue
             semantic_key = normalize_semantic_key(binding.get("semantic_key"))
-            if semantic_key not in HOUR_IDENTITY_KEYS or semantic_key in selected or semantic_key in seen:
+            if (
+                semantic_key not in HOUR_IDENTITY_KEYS
+                or semantic_key in selected
+                or semantic_key in seen
+            ):
                 continue
             seen.add(semantic_key)
             confirmed_hour_keys.append(semantic_key)
@@ -717,7 +800,9 @@ class TemplateHashPolicyService:
         for semantic_key in confirmed_hour_keys:
             values = []
             for row in rows:
-                value, _source = resolve_semantic_value(row, semantic_key, header_bindings)
+                value, _source = resolve_semantic_value(
+                    row, semantic_key, header_bindings
+                )
                 text = "" if value is None else str(value).strip()
                 if text:
                     values.append(text)
