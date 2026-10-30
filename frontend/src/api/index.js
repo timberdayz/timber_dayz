@@ -36,6 +36,87 @@ const TIMEOUTS = {
   governance: 120000 // ⭐ 模板治理看板：逐组合读样本表头并比对，实测 18~43 秒
 }
 
+// ==================== 请求失败分类（超时 / 断网 / 服务端错误）====================
+//
+// 背景：axios 的超时错误 message 是 "timeout of 70000ms exceeded"，
+// 原实现把它原样包进「网络连接失败」，用户看到的是「网络连接失败」而不是
+// 「服务端处理时间过长」。后端 5xx 与真正的断网也无法区分。
+//
+// 下面三个函数只做「识别 + 生成文案」，不改变任何既有错误字段契约：
+//   error.message / error.response / error.data / error.isNetworkError /
+//   error.code / error.type 全部保持原样，只新增分类字段。
+
+/**
+ * 把毫秒超时换算成易读文案（70000 -> "70 秒"，180000 -> "3 分钟"）
+ * @param {number} timeoutMs 超时毫秒数
+ * @returns {string} 易读文案，非法值返回空串
+ */
+function formatTimeoutText(timeoutMs) {
+  const ms = Number(timeoutMs)
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  if (ms % 60000 === 0) return `${ms / 60000} 分钟`
+  if (ms % 1000 === 0) return `${ms / 1000} 秒`
+  return `${ms} 毫秒`
+}
+
+/**
+ * 识别请求失败类型
+ *
+ * - timeout：axios 超时（ECONNABORTED / ETIMEDOUT，或 message 含 timeout）
+ * - network：断网 / 无法连接到服务器（ERR_NETWORK，或根本没有响应）
+ * - server ：服务端错误（HTTP 5xx）
+ * - http   ：其它有响应的 HTTP 错误（4xx 等）
+ *
+ * @param {Error} error axios 抛出的错误
+ * @param {Object} config 该请求的 axios config（取 timeout）
+ * @returns {{category: string, status: number|null, timeoutMs: number, rawMessage: string}}
+ */
+function classifyRequestFailure(error, config) {
+  const status = error?.response?.status ?? null
+  const code = error?.code || ''
+  const rawMessage = String(error?.message || '')
+  const timeoutMs = Number(config?.timeout) || 0
+
+  if (
+    code === 'ECONNABORTED' ||
+    code === 'ETIMEDOUT' ||
+    /timeout/i.test(rawMessage)
+  ) {
+    return { category: 'timeout', status, timeoutMs, rawMessage }
+  }
+  if (code === 'ERR_NETWORK') {
+    return { category: 'network', status, timeoutMs, rawMessage }
+  }
+  if (status !== null && status >= 500) {
+    return { category: 'server', status, timeoutMs, rawMessage }
+  }
+  if (!error?.response) {
+    return { category: 'network', status, timeoutMs, rawMessage }
+  }
+  return { category: 'http', status, timeoutMs, rawMessage }
+}
+
+/**
+ * 按失败类型生成中文文案（无 emoji）
+ * @param {Object} failure classifyRequestFailure 的结果
+ * @returns {string} 面向用户的文案
+ */
+function buildFailureMessage(failure) {
+  if (failure.category === 'timeout') {
+    const threshold = formatTimeoutText(failure.timeoutMs)
+    return threshold
+      ? `请求超时，服务端处理时间过长（超时阈值 ${threshold}）`
+      : '请求超时，服务端处理时间过长'
+  }
+  if (failure.category === 'server') {
+    return `服务端返回错误（HTTP ${failure.status}）`
+  }
+  if (failure.category === 'network') {
+    return '无法连接到服务器，请检查网络或后端服务是否在运行'
+  }
+  return failure.rawMessage || '请求失败'
+}
+
 // ⭐ v6.0.0新增：不需要认证的接口列表
 const NO_AUTH_PATHS = ['/auth/login', '/auth/refresh', '/health']
 
@@ -656,6 +737,14 @@ api.interceptors.response.use(
     if (error.response) {
       // HTTP错误（404、500等）：检查响应格式
       const responseData = error.response.data
+      const httpStatus = error.response.status
+      const isServerError = httpStatus >= 500
+      // 服务端错误(5xx)：与「超时」「断网」区分开，并把后端返回的 message/detail 透出来
+      const serverDetail =
+        responseData?.error?.detail ||
+        responseData?.detail ||
+        responseData?.message ||
+        ''
       if (
         responseData &&
         typeof responseData === 'object' &&
@@ -663,8 +752,13 @@ api.interceptors.response.use(
         responseData.success === false
       ) {
         // 统一错误格式：提取error字段
-        const apiError = new Error(responseData.message || '请求失败')
-        apiError.code = responseData.error?.code || error.response.status
+        const backendMessage = responseData.message || '请求失败'
+        const apiError = new Error(
+          isServerError
+            ? `服务端返回错误（HTTP ${httpStatus}）${serverDetail ? `：${serverDetail}` : ''}`
+            : backendMessage
+        )
+        apiError.code = responseData.error?.code || httpStatus
         apiError.type = responseData.error?.type || 'SystemError'
         apiError.detail = responseData.error?.detail
         apiError.recovery_suggestion = responseData.error?.recovery_suggestion
@@ -672,25 +766,48 @@ api.interceptors.response.use(
         apiError.response = error.response
         apiError.data = responseData.data
         apiError.error_code = responseData.data?.error_code
+        if (isServerError) {
+          apiError.isServerError = true
+          apiError.errorCategory = 'server'
+          apiError.backendMessage = backendMessage
+        }
         return Promise.reject(apiError)
       }
       // 非统一格式的HTTP错误：包装为统一格式
       const httpError = new Error(
-        error.response.data?.message || `HTTP ${error.response.status} 错误`
+        isServerError
+          ? `服务端返回错误（HTTP ${httpStatus}）${serverDetail ? `：${serverDetail}` : ''}`
+          : error.response.data?.message || `HTTP ${httpStatus} 错误`
       )
-      httpError.code = error.response.status
+      httpError.code = httpStatus
       httpError.type = 'SystemError'
       httpError.isApiError = true
       httpError.response = error.response
+      if (isServerError) {
+        httpError.isServerError = true
+        httpError.errorCategory = 'server'
+        httpError.backendMessage = error.response.data?.message || ''
+      }
       return Promise.reject(httpError)
     }
 
-    // 真正的网络错误（无响应）
-    const message = error.message || '网络连接失败，请检查网络'
+    // 没有响应：区分「请求超时」与「断网/无法连接」
+    //   超时 = 服务端处理时间过长（不是网络问题）
+    //   断网 = 连不上服务器
+    const failure = classifyRequestFailure(error, config)
+    const message = buildFailureMessage(failure)
     const networkError = new Error(message)
-    networkError.isNetworkError = true // 标记为网络错误
+    networkError.isNetworkError = true // 标记为网络错误（既有契约，保持不变）
     networkError.code = 'NETWORK_ERROR'
     networkError.type = 'NetworkError'
+    // ── 新增：结构化区分字段（不改动上面任何既有字段）──
+    networkError.errorCategory = failure.category // 'timeout' | 'network'
+    networkError.isTimeout = failure.category === 'timeout'
+    networkError.timeoutMs = failure.timeoutMs || null
+    networkError.originalMessage = failure.rawMessage
+    if (failure.category === 'timeout') {
+      networkError.recovery_suggestion = '服务端处理时间过长，请稍后重试或缩小查询范围'
+    }
 
     // 记录网络错误日志（性能监控）
     if (

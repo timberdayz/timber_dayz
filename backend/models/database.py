@@ -24,6 +24,7 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from fastapi import Request
 from typing import Generator, AsyncGenerator
 from urllib.parse import urlparse, urlunparse
 import asyncio
@@ -326,8 +327,15 @@ if DATABASE_URL.startswith("sqlite"):
 else:
     # PostgreSQL连接池配置(第二阶段优化)
     # v4.12.0: 配置search_path以支持多schema访问
+    # [*] 2026-10-30: statement_timeout 改为读配置(默认仍是 120s),
+    # 请求级预算由 get_async_db 用 SET LOCAL 局部收紧,见文件末尾「超时预算」小节。
     connect_args = {
-        "options": "-c statement_timeout=120000 -c idle_in_transaction_session_timeout=120000 -c search_path=public,b_class,a_class,c_class,core,finance"
+        "options": (
+            f"-c statement_timeout={settings.DB_POOL_STATEMENT_TIMEOUT_MS} "
+            f"-c idle_in_transaction_session_timeout="
+            f"{settings.DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS} "
+            "-c search_path=public,b_class,a_class,c_class,core,finance"
+        )
     }
     pool_config = {
         "pool_size": settings.DB_POOL_SIZE,
@@ -396,8 +404,16 @@ def set_search_path_on_connect(dbapi_connection, connection_record):
     cursor.execute(
         "SET search_path TO public, b_class, a_class, c_class, core, finance"
     )
-    cursor.execute("SET statement_timeout TO 120000")
-    cursor.execute("SET idle_in_transaction_session_timeout TO 120000")
+    # [*] 2026-10-30: 连接池级默认仍是 120s(批量采集/导入等后台长任务直接用
+    # AsyncSessionLocal(),不经过请求级预算)。请求内的收紧用 SET LOCAL,
+    # 见文件末尾「超时预算」小节。
+    cursor.execute(
+        f"SET statement_timeout TO {int(settings.DB_POOL_STATEMENT_TIMEOUT_MS)}"
+    )
+    cursor.execute(
+        "SET idle_in_transaction_session_timeout TO "
+        f"{int(settings.DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS)}"
+    )
     cursor.close()
 
 
@@ -421,6 +437,69 @@ def reset_async_engine_pool_for_new_loop() -> None:
     """
     async_engine.sync_engine.dispose(close=False)
     logger.info("[async] dropped async engine pool before creating a new event loop")
+
+
+# ==================== 超时预算(2026-10-30) ====================
+#
+# 规则:后端 DB statement_timeout 必须**严格小于**前端 axios 对应接口的超时。
+# 前端超时表见 frontend/src/api/index.js 的 TIMEOUTS
+# (default 30s / dashboard 70s / mapping 90s / governance 120s / scan 120s
+#  / preview 60s / ingest 180s / collection 300s / sync 120s)。
+#
+# 为什么用 SET LOCAL 而不是改连接池默认值:
+#   Celery 与后台批量采集/导入直接用 AsyncSessionLocal(),不经过请求级预算。
+#   把连接池默认值全局砍小会打断这些长事务与批量任务。
+#   因此:连接池默认仍是 120s(DB_POOL_STATEMENT_TIMEOUT_MS),
+#   请求内用 SET LOCAL 局部收紧。
+
+#: (路径片段, DB 预算毫秒) —— 取自配置(backend/utils/config.py)，
+#: 键顺序与前端 TIMEOUTS 的 URL 匹配顺序保持一致
+_REQUEST_STATEMENT_TIMEOUT_RULES: tuple[tuple[str, int], ...] = tuple(
+    get_settings().REQUEST_STATEMENT_TIMEOUT_MS.items()
+)
+
+#: 普通接口：前端 axios 默认 30s，DB 留 5s 余量给响应组装与序列化
+_DEFAULT_REQUEST_STATEMENT_TIMEOUT_MS: int = (
+    get_settings().DB_REQUEST_STATEMENT_TIMEOUT_MS
+)
+
+#: 是否是 PostgreSQL（SQLite 不支持 SET LOCAL statement_timeout）
+_IS_POSTGRESQL: bool = ASYNC_DATABASE_URL.startswith("postgresql")
+
+
+def resolve_request_statement_timeout_ms(path: str | None) -> int:
+    """按请求路径给出 DB statement_timeout 预算（毫秒）。
+
+    返回值恒**小于**该路径在前端的 axios 超时，
+    保证「后端先放弃并回错误、前端不会先报『网络连接失败』」。
+    """
+    if not path:
+        return _DEFAULT_REQUEST_STATEMENT_TIMEOUT_MS
+    for fragment, budget_ms in _REQUEST_STATEMENT_TIMEOUT_RULES:
+        if fragment in path:
+            return budget_ms
+    return _DEFAULT_REQUEST_STATEMENT_TIMEOUT_MS
+
+
+async def apply_statement_timeout(session: AsyncSession, timeout_ms: int) -> None:
+    """在当前事务内局部设置 statement_timeout（SET LOCAL）。
+
+    - ``timeout_ms <= 0`` 表示不限制（PostgreSQL 里 0 即「无限」）。
+    - 非 PostgreSQL 直接跳过（SQLite 不认这条语句）。
+    - 设置失败不把请求打成 500：回滚后沿用连接池默认值。
+    """
+    if timeout_ms < 0 or not _IS_POSTGRESQL:
+        return
+    try:
+        await session.execute(text(f"SET LOCAL statement_timeout = {int(timeout_ms)}"))
+    except Exception:
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        logger.warning(
+            "[db] SET LOCAL statement_timeout 失败，沿用连接池默认值: %s", timeout_ms
+        )
 
 
 # ==================== FastAPI依赖注入 ====================
@@ -449,7 +528,7 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_async_db(request: Request = None) -> AsyncGenerator[AsyncSession, None]:
     """
     FastAPI数据库Session依赖注入(异步版本,v4.18.2新增)
 
@@ -468,9 +547,21 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
         - 成功时自动 commit(请求结束后)
         - 异常时自动 rollback
         - 如果路由函数内已手动 commit,此处再次 commit 是无害的(空操作)
+
+        超时预算(2026-10-30):
+        - 请求内用 ``SET LOCAL statement_timeout`` 局部收紧 DB 超时,
+          保证「DB statement_timeout < 前端 axios 超时」。
+        - 预算按请求路径查表(见 resolve_request_statement_timeout_ms),
+          顺序与前端 TIMEOUTS 的 URL 匹配顺序一致。
+        - 没有 Request 上下文时(脚本/测试直接调用)不施加预算,
+          沿用连接池默认值。
     """
     session = AsyncSessionLocal()
     try:
+        timeout_ms = resolve_request_statement_timeout_ms(
+            getattr(getattr(request, "url", None), "path", None)
+        )
+        await apply_statement_timeout(session, timeout_ms)
         yield session
         await session.commit()  # 自动提交(如果有未提交的更改)
     except Exception:

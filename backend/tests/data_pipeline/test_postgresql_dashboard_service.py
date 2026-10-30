@@ -3169,7 +3169,12 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                         shop_id VARCHAR(256),
                         granularity VARCHAR(32),
                         metric_date DATE,
+                        platform_sku VARCHAR(128),
+                        product_sku VARCHAR(128),
+                        sku_id VARCHAR(128),
+                        product_id VARCHAR(128),
                         paid_amount NUMERIC,
+                        sales_amount NUMERIC,
                         order_id VARCHAR(128),
                         product_quantity NUMERIC,
                         profit NUMERIC
@@ -3759,7 +3764,13 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypat
                         metric_date DATE,
                         platform_sku VARCHAR(128),
                         product_sku VARCHAR(128),
-                        product_quantity NUMERIC
+                        sku_id VARCHAR(128),
+                        product_id VARCHAR(128),
+                        paid_amount NUMERIC,
+                        sales_amount NUMERIC,
+                        order_id VARCHAR(128),
+                        product_quantity NUMERIC,
+                        profit NUMERIC
                     )
                     """
                 )

@@ -130,7 +130,53 @@ class Settings:
     
     DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "60"))  # 连接超时60秒
     DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "1800")) # 连接回收30分钟(避免长连接问题)
-    
+
+    # ── 超时预算对齐(2026-10-30)────────────────────────────────
+    # 背景:前端 axios 超时(frontend/src/api/index.js 的 TIMEOUTS)必须**大于**后端
+    # DB statement_timeout。否则前端先放弃(报"网络连接失败"),后端 SQL 还在跑,
+    # 拖住事件循环与连接池 —— 这就是"超时预算倒置"。
+    # 规则:DB statement_timeout < 前端 axios 超时,中间留出响应组装与序列化的余量。
+    # 详见 docs/architecture/SYNC_MODULE_REFACTOR_PLAN.md 第 4 批。
+    #
+    # Dashboard 家族的 DB 预算(前端 /dashboard/* 是 70s,这里留 10s 余量)。
+    DB_STATEMENT_TIMEOUT_MS: int = int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "60000"))
+    # 请求级 DB 超时预算(毫秒):按请求路径片段匹配。
+    # 键顺序 = 前端 URL 匹配的判定顺序(frontend/src/api/index.js)。
+    # 规则:每个值必须**严格小于**该路径在前端的 axios 超时。
+    REQUEST_STATEMENT_TIMEOUT_MS: dict[str, int] = {
+        # 前端 120s;耗时主要是 Excel 表头解析(纯 IO),DB 侧只有几次目录查询
+        "/governance/detailed-coverage": int(os.getenv("DB_TIMEOUT_GOVERNANCE_MS", "60000")),
+        # 前端 120s
+        "/scan": int(os.getenv("DB_TIMEOUT_SCAN_MS", "60000")),
+        # 前端 60s
+        "/preview": int(os.getenv("DB_TIMEOUT_PREVIEW_MS", "50000")),
+        # 前端 180s
+        "/ingest": int(os.getenv("DB_TIMEOUT_INGEST_MS", "170000")),
+        # 前端 70s
+        "/dashboard": DB_STATEMENT_TIMEOUT_MS,
+        # 前端 300s
+        "/collection": int(os.getenv("DB_TIMEOUT_COLLECTION_MS", "290000")),
+        # 前端 90s
+        "/mapping": int(os.getenv("DB_TIMEOUT_MAPPING_MS", "80000")),
+        # 前端 60s
+        "/data-sync/batch": int(os.getenv("DB_TIMEOUT_DATA_SYNC_BATCH_MS", "50000")),
+        # 前端 120s
+        "/data-sync/single": int(os.getenv("DB_TIMEOUT_DATA_SYNC_SINGLE_MS", "110000")),
+    }
+    # 普通接口:前端 axios 默认 30s,DB 留 5s 余量
+    DB_REQUEST_STATEMENT_TIMEOUT_MS: int = int(
+        os.getenv("DB_REQUEST_STATEMENT_TIMEOUT_MS", "25000")
+    )
+    # 连接池级默认值:保持 120s。Celery/后台批量采集导入直接用 AsyncSessionLocal(),
+    # 不经过请求级预算;把连接池默认值全局砍到 60s 会打断这些长事务与批量任务。
+    DB_POOL_STATEMENT_TIMEOUT_MS: int = int(os.getenv("DB_POOL_STATEMENT_TIMEOUT_MS", "120000"))
+    # 批量采集/导入长任务专用预算:0 = 不限制(显式保留/可按环境放宽)。
+    DB_BATCH_STATEMENT_TIMEOUT_MS: int = int(os.getenv("DB_BATCH_STATEMENT_TIMEOUT_MS", "0"))
+    # 事务空闲超时(沿用原值)
+    DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: int = int(
+        os.getenv("DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS", "120000")
+    )
+
     # 安全配置
     SECRET_KEY: str = os.getenv("SECRET_KEY", "xihong-erp-secret-key-2025")
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "xihong-erp-jwt-secret-2025")

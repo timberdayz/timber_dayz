@@ -4,24 +4,59 @@ CREATE SCHEMA IF NOT EXISTS api;
 -- cannot rename view columns through CREATE OR REPLACE VIEW, so rebuild it.
 DROP VIEW IF EXISTS api.clearance_ranking_module;
 
+-- 2026-10-30 慢查询治理（语义保持不变，只改执行方式）：
+-- 原实现跑满 120 秒 DB statement_timeout 才报错（前端 70 秒先超时 -> 报「网络连接 70000ms」）。
+-- 三个成本来源与对应改法：
+--   1) `to_jsonb(o)->>'...'` 把整行（含 raw_data / header_columns 两个大 JSONB）
+--      转成 jsonb 再取 key —— 对 b_class 下 9 张订单事实表逐行做一遍。
+--      改法：直接取列（atomic 视图已经把 sku_id / platform_sku / product_sku /
+--      product_id / paid_amount / sales_amount / product_quantity 暴露成普通列，
+--      取值与 to_jsonb(o)->>'...' 完全一致）。
+--   2) 金额上多做了一次 `numeric -> text -> 正则 -> numeric` 往返。
+--      改法：atomic 视图的 paid_amount / sales_amount 只可能是 NULL 或有限 numeric
+--      （源头是 regexp_replace('[^0-9.-]','') 清洗后的字符串再转 numeric），
+--      原正则恒为真，故 COALESCE 与原表达式等价。
+--   3) `JOIN LATERAL` 里的 `mart.inventory_backlog_base` 会被逐条订单行重复计算
+--      （该视图自身还带两层窗口函数）—— 典型 N+1 放大。
+--      改法：backlog 物化成 CTE（只算一次），LATERAL 的驱动行去重成
+--      (ranking_month, platform_code, sku_key) —— LATERAL 的选行结果只取决于这三个字段，
+--      去重不改变结果。
+-- 选行规则（LATERAL + DISTINCT ON + NOT EXISTS + age_days >= 30）与输出列全部保持原样。
 CREATE OR REPLACE VIEW api.clearance_ranking_module AS
 -- The previous implementation selected mart.inventory_backlog_base rows.
 -- This view keeps compatibility fields while exposing monthly shop rankings.
-WITH order_months AS (
+WITH order_months AS MATERIALIZED (
     SELECT
         date_trunc('month', o.metric_date)::date AS ranking_month,
         o.platform_code,
-        COALESCE(NULLIF(BTRIM(to_jsonb(o)->>'sku_id'), ''), NULLIF(BTRIM(o.platform_sku), ''),
-                 NULLIF(BTRIM(o.product_sku), ''), NULLIF(BTRIM(to_jsonb(o)->>'product_id'), '')) AS sku_key,
+        COALESCE(NULLIF(BTRIM(o.sku_id), ''), NULLIF(BTRIM(o.platform_sku), ''),
+                 NULLIF(BTRIM(o.product_sku), ''), NULLIF(BTRIM(o.product_id), '')) AS sku_key,
         o.shop_id,
-        COALESCE(
-            CASE WHEN (to_jsonb(o)->>'paid_amount') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (to_jsonb(o)->>'paid_amount')::numeric END,
-            CASE WHEN (to_jsonb(o)->>'sales_amount') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (to_jsonb(o)->>'sales_amount')::numeric END,
-            0
-        ) AS sales_amount,
+        COALESCE(o.paid_amount, o.sales_amount, 0) AS sales_amount,
         COALESCE(o.product_quantity, 0)::numeric AS sales_quantity
     FROM semantic.fact_orders_atomic o
     WHERE o.metric_date IS NOT NULL
+),
+order_sku_month AS MATERIALIZED (
+    -- LATERAL 的驱动行去重：同一 (月份, 平台, SKU) 只算一次，
+    -- 选行结果与逐订单行重复计算完全一致。
+    SELECT DISTINCT
+        ranking_month,
+        platform_code,
+        sku_key
+    FROM order_months
+    WHERE sku_key IS NOT NULL
+),
+backlog_rows AS MATERIALIZED (
+    -- 物化：原来在 LATERAL 里被逐条订单行重复计算
+    SELECT
+        b.platform_code,
+        COALESCE(NULLIF(BTRIM(b.platform_sku), ''), NULLIF(BTRIM(b.product_sku), ''),
+                 NULLIF(BTRIM(b.product_id), '')) AS sku_key,
+        b.snapshot_date,
+        COALESCE(b.days_since_restock, 0) AS age_days,
+        b.inventory_value
+    FROM mart.inventory_backlog_base b
 ),
 stagnant_before_month AS (
     SELECT DISTINCT ON (h.platform_code, h.sku_key, m.ranking_month)
@@ -31,25 +66,25 @@ stagnant_before_month AS (
         -- 2026-10-24：滞销口径换成「距上次进货时长」（stock_changed_at 派生）
         h.age_days,
         h.inventory_value
-    FROM order_months m
+    FROM order_sku_month m
     JOIN LATERAL (
         SELECT
             b.platform_code,
-            COALESCE(NULLIF(BTRIM(b.platform_sku), ''), NULLIF(BTRIM(b.product_sku), ''), NULLIF(BTRIM(b.product_id), '')) AS sku_key,
+            b.sku_key,
             b.snapshot_date,
-            b.days_since_restock,
-            COALESCE(b.days_since_restock, 0) AS age_days,
+            b.age_days,
             b.inventory_value
-        FROM mart.inventory_backlog_base b
-        WHERE b.snapshot_date < m.ranking_month
-           OR NOT EXISTS (
-                SELECT 1
-                FROM mart.inventory_backlog_base prior
-                WHERE prior.platform_code = b.platform_code
-                  AND COALESCE(NULLIF(BTRIM(prior.platform_sku), ''), NULLIF(BTRIM(prior.product_sku), ''), NULLIF(BTRIM(prior.product_id), '')) =
-                      COALESCE(NULLIF(BTRIM(b.platform_sku), ''), NULLIF(BTRIM(b.product_sku), ''), NULLIF(BTRIM(b.product_id), ''))
-                  AND prior.snapshot_date < m.ranking_month
-           )
+        FROM backlog_rows b
+        WHERE b.platform_code = m.platform_code
+          AND b.sku_key = m.sku_key
+          AND (b.snapshot_date < m.ranking_month
+               OR NOT EXISTS (
+                    SELECT 1
+                    FROM backlog_rows prior
+                    WHERE prior.platform_code = b.platform_code
+                      AND prior.sku_key = b.sku_key
+                      AND prior.snapshot_date < m.ranking_month
+               ))
         ORDER BY (b.snapshot_date < m.ranking_month) DESC, b.snapshot_date DESC
         LIMIT 1
     ) h

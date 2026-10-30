@@ -7,10 +7,15 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
-from backend.models.database import AsyncSessionLocal
+from backend.models.database import AsyncSessionLocal, apply_statement_timeout
 from backend.services.inventory.inventory_dos_service import compute_dos
 from backend.services.inventory.inventory_restock_service import classify_restock_tier
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
+from backend.utils.config import get_settings
+
+#: Dashboard 家族请求内的 DB 语句超时预算(毫秒)。
+#: 前端 axios 对 /dashboard/* 的超时是 70 秒,这里必须严格小于它。
+_DASHBOARD_STATEMENT_TIMEOUT_MS: int = get_settings().DB_STATEMENT_TIMEOUT_MS
 
 
 def _to_float(value: Any) -> float:
@@ -982,6 +987,10 @@ class PostgresqlDashboardService:
         self, query: str, params: dict[str, Any]
     ) -> list[dict[str, Any]]:
         async with AsyncSessionLocal() as session:
+            # [*] 2026-10-30: 请求内局部收紧 DB 语句超时。
+            # Dashboard 家族的端 axios 超时是 70 秒,DB 必须严格小于它,
+            # 否则前端先报「网络连接失败」而后端还在跑(超时预算倒置)。
+            await apply_statement_timeout(session, _DASHBOARD_STATEMENT_TIMEOUT_MS)
             result = await session.execute(text(query), params)
             return [dict(row) for row in result.mappings().all()]
 
@@ -1965,6 +1974,11 @@ class PostgresqlDashboardService:
             "period_end": period_end,
         }
 
+        # [*] 2026-10-30: 查询口径不变（仍走 api 层视图 api.clearance_ranking_module，
+        # 这是仓库的 Dashboard 分层约束，见 backend/tests/data_pipeline/
+        # test_dashboard_online_query_policy_gates.py）。
+        # 慢查询的治理落在 api 层视图 sql/api_modules/clearance_ranking_module.sql：
+        # 去掉 to_jsonb 整行转 jsonb、把 backlog 物化、LATERAL 驱动行去重。
         rows = await self._fetch_rows(
             """
             -- Compatibility aliases retained for legacy callers: snapshot_date >= :period_start,
