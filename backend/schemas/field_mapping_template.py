@@ -18,6 +18,7 @@ TemplateFieldParseRuleValueKind = Literal[
 ]
 TemplateFieldParseRuleRangePick = Literal["start", "end"]
 TemplateSemanticReviewStatus = Literal["pending", "confirmed_semantic", "confirmed_non_semantic"]
+TemplateSemanticReviewSource = Literal["user", "inferred"]
 
 
 class TemplateHeaderBinding(BaseModel):
@@ -31,6 +32,14 @@ class TemplateHeaderBinding(BaseModel):
     semantic_review_status: Optional[TemplateSemanticReviewStatus] = Field(
         None,
         description="Manual review status for semantic identity governance",
+    )
+    semantic_review_source: Optional[TemplateSemanticReviewSource] = Field(
+        None,
+        description=(
+            "Whether the semantic review came from explicit user confirmation "
+            "or from system inference; only user-confirmed bindings may be "
+            "promoted to a semantic identity"
+        ),
     )
     position: Optional[int] = Field(None, description="0-based column position")
     sample_type: Optional[str] = Field(None, description="Sample-inferred type")
@@ -186,6 +195,24 @@ class TemplateSaveData(BaseModel):
     save_mode: TemplateSaveMode
     base_template_id: Optional[int] = None
     governance_checks: Dict[str, Any] = Field(default_factory=dict)
+    # [*] 家族投影状态(第 3 批 3.1)
+    #
+    # 保存模板 = 「归档旧模板 + 插入新模板 + 家族投影」**同一个事务**。
+    # 投影失败 ⇒ 整体回滚 ⇒ 接口返回失败(不返回 success=true)。
+    # 因此这里必须把投影结果显式回传, 前端才能区分
+    # 「模板存下来了且家族目录同步了」与「模板存下来了但家族目录没同步」。
+    family_id: Optional[int] = Field(None, description="投影命中的模板家族 ID")
+    active_version_id: Optional[int] = Field(
+        None, description="投影后的模板家族激活版本 ID"
+    )
+    projection_status: str = Field(
+        "projected",
+        description="家族投影状态: projected(已投影) / failed(投影失败已回滚) / skipped(未投影)",
+    )
+    family_hash_conflicts: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="家族历史版本(archived)的 hash 口径差异, 仅提示不阻断",
+    )
 
 
 class TemplateSaveResponse(BaseModel):
@@ -440,6 +467,10 @@ class TemplateResolveShadowCompare(BaseModel):
 class TemplateResolveData(BaseModel):
     matched: bool
     governance_status: str
+    # [*] 家族级治理状态(ready / missing_template / ...)
+    #     与文件级 governance_status 是两套词汇: 文件级沿用既有取值集合,
+    #     家族级显式暴露「该维度已无已发布模板」(第 3 批 3.6)。
+    family_governance_status: Optional[str] = None
     family: Optional[TemplateFamilyListItem] = None
     active_version: Optional[TemplateVersionListItem] = None
     variant: Optional[TemplateVariantListItem] = None

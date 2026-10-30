@@ -6,12 +6,14 @@ import re
 import time
 import weakref
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Optional
 
 from sqlalchemy import and_, event, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.semantic_field_registry import is_canonical_semantic_key, normalize_semantic_key
+from backend.services.template_matcher import resolve_template_for_file
 from backend.services.template_variant_takeover import (
     TAKEOVER_FLAG,
     build_takeover_report,
@@ -491,7 +493,16 @@ class TemplateFamilyService:
         *,
         platform: Optional[str] = None,
         data_domain: Optional[str] = None,
-    ) -> None:
+        commit: bool = True,
+    ) -> Dict[str, Any]:
+        """把已发布模板投影成「模板族 → 版本 → 变体」目录。
+
+        [*] ``commit=False`` 时**不提交** —— 保存模板链路要把
+        「归档旧模板 + 插入新模板 + 家族投影」放进**同一个事务**
+        (见 :meth:`backend.services.field_mapping_template_service.FieldMappingTemplateService.save_template`)。
+
+        返回值给调用方回传投影结果(家族 ID / 激活版本 ID)。
+        """
         stmt = select(FieldMappingTemplate).where(FieldMappingTemplate.status == "published")
         if platform:
             stmt = stmt.where(FieldMappingTemplate.platform == platform)
@@ -499,8 +510,6 @@ class TemplateFamilyService:
             stmt = stmt.where(FieldMappingTemplate.data_domain == data_domain)
         result = await self.db.execute(stmt)
         templates = list(result.scalars().all())
-        if not templates:
-            return
 
         groups: dict[tuple[str, str, Optional[str], Optional[str], Optional[str]], list[FieldMappingTemplate]] = defaultdict(list)
         for template in templates:
@@ -514,16 +523,135 @@ class TemplateFamilyService:
                 )
             ].append(template)
 
+        projected: list[Dict[str, Any]] = []
         for key, group in groups.items():
-            await self._upsert_projection_group(key, group)
+            result_item = await self._upsert_projection_group(key, group)
+            if result_item:
+                projected.append(result_item)
 
-        await self.db.commit()
+        # [*] 已经没有 published 模板的维度: 显式标记「缺少模板」,
+        #     并清空 active_version_id —— 不让 resolver 继续报 ready。
+        await self._mark_families_without_published_template(
+            platform=platform,
+            data_domain=data_domain,
+            projected_keys=set(groups.keys()),
+        )
+
+        if commit:
+            await self.db.commit()
+
+        return {
+            "families": projected,
+            "family_count": len(projected),
+        }
+
+    async def _mark_families_without_published_template(
+        self,
+        *,
+        platform: Optional[str],
+        data_domain: Optional[str],
+        projected_keys: set,
+    ) -> None:
+        """把「该维度已无 published 模板」的家族标记为 missing_template。
+
+        背景(第 3 批 3.6): 以前删除模板是**硬删**, 家族目录完全不知道 ——
+        家族还挂着 active_version_id, 变体还指向已经不存在的模板,
+        resolver 却报 ``matched=True / governance_status='ready'``,
+        而入库判定走模板匹配得到「没有模板」⇒ 同一文件两处结论相反。
+        """
+        stmt = select(FieldMappingTemplateFamily)
+        if platform:
+            stmt = stmt.where(FieldMappingTemplateFamily.platform == platform)
+        if data_domain:
+            stmt = stmt.where(FieldMappingTemplateFamily.data_domain == data_domain)
+        result = await self.db.execute(stmt)
+
+        for family in result.scalars().all():
+            key = self._family_dimension_key(family)
+            if key in projected_keys:
+                continue
+            if family.governance_status == "missing_template" and family.active_version_id is None:
+                continue
+
+            logger.info(
+                "[TemplateFamily] 家族维度已无 published 模板, 标记为 missing_template: key=%s family_id=%s",
+                key,
+                family.id,
+            )
+            family.governance_status = "missing_template"
+            family.active_version_id = None
+            # [*] 原激活版本置为 superseded —— 历史留痕, 但不再对外生效
+            version = await self._get_active_version(family.id)
+            if version is not None:
+                version.status = "superseded"
+
+    async def _pick_group_representative(
+        self,
+        key: tuple[str, str, Optional[str], Optional[str], Optional[str]],
+        group: list[FieldMappingTemplate],
+    ) -> FieldMappingTemplate:
+        """选出该维度里「代表这一版」的模板。
+
+        [*] 口径统一: 走唯一解析入口 ``resolve_template_for_file``,
+        与入库判定 / 治理看板用同一把尺子。
+        解析结果必须落在本维度内(降级可能放宽 sub_domain),
+        落不进去时退回「版本号最高」。
+        """
+        platform, data_domain, sub_domain, granularity, account = key
+        representative = max(group, key=lambda item: (item.version or 0, item.id or 0))
+        try:
+            resolution = await resolve_template_for_file(
+                self.db,
+                platform=platform,
+                data_domain=data_domain,
+                granularity=granularity,
+                sub_domain=sub_domain,
+                account=account,
+            )
+        except Exception:  # noqa: BLE001 - 解析失败不阻断投影
+            logger.warning(
+                "[TemplateFamily] 代表模板解析失败, 退回版本号最高: key=%s",
+                key,
+                exc_info=True,
+            )
+            return representative
+
+        candidate = resolution.template
+        if candidate is None:
+            return representative
+        if candidate.id in {item.id for item in group}:
+            return candidate
+        return representative
+
+    @staticmethod
+    def _version_payload_matches(
+        version: FieldMappingTemplateVersion,
+        payload: Dict[str, Any],
+    ) -> bool:
+        """当前激活版本的内容是否已经等于本次投影要写入的内容。"""
+        if version.template_name != payload["template_name"]:
+            return False
+        if list(version.deduplication_fields or []) != payload["deduplication_fields"]:
+            return False
+        if list(version.header_bindings or []) != payload["header_bindings"]:
+            return False
+        if list(version.legacy_template_ids or []) != payload["legacy_template_ids"]:
+            return False
+        return True
+
+    async def _get_max_version_no(self, family_id: int) -> int:
+        result = await self.db.execute(
+            select(func.max(FieldMappingTemplateVersion.version_no)).where(
+                FieldMappingTemplateVersion.family_id == family_id
+            )
+        )
+        return int(result.scalar() or 0)
 
     async def _upsert_projection_group(
         self,
         key: tuple[str, str, Optional[str], Optional[str], Optional[str]],
         group: list[FieldMappingTemplate],
-    ) -> None:
+    ) -> Optional[Dict[str, Any]]:
         platform, data_domain, sub_domain, granularity, account = key
         matching_group = [
             template
@@ -545,7 +673,7 @@ class TemplateFamilyService:
                 key,
             )
         if not matching_group:
-            return
+            return None
         group = matching_group
 
         family = await self._get_family(key)
@@ -563,32 +691,31 @@ class TemplateFamilyService:
             self.db.add(family)
             await self.db.flush()
 
-        newest = max(group, key=lambda item: (item.version or 0, item.id or 0))
-        version = await self._get_active_version(family.id)
-        if version is None:
-            version = FieldMappingTemplateVersion(
-                family_id=family.id,
-                version_no=newest.version or 1,
-                status="active",
-                template_name=newest.template_name,
-                deduplication_fields=list(newest.deduplication_fields or []),
-                header_bindings=list(newest.header_bindings or []),
-                notes=newest.notes,
-                legacy_template_ids=[template.id for template in group if template.id is not None],
-                created_by=newest.created_by or "system",
-            )
-            self.db.add(version)
-            await self.db.flush()
+        newest = await self._pick_group_representative(key, group)
+        projected_payload = {
+            "template_name": newest.template_name,
+            "deduplication_fields": list(newest.deduplication_fields or []),
+            "header_bindings": list(newest.header_bindings or []),
+            "notes": newest.notes,
+            "legacy_template_ids": [
+                template.id for template in group if template.id is not None
+            ],
+        }
+
+        # [*] 版本化(第 3 批 3.5): 每次「发布」产生一条**新**版本行,
+        #     旧行置为 superseded —— 不再原地覆盖(原地覆盖 ⇒ 永远只有 1 个版本,
+        #     created_at 永不更新, 历史全丢)。
+        active_version = await self._get_active_version(family.id)
+        if active_version is not None and self._version_payload_matches(
+            active_version, projected_payload
+        ):
+            version = active_version
         else:
-            version.version_no = newest.version or version.version_no
-            version.template_name = newest.template_name
-            _assign_if_changed(version, "deduplication_fields", list(newest.deduplication_fields or []))
-            _assign_if_changed(version, "header_bindings", list(newest.header_bindings or []))
-            version.notes = newest.notes
-            _assign_if_changed(
-                version,
-                "legacy_template_ids",
-                [template.id for template in group if template.id is not None],
+            version = await self._create_version(
+                family=family,
+                newest=newest,
+                payload=projected_payload,
+                previous_version=active_version,
             )
 
         existing_variants_result = await self.db.execute(
@@ -638,6 +765,50 @@ class TemplateFamilyService:
         family.active_version_id = version.id
         family.governance_status = "ready"
         family.display_name = self._build_display_name(platform, data_domain, sub_domain, granularity)
+
+        return {
+            "family_id": family.id,
+            "active_version_id": version.id,
+            "version_no": version.version_no,
+            "key": key,
+        }
+
+    async def _create_version(
+        self,
+        *,
+        family: FieldMappingTemplateFamily,
+        newest: FieldMappingTemplate,
+        payload: Dict[str, Any],
+        previous_version: Optional[FieldMappingTemplateVersion],
+    ) -> FieldMappingTemplateVersion:
+        """新增一条版本行, 并把上一条置为 superseded。
+
+        ``version_no`` 取「模板版本号」与「该家族已有最大版本号 + 1」的较大值:
+        * 正常发布(v4 取代 v3)⇒ version_no = 4, 与模板版本号对齐;
+        * 同一版本号下内容被原地改写 ⇒ version_no 递增, 避开唯一约束。
+        """
+        max_version_no = await self._get_max_version_no(family.id)
+        version_no = max(int(newest.version or 1), max_version_no + 1)
+
+        if previous_version is not None:
+            previous_version.status = "superseded"
+
+        version = FieldMappingTemplateVersion(
+            family_id=family.id,
+            version_no=version_no,
+            status="active",
+            template_name=payload["template_name"],
+            deduplication_fields=list(payload["deduplication_fields"]),
+            header_bindings=list(payload["header_bindings"]),
+            notes=payload["notes"],
+            legacy_template_ids=list(payload["legacy_template_ids"]),
+            created_by=newest.created_by or "system",
+            # [*] 版本生效时间 —— 不再停留在首次投影时间
+            created_at=datetime.now(timezone.utc),
+        )
+        self.db.add(version)
+        await self.db.flush()
+        return version
 
     async def _get_family(
         self,
@@ -702,11 +873,24 @@ class TemplateFamilyService:
     ) -> Optional[FieldMappingTemplateFamily]:
         key = _dimension_key(platform, data_domain, sub_domain, granularity, account)
         family = await self._get_family(key)
+        if family is None:
+            # [*] 账号维度: account=None 的家族适用于**任意**账号
+            #     (与 _account_dimension_matches / 模板匹配的第 1 级同一口径)。
+            #     少了这一步, 「文件带账号 + 家族是通用模板」永远匹配不上,
+            #     治理看板与入库判定就会对同一个文件给出相反结论。
+            family = await self._get_family(
+                _dimension_key(platform, data_domain, sub_domain, granularity, None)
+            )
         if family:
             return family
 
         await self.project_legacy_templates(platform=platform, data_domain=data_domain)
-        return await self._get_family(key)
+        family = await self._get_family(key)
+        if family is None:
+            family = await self._get_family(
+                _dimension_key(platform, data_domain, sub_domain, granularity, None)
+            )
+        return family
 
     async def list_families(
         self,
@@ -1034,6 +1218,7 @@ class TemplateResolver:
                 "matched": False,
                 "governance_status": "missing_family",
                 "family": None,
+                "family_governance_status": None,
                 "active_version": None,
                 "variant": None,
                 "semantic_bindings": [],
@@ -1044,6 +1229,7 @@ class TemplateResolver:
                     data_domain=data_domain,
                     granularity=granularity,
                     sub_domain=sub_domain,
+                    account=account,
                     header_columns=header_columns or [],
                     sample_rows=sample_rows or [],
                     selected_variant=None,
@@ -1053,10 +1239,13 @@ class TemplateResolver:
         family_payload, versions = await self.family_service.get_family_versions(family.id)
         active_version = next((item for item in versions if item["status"] == "active"), None)
         if active_version is None:
+            # [*] 家族存在但没有激活版本 = 该维度**没有已发布模板**(第 3 批 3.6)。
+            #     明确把家族级状态透出去, 别让上层只看到 "missing_variant"。
             return {
                 "matched": False,
                 "governance_status": "missing_variant",
                 "family": family_payload,
+                "family_governance_status": family_payload.get("governance_status"),
                 "active_version": None,
                 "variant": None,
                 "semantic_bindings": [],
@@ -1067,6 +1256,7 @@ class TemplateResolver:
                     data_domain=data_domain,
                     granularity=granularity,
                     sub_domain=sub_domain,
+                    account=account,
                     header_columns=header_columns or [],
                     sample_rows=sample_rows or [],
                     selected_variant=None,
@@ -1112,6 +1302,7 @@ class TemplateResolver:
             data_domain=data_domain,
             granularity=granularity,
             sub_domain=sub_domain,
+            account=account,
             header_columns=header_columns or [],
             sample_rows=sample_rows or [],
             selected_variant=selected_variant,
@@ -1136,6 +1327,7 @@ class TemplateResolver:
             "matched": selected_variant is not None,
             "governance_status": governance_status,
             "family": family_payload,
+            "family_governance_status": family_payload.get("governance_status"),
             "active_version": active_version,
             "variant": selected_variant,
             "semantic_bindings": semantic_bindings,
@@ -1365,44 +1557,43 @@ class TemplateResolver:
         data_domain: str,
         granularity: Optional[str],
         sub_domain: Optional[str],
+        account: Optional[str] = None,
         header_columns: list[str],
         sample_rows: list[dict[str, Any]],
         selected_variant: Optional[dict[str, Any]],
     ) -> dict[str, Any]:
-        stmt = select(FieldMappingTemplate).where(
-            and_(
-                FieldMappingTemplate.platform == platform,
-                FieldMappingTemplate.data_domain == data_domain,
-                FieldMappingTemplate.granularity == granularity,
-                FieldMappingTemplate.sub_domain == sub_domain,
-                FieldMappingTemplate.status == "published",
-            )
+        """对照: 「投影变体指向的模板」与「唯一解析入口选出的模板」是不是同一版。
+
+        [*] 旧实现自己写了一套查询(只按 version 取最新, 不看 account),
+        那是「同一件事的第三把尺子」。现在统一走
+        :func:`backend.services.template_matcher.resolve_template_for_file`。
+        """
+        resolution = await resolve_template_for_file(
+            self.db,
+            platform=platform,
+            data_domain=data_domain,
+            granularity=granularity,
+            sub_domain=sub_domain,
+            account=account,
+            sample_rows=sample_rows or None,
         )
-        result = await self.db.execute(stmt)
-        templates = list(result.scalars().all())
-        if not templates:
+        legacy_template = resolution.template
+        projected_legacy_template_id = (
+            selected_variant.get("source_legacy_template_id") if selected_variant else None
+        )
+        if legacy_template is None:
             return {
                 "legacy_template_id": None,
                 "legacy_template_name": None,
-                "projected_variant_legacy_template_id": selected_variant.get("source_legacy_template_id") if selected_variant else None,
+                "projected_variant_legacy_template_id": projected_legacy_template_id,
                 "is_consistent": selected_variant is None,
             }
 
-        selected_legacy = None
-        if sample_rows:
-            for template in sorted(templates, key=lambda item: (item.version or 0, item.id or 0), reverse=True):
-                if _variant_matches_sample_rows(template.field_parse_rules or [], sample_rows):
-                    selected_legacy = template
-                    break
-        if selected_legacy is None:
-            selected_legacy = max(templates, key=lambda item: (item.version or 0, item.id or 0))
-
-        projected_legacy_template_id = selected_variant.get("source_legacy_template_id") if selected_variant else None
         return {
-            "legacy_template_id": selected_legacy.id,
-            "legacy_template_name": selected_legacy.template_name,
+            "legacy_template_id": legacy_template.id,
+            "legacy_template_name": legacy_template.template_name,
             "projected_variant_legacy_template_id": projected_legacy_template_id,
-            "is_consistent": selected_legacy.id == projected_legacy_template_id,
+            "is_consistent": legacy_template.id == projected_legacy_template_id,
         }
 
 

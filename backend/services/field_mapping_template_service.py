@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, desc, select
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.deduplication_fields_config import get_default_deduplication_fields
@@ -21,6 +20,24 @@ from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 VERSION_SUFFIX_PATTERN = re.compile(r"_v\d+$")
+
+#: 家族投影状态(写入保存响应)
+PROJECTION_STATUS_PROJECTED = "projected"
+PROJECTION_STATUS_FAILED = "failed"
+PROJECTION_STATUS_SKIPPED = "skipped"
+
+
+class TemplateFamilyProjectionError(RuntimeError):
+    """模板家族投影失败。
+
+    保存模板 = 「归档旧模板 + 插入新模板 + 家族投影」**同一个事务**。
+    投影失败 ⇒ 整体回滚 ⇒ 必须用**可区分**的异常类型抛出去,
+    由路由层翻译成明确错误码(不能泛化成 500)。
+    """
+
+    def __init__(self, message: str, *, cause: Optional[BaseException] = None) -> None:
+        super().__init__(message)
+        self.cause = cause
 
 
 class FieldMappingTemplateService:
@@ -48,6 +65,15 @@ class FieldMappingTemplateService:
         save_mode: str = "create",
         base_template_id: Optional[int] = None,
     ) -> Dict[str, Any]:
+        """保存模板(归档旧版本 + 插入新版本 + 家族投影, **同一个事务**)。
+
+        [*] 第 3 批 3.1: 以前是「先 commit 模板, 再单独 commit 投影」,
+        于是有两种坏状态:
+          A. 写库成功但接口报 500(用户以为失败, 模板其实已改);
+          B. 接口报成功但没投影(家族目录与真实模板对不上)。
+        现在三步合并进一个事务: 投影失败 ⇒ 整体回滚 ⇒ 抛
+        :class:`TemplateFamilyProjectionError`。
+        """
         try:
             sub_domain = _normalize_dimension(sub_domain)
             account = _normalize_dimension(account)
@@ -83,18 +109,11 @@ class FieldMappingTemplateService:
             )
             existing_templates = list(existing_result.scalars().all())
 
-            archived_template_id = None
+            new_version = 1
             if existing_templates:
                 new_version = max(
                     (item.version or 0) for item in existing_templates
                 ) + 1
-                for existing in existing_templates:
-                    existing.status = "archived"
-                    existing.updated_at = datetime.now(timezone.utc)
-                    self.db.add(existing)
-                archived_template_id = existing_templates[0].id
-            else:
-                new_version = 1
 
             current_time = datetime.now(timezone.utc)
             resolved_template_name = self._resolve_template_name(
@@ -106,46 +125,87 @@ class FieldMappingTemplateService:
                 version=new_version,
             )
 
-            template = FieldMappingTemplate(
-                platform=platform,
-                data_domain=data_domain,
-                granularity=granularity,
-                account=account,
-                sub_domain=sub_domain,
-                header_row=header_row,
-                sheet_name=sheet_name,
-                encoding=encoding,
-                header_columns=header_columns,
-                deduplication_fields=deduplication_fields,
-                header_bindings=header_bindings,
-                field_parse_rules=field_parse_rules,
-                template_name=resolved_template_name,
-                version=new_version,
-                status="published",
-                field_count=len(header_columns),
-                usage_count=0,
-                success_rate=0.0,
-                created_by=created_by,
-                created_at=current_time,
-                updated_at=current_time,
-                notes="DSS架构重构(v4.6.0)+ 核心字段去重(v4.14.0)",
-            )
+            # [*] 结束读取阶段可能已经开启的隐式事务(只有读操作),
+            #     让下面的 `db.begin()` 能开出一个**干净**的事务。
+            #     get_async_db 会在请求结束时再 commit 一次 —— 这里不重复提交业务数据。
+            if self.db.in_transaction():
+                await self.db.commit()
 
-            self.db.add(template)
-            await self.db.commit()
-            await self.db.refresh(template)
-            from backend.services.template_family_service import get_template_family_service
+            archived_template_id: Optional[int] = None
+            projection_family_id: Optional[int] = None
+            projection_version_id: Optional[int] = None
 
             try:
-                await get_template_family_service(self.db).project_legacy_templates(
-                    platform=platform,
-                    data_domain=data_domain,
+                async with self.db.begin():
+                    if existing_templates:
+                        for existing in existing_templates:
+                            existing.status = "archived"
+                            existing.updated_at = current_time
+                            self.db.add(existing)
+                        archived_template_id = existing_templates[0].id
+
+                    template = FieldMappingTemplate(
+                        platform=platform,
+                        data_domain=data_domain,
+                        granularity=granularity,
+                        account=account,
+                        sub_domain=sub_domain,
+                        header_row=header_row,
+                        sheet_name=sheet_name,
+                        encoding=encoding,
+                        header_columns=header_columns,
+                        deduplication_fields=deduplication_fields,
+                        header_bindings=header_bindings,
+                        field_parse_rules=field_parse_rules,
+                        template_name=resolved_template_name,
+                        version=new_version,
+                        status="published",
+                        field_count=len(header_columns),
+                        usage_count=0,
+                        success_rate=0.0,
+                        created_by=created_by,
+                        created_at=current_time,
+                        updated_at=current_time,
+                        notes="DSS架构重构(v4.6.0)+ 核心字段去重(v4.14.0)",
+                    )
+                    self.db.add(template)
+                    await self.db.flush()
+
+                    # [*] 家族投影: 与模板写入**同一个事务**。
+                    #     commit=False —— 提交权归外层事务。
+                    try:
+                        projection_family_id, projection_version_id = await self._project_family(
+                            platform=platform,
+                            data_domain=data_domain,
+                            granularity=granularity,
+                            sub_domain=sub_domain,
+                            account=account,
+                        )
+                    except TemplateFamilyProjectionError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - 统一成可区分的异常类型
+                        raise TemplateFamilyProjectionError(
+                            f"模板家族投影失败: {exc}",
+                            cause=exc,
+                        ) from exc
+            except TemplateFamilyProjectionError:
+                await self.db.rollback()
+                logger.error(
+                    "[Template] 家族投影失败, 已回滚本次保存: platform=%s, domain=%s",
+                    platform,
+                    data_domain,
                 )
-            except OperationalError as exc:
-                logger.warning(f"[Template] skip family projection because new tables are unavailable: {exc}")
+                raise
+            except Exception as exc:
+                await self.db.rollback()
+                logger.error(f"[Template] 保存失败: {exc}")
+                raise
+
+            await self.db.refresh(template)
 
             logger.info(
-                f"[Template] 保存成功: {template.template_name} (ID={template.id}, {len(header_columns)}个字段)"
+                f"[Template] 保存成功: {template.template_name} (ID={template.id}, {len(header_columns)}个字段), "
+                f"family_id={projection_family_id}, active_version_id={projection_version_id}"
             )
             return {
                 "template_id": template.id,
@@ -155,11 +215,61 @@ class FieldMappingTemplateService:
                 "archived_template_id": archived_template_id,
                 "save_mode": save_mode,
                 "base_template_id": base_template_id,
+                "family_id": projection_family_id,
+                "active_version_id": projection_version_id,
+                "projection_status": PROJECTION_STATUS_PROJECTED,
             }
         except Exception as exc:
             await self.db.rollback()
             logger.error(f"[Template] 保存失败: {exc}")
             raise
+
+    async def _project_family(
+        self,
+        *,
+        platform: str,
+        data_domain: str,
+        granularity: Optional[str] = None,
+        sub_domain: Optional[str] = None,
+        account: Optional[str] = None,
+    ) -> tuple[Optional[int], Optional[int]]:
+        """在当前事务里投影模板家族。
+
+        失败时抛 :class:`TemplateFamilyProjectionError` —— 调用方据此回滚整个事务。
+        """
+        from backend.services.template_family_service import get_template_family_service
+
+        try:
+            projection = await get_template_family_service(self.db).project_legacy_templates(
+                platform=platform,
+                data_domain=data_domain,
+                commit=False,
+            )
+        except TemplateFamilyProjectionError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 统一转成可区分的异常类型
+            raise TemplateFamilyProjectionError(
+                f"模板家族投影失败: {exc}",
+                cause=exc,
+            ) from exc
+
+        families = projection.get("families") or []
+        # [*] 只取本次保存所命中的那个维度(严格 5 维)
+        target_key = (
+            str(platform).strip(),
+            str(data_domain).strip(),
+            sub_domain,
+            granularity,
+            account,
+        )
+        target = None
+        for item in families:
+            if tuple(item.get("key") or ()) == target_key:
+                target = item
+                break
+        if target is None:
+            return None, None
+        return target.get("family_id"), target.get("active_version_id")
 
     @staticmethod
     def _resolve_template_name(
@@ -314,20 +424,77 @@ class FieldMappingTemplateService:
             raise
 
     async def delete_template(self, template_id: int) -> bool:
-        try:
-            template = await self.db.get(FieldMappingTemplate, template_id)
-            if not template:
-                logger.warning(f"[Template] 删除失败: 模板{template_id}不存在")
-                return False
+        """删除模板 = **归档 + 重投影**(第 3 批 3.6)。
 
-            await self.db.delete(template)
-            await self.db.commit()
-            logger.info(f"[Template] 删除成功: {template.template_name} (ID={template_id})")
+        以前是硬删(``db.delete`` + commit), 后果是:
+
+        * 家族目录完全不知道模板没了 —— ``active_version_id`` 还挂着,
+          变体还指向已经不存在的模板行;
+        * resolver 仍然报 ``matched=True / governance_status='ready'``,
+          而入库判定走模板匹配得到「没有模板」⇒ **同一文件两处结论相反**。
+
+        现在: 模板行保留(status='archived'), 家族目录重投影,
+        该维度若已无 published 模板 ⇒ 家族标记 ``missing_template``
+        且清空 ``active_version_id``。
+        """
+        template = await self.db.get(FieldMappingTemplate, template_id)
+        if not template:
+            logger.warning(f"[Template] 删除失败: 模板{template_id}不存在")
+            return False
+
+        try:
+            if self.db.in_transaction():
+                await self.db.commit()
+
+            async with self.db.begin():
+                template.status = "archived"
+                template.updated_at = datetime.now(timezone.utc)
+                self.db.add(template)
+                await self.db.flush()
+
+                # [*] 重投影: 让家族目录反映「该维度已无 published 模板」
+                await self._reproject_family(
+                    platform=template.platform,
+                    data_domain=template.data_domain,
+                )
+
+            logger.info(
+                f"[Template] 删除成功(已归档): {template.template_name} (ID={template_id})"
+            )
             return True
+        except TemplateFamilyProjectionError:
+            await self.db.rollback()
+            logger.error(
+                "[Template] 删除失败: 家族重投影失败, 已回滚归档: template_id=%s", template_id
+            )
+            raise
         except Exception as exc:
             await self.db.rollback()
             logger.error(f"[Template] 删除失败: {exc}")
             raise
+
+    async def _reproject_family(
+        self,
+        *,
+        platform: str,
+        data_domain: str,
+    ) -> None:
+        """在当前事务里重投影模板家族(删除/归档模板后调用)。"""
+        from backend.services.template_family_service import get_template_family_service
+
+        try:
+            await get_template_family_service(self.db).project_legacy_templates(
+                platform=platform,
+                data_domain=data_domain,
+                commit=False,
+            )
+        except TemplateFamilyProjectionError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 统一转成可区分的异常类型
+            raise TemplateFamilyProjectionError(
+                f"模板家族重投影失败: {exc}",
+                cause=exc,
+            ) from exc
 
 
 def get_template_service(db: AsyncSession) -> FieldMappingTemplateService:

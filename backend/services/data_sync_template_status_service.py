@@ -7,11 +7,11 @@ from sqlalchemy.exc import OperationalError
 
 from modules.core.db import CatalogFile, FieldMappingTemplate
 from backend.services.template_contract_service import (
+    contract_template_id,
     describe_contract_baseline,
     is_contract_baseline_valid,
     parse_contract_captured_at,
     read_template_contract,
-    resolve_contract_template,
 )
 from backend.services.template_family_service import get_template_resolver
 from backend.services.template_matcher import get_template_matcher
@@ -42,6 +42,18 @@ DRIFT_ORIGIN_TEMPLATE_UPGRADE = "template_upgrade"
 DRIFT_ORIGIN_UNKNOWN = "unknown"
 
 
+# ── 契约状态(第 3 批 3.3) ───────────────────────────────────────────
+#
+# 「契约失效」以前与「从来没有契约」混为一谈:
+# 契约指向的模板行被删 / 被原地改写 ⇒ 基准直接落到「当前已发布模板」,
+# 历史文件被**静默**地用新模板解释, 没有留痕。
+#
+# 现在契约状态是**一等状态**, 三种取值互不重叠:
+CONTRACT_STATUS_VALID = "valid"
+CONTRACT_STATUS_INVALID = "invalid"
+CONTRACT_STATUS_MISSING = "missing"
+
+
 class DataSyncTemplateStatusService:
     def __init__(self, db):
         self.db = db
@@ -57,6 +69,79 @@ class DataSyncTemplateStatusService:
         except (TypeError, ValueError):
             return None
 
+    async def _resolve_contract_candidate(
+        self,
+        contract: Optional[Dict[str, Any]],
+    ) -> Optional[FieldMappingTemplate]:
+        """取契约指向的模板行(用 ``db.get``, 命中会话 identity map, 不额外查询)。"""
+        template_id = contract_template_id(contract)
+        if template_id is None:
+            return None
+        try:
+            return await self.db.get(FieldMappingTemplate, template_id)
+        except Exception:  # noqa: BLE001 - 取不到就按「契约失效」处理
+            return None
+
+    async def _evaluate_contract_status(
+        self,
+        contract: Optional[Dict[str, Any]],
+    ) -> tuple[str, Optional[str]]:
+        """判定契约状态(第 3 批 3.3)。
+
+        Returns:
+            ``(contract_status, invalid_reason)``
+
+        * ``valid``   契约指向的模板行还在, 且表头指纹仍然一致
+        * ``invalid`` 模板行已被删除, 或被原地改写(``columns_hash`` 不匹配)
+        * ``missing`` 文件上根本没有契约
+        """
+        if not isinstance(contract, dict) or not contract:
+            return CONTRACT_STATUS_MISSING, None
+        candidate = await self._resolve_contract_candidate(contract)
+        if candidate is None:
+            return (
+                CONTRACT_STATUS_INVALID,
+                "契约指向的模板行已不存在(模板被删除或未迁移), 已回退到当前已发布模板",
+            )
+        if not is_contract_baseline_valid(contract, candidate):
+            return (
+                CONTRACT_STATUS_INVALID,
+                "契约记录的表头指纹与模板当前表头不一致(模板被原地改写), 已回退到当前已发布模板",
+            )
+        return CONTRACT_STATUS_VALID, None
+
+    @staticmethod
+    def _build_contract_signals(
+        *,
+        contract_status: str,
+        contract_invalid_reason: Optional[str],
+        contract_stale: bool,
+        baseline_kind: str,
+        comparison_template: Any,
+    ) -> Dict[str, Any]:
+        """契约相关信号(第 3 批 3.3)。
+
+        契约失效时**必须**显式带上「已回退到当前模板」的标记 ——
+        不允许静默回退(上层据此落库与提示)。
+        """
+        contract_fallback: Optional[Dict[str, Any]] = None
+        if contract_status == CONTRACT_STATUS_INVALID:
+            contract_fallback = {
+                "applied": True,
+                "reason": contract_invalid_reason,
+                "fallback_template_id": getattr(comparison_template, "id", None),
+                "fallback_template_name": getattr(
+                    comparison_template, "template_name", None
+                ),
+                "fallback_kind": baseline_kind,
+            }
+        return {
+            "contract_status": contract_status,
+            "contract_invalid": contract_status == CONTRACT_STATUS_INVALID,
+            "contract_stale": contract_stale,
+            "contract_fallback": contract_fallback,
+        }
+
     async def evaluate_catalog_file(
         self,
         catalog_file: CatalogFile,
@@ -71,12 +156,20 @@ class DataSyncTemplateStatusService:
         published_template: Optional[FieldMappingTemplate] = None,
     ) -> Dict[str, Any]:
         resolver_result = None
+        normalized_sub_domain = catalog_file.sub_domain if catalog_file.sub_domain else None
+        # [*] 账号/地区维度: 不同地区的导出表头可能不同, 优先匹配账号专属模板
+        normalized_account = (
+            getattr(catalog_file, "account", None) or None
+        )
         try:
             resolver_result = await self.template_resolver.resolve(
                 platform=catalog_file.platform_code,
                 data_domain=catalog_file.data_domain,
                 granularity=catalog_file.granularity,
-                sub_domain=catalog_file.sub_domain if catalog_file.sub_domain else None,
+                sub_domain=normalized_sub_domain,
+                # [*] 必须传 account —— 少了它, resolver 会用「无账号」的家族,
+                #     与入库判定(走模板匹配)对同一个文件给出相反结论。
+                account=normalized_account,
                 header_row=header_row,
                 header_columns=current_columns or [],
                 sample_rows=sample_rows or [],
@@ -84,11 +177,6 @@ class DataSyncTemplateStatusService:
         except OperationalError:
             resolver_result = None
 
-        normalized_sub_domain = catalog_file.sub_domain if catalog_file.sub_domain else None
-        # [*] 账号/地区维度: 不同地区的导出表头可能不同, 优先匹配账号专属模板
-        normalized_account = (
-            getattr(catalog_file, "account", None) or None
-        )
         template = template or await self.template_matcher.find_best_template(
             platform=catalog_file.platform_code,
             data_domain=catalog_file.data_domain,
@@ -108,6 +196,12 @@ class DataSyncTemplateStatusService:
         baseline_template = None
         baseline_kind = TEMPLATE_BASELINE_CURRENT
         current_template = template
+        # [*] 契约状态(第 3 批 3.3): valid / invalid / missing 三者互不重叠
+        contract_status, contract_invalid_reason = (
+            await self._evaluate_contract_status(contract)
+            if contract
+            else (CONTRACT_STATUS_MISSING, None)
+        )
 
         # [D7] 跨 family 接管: 由**其他粒度**的变体解释本文件。
         #
@@ -150,8 +244,8 @@ class DataSyncTemplateStatusService:
                 if published_template is not None:
                     current_template = published_template
         elif contract:
-            candidate = await resolve_contract_template(self.db, contract)
-            if candidate is not None and is_contract_baseline_valid(contract, candidate):
+            candidate = await self._resolve_contract_candidate(contract)
+            if candidate is not None and contract_status == CONTRACT_STATUS_VALID:
                 baseline_template = candidate
                 baseline_kind = TEMPLATE_BASELINE_CONTRACT
                 # 当前已发布模板: 用来识别「我们自己升级过模板」这种情况
@@ -163,6 +257,9 @@ class DataSyncTemplateStatusService:
                     account=normalized_account,
                 )
                 current_template = published_template or candidate
+            # [*] 契约失效(invalid)⇒ **不再无声回退**:
+            #     基准落到「当前已发布模板」, 但返回结构里会带上
+            #     contract_status=invalid + contract_fallback 标记(见文件末尾)。
 
         if baseline_template is None and takeover_report:
             takeover_template = await self._load_legacy_template(
@@ -176,6 +273,23 @@ class DataSyncTemplateStatusService:
 
         # [D7] 比较基准: 契约 > 跨 family 接管 > 当前已发布模板
         comparison_template = baseline_template or template
+
+        # [*] 契约是否已过时: 契约存在, 但实际解释这个文件的基准不是它 ——
+        #     说明采集登记时按粒度选错了模板(导出格式不跟着粒度走), 需要修正。
+        contract_stale = bool(
+            contract
+            and baseline_kind
+            and baseline_kind != TEMPLATE_BASELINE_CONTRACT
+        )
+
+        # [*] 契约信号(第 3 批 3.3): 契约失效必须**显式**留痕, 不允许无声回退
+        contract_signals = self._build_contract_signals(
+            contract_status=contract_status,
+            contract_invalid_reason=contract_invalid_reason,
+            contract_stale=contract_stale,
+            baseline_kind=baseline_kind,
+            comparison_template=comparison_template,
+        )
 
         if not comparison_template:
             governance_status = (
@@ -213,6 +327,7 @@ class DataSyncTemplateStatusService:
                 "baseline_template_id": baseline_info.get("baseline_template_id"),
                 "baseline_template_version": baseline_info.get("baseline_template_version"),
                 "shadow_compare": resolver_result.get("shadow_compare") if resolver_result else None,
+                **contract_signals,
             }
 
         if current_columns is None:
@@ -239,6 +354,7 @@ class DataSyncTemplateStatusService:
                 "baseline_template_id": baseline_info.get("baseline_template_id"),
                 "baseline_template_version": baseline_info.get("baseline_template_version"),
                 "shadow_compare": resolver_result.get("shadow_compare") if resolver_result else None,
+                **contract_signals,
             }
 
         header_changes = await self.template_matcher.detect_header_changes(
@@ -287,14 +403,6 @@ class DataSyncTemplateStatusService:
                 if baseline_info.get("template_outdated")
                 else None
             )
-
-        # [*] 契约是否已过时: 契约存在, 但实际解释这个文件的基准不是它 ——
-        # 说明采集登记时按粒度选错了模板(导出格式不跟着粒度走), 需要修正。
-        contract_stale = bool(
-            contract
-            and baseline_kind
-            and baseline_kind != TEMPLATE_BASELINE_CONTRACT
-        )
 
         # [*] 契约失效: 契约基准已经解释不了这个文件, 而当前已发布模板可以。
         #
@@ -415,10 +523,10 @@ class DataSyncTemplateStatusService:
                 else TEMPLATE_BASELINE_CURRENT
             ),
             "takeover": takeover_report,
-            "contract_stale": contract_stale,
             "template_outdated": bool(baseline_info.get("template_outdated")),
             "baseline_template_id": baseline_info.get("baseline_template_id"),
             "baseline_template_version": baseline_info.get("baseline_template_version"),
             "baseline_valid": bool(baseline_info.get("baseline_valid")),
             "shadow_compare": resolver_result.get("shadow_compare") if resolver_result else None,
+            **contract_signals,
         }

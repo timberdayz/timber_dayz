@@ -1027,6 +1027,8 @@ function confirmBindingMapping(rawName) {
   const confirmedBinding = {
     ...target,
     semantic_review_status: 'confirmed_semantic',
+    // 用户在界面上明确点过确认 ⇒ 允许被提升成语义身份（区别于系统推断）。
+    semantic_review_source: 'user',
   }
   editedHeaderBindings.value = mergeHeaderBindingsForSave(
     editedHeaderBindings.value,

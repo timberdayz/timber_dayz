@@ -359,6 +359,16 @@ REVIEW_STATUS_CONFIRMED_SEMANTIC = "confirmed_semantic"
 REVIEW_STATUS_CONFIRMED_NON_SEMANTIC = "confirmed_non_semantic"
 REVIEW_STATUS_PENDING = "pending"
 
+# 语义复核状态**来源**：区分「用户明确确认」与「系统按表头名推断」。
+#
+# 为什么需要这个区分：
+# 历史绑定里只要推断出了 semantic_key 就会被标成 confirmed_semantic，
+# 于是「产品ID」这种中文列名也会被当成 product_id 身份，
+# 与真正写成 product_id 的模板判成「口径一致」⇒ 假一致。
+# 只有用户明确点过确认的绑定，才允许被提升成语义身份。
+REVIEW_SOURCE_USER = "user"
+REVIEW_SOURCE_INFERRED = "inferred"
+
 
 def normalize_semantic_key(value: Optional[str]) -> Optional[str]:
     text = str(value or "").strip()

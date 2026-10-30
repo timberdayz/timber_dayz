@@ -150,6 +150,10 @@ class DataSyncService:
             log_prefix="DataSync",
             executor_manager_factory=lambda: get_executor_manager(),
         )
+        # 模板契约解析状态(按 catalog_file.id 索引)。契约读取异常时会被写入，
+        # 让「回退到当前已发布模板」这件事对调用方可见，而不是只留一条日志。
+        # 按文件维度存，避免同一 service 实例并发处理多个文件时互相串扰。
+        self.contract_resolution_status: Dict[Any, Dict[str, Any]] = {}
 
     def _resolve_runtime_spreadsheet_path(self, file_path: str) -> str:
         """解析运行时可读的表格路径。
@@ -348,34 +352,29 @@ class DataSyncService:
 
         有了契约, 基准就是**采集当时生效的那一版模板** —— 我们自己升级模板
         (v5 -> v6)不会让按 v5 采集的文件突然变成漂移, 源文件结构真的变了才会。
+
+        读取契约时抛异常**不再静默**: 异常被记到 ``self.contract_resolution_status``,
+        调用方可以据此把「回退到当前已发布模板」这件事显式地告诉使用者,
+        而不是只留一条 warning 日志。
         """
         try:
-            return await resolve_valid_contract_template(self.db, catalog_file)
+            resolved = await resolve_valid_contract_template(self.db, catalog_file)
         except Exception as exc:  # noqa: BLE001
+            self.contract_resolution_status[getattr(catalog_file, "id", None)] = {
+                "file_id": getattr(catalog_file, "id", None),
+                "file_name": getattr(catalog_file, "file_name", None),
+                "contract_status": "error",
+                "contract_error": f"{type(exc).__name__}: {exc}",
+                "fallback_applied": True,
+                "fallback_reason": "读取模板契约时发生异常, 已回退到当前已发布模板",
+            }
             logger.warning(
-                "[DataSync] 读取模板契约失败 %s: %s",
+                "[DataSync] 读取模板契约失败 %s: %s (已回退到当前已发布模板)",
                 getattr(catalog_file, "file_name", None),
                 exc,
             )
             return None
-    async def _resolve_governing_template(
-        self,
-        catalog_file: CatalogFile,
-        fallback: Optional[FieldMappingTemplate] = None,
-    ) -> Optional[FieldMappingTemplate]:
-        """解析「治理这个文件的模板」。
-
-        优先使用文件自带的模板契约 —— 也就是**采集当时生效的那一版模板**。
-        没有契约的历史文件才回退到当前已发布模板。
-
-        这样一来, 我们自己升级模板(v5 -> v6)不会让按 v5 采集的文件
-        突然变成「结构漂移」, 源文件结构真的变了才会被判定为漂移。
-        """
-        contract_template = await self._resolve_contract_template(catalog_file)
-        if contract_template is not None:
-            return contract_template
-        return fallback
-
+        return resolved
     async def _resolve_ingestion_baseline(
         self,
         catalog_file: CatalogFile,
@@ -460,6 +459,45 @@ class DataSyncService:
         return status
 
     async def evaluate_catalog_file_template_status(
+        self,
+        catalog_file: CatalogFile,
+        *,
+        template=None,
+        use_template_header_row: bool = True,
+    ) -> Dict[str, Any]:
+        """评估文件的模板状态，并把契约解析状态合并进返回体。
+
+        契约读取**异常**时，异常被记在 ``self.contract_resolution_status``，
+        这里把它合并进返回体，让「回退到当前已发布模板」这件事对调用方可见
+        （否则只有一条日志，调用方无从知道契约其实没能用上）。
+        """
+        payload = await self._evaluate_catalog_file_template_status(
+            catalog_file,
+            template=template,
+            use_template_header_row=use_template_header_row,
+        )
+        return self._apply_contract_resolution_status(catalog_file, payload)
+
+    def _apply_contract_resolution_status(
+        self,
+        catalog_file: CatalogFile,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        contract_status = self.contract_resolution_status.get(
+            getattr(catalog_file, "id", None)
+        )
+        if not contract_status or not isinstance(payload, dict):
+            return payload
+        merged = dict(payload)
+        merged["contract_status"] = contract_status.get("contract_status")
+        merged["contract_error"] = contract_status.get("contract_error")
+        fallback = dict(merged.get("contract_fallback") or {})
+        fallback.setdefault("applied", contract_status.get("fallback_applied", True))
+        fallback.setdefault("reason", contract_status.get("fallback_reason"))
+        merged["contract_fallback"] = fallback
+        return merged
+
+    async def _evaluate_catalog_file_template_status(
         self,
         catalog_file: CatalogFile,
         *,

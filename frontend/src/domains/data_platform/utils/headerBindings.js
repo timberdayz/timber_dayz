@@ -580,6 +580,10 @@ export function inferHeaderBindings({
       identity_strength: requirements.identity_strength,
       hash_warning: requirements.hash_warning,
       semantic_review_status: semanticKey ? 'confirmed_semantic' : 'pending',
+      // 来源标记：批量推断出来的语义键不等于用户确认过。
+      // 只有用户在界面上明确确认过的绑定，才允许被提升成语义身份，
+      // 否则「产品ID」这种中文列名会被当成 product_id，与语义键模板判成口径一致。
+      semantic_review_source: 'inferred',
       position,
       sample_type: sampleType,
       confidence,
@@ -601,6 +605,7 @@ export function updateHeaderBindingSemantic(headerBindings = [], rawName, semant
         hash_eligible: false,
         semantic_kind: '',
         semantic_review_status: 'confirmed_non_semantic',
+        semantic_review_source: 'user',
         display_name: binding?.display_name || binding?.raw_name,
       }
     }
@@ -619,6 +624,8 @@ export function updateHeaderBindingSemantic(headerBindings = [], rawName, semant
       identity_strength: requirements.identity_strength,
       hash_warning: requirements.hash_warning,
       semantic_review_status: normalizedKey ? 'confirmed_semantic' : 'pending',
+      // 用户在下拉框里明确改过 ⇒ 属于「用户确认」，可被提升成语义身份。
+      semantic_review_source: 'user',
       display_name: binding?.display_name || binding?.raw_name,
     }
   })

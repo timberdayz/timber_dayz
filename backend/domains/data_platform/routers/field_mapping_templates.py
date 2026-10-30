@@ -56,13 +56,21 @@ from backend.services.template_family_service import (
     get_template_family_service,
     get_template_resolver,
 )
-from backend.services.field_mapping_template_service import get_template_service
+from backend.services.field_mapping_template_service import (
+    TemplateFamilyProjectionError,
+    get_template_service,
+)
 from backend.services.semantic_field_registry import (
+    REVIEW_SOURCE_INFERRED,
+    REVIEW_SOURCE_USER,
+    REVIEW_STATUS_CONFIRMED_SEMANTIC,
     get_semantic_aliases,
     get_semantic_requirements,
     infer_semantic_key,
     is_canonical_semantic_key,
     normalize_semantic_key,
+    resolve_binding_review_status,
+    resolve_semantic_value,
 )
 from backend.services.semantic_hash_policy_service import SemanticHashPolicyService
 from backend.services.semantic_alias_registry import SemanticAliasRegistryService
@@ -98,6 +106,9 @@ DATE_PARSE_VALUE_KINDS = {
 }
 DATE_PARSE_RANGE_VALUE_KINDS = {"date_range", "datetime_range", "time_range"}
 SYSTEM_HASH_SCOPE_KEYS = {"platform_code", "shop_id", "data_domain", "granularity", "sub_domain"}
+# [*] 历史遗留的「列名 → 语义键」映射。
+#     它**不参与** hash 计算(calculate_data_hash 只认 canonical 语义键),
+#     因此家族 hash 校验也不再使用它 —— 用了就会重新制造「假一致」。
 LEGACY_SOURCE_FIELD_SEMANTIC_OVERRIDES = {
     "products": {
         "id": "product_id",
@@ -123,9 +134,35 @@ def _normalize_dimension_value(value: Any) -> Optional[str]:
 
 
 def _binding_lookup_by_source(header_bindings: list[dict[str, Any]] | None) -> dict[str, str]:
+    """列名 → 语义键 的映射(只认**显式确认**的绑定)。
+
+    [*] 为什么必须是「显式确认」而不是「推断出来的语义键也算确认」
+    ------------------------------------------------------
+    hash 身份键的判定必须与
+    :meth:`backend.services.deduplication_service.DeduplicationService.calculate_data_hash`
+    一致 —— 那里的 hash 键名只认 canonical 语义键, 中文列名一律退回原始列名。
+
+    若把「没有复核状态、但推断出了 semantic_key」的绑定也当成确认,
+    历史中文名模板(如 ``deduplication_fields=['产品ID', ...]``)就会因为
+    绑定里推断出了 ``product_id`` 而被提升成语义身份 ⇒ 与语义键模板
+    判成「完全一致」⇒ **假一致重新出现**(这正是本次要修的东西)。
+
+    因此这里刻意要求 ``semantic_review_status`` 显式为 confirmed_semantic:
+    「用户明确说过这一列就是 product_id」才算语义身份成立。
+    """
     lookup: dict[str, str] = {}
     for binding in header_bindings or []:
-        if binding.get("semantic_review_status") != "confirmed_semantic":
+        if str(binding.get("semantic_review_status") or "").strip() != (
+            REVIEW_STATUS_CONFIRMED_SEMANTIC
+        ):
+            continue
+        # 「系统按表头名推断出来的」绑定不能提升成语义身份 ——
+        # 否则「产品ID」这种中文列名会被当成 product_id，
+        # 与真正写成 product_id 的模板判成口径一致 ⇒ 假一致。
+        if (
+            str(binding.get("semantic_review_source") or "").strip()
+            == REVIEW_SOURCE_INFERRED
+        ):
             continue
         semantic_key = normalize_semantic_key(
             binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
@@ -143,83 +180,124 @@ def _binding_lookup_by_source(header_bindings: list[dict[str, Any]] | None) -> d
     return lookup
 
 
-def _canonical_user_hash_key_set(
-    fields: list[str] | None,
-    header_bindings: list[dict[str, Any]] | None = None,
-    data_domain: str | None = None,
-) -> set[str]:
-    keys: set[str] = set()
-    binding_lookup = _binding_lookup_by_source(header_bindings)
-    legacy_overrides = LEGACY_SOURCE_FIELD_SEMANTIC_OVERRIDES.get(str(data_domain or "").lower(), {})
-    for field in fields or []:
-        field_text = str(field or "").strip()
-        semantic_key = normalize_semantic_key(field_text)
-        if not semantic_key or not is_canonical_semantic_key(semantic_key):
-            semantic_key = binding_lookup.get(field_text.lower())
-        if not semantic_key or not is_canonical_semantic_key(semantic_key):
-            semantic_key = legacy_overrides.get(field_text.lower())
-        if not semantic_key or not is_canonical_semantic_key(semantic_key):
-            semantic_key = infer_semantic_key(field_text)
-        if not semantic_key or semantic_key in SYSTEM_HASH_SCOPE_KEYS:
-            continue
-        if is_canonical_semantic_key(semantic_key):
-            keys.add(semantic_key)
-    return keys
-
-
-def _hash_source_by_semantic_key(
+def _hash_field_pairs(
     fields: list[str] | None,
     header_bindings: list[dict[str, Any]] | None,
+    header_columns: list[str] | None,
     data_domain: str | None = None,
 ) -> dict[str, str]:
+    """算出「参与 data_hash 的字段对」: ``{身份键: 实际取值来源列}``。
+
+    身份键怎么来的(与
+    :meth:`backend.services.deduplication_service.DeduplicationService.calculate_data_hash`
+    同一套解析函数、同一套判定顺序)
+    ------------------------------------------------------------------
+    1. **原文**是 canonical 语义键 ⇒ 身份键 = 语义键
+       (``calculate_data_hash`` 也是先对**原文**判 canonical, 中文名过不了);
+    2. 否则, 用户**已确认**的语义绑定(``semantic_review_status == confirmed_semantic``)
+       ⇒ 身份键 = 该绑定的语义键(用户明确说过「这一列就是 product_id」);
+    3. 否则, products 域的历史列名覆盖 ⇒ 身份键 = 覆盖出来的语义键;
+    4. 否则 ⇒ 身份键 = **原始字段名**(这正是 hash 字典里的键名)。
+
+    为什么不能像旧实现那样「先 normalize 再判 canonical」
+    --------------------------------------------------
+    旧实现先 ``normalize_semantic_key(字段)`` —— 这一步会把「产品ID」这种
+    **中文别名**也归一成 ``product_id``, 于是 ``['产品ID', ...]`` 与
+    ``['product_id', ...]`` 的语义键集合完全相同 ⇒ 判「完全一致」。
+    但真正算 hash 时, 中文名过不了 canonical 判定 ⇒ 退回按原始列名匹配
+    ⇒ hash 键名变成中文 ⇒ **同一行数据 hash 不同**。这就是假一致。
+
+    取值来源列用 ``resolve_semantic_value`` 解析(与 hash 取值同一条路径);
+    没有源列时退回字段原文。
+    """
     binding_lookup = _binding_lookup_by_source(header_bindings)
-    legacy_overrides = LEGACY_SOURCE_FIELD_SEMANTIC_OVERRIDES.get(str(data_domain or "").lower(), {})
-    source_by_key: dict[str, str] = {}
+    legacy_overrides = LEGACY_SOURCE_FIELD_SEMANTIC_OVERRIDES.get(
+        str(data_domain or "").lower(), {}
+    )
+    # [*] 用模板的表头列构造一个「只有列名、没有值」的行:
+    #     resolve_semantic_value 返回 (值, 命中的列名), 值我们不需要, 列名才是比对对象。
+    row = {
+        str(column): None
+        for column in (header_columns or [])
+        if str(column).strip()
+    }
+    pairs: dict[str, str] = {}
     for field in fields or []:
         field_text = str(field or "").strip()
-        semantic_key = normalize_semantic_key(field_text)
-        if not semantic_key or not is_canonical_semantic_key(semantic_key):
-            semantic_key = binding_lookup.get(field_text.lower())
-        if not semantic_key or not is_canonical_semantic_key(semantic_key):
-            semantic_key = legacy_overrides.get(field_text.lower())
-        if not semantic_key or not is_canonical_semantic_key(semantic_key):
-            semantic_key = infer_semantic_key(field_text)
-        if semantic_key and semantic_key not in SYSTEM_HASH_SCOPE_KEYS and semantic_key not in source_by_key:
-            source_by_key[semantic_key] = field_text
-    for binding in header_bindings or []:
-        semantic_key = normalize_semantic_key(binding.get("semantic_key"))
-        if not semantic_key or semantic_key in source_by_key:
+        if not field_text:
             continue
-        raw_name = str(binding.get("raw_name") or binding.get("source_header") or binding.get("display_name") or "").strip()
-        if raw_name:
-            source_by_key[semantic_key] = raw_name
-    return source_by_key
+
+        # [*] 与 calculate_data_hash 完全一致的判定顺序: 先对**原文**判 canonical
+        semantic_key = (
+            normalize_semantic_key(field_text)
+            if is_canonical_semantic_key(field_text)
+            else None
+        )
+        if semantic_key is None:
+            # 用户已确认的语义绑定 ⇒ 语义身份成立
+            semantic_key = binding_lookup.get(field_text.lower())
+        if semantic_key is None:
+            # products 域的历史列名覆盖
+            semantic_key = legacy_overrides.get(field_text.lower())
+        if semantic_key and semantic_key in SYSTEM_HASH_SCOPE_KEYS:
+            continue
+
+        if semantic_key:
+            identity = semantic_key
+            _value, matched_key = resolve_semantic_value(
+                row,
+                semantic_key,
+                header_bindings=header_bindings,
+            )
+            source_column = str(matched_key) if matched_key else field_text
+        else:
+            # 非 canonical 字段名: 按原始列名匹配(与 calculate_data_hash 的兜底分支一致)
+            identity = field_text
+            matched_column = None
+            for column in row:
+                if column == field_text or column.lower() == field_text.lower():
+                    matched_column = column
+                    break
+            source_column = matched_column or field_text
+
+        pairs.setdefault(identity, source_column)
+    return pairs
 
 
-def _family_hash_change_payload(
-    *,
-    existing_template: FieldMappingTemplate,
-    existing_keys: set[str],
-    current_keys: set[str],
-    current_deduplication_fields: list[str],
-    current_header_bindings: list[dict[str, Any]],
+def _compare_hash_field_pairs(
+    existing_pairs: dict[str, str],
+    current_pairs: dict[str, str],
     data_domain: str,
 ) -> dict[str, Any]:
-    existing_sources = _hash_source_by_semantic_key(
-        existing_template.deduplication_fields or [],
-        existing_template.header_bindings or [],
-        data_domain,
+    """比较两套「参与 hash 的字段对」。
+
+    * ``missing_keys``  家族在用、这次没用的身份键
+    * ``extra_keys``    这次新增的身份键
+    * ``source_field_changes`` 同一个身份键, 取值来源列变了
+      —— **只提示不阻断**: 同一语义键下表头拼写不同(源文件改了列名)是
+      允许的, 语义身份没变就不该把整个家族锁死。
+
+    阻断口径 = 身份键集合不一致(与旧实现一致), 但身份键的判定方式变了。
+    """
+    existing_keys = set(existing_pairs.keys())
+    current_keys = set(current_pairs.keys())
+    comparable_existing_keys = _compatible_family_hash_keys(
+        existing_keys=existing_keys,
+        current_keys=current_keys,
+        data_domain=data_domain,
     )
-    current_sources = _hash_source_by_semantic_key(
-        current_deduplication_fields,
-        current_header_bindings,
-        data_domain,
-    )
-    source_field_changes = []
-    for semantic_key in sorted(existing_keys & current_keys):
-        family_raw_name = existing_sources.get(semantic_key)
-        current_raw_name = current_sources.get(semantic_key)
-        if family_raw_name and current_raw_name and family_raw_name != current_raw_name:
+    missing_keys = sorted(comparable_existing_keys - current_keys)
+    extra_keys = sorted(current_keys - comparable_existing_keys)
+
+    source_field_changes: list[dict[str, Any]] = []
+    for semantic_key in sorted(comparable_existing_keys & current_keys):
+        family_raw_name = existing_pairs.get(semantic_key)
+        current_raw_name = current_pairs.get(semantic_key)
+        if (
+            family_raw_name
+            and current_raw_name
+            and family_raw_name != current_raw_name
+        ):
             source_field_changes.append(
                 {
                     "semantic_key": semantic_key,
@@ -227,26 +305,55 @@ def _family_hash_change_payload(
                     "current_raw_name": current_raw_name,
                 }
             )
+
     semantic_hash_key_changes = [
-        {"change": "missing", "semantic_key": key}
-        for key in sorted(existing_keys - current_keys)
+        {"change": "missing", "semantic_key": key} for key in missing_keys
     ] + [
-        {"change": "added", "semantic_key": key}
-        for key in sorted(current_keys - existing_keys)
+        {"change": "added", "semantic_key": key} for key in extra_keys
     ]
+
+    return {
+        "missing_keys": missing_keys,
+        "extra_keys": extra_keys,
+        "source_field_changes": source_field_changes,
+        "semantic_hash_key_changes": semantic_hash_key_changes,
+        "is_compatible": not (missing_keys or extra_keys),
+    }
+
+
+def _family_hash_change_payload(
+    *,
+    existing_template: FieldMappingTemplate,
+    existing_pairs: dict[str, str],
+    current_pairs: dict[str, str],
+    comparison: dict[str, Any],
+    current_deduplication_fields: list[str],
+    current_header_bindings: list[dict[str, Any]],
+    data_domain: str,
+) -> dict[str, Any]:
+    """构造家族 hash 口径变化的 payload(前端已依赖这里的字段结构)。"""
+    existing_keys = set(existing_pairs.keys())
+    current_keys = set(current_pairs.keys())
+    comparable_existing_keys = _compatible_family_hash_keys(
+        existing_keys=existing_keys,
+        current_keys=current_keys,
+        data_domain=data_domain,
+    )
     suggested_action = "save_allowed"
-    if semantic_hash_key_changes:
+    if comparison["semantic_hash_key_changes"]:
         suggested_action = (
             "migrate_family_hash_keys"
-            if data_domain == "products" and "product_name" in existing_keys and "product_id" in current_keys
+            if data_domain == "products" and "product_name" in comparable_existing_keys and "product_id" in current_keys
             else "create_new_family"
         )
     return {
-        "family_hash_keys": sorted(existing_keys),
+        "family_hash_keys": sorted(comparable_existing_keys),
         "current_hash_keys": sorted(current_keys),
-        "source_field_changes": source_field_changes,
-        "semantic_hash_key_changes": semantic_hash_key_changes,
+        "source_field_changes": list(comparison["source_field_changes"]),
+        "semantic_hash_key_changes": list(comparison["semantic_hash_key_changes"]),
         "suggested_action": suggested_action,
+        "family_hash_source_pairs": dict(sorted(existing_pairs.items())),
+        "current_hash_source_pairs": dict(sorted(current_pairs.items())),
     }
 
 
@@ -256,6 +363,10 @@ def _compatible_family_hash_keys(
     current_keys: set[str],
     data_domain: str,
 ) -> set[str]:
+    """兼容口径: 只保留 products 域「product_name → product_id」这一个已知迁移。
+
+    [*] 不在这里放宽成「什么都放行」—— 那会让家族口径彻底失去约束。
+    """
     compatible_keys = set(existing_keys)
     if (
         data_domain == "products"
@@ -385,9 +496,8 @@ def _filter_bindings_for_manual_review(
     filtered: list[dict[str, Any]] = []
     for binding in bindings:
         semantic_key = normalize_semantic_key(binding.get("semantic_key"))
-        review_status = str(binding.get("semantic_review_status") or "").strip()
-        if not review_status:
-            review_status = "confirmed_semantic" if semantic_key else "pending"
+        # 复核状态判定复用 registry 的唯一实现，避免读取侧与保存闸门各判一套
+        review_status = resolve_binding_review_status(binding)
         has_conflict = bool(semantic_key and semantic_counts.get(semantic_key, 0) > 1)
         is_key_review_candidate = bool(
             binding.get("required")
@@ -672,6 +782,19 @@ def _normalize_header_bindings(
         else:
             semantic_review_status = "pending"
 
+        # 复核来源：区分「用户明确确认」与「系统按表头名推断」。
+        # 只有用户确认过的绑定才允许被提升成语义身份，
+        # 否则「产品ID」这种中文列名会被当成 product_id ⇒ 与语义键模板判成口径一致。
+        requested_review_source = str(
+            requested.get("semantic_review_source") or ""
+        ).strip()
+        if requested_review_source not in {REVIEW_SOURCE_USER, REVIEW_SOURCE_INFERRED}:
+            # 兼容旧前端：没有来源标记时，按请求里是否显式带了复核状态来区分。
+            requested_review_source = (
+                REVIEW_SOURCE_USER if requested_review_status else REVIEW_SOURCE_INFERRED
+            )
+        semantic_review_source = requested_review_source
+
         if semantic_review_status == "confirmed_non_semantic":
             inferred_semantic_key = None
             semantic_role = None
@@ -694,6 +817,7 @@ def _normalize_header_bindings(
                 "required": required,
                 "hash_participates": hash_participates,
                 "semantic_review_status": semantic_review_status,
+                "semantic_review_source": semantic_review_source,
                 "position": requested.get("position", position),
                 "sample_type": sample_type,
                 "confidence": confidence,
@@ -969,8 +1093,31 @@ async def _validate_template_family_hash_keys(
     account: Optional[str],
     deduplication_fields: list[str],
     header_bindings: list[dict[str, Any]],
-) -> None:
-    current_keys = _canonical_user_hash_key_set(deduplication_fields, header_bindings, data_domain)
+    header_columns: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """家族 hash 口径校验。
+
+    [*] 比较对象 = 「实际参与 data_hash 的字段对」(见 :func:`_hash_field_pairs`),
+        不再是裸语义键集合 —— 后者会把「语义键相同但物理键名不同」判成一致。
+    [*] 比较基准 = 家族下**全部版本**(含 archived):
+        - 与**当前 published**版本口径不一致 ⇒ **阻断**
+          (会改变同一行数据的 hash ⇒ 历史上已入库的行会被判成新行);
+        - 与**archived**(或历史 published)版本口径不一致 ⇒ **只提示不阻断**。
+          理由: 历史版本已经落库, 口径修复属于数据专项(文档 §3.3 未授权执行);
+          若把 archived 纳入阻断, 任何口径变化都会被永久锁死 —— 用户既改不了
+          历史版本, 也保存不了新版本。
+
+    Returns:
+        家族口径差异信息(供保存响应回传)。
+    """
+    current_pairs = _hash_field_pairs(
+        deduplication_fields,
+        header_bindings,
+        header_columns,
+        data_domain,
+    )
+
+    # [*] 家族下全部版本(published + archived)都参与比较
     result = await db.execute(
         select(FieldMappingTemplate).where(
             and_(
@@ -979,50 +1126,105 @@ async def _validate_template_family_hash_keys(
                 FieldMappingTemplate.granularity == _normalize_dimension_value(granularity),
                 FieldMappingTemplate.sub_domain == _normalize_dimension_value(sub_domain),
                 FieldMappingTemplate.account == _normalize_dimension_value(account),
-                FieldMappingTemplate.status == "published",
             )
         )
     )
     existing_templates = list(result.scalars().all())
     if not existing_templates:
-        return
+        return {"archived_version_conflicts": []}
 
-    existing = sorted(
-        existing_templates,
+    published_templates = [
+        item for item in existing_templates if item.status == "published"
+    ]
+    if not published_templates:
+        # 家族没有 published 模板 ⇒ 没有可比基准(与旧行为一致)
+        return {"archived_version_conflicts": []}
+
+    existing = max(
+        published_templates,
         key=lambda item: (item.version or 0, item.id or 0),
-        reverse=True,
-    )[0]
-    existing_keys = _canonical_user_hash_key_set(
+    )
+    existing_pairs = _hash_field_pairs(
         existing.deduplication_fields or [],
         existing.header_bindings or [],
+        existing.header_columns or [],
         data_domain,
     )
-    if not existing_keys:
-        return
+    if not existing_pairs:
+        return {"archived_version_conflicts": []}
 
-    comparable_existing_keys = _compatible_family_hash_keys(
-        existing_keys=existing_keys,
-        current_keys=current_keys,
-        data_domain=data_domain,
-    )
-    missing_keys = sorted(comparable_existing_keys - current_keys)
-    extra_keys = sorted(current_keys - comparable_existing_keys)
-    if not missing_keys and not extra_keys:
-        return
+    comparison = _compare_hash_field_pairs(existing_pairs, current_pairs, data_domain)
+
+    # [*] 历史版本(published 之外的旧版本)口径差异: 只提示
+    archived_conflicts: list[dict[str, Any]] = []
+    for item in existing_templates:
+        if item.id == existing.id:
+            continue
+        item_pairs = _hash_field_pairs(
+            item.deduplication_fields or [],
+            item.header_bindings or [],
+            item.header_columns or [],
+            data_domain,
+        )
+        if not item_pairs:
+            continue
+        item_comparison = _compare_hash_field_pairs(
+            item_pairs, current_pairs, data_domain
+        )
+        if item_comparison["is_compatible"]:
+            continue
+        archived_conflicts.append(
+            {
+                "template_id": item.id,
+                "template_name": item.template_name,
+                "status": item.status,
+                "version": item.version,
+                "family_hash_keys": sorted(item_pairs.keys()),
+                "missing_keys": item_comparison["missing_keys"],
+                "extra_keys": item_comparison["extra_keys"],
+                "source_field_changes": item_comparison["source_field_changes"],
+            }
+        )
+
+    if archived_conflicts:
+        logger.warning(
+            "[Template] 家族历史版本存在 hash 口径差异(仅提示, 不阻断): platform=%s, domain=%s, "
+            "granularity=%s, sub_domain=%s, account=%s, conflicts=%s",
+            platform,
+            data_domain,
+            granularity,
+            sub_domain,
+            account,
+            [item["template_id"] for item in archived_conflicts],
+        )
+
+    if comparison["is_compatible"]:
+        return {"archived_version_conflicts": archived_conflicts}
 
     payload = _family_hash_change_payload(
         existing_template=existing,
-        existing_keys=comparable_existing_keys,
-        current_keys=current_keys,
+        existing_pairs=existing_pairs,
+        current_pairs=current_pairs,
+        comparison=comparison,
         current_deduplication_fields=deduplication_fields,
         current_header_bindings=header_bindings,
         data_domain=data_domain,
     )
+    payload["archived_version_conflicts"] = archived_conflicts
+
     details: list[str] = []
-    if missing_keys:
-        details.append("缺少必要 hash 语义字段: " + ", ".join(missing_keys))
-    if extra_keys:
-        details.append("新增 hash 语义字段: " + ", ".join(extra_keys))
+    if comparison["missing_keys"]:
+        details.append("缺少必要 hash 语义字段: " + ", ".join(comparison["missing_keys"]))
+    if comparison["extra_keys"]:
+        details.append("新增 hash 语义字段: " + ", ".join(comparison["extra_keys"]))
+    if comparison["source_field_changes"]:
+        details.append(
+            "同一语义键的取值来源列发生变化: "
+            + ", ".join(
+                f"{item['semantic_key']}({item['family_raw_name']}->{item['current_raw_name']})"
+                for item in comparison["source_field_changes"]
+            )
+        )
     message = (
         "; ".join(details)
         + "。同一模板家族必须保持同一套 data_hash 语义字段；"
@@ -1035,16 +1237,6 @@ async def _validate_template_family_hash_keys(
             + " Historical family hash uses product_name while current selection uses product_id."
         )
     raise TemplateFamilyHashKeyMismatch(message, payload)
-
-    details: list[str] = []
-    if missing_keys:
-        details.append("缺少必要 hash 语义字段: " + ", ".join(missing_keys))
-    if extra_keys:
-        details.append("新增 hash 语义字段: " + ", ".join(extra_keys))
-    raise ValueError(
-        "; ".join(details)
-        + "。同一模板家族必须保持同一套 data_hash 语义字段；如业务行粒度不同，请拆分 sub_domain 或模板家族。"
-    )
 
 
 @router.post(
@@ -1210,8 +1402,9 @@ async def save_mapping_template(
                 data={"hash_policy": readiness.to_dict()},
             )
 
+        family_hash_conflicts: list[dict[str, Any]] = []
         try:
-            await _validate_template_family_hash_keys(
+            family_validation = await _validate_template_family_hash_keys(
                 db,
                 platform=request.platform,
                 data_domain=request.data_domain,
@@ -1220,6 +1413,10 @@ async def save_mapping_template(
                 account=request.account,
                 deduplication_fields=deduplication_fields,
                 header_bindings=header_bindings,
+                header_columns=header_columns,
+            )
+            family_hash_conflicts = list(
+                (family_validation or {}).get("archived_version_conflicts") or []
             )
         except TemplateFamilyHashKeyMismatch as exc:
             hash_policy_payload = readiness.to_dict()
@@ -1294,16 +1491,40 @@ async def save_mapping_template(
             hash_policy_result=hash_policy_result,
         )
         save_result["governance_checks"] = governance_checks
+        # [*] 家族投影结果(第 3 批 3.1)与历史版本口径差异
+        save_result.setdefault("family_id", None)
+        save_result.setdefault("active_version_id", None)
+        save_result.setdefault("projection_status", "projected")
+        save_result["family_hash_conflicts"] = family_hash_conflicts
 
         logger.info(
             f"[Template] 保存成功: platform={request.platform}, domain={request.data_domain}, "
-            f"template_id={save_result['template_id']}"
+            f"template_id={save_result['template_id']}, "
+            f"projection_status={save_result['projection_status']}, "
+            f"family_id={save_result['family_id']}"
         )
 
         return TemplateSaveResponse(
             success=True,
             data=save_result,
             message="模板保存成功",
+        )
+    except TemplateFamilyProjectionError as exc:
+        # [*] 家族投影失败 ⇒ 整个保存事务已回滚 ⇒ 必须返回**失败**响应
+        #     (不能 success=true, 也不能泛化成 500)
+        logger.error(f"保存模板失败(家族投影失败, 已回滚): {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_TRANSACTION_ERROR,
+            message=f"保存模板失败: 模板家族投影失败, 本次保存已回滚: {exc}",
+            error_type=get_error_type(ErrorCode.DATABASE_TRANSACTION_ERROR),
+            detail=str(exc),
+            recovery_suggestion="请检查模板家族目录表(core.field_mapping_template_families/versions/variants)是否可用后重试",
+            status_code=500,
+            data={
+                "projection_status": "failed",
+                "family_id": None,
+                "active_version_id": None,
+            },
         )
     except ValueError as exc:
         logger.error(f"保存模板失败(参数错误): {exc}", exc_info=True)
@@ -2010,7 +2231,12 @@ async def delete_mapping_template(
     template_id: int,
     db: AsyncSession = Depends(get_async_db),
 ):
-    """删除模板。"""
+    """删除模板(归档 + 家族重投影)。
+
+    [*] 第 3 批 3.6: 不再硬删 —— 硬删会让变体指向不存在的模板行,
+        家族目录还挂着 active_version_id, resolver 仍报 ready,
+        而入库判定报「没有模板」⇒ 同一文件两处结论相反。
+    """
     try:
         template_service = get_template_service(db)
         success = await template_service.delete_template(template_id)
@@ -2028,6 +2254,16 @@ async def delete_mapping_template(
             detail=f"模板ID {template_id} 不存在",
             recovery_suggestion="请检查模板ID是否正确",
             status_code=404,
+        )
+    except TemplateFamilyProjectionError as exc:
+        logger.error(f"删除模板失败(家族重投影失败, 已回滚): {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_TRANSACTION_ERROR,
+            message=f"删除模板失败: 模板家族重投影失败, 本次删除已回滚: {exc}",
+            error_type=get_error_type(ErrorCode.DATABASE_TRANSACTION_ERROR),
+            detail=str(exc),
+            recovery_suggestion="请检查模板家族目录表是否可用后重试",
+            status_code=500,
         )
     except Exception as exc:
         logger.error(f"删除模板失败: {exc}", exc_info=True)

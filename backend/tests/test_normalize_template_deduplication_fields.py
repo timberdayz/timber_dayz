@@ -203,80 +203,92 @@ async def test_apply_then_restore_round_trip(tmp_path):
 
     这里不用 ``pg_session`` fixture：它的 engine 与 ``@pytest.mark.asyncio``
     的事件循环作用域不一致（session 级 fixture vs function 级 loop），
-    会触发 "attached to a different loop"。改用脚本自己的 AsyncSessionLocal，
+    会触发 "attached to a different loop"。
+
+    也不复用 ``backend.models.database.AsyncSessionLocal``：它的连接池在
+    import 时就建好，跨测试复用同一个 pool 时 asyncpg 会把连接绑到
+    第一次使用它的那个 event loop 上，在全量回归里表现为
+    "attached to a different loop"。因此这里自建 engine，用完即弃。
+
     护栏已把 DATABASE_URL 指向一次性容器，绝不会碰到真实业务库。
     """
     from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-    from backend.models.database import AsyncSessionLocal
+    from backend.models.database import DATABASE_URL, get_async_database_url
     from modules.core.db import FieldMappingTemplate
 
-    async with AsyncSessionLocal() as session:
-        template = FieldMappingTemplate(
-            platform="shopee",
-            data_domain="analytics",
-            granularity="daily",
-            account="unit-test-account",
-            template_name="unit_test_normalize_dedup",
-            version=1,
-            status="archived",
-            encoding="utf-8",
-            header_row=0,
-            header_columns=["日期"],
-            deduplication_fields=["日期"],
-            header_bindings=[
-                {
-                    "raw_name": "日期",
-                    "semantic_key": "metric_date",
-                    "semantic_review_status": "confirmed_semantic",
-                }
-            ],
-            field_parse_rules=[],
-        )
-        session.add(template)
-        await session.commit()
-        template_id = template.id
+    engine = create_async_engine(get_async_database_url(DATABASE_URL), echo=False)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as session:
+            template = FieldMappingTemplate(
+                platform="shopee",
+                data_domain="analytics",
+                granularity="daily",
+                account="unit-test-account",
+                template_name="unit_test_normalize_dedup",
+                version=1,
+                status="archived",
+                encoding="utf-8",
+                header_row=0,
+                header_columns=["日期"],
+                deduplication_fields=["日期"],
+                header_bindings=[
+                    {
+                        "raw_name": "日期",
+                        "semantic_key": "metric_date",
+                        "semantic_review_status": "confirmed_semantic",
+                    }
+                ],
+                field_parse_rules=[],
+            )
+            session.add(template)
+            await session.commit()
+            template_id = template.id
 
-        plan = script.plan_template_field_mapping(
-            template_id=template_id,
-            template_name="unit_test_normalize_dedup",
-            data_domain="analytics",
-            granularity="daily",
-            status="archived",
-            deduplication_fields=["日期"],
-            header_bindings=template.header_bindings,
-            header_columns=template.header_columns,
-            field_parse_rules=[],
-        )
-        assert plan.needs_change is True
+            plan = script.plan_template_field_mapping(
+                template_id=template_id,
+                template_name="unit_test_normalize_dedup",
+                data_domain="analytics",
+                granularity="daily",
+                status="archived",
+                deduplication_fields=["日期"],
+                header_bindings=template.header_bindings,
+                header_columns=template.header_columns,
+                field_parse_rules=[],
+            )
+            assert plan.needs_change is True
 
-        backup_path = tmp_path / "backup.json"
-        changed = await script.apply_plans([plan], backup_path, session=session)
-        assert changed == 1
+            backup_path = tmp_path / "backup.json"
+            changed = await script.apply_plans([plan], backup_path, session=session)
+            assert changed == 1
 
-        row = await session.execute(
-            text(
-                "SELECT deduplication_fields FROM core.field_mapping_templates "
-                "WHERE id = :tid"
-            ),
-            {"tid": template_id},
-        )
-        assert row.scalar() == ["metric_date"]
+            row = await session.execute(
+                text(
+                    "SELECT deduplication_fields FROM core.field_mapping_templates "
+                    "WHERE id = :tid"
+                ),
+                {"tid": template_id},
+            )
+            assert row.scalar() == ["metric_date"]
 
-        restored = await script.restore_plans(backup_path, session=session)
-        assert restored == 1
+            restored = await script.restore_plans(backup_path, session=session)
+            assert restored == 1
 
-        row = await session.execute(
-            text(
-                "SELECT deduplication_fields FROM core.field_mapping_templates "
-                "WHERE id = :tid"
-            ),
-            {"tid": template_id},
-        )
-        assert row.scalar() == ["日期"]
+            row = await session.execute(
+                text(
+                    "SELECT deduplication_fields FROM core.field_mapping_templates "
+                    "WHERE id = :tid"
+                ),
+                {"tid": template_id},
+            )
+            assert row.scalar() == ["日期"]
 
-        await session.execute(
-            text("DELETE FROM core.field_mapping_templates WHERE id = :tid"),
-            {"tid": template_id},
-        )
-        await session.commit()
+            await session.execute(
+                text("DELETE FROM core.field_mapping_templates WHERE id = :tid"),
+                {"tid": template_id},
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()

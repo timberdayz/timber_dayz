@@ -18,8 +18,9 @@ v4.18.2新增:
 """
 
 from typing import Optional, Dict, List, Any
+from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, or_
+from sqlalchemy import select, desc, or_, case
 from datetime import datetime
 
 from modules.core.db import FieldMappingTemplate
@@ -82,6 +83,25 @@ def match_dimension_condition(column, value: Optional[str]):
     return column == value
 
 
+def _account_generic_first_order():
+    """同一版本号下, 「与店铺无关」的模板排在前面。
+
+    为什么需要: 同一个版本号上可能同时存在「通用模板」与「店铺专属模板」。
+    文件没有账号时, 应当优先用通用模板 —— 否则同一个文件在不同环境里
+    可能被解释成不同模板(取决于数据库返回顺序)。
+    """
+    return case(
+        (
+            or_(
+                FieldMappingTemplate.account.is_(None),
+                FieldMappingTemplate.account == "",
+            ),
+            0,
+        ),
+        else_=1,
+    )
+
+
 def build_template_match_levels(
     platform: str,
     data_domain: str,
@@ -97,6 +117,17 @@ def build_template_match_levels(
     * ``account_scoped``   账号/地区专属模板
     * ``exact``            精确匹配(platform + data_domain [+ sub_domain] + granularity)
     * ``relaxed_sub_domain``忽略 sub_domain(向后兼容; services 域不允许降级)
+
+    降级语义(SSOT, 唯一一份定义)
+    ----------------------------
+    * **sub_domain**: 文件**没有** sub_domain 时**不约束** sub_domain
+      (允许匹配任意 sub_domain 的模板); 文件**有** sub_domain 时必须相等。
+      例外: ``services`` 域不允许再向下放宽(ai_assistant 与 agent 表头完全不同)。
+    * **account**: 文件**有** account 时, 账号专属模板走第 0 级优先命中;
+      其余级别只接受「与店铺无关」的模板(account 为空)或同账号模板,
+      避免**别的店铺**的模板被误用。
+      文件**没有** account 时不约束 account(与历史行为一致), 同版本号下通用模板优先。
+    * **granularity**: 始终要求相等(忽略 granularity 的宽松匹配会选错模板, 已禁用)。
     """
     norm_granularity = normalize_dimension_value(granularity)
     norm_sub_domain = normalize_dimension_value(sub_domain)
@@ -133,6 +164,15 @@ def build_template_match_levels(
         level1_conditions.append(
             match_dimension_condition(FieldMappingTemplate.sub_domain, norm_sub_domain)
         )
+    # [*] 账号维度: 文件有账号时, 不允许命中「别的店铺」的专属模板。
+    if norm_account is not None:
+        level1_conditions.append(
+            or_(
+                FieldMappingTemplate.account.is_(None),
+                FieldMappingTemplate.account == "",
+                FieldMappingTemplate.account == norm_account,
+            )
+        )
     levels.append((MATCH_LEVEL_EXACT, level1_conditions))
 
     # Level 2: 忽略sub_domain(向后兼容)
@@ -143,21 +183,224 @@ def build_template_match_levels(
     )
     services_blocked = normalized_domain == "services" and norm_sub_domain is not None
     if level2_allowed and not services_blocked:
-        levels.append(
-            (
-                MATCH_LEVEL_RELAXED_SUB_DOMAIN,
-                [
-                    FieldMappingTemplate.platform == platform,
-                    FieldMappingTemplate.data_domain == data_domain,
-                    match_dimension_condition(
-                        FieldMappingTemplate.granularity, norm_granularity
-                    ),
-                    FieldMappingTemplate.status == "published",
-                ],
+        level2_conditions = [
+            FieldMappingTemplate.platform == platform,
+            FieldMappingTemplate.data_domain == data_domain,
+            match_dimension_condition(
+                FieldMappingTemplate.granularity, norm_granularity
+            ),
+            FieldMappingTemplate.status == "published",
+        ]
+        if norm_account is not None:
+            level2_conditions.append(
+                or_(
+                    FieldMappingTemplate.account.is_(None),
+                    FieldMappingTemplate.account == "",
+                    FieldMappingTemplate.account == norm_account,
+                )
             )
-        )
+        levels.append((MATCH_LEVEL_RELAXED_SUB_DOMAIN, level2_conditions))
 
     return levels
+
+
+# ==================== 文件 → 模板的唯一解析入口 (SSOT) ====================
+#
+# 背景
+# ----
+# 「一个文件该由哪一版模板解释」这件事, 历史上散落在三处, 口径各不相同:
+#
+#   1. ``TemplateMatcher.find_best_template``      —— 三级降级(账号专属 → 精确 → 忽略 sub_domain)
+#   2. ``TemplateFamilyService._dimension_key``    —— 严格 5 维相等
+#   3. ``TemplateFamilyService._legacy_shadow_compare`` —— 第四套(只按 version 取最新)
+#
+# 同一件事三把尺子 ⇒ 治理面板与入库判定对同一个文件给出相反结论
+# (实测: resolver 报 ready, find_best_template 报「没有模板」)。
+#
+# 本模块把降级规则收进**唯一**入口 ``resolve_template_for_file``,
+# 入库判定 / 治理看板 / 家族投影三处都调用它。
+# 降级语义写在 :func:`build_template_match_levels` 的文档里(唯一一份定义)。
+
+
+@dataclass(frozen=True)
+class TemplateFileResolution:
+    """一次「文件 → 模板」解析的结果。"""
+
+    template: Optional[FieldMappingTemplate]
+    level: Optional[str]
+    platform: str
+    data_domain: str
+    granularity: Optional[str]
+    sub_domain: Optional[str]
+    account: Optional[str]
+
+    @property
+    def matched(self) -> bool:
+        return self.template is not None
+
+
+def _pick_by_sample_rows(
+    candidates: List[FieldMappingTemplate],
+    sample_rows: Optional[List[Dict[str, Any]]],
+) -> FieldMappingTemplate:
+    """在同级别的候选里挑一个「解析规则与样本行吻合」的模板。
+
+    没有样本行时直接取第一个(版本号最高、通用模板优先)。
+    """
+    if not sample_rows:
+        return candidates[0]
+    # [*] 延迟导入: template_family_service 依赖本模块, 顶层互相 import 会成环
+    from backend.services.template_family_service import _variant_matches_sample_rows
+
+    for candidate in candidates:
+        if _variant_matches_sample_rows(
+            candidate.field_parse_rules or [], sample_rows
+        ):
+            return candidate
+    return candidates[0]
+
+
+async def resolve_template_for_file(
+    db: AsyncSession,
+    *,
+    platform: str,
+    data_domain: str,
+    granularity: Optional[str] = None,
+    sub_domain: Optional[str] = None,
+    account: Optional[str] = None,
+    sample_rows: Optional[List[Dict[str, Any]]] = None,
+) -> TemplateFileResolution:
+    """唯一入口: 解析「解释这个文件的模板」。
+
+    Args:
+        platform: 平台代码
+        data_domain: 数据域
+        granularity: 粒度(可选)
+        sub_domain: 子域(可选)
+        account: 账号/地区(可选)
+        sample_rows: 样本行(可选) —— 给出时优先选解析规则吻合的模板
+
+    Returns:
+        :class:`TemplateFileResolution`; ``template`` 为 None 表示没匹配到。
+    """
+    norm_granularity = normalize_dimension_value(granularity)
+    norm_sub_domain = normalize_dimension_value(sub_domain)
+    norm_account = normalize_dimension_value(account)
+
+    levels = build_template_match_levels(
+        platform=platform,
+        data_domain=data_domain,
+        granularity=granularity,
+        sub_domain=sub_domain,
+        account=account,
+    )
+
+    for level_name, conditions in levels:
+        stmt = (
+            select(FieldMappingTemplate)
+            .where(*conditions)
+            .order_by(
+                desc(FieldMappingTemplate.version),
+                _account_generic_first_order(),
+            )
+        )
+        result = await db.execute(stmt)
+        candidates = list(result.scalars().all())
+        if not candidates:
+            continue
+
+        template = _pick_by_sample_rows(candidates, sample_rows)
+        logger.debug(
+            f"[TemplateMatcher] 命中模板({level_name}): {template.template_name} "
+            f"(v{template.version}, {platform}/{data_domain}/"
+            f"{norm_sub_domain or 'None'}/{norm_granularity or 'None'}/"
+            f"{norm_account or 'None'})"
+        )
+        return TemplateFileResolution(
+            template=template,
+            level=level_name,
+            platform=platform,
+            data_domain=data_domain,
+            granularity=norm_granularity,
+            sub_domain=norm_sub_domain,
+            account=norm_account,
+        )
+
+    logger.info(
+        f"[TemplateMatcher] 未找到严格匹配模板(platform={platform}, domain={data_domain}, "
+        f"sub_domain={norm_sub_domain or 'None'}, granularity={norm_granularity or 'None'}, "
+        f"account={norm_account or 'None'})"
+    )
+    return TemplateFileResolution(
+        template=None,
+        level=None,
+        platform=platform,
+        data_domain=data_domain,
+        granularity=norm_granularity,
+        sub_domain=norm_sub_domain,
+        account=norm_account,
+    )
+
+
+def resolve_template_for_file_sync(
+    session,
+    *,
+    platform: str,
+    data_domain: str,
+    granularity: Optional[str] = None,
+    sub_domain: Optional[str] = None,
+    account: Optional[str] = None,
+    sample_rows: Optional[List[Dict[str, Any]]] = None,
+) -> TemplateFileResolution:
+    """同步会话版的唯一入口(采集落库登记链路)。
+
+    与 :func:`resolve_template_for_file` 使用**同一套**条件与降级规则,
+    保证「登记时记录的模板契约」与「入库时实际使用的模板」一致。
+    """
+    norm_granularity = normalize_dimension_value(granularity)
+    norm_sub_domain = normalize_dimension_value(sub_domain)
+    norm_account = normalize_dimension_value(account)
+
+    levels = build_template_match_levels(
+        platform=platform,
+        data_domain=data_domain,
+        granularity=granularity,
+        sub_domain=sub_domain,
+        account=account,
+    )
+
+    for level_name, conditions in levels:
+        stmt = (
+            select(FieldMappingTemplate)
+            .where(*conditions)
+            .order_by(
+                desc(FieldMappingTemplate.version),
+                _account_generic_first_order(),
+            )
+        )
+        candidates = list(session.execute(stmt).scalars().all())
+        if not candidates:
+            continue
+        template = _pick_by_sample_rows(candidates, sample_rows)
+        return TemplateFileResolution(
+            template=template,
+            level=level_name,
+            platform=platform,
+            data_domain=data_domain,
+            granularity=norm_granularity,
+            sub_domain=norm_sub_domain,
+            account=norm_account,
+        )
+
+    return TemplateFileResolution(
+        template=None,
+        level=None,
+        platform=platform,
+        data_domain=data_domain,
+        granularity=norm_granularity,
+        sub_domain=norm_sub_domain,
+        account=norm_account,
+    )
 
 
 def find_best_template_sync(
@@ -174,22 +417,15 @@ def find_best_template_sync(
     保证「登记时记录的模板契约」与「入库时实际使用的模板」一致。
     """
     try:
-        for _level, conditions in build_template_match_levels(
+        resolution = resolve_template_for_file_sync(
+            session,
             platform=platform,
             data_domain=data_domain,
             granularity=granularity,
             sub_domain=sub_domain,
             account=account,
-        ):
-            stmt = (
-                select(FieldMappingTemplate)
-                .where(*conditions)
-                .order_by(desc(FieldMappingTemplate.version))
-            )
-            template = session.execute(stmt).scalars().first()
-            if template:
-                return template
-        return None
+        )
+        return resolution.template
     except Exception as e:  # noqa: BLE001
         logger.error(f"[TemplateMatcher] 同步查找模板失败: {e}", exc_info=True)
         return None
@@ -304,7 +540,7 @@ class TemplateMatcher:
         }
 
     async def find_best_template(
-        self, 
+        self,
         platform: str,
         data_domain: str,
         granularity: str = None,
@@ -313,12 +549,15 @@ class TemplateMatcher:
     ) -> Optional[FieldMappingTemplate]:
         """
         查找最佳模板(v4.5.1增强版,v4.18.2异步支持)
-        
-        匹配策略(三级智能降级):
+
+        [*] 本方法只保留「取模板」的语义, 降级规则全部收敛到
+        :func:`resolve_template_for_file`(唯一入口) —— 入库判定 / 治理看板 /
+        家族投影三处必须用同一把尺子。
+
+        匹配策略(三级智能降级, 定义见 ``build_template_match_levels``):
         Level 0: 账号/地区专属模板(platform + data_domain + granularity + account)
         Level 1: 精确匹配(platform + data_domain + sub_domain + granularity)
         Level 2: 忽略sub_domain(向后兼容)
-        Level 3: 忽略granularity(最宽松)
 
         状态筛选:status = 'published'(只用已发布模板)
         版本选择:MAX(version)(最新版本)
@@ -336,61 +575,21 @@ class TemplateMatcher:
             FieldMappingTemplate对象 或 None
         """
         try:
-            norm_granularity = self._normalize_dimension(granularity)
-            norm_sub_domain = self._normalize_dimension(sub_domain)
-            norm_account = self._normalize_dimension(account)
-
-            # [*] 匹配条件集中在 build_template_match_levels, 与同步登记链路共用同一套规则
-            levels = build_template_match_levels(
+            resolution = await resolve_template_for_file(
+                self.db,
                 platform=platform,
                 data_domain=data_domain,
                 granularity=granularity,
                 sub_domain=sub_domain,
                 account=account,
             )
-
-            for level_name, conditions in levels:
-                stmt = (
-                    select(FieldMappingTemplate)
-                    .where(*conditions)
-                    .order_by(desc(FieldMappingTemplate.version))
+            if resolution.template is None:
+                logger.info(
+                    f"[TemplateMatcher] 未找到模板: {platform}/{data_domain}/"
+                    f"{resolution.sub_domain or 'ANY'}/{resolution.granularity or 'ANY'}"
                 )
-
-                # [*] v4.18.2:支持异步会话
-                result = await self.db.execute(stmt)
-                template = result.scalars().first()
-
-                if not template:
-                    continue
-
-                # [*] v4.19.5 优化:降低日志级别(INFO -> DEBUG),减少日志噪音
-                if level_name == MATCH_LEVEL_ACCOUNT_SCOPED:
-                    logger.debug(
-                        f"[Level 0] 账号专属模板: {template.template_name} "
-                        f"(v{template.version}, account={norm_account})"
-                    )
-                elif level_name == MATCH_LEVEL_EXACT:
-                    logger.debug(
-                        f"[Level 1] 精确匹配: {template.template_name} "
-                        f"(v{template.version}, {platform}/{data_domain}/{norm_sub_domain or 'None'}/{norm_granularity or 'None'})"
-                    )
-                else:
-                    logger.debug(
-                        f"[Level 2] 模糊匹配(忽略sub_domain): {template.template_name} "
-                        f"(v{template.version}, {platform}/{data_domain}/{norm_granularity or 'None'})"
-                    )
-                return template
-
-            # Level 3(已禁用):忽略granularity的宽松匹配会导致错误模板,直接返回None
-            logger.info(
-                f"[TemplateMatcher] 未找到严格匹配模板(platform={platform}, domain={data_domain}, "
-                f"sub_domain={norm_sub_domain or 'None'}, granularity={norm_granularity or 'None'})"
-            )
-            logger.info(
-                f"[TemplateMatcher] 未找到模板: {platform}/{data_domain}/{norm_sub_domain or 'ANY'}/{norm_granularity or 'ANY'}"
-            )
-            return None
-
+                return None
+            return resolution.template
         except Exception as e:
             logger.error(f"[TemplateMatcher] 查找模板失败: {e}", exc_info=True)
             return None
