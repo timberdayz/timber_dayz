@@ -953,6 +953,74 @@ export DEPLOY_REBUILD_VIEW_TARGETS="api.clearance_ranking_module api.sku_clearan
 python scripts/rebuild_views.py --target api.clearance_ranking_module
 ```
 
+### 3.9.9 v7.12.1 上线后的生产实测：**视图口径已修好，但生产仍返回 0 行**（数据侧缺口）
+
+v7.12.1（`5a254d65`）发版后，Phase 2.7 / 2.7b 在生产服务器上跑通：
+
+```
+[OK] rebuilt view definitions present: api.clearance_ranking_module
+[OK] Backend is healthy / Frontend responded / Nginx /health passed
+[OK] Deployment completed. Tags: Backend=v7.12.1, Frontend=v7.12.1
+```
+
+**线上第一层结论：视图定义确实换成了新版。**
+
+| 观测点 | 发版前 | 发版后 |
+| --- | --- | --- |
+| `GET /health` 的 `checks.dashboard.status` | `degraded` | **`ready`** |
+| `GET /api/dashboard/assets/status` 的 `assets_drift` | `true` | **`false`** |
+| 同上，`clearance_ranking` 模块状态 | `drift` | **`ready`** |
+| `GET /api/dashboard/clearance-ranking` 耗时 | — | **38~43s**（在跑新定义的复杂 join，不是秒回空） |
+
+**线上第二层结论：0 行不是口径问题，是生产缺少「距上次进货时长」这份数据。**
+
+生产 `GET /api/dashboard/business-overview/inventory-backlog` 返回：
+
+```json
+{"total_value":169752.01,"total_quantity":8412,
+ "deep_stagnant_row_count":0,"mid_stagnant_row_count":0,"active_row_count":0,
+ "unknown_restock_row_count":309,"top_products":[]}
+```
+
+`unknown_restock_row_count` 的定义是 `COUNT(*) FILTER (WHERE days_since_restock IS NULL)`
+（`sql/api_modules/inventory_backlog_summary_module.sql`）——
+统计的是**同一张** `mart.inventory_backlog_base`，
+而滞销榜视图的入选条件正是 `h.age_days >= 30`，
+其中 `age_days = COALESCE(b.days_since_restock, 0)`（`sql/api_modules/clearance_ranking_module.sql`）。
+
+⇒ 生产的 309 行积压**全部** `days_since_restock IS NULL` ⇒ `age_days = 0` ⇒ `>= 30` 一条都过不了 ⇒ 视图 0 行。
+
+本地对照（同一套 SQL）：
+
+| 指标 | 本地 | 生产 |
+| --- | --- | --- |
+| `mart.inventory_backlog_base` 行数 | 506 | 309 |
+| `days_since_restock IS NULL` | **0** | **309（全部）** |
+| `days_since_restock >= 30` | 409 | 0 |
+| `mart.inventory_state`（状态层）行数 | 1230 | 未填充 |
+
+**结论**：P7 的两处口径缺陷（sku_key 不对称、跨域平台 join）在生产已经修掉并生效；
+剩下的 0 行是**生产缺少库存状态层数据**——
+`mart.inventory_state` 没跑出 `stock_added_at`（距上次进货时长的来源），
+和 §3.9.6 记的「miaoshou 订单采集链路未跑」是同一类问题：**采集/状态层在生产没出数**，
+不是视图口径写错了。
+
+**⇒ 后续动作（在数据/运维侧，不在视图 SQL 里）**：
+
+1. 在生产服务器上跑通库存快照采集 → 状态层（`mart.inventory_state`）→ `mart.inventory_backlog_base`
+   的 `days_since_restock` 链路；
+2. 链路出数后，`api.clearance_ranking_module` 会**自动**出数（视图是实时的，不需要再重建）；
+3. **不要**为了「让它有数」去改 `age_days >= 30` 这个口径 —— 那会把没有库龄的行也算成滞销，
+   属于制造假数据。正确做法是把库龄数据补上。
+
+**⇒ 顺带暴露的一个口径脆弱点（值得记一笔）**：
+
+`COALESCE(b.days_since_restock, 0)` 把「取不到库龄」和「库龄是 0 天」**混成同一个值**，
+于是「数据缺失」被伪装成「都是新货」。同一个 NULL 也让 `inventory_backlog_summary` 的
+`active_sku_count`（`days_since_restock < 30`）把缺数据的行算成活跃 SKU。
+建议后续把「取不到」单独成一档（例如 `-1` 或独立的 `restock_tier = 'unknown'`），
+让「没有库龄」在数据上可见，而不是静默变成 0。
+
 ---
 
 ## 4. 建议的实施顺序
@@ -986,4 +1054,6 @@ python scripts/rebuild_views.py --target api.clearance_ranking_module
   但剩下的 22s 在**语义层**：`semantic.fact_orders_atomic` 对每一行都跑一次店铺别名解析
   （33265 次关联子查询）。真正的优化对象是那里，需另立专项评估对所有下游视图的影响面（§3.9.7）。
 - **⏸ 同根因的兄弟缺陷（未改）**：`api.sku_clearance_ranking_module.sold_units_30d` 恒为 0（它把订单平台限制成库存平台），改法与 §3.9 一致，但它会改变 SKU 级滞销清单的动销量与 DOS 定价输入 ⇒ 需业务确认后单独发版（§3.9.6）。
+- **⏸ v7.12.1 上线后的生产实测（2026-10-31）**：视图口径**已修好并生效**（`assets_drift=false`、模块 `ready`、新定义在跑 38~43s），但生产滞销榜**仍是 0 行** —— 根因是生产的 309 行积压**全部 `days_since_restock IS NULL`**（库存状态层 `mart.inventory_state` 没出数），被 `age_days >= 30` 全过滤掉。**这是采集/状态层的数据缺口，不是口径问题**；动作在数据侧补链路，不在视图 SQL 里改口径（§3.9.9）。
+- **⚠️ 口径脆弱点（待处理）**：`COALESCE(days_since_restock, 0)` 把「取不到库龄」和「库龄 0 天」混成同一个值 —— 数据缺失被伪装成「都是新货」，`inventory_backlog_summary` 的 `active_sku_count` 也会把缺数据的行算成活跃。建议把「取不到」单独成一档，让缺失在数据上可见（§3.9.9）。
 
