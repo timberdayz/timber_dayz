@@ -8,8 +8,23 @@ from typing import Any, Iterable
 from backend.services.semantic_field_registry import (
     get_semantic_field_meta,
     is_canonical_semantic_key,
+    is_confirmed_semantic_binding,
     normalize_semantic_key,
 )
+
+
+# 域级身份字段限制：某些语义键虽然在全局层面可以作为 hash 身份键，
+# 但在特定数据域里无法唯一标识一行，必须在"选择阶段"就拒绝。
+DOMAIN_BLOCKED_SEMANTIC_KEYS: dict[str, set[str]] = {
+    "inventory": {"product_name"},
+}
+
+DOMAIN_BLOCKED_REASON: dict[str, str] = {
+    "inventory": (
+        "inventory 域不接受 product_name 作为身份字段："
+        "商品名可能重名或改名，请改用 product_id / platform_sku。"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -107,6 +122,25 @@ class SemanticHashPolicyService:
 
         eligible = bool(meta.get("hash_eligible"))
         weak_identity = str(meta.get("identity_strength") or "").lower() == "weak"
+        warning = str(meta.get("hash_warning") or "") or None if weak_identity else None
+
+        domain_blocked = DOMAIN_BLOCKED_SEMANTIC_KEYS.get(domain, set())
+        if eligible and normalized in domain_blocked:
+            return SemanticHashOption(
+                semantic_key=normalized,
+                label=label,
+                kind=kind,
+                eligible=False,
+                recommended=False,
+                weak_identity=weak_identity,
+                legacy_compatible=False,
+                blocked_reason=DOMAIN_BLOCKED_REASON.get(
+                    domain, f"{domain} 域不接受 {label} 作为身份字段。"
+                ),
+                warning=warning,
+                raw_name=raw_name,
+            )
+
         return SemanticHashOption(
             semantic_key=normalized,
             label=label,
@@ -116,7 +150,7 @@ class SemanticHashPolicyService:
             weak_identity=weak_identity,
             legacy_compatible=False,
             blocked_reason=None if eligible else "This semantic field is not configured as a Data Hash identity field.",
-            warning=str(meta.get("hash_warning") or "") or None if weak_identity else None,
+            warning=warning,
             raw_name=raw_name,
         )
 
@@ -131,7 +165,7 @@ class SemanticHashPolicyService:
         options: list[dict[str, Any]] = []
         seen: set[str] = set()
         for binding in header_bindings or []:
-            if binding.get("semantic_review_status") != "confirmed_semantic":
+            if not is_confirmed_semantic_binding(binding):
                 continue
             semantic_key = normalize_semantic_key(binding.get("semantic_key"))
             if not semantic_key or semantic_key in seen:

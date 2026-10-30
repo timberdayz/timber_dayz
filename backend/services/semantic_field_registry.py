@@ -5,56 +5,6 @@ from typing import Any, Dict, Iterable, Optional
 from backend.services.currency_extractor import get_currency_extractor
 
 
-SEMANTIC_FIELD_ALIASES: dict[str, list[str]] = {
-    "order_id": ["order_id", "订单号", "订单编号", "order id"],
-    "product_id": ["product_id", "产品id", "商品id", "产品ID", "商品ID", "product id"],
-    "platform_sku": ["platform_sku", "平台sku", "平台 sku", "product_sku", "产品sku", "商品sku"],
-    "sku_id": ["sku_id", "sku id", "SKU ID", "SKU编号"],
-    "line_id": ["line_id", "order_line_id", "line id", "order line id"],
-    "service_id": ["service_id", "service id", "服务ID", "服务编号"],
-    "shop_id": ["shop_id", "店铺", "店铺ID", "shop id"],
-    "product_name": ["product_name", "item_name", "product name", "item name", "商品", "商品名", "商品名称", "产品名称"],
-    "item_status": ["item_status", "product_status", "listing_status", "item status", "product status", "发品状态", "商品状态"],
-    "gmv_band": ["gmv_band", "gmv band", "gmv range", "GMV区间", "GMV 区间"],
-    "warehouse_name": ["warehouse_name", "warehouse", "仓库", "仓库名称", "warehouse name"],
-    "metric_date": ["metric_date", "日期", "统计日期", "data_date", "date"],
-    "period_start_date": ["period_start_date", "开始日期", "周期开始日期"],
-    "period_end_date": ["period_end_date", "结束日期", "周期结束日期"],
-    "order_date": ["order_date", "下单日期", "订单日期", "下单时间"],
-    "gmv": ["gmv", "GMV"],
-    "sales_amount": ["sales_amount", "sales amount", "sales", "销售额", "销售金额"],
-    "sales_volume": ["sales_volume", "sales volume", "units sold", "销量", "销售数量"],
-    "order_count": ["order_count", "order count", "orders", "订单量", "订单数"],
-}
-
-SEMANTIC_FIELD_META: dict[str, dict[str, Any]] = {
-    "order_id": {"kind": "identity", "hash_eligible": True, "default_hash": True, "required": True},
-    "product_id": {"kind": "identity", "hash_eligible": True, "default_hash": True},
-    "platform_sku": {"kind": "identity", "hash_eligible": True, "default_hash": True},
-    "sku_id": {"kind": "identity", "hash_eligible": True, "default_hash": True},
-    "line_id": {"kind": "identity", "hash_eligible": True, "default_hash": True},
-    "service_id": {"kind": "identity", "hash_eligible": True, "default_hash": True},
-    "shop_id": {"kind": "identity", "hash_eligible": True, "default_hash": False, "system_scope": True},
-    "warehouse_name": {"kind": "dimension", "hash_eligible": True, "default_hash": True},
-    "gmv_band": {"kind": "dimension", "hash_eligible": True, "default_hash": False},
-    "metric_date": {"kind": "time", "hash_eligible": True, "default_hash": True},
-    "period_start_date": {"kind": "time", "hash_eligible": True, "default_hash": True},
-    "period_end_date": {"kind": "time", "hash_eligible": True, "default_hash": True},
-    "order_date": {"kind": "time", "hash_eligible": True, "default_hash": False},
-    "product_name": {
-        "kind": "dimension",
-        "hash_eligible": True,
-        "default_hash": False,
-        "identity_strength": "weak",
-        "hash_warning": "商品名可能重名或改名，优先使用商品 ID / SKU。",
-    },
-    "item_status": {"kind": "attribute", "hash_eligible": False, "default_hash": False},
-    "gmv": {"kind": "metric", "hash_eligible": False, "default_hash": False},
-    "sales_amount": {"kind": "metric", "hash_eligible": False, "default_hash": False},
-    "sales_volume": {"kind": "metric", "hash_eligible": False, "default_hash": False},
-    "order_count": {"kind": "metric", "hash_eligible": False, "default_hash": False},
-}
-
 SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
     "order_id": {
         "label": "订单号",
@@ -182,7 +132,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "label": "访客数",
         "kind": "metric",
         "domain": "analytics",
-        "hash_eligible": True,
+        "hash_eligible": False,
         "default_hash": False,
         "aliases": ["访客数", "visitors", "visitor count"],
     },
@@ -404,6 +354,11 @@ SEMANTIC_HASH_IDENTITY_KEYS = {
     key for key, meta in SEMANTIC_FIELD_META.items() if meta.get("hash_eligible")
 }
 
+# 语义复核状态取值
+REVIEW_STATUS_CONFIRMED_SEMANTIC = "confirmed_semantic"
+REVIEW_STATUS_CONFIRMED_NON_SEMANTIC = "confirmed_non_semantic"
+REVIEW_STATUS_PENDING = "pending"
+
 
 def normalize_semantic_key(value: Optional[str]) -> Optional[str]:
     text = str(value or "").strip()
@@ -431,17 +386,58 @@ def is_hash_identity_semantic_key(value: Optional[str]) -> bool:
     return bool(normalized) and normalized in SEMANTIC_HASH_IDENTITY_KEYS
 
 
+def resolve_binding_review_status(binding: Optional[Dict[str, Any]]) -> str:
+    """返回一条字段绑定的语义复核状态。
+
+    这是读写两侧判定"绑定是否已确认"的唯一来源，避免同一个绑定
+    在保存闸门、hash 闸门、读取展示三处得到不同结论。
+
+    规则：
+    - 显式带 ``semantic_review_status`` 时以它为准；
+    - 历史数据里没有该字段、但已经推断出 ``semantic_key`` 的绑定，
+      按迁移期兼容口径视为已确认；
+    - 其余情况一律视为待复核。
+    """
+    if not binding:
+        return REVIEW_STATUS_PENDING
+    status = str(binding.get("semantic_review_status") or "").strip()
+    if status:
+        return status
+    if normalize_semantic_key(binding.get("semantic_key")):
+        return REVIEW_STATUS_CONFIRMED_SEMANTIC
+    return REVIEW_STATUS_PENDING
+
+
+def is_confirmed_semantic_binding(binding: Optional[Dict[str, Any]]) -> bool:
+    return resolve_binding_review_status(binding) == REVIEW_STATUS_CONFIRMED_SEMANTIC
+
+
+def parse_rule_provided_semantic_keys(
+    field_parse_rules: Optional[Iterable[Dict[str, Any]]],
+) -> set[str]:
+    """解析规则能够提供数据来源的语义键集合。
+
+    只要存在一条解析规则产出该语义键，就认为它有数据来源，
+    因此不再要求它必须同时具备 confirmed 绑定。
+    """
+    provided: set[str] = set()
+    for rule in field_parse_rules or []:
+        if not isinstance(rule, dict):
+            continue
+        semantic_key = normalize_semantic_key(
+            rule.get("target_field") or rule.get("semantic_key") or rule.get("field")
+        )
+        if semantic_key and is_canonical_semantic_key(semantic_key):
+            provided.add(semantic_key)
+    return provided
+
+
 def get_semantic_field_meta(semantic_key: Optional[str]) -> dict[str, Any]:
     normalized = normalize_semantic_key(semantic_key)
     if not normalized:
         return {}
     meta = SEMANTIC_FIELD_META.get(normalized, {})
     return {"semantic_key": normalized, **meta} if meta else {}
-
-
-def is_hash_eligible_semantic_key(value: Optional[str]) -> bool:
-    normalized = normalize_semantic_key(value)
-    return bool(normalized) and bool(SEMANTIC_FIELD_META.get(normalized, {}).get("hash_eligible"))
 
 
 def infer_semantic_key(*values: Optional[str]) -> Optional[str]:

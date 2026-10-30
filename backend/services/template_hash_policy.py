@@ -6,9 +6,12 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Set
 
 from backend.services.semantic_field_registry import (
+    REVIEW_STATUS_CONFIRMED_SEMANTIC,
     is_canonical_semantic_key,
+    is_confirmed_semantic_binding,
     is_hash_identity_semantic_key,
     normalize_semantic_key,
+    parse_rule_provided_semantic_keys,
     resolve_semantic_value,
 )
 from backend.services.semantic_hash_policy_service import SemanticHashPolicyService
@@ -32,6 +35,7 @@ DATE_IDENTITY_KEYS = set(DATE_IDENTITY_KEY_ORDER)
 class HashPolicyResult:
     passed: bool
     blocking_errors: List[str] = field(default_factory=list)
+    blocking_messages: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     resolved_keys: List[str] = field(default_factory=list)
     requirement_groups: List[Dict[str, Any]] = field(default_factory=list)
@@ -44,6 +48,7 @@ class HashPolicyResult:
         return {
             "passed": self.passed,
             "blocking_errors": list(self.blocking_errors),
+            "blocking_messages": list(self.blocking_messages),
             "warnings": list(self.warnings),
             "resolved_keys": list(self.resolved_keys),
             "requirement_groups": [dict(group) for group in self.requirement_groups],
@@ -56,7 +61,6 @@ class HashPolicyResult:
 
 class TemplateHashPolicyService:
     PRODUCT_REQUIRED_IDENTITY_KEYS = ["product_id"]
-    PRODUCT_OPTIONAL_IDENTITY_KEYS = ["platform_sku", "sku_id", "product_name"]
     PRODUCT_STRONG_IDENTITY_KEYS = ["product_id", "platform_sku", "sku_id"]
     PRODUCT_IDENTITY_KEYS = [*PRODUCT_STRONG_IDENTITY_KEYS]
     PRODUCT_DAILY_DATE_KEYS = ["metric_date"]
@@ -89,7 +93,9 @@ class TemplateHashPolicyService:
         auto_date_sources = self._auto_date_identity_sources(field_parse_rules)
         auto_date_keys = set(auto_date_sources)
         resolved_keys.update(auto_date_keys)
-        derived_sources = self._derived_selected_sources(deduplication_fields, field_parse_rules)
+        derived_sources = self._file_companion_date_sources(
+            deduplication_fields, field_parse_rules
+        )
         derived_keys = set(derived_sources)
         invalid_keys = sorted(
             self._invalid_deduplication_keys(
@@ -103,6 +109,7 @@ class TemplateHashPolicyService:
         )
 
         errors: List[str] = []
+        messages: List[str] = []
         warnings: List[str] = []
         requirement_groups: List[Dict[str, Any]] = []
 
@@ -110,6 +117,9 @@ class TemplateHashPolicyService:
             errors.append(
                 "deduplication_fields must be confirmed semantic keys: "
                 + ", ".join(invalid_keys)
+            )
+            messages.append(
+                "去重字段必须是对应的语义键（需已确认映射）：" + "、".join(invalid_keys)
             )
 
         def add_any_group(
@@ -132,10 +142,12 @@ class TemplateHashPolicyService:
                 "missing_keys": [] if passed else list(accepted_keys),
                 "passed": passed,
                 "message": message,
+                "legacy_error": legacy_error,
             }
             requirement_groups.append(group)
             if not passed:
                 errors.append(legacy_error or message)
+                messages.append(message)
 
         def add_all_group(
             *,
@@ -158,10 +170,12 @@ class TemplateHashPolicyService:
                 "missing_keys": missing_keys,
                 "passed": passed,
                 "message": message,
+                "legacy_error": legacy_error,
             }
             requirement_groups.append(group)
             if not passed:
                 errors.append(legacy_error or message)
+                messages.append(message)
 
         if domain == "products" and grain == "daily":
             add_any_group(
@@ -207,6 +221,7 @@ class TemplateHashPolicyService:
                         "missing_keys": [],
                         "passed": True,
                         "message": f"products {grain} uses metric_date as period identity.",
+                        "legacy_error": None,
                     }
                 )
             else:
@@ -319,6 +334,7 @@ class TemplateHashPolicyService:
         return HashPolicyResult(
             passed=not errors,
             blocking_errors=errors,
+            blocking_messages=messages,
             warnings=warnings,
             resolved_keys=sorted(resolved_keys),
             requirement_groups=requirement_groups,
@@ -348,18 +364,17 @@ class TemplateHashPolicyService:
                 keys.add(str(semantic_key))
         return keys
 
-    def _derived_selected_keys(
-        self,
-        deduplication_fields: Iterable[str],
-        field_parse_rules: Iterable[Dict[str, Any]],
-    ) -> Set[str]:
-        return set(self._derived_selected_sources(deduplication_fields, field_parse_rules))
-
-    def _derived_selected_sources(
+    def _file_companion_date_sources(
         self,
         deduplication_fields: Iterable[str],
         field_parse_rules: Iterable[Dict[str, Any]],
     ) -> Dict[str, str]:
+        """文件伴生日期派生的语义键。
+
+        只有来源列是 ``__file_date_from__`` / ``__file_date_to__`` 的解析规则才算：
+        这类日期来自文件名而不是行内数据，同一文件内所有行取值相同，
+        因此只能作为"周期标识"，不能作为区分行的身份键。
+        """
         selected_keys = {
             semantic_key
             for semantic_key in (normalize_semantic_key(field) for field in deduplication_fields or [])
@@ -372,6 +387,13 @@ class TemplateHashPolicyService:
             if semantic_key in selected_keys and source_column in FILE_DATE_SOURCE_COLUMNS:
                 derived_sources[semantic_key] = source_column
         return derived_sources
+
+    def _parse_rule_provided_keys(
+        self,
+        field_parse_rules: Iterable[Dict[str, Any]],
+    ) -> Set[str]:
+        """解析规则能够提供数据来源的语义键（见 registry 的同名共享实现）。"""
+        return parse_rule_provided_semantic_keys(field_parse_rules)
 
     def _auto_date_identity_sources(
         self,
@@ -408,17 +430,10 @@ class TemplateHashPolicyService:
         confirmed_semantic_keys = {
             normalize_semantic_key(binding.get("semantic_key"))
             for binding in header_bindings or []
-            if binding.get("semantic_review_status") == "confirmed_semantic"
+            if is_confirmed_semantic_binding(binding)
         }
         confirmed_semantic_keys = {key for key in confirmed_semantic_keys if key}
-        derived_semantic_keys = {
-            semantic_key
-            for semantic_key in (
-                normalize_semantic_key(rule.get("target_field") or rule.get("semantic_key") or rule.get("field"))
-                for rule in field_parse_rules or []
-            )
-            if semantic_key and is_canonical_semantic_key(semantic_key)
-        }
+        derived_semantic_keys = self._parse_rule_provided_keys(field_parse_rules)
 
         invalid: Set[str] = set()
         for field in deduplication_fields or []:
@@ -510,7 +525,7 @@ class TemplateHashPolicyService:
         confirmed_keys = {
             normalize_semantic_key(binding.get("semantic_key"))
             for binding in header_bindings or []
-            if binding.get("semantic_review_status") == "confirmed_semantic"
+            if is_confirmed_semantic_binding(binding)
         }
         confirmed_keys = {key for key in confirmed_keys if key}
         warnings: List[str] = []
@@ -641,7 +656,7 @@ class TemplateHashPolicyService:
         confirmed_hour_keys = []
         seen: Set[str] = set()
         for binding in header_bindings or []:
-            if binding.get("semantic_review_status") != "confirmed_semantic":
+            if not is_confirmed_semantic_binding(binding):
                 continue
             semantic_key = normalize_semantic_key(binding.get("semantic_key"))
             if semantic_key not in HOUR_IDENTITY_KEYS or semantic_key in selected or semantic_key in seen:

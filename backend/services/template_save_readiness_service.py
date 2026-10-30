@@ -4,10 +4,18 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List
 
 from backend.services.semantic_field_registry import (
+    REVIEW_STATUS_CONFIRMED_NON_SEMANTIC,
     is_canonical_semantic_key,
+    is_confirmed_semantic_binding,
     normalize_semantic_key,
+    parse_rule_provided_semantic_keys,
+    resolve_binding_review_status,
 )
-from backend.services.template_hash_policy import HashPolicyResult, TemplateHashPolicyService
+from backend.services.template_hash_policy import (
+    SYSTEM_SCOPE_FIELD_SET,
+    HashPolicyResult,
+    TemplateHashPolicyService,
+)
 from backend.services.semantic_hash_policy_service import SemanticHashPolicyService
 
 
@@ -23,6 +31,7 @@ class TemplateSaveReadinessResult:
     normalized_header_bindings: List[Dict[str, Any]]
     hash_policy: HashPolicyResult
     blocking_errors: List[str]
+    blocking_messages: List[str]
     warnings: List[str]
     unresolved_deduplication_fields: List[str]
     hash_options: List[Dict[str, Any]]
@@ -34,6 +43,7 @@ class TemplateSaveReadinessResult:
                 "passed": self.can_save,
                 "can_save": self.can_save,
                 "blocking_errors": list(self.blocking_errors),
+                "blocking_messages": list(self.blocking_messages),
                 "warnings": list(self.warnings),
                 "normalized_deduplication_fields": list(self.normalized_deduplication_fields),
                 "normalized_header_bindings": [dict(binding) for binding in self.normalized_header_bindings],
@@ -94,14 +104,7 @@ def validate_deduplication_fields_against_bindings(
         )
         if semantic_key:
             bindings_by_semantic.setdefault(semantic_key, []).append(binding)
-    derived_semantic_keys = {
-        semantic_key
-        for semantic_key in (
-            normalize_semantic_key(rule.get("target_field") or rule.get("semantic_key") or rule.get("field"))
-            for rule in (field_parse_rules or [])
-        )
-        if semantic_key and is_canonical_semantic_key(semantic_key)
-    }
+    derived_semantic_keys = parse_rule_provided_semantic_keys(field_parse_rules)
 
     header_lookup = {str(column).strip().lower() for column in header_columns}
     invalid_fields: list[str] = []
@@ -111,11 +114,15 @@ def validate_deduplication_fields_against_bindings(
         field_text = str(field).strip()
         field_key = field_text.lower()
         normalized_key = normalize_semantic_key(field_text)
+        # 系统范围字段由后端自动追加到 hash，不需要用户确认映射，
+        # 与 hash 闸门（template_hash_policy）保持同一口径。
+        if normalized_key and normalized_key in SYSTEM_SCOPE_FIELD_SET:
+            continue
         raw_binding = binding_by_raw.get(field_key)
         semantic_bindings = bindings_by_semantic.get(normalized_key or "", [])
         candidate_bindings = [binding for binding in [raw_binding, *semantic_bindings] if binding]
         for binding in candidate_bindings:
-            if binding.get("semantic_review_status") == "confirmed_non_semantic":
+            if resolve_binding_review_status(binding) == REVIEW_STATUS_CONFIRMED_NON_SEMANTIC:
                 raw_name = str(binding.get("raw_name") or field_text).strip()
                 if raw_name and raw_name not in non_semantic_diagnostics:
                     non_semantic_diagnostics.append(raw_name)
@@ -123,7 +130,7 @@ def validate_deduplication_fields_against_bindings(
         confirmed_semantic_bindings = [
             binding
             for binding in semantic_bindings
-            if binding.get("semantic_review_status") == "confirmed_semantic"
+            if is_confirmed_semantic_binding(binding)
         ]
         if normalized_key and is_canonical_semantic_key(normalized_key) and confirmed_semantic_bindings:
             continue
@@ -137,7 +144,7 @@ def validate_deduplication_fields_against_bindings(
         if (
             field_key in header_lookup
             and raw_binding
-            and raw_binding.get("semantic_review_status") == "confirmed_semantic"
+            and is_confirmed_semantic_binding(raw_binding)
             and raw_semantic_key
             and is_canonical_semantic_key(raw_semantic_key)
         ):
@@ -168,7 +175,7 @@ def sync_hash_participation_from_deduplication_fields(
     for binding in header_bindings or []:
         next_binding = dict(binding)
         semantic_key = normalize_semantic_key(next_binding.get("semantic_key"))
-        if next_binding.get("semantic_review_status") != "confirmed_semantic" or not semantic_key:
+        if not is_confirmed_semantic_binding(next_binding) or not semantic_key:
             next_binding["hash_participates"] = False
         else:
             next_binding["hash_participates"] = semantic_key in selected_hash_keys
@@ -237,6 +244,13 @@ class TemplateSaveReadinessService:
             sample_rows=sample_rows,
         )
         blocking_errors = [*binding_errors, *list(hash_policy.blocking_errors)]
+        blocking_messages: list[str] = []
+        if unresolved_deduplication_fields:
+            blocking_messages.append(
+                "去重字段无法解析到已确认的语义映射，请先确认映射："
+                + "、".join(unresolved_deduplication_fields)
+            )
+        blocking_messages.extend(list(hash_policy.blocking_messages))
         warnings = list(hash_policy.warnings)
         can_save = not blocking_errors and hash_policy.passed
         return TemplateSaveReadinessResult(
@@ -245,6 +259,7 @@ class TemplateSaveReadinessService:
             normalized_header_bindings=normalized_header_bindings,
             hash_policy=hash_policy,
             blocking_errors=blocking_errors,
+            blocking_messages=blocking_messages,
             warnings=warnings,
             unresolved_deduplication_fields=unresolved_deduplication_fields,
             hash_options=hash_options,
