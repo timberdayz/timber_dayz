@@ -3,7 +3,7 @@
 > 状态：**第 1~4 批已全部落地并提交（本地，未 push）**；历史数据修复**脚本已交付但未执行**。
 > 审查范围：`backend/services/{template_hash_policy, semantic_hash_policy_service, semantic_field_registry, template_save_readiness_service, field_mapping_template_service, template_family_service, template_semantic_binding_backfill}.py`、`backend/domains/data_platform/routers/field_mapping_templates.py`、`frontend/src/components/dataSync/{TemplateUpdateWorkbenchDrawer,TemplateDeduplicationReviewPanel}.vue`、`frontend/src/domains/data_platform/utils/{deduplicationSelection,headerBindings}.js`
 > 取证方式：真实库只读查询 + 真实 HTTP 接口重放 + node 直跑前端真实模块 + 后端日志还原用户操作序列。全部结论标注了 `文件:行号`。
-> 交付提交：`3367d211`（第 1 批 前端止漏）、`f26248f0`（第 2 批 后端口径归一）、`b1b34dfe`（数据修复脚本）、`482705d6`（第 3 批 状态机与家族校验）、`f2b09f5c`（第 4 批 环境与可观测）、`4cf795a1`（数据修复脚本增强 + 真实库执行）。
+> 交付提交：`3367d211`（第 1 批 前端止漏）、`f26248f0`（第 2 批 后端口径归一）、`b1b34dfe`（数据修复脚本）、`482705d6`（第 3 批 状态机与家族校验）、`f2b09f5c`（第 4 批 环境与可观测）、`4cf795a1`（数据修复脚本增强 + 真实库执行）、`c5d77f71`（前端守卫测试路径约定修复，见 §3.3）。
 
 ---
 
@@ -330,6 +330,49 @@
 - **`data_hash` 重算**：仍未做（理由见 §3.1 末尾）。事实表里"同一业务键对应多个 `data_hash`"的冗余**依然存在**（`fact_shopee_orders_monthly` 26627 行 / 2807 组 / 5261 冗余行等），需要配套的合并/清理决策与回滚方案。
 - **事实表合并/清理**：未做。
 - **新增索引**：见 §5「待确认」，`b_class.fact_*` 的 `(platform_code, shop_id, <业务键>)` 唯一索引建议**未建**（需先清理冗余行）。
+
+---
+
+## 3.3 验证缺口：采集同步模块的前端守卫一直是「哑测试」（2026-10-30 发现并修复）
+
+### 3.3.1 问题
+
+标准前端跑法是 `cd frontend` 后 `node --test "scripts/**/*.test.mjs" "tests/**/*.test.mjs"`。但 `frontend/scripts/` 目录内部**混用了两套 cwd 约定**：
+
+| 约定 | 数量 | 解析结果 |
+|------|------|---------|
+| 按 `frontend/` 目录解析（`src/...`） | 13 个 | ✅ 正确 |
+| 按**仓库根**解析（`frontend/src/...`） | **4 个** | ❌ 在 `cd frontend` 下解析成 `frontend/frontend/src/...` ⇒ `readFileSync` **ENOENT 崩溃** |
+
+⇒ 那 4 个文件**在断言执行之前就崩了**，断言从未运行过。它们长期显示为"失败"，但既不是功能缺陷、也不是断言不通过，而是**读不到文件**。
+
+**后果**：`dataSyncTasksHeaderChangeUi` / `dataSyncTemplateSaveApiNaming` / `frontPagePermissionAudit` 这 3 个**采集同步模块自己的守卫**，长期是哑的 ⇒ **第 1 批前端止漏与第 3 批契约显式化实际上没有有效守卫**，"失败集合零新增"这个结论对它们**不成立**。
+
+### 3.3.2 修复
+
+统一到目录内主流约定（`frontend/` 目录解析 `src/...`）：
+
+| 文件 | 原约定 | 现约定 |
+|------|-------|-------|
+| `frontend/scripts/businessOverviewKpiGranularity.test.mjs` | `resolve(cwd,'frontend')` | `resolve(cwd)` |
+| `frontend/scripts/dataSyncTasksHeaderChangeUi.test.mjs` | `resolve(cwd,'frontend/src/…')` | `resolve(cwd,'src/…')` |
+| `frontend/scripts/dataSyncTemplateSaveApiNaming.test.mjs` | `resolve(projectRoot,'frontend/src/api/index.js')` | `resolve(projectRoot,'src/api/index.js')` |
+| `frontend/scripts/frontPagePermissionAudit.test.mjs` | `path.resolve('frontend/src/router/index.js')` + `path.resolve('frontend/src/config/rolePermissions.js')` | 去掉 `frontend/` 前缀（**两处**） |
+
+另修 `frontend/tests/hrShopCommissionConfigApi.test.mjs`：引用的是迁移前旧路径 `src/views/hr/ShopAssignment.vue`，实际已迁到 `src/domains/business/views/hr/ShopAssignment.vue`。
+
+### 3.3.3 修复后的结果（**这条最重要**）
+
+前端全量失败数 **16 → 11，零新增**，5 个假失败消除。这 4 个文件**恢复为真正执行断言后全部通过** ⇒ **被它们守卫的契约本来就成立**，第 1 批 / 第 3 批的前端改动**确实有守卫且确实通过**。
+
+其中 `dataSyncCleanupUi.test.mjs` 的 4 个采集同步核心用例全部通过：
+
+- `template update workbench uses backend hash options for Data Hash choices`（第 1 批 1.10 后端优先）
+- `template update workbench auto-selects newly confirmed strong hash identities`（第 1 批 1.7）
+- `template hash panel merges backend options with edited bindings`（第 1 批 1.4）
+- `template save errors explain family hash semantic key changes`（第 3 批契约显式化）
+
+⚠️ 修复后 `frontPagePermissionAudit` **新暴露 1 个真实用例失败**：`active routes do not declare roles without matching permissions`（路由声明了没有对应权限的 `roles`）。这是**权限契约问题**，属路由/权限模块，不在本次采集同步改造范围，已记录。
 
 ---
 
