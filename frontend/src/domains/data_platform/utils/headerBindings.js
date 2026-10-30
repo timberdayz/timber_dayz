@@ -500,6 +500,42 @@ function inferSemanticKey(...values) {
   return null
 }
 
+/**
+ * 域限定的「列名 → 语义键」映射。
+ *
+ * 与后端 `semantic_field_registry.DOMAIN_COLUMN_SEMANTIC_OVERRIDES` 保持一致。
+ * 不能写进全局别名表：同一个列名在不同数据域含义不同（`ID` 在 products 域是商品 ID），
+ * 放进全局表会造成跨域污染。
+ */
+export const DOMAIN_COLUMN_SEMANTIC_OVERRIDES = {
+  products: {
+    商品编号: 'product_id',
+    '商品 id': 'product_id',
+    id: 'product_id',
+    规格编号: 'sku_id',
+  },
+  services: {
+    客服id: 'service_id',
+    客服编号: 'service_id',
+  },
+  inventory: {
+    '*商品sku': 'platform_sku',
+    '*商品名称': 'product_name',
+  },
+}
+
+function inferSemanticKeyForDomain(dataDomain, ...values) {
+  const domain = String(dataDomain || '').trim().toLowerCase()
+  const overrides = DOMAIN_COLUMN_SEMANTIC_OVERRIDES[domain] || {}
+  for (const rawValue of values) {
+    const value = String(rawValue ?? '').trim().toLowerCase()
+    if (!value) continue
+    const target = overrides[value]
+    if (target && SEMANTIC_FIELD_META[target]) return target
+  }
+  return inferSemanticKey(...values)
+}
+
 function semanticRequirements(semanticKey) {
   const meta = getSemanticFieldMeta(semanticKey)
   return {
@@ -535,6 +571,7 @@ function looksLikeNumberValue(rawValue) {
 export function inferHeaderBindings({
   headerColumns = [],
   sampleData = {},
+  dataDomain = '',
 } = {}) {
   return (Array.isArray(headerColumns) ? headerColumns : []).map((rawName, position) => {
     const sampleValue = sampleData?.[rawName]
@@ -560,7 +597,7 @@ export function inferHeaderBindings({
       aliases = ['日期', '统计日期']
     }
 
-    semanticKey = semanticKey || inferSemanticKey(rawName, displayName, ...aliases)
+    semanticKey = semanticKey || inferSemanticKeyForDomain(dataDomain, rawName, displayName, ...aliases)
     const meta = semanticKey ? getSemanticFieldMeta(semanticKey) : null
     if (meta?.aliases?.length) {
       aliases = Array.from(new Set([...aliases, ...meta.aliases]))

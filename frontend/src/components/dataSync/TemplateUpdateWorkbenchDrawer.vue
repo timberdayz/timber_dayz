@@ -535,14 +535,28 @@ const fallbackFileId = computed(() => props.context?.row?.sample_file_id ?? null
 const currentFileId = computed(() => workbenchContext.value?.current_file?.id ?? fallbackFileId.value)
 const showHeaderRowControl = computed(() => updateMode.value !== 'core-only' && !!currentFileId.value)
 
-const PRODUCTS_STRONG_IDENTITY_KEYS = new Set(['product_id'])
+// 各数据域**必需**的身份键。
+//
+// 为什么只列这几个
+// ----------------
+// 后端 hash 闸门对不同域有不同的必需身份键（见 template_hash_policy.py）：
+//   - products 域必须能定位到 product_id；
+//   - orders 域必须能定位到 order_id（否则同一订单的不同行会互相覆盖）；
+//   - services 域必须能定位到 service_id。
+// 这些键一旦在源文件里被认出来，就应当**自动**进入去重字段，
+// 否则会出现「文件里明明有订单号，模板却没选它 ⇒ 保存被闸门拦下」的荒唐状态。
+//
+// 只在**绑定已确认为该语义键**时才会被补进来（见 mergeRecommendedIdentityFields），
+// 所以不会把认不出来的列硬塞进 hash。
+const DOMAIN_REQUIRED_IDENTITY_KEYS = {
+  products: ['product_id'],
+  orders: ['order_id'],
+  services: ['service_id'],
+}
 
 const recommendedStrongIdentityKeys = computed(() => {
   const domain = String(templateContext.value?.data_domain || props.template?.data_domain || props.template?.domain || '').trim().toLowerCase()
-  if (domain === 'products') {
-    return PRODUCTS_STRONG_IDENTITY_KEYS
-  }
-  return new Set()
+  return new Set(DOMAIN_REQUIRED_IDENTITY_KEYS[domain] || [])
 })
 
 function isRecommendedStrongIdentityKey(semanticKey) {

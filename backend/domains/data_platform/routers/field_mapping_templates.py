@@ -66,7 +66,7 @@ from backend.services.semantic_field_registry import (
     REVIEW_STATUS_CONFIRMED_SEMANTIC,
     get_semantic_aliases,
     get_semantic_requirements,
-    infer_semantic_key,
+    infer_semantic_key_for_domain,
     is_canonical_semantic_key,
     normalize_semantic_key,
     resolve_binding_review_status,
@@ -424,7 +424,12 @@ async def _load_file_update_preview(
             "sub_domain": catalog_file.sub_domain,
         },
         "header_columns": header_columns,
-        "header_bindings": _normalize_header_bindings(None, header_columns, sample_data),
+        "header_bindings": _normalize_header_bindings(
+            None,
+            header_columns,
+            sample_data,
+            data_domain=catalog_file.data_domain,
+        ),
         "sample_data": sample_data,
         "preview_data": df.head(20).to_dict("records"),
     }
@@ -476,7 +481,12 @@ async def _load_file_update_summary(
             "sub_domain": catalog_file.sub_domain,
         },
         "header_columns": header_columns,
-        "header_bindings": _normalize_header_bindings(None, header_columns, sample_data),
+        "header_bindings": _normalize_header_bindings(
+            None,
+            header_columns,
+            sample_data,
+            data_domain=catalog_file.data_domain,
+        ),
     }
 
 
@@ -707,7 +717,15 @@ def _normalize_header_bindings(
     request_bindings: list[Any] | None,
     header_columns: list[str],
     sample_data: dict[str, Any] | None,
+    data_domain: str | None = None,
 ) -> list[dict[str, Any]]:
+    """把请求里的字段绑定归一化成统一结构。
+
+    ``data_domain`` 传入后，列名 → 语义键的推断会走**域限定**的列名表
+    （见 ``semantic_field_registry.DOMAIN_COLUMN_SEMANTIC_OVERRIDES``），
+    这样 ``商品编号`` / ``ID`` / ``客服ID`` 这类真实表头能被认出来，
+    而不会把「同名列不同含义」污染到别的数据域。
+    """
     sample_data = sample_data or {}
     requested_by_raw: dict[str, dict[str, Any]] = {}
     for binding in request_bindings or []:
@@ -742,13 +760,19 @@ def _normalize_header_bindings(
         semantic_key = requested.get("semantic_key")
         semantic_role = requested.get("semantic_role")
         aliases = [str(alias).strip() for alias in requested.get("aliases", []) if str(alias).strip()]
-        inferred_semantic_key = infer_semantic_key(
-            semantic_key,
-            semantic_role,
-            display_name,
-            raw_name,
-            *aliases,
-        )
+        # 请求里显式带了的语义键优先（用户已经选过）；
+        # 没带时按数据域推断列名，域内没命中再回落到全局别名表。
+        requested_semantic_key = normalize_semantic_key(semantic_key)
+        if requested_semantic_key and is_canonical_semantic_key(requested_semantic_key):
+            inferred_semantic_key = requested_semantic_key
+        else:
+            inferred_semantic_key = infer_semantic_key_for_domain(
+                data_domain,
+                semantic_role,
+                display_name,
+                raw_name,
+                *aliases,
+            )
         semantic_requirements = get_semantic_requirements(inferred_semantic_key)
         requested_review_status = str(requested.get("semantic_review_status") or "").strip()
         if requested_review_status not in {
@@ -1257,6 +1281,7 @@ async def preview_template_hash_policy(
         request.header_bindings,
         preview_header_columns,
         {},
+        data_domain=request.data_domain,
     )
     field_parse_rules = _enrich_field_parse_rules(
         _normalize_field_parse_rules(request.field_parse_rules),
@@ -1315,6 +1340,7 @@ async def save_mapping_template(
             request.header_bindings,
             header_columns,
             request.sample_data,
+            data_domain=request.data_domain,
         )
         header_bindings = _apply_mapping_semantics_to_header_bindings(
             header_bindings,
@@ -1648,6 +1674,7 @@ async def get_template_update_context(
             template.header_bindings,
             template_header_columns,
             {},
+            data_domain=template.data_domain,
         )
         required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
             template_deduplication_fields,
@@ -1763,6 +1790,7 @@ async def get_template_update_context(
                 file_summary.get("header_bindings", []),
                 current_header_columns,
                 {},
+                data_domain=template.data_domain,
             )
             matcher = get_template_matcher(db)
             header_changes = await matcher.detect_header_changes(
@@ -1931,6 +1959,7 @@ async def get_template_update_bindings(
             file_preview.get("header_bindings", []),
             file_preview.get("header_columns", []),
             file_preview.get("sample_data", {}),
+            data_domain=template.data_domain,
         )
         required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
             template.deduplication_fields or [],

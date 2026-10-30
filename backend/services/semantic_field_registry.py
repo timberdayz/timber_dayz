@@ -350,6 +350,48 @@ SEMANTIC_FIELD_META = {
     for key, definition in SEMANTIC_FIELD_DEFINITIONS.items()
 }
 
+
+# 域限定的「列名 → 语义键」映射。
+#
+# 为什么不能写进全局别名表
+# ----------------------
+# 全局别名表对所有数据域一视同仁，但同一个列名在不同域含义不同：
+#   - ``ID`` 在 products 域是商品 ID，放到全局表会让别的域的 ``ID`` 也被当成商品身份；
+#   - ``客服ID`` 在 services 域是客服（服务人员）ID，在别的域不是。
+# 写进全局表 = 跨域污染，别的域的同名列被误提升成语义身份。
+#
+# 为什么这样做是安全的
+# ------------------
+# 1. 只在**对应数据域内**生效，别的域完全不受影响；
+# 2. 命中结果只标记 ``semantic_review_source=inferred``（系统按列名推断，不是用户确认），
+#    家族 hash 一致性比较仍然只认用户确认过的绑定
+#    （见 ``field_mapping_templates._binding_lookup_by_source``），
+#    所以第 3 批修掉的「假一致」不会被重新制造出来。
+#
+# 表里的列名全部来自真实源文件的表头（catalog 文件的 header_columns），
+# 不做猜测性扩展；拿不准含义的列（状态类、名称类、货号类）一律不映射。
+DOMAIN_COLUMN_SEMANTIC_OVERRIDES: Dict[str, Dict[str, str]] = {
+    "products": {
+        # Shopee 商品维度导出：商品编号 = Item ID
+        "商品编号": "product_id",
+        # TikTok 商品维度导出：商品 ID / ID
+        "商品 id": "product_id",
+        "id": "product_id",
+        # Shopee 商品维度导出：规格编号 = 规格(SKU) ID
+        "规格编号": "sku_id",
+    },
+    "services": {
+        # 客服维度报表：客服ID = 服务人员 ID
+        "客服id": "service_id",
+        "客服编号": "service_id",
+    },
+    "inventory": {
+        # 妙手库存导出：带 * 的是必填列
+        "*商品sku": "platform_sku",
+        "*商品名称": "product_name",
+    },
+}
+
 SEMANTIC_HASH_IDENTITY_KEYS = {
     key for key, meta in SEMANTIC_FIELD_META.items() if meta.get("hash_eligible")
 }
@@ -456,6 +498,31 @@ def infer_semantic_key(*values: Optional[str]) -> Optional[str]:
         if normalized in SEMANTIC_FIELD_ALIASES:
             return normalized
     return None
+
+
+def infer_semantic_key_for_domain(
+    data_domain: Optional[str],
+    *values: Optional[str],
+) -> Optional[str]:
+    """按数据域推断列名对应的语义键。
+
+    先查**域限定**的列名表（:data:`DOMAIN_COLUMN_SEMANTIC_OVERRIDES`），
+    域内没有命中时回落到全局别名表。
+
+    这样既能让 ``商品编号`` / ``ID`` / ``客服ID`` 这类真实表头被认出来，
+    又不会把「同名列不同含义」污染到别的数据域。
+    """
+    domain = str(data_domain or "").strip().lower()
+    overrides = DOMAIN_COLUMN_SEMANTIC_OVERRIDES.get(domain, {})
+    if overrides:
+        for value in values:
+            text = str(value or "").strip().lower()
+            if not text:
+                continue
+            target = overrides.get(text)
+            if target and is_canonical_semantic_key(target):
+                return target
+    return infer_semantic_key(*values)
 
 
 def get_semantic_aliases(semantic_key: Optional[str]) -> list[str]:

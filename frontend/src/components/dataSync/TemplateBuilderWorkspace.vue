@@ -459,8 +459,13 @@ watch(
 )
 
 watch(
-  [() => props.headerBindings, () => props.headerColumns, sampleDataLookup],
-  ([bindings, headerColumns, sampleLookup]) => {
+  [
+    () => props.headerBindings,
+    () => props.headerColumns,
+    sampleDataLookup,
+    () => props.fileFilters?.domain,
+  ],
+  ([bindings, headerColumns, sampleLookup, dataDomain]) => {
     if (Array.isArray(bindings) && bindings.length > 0) {
       localHeaderBindings.value = bindings.map(item => ({ ...item }))
       return
@@ -468,6 +473,7 @@ watch(
     localHeaderBindings.value = inferHeaderBindings({
       headerColumns,
       sampleData: sampleLookup,
+      dataDomain,
     })
   },
   { immediate: true, deep: true }

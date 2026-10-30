@@ -756,6 +756,7 @@ const handlePreview = async () => {
       headerBindings.value = data.header_bindings || inferHeaderBindings({
         headerColumns: data.header_columns || [],
         sampleData: data.sample_data || {},
+        dataDomain: fileFilters.value.domain,
       })
       ElMessage.success('预览成功')
     }
@@ -902,6 +903,7 @@ const handleWorkbenchSave = async ({
         : inferHeaderBindings({
             headerColumns: currentHeaderColumns,
             sampleData: currentSampleData,
+            dataDomain: templateDataDomain,
           })
     const hashPolicyPassed = await ensureHashPolicyPreviewPassed({
       dataDomain: templateDataDomain,
@@ -988,6 +990,7 @@ const handleSaveVariant = async () => {
         : inferHeaderBindings({
             headerColumns: headerColumns.value,
             sampleData: sampleData.value,
+            dataDomain: family.data_domain,
           })
     const hashPolicyPassed = await ensureHashPolicyPreviewPassed({
       dataDomain: family.data_domain,
@@ -1061,6 +1064,7 @@ const handleSaveTemplate = async () => {
         : inferHeaderBindings({
             headerColumns: headerColumns.value,
             sampleData: sampleData.value,
+            dataDomain: fileFilters.value.domain,
           })
     const hashPolicyPassed = await ensureHashPolicyPreviewPassed({
       dataDomain: fileFilters.value.domain,
