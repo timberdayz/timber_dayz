@@ -294,7 +294,19 @@ function mergeHashOptionsWithCurrentBindings() {
   for (const binding of Array.isArray(props.currentHeaderBindings) ? props.currentHeaderBindings : []) {
     const option = hashOptionFromBinding(binding)
     const semanticKey = String(option?.semantic_key || '').trim()
-    if (semanticKey) byKey.set(semanticKey, { ...(byKey.get(semanticKey) || {}), ...option })
+    if (!semanticKey) continue
+    const backendOption = byKey.get(semanticKey)
+    if (!backendOption) {
+      byKey.set(semanticKey, { ...option })
+      continue
+    }
+    // 策略字段（eligible / blocked_reason / recommended / weak_identity）以后端为准，
+    // 本地只补充展示信息，避免本地重算覆盖后端规则。
+    byKey.set(semanticKey, {
+      ...backendOption,
+      raw_name: backendOption.raw_name || option.raw_name,
+      label: backendOption.label || option.label,
+    })
   }
   return [...byKey.values()]
 }
@@ -384,13 +396,17 @@ const semanticMatchedNonHashableFields = computed(() =>
     .filter(match => match?.status === 'matched_non_hashable')
 )
 const blockingMessage = computed(() => {
+  // 优先展示后端准备好的中文可执行文案，并补充"具体缺哪个键"的引导；
+  // 英文 legacy_error 降为次要信息。
+  const group = missingGroups.value[0]
+  if (group?.message) {
+    const missingKeys = Array.isArray(group.missing_keys) ? group.missing_keys : []
+    const guidance = missingKeys.length > 0 ? `（缺少：${missingKeys.join('、')}）` : ''
+    return `不能保存：${group.message}${guidance}`
+  }
   const blockingError = hashPolicyPreview.value?.blocking_errors?.[0]
   if (blockingError) {
     return `不能保存：${blockingError}`
-  }
-  const group = missingGroups.value[0]
-  if (group?.message) {
-    return `不能保存：${group.message}`
   }
   const invalidKeys = hashPolicyPreview.value?.invalid_keys || []
   if (invalidKeys.length > 0) {
@@ -524,6 +540,7 @@ async function runHashPolicyPreview(signature = hashPolicyPreviewSignature.value
     if (requestId !== previewRequestId) return
     hashPolicyPreview.value = error?.data?.hash_policy || null
     ElMessage.warning(
+      hashPolicyPreview.value?.missing_required_groups?.[0]?.message ||
       hashPolicyPreview.value?.blocking_errors?.[0] ||
       error?.message ||
       'Data Hash 预检失败'

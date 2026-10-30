@@ -283,6 +283,14 @@
                 <div v-else class="template-update-workbench-drawer__inline-display">
                   <span>{{ row.meta?.label || row.semantic_key || 'Unmapped' }}</span>
                   <el-button link type="primary" @click="startEditingBinding(row.raw_name)">Edit</el-button>
+                  <el-button
+                    v-if="row.semantic_key && !selectedDeduplicationFieldSet.has(row.semantic_key)"
+                    link
+                    type="success"
+                    @click="confirmBindingMapping(row.raw_name)"
+                  >
+                    确认映射并加入
+                  </el-button>
                 </div>
               </template>
             </el-table-column>
@@ -331,6 +339,33 @@
         </div>
         <div v-else class="template-update-workbench-drawer__muted">
           No deduplication field selected.
+        </div>
+
+        <div
+          v-if="unresolvedDeduplicationFields.length > 0"
+          class="template-update-workbench-drawer__unresolved"
+        >
+          <div class="template-update-workbench-drawer__muted">
+            以下字段在当前绑定集中缺少已确认的语义映射。你的选择已保留，确认映射后即可正常保存：
+          </div>
+          <div class="template-update-workbench-drawer__tags" style="margin-top: 6px;">
+            <el-tag
+              v-for="item in unresolvedDeduplicationFields"
+              :key="item.field"
+              size="small"
+              type="warning"
+            >
+              {{ formatFieldLabel(item.field) }}
+            </el-tag>
+          </div>
+          <el-button
+            size="small"
+            style="margin-top: 8px;"
+            :loading="loadingBindings"
+            @click="reloadAllBindings"
+          >
+            重新加载字段绑定
+          </el-button>
         </div>
       </div>
       </template>
@@ -406,12 +441,23 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  // 父级保存处理器：传入后抽屉会 await 它，从而把 loading 状态覆盖到保存真正结束，
+  // 并让失败信息可以在抽屉内展示。未传入时回退到 emit('save')。
+  onSave: {
+    type: Function,
+    default: null,
+  },
 })
 
 const emit = defineEmits(['save', 'close', 'select-mode'])
 
 const activeContext = ref(null)
 const selectedDeduplicationFields = ref([])
+// 用户显式编辑过的绑定行（只含被改动的行），与"表格显示基底"解耦。
+const editedHeaderBindings = ref([])
+// 归一化诊断信息：removed=被剔除且有明确原因；unresolved=保留但当前绑定集缺确认绑定。
+const deduplicationDiagnostics = ref({ removed: [], unresolved: [] })
+const contextRequestToken = ref(0)
 const selectedHeaderRow = ref(0)
 const reloadingContext = ref(false)
 const previewExpanded = ref(false)
@@ -470,6 +516,18 @@ const updateMode = computed(() => workbenchContext.value?.update_mode ?? 'with-s
 const headerSource = computed(() => workbenchContext.value?.header_source ?? 'sample-file')
 const selectedDeduplicationFieldSet = computed(
   () => new Set(selectedDeduplicationFields.value.map(field => String(field || '').trim()).filter(Boolean))
+)
+// 保留了用户选择、但当前绑定集中缺少已确认语义映射的字段（需要用户确认）。
+const unresolvedDeduplicationFields = computed(() =>
+  Array.isArray(deduplicationDiagnostics.value?.unresolved)
+    ? deduplicationDiagnostics.value.unresolved
+    : [],
+)
+// 被剔除的字段及原因（明确非法/非语义/派生/不可参与 hash）。
+const removedDeduplicationFields = computed(() =>
+  Array.isArray(deduplicationDiagnostics.value?.removed)
+    ? deduplicationDiagnostics.value.removed
+    : [],
 )
 const fieldParseSourceOptions = computed(() => buildFieldParseSourceOptions(currentHeaderColumns.value))
 
@@ -530,7 +588,18 @@ const effectiveHashOptions = computed(() => {
   for (const option of buildHashOptionsFromHeaderBindings(saveReadyHeaderBindings.value)) {
     const key = String(option?.semantic_key || '').trim()
     if (!key) continue
-    byKey.set(key, { ...(byKey.get(key) || {}), ...option })
+    const backendOption = byKey.get(key)
+    if (!backendOption) {
+      byKey.set(key, { ...option })
+      continue
+    }
+    // 策略字段（eligible / blocked_reason / recommended / weak_identity）一律以后端为准，
+    // 前端只补充展示信息，避免本地重算覆盖后端规则（如 system_scope / metric 字段）。
+    byKey.set(key, {
+      ...backendOption,
+      raw_name: backendOption.raw_name || option.raw_name,
+      label: backendOption.label || option.label,
+    })
   }
   return [...byKey.values()]
 })
@@ -610,6 +679,8 @@ watch(
       : Array.isArray(next?.current_header_bindings)
       ? next.current_header_bindings.map(item => ({ ...item }))
       : []
+    editedHeaderBindings.value = []
+    deduplicationDiagnostics.value = { removed: [], unresolved: [] }
     localFieldParseRules.value = buildFieldParseRulesForContext(next)
     previewExpanded.value = false
     previewLoaded.value = false
@@ -639,27 +710,36 @@ const changeSummary = computed(() => ({
   existing_deduplication_field_matches: existingDeduplicationFieldMatches.value,
 }))
 
+// 显示基底：needs-review 视图只展示待复核行，all 视图展示全量；始终叠加用户已编辑的行。
 const activeBindingSource = computed(() => {
-  if (bindingsLoaded.value && fullHeaderBindings.value.length > 0 && bindingsViewMode.value === 'all') {
-    return fullHeaderBindings.value
+  const base =
+    bindingsLoaded.value && fullHeaderBindings.value.length > 0 && bindingsViewMode.value === 'all'
+      ? fullHeaderBindings.value
+      : localHeaderBindings.value
+  if (editedHeaderBindings.value.length === 0) {
+    return base
   }
-  return localHeaderBindings.value
+  return mergeHeaderBindingsForSave(base, editedHeaderBindings.value)
 })
 
-const saveReadyBindingBase = computed(() => {
+// 提交基底：恒为全量绑定表 + 用户编辑，永不因视图切换而丢行。
+// 视图模式只影响"显示哪些行"，绝不能影响"要保存哪些绑定"。
+const bindingBase = computed(() => {
   if (fullHeaderBindings.value.length > 0) {
     return fullHeaderBindings.value
   }
   if (Array.isArray(fullContextHeaderBindings.value) && fullContextHeaderBindings.value.length > 0) {
     return fullContextHeaderBindings.value
   }
-  return activeBindingSource.value
+  return localHeaderBindings.value
 })
+
+const saveReadyBindingBase = computed(() => bindingBase.value)
 
 const submissionState = computed(() => {
   return buildTemplateUpdateSubmissionState({
-    baseBindings: saveReadyBindingBase.value,
-    editedBindings: localHeaderBindings.value,
+    baseBindings: bindingBase.value,
+    editedBindings: editedHeaderBindings.value,
     selectedFields: selectedDeduplicationFields.value,
     fieldParseRules: localFieldParseRules.value,
   })
@@ -674,13 +754,16 @@ watch(
       : recommended.length > 0
       ? [...recommended]
       : []
+    const diagnostics = { removed: [], unresolved: [] }
     selectedDeduplicationFields.value = normalizeDeduplicationSelection(
       mergeRecommendedIdentityFields(initialSelection, submissionState.value.headerBindings),
       submissionState.value.headerBindings,
       localFieldParseRules.value,
       null,
       eligibleHashSemanticKeys.value,
+      diagnostics,
     )
+    deduplicationDiagnostics.value = diagnostics
   },
   { immediate: true },
 )
@@ -733,13 +816,16 @@ const visibleBindingRows = computed(() => {
 watch(
   [() => submissionState.value.headerBindings, localFieldParseRules],
   () => {
+    const diagnostics = { removed: [], unresolved: [] }
     const normalizedSelection = normalizeDeduplicationSelection(
       selectedDeduplicationFields.value,
       saveReadyHeaderBindings.value,
       localFieldParseRules.value,
       null,
       eligibleHashSemanticKeys.value,
+      diagnostics,
     )
+    deduplicationDiagnostics.value = diagnostics
     const currentSignature = JSON.stringify(selectedDeduplicationFields.value)
     const nextSignature = JSON.stringify(normalizedSelection)
     if (currentSignature !== nextSignature) {
@@ -797,7 +883,7 @@ async function ensureBindingsLoaded() {
       : []
     fullHeaderBindings.value = mergeHeaderBindingsForSave(
       loadedBindings,
-      localHeaderBindings.value,
+      editedHeaderBindings.value,
     )
     applyAutoCompanionDateRulesForContext(workbenchContext.value, fullHeaderBindings.value)
     bindingsLoaded.value = true
@@ -807,6 +893,16 @@ async function ensureBindingsLoaded() {
   } finally {
     loadingBindings.value = false
   }
+}
+
+// 强制重新拉取全量字段绑定：用于"当前绑定集缺少已确认映射"的自我修复场景。
+async function reloadAllBindings() {
+  if (updateMode.value === 'core-only') {
+    ElMessage.warning('核心字段更新模式没有样本文件，无法重新加载字段绑定')
+    return
+  }
+  bindingsLoaded.value = false
+  await ensureBindingsLoaded()
 }
 
 async function togglePreviewSection() {
@@ -851,30 +947,38 @@ function semanticSelectValue(row) {
 }
 
 function handleSemanticKeyChange(rawName, semanticKey) {
-  const nextBindings = updateHeaderBindingSemantic(activeBindingSource.value, rawName, semanticKey)
-  const nextEditedBindings = mergeHeaderBindingsForSave(
-    localHeaderBindings.value,
-    nextBindings,
+  // 始终基于全量绑定表定位并替换目标行：视图模式只影响"显示哪些行"，
+  // 绝不能影响"编辑哪些行"与"提交哪些绑定"（否则会把全量绑定截断成复核行）。
+  const nextBindings = updateHeaderBindingSemantic(bindingBase.value, rawName, semanticKey)
+  const changedBinding = nextBindings.find(binding => binding?.raw_name === rawName) || null
+  editedHeaderBindings.value = mergeHeaderBindingsForSave(
+    editedHeaderBindings.value,
+    changedBinding ? [changedBinding] : [],
   )
   if (bindingsLoaded.value && fullHeaderBindings.value.length > 0) {
     fullHeaderBindings.value = nextBindings
   }
-  localHeaderBindings.value = nextEditedBindings
-  const updatedBinding = nextBindings.find(binding => binding?.raw_name === rawName)
+  const updatedBinding = changedBinding
   const preferredSemanticKey = isRecommendedStrongIdentityKey(updatedBinding?.semantic_key)
     ? String(updatedBinding?.semantic_key || '').trim()
     : null
-  const nextDeduplicationFields = buildTemplateUpdateSubmissionState({
-    baseBindings: nextBindings,
-    editedBindings: nextEditedBindings,
-    selectedFields: selectedDeduplicationFields.value,
-    fieldParseRules: localFieldParseRules.value,
+  const mergedBindings = mergeHeaderBindingsForSave(
+    bindingBase.value,
+    editedHeaderBindings.value,
+  )
+  const diagnostics = { removed: [], unresolved: [] }
+  const nextDeduplicationFields = normalizeDeduplicationSelection(
+    selectedDeduplicationFields.value,
+    mergedBindings,
+    localFieldParseRules.value,
     preferredSemanticKey,
-    eligibleSemanticKeys: eligibleHashSemanticKeys.value,
-  }).deduplicationFields
+    eligibleHashSemanticKeys.value,
+    diagnostics,
+  )
+  deduplicationDiagnostics.value = diagnostics
   selectedDeduplicationFields.value = mergeRecommendedIdentityFields(
     nextDeduplicationFields,
-    nextEditedBindings,
+    mergedBindings,
   )
 }
 
@@ -889,12 +993,54 @@ function handleHashPolicyChange({ valid, loading, preview }) {
     ? preview.normalized_deduplication_fields
     : null
   if (normalizedFields) {
-    const currentSignature = JSON.stringify(selectedDeduplicationFields.value)
-    const nextSignature = JSON.stringify(normalizedFields)
-    if (currentSignature !== nextSignature) {
-      selectedDeduplicationFields.value = [...normalizedFields]
+    // 只增不删：后端归一化结果只用于补充字段，不得收窄用户的既有选择。
+    // 收窄会静默抹掉用户已选、且后端已确认的字段（如 order_id），且无法自愈。
+    const currentFields = selectedDeduplicationFields.value
+    const currentKeys = new Set(
+      currentFields.map(field => String(field || '').trim().toLowerCase()),
+    )
+    const additions = normalizedFields.filter(
+      field => !currentKeys.has(String(field || '').trim().toLowerCase()),
+    )
+    if (additions.length > 0) {
+      selectedDeduplicationFields.value = [...currentFields, ...additions]
     }
   }
+}
+
+// 显式、幂等地确认某行的语义映射，并按需把它加入去重字段。
+// 独立于 el-select 的 change 事件（Element Plus 对同值不 emit，原实现无法触发）。
+function confirmBindingMapping(rawName) {
+  const targetKey = String(rawName || '').trim()
+  const target = bindingBase.value.find(
+    binding => String(binding?.raw_name || '').trim() === targetKey,
+  )
+  if (!target) {
+    ElMessage.warning('未找到该字段的绑定记录')
+    return
+  }
+  const semanticKey = String(target.semantic_key || '').trim()
+  if (!semanticKey) {
+    ElMessage.warning('该字段尚未绑定语义字段，请先在语义字段列选择')
+    return
+  }
+  const confirmedBinding = {
+    ...target,
+    semantic_review_status: 'confirmed_semantic',
+  }
+  editedHeaderBindings.value = mergeHeaderBindingsForSave(
+    editedHeaderBindings.value,
+    [confirmedBinding],
+  )
+  if (bindingsLoaded.value && fullHeaderBindings.value.length > 0) {
+    fullHeaderBindings.value = fullHeaderBindings.value.map(binding =>
+      String(binding?.raw_name || '').trim() === targetKey ? confirmedBinding : binding,
+    )
+  }
+  if (!selectedDeduplicationFieldSet.value.has(semanticKey)) {
+    selectedDeduplicationFields.value = [...selectedDeduplicationFields.value, semanticKey]
+  }
+  ElMessage.success(`已确认「${targetKey}」→ ${semanticKey}`)
 }
 
 function formatFieldLabel(field) {
@@ -937,9 +1083,10 @@ function removeFieldParseRule(index) {
 
 async function handleSave() {
   if (!hashPolicyAllowsSave.value) {
+    // 优先展示后端准备好的中文可执行文案，其次才是英文 legacy_error。
     const message =
-      hashPolicyPreview.value?.blocking_errors?.[0] ||
       hashPolicyPreview.value?.missing_required_groups?.[0]?.message ||
+      hashPolicyPreview.value?.blocking_errors?.[0] ||
       '请先补齐 Data Hash 必需的语义字段。'
     ElMessage.warning(message)
     return
@@ -950,16 +1097,17 @@ async function handleSave() {
       await ensureBindingsLoaded()
     }
     const submissionState = buildTemplateUpdateSubmissionState({
-      baseBindings: saveReadyBindingBase.value,
-      editedBindings: localHeaderBindings.value,
-      selectedFields: Array.isArray(lastSaveReadinessPreview.value?.normalized_deduplication_fields)
-        ? lastSaveReadinessPreview.value.normalized_deduplication_fields
-        : selectedDeduplicationFields.value,
+      baseBindings: bindingBase.value,
+      editedBindings: editedHeaderBindings.value,
+      // 直接使用用户当前选择：归一化已改为"只增不删"，
+      // 不能再用后端上一次的归一化结果覆盖，否则会把用户已选字段静默收窄。
+      selectedFields: selectedDeduplicationFields.value,
       fieldParseRules: localFieldParseRules.value,
       eligibleSemanticKeys: eligibleHashSemanticKeys.value,
     })
     selectedDeduplicationFields.value = submissionState.deduplicationFields
-    emit('save', {
+    deduplicationDiagnostics.value = submissionState.diagnostics
+    const payload = {
       deduplicationFields: submissionState.deduplicationFields,
       headerRow: selectedHeaderRow.value,
       headerColumns: [...currentHeaderColumns.value],
@@ -969,7 +1117,13 @@ async function handleSave() {
         ? workbenchContext.value.preview_data.map(row => ({ ...row }))
         : [],
       fieldParseRules: normalizeFieldParseRulesForSave(),
-    })
+    }
+    if (typeof props.onSave === 'function') {
+      // 等待父级保存真正结束，loading 状态才能覆盖整个保存过程。
+      await props.onSave(payload)
+    } else {
+      emit('save', payload)
+    }
   } finally {
     saving.value = false
   }
@@ -980,6 +1134,8 @@ async function reloadContext() {
   const fileId = currentFileId.value
   if (!templateId || !fileId) return
 
+  // 请求令牌：只接受最新一次请求的结果，避免快速切换表头时旧响应覆盖新数据。
+  const requestToken = ++contextRequestToken.value
   reloadingContext.value = true
   try {
     const context = await api.getTemplateUpdateContext(templateId, {
@@ -987,12 +1143,20 @@ async function reloadContext() {
       fileId,
       headerRow: selectedHeaderRow.value,
     })
+    if (requestToken !== contextRequestToken.value) {
+      return
+    }
     activeContext.value = context
   } catch (error) {
+    if (requestToken !== contextRequestToken.value) {
+      return
+    }
     console.error('Failed to reload context:', error)
     ElMessage.error(error?.message || 'Failed to reload context')
   } finally {
-    reloadingContext.value = false
+    if (requestToken === contextRequestToken.value) {
+      reloadingContext.value = false
+    }
   }
 }
 
@@ -1118,6 +1282,14 @@ function handleClose() {
 .template-update-workbench-drawer__empty {
   color: #909399;
   font-size: 12px;
+}
+
+.template-update-workbench-drawer__unresolved {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fdf6ec;
+  border: 1px solid #f3d19e;
 }
 
 .template-update-workbench-drawer__inline-display {

@@ -221,7 +221,7 @@
       :context="updateWorkbenchContext"
       :template="pendingManualUpdateTemplate"
       :loading-mode="manualUpdateLoadingMode"
-      @save="handleWorkbenchSave"
+      :on-save="handleWorkbenchSave"
       @select-mode="handleWorkbenchModeSelect"
       @close="closeTemplateUpdateWorkbench"
     />
@@ -809,12 +809,16 @@ const getHashPolicyFailureMessage = (preview) => {
   if (sourceFieldChanges.length > 0 && semanticHashKeyChanges.length === 0) {
     return '源字段名变化已识别，标准语义字段未变化，可继续保存。'
   }
-  if (preview?.blocking_errors?.[0]) {
-    return preview.blocking_errors[0]
-  }
+  // 优先展示后端准备好的中文可执行文案，并补充"具体缺哪个键"的引导；
+  // 英文 legacy_error 降为次要信息，避免用户只看到一句技术断言。
   const missingGroup = preview?.missing_required_groups?.[0]
   if (missingGroup?.message) {
-    return missingGroup.message
+    const missingKeys = Array.isArray(missingGroup.missing_keys) ? missingGroup.missing_keys : []
+    const guidance = missingKeys.length > 0 ? `（缺少：${missingKeys.join('、')}）` : ''
+    return `${missingGroup.message}${guidance}`
+  }
+  if (preview?.blocking_errors?.[0]) {
+    return preview.blocking_errors[0]
   }
   const invalidKeys = preview?.invalid_keys || []
   if (invalidKeys.length > 0) {
