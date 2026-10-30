@@ -197,6 +197,146 @@ def test_plan_is_idempotent_for_already_semantic_fields():
     assert plan.planned_fields == ["metric_date"]
 
 
+def test_hint_index_is_scoped_by_data_domain():
+    products_index = script.build_hint_semantic_index(data_domain="products")
+    services_index = script.build_hint_semantic_index(data_domain="services")
+
+    assert products_index["规格编号"] == ["sku_id"]
+    assert products_index["商品编号"] == ["product_id"]
+    assert "规格编号" not in services_index
+
+    assert services_index["客服id"] == ["service_id"]
+    assert "客服id" not in products_index
+
+
+def test_plan_removes_unrecognized_column_as_non_identity():
+    """注册表里完全没有的列名 = 业务属性，不能继续当身份键。"""
+    plan = _plan(
+        data_domain="orders",
+        granularity="daily",
+        deduplication_fields=["订单号", "订单状态"],
+        header_bindings=[
+            {
+                "raw_name": "订单号",
+                "semantic_key": "order_id",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "raw_name": "订单状态",
+                "semantic_key": None,
+            },
+        ],
+        header_columns=["订单号", "订单状态"],
+    )
+
+    assert plan.needs_change is True
+    assert [item["from"] for item in plan.removals] == ["订单状态"]
+    assert plan.removals[0]["evidence"] == "binding_without_semantic_key"
+    assert plan.planned_fields == ["order_id"]
+
+
+def test_plan_keeps_parse_rule_source_column_with_multiple_targets():
+    """解析规则来源列是有数据的，多义时保持原样而不是剔除。"""
+    plan = _plan(
+        data_domain="services",
+        granularity="monthly",
+        deduplication_fields=["日期期间"],
+        header_bindings=[],
+        header_columns=["日期期间"],
+        field_parse_rules=[
+            {"target_field": "metric_date", "source_column": "日期期间"},
+            {"target_field": "period_start_date", "source_column": "日期期间"},
+            {"target_field": "period_end_date", "source_column": "日期期间"},
+        ],
+    )
+
+    assert plan.removals == []
+    assert plan.ambiguous_fields == ["日期期间"]
+    assert "日期期间" in plan.planned_fields
+
+
+def test_plan_replaces_column_with_single_parse_rule_target():
+    """解析规则唯一产出一个语义键时，可以直接改写。"""
+    plan = _plan(
+        data_domain="analytics",
+        granularity="daily",
+        deduplication_fields=["统计周期"],
+        header_bindings=[],
+        header_columns=["统计周期"],
+        field_parse_rules=[
+            {"target_field": "metric_date", "source_column": "统计周期"},
+        ],
+    )
+
+    assert plan.needs_change is True
+    assert plan.replacements == [
+        {"from": "统计周期", "to": "metric_date", "source": "parse_rule"}
+    ]
+    assert plan.planned_fields == ["metric_date"]
+
+
+def test_plan_adds_missing_domain_identity_key_when_template_has_it():
+    """模板自身有已确认绑定时，允许受控补齐域级必需身份键。"""
+    plan = _plan(
+        data_domain="orders",
+        granularity="daily",
+        deduplication_fields=["产品ID"],
+        header_bindings=[
+            {
+                "raw_name": "产品ID",
+                "semantic_key": "product_id",
+                "semantic_review_status": "confirmed_semantic",
+            },
+            {
+                "raw_name": "订单号",
+                "semantic_key": "order_id",
+                "semantic_review_status": "confirmed_semantic",
+            },
+        ],
+        header_columns=["产品ID", "订单号"],
+    )
+
+    assert plan.needs_change is True
+    assert [item["key"] for item in plan.additions] == ["order_id"]
+    assert plan.planned_fields == ["product_id", "order_id"]
+
+
+def test_plan_refuses_to_add_identity_key_without_data_source():
+    """没有数据来源的身份键绝不凭空补进来。"""
+    plan = _plan(
+        data_domain="orders",
+        granularity="daily",
+        deduplication_fields=["产品ID"],
+        header_bindings=[
+            {
+                "raw_name": "产品ID",
+                "semantic_key": "product_id",
+                "semantic_review_status": "confirmed_semantic",
+            },
+        ],
+        header_columns=["产品ID"],
+    )
+
+    assert plan.needs_change is False
+    assert plan.additions == []
+    assert plan.skipped_reason and "未通过" in plan.skipped_reason
+    assert "order_id" in plan.missing_identity_keys
+
+
+def test_plan_skips_when_removal_leaves_no_identity_key():
+    plan = _plan(
+        data_domain="services",
+        granularity="daily",
+        deduplication_fields=["聊天询问"],
+        header_bindings=[],
+        header_columns=["聊天询问"],
+    )
+
+    assert plan.needs_change is False
+    assert plan.removals and plan.removals[0]["from"] == "聊天询问"
+    assert plan.skipped_reason and "没有任何身份键" in plan.skipped_reason
+
+
 @pytest.mark.asyncio
 async def test_apply_then_restore_round_trip(tmp_path):
     """在隔离库上验证 apply / restore 往返。

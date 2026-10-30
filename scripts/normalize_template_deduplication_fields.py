@@ -50,9 +50,14 @@ from backend.services.semantic_field_registry import (  # noqa: E402
     SEMANTIC_FIELD_META,
     get_semantic_aliases,
     is_canonical_semantic_key,
+    is_confirmed_semantic_binding,
     normalize_semantic_key,
+    parse_rule_provided_semantic_keys,
 )
-from backend.services.template_hash_policy import TemplateHashPolicyService  # noqa: E402
+from backend.services.template_hash_policy import (  # noqa: E402
+    FILE_DATE_SOURCE_COLUMNS,
+    TemplateHashPolicyService,
+)
 from backend.services.template_save_readiness_service import (  # noqa: E402
     TemplateSaveReadinessService,
 )
@@ -77,6 +82,7 @@ class TemplateFieldPlan:
     planned_fields: List[str] = field(default_factory=list)
     replacements: List[Dict[str, str]] = field(default_factory=list)
     removals: List[Dict[str, str]] = field(default_factory=list)
+    additions: List[Dict[str, str]] = field(default_factory=list)
     unmapped_fields: List[str] = field(default_factory=list)
     ambiguous_fields: List[str] = field(default_factory=list)
     missing_identity_keys: List[str] = field(default_factory=list)
@@ -84,7 +90,10 @@ class TemplateFieldPlan:
 
     @property
     def needs_change(self) -> bool:
-        return bool(self.replacements or self.removals) and not self.skipped_reason
+        return (
+            bool(self.replacements or self.removals or self.additions)
+            and not self.skipped_reason
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -97,6 +106,7 @@ class TemplateFieldPlan:
             "planned_fields": list(self.planned_fields),
             "replacements": [dict(item) for item in self.replacements],
             "removals": [dict(item) for item in self.removals],
+            "additions": [dict(item) for item in self.additions],
             "unmapped_fields": list(self.unmapped_fields),
             "ambiguous_fields": list(self.ambiguous_fields),
             "missing_identity_keys": list(self.missing_identity_keys),
@@ -173,6 +183,55 @@ def merge_semantic_candidates(
     return {raw: sorted(keys) for raw, keys in merged.items()}
 
 
+# 脚本专用的业务列名提示。
+#
+# 为什么单独放这里、而不是改 ``semantic_field_registry``：
+# registry 是**全局语义契约**，后端 hash 计算、前端下拉框、前后端一致性测试
+# 都依赖它；随手加别名会改变 ``normalize_semantic_key`` 的行为，
+# 进而影响历史数据的 hash 取值路径。
+#
+# 这里只是「历史模板的列名写法和语义键命名不一致」的一次性归一提示，
+# 只在本脚本内部生效，不外溢到运行时。
+#
+# 提示按数据域限定：同一个中文列名在不同域下含义可能不同，
+# 跨域套用会把业务列错认成别的身份键。
+LEGACY_COLUMN_SEMANTIC_HINTS: Dict[str, Dict[str, Any]] = {
+    # 商品表：本地商品编号即 product_id，规格编号即 sku_id
+    "商品编号": {"semantic_key": "product_id", "domains": {"products"}},
+    "规格编号": {"semantic_key": "sku_id", "domains": {"products"}},
+    # 客服工号即服务 ID
+    "客服id": {"semantic_key": "service_id", "domains": {"services"}},
+}
+
+
+def build_hint_semantic_index(
+    hints: Optional[Dict[str, Dict[str, Any]]] = None,
+    data_domain: Optional[str] = None,
+) -> Dict[str, List[str]]:
+    """用业务列名提示表建立 原始表头名 -> 语义键 的索引。
+
+    ``data_domain`` 不为空时，只启用适用于该数据域的提示。
+    """
+    domain = str(data_domain or "").strip().lower()
+    index: Dict[str, List[str]] = {}
+    for raw, spec in (hints or LEGACY_COLUMN_SEMANTIC_HINTS).items():
+        if not isinstance(spec, dict):
+            continue
+        allowed_domains = spec.get("domains")
+        if domain and allowed_domains and domain not in allowed_domains:
+            continue
+        normalized = normalize_semantic_key(spec.get("semantic_key"))
+        if not normalized or not is_canonical_semantic_key(normalized):
+            continue
+        name = str(raw or "").strip().lower()
+        if not name:
+            continue
+        bucket = index.setdefault(name, [])
+        if normalized not in bucket:
+            bucket.append(normalized)
+    return index
+
+
 def classify_semantic_key(semantic_key: str) -> str:
     """按语义字段的 kind 判断能否参与 Data Hash。"""
     meta = SEMANTIC_FIELD_META.get(semantic_key, {})
@@ -182,6 +241,242 @@ def classify_semantic_key(semantic_key: str) -> str:
     if bool(meta.get("hash_eligible")):
         return ACTION_REPLACE
     return ACTION_UNKNOWN
+
+
+def collect_known_columns(
+    header_columns: Optional[List[str]],
+    header_bindings: Optional[List[Dict[str, Any]]],
+) -> set[str]:
+    """模板里真实存在的列名集合（小写）。"""
+    known: set[str] = set()
+    for column in header_columns or []:
+        name = str(column or "").strip().lower()
+        if name:
+            known.add(name)
+    for binding in header_bindings or []:
+        if not isinstance(binding, dict):
+            continue
+        for raw in (binding.get("raw_name"), binding.get("source_header")):
+            name = str(raw or "").strip().lower()
+            if name:
+                known.add(name)
+    return known
+
+
+
+def collect_confirmed_semantic_keys(
+    header_bindings: Optional[List[Dict[str, Any]]],
+) -> set[str]:
+    """模板自身已确认的语义键集合。
+
+    "已确认"= 绑定上带 semantic_key（迁移期兼容口径）或显式标记为
+    confirmed_semantic。pending / confirmed_non_semantic 的绑定不算。
+    """
+    keys: set[str] = set()
+    for binding in header_bindings or []:
+        if not isinstance(binding, dict):
+            continue
+        if not is_confirmed_semantic_binding(binding):
+            continue
+        semantic_key = normalize_semantic_key(binding.get("semantic_key"))
+        if semantic_key and is_canonical_semantic_key(semantic_key):
+            keys.add(semantic_key)
+    return keys
+
+
+def collect_file_companion_rule_keys(
+    field_parse_rules: Optional[List[Dict[str, Any]]],
+) -> Dict[str, str]:
+    """解析规则里来源为"文件伴生日期"的语义键 -> 来源列。
+
+    这类日期来自文件名而不是行内数据，同一文件内所有行取值相同，
+    只能作为"周期标识"，不能区分行。
+    """
+    sources: Dict[str, str] = {}
+    for rule in field_parse_rules or []:
+        if not isinstance(rule, dict):
+            continue
+        semantic_key = normalize_semantic_key(
+            rule.get("target_field") or rule.get("semantic_key") or rule.get("field")
+        )
+        source_column = str(rule.get("source_column") or "").strip()
+        if semantic_key and source_column in FILE_DATE_SOURCE_COLUMNS:
+            sources[semantic_key] = source_column
+    return sources
+
+
+def build_parse_rule_source_index(
+    field_parse_rules: Optional[List[Dict[str, Any]]],
+) -> Dict[str, List[str]]:
+    """原始表头名(小写) -> 解析规则产出的语义键 索引。
+
+    解析规则的来源列是有数据的：规则会把这一列解析成某个语义键。
+    所以来源列绝不能当成"无效列"剔除，否则会连周期标识一起丢掉。
+    """
+    index: Dict[str, List[str]] = {}
+    for rule in field_parse_rules or []:
+        if not isinstance(rule, dict):
+            continue
+        semantic_key = normalize_semantic_key(
+            rule.get("target_field") or rule.get("semantic_key") or rule.get("field")
+        )
+        source_column = str(rule.get("source_column") or "").strip()
+        if not semantic_key or not is_canonical_semantic_key(semantic_key):
+            continue
+        if not source_column:
+            continue
+        bucket = index.setdefault(source_column.lower(), [])
+        if semantic_key not in bucket:
+            bucket.append(semantic_key)
+    return {raw: sorted(keys) for raw, keys in index.items()}
+
+
+def _dedupe_fields(fields: List[str]) -> List[str]:
+    """去重但保持顺序。"""
+    deduped: List[str] = []
+    seen = set()
+    for item in fields:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _revalidate_fields(
+    *,
+    data_domain: str,
+    granularity: Optional[str],
+    sub_domain: Optional[str],
+    deduplication_fields: List[str],
+    header_columns: Optional[List[str]],
+    header_bindings: Optional[List[Dict[str, Any]]],
+    field_parse_rules: Optional[List[Dict[str, Any]]],
+    hash_service: TemplateHashPolicyService,
+    readiness_service: TemplateSaveReadinessService,
+) -> Tuple[bool, List[str], str, Any]:
+    """按两道闸门复验一组去重字段。
+
+    返回 (是否通过, 还缺哪些身份键, 失败原因, hash 策略结果)。
+    """
+    readiness = readiness_service.assess(
+        data_domain=data_domain,
+        granularity=granularity,
+        sub_domain=sub_domain,
+        deduplication_fields=list(deduplication_fields),
+        header_columns=list(header_columns or []),
+        header_bindings=list(header_bindings or []),
+        field_parse_rules=list(field_parse_rules or []),
+    )
+    if not readiness.can_save:
+        return (
+            False,
+            collect_missing_identity_keys(readiness.hash_policy),
+            "；".join(readiness.blocking_messages or readiness.blocking_errors),
+            readiness.hash_policy,
+        )
+    policy = hash_service.validate(
+        data_domain=data_domain,
+        granularity=granularity,
+        sub_domain=sub_domain,
+        deduplication_fields=list(deduplication_fields),
+        header_bindings=list(header_bindings or []),
+        field_parse_rules=list(field_parse_rules or []),
+    )
+    if not policy.passed:
+        return (
+            False,
+            collect_missing_identity_keys(policy),
+            "；".join(policy.blocking_messages or policy.blocking_errors),
+            policy,
+        )
+    return True, [], "", policy
+
+
+def _plan_identity_additions(
+    *,
+    data_domain: str,
+    granularity: Optional[str],
+    sub_domain: Optional[str],
+    current_fields: List[str],
+    header_bindings: Optional[List[Dict[str, Any]]],
+    field_parse_rules: Optional[List[Dict[str, Any]]],
+    confirmed_keys: set[str],
+    rule_keys: set[str],
+    file_companion_keys: Dict[str, str],
+    hash_service: TemplateHashPolicyService,
+) -> List[Dict[str, str]]:
+    """受控补齐域级必需身份键。
+
+    只在"模板自身确实有数据来源"时才补：
+
+    * 模板有已确认绑定指向该语义键；或
+    * 解析规则能产出该语义键。
+
+    绝不凭空造出没有数据来源的键；补齐后仍需复验两道闸门。
+    """
+    policy = hash_service.validate(
+        data_domain=data_domain,
+        granularity=granularity,
+        sub_domain=sub_domain,
+        deduplication_fields=list(current_fields),
+        header_bindings=list(header_bindings or []),
+        field_parse_rules=list(field_parse_rules or []),
+    )
+    missing_groups = [
+        group
+        for group in (policy.missing_required_groups or [])
+        if group.get("severity") == "blocking"
+    ]
+    resolved = set(policy.resolved_keys or [])
+    additions: List[Dict[str, str]] = []
+    added_keys: set[str] = set()
+
+    def _supports(key: str) -> bool:
+        return key in confirmed_keys or key in rule_keys
+
+    for group in missing_groups:
+        accepted = list(group.get("accepted_keys") or [])
+        requirement_type = str(group.get("requirement_type") or "any_of")
+        if requirement_type == "any_of":
+            wanted = list(accepted)
+        else:
+            wanted = [key for key in accepted if key not in resolved]
+        for key in wanted:
+            if key in resolved or key in added_keys:
+                continue
+            if not _supports(key):
+                continue
+            additions.append(
+                {
+                    "key": key,
+                    "reason": (
+                        "补齐域级必需身份键"
+                        f"（{group.get('label') or group.get('key')}）"
+                    ),
+                }
+            )
+            added_keys.add(key)
+            if requirement_type == "any_of":
+                break
+
+    # 周期键：解析规则的来源是文件伴生日期时，把它显式写进去重字段，
+    # 让"周期标识"这一口径在模板里显式成立。
+    for key in file_companion_keys:
+        if key in resolved or key in added_keys:
+            continue
+        if not _supports(key):
+            continue
+        additions.append(
+            {
+                "key": key,
+                "reason": "解析规则来源为文件伴生日期，作为周期标识显式写入去重字段",
+            }
+        )
+        added_keys.add(key)
+
+    return additions
 
 
 def plan_template_field_mapping(
@@ -195,6 +490,7 @@ def plan_template_field_mapping(
     header_bindings: Optional[List[Dict[str, Any]]],
     header_columns: Optional[List[str]],
     field_parse_rules: Optional[List[Dict[str, Any]]],
+    sub_domain: Optional[str] = None,
     candidate_index: Optional[Dict[str, List[str]]] = None,
     hash_service: Optional[TemplateHashPolicyService] = None,
     readiness_service: Optional[TemplateSaveReadinessService] = None,
@@ -202,11 +498,16 @@ def plan_template_field_mapping(
     """计算单个模板的归一方案（纯函数，不碰数据库）。"""
     hash_service = hash_service or TemplateHashPolicyService()
     readiness_service = readiness_service or TemplateSaveReadinessService()
-    if candidate_index is None:
-        candidate_index = merge_semantic_candidates(
-            build_binding_semantic_index(header_bindings),
-            build_alias_semantic_index(),
-        )
+
+    local_index = merge_semantic_candidates(
+        build_binding_semantic_index(header_bindings),
+        build_alias_semantic_index(),
+        build_hint_semantic_index(data_domain=data_domain),
+    )
+    if candidate_index is not None:
+        candidate_index = merge_semantic_candidates(candidate_index, local_index)
+    else:
+        candidate_index = local_index
 
     current = [str(item).strip() for item in (deduplication_fields or []) if str(item).strip()]
     plan = TemplateFieldPlan(
@@ -220,6 +521,18 @@ def plan_template_field_mapping(
     if not current:
         plan.skipped_reason = "模板未配置 deduplication_fields"
         return plan
+
+    confirmed_keys = collect_confirmed_semantic_keys(header_bindings)
+    rule_keys = parse_rule_provided_semantic_keys(field_parse_rules)
+    file_companion_keys = collect_file_companion_rule_keys(field_parse_rules)
+    parse_source_index = build_parse_rule_source_index(field_parse_rules)
+    binding_raw_names = {
+        str(raw or "").strip().lower()
+        for binding in header_bindings or []
+        if isinstance(binding, dict)
+        for raw in (binding.get("raw_name"), binding.get("source_header"))
+        if str(raw or "").strip()
+    }
 
     planned: List[str] = []
     for raw_field in current:
@@ -242,6 +555,7 @@ def plan_template_field_mapping(
                         "from": raw_field,
                         "to": semantic_key,
                         "source": "semantic_index",
+                        "evidence": "semantic_metric",
                         "reason": "度量字段无法区分行，不应参与 Data Hash",
                     }
                 )
@@ -252,55 +566,101 @@ def plan_template_field_mapping(
             plan.ambiguous_fields.append(raw_field)
             planned.append(raw_field)
         else:
-            plan.unmapped_fields.append(raw_field)
-            planned.append(raw_field)
+            derived_keys = parse_source_index.get(raw_field.lower(), [])
+            if len(derived_keys) == 1:
+                # 解析规则证明这一列会被解析成该语义键，直接改写成语义键
+                planned.append(derived_keys[0])
+                plan.replacements.append(
+                    {"from": raw_field, "to": derived_keys[0], "source": "parse_rule"}
+                )
+            elif len(derived_keys) > 1:
+                # 同一列被解析成多个语义键，无法确定用哪个，保持原样
+                plan.ambiguous_fields.append(raw_field)
+                planned.append(raw_field)
+            else:
+                # 该列名在语义字段注册表里完全不存在，也没有任何模板能给出映射，
+                # 它不可能是合法的行身份键（业务属性 / 度量 / 导出时多出来的空列）。
+                plan.removals.append(
+                    {
+                        "from": raw_field,
+                        "to": "",
+                        "source": "unrecognized_column",
+                        "evidence": (
+                            "binding_without_semantic_key"
+                            if raw_field.lower() in binding_raw_names
+                            else "no_binding"
+                        ),
+                        "reason": "该列名不在语义字段注册表内，无法作为行身份键",
+                    }
+                )
 
-    # 去重但保持顺序
-    deduped: List[str] = []
-    seen = set()
-    for item in planned:
-        key = item.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
+    deduped = _dedupe_fields(planned)
     plan.planned_fields = deduped
 
-    if not plan.replacements and not plan.removals:
-        plan.skipped_reason = "无需改写（已全部是语义键，或无法确凿判定）"
+    if not deduped:
+        plan.skipped_reason = "剔除后没有任何身份键，保持原样"
         return plan
 
-    # 改写后必须仍然通过两道闸门，否则整体跳过
-    readiness = readiness_service.assess(
+    passed, missing, reason, _policy = _revalidate_fields(
         data_domain=data_domain,
         granularity=granularity,
-        sub_domain=None,
-        deduplication_fields=list(deduped),
-        header_columns=list(header_columns or []),
-        header_bindings=list(header_bindings or []),
-        field_parse_rules=list(field_parse_rules or []),
+        sub_domain=sub_domain,
+        deduplication_fields=deduped,
+        header_columns=header_columns,
+        header_bindings=header_bindings,
+        field_parse_rules=field_parse_rules,
+        hash_service=hash_service,
+        readiness_service=readiness_service,
     )
-    if not readiness.can_save:
-        plan.missing_identity_keys = _collect_missing_identity_keys(readiness.hash_policy)
-        plan.skipped_reason = (
-            "改写后未通过保存校验，保持原样："
-            + "；".join(readiness.blocking_messages or readiness.blocking_errors)
+
+    if not passed:
+        # 受控补齐：只有模板自身有数据来源的身份键才允许补进来
+        additions = _plan_identity_additions(
+            data_domain=data_domain,
+            granularity=granularity,
+            sub_domain=sub_domain,
+            current_fields=deduped,
+            header_bindings=header_bindings,
+            field_parse_rules=field_parse_rules,
+            confirmed_keys=confirmed_keys,
+            rule_keys=rule_keys,
+            file_companion_keys=file_companion_keys,
+            hash_service=hash_service,
         )
+        if additions:
+            candidate_fields = _dedupe_fields(
+                [*deduped, *(item["key"] for item in additions)]
+            )
+            passed2, missing2, reason2, _ = _revalidate_fields(
+                data_domain=data_domain,
+                granularity=granularity,
+                sub_domain=sub_domain,
+                deduplication_fields=candidate_fields,
+                header_columns=header_columns,
+                header_bindings=header_bindings,
+                field_parse_rules=field_parse_rules,
+                hash_service=hash_service,
+                readiness_service=readiness_service,
+            )
+            if passed2:
+                plan.additions = additions
+                plan.planned_fields = candidate_fields
+                return plan
+            plan.missing_identity_keys = missing2
+            plan.skipped_reason = (
+                "补齐后仍未通过校验，保持原样：" + reason2
+            )
+            return plan
+
+        plan.missing_identity_keys = missing
+        if plan.replacements or plan.removals:
+            plan.skipped_reason = "改写后未通过保存校验，保持原样：" + reason
+        else:
+            plan.skipped_reason = "当前配置未通过保存校验，且无法自动补齐，保持原样：" + reason
         return plan
 
-    policy = hash_service.validate(
-        data_domain=data_domain,
-        granularity=granularity,
-        sub_domain=None,
-        deduplication_fields=list(deduped),
-        header_bindings=list(header_bindings or []),
-        field_parse_rules=list(field_parse_rules or []),
-    )
-    if not policy.passed:
-        plan.skipped_reason = (
-            "改写后未通过 hash 策略校验，保持原样："
-            + "；".join(policy.blocking_messages or policy.blocking_errors)
-        )
+    if not plan.replacements and not plan.removals and not plan.additions:
+        plan.skipped_reason = "无需改写（已全部是语义键，且已通过校验）"
         return plan
 
     return plan
@@ -314,9 +674,6 @@ def collect_missing_identity_keys(policy) -> List[str]:
             if key not in missing:
                 missing.append(key)
     return missing
-
-
-_collect_missing_identity_keys = collect_missing_identity_keys
 
 
 _collect_missing_identity_keys = collect_missing_identity_keys
@@ -377,6 +734,7 @@ async def collect_plans() -> List[TemplateFieldPlan]:
                 header_bindings=tpl["header_bindings"],
                 header_columns=tpl["header_columns"],
                 field_parse_rules=tpl["field_parse_rules"],
+                sub_domain=tpl.get("sub_domain"),
                 candidate_index=candidate_index,
                 hash_service=hash_service,
                 readiness_service=readiness_service,
@@ -481,7 +839,15 @@ def print_report(plans: List[TemplateFieldPlan]) -> None:
             for item in plan.replacements:
                 print(f"    替换  {item['from']}  ->  {item['to']}   (依据: {item['source']})")
             for item in plan.removals:
-                print(f"    剔除  {item['from']}  ->  {item['to']}   ({item['reason']})")
+                target = item["to"] or "(剔除)"
+                evidence = item.get("evidence") or "-"
+                print(
+                    f"    剔除  {item['from']}  ->  {target}   "
+                    f"({item['reason']}; 证据: {evidence})"
+                )
+            for item in plan.additions:
+                print(f"    补齐  {item['key']}   ({item['reason']})")
+            print(f"    结果  {plan.current_fields}  ->  {plan.planned_fields}")
             if plan.unmapped_fields:
                 print(f"    无法判定，保持原样: {plan.unmapped_fields}")
             if plan.ambiguous_fields:
@@ -511,8 +877,25 @@ def print_report(plans: List[TemplateFieldPlan]) -> None:
                 f"[{plan.template_id}] {plan.template_name}: "
                 f"无法判定={plan.unmapped_fields} 多候选={plan.ambiguous_fields}"
             )
+    removed_columns: Dict[str, List[int]] = {}
+    for plan in changed:
+        for item in plan.removals:
+            removed_columns.setdefault(item["from"], []).append(plan.template_id)
+    if removed_columns:
+        print("\n=== 被剔除的列名清单（请人工审阅） ===")
+        for column, template_ids in sorted(removed_columns.items()):
+            evidences = sorted(
+                {
+                    item.get("evidence") or "-"
+                    for plan in changed
+                    for item in plan.removals
+                    if item["from"] == column
+                }
+            )
+            print(f"    {column}  <- 模板 {template_ids}  证据: {evidences}")
     print("\n提示：把业务属性/度量列写进 deduplication_fields 本身就是配置错误，")
     print("      它们无法区分行；需要按域补齐真正的身份键（见各模板的『还缺这些身份键』）。")
+    print("      被剔除的列名如果确实是业务身份键，请在对应模板里确认字段映射后重新运行本脚本。")
 
 
 async def main() -> int:
