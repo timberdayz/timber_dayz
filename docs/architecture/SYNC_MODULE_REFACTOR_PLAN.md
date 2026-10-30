@@ -675,6 +675,57 @@ deduplication_fields 写法不一（订单号 vs order_id）
 | 对**构造的坏样本**跑（路径写错的测试） | 静态 1 条 + 运行时 2 条 ⇒ **exit 1**，并打印具体文件与行号 |
 | 门禁自测 | **5 项全绿** |
 
+### 3.6.3 门禁上线后自己红了：又一个「哑测试」（2026-10-31 第 11 轮）
+
+P4 门禁上线后，`main` 的 `CI Pipeline` **连续 8 次红**，原因不是新代码坏了，
+而是**门禁自己抓到了第 5 个哑测试**：
+
+```
+frontend/scripts/manualChunksCycle.test.mjs:18
+  Error: ENOENT: no such file or directory,
+  scandir '.../frontend/dist/assets/js'
+```
+
+这条测试检查的是**前端构建产物**（Vite 打包出来的 chunk 有没有循环引用）。
+`frontend/dist/` 是 gitignore 且未跟踪 ⇒ CI 的全新检出里**根本不存在**；
+而 `frontend-guard` job 只做 `npm ci`，**不跑 `vite build`** ⇒ 目录永远不存在。
+
+⇒ 测试在 `readdirSync(jsDir)` 处直接崩掉，**断言一次都没执行**，
+和它要抓的那 4 个哑测试是同一种病。
+
+**修法：显式跳过，而不是崩掉。**
+
+```js
+const skipReason = existsSync(jsDir)
+  ? false
+  : 'dist/assets/js 不存在：需要先构建前端产物（例如 npm run build）才有可检查的对象'
+
+test('build output does not create a circular import between ...', { skip: skipReason }, () => { ... })
+```
+
+要点：
+
+* **没有构建产物 ⇒ 没有可检查的对象 ⇒ 显式 skip 并写清原因**，
+  而不是让测试「崩掉」伪装成一条普通失败（这正是门禁要禁止的形态）；
+* 门禁本身**不削弱**：运行时检查照旧扫 ENOENT 等信号 ——
+  只是这条测试不再制造假信号；
+* 本地/任何先构建过前端的上下文里，这条测试**仍然是真检查**（`skip: false`）；
+* 没有去改门禁去「忽略 dist 下的 ENOENT」—— 那等于给门禁开一个可以藏真 bug 的口子。
+
+**修完的实测**：
+
+| 场景 | 修之前 | 修之后 |
+| --- | --- | --- |
+| 本地（有 `dist/`） | 真跑断言，通过 | **真跑断言，通过**（不变） |
+| 模拟 CI（无 `dist/`） | ENOENT 崩溃 → 门禁 exit 1 | **`skipped 2`（带原因），无 ENOENT → 门禁 exit 0** |
+| 全量前端测试失败基线 | 9 条 | **9 条**（名单逐条一致） |
+| 门禁本地跑 | — | 静态 0 / 运行时 **0** / 普通断言失败 **9** ⇒ **exit 0** |
+
+**教训（写给以后）**：门禁上线时，它会立刻把「以前没人看的红灯」全部暴露出来。
+这是好事，但必须**当场把暴露出来的红灯处理掉** ——
+否则就是「永远红的 CI」，而永远红的 CI 和永远绿的 CI 同样有害：
+真回归会被淹没在里面。
+
 ---
 
 ## 3.7 P3｜模板口径体检巡检（2026-10-31 第 10 轮）
