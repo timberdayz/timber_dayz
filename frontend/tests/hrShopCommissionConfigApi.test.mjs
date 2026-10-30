@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 
 const repoRoot = resolve(import.meta.dirname, '..')
 const apiSource = readFileSync(resolve(repoRoot, 'src/api/index.js'), 'utf8')
-const viewSource = readFileSync(resolve(repoRoot, 'src/views/hr/ShopAssignment.vue'), 'utf8')
+const viewSource = readFileSync(resolve(repoRoot, 'src/domains/business/views/hr/ShopAssignment.vue'), 'utf8')
 
 test('HR shop commission config API forwards year_month as query params', () => {
   assert.match(

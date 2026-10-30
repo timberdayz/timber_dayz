@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const filePath = resolve(process.cwd(), 'frontend/src/domains/data_platform/views/DataSyncTasks.vue')
+const filePath = resolve(process.cwd(), 'src/domains/data_platform/views/DataSyncTasks.vue')
 const text = readFileSync(filePath, 'utf8')
 
 assert.match(text, /getHeaderChangeErrors/, 'task view should surface header-change hints')

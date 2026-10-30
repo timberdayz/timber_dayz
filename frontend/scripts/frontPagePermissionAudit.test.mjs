@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const routerPath = path.resolve('frontend/src/router/index.js')
+const routerPath = path.resolve('src/router/index.js')
 const routerText = fs.readFileSync(routerPath, 'utf8')
 
 function extractRoutes(text) {
@@ -168,7 +168,7 @@ test('hr approval and messaging pages follow personal view operation classificat
 })
 
 test('active routes do not declare roles without matching permissions', async () => {
-  const { ROLE_CONFIG } = await import(pathToFileURL(path.resolve('frontend/src/config/rolePermissions.js')).href)
+  const { ROLE_CONFIG } = await import(pathToFileURL(path.resolve('src/config/rolePermissions.js')).href)
   const mismatches = routes
     .filter((route) => route.permission && Array.isArray(route.roles) && route.roles.length > 0)
     .flatMap((route) =>

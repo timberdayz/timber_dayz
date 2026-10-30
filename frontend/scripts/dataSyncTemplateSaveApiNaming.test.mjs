@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const projectRoot = resolve(process.cwd())
-const apiPath = resolve(projectRoot, 'frontend/src/api/index.js')
+const apiPath = resolve(projectRoot, 'src/api/index.js')
 const apiText = readFileSync(apiPath, 'utf8')
 
 assert.match(
