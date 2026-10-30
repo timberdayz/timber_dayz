@@ -1,8 +1,9 @@
 # 采集同步模块 · 前后端一体优化方案
 
-> 状态：审查结论 + 待拍板方案（**本文档不含任何已落地的代码改动**）
+> 状态：**第 1~4 批已全部落地并提交（本地，未 push）**；历史数据修复**脚本已交付但未执行**。
 > 审查范围：`backend/services/{template_hash_policy, semantic_hash_policy_service, semantic_field_registry, template_save_readiness_service, field_mapping_template_service, template_family_service, template_semantic_binding_backfill}.py`、`backend/domains/data_platform/routers/field_mapping_templates.py`、`frontend/src/components/dataSync/{TemplateUpdateWorkbenchDrawer,TemplateDeduplicationReviewPanel}.vue`、`frontend/src/domains/data_platform/utils/{deduplicationSelection,headerBindings}.js`
 > 取证方式：真实库只读查询 + 真实 HTTP 接口重放 + node 直跑前端真实模块 + 后端日志还原用户操作序列。全部结论标注了 `文件:行号`。
+> 交付提交：`3367d211`（第 1 批 前端止漏）、`f26248f0`（第 2 批 后端口径归一）、`b1b34dfe`（数据修复脚本）、`482705d6`（第 3 批 状态机与家族校验）、`f2b09f5c`（第 4 批 环境与可观测）。
 
 ---
 
@@ -146,6 +147,30 @@
 | 3.5 | 契约失效提升为一等状态（`contract_invalid`）+ 契约回填（当前 459 个文件仅 24 个带契约） | `template_variant_takeover_service.py:281-334`、`template_contract_service.py:253-289` |
 | 3.6 | 抽唯一 `resolve_template_for_file(platform, domain, granularity, sub_domain, account)`，供入库判定/治理看板/投影三处共用（消除"严格 5 维 vs 3 级降级"与 `_legacy_shadow_compare` 第三把尺子） | `data_sync_template_status_service.py:75-98`、`template_matcher.py:95-160`、`template_family_service.py:248-262` |
 
+#### 第 3 批实施结果（2026-10-30）
+
+| 方案项 | 实际落地 | 关键取舍 |
+|-------|---------|---------|
+| 3.1 | 保存链路合并为单事务（`async with db.begin()`）；投影失败整体回滚并抛 `TemplateFamilyProjectionError`，路由转错误码 1003，**不再"报成功但没投影"**；响应新增 `family_id`/`active_version_id`/`projection_status` | — |
+| 3.2 | 家族校验改比「实际参与 `data_hash` 的字段对」：比较对象是 `{身份键: 实际取值来源列}`，身份键判定与 `calculate_data_hash` **完全同序**（先对**原文**判 canonical，中文列名不会被提升）。这修掉了「中文名 vs 语义键」被判「完全一致」的**假一致** | **archived 版本参与比较但只提示不阻断**（阻断基准仍是最新 published）。若 archived 也阻断，`shopee/orders/weekly` 家族会被**永久锁死**（用户既改不了历史版本，也存不进新模板），而历史口径修复属未授权的数据变更 |
+| 3.5 | 契约失效提升为一等状态：新增 `contract_status`（`valid`/`invalid`/`missing`）+ `contract_invalid` + `contract_fallback{applied,reason,fallback_template_id}`，在全部返回路径透出；读取契约抛异常不再静默（记入 `contract_resolution_status` 并合并进返回体） | — |
+| 3.6 | 抽出唯一 `resolve_template_for_file`（异步 + 同步孪生），入库判定 / 治理看板 / 家族投影三处共用；`resolve` 调用已传 `account` | 消除了"resolver 报 missing_family、匹配器报有模板"的两套结论 |
+| 新增 | 家族投影**版本化**：每次发布新增一条 version 行、旧行置 `superseded`，历史版本可返回；删除模板改为**归档 + 同事务重投影**（该维度无 published 模板时家族 `governance_status='missing_template'`、`active_version_id=NULL`） | 前端变体表会一并列出历史变体（`flattenVariants` 展平所有版本），未擅自裁剪 |
+
+**本轮额外补上的一层（关键，否则 3.2 会在用户保存一次后失效）**：
+
+新增 `semantic_review_source` 字段区分「用户明确确认」与「系统按表头名推断」：
+
+| 来源 | 前端标记 | 后端落库 |
+|------|---------|---------|
+| 批量推断（`normalizeHeaderBindings`） | `inferred` | `inferred` |
+| 用户在下拉框改（`updateHeaderBindingSemantic`） | `user` | `user` |
+| 用户点「确认映射并加入」 | `user` | `user` |
+
+只有**非 `inferred`** 的确认绑定才允许被提升成语义身份。没有这一层区分，「产品ID」会被当成 `product_id` ⇒ 3.2 修掉的假一致会在用户保存一次模板后**重新出现**（前端原先对所有推断出的键一律标 `confirmed_semantic`，后端保存侧也会自动确认）。
+
+同时把「绑定是否已确认」的判定统一到 registry 的 `resolve_binding_review_status`，消除读取侧与两道闸门各判一套的旧矛盾。
+
 ### 第 4 批｜环境与可观测
 
 | # | 改动 | 说明 |
@@ -153,6 +178,28 @@
 | 4.1 | **修正超时预算倒置**：DB `statement_timeout` 必须 < 前端超时（`api/index.js:30-32` 的注释要求如此，实际 120s > 70s）⇒ DB 设 60s，前端保持 70s | `frontend/src/api/index.js:25-37`、`backend` DB 配置 |
 | 4.2 | `/api/dashboard/clearance-ranking` 慢查询治理（索引/预聚合）。实测该查询跑满 120s，间隔 71/72/73 秒重试，且占满事件循环使模板请求排队 | `frontend/src/api/dashboard.js:113`、`data_sync.py` 对应实现 |
 | 4.3 | 错误文案区分"超时 / 断网 / 服务端错误"（现在 `timeout of 70000ms exceeded` 被当网络错误原样抛出） | `frontend/src/api/index.js:688-708` |
+
+#### 第 4 批实施结果（2026-10-30）
+
+| 项 | 实际落地 | 与原计划的差异 |
+|---|---------|---------------|
+| 4.1 | 连接池级默认**保持 120s 不变**（`DB_POOL_STATEMENT_TIMEOUT_MS`）——Celery/后台批量采集导入直接用 `AsyncSessionLocal()`、不经过请求级预算，把池默认值砍到 60s 会打断这些长事务。**新增按路径分级的请求级预算**，用 `SET LOCAL` 局部收紧：`/dashboard` 60s（前端 70s）、普通接口 25s（前端 30s）、`/preview` 50s（前端 60s）、`/mapping` 80s（前端 90s）、`/ingest` 170s（前端 180s）、`/collection` 290s（前端 300s）、`/governance` 60s（前端 120s）、`/scan` 60s（前端 120s） | 原计划是「DB 统一设 60s」。实测 governance/scan 的耗时在 **Excel 表头解析（纯 IO）** 而非 DB 侧，故按路径分级比全局一个值更贴合余量 |
+| 4.2 | 视图层优化（`sql/api_modules/clearance_ranking_module.sql`）：去掉 `to_jsonb(o)->>'...'` 整行转 jsonb、去掉金额的 `numeric→text→正则→numeric` 往返、把 `mart.inventory_backlog_base` 从 LATERAL 的 N+1 重复计算物化成 CTE、LATERAL 驱动行去重成 `(ranking_month, platform_code, sku_key)`。选行规则与输出列保持原样 | 原计划写的是「索引/预聚合」。实测真正的主因是 **LATERAL N+1 放大**（原视图即使只留 tiktok 一个平台也 >600s 打不出来），单加索引不解决 |
+| 4.3 | 新增 `classifyRequestFailure` / `buildFailureMessage`，区分 timeout / network / server / http 四类。**不改变任何既有错误字段契约**（`message`/`response`/`data`/`isNetworkError`/`code`/`type` 原样保留），只新增分类字段 | 无差异 |
+
+**4.2 慢查询实测对比**
+
+| | 优化前 | 优化后 |
+|---|---|---|
+| 真实接口 `GET /api/dashboard/clearance-ranking` | **HTTP 500 @ 120.09s**（DB statement_timeout） | 视图 SQL **42.5 / 43.5 / 43.7s**（3 次实测） |
+| LATERAL 选行阶段 | 18.1s（tiktok 单平台） | **1.03s**（17 倍） |
+| 全量 atomic 扫描 | 24.9s | 24.9s（剩余成本在此，需要配合"月窗口下推"才能再降） |
+
+⚠️ **两个必须知道的事实**：
+
+1. **视图定义变更不会自动生效**。`refresh_runner.py:409-413` 明确「普通视图的数据是查询时实时算的，定义变更请走 `scripts/rebuild_views.py` 显式重建」。
+2. **真实库当前生效的视图与仓库最终文件不等价**。`ops.pipeline_run_log` 显示 **2026-10-30 05:51 UTC（13:51 本地）** 有一次 `bootstrap_postgresql_dashboard.clearance_ranking` 自动重建，它读到的是当时工作区里**尚未写完的中间版本**。两者差异是实质性的：中间版本把 `b.platform_code = m.platform_code AND b.sku_key = m.sku_key` 放在 LATERAL 的 **JOIN ON** 侧，最终版本放在 LATERAL 子查询的 **WHERE** 侧 —— 后者才会先按 sku 过滤再按日期取最新，前者会先全局取最新一行再由 ON 过滤。CTE 结构（`order_months / order_sku_month / backlog_rows / stagnant_before_month / shop_month`）两者一致。
+   ⇒ 对齐命令：`python scripts/rebuild_views.py --target api.clearance_ranking_module`（会短暂持有排他锁）。
 
 ---
 
