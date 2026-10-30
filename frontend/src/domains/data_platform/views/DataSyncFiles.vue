@@ -937,7 +937,7 @@ const fileViewOptions = [
   { label: '异常文件', value: 'anomaly', status: null },
   { label: '历史遗留', value: 'legacy', status: null }
 ]
-const activeFileView = ref('pending')
+const activeFileView = ref('ready')
 
 // v4.18.0新增：分页相关
 const pagination = ref({
@@ -1095,7 +1095,7 @@ const getTemplateStatusTooltip = (row) => {
   if (row?.semantic_contract_status === 'breaking_drift') {
     parts.push('模板待确认：缺少业务概览 required 语义字段')
   } else if (row?.semantic_contract_status === 'non_breaking_drift') {
-    parts.push('字段漂移但核心语义字段完整，允许自动同步')
+    parts.push('非破坏性变更：核心语义字段完整，允许降级同步')
   }
   if (missingRequired.length) {
     parts.push(`缺少核心字段：${missingRequired.join(', ')}`)
@@ -1434,7 +1434,7 @@ const calculateDuration = (startTime, endTime) => {
 
 // 重置筛选器
 const resetFilters = () => {
-  activeFileView.value = 'pending'
+  activeFileView.value = 'ready'
   filters.value = {
     platform: null,
     domain: null,
