@@ -25,6 +25,15 @@ REQUIRED_LITERALS = [
     "run --rm --no-deps backend-api python3 /app/scripts/bootstrap_production.py",
     "run --rm --no-deps backend-api python3 /app/scripts/verify_system_role_integrity.py --repair",
     "run --rm --no-deps backend-api python3 /app/scripts/bootstrap_postgresql_dashboard.py",
+    # [VIEW REBUILD] 视图**定义**变更必须显式重建：数据刷新与 bootstrap 都会跳过
+    # 已存在的普通视图，生产又关掉了启动自愈 ⇒ 少了这一步，改过的 sql/ 资产不会生效。
+    "run --rm --no-deps backend-api python3 /app/scripts/rebuild_views.py",
+    "DEPLOY_REBUILD_VIEW_TARGETS",
+    "api.clearance_ranking_module",
+    # 重建后必须再确认目标视图确实存在（rebuild_views.py 对「目标不在库里」
+    # 会跳过并返回 0，那是静默成功）。
+    "rebuild_dashboard_view_definitions",
+    "-e REBUILD_VERIFY_TARGETS",
     "up -d --no-build --no-deps backend-api celery-worker celery-beat",
     "up -d --no-build --no-deps frontend",
     "up -d --no-build --no-deps nginx",
@@ -34,6 +43,7 @@ REQUIRED_BACKEND_IMAGE_FILES = [
     "scripts/bootstrap_production.py",
     "scripts/verify_system_role_integrity.py",
     "scripts/bootstrap_postgresql_dashboard.py",
+    "scripts/rebuild_views.py",
 ]
 
 

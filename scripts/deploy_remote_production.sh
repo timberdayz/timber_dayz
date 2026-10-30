@@ -860,6 +860,103 @@ if [ ${BOOTSTRAP_RC} -ne 0 ]; then
 fi
 echo "[OK] PostgreSQL Dashboard assets are ready"
 
+# [VIEW REBUILD] Phase 2.7: 视图**定义**变更的落地。
+#
+# 为什么必须显式重建：数据刷新流程（refresh_runner.execute_sql_target）对**已存在的**
+# 普通视图会跳过重建（recreate_views=False），bootstrap 走的是同一条路 —— 所以改了
+# sql/ 里的视图定义，光部署是**不会生效**的。生产环境
+# AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false，连「启动时自动补资产」这条也没有。
+#
+# 选在这个时刻重建：
+#   - 数据库已迁移、schema 门禁已过；
+#   - 旧 backend 容器此时已被 stage 停掉 → CREATE OR REPLACE VIEW 的排他锁
+#     不会挡住线上查询（重建期间看板会短暂转圈）；
+#   - 重建失败会触发回滚（DEPLOYMENT_ROLLBACK_ARMED=1）→ 不会带着旧定义上线。
+#
+# 目标清单可用环境变量 DEPLOY_REBUILD_VIEW_TARGETS 覆盖（空格分隔）。
+rebuild_dashboard_view_definitions() {
+  local rebuild_targets="$1"
+  local rebuild_args=()
+  local rebuild_target
+
+  for rebuild_target in ${rebuild_targets}; do
+    rebuild_args+=(--target "${rebuild_target}")
+  done
+
+  if [ ${#rebuild_args[@]} -eq 0 ]; then
+    echo "[INFO] Phase 2.7: No view rebuild targets configured, skipping"
+    return 0
+  fi
+
+  echo "[INFO] Phase 2.7: Rebuilding dashboard view definitions (${rebuild_targets})..."
+  local rebuild_log_file="${DEPLOY_LOG_DIR}/rebuild_views_${BOOTSTRAP_TS}.log"
+
+  set +e
+  "${compose_cmd_base[@]}" run --rm --no-deps backend-api python3 /app/scripts/rebuild_views.py "${rebuild_args[@]}" 2>&1 | tee "${rebuild_log_file}"
+  local rebuild_rc=${PIPESTATUS[0]}
+  set -e
+
+  if [ ${rebuild_rc} -ne 0 ]; then
+    echo "[FAIL] Dashboard view rebuild failed, deployment blocked"
+    echo "[INFO] Rebuild log: ${rebuild_log_file}"
+    echo "[INFO] Previous application containers will be restored by the rollback path."
+    return 1
+  fi
+
+  # rebuild_views.py 在「目标不在库里」时会跳过并返回 0 —— 那是**静默成功**。
+  # 这里再确认目标视图确实存在，避免「部署显示成功、视图其实根本没重建」。
+  echo "[INFO] Phase 2.7b: Verifying rebuilt view definitions exist..."
+  export REBUILD_VERIFY_TARGETS="${rebuild_targets}"
+  set +e
+  "${compose_cmd_base[@]}" run --rm --no-deps -e REBUILD_VERIFY_TARGETS backend-api python3 -c '
+import asyncio
+import os
+import sys
+
+from sqlalchemy import text
+
+from backend.models.database import AsyncSessionLocal
+
+TARGETS = [t for t in os.environ.get("REBUILD_VERIFY_TARGETS", "").split() if t]
+
+
+async def main() -> int:
+    missing = []
+    async with AsyncSessionLocal() as session:
+        for target in TARGETS:
+            result = await session.execute(
+                text("SELECT to_regclass(:name)"), {"name": target}
+            )
+            if result.scalar_one() is None:
+                missing.append(target)
+    if missing:
+        print("[FAIL] missing view definitions: " + ", ".join(missing))
+        return 1
+    print("[OK] rebuilt view definitions present: " + ", ".join(TARGETS))
+    return 0
+
+
+sys.exit(asyncio.run(main()))
+'
+  local verify_rc=$?
+  set -e
+
+  if [ ${verify_rc} -ne 0 ]; then
+    echo "[FAIL] Dashboard view rebuild did not produce the expected views, deployment blocked"
+    echo "[INFO] Rebuild log: ${rebuild_log_file}"
+    echo "[INFO] Previous application containers will be restored by the rollback path."
+    return 1
+  fi
+
+  echo "[OK] Dashboard view definitions rebuilt"
+  return 0
+}
+
+if ! rebuild_dashboard_view_definitions "${DEPLOY_REBUILD_VIEW_TARGETS:-api.clearance_ranking_module}"; then
+  echo "[INFO] Deployment blocked before application startup"
+  exit 1
+fi
+
 echo "[INFO] Phase 3: starting application layer (backend-api, celery)..."
 "${compose_cmd_base[@]}" up -d --no-build --no-deps backend-api celery-worker celery-beat
 

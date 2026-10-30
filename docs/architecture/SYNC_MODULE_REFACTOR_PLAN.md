@@ -883,7 +883,71 @@ deduplication_fields 写法不一（订单号 vs order_id）
 后端重启时会自动把 `sql/` 资产重新灌进库 ⇒ 本地改完视图定义、重启后端即生效。
 
 **生产环境该开关为 false**（`should_auto_bootstrap_dashboard_on_startup("production")` 返回 False），
-所以发版后**必须显式重建视图**：
+而且**数据刷新流程与 dashboard bootstrap 都会跳过「已存在的普通视图」**
+（`refresh_runner.execute_sql_target` 的 `recreate_views=False`）——
+所以生产上改完 `sql/` 资产，**光部署不会生效**，必须显式重建。
+
+> **第 11 轮起，这一步已经接进部署流程，不需要人工去服务器上跑。**
+
+`scripts/deploy_remote_production.sh` 新增 **Phase 2.7**：
+
+```
+Phase 2     数据库迁移（智能迁移）
+Phase 2.1   schema 完整性门禁
+Phase 2.5   生产 bootstrap
+Phase 2.6   dashboard 资产 bootstrap（只补「缺失」的视图）
+Phase 2.7 ★ 重建视图定义（CREATE OR REPLACE VIEW）
+Phase 2.7b ★ 确认重建后的视图确实存在
+Phase 3     启动应用层（backend-api / celery / frontend / nginx）
+```
+
+执行的命令：
+
+```bash
+python3 /app/scripts/rebuild_views.py --target api.clearance_ranking_module
+```
+
+**为什么要再加 2.7b**：`rebuild_views.py` 在「目标视图不在库里」时会**跳过并返回 0** ——
+那是**静默成功**。只跑重建步骤的话，会出现「部署日志显示成功、视图其实根本没重建」。
+2.7b 用 `to_regclass()` 逐个确认目标视图存在，缺失就中止部署并回滚。
+
+（这里**不校验行数**：新环境/空库时视图合法地返回 0 行，行数校验会误报。
+行数由发布后的「After Deployment」人工确认，见 `docs/guides/RELEASE_CHECKLIST.md`。）
+
+放在这个位置是有讲究的：
+
+- **在 schema 门禁之后** —— 迁移没过就不会走到这里；
+- **在应用层启动之前** —— 新 backend 一起来看到的就是新定义，不会先上线一轮旧口径；
+- **旧 backend 容器此时已被 stage 停掉** → `CREATE OR REPLACE VIEW` 的 ACCESS EXCLUSIVE
+  排他锁**不会挡住线上查询**（重建期间看板会短暂转圈）；
+- **重建失败 ⇒ 部署中止 ⇒ 回滚路径恢复旧容器** ⇒ 绝不会「带着旧定义上线」。
+
+目标清单可用环境变量覆盖（空格分隔）：
+
+```bash
+export DEPLOY_REBUILD_VIEW_TARGETS="api.clearance_ranking_module api.sku_clearance_ranking_module"
+```
+
+配套改动：
+
+| 文件 | 改动 |
+| --- | --- |
+| `Dockerfile.backend` | 把 `scripts/rebuild_views.py` COPY 进后端镜像（容器内执行） |
+| `scripts/deploy_remote_production.sh` | 新增 Phase 2.7 + 2.7b |
+| `scripts/verify_remote_deploy_contracts.py` | 加契约门禁：脚本里必须有重建步骤 + 镜像里必须有重建脚本 |
+| `tests/test_verify_remote_deploy_contracts.py` | 6 项自测，锁住「重建早于应用层启动」+「内联 Python 可编译且 import 齐全」 |
+
+**仍然需要人工确认的两种情况**：
+
+1. 视图的**列**变了（增删列、改名）⇒ 纯 `CREATE OR REPLACE VIEW` 会直接报错。
+   当前 `sql/api_modules/clearance_ranking_module.sql` 用的是
+   `DROP VIEW IF EXISTS` + `CREATE OR REPLACE VIEW` 两段式，列变了也能重建 ⇒ 不受影响；
+   别的视图若只写 `CREATE OR REPLACE VIEW`，列变更会失败 —— 部署会中止并回滚，
+   属于**响亮的失败**（不是静默错误），按提示改成 DROP + CREATE 即可。
+2. 视图**依赖链**变了（新增了上游视图）⇒ 需要把新上游也加进
+   `DEPLOY_REBUILD_VIEW_TARGETS`；`rebuild_views.py` 会按拓扑序串行重建，不会自锁。
+
+手动重建的入口仍然保留（本地调试 / 应急）：
 
 ```bash
 python scripts/rebuild_views.py --target api.clearance_ranking_module
@@ -917,7 +981,7 @@ python scripts/rebuild_views.py --target api.clearance_ranking_module
 - **待确认**：weekly/monthly 事实表里 `订单号`/`平台SKU`/`SKU_ID` 三列 100% 为空——是"旧版模板遗留列"还是"当前口径要求"，需业务/数据侧确认后再决定 3.4 的宽表策略。
 - **待确认**：「数据更新成功」这条绿色提示**不在本仓库**（`frontend/src`、`backend`、`frontend/dist`、`git log --all -S` 全无此字面串）⇒ 来自当前代码库之外的产物（浏览器缓存的旧版前端 / Service Worker / 另一套前端）。需当时的浏览器截图 + Network 面板记录才能定位。
 - **✅ 已修复（2026-10-31，第 10 轮）**：`api.clearance_ranking_module` **恒返回 0 行**。根因是**两处代码缺陷**，不是数据没到位：① 两侧 `sku_key` 定义不对称（订单侧 `sku_id` 优先、积压侧 `platform_sku` 优先）；② join 条件拿「库存的数据来源平台 `miaoshou`」比「订单的销售渠道 `shopee`/`tiktok`」⇒ 恒不相等。修复后视图从 **0 行变成 143 行**，详见 §3.9。
-- **⚠️ 生产发版后必须显式重建视图**：生产环境 `AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false` ⇒ 改完 `sql/` 资产不会自动生效，要跑 `python scripts/rebuild_views.py --target api.clearance_ranking_module`（§3.9.8）。
+- **✅ 生产视图重建已接进部署流程（第 11 轮）**：生产环境 `AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false`，且数据刷新/bootstrap 都会跳过「已存在的普通视图」⇒ 改完 `sql/` 资产光部署不生效。现在由 `scripts/deploy_remote_production.sh` 的 **Phase 2.7** 在部署中自动执行 `python3 /app/scripts/rebuild_views.py --target api.clearance_ranking_module`（旧容器已停、无排他锁冲突；失败即中止部署并回滚），**不需要人工去服务器上跑**（§3.9.8）。
 - **⏸ 仍未做**：P6 服务层月窗口下推。P7 已把滞销榜查询压回 **47.7s**（在 60s 的 DB 预算内），
   但剩下的 22s 在**语义层**：`semantic.fact_orders_atomic` 对每一行都跑一次店铺别名解析
   （33265 次关联子查询）。真正的优化对象是那里，需另立专项评估对所有下游视图的影响面（§3.9.7）。

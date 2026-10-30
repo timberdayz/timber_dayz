@@ -19,6 +19,11 @@
    - local production compose validation uses `--env-file .env.production`
    - no legacy password fallback remains
    - local `.env.production` matches the intended server `.env`
+6. If any view asset under `sql/` changed, list the affected targets — the deploy
+   rebuilds them automatically (Phase 2.7, see "Dashboard View Definitions" below):
+   ```bash
+   git diff --name-only v<previous-tag>..HEAD -- sql/
+   ```
 
 ## Tag Release
 
@@ -45,6 +50,29 @@ powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Config
 
 Expected result: `origin` has two push URLs while `main` tracks `origin/main`; `cnb/main` is checked as the required mirror reference. The script refuses dirty worktrees, non-main branches, in-progress merges/rebases, remote divergence, and non-fast-forward local history.
 
+## Dashboard View Definitions
+
+Changing a **view definition** under `sql/` does not take effect by deploying alone:
+the data refresh path and the dashboard bootstrap both skip views that already exist,
+and production runs with `AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false`.
+
+The deployment now handles this automatically. `scripts/deploy_remote_production.sh`
+runs **Phase 2.7** — after the database migration and the schema gate, and before the
+application layer starts:
+
+```bash
+python3 /app/scripts/rebuild_views.py --target api.clearance_ranking_module
+```
+
+- The rebuild happens while the old backend containers are already stopped, so the
+  `CREATE OR REPLACE VIEW` exclusive lock does not block live dashboard queries.
+- A failed rebuild aborts the deployment and the rollback path restores the previous
+  containers, so the old definition never goes live on its own.
+- Target list is configurable via `DEPLOY_REBUILD_VIEW_TARGETS` (space separated).
+  The default is `api.clearance_ranking_module`.
+- `scripts/rebuild_views.py` must be present in the backend image
+  (`Dockerfile.backend`) — enforced by `scripts/verify_remote_deploy_contracts.py`.
+
 ## Watch GitHub Actions
 
 Expected order:
@@ -56,6 +84,8 @@ Expected order:
    - `Validate Data Flow (Release Gate)`
    - `Build and Push Images (Release Tag)`
    - `Deploy to Production (Tag Release)`
+     - remote phases: migrations → schema gate → dashboard bootstrap →
+       **Phase 2.7 view rebuild** → backend → frontend → nginx
 
 ## If Deployment Fails
 
@@ -73,3 +103,6 @@ Expected order:
 3. Confirm database migrations are applied
 4. Confirm Redis and Celery services are healthy
 5. Confirm the deployed tag matches the intended release
+6. If `sql/` view assets changed, confirm Phase 2.7 succeeded:
+   - server log: `${PRODUCTION_PATH}/deploy-logs/rebuild_views_<timestamp>.log`
+   - the rebuilt view returns rows (a 0-row result usually means the join口径 drifted)
