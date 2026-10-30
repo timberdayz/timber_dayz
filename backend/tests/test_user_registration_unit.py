@@ -19,12 +19,27 @@
    - rejected状态用户登录测试
    - suspended状态用户登录测试
    - 账户锁定测试
+
+⚠️ **这是一个会写数据的测试**(2026-10-30 加固)
+---------------------------------------------------
+* **默认跳过**: 必须显式设置 ``XIHONG_RUN_INTEGRATION_TESTS=1`` +
+  ``XIHONG_INTEGRATION_DISPOSABLE=1`` + ``XIHONG_INTEGRATION_BASE_URL=<地址>``,
+  三个都给出才跑。**没有默认地址** —— 旧实现默认打 ``http://localhost:8001``,
+  而那台本地服务连的是**真实业务库**, 2026-01 ~ 2026-10 累积了 400+ 个
+  ``test_user_* / dup_user_* / pwd_test_*`` 残留账号。
+* **失败会真的失败**: 用例原本用 ``print_result`` 记录成败、**不抛异常**
+  ⇒ pytest 一律判「通过」(后端没起来也算过)。现在模块结束时会把失败项
+  统一转成真正的测试失败。
+* **启用前提**: 目标后端的注册接口**不能限流**(否则批量注册会被 429 打断,
+  用例会误报); 另需存在 ``operator`` 角色(审批接口缺该角色返回 500)。
 """
 
 import sys
 import asyncio
 import time
 from pathlib import Path
+
+import pytest
 
 # 添加项目根目录到 Python 路径
 root_dir = Path(__file__).parent.parent.parent
@@ -34,10 +49,26 @@ import requests
 from typing import Dict, List, Tuple
 from modules.core.logger import get_logger
 
+from integration_gate import (  # noqa: E402  (同级模块, pytest prepend 导入模式)
+    IntegrationGateError,
+    require_integration_ready,
+    skip_reason,
+)
+
 logger = get_logger(__name__)
 
-# 测试配置
-BASE_URL = "http://localhost:8001"
+pytestmark = pytest.mark.integration
+
+# [*] 2026-10-30 加固 —— 这些用例会**真的注册 / 审批 / 拒绝用户**。
+#     旧实现把目标写死 ``http://localhost:8001``, 而那台本地服务连的是
+#     **真实业务库** ⇒ 每跑一次就往生产库塞一批测试账号
+#     (实测 2026-01 ~ 2026-10 累积了 400+ 个)。
+#     现在必须显式开启 + 显式指定可丢弃的目标, 默认一个字节都不写。
+try:
+    BASE_URL = require_integration_ready()
+except IntegrationGateError as _gate_error:
+    pytest.skip(f"{skip_reason()} ({_gate_error})", allow_module_level=True)
+
 API_PREFIX = "/api"
 
 # 测试结果
@@ -64,6 +95,24 @@ def print_result(test_name: str, success: bool, message: str = ""):
     if message:
         print(f"      {message}")
     test_results.append((test_name, success, message))
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _fail_on_case_failure():
+    """把用例记录的失败变成**真正的测试失败**。
+
+    为什么需要: 这些用例用 ``print_result`` 记录成败、**不抛异常**,
+    而 pytest 只把「抛异常」当失败 ⇒ 无论注册成功还是后端根本没起来,
+    pytest 都会判**通过** (这正是它们以前混进回归基线的原因)。
+    """
+    test_results.clear()
+    yield
+    failures = [(name, message) for name, ok, message in test_results if not ok]
+    if failures:
+        pytest.fail(
+            "以下用例失败: "
+            + "; ".join(f"{name}({message})" for name, message in failures)
+        )
 
 
 def login_as_admin() -> str:
