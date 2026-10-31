@@ -54,6 +54,16 @@ markers = [
     "requires_browser: marks tests that require a real browser environment",
 ]
 asyncio_mode = "auto"
+# ⚠️ pytest-asyncio 1.x 起，async fixture 的事件循环作用域默认跟 fixture 自己的 scope 走，
+#    测试函数默认走 function 作用域。
+#    后果（本仓库 2026-10-31 实测）：`pg_engine` 是 session 级 fixture → 跑在 session 事件循环；
+#    而 `pg_session`（function 级）与测试函数跑在各自 function 事件循环里。
+#    session 级 engine 的连接池里每条 asyncpg 连接都绑定在 session 循环上，
+#    被另一个循环的 session 取用 → `InterfaceError: cannot perform operation: another operation is in progress`
+#    → 全量 4723 个 error（不是用例本身有问题，是连接跨循环复用）。
+#    修法：把 async fixture 与测试函数统一到 session 事件循环上，让 engine / session / 测试同循环。
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 filterwarnings = [
     "ignore:Support for class-based `config` is deprecated:DeprecationWarning",
     "ignore:`max_items` is deprecated and will be removed, use `max_length` instead:DeprecationWarning",

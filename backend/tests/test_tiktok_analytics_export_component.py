@@ -32,8 +32,11 @@ class _FakePage:
         self.redirect_to_login = False
         self.visible_selectors: set[str] = set()
         self.visible_texts: set[str] = set()
+        self.event_handlers: dict[str, list] = {}
 
-    async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
+    async def goto(
+        self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000
+    ) -> None:
         self.goto_calls.append(url)
         if self.redirect_to_login:
             self.url = "https://seller.tiktokshopglobalselling.com/account/login"
@@ -48,6 +51,27 @@ class _FakePage:
 
     def get_by_text(self, text: str, exact: bool = False):
         return _FakeLocator(visible=text in self.visible_texts)
+
+    # ── Playwright 事件订阅 ─────────────────────────────────────────────
+    # 生产侧 `modules/platforms/tiktok/components/_runtime_diagnostics.py`
+    # 的 `attach_tiktok_runtime_diagnostics()` 会注册 console / requestfailed /
+    # response 三个监听器（Playwright 标准 API）。该 mock 在 commit f047979a
+    # 新增诊断能力时**未同步**，导致本文件全部用例抛
+    # `AttributeError: '_FakePage' object has no attribute 'on'`。
+    def on(self, event: str, handler) -> None:
+        self.event_handlers.setdefault(event, []).append(handler)
+
+    def emit(self, event: str, payload=None) -> None:
+        """手动触发已注册的事件监听器（供诊断相关用例使用）。"""
+        for handler in list(self.event_handlers.get(event, [])):
+            handler(payload)
+
+    async def evaluate(self, script: str):
+        # 诊断快照读 `document.readyState`；mock 统一返回 None → 快照侧得到 "unknown"
+        return None
+
+    async def title(self) -> str:
+        return ""
 
 
 class _FakeLocator:
@@ -71,13 +95,18 @@ class _DelayedAnalyticsNavigationPage(_FakePage):
         self._pending_url: str | None = None
         self._settle_after_waits = settle_after_waits
 
-    async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
+    async def goto(
+        self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000
+    ) -> None:
         self.goto_calls.append(url)
         self._pending_url = url
 
     async def wait_for_timeout(self, ms: int) -> None:
         self.wait_calls.append(ms)
-        if self._pending_url is not None and len(self.wait_calls) >= self._settle_after_waits:
+        if (
+            self._pending_url is not None
+            and len(self.wait_calls) >= self._settle_after_waits
+        ):
             self.url = self._pending_url
             self._pending_url = None
 
@@ -85,34 +114,56 @@ class _DelayedAnalyticsNavigationPage(_FakePage):
 def test_tiktok_analytics_export_detects_analytics_page_url() -> None:
     component = TiktokAnalyticsExport(_ctx())
 
-    assert component._analytics_page_looks_ready(
-        "https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG"
-    ) is True
-    assert component._analytics_page_looks_ready(
-        "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG"
-    ) is False
+    assert (
+        component._analytics_page_looks_ready(
+            "https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG"
+        )
+        is True
+    )
+    assert (
+        component._analytics_page_looks_ready(
+            "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG"
+        )
+        is False
+    )
 
 
 @pytest.mark.asyncio
 async def test_tiktok_analytics_export_navigates_to_analytics_page_and_runs_helpers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
-    component = TiktokAnalyticsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+    )
+    component = TiktokAnalyticsExport(
+        _ctx({"shop_region": "SG", "granularity": "monthly"})
+    )
 
-    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    switch_mock = AsyncMock(
+        return_value=type("R", (), {"success": True, "message": "ok"})()
+    )
     date_state_mock = AsyncMock(return_value=False)
-    date_mock = AsyncMock(return_value=DatePickResult(success=True, message="ok", option=DateOption.LAST_30_DAYS))
+    date_mock = AsyncMock(
+        return_value=DatePickResult(
+            success=True, message="ok", option=DateOption.LAST_30_DAYS
+        )
+    )
     confirm_mock = AsyncMock(return_value=True)
     trigger_mock = AsyncMock(return_value=True)
     collect_mock = AsyncMock(return_value="temp/analytics.xlsx")
 
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
-    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(
+        component, "_date_selection_already_satisfied", date_state_mock, raising=False
+    )
     monkeypatch.setattr(component, "_run_date_picker", date_mock)
-    monkeypatch.setattr(component, "_confirm_date_selection", confirm_mock, raising=False)
+    monkeypatch.setattr(
+        component, "_confirm_date_selection", confirm_mock, raising=False
+    )
     monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
-    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
+    monkeypatch.setattr(
+        component, "collect_download_result", collect_mock, raising=False
+    )
 
     result = await component.run(page)
 
@@ -131,18 +182,28 @@ async def test_tiktok_analytics_export_navigates_to_analytics_page_and_runs_help
 async def test_tiktok_analytics_export_deep_links_directly_from_unknown_logged_in_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/orders/list?shop_region=SG")
-    component = TiktokAnalyticsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/orders/list?shop_region=SG"
+    )
+    component = TiktokAnalyticsExport(
+        _ctx({"shop_region": "SG", "granularity": "monthly"})
+    )
 
-    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    switch_mock = AsyncMock(
+        return_value=type("R", (), {"success": True, "message": "ok"})()
+    )
     date_state_mock = AsyncMock(return_value=True)
     trigger_mock = AsyncMock(return_value=True)
     collect_mock = AsyncMock(return_value="temp/analytics.xlsx")
 
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
-    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(
+        component, "_date_selection_already_satisfied", date_state_mock, raising=False
+    )
     monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
-    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
+    monkeypatch.setattr(
+        component, "collect_download_result", collect_mock, raising=False
+    )
 
     result = await component.run(page)
 
@@ -156,8 +217,12 @@ async def test_tiktok_analytics_export_deep_links_directly_from_unknown_logged_i
 async def test_tiktok_analytics_export_switches_shop_context_on_analytics_page_after_direct_navigation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
-    component = TiktokAnalyticsExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+    )
+    component = TiktokAnalyticsExport(
+        _ctx({"shop_region": "MY", "granularity": "monthly"})
+    )
 
     async def _switch_on_analytics_page(current_page):
         assert "/compass/data-overview" in str(current_page.url)
@@ -170,9 +235,13 @@ async def test_tiktok_analytics_export_switches_shop_context_on_analytics_page_a
     collect_mock = AsyncMock(return_value="temp/analytics-my.xlsx")
 
     monkeypatch.setattr(component, "_run_shop_switch", _switch_on_analytics_page)
-    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(
+        component, "_date_selection_already_satisfied", date_state_mock, raising=False
+    )
     monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
-    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
+    monkeypatch.setattr(
+        component, "collect_download_result", collect_mock, raising=False
+    )
 
     result = await component.run(page)
 
@@ -189,8 +258,12 @@ async def test_tiktok_analytics_export_switches_shop_context_on_analytics_page_a
 async def test_tiktok_analytics_export_normalizes_region_on_analytics_page_without_bouncing_homepage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG")
-    component = TiktokAnalyticsExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG"
+    )
+    component = TiktokAnalyticsExport(
+        _ctx({"shop_region": "MY", "granularity": "monthly"})
+    )
 
     async def _switch_on_analytics_page(current_page):
         assert "/compass/data-overview" in str(current_page.url)
@@ -203,9 +276,13 @@ async def test_tiktok_analytics_export_normalizes_region_on_analytics_page_witho
     collect_mock = AsyncMock(return_value="temp/analytics-my.xlsx")
 
     monkeypatch.setattr(component, "_run_shop_switch", _switch_on_analytics_page)
-    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(
+        component, "_date_selection_already_satisfied", date_state_mock, raising=False
+    )
     monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
-    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
+    monkeypatch.setattr(
+        component, "collect_download_result", collect_mock, raising=False
+    )
 
     result = await component.run(page)
 
@@ -214,16 +291,23 @@ async def test_tiktok_analytics_export_normalizes_region_on_analytics_page_witho
 
 
 @pytest.mark.asyncio
-async def test_tiktok_analytics_export_waits_until_data_overview_navigation_settles() -> None:
+async def test_tiktok_analytics_export_waits_until_data_overview_navigation_settles() -> (
+    None
+):
     page = _DelayedAnalyticsNavigationPage(
         "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY",
         settle_after_waits=2,
     )
-    component = TiktokAnalyticsExport(_ctx({"shop_region": "MY", "granularity": "monthly"}))
+    component = TiktokAnalyticsExport(
+        _ctx({"shop_region": "MY", "granularity": "monthly"})
+    )
 
     current_url = await component.ensure_analytics_ready(page)
 
-    assert current_url == "https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=MY"
+    assert (
+        current_url
+        == "https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=MY"
+    )
     assert page.goto_calls == [
         "https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=MY"
     ]
@@ -235,7 +319,9 @@ async def test_tiktok_analytics_export_returns_login_required_when_entry_state_i
 ) -> None:
     page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
     page.visible_selectors.add("input[type='password']")
-    component = TiktokAnalyticsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
+    component = TiktokAnalyticsExport(
+        _ctx({"shop_region": "SG", "granularity": "monthly"})
+    )
 
     switch_mock = AsyncMock()
     date_mock = AsyncMock()
@@ -258,7 +344,9 @@ async def test_tiktok_analytics_export_returns_login_required_when_entry_state_i
 async def test_tiktok_analytics_export_forwards_explicit_custom_range_to_date_picker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG")
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG"
+    )
     component = TiktokAnalyticsExport(
         _ctx(
             {
@@ -273,19 +361,31 @@ async def test_tiktok_analytics_export_forwards_explicit_custom_range_to_date_pi
         )
     )
 
-    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    switch_mock = AsyncMock(
+        return_value=type("R", (), {"success": True, "message": "ok"})()
+    )
     date_state_mock = AsyncMock(return_value=False)
-    date_mock = AsyncMock(return_value=DatePickResult(success=True, message="ok", option=DateOption.LAST_30_DAYS))
+    date_mock = AsyncMock(
+        return_value=DatePickResult(
+            success=True, message="ok", option=DateOption.LAST_30_DAYS
+        )
+    )
     confirm_mock = AsyncMock(return_value=True)
     trigger_mock = AsyncMock(return_value=True)
     collect_mock = AsyncMock(return_value="temp/analytics.xlsx")
 
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
-    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(
+        component, "_date_selection_already_satisfied", date_state_mock, raising=False
+    )
     monkeypatch.setattr(component, "_run_date_picker", date_mock)
-    monkeypatch.setattr(component, "_confirm_date_selection", confirm_mock, raising=False)
+    monkeypatch.setattr(
+        component, "_confirm_date_selection", confirm_mock, raising=False
+    )
     monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
-    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
+    monkeypatch.setattr(
+        component, "collect_download_result", collect_mock, raising=False
+    )
 
     result = await component.run(page)
 
@@ -299,19 +399,34 @@ async def test_tiktok_analytics_export_forwards_explicit_custom_range_to_date_pi
 async def test_tiktok_analytics_export_uses_explicit_trigger_and_collect_stages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG")
-    component = TiktokAnalyticsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG"
+    )
+    component = TiktokAnalyticsExport(
+        _ctx({"shop_region": "SG", "granularity": "monthly"})
+    )
 
-    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    switch_mock = AsyncMock(
+        return_value=type("R", (), {"success": True, "message": "ok"})()
+    )
     date_state_mock = AsyncMock(return_value=True)
     trigger_mock = AsyncMock(return_value=True)
     collect_mock = AsyncMock(return_value="temp/analytics-delayed.xlsx")
 
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
-    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(
+        component, "_date_selection_already_satisfied", date_state_mock, raising=False
+    )
     monkeypatch.setattr(component, "trigger_export", trigger_mock, raising=False)
-    monkeypatch.setattr(component, "collect_download_result", collect_mock, raising=False)
-    monkeypatch.setattr(component, "_run_export", AsyncMock(side_effect=AssertionError("should use explicit stages")), raising=False)
+    monkeypatch.setattr(
+        component, "collect_download_result", collect_mock, raising=False
+    )
+    monkeypatch.setattr(
+        component,
+        "_run_export",
+        AsyncMock(side_effect=AssertionError("should use explicit stages")),
+        raising=False,
+    )
 
     result = await component.run(page)
 

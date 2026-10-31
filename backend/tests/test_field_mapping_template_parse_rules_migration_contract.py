@@ -19,7 +19,9 @@ def _find_field_mapping_template_parse_rules_migration() -> Path:
 
 
 def _field_mapping_template_parse_rules_revision() -> str:
-    source = _find_field_mapping_template_parse_rules_migration().read_text(encoding="utf-8")
+    source = _find_field_mapping_template_parse_rules_migration().read_text(
+        encoding="utf-8"
+    )
     match = re.search(r'^revision\s*=\s*"([^"]+)"', source, re.MULTILINE)
     assert match, "expected revision identifier in parse-rules migration source"
     return match.group(1)
@@ -29,8 +31,24 @@ def test_field_mapping_template_parse_rules_migration_exists():
     _find_field_mapping_template_parse_rules_migration()
 
 
+def _schema_package_source() -> str:
+    """schema 包源文本 —— 聚合器 `schema.py` + `schema_parts/*.py` 分片一起读。
+
+    2026-10-31 实测修正：schema 拆分成 `modules/core/db/schema_parts/` 后，
+    列定义已迁到分片文件（`field_parse_rules = Column(JSONB, ...)` 在
+    `schema_parts/data_platform.py`），聚合器 `modules/core/db/schema.py`
+    里已无任何字面量（`Column(` / `mapped_column(` 计数均为 0）。
+    只读聚合器会误判「列不存在」→ 断言过期。读整个包则与拆分方式解耦。
+    """
+    parts = [Path("modules/core/db/schema.py")]
+    parts += sorted(Path("modules/core/db/schema_parts").glob("*.py"))
+    return "\n".join(
+        p.read_text(encoding="utf-8", errors="replace") for p in parts if p.exists()
+    )
+
+
 def test_field_mapping_template_schema_defines_parse_rules_column():
-    source = Path("modules/core/db/schema.py").read_text(encoding="utf-8")
+    source = _schema_package_source()
 
     assert "field_parse_rules = Column(JSONB" in source
     assert "field_parse_rules" in source
@@ -106,7 +124,9 @@ def test_field_mapping_template_parse_rules_migration_adds_jsonb_column():
             conn.close()
 
         env = os.environ.copy()
-        env["DATABASE_URL"] = f"postgresql://erp_user:erp_pass_2025@127.0.0.1:15432/{rehearsal_db}"
+        env["DATABASE_URL"] = (
+            f"postgresql://erp_user:erp_pass_2025@127.0.0.1:15432/{rehearsal_db}"
+        )
         result = subprocess.run(
             [
                 sys.executable,
@@ -124,9 +144,9 @@ def test_field_mapping_template_parse_rules_migration_adds_jsonb_column():
             timeout=240,
         )
 
-        assert result.returncode == 0, (
-            f"alembic upgrade failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"alembic upgrade failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
         conn = psycopg2.connect(
             host="127.0.0.1",
