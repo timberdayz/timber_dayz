@@ -77,6 +77,8 @@ def _row(**overrides):
         "days_since_restock": 0,
         # DOS 参考原料：近 90 天窗口销量
         "checklist_sales_90d": 90,
+        # 近30天动销：妙手状态层自带的窗口销量（与库存同源同一次采集）
+        "sold_units_30d": 12,
         "sku_id": 1001,
         "default_purchase_cost": 46.5,
         "reference_selling_price": None,
@@ -633,6 +635,47 @@ def test_clearance_view_refresh_dependency_dropped_the_order_facts():
 
     assert deps == ["mart.inventory_state"], f"依赖列表应只剩状态层，实际是 {deps}"
     assert "semantic.fact_orders_atomic" not in deps
+
+
+# ----------------------------------------------------------------------
+# 近30天动销：数据修真了，还得真的进到接口响应里
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_response_carries_the_30d_sales_number(monkeypatch):
+    """近30天动销必须进到接口响应里。
+
+    2026-10-31 实测：视图里的数字换源后已经是真的（503 行里 292 行 >0），
+    但 service 查了 `sold_units_30d` 却**没往响应模型里填** ——
+    接口从来没返回过这一列，页面上自然也没有它。
+    """
+    service, _ = _build_service(monkeypatch, rows=[_row(sold_units_30d=37)])
+
+    result = await service.get_sku_clearance_ranking(min_restock_days=0)
+
+    assert result.items[0].sold_units_30d == 37
+
+
+@pytest.mark.asyncio
+async def test_response_keeps_missing_30d_sales_as_none_not_zero(monkeypatch):
+    """取不到近30天销量时是 None（不可算），不是 0。
+
+    0 会被运营读成「这个 SKU 30 天一件都没卖出去」——
+    那是最容易导致误清货的数字。
+    """
+    service, _ = _build_service(monkeypatch, rows=[_row(sold_units_30d=None)])
+
+    result = await service.get_sku_clearance_ranking(min_restock_days=0)
+
+    assert result.items[0].sold_units_30d is None
+
+
+def test_response_schema_declares_the_30d_sales_field():
+    """响应模型必须声明这个字段 —— 少声明就等于悄悄丢掉。"""
+    from backend.schemas.inventory import SkuClearanceRankingItemResponse
+
+    assert "sold_units_30d" in SkuClearanceRankingItemResponse.model_fields
 
 
 def test_clearance_view_keeps_pricing_formulas_out_of_sql():

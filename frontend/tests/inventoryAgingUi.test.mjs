@@ -152,6 +152,17 @@ test('周转哨兵值已彻底移除，最低售价来源仍有可读展示', ()
   assert.match(viewSource, /case 'discount_guard':\s*return '折扣护栏'/)
 })
 
+test('滞销明细表展示近30天销量（库存数据域口径）', () => {
+  // 2026-10-31：视图里的数字换源后已经是真的，但响应模型里一直没这个字段，
+  // 页面上也就没有这一列 —— 运营看不到近30天到底卖了多少。
+  // 口径必须在表头说清楚：这是**库存数据域**的采集值（随库存增量更新刷新），
+  // 不是订单口径、不是实时动销速度。
+  assert.match(viewSource, /prop="sold_units_30d" label="近30天销量（库存采集）"/)
+  assert.match(viewSource, /row\.sold_units_30d/)
+  assert.match(viewSource, /库存数据域/)
+  assert.match(viewSource, /增量更新时才刷新/)
+})
+
 test('原有库龄明细页签功能未变', () => {
   assert.match(viewSource, /inventoryDomainApi\.getAging\(/)
   assert.match(viewSource, /inventoryDomainApi\.getAgingBuckets\(/)

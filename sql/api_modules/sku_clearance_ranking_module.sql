@@ -74,7 +74,13 @@ WITH state AS (
         COUNT(DISTINCT warehouse_name)                 AS warehouse_count,
         -- DOS 参考原料（妙手「近90天销量数据」）
         MAX(checklist_sales_90d)                       AS checklist_sales_90d,
-        -- 近30天动销（妙手「近30天销量数据」）：与库存同源、同一次采集
+        -- 近30天销量（**库存数据域口径**，不是订单数据域）：
+        --   来自妙手仓库清单里每个「仓库×SKU」自带的「近30天销量数据」，
+        --   与库存**同一次采集、同一份文件** ⇒ 库存和销量不会互相打架。
+        --   刷新时机：库存数据域增量更新一次，它才刷新一次 —— 采集时点的窗口销量，
+        --   **不是实时动销速度**，更不是订单事实口径。
+        --   跨仓聚合取 MAX 而不是 SUM：妙手按仓重复给出同一笔销量时，
+        --   SUM 会重复计数（实测 503 个 SKU 里仅 3 个多仓，30d 的 MAX 与 SUM 当前相等）。
         MAX(checklist_sales_30d)                       AS sold_units_30d,
         MAX(last_metric_date)                          AS snapshot_date
     FROM mart.inventory_state

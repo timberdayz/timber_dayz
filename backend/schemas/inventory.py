@@ -191,6 +191,14 @@ class SkuClearanceRankingItemResponse(BaseModel):
     warehouse_count: int = 0
     # 距上次进货天数：主判据（补货才重新开始计时，销售不重置）
     days_since_restock: Optional[int] = None
+    # 近30天销量：**库存数据域口径**（不是订单数据域）。
+    # 来源：妙手仓库清单里每个「仓库×SKU」自带的「近30天销量」，
+    # 与库存**同一次采集、同一份文件** ⇒ 库存和销量不会互相打架。
+    # 刷新时机：库存数据域增量更新一次才刷新一次 —— 是**采集时点**的窗口销量，
+    # **不是实时动销速度**，也不是订单事实口径。
+    # SKU 级跨渠道合计（跨仓取 MAX，不按仓重复计数）。
+    # 取不到时是 None（不是 0）—— 0 会被误读成「这个 SKU 没人买」。
+    sold_units_30d: Optional[int] = None
     # 可售天数（DOS）参考值：由 inventory_dos_service 唯一实现算出，
     # 分子=可用库存，分母=近 90 天窗口销量。分母不随每次采集刷新，
     # **仅供参考，不参与任何判定**；算不出来时为 None（不是 0，也不是哨兵值）。

@@ -29,7 +29,10 @@ from backend.schemas.inventory import (
     SkuClearanceTierStat,
 )
 from backend.services.inventory.inventory_dos_service import compute_dos
-from backend.services.product_pricing_service import compute_sku_pricing, select_restock_tier
+from backend.services.product_pricing_service import (
+    compute_sku_pricing,
+    select_restock_tier,
+)
 from backend.services.sku_pricing_policy_service import (
     load_current_policies,
     to_policy_rows,
@@ -139,6 +142,13 @@ def _to_item_response(
         inventory_value=float(row.get("inventory_value") or 0.0),
         warehouse_count=int(row.get("warehouse_count") or 0),
         days_since_restock=days_since_restock,
+        # 近30天销量：库存数据域口径（妙手仓库清单，与库存同一次采集），
+        # 不是订单事实口径；取不到时保留 None（不拿 0 冒充「没人买」）。
+        sold_units_30d=(
+            int(float(row["sold_units_30d"]))
+            if row.get("sold_units_30d") is not None
+            else None
+        ),
         checklist_dos_sales90=(float(dos_days) if dos_days is not None else None),
         sku_id=int(sku_id) if sku_id is not None else None,
         default_purchase_cost=(
@@ -209,7 +219,9 @@ class SkuClearanceService:
             filters.append("platform_code = :platform_code")
             params["platform_code"] = str(platform_code)
         if keyword:
-            filters.append("(product_sku ILIKE :keyword OR product_name ILIKE :keyword)")
+            filters.append(
+                "(product_sku ILIKE :keyword OR product_name ILIKE :keyword)"
+            )
             params["keyword"] = f"%{keyword}%"
 
         return filters, params
@@ -231,7 +243,9 @@ class SkuClearanceService:
         if self.db is None or not rows:
             return {}
 
-        sku_ids = sorted({int(row["sku_id"]) for row in rows if row.get("sku_id") is not None})
+        sku_ids = sorted(
+            {int(row["sku_id"]) for row in rows if row.get("sku_id") is not None}
+        )
         if not sku_ids:
             return {}
 
@@ -242,7 +256,9 @@ class SkuClearanceService:
                 )
             )
         ).all()
-        creator_rates = {row.sku_id: row.creator_commission_rate for row in creator_rows}
+        creator_rates = {
+            row.sku_id: row.creator_commission_rate for row in creator_rows
+        }
 
         bindings = (
             await self.db.execute(
@@ -258,10 +274,14 @@ class SkuClearanceService:
         spu_rates: dict[str, dict] = {}
         if spu_by_sku:
             spus = (
-                await self.db.execute(
-                    select(DimSpu).where(DimSpu.spu.in_(set(spu_by_sku.values())))
+                (
+                    await self.db.execute(
+                        select(DimSpu).where(DimSpu.spu.in_(set(spu_by_sku.values())))
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for spu in spus:
                 spu_rates[spu.spu] = {
                     "return_loss_rate": spu.return_loss_rate,
@@ -336,7 +356,11 @@ class SkuClearanceService:
         pricing_inputs = await self._load_pricing_inputs(rows)
         policy_rows = await self._load_policy_rows()
         platform = await self._load_platform(policy_rows)
-        deepest = max(policy_rows, key=lambda p: p["min_restock_days"]) if policy_rows else None
+        deepest = (
+            max(policy_rows, key=lambda p: p["min_restock_days"])
+            if policy_rows
+            else None
+        )
         # 汇总要按档位分组 → 必须先拿到档位表（policy_rows）
         summary = await self._build_summary(where_clause, params, policy_rows)
 
@@ -387,7 +411,9 @@ class SkuClearanceService:
             restock_tiers=await self._build_restock_tiers(
                 where_clause, params, policy_rows
             ),
-            missing_reference_price_count=int(base.get("missing_reference_price_count") or 0),
+            missing_reference_price_count=int(
+                base.get("missing_reference_price_count") or 0
+            ),
         )
 
     async def _build_restock_tiers(
@@ -455,9 +481,7 @@ class SkuClearanceService:
             stats.append(
                 SkuClearanceTierStat(
                     min_restock_days=bounds[index],
-                    tier_label=str(
-                        policy.get("tier_label") or f"≥{bounds[index]}天"
-                    ),
+                    tier_label=str(policy.get("tier_label") or f"≥{bounds[index]}天"),
                     sku_count=int(bucket.get("sku_count") or 0),
                     inventory_value=float(bucket.get("inventory_value") or 0.0),
                 )
