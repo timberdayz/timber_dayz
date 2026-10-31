@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from sqlalchemy.exc import ProgrammingError
@@ -634,6 +635,73 @@ async def test_postgresql_dashboard_service_inventory_backlog_defaults_to_board_
     result = await service.get_business_overview_inventory_backlog(min_days=30)
 
     assert result["top_products"] == [{"rank": 1}]
+
+
+@pytest.mark.asyncio
+async def test_inventory_backlog_rows_expose_inventory_domain_30d_sales(monkeypatch):
+    """近30天销量走库存数据域口径：取自 checklist_sales_30d，归一化成整数件数。
+
+    源值是 NUMERIC(18,2)（妙手窗口销量），0 是事实（确实一件没卖），
+    不是「没有这个数」——缺失必须保留 None。
+    """
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "platform_sku": "A-00001-BLACK",
+                "warehouse_name": "新加坡",
+                "days_since_restock": 60,
+                "inventory_value": 1000,
+                "checklist_sales_30d": Decimal("12.00"),
+            },
+            {
+                "platform_sku": "A-00009-BLACK",
+                "warehouse_name": "新加坡",
+                "days_since_restock": 45,
+                "inventory_value": 500,
+                "checklist_sales_30d": Decimal("0.00"),
+            },
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    rows = await service._load_ranked_inventory_backlog_module_rows(
+        source_table="api.business_overview_inventory_backlog_module",
+        min_days=30,
+        limit=20,
+    )
+
+    assert rows[0]["sold_units_30d"] == 12
+    assert isinstance(rows[0]["sold_units_30d"], int)
+    # 0 是事实（确实一件没卖），不是缺失
+    assert rows[1]["sold_units_30d"] == 0
+
+
+@pytest.mark.asyncio
+async def test_inventory_backlog_rows_keep_missing_30d_sales_as_none(monkeypatch):
+    """取不到就保留 None，不填 0：None = 没有这个数，0 = 确实一件没卖。"""
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "platform_sku": "A-00001-BLACK",
+                "days_since_restock": 60,
+                "inventory_value": 1000,
+                "checklist_sales_30d": None,
+            }
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+
+    rows = await service._load_ranked_inventory_backlog_module_rows(
+        source_table="api.business_overview_inventory_backlog_module",
+        min_days=30,
+        limit=20,
+    )
+
+    assert rows[0]["sold_units_30d"] is None
 
 
 @pytest.mark.asyncio

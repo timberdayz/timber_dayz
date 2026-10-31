@@ -667,6 +667,26 @@ def _compute_checklist_dos_sales90(row: dict[str, Any]) -> float | None:
     return float(value) if value is not None else None
 
 
+def _normalize_inventory_backlog_sold_units_30d(row: dict[str, Any]) -> int | None:
+    """近30天销量：**库存数据域口径**，不是订单数据域口径。
+
+    数值来自 `mart.inventory_state.checklist_sales_30d`
+    （妙手仓库清单里每个「仓库×SKU」自带的「近30天销量数据」），
+    与库存**同一次采集、同一份文件** ⇒ 库存和销量不会互相打架。
+
+    刷新时机：库存数据域**增量更新一次，它才刷新一次** —— 这是**采集时点**的
+    窗口销量，**不是实时动销速度**，也不是订单事实口径。
+
+    归一化规则（与 SKU 级滞销清单 `sku_clearance_service` 逐字一致）：
+      - 取不到 → None（**不是 0**）：None = 没有这个数，0 = 确实一件没卖；
+      - 有值 → 整数件数（源列是 NUMERIC(18,2)）。
+    """
+    value = _to_optional_float(row.get("checklist_sales_30d"))
+    if value is None:
+        return None
+    return int(value)
+
+
 def summarize_inventory_backlog_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """滞销汇总（四张卡口径）：总库存价值 / 重度积压 / 中度积压 / 滞销占比。
 
@@ -1159,6 +1179,11 @@ class PostgresqlDashboardService:
             )
             # DOS 只作参考值：分母不新鲜，不参与判定，但运营需要这个量级感
             normalized["checklist_dos_sales90"] = _compute_checklist_dos_sales90(
+                normalized
+            )
+            # 近30天销量（库存数据域口径）：库存增量更新时才刷新一次，
+            # 不是订单口径、不是实时动销速度。缺失保留 None，不填 0。
+            normalized["sold_units_30d"] = _normalize_inventory_backlog_sold_units_30d(
                 normalized
             )
             normalized["rank"] = index

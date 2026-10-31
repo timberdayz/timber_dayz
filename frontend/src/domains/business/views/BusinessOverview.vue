@@ -1090,6 +1090,21 @@
               </template>
             </el-table-column>
             <el-table-column
+              prop="sold_units_30d"
+              label="近30天销量（库存采集）"
+              width="150"
+              align="right"
+            >
+              <template #default="{ row }">
+                <el-tooltip
+                  content="库存数据域（妙手仓库清单）里每个仓库×SKU 自带的近30天销量，与库存同一次采集；库存数据域增量更新时才刷新一次，不是实时动销速度，也不是订单口径"
+                  placement="top"
+                >
+                  <span>{{ row.sold_units_30d ?? "-" }}</span>
+                </el-tooltip>
+              </template>
+            </el-table-column>
+            <el-table-column
               prop="checklist_dos_sales90"
               label="可售天数（参考）"
               width="130"

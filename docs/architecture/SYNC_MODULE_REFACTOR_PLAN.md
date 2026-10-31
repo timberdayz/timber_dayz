@@ -1296,6 +1296,103 @@ def _should_refresh_inventory_layers(targets, context) -> bool:
 
 ---
 
+### 3.9.13 「近30天销量」：换源、露接口、**露到运营真正在用的那张表**（2026-11-01 第 12~13 轮）
+
+这一节把「近30天销量」从**视图里有数**一路推到**运营能在生产页面上看到**，并记录一个
+容易被忽略的事实：**代码里有页面 ≠ 生产有页面**。
+
+#### 3.9.13.1 换源（v7.12.3）：`sold_units_30d` 恒 0 的根因是「跨系统对账」本身不成立
+
+| 现象 | 根因 | 修法 |
+| --- | --- | --- |
+| `api.sku_clearance_ranking_module.sold_units_30d` **100% 为 0** | ① 平台对不上：库存行 `platform_code='miaoshou'`（数据来源），订单行是 `shopee/tiktok`（销售渠道），拿它们相等连接 ⇒ 一行都配不上；② SKU 口径两侧不对称；③ 大小写不归一 | **不再跨系统对账**，直接用妙手 ERP 自带的「近30天销量」列 `checklist_sales_30d` |
+
+老代码还叠了 `platform_code = ANY(有库存的平台)` 这层过滤，在生产上把订单行全滤掉 ——
+**快，但数字是全 0**。
+
+换源后的实测：503 个 SKU 里 292 个 `sold_units_30d>0`、**0 个 NULL**、查询从 10 秒级降到 **8.2ms**；
+ERP 口径与订单事实口径均值 6.76 vs 6.79，双方都 >0 的 246 个 SKU 里 189 个差异 ≤20%（差异来自采集时点不同）。
+视图列名列序不变 ⇒ 前端契约不受影响；刷新依赖同步去掉 `semantic.fact_orders_atomic`。
+
+#### 3.9.13.2 露接口与页面（v7.12.4）：先补齐「半成品设计」
+
+`git log -S` 查证：**视图层与 service 查询层**从 2026-10-25（判据换血）起就有 30 天动销列，
+但**响应模型与前端全历史从未有过** —— 属半成品设计。v7.12.4 补齐：
+
+- `backend/schemas/inventory.py`：`SkuClearanceRankingItemResponse` 新增 `sold_units_30d: Optional[int]`；
+- `backend/services/inventory/sku_clearance_service.py`：映射 `int(float(...))`，**缺失保留 None 不填 0**；
+- 视图 SQL 只加口径注释。
+
+#### 3.9.13.3 关键事实：v7.12.4 的列**没有真正上线**（生产镜像实测）
+
+v7.12.4 把列加进了 `frontend/src/domains/business/views/inventory/InventoryAging.vue`。
+但这个组件**没有被任何地方 import**：
+
+| 检查 | 结果 |
+| --- | --- |
+| `frontend/src` 内搜 `InventoryAging` | 零命中 |
+| `router/index.js` 里的 inventory 路由 | **一条都没有**（`/inventory/aging` 只是 `routeDisplayNames` 里的历史显示名映射） |
+| `menuGroups.js` 菜单项 | 无「库存库龄」入口 |
+| 生产镜像 `frontend:v7.12.4`（digest `sha256:8a3974aa…`） | 117 个分包**无** `InventoryAging` 分包；全包搜「近30天销量」「sold_units_30d」**零命中**；旧文案「可售天数」在 `BusinessOverview-d61d8c62.js` |
+
+⇒ **该组件是孤儿组件**。生产上运营真正看到的 SKU 级滞销表，是
+**业务概览 →「库存积压与滞销风险」→「高积压风险产品Top20」**（`BusinessOverview.vue`），
+而不是那个 814 行的完整滞销清单页。
+
+#### 3.9.13.4 本轮改法：在真正在用的表上补这一列
+
+数据源**已经现成**，只差最后一段透出：
+
+```
+mart.inventory_state.checklist_sales_30d          (库存数据域，仓库×SKU 粒度)
+  → mart.inventory_backlog_base.checklist_sales_30d   (LEFT JOIN 仓×SKU)
+    → api.business_overview_inventory_backlog_module  (已 SELECT 该列)
+      → backend service 归一化                        ← 本轮补
+        → BusinessOverview「高积压风险产品Top20」列      ← 本轮补
+```
+
+| 改动 | 文件 |
+| --- | --- |
+| 后端归一化：`sold_units_30d`（整数件数，**缺失保留 None**） | `backend/services/postgresql_dashboard_service.py` |
+| 前端加列 + 口径 tooltip | `frontend/src/domains/business/views/BusinessOverview.vue` |
+| 后端测试（数值透出 / 缺失为 None） | `backend/tests/data_pipeline/test_postgresql_dashboard_service.py` |
+| 前端契约测试（列存在 / 口径文案 / 列序） | `frontend/tests/businessOverviewInventoryBacklogUi.test.mjs`（新） |
+
+#### 3.9.13.5 口径（四处统一措辞）
+
+**近30天销量（库存采集）** = 来自**库存数据域**（妙手仓库清单里每个「仓库×SKU」自带的
+「近30天销量数据」），与库存**同一次采集、同一份文件**；随**库存数据域增量更新**刷新一次，
+是**采集时点**的窗口销量；**不是订单数据域口径、不是实时动销速度**；
+取不到为 `None`（**不是 0**）——`None` = 没有这个数，`0` = 确实一件没卖。
+
+#### 3.9.13.6 实测（本地）
+
+| 项 | 结果 |
+| --- | --- |
+| `api.business_overview_inventory_backlog_module` | 506 行，`checklist_sales_30d` **全部非空**，其中 **292 行 >0**、214 行为 0 |
+| 与 SKU 级滞销视图对同一 SKU | 逐值一致（如 `A-00008-BLACK` 仓级 12.00 = SKU 级 12.00） |
+| 接口响应 | 每行带 `sold_units_30d`，类型 `int`；JSON 化后前端拿到整数 |
+| 前端全量回归 | 402 pass / **9 fail**，失败名与既有 9 条基线**逐条一致**，无新增（新增 4 条测试全过） |
+
+**Top20 里几乎全是 0 —— 这是业务真相，不是故障**：
+
+| 距上次进货天数 | 行数 | 近30天销量 >0 | = 0 |
+| --- | --- | --- | --- |
+| 60~89 天 | 173 | **3** | 170 |
+| 30~59 天 | 333 | **289** | 44 |
+
+Top20 按「压得最久」排序 ⇒ 压最久的货**确实一件没卖**，这一列在这里就是**清货信号**；
+同一列在 30~59 天档位里有 289/333 行是真实数字（例：`A-00001-BLACK` 47 天、库存 51、近30天卖 83 件）。
+
+#### 3.9.13.7 遗留：SKU 级滞销清单页仍是孤儿
+
+`InventoryAging.vue`（814 行，库龄明细 + 滞销清单两个页签）代码完整、后端接口齐备
+（`/api/inventory/aging`、`/aging/buckets`、`/aging/history`、`/api/inventory/clearance-ranking`），
+但**没有路由、没有菜单、没有库存类权限码**（权限目录里一个 inventory 权限都没有）。
+复活它属于**产品决策**（新增导航入口 + 权限模型），不是「补一列」，**未擅自上线**。
+
+---
+
 ## 4. 建议的实施顺序
 
 1. **第 1 批**（前端止漏）—— 独立提交，可立即解除当前阻塞。
@@ -1326,7 +1423,9 @@ def _should_refresh_inventory_layers(targets, context) -> bool:
 - **⏸ 仍未做**：P6 服务层月窗口下推。P7 已把滞销榜查询压回 **47.7s**（在 60s 的 DB 预算内），
   但剩下的 22s 在**语义层**：`semantic.fact_orders_atomic` 对每一行都跑一次店铺别名解析
   （33265 次关联子查询）。真正的优化对象是那里，需另立专项评估对所有下游视图的影响面（§3.9.7）。
-- **⏸ 同根因的兄弟缺陷（未改）**：`api.sku_clearance_ranking_module.sold_units_30d` 恒为 0（它把订单平台限制成库存平台），改法与 §3.9 一致，但它会改变 SKU 级滞销清单的动销量与 DOS 定价输入 ⇒ 需业务确认后单独发版（§3.9.6）。
+- **✅ 同根因的兄弟缺陷已修（v7.12.3，第 12 轮）**：`api.sku_clearance_ranking_module.sold_units_30d` 恒为 0 —— 根因是**跨系统对账本身不成立**（平台拿「数据来源」比「销售渠道」、两侧 SKU 口径不对称、大小写未归一，三重错位），改为**不再跨系统对账**、直接用妙手清单自带的 `checklist_sales_30d`（库存数据域口径）：查询从 10 秒级降到 **8.2ms**、503 个 SKU 里 **292 个 >0**、**0 个 NULL**（§3.9.13.1）。
+- **✅ v7.12.4 的「近30天销量」列没有真正上线（第 13 轮查明）**：该列加进了 `InventoryAging.vue`，但该组件**未被任何地方 import**（无路由、无菜单、生产镜像 117 个分包里无此文案）⇒ 运营在生产上看不到。真实在用的 SKU 级滞销表是**业务概览的「高积压风险产品Top20」**，本轮已把列补到那里（数据源 `mart.inventory_state.checklist_sales_30d` 本来就通到 api 视图，只差后端归一化）。详见 §3.9.13。
+- **⏸ SKU 级滞销清单页（`InventoryAging.vue`，814 行）仍是孤儿组件**：代码完整、后端接口齐备，但**没有路由、没有菜单、没有库存类权限码**。复活它属**产品决策**（新增导航入口 + 权限模型），未擅自上线（§3.9.13.7）。
 - **⏸ v7.12.1 上线后的生产实测（2026-10-31）**：视图口径**已修好并生效**（`assets_drift=false`、模块 `ready`、新定义在跑 38~43s），但生产滞销榜**仍是 0 行** —— 根因是生产的 309 行积压**全部 `days_since_restock IS NULL`**（库存状态层 `mart.inventory_state` 没出数），被 `age_days >= 30` 全过滤掉。**这是采集/状态层的数据缺口，不是口径问题**；动作在数据侧补链路，不在视图 SQL 里改口径（§3.9.9）。
 - **⚠️ 口径脆弱点（待处理）**：`COALESCE(days_since_restock, 0)` 把「取不到库龄」和「库龄 0 天」混成同一个值 —— 数据缺失被伪装成「都是新货」，`inventory_backlog_summary` 的 `active_sku_count` 也会把缺数据的行算成活跃。建议把「取不到」单独成一档，让缺失在数据上可见（§3.9.9）。
 - **✅ SKU 大小写归一（第 11 轮）**：库存侧与订单侧**同一件商品** SKU **只有大小写不同**时配不上，实测 6 个 SKU（库龄 47~60 天，**全部 ≥30 天、本来都该进榜**）整件漏在榜外。修法是两侧 `sku_key` 统一套 `LOWER()`（依据：商品中心的 SKU 主键本来就是小写归一过的）。重建前后逐行对比：**0 行消失、1 行新增、41 行数值变大**（金额最多 +25% ⇒ 改之前的看板滞销金额是系统性偏低的），耗时 43.3s→45.5s 仍在 60s 预算内（§3.9.10）。
