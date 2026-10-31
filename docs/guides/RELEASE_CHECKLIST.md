@@ -73,6 +73,35 @@ python3 /app/scripts/rebuild_views.py --target api.clearance_ranking_module
 - `scripts/rebuild_views.py` must be present in the backend image
   (`Dockerfile.backend`) — enforced by `scripts/verify_remote_deploy_contracts.py`.
 
+## Inventory Layers
+
+The inventory domain has **two independent persisted layers**, and they feed **two different
+dashboards**. Do not assume one refresh covers the other:
+
+| Layer | Table | Feeds | Rebuilt by |
+| --- | --- | --- | --- |
+| Age layer | `mart.inventory_age_current` / `_history` | inventory aging views | `scripts/rebuild_inventory_age_from_snapshots.py` (Phase 3a) |
+| State layer | `mart.inventory_state` | clearance rankings (`api.clearance_ranking_module`, `api.sku_clearance_ranking_module`) | `scripts/rebuild_inventory_state_from_snapshots.py` (Phase 3a') |
+
+`mart.inventory_state` is a **table**, not a view — the view rebuild in Phase 2.7 can only
+guarantee it exists; **rows are written solely by `InventoryStateRefreshService`**.
+If the state layer is empty, `days_since_restock` is NULL for every row, `age_days` collapses
+to 0 and the clearance ranking returns **0 rows** (see
+`docs/architecture/SYNC_MODULE_REFACTOR_PLAN.md` §3.9.11).
+
+The deployment rebuilds both layers automatically:
+
+```bash
+python3 /app/scripts/rebuild_inventory_age_from_snapshots.py --full-rebuild    # Phase 3a
+python3 /app/scripts/rebuild_inventory_state_from_snapshots.py --full-rebuild  # Phase 3a'
+```
+
+- Both scripts must be present in the backend image (`Dockerfile.backend`) — enforced by
+  `scripts/verify_remote_deploy_contracts.py`.
+- A failed rebuild aborts the deployment and the rollback path restores the previous containers.
+- No row-count assertion is made on purpose: a genuinely empty environment legitimately has
+  0 rows, and a row-count gate would report a false failure there.
+
 ## Watch GitHub Actions
 
 Expected order:
@@ -85,7 +114,8 @@ Expected order:
    - `Build and Push Images (Release Tag)`
    - `Deploy to Production (Tag Release)`
      - remote phases: migrations → schema gate → dashboard bootstrap →
-       **Phase 2.7 view rebuild** → backend → frontend → nginx
+       **Phase 2.7 view rebuild** → backend →
+       **Phase 3a/3a' inventory age + state rebuild** → frontend → nginx
 
 ## If Deployment Fails
 
@@ -106,3 +136,11 @@ Expected order:
 6. If `sql/` view assets changed, confirm Phase 2.7 succeeded:
    - server log: `${PRODUCTION_PATH}/deploy-logs/rebuild_views_<timestamp>.log`
    - the rebuilt view returns rows (a 0-row result usually means the join口径 drifted)
+7. Confirm the inventory layers were rebuilt (Phase 3a / 3a'):
+   - server log contains `[OK] Inventory age full rebuild completed` and
+     `[OK] Inventory state full rebuild completed`
+   - `GET /api/data-pipeline/freshness` shows `mart.inventory_state` with a
+     `last_succeeded_at` **newer** than the deploy start (not the bootstrap timestamp)
+   - `GET /api/dashboard/business-overview/inventory-backlog` shows
+     `unknown_restock_row_count` **lower** than the total row count
+     (an equal value means the state layer still contributes nothing)

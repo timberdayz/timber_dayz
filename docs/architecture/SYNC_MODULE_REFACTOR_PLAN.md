@@ -1220,6 +1220,80 @@ semantic.fact_inventory_snapshot        （妙手库存快照，b_class 三张�
 ⇒ 修复必须补**状态层的生产触发路径**（部署路径 + 采集路径），
 **不能**靠调 `age_days >= 30` 口径绕过去（那是把「没数据」当成「没滞销」，会把 0 行洗成假数）。
 
+### 3.9.12 修：把状态层的生产触发路径补齐（A + B，2026-10-31 第 11 轮）
+
+§3.9.11 定位出两个缺口，本节把它们都补上。
+
+#### A｜部署路径：发版时把状态层一起重建
+
+| 改动 | 文件 |
+| --- | --- |
+| 新增状态层重建脚本（与库龄层脚本**对称**） | `scripts/rebuild_inventory_state_from_snapshots.py`（新） |
+| 进后端镜像（容器内执行） | `Dockerfile.backend` |
+| 部署时执行（**Phase 3a'**，紧跟 Phase 3a 库龄层重建之后） | `scripts/deploy_remote_production.sh` |
+| 契约门禁锁住「脚本里有这一步」+「镜像里有这个脚本」 | `scripts/verify_remote_deploy_contracts.py` |
+
+脚本本体就是调用唯一写入方：
+
+```python
+result = await InventoryStateRefreshService(db=session).refresh(force_full=args.full_rebuild)
+```
+
+`--full-rebuild` = 忽略水位线，把全部快照行回放一遍（发版场景要的就是这个）。
+
+**为什么不能靠 SQL 资产重建**：`mart.inventory_state` 是**表**，
+`sql/mart/inventory_state.sql` 只有 `CREATE TABLE IF NOT EXISTS` ——
+视图重建那套（`rebuild_views.py`）对它只能「保证表存在」，**灌不进一行数据**。
+
+#### B｜采集路径：触发判据从「事件字段」改成「刷新目标」
+
+```python
+# backend/tasks/refresh_queue_tasks.py
+INVENTORY_FACT_TARGET = "semantic.fact_inventory_snapshot"
+
+def _should_refresh_inventory_layers(targets, context) -> bool:
+    if (context or {}).get("data_domain") == "inventory":
+        return True
+    return INVENTORY_FACT_TARGET in (targets or [])
+```
+
+旧判据是 `context_json.data_domain == "inventory"` —— **只有 A 类文件上传会带这个字段**
+（`data_ingestion_service` → `DATA_INGESTED`），云同步 / 手工触发 / 安全网自愈都不带。
+⇒ 生产上只要不是走 A 类上传，状态层就一步不动。
+
+新判据看的是「**这次刷新到底动了哪些资产**」，与谁触发的无关：
+只要刷新计划重建了库存事实，状态层就必须跟着重算，否则两者会脱节。
+
+**为什么 orders 域也会触发（这是刻意的，不是误触发）**：
+刷新目标的闭包是 `expand_downstream_targets` 算出来的，而
+`api.clearance_ranking_module` 依赖 `mart.inventory_backlog_base` → `mart.inventory_state`
+→ `semantic.fact_inventory_snapshot`，所以**订单域的刷新计划本来就会重建库存事实**
+（实测：orders 域闭包 38 个目标里含全部 9 个库存域资产）。
+既然库存事实被重建了，状态层就必须跟着重算 —— 这是**一致性要求**，不是浪费。
+
+实测代价（本地）：状态层刷新 **0.4~0.5s**，`sync_inventory_skus` **2.6s**（1122 个 SKU），
+相对刷新计划本身的 40s+ 可以忽略 ⇒ 放宽触发没有性能代价。
+
+#### 实测
+
+| 项 | 结果 |
+| --- | --- |
+| 新脚本 `--dry-run` | 打印 `semantic.fact_inventory_snapshot` → `mart.inventory_snapshot_history` → `mart.inventory_state`（依赖顺序） |
+| 新脚本 `--full-rebuild`（本地实跑） | `incoming_row_count=2726` → `state_key_count=1230`，退出码 0 |
+| 状态层刷新耗时（本地） | 0.4s（增量）/ 0.5s（全量） |
+| `sync_inventory_skus` 耗时（本地） | 2.6s（1122 个 SKU） |
+| 新增单测 | 判据函数 6 条断言 + 端到端「无 `data_domain` 但目标含库存事实 ⇒ 状态层照样刷」1 条；部署契约 4 条 |
+| 部署契约门禁 / `bash -n` / black / ruff | 全绿 |
+| 顺带修掉两条**过期断言** | `test_runtime_config_alignment.py` 断言部署脚本里有 `up -d --no-build backend-api ...`（脚本更早那轮加了 `--no-deps` 就对不上了）；`test_remote_deploy_migration_contract.py` 断言前端探针用 `wget`（脚本早已改成 `sh -c 'curl ...'`，且 v7.12.1 生产部署实测通过）。两条在 HEAD 上同样失败，属**既有基线失败**，本轮一并修正。 |
+
+#### 这一轮的教训
+
+**「有写入方」不等于「会被写入」。**
+状态层有写入方、有单元测试、文档里还写着「闭环已补上」——
+但触发条件挂在**某个调用方特有的事件字段**上，
+而生产上真正跑的那条路恰好不带这个字段 ⇒ 闭环在代码里是通的，在生产是断的。
+**判据要挂在「事情本身」（这次刷新动了库存事实）上，不要挂在「谁触发的」上。**
+
 ---
 
 ## 4. 建议的实施顺序
@@ -1257,4 +1331,5 @@ semantic.fact_inventory_snapshot        （妙手库存快照，b_class 三张�
 - **⚠️ 口径脆弱点（待处理）**：`COALESCE(days_since_restock, 0)` 把「取不到库龄」和「库龄 0 天」混成同一个值 —— 数据缺失被伪装成「都是新货」，`inventory_backlog_summary` 的 `active_sku_count` 也会把缺数据的行算成活跃。建议把「取不到」单独成一档，让缺失在数据上可见（§3.9.9）。
 - **✅ SKU 大小写归一（第 11 轮）**：库存侧与订单侧**同一件商品** SKU **只有大小写不同**时配不上，实测 6 个 SKU（库龄 47~60 天，**全部 ≥30 天、本来都该进榜**）整件漏在榜外。修法是两侧 `sku_key` 统一套 `LOWER()`（依据：商品中心的 SKU 主键本来就是小写归一过的）。重建前后逐行对比：**0 行消失、1 行新增、41 行数值变大**（金额最多 +25% ⇒ 改之前的看板滞销金额是系统性偏低的），耗时 43.3s→45.5s 仍在 60s 预算内（§3.9.10）。
 - **⏸ 生产库存状态层没出数 —— 根因已定案（第 11 轮）**：滞销榜的判据「距上次进货天数」**只存在** `mart.inventory_state`（状态层，是表不是视图），而生产上这张表**从来没被写入过数据**（freshness 停在 bootstrap 建表那一刻 17:07:16；库龄层 17:08:42 是真刷过的）。根因是**状态层有写入方但没有稳定的触发路径**：唯一写入方 `InventoryStateRefreshService` 在生产代码里只有一个调用方（队列消费者，且要求 `context_json.data_domain == "inventory"`），而部署脚本 Phase 3a 只重建**库龄层**、**不重建状态层**。**⇒ 修复必须补状态层的生产触发路径（部署路径 + 采集路径），不能靠调 `age_days >= 30` 绕过去**（那是把「没数据」洗成假数）。详见 §3.9.11。
+- **✅ 状态层的生产触发路径已补齐（第 11 轮，随 v7.12.2 发布）**：**A**=新增 `scripts/rebuild_inventory_state_from_snapshots.py` 并挂进部署脚本 **Phase 3a'**（与库龄层重建对称；状态层是表，只能靠 `InventoryStateRefreshService` 的 upsert 灌数据，SQL 资产重建对它无效）；**B**=刷新触发判据从「事件带 `data_domain=inventory`」改成「**本次刷新目标含库存事实**（`semantic.fact_inventory_snapshot`）」—— 前者只有 A 类文件上传会带，导致生产上云同步/手工/安全网自愈全都刷不到状态层；后者与谁触发无关，**orders 域的刷新闭包本来就含库存事实**（`clearance_ranking → backlog_base → inventory_state → fact_inventory_snapshot`），所以订单采集也会顺带把状态层刷对。实测代价可忽略（状态层刷新 0.5s、`sync_inventory_skus` 2.6s）。**教训：「有写入方」不等于「会被写入」，判据要挂在事情本身而不是谁触发的。** 详见 §3.9.12。
 

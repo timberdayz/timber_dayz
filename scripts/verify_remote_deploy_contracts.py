@@ -34,6 +34,13 @@ REQUIRED_LITERALS = [
     # 会跳过并返回 0，那是静默成功）。
     "rebuild_dashboard_view_definitions",
     "-e REBUILD_VERIFY_TARGETS",
+    # [INVENTORY LAYERS] 库存两层都要在部署时重建：
+    #   库龄层(mart.inventory_age_*) 与状态层(mart.inventory_state)。
+    # 状态层是「距上次进货天数」的唯一来源 —— 它是**表**不是视图，
+    # SQL 资产重建灌不进数据，只有 InventoryStateRefreshService 的 upsert 能写。
+    # 少了状态层这一步 → 空表 → 滞销榜恒 0 行（§3.9.11）。
+    "python3 /app/scripts/rebuild_inventory_age_from_snapshots.py --full-rebuild",
+    "python3 /app/scripts/rebuild_inventory_state_from_snapshots.py --full-rebuild",
     "up -d --no-build --no-deps backend-api celery-worker celery-beat",
     "up -d --no-build --no-deps frontend",
     "up -d --no-build --no-deps nginx",
@@ -44,6 +51,8 @@ REQUIRED_BACKEND_IMAGE_FILES = [
     "scripts/verify_system_role_integrity.py",
     "scripts/bootstrap_postgresql_dashboard.py",
     "scripts/rebuild_views.py",
+    "scripts/rebuild_inventory_age_from_snapshots.py",
+    "scripts/rebuild_inventory_state_from_snapshots.py",
 ]
 
 

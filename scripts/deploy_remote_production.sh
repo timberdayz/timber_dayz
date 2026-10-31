@@ -1000,6 +1000,19 @@ else
   exit 1
 fi
 
+# Phase 3a': 状态层(mart.inventory_state) —— 「距上次进货天数」的唯一来源。
+# 它是**表**不是视图，SQL 资产重建只会 CREATE TABLE IF NOT EXISTS，灌不进数据；
+# 只有 InventoryStateRefreshService 的 upsert 能写。少了这一步 → 状态层是空表
+# → 滞销榜恒 0 行（age_days = COALESCE(days_since_restock, 0) = 0，被 >= 30 全过滤）。
+# 与库龄层脚本对称，详见 docs/architecture/SYNC_MODULE_REFACTOR_PLAN.md §3.9.11。
+echo "[INFO] Phase 3a': rebuilding persisted inventory state layer..."
+if "${compose_cmd_base[@]}" exec -T backend-api python3 /app/scripts/rebuild_inventory_state_from_snapshots.py --full-rebuild; then
+  echo "[OK] Inventory state full rebuild completed"
+else
+  echo "[FAIL] Inventory state full rebuild failed"
+  exit 1
+fi
+
 echo "[INFO] Phase 3b: starting frontend..."
 "${compose_cmd_base[@]}" up -d --no-build --no-deps frontend
 

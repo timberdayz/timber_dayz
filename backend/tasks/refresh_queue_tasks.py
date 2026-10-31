@@ -4,8 +4,13 @@ import asyncio
 from typing import Any
 
 from backend.celery_app import celery_app
-from backend.models.database import AsyncSessionLocal, reset_async_engine_pool_for_new_loop
-from backend.services.data_pipeline.inventory_age_refresh_service import InventoryAgeRefreshService
+from backend.models.database import (
+    AsyncSessionLocal,
+    reset_async_engine_pool_for_new_loop,
+)
+from backend.services.data_pipeline.inventory_age_refresh_service import (
+    InventoryAgeRefreshService,
+)
 from backend.services.data_pipeline.inventory_state_refresh_service import (
     InventoryStateRefreshService,
 )
@@ -31,6 +36,34 @@ from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 REFRESH_QUEUE_RUNNING_TIMEOUT_SECONDS = 10 * 60
+
+#: 库存事实来源资产 —— 「本次刷新重建了它」就意味着状态层必须跟着重算。
+#:
+#: 为什么判据从「事件带 data_domain=inventory」换成「刷新目标里含库存事实」
+#: （2026-10-31 第 11 轮，详见 docs/architecture/SYNC_MODULE_REFACTOR_PLAN.md §3.9.11）：
+#: 旧判据**只有 A 类文件上传会带**（`data_ingestion_service` → `DATA_INGESTED`），
+#: 云同步 / 手工触发 / 安全网自愈都不带 ⇒ 生产上状态层**从来没有被刷新过**
+#: （`mart.inventory_state` 是空表 → 滞销榜恒 0 行）。
+#:
+#: 新判据看的是「这次刷新到底动了哪些资产」，**与谁触发的无关**：
+#: 只要刷新计划重建了库存事实，状态层就必须跟着重算，否则两者会脱节。
+INVENTORY_FACT_TARGET = "semantic.fact_inventory_snapshot"
+
+
+def _should_refresh_inventory_layers(
+    targets: list[str], context: dict[str, Any] | None
+) -> bool:
+    """本次刷新要不要顺带刷新库存状态层 + 库龄层。
+
+    判据是「库存事实有没有被重建」，不是「事件有没有声明 domain」：
+    orders 域的刷新闭包里同样含库存事实
+    （`api.clearance_ranking_module` → `mart.inventory_backlog_base`
+    → `mart.inventory_state` → `semantic.fact_inventory_snapshot`），
+    所以订单采集也会顺带把状态层刷对 —— 这正是生产需要的自愈能力。
+    """
+    if (context or {}).get("data_domain") == "inventory":
+        return True
+    return INVENTORY_FACT_TARGET in (targets or [])
 
 
 def _modules_for_targets(targets: list[str]) -> list[str]:
@@ -108,7 +141,9 @@ async def _invalidate_refresh_target_caches(targets: list[str]) -> None:
         )
 
 
-async def _bootstrap_modules_for_validation_report(db, report: RefreshValidationReport) -> None:
+async def _bootstrap_modules_for_validation_report(
+    db, report: RefreshValidationReport
+) -> None:
     for module_name in report.modules:
         await bootstrap_dashboard_assets_if_needed(
             db,
@@ -191,9 +226,8 @@ def _is_retryable_lock_error(exc: BaseException) -> bool:
     for candidate in (exc, getattr(exc, "orig", None)):
         if candidate is None:
             continue
-        sqlstate = (
-            getattr(candidate, "sqlstate", None)
-            or getattr(candidate, "pgcode", None)
+        sqlstate = getattr(candidate, "sqlstate", None) or getattr(
+            candidate, "pgcode", None
         )
         if sqlstate in _RETRYABLE_LOCK_SQLSTATES:
             return True
@@ -268,7 +302,7 @@ async def _async_process_refresh_queue_task() -> dict:
             run_id = extract_run_id(refresh_result)
             refresh_status = extract_refresh_status(refresh_result)
             failed_targets = extract_failed_targets(refresh_result)
-            if (task.context_json or {}).get("data_domain") == "inventory":
+            if _should_refresh_inventory_layers(targets, context):
                 # 先同步 SKU 身份(miaoshou 别名桥),后面的刷新才拿得到 sku_id 映射
                 await sync_inventory_skus(db, source_file_id=context.get("file_id"))
                 # 状态层先 upsert：「距上次进货天数」的来源就是它。
