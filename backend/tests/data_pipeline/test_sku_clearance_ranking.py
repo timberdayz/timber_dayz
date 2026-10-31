@@ -6,7 +6,9 @@
 2. 每个筛选参数**真的进 WHERE 子句**（不是空转）；
 3. 排序字段走白名单，用户输入永远不拼进 SQL；
 4. 未匹配 ERP 主数据的 SKU 照常返回，定价字段为空；
-5. 视图 SQL 不得把定价公式写进去，也不得退回慢的 backlog_base 取数路径。
+5. 视图 SQL 不得把定价公式写进去，也不得退回慢的 backlog_base 取数路径；
+6. 近30天动销必须来自状态层自带的窗口销量（跨系统对账的平台口径恒配不上），
+   且刷新依赖里不许再留着订单事实表。
 """
 
 from __future__ import annotations
@@ -103,9 +105,15 @@ def _build_service(
         if "AS tier_index" in query:
             return tier_rows or []
         if "count(*) AS sku_count" in query:
-            return [summary or {"sku_count": 0, "total_quantity": 0,
-                                "total_inventory_value": 0,
-                                "missing_reference_price_count": 0}]
+            return [
+                summary
+                or {
+                    "sku_count": 0,
+                    "total_quantity": 0,
+                    "total_inventory_value": 0,
+                    "missing_reference_price_count": 0,
+                }
+            ]
         return rows or []
 
     async def fake_load_pricing_inputs(_rows):
@@ -191,7 +199,9 @@ async def test_unsupported_sort_by_is_rejected_and_never_reaches_sql(monkeypatch
 async def test_sort_by_whitelist_maps_to_known_columns(monkeypatch):
     service, captured = _build_service(monkeypatch, rows=[_row()])
 
-    await service.get_sku_clearance_ranking(sort_by="days_since_restock", sort_order="asc")
+    await service.get_sku_clearance_ranking(
+        sort_by="days_since_restock", sort_order="asc"
+    )
 
     detail = [q for q, _ in captured if "ORDER BY" in q][0]
     assert "ORDER BY days_since_restock ASC" in detail
@@ -279,7 +289,9 @@ async def test_pricing_uses_pure_function_and_reports_tier(monkeypatch):
 async def test_clearance_recovery_amount_uses_current_discount(monkeypatch):
     service, _ = _build_service(
         monkeypatch,
-        rows=[_row(days_since_restock=70, reference_selling_price=100.0, current_qty=10)],
+        rows=[
+            _row(days_since_restock=70, reference_selling_price=100.0, current_qty=10)
+        ],
         pricing_inputs={
             1001: {
                 "creator_commission_rate": None,
@@ -350,7 +362,9 @@ async def test_endpoint_returns_full_payload(monkeypatch):
             offset=kwargs.get("offset", 0),
         )
 
-    monkeypatch.setattr(SkuClearanceService, "get_sku_clearance_ranking", fake_get_ranking)
+    monkeypatch.setattr(
+        SkuClearanceService, "get_sku_clearance_ranking", fake_get_ranking
+    )
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
@@ -554,9 +568,7 @@ def _view_sql_body() -> str:
     注释里出现这些词是**应该**的，门禁只针对真正执行的语句。
     """
     body = [
-        line
-        for line in _view_sql().splitlines()
-        if not line.strip().startswith("--")
+        line for line in _view_sql().splitlines() if not line.strip().startswith("--")
     ]
     return "\n".join(body)
 
@@ -578,27 +590,49 @@ def test_clearance_view_does_not_use_the_slow_backlog_base_path():
         "视图不能引用 mart.inventory_backlog_base：它的销售 CTE 要 8.8 秒，"
         "会让滞销清单页面变成 11 秒的慢查询"
     )
-    assert "mart.inventory_state" in sql_text, (
-        "主判据应改从 mart.inventory_state 取（距上次进货天数）"
-    )
+    assert (
+        "mart.inventory_state" in sql_text
+    ), "主判据应改从 mart.inventory_state 取（距上次进货天数）"
 
 
-def test_clearance_view_restricts_sales_to_platforms_with_inventory():
-    """销售聚合必须限定在「有库存的平台」。
+def test_clearance_view_takes_30d_sales_from_the_state_layer_not_the_order_facts():
+    """近30天动销必须取状态层自带的窗口销量，不能再去订单事实表跨系统对账。
 
-    `platform_code = ANY(ARRAY(SELECT DISTINCT platform_code FROM mart.inventory_state))`
-    是 InitPlan → 常量数组 → 谓词能下推到 fact_orders_atomic 的 UNION ALL 分支，
-    实测 21.0s → 12ms。
+    2026-10-31 实测根因：库存行来自妙手（platform_code='miaoshou'），
+    订单行来自销售渠道（shopee/tiktok）。老口径用 platform_code 相等连接，
+    两边**一行都配不上** ⇒ `sold_units_30d` 恒 0（不是偶尔为 0，是 100% 为 0）；
+    老代码还额外加了 `platform_code = ANY(有库存的平台)` 过滤，
+    在生产上把 shopee/tiktok 的订单行全滤掉 —— 快是快了，数字全 0。
 
-    不改变任何数字：销售与库存的连接键含 platform_code，没有库存的平台
-    其销售行本来也匹配不上。
+    改法：用状态层同源同一次采集的 `checklist_sales_30d`（妙手「近30天销量数据」）。
+    顺带甩掉 `semantic.fact_orders_atomic` 那个 10 秒级慢查询（每行跑一次店铺别名解析）。
     """
     sql_text = _view_sql_body()
 
-    assert "ARRAY(SELECT DISTINCT platform_code FROM mart.inventory_state)" in sql_text, (
-        "销售 CTE 必须限定在有库存的平台，否则 fact_orders_atomic 全量求值要 21 秒"
+    assert "semantic.fact_orders_atomic" not in sql_text, (
+        "视图不能再依赖 semantic.fact_orders_atomic：库存与订单的平台口径对不上，"
+        "配出来的销量恒为 0；而且那个视图每行都要跑一次店铺别名解析（10 秒级慢查询）"
     )
-    assert "semantic.fact_orders_atomic" in sql_text
+    assert (
+        "checklist_sales_30d" in sql_text
+    ), "近30天动销必须取状态层自带的窗口销量 checklist_sales_30d（与库存同源同一次采集）"
+    assert (
+        "sold_units_30d" in sql_text
+    ), "视图必须继续输出 sold_units_30d（前端契约不变）"
+
+
+def test_clearance_view_refresh_dependency_dropped_the_order_facts():
+    """刷新依赖要跟着口径一起改。
+
+    依赖列表是「上游变了要重建谁」的依据。口径已经不依赖订单事实表了，
+    还留着 `semantic.fact_orders_atomic` 的话，每刷一次订单就会白重建这个视图。
+    """
+    from backend.services.data_pipeline.refresh_registry import PIPELINE_DEPENDENCIES
+
+    deps = PIPELINE_DEPENDENCIES["api.sku_clearance_ranking_module"]
+
+    assert deps == ["mart.inventory_state"], f"依赖列表应只剩状态层，实际是 {deps}"
+    assert "semantic.fact_orders_atomic" not in deps
 
 
 def test_clearance_view_keeps_pricing_formulas_out_of_sql():
@@ -621,6 +655,6 @@ def test_clearance_view_keeps_pricing_formulas_out_of_sql():
         "cost_floor",
         "target_margin_rate",
     ):
-        assert forbidden not in sql_text, (
-            f"视图里出现 {forbidden}：定价口径必须只留 product_pricing_service 一处"
-        )
+        assert (
+            forbidden not in sql_text
+        ), f"视图里出现 {forbidden}：定价口径必须只留 product_pricing_service 一处"

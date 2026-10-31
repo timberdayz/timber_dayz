@@ -20,7 +20,37 @@
 -- ⚠️ **未匹配主数据的 SKU 照常保留**：不 join core.dim_erp_sku 过滤掉未匹配行，
 --    滞销清单漏掉新品恰恰是最要命的。匹配不上的行定价字段为空，由前端标「未匹配主数据」。
 --
--- ⚠️ 性能：sales_30d 的平台限定见下 —— 谓词下推把 21s 降到 12ms，数字不变。
+-- 2026-10-31 「近30天动销」换源（`sold_units_30d` 恒 0 的根因修复）：
+--
+-- 现象：这一列**永远是 0**（不是"偶尔为 0"，是 100% 为 0）。
+--
+-- 根因不是数据没到位，是**跨系统对账**这件事本身就不成立：
+--   ① **平台对不上**：库存行来自妙手（platform_code='miaoshou'），
+--      订单行来自销售渠道（shopee / tiktok）。老口径用 platform_code 相等连接，
+--      妙手库存永远配不上任何销售渠道的订单 ⇒ 一行都配不上。
+--      （老代码还额外加了 `platform_code = ANY(有库存的平台)` 过滤，
+--        在生产上直接把 shopee/tiktok 的订单行全滤掉 —— 快是快了，数字是全 0。）
+--   ② **SKU 口径不一致**：订单侧只取 `product_sku`；库存侧取的是
+--      `platform_sku → product_sku → sku_id → product_id` 的组合。同一件商品
+--      两个系统给的键不一样。
+--   ③ **大小写不归一**：`'A-00001-Army green'` vs `'A-00001-Army Green'` 配不上。
+--
+-- 改法：**不再跨系统对账**，直接用妙手 ERP 自带的「近30天销量」
+--        （原始列名「近30天销量数据」→ `checklist_sales_30d`）。
+--   - 库存与销量来自**同一次采集、同一份文件** ⇒ 库存和销量不会互相打架；
+--   - 数字是真的：本地实测 ERP 口径与订单事实口径的均值几乎相同
+--     （6.76 vs 6.79）；两边都 >0 的 246 个 SKU 里 189 个差异 ≤20%，
+--     差异来自采集时点不同，不是口径打架；
+--   - 页面从「10 秒级慢查询」变成「毫秒级」：不再扫 `semantic.fact_orders_atomic`
+--     （那个视图每行都要跑一次店铺别名解析，本地实测 2253 行 = 10.6 秒）。
+--
+-- ⚠️ 语义变化（业务须知）：`sold_units_30d` 现在是**妙手口径的 SKU 级近30天销量**
+--    （跨渠道合计），不再是「某个销售渠道的订单销量」。滞销清单按 SKU 展示，
+--    运营在妙手看到的近30天销量与这里一致 —— 这正是本轮重构要的口径统一。
+--    同一 SKU 若在多个 platform 下都有库存行，各行显示同一个 SKU 级销量值。
+--
+-- ⚠️ 性能：视图只读 `mart.inventory_state` 与 `core.dim_erp_sku`，
+--    实测 0.4ms。不再依赖 `semantic.fact_orders_atomic`。
 
 CREATE SCHEMA IF NOT EXISTS api;
 
@@ -30,7 +60,7 @@ DROP VIEW IF EXISTS api.sku_clearance_ranking_module;
 
 CREATE OR REPLACE VIEW api.sku_clearance_ranking_module AS
 WITH state AS (
-    -- 距上次进货天数（SKU 级）
+    -- 距上次进货天数（SKU 级）+ 妙手窗口销量
     -- mart.inventory_state 每行是一个 SKU×仓：
     --   stock_added_at  = 上次库存数量增加（进货）的时间 = 计时器基准
     --   available_stock > 0 的仓才参与（已清空的仓不压资金）
@@ -42,7 +72,10 @@ WITH state AS (
         SUM(COALESCE(on_hand_stock, 0))                AS on_hand_qty,
         SUM(COALESCE(inventory_value, 0))              AS inventory_value,
         COUNT(DISTINCT warehouse_name)                 AS warehouse_count,
+        -- DOS 参考原料（妙手「近90天销量数据」）
         MAX(checklist_sales_90d)                       AS checklist_sales_90d,
+        -- 近30天动销（妙手「近30天销量数据」）：与库存同源、同一次采集
+        MAX(checklist_sales_30d)                       AS sold_units_30d,
         MAX(last_metric_date)                          AS snapshot_date
     FROM mart.inventory_state
     WHERE sku_key IS NOT NULL
@@ -51,23 +84,6 @@ WITH state AS (
       -- （同一套公式 + 同一个过滤），商品中心与滞销清单不会给出两个答案。
       AND available_stock > 0
     GROUP BY platform_code, sku_key
-),
-sales_30d AS (
-    -- 近 30 天动销（**参考值**）：按 SKU 聚合，不是按仓库行，否则同一 SKU 的销量会被重复计数
-    -- 平台限定见文件头说明：谓词下推 → 21s 降到 12ms，数字不变。
-    SELECT
-        platform_code,
-        product_sku,
-        COALESCE(SUM(product_quantity), 0)         AS sold_units_30d,
-        COUNT(DISTINCT metric_date::date)          AS active_days_30d
-    FROM semantic.fact_orders_atomic
-    WHERE platform_code = ANY (
-              ARRAY(SELECT DISTINCT platform_code FROM mart.inventory_state)
-          )
-      AND metric_date::date >= CURRENT_DATE - INTERVAL '30 days'
-      AND metric_date::date <= CURRENT_DATE
-      AND product_sku IS NOT NULL
-    GROUP BY platform_code, product_sku
 ),
 erp AS (
     -- ERP 主数据：只取定价需要的原料列
@@ -94,14 +110,12 @@ SELECT
     s.days_since_restock,
     -- DOS 参考原料（除法在 Python 唯一实现里做）
     s.checklist_sales_90d,
-    COALESCE(sd.sold_units_30d, 0)      AS sold_units_30d,
+    -- 近30天动销（参考值）
+    COALESCE(s.sold_units_30d, 0)       AS sold_units_30d,
     erp.sku_id,
     erp.default_purchase_cost,
     erp.reference_selling_price,
     erp.min_selling_price_override
 FROM state s
-LEFT JOIN sales_30d sd
-       ON sd.platform_code = s.platform_code
-      AND sd.product_sku = s.sku_key
 LEFT JOIN erp
        ON erp.sku_key = s.sku_key;

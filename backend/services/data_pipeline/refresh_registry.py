@@ -2,28 +2,53 @@ from __future__ import annotations
 
 import re
 
-from modules.core.data_domains import DataDomain, data_domain_tokens_for, normalize_data_domain
+from modules.core.data_domains import (
+    DataDomain,
+    data_domain_tokens_for,
+    normalize_data_domain,
+)
 
 
 PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.alias_registry": [],
     "semantic.shop_identity_resolution_candidates": [],
-    "semantic.fact_orders_monthly_atomic_mv": ["semantic.shop_identity_resolution_candidates"],
-    "semantic.fact_analytics_monthly_atomic_mv": ["semantic.shop_identity_resolution_candidates"],
+    "semantic.fact_orders_monthly_atomic_mv": [
+        "semantic.shop_identity_resolution_candidates"
+    ],
+    "semantic.fact_analytics_monthly_atomic_mv": [
+        "semantic.shop_identity_resolution_candidates"
+    ],
     "semantic.fact_orders_atomic": [],
     "semantic.fact_analytics_atomic": ["semantic.shop_identity_resolution_candidates"],
     "semantic.fact_orders_monthly_atomic": ["semantic.fact_orders_monthly_atomic_mv"],
-    "semantic.fact_analytics_monthly_atomic": ["semantic.fact_analytics_monthly_atomic_mv"],
+    "semantic.fact_analytics_monthly_atomic": [
+        "semantic.fact_analytics_monthly_atomic_mv"
+    ],
     "semantic.fact_products_atomic": ["semantic.alias_registry"],
     "semantic.fact_inventory_snapshot": [],
     "semantic.fact_services_atomic": [],
     "semantic.shop_month_other_operating_cost": [],
-    "mart.shop_day_kpi": ["semantic.fact_orders_atomic", "semantic.fact_analytics_atomic"],
+    "mart.shop_day_kpi": [
+        "semantic.fact_orders_atomic",
+        "semantic.fact_analytics_atomic",
+    ],
     "mart.shop_hour_traffic_kpi": ["semantic.fact_analytics_atomic"],
-    "mart.shop_week_kpi": ["semantic.fact_orders_atomic", "semantic.fact_analytics_atomic"],
-    "mart.shop_month_kpi": ["semantic.fact_orders_monthly_atomic", "semantic.fact_analytics_monthly_atomic"],
-    "mart.platform_day_kpi": ["semantic.fact_orders_atomic", "semantic.fact_analytics_atomic"],
-    "mart.platform_week_kpi": ["semantic.fact_orders_atomic", "semantic.fact_analytics_atomic"],
+    "mart.shop_week_kpi": [
+        "semantic.fact_orders_atomic",
+        "semantic.fact_analytics_atomic",
+    ],
+    "mart.shop_month_kpi": [
+        "semantic.fact_orders_monthly_atomic",
+        "semantic.fact_analytics_monthly_atomic",
+    ],
+    "mart.platform_day_kpi": [
+        "semantic.fact_orders_atomic",
+        "semantic.fact_analytics_atomic",
+    ],
+    "mart.platform_week_kpi": [
+        "semantic.fact_orders_atomic",
+        "semantic.fact_analytics_atomic",
+    ],
     "mart.platform_month_kpi": ["mart.shop_month_kpi"],
     "mart.product_day_kpi": ["semantic.fact_products_atomic"],
     "mart.inventory_snapshot_history": ["semantic.fact_inventory_snapshot"],
@@ -34,20 +59,49 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "mart.inventory_age_current": ["mart.inventory_age_history"],
     "mart.inventory_current": ["semantic.fact_inventory_snapshot"],
     "mart.inventory_state": ["semantic.fact_inventory_snapshot"],
-    "mart.inventory_backlog_base": ["mart.inventory_snapshot_latest", "mart.inventory_state"],
+    "mart.inventory_backlog_base": [
+        "mart.inventory_snapshot_latest",
+        "mart.inventory_state",
+    ],
     "mart.spu_operating_current": ["mart.inventory_age_current"],
     "mart.hr_shop_monthly_profit": ["semantic.fact_orders_atomic"],
     "mart.b_cost_shop_month": ["semantic.fact_orders_atomic"],
     "mart.shop_month_labor_cost": [],
     "api.business_overview_kpi_module": ["mart.platform_month_kpi"],
-    "api.business_overview_comparison_platform_module": ["mart.platform_day_kpi", "mart.platform_week_kpi", "mart.platform_month_kpi"],
-    "api.business_overview_comparison_module": ["mart.shop_day_kpi", "mart.shop_week_kpi", "mart.shop_month_kpi"],
-    "api.business_overview_shop_racing_monthly_module": ["semantic.fact_orders_monthly_atomic"],
-    "api.business_overview_shop_racing_module": ["mart.shop_day_kpi", "mart.shop_week_kpi", "mart.shop_month_kpi"],
-    "api.business_overview_traffic_ranking_module": ["mart.shop_day_kpi", "mart.shop_week_kpi", "mart.shop_month_kpi"],
+    "api.business_overview_comparison_platform_module": [
+        "mart.platform_day_kpi",
+        "mart.platform_week_kpi",
+        "mart.platform_month_kpi",
+    ],
+    "api.business_overview_comparison_module": [
+        "mart.shop_day_kpi",
+        "mart.shop_week_kpi",
+        "mart.shop_month_kpi",
+    ],
+    "api.business_overview_shop_racing_monthly_module": [
+        "semantic.fact_orders_monthly_atomic"
+    ],
+    "api.business_overview_shop_racing_module": [
+        "mart.shop_day_kpi",
+        "mart.shop_week_kpi",
+        "mart.shop_month_kpi",
+    ],
+    "api.business_overview_traffic_ranking_module": [
+        "mart.shop_day_kpi",
+        "mart.shop_week_kpi",
+        "mart.shop_month_kpi",
+    ],
     "api.store_analysis_capability_module": ["mart.shop_month_kpi"],
-    "api.store_analysis_traffic_summary_module": ["mart.shop_day_kpi", "mart.shop_week_kpi", "mart.shop_month_kpi"],
-    "api.store_analysis_traffic_trend_module": ["mart.shop_hour_traffic_kpi", "mart.shop_day_kpi", "mart.shop_month_kpi"],
+    "api.store_analysis_traffic_summary_module": [
+        "mart.shop_day_kpi",
+        "mart.shop_week_kpi",
+        "mart.shop_month_kpi",
+    ],
+    "api.store_analysis_traffic_trend_module": [
+        "mart.shop_hour_traffic_kpi",
+        "mart.shop_day_kpi",
+        "mart.shop_month_kpi",
+    ],
     "api.business_overview_inventory_backlog_module": ["mart.inventory_backlog_base"],
     "api.inventory_backlog_summary_module": ["mart.inventory_backlog_base"],
     "api.inventory_age_list_module": ["mart.inventory_age_current"],
@@ -60,9 +114,16 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "api.b_cost_analysis_overview_module": ["mart.b_cost_shop_month"],
     "api.b_cost_analysis_shop_month_module": ["mart.b_cost_shop_month"],
     "api.b_cost_analysis_order_detail_module": ["semantic.fact_orders_atomic"],
-    "api.clearance_ranking_module": ["mart.inventory_backlog_base", "api.inventory_backlog_summary_module", "semantic.fact_orders_atomic"],
-    # SKU 级滞销清单：判据来自状态层（距上次进货天数），ERP 主数据补定价原料
-    "api.sku_clearance_ranking_module": ["mart.inventory_state", "semantic.fact_orders_atomic"],
+    "api.clearance_ranking_module": [
+        "mart.inventory_backlog_base",
+        "api.inventory_backlog_summary_module",
+        "semantic.fact_orders_atomic",
+    ],
+    # SKU 级滞销清单：判据来自状态层（距上次进货天数），ERP 主数据补定价原料。
+    # 2026-10-31：不再依赖 semantic.fact_orders_atomic —— 近30天动销改用妙手自带的
+    # 窗口销量（状态层里已有），跨系统对账口径恒为 0，且那个视图每行跑一次店铺别名
+    # 解析（10 秒级慢查询）。依赖列表跟着口径一起改，否则每次订单刷新都会白重建它。
+    "api.sku_clearance_ranking_module": ["mart.inventory_state"],
 }
 
 SQL_TARGET_PATHS: dict[str, str] = {
@@ -170,7 +231,9 @@ def expand_downstream_targets(base_targets: list[str]) -> list[str]:
         discovered.add(target)
         stack.extend(reverse.get(target, []))
 
-    return topologically_sort_targets([target for target in discovered if target in SQL_TARGET_PATHS])
+    return topologically_sort_targets(
+        [target for target in discovered if target in SQL_TARGET_PATHS]
+    )
 
 
 def _normalize_table_name(source_table_name: str | None) -> str:
@@ -181,7 +244,9 @@ def _normalize_table_name(source_table_name: str | None) -> str:
 
 
 #: 有刷新目标图的业务域(与 _base_targets_for_refresh_domain 的分支保持一致)
-_REFRESHABLE_DOMAINS = frozenset({"orders", "analytics", "products", "inventory", "services"})
+_REFRESHABLE_DOMAINS = frozenset(
+    {"orders", "analytics", "products", "inventory", "services"}
+)
 
 
 def _infer_refresh_domain(
