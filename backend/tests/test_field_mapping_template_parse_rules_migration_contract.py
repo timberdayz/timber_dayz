@@ -4,11 +4,61 @@ import re
 import subprocess
 import sys
 import time
+from urllib.parse import quote, urlparse
 
 import psycopg2
+import pytest
+
+from backend.utils.project_env import isolated_database_url
 
 
 CURRENT_REVISION = "20260415_c_class_employee_metrics_cleanup"
+
+
+def _candidate_databases():
+    """能 CREATE DATABASE 的 PostgreSQL 候选地址。
+
+    优先用**测试护栏的一次性隔离容器**（``XIHONG_TEST_DATABASE_URL``）——
+    这才符合「测试绝不碰真实业务库」的家规；
+    容器用不了时退回本地开发库（127.0.0.1:15432）；
+    两者都连不上就跳过，别把没有本地库的 CI 拖红。
+    """
+    candidates = []
+    guard_url = isolated_database_url()
+    if guard_url:
+        parsed = urlparse(guard_url)
+        candidates.append(
+            (
+                parsed.hostname or "localhost",
+                parsed.port or 5432,
+                parsed.username or "",
+                parsed.password or "",
+            )
+        )
+    candidates.append(("127.0.0.1", 15432, "erp_user", "erp_pass_2025"))
+    return candidates
+
+
+def _connect_admin():
+    """连上能 CREATE DATABASE 的 PostgreSQL；都不行就跳过。"""
+    last_error = None
+    for host, port, user, password in _candidate_databases():
+        try:
+            conn = psycopg2.connect(
+                host=host,
+                port=port,
+                user=user,
+                password=password,
+                dbname="postgres",
+                connect_timeout=3,
+            )
+            conn.autocommit = True
+            return conn, (host, port, user, password)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+    pytest.skip(
+        f"没有可用的 PostgreSQL 演练环境（隔离容器与本地库都连不上）：{last_error}"
+    )
 
 
 def _find_field_mapping_template_parse_rules_migration() -> Path:
@@ -55,14 +105,7 @@ def test_field_mapping_template_schema_defines_parse_rules_column():
 
 
 def test_field_mapping_template_parse_rules_migration_adds_jsonb_column():
-    admin_conn = psycopg2.connect(
-        host="127.0.0.1",
-        port=15432,
-        user="erp_user",
-        password="erp_pass_2025",
-        dbname="postgres",
-    )
-    admin_conn.autocommit = True
+    admin_conn, (host, port, user, password) = _connect_admin()
     rehearsal_db = f"xihong_erp_template_parse_rules_{int(time.time())}"
 
     try:
@@ -71,10 +114,10 @@ def test_field_mapping_template_parse_rules_migration_adds_jsonb_column():
             cur.execute(f"CREATE DATABASE {rehearsal_db}")
 
         conn = psycopg2.connect(
-            host="127.0.0.1",
-            port=15432,
-            user="erp_user",
-            password="erp_pass_2025",
+            host=host,
+            port=port,
+            user=user,
+            password=password,
             dbname=rehearsal_db,
         )
         try:
@@ -125,7 +168,7 @@ def test_field_mapping_template_parse_rules_migration_adds_jsonb_column():
 
         env = os.environ.copy()
         env["DATABASE_URL"] = (
-            f"postgresql://erp_user:erp_pass_2025@127.0.0.1:15432/{rehearsal_db}"
+            f"postgresql://{quote(user)}:{quote(password)}@{host}:{port}/{rehearsal_db}"
         )
         result = subprocess.run(
             [
@@ -149,10 +192,10 @@ def test_field_mapping_template_parse_rules_migration_adds_jsonb_column():
         ), f"alembic upgrade failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
         conn = psycopg2.connect(
-            host="127.0.0.1",
-            port=15432,
-            user="erp_user",
-            password="erp_pass_2025",
+            host=host,
+            port=port,
+            user=user,
+            password=password,
             dbname=rehearsal_db,
         )
         try:
