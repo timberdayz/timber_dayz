@@ -50,6 +50,24 @@ DROP VIEW IF EXISTS api.clearance_ranking_module;
 --
 -- 改完实测：join 命中 418 个积压 SKU，视图从 0 行变成按月 × 渠道 × 店铺出榜单。
 -- 选行规则（LATERAL + DISTINCT ON + NOT EXISTS + age_days >= 30）与输出列保持不变。
+-- 2026-10-31 SKU 大小写归一（实测修掉一批「明明是同一件商品却配不上」的漏配）
+-- ------------------------------------------------------------------
+-- 现象：库存侧与订单侧的同一件商品，SKU 写法**只有大小写不同**时配不上
+--       （库存侧 'A-00001-Army green' vs 订单侧 'A-00001-Army Green'）。
+-- 实测本地有 6 个这样的库存 SKU（库龄 47~60 天，**全部 ≥30 天、能进榜**），
+-- 因为没对上大小写而**整件漏在榜外**。
+--
+-- 实证「归一是安全的」：
+--   - 库存侧 503 个不同 SKU，忽略大小写后仍是 503 个 ⇒ 不会把两件商品合成一件；
+--   - 订单侧 886 → 881 ⇒ 归一合并掉的 5 组就是「同一商品的不同大小写写法」，
+--     合并它们是对的（同一商品的多条订单行应该合并统计）；
+--   - 按平台SKU 配出来的 414 对，两边商品名 **100% 完全一致** ⇒ 当前口径零误配。
+--
+-- 修法：两侧 sku_key 统一再套一层 LOWER()。
+--   依据：商品中心的 SKU 主键 core.dim_erp_sku.sku_key 本来就是**小写归一**过的
+--   （'A-00033-black'），SKU 是标识符、大小写不承载业务含义。
+-- ⚠️ 归一只做在 **sku_key** 上；展示用的 platform_sku/product_sku 保持原样。
+--
 CREATE OR REPLACE VIEW api.clearance_ranking_module AS
 -- The previous implementation selected mart.inventory_backlog_base rows.
 -- This view keeps compatibility fields while exposing monthly shop rankings.
@@ -57,9 +75,9 @@ WITH order_months AS MATERIALIZED (
     SELECT
         date_trunc('month', o.metric_date)::date AS ranking_month,
         o.platform_code,
-        -- SKU 口径：与 backlog_rows **逐字相同**（P7 修复 ①）
-        COALESCE(NULLIF(BTRIM(o.platform_sku), ''), NULLIF(BTRIM(o.product_sku), ''),
-                 NULLIF(BTRIM(o.product_id), '')) AS sku_key,
+        -- SKU 口径：与 backlog_rows **逐字相同**（P7 修复 ①），并统一 LOWER()（大小写归一）
+        LOWER(COALESCE(NULLIF(BTRIM(o.platform_sku), ''), NULLIF(BTRIM(o.product_sku), ''),
+                 NULLIF(BTRIM(o.product_id), ''))) AS sku_key,
         o.shop_id,
         COALESCE(o.paid_amount, o.sales_amount, 0) AS sales_amount,
         COALESCE(o.product_quantity, 0)::numeric AS sales_quantity
@@ -91,9 +109,9 @@ backlog_rows AS MATERIALIZED (
     -- 物化：原来在 LATERAL 里被逐条订单行重复计算
     SELECT
         b.platform_code,
-        -- SKU 口径：与 order_months **逐字相同**（P7 修复 ①）
-        COALESCE(NULLIF(BTRIM(b.platform_sku), ''), NULLIF(BTRIM(b.product_sku), ''),
-                 NULLIF(BTRIM(b.product_id), '')) AS sku_key,
+        -- SKU 口径：与 order_months **逐字相同**（P7 修复 ①），并统一 LOWER()（大小写归一）
+        LOWER(COALESCE(NULLIF(BTRIM(b.platform_sku), ''), NULLIF(BTRIM(b.product_sku), ''),
+                 NULLIF(BTRIM(b.product_id), ''))) AS sku_key,
         b.snapshot_date,
         COALESCE(b.days_since_restock, 0) AS age_days,
         b.inventory_value,
