@@ -1133,6 +1133,93 @@ LOWER(COALESCE(NULLIF(BTRIM(o.platform_sku), ''), NULLIF(BTRIM(o.product_sku), '
 **口径统一不是一次改完的，是被一层层剥出来的**；每次都要用「逐行对比 + 只增不减」验收，
 否则很容易在修好一个坑的同时制造另一个坑。
 
+### 3.9.11 生产库存状态层（`mart.inventory_state`）为什么不出数（2026-10-31 第 11 轮）
+
+§3.9.9 定位到「口径已修好、但生产仍返回 0 行」之后，这一轮把**数据侧的缺口**挖到底了。
+结论：**不是口径问题，是生产上「状态层从来没有被任何一条路径写入过」。**
+
+#### 依赖链（每一环都已在代码与生产数据上核对）
+
+```
+semantic.fact_inventory_snapshot        （妙手库存快照，b_class 三张表的 UNION）
+  → mart.inventory_state                 （**表**，由 InventoryStateRefreshService upsert 写入）
+  → mart.inventory_backlog_base         （视图，LEFT JOIN 状态层取 days_since_restock）
+  → api.clearance_ranking_module        （视图，WHERE age_days >= 30）
+```
+
+`mart.inventory_state` 是**表**不是视图：SQL 资产重建只会 `CREATE TABLE IF NOT EXISTS`，
+**灌不进数据**。它的唯一写入方是
+`backend/services/data_pipeline/inventory_state_refresh_service.py::InventoryStateRefreshService.persist_rows`。
+
+#### 生产实测（公网 API 只读观测，2026-10-30 v7.12.1 上线后）
+
+| 证据 | 数值 | 含义 |
+| --- | --- | --- |
+| `mart.inventory_state` 的 freshness | `2026-10-30T17:07:16.298433Z` | **等于 bootstrap 建表那一刻**（`bootstrap_postgresql_dashboard.clearance_ranking` 的时间戳），之后没被任何刷新碰过 |
+| `mart.inventory_age_current` 的 freshness | `2026-10-30T17:08:42.917729Z` | 库龄层在 **Phase 3a** 被真刷过（晚 1 分半） |
+| 生产积压汇总 | `unknown_restock_row_count = 309`（共 309 行）、三个分档全 0 | **状态层对这批 SKU 没有任何可用行** |
+| 生产滞销榜 | `data: []` | `age_days = COALESCE(days_since_restock, 0) = 0` ⇒ `>= 30` 恒空 |
+
+**⇒ 状态层在生产上是空表。** 佐证：本地同口径跑出来状态层 **1230 行**、
+`mart.inventory_backlog_base` **506 行且 unknown = 0**；生产 unknown = 309/309。
+
+补充判定（排除「有行但 `stock_added_at` 全 NULL」）：
+`resolve_state_transition` 对**首次观测**返回 `stock_added_at = created_at or base_at`
+（`base_at = observed_at or ingest_timestamp`），**永不为 NULL**；
+`build_state_row` 里的回放锚点也只在有值时覆盖。
+⇒ 只要状态层**有一行能 join 上**，`days_since_restock` 就非空。
+生产 309/309 全空 ⇒ 状态层要么是空表，要么一行都 join 不上（而两边的
+`platform_code`/`sku_key`/`warehouse_name` 取自同一张 `semantic.fact_inventory_snapshot`，
+**join 不上的可能性极低**）。
+
+#### 根因：状态层有写入方，但**没有稳定的触发路径**
+
+`InventoryStateRefreshService.refresh()` 在生产代码里**只有一个调用方**：
+
+| 位置 | 状态 |
+| --- | --- |
+| `backend/tasks/refresh_queue_tasks.py:276` | ✅ 唯一活着的调用方，但被 `if (task.context_json or {}).get("data_domain") == "inventory"` 守着 |
+| `backend/services/event_listeners.py:143`（内联路径） | ❌ **死代码** —— 仓库文档已记载「生产代码里从来没被调用过」，只有测试在调 |
+| `backend/services/cloud_sync_admin_command_service.py:368`（`refresh_projection`） | ❌ 直接 `execute_refresh_plan`，**不刷状态层** |
+| `scripts/deploy_remote_production.sh`（Phase 3a） | ❌ 跑 `scripts/rebuild_inventory_age_from_snapshots.py` → 只调 `InventoryAgeRefreshService`，**从头到尾没碰过状态层** |
+
+`scripts/` 全目录 grep `InventoryState|inventory_state` 只命中 `rebuild_views.py` 的注释示例。
+
+**⇒ 缺口有两个，叠加起来就是「永远空表」：**
+
+1. **部署路径没有这一步** —— 发版只重建库龄层。新环境 / 每次发版后状态层必然是空表。
+2. **采集路径在生产上没喂到它** —— 状态层刷新的触发条件是「事件带 `data_domain=inventory`」，
+   而不是「本次刷新涉及库存域资产」。只要触发方没传这个字段，状态层就一步不动。
+
+#### 生产侧采集链路的实证
+
+生产可见的最近 4 次队列刷新（2026-10-29 07:03 / 07:05 ×2 / 08:04，`trigger=cloud_sync`）
+**后面没有任何 `inventory_state_*` / `inventory_age_*` 运行记录** ⇒ 那 4 个任务**都不是 inventory 域**。
+（`inventory_age_*` 在生产只出现过两次：10-26 14:57 与 10-30 17:08，**都是部署脚本 Phase 3a 打的**。）
+
+本地对照组（链路是通的）：本地的库存走 **A 类文件上传**
+（`data_ingestion_service` → `DATA_INGESTED` → 入队时 context 带 `data_domain="inventory"`）
+⇒ `core.refresh_queue_tasks` 里 inventory 域任务 12 条 completed ⇒ 状态层被刷新出 1230 行。
+**⇒ 机制本身没坏，坏的是生产的触发条件没满足。**
+
+另有一条待定案的线索：生产的 `mart.inventory_current` 与 `mart.spu_operating_current`
+在 **2026-10-26T06:16:00Z** 同时被刷新过 ⇒ 那次确实有一次 **inventory 域的刷新计划**跑过。
+但状态层至今无数据 ⇒ 那次任务要么 context 里没带 `data_domain="inventory"`，
+要么状态层刷新途中抛错被吞了（生产 postgres `statement_timeout=120s`，
+而状态层刷新是「全表扫 + 全表逐帧回放 + upsert」，是整条链上最重的一步，是超时的头号嫌疑）。
+**定案需要生产的 `core.refresh_queue_tasks.last_error`**，本机无生产 DB / SSH 权限，
+只能用公网 API 观测，故留作运维侧取证项。
+
+#### 结论（业务语言）
+
+滞销榜不是「算错了」，是**「没有可算的东西」**：判据「距上次进货天数」只存在状态层，
+而状态层在生产上是一张从没被写过数据的空表。
+库龄层（`mart.inventory_age_current`）是好的、有数，但它**不喂**滞销榜 ——
+两张榜用的是**两个不同的层**，这一点很容易看混。
+
+⇒ 修复必须补**状态层的生产触发路径**（部署路径 + 采集路径），
+**不能**靠调 `age_days >= 30` 口径绕过去（那是把「没数据」当成「没滞销」，会把 0 行洗成假数）。
+
 ---
 
 ## 4. 建议的实施顺序
@@ -1169,4 +1256,5 @@ LOWER(COALESCE(NULLIF(BTRIM(o.platform_sku), ''), NULLIF(BTRIM(o.product_sku), '
 - **⏸ v7.12.1 上线后的生产实测（2026-10-31）**：视图口径**已修好并生效**（`assets_drift=false`、模块 `ready`、新定义在跑 38~43s），但生产滞销榜**仍是 0 行** —— 根因是生产的 309 行积压**全部 `days_since_restock IS NULL`**（库存状态层 `mart.inventory_state` 没出数），被 `age_days >= 30` 全过滤掉。**这是采集/状态层的数据缺口，不是口径问题**；动作在数据侧补链路，不在视图 SQL 里改口径（§3.9.9）。
 - **⚠️ 口径脆弱点（待处理）**：`COALESCE(days_since_restock, 0)` 把「取不到库龄」和「库龄 0 天」混成同一个值 —— 数据缺失被伪装成「都是新货」，`inventory_backlog_summary` 的 `active_sku_count` 也会把缺数据的行算成活跃。建议把「取不到」单独成一档，让缺失在数据上可见（§3.9.9）。
 - **✅ SKU 大小写归一（第 11 轮）**：库存侧与订单侧**同一件商品** SKU **只有大小写不同**时配不上，实测 6 个 SKU（库龄 47~60 天，**全部 ≥30 天、本来都该进榜**）整件漏在榜外。修法是两侧 `sku_key` 统一套 `LOWER()`（依据：商品中心的 SKU 主键本来就是小写归一过的）。重建前后逐行对比：**0 行消失、1 行新增、41 行数值变大**（金额最多 +25% ⇒ 改之前的看板滞销金额是系统性偏低的），耗时 43.3s→45.5s 仍在 60s 预算内（§3.9.10）。
+- **⏸ 生产库存状态层没出数 —— 根因已定案（第 11 轮）**：滞销榜的判据「距上次进货天数」**只存在** `mart.inventory_state`（状态层，是表不是视图），而生产上这张表**从来没被写入过数据**（freshness 停在 bootstrap 建表那一刻 17:07:16；库龄层 17:08:42 是真刷过的）。根因是**状态层有写入方但没有稳定的触发路径**：唯一写入方 `InventoryStateRefreshService` 在生产代码里只有一个调用方（队列消费者，且要求 `context_json.data_domain == "inventory"`），而部署脚本 Phase 3a 只重建**库龄层**、**不重建状态层**。**⇒ 修复必须补状态层的生产触发路径（部署路径 + 采集路径），不能靠调 `age_days >= 30` 绕过去**（那是把「没数据」洗成假数）。详见 §3.9.11。
 
