@@ -68,15 +68,24 @@ def test_backend_gunicorn_errors_are_written_to_container_stderr():
 def test_backend_image_includes_current_schema_migration_helper_module():
     dockerfile = BACKEND_DOCKERFILE.read_text(encoding="utf-8")
 
-    assert "COPY scripts/run_current_schema_migrations.py /app/scripts/run_current_schema_migrations.py" in dockerfile
-    assert "COPY scripts/local_migration_backup.py /app/scripts/local_migration_backup.py" in dockerfile
+    assert (
+        "COPY scripts/run_current_schema_migrations.py /app/scripts/run_current_schema_migrations.py"
+        in dockerfile
+    )
+    assert (
+        "COPY scripts/local_migration_backup.py /app/scripts/local_migration_backup.py"
+        in dockerfile
+    )
 
 
 def test_backend_image_includes_v2_profit_basis_migration_runner_and_backup_client():
     dockerfile = BACKEND_DOCKERFILE.read_text(encoding="utf-8")
 
     assert "postgresql-client" in dockerfile
-    assert "COPY scripts/migrate_profit_basis_to_v2.py /app/scripts/migrate_profit_basis_to_v2.py" in dockerfile
+    assert (
+        "COPY scripts/migrate_profit_basis_to_v2.py /app/scripts/migrate_profit_basis_to_v2.py"
+        in dockerfile
+    )
 
 
 def test_current_schema_preflight_only_performs_read_only_adoption_checks(monkeypatch):
@@ -310,8 +319,11 @@ def test_remote_deploy_uses_a_valid_bash_rollback_suffix_and_frontend_probe_tool
 
     assert 'DEPLOYMENT_ROLLBACK_SUFFIX="$$_$(date +%s)"' in script
     assert "${$}" not in script
+    # 前端容器探针走 `sh -c` 包裹的 curl（带引号，重定向留在容器 shell 内）。
+    # 这条形式已在 v7.12.1 生产部署实测通过
+    # （日志："[OK] Frontend responded on container port 80"）。
     assert (
-        "docker exec xihong_erp_frontend wget --quiet --tries=1 "
-        "--output-document=/dev/null http://127.0.0.1/" in script
+        "docker exec xihong_erp_frontend sh -c 'curl -fsS http://127.0.0.1/" in script
     )
+    # 不能是「裸 curl」形式：容器里没装 curl 时会直接失败而不是探测失败。
     assert "docker exec xihong_erp_frontend curl" not in script

@@ -368,7 +368,13 @@ def test_remote_production_deploy_does_not_start_celery_exporter_by_default():
     assert (
         "up -d backend celery-worker celery-beat celery-exporter" not in deploy_script
     )
-    assert "up -d --no-build backend-api celery-worker celery-beat" in deploy_script
+    # 应用层启动固定带 --no-build --no-deps：
+    # --no-build 禁止在服务器上现场构建镜像（镜像由 CI 推送），
+    # --no-deps 避免连带拉起依赖服务（数据库/Redis 由独立阶段管理）。
+    assert (
+        "up -d --no-build --no-deps backend-api celery-worker celery-beat"
+        in deploy_script
+    )
 
 
 def test_remote_production_deploy_removes_legacy_celery_exporter_container():
