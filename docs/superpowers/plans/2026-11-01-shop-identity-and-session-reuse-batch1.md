@@ -330,10 +330,13 @@ def test_save_helper_throws_on_nonzero_exit():
     assert "throw" in block
 
 
-def test_save_helper_rejects_missing_work_tag():
-    """有账号但缺 work tag 时必须报错，不能静默退回 session=default。"""
+def test_save_helper_rejects_unresolvable_session():
+    """既没有 -WorkTag、又没有活动会话时必须报错，不能静默退回 session=default。"""
     block = _save_helper_block()
-    assert "requires -WorkTag" in block, "缺 work tag 时会静默退回 pwcli state-save（断点 A）"
+    assert "cannot locate the browser session" in block, (
+        "定位不到会话时必须报错（否则会退回 pwcli state-save -> session=default -> 断点 A）"
+    )
+    assert "Get-PwcliActiveSession" in block, "必须复用既有 Get-PwcliActiveSession 解析活动会话"
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -342,7 +345,8 @@ def test_save_helper_rejects_missing_work_tag():
 python -m pytest backend/tests/test_pwcli_helpers_session_targeting.py -q
 ```
 
-Expected: 3 个 FAIL（分别缺 `exit $LASTEXITCODE`、缺 `-WorkTag`、缺 `$LASTEXITCODE`/`throw` 检查）。
+Expected: **4 个 FAIL**（分别缺 `exit $LASTEXITCODE`、缺 `-WorkTag`、缺 `$LASTEXITCODE`/`throw` 检查、缺「定位不到会话」的报错）。
+（Step 6b 之后本文件共 5 条用例。）
 
 - [ ] **Step 3: `scripts/pwcli.ps1` 传播退出码**
 
@@ -387,10 +391,22 @@ function Save-PwcliPlatformState {
         return
     }
 
-    if ($AccountId -and -not $WorkTag) {
-        # 有账号但没给 work tag -> 定位不到会话。直接报错，不要静默退回 pwcli state-save
-        # （那会解析成 session "default" 并失败，正是 spec 断点 A）。
-        throw "Save-PwcliPlatformState requires -WorkTag when -AccountId is given"
+    if ($AccountId) {
+        # 手工 SOP 形态（同一个 shell 里先 open 再 save）：
+        # Open-PwcliPlatform 会把 $env:PLAYWRIGHT_CLI_SESSION 设成 "$platformName-$WorkTag"，
+        # 这里直接复用既有的 Get-PwcliActiveSession 解析（今天这条路径就是好的，见 Step 5c）。
+        $session = Get-PwcliActiveSession
+        if (-not $session) {
+            # 既没有 -WorkTag、又没有活动会话 -> 定位不到会话。
+            # 这里必须报错：再往下走会退化成 `pwcli state-save`，
+            # session 被解析成 "default" 并失败（正是 spec 断点 A）。
+            throw "Save-PwcliPlatformState cannot locate the browser session for account '$AccountId': pass -WorkTag, or open the session in this shell first"
+        }
+        pwcli --session $session state-save
+        if ($LASTEXITCODE -ne 0) {
+            throw "pwcli state-save failed for session '$session' (exit code $LASTEXITCODE)"
+        }
+        return
     }
 
     if (-not $Filename) {
@@ -463,13 +479,55 @@ function Save-PwcliTiktokState {
 
 > **实施者必须先读** `scripts/pwcli_helpers.ps1:440-490` 的实际变量名（`$account` 的字段名可能是 `$account.account_id` / `$account.work_tag` 或别的），**照抄同文件 open 分支的写法**，不要凭空造变量名。
 
+- [ ] **Step 5c: 确认既有调用形态不受影响（文档 / 生成器 / SOP）**
+
+> **为什么要有这一步**：本 Task 早期方案是「有 `-AccountId` 但缺 `-WorkTag` 就直接 `throw`」。
+> 实测那样会打断**现有文档与生成脚本里的调用形态**（全部不带 `-WorkTag`）：
+> - `docs/guides/PWCLI_MANUAL_SHOP_INSPECTION.md:119,151,163`
+> - `docs/guides/COLLECTION_SESSION_AND_FINGERPRINT.md:44-45`
+> - `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md:426-428`
+> - `docs/generated/PWCLI_ACCOUNT_COMMANDS.md`（多处，由 `scripts/generate_pwcli_account_commands.py:137,145,153` 生成）
+>
+> 这些都是**手工 SOP 形态**：同一个 PowerShell 会话里先
+> `Open-PwcliShopee -WorkTag <tag> -AccountId '<id>'`
+> （`Open-PwcliPlatform` 会把 `$env:PLAYWRIGHT_CLI_SESSION` 设成 `"$platformName-$WorkTag"`），
+> 再 `Save-PwcliShopeeState -AccountId '<id>'`。这条路径**今天就是好的**，不能被新改动打断。
+>
+> → 所以 Step 4 的 `throw` 条件是「**既没有 `-WorkTag`、又没有活动会话**」，
+> 而不是「缺 `-WorkTag` 就报错」。活动会话由既有的 `Get-PwcliActiveSession` 解析。
+
+**只读核对（不改任何文档）**：
+
+```bash
+python -m pytest tests/test_pwcli_inspection_panel.py tests/test_pwcli_daily_inspection_helpers.py -q
+```
+
+Expected: 全部 PASS（这两个文件断言的是 helper 名字与调用形态，本 Task 不改它们）。
+
+**手工确认既有 SOP 形态仍然可用**（同一个 shell 内）：
+
+```powershell
+. .\scripts\pwcli_helpers.ps1
+Open-PwcliShopee -WorkTag explore -AccountId 'hongxikeji:main'
+# 浏览器打开、人工操作完成后，在**同一个** shell 里执行：
+Save-PwcliShopeeState -AccountId 'hongxikeji:main'
+```
+
+Expected: **不再**抛 `requires -WorkTag`；若确实定位不到会话，错误信息是
+`Save-PwcliPlatformState cannot locate the browser session for account '...'`（可操作），
+而不是 `No browser session found for 'default'`（不可操作）。
+
+**本 Task 不改任何 `docs/` 文件** —— 文档与生成脚本的调用形态保持不变。
+（第二轮复核已确认 `docs/generated/PWCLI_ACCOUNT_COMMANDS.md` 是生成物，
+真要改生成模板时走 `scripts/generate_pwcli_account_commands.py`；本轮不需要。）
+
 - [ ] **Step 6: 运行测试确认通过**
 
 ```bash
 python -m pytest backend/tests/test_pwcli_helpers_session_targeting.py -q
 ```
 
-Expected: 全部 PASS。
+Expected: 全部 PASS（共 5 条：Step 1 的 4 条 + Step 6b 的 1 条）。
 
 - [ ] **Step 6b: 补一条「调用方确实传了 -WorkTag」的测试**
 
@@ -668,22 +726,65 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_pwcli_native_bootstraps_repo_root_into_sys_path():
-    """仓库根必须在 import 时进入 sys.path。
+def _run_probe(code: str, *args: str) -> subprocess.CompletedProcess[str]:
+    probe = REPO_ROOT / "modules" / "utils" / "pwcli_native.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        return subprocess.run(
+            [sys.executable, "-c", code, str(probe), *args],
+            cwd=tmp,  # 关键：CWD 不在仓库根，否则仓库根会通过 CWD 混进 sys.path
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
 
-    直接以 `python modules/utils/pwcli_native.py` 启动时，sys.path[0] 是脚本目录
-    `modules/utils`，不含仓库根 -> 延迟导入 `modules.utils.sessions.session_manager`
-    会抛 ModuleNotFoundError（spec D4）。
+
+def test_direct_script_launch_can_import_modules_package():
+    """直接以脚本方式启动时，必须能 import 到 `modules.*`。
+
+    这是生产故障的精确复现：`python modules/utils/pwcli_native.py ... --account-id X`
+    时 `sys.path[0]` 是 `modules/utils`，不含仓库根 →
+    `modules/utils/pwcli_native.py:320` 的延迟导入
+    `from modules.utils.sessions.session_manager import SessionManager`
+    抛 `ModuleNotFoundError: No module named 'modules'`。
+
+    探针把 CWD 放在**临时目录**（不在仓库根），
+    否则 `python -m pytest` 的 CWD 兜底会让这条断言今天就通过（已实测）。
     """
-    import modules.utils.pwcli_native as mod
+    code = (
+        "import runpy, sys\n"
+        "runpy.run_path(sys.argv[1], run_name='pwcli_probe')\n"
+        "from modules.utils.sessions.session_manager import SessionManager\n"
+        "print('SESSION_MANAGER_IMPORT_OK')\n"
+    )
+    result = _run_probe(code)
+    assert result.returncode == 0, (
+        "直接调用入口无法 import modules.*：\n" + (result.stderr or "")
+    )
+    assert "SESSION_MANAGER_IMPORT_OK" in result.stdout
 
-    repo_root = str(Path(mod.__file__).resolve().parents[2])
-    assert repo_root in sys.path, "pwcli_native 没有把仓库根放进 sys.path"
+
+def test_pwcli_native_bootstraps_repo_root_into_sys_path():
+    """仓库根必须由模块**自己**放进 sys.path，而不是靠 CWD 兜底。
+
+    判据不能写成 `repo_root in sys.path`：`python -m pytest` 会把 CWD（= 仓库根）
+    放进 `sys.path`，那条断言今天就通过，守不住任何东西（已实测）。
+    """
+    code = (
+        "import runpy, sys\n"
+        "runpy.run_path(sys.argv[1], run_name='pwcli_probe')\n"
+        "print('REPO_ROOT_IN_PATH=' + str(sys.argv[2] in [p.rstrip('/\\\\') for p in sys.path]))\n"
+    )
+    result = _run_probe(code, str(REPO_ROOT))
+    assert "REPO_ROOT_IN_PATH=True" in result.stdout, (
+        "pwcli_native 没有自己把仓库根放进 sys.path：\n"
+        + result.stdout + (result.stderr or "")
+    )
 
 
 def test_direct_script_launch_does_not_fail_on_import():
@@ -699,10 +800,21 @@ def test_direct_script_launch_does_not_fail_on_import():
     assert "ModuleNotFoundError" not in (result.stderr or ""), result.stderr
 ```
 
-> **为什么不用 `python -c "import runpy; ..."` 做主断言**：`python -c` 会把 **CWD** 放进 `sys.path`，
-> 测试又设了 `cwd=REPO_ROOT` → `import modules` 天然可用 → 测试**今天就会通过**，守不住任何东西（已实测）。
-> 主断言必须是上面的 `sys.path` 结构断言。
-> 次要断言 `test_direct_script_launch_does_not_fail_on_import` 只能守住"导入期不炸"；
+> **为什么探针要跑在临时目录里**：`python -m pytest` 与它批评的 `python -c` 是**同一个机制** ——
+> 把 **CWD** 放进 `sys.path`。只要探针的 CWD 是仓库根，仓库根就天然在 `sys.path` 里，
+> 断言 `repo_root in sys.path` 今天就会通过（**已实测**）→ 空守卫。
+> 把 CWD 放到临时目录后，仓库根**只能**由 `pwcli_native` 自己插入 → 判据成立。
+>
+> **已实测（今天，修复前）**：
+> ```
+> probe1（import 探针）→ returncode=1
+>   ModuleNotFoundError: No module named 'modules'
+> probe2（sys.path 探针）→ REPO_ROOT_IN_PATH=False
+> ```
+> 两条都 FAIL —— 这就是要修的判据。
+>
+> `test_direct_script_launch_does_not_fail_on_import` 今天**就通过**
+> （`--help` 不会触发 `:320` 的延迟导入），它是护栏不是判据。
 > 真正会触发 `:320` 延迟导入的是**带 `--account-id` 的 open / state-save**，那需要真实浏览器，属于手工验证（Step 5）。
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -711,7 +823,11 @@ def test_direct_script_launch_does_not_fail_on_import():
 python -m pytest backend/tests/test_pwcli_native_sys_path_bootstrap.py -q
 ```
 
-Expected: FAIL，`stderr` 含 `ModuleNotFoundError: No module named 'modules'`。
+Expected: **2 FAIL** ——
+- `test_direct_script_launch_can_import_modules_package`：子进程 `returncode=1`，stderr 含 `ModuleNotFoundError: No module named 'modules'`；
+- `test_pwcli_native_bootstraps_repo_root_into_sys_path`：子进程打印 `REPO_ROOT_IN_PATH=False`。
+
+`test_direct_script_launch_does_not_fail_on_import` 今天就通过（护栏，不是判据）。
 
 - [ ] **Step 3: 加 `sys.path` 引导**
 
@@ -1137,7 +1253,10 @@ def test_sql_assets_use_stored_alias_normalized():
 python -m pytest backend/tests/test_alias_normalization_consistency.py -q
 ```
 
-Expected: `test_normalize_alias_key_matches_sql_semantics` 与 `test_normalize_alias_key_is_idempotent` FAIL。
+Expected: **只有 `test_normalize_alias_key_matches_sql_semantics` FAIL**（`TK-新加坡-1店` 今天被规范化成 `-新加坡-1店`，不是 `新加坡1店`）。
+
+`test_normalize_alias_key_is_idempotent` 今天**就通过**（旧规则也是幂等的）—— 它是**护栏**不是判据；
+`test_sql_assets_use_stored_alias_normalized` 今天也通过（同样是护栏）。
 
 - [ ] **Step 3: 改 Python 侧规范化**
 
@@ -1256,12 +1375,15 @@ git commit -m "fix(别名): 写侧与查侧规范化统一，认领了不再匹�
 ## Task 7: 语义层多候选不静默归一（落 unknown + 告警码）
 
 **Files:**
-- Modify: `sql/semantic/shop_identity_resolution_candidates.sql`
-- Modify: `sql/semantic/orders_atomic.sql:439-474`
-- Modify: `sql/semantic/analytics_atomic.sql:175-229`
-- Modify: `sql/semantic/orders_monthly_atomic_mv.sql:267-292`
+- Modify: `sql/semantic/orders_atomic.sql:439-474`（`alias_resolved` 段的 LATERAL + 最终 SELECT `:477-530`）
+- Modify: `sql/semantic/analytics_atomic.sql:162-206`（LATERAL）+ 最终 SELECT
+- Modify: `sql/semantic/orders_monthly_atomic_mv.sql:233-292`（告警码 CASE + LATERAL `:267-279`）+ 最终 SELECT `:293-311`
+- Modify: `sql/semantic/analytics_monthly_atomic_mv.sql:339-405`（告警码 CASE `:365-377` + LATERAL `:389-401`）+ 最终 SELECT
 - Test: `backend/tests/data_pipeline/test_shop_identity_resolution_sql.py`（扩充）
 - Test: `backend/tests/test_semantic_ambiguous_identity_sql.py`（新建）
+
+> **本 Task 不改 `sql/semantic/shop_identity_resolution_candidates.sql`（候选视图）** —— 区域感知匹配属第二批 ⑨。
+> 该文件仍需在 `git add` 里带上（第一批 Task 6 改过它的规范化口径），但**本 Task 不动它**。
 
 **背景（spec §2.5）**：
 - live 有**三套并存**的解析逻辑，全部 `LIMIT 1`。
@@ -1295,6 +1417,13 @@ SQL_ASSETS = (
     "sql/semantic/orders_atomic.sql",
     "sql/semantic/analytics_atomic.sql",
     "sql/semantic/orders_monthly_atomic_mv.sql",
+    "sql/semantic/analytics_monthly_atomic_mv.sql",
+)
+
+LEGACY_WARNING_CODES = (
+    "missing_identity",
+    "unresolved_shop_account",
+    "missing_required_platform_shop_id",
 )
 
 
@@ -1303,12 +1432,27 @@ def _text(rel: str) -> str:
 
 
 def test_no_sql_asset_uses_bare_limit_1_on_identity():
-    """三条语义路径都不允许再对身份候选直接 LIMIT 1。"""
+    """四条语义路径都不允许再对身份候选直接 LIMIT 1。"""
     for rel in SQL_ASSETS:
         text = _text(rel)
         assert "ambiguous_shop_label" in text, f"{rel} 缺少 ambiguous_shop_label 告警码"
         assert "unmatched_shop_label" in text, f"{rel} 缺少 unmatched_shop_label 告警码"
         assert "identity_candidate_count" in text, f"{rel} 缺少 identity_candidate_count"
+
+
+def test_monthly_assets_keep_legacy_warning_codes():
+    """既有的三个告警码不能被新词表覆盖掉（spec A7 的「并存关系」）。
+
+    live 上 `missing_identity` / `unresolved_shop_account` / `missing_required_platform_shop_id`
+    已经在用（88 行 `unresolved_shop_account`），新词表只能**加**不能**盖**。
+    """
+    for rel in (
+        "sql/semantic/orders_monthly_atomic_mv.sql",
+        "sql/semantic/analytics_monthly_atomic_mv.sql",
+    ):
+        text = _text(rel)
+        for code in LEGACY_WARNING_CODES:
+            assert code in text, f"{rel} 丢了既有告警码 {code}"
 
 
 def test_candidate_view_untouched_in_batch1():
@@ -1318,6 +1462,9 @@ def test_candidate_view_untouched_in_batch1():
     **和** 视图末尾的 SELECT 列表，否则 PostgreSQL 报
     `each UNION query must have the same number of columns`（已实测）。
     本批次只给别名表加列与约束，多候选由判定逻辑落 unknown。
+
+    ⚠ **本用例是「第一批专用护栏」**：第二批 Task 17 要给候选视图加区域列，
+    届时**必须**把本用例改成断言新列存在（见第二批计划的 Task 17 Step 1）。
     """
     text = _text("sql/semantic/shop_identity_resolution_candidates.sql")
     assert text.count("UNION ALL") == 3, "候选视图的 UNION 分支数变了（应为 4 路 UNION ALL）"
@@ -1348,19 +1495,20 @@ Expected: FAIL。
 >
 > → **本 Task 不改视图**。Task 5 已经把 `shop_region` 列与新约束落库（那部分不受影响）。
 
-- [ ] **Step 4: 三条语义路径统一判定逻辑**
+- [ ] **Step 4: 四条语义路径统一判定逻辑**
 
-**三条路径的现状（已核验，勿凭印象改）：**
+**四条路径的现状（已核验，勿凭印象改）：**
 
 | 文件 | 现状 | 关键位置 |
 |---|---|---|
 | `sql/semantic/orders_atomic.sql`（530 行） | **不走候选视图**，直接 `LATERAL` 扫 `core.shop_accounts sa` + `LEFT JOIN core.shop_account_aliases saa`，条件是 `store_name` 等值 **OR** `platform_shop_id` 等值 **OR** 别名匹配，`ORDER BY 别名命中 → is_primary → sa.id LIMIT 1` | `:451-474`（LATERAL）、`:462-467`（匹配条件）、`:469-473`（排序 + LIMIT 1） |
-| `sql/semantic/analytics_atomic.sql`（328 行） | 走候选视图，`LATERAL` + `ORDER BY resolution_priority, resolved_shop_id LIMIT 1` | `:175-229` |
-| `sql/semantic/orders_monthly_atomic_mv.sql`（317 行） | 走候选视图，`LATERAL` + `ORDER BY c.resolution_priority, c.resolved_shop_id LIMIT 1`；候选集合由 `mapped` 层的 `normalized_identity_candidates` 数组提供 | `:139-147`（LATERAL）、`:267-292` |
+| `sql/semantic/analytics_atomic.sql`（328 行） | 走候选视图，`LATERAL` + `ORDER BY resolution_priority, resolved_shop_id LIMIT 1`；候选来自 `VALUES` 内联列表 | `:162-206`（LATERAL）、`:168-199`（内联候选） |
+| `sql/semantic/orders_monthly_atomic_mv.sql`（317 行） | 走候选视图，`LATERAL` + `ORDER BY c.resolution_priority, c.resolved_shop_id LIMIT 1`；候选集合由 `prepared_identity_monthly_orders` 层的 `normalized_identity_candidates` 数组提供 | `:203-220`（数组构造）、`:267-279`（LATERAL）、`:247-259`（既有告警码词表） |
+| `sql/semantic/analytics_monthly_atomic_mv.sql` | 走候选视图，`LATERAL` + `ORDER BY c.resolution_priority, c.resolved_shop_id LIMIT 1`；**带与 orders monthly 同一套既有告警码词表** | `:334`（数组）、`:389-401`（LATERAL）、`:365-377`（既有告警码词表） |
 
 **4a. 先把 `orders_atomic.sql` 改成走候选视图（口径统一的前提）。**
 
-`orders_atomic.sql` 是三条里唯一自己扫 `core.shop_accounts` 的，因此它的塌缩胜者（SG 店）与另两条（MY 店）不同。
+`orders_atomic.sql` 是四条里唯一自己扫 `core.shop_accounts` 的，因此它的塌缩胜者（SG 店）与另三条（MY 店）不同。
 
 改动要求：
 1. 在 `mapped` CTE 里补出 `normalized_identity_candidates` 数组，**构造方式照抄 `sql/semantic/orders_monthly_atomic_mv.sql` 的 mapped 层**（候选来源 = `source_platform_shop_id` / `source_shop_account_id` / `source_shop_id`（排除 `xihong`/`unknown`/`none`）/ `source_shop_id_compact` / `normalized_store_label_raw`）。
@@ -1370,32 +1518,87 @@ Expected: FAIL。
 3. 删掉 `orders_atomic.sql` 里对 `core.shop_account_aliases` 的直接 JOIN —— 别名匹配统一由候选视图的 `alias_match` 分支承担。
 4. 保留原有的「`shop_id` 为 `''`/`none`/`unknown`/`xihong` 时落 `unknown`」兜底。
 
-**4b. 三条路径的 LATERAL 改成「候选集合 + 计数」。**
+**4b. 四条路径的 LATERAL 改成「候选集合 + 计数」。**
 
-以 `sql/semantic/orders_monthly_atomic_mv.sql:139-147` 为样板（三个文件做同样改动）：
+样板：`sql/semantic/orders_monthly_atomic_mv.sql:267-279`（当前 `LIMIT 1` 的 LATERAL）。
+四个文件做同样改动，只是候选表达式来源不同（见本节末尾的「四个文件的差异」）。
+
+> **⚠ 不要用窗口函数做去重计数** —— PostgreSQL 不支持，两种「显然写法」都会出事（**已在 live PG 15.14 实测**）：
+>
+> | 写法 | 实测结果 | 后果 |
+> |---|---|---|
+> | `count(DISTINCT c.resolved_shop_id) OVER ()` | `ERROR: DISTINCT is not implemented for window functions` | 语义层重建**直接报错**，部署即失败 |
+> | `count(*) OVER ()` | `[(1, [1, 1, 2])]` —— 窗口函数在聚合之后求值，`count` **恒为 1** | 所有多候选都被判成 1 个 → **永远不落 `ambiguous_shop_label`** → 正是 D13/A6 要防的静默错配 |
+>
+> 所以候选计数必须写成**纯聚合**（`count(DISTINCT ...)` + `array_agg(DISTINCT ...)`），
+> 放在**独立子查询**里，再用 `LEFT JOIN LATERAL` 拼回去。
+
+**可执行实现（已在 live 实测：0 候选 / 1 候选 / 2 候选三种输入全部返回正确计数，输出行数恒为 1，无行放大）**：
 
 ```sql
          LEFT JOIN LATERAL (
-             SELECT c.resolved_shop_id,
-                    c.resolution_method,
-                    c.resolution_priority,
-                    c.resolved_shop_account_id,
-                    count(DISTINCT c.resolved_shop_id) OVER () AS candidate_count,
-                    array_agg(DISTINCT c.resolved_shop_id ORDER BY c.resolved_shop_id) AS candidate_shop_ids
-               FROM semantic.shop_identity_resolution_candidates c
-              WHERE c.platform_code = lower(COALESCE(d.platform_code, ''))
-                AND (c.identity_value_normalized = ANY (d.normalized_identity_candidates))
-             ) resolved ON TRUE
+             SELECT
+                 agg.candidate_count,
+                 agg.candidate_shop_ids,
+                 best.resolved_shop_id,
+                 best.resolved_shop_account_id,
+                 best.resolution_method,
+                 best.resolution_priority,
+                 best.identity_source_value
+             FROM (
+                 -- ① 计数与候选清单：纯聚合，按去重后的店铺算
+                 SELECT
+                     count(DISTINCT c.resolved_shop_id)::int AS candidate_count,
+                     array_agg(DISTINCT c.resolved_shop_id ORDER BY c.resolved_shop_id) AS candidate_shop_ids
+                 FROM semantic.shop_identity_resolution_candidates c
+                 WHERE c.platform_code = lower(COALESCE(m.platform_code, ''))
+                   AND c.identity_value_normalized = ANY (m.normalized_identity_candidates)
+             ) agg
+             LEFT JOIN LATERAL (
+                 -- ② 最优候选：每个店只保留优先级最高的一行
+                 SELECT DISTINCT ON (c.resolved_shop_id)
+                        c.resolved_shop_id,
+                        c.resolved_shop_account_id,
+                        c.resolution_method,
+                        c.resolution_priority,
+                        c.identity_source_value
+                 FROM semantic.shop_identity_resolution_candidates c
+                 WHERE c.platform_code = lower(COALESCE(m.platform_code, ''))
+                   AND c.identity_value_normalized = ANY (m.normalized_identity_candidates)
+                 ORDER BY c.resolved_shop_id, c.resolution_priority, c.resolution_method, c.identity_source_value
+             ) best ON TRUE
+             ORDER BY best.resolution_priority, best.resolved_shop_id
+             LIMIT 1
+         ) resolved ON TRUE
 ```
 
-> **关键写法（已实测踩过坑）**：
-> - **不要**加 `GROUP BY` —— 加了之后 `array_agg` 每个分组只有一个元素（永远拿不到候选列表），
->   且 `resolved_shop_id` 会与 `GROUP BY` 冲突报 `must appear in the GROUP BY clause`。
-> - 计数必须用 **`count(DISTINCT c.resolved_shop_id) OVER ()`** 而不是 `count(*) OVER ()`：
->   同一个店可能通过多种方式命中（如 `store_name_match` 与 `shop_account_id`），
->   用 `count(*)` 会把 1 个店算成 2 个候选 → 误判 `ambiguous_shop_label`。
->   live 上已存在这种行（`验证码测试账号` 同时命中 `store_name_match` 与 `shop_account_id`）。
-> - `array_agg(DISTINCT ...)` 同样按去重后的店铺计数。
+**为什么这样写（三条都实测过）**：
+- `agg` 是**纯聚合**，没有窗口函数 → 规避上面两条错误；
+  `count(DISTINCT ...)` 保证「同一个店通过多种方式命中」只算 **1 个**候选
+  （live 上确实存在这种行：`验证码测试账号` 同时命中 `store_name_match` 与 `shop_account_id`）。
+- `LEFT JOIN LATERAL ... best ON TRUE` 保证**候选为 0 时 LATERAL 仍返回 1 行**
+  （`best.*` 全 NULL、`candidate_count = 0`），外层 `LEFT JOIN LATERAL ... ON TRUE` 也就不会把整行丢掉 ——
+  这样「候选为 0」才能与「视图里根本没这行」区分开。
+- `DISTINCT ON (resolved_shop_id)` + 外层 `ORDER BY ... LIMIT 1` 保证**输出恒为 1 行**
+  （实测 2 候选时输出行数 = 1），不会因为候选变多而让主查询行放大。
+- `array_agg(DISTINCT ... ORDER BY ...)` 是 PostgreSQL 允许的组合（DISTINCT 的表达式必须与 ORDER BY 一致）。
+
+**实测记录（live PG 15.14，只读，未改任何数据）**：
+
+| 输入候选数组 | `candidate_count` | `candidate_shop_ids` | `resolved_shop_id` |
+|---|---|---|---|
+| `['新加坡1店']` | 1 | `['tiktok_sg_daone_mall_local']` | `tiktok_sg_daone_mall_local` |
+| `['新加坡1店','马来1店']` | 2 | `['tiktok_my_dawie_mall_local','tiktok_sg_daone_mall_local']` | `tiktok_my_dawie_mall_local`（仅用于展示；候选数 ≥ 2 时最终落 `unknown`） |
+| `['不存在的店名xyz']` | 0 | NULL | NULL |
+
+**四个文件的候选表达式来源不同 —— 不要照抄**：
+
+| 文件 | LATERAL 外层别名 | 候选表达式 | 改法 |
+|---|---|---|---|
+| `orders_monthly_atomic_mv.sql` | `m` | `m.normalized_identity_candidates`（`:203-220` 构造） | 直接套用上面的模板 |
+| `analytics_monthly_atomic_mv.sql` | `m` | `m.normalized_identity_candidates`（`:334`） | 直接套用上面的模板 |
+| `orders_atomic.sql` | `d` | **今天没有** `normalized_identity_candidates` | 先按 Step 4a 在 `mapped` 层补出该数组，再套用模板（把 `m.` 换成 `d.`） |
+| `analytics_atomic.sql` | `m` | `VALUES (...)` 内联列表（`:168-199`），**不是数组** | 先把内联 `VALUES` 抽成 CTE（例如 `candidate_values`），再套用模板（把 `= ANY (m.normalized_identity_candidates)` 换成 `= ANY (cv.identity_value_normalized)`） |
 
 然后把 `shop_id` 的 CASE 改成：
 
@@ -1406,26 +1609,93 @@ Expected: FAIL。
              END AS shop_id,
 ```
 
-并新增三列：
+并新增两列（告警码那一列见 Step 4c —— 它必须与既有词表并存，不能直接覆盖）：
 
 ```sql
-             CASE
-                 WHEN resolved.candidate_count IS NULL OR resolved.candidate_count = 0 THEN 'unmatched_shop_label'
-                 WHEN resolved.candidate_count > 1 THEN 'ambiguous_shop_label'
-                 ELSE NULL
-             END AS identity_warning_code,
              resolved.candidate_count AS identity_candidate_count,
              resolved.candidate_shop_ids::text AS identity_candidates,
 ```
 
-> `identity_warning_code` / `identity_candidate_count` / `identity_candidates` 三列在 `fact_orders_atomic` 与 `fact_analytics_atomic` 上是**新增列**（`fact_orders_atomic` 现有 43 列），加列后必须同步：
-> - 三个 SQL 资产各自的**最终 SELECT 列表**（`orders_atomic.sql` 的 `:477+`、`analytics_atomic.sql` 的最终 SELECT、`orders_monthly_atomic_mv.sql` 的最终 SELECT）；
-> - 下游消费这些视图的 mart / api 层 SQL（`sql/mart/*`、`sql/api/*`）—— 若它们用了 `SELECT *` 则无需改；若是显式列表，需要补列；
+**4c. `identity_warning_code` 的完整词表与并存关系（spec A7 要求「已定义」）。**
+
+`identity_warning_code` 是**单值列**（下游 mart / api / 前端都按一个码读），所以新旧码必须按**固定优先级**共存。
+
+**既有词表（live 已经在用，不许被新词表盖掉）**：
+
+| 码 | 触发条件 | live 现状（实测） |
+|---|---|---|
+| `missing_identity` | 四个身份线索（`source_platform_shop_id` / `source_shop_account_id` / `store_label_raw` / `source_shop_id`）**全为空** | 0 行 |
+| `unresolved_shop_account` | 候选为空 / 候选唯一但 `resolved_shop_account_id` 为空 / `canonical.shop_account_id` 查不到 | **88 行**（全部来自 `TK新加坡3C店`，`raw_shop_id='xihong'`） |
+| `missing_required_platform_shop_id` | 已归属、平台是 shopee，但该店没有 `platform_shop_id` | 0 行 |
+| `NULL` | 正常归属 | 31201 行 |
+
+**新增两个码（本次改造）**：
+
+| 码 | 触发条件 | 含义 |
+|---|---|---|
+| `unmatched_shop_label` | **候选数 = 0**（有身份线索，但候选视图里一个店都没命中） | 这个标签没人认领 → 需要建别名/认领 |
+| `ambiguous_shop_label` | **候选数 ≥ 2** | 同一个标签命中多个店 → 必须消歧，**不许归第一** |
+
+**并存优先级（从上到下，先命中先返回）**：
+
+```sql
+CASE
+    WHEN COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) IS NULL
+        THEN 'missing_identity'                                   -- ① 连线索都没有
+    WHEN resolved.candidate_count = 0
+        THEN 'unmatched_shop_label'                               -- ② 有线索但没人认领
+    WHEN resolved.candidate_count > 1
+        THEN 'ambiguous_shop_label'                               -- ③ 命中多个店
+    WHEN resolved.resolved_shop_account_id IS NULL
+        THEN 'unresolved_shop_account'                            -- ④ 唯一候选但账号号为空
+    WHEN resolved.resolved_shop_account_id IS NOT NULL AND canonical.shop_account_id IS NULL
+        THEN 'unresolved_shop_account'                            -- ④ 唯一候选但 canonical 查不到
+    WHEN resolved.resolved_shop_account_id IS NOT NULL
+     AND LOWER(COALESCE(m.platform_code, '')) IN ('shopee')
+     AND NULLIF(TRIM(canonical.platform_shop_id), '') IS NULL
+        THEN 'missing_required_platform_shop_id'                  -- ⑤ shopee 缺平台店铺号
+    ELSE NULL
+END AS identity_warning_code
+```
+
+**为什么这样排**：
+- ① 最严重（连线索都没有）→ 排最前，避免被「没人认领」盖住。
+- ②③ 比 ④⑤ **更具体、更可执行**（「没店认领」/「多个店抢」比「账号号为空」更贴近人要做的事）→ 排在 ④⑤ 前面。
+- ④⑤ 保留原语义与原触发条件，**只在新码没命中时才生效** → live 的 88 行不会凭空消失：
+  它们会按新口径落进 `unmatched_shop_label`（`TK新加坡3C店` 确实一个店都没命中，实测候选集为空）。
+
+**两个 monthly 资产都要改（不要只改 orders 一个）**：
+- `sql/semantic/orders_monthly_atomic_mv.sql:247-259`（既有词表）
+- `sql/semantic/analytics_monthly_atomic_mv.sql:365-377`（**同一套既有词表**；live `fact_analytics_monthly_atomic_mv` 3541 行、当前 `identity_warning_code` 全为 NULL）
+
+> ⚠ **漏改 `analytics_monthly_atomic_mv.sql` 的后果**：两个 monthly 视图的告警码词表会不一致 ——
+> orders 侧能报 `unmatched_shop_label`，analytics 侧只会报旧的 `unresolved_shop_account`，运营看板上两个口径互相打架。
+
+**两个 monthly 薄封装 VIEW 用的是显式列清单 —— 加列必须同步，否则新列只在 MV 上、wrapper 上没有**：
+
+| 薄封装 VIEW | 文件 | 显式列数 | 备注 |
+|---|---|---|---|
+| `semantic.fact_orders_monthly_atomic` | `sql/semantic/orders_monthly_atomic.sql:5-23` | 16 | `CREATE OR REPLACE`，无 DROP |
+| `semantic.fact_analytics_monthly_atomic` | `sql/semantic/analytics_monthly_atomic.sql:5-27` | 21 | **`:3` 是 `DROP VIEW IF EXISTS ... CASCADE`** → 重建时必须由 runner 按依赖顺序重建下游 |
+
+实施者的选择（两条都可行，但**必须显式做一遍**，不能默认「加了就有」）：
+- **方案 A（推荐）**：两个 wrapper 也在末尾补上 `identity_candidate_count` / `identity_candidates`
+  → 运营看板与下游 mart 直接能读到候选清单；
+- **方案 B**：wrapper 不动 → 新列只存在于 MV 上，`fact_orders_monthly_atomic` 读不到候选清单，
+  此时 Task 8 的核对查询要改成直接查 `semantic.fact_orders_monthly_atomic_mv`（**MV 在 live 里确实存在**，
+  `pg_class.relkind='m'`，`information_schema.tables` 不列 MATVIEW，别据此判断它不存在）。
+
+**`fact_orders_atomic` / `fact_analytics_atomic` 今天没有 `identity_warning_code` 列**
+（实测 live 列数分别为 **40** / **31**），本 Task 给它们**新增**三列：
+`identity_warning_code` / `identity_candidate_count` / `identity_candidates`。加列后必须同步：
+> - 四个 SQL 资产各自的**最终 SELECT 列表**（`orders_atomic.sql` 的 `:477-530`、`analytics_atomic.sql` 的最终 SELECT、两个 monthly MV 的最终 SELECT）；
+> - 下游消费这些视图的 mart / api 层 SQL（`sql/mart/*`、`sql/api_modules/*`）—— 若它们用了 `SELECT *` 则无需改；若是显式列表，需要补列；
 > - `backend/schemas/` 下暴露这些字段的 Pydantic 契约（若有）。
 >
 > **实施者必须先 grep 全部下游引用**：`grep -rn "fact_orders_atomic" sql/ backend/ --include=*.sql --include=*.py`。
 >
-> **实施者必须先在 live 上验证这段 SQL 能跑通**（`SELECT ... LIMIT 0` 或包一层子查询试跑），再改文件。
+> **实施者必须先在 live 上验证这段 SQL 能跑通**（`SELECT ... LIMIT 0` 或包一层子查询试跑），再改文件 ——
+> 上面的模板已在 live PG 15.14 实测可执行。
 
 - [ ] **Step 5: 跑语义层 SQL 资产一致性测试**
 
@@ -1452,7 +1722,8 @@ git commit -m "feat(语义层): 多候选不再静默归一，落 unknown + 告�
 ## Task 8: 语义层部署到 live + MV 刷新 + 前后对比
 
 **Files:**
-- Modify: `sql/semantic/orders_atomic.sql` / `analytics_atomic.sql` / `orders_monthly_atomic_mv.sql`（若上一步已同步则无改动）
+- Modify: `sql/semantic/orders_atomic.sql` / `analytics_atomic.sql` / `orders_monthly_atomic_mv.sql` / `analytics_monthly_atomic_mv.sql`（若上一步已同步则无改动）
+- Modify: `sql/semantic/orders_monthly_atomic.sql` / `analytics_monthly_atomic.sql`（薄封装 VIEW 的显式列清单 —— 若上一步选了方案 A）
 - 无新文件
 
 **背景**：`semantic.fact_orders_atomic` / `fact_analytics_atomic` 是 **VIEW**（改定义即时生效）；`semantic.fact_orders_monthly_atomic_mv` 是 **MATVIEW**（改定义后必须 `REFRESH MATERIALIZED VIEW` 才生效），`semantic.fact_orders_monthly_atomic` 是它的薄封装 VIEW。
@@ -1466,6 +1737,7 @@ git commit -m "feat(语义层): 多候选不再静默归一，落 unknown + 告�
 > - `sql/semantic/analytics_atomic.sql:3` = `DROP VIEW ... CASCADE`
 >   → 级联掉 5 个 mart 视图：`mart.platform_day_kpi` / `platform_week_kpi` / `shop_day_kpi` / `shop_hour_traffic_kpi` / `shop_week_kpi`
 >   （资产在 `sql/mart/*.sql`，同样不在清单里）。
+> - `sql/semantic/analytics_monthly_atomic.sql:3` = `DROP VIEW IF EXISTS ... CASCADE` —— 同样是级联重建。
 >
 > MV 文件自己的注释（`:3-5`）写明 CASCADE 只在"下游视图由 runner 按依赖顺序重建"的前提下可接受。
 
@@ -1547,7 +1819,17 @@ with eng.connect() as c:
 "
 ```
 
-Expected: `unmatched_shop_label` 对应 `unknown`；`ambiguous_shop_label` 数量为 0 或极少（当前无同名店）。
+Expected:
+- `unmatched_shop_label` 对应 `unknown`；
+- `ambiguous_shop_label` 数量为 0 或极少（当前无同名店）；
+- **live 原来那 88 行 `unresolved_shop_account` 不会凭空消失** —— 它们全部来自 `TK新加坡3C店`
+  （实测 `store_label_raw='TK新加坡3C店'`、`raw_shop_id='xihong'`、候选集为空），
+  改造后会按新口径落进 `unmatched_shop_label`。
+  核对口径：**`unresolved_shop_account` + `unmatched_shop_label` + `ambiguous_shop_label` 三者之和 ≥ 88**，
+  且这 88 行**不允许**变成 `identity_warning_code IS NULL`（那才是静默错配）；
+- `missing_identity` 与 `missing_required_platform_shop_id` 保持原值（live 都是 0 行）；
+- `semantic.fact_analytics_monthly_atomic_mv`（3541 行）也要跑同样的核对 —— 它的告警码词表
+  同样被本次改造扩展过（Task 7 Step 4c）。
 
 - [ ] **Step 5: 提交（若上一步有改动）**
 
@@ -1643,7 +1925,8 @@ def test_resolve_file_identity_falls_back_to_raw_shop_id():
 python -m pytest backend/tests/test_catalog_file_identity_backfill.py -q
 ```
 
-Expected: FAIL（`hit` 为空）。
+Expected: **3 条全 FAIL**，报错是 `ImportError: cannot import name 'resolve_file_identity'`
+（纯函数今天不存在；测试不再用 grep 源码树的写法）。
 
 - [ ] **Step 4: 实现回填**
 
@@ -2056,7 +2339,7 @@ Expected: 全部 PASS，且**不少于 Task 0 Step 2 的基线通过数**（基�
 | A3 读写同路径 | Task 1 的测试 + 磁盘核对 | |
 | A5 稳定编号落库 | Task 10 Step 6 | |
 | A6 不静默错配 | Task 8 Step 3/4 | |
-| A7 告警码词表 | Task 8 Step 4 | |
+| A7 告警码词表（新旧并存） | Task 7 Step 4c（词表 + 优先级）+ Task 8 Step 4（新码 `unmatched_shop_label` / `ambiguous_shop_label` 与既有 `missing_identity` / `unresolved_shop_account` / `missing_required_platform_shop_id` 按固定优先级并存） | |
 | A8 别名可认领 | Task 6 Step 5 | |
 | A9 平台大小写 | Task 5 Step 7 | |
 | A10 别名区域维度 | Task 5 Step 7 + `FIORO` 可挂三店的手工验证 | |

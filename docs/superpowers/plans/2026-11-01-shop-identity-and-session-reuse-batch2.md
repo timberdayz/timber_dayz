@@ -414,16 +414,37 @@ git commit -m "fix(会话): 新鲜度只认 saved_at，30 天过期机制恢复�
 
 **Files:**
 - Modify: `modules/apps/collection_center/executor_v2.py:2805-2822`（`_should_skip_post_login_session_persist`）
-- Modify: `modules/apps/collection_center/executor_v2.py:255-309`（executor 版 bootstrap 补 TikTok 质量门禁）
+- Modify: `modules/apps/collection_center/executor_v2.py:245-309`（executor 版 bootstrap，`def` 在 `:245`；整份删掉，改为复用 runtime_session 的实现）
 - Test: `backend/tests/test_collection_executor_session_alignment.py`（扩充）
 
 **背景**：
 - `executor_v2.py:2822` 的 `_should_skip_post_login_session_persist` 在 `platform=='tiktok' and runtime_mode=='persistent_profile'` 时**不落 storage_state** → 人工巡店保存的会话在 TikTok 上拿不到。
-- `executor_v2.py:255-309` 的 executor 版 bootstrap **缺** `modules/apps/collection_center/runtime_session.py:74-136` 的 TikTok 质量门禁 → 低质量会话会被当可用。
+- `executor_v2.py:245-309` 的 executor 版 bootstrap **缺** `modules/apps/collection_center/runtime_session.py:74-136` 的 TikTok 质量门禁 → 低质量会话会被当可用。
 
 - [ ] **Step 1: 写失败测试**
 
-在 `backend/tests/test_collection_executor_session_alignment.py` 末尾追加：
+**先补文件头** —— 该文件当前**没有** `REPO_ROOT` 定义
+（实测：文件里 `grep REPO_ROOT` 无匹配）。直接追加用例会 `NameError: name 'REPO_ROOT' is not defined`，
+而 `NameError` 发生在断言**之前** → 就算把 executor 的重复 bootstrap 删掉了，这条用例照样红，
+实施者会卡死在 Step 5「Expected: 全部 PASS」。
+
+在 `backend/tests/test_collection_executor_session_alignment.py` 的 import 区补上：
+
+```python
+from pathlib import Path
+```
+
+并在 import 区之后加一行：
+
+```python
+REPO_ROOT = Path(__file__).resolve().parents[2]
+```
+
+> 该文件当前的 import 区是：`from __future__ import annotations` / `from unittest.mock import AsyncMock` /
+> `import pytest` / `from modules.apps.collection_center.executor_v2 import ...` /
+> `from modules.apps.collection_center.transition_gates import ...`。
+
+然后在文件**末尾**追加：
 
 ```python
 def test_manual_seeded_session_is_not_skipped_for_tiktok():
@@ -561,7 +582,7 @@ params["session_metadata"] = getattr(runtime_bundle, "session_metadata", None) o
 
 - [ ] **Step 4: executor 侧的 bootstrap 复用 runtime_session 的实现（补上 TikTok 质量门禁）**
 
-**现状核实**：`executor_v2.py:250-309` 有**一份自己的** `_bootstrap_session_from_profile_sync`，
+**现状核实**：`executor_v2.py:245-309` 有**一份自己的** `_bootstrap_session_from_profile_sync`，
 它从持久 profile 读出 storage_state 就直接 `save_session` —— **没有 TikTok 质量门禁**。
 
 而 `modules/apps/collection_center/runtime_session.py:258-312` 的同名函数**有**门禁：
@@ -582,9 +603,12 @@ params["session_metadata"] = getattr(runtime_bundle, "session_metadata", None) o
 
 **修法（优先 DRY，不要再抄第三份）**：
 
-1. 删掉 `executor_v2.py:250-309` 的重复实现，改为直接调用 `runtime_session._bootstrap_session_from_profile_sync`
-   （`executor_v2.py:312-335` 的 `_load_or_bootstrap_session_async` 里已经在用 `runtime_session._bootstrap_session_from_profile_sync`，
-   把这条路径统一即可）。
+1. 删掉 `executor_v2.py:245-309` 的重复实现（`def` 在 `:245`），**并同步改调用点**：
+   `executor_v2.py:330` 现在调的是**本地那份**（`_bootstrap_session_from_profile_sync(...)`，无模块前缀），
+   **不是** `runtime_session` 的实现 —— 全文 grep 确认 executor 内从未出现过
+   `runtime_session._bootstrap_session_from_profile_sync`。
+   → 改法：把 `:330` 的 lambda 改成调用 `runtime_session._bootstrap_session_from_profile_sync(...)`。
+   **只删函数不改调用点会直接 `NameError`。**
 2. 如果因为依赖方向不能直接删（`executor_v2` 顶层 import `runtime_session` 造成循环），就改成
    `from modules.apps.collection_center import runtime_session` 的**函数内延迟 import**，与 `executor_v2.py:2831` 的既有写法一致。
 3. **无论走哪条路，都必须保证 TikTok 分支经过 `tiktok_storage_state_meets_quality_gate`**，
@@ -592,7 +616,7 @@ params["session_metadata"] = getattr(runtime_bundle, "session_metadata", None) o
 
 > **不要**把门禁逻辑再抄一遍到 executor 侧 —— 那正是当前问题的成因。
 > 现成符号：`runtime_session.tiktok_storage_state_meets_quality_gate`（`:104`）、`runtime_session.tiktok_storage_state_quality_score`（`:74`）。
-> （`executor_v2.py:1472-1493` 的 `_wait_and_capture_high_quality_tiktok_session` 已经在用这两个符号，属于**另一条**路径 —— 登录后的捕获，不在本 Step 范围。）
+> （`_wait_and_capture_high_quality_tiktok_session` 定义在 `executor_v2.py:1432`，它在**函数体内**的 `:1472` / `:1477` / `:1493` 用这两个符号，属于**另一条**路径 —— 登录后的捕获，不在本 Step 范围。）
 
 - [ ] **Step 5: 运行测试确认通过**
 
@@ -809,7 +833,12 @@ with eng.connect() as c:
 "
 ```
 
-Expected: 每个平台的 `distinct_codes == total`（同平台内唯一）。
+Expected: 每个平台 **`filled == total`（全部回填，没有 NULL）** 且 **`distinct_codes == filled`（同平台内唯一）**。
+
+> **口径坑**：`count(distinct x)` **不统计 NULL**。若用 `distinct_codes == total` 判断，
+> 只要有一行没回填就会**误报成「不唯一」**，而且按这个口径永远修不好。
+> 正确判据是 `count(distinct internal_code) == count(internal_code)`
+> —— 左边是去重后的非空值个数，右边是非空值总行数；两者相等 ⟺ 无 NULL 且唯一。
 
 - [ ] **Step 6: 后端 API 暴露建议值**
 
@@ -1158,6 +1187,7 @@ git commit -m "feat(店铺身份): 改名走联动流程，老数据不断、新
 - Modify: `sql/semantic/analytics_atomic.sql`（同上）
 - Modify: `sql/semantic/orders_monthly_atomic_mv.sql`（同上）
 - Test: `backend/tests/data_pipeline/test_shop_identity_resolution_sql.py`（扩充）
+- Test: `backend/tests/test_semantic_ambiguous_identity_sql.py`（**改写第一批留下的护栏用例** —— 见 Step 2）
 
 **背景**：第一批 D10a 给别名表加了 `shop_region` 列与新约束 —— 于是同一个 `FIORO` 可以分别注册给 SG/MY/PH 三个店。
 但**匹配还只看 `(platform, alias_normalized)`** → `FIORO` 会同时命中三个店 → 落 `unknown` + `ambiguous_shop_label`。
@@ -1192,17 +1222,51 @@ def test_sql_assets_map_site_to_region():
         assert "'菲律宾'" in text, f"{rel} 缺少站点映射表"
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 2: 更新第一批留下的护栏用例（不做这一步，第二批落地后裸 `pytest` 必红）**
 
-```bash
-python -m pytest backend/tests/data_pipeline/test_shop_identity_resolution_sql.py -q -k "site_to_region"
+第一批的 `backend/tests/test_semantic_ambiguous_identity_sql.py::test_candidate_view_untouched_in_batch1`
+断言候选视图里**没有** `shop_region` —— 本 Task 要给视图加区域列，**该断言必然失败**。
+
+把那条用例改成：
+
+```python
+def test_candidate_view_carries_region_dimension():
+    """第二批：候选视图必须带出区域维度，供同名品牌店按站点消歧。
+
+    视图的 identity_rows 是 4 路 UNION ALL；加列必须同时改 4 个分支
+    **和** 视图末尾的 SELECT 列表，否则 PostgreSQL 报
+    `each UNION query must have the same number of columns`（已实测）。
+    """
+    text = _text("sql/semantic/shop_identity_resolution_candidates.sql")
+    assert text.count("UNION ALL") == 3, "候选视图的 UNION 分支数变了（应为 4 路 UNION ALL）"
+    assert "identity_shop_region" in text, "候选视图没有带出区域维度"
+    assert "candidate_shop_region" in text, "候选视图的 CTE 没有店铺区域列"
 ```
 
-Expected: FAIL。
+> 同一个文件里的 `test_no_sql_asset_uses_bare_limit_1_on_identity` 与
+> `test_monthly_assets_keep_legacy_warning_codes` **不受影响**，保持原样。
 
-- [ ] **Step 3: 在 `mapped` 层加 `source_region`**
+- [ ] **Step 2b: 运行测试确认失败**
 
-三个 SQL 资产的 `mapped` CTE 里都加一列（以 `orders_atomic.sql` 为例，`:62` 的 `source_site` 旁边）：
+```bash
+python -m pytest backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py -q -k "site_to_region or region_dimension"
+```
+
+Expected: FAIL（`source_region` / `identity_shop_region` 今天都不存在）。
+
+- [ ] **Step 3: 抽取站点 → 区域（**逐文件落点不同，不要照抄**）**
+
+> ⚠ **本 Step 早期版本写的是「三个 SQL 资产的 `mapped` CTE 里都加一列」—— 那是错的**（实测）：
+> - `orders_atomic.sql` 有 `mapped` CTE（`:32`）且已有 `source_site`（`:62`）✅
+> - `analytics_atomic.sql` 有 `mapped` CTE（`:34`）但**没有** `source_site` ❌
+> - `orders_monthly_atomic_mv.sql` **根本没有 `mapped` CTE** ❌
+>   （它的链是 `raw_monthly_orders`(:9) → `mapped_monthly_orders`(:19) → `normalized_monthly_orders`(:114)
+>   → `prepared_identity_monthly_orders`(:200) → `resolved_monthly_orders` → `deduplicated_monthly_orders`(:284)）
+>
+> 而且 —— **两条 analytics 路径根本没有站点可映射**（live 实测，见下表）。
+> 区域感知匹配**只对有站点信息的 orders 路径生效**。
+
+**站点 → 区域的映射表达式（两个 orders 文件共用）**：
 
 ```sql
         CASE lower(NULLIF(TRIM(BOTH FROM COALESCE(source_site, '')), ''))
@@ -1218,9 +1282,38 @@ Expected: FAIL。
         END AS source_region,
 ```
 
-> 这张表与 `backend/domains/collection/routers/account_alignment.py:796-805` 的 `site_map` **必须保持一致**。
+> 这张表与 `backend/domains/collection/routers/account_alignment.py:796-805` 的 `site_map` **必须保持一致**
+> （8 项逐项核对：菲律宾→ph、新加坡→sg、马来/马来西亚→my、泰国→th、越南→vn、印尼→id、巴西→br；fallback 也一致）。
 > 实施者要在这两个地方各加一条注释互相指认，避免以后单边改。（SQL 侧没法直接 import Python 常量，
 > 只能靠约定 + 双向注释 + 测试守住。）
+
+**逐文件落点**：
+
+| 文件 | 落点 | `source_site` 从哪来 | 区域过滤是否生效 |
+|---|---|---|---|
+| `sql/semantic/orders_atomic.sql` | `mapped` CTE（`:32`）里，`:62` 的 `source_site` **正下方**加 `source_region` | 已有（`:62`，读 `raw_data->>'站点'`） | ✅ 生效 |
+| `sql/semantic/orders_monthly_atomic_mv.sql` | `mapped_monthly_orders` CTE（`:19`）里，`:35` 的 `store_label_raw` **后面**先补 `source_site`、再加 `source_region` | **要新加**：`NULLIF(TRIM(COALESCE(raw_data->>'站点', raw_data->>'site')), '')` | ✅ 生效 |
+| `sql/semantic/analytics_atomic.sql` | **不动** | raw 里没有 | ❌ 不适用 |
+| `sql/semantic/analytics_monthly_atomic_mv.sql` | **不动** | raw 里没有 | ❌ 不适用 |
+
+**为什么两条 analytics 路径不适用（live 实测，只读）**：
+
+| raw 表 | 行数 | 有 `站点` | 有 `店铺` | 有 `shop_account_id` |
+|---|---|---|---|---|
+| `b_class.fact_tiktok_orders_monthly` | 4662 | **4662（100%）** | **4662（100%）** | — |
+| `b_class.fact_tiktok_analytics_monthly` | 1263 | **0** | **0** | 543（43%） |
+| `b_class.fact_shopee_orders_monthly` | 26627 | **0** | — | — |
+
+即：
+- **analytics 的 raw 里既没有站点、也没有店铺标签** → 无从推导区域。
+  这两条路径靠 `shop_account_id`（稳定锚点）匹配，**不会**出现「同一标签命中多个店」的歧义，
+  所以只需要第一批的「候选唯一才归属」判定（候选 0 → `unmatched_shop_label`，候选 ≥2 → `ambiguous_shop_label`），
+  **不需要**区域过滤。
+- **shopee 的 raw 里也没有站点** → `source_site` 为 NULL → `source_region` 为 NULL →
+  区域过滤对 shopee 自动失效（等价于「不限区域」），**行为不变**。
+
+> **不要**为了「三个文件统一」而给 analytics 硬造一个区域字段 —— 那会引入一个永远是 NULL 的列，
+> 或者更糟：让实施者以为 analytics 也能按区域消歧。
 
 - [ ] **Step 4: 候选视图带出别名的区域**
 
@@ -1229,13 +1322,32 @@ Expected: FAIL。
 加列必须**同时**改 4 个分支 **和** 视图末尾的 SELECT 列表，否则 PostgreSQL 报
 `each UNION query must have the same number of columns`（已实测）。
 
-建议新增列 `identity_shop_region`：
-- `alias_match` 分支 → `saa.shop_region`
-- 其余三个分支 → `active_shop_accounts.candidate_shop_region`（即该店铺账号自己的 `shop_region`）
+建议新增列 `identity_shop_region`，取值如下：
 
-- [ ] **Step 5: 匹配时按区域消歧**
+| 分支 | `identity_shop_region` |
+|---|---|
+| `alias_match` | `saa.shop_region`（别名自己的区域；NULL = 「不限区域」） |
+| `platform_shop_id` | `active_shop_accounts.candidate_shop_region` |
+| `shop_account_id` | `active_shop_accounts.candidate_shop_region` |
+| `store_name_match` | `active_shop_accounts.candidate_shop_region` |
 
-三条路径的 LATERAL 在候选集合上增加区域过滤，规则：
+> ⚠ **`active_shop_accounts.candidate_shop_region` 这一列当前并不存在**（候选视图的 CTE 只有
+> `shop_account_pk` / `platform_code` / `resolved_shop_account_id` / `candidate_platform_shop_id` /
+> `candidate_store_label` / `resolved_shop_id` 六列）。实施者必须**先**在该 CTE 里补出：
+>
+> ```sql
+>         NULLIF(TRIM(COALESCE(sa.shop_region, '')), '') AS candidate_shop_region,
+> ```
+>
+> 放在 `candidate_store_label` 那一行后面，再在 4 个 UNION 分支与最终 SELECT 里引用它。
+
+> ⚠ `core.shop_account_aliases.shop_region` 是**第一批 Task 5 新加的列**（当前 live 还没有）。
+> 若该列不存在，`alias_match` 分支会直接报错 → 实施者必须确认第一批迁移已应用
+> （`python scripts/run_current_schema_migrations.py --preflight-only --json`）。
+
+- [ ] **Step 5: 匹配时按区域消歧（**只对两条 orders 路径生效**）**
+
+`orders_atomic.sql` 与 `orders_monthly_atomic_mv.sql` 的 LATERAL 在候选集合上增加区域过滤，规则：
 
 ```
 候选 = 候选视图里 identity_value_normalized 命中的行
@@ -1247,6 +1359,28 @@ Expected: FAIL。
 
 只有**区域优先层命中**的候选才参与计数；若无任何候选 → `unmatched_shop_label`；
 若区域优先层内仍有多个候选 → `ambiguous_shop_label`。
+
+**两条 analytics 路径不做区域过滤**（`analytics_atomic.sql` / `analytics_monthly_atomic_mv.sql`）——
+它们的 raw 里既没有站点也没有店铺标签（Step 3 实测表），无从推导区域；
+这两条路径靠 `shop_account_id` 匹配，不会出现同名品牌歧义。
+
+**注意 `candidate_count` 的算口径**：区域过滤必须作用在**候选集合本身**上，
+也就是把「计数用的 `agg` 子查询」和「取最优候选的 `best` 子查询」**都**加上区域过滤条件，
+否则会出现「计数按过滤后的候选算、归属却取到未过滤的候选」的不一致。
+区域过滤条件形如：
+
+```sql
+  AND (
+        c.identity_shop_region = <source_region 表达式>
+        OR c.identity_shop_region IS NULL
+      )
+```
+
+`<source_region 表达式>` 在 `orders_atomic.sql` 里是 `d.source_region`，
+在 `orders_monthly_atomic_mv.sql` 里是 `m.source_region`（**Step 3 新加的列**）。
+`source_region` 为 NULL（shopee 没有站点）时，这个条件退化成「只保留不限区域的别名」——
+**这会改变 shopee 的现有行为**，实施者必须用 Task 17 Step 5b 的方式显式处理：
+当 `source_region` 为 NULL 时**不做区域过滤**（等价于「不限区域」）。
 
 > **必须保证**：区域过滤**只用于消歧，不制造新的 unknown**。
 > 存量 21 条别名在 Task 5 已按 `core.shop_accounts.shop_region` 回填区域，
@@ -1293,7 +1427,7 @@ git commit -m "feat(语义层): 区域参与身份匹配，同名品牌店按站
 - [ ] **Step 1: 跑全量相关测试**
 
 ```bash
-python -m pytest backend/tests/test_pwcli_session_naming.py backend/tests/test_session_manager_protection.py backend/tests/test_session_storage_roots.py backend/tests/test_collection_executor_session_alignment.py backend/tests/test_collection_runtime_session.py backend/tests/test_collection_session_reuse_contract.py backend/tests/test_shop_internal_code.py backend/tests/test_shop_rename_flow.py backend/tests/test_shop_account_aliases_api.py backend/tests/test_shop_identity_schema_migration.py backend/tests/test_alias_normalization_consistency.py backend/tests/data_pipeline/test_shop_identity_resolution_sql.py -q
+python -m pytest backend/tests/test_pwcli_session_naming.py backend/tests/test_session_manager_protection.py backend/tests/test_session_storage_roots.py backend/tests/test_collection_executor_session_alignment.py backend/tests/test_collection_runtime_session.py backend/tests/test_collection_session_reuse_contract.py backend/tests/test_shop_internal_code.py backend/tests/test_shop_rename_flow.py backend/tests/test_shop_account_aliases_api.py backend/tests/test_shop_identity_schema_migration.py backend/tests/test_alias_normalization_consistency.py backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py -q
 ```
 
 Expected: 全部 PASS。
