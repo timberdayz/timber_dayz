@@ -124,7 +124,54 @@ class FileRegistrationService:
                 hash_md5.update(chunk)
         
         return hash_md5.hexdigest()
-    
+
+    def _resolve_identity(
+        self,
+        *,
+        platform: Optional[str] = None,
+        shop_id: Optional[str] = None,
+        shop_account_id: Optional[str] = None,
+        platform_shop_id: Optional[str] = None,
+        store_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """确定文件级店铺账号身份（Task 9 Step 4b）。
+
+        口径与采集登记路径保持一致：
+
+        1. 调用方已知的 ``shop_account_id`` -> 直接用（**主路径**）
+        2. 否则按 (平台, 平台店铺ID / 店铺标签) 反查 ``core.shop_accounts``，唯一命中才用
+        3. 都不是 -> 保持 ``NULL``（**不猜**）
+        """
+        resolved: Dict[str, Any] = {
+            'shop_account_id': shop_account_id or None,
+            'store_name': store_name or None,
+            'platform_shop_id': platform_shop_id or None,
+        }
+        if resolved['shop_account_id']:
+            return resolved
+
+        try:
+            from modules.services.catalog_scanner import resolve_shop_account_by_identity
+
+            matched = resolve_shop_account_by_identity(
+                self.db,
+                platform_code=platform,
+                platform_shop_id=platform_shop_id,
+                store_name=store_name,
+                shop_id=shop_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"店铺账号身份反查失败, 保持 shop_account_id 为空: {exc}")
+            return resolved
+
+        if not matched:
+            return resolved
+
+        resolved['shop_account_id'] = matched.get('shop_account_id') or None
+        resolved['store_name'] = resolved['store_name'] or matched.get('store_name')
+        resolved['platform_shop_id'] = resolved['platform_shop_id'] or matched.get('platform_shop_id')
+        return resolved
+
     def _build_target_path(
         self,
         platform: str,
@@ -231,6 +278,15 @@ class FileRegistrationService:
             filename=filename
         )
         
+        # 店铺账号身份（Task 9 Step 4b）：主路径用调用方已知的值，否则反查、唯一命中才用
+        identity = self._resolve_identity(
+            platform=platform,
+            shop_id=shop_id,
+            shop_account_id=(extra_metadata or {}).get('shop_account_id'),
+            platform_shop_id=(extra_metadata or {}).get('platform_shop_id'),
+            store_name=(extra_metadata or {}).get('store_name'),
+        )
+
         # 创建数据库记录
         catalog_file = CatalogFile(
             file_name=filename,
@@ -240,14 +296,17 @@ class FileRegistrationService:
             platform_code=platform.lower(),
             data_domain=data_domain.lower(),
             sub_domain=sub_domain,
-            account_id=account,
+            account=account,
             shop_id=shop_id,
+            shop_account_id=identity['shop_account_id'],
+            store_name=identity['store_name'],
+            platform_shop_id=identity['platform_shop_id'],
             granularity=granularity,
             date_from=datetime.strptime(date_from, "%Y-%m-%d").date() if date_from else None,
             date_to=datetime.strptime(date_to, "%Y-%m-%d").date() if date_to else None,
             status='pending',
-            upload_time=datetime.now(timezone.utc),
-            metadata=extra_metadata or {}
+            first_seen_at=datetime.now(timezone.utc),
+            file_metadata=extra_metadata or {}
         )
         
         try:
@@ -342,6 +401,16 @@ class FileRegistrationService:
                 shutil.move(str(source_path), str(target_path))
                 moved_files.append({'source': source_path, 'target': target_path})
                 
+                # 店铺账号身份（Task 9 Step 4b）
+                file_metadata = file_info.get('metadata') or {}
+                identity = self._resolve_identity(
+                    platform=file_info.get('platform'),
+                    shop_id=file_info.get('shop_id'),
+                    shop_account_id=file_metadata.get('shop_account_id'),
+                    platform_shop_id=file_metadata.get('platform_shop_id'),
+                    store_name=file_metadata.get('store_name'),
+                )
+
                 # 创建记录
                 catalog_file = CatalogFile(
                     file_name=filename,
@@ -351,14 +420,17 @@ class FileRegistrationService:
                     platform_code=file_info['platform'].lower(),
                     data_domain=file_info['data_domain'].lower(),
                     sub_domain=file_info.get('sub_domain'),
-                    account_id=file_info['account'],
+                    account=file_info['account'],
                     shop_id=file_info.get('shop_id'),
+                    shop_account_id=identity['shop_account_id'],
+                    store_name=identity['store_name'],
+                    platform_shop_id=identity['platform_shop_id'],
                     granularity=file_info.get('granularity', 'daily'),
                     date_from=datetime.strptime(file_info['date_from'], "%Y-%m-%d").date() if file_info.get('date_from') else None,
                     date_to=datetime.strptime(file_info['date_to'], "%Y-%m-%d").date() if file_info.get('date_to') else None,
                     status='pending',
-                    upload_time=datetime.now(timezone.utc),
-                    metadata=file_info.get('metadata', {})
+                    first_seen_at=datetime.now(timezone.utc),
+                    file_metadata=file_metadata
                 )
                 
                 self.db.add(catalog_file)
@@ -409,7 +481,7 @@ class FileRegistrationService:
             
             if catalog_file:
                 catalog_file.status = 'ingested'
-                catalog_file.ingest_time = datetime.now(timezone.utc)
+                catalog_file.last_processed_at = datetime.now(timezone.utc)
                 self.db.commit()
                 return True
             
