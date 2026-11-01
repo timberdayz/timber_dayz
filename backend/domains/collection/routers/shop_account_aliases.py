@@ -1,7 +1,8 @@
 ﻿from __future__ import annotations
 
 import codecs
-from typing import List
+from dataclasses import dataclass
+from typing import Any, Iterable, List, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -120,6 +121,91 @@ _UNMATCHED_ALIAS_PARAMS = {
     "cn_shopee_paid": _CN_SHOPEE_PAID,
     "cn_tiktok_paid": _CN_TIKTOK_PAID,
 }
+
+
+@dataclass(frozen=True)
+class _PlatformAliasOccupancy:
+    """某个平台下店铺账号的别名占用情况。"""
+
+    total_shop_accounts: int = 0
+    occupied_shop_accounts: int = 0
+    claimable_shop_accounts: int = 0
+
+
+async def _load_platform_alias_occupancy(db: AsyncSession) -> dict[str, _PlatformAliasOccupancy]:
+    """统计每个平台下有多少店铺账号、已被其它标签 1:1 占满多少、还能直接认领多少。
+
+    认领接口对「已持有其它主动别名」的店铺账号直接返回 409，因此只有没有任何主动
+    别名的经营店铺账号才是可认领目标（采集账号本身禁止认领别名）。
+    """
+    occupied_shop_account_ids = set(
+        (
+            await db.execute(
+                select(ShopAccountAlias.shop_account_id).where(
+                    ShopAccountAlias.is_active == True,  # noqa: E712
+                    ShopAccountAlias.is_primary == True,  # noqa: E712
+                )
+            )
+        ).scalars().all()
+    )
+    account_rows = (
+        await db.execute(select(ShopAccount.platform, ShopAccount.id, ShopAccount.business_role))
+    ).all()
+
+    buckets: dict[str, dict[str, int]] = {}
+    for platform, shop_account_db_id, business_role in account_rows:
+        bucket = buckets.setdefault(
+            (platform or "").strip().lower(),
+            {"total": 0, "occupied": 0, "claimable": 0},
+        )
+        bucket["total"] += 1
+        if shop_account_db_id in occupied_shop_account_ids:
+            bucket["occupied"] += 1
+        elif business_role != ShopAccountBusinessRole.collection_source:
+            bucket["claimable"] += 1
+
+    return {
+        platform: _PlatformAliasOccupancy(
+            total_shop_accounts=bucket["total"],
+            occupied_shop_accounts=bucket["occupied"],
+            claimable_shop_accounts=bucket["claimable"],
+        )
+        for platform, bucket in buckets.items()
+    }
+
+
+def _build_claim_hint(occupancy: _PlatformAliasOccupancy | None) -> str | None:
+    """生成未匹配别名的认领提示：说清「为什么现在不能直接认领、下一步该做什么」。"""
+    if occupancy is None:
+        return None
+    if occupancy.total_shop_accounts <= 0:
+        return "该平台下暂无店铺账号，需新建店账号才能认领"
+    if occupancy.claimable_shop_accounts > 0:
+        return f"该平台下有 {occupancy.claimable_shop_accounts} 个店铺账号可直接认领"
+    if occupancy.occupied_shop_accounts >= occupancy.total_shop_accounts:
+        return (
+            f"该平台下 {occupancy.total_shop_accounts} 个店铺账号已被其它标签 1:1 占满，"
+            "需新建店账号才能认领"
+        )
+    return (
+        f"该平台下 {occupancy.occupied_shop_accounts} 个店铺账号已被其它标签 1:1 占满，"
+        f"其余 {occupancy.total_shop_accounts - occupancy.occupied_shop_accounts} 个为采集账号，"
+        "需新建店账号才能认领"
+    )
+
+
+def _build_unmatched_alias_items(
+    rows: Iterable[Mapping[str, Any]],
+    occupancy_by_platform: Mapping[str, _PlatformAliasOccupancy],
+) -> List[UnmatchedShopAliasItem]:
+    """把未匹配别名查询结果装配成契约对象，并补上认领提示。"""
+    items: List[UnmatchedShopAliasItem] = []
+    for row in rows:
+        payload = dict(row)
+        platform_key = (payload.get("platform") or "").strip().lower()
+        payload["claim_hint"] = _build_claim_hint(occupancy_by_platform.get(platform_key))
+        items.append(UnmatchedShopAliasItem(**payload))
+    return items
 
 
 class ShopAccountAliasClaimRequest(BaseModel):
@@ -373,5 +459,6 @@ async def get_unmatched_shop_aliases(
     db: AsyncSession = Depends(get_async_db),
 ):
     result = await db.execute(text(_UNMATCHED_ALIAS_QUERY), _UNMATCHED_ALIAS_PARAMS)
-    items = [UnmatchedShopAliasItem(**dict(row)) for row in result.mappings().all()]
+    occupancy_by_platform = await _load_platform_alias_occupancy(db)
+    items = _build_unmatched_alias_items(result.mappings().all(), occupancy_by_platform)
     return UnmatchedShopAliasResponse(items=items, count=len(items))

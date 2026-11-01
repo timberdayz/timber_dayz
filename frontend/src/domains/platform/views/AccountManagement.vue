@@ -24,7 +24,8 @@
           class="unmatched-alias-item"
         >
           <span class="unmatched-alias-name">{{ item.platform }} / {{ item.site || '未标注站点' }} / {{ item.store_label_raw }}</span>
-          <span class="unmatched-alias-meta">订单 {{ item.order_count }}，金额 {{ Number(item.paid_amount || 0).toFixed(2) }}</span>
+          <span class="unmatched-alias-meta">出现 {{ item.row_count }} 行，订单 {{ item.order_count }}，金额 {{ Number(item.paid_amount || 0).toFixed(2) }}</span>
+          <span v-if="item.claim_hint" class="unmatched-alias-hint">{{ item.claim_hint }}</span>
         </div>
       </div>
     </el-alert>
@@ -1510,6 +1511,7 @@ function getCapabilitiesText(capabilities) {
 
 .unmatched-alias-item {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   font-size: 13px;
@@ -1521,6 +1523,12 @@ function getCapabilitiesText(capabilities) {
 
 .unmatched-alias-meta {
   color: #909399;
+}
+
+.unmatched-alias-hint {
+  flex-basis: 100%;
+  color: #e6a23c;
+  font-size: 12px;
 }
 
 .capabilities-tags {
