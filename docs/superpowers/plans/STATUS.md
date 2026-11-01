@@ -77,15 +77,78 @@ Live deployment verified:
   （`sql/mart/annual_summary_shop_month.sql` 已不存在）。
   已在 main 基线 worktree（`25aeba29`）逐条对照：**main 上同样失败**，属既有失败。
 
-### 发布前置条件（未完成，需业务决策）
+### 发布（v7.12.6，2026-11-02）—— 已上线
 
-- 分支**未合并 main、未打 tag、未 push**。
-- 原因：`data_hash` 口径由 `scope:shop_id` 切到 `scope:shop_account_id`，全部 460 个已入库文件的
-  hash 失效；计划 Task 10 Step 6 要求**事实层全量重建必须先于新 dedup 口径代码上线**，
-  否则再采会重复入账。当前 live 各非空事实表 `rows == distinct_data_hash`（无重复），
-  但仍需先做一次事实层重建（`RefreshQueueService` 或按文件粒度 delete+重扫+重入库）。
-- 另：仓库部署是 tag 驱动，`main` 需走 `scripts/sync_main_mirrors.ps1`，
-  AGENTS.md 禁止单远端 push / force push。
+- 分支以 `--ff-only` 合并进 main（main @ `7d43a43f`，50 commits / 63 files / +11667 −310），
+  `scripts/sync_main_mirrors.ps1 -Sync` 已把 main 同步到 **GitHub + CNB 双远端**
+  （`XIHONG_GIT_MIRROR_SYNCED=7d43a43f`），未使用单远端 push / force push。
+- tag `v7.12.6` 已推送到 GitHub 与 CNB，触发 GitHub Actions「Deploy to Production」
+  run `41330766206`，**全部作业 success**。
+- **local_console 启动失败的根因已消除**：live 版本戳
+  `current_schema_20261101_shop_identity_region_and_code` 现在落在
+  `get_supported_current_revisions()` 支持链的 head 上，
+  `scripts/run_current_schema_migrations.py --preflight-only` 返回
+  `[OK] Current-schema preflight passed: upgrade`。
+- 发布前门禁：后端 26 文件总验收 **318 passed**；
+  `scripts/verify_release_local.py --skip-build` **exit=0**
+  （fresh-db 迁移 + 迁移后 ORM Schema 一致性 + 云同步验证 + compose config + 部署前检查）；
+  前端 `npm run build` exit=0，`collectionTasksStatusUi` 6/6。
+- 生产部署核对（run 日志 + 站点探测）：
+  - Phase 1.5 只读预检通过；Phase 2 `[OK] Current-schema migration action completed: upgrade`
+  - schema gate：`current_revision == head_revision == current_schema_20261101_shop_identity_region_and_code`，
+    `missing_tables` / `missing_columns` 皆空
+  - Phase 2.6 `[OK] PostgreSQL Dashboard assets are ready`
+  - Phase 2.7 `[OK] Dashboard view definitions rebuilt`；Phase 2.7b `[OK] rebuilt view definitions present`
+  - Phase 3a `[OK] Inventory age full rebuild completed`；Phase 3a' `[OK] Inventory state full rebuild completed`
+  - backend healthy、celery worker + celery beat 已启动、nginx `/health` 通过、
+    `[OK] Application cutover completed. Tags: Backend=v7.12.6, Frontend=v7.12.6`
+  - 站点探测：`/api/health` 与 `/healthz/ready` 均返回 `version=v7.12.6`、
+    `database=connected`、`dashboard=ready`
+- **关于「Phase 2.7 只重建了 `api.clearance_ranking_module`」**：本次改动的 7 个
+  `sql/semantic/*` 资产**确实生效了**。MV 重建用 `DROP MATERIALIZED VIEW ... CASCADE`
+  把依赖它们的整层看板视图连带清空，随后的 bootstrap 把 47 个目标全部重新执行
+  （部署日志里 **0 条「跳过重建」、0 条失败**），因此生产视图定义与仓库一致。
+- **遗留的发布工具缺口（不阻塞本次发布）**：Phase 2.7 的重建目标清单写死为
+  `api.clearance_ranking_module`，并未按 `sql/` 差异自动计算，而
+  `RELEASE_CHECKLIST.md` 声称「改了 `sql/` 的视图部署会自动重建」。本次靠 CASCADE
+  连带重建兜住了，但这是运气不是机制 —— 后续应把目标清单改成按 tag 差异计算。
+- **重复入账边界（务必知悉）**：`data_hash` 口径由 `scope:shop_id` 切到
+  `scope:shop_account_id`，已入库文件的 hash 失效；自动入库只处理 `status='pending'`，
+  历史月份已入库文件不会被自动重入库，因此本次**不做生产事实层全量重建**。
+  唯一例外：**严禁对历史月份文件手动重触发 ingest**（会重复入账），
+  确需重采请先按文件粒度 delete 再重扫重入库。
+
+### 临时/测试内容清理（2026-11-02）
+
+已清理：
+
+- `%TEMP%` 下 47 个 `probe_*.py` / `erp_*.py` 临时探针脚本
+- 3 个旧 worktree（`baseline-check` / `baseline-refresh-queue` / `verify-frontend-baseline`）
+  及本任务自身的 `.worktrees/shop-identity-batch1` 与已合并分支 `feature/shop-identity-batch1`
+- `temp/` 下 19 个测试产物目录、`temp/outputs/` 下 45 个历史报告文件
+- `logs/` 下 400 个历史前端启动日志
+- 4 个已停止的遗留容器（`goofy_hopper` / `xihong_erp_backend_collector` /
+  `xihong_erp_backend_api` / `xihong_erp_migrate`）
+- 13 个历史遗留镜像（`release-publish-20260916-*`、`xihong-erp-backend-smoke:*`、
+  `codex-cloud-sync-runtime-ops-*`、`xihong_erp-backend-collector:latest`、
+  `xihong_erp-backend:latest` 及 4 个 `<none>` 悬空镜像）
+
+主动保留：
+
+- 业务数据：`temp/outputs/` 的 412 个 xlsx/xls、`data/raw` 914 个文件
+- 命名持久卷：`xihong_erp_*`、`docker_*`
+- 运行中容器与 `logs/backend-local.out.log` / `.err.log`（本地后端仍在写）
+- 回滚锚点镜像：`xihong_erp-backend:deploy-20260531`、`xihong_erp-frontend:deploy-20260531`、
+  `xihong_erp-celery-worker:latest`、`xihong_erp-celery-beat:latest`（运行中在用）
+
+**未清理（受安全策略拦截，需人工执行）**：
+
+- 11 个 testcontainers 遗留的 postgres 匿名悬空卷。`docker volume rm` 被本地安全策略
+  判定为不可逆销毁而拦截，需在 Docker Desktop 里手动清理：
+
+  ```bash
+  docker volume ls -f dangling=true --format '{{.Name}}'   # 逐个核对后删除
+  ```
 
 ### 待业务确认（不阻塞实施）
 
