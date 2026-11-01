@@ -1189,10 +1189,11 @@ git commit -m "feat(店铺身份): 改名走联动流程，老数据不断、新
 ## Task 17: 区域感知匹配（D10b —— 让同名品牌店按站点分流）
 
 **Files:**
-- Modify: `sql/semantic/shop_identity_resolution_candidates.sql`（`alias_match` 分支带出别名的 `shop_region`）
-- Modify: `sql/semantic/orders_atomic.sql`（`mapped` 层加 `source_region`）
-- Modify: `sql/semantic/analytics_atomic.sql`（同上）
-- Modify: `sql/semantic/orders_monthly_atomic_mv.sql`（同上）
+- Modify: `sql/semantic/shop_identity_resolution_candidates.sql`（`alias_match` 分支带出别名的 `shop_region`；并先在 `active_shop_accounts` CTE 里补出 `candidate_shop_region`）
+- Modify: `sql/semantic/orders_atomic.sql`（**`cleaned` 层(:280) 加 `source_region`** —— 该层的 `source_site` 已是真实输入列）
+- Modify: `sql/semantic/orders_monthly_atomic_mv.sql`（`mapped_monthly_orders`(:19) 新算 `source_site` → `normalized_monthly_orders`(:114) 加 `source_region`）
+- **不改** `sql/semantic/analytics_atomic.sql` / `sql/semantic/analytics_monthly_atomic_mv.sql`
+  （raw 里没有站点来源；Step 1 的反向护栏会断言这两个文件里**不得**出现 `AS source_region`）
 - Test: `backend/tests/data_pipeline/test_shop_identity_resolution_sql.py`（扩充）
 - Test: `backend/tests/test_semantic_ambiguous_identity_sql.py`（**改写第一批留下的护栏用例** —— 见 Step 2）
 
@@ -1234,12 +1235,50 @@ def test_sql_assets_map_site_to_region():
         assert "'菲律宾'" in text, f"{rel} 缺少站点映射表"
 
 
+def test_site_map_matches_python_side():
+    """SQL 的站点→区域映射必须与 `account_alignment.py` 的 `site_map` **逐项**一致。
+
+    只比 key→value，**不比 fallback** —— 两侧 fallback 的大小写本来就不同，是有意的：
+    Python 侧（`account_alignment.py:806`）产出小写，只用于生成建议 id（`:820-821`）；
+    SQL 侧产出大写，要与 `core.shop_accounts.shop_region`（实测存大写 `MY`/`PH`/`SG`）比较。
+
+    这条断言让「只锁 8 项映射」真的成为事实，而不是靠文档承诺。
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+
+    src = (root / "backend" / "domains" / "collection" / "routers"
+           / "account_alignment.py").read_text(encoding="utf-8")
+    site_map = None
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "site_map" for t in node.targets
+        ):
+            site_map = ast.literal_eval(node.value)
+            break
+    assert site_map, "account_alignment.py 里找不到 site_map"
+
+    for rel in (
+        "sql/semantic/orders_atomic.sql",
+        "sql/semantic/orders_monthly_atomic_mv.sql",
+    ):
+        text = (root / rel).read_text(encoding="utf-8")
+        for site, code in site_map.items():
+            assert f"WHEN '{site}' THEN '{code.upper()}'" in text, (
+                f"{rel} 缺少站点映射 {site} -> {code.upper()}"
+                f"（与 account_alignment.py 的 site_map 不一致）"
+            )
+
+
 def test_analytics_assets_do_not_get_region_column():
     """反向护栏：两条 analytics 路径**不得**出现区域列。
 
     它们没有站点来源（raw 里 `站点` / `店铺` 都是 0 行），
     加了只会是永远 NULL 的列，还会让"区域感知匹配"的适用范围变得含糊。
     """
+    import re
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[3]
@@ -1248,8 +1287,13 @@ def test_analytics_assets_do_not_get_region_column():
         "sql/semantic/analytics_monthly_atomic_mv.sql",
     ):
         text = (root / rel).read_text(encoding="utf-8")
-        assert "source_region" not in text, f"{rel} 不该有区域列（raw 里没有站点来源）"
-        assert "'菲律宾'" not in text, f"{rel} 不该有站点映射表"
+        # 只匹配「真的定义了列」的形态，避免一句解释性注释就误红
+        assert not re.search(r"AS\s+source_region\b", text, re.I), (
+            f"{rel} 不该有区域列（raw 里没有站点来源）"
+        )
+        assert not re.search(r"WHEN\s+'[^']+'\s+THEN\s+'[A-Z]{2}'", text), (
+            f"{rel} 不该有站点映射表"
+        )
 ```
 
 - [ ] **Step 2: 更新第一批留下的护栏用例（不做这一步，第二批落地后裸 `pytest` 必红）**
@@ -1279,14 +1323,18 @@ def test_candidate_view_carries_region_dimension():
 - [ ] **Step 2b: 运行测试确认失败**
 
 ```bash
-python -m pytest backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py -q -k "site_to_region or region_dimension or region_column"
+python -m pytest backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py -q -k "site_to_region or site_map or region_dimension or region_column"
 ```
 
-Expected: **2 FAIL + 1 PASS** ——
+Expected: **3 FAIL + 1 PASS** ——
 - `test_sql_assets_map_site_to_region`：两条 orders 资产今天都没有 `source_region` → FAIL；
+- `test_site_map_matches_python_side`：SQL 里还没有站点映射表 → FAIL
+  （实测今天的报错是 `sql/semantic/orders_atomic.sql 缺少站点映射 菲律宾 -> PH`）；
 - `test_candidate_view_carries_region_dimension`（Step 2 改写的那条）：候选视图今天没有区域列 → FAIL；
 - `test_analytics_assets_do_not_get_region_column`：这条**今天就通过**（analytics 确实没有区域列），
   它是**反向护栏** —— 防止实施者为了"统一"给 analytics 硬造一个永远 NULL 的区域列。
+
+> `-k` 里必须带上 `site_map`，否则 `test_site_map_matches_python_side` 会被 deselect 掉（名字里没有前三个关键词）。
 
 - [ ] **Step 3: 抽取站点 → 区域（**逐文件落点不同，不要照抄**）**
 
@@ -1347,6 +1395,13 @@ Expected: **2 FAIL + 1 PASS** ——
 
 **透传清单（漏一条就报 `column ... does not exist`，已实测复现）**：
 
+> **`source_region` 只用于匹配，不对外暴露**：两条路径的 `source_region` 都停在**中间 CTE**，
+> 不进最终 SELECT 的输出列。`orders_atomic.sql` 的最终 SELECT（`:477-530`）不加它；
+> `orders_monthly_atomic_mv.sql` 的最终 SELECT（`:293-311`）也不加它 ——
+> `resolved_monthly_orders` 的显式清单里要补它，只是为了让 LATERAL 能引用（`m.source_region`），
+> 最终输出仍是原来那 16 列。
+> （两个薄封装 VIEW 也是显式列清单：orders 16 列、analytics 20 列，**都不受影响**。）
+
 | 文件 | CTE 链（谁带显式列清单） | `source_region` 的传递路径 |
 |---|---|---|
 | `orders_atomic.sql` | `mapped`(:32) → **`cleaned`(:280，显式列清单)** → `deduplicated`(:390，`SELECT *`) → `alias_resolved`(:406) | `cleaned` 里**新算** → `deduplicated`（`SELECT *`）自动带上 → `alias_resolved` 的 LATERAL 用 `d.source_region` ✅ |
@@ -1361,8 +1416,8 @@ Expected: **2 FAIL + 1 PASS** ——
 | 场景 | 结果 |
 |---|---|
 | **反例**：在同一条 `SELECT` 列表里用 `source_site` 输出别名算 `source_region` | `ERROR: column "source_site" does not exist` ✅（这就是"不能紧跟在 `source_site` 后面"的依据） |
-| `orders_atomic.sql` 落点：`cleaned` 层用真实输入列 `source_site` 算 `source_region` | ✅ 正常返回（实测 200 行 `菲律宾 → PH`） |
-| `orders_monthly_atomic_mv.sql` 落点：`normalized_monthly_orders` 层算 `source_region` | ✅ 正常返回（实测 200 行 `菲律宾 → PH`） |
+| `orders_atomic.sql` 落点：`cleaned` 层用真实输入列 `source_site` 算 `source_region` | ✅ 正常返回（全量 4662 行：菲律宾 2450 / 新加坡 1635 / 马来 577 → PH / SG / MY） |
+| `orders_monthly_atomic_mv.sql` 落点：`normalized_monthly_orders` 层算 `source_region` | ✅ 正常返回（同上分布） |
 | 过滤条件引用 `d.source_region` / `m.source_region` | ✅ 正常返回 |
 
 > 反例那行**必须报错** —— 它证明"同层不能引用输出别名"这条 PostgreSQL 规则在 live 上确实生效，
@@ -1375,9 +1430,9 @@ Expected: **2 FAIL + 1 PASS** ——
 
 | raw 表 | 行数 | 有 `站点` | 有 `店铺` | 有 `shop_account_id` |
 |---|---|---|---|---|
-| `b_class.fact_tiktok_orders_monthly` | 4662 | **4662（100%）** | **4662（100%）** | — |
+| `b_class.fact_tiktok_orders_monthly` | 4662 | **4662（100%）** | **4662（100%）** | 2751（59%） |
 | `b_class.fact_tiktok_analytics_monthly` | 1263 | **0** | **0** | 543（43%） |
-| `b_class.fact_shopee_orders_monthly` | 26627 | **0** | **26627（100%）** | — |
+| `b_class.fact_shopee_orders_monthly` | 26627 | **0** | **26627（100%）** | 15432（58%） |
 
 即：
 - **analytics 的 raw 里既没有站点、也没有店铺标签** → 无从推导区域。
@@ -1441,7 +1496,7 @@ Expected: **2 FAIL + 1 PASS** ——
 > 用「层 1 为空就回落完整候选集」可以**证明**区域过滤只会让归属更精确、不会让归属变少：
 > 层 1 ⊆ 完整候选集 → `candidate_count` 只会不变或变小；变小只可能把 `ambiguous(≥2)` 变成 `unique(1)`，不会把 `unique(1)` 变成 `ambiguous`。
 
-**可执行实现（已在 live PG 15.14 实测，7 种输入全部符合预期）**：
+**可执行实现（已在 live PG 15.14 实测，下表 6 种输入全部符合预期）**：
 
 ```sql
                    AND (
@@ -1530,7 +1585,7 @@ Expected: **与第一批 Task 0 的基线完全一致**（2473 / 1448 / 505 / 28
 git add sql/semantic/ backend/tests/data_pipeline/test_shop_identity_resolution_sql.py
 git commit -m "feat(语义层): 区域参与身份匹配，同名品牌店按站点分流
 
-- mapped 层把 raw 的中文站点映射成区域码（与 account_alignment.py 的 site_map 对齐）
+- cleaned / normalized_monthly_orders 层把 raw 的中文站点映射成区域码（与 account_alignment.py 的 site_map 对齐）
 - 候选视图带出别名/店铺的区域维度
 - 匹配时先按区域精确匹配；没有精确匹配时回落到**完整候选集**（不是「只取不限区域的别名」）
 - 存量数据归属不变（与第一批基线一致）"

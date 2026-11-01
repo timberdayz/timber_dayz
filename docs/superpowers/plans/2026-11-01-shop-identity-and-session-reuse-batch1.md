@@ -1535,6 +1535,30 @@ Expected: FAIL。
 1. 在 `mapped` CTE 里补出 `normalized_identity_candidates` 数组，**构造方式照抄 `sql/semantic/orders_monthly_atomic_mv.sql` 的 mapped 层**（候选来源 = `source_platform_shop_id` / `source_shop_account_id` / `source_shop_id`（排除 `xihong`/`unknown`/`none`）/ `source_shop_id_compact` / `normalized_store_label_raw`）。
    > `orders_atomic.sql` 当前**没有** `normalized_identity_candidates`（实测 0 次），`mapped` 层也没有 `normalized_store_label_raw` —— 这两个都要补。
    > `orders_atomic.sql:62` 已经抽出了 `source_site`（`raw_data->>'站点'`），**保留它**，第二批的区域感知匹配要用。
+
+1b. **⚠ 每个文件缺的身份线索列不一样 —— 照抄 monthly 的数组构造会引用到不存在的列**
+   （实测 grep：`orders_atomic.sql` 里 `source_platform_shop_id` **0 次**、`source_shop_account_id` **0 次**、
+   `canonical` **0 次**；`analytics_atomic.sql` 里 `canonical` 同样 **0 次**）：
+
+| 文件 | `source_platform_shop_id` | `source_shop_account_id` | `source_shop_id` | `normalized_*` 具名列 | `canonical` JOIN |
+|---|---|---|---|---|---|
+| `orders_atomic.sql` | **缺** → 在 `mapped` 新增（取法照抄 `orders_monthly_atomic_mv.sql:39-45`：`raw_data->>'platform_shop_id'` / `平台店铺ID` / `店铺ID`），并**透传**到 `cleaned`(:280) 的显式清单 | **缺** → 在 `mapped` 新增（取法照抄 `orders_monthly_atomic_mv.sql:46-57`：`raw_data->>'shop_account_id'` / `account_id` / `店铺账号ID` / `账号ID` / `account`），并**透传**到 `cleaned` | `mapped`(:35) 有，但 `cleaned`(:283) 把它**改名成了 `shop_id`**（`COALESCE(source_shop_id,'unknown')`）→ 要在 `cleaned` 的显式清单里**同时保留 `source_shop_id`**（Step 4c 的 CASE 用的是 `source_shop_id`） | **缺**（Step 4a 已要求补 `normalized_store_label_raw` / `normalized_source_shop_id_compact`） | **缺** → 必须新增 |
+| `analytics_atomic.sql` | `mapped`(:34) 里有（`:50-60`） | `mapped`(:34) 里有（`:61-72`） | `mapped`(:34) 里有（`:37`） | 无具名列（候选在 `:168-199` 用内联 `REGEXP_REPLACE` 构造） | **缺** → 必须新增 |
+| `orders_monthly_atomic_mv.sql` | 有（`:45` → `:132` → `:172`） | 有（`:57` → `:133` → `:173`） | 有（`:23` → `:130` → `:171`） | 有（`normalized_source_shop_id_compact`:184、`normalized_store_label_raw`:195） | **已有**（`:280-282`） |
+| `analytics_monthly_atomic_mv.sql` | 有（`:42` → `:113` → `:301`） | 有（`:54` → `:114` → `:302`） | 有（`:20` → `:111` → `:304`） | 无具名列（`:334` 内联构造数组） | **已有**（`:402-404`） |
+
+   **`canonical` JOIN 怎么加**：Step 4c 的 CASE 用到 `canonical.shop_account_id` 与 `canonical.platform_shop_id`，
+   而两个 atomic 资产**都没有**这个 JOIN → 照抄 CASE 会报 `column "canonical.shop_account_id" does not exist`。
+   照抄 monthly 的写法（`orders_monthly_atomic_mv.sql:280-282`）：
+   ```sql
+       LEFT JOIN core.shop_accounts canonical
+         ON LOWER(COALESCE(canonical.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
+        AND canonical.shop_account_id = resolved.resolved_shop_account_id
+   ```
+   - `orders_atomic.sql` → 加在 `alias_resolved`(:406) 里、LATERAL 之后；
+   - `analytics_atomic.sql` → 加在 `resolved`(:120) 里、LATERAL 之后。
+
+   > 落点以**各文件自己的 CTE 结构**为准，不要照抄别处的行号。
 2. 把 `:451-474` 的 LATERAL 换成扫 `semantic.shop_identity_resolution_candidates c`，条件 `c.platform_code = lower(d.platform_code) AND c.identity_value_normalized = ANY (d.normalized_identity_candidates)`。
 3. 删掉 `orders_atomic.sql` 里对 `core.shop_account_aliases` 的直接 JOIN —— 别名匹配统一由候选视图的 `alias_match` 分支承担。
 4. 保留原有的「`shop_id` 为 `''`/`none`/`unknown`/`xihong` 时落 `unknown`」兜底。
@@ -1593,7 +1617,7 @@ Expected: FAIL。
          ) resolved ON TRUE
 ```
 
-**为什么这样写（三条都实测过）**：
+**为什么这样写（四条都实测过）**：
 - `agg` 是**纯聚合**，没有窗口函数 → 规避上面两条错误；
   `count(DISTINCT ...)` 保证「同一个店通过多种方式命中」只算 **1 个**候选
   （live 上确实存在这种行：`验证码测试账号` 同时命中 `store_name_match` 与 `shop_account_id`）。
