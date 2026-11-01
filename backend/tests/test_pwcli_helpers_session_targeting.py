@@ -63,3 +63,49 @@ def test_panel_save_command_passes_work_tag():
     joined = " ".join(command)
     assert "-WorkTag" in joined, "面板保存命令缺少 -WorkTag"
     assert "shopee-hongxikeji-main-inspect" in joined, "面板保存命令没有传具体 work_tag"
+
+
+def test_inspection_loop_passes_work_tag_on_every_platform_branch():
+    """巡店循环的**三个**平台分支都必须传 -WorkTag。
+
+    计划自称 Step 5b 是"最易漏的一步"：漏掉任何一条，
+    该平台的 session 名就会退回 default -> 存错地方 -> 下次读不到。
+
+    这里按**调用点**逐条锁定（不是只查函数签名）：
+    巡店循环里恰好有 3 处 `Save-Pwcli*State -AccountId $account.account_id` 调用，
+    且每一处都带 `-WorkTag $account.work_tag`。
+    （函数**定义**形如 `Save-PwcliShopeeState {`，不带 -AccountId，天然不会被误计。）
+    """
+    text = _read(HELPERS)
+
+    calls = re.findall(
+        r"Save-Pwcli(Miaoshou|Shopee|Tiktok)State\s+-AccountId\s+\$account\.account_id(?P<rest>[^\r\n]*)",
+        text,
+    )
+    assert len(calls) == 3, (
+        f"应恰好有 3 处 Save-Pwcli*State 调用（巡店循环的三个平台分支），实际 {len(calls)} 处：{calls}"
+    )
+    for platform, rest in calls:
+        assert "-WorkTag" in rest, f"{platform} 分支没有传 -WorkTag（实际：{rest.strip()!r}）"
+        assert "$account.work_tag" in rest, (
+            f"{platform} 分支传的 -WorkTag 不是 $account.work_tag（实际：{rest.strip()!r}）"
+        )
+
+    # 三个平台一个都不能少
+    assert {platform for platform, _ in calls} == {"Miaoshou", "Shopee", "Tiktok"}
+
+
+def test_platform_save_wrappers_forward_work_tag():
+    """三个 Save-Pwcli{Platform}State 包装必须把 -WorkTag 透传给 Save-PwcliPlatformState。
+
+    包装层漏传的话，即使巡店循环传了 work_tag，session 名仍然退回 default。
+    """
+    text = _read(HELPERS)
+    for platform in ("miaoshou", "shopee", "tiktok"):
+        pattern = (
+            rf"function Save-Pwcli{platform.capitalize()}State\s*\{{[^}}]*"
+            rf"Save-PwcliPlatformState\s+-Platform\s+{platform}\s+-AccountId\s+\$AccountId\s+-WorkTag\s+\$WorkTag"
+        )
+        assert re.search(pattern, text, re.IGNORECASE | re.DOTALL), (
+            f"Save-Pwcli{platform.capitalize()}State 没有把 -WorkTag 透传给 Save-PwcliPlatformState"
+        )
