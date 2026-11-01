@@ -46,17 +46,14 @@ def test_monthly_assets_keep_legacy_warning_codes():
             assert code in text, f"{rel} 丢了既有告警码 {code}"
 
 
-def test_candidate_view_untouched_in_batch1():
-    """本批次不改候选视图 —— 区域感知匹配属第二批 ⑨。
+def test_candidate_view_carries_region_dimension():
+    """第二批：候选视图必须带出区域维度，供同名品牌店按站点消歧。
 
-    视图的 identity_rows 是 4 路 UNION ALL；给视图加列必须同时改 4 个分支
+    视图的 identity_rows 是 4 路 UNION ALL；加列必须同时改 4 个分支
     **和** 视图末尾的 SELECT 列表，否则 PostgreSQL 报
     `each UNION query must have the same number of columns`（已实测）。
-    本批次只给别名表加列与约束，多候选由判定逻辑落 unknown。
-
-    ⚠ **本用例是「第一批专用护栏」**：第二批 Task 17 要给候选视图加区域列，
-    届时**必须**把本用例改成断言新列存在（见第二批计划的 Task 17 Step 1）。
     """
     text = _text("sql/semantic/shop_identity_resolution_candidates.sql")
     assert text.count("UNION ALL") == 3, "候选视图的 UNION 分支数变了（应为 4 路 UNION ALL）"
-    assert "shop_region" not in text, "本批次不应改候选视图（区域感知匹配属第二批 ⑨）"
+    assert "identity_shop_region" in text, "候选视图没有带出区域维度"
+    assert "candidate_shop_region" in text, "候选视图的 CTE 没有店铺区域列"

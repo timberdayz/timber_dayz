@@ -307,6 +307,21 @@ cleaned AS (
         store_label_raw,
         source_account,
         source_site,
+        -- 站点 → 区域码（大写，与 core.shop_accounts.shop_region 比较）。
+        -- 8 项映射与 backend/domains/collection/routers/account_alignment.py 的 `site_map` 对齐
+        -- （改一侧必须同时改另一侧；两侧 fallback 的大小写**有意**不同：Python 侧小写只用于
+        --  生成建议 id，SQL 侧大写才与 shop_region 比较）。
+        CASE lower(NULLIF(TRIM(BOTH FROM COALESCE(source_site, '')), ''))
+            WHEN '菲律宾' THEN 'PH'
+            WHEN '新加坡' THEN 'SG'
+            WHEN '马来' THEN 'MY'
+            WHEN '马来西亚' THEN 'MY'
+            WHEN '泰国' THEN 'TH'
+            WHEN '越南' THEN 'VN'
+            WHEN '印尼' THEN 'ID'
+            WHEN '巴西' THEN 'BR'
+            ELSE UPPER(LEFT(NULLIF(TRIM(BOTH FROM COALESCE(source_site, '')), ''), 2))
+        END AS source_region,
         source_platform_shop_id,
         source_shop_account_id,
         -- 候选值集合：就地引用 mapped 的真实输入列（同层不能引用输出别名）
@@ -544,6 +559,24 @@ alias_resolved AS (
             FROM semantic.shop_identity_resolution_candidates c
             WHERE c.platform_code = lower(COALESCE(d.platform_code, ''))
               AND c.identity_value_normalized = ANY (d.normalized_identity_candidates)
+              -- 区域感知匹配：层 1 = 区域精确匹配；层 2 = 完整候选集（层 1 为空时的兜底）。
+              -- 写成「并集」会凭空制造新的 unknown，这里必须是「层 1 为空才回落完整候选集」。
+              AND (
+                    (
+                        c.identity_shop_region IS NOT NULL
+                        AND d.source_region IS NOT NULL
+                        AND c.identity_shop_region = d.source_region
+                    )
+                    OR NOT EXISTS (
+                        SELECT 1
+                        FROM semantic.shop_identity_resolution_candidates c_exact
+                        WHERE c_exact.platform_code = lower(COALESCE(d.platform_code, ''))
+                          AND c_exact.identity_value_normalized = ANY (d.normalized_identity_candidates)
+                          AND c_exact.identity_shop_region IS NOT NULL
+                          AND d.source_region IS NOT NULL
+                          AND c_exact.identity_shop_region = d.source_region
+                    )
+              )
         ) agg
         LEFT JOIN LATERAL (
             -- ② 最优候选：每个店只保留优先级最高的一行
@@ -556,6 +589,23 @@ alias_resolved AS (
             FROM semantic.shop_identity_resolution_candidates c
             WHERE c.platform_code = lower(COALESCE(d.platform_code, ''))
               AND c.identity_value_normalized = ANY (d.normalized_identity_candidates)
+              -- 与 ① 计数子查询**同一段**区域过滤，否则计数与归属会不一致
+              AND (
+                    (
+                        c.identity_shop_region IS NOT NULL
+                        AND d.source_region IS NOT NULL
+                        AND c.identity_shop_region = d.source_region
+                    )
+                    OR NOT EXISTS (
+                        SELECT 1
+                        FROM semantic.shop_identity_resolution_candidates c_exact
+                        WHERE c_exact.platform_code = lower(COALESCE(d.platform_code, ''))
+                          AND c_exact.identity_value_normalized = ANY (d.normalized_identity_candidates)
+                          AND c_exact.identity_shop_region IS NOT NULL
+                          AND d.source_region IS NOT NULL
+                          AND c_exact.identity_shop_region = d.source_region
+                    )
+              )
             ORDER BY c.resolved_shop_id, c.resolution_priority, c.resolution_method, c.identity_source_value
         ) best ON TRUE
         ORDER BY best.resolution_priority, best.resolved_shop_id
