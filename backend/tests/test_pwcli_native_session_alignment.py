@@ -15,13 +15,13 @@ def test_resolve_session_platform_uses_session_prefix() -> None:
 def test_resolve_default_profile_dir_uses_platform_profile_root_without_account_id() -> None:
     path = pwcli_native.resolve_default_profile_dir("tiktok-explore", None)
 
-    assert path == Path("F:/Vscode/python_programme/AI_code/xihong_erp/output/playwright/profiles/tiktok")
+    assert path == pwcli_native.REPO_ROOT / "output" / "playwright" / "profiles" / "tiktok"
 
 
 def test_resolve_default_profile_dir_uses_runtime_account_profile_with_account_id() -> None:
     path = pwcli_native.resolve_default_profile_dir("tiktok-explore", "Tiktok 2店")
 
-    assert path == Path("F:/Vscode/python_programme/AI_code/xihong_erp/profiles/tiktok/Tiktok2店")
+    assert path == pwcli_native.REPO_ROOT / "profiles" / "tiktok" / "Tiktok2店"
 
 
 def test_load_storage_state_payload_accepts_wrapped_session_manager_format(tmp_path: Path) -> None:
