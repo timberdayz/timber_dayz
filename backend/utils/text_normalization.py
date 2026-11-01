@@ -65,12 +65,30 @@ def normalize_alias_text(value: str | None) -> str | None:
     return normalize_human_text(value)
 
 
+_ALIAS_PLATFORM_PREFIX_RE = re.compile(
+    r"^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*",
+    re.IGNORECASE,
+)
+_ALIAS_SEPARATOR_RE = re.compile(r"[\s_()/-]+")
+
+
 def normalize_alias_key(value: str | None) -> str:
-    normalized = normalize_alias_text(value) or ""
-    normalized = " ".join(normalized.lower().split())
-    return re.sub(
-        r"^(?:shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*",
-        "",
-        normalized,
-        flags=re.IGNORECASE,
-    ).strip()
+    """把原始导出标签规范化成匹配键。
+
+    规则必须与 SQL 侧完全一致（剥平台前缀 -> 小写 -> 折叠空白 -> 删分隔符），
+    否则「认领了却匹配不上」。唯一真源是本函数；SQL 侧只允许使用存储好的
+    ``alias_normalized``，不得再做第二次规范化。
+
+    Args:
+        value: 原始标签，例如 ``TK-新加坡-1店``
+
+    Returns:
+        规范化后的匹配键，例如 ``新加坡1店``
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = _ALIAS_PLATFORM_PREFIX_RE.sub("", text, count=1)
+    text = text.strip().lower()
+    text = _ALIAS_SEPARATOR_RE.sub("", text)
+    return text.strip()

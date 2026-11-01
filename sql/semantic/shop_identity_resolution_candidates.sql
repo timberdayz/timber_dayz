@@ -68,13 +68,15 @@ identity_rows AS (
         'store_name_match'::varchar AS resolution_method,
         4 AS resolution_priority,
         REGEXP_REPLACE(
-            REGEXP_REPLACE(
-                LOWER(TRIM(candidate_store_label)),
-                '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
-                '',
-                'i'
+            LOWER(
+                TRIM(BOTH FROM REGEXP_REPLACE(
+                    TRIM(BOTH FROM COALESCE(active_shop_accounts.candidate_store_label, '')),
+                    '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
+                    '',
+                    'i'
+                ))
             ),
-            '[[:space:]_()/-]+',
+            '[\s_()/-]+',
             '',
             'g'
         ) AS identity_value_normalized,
