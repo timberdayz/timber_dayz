@@ -1396,11 +1396,15 @@ Expected: **3 FAIL + 1 PASS** ——
 **透传清单（漏一条就报 `column ... does not exist`，已实测复现）**：
 
 > **`source_region` 只用于匹配，不对外暴露**：两条路径的 `source_region` 都停在**中间 CTE**，
-> 不进最终 SELECT 的输出列。`orders_atomic.sql` 的最终 SELECT（`:477-530`）不加它；
-> `orders_monthly_atomic_mv.sql` 的最终 SELECT（`:293-311`）也不加它 ——
-> `resolved_monthly_orders` 的显式清单里要补它，只是为了让 LATERAL 能引用（`m.source_region`），
-> 最终输出仍是原来那 16 列。
-> （两个薄封装 VIEW 也是显式列清单：orders 16 列、analytics 20 列，**都不受影响**。）
+> 不进最终 SELECT 的输出列。
+> - `orders_atomic.sql`：最终 SELECT（`:477-530`）**不加**它 —— LATERAL 在 `alias_resolved`(:406) 里，
+>   该层直接用 `d.source_region`（`d` = `deduplicated`），中间不需要把它写进任何显式清单。
+> - `orders_monthly_atomic_mv.sql`：`resolved_monthly_orders`(:221) 的显式清单里**要**补它 ——
+>   不是为了最终 SELECT，而是因为 `prepared_identity_monthly_orders`(:200) 的 `n.*` 把它带进来了，
+>   该层的 LATERAL 用 `m.source_region`（`m` = prepared 层）能引用到；
+>   但最终 SELECT（`:293-311`）**不加**它 → 对外仍然只有原有的那些列
+>   （第一批 Task 7 会给这个 MV 加 `identity_candidate_count` / `identity_candidates`，
+>   所以 Task 7 之后是 18 列；两个薄封装 VIEW 是显式列清单，是否带出新列取决于 Task 7 的「方案 A / B」）。
 
 | 文件 | CTE 链（谁带显式列清单） | `source_region` 的传递路径 |
 |---|---|---|
@@ -1416,8 +1420,8 @@ Expected: **3 FAIL + 1 PASS** ——
 | 场景 | 结果 |
 |---|---|
 | **反例**：在同一条 `SELECT` 列表里用 `source_site` 输出别名算 `source_region` | `ERROR: column "source_site" does not exist` ✅（这就是"不能紧跟在 `source_site` 后面"的依据） |
-| `orders_atomic.sql` 落点：`cleaned` 层用真实输入列 `source_site` 算 `source_region` | ✅ 正常返回（全量 4662 行：菲律宾 2450 / 新加坡 1635 / 马来 577 → PH / SG / MY） |
-| `orders_monthly_atomic_mv.sql` 落点：`normalized_monthly_orders` 层算 `source_region` | ✅ 正常返回（同上分布） |
+| `orders_atomic.sql` 落点：`cleaned` 层用真实输入列 `source_site` 算 `source_region` | ✅ 正常返回。**注意口径**：`orders_atomic.sql` 吃 daily+weekly+monthly 三个粒度 → tiktok 合计 **5004 行**（菲律宾 2762 / 新加坡 1662 / 马来 580）；另有 shopee **28261 行无站点** → `source_region` 为 NULL → 走层 2 兜底 |
+| `orders_monthly_atomic_mv.sql` 落点：`normalized_monthly_orders` 层算 `source_region` | ✅ 正常返回。该 MV 共 **31289 行** = tiktok 4662（菲律宾 2450 / 新加坡 1635 / 马来 577）+ shopee 26627（站点全 NULL → 层 2 兜底） |
 | 过滤条件引用 `d.source_region` / `m.source_region` | ✅ 正常返回 |
 
 > 反例那行**必须报错** —— 它证明"同层不能引用输出别名"这条 PostgreSQL 规则在 live 上确实生效，

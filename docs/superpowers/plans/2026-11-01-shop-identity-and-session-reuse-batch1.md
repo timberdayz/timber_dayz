@@ -1532,7 +1532,11 @@ Expected: FAIL。
 `orders_atomic.sql` 是四条里唯一自己扫 `core.shop_accounts` 的，因此它的塌缩胜者（SG 店）与另三条（MY 店）不同。
 
 改动要求：
-1. 在 `mapped` CTE 里补出 `normalized_identity_candidates` 数组，**构造方式照抄 `sql/semantic/orders_monthly_atomic_mv.sql` 的 mapped 层**（候选来源 = `source_platform_shop_id` / `source_shop_account_id` / `source_shop_id`（排除 `xihong`/`unknown`/`none`）/ `source_shop_id_compact` / `normalized_store_label_raw`）。
+1. 在 `mapped` CTE 里补出 `normalized_identity_candidates` 数组，**构造方式照抄 `sql/semantic/orders_monthly_atomic_mv.sql` 的 `prepared_identity_monthly_orders` 层**（`:200-218`）——
+   ⚠ **不是 `mapped` 层**：`mapped` 层只抽原始列，数组是在 `prepared_identity_monthly_orders` 里用
+   `ARRAY_REMOVE(ARRAY[...], NULL)` 构造的，**必须连 `ARRAY_REMOVE` 与 `xihong`/`unknown`/`none` 排除一起抄**，
+   只抄 `mapped` 会漏掉去空与排除逻辑。
+   候选来源 = `source_platform_shop_id` / `source_shop_account_id` / `source_shop_id`（排除 `xihong`/`unknown`/`none`）/ `source_shop_id_compact` / `normalized_store_label_raw`。
    > `orders_atomic.sql` 当前**没有** `normalized_identity_candidates`（实测 0 次），`mapped` 层也没有 `normalized_store_label_raw` —— 这两个都要补。
    > `orders_atomic.sql:62` 已经抽出了 `source_site`（`raw_data->>'站点'`），**保留它**，第二批的区域感知匹配要用。
 
@@ -1549,14 +1553,22 @@ Expected: FAIL。
 
    **`canonical` JOIN 怎么加**：Step 4c 的 CASE 用到 `canonical.shop_account_id` 与 `canonical.platform_shop_id`，
    而两个 atomic 资产**都没有**这个 JOIN → 照抄 CASE 会报 `column "canonical.shop_account_id" does not exist`。
-   照抄 monthly 的写法（`orders_monthly_atomic_mv.sql:280-282`）：
+   照抄 monthly 的写法（`orders_monthly_atomic_mv.sql:280-282`），
+   **但右侧的 LATERAL 结果别名必须按文件替换**（照抄 `resolved` 会报
+   `missing FROM-clause entry for table "resolved"`，在 `analytics_atomic.sql` 里还会与同名 CTE 冲突）：
+
    ```sql
+   -- orders_atomic.sql（LATERAL 别名 = account_map），加在 alias_resolved(:406) 里、LATERAL 之后
        LEFT JOIN core.shop_accounts canonical
          ON LOWER(COALESCE(canonical.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
-        AND canonical.shop_account_id = resolved.resolved_shop_account_id
+        AND canonical.shop_account_id = account_map.resolved_shop_account_id
    ```
-   - `orders_atomic.sql` → 加在 `alias_resolved`(:406) 里、LATERAL 之后；
-   - `analytics_atomic.sql` → 加在 `resolved`(:120) 里、LATERAL 之后。
+   ```sql
+   -- analytics_atomic.sql（LATERAL 别名 = resolved_candidate），加在 resolved(:120) 里、LATERAL 之后
+       LEFT JOIN core.shop_accounts canonical
+         ON LOWER(COALESCE(canonical.platform, '')) = LOWER(COALESCE(m.platform_code, ''))
+        AND canonical.shop_account_id = resolved_candidate.resolved_shop_account_id
+   ```
 
    > 落点以**各文件自己的 CTE 结构**为准，不要照抄别处的行号。
 2. 把 `:451-474` 的 LATERAL 换成扫 `semantic.shop_identity_resolution_candidates c`，条件 `c.platform_code = lower(d.platform_code) AND c.identity_value_normalized = ANY (d.normalized_identity_candidates)`。
@@ -1643,13 +1655,13 @@ Expected: FAIL。
 | `orders_monthly_atomic_mv.sql` | `m` | `m.normalized_identity_candidates`（`:203-220` 构造） | 直接套用上面的模板 |
 | `analytics_monthly_atomic_mv.sql` | `m` | `m.normalized_identity_candidates`（`:334`） | 直接套用上面的模板 |
 | `orders_atomic.sql` | `d` | **今天没有** `normalized_identity_candidates` | 先按 Step 4a 在 `mapped` 层补出该数组，再套用模板（把 `m.` 换成 `d.`）。⚠ **LATERAL 结果别名是 `account_map`**（`:474`），不是 `resolved` → 模板里的 `resolved.*` 全要改成 `account_map.*`；或者把别名改名成 `resolved` 并**同步改** `:410-411` 两处引用 |
-| `analytics_atomic.sql` | `m` | `VALUES (...)` 内联列表（`:168-199`），**不是数组** | 先把内联 `VALUES` 抽成 CTE（例如 `candidate_values`），再套用模板（把 `= ANY (m.normalized_identity_candidates)` 换成 `= ANY (cv.identity_value_normalized)`） |
+| `analytics_atomic.sql` | `m` | `VALUES (...)` 内联列表（`:168-199`），**不是数组** | 先把内联 `VALUES` 抽成 CTE（例如 `candidate_values`），再套用模板。⚠ `ANY` 的**右侧必须是数组** —— 直接写 `= ANY (cv.identity_value_normalized)` 会报 `op ANY/ALL (array) requires array on right side`（已实测）。正确写法：`= ANY (ARRAY(SELECT cv.identity_value_normalized FROM candidate_values cv))` |
 
 **⚠ 四个文件还有「中间 CTE 透传」与「LATERAL 结果别名」两处差异 —— 照抄上面的模板会报 `column does not exist`**：
 
 | 文件 | CTE 链（谁带显式列清单） | LATERAL 结果别名 | 必须补的透传 |
 |---|---|---|---|
-| `orders_atomic.sql` | `mapped`(:32) → **`cleaned`(:280，显式列清单)** → `deduplicated`(:390，`SELECT *`) → `alias_resolved`(:406) | **`account_map`**(:474) | ① `normalized_identity_candidates` 必须在 `cleaned` 的显式清单里**再透传一次** —— 否则 `d.normalized_identity_candidates` 报 `column d.normalized_identity_candidates does not exist`；② 新算出的 `identity_warning_code` / `identity_candidate_count` / `identity_candidates` 同样要穿过 `cleaned` 才能到最终 SELECT |
+| `orders_atomic.sql` | `mapped`(:32) → **`cleaned`(:280，显式列清单)** → `deduplicated`(:390，`SELECT *`) → `alias_resolved`(:406) | **`account_map`**(:474) | ① `normalized_identity_candidates` 必须在 `cleaned` 的显式清单里**再透传一次** —— 否则 `d.normalized_identity_candidates` 报 `column d.normalized_identity_candidates does not exist`；② `identity_warning_code` / `identity_candidate_count` / `identity_candidates` **在 `alias_resolved`(:406，LATERAL 所在层) 算出**，不经过 `cleaned` —— 只需加进 `alias_resolved` 的显式清单，再由最终 SELECT（`:477-530`）引用 |
 | `analytics_atomic.sql` | `mapped`(:34) → `resolved`(:120) → **`cleaned`(:208，显式列清单)** → `deduplicated`(:279) | **`resolved_candidate`**(:206) | ① LATERAL 的结果别名是 `resolved_candidate`，**不是** `resolved` → 模板与 CASE 里的 `resolved.candidate_count` / `resolved.candidate_shop_ids` 都要改成 `resolved_candidate.*`；② 新列在 `resolved` 里算出后要穿过 `cleaned`(:208) 的显式清单 |
 | `orders_monthly_atomic_mv.sql` | `mapped_monthly_orders`(:19) → `normalized_monthly_orders`(:114) → `prepared_identity_monthly_orders`(:200) → **`resolved_monthly_orders`(:221，显式列清单)** → `deduplicated_monthly_orders`(:284，`SELECT *`) | `resolved` | 新列在 `resolved_monthly_orders` 里算出 → 加进该 CTE 的显式清单 → `deduplicated`（`SELECT *`）自动带上 → 最终 SELECT 引用 |
 | `analytics_monthly_atomic_mv.sql` | `mapped_monthly_traffic`(:16) → `normalized_monthly_traffic`(:107) → **`resolved_monthly_traffic`(:339，显式列清单)** → `deduplicated_monthly_traffic`(:406，`SELECT *`) | `resolved` | 同上 |
@@ -1748,6 +1760,12 @@ END AS identity_warning_code
   此时 Task 8 的核对查询要改成直接查 `semantic.fact_orders_monthly_atomic_mv`（**MV 在 live 里确实存在**，
   `pg_class.relkind='m'`，`information_schema.tables` 不列 MATVIEW，别据此判断它不存在）。
 
+> ⚠ **CASE 里的外层别名也要按文件替换**：Step 4b 的模板用的是 `m.`（`m` = 月度/analytics 那条链的外层别名），
+> 但 `orders_atomic.sql` 的 LATERAL 在 `alias_resolved`(:406) 里、外层是 `d`（`FROM deduplicated d`）→
+> **Step 4c 的 CASE 里的 `m.source_platform_shop_id` / `m.source_shop_account_id` / `m.store_label_raw` / `m.source_shop_id`
+> 在该文件里必须改成 `d.*`**，否则报 `column d.source_platform_shop_id does not exist`。
+> `analytics_atomic.sql` 的外层是 `m`（`FROM mapped m`），保持 `m.` 不变。
+
 **`fact_orders_atomic` / `fact_analytics_atomic` 今天没有 `identity_warning_code` 列**
 （实测 live 列数分别为 **40** / **31**），本 Task 给它们**新增**三列：
 `identity_warning_code` / `identity_candidate_count` / `identity_candidates`。加列后必须同步：
@@ -1777,7 +1795,7 @@ git commit -m "feat(语义层): 多候选不再静默归一，落 unknown + 告�
 - 四条语义路径统一判定：候选 1 才归属，候选 0 落 unmatched_shop_label，
   候选 >=2 落 ambiguous_shop_label 并输出 identity_candidate_count / identity_candidates
 - 候选集含 disabled 账号（业务确认停用只是暂时的，唯一性判定用完整候选集）
-- 候选视图带上 shop_region 维度"
+- 候选视图本批次**不改**（区域感知匹配属第二批 ⑨；本批次只给别名表加列与约束）"
 ```
 
 ---
@@ -1804,10 +1822,62 @@ git commit -m "feat(语义层): 多候选不再静默归一，落 unknown + 告�
 >
 > MV 文件自己的注释（`:3-5`）写明 CASCADE 只在"下游视图由 runner 按依赖顺序重建"的前提下可接受。
 
-**必须用仓库的部署入口**：
+**⚠⚠ 必须用 `scripts/rebuild_views.py` 落地视图定义变更 —— `bootstrap` 不会重建已存在的视图。**
+
+> **这是本 Task 最容易「静默失败」的地方**（已实测 `backend/services/data_pipeline/refresh_runner.py:408`）：
+> ```text
+> if not recreate_views and await _target_view_kind(db, planned_target) == "v":
+>     # 普通视图不在数据刷新时重建（避免 CREATE OR REPLACE VIEW 拿 ACCESS EXCLUSIVE 锁）
+>     ...
+>     continue
+> ```
+> `bootstrap_postgresql_dashboard.py` 走的正是 `execute_sql_target(recreate_views=False)`
+> → **库里已存在的普通视图会被直接跳过**。
+>
+> 而 Task 7 改的**正是视图定义**：
+> `sql/semantic/orders_atomic.sql` = `CREATE OR REPLACE VIEW`、
+> `sql/semantic/analytics_atomic.sql` = `DROP VIEW ... CASCADE` + `CREATE`。
+>
+> 后果（必须避免）：
+> - 两个 atomic 视图**保持旧定义** → `identity_warning_code` / `identity_candidate_count` / `identity_candidates` **根本不会出现** → A7 不达标；
+> - 两个 monthly MV（`relkind='m'`，不走跳过分支）**会被重建** →
+>   **Step 3 / Step 4 的数据核对照样「通过」** → 失败是**静默**的，
+>   下游按新列写 SQL 时才会炸。
+>
+> 仓库自己写明了这条规矩：
+> - `scripts/deploy_remote_production.sh:863-868`（Phase 2.7「视图定义变更落地」）：
+>   「改了 sql/ 里的视图定义，光部署是不会生效的」；
+> - `tests/test_verify_remote_deploy_contracts.py:18-28` 的 `test_deploy_script_rebuilds_view_definitions`
+>   断言部署脚本里必须出现 `rebuild_views.py`；
+> - `scripts/rebuild_views.py:105` 用的是 `recreate_views=True`。
+
+**先 dry-run 看清楚要重建什么**：
 
 ```bash
-python scripts/bootstrap_postgresql_dashboard.py --module all
+python scripts/rebuild_views.py --dry-run
+```
+
+**再真跑**（不给 `--target` 就是重建整条视图链，脚本内部按 `topologically_sort_targets` 排依赖顺序、串行执行）：
+
+```bash
+python scripts/rebuild_views.py
+```
+
+> 只想重建本次改动涉及的视图也可以（`--target` 可重复）：
+> ```bash
+> python scripts/rebuild_views.py --target semantic.fact_orders_atomic --target semantic.fact_analytics_atomic
+> ```
+> 但**两个 monthly MV 也必须重建**（它们要加 `identity_candidate_count` / `identity_candidates` 列），
+> **所以建议直接全量跑** `python scripts/rebuild_views.py`。
+>
+> `rebuild_views.py` 会 `DROP ... CASCADE` 后按依赖顺序重建下游 —— 这正是需要的语义，
+> **不要再手动逐个执行原始 SQL**。
+
+**`bootstrap` 入口的定位要改**：它负责**补资产 + 刷新物化视图**，**不负责视图定义变更**。两者都要跑，顺序是「先 rebuild，再 bootstrap 刷新」：
+
+```bash
+python scripts/rebuild_views.py                                                                     # 1) 落地视图定义变更
+python scripts/bootstrap_postgresql_dashboard.py --module all --refresh-materializations           # 2) 补资产 + 刷新
 ```
 
 先只检查不改动：
@@ -1816,17 +1886,41 @@ python scripts/bootstrap_postgresql_dashboard.py --module all
 python scripts/bootstrap_postgresql_dashboard.py --check --module all --json
 ```
 
-需要刷新重物化时：
+> **实施者必须先跑 `--help` 确认参数**，并先 `--check` / `--dry-run` 看清楚将要动哪些对象。
+> 若部署后仍有对象缺失（说明有资产不在 runner 的清单里），**用这两个入口的报告定位**，不要手动逐个执行原始 SQL。
+
+Expected: 重建成功，`semantic.fact_orders_atomic` / `fact_analytics_atomic` / `fact_orders_monthly_atomic` / `fact_orders_monthly_atomic_mv` 以及 5 个 mart 视图全部存在。
+
+- [ ] **Step 1b: 验证新列真的出现了（专门防「静默未生效」）**
 
 ```bash
-python scripts/bootstrap_postgresql_dashboard.py --module all --refresh-materializations
+python -c "
+import sqlalchemy as sa
+eng = sa.create_engine('postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp')
+with eng.connect() as c:
+    for rel in ('fact_orders_atomic','fact_analytics_atomic','fact_orders_monthly_atomic','fact_analytics_monthly_atomic'):
+        cols = [r[0] for r in c.execute(sa.text('''
+            select column_name from information_schema.columns
+             where table_schema='semantic' and table_name=:t
+               and column_name in ('identity_warning_code','identity_candidate_count','identity_candidates')
+             order by column_name'''), {'t': rel})]
+        print(rel, '->', cols)
+"
 ```
 
-> 入口是 `scripts/bootstrap_postgresql_dashboard.py`（内部走 `backend/services/data_pipeline/dashboard_bootstrap.py` 的 `bootstrap_dashboard_assets` / `refresh_dashboard_materialization_assets`），**它按依赖顺序重建下游**。
-> **实施者必须先跑 `--help` 确认参数**，并先 `--check` 看清楚将要动哪些对象。
-> 若部署后仍有对象缺失（说明有资产不在 runner 的清单里），**用 `scripts/bootstrap_postgresql_dashboard.py --check` 的报告定位**，不要手动逐个执行原始 SQL。
+Expected（**改造前的 live 实测基线**：`fact_orders_atomic` 40 列 / `fact_analytics_atomic` 31 列，
+两者的 `identity_*` 列**一个都没有**；`fact_orders_monthly_atomic` 16 列、`fact_analytics_monthly_atomic` 20 列，
+两者都**只有** `identity_warning_code`）：
 
-Expected: 部署成功，`semantic.fact_orders_atomic` / `fact_analytics_atomic` / `fact_orders_monthly_atomic` / `fact_orders_monthly_atomic_mv` 以及 5 个 mart 视图全部存在。
+| 视图 | 改造后应有 |
+|---|---|
+| `semantic.fact_orders_atomic` | `['identity_candidate_count', 'identity_candidates', 'identity_warning_code']`（3 列） |
+| `semantic.fact_analytics_atomic` | 同上 3 列 |
+| `semantic.fact_orders_monthly_atomic` | 至少 `identity_warning_code`（新增两列是否出现在 wrapper 上，取决于 Task 7 的「方案 A / B」） |
+| `semantic.fact_analytics_monthly_atomic` | 至少 `identity_warning_code` |
+
+> **少了任何一列 = 视图定义没真正重建** → 回 Step 1 重跑 `rebuild_views.py`。
+> **不要只看 Step 3 / Step 4 的数据核对** —— monthly MV 重建成功会让那些核对照样「通过」。
 
 - [ ] **Step 2: 确认 MATVIEW 已刷新**
 
@@ -1999,7 +2093,9 @@ Expected: **3 条全 FAIL**，报错是 `ImportError: cannot import name 'resolv
 def resolve_file_identity(file_record: Any) -> str:
     """文件级店铺身份编号。
 
-    优先级：shop_account_id（永不变化，全平台 20/20 覆盖） > platform_shop_id > shop_id。
+    优先级：shop_account_id（永不变化，20 个 enabled 店铺账号全部有值） > platform_shop_id > shop_id。
+    注意：**店铺账号层 20/20 覆盖 ≠ 文件层覆盖** —— `public.catalog_files.shop_account_id`
+    实测只有 87/460 有值，文件层覆盖要靠 Task 9 补齐。
     三者都拿不到时返回 ``"none"``（与既有 ``file_record.shop_id or "none"`` 语义一致）。
     """
     shop_account_id = getattr(file_record, "shop_account_id", None)
