@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
 from backend.services.data_pipeline.refresh_runner import execute_sql_target
+from backend.utils.text_normalization import normalize_alias_key
 
 
 def test_orders_atomic_sql_exists_and_creates_semantic_view():
@@ -50,11 +51,21 @@ def test_orders_atomic_sql_maps_current_orders_amount_and_store_fields():
 
 
 def test_orders_atomic_sql_resolves_shop_aliases_via_shop_accounts_and_aliases():
+    """订单视图必须经**候选视图**解析别名 —— 别名表由候选视图统一读取。
+
+    第一批 Task 7 起，``orders_atomic.sql`` 不再直接 JOIN ``core.shop_account_aliases``，
+    改走 ``semantic.shop_identity_resolution_candidates``；别名表只在候选视图里被读。
+    断言必须跟着这个事实走 —— 继续断言别名表出现在订单视图里，改造后必然失败。
+    """
     sql_text = Path("sql/semantic/orders_atomic.sql").read_text(encoding="utf-8", errors="replace")
+    candidates_text = Path("sql/semantic/shop_identity_resolution_candidates.sql").read_text(
+        encoding="utf-8", errors="replace"
+    )
 
     assert "core.shop_accounts" in sql_text
-    assert "core.shop_account_aliases" in sql_text
-    assert "alias_normalized" in sql_text
+    assert "semantic.shop_identity_resolution_candidates" in sql_text
+    assert "core.shop_account_aliases" in candidates_text
+    assert "alias_normalized" in candidates_text
     assert "store_name" in sql_text
     assert "platform_shop_id" in sql_text
 
@@ -295,6 +306,7 @@ async def test_orders_atomic_prefers_rmb_profit_over_local_profit():
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             row = (
@@ -345,10 +357,17 @@ async def test_orders_atomic_resolves_shop_alias_via_shop_account_alias():
                     INSERT INTO core.shop_account_aliases (
                         shop_account_id, platform, alias_value, alias_normalized, is_primary, is_active
                     ) VALUES (
-                        1, 'shopee', '3C Shop', '3c shop', true, true
+                        1, 'shopee', :alias_value, :alias_normalized, true, true
                     )
                     """
-                )
+                ),
+                {
+                    "alias_value": "3C Shop",
+                    # alias_normalized 存的是**生产写入路径**产出的紧凑键
+                    # （backend.utils.text_normalization.normalize_alias_key），
+                    # SQL 侧直接读这一列、不再自己算 —— 写非规范值会让别名匹配静默落空。
+                    "alias_normalized": normalize_alias_key("3C Shop"),
+                },
             )
             await session.execute(
                 text(
@@ -372,6 +391,7 @@ async def test_orders_atomic_resolves_shop_alias_via_shop_account_alias():
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             rows = (
@@ -450,6 +470,7 @@ async def test_orders_atomic_resolves_prefixed_store_label_via_normalized_alias(
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             rows = (
@@ -507,6 +528,7 @@ async def test_orders_atomic_marks_account_level_shop_id_without_alias_as_unknow
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             rows = (
@@ -573,6 +595,7 @@ async def test_orders_atomic_resolves_shop_alias_via_shop_account_store_name_fal
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             rows = (

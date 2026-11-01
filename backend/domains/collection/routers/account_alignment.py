@@ -793,6 +793,15 @@ def _generate_suggested_id(account: str, site: str, store_label: str) -> str:
         prefix = "tiktok"
 
     # 站点代码
+    # ⚠ 这 8 项映射与语义层的站点→区域映射**必须逐项一致**：
+    #   sql/semantic/orders_atomic.sql 的 `source_region` CASE
+    #   sql/semantic/orders_monthly_atomic_mv.sql 的 `source_region` CASE
+    # 改一侧必须同时改另一侧（护栏见
+    # backend/tests/data_pipeline/test_shop_identity_resolution_sql.py::test_site_map_matches_python_side）。
+    #
+    # ⚠ 两侧 fallback 的大小写**有意**不同，不要"修正"成一致：
+    #   本文件（Python）产出**小写**，只用于生成建议 id（拼成 tiktok_ph_xxx），从不与 shop_region 比较；
+    #   SQL 侧产出**大写**，要与 core.shop_accounts.shop_region（实测存大写 MY / PH / SG）比较。
     site_map = {
         "菲律宾": "ph",
         "新加坡": "sg",
