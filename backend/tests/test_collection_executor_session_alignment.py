@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
 from modules.apps.collection_center.executor_v2 import CollectionExecutorV2, CollectionResult
 from modules.apps.collection_center.transition_gates import GateResult, GateStatus
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.asyncio
@@ -602,6 +606,80 @@ async def test_shared_login_phase_skips_blocking_tiktok_session_persist_for_reus
     saved.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_shared_login_phase_persists_manual_session_for_tiktok_persistent_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """人工保存的会话在 TikTok 持久 profile 下也必须落盘（spec D8）。
+
+    这是上面那条「跳过」用例的反向对照：``session_metadata`` 带着
+    ``manual_seeded`` / ``protected`` 时，登录后的 storage_state 必须写回。
+    """
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+    executor._check_cancelled = AsyncMock()
+    executor.popup_handler.close_popups = AsyncMock()
+    executor._execute_python_component = AsyncMock(return_value=True)
+    executor._ensure_login_gate_ready = AsyncMock(
+        return_value=GateResult(
+            stage="login_gate",
+            status=GateStatus.READY,
+            reason="logged-in markers confirmed",
+            current_url="https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY",
+        )
+    )
+
+    wait_capture = AsyncMock(return_value={"cookies": ["fresh"], "origins": []})
+    saved = AsyncMock(return_value=True)
+    monkeypatch.setattr(executor, "_wait_and_capture_high_quality_tiktok_session", wait_capture)
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._save_session_async",
+        saved,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._record_platform_shop_discovery_async",
+        AsyncMock(),
+    )
+
+    page = type("Page", (), {"url": "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY"})()
+    context = type(
+        "Ctx",
+        (),
+        {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+    )()
+    params = {
+        "reused_session": True,
+        "_runtime_session_mode": "persistent_profile",
+        "session_metadata": {"manual_seeded": True, "protected": True},
+        "params": {"reused_session": True},
+    }
+
+    await executor._execute_shared_login_phase(
+        task_id="task-1",
+        platform="tiktok",
+        account={"account_id": "acc-1", "login_url": "https://seller.tiktokshopglobalselling.com/account/login"},
+        params=params,
+        context=context,
+        browser=object(),
+        play_context=object(),
+        page=page,
+        adapter=object(),
+        runtime_manifests=None,
+        session_platform="tiktok",
+        session_account_id="main-1",
+        save_session_after_login=True,
+        start_time=__import__("datetime").datetime.now(),
+        total_domains_count=0,
+    )
+
+    wait_capture.assert_awaited_once()
+    saved.assert_awaited_once_with(
+        "tiktok",
+        "main-1",
+        {"cookies": ["fresh"], "origins": []},
+    )
+
+
 def test_tiktok_persistent_profile_skips_post_login_session_persist_even_when_fresh() -> None:
     assert CollectionExecutorV2._should_skip_post_login_session_persist(
         platform="tiktok",
@@ -999,3 +1077,140 @@ async def test_execute_parallel_domains_uses_auto_runtime_strategy_for_shared_lo
     assert result.status == "failed"
     assert result.error_message == "No data domains provided"
     assert observed["session_runtime_mode"] == "auto"
+
+
+def test_manual_seeded_session_is_not_skipped_for_tiktok():
+    """人工保存的会话在 TikTok 持久 profile 模式下也必须落盘。"""
+    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
+
+    params = {
+        "_runtime_session_mode": "persistent_profile",
+        "session_metadata": {"manual_seeded": True, "protected": True},
+    }
+    assert not CollectionExecutorV2._should_skip_post_login_session_persist(
+        platform="tiktok",
+        params=params,
+    )
+
+
+def test_automatic_tiktok_persistent_profile_may_still_skip():
+    """自动来源的 TikTok 持久 profile 保持原有跳过行为。"""
+    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
+
+    params = {
+        "_runtime_session_mode": "persistent_profile",
+        "session_metadata": {},
+    }
+    assert CollectionExecutorV2._should_skip_post_login_session_persist(
+        platform="tiktok",
+        params=params,
+    )
+
+
+def test_non_tiktok_platform_is_never_skipped():
+    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
+
+    params = {"_runtime_session_mode": "persistent_profile", "session_metadata": {}}
+    assert not CollectionExecutorV2._should_skip_post_login_session_persist(
+        platform="shopee",
+        params=params,
+    )
+
+
+def test_executor_does_not_duplicate_profile_bootstrap():
+    """executor 侧不得再保留一份没有 TikTok 质量门禁的 profile bootstrap。
+
+    现状：``runtime_session._bootstrap_session_from_profile_sync`` 有门禁，
+    ``executor_v2`` 里又抄了一份没有门禁的 → 低质量 state 会被提升为正式会话。
+    修法是复用 runtime_session 的实现，不是再抄第三份。
+    """
+    text = (
+        REPO_ROOT / "modules" / "apps" / "collection_center" / "executor_v2.py"
+    ).read_text(encoding="utf-8")
+    assert "def _bootstrap_session_from_profile_sync" not in text, (
+        "executor 侧仍有一份自己的 _bootstrap_session_from_profile_sync（缺 TikTok 质量门禁），"
+        "应改为复用 runtime_session 的实现"
+    )
+
+
+def test_resolve_session_metadata_prefers_runtime_bundle_metadata() -> None:
+    """bundle 上已带元数据时直接用它，不再回落到 SessionManager。"""
+    bundle = type(
+        "Bundle",
+        (),
+        {"session_metadata": {"manual_seeded": True, "protected": True}},
+    )()
+
+    metadata = CollectionExecutorV2._resolve_session_metadata(
+        platform="tiktok",
+        params={"main_account_id": "main-1"},
+        runtime_bundle=bundle,
+    )
+
+    assert metadata == {"manual_seeded": True, "protected": True}
+
+
+def test_resolve_session_metadata_falls_back_to_session_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """bundle 没有元数据时回退到 SessionManager（人工巡店会话的落盘位置）。"""
+    monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager.get_session_metadata",
+        lambda self, platform, account_id: {"manual_seeded": True, "protected": True},
+    )
+
+    metadata = CollectionExecutorV2._resolve_session_metadata(
+        platform="tiktok",
+        params={"main_account_id": "main-1"},
+        runtime_bundle=object(),
+    )
+
+    assert metadata == {"manual_seeded": True, "protected": True}
+
+
+def test_persistent_profile_bundle_reads_manual_marker_from_disk_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """持久 profile 分支的 bundle 不带 session_metadata → 必须从磁盘会话读到人工标记。
+
+    持久 profile 的 ``RuntimeContextBundle`` 由 ``runtime_session`` 构造，
+    它的 ``session_metadata`` 恒为空 dict；人工巡店保存的会话落在
+    ``data/sessions/<platform>/<owner>/storage_state.json`` 里，
+    所以标记只能经 ``SessionManager`` 读回来。
+    """
+    from modules.utils.sessions import session_manager as session_manager_module
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.setattr(session_manager_module, "REPO_ROOT", repo_root)
+
+    manager = session_manager_module.SessionManager()
+    session_file = manager.get_session_path("tiktok", "main-1")
+    session_file.parent.mkdir(parents=True, exist_ok=True)
+    session_file.write_text(
+        '{"platform": "tiktok", "account_id": "main-1", "storage_state": {},'
+        ' "metadata": {"manual_seeded": true, "protected": true}}',
+        encoding="utf-8",
+    )
+
+    # 持久 profile 的 bundle 不带任何 session_metadata
+    persistent_bundle = type("Bundle", (), {"session_metadata": {}})()
+
+    metadata = CollectionExecutorV2._resolve_session_metadata(
+        platform="tiktok",
+        params={"main_account_id": "main-1"},
+        runtime_bundle=persistent_bundle,
+    )
+
+    assert metadata["manual_seeded"] is True
+    assert metadata["protected"] is True
+
+    # 标记可见 → 持久 profile 下不再跳过落盘
+    assert not CollectionExecutorV2._should_skip_post_login_session_persist(
+        platform="tiktok",
+        params={
+            "_runtime_session_mode": "persistent_profile",
+            "session_metadata": metadata,
+        },
+    )
