@@ -106,6 +106,30 @@ def _format_sync_stage_error(stage: str, detail: str) -> str:
     return f"数据同步失败:{stage},{detail}"
 
 
+def resolve_file_identity(file_record: Any) -> str:
+    """文件级店铺身份编号。
+
+    优先级：shop_account_id（永不变化，20 个 enabled 店铺账号全部有值） > platform_shop_id > shop_id。
+    注意：**店铺账号层 20/20 覆盖 != 文件层覆盖** —— ``public.catalog_files.shop_account_id``
+    实测只有 87/460 有值，文件层覆盖要靠 Task 9 补齐。
+    三者都拿不到时返回 ``"none"``（与既有 ``file_record.shop_id or "none"`` 语义一致）。
+
+    为什么必须优先用 shop_account_id
+    -------------------------------
+    ``file_record.shop_id`` 取的是账号级值（如 ``'xihong'``），改名后会变；
+    同一份数据改名后再采一次，若用它做 ``data_hash`` 作用域就会重复入库。
+    ``shop_account_id`` 是稳定身份编号，改名不影响。
+    """
+    for attr in ("shop_account_id", "platform_shop_id", "shop_id"):
+        value = getattr(file_record, attr, None)
+        if not value:
+            continue
+        normalized = str(value).strip()
+        if normalized:
+            return normalized
+    return "none"
+
+
 def validate_metric_date_contract(
     *,
     metric_date: Optional[date],
