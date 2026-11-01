@@ -514,17 +514,19 @@ class DataIngestionService:
                         f"[Ingest] [v4.18.1] 文件级别platform_code为空,使用unknown"
                     )
 
-                # 文件级别确定shop_id(从伴生JSON文件获取,没有则为'none')
-                # [*] v4.18.1重构:shop_id完全从文件元数据获取,不再逐行检查
-                file_shop_id = file_record.shop_id or "none"
+                # 文件级别确定稳定身份编号（spec D14）。
+                # 优先级：shop_account_id（永不变化；店铺账号层 20/20 覆盖） > platform_shop_id > shop_id。
+                # file_shop_id 会随改名变化，用它做 data_hash 作用域会导致同一份数据重复入库。
+                file_shop_account_id = getattr(file_record, "shop_account_id", None) or None
+                file_platform_shop_id = getattr(file_record, "platform_shop_id", None) or None
+                file_shop_id = resolve_file_identity(file_record)
                 file_main_account_id = getattr(file_record, "main_account_id", None)
-                file_shop_account_id = getattr(file_record, "shop_account_id", None)
                 file_store_name = getattr(file_record, "store_name", None)
-                file_platform_shop_id = getattr(file_record, "platform_shop_id", None)
 
                 if not file_record.shop_id:
                     logger.info(
-                        f"[Ingest] [v4.18.1] 文件级别shop_id为空,设为'none'(将使用数据库账号主数据进行关联)"
+                        f"[Ingest] [v4.18.1] 文件级别shop_id为空,稳定身份编号回退为{file_shop_id}"
+                        f"(将使用数据库账号主数据进行关联)"
                     )
 
                 # 批量应用到所有行(静默处理,不逐行输出日志)
@@ -653,6 +655,16 @@ class DataIngestionService:
                             file_platform_code
                             if "file_platform_code" in locals()
                             else platform
+                        ),
+                        "shop_account_id": (
+                            file_shop_account_id
+                            if "file_shop_account_id" in locals()
+                            else None
+                        ),
+                        "platform_shop_id": (
+                            file_platform_shop_id
+                            if "file_platform_shop_id" in locals()
+                            else None
                         ),
                         "shop_id": file_shop_id if "file_shop_id" in locals() else None,
                         "data_domain": domain,
