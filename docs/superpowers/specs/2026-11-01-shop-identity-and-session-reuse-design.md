@@ -382,8 +382,16 @@ shopee KR        SG×3
 
 ### 5.2 身份线
 
-**D10 —— 匹配锚点升级为 `(platform, main_account_id, alias_normalized, shop_region)`。**
-`core.shop_account_aliases` 新增 `shop_region` 列（可空；NULL 表示"不限区域"，兼容存量）**与 `main_account_id` 维度**（或等价地把别名绑定到店铺账号后从店铺反查主账号），唯一约束改为 `(platform, alias_normalized, shop_region, is_active)` 且**必须使用 `NULLS NOT DISTINCT`**（PostgreSQL 15.14 支持；否则 NULL 行互不冲突，约束对存量行形同虚设，且"FIORO 可挂三店"会变成"FIORO 可挂无限多店"）。
+**D10a —— 别名表加区域维度（第一批：落库与约束）。**
+`core.shop_account_aliases` 新增 `shop_region` 列（可空；NULL 表示"不限区域"，兼容存量），唯一约束改为 `(platform, alias_normalized, shop_region, is_active)` 且**必须使用 `NULLS NOT DISTINCT`**（PostgreSQL 15.14 支持；否则 NULL 行互不冲突，约束对存量行形同虚设，且"FIORO 可挂三店"会变成"FIORO 可挂无限多店"）。
+
+**D10b —— 匹配用区域消歧（第二批 ⑨：让 `FIORO` + 站点正确分流）。**
+只加列不改匹配的话，同一个 `FIORO` 会产生多个候选 → 落 `unknown` + `ambiguous_shop_label`（**安全，但认不出店**）。
+要让它真正分流，需要把「站点 → 区域」引入匹配：
+- raw 数据里已有站点：`b_class.fact_tiktok_orders_monthly.raw_data->>'站点'`（100% 覆盖，改名后不变），`sql/semantic/orders_atomic.sql:62` 已经把它抽成 `source_site`；
+- 现成映射：`backend/domains/collection/routers/account_alignment.py:796-805` 的 `site_map`（菲律宾→ph、新加坡→sg、马来/马来西亚→my、泰国→th、越南→vn、印尼→id、巴西→br）；
+- 店铺侧区域：`core.shop_accounts.shop_region` 存**大写**（MY/PH/SG），与 `site_map` 的小写码差一个 `upper()`；
+- 匹配规则：候选别名的 `shop_region` 与该行站点映射出的区域一致（`shop_region IS NULL` 的别名作"不限区域"兜底，优先级最低）。
 
 **D11 —— 写侧与查侧共用同一套规范化，且必须幂等、可解释。**
 `backend/utils/text_normalization.py` 的 `normalize_alias_key` 改为与 SQL 侧完全一致：剥平台前缀 → 小写 → 折叠空白 → 删 `[[:space:]_()/-]+`（**含前导连字符**）。
@@ -482,7 +490,7 @@ D12 的两个新码与既有 `unresolved_shop_account` 的关系需明确：**�
 | ⑤ | 采集用店铺身份编号落库 | **订单重复入账、月结算错** | D14（含前置：补齐 `catalog_files.shop_account_id`） | A5 |
 | ⑥ | 认不准就不猜 | 数据张冠李戴 | D13 | A6 A7 |
 | ⑧ | 修别名认领失效 | 90 行数据认不出店 | D11、D12 | A8 A9 |
-| ⑩ | 别名表区域维度落地 | 同名品牌店可区分 | D10 | A10 |
+| ⑩ | 别名表区域维度落地（落库与约束） | 同名品牌店可区分 | D10a | A10 |
 
 ### 第二批（正本）
 
@@ -491,7 +499,7 @@ D12 的两个新码与既有 `unresolved_shop_account` 的关系需明确：**�
 | ③ | 一账号一巡店窗口 | 登录态互相覆盖 | D9 | B1 |
 | ④ | 账号标识唯一化 | 串号 | D9 | B2 |
 | ⑦ | 改名自动留痕（曾用名进别名表） | 老数据认不出店、数据分裂 | D15 | B3 |
-| ⑨ | 改名后按站点自动重认店铺 | 改名后全量人工重认 | D10 + D13 | B5 |
+| ⑨ | 改名后按站点自动重认店铺（区域感知匹配） | 改名后全量人工重认 | D10b + D13 | B5 |
 | ⑪ | 内部标准名字段 | 唯一、带地区标识 | §4.1 + D17 | B4 |
 | ⑫ | 会话新鲜度与持久化口径 | 过期会话被当新会话用 | D7、D8 | A11 A12 |
 | ⑬ | 改名联动与刷新队列口径 | 改名产生分歧 | D17 | A13 |

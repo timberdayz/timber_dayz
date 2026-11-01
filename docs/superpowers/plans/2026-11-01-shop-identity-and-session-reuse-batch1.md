@@ -22,16 +22,22 @@
 | D1 保存按账号定位会话 / D2 退出码传播 | Task 2 | A1 A2 |
 | D3 面板渲染真实输出 | Task 3 | A2 |
 | D4 `pwcli_native` 直接调用 `sys.path` 兜底 | Task 4 | A1 |
-| D10 别名表区域维度 | Task 5 | A10 |
+| D10a 别名表区域维度（落库与约束） | Task 5 | A10 |
 | D12 平台大小写归一 | Task 5 | A9 |
 | D11 别名规范化统一 | Task 6 | A8 |
 | D13 多候选落 unknown + 告警码 | Task 7 Task 8 | A6 A7 |
 | D14 稳定身份编号落库 | Task 9 Task 10 | A5 |
 | A14 待认领清单 | Task 11 | A14 |
+| D6 采集优先使用人工保存的会话 | Task 12 | A4 |
 
 ### 0.2 明确不在本计划范围（属第二批 / 独立计划）
 
 - 第二批全部：③一账号一巡店窗口、④账号标识唯一化、⑦曾用名、⑨改名后按站点重认、⑪内部标准名前端、⑫会话新鲜度与持久化、⑬改名联动。
+  → **A11 / A12 / A13 按 spec §6 归第二批**（spec §8 把它们列在「第一批」小节里，是 spec 自身的编排出入；
+  本计划以 spec §6 的批次划分为准）。
+- **D10b 区域感知匹配**（用「站点 → 区域」映射让 `FIORO` + 站点正确分流到三个店）→ 属第二批 ⑨。
+  本批次只做 D10a（别名表加列与约束）—— 加完列之后同名别名会产生多个候选，
+  由 Task 7 的判定逻辑落成 `unknown` + `ambiguous_shop_label`，**不会静默错配**，是安全状态。
 - IP 隔离（spec §10）。
 - `TK新加坡3C店` 的认领（业务已决定暂不认领，Task 11 只做**可见性**）。
 - `data/sessions` 下 18~20 个历史别名孤儿目录的清理（spec §10）。
@@ -55,6 +61,7 @@ Task 1 → Task 2 → Task 3 → Task 4          （会话线，可与身份线�
 Task 5 → Task 6 → Task 7 → Task 8          （身份线，必须串行：迁移 → 规范化 → 语义层）
 Task 9 → Task 10                          （落库，必须在 Task 5 之后）
 Task 11                                  （面板可见性，依赖 Task 7/8）
+Task 12                                  （采集侧优先用人工会话，独立）
 ```
 
 **Task 9（补齐 `catalog_files.shop_account_id`）必须先于 Task 10（改 `data_hash` 口径）**，否则会造成全量历史行重复。
@@ -298,6 +305,11 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _save_helper_block() -> str:
+    text = _read(HELPERS)
+    return text.split("function Save-PwcliPlatformState", 1)[1].split("\nfunction ", 1)[0]
+
+
 def test_launcher_propagates_exit_code():
     """pwcli.ps1 必须把 python 的退出码传给调用方，否则失败会被当成成功。"""
     text = _read(LAUNCHER)
@@ -306,20 +318,22 @@ def test_launcher_propagates_exit_code():
 
 def test_save_helper_accepts_work_tag():
     """保存函数必须能按账号定位会话，不能只依赖环境变量。"""
-    text = _read(HELPERS)
-    save_block = text.split("function Save-PwcliPlatformState", 1)[1].split("function ", 1)[0]
-    assert "WorkTag" in save_block, "Save-PwcliPlatformState 缺少 -WorkTag 参数"
-    assert "$platformName-$WorkTag" in save_block.replace(" ", "").replace(
-        '"$platformName-$WorkTag"', '"$platformName-$WorkTag"'
-    ) or '"$platformName-$WorkTag"' in save_block
+    block = _save_helper_block()
+    assert "WorkTag" in block, "Save-PwcliPlatformState 缺少 -WorkTag 参数"
+    assert '"$platformName-$WorkTag"' in block, "保存函数没有用 platform+WorkTag 拼 session 名"
 
 
 def test_save_helper_throws_on_nonzero_exit():
     """保存失败必须抛错，让调用方拿到非 0 退出码。"""
-    text = _read(HELPERS)
-    save_block = text.split("function Save-PwcliPlatformState", 1)[1].split("function ", 1)[0]
-    assert "$LASTEXITCODE" in save_block
-    assert "throw" in save_block
+    block = _save_helper_block()
+    assert "$LASTEXITCODE" in block
+    assert "throw" in block
+
+
+def test_save_helper_rejects_missing_work_tag():
+    """有账号但缺 work tag 时必须报错，不能静默退回 session=default。"""
+    block = _save_helper_block()
+    assert "requires -WorkTag" in block, "缺 work tag 时会静默退回 pwcli state-save（断点 A）"
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -373,6 +387,12 @@ function Save-PwcliPlatformState {
         return
     }
 
+    if ($AccountId -and -not $WorkTag) {
+        # 有账号但没给 work tag -> 定位不到会话。直接报错，不要静默退回 pwcli state-save
+        # （那会解析成 session "default" 并失败，正是 spec 断点 A）。
+        throw "Save-PwcliPlatformState requires -WorkTag when -AccountId is given"
+    }
+
     if (-not $Filename) {
         $Filename = Get-PwcliStateFile -Platform $platformName
     }
@@ -411,6 +431,38 @@ function Save-PwcliTiktokState {
 }
 ```
 
+- [ ] **Step 5b: 调用方必须真的把 `-WorkTag` 传进来（否则断点 A 原样保留）**
+
+> **这是 Task 2 最容易被漏掉的一步。** 现有两个调用方都**没有**传 `-WorkTag`：
+> - `scripts/pwcli_inspection_panel.py:129-134`（save 分支）拼的是 `Save-PwcliShopeeState -AccountId '<id>'`；
+> - `scripts/pwcli_helpers.ps1:479-485`（巡店循环）拼的是 `Save-Pwcli*State -AccountId $account.account_id`。
+>
+> 对比 open 分支：`pwcli_inspection_panel.py:122-123` 与 `pwcli_helpers.ps1:451-457` **是**带 `-WorkTag` 的 —— 照抄它们的写法即可。
+
+**5b-1 改面板。** 把 `scripts/pwcli_inspection_panel.py:129-134` 的 save 分支替换为：
+
+```python
+    elif action == "save":
+        helper = SAVE_HELPERS.get(platform)
+        if not helper:
+            raise ValueError(f"Unsupported platform: {platform}")
+        command = (
+            utf8_prefix
+            + f"Set-Location -LiteralPath '{quote_ps(str(repo_root))}'; "
+            + f". '{quote_ps(str(repo_root / 'scripts' / 'pwcli_helpers.ps1'))}'; "
+            + f"{helper} -AccountId '{quote_ps(str(account['account_id']))}' "
+            + f"-WorkTag '{quote_ps(str(account['work_tag']))}'"
+        )
+```
+
+**5b-2 改巡店循环。** 把 `scripts/pwcli_helpers.ps1:479-485` 里的保存调用改为（与同文件 `:451-457` 的 open 调用保持同样的传参形态）：
+
+```powershell
+        Save-Pwcli$($PlatformName)State -AccountId $account.account_id -WorkTag $account.work_tag
+```
+
+> **实施者必须先读** `scripts/pwcli_helpers.ps1:440-490` 的实际变量名（`$account` 的字段名可能是 `$account.account_id` / `$account.work_tag` 或别的），**照抄同文件 open 分支的写法**，不要凭空造变量名。
+
 - [ ] **Step 6: 运行测试确认通过**
 
 ```bash
@@ -419,23 +471,55 @@ python -m pytest backend/tests/test_pwcli_helpers_session_targeting.py -q
 
 Expected: 全部 PASS。
 
-- [ ] **Step 7: 实跑验证退出码传播（只读，不启动浏览器）**
+- [ ] **Step 6b: 补一条「调用方确实传了 -WorkTag」的测试**
 
-```bash
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$PWD\scripts\pwcli.ps1' --session no-such-session-xyz state-save; exit $LASTEXITCODE"
+在 `backend/tests/test_pwcli_helpers_session_targeting.py` 里追加：
+
+```python
+def test_panel_save_command_passes_work_tag():
+    """面板的保存命令必须带上 -WorkTag，否则 session 又会退回 default。"""
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from pwcli_inspection_panel import build_pwcli_action_command
+
+    account = {
+        "platform": "shopee",
+        "account_id": "hongxikeji:main",
+        "work_tag": "shopee-hongxikeji-main-inspect",
+        "display_name": "hongxikeji:main",
+    }
+    command = build_pwcli_action_command("save", account, REPO_ROOT)
+    joined = " ".join(command)
+    assert "-WorkTag" in joined, "面板保存命令缺少 -WorkTag"
+    assert "shopee-hongxikeji-main-inspect" in joined, "面板保存命令没有传具体 work_tag"
 ```
 
-Expected: 打印 `No browser session found for 'no-such-session-xyz'`，**退出码 ≠ 0**。
+- [ ] **Step 7: 实跑验证退出码传播（只读，不启动浏览器）**
+
+**注意命令写法**：不能带尾部 `; exit $LASTEXITCODE`（那会让 `$LASTEXITCODE` 从内层脚本传出来，修复前后都返回非 0，验证不了差异）。要**直接看进程退出码**：
+
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pwcli.ps1 --session no-such-session-xyz state-save
+echo "exit code = $LASTEXITCODE"
+```
+
+Expected:
+- 打印 `No browser session found for 'no-such-session-xyz'`；
+- **`exit code` ≠ 0**。
+
+> 修复前同样这条命令的 `exit code` 是 0（已实测）→ 修复前后可区分。
 
 - [ ] **Step 8: 提交**
 
 ```bash
-git add scripts/pwcli.ps1 scripts/pwcli_helpers.ps1 backend/tests/test_pwcli_helpers_session_targeting.py
+git add scripts/pwcli.ps1 scripts/pwcli_helpers.ps1 scripts/pwcli_inspection_panel.py backend/tests/test_pwcli_helpers_session_targeting.py
 git commit -m "fix(巡店): 保存会话按账号定位，并让失败真正返回非 0 退出码
 
 - pwcli.ps1 补 exit \$LASTEXITCODE，失败不再被当成成功
 - Save-PwcliPlatformState 新增 -WorkTag，session 名与 Open-PwcliPlatform 完全一致
-- 不再依赖 \$env:PLAYWRIGHT_CLI_SESSION（面板每次动作都是新进程，变量不在里面）
+- 调用方补齐 -WorkTag：巡店面板 save 分支与 helpers 巡店循环
+  （此前只改函数签名、调用方不传，session 仍会退回 default，断点 A 原样保留）
 - 保存失败时 throw，调用方能拿到非 0 退出码"
 ```
 
@@ -465,15 +549,26 @@ PANEL_PY = REPO_ROOT / "scripts" / "pwcli_inspection_panel.py"
 
 
 def test_panel_html_renders_message_not_only_status():
-    """前端日志必须渲染 message（真实 stdout/stderr），不能只有 status。"""
+    """前端日志必须渲染 result.message（真实 stdout/stderr），不能只有 result.status。
+
+    注意：断言必须写 ``result.message``（精确），不能写 ``.message`` —— 后者会被
+    文件里已有的 ``error.message`` 命中，测试就成了永远通过的空守卫。
+    """
     text = PANEL_HTML.read_text(encoding="utf-8")
-    assert "result.message" in text or ".message" in text, "前端未渲染 result.message"
+    assert "result.status" in text, "前端未渲染 result.status"
+    assert "result.message" in text, "前端未渲染 result.message"
+
+    matched = [line for line in text.splitlines() if "result.message" in line]
+    assert matched, "未找到渲染 result.message 的语句"
+    assert any("result.status" in line for line in matched), (
+        "result.message 与 result.status 不在同一条日志里，失败信息仍会被丢掉"
+    )
 
 
-def test_panel_records_stderr_on_failure():
-    """后端在失败时必须把 stderr 原文记进日志。"""
+def test_panel_success_response_includes_message():
+    """成功时也必须把 stdout 带回来，否则前端没有可显示的内容。"""
     text = PANEL_PY.read_text(encoding="utf-8")
-    assert "result.stderr" in text
+    assert "combined_output" in text, "成功分支没有把 stdout/stderr 合并进 message"
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -505,18 +600,36 @@ Expected: 至少 1 个 FAIL。
 
 - [ ] **Step 4: 前端渲染 message**
 
-在 `scripts/pwcli_inspection_panel_static/index.html` 的 `runAction` 里，把日志写入改为**同时**渲染 `result.message` 与 `result.status`。定位方式：搜索 `result.status` 的日志渲染语句，替换为：
+`scripts/pwcli_inspection_panel_static/index.html:311-324` 的 `runAction` 现在长这样：
 
 ```javascript
-        const detail = (result && result.message) ? result.message : '';
-        appendLog(
-          `${label} · ${account.display_name || account.account_id} · ${result.status || 'unknown'}`
-          + (detail ? `\n${detail}` : '')
-        );
+    async function runAction(action, account) {
+      try {
+        const result = await api(`/api/accounts/${action}`, {
+          method: 'POST',
+          body: JSON.stringify({ platform: account.platform, account_id: account.account_id }),
+        });
+        const index = accounts.findIndex((item) => item.platform === result.platform && item.account_id === result.account_id);
+        if (index >= 0) accounts[index] = result;
+        render();
+        addLog(`${account.display_name} ${action} -> ${result.status}`);
+      } catch (error) {
+        addLog(`${account.display_name} ${error.message}`);
+      }
+    }
 ```
 
-> 实施者注意：本仓库的 JS 变量名以实际文件为准。**要求是：日志文本必须包含 `result.message` 的内容**，且失败时 `result.status` 为 `error`。
-> 若文件里已有 `appendLog` 之类的辅助函数，复用它，不要新增第二个日志函数。
+改成（**沿用文件里已有的 `addLog(...)` 与 `action` 变量名**，不要新造辅助函数）：
+
+```javascript
+        addLog(`${account.display_name} ${action} -> ${result.status}` + (result.message ? `\n${result.message}` : ''));
+      } catch (error) {
+        addLog(`${account.display_name} ${action} -> error\n${(error && error.message) || '未知错误'}`);
+      }
+```
+
+> 说明：`api()`（`index.html:247-257`）在非 2xx 时抛的是 `new Error(payload.detail || ...)`，而 Task 3 Step 3 让后端把 `detail` 设成真实 stderr → **失败路径的 `error.message` 已经是真实原因**。
+> 本 Step 要补的是**成功路径**：把 `result.message`（后端合并的 stdout）也显示出来，让运营看到"保存到哪个文件"。
 
 - [ ] **Step 5: 运行测试确认通过**
 
@@ -560,16 +673,24 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_direct_script_launch_can_import_session_manager():
-    """直接以脚本方式启动 pwcli_native 时，必须能 import 到 modules.*。"""
+def test_pwcli_native_bootstraps_repo_root_into_sys_path():
+    """仓库根必须在 import 时进入 sys.path。
+
+    直接以 `python modules/utils/pwcli_native.py` 启动时，sys.path[0] 是脚本目录
+    `modules/utils`，不含仓库根 -> 延迟导入 `modules.utils.sessions.session_manager`
+    会抛 ModuleNotFoundError（spec D4）。
+    """
+    import modules.utils.pwcli_native as mod
+
+    repo_root = str(Path(mod.__file__).resolve().parents[2])
+    assert repo_root in sys.path, "pwcli_native 没有把仓库根放进 sys.path"
+
+
+def test_direct_script_launch_does_not_fail_on_import():
+    """直接以脚本方式启动时，不得出现 ModuleNotFoundError。"""
     probe = REPO_ROOT / "modules" / "utils" / "pwcli_native.py"
-    code = (
-        "import runpy, sys;"
-        "sys.argv = ['pwcli_native.py', '--help'];"
-        "runpy.run_path(r'%s', run_name='__main__')" % probe
-    )
     result = subprocess.run(
-        [sys.executable, "-c", code],
+        [sys.executable, str(probe), "--help"],
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
@@ -577,6 +698,12 @@ def test_direct_script_launch_can_import_session_manager():
     )
     assert "ModuleNotFoundError" not in (result.stderr or ""), result.stderr
 ```
+
+> **为什么不用 `python -c "import runpy; ..."` 做主断言**：`python -c` 会把 **CWD** 放进 `sys.path`，
+> 测试又设了 `cwd=REPO_ROOT` → `import modules` 天然可用 → 测试**今天就会通过**，守不住任何东西（已实测）。
+> 主断言必须是上面的 `sys.path` 结构断言。
+> 次要断言 `test_direct_script_launch_does_not_fail_on_import` 只能守住"导入期不炸"；
+> 真正会触发 `:320` 延迟导入的是**带 `--account-id` 的 open / state-save**，那需要真实浏览器，属于手工验证（Step 5）。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -841,22 +968,22 @@ def downgrade() -> None:
         UniqueConstraint("platform", "alias_normalized", "is_active", name="uq_shop_account_aliases_active_alias"),
 ```
 
-改为**唯一索引**（不是 UniqueConstraint）：
+改为：
 
 ```python
-        Index(
-            "uq_shop_account_aliases_active_alias",
+        UniqueConstraint(
             "platform",
             "alias_normalized",
             "shop_region",
             "is_active",
-            unique=True,
+            name="uq_shop_account_aliases_active_alias",
             postgresql_nulls_not_distinct=True,
         ),
 ```
 
-> **为什么用 Index 而不是 UniqueConstraint**：仓库当前 SQLAlchemy 是 **2.0.41**，`UniqueConstraint.__init__` **不支持** `postgresql_nulls_not_distinct` 参数（已实测：`"postgresql_nulls_not_distinct" in inspect.signature(UniqueConstraint.__init__).parameters` → `False`）。只有 `Index` 支持该参数。
-> 迁移脚本里用的是原生 SQL（`ALTER TABLE ... ADD CONSTRAINT ... UNIQUE NULLS NOT DISTINCT (...)`），与这里的 Index 定义语义一致。
+> **已实测（SQLAlchemy 2.0.41）**：`UniqueConstraint(..., postgresql_nulls_not_distinct=True)` 会生成
+> `CONSTRAINT uq_t UNIQUE NULLS NOT DISTINCT (a, b, c)` —— 与迁移脚本里的原生 SQL 完全一致。
+> （注意：`inspect.signature(UniqueConstraint.__init__)` 里看不到这个参数，因为它走的是 `**kw`；**不要**因此改用 `Index` —— `Index` 形式不会出现在 `CREATE TABLE` 里，反而与迁移不一致。）
 
 - [ ] **Step 5: 运行测试确认通过**
 
@@ -868,11 +995,24 @@ Expected: 全部 PASS。
 
 - [ ] **Step 6: 在 live 库上跑迁移**
 
+**迁移入口是 `scripts/run_current_schema_migrations.py`，不是 `alembic -c current_migrations/alembic.ini`。**
+（`current_migrations/` 目录下**没有** `alembic.ini`；仓库根的 `alembic.ini:4` 指向的是历史链 `migrations`。）
+
+先做只读预检：
+
 ```bash
-python -m alembic -c current_migrations/alembic.ini upgrade head
+python scripts/run_current_schema_migrations.py --preflight-only --json
 ```
 
-> 若仓库的 alembic 入口不同，先确认：`Get-ChildItem current_migrations -Filter "*.ini"`。**不要猜**，按实际配置文件执行。
+Expected: 输出当前链状态与将要执行的动作，**不改库**。
+
+确认无误后正式执行：
+
+```bash
+python scripts/run_current_schema_migrations.py --database-url "postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp"
+```
+
+> 该脚本还支持 `--diagnose`（诊断当前链状态）与 `--json`（机器可读输出）。**实施者先跑 `python scripts/run_current_schema_migrations.py --help` 确认参数**，不要凭记忆敲。
 
 Expected: 迁移成功，无报错。
 
@@ -950,7 +1090,9 @@ CASES = [
     ("Malaysia(Flora Mall)", "malaysiafloramall"),
     ("Shopee3C店", "3c店"),
     ("3C店", "3c店"),
-    ("xhkj1.my", "xhkj1my"),
+    # 注意：分隔符集是 [\s_()/-]，**不含点号** —— 与 spec §2.4 的 SQL 口径
+    # `[[:space:]_()/-]+` 保持一致。xhkj1.my 的规范化值就是 xhkj1.my。
+    ("xhkj1.my", "xhkj1.my"),
 ]
 
 
@@ -1169,10 +1311,17 @@ def test_no_sql_asset_uses_bare_limit_1_on_identity():
         assert "identity_candidate_count" in text, f"{rel} 缺少 identity_candidate_count"
 
 
-def test_candidate_view_exposes_region_dimension():
-    """候选视图必须带上 shop_region 维度。"""
+def test_candidate_view_untouched_in_batch1():
+    """本批次不改候选视图 —— 区域感知匹配属第二批 ⑨。
+
+    视图的 identity_rows 是 4 路 UNION ALL；给视图加列必须同时改 4 个分支
+    **和** 视图末尾的 SELECT 列表，否则 PostgreSQL 报
+    `each UNION query must have the same number of columns`（已实测）。
+    本批次只给别名表加列与约束，多候选由判定逻辑落 unknown。
+    """
     text = _text("sql/semantic/shop_identity_resolution_candidates.sql")
-    assert "shop_region" in text
+    assert text.count("UNION ALL") == 3, "候选视图的 UNION 分支数变了（应为 4 路 UNION ALL）"
+    assert "shop_region" not in text, "本批次不应改候选视图（区域感知匹配属第二批 ⑨）"
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -1183,17 +1332,21 @@ python -m pytest backend/tests/test_semantic_ambiguous_identity_sql.py -q
 
 Expected: FAIL。
 
-- [ ] **Step 3: 在候选视图里带上区域维度**
+- [ ] **Step 3: 候选视图本批次不动（区域感知匹配属第二批 ⑨）**
 
-`sql/semantic/shop_identity_resolution_candidates.sql` 的 `active_shop_accounts` CTE 里补一列：
-
-```sql
-            NULLIF(TRIM(BOTH FROM COALESCE(sa.shop_region, '')), '')::text AS candidate_shop_region,
-```
-
-并在 `alias_match` 分支的 SELECT 列表里带上 `active_shop_accounts.candidate_shop_region`。
-
-> 视图的对外列变化会影响下游 SELECT 列表 —— **实施者必须同步更新三个 SQL 资产里引用该视图的列清单**，否则视图会因列数不匹配而报错。
+> **重要边界**：`sql/semantic/shop_identity_resolution_candidates.sql` 的 `identity_rows` 是 **4 路 UNION ALL**
+> （`platform_shop_id` / `shop_account_id` / `alias_match` / `store_name_match`）。
+> 给视图加列必须**同时**改 4 个分支 **和** 视图末尾的 SELECT 列表，否则 PostgreSQL 直接报
+> `each UNION query must have the same number of columns`（已实测）。
+>
+> 但**本批次不需要给视图加区域列**：
+> - 别名表加了 `shop_region` + 新唯一约束之后，同一个 `FIORO` 可以分别注册给 SG/MY/PH 三个店；
+> - 此时按 `(platform, alias_normalized)` 匹配会得到 **3 个候选** → Task 7 的判定逻辑会把它落成
+>   `unknown` + `ambiguous_shop_label` → **不会静默错配**（这正是 D13 要的行为）；
+> - 真正把 `FIORO` + 站点正确分流到三个店，需要「站点 → 区域」映射参与匹配，
+>   属于**第二批 ⑨**（见第二批计划的区域感知匹配 Task）。
+>
+> → **本 Task 不改视图**。Task 5 已经把 `shop_region` 列与新约束落库（那部分不受影响）。
 
 - [ ] **Step 4: 三条语义路径统一判定逻辑**
 
@@ -1212,6 +1365,7 @@ Expected: FAIL。
 改动要求：
 1. 在 `mapped` CTE 里补出 `normalized_identity_candidates` 数组，**构造方式照抄 `sql/semantic/orders_monthly_atomic_mv.sql` 的 mapped 层**（候选来源 = `source_platform_shop_id` / `source_shop_account_id` / `source_shop_id`（排除 `xihong`/`unknown`/`none`）/ `source_shop_id_compact` / `normalized_store_label_raw`）。
    > `orders_atomic.sql` 当前**没有** `normalized_identity_candidates`（实测 0 次），`mapped` 层也没有 `normalized_store_label_raw` —— 这两个都要补。
+   > `orders_atomic.sql:62` 已经抽出了 `source_site`（`raw_data->>'站点'`），**保留它**，第二批的区域感知匹配要用。
 2. 把 `:451-474` 的 LATERAL 换成扫 `semantic.shop_identity_resolution_candidates c`，条件 `c.platform_code = lower(d.platform_code) AND c.identity_value_normalized = ANY (d.normalized_identity_candidates)`。
 3. 删掉 `orders_atomic.sql` 里对 `core.shop_account_aliases` 的直接 JOIN —— 别名匹配统一由候选视图的 `alias_match` 分支承担。
 4. 保留原有的「`shop_id` 为 `''`/`none`/`unknown`/`xihong` 时落 `unknown`」兜底。
@@ -1226,16 +1380,22 @@ Expected: FAIL。
                     c.resolution_method,
                     c.resolution_priority,
                     c.resolved_shop_account_id,
-                    count(*) OVER () AS candidate_count,
-                    array_agg(c.resolved_shop_id ORDER BY c.resolution_priority, c.resolved_shop_id) AS candidate_shop_ids
+                    count(DISTINCT c.resolved_shop_id) OVER () AS candidate_count,
+                    array_agg(DISTINCT c.resolved_shop_id ORDER BY c.resolved_shop_id) AS candidate_shop_ids
                FROM semantic.shop_identity_resolution_candidates c
               WHERE c.platform_code = lower(COALESCE(d.platform_code, ''))
                 AND (c.identity_value_normalized = ANY (d.normalized_identity_candidates))
-              GROUP BY c.resolved_shop_id, c.resolution_method, c.resolution_priority, c.resolved_shop_account_id
              ) resolved ON TRUE
 ```
 
-> `count(*) OVER ()` 在 `GROUP BY` 之后是**分组窗口计数**（不是 `count(*) OVER ()` 的默认整表计数），语义正确；`array_agg` 必须与 `GROUP BY` 的列一致。实施者**必须在 live 上先跑一次这条 SQL 验证语法**，不要直接部署。
+> **关键写法（已实测踩过坑）**：
+> - **不要**加 `GROUP BY` —— 加了之后 `array_agg` 每个分组只有一个元素（永远拿不到候选列表），
+>   且 `resolved_shop_id` 会与 `GROUP BY` 冲突报 `must appear in the GROUP BY clause`。
+> - 计数必须用 **`count(DISTINCT c.resolved_shop_id) OVER ()`** 而不是 `count(*) OVER ()`：
+>   同一个店可能通过多种方式命中（如 `store_name_match` 与 `shop_account_id`），
+>   用 `count(*)` 会把 1 个店算成 2 个候选 → 误判 `ambiguous_shop_label`。
+>   live 上已存在这种行（`验证码测试账号` 同时命中 `store_name_match` 与 `shop_account_id`）。
+> - `array_agg(DISTINCT ...)` 同样按去重后的店铺计数。
 
 然后把 `shop_id` 的 CASE 改成：
 
@@ -1264,6 +1424,8 @@ Expected: FAIL。
 > - `backend/schemas/` 下暴露这些字段的 Pydantic 契约（若有）。
 >
 > **实施者必须先 grep 全部下游引用**：`grep -rn "fact_orders_atomic" sql/ backend/ --include=*.sql --include=*.py`。
+>
+> **实施者必须先在 live 上验证这段 SQL 能跑通**（`SELECT ... LIMIT 0` 或包一层子查询试跑），再改文件。
 
 - [ ] **Step 5: 跑语义层 SQL 资产一致性测试**
 
@@ -1295,30 +1457,49 @@ git commit -m "feat(语义层): 多候选不再静默归一，落 unknown + 告�
 
 **背景**：`semantic.fact_orders_atomic` / `fact_analytics_atomic` 是 **VIEW**（改定义即时生效）；`semantic.fact_orders_monthly_atomic_mv` 是 **MATVIEW**（改定义后必须 `REFRESH MATERIALIZED VIEW` 才生效），`semantic.fact_orders_monthly_atomic` 是它的薄封装 VIEW。
 
-- [ ] **Step 1: 先在 live 上重建三个对象**
+- [ ] **Step 1: 走仓库的语义层部署入口，不要逐个执行原始 SQL**
+
+> **⚠ 逐个执行这 4 个 SQL 文件会 CASCADE 掉下游对象且不重建**（已实测依赖链）：
+> - `sql/semantic/orders_monthly_atomic_mv.sql:6` = `DROP MATERIALIZED VIEW ... CASCADE`
+>   → 依赖者 `semantic.fact_orders_monthly_atomic`（由 `sql/semantic/orders_monthly_atomic.sql:5` 创建，**不在本 Task 的文件清单里**）
+>   → Step 3/Step 4 的验证查询会直接报 `relation does not exist`。
+> - `sql/semantic/analytics_atomic.sql:3` = `DROP VIEW ... CASCADE`
+>   → 级联掉 5 个 mart 视图：`mart.platform_day_kpi` / `platform_week_kpi` / `shop_day_kpi` / `shop_hour_traffic_kpi` / `shop_week_kpi`
+>   （资产在 `sql/mart/*.sql`，同样不在清单里）。
+>
+> MV 文件自己的注释（`:3-5`）写明 CASCADE 只在"下游视图由 runner 按依赖顺序重建"的前提下可接受。
+
+**必须用仓库的部署入口**：
 
 ```bash
-python -c "
-import sqlalchemy as sa
-eng = sa.create_engine('postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp')
-with eng.begin() as c:
-    for rel in (
-        'sql/semantic/shop_identity_resolution_candidates.sql',
-        'sql/semantic/orders_atomic.sql',
-        'sql/semantic/analytics_atomic.sql',
-        'sql/semantic/orders_monthly_atomic_mv.sql',
-    ):
-        sql = open(rel, encoding='utf-8').read()
-        c.execute(sa.text(sql))
-        print('applied', rel)
-"
+python scripts/bootstrap_postgresql_dashboard.py --module all
 ```
 
-Expected: 四个对象全部重建成功，无报错。
+先只检查不改动：
 
-> **若某个 SQL 文件里含 `DROP ... IF EXISTS` + `CREATE`，直接整段执行即可。若含 alembic 风格的占位符，先按仓库既有部署脚本的方式处理（`Get-ChildItem scripts -Filter "*semantic*"`）。**
+```bash
+python scripts/bootstrap_postgresql_dashboard.py --check --module all --json
+```
 
-- [ ] **Step 2: 刷新 MATVIEW**
+需要刷新重物化时：
+
+```bash
+python scripts/bootstrap_postgresql_dashboard.py --module all --refresh-materializations
+```
+
+> 入口是 `scripts/bootstrap_postgresql_dashboard.py`（内部走 `backend/services/data_pipeline/dashboard_bootstrap.py` 的 `bootstrap_dashboard_assets` / `refresh_dashboard_materialization_assets`），**它按依赖顺序重建下游**。
+> **实施者必须先跑 `--help` 确认参数**，并先 `--check` 看清楚将要动哪些对象。
+> 若部署后仍有对象缺失（说明有资产不在 runner 的清单里），**用 `scripts/bootstrap_postgresql_dashboard.py --check` 的报告定位**，不要手动逐个执行原始 SQL。
+
+Expected: 部署成功，`semantic.fact_orders_atomic` / `fact_analytics_atomic` / `fact_orders_monthly_atomic` / `fact_orders_monthly_atomic_mv` 以及 5 个 mart 视图全部存在。
+
+- [ ] **Step 2: 确认 MATVIEW 已刷新**
+
+```bash
+python scripts/bootstrap_postgresql_dashboard.py --module all --refresh-materializations
+```
+
+Expected: 打印刷新完成。若 runner 未覆盖 `semantic.fact_orders_monthly_atomic_mv`，则显式执行：
 
 ```bash
 python -c "
@@ -1329,8 +1510,6 @@ with eng.begin() as c:
     print('refreshed')
 "
 ```
-
-Expected: 打印 `refreshed`。
 
 - [ ] **Step 3: 与 Task 0 的基线对比**
 
@@ -1419,17 +1598,44 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_ingestion_resolves_shop_account_id_for_catalog_files():
-    """入库时必须能确定 catalog_files.shop_account_id，否则 data_hash 口径无法切换。"""
-    candidates = list((REPO_ROOT / "backend").rglob("*.py"))
-    hit = [
-        p
-        for p in candidates
-        if "catalog_files" in p.read_text(encoding="utf-8", errors="ignore")
-        and "shop_account_id" in p.read_text(encoding="utf-8", errors="ignore")
-    ]
-    assert hit, "没有找到写入 catalog_files.shop_account_id 的代码"
+def test_resolve_file_identity_prefers_shop_account_id():
+    """文件级身份必须优先用 shop_account_id（永不变化，全平台覆盖）。"""
+    from backend.services.data_ingestion_service import resolve_file_identity
+
+    class _Record:
+        shop_account_id = "tiktok_sg_daone_mall_local"
+        platform_shop_id = "123456"
+        shop_id = "xihong"
+
+    assert resolve_file_identity(_Record()) == "tiktok_sg_daone_mall_local"
+
+
+def test_resolve_file_identity_falls_back_to_platform_shop_id():
+    from backend.services.data_ingestion_service import resolve_file_identity
+
+    class _Record:
+        shop_account_id = None
+        platform_shop_id = "123456"
+        shop_id = "xihong"
+
+    assert resolve_file_identity(_Record()) == "123456"
+
+
+def test_resolve_file_identity_falls_back_to_raw_shop_id():
+    from backend.services.data_ingestion_service import resolve_file_identity
+
+    class _Record:
+        shop_account_id = None
+        platform_shop_id = None
+        shop_id = "xihong"
+
+    assert resolve_file_identity(_Record()) == "xihong"
 ```
+
+> **为什么不用 grep 源码树的写法**：那种断言在改动前就会通过（实测 `catalog_files` + `shop_account_id` 在
+> `data_ingestion_service.py` / `data_sync.py` / `collection_tasks.py` 三个文件里都能 grep 到），
+> 守不住任何东西。这里改成**抽出一个纯函数 `resolve_file_identity`** 并直接测它的优先级 ——
+> 该函数今天不存在，测试**今天必然失败**，改完必然通过。
 
 - [ ] **Step 3: 运行测试确认失败**
 
@@ -1440,6 +1646,29 @@ python -m pytest backend/tests/test_catalog_file_identity_backfill.py -q
 Expected: FAIL（`hit` 为空）。
 
 - [ ] **Step 4: 实现回填**
+
+**4a. 抽出纯函数 `resolve_file_identity`**（放在 `backend/services/data_ingestion_service.py` 模块级）：
+
+```python
+def resolve_file_identity(file_record: Any) -> str:
+    """文件级店铺身份编号。
+
+    优先级：shop_account_id（永不变化，全平台 20/20 覆盖） > platform_shop_id > shop_id。
+    三者都拿不到时返回 ``"none"``（与既有 ``file_record.shop_id or "none"`` 语义一致）。
+    """
+    shop_account_id = getattr(file_record, "shop_account_id", None)
+    if shop_account_id:
+        return str(shop_account_id).strip()
+    platform_shop_id = getattr(file_record, "platform_shop_id", None)
+    if platform_shop_id:
+        return str(platform_shop_id).strip()
+    shop_id = getattr(file_record, "shop_id", None)
+    if shop_id:
+        return str(shop_id).strip()
+    return "none"
+```
+
+**4b. 在写 `catalog_files` 的位置回填。**
 
 在写 `catalog_files` 的位置，按以下优先级确定 `shop_account_id`：
 
@@ -1501,12 +1730,22 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TARGET = REPO_ROOT / "backend" / "services" / "data_ingestion_service.py"
 
 
-def test_hash_scope_uses_stable_identity_not_raw_shop_id():
-    """data_hash 作用域必须用稳定身份编号，不能用会随改名变化的 shop_id。"""
+def test_hash_scope_contains_stable_identity_keys():
+    """data_hash 作用域必须包含稳定身份编号。
+
+    注：``shop_id`` 键**保留**（它的取值现在是稳定 id 优先），因为当
+    ``shop_account_id`` 未知时仍需要靠它区分店铺；直接删掉会造成同平台多店撞 hash。
+    """
     text = TARGET.read_text(encoding="utf-8")
-    assert "shop_account_id" in text, "入库链路没有使用 shop_account_id 作为身份"
     hash_scope = text.split("hash_scope_values = {", 1)[1].split("}", 1)[0]
-    assert "file_shop_id" not in hash_scope, "data_hash 作用域仍在使用 file_shop_id"
+    assert "shop_account_id" in hash_scope, "hash 作用域缺少 shop_account_id"
+    assert "platform_shop_id" in hash_scope, "hash 作用域缺少 platform_shop_id"
+
+
+def test_ingestion_uses_resolve_file_identity():
+    """文件级身份必须走 resolve_file_identity（Task 9 抽出的纯函数）。"""
+    text = TARGET.read_text(encoding="utf-8")
+    assert "resolve_file_identity" in text, "入库没有使用 resolve_file_identity"
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -1527,12 +1766,7 @@ Expected: FAIL。
                 # file_shop_id 会随改名变化，用它做 data_hash 作用域会导致同一份数据重复入库。
                 file_shop_account_id = getattr(file_record, "shop_account_id", None) or None
                 file_platform_shop_id = getattr(file_record, "platform_shop_id", None) or None
-                file_shop_id = (
-                    file_shop_account_id
-                    or file_platform_shop_id
-                    or file_record.shop_id
-                    or "none"
-                )
+                file_shop_id = resolve_file_identity(file_record)
                 file_main_account_id = getattr(file_record, "main_account_id", None)
                 file_store_name = getattr(file_record, "store_name", None)
 ```
@@ -1613,42 +1847,72 @@ git commit -m "fix(入库): data_hash 口径改用稳定身份编号，避免改
 
 - [ ] **Step 1: 写失败测试**
 
-在 `backend/tests/test_shop_account_aliases_api.py` 末尾追加：
+新建 `backend/tests/test_shop_account_unmatched_alias_hint.py`：
 
 ```python
-def test_unmatched_alias_list_includes_occurrence_counts():
-    """未匹配别名清单必须带上出现次数，让运营知道这条数据有多大。"""
-    from backend.domains.collection.routers.shop_account_aliases import _UNMATCHED_ALIAS_QUERY
+from __future__ import annotations
 
-    sql = " ".join(_UNMATCHED_ALIAS_QUERY.split())
-    assert "count(" in sql.lower(), "未匹配别名查询缺少出现次数统计"
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_unmatched_alias_item_exposes_claim_hint():
+    """未匹配别名项必须给出认领提示。
+
+    业务决定：TK新加坡3C店 暂不认领，必须说清「现有 TikTok 店已被其它标签 1:1 占满，
+    需新建店账号才能认领」—— 否则运营看到 unknown 不知道下一步该做什么。
+    """
+    from backend.schemas.account import UnmatchedShopAliasItem
+
+    assert "claim_hint" in UnmatchedShopAliasItem.model_fields, "未匹配别名项缺少 claim_hint"
+
+
+def test_account_management_shows_unmatched_alias_row_count():
+    """前端必须展示未匹配别名的出现次数 row_count。
+
+    注：``order_count`` 已经在展示了，缺的是 ``row_count``（数据行数）。
+    """
+    vue = REPO_ROOT / "frontend" / "src" / "domains" / "platform" / "views" / "AccountManagement.vue"
+    text = vue.read_text(encoding="utf-8")
+    assert "row_count" in text, "前端未展示未匹配别名的 row_count"
 ```
+
+> **现状核实（已实测）**：`_UNMATCHED_ALIAS_QUERY`（`backend/domains/collection/routers/shop_account_aliases.py:81-83`、`:92-94`）
+> **已经**有 `COUNT(*) AS row_count` / `COUNT(DISTINCT order_id) AS order_count` / `SUM(paid_amount)`；
+> `backend/schemas/account.py` 的 `UnmatchedShopAliasItem` **已经**暴露 `row_count` / `order_count` / `paid_amount`；
+> `AccountManagement.vue:26-27` **已经**显示 `site` 与 `order_count`。
+> → **剩下真正缺的只有两件**：前端补 `row_count`、补「暂不认领 / 需新建店账号」的说明与候选提示。
+> 所以上面的测试只盯这两件（**不要**再断言"查询里要有 count"，那部分已经存在，断言它没有意义）。
 
 - [ ] **Step 2: 运行测试确认失败**
 
 ```bash
-python -m pytest backend/tests/test_shop_account_aliases_api.py -q -k "unmatched_alias_list"
+python -m pytest backend/tests/test_shop_account_unmatched_alias_hint.py -q
 ```
 
-Expected: FAIL。
+Expected: 2 个 FAIL（`claim_hint` 不存在、前端没有 `row_count`）。
 
-- [ ] **Step 3: 在未匹配别名查询里补出现次数与候选提示**
+- [ ] **Step 3: 后端补认领提示**
 
-在 `backend/domains/collection/routers/shop_account_aliases.py` 的 `_UNMATCHED_ALIAS_QUERY` 里补：
+- `backend/schemas/account.py` 的 `UnmatchedShopAliasItem` 增加 `claim_hint: str | None = None`；
+- `backend/domains/collection/routers/shop_account_aliases.py` 的未匹配别名返回处填上提示文案，例如
+  「该平台下 N 个店铺账号已被其它标签 1:1 占满，需新建店账号才能认领」。
 
-- 出现次数统计（按 `(店铺标签, 站点)` 从 raw 层计数）；
-- 候选提示（例如「该平台下 N 个店铺账号已被其它标签 1:1 占满，需新建店账号才能认领」）。
-
-> **实施者必须先确认**未匹配别名的来源表与字段。live 上 TikTok 订单的原始标签在 `b_class.fact_tiktok_orders_monthly.raw_data->>'店铺'`，站点在 `raw_data->>'站点'`（**不是**物化列 —— 物化列有 191 行 NULL）。
+> **实施者必须先确认**未匹配别名的来源表与字段。live 上 TikTok 订单的原始标签在
+> `b_class.fact_tiktok_orders_monthly.raw_data->>'店铺'`，站点在 `raw_data->>'站点'`
+> （**不是**物化列 —— 物化列有 191 行 NULL）。
 
 - [ ] **Step 4: 前端展示**
 
-在 `frontend/src/domains/platform/views/AccountManagement.vue` 的「未匹配店铺别名」告警面板里，加上：出现次数、站点、以及「暂不认领」的说明。样式沿用文件里已有的告警样式。
+在 `frontend/src/domains/platform/views/AccountManagement.vue` 的「未匹配店铺别名」告警面板里：
+- 补 `row_count`（数据行数）展示（`order_count` 已在展示）；
+- 展示后端返回的 `claim_hint` 认领提示。
 
 - [ ] **Step 5: 运行测试 + 构建**
 
 ```bash
-python -m pytest backend/tests/test_shop_account_aliases_api.py -q
+python -m pytest backend/tests/test_shop_account_unmatched_alias_hint.py backend/tests/test_shop_account_aliases_api.py -q
 cd frontend; npm run build
 ```
 
@@ -1657,11 +1921,118 @@ Expected: 测试 PASS；构建成功。
 - [ ] **Step 6: 提交**
 
 ```bash
-git add backend/domains/collection/routers/shop_account_aliases.py frontend/src/domains/platform/views/AccountManagement.vue backend/tests/test_shop_account_aliases_api.py
-git commit -m "feat(店铺身份): 未匹配别名清单带上出现次数与候选提示
+git add backend/schemas/account.py backend/domains/collection/routers/shop_account_aliases.py frontend/src/domains/platform/views/AccountManagement.vue backend/tests/test_shop_account_unmatched_alias_hint.py
+git commit -m "feat(店铺身份): 未匹配别名面板补出现次数与认领提示
 
 TK新加坡3C店 按业务决定暂不认领，保持 unknown 并在面板可见，
 说清「现有 TikTok 店已被其它标签 1:1 占满，需新建店账号才能认领」。"
+```
+
+---
+
+## Task 12: 采集优先使用人工保存的会话（打通 A4）
+
+**Files:**
+- Modify: `modules/apps/collection_center/executor_v2.py:896-1034`（`_open_runtime_bundle` 的会话短路条件，锚点 `:924`）
+- Modify: `modules/apps/collection_center/executor_v2.py:255-309`（executor 版 bootstrap）
+- Test: `backend/tests/test_collection_session_reuse_contract.py`（扩充）
+
+**背景（spec D6 / §2.7）**：`executor_v2.py:924` 的短路条件
+
+```
+if (not has_persistent_profile and effective_storage_state is None and session_owner_id):
+```
+
+意味着**profile 目录非空时，`data/sessions` 下的 storage_state 根本不读** → 人工巡店保存的会话，对已有 profile 的账号无效。
+
+**这是 spec 验收 A4 的唯一实现点，第一批不做它 A4 就不可达。**
+
+- [ ] **Step 1: 写失败测试**
+
+在 `backend/tests/test_collection_session_reuse_contract.py` 末尾追加：
+
+```python
+def test_manual_storage_state_wins_over_existing_profile():
+    """人工巡店保存的会话必须优先于持久 profile 目录被读取。"""
+    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
+
+    # profile 目录非空（has_persistent_profile=True）但人工会话存在 -> 必须读人工会话
+    assert CollectionExecutorV2._should_prefer_manual_storage_state(
+        has_persistent_profile=True,
+        has_manual_storage_state=True,
+    )
+    assert not CollectionExecutorV2._should_prefer_manual_storage_state(
+        has_persistent_profile=True,
+        has_manual_storage_state=False,
+    )
+```
+
+> **实施者必须先读** `executor_v2.py:896-1034` 里 `has_persistent_profile` / `effective_storage_state` / `session_owner_id`
+> 的真实来源，再决定把判定抽成静态方法还是内联条件。上面的静态方法名是**建议名**，
+> 若实际代码结构不同，可以换成等价形式 —— 但**必须有一个可单测的判定点**。
+
+- [ ] **Step 2: 运行测试确认失败**
+
+```bash
+python -m pytest backend/tests/test_collection_session_reuse_contract.py -q -k "manual_storage_state"
+```
+
+Expected: FAIL（该判定点还不存在）。
+
+- [ ] **Step 3: 实现**
+
+在 `executor_v2.py` 的 `CollectionExecutorV2` 上新增静态方法：
+
+```python
+    @staticmethod
+    def _should_prefer_manual_storage_state(
+        *,
+        has_persistent_profile: bool,
+        has_manual_storage_state: bool,
+    ) -> bool:
+        """人工巡店保存的会话优先于持久 profile 目录（spec D6）。
+
+        现状是「profile 目录非空就不读 data/sessions」，导致运营在面板里保存的会话
+        对已有 profile 的账号完全无效。
+        """
+        return bool(has_manual_storage_state)
+```
+
+并把 `:924` 附近的短路条件改成：先探测 `data/sessions/<platform>/<owner>/storage_state.json`
+（**用 SessionManager 的路径规则**，即 `_safe_filename` 净化后的目录名）是否存在，
+存在则优先用它；profile 目录只作为没有人工会话时的兜底。
+
+> **实施者必须核对**：
+> - 探测用的路径规则必须与 `SessionManager.get_session_path` 一致（净化名），否则读不到（见第一批 Task 1）；
+> - `runtime_session.py:458-462` 的 `_profile_contains_state` 只是「目录非空」判断，**不是**真会话检测 ——
+>   profile 目录里的 Chromium 缓存文件也会让它返回 True。人工会话的探测必须走 `SessionManager`。
+
+- [ ] **Step 4: 运行测试确认通过**
+
+```bash
+python -m pytest backend/tests/test_collection_session_reuse_contract.py backend/tests/test_collection_runtime_session.py backend/tests/test_collection_executor_session_alignment.py -q
+```
+
+Expected: 全部 PASS。
+
+- [ ] **Step 5: 端到端核对**
+
+人工巡店保存一次会话后触发一次采集，确认采集用的是 `data/sessions/.../storage_state.json`：
+
+```bash
+Get-ChildItem data/sessions -Recurse -Filter storage_state.json | Select-Object FullName, LastWriteTime
+```
+
+Expected: 该账号的 `storage_state.json` mtime 是刚才保存的时间；采集日志里能看到读取该文件的记录。
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add modules/apps/collection_center/executor_v2.py backend/tests/test_collection_session_reuse_contract.py
+git commit -m "fix(采集): 人工巡店保存的会话优先于持久 profile 目录被读取
+
+现状 executor_v2 的短路条件是「profile 目录非空就不读 data/sessions」，
+导致运营在巡店面板保存的会话对已有 profile 的账号完全无效（spec D6 / A4）。"
 ```
 
 ---
@@ -1671,10 +2042,10 @@ TK新加坡3C店 按业务决定暂不认领，保持 unknown 并在面板可见
 - [ ] **Step 1: 跑全量相关测试**
 
 ```bash
-python -m pytest backend/tests/test_session_storage_roots.py backend/tests/test_collection_session_reuse_contract.py backend/tests/test_pwcli_native_session_alignment.py backend/tests/test_session_manager_protection.py backend/tests/test_shop_account_aliases_api.py backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_alias_sql_assets.py backend/tests/test_alias_normalization_consistency.py backend/tests/test_semantic_ambiguous_identity_sql.py backend/tests/test_shop_identity_schema_migration.py backend/tests/test_catalog_file_identity_backfill.py backend/tests/test_data_ingestion_hash_identity.py backend/tests/test_pwcli_helpers_session_targeting.py backend/tests/test_pwcli_inspection_panel_reporting.py backend/tests/test_pwcli_native_sys_path_bootstrap.py -q
+python -m pytest backend/tests/test_session_storage_roots.py backend/tests/test_collection_session_reuse_contract.py backend/tests/test_pwcli_native_session_alignment.py backend/tests/test_session_manager_protection.py backend/tests/test_shop_account_aliases_api.py backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_alias_sql_assets.py backend/tests/test_alias_normalization_consistency.py backend/tests/test_semantic_ambiguous_identity_sql.py backend/tests/test_shop_identity_schema_migration.py backend/tests/test_catalog_file_identity_backfill.py backend/tests/test_data_ingestion_hash_identity.py backend/tests/test_pwcli_helpers_session_targeting.py backend/tests/test_pwcli_inspection_panel_reporting.py backend/tests/test_pwcli_native_sys_path_bootstrap.py backend/tests/test_shop_account_unmatched_alias_hint.py -q
 ```
 
-Expected: 全部 PASS，且**不少于 Task 0 Step 2 的基线通过数**。
+Expected: 全部 PASS，且**不少于 Task 0 Step 2 的基线通过数**（基线 = 41 passed）。
 
 - [ ] **Step 2: 核对 spec 第一批验收项**
 

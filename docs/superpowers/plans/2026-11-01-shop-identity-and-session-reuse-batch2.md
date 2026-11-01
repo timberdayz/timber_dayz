@@ -23,8 +23,9 @@
 | D9 slug 保留中文 / session 名可区分 | Task 12 | B1 B2 |
 | D7 会话新鲜度以 `saved_at` 为准 | Task 13 | A11 |
 | D8 TikTok 持久 profile 也落 storage_state | Task 14 | A12 |
-| §4.1 内部标准名 + D10 | Task 15 | B4 |
-| D15 曾用名 / D16 别名应用级约束 / D17 改名联动 | Task 16 | A13 B3 B5 |
+| §4.1 内部标准名 + D10a | Task 15 | B4 |
+| D15 曾用名 / D16 别名唯一性预检 / D17 改名联动 | Task 16 | A13 B3 B5 |
+| **D10b 区域感知匹配** | Task 17 | B5 |
 
 ### 0.2 明确不在本计划范围
 
@@ -159,6 +160,14 @@ def command_open(session: str, args: list[str]) -> int:
 ```
 
 > **实施者必须核对**：`session` 参数的来源。面板走 `Open-PwcliPlatform -WorkTag <work_tag>` → session = `"$platformName-$WorkTag"`，而 work_tag 已按账号唯一。**若发现 session 名在某些调用路径上仍是平台级**（如 `Open-PwcliPlatform` 不带 `-WorkTag` 时默认 `explore`），必须同步在 `Open-PwcliPlatform` 里把 work_tag 拼上账号，否则两个账号仍会共用 `shopee-explore`。这一条是本 Task 的**必查项**。
+>
+> **必查项必须覆盖 open 与 save 两条路径**：
+> - **open** 路径：`scripts/pwcli_inspection_panel.py:122-123` 与 `scripts/pwcli_helpers.ps1:451-457` —— 现状**已**带 `-WorkTag`。
+> - **save** 路径：`scripts/pwcli_inspection_panel.py:129-134` 与 `scripts/pwcli_helpers.ps1:479-485` —— **第一批 Task 2 的 Step 5b 已经补上 `-WorkTag`**（若第一批已完成，这里只需回归确认）。
+>   漏了 save 路径 → 人工会话保存仍然落回 session `"default"` → A12、B1 的业务前提不成立。
+>
+> **核对命令**：`grep -n "WorkTag" scripts/pwcli_inspection_panel.py scripts/pwcli_helpers.ps1`
+> → 必须同时看到 open 分支与 save 分支都带 `-WorkTag`。
 
 - [ ] **Step 5: 运行测试确认通过**
 
@@ -168,13 +177,29 @@ python -m pytest backend/tests/test_pwcli_session_naming.py backend/tests/test_p
 
 Expected: 全部 PASS。
 
-- [ ] **Step 6: 核对磁盘上没有因旧 slug 产生的冲突目录**
+- [ ] **Step 6: 核对磁盘上没有因旧 slug 产生的冲突痕迹**
+
+**slug 塌缩真正落在 session 名与工作目录上，不在 profile 目录。**
 
 ```bash
-Get-ChildItem output/playwright/profiles -Recurse -Directory | Where-Object { $_.Name -eq "account" } | Select-Object FullName
+# 1) 会话目录（session 名）
+Get-ChildItem output/playwright/.pwcli_native/sessions -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like '*account*' } | Select-Object FullName
+
+# 2) 工作目录（work tag）
+Get-ChildItem output/playwright/work -Recurse -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like '*account*' } | Select-Object FullName
 ```
 
-Expected: 列出历史遗留的 `account` 目录（**不要在本 Task 删**，清理属 spec §10 的独立任务）。记录下来交业务确认。
+Expected:
+- **「目录不存在」也是合法结论** —— 当前工作区可能根本没有 `output/playwright`（该目录按需生成，通常不入库）。
+  → 在提交说明里如实写「当前工作区无历史遗留」即可，**不要**为了让命令有输出而去造目录。
+- 若存在 `*-account-inspect` 之类的目录 → 说明历史上有账号塌成了同一个 slug，记录下来交业务确认
+  （**不要在本 Task 删**，清理属 spec §10 的独立任务）。
+
+> **⚠ 别去 `profiles/` 找**：按账号的 profile 目录在 `<repo>/profiles/<platform>/<safe_token>`，
+> 而 `session_manager_safe_token`（`modules/utils/pwcli_native.py:136-139`）用的是 `str.isalnum()` ——
+> **中文会被保留**（实测 `profiles/妙手erp` 存在）→ 那里**不会出现**名为 `account` 的目录。
 
 - [ ] **Step 7: 提交**
 
@@ -207,7 +232,7 @@ git commit -m "fix(巡店): slugify 保留非 ASCII 身份，一账号一巡店�
 在 `backend/tests/test_session_manager_protection.py` 末尾追加：
 
 ```python
-def test_freshness_uses_saved_at_only(tmp_path):
+def test_freshness_uses_saved_at_only():
     """新鲜度必须以 saved_at 为准，last_used_at 不得参与。"""
     from modules.utils.sessions.session_manager import _session_freshness_timestamp
 
@@ -219,40 +244,77 @@ def test_freshness_uses_saved_at_only(tmp_path):
     assert _session_freshness_timestamp(session) == 1000.0
 
 
-def test_freshness_falls_back_to_created_at(tmp_path):
+def test_freshness_falls_back_to_created_at():
+    """saved_at 缺失时才回退 created_at（护栏：修复后仍须成立）。"""
     from modules.utils.sessions.session_manager import _session_freshness_timestamp
 
     session = {"metadata": {}, "created_at": 500.0}
     assert _session_freshness_timestamp(session) == 500.0
 
 
-def test_load_session_does_not_refresh_saved_at(tmp_path):
-    """读一次会话不得刷新 saved_at。"""
+def test_protected_session_keeps_saved_at_when_overwritten(tmp_path):
+    """protected 人工会话被自动 state 覆盖时，saved_at 不得被刷新（spec D7）。"""
     import json
     import time
 
     from modules.utils.sessions.session_manager import SessionManager
 
     manager = SessionManager(base_path=tmp_path / "data" / "sessions")
-    manager.save_session("shopee", "acct", {"cookies": [], "origins": []})
+    manager.save_session(
+        "shopee",
+        "acct",
+        {"cookies": [{"name": "sid", "value": "v"}], "origins": []},
+        metadata={"manual_seeded": True, "protected": True},
+    )
     path = manager.get_session_path("shopee", "acct")
-    first = json.loads(path.read_text(encoding="utf-8"))
-    saved_at = first["metadata"]["saved_at"]
+    saved_at = json.loads(path.read_text(encoding="utf-8"))["metadata"]["saved_at"]
 
     time.sleep(0.05)
-    manager.load_session("shopee", "acct")
+    # 自动来源、质量更低的 state 覆盖 -> 保留旧 state，且 saved_at 不得刷新
+    manager.save_session("shopee", "acct", {"cookies": [], "origins": []})
 
-    second = json.loads(path.read_text(encoding="utf-8"))
-    assert second["metadata"]["saved_at"] == saved_at
+    after = json.loads(path.read_text(encoding="utf-8"))
+    assert after["metadata"]["saved_at"] == saved_at, "protected 会话的 saved_at 被自动回写刷新了"
+
+
+def test_expired_session_is_rejected_even_when_recently_read(tmp_path):
+    """saved_at 过期时，即使 last_used_at 是现在，也必须判为过期。"""
+    import json
+    import time
+
+    from modules.utils.sessions.session_manager import SessionManager
+
+    manager = SessionManager(base_path=tmp_path / "data" / "sessions")
+    manager.save_session(
+        "shopee",
+        "acct",
+        {"cookies": [{"name": "sid", "value": "v"}], "origins": []},
+    )
+    path = manager.get_session_path("shopee", "acct")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["metadata"]["saved_at"] = time.time() - 40 * 86400
+    payload["last_used_at"] = time.time()
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    assert manager.load_session("shopee", "acct", max_age_days=30) is None
 ```
+
+> **关于「Expected: FAIL」的准确说法**（实测）：
+> - `test_freshness_uses_saved_at_only` → **今天 FAIL**（现状取 max，含 `last_used_at`）✅
+> - `test_expired_session_is_rejected_even_when_recently_read` → **今天 FAIL**（现状 `last_used_at` 兜住了过期判定）✅
+> - `test_protected_session_keeps_saved_at_when_overwritten` → **今天 FAIL**（现状 `save_session` 无条件刷新 `saved_at`）✅
+> - `test_freshness_falls_back_to_created_at` → **今天 PASS**（护栏用例，修复后仍须成立）
+>
+> 原来那条 `test_load_session_does_not_refresh_saved_at` **今天就 PASS**（`load_session` 只改 `last_used_at`，
+> 从不碰 `metadata.saved_at`），守不住任何东西 → **已删除**，换成上面两条真正能区分新旧行为的用例。
 
 - [ ] **Step 2: 运行测试确认失败**
 
 ```bash
-python -m pytest backend/tests/test_session_manager_protection.py -q -k "freshness or saved_at"
+python -m pytest backend/tests/test_session_manager_protection.py -q -k "freshness or saved_at or expired"
 ```
 
-Expected: 至少 2 个 FAIL。
+Expected: **3 FAIL + 1 PASS**（`test_freshness_falls_back_to_created_at` 是护栏，本就 PASS）。
 
 - [ ] **Step 3: 改 `_session_freshness_timestamp`**
 
@@ -320,12 +382,12 @@ def _session_freshness_timestamp(session_data: Optional[Dict[str, Any]]) -> floa
                 _write_json_atomic(session_file, session_data)
 ```
 
-> **注意**：这会让**每次读取都写文件**（因为 last_used_at 一定变）。若 `last_used_at` 的刷新本身不需要落盘，直接**删掉整段回写**：
-> ```python
->             # 读取不改写磁盘：saved_at 与 last_used_at 都不因读取而变化（见 spec D7）
->             pass
-> ```
-> 二选一，取决于 `last_used_at` 是否被别处依赖。**实施者必须先 grep `last_used_at` 的所有使用点再决定**，并在提交说明里写明。
+> **注意**：两个候选实现都不改 `saved_at` → 上面的测试无法区分；而 `last_used_at` 确实被
+> `session_manager.py:668-686`（`get_session_info` → `last_used_date` 展示）消费。
+> **默认选「保留回写」**（只把 `last_used_at` 刷新，不动 `saved_at`）——
+> 这样既满足 D7，又保留「最近一次使用时间」的展示语义。
+> 若实施者改选「删掉整段回写」，**必须在提交说明里写明 `last_used_date` 展示语义的变化**，并同步
+> `backend/tests/test_session_manager_protection.py` 里依赖 `last_used_at` 的断言。
 
 - [ ] **Step 6: 运行测试确认通过**
 
@@ -400,7 +462,26 @@ def test_non_tiktok_platform_is_never_skipped():
         platform="shopee",
         params=params,
     )
+
+
+def test_executor_does_not_duplicate_profile_bootstrap():
+    """executor 侧不得再保留一份没有 TikTok 质量门禁的 profile bootstrap。
+
+    现状：``runtime_session._bootstrap_session_from_profile_sync`` 有门禁，
+    ``executor_v2`` 里又抄了一份没有门禁的 → 低质量 state 会被提升为正式会话。
+    修法是复用 runtime_session 的实现，不是再抄第三份。
+    """
+    text = (
+        REPO_ROOT / "modules" / "apps" / "collection_center" / "executor_v2.py"
+    ).read_text(encoding="utf-8")
+    assert "def _bootstrap_session_from_profile_sync" not in text, (
+        "executor 侧仍有一份自己的 _bootstrap_session_from_profile_sync（缺 TikTok 质量门禁），"
+        "应改为复用 runtime_session 的实现"
+    )
 ```
+
+> **A12 后半句「不会覆盖人工保存的 protected 会话」**已由 `backend/tests/test_session_manager_protection.py`
+> 现有用例覆盖（`save_session` 的 `old_protected` 保护逻辑），本 Task 不重复造用例。
 
 > **真实签名（已核验 `executor_v2.py:2805-2822`）**：`_should_skip_post_login_session_persist` 是 `CollectionExecutorV2` 上的 `@staticmethod`，签名为 `(*, platform: str, params: Dict[str, Any]) -> bool`。`runtime_mode` 由 `params["_runtime_session_mode"]` 或 `params["params"]["_runtime_session_mode"]` 推导，**不是独立入参**。两个调用点在 `executor_v2.py:1291` 与 `:3158`，都只传 `platform` 与 `params`。
 
@@ -416,17 +497,25 @@ Expected: `test_manual_seeded_session_is_not_skipped_for_tiktok` FAIL。
 
 **3a. 把会话元数据带进 `params`。**
 
-`modules/apps/collection_center/runtime_session.py:507-514` 的 `RuntimeSessionCandidate` 已经带了 `metadata` 与 `manual_seeded` 属性（`manual_seeded` = `metadata.manual_seeded or metadata.protected`）—— **这是现成的判据，不要另造**。
+**好消息：`session_metadata` 其实已经有了，只是没进 `params`。**
 
-实施者必须做的三件事：
+- `executor_v2.py:1031`：`setattr(bundle, "session_metadata", dict(session_candidate.metadata or {}))` —— **RuntimeBundle 的 session_metadata 已经被填好了**（`session_candidate` 来自 `runtime_session.load_runtime_session_candidate`）。
+- `executor_v2.py:1083-1095`：`session_metadata = getattr(runtime_bundle, "session_metadata", None)`，为空时回退 `SessionManager().get_session_metadata(...)`。
+- `executor_v2.py:1122-1126`：runtime bundle 摘要里已经有 `session_manual_seeded` / `session_protected`。
 
-1. 在 `executor_v2.py:505-522`（`_open_runtime_bundle` 里装载 `session_data` 的位置）把 `session_data.get("metadata")` 取出来。
-2. 在构造 `params` 之后（`executor_v2.py:583` 附近，以及同样写 `params["reused_session"]` 的 `:591`、`:1997`、`:2103`、`:5834`、`:6161` 各处）写入：
-   ```python
-   params["session_metadata"] = session_metadata or {}
-   ```
-   > **实施者必须先 `grep -n "_runtime_session_mode" modules/apps/collection_center/executor_v2.py`**，找出 `session_metadata` 必须在哪些点与 `_runtime_session_mode` 一起写入 —— 漏一个点，那个分支就拿不到人工标记。
-3. `runtime_bundle` 里若已有 `session_metadata` 字段（`runtime_session.py:492` 的 dataclass 已有 `session_metadata: Dict[str, Any]`），直接透传，不要新建字段。
+→ 所以**不需要**改任何取数逻辑，只要在构造 `params` 之后补一行：
+
+```python
+params["session_metadata"] = getattr(runtime_bundle, "session_metadata", None) or {}
+```
+
+写入点（**实测 `params["reused_session"]` 只出现在 `executor_v2.py:591`**；`_runtime_session_mode` 的写入点是 `:1998` / `:2104` / `:5835`）：
+- `:591`（`_open_runtime_bundle` 里，`params` 已由 `_build_runtime_task_params` 在 `:583` 构造完）
+- `:1998` / `:2104`（两处 `params["main_account_id"] = session_owner_id` 附近）
+- `:5835`（`params["main_account_id"] = session_owner_id` 之后）
+
+> **实施者必须先 `grep -n "_runtime_session_mode" modules/apps/collection_center/executor_v2.py`** 复核一遍 —— 漏一个点，那个分支就拿不到人工标记。
+> 如果 `params` 是在没有 `runtime_bundle` 的分支构造的，就退化成 `{}`（等价于"不是人工会话"）。
 
 **3b. 改判定逻辑（签名不变，两个调用点不用改）。**
 
@@ -470,16 +559,40 @@ Expected: `test_manual_seeded_session_is_not_skipped_for_tiktok` FAIL。
 
 > **签名刻意保持 `(*, platform, params)`**：现有两个调用点（`executor_v2.py:1291` 与 `:3158`）不需要改动，减少回归面。
 
-- [ ] **Step 4: 补 executor 版 bootstrap 的 TikTok 质量门禁**
+- [ ] **Step 4: executor 侧的 bootstrap 复用 runtime_session 的实现（补上 TikTok 质量门禁）**
 
-复用现成符号，**不要复制实现**：
+**现状核实**：`executor_v2.py:250-309` 有**一份自己的** `_bootstrap_session_from_profile_sync`，
+它从持久 profile 读出 storage_state 就直接 `save_session` —— **没有 TikTok 质量门禁**。
 
-- `modules/apps/collection_center/runtime_session.py:104` `tiktok_storage_state_meets_quality_gate(storage_state) -> bool`
-- `modules/apps/collection_center/runtime_session.py:74` `tiktok_storage_state_quality_score(storage_state) -> int`
+而 `modules/apps/collection_center/runtime_session.py:258-312` 的同名函数**有**门禁：
 
-在 `executor_v2.py:255-309` 的 executor 版 bootstrap 路径里：加载 storage_state 之后，若平台是 TikTok 且 `tiktok_storage_state_meets_quality_gate(...)` 为 False，则**视为「无会话」**，走重新登录。
+```python
+    if str(platform or "").strip().lower() == "tiktok":
+        if not tiktok_storage_state_meets_quality_gate(storage_state):
+            logger.warning(
+                "Skip promoting bootstrapped TikTok storage_state without seller-quality session (score=%s) for %s/%s",
+                tiktok_storage_state_quality_score(storage_state),
+                platform,
+                account_id,
+            )
+            return {"storage_state": storage_state}
+```
 
-> 现状核实：`executor_v2.py:255-309` 的 executor 版 bootstrap **没有**引用上述两个函数（只有 `runtime_session.py` 侧有）。实施者要 import 上面的现成函数，不要把质量评分逻辑再写一遍。
+→ 这就是「executor 版 bootstrap 缺 TikTok 质量门禁」的真正成因：**两份重复实现，runtime 那份有门禁，executor 那份没有。**
+
+**修法（优先 DRY，不要再抄第三份）**：
+
+1. 删掉 `executor_v2.py:250-309` 的重复实现，改为直接调用 `runtime_session._bootstrap_session_from_profile_sync`
+   （`executor_v2.py:312-335` 的 `_load_or_bootstrap_session_async` 里已经在用 `runtime_session._bootstrap_session_from_profile_sync`，
+   把这条路径统一即可）。
+2. 如果因为依赖方向不能直接删（`executor_v2` 顶层 import `runtime_session` 造成循环），就改成
+   `from modules.apps.collection_center import runtime_session` 的**函数内延迟 import**，与 `executor_v2.py:2831` 的既有写法一致。
+3. **无论走哪条路，都必须保证 TikTok 分支经过 `tiktok_storage_state_meets_quality_gate`**，
+   低质量 state **不得**被 `save_session` 提升为正式会话。
+
+> **不要**把门禁逻辑再抄一遍到 executor 侧 —— 那正是当前问题的成因。
+> 现成符号：`runtime_session.tiktok_storage_state_meets_quality_gate`（`:104`）、`runtime_session.tiktok_storage_state_quality_score`（`:74`）。
+> （`executor_v2.py:1472-1493` 的 `_wait_and_capture_high_quality_tiktok_session` 已经在用这两个符号，属于**另一条**路径 —— 登录后的捕获，不在本 Step 范围。）
 
 - [ ] **Step 5: 运行测试确认通过**
 
@@ -505,9 +618,11 @@ git commit -m "fix(采集): 人工保存的会话在 TikTok 持久 profile 模�
 
 **Files:**
 - Create: `backend/services/shop_internal_code_service.py`（新增：建议值生成 + 回填）
+- Create: `backend/services/shop_rename_service.py`（新增：改名联动 + `core.dim_shops` 展示名同步）
 - Modify: `backend/domains/collection/routers/shop_accounts.py:121-154`（序列化）、`:363-405`（更新）
-- Modify: `backend/schemas/`（Pydantic 契约）
-- Modify: `frontend/src/domains/platform/views/AccountManagement.vue:428-445`（编辑表单）
+- Modify: `backend/schemas/shop_account.py`（`ShopAccountUpdate` / `ShopAccountResponse` 加 `internal_code`）
+- Modify: `frontend/src/domains/platform/views/AccountManagement.vue:337-355`（表格列）、`:428-445`（编辑表单）、`:740-764`（`accountForm`）、`:1097-1104`（提交载荷）
+- Modify: `frontend/src/stores/accounts.js:38-65`（**`buildShopAccountUpdatePayload` 的字段白名单** —— 不改这里，前端填的内部标准名会被静默丢弃）
 - Test: `backend/tests/test_shop_internal_code.py`（新建）
 
 **业务约定（spec §11.1 第 2 条）**：内部标准名 = `FIORO_SG` / `FIORO_MY` / `FIORO_PH` 形式，**同平台同区域多主账号冲突时**才追加主账号短标识（`FIORO_MY_T1`）。标准名**不参与数据匹配**。
@@ -698,20 +813,41 @@ Expected: 每个平台的 `distinct_codes == total`（同平台内唯一）。
 
 - [ ] **Step 6: 后端 API 暴露建议值**
 
-在 `backend/domains/collection/routers/shop_accounts.py`：
+`backend/schemas/shop_account.py`（**Pydantic 契约放这里，不要写在 router 里**）：
 
-- `_serialize_shop_account`（:121-154）里加上 `internal_code` 与 `suggested_internal_code`；
+- `ShopAccountUpdate` 增加 `internal_code: Optional[str] = None`；
+- `ShopAccountResponse` 增加 `internal_code: Optional[str]` 与 `suggested_internal_code: Optional[str]`。
+
+`backend/domains/collection/routers/shop_accounts.py`：
+
+- `_serialize_shop_account`（:121-154）里带上 `internal_code` 与 `suggested_internal_code`（后者由 `shop_internal_code_service.suggest_internal_code` 实时算，不落库）；
 - `update_shop_account`（:363-405）接受 `internal_code`，做**同平台唯一性校验**，冲突返回 409 并给出冲突详情（哪个店占用了这个名字）。
 
-Pydantic 契约放 `backend/schemas/`，不要写在 router 里。
+> 读方向本来就通：`frontend/src/stores/accounts.js:8` 的 `normalizeShopAccount` 用 `...shopAccount` 展开，
+> 后端返回即带出。**写方向才缺一环**，见 Step 7。
 
-- [ ] **Step 7: 前端编辑入口**
+- [ ] **Step 7: 前端编辑入口（含 payload 白名单）**
 
-在 `frontend/src/domains/platform/views/AccountManagement.vue`：
+**7a. 改 payload 构建器（不做这一步，表单里填的内部标准名会被静默丢弃）。**
+
+`frontend/src/stores/accounts.js:38-65` 的 `buildShopAccountUpdatePayload` 用的是固定字段白名单：
+
+```js
+const fields = ['store_name','shop_region','shop_type','business_role','capabilities','enabled','notes']
+```
+
+`internal_code` 不在里面 → **前端填了也传不出去**。必须把它加进白名单。
+
+**7b. 改页面。** 在 `frontend/src/domains/platform/views/AccountManagement.vue`：
 
 - 表格列（:337-355）加一列「内部标准名」，展示 `internal_code`，为空时显示建议值的灰色提示；
 - 编辑表单（:428-445）加一行「内部标准名」，输入框带建议值 placeholder，用户可改；
+- `accountForm`（:740-764）加上 `internal_code` 初始值；
+- 提交载荷（:1097-1104）是 `{ ...accountForm }` 整表提交 —— **确认 `internal_code` 在 `accountForm` 里**，否则会被整表覆盖掉；
 - 同平台重名时展示后端返回的冲突详情。
+
+> **必须验证**：`buildShopAccountUpdatePayload` 的白名单改完后，`AccountManagement.vue` 提交时
+> `internal_code` 确实出现在请求体里。**这是 B4 能否落地的唯一卡点** —— 只改页面不改 store 不会生效。
 
 - [ ] **Step 8: 测试 + 构建**
 
@@ -725,12 +861,13 @@ Expected: 测试 PASS；构建成功。
 - [ ] **Step 9: 提交**
 
 ```bash
-git add backend/services/shop_internal_code_service.py backend/domains/collection/routers/shop_accounts.py backend/schemas/ frontend/src/domains/platform/views/AccountManagement.vue backend/tests/test_shop_internal_code.py
+git add backend/services/shop_internal_code_service.py backend/domains/collection/routers/shop_accounts.py backend/schemas/shop_account.py frontend/src/domains/platform/views/AccountManagement.vue frontend/src/stores/accounts.js backend/tests/test_shop_internal_code.py
 git commit -m "feat(店铺身份): 新增内部标准名 internal_code 及账号管理页编辑入口
 
 - 建议值规则：店铺名去掉已知地区后缀 -> 大写化 -> 非字母数字转 _ -> 拼 _ + 区域
 - 同平台同区域多主账号冲突时追加主账号短标识（FIORO_MY_T1）
 - 标准名只供人读，不参与数据匹配
+- 前端 payload 白名单同步加入 internal_code，否则表单填了也传不出去
 - 存量 52 个店铺账号回填 internal_code，同平台内保证唯一"
 ```
 
@@ -775,16 +912,32 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ROUTER = REPO_ROOT / "backend" / "domains" / "collection" / "routers" / "shop_accounts.py"
+SERVICE = REPO_ROOT / "backend" / "services" / "shop_rename_service.py"
 
 
-def test_update_shop_account_has_rename_linking():
-    """改名必须走联动流程，不能是裸 setattr。"""
-    text = ROUTER.read_text(encoding="utf-8")
-    body = text.split("async def update_shop_account", 1)[1].split("\nasync def ", 1)[0]
-    assert "former_name" in body, "改名流程没有写曾用名"
-    assert "is_primary" in body, "改名流程没有处理主别名接管"
-    assert "dim_shops" in body, "改名流程没有同步 core.dim_shops 的展示名"
-    assert "setattr" not in body, "update_shop_account 仍是裸 setattr"
+def test_rename_flow_is_wired():
+    """改名必须走联动服务，且不得破坏现有的字段赋值与唯一性校验。
+
+    注意：断言必须**跨文件**看「调用了具名服务 + 服务里做了什么」，
+    不能在 ``update_shop_account`` 函数体内找字符串 —— 联动逻辑放在独立服务里，
+    在函数体内找 ``former_name`` / ``dim_shops`` 永远找不到。
+    """
+    body = ROUTER.read_text(encoding="utf-8").split("async def update_shop_account", 1)[1].split("\nasync def ", 1)[0]
+
+    # 1) 改名分支必须调用具名的联动服务
+    assert "_apply_store_name_rename" in body, "update_shop_account 没有调用改名联动"
+
+    # 2) 现有的通用赋值与 platform_shop_id 唯一性校验必须保留
+    #    （前端每次编辑提交整个表单，改名分支若用 if/else 会把其它字段全丢掉）
+    assert "setattr(record, field, value)" in body, "改名把原有的字段赋值分支弄丢了"
+    assert "_assert_platform_shop_id_unique" in body, "改名把 platform_shop_id 唯一性校验弄丢了"
+
+    # 3) 联动服务里必须有曾用名、主别名接管、dim_shops 同步
+    assert SERVICE.exists(), "缺少改名联动服务 backend/services/shop_rename_service.py"
+    service = SERVICE.read_text(encoding="utf-8")
+    assert "former_name" in service, "改名联动没有写曾用名"
+    assert "is_primary" in service, "改名联动没有处理主别名接管"
+    assert "dim_shops" in service, "改名联动没有同步 core.dim_shops 展示名"
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -804,17 +957,15 @@ async def _apply_store_name_rename(
     db: AsyncSession,
     shop_account: ShopAccount,
     new_store_name: str,
-    *,
-    operator: Optional[str] = None,
 ) -> None:
     """执行一次改名联动（spec D17）。
 
     顺序固定：
       1. 旧名转曾用名（别名表 is_active=true, is_primary=false）
       2. 新名写入别名表并接管 is_primary
-      3. 同步 core.platform_accounts.store_name
-      4. 同步 internal_code（若随之改动）
-      5. 入刷新队列
+      3. 同步 core.dim_shops.shop_name（展示用的维度表，店铺粒度）
+      4. 落库 core.shop_accounts.store_name
+      5. 入刷新队列（一次）
     """
     platform = (shop_account.platform or "").strip().lower()
     old_store_name = (shop_account.store_name or "").strip()
@@ -849,11 +1000,21 @@ async def _apply_store_name_rename(
     shop_account.store_name = new_store_name
 
     # 5) 刷新队列（一次）
-    await _enqueue_shop_identity_refresh(changed_fields=["store_name", "alias"])
+    await _enqueue_shop_identity_refresh(
+        db,
+        shop_account=shop_account,
+        changed_fields=["store_name", "alias"],
+    )
 ```
 
-> `_sync_dim_shop_name` 需要新建：更新 `core.dim_shops` 中 `platform_code = platform AND shop_id = shop_account.shop_account_id` 的 `shop_name`（找不到对应行时**不新建**，只记日志）。
-> `_enqueue_shop_identity_refresh` 的真实签名是 `(db, shop_account=..., changed_fields=[...])`（`backend/domains/collection/routers/shop_accounts.py:400-404`），**不是**模块级裸函数 —— 实施者必须按真实签名调用。
+> **同步目标说明**：第 3 步同步的是 **`core.dim_shops.shop_name`**（`platform_code = platform AND shop_id = shop_account_id`），
+> **不是** `core.platform_accounts` —— 后者是主账号粒度的旧表（11 行，`store_name` = 主账号名），改店铺名不该动它。
+> `_sync_dim_shop_name` 需要新建：找不到对应行时**不新建**，只记日志。
+>
+> **`_enqueue_shop_identity_refresh` 的真实签名**是 `(db, *, shop_account, changed_fields)`（`backend/domains/collection/routers/shop_accounts.py:209-213`），
+> **必须**传 `db` 与 `shop_account=` —— 漏了会 TypeError。
+>
+> **`operator` 参数不存在**：现状 `update_shop_account` 写死 `record.updated_by = "system"`，改名沿用即可，不要另造参数。
 
 要求：
 - `_upsert_shop_alias` 必须处理「该别名已存在且属于别的店」的情况 → 冲突则报 409，**不静默覆盖**；
@@ -899,30 +1060,56 @@ async def update_shop_account(
 | **`_enqueue_shop_identity_refresh` 已经接上了** | `:400-404` 已调用，且 `_SHOP_IDENTITY_FIELDS`（`:42-47`）已包含 `store_name` → **改名本来就会触发一次刷新**。本 Task **不需要**新增刷新调用，只需保证改名走联动流程时 `changed_fields` 里带上 `store_name` |
 | 刷新的目标是 `_SHOP_IDENTITY_REFRESH_TARGETS`（`:38-41`）= `semantic.fact_orders_monthly_atomic_mv` + `semantic.fact_analytics_monthly_atomic_mv` | 改 `fact_orders_atomic` 视图不在该列表里 —— 见下面的补充说明 |
 
-改法：
+改法（**先全量赋值，再对 store_name 走联动** —— 不要用 if/else 二选一）：
 
 ```python
-    if "store_name" in update_data and update_data["store_name"] != record.store_name:
-        # 同主账号下 store_name 唯一
+    original_store_name = record.store_name
+
+    # 1) 先按现有逻辑全量赋值（保留 platform_shop_id 唯一性校验与 capabilities 处理）
+    for field, value in update_data.items():
+        setattr(record, field, value)
+
+    # 2) 再对 store_name 走改名联动
+    #    注意：前端每次编辑提交整个表单（store_name 恒存在），
+    #    若把改名做成 if/else，else 分支永远不走 -> 其它字段全部不落库。
+    if "store_name" in update_data and update_data["store_name"] != original_store_name:
         await _assert_store_name_unique_in_main_account(
             db, record.main_account_id, update_data["store_name"], exclude_id=record.id
         )
         await _apply_store_name_rename(db, record, update_data["store_name"])
-    else:
-        for field, value in update_data.items():
-            setattr(record, field, value)
 ```
+
+> **⚠ 为什么不能写成 if/else**：前端 `frontend/src/domains/platform/views/AccountManagement.vue:1097-1104`
+> 提交的是 `{ ...accountForm }` 整表，而 `accountForm` 恒含 `store_name`。
+> → `if "store_name" in update_data and ... != 原值` 一旦成立，`else` 分支被跳过，
+> `shop_region / shop_type / business_role / capabilities / enabled / notes / platform_shop_id` **全部不落库**，
+> 同时 `shop_accounts.py:373-379` 的 `_assert_platform_shop_id_unique` 也被绕过。
+> → **必须先全量 setattr，再叠加改名联动。**
 
 **补充（实施者必须处理）**：`_SHOP_IDENTITY_REFRESH_TARGETS` 目前只有两个 monthly 物化视图，而第一批 Task 7/8 改的是 `semantic.fact_orders_atomic`（VIEW）与 `semantic.fact_analytics_atomic`（VIEW）。改名后要保证**这三个视图的归属都被重算**：
 - 两个 monthly 物化视图 → 现有 `_enqueue_shop_identity_refresh` 已覆盖（需 `REFRESH MATERIALIZED VIEW`）；
 - 两个 VIEW → 改定义即生效，但**旧数据不会自动重算** → 需要在改名后显式触发一次 raw 层重建。
 → **实施者必须先确认 `RefreshQueueService.enqueue_refresh` 的实际重算范围**（`backend/services/data_pipeline/refresh_queue_service.py:44`），再决定是否需要把 `semantic.fact_orders_atomic` / `semantic.fact_analytics_atomic` 加进 `_SHOP_IDENTITY_REFRESH_TARGETS`。**这一条是 B5「改名后自动重认」能否成立的关键，不得跳过。**
 
-- [ ] **Step 5: 别名应用级约束放宽（D16）**
+- [ ] **Step 5: 别名唯一性的应用层友好预检（D16）**
 
-`backend/domains/collection/routers/shop_account_aliases.py:297-307` 的 409 判定从「同平台同别名已有 active 记录」放宽为「同平台同别名**同区域**已有 active 记录」。
+> **先纠正一处误解**：现有代码里**只有一处** 409（`backend/domains/collection/routers/shop_account_aliases.py:301-307`），
+> 它的语义是「**同一个店铺账号自己**已有主别名、且规范化值与新值不同 → 409」，
+> 是**账号内**主别名唯一性 —— 代码里**不存在**跨账号的「同平台同别名」应用级检查。
+>
+> → 所以这一步**不是"放宽"**，而是**补一条友好预检**：
+> 库层约束（第一批 Task 5 建的 `UNIQUE NULLS NOT DISTINCT (platform, alias_normalized, shop_region, is_active)`）
+> 已经实现了 D16 的「同平台同别名同区域只能一条 active」。
+> 应用层要做的是在写库前把这个约束翻译成人话，让运营知道「这个别名在这个区域已经被 X 店占用了」，
+> 而不是抛数据库约束异常。
 
-同时 `_clear_primary_aliases`（:164-180）保持现状：**旧别名仅降 `is_primary`，`is_active` 仍为 True**（曾用名机制依赖这一点）。
+实现要求：
+
+1. 在创建/认领别名前，用 `(platform, alias_normalized, shop_region, is_active=True)` 查一次；
+   命中且属于**别的**店铺账号 → 409，错误信息带上占用方（店铺名 + 区域）。
+2. `shop_region` 为 NULL 的别名（不限区域）**不与有区域的别名冲突** —— 与库层 `NULLS NOT DISTINCT` 语义一致：NULL 只与 NULL 冲突。
+3. 现有的账号内主别名 409（`:301-307`）**保持不动**。
+4. `_clear_primary_aliases`（:164-180）保持现状：**旧别名仅降 `is_primary`，`is_active` 仍为 True**（曾用名机制依赖这一点）。
 
 - [ ] **Step 6: 运行测试确认通过**
 
@@ -943,24 +1130,165 @@ python -m pytest backend/tests/test_shop_rename_flow.py -q -k "end_to_end"
 > 若还没有端到端用例，在本 Step 补一个：用 `AsyncSession` + 事务回滚（`async with db.begin(): ... raise Rollback`）模拟一次改名，断言：
 > - 旧名在别名表里新增了一条 `is_primary=false, is_active=true, alias_type='former_name'` 的记录；
 > - 新名成为 `is_primary=true` 的记录；
-> - `core.platform_accounts.store_name` 已同步；
-> - 刷新队列入队 1 次。
+> - **`core.dim_shops` 里对应行的 `shop_name` 已更新为新名**（`platform_code` + `shop_id` 定位）；
+> - `core.shop_accounts.store_name` 已更新；
+> - 刷新队列入队 1 次；
+> - **同一次 payload 里的其它字段（`shop_region` / `platform_shop_id` / `enabled` 等）仍然落库** —— 这是「先全量 setattr 再联动」的保护用例。
 
 - [ ] **Step 8: 提交**
 
 ```bash
-git add backend/domains/collection/routers/shop_accounts.py backend/domains/collection/routers/shop_account_aliases.py backend/services/shop_sync_service.py backend/tests/test_shop_rename_flow.py
+git add backend/domains/collection/routers/shop_accounts.py backend/domains/collection/routers/shop_account_aliases.py backend/services/shop_rename_service.py backend/tests/test_shop_rename_flow.py
 git commit -m "feat(店铺身份): 改名走联动流程，老数据不断、新数据不串
 
 - 改名固定六步：唯一性校验 -> 旧名转曾用名 -> 新名接管主别名
-  -> 同步 core.platform_accounts.store_name -> 同步 internal_code -> 入刷新队列一次
+  -> 同步 core.dim_shops.shop_name -> 同步 internal_code -> 入刷新队列一次
 - 曾用名是别名表里 is_primary=false 且 is_active=true 的记录，仍参与匹配
-- 别名应用级 409 从「同平台同别名」放宽为「同平台同别名同区域」"
+- 先全量 setattr 再叠加改名联动，避免前端整表提交时丢掉其它字段
+- 别名唯一性补一条应用层友好预检（库层约束已由第一批落地）"
 ```
 
 ---
 
-## 17. 第二批总验收
+## Task 17: 区域感知匹配（D10b —— 让同名品牌店按站点分流）
+
+**Files:**
+- Modify: `sql/semantic/shop_identity_resolution_candidates.sql`（`alias_match` 分支带出别名的 `shop_region`）
+- Modify: `sql/semantic/orders_atomic.sql`（`mapped` 层加 `source_region`）
+- Modify: `sql/semantic/analytics_atomic.sql`（同上）
+- Modify: `sql/semantic/orders_monthly_atomic_mv.sql`（同上）
+- Test: `backend/tests/data_pipeline/test_shop_identity_resolution_sql.py`（扩充）
+
+**背景**：第一批 D10a 给别名表加了 `shop_region` 列与新约束 —— 于是同一个 `FIORO` 可以分别注册给 SG/MY/PH 三个店。
+但**匹配还只看 `(platform, alias_normalized)`** → `FIORO` 会同时命中三个店 → 落 `unknown` + `ambiguous_shop_label`。
+**这是安全状态（不静默错配），但认不出店。** D10b 就是让区域参与匹配，把它变成正确归属。
+
+**已核实的事实（实施者照此做，不要另造映射）**：
+
+| 事实 | 位置 |
+|---|---|
+| raw 数据里的站点是中文，且 100% 覆盖、改名后不变 | `b_class.fact_tiktok_orders_monthly.raw_data->>'站点'`（菲律宾/新加坡/马来/…） |
+| `orders_atomic.sql` 已经把站点抽出来了 | `sql/semantic/orders_atomic.sql:62` `source_site` |
+| 现成的「站点 → 国家码」映射 | `backend/domains/collection/routers/account_alignment.py:796-805` 的 `site_map`（菲律宾→ph、新加坡→sg、马来/马来西亚→my、泰国→th、越南→vn、印尼→id、巴西→br） |
+| 店铺侧区域是**大写** | `core.shop_accounts.shop_region` = `MY` / `PH` / `SG`（与 `site_map` 的小写差一个 `upper()`） |
+
+- [ ] **Step 1: 写失败测试**
+
+在 `backend/tests/data_pipeline/test_shop_identity_resolution_sql.py` 末尾追加：
+
+```python
+def test_sql_assets_map_site_to_region():
+    """语义层必须把 raw 的中文站点映射成店铺区域码（大写）。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    for rel in (
+        "sql/semantic/orders_atomic.sql",
+        "sql/semantic/analytics_atomic.sql",
+        "sql/semantic/orders_monthly_atomic_mv.sql",
+    ):
+        text = (root / rel).read_text(encoding="utf-8")
+        assert "source_region" in text, f"{rel} 没有把站点映射成区域"
+        assert "'菲律宾'" in text, f"{rel} 缺少站点映射表"
+```
+
+- [ ] **Step 2: 运行测试确认失败**
+
+```bash
+python -m pytest backend/tests/data_pipeline/test_shop_identity_resolution_sql.py -q -k "site_to_region"
+```
+
+Expected: FAIL。
+
+- [ ] **Step 3: 在 `mapped` 层加 `source_region`**
+
+三个 SQL 资产的 `mapped` CTE 里都加一列（以 `orders_atomic.sql` 为例，`:62` 的 `source_site` 旁边）：
+
+```sql
+        CASE lower(NULLIF(TRIM(BOTH FROM COALESCE(source_site, '')), ''))
+            WHEN '菲律宾' THEN 'PH'
+            WHEN '新加坡' THEN 'SG'
+            WHEN '马来' THEN 'MY'
+            WHEN '马来西亚' THEN 'MY'
+            WHEN '泰国' THEN 'TH'
+            WHEN '越南' THEN 'VN'
+            WHEN '印尼' THEN 'ID'
+            WHEN '巴西' THEN 'BR'
+            ELSE UPPER(LEFT(NULLIF(TRIM(BOTH FROM COALESCE(source_site, '')), ''), 2))
+        END AS source_region,
+```
+
+> 这张表与 `backend/domains/collection/routers/account_alignment.py:796-805` 的 `site_map` **必须保持一致**。
+> 实施者要在这两个地方各加一条注释互相指认，避免以后单边改。（SQL 侧没法直接 import Python 常量，
+> 只能靠约定 + 双向注释 + 测试守住。）
+
+- [ ] **Step 4: 候选视图带出别名的区域**
+
+`sql/semantic/shop_identity_resolution_candidates.sql` 的 `alias_match` 分支要带出 `saa.shop_region`。
+**注意**：该视图的 `identity_rows` 是 **4 路 UNION ALL**（`platform_shop_id` / `shop_account_id` / `alias_match` / `store_name_match`），
+加列必须**同时**改 4 个分支 **和** 视图末尾的 SELECT 列表，否则 PostgreSQL 报
+`each UNION query must have the same number of columns`（已实测）。
+
+建议新增列 `identity_shop_region`：
+- `alias_match` 分支 → `saa.shop_region`
+- 其余三个分支 → `active_shop_accounts.candidate_shop_region`（即该店铺账号自己的 `shop_region`）
+
+- [ ] **Step 5: 匹配时按区域消歧**
+
+三条路径的 LATERAL 在候选集合上增加区域过滤，规则：
+
+```
+候选 = 候选视图里 identity_value_normalized 命中的行
+区域优先层：
+  1. identity_shop_region = 该行 source_region   （精确匹配，优先）
+  2. identity_shop_region IS NULL                 （不限区域，兜底）
+  3. 其余（区域不匹配的）不参与本次归属
+```
+
+只有**区域优先层命中**的候选才参与计数；若无任何候选 → `unmatched_shop_label`；
+若区域优先层内仍有多个候选 → `ambiguous_shop_label`。
+
+> **必须保证**：区域过滤**只用于消歧，不制造新的 unknown**。
+> 存量 21 条别名在 Task 5 已按 `core.shop_accounts.shop_region` 回填区域，
+> 而 raw 的 `站点` 映射出来的区域与店铺区域一致（实测 TikTok 六个店：MY/PH/SG ↔ 马来/菲律宾/新加坡）→
+> 存量数据应全部**继续唯一命中**。
+
+- [ ] **Step 6: 部署 + 回归**
+
+```bash
+python scripts/bootstrap_postgresql_dashboard.py --module all --refresh-materializations
+```
+
+然后跑一次与第一批 Task 8 Step 3 相同的基线对比：
+
+```bash
+python -c "
+import sqlalchemy as sa
+eng = sa.create_engine('postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp')
+with eng.connect() as c:
+    for r in c.execute(sa.text(\"select shop_id, count(*) from semantic.fact_orders_atomic where platform_code='tiktok' group by 1 order by 2 desc\")):
+        print(tuple(r))
+"
+```
+
+Expected: **与第一批 Task 0 的基线完全一致**（2473 / 1448 / 505 / 289 / 124 / 90 / 75）——
+区域过滤**不得**改变存量数据的归属。
+
+- [ ] **Step 7: 提交**
+
+```bash
+git add sql/semantic/ backend/tests/data_pipeline/test_shop_identity_resolution_sql.py
+git commit -m "feat(语义层): 区域参与身份匹配，同名品牌店按站点分流
+
+- mapped 层把 raw 的中文站点映射成区域码（与 account_alignment.py 的 site_map 对齐）
+- 候选视图带出别名/店铺的区域维度
+- 匹配时先按区域精确匹配，再退回「不限区域」的别名
+- 存量数据归属不变（与第一批基线一致）"
+```
+
+---
+
+## 18. 第二批总验收
 
 - [ ] **Step 1: 跑全量相关测试**
 
@@ -969,6 +1297,20 @@ python -m pytest backend/tests/test_pwcli_session_naming.py backend/tests/test_s
 ```
 
 Expected: 全部 PASS。
+
+- [ ] **Step 1b: 确认区域感知匹配没有改变存量归属**
+
+```bash
+python -c "
+import sqlalchemy as sa
+eng = sa.create_engine('postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp')
+with eng.connect() as c:
+    for r in c.execute(sa.text(\"select shop_id, count(*) from semantic.fact_orders_atomic where platform_code='tiktok' group by 1 order by 2 desc\")):
+        print(tuple(r))
+"
+```
+
+Expected: 与第一批 Task 0 的基线一致（2473 / 1448 / 505 / 289 / 124 / 90 / 75）。
 
 - [ ] **Step 2: 核对 spec 第二批验收项**
 
@@ -1009,7 +1351,7 @@ Expected: 改名**前后各店的行数一致**（老数据通过曾用名继续
 
 ---
 
-## 18. 风险与回滚
+## 19. 风险与回滚
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|
