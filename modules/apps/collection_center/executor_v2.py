@@ -1073,6 +1073,34 @@ class CollectionExecutorV2:
         return details
 
     @staticmethod
+    def _resolve_session_metadata(
+        *,
+        platform: str,
+        params: Dict[str, Any],
+        runtime_bundle: Any,
+    ) -> Dict[str, Any]:
+        """取会话元数据（``manual_seeded`` / ``protected`` 标记的来源）。
+
+        优先用 runtime bundle 上已经填好的元数据；没有就回退到 ``SessionManager``
+        里落盘的会话元数据 —— 人工巡店保存的会话正是走这条路径。
+        """
+        bundle_metadata = getattr(runtime_bundle, "session_metadata", None)
+        if isinstance(bundle_metadata, dict) and bundle_metadata:
+            return dict(bundle_metadata)
+        session_owner_id = params.get("main_account_id")
+        if not session_owner_id:
+            return {}
+        try:
+            from modules.utils.sessions.session_manager import SessionManager
+
+            metadata = SessionManager().get_session_metadata(
+                platform, session_owner_id
+            )
+        except Exception:
+            return {}
+        return dict(metadata) if isinstance(metadata, dict) else {}
+
+    @staticmethod
     def _runtime_session_diagnostics(
         *,
         platform: str,
@@ -1080,19 +1108,13 @@ class CollectionExecutorV2:
         runtime_bundle: Any,
     ) -> Dict[str, Any]:
         session_owner_id = params.get("main_account_id")
-        session_metadata: Dict[str, Any] = {}
-        bundle_metadata = getattr(runtime_bundle, "session_metadata", None)
-        if isinstance(bundle_metadata, dict) and bundle_metadata:
-            session_metadata = bundle_metadata
-        elif session_owner_id:
-            try:
-                from modules.utils.sessions.session_manager import SessionManager
-
-                session_metadata = SessionManager().get_session_metadata(
-                    platform, session_owner_id
-                )
-            except Exception:
-                session_metadata = {}
+        session_metadata = params.get("session_metadata")
+        if not isinstance(session_metadata, dict):
+            session_metadata = CollectionExecutorV2._resolve_session_metadata(
+                platform=platform,
+                params=params,
+                runtime_bundle=runtime_bundle,
+            )
         context_options = getattr(runtime_bundle, "context_options", {}) or {}
         extra_headers = context_options.get("extra_http_headers", {}) or {}
         return {
@@ -1996,6 +2018,11 @@ class CollectionExecutorV2:
                     if shop_account_id:
                         params["shop_account_id"] = shop_account_id
                     params["_runtime_session_mode"] = runtime_bundle.mode
+                    params["session_metadata"] = self._resolve_session_metadata(
+                        platform=platform,
+                        params=params,
+                        runtime_bundle=runtime_bundle,
+                    )
                     params["_actual_execution_mode"] = (
                         "headless"
                         if self._build_runtime_launch_kwargs(debug_mode=debug_mode).get(
@@ -2102,6 +2129,11 @@ class CollectionExecutorV2:
                 if shop_account_id:
                     params["shop_account_id"] = shop_account_id
                 params["_runtime_session_mode"] = runtime_bundle.mode
+                params["session_metadata"] = self._resolve_session_metadata(
+                    platform=platform,
+                    params=params,
+                    runtime_bundle=runtime_bundle,
+                )
                 params["_actual_execution_mode"] = (
                     "headless"
                     if self._build_runtime_launch_kwargs(debug_mode=debug_mode).get(
@@ -2808,6 +2840,11 @@ class CollectionExecutorV2:
         platform: str,
         params: Dict[str, Any],
     ) -> bool:
+        """TikTok 走持久 profile 时默认不落 storage_state。
+
+        但**人工巡店保存的会话必须落盘**（spec D8）—— 否则采集侧读不到人工会话。
+        自动来源的会话保持原有跳过行为。
+        """
         normalized_platform = str(platform or "").strip().lower()
         nested_params = params.get("params") or {}
         runtime_mode = (
@@ -2819,7 +2856,17 @@ class CollectionExecutorV2:
             .strip()
             .lower()
         )
-        return normalized_platform == "tiktok" and runtime_mode == "persistent_profile"
+        if not (normalized_platform == "tiktok" and runtime_mode == "persistent_profile"):
+            return False
+
+        metadata = params.get("session_metadata")
+        if not isinstance(metadata, dict):
+            metadata = nested_params.get("session_metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if metadata.get("manual_seeded") or metadata.get("protected"):
+            return False
+        return True
 
     @staticmethod
     def _requires_headful_login_fallback(verification_type: str | None) -> bool:
@@ -5833,6 +5880,11 @@ class CollectionExecutorV2:
             if shop_account_id:
                 params["shop_account_id"] = shop_account_id
             params["_runtime_session_mode"] = runtime_bundle.mode
+            params["session_metadata"] = self._resolve_session_metadata(
+                platform=platform,
+                params=params,
+                runtime_bundle=runtime_bundle,
+            )
             adapter = None
             if runtime_manifests is None:
                 adapter = create_adapter(
