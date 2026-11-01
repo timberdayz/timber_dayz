@@ -1190,6 +1190,10 @@ git commit -m "feat(店铺身份): 改名走联动流程，老数据不断、新
 
 **Files:**
 - Modify: `sql/semantic/shop_identity_resolution_candidates.sql`（`alias_match` 分支带出别名的 `shop_region`；并先在 `active_shop_accounts` CTE 里补出 `candidate_shop_region`）
+- 前置（**第一批已完成**）：`backend/services/data_pipeline/refresh_registry.py` 里
+  `PIPELINE_DEPENDENCIES["semantic.fact_orders_atomic"]` 已声明
+  `["semantic.shop_identity_resolution_candidates"]` —— 没有这条依赖边，
+  本 Task 的 `rebuild_views.py` 会先重建 `fact_orders_atomic`、再建候选视图 → 直接失败
 - Modify: `sql/semantic/orders_atomic.sql`（**`cleaned` 层(:280) 加 `source_region`** —— 该层的 `source_site` 已是真实输入列）
 - Modify: `sql/semantic/orders_monthly_atomic_mv.sql`（`mapped_monthly_orders`(:19) 新算 `source_site` → `normalized_monthly_orders`(:114) 加 `source_region`）
 - **不改** `sql/semantic/analytics_atomic.sql` / `sql/semantic/analytics_monthly_atomic_mv.sql`
@@ -1585,25 +1589,36 @@ python -c "
 import sqlalchemy as sa
 eng = sa.create_engine('postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp')
 with eng.connect() as c:
-    # 候选视图是普通 VIEW，用 information_schema
+    # ① 候选视图是普通 VIEW，用 information_schema 查它的输出列
     cols = [r[0] for r in c.execute(sa.text('''
         select column_name from information_schema.columns
          where table_schema='semantic' and table_name='shop_identity_resolution_candidates'
-           and column_name in ('identity_shop_region','candidate_shop_region')
+           and column_name like '%shop_region%'
          order by column_name'''))]
     print('candidates view ->', cols)
-    # fact_orders_atomic 是普通 VIEW
-    cols2 = [r[0] for r in c.execute(sa.text('''
-        select column_name from information_schema.columns
-         where table_schema='semantic' and table_name='fact_orders_atomic'
-           and column_name='source_region' '''))]
-    print('fact_orders_atomic ->', cols2)
+    # ② source_region 只用于匹配、**不对外暴露** -> 不能查列，要查视图定义
+    d = c.execute(sa.text(
+        "select pg_get_viewdef(CAST('semantic.fact_orders_atomic' AS regclass), true)"
+    )).scalar()
+    print('fact_orders_atomic def has source_region =', 'source_region' in d)
 "
 ```
 
 Expected:
-- `candidates view -> ['candidate_shop_region', 'identity_shop_region']`（2 列）
-- `fact_orders_atomic -> ['source_region']`（1 列）
+- `candidates view -> ['identity_shop_region']`（**1 列**）
+- `fact_orders_atomic def has source_region = True`
+
+> ⚠ **为什么候选视图只期望 1 列**：`candidate_shop_region` 是 `active_shop_accounts` CTE 的**内部列**，
+> 视图的最终 SELECT（7 列显式清单）只把它包成 `identity_shop_region` 输出一列 →
+> `information_schema.columns` 里**看不到** `candidate_shop_region`。
+> 它的存在由第一批留下的护栏 `test_candidate_view_carries_region_dimension`
+> 断言 SQL 文本里的 `"candidate_shop_region" in text` 来守。
+>
+> ⚠ **为什么 `source_region` 要查视图定义而不是列**：
+> Step 3 明确「`source_region` 只用于匹配、不对外暴露」→ 它**不出现在**最终 SELECT 里，
+> `information_schema.columns` 查它是 `[]`（那是**正确的**，不是没重建）。
+> 要验证它，只能查 `pg_get_viewdef` 里有没有这个表达式。
+> （如果实施者把 `source_region` 加进了最终 SELECT，那条护栏会变成 `[]` → 反而说明设计被改坏了。）
 
 > 少了任何一列 = 视图定义没真正重建 → 回到 `rebuild_views.py`。
 > **不要用 bootstrap 的 `--check` / drift 当护栏** ——
@@ -1628,7 +1643,7 @@ Expected: **与第一批 Task 0 的基线完全一致**（2473 / 1448 / 505 / 28
 - [ ] **Step 7: 提交**
 
 ```bash
-git add sql/semantic/ backend/tests/data_pipeline/test_shop_identity_resolution_sql.py
+git add sql/semantic/ backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py
 git commit -m "feat(语义层): 区域参与身份匹配，同名品牌店按站点分流
 
 - cleaned / normalized_monthly_orders 层把 raw 的中文站点映射成区域码（与 account_alignment.py 的 site_map 对齐）
@@ -1644,7 +1659,7 @@ git commit -m "feat(语义层): 区域参与身份匹配，同名品牌店按站
 - [ ] **Step 1: 跑全量相关测试**
 
 ```bash
-python -m pytest backend/tests/test_pwcli_session_naming.py backend/tests/test_session_manager_protection.py backend/tests/test_session_storage_roots.py backend/tests/test_collection_executor_session_alignment.py backend/tests/test_collection_runtime_session.py backend/tests/test_collection_session_reuse_contract.py backend/tests/test_shop_internal_code.py backend/tests/test_shop_rename_flow.py backend/tests/test_shop_account_aliases_api.py backend/tests/test_shop_identity_schema_migration.py backend/tests/test_alias_normalization_consistency.py backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py -q
+python -m pytest backend/tests/test_pwcli_session_naming.py backend/tests/test_session_manager_protection.py backend/tests/test_session_storage_roots.py backend/tests/test_collection_executor_session_alignment.py backend/tests/test_collection_runtime_session.py backend/tests/test_collection_session_reuse_contract.py backend/tests/test_shop_internal_code.py backend/tests/test_shop_rename_flow.py backend/tests/test_shop_account_aliases_api.py backend/tests/test_shop_identity_schema_migration.py backend/tests/test_alias_normalization_consistency.py backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/data_pipeline/test_refresh_runner.py backend/tests/test_semantic_ambiguous_identity_sql.py -q
 ```
 
 Expected: 全部 PASS。

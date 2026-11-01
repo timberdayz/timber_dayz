@@ -1382,7 +1382,7 @@ Expected: 全部 PASS。
 - [ ] **Step 7: 提交**
 
 ```bash
-git add backend/utils/text_normalization.py sql/semantic/shop_identity_resolution_candidates.sql sql/semantic/orders_atomic.sql sql/semantic/analytics_atomic.sql backend/tests/test_alias_normalization_consistency.py
+git add backend/utils/text_normalization.py sql/semantic/shop_identity_resolution_candidates.sql sql/semantic/orders_atomic.sql backend/tests/test_alias_normalization_consistency.py
 git commit -m "fix(别名): 写侧与查侧规范化统一，认领了不再匹配不上
 
 - normalize_alias_key 改为剥前缀 + 小写 + 删分隔符，与 SQL 侧完全一致
@@ -1585,7 +1585,13 @@ Expected: FAIL。
 Step 4a 让 `orders_atomic.sql` **改走候选视图** → 这个依赖从「不存在」变成「真实存在」，
 **必须声明**，否则 `scripts/rebuild_views.py` 会把 `semantic.fact_orders_atomic` 排在
 `semantic.shop_identity_resolution_candidates` **之前**重建（实测 `--dry-run` 的顺序就是这样：
-orders_atomic 第 1、候选视图第 6）→ 建视图时找不到候选视图的列 → **重建直接失败**。
+orders_atomic 第 1、候选视图第 6）→ **第二批**候选视图加 `identity_shop_region` 之后，
+`orders_atomic` 引用它就会找不到列 → **重建直接失败**。
+
+> 实测改完之后 `--dry-run` 的顺序变成：候选视图第 **1**、`semantic.fact_orders_atomic` 第 **2** ✅。
+>
+> **这条依赖边是第二批 ⑨ 的前置** —— 第二批 Task 17 会给候选视图加区域列并让 orders 路径引用它，
+> 必须在第一批就把依赖图改好，否则第二批的 `rebuild_views.py` 会直接失败。
 
 改成：
 
@@ -1597,7 +1603,9 @@ orders_atomic 第 1、候选视图第 6）→ 建视图时找不到候选视图�
 > `backend/tests/data_pipeline/test_refresh_runner.py:88` 断言的是
 > `PIPELINE_DEPENDENCIES["semantic.fact_orders_atomic"] == []` → 要改成
 > `== ["semantic.shop_identity_resolution_candidates"]`。
-> **不改这条断言，第一批的总验收会红。**
+> **不改这条断言，跑全量 `pytest` 会红**（实测：内存改依赖后，该文件里**只有这一条**红，其余 21 条绿）。
+> → 所以 `backend/tests/data_pipeline/test_refresh_runner.py` 已加入第一批 §12 Step 1 与第二批 §18 Step 1 的验收清单，
+> **别等到 CI 才发现**。
 
 > 改完用 `python scripts/rebuild_views.py --dry-run` 复核顺序：
 > `semantic.shop_identity_resolution_candidates` 必须排在 `semantic.fact_orders_atomic` **之前**。
@@ -1831,7 +1839,7 @@ Expected: 全部 PASS。
 - [ ] **Step 6: 提交**
 
 ```bash
-git add sql/semantic/ backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py
+git add sql/semantic/ backend/services/data_pipeline/refresh_registry.py backend/tests/data_pipeline/test_refresh_runner.py backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py
 git commit -m "feat(语义层): 多候选不再静默归一，落 unknown + 告警码
 
 - 四条语义路径统一判定：候选 1 才归属，候选 0 落 unmatched_shop_label，
@@ -2550,7 +2558,7 @@ git commit -m "fix(采集): 人工巡店保存的会话优先于持久 profile �
 - [ ] **Step 1: 跑全量相关测试**
 
 ```bash
-python -m pytest backend/tests/test_session_storage_roots.py backend/tests/test_collection_session_reuse_contract.py backend/tests/test_pwcli_native_session_alignment.py backend/tests/test_session_manager_protection.py backend/tests/test_shop_account_aliases_api.py backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_alias_sql_assets.py backend/tests/test_alias_normalization_consistency.py backend/tests/test_semantic_ambiguous_identity_sql.py backend/tests/test_shop_identity_schema_migration.py backend/tests/test_catalog_file_identity_backfill.py backend/tests/test_data_ingestion_hash_identity.py backend/tests/test_pwcli_helpers_session_targeting.py backend/tests/test_pwcli_inspection_panel_reporting.py backend/tests/test_pwcli_native_sys_path_bootstrap.py backend/tests/test_shop_account_unmatched_alias_hint.py -q
+python -m pytest backend/tests/test_session_storage_roots.py backend/tests/test_collection_session_reuse_contract.py backend/tests/test_pwcli_native_session_alignment.py backend/tests/test_session_manager_protection.py backend/tests/test_shop_account_aliases_api.py backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/data_pipeline/test_refresh_runner.py backend/tests/test_semantic_alias_sql_assets.py backend/tests/test_alias_normalization_consistency.py backend/tests/test_semantic_ambiguous_identity_sql.py backend/tests/test_shop_identity_schema_migration.py backend/tests/test_catalog_file_identity_backfill.py backend/tests/test_data_ingestion_hash_identity.py backend/tests/test_pwcli_helpers_session_targeting.py backend/tests/test_pwcli_inspection_panel_reporting.py backend/tests/test_pwcli_native_sys_path_bootstrap.py backend/tests/test_shop_account_unmatched_alias_hint.py -q
 ```
 
 Expected: 全部 PASS，且**不少于 Task 0 Step 2 的基线通过数**（基线 = 41 passed）。
