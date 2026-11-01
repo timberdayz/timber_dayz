@@ -23,5 +23,7 @@ SELECT
     gmv,
     total_transaction_amount,
     data_hash,
-    ingest_timestamp
+    ingest_timestamp,
+    identity_candidate_count,
+    identity_candidates
 FROM semantic.fact_analytics_monthly_atomic_mv;

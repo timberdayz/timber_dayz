@@ -51,6 +51,28 @@ mapped AS (
         NULLIF(
             TRIM(
                 COALESCE(
+                    raw_data->>'platform_shop_id',
+                    raw_data->>'平台店铺ID',
+                    raw_data->>'店铺ID'
+                )
+            ),
+            ''
+        ) AS source_platform_shop_id,
+        NULLIF(
+            TRIM(
+                COALESCE(
+                    raw_data->>'shop_account_id',
+                    raw_data->>'account_id',
+                    raw_data->>'店铺账号ID',
+                    raw_data->>'账号ID',
+                    raw_data->>'account'
+                )
+            ),
+            ''
+        ) AS source_shop_account_id,
+        NULLIF(
+            TRIM(
+                COALESCE(
                     raw_data->>'采购账号',
                     raw_data->>'账号',
                     raw_data->>'account',
@@ -281,9 +303,49 @@ cleaned AS (
     SELECT
         platform_code,
         COALESCE(source_shop_id, 'unknown') AS shop_id,
+        source_shop_id,
         store_label_raw,
         source_account,
         source_site,
+        source_platform_shop_id,
+        source_shop_account_id,
+        -- 候选值集合：就地引用 mapped 的真实输入列（同层不能引用输出别名）
+        ARRAY_REMOVE(
+            ARRAY[
+                LOWER(COALESCE(source_platform_shop_id, '')),
+                LOWER(COALESCE(source_shop_account_id, '')),
+                CASE
+                    WHEN LOWER(COALESCE(source_shop_id, '')) NOT IN ('xihong', 'unknown', 'none')
+                    THEN LOWER(COALESCE(source_shop_id, ''))
+                END,
+                CASE
+                    WHEN LOWER(COALESCE(source_shop_id, '')) NOT IN ('xihong', 'unknown', 'none')
+                    THEN REGEXP_REPLACE(
+                        REGEXP_REPLACE(
+                            LOWER(TRIM(COALESCE(source_shop_id, ''))),
+                            '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
+                            '',
+                            'i'
+                        ),
+                        '[[:space:]_()/-]+',
+                        '',
+                        'g'
+                    )
+                END,
+                REGEXP_REPLACE(
+                    REGEXP_REPLACE(
+                        LOWER(TRIM(COALESCE(store_label_raw, ''))),
+                        '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
+                        '',
+                        'i'
+                    ),
+                    '[[:space:]_()/-]+',
+                    '',
+                    'g'
+                )
+            ],
+            ''
+        ) AS normalized_identity_candidates,
         data_domain,
         granularity,
         metric_date,
@@ -407,11 +469,28 @@ alias_resolved AS (
     SELECT
         d.platform_code,
         CASE
-            WHEN account_map.resolved_shop_id IS NOT NULL THEN account_map.resolved_shop_id
-            WHEN LOWER(COALESCE(d.shop_id, '')) IN ('', 'none', 'unknown', 'xihong')
-            THEN 'unknown'
-            ELSE COALESCE(d.shop_id, 'unknown')
+            WHEN account_map.candidate_count = 1 THEN account_map.resolved_shop_id
+            ELSE 'unknown'
         END AS shop_id,
+        CASE
+            WHEN COALESCE(d.source_platform_shop_id, d.source_shop_account_id, d.store_label_raw, d.source_shop_id) IS NULL
+            THEN 'missing_identity'
+            WHEN account_map.candidate_count = 0
+            THEN 'unmatched_shop_label'
+            WHEN account_map.candidate_count > 1
+            THEN 'ambiguous_shop_label'
+            WHEN account_map.resolved_shop_account_id IS NULL
+            THEN 'unresolved_shop_account'
+            WHEN account_map.resolved_shop_account_id IS NOT NULL AND canonical.shop_account_id IS NULL
+            THEN 'unresolved_shop_account'
+            WHEN account_map.resolved_shop_account_id IS NOT NULL
+             AND LOWER(COALESCE(d.platform_code, '')) IN ('shopee')
+             AND NULLIF(TRIM(canonical.platform_shop_id), '') IS NULL
+            THEN 'missing_required_platform_shop_id'
+            ELSE NULL
+        END AS identity_warning_code,
+        account_map.candidate_count AS identity_candidate_count,
+        account_map.candidate_shop_ids::text AS identity_candidates,
         d.data_domain,
         d.granularity,
         d.metric_date,
@@ -450,28 +529,41 @@ alias_resolved AS (
     FROM deduplicated d
     LEFT JOIN LATERAL (
         SELECT
-            COALESCE(
-                NULLIF(TRIM(sa.platform_shop_id), ''),
-                NULLIF(TRIM(sa.shop_account_id), ''),
-                sa.id::text
-            ) AS resolved_shop_id
-        FROM core.shop_accounts sa
-        LEFT JOIN core.shop_account_aliases saa
-          ON saa.shop_account_id = sa.id
-         AND saa.is_active = true
-        WHERE LOWER(COALESCE(sa.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
-          AND (
-                LOWER(COALESCE(sa.store_name, '')) = LOWER(COALESCE(d.store_label_raw, ''))
-                OR LOWER(COALESCE(sa.platform_shop_id, '')) = LOWER(COALESCE(d.store_label_raw, ''))
-                OR LOWER(COALESCE(saa.alias_value, '')) = LOWER(COALESCE(d.store_label_raw, ''))
-                OR LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(LOWER(TRIM(COALESCE(d.store_label_raw, ''))), '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*', '', 'i'), '[\s_()/-]+', '', 'g'), '\s+', ' ', 'g')
-          )
-        ORDER BY
-            CASE WHEN LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(LOWER(TRIM(COALESCE(d.store_label_raw, ''))), '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*', '', 'i'), '[\s_()/-]+', '', 'g'), '\s+', ' ', 'g') THEN 0 ELSE 1 END,
-            CASE WHEN saa.is_primary THEN 0 ELSE 1 END,
-            sa.id
+            agg.candidate_count,
+            agg.candidate_shop_ids,
+            best.resolved_shop_id,
+            best.resolved_shop_account_id,
+            best.resolution_method,
+            best.resolution_priority,
+            best.identity_source_value
+        FROM (
+            -- ① 计数与候选清单：纯聚合，按去重后的店铺算
+            SELECT
+                count(DISTINCT c.resolved_shop_id)::int AS candidate_count,
+                array_agg(DISTINCT c.resolved_shop_id ORDER BY c.resolved_shop_id) AS candidate_shop_ids
+            FROM semantic.shop_identity_resolution_candidates c
+            WHERE c.platform_code = lower(COALESCE(d.platform_code, ''))
+              AND c.identity_value_normalized = ANY (d.normalized_identity_candidates)
+        ) agg
+        LEFT JOIN LATERAL (
+            -- ② 最优候选：每个店只保留优先级最高的一行
+            SELECT DISTINCT ON (c.resolved_shop_id)
+                   c.resolved_shop_id,
+                   c.resolved_shop_account_id,
+                   c.resolution_method,
+                   c.resolution_priority,
+                   c.identity_source_value
+            FROM semantic.shop_identity_resolution_candidates c
+            WHERE c.platform_code = lower(COALESCE(d.platform_code, ''))
+              AND c.identity_value_normalized = ANY (d.normalized_identity_candidates)
+            ORDER BY c.resolved_shop_id, c.resolution_priority, c.resolution_method, c.identity_source_value
+        ) best ON TRUE
+        ORDER BY best.resolution_priority, best.resolved_shop_id
         LIMIT 1
     ) account_map ON TRUE
+    LEFT JOIN core.shop_accounts canonical
+      ON LOWER(COALESCE(canonical.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
+     AND canonical.shop_account_id = account_map.resolved_shop_account_id
     WHERE d.rn = 1
 )
 SELECT
@@ -526,5 +618,8 @@ SELECT
         - purchase_amount
         - profit
         - warehouse_operation_fee
-    ) AS platform_total_cost_derived
+    ) AS platform_total_cost_derived,
+    identity_warning_code,
+    identity_candidate_count,
+    identity_candidates
 FROM alias_resolved;

@@ -35,20 +35,21 @@ def test_normalize_alias_key_is_idempotent():
 def test_sql_assets_use_stored_alias_normalized():
     """直接引用别名表的 SQL 必须用存储的 alias_normalized。
 
-    注：``analytics_atomic.sql`` 与 ``orders_monthly_atomic_mv.sql`` 走的是候选视图
-    ``semantic.shop_identity_resolution_candidates``，不直接 JOIN 别名表，
-    所以对这两个文件断言的是「引用了候选视图」。
+    注：第一批 Task 7 把 ``orders_atomic.sql`` 改成走候选视图
+    ``semantic.shop_identity_resolution_candidates``，别名匹配由候选视图的
+    ``alias_match`` 分支承担 —— 它**不再直接 JOIN 别名表**，
+    所以对它断言的是「引用了候选视图」且「不再出现 saa.alias_normalized」。
     """
-    for rel in (
-        "sql/semantic/shop_identity_resolution_candidates.sql",
-        "sql/semantic/orders_atomic.sql",
-    ):
-        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
-        assert "saa.alias_normalized" in text, f"{rel} 未使用存储的 alias_normalized"
+    text = (REPO_ROOT / "sql/semantic/shop_identity_resolution_candidates.sql").read_text(encoding="utf-8")
+    assert "saa.alias_normalized" in text, "候选视图未使用存储的 alias_normalized"
 
     for rel in (
+        "sql/semantic/orders_atomic.sql",
         "sql/semantic/analytics_atomic.sql",
         "sql/semantic/orders_monthly_atomic_mv.sql",
     ):
         text = (REPO_ROOT / rel).read_text(encoding="utf-8")
         assert "shop_identity_resolution_candidates" in text, f"{rel} 未引用候选视图"
+
+    text = (REPO_ROOT / "sql/semantic/orders_atomic.sql").read_text(encoding="utf-8")
+    assert "saa.alias_normalized" not in text, "orders_atomic.sql 不应再直接 JOIN 别名表"

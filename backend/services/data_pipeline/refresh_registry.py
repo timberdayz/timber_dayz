@@ -18,7 +18,7 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.fact_analytics_monthly_atomic_mv": [
         "semantic.shop_identity_resolution_candidates"
     ],
-    "semantic.fact_orders_atomic": [],
+    "semantic.fact_orders_atomic": ["semantic.shop_identity_resolution_candidates"],
     "semantic.fact_analytics_atomic": ["semantic.shop_identity_resolution_candidates"],
     "semantic.fact_orders_monthly_atomic": ["semantic.fact_orders_monthly_atomic_mv"],
     "semantic.fact_analytics_monthly_atomic": [

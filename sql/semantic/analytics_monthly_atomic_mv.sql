@@ -341,10 +341,9 @@ resolved_monthly_traffic AS MATERIALIZED (
         m.metric_date,
         m.platform_code,
         CASE
-            WHEN resolved.resolved_shop_id IS NOT NULL
+            WHEN resolved.candidate_count = 1
             THEN COALESCE(NULLIF(TRIM(canonical.platform_shop_id), ''), resolved.resolved_shop_id)
-            WHEN COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) IS NULL THEN 'unknown'
-            ELSE COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id)
+            ELSE 'unknown'
         END AS shop_id,
         COALESCE(m.source_shop_id, m.store_label_raw) AS raw_shop_id,
         m.store_label_raw,
@@ -365,6 +364,10 @@ resolved_monthly_traffic AS MATERIALIZED (
         CASE
             WHEN COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) IS NULL
             THEN 'missing_identity'
+            WHEN resolved.candidate_count = 0
+            THEN 'unmatched_shop_label'
+            WHEN resolved.candidate_count > 1
+            THEN 'ambiguous_shop_label'
             WHEN resolved.resolved_shop_account_id IS NULL
             THEN 'unresolved_shop_account'
             WHEN resolved.resolved_shop_account_id IS NOT NULL AND canonical.shop_account_id IS NULL
@@ -375,6 +378,8 @@ resolved_monthly_traffic AS MATERIALIZED (
             THEN 'missing_required_platform_shop_id'
             ELSE NULL
         END AS identity_warning_code,
+        resolved.candidate_count AS identity_candidate_count,
+        resolved.candidate_shop_ids::text AS identity_candidates,
         m.visitor_count,
         m.product_visitor_count,
         m.page_views,
@@ -388,15 +393,36 @@ resolved_monthly_traffic AS MATERIALIZED (
     FROM normalized_monthly_traffic m
     LEFT JOIN LATERAL (
         SELECT
-            c.resolved_shop_id,
-            c.resolved_shop_account_id,
-            c.resolution_method,
-            c.resolution_priority,
-            c.identity_source_value
-        FROM semantic.shop_identity_resolution_candidates c
-        WHERE c.platform_code = LOWER(COALESCE(m.platform_code, ''))
-          AND c.identity_value_normalized = ANY (m.normalized_identity_candidates)
-        ORDER BY c.resolution_priority, c.resolved_shop_id
+            agg.candidate_count,
+            agg.candidate_shop_ids,
+            best.resolved_shop_id,
+            best.resolved_shop_account_id,
+            best.resolution_method,
+            best.resolution_priority,
+            best.identity_source_value
+        FROM (
+            -- ① 计数与候选清单：纯聚合，按去重后的店铺算
+            SELECT
+                count(DISTINCT c.resolved_shop_id)::int AS candidate_count,
+                array_agg(DISTINCT c.resolved_shop_id ORDER BY c.resolved_shop_id) AS candidate_shop_ids
+            FROM semantic.shop_identity_resolution_candidates c
+            WHERE c.platform_code = lower(COALESCE(m.platform_code, ''))
+              AND c.identity_value_normalized = ANY (m.normalized_identity_candidates)
+        ) agg
+        LEFT JOIN LATERAL (
+            -- ② 最优候选：每个店只保留优先级最高的一行
+            SELECT DISTINCT ON (c.resolved_shop_id)
+                   c.resolved_shop_id,
+                   c.resolved_shop_account_id,
+                   c.resolution_method,
+                   c.resolution_priority,
+                   c.identity_source_value
+            FROM semantic.shop_identity_resolution_candidates c
+            WHERE c.platform_code = lower(COALESCE(m.platform_code, ''))
+              AND c.identity_value_normalized = ANY (m.normalized_identity_candidates)
+            ORDER BY c.resolved_shop_id, c.resolution_priority, c.resolution_method, c.identity_source_value
+        ) best ON TRUE
+        ORDER BY best.resolution_priority, best.resolved_shop_id
         LIMIT 1
     ) resolved ON TRUE
     LEFT JOIN core.shop_accounts canonical
@@ -432,7 +458,9 @@ SELECT
     gmv,
     total_transaction_amount,
     data_hash,
-    ingest_timestamp
+    ingest_timestamp,
+    identity_candidate_count,
+    identity_candidates
 FROM deduplicated_monthly_traffic
 WHERE rn = 1;
 

@@ -121,9 +121,8 @@ resolved AS (
     SELECT
         m.platform_code,
         CASE
-            WHEN resolved_candidate.resolved_shop_id IS NOT NULL THEN resolved_candidate.resolved_shop_id
-            WHEN COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) IS NULL THEN 'unknown'
-            ELSE COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id)
+            WHEN resolved_candidate.candidate_count = 1 THEN resolved_candidate.resolved_shop_id
+            ELSE 'unknown'
         END AS shop_id,
         COALESCE(m.source_shop_id, m.store_label_raw) AS raw_shop_id,
         m.store_label_raw,
@@ -134,6 +133,25 @@ resolved AS (
             ELSE 'unclaimed_identity'
         END AS resolution_method,
         COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) AS identity_source_value,
+        CASE
+            WHEN COALESCE(m.source_platform_shop_id, m.source_shop_account_id, m.store_label_raw, m.source_shop_id) IS NULL
+            THEN 'missing_identity'
+            WHEN resolved_candidate.candidate_count = 0
+            THEN 'unmatched_shop_label'
+            WHEN resolved_candidate.candidate_count > 1
+            THEN 'ambiguous_shop_label'
+            WHEN resolved_candidate.resolved_shop_account_id IS NULL
+            THEN 'unresolved_shop_account'
+            WHEN resolved_candidate.resolved_shop_account_id IS NOT NULL AND canonical.shop_account_id IS NULL
+            THEN 'unresolved_shop_account'
+            WHEN resolved_candidate.resolved_shop_account_id IS NOT NULL
+             AND LOWER(COALESCE(m.platform_code, '')) IN ('shopee')
+             AND NULLIF(TRIM(canonical.platform_shop_id), '') IS NULL
+            THEN 'missing_required_platform_shop_id'
+            ELSE NULL
+        END AS identity_warning_code,
+        resolved_candidate.candidate_count AS identity_candidate_count,
+        resolved_candidate.candidate_shop_ids::text AS identity_candidates,
         m.data_domain,
         m.granularity,
         m.metric_date,
@@ -160,50 +178,77 @@ resolved AS (
         m.currency_code
     FROM mapped m
     LEFT JOIN LATERAL (
+        WITH candidate_values AS (
+            -- 候选值集合：必须留在 LATERAL 内部（行相关：引用外层 m.*）
+            SELECT candidate.identity_value_normalized
+            FROM (
+                VALUES
+                    (LOWER(COALESCE(m.source_platform_shop_id, ''))),
+                    (LOWER(COALESCE(m.source_shop_account_id, ''))),
+                    (LOWER(COALESCE(m.source_shop_id, ''))),
+                    (
+                        REGEXP_REPLACE(
+                            REGEXP_REPLACE(
+                                LOWER(TRIM(COALESCE(m.source_shop_id, ''))),
+                                '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
+                                '',
+                                'i'
+                            ),
+                            '[[:space:]_()/-]+',
+                            '',
+                            'g'
+                        )
+                    ),
+                    (
+                        REGEXP_REPLACE(
+                            REGEXP_REPLACE(
+                                LOWER(TRIM(COALESCE(m.store_label_raw, ''))),
+                                '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
+                                '',
+                                'i'
+                            ),
+                            '[[:space:]_()/-]+',
+                            '',
+                            'g'
+                        )
+                    )
+            ) candidate(identity_value_normalized)
+            WHERE NULLIF(candidate.identity_value_normalized, '') IS NOT NULL
+        )
         SELECT
-            c.resolved_shop_id,
-            c.resolved_shop_account_id,
-            c.resolution_method,
-            c.resolution_priority
+            agg.candidate_count,
+            agg.candidate_shop_ids,
+            best.resolved_shop_id,
+            best.resolved_shop_account_id,
+            best.resolution_method,
+            best.resolution_priority
         FROM (
-            VALUES
-                (LOWER(COALESCE(m.source_platform_shop_id, ''))),
-                (LOWER(COALESCE(m.source_shop_account_id, ''))),
-                (LOWER(COALESCE(m.source_shop_id, ''))),
-                (
-                    REGEXP_REPLACE(
-                        REGEXP_REPLACE(
-                            LOWER(TRIM(COALESCE(m.source_shop_id, ''))),
-                            '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
-                            '',
-                            'i'
-                        ),
-                        '[[:space:]_()/-]+',
-                        '',
-                        'g'
-                    )
-                ),
-                (
-                    REGEXP_REPLACE(
-                        REGEXP_REPLACE(
-                            LOWER(TRIM(COALESCE(m.store_label_raw, ''))),
-                            '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
-                            '',
-                            'i'
-                        ),
-                        '[[:space:]_()/-]+',
-                        '',
-                        'g'
-                    )
-                )
-        ) candidate(identity_value_normalized)
-        INNER JOIN semantic.shop_identity_resolution_candidates c
-          ON c.platform_code = LOWER(COALESCE(m.platform_code, ''))
-         AND c.identity_value_normalized = candidate.identity_value_normalized
-        WHERE NULLIF(candidate.identity_value_normalized, '') IS NOT NULL
-        ORDER BY c.resolution_priority, c.resolved_shop_id
+            -- ① 计数与候选清单：纯聚合，按去重后的店铺算
+            SELECT
+                count(DISTINCT c.resolved_shop_id)::int AS candidate_count,
+                array_agg(DISTINCT c.resolved_shop_id ORDER BY c.resolved_shop_id) AS candidate_shop_ids
+            FROM semantic.shop_identity_resolution_candidates c
+            WHERE c.platform_code = LOWER(COALESCE(m.platform_code, ''))
+              AND c.identity_value_normalized = ANY (ARRAY(SELECT identity_value_normalized FROM candidate_values))
+        ) agg
+        LEFT JOIN LATERAL (
+            -- ② 最优候选：每个店只保留优先级最高的一行
+            SELECT DISTINCT ON (c.resolved_shop_id)
+                   c.resolved_shop_id,
+                   c.resolved_shop_account_id,
+                   c.resolution_method,
+                   c.resolution_priority
+            FROM semantic.shop_identity_resolution_candidates c
+            WHERE c.platform_code = LOWER(COALESCE(m.platform_code, ''))
+              AND c.identity_value_normalized = ANY (ARRAY(SELECT identity_value_normalized FROM candidate_values))
+            ORDER BY c.resolved_shop_id, c.resolution_priority, c.resolution_method
+        ) best ON TRUE
+        ORDER BY best.resolution_priority, best.resolved_shop_id
         LIMIT 1
     ) resolved_candidate ON TRUE
+    LEFT JOIN core.shop_accounts canonical
+      ON LOWER(COALESCE(canonical.platform, '')) = LOWER(COALESCE(m.platform_code, ''))
+     AND canonical.shop_account_id = resolved_candidate.resolved_shop_account_id
 ),
 cleaned AS (
     SELECT
@@ -214,6 +259,9 @@ cleaned AS (
         resolved_shop_account_id,
         resolution_method,
         identity_source_value,
+        identity_warning_code,
+        identity_candidate_count,
+        identity_candidates,
         data_domain,
         granularity,
         metric_date,
@@ -323,6 +371,9 @@ SELECT
     header_columns,
     data_hash,
     ingest_timestamp,
-    currency_code
+    currency_code,
+    identity_warning_code,
+    identity_candidate_count,
+    identity_candidates
 FROM deduplicated
 WHERE rn = 1;

@@ -85,7 +85,7 @@ def test_refresh_registry_exposes_dependency_order():
         topologically_sort_targets,
     )
 
-    assert PIPELINE_DEPENDENCIES["semantic.fact_orders_atomic"] == []
+    assert PIPELINE_DEPENDENCIES["semantic.fact_orders_atomic"] == ["semantic.shop_identity_resolution_candidates"]
     assert SQL_TARGET_PATHS["semantic.fact_orders_atomic"] == "sql/semantic/orders_atomic.sql"
     assert PIPELINE_DEPENDENCIES["semantic.fact_orders_monthly_atomic_mv"] == ["semantic.shop_identity_resolution_candidates"]
     assert SQL_TARGET_PATHS["semantic.fact_orders_monthly_atomic_mv"] == "sql/semantic/orders_monthly_atomic_mv.sql"

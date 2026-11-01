@@ -19,5 +19,7 @@ SELECT
     product_quantity,
     profit,
     data_hash,
-    ingest_timestamp
+    ingest_timestamp,
+    identity_candidate_count,
+    identity_candidates
 FROM semantic.fact_orders_monthly_atomic_mv;
