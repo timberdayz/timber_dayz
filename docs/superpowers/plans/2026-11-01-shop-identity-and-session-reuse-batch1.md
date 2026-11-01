@@ -841,20 +841,22 @@ def downgrade() -> None:
         UniqueConstraint("platform", "alias_normalized", "is_active", name="uq_shop_account_aliases_active_alias"),
 ```
 
-改为
+改为**唯一索引**（不是 UniqueConstraint）：
 
 ```python
-        UniqueConstraint(
+        Index(
+            "uq_shop_account_aliases_active_alias",
             "platform",
             "alias_normalized",
             "shop_region",
             "is_active",
-            name="uq_shop_account_aliases_active_alias",
+            unique=True,
             postgresql_nulls_not_distinct=True,
         ),
 ```
 
-> `postgresql_nulls_not_distinct=True` 是 SQLAlchemy 2.0 的 `UniqueConstraint` 参数。若当前 SQLAlchemy 版本不支持该参数，改用 `Index(..., postgresql_nulls_not_distinct=True)` 表达同一个唯一索引，并在本 Task 的提交说明里注明。
+> **为什么用 Index 而不是 UniqueConstraint**：仓库当前 SQLAlchemy 是 **2.0.41**，`UniqueConstraint.__init__` **不支持** `postgresql_nulls_not_distinct` 参数（已实测：`"postgresql_nulls_not_distinct" in inspect.signature(UniqueConstraint.__init__).parameters` → `False`）。只有 `Index` 支持该参数。
+> 迁移脚本里用的是原生 SQL（`ALTER TABLE ... ADD CONSTRAINT ... UNIQUE NULLS NOT DISTINCT (...)`），与这里的 Index 定义语义一致。
 
 - [ ] **Step 5: 运行测试确认通过**
 
@@ -966,14 +968,25 @@ def test_normalize_alias_key_is_idempotent():
 
 
 def test_sql_assets_use_stored_alias_normalized():
-    """SQL 侧必须直接使用存储的 alias_normalized，不再做第二次规范化。"""
+    """直接引用别名表的 SQL 必须用存储的 alias_normalized。
+
+    注：``analytics_atomic.sql`` 与 ``orders_monthly_atomic_mv.sql`` 走的是候选视图
+    ``semantic.shop_identity_resolution_candidates``，不直接 JOIN 别名表，
+    所以对这两个文件断言的是「引用了候选视图」。
+    """
     for rel in (
         "sql/semantic/shop_identity_resolution_candidates.sql",
         "sql/semantic/orders_atomic.sql",
-        "sql/semantic/analytics_atomic.sql",
     ):
         text = (REPO_ROOT / rel).read_text(encoding="utf-8")
         assert "saa.alias_normalized" in text, f"{rel} 未使用存储的 alias_normalized"
+
+    for rel in (
+        "sql/semantic/analytics_atomic.sql",
+        "sql/semantic/orders_monthly_atomic_mv.sql",
+    ):
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert "shop_identity_resolution_candidates" in text, f"{rel} 未引用候选视图"
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -1043,19 +1056,22 @@ def normalize_alias_key(value: str) -> str:
    ) AS identity_value_normalized
 ```
 
+`sql/semantic/analytics_atomic.sql` 与 `sql/semantic/orders_monthly_atomic_mv.sql` **不直接 JOIN 别名表**，它们走候选视图 `semantic.shop_identity_resolution_candidates` → **不需要改**（候选视图里已经用的是 `saa.alias_normalized`）。
+
 `sql/semantic/orders_atomic.sql:467` 的别名比对条件：
 
 ```sql
                      OR LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(REGEXP_REPLACE(LOWER(TRIM(COALESCE(d.store_label_raw, ''))), '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*', '', 'i'), '\s+', ' ', 'g')
 ```
 
-改为（直接用存储值比对原始标签的规范化形式——注意原始标签仍需按同一规则规范化后才能与存储值比较，所以这里比对的是**存储值**与**标签规范化后**的值）：
+改为（把原始标签规范化成与存储值同一套规则：剥前缀 → 小写 → 删分隔符）：
 
 ```sql
                      OR LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(LOWER(TRIM(COALESCE(d.store_label_raw, ''))), '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*', '', 'i'), '[\s_()/-]+', '', 'g'), '\s+', ' ', 'g')
 ```
 
-`sql/semantic/analytics_atomic.sql` 做**同样**的改动（找到对应的 store_name / alias 规范化表达式）。
+> **同时把 `:470` 的 ORDER BY 里的同一段表达式一并替换**（`:470` 的 `CASE WHEN LOWER(COALESCE(saa.alias_normalized, '')) = REGEXP_REPLACE(...)` 用的是旧规则，不改会导致"能命中但排序按旧规则"）。
+> **本 Task 不动 `orders_atomic.sql` 的整体解析结构** —— 它在 Task 7 会被整体改成走候选视图。
 
 > **实施者必须做的核对**：改完后，用 live 库验证「21 条存量别名的 `alias_normalized` 是否已符合新规则」。若不符合，需要一条数据订正脚本把存量值重算（**这一步会改变匹配行为，必须单独一个提交并说明**）。
 
@@ -1181,9 +1197,28 @@ Expected: FAIL。
 
 - [ ] **Step 4: 三条语义路径统一判定逻辑**
 
-以 `sql/semantic/orders_atomic.sql` 为样板（另外两个文件做同样改动）：
+**三条路径的现状（已核验，勿凭印象改）：**
 
-把 `LATERAL` 子查询从「取一行」改成「取候选集合 + 计数」：
+| 文件 | 现状 | 关键位置 |
+|---|---|---|
+| `sql/semantic/orders_atomic.sql`（530 行） | **不走候选视图**，直接 `LATERAL` 扫 `core.shop_accounts sa` + `LEFT JOIN core.shop_account_aliases saa`，条件是 `store_name` 等值 **OR** `platform_shop_id` 等值 **OR** 别名匹配，`ORDER BY 别名命中 → is_primary → sa.id LIMIT 1` | `:451-474`（LATERAL）、`:462-467`（匹配条件）、`:469-473`（排序 + LIMIT 1） |
+| `sql/semantic/analytics_atomic.sql`（328 行） | 走候选视图，`LATERAL` + `ORDER BY resolution_priority, resolved_shop_id LIMIT 1` | `:175-229` |
+| `sql/semantic/orders_monthly_atomic_mv.sql`（317 行） | 走候选视图，`LATERAL` + `ORDER BY c.resolution_priority, c.resolved_shop_id LIMIT 1`；候选集合由 `mapped` 层的 `normalized_identity_candidates` 数组提供 | `:139-147`（LATERAL）、`:267-292` |
+
+**4a. 先把 `orders_atomic.sql` 改成走候选视图（口径统一的前提）。**
+
+`orders_atomic.sql` 是三条里唯一自己扫 `core.shop_accounts` 的，因此它的塌缩胜者（SG 店）与另两条（MY 店）不同。
+
+改动要求：
+1. 在 `mapped` CTE 里补出 `normalized_identity_candidates` 数组，**构造方式照抄 `sql/semantic/orders_monthly_atomic_mv.sql` 的 mapped 层**（候选来源 = `source_platform_shop_id` / `source_shop_account_id` / `source_shop_id`（排除 `xihong`/`unknown`/`none`）/ `source_shop_id_compact` / `normalized_store_label_raw`）。
+   > `orders_atomic.sql` 当前**没有** `normalized_identity_candidates`（实测 0 次），`mapped` 层也没有 `normalized_store_label_raw` —— 这两个都要补。
+2. 把 `:451-474` 的 LATERAL 换成扫 `semantic.shop_identity_resolution_candidates c`，条件 `c.platform_code = lower(d.platform_code) AND c.identity_value_normalized = ANY (d.normalized_identity_candidates)`。
+3. 删掉 `orders_atomic.sql` 里对 `core.shop_account_aliases` 的直接 JOIN —— 别名匹配统一由候选视图的 `alias_match` 分支承担。
+4. 保留原有的「`shop_id` 为 `''`/`none`/`unknown`/`xihong` 时落 `unknown`」兜底。
+
+**4b. 三条路径的 LATERAL 改成「候选集合 + 计数」。**
+
+以 `sql/semantic/orders_monthly_atomic_mv.sql:139-147` 为样板（三个文件做同样改动）：
 
 ```sql
          LEFT JOIN LATERAL (
@@ -1200,17 +1235,18 @@ Expected: FAIL。
              ) resolved ON TRUE
 ```
 
+> `count(*) OVER ()` 在 `GROUP BY` 之后是**分组窗口计数**（不是 `count(*) OVER ()` 的默认整表计数），语义正确；`array_agg` 必须与 `GROUP BY` 的列一致。实施者**必须在 live 上先跑一次这条 SQL 验证语法**，不要直接部署。
+
 然后把 `shop_id` 的 CASE 改成：
 
 ```sql
              CASE
                  WHEN resolved.candidate_count = 1 THEN resolved.resolved_shop_id
-                 WHEN resolved.candidate_count IS NULL OR resolved.candidate_count = 0 THEN 'unknown'
                  ELSE 'unknown'
              END AS shop_id,
 ```
 
-并新增两列：
+并新增三列：
 
 ```sql
              CASE
@@ -1222,11 +1258,12 @@ Expected: FAIL。
              resolved.candidate_shop_ids::text AS identity_candidates,
 ```
 
-> `identity_warning_code` / `identity_candidate_count` / `identity_candidates` 三列在 `fact_orders_atomic` 与 `fact_analytics_atomic` 上是**新增列**（现有列数分别为 43 与其它），加列后必须同步：
-> - `sql/semantic/orders_atomic.sql` 末尾的最终 SELECT 列表；
-> - `sql/semantic/analytics_atomic.sql` 的最终 SELECT 列表；
-> - 下游消费这些视图的 mart / api 层 SQL（`sql/mart/*`、`sql/api/*`）—— 若它们用了 `SELECT *`，无需改；若是显式列表，需要补列。
+> `identity_warning_code` / `identity_candidate_count` / `identity_candidates` 三列在 `fact_orders_atomic` 与 `fact_analytics_atomic` 上是**新增列**（`fact_orders_atomic` 现有 43 列），加列后必须同步：
+> - 三个 SQL 资产各自的**最终 SELECT 列表**（`orders_atomic.sql` 的 `:477+`、`analytics_atomic.sql` 的最终 SELECT、`orders_monthly_atomic_mv.sql` 的最终 SELECT）；
+> - 下游消费这些视图的 mart / api 层 SQL（`sql/mart/*`、`sql/api/*`）—— 若它们用了 `SELECT *` 则无需改；若是显式列表，需要补列；
 > - `backend/schemas/` 下暴露这些字段的 Pydantic 契约（若有）。
+>
+> **实施者必须先 grep 全部下游引用**：`grep -rn "fact_orders_atomic" sql/ backend/ --include=*.sql --include=*.py`。
 
 - [ ] **Step 5: 跑语义层 SQL 资产一致性测试**
 

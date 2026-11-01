@@ -297,7 +297,7 @@ semantic.fact_orders_atomic (tiktok):
 | **系统自动** | 按 `store_name` + `shop_region` + `main_account_id` 生成建议值 | 区域是现成的辅助锚点（**但不是唯一锚点**，见下） |
 | **用户手动** | 在账号管理页现有编辑弹窗里确认或修改建议值 | 平台侧真实店名我们不知道，**不能自动生成**；标准名是业务命名决策（要不要带平台、要不要带序号），**必须人定** |
 | **系统自动** | 同平台内唯一性校验；冲突时给出具体冲突项 | 建议值可能撞车，必须能自动消歧 |
-| **系统自动** | 改名时自动记曾用名；同步 `core.platform_accounts.store_name`（否则 `dim_shops` 会被打回旧名，见 `backend/services/shop_sync_service.py:85`）；同主账号下唯一性校验 | 这些是"改名动作的必然副作用"，手工做必然漏 |
+| **系统自动** | 改名时自动记曾用名；同步 `core.dim_shops.shop_name`（展示用的维度表，否则页面/绩效/提成显示旧名）；同主账号下唯一性校验 | 这些是"改名动作的必然副作用"，手工做必然漏 |
 
 **建议值生成规则（必须逐形态枚举，否则不可预测）**：
 
@@ -460,10 +460,14 @@ D12 的两个新码与既有 `unresolved_shop_account` 的关系需明确：**�
 1. **唯一性校验**：同平台 `internal_code` 唯一；同主账号 `store_name` 唯一。
 2. **旧名转曾用名**：把旧 `store_name` 写入别名表（`is_active=true`, `is_primary=false`, `alias_type='former_name'`）—— 老数据继续命中（D15）。
 3. **新名接管**：新 `store_name` 写入别名表并置 `is_primary=true`（原主别名降为 `is_primary=false`，`is_active` 保持 True）。
-4. **同步 `core.platform_accounts.store_name`** —— 否则 `dim_shops` 会被打回旧名（`backend/services/shop_sync_service.py:85`）。
+4. **同步 `core.dim_shops.shop_name`**（`platform_code = platform AND shop_id = shop_account_id`）—— 否则页面、绩效、提成里显示的还是旧名。
+   > **⚠ 不是 `core.platform_accounts`**：该表是**主账号粒度**的旧表（11 行，`account_id` = 主账号 ID，`store_name` = 主账号名如 `Tiktok 1店`，`shop_id` 全为 NULL）→ 改店铺名不该改它。
+   > `core.dim_shops`（49 行）里的店铺粒度行（`shop_id = tiktok_my_dawie_mall_local` / `xhkj1.my` 等）的 `shop_name` 已经等于 `core.shop_accounts.store_name`，且被 `hr_commission` / `target_management` / `clearance_ranking_service` / `c_class_data_service` 读取展示。
+   > `backend/services/shop_sync_service.py:83-103` 现有的是 `core.platform_accounts` → `core.dim_shops` 的同步（方向相反、粒度不同），**不能直接复用**。
 5. **同步 `internal_code`**（若随之改动）。
 6. **入刷新队列**：`core.shop_account_aliases` 变更 → `shop_account_aliases.py:347` `_enqueue_shop_identity_refresh` → `RefreshQueueService.enqueue_refresh`。**改名必须触发这一次重算**（归属路径要重算），但**不得**由改名路径触发超出必要范围的全量重建。
-   → 实施前必须确认当前改名路径是否已调用 `_enqueue_shop_identity_refresh`（尚未核实），据此决定是"补调用"还是"保持"。
+   > **已核实（`shop_accounts.py:363-405`）**：`update_shop_account` **已经**调用 `_enqueue_shop_identity_refresh(db, shop_account=record, changed_fields=...)`，且 `_SHOP_IDENTITY_FIELDS`（`:42-47`）已包含 `store_name` → **改名本来就会触发一次刷新**。
+   > **但**：`_SHOP_IDENTITY_REFRESH_TARGETS`（`:38-41`）目前只有 `semantic.fact_orders_monthly_atomic_mv` 与 `semantic.fact_analytics_monthly_atomic_mv` 两个**物化视图**；而 `semantic.fact_orders_atomic` 与 `semantic.fact_analytics_atomic` 是**视图**（改定义即生效，但旧数据不会自动重算）→ 实施前必须确认 `RefreshQueueService.enqueue_refresh` 的实际重算范围，并决定是否把这两个视图纳入刷新目标。**这是 B5「改名后自动重认」能否成立的关键。**
 
 ---
 
@@ -547,7 +551,7 @@ ALTER TABLE core.shop_account_aliases
 ```
 
 ORM SSOT 同步更新 `modules/core/db/schema_parts/platform.py`。
-`core.platform_accounts`（旧表）的 `store_name` 同步逻辑在 `backend/services/shop_sync_service.py:83-103`，不新增列。
+`core.platform_accounts`（旧表，主账号粒度）本轮**不动**；改名时同步的是 `core.dim_shops.shop_name`（店铺粒度，见 D17 第 4 步）。
 
 ---
 
@@ -567,7 +571,7 @@ ORM SSOT 同步更新 `modules/core/db/schema_parts/platform.py`。
 - [ ] **A10（别名区域维度）** `core.shop_account_aliases.shop_region` 列存在；新唯一约束生效；`FIORO` 可同时挂在 `FIORO_SG` / `FIORO_MY` / `FIORO_PH` 三个店上而不冲突；`shop_region IS NULL` 的存量行不绕过约束。
 - [ ] **A11（会话新鲜度）** 读一次会话**不会**刷新 `saved_at`；把 `saved_at` 调到 40 天前 + `last_used_at` 调到当前 → 判定为过期。
 - [ ] **A12（持久化口径）** TikTok 走持久 profile 模式时，登录后的 storage_state 仍会落盘，且不会覆盖人工保存的 protected 会话。
-- [ ] **A13（改名联动）** 改 `store_name` → 旧名进别名表（`is_primary=false`, `is_active=true`, `alias_type='former_name'`）、新名接管 `is_primary`、`core.platform_accounts.store_name` 与 `internal_code` 同步；**改名后携带旧名的历史数据仍归到同一个 `shop_account_id`，不落 unknown**；刷新队列触发**一次**（且仅一次）归属重算。
+- [ ] **A13（改名联动）** 改 `store_name` → 旧名进别名表（`is_primary=false`, `is_active=true`, `alias_type='former_name'`）、新名接管 `is_primary`、`core.dim_shops.shop_name` 与 `internal_code` 同步；**改名后携带旧名的历史数据仍归到同一个 `shop_account_id`，不落 unknown**；刷新队列触发**一次**（且仅一次）归属重算。
 - [ ] **A14（待认领清单）** `TK新加坡3C店`（monthly 88 行 / atomic unknown 90 行）**按业务决定暂不认领**：保持 `unknown`，并在「未匹配店铺别名」面板可见（含说明：现有 6 个 TikTok 店已被其它标签 1:1 占满，需新建店账号才能认领）。
 
 ### 第二批

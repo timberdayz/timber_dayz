@@ -366,25 +366,43 @@ git commit -m "fix(会话): 新鲜度只认 saved_at，30 天过期机制恢复�
 ```python
 def test_manual_seeded_session_is_not_skipped_for_tiktok():
     """人工保存的会话在 TikTok 持久 profile 模式下也必须落盘。"""
-    from modules.apps.collection_center.executor_v2 import _should_skip_post_login_session_persist
+    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
 
-    assert not _should_skip_post_login_session_persist(
+    params = {
+        "_runtime_session_mode": "persistent_profile",
+        "session_metadata": {"manual_seeded": True, "protected": True},
+    }
+    assert not CollectionExecutorV2._should_skip_post_login_session_persist(
         platform="tiktok",
-        runtime_mode="persistent_profile",
-        session_metadata={"manual_seeded": True, "protected": True},
+        params=params,
     )
 
 
 def test_automatic_tiktok_persistent_profile_may_still_skip():
     """自动来源的 TikTok 持久 profile 保持原有跳过行为。"""
-    from modules.apps.collection_center.executor_v2 import _should_skip_post_login_session_persist
+    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
 
-    assert _should_skip_post_login_session_persist(
+    params = {
+        "_runtime_session_mode": "persistent_profile",
+        "session_metadata": {},
+    }
+    assert CollectionExecutorV2._should_skip_post_login_session_persist(
         platform="tiktok",
-        runtime_mode="persistent_profile",
-        session_metadata={},
+        params=params,
+    )
+
+
+def test_non_tiktok_platform_is_never_skipped():
+    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
+
+    params = {"_runtime_session_mode": "persistent_profile", "session_metadata": {}}
+    assert not CollectionExecutorV2._should_skip_post_login_session_persist(
+        platform="shopee",
+        params=params,
     )
 ```
+
+> **真实签名（已核验 `executor_v2.py:2805-2822`）**：`_should_skip_post_login_session_persist` 是 `CollectionExecutorV2` 上的 `@staticmethod`，签名为 `(*, platform: str, params: Dict[str, Any]) -> bool`。`runtime_mode` 由 `params["_runtime_session_mode"]` 或 `params["params"]["_runtime_session_mode"]` 推导，**不是独立入参**。两个调用点在 `executor_v2.py:1291` 与 `:3158`，都只传 `platform` 与 `params`。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -394,35 +412,74 @@ python -m pytest backend/tests/test_collection_executor_session_alignment.py -q 
 
 Expected: `test_manual_seeded_session_is_not_skipped_for_tiktok` FAIL。
 
-- [ ] **Step 3: 改 `_should_skip_post_login_session_persist`**
+- [ ] **Step 3: 让跳过判定能看见「人工保存」标记**
 
-把 `modules/apps/collection_center/executor_v2.py:2805-2822` 替换为：
+**3a. 把会话元数据带进 `params`。**
+
+`modules/apps/collection_center/runtime_session.py:507-514` 的 `RuntimeSessionCandidate` 已经带了 `metadata` 与 `manual_seeded` 属性（`manual_seeded` = `metadata.manual_seeded or metadata.protected`）—— **这是现成的判据，不要另造**。
+
+实施者必须做的三件事：
+
+1. 在 `executor_v2.py:505-522`（`_open_runtime_bundle` 里装载 `session_data` 的位置）把 `session_data.get("metadata")` 取出来。
+2. 在构造 `params` 之后（`executor_v2.py:583` 附近，以及同样写 `params["reused_session"]` 的 `:591`、`:1997`、`:2103`、`:5834`、`:6161` 各处）写入：
+   ```python
+   params["session_metadata"] = session_metadata or {}
+   ```
+   > **实施者必须先 `grep -n "_runtime_session_mode" modules/apps/collection_center/executor_v2.py`**，找出 `session_metadata` 必须在哪些点与 `_runtime_session_mode` 一起写入 —— 漏一个点，那个分支就拿不到人工标记。
+3. `runtime_bundle` 里若已有 `session_metadata` 字段（`runtime_session.py:492` 的 dataclass 已有 `session_metadata: Dict[str, Any]`），直接透传，不要新建字段。
+
+**3b. 改判定逻辑（签名不变，两个调用点不用改）。**
+
+把 `executor_v2.py:2805-2822` 替换为：
 
 ```python
-def _should_skip_post_login_session_persist(
-    platform: str,
-    runtime_mode: str,
-    session_metadata: Optional[Dict[str, Any]] = None,
-) -> bool:
-    """TikTok 走持久 profile 时默认不落 storage_state。
+    @staticmethod
+    def _should_skip_post_login_session_persist(
+        *,
+        platform: str,
+        params: Dict[str, Any],
+    ) -> bool:
+        """TikTok 走持久 profile 时默认不落 storage_state。
 
-    但**人工巡店保存的会话必须落盘**（spec D8）——否则采集侧读不到人工会话，
-    自动化保存的会话保持原行为。
-    """
-    metadata = session_metadata if isinstance(session_metadata, dict) else {}
-    if metadata.get("manual_seeded") or metadata.get("protected"):
-        return False
-    return platform == "tiktok" and runtime_mode == "persistent_profile"
+        但**人工巡店保存的会话必须落盘**（spec D8）—— 否则采集侧读不到人工会话。
+        自动来源的会话保持原有跳过行为。
+        """
+        normalized_platform = str(platform or "").strip().lower()
+        nested_params = params.get("params") or {}
+        runtime_mode = (
+            str(
+                params.get("_runtime_session_mode")
+                or nested_params.get("_runtime_session_mode")
+                or ""
+            )
+            .strip()
+            .lower()
+        )
+        if not (normalized_platform == "tiktok" and runtime_mode == "persistent_profile"):
+            return False
+
+        metadata = params.get("session_metadata")
+        if not isinstance(metadata, dict):
+            metadata = nested_params.get("session_metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if metadata.get("manual_seeded") or metadata.get("protected"):
+            return False
+        return True
 ```
 
-> **实施者必须核对**真实函数签名并同步所有调用点（grep `_should_skip_post_login_session_persist`）。
-> 若现签名没有 `session_metadata` 参数，需要新增并把会话元数据传进来。
+> **签名刻意保持 `(*, platform, params)`**：现有两个调用点（`executor_v2.py:1291` 与 `:3158`）不需要改动，减少回归面。
 
 - [ ] **Step 4: 补 executor 版 bootstrap 的 TikTok 质量门禁**
 
-把 `modules/apps/collection_center/runtime_session.py:74-136` 的质量门禁逻辑（`tiktok_storage_state_meets_quality_gate` 等）复用到 `executor_v2.py:255-309` 的 bootstrap 路径：加载 storage_state 后，若平台是 TikTok 且质量门禁未过，则视为「无会话」，走重新登录。
+复用现成符号，**不要复制实现**：
 
-> **实施者必须先读** `runtime_session.py:74-136` 的确切实现与导出符号，再在 executor 侧调用同一套函数，**不要复制一份**。
+- `modules/apps/collection_center/runtime_session.py:104` `tiktok_storage_state_meets_quality_gate(storage_state) -> bool`
+- `modules/apps/collection_center/runtime_session.py:74` `tiktok_storage_state_quality_score(storage_state) -> int`
+
+在 `executor_v2.py:255-309` 的 executor 版 bootstrap 路径里：加载 storage_state 之后，若平台是 TikTok 且 `tiktok_storage_state_meets_quality_gate(...)` 为 False，则**视为「无会话」**，走重新登录。
+
+> 现状核实：`executor_v2.py:255-309` 的 executor 版 bootstrap **没有**引用上述两个函数（只有 `runtime_session.py` 侧有）。实施者要 import 上面的现成函数，不要把质量评分逻辑再写一遍。
 
 - [ ] **Step 5: 运行测试确认通过**
 
@@ -684,7 +741,7 @@ git commit -m "feat(店铺身份): 新增内部标准名 internal_code 及账号
 **Files:**
 - Modify: `backend/domains/collection/routers/shop_accounts.py:363-405`（`update_shop_account`）
 - Modify: `backend/domains/collection/routers/shop_account_aliases.py:297-307`（409 判定放宽）、`:164-180`（`_clear_primary_aliases`）
-- Modify: `backend/services/shop_sync_service.py:83-103`（`core.platform_accounts.store_name` 同步）
+- Create: `backend/services/shop_rename_service.py`（改名联动 + `core.dim_shops` 展示名同步）
 - Test: `backend/tests/test_shop_rename_flow.py`（新建）
 
 **业务背景（spec §11.1 第 1 条 + D15 + D17）**：
@@ -696,9 +753,16 @@ git commit -m "feat(店铺身份): 新增内部标准名 internal_code 及账号
 1. **唯一性校验**：同平台 `internal_code` 唯一；同主账号 `store_name` 唯一。
 2. **旧名转曾用名**：把旧 `store_name` 写入别名表（`is_active=true`, `is_primary=false`, `alias_type='former_name'`）→ **老数据继续命中同一个店**。
 3. **新名接管**：新 `store_name` 写入别名表并置 `is_primary=true`；原主别名降为 `is_primary=false`、`is_active` 保持 True。
-4. **同步 `core.platform_accounts.store_name`** → 否则 `dim_shops` 会被打回旧名。
+4. **同步 `core.dim_shops.shop_name`** → 否则页面、绩效、提成里显示的还是旧名。
 5. **同步 `internal_code`**（若随之改动）。
 6. **入刷新队列** → 触发**一次**归属重算（必要，因为归属路径要重算）。
+
+> **⚠ 同步目标是 `core.dim_shops`，不是 `core.platform_accounts`。**
+> 已核验（live 库）：`core.platform_accounts` 是**主账号粒度**的旧表（11 行，`account_id` = 主账号 ID，`store_name` = 主账号名如 `Tiktok 1店`，`shop_id` 全为 NULL）。
+> **改店铺名不应该改它** —— 那会把店铺名写回主账号名上。
+> 真正需要同步的是 `core.dim_shops`（49 行，其中店铺粒度的行 `shop_id = tiktok_my_dawie_mall_local` / `xhkj1.my` 等，其 `shop_name` 已经等于 `core.shop_accounts.store_name`）。
+> `core.dim_shops.shop_name` 被 `backend/domains/business/routers/hr_commission.py`、`target_management.py`、`backend/services/clearance_ranking_service.py`、`c_class_data_service.py` 等读取并展示 → 不同步就会显示旧名。
+> `backend/services/shop_sync_service.py:83-103` 现有的是 `core.platform_accounts` → `core.dim_shops` 的同步（方向相反，粒度也不同），**不能直接复用**。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -719,7 +783,7 @@ def test_update_shop_account_has_rename_linking():
     body = text.split("async def update_shop_account", 1)[1].split("\nasync def ", 1)[0]
     assert "former_name" in body, "改名流程没有写曾用名"
     assert "is_primary" in body, "改名流程没有处理主别名接管"
-    assert "platform_accounts" in body, "改名流程没有同步 core.platform_accounts"
+    assert "dim_shops" in body, "改名流程没有同步 core.dim_shops 的展示名"
     assert "setattr" not in body, "update_shop_account 仍是裸 setattr"
 ```
 
@@ -778,17 +842,18 @@ async def _apply_store_name_rename(
         is_active=True,
     )
 
-    # 3) 同步旧表
-    await sync_platform_account_store_name(db, platform, shop_account.shop_account_id, new_store_name)
+    # 3) 同步展示用的维度表（店铺粒度）
+    await _sync_dim_shop_name(db, platform, shop_account.shop_account_id, new_store_name)
 
     # 4) 落库
     shop_account.store_name = new_store_name
-    if operator:
-        shop_account.updated_by = operator
 
     # 5) 刷新队列（一次）
     await _enqueue_shop_identity_refresh(changed_fields=["store_name", "alias"])
 ```
+
+> `_sync_dim_shop_name` 需要新建：更新 `core.dim_shops` 中 `platform_code = platform AND shop_id = shop_account.shop_account_id` 的 `shop_name`（找不到对应行时**不新建**，只记日志）。
+> `_enqueue_shop_identity_refresh` 的真实签名是 `(db, shop_account=..., changed_fields=[...])`（`backend/domains/collection/routers/shop_accounts.py:400-404`），**不是**模块级裸函数 —— 实施者必须按真实签名调用。
 
 要求：
 - `_upsert_shop_alias` 必须处理「该别名已存在且属于别的店」的情况 → 冲突则报 409，**不静默覆盖**；
@@ -797,20 +862,61 @@ async def _apply_store_name_rename(
 
 - [ ] **Step 4: `update_shop_account` 改用联动流程**
 
-把 `backend/domains/collection/routers/shop_accounts.py:363-405` 的裸 `setattr` 改为：
+**真实代码（已核验 `backend/domains/collection/routers/shop_accounts.py:363-405`）**：
 
 ```python
-    if "store_name" in payload and payload["store_name"] != shop_account.store_name:
+@router.put("/{shop_account_id}", response_model=ShopAccountResponse)
+async def update_shop_account(
+    shop_account_id: str,
+    payload: ShopAccountUpdate,
+    db: AsyncSession = Depends(get_async_db),
+):
+    record = await _get_shop_account_or_404(db, shop_account_id)
+    update_data = payload.model_dump(exclude_unset=True)
+    ...
+    for field, value in update_data.items():
+        setattr(record, field, value)
+    ...
+    record.updated_by = "system"
+    ...
+    changed_identity_fields = [
+        field for field in update_data.keys() if field in _SHOP_IDENTITY_FIELDS
+    ]
+    await _enqueue_shop_identity_refresh(
+        db,
+        shop_account=record,
+        changed_fields=changed_identity_fields,
+    )
+```
+
+要点（实施者必须按这个改，不要照抄本 Task 早期版本里的变量名）：
+
+| 事实 | 说明 |
+|---|---|
+| 变量是 `update_data`，不是 `payload` | `payload` 是 Pydantic 模型，`update_data` 才是字段字典 |
+| **没有** `editable_fields` | 现有实现是 `for field, value in update_data.items(): setattr(...)` 全量裸赋值 |
+| **没有** `current_user` | 操作人写死 `record.updated_by = "system"` |
+| **`_enqueue_shop_identity_refresh` 已经接上了** | `:400-404` 已调用，且 `_SHOP_IDENTITY_FIELDS`（`:42-47`）已包含 `store_name` → **改名本来就会触发一次刷新**。本 Task **不需要**新增刷新调用，只需保证改名走联动流程时 `changed_fields` 里带上 `store_name` |
+| 刷新的目标是 `_SHOP_IDENTITY_REFRESH_TARGETS`（`:38-41`）= `semantic.fact_orders_monthly_atomic_mv` + `semantic.fact_analytics_monthly_atomic_mv` | 改 `fact_orders_atomic` 视图不在该列表里 —— 见下面的补充说明 |
+
+改法：
+
+```python
+    if "store_name" in update_data and update_data["store_name"] != record.store_name:
         # 同主账号下 store_name 唯一
         await _assert_store_name_unique_in_main_account(
-            db, shop_account.main_account_id, payload["store_name"], exclude_id=shop_account.id
+            db, record.main_account_id, update_data["store_name"], exclude_id=record.id
         )
-        await _apply_store_name_rename(db, shop_account, payload["store_name"], operator=current_user)
+        await _apply_store_name_rename(db, record, update_data["store_name"])
     else:
-        for field in editable_fields:
-            if field in payload:
-                setattr(shop_account, field, payload[field])
+        for field, value in update_data.items():
+            setattr(record, field, value)
 ```
+
+**补充（实施者必须处理）**：`_SHOP_IDENTITY_REFRESH_TARGETS` 目前只有两个 monthly 物化视图，而第一批 Task 7/8 改的是 `semantic.fact_orders_atomic`（VIEW）与 `semantic.fact_analytics_atomic`（VIEW）。改名后要保证**这三个视图的归属都被重算**：
+- 两个 monthly 物化视图 → 现有 `_enqueue_shop_identity_refresh` 已覆盖（需 `REFRESH MATERIALIZED VIEW`）；
+- 两个 VIEW → 改定义即生效，但**旧数据不会自动重算** → 需要在改名后显式触发一次 raw 层重建。
+→ **实施者必须先确认 `RefreshQueueService.enqueue_refresh` 的实际重算范围**（`backend/services/data_pipeline/refresh_queue_service.py:44`），再决定是否需要把 `semantic.fact_orders_atomic` / `semantic.fact_analytics_atomic` 加进 `_SHOP_IDENTITY_REFRESH_TARGETS`。**这一条是 B5「改名后自动重认」能否成立的关键，不得跳过。**
 
 - [ ] **Step 5: 别名应用级约束放宽（D16）**
 
