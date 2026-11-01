@@ -165,12 +165,20 @@ def runtime_account_profile_dir(platform: str, account_id: str) -> Path:
 
 
 def runtime_account_state_path(platform: str, account_id: str) -> Path:
+    """巡店侧会话读取路径。
+
+    必须与 SessionManager 的写入路径完全一致（spec D5）：
+    写入用 safe_session_account_dirname 净化，读取也必须用同一个函数，
+    否则保存下来的会话在下次打开时读不到。
+    """
+    from modules.utils.sessions.session_manager import safe_session_account_dirname
+
     return (
         REPO_ROOT
         / "data"
         / "sessions"
         / platform.lower()
-        / str(account_id).strip()
+        / safe_session_account_dirname(str(account_id).strip())
         / "storage_state.json"
     )
 

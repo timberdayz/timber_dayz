@@ -121,6 +121,27 @@ def _session_freshness_timestamp(session_data: Optional[Dict[str, Any]]) -> floa
     return max(numeric_values) if numeric_values else 0.0
 
 
+def safe_session_account_dirname(account_id: str) -> str:
+    """账号 ID -> 会话目录名。
+
+    会话的**写入路径**与**读取路径**必须共用本函数，否则巡店保存的会话
+    在下次打开时读不到（见 spec D5）。
+
+    Args:
+        account_id: 原始账号 ID，例如 ``hongxikeji:main``
+
+    Returns:
+        安全的目录名，例如 ``hongxikeji_main``
+    """
+    unsafe_chars = '<>:"/\\|?*'
+    safe_name = str(account_id)
+    for char in unsafe_chars:
+        safe_name = safe_name.replace(char, "_")
+    if len(safe_name) > 50:
+        safe_name = safe_name[:50]
+    return safe_name
+
+
 class SessionManager:
     """会话管理器"""
 
@@ -770,7 +791,8 @@ class SessionManager:
         
         return cleaned_count
     
-    def _safe_filename(self, filename: str) -> str:
+    @staticmethod
+    def _safe_filename(filename: str) -> str:
         """
         转换为安全的文件名
         
@@ -780,15 +802,4 @@ class SessionManager:
         Returns:
             安全的文件名
         """
-        # 替换不安全的字符
-        unsafe_chars = '<>:"/\\|?*'
-        safe_name = filename
-        
-        for char in unsafe_chars:
-            safe_name = safe_name.replace(char, '_')
-        
-        # 限制长度
-        if len(safe_name) > 50:
-            safe_name = safe_name[:50]
-        
-        return safe_name
+        return safe_session_account_dirname(filename)
