@@ -112,6 +112,10 @@ class UnmatchedShopAliasItem(BaseModel):
     row_count: int = Field(description="命中行数")
     order_count: int = Field(description="订单数")
     paid_amount: float = Field(description="支付金额汇总")
+    claim_hint: Optional[str] = Field(
+        default=None,
+        description="认领提示：说清为什么现在不能直接认领、下一步该做什么",
+    )
 
 
 class UnmatchedShopAliasResponse(BaseModel):
