@@ -20,6 +20,9 @@ from backend.services.shop_internal_code_service import (
     load_taken_internal_codes,
     suggest_internal_code_for_account,
 )
+from backend.services.shop_rename_service import (
+    apply_store_name_rename as _apply_store_name_rename,
+)
 from backend.utils.text_normalization import normalize_alias_text
 from modules.core.db import (
     MainAccount,
@@ -239,6 +242,36 @@ async def _assert_internal_code_unique(
         )
 
 
+async def _assert_store_name_unique_in_main_account(
+    db: AsyncSession,
+    main_account_id: str,
+    store_name: str | None,
+    *,
+    exclude_id: int | None = None,
+) -> None:
+    """同一个主账号下店铺名唯一（改名联动的第一步校验）。"""
+    normalized_store_name = (store_name or "").strip()
+    if not normalized_store_name:
+        return
+
+    stmt = select(ShopAccount).where(
+        ShopAccount.main_account_id == main_account_id,
+        ShopAccount.store_name == normalized_store_name,
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(ShopAccount.id != exclude_id)
+
+    existing = (await db.execute(stmt)).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"主账号 '{main_account_id}' 下已存在同名店铺 '{normalized_store_name}'"
+                f"（店铺账号 '{existing.shop_account_id}'）"
+            ),
+        )
+
+
 async def _assert_main_account_exists(
     db: AsyncSession, platform: str, main_account_id: str
 ) -> None:
@@ -436,6 +469,9 @@ async def update_shop_account(
     update_data = payload.model_dump(exclude_unset=True)
     capabilities_submitted = "capabilities" in update_data
     capabilities = update_data.pop("capabilities", None)
+    # 改名联动的两个「原值」必须在赋值前抓住 —— 前端每次提交的是整个表单
+    original_store_name = record.store_name
+    original_internal_code = record.internal_code
     if "platform_shop_id" in update_data:
         await _assert_platform_shop_id_unique(
             db,
@@ -453,8 +489,27 @@ async def update_shop_account(
             internal_code=normalized_internal_code,
             exclude_id=record.id,
         )
+    if "store_name" in update_data:
+        await _assert_store_name_unique_in_main_account(
+            db,
+            record.main_account_id,
+            update_data["store_name"],
+            exclude_id=record.id,
+        )
+    # 1) 先按现有逻辑全量赋值（保留 platform_shop_id 唯一性校验与 capabilities 处理）
     for field, value in update_data.items():
         setattr(record, field, value)
+    # 2) 再对 store_name 走改名联动。
+    #    注意：前端每次编辑提交整个表单（store_name 恒存在），
+    #    若把改名做成 if/else，else 分支永远不走 -> 其它字段全部不落库。
+    if "store_name" in update_data and update_data["store_name"] != original_store_name:
+        await _apply_store_name_rename(
+            db,
+            record,
+            update_data["store_name"],
+            old_store_name=original_store_name,
+            original_internal_code=original_internal_code,
+        )
     if capabilities_submitted or "shop_type" in update_data:
         await _ensure_capability_rows(
             db,
@@ -473,6 +528,7 @@ async def update_shop_account(
     changed_identity_fields = [
         field for field in update_data.keys() if field in _SHOP_IDENTITY_FIELDS
     ]
+    # 改名一定会带上 store_name -> 归属重算已经由这一次入队覆盖
     await _enqueue_shop_identity_refresh(
         db,
         shop_account=record,
