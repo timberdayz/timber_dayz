@@ -61,6 +61,22 @@ Live deployment verified:
 这是**部署态**而非分支改动；`git checkout -- sql/semantic backend/services/data_pipeline/refresh_registry.py`
 即可回退，但回退后常驻栈会重新把 live 降回 20 列。
 
+### 分支引入的测试夹具回归（已修，commit `be62d2d8`）
+
+- 现象：候选视图（Task 17）新增 `core.shop_accounts.shop_region` /
+  `core.shop_account_aliases.shop_region` 依赖后，三个 data_pipeline 测试的**夹具表缺列**，
+  创建视图直接失败 → 共 8 条 failed。
+- 修复：三个夹具补 `shop_region` 列；`test_b_cost_analysis_semantic_sql.py`
+  补建候选视图；`test_granularity_alignment_sql.py` 补一条可唯一归属 `shop-a` 的
+  `shop_accounts` 行（计划口径「候选唯一才归属」，候选 0 → `unknown`）。
+- 结论：这三个文件由 8 failed 转为全绿。
+- ⚠ `test_granularity_alignment_sql.py` 仍有 **2 条失败**（与本分支无关）：
+  `test_shop_month_kpi_does_not_fallback_to_daily`（断言月度薄封装里含
+  `fact_shopee_orders_monthly`，但薄封装早已改为只读 MV）与
+  `test_annual_summary_shop_month_does_not_force_missing_costs_to_zero`
+  （`sql/mart/annual_summary_shop_month.sql` 已不存在）。
+  已在 main 基线 worktree（`25aeba29`）逐条对照：**main 上同样失败**，属既有失败。
+
 ### 发布前置条件（未完成，需业务决策）
 
 - 分支**未合并 main、未打 tag、未 push**。
