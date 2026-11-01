@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, date as date_type
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 import hashlib
 import os
 import re
@@ -304,6 +304,313 @@ def _resolve_standard_shop_identity(
         "store_name": _text("store_name") or _text("shop_name"),
         "platform_shop_id": _text("platform_shop_id"),
     }
+
+
+def _identity_text(value: Optional[str]) -> str:
+    """身份字段归一化：去空白；``none`` 视为"没有值"（与目录里的哨兵值一致）。"""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() == "none":
+        return ""
+    return text
+
+
+def _match_shop_account_candidates(
+    candidates: Iterable[Dict[str, Any]],
+    match_method: str,
+) -> Optional[Dict[str, Any]]:
+    """候选店铺账号必须唯一；命中 0 个或多个一律放弃（**不猜**）。
+
+    返回统一形状::
+
+        {
+            "shop_account_id": ..., "main_account_id": ..., "store_name": ...,
+            "platform_shop_id": ..., "shop_region": ..., "match_method": ...,
+        }
+    """
+    unique: Dict[str, Dict[str, Any]] = {}
+    for account in candidates:
+        shop_account_id = _identity_text(account.get("shop_account_id"))
+        if not shop_account_id:
+            continue
+        unique.setdefault(shop_account_id, account)
+
+    if len(unique) != 1:
+        return None
+
+    account = next(iter(unique.values()))
+    return {
+        "shop_account_id": _identity_text(account.get("shop_account_id")),
+        "main_account_id": _identity_text(account.get("main_account_id")) or None,
+        "store_name": _identity_text(account.get("store_name")) or None,
+        "platform_shop_id": _identity_text(account.get("platform_shop_id")) or None,
+        "shop_region": _identity_text(account.get("shop_region")) or None,
+        "match_method": match_method,
+    }
+
+
+def collect_shop_account_candidates(
+    accounts: Iterable[Dict[str, Any]],
+    aliases: Iterable[Dict[str, Any]],
+    *,
+    platform_code: Optional[str] = None,
+    source_platform: Optional[str] = None,
+    platform_shop_id: Optional[str] = None,
+    store_name: Optional[str] = None,
+    shop_id: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], str]:
+    """按优先级收集店铺账号候选（返回**第一个命中方式**的候选列表）。
+
+    匹配优先级（命中即停）：
+
+    1. ``platform_shop_id`` 精确匹配（平台内唯一，最稳）
+    2. ``store_name`` 精确匹配（平台内）
+    3. 别名表 ``alias_normalized`` 匹配（平台内，active 别名）
+    4. 跨平台唯一标签兜底（业务平台与采集来源平台不一致时使用）
+
+    Returns:
+        ``(候选列表, 匹配方式名)``；一个都没命中时返回 ``([], "")``。
+    """
+    account_rows = list(accounts or [])
+    alias_rows = list(aliases or [])
+
+    platforms: List[str] = []
+    for value in (platform_code, source_platform):
+        text = _identity_text(value).lower()
+        if text and text not in platforms:
+            platforms.append(text)
+
+    platform_shop_id_values = {
+        _identity_text(value).lower() for value in (platform_shop_id, shop_id)
+    }
+    platform_shop_id_values.discard("")
+
+    label_values = {_identity_text(value) for value in (store_name, shop_id)}
+    label_values.discard("")
+    label_keys = set()
+    if label_values:
+        from backend.utils.text_normalization import normalize_alias_key
+
+        label_keys = {normalize_alias_key(value) for value in label_values}
+        label_keys.discard("")
+
+    def _accounts_in_platforms(scope_platforms: Iterable[str]) -> List[Dict[str, Any]]:
+        scope = {item for item in scope_platforms if item}
+        if not scope:
+            return list(account_rows)
+        return [
+            account
+            for account in account_rows
+            if _identity_text(account.get("platform")).lower() in scope
+        ]
+
+    def _alias_accounts(
+        scope_platforms: Iterable[str], keys: Iterable[str]
+    ) -> List[Dict[str, Any]]:
+        scope = {item for item in scope_platforms if item}
+        key_set = {item for item in keys if item}
+        if not key_set:
+            return []
+        account_pks = set()
+        for alias in alias_rows:
+            if not alias.get("is_active"):
+                continue
+            alias_platform = _identity_text(alias.get("platform")).lower()
+            if scope and alias_platform not in scope:
+                continue
+            alias_key = _identity_text(alias.get("alias_normalized")).lower()
+            if alias_key not in key_set:
+                continue
+            account_pk = alias.get("shop_account_pk")
+            if account_pk is None:
+                continue
+            account_pks.add(int(account_pk))
+        if not account_pks:
+            return []
+        return [
+            account
+            for account in account_rows
+            if account.get("id") is not None and int(account["id"]) in account_pks
+        ]
+
+    # ① 平台店铺ID（平台内唯一，最稳）
+    if platform_shop_id_values and platforms:
+        hits = [
+            account
+            for account in _accounts_in_platforms(platforms)
+            if _identity_text(account.get("platform_shop_id")).lower()
+            in platform_shop_id_values
+        ]
+        if hits:
+            return hits, "platform_shop_id"
+
+    # ② 店铺名称
+    if label_values and platforms:
+        lowered = {value.lower() for value in label_values}
+        hits = [
+            account
+            for account in _accounts_in_platforms(platforms)
+            if _identity_text(account.get("store_name")).lower() in lowered
+        ]
+        if hits:
+            return hits, "store_name"
+
+    # ③ 别名（active）
+    if label_keys and platforms:
+        hits = _alias_accounts(platforms, label_keys)
+        if hits:
+            return hits, "alias"
+
+    # ④ 跨平台唯一标签兜底
+    if label_values:
+        lowered = {value.lower() for value in label_values}
+        hits = [
+            account
+            for account in account_rows
+            if _identity_text(account.get("store_name")).lower() in lowered
+        ]
+        if hits:
+            return hits, "store_name_cross_platform"
+
+    if label_keys:
+        hits = _alias_accounts(set(), label_keys)
+        if hits:
+            return hits, "alias_cross_platform"
+
+    return [], ""
+
+
+def match_shop_account_by_identity(
+    accounts: Iterable[Dict[str, Any]],
+    aliases: Iterable[Dict[str, Any]],
+    *,
+    platform_code: Optional[str] = None,
+    source_platform: Optional[str] = None,
+    platform_shop_id: Optional[str] = None,
+    store_name: Optional[str] = None,
+    shop_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """纯函数：按 (平台, 平台店铺ID / 店铺标签) 反查店铺账号，**唯一命中才返回**。
+
+    命中 0 个或多个时返回 ``None``（保持 NULL，不猜）。
+    """
+    candidates, match_method = collect_shop_account_candidates(
+        accounts,
+        aliases,
+        platform_code=platform_code,
+        source_platform=source_platform,
+        platform_shop_id=platform_shop_id,
+        store_name=store_name,
+        shop_id=shop_id,
+    )
+    if not candidates:
+        return None
+    return _match_shop_account_candidates(candidates, match_method)
+
+
+def load_shop_account_identity_candidates(
+    session,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """只读读取 ``core.shop_accounts`` / ``core.shop_account_aliases`` 的身份候选。
+
+    只 SELECT 需要的列（不 ``select(ShopAccount)``）—— 模型里的部分列在 live 上
+    还不存在（Task 5 迁移未部署），整表 select 会直接报错。
+    """
+    from modules.core.db import ShopAccount, ShopAccountAlias
+
+    account_rows = session.execute(
+        select(
+            ShopAccount.id,
+            ShopAccount.shop_account_id,
+            ShopAccount.platform,
+            ShopAccount.main_account_id,
+            ShopAccount.store_name,
+            ShopAccount.platform_shop_id,
+            ShopAccount.shop_region,
+        )
+    ).mappings().all()
+
+    alias_rows = session.execute(
+        select(
+            ShopAccountAlias.shop_account_id.label("shop_account_pk"),
+            ShopAccountAlias.platform,
+            ShopAccountAlias.alias_normalized,
+            ShopAccountAlias.is_active,
+        )
+    ).mappings().all()
+
+    return [dict(row) for row in account_rows], [dict(row) for row in alias_rows]
+
+
+def resolve_shop_account_by_identity(
+    session,
+    *,
+    platform_code: Optional[str] = None,
+    source_platform: Optional[str] = None,
+    platform_shop_id: Optional[str] = None,
+    store_name: Optional[str] = None,
+    shop_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """按 (平台, 平台店铺ID / 店铺标签) 反查 ``core.shop_accounts``（唯一命中才用）。
+
+    这是 Task 9 Step 4b 的第 2 条优先级：采集上下文里没有 ``shop_account_id`` 时，
+    用文件上的店铺标签反查；查不到或查到多个 -> 保持 ``NULL``（**不猜**）。
+    """
+    try:
+        accounts, aliases = load_shop_account_identity_candidates(session)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[CatalogScanner] 读取店铺账号候选失败, 跳过身份反查: %s", exc)
+        return None
+
+    return match_shop_account_by_identity(
+        accounts,
+        aliases,
+        platform_code=platform_code,
+        source_platform=source_platform,
+        platform_shop_id=platform_shop_id,
+        store_name=store_name,
+        shop_id=shop_id,
+    )
+
+
+def _apply_resolved_shop_account(
+    session,
+    standard_identity: Optional[Dict[str, Any]],
+    *,
+    platform_code: Optional[str] = None,
+    source_platform: Optional[str] = None,
+    shop_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """把反查到的店铺账号并入采集上下文身份（已有值不覆盖）。
+
+    Task 9 Step 4b 的写入侧口径：
+
+    1. 采集任务上下文里已知的 ``shop_account_id``（**主路径**）—— 直接用；
+    2. 否则按 (平台, 平台店铺ID/店铺标签) 反查 ``core.shop_accounts``，唯一命中才用；
+    3. 都不是 -> 保持 ``NULL``（**不猜**）。
+    """
+    identity: Dict[str, Any] = dict(standard_identity or {})
+    if identity.get("shop_account_id"):
+        return identity
+
+    resolved = resolve_shop_account_by_identity(
+        session,
+        platform_code=platform_code,
+        source_platform=source_platform,
+        platform_shop_id=identity.get("platform_shop_id"),
+        store_name=identity.get("store_name"),
+        shop_id=shop_id,
+    )
+    if not resolved:
+        return identity
+
+    identity["shop_account_id"] = resolved["shop_account_id"]
+    for key in ("main_account_id", "store_name", "platform_shop_id"):
+        if not identity.get(key) and resolved.get(key):
+            identity[key] = resolved[key]
+    identity["match_method"] = resolved.get("match_method")
+    return identity
 
 
 def _is_repaired_cache(file_path: Path) -> bool:
@@ -729,6 +1036,17 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                         initial_status = 'pending'
                         logger.info(f"[{file_path.name}] .meta.json无shop_id,设为'none'")
 
+                    # 3.6 店铺账号身份(Task 9 Step 4b):
+                    # 采集上下文已知 -> 直接用; 否则按 (平台, 平台店铺ID/店铺标签)
+                    # 反查 core.shop_accounts, 唯一命中才用; 都不是 -> 保持 NULL(不猜)。
+                    standard_identity = _apply_resolved_shop_account(
+                        session,
+                        standard_identity,
+                        platform_code=norm_platform,
+                        source_platform=norm_source_platform,
+                        shop_id=initial_shop_id,
+                    )
+
                     semantic_result = validate_file_semantics(
                         source_platform=norm_source_platform,
                         data_domain=norm_domain,
@@ -856,10 +1174,10 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                         existing.platform_code = norm_platform  # v4.3.5: 兼容性字段同步
                         existing.storage_layer = 'raw'
                         existing.quality_score = quality_score
-                        existing.main_account_id = standard_identity.get("main_account_id")
-                        existing.shop_account_id = standard_identity.get("shop_account_id")
-                        existing.store_name = standard_identity.get("store_name")
-                        existing.platform_shop_id = standard_identity.get("platform_shop_id")
+                        existing.main_account_id = standard_identity.get("main_account_id") or existing.main_account_id
+                        existing.shop_account_id = standard_identity.get("shop_account_id") or existing.shop_account_id
+                        existing.store_name = standard_identity.get("store_name") or existing.store_name
+                        existing.platform_shop_id = standard_identity.get("platform_shop_id") or existing.platform_shop_id
                         existing.meta_file_path = relative_meta_path  # v4.18.0: 存储相对路径
                         
                         # [*] 账号信息更新(从.meta.json提取)
@@ -1156,6 +1474,15 @@ def register_single_file(file_path: str) -> Optional[int]:
             initial_status = 'pending'
             logger.info(f"[{file_path_obj.name}] .meta.json无shop_id,设为'none'")
 
+        # 3.6 店铺账号身份(Task 9 Step 4b): 同 scan_catalog, 唯一命中才写, 不猜。
+        standard_identity = _apply_resolved_shop_account(
+            session,
+            standard_identity,
+            platform_code=norm_platform,
+            source_platform=norm_source_platform,
+            shop_id=initial_shop_id,
+        )
+
         semantic_result = validate_file_semantics(
             source_platform=norm_source_platform,
             data_domain=norm_domain,
@@ -1231,10 +1558,10 @@ def register_single_file(file_path: str) -> Optional[int]:
             existing.platform_code = norm_platform
             existing.storage_layer = 'raw'
             existing.quality_score = quality_score
-            existing.main_account_id = standard_identity.get("main_account_id")
-            existing.shop_account_id = standard_identity.get("shop_account_id")
-            existing.store_name = standard_identity.get("store_name")
-            existing.platform_shop_id = standard_identity.get("platform_shop_id")
+            existing.main_account_id = standard_identity.get("main_account_id") or existing.main_account_id
+            existing.shop_account_id = standard_identity.get("shop_account_id") or existing.shop_account_id
+            existing.store_name = standard_identity.get("store_name") or existing.store_name
+            existing.platform_shop_id = standard_identity.get("platform_shop_id") or existing.platform_shop_id
             existing.meta_file_path = relative_meta_path  # v4.18.0: 存储相对路径
             if meta_for_resolver.get('account'):
                 existing.account = meta_for_resolver['account']

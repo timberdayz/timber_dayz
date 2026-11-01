@@ -48,7 +48,13 @@ class DeduplicationService:
     v4.18.2: 支持异步会话
     v4.19.0更新:移除同步/异步双模式支持,统一为异步架构
     """
-    
+
+    # 去重作用域的维度键（固定维度，不随店铺变化）
+    _SCOPE_DIMENSION_KEYS = ("platform_code", "data_domain", "granularity", "sub_domain")
+
+    # 去重作用域的身份键（稳定身份优先，只取第一个可用的）
+    _SCOPE_IDENTITY_KEYS = ("shop_account_id", "platform_shop_id", "shop_id")
+
     def __init__(self, db: AsyncSession):
         """
         初始化去重服务
@@ -235,10 +241,30 @@ class DeduplicationService:
 
     @staticmethod
     def _build_scope_hash_data(scope_values: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """构造去重作用域（data_hash 的"店铺/数据域"部分）。
+
+        口径（Task 10）：
+        - 维度键固定：``platform_code`` / ``data_domain`` / ``granularity`` / ``sub_domain``；
+        - 身份键只取**第一个可用的稳定身份**：
+          ``shop_account_id``（永不变化）> ``platform_shop_id`` > ``shop_id``。
+
+        为什么身份键只取一个：
+        - ``shop_id`` 随改名变化，**不能单独决定去重**（同一份数据改名后会重复入库）；
+        - ``shop_account_id`` 与 ``platform_shop_id`` 在同一个店铺上是一一对应的，
+          同时放进作用域不会增加区分度，却会让"后补一个字段"变成一次口径变更
+          （回填 platform_shop_id 会让已经算好的 hash 全部作废）；
+        - 只取一个身份键 -> 身份一旦确定，口径就**不再变化**（幂等）。
+
+        口径变更的影响：作用域里的键/值变了 => 已入库行的 ``data_hash`` 与新算出的
+        hash 不同 => 同一份数据再采一次会被当成新数据插入。
+        因此**回填必须先行**，并且回填后需要按"需重建清单"重建受影响文件的事实行
+        （见 ``backend/services/catalog_files_identity_backfill.py`` 的报告）。
+        """
         if not scope_values:
             return {}
+
         scope_hash_data: Dict[str, Any] = {}
-        for key in ("platform_code", "shop_id", "data_domain", "granularity", "sub_domain"):
+        for key in DeduplicationService._SCOPE_DIMENSION_KEYS:
             value = scope_values.get(key)
             if value is None:
                 continue
@@ -246,6 +272,17 @@ class DeduplicationService:
             if not text:
                 continue
             scope_hash_data[f"scope:{key}"] = text
+
+        for key in DeduplicationService._SCOPE_IDENTITY_KEYS:
+            value = scope_values.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            scope_hash_data[f"scope:{key}"] = text
+            break
+
         return scope_hash_data
 
     @staticmethod
