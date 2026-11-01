@@ -471,13 +471,34 @@ function Save-PwcliTiktokState {
         )
 ```
 
-**5b-2 改巡店循环。** 把 `scripts/pwcli_helpers.ps1:479-485` 里的保存调用改为（与同文件 `:451-457` 的 open 调用保持同样的传参形态）：
+**5b-2 改巡店循环。** `scripts/pwcli_helpers.ps1:477-491` 是 `switch ($account.platform)` 的**三个字面分支**
+（**没有 `$PlatformName` 这个变量** —— 全文件 grep 0 命中；照字面写 `$($PlatformName)` 会得到
+`Save-PwcliState` 这个空函数名 → 保存静默失败，正是本 Task 要消灭的"失败不可见"）。
+
+把三个分支改成：
 
 ```powershell
-        Save-Pwcli$($PlatformName)State -AccountId $account.account_id -WorkTag $account.work_tag
+        switch ($account.platform) {
+            "miaoshou" {
+                Save-PwcliMiaoshouState -AccountId $account.account_id -WorkTag $account.work_tag
+            }
+            "shopee" {
+                Save-PwcliShopeeState -AccountId $account.account_id -WorkTag $account.work_tag
+            }
+            "tiktok" {
+                Save-PwcliTiktokState -AccountId $account.account_id -WorkTag $account.work_tag
+            }
+            default {
+                Write-Warning "Unsupported platform: $($account.platform)"
+                continue
+            }
+        }
 ```
 
-> **实施者必须先读** `scripts/pwcli_helpers.ps1:440-490` 的实际变量名（`$account` 的字段名可能是 `$account.account_id` / `$account.work_tag` 或别的），**照抄同文件 open 分支的写法**，不要凭空造变量名。
+> **work_tag 从哪来**：`scripts/pwcli_account_inventory.py:54-55` 的 `work_tag(platform, account_id)`
+> 与 `:111` 把 `work_tag` 放进账号字典 → 巡店循环里的 `$account.work_tag` 就是同一个值。
+> 实施者必须**先读** `scripts/pwcli_helpers.ps1:440-495` 的实际变量名与 open 分支写法，
+> 照抄同文件 open 分支（`:451-457` 附近）的形态，不要凭空造变量名。
 
 - [ ] **Step 5c: 确认既有调用形态不受影响（文档 / 生成器 / SOP）**
 
@@ -1600,6 +1621,19 @@ Expected: FAIL。
 | `orders_atomic.sql` | `d` | **今天没有** `normalized_identity_candidates` | 先按 Step 4a 在 `mapped` 层补出该数组，再套用模板（把 `m.` 换成 `d.`） |
 | `analytics_atomic.sql` | `m` | `VALUES (...)` 内联列表（`:168-199`），**不是数组** | 先把内联 `VALUES` 抽成 CTE（例如 `candidate_values`），再套用模板（把 `= ANY (m.normalized_identity_candidates)` 换成 `= ANY (cv.identity_value_normalized)`） |
 
+**⚠ 四个文件还有「中间 CTE 透传」与「LATERAL 结果别名」两处差异 —— 照抄上面的模板会报 `column does not exist`**：
+
+| 文件 | CTE 链（谁带显式列清单） | LATERAL 结果别名 | 必须补的透传 |
+|---|---|---|---|
+| `orders_atomic.sql` | `mapped`(:32) → **`cleaned`(:280，显式列清单)** → `deduplicated`(:390，`SELECT *`) → `alias_resolved`(:406) | `resolved` | ① `normalized_identity_candidates` 必须在 `cleaned` 的显式清单里**再透传一次** —— 否则 `d.normalized_identity_candidates` 报 `column d.normalized_identity_candidates does not exist`；② 新算出的 `identity_warning_code` / `identity_candidate_count` / `identity_candidates` 同样要穿过 `cleaned` 才能到最终 SELECT |
+| `analytics_atomic.sql` | `mapped`(:34) → `resolved`(:120) → **`cleaned`(:208，显式列清单)** → `deduplicated`(:279) | **`resolved_candidate`**(:206) | ① LATERAL 的结果别名是 `resolved_candidate`，**不是** `resolved` → 模板与 CASE 里的 `resolved.candidate_count` / `resolved.candidate_shop_ids` 都要改成 `resolved_candidate.*`；② 新列在 `resolved` 里算出后要穿过 `cleaned`(:208) 的显式清单 |
+| `orders_monthly_atomic_mv.sql` | `mapped_monthly_orders`(:19) → `normalized_monthly_orders`(:114) → `prepared_identity_monthly_orders`(:200) → **`resolved_monthly_orders`(:221，显式列清单)** → `deduplicated_monthly_orders`(:284，`SELECT *`) | `resolved` | 新列在 `resolved_monthly_orders` 里算出 → 加进该 CTE 的显式清单 → `deduplicated`（`SELECT *`）自动带上 → 最终 SELECT 引用 |
+| `analytics_monthly_atomic_mv.sql` | `mapped_monthly_traffic`(:16) → `normalized_monthly_traffic`(:107) → **`resolved_monthly_traffic`(:339，显式列清单)** → `deduplicated_monthly_traffic`(:406，`SELECT *`) | `resolved` | 同上 |
+
+> **为什么必须写清楚**：PostgreSQL 不会自动把列带过 `SELECT 列清单` 形式的 CTE。
+> 漏掉透传 → 语义层重建时直接报 `column ... does not exist`；
+> 漏掉 LATERAL 别名 → CASE 里的 `resolved.*` 取不到值，`candidate_count` 恒为 NULL → **所有行都落 `unmatched_shop_label`**。
+
 然后把 `shop_id` 的 CASE 改成：
 
 ```sql
@@ -1676,7 +1710,7 @@ END AS identity_warning_code
 | 薄封装 VIEW | 文件 | 显式列数 | 备注 |
 |---|---|---|---|
 | `semantic.fact_orders_monthly_atomic` | `sql/semantic/orders_monthly_atomic.sql:5-23` | 16 | `CREATE OR REPLACE`，无 DROP |
-| `semantic.fact_analytics_monthly_atomic` | `sql/semantic/analytics_monthly_atomic.sql:5-27` | 21 | **`:3` 是 `DROP VIEW IF EXISTS ... CASCADE`** → 重建时必须由 runner 按依赖顺序重建下游 |
+| `semantic.fact_analytics_monthly_atomic` | `sql/semantic/analytics_monthly_atomic.sql:5-27` | 20 | **`:3` 是 `DROP VIEW IF EXISTS ... CASCADE`** → 重建时必须由 runner 按依赖顺序重建下游 |
 
 实施者的选择（两条都可行，但**必须显式做一遍**，不能默认「加了就有」）：
 - **方案 A（推荐）**：两个 wrapper 也在末尾补上 `identity_candidate_count` / `identity_candidates`

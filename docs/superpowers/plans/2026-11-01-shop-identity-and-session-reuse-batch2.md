@@ -414,12 +414,12 @@ git commit -m "fix(会话): 新鲜度只认 saved_at，30 天过期机制恢复�
 
 **Files:**
 - Modify: `modules/apps/collection_center/executor_v2.py:2805-2822`（`_should_skip_post_login_session_persist`）
-- Modify: `modules/apps/collection_center/executor_v2.py:245-309`（executor 版 bootstrap，`def` 在 `:245`；整份删掉，改为复用 runtime_session 的实现）
+- Modify: `modules/apps/collection_center/executor_v2.py:245-303`（executor 版 bootstrap，`def` 在 `:245`，函数体止于 `:303`；整份删掉，改为复用 runtime_session 的实现）
 - Test: `backend/tests/test_collection_executor_session_alignment.py`（扩充）
 
 **背景**：
 - `executor_v2.py:2822` 的 `_should_skip_post_login_session_persist` 在 `platform=='tiktok' and runtime_mode=='persistent_profile'` 时**不落 storage_state** → 人工巡店保存的会话在 TikTok 上拿不到。
-- `executor_v2.py:245-309` 的 executor 版 bootstrap **缺** `modules/apps/collection_center/runtime_session.py:74-136` 的 TikTok 质量门禁 → 低质量会话会被当可用。
+- `executor_v2.py:245-303` 的 executor 版 bootstrap **缺** `modules/apps/collection_center/runtime_session.py:74-136` 的 TikTok 质量门禁 → 低质量会话会被当可用。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -582,7 +582,7 @@ params["session_metadata"] = getattr(runtime_bundle, "session_metadata", None) o
 
 - [ ] **Step 4: executor 侧的 bootstrap 复用 runtime_session 的实现（补上 TikTok 质量门禁）**
 
-**现状核实**：`executor_v2.py:245-309` 有**一份自己的** `_bootstrap_session_from_profile_sync`，
+**现状核实**：`executor_v2.py:245-303`（`def` 在 `:245`，函数体止于 `:303`）有**一份自己的** `_bootstrap_session_from_profile_sync`，
 它从持久 profile 读出 storage_state 就直接 `save_session` —— **没有 TikTok 质量门禁**。
 
 而 `modules/apps/collection_center/runtime_session.py:258-312` 的同名函数**有**门禁：
@@ -603,7 +603,7 @@ params["session_metadata"] = getattr(runtime_bundle, "session_metadata", None) o
 
 **修法（优先 DRY，不要再抄第三份）**：
 
-1. 删掉 `executor_v2.py:245-309` 的重复实现（`def` 在 `:245`），**并同步改调用点**：
+1. 删掉 `executor_v2.py:245-303` 的重复实现（`def` 在 `:245`，函数体止于 `:303`），**并同步改调用点**：
    `executor_v2.py:330` 现在调的是**本地那份**（`_bootstrap_session_from_profile_sync(...)`，无模块前缀），
    **不是** `runtime_session` 的实现 —— 全文 grep 确认 executor 内从未出现过
    `runtime_session._bootstrap_session_from_profile_sync`。
@@ -700,7 +700,14 @@ def test_suggest_is_deterministic():
 python -m pytest backend/tests/test_shop_internal_code.py -q
 ```
 
-Expected: FAIL（模块不存在）。
+Expected: **collection error**（不是用例 FAIL）—— `from backend.services.shop_internal_code_service import ...`
+写在**模块级**，而该模块今天还不存在 → pytest 报
+`ModuleNotFoundError: No module named 'backend.services.shop_internal_code_service'` 并**中断整轮收集**，
+所以输出是 `ERROR` 而不是 `failed`。
+
+> 若实施者希望看到"用例级 FAIL"，把 import 写进用例函数体内即可（第一批 Task 9 的 `resolve_file_identity`
+> 就是这么写的，失败形态是 `ImportError: cannot import name ...`）。
+> 两种写法都可以，**但必须知道今天看到的是 collection error**。
 
 - [ ] **Step 3: 新建服务**
 
@@ -1208,18 +1215,41 @@ git commit -m "feat(店铺身份): 改名走联动流程，老数据不断、新
 
 ```python
 def test_sql_assets_map_site_to_region():
-    """语义层必须把 raw 的中文站点映射成店铺区域码（大写）。"""
+    """语义层必须把 raw 的中文站点映射成店铺区域码（大写）。
+
+    只有**有站点来源**的两条 orders 路径需要区域映射 ——
+    analytics 的 raw 里既没有站点也没有店铺标签
+    （实测 `b_class.fact_tiktok_analytics_monthly` 1263 行，站点 0 / 店铺 0），
+    给它硬造一个区域字段只会多一个永远是 NULL 的列。
+    """
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[3]
     for rel in (
         "sql/semantic/orders_atomic.sql",
-        "sql/semantic/analytics_atomic.sql",
         "sql/semantic/orders_monthly_atomic_mv.sql",
     ):
         text = (root / rel).read_text(encoding="utf-8")
         assert "source_region" in text, f"{rel} 没有把站点映射成区域"
         assert "'菲律宾'" in text, f"{rel} 缺少站点映射表"
+
+
+def test_analytics_assets_do_not_get_region_column():
+    """反向护栏：两条 analytics 路径**不得**出现区域列。
+
+    它们没有站点来源（raw 里 `站点` / `店铺` 都是 0 行），
+    加了只会是永远 NULL 的列，还会让"区域感知匹配"的适用范围变得含糊。
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    for rel in (
+        "sql/semantic/analytics_atomic.sql",
+        "sql/semantic/analytics_monthly_atomic_mv.sql",
+    ):
+        text = (root / rel).read_text(encoding="utf-8")
+        assert "source_region" not in text, f"{rel} 不该有区域列（raw 里没有站点来源）"
+        assert "'菲律宾'" not in text, f"{rel} 不该有站点映射表"
 ```
 
 - [ ] **Step 2: 更新第一批留下的护栏用例（不做这一步，第二批落地后裸 `pytest` 必红）**
@@ -1249,10 +1279,14 @@ def test_candidate_view_carries_region_dimension():
 - [ ] **Step 2b: 运行测试确认失败**
 
 ```bash
-python -m pytest backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py -q -k "site_to_region or region_dimension"
+python -m pytest backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py -q -k "site_to_region or region_dimension or region_column"
 ```
 
-Expected: FAIL（`source_region` / `identity_shop_region` 今天都不存在）。
+Expected: **2 FAIL + 1 PASS** ——
+- `test_sql_assets_map_site_to_region`：两条 orders 资产今天都没有 `source_region` → FAIL；
+- `test_candidate_view_carries_region_dimension`（Step 2 改写的那条）：候选视图今天没有区域列 → FAIL；
+- `test_analytics_assets_do_not_get_region_column`：这条**今天就通过**（analytics 确实没有区域列），
+  它是**反向护栏** —— 防止实施者为了"统一"给 analytics 硬造一个永远 NULL 的区域列。
 
 - [ ] **Step 3: 抽取站点 → 区域（**逐文件落点不同，不要照抄**）**
 
@@ -1350,15 +1384,61 @@ Expected: FAIL（`source_region` / `identity_shop_region` 今天都不存在）�
 `orders_atomic.sql` 与 `orders_monthly_atomic_mv.sql` 的 LATERAL 在候选集合上增加区域过滤，规则：
 
 ```
-候选 = 候选视图里 identity_value_normalized 命中的行
-区域优先层：
-  1. identity_shop_region = 该行 source_region   （精确匹配，优先）
-  2. identity_shop_region IS NULL                 （不限区域，兜底）
-  3. 其余（区域不匹配的）不参与本次归属
+完整候选集 = 候选视图里 identity_value_normalized 命中的行（D10a 的口径）
+层 1（精确匹配）：identity_shop_region = 该行 source_region，且 source_region IS NOT NULL
+层 2（兜底）    ：当层 1 为空时，用**完整候选集**（不做任何区域过滤）
+
+最终候选集 = 层 1 非空 ? 层 1 : 层 2
 ```
 
-只有**区域优先层命中**的候选才参与计数；若无任何候选 → `unmatched_shop_label`；
-若区域优先层内仍有多个候选 → `ambiguous_shop_label`。
+- 候选集为空 → `unmatched_shop_label`；
+- 最终候选集里仍有多个候选 → `ambiguous_shop_label`。
+
+> **为什么层 2 是「完整候选集」而不是「只取 `identity_shop_region IS NULL` 的别名」**：
+> 「只取不限区域的别名」在**没有站点**的数据上（shopee 的 raw 里没有 `站点`，实测 26627 行全空）
+> 会把该平台所有别名都滤掉 → **凭空制造新的 unknown**，直接违反「区域过滤只用于消歧、不制造新 unknown」这条硬约束。
+> 用「层 1 为空就回落完整候选集」可以**证明**区域过滤只会让归属更精确、不会让归属变少：
+> 层 1 ⊆ 完整候选集 → `candidate_count` 只会不变或变小；变小只可能把 `ambiguous(≥2)` 变成 `unique(1)`，不会把 `unique(1)` 变成 `ambiguous`。
+
+**可执行实现（已在 live PG 15.14 实测，7 种输入全部符合预期）**：
+
+```sql
+                   AND (
+                         (
+                             c.identity_shop_region IS NOT NULL
+                             AND m.source_region IS NOT NULL
+                             AND c.identity_shop_region = m.source_region
+                         )
+                         OR NOT EXISTS (
+                             SELECT 1
+                             FROM semantic.shop_identity_resolution_candidates c_exact
+                             WHERE c_exact.platform_code = lower(COALESCE(m.platform_code, ''))
+                               AND c_exact.identity_value_normalized = ANY (m.normalized_identity_candidates)
+                               AND c_exact.identity_shop_region IS NOT NULL
+                               AND m.source_region IS NOT NULL
+                               AND c_exact.identity_shop_region = m.source_region
+                         )
+                   )
+```
+
+> 这段条件要**同时**加在 Step 4b 模板里的两个子查询上（`agg` 计数子查询 与 `best` 最优候选子查询），
+> 否则会出现「计数按过滤后的候选算、归属却取到未过滤的候选」的不一致。
+> `orders_atomic.sql` 里把 `m.` 换成 `d.`。
+
+**实测记录（live PG 15.14，只读；用「候选视图 + 新增区域列」的等价 CTE 模拟）**：
+
+| 场景 | 输入 | `candidate_count` | 落点 |
+|---|---|---|---|
+| 单候选 + 区域命中 | `['新加坡1店']`，`source_region='SG'` | 1 | `tiktok_sg_daone_mall_local` |
+| **目标场景**：同名品牌 + 站点分流 | `['新加坡1店','马来1店']`，`source_region='SG'` | **1** | `tiktok_sg_daone_mall_local`（D10a 下这里是 2 → `ambiguous_shop_label`） |
+| 同名品牌 + 站点分流（另一区） | `['新加坡1店','马来1店']`，`source_region='MY'` | 1 | `tiktok_my_dawie_mall_local` |
+| 无精确匹配 → 层 2 兜底 | `['马来1店']`，`source_region='SG'` | 1 | `tiktok_my_dawie_mall_local`（**不是 unknown**） |
+| 无站点（shopee 式） → 层 2 兜底 | `['马来1店']`，`source_region=NULL` | 1 | `tiktok_my_dawie_mall_local`（**不是 unknown**） |
+| 零候选 | `['不存在的店名xyz']` | 0 | `unknown` + `unmatched_shop_label` |
+
+> **未收录站点不会制造新 unknown**：映射表 `ELSE UPPER(LEFT(site,2))` 对未收录的中文站点会产出中文串
+> （如「美国」→「美国」），它与任何区域码都不相等 → 没有层 1 命中 → 自动落到层 2 完整候选集 → 归属不变。
+> 这条与 Step 3 的映射表实现无关，**即使 fallback 保留原样也安全**。
 
 **两条 analytics 路径不做区域过滤**（`analytics_atomic.sql` / `analytics_monthly_atomic_mv.sql`）——
 它们的 raw 里既没有站点也没有店铺标签（Step 3 实测表），无从推导区域；
