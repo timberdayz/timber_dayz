@@ -200,3 +200,70 @@ def test_session_info_age_uses_latest_saved_time(tmp_path: Path) -> None:
         assert info["age_days"] < 10
     finally:
         time.time = original_time
+
+
+def test_freshness_uses_saved_at_only():
+    """新鲜度必须以 saved_at 为准，last_used_at 不得参与。"""
+    from modules.utils.sessions.session_manager import _session_freshness_timestamp
+
+    session = {
+        "metadata": {"saved_at": 1000.0},
+        "last_used_at": 9_999_999.0,
+        "created_at": 500.0,
+    }
+    assert _session_freshness_timestamp(session) == 1000.0
+
+
+def test_freshness_falls_back_to_created_at():
+    """saved_at 缺失时才回退 created_at（护栏：修复后仍须成立）。"""
+    from modules.utils.sessions.session_manager import _session_freshness_timestamp
+
+    session = {"metadata": {}, "created_at": 500.0}
+    assert _session_freshness_timestamp(session) == 500.0
+
+
+def test_protected_session_keeps_saved_at_when_overwritten(tmp_path):
+    """protected 人工会话被自动 state 覆盖时，saved_at 不得被刷新（spec D7）。"""
+    import json
+    import time
+
+    from modules.utils.sessions.session_manager import SessionManager
+
+    manager = SessionManager(base_path=tmp_path / "data" / "sessions")
+    manager.save_session(
+        "shopee",
+        "acct",
+        {"cookies": [{"name": "sid", "value": "v"}], "origins": []},
+        metadata={"manual_seeded": True, "protected": True},
+    )
+    path = manager.get_session_path("shopee", "acct")
+    saved_at = json.loads(path.read_text(encoding="utf-8"))["metadata"]["saved_at"]
+
+    time.sleep(0.05)
+    # 自动来源、质量更低的 state 覆盖 -> 保留旧 state，且 saved_at 不得刷新
+    manager.save_session("shopee", "acct", {"cookies": [], "origins": []})
+
+    after = json.loads(path.read_text(encoding="utf-8"))
+    assert after["metadata"]["saved_at"] == saved_at, "protected 会话的 saved_at 被自动回写刷新了"
+
+
+def test_expired_session_is_rejected_even_when_recently_read(tmp_path):
+    """saved_at 过期时，即使 last_used_at 是现在，也必须判为过期。"""
+    import json
+    import time
+
+    from modules.utils.sessions.session_manager import SessionManager
+
+    manager = SessionManager(base_path=tmp_path / "data" / "sessions")
+    manager.save_session(
+        "shopee",
+        "acct",
+        {"cookies": [{"name": "sid", "value": "v"}], "origins": []},
+    )
+    path = manager.get_session_path("shopee", "acct")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["metadata"]["saved_at"] = time.time() - 40 * 86400
+    payload["last_used_at"] = time.time()
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    assert manager.load_session("shopee", "acct", max_age_days=30) is None
