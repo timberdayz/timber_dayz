@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 from pathlib import Path
@@ -9,11 +10,14 @@ import pytest
 from scripts.local_console_processes import (
     INSPECTION_PANEL,
     LOCAL_COLLECTION,
+    READY_URLS,
     LocalProcessSupervisor,
     ProcessOwnershipError,
     build_service_specs,
     decode_output_line,
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeProcess:
@@ -139,7 +143,9 @@ def test_process_output_decodes_utf8_and_windows_fallback_bytes():
     assert decode_output_line("迁移完成".encode("gb18030")) == "迁移完成"
 
 
-def test_terminal_and_log_output_redact_sensitive_values(tmp_path: Path, runtime: FakeRuntime):
+def test_terminal_and_log_output_redact_sensitive_values(
+    tmp_path: Path, runtime: FakeRuntime
+):
     terminal_lines: list[str] = []
     supervisor = LocalProcessSupervisor(
         repo_root=tmp_path,
@@ -207,15 +213,21 @@ def test_collection_protocol_markers_propagate_failure_details_without_overwriti
     assert status["failure_code"] == "migration_schema_drift"
     assert status["source_exit_code"] == 2
     assert status["wrapper_exit_code"] == 2
-    assert status["last_failure_summary"] == "schema fingerprint mismatch token=<redacted>"
+    assert (
+        status["last_failure_summary"] == "schema fingerprint mismatch token=<redacted>"
+    )
     assert status["recovery_hint"] == "manual_schema_review"
     assert status["actual_fingerprint"] == "actual-fingerprint"
     assert status["approved_fingerprint"] == "approved-fingerprint"
     assert status["launch_stage"] == "migration_preflight:started"
-    assert "hidden" not in "\n".join(supervisor.read_log(LOCAL_COLLECTION, max_lines=10))
+    assert "hidden" not in "\n".join(
+        supervisor.read_log(LOCAL_COLLECTION, max_lines=10)
+    )
 
 
-def test_start_is_idempotent_for_a_managed_process(supervisor: LocalProcessSupervisor, runtime: FakeRuntime):
+def test_start_is_idempotent_for_a_managed_process(
+    supervisor: LocalProcessSupervisor, runtime: FakeRuntime
+):
     first = supervisor.start(LOCAL_COLLECTION)
     second = supervisor.start(LOCAL_COLLECTION)
 
@@ -261,7 +273,9 @@ def test_inspection_panel_stop_does_not_terminate_platform_browser_children(
     assert process.children_terminated is False
 
 
-def test_supervisor_recovers_a_valid_managed_process(tmp_path: Path, runtime: FakeRuntime):
+def test_supervisor_recovers_a_valid_managed_process(
+    tmp_path: Path, runtime: FakeRuntime
+):
     specs = build_service_specs(tmp_path, python_executable="python-test")
     command = list(specs[LOCAL_COLLECTION].command)
     process = FakeProcess(4567, command, create_time=77.0)
@@ -300,7 +314,9 @@ def test_supervisor_recovers_a_valid_managed_process(tmp_path: Path, runtime: Fa
     assert status["launch_url"] == "http://localhost:5173"
 
 
-def test_external_process_is_reported_but_cannot_be_stopped(tmp_path: Path, runtime: FakeRuntime):
+def test_external_process_is_reported_but_cannot_be_stopped(
+    tmp_path: Path, runtime: FakeRuntime
+):
     specs = build_service_specs(tmp_path, python_executable="python-test")
     external = FakeProcess(4999, list(specs[INSPECTION_PANEL].command))
     runtime.by_pid[external.pid] = external
@@ -454,3 +470,125 @@ def test_failure_protocol_creates_redacted_structured_audit_record(
     assert "token=<redacted>" in audit
     assert '"actual_fingerprint": "actual-fingerprint"' in audit
     assert '"approved_fingerprint": "approved-fingerprint"' in audit
+
+
+def test_transient_readiness_failure_never_downgrades_a_running_service(
+    tmp_path: Path, runtime: FakeRuntime
+):
+    """[*] 已经跑起来的系统，不许因为一次瞬时探测失败就被降级或被杀。"""
+    now = [100.0]
+    probe = {"value": True}
+    supervisor = LocalProcessSupervisor(
+        repo_root=tmp_path,
+        state_path=tmp_path / "state.json",
+        log_dir=tmp_path / "logs",
+        popen_factory=runtime.popen,
+        process_resolver=runtime.resolve,
+        process_iterator=runtime.iter_processes,
+        readiness_probe=lambda _service: probe["value"],
+        wait_for_processes=lambda _processes, _timeout: ([], []),
+        time_provider=lambda: now[0],
+        startup_timeout_seconds=20,
+    )
+    started = supervisor.start(LOCAL_COLLECTION)
+    process = runtime.by_pid[started["pid"]]
+
+    now[0] = 101.0
+    assert supervisor.status(LOCAL_COLLECTION)["state"] == "running"
+
+    # 一次瞬时失败；此时"启动预算"早就超了，但服务已经就绪过
+    probe["value"] = False
+    now[0] = 500.0
+    status = supervisor.status(LOCAL_COLLECTION)
+
+    assert status["state"] == "running"
+    assert process.terminated is False
+    assert process.killed is False
+
+
+def test_repeated_readiness_failures_enter_observation_state_without_killing(
+    tmp_path: Path, runtime: FakeRuntime
+):
+    """[*] 连续失败达阈值才进入观察态，并重置预算窗口——但绝不杀进程。"""
+    now = [100.0]
+    probe = {"value": True}
+    supervisor = LocalProcessSupervisor(
+        repo_root=tmp_path,
+        state_path=tmp_path / "state.json",
+        log_dir=tmp_path / "logs",
+        popen_factory=runtime.popen,
+        process_resolver=runtime.resolve,
+        process_iterator=runtime.iter_processes,
+        readiness_probe=lambda _service: probe["value"],
+        wait_for_processes=lambda _processes, _timeout: ([], []),
+        time_provider=lambda: now[0],
+        startup_timeout_seconds=20,
+        readiness_failure_threshold=3,
+    )
+    started = supervisor.start(LOCAL_COLLECTION)
+    process = runtime.by_pid[started["pid"]]
+
+    now[0] = 101.0
+    assert supervisor.status(LOCAL_COLLECTION)["state"] == "running"
+
+    probe["value"] = False
+    now[0] = 102.0
+    assert supervisor.status(LOCAL_COLLECTION)["state"] == "running"
+    assert supervisor.status(LOCAL_COLLECTION)["state"] == "running"
+    # 第三次连续失败：进入观察态，但进程还活着
+    assert supervisor.status(LOCAL_COLLECTION)["state"] == "starting"
+    assert process.terminated is False
+    assert process.killed is False
+
+
+def test_startup_timeout_records_structured_audit_evidence(
+    tmp_path: Path, runtime: FakeRuntime
+):
+    """[*] 真正启动失败时，必须留下 startup-audit 证据。"""
+    now = [10.0]
+    supervisor = LocalProcessSupervisor(
+        repo_root=tmp_path,
+        state_path=tmp_path / "state.json",
+        log_dir=tmp_path / "logs",
+        popen_factory=runtime.popen,
+        process_resolver=runtime.resolve,
+        process_iterator=runtime.iter_processes,
+        readiness_probe=lambda _service: False,
+        wait_for_processes=lambda _processes, _timeout: ([], []),
+        time_provider=lambda: now[0],
+        startup_timeout_seconds=20,
+    )
+    supervisor.start(LOCAL_COLLECTION)
+    now[0] = 31.0
+
+    status = supervisor.status(LOCAL_COLLECTION)
+
+    assert status["state"] == "failed"
+    audit = (tmp_path / "logs" / "startup-audit.jsonl").read_text(encoding="utf-8")
+    assert '"failure_code": "startup_timeout"' in audit
+
+
+def test_console_probe_covers_every_run_py_backend_port_fallback(monkeypatch):
+    """[*] 控制台探针必须覆盖 run.py 的全部端口回退，否则会误杀健康的后端。"""
+    spec = importlib.util.spec_from_file_location(
+        "run_module_for_console_tests", PROJECT_ROOT / "run.py"
+    )
+    run_module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(run_module)
+
+    probe_ports = {url.split(":")[2].split("/")[0] for url in READY_URLS}
+    monkeypatch.setattr(run_module, "_is_port_in_use", lambda port: False)
+
+    chosen_ports = []
+    for candidate in (8001, 18001, 18011, 18021, 18031, 18041):
+        monkeypatch.setattr(
+            run_module,
+            "_can_bind_local_port",
+            lambda port, host="127.0.0.1": port == candidate,
+        )
+        chosen = run_module._choose_local_backend_port(8001)
+        assert chosen is not None
+        chosen_ports.append(str(chosen))
+
+    assert set(chosen_ports) <= probe_ports

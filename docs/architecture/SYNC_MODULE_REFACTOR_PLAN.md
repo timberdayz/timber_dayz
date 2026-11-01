@@ -1393,6 +1393,35 @@ Top20 按「压得最久」排序 ⇒ 压最久的货**确实一件没卖**，�
 
 ---
 
+### 3.9.14 「启动失败」真相：不是采集模块坏了，是本地控制台把跑起来的系统误杀了（2026-11-01 第 14 轮）
+
+**现场**：真机验证采集内容时，本地控制台显示「启动失败」，前端报「加载任务失败：无法连接到服务器」。
+
+**根因（不是采集模块）**：精确时间线（`logs/local-console/local-collection.log`、`logs/backend-local.*.log`、`local-console-state.json`）——
+13:17:07 控制台启动 → 13:17:52 后端 uvicorn 就绪(8001) → 13:17:56 前端 5173 就绪 → run.py 打印「系统启动成功」→
+13:20:14 控制台首次探测成功（`last_success_at`）→ 13:20:30 采集器打 TikTok 出现 `ERR_CONNECTION_TIMED_OUT` →
+13:21:0x 某次探测瞬时失败 → 13:21:07 满 240s 判 `startup_timeout` 并**杀整棵进程树** →
+13:21:21 后端日志戛然而止（**无 traceback ＝ 外部强杀**）→ 前端「无法连接到服务器」。
+
+**7 个问题点与修法**
+
+| # | 问题 | 修法 |
+|---|------|------|
+| 1 | 探针一次瞬时失败就把 `running` 降级回 `starting`，而 `started_at` 只在启动时写一次、不重置 ⇒ 240s 后必杀整棵树 | 状态机重写：**已经就绪过的服务，不许因瞬时探测失败被降级或被杀**；连续失败达阈值（5 次）才进观察态并**重置预算窗口**；只有「从未就绪过 + 超预算」才判 `startup_timeout` 并终止进程 |
+| 2 | 探针预算 0.4s，比 run.py 自己的 2s 严格 5 倍 | 放宽到 3.0s（`READINESS_PROBE_TIMEOUT_SECONDS`） |
+| 3 | 探针只覆盖 8001/18001/18011，run.py 却会回退到 18021/18031/18041 ⇒ 后端**活着也探测不到** | `READY_URLS` 补齐全部回退端口，并用契约测试锁死（防止再漂移） |
+| 4 | 启动预算 240s < run.py 最坏耗时（自己等后端 180s + 前端 15s，前面还有迁移/备份/隧道） | 默认预算提到 600s，可用 `LOCAL_CONSOLE_STARTUP_TIMEOUT_SECONDS` 覆盖 |
+| 5 | `startup_timeout` 分支没写 `startup-audit.jsonl`（最后一条还是 10/13） | 补写审计证据 |
+| 6 | 前端 `loadTasks` 一个 try 串三个接口，任一失败就弹「加载任务失败」（可表格里其实已经有数据） | 拆成三段各自兜底，错误文案按调用点区分 |
+| 7 | 前端不认识 `interrupted`（终态表、标签表都缺），库里已积 8 条僵尸任务 | 补 `interrupted` 终态 + 中文标签 + 标签色；后端启动时**自动回收 stale 的 pending/queued/running**（只回收陈旧的，不动历史数据、不做数据写） |
+
+**顺带修**：`/healthz/ready` 原来在 async 路由里用**同步 Session** 做数据库探测（阻塞事件循环）⇒ 改成 `asyncio.to_thread` 丢线程池；
+`task_service.py` 里两处同名 `filter_domains_by_account_capability`（后者覆盖前者，前者是死代码）⇒ 删掉死的那份。
+
+**验证**：控制台 19 条测试全绿（含 4 条新增：瞬时失败不降级、连续失败只进观察态、超时补审计、探针覆盖全部端口回退）；
+前端新增 `collectionTasksStatusUi` 6 条全绿；前端全量 417 条 = 408 pass / 9 fail（**失败名与既有 9 条基线逐条一致，零新增**）；
+后端新增 `test_task_service_stale_reclaim` 5 条全绿；`black --check` + `ruff check` 全绿；前端 `npm run build` exit 0。
+
 ## 4. 建议的实施顺序
 
 1. **第 1 批**（前端止漏）—— 独立提交，可立即解除当前阻塞。

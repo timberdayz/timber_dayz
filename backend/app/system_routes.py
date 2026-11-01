@@ -1,3 +1,4 @@
+import asyncio
 import os
 from datetime import datetime
 from datetime import timezone
@@ -24,14 +25,28 @@ def register_system_routes(app, settings, app_version, get_db):
             return -1.0
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
-        return max((datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds(), 0.0)
+        return max(
+            (
+                datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)
+            ).total_seconds(),
+            0.0,
+        )
 
-    def _emit_metric(lines: list[str], name: str, value: float | int, labels: dict[str, str] | None = None) -> None:
+    def _emit_metric(
+        lines: list[str],
+        name: str,
+        value: float | int,
+        labels: dict[str, str] | None = None,
+    ) -> None:
         if labels:
-            rendered = ",".join(f'{key}="{str(val).replace(chr(34), "")}"' for key, val in sorted(labels.items()))
+            rendered = ",".join(
+                f'{key}="{str(val).replace(chr(34), "")}"'
+                for key, val in sorted(labels.items())
+            )
             lines.append(f"{name}{{{rendered}}} {value}")
             return
         lines.append(f"{name} {value}")
+
     @app.get("/api/healthz/live", tags=["系统"])
     @app.get("/healthz/live", tags=["系统"])
     async def live_health_check():
@@ -45,8 +60,12 @@ def register_system_routes(app, settings, app_version, get_db):
     @app.get("/metrics", include_in_schema=False)
     async def prometheus_metrics():
         from backend.models.database import AsyncSessionLocal, SessionLocal
-        from backend.services.cloud_sync_admin_query_service import CloudSyncAdminQueryService
-        from backend.services.postgresql_dashboard_service import PostgresqlDashboardService
+        from backend.services.cloud_sync_admin_query_service import (
+            CloudSyncAdminQueryService,
+        )
+        from backend.services.postgresql_dashboard_service import (
+            PostgresqlDashboardService,
+        )
         from backend.tasks.scheduled_tasks import detect_auto_ingest_orphan_locks
 
         runtime = getattr(app.state, "cloud_sync_runtime", None)
@@ -58,8 +77,12 @@ def register_system_routes(app, settings, app_version, get_db):
         try:
             async with AsyncSessionLocal() as session:
                 service = CloudSyncAdminQueryService(session)
-                overview = await service.get_overview_summary(runtime_health=runtime_health)
-                runtime_summary = await service.get_runtime_summary(runtime_health=runtime_health)
+                overview = await service.get_overview_summary(
+                    runtime_health=runtime_health
+                )
+                runtime_summary = await service.get_runtime_summary(
+                    runtime_health=runtime_health
+                )
                 table_states = await service.list_table_states()
         except Exception:
             overview = {}
@@ -94,7 +117,9 @@ def register_system_routes(app, settings, app_version, get_db):
                 CloudSyncReceiveLogQuery,
             )
 
-            cloud_receive_summary = CloudSyncReceiveLogQuery().get_latest_receive_summary()
+            cloud_receive_summary = (
+                CloudSyncReceiveLogQuery().get_latest_receive_summary()
+            )
         except Exception:
             cloud_receive_summary = {
                 "available": False,
@@ -106,21 +131,33 @@ def register_system_routes(app, settings, app_version, get_db):
             "# HELP xihong_cloud_sync_pending_catalog_files_total Pending catalog files awaiting local ingest.",
             "# TYPE xihong_cloud_sync_pending_catalog_files_total gauge",
         ]
-        _emit_metric(lines, "xihong_cloud_sync_pending_catalog_files_total", int(overview.get("pending_catalog_file_count") or 0))
+        _emit_metric(
+            lines,
+            "xihong_cloud_sync_pending_catalog_files_total",
+            int(overview.get("pending_catalog_file_count") or 0),
+        )
         lines.extend(
             [
                 "# HELP xihong_cloud_sync_pending_catalog_files_overdue_total Pending catalog files older than 10 minutes.",
                 "# TYPE xihong_cloud_sync_pending_catalog_files_overdue_total gauge",
             ]
         )
-        _emit_metric(lines, "xihong_cloud_sync_pending_catalog_files_overdue_total", int(overview.get("overdue_pending_catalog_file_count") or 0))
+        _emit_metric(
+            lines,
+            "xihong_cloud_sync_pending_catalog_files_overdue_total",
+            int(overview.get("overdue_pending_catalog_file_count") or 0),
+        )
         lines.extend(
             [
                 "# HELP xihong_cloud_sync_refresh_queue_failed_total Failed refresh queue tasks triggered by cloud sync.",
                 "# TYPE xihong_cloud_sync_refresh_queue_failed_total gauge",
             ]
         )
-        _emit_metric(lines, "xihong_cloud_sync_refresh_queue_failed_total", int(overview.get("refresh_failed_task_count") or 0))
+        _emit_metric(
+            lines,
+            "xihong_cloud_sync_refresh_queue_failed_total",
+            int(overview.get("refresh_failed_task_count") or 0),
+        )
         lines.extend(
             [
                 "# HELP xihong_cloud_sync_orphan_lock_count Idle auto-ingest advisory locks without a running task.",
@@ -167,14 +204,22 @@ def register_system_routes(app, settings, app_version, get_db):
                 "# TYPE xihong_cloud_sync_runtime_heartbeat_age_seconds gauge",
             ]
         )
-        _emit_metric(lines, "xihong_cloud_sync_runtime_heartbeat_age_seconds", _safe_age_seconds(runtime_summary.get("last_runtime_heartbeat_at")))
+        _emit_metric(
+            lines,
+            "xihong_cloud_sync_runtime_heartbeat_age_seconds",
+            _safe_age_seconds(runtime_summary.get("last_runtime_heartbeat_at")),
+        )
         lines.extend(
             [
                 "# HELP xihong_cloud_sync_task_heartbeat_age_seconds Age in seconds since current task heartbeat.",
                 "# TYPE xihong_cloud_sync_task_heartbeat_age_seconds gauge",
             ]
         )
-        _emit_metric(lines, "xihong_cloud_sync_task_heartbeat_age_seconds", float(runtime_summary.get("seconds_since_task_heartbeat") or -1))
+        _emit_metric(
+            lines,
+            "xihong_cloud_sync_task_heartbeat_age_seconds",
+            float(runtime_summary.get("seconds_since_task_heartbeat") or -1),
+        )
         lines.extend(
             [
                 "# HELP xihong_cloud_sync_table_receive_age_seconds Age in seconds since latest receive log per source table.",
@@ -201,10 +246,15 @@ def register_system_routes(app, settings, app_version, get_db):
                 lines,
                 "xihong_business_table_stale_hours",
                 float(check.get("stale_hours") or -1),
-                labels={"table_name": check.get("table_name", "unknown"), "side": check.get("side", "unknown")},
+                labels={
+                    "table_name": check.get("table_name", "unknown"),
+                    "side": check.get("side", "unknown"),
+                },
             )
 
-        return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
+        return PlainTextResponse(
+            "\n".join(lines) + "\n", media_type="text/plain; version=0.0.4"
+        )
 
     async def build_ready_health_payload(db: Session) -> tuple[dict, int]:
         runtime_mode = str(getattr(app.state, "runtime_mode", "")).strip().lower()
@@ -219,9 +269,11 @@ def register_system_routes(app, settings, app_version, get_db):
             "checks": {
                 "database": {
                     "status": "unknown",
-                    "type": "PostgreSQL"
-                    if "postgresql" in settings.DATABASE_URL
-                    else "SQLite",
+                    "type": (
+                        "PostgreSQL"
+                        if "postgresql" in settings.DATABASE_URL
+                        else "SQLite"
+                    ),
                 },
                 "dashboard": {
                     "status": "unknown",
@@ -230,7 +282,11 @@ def register_system_routes(app, settings, app_version, get_db):
         }
 
         try:
-            db.execute(text("SELECT 1"))
+            # [*] 这是 async 路由：同步 Session 的查询丢到线程池里跑，别在事件循环里阻塞。
+            #     数据库一慢（等连接池、磁盘抖动）就会卡住**整个**事件循环；
+            #     本地采集把 Playwright 跑在同一个后端进程里，一个卡住的探针
+            #     就能把整个后端的响应拖慢，连带把控制台的就绪探测拖到超时。
+            await asyncio.to_thread(db.execute, text("SELECT 1"))
             health_status["checks"]["database"]["status"] = "connected"
         except Exception as exc:
             health_status["checks"]["database"]["status"] = "error"
@@ -308,7 +364,9 @@ def register_system_routes(app, settings, app_version, get_db):
             "dashboard": ready_payload["checks"]["dashboard"],
             "routes": {
                 "total": len(app.routes),
-                "endpoints": len([route for route in app.routes if hasattr(route, "path")]),
+                "endpoints": len(
+                    [route for route in app.routes if hasattr(route, "path")]
+                ),
             },
             "pool": {"size": 0, "checked_out": 0, "overflow": 0},
             "executors": {

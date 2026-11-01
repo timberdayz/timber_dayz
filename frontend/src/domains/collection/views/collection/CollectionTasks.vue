@@ -554,7 +554,9 @@ const verificationInputMode = ref('')
 const verificationSubmitting = ref(false)
 const verificationCode = ref('')
 const currentTask = ref(null)
-const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled', 'partial_success']
+// [*] interrupted = 服务重启导致任务中断，属于终态：
+//     它不会自己再往下走，必须显示成"结束了"，否则页面会一直转圈等一个死任务。
+const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled', 'partial_success', 'interrupted']
 
 // WebSocket连接
 const wsConnections = ref({})
@@ -682,28 +684,46 @@ const loadTasks = async () => {
     const params = {}
     if (statusFilter.value) params.status = statusFilter.value
     if (route.query.config_id) params.config_id = route.query.config_id
-    
-    tasks.value = await collectionApi.getTasks(params)
-    if (tasks.value.length === 0 && activeTaskIds.value.length > 0) {
-      const unfiltered = await collectionApi.getTasks(statusFilter.value ? { status: statusFilter.value } : {})
-      tasks.value = (unfiltered || []).filter(task => activeTaskIds.value.includes(task.task_id))
-    }
-    verificationItems.value = await collectionApi.getVerificationItems()
-    if (route.query.task_ids) {
-      const taskIds = String(route.query.task_ids).split(',').filter(Boolean)
-      const matchedTask = tasks.value.find((task) => taskIds.includes(task.task_id))
-      if (matchedTask) {
-        await focusTaskRow(matchedTask.task_id)
+
+    // [*] 三段数据分开兜底：
+    //     之前是一个 try 串三个接口，任意一个失败都弹"加载任务失败"，
+    //     可任务列表其实已经取回来了 —— 表格有数据却报错，操作员只会以为系统坏了。
+    try {
+      tasks.value = await collectionApi.getTasks(params)
+      if (tasks.value.length === 0 && activeTaskIds.value.length > 0) {
+        const unfiltered = await collectionApi.getTasks(statusFilter.value ? { status: statusFilter.value } : {})
+        tasks.value = (unfiltered || []).filter(task => activeTaskIds.value.includes(task.task_id))
       }
+    } catch (error) {
+      // 任务列表是主数据：加载失败必须明确报错
+      ElMessage.error('加载任务失败: ' + (error?.message || error))
     }
-    syncVerificationDialogFromTasks(tasks.value)
-    
-    // 为运行中的任务建立WebSocket连接
-    tasks.value
-      .filter(t => ACTIVE_TASK_STATUSES.includes(t.status))
-      .forEach(t => connectTaskWebSocket(t.task_id))
-  } catch (error) {
-    ElMessage.error('加载任务失败: ' + error.message)
+
+    try {
+      verificationItems.value = await collectionApi.getVerificationItems()
+    } catch (error) {
+      // 待确认项只是辅助数据：挂了不影响任务列表，别再冒充"加载任务失败"
+      ElMessage.warning('加载待确认项失败: ' + (error?.message || error))
+    }
+
+    try {
+      if (route.query.task_ids) {
+        const taskIds = String(route.query.task_ids).split(',').filter(Boolean)
+        const matchedTask = tasks.value.find((task) => taskIds.includes(task.task_id))
+        if (matchedTask) {
+          await focusTaskRow(matchedTask.task_id)
+        }
+      }
+      syncVerificationDialogFromTasks(tasks.value)
+
+      // 为运行中的任务建立WebSocket连接
+      tasks.value
+        .filter(t => ACTIVE_TASK_STATUSES.includes(t.status))
+        .forEach(t => connectTaskWebSocket(t.task_id))
+    } catch (error) {
+      // 聚焦任务/联动弹窗只是界面动作：失败写日志即可，别弹错误框打扰操作员
+      console.warn('[采集任务] 聚焦任务失败:', error)
+    }
   } finally {
     loading.value = false
     scheduleTaskRefresh(tasks.value)
@@ -1038,6 +1058,7 @@ const getStatusTagType = (status) => {
     verification_required: 'warning',
     verification_submitted: 'info',
     paused: 'warning',
+    interrupted: 'warning',  // [*] 服务重启导致中断：不是失败，但需要人工关注
     partial_success: 'warning'  // v4.7.0: 部分成功显示为warning
   }
   return types[status] || 'info'
@@ -1050,6 +1071,7 @@ const getStatusLabel = (status) => {
     verification_required: '等待验证码',
     verification_submitted: '验证码已提交',
     paused: '等待验证码',
+    interrupted: '已中断',  // [*] 服务重启导致中断
     partial_success: '部分成功'  // v4.7.0: 新状态
   }
   return labels[status] || status

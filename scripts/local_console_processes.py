@@ -22,11 +22,51 @@ SERVICE_IDS = (LOCAL_COLLECTION, INSPECTION_PANEL)
 
 FRONTEND_URL_PATTERN = re.compile(r"\[前端\]\s*主界面:\s*(https?://\S+)")
 INSPECTION_URL_PREFIX = "PWCLI inspection panel: "
+#: 本地后端就绪探针地址。
+#:
+#: [*] 必须**覆盖 run.py 的全部端口回退**：run.py 的 `_choose_local_backend_port`
+#:     在默认端口被占用时会依次回退到 18001/18011/18021/18031/18041。
+#:     探针列表漏掉任何一个，后端就会"明明活着却探测不到"，
+#:     控制台只能判它没启动，最后按启动超时把整棵进程树杀掉。
 READY_URLS = (
     "http://127.0.0.1:8001/healthz/ready",
     "http://127.0.0.1:18001/healthz/ready",
     "http://127.0.0.1:18011/healthz/ready",
+    "http://127.0.0.1:18021/healthz/ready",
+    "http://127.0.0.1:18031/healthz/ready",
+    "http://127.0.0.1:18041/healthz/ready",
 )
+
+#: 就绪探针的单次请求超时预算（秒）。
+#:
+#: 必须宽于后端 ``/healthz/ready`` 的**实际**响应时间：该端点在 async 路由里做数据库巡检，
+#: 而本地采集模式把 Playwright 采集跑在**同一个后端进程**里（见 CollectionTasks 页的说明），
+#: 进程一忙，响应就会变慢。预算太紧（曾经是 0.4 秒）会把"后端只是 momentarily 忙"
+#: 误判成"没启动"，再叠加状态机 bug 就会**误杀已经跑起来的系统**。
+#: run.py 自己等同一个端点用的是 2 秒（run.py::wait_for_service），这里留一点余量。
+READINESS_PROBE_TIMEOUT_SECONDS = 3.0
+
+#: "从没就绪过"的启动预算上限（秒）。
+#:
+#: [*] 必须**大于 run.py 的最坏启动耗时**：run.py 自己最多等后端 180 秒
+#:     （run.py::wait_for_service），再加前端 15 秒，而这两段之前还有
+#:     迁移/备份/隧道等准备动作。预算比它短，控制台会在系统**还在正常启动**时
+#:     就判它启动失败并杀掉整棵进程树。
+DEFAULT_STARTUP_TIMEOUT_SECONDS = 600.0
+
+
+def resolve_startup_timeout_seconds(explicit: float | None = None) -> float:
+    """解析启动预算：显式入参 > 环境变量 > 默认值。"""
+    if explicit is not None:
+        return float(explicit)
+    raw = os.getenv("LOCAL_CONSOLE_STARTUP_TIMEOUT_SECONDS", "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return DEFAULT_STARTUP_TIMEOUT_SECONDS
+
 
 CONNECTION_SECRET_PATTERN = re.compile(
     r"(?P<prefix>[a-z][a-z0-9+.-]*://[^\s:/@]+:)[^\s@]+(?P<suffix>@)",
@@ -57,13 +97,9 @@ def decode_output_line(value: bytes | str) -> str:
 
 
 def redact_output_line(line: str) -> str:
-    redacted = CONNECTION_SECRET_PATTERN.sub(
-        r"\g<prefix><redacted>\g<suffix>", line
-    )
+    redacted = CONNECTION_SECRET_PATTERN.sub(r"\g<prefix><redacted>\g<suffix>", line)
     redacted = QUERY_SECRET_PATTERN.sub(r"\g<prefix><redacted>", redacted)
-    return ASSIGNMENT_SECRET_PATTERN.sub(
-        r"\g<name>\g<separator><redacted>", redacted
-    )
+    return ASSIGNMENT_SECRET_PATTERN.sub(r"\g<name>\g<separator><redacted>", redacted)
 
 
 class UnknownServiceError(ValueError):
@@ -102,6 +138,7 @@ class ManagedRecord:
     approved_fingerprint: str | None = None
     launch_stage: str | None = None
     last_success_at: float | None = None
+    consecutive_readiness_failures: int = 0
 
 
 def build_service_specs(
@@ -154,7 +191,9 @@ def probe_service_readiness(service_id: str) -> bool:
         return False
     for url in READY_URLS:
         try:
-            with urllib.request.urlopen(url, timeout=0.4) as response:
+            with urllib.request.urlopen(
+                url, timeout=READINESS_PROBE_TIMEOUT_SECONDS
+            ) as response:
                 if response.status == 200:
                     return True
         except Exception:
@@ -177,7 +216,8 @@ class LocalProcessSupervisor:
         wait_for_processes: Callable[..., Any] = psutil.wait_procs,
         url_opener: Callable[[str], Any] = webbrowser.open,
         time_provider: Callable[[], float] = time.time,
-        startup_timeout_seconds: float = 240,
+        startup_timeout_seconds: float | None = None,
+        readiness_failure_threshold: int = 5,
         output_sink: Callable[[str], None] | None = None,
     ) -> None:
         self.repo_root = repo_root.resolve()
@@ -191,7 +231,10 @@ class LocalProcessSupervisor:
         self._wait_for_processes = wait_for_processes
         self._url_opener = url_opener
         self._time_provider = time_provider
-        self._startup_timeout_seconds = startup_timeout_seconds
+        self._startup_timeout_seconds = resolve_startup_timeout_seconds(
+            startup_timeout_seconds
+        )
+        self._readiness_failure_threshold = readiness_failure_threshold
         self._output_sink = output_sink or (lambda _line: None)
         self._records: dict[str, ManagedRecord] = {}
         self._handles: dict[str, Any] = {}
@@ -245,8 +288,7 @@ class LocalProcessSupervisor:
     def _save_state(self) -> None:
         document = self._read_state_document()
         document["services"] = {
-            service_id: asdict(record)
-            for service_id, record in self._records.items()
+            service_id: asdict(record) for service_id, record in self._records.items()
         }
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = self.state_path.with_suffix(".tmp")
@@ -394,25 +436,40 @@ class LocalProcessSupervisor:
                 if service_id == INSPECTION_PANEL and record.launch_url:
                     record.state = "running"
                 elif self._readiness_probe(service_id):
+                    record.consecutive_readiness_failures = 0
                     was_running = record.state == "running"
                     record.state = "running"
                     if not was_running:
                         record.last_success_at = self._time_provider()
-                elif (
-                    record.state == "starting"
-                    and self._time_provider() - record.started_at
-                    > self._startup_timeout_seconds
-                ):
-                    record.state = "failed"
-                    record.last_error = (
-                        f"启动超时（超过 {int(self._startup_timeout_seconds)} 秒）"
+                else:
+                    record.consecutive_readiness_failures += 1
+                    startup_budget_exhausted = (
+                        self._time_provider() - record.started_at
+                        > self._startup_timeout_seconds
                     )
-                    record.failure_code = "startup_timeout"
-                    record.last_failure_summary = record.last_error
-                    self._terminate_owned_process(service_id, process)
-                    self._handles.pop(service_id, None)
-                elif record.state not in {"stopping", "failed"}:
-                    record.state = "starting"
+                    if record.state == "running":
+                        # 已经就绪过：**瞬时探测失败不许降级、更不许杀进程**。
+                        # 连续失败只进入观察态并重置预算窗口，给系统一段恢复时间；
+                        # 真挂掉（进程退出）会走上面的"进程已退出"分支。
+                        if (
+                            record.consecutive_readiness_failures
+                            >= self._readiness_failure_threshold
+                        ):
+                            record.state = "starting"
+                            record.started_at = self._time_provider()
+                    elif record.state == "starting" and startup_budget_exhausted:
+                        # 从未就绪过 + 超预算 ⇒ 真启动失败：终止并留证。
+                        record.state = "failed"
+                        record.last_error = (
+                            f"启动超时（超过 {int(self._startup_timeout_seconds)} 秒）"
+                        )
+                        record.failure_code = "startup_timeout"
+                        record.last_failure_summary = record.last_error
+                        self._terminate_owned_process(service_id, process)
+                        self._handles.pop(service_id, None)
+                        self._append_startup_audit(service_id, record)
+                    elif record.state not in {"stopping", "failed"}:
+                        record.state = "starting"
                 self._save_state()
                 return self._snapshot(
                     service_id, state=record.state, record=record, managed=True
