@@ -1,7 +1,7 @@
 # 采集会话复用与店铺身份统一 —— 设计规格
 
 - 日期：2026-11-01
-- 状态：待评审（v2，已按独立事实核查修正）
+- 状态：**业务已确认方向**（v3，含 4 项业务拍板结论，见 §11.1）；待进入实施计划
 - 范围：`modules/utils/pwcli_native.py`、`scripts/pwcli*.{py,ps1}`、`scripts/pwcli_inspection_panel_static/index.html`、`modules/utils/sessions/session_manager.py`、`modules/apps/collection_center/*`、`backend/services/data_ingestion_service.py`、`sql/semantic/*`、`backend/domains/collection/routers/shop_account*.py`、`backend/utils/text_normalization.py`、`frontend/src/domains/platform/views/AccountManagement.vue`
 - 关联文档：`docs/guides/UNIFIED_SHOP_IDENTITY_PRINCIPLES.md`、`docs/guides/PWCLI_MANUAL_SHOP_INSPECTION.md`
 - 迁移落点：`current_migrations/versions/`（活动迁移集；`migrations/versions/` 为历史集，本轮不动）
@@ -255,6 +255,7 @@ semantic.fact_orders_atomic (tiktok):
 ### 2.8 数据健康缺口（需要业务确认，不在代码范围内）
 
 - `TK新加坡3C店`（新加坡）→ 别名表里**没有这个标签**，`core.shop_accounts` 里也**没有对应的 TikTok 店铺账号**（只有 shopee 的 `chenewei666.sg`，且 `enabled=false`）。
+  > **业务已决定：暂不认领**，保持 `unknown` 并登记为待处理（见 §11.1 第 3 条、A14）。
   - 在 `b_class.fact_tiktok_orders_monthly`（按 `raw_data->>'店铺'`）中 = **88 行**；
   - 在 `semantic.fact_orders_atomic`（全粒度汇总）中落 `unknown` = **90 行**。
   - 两者都是真值，但属不同表，**不要混用口径**。
@@ -271,11 +272,17 @@ semantic.fact_orders_atomic (tiktok):
 
 | 概念 | 载体 | 是否唯一 | 是否参与数据匹配 | 例子 |
 |---|---|---|---|---|
-| **平台侧真实店名** | `core.shop_accounts.store_name`（现有列） | 可重名 | 现状：直接参与（**要改成只经别名表间接参与**） | `FIORO`、`DAWIE Mall`、`xhkj1.my` |
+| **平台侧真实店名** | `core.shop_accounts.store_name`（现有列） | 可重名，**且会随平台改名而变化** | 现状：直接参与（**要改成只经别名表间接参与**） | `FIORO`（原 `DAONE Mall`）、`xhkj1.my` |
 | **内部标准名** | `core.shop_accounts.internal_code`（**新增列**） | 同平台内唯一 | **否**（仅供人读与内部引用） | `FIORO_SG`、`FIORO_MY`、`FIORO_PH` |
 | **原始导出标签** | `core.shop_account_aliases.alias_value` | 平台 + 主账号 + 区域内唯一 | **是（唯一的真实匹配锚点）** | `TK菲律宾1店`、`Shopee3C店` |
 
 **内部标准名不参与匹配。** 数据归属只走 `(平台, 主账号, 原始导出标签, 区域)`。
+
+**平台侧真实店名会变（业务已确认）**：例如 `DAONE Mall` → `FIORO`。因此：
+
+1. 它**不能**当稳定标识 —— 稳定标识只能是 `shop_account_id`。
+2. **改名那一刻，历史数据仍要归到同一个店** —— 靠"旧名进别名表"实现（见 D15）。
+3. **改名那一刻不能塌缩** —— 靠"新旧名同时在别名表 + 语义层不再用 `store_name` 等值直接匹配"实现（见 D10/D13）。
 
 ---
 
@@ -318,15 +325,23 @@ shopee KR        SG×3
 
 **"FIORO" 这个平台侧真实店名要不要进别名表？** 要。但因为 `UniqueConstraint("platform","alias_normalized","is_active")` 的存在，裸 `FIORO` 只能给一个店 → **别名表必须引入区域维度**（见 §5.2 D9）。
 
-### 4.2 改名时间点？——**不迫近，但必须排在语义层改造之后**
+### 4.2 改名时间点？——**改名确定会发生，但顺序不能颠倒**
+
+业务已确认：平台侧真实店名最终都要改（`DAONE Mall` → `FIORO`），不改未来会有分歧（同一个店在库里出现两个名字，老数据认旧名、新数据认新名，数据分裂）。
+
+所以问题不是"要不要改"，而是"**改的时候系统扛不扛得住**"。
 
 理由：妙手导出用的是中文别名标签而非平台店名，**改 `store_name` 当下不会让现有数据塌缩**；真正的红线是语义层的 `store_name` 等值 + `LIMIT 1`（§2.5）。
 
 结论：
 
-1. **⑤⑥⑧（语义层止血）先做**，它们不依赖改名，且是订单重复入账的直接成因。
-2. **改名放在第二批之后**，且改名时**必须同时**为平台侧真实店名建带区域维度的别名记录 —— 否则改名那一刻就是塌缩时刻。
-3. 如果业务侧确实要把 TikTok 三店改成 `FIORO`，请在第一批完成后提出，届时 D9 已就位。
+1. **⑤⑥⑧⑩（语义层止血 + 别名区域维度）先做** —— 它们不是"可选优化"，而是**改名的前置条件**。做完之后，改名才是安全操作。
+2. **改名时必须一次性完成三件事**（缺一件就分歧）：
+   - 旧平台侧真实名写进别名表（`is_active=true`, `is_primary=false`）→ 老数据继续命中；
+   - 新平台侧真实名写进别名表并绑定区域 → 新数据命中正确店铺；
+   - 内部标准名同步更新（`FIORO_SG` 形式）→ 内部引用统一。
+3. **改名不得由运营在账号管理页直接改 `store_name`** —— 必须走一个带联动的改名流程（D17），否则第 2 条的三个"必须"无法保证。
+4. 业务侧要改 TikTok 三店为 `FIORO` 时，请在第一批完成后提出，届时 D10/D13 已就位。
 
 ---
 
@@ -386,8 +401,14 @@ SQL 侧统一改为**直接使用存储的 `alias_normalized`**，不再在查�
 - 候选 > 1 → `unknown` + `identity_warning_code='ambiguous_shop_label'`，并暴露 `identity_candidate_count` 与 `identity_candidates`（供"未匹配店铺别名"面板消费）。
 
 **候选集口径必须同时明确（否则会凭空制造 unknown）：**
-- 是否排除 `enabled=false` 的店铺账号？→ **建议排除**（当前候选池有 65/136 行来自 disabled 账号，含脏行 `platform='验证码测试账号'`）；此变更需单独评估历史归属重算范围。
-- `alias_match` 是否要求 `is_primary=true`？→ **建议不要求**（"曾用名"机制依赖 `is_active` 即可匹配）。
+
+- **是否排除 `enabled=false` 的店铺账号？→ 不排除**（业务确认：停用只是暂时的，可能回来还会启用）。
+  当前候选池有 65/136 行来自 disabled 账号（含脏行 `platform='验证码测试账号'`）。
+  **排除会有害**：一旦某账号被停用，它名下数据会掉进 `unknown`；重新启用后归属又变回 —— 归属随启停状态漂移，历史数据反复进出 unknown。
+  **不排除则安全**：唯一性判定用**完整候选集**，只要候选仍是唯一的，归属就不随启停变化。
+  → 唯一的例外是**同名冲突**：enabled 店与 disabled 店同名时 → 2 个候选 → `unknown` + `ambiguous_shop_label` → 交人工裁决。这正是应有的行为（将来 disabled 店若启用，归属会变，必须人工确认）。
+  → 脏行 `platform='验证码测试账号'` 单独清理（§11 第 7 条），不进 D13 口径讨论。
+- `alias_match` 是否要求 `is_primary=true`？→ **不要求**（"曾用名"机制依赖 `is_active` 即可匹配）。
 
 **告警码词表**：live `semantic.fact_orders_monthly_atomic.identity_warning_code` 现仅 `NULL` 与 `unresolved_shop_account`。
 D12 的两个新码与既有 `unresolved_shop_account` 的关系需明确：**建议保留 `unresolved_shop_account` 作为"完全无法定位"的粗粒度标记，新增 `ambiguous_shop_label` / `unmatched_shop_label` 作为细粒度补充**，不做替换。
@@ -410,16 +431,39 @@ D12 的两个新码与既有 `unresolved_shop_account` 的关系需明确：**�
 → **必须先把 `catalog_files.shop_account_id` 补齐到 460/460**（在采集入库时回填，而不是事后刷库），再改 `data_hash` 口径。
 → `platform_shop_id` 在 file 层 **0/460 完全不可用**，不能作为"次之"选项。
 
-**D15 —— 曾用名独立成表，不复用别名表。**
-新增 `core.shop_account_store_name_history`（`shop_account_pk`、`old_value`、`new_value`、`changed_at`、`changed_by`）。
-理由：复用别名表会 (a) 撞平台唯一约束，(b) 每次改名触发全量历史归属重算（`shop_account_aliases.py:347` → `RefreshQueueService.enqueue_refresh` → raw 层全量重建）。
+**D15 —— 曾用名 = 别名表里的一条"可参与匹配"的记录（不另建表）。**
+
+平台侧真实店名会变（`DAONE Mall` → `FIORO`，业务已确认）。改名时必须把**旧名写进 `core.shop_account_aliases`**（`alias_value` = 旧名，`alias_normalized` = 旧名的规范化值，`is_active=true`，`is_primary=false`，`alias_type='former_name'`），这样：
+
+- 老数据（携带 `DAONE Mall`）**继续命中同一个店** → 不会掉进 unknown → 不产生分歧；
+- 老名与新名**指向同一 `shop_account_id`** → `semantic.fact_orders_atomic.shop_id` 不分裂，`mart.shop_*_kpi` 聚合不断。
+
+**为什么不用独立的曾用名表**：独立表只能追溯、不能匹配 → 老数据认不出店 → 正是要避免的"分歧"。别名表本来就是"原始导出标签 → 标准店铺"的映射表，旧名天然就是一条原始标签。
+
+**代价（可接受且必要）**：写别名会触发 `shop_account_aliases.py:347` `_enqueue_shop_identity_refresh` → `RefreshQueueService.enqueue_refresh` → raw 层全量重建。
+**这是正确的**：归属确实要重算一次（老数据从 `store_name_match` 改为 `alias_match`，命中同一个店，结果不变但路径变了）。重算**只在改名时发生一次**，不是每次改名都全量。日常读取不触发。
+
+**改名审计**沿用 `core.shop_accounts.updated_by` / `updated_at` + `core.shop_account_aliases.created_by` 语义，不新建审计表。
+
+**"曾用名"的读写规则**：
+- `is_primary=true` 的别名 = 当前生效的平台侧真实名（改名后由新名接管）；
+- `is_primary=false` 且 `is_active=true` 的别名 = 曾用名，**仍参与匹配**（候选视图 alias_match 只看 `is_active`，已满足）；
+- `is_active=false` = 彻底作废（如 §2.4 那种挂错的孤儿别名），不参与匹配。
 
 **D16 —— 别名应用级约束从"同平台同别名只能一个"放宽为"同平台同别名同区域只能一个"。**
 `backend/domains/collection/routers/shop_account_aliases.py:297-307` 的 409 判定同步放宽；`_clear_primary_aliases`(:164-180) 保持"旧别名仅降 `is_primary`、`is_active` 仍为 True"的语义（曾用名机制已现成可用）。
 同时明确**匹配侧**对 `shop_region IS NULL` 的处理：NULL 别名优先级最低，仅当"同区域内无候选"时兜底。
 
-**D17 —— 店铺改名联动。**
-`backend/domains/collection/routers/shop_accounts.py:363-405` 的 `update_shop_account` 从裸 `setattr` 改为带联动的更新：唯一性校验 → 写曾用名 → 同步 `core.platform_accounts.store_name` → **入刷新队列的条件必须显式定义**（当前改名路径是否调用 `_enqueue_shop_identity_refresh` 尚未核实，实施前必须确认；B3"改名不触发全量重算"依赖这一点）。
+**D17 —— 店铺改名联动（改名必须走这一个入口，不允许裸改 `store_name`）。**
+`backend/domains/collection/routers/shop_accounts.py:363-405` 的 `update_shop_account` 从裸 `setattr` 改为带联动的更新，顺序固定：
+
+1. **唯一性校验**：同平台 `internal_code` 唯一；同主账号 `store_name` 唯一。
+2. **旧名转曾用名**：把旧 `store_name` 写入别名表（`is_active=true`, `is_primary=false`, `alias_type='former_name'`）—— 老数据继续命中（D15）。
+3. **新名接管**：新 `store_name` 写入别名表并置 `is_primary=true`（原主别名降为 `is_primary=false`，`is_active` 保持 True）。
+4. **同步 `core.platform_accounts.store_name`** —— 否则 `dim_shops` 会被打回旧名（`backend/services/shop_sync_service.py:85`）。
+5. **同步 `internal_code`**（若随之改动）。
+6. **入刷新队列**：`core.shop_account_aliases` 变更 → `shop_account_aliases.py:347` `_enqueue_shop_identity_refresh` → `RefreshQueueService.enqueue_refresh`。**改名必须触发这一次重算**（归属路径要重算），但**不得**由改名路径触发超出必要范围的全量重建。
+   → 实施前必须确认当前改名路径是否已调用 `_enqueue_shop_identity_refresh`（尚未核实），据此决定是"补调用"还是"保持"。
 
 ---
 
@@ -442,11 +486,11 @@ D12 的两个新码与既有 `unresolved_shop_account` 的关系需明确：**�
 |---|---|---|---|---|
 | ③ | 一账号一巡店窗口 | 登录态互相覆盖 | D9 | B1 |
 | ④ | 账号标识唯一化 | 串号 | D9 | B2 |
-| ⑦ | 改名自动留痕（曾用名） | 追溯困难 | D15 | B3 |
+| ⑦ | 改名自动留痕（曾用名进别名表） | 老数据认不出店、数据分裂 | D15 | B3 |
 | ⑨ | 改名后按站点自动重认店铺 | 改名后全量人工重认 | D10 + D13 | B5 |
 | ⑪ | 内部标准名字段 | 唯一、带地区标识 | §4.1 + D17 | B4 |
 | ⑫ | 会话新鲜度与持久化口径 | 过期会话被当新会话用 | D7、D8 | A11 A12 |
-| ⑬ | 改名联动与刷新队列口径 | 改名触发全量重算 | D17 | A13 |
+| ⑬ | 改名联动与刷新队列口径 | 改名产生分歧 | D17 | A13 |
 
 ---
 
@@ -492,19 +536,14 @@ ALTER TABLE core.shop_accounts
   ADD CONSTRAINT uq_shop_accounts_platform_internal_code UNIQUE (platform, internal_code);
 ```
 
-**第 4 步 —— 曾用名表（D15）**
+**第 4 步 —— 曾用名不建表（见 D15），只需给别名加类型标记**
 
 ```sql
-CREATE TABLE core.shop_account_store_name_history (
-  id              serial PRIMARY KEY,
-  shop_account_pk integer NOT NULL REFERENCES core.shop_accounts(id) ON DELETE CASCADE,
-  old_value       varchar(200) NOT NULL,
-  new_value       varchar(200) NOT NULL,
-  changed_at      timestamptz NOT NULL DEFAULT now(),
-  changed_by      varchar(100)
-);
-CREATE INDEX ix_shop_account_store_name_history_account
-  ON core.shop_account_store_name_history(shop_account_pk, changed_at DESC);
+-- 曾用名 = core.shop_account_aliases 里 is_primary=false 且 is_active=true 的一条记录
+-- alias_type 复用为 'former_name'，便于前端与治理面板区分
+ALTER TABLE core.shop_account_aliases
+  ADD CONSTRAINT ck_shop_account_aliases_alias_type
+  CHECK (alias_type IS NULL OR alias_type IN ('primary','former_name','manual','auto'));
 ```
 
 ORM SSOT 同步更新 `modules/core/db/schema_parts/platform.py`。
@@ -528,13 +567,14 @@ ORM SSOT 同步更新 `modules/core/db/schema_parts/platform.py`。
 - [ ] **A10（别名区域维度）** `core.shop_account_aliases.shop_region` 列存在；新唯一约束生效；`FIORO` 可同时挂在 `FIORO_SG` / `FIORO_MY` / `FIORO_PH` 三个店上而不冲突；`shop_region IS NULL` 的存量行不绕过约束。
 - [ ] **A11（会话新鲜度）** 读一次会话**不会**刷新 `saved_at`；把 `saved_at` 调到 40 天前 + `last_used_at` 调到当前 → 判定为过期。
 - [ ] **A12（持久化口径）** TikTok 走持久 profile 模式时，登录后的 storage_state 仍会落盘，且不会覆盖人工保存的 protected 会话。
-- [ ] **A13（改名联动）** 改 `store_name` → 曾用名入表、`core.platform_accounts.store_name` 同步、`core.shop_accounts.store_name` 更新；**刷新队列的触发条件与实际行为一致**（改名不触发 raw 层全量重建）。
+- [ ] **A13（改名联动）** 改 `store_name` → 旧名进别名表（`is_primary=false`, `is_active=true`, `alias_type='former_name'`）、新名接管 `is_primary`、`core.platform_accounts.store_name` 与 `internal_code` 同步；**改名后携带旧名的历史数据仍归到同一个 `shop_account_id`，不落 unknown**；刷新队列触发**一次**（且仅一次）归属重算。
+- [ ] **A14（待认领清单）** `TK新加坡3C店`（monthly 88 行 / atomic unknown 90 行）**按业务决定暂不认领**：保持 `unknown`，并在「未匹配店铺别名」面板可见（含说明：现有 6 个 TikTok 店已被其它标签 1:1 占满，需新建店账号才能认领）。
 
 ### 第二批
 
 - [ ] **B1（一账号一窗口）** 同时打开两个账号的巡店窗口，互不踢掉对方；同一账号重复打开才复用/接管。
 - [ ] **B2（账号标识唯一）** 中文账号名不再被 slugify 丢弃；`虾皮巴西（东朗照明主体）` 与 `验证码测试账号` 不再塌成同一个 session 名；`data/sessions` 下不再新增因 slug 塌缩而互相覆盖的目录。
-- [ ] **B3（曾用名）** 改名后 `core.shop_account_store_name_history` 可查到旧名与变更时间；改名**不触发**全量历史归属重算。
+- [ ] **B3（曾用名）** 改名后别名表可查到旧名（`is_primary=false`, `is_active=true`, `alias_type='former_name'`）；**老数据（携带旧名）仍命中同一店**；改名触发**一次**归属重算（不是零次，也不是每次读取都重算）。
 - [ ] **B4（标准名）** 账号管理页可编辑「内部标准名」，系统给出 `FIORO_SG` 形式建议值（含主账号消歧）；同平台内重名被拒绝并给出冲突详情；同主账号下同名也能正确区分。
 - [ ] **B5（改名后自动重认）** TikTok 三店 `store_name` 改为 `FIORO` 后，新采集数据的归属仍按区域正确分流到三个店，且三条语义路径均无 `LIMIT 1` 塌缩。
 
@@ -555,12 +595,13 @@ ORM SSOT 同步更新 `modules/core/db/schema_parts/platform.py`。
 |---|---|---|
 | 别名表唯一约束放宽后出现同平台同别名同区域两条 active | 匹配歧义 | 迁移脚本显式消解存量冲突（D12），并加约束校验脚本 |
 | `shop_region IS NULL` 在普通 UNIQUE 下互不冲突 | 约束形同虚设 | 用 `UNIQUE NULLS NOT DISTINCT`（PG 15.14）或先回填再约束 |
-| 候选池排除 disabled 账号 | 历史归属重算，部分行从某店移到 unknown | 单独一次变更 + 全量重算 + 前后对比 |
+| 若把 disabled 账号排除出候选池 | 停用/启用会让数据归属在 unknown 与正常店之间漂移 | **明确不排除**（业务确认：停用只是暂时的）；唯一性判定用完整候选集；只有同名冲突才落 ambiguous |
+| 旧名写进别名表后与既有别名冲突 | 匹配歧义 | 唯一约束带区域维度 + `NULLS NOT DISTINCT`；冲突时人工裁决，不自动合并 |
 | `shop_region` 维度让存量别名（NULL 区域）语义漂移 | 老数据匹配行为变化 | NULL = "不限区域"，匹配时 NULL 别名优先级最低，仅当区域内无候选时兜底 |
 | 语义层从"归第一"改成"落 unknown" | 短期 `unknown` 行数上升 | 这是暴露而非制造问题；配套面板给出认领清单，逐条处理 |
 | `data_hash` 口径变更导致历史行与新行并存 | 短期重复计数 | **先补齐 `catalog_files.shop_account_id` 再改口径**；变更后触发一次全量 semantic 重建；上线前在快照库演练 |
 | `save_session` 在保留 protected 旧 state 时仍刷新 `saved_at` | 新鲜度判定失真 | D7 同时修 `session_manager.py:447` |
-| 改名触发刷新队列 → raw 层全量重算 | 耗时长 | 改名与刷新解耦（D15/D17）；先只更新映射，不立即重算历史 |
+| 改名触发一次 raw 层全量重算 | 耗时长 | 这是**必要的**（归属路径确实要重算）；重算只在改名时发生一次，改名路径不得额外触发；上线前在快照库演练 |
 | MATVIEW 变更未刷新 | 线上仍走旧逻辑 | 变更脚本内置 `REFRESH MATERIALIZED VIEW` + 前后行数对比 |
 
 ---
@@ -575,17 +616,23 @@ ORM SSOT 同步更新 `modules/core/db/schema_parts/platform.py`。
 
 ---
 
-## 11. 需要业务确认的问题
+## 11. 业务确认结果与仍待确认的问题
 
-1. **`TK新加坡3C店`（monthly 88 行 / atomic unknown 90 行）归属哪个 TikTok 店？**
-   现有 6 个 TikTok 店已被 6 个标签 1:1 占满（`Tiktok 1店` 三店 ← TK新加坡1店/TK马来1店/TK菲律宾1店；`chenzeweinbnb@163.com` 三店 ← TK新加坡2店/TK马来2店/TK菲律宾2店）。
-   需要新建第 7 个店账号，还是并入现有某店？
-   旁证：`chenewei666:main` 的 `main_account_name='shopee新加坡3C店'`，其 disabled 店 `chenewei666.sg` 持有别名 `3C店` —— 是否即同一"3C 品牌"的 TikTok 侧？
-2. **`3c店` 冲突的取舍**：`Shopee3C店`→`zewei_toys.sg`（active+primary，店 enabled=true） vs `3C店`→`chenewei666.sg`（店 enabled=false）。
-   D12 的默认规则会保留前者，等于让 disabled 的 3C 店永久无别名 —— 是否为业务意图？
-3. **两个 disabled 主账号是否启用**（`虾皮巴西（东朗照明主体）` 6 店、`验证码测试账号` 1 店）？当前它们的面板/采集可见性一致（都看不见），但语义层候选池仍含它们的店铺账号。
-4. **三个 FIORO 店的真实归属与 `internal_code` 取值**：`Tiktok 1店` 下 id 62/63/64（DAONE Mall/SG、DAWIE Mall/MY、Explorers Mall/PH）是否就是要改名为 `FIORO` 的三店？
-   `internal_code` 取 `FIORO_SG`/`FIORO_MY`/`FIORO_PH` 是否符合业务命名习惯（是否要带平台前缀、是否要带序号、跨主账号如何区分）？
-5. **别名 `shop_region` 的回填策略**：存量 21 条别名是否回填区域，还是保留 NULL 作"不限区域"？
-6. **`Tiktok 1店` 与 `chenzeweinbnb@163.com` 的归属划分**：两主账号各持 3 个 TikTok 店，标签前缀完全对称（TK+地区+序号），但 `TK新加坡1店` 同时出现在 id 62（SG，active）与 id 63（MY，inactive）—— 疑似历史误录，是否确认？
-7. **`core.shop_accounts.platform='验证码测试账号'` 脏行**：随 D12 一起清为 NULL、删除，还是保留为特例？
+### 11.1 已确认（2026-11-01 业务拍板）
+
+| # | 问题 | 结论 | 影响的设计 |
+|---|---|---|---|
+| 1 | 平台侧真实店名会变（`DAONE Mall` → `FIORO`），最终都要改，不改未来有分歧 | **确认会改** → 改名必须走联动流程；旧名必须继续能匹配 | §3、§4.2、D15、D17 |
+| 2 | 内部标准名命名约定 | `FIORO_SG` / `FIORO_MY` / `FIORO_PH`；同平台同区域多主账号冲突时才追加主账号短标识（`FIORO_MY_T1`） | §4.1、D10 |
+| 3 | `TK新加坡3C店`（90 行）归属 | **暂不认领**，保持 `unknown` 并登记为待处理 | A14、§2.8 |
+| 4 | 语义层候选池是否排除 disabled 账号 | **不排除** —— 停用只是暂时的，可能回来还会启用 | D13 候选集口径 |
+
+### 11.2 仍待确认（不阻塞第一批实施）
+
+1. **`3c店` 冲突的取舍**：`Shopee3C店`→`zewei_toys.sg`（active+primary，店 enabled=true） vs `3C店`→`chenewei666.sg`（店 enabled=false）。D12 的默认规则保留前者，等于让 disabled 的 3C 店永久无别名 —— 是否为业务意图？
+   （**注意**：按 11.1 第 4 条"不排除 disabled"，这条的取舍只影响"哪个店认领 `3c店`"，不影响归属漂移。）
+2. **两个 disabled 主账号是否启用**（`虾皮巴西（东朗照明主体）` 6 店、`验证码测试账号` 1 店）？面板与采集可见性已一致（都看不见），但语义层候选池仍含它们的店铺账号（65/136 行）。
+3. **TikTok 三店改名后的具体归属**：`Tiktok 1店` 下 id 62/63/64（DAONE Mall/SG、DAWIE Mall/MY、Explorers Mall/PH）是否就是要改名为 `FIORO` 的三店？两个 TikTok 主账号各持 3 店、标签前缀完全对称（TK+地区+序号），但 `TK新加坡1店` 同时出现在 id 62（SG，active）与 id 63（MY，inactive）—— 疑似历史误录。
+4. **别名 `shop_region` 的回填策略**：存量 21 条别名是否回填区域，还是保留 NULL 作"不限区域"？
+5. **`core.shop_accounts.platform='验证码测试账号'` 脏行**：随 D12 一起清为 NULL、删除，还是保留为特例？
+6. **两套 alembic 中生产实际使用哪一套**：仓库并存 `current_migrations/versions/`（活动，2026-08+）与 `migrations/versions/`（历史）。本 spec 按前者落点，需运维确认。
