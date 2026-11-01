@@ -181,14 +181,17 @@ def build_app(state: PanelState) -> FastAPI:
         state.statuses[key] = pending
         command = build_pwcli_action_command(action, account, state.repo_root)
         result = state.command_runner(command)
-        if result.exit_code != 0:
+        combined_output = "\n".join(
+            part for part in (result.stdout, result.stderr) if part and part.strip()
+        ).strip()
+        if result.exit_code != 0 or not combined_output:
             state.statuses[key] = "error"
-            message = (result.stderr or result.stdout or "Command failed").strip()
+            message = combined_output or f"Command failed with exit code {result.exit_code}"
             state.record(action, account, "error", message)
             raise HTTPException(status_code=500, detail=message)
         state.statuses[key] = success
-        state.record(action, account, success, (result.stdout or "").strip())
-        return {**account, "status": success}
+        state.record(action, account, success, combined_output or (result.stdout or "").strip())
+        return {**account, "status": success, "message": combined_output}
 
     @app.post("/api/accounts/open", dependencies=[Depends(require_token)])
     def open_account(request: AccountRequest) -> dict[str, Any]:

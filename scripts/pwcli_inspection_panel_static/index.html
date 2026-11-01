@@ -317,9 +317,9 @@
         const index = accounts.findIndex((item) => item.platform === result.platform && item.account_id === result.account_id);
         if (index >= 0) accounts[index] = result;
         render();
-        addLog(`${account.display_name} ${action} -> ${result.status}`);
+        addLog(`${account.display_name} ${action} -> ${result.status}` + (result.message ? `\n${result.message}` : ''));
       } catch (error) {
-        addLog(`${account.display_name} ${error.message}`);
+        addLog(`${account.display_name} ${action} -> error\n${(error && error.message) || '未知错误'}`);
       }
     }
 
