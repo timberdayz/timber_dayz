@@ -1403,6 +1403,7 @@ git commit -m "fix(别名): 写侧与查侧规范化统一，认领了不再匹�
 - Modify: `sql/semantic/analytics_monthly_atomic_mv.sql:339-405`（告警码 CASE `:365-377` + LATERAL `:389-401`）+ 最终 SELECT
 - Test: `backend/tests/data_pipeline/test_shop_identity_resolution_sql.py`（扩充）
 - Test: `backend/tests/test_semantic_ambiguous_identity_sql.py`（新建）
+- Modify: `backend/tests/test_alias_normalization_consistency.py`（**改写护栏** —— 见 Step 4a-3 的冲突说明；不改会红）
 
 > **本 Task 不改 `sql/semantic/shop_identity_resolution_candidates.sql`（候选视图）** —— 区域感知匹配属第二批 ⑨。
 > 该文件仍需在 `git add` 里带上（第一批 Task 6 改过它的规范化口径），但**本 Task 不动它**。
@@ -1612,6 +1613,25 @@ orders_atomic 第 1、候选视图第 6）→ **第二批**候选视图加 `iden
 > （`fact_analytics_atomic`(:22) 与两个 monthly MV(:15-20) 本来就声明了这条依赖，不用改。）
 2. 把 `:451-474` 的 LATERAL 换成扫 `semantic.shop_identity_resolution_candidates c`，条件 `c.platform_code = lower(d.platform_code) AND c.identity_value_normalized = ANY (d.normalized_identity_candidates)`。
 3. 删掉 `orders_atomic.sql` 里对 `core.shop_account_aliases` 的直接 JOIN —— 别名匹配统一由候选视图的 `alias_match` 分支承担。
+
+> ⚠ **⚠ 第 3 步会让 Task 6 留下的护栏变红 —— 必须同一个 Task 里一起改**
+> （第 12 轮实跑复核才发现，11 轮文档复核没抓到 —— 因为它需要把两个 Task 连起来真跑）：
+>
+> Task 6 新建的 `backend/tests/test_alias_normalization_consistency.py` 里有：
+> ```python
+> for rel in ("sql/semantic/shop_identity_resolution_candidates.sql", "sql/semantic/orders_atomic.sql"):
+>     assert "saa.alias_normalized" in text, f"{rel} 未使用存储的 alias_normalized"
+> ```
+> —— 它要求 `orders_atomic.sql` **仍然直接 JOIN 别名表**（因为 Task 6 当时还没改走候选视图）。
+> 而本步 3 要**删掉那个 JOIN** → `saa.alias_normalized` 从文件里消失 → **这条护栏变红**。
+>
+> → **正确改法**（本 Task 内一并完成）：
+> - `shop_identity_resolution_candidates.sql` 保留「必须含 `saa.alias_normalized`」；
+> - `orders_atomic.sql` **挪到**「必须引用 `shop_identity_resolution_candidates`」那一组，
+>   并追加一条 `assert "saa.alias_normalized" not in text`（防止它又被塞回直接 JOIN）。
+>
+> 漏了这一步 → 第一批末尾的总验收会红，且报错信息（"未使用存储的 alias_normalized"）
+> 会让人误以为是 Task 6 没做对，方向完全反了。
 4. 保留原有的「`shop_id` 为 `''`/`none`/`unknown`/`xihong` 时落 `unknown`」兜底。
 
 **4b. 四条路径的 LATERAL 改成「候选集合 + 计数」。**
@@ -1828,6 +1848,47 @@ END AS identity_warning_code
 > **实施者必须先在 live 上验证这段 SQL 能跑通**（`SELECT ... LIMIT 0` 或包一层子查询试跑），再改文件 ——
 > 上面的模板已在 live PG 15.14 实测可执行。
 
+> **第 12 轮实跑复核结论（照着计划真做一遍之后的三处修正 + 实测事实）**：
+>
+> **① `orders_atomic.sql` 的 `normalized_identity_candidates` 落点要改：`mapped` 层 → `cleaned` 层。**
+> Step 4a-1 说"在 `mapped` CTE 里补出数组，照抄 `prepared_identity_monthly_orders` 层" ——
+> **在 `orders_atomic.sql` 里不可直接照抄**：`mapped` 的 ARRAY 元素若写成
+> `normalized_source_platform_shop_id` 这类**同层输出别名**，PostgreSQL 直接报
+> `column "normalized_source_platform_shop_id" does not exist`（同层不能引用输出别名）。
+> 正确做法（已实测跑通）：
+> - `mapped` 层只补两个**原始线索列** `source_platform_shop_id` / `source_shop_account_id`
+>   （取法照抄 `orders_monthly_atomic_mv.sql:39-45` / `:46-57`）；
+> - **`cleaned` 层**（`FROM mapped`，mapped 的列是**真实输入列**）里用
+>   `ARRAY_REMOVE(ARRAY[ LOWER(COALESCE(source_platform_shop_id,'')), ... ], '')`
+>   **就地构造**数组，元素直接引用 mapped 的列。
+> → 结果与计划等价（`deduplicated d.normalized_identity_candidates` 可用），但落点不同。
+>
+> **② `analytics_atomic.sql` 的 `VALUES` 不必复制两遍 —— 用 LATERAL 体内的 `WITH` CTE。**
+> Step 4b 给的是"在两个子查询里各写一次 `ARRAY(SELECT ... FROM (VALUES ...) cand(...))`"。
+> 实测 **PostgreSQL 允许 LATERAL 体内带 `WITH`，且该 CTE 可以引用外层表**：
+> ```sql
+> -- 实测通过：LATERAL 体内 WITH + 外层引用
+> select t.x, l.v from (select 10 as x) t
+> left join lateral (with cand as (select t.x + 1 as v) select c.v from cand c) l on true;
+> -- 实测通过：0 行时聚合仍返回 1 行（count=0），不会把整行丢掉
+> select t.x, l.n from (select 10 as x) t
+> left join lateral (with cand as (select t.x + 1 as v where false) select count(*)::int as n from cand) l on true;
+> ```
+> → 用一个 `WITH candidate_values AS (...)` 定义候选值集合，
+> `agg` 与 `best` 两个子查询都引用 `ARRAY(SELECT identity_value_normalized FROM candidate_values)`
+> —— **`VALUES` 只写一遍**，且仍然**留在 LATERAL 内部**（保持行相关），
+> 也不会因"提到 LATERAL 之外"退化成笛卡尔积。
+>
+> **③ 实测事实：Task 5 / Task 6 的两处"条件前提"已落地，可直接省掉一步。**
+> - Task 5 迁移实跑（事务内执行后回滚）：**21 条存量别名全部回填到 `shop_region`**，
+>   `shop_region IS NULL` 剩 **0 行** → 待确认问题「别名 `shop_region` 回填策略」
+>   对存量数据**已无实际分歧**（存量已无"不限区域"的行）。
+> - Task 6 实跑：**21 条存量别名的 `alias_normalized` 全部已符合新规则（不符合 0 条）**
+>   → Step 4 末尾那句"若不符合，需要一条数据订正脚本把存量值重算"的**前提不成立**，
+>   **不需要数据订正脚本**。
+> - 另：`shop_identity_resolution_candidates.sql` 的 `store_name_match` 分支
+>   与 Python `normalize_alias_key` 实测 **52/52 条逐条一致** ✅。
+
 - [ ] **Step 5: 跑语义层 SQL 资产一致性测试**
 
 ```bash
@@ -1839,7 +1900,7 @@ Expected: 全部 PASS。
 - [ ] **Step 6: 提交**
 
 ```bash
-git add sql/semantic/ backend/services/data_pipeline/refresh_registry.py backend/tests/data_pipeline/test_refresh_runner.py backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py
+git add sql/semantic/ backend/services/data_pipeline/refresh_registry.py backend/tests/data_pipeline/test_refresh_runner.py backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py backend/tests/test_alias_normalization_consistency.py
 git commit -m "feat(语义层): 多候选不再静默归一，落 unknown + 告警码
 
 - 四条语义路径统一判定：候选 1 才归属，候选 0 落 unmatched_shop_label，
@@ -2033,6 +2094,35 @@ Expected（对照 Task 0 Step 3 的基线）:
 - 六个 `tiktok_*_local` 的行数**保持不变**；
 - `unknown` 的行数**不增加**（候选唯一的行仍唯一命中）；
 - 若 `unknown` 增加了，说明某处候选口径被改宽了 → **必须查明原因再继续**。
+
+> ⚠ **⚠ 这条护栏是「条件式」的，不是无条件的期望**（第 12 轮实跑复核修正）：
+>
+> **前提**：别名表里**没有**新增「同平台 + 同 `alias_normalized`」的 active 行。
+> Task 5 的迁移把唯一约束从 `(platform, alias_normalized, is_active)`
+> 改成 `(platform, alias_normalized, shop_region, is_active)` ——
+> 改完之后**同平台同名别名就可以共存** → 多候选成为可能 → `unknown` **应该**增加
+> （这正是"不再静默归一"的全部意义）。
+>
+> → **`unknown` 增加不一定是 bug**。判据应该是「先查是不是新增了同名别名」：
+> - 是新增的同名别名造成的 → **增加是正确的**（原设计就是不许静默归一）；
+> - 不是 → 才是口径被改宽，需要回查。
+>
+> 📌 **由此得出一条操作纪律（重要）**：
+> **「三个同名品牌店（如三个地区的 FIORO）」的别名数据录入，必须排在第二批 ⑨
+> 区域感知匹配上线之后。**
+> 若在第一批就录 3 条同名别名 → 区域还没参与匹配 → 3 个候选 →
+> 那批数据**全部落 unknown** → 业务上会看到"同品牌店数据集体消失"。
+> （数据是安全的——比张冠李戴好——但会被当成事故。）
+>
+> 📌 **实测基线（live PG 15.14，事务内重建后回滚，未留痕）**：
+> - `semantic.fact_orders_atomic`（改走候选视图后）：**shop_id 分布完全不变** ✅
+>   （六个 `tiktok_*_local` 行数不动，说明"改走候选视图"没有改变归属口径）
+> - `semantic.fact_analytics_atomic` / `fact_analytics_monthly_atomic_mv`：
+>   **18 行**从两个店（`1419169771` / `1540271739`）落成 `unknown` +
+>   `ambiguous_shop_label` —— 这是 live 上**真实存在的多候选**，
+>   改造前被静默归给排序第一的那个店，改造后正确报歧义。**这就是 A6 的现场证据。**
+> - `semantic.fact_orders_monthly_atomic_mv`：88 行 `unresolved_shop_account`
+>   → `unmatched_shop_label`（与本 Task Step 4 的预期逐字吻合），shop_id 分布不变。
 
 - [ ] **Step 4: 验证多候选确实落 unknown 而不是归第一**
 
@@ -2557,11 +2647,27 @@ git commit -m "fix(采集): 人工巡店保存的会话优先于持久 profile �
 
 - [ ] **Step 1: 跑全量相关测试**
 
+> ⚠ **这条命令是「第一批全部 Task 完成后」的总验收，中途不要跑** ——
+> 清单里有 **6 个测试文件由后续 Task 新建**，尚未做完时跑会直接报
+> `ERROR: file or directory not found`（实测）：
+> `test_pwcli_helpers_session_targeting.py`（Task 2）、
+> `test_pwcli_inspection_panel_reporting.py`（Task 3）、
+> `test_pwcli_native_sys_path_bootstrap.py`（Task 4）、
+> `test_catalog_file_identity_backfill.py`（Task 9）、
+> `test_data_ingestion_hash_identity.py`（Task 10）、
+> `test_shop_account_unmatched_alias_hint.py`（Task 11）。
+> → **中途想验证**，去掉这 6 个文件跑其余 11 个即可（实测全绿）。
+
 ```bash
 python -m pytest backend/tests/test_session_storage_roots.py backend/tests/test_collection_session_reuse_contract.py backend/tests/test_pwcli_native_session_alignment.py backend/tests/test_session_manager_protection.py backend/tests/test_shop_account_aliases_api.py backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/data_pipeline/test_refresh_runner.py backend/tests/test_semantic_alias_sql_assets.py backend/tests/test_alias_normalization_consistency.py backend/tests/test_semantic_ambiguous_identity_sql.py backend/tests/test_shop_identity_schema_migration.py backend/tests/test_catalog_file_identity_backfill.py backend/tests/test_data_ingestion_hash_identity.py backend/tests/test_pwcli_helpers_session_targeting.py backend/tests/test_pwcli_inspection_panel_reporting.py backend/tests/test_pwcli_native_sys_path_bootstrap.py backend/tests/test_shop_account_unmatched_alias_hint.py -q
 ```
 
 Expected: 全部 PASS，且**不少于 Task 0 Step 2 的基线通过数**（基线 = 41 passed）。
+
+> **基线的可移植性修正（实测）**：`backend/tests/test_pwcli_native_session_alignment.py` 原先把
+> `F:/Vscode/python_programme/AI_code/xihong_erp/...` **本机绝对路径写死进断言** →
+> 在 worktree、换机器、上 CI 都会红（实测 worktree 里 2 failed）。
+> 已改成 `pwcli_native.REPO_ROOT / ...` 推导（与同文件 :69-100 的既有写法一致）。
 
 - [ ] **Step 2: 核对 spec 第一批验收项**
 
