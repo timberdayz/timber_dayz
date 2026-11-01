@@ -110,7 +110,8 @@ async def _create_orders_b_class_tables(session) -> None:
                 platform VARCHAR(50) NOT NULL,
                 shop_account_id VARCHAR(100) NOT NULL,
                 store_name VARCHAR(200) NOT NULL,
-                platform_shop_id VARCHAR(256)
+                platform_shop_id VARCHAR(256),
+                shop_region VARCHAR(50)
             )
             """
         )
@@ -125,7 +126,8 @@ async def _create_orders_b_class_tables(session) -> None:
                 alias_value VARCHAR(200) NOT NULL,
                 alias_normalized VARCHAR(200) NOT NULL,
                 is_primary BOOLEAN DEFAULT FALSE,
-                is_active BOOLEAN DEFAULT TRUE
+                is_active BOOLEAN DEFAULT TRUE,
+                shop_region VARCHAR(50)
             )
             """
         )

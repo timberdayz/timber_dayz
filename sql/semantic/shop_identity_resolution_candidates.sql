@@ -11,6 +11,8 @@ WITH active_shop_accounts AS (
         NULLIF(TRIM(COALESCE(sa.shop_account_id, '')), '') AS resolved_shop_account_id,
         NULLIF(TRIM(COALESCE(sa.platform_shop_id, '')), '') AS candidate_platform_shop_id,
         NULLIF(TRIM(COALESCE(sa.store_name, '')), '') AS candidate_store_label,
+        -- 店铺自身的区域（大写，如 MY / PH / SG）；NULL = 不限区域
+        NULLIF(TRIM(COALESCE(sa.shop_region, '')), '') AS candidate_shop_region,
         COALESCE(
             NULLIF(TRIM(COALESCE(sa.platform_shop_id, '')), ''),
             NULLIF(TRIM(COALESCE(sa.shop_account_id, '')), ''),
@@ -26,7 +28,8 @@ identity_rows AS (
         'platform_shop_id'::varchar AS resolution_method,
         1 AS resolution_priority,
         LOWER(candidate_platform_shop_id) AS identity_value_normalized,
-        candidate_platform_shop_id AS identity_source_value
+        candidate_platform_shop_id AS identity_source_value,
+        candidate_shop_region AS identity_shop_region
     FROM active_shop_accounts
     WHERE candidate_platform_shop_id IS NOT NULL
 
@@ -39,7 +42,8 @@ identity_rows AS (
         'shop_account_id'::varchar AS resolution_method,
         2 AS resolution_priority,
         LOWER(resolved_shop_account_id) AS identity_value_normalized,
-        resolved_shop_account_id AS identity_source_value
+        resolved_shop_account_id AS identity_source_value,
+        candidate_shop_region AS identity_shop_region
     FROM active_shop_accounts
     WHERE resolved_shop_account_id IS NOT NULL
 
@@ -52,7 +56,9 @@ identity_rows AS (
         'alias_match'::varchar AS resolution_method,
         3 AS resolution_priority,
         LOWER(TRIM(saa.alias_normalized)) AS identity_value_normalized,
-        saa.alias_value AS identity_source_value
+        saa.alias_value AS identity_source_value,
+        -- 别名自己的区域（第一批 Task 5 新增列）；NULL = 不限区域
+        NULLIF(TRIM(COALESCE(saa.shop_region, '')), '') AS identity_shop_region
     FROM active_shop_accounts asa
     INNER JOIN core.shop_account_aliases saa
       ON saa.shop_account_id = asa.shop_account_pk
@@ -80,7 +86,8 @@ identity_rows AS (
             '',
             'g'
         ) AS identity_value_normalized,
-        candidate_store_label AS identity_source_value
+        candidate_store_label AS identity_source_value,
+        candidate_shop_region AS identity_shop_region
     FROM active_shop_accounts
     WHERE candidate_store_label IS NOT NULL
 )
@@ -91,7 +98,8 @@ SELECT
     resolved_shop_id,
     resolved_shop_account_id,
     resolution_method,
-    resolution_priority
+    resolution_priority,
+    identity_shop_region
 FROM identity_rows
 WHERE NULLIF(TRIM(COALESCE(identity_value_normalized, '')), '') IS NOT NULL;
 

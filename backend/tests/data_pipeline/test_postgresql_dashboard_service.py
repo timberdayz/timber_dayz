@@ -3209,7 +3209,8 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                         shop_account_id VARCHAR(100) NOT NULL,
                         platform VARCHAR(50) NOT NULL,
                         store_name VARCHAR(200) NOT NULL,
-                        platform_shop_id VARCHAR(256)
+                        platform_shop_id VARCHAR(256),
+                        shop_region VARCHAR(50)
                     )
                     """
                 )
@@ -3224,7 +3225,8 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                         alias_value VARCHAR(200) NOT NULL,
                         alias_normalized VARCHAR(200) NOT NULL,
                         is_primary BOOLEAN DEFAULT FALSE,
-                        is_active BOOLEAN DEFAULT TRUE
+                        is_active BOOLEAN DEFAULT TRUE,
+                        shop_region VARCHAR(50)
                     )
                     """
                 )
@@ -3451,7 +3453,8 @@ async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate
                         shop_account_id VARCHAR(100) NOT NULL,
                         platform VARCHAR(50) NOT NULL,
                         store_name VARCHAR(200) NOT NULL,
-                        platform_shop_id VARCHAR(256)
+                        platform_shop_id VARCHAR(256),
+                        shop_region VARCHAR(50)
                     )
                     """
                 )
@@ -3466,7 +3469,8 @@ async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate
                         alias_value VARCHAR(200) NOT NULL,
                         alias_normalized VARCHAR(200) NOT NULL,
                         is_primary BOOLEAN DEFAULT FALSE,
-                        is_active BOOLEAN DEFAULT TRUE
+                        is_active BOOLEAN DEFAULT TRUE,
+                        shop_region VARCHAR(50)
                     )
                     """
                 )
@@ -3634,7 +3638,8 @@ async def test_business_overview_kpi_module_exposes_pv_uv_conversion_rates():
                         platform VARCHAR(50),
                         store_name VARCHAR(200),
                         platform_shop_id VARCHAR(256),
-                        shop_account_id VARCHAR(256)
+                        shop_account_id VARCHAR(256),
+                        shop_region VARCHAR(50)
                     )
                     """
                 )
@@ -3649,7 +3654,8 @@ async def test_business_overview_kpi_module_exposes_pv_uv_conversion_rates():
                         alias_value VARCHAR(256),
                         alias_normalized VARCHAR(256),
                         is_active BOOLEAN DEFAULT TRUE,
-                        is_primary BOOLEAN DEFAULT FALSE
+                        is_primary BOOLEAN DEFAULT FALSE,
+                        shop_region VARCHAR(50)
                     )
                     """
                 )
