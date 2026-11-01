@@ -13,7 +13,8 @@ from scripts.pwcli_account_inventory import (
 def test_work_tag_normalizes_spaces_colons_email_and_non_ascii():
     assert work_tag("shopee", "hongxikeji:main") == "shopee-hongxikeji-main-inspect"
     assert work_tag("tiktok", "chenzeweinbnb@163.com") == "tiktok-chenzeweinbnb-163-com-inspect"
-    assert work_tag("tiktok", "Tiktok 1店") == "tiktok-tiktok-1-inspect"
+    # 非 ASCII 账号名必须带稳定哈希后缀，否则会塌成同一个 work_tag（spec D9）
+    assert work_tag("tiktok", "Tiktok 1店") == "tiktok-tiktok-1-a9983eb0-inspect"
 
 
 def test_display_name_prefers_main_account_name_then_username_then_account_id():
