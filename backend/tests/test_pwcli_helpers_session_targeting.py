@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPERS = REPO_ROOT / "scripts" / "pwcli_helpers.ps1"
 LAUNCHER = REPO_ROOT / "scripts" / "pwcli.ps1"
+INVENTORY = REPO_ROOT / "scripts" / "pwcli_account_inventory.py"
 
 
 def _read(path: Path) -> str:
@@ -109,3 +116,120 @@ def test_platform_save_wrappers_forward_work_tag():
         assert re.search(pattern, text, re.IGNORECASE | re.DOTALL), (
             f"Save-Pwcli{platform.capitalize()}State 没有把 -WorkTag 透传给 Save-PwcliPlatformState"
         )
+
+
+def _powershell_work_tag(platform: str, account_id: str) -> str:
+    """在 PowerShell 里跑一次 Resolve-PwcliWorkTag，返回它算出来的 work tag。"""
+    script = (
+        f". '{HELPERS}'; "
+        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
+        f"Resolve-PwcliWorkTag -Platform '{platform}' -AccountId '{account_id}'"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        cwd=REPO_ROOT,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    output = (result.stdout or "").strip()
+    assert result.returncode == 0, f"PowerShell 执行失败：{result.stdout}\n{result.stderr}"
+    return output
+
+
+def test_open_helper_resolves_work_tag_from_account():
+    """Open-PwcliPlatform 必须把账号拼进 work tag，不能默认用平台级的 "explore"。
+
+    否则手工执行 `Open-PwcliShopee -AccountId X`（不带 -WorkTag）时，
+    同平台的多个账号会共用 `shopee-explore` 这一个 session 名 ——
+    后开的窗口会把先开的窗口杀掉（spec D9 / ③一账号一巡店窗口）。
+
+    这里锁定的是**函数体**而不是字面量：只要 Open 走了 Resolve-PwcliWorkTag，
+    推导规则怎么变都不会退化回平台级 session 名。
+    """
+    text = _read(HELPERS)
+    block = text.split("function Open-PwcliPlatform", 1)[1].split("\nfunction ", 1)[0]
+    assert "Resolve-PwcliWorkTag" in block, "Open-PwcliPlatform 没有按账号解析 work tag"
+    assert "$resolvedWorkTag" in block, "Open-PwcliPlatform 没有用解析出来的 work tag 拼 session 名"
+
+
+@pytest.mark.skipif(shutil.which("powershell") is None, reason="requires Windows PowerShell")
+def test_powershell_and_python_derive_the_same_work_tag():
+    """PowerShell 侧与 Python 侧的 work tag 规则必须完全一致。
+
+    两侧各写一遍规则迟早会分叉；一旦分叉，同一个账号在「网页面板」和
+    「手工命令」下会落到不同的 session 名与工作目录（spec D9）。
+    """
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from pwcli_account_inventory import work_tag
+
+    for platform, account_id in (
+        ("shopee", "hongxikeji:main"),
+        ("tiktok", "Tiktok 1店"),
+        ("shopee", "虾皮巴西（东朗照明主体）"),
+    ):
+        assert _powershell_work_tag(platform, account_id) == work_tag(platform, account_id)
+
+
+@pytest.mark.skipif(shutil.which("powershell") is None, reason="requires Windows PowerShell")
+def test_powershell_derives_distinct_tags_for_chinese_accounts():
+    """两个中文账号在 PowerShell 侧也必须得到不同的 work tag。
+
+    这是 ③「一账号一巡店窗口」在手工命令路径上的前提 ——
+    中文账号名不能塌成同一个 session 名。
+    """
+    first = _powershell_work_tag("shopee", "虾皮巴西（东朗照明主体）")
+    second = _powershell_work_tag("shopee", "验证码测试账号")
+    assert first != second, "两个中文账号推导出了同一个 work tag"
+    assert first and second, "work tag 不能为空"
+
+
+@pytest.mark.skipif(shutil.which("powershell") is None, reason="requires Windows PowerShell")
+def test_explicit_work_tag_wins_over_account_derivation():
+    """显式传入的 -WorkTag 必须优先于按账号推导。"""
+    script = (
+        f". '{HELPERS}'; "
+        "Resolve-PwcliWorkTag -Platform 'shopee' -WorkTag 'fixed-tag' -AccountId 'hongxikeji:main'"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        cwd=REPO_ROOT,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, f"PowerShell 执行失败：{result.stdout}\n{result.stderr}"
+    assert (result.stdout or "").strip() == "fixed-tag"
+
+
+def test_work_tag_cli_does_not_touch_database():
+    """work-tag 子命令必须能在没有数据库的环境里跑（PowerShell 侧要靠它推导）。"""
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(INVENTORY),
+            "work-tag",
+            "--platform",
+            "shopee",
+            "--account-id",
+            "hongxikeji:main",
+        ],
+        cwd=REPO_ROOT,
+        env={**os.environ, "DATABASE_URL": "postgresql://invalid:invalid@127.0.0.1:1/none"},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert (result.stdout or "").strip() == "shopee-hongxikeji-main-inspect"

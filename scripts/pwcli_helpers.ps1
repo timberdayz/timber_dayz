@@ -118,6 +118,59 @@ function Get-PwcliActiveSession {
     return $session.Trim()
 }
 
+function Get-PwcliAccountWorkTag {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Platform,
+        [Parameter(Mandatory = $true)]
+        [string]$AccountId
+    )
+
+    # work tag 的规则**只此一份**（Python 侧 scripts/pwcli_account_inventory.py 的 work_tag）。
+    # PowerShell 不自己实现一遍：两边各写一遍迟早会不一致，一旦不一致，
+    # 同一个账号在「网页面板」和「手工命令」下会落到不同的 session 名与工作目录。
+    $helper = Get-PwcliScriptPath "pwcli_account_inventory.py"
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = (python $helper work-tag --platform $Platform --account-id $AccountId 2>&1 | Out-String)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($exitCode -ne 0) {
+        throw "Get-PwcliAccountWorkTag failed for platform '$Platform' account '$AccountId' (exit code $exitCode): $output"
+    }
+
+    $tag = $output.Trim()
+    if (-not $tag) {
+        throw "Get-PwcliAccountWorkTag returned an empty work tag for platform '$Platform' account '$AccountId'"
+    }
+    return $tag
+}
+
+function Resolve-PwcliWorkTag {
+    param(
+        [string]$Platform,
+        [string]$WorkTag,
+        [string]$AccountId
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($WorkTag)) {
+        return $WorkTag.Trim()
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($AccountId)) {
+        # 有账号就必须按账号推导：否则多个账号会共用 "explore" 这个**平台级** session 名，
+        # 后开的窗口会把先开的窗口杀掉（spec D9 / ③一账号一巡店窗口）。
+        return Get-PwcliAccountWorkTag -Platform $Platform -AccountId $AccountId
+    }
+
+    return "explore"
+}
+
 function Invoke-PwcliSessionCommand {
     param(
         [Parameter(Mandatory = $true)]
@@ -152,16 +205,17 @@ function Open-PwcliPlatform {
         [Parameter(Mandatory = $true)]
         [ValidateSet("miaoshou", "shopee", "tiktok")]
         [string]$Platform,
-        [string]$WorkTag = "explore",
+        [string]$WorkTag = "",
         [string]$Url,
         [string]$AccountId,
         [switch]$NoCd
     )
 
     $platformName = $Platform.ToLower()
-    $workDir = Get-PwcliWorkDir -Platform $platformName -WorkTag $WorkTag
+    $resolvedWorkTag = Resolve-PwcliWorkTag -Platform $platformName -WorkTag $WorkTag -AccountId $AccountId
+    $workDir = Get-PwcliWorkDir -Platform $platformName -WorkTag $resolvedWorkTag
     $stateFile = Get-PwcliStateFile -Platform $platformName
-    $session = "$platformName-$WorkTag"
+    $session = "$platformName-$resolvedWorkTag"
 
     New-Item -ItemType Directory -Force $workDir | Out-Null
     $env:PLAYWRIGHT_CLI_SESSION = $session
@@ -254,10 +308,11 @@ function Show-PwcliPaths {
         [ValidateSet("miaoshou", "shopee", "tiktok")]
         [string]$Platform = "miaoshou",
         [string]$AccountId,
-        [string]$WorkTag = "explore"
+        [string]$WorkTag = ""
     )
 
     $platformName = $Platform.ToLower()
+    $resolvedWorkTag = Resolve-PwcliWorkTag -Platform $platformName -WorkTag $WorkTag -AccountId $AccountId
     $runtimeProfileDir = $null
     if ($AccountId) {
         $runtimeProfileDir = (Get-PwcliRuntimeProfileDir -Platform $platformName -AccountId $AccountId | Out-String).Trim()
@@ -268,14 +323,14 @@ function Show-PwcliPaths {
         ProfileDir = Get-PwcliProfileDir -Platform $platformName
         RuntimeProfileDir = $runtimeProfileDir
         StateFile = Get-PwcliStateFile -Platform $platformName
-        WorkDir = Get-PwcliWorkDir -Platform $platformName -WorkTag $WorkTag
-        Session = "$platformName-$WorkTag"
+        WorkDir = Get-PwcliWorkDir -Platform $platformName -WorkTag $resolvedWorkTag
+        Session = "$platformName-$resolvedWorkTag"
     }
 }
 
 function Open-PwcliMiaoshou {
     param(
-        [string]$WorkTag = "explore",
+        [string]$WorkTag = "",
         [string]$Url = "https://erp.91miaoshou.com/welcome",
         [string]$AccountId
     )
@@ -285,7 +340,7 @@ function Open-PwcliMiaoshou {
 
 function Open-PwcliShopee {
     param(
-        [string]$WorkTag = "explore",
+        [string]$WorkTag = "",
         [string]$Url = "https://seller.shopee.cn/",
         [string]$AccountId
     )
@@ -295,7 +350,7 @@ function Open-PwcliShopee {
 
 function Open-PwcliTiktok {
     param(
-        [string]$WorkTag = "explore",
+        [string]$WorkTag = "",
         [string]$Url = "https://seller.tiktokglobalshop.com/",
         [string]$AccountId
     )

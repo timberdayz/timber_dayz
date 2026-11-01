@@ -132,3 +132,40 @@ def build_inspection_accounts(rows: list[MainAccountRow]) -> tuple[list[dict[str
             }
         )
     return accounts, skipped
+
+
+def _cli_work_tag(platform: str, account_id: str) -> int:
+    """按账号推导 work tag。
+
+    单独做成 CLI，是为了让 PowerShell 侧（``scripts/pwcli_helpers.ps1`` 的
+    ``Resolve-PwcliWorkTag``）拿到**同一个** work tag ——
+    规则只此一份，不在两边各实现一遍。
+
+    两边各写一遍迟早会不一致：一旦不一致，同一个账号在「网页面板」和
+    「手工命令」下会落到不同的 session 名与工作目录（spec D9）。
+    """
+    print(work_tag(platform, account_id))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="pwcli_account_inventory",
+        description="巡店账号清单工具；work-tag 子命令不访问数据库。",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+    tag_parser = sub.add_parser("work-tag", help="打印指定账号的 work tag")
+    tag_parser.add_argument("--platform", required=True)
+    tag_parser.add_argument("--account-id", required=True)
+
+    args = parser.parse_args(argv)
+    if args.command == "work-tag":
+        return _cli_work_tag(args.platform, args.account_id)
+    parser.error(f"unknown command: {args.command}")
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
