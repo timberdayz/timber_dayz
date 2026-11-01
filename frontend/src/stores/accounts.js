@@ -39,6 +39,7 @@ function buildShopAccountUpdatePayload(data) {
   const payload = {}
   const fields = [
     'store_name',
+    'internal_code',
     'shop_region',
     'shop_type',
     'business_role',
@@ -225,6 +226,7 @@ export const useAccountsStore = defineStore('accounts', {
           shop_account_id: data.account_id,
           main_account_id: mainAccountId,
           store_name: data.store_name,
+          internal_code: data.internal_code || null,
           platform_shop_id: data.shop_id || null,
           shop_region: data.shop_region,
           shop_type: data.shop_type,

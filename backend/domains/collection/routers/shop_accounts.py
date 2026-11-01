@@ -16,6 +16,13 @@ from backend.schemas.shop_account import (
 )
 from backend.services.cache_service import get_cache_service
 from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
+from backend.services.shop_internal_code_service import (
+    load_taken_internal_codes,
+    suggest_internal_code_for_account,
+)
+from backend.services.shop_rename_service import (
+    apply_store_name_rename as _apply_store_name_rename,
+)
 from backend.utils.text_normalization import normalize_alias_text
 from modules.core.db import (
     MainAccount,
@@ -121,6 +128,8 @@ async def _ensure_capability_rows(
 async def _serialize_shop_account(
     db: AsyncSession,
     record: ShopAccount,
+    *,
+    taken_codes: dict[str, set[str]] | None = None,
 ) -> ShopAccountResponse:
     alias_result = await db.execute(
         select(ShopAccountAlias).where(
@@ -133,6 +142,11 @@ async def _serialize_shop_account(
     if primary_alias is None:
         primary_alias = next((alias.alias_value for alias in aliases), None)
     capabilities = await _load_capabilities(db, record.id, record.shop_type)
+    suggested_internal_code = await suggest_internal_code_for_account(
+        db,
+        record,
+        taken_codes=taken_codes,
+    )
     return ShopAccountResponse(
         id=record.id,
         platform=record.platform,
@@ -142,6 +156,8 @@ async def _serialize_shop_account(
         alias_count=len(aliases),
         capabilities=capabilities,
         store_name=record.store_name,
+        internal_code=record.internal_code,
+        suggested_internal_code=suggested_internal_code,
         platform_shop_id=record.platform_shop_id,
         platform_shop_id_status=record.platform_shop_id_status,
         shop_region=record.shop_region,
@@ -189,6 +205,69 @@ async def _assert_platform_shop_id_unique(
             detail=(
                 f"platform_shop_id '{normalized_platform_shop_id}' already exists "
                 f"for platform '{platform}' on shop_account_id '{existing.shop_account_id}'"
+            ),
+        )
+
+
+async def _assert_internal_code_unique(
+    db: AsyncSession,
+    *,
+    platform: str,
+    internal_code: str | None,
+    exclude_id: int | None = None,
+) -> None:
+    """内部标准名同平台内唯一（库层约束 uq_shop_accounts_platform_internal_code）。
+
+    这里把约束翻译成人话：冲突时告诉运营「这个名字被哪个店占用了」。
+    """
+    normalized_internal_code = (internal_code or "").strip()
+    if not normalized_internal_code:
+        return
+
+    stmt = select(ShopAccount).where(
+        ShopAccount.platform == platform,
+        ShopAccount.internal_code == normalized_internal_code,
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(ShopAccount.id != exclude_id)
+
+    existing = (await db.execute(stmt)).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"内部标准名 '{normalized_internal_code}' 已被平台 '{platform}' 的店铺账号 "
+                f"'{existing.shop_account_id}'（店名 {existing.store_name}）占用"
+            ),
+        )
+
+
+async def _assert_store_name_unique_in_main_account(
+    db: AsyncSession,
+    main_account_id: str,
+    store_name: str | None,
+    *,
+    exclude_id: int | None = None,
+) -> None:
+    """同一个主账号下店铺名唯一（改名联动的第一步校验）。"""
+    normalized_store_name = (store_name or "").strip()
+    if not normalized_store_name:
+        return
+
+    stmt = select(ShopAccount).where(
+        ShopAccount.main_account_id == main_account_id,
+        ShopAccount.store_name == normalized_store_name,
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(ShopAccount.id != exclude_id)
+
+    existing = (await db.execute(stmt)).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"主账号 '{main_account_id}' 下已存在同名店铺 '{normalized_store_name}'"
+                f"（店铺账号 '{existing.shop_account_id}'）"
             ),
         )
 
@@ -263,7 +342,11 @@ async def list_shop_accounts(
         stmt = stmt.where(ShopAccount.enabled == enabled)
     result = await db.execute(stmt)
     records = result.scalars().all()
-    return [await _serialize_shop_account(db, record) for record in records]
+    taken_codes = await load_taken_internal_codes(db)
+    return [
+        await _serialize_shop_account(db, record, taken_codes=taken_codes)
+        for record in records
+    ]
 
 
 @router.post("", response_model=ShopAccountResponse)
@@ -277,6 +360,13 @@ async def create_shop_account(
         platform=payload.platform,
         platform_shop_id=payload.platform_shop_id,
     )
+    normalized_internal_code = str(payload.internal_code or "").strip() or None
+    if normalized_internal_code:
+        await _assert_internal_code_unique(
+            db,
+            platform=payload.platform,
+            internal_code=normalized_internal_code,
+        )
     existing = await db.execute(
         select(ShopAccount).where(
             ShopAccount.platform == payload.platform,
@@ -291,6 +381,7 @@ async def create_shop_account(
         shop_account_id=payload.shop_account_id,
         main_account_id=payload.main_account_id,
         store_name=payload.store_name,
+        internal_code=normalized_internal_code,
         platform_shop_id=payload.platform_shop_id,
         platform_shop_id_status="manual_confirmed" if payload.platform_shop_id else "missing",
         shop_region=payload.shop_region,
@@ -330,11 +421,19 @@ async def batch_create_shop_accounts(
         )
         if existing.scalar_one_or_none() is not None:
             continue
+        normalized_internal_code = str(payload.internal_code or "").strip() or None
+        if normalized_internal_code:
+            await _assert_internal_code_unique(
+                db,
+                platform=payload.platform,
+                internal_code=normalized_internal_code,
+            )
         record = ShopAccount(
             platform=payload.platform,
             shop_account_id=payload.shop_account_id,
             main_account_id=payload.main_account_id,
             store_name=payload.store_name,
+            internal_code=normalized_internal_code,
             platform_shop_id=payload.platform_shop_id,
             platform_shop_id_status="manual_confirmed" if payload.platform_shop_id else "missing",
             shop_region=payload.shop_region,
@@ -370,6 +469,9 @@ async def update_shop_account(
     update_data = payload.model_dump(exclude_unset=True)
     capabilities_submitted = "capabilities" in update_data
     capabilities = update_data.pop("capabilities", None)
+    # 改名联动的两个「原值」必须在赋值前抓住 —— 前端每次提交的是整个表单
+    original_store_name = record.store_name
+    original_internal_code = record.internal_code
     if "platform_shop_id" in update_data:
         await _assert_platform_shop_id_unique(
             db,
@@ -377,8 +479,37 @@ async def update_shop_account(
             platform_shop_id=update_data["platform_shop_id"],
             exclude_id=record.id,
         )
+    if "internal_code" in update_data:
+        # 空串 = 清空标准名（内部标准名不参与匹配，清掉不影响历史数据）
+        normalized_internal_code = str(update_data["internal_code"] or "").strip()
+        update_data["internal_code"] = normalized_internal_code or None
+        await _assert_internal_code_unique(
+            db,
+            platform=record.platform,
+            internal_code=normalized_internal_code,
+            exclude_id=record.id,
+        )
+    if "store_name" in update_data:
+        await _assert_store_name_unique_in_main_account(
+            db,
+            record.main_account_id,
+            update_data["store_name"],
+            exclude_id=record.id,
+        )
+    # 1) 先按现有逻辑全量赋值（保留 platform_shop_id 唯一性校验与 capabilities 处理）
     for field, value in update_data.items():
         setattr(record, field, value)
+    # 2) 再对 store_name 走改名联动。
+    #    注意：前端每次编辑提交整个表单（store_name 恒存在），
+    #    若把改名做成 if/else，else 分支永远不走 -> 其它字段全部不落库。
+    if "store_name" in update_data and update_data["store_name"] != original_store_name:
+        await _apply_store_name_rename(
+            db,
+            record,
+            update_data["store_name"],
+            old_store_name=original_store_name,
+            original_internal_code=original_internal_code,
+        )
     if capabilities_submitted or "shop_type" in update_data:
         await _ensure_capability_rows(
             db,
@@ -397,6 +528,7 @@ async def update_shop_account(
     changed_identity_fields = [
         field for field in update_data.keys() if field in _SHOP_IDENTITY_FIELDS
     ]
+    # 改名一定会带上 store_name -> 归属重算已经由这一次入队覆盖
     await _enqueue_shop_identity_refresh(
         db,
         shop_account=record,

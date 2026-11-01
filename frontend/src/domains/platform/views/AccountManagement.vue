@@ -336,6 +336,12 @@
             height="540"
           >
             <el-table-column prop="store_name" label="店铺名称" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="internal_code" label="内部标准名" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="row.internal_code">{{ row.internal_code }}</span>
+                <span v-else class="erp-text-muted">{{ row.suggested_internal_code || '-' }}</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="account_id" label="店铺账号ID" min-width="180" show-overflow-tooltip />
             <el-table-column label="业务身份" width="120">
               <template #default="{ row }">
@@ -439,7 +445,12 @@
             <el-form-item label="店铺名称" prop="store_name">
               <el-input v-model="accountForm.store_name" placeholder="如：HongXi Singapore Local" />
             </el-form-item>
-            
+
+            <el-form-item label="内部标准名">
+              <el-input v-model="accountForm.internal_code" :placeholder="suggestedInternalCodePlaceholder" />
+              <div class="form-tip">同平台内唯一、只供人读，不参与数据匹配；留空则由系统按「店名 + 区域」给出建议值</div>
+            </el-form-item>
+
             <el-form-item prop="parent_account" label="主账号ID">
               <el-input v-model="accountForm.parent_account" placeholder="多店铺共用时填写，如：hongxikeji:main" />
               <div class="form-tip">用于共享登录身份、持久会话和浏览器 profile</div>
@@ -734,6 +745,12 @@ const mainAccountStatusUpdating = ref(false)
 
 const shopQuickFilter = ref('all')
 
+// 内部标准名建议值（后端实时算，不落库）
+const suggestedInternalCodePlaceholder = computed(() => {
+  const suggested = editingAccount.value?.suggested_internal_code || ''
+  return suggested ? `建议值：${suggested}` : '如：FIORO_SG'
+})
+
 // 表单引用
 const accountFormRef = ref(null)
 
@@ -745,6 +762,7 @@ const accountForm = reactive({
   platform: 'shopee',
   account_alias: '',
   store_name: '',
+  internal_code: '',
   shop_type: 'local',
   business_role: 'operating_store',
   shop_region: '',
@@ -1067,6 +1085,7 @@ function handleEdit(account) {
     platform: account.platform,
     account_alias: account.account_alias || '',
     store_name: account.store_name,
+    internal_code: account.internal_code || '',
     shop_type: account.shop_type || 'local',
     business_role: account.business_role || 'operating_store',
     shop_region: account.shop_region || '',
@@ -1134,6 +1153,7 @@ function resetForm() {
     platform: 'shopee',
     account_alias: '',
     store_name: '',
+    internal_code: '',
     shop_type: 'local',
     business_role: 'operating_store',
     shop_region: '',

@@ -11,6 +11,10 @@ class ShopAccountCreate(BaseModel):
     shop_account_id: str = Field(..., description="店铺账号ID")
     main_account_id: str = Field(..., description="归属主账号ID")
     store_name: str = Field(..., description="店铺名称")
+    internal_code: Optional[str] = Field(
+        None,
+        description="内部标准名：同平台内唯一，带地区标识；只供人读，不参与数据匹配",
+    )
     platform_shop_id: Optional[str] = Field(None, description="平台店铺ID")
     shop_region: Optional[str] = Field(None, description="店铺区域")
     shop_type: Optional[str] = Field(None, description="店铺类型")
@@ -25,6 +29,10 @@ class ShopAccountCreate(BaseModel):
 
 class ShopAccountUpdate(BaseModel):
     store_name: Optional[str] = None
+    internal_code: Optional[str] = Field(
+        None,
+        description="内部标准名：同平台内唯一，带地区标识；只供人读，不参与数据匹配",
+    )
     platform_shop_id: Optional[str] = None
     platform_shop_id_status: Optional[str] = None
     shop_region: Optional[str] = None
@@ -44,6 +52,14 @@ class ShopAccountResponse(BaseModel):
     alias_count: int = 0
     capabilities: dict = Field(default_factory=dict)
     store_name: str
+    internal_code: Optional[str] = Field(
+        None,
+        description="内部标准名：同平台内唯一，带地区标识；只供人读，不参与数据匹配",
+    )
+    suggested_internal_code: Optional[str] = Field(
+        None,
+        description="内部标准名建议值（实时算，不落库）",
+    )
     platform_shop_id: Optional[str]
     platform_shop_id_status: str
     shop_region: Optional[str]

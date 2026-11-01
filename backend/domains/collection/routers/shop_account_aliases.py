@@ -15,6 +15,7 @@ from backend.schemas.account import UnmatchedShopAliasItem, UnmatchedShopAliasRe
 from backend.schemas.shop_account_alias import ShopAccountAliasCreate, ShopAccountAliasResponse
 from backend.services.cache_service import get_cache_service
 from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
+from backend.services.shop_rename_service import assert_alias_available
 from backend.utils.text_normalization import normalize_alias_key, normalize_alias_text
 from modules.core.db import ShopAccount, ShopAccountAlias, ShopAccountBusinessRole
 from modules.core.logger import get_logger
@@ -332,13 +333,32 @@ async def create_shop_account_alias(
     if not alias_value:
         raise HTTPException(status_code=400, detail="alias_value is required")
 
+    shop_account = await db.get(ShopAccount, payload.shop_account_id)
+    if shop_account is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"shop account id '{payload.shop_account_id}' not found",
+        )
+    shop_region = str(shop_account.shop_region or "").strip() or None
+    alias_normalized = _normalize_alias(alias_value)
+
+    # 友好预检：同平台 + 同别名 + 同区域只能有一条 active 别名（库层唯一约束的人话版）
+    await assert_alias_available(
+        db,
+        platform=payload.platform,
+        alias_normalized=alias_normalized,
+        shop_region=shop_region,
+        exclude_shop_account_db_id=shop_account.id,
+    )
+
     record = ShopAccountAlias(
         shop_account_id=payload.shop_account_id,
         platform=payload.platform,
         alias_value=alias_value,
-        alias_normalized=_normalize_alias(alias_value),
+        alias_normalized=alias_normalized,
         alias_type=payload.alias_type,
         source=payload.source,
+        shop_region=shop_region,
         is_primary=payload.is_primary,
         is_active=payload.is_active,
     )
@@ -370,6 +390,7 @@ async def claim_shop_account_alias(
     if not alias_value:
         raise HTTPException(status_code=400, detail="alias_value is required")
     alias_normalized = _normalize_alias(alias_value)
+    shop_region = str(shop_account.shop_region or "").strip() or None
 
     current_primary_alias = (
         await db.execute(
@@ -392,6 +413,16 @@ async def claim_shop_account_alias(
             ),
         )
 
+    # 友好预检：同平台 + 同别名 + 同区域只能有一条 active 别名。
+    # 放在任何写操作之前，避免「先降级主别名、再发现冲突」。
+    await assert_alias_available(
+        db,
+        platform=payload.platform,
+        alias_normalized=alias_normalized,
+        shop_region=shop_region,
+        exclude_shop_account_db_id=shop_account.id,
+    )
+
     await _clear_primary_aliases(db, shop_account.id)
     existing = (
         await db.execute(
@@ -400,12 +431,13 @@ async def claim_shop_account_alias(
                 ShopAccountAlias.alias_normalized == alias_normalized,
             )
         )
-    ).scalar_one_or_none()
+    ).scalars().first()
 
     if existing is not None:
         existing.alias_value = alias_value
         existing.alias_type = "claimed"
         existing.source = payload.source
+        existing.shop_region = shop_region
         existing.is_primary = True
         existing.is_active = True
         await db.commit()
@@ -424,6 +456,7 @@ async def claim_shop_account_alias(
         alias_normalized=alias_normalized,
         alias_type="claimed",
         source=payload.source,
+        shop_region=shop_region,
         is_primary=True,
         is_active=True,
     )
