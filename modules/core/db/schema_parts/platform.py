@@ -169,6 +169,7 @@ class ShopAccount(Base):
 
     __table_args__ = (
         UniqueConstraint("platform", "platform_shop_id", name="uq_shop_accounts_platform_shop_id"),
+        UniqueConstraint("platform", "internal_code", name="uq_shop_accounts_platform_internal_code"),
         Index("ix_shop_accounts_main_account_id", "main_account_id"),
         Index("ix_shop_accounts_platform_shop_id", "platform_shop_id"),
         Index("ix_shop_accounts_enabled", "enabled"),
@@ -185,6 +186,7 @@ class ShopAccount(Base):
         comment="归属主账号ID",
     )
     store_name = Column(String(200), nullable=False, comment="店铺名称")
+    internal_code = Column(String(100), nullable=True, comment="内部标准名：同平台内唯一，带地区标识")
     platform_shop_id = Column(String(256), nullable=True, comment="平台店铺ID")
     platform_shop_id_status = Column(
         String(32),
@@ -224,7 +226,14 @@ class ShopAccountAlias(Base):
     __tablename__ = "shop_account_aliases"
 
     __table_args__ = (
-        UniqueConstraint("platform", "alias_normalized", "is_active", name="uq_shop_account_aliases_active_alias"),
+        UniqueConstraint(
+            "platform",
+            "alias_normalized",
+            "shop_region",
+            "is_active",
+            name="uq_shop_account_aliases_active_alias",
+            postgresql_nulls_not_distinct=True,
+        ),
         Index("ix_shop_account_aliases_shop_account_id", "shop_account_id"),
         Index("ix_shop_account_aliases_platform_alias_normalized", "platform", "alias_normalized"),
         {"schema": "core"},
@@ -241,6 +250,7 @@ class ShopAccountAlias(Base):
     alias_value = Column(String(256), nullable=False, comment="别名原值")
     alias_normalized = Column(String(256), nullable=False, comment="标准化别名")
     alias_type = Column(String(32), nullable=True, comment="别名类型")
+    shop_region = Column(String(50), nullable=True, comment="区域维度：同平台同别名可按区域绑定到不同店铺")
     source = Column(String(64), nullable=True, comment="来源")
     is_primary = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     is_active = Column(Boolean, nullable=False, default=True, server_default=text("true"))
