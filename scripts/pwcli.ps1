@@ -5,3 +5,4 @@ param(
 
 $ScriptPath = Join-Path $PSScriptRoot "pwcli_native.py"
 & python $ScriptPath @CliArgs
+exit $LASTEXITCODE

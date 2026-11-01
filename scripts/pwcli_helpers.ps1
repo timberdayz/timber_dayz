@@ -198,21 +198,43 @@ function Save-PwcliPlatformState {
         [ValidateSet("miaoshou", "shopee", "tiktok")]
         [string]$Platform,
         [string]$AccountId,
-        [string]$Filename
+        [string]$Filename,
+        [string]$WorkTag
     )
 
+    $platformName = $Platform.ToLower()
+
+    if ($AccountId -and $WorkTag) {
+        # session 名必须与 Open-PwcliPlatform 完全一致（同一平台 + 同一 work tag）。
+        # 不能依赖 $env:PLAYWRIGHT_CLI_SESSION —— 面板每次动作都是新进程，变量不在里面。
+        $session = "$platformName-$WorkTag"
+        pwcli --session $session state-save
+        if ($LASTEXITCODE -ne 0) {
+            throw "pwcli state-save failed for session '$session' (exit code $LASTEXITCODE)"
+        }
+        return
+    }
+
     if ($AccountId) {
+        # 手工 SOP 形态（同一个 shell 里先 open 再 save）：
+        # Open-PwcliPlatform 会把 $env:PLAYWRIGHT_CLI_SESSION 设成 "$platformName-$WorkTag"，
+        # 这里直接复用既有的 Get-PwcliActiveSession 解析（今天这条路径就是好的，见 Step 5c）。
         $session = Get-PwcliActiveSession
-        if ($session) {
-            pwcli --session $session state-save
-        } else {
-            pwcli state-save
+        if (-not $session) {
+            # 既没有 -WorkTag、又没有活动会话 -> 定位不到会话。
+            # 这里必须报错：再往下走会退化成 `pwcli state-save`，
+            # session 被解析成 "default" 并失败（正是 spec 断点 A）。
+            throw "Save-PwcliPlatformState cannot locate the browser session for account '$AccountId': pass -WorkTag, or open the session in this shell first"
+        }
+        pwcli --session $session state-save
+        if ($LASTEXITCODE -ne 0) {
+            throw "pwcli state-save failed for session '$session' (exit code $LASTEXITCODE)"
         }
         return
     }
 
     if (-not $Filename) {
-        $Filename = Get-PwcliStateFile -Platform $Platform.ToLower()
+        $Filename = Get-PwcliStateFile -Platform $platformName
     }
 
     New-Item -ItemType Directory -Force (Split-Path -Parent $Filename) | Out-Null
@@ -221,6 +243,9 @@ function Save-PwcliPlatformState {
         pwcli --session $session state-save $Filename
     } else {
         pwcli state-save $Filename
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "pwcli state-save failed for session '$session' (exit code $LASTEXITCODE)"
     }
 }
 
@@ -279,18 +304,18 @@ function Open-PwcliTiktok {
 }
 
 function Save-PwcliMiaoshouState {
-    param([string]$AccountId)
-    Save-PwcliPlatformState -Platform miaoshou -AccountId $AccountId
+    param([string]$AccountId, [string]$WorkTag)
+    Save-PwcliPlatformState -Platform miaoshou -AccountId $AccountId -WorkTag $WorkTag
 }
 
 function Save-PwcliShopeeState {
-    param([string]$AccountId)
-    Save-PwcliPlatformState -Platform shopee -AccountId $AccountId
+    param([string]$AccountId, [string]$WorkTag)
+    Save-PwcliPlatformState -Platform shopee -AccountId $AccountId -WorkTag $WorkTag
 }
 
 function Save-PwcliTiktokState {
-    param([string]$AccountId)
-    Save-PwcliPlatformState -Platform tiktok -AccountId $AccountId
+    param([string]$AccountId, [string]$WorkTag)
+    Save-PwcliPlatformState -Platform tiktok -AccountId $AccountId -WorkTag $WorkTag
 }
 
 function pwsnap {
@@ -476,13 +501,13 @@ function Start-PwcliDailyInspection {
 
         switch ($account.platform) {
             "miaoshou" {
-                Save-PwcliMiaoshouState -AccountId $account.account_id
+                Save-PwcliMiaoshouState -AccountId $account.account_id -WorkTag $account.work_tag
             }
             "shopee" {
-                Save-PwcliShopeeState -AccountId $account.account_id
+                Save-PwcliShopeeState -AccountId $account.account_id -WorkTag $account.work_tag
             }
             "tiktok" {
-                Save-PwcliTiktokState -AccountId $account.account_id
+                Save-PwcliTiktokState -AccountId $account.account_id -WorkTag $account.work_tag
             }
             default {
                 Write-Warning "Unsupported platform: $($account.platform)"

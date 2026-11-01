@@ -130,7 +130,8 @@ def build_pwcli_action_command(action: str, account: dict[str, Any], repo_root: 
             utf8_prefix
             + f"Set-Location -LiteralPath '{quote_ps(str(repo_root))}'; "
             f". '{quote_ps(str(repo_root / 'scripts' / 'pwcli_helpers.ps1'))}'; "
-            f"{helper} -AccountId '{quote_ps(str(account['account_id']))}'"
+            f"{helper} -AccountId '{quote_ps(str(account['account_id']))}' "
+            + f"-WorkTag '{quote_ps(str(account['work_tag']))}'"
         )
     else:
         raise ValueError(f"Unsupported action: {action}")
