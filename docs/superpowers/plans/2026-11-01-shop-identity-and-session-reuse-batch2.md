@@ -1399,17 +1399,17 @@ Expected: **3 FAIL + 1 PASS** ——
 > 不进最终 SELECT 的输出列。
 > - `orders_atomic.sql`：最终 SELECT（`:477-530`）**不加**它 —— LATERAL 在 `alias_resolved`(:406) 里，
 >   该层直接用 `d.source_region`（`d` = `deduplicated`），中间不需要把它写进任何显式清单。
-> - `orders_monthly_atomic_mv.sql`：`resolved_monthly_orders`(:221) 的显式清单里**要**补它 ——
->   不是为了最终 SELECT，而是因为 `prepared_identity_monthly_orders`(:200) 的 `n.*` 把它带进来了，
->   该层的 LATERAL 用 `m.source_region`（`m` = prepared 层）能引用到；
->   但最终 SELECT（`:293-311`）**不加**它 → 对外仍然只有原有的那些列
+> - `orders_monthly_atomic_mv.sql`：**也不需要**写进任何显式清单 ——
+>   `prepared_identity_monthly_orders`(:200) 是 `SELECT n.*, ARRAY_REMOVE(...) FROM normalized_monthly_orders n`，
+>   `n.*` 已经把 `source_region` 带进来了 → 该层的 LATERAL 直接用 `m.source_region`（`m` = prepared 层）即可；
+>   最终 SELECT（`:293-311`）**不加**它 → 对外仍然只有原有的那些列
 >   （第一批 Task 7 会给这个 MV 加 `identity_candidate_count` / `identity_candidates`，
 >   所以 Task 7 之后是 18 列；两个薄封装 VIEW 是显式列清单，是否带出新列取决于 Task 7 的「方案 A / B」）。
 
 | 文件 | CTE 链（谁带显式列清单） | `source_region` 的传递路径 |
 |---|---|---|
 | `orders_atomic.sql` | `mapped`(:32) → **`cleaned`(:280，显式列清单)** → `deduplicated`(:390，`SELECT *`) → `alias_resolved`(:406) | `cleaned` 里**新算** → `deduplicated`（`SELECT *`）自动带上 → `alias_resolved` 的 LATERAL 用 `d.source_region` ✅ |
-| `orders_monthly_atomic_mv.sql` | `mapped_monthly_orders`(:19) → **`normalized_monthly_orders`(:114，显式列清单)** → `prepared_identity_monthly_orders`(:200，`n.*`) → **`resolved_monthly_orders`(:221，显式列清单)** → `deduplicated_monthly_orders`(:284，`SELECT *`) | `mapped_monthly_orders` 新算 `source_site` → `normalized_monthly_orders` 显式清单里带上 `source_site` 并**新算** `source_region` → `prepared_identity_monthly_orders`（`n.*`）自动带上 → `resolved_monthly_orders` 的 LATERAL 用 `m.source_region` ✅（`m` = prepared 层）→ 该 CTE 的显式清单还要补上 `source_region` 才能到最终 SELECT |
+| `orders_monthly_atomic_mv.sql` | `mapped_monthly_orders`(:19) → **`normalized_monthly_orders`(:114，显式列清单)** → `prepared_identity_monthly_orders`(:200，`n.*`) → **`resolved_monthly_orders`(:221，显式列清单)** → `deduplicated_monthly_orders`(:284，`SELECT *`) | `mapped_monthly_orders` 新算 `source_site` → `normalized_monthly_orders` 显式清单里带上 `source_site` 并**新算** `source_region` → `prepared_identity_monthly_orders`（`n.*`）自动带上 → `resolved_monthly_orders` 的 LATERAL 用 `m.source_region` ✅（`m` = prepared 层）→ **不需要**再往 `resolved_monthly_orders` 的显式清单里补（`m.source_region` 已经能引用到；最终 SELECT 也不加它） |
 
 > `orders_monthly_atomic_mv.sql` 的 `prepared_identity_monthly_orders`(:200) 是 `SELECT n.*, ARRAY_REMOVE(...) ...`，
 > `n.*` 会把 `normalized_monthly_orders` 的所有列带过来 ✅ —— 这一层不用改。
@@ -1564,9 +1564,51 @@ Expected: **3 FAIL + 1 PASS** ——
 
 - [ ] **Step 6: 部署 + 回归**
 
+> **⚠⚠ 必须先 `rebuild_views.py`，不能只跑 bootstrap**（第一批 Task 8 Step 1 的同一条规矩）：
+> `bootstrap_postgresql_dashboard.py` 走 `refresh_runner.execute_sql_target(recreate_views=False)`，
+> 而 `backend/services/data_pipeline/refresh_runner.py:408` 对**库里已存在的普通视图**会**直接跳过**。
+> 本 Task 改的 `sql/semantic/shop_identity_resolution_candidates.sql` 是**普通 VIEW**，
+> `sql/semantic/orders_atomic.sql` 也是普通 VIEW → 只跑 bootstrap 的话**两个都不会重建**，
+> `identity_shop_region` / `candidate_shop_region` / `source_region` 不会出现，
+> 而 monthly MV 会重建 → 回归查询**照样「通过」** → **静默失败**。
+
 ```bash
-python scripts/bootstrap_postgresql_dashboard.py --module all --refresh-materializations
+python scripts/rebuild_views.py --dry-run      # 1) 先看要重建什么
+python scripts/rebuild_views.py                # 2) 真跑（recreate_views=True，按依赖顺序重建整链）
+python scripts/bootstrap_postgresql_dashboard.py --module all --refresh-materializations   # 3) 补资产 + 刷新
 ```
+
+**列级护栏（必须查，不能只看数据行数）**：
+
+```bash
+python -c "
+import sqlalchemy as sa
+eng = sa.create_engine('postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp')
+with eng.connect() as c:
+    # 候选视图是普通 VIEW，用 information_schema
+    cols = [r[0] for r in c.execute(sa.text('''
+        select column_name from information_schema.columns
+         where table_schema='semantic' and table_name='shop_identity_resolution_candidates'
+           and column_name in ('identity_shop_region','candidate_shop_region')
+         order by column_name'''))]
+    print('candidates view ->', cols)
+    # fact_orders_atomic 是普通 VIEW
+    cols2 = [r[0] for r in c.execute(sa.text('''
+        select column_name from information_schema.columns
+         where table_schema='semantic' and table_name='fact_orders_atomic'
+           and column_name='source_region' '''))]
+    print('fact_orders_atomic ->', cols2)
+"
+```
+
+Expected:
+- `candidates view -> ['candidate_shop_region', 'identity_shop_region']`（2 列）
+- `fact_orders_atomic -> ['source_region']`（1 列）
+
+> 少了任何一列 = 视图定义没真正重建 → 回到 `rebuild_views.py`。
+> **不要用 bootstrap 的 `--check` / drift 当护栏** ——
+> `dashboard_bootstrap.py:510-515` 在跑完后会**无条件**把 `asset_fingerprint_applied` 写成期望值、
+> `status` 写成 `ready`，所以 drift 信号会被自己抹掉。**唯一可信的证据就是上面的列级检查。**
 
 然后跑一次与第一批 Task 8 Step 3 相同的基线对比：
 

@@ -1195,7 +1195,6 @@ git commit -m "feat(店铺身份): 别名表加区域维度，店铺账号加内
 - Modify: `backend/utils/text_normalization.py:68-76`（`normalize_alias_key`）
 - Modify: `sql/semantic/shop_identity_resolution_candidates.sql:70-80`（store_name 规范化）
 - Modify: `sql/semantic/orders_atomic.sql:467`（别名比对）
-- Modify: `sql/semantic/analytics_atomic.sql`（同处）
 - Test: `backend/tests/test_alias_normalization_consistency.py`（新建）
 
 **背景（真 bug）**：
@@ -1397,6 +1396,8 @@ git commit -m "fix(别名): 写侧与查侧规范化统一，认领了不再匹�
 
 **Files:**
 - Modify: `sql/semantic/orders_atomic.sql:439-474`（`alias_resolved` 段的 LATERAL + 最终 SELECT `:477-530`）
+- Modify: `backend/services/data_pipeline/refresh_registry.py:21`（**补依赖** —— 见下方 Step 4a-2）
+- Modify: `backend/tests/data_pipeline/test_refresh_runner.py:88`（**同步改依赖断言** —— 不改会红）
 - Modify: `sql/semantic/analytics_atomic.sql:162-206`（LATERAL）+ 最终 SELECT
 - Modify: `sql/semantic/orders_monthly_atomic_mv.sql:233-292`（告警码 CASE + LATERAL `:267-279`）+ 最终 SELECT `:293-311`
 - Modify: `sql/semantic/analytics_monthly_atomic_mv.sql:339-405`（告警码 CASE `:365-377` + LATERAL `:389-401`）+ 最终 SELECT
@@ -1571,6 +1572,36 @@ Expected: FAIL。
    ```
 
    > 落点以**各文件自己的 CTE 结构**为准，不要照抄别处的行号。
+
+1c. **⚠ 必须同步补依赖图，否则重建顺序会错、直接失败**
+
+`backend/services/data_pipeline/refresh_registry.py:21`（映射表名是 `PIPELINE_DEPENDENCIES`，定义在 `:12`）现在是：
+
+```text
+    "semantic.fact_orders_atomic": [],
+    "semantic.fact_analytics_atomic": ["semantic.shop_identity_resolution_candidates"],
+```
+
+Step 4a 让 `orders_atomic.sql` **改走候选视图** → 这个依赖从「不存在」变成「真实存在」，
+**必须声明**，否则 `scripts/rebuild_views.py` 会把 `semantic.fact_orders_atomic` 排在
+`semantic.shop_identity_resolution_candidates` **之前**重建（实测 `--dry-run` 的顺序就是这样：
+orders_atomic 第 1、候选视图第 6）→ 建视图时找不到候选视图的列 → **重建直接失败**。
+
+改成：
+
+```text
+    "semantic.fact_orders_atomic": ["semantic.shop_identity_resolution_candidates"],
+```
+
+> **⚠ 现有的契约测试会因此变红，必须同步改**：
+> `backend/tests/data_pipeline/test_refresh_runner.py:88` 断言的是
+> `PIPELINE_DEPENDENCIES["semantic.fact_orders_atomic"] == []` → 要改成
+> `== ["semantic.shop_identity_resolution_candidates"]`。
+> **不改这条断言，第一批的总验收会红。**
+
+> 改完用 `python scripts/rebuild_views.py --dry-run` 复核顺序：
+> `semantic.shop_identity_resolution_candidates` 必须排在 `semantic.fact_orders_atomic` **之前**。
+> （`fact_analytics_atomic`(:22) 与两个 monthly MV(:15-20) 本来就声明了这条依赖，不用改。）
 2. 把 `:451-474` 的 LATERAL 换成扫 `semantic.shop_identity_resolution_candidates c`，条件 `c.platform_code = lower(d.platform_code) AND c.identity_value_normalized = ANY (d.normalized_identity_candidates)`。
 3. 删掉 `orders_atomic.sql` 里对 `core.shop_account_aliases` 的直接 JOIN —— 别名匹配统一由候选视图的 `alias_match` 分支承担。
 4. 保留原有的「`shop_id` 为 `''`/`none`/`unknown`/`xihong` 时落 `unknown`」兜底。
@@ -1585,7 +1616,7 @@ Expected: FAIL。
 > | 写法 | 实测结果 | 后果 |
 > |---|---|---|
 > | `count(DISTINCT c.resolved_shop_id) OVER ()` | `ERROR: DISTINCT is not implemented for window functions` | 语义层重建**直接报错**，部署即失败 |
-> | `count(*) OVER ()` | `[(1, [1, 1, 2])]` —— 窗口函数在聚合之后求值，`count` **恒为 1** | 所有多候选都被判成 1 个 → **永远不落 `ambiguous_shop_label`** → 正是 D13/A6 要防的静默错配 |
+> | `count(*) OVER ()` | `[(1, [1, 1, 2])]` —— 窗口函数在**聚合之后**求值，`count` 统计的是「聚合结果的行数」而不是候选行数；在无 `GROUP BY` 的场景里恒为 1（分组场景里等于分组数，**同样不是候选数**） | 所有多候选都被判成 1 个 → **永远不落 `ambiguous_shop_label`** → 正是 D13/A6 要防的静默错配 |
 >
 > 所以候选计数必须写成**纯聚合**（`count(DISTINCT ...)` + `array_agg(DISTINCT ...)`），
 > 放在**独立子查询**里，再用 `LEFT JOIN LATERAL` 拼回去。
@@ -1655,7 +1686,7 @@ Expected: FAIL。
 | `orders_monthly_atomic_mv.sql` | `m` | `m.normalized_identity_candidates`（`:203-220` 构造） | 直接套用上面的模板 |
 | `analytics_monthly_atomic_mv.sql` | `m` | `m.normalized_identity_candidates`（`:334`） | 直接套用上面的模板 |
 | `orders_atomic.sql` | `d` | **今天没有** `normalized_identity_candidates` | 先按 Step 4a 在 `mapped` 层补出该数组，再套用模板（把 `m.` 换成 `d.`）。⚠ **LATERAL 结果别名是 `account_map`**（`:474`），不是 `resolved` → 模板里的 `resolved.*` 全要改成 `account_map.*`；或者把别名改名成 `resolved` 并**同步改** `:410-411` 两处引用 |
-| `analytics_atomic.sql` | `m` | `VALUES (...)` 内联列表（`:168-199`），**不是数组** | 先把内联 `VALUES` 抽成 CTE（例如 `candidate_values`），再套用模板。⚠ `ANY` 的**右侧必须是数组** —— 直接写 `= ANY (cv.identity_value_normalized)` 会报 `op ANY/ALL (array) requires array on right side`（已实测）。正确写法：`= ANY (ARRAY(SELECT cv.identity_value_normalized FROM candidate_values cv))` |
+| `analytics_atomic.sql` | `m` | `VALUES (...)` 内联列表（`:168-199`），**不是数组** | 保留 `VALUES` 在 LATERAL **内部**，只把比较方式改成数组：⚠ `ANY` 的**右侧必须是数组** —— 直接写 `= ANY (cv.identity_value_normalized)` 会报 `op ANY/ALL (array) requires array on right side`（已实测）。正确写法：`= ANY (ARRAY(SELECT cand.identity_value_normalized FROM (VALUES ...) cand(identity_value_normalized)))`。**⚠ 不得把 `VALUES` 提到 LATERAL 之外** —— `:169-199` 的每个候选值都引用外层 `m.source_platform_shop_id` / `m.store_label_raw`，是**行相关**的；提到同层 CTE 后就不再与当前输出行相关 → LATERAL 退化成笛卡尔积 → **行放大** |
 
 **⚠ 四个文件还有「中间 CTE 透传」与「LATERAL 结果别名」两处差异 —— 照抄上面的模板会报 `column does not exist`**：
 
@@ -1765,6 +1796,17 @@ END AS identity_warning_code
 > **Step 4c 的 CASE 里的 `m.source_platform_shop_id` / `m.source_shop_account_id` / `m.store_label_raw` / `m.source_shop_id`
 > 在该文件里必须改成 `d.*`**，否则报 `column d.source_platform_shop_id does not exist`。
 > `analytics_atomic.sql` 的外层是 `m`（`FROM mapped m`），保持 `m.` 不变。
+
+> **⚠⚠ 加列位置有硬约束**：`orders_atomic.sql` 是 `CREATE OR REPLACE VIEW`（`:3`），
+> PostgreSQL 只允许在列清单**末尾**追加列 —— 插到中间会报 `cannot change name of view column`。
+> 所以：**`orders_atomic.sql` 的最终 SELECT（`:477-530`）里，三列必须追加在 `platform_total_cost_derived` 之后**，
+> **不能**紧跟在 `shop_id` 后面。
+> `analytics_atomic.sql`（`DROP VIEW ... CASCADE` + `CREATE`）与两个 monthly MV（`DROP MATERIALIZED VIEW` + `CREATE`）
+> 是整表重建，位置无所谓；两个薄封装 VIEW 若走「方案 A」，同样必须**追加在末尾**。
+>
+> **⚠ 还有一个容易忽略的点**：Step 4b 的模板里，`shop_id` 的 CASE 与新三列是**分开的两段**——
+> `shop_id` 的 CASE 落在 `alias_resolved`(:406) 里，新三列也落在同一层；
+> 但**最终 SELECT**（`:477-530`）要按上面的顺序把它们放好。
 
 **`fact_orders_atomic` / `fact_analytics_atomic` 今天没有 `identity_warning_code` 列**
 （实测 live 列数分别为 **40** / **31**），本 Task 给它们**新增**三列：
@@ -1912,6 +1954,30 @@ Expected（**改造前的 live 实测基线**：`fact_orders_atomic` 40 列 / `f
 两者的 `identity_*` 列**一个都没有**；`fact_orders_monthly_atomic` 16 列、`fact_analytics_monthly_atomic` 20 列，
 两者都**只有** `identity_warning_code`）：
 
+> **⚠ `information_schema.columns` 不列 MATVIEW**（实测：`fact_orders_monthly_atomic_mv` 查它返回 **0 行**，
+> 而 `pg_attribute` 查到 16 列）。所以上面对两个 monthly **wrapper**（普通 VIEW）的检查是对的，
+> 但**要验 MV 本身**必须查 `pg_attribute`：
+>
+> ```bash
+> python -c "
+> import sqlalchemy as sa
+> eng = sa.create_engine('postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp')
+> with eng.connect() as c:
+>     for t in ('fact_orders_monthly_atomic_mv','fact_analytics_monthly_atomic_mv'):
+>         cols = [r[0] for r in c.execute(sa.text('''
+>             select a.attname from pg_attribute a
+>               join pg_class c on c.oid = a.attrelid
+>               join pg_namespace n on n.oid = c.relnamespace
+>              where n.nspname='semantic' and c.relname=:t
+>                and a.attnum > 0 and not a.attisdropped
+>                and a.attname like 'identity%' order by 1'''), {'t': t})]
+>         print(t, '->', cols)
+> "
+> ```
+> Expected: 两个 MV 都有 `identity_candidate_count` / `identity_candidates` / `identity_warning_code`。
+> （若 Task 7 选了「方案 B」—— wrapper 不动 —— 则 wrapper 上的 `identity_candidate_count` /
+> `identity_candidates` 不会有，**以 MV 的结果为准**；Task 8 Step 3/4 的核对查询也要相应改成直接查 MV。）
+
 | 视图 | 改造后应有 |
 |---|---|
 | `semantic.fact_orders_atomic` | `['identity_candidate_count', 'identity_candidates', 'identity_warning_code']`（3 列） |
@@ -2038,7 +2104,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_resolve_file_identity_prefers_shop_account_id():
-    """文件级身份必须优先用 shop_account_id（永不变化，全平台覆盖）。"""
+    """文件级身份必须优先用 shop_account_id（永不变化；店铺账号层 20/20 覆盖）。"""
     from backend.services.data_ingestion_service import resolve_file_identity
 
     class _Record:
@@ -2204,7 +2270,7 @@ Expected: FAIL。
 
 ```python
                 # 文件级别确定稳定身份编号（spec D14）。
-                # 优先级：shop_account_id（永不变化，全平台覆盖） > platform_shop_id > shop_id。
+                # 优先级：shop_account_id（永不变化；店铺账号层 20/20 覆盖） > platform_shop_id > shop_id。
                 # file_shop_id 会随改名变化，用它做 data_hash 作用域会导致同一份数据重复入库。
                 file_shop_account_id = getattr(file_record, "shop_account_id", None) or None
                 file_platform_shop_id = getattr(file_record, "platform_shop_id", None) or None
