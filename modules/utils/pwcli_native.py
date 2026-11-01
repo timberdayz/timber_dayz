@@ -21,6 +21,13 @@ if hasattr(sys.stderr, "reconfigure"):
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# 直接以 `python modules/utils/pwcli_native.py` 启动时，sys.path[0] 是脚本目录而非仓库根，
+# 延迟导入 modules.* 会抛 ModuleNotFoundError（见 spec D4）。
+# scripts/pwcli_native.py 这个 shim 已经做了同样的事，这里保证两种入口行为一致。
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 PWCLI_ROOT = REPO_ROOT / "output" / "playwright" / ".pwcli_native"
 SESSIONS_DIR = PWCLI_ROOT / "sessions"
 DETACHED_PROCESS = 0x00000008
