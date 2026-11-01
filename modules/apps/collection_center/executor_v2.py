@@ -242,71 +242,39 @@ async def _load_session_async(
     return await loop.run_in_executor(_get_executor_pool(), _load)
 
 
-def _bootstrap_session_from_profile_sync(
-    platform: str,
-    account_id: str,
-    account_config: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
-    """Best-effort bridge from persistent profile to storage_state session."""
-    from playwright.sync_api import sync_playwright
-    from modules.utils.sessions.session_manager import SessionManager
+def _manual_storage_state_path(platform: str, account_id: str) -> Optional[Path]:
+    """人工巡店保存的会话文件路径（``data/sessions/<platform>/<owner>/storage_state.json``）。
 
-    session_manager = SessionManager()
-    profile_path = session_manager.get_persistent_profile_path(platform, account_id)
-
+    路径规则**必须**与 ``SessionManager.get_session_path`` 完全一致（净化后的目录名），
+    否则采集侧读不到巡店面板保存的会话（spec D5 / D6）。
+    """
+    if not platform or not account_id:
+        return None
     try:
-        if not profile_path.exists() or not any(profile_path.iterdir()):
-            logger.debug("No persistent profile found for %s/%s", platform, account_id)
-            return None
+        from modules.utils.sessions.session_manager import SessionManager
+
+        return SessionManager().get_session_path(platform, account_id)
     except Exception:
-        logger.debug("Persistent profile probe failed for %s/%s", platform, account_id)
-        return None
-
-    launch_options = enforce_official_playwright_browser({"headless": True})
-
-    try:
-        with sync_playwright() as playwright:
-            context = playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profile_path),
-                accept_downloads=False,
-                **launch_options,
-            )
-            runtime_session.apply_stealth_init_scripts_sync(context)
-            try:
-                storage_state = runtime_session.read_context_storage_state_sync(
-                    platform=platform,
-                    context=context,
-                )
-            finally:
-                context.close()
-    except Exception as e:
-        logger.warning(
-            "Bootstrap session from profile failed for %s/%s: %s",
-            platform,
-            account_id,
-            e,
+        logger.debug(
+            "Manual storage state path probe failed for %s/%s", platform, account_id
         )
         return None
 
-    try:
-        session_manager.save_session(
-            platform,
-            account_id,
-            storage_state,
-            metadata={
-                "bootstrapped_from_profile": True,
-                "saved_at": time.time(),
-            },
-        )
-    except Exception as e:
-        logger.warning(
-            "Saving bootstrapped session failed for %s/%s: %s",
-            platform,
-            account_id,
-            e,
-        )
 
-    return {"storage_state": storage_state}
+def _manual_storage_state_exists(platform: str, account_id: str) -> bool:
+    """人工巡店保存的会话是否已经落盘。
+
+    注意：持久 profile 目录里也有 Chromium 缓存文件，不能用「目录非空」判断会话存在
+    （``runtime_session._profile_contains_state`` 只判目录非空）—— 人工会话必须走
+    ``SessionManager``。
+    """
+    session_path = _manual_storage_state_path(platform, account_id)
+    if session_path is None:
+        return False
+    try:
+        return session_path.exists()
+    except OSError:
+        return False
 
 
 async def _load_or_bootstrap_session_async(
@@ -327,7 +295,7 @@ async def _load_or_bootstrap_session_async(
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
         _get_executor_pool(),
-        lambda: _bootstrap_session_from_profile_sync(
+        lambda: runtime_session._bootstrap_session_from_profile_sync(
             platform,
             account_id,
             account_config=account_config,
@@ -893,6 +861,19 @@ class CollectionExecutorV2:
             )
             return await operation()
 
+    @staticmethod
+    def _should_prefer_manual_storage_state(
+        *,
+        has_persistent_profile: bool,
+        has_manual_storage_state: bool,
+    ) -> bool:
+        """人工巡店保存的会话优先于持久 profile 目录（spec D6）。
+
+        现状是「profile 目录非空就不读 data/sessions」，导致运营在面板里保存的会话
+        对已有 profile 的账号完全无效。
+        """
+        return bool(has_manual_storage_state)
+
     async def _open_runtime_bundle(
         self,
         *,
@@ -920,8 +901,18 @@ class CollectionExecutorV2:
                 session_owner_id
                 and runtime_session.runtime_profile_exists(platform, session_owner_id)
             )
+            # 人工巡店保存的会话（data/sessions/<platform>/<owner>/storage_state.json）
+            # 必须优先于持久 profile 目录被读取（spec D6 / A4）。
+            has_manual_storage_state = bool(
+                session_owner_id
+                and _manual_storage_state_exists(platform, session_owner_id)
+            )
+            prefer_manual_storage_state = self._should_prefer_manual_storage_state(
+                has_persistent_profile=has_persistent_profile,
+                has_manual_storage_state=has_manual_storage_state,
+            )
             if (
-                not has_persistent_profile
+                (prefer_manual_storage_state or not has_persistent_profile)
                 and effective_storage_state is None
                 and session_owner_id
             ):
@@ -932,9 +923,13 @@ class CollectionExecutorV2:
                 )
                 if session_data and isinstance(session_data.get("storage_state"), dict):
                     effective_storage_state = session_data["storage_state"]
+                    session_metadata: Dict[str, Any] = {"source": "session_manager"}
+                    raw_metadata = session_data.get("metadata")
+                    if isinstance(raw_metadata, dict):
+                        session_metadata.update(raw_metadata)
                     session_candidate = runtime_session.RuntimeSessionCandidate(
                         storage_state=effective_storage_state,
-                        metadata={"source": "session_manager"},
+                        metadata=session_metadata,
                     )
                 else:
                     session_candidate = (
@@ -949,8 +944,13 @@ class CollectionExecutorV2:
                 platform=platform,
                 session_owner_id=session_owner_id,
                 has_storage_state=bool(effective_storage_state),
-                has_manual_storage_state=session_candidate.manual_seeded,
-                has_persistent_profile=has_persistent_profile,
+                has_manual_storage_state=(
+                    prefer_manual_storage_state or session_candidate.manual_seeded
+                ),
+                # 人工会话存在时，持久 profile 目录只作为兜底，不再优先。
+                has_persistent_profile=(
+                    has_persistent_profile and not prefer_manual_storage_state
+                ),
                 force_persistent_profile=False,
                 execution_kind="formal_collection",
                 component_type="export",
