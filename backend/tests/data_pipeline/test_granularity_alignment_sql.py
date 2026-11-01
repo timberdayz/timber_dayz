@@ -91,7 +91,8 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                         platform VARCHAR(50) NOT NULL,
                         shop_account_id VARCHAR(100) NOT NULL,
                         store_name VARCHAR(200) NOT NULL,
-                        platform_shop_id VARCHAR(256)
+                        platform_shop_id VARCHAR(256),
+                        shop_region VARCHAR(50)
                     )
                     """
                 )
@@ -106,7 +107,19 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                         alias_value VARCHAR(200) NOT NULL,
                         alias_normalized VARCHAR(200) NOT NULL,
                         is_primary BOOLEAN DEFAULT FALSE,
-                        is_active BOOLEAN DEFAULT TRUE
+                        is_active BOOLEAN DEFAULT TRUE,
+                        shop_region VARCHAR(50)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO core.shop_accounts (
+                        platform, shop_account_id, store_name, platform_shop_id, shop_region
+                    ) VALUES (
+                        'shopee', 'shopee_shop_a_local', 'Shop A', 'shop-a', 'SG'
                     )
                     """
                 )

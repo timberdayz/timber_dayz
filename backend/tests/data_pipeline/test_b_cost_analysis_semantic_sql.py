@@ -166,7 +166,8 @@ async def _create_orders_b_class_tables(session) -> None:
                 platform VARCHAR(50) NOT NULL,
                 shop_account_id VARCHAR(100) NOT NULL,
                 store_name VARCHAR(200) NOT NULL,
-                platform_shop_id VARCHAR(256)
+                platform_shop_id VARCHAR(256),
+                shop_region VARCHAR(50)
             )
             """
         )
@@ -181,7 +182,8 @@ async def _create_orders_b_class_tables(session) -> None:
                 alias_value VARCHAR(200) NOT NULL,
                 alias_normalized VARCHAR(200) NOT NULL,
                 is_primary BOOLEAN DEFAULT FALSE,
-                is_active BOOLEAN DEFAULT TRUE
+                is_active BOOLEAN DEFAULT TRUE,
+                shop_region VARCHAR(50)
             )
             """
         )
@@ -272,6 +274,7 @@ async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             result = await session.execute(
@@ -388,6 +391,7 @@ async def test_orders_atomic_keeps_view_queryable_when_b_cost_amount_strings_are
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             result = await session.execute(
@@ -472,6 +476,7 @@ async def test_orders_atomic_falls_back_when_b_cost_alias_value_is_empty_string(
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             row = (

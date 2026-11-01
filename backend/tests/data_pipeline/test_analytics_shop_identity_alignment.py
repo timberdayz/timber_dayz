@@ -30,7 +30,8 @@ async def test_analytics_monthly_atomic_resolves_shop_account_identity_to_canoni
                         platform VARCHAR(50) NOT NULL,
                         shop_account_id VARCHAR(100) NOT NULL,
                         store_name VARCHAR(200) NOT NULL,
-                        platform_shop_id VARCHAR(256)
+                        platform_shop_id VARCHAR(256),
+                        shop_region VARCHAR(50)
                     )
                     """
                 )
@@ -45,7 +46,8 @@ async def test_analytics_monthly_atomic_resolves_shop_account_identity_to_canoni
                         alias_value VARCHAR(200) NOT NULL,
                         alias_normalized VARCHAR(200) NOT NULL,
                         is_primary BOOLEAN DEFAULT FALSE,
-                        is_active BOOLEAN DEFAULT TRUE
+                        is_active BOOLEAN DEFAULT TRUE,
+                        shop_region VARCHAR(50)
                     )
                     """
                 )
@@ -141,7 +143,8 @@ async def test_analytics_monthly_atomic_treats_dash_placeholders_as_null_metrics
                         platform VARCHAR(50) NOT NULL,
                         shop_account_id VARCHAR(100) NOT NULL,
                         store_name VARCHAR(200) NOT NULL,
-                        platform_shop_id VARCHAR(256)
+                        platform_shop_id VARCHAR(256),
+                        shop_region VARCHAR(50)
                     )
                     """
                 )
@@ -156,7 +159,8 @@ async def test_analytics_monthly_atomic_treats_dash_placeholders_as_null_metrics
                         alias_value VARCHAR(200) NOT NULL,
                         alias_normalized VARCHAR(200) NOT NULL,
                         is_primary BOOLEAN DEFAULT FALSE,
-                        is_active BOOLEAN DEFAULT TRUE
+                        is_active BOOLEAN DEFAULT TRUE,
+                        shop_region VARCHAR(50)
                     )
                     """
                 )
