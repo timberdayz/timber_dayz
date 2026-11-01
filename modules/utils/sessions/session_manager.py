@@ -106,19 +106,26 @@ def _write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
 
 
 def _session_freshness_timestamp(session_data: Optional[Dict[str, Any]]) -> float:
+    """会话的新鲜度时间戳。
+
+    只认 ``metadata.saved_at``（真实保存时间）。``last_used_at`` 会在每次读取时刷新，
+    参与计算会让过期机制永不触发（见 spec D7）。``saved_at`` 缺失时才回退 ``created_at``。
+    """
     if not isinstance(session_data, dict):
         return 0.0
 
     metadata = session_data.get("metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
 
-    candidates = [
-        metadata.get("saved_at"),
-        session_data.get("last_used_at"),
-        session_data.get("created_at"),
-    ]
-    numeric_values = [float(value) for value in candidates if isinstance(value, (int, float))]
-    return max(numeric_values) if numeric_values else 0.0
+    saved_at = metadata.get("saved_at")
+    if isinstance(saved_at, (int, float)):
+        return float(saved_at)
+
+    created_at = session_data.get("created_at")
+    if isinstance(created_at, (int, float)):
+        return float(created_at)
+
+    return 0.0
 
 
 def safe_session_account_dirname(account_id: str) -> str:
@@ -457,15 +464,19 @@ class SessionManager:
                     selected_gate = old_gate
 
             current_time = time.time()
-            # created_at 保留首次创建时间；会话新鲜度由 saved_at/last_used_at 驱动。
+            # created_at 保留首次创建时间；会话新鲜度由 saved_at 驱动。
             created_at = current_time
             if existing_session and isinstance(existing_session.get("created_at"), (int, float)):
                 created_at = float(existing_session.get("created_at"))
 
+            kept_old_state = old_state is not None and selected_state is old_state
+
             merged_metadata: Dict[str, Any] = {}
             merged_metadata.update(old_metadata)
             merged_metadata.update(incoming_metadata)
-            merged_metadata["saved_at"] = current_time
+            # 保留了旧 state 就不能刷新 saved_at，否则人工会话的保存时间会被自动回写刷掉
+            if not kept_old_state:
+                merged_metadata["saved_at"] = current_time
             merged_metadata["quality_score"] = selected_score
             merged_metadata["quality_gate_passed"] = bool(selected_gate)
             if incoming_manual:
@@ -541,9 +552,12 @@ class SessionManager:
                     logger.warning(f"会话已过期 ({age_days:.1f} 天): {platform}/{account_id}")
                     return None
             
-            # 更新最后使用时间
+            # 只在内容真正变化时回写。读一次会话不该刷新 saved_at（见 spec D7），
+            # 但仍需要维护 last_used_at 以便排查最近一次使用时间。
+            previous_last_used_at = session_data.get("last_used_at")
             session_data["last_used_at"] = time.time()
-            _write_json_atomic(session_file, session_data)
+            if previous_last_used_at != session_data["last_used_at"]:
+                _write_json_atomic(session_file, session_data)
             
             logger.info(f"会话已加载: {platform}/{account_id}")
             return session_data
