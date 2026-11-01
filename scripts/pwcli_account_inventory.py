@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from dataclasses import dataclass
@@ -46,9 +47,28 @@ def database_url() -> str:
 
 
 def slugify(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9]+", "-", str(value or "").strip().lower())
-    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-")
-    return cleaned or "account"
+    """把账号标识转成可安全用于路径与 session 名的短标签。
+
+    非 ASCII 字符（中文账号名）必须保留或参与哈希，否则不同账号会塌成同一个
+    slug，导致巡店窗口互相踢、storage_state 互相覆盖（见 spec D9）。
+    """
+    text = str(value or "").strip().lower()
+    if not text:
+        return "account"
+
+    ascii_part = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    non_ascii = "".join(ch for ch in text if ord(ch) > 127)
+
+    if not ascii_part:
+        # 纯中文账号名：用稳定短哈希区分，避免全部塌成 "account"
+        digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+        return f"cn-{digest}"
+
+    if non_ascii:
+        digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+        return f"{ascii_part}-{digest}"
+
+    return ascii_part
 
 
 def work_tag(platform: str, account_id: str) -> str:

@@ -718,6 +718,8 @@ def command_open(session: str, args: list[str]) -> int:
     if profile_dir is None:
         profile_dir = resolve_default_profile_dir(session, account_id)
     existing = load_session(session)
+    # session 名按账号唯一（见 spec D9 / scripts/pwcli_account_inventory.py:work_tag），
+    # 因此这里杀掉的只会是「同一个账号的上一次窗口」，不会误伤其它账号。
     if existing and is_process_alive(int(existing["pid"])):
         kill_process(int(existing["pid"]))
         remove_session(session)

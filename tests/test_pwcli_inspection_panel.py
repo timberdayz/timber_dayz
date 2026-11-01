@@ -54,7 +54,7 @@ def test_accounts_api_returns_enabled_supported_accounts_with_status():
             "platform": "tiktok",
             "display_name": "Tiktok 1店 (seller@example.com)",
             "account_id": "Tiktok 1店",
-            "work_tag": "tiktok-tiktok-1-inspect",
+            "work_tag": "tiktok-tiktok-1-a9983eb0-inspect",
             "status": "idle",
         },
     ]
