@@ -21,6 +21,13 @@ if hasattr(sys.stderr, "reconfigure"):
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# 直接以 `python modules/utils/pwcli_native.py` 启动时，sys.path[0] 是脚本目录而非仓库根，
+# 延迟导入 modules.* 会抛 ModuleNotFoundError（见 spec D4）。
+# scripts/pwcli_native.py 这个 shim 已经做了同样的事，这里保证两种入口行为一致。
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 PWCLI_ROOT = REPO_ROOT / "output" / "playwright" / ".pwcli_native"
 SESSIONS_DIR = PWCLI_ROOT / "sessions"
 DETACHED_PROCESS = 0x00000008
@@ -165,12 +172,20 @@ def runtime_account_profile_dir(platform: str, account_id: str) -> Path:
 
 
 def runtime_account_state_path(platform: str, account_id: str) -> Path:
+    """巡店侧会话读取路径。
+
+    必须与 SessionManager 的写入路径完全一致（spec D5）：
+    写入用 safe_session_account_dirname 净化，读取也必须用同一个函数，
+    否则保存下来的会话在下次打开时读不到。
+    """
+    from modules.utils.sessions.session_manager import safe_session_account_dirname
+
     return (
         REPO_ROOT
         / "data"
         / "sessions"
         / platform.lower()
-        / str(account_id).strip()
+        / safe_session_account_dirname(str(account_id).strip())
         / "storage_state.json"
     )
 

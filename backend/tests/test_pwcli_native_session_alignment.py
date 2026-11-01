@@ -303,3 +303,31 @@ def test_save_default_storage_state_from_context_supplements_tiktok_origins_from
         {"name": "current_shop_region", "value": "SG"},
         {"name": "LOCAL_IS_EFFECTIVE", "value": "1"},
     ]
+
+
+def test_runtime_account_state_path_matches_session_manager_write_path(tmp_path, monkeypatch):
+    """巡店读取路径必须与 SessionManager 写入路径完全一致。"""
+    from modules.utils.pwcli_native import runtime_account_state_path
+    from modules.utils.sessions.session_manager import SessionManager
+
+    monkeypatch.setattr("modules.utils.pwcli_native.REPO_ROOT", tmp_path)
+    manager = SessionManager(base_path=tmp_path / "data" / "sessions")
+
+    account_id = "hongxikeji:main"
+    expected = manager.get_session_path("shopee", account_id)
+    actual = runtime_account_state_path("shopee", account_id)
+
+    assert actual == expected
+    assert actual.parent.name == "hongxikeji_main"
+    assert actual.name == "storage_state.json"
+
+
+def test_runtime_account_state_path_is_stable_for_colon_accounts(tmp_path, monkeypatch):
+    """带冒号的账号 ID 与已净化账号 ID 必须指向同一个目录。"""
+    from modules.utils.pwcli_native import runtime_account_state_path
+
+    monkeypatch.setattr("modules.utils.pwcli_native.REPO_ROOT", tmp_path)
+
+    a = runtime_account_state_path("shopee", "hongxikeji:main")
+    b = runtime_account_state_path("shopee", "hongxikeji_main")
+    assert a == b
