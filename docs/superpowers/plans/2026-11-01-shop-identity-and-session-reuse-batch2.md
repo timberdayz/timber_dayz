@@ -414,12 +414,12 @@ git commit -m "fix(会话): 新鲜度只认 saved_at，30 天过期机制恢复�
 
 **Files:**
 - Modify: `modules/apps/collection_center/executor_v2.py:2805-2822`（`_should_skip_post_login_session_persist`）
-- Modify: `modules/apps/collection_center/executor_v2.py:245-303`（executor 版 bootstrap，`def` 在 `:245`，函数体止于 `:303`；整份删掉，改为复用 runtime_session 的实现）
+- Modify: `modules/apps/collection_center/executor_v2.py:245-309`（executor 版 bootstrap，`def` 在 `:245`、`return` 在 `:309`、下一个顶层 def 在 `:312`；整份删掉，改为复用 runtime_session 的实现）
 - Test: `backend/tests/test_collection_executor_session_alignment.py`（扩充）
 
 **背景**：
 - `executor_v2.py:2822` 的 `_should_skip_post_login_session_persist` 在 `platform=='tiktok' and runtime_mode=='persistent_profile'` 时**不落 storage_state** → 人工巡店保存的会话在 TikTok 上拿不到。
-- `executor_v2.py:245-303` 的 executor 版 bootstrap **缺** `modules/apps/collection_center/runtime_session.py:74-136` 的 TikTok 质量门禁 → 低质量会话会被当可用。
+- `executor_v2.py:245-309` 的 executor 版 bootstrap **缺** `modules/apps/collection_center/runtime_session.py:74-136` 的 TikTok 质量门禁 → 低质量会话会被当可用。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -582,7 +582,7 @@ params["session_metadata"] = getattr(runtime_bundle, "session_metadata", None) o
 
 - [ ] **Step 4: executor 侧的 bootstrap 复用 runtime_session 的实现（补上 TikTok 质量门禁）**
 
-**现状核实**：`executor_v2.py:245-303`（`def` 在 `:245`，函数体止于 `:303`）有**一份自己的** `_bootstrap_session_from_profile_sync`，
+**现状核实**：`executor_v2.py:245-309`（`def` 在 `:245`、`return` 在 `:309`、下一个顶层 `def` 在 `:312`）有**一份自己的** `_bootstrap_session_from_profile_sync`，
 它从持久 profile 读出 storage_state 就直接 `save_session` —— **没有 TikTok 质量门禁**。
 
 而 `modules/apps/collection_center/runtime_session.py:258-312` 的同名函数**有**门禁：
@@ -603,7 +603,7 @@ params["session_metadata"] = getattr(runtime_bundle, "session_metadata", None) o
 
 **修法（优先 DRY，不要再抄第三份）**：
 
-1. 删掉 `executor_v2.py:245-303` 的重复实现（`def` 在 `:245`，函数体止于 `:303`），**并同步改调用点**：
+1. 删掉 `executor_v2.py:245-309` 的重复实现（`def` 在 `:245`、`return` 在 `:309`），**并同步改调用点**：
    `executor_v2.py:330` 现在调的是**本地那份**（`_bootstrap_session_from_profile_sync(...)`，无模块前缀），
    **不是** `runtime_session` 的实现 —— 全文 grep 确认 executor 内从未出现过
    `runtime_session._bootstrap_session_from_profile_sync`。
@@ -1316,19 +1316,60 @@ Expected: **2 FAIL + 1 PASS** ——
         END AS source_region,
 ```
 
-> 这张表与 `backend/domains/collection/routers/account_alignment.py:796-805` 的 `site_map` **必须保持一致**
-> （8 项逐项核对：菲律宾→ph、新加坡→sg、马来/马来西亚→my、泰国→th、越南→vn、印尼→id、巴西→br；fallback 也一致）。
+> **8 项映射必须逐项一致**（菲律宾→ph、新加坡→sg、马来/马来西亚→my、泰国→th、越南→vn、印尼→id、巴西→br）
+> —— 与 `backend/domains/collection/routers/account_alignment.py:796-805` 的 `site_map` 对齐。
 > 实施者要在这两个地方各加一条注释互相指认，避免以后单边改。（SQL 侧没法直接 import Python 常量，
 > 只能靠约定 + 双向注释 + 测试守住。）
+>
+> **⚠ fallback 的大小写两侧本来就不同，这是有意的，不要"修正"成一致**：
+> - Python `account_alignment.py:806`：`site_map.get(site, site.lower()[:2] if site else "")` → **小写**。
+>   它的产物只用于**生成建议 id**（`:820-821` 拼成 `tiktok_ph_xxx`），从不与 `shop_region` 比较。
+> - SQL 侧：`UPPER(LEFT(..., 2))` → **大写**。
+>   它的产物要与 `core.shop_accounts.shop_region`（实测存**大写** `MY` / `PH` / `SG`）比较，必须大写。
+>
+> → **护栏只锁「8 项映射」一致，不锁 fallback 的大小写**。
+> live 数据里只出现已收录的三个中文站点（菲律宾 / 新加坡 / 马来），两边的差异目前不会显现；
+> 但如果实施者把 SQL 的 fallback 改成小写，未收录站点会永远匹配不上区域码 → 区域过滤退化为层 2 兜底（安全，但消歧失效）。
 
-**逐文件落点**：
+**逐文件落点（⚠ 同一条 SELECT 列表里不能引用本层的输出别名，落地位置必须按下表）**：
 
-| 文件 | 落点 | `source_site` 从哪来 | 区域过滤是否生效 |
+> **PostgreSQL 的硬规则**：同一个 `SELECT` 列表里**不能**引用同层的输出别名。
+> 所以 `source_region` **不能**紧跟在 `source_site` 后面（`source_site` 是上一层 CTE 的输出别名），
+> 否则报 `column "source_site" does not exist`（已实测复现）。
+> `source_region` 必须在**`source_site` 已经是真实输入列**的那一层计算。
+
+| 文件 | `source_site` 在哪 | **`source_region` 在哪算** | 区域过滤是否生效 |
 |---|---|---|---|
-| `sql/semantic/orders_atomic.sql` | `mapped` CTE（`:32`）里，`:62` 的 `source_site` **正下方**加 `source_region` | 已有（`:62`，读 `raw_data->>'站点'`） | ✅ 生效 |
-| `sql/semantic/orders_monthly_atomic_mv.sql` | `mapped_monthly_orders` CTE（`:19`）里，`:35` 的 `store_label_raw` **后面**先补 `source_site`、再加 `source_region` | **要新加**：`NULLIF(TRIM(COALESCE(raw_data->>'站点', raw_data->>'site')), '')` | ✅ 生效 |
-| `sql/semantic/analytics_atomic.sql` | **不动** | raw 里没有 | ❌ 不适用 |
-| `sql/semantic/analytics_monthly_atomic_mv.sql` | **不动** | raw 里没有 | ❌ 不适用 |
+| `sql/semantic/orders_atomic.sql` | `mapped`(:32) 里 `:62` 算出（读 `raw_data->>'站点'`），并**透传**到 `cleaned`(:280) 的显式清单 `:286` | **`cleaned`(:280)** —— 在 `:286` 的 `source_site` 那一行**正下方**加（此处 `source_site` 是真实输入列，可直接引用） | ✅ 生效 |
+| `sql/semantic/orders_monthly_atomic_mv.sql` | `mapped_monthly_orders`(:19) 里**新加**：`NULLIF(TRIM(COALESCE(raw_data->>'站点', raw_data->>'site')), '')`，并**透传**到 `normalized_monthly_orders`(:114) 的显式清单（该清单 `:115-198` 目前**没有** `source_site`） | **`normalized_monthly_orders`(:114)** —— 在新增的 `source_site` 那一行下面加 | ✅ 生效 |
+| `sql/semantic/analytics_atomic.sql` | **不动** | **不动** | ❌ 不适用 |
+| `sql/semantic/analytics_monthly_atomic_mv.sql` | **不动** | **不动** | ❌ 不适用 |
+
+**透传清单（漏一条就报 `column ... does not exist`，已实测复现）**：
+
+| 文件 | CTE 链（谁带显式列清单） | `source_region` 的传递路径 |
+|---|---|---|
+| `orders_atomic.sql` | `mapped`(:32) → **`cleaned`(:280，显式列清单)** → `deduplicated`(:390，`SELECT *`) → `alias_resolved`(:406) | `cleaned` 里**新算** → `deduplicated`（`SELECT *`）自动带上 → `alias_resolved` 的 LATERAL 用 `d.source_region` ✅ |
+| `orders_monthly_atomic_mv.sql` | `mapped_monthly_orders`(:19) → **`normalized_monthly_orders`(:114，显式列清单)** → `prepared_identity_monthly_orders`(:200，`n.*`) → **`resolved_monthly_orders`(:221，显式列清单)** → `deduplicated_monthly_orders`(:284，`SELECT *`) | `mapped_monthly_orders` 新算 `source_site` → `normalized_monthly_orders` 显式清单里带上 `source_site` 并**新算** `source_region` → `prepared_identity_monthly_orders`（`n.*`）自动带上 → `resolved_monthly_orders` 的 LATERAL 用 `m.source_region` ✅（`m` = prepared 层）→ 该 CTE 的显式清单还要补上 `source_region` 才能到最终 SELECT |
+
+> `orders_monthly_atomic_mv.sql` 的 `prepared_identity_monthly_orders`(:200) 是 `SELECT n.*, ARRAY_REMOVE(...) ...`，
+> `n.*` 会把 `normalized_monthly_orders` 的所有列带过来 ✅ —— 这一层不用改。
+> `orders_atomic.sql` 的 `deduplicated`(:390) 是 `SELECT *` ✅ —— 同样不用改。
+
+**实测（live PG 15.14，只读）**：
+
+| 场景 | 结果 |
+|---|---|
+| **反例**：在同一条 `SELECT` 列表里用 `source_site` 输出别名算 `source_region` | `ERROR: column "source_site" does not exist` ✅（这就是"不能紧跟在 `source_site` 后面"的依据） |
+| `orders_atomic.sql` 落点：`cleaned` 层用真实输入列 `source_site` 算 `source_region` | ✅ 正常返回（实测 200 行 `菲律宾 → PH`） |
+| `orders_monthly_atomic_mv.sql` 落点：`normalized_monthly_orders` 层算 `source_region` | ✅ 正常返回（实测 200 行 `菲律宾 → PH`） |
+| 过滤条件引用 `d.source_region` / `m.source_region` | ✅ 正常返回 |
+
+> 反例那行**必须报错** —— 它证明"同层不能引用输出别名"这条 PostgreSQL 规则在 live 上确实生效，
+> 实施者如果把 `source_region` 放错层，部署时会立刻看到 `column "source_site" does not exist`，
+> 而不是等到数据错配才发现。
+
+
 
 **为什么两条 analytics 路径不适用（live 实测，只读）**：
 
@@ -1336,7 +1377,7 @@ Expected: **2 FAIL + 1 PASS** ——
 |---|---|---|---|---|
 | `b_class.fact_tiktok_orders_monthly` | 4662 | **4662（100%）** | **4662（100%）** | — |
 | `b_class.fact_tiktok_analytics_monthly` | 1263 | **0** | **0** | 543（43%） |
-| `b_class.fact_shopee_orders_monthly` | 26627 | **0** | — | — |
+| `b_class.fact_shopee_orders_monthly` | 26627 | **0** | **26627（100%）** | — |
 
 即：
 - **analytics 的 raw 里既没有站点、也没有店铺标签** → 无从推导区域。
@@ -1445,22 +1486,17 @@ Expected: **2 FAIL + 1 PASS** ——
 这两条路径靠 `shop_account_id` 匹配，不会出现同名品牌歧义。
 
 **注意 `candidate_count` 的算口径**：区域过滤必须作用在**候选集合本身**上，
-也就是把「计数用的 `agg` 子查询」和「取最优候选的 `best` 子查询」**都**加上区域过滤条件，
+也就是把「计数用的 `agg` 子查询」和「取最优候选的 `best` 子查询」**都**加上**同一段**过滤条件
+（就是上面那段 `AND ( 精确匹配 OR NOT EXISTS(精确匹配) )`），
 否则会出现「计数按过滤后的候选算、归属却取到未过滤的候选」的不一致。
-区域过滤条件形如：
-
-```sql
-  AND (
-        c.identity_shop_region = <source_region 表达式>
-        OR c.identity_shop_region IS NULL
-      )
-```
 
 `<source_region 表达式>` 在 `orders_atomic.sql` 里是 `d.source_region`，
-在 `orders_monthly_atomic_mv.sql` 里是 `m.source_region`（**Step 3 新加的列**）。
-`source_region` 为 NULL（shopee 没有站点）时，这个条件退化成「只保留不限区域的别名」——
-**这会改变 shopee 的现有行为**，实施者必须用 Task 17 Step 5b 的方式显式处理：
-当 `source_region` 为 NULL 时**不做区域过滤**（等价于「不限区域」）。
+在 `orders_monthly_atomic_mv.sql` 里是 `m.source_region`（**Step 3 新算的列**，透传路径见 Step 3 的透传清单）。
+
+> **不要**把过滤条件写成「`c.identity_shop_region = <src> OR c.identity_shop_region IS NULL`」——
+> 那是**并集**语义：不限区域的别名会与精确匹配的别名一起被计入 → `candidate_count ≥ 2` → 仍然落
+> `ambiguous_shop_label`，「优先/兜底」等于没实现；而且在没有站点的数据上（shopee）会把别名全滤掉 →
+> **凭空制造新的 unknown**。正确写法就是上面那段带 `NOT EXISTS` 的版本。
 
 > **必须保证**：区域过滤**只用于消歧，不制造新的 unknown**。
 > 存量 21 条别名在 Task 5 已按 `core.shop_accounts.shop_region` 回填区域，
@@ -1496,7 +1532,7 @@ git commit -m "feat(语义层): 区域参与身份匹配，同名品牌店按站
 
 - mapped 层把 raw 的中文站点映射成区域码（与 account_alignment.py 的 site_map 对齐）
 - 候选视图带出别名/店铺的区域维度
-- 匹配时先按区域精确匹配，再退回「不限区域」的别名
+- 匹配时先按区域精确匹配；没有精确匹配时回落到**完整候选集**（不是「只取不限区域的别名」）
 - 存量数据归属不变（与第一批基线一致）"
 ```
 

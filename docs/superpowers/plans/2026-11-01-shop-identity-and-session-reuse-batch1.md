@@ -1407,11 +1407,11 @@ git commit -m "fix(别名): 写侧与查侧规范化统一，认领了不再匹�
 > 该文件仍需在 `git add` 里带上（第一批 Task 6 改过它的规范化口径），但**本 Task 不动它**。
 
 **背景（spec §2.5）**：
-- live 有**三套并存**的解析逻辑，全部 `LIMIT 1`。
+- live 有**四套并存**的解析逻辑，全部 `LIMIT 1`。
 - 两条路径的塌缩胜者还不同：`semantic.fact_orders_atomic` 路径 → SG 店；候选视图路径 → MY 店。
 - 候选池**不按 `enabled` 过滤**（65/136 行来自 disabled 账号）——业务已决定**不排除**（停用只是暂时的），唯一性判定必须用**完整候选集**。
 
-**判定口径（唯一真源，三条路径共用）**：
+**判定口径（唯一真源，四条路径共用）**：
 
 ```
 候选数 = 0  → shop_id = 'unknown', identity_warning_code = 'unmatched_shop_label'
@@ -1618,14 +1618,14 @@ Expected: FAIL。
 |---|---|---|---|
 | `orders_monthly_atomic_mv.sql` | `m` | `m.normalized_identity_candidates`（`:203-220` 构造） | 直接套用上面的模板 |
 | `analytics_monthly_atomic_mv.sql` | `m` | `m.normalized_identity_candidates`（`:334`） | 直接套用上面的模板 |
-| `orders_atomic.sql` | `d` | **今天没有** `normalized_identity_candidates` | 先按 Step 4a 在 `mapped` 层补出该数组，再套用模板（把 `m.` 换成 `d.`） |
+| `orders_atomic.sql` | `d` | **今天没有** `normalized_identity_candidates` | 先按 Step 4a 在 `mapped` 层补出该数组，再套用模板（把 `m.` 换成 `d.`）。⚠ **LATERAL 结果别名是 `account_map`**（`:474`），不是 `resolved` → 模板里的 `resolved.*` 全要改成 `account_map.*`；或者把别名改名成 `resolved` 并**同步改** `:410-411` 两处引用 |
 | `analytics_atomic.sql` | `m` | `VALUES (...)` 内联列表（`:168-199`），**不是数组** | 先把内联 `VALUES` 抽成 CTE（例如 `candidate_values`），再套用模板（把 `= ANY (m.normalized_identity_candidates)` 换成 `= ANY (cv.identity_value_normalized)`） |
 
 **⚠ 四个文件还有「中间 CTE 透传」与「LATERAL 结果别名」两处差异 —— 照抄上面的模板会报 `column does not exist`**：
 
 | 文件 | CTE 链（谁带显式列清单） | LATERAL 结果别名 | 必须补的透传 |
 |---|---|---|---|
-| `orders_atomic.sql` | `mapped`(:32) → **`cleaned`(:280，显式列清单)** → `deduplicated`(:390，`SELECT *`) → `alias_resolved`(:406) | `resolved` | ① `normalized_identity_candidates` 必须在 `cleaned` 的显式清单里**再透传一次** —— 否则 `d.normalized_identity_candidates` 报 `column d.normalized_identity_candidates does not exist`；② 新算出的 `identity_warning_code` / `identity_candidate_count` / `identity_candidates` 同样要穿过 `cleaned` 才能到最终 SELECT |
+| `orders_atomic.sql` | `mapped`(:32) → **`cleaned`(:280，显式列清单)** → `deduplicated`(:390，`SELECT *`) → `alias_resolved`(:406) | **`account_map`**(:474) | ① `normalized_identity_candidates` 必须在 `cleaned` 的显式清单里**再透传一次** —— 否则 `d.normalized_identity_candidates` 报 `column d.normalized_identity_candidates does not exist`；② 新算出的 `identity_warning_code` / `identity_candidate_count` / `identity_candidates` 同样要穿过 `cleaned` 才能到最终 SELECT |
 | `analytics_atomic.sql` | `mapped`(:34) → `resolved`(:120) → **`cleaned`(:208，显式列清单)** → `deduplicated`(:279) | **`resolved_candidate`**(:206) | ① LATERAL 的结果别名是 `resolved_candidate`，**不是** `resolved` → 模板与 CASE 里的 `resolved.candidate_count` / `resolved.candidate_shop_ids` 都要改成 `resolved_candidate.*`；② 新列在 `resolved` 里算出后要穿过 `cleaned`(:208) 的显式清单 |
 | `orders_monthly_atomic_mv.sql` | `mapped_monthly_orders`(:19) → `normalized_monthly_orders`(:114) → `prepared_identity_monthly_orders`(:200) → **`resolved_monthly_orders`(:221，显式列清单)** → `deduplicated_monthly_orders`(:284，`SELECT *`) | `resolved` | 新列在 `resolved_monthly_orders` 里算出 → 加进该 CTE 的显式清单 → `deduplicated`（`SELECT *`）自动带上 → 最终 SELECT 引用 |
 | `analytics_monthly_atomic_mv.sql` | `mapped_monthly_traffic`(:16) → `normalized_monthly_traffic`(:107) → **`resolved_monthly_traffic`(:339，显式列清单)** → `deduplicated_monthly_traffic`(:406，`SELECT *`) | `resolved` | 同上 |
@@ -1633,6 +1633,11 @@ Expected: FAIL。
 > **为什么必须写清楚**：PostgreSQL 不会自动把列带过 `SELECT 列清单` 形式的 CTE。
 > 漏掉透传 → 语义层重建时直接报 `column ... does not exist`；
 > 漏掉 LATERAL 别名 → CASE 里的 `resolved.*` 取不到值，`candidate_count` 恒为 NULL → **所有行都落 `unmatched_shop_label`**。
+>
+> **模板里的 `) resolved ON TRUE` 是占位别名** —— 落地时按上表的「LATERAL 结果别名」列改：
+> `orders_atomic.sql` → `account_map`；`analytics_atomic.sql` → `resolved_candidate`；
+> 两个 monthly MV → `resolved`。
+> 改了别名之后，**模板与 CASE 里的 `resolved.*` 要同步替换**，否则 `candidate_count` 恒为 NULL。
 
 然后把 `shop_id` 的 CASE 改成：
 
@@ -1745,7 +1750,7 @@ Expected: 全部 PASS。
 git add sql/semantic/ backend/tests/data_pipeline/test_shop_identity_resolution_sql.py backend/tests/test_semantic_ambiguous_identity_sql.py
 git commit -m "feat(语义层): 多候选不再静默归一，落 unknown + 告警码
 
-- 三条语义路径统一判定：候选 1 才归属，候选 0 落 unmatched_shop_label，
+- 四条语义路径统一判定：候选 1 才归属，候选 0 落 unmatched_shop_label，
   候选 >=2 落 ambiguous_shop_label 并输出 identity_candidate_count / identity_candidates
 - 候选集含 disabled 账号（业务确认停用只是暂时的，唯一性判定用完整候选集）
 - 候选视图带上 shop_region 维度"
@@ -2251,7 +2256,7 @@ TK新加坡3C店 按业务决定暂不认领，保持 unknown 并在面板可见
 
 **Files:**
 - Modify: `modules/apps/collection_center/executor_v2.py:896-1034`（`_open_runtime_bundle` 的会话短路条件，锚点 `:924`）
-- Modify: `modules/apps/collection_center/executor_v2.py:255-309`（executor 版 bootstrap）
+- Modify: `modules/apps/collection_center/executor_v2.py:245-309`（executor 版 bootstrap）
 - Test: `backend/tests/test_collection_session_reuse_contract.py`（扩充）
 
 **背景（spec D6 / §2.7）**：`executor_v2.py:924` 的短路条件

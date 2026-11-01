@@ -371,7 +371,7 @@ shopee KR        SG×3
 （`backend/tests/test_session_storage_roots.py:30-31` 断言的"session 目录名 ≠ profile 目录名"是既定设计，**不受影响**。）
 
 **D6 —— 采集侧会话读取顺序修正。**
-`executor_v2.py:924` 的短路条件改为：当存在 `session_owner_id` 且 `data/sessions/<platform>/<owner>/storage_state.json` 存在时，**优先使用该 storage_state**（人工巡店保存的），而不是"profile 目录非空就跳过一切"。会话质量门禁沿用 `runtime_session.py:74-136` 的 TikTok 质量评分（该门禁在 `executor_v2.py:255-309` 的 executor 版 bootstrap 里缺失，需补齐）。
+`executor_v2.py:924` 的短路条件改为：当存在 `session_owner_id` 且 `data/sessions/<platform>/<owner>/storage_state.json` 存在时，**优先使用该 storage_state**（人工巡店保存的），而不是"profile 目录非空就跳过一切"。会话质量门禁沿用 `runtime_session.py:74-136` 的 TikTok 质量评分（该门禁在 `executor_v2.py:245-309` 的 executor 版 bootstrap 里缺失，需补齐）。
 
 **D7 —— 会话新鲜度以 `saved_at` 为准。**
 `_session_freshness_timestamp` 改为：**`saved_at` 唯一优先，完全不参与 `last_used_at`**（仅当 `saved_at` 缺失时回退 `created_at`）。
@@ -620,7 +620,7 @@ ORM SSOT 同步更新 `modules/core/db/schema_parts/platform.py`。
 - [ ] **B2（账号标识唯一）** 中文账号名不再被 slugify 丢弃；`虾皮巴西（东朗照明主体）` 与 `验证码测试账号` 不再塌成同一个 session 名；`data/sessions` 下不再新增因 slug 塌缩而互相覆盖的目录。
 - [ ] **B3（曾用名）** 改名后别名表可查到旧名（`is_primary=false`, `is_active=true`, `alias_type='former_name'`）；**老数据（携带旧名）仍命中同一店**；改名触发**一次**归属重算（不是零次，也不是每次读取都重算）。
 - [ ] **B4（标准名）** 账号管理页可编辑「内部标准名」，系统给出 `FIORO_SG` 形式建议值（含主账号消歧）；同平台内重名被拒绝并给出冲突详情；同主账号下同名也能正确区分。
-- [ ] **B5（改名后自动重认）** TikTok 三店 `store_name` 改为 `FIORO` 后，新采集数据的归属仍按区域正确分流到三个店，且三条语义路径均无 `LIMIT 1` 塌缩。
+- [ ] **B5（改名后自动重认）** TikTok 三店 `store_name` 改为 `FIORO` 后，新采集数据的归属仍按区域正确分流到三个店，且四条语义路径均无 `LIMIT 1` 塌缩。
 
 ### 回归护栏
 
@@ -628,7 +628,7 @@ ORM SSOT 同步更新 `modules/core/db/schema_parts/platform.py`。
 - [ ] `backend/tests/test_collection_session_reuse_contract.py` 仍通过（load 优先于 bootstrap）。
 - [ ] `backend/tests/test_shop_account_aliases_api.py` 仍通过（其中已有的 4 条 `normalize_alias_key` 断言在新规则下应仍成立）。
 - [ ] `backend/tests/data_pipeline/test_shop_identity_resolution_sql.py` 仍通过。
-- [ ] `sql/semantic/` 下三条语义路径的解析逻辑统一到同一套候选视图 + 告警码，**不再**各自实现 `LIMIT 1`。
+- [ ] `sql/semantic/` 下四条语义路径（orders/analytics × atomic/monthly）的解析逻辑统一到同一套候选视图 + 告警码，**不再**各自实现 `LIMIT 1`。
 - [ ] MATVIEW 变更后已执行 `REFRESH MATERIALIZED VIEW semantic.fact_orders_monthly_atomic_mv` 并完成历史回填（改 VIEW 定义不会立即生效）。
 
 ---
