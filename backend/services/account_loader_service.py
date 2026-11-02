@@ -39,6 +39,24 @@ class AccountLoaderService:
             "login_flags": data.get("login_flags", {}),
         }
 
+    @staticmethod
+    def _extract_proxy_config(shop: ShopAccount) -> Dict:
+        """账号级代理配置，存在 core.shop_accounts.extra_config["proxy"]。
+
+        不加列、不写迁移：代理配置走 extra_config jsonb。
+        extra_config 为 None、proxy 子字典不存在、字段缺失或类型不对时
+        一律安全兜底，不抛异常。
+        """
+        data = shop.extra_config or {}
+        raw = data.get("proxy") or {}
+        if not isinstance(raw, dict):
+            raw = {}
+        return {
+            "proxy_enabled": bool(raw.get("enabled")),
+            "proxy_server": str(raw.get("server") or "").strip(),
+            "proxy_region": str(raw.get("region") or "").strip(),
+        }
+
     def _build_account_dict(
         self,
         main_account: MainAccount,
@@ -50,6 +68,7 @@ class AccountLoaderService:
             return None
 
         legacy = self._extract_legacy_shop_extra(shop_account)
+        proxy = self._extract_proxy_config(shop_account)
         return {
             "account_id": shop_account.shop_account_id,
             "main_account_id": main_account.main_account_id,
@@ -67,7 +86,10 @@ class AccountLoaderService:
             "shop_id": shop_account.platform_shop_id or "",
             "parent_account": main_account.main_account_id,
             "enabled": shop_account.enabled,
-            "proxy_required": legacy["proxy_required"],
+            "proxy_required": bool(legacy["proxy_required"] or proxy["proxy_enabled"]),
+            "proxy_enabled": proxy["proxy_enabled"],
+            "proxy_server": proxy["proxy_server"],
+            "proxy_region": proxy["proxy_region"],
             "notes": shop_account.notes or "",
             "capabilities": capabilities,
             "another_name": "",
