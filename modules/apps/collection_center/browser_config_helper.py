@@ -119,8 +119,10 @@ def get_browser_context_args() -> dict:
     获取浏览器上下文参数(全局默认反检测指纹)。
     主采集执行器已按账号使用 DeviceFingerprintManager 生成指纹，此处仅作回退/兼容。
 
-    代理为预留能力：当前采集在住宅 IP 下无需启用；若未来需要多 IP/代理，
-    可在执行器创建 context 时从 account 读取 proxy_required/proxy 并注入 context 的 proxy。
+    代理不在这里注入：账号级代理由
+    ``backend/services/account_proxy_config.resolve_account_proxy`` 解析，
+    在执行器/运行时会话里注入 browser 级与 context 级的 ``proxy``。
+    本函数只是无账号信息时的指纹回退，不该带代理。
     """
     return {
         "viewport": {"width": 1920, "height": 1080},

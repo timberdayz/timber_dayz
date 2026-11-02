@@ -61,8 +61,8 @@ class AccountLoaderService:
             return None
 
         legacy = self._extract_legacy_shop_extra(shop_account)
-        # getattr 兜底：测试替身（SimpleNamespace）可能没有 extra_config 属性
-        proxy = extract_proxy_config(getattr(shop_account, "extra_config", None))
+        # 与 legacy 路径保持一致的写法：extra_config 是 ShopAccount 的既有字段
+        proxy = extract_proxy_config(shop_account.extra_config)
         return {
             "account_id": shop_account.shop_account_id,
             "main_account_id": main_account.main_account_id,
@@ -83,10 +83,14 @@ class AccountLoaderService:
             # proxy_required：账号需要代理（历史 legacy_proxy_required 标记 或 extra_config.proxy.enabled）。
             # 注意：遗留链路 modules/utils/proxy_config_manager.py 也读这个键去选"地区池"代理，
             # 账号自有 proxy_server 必须在注入浏览器时优先于地区池，否则一账号会出两个 IP。
+            # 新链路（backend/services/account_proxy_config.resolve_account_proxy）不读这个键，
+            # 只认账号自有的 proxy_server。
             "proxy_required": bool(legacy["proxy_required"] or proxy["proxy_enabled"]),
             "proxy_enabled": proxy["proxy_enabled"],
             "proxy_server": proxy["proxy_server"],
             "proxy_region": proxy["proxy_region"],
+            "proxy_username": proxy["proxy_username"],
+            "proxy_password": proxy["proxy_password"],
             "notes": shop_account.notes or "",
             "capabilities": capabilities,
             "another_name": "",

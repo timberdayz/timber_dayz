@@ -57,6 +57,7 @@ from backend.services.collection_account_runtime_service import (
     CollectionAccountRuntimeError,
     load_collection_account_runtime,
 )
+from backend.services.account_proxy_config import resolve_account_proxy
 from backend.services.websocket_manager import connection_manager
 from backend.services.collection_task_status import STATUS as TASK_STATUS, TERMINAL_STATUSES, ACTIVE_STATUSES
 
@@ -1697,12 +1698,16 @@ async def _execute_collection_task_background_v2(
 
             browser = None
             try:
+                # 账号级代理：账号自有的 proxy_server 优先，绝不回退到遗留地区池
+                account_proxy = resolve_account_proxy(account)
                 if parallel_mode:
                     browser = await p.chromium.launch(
                         **get_browser_launch_args(
                             debug_mode=debug_mode,
                             execution_mode=execution_mode,
-                        )
+                        ),
+                        # 浏览器级全局代理：并行扇出的所有 context 都继承同一个出口 IP
+                        **({"proxy": account_proxy} if account_proxy else {}),
                     )
                     logger.info(
                         f"Task {task_id}: Using PARALLEL execution mode (max_parallel={max_parallel})"
@@ -1720,6 +1725,7 @@ async def _execute_collection_task_background_v2(
                         max_parallel=max_parallel,
                         debug_mode=debug_mode,
                         runtime_manifests=runtime_manifests,
+                        proxy=account_proxy,
                     )
                 else:
                     result = await executor.execute(
@@ -1736,6 +1742,7 @@ async def _execute_collection_task_background_v2(
                         debug_mode=debug_mode,
                         runtime_manifests=runtime_manifests,
                         session_runtime_mode="auto",
+                        proxy=account_proxy,
                     )
             finally:
                 if browser is not None:
@@ -1892,12 +1899,16 @@ async def _execute_collection_task_background(
 
                 browser = None
                 try:
+                    # 账号级代理：账号自有的 proxy_server 优先，绝不回退到遗留地区池
+                    account_proxy = resolve_account_proxy(account)
                     if parallel_mode:
                         browser = await p.chromium.launch(
                             **get_browser_launch_args(
                                 debug_mode=debug_mode,
                                 execution_mode=execution_mode,
-                            )
+                            ),
+                            # 浏览器级全局代理：并行扇出的所有 context 都继承同一个出口 IP
+                            **({"proxy": account_proxy} if account_proxy else {}),
                         )
                         logger.info(
                             f"Task {task_id}: Using PARALLEL execution mode (max_parallel={max_parallel})"
@@ -1915,6 +1926,7 @@ async def _execute_collection_task_background(
                             max_parallel=max_parallel,
                             debug_mode=debug_mode,
                             runtime_manifests=runtime_manifests,
+                            proxy=account_proxy,
                         )
                     else:
                         result = await executor.execute(
@@ -1931,6 +1943,7 @@ async def _execute_collection_task_background(
                             debug_mode=debug_mode,
                             runtime_manifests=runtime_manifests,
                             session_runtime_mode="auto",
+                            proxy=account_proxy,
                         )
 
                     task.status = result.status

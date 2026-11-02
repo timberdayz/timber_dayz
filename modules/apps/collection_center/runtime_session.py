@@ -434,6 +434,8 @@ def _build_playwright_context_options_from_fingerprint(
         "ignore_https_errors",
         "java_script_enabled",
         "accept_downloads",
+        # 代理必须进白名单：否则 context options 会把账号级代理丢掉（断点③）
+        "proxy",
     }
     result: Dict[str, Any] = {}
     for key, value in (fingerprint_options or {}).items():
@@ -754,9 +756,15 @@ async def open_persistent_runtime_bundle(
         headless=bool((launch_kwargs or {}).get("headless", True)),
     )
     launch_options = enforce_official_playwright_browser(dict(launch_kwargs or {}))
+    # profile 模式下 proxy 是**浏览器进程级**参数（launch_persistent_context 的 proxy），
+    # 与 context 级 proxy 不同义；context_options 里若也带了 proxy，重复传同一个 key
+    # 会抛 TypeError，所以这里显式取出、只传一次。
+    launch_options.pop("proxy", None)
+    context_options.pop("proxy", None)
 
     context = await browser_type.launch_persistent_context(
         user_data_dir=str(profile_path),
+        **({"proxy": proxy} if proxy else {}),
         **launch_options,
         **context_options,
     )

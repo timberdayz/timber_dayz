@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs, urlparse
 
 from modules.core.logger import get_logger
+from backend.services.account_proxy_config import resolve_account_proxy
 from backend.services.verification_protocol import (
     apply_verification_result_to_params,
     verification_input_mode,
@@ -438,6 +439,8 @@ def _build_playwright_context_options_from_fingerprint(
         "ignore_https_errors",
         "java_script_enabled",
         "accept_downloads",
+        # 代理必须进白名单：否则 context options 会把账号级代理丢掉（断点③）
+        "proxy",
     }
     out = {}
     for k, v in fp_options.items():
@@ -1836,7 +1839,7 @@ class CollectionExecutorV2:
         debug_mode: bool = False,  # v4.7.0: 调试模式
         browser=None,  # 推荐: Playwright Browser 对象, 执行器自建带指纹与会话的 context
         browser_type=None,
-        proxy: Optional[Dict[str, str]] = None,  # 代理预留, 当前不注入
+        proxy: Optional[Dict[str, str]] = None,  # 账号级代理(Playwright 形态)
         runtime_manifests: Optional[Dict[str, Any]] = None,
         session_runtime_mode: str = "storage_state_fanout",
     ) -> CollectionResult:
@@ -1863,13 +1866,16 @@ class CollectionExecutorV2:
             sub_domains: 子域数组(v4.7.0)
             debug_mode: 调试模式(v4.7.0,仅用于日志记录)
             browser: 推荐传入, 执行器自建带指纹与可选会话的 context
-            proxy: 代理预留, 当前不向 context 注入
+            proxy: 账号级代理(Playwright 形态)。调用方没传时从账号配置解析
+                   (自有代理优先, 绝不回退到遗留地区池)
 
         Returns:
             CollectionResult: 采集结果
         """
         start_time = datetime.now()
         legacy_direct_page_mode = False
+        # 账号级代理：调用方没显式传就从账号配置解析（自有代理优先，绝不走遗留地区池）
+        proxy = proxy or resolve_account_proxy(account)
 
         # 1.0 统一约定: 规范化 account_id, 决定是否使用按账号会话/指纹
         session_owner_id, shop_account_id, use_account_session_fingerprint = (
@@ -1973,8 +1979,14 @@ class CollectionExecutorV2:
             and normalized_runtime_mode in {"auto", "storage_state_fanout"}
             and browser_type is not None
         ):
+            # 浏览器级全局代理：账号自有代理必须在浏览器进程级注入。
+            # context 级 proxy 的生效前提就是浏览器带了全局代理，否则会静默直连
+            # （C2：自有代理场景不允许回退直连）。
+            launch_kwargs = self._build_runtime_launch_kwargs(debug_mode=debug_mode)
+            launch_kwargs.pop("proxy", None)
             browser_instance = await browser_type.launch(
-                **self._build_runtime_launch_kwargs(debug_mode=debug_mode)
+                **launch_kwargs,
+                **({"proxy": proxy} if proxy else {}),
             )
             created_browser_instance = browser_instance
         if browser_instance is None and normalized_runtime_mode != "persistent_profile":
@@ -2950,17 +2962,21 @@ class CollectionExecutorV2:
         from playwright.async_api import async_playwright
 
         account_id = session_account_id or str(account.get("account_id") or "").strip()
+        # 有头登录回退也必须走账号自己的代理（P2：登录与使用同 IP；
+        # 自有代理场景下静默直连等于放弃 IP 隔离）
+        proxy = resolve_account_proxy(account)
 
         async with async_playwright() as playwright:
             headed_browser = await playwright.chromium.launch(
                 **enforce_official_playwright_browser(
                     {"headless": False, "args": ["--start-maximized"]}
-                )
+                ),
+                **({"proxy": proxy} if proxy else {}),
             )
             try:
                 if account_id:
                     fp_options = await _get_fingerprint_context_options_async(
-                        platform, account_id, account
+                        platform, account_id, account, proxy=proxy
                     )
                     context_options = (
                         _build_playwright_context_options_from_fingerprint(fp_options)
@@ -5745,6 +5761,7 @@ class CollectionExecutorV2:
         max_parallel: int = 3,  # 最大并发数
         debug_mode: bool = False,
         runtime_manifests: Optional[Dict[str, Any]] = None,
+        proxy: Optional[Dict[str, Any]] = None,  # 账号级代理(Playwright 形态)
     ) -> CollectionResult:
         """
         [*] Phase 9.1: 并行执行多个数据域
@@ -5762,11 +5779,15 @@ class CollectionExecutorV2:
             browser: Playwright Browser对象
             max_parallel: 最大并发数(防止资源耗尽)
             debug_mode: 调试模式
+            proxy: 账号级代理(Playwright 形态)。调用方没传时从账号配置解析
+                   (自有代理优先, 绝不回退到遗留地区池)
 
         Returns:
             CollectionResult: 采集结果
         """
         start_time = datetime.now()
+        # 账号级代理：调用方没显式传就从账号配置解析（自有代理优先，绝不走遗留地区池）
+        proxy = proxy or resolve_account_proxy(account)
         session_owner_id, shop_account_id, use_account_session_fingerprint = (
             _resolve_session_scope(account_id, account)
         )
@@ -5860,7 +5881,7 @@ class CollectionExecutorV2:
                 launch_kwargs=self._build_runtime_launch_kwargs(
                     debug_mode=debug_mode,
                 ),
-                proxy=None,
+                proxy=proxy,
             )
             storage_state = None
             reused_session = runtime_bundle.reused_session
@@ -6006,7 +6027,7 @@ class CollectionExecutorV2:
         if use_account_session_fingerprint and session_owner_id:
             try:
                 fp_opts = await _get_fingerprint_context_options_async(
-                    platform, session_owner_id, account, proxy=None
+                    platform, session_owner_id, account, proxy=proxy
                 )
                 domain_context_options = (
                     _build_playwright_context_options_from_fingerprint(fp_opts)
