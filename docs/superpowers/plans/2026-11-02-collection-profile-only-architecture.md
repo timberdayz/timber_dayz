@@ -132,15 +132,25 @@ git commit -m "feat(account): 从 extra_config 透出账号级代理配置"
 
 **Files:**
 - Modify: `backend/domains/collection/routers/collection_tasks.py:1725-1739`、`:1920-1934`（传 proxy）
-- Create: `backend/services/account_proxy_config.py`（共享代理解析 helper）
+- Modify: `backend/services/account_proxy_config.py`（**Task 1 已落地**，本 Task 扩展：凭据形态、无 scheme 归一）
 - Modify: `backend/services/shop_account_loader_service.py:58-74`（`compat_account` 补 proxy 键 —— **主运行时路径**）
-- Modify: `backend/services/account_loader_service.py`（改用共享 helper）
-- Modify: `modules/apps/collection_center/executor_v2.py:1839`（proxy 参数）、`:426-441`（allowed 白名单）、`:1976`（browser launch）、`:6008-6013`（并行路径硬编码 None）
+- Modify: `backend/services/account_loader_service.py`（修 Minor 1 的错误注释）
+- Modify: `modules/apps/collection_center/executor_v2.py:1839`（proxy 参数）、`:426-441`（allowed 白名单）、`:1976`（browser launch）、`:5863`、`:6008-6013`（硬编码 None）
 - Modify: `modules/apps/collection_center/runtime_session.py:422-437`（allowed 白名单）、`:758-762`（`launch_persistent_context` 传 proxy）、`:819`
 - Modify: `modules/utils/sessions/device_fingerprint.py:445-446`
 - Test: `backend/tests/test_account_proxy_config.py`（追加）
 
-**复用点（不要从零写）**：`modules/utils/proxy_config_manager.py` 已有 `get_proxy_for_account`（`:287`）、`get_account_proxy_region`（`:310`）、`get_playwright_proxy_config`（`:486`）；代理池配置在 `config/proxy_config.py`。
+**复用点（不要从零写）**：`backend/services/account_proxy_config.py` 已有 `extract_proxy_config` / `split_proxy_credentials` / `mask_proxy_server`（Task 1 落地）。
+
+**Task 2 必须满足的 5 条硬约束**（来自 Task 1 代码质量复审）：
+
+| # | 约束 | 原因 |
+|---|---|---|
+| C1 | **账号自有 `proxy_server` 必须优先于遗留地区池**；账号有自有代理时**绝不**走 `proxy_config_manager.get_playwright_proxy_config` | 遗留链路全程不读账号自有的 `proxy_server`，只按 account_id + 地区池选 → 不改会「一账号两个 IP」，直接违反 P1/P2 |
+| C2 | `proxy_config_manager` 的 `fallback_to_direct: True`（`config/proxy_config.py:221`）在**自有代理场景下必须禁用** | 代理失败静默回退直连 → 账号从宿主 IP 出现，IP 隔离形同虚设 |
+| C3 | 代理串**必须带 scheme**（本仓约定见 `proxy_config_manager.py:61`）；无 scheme 的输入要归一（补 `http://`）或显式拒绝 | Playwright python 绑定不校验 `proxy.server`，畸形值只会在导航期报 `ERR_PROXY_CONNECTION_FAILED`，看不出是配置写错 |
+| C4 | 凭据形态要定契约：**支持**「内嵌在 URL 的 user:pass」与「独立的 `proxy.username` / `proxy.password`」两种 | `extract_proxy_config` 目前静默丢弃独立的 username/password，形态未定会导致配置写不进去 |
+| C5 | `mask_proxy_server` 要有生产调用方（规范 §8 的 `session_proxy` 脱敏诊断字段） | 否则是死代码；诊断字段本身在 Task 8 落地，本 Task 至少接线 |
 
 - [ ] **Step 1: 写失败测试**
 
@@ -181,22 +191,30 @@ def test_proxy_reaches_context_options():
     proxy=resolve_account_proxy(account),
 ```
 
-新增 helper（放在 `backend/services/account_loader_service.py` 或就近的 service）：
+新增 helper（**放在 `backend/services/account_proxy_config.py`**，与解析规则同源）：
 
 ```python
 def resolve_account_proxy(account: dict) -> dict | None:
-    """P1/P3：账号级代理。server 为空则不启用。"""
+    """P1/P3/C1/C3/C4：账号级代理。
+
+    账号自有 proxy_server 优先；绝不静默回退到遗留地区池。
+    返回 Playwright 形态：{"server": ..., "username": ..., "password": ...}
+    """
     server = str((account or {}).get("proxy_server") or "").strip()
     if not server or not (account or {}).get("proxy_enabled"):
         return None
-    proxy = {"server": server}
-    region = str((account or {}).get("proxy_region") or "").strip()
-    if region:
-        proxy["region"] = region
+    proxy = split_proxy_credentials(server)
+    # 独立的 username/password 形态（覆盖 split 只认 URL 内嵌凭据的缺口）
+    username = str((account or {}).get("proxy_username") or "").strip()
+    password = str((account or {}).get("proxy_password") or "").strip()
+    if username:
+        proxy["username"] = username
+    if password:
+        proxy["password"] = password
     return proxy
 ```
 
-> 若 `proxy_config_manager.get_playwright_proxy_config` 能按 region 解析出可用代理，优先用它（它已有池化与健康检查逻辑）。
+> **不要**在这里调用 `proxy_config_manager.get_playwright_proxy_config` —— 那是遗留地区池链路，会给同一个账号第二个 IP（C1）。
 
 - [ ] **Step 5b: 补主运行时路径的 proxy 透出（Task 1 实施中发现的缺口）**
 
@@ -208,7 +226,27 @@ Task 1 只改了 `AccountLoaderService`，但**主运行时路径优先走 `shop
 
 因此必须在 `shop_account_loader_service` 的 `compat_account` 里同样平铺出 `proxy_enabled` / `proxy_server` / `proxy_region`（数据同样来自 `core.shop_accounts.extra_config["proxy"]`），否则 Task 2 接浏览器时拿到的账号 dict 里没有代理信息。
 
-**实现建议**：把解析逻辑抽成一个共享 helper（例如 `backend/services/account_proxy_config.py` 的 `extract_proxy_config(extra_config) -> dict`），`AccountLoaderService` 与 `ShopAccountLoaderService` 都调用它，避免两处重复解析规则。
+**实现建议**：把解析逻辑抽成一个共享 helper（`backend/services/account_proxy_config.py` 的 `extract_proxy_config(extra_config) -> dict`），`AccountLoaderService` 与 `ShopAccountLoaderService` 都调用它，避免两处重复解析规则。
+
+> Task 1 已落地 `account_proxy_config.py`，本 Step 直接 import 即可。**导入后模块 docstring 里「单一定义源」的说法才成立**（Task 1 复审 Minor 2）。
+
+- [ ] **Step 5c: 扩展 `account_proxy_config.py`（C3 / C4）**
+
+1. **无 scheme 归一**（C3）：`split_proxy_credentials("user:pass@h:8080")` 目前产出 `server="h:8080"`（无 scheme）。本仓约定必带 scheme（`proxy_config_manager.py:61`）。请归一为 `http://h:8080`，并补一条用例钉死。
+2. **独立凭据形态**（C4）：`extract_proxy_config` 目前只回 3 个键，`proxy: {username, password}` 会被静默丢弃。请一并透出 `proxy_username` / `proxy_password`（来源仍是 `extra_config["proxy"]`），并让 `resolve_account_proxy` 优先用独立字段、无独立字段时回退 URL 内嵌凭据。
+3. `mask_proxy_server` 要能把独立形态的凭据也抹掉。
+
+- [ ] **Step 5d: 修 Task 1 复审的 Minor**
+
+- **Minor 1**：`backend/services/account_loader_service.py:64-65` 的注释「getattr 兜底：测试替身（SimpleNamespace）可能没有 extra_config 属性」**事实错误** —— `_extract_legacy_shop_extra` 在更早位置就访问 `shop.extra_config`，属性缺失会先抛 `AttributeError`，`getattr` 实际不可达。请改成「与 legacy 路径保持一致的兜底」之类的准确表述，或直接写 `shop_account.extra_config`。
+- **Minor 4**：补一条 loader 级回归断言 —— `enabled="false"` 时 `account["proxy_required"] is False`（I1 的生产后果防线，成本极低）。
+- **Minor 6**：`account_proxy_config` 模块 docstring 承诺「任何异常输入都安全兜底」—— 这只对 `extract_proxy_config` 成立，**loader 层不成立**（legacy 那步先抛）。请把承诺范围写准。
+
+- [ ] **Step 5e: 禁用自有代理场景下的直连回退（C2）**
+
+`config/proxy_config.py:221` 的 `fallback_to_direct: True` 属于遗留地区池链路。**自有代理场景下不能让代理失败静默回退直连**。
+
+要求：账号配置了自有代理时，代理不可用必须**显式失败**（抛错 / 任务失败 + 明确错误信息），不得直连。本 Task 只需保证**新链路**（`resolve_account_proxy` → 浏览器）不走那条静默回退；遗留 `proxy_config_manager` 链路本次**不动**（它不在采集主链路上），但要在代码注释里写明这一边界。
 
 - [ ] **Step 6: 浏览器级全局代理（避免 per-context 另起进程）**
 
