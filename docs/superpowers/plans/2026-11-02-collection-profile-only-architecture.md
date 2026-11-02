@@ -301,10 +301,60 @@ git commit -m "feat(collection): 打通账号级代理链路，代理进入浏�
 
 **Files:**
 - Create: `backend/services/main_account_session_lock.py`
-- Modify: `modules/apps/collection_center/executor_v2.py:854`、`:5843`
+- Modify: `backend/services/main_account_session_coordinator.py`（保留兼容外壳，内部改走跨进程锁）
+- Modify: `modules/apps/collection_center/executor_v2.py:844-873`（顺序路径锁边界）、`:5838-5867`、`:5998-5999`（并行路径）
+- Modify: `backend/utils/config.py`（锁后端开关）
 - Test: `backend/tests/test_main_account_session_lock.py`（新建）
+- Test 改写: `backend/tests/test_collection_executor_reused_session_scope.py:241-245`、`:837`、`backend/tests/test_collection_executor_session_alignment.py:999-1001`、`backend/tests/test_main_account_session_coordinator.py`
 
-**问题**：`MainAccountSessionCoordinator` 是**进程内** `asyncio.Lock`（模块级单例 `main_account_session_coordinator.py:60`），生产 celery `--concurrency=4`（prefork 4 子进程）下跨进程无效 → 同一 profile 可能被两个浏览器进程同时打开。
+### Task 3 必须先纠正的 3 个前提（原计划有误，已只读核实）
+
+| # | 原计划说法 | 核实结论 | 影响 |
+|---|---|---|---|
+| F1 | 「生产 celery `--concurrency=4`（prefork 4 子进程）下跨进程无效」 | **归因错误**。采集根本不在 celery 里跑（`backend/tasks/` 无 collection 任务）。真实多进程来源是 `Dockerfile.backend:89-91` 的 `gunicorn backend.main:app --workers 4`，且 `docker-compose.prod.yml:89 backend-api`（`DEPLOYMENT_ROLE: api`）与 `:181 backend-collector`（`DEPLOYMENT_ROLE: collector`）是**两个独立容器** → 最多 8 个 OS 进程 | 按错误归因设计会修错地方。锁必须按「gunicorn 4 worker × 2 容器」建模 |
+| F2 | 未提及 API 触发路径 | `collection_tasks.py:748` 和 `:996` → `asyncio.create_task(...)` → **API 触发的采集跑在任意一个 gunicorn worker 里**；该路径**不受** `CollectionLeaderLock` 保护（`should_start_collection_queue_runner("api")` 返回 False，`backend/main.py:143-144`） | **这正是最容易并发打开同一 profile 的来源**，锁必须覆盖它 |
+| F3 | 锁只改 `:854` / `:5843` 两处 | 顺序路径的锁边界**与 profile 生命周期不对齐**：`executor_v2.py:2110-2115` 的 `_run_with_main_account_session_lock(operation=_coordinated_login)` 在 `_coordinated_login` 返回时就释放锁，而 persistent profile context 一直活到 `:2648-2658` 的 `_cleanup_browser_runtime` 才关闭 | 换成跨进程锁后**仍然会双开**。锁的持有范围必须改为「profile 打开 → profile 关闭」 |
+
+> 缓解事实：Chromium 的 user-data-dir 自带 `SingletonLock`，同机双开会**报错**而不是静默双开。但代价是第二个任务直接失败并抛 Chromium 原始错误，用户看到的是莫名报错而不是「排队等待」。跨进程锁的价值正是把它变成排队。
+
+### 锁后端选型（已只读核实，非拍脑袋）
+
+**选 Redis（`SET NX` + token 校验释放），不走 Postgres advisory lock。**
+
+- Redis 在本项目是**强制基础设施**：`backend/utils/config.py:254-258` 生产环境 `REDIS_ENABLED=false` 直接 `RuntimeError`；`redis>=5.0.0` 已在 `requirements.txt:24` / `backend/requirements.txt:25`；异步客户端 `backend/utils/redis_client.py:17,50-75`（`redis.asyncio` + `socket_timeout=5`）已在用；验证码等待路径 `collection_tasks.py:1440-1462` 已经依赖 `app.state.redis`。
+- TTL 是硬需求（进程被 kill 必须能自动解锁）→ Redis 原生支持；PG advisory lock 是 session 级、无 TTL。
+- 需要 `is_locked` / `waiter_count` 诊断接口 → Redis 可查；PG advisory lock 只能「试拿」，查不到状态。
+- `REDIS_URL` 与 `CELERY_BROKER_URL` 同实例同 db=0（`docker-compose.prod.yml:363-366`）→ Redis 挂了采集本来就派发不出来，「Redis 不可用」与「采集不可用」是同一故障，fail-open 无意义。
+- PG advisory lock 另有 4 个坑：无碰撞哈希（`collection_leader_lock.py:18` 的 crc32 只有 32 位，账号规模上去会碰撞）、session 级锁要绑长连接（采集侧拿不到 `get_async_db()`，得用 `AsyncSessionLocal()` 直开）、无 TTL 需自建租约、查不到状态需自建状态表。
+
+### Task 3 必须满足的硬约束
+
+| # | 约束 | 原因 |
+|---|---|---|
+| L1 | **锁粒度用 `main_account_id`**（不是 `shop_account_id`） | `core.shop_accounts.main_account_id` 是 FK（`platform.py:182-187`），1 主账号 → N 店铺账号；按店铺锁会漏掉「同一主账号下多店铺并行打开同一 profile」 |
+| L2 | **释放必须 token 校验 + Lua CAS** | 现有 `main_account_session_coordinator.py:46-47` 的 `if state.lock.locked(): release()` 是「检查与释放非原子」；照搬到分布式锁会「误删他人锁」 |
+| L3 | **Key 必须白名单 + 截断 + 64 位哈希**，禁止 `crc32` | `main_account_id` 实测含中文/空格/全角（如 `虾皮巴西（东朗照明主体）`、`shopee KR`）；crc32 32 位碰撞会导致「两个不同主账号互相阻塞」 |
+| L4 | **TTL 必须与续期解耦**：实现续期（heartbeat，每 TTL/3 刷新 EXPIRE） | `executor_v2.py:755-756` 的 `DEFAULT_TASK_TIMEOUT=1800` **从未被强制**（全文件无 `wait_for`/`asyncio.timeout`），采集不是 celery 任务（无 `task_time_limit`）→ 采集可跑 > 30 min，单次 `EX 1800` 必然提前过期 → 锁提前失效 → 双开 |
+| L5 | **不可用时分级**：生产 Redis 不可用 → **fail-closed**（任务失败 + 明确错误「账号会话锁服务不可用」）；开发/测试 → **fail-open 到进程内 `asyncio.Lock`** | 双开 profile 会造成**静默的会话互相覆盖**（会话是「无条件覆盖写入」），数据损坏比拒绝采集危险得多。开发环境降级与 `config.py:260-272`「生产强制 Redis、开发降级内存」同构 |
+| L6 | **必须保留既有兼容契约** | `acquire(platform, main_account_id)` 位置参数签名、`@asynccontextmanager` 且 **yield None**（不能改成 yield token）、`waiter_count` / `is_locked` 必须继续存在、`CollectionExecutorV2(main_account_session_coordinator=...)` 注入点（`executor_v2.py:760`）必须继续可用 |
+| L7 | **`waiter_count` 在分布式下不得退化为恒 0** | 若实现成「key 存在 → is_locked=True, waiter_count=0」，则 `executor_v2.py:852-863` 的「等待主账号会话」状态推送**永远不触发** → 前端可观测性退化。需用独立 ZSET/Hash 记录等待者 |
+| L8 | **单元测试一律用假后端，绝不连真实 Redis/PG** | `backend/tests/conftest.py:26-69` 记录过「测试写生产数据」的真实事故。参照 `backend/tests/test_collection_leader_lock.py:44` 的 monkeypatch 模式 + `pg_engine` fixture 的 `ImportError → pytest.skip` + `integration` marker 双开关 |
+
+### 实施前必须确认的两个外部事实（无法从代码确定）
+
+| # | 待确认 | 影响 | 建议动作 |
+|---|---|---|---|
+| E1 | 生产 Redis 的 `maxmemory-policy` | 若为 `volatile-lru` / `allkeys-lru`，**带 TTL 的锁 key 会被 LRU 淘汰** → 锁凭空消失 → 双开（`REDIS_URL` 与 Celery broker 同 db=0，`docker-compose.prod.yml:363-366`） | 锁改用**独立 db index**（如 db 1），或主 key 不带 TTL + TTL 放独立字段 |
+| E2 | 生产实际生效的 compose 组合与 Redis 认证形态 | `docker-compose.collection.yml:112` 只有 `REDIS_URL: redis://${REDIS_HOST}:${REDIS_PORT}/0` —— **无密码、无内建 redis 服务**，与其他 compose 的 `${REDIS_PASSWORD}` 拼装不一致。若生产用这套栈，新锁会因认证失败**永远拿不到锁** → 全部采集被 fail-closed 拒绝 | 实施时向运维确认；代码侧必须让「认证失败」与「锁冲突」报出**不同**错误 |
+
+### 锁边界设计（修 F3）
+
+| 路径 | 现状 | 目标 |
+|---|---|---|
+| 顺序路径 `execute()` | 锁覆盖「打开 profile + 登录 + 验证码等待」，**不覆盖** profile 的采集期使用（`:2115` 释放 → `:2648` 才关闭） | 锁持有范围改为**「打开 profile → 关闭 profile」**，即与 `_cleanup_browser_runtime` 对齐 |
+| 并行路径 `execute_parallel_domains()` | 锁覆盖「打开 profile + 登录 + 验证码 + snapshot」，`:6003` 已关闭 context → **边界已对齐** | 保持；扇出的 `new_context(storage_state=...)` 不碰 profile 目录，不受锁约束 |
+
+> 锁边界扩大后，`waiter_count` / `is_locked` 的可观测语义会变（等锁时间变长），需在诊断文案上体现。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -312,12 +362,12 @@ git commit -m "feat(collection): 打通账号级代理链路，代理进入浏�
 import pytest
 
 
-def test_lock_is_acquired_across_independent_coordinator_instances():
-    """两个独立实例（模拟两个 celery 子进程）必须互斥。"""
+def test_lock_is_acquired_across_independent_lock_instances():
+    """两个独立实例（模拟两个 gunicorn worker）必须互斥。"""
     from backend.services.main_account_session_lock import MainAccountSessionLock
 
-    lock_a = MainAccountSessionLock()
-    lock_b = MainAccountSessionLock()
+    lock_a = MainAccountSessionLock(backend=FakeLockBackend())
+    lock_b = MainAccountSessionLock(backend=FakeLockBackend())
 
     async def scenario():
         async with lock_a.acquire("shopee", "shopee KR"):
@@ -329,7 +379,7 @@ def test_lock_is_acquired_across_independent_coordinator_instances():
     asyncio.run(scenario())
 ```
 
-> 实现若用 Redis，本测试需 Redis 可用；**同时提供一个内存实现作为测试替身**，测试用注入的后端。
+> **两个实例必须共享同一个假后端**（模拟同一个 Redis），否则测的是两个独立内存字典、必然不互斥 —— 这是「假绿」的典型来源。假后端要提供 `set_nx(key, token, ttl)` / `get(key)` / `delete_if_token(key, token)` / `add_waiter` / `remove_waiter`。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -341,10 +391,26 @@ def test_lock_is_acquired_across_independent_coordinator_instances():
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
+import re
+import socket
 import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
+
+_SAFE = re.compile(r"[^a-z0-9_-]+")
+
+
+def _sanitize(value: str, *, limit: int = 40) -> str:
+    """可读前缀：白名单化 + 截断（仅用于排障，不参与唯一性判定）。"""
+    return _SAFE.sub("_", str(value or "").strip().lower())[:limit]
+
+
+def _digest(platform: str, main_account_id: str) -> str:
+    """64 位摘要：避免 crc32 的 32 位碰撞。"""
+    raw = f"{str(platform or '').strip().lower()}|{str(main_account_id or '').strip()}"
+    return hashlib.blake2b(raw.encode("utf-8"), digest_size=8).hexdigest()
 
 
 class MainAccountSessionLock:
@@ -354,53 +420,55 @@ class MainAccountSessionLock:
     因此锁必须是跨进程的（Redis SET NX），进程内 asyncio.Lock 不够。
     """
 
-    def __init__(self, redis_client=None, *, key_prefix: str = "xihong:account_session_lock", ttl_seconds: int = 1800):
-        self._redis = redis_client
+    def __init__(self, backend=None, *, key_prefix: str = "xihong:acct_lock", ttl_seconds: int = 300):
+        self._backend = backend
         self._key_prefix = key_prefix
         self._ttl_seconds = ttl_seconds
         self._local: dict[str, asyncio.Lock] = {}
 
     def _key(self, platform: str, main_account_id: str) -> str:
-        return f"{self._key_prefix}:{str(platform or '').strip().lower()}:{str(main_account_id or '').strip()}"
-
-    @asynccontextmanager
-    async def acquire(self, platform: str, main_account_id: str, *, timeout: float = 300.0) -> AsyncIterator[None]:
-        key = self._key(platform, main_account_id)
-        token = f"{os.getpid()}-{time.time()}"
-        deadline = time.time() + max(0.0, timeout)
-        acquired = False
-        while time.time() < deadline:
-            if self._redis is None:
-                acquired = True
-                break
-            acquired = bool(self._redis.set(key, token, nx=True, ex=self._ttl_seconds))
-            if acquired:
-                break
-            await asyncio.sleep(1.0)
-        if not acquired:
-            raise TimeoutError(f"account session lock timeout: {platform}/{main_account_id}")
-        try:
-            yield
-        finally:
-            if self._redis is not None:
-                try:
-                    self._redis.delete(key)
-                except Exception:
-                    pass
+        return (
+            f"{self._key_prefix}:{_sanitize(platform)}:"
+            f"{_sanitize(main_account_id)}:{_digest(platform, main_account_id)}"
+        )
 ```
 
-> 生产实现里释放应校验 token（Lua CAS）以免误删他人锁；实施时补上。
+> **TTL 不再是单一固定 1800**：并行路径典型 1~2 min、最坏 ~8 min → 300s 够；顺序路径若按 F3 扩到 profile 全生命周期，则必须**实现续期**（每 TTL/3 刷新 EXPIRE）而不是一次 `EX`。任何覆盖登录阶段的锁，TTL 必须 > 验证码等待上限 300s（`collection_tasks.py:70`）。
+>
+> **释放必须 Lua CAS**（L2），不能照搬 `delete(key)`：典型脚本 `if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end`。
+>
+> **holder 信息**要写进锁值（`{pid, task_id, hostname, acquired_at}`）便于排障并支持 `is_locked` 返回详情。
+>
+> **重入**（L2 配套）：`asyncio.Lock` 不可重入，同 key 同协程二次 acquire 会自死锁；跨进程版会变成「等一个永远不释放的分布式锁」，更隐蔽。新实现必须显式处理同 token 重入（放行或快速失败），且 `acquire` 必须有 `timeout` 兜底。
 
-- [ ] **Step 4: executor 接入**
+- [ ] **Step 4: 接入 executor（含锁边界修正）**
 
-`executor_v2.py:854` 与 `:5843` 改成使用新锁（保留 `MainAccountSessionCoordinator` 的 `waiter_count` / `is_locked` 诊断接口，内部改为读新锁）。
+- `executor_v2.py:844-873`（`_run_with_main_account_session_lock`）与 `:5838-5867`、`:5998-5999` 改成使用新锁。
+- 保留 `MainAccountSessionCoordinator` 的 `waiter_count` / `is_locked` 诊断接口，**内部改为读新锁**（`main_account_session_coordinator.py` 变成兼容外壳，L6）。
+- **锁边界按 F3 修正**：顺序路径的锁要覆盖到 profile 关闭（`:2648` `_cleanup_browser_runtime`），否则跨进程锁形同虚设。
+- 锁不可用时按 L5 分级：生产 fail-closed、开发 fail-open 到进程内 `asyncio.Lock`。
+- `waiter_count` 按 L7 用独立 ZSET/Hash 记录等待者，保证 `:852-863` 的状态推送仍工作。
 
-- [ ] **Step 5: 跑测试并提交**
+- [ ] **Step 5: 改写会被打破的既有测试**
+
+- `backend/tests/test_collection_executor_reused_session_scope.py:241-245` —— **源码字符串断言**硬编码了 `"main_account_session_coordinator.acquire("` 字面量 → 改造后必然失败，必须同步改写。
+- `backend/tests/test_collection_executor_reused_session_scope.py:837` —— 硬编码 `"_run_with_main_account_session_lock"`。
+- `backend/tests/test_collection_executor_session_alignment.py:999-1001` —— 把 `acquire` / `is_locked` / `waiter_count` 三个方法整体打桩 → 新接口若改签名要一起改。
+- `backend/tests/test_main_account_session_coordinator.py` —— 3 个用例直接实例化协调器并断言 `waiter_count` 的「等锁者计数」语义 → 新实现必须保住这个语义。
+
+- [ ] **Step 6: 跑测试并提交**
 
 ```powershell
-git add backend/services/main_account_session_lock.py modules/apps/collection_center/executor_v2.py backend/tests/test_main_account_session_lock.py
-git commit -m "feat(collection): 账号级会话锁改为跨进程实现"
+$env:PYTHONIOENCODING='utf-8'
+python -m pytest backend/tests/test_main_account_session_lock.py backend/tests/test_main_account_session_coordinator.py backend/tests/test_collection_executor_reused_session_scope.py backend/tests/test_collection_executor_session_alignment.py -v
 ```
+
+```powershell
+git add backend/services/main_account_session_lock.py backend/services/main_account_session_coordinator.py backend/utils/config.py modules/apps/collection_center/executor_v2.py backend/tests/test_main_account_session_lock.py backend/tests/test_main_account_session_coordinator.py backend/tests/test_collection_executor_reused_session_scope.py backend/tests/test_collection_executor_session_alignment.py
+git commit -m "feat(collection): 账号级会话锁改为跨进程实现并对齐 profile 生命周期"
+```
+
+> **顺序提示**：Task 3 必须**先于** Task 4 落地。Task 4 把顺序路径改成「恒走 profile」后，所有采集都会打开 profile 目录 → 争用面从「部分账号」变成「全部账号」→ 锁的吞吐与 TTL 压力显著上升。Task 4 落地后需重新评估等待超时与 TTL。
 
 ---
 
