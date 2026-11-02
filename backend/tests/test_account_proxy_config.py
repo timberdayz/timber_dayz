@@ -1,15 +1,23 @@
-"""P1 账号级代理配置透出契约。
+"""账号级代理配置解析契约。
 
-代理配置存在 ``core.shop_accounts.extra_config["proxy"]`` 里（本计划不加列、
-不写迁移），由 ``AccountLoaderService`` 透出成平铺键，供后续任务把它接到
-浏览器代理链路。
+代理配置存在 ``core.shop_accounts.extra_config["proxy"]``（不加列、不写迁移），
+解析规则集中在 ``backend/services/account_proxy_config.py``：
+AccountLoaderService 与 ShopAccountLoaderService 共用同一套规则，
+测试直接打在这套共享纯函数上。
 
-这里只锁"账号 dict 里能读到这三个键"这一层契约，不涉及浏览器注入。
+规范：docs/guides/COLLECTION_SESSION_LIFECYCLE.md P1~P4
 """
 
 from types import SimpleNamespace
 
+import pytest
+
 from backend.services.account_loader_service import AccountLoaderService
+from backend.services.account_proxy_config import (
+    extract_proxy_config,
+    mask_proxy_server,
+    split_proxy_credentials,
+)
 
 
 def _make_service() -> AccountLoaderService:
@@ -107,3 +115,61 @@ def test_account_loader_keeps_legacy_proxy_required_flag():
     assert enabled_account["proxy_required"] is True
     assert enabled_account["proxy_server"] == "http://10.0.0.9:8080"
     assert enabled_account["proxy_region"] == ""
+
+
+@pytest.mark.parametrize(
+    "extra_config, expected",
+    [
+        (None, (False, "", "")),
+        ({}, (False, "", "")),
+        ({"proxy": None}, (False, "", "")),
+        ({"proxy": "http://h:1"}, (False, "", "")),  # proxy 不是 dict
+        ({"proxy": ["a"]}, (False, "", "")),
+        ({"proxy": {"enabled": True, "server": None}}, (True, "", "")),
+        ({"proxy": {"enabled": True, "region": "   "}}, (True, "", "")),
+        ({"proxy": {"enabled": True, "server": " http://h:1 "}}, (True, "http://h:1", "")),
+        ({"proxy": {"enabled": "false", "server": "http://h:1"}}, (False, "http://h:1", "")),
+        ({"proxy": {"enabled": "true"}}, (True, "", "")),
+        ({"proxy": {"enabled": False, "server": "http://h:1"}}, (False, "http://h:1", "")),
+        ({"proxy": {"server": {"host": "h"}}}, (False, "", "")),  # 非标量 server
+        # extra_config 本身类型不对：本函数必须安全兜底、不抛异常
+        ("not-a-dict", (False, "", "")),
+        (["not-a-dict"], (False, "", "")),
+        # enabled 为数字
+        ({"proxy": {"enabled": 1, "server": "http://h:1"}}, (True, "http://h:1", "")),
+        ({"proxy": {"enabled": 0}}, (False, "", "")),
+        # 数字标量转字符串（端口号写成数字时）
+        ({"proxy": {"enabled": True, "server": 8080}}, (True, "8080", "")),
+    ],
+)
+def test_extract_proxy_config_boundaries(extra_config, expected):
+    """解析规则边界表：Task 2 会复用同一套解析，这里必须钉死。"""
+    result = extract_proxy_config(extra_config)
+    assert (
+        result["proxy_enabled"],
+        result["proxy_server"],
+        result["proxy_region"],
+    ) == expected
+
+
+def test_split_proxy_credentials_extracts_userinfo():
+    """带凭据的代理串必须拆成 Playwright 的 server/username/password。"""
+    assert split_proxy_credentials("http://user:pass@h:8080") == {
+        "server": "http://h:8080",
+        "username": "user",
+        "password": "pass",
+    }
+    assert split_proxy_credentials("http://h:8080") == {"server": "http://h:8080"}
+    assert split_proxy_credentials("") == {}
+    # 无 scheme（运维漏写 http://）也要拆干净
+    assert split_proxy_credentials("user:pass@h:8080") == {
+        "server": "h:8080",
+        "username": "user",
+        "password": "pass",
+    }
+
+
+def test_mask_proxy_server_drops_credentials():
+    """诊断字段用：凭据必须被抹掉（规范 §8 session_proxy 脱敏）。"""
+    assert mask_proxy_server("http://user:pass@h:8080") == "http://h:8080"
+    assert "pass" not in mask_proxy_server("http://user:pass@h:8080")

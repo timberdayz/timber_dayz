@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from backend.services.account_proxy_config import extract_proxy_config
 from backend.services.encryption_service import get_encryption_service
 from modules.core.db import MainAccount, ShopAccount, ShopAccountCapability
 from modules.core.logger import get_logger
@@ -39,36 +40,29 @@ class AccountLoaderService:
             "login_flags": data.get("login_flags", {}),
         }
 
-    @staticmethod
-    def _extract_proxy_config(shop: ShopAccount) -> Dict:
-        """账号级代理配置，存在 core.shop_accounts.extra_config["proxy"]。
-
-        不加列、不写迁移：代理配置走 extra_config jsonb。
-        extra_config 为 None、proxy 子字典不存在、字段缺失或类型不对时
-        一律安全兜底，不抛异常。
-        """
-        data = shop.extra_config or {}
-        raw = data.get("proxy") or {}
-        if not isinstance(raw, dict):
-            raw = {}
-        return {
-            "proxy_enabled": bool(raw.get("enabled")),
-            "proxy_server": str(raw.get("server") or "").strip(),
-            "proxy_region": str(raw.get("region") or "").strip(),
-        }
-
     def _build_account_dict(
         self,
         main_account: MainAccount,
         shop_account: ShopAccount,
         capabilities: Dict[str, bool],
     ) -> Optional[Dict]:
+        """组装运行时账号 dict。
+
+        代理相关键来自 ``core.shop_accounts.extra_config["proxy"]``，解析规则见
+        ``backend/services/account_proxy_config.py``（AccountLoaderService 与
+        ShopAccountLoaderService 共用的单一定义源）。
+
+        其中 ``proxy_region`` 是**自由地区标识**（例如 ``"sg"``），与遗留
+        ``AccountConfig.proxy_region`` 用的"地区池 key"词汇表
+        （``config/proxy_config.py`` 的 ``"china"`` / ``"singapore"``）**不是同一套**。
+        """
         password = self._decrypt_password(main_account.password_encrypted)
         if password is None:
             return None
 
         legacy = self._extract_legacy_shop_extra(shop_account)
-        proxy = self._extract_proxy_config(shop_account)
+        # getattr 兜底：测试替身（SimpleNamespace）可能没有 extra_config 属性
+        proxy = extract_proxy_config(getattr(shop_account, "extra_config", None))
         return {
             "account_id": shop_account.shop_account_id,
             "main_account_id": main_account.main_account_id,
@@ -86,6 +80,9 @@ class AccountLoaderService:
             "shop_id": shop_account.platform_shop_id or "",
             "parent_account": main_account.main_account_id,
             "enabled": shop_account.enabled,
+            # proxy_required：账号需要代理（历史 legacy_proxy_required 标记 或 extra_config.proxy.enabled）。
+            # 注意：遗留链路 modules/utils/proxy_config_manager.py 也读这个键去选"地区池"代理，
+            # 账号自有 proxy_server 必须在注入浏览器时优先于地区池，否则一账号会出两个 IP。
             "proxy_required": bool(legacy["proxy_required"] or proxy["proxy_enabled"]),
             "proxy_enabled": proxy["proxy_enabled"],
             "proxy_server": proxy["proxy_server"],
