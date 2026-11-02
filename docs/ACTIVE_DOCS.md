@@ -49,6 +49,7 @@ Do not use full-repository search as the first step when one of these files cove
 
 ## Collection
 
+- `docs/guides/COLLECTION_SESSION_LIFECYCLE.md`: normative session lifecycle and save semantics (覆盖写入、写入门槛、失败不写)
 - `docs/guides/COLLECTION_AUTHORING_RULES.md`: active collection authoring workflow
 - `docs/guides/COLLECTION_RUNTIME_RESTORE_RULES.md`: runtime session restore and page-ready rules for formal collection
 - `docs/guides/PWCLI_COMMAND_REFERENCE.md`: active `pwcli` command reference
