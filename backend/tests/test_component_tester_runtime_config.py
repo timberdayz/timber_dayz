@@ -1,8 +1,13 @@
-from tools.test_component import ComponentTester
+from tools.test_component import (
+    ComponentTestResult,
+    ComponentTester,
+    TestStatus,
+)
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import json
+import tempfile
 
 import pytest
 
@@ -362,46 +367,78 @@ async def test_component_tester_persists_session_after_login_success(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_component_tester_recreates_context_with_main_account_session_scope(monkeypatch):
+async def test_component_tester_rebuild_uses_main_account_profile_scope_without_session_file(monkeypatch):
+    """重开走**主账号的 profile 目录**(profile 单一载体), 不再读会话文件。
+
+    旧实现是「读会话文件 -> 重建 context」, 与采集侧已脱节; 现在改成
+    「在同一个 profile 目录上重开持久 context」。
+    """
     tester = ComponentTester(platform="shopee", account_id="shop-1")
 
-    old_context = AsyncMock()
-    new_context = AsyncMock()
-    new_page = AsyncMock()
-    new_context.new_page = AsyncMock(return_value=new_page)
-    browser = AsyncMock()
-    browser.new_context = AsyncMock(return_value=new_context)
+    profile_dir = Path(tempfile.gettempdir()) / "t65-profile-scope" / "main-1"
+    opened: list = []
+    loaded: list = []
 
-    loaded = {}
+    async def _fake_open_persistent_runtime_bundle(**kwargs):
+        opened.append(kwargs)
+        return SimpleNamespace(context=AsyncMock(), page=AsyncMock())
 
     async def _fake_load(*, platform, session_owner_id, account, max_age_days=30):
-        loaded["platform"] = platform
-        loaded["account_id"] = session_owner_id
-        loaded["account_info"] = account
-        loaded["max_age_days"] = max_age_days
+        loaded.append((platform, session_owner_id))
         return {"storage_state": {"cookies": ["from-main"], "origins": []}}
 
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.open_persistent_runtime_bundle",
+        _fake_open_persistent_runtime_bundle,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.prime_runtime_page_for_login_gate",
+        AsyncMock(),
+    )
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.load_or_bootstrap_runtime_storage_state",
         _fake_load,
     )
     monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager.get_persistent_profile_path",
+        lambda self, platform, account_id: profile_dir,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.python_component_adapter.create_adapter",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
         tester,
-        "_build_component_browser_context_options",
-        AsyncMock(return_value={"storage_state": {"cookies": ["from-main"], "origins": []}}),
+        "_run_login_with_verification_support",
+        AsyncMock(return_value=SimpleNamespace(success=True)),
     )
-    monkeypatch.setattr(tester, "_prime_page_for_login_gate", AsyncMock())
+    # 账号锁用假实现(避免按住进程内锁单例, 污染同会话其它用例)
+    monkeypatch.setattr(
+        tester,
+        "_open_profile_session_lock",
+        AsyncMock(return_value=None),
+    )
 
-    rebuilt_context, rebuilt_page = await tester._recreate_context_with_saved_session(
-        browser=browser,
-        old_context=old_context,
+    ok, _new_context, _new_page = await tester._run_headful_login_fallback(
+        browser_type=object(),
+        old_context=AsyncMock(),
         account_info={"account_id": "shop-1", "main_account_id": "main-1"},
+        login_class=object(),
+        component_name="shopee/login",
+        result=ComponentTestResult(
+            component_name="login",
+            platform="shopee",
+            status=TestStatus.PENDING,
+        ),
     )
 
-    assert rebuilt_context is new_context
-    assert rebuilt_page is new_page
-    assert loaded["platform"] == "shopee"
-    assert loaded["account_id"] == "main-1"
+    assert ok is True
+    assert opened, "回退必须在持久 profile 上重开 context"
+    for call in opened:
+        assert call["session_owner_id"] == "main-1"
+        assert call["profile_path_override"] == str(profile_dir)
+    # 会话文件不再参与这条链路
+    assert loaded == []
 
 
 class _FailureBodyLocator:
