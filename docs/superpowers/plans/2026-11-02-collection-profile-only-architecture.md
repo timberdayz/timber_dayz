@@ -771,6 +771,70 @@ profile 模式下需要人工过验证码时
 
 > 这条与 Task 6 的 `command_close` 优雅关闭（F6-4）是同一类问题：**必须正常关闭，profile 才记得住登录态**。
 
+### Task 4.5 实施细节（已逐处核实，勿再自行推断）
+
+**参数穿线链**（当前 `browser_type` 只到 `_open_runtime_bundle`，`profile_path` 根本没往外传）：
+
+```
+execute(browser_type=...)                         executor_v2.py:1954
+  └─ _open_runtime_bundle(...)                   :2157 / :2274   → runtime_bundle.profile_path
+       └─ _execute_shared_login_phase(...)       :2213            ← 此处新增 browser_type / profile_path / launch_kwargs
+            └─ _run_headful_login_fallback(...)  :1331            ← 此处新增 browser_type / profile_path / launch_kwargs
+       └─ _execute_with_python_components(...)   :2353            ← 此处新增 browser_type / profile_path / launch_kwargs
+            └─ _run_headful_login_fallback(...)  :3323            ← 此处新增同上
+```
+
+| 参数 | 来源 | 说明 |
+|---|---|---|
+| `browser_type` | `execute()` 的入参（`:1954`） | 生产入口 `collection_tasks.py:1694` 的 `async with async_playwright() as p:` 把 `p.chromium` 传进来，**全程存活**。Task 3 加的 `browser_type.launch`（`:2105`）用完即弃，但 `browser_type` 对象本身可复用 |
+| `profile_path` | `runtime_bundle.profile_path`（`runtime_session.py:808`） | 需在 `execute()` 第一段 try 里把 `runtime_bundle.profile_path` 存到**第二段 try 也能访问**的变量（如 `runtime_profile_path`） |
+| `launch_kwargs` | `self._build_runtime_launch_kwargs(debug_mode=debug_mode)` | 决定 headless/headed。回退的 headed 阶段用 `{"headless": False, "args": ["--start-maximized"]}`；回退后重开时用原 `launch_kwargs`（保持 headless 与主流程一致） |
+| `proxy` | **调用方已解析好的对象** | 见「要求 4」—— 绝不能从 account 重解析 |
+
+**headed 阶段建议直接复用 `open_persistent_runtime_bundle`**（而不是手写 `launch_persistent_context`）：
+
+```python
+headed_bundle = await runtime_session.open_persistent_runtime_bundle(
+    browser_type=browser_type,
+    platform=platform,
+    session_owner_id=session_account_id,
+    account=account,
+    launch_kwargs={"headless": False, "args": ["--start-maximized"]},
+    proxy=proxy,
+    profile_path_override=profile_path,
+)
+```
+
+这样自动满足 R8（`normalize_persistent_profile_context_options` 剥离 UA/locale/时区）、proxy 只传一次（`:766-770` 已处理「只传一次」语义）、`reused_session`/`profile_path` 诊断字段齐全。
+**注意**：`open_persistent_runtime_bundle` 会 `mkdir` profile 目录并用 `_profile_contains_state` 判 `reused_session` —— 这在 headed 阶段是期望行为。
+
+**重开阶段**：
+
+```python
+new_bundle = await runtime_session.open_persistent_runtime_bundle(
+    browser_type=browser_type,
+    platform=platform,
+    session_owner_id=session_account_id,
+    account=account,
+    launch_kwargs=original_launch_kwargs,   # 保持与主流程一致的 headless
+    proxy=proxy,
+    profile_path_override=profile_path,
+)
+return True, new_bundle.context, new_bundle.page, "success"
+```
+
+**必须保留的现有行为**：
+- `VerificationRequiredError` → `_wait_verification_and_continue` 的等待与截图逻辑（`:3172-3219`）
+- 超时返回 `("timeout")` 语义（调用点 `:1350` 依赖 `fallback_outcome == "timeout"`）
+- `fallback_result` 的 **3 元组 / 4 元组兼容**（`:1343-1349`、`:3335-3341`）
+- 账号锁必须**全程持有**（关闭旧 context → headed 登录 → 关闭 → 重开，全过程都在 Task 3 的锁内，因为 `execute()` 的 finally 在 `_cleanup_browser_runtime` 之后才释放锁）
+
+**要删的**：
+- `_recreate_runtime_page_with_saved_session`（`:3065-3116`）整体删除 —— 它的存在意义就是「读会话文件 → `browser.new_context` 注入」，与 profile 单一载体直接冲突。**连带消除 H3**（它调的 `_load_or_bootstrap_session_async` → `_bootstrap_session_from_profile_sync` 会二次开同一 profile 目录）
+- `_run_headful_login_fallback` 里的 `_save_session_async` 调用（`:3230`）与「读回会话文件」逻辑
+
+**注意**：`open_persistent_runtime_bundle` 的 `profile_path_override` 参数已存在（`runtime_session.py:741`），**不需要新增**。
+
 ---
 
 ## Task 5: 并行路径快照纯内存化（R5）
