@@ -316,6 +316,7 @@ def test_launch_inspector_recorder_subprocess_uses_prepared_account_info(monkeyp
     def _fake_prepare_account_info(account):
         return {
             "account_id": account.account_id,
+            "main_account_id": getattr(account, "main_account_id", "") or "",
             "platform": account.platform,
             "username": account.username,
             "password": "plain-password",
@@ -349,6 +350,7 @@ def test_launch_inspector_recorder_subprocess_uses_prepared_account_info(monkeyp
 
     account = SimpleNamespace(
         account_id="acc-1",
+        main_account_id="main-acc-1",
         platform="miaoshou",
         store_name="Miaoshou Test Store",
         username="user@example.com",
@@ -365,6 +367,46 @@ def test_launch_inspector_recorder_subprocess_uses_prepared_account_info(monkeyp
         captured["config"]["account_info"]["login_url"]
         == "https://erp.91miaoshou.com"
     )
+    # 录制器要用**主账号 ID** 开 profile（规则 B），所以 config 里必须带得上它。
+    assert captured["config"]["account_info"]["main_account_id"] == "main-acc-1"
+
+
+def test_component_test_service_prepare_account_info_carries_main_account_id(monkeypatch):
+    """``prepare_account_info`` 必须带上 ``main_account_id``。
+
+    录制器与组件测试器都靠这个键决定「按主账号 ID 开 profile」（规则 B）。
+    这个键一旦缺失，profile 路径会回退到店铺账号 ID，
+    于是「巡店登录 → 采集复用」这条链路就断了。
+    """
+    import backend.services.component_test_service as component_test_service
+
+    class _FakeEncryptionService:
+        def decrypt_password(self, _encrypted):
+            return "plain-password"
+
+    monkeypatch.setattr(
+        component_test_service,
+        "get_encryption_service",
+        lambda: _FakeEncryptionService(),
+    )
+
+    account = SimpleNamespace(
+        account_id="acc-1",
+        shop_account_id="acc-1",
+        main_account_id="main-acc-1",
+        platform="miaoshou",
+        username="user@example.com",
+        password_encrypted="encrypted-password",
+        login_url="https://erp.91miaoshou.com/login",
+        store_name="Miaoshou Test Store",
+        capabilities={},
+        enabled=True,
+    )
+
+    info = component_test_service.ComponentTestService.prepare_account_info(account)
+
+    assert info["main_account_id"] == "main-acc-1"
+    assert info["account_id"] == "acc-1"
 
 
 def test_component_recorder_router_uses_shop_account_loader_without_platform_account_fallback():

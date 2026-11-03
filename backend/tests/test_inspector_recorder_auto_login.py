@@ -269,3 +269,96 @@ async def test_miaoshou_login_reused_session_short_circuits():
 
     assert result.success is True
     assert result.message == "already logged in"
+
+
+class _FakePersistentContext:
+    async def add_init_script(self, _script: str) -> None:
+        return None
+
+
+class _FakeChromium:
+    def __init__(self, captured: dict):
+        self._captured = captured
+
+    async def launch_persistent_context(self, **kwargs):
+        self._captured.update(kwargs)
+        return _FakePersistentContext()
+
+
+class _FakePlaywright:
+    def __init__(self, captured: dict):
+        self.chromium = _FakeChromium(captured)
+
+
+def _patch_profile_and_fingerprint(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager.get_persistent_profile_path",
+        lambda self, platform, account_id: tmp_path / platform / account_id,
+    )
+    monkeypatch.setattr(
+        "modules.utils.sessions.device_fingerprint.DeviceFingerprintManager.get_or_create_fingerprint",
+        lambda self, platform, account_id, account_info: {
+            "viewport": {"width": 1280, "height": 720},
+            "user_agent": "UA",
+            "locale": "zh-CN",
+            "timezone": "Asia/Shanghai",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_inspector_recorder_profile_path_uses_main_account_id(monkeypatch, tmp_path):
+    """profile 路径必须按**主账号**维度（规则 B：profiles/<平台>/<主账号ID>/）。
+
+    ``account_info['account_id']`` 是**店铺账号** ID —— 用它会生产出
+    ``profiles/<平台>/<店铺账号ID>/``，而那正是 ``legacy_shop_artifact_cleanup``
+    认定的「店铺级遗留物」目录；采集侧按主账号 ID 开 profile，读不到它，
+    于是「巡店登录 → 采集复用」这条链路会断。
+    """
+    captured: dict = {}
+    _patch_profile_and_fingerprint(monkeypatch, tmp_path)
+
+    recorder = InspectorRecorder(
+        {
+            "platform": "miaoshou",
+            "component_type": "export",
+            "account_info": {
+                "account_id": "shop-acc-1",
+                "main_account_id": "main-acc-1",
+                "login_url": "https://erp.91miaoshou.com/login",
+            },
+        }
+    )
+
+    await recorder._create_context(_FakePlaywright(captured))
+
+    user_data_dir = str(captured["user_data_dir"]).replace("\\", "/")
+    assert user_data_dir.endswith("miaoshou/main-acc-1")
+    assert "shop-acc-1" not in user_data_dir
+
+
+@pytest.mark.asyncio
+async def test_inspector_recorder_profile_path_falls_back_to_shop_account_id(monkeypatch, tmp_path):
+    """``main_account_id`` 缺失时回退到店铺账号 ID，并留下告警。
+
+    回退是兜底，不是常态 —— 采集侧始终按主账号 ID 开 profile，
+    所以这里必须显式告警，避免「录的时候登录态存到了另一个目录」。
+    """
+    captured: dict = {}
+    _patch_profile_and_fingerprint(monkeypatch, tmp_path)
+
+    recorder = InspectorRecorder(
+        {
+            "platform": "miaoshou",
+            "component_type": "export",
+            "account_info": {
+                "account_id": "shop-acc-1",
+                "login_url": "https://erp.91miaoshou.com/login",
+            },
+        }
+    )
+
+    await recorder._create_context(_FakePlaywright(captured))
+
+    user_data_dir = str(captured["user_data_dir"]).replace("\\", "/")
+    assert user_data_dir.endswith("miaoshou/shop-acc-1")

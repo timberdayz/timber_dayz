@@ -44,7 +44,9 @@ def collect_legacy_shop_artifact_paths(
             continue
 
         candidates = [
-            root / "data" / "sessions" / platform / shop_account_id,
+            # 注意：``data/sessions/**`` **不在**候选里 —— 会话文件体系已整体废除，
+            # 新代码根本不读它，它不再是「会被误用的店铺级遗留物」，
+            # 留着只会让运维去删一批无害文件。
             root / "profiles" / platform / shop_account_id,
             root / "data" / "session_profiles" / platform / shop_account_id,
             fingerprint_manager.get_fingerprint_file(platform, shop_account_id),

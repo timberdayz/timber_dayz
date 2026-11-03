@@ -412,14 +412,35 @@ class InspectorRecorder:
                 
                 session_manager = SessionManager()
                 fingerprint_manager = DeviceFingerprintManager()
-                
+
                 # 获取 profile 路径
-                account_id = self.account_info.get('account_id', 'default')
-                profile_path = session_manager.get_persistent_profile_path(self.platform, account_id)
-                
+                #
+                # profile 按**主账号**维度（规则 B：profiles/<平台>/<主账号ID>/）。
+                # ``account_info['account_id']`` 是**店铺账号** ID —— 用它会生产出
+                # ``profiles/<平台>/<店铺账号ID>/`` 这种目录，而那正是
+                # ``legacy_shop_artifact_cleanup`` 认定的「店铺级遗留物」目录，
+                # 同时采集侧（按主账号 ID 开 profile）根本读不到它，
+                # 于是「巡店登录 → 采集复用」这条链路会断。
+                #
+                # 指纹也必须用同一个 key：采集执行器的
+                # ``runtime_session._get_fingerprint_context_options_async`` 用的就是
+                # ``session_owner_id``（= 主账号 ID）。profile 与指纹的 key 不一致，
+                # 会出现「同一个 profile 目录、两种设备指纹」，录出来的登录态未必能被采集复用。
+                shop_account_id = str(self.account_info.get('account_id') or '').strip()
+                main_account_id = str(self.account_info.get('main_account_id') or '').strip()
+                profile_owner_id = main_account_id or shop_account_id
+                if not main_account_id and shop_account_id:
+                    logger.warning(
+                        "account_info 缺少 main_account_id，profile 路径回退到店铺账号 ID: %s",
+                        shop_account_id,
+                    )
+                if not profile_owner_id:
+                    profile_owner_id = 'default'
+                profile_path = session_manager.get_persistent_profile_path(self.platform, profile_owner_id)
+
                 # 获取指纹配置
                 fingerprint = fingerprint_manager.get_or_create_fingerprint(
-                    self.platform, account_id, self.account_info
+                    self.platform, profile_owner_id, self.account_info
                 ) if self.use_fingerprint else {}
                 
                 # 构建上下文选项

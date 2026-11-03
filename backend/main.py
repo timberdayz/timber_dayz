@@ -292,7 +292,7 @@ async def lifespan(app: FastAPI):
             )
             if legacy_artifacts:
                 logger.warning(
-                    "[WARNING] 检测到 %s 个店铺级会话历史残留；当前运行不会使用它们，但建议清理",
+                    "[WARNING] 检测到 %s 个店铺级 profile 遗留；当前运行不会使用它们，但建议清理",
                     len(legacy_artifacts),
                 )
                 for artifact in legacy_artifacts[:10]:
@@ -304,7 +304,7 @@ async def lifespan(app: FastAPI):
                     )
         except Exception as legacy_artifact_error:
             logger.warning(
-                "[WARNING] 遗留店铺会话残留检查失败: %s",
+                "[WARNING] 遗留店铺级 profile 检查失败: %s",
                 legacy_artifact_error,
             )
 
