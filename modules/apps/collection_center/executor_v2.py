@@ -1299,6 +1299,9 @@ class CollectionExecutorV2:
         start_time: datetime,
         total_domains_count: int,
         proxy: Optional[Dict[str, Any]] = None,
+        browser_type: Any = None,
+        profile_path: Optional[str] = None,
+        launch_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Any, Any, Optional[CollectionResult]]:
         await self._update_status(task_id, 5, "正在登录...")
         await self._check_cancelled(task_id)
@@ -1339,6 +1342,9 @@ class CollectionExecutorV2:
                         session_account_id=session_account_id,
                         runtime_manifests=runtime_manifests,
                         proxy=proxy,
+                        browser_type=browser_type,
+                        profile_path=profile_path,
+                        launch_kwargs=launch_kwargs,
                     )
                     if len(fallback_result) == 4:
                         login_success, play_context, page, fallback_outcome = (
@@ -2149,11 +2155,17 @@ class CollectionExecutorV2:
                 main_account_id=session_owner_id,
             )
 
+        # Task 4.5：把 profile 目录与 launch 参数从 runtime bundle 往外传，
+        # 让「有头人工验证码回退」能落到**同一个 profile 目录**上（profile 单一载体）。
+        runtime_profile_path: Optional[str] = None
+        runtime_launch_kwargs = self._build_runtime_launch_kwargs(debug_mode=debug_mode)
+
         try:
             # 执行器统一建 context: 由执行器创建带指纹与可选会话的 context
             if context.current_component_index == 0:
 
                 async def _coordinated_login():
+                    nonlocal runtime_profile_path
                     runtime_bundle = await self._open_runtime_bundle(
                         session_runtime_mode=session_runtime_mode,
                         browser=browser_instance,
@@ -2162,10 +2174,11 @@ class CollectionExecutorV2:
                         session_owner_id=session_owner_id,
                         runtime_account=runtime_account,
                         storage_state=None,
-                        launch_kwargs=self._build_runtime_launch_kwargs(
-                            debug_mode=debug_mode,
-                        ),
+                        launch_kwargs=runtime_launch_kwargs,
                         proxy=proxy,
+                    )
+                    runtime_profile_path = getattr(
+                        runtime_bundle, "profile_path", None
                     )
                     params = _build_runtime_task_params(
                         task_id=task_id,
@@ -2228,6 +2241,9 @@ class CollectionExecutorV2:
                                 start_time=start_time,
                                 total_domains_count=total_domains_count,
                                 proxy=proxy,
+                                browser_type=browser_type,
+                                profile_path=runtime_profile_path,
+                                launch_kwargs=runtime_launch_kwargs,
                             )
                         )
                     except Exception:
@@ -2279,11 +2295,10 @@ class CollectionExecutorV2:
                     session_owner_id=session_owner_id,
                     runtime_account=runtime_account,
                     storage_state=None,
-                    launch_kwargs=self._build_runtime_launch_kwargs(
-                        debug_mode=debug_mode,
-                    ),
+                    launch_kwargs=runtime_launch_kwargs,
                     proxy=proxy,
                 )
+                runtime_profile_path = getattr(runtime_bundle, "profile_path", None)
                 params = _build_runtime_task_params(
                     task_id=task_id,
                     account=runtime_account,
@@ -2371,6 +2386,9 @@ class CollectionExecutorV2:
                     session_account_id=session_owner_id,
                     runtime_manifests=runtime_manifests,
                     proxy=proxy,
+                    browser_type=browser_type,
+                    profile_path=runtime_profile_path,
+                    launch_kwargs=runtime_launch_kwargs,
                 )
 
             # ===== 以下为旧的 YAML 组件执行流程(将被废弃) =====
@@ -3062,28 +3080,80 @@ class CollectionExecutorV2:
             account=account,
         )
 
-    async def _recreate_runtime_page_with_saved_session(
+    async def _perform_headful_login(
         self,
         *,
-        browser,
-        old_context,
+        task_id: str,
+        platform: str,
+        account: Dict[str, Any],
+        params: Dict[str, Any],
+        page: Any,
+        runtime_manifests: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, str]:
+        """在有头页面里跑登录组件（含人工验证码等待）。
+
+        返回 (login_success, outcome)：
+        - (True, "success") 登录成功
+        - (False, "failed") 登录组件返回失败
+        - (False, "timeout") 人工验证码等待超时（调用点依赖这个语义）
+        """
+        while True:
+            try:
+                if runtime_manifests is not None:
+                    login_manifest = runtime_manifests.get("login")
+                    login_result = await self._run_runtime_manifest_component(
+                        page=page,
+                        manifest=login_manifest,
+                        account=account,
+                        config=params,
+                    )
+                    login_success = bool(getattr(login_result, "success", False))
+                else:
+                    adapter = create_adapter(
+                        platform=platform,
+                        account=account,
+                        config=params,
+                    )
+                    login_success = await self._execute_python_component(
+                        page=page,
+                        adapter=adapter,
+                        component_type="login",
+                        params=params,
+                    )
+                if not login_success:
+                    return False, "failed"
+                return True, "success"
+            except VerificationRequiredError as e:
+                value = await self._wait_verification_and_continue(
+                    task_id,
+                    e.verification_type,
+                    e.screenshot_path,
+                    page,
+                    params,
+                    None,
+                    is_login=True,
+                )
+                if value is None:
+                    return False, "timeout"
+                apply_verification_result_to_params(
+                    params,
+                    verification_type=e.verification_type,
+                    value=value,
+                )
+                continue
+
+    async def _build_legacy_headful_context_options(
+        self,
+        *,
         platform: str,
         account: Dict[str, Any],
         account_id: str,
-    ):
-        storage_state = None
-        if account_id:
-            session_data = await _load_or_bootstrap_session_async(
-                platform,
-                account_id,
-                account,
-            )
-            if session_data and isinstance(session_data.get("storage_state"), dict):
-                storage_state = session_data["storage_state"]
-
+        proxy: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """legacy 回退路径的 context 选项（沿用指纹注入；R8 只约束 profile 模式）。"""
         if account_id:
             fp_options = await _get_fingerprint_context_options_async(
-                platform, account_id, account
+                platform, account_id, account, proxy=proxy
             )
             context_options = _build_playwright_context_options_from_fingerprint(
                 fp_options
@@ -3094,26 +3164,12 @@ class CollectionExecutorV2:
             )
 
             context_options = get_browser_context_args()
-
         context_options.setdefault("accept_downloads", True)
-        if storage_state:
-            context_options["storage_state"] = storage_state
         context_options.setdefault(
             "viewport", dict(runtime_session.STANDARD_HEADLESS_VIEWPORT)
         )
-        if "locale" not in context_options:
-            context_options["locale"] = "zh-CN"
-
-        await self._close_playwright_resource(
-            old_context,
-            label="old_runtime_context",
-        )
-
-        new_context = await browser.new_context(**context_options)
-        await runtime_session.apply_stealth_init_scripts(new_context)
-        new_page = await new_context.new_page()
-        await self._prime_runtime_page_for_login_gate(new_page, platform, account)
-        return new_context, new_page
+        context_options.setdefault("locale", "zh-CN")
+        return context_options
 
     async def _run_headful_login_fallback(
         self,
@@ -3128,9 +3184,10 @@ class CollectionExecutorV2:
         session_account_id: str,
         runtime_manifests: Optional[Dict[str, Any]] = None,
         proxy: Optional[Dict[str, Any]] = None,
+        browser_type: Any = None,
+        profile_path: Optional[str] = None,
+        launch_kwargs: Optional[Dict[str, Any]] = None,
     ):
-        from playwright.async_api import async_playwright
-
         account_id = session_account_id or str(account.get("account_id") or "").strip()
         # 有头登录回退必须用**调用方已解析好的**代理对象（可能带凭据）。
         # 这里绝不能从 account 重新解析：account 已被 strip_account_proxy_credentials
@@ -3138,6 +3195,139 @@ class CollectionExecutorV2:
         # 人工登录流程在最需要它的场景（风控要人工过验证码）走不通。
         # 该代理对象只流向 Playwright 的 launch(proxy=...)，不进入组件 config。
 
+        if browser_type is not None and profile_path:
+            return await self._run_profile_headful_login_fallback(
+                task_id=task_id,
+                platform=platform,
+                account=account,
+                params=params,
+                old_context=old_context,
+                session_account_id=session_account_id,
+                runtime_manifests=runtime_manifests,
+                proxy=proxy,
+                browser_type=browser_type,
+                profile_path=profile_path,
+                launch_kwargs=launch_kwargs,
+            )
+
+        # 没有持久化 profile 目标（Task 4 之前主路径可能是 storage_state 扇出）：
+        # 保留旧的 legacy 回退路径（独立有头浏览器 + 内存态转移）。
+        # Task 4 把主路径统一收敛到 profile 之后，这条分支会被删掉。
+        logger.debug(
+            "Headful login fallback uses legacy path (no persistent profile target): "
+            "browser_type_available=%s profile_path=%s session_account_id=%s",
+            browser_type is not None,
+            profile_path,
+            session_account_id,
+        )
+        return await self._run_legacy_headful_login_fallback(
+            task_id=task_id,
+            platform=platform,
+            account=account,
+            params=params,
+            browser=browser,
+            old_context=old_context,
+            session_platform=session_platform,
+            session_account_id=session_account_id,
+            runtime_manifests=runtime_manifests,
+            proxy=proxy,
+            account_id=account_id,
+        )
+
+    async def _run_profile_headful_login_fallback(
+        self,
+        *,
+        task_id: str,
+        platform: str,
+        account: Dict[str, Any],
+        params: Dict[str, Any],
+        old_context,
+        session_account_id: str,
+        runtime_manifests: Optional[Dict[str, Any]],
+        proxy: Optional[Dict[str, Any]],
+        browser_type: Any,
+        profile_path: str,
+        launch_kwargs: Optional[Dict[str, Any]],
+    ):
+        """有头人工验证码回退（profile 单一载体）。
+
+        流程：关掉主持久 context（释放 Chromium ProcessSingleton 锁）→ 在**同一个
+        profile 目录**上开有头持久 context → 人工登录 → 正常 close（Chromium 自己
+        刷盘，R7）→ 重开同一 profile 的持久 context。
+
+        全程不写/读会话文件：登录态由 Chromium 直接写进 profile（R1/R2）。
+        """
+        # R6：同一 profile 目录不能被两个浏览器进程同时打开 —— 必须先关旧 context。
+        await self._close_playwright_resource(
+            old_context,
+            label="old_runtime_context",
+        )
+
+        headed_bundle = await runtime_session.open_persistent_runtime_bundle(
+            browser_type=browser_type,
+            platform=platform,
+            session_owner_id=session_account_id,
+            account=account,
+            launch_kwargs={"headless": False, "args": ["--start-maximized"]},
+            proxy=proxy,
+            profile_path_override=profile_path,
+        )
+        headed_context = headed_bundle.context
+        headed_page = headed_bundle.page
+        try:
+            login_success, outcome = await self._perform_headful_login(
+                task_id=task_id,
+                platform=platform,
+                account=account,
+                params=params,
+                page=headed_page,
+                runtime_manifests=runtime_manifests,
+            )
+            if not login_success:
+                return False, old_context, None, outcome
+            await self._ensure_login_gate_ready(headed_page, platform)
+        finally:
+            # R7：正常关闭才能让 Chromium 把登录态刷进 profile。
+            await self._close_playwright_resource(
+                headed_context,
+                label="headful_fallback_context",
+            )
+
+        # 重开同一个 profile 目录 → 主 context 仍是**持久 context**（profile 仍是唯一载体）。
+        new_bundle = await runtime_session.open_persistent_runtime_bundle(
+            browser_type=browser_type,
+            platform=platform,
+            session_owner_id=session_account_id,
+            account=account,
+            launch_kwargs=launch_kwargs or {"headless": True},
+            proxy=proxy,
+            profile_path_override=profile_path,
+        )
+        return True, new_bundle.context, new_bundle.page, "success"
+
+    async def _run_legacy_headful_login_fallback(
+        self,
+        *,
+        task_id: str,
+        platform: str,
+        account: Dict[str, Any],
+        params: Dict[str, Any],
+        browser,
+        old_context,
+        session_platform: str,
+        session_account_id: str,
+        runtime_manifests: Optional[Dict[str, Any]],
+        proxy: Optional[Dict[str, Any]],
+        account_id: str,
+    ):
+        """legacy 回退（没有持久化 profile 目标时）。
+
+        与 profile 路径的区别：登录发生在**独立的有头浏览器**里，登录态只能在内存里
+        交给主 context（不再写/读会话文件）。Task 4 会把这条分支删掉。
+        """
+        from playwright.async_api import async_playwright
+
+        storage_state: Optional[Dict[str, Any]] = None
         async with async_playwright() as playwright:
             headed_browser = await playwright.chromium.launch(
                 **enforce_official_playwright_browser(
@@ -3146,89 +3336,37 @@ class CollectionExecutorV2:
                 **({"proxy": proxy} if proxy else {}),
             )
             try:
-                if account_id:
-                    fp_options = await _get_fingerprint_context_options_async(
-                        platform, account_id, account, proxy=proxy
-                    )
-                    context_options = (
-                        _build_playwright_context_options_from_fingerprint(fp_options)
-                    )
-                else:
-                    from modules.apps.collection_center.browser_config_helper import (
-                        get_browser_context_args,
-                    )
-
-                    context_options = get_browser_context_args()
-                context_options.setdefault("accept_downloads", True)
-                context_options.setdefault(
-                    "viewport", dict(runtime_session.STANDARD_HEADLESS_VIEWPORT)
+                context_options = await self._build_legacy_headful_context_options(
+                    platform=platform,
+                    account=account,
+                    account_id=account_id,
+                    proxy=proxy,
                 )
-                context_options.setdefault("locale", "zh-CN")
 
                 headed_context = await headed_browser.new_context(**context_options)
                 await runtime_session.apply_stealth_init_scripts(headed_context)
                 try:
                     headed_page = await headed_context.new_page()
-                    while True:
-                        try:
-                            if runtime_manifests is not None:
-                                login_manifest = runtime_manifests.get("login")
-                                login_result = (
-                                    await self._run_runtime_manifest_component(
-                                        page=headed_page,
-                                        manifest=login_manifest,
-                                        account=account,
-                                        config=params,
-                                    )
-                                )
-                                login_success = bool(
-                                    getattr(login_result, "success", False)
-                                )
-                            else:
-                                adapter = create_adapter(
-                                    platform=platform,
-                                    account=account,
-                                    config=params,
-                                )
-                                login_success = await self._execute_python_component(
-                                    page=headed_page,
-                                    adapter=adapter,
-                                    component_type="login",
-                                    params=params,
-                                )
-                            if not login_success:
-                                return False, old_context, None, "failed"
-                            break
-                        except VerificationRequiredError as e:
-                            value = await self._wait_verification_and_continue(
-                                task_id,
-                                e.verification_type,
-                                e.screenshot_path,
-                                headed_page,
-                                params,
-                                None,
-                                is_login=True,
-                            )
-                            if value is None:
-                                return False, old_context, None, "timeout"
-                            apply_verification_result_to_params(
-                                params,
-                                verification_type=e.verification_type,
-                                value=value,
-                            )
-                            continue
-
+                    login_success, outcome = await self._perform_headful_login(
+                        task_id=task_id,
+                        platform=platform,
+                        account=account,
+                        params=params,
+                        page=headed_page,
+                        runtime_manifests=runtime_manifests,
+                    )
+                    if not login_success:
+                        return False, old_context, None, outcome
                     await self._ensure_login_gate_ready(headed_page, platform)
                     if session_platform and session_account_id:
+                        # 只在内存里取一份快照交给主 context，
+                        # 不写会话文件、不读会话文件（profile 才是唯一载体）。
                         storage_state = (
                             await self._wait_and_capture_high_quality_tiktok_session(
                                 page=headed_page,
                                 session_platform=session_platform,
                                 session_account_id=session_account_id,
                             )
-                        )
-                        await _save_session_async(
-                            session_platform, session_account_id, storage_state
                         )
                 finally:
                     await self._close_playwright_resource(
@@ -3244,13 +3382,24 @@ class CollectionExecutorV2:
         if browser is None:
             return False, old_context, None
 
-        new_context, new_page = await self._recreate_runtime_page_with_saved_session(
-            browser=browser,
-            old_context=old_context,
+        # 把有头浏览器的登录态**在内存里**交给主 context（legacy 路径）。
+        context_options = await self._build_legacy_headful_context_options(
             platform=platform,
             account=account,
             account_id=account_id,
+            proxy=proxy,
         )
+        if storage_state:
+            context_options["storage_state"] = storage_state
+
+        await self._close_playwright_resource(
+            old_context,
+            label="old_runtime_context",
+        )
+        new_context = await browser.new_context(**context_options)
+        await runtime_session.apply_stealth_init_scripts(new_context)
+        new_page = await new_context.new_page()
+        await self._prime_runtime_page_for_login_gate(new_page, platform, account)
         return True, new_context, new_page, "success"
 
     async def _execute_with_python_components(
@@ -3274,6 +3423,9 @@ class CollectionExecutorV2:
         session_account_id: str = "",
         runtime_manifests: Optional[Dict[str, Any]] = None,
         proxy: Optional[Dict[str, Any]] = None,
+        browser_type: Any = None,
+        profile_path: Optional[str] = None,
+        launch_kwargs: Optional[Dict[str, Any]] = None,
     ) -> CollectionResult:
         """
         v4.8.0: 使用 Python 组件执行采集流程
@@ -3331,6 +3483,9 @@ class CollectionExecutorV2:
                             session_account_id=session_account_id,
                             runtime_manifests=runtime_manifests,
                             proxy=proxy,
+                            browser_type=browser_type,
+                            profile_path=profile_path,
+                            launch_kwargs=launch_kwargs,
                         )
                         if len(fallback_result) == 4:
                             login_success, play_context, page, fallback_outcome = (

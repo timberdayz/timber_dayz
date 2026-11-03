@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -130,44 +131,68 @@ async def test_executor_open_runtime_bundle_auto_prefers_storage_state_helper(
 
 
 @pytest.mark.asyncio
-async def test_recreate_runtime_page_with_saved_session_preserves_fingerprint_viewport(
+async def test_headful_profile_fallback_keeps_runtime_page_aligned_to_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """有头回退走 profile 后：runtime page 必须来自**持久 context**，且保留 viewport。
+
+    原用例针对 ``_recreate_runtime_page_with_saved_session``（读会话文件 →
+    ``browser.new_context`` 注入指纹），该路径已随 Task 4.5 删除（会话文件不再是
+    载体）。此处改为钉住新契约：回退在**同一个 profile 目录**上开持久 context，
+    viewport 沿用 runtime 策略，指纹覆盖项按 R8 剥离。
+    """
     executor = CollectionExecutorV2()
-    executor._close_playwright_resource = AsyncMock()
-    executor._prime_runtime_page_for_login_gate = AsyncMock()
+    executor._ensure_login_gate_ready = AsyncMock()
+    executor._run_runtime_manifest_component = AsyncMock(
+        return_value=SimpleNamespace(success=True)
+    )
+
+    captured: list[dict] = []
 
     class _FakeContext:
+        pages: list = []
+
         async def new_page(self):
             return object()
 
-    captured: dict[str, object] = {}
-
-    class _FakeBrowser:
-        async def new_context(self, **kwargs):
-            captured.update(kwargs)
+    class _FakeBrowserType:
+        async def launch_persistent_context(self, **kwargs):
+            captured.append(dict(kwargs))
             return _FakeContext()
 
+    async def _fake_build_runtime_context_options(**kwargs):
+        return {
+            "locale": "zh-CN",
+            "viewport": {"width": 2880, "height": 1800},
+            "accept_downloads": True,
+        }
+
     monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._get_fingerprint_context_options_async",
-        AsyncMock(
-            return_value={
-                "locale": "zh-CN",
-                "viewport": {"width": 2880, "height": 1800},
-                "accept_downloads": True,
-            }
-        ),
+        "modules.apps.collection_center.runtime_session.build_runtime_context_options",
+        _fake_build_runtime_context_options,
     )
 
-    await executor._recreate_runtime_page_with_saved_session(
-        browser=_FakeBrowser(),
-        old_context=object(),
+    result = await executor._run_headful_login_fallback(
+        task_id="task-1",
         platform="miaoshou",
         account={"account_id": "acc-1", "login_url": "https://erp.91miaoshou.com"},
-        account_id="acc-1",
+        params={"params": {}},
+        browser=None,
+        old_context=object(),
+        session_platform="miaoshou",
+        session_account_id="acc-1",
+        runtime_manifests={"login": {"component": "login"}},
+        proxy=None,
+        browser_type=_FakeBrowserType(),
+        profile_path=str(REPO_ROOT / "profiles" / "miaoshou" / "acc-1"),
+        launch_kwargs={"headless": True},
     )
 
-    assert captured["viewport"] == {"width": 2880, "height": 1800}
+    assert result[0] is True
+    # 有头阶段：持久 context + 保留 viewport
+    assert captured[0]["viewport"] == {"width": 2880, "height": 1800}
+    assert captured[0]["user_data_dir"].endswith("acc-1")
+    assert captured[0]["headless"] is False
 
 
 @pytest.mark.asyncio

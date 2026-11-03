@@ -1283,23 +1283,23 @@ async def test_headful_login_fallback_uses_passed_proxy_with_credentials(monkeyp
 
     account 进入回退前已被 strip（凭据已删），若在回退里从 account 重新解析，
     需要认证的代理会收到 407 —— 人工登录流程在最需要它的场景走不通。
+
+    Task 4.5 起，回退在**同一个 profile 目录**上开持久 context，代理必须原样
+    透传到 ``launch_persistent_context``（浏览器进程级参数）。
     """
     from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
 
     executor = CollectionExecutorV2()
     executor._update_status = AsyncMock()
     executor._ensure_login_gate_ready = AsyncMock()
-    executor._execute_python_component = AsyncMock(return_value=True)
-    executor._recreate_runtime_page_with_saved_session = AsyncMock(
-        return_value=(object(), object())
+    executor._run_runtime_manifest_component = AsyncMock(
+        return_value=SimpleNamespace(success=True)
     )
 
     launched: list[dict] = []
-    context_kwargs: dict[str, object] = {}
 
     class _FakeContext:
-        async def add_init_script(self, script: str) -> None:
-            return None
+        pages: list = []
 
         async def new_page(self):
             return object()
@@ -1307,40 +1307,24 @@ async def test_headful_login_fallback_uses_passed_proxy_with_credentials(monkeyp
         async def close(self):
             return None
 
-    class _FakeBrowser:
-        async def new_context(self, **kwargs):
-            context_kwargs.update(kwargs)
+    class _FakeChromium:
+        async def launch_persistent_context(self, **kwargs):
+            launched.append(kwargs)
             return _FakeContext()
 
-        async def close(self):
-            return None
-
-    class _FakeChromium:
-        async def launch(self, **kwargs):
-            launched.append(kwargs)
-            return _FakeBrowser()
-
-    class _FakePlaywright:
-        chromium = _FakeChromium()
-
-    class _FakePlaywrightManager:
-        async def __aenter__(self):
-            return _FakePlaywright()
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
+    async def _fake_build_runtime_context_options(**kwargs):
+        return {"viewport": {"width": 1280, "height": 800}, "accept_downloads": True}
 
     monkeypatch.setattr(
-        "playwright.async_api.async_playwright",
-        lambda: _FakePlaywrightManager(),
+        "modules.apps.collection_center.runtime_session.build_runtime_context_options",
+        _fake_build_runtime_context_options,
     )
-    monkeypatch.setattr(
-        "modules.utils.sessions.device_fingerprint.DeviceFingerprintManager."
-        "get_or_create_fingerprint",
-        lambda self, platform, account_id, account_config=None: dict(
-            _FAKE_FINGERPRINT
-        ),
-    )
+
+    proxy = {
+        "server": "http://10.0.0.9:8080",
+        "username": "u",
+        "password": "p",
+    }
 
     await executor._run_headful_login_fallback(
         task_id="task-1",
@@ -1348,29 +1332,25 @@ async def test_headful_login_fallback_uses_passed_proxy_with_credentials(monkeyp
         # account 已被 strip：没有凭据
         account={"account_id": "shopee_sg_x", "proxy_server": "http://10.0.0.9:8080"},
         params={"params": {}, "account": {"account_id": "shopee_sg_x"}},
-        browser=object(),
+        browser=None,
         old_context=object(),
         session_platform="",
         session_account_id="",
-        runtime_manifests=None,
-        proxy={
+        runtime_manifests={"login": {"component": "login"}},
+        proxy=proxy,
+        browser_type=_FakeChromium(),
+        profile_path="/tmp/profiles/shopee/shopee_sg_x",
+        launch_kwargs={"headless": True},
+    )
+
+    assert launched, "有头回退必须走 launch_persistent_context"
+    # 有头阶段与重开阶段都必须是**同一个带凭据的代理对象**
+    for call in launched:
+        assert call["proxy"] == {
             "server": "http://10.0.0.9:8080",
             "username": "u",
             "password": "p",
-        },
-    )
-
-    assert launched[0]["proxy"] == {
-        "server": "http://10.0.0.9:8080",
-        "username": "u",
-        "password": "p",
-    }
-    # 有头 context 也带同一个代理（context 级 proxy，覆盖全局）
-    assert context_kwargs["proxy"] == {
-        "server": "http://10.0.0.9:8080",
-        "username": "u",
-        "password": "p",
-    }
+        }
 
 
 async def test_headful_login_fallback_receives_resolved_proxy_from_caller(monkeypatch):
