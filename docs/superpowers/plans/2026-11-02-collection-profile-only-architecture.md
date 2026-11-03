@@ -27,6 +27,33 @@
 
 ---
 
+## 0.1 实施进展（2026-11-03）
+
+| Task | 状态 | 提交 / 结论 |
+|---|---|---|
+| Task 0 worktree + 基线 | ✅ | 10 文件 99 passed 基线 |
+| Task 1 账号代理配置透出 | ✅ 双评审通过 | `9796a390` + `0b5c1864`；`account_proxy_config.py` 分支覆盖 100% |
+| Task 2 打通代理链路 | ✅ 三轮评审通过 | `2b4a3b39` / `366cc4f9` / `76c821e3`；全量失败集合 NEW=0 |
+| Task 3 跨进程账号锁 | ✅ 实现 + 规格评审 Compliant + 收口 | `b88fa447` + `39578201`（合并于 `ad3e42a4`）；覆盖率 100%；规格评审 2 项 Important 已修 |
+| Task 4.5 有头回退走 profile | ✅ | `8d51df14`；9 个新用例；两种顺序 NEW=0 / FIXED=0 |
+| Task 4 补地基 | ⏳ 下一步 | 本计划拆出，见下文「实施拆分」 |
+| Task 4.2 顺序路径收敛 | ⏳ | 同上 |
+| Task 5 / 6 / 7 | ⏳ | Task 6/7 已完成二次只读盘点，见各自章节的修订表 |
+| Task 8 / 9 / 10 | ⏳ | Task 10 **必须在合并回 main 之后**跑（profile 根是仓库根相对，worktree 的 `profiles/` 是空的） |
+
+**已知的仓库既有失败基线**：`backend/tests` 全量 **143 failed / 3986 passed / 22 errors**。判据是**失败集合逐条 diff**（`--junitxml`），**不是计数**。
+
+**跑测试的两个环境坑**（实测，务必带上）：
+1. 必须设 `$env:PYTHONUTF8='1'`（或 `PYTHONIOENCODING=utf-8`），否则 pytest capture 把 GBK 控制台字节按 UTF-8 解码 → setup 阶段 **5011 个假 error**。
+2. 顺序敏感用例（`test_account_proxy_config.py` 与 `test_collection_executor_session_alignment.py` 谁先跑会影响结果）→ 验收必须**两个顺序都跑**；换序要用 `-p reorder_collection_tests` 自定义插件，**不能用重复路径参数**（pytest 会把目录整体跳过，只收 119 个用例）。
+
+**未验证/待外部确认**：
+- **E2**：生产实际生效的 compose 组合与 Redis 认证形态。已把代码侧的兜底做掉（`REDIS_PASSWORD` 注入 + 显式 `ACCOUNT_SESSION_LOCK_BACKEND`），但**生产用哪套 compose 仍需运维确认**。
+- **E1**：生产 Redis 的 `maxmemory-policy`（本机 `noeviction`，锁 key 不会被淘汰）。
+- **真实代理凭据**：本机 19 个 enabled shop_account 的 `extra_config->'proxy'` **全为 NULL** → 本轮用本地假代理跑通链路，真实出口 IP 待凭据到位后补。
+
+---
+
 ## 1. 变更地图
 
 | 文件 | 责任 | Task |
@@ -310,7 +337,10 @@ Task 4.5（有头验证码回退走 profile）  ← 计划外新增，阻塞级
    │                                    必须先于 Task 4：Task 4 删掉多余 browser 后
    │                                    有头回退失去 browser.new_context 的依赖
    ▼
-Task 4（顺序路径恒走 profile）
+Task 4（补地基：异常路径不泄漏 + 模式解析统一）
+   │                                    只修洞，不改行为语义；必须先于 4.2
+   ▼
+Task 4.2（收敛：顺序路径恒走 profile）
    │
    ▼
 Task 5（并行快照纯内存）  ┐
@@ -403,7 +433,31 @@ Task 8（诊断字段+前端）→ Task 9（文档同步）→ Task 10（验收�
 | # | 待确认 | 影响 | 建议动作 |
 |---|---|---|---|
 | E1 | 生产 Redis 的 `maxmemory-policy` | 若为 `volatile-lru` / `allkeys-lru`，**带 TTL 的锁 key 会被 LRU 淘汰** → 锁凭空消失 → 双开（`REDIS_URL` 与 Celery broker 同 db=0，`docker-compose.prod.yml:363-366`） | ✅ **已核实**：本地 Redis 实测 `maxmemory-policy = noeviction`（Redis 7.4.7）；生产 compose 的启动命令是 `redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}`（`docker-compose.prod.yml:63`）**未覆盖 maxmemory-policy** → 用默认值 `noeviction` → **锁 key 不会被淘汰**。仍建议生产上线前跑一次 `redis-cli CONFIG GET maxmemory-policy` 确认 |
-| E2 | 生产实际生效的 compose 组合与 Redis 认证形态 | `docker-compose.collection.yml:112` 只有 `REDIS_URL: redis://${REDIS_HOST}:${REDIS_PORT}/0` —— **无密码、无内建 redis 服务**，与其他 compose 的 `${REDIS_PASSWORD}` 拼装不一致。若生产用这套栈，新锁会因认证失败**永远拿不到锁** → 全部采集被 fail-closed 拒绝 | ⚠️ **仍待运维确认**。代码侧必须让「认证失败」与「锁冲突」报出**不同**错误（前者是「锁服务不可用」，后者是「该主账号正被其他任务占用」） |
+| E2 | 生产实际生效的 compose 组合与 Redis 认证形态 | `docker-compose.collection.yml:112` 只有 `REDIS_URL: redis://${REDIS_HOST}:${REDIS_PORT}/0` —— **无密码、无内建 redis 服务**，与其他 compose 的 `${REDIS_PASSWORD}` 拼装不一致。若生产用那套栈，新锁会因认证失败**永远拿不到锁** → 全部采集被 fail-closed 拒绝 | ⚠️ **仍待运维确认**，但**代码侧已加兜底**（见 Task 3 收口 B：`REDIS_URL` 无密码且 `REDIS_PASSWORD` 存在时自动注入）。代码侧必须让「认证失败」与「锁冲突」报出**不同**错误（前者是「锁服务不可用」，后者是「该主账号正被其他任务占用」） |
+
+### Task 3 收口项（2026-11-03 规格评审 VERDICT: PARTIAL 后追加）
+
+规格评审结论：**L1~L9 / F1~F3 / 锁边界 / `_alt` 旁路 / 既有测试改写 全部 ✅ Compliant，全量失败集合逐条 diff 零新增**，但有 2 项 Important 必须修。下表是收口清单。
+
+| # | 级别 | 问题 | 位置 | 修法 |
+|---|---|---|---|---|
+| A | **Important** | **Redis 连接失败后永不重试** —— `_redis_client_resolved = True` 在连接**之前**置位，失败后单例被永久污染（`_redis_client_singleton` 恒为 `None`）→ 一次瞬时抖动让该 gunicorn worker **此后所有采集被永久拒绝**（生产 fail-closed），Redis 恢复也没用，只能重启进程 | `main_account_session_lock.py:353-396` | 成功后才置 `resolved`；失败分支 `aclose()` 已建 client；加失败冷却窗（避免每次取锁白等 5s 超时）；日志给可执行运维提示；补「第二次会重试」回归测试 |
+| B | **Important**（新发现） | **`REDIS_URL` 无密码但环境变量有 `REDIS_PASSWORD` → 认证必然失败** —— 全仓没有任何地方把 `REDIS_PASSWORD` 注入 URL（`backend/utils/redis_client.py` 也没有） | `main_account_session_lock.py` `get_shared_redis_client()` | URL 不含 userinfo 且 `REDIS_PASSWORD` 非空时注入密码；URL 已含密码则原样用；注入后日志必须脱敏 |
+| C | **Important** | **采集栈静默降级为进程内锁** —— `account_session_lock_environment()` 读 `ENVIRONMENT`（默认 development），而 `docker-compose.collection.yml` 的 `collection` 服务**既没设 `ENVIRONMENT` 也没设 `REDIS_URL`** → `auto` 走非生产分支 → 跨进程保护形同虚设 | `docker-compose.collection.yml` + `docker-compose.prod.yml` | `collection` 服务补 `REDIS_URL` / `REDIS_PASSWORD` / `ACCOUNT_SESSION_LOCK_BACKEND=redis`；prod 两服务显式设 `ACCOUNT_SESSION_LOCK_BACKEND=redis`；**代码侧降级日志提到 `error` 级**并写明「跨进程保护已失效」。**不要**改 `ENVIRONMENT`（那个 compose 也用于开发） |
+| D | **P0**（新发现） | **持久 profile 目录在生产/采集容器里没有挂载持久化** —— profile 根是 `REPO_ROOT/profiles`（容器内 `/app/profiles`）；`docker-compose.yml:111`、`docker-compose.dev.yml:60`、`docker-compose.collection-cloud-sync.yml:61` **都挂了** `./profiles:/app/profiles`，但 **`docker-compose.prod.yml` 与 `docker-compose.collection.yml` 没挂** → 容器一重建，**所有账号的 Chromium 登录态全部丢失** → 每次都要重新人工登录 + 过验证码 → **整个「profile 唯一载体」架构在生产上失效** | `docker-compose.prod.yml`（`backend_api_service` volumes）、`docker-compose.collection.yml`（`collection` volumes） | 两个文件各加一行 `- ./profiles:/app/profiles` + 一行中文注释 |
+| E | Minor | 等待者 Hash 的 TTL 与锁 TTL 相同（300s）→ 等待超 300s 后 `waiter_count` 归零，L7 退化 | `main_account_session_lock.py:241-250` | 每次 `add_waiter` 刷新 TTL，或把 Hash TTL 设为锁 TTL 的数倍 |
+| F | Minor | `LocalSessionLockBackend._scope` 用 `id(loop)` 做 key —— Python 的 `id()` 在对象回收后**会被复用**，两个不同 loop 可能拿到同一个 id → 误判为同一把锁 | `main_account_session_lock.py:271-278` | 改用不会复用的标识（loop 上挂 uuid4 / 自增序号） |
+
+> **A 与 D 是阻塞级**：A 让一次 Redis 抖动变成永久采集停摆；D 让整个架构在生产上失效。**两者都必须在 Task 4 之前修完。**
+
+### 评审另记的 Minor（登记到后续 Task，本轮不修）
+
+| # | 问题 | 归属 |
+|---|---|---|
+| M1 | `_open_runtime_bundle` 成功后、进入 `try` 之前抛错 → profile context 泄漏（`except BaseException` 已释放锁） | **Task 4 Step 8.1**（= F4-8） |
+| M2 | `_requires_profile_session_lock` 与 `_open_runtime_bundle` 之间的 TOCTOU | Task 4 恒 `persistent_profile` 后自动消失 |
+| M3 | TTL=300 未严格 > 验证码等待上限 300s（意图已由续期满足） | 文档说明即可 |
+| M4 | **不取账号锁的 profile 打开路径**：`modules/apps/collection_center/app.py`（巡店 `:657/845/1032/1184`）、`handlers.py:498/580/1392/1423`、`backend/domains/collection/routers/component_recorder.py:553-634`（录制**子进程**，`use_persistent_context=True`）都直接开 profile，**不经过账号锁** → 采集持锁期间巡店/录制仍可打开同一 profile 目录 → **R6 的系统级覆盖尚未闭合** | **Task 6**（巡店必须纳入同一把账号锁） |
 
 ### 锁边界设计（修 F3）
 
@@ -532,10 +586,20 @@ git commit -m "feat(collection): 账号级会话锁改为跨进程实现并对�
 
 ## Task 4: 采集顺序路径统一走 profile（R1 / R4 / R8）
 
+> **实施拆分（2026-11-03 追加）**：原 Task 4 一次要改 8 处、牵涉 12 个测试文件，单个子代理容易被打断（Task 4.5 已经中途中断过一次）。
+> 拆成 **Task 4（补地基）** 与 **Task 4.2（做收敛）** 两段，各自独立实现 + 独立评审：
+>
+> | 段 | 内容 | 性质 | 依赖 |
+> |---|---|---|---|
+> | **Task 4** | ① `_cleanup_browser_runtime` 提到覆盖两段 try 的最外层 finally（F4-8/M1）② 模式解析上提（F4-9）③ `_requires_profile_session_lock` 跟随统一后的模式（不再依赖 `_manual_storage_state_exists`） | **只补洞，不改行为语义** —— 修的是「异常路径泄漏 profile context」与「模式判定脱节」 | 无（Task 4.5 之后即可） |
+> | **Task 4.2** | ④ 删死代码 `_prepare_runtime_page_bundle` ⑤ `choose_runtime_strategy` 正式采集恒 `persistent_profile` ⑥ `_open_runtime_bundle` 只走 profile + 删 5 个函数 ⑦ profile 模式不再多开 Chromium（原 Step 6）⑧ R8 一致性断言 + 测试改写清单 | **行为收敛** —— 把「storage_state 优先」彻底换成「profile 唯一」 | 必须在 Task 4 之后（③ 要先解耦 `_manual_storage_state_exists`，⑥ 才能删它） |
+>
+> **为什么必须拆**：Task 4 的 ① 是**阻塞级正确性修复**（Task 4.2 落地后每次采集都开 profile，不修就等于每次采集都可能泄漏一个 Chromium 进程 + 泄漏 profile 目录锁 → 下一个任务双开）。它必须**先落地并单独验证**，不能和大改混在一起，否则出问题时分不清是「洞」还是「收敛」引入的。
+
 **Files:**
-- Modify: `modules/apps/collection_center/runtime_session.py:517-572`（`choose_runtime_strategy`）、`:694-721`
-- Modify: `modules/apps/collection_center/executor_v2.py:899-1034`（`_open_runtime_bundle`）、`:467-588`（`_prepare_runtime_page_bundle` 死代码）
-- Test: `backend/tests/test_collection_session_reuse_contract.py`（改写）
+- Modify: `modules/apps/collection_center/runtime_session.py:519-582`（`choose_runtime_strategy`）、`:703-730`（`normalize_persistent_profile_context_options`）
+- Modify: `modules/apps/collection_center/executor_v2.py:991-1148`（`_open_runtime_bundle`）、`:468-596`（`_prepare_runtime_page_bundle` 死代码）、`:2152-2349`（第一段 try / 异常路径）、`:939-976`（`_requires_profile_session_lock`）
+- Test: `backend/tests/test_collection_session_reuse_contract.py`（改写）、`backend/tests/test_collection_executor_session_alignment.py`、`backend/tests/test_collection_executor_reused_session_scope.py`、`backend/tests/test_collection_runtime_session.py`、`backend/tests/test_component_tester_runtime_config.py`、`backend/tests/test_account_proxy_config.py`、`backend/tests/test_main_account_session_lock.py`
 
 ### Task 4 只读盘点结论（实施前必读，行号以真实代码为准）
 
@@ -564,11 +628,47 @@ git commit -m "feat(collection): 账号级会话锁改为跨进程实现并对�
 | R5 | 「`choose_runtime_strategy` 两处调用都传 `formal_collection`」 | **错** —— 生产 1 处 `formal_collection`，工具脚本 1 处 `component_test` | 收敛时保留 `execution_kind` 参数语义，工具脚本行为不变 |
 | R6 | 「profile 模式下多开的 Chromium 进程 IP 出口多一个」 | 不准确 —— 该 browser 走同一 `proxy` 参数，不会多出出口 IP；但确实多占一个进程 | 同 R3 |
 
-### Task 4 实施时必须一并修掉的「地基」（盘点新增，阻塞级）
+### Task 4（第一段：补地基）—— 只修洞，不改行为语义
 
-1. **`_cleanup_browser_runtime` 提到最外层 finally**（F4-8）→ 否则 R7（profile 刷盘）与 R6（目录独占）都不成立。
-2. **`_requires_profile_session_lock`（`:939-976`）的 `auto` 分支改为恒 True**（当前依赖 `_manual_storage_state_exists`）→ Task 4 后顺序路径恒开 profile，「新账号首次采集」也必须加锁，否则两个任务可同时首开同一 profile 目录。
-3. **`execute()` 的模式解析上提**（F4-9）→ 统一决定 profile/storage，再传给 `_open_runtime_bundle`，避免 `browser_type` 缺失时报错不清晰。
+> 这一段**不改**「storage_state 优先 / profile 兜底」的行为，只把三个「洞」补上。
+> 它**必须先于 Task 4.2 落地**：Task 4.2 之后每次采集都会开 profile 目录，
+> 不先修就等于**每次采集都可能泄漏一个 Chromium 进程 + 泄漏 profile 目录独占锁** →
+> 下一个任务双开同一 profile → 登录态互相覆盖。
+
+**Files:**
+- Modify: `modules/apps/collection_center/executor_v2.py:2152-2349`（第一段 try / 异常路径）、`:939-976`（`_requires_profile_session_lock`）、`:2093-2117`（模式前置校验）
+- Test: `backend/tests/test_collection_executor_reused_session_scope.py`、`backend/tests/test_main_account_session_lock.py`、`backend/tests/test_collection_executor_session_alignment.py`
+
+- [ ] **Step 4.0.1: `_cleanup_browser_runtime` 提到覆盖两段 try 的最外层 finally（F4-8 / M1）**
+
+`execute()` 现在是**两段 try**：第一段 `try`（`:2152`）的 `except TaskCancelledError`（`:2330`）/ `except BaseException`（`:2345`）**只释放锁、直接 return/raise**，第二段的 `finally`（`:2801`）永不执行 → `_cleanup_browser_runtime` 被跳过 → **profile context 泄漏**（Chromium 进程残留 + profile 目录锁不释放 + 账号锁已释放 → 下一个任务可双开同一 profile）。
+
+改法：把 `_cleanup_browser_runtime(...)` 提到**同时覆盖两段 try 的最外层 finally**，或在第一段的两个 except 分支里也调用它（必须**幂等** —— 第二段的 finally 也会调一次）。
+**注意**：`_cleanup_browser_runtime` 依赖 `page` / `play_context` / `created_browser_instance` / `diagnostics_session` 等变量，其中一部分在第一段 try **内部**才赋值 → 提到外层时要处理「变量尚未绑定」的情况（用 `None` 初始化或先声明）。
+**验收**：断言「第一段 try 抛异常时，profile context 仍被 close」；断言「正常路径不会 close 两次」。
+
+- [ ] **Step 4.0.2: 模式解析上提（F4-9）**
+
+把 `execute()` 的模式判定（`:2093-2117`）与 `_open_runtime_bundle` 的内部解析（`:1013-1073`）统一，避免 `browser_type=None` 时抛 AttributeError 而非清晰 ValueError。
+
+- [ ] **Step 4.0.3: `_requires_profile_session_lock` 不再依赖 `_manual_storage_state_exists`**
+
+`:939-976` 当前在 `auto` 模式下靠「profile 目录存在」+「没有人工会话」决定加不加锁。Task 4.2 之后顺序路径恒开 profile → **「新账号首次采集」也必须加锁**，否则两个任务可同时首开同一 profile 目录（违反 R6）。
+
+**要求**：这一段把该判定**改成跟随 Step 4.0.2 上提后的统一模式判定**（`auto` → 本次会打开 profile → True），
+但**不要**在这里删 `_manual_storage_state_exists`（Task 4.2 才删）。
+**验收**：断言「`auto` 模式下即使 profile 目录还不存在，也加锁」。
+
+- [ ] **Step 4.0.4: 跑测试并提交**
+
+```powershell
+git add modules/apps/collection_center/executor_v2.py backend/tests/test_collection_executor_reused_session_scope.py backend/tests/test_main_account_session_lock.py backend/tests/test_collection_executor_session_alignment.py
+git commit -m "fix(collection): 采集异常路径不再泄漏 profile context，账号锁判定与模式解析统一"
+```
+
+---
+
+### Task 4.2（第二段：做收敛）—— profile 成为顺序路径唯一载体
 
 - [ ] **Step 1: 改写既有测试表达新规则**
 
@@ -653,22 +753,6 @@ if (
 确认 `normalize_persistent_profile_context_options`（`runtime_session.py:703-730`）在顺序路径生效 —— 顺序路径现在也是 profile 模式，所以自动一致 —— 在测试中断言这一点。
 
 并行扇出的 `domain_context_options`（`executor_v2.py:6201-6219`）若仍注入 UA/locale/timezone，必须在 Task 5 显式断言「顺序与并行一致」，否则 R8 不成立。
-
-- [ ] **Step 8: R7 正常关闭（补 F4-8 泄漏）**
-
-- [ ] **Step 8.1: `_cleanup_browser_runtime` 提到覆盖两段 try 的最外层 finally**
-
-`execute()` 现在是**两段 try**：第一段 `try`（`:2152`）的 `except TaskCancelledError`（`:2330`）/ `except BaseException`（`:2345`）**只释放锁、直接 return/raise**，第二段的 `finally`（`:2801`）永不执行 → `_cleanup_browser_runtime` 被跳过 → **profile context 泄漏**。
-
-改法：把 `_cleanup_browser_runtime(...)` 提到**同时覆盖两段 try 的最外层 finally**，或在第一段的两个 except 分支里也调用它（幂等）。**验收**：断言「第一段 try 抛异常时，profile context 仍被 close」。
-
-- [ ] **Step 8.2: `_requires_profile_session_lock` 的 `auto` 分支恒 True**
-
-`:939-976` 当前在 `auto` 模式下依赖 `_manual_storage_state_exists` 决定加不加锁。Task 4 后顺序路径恒开 profile → **「新账号首次采集」也必须加锁**，否则两个任务可同时首开同一 profile 目录（违反 R6）。
-
-- [ ] **Step 8.3: 模式解析上提（F4-9）**
-
-把 `execute()` 的模式判定（`:2093-2117`）与 `_open_runtime_bundle` 的内部解析（`:1013-1073`）统一，避免 `browser_type=None` 时抛 AttributeError 而非清晰 ValueError。
 
 - [ ] **Step 9: 跑测试并提交**
 
@@ -907,6 +991,7 @@ git commit -m "refactor(collection): 并行快照改为纯内存，不再落盘�
 | F6-6 | `pwcli_helpers.ps1:548-571` 的交互式巡店循环里 `Read-Host "Press Enter to save..."` → 调 3 个 Save 函数 | 删 Save 函数后 CLI 巡店流程直接断，**必须同步改写** |
 | F6-7 | `pwcli_native.py:348` 的 `raw_json` 分支仍会写 `output/playwright/state/<platform>.json`（**非账号级**，仅在无 `--account-id` 时） | 与 `data/sessions` 无关，**可以保留**（人工导出会话能力） |
 | F6-8 | `pwcli_native.py:436-439` 的 `save_session(session, metadata)` 写的是 `output/playwright/sessions/<token>/session.json`（pid/port 元数据） | **不是登录态**，不能随「删 save_session」一起删 |
+| F6-9 | 🔴 **巡店打开 profile 时不取账号锁**（2026-11-03 规格评审新发现，M4）—— `modules/apps/collection_center/app.py`（巡店 `:657/845/1032/1184`）与 `handlers.py:498/580/1392/1423` 直接调 `PersistentBrowserManager.get_or_create_persistent_context` 打开 profile，**不经过 Task 3 的账号锁**；`backend/domains/collection/routers/component_recorder.py:553-634`（录制**子进程**，`use_persistent_context=True`）同理 | 采集任务持锁期间，巡店/录制**仍可打开同一 profile 目录** → R6「同一账号串行」在系统层面**没有闭合**。**Task 6 必须让巡店也走同一把跨进程账号锁**（录制子进程同理，见 Step 5b） |
 
 - [ ] **Step 1: 改写测试**
 
@@ -941,6 +1026,17 @@ git commit -m "refactor(collection): 并行快照改为纯内存，不再落盘�
 `pwcli_native.launch_browser` 的 Chromium 启动参数加 `--proxy-server=<账号代理>`，凭据用 CDP `Fetch.continueWithAuth`。代理来源与采集一致（`extra_config["proxy"]`）。
 
 > 若判定代理注入改动过大，可**拆到 Task 6.1** 单独交付，但**必须在 Task 10 验收前完成** —— 否则 P2 未满足。
+
+- [ ] **Step 6.7: 巡店也纳入同一把账号锁（F6-9 / R6 系统级闭合）**
+
+Task 3 只给**采集**加了跨进程账号锁。巡店（`modules/apps/collection_center/app.py:657/845/1032/1184`、`handlers.py:498/580/1392/1423`）与录制（`backend/domains/collection/routers/component_recorder.py:553-634`，**子进程**）仍然直接打开 profile 目录 → 采集持锁期间它们照样能打开同一个目录 → **Chromium ProcessSingleton 冲突**，或更糟：双开导致 profile 损坏。
+
+要求：
+1. 巡店打开 profile 前，必须用**同一把** `MainAccountSessionLock`（key = `build_lock_key(platform, main_account_id)`）取锁，并**持有到巡店浏览器关闭**（R7：正常关闭 → 刷盘 → 再放锁）。
+2. 锁被占用时，巡店面板必须给出**明确提示**（「该账号正在采集中，请稍后再打开」），而不是让 Chromium 自己报 ProcessSingleton 错误。
+3. 录制子进程需要能拿到锁：优先复用 `MainAccountSessionLock` 的 Redis 后端（子进程自己连 Redis），不要在父进程里代持（父进程退出就会放锁，子进程还在跑）。
+
+> **这一步是 R6「同一账号串行」在系统层面闭合的前提**，与 Task 3 的锁是同一把锁，不是新增一把。
 
 - [ ] **Step 7: 跑测试并提交**
 
@@ -991,6 +1087,80 @@ git commit -m "feat(pwcli): 巡店面板移除保存会话，登录态由 profil
 | F7-6 | `modules/collectors/base/base_collector.py:424-443` 与 `modules/collectors/shopee_collector.py:312-347` 各有**独立会话机制**（`temp/sessions/**`，24h 有效期） | **不在本次废除范围**，但容易被误判为「会话文件」→ 明确写进注释/文档，避免后续误删 |
 | F7-7 | `modules/services/shopee_exporter.py:194` 的 `from_persistent_session` 当前 `'cookies' in session_data` **恒假** → 永远走 `cls()`（无 cookie）→ **这个功能今天已经是坏的** | 唯一调用方 `app.py:438`（CLI 交互 `export_product_performance_weekly`）→ 删除前需确认该 CLI 是否还重要 |
 | F7-8 | `data/sessions/` 现有 **19 个文件、约 1.47 MB**，时间跨度 2025-08-18 → 2026-11-02；其中 5 个是「别名孤儿」（`account-1`/`account-2`/`test_account_001`/`妙手erp`/`miaoshou_erp`）；3 个平台命名空间（`miaoshou_erp` / `妙手erp` / `miaoshou`）与采集用的 `shopee`/`tiktok`/`miaoshou` **不统一** | **不要在代码里自动删**。清理策略：整体备份 → `data/sessions.bak-<日期>`（`data/` 已 gitignore）→ 观察 1~2 周 → 删除；`shopee KR`（事故现场证据）与 `tiktok/Tiktok 1店`（497 KB，含 IndexedDB 级 localStorage）建议单独留档 |
+
+### Task 6 / Task 7 二次只读盘点（2026-11-03，结论已独立核实）
+
+> 下表推翻/修正上表 F6/F7 的多处说法。**实施以本表为准。**
+
+#### 计划与真实代码的出入（逐条带证据）
+
+| # | 计划说法 | 真实情况 | 处置 |
+|---|---|---|---|
+| G1 | F6-2「`save_default_storage_state_from_context` 有 **9 个**调用点」 | 真实 **11 处**：`pwcli_native.py:661`(open)/`:772`(close)/`:803`(reload)/`:825`(snapshot)/`:844`(click)/`:859`(fill)/`:873`(press)/`:892`(screenshot)/`:914`+`:932`(state-save)/**`:948`(`command_state_load`，计划完全漏列）** | 第 11 处（`:948`）在账号级 session 下**确实写 `data/sessions`** → 必须一并处理，否则「不写会话文件」不成立 |
+| G2 | F6-8「写的是 `output/playwright/sessions/<token>/session.json`」 | 路径错 → 实际 `output/playwright/.pwcli_native/sessions/<token>/session.json`（`pwcli_native.py:31-32`、`:417-419`） | 改文案；结论不变（pid/port 元数据，不删） |
+| G3 | F6-9「巡店开 profile 的 8 处调用点」 | 真实 **17 处** `get_or_create_persistent_context`：`app.py:659/845/1032/1184/1241/1279/1326/1401/1612/1866/2335/4587/4664`(13) + `handlers.py:498/580/1392/1423`(4) | Step 6.7 改造面比计划写的大 **2 倍** |
+| G4 | 🔴 **Step 6.7 隐含前提「巡店与采集打开同一个 profile」** | **只对 pwcli 面板成立**。`app.py`/`handlers.py` 走 `resolve_account_session_id(account)` → `account["account_id"]` = **shop_account_id**（`modules/utils/account_identity.py:6-16`）；采集走 `session_owner_id` = **main_account_id**（`runtime_session.py:597-598`）→ **不是同一个目录**。磁盘实证：`profiles/tiktok/tiktok_my_flora_mall_local`（shop_account_id 命名，且是 18 个真实 profile 之一） | 见下方 **B1**（阻塞级，**已提请用户拍板**） |
+| G5 | ✅ Step 6.7「面板怎么知道 `main_account_id`」存疑 | **不阻塞**：`scripts/pwcli_account_inventory.py:130` `"account_id": row.main_account_id`（源 `core.main_accounts.main_account_id`）→ 锁 key 可直接拼，与采集侧同 key 空间（`executor_v2.py:2152-2156`） | 面板侧加 Redis 调用即可，**不改数据源** |
+| G6 | 🔴 Step 6.6「代理来源与采集一致（`extra_config["proxy"]`）」 | 采集的代理来自 **`core.shop_accounts.extra_config["proxy"]`**；面板数据源是 **`core.main_accounts`**（`pwcli_account_inventory.py:101`），**没有 shop_accounts 的行，也没有 proxy 字段**（`core.main_accounts` 虽有 `extra_config` 列但实测全空） | 面板 SQL 需 **LEFT JOIN `core.shop_accounts`** 取 `extra_config->'proxy'`；解析**复用** `backend/services/account_proxy_config.extract_proxy_config`，不要重写 |
+| G7 | F6-5「巡店完全不注入代理」 | ✅ 证实（`pwcli_native.py` 全文 `proxy` 0 命中；`pwcli_helpers.ps1` 同样 0 命中）。**附加实测**：本机 **19 个 enabled shop_account 的 `extra_config->'proxy'` 全为 NULL** → 当前环境没有任何账号配了代理 | 保留 Step 6.6，但语义应是「**通道打通 + 有配置才生效**」 |
+| G8 | F6-1「巡店面板已经用 profile，路径规则与采集完全一致」 | ✅ 对 **pwcli 面板**成立（`pwcli_native.py:170-171` = `REPO_ROOT/profiles/<token(platform)>/<token(account_id)>`，与 `session_manager.py:212-213` 同规则）。磁盘实证 `profiles/shopee/shopeeKR`、`profiles/tiktok/Tiktok1店` 都是 main_account_id 净化结果 | 保留 F6-1，但**必须加限定词「指 pwcli 面板」**，否则被 G4 推翻 |
+| G9 | F7-2「`SessionManager.__init__` mkdir 两处」 | 真实 **3 处**：`session_manager.py:170`(`data/sessions`) `:175`(`data/session_profiles`) `:179`(`profiles`) | 收窄时三处都要处理（第三处要保留） |
+| G10 | Task 7 写入点表「`executor_v2.py:316` `_save_session_async`」 | 行号偏：def 在 `:311-323`，`sm.save_session` 在 **`:321`** | 改行号 |
+| G11 | 🔴 Task 7 写入点表「`executor_v2.py:1343` 顺序路径登录后落盘」 | **行号错** → 实际在 **`executor_v2.py:1446`**（条件 `:1428`） | 改行号 |
+| G12 | 🔴 Task 7 写入点表只列了 1 处 `_save_session_async` 调用 | 实际 **3 处**：`:1446`（顺序路径）、**`:3230`**（有头验证码回退 —— Task 4.5 正在改）、**`:3412`**（第二个顺序分支） | 补 `:3230` / `:3412` |
+| G13 | Task 7「`persistent_browser_manager.py:350` `save_context_state`」 | 偏移 → def 在 **`:319`**，`self.session_manager.save_session(...)` 在 **`:363`** | 改行号 |
+| G14 | Task 7「`save_context_state` 有 **14 个**调用方」 | 真实 **12 处**（计划自己列了 12 个）。逐条核对全部存在：`app.py:776/960/2051/2321/2369`、`handlers.py:521/603/1398/1429`、`login_orchestrator.py:198`、`enhanced_recording_wizard.py:124`、`persistent_browser_manager.py:397`(close_context) | 把「14」改成「12」；`close_context:384` → **`:397`** |
+| G15 | F7-7「`shopee_exporter.py:194` 恒假」 | `load_session` 在 `:194` ✅，判定在 **`:196`**；唯一调用方 `app.py:438` ✅ | 行号微调 |
+| G16 | Task 7「`miaoshou_smart_login.py:505` 是死代码」 | **半对**：`login_miaoshou_account`（def `:543`）确实无调用方 ✅；但 `MiaoshouSmartLogin.__init__:39` 的 `SessionManager()` **会 mkdir `data/sessions`** → 即使死代码也产生目录 | 删写点 ✅ + **必须处理 `:39` 的构造副作用** |
+| G17 | F7-6「`base_collector`/`shopee_collector` 的 `temp/sessions/**` 不在废除范围」 | ✅ 完全证实：`base_collector.py:131` `session_dir = Path(f"temp/sessions/{platform}_{account_id}")`（写 `:427/437`）、`shopee_collector.py:65` `Path("temp/sessions/shopee")/store_name`（写 `:339`）→ **都不写 `data/sessions`** | 保留 F7-6；建议加注释锁死 |
+| G18 | F7-3「`app.py:2259-2263` 硬编码 `Path("data/sessions")`」 | ✅ 正确（`:2259` 硬编码，`:2260` 目录非空即 "healthy"）。补充：`:2256` 的 `session_key = f"{platform.lower()}/{account_label}"` 用 `account_label`，与 `SessionManager._safe_filename` 规则不同 → 即使今天也是「几乎永不命中」的判据 | 改查 profile 目录 ✅ |
+| G19 | F7-4「3 套目录命名规则并存」 | ✅ 证实，**但漏了第 4 套**：`profiles/<platform>/<shop_account_id>`（`PersistentBrowserManager` 路径） | F7-4 改为「**4 套**」 |
+| G20 | Task 6 Files 清单的行号 | 逐条核对**全部命中**（面板 `:35-39`/`:176-210`；HTML `:200`/`:223`/`:290`/`:299`；ps1 `:249-304`/`:363`/`:368`/`:373`/`:548-571`；`pwcli_native.py:899-935`/`:325-348`/`:970`/`:1005-1006`；`verify_pwcli_helpers.ps1:10-12`；`generate_pwcli_account_commands.py:137/145/153`；`pwcli_account_inventory.py:26/32/38`） | 无需改 |
+| G21 | Task 6 Test 清单含 `backend/tests/test_pwcli_inspection_panel_reporting.py` | 该文件**不含任何 save 断言**（只断言 `result.status`/`result.message`/`combined_output`）→ 不会失效 | 从失效清单移除 |
+
+#### 🔴 阻塞级耦合
+
+| # | 问题 | 后果 | 处置 |
+|---|---|---|---|
+| **B1** | **profile 身份有三套命名空间**：采集 `profiles/<平台>/<main_account_id>`；pwcli 面板 `profiles/<平台>/<main_account_id>` ✅；**TUI 巡店/组件调试台/录制子进程 `profiles/<平台>/<shop_account_id>`** ❌ | ① TUI 巡店登录的登录态落在**采集永远不读**的目录；② 讽刺的是，**目前是它靠「人工会话优先」这条规则在给采集喂登录态**（`executor_v2.py:1020-1029` → `_should_prefer_manual_storage_state` 恒 True）→ **Task 7 删掉会话文件后这条桥彻底断**；③ `legacy_shop_artifact_cleanup.py:48` 把 `profiles/<平台>/<shop_account_id>` 列为「遗留物」→ **代码在持续制造被自己标记为垃圾的目录** | **已提请用户拍板**（三选一：全部统一到 main_account_id / 承认它是独立调试工具 / 本轮先按独立工具做、统一化排后续） |
+| **B2** | Task 7 删文件后 `_manual_storage_state_exists` 恒 False → 采集行为从「读人工会话」**静默翻转**为「走 profile」 | 方向正确（符合 R1/R4），但**必须在测试里显式断言这个翻转**，否则是静默行为变更 | Task 4.2 的测试改写清单里补一条「人工会话文件存在时也恒走 profile」 |
+| **B3** | Step 6.7 的锁在 **TUI 巡店**路径上拿不到 `main_account_id` | `app.py`/`handlers.py` 的 account dict 来自 `AccountManager` 的**文件配置**（`accounts.enc`/`local_accounts.py`），**没有 `main_account_id` 字段** → 要新增 DB 查询 `core.shop_accounts.shop_account_id → main_account_id`。录制子进程**有**（`component_test_service.py:69-72`）但没被用（`tools/test_component.py:1792` 优先取 `session_owner_id or self.account_id`） | 随 B1 的拍板结果处理 |
+| **B4** | `command_state_load`（`pwcli_native.py:948`）是第 11 个写入点，计划漏列 | 账号级 session 下它写 `data/sessions` | Task 6 必须单独把该分支置空 |
+
+#### 🟠 重要级耦合
+
+| # | 问题 | 处置 |
+|---|---|---|
+| **I1** | `manual_seeded` / `protected` 在 Task 6 后**全系统归零**（唯一生产者是 `pwcli_native.py:917-921` 的 `command_state_save`）。消费者：`executor_v2.py:3061`、`:1261`、`runtime_session.py:361/365/515-516`、`collection_tasks.py:464` | **Task 8 的诊断字段必须与 Task 6 同步**（规范 v3 已决定废除 `session_manual_seeded`/`session_protected` → 正好一致，但实施顺序要对齐） |
+| **I2** | Task 7 删 `safe_session_account_dirname` 会**打断 `pwcli_native`**：`session_manager.py:131` → `pwcli_native.py:181`(函数内 import) → `runtime_account_state_path:174-190` → `resolve_default_state_config:211` → **每次账号级 open 都触发** → 运行时 `ImportError`（不是启动期） | **必须 Task 6 先把账号级 `default_state_path` / `default_state_mode` 拆掉**，或 Task 7 同步删 `runtime_account_state_path` |
+| **I3** | `get_persistent_profile_path:216` 的 **mkdir 副作用** —— 「读 profile 存在性」会**创建空目录**（主仓已见 `profiles/shopee/account-1`、`account-2`、`main-1`、`profiles/miaoshou/acc-1`、`main-1` 等空目录） | 收窄 `SessionManager` 时去掉这个 mkdir，否则「目录可整体删除」的验收被空目录干扰 |
+| **I4** | `SessionManager()` 有 **11+ 处构造点**，每处都会 mkdir `data/sessions`：`runtime_session.py:252/266/325/470/745`、`executor_v2.py:244/261/320/1210`、`persistent_browser_manager.py:48`、`shopee_workflow_manager.py:83/421`、`miaoshou_smart_login.py:39`、`shopee_exporter.py:193`、`pwcli_native.py:340`、`tools/test_component.py:1796`、`tools/launch_inspector_recorder.py:413` | 删 `:170` 的 mkdir 之后仍有人传 `base_path=` → **`SessionManager.__init__` 的 `base_path` 参数本身就该删**（`pwcli_native.py:340` 是唯一显式传参的） |
+| **I5** | 巡店面板**读**旧会话文件注入 profile（`pwcli_native.py:658` → `:380-393`） | Task 6 只删「写」的话，**旧 `data/sessions` 里的过期 cookie 会被注入进新 profile**，直接违反 R1/R4 → **Task 6 必须同时清掉账号级 `default_state_path`** |
+| **I6** | `command_open:723` **重复打开会强杀上一个窗口**（R7 违反）→ 「登录完 → 再点打开」会丢登录态 | Step 6.5 只改了 `command_close`（`:778`），**漏了 `:723`（重复打开）与 `:789`（close-all）** → **三处统一改** |
+| **I7** | `persistent_browser_manager.py:205` 的 `_alt` 旁路仍会制造第二份登录态（主仓已有 `profiles/shopee/虾皮巴西东朗照明主体_alt`） | Task 7 Step 3.5 删这个 fallback ✅（方向正确） |
+
+#### Task 6 补充要求（盘点新增）
+
+1. **优雅关闭（Step 6.5）落成方案 D**：**CDP `Browser.close`** → Chromium 正常退出 → 刷盘；**必须带超时 + 回落 `taskkill`**。
+   - 注意 `playwright.stop()`（`:777`）**不会关浏览器** —— 浏览器是 `connect_over_cdp` 接上的，Playwright 只断开 CDP，不拥有该浏览器进程。顺序必须是「`browser.close()` → 再 `playwright.stop()`」，**现在顺序相反**。
+   - `close_all:788` 是逐个 session 处理、无 CDP 连接 → 要么补连接、要么逐个走同一路径。
+2. **锁的持有期（Step 6.7 未回答）**：`pwcli open` 是一次性命令（`command_open:742` 返回 0，PowerShell/Python 结束，**Chromium 还活着**）→ 当前架构里**没有自然持有者**。
+   - **推荐方案 ①**：面板（常驻 uvicorn，`pwcli_inspection_panel.py:229`）在 `/api/accounts/open` 前取 Redis 锁 → 启动后从 `output/playwright/.pwcli_native/sessions/<session>/session.json` 读 `pid` → 轮询 `is_process_alive(pid)`（`:451-453`）→ 进程消失即放锁。
+   - 面板 `run_action:176` 现在是 **sync def**（`subprocess.run` 阻塞）→ 端点要改 `async def` + `await` 取锁 + `asyncio.create_task` 后台轮询放锁。面板进程崩溃 → 锁泄漏到 TTL（可接受，靠 TTL + 心跳）。
+   - 锁被占用时的提示：面板 `run_action:191` 已有 `HTTPException` 通路，但 **500 语义不对 → 应改成 409**。
+3. **代理传递要打通 5 环**（盘点逐环列出）：面板 SQL LEFT JOIN 取 proxy → 面板拼命令 → `pwcli_helpers.ps1` 加参数 → `pwcli_native.parse_open_args` 加 `--proxy-server/--proxy-username/--proxy-password` → Chromium `--proxy-server=`。
+   - ⚠️ **凭据不要进命令行**（进程列表可见）→ 建议走环境变量或临时文件。
+   - ⚠️ Chromium 的 `--proxy-server` **不支持 user:pass** → 需 CDP `Fetch.continueWithAuth`。更省事的替代：把 `launch_browser` 的裸 `subprocess.Popen` 换成 `playwright.chromium.launch_persistent_context(..., proxy={server,username,password})`（Playwright 原生支持带凭据代理，且 R8 更干净），但会改动 session 元数据/重连逻辑（`connect_browser` 依赖 `--remote-debugging-port`）→ **改动面更大，需在 Task 6.1 单独评估**。
+4. **`save_default_storage_state_from_context` 改成 no-op 是安全的**：函数签名 `-> None`，**11 个调用点全部是裸语句、无一使用返回值**（已逐个核实）。
+5. `:332-333` 的 TikTok origins 补充（`_supplement_tiktok_storage_state_from_pages`）**必须保留给 raw_json 分支**，否则 `pwcli state-save <file>`（人工导出）会丢 `localStorage`。
+6. **R7 另一处硬伤**：`launch_browser` 用 `subprocess.Popen(DETACHED_PROCESS)` 启动 Chromium，**Playwright 从不 close 这个 context** → profile 的最终刷盘完全依赖 Chromium 进程自己退出。**用户手点 X = 优雅 ✅**；程序化 close / 重开 / close-all 三条路违反 R7 → 验收口径要写清楚这一点。
+
+#### Task 7 补充要求（盘点新增）
+
+1. **`base_collector` / `shopee_collector` 的 `temp/sessions/**` 明确排除**（G17 已证实）→ 建议加注释锁死，避免后续误删。
+2. **`SessionManager` 收窄后外部调用方清单**（会断的）：`runtime_session.load_runtime_session_candidate`（`:347`）与其内部 `_load_session_async`（`:241`）、`_bootstrap_session_from_profile_sync`（`:258`）在 Task 4.2 后**全部变成死链**；`_bootstrap_session_from_profile_sync` 还有个隐患 —— 它会用**同一 profile 目录再开一个持久 context**，主 profile 开着时 → Chromium ProcessSingleton 冲突 → 被 `except Exception` 吞掉 → 返回 `None` → **新 context 无登录态且不报错**。
+3. **文档同步范围要扩**（M5）：`docs/guides/` 下 4 个文档 + `openspec/specs/data-collection/spec.md:47/49` 仍在规定 `data/sessions` 为事实标准 → Task 9 必须逐一点名覆盖。
+
 
 - [ ] **Step 1: 写失败测试**
 
