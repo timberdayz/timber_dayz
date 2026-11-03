@@ -21,6 +21,10 @@ import pytest
 
 from modules.apps.collection_center.executor_v2 import CollectionResult
 
+# 预先 import 真实的 redis_client(脱敏工具): 下面的用例会替换 sys.modules["redis"],
+# 若那时才 import 它, fastapi_cache 会去 import 真实 redis 包并因假模块缺属性而失败。
+from backend.utils.redis_client import sanitize_redis_url_for_log  # noqa: F401
+
 
 # ---------------------------------------------------------------------------
 # 假后端
@@ -35,6 +39,7 @@ class FakeSessionLockBackend:
         self.expiry: Dict[str, float] = {}
         self.waiters: Dict[str, Set[str]] = {}
         self.calls: List[Tuple[str, str]] = []
+        self.waiter_ttls: List[int] = []
         self.unavailable = False
 
     # -- 内部 -------------------------------------------------------------
@@ -92,6 +97,7 @@ class FakeSessionLockBackend:
     async def add_waiter(self, key: str, waiter_id: str, ttl_seconds: int) -> None:
         self._guard()
         self.calls.append(("add_waiter", key))
+        self.waiter_ttls.append(int(ttl_seconds))
         self.waiters.setdefault(key, set()).add(waiter_id)
 
     async def remove_waiter(self, key: str, waiter_id: str) -> None:
@@ -151,6 +157,32 @@ class FakeRedisClient:
     async def hlen(self, key):
         self.calls.append(("hlen", key))
         return len(self.waiters.get(key, {}))
+
+
+class _StubRedisClient:
+    """最小可用的假 Redis 客户端(只实现账号会话锁用到的命令)。"""
+
+    def __init__(self, *, ping_error: Optional[Exception] = None) -> None:
+        self.ping_error = ping_error
+        self.closed = False
+
+    async def ping(self) -> bool:
+        if self.ping_error is not None:
+            raise self.ping_error
+        return True
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def _install_fake_redis_asyncio(monkeypatch, from_url) -> None:
+    """把 ``sys.modules["redis"]`` 换成假模块 —— **绝不连真实 Redis**。"""
+    fake_asyncio_module = types.ModuleType("redis.asyncio")
+    fake_asyncio_module.from_url = from_url  # type: ignore[attr-defined]
+    fake_redis_module = types.ModuleType("redis")
+    fake_redis_module.asyncio = fake_asyncio_module  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "redis", fake_redis_module)
+    monkeypatch.setitem(sys.modules, "redis.asyncio", fake_asyncio_module)
 
 
 # ---------------------------------------------------------------------------
@@ -1196,23 +1228,218 @@ async def test_shared_redis_client_is_cached_after_first_resolution(
 async def test_shared_redis_client_returns_none_when_connection_fails(
     monkeypatch,
 ) -> None:
+    """连接失败 -> 返回 None(但**不得**把失败永久缓存, 见下一个用例)。"""
     from backend.services import main_account_session_lock as lock_module
 
     await lock_module.reset_shared_redis_client()
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("REDIS_PASSWORD", raising=False)
 
-    fake_asyncio_module = types.ModuleType("redis.asyncio")
+    attempts: List[str] = []
 
-    def _boom(url, **kwargs):
+    def _boom(url: str, **kwargs):
+        attempts.append(url)
         raise RuntimeError("connection refused")
 
-    fake_asyncio_module.from_url = _boom
-    fake_redis_module = types.ModuleType("redis")
-    fake_redis_module.asyncio = fake_asyncio_module
-    monkeypatch.setitem(sys.modules, "redis", fake_redis_module)
-    monkeypatch.setitem(sys.modules, "redis.asyncio", fake_asyncio_module)
+    _install_fake_redis_asyncio(monkeypatch, _boom)
 
     assert await lock_module.get_shared_redis_client() is None
+    assert len(attempts) == 1
+
+    await lock_module.reset_shared_redis_client()
+
+
+@pytest.mark.asyncio
+async def test_shared_redis_client_retries_connection_after_failure(
+    monkeypatch,
+) -> None:
+    """回归: 第一次连接失败后, 第二次调用**必须重新尝试连接**。
+
+    旧实现把 ``_redis_client_resolved`` 在连接**之前**置位 -> 一次抖动后该进程
+    此后永远拿不到 Redis -> 生产 fail-closed -> 该 worker 的采集被永久拒绝。
+    """
+    from backend.services import main_account_session_lock as lock_module
+
+    await lock_module.reset_shared_redis_client()
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+    # 关掉冷却窗, 让第二次调用立刻重试
+    monkeypatch.setenv("ACCOUNT_SESSION_LOCK_REDIS_RETRY_COOLDOWN_SECONDS", "0")
+
+    attempts: List[str] = []
+    client = _StubRedisClient()
+
+    def _from_url(url: str, **kwargs):
+        attempts.append(url)
+        if len(attempts) == 1:
+            raise RuntimeError("connection refused")
+        return client
+
+    _install_fake_redis_asyncio(monkeypatch, _from_url)
+
+    assert await lock_module.get_shared_redis_client() is None
+    # 第二次: 必须真的重新尝试连接(而不是复用缓存的失败)
+    assert await lock_module.get_shared_redis_client() is client
+    assert len(attempts) == 2
+
+    await lock_module.reset_shared_redis_client()
+
+
+@pytest.mark.asyncio
+async def test_shared_redis_client_does_not_retry_within_cooldown_window(
+    monkeypatch,
+) -> None:
+    """冷却窗内不再白等连接超时(快速返回 None), 窗口外自动重试。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    await lock_module.reset_shared_redis_client()
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+    monkeypatch.setenv("ACCOUNT_SESSION_LOCK_REDIS_RETRY_COOLDOWN_SECONDS", "0.05")
+
+    attempts: List[str] = []
+
+    def _boom(url: str, **kwargs):
+        attempts.append(url)
+        raise RuntimeError("connection refused")
+
+    _install_fake_redis_asyncio(monkeypatch, _boom)
+
+    assert await lock_module.get_shared_redis_client() is None
+    assert len(attempts) == 1
+
+    # 冷却窗内 -> 不再重连, 但仍然是 None(fail-closed 语义不变)
+    assert await lock_module.get_shared_redis_client() is None
+    assert len(attempts) == 1
+
+    # 冷却窗外 -> 自动重试
+    await asyncio.sleep(0.1)
+    assert await lock_module.get_shared_redis_client() is None
+    assert len(attempts) == 2
+
+    await lock_module.reset_shared_redis_client()
+
+
+@pytest.mark.asyncio
+async def test_shared_redis_client_closes_client_when_ping_fails(
+    monkeypatch,
+) -> None:
+    """from_url 成功但 ping 失败 -> 已创建的连接必须被关闭(不泄漏)。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    await lock_module.reset_shared_redis_client()
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+
+    client = _StubRedisClient(ping_error=RuntimeError("auth failed"))
+
+    _install_fake_redis_asyncio(monkeypatch, lambda url, **kwargs: client)
+
+    assert await lock_module.get_shared_redis_client() is None
+    assert client.closed is True
+
+    await lock_module.reset_shared_redis_client()
+
+
+@pytest.mark.asyncio
+async def test_shared_redis_client_failure_log_gives_operator_hint(
+    monkeypatch,
+    caplog,
+) -> None:
+    """失败日志必须给出**可执行**的运维提示(会重连 + 该查什么)。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    await lock_module.reset_shared_redis_client()
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+
+    def _boom(url: str, **kwargs):
+        raise RuntimeError("connection refused")
+
+    _install_fake_redis_asyncio(monkeypatch, _boom)
+
+    with caplog.at_level("ERROR"):
+        assert await lock_module.get_shared_redis_client() is None
+
+    assert "自动重连" in caplog.text
+    assert "REDIS_PASSWORD" in caplog.text
+
+    await lock_module.reset_shared_redis_client()
+
+
+@pytest.mark.asyncio
+async def test_shared_redis_client_does_not_leak_connection_on_concurrent_call(
+    monkeypatch,
+) -> None:
+    """并发首连: 只保留一条连接, 另一条必须被关闭(不得泄漏)。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    await lock_module.reset_shared_redis_client()
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+
+    created: List[_StubRedisClient] = []
+    gate = asyncio.Event()
+
+    class _GatedRedis(_StubRedisClient):
+        async def ping(self) -> bool:
+            # 等到两个客户端都建好 -> 强制两个调用交错
+            if len(created) >= 2:
+                gate.set()
+            await gate.wait()
+            return True
+
+    def _from_url(url: str, **kwargs):
+        client = _GatedRedis()
+        created.append(client)
+        return client
+
+    _install_fake_redis_asyncio(monkeypatch, _from_url)
+
+    first, second = await asyncio.gather(
+        lock_module.get_shared_redis_client(),
+        lock_module.get_shared_redis_client(),
+    )
+
+    assert first is not None
+    assert first is second
+    assert len(created) == 2
+    assert sum(1 for client in created if client.closed) == 1
+
+    await lock_module.reset_shared_redis_client()
+
+
+@pytest.mark.asyncio
+async def test_reset_shared_redis_client_clears_failure_cooldown(
+    monkeypatch,
+) -> None:
+    """reset 必须同时清掉失败时间戳(否则冷却状态会跨调用残留)。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    await lock_module.reset_shared_redis_client()
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+    monkeypatch.setenv("ACCOUNT_SESSION_LOCK_REDIS_RETRY_COOLDOWN_SECONDS", "300")
+
+    attempts: List[str] = []
+
+    def _boom(url: str, **kwargs):
+        attempts.append(url)
+        raise RuntimeError("connection refused")
+
+    _install_fake_redis_asyncio(monkeypatch, _boom)
+
+    assert await lock_module.get_shared_redis_client() is None
+    assert len(attempts) == 1
+
+    # 冷却窗内 -> 不重连
+    assert await lock_module.get_shared_redis_client() is None
+    assert len(attempts) == 1
+
+    # reset 之后 -> 冷却状态被清掉 -> 立刻重试
+    await lock_module.reset_shared_redis_client()
+    assert await lock_module.get_shared_redis_client() is None
+    assert len(attempts) == 2
 
     await lock_module.reset_shared_redis_client()
 
@@ -1494,5 +1721,221 @@ async def test_renew_loop_propagates_cancellation() -> None:
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+# ---------------------------------------------------------------------------
+# REDIS_PASSWORD 注入(URL 不带密码但环境变量有密码 -> AUTH 必然失败)
+# ---------------------------------------------------------------------------
+
+
+def test_inject_redis_password_keeps_url_that_already_has_password() -> None:
+    """URL 已含密码 -> 原样使用(以 URL 为准, 不覆盖)。"""
+    from backend.services.main_account_session_lock import inject_redis_password
+
+    url = "redis://:existing-secret@redis:6379/0"
+    assert inject_redis_password(url, "other-secret") == url
+
+
+def test_inject_redis_password_injects_password_into_plain_url() -> None:
+    """URL 不含密码 + 有密码 -> 注入 ``:password@``。"""
+    from backend.services.main_account_session_lock import inject_redis_password
+
+    assert (
+        inject_redis_password("redis://redis:6379/0", "s3cret")
+        == "redis://:s3cret@redis:6379/0"
+    )
+
+
+def test_inject_redis_password_keeps_url_when_no_password_available() -> None:
+    """URL 不含密码 + 没有环境变量密码 -> 原样使用(兼容无密码 Redis)。"""
+    from backend.services.main_account_session_lock import inject_redis_password
+
+    url = "redis://redis:6379/0"
+    assert inject_redis_password(url, "") == url
+    assert inject_redis_password("", "s3cret") == ""
+
+
+def test_inject_redis_password_reads_environment_variable(
+    monkeypatch,
+) -> None:
+    """省略 password 时读环境变量 ``REDIS_PASSWORD``。"""
+    from backend.services.main_account_session_lock import inject_redis_password
+
+    monkeypatch.setenv("REDIS_PASSWORD", "env-secret")
+    assert (
+        inject_redis_password("redis://redis:6379/0")
+        == "redis://:env-secret@redis:6379/0"
+    )
+
+    monkeypatch.setenv("REDIS_PASSWORD", "")
+    assert inject_redis_password("redis://redis:6379/0") == "redis://redis:6379/0"
+
+
+def test_inject_redis_password_handles_userinfo_without_password() -> None:
+    """畸形形态: URL 带 userinfo 但**没有**密码 -> 保留用户名并补上密码。"""
+    from backend.services.main_account_session_lock import inject_redis_password
+
+    assert (
+        inject_redis_password("redis://some-user@redis:6379/0", "s3cret")
+        == "redis://some-user:s3cret@redis:6379/0"
+    )
+
+
+def test_inject_redis_password_keeps_unparsable_url() -> None:
+    """URL 解析失败 -> 原样使用(连接层会给出明确报错)。"""
+    from backend.services.main_account_session_lock import inject_redis_password
+
+    broken = "redis://[::1"
+    assert inject_redis_password(broken, "s3cret") == broken
+
+
+@pytest.mark.asyncio
+async def test_shared_redis_client_injects_password_and_masks_it_in_logs(
+    monkeypatch,
+    caplog,
+) -> None:
+    """端到端: URL 不带密码 -> 用环境变量密码连接, 且密码绝不能进日志。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    await lock_module.reset_shared_redis_client()
+    monkeypatch.setenv("REDIS_URL", "redis://redis:6379/0")
+    monkeypatch.setenv("REDIS_PASSWORD", "top-secret")
+
+    used: Dict[str, Any] = {}
+
+    def _from_url(url: str, **kwargs):
+        used["url"] = url
+        return _StubRedisClient()
+
+    _install_fake_redis_asyncio(monkeypatch, _from_url)
+
+    with caplog.at_level("INFO"):
+        client = await lock_module.get_shared_redis_client()
+
+    assert client is not None
+    assert used["url"] == "redis://:top-secret@redis:6379/0"
+    assert "top-secret" not in caplog.text
+    assert "***@redis:6379" in caplog.text
+
+    await lock_module.reset_shared_redis_client()
+
+
+# ---------------------------------------------------------------------------
+# 降级为进程内锁时必须按 error 告警(跨进程保护已失效)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_degrade_to_local_lock_is_reported_as_error(
+    monkeypatch,
+    caplog,
+) -> None:
+    """Redis 不可用而 fail-open 时, 必须 error 级别告警并写明跨进程保护失效。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "redis")
+
+    async def _fake_client():
+        return None
+
+    monkeypatch.setattr(lock_module, "get_shared_redis_client", _fake_client)
+
+    with caplog.at_level("ERROR"):
+        backend = await lock_module.create_default_backend(fail_closed=False)
+
+    assert isinstance(backend, lock_module.LocalSessionLockBackend)
+    assert "跨进程保护已失效" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# 等待者 Hash 的 TTL 必须覆盖整个等待时长
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_waiter_hash_ttl_covers_the_configured_max_wait_time() -> None:
+    """等待者 Hash 的 TTL 必须覆盖**配置的最大等待时长**(锁 TTL 只有 300s)。"""
+    from backend.services.main_account_session_lock import (
+        MainAccountSessionLock,
+        MainAccountSessionLockTimeoutError,
+    )
+
+    backend = FakeSessionLockBackend()
+    holder = MainAccountSessionLock(backend=backend, ttl_seconds=300, wait_timeout=1800)
+    waiter = MainAccountSessionLock(
+        backend=backend, ttl_seconds=300, wait_timeout=1800, retry_interval=0.05
+    )
+
+    async with holder.acquire("shopee", "main-a"):
+        task = asyncio.create_task(waiter.acquire("shopee", "main-a").__aenter__())
+        await asyncio.sleep(0.2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    # 等待时长 1800s -> 等待者 Hash 的 TTL 必须 >= 1800(否则 waiter_count 会归零)
+    assert backend.waiter_ttls == [1800 + 60]
+
+
+@pytest.mark.asyncio
+async def test_redis_backend_refreshes_waiter_hash_ttl_on_every_registration() -> None:
+    """每次登记等待者都要刷新等待者 Hash 的 TTL。"""
+    from backend.services.main_account_session_lock import RedisSessionLockBackend
+
+    client = FakeRedisClient()
+    backend = RedisSessionLockBackend(client)
+
+    await backend.add_waiter("lock-key", "waiter-1", 1860)
+    await backend.add_waiter("lock-key", "waiter-2", 1860)
+
+    expire_calls = [payload for name, payload in client.calls if name == "expire"]
+    assert expire_calls == [("lock-key:waiters", 1860), ("lock-key:waiters", 1860)]
+
+
+# ---------------------------------------------------------------------------
+# 进程内后端的事件循环作用域标识不得用 id(loop)(id 会被复用)
+# ---------------------------------------------------------------------------
+
+
+def test_local_backend_scope_uses_a_non_reusable_loop_identity() -> None:
+    """作用域标识必须是唯一且**不复用**的 uuid, 不能是 ``id(loop)``。"""
+    from backend.services.main_account_session_lock import LocalSessionLockBackend
+
+    backend = LocalSessionLockBackend()
+    scopes: List[Tuple[str, str]] = []
+
+    async def _capture():
+        scopes.append(backend._scope("k"))
+
+    loop_a = asyncio.new_event_loop()
+    try:
+        loop_a.run_until_complete(_capture())
+    finally:
+        loop_a.close()
+
+    loop_b = asyncio.new_event_loop()
+    try:
+        loop_b.run_until_complete(_capture())
+    finally:
+        loop_b.close()
+
+    # 两个不同的 event loop -> 两个不同的作用域(否则会误判为「同一把锁」)
+    assert scopes[0] != scopes[1]
+    assert scopes[0][1] == scopes[1][1] == "k"
+    # 明确不是 id(loop): 是 uuid4 的 32 位 hex
+    assert len(scopes[0][0]) == 32
+    assert all(char in "0123456789abcdef" for char in scopes[0][0])
+
+
+@pytest.mark.asyncio
+async def test_local_backend_scope_is_stable_within_the_same_loop() -> None:
+    """同一个 event loop 内, 作用域标识必须稳定(否则锁根本互斥不了)。"""
+    from backend.services.main_account_session_lock import LocalSessionLockBackend
+
+    backend = LocalSessionLockBackend()
+    first = backend._scope("k")
+    second = backend._scope("k")
+
+    assert first == second
 
 
