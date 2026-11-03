@@ -1846,7 +1846,7 @@ Expected: 工作区干净。
 | 6 | 收窄 `SessionManager` | ✅ | `session_manager.py` **802 → 110 行**，只剩 `get_persistent_profile_path` + `get_profile_path`；`__init__` 去掉 `base_path` 形参与 mkdir；`get_persistent_profile_path` **去掉 mkdir 副作用** |
 | 7 | 最后删 `safe_session_account_dirname` | ✅ | 自由函数删；legacy 命名规则**就地内联**进 `get_profile_path`，legacy 目录指向不变 |
 | 8 | 外围同步 | ✅ | `dcf37179`：`data/sessions` 移出遗留物候选；`backend/main.py` / `run.py` 告警文案改「店铺级 profile 遗留」；`launch_inspector_recorder` profile 改主账号 ID（**指纹同 key**） |
-| 9 | 磁盘清理 | ⏸ **待运维** | 代码不自动删目录（规范 §6）。主仓实测 `data/sessions/` 有 19 个 `storage_state.json`（1.47 MB）+ 10 个空目录，命名空间 `miaoshou` / `miaoshou_erp` / `妙手erp` 三套并存 → 走「备份 → 观察 1~2 周 → 删除」 |
+| 9 | 磁盘清理 | ⏸ **待运维** | 代码不自动删目录（规范 §6）。主仓实测 `data/sessions/` 有 19 个 `storage_state.json`（1.47 MB）+ 10 个空目录，命名空间 `miaoshou` / `miaoshou_erp` / `妙手erp` 三套并存 → 走「备份 → 观察 1~2 周 → 删除」。**注意**：`tools/cleanup_legacy_shop_session_artifacts.py`（人工触发的清理脚本，默认 dry-run，`--delete` 才真删）在步 8 之后**不再包含 `data/sessions` 候选** → 它清的是店铺级 profile / fingerprint 遗留，**不是**会话文件。`data/sessions/` 的删除需要运维单独出一份清单 |
 | 10 | 文档同步 | ✅ | Task 9 |
 
 **步 8 的一处补正**：计划原文只说录制器 profile 改 `main_account_id`，但**指纹也必须同 key** —— 采集执行器 `runtime_session._get_fingerprint_context_options_async` 用的就是 `session_owner_id`（= 主账号 ID）。profile 与指纹 key 不一致会出现「同一个 profile 目录、两种设备指纹」，录出来的登录态未必能被采集复用。已按同 key 落地。
