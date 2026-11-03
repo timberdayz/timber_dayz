@@ -421,6 +421,11 @@ class TaskResponse(BaseModel):
     login_gate_url: Optional[str] = None
     runtime_strategy_reason: Optional[str] = None
     session_source: Optional[str] = None
+    # [Task 8] 会话诊断收敛为 profile 载体语义（规范 §8）。
+    # 不声明就会被 response_model 丢掉，前端顶层就读不到。
+    session_profile_path: Optional[str] = None
+    session_reused: Optional[bool] = None
+    session_proxy: Optional[str] = None
     runtime_metadata: Optional[Dict[str, Any]] = None
 
 

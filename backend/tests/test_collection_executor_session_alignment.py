@@ -1127,8 +1127,8 @@ def test_runtime_metadata_details_include_session_diagnostics() -> None:
             "_runtime_session_diagnostics": {
                 "session_owner_id": "main-1",
                 "shop_account_id": "shop-1",
-                "persistent_profile_path": "profiles/tiktok/main-1",
-                "profile_contains_state": True,
+                "session_profile_path": "profiles/tiktok/main-1",
+                "session_reused": True,
                 "selected_page_url": "https://seller.tiktok.com/account/login",
                 "available_page_urls": [
                     "https://seller.tiktok.com/account/login",
@@ -1137,8 +1137,9 @@ def test_runtime_metadata_details_include_session_diagnostics() -> None:
                 "runtime_context_summary": {
                     "locale": None,
                 },
-                "runtime_strategy_reason": "storage_state_missing",
-                "session_source": "persistent_profile",
+                "runtime_strategy_reason": "persistent_profile_ready",
+                "session_source": "profile",
+                "session_proxy": "http://proxy.example.com:8080",
                 "probe_urls": [
                     "https://seller.tiktok.com/homepage",
                     "https://seller.tiktok.com/account/login",
@@ -1152,16 +1153,17 @@ def test_runtime_metadata_details_include_session_diagnostics() -> None:
 
     assert details["session_owner_id"] == "main-1"
     assert details["shop_account_id"] == "shop-1"
-    assert details["persistent_profile_path"] == "profiles/tiktok/main-1"
-    assert details["profile_contains_state"] is True
+    assert details["session_profile_path"] == "profiles/tiktok/main-1"
+    assert details["session_reused"] is True
     assert details["selected_page_url"] == "https://seller.tiktok.com/account/login"
     assert details["available_page_urls"] == [
         "https://seller.tiktok.com/account/login",
         "https://seller.tiktok.com/homepage?shop_region=MY",
     ]
     assert details["runtime_context_summary"] == {"locale": None}
-    assert details["runtime_strategy_reason"] == "storage_state_missing"
-    assert details["session_source"] == "persistent_profile"
+    assert details["runtime_strategy_reason"] == "persistent_profile_ready"
+    assert details["session_source"] == "profile"
+    assert details["session_proxy"] == "http://proxy.example.com:8080"
     assert details["probe_urls"] == [
         "https://seller.tiktok.com/homepage",
         "https://seller.tiktok.com/account/login",
@@ -1534,11 +1536,46 @@ def test_runtime_session_diagnostics_has_no_legacy_quality_fields() -> None:
         "session_quality_source",
         "session_manual_seeded",
         "session_protected",
+        "persistent_profile_path",
+        "profile_contains_state",
     ):
         assert legacy_field not in diagnostics, f"诊断里仍存在旧字段 {legacy_field}"
 
-    assert diagnostics["profile_contains_state"] is True
-    assert diagnostics["session_source"] == "persistent_profile"
+    assert diagnostics["session_profile_path"] == "profiles/tiktok/main-1"
+    assert diagnostics["session_reused"] is True
+    # [Task 8] profile 是唯一载体 → 会话来源对外只有单值 ``profile``
+    assert diagnostics["session_source"] == "profile"
+    assert diagnostics["session_proxy"] is None
+
+
+def test_runtime_session_diagnostics_masks_proxy_credentials() -> None:
+    """[Task 8] ``session_proxy`` 只留 scheme+host，凭据必须被抹掉。"""
+    bundle = type(
+        "Bundle",
+        (),
+        {
+            "context_options": {},
+            "profile_path": "profiles/tiktok/main-1",
+            "reused_session": False,
+            "session_source": "persistent_profile",
+        },
+    )()
+
+    diagnostics = CollectionExecutorV2._runtime_session_diagnostics(
+        platform="tiktok",
+        params={"main_account_id": "main-1"},
+        runtime_bundle=bundle,
+        proxy={
+            "server": "http://user:pass@proxy.example.com:8080",
+            "username": "user",
+            "password": "pass",
+        },
+    )
+
+    assert diagnostics["session_proxy"] == "http://proxy.example.com:8080"
+    assert "user" not in diagnostics["session_proxy"]
+    assert "pass" not in diagnostics["session_proxy"]
+    assert diagnostics["session_reused"] is False
 
 
 @pytest.mark.asyncio

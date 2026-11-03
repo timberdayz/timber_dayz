@@ -395,16 +395,16 @@ class PersistentBrowserManager:
         context_key = f"{platform}_{account_id}"
         profile_path = self.session_manager.get_persistent_profile_path(platform, account_id)
 
-        profile_contains_state = False
+        profile_has_cookie_store = False
         try:
-            # 与 runtime_session._profile_contains_state 同一判据：Chromium 的 cookie 库
+            # 与 runtime_session 的 cookie 库判据一致：看 Chromium 的 cookie 库
             # （不是「目录非空」—— 启动过一次的 profile 也会非空）。
-            profile_contains_state = any(
+            profile_has_cookie_store = any(
                 (profile_path / relative).exists()
                 for relative in ("Default/Network/Cookies", "Default/Cookies")
             )
         except Exception:
-            profile_contains_state = False
+            profile_has_cookie_store = False
 
         return {
             'platform': platform,
@@ -414,5 +414,6 @@ class PersistentBrowserManager:
             'is_active': context_key in self.active_contexts,
             'profile_exists': profile_path.exists(),
             # 登录态只由 profile 承载；「会话文件是否存在」这个概念已废除。
-            'profile_contains_state': profile_contains_state,
+            # [Task 8] 旧诊断字段名整体收敛为 profile 载体语义。
+            'profile_has_cookie_store': profile_has_cookie_store,
         }
