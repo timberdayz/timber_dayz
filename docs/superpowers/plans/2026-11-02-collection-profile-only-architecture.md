@@ -854,52 +854,73 @@ git commit -m "refactor(session): 废弃会话文件，登录态只保留 profil
 ## Task 8: 诊断字段与前端展示
 
 **Files:**
-- Modify: `modules/apps/collection_center/executor_v2.py:1103-1149`（`_runtime_session_diagnostics`）
-- Modify: `backend/domains/collection/routers/collection_tasks.py:436-466`
-- Modify: `frontend/src/domains/collection/views/collection/CollectionTasks.vue:360-394`、`:1080-1120`
-- Modify: `frontend/scripts/collectionTaskSessionQualityUi.test.mjs`
-- Test: `backend/tests/test_collection_task_runtime_metadata.py`
+- Modify: `modules/apps/collection_center/executor_v2.py:1121-1167`（`_runtime_session_diagnostics`）、`:1094-1119`（`_resolve_session_metadata`）、`:2874-2905`（`_should_skip_post_login_session_persist`）、`:2055/:2167/:5935`（`params["session_metadata"]`）、`:2068/:2180`（诊断调用点）、`:29-32`（import）
+- Modify: `backend/domains/collection/routers/collection_tasks.py:437-467`（白名单抽取）、`:470-540`（顶层提升）
+- Modify: `backend/schemas/collection.py:377-424`（`TaskResponse` 字段声明）
+- Modify: `frontend/src/domains/collection/views/collection/CollectionTasks.vue:360-395`、`:1093-1122`
+- Modify: `frontend/scripts/collectionTaskSessionQualityUi.test.mjs`（建议同时改名 `collectionTaskSessionProfileUi.test.mjs`）
+- Test: `backend/tests/test_collection_task_runtime_metadata.py`、`backend/tests/test_collection_executor_session_alignment.py:935-981`、`backend/tests/test_collection_frontend_contracts.py:247-259`
 
-**字段变更**：
+### Task 8 只读盘点结论（实施前必读）
+
+| # | 事实 | 影响 |
+|---|---|---|
+| F8-1 | **代码里已有等价字段，名字不同**：`persistent_profile_path`（`executor_v2.py:1141` ← `bundle.profile_path`）、`profile_contains_state`（`:1142-1144` ← `bundle.reused_session`） | 规范 §8 的 `session_profile_path` / `session_reused` 是**改名**，不是新增。改名要同步 executor + router + 2 个后端测试共 4 处 |
+| F8-2 | **`session_source` 已存在**（`executor_v2.py:1149`），取值是 `persistent_profile` / `storage_state` / `manual_storage_state` / `fresh_login`（`:1042-1046` 赋值），前端 `:366-368` 已在展示 | 计划把它当「新增」是误判。**按规范 v3（单一载体）应收敛为 `profile`** → 需同步 executor 赋值点 + 前端标签映射 |
+| F8-3 | 🔴 **前端那 5 个旧字段今天就是死代码**：`TaskResponse`（`backend/schemas/collection.py:377-424`）未声明 `session_quality_*`，`response_model` 会把未声明字段全部丢弃；Vue 读的是顶层 `detailTask.session_quality_source`，而 router 只把 7 个键提升到顶层（`collection_tasks.py:532-539`） | **删这 5 项没有功能回退风险**（它们从未渲染过） |
+| F8-4 | 🔴 **新字段默认也传不到前端**：router 不把 `persistent_profile_path`/`profile_contains_state` 提升到顶层，`TaskResponse` 也没声明 | **必须同时改** `collection_tasks.py:470-540`（提升顶层）+ `backend/schemas/collection.py:377-424`（声明字段），否则 Task 8 Step 3 是空做 |
+| F8-5 | 🔴 **Task 8 与 Task 7 强耦合**：旧字段的值来自 `session_metadata`，而 `session_metadata` 来自 `SessionManager.get_session_metadata()`（`executor_v2.py:1112-1116`）——Task 7 Step 3 要删该方法 | Task 8 必须连带删 `_resolve_session_metadata`（`:1094-1119`）与三处 `params["session_metadata"]` 赋值，否则 Task 7 一执行 Task 8 就断 |
+| F8-6 | 🔴 **并行路径根本没有会话诊断**：`execute_parallel_domains`（`:5779`）里 `:5935` 只设 `session_metadata`，**从不调用** `_runtime_session_diagnostics` | Task 10 第 8 步（并行采集）拿不到 profile/复用/代理诊断 → 若要在并行侧取证，需在 `execute_parallel_domains` 补一次诊断写入 |
+| F8-7 | `session_proxy` 的数据源在作用域内：`proxy` 是 `execute()` 局部变量（`:1895`），两个诊断调用点（`:2068`/`:2180`）同属 `execute()` → 最小改动是给 `_runtime_session_diagnostics` 加 `proxy=` 关键字参数并用 `mask_proxy_server` 脱敏 | `executor_v2.py:29-32` 的 import 加 `mask_proxy_server` 即可 |
+| F8-8 | `profile_contains_state` 语义失真：只判「profile 目录非空」（`runtime_session.py:460-464`），而 `session_manager.py:216` 会 `mkdir` 空目录 → 未登录账号也报 True | 改名成 `session_reused` **不解决**失真。要么同步修判定（Task 4 F4-6），要么字段名用更诚实的措辞 |
+| F8-9 | 前端无 TS 类型定义、无快照测试；`frontend/scripts/*.mjs` **不进 CI**（`.github/workflows/ci.yml:242-243` 只跑 `ci_frontend_test_silence_gate.py`） | 守卫测试只能手工 `node --test` 跑 |
+| F8-10 | `backend/tests/test_collection_frontend_contracts.py:247-259` 断言 Vue 里存在 `session_source`、`getSessionSourceLabel`、旧文案 | 改标签映射文案会让它红 → **必须同步改写**（计划未列） |
+
+**字段变更表（按规范 v3 收敛）**：
 
 | 旧 | 新 |
 |---|---|
 | `session_quality_score` | 删除 |
 | `session_quality_gate_passed` | 删除 |
-| `session_quality_source` | `session_source`（取值 `profile`） |
+| `session_quality_source` | 删除（其语义由 `session_source` 承载） |
 | `session_manual_seeded` | 删除 |
 | `session_protected` | 删除 |
-| — | `session_profile_path`（新增） |
-| — | `session_reused`（新增，profile 内是否已有登录态） |
+| `persistent_profile_path` | 改名 `session_profile_path` |
+| `profile_contains_state` | 改名 `session_reused` |
+| `session_source`（4 值） | **取值收敛为 `profile`**（单一载体） |
 | — | `session_proxy`（新增，脱敏后的代理标识） |
 
 - [ ] **Step 1: 改写后端测试**
 
-`test_collection_task_runtime_metadata.py:41` 的断言改为新字段集。
+`test_collection_task_runtime_metadata.py:41` 的断言改为新字段集；同时改写 `test_collection_executor_session_alignment.py:935-981`（断言 `persistent_profile_path`/`profile_contains_state`）与 `test_collection_frontend_contracts.py:247-259`（断言 Vue 里的字段名与文案）。
 
 - [ ] **Step 2: 实现后端**
 
-`executor_v2._runtime_session_diagnostics` 产出新字段；`collection_tasks.py:436-466` 同步抽取与透出。
+1. `executor_v2._runtime_session_diagnostics`：产出 `session_profile_path` / `session_reused` / `session_source`（收敛为 `profile`）/ `session_proxy`（`mask_proxy_server` 脱敏）；删 5 个旧字段。
+2. 删除 `_resolve_session_metadata`（`:1094-1119`）与三处 `params["session_metadata"]` 赋值（`:2055`/`:2167`/`:5935`），以及 `_should_skip_post_login_session_persist`（`:2874-2905`，依赖 `manual_seeded`/`protected`）。
+3. `collection_tasks.py:437-467` 白名单同步；`:470-540` 把新字段提升到响应顶层。
+4. `backend/schemas/collection.py:377-424` 的 `TaskResponse` 声明新字段（否则 `response_model` 会丢弃）。
+5. 两个诊断调用点传 `proxy=proxy`。
 
 - [ ] **Step 3: 改前端**
 
-`CollectionTasks.vue`：删除「质量来源」「质量评分」「质量门槛」「人工播种」「会话保护」五项；新增「会话载体」（profile 路径）、「是否复用」「出口代理」三项。同步更新 `getSessionQualitySourceLabel` 等标签映射函数。
+`CollectionTasks.vue`：删除「质量来源」「质量评分」「质量门槛」「人工播种」「会话保护」五项；新增「会话载体」（profile 路径）、「是否复用」「出口代理」三项；删除 `getSessionQualitySourceLabel`；`getSessionSourceLabel` 映射改为 `profile` 语义。
 
 - [ ] **Step 4: 改前端守卫测试**
 
-`frontend/scripts/collectionTaskSessionQualityUi.test.mjs` 重写为断言新字段。
+`frontend/scripts/collectionTaskSessionQualityUi.test.mjs` 重写为断言新字段名，**并加反向断言**（旧字段名不应再出现）——反向断言比「存在断言」更抗回归。建议同时改文件名。
 
 - [ ] **Step 5: 跑测试**
 
 ```powershell
-python -m pytest backend/tests/test_collection_task_runtime_metadata.py -v
+python -m pytest backend/tests/test_collection_task_runtime_metadata.py backend/tests/test_collection_executor_session_alignment.py backend/tests/test_collection_frontend_contracts.py -v
 cd frontend; npm run build; node scripts/collectionTaskSessionQualityUi.test.mjs
 ```
 
 - [ ] **Step 6: 提交**
 
 ```powershell
-git add modules/apps/collection_center/executor_v2.py backend/domains/collection/routers/collection_tasks.py frontend/src/domains/collection/views/collection/CollectionTasks.vue frontend/scripts/collectionTaskSessionQualityUi.test.mjs backend/tests/test_collection_task_runtime_metadata.py
+git add modules/apps/collection_center/executor_v2.py backend/domains/collection/routers/collection_tasks.py backend/schemas/collection.py frontend/src/domains/collection/views/collection/CollectionTasks.vue frontend/scripts/collectionTaskSessionQualityUi.test.mjs backend/tests/test_collection_task_runtime_metadata.py backend/tests/test_collection_executor_session_alignment.py backend/tests/test_collection_frontend_contracts.py
 git commit -m "refactor(diagnostics): 会话诊断字段改为 profile 载体语义"
 ```
 
@@ -951,13 +972,23 @@ git commit -m "docs(session): 回填 profile 单一载体架构实施结果"
 
 ## Task 10: 全量验收
 
+- [ ] **Step 0: 落一份可复用的基线快照**
+
+仓库里**没有** pytest 基线对比脚本，「143 failed + 22 errors」这个基线也没有任何文档记录 → 判定「零新增失败」不可复现。**先落一份基线快照文件**（含失败用例 id 列表），后续每次验收都拿它做集合 diff。
+
 - [ ] **Step 1: 后端全量测试**
 
 ```powershell
-python -m pytest backend/tests -q
+python -m pytest backend/tests -q --tb=no -rfE
 ```
 
-Expected: 全部 PASS（基线 318 附近；新增失败必须定位到本计划改动）。
+Expected: **失败数不高于基线**，且**新增失败必须定位到本计划改动**。
+
+> ⚠️ **不是「全部 PASS」** —— 仓库既有基线就是 **143 failed + 22 errors**（已用同 worktree 同环境双向验证过）。「全部 PASS」这个口径不可能达成，也不该达成。
+>
+> **判据必须是失败集合逐条 diff，不是看计数**。可用 `--junitxml` 产出后比对（`NEW failures=0`）。
+>
+> ⚠️ 跑全量会改写 `modules/platforms/shopee/components/login_v1_0_0.py` 的行尾 → 跑完 `git checkout --` 复原，不要提交它。
 
 - [ ] **Step 2: 前端构建 + 守卫测试**
 
@@ -969,6 +1000,9 @@ node scripts/collectionTaskSessionQualityUi.test.mjs
 
 Expected: exit=0。
 
+> ⚠️ `frontend/scripts/*.mjs` **不进 CI**（`.github/workflows/ci.yml:242-243` 只跑 `ci_frontend_test_silence_gate.py`）→ 必须手工跑。
+> ⚠️ Task 8 会把守卫测试改名（建议 `collectionTaskSessionProfileUi.test.mjs`）→ 此处命令同步改。
+
 - [ ] **Step 3: 发布前门禁**
 
 ```powershell
@@ -977,21 +1011,45 @@ python scripts/verify_release_local.py --skip-build
 
 Expected: exit=0。
 
+> ⚠️ **本地可能跑不通**（不要误判成代码问题）：该脚本需要 `.env.production`（**本地 worktree 不存在**）、docker compose 文件齐全，且内部第 3 步 `verify_system_role_integrity.py --repair` **会写库**。
+>
+> 跑不通时改为**只跑只读的那几项门禁**（`verify_rules_completeness.py` / `verify_root_md_whitelist.py` / `verify_utf8_source_hygiene.py`），并在验收记录里注明「发布门禁因缺 `.env.production` 未执行」。
+
 - [ ] **Step 4: 真实采集验收（关键）**
 
 在**本地笔记本**上按序执行：
 
-1. 备份并清空旧的会话目录（不进 VCS）：把 `data/sessions/` 整体改名为 `data/sessions.bak-20261102`
-2. 清空 `profiles/shopee/shopeeKR/` 下的 Chromium 状态（或整个目录改名备份）
+1. 备份并清空旧的会话目录（不进 VCS）：把 `data/sessions/` 整体改名为 `data/sessions.bak-<日期>`
+2. 清空验收账号对应的 profile 目录（或整个目录改名备份）。**账号与目录的对应关系**（实测）：`shopee_sg_eternalbloom_local` → `profiles/shopee/shopee_sg_eternalbloom_local`（下划线保留）。`profiles/shopee/shopeeKR` 是账号 "shopee KR" 的**旧目录**，不是验收账号的目录
 3. 采集任务 A（`shopee_sg_eternalbloom_local`）→ 应要求登录 + 验证码
-4. **检查 `profiles/shopee/shopeeKR/Default/Cookies` 的 mtime 已更新**，且 `data/sessions/` 下**没有**新文件
+4. **检查 `profiles/shopee/shopee_sg_eternalbloom_local/Default/Network/Cookies` 的 mtime 已更新**（⚠️ **不是** `Default/Cookies` —— 本机 Chromium 的 cookie 库实际在 `Default/Network/Cookies`，实测存在），且 `data/sessions/` 下**没有**新文件
 5. 立刻再跑一次采集 A' → **必须免验证码**
-6. 巡店面板「打开巡店」→ 浏览器用的是**同一个** `profiles/shopee/shopeeKR` 目录（核对进程参数/目录占用）→ 人工登录 → 关闭浏览器 → 再次采集应免验证码
+6. 巡店面板「打开巡店」→ 浏览器用的是**同一个** profile 目录（核对进程参数 `--user-data-dir`）→ 人工登录 → 关闭浏览器 → 再次采集应免验证码
 7. 巡店面板**没有**「保存会话」按钮
 8. 并行采集（多数据域）→ 任务成功，且 `data/sessions/` 仍无新文件
 9. 代理灰度：给一个账号配置 `extra_config.proxy` → 采集该账号 → 核对出站 IP 是代理 IP
 
+**「免验证码」的客观判据**（第 5 步判定依据，四项同时成立才算过）：
+
+| # | 证据 | 取证方式 |
+|---|---|---|
+| E1 | 全程没弹验证码 | `core.collection_tasks.verification_type` 与 `verification_screenshot` **均为 NULL** |
+| E2 | 登录门检查通过 | `core.collection_task_logs.details` 里 `step_id="login_gate_result"` 的 `login_gate_ready=true` |
+| E3 | 确实复用了 profile 登录态 | 同一行 details 里 `reused_session=true` + 诊断 `session_reused=true` + `session_source=profile` |
+| E4 | profile cookie 已刷盘 | `profiles/<p>/<a>/Default/Network/Cookies` 的 **mtime 前进** |
+
+> E1~E3 可直接用 SQL 从 `core.collection_task_logs` 取证；E4 从文件系统取证。
+> 「无验证码截图」可作辅助证据：`temp/screenshots/verification_<platform>_<时间戳>.png` 在采集窗口内**没有**新文件。
+
 **Expected**：第 4、5、6、7、8、9 步全部符合。**第 4 或第 5 步不过 → 停下报告，不要加临时补丁。**
+
+> ⚠️ **前置依赖**：本步依赖 Task 3 / 4 / 5 / 6 / 7 **全部完成**。在 Task 7 落地前，`SessionManager.__init__` 仍会 mkdir 并写 `data/sessions/`（`session_manager.py:169-170`）→ 第 1/4/5/8 步必然失败。
+>
+> ⚠️ **本地触发采集的唯一入口是 HTTP API**：`POST /api/collection/tasks`（需管理员登录）。仓库里**没有**创建采集任务的 CLI 脚本。巡店面板启动：`python scripts/pwcli_inspection_panel.py`（自动开 `http://127.0.0.1:<port>/?token=<token>`）。
+>
+> ⚠️ **代理配置无 UI**：只能直接改 DB 的 `core.shop_accounts.extra_config["proxy"]`。
+>
+> ⚠️ **并行侧无诊断**（F8-6）：第 8 步拿不到 profile/复用/代理证据，只能靠「任务成功 + `data/sessions/` 无新文件」判定。
 
 - [ ] **Step 5: 记录验收结论**
 
