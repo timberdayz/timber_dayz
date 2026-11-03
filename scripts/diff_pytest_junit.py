@@ -5,6 +5,9 @@
 
     python scripts/diff_pytest_junit.py <before.xml> <after.xml> [前缀过滤, 如 backend]
 
+    # 导出一次运行的失败用例清单，作为可长期引用的基线快照
+    python scripts/diff_pytest_junit.py --save-baseline <junit.xml> <out.txt> [前缀过滤]
+
 输出::
 
     NEW     = 只在 after 里失败的用例（**回归**）
@@ -62,7 +65,26 @@ def collect(path: str, prefix: str | None) -> tuple[dict[str, str], set[str]]:
     return failures, all_ids
 
 
+def save_baseline(junit_path: str, out_path: str, prefix: str | None) -> int:
+    """把某次运行的**失败用例 id 清单**导出成基线快照文件。
+
+    用途：仓库自带一批既有失败用例，「零新增失败」这件事要能被复现，
+    就必须有一份**可长期引用的基线清单**，而不是每次现跑现比。
+    """
+    failures, _all_ids = collect(junit_path, prefix)
+    lines = sorted(failures)
+    Path(out_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"[baseline] {len(lines)} failing cases -> {out_path}")
+    return 0
+
+
 def main() -> int:
+    if len(sys.argv) >= 2 and sys.argv[1] == "--save-baseline":
+        if len(sys.argv) < 4:
+            print(__doc__)
+            return 2
+        return save_baseline(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else None)
+
     if len(sys.argv) < 3:
         print(__doc__)
         return 2

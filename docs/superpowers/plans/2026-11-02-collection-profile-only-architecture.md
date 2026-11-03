@@ -65,6 +65,12 @@
 
 **已知的仓库既有失败基线**：`backend/tests` 全量 **143 failed / 3986 passed / 22 errors**。判据是**失败集合逐条 diff**（`--junitxml`），**不是计数**。
 
+**基线快照文件**（Task 10 步 0 的可复现口径）：`docs/superpowers/plans/2026-11-02-collection-profile-only-baseline.txt` —— **165 条**失败用例 id，一行一条，来源是本计划动手前的 `fa91f7ae`。重新生成：
+```powershell
+python -m pytest backend/tests -q --tb=no --junitxml=<file>.xml
+python scripts/diff_pytest_junit.py --save-baseline <file>.xml docs/superpowers/plans/2026-11-02-collection-profile-only-baseline.txt
+```
+
 **跑测试的两个环境坑**（实测，务必带上）：
 1. 必须设 `$env:PYTHONUTF8='1'`（或 `PYTHONIOENCODING=utf-8`），否则 pytest capture 把 GBK 控制台字节按 UTF-8 解码 → setup 阶段 **5011 个假 error**。
 2. 顺序敏感用例（`test_account_proxy_config.py` 与 `test_collection_executor_session_alignment.py` 谁先跑会影响结果）→ 验收必须**两个顺序都跑**；换序要用 `-p reorder_collection_tests` 自定义插件，**不能用重复路径参数**（pytest 会把目录整体跳过，只收 119 个用例）。
