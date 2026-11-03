@@ -36,10 +36,15 @@
 | Task 2 打通代理链路 | ✅ 三轮评审通过 | `2b4a3b39` / `366cc4f9` / `76c821e3`；全量失败集合 NEW=0 |
 | Task 3 跨进程账号锁 | ✅ 实现 + 规格评审 Compliant + 收口 | `b88fa447` + `39578201`（合并于 `ad3e42a4`）；覆盖率 100%；规格评审 2 项 Important 已修 |
 | Task 4.5 有头回退走 profile | ✅ | `8d51df14`；9 个新用例；两种顺序 NEW=0 / FIXED=0 |
-| Task 4 补地基 | ⏳ 下一步 | 本计划拆出，见下文「实施拆分」 |
-| Task 4.2 顺序路径收敛 | ⏳ | 同上 |
-| Task 5 / 6 / 7 | ⏳ | Task 6/7 已完成二次只读盘点，见各自章节的修订表 |
+| Task 4.5 代码质量评审 | ✅ 修复完成 | 评审 VERDICT: NEEDS_FIX（F1🔴 + F2~F6🟠 + F8~F13🟡）→ 修复 `8bd831f4`；F1 重开页面未 prime 已用「两种情况都成立」的导航修法钉住；F4 compose 补 `extra_hosts: host-gateway`；锁模块覆盖率仍 100% |
+| Task 4 补地基 | ✅ | `035523b7`；11 个新用例（TDD 证明 8 个在旧码上红）；`backend/tests` 两种顺序 NEW=0 / FIXED=0 |
+| Task 6.0 清理遗留老程序 | ✅ | `6e63f501`；删 `app.py`(5170 行) + `handlers.py`(2524 行) + 2 个测试；路由表 740 条不变；NEW=0 / FIXED=0 |
+| Task 6.5 录制子进程对齐 profile | ✅ | `b9fdcb62`；profile 身份改主账号 ID + 接入跨进程锁 + 删 14 处硬编码调试写入；NEW=0 / FIXED=0 |
+| Task 4.2 顺序路径收敛 | ⏳ 进行中 | 分支 `feature/session-profile-only-t42` |
+| Task 5 / 6 / 7 | ⏳ 进行中 | Task 5 分支 `...-t5`、Task 6 分支 `...-t6`；Task 7 已完成二次只读盘点，见各自章节的修订表 |
 | Task 8 / 9 / 10 | ⏳ | Task 10 **必须在合并回 main 之后**跑（profile 根是仓库根相对，worktree 的 `profiles/` 是空的） |
+
+**四路分支已合并进 `feature/session-profile-only`**（`0b615706`，**零冲突**）：`035523b7`(Task 4) + `60ed2be2`(_fix345) + `69155c16`(Task 6.0) + `0b615706`(Task 6.5)。合并后冒烟：关键 8 个测试文件 **180 passed**；三个守卫脚本 exit 0；`docker compose -f docker-compose.collection.yml config -q` exit 0。
 
 **已知的仓库既有失败基线**：`backend/tests` 全量 **143 failed / 3986 passed / 22 errors**。判据是**失败集合逐条 diff**（`--junitxml`），**不是计数**。
 
@@ -1300,8 +1305,10 @@ git commit -m "feat(pwcli): 巡店面板移除保存会话，登录态由 profil
 - [ ] **Step 7: 跑测试**
 
 ```powershell
-python -m pytest backend/tests/test_session_storage_roots.py backend/tests/test_legacy_shop_session_cleanup.py backend/tests/test_collection_session_reuse_contract.py backend/tests/test_pwcli_native_session_alignment.py backend/tests/test_recording_handler_manual_session_metadata.py backend/tests/test_persistent_browser_manager_session_metadata.py -v
+python -m pytest backend/tests/test_session_storage_roots.py backend/tests/test_legacy_shop_session_cleanup.py backend/tests/test_collection_session_reuse_contract.py backend/tests/test_pwcli_native_session_alignment.py backend/tests/test_persistent_browser_manager_session_metadata.py -v
 ```
+
+> ⚠️ **Task 6.0（2026-11-03 已完成）删掉了 `backend/tests/test_recording_handler_manual_session_metadata.py`**（它测的是已删除的 `handlers.py`）→ 上面的命令里已移除该项。
 
 > 旧语义测试（人工保护 / 质量分回退 / 30 天门禁）随 `test_session_manager_protection.py` 一并删除；其余文件里断言旧 metadata 的用例按新语义改写。
 
@@ -1309,9 +1316,59 @@ python -m pytest backend/tests/test_session_storage_roots.py backend/tests/test_
 
 ```powershell
 git rm backend/tests/test_session_manager_protection.py
-git add modules/utils/sessions/session_manager.py modules/utils/sessions/__init__.py modules/apps/collection_center/executor_v2.py modules/apps/collection_center/runtime_session.py modules/utils/persistent_browser_manager.py modules/collectors/miaoshou_smart_login.py modules/collectors/shopee_workflow_manager.py modules/services/shopee_exporter.py modules/utils/sessions/legacy_shop_artifact_cleanup.py modules/apps/collection_center/app.py backend/main.py run.py backend/tests/test_session_storage_roots.py backend/tests/test_legacy_shop_session_cleanup.py
+git add modules/utils/sessions/session_manager.py modules/utils/sessions/__init__.py modules/apps/collection_center/executor_v2.py modules/apps/collection_center/runtime_session.py modules/utils/persistent_browser_manager.py modules/collectors/miaoshou_smart_login.py modules/collectors/shopee_workflow_manager.py modules/services/shopee_exporter.py modules/utils/sessions/legacy_shop_artifact_cleanup.py backend/main.py run.py backend/tests/test_session_storage_roots.py backend/tests/test_legacy_shop_session_cleanup.py
 git commit -m "refactor(session): 废弃会话文件，登录态只保留 profile 单一载体"
 ```
+
+> ⚠️ **Task 6.0 已删除 `modules/apps/collection_center/app.py`** → 上面 `git add` 清单里的该项**已移除**。
+
+---
+
+## Task 3.1: 账号锁后端统一（2026-11-03 Task 6.5 实施时新发现，计划外新增）
+
+> **位置**：`backend/services/main_account_session_lock.py` 的 `_backend_mode()` + `backend/utils/config.py` 的 `account_session_lock_backend()` / `account_session_lock_environment()`。
+> **规模**：小（单模块 + 测试）。
+
+### 问题
+
+`auto` 模式的解析规则是「生产 → Redis / 其余 → 进程内锁」（`main_account_session_lock.py:596`）：
+
+```python
+if mode == "auto":
+    return "redis" if account_session_lock_environment() == "production" else "local"
+```
+
+但 Task 6.5 给**录制/组件测试子进程**选后端时用的是另一套规则：**只要配了 `REDIS_URL` 就走 Redis**（否则进程内锁对子进程完全无效，因为父子是两个进程）。
+
+→ **非生产环境下**：父进程（FastAPI 采集任务）持**进程内锁**，子进程（录制）持**Redis 锁** → **两者互不排斥** → 采集持锁期间，录制仍可打开同一 profile 目录 → R6「同一账号串行」在非生产下**没闭合**。
+
+### 修法
+
+把 `auto` 的解析改成「生产 **或** 实际配了 `REDIS_URL` → Redis；否则 → 进程内锁」，让父子两侧用**同一套判定**。
+
+- 「配了 `REDIS_URL`」的判据要看**真实生效值**（`REDIS_URL` 或 `CELERY_BROKER_URL`），不能只看环境变量是否存在（compose 里 `REDIS_URL: redis://${REDIS_HOST:-host.docker.internal}:${REDIS_PORT:-6379}/0` **恒有值**，即使宿主 Redis 没起 —— 那时 Redis 连不上会走 fail-open 降级，行为可接受）。
+- 单元测试绝不连真实 Redis 这件事**由 `backend/tests/conftest.py` 的护栏保证**（无条件设 `ACCOUNT_SESSION_LOCK_BACKEND=local`），**不依赖** `auto` 的非生产语义 → 改 `auto` 不会破坏测试隔离。
+- 两侧（`main_account_session_lock.py` 与 `tools/test_component.py`）的判定**必须收敛到同一个函数**，避免再次分叉。
+
+### 验收
+
+- 非生产 + 配了 `REDIS_URL` → 父进程与子进程都拿 **Redis** 锁 → 同一个 key 互相排斥。
+- 未配 `REDIS_URL` → 两侧都退化为进程内锁并**明确告警**。
+- 锁不可达时的降级行为保持分级（生产 fail-closed / 非生产 fail-open），并有 error 级日志。
+
+---
+
+## 遗留 profile 命名空间的剩余生产者（2026-11-03 Task 6.5 盘点新发现）
+
+`profiles/<平台>/<店铺账号ID>` 这套**与采集侧不同的命名空间**，在 Task 6.0 删掉老程序后，生产者只剩：
+
+| 生产者 | 状态 | 处理 |
+|---|---|---|
+| `tools/test_component.py` | ✅ Task 6.5 已改为按**主账号 ID** 命名 | 已闭环 |
+| `modules/apps/collection_center/app.py` / `handlers.py` | ✅ Task 6.0 已删除 | 已闭环 |
+| **`tools/launch_inspector_recorder.py:417`** | 🔴 **仍在用 `account_info['account_id']`（店铺账号 ID）** | **Task 7 必须一并改掉**，否则 `profiles/<平台>/<店铺账号ID>` 仍有活的生产者，遗留清理规则（`legacy_shop_artifact_cleanup.py`）清理不干净 |
+
+> 顺带：`backend/services/recorder_segment_validator.py:237` 调用 `_run_login_before_non_login` 后**丢弃**返回的 context/page；若该路径触发有头回退，回退会关掉旧 context，而调用方仍持有已关闭的旧 page。**旧实现同样如此（非本次引入）**，但改用 profile 载体后该路径需要调用方接收新 page —— 列入 Task 7 一并核实。
 
 ---
 
@@ -1397,6 +1454,28 @@ git commit -m "refactor(diagnostics): 会话诊断字段改为 profile 载体语
 - Modify: `docs/guides/COLLECTION_SESSION_AND_FINGERPRINT.md`（「代理预留」段改为已实现）
 - Modify: `docs/superpowers/plans/STATUS.md`（新增条目）
 - Verify: `docs/ACTIVE_DOCS.md`（已指向本文，无需改）
+
+### Task 6.0 交接的文档清单（2026-11-03，删老程序后必须同步）
+
+Task 6.0 删除了遗留 CLI 老程序，以下文档仍提到「采集中心应用 / 一键采集 CLI / `CollectionCenterApp`」，**Task 9 必须改**：
+
+| 文档 | 要改什么 |
+|---|---|
+| `docs/superpowers/plans/2026-11-02-collection-profile-only-architecture.md` | 本文自身（Task 7 的 git add / 测试清单已改，见上文标注） |
+| `docs/superpowers/plans/2026-03-28-platform-adapter-surface-convergence.md` | 「Isolate Legacy `collection_center/app.py`」那一节 |
+| `docs/superpowers/plans/2026-04-02-main-account-shop-account-domain-chain-implementation.md` | 提到老程序的部分 |
+| `docs/superpowers/plans/2026-11-02-collection-session-overwrite-semantics.md`（已作废） | 548/594/613 行改 `handlers.py` 的地方 —— **该文档已标作废**，只需加一句「相关代码已随 Task 6.0 删除」 |
+| `docs/guides/maintenance_scheduler_guide.md` | 引用了已死的 `modules/utils/recording_maintenance.py` |
+| `docs/guides/COLLECTION_PATH_LEGACY_INVENTORY.md` | 遗留路径盘点清单，去掉已删的老程序 |
+| `openspec/`（**活**的 `changes/` 与 `specs/`） | 已核实**无**活引用；`openspec/changes/archive/**` 是历史归档，**不要动** |
+
+### Task 6.0 保留但已无调用方的模块（文档里若提到，要标注）
+
+以下模块在老程序删除后**没有活调用方**，但**本次不删**（避免超范围大删），文档里不要再把它们描述成「在用」：
+
+`modules/utils/template_generator.py` / `modules/utils/har_capture_utils.py` / `modules/automation/shopee_seller_auto_login.py` / `modules/utils/account_identity.py`（`describe_account_identity` 无调用方）/ `modules/utils/data_processing_pipeline.py`（**本身已损坏**：`from models.database import CollectionTask, DatabaseManager`，这两个名字在 `modules/core/db/schema.py` 单一数据源下都不存在，模块根本 import 不了）。
+
+> ⚠️ `modules/utils/persistent_browser_manager.py`、`modules/utils/account_manager.py`、包内 `component_loader.py` 等**仍有活调用方**（`login_orchestrator` / `enhanced_recording_wizard` / `shopee_playwright_exporter` / `tools/launch_inspector_recorder.py`）→ **不要**把它们写成「已废弃」。
 
 - [ ] **Step 1: 回填概念文档**
 
