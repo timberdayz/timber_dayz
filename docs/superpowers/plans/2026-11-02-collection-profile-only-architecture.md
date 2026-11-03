@@ -75,7 +75,7 @@
 | `backend/domains/collection/routers/collection_tasks.py` | 传 proxy；诊断字段 | 2, 8 |
 | `backend/services/main_account_session_coordinator.py` + 新文件 | 跨进程账号锁 | 3 |
 | `frontend/src/domains/collection/views/collection/CollectionTasks.vue` | 诊断展示 | 8 |
-| `frontend/scripts/collectionTaskSessionQualityUi.test.mjs` | 前端守卫测试 | 8 |
+| `frontend/scripts/collectionTaskSessionDiagnosticsUi.test.mjs` | 前端守卫测试 | 8 |
 
 **保留不动**：`modules/utils/persistent_browser_manager.py` 的 profile 管理能力（28 处调用方），**只移除它写会话文件的耦合**（`save_context_state` → `:350`）。
 
@@ -1420,7 +1420,7 @@ if mode == "auto":
 - Modify: `backend/domains/collection/routers/collection_tasks.py:437-467`（白名单抽取）、`:470-540`（顶层提升）
 - Modify: `backend/schemas/collection.py:377-424`（`TaskResponse` 字段声明）
 - Modify: `frontend/src/domains/collection/views/collection/CollectionTasks.vue:360-395`、`:1093-1122`
-- Modify: `frontend/scripts/collectionTaskSessionQualityUi.test.mjs`（建议同时改名 `collectionTaskSessionProfileUi.test.mjs`）
+- Modify: `frontend/scripts/collectionTaskSessionDiagnosticsUi.test.mjs`（Task 8 已完成改名）
 - Test: `backend/tests/test_collection_task_runtime_metadata.py`、`backend/tests/test_collection_executor_session_alignment.py:935-981`、`backend/tests/test_collection_frontend_contracts.py:247-259`
 
 ### Task 8 只读盘点结论（实施前必读）
@@ -1470,19 +1470,19 @@ if mode == "auto":
 
 - [ ] **Step 4: 改前端守卫测试**
 
-`frontend/scripts/collectionTaskSessionQualityUi.test.mjs` 重写为断言新字段名，**并加反向断言**（旧字段名不应再出现）——反向断言比「存在断言」更抗回归。建议同时改文件名。
+`frontend/scripts/collectionTaskSessionDiagnosticsUi.test.mjs`（Task 8 已改名）重写为断言新字段名，**并加反向断言**（旧字段名不应再出现）——反向断言比「存在断言」更抗回归。
 
 - [ ] **Step 5: 跑测试**
 
 ```powershell
 python -m pytest backend/tests/test_collection_task_runtime_metadata.py backend/tests/test_collection_executor_session_alignment.py backend/tests/test_collection_frontend_contracts.py -v
-cd frontend; npm run build; node scripts/collectionTaskSessionQualityUi.test.mjs
+cd frontend; npm run build; node scripts/collectionTaskSessionDiagnosticsUi.test.mjs
 ```
 
 - [ ] **Step 6: 提交**
 
 ```powershell
-git add modules/apps/collection_center/executor_v2.py backend/domains/collection/routers/collection_tasks.py backend/schemas/collection.py frontend/src/domains/collection/views/collection/CollectionTasks.vue frontend/scripts/collectionTaskSessionQualityUi.test.mjs backend/tests/test_collection_task_runtime_metadata.py backend/tests/test_collection_executor_session_alignment.py backend/tests/test_collection_frontend_contracts.py
+git add modules/apps/collection_center/executor_v2.py backend/domains/collection/routers/collection_tasks.py backend/schemas/collection.py frontend/src/domains/collection/views/collection/CollectionTasks.vue frontend/scripts/collectionTaskSessionDiagnosticsUi.test.mjs backend/tests/test_collection_task_runtime_metadata.py backend/tests/test_collection_executor_session_alignment.py backend/tests/test_collection_frontend_contracts.py
 git commit -m "refactor(diagnostics): 会话诊断字段改为 profile 载体语义"
 ```
 
@@ -1579,13 +1579,13 @@ Expected: **失败数不高于基线**，且**新增失败必须定位到本计�
 ```powershell
 cd frontend
 npm run build
-node scripts/collectionTaskSessionQualityUi.test.mjs
+node scripts/collectionTaskSessionDiagnosticsUi.test.mjs
 ```
 
 Expected: exit=0。
 
 > ⚠️ `frontend/scripts/*.mjs` **不进 CI**（`.github/workflows/ci.yml:242-243` 只跑 `ci_frontend_test_silence_gate.py`）→ 必须手工跑。
-> ⚠️ Task 8 会把守卫测试改名（建议 `collectionTaskSessionProfileUi.test.mjs`）→ 此处命令同步改。
+> ⚠️ Task 8 已把守卫测试改名为 `collectionTaskSessionDiagnosticsUi.test.mjs` → 此处命令已同步。
 
 - [ ] **Step 3: 发布前门禁**
 
@@ -1788,7 +1788,7 @@ Expected: 工作区干净。
 |---|---|
 | `backend/tests/test_collection_task_runtime_metadata.py` | 断言了 `persistent_profile_path` / `profile_contains_state` / 5 个旧字段 / `session_source` 取值 |
 | `backend/tests/test_collection_frontend_contracts.py` | `:258` 断言 `"storage_state_available"`、`:259` 断言 `"storage_state 会话快照"`（**原计划 Task 8 未列此项**） |
-| `frontend/scripts/collectionTaskSessionQualityUi.test.mjs` | 断言 5 个旧字段名 → 改写为新字段名 + **反向断言**（旧字段名不应再出现），建议同时改名文件 |
+| `frontend/scripts/collectionTaskSessionDiagnosticsUi.test.mjs` | 断言 5 个旧字段名 → 改写为新字段名 + **反向断言**（旧字段名不应再出现），文件已完成改名 |
 | `backend/tests/test_collection_executor_session_alignment.py` | 断言 `session_source == "storage_state"` → 恒为 `"persistent_profile"` |
 
 ### B.7 盘点没能确认的地方（实施时要补）
