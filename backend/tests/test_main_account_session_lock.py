@@ -1083,6 +1083,41 @@ async def test_local_backend_tracks_waiters() -> None:
 
 
 @pytest.mark.asyncio
+async def test_local_backend_reclaims_lock_objects_after_release() -> None:
+    """评审 F9: 释放后必须回收锁对象(否则 ``_locks`` 随账号数单调增长)。
+
+    实测旧实现「200 次加解锁后 _locks=200」—— 条目永久保留(``_holders`` 会 pop)。
+    """
+    from backend.services.main_account_session_lock import LocalSessionLockBackend
+
+    backend = LocalSessionLockBackend()
+
+    for index in range(20):
+        key = f"key-{index}"
+        assert await backend.set_nx(key, f"token-{index}", 60) is True
+        assert await backend.delete_if_token(key, f"token-{index}") is True
+
+    assert backend._holders == {}
+    assert backend._locks == {}, "锁对象必须在释放后被回收"
+
+
+@pytest.mark.asyncio
+async def test_local_backend_keeps_lock_object_while_waiters_exist() -> None:
+    """评审 F9: 还有等待者时锁对象**不能**被回收(等待者还要靠它互斥)。"""
+    from backend.services.main_account_session_lock import LocalSessionLockBackend
+
+    backend = LocalSessionLockBackend()
+
+    assert await backend.set_nx("k", "token-1", 60) is True
+    await backend.add_waiter("k", "waiter-1", 60)
+    assert await backend.delete_if_token("k", "token-1") is True
+
+    assert len(backend._locks) == 1, "仍有等待者时锁对象必须保留"
+
+    await backend.remove_waiter("k", "waiter-1")
+
+
+@pytest.mark.asyncio
 async def test_local_backend_release_when_lock_not_held() -> None:
     from backend.services.main_account_session_lock import LocalSessionLockBackend
 
@@ -1371,7 +1406,13 @@ async def test_shared_redis_client_failure_log_gives_operator_hint(
 async def test_shared_redis_client_does_not_leak_connection_on_concurrent_call(
     monkeypatch,
 ) -> None:
-    """并发首连: 只保留一条连接, 另一条必须被关闭(不得泄漏)。"""
+    """并发首连: 只保留一条连接, 另一条必须被关闭(不得泄漏)。
+
+    评审 F2: 断言必须是**身份级**而不是计数级 —— 要防的 bug 是
+    「后到者把**先到者(共享单例)**的连接提前关掉」。计数级断言(关了几个)
+    对这个变异完全无感(照样全绿), 所以这里明确断言:
+    被关掉的是**非单例**那条, 且**单例本身没被关**。
+    """
     from backend.services import main_account_session_lock as lock_module
 
     await lock_module.reset_shared_redis_client()
@@ -1404,7 +1445,108 @@ async def test_shared_redis_client_does_not_leak_connection_on_concurrent_call(
     assert first is not None
     assert first is second
     assert len(created) == 2
-    assert sum(1 for client in created if client.closed) == 1
+
+    # 共享单例是「先到的那条」——它**不能**被关掉
+    singleton = first
+    others = [client for client in created if client is not singleton]
+    assert len(others) == 1
+    assert others[0].closed is True, "后到者必须关闭**自己**那条连接"
+    assert singleton.closed is False, "共享单例不得被后到者关掉"
+
+    await lock_module.reset_shared_redis_client()
+
+
+@pytest.mark.asyncio
+async def test_shared_redis_client_failure_log_includes_sanitized_url(
+    monkeypatch,
+    caplog,
+) -> None:
+    """评审 F10: 连接失败日志必须带(脱敏后的)URL —— 运维要能看出连的是哪台。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    await lock_module.reset_shared_redis_client()
+    monkeypatch.setenv("REDIS_URL", "redis://redis.internal:6380/3")
+    monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+
+    def _boom(url: str, **kwargs):
+        raise RuntimeError("connection refused")
+
+    _install_fake_redis_asyncio(monkeypatch, _boom)
+
+    with caplog.at_level("ERROR"):
+        assert await lock_module.get_shared_redis_client() is None
+
+    assert "redis.internal:6380" in caplog.text
+    assert "/3" in caplog.text
+
+    await lock_module.reset_shared_redis_client()
+
+
+@pytest.mark.asyncio
+async def test_shared_redis_client_success_clears_failure_cooldown_state(
+    monkeypatch,
+) -> None:
+    """评审 F11: 连接成功必须清掉失败冷却状态(否则状态残留)。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    await lock_module.reset_shared_redis_client()
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+
+    client = _StubRedisClient()
+    _install_fake_redis_asyncio(monkeypatch, lambda url, **kwargs: client)
+
+    # 先人为制造一次失败状态残留
+    lock_module._redis_client_failed_at = 123.0
+
+    resolved = await lock_module.get_shared_redis_client()
+
+    assert resolved is client
+    assert lock_module._redis_client_failed_at is None
+
+    await lock_module.reset_shared_redis_client()
+
+
+@pytest.mark.asyncio
+async def test_reset_shared_redis_client_discards_in_flight_connection(
+    monkeypatch,
+) -> None:
+    """评审 F11: 连接期间发生 reset -> 在途连接醒来后必须自行关闭并丢弃。
+
+    否则它会把 reset 刚清掉的单例**复活**(``_redis_client_singleton = client``),
+    reset 等于没做。
+    """
+    from backend.services import main_account_session_lock as lock_module
+
+    await lock_module.reset_shared_redis_client()
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+
+    ping_started = asyncio.Event()
+    release_ping = asyncio.Event()
+    client = _StubRedisClient()
+
+    class _SlowPingRedis(_StubRedisClient):
+        async def ping(self) -> bool:
+            ping_started.set()
+            await release_ping.wait()
+            return True
+
+    client = _SlowPingRedis()
+    _install_fake_redis_asyncio(monkeypatch, lambda url, **kwargs: client)
+
+    task = asyncio.create_task(lock_module.get_shared_redis_client())
+    await ping_started.wait()
+
+    # 连接还在途中 -> 此刻 reset
+    await lock_module.reset_shared_redis_client()
+    release_ping.set()
+
+    result = await task
+
+    assert result is None, "被 reset 掉的在途连接不得再写回全局单例"
+    assert client.closed is True, "被丢弃的连接必须关闭(不得泄漏)"
+    assert lock_module._redis_client_singleton is None
 
     await lock_module.reset_shared_redis_client()
 
@@ -1787,6 +1929,23 @@ def test_inject_redis_password_keeps_unparsable_url() -> None:
 
     broken = "redis://[::1"
     assert inject_redis_password(broken, "s3cret") == broken
+
+
+def test_inject_redis_password_keeps_url_without_supported_scheme() -> None:
+    """评审 F8: 无 scheme 的畸形 URL 必须**原样返回**(不得产出更畸形的 URL)。
+
+    ``urlsplit("host:6379")`` **不抛异常**(把 ``host`` 当 scheme、``6379`` 当 path)
+    → 旧实现会产出 ``host://:pw@/6379`` —— 比原 URL 更畸形, 且必然连不上。
+    """
+    from backend.services.main_account_session_lock import inject_redis_password
+
+    assert inject_redis_password("host:6379", "s3cret") == "host:6379"
+    assert inject_redis_password("localhost:6379", "s3cret") == "localhost:6379"
+    # 受支持的 scheme 仍然正常注入
+    assert (
+        inject_redis_password("rediss://redis:6379/0", "s3cret")
+        == "rediss://:s3cret@redis:6379/0"
+    )
 
 
 @pytest.mark.asyncio

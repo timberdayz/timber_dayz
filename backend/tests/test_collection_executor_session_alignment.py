@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from modules.apps.collection_center.executor_v2 import CollectionExecutorV2, CollectionResult
+from modules.apps.collection_center.executor_v2 import (
+    CollectionExecutorV2,
+    CollectionResult,
+    VerificationRequiredError,
+)
 from modules.apps.collection_center.transition_gates import GateResult, GateStatus
 
 
@@ -133,6 +137,7 @@ async def test_executor_open_runtime_bundle_auto_prefers_storage_state_helper(
 @pytest.mark.asyncio
 async def test_headful_profile_fallback_keeps_runtime_page_aligned_to_profile(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """有头回退走 profile 后：runtime page 必须来自**持久 context**，且保留 viewport。
 
@@ -140,6 +145,9 @@ async def test_headful_profile_fallback_keeps_runtime_page_aligned_to_profile(
     ``browser.new_context`` 注入指纹），该路径已随 Task 4.5 删除（会话文件不再是
     载体）。此处改为钉住新契约：回退在**同一个 profile 目录**上开持久 context，
     viewport 沿用 runtime 策略，指纹覆盖项按 R8 剥离。
+
+    profile 目录用 ``tmp_path``（评审 F13）：``profiles/`` 被 .gitignore 忽略，
+    用仓库真实路径的话，一旦替身真的建目录就会在仓库里留下垃圾目录。
     """
     executor = CollectionExecutorV2()
     executor._ensure_login_gate_ready = AsyncMock()
@@ -184,7 +192,7 @@ async def test_headful_profile_fallback_keeps_runtime_page_aligned_to_profile(
         runtime_manifests={"login": {"component": "login"}},
         proxy=None,
         browser_type=_FakeBrowserType(),
-        profile_path=str(REPO_ROOT / "profiles" / "miaoshou" / "acc-1"),
+        profile_path=str(tmp_path / "profiles" / "miaoshou" / "acc-1"),
         launch_kwargs={"headless": True},
     )
 
@@ -1310,3 +1318,73 @@ def test_persistent_profile_bundle_reads_manual_marker_from_disk_session(
             "session_metadata": metadata,
         },
     )
+
+class _BlankFallbackPage:
+    """回退返回的页面停在 about:blank（持久 context 的默认首屏）。"""
+
+    def __init__(self) -> None:
+        self.url = "about:blank"
+        self.goto_calls: list[str] = []
+
+    async def goto(self, url: str, **kwargs) -> None:
+        self.goto_calls.append(url)
+        self.url = url
+
+    async def wait_for_load_state(self, state: str, timeout: int = 0) -> None:
+        return None
+
+    async def wait_for_timeout(self, ms: int) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_shared_login_phase_navigates_blank_page_returned_by_headful_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """评审 F1 兜底：回退返回的页面若仍是 about:blank，必须主动导航一次。
+
+    没有这道兜底时，登录闸门必然失败（about:blank 探测不到登录态），
+    而且报错只说 ``url=about:blank``，指不到真因。
+    """
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+    executor._check_cancelled = AsyncMock()
+    executor.popup_handler.close_popups = AsyncMock()
+    executor._ensure_login_gate_ready = AsyncMock()
+
+    blank_page = _BlankFallbackPage()
+
+    async def _raise_verification(*args, **kwargs):
+        raise VerificationRequiredError("manual_intervention", "shot.png")
+
+    monkeypatch.setattr(executor, "_execute_python_component", _raise_verification)
+    monkeypatch.setattr(
+        executor,
+        "_run_headful_login_fallback",
+        AsyncMock(return_value=(True, object(), blank_page, "success")),
+    )
+
+    await executor._execute_shared_login_phase(
+        task_id="task-1",
+        platform="shopee",
+        account={"account_id": "acc-1", "login_url": "https://seller.shopee.cn/account/signin"},
+        params={"_runtime_session_mode": "persistent_profile"},
+        context=type(
+            "Ctx",
+            (),
+            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+        )(),
+        browser=object(),
+        play_context=object(),
+        page=object(),
+        adapter=object(),
+        runtime_manifests=None,
+        session_platform="shopee",
+        session_account_id="main-1",
+        save_session_after_login=False,
+        start_time=__import__("datetime").datetime.now(),
+        total_domains_count=0,
+    )
+
+    assert blank_page.goto_calls, "回退返回 about:blank 页面时必须主动导航到平台入口"
+    assert blank_page.url != "about:blank"

@@ -85,6 +85,9 @@ _SAFE_SEGMENT_LIMIT = 40
 #: 旁路 profile 后缀(``persistent_browser_manager`` 的 ``<account>_alt``)
 PROFILE_ALT_SUFFIX = "_alt"
 
+#: 允许注入密码的 Redis URL scheme(评审 F8: 畸形 URL 必须原样返回)
+_SUPPORTED_REDIS_URL_SCHEMES = frozenset({"redis", "rediss", "unix"})
+
 #: 释放锁的 Lua 脚本: **token 校验 + 原子删除**(L2)。
 #: 不得拆成「先 GET 再 DEL」两步 —— 分布式下会误删他人的锁。
 RELEASE_LOCK_LUA = (
@@ -329,6 +332,11 @@ class LocalSessionLockBackend:
         lock = self._locks.get(scope)
         if lock is not None and lock.locked():
             lock.release()
+        # 评审 F9: 锁对象本身也要回收 —— 否则 `_locks` 会随账号数**单调增长**
+        # (实测 200 次加解锁后 _locks=200, 条目永久保留)。
+        # 该 scope 下既没有 holder 也没有 waiter 时, 说明这把锁已经没人用。
+        if not self._waiters.get(scope):
+            self._locks.pop(scope, None)
         return True
 
     async def renew(self, key: str, token: str, ttl_seconds: int) -> bool:
@@ -381,6 +389,10 @@ _redis_client_resolved = False
 #: 上一次连接失败的时间(单调时钟)。用于「失败冷却窗」:
 #: 冷却窗内快速判定不可用(fail-closed 语义不变), 窗口外才真正重连。
 _redis_client_failed_at: Optional[float] = None
+#: 单例 epoch(评审 F11): ``reset_shared_redis_client`` 会自增它。
+#: 连接期间(in-flight)的协程醒来后如果发现 epoch 变了, 说明期间发生过 reset
+#: → 它手里这条连接**不能**再写回全局单例(否则会把 reset 刚清掉的单例复活)。
+_redis_client_epoch = 0
 
 
 def inject_redis_password(redis_url: str, password: Optional[str] = None) -> str:
@@ -401,6 +413,12 @@ def inject_redis_password(redis_url: str, password: Optional[str] = None) -> str
     * URL 不含密码且 ``REDIS_PASSWORD`` 非空 -> 注入 ``:password@``。
 
     ``password`` 省略时读环境变量 ``REDIS_PASSWORD``。
+
+    评审 F8: ``urlsplit`` 对「无 scheme 的畸形 URL」**不抛异常**
+    (``urlsplit("host:6379")`` 会把 ``host`` 当 scheme、``6379`` 当 path),
+    于是原实现会产出 ``host://:pw@/6379`` —— 比原 URL 更畸形。
+    这里先校验 scheme 属于 ``{redis, rediss, unix}``, 不匹配就**原样返回**
+    (连接层会给出明确报错)。
     """
     url = str(redis_url or "")
     if password is None:
@@ -410,6 +428,15 @@ def inject_redis_password(redis_url: str, password: Optional[str] = None) -> str
         return url
     try:
         parsed = urlsplit(url)
+        if parsed.scheme.lower() not in _SUPPORTED_REDIS_URL_SCHEMES:
+            logger.warning(
+                "[AccountSessionLock] REDIS_URL 的 scheme=%r 不受支持(支持: %s), "
+                "原样使用不注入密码: %s",
+                parsed.scheme,
+                "/".join(sorted(_SUPPORTED_REDIS_URL_SCHEMES)),
+                url,
+            )
+            return url
         if parsed.password is not None:
             # URL 已经带了密码 -> 以 URL 为准, 不覆盖
             return url
@@ -452,8 +479,12 @@ async def get_shared_redis_client() -> Optional[Any]:
       **窗口外自动重连**。
     """
     global _redis_client_singleton, _redis_client_resolved, _redis_client_failed_at
+    global _redis_client_epoch
     if _redis_client_resolved:
         return _redis_client_singleton
+
+    # 本次连接开始时的 epoch(评审 F11): 连接期间若发生 reset, epoch 会变。
+    epoch = _redis_client_epoch
 
     from backend.utils.config import account_session_lock_redis_retry_cooldown_seconds
 
@@ -482,6 +513,13 @@ async def get_shared_redis_client() -> Optional[Any]:
     # URL 不带密码但环境变量有密码时, 把密码注入(否则 AUTH 必然失败)
     effective_url = inject_redis_password(redis_url)
 
+    try:
+        from backend.utils.redis_client import sanitize_redis_url_for_log
+
+        safe_url = sanitize_redis_url_for_log(effective_url)
+    except Exception:  # pragma: no cover - 脱敏工具不可用时兜底
+        safe_url = "redis://***"
+
     client = None
     try:
         from redis import asyncio as aioredis
@@ -500,12 +538,25 @@ async def get_shared_redis_client() -> Optional[Any]:
             with contextlib.suppress(Exception):
                 await client.aclose()
         _redis_client_failed_at = time.monotonic()
+        # 评审 F10: 失败日志必须带上(脱敏后的)URL —— 否则运维拿不到
+        # 「到底连的是哪个 host:port/db」。
         logger.error(
-            "[AccountSessionLock] Redis 连接失败: %s; 账号会话锁不可用"
+            "[AccountSessionLock] Redis 连接失败: %s (url=%s); 账号会话锁不可用"
             "(生产 fail-closed 会拒绝采集); 将在 %.0fs 后自动重连, "
             "请检查 Redis 是否可达以及 REDIS_URL/REDIS_PASSWORD 是否正确",
             exc,
+            safe_url,
             cooldown,
+        )
+        return None
+
+    # 评审 F11: 连接期间可能发生过 reset -> 醒来后 epoch 变了
+    # -> 这条连接必须自行关闭并丢弃(不能把 reset 刚清掉的单例复活)。
+    if epoch != _redis_client_epoch:
+        with contextlib.suppress(Exception):
+            await client.aclose()
+        logger.info(
+            "[AccountSessionLock] Redis 连接期间客户端被重置, 已丢弃本次连接"
         )
         return None
 
@@ -517,22 +568,23 @@ async def get_shared_redis_client() -> Optional[Any]:
         _redis_client_resolved = True
         return existing
 
-    try:
-        from backend.utils.redis_client import sanitize_redis_url_for_log
-
-        safe_url = sanitize_redis_url_for_log(effective_url)
-    except Exception:  # pragma: no cover - 脱敏工具不可用时兜底
-        safe_url = "redis://***"
-
     logger.info("[AccountSessionLock] Redis 已连接: %s", safe_url)
     _redis_client_singleton = client
     _redis_client_resolved = True
+    # 评审 F11: 连接成功 -> 清掉失败冷却状态(否则状态残留, 下次会误判「冷却窗内」)
+    _redis_client_failed_at = None
     return _redis_client_singleton
 
 
 async def reset_shared_redis_client() -> None:
-    """测试辅助: 丢弃进程级 Redis 单例(含失败冷却状态)。"""
+    """测试辅助: 丢弃进程级 Redis 单例(含失败冷却状态)。
+
+    评审 F11: 这里必须**自增 epoch** —— 否则正在 ``await client.ping()`` 的协程
+    醒来后会把刚被清掉的单例重新写回全局(reset 形同无效)。
+    """
     global _redis_client_singleton, _redis_client_resolved, _redis_client_failed_at
+    global _redis_client_epoch
+    _redis_client_epoch += 1
     client = _redis_client_singleton
     _redis_client_singleton = None
     _redis_client_resolved = False

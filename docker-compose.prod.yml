@@ -155,6 +155,11 @@ services:
       # 持久化 Profile 目录（登录态的唯一载体）：必须挂到宿主机，
       # 否则容器一重建，所有账号的 Chromium 登录态全部丢失（每次都要重新人工登录 + 过验证码）
       - ./profiles:/app/profiles
+    # 防御性配置：生产当前用的是内网服务名 redis:6379（不依赖 host.docker.internal），
+    # 但若将来把 REDIS_URL 指回宿主，Linux 上没有这条映射会解析失败 → 账号会话锁
+    # 静默降级为进程内锁（跨进程保护失效）。host-gateway 需要 Docker 20.10+。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # 生产最小端口暴露：backend 不映射宿主机端口（通过 nginx 反向代理访问 /api/）
     depends_on:
       postgres:

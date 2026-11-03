@@ -556,7 +556,8 @@ async def _prepare_runtime_page_bundle(
 
     context_options.setdefault("accept_downloads", True)
     if storage_state:
-        context_options["storage_state"] = storage_state
+        if storage_state:
+            context_options["storage_state"] = storage_state
 
     params = _build_runtime_task_params(
         task_id=task_id,
@@ -1353,6 +1354,17 @@ class CollectionExecutorV2:
                     else:
                         login_success, play_context, page = fallback_result
                         fallback_outcome = "success" if login_success else "failed"
+                    if login_success:
+                        # F1 兜底：回退返回的页面若仍停在 about:blank，登录闸门必然失败
+                        #（LoginStatusDetector 对 about:blank 只给 UNKNOWN）。这里主动
+                        # 导航一次，防止以后再新增回退分支时重犯同一个坑。
+                        await self._ensure_page_at_platform_entry(
+                            page,
+                            platform,
+                            account,
+                            task_id=task_id,
+                            only_if_blank=True,
+                        )
                     if not login_success and fallback_outcome == "timeout":
                         return (
                             play_context,
@@ -3080,6 +3092,67 @@ class CollectionExecutorV2:
             account=account,
         )
 
+    async def _ensure_page_at_platform_entry(
+        self,
+        page: Any,
+        platform: str,
+        account: Optional[Dict[str, Any]],
+        *,
+        task_id: str = "",
+        only_if_blank: bool = False,
+    ) -> bool:
+        """把页面导航到平台入口(登录闸门的前置条件)。
+
+        **薄封装**: 导航实现只有一份 —— ``runtime_session.prime_runtime_page_for_login_gate``
+        (``force_navigate=True`` 时无条件导航, 否则只在 about:blank 时导航)。
+        这里只负责「异常不外抛 + 中文告警日志」。
+
+        为什么必须有这一步(评审 F1)
+        --------------------------
+        Playwright 启动**持久 context** 时 push 的首个页面就是 ``about:blank``
+        (Playwright 源码 ``chromium.js``: ``if (isPersistent) chromeArguments.push
+        ("about:blank")``) → ``context.pages[0]`` 几乎必然停在 about:blank。
+        此时登录态探测(``LoginStatusDetector``)对 about:blank 只能给出 UNKNOWN
+        (不匹配任何已知模式, 置信度上限 0.59)→ 闸门 ``READY`` 要求
+        ``logged_in`` 且置信度 >= 0.7 → **必然失败**, 而且报错只说
+        ``login gate not ready ... url=about:blank``, 完全指不到真因。
+
+        导航失败**不抛异常**: 只打中文告警日志, 让随后的闸门检查给出可读原因,
+        避免整条流程崩成看不懂的错。
+
+        返回是否成功导航。
+        """
+        if page is None or not hasattr(page, "goto"):
+            return False
+
+        if only_if_blank:
+            current_url = str(getattr(page, "url", "") or "").strip()
+            if current_url and current_url.lower() != "about:blank":
+                return False
+
+        try:
+            await runtime_session.prime_runtime_page_for_login_gate(
+                page=page,
+                platform=platform,
+                account=account,
+                force_navigate=not only_if_blank,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Task %s: 导航到平台入口失败(error=%s); "
+                "登录闸门检查会给出具体原因",
+                task_id,
+                exc,
+            )
+            return False
+
+        logger.info(
+            "Task %s: 页面已导航到平台入口(url=%s)",
+            task_id,
+            str(getattr(page, "url", "") or ""),
+        )
+        return True
+
     async def _perform_headful_login(
         self,
         *,
@@ -3258,10 +3331,19 @@ class CollectionExecutorV2:
         全程不写/读会话文件：登录态由 Chromium 直接写进 profile（R1/R2）。
         """
         # R6：同一 profile 目录不能被两个浏览器进程同时打开 —— 必须先关旧 context。
-        await self._close_playwright_resource(
+        old_context_closed = await self._close_playwright_resource(
             old_context,
             label="old_runtime_context",
         )
+        if not old_context_closed:
+            # 旧 Chromium 没退干净 → 紧接着在同一个 profile 目录上重开必然撞
+            # Chromium 的 "profile is in use by another process"。这里直接中止，
+            # 给运维一条能指向真因的中文错误，而不是让 Playwright 的原始异常冒出来。
+            raise StepExecutionError(
+                "旧浏览器上下文关闭失败（可能残留 Chromium 进程占用 profile 目录），"
+                "已中止有头回退：继续重开会触发 Chromium profile 独占锁冲突"
+                "（profile is in use by another process）"
+            )
 
         headed_bundle = await runtime_session.open_persistent_runtime_bundle(
             browser_type=browser_type,
@@ -3274,6 +3356,7 @@ class CollectionExecutorV2:
         )
         headed_context = headed_bundle.context
         headed_page = headed_bundle.page
+        headed_context_closed = True
         try:
             login_success, outcome = await self._perform_headful_login(
                 task_id=task_id,
@@ -3288,9 +3371,17 @@ class CollectionExecutorV2:
             await self._ensure_login_gate_ready(headed_page, platform)
         finally:
             # R7：正常关闭才能让 Chromium 把登录态刷进 profile。
-            await self._close_playwright_resource(
+            headed_context_closed = await self._close_playwright_resource(
                 headed_context,
                 label="headful_fallback_context",
+            )
+
+        if not headed_context_closed:
+            # 有头 context 没退干净 → 登录态很可能**没有**刷进 profile（R7 不成立），
+            # 而且重开同一 profile 目录会撞独占锁。直接中止比继续往下撞异常好。
+            raise StepExecutionError(
+                "有头浏览器关闭失败，登录态可能未刷入 profile 目录（正常关闭才会落盘），"
+                "已中止有头回退：继续重开会触发 Chromium profile 独占锁冲突"
             )
 
         # 重开同一个 profile 目录 → 主 context 仍是**持久 context**（profile 仍是唯一载体）。
@@ -3302,6 +3393,15 @@ class CollectionExecutorV2:
             launch_kwargs=launch_kwargs or {"headless": True},
             proxy=proxy,
             profile_path_override=profile_path,
+        )
+        # F1：持久 context 重开后首个页面停在 about:blank（Playwright 对持久 context
+        # 会 push about:blank）→ 登录态探测必然是 UNKNOWN → 闸门必然不通过。
+        # 这里显式导航到平台入口；失败只告警不抛异常，由后续闸门给出可读原因。
+        await self._ensure_page_at_platform_entry(
+            new_bundle.page,
+            platform,
+            account,
+            task_id=task_id,
         )
         return True, new_bundle.context, new_bundle.page, "success"
 
@@ -3358,14 +3458,18 @@ class CollectionExecutorV2:
                     if not login_success:
                         return False, old_context, None, outcome
                     await self._ensure_login_gate_ready(headed_page, platform)
-                    if session_platform and session_account_id:
+                    # 评审 F3：采集条件必须用**已解析好的 account_id**
+                    # （= session_account_id or account["account_id"]）。
+                    # 旧写法只看 session_account_id → 它为空时整份登录态被丢弃，
+                    # 主 context 随后以「完全未登录」的状态继续采集。
+                    if session_platform and account_id:
                         # 只在内存里取一份快照交给主 context，
                         # 不写会话文件、不读会话文件（profile 才是唯一载体）。
                         storage_state = (
                             await self._wait_and_capture_high_quality_tiktok_session(
                                 page=headed_page,
                                 session_platform=session_platform,
-                                session_account_id=session_account_id,
+                                session_account_id=account_id,
                             )
                         )
                 finally:
@@ -3382,6 +3486,17 @@ class CollectionExecutorV2:
         if browser is None:
             return False, old_context, None
 
+        # 评审 F3：legacy 路径拿不到登录态就**必须报错**，不能静默造一个
+        # 未登录的 context 继续采集（否则现场与「有头登录已成功」完全脱节：
+        # 后续请求 401 / 跳登录页 / 结果为空）。
+
+        if not storage_state:
+            raise StepExecutionError(
+                "有头登录后未能取到登录态快照（legacy 回退路径没有持久化 profile 可用），"
+                "已中止本次采集：继续执行只会以未登录状态采集，结果为空或 401。"
+                f"platform={session_platform}, account_id={account_id or '-'}"
+            )
+
         # 把有头浏览器的登录态**在内存里**交给主 context（legacy 路径）。
         context_options = await self._build_legacy_headful_context_options(
             platform=platform,
@@ -3389,8 +3504,7 @@ class CollectionExecutorV2:
             account_id=account_id,
             proxy=proxy,
         )
-        if storage_state:
-            context_options["storage_state"] = storage_state
+        context_options["storage_state"] = storage_state
 
         await self._close_playwright_resource(
             old_context,
@@ -3494,6 +3608,16 @@ class CollectionExecutorV2:
                         else:
                             login_success, play_context, page = fallback_result
                             fallback_outcome = "success" if login_success else "failed"
+                        if login_success:
+                            # F1 兜底（与 _execute_shared_login_phase 同一处逻辑）：
+                            # 回退返回的页面若仍停在 about:blank，登录闸门必然失败。
+                            await self._ensure_page_at_platform_entry(
+                                page,
+                                platform,
+                                account,
+                                task_id=task_id,
+                                only_if_blank=True,
+                            )
                         if not login_success and fallback_outcome == "timeout":
                             return self._build_verification_timeout_result(
                                 task_id=task_id,
@@ -5962,15 +6086,34 @@ class CollectionExecutorV2:
                 },
             )
 
-    async def _close_playwright_resource(self, resource: Any, *, label: str) -> None:
+    async def _close_playwright_resource(self, resource: Any, *, label: str) -> bool:
+        """关闭 Playwright 资源。
+
+        返回是否关闭成功(``True`` = 已关闭 / 无需关闭, ``False`` = 关闭失败)。
+
+        日志级别说明(评审 F5)
+        ----------------------
+        关闭失败**不是**可忽略的细节: 持久 profile 场景下旧 Chromium 进程残留会
+        继续占用 user-data-dir 的 ``SingletonLock`` → 紧接着在**同一 profile 目录**
+        上 ``launch_persistent_context`` 会抛 Chromium 的 "profile is in use by
+        another process"。根因在这里, 暴露出来的却是 Playwright 的原始报错 →
+        运维会误判为 profile 损坏。所以这里用 warning 而不是 debug。
+        """
         if resource is None or not hasattr(resource, "close"):
-            return
+            return True
         try:
             maybe_close = resource.close()
             if inspect.isawaitable(maybe_close):
                 await maybe_close
+            return True
         except Exception as exc:
-            logger.debug("Close %s failed: %s", label, exc)
+            logger.warning(
+                "Close %s failed: %s（可能残留浏览器进程；持久 profile 场景下会触发 "
+                "Chromium profile 独占锁冲突 / 登录态无法刷盘）",
+                label,
+                exc,
+            )
+            return False
 
     async def _cleanup_browser_runtime(
         self,
