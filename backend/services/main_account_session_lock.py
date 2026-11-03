@@ -82,7 +82,12 @@ _SAFE_SEGMENT_RE = re.compile(r"[^a-z0-9_-]+")
 #: key 片段最大长度(截断)
 _SAFE_SEGMENT_LIMIT = 40
 
-#: 旁路 profile 后缀(``persistent_browser_manager`` 的 ``<account>_alt``)
+#: 旁路 profile 后缀(``persistent_browser_manager`` 历史上用过的 ``<account>_alt``)。
+#: **Task 7 收口后已不再生产该目录** —— 旁路分支已从
+#: ``modules/utils/persistent_browser_manager.py`` 删除, 因为它会把登录态劈成
+#: 第二个目录, 违反「profile 是唯一登录态载体」, 且该目录从不被复用(纯负债)。
+#: 这里**保留归一化**纯粹是防御性的: 万一磁盘上还留着历史 ``_alt`` 目录,
+#: 它仍应与主目录共用同一把锁, 避免「主 profile 被 A 锁住、旁路 profile 被 B 打开」。
 PROFILE_ALT_SUFFIX = "_alt"
 
 #: 允许注入密码的 Redis URL scheme(评审 F8: 畸形 URL 必须原样返回)
@@ -133,9 +138,13 @@ class MainAccountSessionLockTimeoutError(MainAccountSessionLockError):
 def normalize_profile_identity(profile_identity: Any) -> str:
     """把 profile 目录身份归一化成「逻辑账号身份」。
 
-    旁路 profile(``<account>_alt``)与主 profile(``<account>``)属于**同一个逻辑账号**,
+    历史旁路 profile(``<account>_alt``)与主 profile(``<account>``)属于**同一个逻辑账号**,
     承载的是同一份登录态语义 → 必须共用**同一把**跨进程锁。否则会出现
     「主 profile 被任务 A 锁住、旁路 profile 被任务 B 打开」的交叉双开。
+
+    ``persistent_browser_manager`` 的旁路分支已删除(T7 收口), 现在**不会再生产**
+    ``_alt`` 目录; 这里保留归一化只是防御 —— 磁盘上若还有历史遗留目录, 仍应与
+    主目录共用同一把锁。
 
     代价: 账号名本身以 ``_alt`` 结尾时会被归一到它的前缀(极罕见, 只会造成两个账号
     互相排队, 不会造成双开)。

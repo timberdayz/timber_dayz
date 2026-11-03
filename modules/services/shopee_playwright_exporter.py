@@ -11,6 +11,23 @@ Shopee Playwright 安全导出器
   正式文件后续由执行器/注册链路提升到 data/raw/
   文件命名:YYYYMMDD_HHMMSS__<account>__<shop>__<data_type>__<granularity>__<start>_<end>.xlsx
 - 日期控件探测与分析
+
+⚠️ 已冻结(2026-11 收尾)
+--------------------------
+**建 profile 的入口没有生产调用方**: 它原先只被 ``modules/platforms/shopee/archive/export.py``
+引用, 而那个 ``archive/`` 目录是 ``components/`` 的旧副本, 已在本次收尾中删除
+(组件加载器用 ``glob("*.py")`` 非递归扫描, 所以它从未被重复注册)。
+
+当前唯一的活引用是 ``modules/services/date_selection_manager.py`` —— **只借用
+``_set_quick_timerange`` / ``_verify_*`` 这些日期选择 helper, 不建 profile 目录**。
+
+硬约束:
+* **不得新增调用方**(尤其不要再拿它建 profile)。
+* profile 目录口径**只认 main_account_id**。本模块当前用的是
+  ``store_name or username or account_id``(:64 附近) —— 那是**店铺标识**,
+  与主链路的 ``profiles/<platform>/<sanitized_main_account_id>`` **口径分裂**。
+  正式导出走 ``modules/platforms/shopee/components/analytics_export.py``,
+  不经过本模块。
 """
 from __future__ import annotations
 

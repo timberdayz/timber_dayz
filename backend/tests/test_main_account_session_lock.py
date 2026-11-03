@@ -256,14 +256,17 @@ def test_lock_key_covers_both_main_and_alt_profile_identity() -> None:
     assert build_lock_key("shopee", "acct") != build_lock_key("shopee", "acct2")
 
 
-def test_persistent_browser_manager_alt_profile_shares_the_same_lock_key(
+def test_persistent_browser_manager_never_creates_alt_profile(
     monkeypatch,
     tmp_path,
 ) -> None:
-    """旁路 profile(<account>_alt)必须与主 profile 共用同一把跨进程锁。
+    """持久化上下文**永远不得**创建旁路 profile(``<account>_alt``)目录。
 
-    ``persistent_browser_manager`` 的旁路 profile 是主 profile 的**同目录兄弟**
-    (``<account>_alt``), 属于同一个逻辑账号 → 账号会话锁的 key 构造必须把它们归一化到同一把锁。
+    旧实现在第一次 ``launch_persistent_context`` 失败时退到 ``<account>_alt``,
+    把登录态劈成第二个目录, 违反「profile 是唯一登录态载体」; 而且该目录
+    **从不被复用**(每次都先试主目录) → 只会堆积永远用不上的登录态副本。
+
+    T7 收口后: 两次尝试都指向**同一个**主目录, 不产生任何旁路目录。
     """
     from backend.services.main_account_session_lock import build_lock_key
     from modules.utils import persistent_browser_manager as manager_module
@@ -315,10 +318,13 @@ def test_persistent_browser_manager_alt_profile_shares_the_same_lock_key(
 
     manager._create_persistent_context("shopee", "main-acct", {})
 
+    # 两次尝试都指向**同一个**主目录
     assert len(used_dirs) == 2
-    alt_dir = used_dirs[1]
-    assert alt_dir.endswith("_alt")
-    # 旁路目录与主目录是同一个逻辑账号 -> 同一把锁
+    assert used_dirs[0] == used_dirs[1] == str(main_profile)
+    # 磁盘上不得出现任何旁路目录
+    assert [p.name for p in profile_dir.iterdir() if p.name.endswith("_alt")] == []
+    assert not (profile_dir / "main-acct_alt").exists()
+    # 历史遗留的 _alt 目录(若还在)仍须与主目录共用同一把锁
     assert build_lock_key("shopee", "main-acct") == build_lock_key("shopee", "main-acct_alt")
 
 

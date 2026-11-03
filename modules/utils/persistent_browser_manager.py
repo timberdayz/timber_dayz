@@ -186,28 +186,16 @@ class PersistentBrowserManager:
                 logger.warning(f"设置默认downloads_path失败: {e}")
 
             # 尝试创建(带小重试,处理偶发的 "Target ... has been closed")
+            #
+            # [Task 7 收口] **不再有旁路 profile**。
+            # 旧实现在第一次失败时退到 ``<account>_alt`` 目录, 会把登录态劈成第二个目录,
+            # 直接违反「profile 是唯一登录态载体」。而且 ``_alt`` 目录**从不被复用**
+            # (每次都先试主目录), 只会不断堆积永远用不上的登录态副本 —— 纯负债。
+            # 现在两次尝试都指向**同一个**主目录; 都失败才走普通上下文回退。
             last_err = None
             for attempt in range(2):
                 try:
-                    # 第一次使用主Profile;第二次使用旁路Profile,避免主Profile被系统锁定/损坏
-                    if attempt == 0:
-                        user_dir = profile_path
-                    else:
-                        # [Task 3 / F7-1] 旁路 profile 与主 profile 属于**同一个逻辑账号**,
-                        # 跨进程账号锁按 (platform, main_account_id) 加锁,
-                        # 而账号会话锁的 key 构造会把旁路身份归一化回主身份
-                        # (``main_account_session_lock.normalize_profile_identity``)
-                        # -> **同一把锁覆盖 <account> 与 <account>_alt 两个目录**,
-                        # 不会出现「主 profile 被 A 锁住、旁路 profile 被 B 打开」的交叉双开。
-                        #
-                        # 但旁路 profile 会把登录态**分散到第二个目录**, 违反「profile 是唯一
-                        # 登录态载体」—— Task 7 会彻底删掉这个旁路。
-                        user_dir = profile_path.with_name(profile_path.name + "_alt")
-                        user_dir.mkdir(parents=True, exist_ok=True)
-                        logger.warning(
-                            "持久化上下文回退到旁路 profile: %s (与主 profile 共用同一把账号会话锁)",
-                            user_dir,
-                        )
+                    user_dir = profile_path
                     context = self.playwright.chromium.launch_persistent_context(
                         user_data_dir=str(user_dir),
                         **context_options,
@@ -228,6 +216,11 @@ class PersistentBrowserManager:
                         break
             # 最终回退到普通上下文
             logger.error(f"创建持久化上下文失败: {last_err}")
+            logger.warning(
+                "持久化上下文不可用, 已回退到**普通(非持久)上下文**: "
+                "本次**不会保存登录态**, 下次仍需重新登录。若 profile 目录疑似损坏, "
+                "请人工清理后重试 (不要用旁路目录绕过)。"
+            )
             return self._create_fallback_context(fingerprint, context_key=context_key)
         except Exception as e:
             logger.error(f"创建持久化上下文异常: {e}")

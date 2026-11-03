@@ -5,6 +5,19 @@
 - 修复:此前文件被杂质字符(NUL)污染,导致导入时报 SyntaxError: source code string cannot contain null bytes
 - 该精简版仅提供最小可用能力:平台/数据类型选择 + 为录制预热浏览器会话
 - 真正的录制/回放仍走 temp/recordings/ 下你的脚本;本向导不修改磁盘脚本
+
+⚠️ 已冻结(2026-11 收尾)
+--------------------------
+本模块**没有生产调用方** —— 它原先只被 ``modules/automation/shopee_seller_auto_login.py``
+引用, 而那个脚本已在本次收尾中删除(零活调用方)。
+
+硬约束:
+* **不得新增调用方**。
+* profile 目录口径**只认 main_account_id**。注意本模块当前用的是
+  ``store_name or username or account_id``(:104 附近) —— 那是**店铺标识**,
+  与主链路的 ``profiles/<platform>/<sanitized_main_account_id>`` **口径分裂**,
+  会导致「同一份登录态存在两个目录」。若将来必须复活本模块, 先把账号口径改成
+  main_account_id。
 """
 from __future__ import annotations
 

@@ -5,6 +5,23 @@
 统一登录编排器
 支持妙手ERP、Shopee卖家、TikTok卖家的智能登录流程
 包含:登录环节 -> 验证码识别 -> 邮箱OTP -> SMS用户输入
+
+⚠️ 已冻结(2026-11 收尾)
+--------------------------
+本模块**没有生产调用方**(仅被 ``modules/apps/collection_center/contract_tests.py``
+与 ``backend/tests/test_login_orchestrator_surface_convergence.py`` 引用), 且
+``supported_platforms`` 只剩 ``miaoshou`` / ``miaoshou_erp``。
+
+保留原因: 仍有测试引用, 删了要连带改测试; 且它只服务妙手, 不碰 shopee/tiktok。
+
+硬约束:
+* **不得新增调用方**。
+* 登录态的 profile 目录口径**只认 main_account_id**(净化后即
+  ``profiles/<platform>/<sanitized_main_account_id>``), 与
+  ``docs/guides/COLLECTION_SESSION_LIFECYCLE.md`` 保持一致。
+* 本模块用的是 ``account.get('account_id', username)`` —— 若调用方塞进来的是
+  **店铺账号 ID**, 建出来的目录就与主链路口径分裂(profile 会变成两份登录态)。
+  新接入前必须先确认 account_id 是主账号 ID。
 """
 
 import time
