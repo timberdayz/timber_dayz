@@ -130,6 +130,162 @@ async def test_executor_open_runtime_bundle_auto_prefers_storage_state_helper(
     storage_open.assert_not_awaited()
 
 
+# ---------------------------------------------------------------------------
+# Task 4 / F4-9：模式判定收敛到一处
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_passes_resolved_runtime_mode_to_open_runtime_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F4-9：``execute()`` 解析一次模式，并把**解析后的**模式传给 bundle 打开器。
+
+    前置校验与「真正开 profile 目录」必须看到同一个模式结论，否则会出现
+    「校验按 auto 放行、实际却走 profile」的脱节。
+    """
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.runtime_profile_exists",
+        lambda platform, session_owner_id: True,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._manual_storage_state_exists",
+        lambda platform, account_id: False,
+    )
+
+    observed: dict = {}
+
+    class _Ctx:
+        async def close(self):
+            return None
+
+    class _Page:
+        async def close(self):
+            return None
+
+    class _Bundle:
+        reused_session = False
+        mode = "persistent_profile"
+        profile_path = "profiles/miaoshou/main-1"
+
+        def __init__(self) -> None:
+            self.context = _Ctx()
+            self.page = _Page()
+
+    async def _fake_open_runtime_bundle(**kwargs):
+        observed["session_runtime_mode"] = kwargs.get("session_runtime_mode")
+        observed["resolved_mode"] = kwargs.get("resolved_mode")
+        return _Bundle()
+
+    monkeypatch.setattr(executor, "_open_runtime_bundle", _fake_open_runtime_bundle)
+    monkeypatch.setattr(
+        executor,
+        "_execute_shared_login_phase",
+        AsyncMock(return_value=(object(), object(), None)),
+    )
+    monkeypatch.setattr(
+        executor,
+        "_execute_with_python_components",
+        AsyncMock(
+            return_value=CollectionResult(
+                task_id="task-1", status="completed", files_collected=0
+            )
+        ),
+    )
+    monkeypatch.setattr(executor, "_cleanup_browser_runtime", AsyncMock())
+
+    await executor.execute(
+        task_id="task-1",
+        platform="miaoshou",
+        account_id="shop-1",
+        account={
+            "username": "u",
+            "password": "p",
+            "main_account_id": "main-1",
+            "shop_account_id": "shop-1",
+        },
+        data_domains=["orders"],
+        date_range={"start": "2025-01-01", "end": "2025-01-31"},
+        granularity="daily",
+        browser=object(),
+        browser_type=object(),
+        session_runtime_mode="auto",
+    )
+
+    # auto 解析成 persistent_profile → 传下去的是**解析后**的模式，不是原始的 "auto"
+    assert observed["session_runtime_mode"] == "persistent_profile"
+    assert observed["resolved_mode"] is not None
+    assert observed["resolved_mode"].mode == "persistent_profile"
+
+
+@pytest.mark.asyncio
+async def test_execute_raises_clear_error_when_profile_mode_lacks_browser_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F4-9：走持久化 profile 但没有 browser_type → 清晰的 ValueError，不是 AttributeError。"""
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.runtime_profile_exists",
+        lambda platform, session_owner_id: True,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._manual_storage_state_exists",
+        lambda platform, account_id: False,
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        await executor.execute(
+            task_id="task-1",
+            platform="miaoshou",
+            account_id="shop-1",
+            account={
+                "username": "u",
+                "password": "p",
+                "main_account_id": "main-1",
+                "shop_account_id": "shop-1",
+            },
+            data_domains=["orders"],
+            date_range={"start": "2025-01-01", "end": "2025-01-31"},
+            granularity="daily",
+            browser=object(),
+            browser_type=None,
+            session_runtime_mode="auto",
+        )
+
+    message = str(excinfo.value)
+    assert "browser_type" in message
+    assert "profile" in message
+    # 必须是 ValueError（不是 AttributeError）
+    assert not isinstance(excinfo.value, AttributeError)
+
+
+@pytest.mark.asyncio
+async def test_open_runtime_bundle_raises_clear_error_without_browser_type() -> None:
+    """F4-9：直接调用 ``_open_runtime_bundle`` 时同样给出清晰的中文 ValueError。"""
+    executor = CollectionExecutorV2()
+
+    with pytest.raises(ValueError) as excinfo:
+        await executor._open_runtime_bundle(
+            session_runtime_mode="persistent_profile",
+            browser=object(),
+            browser_type=None,
+            platform="miaoshou",
+            session_owner_id="main-1",
+            runtime_account={"login_url": "https://erp.91miaoshou.com/login"},
+            storage_state=None,
+            launch_kwargs={"headless": True},
+        )
+
+    message = str(excinfo.value)
+    assert "browser_type" in message
+    assert "profile" in message
+
+
 @pytest.mark.asyncio
 async def test_headful_profile_fallback_keeps_runtime_page_aligned_to_profile(
     monkeypatch: pytest.MonkeyPatch,

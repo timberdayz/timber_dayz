@@ -1,12 +1,15 @@
 from pathlib import Path
 import asyncio
 import json
+from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock
 
 import pytest
 
 from modules.apps.collection_center.executor_v2 import (
     CollectionExecutorV2,
+    CollectionResult,
+    TaskCancelledError,
     _extract_platform_shop_context,
     _resolve_session_scope,
 )
@@ -498,3 +501,254 @@ async def test_execute_reloads_main_account_session_after_waiting_for_lock(
     results = await asyncio.gather(first_task, second_task)
 
     assert results == ["stale", "fresh"]
+
+
+# ---------------------------------------------------------------------------
+# Task 4 / F4-8：采集异常路径不得泄漏 profile context
+#
+# execute() 是**两段 try**：第一段 try 的 except 分支只释放账号锁就直接 return/raise
+# → 第二段的 finally 永不执行 → _cleanup_browser_runtime 被跳过 →
+# Chromium 进程残留 + profile 目录的独占锁不释放 + 账号锁已释放
+# → 下一个任务能双开同一 profile 目录（R6）。
+# ---------------------------------------------------------------------------
+
+
+class _RecordingCoordinator:
+    """记录加锁/解锁时序的假协调器（与 test_main_account_session_lock 同构）。"""
+
+    def __init__(self, events: List[str]) -> None:
+        self.events = events
+        self.acquired_with: List[Any] = []
+
+    def acquire(self, platform: str, main_account_id: str):
+        coordinator = self
+
+        class _CM:
+            async def __aenter__(self):
+                coordinator.events.append("lock-acquire")
+                coordinator.acquired_with.append((platform, main_account_id))
+                return None
+
+            async def __aexit__(self, exc_type, exc, tb):
+                coordinator.events.append("lock-release")
+                return None
+
+        return _CM()
+
+    def is_locked(self, platform: str, main_account_id: str) -> bool:
+        return False
+
+    def waiter_count(self, platform: str, main_account_id: str) -> int:
+        return 0
+
+    async def is_locked_async(self, platform: str, main_account_id: str) -> bool:
+        return False
+
+    async def waiter_count_async(self, platform: str, main_account_id: str) -> int:
+        return 0
+
+
+def _install_fake_profile_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    executor: CollectionExecutorV2,
+    events: List[str],
+    *,
+    login_phase_error: Optional[BaseException] = None,
+    diagnostics_error: Optional[BaseException] = None,
+    login_result: Optional[CollectionResult] = None,
+) -> Dict[str, int]:
+    """装一套假的 profile 运行时，返回 close 次数计数器。
+
+    ``diagnostics_error`` 让异常发生在 ``play_context`` **已经绑定之后**
+    （``_start_browser_diagnostics``）→ 正好命中「第一段 try 的异常路径」，
+    且此时 profile context 确实还开着。
+
+    ``login_result`` 让登录阶段直接给出终态 → ``execute()`` 提前返回，
+    第二段 try 根本不会执行。
+    """
+    state = {"context_closes": 0, "page_closes": 0}
+
+    class _Ctx:
+        async def close(self):
+            state["context_closes"] += 1
+            events.append("context-closed")
+
+    class _Page:
+        async def close(self):
+            state["page_closes"] += 1
+            events.append("page-closed")
+
+    class _Bundle:
+        reused_session = False
+        mode = "persistent_profile"
+        profile_path = "profiles/miaoshou/main-1"
+
+        def __init__(self) -> None:
+            self.context = _Ctx()
+            self.page = _Page()
+
+    async def _open_runtime_bundle(**kwargs):
+        events.append("profile-opened")
+        return _Bundle()
+
+    async def _execute_shared_login_phase(**kwargs):
+        if login_phase_error is not None:
+            raise login_phase_error
+        return kwargs["play_context"], kwargs["page"], login_result
+
+    async def _start_browser_diagnostics(**kwargs):
+        if diagnostics_error is not None:
+            raise diagnostics_error
+        return None
+
+    monkeypatch.setattr(executor, "_open_runtime_bundle", _open_runtime_bundle)
+    monkeypatch.setattr(
+        executor, "_execute_shared_login_phase", _execute_shared_login_phase
+    )
+    monkeypatch.setattr(
+        executor, "_start_browser_diagnostics", _start_browser_diagnostics
+    )
+    monkeypatch.setattr(
+        executor,
+        "_execute_with_python_components",
+        AsyncMock(
+            return_value=CollectionResult(
+                task_id="task-1", status="completed", files_collected=0
+            )
+        ),
+    )
+    return state
+
+
+async def _run_profile_collection(executor: CollectionExecutorV2) -> Any:
+    return await executor.execute(
+        task_id="task-1",
+        platform="miaoshou",
+        account_id="shop-1",
+        account={
+            "username": "u",
+            "password": "p",
+            "main_account_id": "main-1",
+            "shop_account_id": "shop-1",
+        },
+        data_domains=["orders"],
+        date_range={"start": "2025-01-01", "end": "2025-01-31"},
+        granularity="daily",
+        browser=object(),
+        browser_type=object(),
+        session_runtime_mode="persistent_profile",
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_closes_profile_context_when_first_stage_raises(monkeypatch):
+    """F4-8：第一段 try 抛异常时，profile context 仍必须被 close。
+
+    不关的话：Chromium 进程残留 + profile 目录独占锁不释放，而账号锁已经放掉
+    → 下一个任务能双开同一 profile 目录（R6）。
+    """
+    events: List[str] = []
+    coordinator = _RecordingCoordinator(events)
+    executor = CollectionExecutorV2(main_account_session_coordinator=coordinator)
+    executor._update_status = AsyncMock()
+
+    state = _install_fake_profile_runtime(
+        monkeypatch,
+        executor,
+        events,
+        diagnostics_error=RuntimeError("diagnostics boom"),
+    )
+
+    with pytest.raises(RuntimeError, match="diagnostics boom"):
+        await _run_profile_collection(executor)
+
+    assert state["context_closes"] == 1
+    # 关闭必须早于释放账号锁（顺序反了就会双开同一 profile）
+    assert events.index("context-closed") < events.index("lock-release")
+
+
+@pytest.mark.asyncio
+async def test_execute_closes_profile_context_once_on_normal_path(monkeypatch):
+    """F4-8：正常路径下 profile context 只被 close 一次（幂等）。"""
+    events: List[str] = []
+    coordinator = _RecordingCoordinator(events)
+    executor = CollectionExecutorV2(main_account_session_coordinator=coordinator)
+    executor._update_status = AsyncMock()
+
+    state = _install_fake_profile_runtime(monkeypatch, executor, events)
+
+    result = await _run_profile_collection(executor)
+
+    assert result.status == "completed"
+    assert state["context_closes"] == 1
+    assert events.index("context-closed") < events.index("lock-release")
+
+
+@pytest.mark.asyncio
+async def test_execute_closes_profile_context_on_cancel_path(monkeypatch):
+    """F4-8：取消路径（TaskCancelledError）下 profile context 也必须被 close。"""
+    events: List[str] = []
+    coordinator = _RecordingCoordinator(events)
+    executor = CollectionExecutorV2(main_account_session_coordinator=coordinator)
+    executor._update_status = AsyncMock()
+
+    state = _install_fake_profile_runtime(
+        monkeypatch,
+        executor,
+        events,
+        diagnostics_error=TaskCancelledError("cancelled"),
+    )
+
+    result = await _run_profile_collection(executor)
+
+    assert result.status == "cancelled"
+    assert state["context_closes"] == 1
+    assert events.index("context-closed") < events.index("lock-release")
+
+
+@pytest.mark.asyncio
+async def test_execute_does_not_close_profile_context_twice_on_cancel(monkeypatch):
+    """F4-8：登录阶段失败时 context 已被内部关过一次 → 兜底清理不能重复关。"""
+    events: List[str] = []
+    coordinator = _RecordingCoordinator(events)
+    executor = CollectionExecutorV2(main_account_session_coordinator=coordinator)
+    executor._update_status = AsyncMock()
+
+    state = _install_fake_profile_runtime(
+        monkeypatch,
+        executor,
+        events,
+        login_phase_error=TaskCancelledError("cancelled"),
+    )
+
+    result = await _run_profile_collection(executor)
+
+    assert result.status == "cancelled"
+    # _execute_shared_login_phase 内部已关过一次 runtime_bundle.context，
+    # 外层兜底清理必须幂等 → 总数仍然是 1
+    assert state["context_closes"] == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_closes_profile_context_on_early_login_result_return(monkeypatch):
+    """F4-8：登录阶段直接给出终态并提前返回时，context 与账号锁都要收掉。
+
+    提前返回 → 第二段 try 根本不执行 → 它的 finally 也不会跑。
+    """
+    events: List[str] = []
+    coordinator = _RecordingCoordinator(events)
+    executor = CollectionExecutorV2(main_account_session_coordinator=coordinator)
+    executor._update_status = AsyncMock()
+
+    state = _install_fake_profile_runtime(
+        monkeypatch,
+        executor,
+        events,
+        login_result=CollectionResult(task_id="task-1", status="failed"),
+    )
+
+    result = await _run_profile_collection(executor)
+
+    assert result.status == "failed"
+    assert state["context_closes"] == 1
+    assert events.index("context-closed") < events.index("lock-release")

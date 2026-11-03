@@ -954,6 +954,176 @@ async def test_requires_profile_session_lock_only_for_profile_modes(
     )
 
 
+@pytest.mark.asyncio
+async def test_requires_profile_session_lock_locks_auto_without_profile_dir(
+    monkeypatch,
+) -> None:
+    """R6：auto 模式下即使 profile 目录**还不存在**也必须加锁。
+
+    新账号首次采集时 profile 目录还不存在 → 旧口径（探目录是否存在）会漏加锁 →
+    两个任务可以同时**首开**同一目录 → 第二个撞 Chromium 对 user_data_dir 的独占锁
+    启动失败，更糟的是 profile 可能被写坏。
+    """
+    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
+
+    executor = CollectionExecutorV2()
+
+    # profile 目录**还不存在**（新账号首次采集）
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.runtime_profile_exists",
+        lambda platform, session_owner_id: False,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._manual_storage_state_exists",
+        lambda platform, account_id: False,
+    )
+
+    assert (
+        executor._requires_profile_session_lock(
+            platform="shopee",
+            session_owner_id="main-1",
+            session_runtime_mode="auto",
+        )
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_requires_profile_session_lock_follows_mode_not_directory_state(
+    monkeypatch,
+) -> None:
+    """判定口径是**运行时模式**，不是「profile 目录此刻存不存在」。"""
+    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
+
+    executor = CollectionExecutorV2()
+
+    for has_profile in (False, True):
+        monkeypatch.setattr(
+            "modules.apps.collection_center.runtime_session.runtime_profile_exists",
+            lambda platform, session_owner_id, _has=has_profile: _has,
+        )
+        monkeypatch.setattr(
+            "modules.apps.collection_center.executor_v2._manual_storage_state_exists",
+            lambda platform, account_id: False,
+        )
+
+        # 显式走 profile → 加锁
+        assert (
+            executor._requires_profile_session_lock(
+                platform="shopee",
+                session_owner_id="main-1",
+                session_runtime_mode="persistent_profile",
+            )
+            is True
+        )
+        # auto → 目标载体是 profile 目录 → 加锁（与目录是否存在无关）
+        assert (
+            executor._requires_profile_session_lock(
+                platform="shopee",
+                session_owner_id="main-1",
+                session_runtime_mode="auto",
+            )
+            is True
+        )
+        # 纯 storage_state 扇出不碰 profile 目录 → 不加锁
+        assert (
+            executor._requires_profile_session_lock(
+                platform="shopee",
+                session_owner_id="main-1",
+                session_runtime_mode="storage_state_fanout",
+            )
+            is False
+        )
+
+
+@pytest.mark.asyncio
+async def test_auto_mode_takes_account_lock_even_when_profile_dir_missing(
+    monkeypatch,
+) -> None:
+    """R6 + Task 4：auto 模式下 profile 目录还不存在也必须拿到**跨进程**账号锁。
+
+    判据不是「有没有调过加锁接口」（进程内协调器也会走同一个接口），
+    而是「账号锁是否持有到 profile context 关闭之后」——
+    只有跨进程锁路径（``session_lock_cm``）才会这样（R6 + F3）。
+    """
+    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
+
+    events: List[str] = []
+    coordinator = _RecordingCoordinator(events)
+    executor = CollectionExecutorV2(main_account_session_coordinator=coordinator)
+    executor._update_status = AsyncMock()
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.runtime_profile_exists",
+        lambda platform, session_owner_id: False,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._manual_storage_state_exists",
+        lambda platform, account_id: False,
+    )
+
+    class _Ctx:
+        async def close(self):
+            events.append("context-closed")
+
+    class _Page:
+        async def close(self):
+            return None
+
+    class _Bundle:
+        reused_session = False
+        mode = "persistent_profile"
+        profile_path = "profiles/miaoshou/main-1"
+
+        def __init__(self) -> None:
+            self.context = _Ctx()
+            self.page = _Page()
+
+    async def _open_runtime_bundle(**kwargs):
+        events.append("profile-opened")
+        return _Bundle()
+
+    async def _execute_shared_login_phase(**kwargs):
+        return kwargs["play_context"], kwargs["page"], None
+
+    monkeypatch.setattr(executor, "_open_runtime_bundle", _open_runtime_bundle)
+    monkeypatch.setattr(
+        executor, "_execute_shared_login_phase", _execute_shared_login_phase
+    )
+    monkeypatch.setattr(
+        executor,
+        "_execute_with_python_components",
+        AsyncMock(
+            return_value=CollectionResult(
+                task_id="task-1", status="completed", files_collected=0
+            )
+        ),
+    )
+
+    await executor.execute(
+        task_id="task-1",
+        platform="miaoshou",
+        account_id="shop-1",
+        account={
+            "username": "u",
+            "password": "p",
+            "main_account_id": "main-1",
+            "shop_account_id": "shop-1",
+        },
+        data_domains=["orders"],
+        date_range={"start": "2025-01-01", "end": "2025-01-31"},
+        granularity="daily",
+        browser=object(),
+        browser_type=object(),
+        session_runtime_mode="auto",
+    )
+
+    # 账号锁必须在打开 profile 之前拿到
+    assert events.index("lock-acquire") < events.index("profile-opened")
+    # 且必须持有到 profile context 关闭之后（R6：不能让另一个进程双开同一目录）
+    assert events.index("context-closed") < events.index("lock-release")
+
+
 # ---------------------------------------------------------------------------
 # 后端实现与降级路径
 # ---------------------------------------------------------------------------

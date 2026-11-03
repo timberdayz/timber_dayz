@@ -738,6 +738,40 @@ class BrowserDiagnosticsSession:
     event_counts: Dict[str, int] = field(default_factory=dict)
 
 
+# 运行时模式 → 是否「以持久 profile 目录为目标载体」。
+#
+#   persistent_profile   → 显式要求走持久 profile 目录；
+#   auto                → 顺序路径的目标载体就是 profile 目录（profile 是登录态的
+#                          唯一载体）。**即使 profile 目录此刻还不存在**（新账号首次
+#                          采集），本次执行也会首开它 → 两个任务同时首开同一目录会撞
+#                          Chromium 对 user_data_dir 的独占锁（R6）→ 必须加账号锁；
+#   storage_state_fanout → 不碰 profile 目录（只吃内存里的会话快照）→ 不加锁。
+#
+# 这是**模式层面**的判定，不是「目录此刻存不存在」的探测 —— 探测口径会让新账号
+# 首次采集漏加锁（Task 4 / F4-9）。
+_PROFILE_TARGETING_RUNTIME_MODES = frozenset({"auto", "persistent_profile"})
+
+
+@dataclass(frozen=True)
+class _ResolvedRuntimeMode:
+    """运行时模式解析后的**唯一**结论（Task 4 / F4-9）。
+
+    ``execute()`` 的前置校验、账号锁判定与 ``_open_runtime_bundle`` 的分支
+    必须看到同一份解析结果 —— 否则「校验用的模式」与「真正开 profile 用的模式」
+    会脱节（``browser_type=None`` 时抛 AttributeError 而不是清晰的 ValueError）。
+
+    这里**只**装模式结论与判定它所需的两个探针结果；
+    会话物化（读会话文件 / bootstrap）留在 ``_open_runtime_bundle`` 里做 ——
+    那一步会打开 profile 目录，必须留在账号锁**之内**。
+    """
+
+    mode: str
+    requested_mode: str
+    has_persistent_profile: bool = False
+    has_manual_storage_state: bool = False
+    prefer_manual_storage_state: bool = False
+
+
 class TaskCancelledError(Exception):
     """任务被取消"""
 
@@ -948,32 +982,22 @@ class CollectionExecutorV2:
         只有真正要打开 profile 时才加锁 —— 纯 storage_state 扇出不碰 profile 目录,
         不该被账号锁串行化。
 
-        判定口径与 ``_open_runtime_bundle`` 的模式解析保持一致:
-        ``persistent_profile`` 显式模式 → 一定开;
-        ``auto`` 模式 → profile 目录存在且没有人工巡店会话(人工会话优先, 见 spec D6) → 开。
+        [Task 4 / F4-9 + R6] 判定口径跟着**统一模式判定**走
+        (``_PROFILE_TARGETING_RUNTIME_MODES``), 不再依赖「profile 目录此刻存不存在」:
+
+        - ``persistent_profile`` → 一定开 profile 目录 → 加锁;
+        - ``auto`` → 目标载体就是 profile 目录 → 加锁。
+          **即使 profile 目录还不存在**(新账号首次采集)也必须加锁:
+          本次执行会**首开**这个目录, 两个任务同时首开 → 第二个撞 Chromium 对
+          user_data_dir 的独占锁启动失败, 更糟的是 profile 可能被写坏(R6);
+        - ``storage_state_fanout`` → 不碰 profile 目录 → 不加锁。
+
+        ``platform`` 保留在签名里是为了兼容既有调用方(锁键按平台隔离)。
         """
         normalized = str(session_runtime_mode or "").strip().lower()
         if not session_owner_id:
             return False
-        if normalized == "persistent_profile":
-            return True
-        if normalized != "auto":
-            return False
-        try:
-            has_profile = runtime_session.runtime_profile_exists(
-                platform, session_owner_id
-            )
-        except Exception:
-            logger.debug(
-                "Failed to probe persistent profile for %s/%s",
-                platform,
-                session_owner_id,
-                exc_info=True,
-            )
-            return False
-        if not has_profile:
-            return False
-        return not _manual_storage_state_exists(platform, session_owner_id)
+        return normalized in _PROFILE_TARGETING_RUNTIME_MODES
 
     @staticmethod
     def _should_prefer_manual_storage_state(
@@ -988,6 +1012,75 @@ class CollectionExecutorV2:
         """
         return bool(has_manual_storage_state)
 
+    def _resolve_runtime_mode(
+        self,
+        *,
+        session_runtime_mode: str,
+        platform: str,
+        session_owner_id: str,
+    ) -> _ResolvedRuntimeMode:
+        """把「运行时模式」的判定**收敛到一处**（Task 4 / F4-9）。
+
+        ``execute()`` 的前置校验、账号锁判定与 ``_open_runtime_bundle`` 的分支
+        必须看到**同一个**模式结论 —— 否则会出现「前置校验按 auto 放行、实际却去
+        开 profile 目录」的脱节（``browser_type=None`` 时在 profile 分支里抛
+        AttributeError，而不是清晰的 ValueError）。
+
+        这里**不动**「auto 按有没有 profile / 有没有人工会话选模式」的既有策略
+        （那是 Task 4.2 的事），只把判定集中到一处，避免解析两遍。
+
+        本方法**只做无副作用的探针**（不读会话文件、不 bootstrap、不打开 profile
+        目录）→ 可以在拿账号锁之前安全调用；会话物化留在 ``_open_runtime_bundle``
+        里、在账号锁之内完成。
+        """
+        normalized_mode = str(session_runtime_mode or "").strip().lower()
+        if normalized_mode != "auto":
+            return _ResolvedRuntimeMode(
+                mode=normalized_mode,
+                requested_mode=normalized_mode,
+            )
+
+        has_persistent_profile = bool(
+            session_owner_id
+            and runtime_session.runtime_profile_exists(platform, session_owner_id)
+        )
+        # 人工巡店保存的会话（data/sessions/<platform>/<owner>/storage_state.json）
+        # 必须优先于持久 profile 目录被读取（spec D6 / A4）。
+        has_manual_storage_state = bool(
+            session_owner_id
+            and _manual_storage_state_exists(platform, session_owner_id)
+        )
+        prefer_manual_storage_state = self._should_prefer_manual_storage_state(
+            has_persistent_profile=has_persistent_profile,
+            has_manual_storage_state=has_manual_storage_state,
+        )
+        # 模式结论直接取自**同一个**策略函数（``choose_runtime_strategy``），
+        # 保证「判定模式」与「记录 strategy_reason」永远是同一个结论。
+        # ``has_storage_state`` 传 False 是安全的：策略函数只有在
+        # 「没有 profile、也没有人工会话」时才看它，而那两种情况下的结论
+        # 都是 storage_state_fanout —— 模式与 storage_state 的内容无关。
+        decision = runtime_session.choose_runtime_strategy(
+            platform=platform,
+            session_owner_id=session_owner_id,
+            has_storage_state=False,
+            has_manual_storage_state=has_manual_storage_state,
+            # 人工会话存在时，持久 profile 目录只作为兜底，不再优先。
+            has_persistent_profile=(
+                has_persistent_profile and not prefer_manual_storage_state
+            ),
+            force_persistent_profile=False,
+            execution_kind="formal_collection",
+            component_type="export",
+            parallel_mode=False,
+        )
+        return _ResolvedRuntimeMode(
+            mode=decision.mode,
+            requested_mode=normalized_mode,
+            has_persistent_profile=has_persistent_profile,
+            has_manual_storage_state=has_manual_storage_state,
+            prefer_manual_storage_state=prefer_manual_storage_state,
+        )
+
     async def _open_runtime_bundle(
         self,
         *,
@@ -1000,33 +1093,35 @@ class CollectionExecutorV2:
         storage_state: Optional[Dict[str, Any]] = None,
         launch_kwargs: Optional[Dict[str, Any]] = None,
         proxy: Optional[Dict[str, Any]] = None,
+        resolved_mode: Optional[_ResolvedRuntimeMode] = None,
     ):
-        normalized_mode = (
-            str(session_runtime_mode or "storage_state_fanout").strip().lower()
-        )
+        # [Task 4 / F4-9] 模式判定收敛到 ``_resolve_runtime_mode``：
+        # ``execute()`` 先解析一次并把结论传进来（``session_runtime_mode`` 传的是
+        # **解析后**的模式，``resolved_mode`` 带上判定所需的探针结果）；
+        # 这里只**消费**结论，不再自己解析。
+        # 直接调用本方法的调用方（测试/并行路径）走同一条兜底解析 —— 两条路径
+        # 用的是同一套判定逻辑，不会再出现「解析两遍、结论不一致」。
+        if resolved_mode is None:
+            resolved_mode = self._resolve_runtime_mode(
+                session_runtime_mode=session_runtime_mode,
+                platform=platform,
+                session_owner_id=session_owner_id,
+            )
+        normalized_mode = resolved_mode.mode
+        is_auto_request = resolved_mode.requested_mode == "auto"
         effective_storage_state = storage_state
-
         session_candidate = runtime_session.RuntimeSessionCandidate(
             storage_state=effective_storage_state, metadata={}
         )
 
-        if normalized_mode == "auto":
-            has_persistent_profile = bool(
-                session_owner_id
-                and runtime_session.runtime_profile_exists(platform, session_owner_id)
-            )
-            # 人工巡店保存的会话（data/sessions/<platform>/<owner>/storage_state.json）
-            # 必须优先于持久 profile 目录被读取（spec D6 / A4）。
-            has_manual_storage_state = bool(
-                session_owner_id
-                and _manual_storage_state_exists(platform, session_owner_id)
-            )
-            prefer_manual_storage_state = self._should_prefer_manual_storage_state(
-                has_persistent_profile=has_persistent_profile,
-                has_manual_storage_state=has_manual_storage_state,
-            )
+        if is_auto_request:
+            # auto 分支的会话物化：人工巡店保存的会话优先于持久 profile 目录
+            # 被读取（spec D6 / A4）。条件与既有实现完全一致。
             if (
-                (prefer_manual_storage_state or not has_persistent_profile)
+                (
+                    resolved_mode.prefer_manual_storage_state
+                    or not resolved_mode.has_persistent_profile
+                )
                 and effective_storage_state is None
                 and session_owner_id
             ):
@@ -1059,18 +1154,19 @@ class CollectionExecutorV2:
                 session_owner_id=session_owner_id,
                 has_storage_state=bool(effective_storage_state),
                 has_manual_storage_state=(
-                    prefer_manual_storage_state or session_candidate.manual_seeded
+                    resolved_mode.prefer_manual_storage_state
+                    or session_candidate.manual_seeded
                 ),
                 # 人工会话存在时，持久 profile 目录只作为兜底，不再优先。
                 has_persistent_profile=(
-                    has_persistent_profile and not prefer_manual_storage_state
+                    resolved_mode.has_persistent_profile
+                    and not resolved_mode.prefer_manual_storage_state
                 ),
                 force_persistent_profile=False,
                 execution_kind="formal_collection",
                 component_type="export",
                 parallel_mode=False,
             )
-            normalized_mode = strategy.mode
         else:
             strategy = runtime_session.RuntimeStrategyDecision(
                 mode=normalized_mode,
@@ -1081,6 +1177,12 @@ class CollectionExecutorV2:
             )
 
         if normalized_mode == "persistent_profile":
+            if browser_type is None:
+                raise ValueError(
+                    "走持久化 profile 需要 browser_type："
+                    f"platform={platform}, session_owner_id={session_owner_id}。"
+                    "未拿到 browser_type，无法打开该账号的持久 profile 目录。"
+                )
             bundle = await runtime_session.open_persistent_runtime_bundle(
                 browser_type=browser_type,
                 platform=platform,
@@ -2096,16 +2198,30 @@ class CollectionExecutorV2:
                 page_context_to_close = page.context
             except Exception as e:
                 logger.warning("Could not get browser from page: %s", e)
-        normalized_runtime_mode = str(session_runtime_mode).strip().lower()
+        # [Task 4 / F4-9] 模式判定**收敛到一处**：
+        # execute() 先解析出**实际生效**的模式，再把它传给 _open_runtime_bundle →
+        # 前置校验与「真正开 profile 目录」用的永远是同一个模式结论，
+        # 不会再出现「校验按 auto 放行、实际走 profile」的脱节。
+        requested_runtime_mode = str(session_runtime_mode or "").strip().lower()
+        resolved_runtime_mode = self._resolve_runtime_mode(
+            session_runtime_mode=session_runtime_mode,
+            platform=platform,
+            session_owner_id=session_owner_id,
+        )
+        normalized_runtime_mode = resolved_runtime_mode.mode
         if (
             browser_instance is None
-            and normalized_runtime_mode in {"auto", "storage_state_fanout"}
+            and requested_runtime_mode in {"auto", "storage_state_fanout"}
             and browser_type is not None
         ):
             # 浏览器级全局代理：账号自有代理必须在浏览器进程级注入。
             # 实测：per-context proxy 无需浏览器全局代理即可生效，
             # 且会覆盖全局代理；进程数也不因 per-context proxy 而增加。
             # 浏览器级代理仍保留：浏览器自身的请求（不经 context 的）也要走同一出口 IP。
+            #
+            # 这里刻意用**请求模式**(requested_runtime_mode)而不是解析后的模式：
+            # profile 模式下多开的那一个 Chromium 目前仍被 legacy 有头回退路径依赖
+            # (R3) —— 收敛到「profile 模式不再多开浏览器」是 Task 4.2 Step 6 的事。
             launch_kwargs = self._build_runtime_launch_kwargs(debug_mode=debug_mode)
             launch_kwargs.pop("proxy", None)
             browser_instance = await browser_type.launch(
@@ -2119,7 +2235,9 @@ class CollectionExecutorV2:
             )
         if normalized_runtime_mode == "persistent_profile" and browser_type is None:
             raise ValueError(
-                "execute() requires browser_type= when session_runtime_mode='persistent_profile'"
+                "走持久化 profile 需要 browser_type："
+                f"platform={platform}, session_owner_id={session_owner_id}。"
+                "未拿到 browser_type，无法打开该账号的持久 profile 目录。"
             )
 
         # [Task 3 / F3] 锁边界 = 「打开 profile → 关闭 profile」。
@@ -2160,6 +2278,34 @@ class CollectionExecutorV2:
         runtime_profile_path: Optional[str] = None
         runtime_launch_kwargs = self._build_runtime_launch_kwargs(debug_mode=debug_mode)
 
+        # [Task 4 / F4-8] play_context / page 在第一段 try **内部**才赋值，
+        # 异常路径要能安全引用它们 → 先给安全默认值(None)。
+        play_context = None
+        runtime_cleanup_done = False
+
+        async def _cleanup_runtime_once() -> None:
+            """幂等地关闭 profile context / browser 运行时资源。
+
+            [Task 4 / F4-8] 第一段 try 的两个 except 分支与第二段 try 的 finally
+            都会走到这里 → 必须保证 profile context **只被 close 一次**
+            （第二段的 finally 也会调一次；``_execute_shared_login_phase`` 内部
+            失败时也已经先关过一次）。
+            """
+            nonlocal runtime_cleanup_done
+            if runtime_cleanup_done:
+                return
+            runtime_cleanup_done = True
+            await self._cleanup_browser_runtime(
+                task_id=task_id,
+                page=page,
+                play_context=play_context,
+                browser=created_browser_instance,
+                diagnostics=diagnostics_session,
+                failed=diagnostics_failed,
+                scope="main",
+                extra_context=page_context_to_close,
+            )
+
         try:
             # 执行器统一建 context: 由执行器创建带指纹与可选会话的 context
             if context.current_component_index == 0:
@@ -2167,7 +2313,7 @@ class CollectionExecutorV2:
                 async def _coordinated_login():
                     nonlocal runtime_profile_path
                     runtime_bundle = await self._open_runtime_bundle(
-                        session_runtime_mode=session_runtime_mode,
+                        session_runtime_mode=normalized_runtime_mode,
                         browser=browser_instance,
                         browser_type=browser_type,
                         platform=platform,
@@ -2176,6 +2322,7 @@ class CollectionExecutorV2:
                         storage_state=None,
                         launch_kwargs=runtime_launch_kwargs,
                         proxy=proxy,
+                        resolved_mode=resolved_runtime_mode,
                     )
                     runtime_profile_path = getattr(
                         runtime_bundle, "profile_path", None
@@ -2285,10 +2432,17 @@ class CollectionExecutorV2:
                 login_result = bundle["login_result"]
                 params["_main_account_shared_state_prepared"] = True
                 if isinstance(login_result, CollectionResult):
+                    # [Task 4 / F4-8] 提前返回（登录阶段已给出终态）→
+                    # 第二段 try 不会执行 → 它的 finally 也不会跑 →
+                    # profile context 与账号锁都必须在这里收掉，
+                    # 否则 Chromium 残留 + profile 目录独占锁不释放（R6）。
+                    with contextlib.suppress(BaseException):
+                        await _cleanup_runtime_once()
+                    await _release_session_lock()
                     return login_result
             else:
                 runtime_bundle = await self._open_runtime_bundle(
-                    session_runtime_mode=session_runtime_mode,
+                    session_runtime_mode=normalized_runtime_mode,
                     browser=browser_instance,
                     browser_type=browser_type,
                     platform=platform,
@@ -2297,6 +2451,7 @@ class CollectionExecutorV2:
                     storage_state=None,
                     launch_kwargs=runtime_launch_kwargs,
                     proxy=proxy,
+                    resolved_mode=resolved_runtime_mode,
                 )
                 runtime_profile_path = getattr(runtime_bundle, "profile_path", None)
                 params = _build_runtime_task_params(
@@ -2343,7 +2498,12 @@ class CollectionExecutorV2:
                 )
 
         except TaskCancelledError:
-            # 登录阶段被取消 -> profile 不会进入后面的组件执行段, 必须在这里释放锁
+            # 登录阶段被取消 -> profile 不会进入后面的组件执行段。
+            # [Task 4 / F4-8] 必须先**关闭 profile context**再释放账号锁：
+            # 否则 Chromium 进程残留 + profile 目录的独占锁不释放，
+            # 而账号锁已经放掉 -> 下一个任务能双开同一 profile 目录（R6）。
+            with contextlib.suppress(BaseException):
+                await _cleanup_runtime_once()
             await _release_session_lock()
             return CollectionResult(
                 task_id=task_id,
@@ -2360,6 +2520,10 @@ class CollectionExecutorV2:
         except BaseException:
             # 登录阶段抛出非取消类异常 -> 下面的组件执行段不会执行,
             # 账号锁必须在这里释放, 否则这把锁会被续期心跳一直续下去。
+            # [Task 4 / F4-8] 第二段 try 的 finally 不会执行 →
+            # profile context 必须在这里关掉，且**关在放锁之前**。
+            with contextlib.suppress(BaseException):
+                await _cleanup_runtime_once()
             await _release_session_lock()
             raise
 
@@ -2817,16 +2981,9 @@ class CollectionExecutorV2:
                 total_domains=total_domains_count,
             )
         finally:
-            await self._cleanup_browser_runtime(
-                task_id=task_id,
-                page=page,
-                play_context=play_context,
-                browser=created_browser_instance,
-                diagnostics=diagnostics_session,
-                failed=diagnostics_failed,
-                scope="main",
-                extra_context=page_context_to_close,
-            )
+            # [Task 4 / F4-8] 幂等关闭：第一段 try 的异常路径可能已经关过一次，
+            # 这里再调一次也不会重复 close。
+            await _cleanup_runtime_once()
             # [Task 3 / F3] profile context 已真正关闭 → 现在才释放账号锁。
             # 顺序不能反: 先释放锁会让另一个进程在 Chromium 仍占用 profile 目录时打开它。
             await _release_session_lock()
