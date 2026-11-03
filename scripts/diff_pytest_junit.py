@@ -73,7 +73,9 @@ def save_baseline(junit_path: str, out_path: str, prefix: str | None) -> int:
     """
     failures, _all_ids = collect(junit_path, prefix)
     lines = sorted(failures)
-    Path(out_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # 显式 LF：仓库 .gitattributes 统一行尾，Windows 默认的 CRLF 会被改写
+    with Path(out_path).open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(lines) + "\n")
     print(f"[baseline] {len(lines)} failing cases -> {out_path}")
     return 0
 
