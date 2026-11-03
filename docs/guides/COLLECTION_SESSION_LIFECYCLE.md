@@ -5,8 +5,8 @@
 - **规范性文档**：本文定义「采集会话 / 账号身份」这套业务概念的**唯一权威语义**。代码实现、巡店面板、采集执行器都必须以此为准。
 - **上位文档**：[`COLLECTION_SESSION_AND_FINGERPRINT.md`](COLLECTION_SESSION_AND_FINGERPRINT.md) 定义账号级指纹与存储路径。本文定义**会话载体、保存语义、并发与 IP 隔离**。
 - **冲突处理**：本文与仓库其他文档冲突时以本文为准，并在同一任务内同步更新冲突文档。
-- **状态**：**生效版 v3**（2026-11-02 业务决策已确认）。
-- **版本沿革**：v1/v2 确立了「会话文件覆盖写入」语义；v3 按业务决策改为**单一载体（profile）+ IP 隔离**，会话文件废除。
+- **状态**：**生效版 v3.1**（2026-11-03 实现回填）。
+- **版本沿革**：v1/v2 确立了「会话文件覆盖写入」语义；v3 按业务决策改为**单一载体（profile）+ IP 隔离**，会话文件废除；v3.1 是**实现回填** —— 把 v3 已定稿的业务语义对应到已落地的代码与文件位置，**业务语义未变**。
 
 ---
 
@@ -170,18 +170,20 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 
 ## 6. 废除清单
 
-| 废除项 | 位置 | 理由 |
+以下能力**已废除**（代码已删除）。落地位置按**函数名 / 模块路径**标注 —— 行号会随后续提交漂移，函数名才稳定。
+
+| 废除项 | 已落地位置（函数 / 模块） | 理由 |
 |---|---|---|
-| **会话文件整体**（`data/sessions/**`） | `modules/utils/sessions/session_manager.py` | 登录态副本是本次事故的根源；profile 已能完整承载 |
-| **人工会话保护**（旧的是人工 + 新的是自动 → 保留旧的） | `session_manager.py:452-464` | 无第二份副本，不再需要仲裁 |
-| **保护标记自我传染** | `session_manager.py:493-496` | 同上 |
-| **质量分回退保护** | `session_manager.py:55-73` | 同上；且分数不看有效期，过期会话拿 29 分照样"合格" |
-| **30 天过期门禁** | `session_manager.py:547-553` | 读取即信任（R4） |
-| **巡店「保存会话」按钮与 `pwcli state-save`** | `scripts/pwcli_helpers.ps1:249-304`、`pwcli_native.command_state_save:899-935` | profile 自动持久化，导出动作无意义（R3） |
-| **`pwcli open` 打开后回写会话** | `pwcli_native.command_open:661` | 打开不是登录成功；网络抖动时抓到的信息可能残缺 |
-| **profile 引导落盘**（`_bootstrap_session_from_profile_sync` 写盘） | `runtime_session.py:306-312` | profile 本身就是引导源，无需再复制一份 |
-| **顺序采集路径的 storage_state 优先** | `runtime_session.choose_runtime_strategy:517-572` | 统一走 profile |
-| **三套并存的目录命名规则** | `session_manager._safe_filename` / `get_persistent_profile_path` / `pwcli_account_inventory.work_tag` | 统一为 `get_persistent_profile_path` |
+| **会话文件整体**（`data/sessions/**`） | `modules/utils/sessions/session_manager.py` —— `SessionManager.save_session` / `load_session` / `restore_session` / `get_session_path` / `get_session_metadata` / `list_sessions` / `cleanup_expired_sessions` / `delete_session` / `is_session_valid` 这一族会话文件 API 已整体删除 | 登录态副本是本次事故的根源；profile 已能完整承载 |
+| **人工会话保护**（旧的是人工 + 新的是自动 → 保留旧的） | 同上 —— 随会话文件 API 族一并删除 | 无第二份副本，不再需要仲裁 |
+| **保护标记自我传染** | 同上 —— 随会话文件 API 族一并删除 | 同上 |
+| **质量分回退保护**（`session_quality_score` / `session_meets_quality_gate`） | `modules/utils/sessions/session_manager.py` —— `session_quality_score` / `session_meets_quality_gate` 已随会话文件 API 族删除 | 同上；且分数不看有效期，过期会话拿 29 分照样"合格" |
+| **30 天过期门禁** | `SessionManager.cleanup_expired_sessions` / `is_session_valid`（随会话文件 API 族删除） | 读取即信任（R4） |
+| **巡店「保存会话」按钮与 `pwcli state-save`** | `scripts/pwcli_helpers.ps1` 的 `Save-Pwcli*State` 系列函数已删；`modules/utils/pwcli_native.py` 的 `command_state_save` 已删 | profile 自动持久化，导出动作无意义（R3） |
+| **`pwcli open` 打开后回写会话** | `modules/utils/pwcli_native.py` 的 `command_open` 不再回写会话 | 打开不是登录成功；网络抖动时抓到的信息可能残缺 |
+| **profile 引导落盘**（`_bootstrap_session_from_profile_sync` 写盘） | `modules/apps/collection_center/runtime_session.py` —— `_bootstrap_session_from_profile_sync` 的写盘路径已删 | profile 本身就是引导源，无需再复制一份 |
+| **顺序采集路径的 storage_state 优先** | `modules/apps/collection_center/runtime_session.py` —— `choose_runtime_strategy` 对 `formal_collection` 恒返回 `persistent_profile` | 统一走 profile |
+| **三套并存的目录命名规则** | 统一为 `modules/utils/sessions/session_manager.py` 的 `SessionManager.get_persistent_profile_path`（取代 `safe_session_account_dirname` / `SessionManager._safe_filename` / `pwcli_account_inventory.work_tag`） | 单一命名规则来源 |
 
 ---
 
@@ -239,6 +241,7 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 | 旧字段 | 新字段 | 说明 |
 |---|---|---|
 | `session_quality_score` | — | 质量分废除 |
+| `session_quality_gate_passed` | — | 质量门槛概念废除 |
 | `session_quality_source` | `session_source` | 取值 `profile`（登录态来自 profile） |
 | `session_manual_seeded` | — | 人工播种概念废除（profile 由人工登录建立，但这是常态不是标记） |
 | `session_protected` | — | 会话保护概念废除 |
@@ -246,7 +249,7 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 | — | `session_reused` | 本次是否复用了 profile 中已有的登录态 |
 | — | `session_proxy` | 生效的代理标识（脱敏） |
 
-**前端** `frontend/src/domains/collection/views/collection/CollectionTasks.vue:369-382` 的四项会话诊断展示需同步调整。
+**前端**（`frontend/src/domains/collection/views/collection/CollectionTasks.vue`）会话诊断展示已同步收敛：删除「质量来源」「质量评分」「质量门槛」「人工播种」「会话保护」五项，新增「会话载体」（`session_profile_path`）、「是否复用」（`session_reused`）、「出口代理」（`session_proxy`）三项，保留「会话来源」（`session_source`）。
 
 ---
 
@@ -297,3 +300,4 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 | 2026-11-02 | 草案 v1 | 基于会话复用失效事故重写会话语义：确立"最后写入者胜出"，废除来源优先级与质量分回退保护 |
 | 2026-11-02 | 生效版 v2 | 落定 D1~D4：人工保存即确认、`pwcli open` 不回写、profile 引导不落盘、同账号串行 |
 | 2026-11-02 | **生效版 v3** | 架构升级为**单一载体（profile）**：会话文件废除（D5）、巡店「保存会话」改为「打开巡店」（D6）、IP 隔离链路一并打通（D7）、新增 R7 正常关闭落盘与 P1~P4 代理规则 |
+| 2026-11-03 | **生效版 v3.1** | **实现回填**（**业务语义未变**，只把 v3 已定稿的语义对应到已落地的代码与文件位置）：① **会话文件体系废除落地** —— `session_manager.py` 会话文件 API 族整体删除、`runtime_session.py` profile 引导落盘删除、正式采集恒走 profile；② **诊断字段收敛** —— 废止 `session_quality_*` / `session_manual_seeded` / `session_protected`，前端改为「会话载体 / 是否复用 / 出口代理」三项；③ **代理链路打通** —— `extra_config->'proxy'` → `resolve_account_proxy` → 浏览器 `proxy=` 注入，凭据只随 `proxy=` 下传；④ **巡店面板动作收敛为「打开巡店」**（原「保存会话」按钮与 `pwcli state-save` 已删） |

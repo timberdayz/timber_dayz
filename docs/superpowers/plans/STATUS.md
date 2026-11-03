@@ -167,6 +167,11 @@ Live deployment verified:
   miaoshou `miaoshou_real_001`（2026-10-26）、
   shopee KR（2026-11-01）。真实环境影响量需在生产评估。
 
+## Session Profile-Only Architecture (2026-11)
+
+- Plan: `docs/superpowers/plans/2026-11-02-collection-profile-only-architecture.md`
+- Spec: `docs/guides/COLLECTION_SESSION_LIFECYCLE.md` (v3.1)
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).

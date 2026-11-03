@@ -29,9 +29,13 @@
 
 - 复用会话时执行器传入 `config['reused_session']=True`。各平台登录组件（当前主采集为 shopee、tiktok、miaoshou）按统一契约实现：先做已登录检测（如 URL/元素判断已在工作台），已登录则跳过并返回 success=True，未登录或需安全验证则执行完整登录并返回相应 success。执行器据此决定是否触发完整登录与 save_session。
 
-## 代理预留
+## 代理（已实现）
 
-- 在账号配置与执行器/浏览器配置层保留 proxy 相关字段（如 `proxy_required`、`proxy`）的读取与传递；执行器创建 context 时**暂不**注入 proxy，当前采集在住宅 IP 环境下无需启用。若未来需要多 IP/代理，可在此扩展并传入 context 的 proxy。
+- **配置来源**：账号级代理挂在 `core.shop_accounts.extra_config->'proxy'`（jsonb，不加列、不写迁移），由 `backend/services/account_loader_service.py` 的 `AccountLoaderService._build_runtime_account` 平铺透出为 `proxy_enabled` / `proxy_server` / `proxy_region` / `proxy_username` / `proxy_password`。
+- **解析规则只有一份**：`backend/services/account_proxy_config.py` 的 `resolve_account_proxy`（`AccountLoaderService` 与 `ShopAccountLoaderService` 共用的单一定义源）。它只认账号自有代理，**绝不回退**遗留地区池链路，也**不走** `fallback_to_direct` 静默直连；代理配置坏了（拆不出主机）**显式失败**，不退回「没配代理」。
+- **注入位置**：采集执行器把账号级代理注入浏览器 context 的 `proxy=` 参数 —— profile 模式走 `launch_persistent_context(proxy=...)`（**浏览器进程级全局代理，优先**），并行扇出走 `browser.new_context(proxy=...)`；`runtime_session._build_playwright_context_options_from_fingerprint` 的白名单已含 `proxy`，不会再被丢弃。
+- **凭据边界**：凭据**只随 `proxy=` 参数下传**。账号字典在进入组件 config 之前由 `strip_account_proxy_credentials` 剔除 `proxy_username` / `proxy_password` 与 URL 内嵌凭据 —— **不写进日志、不进组件配置**。
+- **诊断暴露**：诊断字段 `session_proxy` 用 `mask_proxy_server` 脱敏后暴露（只留 scheme + host，抹掉凭据）。
 
 ## 运维提醒
 
