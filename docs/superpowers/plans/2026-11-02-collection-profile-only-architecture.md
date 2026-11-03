@@ -1641,7 +1641,7 @@ Expected: exit=0。
 > `verify_root_md_whitelist.py` exit=0、`verify_utf8_source_hygiene.py` exit=0。
 > **发布门禁 `verify_release_local.py --skip-build` 未执行**（本地缺 `.env.production`，且其内部 `--repair` 会写库）。
 
-- [ ] **Step 4: 真实采集验收（关键）** ⏸ **部分完成，剩人工环节**
+- [x] **Step 4: 真实采集验收（关键）** — 自动化部分已完成；人工环节按用户决定移交（§10.4.2）
 
 在**本地笔记本**上按序执行：
 
@@ -1760,12 +1760,14 @@ Get-Item "profiles\shopee\shopeeKR\Default\Network\Cookies" | Select-Object Full
 | 步 | 期望 | 实测 | 结论 |
 |---|---|---|---|
 | 1（备份 `data/sessions/`） | 采集后无新会话文件 | 采集前后均 **19 个 `storage_state.json`（1.47 MB）**，无新增 | ✅ |
+| 1'（磁盘清理） | 备份 → 观察 → 删除 | **用户 2026-11-03 决定「立刻备份并删除」** → `data/sessions/` 整体改名为 `data/sessions.bak-20261103/`（19 个文件 / 1,536,719 bytes 全量保留，可随时改名还原）；**原 `data/sessions/` 已不存在** | ✅ |
+| 1''（`_alt` 旁路 profile） | 消除登录态分散 | **用户 2026-11-03 决定删除** → `profiles/shopee/虾皮巴西东朗照明主体_alt/`（16 条目 + Cookies 20480）已移入回收站；主 profile `profiles/shopee/shopeeKR/` 完好（Cookies 28672 bytes） | ✅ |
 | 2（备份 profile） | 为「首次登录」清空载体 | **未清空**（保留现有 `profiles/shopee/shopeeKR`，避免 3 个店铺账号无谓掉登录态） | ⏭ 主动不做 |
 | 3/4（采集 A → 需登录） | 要求登录 + 验证码 | 任务 `41500205-…` 真实跑到 `status=verification_required` / `verification_type=otp`；Shopee 登录页**自动填好**主账号 `Leslieshop:main` 与密码；OTP 发往 `+86 191****371` | ✅ 前半段符合 |
-| 5（立刻再跑，免验证码） | E1~E4 同时成立 | **未验** —— 依赖 3/4 的登录成功，OTP 只能由账号持有人提供 | ⏸ **待人工** |
+| 5（立刻再跑，免验证码） | E1~E4 同时成立 | **未验** —— 依赖 3/4 的登录成功，OTP 只能由账号持有人提供 | ⏸ **用户自行验证**（见 §10.4.2） |
 | 6（巡店登录 → 采集复用） | 同一 profile 目录 | 面板 `account_id` **就是** `main_account_id`；巡店侧 `pwcli_native.runtime_account_profile_dir` 与采集侧 `SessionManager.get_persistent_profile_path` **都指向** `profiles/shopee/shopeeKR` | ✅ 路径一致（代码核对 + 运行时探针） |
 | 7（面板无「保存会话」） | 按钮消失 | 全仓 grep：生产代码里「保存会话」/`Save-Pwcli*State`/`pwcli state-save` **全部清零** | ✅ |
-| 8（并行采集 + 无新文件） | 任务成功且无新会话文件 | 未验（同样卡在登录环节） | ⏸ 待人工 |
+| 8（并行采集 + 无新文件） | 任务成功且无新会话文件 | 未验（同样卡在登录环节） | ⏸ **用户自行验证** |
 | 9（代理灰度） | 假代理收到平台请求 + `session_proxy` 脱敏 | 本地假代理 `127.0.0.1:18888` 实收 **12 条**，含 `CONNECT seller.shopee.cn:443`、`CONNECT seller.shopee.sg:443`、`CONNECT patronus.idata.shopeemobile.com:443`；`session_proxy=http://127.0.0.1:18888`（脱敏）；`http://user:pass@proxy.example.com:8080` → `http://proxy.example.com:8080` | ✅ 链路通（**真实出口 IP 待真凭据补验**） |
 
 **诊断字段实测值**（运行时探针，走生产代码 `open_persistent_runtime_bundle` → `_runtime_session_diagnostics`）：
@@ -1826,38 +1828,171 @@ runtime_locale       = null
 >
 > ⚠️ **并行侧无诊断**（F8-6）：第 8 步拿不到 profile/复用/代理证据，只能靠「任务成功 + `data/sessions/` 无新文件」判定。
 
+#### 10.4.2 用户自行验收操作手册（2026-11-03）
+
+> **用户决定**（2026-11-03）：真机「登录一次 → 后续免验证码」需要账号持有人配合，**交付后由用户自己验证**。
+> 代码侧全部完成并已用自动化手段验证；下面是把「剩下的那一段」跑完的操作顺序。
+>
+> **要证明什么**（一句话）：**登录一次 → 之后每次采集都不再要验证码**。
+
+##### 第 0 步：起本地后端
+
+```powershell
+Set-Location F:\Vscode\python_programme\AI_code\xihong_erp
+python run.py --local
+```
+
+- 日志里会打印本机后端与前端的**实际地址**（本机实测后端 `http://127.0.0.1:8001`、前端 `http://127.0.0.1:51730`）。
+- ⚠️ **`.env.local` 里已经把 `CLOUD_DATABASE_URL` 置空** —— 不置空后端起不来（它会连一个不存在的云库并直接退出）。
+  这一行只在本机 `.env.local`（已被 gitignore）里，不影响别人。
+
+##### 第 1 步：登录
+
+- 用你平时的 ERP 账号（`xihong`）。
+  ⚠️ `.env.local` 里的 `LOCAL_DEV_ADMIN_PASSWORD` **只对新建账号生效**，已存在的 `xihong` 不会被重置口令（实测 401）。
+- **备用**：本地验收专用超级用户 `acceptance_admin`，口令在 `.env.local` 的 `ACCEPT_ADMIN_PASSWORD`（2026-11-03 创建，仅本机回环库）。
+
+##### 第 2 步：发起第一次采集（会要求登录 + 验证码，这是正常的）
+
+命令行：
+
+```powershell
+$tok = "<第 1 步拿到的 access_token>"
+curl -s -X POST http://127.0.0.1:8001/api/collection/tasks -H 'Content-Type: application/json' `
+  -H "Authorization: Bearer $tok" `
+  -d '{"platform":"shopee","account_id":"shopee_sg_eternalbloom_local","data_domains":["products"],"granularity":"daily","date_range":{"start":"2026-11-01","end":"2026-11-02"}}'
+```
+
+或者在前端「数据采集」页建任务，更直观。
+
+**会发生什么**（本机已实测到这一步）：登录页**自动填好**账号 `Leslieshop:main` 与密码 →
+Shopee 弹**手机 OTP**（`+86 191****371`）→ 任务变成 `verification_required`。
+
+##### 第 3 步：把登录做完（二选一）
+
+**方式 A：回填 OTP**（最快）
+
+```powershell
+curl -s -X POST "http://127.0.0.1:8001/api/collection/tasks/<task_id>/resume" `
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $tok" `
+  -d '{"otp":"<手机收到的6位码>"}'
+```
+
+系统在**同一个浏览器页面**里把码填进去并继续，登录成功后 Chromium 会把新 cookie 写回 profile 目录。
+
+**方式 B：巡店面板手动登录**（顺带把第 6 步也验了）
+
+```powershell
+python scripts/pwcli_inspection_panel.py
+```
+
+浏览器打开面板 → 找到「shopee / shopee KR」→ 点「**打开巡店**」→ 在弹出的浏览器里自己登录（任何验证码都能处理）→
+**正常关掉浏览器窗口**（别强杀，让它把 cookie 写盘）→ 回到第 4 步。
+
+> 面板**没有**「保存会话」按钮了 —— 登录态由 Chromium 自己写进 profile（这是本次改造的核心）。
+
+##### 第 4 步：紧接着再跑一次采集 → 应该**免验证码**
+
+重复第 2 步的命令（换个 `data_domains` 也可以，比如 `["products","services"]` 顺便验并行）。
+
+**四项证据同时成立才算过**：
+
+| # | 证据 | 取证方式 |
+|---|---|---|
+| E1 | 全程没弹验证码 | `core.collection_tasks.verification_type` 与 `verification_screenshot` **均为 NULL** |
+| E2 | 登录门检查通过 | `core.collection_task_logs.details` 里 `step_id="login_gate_result"` 且 `login_gate_ready=true` |
+| E3 | 确实复用了 profile 登录态 | 同一行 details 里 `session_reused=true` + `session_source=profile` |
+| E4 | profile cookie 已刷盘 | `profiles/shopee/shopeeKR/Default/Network/Cookies` 的 **mtime 前进** |
+
+取证 SQL：
+
+```sql
+-- E1
+select task_id, status, verification_type, verification_screenshot, started_at, completed_at
+from core.collection_tasks order by id desc limit 3;
+
+-- E2 + E3（details 是 json 不是 jsonb，用 ->> 取值）
+select l.task_id, l.message,
+       l.details->>'step_id'            as step_id,
+       l.details->>'login_gate_ready'   as gate_ready,
+       l.details->>'session_reused'     as reused,
+       l.details->>'session_source'     as source,
+       l.details->>'session_profile_path' as profile_path,
+       l.details->>'session_proxy'      as proxy
+from core.collection_task_logs l
+where l.details is not null
+  and l.details::text like '%login_gate_result%'
+order by l.id desc limit 10;
+```
+
+E4 取证：
+
+```powershell
+Get-Item "profiles\shopee\shopeeKR\Default\Network\Cookies" | Select-Object FullName, Length, LastWriteTime
+```
+
+> ⚠️ **取证据一定要挑「登录成功过的那次任务」**。
+> 首次登录（等验证码那次）的任务日志里**只有**「任务已创建」「等待验证码回填」两行，
+> `session_reused` 等字段一个都拿不到 —— 这是设计如此，不是 bug。
+
+##### 第 5 步（可选）：代理灰度
+
+真代理凭据到位后：给账号写 `core.shop_accounts.extra_config->'proxy' = {"enabled": true, "server": "http://用户:口令@代理:端口"}`，
+再跑一次采集 → 看任务诊断里的 `session_proxy`（脱敏后只剩 `scheme://host`）→ 再去平台后台看出口 IP 是否与代理一致。
+
+> 本轮已用**本地假代理**验过链路：假代理实收 12 条请求行（含 `CONNECT seller.shopee.cn:443`），
+> `session_proxy` 脱敏正确。**真实出口 IP 还没验过** —— 缺真凭据。
+
+##### 出了问题怎么办
+
+| 现象 | 多半是 |
+|---|---|
+| 后端起不来，日志有 `cloud sync startup checks failed` | `.env.local` 里的 `CLOUD_DATABASE_URL` 被改回非空了 → 置空 |
+| 任务一直 `verification_required` | OTP 没过；或 `profiles/shopee/shopeeKR` 里 cookie 已过期（正常，重新登录一次） |
+| 第二次采集还是要验证码 | 登录没真正成功（cookie 没写进 profile）；或浏览器被强杀，cookie 没刷盘 |
+| 日志里找不到 `login_gate_result` | 登录门没通过 —— 这次任务不是「复用成功」的那次，换一次任务看 |
+
 - [x] **Step 5: 记录验收结论**
 
 写进 `docs/guides/COLLECTION_SESSION_LIFECYCLE.md` §10。
 
 > ✅ **已完成**（2026-11-03）：已回填到规范 §10.1「验收实测记录」+ §11 变更记录（标注「验收回填，业务语义未变」）。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add docs/guides/COLLECTION_SESSION_LIFECYCLE.md
 git commit -m "docs(session): 记录 profile 单一载体架构的真实验收结论"
 ```
 
+> ✅ **已完成**：`fd31ba90`（验收实测记录）+ 后续一次提交（磁盘清理结果 + 用户自行验收手册 §10.4.2）。
+
 ---
 
 ## 11. 合并与收尾
 
-- [ ] **Step 1: 合并回 main**
+- [x] **Step 1: 合并回 main**
 
 ```powershell
 Set-Location F:\Vscode\python_programme\AI_code\xihong_erp
 git merge --no-ff feature/session-profile-only
 ```
 
-- [ ] **Step 2: 清理 worktree**
+> ✅ **已完成**：`ad8e851a`（代码，88 文件零冲突）+ `180b2f6c`（文档）。
+
+- [x] **Step 2: 清理 worktree**
 
 ```powershell
 git worktree remove .worktrees/session-profile-only
 git branch -d feature/session-profile-only
 ```
 
-- [ ] **Step 3: 复核**
+> ✅ **已完成**（2026-11-03）：worktree 已移除、分支已删（`Deleted branch feature/session-profile-only (was d68848f8)`）。
+> 另：`.worktrees/_t8f/` **保留** —— 内含指向主仓 `frontend/node_modules` 的目录联接，
+> 递归删除会误伤主仓依赖，删除被安全策略拦截；它是**未注册**的孤儿目录（`git worktree list` 里没有），不影响任何功能。
+> `.worktrees/release-publish-20260916/`（旧的独立 clone）与 `.worktrees/inventory-aging-pipeline-recovery/`（他任务）**不动**。
+
+- [x] **Step 3: 复核**
 
 ```powershell
 git status --porcelain
@@ -1865,6 +2000,9 @@ git log --oneline -5
 ```
 
 Expected: 工作区干净。
+
+> ✅ **已完成**（2026-11-03）：工作区干净；`main` HEAD = `fd31ba90`（文档回填）+ `180b2f6c`（代码合并）。
+> ⚠️ `main` **领先 `origin/main`**（本轮提交尚未推送）—— 发布是 tag 驱动，推送需另行按 `docs/guides/RELEASE_CHECKLIST.md` 执行。
 
 > **本计划只改本地 main 分支。发布（打 tag、推双远端）不在范围内**，需另行按 `docs/guides/RELEASE_CHECKLIST.md` 执行。
 
@@ -1988,7 +2126,8 @@ Expected: 工作区干净。
 | 6 | 收窄 `SessionManager` | ✅ | `session_manager.py` **802 → 110 行**，只剩 `get_persistent_profile_path` + `get_profile_path`；`__init__` 去掉 `base_path` 形参与 mkdir；`get_persistent_profile_path` **去掉 mkdir 副作用** |
 | 7 | 最后删 `safe_session_account_dirname` | ✅ | 自由函数删；legacy 命名规则**就地内联**进 `get_profile_path`，legacy 目录指向不变 |
 | 8 | 外围同步 | ✅ | `dcf37179`：`data/sessions` 移出遗留物候选；`backend/main.py` / `run.py` 告警文案改「店铺级 profile 遗留」；`launch_inspector_recorder` profile 改主账号 ID（**指纹同 key**） |
-| 9 | 磁盘清理 | ⏸ **待运维** | 代码不自动删目录（规范 §6）。主仓实测 `data/sessions/` 有 19 个 `storage_state.json`（1.47 MB）+ 10 个空目录，命名空间 `miaoshou` / `miaoshou_erp` / `妙手erp` 三套并存 → 走「备份 → 观察 1~2 周 → 删除」。**注意**：`tools/cleanup_legacy_shop_session_artifacts.py`（人工触发的清理脚本，默认 dry-run，`--delete` 才真删）在步 8 之后**不再包含 `data/sessions` 候选** → 它清的是店铺级 profile / fingerprint 遗留，**不是**会话文件。`data/sessions/` 的删除需要运维单独出一份清单 |
+| 9 | 磁盘清理 | ✅ **已落地**（2026-11-03，用户决定「立刻备份并删除」） | `data/sessions/` 整体改名为 `data/sessions.bak-20261103/`（19 个 `storage_state.json` / 1,536,719 bytes 全量保留，可随时改名还原），**原 `data/sessions/` 已不存在**。⚠️ 另注：`tools/cleanup_legacy_shop_session_artifacts.py`（人工触发的清理脚本，默认 dry-run，`--delete` 才真删）清的是**店铺级 profile / fingerprint 遗留**，不是会话文件 —— `data/sessions/` 的这次删除是按运维决定单独做的 |
+| 9b | `_alt` 旁路 profile | ✅ **已删除**（2026-11-03，用户拍板） | `profiles/shopee/虾皮巴西东朗照明主体_alt/`（16 条目 + Cookies 20480）已移入回收站；主 profile `profiles/shopee/shopeeKR/` 完好（Cookies 28672 bytes） |
 | 10 | 文档同步 | ✅ | Task 9 |
 
 **步 8 的一处补正**：计划原文只说录制器 profile 改 `main_account_id`，但**指纹也必须同 key** —— 采集执行器 `runtime_session._get_fingerprint_context_options_async` 用的就是 `session_owner_id`（= 主账号 ID）。profile 与指纹 key 不一致会出现「同一个 profile 目录、两种设备指纹」，录出来的登录态未必能被采集复用。已按同 key 落地。
@@ -1996,7 +2135,7 @@ Expected: 工作区干净。
 #### B.8.2 B.7 五条悬案的实测结论
 
 1. **`data/sessions/` 磁盘真实状态** —— 主仓实测 **19 个 `storage_state.json`（1.47 MB）+ 10 个空目录**；命名空间 `miaoshou` / `miaoshou_erp` / `妙手erp` 三套并存。哪些是事故现场证据、哪些是遗留孤儿 → **仍需运维确认**，代码不自动删。
-2. **`_alt` 旁路 profile** —— 主仓 `profiles/shopee/虾皮巴西东朗照明主体_alt` **确实有实体目录**（16 个条目 + `Default/Network/Cookies` 20480 bytes，mtime 2025-09-05）→ 是真登录过的 profile，不是空壳。本轮**未删**：它在 `main_account_session_lock` 归一化下与主 profile 共用同一把锁，不产生交叉双开；但它确实把登录态分散到第二个目录，**仍是 R1 的残留违反** → 需产品/运维拍板后单开一步。
+2. **`_alt` 旁路 profile** —— 主仓 `profiles/shopee/虾皮巴西东朗照明主体_alt` **确实有实体目录**（16 个条目 + `Default/Network/Cookies` 20480 bytes，mtime 2025-09-05）→ 是真登录过的 profile，不是空壳。**已按用户 2026-11-03 决定删除**（移入回收站，可恢复）：它在 `main_account_session_lock` 归一化下与主 profile 共用同一把锁，不产生交叉双开；但它确实把登录态分散到第二个目录，**是 R1 的残留违反** → 现在已消除。主 profile `profiles/shopee/shopeeKR/` 完好。
 3. **`session_reused` 到底该判什么** —— ✅ **已实测并落地**。Chromium 110+ 的 cookie 库在 **`Default/Network/Cookies`**（旧版路径 `Default/Cookies`）。主仓 18 个真实 profile **全部**有该文件（20480 ~ 45056 bytes）；7 个被 mkdir 创建的空 profile（`miaoshou/main-1`、`shopee/shopee`、`shopee/account-1`、`shopee/account-2`、`miaoshou/acc-1`、`tiktok/main-1`、`shopee/main-1`）**目录条目数 = 0，连 `Default/` 都没有**。
    → 判据落地为**「Cookies 文件存在」**，**不用 mtime**（mtime 只证明「最近用过」，不证明「有登录态」）。
    → 相比原判据「目录非空」，这更严：**Chromium 启动过一次但没登录**的 profile 现在判为「无 profile」。行为变化落在**组件测试路径**（`persistent_profile` → `storage_state_fanout` / `fresh_login_required`），判断为**符合预期**（没登录态就不该复用）。
@@ -2018,7 +2157,7 @@ Expected: 工作区干净。
 
 | # | 悬案 | 本轮结论 |
 |---|---|---|
-| 1 | `data/sessions/` 磁盘真实状态与清理清单 | **仍需运维确认**（代码不自动删）。本轮实测：采集前后均为 19 个 `storage_state.json`（1.47 MB），**无新增** → 「会话文件写入点清零」在运行期成立 |
+| 1 | `data/sessions/` 磁盘真实状态与清理清单 | ✅ **已闭环**（2026-11-03）：采集前后均为 19 个 `storage_state.json`（1.47 MB），**零新增** → 「会话文件写入点清零」在运行期成立；随后按用户决定「立刻备份并删除」，目录改名保留在 `data/sessions.bak-20261103/`，原目录已不存在 |
 | 2 | `_alt` 旁路 profile 是否还有实体目录 | 本轮**未动**（需产品/运维拍板）。注意它与主 profile 共用同一把 `main_account_id` 锁，不会交叉双开 |
 | 3 | `session_reused` 到底该判什么 | **已落地并实测**：判据 = Chromium cookie 库文件存在。本轮探针实测 `session_reused=true`。⚠️ **新增认知**：这是「**载体存在**」判据，**不是**「登录态有效」判据 —— 实测 profile 有 cookie 库但 cookie 已过期，采集仍要求重新登录（OTP） |
 | 4 | `session_proxy` 的脱敏粒度 | **已实测**：真代理样本缺失 → 用本地假代理补齐。`session_proxy=http://127.0.0.1:18888`（无凭据）；`http://user:pass@proxy.example.com:8080` → `http://proxy.example.com:8080`；`http://user:pass`（缺 host）→ `http://***` |
@@ -2041,11 +2180,16 @@ Expected: 工作区干净。
 | 2 | 后端启动即退出：`cloud sync startup checks failed` | `.env` 的 `CLOUD_DATABASE_URL` 指向不存在的云库 `127.0.0.1:15433` → 检查判 `error` → `main.py:544` 抛 `RuntimeError` | 在 **`.env.local`**（gitignored）把 `CLOUD_DATABASE_URL` 置空 → 检查判 `degraded` → 正常启动。**不动代码** |
 | 3 | 采集必须在**本机**跑 | 采集任务由 API 进程内 `asyncio.create_task` 执行（`collection_tasks.py:750`），**不走 Celery**；Docker celery worker **没挂载 `profiles/`** | 本机 API 以 `DEPLOYMENT_ROLE=collector` 启动并**持有** collection leader lock（实测 `leader_lock: acquired`）→ 调度与队列都在本机 |
 
-#### B.9.4 人工环节卡在哪（唯一剩余阻塞）
+#### B.9.4 人工环节卡在哪（已按用户决定移交用户自行验证）
 
 真实采集跑到 Shopee 的**手机 OTP** 弹窗（`+86 191****371`，主账号 `Leslieshop:main`）→
 `verification_type=otp` / `verification_input_mode=code_entry`。
 OTP 只能由账号持有人提供；系统支持 `POST /api/collection/tasks/{task_id}/resume` 传 `{"otp": "..."}` 在**同一个 page** 里回填后继续。
-→ 登录成功后 Chromium 会把新 cookie 写回 `profiles/shopee/shopeeKR` → 紧接着再跑一次采集，
-才有条件拿齐 E1~E4 四项证据（免验证码）。
+登录成功后 Chromium 会把新 cookie 写回 `profiles/shopee/shopeeKR` → 紧接着再跑一次采集，才有条件拿齐 E1~E4 四项证据（免验证码）。
+
+**用户决定（2026-11-03）**：这一步等做完后由用户自己去验，代码侧把其他工作做完。
+→ **移交物**：完整操作手册见本文件 **§10.4.2 用户自行验收操作手册**
+（起后端 → 登录 → 发起采集 → 回填 OTP 或用巡店面板手动登录 → 再跑一次 → 四项证据取证 SQL → 排障对照表）。
+→ 本机环境已就位：`.env.local` 里 `CLOUD_DATABASE_URL` 已置空（否则后端起不来）、
+`acceptance_admin` 超级用户已建（口令在 `.env.local` 的 `ACCEPT_ADMIN_PASSWORD`）。
 

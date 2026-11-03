@@ -293,6 +293,9 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 
 ### 10.1 验收实测记录（2026-11-03，main `180b2f6c`，本机 Windows）
 
+> **验收状态**：自动化能验的都验完了；**「登录一次 → 后续免验证码」这一段需要账号持有人配合，已按用户决定移交用户自行验证**
+> （操作手册见 `docs/superpowers/plans/2026-11-02-collection-profile-only-architecture.md` §10.4.2）。
+>
 > 环境：Docker 栈（postgres 15432 / redis 16379 / celery-worker / celery-beat）+ **本机**后端
 > `python run.py --local`（后端端口 **8001**，路由 740 条）。
 > 验收账号：`shopee_sg_eternalbloom_local` → 主账号 **`shopee KR`** → profile `profiles/shopee/shopeeKR/`。
@@ -304,6 +307,8 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 | C. 巡店登录 → 采集复用 | 面板 `account_id` **就是** `main_account_id`（`build_inspection_accounts`）；巡店侧 `pwcli_native.runtime_account_profile_dir` = `profiles/<平台>/<主账号ID去空格>` → `profiles/shopee/shopeeKR`；采集侧 `SessionManager.get_persistent_profile_path` **同一目录** | ✅ 路径一致（代码核对 + 运行时探针实测） |
 | D. 巡店面板无「保存会话」 | 全仓 grep：生产代码里「保存会话」按钮、`Save-Pwcli*State`、`pwcli state-save` **全部清零**（只剩测试与文档里的「已删除」记录） | ✅ |
 | E. `data/sessions/` 不新增 | 采集前后均为 **19 个 `storage_state.json`（1.47 MB）**，无新增 | ✅ |
+| E'. `data/sessions/` 磁盘清理 | **用户 2026-11-03 决定「立刻备份并删除」** → 整体改名保留在 `data/sessions.bak-20261103/`（19 个文件 / 1,536,719 bytes，可随时改名还原）；**原 `data/sessions/` 已不存在**（且有测试断言该目录不得存在） | ✅ |
+| E''. `_alt` 旁路 profile | **用户 2026-11-03 决定删除** → `profiles/shopee/虾皮巴西东朗照明主体_alt/` 已移入回收站；主 profile `profiles/shopee/shopeeKR/` 完好 | ✅ |
 | F. 同主账号串行 | 本机后端持有 collection leader lock（`leader_lock: acquired`），容器 worker 处于 standby | ✅ |
 | G. IP 隔离（流量经代理） | 本地假代理 `127.0.0.1:18888` 实收 **12 条**请求行，含 `CONNECT seller.shopee.cn:443`、`CONNECT seller.shopee.sg:443`、`CONNECT patronus.idata.shopeemobile.com:443` | ✅ 链路通；**真实出口 IP 待真凭据补验** |
 | H. 指纹不被运行时覆盖 | 运行时探针 `user_agent=null` / `runtime_locale=null` → 取 profile 原生环境，未被注入覆盖 | ✅ |
@@ -350,4 +355,4 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 | 2026-11-02 | 生效版 v2 | 落定 D1~D4：人工保存即确认、`pwcli open` 不回写、profile 引导不落盘、同账号串行 |
 | 2026-11-02 | **生效版 v3** | 架构升级为**单一载体（profile）**：会话文件废除（D5）、巡店「保存会话」改为「打开巡店」（D6）、IP 隔离链路一并打通（D7）、新增 R7 正常关闭落盘与 P1~P4 代理规则 |
 | 2026-11-03 | **生效版 v3.1** | **实现回填**（**业务语义未变**，只把 v3 已定稿的语义对应到已落地的代码与文件位置）：① **会话文件体系废除落地** —— `session_manager.py` 会话文件 API 族整体删除、`runtime_session.py` profile 引导落盘删除、正式采集恒走 profile；② **诊断字段收敛** —— 废止 `session_quality_*` / `session_manual_seeded` / `session_protected`，前端改为「会话载体 / 是否复用 / 出口代理」三项；③ **代理链路打通** —— `extra_config->'proxy'` → `resolve_account_proxy` → 浏览器 `proxy=` 注入，凭据只随 `proxy=` 下传；④ **巡店面板动作收敛为「打开巡店」**（原「保存会话」按钮与 `pwcli state-save` 已删） |
-| 2026-11-03 | 验收回填（业务语义未变） | §10 补 **10.1 验收实测记录**：本机真实采集跑到「等 OTP」→ 证明首采需人工登录；本地假代理实收 12 条 `CONNECT` → 证明流量经代理；诊断字段探针实测 `session_profile_path=profiles/shopee/shopeeKR` / `session_reused=true` / `session_source=profile` / `session_proxy=http://127.0.0.1:18888`。同时记下两条口径：`login_gate_result` 只在登录门通过后落库、`session_reused` 是「载体存在」而非「登录态有效」 |
+| 2026-11-03 | 验收回填（业务语义未变） | §10 补 **10.1 验收实测记录**：本机真实采集跑到「等 OTP」→ 证明首采需人工登录；本地假代理实收 12 条 `CONNECT` → 证明流量经代理；诊断字段探针实测 `session_profile_path=profiles/shopee/shopeeKR` / `session_reused=true` / `session_source=profile` / `session_proxy=http://127.0.0.1:18888`。同时记下两条口径：`login_gate_result` 只在登录门通过后落库、`session_reused` 是「载体存在」而非「登录态有效」。**磁盘清理落地**：`data/sessions/` 已备份为 `data/sessions.bak-20261103/` 后移除，`_alt` 旁路 profile 已删除。「登录一次→免验证码」一段移交用户自行验证（手册见实施计划 §10.4.2） |
