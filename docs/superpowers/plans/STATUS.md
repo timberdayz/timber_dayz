@@ -118,6 +118,86 @@ Live deployment verified:
   唯一例外：**严禁对历史月份文件手动重触发 ingest**（会重复入账），
   确需重采请先按文件粒度 delete 再重扫重入库。
 
+### 发布（v7.12.7 ~ v7.12.9，2026-11-03 ~ 11-04）—— 均已上线
+
+三次发布连成一条线：**v7.12.7 出事故 → v7.12.8 修根因 → v7.12.9 第二轮收尾**。
+
+#### v7.12.7（2026-11-03）—— 事故
+
+- **现象**：celery-worker / celery-beat 上线即崩溃循环，日志是 `kombu.exceptions.VersionMismatch`。
+- **根因**：`kombu` 从 5.6.2 漂到 **5.7.0**；而 `kombu 5.7.0` **硬性要求 `redis-py>=6.1.0`**，
+  与仓库钉死的 `redis==5.0.1` 直接冲突。**pip 安装期不报错**（两个包各自都装得上），
+  只有 celery 真跑起来才炸 ⇒ 典型的「依赖漂到运行时才暴露」。
+- **决策（用户拍板）**：**只修根因，不回退**。
+
+#### v7.12.8（2026-11-03）—— 根因修复，已上线
+
+- commit `c957ad5`，注解 tag `v7.12.8`（tag 对象 `abd41a14`），已推 GitHub + CNB。
+- 做法：传递依赖全部**钉死** + 新增**镜像依赖门禁**（构建期比对镜像内实际版本 vs 清单）
+  + CI 增加 **celery 冒烟**，让这类运行时不兼容能在 CI 里提前暴露。
+- 生产验收通过。
+
+#### v7.12.9（2026-11-04）—— 第二轮收尾，已上线
+
+- 3 条提交，一一对应用户拍板的三项内容，可独立回退：
+  `a044f46b` fix(deps) / `f34eee24` refactor(退役) / `ff33dff7` feat(监控)。
+- 注解 tag `v7.12.9`（tag 对象 `0aba36b7`），已推 GitHub + CNB
+  （**先 GitHub 触发部署，再 CNB 出镜像**，保持 CNB 永不领先 GitHub）。
+
+**1) 彻底清理 5 个退役模块**（店铺分析 / 店铺管理 / 财务报表 / 汇率管理 / 会计期间）
+
+- 前端：路由、菜单、权限、组件、API 封装全删；生产 bundle 里 10 个退役标识 **0 匹配**。
+- 后端：删 store-analysis 路由（7 条）+ `annual_summary` 方法与 SQL 资产；
+  删 Metabase 时代的死 stub router `backend/routers/dashboard_api.py`；
+  权限目录 **59 → 54**，系统角色默认权限同步收敛
+  （`ensure_system_roles()` 启动时自动对齐已有角色，**无需手工改生产库**）。
+- 生产库：清掉 9 个僵尸目标（14 条血缘边 + 9 条新鲜度记录）。**先清理后上线**，
+  避免新监控把已退役对象报成 missing。
+
+**2) 依赖单一真相源**
+
+- 新增 `requirements.lock.txt`：**116 个包**的完整传递依赖闭包，全部 `==`
+  （取自生产 v7.12.8 实测 `pip freeze`）。
+- `requirements.txt` 收敛为 **51 项**运行时直接依赖；`requirements-dev.txt` 补全；
+  **删除 `backend/requirements.txt`**（它与根清单有 26 个包互相矛盾，正是 v7.12.7 漂移的源头）。
+- 镜像改**单步** `pip install -r requirements.lock.txt`（不再分两步互相覆盖）。
+- 门禁 `verify_image_dependency_pins.py` 基线 7 → 116 且**从 lock 自动推导**，
+  另加「禁止浮动范围 / 必须单步安装 / 镜像内无锁外包」三项检查。
+
+**3) 监控存在性校验**
+
+- `/freshness` 新增 `object_exists` / `recorded_status` / `status="missing"` / `missing_targets`；
+  `/lineage` 新增 `target_object_exists` / `source_object_exists` / `missing_objects`。
+- 逻辑目标别名（`semantic.alias_registry` → `semantic.semantic_field_aliases`）登记在册，
+  并用**守护测试**强制新逻辑目标必须登记，否则会把活目标误报成 missing。
+
+**4) 回归判定**
+
+- 后端全量：151 failed / 4639 passed / 30 errors / 12 skipped。
+- 把 **181 个失败用例 ID** 拿到 HEAD worktree **逐个重跑**对照 ⇒ **0 个新增失败**
+  （唯一"差异"用例在 HEAD 上失败一模一样，是既有的环境变量污染，不是本次回归）。
+
+**生产验收（全部通过）**
+
+| 检查项 | 结果 |
+| --- | --- |
+| 5 个容器 | backend-api / celery-worker / celery-beat / frontend / nginx 全 running，镜像均 v7.12.9 |
+| 重启次数 | 全部 **0** |
+| API 版本 / 路由数 | v7.12.9；619 → **612**（正好少 7 条 store-analysis） |
+| dashboard 状态 | `ready`；迁移 head 不变 |
+| 新监控 freshness | **47 个目标，missing = []** |
+| 退役权限目录 | 59 → **54**，`retired_still_present = []` |
+| store-analysis 端点 | **[]**（生产 openapi 零匹配） |
+| 库存积压 `unknown_restock_row_count` | **0**（视图与底表交叉核对一致） |
+| SKU 级滞销清单 / 店铺月度滞销榜 | **513 行 / 165 行** |
+
+**本轮附带发现（非阻塞，已记入 V2 清单）**：库存积压看板的**库龄分档与业务定价档位没对齐** ——
+看板分档 `<30 / 90~180 / >=180`（30~90 天无档），业务定价档 `0 / 60 / 90 / 120`；
+生产实测 **167 个 SKU（货值 47,430）已被业务判为「滞销30天」**，在看板风险分层里却显示
+`中度 0 / 重度 0 / 活跃 30`，另有 321 行（货值 150,756，占总货值 63%）两套体系都不落点。
+**数据是对的，只是展示分档不一致** ⇒ 按 `AGENTS.md` 记入 post-launch V2 清单，
+本轮不改口径。详见 `docs/guides/VERIFICATION_MATRIX.md`。
+
 ### 临时/测试内容清理（2026-11-02）
 
 已清理：
