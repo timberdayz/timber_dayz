@@ -852,8 +852,17 @@ async def snapshot_runtime_storage_state(
     platform: str,
     session_owner_id: str,
     context: Any,
-    persist: bool = True,
 ) -> Optional[Dict[str, Any]]:
+    """读取当前上下文的 storage_state 快照（**只在内存里**，不落盘）。
+
+    [Task 5 / R5] 登录态只由 Chromium 持久 profile 承载：快照不再回写会话文件，
+    ``data/sessions`` 不再因为「取一份快照」而产生新文件；调用方拿到的 dict
+    直接在内存里扇出给各采集上下文。
+
+    返回 ``None`` 表示读取失败 —— 调用方必须显式失败，不允许带着
+    ``storage_state=None`` 继续扇出（否则采集上下文会完全没有登录态，
+    却在登录页上白跑一遍）。
+    """
     normalized_platform = str(platform or "").strip().lower()
     try:
         storage_state = await read_context_storage_state(
@@ -942,41 +951,10 @@ async def snapshot_runtime_storage_state(
         except Exception:
             pass
 
-    if persist and session_owner_id:
-        try:
-            if normalized_platform == "tiktok":
-                origins = storage_state.get("origins") if isinstance(storage_state, dict) else None
-                origins = origins if isinstance(origins, list) else []
-                seller_local_storage = 0
-                if isinstance(storage_state, dict):
-                    seller_local_storage = _seller_local_storage_max(storage_state)
-                if not origins or seller_local_storage <= 0:
-                    logger.warning(
-                        "Skip persisting TikTok storage_state without seller localStorage (origins=%s sellerLocalStorage=%s) (%s/%s)",
-                        len(origins),
-                        seller_local_storage,
-                        platform,
-                        session_owner_id,
-                    )
-                    return storage_state
-            await _save_session_async(platform, session_owner_id, storage_state)
-        except Exception as exc:
-            logger.warning(
-                "Failed to persist storage state for %s/%s: %s",
-                platform,
-                session_owner_id,
-                exc,
-            )
+    # [Task 5 / R5] 快照只在内存里传递，不再落盘到 data/sessions。
+    # 登录态的唯一载体是 Chromium 持久 profile 目录（profiles/<平台>/<主账号ID>），
+    # 由 Chromium 自己刷盘。
     return storage_state
-
-
-async def persist_runtime_session_state(
-    *,
-    platform: str,
-    session_owner_id: str,
-    storage_state: Dict[str, Any],
-) -> bool:
-    return await _save_session_async(platform, session_owner_id, storage_state)
 
 
 def _normalize_probe_base_url(

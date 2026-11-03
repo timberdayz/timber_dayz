@@ -645,9 +645,21 @@ async def test_shared_login_phase_does_not_probe_storage_state_runtime_gate_befo
 
 
 @pytest.mark.asyncio
-async def test_shared_login_phase_persists_refreshed_storage_state_after_login(
+async def test_shared_login_phase_does_not_write_session_file_after_login(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    """[Task 5 / R5] 登录后**不得**再写会话文件。
+
+    登录态只由 Chromium 持久 profile 承载；顺序路径登录后的
+    ``_save_session_async`` 落盘已删除 → ``data/sessions`` 不再产生新文件。
+    """
+    from modules.utils.sessions import session_manager as session_manager_module
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.setattr(session_manager_module, "REPO_ROOT", repo_root)
+
     executor = CollectionExecutorV2()
     executor._update_status = AsyncMock()
     executor._check_cancelled = AsyncMock()
@@ -722,17 +734,23 @@ async def test_shared_login_phase_persists_refreshed_storage_state_after_login(
         total_domains_count=0,
     )
 
-    saved.assert_awaited_once_with(
-        "miaoshou",
-        "main-1",
-        {"cookies": ["fresh"], "origins": []},
-    )
+    saved.assert_not_awaited()
+    sessions_dir = repo_root / "data" / "sessions"
+    # 验收口径：data/sessions 下**不产生新文件**（空目录不算）
+    assert [p for p in sessions_dir.rglob("*") if p.is_file()] == []
 
 
 @pytest.mark.asyncio
 async def test_shared_login_phase_skips_blocking_tiktok_session_persist_for_reused_persistent_profile(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    from modules.utils.sessions import session_manager as session_manager_module
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.setattr(session_manager_module, "REPO_ROOT", repo_root)
+
     executor = CollectionExecutorV2()
     executor._update_status = AsyncMock()
     executor._check_cancelled = AsyncMock()
@@ -793,17 +811,28 @@ async def test_shared_login_phase_skips_blocking_tiktok_session_persist_for_reus
     assert context.current_component_index == 1
     wait_capture.assert_not_awaited()
     saved.assert_not_awaited()
+    sessions_dir = repo_root / "data" / "sessions"
+    # 验收口径：data/sessions 下**不产生新文件**（空目录不算）
+    assert [p for p in sessions_dir.rglob("*") if p.is_file()] == []
 
 
 @pytest.mark.asyncio
-async def test_shared_login_phase_persists_manual_session_for_tiktok_persistent_profile(
+async def test_shared_login_phase_does_not_write_session_file_for_manual_tiktok_session(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    """人工保存的会话在 TikTok 持久 profile 下也必须落盘（spec D8）。
+    """[Task 5 / R5] 人工保存的会话同样**不再落盘**。
 
-    这是上面那条「跳过」用例的反向对照：``session_metadata`` 带着
-    ``manual_seeded`` / ``protected`` 时，登录后的 storage_state 必须写回。
+    这条原来是 spec D8 的反向对照（人工会话必须落盘才能被采集侧读到）；
+    profile-only 之后登录态只由持久 profile 承载，人工会话文件不再是载体，
+    因此「人工会话也落盘」这条规则随 ``_save_session_async`` 一起下线。
     """
+    from modules.utils.sessions import session_manager as session_manager_module
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.setattr(session_manager_module, "REPO_ROOT", repo_root)
+
     executor = CollectionExecutorV2()
     executor._update_status = AsyncMock()
     executor._check_cancelled = AsyncMock()
@@ -861,34 +890,11 @@ async def test_shared_login_phase_persists_manual_session_for_tiktok_persistent_
         total_domains_count=0,
     )
 
-    wait_capture.assert_awaited_once()
-    saved.assert_awaited_once_with(
-        "tiktok",
-        "main-1",
-        {"cookies": ["fresh"], "origins": []},
-    )
-
-
-def test_tiktok_persistent_profile_skips_post_login_session_persist_even_when_fresh() -> None:
-    assert CollectionExecutorV2._should_skip_post_login_session_persist(
-        platform="tiktok",
-        params={
-            "reused_session": False,
-            "_runtime_session_mode": "persistent_profile",
-            "params": {"reused_session": False},
-        },
-    )
-
-
-def test_tiktok_storage_state_fanout_keeps_post_login_session_persist() -> None:
-    assert not CollectionExecutorV2._should_skip_post_login_session_persist(
-        platform="tiktok",
-        params={
-            "reused_session": True,
-            "_runtime_session_mode": "storage_state_fanout",
-            "params": {"reused_session": True},
-        },
-    )
+    wait_capture.assert_not_awaited()
+    saved.assert_not_awaited()
+    sessions_dir = repo_root / "data" / "sessions"
+    # 验收口径：data/sessions 下**不产生新文件**（空目录不算）
+    assert [p for p in sessions_dir.rglob("*") if p.is_file()] == []
 
 
 @pytest.mark.asyncio
@@ -1339,44 +1345,6 @@ async def test_parallel_domains_case_does_not_pollute_module_coordinator_singlet
     assert before[2] == MainAccountSessionCoordinator.waiter_count.__get__(singleton)
 
 
-def test_manual_seeded_session_is_not_skipped_for_tiktok():
-    """人工保存的会话在 TikTok 持久 profile 模式下也必须落盘。"""
-    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
-
-    params = {
-        "_runtime_session_mode": "persistent_profile",
-        "session_metadata": {"manual_seeded": True, "protected": True},
-    }
-    assert not CollectionExecutorV2._should_skip_post_login_session_persist(
-        platform="tiktok",
-        params=params,
-    )
-
-
-def test_automatic_tiktok_persistent_profile_may_still_skip():
-    """自动来源的 TikTok 持久 profile 保持原有跳过行为。"""
-    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
-
-    params = {
-        "_runtime_session_mode": "persistent_profile",
-        "session_metadata": {},
-    }
-    assert CollectionExecutorV2._should_skip_post_login_session_persist(
-        platform="tiktok",
-        params=params,
-    )
-
-
-def test_non_tiktok_platform_is_never_skipped():
-    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
-
-    params = {"_runtime_session_mode": "persistent_profile", "session_metadata": {}}
-    assert not CollectionExecutorV2._should_skip_post_login_session_persist(
-        platform="shopee",
-        params=params,
-    )
-
-
 def test_executor_does_not_duplicate_profile_bootstrap():
     """executor 侧不得再保留一份没有 TikTok 质量门禁的 profile bootstrap。
 
@@ -1466,15 +1434,307 @@ def test_persistent_profile_bundle_reads_manual_marker_from_disk_session(
     assert metadata["manual_seeded"] is True
     assert metadata["protected"] is True
 
-    # 标记可见 → 持久 profile 下不再跳过落盘
-    assert not CollectionExecutorV2._should_skip_post_login_session_persist(
-        platform="tiktok",
-        params={
-            "_runtime_session_mode": "persistent_profile",
-            "session_metadata": metadata,
-        },
+
+@pytest.mark.asyncio
+async def test_snapshot_runtime_storage_state_returns_memory_snapshot_without_writing_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """[Task 5 / R5] 快照只在内存里：不落盘，也没有 ``persist`` 开关了。
+
+    落盘开关下线后，谁都拿不到「顺手写一份会话文件」的能力；
+    登录态的唯一载体是 Chromium 持久 profile 目录。
+    """
+    import inspect
+
+    from modules.apps.collection_center import runtime_session
+    from modules.utils.sessions import session_manager as session_manager_module
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.setattr(session_manager_module, "REPO_ROOT", repo_root)
+
+    state = {"cookies": [{"name": "sid", "value": "1"}], "origins": []}
+    context = SimpleNamespace(storage_state=AsyncMock(return_value=state))
+
+    snapshot = await runtime_session.snapshot_runtime_storage_state(
+        platform="miaoshou",
+        session_owner_id="main-1",
+        context=context,
     )
 
+    assert snapshot == state
+    sessions_dir = repo_root / "data" / "sessions"
+    # 验收口径：data/sessions 下**不产生新文件**（空目录不算）
+    assert [p for p in sessions_dir.rglob("*") if p.is_file()] == []
+
+    # 落盘参数必须已经不存在（再传就是 TypeError）
+    assert (
+        "persist"
+        not in inspect.signature(
+            runtime_session.snapshot_runtime_storage_state
+        ).parameters
+    )
+    with pytest.raises(TypeError):
+        await runtime_session.snapshot_runtime_storage_state(
+            platform="miaoshou",
+            session_owner_id="main-1",
+            context=context,
+            persist=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_parallel_domains_fails_when_storage_state_snapshot_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """[Task 5 / F5-4] 快照为空必须显式失败，不能带着 ``storage_state=None`` 扇出。
+
+    否则每个并行采集上下文都会在登录页白跑一遍，而且**不会报错** ——
+    采集「看起来跑完了」，实际什么数据都没抓到。
+    """
+    from backend.services.main_account_session_coordinator import (
+        MainAccountSessionCoordinator,
+    )
+    from modules.apps.collection_center.executor_v2 import StepExecutionError
+
+    executor = CollectionExecutorV2(
+        main_account_session_coordinator=MainAccountSessionCoordinator()
+    )
+    executor._update_status = AsyncMock()
+    executor._process_files = AsyncMock(return_value=[])
+
+    class _DummyLock:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    async def _async_false(platform, main_account_id):
+        return False
+
+    async def _async_zero(platform, main_account_id):
+        return 0
+
+    coordinator = executor.main_account_session_coordinator
+    coordinator.acquire = lambda platform, main_account_id: _DummyLock()
+    coordinator.is_locked = lambda platform, main_account_id: False
+    coordinator.waiter_count = lambda platform, main_account_id: 0
+    coordinator.is_locked_async = _async_false
+    coordinator.waiter_count_async = _async_zero
+
+    async def _fake_open_runtime_bundle(**kwargs):
+        return type(
+            "Bundle",
+            (),
+            {
+                "reused_session": False,
+                "context": type(
+                    "Ctx", (), {"close": AsyncMock(), "cookies": AsyncMock(return_value=[])}
+                )(),
+                "page": type("Page", (), {"close": AsyncMock()})(),
+                "mode": "persistent_profile",
+            },
+        )()
+
+    browser = SimpleNamespace(new_context=AsyncMock())
+
+    monkeypatch.setattr(executor, "_open_runtime_bundle", _fake_open_runtime_bundle)
+    monkeypatch.setattr(executor, "_ensure_login_gate_ready", AsyncMock())
+    monkeypatch.setattr(
+        executor,
+        "_run_runtime_manifest_component",
+        AsyncMock(return_value=type("R", (), {"success": True})()),
+    )
+    # 快照读取失败 -> 返回 None（这正是 F5-4 描述的分支）
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2.runtime_session.snapshot_runtime_storage_state",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._record_platform_shop_discovery_async",
+        AsyncMock(),
+    )
+
+    with pytest.raises(StepExecutionError):
+        await executor.execute_parallel_domains(
+            task_id="task-1",
+            platform="tiktok",
+            account_id="shop-1",
+            account={
+                "account_id": "shop-1",
+                "shop_account_id": "shop-1",
+                "main_account_id": "main-1",
+                "login_url": "https://seller.tiktok.com/account/login",
+            },
+            data_domains=["orders"],
+            date_range={"start": "2025-01-01", "end": "2025-01-31"},
+            granularity="daily",
+            browser=browser,
+            browser_type=object(),
+            max_parallel=1,
+            debug_mode=False,
+            runtime_manifests={"login": {}, "exports_by_domain": {"orders": {}}},
+        )
+
+    # 关键断言：绝不能带着 storage_state=None 继续扇出给采集上下文
+    browser.new_context.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_parallel_domains_fans_out_memory_snapshot_without_writing_session_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """[Task 5 / R5] 并行扇出用的是**内存里的快照**，且不落任何会话文件。
+
+    两条断言：
+    1. 扇出给采集上下文的 ``storage_state`` 就是主流程刚读到的那份内存 dict；
+    2. ``data/sessions`` 下不产生新文件。
+    """
+    from backend.services.main_account_session_coordinator import (
+        MainAccountSessionCoordinator,
+    )
+    from modules.utils.sessions import session_manager as session_manager_module
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.setattr(session_manager_module, "REPO_ROOT", repo_root)
+
+    executor = CollectionExecutorV2(
+        main_account_session_coordinator=MainAccountSessionCoordinator()
+    )
+    executor._update_status = AsyncMock()
+    executor._process_files = AsyncMock(return_value=[])
+
+    class _DummyLock:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    async def _async_false(platform, main_account_id):
+        return False
+
+    async def _async_zero(platform, main_account_id):
+        return 0
+
+    coordinator = executor.main_account_session_coordinator
+    coordinator.acquire = lambda platform, main_account_id: _DummyLock()
+    coordinator.is_locked = lambda platform, main_account_id: False
+    coordinator.waiter_count = lambda platform, main_account_id: 0
+    coordinator.is_locked_async = _async_false
+    coordinator.waiter_count_async = _async_zero
+
+    async def _fake_open_runtime_bundle(**kwargs):
+        return type(
+            "Bundle",
+            (),
+            {
+                "reused_session": False,
+                "context": type(
+                    "Ctx", (), {"close": AsyncMock(), "cookies": AsyncMock(return_value=[])}
+                )(),
+                "page": type("Page", (), {"close": AsyncMock()})(),
+                "mode": "persistent_profile",
+            },
+        )()
+
+    snapshot = {"cookies": [{"name": "sid", "value": "1"}], "origins": []}
+    fanned_out = {}
+
+    async def _fake_execute_single_domain_parallel(**kwargs):
+        fanned_out["storage_state"] = kwargs.get("storage_state")
+        return None, False
+
+    monkeypatch.setattr(executor, "_open_runtime_bundle", _fake_open_runtime_bundle)
+    monkeypatch.setattr(executor, "_ensure_login_gate_ready", AsyncMock())
+    monkeypatch.setattr(
+        executor,
+        "_run_runtime_manifest_component",
+        AsyncMock(return_value=type("R", (), {"success": True})()),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2.runtime_session.snapshot_runtime_storage_state",
+        AsyncMock(return_value=snapshot),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._record_platform_shop_discovery_async",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        executor, "_execute_single_domain_parallel", _fake_execute_single_domain_parallel
+    )
+
+    await executor.execute_parallel_domains(
+        task_id="task-1",
+        platform="tiktok",
+        account_id="shop-1",
+        account={
+            "account_id": "shop-1",
+            "shop_account_id": "shop-1",
+            "main_account_id": "main-1",
+            "login_url": "https://seller.tiktok.com/account/login",
+        },
+        data_domains=["orders"],
+        date_range={"start": "2025-01-01", "end": "2025-01-31"},
+        granularity="daily",
+        browser=object(),
+        browser_type=object(),
+        max_parallel=1,
+        debug_mode=False,
+        runtime_manifests={"login": {}, "exports_by_domain": {"orders": {}}},
+    )
+
+    # 扇出用的是内存里的那份快照
+    assert fanned_out["storage_state"] == snapshot
+    # 而且没有落任何会话文件
+    sessions_dir = repo_root / "data" / "sessions"
+    assert [p for p in sessions_dir.rglob("*") if p.is_file()] == []
+
+
+def test_load_session_does_not_write_back_to_disk(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """[Task 5 / F5-3] 读会话不得回写磁盘。
+
+    ``load_session`` 以前会刷新 ``last_used_at`` 并把文件重写一遍 ——
+    「只是读一下」也会产生磁盘写，等于会话文件体系还在被使用。
+    """
+    import json
+    import time
+
+    from modules.utils.sessions import session_manager as session_manager_module
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.setattr(session_manager_module, "REPO_ROOT", repo_root)
+
+    manager = session_manager_module.SessionManager()
+    session_file = manager.get_session_path("miaoshou", "main-1")
+    session_file.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "platform": "miaoshou",
+        "account_id": "main-1",
+        "storage_state": {"cookies": [], "origins": []},
+        "created_at": 1000.0,
+        "last_used_at": 1000.0,
+        "metadata": {"saved_at": time.time()},
+    }
+    session_file.write_text(json.dumps(payload), encoding="utf-8")
+    before_content = session_file.read_text(encoding="utf-8")
+    before_mtime = session_file.stat().st_mtime_ns
+
+    session_data = manager.load_session("miaoshou", "main-1")
+
+    assert session_data is not None
+    assert session_data["storage_state"] == {"cookies": [], "origins": []}
+    # 文件内容与 mtime 都必须原封不动
+    assert session_file.read_text(encoding="utf-8") == before_content
+    assert session_file.stat().st_mtime_ns == before_mtime
 class _BlankFallbackPage:
     """回退返回的页面停在 about:blank（持久 context 的默认首屏）。"""
 

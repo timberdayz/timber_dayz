@@ -681,13 +681,17 @@ class ComponentTester:
             return False
 
         try:
-            from modules.apps.collection_center.runtime_session import (
-                persist_runtime_session_state,
-            )
-            return await persist_runtime_session_state(
-                platform=self.platform,
-                session_owner_id=account_id,
-                storage_state=storage_state,
+            # [Task 5] runtime_session 不再暴露「落盘会话」的入口
+            # （persist_runtime_session_state 已删除），这里直接用现成的
+            # SessionManager.save_session：录制/组件测试子进程仍要保存登录态，
+            # 会话文件体系整体收窄由 Task 7 负责。
+            from modules.utils.sessions.session_manager import SessionManager
+
+            return await asyncio.to_thread(
+                SessionManager().save_session,
+                self.platform,
+                account_id,
+                storage_state,
             )
         except Exception as e:
             logger.warning("Failed to save session for %s/%s: %s", self.platform, account_id, e)
