@@ -192,10 +192,14 @@ class LoginOrchestrator:
             if not verification_result[0]:
                 return False, f"验证码处理失败: {verification_result[1]}"
 
-            # 步骤4: 保存持久化状态(减少下次验证码)
+            # 步骤4: 持久化状态
+            # 会话文件体系已废除（Task 7 / R1）：登录态只由 Chromium 持久 profile 承载。
+            # 这里**不能**关闭 profile context —— 紧接着的登录状态确认、以及交回调用方
+            # 继续采集都要用这个 page；profile 由 Chromium 在 context 正常关闭时刷盘
+            # （R7，见本类 close()）。
             if self.persistent_manager:
                 account_id = account.get('account_id', account.get('username', ''))
-                self.persistent_manager.save_context_state(self.context, platform_key, account_id)
+                logger.debug(f"[OK] 登录态由持久 profile 承载: {platform_key}/{account_id}")
             
             # 步骤4: 最终登录状态确认
             if await self._verify_login_success(platform_key):

@@ -95,24 +95,21 @@ async def test_open_runtime_bundle_auto_always_uses_persistent_profile(
 async def test_open_runtime_bundle_never_reads_session_file(monkeypatch):
     """打开 runtime bundle 的过程中**不得读会话文件**（profile 是唯一载体）。
 
-    这是「不读会话文件」这条验收口径的守门用例：
-    只要有人把「读会话文件 / bootstrap」重新接回顺序路径，这里立刻变红。
+    Task 7 之后会话文件体系整体废除：两个读入口
+    ``SessionManager.load_session`` 与 ``runtime_session.load_runtime_session_candidate``
+    **必须不存在** —— 顺序路径无从读起。只要有人把会话文件读回来，这里立刻变红。
     """
     from modules.apps.collection_center import executor_v2
+    from modules.apps.collection_center import runtime_session
+    from modules.utils.sessions.session_manager import SessionManager
+
+    assert not hasattr(SessionManager, "load_session"), "会话文件读入口仍存在"
+    assert not hasattr(runtime_session, "load_runtime_session_candidate"), (
+        "runtime_session 的会话候选读入口仍存在"
+    )
 
     executor = executor_v2.CollectionExecutorV2()
 
-    def _boom(*args, **kwargs):
-        raise AssertionError("顺序采集路径不得读会话文件")
-
-    monkeypatch.setattr(
-        "modules.utils.sessions.session_manager.SessionManager.load_session",
-        _boom,
-    )
-    monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session.load_runtime_session_candidate",
-        _boom,
-    )
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.open_persistent_runtime_bundle",
         _AsyncRecorder(_FakeBundle("persistent-bundle")),

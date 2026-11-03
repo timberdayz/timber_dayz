@@ -422,26 +422,17 @@ async def test_headful_fallback_does_not_write_session_files(
     """回退**本函数内**不得写 data/sessions（profile 是唯一载体，R1/R2）。
 
     覆盖范围说明（评审 F12）：本用例只调用 ``_run_headful_login_fallback``，
-    因此它钉住的是「**回退函数内部**不写会话文件」，**不是**「整条登录流程都不写」。
-    真实流程里回退返回后 ``_execute_shared_login_phase`` 仍可能走
-    ``save_session_after_login`` → ``_save_session_async``（目前只有
-    TikTok + persistent_profile 会跳过；非 TikTok 平台登录后仍会落盘 ——
-    那是计划里的后续待修项，不在本用例范围内）。
+    因此它钉住的是「**回退函数内部**不写会话文件」。
+    Task 7 之后会话文件体系整体废除：executor 侧连会话文件写入口本身
+    都不存在了（``_save_session_async`` 已删除）。
     """
+    from modules.apps.collection_center import executor_v2
+
     executor = _build_executor(monkeypatch)
     events: list[str] = []
     browser_type = _FakeBrowserType(events)
 
-    saved: list[tuple] = []
-
-    async def _fake_save_session_async(*args, **kwargs):
-        saved.append((args, kwargs))
-        return True
-
-    monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._save_session_async",
-        _fake_save_session_async,
-    )
+    assert not hasattr(executor_v2, "_save_session_async"), "会话文件写入口仍存在"
 
     await _run_profile_fallback(
         executor,
@@ -451,7 +442,6 @@ async def test_headful_fallback_does_not_write_session_files(
         browser=_ForbiddenBrowser(),
     )
 
-    assert saved == []
     assert profile_runtime.session_saves == []
 
 

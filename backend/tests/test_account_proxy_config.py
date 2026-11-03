@@ -1369,7 +1369,6 @@ async def test_headful_login_fallback_receives_resolved_proxy_from_caller(monkey
         sub_domains=None,
         total_domains_count=0,
         start_time=datetime.now(),
-        save_session_after_login=False,
         session_platform="",
         session_account_id="",
         runtime_manifests=None,

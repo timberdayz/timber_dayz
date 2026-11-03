@@ -19,9 +19,9 @@
 用法::
 
     python scripts/probe_miaoshou_warehouse_scope.py
-    python scripts/probe_miaoshou_warehouse_scope.py --state <storage_state.json>
+    python scripts/probe_miaoshou_warehouse_scope.py --profile <profile 目录>
 
-登录态默认取 ``data/sessions/miaoshou/miaoshou_real_001/storage_state.json``。
+登录态默认取 ``profiles/miaoshou/miaoshou_real_001``（Chromium 持久 profile）。
 登录态失效时脚本会明确提示需要人工登录，不会编造结论。
 """
 
@@ -34,7 +34,8 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_STATE = REPO_ROOT / "data" / "sessions" / "miaoshou" / "miaoshou_real_001"
+# 登录态只由 Chromium 持久 profile 承载（会话文件体系已废除）。
+DEFAULT_PROFILE = REPO_ROOT / "profiles" / "miaoshou" / "miaoshou_real_001"
 CHECKLIST_URL = "https://erp.91miaoshou.com/warehouse/checklist"
 
 # 仓库筛选的候选锚点：文案 / 角色 / class 三路都试，任一命中即可。
@@ -389,33 +390,41 @@ def _probe_storage_state(page: Any, url: str) -> int:
     return 0
 
 
-def probe(state_path: Path, url: str, headed: bool, cdp: str | None = None) -> int:
+def probe(profile_dir: Path, url: str, headed: bool, cdp: str | None = None) -> int:
     """执行取证。返回进程退出码（0 成功 / 1 登录态失效 / 2 其它异常）。"""
     from playwright.sync_api import sync_playwright
 
     if cdp:
         return _probe_cdp(cdp, url)
 
-    storage_state = state_path / "storage_state.json"
-    if not storage_state.exists():
-        print(f"[probe] 找不到登录态文件：{storage_state}")
-        print("[probe] 请先用 pwcli 人工登录并保存状态后再运行本探针。")
+    if not profile_dir.exists():
+        print(f"[probe] 找不到 profile 目录：{profile_dir}")
+        print("[probe] 请先用巡店面板打开该账号登录（Chromium 会把登录态写进 profile）后再运行本探针。")
         return 1
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=not headed)
-        context = browser.new_context(storage_state=str(storage_state))
-        page = context.new_page()
+        # 登录态只由 Chromium 持久 profile 承载：探针直接在这个 profile 上跑，
+        # 不再从任何「会话文件」里取第二份副本。
+        context = pw.chromium.launch_persistent_context(
+            user_data_dir=str(profile_dir),
+            headless=not headed,
+        )
+        page = context.pages[0] if context.pages else context.new_page()
         try:
             return _probe_storage_state(page, url)
         finally:
             context.close()
-            browser.close()
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="妙手仓库范围筛选只读取证探针")
-    parser.add_argument("--state", default=str(DEFAULT_STATE), help="登录态目录")
+    parser.add_argument(
+        "--profile",
+        "--state",
+        dest="profile",
+        default=str(DEFAULT_PROFILE),
+        help="持久 profile 目录（登录态的唯一载体）",
+    )
     parser.add_argument("--url", default=CHECKLIST_URL, help="目标页面 URL")
     parser.add_argument("--headed", action="store_true", help="有头模式（默认无头）")
     parser.add_argument(
@@ -425,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
         "用于复用人工已登录的会话",
     )
     args = parser.parse_args(argv)
-    return probe(Path(args.state), args.url, args.headed, args.cdp)
+    return probe(Path(args.profile), args.url, args.headed, args.cdp)
 
 
 if __name__ == "__main__":

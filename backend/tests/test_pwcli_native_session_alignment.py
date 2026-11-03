@@ -202,11 +202,6 @@ def test_save_default_storage_state_from_context_does_not_write_session_file(
             "default_state_path": str(target),
         },
         _FakeContext(),
-        session_metadata={
-            "quality_source": "manual",
-            "manual_seeded": True,
-            "protected": True,
-        },
     )
 
     saved.assert_not_called()

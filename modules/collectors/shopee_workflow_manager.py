@@ -20,7 +20,6 @@ from dataclasses import dataclass, asdict
 from playwright.sync_api import sync_playwright, Browser, Page, BrowserContext
 from modules.core.path_manager import get_downloads_dir
 
-from modules.utils.sessions.session_manager import SessionManager
 from modules.utils.otp.verification_service import VerificationCodeService
 from modules.utils.page_analysis_tool import PageAnalysisTool
 from modules.collectors.shopee_page_analyzer import ShopeePageAnalyzer
@@ -80,7 +79,6 @@ class ShopeeWorkflowManager:
         self.workflow_id = f"shopee_workflow_{int(time.time())}"
         self.start_time = datetime.now().isoformat()
         self.verification_service = VerificationCodeService()
-        self.session_manager = SessionManager()
         
         # 工作流步骤定义
         self.workflow_steps = [
@@ -169,7 +167,7 @@ class ShopeeWorkflowManager:
             try:
                 # 步骤3: 会话恢复
                 step3 = self._execute_step("session_restoration",
-                                         lambda: self._restore_session(page, account_config))
+                                         lambda: self._check_existing_login_state(page, account_config))
                 steps.append(step3)
                 
                 # 步骤4: 登录验证
@@ -414,26 +412,23 @@ class ShopeeWorkflowManager:
             "playwright": playwright
         }
     
-    def _restore_session(self, page: Page, account_config: Dict[str, Any]) -> Dict[str, Any]:
-        """恢复会话"""
+    def _check_existing_login_state(self, page: Page, account_config: Dict[str, Any]) -> Dict[str, Any]:
+        """检查登录态（会话文件已废除，profile 是唯一载体）。
+
+        [Task 7 / R1] 旧实现在这里读会话文件并把 cookie 注入 page —— 那份副本
+        已经废除。现在直接问浏览器「你是不是已登录」（R4 读取即信任）。
+        """
         try:
-            # 创建会话管理器
-            session_manager = SessionManager()
-            
-            # 尝试恢复会话
-            session_restored = session_manager.restore_session(page, account_config)
-            
-            if session_restored:
-                # 验证会话是否有效
-                page.goto(account_config['login_url'])
-                time.sleep(3)
-                
-                # 检查是否已登录
-                if self._is_logged_in(page):
-                    return {"session_valid": True, "session_restored": True}
-            
-            return {"session_valid": False, "session_restored": session_restored}
-            
+            # 验证会话是否有效
+            page.goto(account_config['login_url'])
+            time.sleep(3)
+
+            # 检查是否已登录
+            if self._is_logged_in(page):
+                return {"session_valid": True, "session_restored": True}
+
+            return {"session_valid": False, "session_restored": False}
+
         except Exception as e:
             logger.warning(f"[WARN] 会话恢复失败: {e}")
             return {"session_valid": False, "session_restored": False}
