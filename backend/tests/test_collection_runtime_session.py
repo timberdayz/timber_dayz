@@ -514,7 +514,12 @@ def test_build_runtime_login_gate_probe_urls_skips_region_scoped_homepage_for_ti
     ]
 
 
-def test_formal_sequential_runtime_prefers_storage_state_when_available() -> None:
+def test_formal_sequential_runtime_always_prefers_persistent_profile() -> None:
+    """Task 4.2：正式采集**恒走持久 profile**，与「有没有会话文件」无关（R1）。
+
+    旧契约是「storage_state 优先 / profile 兜底」；会话文件整体废除（D5）之后，
+    profile 就是顺序路径的唯一载体。
+    """
     decision = choose_runtime_strategy(
         platform="miaoshou",
         session_owner_id="main-1",
@@ -528,9 +533,10 @@ def test_formal_sequential_runtime_prefers_storage_state_when_available() -> Non
     )
 
     assert decision.mode == "persistent_profile"
-    assert decision.reason == "persistent_profile_available"
+    assert decision.reason == "profile_is_single_source_of_truth"
     assert decision.used_storage_state is False
     assert decision.used_persistent_profile is True
+    assert decision.fallback_allowed is False
 
 
 def test_formal_sequential_runtime_allows_preferring_persistent_profile_for_tiktok_when_enabled(
@@ -549,12 +555,13 @@ def test_formal_sequential_runtime_allows_preferring_persistent_profile_for_tikt
     )
 
     assert decision.mode == "persistent_profile"
-    assert decision.reason == "persistent_profile_available"
+    assert decision.reason == "profile_is_single_source_of_truth"
     assert decision.used_persistent_profile is True
     assert decision.used_storage_state is False
 
 
-def test_formal_sequential_runtime_prefers_manual_storage_state_when_available() -> None:
+def test_formal_sequential_runtime_ignores_manual_storage_state() -> None:
+    """人工巡店保存的会话不再优先（会话文件整体废除，D5 / R1）。"""
     decision = choose_runtime_strategy(
         platform="tiktok",
         session_owner_id="main-1",
@@ -568,9 +575,67 @@ def test_formal_sequential_runtime_prefers_manual_storage_state_when_available()
     )
 
     assert decision.mode == "persistent_profile"
-    assert decision.reason == "persistent_profile_available"
+    assert decision.reason == "profile_is_single_source_of_truth"
     assert decision.used_storage_state is False
     assert decision.used_persistent_profile is True
+    assert decision.fallback_allowed is False
+
+
+def test_formal_collection_strategy_ignores_every_storage_state_probe() -> None:
+    """正式采集的结论**与任何探针结果无关**（profile 是唯一载体）。
+
+    这条守住「顺序路径恒走 profile」：只要有人把「读会话文件 / 人工会话优先」
+    的分支加回判定树，这里立刻变红。
+    """
+    probes = (
+        (False, False, False),
+        (True, False, False),
+        (True, True, False),
+        (True, True, True),
+        (False, False, True),
+    )
+    for has_storage_state, has_manual_storage_state, has_persistent_profile in probes:
+        decision = choose_runtime_strategy(
+            platform="shopee",
+            session_owner_id="main-1",
+            has_storage_state=has_storage_state,
+            has_manual_storage_state=has_manual_storage_state,
+            has_persistent_profile=has_persistent_profile,
+            force_persistent_profile=False,
+            execution_kind="formal_collection",
+            component_type="export",
+            parallel_mode=False,
+        )
+
+        assert decision.mode == "persistent_profile", (
+            has_storage_state,
+            has_manual_storage_state,
+            has_persistent_profile,
+        )
+        assert decision.reason == "profile_is_single_source_of_truth"
+        assert decision.used_storage_state is False
+        assert decision.used_persistent_profile is True
+        assert decision.fallback_allowed is False
+
+
+def test_component_test_strategy_keeps_legacy_decision_tree() -> None:
+    """工具 / 录制路径（``component_test``）不受正式采集收敛影响（R5 修订表）。"""
+    decision = choose_runtime_strategy(
+        platform="shopee",
+        session_owner_id="main-1",
+        has_storage_state=True,
+        has_manual_storage_state=False,
+        has_persistent_profile=False,
+        force_persistent_profile=False,
+        execution_kind="component_test",
+        component_type="export",
+        parallel_mode=False,
+    )
+
+    assert decision.mode == "storage_state_fanout"
+    assert decision.reason == "storage_state_available"
+    assert decision.used_storage_state is True
+    assert decision.used_persistent_profile is False
 
 
 def test_tiktok_storage_state_quality_gate_rejects_shallow_bootstrap_state() -> None:

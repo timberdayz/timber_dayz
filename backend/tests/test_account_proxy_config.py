@@ -1025,48 +1025,25 @@ async def test_runtime_fingerprint_failure_fallback_keeps_account_proxy(monkeypa
     assert context_options["proxy"] == proxy
 
 
-async def test_executor_fingerprint_failure_fallback_keeps_account_proxy(
+async def test_runtime_context_options_fingerprint_failure_fallback_keeps_account_proxy(
     monkeypatch,
-    tmp_path,
 ):
-    """O1：executor 侧的指纹回退分支同样必须带账号代理。
+    """O1：指纹链路失败后的回退分支同样必须带账号代理。
 
-    这段代码当前是死代码（Task 4 会删），但评审点名了它的回退分支 ——
-    在被删掉之前，回退路径不得留下"静默直连"的坑。
+    Task 4.2 删掉了 executor 侧那份死代码（``_prepare_runtime_page_bundle``），
+    活着的回退分支在 ``runtime_session.build_runtime_context_options``：
+    指纹取不到时回退到全局 context 参数，但**必须显式带上账号代理** ——
+    漏掉就是「静默直连」（账号从宿主 IP 出现，IP 隔离形同虚设）。
     """
-    from modules.apps.collection_center import executor_v2
-
-    captured: dict[str, object] = {}
-
-    class _FakeContext:
-        async def new_page(self):
-            return object()
-
-    class _FakeBrowser:
-        async def new_context(self, **kwargs):
-            captured.update(kwargs)
-            return _FakeContext()
+    from modules.apps.collection_center import runtime_session
 
     async def _broken_fingerprint(*args, **kwargs):
         raise RuntimeError("fingerprint broken")
 
-    async def _no_session(*args, **kwargs):
-        return None
-
     monkeypatch.setattr(
-        executor_v2,
+        runtime_session,
         "_get_fingerprint_context_options_async",
         _broken_fingerprint,
-    )
-    monkeypatch.setattr(
-        executor_v2,
-        "_load_or_bootstrap_session_async",
-        _no_session,
-    )
-    monkeypatch.setattr(
-        executor_v2.runtime_session,
-        "apply_stealth_init_scripts",
-        AsyncMock(),
     )
 
     proxy = {
@@ -1074,28 +1051,14 @@ async def test_executor_fingerprint_failure_fallback_keeps_account_proxy(
         "username": "u",
         "password": "p",
     }
-    bundle = await executor_v2._prepare_runtime_page_bundle(
-        task_id="task-1",
+    context_options = await runtime_session.build_runtime_context_options(
         platform="shopee",
         session_owner_id="main-1",
-        runtime_account={"account_id": "shopee_sg_x"},
-        raw_account={"account_id": "shopee_sg_x"},
-        granularity="daily",
-        normalized_date_range={
-            "date_from": "2025-01-01",
-            "date_to": "2025-01-31",
-        },
-        task_download_dir=tmp_path,
-        screenshot_dir=tmp_path,
-        shop_account_id="shopee_sg_x",
-        use_account_session_fingerprint=True,
-        browser_instance=_FakeBrowser(),
-        runtime_manifests={"login": {}},
+        account={"account_id": "shopee_sg_x"},
         proxy=proxy,
     )
 
-    assert captured["proxy"] == proxy
-    assert bundle["context_options"]["proxy"] == proxy
+    assert context_options["proxy"] == proxy
 
 
 async def test_account_proxy_reaches_browser_context_in_parallel_fanout(monkeypatch, tmp_path):

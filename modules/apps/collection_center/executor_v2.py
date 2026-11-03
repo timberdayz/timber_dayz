@@ -232,82 +232,6 @@ async def _record_platform_shop_discovery_async(
         logger.warning("Failed to record platform shop discovery: %s", e)
 
 
-async def _load_session_async(
-    platform: str, account_id: str, max_age_days: int = 30
-) -> Optional[Dict[str, Any]]:
-    """在线程池中加载会话，避免阻塞事件循环。返回 session_data 或 None。"""
-    from modules.utils.sessions.session_manager import SessionManager
-
-    loop = asyncio.get_running_loop()
-
-    def _load() -> Optional[Dict[str, Any]]:
-        sm = SessionManager()
-        return sm.load_session(platform, account_id, max_age_days=max_age_days)
-
-    return await loop.run_in_executor(_get_executor_pool(), _load)
-
-
-def _manual_storage_state_path(platform: str, account_id: str) -> Optional[Path]:
-    """人工巡店保存的会话文件路径（``data/sessions/<platform>/<owner>/storage_state.json``）。
-
-    路径规则**必须**与 ``SessionManager.get_session_path`` 完全一致（净化后的目录名），
-    否则采集侧读不到巡店面板保存的会话（spec D5 / D6）。
-    """
-    if not platform or not account_id:
-        return None
-    try:
-        from modules.utils.sessions.session_manager import SessionManager
-
-        return SessionManager().get_session_path(platform, account_id)
-    except Exception:
-        logger.debug(
-            "Manual storage state path probe failed for %s/%s", platform, account_id
-        )
-        return None
-
-
-def _manual_storage_state_exists(platform: str, account_id: str) -> bool:
-    """人工巡店保存的会话是否已经落盘。
-
-    注意：持久 profile 目录里也有 Chromium 缓存文件，不能用「目录非空」判断会话存在
-    （``runtime_session._profile_contains_state`` 只判目录非空）—— 人工会话必须走
-    ``SessionManager``。
-    """
-    session_path = _manual_storage_state_path(platform, account_id)
-    if session_path is None:
-        return False
-    try:
-        return session_path.exists()
-    except OSError:
-        return False
-
-
-async def _load_or_bootstrap_session_async(
-    platform: str,
-    account_id: str,
-    account_config: Optional[Dict[str, Any]] = None,
-    *,
-    max_age_days: int = 30,
-) -> Optional[Dict[str, Any]]:
-    session_data = await _load_session_async(
-        platform,
-        account_id,
-        max_age_days=max_age_days,
-    )
-    if session_data and isinstance(session_data.get("storage_state"), dict):
-        return session_data
-
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        _get_executor_pool(),
-        lambda: runtime_session._bootstrap_session_from_profile_sync(
-            platform,
-            account_id,
-            account_config=account_config,
-        ),
-    )
-
-
 async def _save_session_async(
     platform: str, account_id: str, storage_state: Dict[str, Any]
 ) -> bool:
@@ -463,138 +387,6 @@ def _build_playwright_context_options_from_fingerprint(
     ):
         pass  # 不授予任何权限
     return out
-
-
-async def _prepare_runtime_page_bundle(
-    *,
-    task_id: str,
-    platform: str,
-    session_owner_id: str,
-    runtime_account: Dict[str, Any],
-    raw_account: Dict[str, Any],
-    granularity: str,
-    normalized_date_range: Dict[str, Any],
-    task_download_dir: Union[str, Path],
-    screenshot_dir: Union[str, Path],
-    shop_account_id: str,
-    use_account_session_fingerprint: bool,
-    browser_instance: Any,
-    runtime_manifests: Optional[Dict[str, Any]],
-    proxy: Optional[Dict[str, str]] = None,
-) -> Dict[str, Any]:
-    storage_state: Optional[Dict[str, Any]] = None
-    reused_session = False
-    if use_account_session_fingerprint and session_owner_id:
-        try:
-            session_data = await _load_or_bootstrap_session_async(
-                platform,
-                session_owner_id,
-                runtime_account,
-            )
-            if session_data and isinstance(session_data.get("storage_state"), dict):
-                storage_state = session_data["storage_state"]
-                reused_session = True
-                logger.info(
-                    "Task %s: session loaded for %s/%s (reused_session=True)",
-                    task_id,
-                    platform,
-                    session_owner_id,
-                )
-            else:
-                if session_data is None:
-                    logger.debug(
-                        "Task %s: no valid session for %s/%s, will full login",
-                        task_id,
-                        platform,
-                        session_owner_id,
-                    )
-                else:
-                    logger.warning(
-                        "Task %s: session_data missing storage_state, will full login",
-                        task_id,
-                    )
-        except Exception as e:
-            logger.warning(
-                "Task %s: load_session failed: %s, will full login", task_id, e
-            )
-
-    if use_account_session_fingerprint and session_owner_id:
-        try:
-            fp_options = await _get_fingerprint_context_options_async(
-                platform,
-                session_owner_id,
-                raw_account,
-                proxy=proxy,
-            )
-            context_options = _build_playwright_context_options_from_fingerprint(
-                fp_options
-            )
-        except Exception as e:
-            logger.warning(
-                "Task %s: get fingerprint failed: %s, fallback to global context args",
-                task_id,
-                e,
-            )
-            from modules.apps.collection_center.browser_config_helper import (
-                get_browser_context_args,
-            )
-
-            context_options = get_browser_context_args()
-            # O1：回退路径也必须显式带上账号代理 —— get_browser_context_args()
-            # 明确不含 proxy，漏掉就是**静默直连**（账号从宿主 IP 出现，
-            # IP 隔离形同虚设）。有代理就必须有代理。
-            if proxy:
-                context_options["proxy"] = proxy
-    else:
-        from modules.apps.collection_center.browser_config_helper import (
-            get_browser_context_args,
-        )
-
-        context_options = get_browser_context_args()
-        if proxy:
-            context_options["proxy"] = proxy
-
-    context_options.setdefault("accept_downloads", True)
-    if storage_state:
-        if storage_state:
-            context_options["storage_state"] = storage_state
-
-    params = _build_runtime_task_params(
-        task_id=task_id,
-        account=runtime_account,
-        platform=platform,
-        granularity=granularity,
-        normalized_date_range=normalized_date_range,
-        task_download_dir=task_download_dir,
-        screenshot_dir=screenshot_dir,
-        reused_session=reused_session,
-    )
-    params["main_account_id"] = session_owner_id
-    if shop_account_id:
-        params["shop_account_id"] = shop_account_id
-
-    play_context = await browser_instance.new_context(**context_options)
-    await runtime_session.apply_stealth_init_scripts(play_context)
-    page = await play_context.new_page()
-    params["reused_session"] = reused_session
-
-    adapter = None
-    if runtime_manifests is None:
-        adapter = create_adapter(
-            platform=platform,
-            account=runtime_account,
-            config=params,
-        )
-
-    return {
-        "storage_state": storage_state,
-        "reused_session": reused_session,
-        "context_options": context_options,
-        "params": params,
-        "play_context": play_context,
-        "page": page,
-        "adapter": adapter,
-    }
 
 
 # Phase 9.4: Async-safe wrappers (run sync DB work in thread executor)
@@ -755,22 +547,19 @@ _PROFILE_TARGETING_RUNTIME_MODES = frozenset({"auto", "persistent_profile"})
 
 @dataclass(frozen=True)
 class _ResolvedRuntimeMode:
-    """运行时模式解析后的**唯一**结论（Task 4 / F4-9）。
+    """运行时模式解析后的**唯一**结论（Task 4 / F4-9，Task 4.2 收敛为恒 profile）。
 
     ``execute()`` 的前置校验、账号锁判定与 ``_open_runtime_bundle`` 的分支
     必须看到同一份解析结果 —— 否则「校验用的模式」与「真正开 profile 用的模式」
     会脱节（``browser_type=None`` 时抛 AttributeError 而不是清晰的 ValueError）。
 
-    这里**只**装模式结论与判定它所需的两个探针结果；
-    会话物化（读会话文件 / bootstrap）留在 ``_open_runtime_bundle`` 里做 ——
-    那一步会打开 profile 目录，必须留在账号锁**之内**。
+    [Task 4.2] 这里**不再装任何「会话来源探针」**：正式采集恒走 profile，
+    没有「人工会话优先」之类的仲裁要记录 → 也就不会去读会话文件。
     """
 
     mode: str
     requested_mode: str
-    has_persistent_profile: bool = False
-    has_manual_storage_state: bool = False
-    prefer_manual_storage_state: bool = False
+    strategy_reason: str = ""
 
 
 class TaskCancelledError(Exception):
@@ -1000,19 +789,6 @@ class CollectionExecutorV2:
             return False
         return normalized in _PROFILE_TARGETING_RUNTIME_MODES
 
-    @staticmethod
-    def _should_prefer_manual_storage_state(
-        *,
-        has_persistent_profile: bool,
-        has_manual_storage_state: bool,
-    ) -> bool:
-        """人工巡店保存的会话优先于持久 profile 目录（spec D6）。
-
-        现状是「profile 目录非空就不读 data/sessions」，导致运营在面板里保存的会话
-        对已有 profile 的账号完全无效。
-        """
-        return bool(has_manual_storage_state)
-
     def _resolve_runtime_mode(
         self,
         *,
@@ -1020,55 +796,38 @@ class CollectionExecutorV2:
         platform: str,
         session_owner_id: str,
     ) -> _ResolvedRuntimeMode:
-        """把「运行时模式」的判定**收敛到一处**（Task 4 / F4-9）。
+        """把「运行时模式」的判定**收敛到一处**（Task 4 / F4-9，Task 4.2 收敛为恒 profile）。
 
         ``execute()`` 的前置校验、账号锁判定与 ``_open_runtime_bundle`` 的分支
         必须看到**同一个**模式结论 —— 否则会出现「前置校验按 auto 放行、实际却去
         开 profile 目录」的脱节（``browser_type=None`` 时在 profile 分支里抛
         AttributeError，而不是清晰的 ValueError）。
 
-        这里**不动**「auto 按有没有 profile / 有没有人工会话选模式」的既有策略
-        （那是 Task 4.2 的事），只把判定集中到一处，避免解析两遍。
+        [Task 4.2] 正式采集的结论**恒为** ``persistent_profile``：profile 是登录态的
+        唯一载体（R1），会话文件整体废除（D5）→ 这里**不再探测**「人工会话是否存在」
+        「profile 目录是否存在」→ 顺序路径因此**不会读会话文件**。
 
-        本方法**只做无副作用的探针**（不读会话文件、不 bootstrap、不打开 profile
-        目录）→ 可以在拿账号锁之前安全调用；会话物化留在 ``_open_runtime_bundle``
-        里、在账号锁之内完成。
+        本方法**只做无副作用的判定**，可以在拿账号锁之前安全调用；
+        打开 profile 目录留在 ``_open_runtime_bundle`` 里、在账号锁之内完成。
         """
         normalized_mode = str(session_runtime_mode or "").strip().lower()
         if normalized_mode != "auto":
             return _ResolvedRuntimeMode(
                 mode=normalized_mode,
                 requested_mode=normalized_mode,
+                strategy_reason=normalized_mode,
             )
 
-        has_persistent_profile = bool(
-            session_owner_id
-            and runtime_session.runtime_profile_exists(platform, session_owner_id)
-        )
-        # 人工巡店保存的会话（data/sessions/<platform>/<owner>/storage_state.json）
-        # 必须优先于持久 profile 目录被读取（spec D6 / A4）。
-        has_manual_storage_state = bool(
-            session_owner_id
-            and _manual_storage_state_exists(platform, session_owner_id)
-        )
-        prefer_manual_storage_state = self._should_prefer_manual_storage_state(
-            has_persistent_profile=has_persistent_profile,
-            has_manual_storage_state=has_manual_storage_state,
-        )
         # 模式结论直接取自**同一个**策略函数（``choose_runtime_strategy``），
         # 保证「判定模式」与「记录 strategy_reason」永远是同一个结论。
-        # ``has_storage_state`` 传 False 是安全的：策略函数只有在
-        # 「没有 profile、也没有人工会话」时才看它，而那两种情况下的结论
-        # 都是 storage_state_fanout —— 模式与 storage_state 的内容无关。
+        # 探针一律传 False：正式采集的结论与「有没有会话文件 / profile 目录存不存在」
+        # 无关（profile 是唯一载体）→ 顺带保证这里不会去读会话文件、不会提前建目录。
         decision = runtime_session.choose_runtime_strategy(
             platform=platform,
             session_owner_id=session_owner_id,
             has_storage_state=False,
-            has_manual_storage_state=has_manual_storage_state,
-            # 人工会话存在时，持久 profile 目录只作为兜底，不再优先。
-            has_persistent_profile=(
-                has_persistent_profile and not prefer_manual_storage_state
-            ),
+            has_manual_storage_state=False,
+            has_persistent_profile=False,
             force_persistent_profile=False,
             execution_kind="formal_collection",
             component_type="export",
@@ -1077,9 +836,7 @@ class CollectionExecutorV2:
         return _ResolvedRuntimeMode(
             mode=decision.mode,
             requested_mode=normalized_mode,
-            has_persistent_profile=has_persistent_profile,
-            has_manual_storage_state=has_manual_storage_state,
-            prefer_manual_storage_state=prefer_manual_storage_state,
+            strategy_reason=decision.reason,
         )
 
     async def _open_runtime_bundle(
@@ -1096,12 +853,13 @@ class CollectionExecutorV2:
         proxy: Optional[Dict[str, Any]] = None,
         resolved_mode: Optional[_ResolvedRuntimeMode] = None,
     ):
-        # [Task 4 / F4-9] 模式判定收敛到 ``_resolve_runtime_mode``：
-        # ``execute()`` 先解析一次并把结论传进来（``session_runtime_mode`` 传的是
-        # **解析后**的模式，``resolved_mode`` 带上判定所需的探针结果）；
-        # 这里只**消费**结论，不再自己解析。
-        # 直接调用本方法的调用方（测试/并行路径）走同一条兜底解析 —— 两条路径
-        # 用的是同一套判定逻辑，不会再出现「解析两遍、结论不一致」。
+        # [Task 4.2] profile 是顺序路径的**唯一**载体（R1 真相源唯一）：
+        # 这里不再「优先人工会话」、不再读会话文件、不再 bootstrap、不再退回
+        # storage_state 扇出 —— 只消费 ``_resolve_runtime_mode`` 的结论。
+        #
+        # ``browser`` / ``storage_state`` 两个入参保留是为了调用方兼容（顺序路径已经
+        # 不用它们）：profile 模式下 context 由 ``launch_persistent_context`` 建，
+        # 登录态由 Chromium 自己写回 profile 目录。
         if resolved_mode is None:
             resolved_mode = self._resolve_runtime_mode(
                 session_runtime_mode=session_runtime_mode,
@@ -1109,145 +867,32 @@ class CollectionExecutorV2:
                 session_owner_id=session_owner_id,
             )
         normalized_mode = resolved_mode.mode
-        is_auto_request = resolved_mode.requested_mode == "auto"
-        effective_storage_state = storage_state
-        session_candidate = runtime_session.RuntimeSessionCandidate(
-            storage_state=effective_storage_state, metadata={}
-        )
-
-        if is_auto_request:
-            # auto 分支的会话物化：人工巡店保存的会话优先于持久 profile 目录
-            # 被读取（spec D6 / A4）。条件与既有实现完全一致。
-            if (
-                (
-                    resolved_mode.prefer_manual_storage_state
-                    or not resolved_mode.has_persistent_profile
-                )
-                and effective_storage_state is None
-                and session_owner_id
-            ):
-                session_data = await _load_or_bootstrap_session_async(
-                    platform=platform,
-                    account_id=session_owner_id,
-                    account_config=runtime_account,
-                )
-                if session_data and isinstance(session_data.get("storage_state"), dict):
-                    effective_storage_state = session_data["storage_state"]
-                    session_metadata: Dict[str, Any] = {"source": "session_manager"}
-                    raw_metadata = session_data.get("metadata")
-                    if isinstance(raw_metadata, dict):
-                        session_metadata.update(raw_metadata)
-                    session_candidate = runtime_session.RuntimeSessionCandidate(
-                        storage_state=effective_storage_state,
-                        metadata=session_metadata,
-                    )
-                else:
-                    session_candidate = (
-                        await runtime_session.load_runtime_session_candidate(
-                            platform=platform,
-                            session_owner_id=session_owner_id,
-                            account=runtime_account,
-                        )
-                    )
-                    effective_storage_state = session_candidate.storage_state
-            strategy = runtime_session.choose_runtime_strategy(
-                platform=platform,
-                session_owner_id=session_owner_id,
-                has_storage_state=bool(effective_storage_state),
-                has_manual_storage_state=(
-                    resolved_mode.prefer_manual_storage_state
-                    or session_candidate.manual_seeded
-                ),
-                # 人工会话存在时，持久 profile 目录只作为兜底，不再优先。
-                has_persistent_profile=(
-                    resolved_mode.has_persistent_profile
-                    and not resolved_mode.prefer_manual_storage_state
-                ),
-                force_persistent_profile=False,
-                execution_kind="formal_collection",
-                component_type="export",
-                parallel_mode=False,
+        if normalized_mode != "persistent_profile":
+            raise ValueError(
+                "正式采集只走持久化 profile（profile 是登录态的唯一载体）："
+                f"platform={platform}, session_owner_id={session_owner_id}, "
+                f"mode={normalized_mode}。"
+                "storage_state 扇出模式已废除，请使用 session_runtime_mode='auto'。"
             )
-        else:
-            strategy = runtime_session.RuntimeStrategyDecision(
-                mode=normalized_mode,
-                reason=normalized_mode,
-                used_storage_state=normalized_mode == "storage_state_fanout",
-                used_persistent_profile=normalized_mode == "persistent_profile",
-                fallback_allowed=normalized_mode == "storage_state_fanout",
+        if browser_type is None:
+            raise ValueError(
+                "走持久化 profile 需要 browser_type："
+                f"platform={platform}, session_owner_id={session_owner_id}。"
+                "未拿到 browser_type，无法打开该账号的持久 profile 目录。"
             )
-
-        if normalized_mode == "persistent_profile":
-            if browser_type is None:
-                raise ValueError(
-                    "走持久化 profile 需要 browser_type："
-                    f"platform={platform}, session_owner_id={session_owner_id}。"
-                    "未拿到 browser_type，无法打开该账号的持久 profile 目录。"
-                )
-            bundle = await runtime_session.open_persistent_runtime_bundle(
-                browser_type=browser_type,
-                platform=platform,
-                session_owner_id=session_owner_id,
-                account=runtime_account,
-                launch_kwargs=launch_kwargs,
-                proxy=proxy,
-            )
-            self._annotate_runtime_bundle(
-                bundle,
-                strategy_reason=strategy.reason,
-                session_source="persistent_profile",
-            )
-            return bundle
-
-        if (
-            normalized_mode != "persistent_profile"
-            and effective_storage_state is None
-            and session_owner_id
-        ):
-            session_data = await _load_or_bootstrap_session_async(
-                platform=platform,
-                account_id=session_owner_id,
-                account_config=runtime_account,
-            )
-            if session_data and isinstance(session_data.get("storage_state"), dict):
-                effective_storage_state = session_data["storage_state"]
-                session_candidate = runtime_session.RuntimeSessionCandidate(
-                    storage_state=effective_storage_state,
-                    metadata={"source": "session_manager"},
-                )
-            else:
-                session_candidate = (
-                    await runtime_session.load_runtime_session_candidate(
-                        platform=platform,
-                        session_owner_id=session_owner_id,
-                        account=runtime_account,
-                    )
-                )
-                if isinstance(session_candidate.storage_state, dict):
-                    effective_storage_state = session_candidate.storage_state
-
-        bundle = await runtime_session.open_storage_state_runtime_bundle(
-            browser=browser,
+        bundle = await runtime_session.open_persistent_runtime_bundle(
+            browser_type=browser_type,
             platform=platform,
             session_owner_id=session_owner_id,
             account=runtime_account,
-            storage_state=effective_storage_state,
+            launch_kwargs=launch_kwargs,
             proxy=proxy,
-            headless=bool((launch_kwargs or {}).get("headless", True)),
         )
         self._annotate_runtime_bundle(
             bundle,
-            strategy_reason=strategy.reason,
-            session_source=(
-                "manual_storage_state"
-                if session_candidate.manual_seeded and effective_storage_state
-                else ("storage_state" if effective_storage_state else "fresh_login")
-            ),
+            strategy_reason=resolved_mode.strategy_reason,
+            session_source="persistent_profile",
         )
-        try:
-            setattr(bundle, "session_metadata", dict(session_candidate.metadata or {}))
-        except Exception:
-            pass
         return bundle
 
     @staticmethod
@@ -2046,7 +1691,7 @@ class CollectionExecutorV2:
         browser_type=None,
         proxy: Optional[Dict[str, str]] = None,  # 账号级代理(Playwright 形态)
         runtime_manifests: Optional[Dict[str, Any]] = None,
-        session_runtime_mode: str = "storage_state_fanout",
+        session_runtime_mode: str = "auto",
     ) -> CollectionResult:
         """
         执行采集任务(v4.7.0 - 任务粒度优化)
@@ -2070,7 +1715,9 @@ class CollectionExecutorV2:
             context: 任务上下文(用于恢复任务)
             sub_domains: 子域数组(v4.7.0)
             debug_mode: 调试模式(v4.7.0,仅用于日志记录)
-            browser: 推荐传入, 执行器自建带指纹与可选会话的 context
+            browser: 推荐传入, 执行器自建带指纹与会话的 context
+            session_runtime_mode: 运行时模式。默认 "auto" → 正式采集**恒走持久化
+                profile**（Task 4.2：profile 是登录态的唯一载体）。
             proxy: 账号级代理(Playwright 形态)。调用方没传时从账号配置解析
                    (自有代理优先, 绝不回退到遗留地区池)
 
@@ -2186,7 +1833,6 @@ class CollectionExecutorV2:
         # execute() 先解析出**实际生效**的模式，再把它传给 _open_runtime_bundle →
         # 前置校验与「真正开 profile 目录」用的永远是同一个模式结论，
         # 不会再出现「校验按 auto 放行、实际走 profile」的脱节。
-        requested_runtime_mode = str(session_runtime_mode or "").strip().lower()
         resolved_runtime_mode = self._resolve_runtime_mode(
             session_runtime_mode=session_runtime_mode,
             platform=platform,
@@ -2195,7 +1841,7 @@ class CollectionExecutorV2:
         normalized_runtime_mode = resolved_runtime_mode.mode
         if (
             browser_instance is None
-            and requested_runtime_mode in {"auto", "storage_state_fanout"}
+            and normalized_runtime_mode != "persistent_profile"
             and browser_type is not None
         ):
             # 浏览器级全局代理：账号自有代理必须在浏览器进程级注入。
@@ -2203,9 +1849,11 @@ class CollectionExecutorV2:
             # 且会覆盖全局代理；进程数也不因 per-context proxy 而增加。
             # 浏览器级代理仍保留：浏览器自身的请求（不经 context 的）也要走同一出口 IP。
             #
-            # 这里刻意用**请求模式**(requested_runtime_mode)而不是解析后的模式：
-            # profile 模式下多开的那一个 Chromium 目前仍被 legacy 有头回退路径依赖
-            # (R3) —— 收敛到「profile 模式不再多开浏览器」是 Task 4.2 Step 6 的事。
+            # [Task 4.2 / F4-3 / R3] profile 模式下**不再多开一个 Chromium**：
+            # profile context 自己就是浏览器进程，多开的那一个纯属浪费
+            # （多一个进程、多一份内存，退出顺序还容易和 profile 独占锁打架）。
+            # Task 4.5 已经把「有头人工验证码回退」改到同一个 profile 目录上，
+            # 所以这里去掉多余的 browser 不会让回退失效。
             launch_kwargs = self._build_runtime_launch_kwargs(debug_mode=debug_mode)
             launch_kwargs.pop("proxy", None)
             browser_instance = await browser_type.launch(
@@ -6589,6 +6237,15 @@ class CollectionExecutorV2:
             domain_context_options = get_browser_context_args()
         domain_context_options = dict(domain_context_options)
         domain_context_options.setdefault("accept_downloads", True)
+        # [Task 4.2 / R8] 并行扇出与顺序路径**同一套指纹口径**：
+        # 都不注入 user_agent / locale / timezone_id 等运行时覆盖项
+        # （以 profile 原生环境为准）。顺序路径已经由
+        # ``normalize_persistent_profile_context_options`` 剥离，这里复用**同一个**
+        # 函数 → 两条路径不会各走各的。
+        domain_context_options = runtime_session.normalize_persistent_profile_context_options(
+            platform=platform,
+            context_options=domain_context_options,
+        )
 
         semaphore = asyncio.Semaphore(max(1, int(max_parallel or 1)))
         total_domains = len(data_domains)

@@ -68,7 +68,14 @@ def test_component_tester_uses_reused_persistent_context_for_export():
     assert tester._persistent_context_mode("export") == "reused"
 
 
-def test_component_tester_runtime_strategy_does_not_force_profile_level_reuse():
+def test_component_tester_runtime_strategy_prefers_persistent_profile():
+    """组件测试器（录制）也以**持久 profile 目录**为登录态载体。
+
+    旧语义是「storage_state 优先」—— 那套会话文件已经是待废除的对象。
+    现在录制子进程与正式采集落在**同一个** profile 目录
+    （Task 6.5：profile 身份统一为主账号 ID），
+    所以「profile 目录存在 → 用 profile」是两侧一致的正确行为。
+    """
     tester = ComponentTester(platform="tiktok", account_id="acc-1")
 
     decision = tester._choose_runtime_strategy(
@@ -79,10 +86,12 @@ def test_component_tester_runtime_strategy_does_not_force_profile_level_reuse():
         component_type="export",
     )
 
-    assert decision.mode == "storage_state_fanout"
+    assert decision.mode == "persistent_profile"
+    assert decision.reason == "persistent_profile_available"
 
 
-def test_component_tester_and_formal_collection_share_storage_state_first_default():
+def test_component_tester_and_formal_collection_share_profile_first_default():
+    """组件测试与正式采集**共用**同一套策略结论（都以 profile 为载体）。"""
     from modules.apps.collection_center.runtime_session import choose_runtime_strategy
 
     decision = choose_runtime_strategy(
@@ -97,8 +106,8 @@ def test_component_tester_and_formal_collection_share_storage_state_first_defaul
         parallel_mode=False,
     )
 
-    assert decision.mode == "storage_state_fanout"
-    assert decision.reason == "storage_state_available"
+    assert decision.mode == "persistent_profile"
+    assert decision.reason == "persistent_profile_available"
 
 
 def test_component_tester_runtime_strategy_delegates_to_shared_runtime_session(monkeypatch):
