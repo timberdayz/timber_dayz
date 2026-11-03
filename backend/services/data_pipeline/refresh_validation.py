@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Iterable
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,9 +35,54 @@ class RefreshValidationReport:
         return "; ".join(parts)
 
 
+# 目标名与真实数据库对象名不一致的「逻辑目标」。
+# 例：semantic.alias_registry 的 SQL 建的是表 semantic.semantic_field_aliases，
+# 目标名只是刷新流程里的一个代号。存在性核对必须按真实对象名进行，
+# 否则会把活着的目标误报成 missing。
+# 维护约束：新增逻辑目标时必须登记在这里，由 test_data_pipeline_freshness_existence 守护。
+LOGICAL_TARGET_OBJECTS: dict[str, str] = {
+    "semantic.alias_registry": "semantic.semantic_field_aliases",
+}
+
+
 async def _target_exists(db: AsyncSession, target: str) -> bool:
     result = await db.execute(text("SELECT to_regclass(:target_name)"), {"target_name": target})
     return result.scalar_one_or_none() is not None
+
+
+async def find_missing_targets(
+    db: AsyncSession,
+    target_names: Iterable[str],
+) -> set[str]:
+    """批量核对目标对象当前是否仍然存在于数据库中。
+
+    freshness 只记录「上一次刷新当时的结果」：对象后来被删除/改名时，
+    状态仍显示 success，监控因此「假绿」。这里做一次实时存在性核对，
+    把「已注册但对象已不存在」的目标挑出来。
+
+    仅检查带 schema 前缀的目标（如 `api.xxx_module`）；不带前缀的名字不是数据库对象。
+    逻辑目标按 LOGICAL_TARGET_OBJECTS 登记的真实对象名核对。
+    """
+    resolved: dict[str, str] = {}
+    for name in {str(n) for n in target_names if n and "." in str(n)}:
+        resolved[name] = LOGICAL_TARGET_OBJECTS.get(name, name)
+    if not resolved:
+        return set()
+
+    object_names = sorted(set(resolved.values()))
+    result = await db.execute(
+        text(
+            """
+            SELECT n.nspname || '.' || c.relname
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname || '.' || c.relname = ANY(:targets)
+            """
+        ),
+        {"targets": object_names},
+    )
+    existing = {row[0] for row in result.fetchall()}
+    return {name for name, object_name in resolved.items() if object_name not in existing}
 
 
 def _parse_datetime(value: Any) -> datetime | None:

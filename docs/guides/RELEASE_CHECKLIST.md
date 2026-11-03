@@ -107,9 +107,11 @@ Both `celery-worker` and `celery-beat` crash-looped, so scheduled jobs (auto
 invoicing, low-stock alerts, DB backups) stopped. The collection chain was **not**
 affected — collection runs inside the API process via asyncio, not through Celery.
 
-**Rule**: every dependency in the Celery stack or in the API process manager must be
-pinned with `==` in **both** `requirements.txt` and `backend/requirements.txt`. Never
-rely on a floating range for it.
+**Rule (as of v7.12.9)**: the production image installs **exactly one** dependency
+file — `requirements.lock.txt` — and every version in it is pinned with `==`. The
+runtime direct dependencies live in `requirements.txt` (also fully pinned), and
+dev-only tools live in `requirements-dev.txt` (never installed into the production
+image). There is no second install step, so nothing can drift between two files.
 
 **Guards added in v7.12.8**:
 
@@ -121,9 +123,96 @@ rely on a floating range for it.
 - The startup smoke test now also starts a real Celery worker against a throwaway
   Redis, so a broker-connectivity regression fails the build instead of production.
 
-**Known gap**: `numpy`, `pandas`, `starlette`, `pydantic`, `sqlalchemy`, `playwright`
-and `alembic` are still floating or split across the two requirements files. A full
-lock file (`pip-compile`) is the real fix and is still open.
+**Fixed in v7.12.9 — single lock file**:
+
+| file | role | installed into production image |
+| --- | --- | --- |
+| `requirements.lock.txt` | complete transitive dependency closure (116 packages), all `==` | **yes** (the only install) |
+| `requirements.txt` | runtime **direct** dependencies only, all `==` | no (cross-checked against the lock) |
+| `requirements-dev.txt` | pytest / linters / testcontainers, all `==` | no |
+
+- `backend/requirements.txt` is **deleted** — the old two-file split was the drift
+  source.
+- `Dockerfile.backend` and `Dockerfile.collection` install the lock in **one** step.
+- The lock was taken from the **measured** `pip freeze` of the running production
+  v7.12.8 image, so v7.12.9 ships the exact versions production was already running
+  (only the 5 dev tools leave the image). No runtime version change.
+- `scripts/verify_image_dependency_pins.py` now **derives** its baseline from
+  `requirements.lock.txt` instead of a hand-copied list, and additionally fails on
+  floating ranges, a multi-step Dockerfile install, or any package in the image that
+  is not in the lock.
+- CI installs lock → requirements → dev in that order, so the CI environment and the
+  production image resolve the same versions.
+
+## Module Retirement (v7.12.9)
+
+v7.12.9 removes five frontend pages whose backing capability was already dead or
+never existed, plus the dead backend code behind them:
+
+| retired page | route | backend permission id | why |
+| --- | --- | --- | --- |
+| 店铺管理 | `/store-management` | `store-management` | front-end-only mock, 0 API calls |
+| 店铺分析 | `/store-analytics` | `store-analytics` | 4 API endpoints, 3 backing views missing in production |
+| 财务报表 | `/finance-reports` | `finance-reports` | placeholder page, 0 API calls |
+| 汇率管理 | `/fx-management` | `fx-management` | placeholder page, 0 API calls |
+| 会计期间 | `/fiscal-periods` | `fiscal-periods` | placeholder page, 0 API calls |
+
+Retirement pattern (reuse it, do not invent a new one):
+
+- `frontend/scripts/moduleSunsetUi.test.mjs` — registers the retired routes and menu
+  entries. This file has already retired 22 routes before v7.12.9.
+- `frontend/scripts/frontPagePermissionAudit.test.mjs` — audits only the routes that
+  are still alive.
+- Backend permission ids are removed from `backend/services/permission_service.py`
+  (the catalog served by `GET /api/permissions`) **and** from the role defaults in
+  `backend/services/system_role_service.py`.
+- `ensure_system_roles()` rewrites an existing role's permission list whenever it
+  differs from the defaults, so removing an id from the defaults also repairs the
+  production `core.dim_role` rows at the next startup — **no manual SQL needed**.
+
+Also removed in v7.12.9:
+
+- `backend/routers/dashboard_api.py` — a Metabase-era **stub** module (its
+  `get_metabase_service()` raises `RuntimeError("... tests should monkeypatch it")`).
+  It was never included in the production app; `backend/domains/business/routes.py`
+  only includes `dashboard_api_postgresql.router`. Deleting it removes 5 dead
+  `annual-summary` handlers and the last Metabase-era business-overview duplicates.
+- `backend/services/annual_cost_aggregate.py` — zero live references (only the dead
+  router above and its own test).
+- `annual_summary` service methods, `reduce_annual_summary_kpi_rows`, the
+  `api.annual_summary_*` / `api.store_analysis_*` SQL assets, and the
+  `mart.shop_hour_traffic_kpi` SQL asset.
+
+**Protected — do not delete**: `core.dim_fiscal_calendar`, `finance.fx_rates`,
+`backend/services/profit_basis_service.py`, `labor_cost_policy_service.py`,
+`shop_target_workbench_service.py`. These share a name with the retired pages but
+carry live logic (fiscal periods are still written by
+`profit_basis_service.ensure_fiscal_period_exists()`, and the fiscal calendar table
+is referenced by 5 other business tables).
+
+## Monitoring Existence Check (v7.12.9)
+
+`GET /api/data-pipeline/freshness` used to report only what happened **at the time
+of the last refresh**, so a target whose view had since been dropped still showed
+`status = success` — the monitoring was **green while the asset was gone**. That is
+how 9 zombie targets stayed invisible.
+
+v7.12.9 adds a live existence check:
+
+- Each freshness row now carries `object_exists`.
+- A target that is registered but whose database object no longer exists is reported
+  with `status = "missing"` (the original value is kept in `recorded_status`) and is
+  listed in `missing_targets`.
+- `GET /api/data-pipeline/lineage` adds `target_object_exists` / `source_object_exists`
+  per edge and a `missing_objects` list.
+
+One caveat: a **logical target** may not match its real object name — e.g.
+`semantic.alias_registry` is the refresh codename for the table
+`semantic.semantic_field_aliases`. Those are registered in
+`LOGICAL_TARGET_OBJECTS` (`backend/services/data_pipeline/refresh_validation.py`),
+and `backend/tests/data_pipeline/test_data_pipeline_freshness_existence.py` fails if
+a new mismatch is not registered — otherwise the check would report a live target as
+missing.
 
 ## Before Tagging
 
@@ -143,7 +232,9 @@ lock file (`pip-compile`) is the real fix and is still open.
    ```
 7. If any dependency file changed, confirm the pins are explicit (`==`) and that the
    baseline in `scripts/verify_image_dependency_pins.py` still matches them — see
-   "Dependency Version Drift" above.
+   "Dependency Version Drift" above. After v7.12.9 the baseline is derived from
+   `requirements.lock.txt`, so the check is: the lock is the only file the backend
+   image installs, and every entry in it is `==`-pinned.
 
 ## Tag Release
 
@@ -268,3 +359,13 @@ Expected order:
    - `GET /api/dashboard/business-overview/inventory-backlog` shows
      `unknown_restock_row_count` **lower** than the total row count
      (an equal value means the state layer still contributes nothing)
+8. Confirm the monitoring existence check behaves (v7.12.9+):
+   - `GET /api/data-pipeline/freshness` returns `missing_targets: []` (or only the
+     targets that were deliberately cleaned up) and every row carries `object_exists`
+   - `GET /api/data-pipeline/lineage` returns `missing_objects: []`
+   - a `status` of `"missing"` means the database object is gone — fix the asset
+     before trusting that target's numbers
+9. Confirm the retired modules are really gone (v7.12.9+):
+   - `GET /api/permissions` no longer lists `finance-reports`, `fx-management`,
+     `fiscal-periods`, `store-management`, `store-analytics`
+   - the retired pages are absent from the menu and their routes no longer resolve

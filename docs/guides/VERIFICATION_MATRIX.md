@@ -26,6 +26,28 @@ This file maps changed surfaces to repository-specific checks. The active verifi
   `python scripts/diff_pytest_junit.py <before.xml> <after.xml>` — it prints
   `NEW` / `FIXED` / `COMMON` and exits `1` when new failures appear. See
   `docs/superpowers/plans/2026-11-02-collection-profile-only-architecture.md` Task 10.
+- Beware the **order-dependent pollution** below when comparing baselines: a failure that
+  only appears in a full-suite run may be caused by an earlier test leaking environment
+  state, not by the change under review. When a diff reports a single new failure,
+  reproduce it at the base revision with the *same* test set before treating it as a
+  regression.
+
+### Known baseline pollution (post-launch V2 debt, recorded 2026-11-04)
+
+`backend/tests/test_project_env.py::test_load_project_env_applies_later_files_as_overrides`
+calls the project env loader, which writes `DEPLOYMENT_ROLE=local` into `os.environ`.
+`monkeypatch.delenv()` only restores variables that existed before the test, so the value
+written *during* the test leaks into every later test in the same session.
+
+Consequence: `backend/tests/test_runtime_mode_route_registration.py::test_collector_mode_exposes_collection_but_not_dashboard`
+fails in any full-suite run (collector mode + `DEPLOYMENT_ROLE=local` also registers the
+dashboard routes) while passing when the file runs alone. Reproduced identically at the
+pre-v7.12.9 base revision, so it is **not** a v7.12.9 regression.
+
+This is non-blocking debt: CI only runs the test files changed by the commit, so it does
+not gate the release. Fix it in the post-launch V2 rebuild — the fix is to make the env
+loader restore `os.environ` after the test (or to use `monkeypatch.setenv` for the values
+it writes).
 
 ## Frontend Changes
 
