@@ -126,6 +126,15 @@ backup_files() {
         files_to_backup+=("data")
     fi
     
+    # 持久化 Profile 目录（登录态的唯一载体，2026-11 收尾补）
+    # profile 是 Chromium 加密目录，不备份就意味着「换机 / 从备份恢复之后
+    # 所有账号都要重新人工登录 + 过验证码」—— 正是会话复用改造要消灭的现象。
+    # 之前只备份了 data/（里面装的是**已废弃**的会话文件），漏掉了真正承载
+    # 登录态的 profiles/。
+    if [ -d "${PROJECT_ROOT}/profiles" ]; then
+        files_to_backup+=("profiles")
+    fi
+    
     if [ -d "${PROJECT_ROOT}/uploads" ]; then
         files_to_backup+=("uploads")
     fi

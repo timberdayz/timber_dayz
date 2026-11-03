@@ -1,5 +1,10 @@
 # Metabase Nginx 反向代理部署总结
 
+> ⚠️ **历史手工操作记录，非当前发布路径**（2026-11-03 标注）
+> 生产实际生效的 compose 组合以 `scripts/deploy_remote_production.sh` 为准 ——
+> **该脚本从不引用 `docker-compose.prod.lockdown.yml`** / `docker-compose.metabase.lockdown.yml`。
+> 详见 `docs/guides/RELEASE_CHECKLIST.md` 的 "Production Compose Combination"。
+
 **部署时间**: 2025-01-09  
 **配置方式**: 方式 2 - Nginx 反向代理（推荐）
 

@@ -1,5 +1,12 @@
 # 生产环境最小端口暴露部署指南
 
+> ⚠️ **历史手工操作记录，非当前发布路径**（2026-11-03 标注）
+> 生产实际生效的 compose 组合以 `scripts/deploy_remote_production.sh` 为准 ——
+> **该脚本从不引用 `docker-compose.prod.lockdown.yml`**。
+> 本文里的 `-f docker-compose.prod.lockdown.yml ... up -d` 是 2025-01 的手工组合，
+> 照着做会与发布流水线冲突。详见 `docs/guides/RELEASE_CHECKLIST.md` 的
+> "Production Compose Combination"。
+
 **更新时间**: 2025-01-09  
 **目的**: 最小化端口暴露，只对外暴露 Nginx 的 80/443，提高安全性
 

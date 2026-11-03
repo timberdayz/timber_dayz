@@ -1544,9 +1544,15 @@ Task 6.0 删除了遗留 CLI 老程序，以下文档仍提到「采集中心应
 
 以下模块在老程序删除后**没有活调用方**，但**本次不删**（避免超范围大删），文档里不要再把它们描述成「在用」：
 
-`modules/utils/template_generator.py` / `modules/utils/har_capture_utils.py` / `modules/automation/shopee_seller_auto_login.py` / `modules/utils/account_identity.py`（`describe_account_identity` 无调用方）/ `modules/utils/data_processing_pipeline.py`（**本身已损坏**：`from models.database import CollectionTask, DatabaseManager`，这两个名字在 `modules/core/db/schema.py` 单一数据源下都不存在，模块根本 import 不了）。
+`modules/utils/template_generator.py` / `modules/utils/har_capture_utils.py` / `modules/utils/account_identity.py`（`describe_account_identity` 无调用方）/ `modules/utils/data_processing_pipeline.py`（**本身已损坏**：`from models.database import CollectionTask, DatabaseManager`，这两个名字在 `modules/core/db/schema.py` 单一数据源下都不存在，模块根本 import 不了）。
 
-> ⚠️ `modules/utils/persistent_browser_manager.py`、`modules/utils/account_manager.py`、包内 `component_loader.py` 等**仍有活调用方**（`login_orchestrator` / `enhanced_recording_wizard` / `shopee_playwright_exporter` / `tools/launch_inspector_recorder.py`）→ **不要**把它们写成「已废弃」。
+> **2026-11-03 发布前收尾已追加处理**：
+> * `modules/automation/shopee_seller_auto_login.py` —— **已删除**（同样零活调用方）。
+> * `modules/platforms/shopee/archive/` —— **已删除**（`components/` 的旧副本；其 `ShopeeExporterComponent` 无人 import；组件加载器用 `glob("*.py")` **非递归**扫描，故它从未被重复注册，删除零风险）。
+> * `modules/utils/login_orchestrator.py` / `modules/utils/enhanced_recording_wizard.py` / `modules/services/shopee_playwright_exporter.py` —— **保留但已冻结**（仍被测试或 `date_selection_manager`(只借日期 helper) 引用）。三者当前传的账号标识是 `store_name / username`（**店铺标识**），与主链路的 `main_account_id`（规则 B）**口径分裂**；文件头已加「已冻结：不得新增调用方，profile 口径只认 main_account_id」头注。
+
+> ⚠️ `modules/utils/persistent_browser_manager.py`、`modules/utils/account_manager.py`、包内 `component_loader.py` 等**仍有活调用方**（`tools/launch_inspector_recorder.py`）→ **不要**把它们写成「已废弃」。
+> 📌 `persistent_browser_manager` 的 `_alt` 旁路分支已于 2026-11-03 收尾**删除**（两次尝试现在都指向同一主目录）；锁侧 `normalize_profile_identity` 的 `_alt` 归一化**保留**为纯防御（磁盘上若还有历史目录，仍与主目录共用同一把锁）。
 
 - [ ] **Step 1: 回填概念文档**
 
@@ -1760,8 +1766,10 @@ Get-Item "profiles\shopee\shopeeKR\Default\Network\Cookies" | Select-Object Full
 | 步 | 期望 | 实测 | 结论 |
 |---|---|---|---|
 | 1（备份 `data/sessions/`） | 采集后无新会话文件 | 采集前后均 **19 个 `storage_state.json`（1.47 MB）**，无新增 | ✅ |
-| 1'（磁盘清理） | 备份 → 观察 → 删除 | **用户 2026-11-03 决定「立刻备份并删除」** → `data/sessions/` 整体改名为 `data/sessions.bak-20261103/`（19 个文件 / 1,536,719 bytes 全量保留，可随时改名还原）；**原 `data/sessions/` 已不存在** | ✅ |
-| 1''（`_alt` 旁路 profile） | 消除登录态分散 | **用户 2026-11-03 决定删除** → `profiles/shopee/虾皮巴西东朗照明主体_alt/`（16 条目 + Cookies 20480）已移入回收站；主 profile `profiles/shopee/shopeeKR/` 完好（Cookies 28672 bytes） | ✅ |
+| 1'（磁盘清理） | 备份 → 观察 → 删除 | **用户 2026-11-03 决定「立刻备份并删除」** → `data/sessions/` 整体改名为 `data/sessions.bak-20261103/`（19 个文件 / 1,536,719 bytes 全量保留）；**收尾时用户决定提前销毁，该备份目录已一并移除**（代码零引用，全程走可恢复删除）。`data/sessions/`、`data/sessions.bak-20261103/`、`data/session_profiles/` **三者现均已不存在** | ✅ |
+| 1''（`_alt` 旁路 profile） | 消除登录态分散 | **用户 2026-11-03 决定删除** → `profiles/shopee/虾皮巴西东朗照明主体_alt/`（16 条目 + Cookies 20480）已移入回收站；主 profile `profiles/shopee/shopeeKR/` 完好（Cookies 28672 bytes）。**收尾把产生它的代码分支也删了** → 两次尝试现在都指向同一主目录，不会再生成旁路目录 | ✅ |
+| 1'''（店铺级遗留 profile） | profile 目录口径统一到规则 B | 对照 `core.main_accounts` 逐个核验：**6 个在用主账号目录全部保留**（`profiles/miaoshou/miaoshou_real_001`、`profiles/shopee/{chenewei666main,hongxikejimain,shopeeKR}`、`profiles/tiktok/{chenzeweinbnb163com,Tiktok1店}`，Cookies 逐个校验完好）；**17 个孤儿目录 + 1 个已停用主账号目录（`虾皮巴西东朗照明主体`，965 MB）+ `profiles/妙手erp/` 已删除**，回收约 2.13 GB | ✅ |
+| 1''''（legacy 持久化上下文目录） | 第二个登录态载体下线 | `data/session_profiles/**` 的最后一个使用者 `modules/collectors/miaoshou_smart_login.py` 已改用 `get_persistent_profile_path('miaoshou', account_id)`；`SessionManager.get_profile_path` 与 `profiles_path` 属性一并下线；目录已删除 | ✅ |
 | 2（备份 profile） | 为「首次登录」清空载体 | **未清空**（保留现有 `profiles/shopee/shopeeKR`，避免 3 个店铺账号无谓掉登录态） | ⏭ 主动不做 |
 | 3/4（采集 A → 需登录） | 要求登录 + 验证码 | 任务 `41500205-…` 真实跑到 `status=verification_required` / `verification_type=otp`；Shopee 登录页**自动填好**主账号 `Leslieshop:main` 与密码；OTP 发往 `+86 191****371` | ✅ 前半段符合 |
 | 5（立刻再跑，免验证码） | E1~E4 同时成立 | ✅ **已成立**（2026-11-03 20:56~21:03，用户跑出 6 条真实任务）：E1 `verification_type`/`verification_screenshot` **6/6 NULL**；E2 `login_gate_ready=true` **6/6**；E3 `session_reused=true` + `session_source=profile` **6/6**；E4 `profiles/shopee/shopeeKR/…/Cookies` mtime → `2026-11-03 20:59:29` | ✅ |

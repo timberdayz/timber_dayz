@@ -164,7 +164,9 @@ Live deployment verified:
   实现的是**会话文件**（`data/sessions/**`）的 30 天过期门禁，而会话文件体系已被
   「Session Profile-Only Architecture」整体废除（见上方条目），30 天门禁随之下线，
   **无需再知会运营**。本机 `data/sessions/` 残留的 19 个会话文件也不再被任何代码读取；
-  磁盘清理按该计划的附录 B 步 9 走「备份 → 观察 1~2 周 → 删除」，由运维执行。
+  磁盘清理已于 2026-11-03 完成（`data/sessions/` → 备份 → 观察 → **备份已按用户决定
+  提前销毁**；另清 17 个店铺级孤儿 profile 目录、1 个已停用主账号目录与
+  `data/session_profiles/`）。
 
 ## Session Profile-Only Architecture (2026-11)
 

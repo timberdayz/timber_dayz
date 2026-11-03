@@ -1,5 +1,10 @@
 # 生产环境最小端口暴露配置总结
 
+> ⚠️ **历史手工操作记录，非当前发布路径**（2026-11-03 标注）
+> 生产实际生效的 compose 组合以 `scripts/deploy_remote_production.sh` 为准 ——
+> **该脚本从不引用 `docker-compose.prod.lockdown.yml`**。
+> 详见 `docs/guides/RELEASE_CHECKLIST.md` 的 "Production Compose Combination"。
+
 **创建时间**: 2025-01-09  
 **状态**: ✅ 配置完成并验证通过
 

@@ -8,6 +8,50 @@
 - Local `origin` has two push URLs: GitHub and CNB Git. `main` keeps the existing GitHub `origin/main` upstream so normal Cursor/VS Code pull behavior remains unchanged. Use `powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Sync` before publishing a completed `main` change; it checks the CNB mirror before writing either remote.
 - CNB registry is used as the preferred production image pull source in China; CNB Git is only a code mirror.
 
+## Production Compose Combination (Source Of Truth)
+
+The effective production compose combination is decided by
+`scripts/deploy_remote_production.sh` — **not** by any hand-written document:
+
+```bash
+docker-compose -f docker-compose.yml \
+                -f docker-compose.prod.yml \
+                [-f docker-compose.cloud.yml] \
+                [-f docker-compose.cloud-4c8g.yml] \   # only when CLOUD_PROFILE=4c8g
+                --profile production \
+                --env-file ${PRODUCTION_PATH}/.env.cleaned \
+                -f docker-compose.deploy.yml
+```
+
+- Infrastructure (PostgreSQL / Redis) stays owned by the original `xihong_erp`
+  compose project (`up -d --no-build postgres redis`).
+- The application layer is the temporary `docker-compose.deploy.yml` generated at
+  deploy time (backend-api / frontend / nginx), attached to the existing
+  `xihong_erp_erp_network`.
+- **Not in effect in production**: `docker-compose.collection*.yml` (local collector
+  machine only), `docker-compose.dev.yml`, `docker-compose.verify-local.yml`, and
+  `docker-compose.prod.lockdown.yml`.
+- `scripts/production_lockdown_deployment_guide.md`, `scripts/production_lockdown_summary.md`
+  and `scripts/metabase_nginx_deployment_summary.md` describe a **different, hand-written**
+  combination (one that includes `docker-compose.prod.lockdown.yml`) that the deploy
+  script never references. Treat them as historical manual notes, not the release path.
+
+### Redis Authentication
+
+- **Production** (`docker-compose.prod.yml`):
+  `redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}` — **no default value**.
+  The server `.env` must therefore carry a non-empty `REDIS_PASSWORD`. If it is empty,
+  Redis ends up with **no password** while the application connects with
+  `redis://:${REDIS_PASSWORD}@redis:6379/0` → empty-password AUTH → rejected by Redis 6+ →
+  the account session lock goes fail-closed → **all collection is refused**. The Redis
+  health check fails first, so the deploy aborts instead of silently shipping.
+- **Collector machine** (`docker-compose.collection.yml`): `REDIS_URL` carries **no
+  password**; `backend.services.main_account_session_lock.inject_redis_password()`
+  injects `REDIS_PASSWORD` on the application side (a password already present in the URL
+  wins; a URL whose scheme is not `redis`/`rediss`/`unix` is returned unchanged).
+- The collector machine's `REDIS_PORT` must point at the **host** Redis port
+  (on this workstation: **16379**), not the container default `6379`.
+
 ## Before Tagging
 
 1. Confirm the working tree is clean or only contains intended release changes
