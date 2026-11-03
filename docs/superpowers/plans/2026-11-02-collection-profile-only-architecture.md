@@ -14,7 +14,7 @@
 
 | 项 | 值 |
 |---|---|
-| 规范来源 | `docs/guides/COLLECTION_SESSION_LIFECYCLE.md` **生效版 v3**（R1~R8 / P1~P4 / D1~D7） |
+| 规范来源 | `docs/guides/COLLECTION_SESSION_LIFECYCLE.md` **生效版 v3.1**（R1~R8 / P1~P4 / D1~D7） |
 | 作废计划 | `docs/superpowers/plans/2026-11-02-collection-session-overwrite-semantics.md`（已标注作废） |
 | 分支 / worktree | `feature/session-profile-only` / `.worktrees/session-profile-only` |
 | 单文件测试 | `python -m pytest backend/tests/<file>.py -v` |
@@ -27,7 +27,7 @@
 
 ---
 
-## 0.1 实施进展（2026-11-03）
+## 0.1 实施进展（2026-11-03 收口更新）
 
 | Task | 状态 | 提交 / 结论 |
 |---|---|---|
@@ -40,12 +40,28 @@
 | Task 4 补地基 | ✅ | `035523b7`；11 个新用例（TDD 证明 8 个在旧码上红）；`backend/tests` 两种顺序 NEW=0 / FIXED=0 |
 | Task 6.0 清理遗留老程序 | ✅ | `6e63f501`；删 `app.py`(5170 行) + `handlers.py`(2524 行) + 2 个测试；路由表 740 条不变；NEW=0 / FIXED=0 |
 | Task 6.5 录制子进程对齐 profile | ✅ | `b9fdcb62`；profile 身份改主账号 ID + 接入跨进程锁 + 删 14 处硬编码调试写入；NEW=0 / FIXED=0 |
-| Task 3.1 账号锁后端统一 | ✅ | 分支 `feature/session-profile-only-t31`；父子进程共用 `resolve_session_lock_backend_mode()`；两种顺序 NEW=0 / FIXED=0；锁模块覆盖率仍 100% |
-| Task 4.2 顺序路径收敛 | ⏳ 进行中 | 分支 `feature/session-profile-only-t42` |
-| Task 5 / 6 / 7 | ⏳ 进行中 | Task 5 分支 `...-t5`、Task 6 分支 `...-t6`；Task 7 已完成二次只读盘点，见各自章节的修订表 |
-| Task 8 / 9 / 10 | ⏳ | Task 10 **必须在合并回 main 之后**跑（profile 根是仓库根相对，worktree 的 `profiles/` 是空的） |
+| Task 4.2 顺序路径收敛 | ✅ | `6c16003f` → 合并 `ed77a466`；定向 317+24 passed |
+| Task 5 并行快照纯内存化 | ✅ | `7d87e304` → 合并 `fa91f7ae`；两种顺序 NEW=0 / FIXED=0 |
+| Task 6 巡店面板删「保存会话」 | ✅ | `450711d0` → 合并 `0b08f153`；代理 + 账号锁 + 优雅关闭（CDP `Browser.close` → 等退出 → 超时才 `taskkill`） |
+| Task 3.1 账号锁后端统一 | ✅ | `756b1b95` → 合并 `3d201574`；父子进程共用 `resolve_session_lock_backend_mode()`；两种顺序 NEW=0 / FIXED=0 |
+| **Task 7 核心：废弃会话文件** | ✅ | `ad6e552a` → 合并 `cda9002d`；`session_manager.py` 802→110 行；`get_persistent_profile_path` 去掉 mkdir 副作用；删 `test_session_manager_protection.py` |
+| **Task 7 步 8：外围同步** | ✅ | `dcf37179`；`data/sessions` 移出遗留物候选；告警文案改「店铺级 profile 遗留」；录制器 profile 改主账号 ID（指纹同 key） |
+| **Task 8 前端** | ✅ | `315b2b8e` → 合并 `c4ff742`；守卫测试改名 `collectionTaskSessionDiagnosticsUi.test.mjs`；`npm run build` 通过 |
+| **Task 9 文档同步** | ✅ | `c52aa915` → 合并 `dd4a8d1b`；生命周期规范 v3.1；另清 `18384f27`（指纹指南与 STATUS.md 的过期描述）、`7807a0e7`（验证矩阵补 diff 口径） |
+| Task 8 后端 | ⏳ 进行中 | 分支 `feature/session-profile-only-t8b`；executor 诊断字段 + router 顶层提升 + schema 声明 |
+| Task 10 全量验收 + 真实采集 | ⏳ 待合并回 main | profile 根是仓库根相对，worktree 的 `profiles/` 是空的 → 真实采集必须回 main 跑 |
 
-**四路分支已合并进 `feature/session-profile-only`**（`0b615706`，**零冲突**）：`035523b7`(Task 4) + `60ed2be2`(_fix345) + `69155c16`(Task 6.0) + `0b615706`(Task 6.5)。合并后冒烟：关键 8 个测试文件 **180 passed**；三个守卫脚本 exit 0；`docker compose -f docker-compose.collection.yml config -q` exit 0。
+**已完成的验证矩阵**（判据 = 失败集合逐条 diff，不是计数）：
+
+| 范围 | 基线 → 变更后 | NEW | FIXED | 备注 |
+|---|---|---|---|---|
+| `backend/tests`（默认顺序） | `fa91f7ae` → `0b08f153` | **0** | 2 | 修好的是 2 条断言旧 `storage_state_fanout` 的用例 |
+| `backend/tests`（换序，串行） | `fa91f7ae` → `0b08f153` | **0** | 2 | 换序用 `-p reorder_collection_tests` |
+| 根 `tests/` | `fa91f7ae` → `0b08f153` | **0** | 8 | 8 条是断网期间抢修的 `test_executor_v2.py` |
+
+> ⚠️ **回归必须串行跑**：并发跑多套全量 pytest 会互相干扰同一个 postgres（临时库重名、alembic 演练库抢占）→ 出现假阳性。已实测：并发时 `test_main_shop_account_migration_contract` 报 `alembic upgrade failed`，**隔离复跑两侧各 5 passed**。
+>
+> ⚠️ **diff 脚本已落进仓库**：`scripts/diff_pytest_junit.py`（NEW 有失败时 exit 1）。早期版本误用 junit 的 `id` 属性（pytest 不写该属性）→ 用例塌缩到类粒度、会漏判 NEW 失败，正确键是 `classname::name`。
 
 **已知的仓库既有失败基线**：`backend/tests` 全量 **143 failed / 3986 passed / 22 errors**。判据是**失败集合逐条 diff**（`--junitxml`），**不是计数**。
 
@@ -1154,6 +1170,9 @@ git commit -m "feat(pwcli): 巡店面板移除保存会话，登录态由 profil
 
 ## Task 7: 废弃会话文件（R1）
 
+> **状态：✅ 已落地（2026-11-03）** —— 核心 `ad6e552a`（合并于 `cda9002d`）；步 8 外围 `dcf37179`。
+> 实施结果与本节清单的差异见文末「附录 B.8 实施结果回填」。
+
 **Files:**
 - Modify: `modules/utils/sessions/session_manager.py`（大幅收窄）
 - Modify: `modules/apps/collection_center/executor_v2.py:240`、`:246`、`:256`、`:316`
@@ -1415,6 +1434,8 @@ if mode == "auto":
 
 ## Task 8: 诊断字段与前端展示
 
+> **状态：前端 ✅ / 后端 ⏳（2026-11-03）** —— 前端 `315b2b8e`（合并于 `c4ff742`）；后端分支 `feature/session-profile-only-t8b`。
+
 **Files:**
 - Modify: `modules/apps/collection_center/executor_v2.py:1121-1167`（`_runtime_session_diagnostics`）、`:1094-1119`（`_resolve_session_metadata`）、`:2874-2905`（`_should_skip_post_login_session_persist`）、`:2055/:2167/:5935`（`params["session_metadata"]`）、`:2068/:2180`（诊断调用点）、`:29-32`（import）
 - Modify: `backend/domains/collection/routers/collection_tasks.py:437-467`（白名单抽取）、`:470-540`（顶层提升）
@@ -1489,6 +1510,9 @@ git commit -m "refactor(diagnostics): 会话诊断字段改为 profile 载体语
 ---
 
 ## Task 9: 文档同步
+
+> **状态：✅ 已落地（2026-11-03）** —— `c52aa915`（合并于 `dd4a8d1b`）；另清 `18384f27`（指纹指南与 STATUS.md 的过期描述）、`7807a0e7`（验证矩阵补 diff 口径）。
+> §10 验收口径的**实测列**留到 Task 10 真机采集后回填。
 
 **Files:**
 - Modify: `docs/guides/COLLECTION_SESSION_LIFECYCLE.md`（v3 → v3.1，回填实现结果）
@@ -1798,3 +1822,42 @@ Expected: 工作区干净。
 3. **`session_reused` 到底该判什么** —— 是否检查 `Default/Network/Cookies` 是否存在 / mtime？取决于本机 Chromium 实际写出的目录结构，**需要真机看一次 profile 目录内容**。
 4. **`session_proxy` 的脱敏粒度** —— 本机 19 个 enabled 账号的 proxy 配置**全为 NULL**，没有真实样本可验证脱敏后的辨识度。
 5. **「巡店登录 → 采集复用」的实际可用性** —— 规则 D 的几条路径（`launch_inspector_recorder` / `login_orchestrator` / `enhanced_recording_wizard` / `shopee_playwright_exporter`）产生的登录态，采集是否真的读得到 → **需要跑一次真机才能确认**。
+
+---
+
+### B.8 实施结果回填（2026-11-03，Task 7 / 8 落地后）
+
+#### B.8.1 B.1 十步删除顺序的实际执行结果
+
+| 步 | 计划 | 实际 | 差异说明 |
+|---|---|---|---|
+| 0 | Task 6 先落地 | ✅ | `pwcli_helpers.ps1` 已无 `state-save` |
+| 1 | 先断写者 | ✅ | `pwcli_native.save_default_storage_state_from_context` 只留 `raw_json`；`persistent_browser_manager.save_context_state` 改为「只关 profile context」；`runtime_session` 引导落盘删；`miaoshou_smart_login._save_session` 删 |
+| 2 | 删 executor 写函数 | ✅ | `_save_session_async` + 2 处调用点删；顺带删 `save_session_after_login` 形参（该形参只剩日志用途） |
+| 3 | 删 runtime_session 写函数 | ✅ | `_save_session_async` 删；新增**内存**快照 `snapshot_profile_storage_state_sync`（不落盘） |
+| 4 | 断读者 | ✅ | `runtime_session` 的读/引导函数删；**`choose_runtime_strategy` 的 `has_manual_storage_state` 形参与分支整个删除** —— 比「传 False」更强，顺带修掉 `tools/test_component.py` 漏传该必填关键字参数导致的既有 `TypeError` |
+| 5 | 删 `_resolve_session_metadata` + 3 处 `params["session_metadata"]` + 5 个旧诊断字段 | ✅ | 5 个旧字段从 executor 侧消失（router 侧在 Task 8 后端收口） |
+| 6 | 收窄 `SessionManager` | ✅ | `session_manager.py` **802 → 110 行**，只剩 `get_persistent_profile_path` + `get_profile_path`；`__init__` 去掉 `base_path` 形参与 mkdir；`get_persistent_profile_path` **去掉 mkdir 副作用** |
+| 7 | 最后删 `safe_session_account_dirname` | ✅ | 自由函数删；legacy 命名规则**就地内联**进 `get_profile_path`，legacy 目录指向不变 |
+| 8 | 外围同步 | ✅ | `dcf37179`：`data/sessions` 移出遗留物候选；`backend/main.py` / `run.py` 告警文案改「店铺级 profile 遗留」；`launch_inspector_recorder` profile 改主账号 ID（**指纹同 key**） |
+| 9 | 磁盘清理 | ⏸ **待运维** | 代码不自动删目录（规范 §6）。主仓实测 `data/sessions/` 有 19 个 `storage_state.json`（1.47 MB）+ 10 个空目录，命名空间 `miaoshou` / `miaoshou_erp` / `妙手erp` 三套并存 → 走「备份 → 观察 1~2 周 → 删除」 |
+| 10 | 文档同步 | ✅ | Task 9 |
+
+**步 8 的一处补正**：计划原文只说录制器 profile 改 `main_account_id`，但**指纹也必须同 key** —— 采集执行器 `runtime_session._get_fingerprint_context_options_async` 用的就是 `session_owner_id`（= 主账号 ID）。profile 与指纹 key 不一致会出现「同一个 profile 目录、两种设备指纹」，录出来的登录态未必能被采集复用。已按同 key 落地。
+
+#### B.8.2 B.7 五条悬案的实测结论
+
+1. **`data/sessions/` 磁盘真实状态** —— 主仓实测 **19 个 `storage_state.json`（1.47 MB）+ 10 个空目录**；命名空间 `miaoshou` / `miaoshou_erp` / `妙手erp` 三套并存。哪些是事故现场证据、哪些是遗留孤儿 → **仍需运维确认**，代码不自动删。
+2. **`_alt` 旁路 profile** —— 主仓 `profiles/shopee/虾皮巴西东朗照明主体_alt` **确实有实体目录**（16 个条目 + `Default/Network/Cookies` 20480 bytes，mtime 2025-09-05）→ 是真登录过的 profile，不是空壳。本轮**未删**：它在 `main_account_session_lock` 归一化下与主 profile 共用同一把锁，不产生交叉双开；但它确实把登录态分散到第二个目录，**仍是 R1 的残留违反** → 需产品/运维拍板后单开一步。
+3. **`session_reused` 到底该判什么** —— ✅ **已实测并落地**。Chromium 110+ 的 cookie 库在 **`Default/Network/Cookies`**（旧版路径 `Default/Cookies`）。主仓 18 个真实 profile **全部**有该文件（20480 ~ 45056 bytes）；7 个被 mkdir 创建的空 profile（`miaoshou/main-1`、`shopee/shopee`、`shopee/account-1`、`shopee/account-2`、`miaoshou/acc-1`、`tiktok/main-1`、`shopee/main-1`）**目录条目数 = 0，连 `Default/` 都没有**。
+   → 判据落地为**「Cookies 文件存在」**，**不用 mtime**（mtime 只证明「最近用过」，不证明「有登录态」）。
+   → 相比原判据「目录非空」，这更严：**Chromium 启动过一次但没登录**的 profile 现在判为「无 profile」。行为变化落在**组件测试路径**（`persistent_profile` → `storage_state_fanout` / `fresh_login_required`），判断为**符合预期**（没登录态就不该复用）。
+4. **`session_proxy` 的脱敏粒度** —— 19 个 enabled 账号的 proxy 配置**仍全为 NULL**，没有真实样本。Task 10 用**本地假代理**验「流量确实经过代理 + 脱敏后的 `session_proxy` 等于 `http://127.0.0.1:<端口>`」；真实出口 IP 待真凭据到位后补。
+5. **「巡店登录 → 采集复用」的实际可用性** —— `launch_inspector_recorder` 已改主账号 ID（+ 指纹同 key）；**`login_orchestrator` / `enhanced_recording_wizard` / `shopee_playwright_exporter` 仍用店铺账号 ID 生成 profile 路径**（规则 D 残留，本轮**未改**，已记录在变更报告）→ 它们产生的登录态采集是否读得到，**仍要跑一次真机才能确认**。
+
+#### B.8.3 本轮发现但不在计划里的两处修正
+
+| 落点 | 问题 | 处置 |
+|---|---|---|
+| `scripts/probe_miaoshou_inventory_date_filter.py` / `scripts/probe_miaoshou_warehouse_scope.py` | 仍在读 `data/sessions/**`（违反「会话文件写入点清零」验收） | Task 7 一并改走 profile |
+| `tools/test_component.py:1523` | `_choose_runtime_strategy` 调用漏传必填关键字参数 `has_manual_storage_state` → 运行期 `TypeError`（**基线 `fa91f7ae` 同样存在**，由 `ba637e85` 引入） | 随形参整体删除而消失 |
