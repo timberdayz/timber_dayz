@@ -36,6 +36,29 @@ docker-compose -f docker-compose.yml \
   combination (one that includes `docker-compose.prod.lockdown.yml`) that the deploy
   script never references. Treat them as historical manual notes, not the release path.
 
+### Mirroring `main` When GitHub HTTPS Is Unreachable
+
+`sync_main_mirrors.ps1 -Sync` fetches `origin` and pushes **GitHub first**, then CNB,
+and refuses to run when the two mirrors disagree. On networks where
+`https://github.com` is unreachable (DNS resolves, TCP/443 times out), the sync
+fails at its very first `git fetch --prune origin`.
+
+GitHub's SSH endpoint on **port 443** usually stays reachable in that case:
+
+```powershell
+$env:GIT_SSH_COMMAND = 'ssh -i C:/Users/18689/.ssh/github_actions_deploy -o IdentitiesOnly=yes'
+# Temporarily route origin's fetch channel over SSH-443 ...
+git remote set-url origin "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git"
+powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Sync `
+    -GitHubUrl "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git"
+# ... then restore the documented HTTPS form
+git remote set-url origin "https://github.com/timberdayz/timber_dayz.git"
+```
+
+The two-mirror contract is unchanged (both remotes still receive the same commit);
+only the transport to GitHub differs. Verified 2026-11-03: both mirrors ended at the
+same SHA.
+
 ### Redis Authentication
 
 - **Production** (`docker-compose.prod.yml`):
