@@ -16,6 +16,13 @@ services:
       # 数据库配置（连接主数据库）
       DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@${POSTGRES_HOST:-host.docker.internal}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-xihong_erp}
 
+      # 账号会话锁后端（Task 3）：同一主账号的持久 profile 目录不能被两个进程同时打开
+      # → 锁必须跨进程（Redis SET NX）。这里显式指定 Redis，不再依赖 ENVIRONMENT 的隐式推断，
+      #    否则采集服务会静默降级为进程内锁（只同进程互斥，跨进程仍可能双开）。
+      REDIS_URL: redis://${REDIS_HOST:-host.docker.internal}:${REDIS_PORT:-6379}/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      ACCOUNT_SESSION_LOCK_BACKEND: ${ACCOUNT_SESSION_LOCK_BACKEND:-redis}
+
       # Playwright配置
       PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
       PLAYWRIGHT_TIMEOUT: ${PLAYWRIGHT_TIMEOUT:-30000}
@@ -67,6 +74,9 @@ services:
       - collection_browser_data:/app/data/browser_sessions
       # 设备指纹持久化
       - collection_fingerprints:/app/data/device_fingerprints
+      # 持久化 Profile 目录（登录态的唯一载体）：必须挂到宿主机，
+      # 否则容器一重建，所有账号的 Chromium 登录态全部丢失（每次都要重新人工登录 + 过验证码）
+      - ./profiles:/app/profiles
 
     networks:
       - erp_network

@@ -374,6 +374,24 @@ def account_session_lock_wait_timeout() -> int:
         return 1800
 
 
+def account_session_lock_redis_retry_cooldown_seconds() -> float:
+    """Redis 连接失败后的**重试冷却窗**(秒)。
+
+    冷却窗内直接判定「账号会话锁后端不可用」(fail-closed 语义**不变**), 只是
+    **不再白等**一次 ``socket_connect_timeout``(5s); 冷却窗外才会真正重连。
+
+    默认 30s 的理由: 足够覆盖一次常见的网络抖动(Redis 重启/连接被 reset),
+    又不会让进程在 Redis 长时间宕机时每秒重试一次(每次重试都要等 5s 超时)。
+    """
+    raw = (os.getenv("ACCOUNT_SESSION_LOCK_REDIS_RETRY_COOLDOWN_SECONDS") or "").strip()
+    if not raw:
+        return 30.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 30.0
+
+
 def account_session_lock_fail_closed() -> bool:
     """锁服务不可用时是否 fail-closed。
 

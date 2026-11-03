@@ -32,6 +32,11 @@ Chromium 的 user-data-dir 自带 ``SingletonLock``, 双开会直接抛原始错
   ``@asynccontextmanager`` 且 **yield None**、``waiter_count`` / ``is_locked`` 继续存在。
 * **waiter_count 不退化为恒 0**(L7): 等待者用**独立**的 Hash/ZSET 记录, 使
   「等待主账号会话」的状态推送在跨进程下依然能触发。
+* **失败可自愈**(L10): Redis 连接失败**不得被永久记住** —— 否则一次网络抖动就会让
+  该 worker 进程的采集**永久停摆**(只能重启进程恢复)。这里用「失败冷却窗」实现
+  自愈: 冷却窗内快速判定不可用(fail-closed 语义不变), 窗口外自动重连。
+* **等待者 TTL 覆盖等待时长**(L11): 锁 TTL(300s) < 最大等待时长(1800s),
+  等待者 Hash 若沿用锁 TTL, 等待超过 300s 后 ``waiter_count`` 会归零。
 """
 
 from __future__ import annotations
@@ -45,8 +50,10 @@ import re
 import socket
 import time
 import uuid
+import weakref
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, Optional, Protocol, Set, Tuple
+from urllib.parse import quote, urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +185,10 @@ def waiter_key_for(key: str) -> str:
 # 后端协议与实现
 # ---------------------------------------------------------------------------
 
+#: event loop -> 作用域标识(uuid4)。
+#: 用弱引用持有: loop 被回收后条目自动消失, **不会**出现 id 复用导致的误判。
+_loop_scope_ids: "weakref.WeakKeyDictionary[Any, str]" = weakref.WeakKeyDictionary()
+
 
 class SessionLockBackend(Protocol):
     """账号会话锁后端协议。
@@ -241,7 +252,10 @@ class RedisSessionLockBackend:
     async def add_waiter(self, key: str, waiter_id: str, ttl_seconds: int) -> None:
         waiter_key = waiter_key_for(key)
         await self._client.hset(waiter_key, waiter_id, str(time.time()))
-        await self._client.expire(waiter_key, int(ttl_seconds))
+        # 每次登记都刷新 TTL: 等待者 Hash 的 TTL 必须**覆盖整个等待时长**
+        # (锁 TTL 只有 300s, 而等待最长可达 1800s -> 沿用锁 TTL 会让
+        #  等待超时后 waiter_count 归零)。
+        await self._client.expire(waiter_key, max(1, int(ttl_seconds)))
 
     async def remove_waiter(self, key: str, waiter_id: str) -> None:
         await self._client.hdel(waiter_key_for(key), waiter_id)
@@ -261,21 +275,34 @@ class LocalSessionLockBackend:
     """
 
     def __init__(self) -> None:
-        # (event_loop_id, key) -> asyncio.Lock
-        self._locks: Dict[Tuple[int, str], asyncio.Lock] = {}
-        # (event_loop_id, key) -> token
-        self._holders: Dict[Tuple[int, str], str] = {}
-        # (event_loop_id, key) -> {waiter_id}
-        self._waiters: Dict[Tuple[int, str], Set[str]] = {}
+        # (event_loop_scope_id, key) -> asyncio.Lock
+        self._locks: Dict[Tuple[str, str], asyncio.Lock] = {}
+        # (event_loop_scope_id, key) -> token
+        self._holders: Dict[Tuple[str, str], str] = {}
+        # (event_loop_scope_id, key) -> {waiter_id}
+        self._waiters: Dict[Tuple[str, str], Set[str]] = {}
 
     @staticmethod
-    def _scope(key: str) -> Tuple[int, str]:
-        """按事件循环隔离锁对象(避免跨事件循环复用 asyncio.Lock 报错)。"""
+    def _scope(key: str) -> Tuple[str, str]:
+        """按事件循环隔离锁对象(避免跨事件循环复用 asyncio.Lock 报错)。
+
+        **不能用 ``id(loop)``**: Python 的 ``id()`` 在对象被回收后**会被复用**,
+        两个**不同**的 event loop 可能拿到同一个 id -> 误判为「同一把锁」 ->
+        两个 loop 共享同一把 ``asyncio.Lock`` -> 互斥语义失真。
+
+        这里给每个 loop 挂一个**唯一且永不复用**的 uuid4 作为作用域标识
+        (``WeakKeyDictionary`` 持有弱引用, loop 回收后条目自动消失,
+        不会泄漏也不会复用)。
+        """
         try:
-            loop_id = id(asyncio.get_running_loop())
+            loop = asyncio.get_running_loop()
         except RuntimeError:  # pragma: no cover - 同步上下文
-            loop_id = 0
-        return (loop_id, key)
+            return ("sync", key)
+        scope_id = _loop_scope_ids.get(loop)
+        if scope_id is None:
+            scope_id = uuid.uuid4().hex
+            _loop_scope_ids[loop] = scope_id
+        return (scope_id, key)
 
     async def set_nx(self, key: str, token: str, ttl_seconds: int) -> bool:
         scope = self._scope(key)
@@ -347,33 +374,120 @@ def get_local_session_lock_backend() -> LocalSessionLockBackend:
 # ---------------------------------------------------------------------------
 
 _redis_client_singleton: Optional[Any] = None
+#: 是否已经**成功**解析出可用客户端。
+#: 注意: 连接**失败**时必须保持 False —— 否则一次抖动就会让该进程此后
+#: 永远拿不到 Redis(fail-closed -> 该 worker 的采集被永久拒绝)。
 _redis_client_resolved = False
+#: 上一次连接失败的时间(单调时钟)。用于「失败冷却窗」:
+#: 冷却窗内快速判定不可用(fail-closed 语义不变), 窗口外才真正重连。
+_redis_client_failed_at: Optional[float] = None
+
+
+def inject_redis_password(redis_url: str, password: Optional[str] = None) -> str:
+    """把 ``REDIS_PASSWORD`` 注入到**不含密码**的 Redis URL 里。
+
+    为什么需要
+    ----------
+    ``docker-compose.collection.yml`` 的 ``REDIS_URL`` 形如
+    ``redis://host.docker.internal:6379/0`` —— **不带密码**, 而同一个部署里
+    ``REDIS_PASSWORD`` 是有的(生产 Redis 开了 ``requirepass``)。全仓**没有任何
+    地方**把 ``REDIS_PASSWORD`` 注入 URL, 于是 ``AUTH`` 必然失败 ->
+    ``ping()`` 抛错 -> 账号会话锁不可用 -> 采集被全部拒绝(生产 fail-closed)。
+
+    规则
+    ----
+    * URL **已含密码** -> 原样使用(以 URL 为准, 不覆盖);
+    * URL 不含密码且 ``REDIS_PASSWORD`` 为空 -> 原样使用(兼容无密码 Redis);
+    * URL 不含密码且 ``REDIS_PASSWORD`` 非空 -> 注入 ``:password@``。
+
+    ``password`` 省略时读环境变量 ``REDIS_PASSWORD``。
+    """
+    url = str(redis_url or "")
+    if password is None:
+        password = os.getenv("REDIS_PASSWORD") or ""
+    secret = str(password or "")
+    if not url or not secret:
+        return url
+    try:
+        parsed = urlsplit(url)
+        if parsed.password is not None:
+            # URL 已经带了密码 -> 以 URL 为准, 不覆盖
+            return url
+        netloc = parsed.netloc
+        host_part = netloc
+        username = ""
+        if "@" in netloc:
+            # 畸形形态: 只有用户名没有密码 -> 保留用户名, 把密码补上
+            user_part, _, host_part = netloc.rpartition("@")
+            username = user_part.split(":", 1)[0]
+        encoded = quote(secret, safe="")
+        if username:
+            new_netloc = f"{username}:{encoded}@{host_part}"
+        else:
+            new_netloc = f":{encoded}@{host_part}"
+        return urlunsplit(
+            (parsed.scheme, new_netloc, parsed.path, parsed.query, parsed.fragment)
+        )
+    except Exception:
+        # URL 解析失败 -> 原样使用(连接层会给出明确报错)
+        return url
 
 
 async def get_shared_redis_client() -> Optional[Any]:
-    """进程级惰性 Redis 单例。
+    """进程级惰性 Redis 单例(失败**可自愈**)。
 
     为什么不用 ``app.state.redis``(L9 的方案 B): 采集是在 ``asyncio.create_task``
     里跑的, **拿不到 app**; 而巡店面板 / 脚本 / CLI 根本不经过 router。
     惰性单例与 ``cache_service.get_cache_service()`` 的既有模式一致, 三个入口都能用。
 
     每个 gunicorn worker 各建一条连接(4 worker × 2 容器 = 8 条), 完全可接受。
+
+    失败语义(重要)
+    --------------
+    * 连接失败**不得被永久缓存** —— 否则一次 Redis 抖动就会让该 worker 进程
+      此后每次取锁都拿到 None -> 生产 fail-closed -> **该 worker 的所有采集
+      被永久拒绝**, 只能靠重启进程恢复。
+    * 因此: 失败时保持「未解析」状态, 并记录失败时间; **冷却窗内**(默认 30s)
+      快速返回 None(fail-closed 语义不变, 只是不再白等 5s 连接超时),
+      **窗口外自动重连**。
     """
-    global _redis_client_singleton, _redis_client_resolved
+    global _redis_client_singleton, _redis_client_resolved, _redis_client_failed_at
     if _redis_client_resolved:
         return _redis_client_singleton
 
-    _redis_client_resolved = True
+    from backend.utils.config import account_session_lock_redis_retry_cooldown_seconds
+
+    cooldown = float(account_session_lock_redis_retry_cooldown_seconds())
+    if _redis_client_failed_at is not None:
+        elapsed = time.monotonic() - _redis_client_failed_at
+        if elapsed < cooldown:
+            logger.warning(
+                "[AccountSessionLock] Redis 后端仍不可用(上次失败在冷却窗内, "
+                "剩余 %.1fs), 本次不再重连; 冷却结束后会自动重试",
+                max(0.0, cooldown - elapsed),
+            )
+            return None
+
     redis_url = (os.getenv("REDIS_URL") or "").strip()
     if not redis_url:
-        logger.warning("[AccountSessionLock] 未配置 REDIS_URL, 账号会话锁不可用")
+        _redis_client_failed_at = time.monotonic()
+        logger.error(
+            "[AccountSessionLock] 未配置 REDIS_URL, 账号会话锁不可用"
+            "(生产 fail-closed 会拒绝全部采集); 请检查采集容器的 REDIS_URL 配置, "
+            "将在 %.0fs 后自动重试",
+            cooldown,
+        )
         return None
 
+    # URL 不带密码但环境变量有密码时, 把密码注入(否则 AUTH 必然失败)
+    effective_url = inject_redis_password(redis_url)
+
+    client = None
     try:
         from redis import asyncio as aioredis
 
         client = aioredis.from_url(
-            redis_url,
+            effective_url,
             encoding="utf8",
             decode_responses=True,
             socket_timeout=5,
@@ -381,27 +495,48 @@ async def get_shared_redis_client() -> Optional[Any]:
         )
         await client.ping()
     except Exception as exc:
-        logger.warning("[AccountSessionLock] Redis 连接失败: %s", exc)
+        if client is not None:
+            # from_url 成功但 ping 失败 -> 必须关闭已创建的连接(否则泄漏)
+            with contextlib.suppress(Exception):
+                await client.aclose()
+        _redis_client_failed_at = time.monotonic()
+        logger.error(
+            "[AccountSessionLock] Redis 连接失败: %s; 账号会话锁不可用"
+            "(生产 fail-closed 会拒绝采集); 将在 %.0fs 后自动重连, "
+            "请检查 Redis 是否可达以及 REDIS_URL/REDIS_PASSWORD 是否正确",
+            exc,
+            cooldown,
+        )
         return None
+
+    existing = _redis_client_singleton
+    if existing is not None:
+        # 并发首连: 已经有别的协程连上了 -> 关闭自己这条(不泄漏), 复用先到的那条
+        with contextlib.suppress(Exception):
+            await client.aclose()
+        _redis_client_resolved = True
+        return existing
 
     try:
         from backend.utils.redis_client import sanitize_redis_url_for_log
 
-        safe_url = sanitize_redis_url_for_log(redis_url)
+        safe_url = sanitize_redis_url_for_log(effective_url)
     except Exception:  # pragma: no cover - 脱敏工具不可用时兜底
         safe_url = "redis://***"
 
     logger.info("[AccountSessionLock] Redis 已连接: %s", safe_url)
     _redis_client_singleton = client
+    _redis_client_resolved = True
     return _redis_client_singleton
 
 
 async def reset_shared_redis_client() -> None:
-    """测试辅助: 丢弃进程级 Redis 单例。"""
-    global _redis_client_singleton, _redis_client_resolved
+    """测试辅助: 丢弃进程级 Redis 单例(含失败冷却状态)。"""
+    global _redis_client_singleton, _redis_client_resolved, _redis_client_failed_at
     client = _redis_client_singleton
     _redis_client_singleton = None
     _redis_client_resolved = False
+    _redis_client_failed_at = None
     if client is not None:
         with contextlib.suppress(Exception):
             await client.aclose()
@@ -454,8 +589,10 @@ async def create_default_backend(*, fail_closed: Optional[bool] = None) -> Sessi
             raise MainAccountSessionLockUnavailableError(
                 "账号会话锁服务不可用: 无法连接 Redis(生产 fail-closed, 拒绝采集以避免 profile 双开)"
             )
-        logger.warning(
-            "[AccountSessionLock] Redis 不可用, 降级为进程内锁(仅同进程互斥, 跨进程仍可能双开)"
+        logger.error(
+            "[AccountSessionLock] Redis 不可用, 已降级为进程内锁: "
+            "**跨进程保护已失效** —— 同一账号可能被两个进程同时打开 profile 目录"
+            "(当前只在同进程内互斥)"
         )
         return get_local_session_lock_backend()
     return RedisSessionLockBackend(client)
@@ -670,7 +807,11 @@ class MainAccountSessionLock:
                 try:
                     acquired = await backend.set_nx(key, token, self._ttl_seconds)
                 except Exception as exc:
-                    logger.error("[AccountSessionLock] 抢锁失败: %s", exc)
+                    logger.error(
+                        "[AccountSessionLock] 抢锁失败: %s; 已降级为进程内锁: "
+                        "**跨进程保护已失效** —— 同一账号可能被两个进程同时打开 profile 目录",
+                        exc,
+                    )
                     if self._should_fail_closed():
                         raise MainAccountSessionLockUnavailableError(
                             "账号会话锁服务不可用: 无法写入账号会话锁(生产 fail-closed, 拒绝采集)"
@@ -682,8 +823,14 @@ class MainAccountSessionLock:
                     break
 
                 if not registered:
+                    # 等待者 Hash 的 TTL 必须**覆盖整个等待时长**:
+                    # 锁 TTL(默认 300s) < 最大等待时长(默认 1800s), 若沿用锁 TTL,
+                    # 等待超过 300s 后 waiter_count 就会归零(L7 失效)。
+                    waiter_ttl = max(
+                        int(self._ttl_seconds), int(effective_timeout) + 60
+                    )
                     with contextlib.suppress(Exception):
-                        await backend.add_waiter(key, waiter_id, self._ttl_seconds)
+                        await backend.add_waiter(key, waiter_id, waiter_ttl)
                     registered = True
                     self._local_waiters[key] = self._local_waiters.get(key, 0) + 1
 
