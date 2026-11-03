@@ -552,13 +552,9 @@ class SessionManager:
                     logger.warning(f"会话已过期 ({age_days:.1f} 天): {platform}/{account_id}")
                     return None
             
-            # 只在内容真正变化时回写。读一次会话不该刷新 saved_at（见 spec D7），
-            # 但仍需要维护 last_used_at 以便排查最近一次使用时间。
-            previous_last_used_at = session_data.get("last_used_at")
-            session_data["last_used_at"] = time.time()
-            if previous_last_used_at != session_data["last_used_at"]:
-                _write_json_atomic(session_file, session_data)
-            
+            # [Task 5 / F5-3] 读操作不改磁盘：登录态只由 Chromium 持久 profile 承载，
+            # 会话文件体系将在 Task 7 整体收窄。``last_used_at`` 保持文件里的原值，
+            # 不再因为「读了一次」就回写文件（读操作产生磁盘写 = 隐性落盘）。
             logger.info(f"会话已加载: {platform}/{account_id}")
             return session_data
             

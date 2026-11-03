@@ -1432,42 +1432,14 @@ class CollectionExecutorV2:
             account=account,
         )
         if save_session_after_login and session_platform and session_account_id:
-            if self._should_skip_post_login_session_persist(
-                platform=platform,
-                params=params,
-            ):
-                logger.info(
-                    "Task %s: skip post-login TikTok session persist for persistent profile runtime",
-                    task_id,
-                )
-            else:
-                try:
-                    storage_state = (
-                        await self._wait_and_capture_high_quality_tiktok_session(
-                            page=page,
-                            session_platform=session_platform,
-                            session_account_id=session_account_id,
-                        )
-                    )
-                    ok = await _save_session_async(
-                        session_platform, session_account_id, storage_state
-                    )
-                    if ok:
-                        logger.info(
-                            "Task %s: session saved for %s/%s",
-                            task_id,
-                            session_platform,
-                            session_account_id,
-                        )
-                    else:
-                        logger.warning(
-                            "Task %s: session save returned False for %s/%s",
-                            task_id,
-                            session_platform,
-                            session_account_id,
-                        )
-                except Exception as e:
-                    logger.warning("Task %s: save_session failed: %s", task_id, e)
+            # [Task 5 / R5] 登录态只由 Chromium 持久 profile 承载：
+            # 登录后不再回写会话文件（data/sessions 不再产生新文件）。
+            logger.info(
+                "Task %s: post-login session persist skipped (profile-only runtime) (%s/%s)",
+                task_id,
+                session_platform,
+                session_account_id,
+            )
         context.current_component_index = 1
         return play_context, page, None
 
@@ -3034,40 +3006,6 @@ class CollectionExecutorV2:
             return None
 
     @staticmethod
-    def _should_skip_post_login_session_persist(
-        *,
-        platform: str,
-        params: Dict[str, Any],
-    ) -> bool:
-        """TikTok 走持久 profile 时默认不落 storage_state。
-
-        但**人工巡店保存的会话必须落盘**（spec D8）—— 否则采集侧读不到人工会话。
-        自动来源的会话保持原有跳过行为。
-        """
-        normalized_platform = str(platform or "").strip().lower()
-        nested_params = params.get("params") or {}
-        runtime_mode = (
-            str(
-                params.get("_runtime_session_mode")
-                or nested_params.get("_runtime_session_mode")
-                or ""
-            )
-            .strip()
-            .lower()
-        )
-        if not (normalized_platform == "tiktok" and runtime_mode == "persistent_profile"):
-            return False
-
-        metadata = params.get("session_metadata")
-        if not isinstance(metadata, dict):
-            metadata = nested_params.get("session_metadata")
-        if not isinstance(metadata, dict):
-            metadata = {}
-        if metadata.get("manual_seeded") or metadata.get("protected"):
-            return False
-        return True
-
-    @staticmethod
     def _requires_headful_login_fallback(verification_type: str | None) -> bool:
         return verification_input_mode(verification_type) == "manual_continue"
 
@@ -3547,42 +3485,14 @@ class CollectionExecutorV2:
                 account=account,
             )
             if save_session_after_login and session_platform and session_account_id:
-                if self._should_skip_post_login_session_persist(
-                    platform=platform,
-                    params=params,
-                ):
-                    logger.info(
-                        "Task %s: skip post-login TikTok session persist for persistent profile runtime",
-                        task_id,
-                    )
-                else:
-                    try:
-                        storage_state = (
-                            await self._wait_and_capture_high_quality_tiktok_session(
-                                page=page,
-                                session_platform=session_platform,
-                                session_account_id=session_account_id,
-                            )
-                        )
-                        ok = await _save_session_async(
-                            session_platform, session_account_id, storage_state
-                        )
-                        if ok:
-                            logger.info(
-                                "Task %s: session saved for %s/%s",
-                                task_id,
-                                session_platform,
-                                session_account_id,
-                            )
-                        else:
-                            logger.warning(
-                                "Task %s: session save returned False for %s/%s",
-                                task_id,
-                                session_platform,
-                                session_account_id,
-                            )
-                    except Exception as e:
-                        logger.warning("Task %s: save_session failed: %s", task_id, e)
+                # [Task 5 / R5] 登录态只由 Chromium 持久 profile 承载：
+                # 登录后不再回写会话文件（data/sessions 不再产生新文件）。
+                logger.info(
+                    "Task %s: post-login session persist skipped (profile-only runtime) (%s/%s)",
+                    task_id,
+                    session_platform,
+                    session_account_id,
+                )
             context.current_component_index = 1
 
         # 2. 循环执行各数据域导出
@@ -6298,8 +6208,15 @@ class CollectionExecutorV2:
                 platform=platform,
                 session_owner_id=session_owner_id,
                 context=login_context,
-                persist=bool(use_account_session_fingerprint and session_owner_id),
             )
+            if not storage_state:
+                # [Task 5 / F5-4] 快照为空 = 没有登录态可以扇出。
+                # 必须显式失败：带着 storage_state=None 继续的话，每个并行采集上下文
+                # 都会在登录页白跑一遍，而且不会报错。
+                raise StepExecutionError(
+                    f"登录态快照为空（平台={platform}，主账号={session_owner_id}）："
+                    "无法把登录态扇出给并行采集上下文，任务终止"
+                )
             logger.info(
                 f"Task {task_id}: Login completed, extracted {len(cookies)} cookies (reused_session=%s)",
                 reused_session,

@@ -337,14 +337,16 @@ async def test_component_tester_persists_session_after_login_success(monkeypatch
 
     saved = {}
 
-    async def _fake_save(*, platform, session_owner_id, storage_state):
+    # [Task 5] runtime_session.persist_runtime_session_state 已删除；
+    # 组件测试子进程改用现成的 SessionManager.save_session（在线程里跑）。
+    def _fake_save(self, platform, account_id, storage_state, metadata=None):
         saved["platform"] = platform
-        saved["account_id"] = session_owner_id
+        saved["account_id"] = account_id
         saved["storage_state"] = storage_state
         return True
 
     monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session.persist_runtime_session_state",
+        "modules.utils.sessions.session_manager.SessionManager.save_session",
         _fake_save,
     )
 
