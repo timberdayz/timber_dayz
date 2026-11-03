@@ -306,11 +306,12 @@ Task 2（代理链路）✅ 已完成
 Task 3（跨进程锁）           ← 必须先于 Task 4
    │                          恒走 profile 后争用面从「部分账号」变「全部账号」
    ▼
+Task 4.5（有头验证码回退走 profile）  ← 计划外新增，阻塞级
+   │                                    必须先于 Task 4：Task 4 删掉多余 browser 后
+   │                                    有头回退失去 browser.new_context 的依赖
+   ▼
 Task 4（顺序路径恒走 profile）
    │
-   ▼
-Task 4.5（有头验证码回退走 profile）  ← 计划外新增，阻塞级
-   │                                    否则 Task 7 删会话文件后，人工登录链路静默断链
    ▼
 Task 5（并行快照纯内存）  ┐
                           ├→ 可并行
@@ -322,6 +323,13 @@ Task 7（废弃会话文件）    ← 必须最后
    ▼
 Task 8（诊断字段+前端）→ Task 9（文档同步）→ Task 10（验收）
 ```
+
+> **顺序修订（2026-11-03，Task 4/4.5 只读盘点后）**：原顺序为「Task 4 → Task 4.5」，
+> **已倒置为「Task 4.5 → Task 4」**。原因：Task 4 Step 6（profile 模式不再多开 Chromium）
+> 会把 `browser_instance` 置为 `None`，而 `_run_headful_login_fallback` 依赖
+> `browser.new_context()` 兜底（`executor_v2.py:3112`）—— Step 6 先落地会导致
+> 有头人工验证码回退**静默失效**（`login_success=False` → 采集在登录页跑完）。
+> Task 4.5 改写回退路径后，Step 6 才安全。
 
 **隐含耦合（计划原本没画，实施时必须一起考虑）**：
 
@@ -531,15 +539,36 @@ git commit -m "feat(collection): 账号级会话锁改为跨进程实现并对�
 
 ### Task 4 只读盘点结论（实施前必读，行号以真实代码为准）
 
+> ⚠️ **2026-11-03 二次只读盘点修订**：下表 F4-1/F4-3/F4-4/F4-5 的描述已被独立核实推翻，
+> 真实结论见下方「二次盘点修订表」。**实施以二次盘点为准。**
+
 | # | 事实 | 影响 |
 |---|---|---|
-| F4-1 | `choose_runtime_strategy`（`runtime_session.py:519-582`）生产只有 1 个调用方（`executor_v2.py:954`），另 1 处在工具脚本；`force_persistent_profile` 与 `parallel_mode` 两个分支**在生产中恒为 False**（死分支） | 收敛时可一并删死分支，但**不要**误判并行路径不受影响 —— 两处调用都传 `execution_kind="formal_collection"` |
-| F4-2 | `runtime_session.py:996-1021` 的 storage_state 回退段已被 `normalized_mode != "persistent_profile"` 条件保护 ✅ | `normalized_mode` 变成 `persistent_profile` 后该段自动跳过，不会误读会话文件 |
-| F4-3 | **profile 模式下会多开一个 Chromium 进程**：`executor_v2.py:1991-2006` 的 `browser_type.launch(...)` 起的 browser 在 profile 模式下完全不用（profile 分支只吃 `browser_type`），但会一直挂到 `_cleanup_browser_runtime`（`:2653`）才关 | 同账号同代理下多一个进程 → 资源浪费 + IP 出口多一个。Task 4 应让 profile 模式**不再创建这个 browser** |
-| F4-4 | **`executor_v2._prepare_runtime_page_bundle`（`:467-588`）是死代码**，但它模块级 import 了 `_load_or_bootstrap_session_async` | Step 4 删掉 `_load_or_bootstrap_session_async` 后，若不先删这段死代码 → **`executor_v2` 整个模块 ImportError → 所有采集全挂**。必须先删死代码 |
-| F4-5 | **R8 注入点共 7 处**，其中 `executor_v2.py:6050-6068`（并行扇出 `domain_context_options`）仍在注入 UA/locale/timezone | 与 R8「顺序与并行指纹行为必须一致」**直接冲突**，需在 Task 5 一并处理或明确说明取舍 |
-| F4-6 | `_profile_contains_state`（`runtime_session.py:460-464`）只判「目录非空」；`get_persistent_profile_path` 会 `mkdir` 空目录 | 从未登录的账号也返回 True → `reused_session=True` 误报 → Task 8 的 `session_reused` 字段失真。**Task 4 或 Task 8 必须修** |
-| F4-7 | `_should_skip_post_login_session_persist`（`executor_v2.py:2866-2898`）依赖 `_runtime_session_mode == "persistent_profile"` 且 session_metadata 里没有 `manual_seeded/protected` | Task 4 后顺序路径恒为 profile → TikTok 自动落盘被跳过，但**非 TikTok 平台（shopee/miaoshou）仍会落盘会话文件**（`:1325-1361` 的条件只有 `save_session_after_login`）→ **Task 7 前必须统一** |
+| F4-1 | `choose_runtime_strategy`（`runtime_session.py:519-582`）生产只有 **1 个**调用方（`executor_v2.py:1057`，`execution_kind="formal_collection"`）；第 2 处是工具脚本 `tools/test_component.py:256`（`execution_kind="component_test"`）。`force_persistent_profile` 与 `parallel_mode` 两个分支**在生产中恒为 False**（死分支） | 收敛时可一并删死分支；**不要**误判并行路径不受影响 —— 生产入口 `collection_tasks.py:1744/:1945` 传 `session_runtime_mode="auto"` |
+| F4-2 | `executor_v2.py:1099-1124` 的 storage_state 回退段已被 `normalized_mode != "persistent_profile"` 条件保护 ✅ | `normalized_mode` 变成 `persistent_profile` 后该段自动跳过，不会误读会话文件 |
+| F4-3 | ⚠️ **原描述有误** —— 见二次盘点 R3 | 步骤必须排在 Task 4.5 之后 |
+| F4-4 | ⚠️ **原描述有误** —— 见二次盘点 R4 | 不会 ImportError，但有 1 个测试需改写 |
+| F4-5 | **R8 注入点**：真正违规的是 **3 处** —— `executor_v2.py:6201-6219`（并行扇出）、`:3098-3105` 与 `:3162-3166`（有头回退两条）。顺序 profile 路径的注入已被 `normalize_persistent_profile_context_options`（`runtime_session.py:703-730`）全部剥离 ✅ | 并行侧在 Task 5 处理，有头回退侧在 Task 4.5 处理 |
+| F4-6 | `_profile_contains_state`（`runtime_session.py:460-464`）只判「目录非空」。**机制更正**：不是「从未登录也返回 True」，而是 `get_persistent_profile_path`（`session_manager.py:216`）`mkdir` 空目录 → 首次为 False；**首次 launch 后 Chromium 写入 `Default/`、`Local State` → 此后永远 True**，即使从未登录 | `reused_session=True` 误报 → Task 8 的 `session_reused` 字段失真。**Task 4 或 Task 8 必须修**（判据应为「profile 内有真实 cookie/登录态」） |
+| F4-7 | `_should_skip_post_login_session_persist`（`executor_v2.py:3018-3050`）**只对 `platform=="tiktok" and mode=="persistent_profile"` 返回 True** | Task 4 后顺序路径恒为 profile → TikTok 自动落盘被跳过，但 **shopee/miaoshou 登录后仍写会话文件**（`:1428-1464`）→ **Task 7 前必须统一** |
+| F4-8 | 🔴 **新增**：`execute()` 是**两段 try**。第一段 `try`（`:2152`）的 `except TaskCancelledError`（`:2330`）/ `except BaseException`（`:2345`）**只释放锁、直接 return/raise** → 第二段的 `finally`（`:2801`）永不执行 → **`_cleanup_browser_runtime` 被跳过 → profile context 泄漏**（Chromium 残留 + profile 目录锁不释放 + 账号锁已释放 → 下一个任务可双开同一 profile） | Task 4 前必须先把 `_cleanup_browser_runtime` 提到**覆盖两段 try 的最外层 finally**。Task 4 后每次采集都开 profile → 泄漏面从「部分账号」变「全部账号」 |
+| F4-9 | 🟠 **新增**：`execute()` 的模式前置校验（`:2093-2117`）只看**原始** `session_runtime_mode`，与 `_open_runtime_bundle` 内部（`:1013-1073`）的模式解析**脱节** | Task 4 后 `_open_runtime_bundle` 恒 profile，但 `browser_type=None` 时会在 `:1084` 抛 AttributeError 而非清晰 ValueError |
+| F4-10 | 🟠 **新增**：`_resolve_session_metadata`（`:1189-1215`）在 profile bundle 的 `session_metadata` 恒空（`RuntimeContextBundle` 构造器默认值，profile 分支从不填）时**回退去读 `SessionManager().get_session_metadata()`** → `load_session` 会**回写 `last_used_at`**（`session_manager.py:557-560`）→ profile 路径上仍产生**磁盘写** | Task 5/7 必须一并归零；Task 8 也要连带删 `_resolve_session_metadata` |
+
+### 二次盘点修订表（2026-11-03，推翻原 F4-1/F4-3/F4-4）
+
+| # | 原计划说法 | 独立核实结论 | 处置 |
+|---|---|---|---|
+| R3 | 「profile 模式下 `browser_type.launch()` 起的 browser 完全不用，只是浪费」 | **错 —— 这个 browser 有用**：`_open_runtime_bundle` 的 profile 分支只吃 `browser_type`，但 `browser_instance` 被继续传给 `_execute_shared_login_phase(browser=...)`（`:2219`）与 `_execute_with_python_components(browser=...)`（`:2359`），最终是 `_run_headful_login_fallback` → `_recreate_runtime_page_with_saved_session` 里 `browser.new_context()`（`:3112`）的**唯一依赖** | Task 4 Step 6 **必须排在 Task 4.5 之后**；Task 4.5 改写回退后 browser 参数废弃，Step 6 才可安全执行 |
+| R4 | 「`_prepare_runtime_page_bundle` 模块级 import 了 `_load_or_bootstrap_session_async` → 顺序反了会 ImportError，所有采集全挂」 | **错 —— 不会有 ImportError**：`_load_or_bootstrap_session_async` 是同模块函数（`:285`），不是 import；函数内的 `get_browser_context_args` 是**函数内 import**（`:538-540`/`:549-551`）。真实影响 = **1 个测试**（`backend/tests/test_account_proxy_config.py:1077`）直接调用该函数，需随删除改写 | 仍先删死代码（减少会话文件耦合面），但**不再有 ImportError 风险** |
+| R5 | 「`choose_runtime_strategy` 两处调用都传 `formal_collection`」 | **错** —— 生产 1 处 `formal_collection`，工具脚本 1 处 `component_test` | 收敛时保留 `execution_kind` 参数语义，工具脚本行为不变 |
+| R6 | 「profile 模式下多开的 Chromium 进程 IP 出口多一个」 | 不准确 —— 该 browser 走同一 `proxy` 参数，不会多出出口 IP；但确实多占一个进程 | 同 R3 |
+
+### Task 4 实施时必须一并修掉的「地基」（盘点新增，阻塞级）
+
+1. **`_cleanup_browser_runtime` 提到最外层 finally**（F4-8）→ 否则 R7（profile 刷盘）与 R6（目录独占）都不成立。
+2. **`_requires_profile_session_lock`（`:939-976`）的 `auto` 分支改为恒 True**（当前依赖 `_manual_storage_state_exists`）→ Task 4 后顺序路径恒开 profile，「新账号首次采集」也必须加锁，否则两个任务可同时首开同一 profile 目录。
+3. **`execute()` 的模式解析上提**（F4-9）→ 统一决定 profile/storage，再传给 `_open_runtime_bundle`，避免 `browser_type` 缺失时报错不清晰。
 
 - [ ] **Step 1: 改写既有测试表达新规则**
 
@@ -570,7 +599,7 @@ git commit -m "feat(collection): 账号级会话锁改为跨进程实现并对�
 
 - [ ] **Step 5: `_open_runtime_bundle` 去掉 storage_state 分支**
 
-`executor_v2.py:914-1010` 的「优先人工会话 / 读会话文件 / bootstrap」三段全部删除，统一走：
+`executor_v2.py:991-1148` 的「优先人工会话 / 读会话文件 / bootstrap」三段全部删除，统一走：
 
 ```python
             runtime_bundle = await self._open_runtime_bundle(
@@ -586,21 +615,60 @@ git commit -m "feat(collection): 账号级会话锁改为跨进程实现并对�
             )
 ```
 
-并删除 `_manual_storage_state_path` / `_manual_storage_state_exists` / `_load_or_bootstrap_session_async` / `_should_prefer_manual_storage_state`。
+删除清单（真实调用点已独立核实）：
 
-- [ ] **Step 6: profile 模式不再多开 Chromium（F4-3）**
+| 待删 | 真实位置 | 连带要改的地方 |
+|---|---|---|
+| `_manual_storage_state_path` | `:250-266` | 仅被 `_manual_storage_state_exists` 内部调用 |
+| `_manual_storage_state_exists` | `:269-282` | `:976`（`_requires_profile_session_lock`）、`:1022`（`_open_runtime_bundle` B 段）、`executor_v2.py:3076` 附近、测试 `test_main_account_session_lock.py:912`、`test_collection_session_reuse_contract.py:84-85/113` |
+| `_load_or_bootstrap_session_async` | `:285-308` | `:489`（死代码）、`:1033`（B 段）、`:1104`（E 段）、`:3076`（`_recreate_runtime_page_with_saved_session`，Task 4.5 已改写） |
+| `_should_prefer_manual_storage_state` | `:978-989` | `:1024`（B 段）、测试 `test_collection_session_reuse_contract.py:57/61` |
+| `_prepare_runtime_page_bundle` | `:468-596` | **1 个测试**：`test_account_proxy_config.py:1077`（验证「指纹失败回退仍带代理」）→ 需改写到新路径 |
 
-`executor_v2.py:1991-2006` 的 browser 创建条件加上「非 persistent_profile 模式」，避免 profile 模式下多挂一个进程。
+> **注意**：删 `_load_or_bootstrap_session_async` 后，`runtime_session.load_runtime_session_candidate`（`:347`）与其内部依赖 `_load_session_async`（`:241`）、`_bootstrap_session_from_profile_sync`（`:258`）**全部变成死链**（唯一其它调用方也是 `_open_runtime_bundle`）。
+> `_bootstrap_session_from_profile_sync` 还有一个**真实隐患**：它会用**同一 profile 目录再开一个持久 context**（`:258-286`），若在主 profile context 已开着时调用 → Chromium ProcessSingleton 冲突 → 被 `except Exception`（`:287`）吞掉 → 返回 `None` → **新 context 无登录态且不报错**。Task 4.5 改写 `_recreate_runtime_page_with_saved_session` 时必须一并消除这个调用。
+
+- [ ] **Step 6: profile 模式不再多开 Chromium（F4-3 / R3）** — ⚠️ **必须排在 Task 4.5 之后**
+
+`executor_v2.py:2105-2108` 的 browser 创建条件加上「非 persistent_profile 模式」：
+
+```python
+if (
+    browser_instance is None
+    and normalized_runtime_mode in {"auto", "storage_state_fanout"}
+    and browser_type is not None
+):
+```
+
+→ Task 4 后 `normalized_runtime_mode` 恒为 profile → 不再 launch 多余 browser。
+
+> ⚠️ **前置依赖**：这一步会让 profile 模式下 `browser_instance` 变成 `None`。
+> 在 Task 4.5 改写 `_run_headful_login_fallback` **之前**执行，`_run_headful_login_fallback`
+> 会在 `:3244-3245` 直接 `return False, old_context, None` → `login_success=False`
+> → `_execute_shared_login_phase:1392` 抛 `StepExecutionError("登录组件执行失败")`
+> → **有头人工验证码回退彻底不可用**。因此实施顺序必须是 **Task 4.5 → Task 4（含本步）**。
 
 - [ ] **Step 7: R8 指纹一致性**
 
-确认 `normalize_persistent_profile_context_options` 在顺序与并行两条路径都生效（profile 模式下不注入 UA/locale/时区）。**顺序路径现在也是 profile 模式，所以自动一致** —— 在测试中断言这一点。
+确认 `normalize_persistent_profile_context_options`（`runtime_session.py:703-730`）在顺序路径生效 —— 顺序路径现在也是 profile 模式，所以自动一致 —— 在测试中断言这一点。
 
-并行扇出的 `domain_context_options`（F4-5）若仍注入 UA/locale/timezone，必须在测试中显式断言「顺序与并行一致」，否则 R8 不成立。
+并行扇出的 `domain_context_options`（`executor_v2.py:6201-6219`）若仍注入 UA/locale/timezone，必须在 Task 5 显式断言「顺序与并行一致」，否则 R8 不成立。
 
-- [ ] **Step 8: R7 正常关闭**
+- [ ] **Step 8: R7 正常关闭（补 F4-8 泄漏）**
 
-确认采集结束时 context 被**正常 close**（`await context.close()`），不是 `playwright.stop()` 强杀。在 `open_persistent_runtime_bundle` 的调用方补上 `finally: await context.close()`。
+- [ ] **Step 8.1: `_cleanup_browser_runtime` 提到覆盖两段 try 的最外层 finally**
+
+`execute()` 现在是**两段 try**：第一段 `try`（`:2152`）的 `except TaskCancelledError`（`:2330`）/ `except BaseException`（`:2345`）**只释放锁、直接 return/raise**，第二段的 `finally`（`:2801`）永不执行 → `_cleanup_browser_runtime` 被跳过 → **profile context 泄漏**。
+
+改法：把 `_cleanup_browser_runtime(...)` 提到**同时覆盖两段 try 的最外层 finally**，或在第一段的两个 except 分支里也调用它（幂等）。**验收**：断言「第一段 try 抛异常时，profile context 仍被 close」。
+
+- [ ] **Step 8.2: `_requires_profile_session_lock` 的 `auto` 分支恒 True**
+
+`:939-976` 当前在 `auto` 模式下依赖 `_manual_storage_state_exists` 决定加不加锁。Task 4 后顺序路径恒开 profile → **「新账号首次采集」也必须加锁**，否则两个任务可同时首开同一 profile 目录（违反 R6）。
+
+- [ ] **Step 8.3: 模式解析上提（F4-9）**
+
+把 `execute()` 的模式判定（`:2093-2117`）与 `_open_runtime_bundle` 的内部解析（`:1013-1073`）统一，避免 `browser_type=None` 时抛 AttributeError 而非清晰 ValueError。
 
 - [ ] **Step 9: 跑测试并提交**
 
@@ -609,34 +677,97 @@ git add modules/apps/collection_center/runtime_session.py modules/apps/collectio
 git commit -m "refactor(collection): 正式采集统一走持久化 profile"
 ```
 
+### Task 4 测试改写清单（盘点逐条核实）
+
+**已红（基线就失败，是 Task 4 要重写的对象，不是新增失效）**：
+- `test_component_tester_runtime_config.py:66-77` —— 断言 `decision.mode == "storage_state_fanout"`
+- `test_component_tester_runtime_config.py:80-96` —— 断言 `decision.mode == "storage_state_fanout"` + `reason == "storage_state_available"`
+
+**必改**：
+- `test_collection_session_reuse_contract.py:6-27` / `:30-49` —— 调 `_load_or_bootstrap_session_async`（函数被删）
+- `test_collection_session_reuse_contract.py:52-64` —— 调 `_should_prefer_manual_storage_state`（函数被删）
+- `test_collection_session_reuse_contract.py:67-85` —— 调 `_manual_storage_state_exists`（函数被删）
+- `test_collection_session_reuse_contract.py:88-143` —— **语义反转**（原本断言「人工会话优先」，现在断言「恒走 profile」）
+- `test_collection_executor_session_alignment.py:48-78` —— 断言 storage_state 分支被调用
+- `test_collection_executor_session_alignment.py:81-129` —— 语义过时，需改名改断言
+- `test_collection_executor_session_alignment.py:808-883` —— 断言 `browser_type.launch.assert_awaited_once()`（Step 6 落地后失效）
+- `test_collection_executor_reused_session_scope.py:133-195` / `:397-500` —— 用 `FakeBrowser()` 但**不传 `browser_type`** → 恒 profile 后会崩，需补 `browser_type`
+- `test_main_account_session_lock.py:881-922` —— monkeypatch `_manual_storage_state_exists`（函数被删）
+- `test_account_proxy_config.py:1050-1098` —— 调 `_prepare_runtime_page_bundle`（死代码被删）
+- `test_collection_runtime_session.py:517-573` —— 3 个 `choose_runtime_strategy` 用例，`reason` 值变
+- `test_collection_task_runtime_metadata.py:56/81` —— 断言 `session_source == "storage_state"` → 恒为 `"persistent_profile"`（随 Task 8 一并改）
+
+**已核实不失效**：
+- `test_collection_executor_session_alignment.py` 全文**不依赖**「顺序路径走 storage_state」——它只把 `_runtime_session_mode` 当**入参字符串**传进被测函数
+- `test_collection_executor_reused_session_scope.py` 全文**无** `storage_state` / `session_source` 断言（逐条核对过）
+
 ---
 
 ## Task 4.5: 有头验证码回退走 profile（计划外新增，阻塞级）
 
-**为什么必须单独一个 Task**：盘点发现 `_run_headful_login_fallback`（`executor_v2.py:2966-3102`）**完全绕开 profile**：
+> ⚠️ **实施顺序：Task 4.5 必须先于 Task 4**（见上文「顺序修订」与 Task 4 Step 6 的前置依赖说明）。
+
+**为什么必须单独一个 Task**：盘点发现 `_run_headful_login_fallback`（`executor_v2.py:3118-3254`）**完全绕开 profile**：
 
 ```
 profile 模式下需要人工过验证码时
-  → :2989-2995 另起一套 async_playwright()，开一个全新的、非 persistent、注入了完整指纹的 headed 浏览器
+  → :3141-3147 另起一套 async_playwright()，开一个全新的、非 persistent、注入了完整指纹的 headed 浏览器
   → 人工在这个浏览器里登录
-  → :3078  把登录态写进**会话文件**
-  → :2924  再从**会话文件**读回来
-  → :2960  new_context(storage_state=...) 注入主 context
+  → :3230       把登录态写进**会话文件**
+  → :3076       再从**会话文件**读回来
+  → :3112       browser.new_context(storage_state=...) 注入主 context
 ```
 
 **Task 7 删掉会话文件后，这条路径直接断链** —— 登录成功但主 context 拿不到登录态 → **采集在登录页跑完（静默失败，不报错）**。
 
+**盘点新发现的、比「文件中转」更严重的问题**：
+
+| # | 问题 | 后果 |
+|---|---|---|
+| H1 | `:3112` 用 `browser.new_context(...)` 建的是**非持久 context** | 回退之后**主 context 被降级成非持久 context** → profile 从此不再是载体 → 后续登录**不会写回 profile** → Task 7 后 profile 永远记不住登录态 |
+| H2 | `:3084-3090` 注入**全量指纹**（UA/locale/时区） | 违反 R8（有头路径与顺序路径指纹行为不一致） |
+| H3 | `:3076` 调的 `_load_or_bootstrap_session_async` 在拿不到会话文件时走 `_bootstrap_session_from_profile_sync` → **用同一 profile 目录再开一个持久 context** | 主 profile context 正开着 → Chromium ProcessSingleton 冲突 → 被 `except Exception` 吞掉 → 返回 `None` → **新 context 无登录态且不报错** |
+
+**为什么不能「保留主 context，另开第二个 headed persistent context」**：
+
+- 规范 R6 自证：`docs/guides/COLLECTION_SESSION_LIFECYCLE.md:111-113` —— 同一 `main_account_id` 的 profile 目录**不能被两个浏览器进程同时打开**（Chromium 对 user_data_dir 加独占锁）
+- 仓库内实证：`modules/utils/persistent_browser_manager.py:188-215` —— 创建持久 context 失败时**重试到旁路目录 `<account>_alt`**，注释明写「避免主 Profile 被系统锁定/损坏」—— 这条重试逻辑本身就证明「重开同一目录」会失败
+- Chromium 原始行为：第二次启动报 `Failed to create a ProcessSingleton for your profile directory.`
+- Playwright 官方 MCP 源码亦在 `launchPersistentContext` 前做 `isProfileLocked5Times(userDataDir)` 检查
+
 **Files:**
-- Modify: `modules/apps/collection_center/executor_v2.py:2966-3102`（`_run_headful_login_fallback`）、`:2922-2960`（`_prepare_runtime_page_bundle` 一带的 storage_state 注入）
+- Modify: `modules/apps/collection_center/executor_v2.py:3118-3254`（`_run_headful_login_fallback`）、`:3065-3116`（`_recreate_runtime_page_with_saved_session`）、两个调用点 `:1331` 与 `:3323`
+- Modify: `modules/apps/collection_center/runtime_session.py:733-812`（`open_persistent_runtime_bundle`，如需 headed 支持）
+
+**目标方案（盘点推荐，已核实可行）**：
+
+| 步 | 动作 | 依据 |
+|---|---|---|
+| 1 | `await old_context.close()`（关掉主持久 context）→ **释放 ProcessSingleton 锁 + 刷盘** | Playwright `crBrowser.js:467-472`：持久 context 的 `close()` 会连浏览器进程一起关 |
+| 2 | `headed_ctx = await browser_type.launch_persistent_context(user_data_dir=profile_path, headless=False, proxy=proxy, ...)` | `browser_type` 生产全程存活（`collection_tasks.py:1694` 的 `async with async_playwright() as p:` 包住整个采集） |
+| 3 | 人工登录：复用现有 `runtime_manifests` / adapter 分支（`:3172-3219` 原样搬过来），`VerificationRequiredError` 仍走 `_wait_verification_and_continue` | 现有逻辑可整体复用 |
+| 4 | `await headed_ctx.close()` → **profile 刷盘（R7）** | 同上 |
+| 5 | `await open_persistent_runtime_bundle(browser_type, ..., launch_kwargs={"headless": True}, proxy=proxy)` → **重开同一 profile** | 直接复用 `runtime_session.open_persistent_runtime_bundle`（`runtime_session.py:733-812`），自动获得 R8 剥离 + proxy 透传 + `reused_session/profile_path` 诊断 |
+| 6 | `return True, new_ctx, new_page, "success"` | 调用方契约不变（`:1343-1349` / `:3335-3341` 已是 4 元组） |
+
+**这个方案的额外收益**：主 context 被替换成**新的持久 context**（而不是现在的非持久 context）→ 顺带修掉 H1。
 
 **要求**：
 
-1. 有头登录回退**改为在同一个 profile 目录上开 headed persistent context**（`launch_persistent_context(user_data_dir=<profile 路径>, headless=False, proxy=...)`），登录态由 Chromium 自己写进 profile。
+1. 有头登录回退**改为在同一个 profile 目录上开 headed persistent context**，登录态由 Chromium 自己写进 profile。
 2. 回退结束后**正常 close**（R7），让 Chromium 刷盘。
-3. 不再有任何「写会话文件 → 读会话文件」的中转。
-4. `proxy` 必须透传（Task 2 已把代理接到 `_run_headful_login_fallback`，这里要保证它用的是账号代理）。
+3. 不再有任何「写会话文件 → 读会话文件」的中转（同时消除 H3）。
+4. `proxy` 必须透传 —— **绝不能从 account 重解析代理**（account 已被 `strip_account_proxy_credentials` 去凭据 → 需认证代理会 407），必须用调用方已解析好的 `proxy` 参数。
+5. headed persistent context 也必须走 `normalize_persistent_profile_context_options` → 复用 `open_persistent_runtime_bundle` 天然满足 R8（顺带修掉 H2）。
+6. **签名要改**：现在 `_run_headful_login_fallback` 拿不到 `browser_type` 和 profile 路径。必须新增 `browser_type` + `profile_path`（或整个 `runtime_bundle`）参数，并从两个调用点（`:1331`、`:3323`）透传。`browser` 参数在 profile 模式下将不再需要。
 
-**验收**：测试断言「有头回退走的是 profile 目录，且全程不产生 `data/sessions` 写入」。
+**profile 路径来源**：`runtime_session` **没有** `get_persistent_profile_path` 这个函数（只有 `runtime_profile_exists` 与 `open_persistent_runtime_bundle` 内部调用）→ 直接用 `SessionManager().get_persistent_profile_path(platform, session_owner_id)`（`session_manager.py:200-218`），或给 `runtime_session` 加一个薄封装。**推荐**复用 `open_persistent_runtime_bundle(profile_path_override=...)`（`runtime_session.py:741` 已有该参数）。
+
+**验收**：
+1. 测试断言「有头回退开的是 `launch_persistent_context(user_data_dir=<profile 目录>, headless=False)`」。
+2. 测试断言「有头回退全程不产生 `data/sessions` 写入」。
+3. 测试断言「回退返回的新 context 仍是**持久 context**（不是 `browser.new_context`）」—— 修 H1。
+4. 测试断言「回退后 profile 目录存在且含 Chromium 写入的登录态痕迹」。
 
 > 这条与 Task 6 的 `command_close` 优雅关闭（F6-4）是同一类问题：**必须正常关闭，profile 才记得住登录态**。
 
