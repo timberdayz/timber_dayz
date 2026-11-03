@@ -378,6 +378,17 @@ Task 8（诊断字段+前端）→ Task 9（文档同步）→ Task 10（验收�
 | L6 | **必须保留既有兼容契约** | `acquire(platform, main_account_id)` 位置参数签名、`@asynccontextmanager` 且 **yield None**（不能改成 yield token）、`waiter_count` / `is_locked` 必须继续存在、`CollectionExecutorV2(main_account_session_coordinator=...)` 注入点（`executor_v2.py:760`）必须继续可用 |
 | L7 | **`waiter_count` 在分布式下不得退化为恒 0** | 若实现成「key 存在 → is_locked=True, waiter_count=0」，则 `executor_v2.py:852-863` 的「等待主账号会话」状态推送**永远不触发** → 前端可观测性退化。需用独立 ZSET/Hash 记录等待者 |
 | L8 | **单元测试一律用假后端，绝不连真实 Redis/PG** | `backend/tests/conftest.py:26-69` 记录过「测试写生产数据」的真实事故。参照 `backend/tests/test_collection_leader_lock.py:44` 的 monkeypatch 模式 + `pg_engine` fixture 的 `ImportError → pytest.skip` + `integration` marker 双开关 |
+| L9 | **Redis 客户端的获取路径必须打通**（只读核实后的关键细节） | `backend/utils/redis_client.py:50-75` 把客户端挂在 **`app.state.redis`**；而采集执行在 `asyncio.create_task` 里（`collection_tasks.py:748`/`:996`）**不在请求上下文里，拿不到 `app`**。但 `CollectionExecutorV2` 是在**请求上下文**里构造的（`collection_tasks.py:1686`、`:1887`）→ **可以在构造时把 `app.state.redis` 传进去** |
+
+### Redis 客户端获取方式（L9 的落地建议，三选一）
+
+| 方案 | 做法 | 优点 | 缺点 |
+|---|---|---|---|
+| A（推荐） | **进程级惰性单例**：新模块里自己 `aioredis.from_url(os.getenv("REDIS_URL"))` + `ping`，失败则返回 None（fail-open 到进程内锁） | 不依赖 FastAPI app 生命周期；采集/巡店/脚本三条路径都能用 | 每个 gunicorn worker 各建一条连接（4×2=8 条，可接受）；需处理连接关闭 |
+| B | router 构造 executor 时把 `app.state.redis` 注入 → executor 传给 coordinator | 复用现有连接，零额外连接 | 巡店面板/脚本等**不经过 router** 的路径拿不到锁 → 需另配 |
+| C | A + B 混合：优先用注入的，没有则惰性建 | 覆盖最全 | 实现稍复杂 |
+
+> 无论选哪个，`REDIS_URL` 的**密码必须脱敏后再进日志**（`redis_client.sanitize_redis_url_for_log` 已提供，`redis_client.py:32-47`）。
 
 ### 实施前必须确认的两个外部事实（无法从代码确定）
 
