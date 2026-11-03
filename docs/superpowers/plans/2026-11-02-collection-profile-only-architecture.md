@@ -1668,3 +1668,92 @@ Expected: 工作区干净。
 | 旧测试大面积红 | pytest 失败 | 逐条判断「旧语义断言」 vs 「真回归」；前者按新语义改写，后者停下报告 |
 | 删掉会话文件后某些 legacy 采集器失效 | `shopee_collector` / `miaoshou_smart_login` 报错 | 这两套有**自有**会话体系（`temp/sessions/`），不受影响；若报错按 Task 7 清单补 |
 | profile 异常退出丢登录态 | 表现为"登录了但没记住" | R7：正常关闭；异常后重跑自愈 |
+
+---
+
+## 附录 B：Task 7 / Task 8 精确落点清单（2026-11-03 只读盘点，基于 `483d4a8b`）
+
+> 本附录由一次**独立只读盘点**产出，行号对应 `483d4a8b`。
+> ⚠️ **基线漂移**：Task 4.2 合并后 `executor_v2.py` / `runtime_session.py` 行号会漂 → 实施 Task 7/8 前**必须重新 grep 定位**，不要照抄行号。
+
+### B.1 Task 7 删除顺序（10 步，每步都不破）
+
+| 步 | 动作 | 依赖前提 | 该步做完的验收 |
+|---|---|---|---|
+| **0** | **前置**：Task 6（删巡店「保存会话」+ `pwcli state-save`）先落地 | — | `pwcli_helpers.ps1:249-304` 不再调 `state-save`；否则 `pwcli_native.command_state_save` 的写盘仍是 `manual_seeded/protected` 的唯一生产者，会把已废概念重新写进新文件 |
+| **1** | **先断写者**（改行为、API 不变）：① `pwcli_native.save_default_storage_state_from_context` 的 session_manager 分支置空（raw_json 分支保留）；② `persistent_browser_manager.save_context_state` 改成不写；③ `runtime_session._bootstrap_session_from_profile_sync` 删落盘；④ `miaoshou_smart_login._save_session` 删写 | 无 | `data/sessions/` 不再产生新文件；`SessionManager` API 仍在，旧测试还能跑（除断言「有写入」的） |
+| **2** | **删 executor 内的写函数**：`executor_v2._save_session_async` + 两处调用点 | 步 1 完成 | 必须同步改 `backend/tests/test_collection_headful_fallback_profile.py`（`monkeypatch.setattr` 目标不存在会 AttributeError） |
+| **3** | **删 runtime_session 内的写函数**：`runtime_session._save_session_async`、`persist_runtime_session_state` | 步 1 完成 | `tools/test_component.py` 的调用点改写 |
+| **4** | **断读者**：`executor_v2._manual_storage_state_path` / `_manual_storage_state_exists` / `_should_prefer_manual_storage_state` / `_load_session_async` / `_load_or_bootstrap_session_async`；`runtime_session._load_session_async` / `load_runtime_session_candidate` / `load_or_bootstrap_runtime_storage_state`；`shopee_exporter.from_persistent_session` | 步 1~3 完成（此时已无写者，读已无害） | 人工会话优先分支清空 → 恒走 profile |
+| **5** | **Task 8 联动**：删 `executor_v2._resolve_session_metadata` + 三处 `params["session_metadata"]` + `_should_skip_post_login_session_persist` | **必须在步 6 之前** —— 它是 `SessionManager.get_session_metadata` 的唯一消费者 | 5 个旧 `session_quality_*`/`manual_seeded`/`protected` 字段消失 |
+| **6** | **收窄 `SessionManager`**：删 `save_session` / `load_session` / `restore_session` / `get_session_path` / `get_session_metadata` / `get_session_info` / `list_sessions` / `cleanup_expired_sessions` / `delete_session` / `is_session_valid` / `describe_storage_targets` / `session_quality_score` / `session_meets_quality_gate` / `_session_freshness_timestamp` / `_write_json_atomic` / `_safe_filename`；`__init__` 去掉 mkdir 与 `base_path` 参数 | 步 4~5 完成（无任何调用方残留） | `SessionManager` 只剩 `get_persistent_profile_path` + `get_profile_path` |
+| **7** | **最后删自由函数 `safe_session_account_dirname`** + `pwcli_native.runtime_account_state_path` + 账号级 `default_state_mode="session_manager"` 分支 | 步 1 已把写路径改成 no-op；步 6 已删 `_safe_filename` | 消除唯一的运行期 ImportError 风险 |
+| **8** | **同步外围**：`legacy_shop_artifact_cleanup.py` 移除 `data/sessions` 候选；`backend/main.py` / `run.py` 告警文案改为「店铺级 profile 遗留」；**`tools/launch_inspector_recorder.py` 改用 `main_account_id`** | 步 6 完成 | 规则 D 的活生产者清零 |
+| **9** | **磁盘清理**：`data/sessions/` 整体备份 → 观察 1~2 周 → 删除 | 全部代码步骤完成 | **代码不自动删目录**（规范 §6） |
+| **10** | **文档同步**（Task 9） | — | 见 Task 9 的文档清单 |
+
+**不能颠倒的三处**：
+1. **步 0 必须在步 1 之前** —— 否则 `pwcli state-save` 会重新写 `manual_seeded`。
+2. **步 5 必须在步 6 之前** —— `_resolve_session_metadata` 依赖 `get_session_metadata`。
+3. **步 7 必须在步 1 之后** —— `pwcli_native` **运行时** import `safe_session_account_dirname`。
+
+### B.2 Task 7 的三个「最危险」点
+
+| # | 事实 | 危害 | 处置 |
+|---|---|---|---|
+| 1 | 🔴 `pwcli_native.maybe_load_default_storage_state`（在 `launch_browser` 内被调）会把**账号级旧会话文件的 cookie 注入新 profile** | **直接违反 R1/R4**（profile 必须是唯一载体）——旧 cookie 会盖掉 profile 里的登录态 | Task 6/7 必须清掉**账号级** `default_state_path`；`raw_json`（非账号级）分支保留 |
+| 2 | 🔴 `pwcli_native.py` **运行时** import `safe_session_account_dirname`（每次账号级 open 都触发） | 删符号后不是启动期报错，而是**跑到那条路径才炸** | 步 7 必须最后删，且先删调用路径 |
+| 3 | 🔴 `SessionManager.get_persistent_profile_path` 有 **mkdir 副作用** | 「查 profile 是否存在」会**创建空目录** → 未登录账号也报「有登录态」→ Task 8 的 `session_reused` 语义失真 | 去掉 mkdir 或改惰性 |
+
+### B.3 命名规则（4 套并存，盘点已核实）
+
+| 规则 | 位置 | 净化规则 | 产出路径 | 现状 |
+|---|---|---|---|---|
+| **A（会话目录）** | `session_manager.safe_session_account_dirname` | 保留空格；非法字符 → `_`；截断 50 字符 | `data/sessions/<平台>/<名称>/storage_state.json` | Task 7 废除 |
+| **B（profile，权威）** | `session_manager.get_persistent_profile_path` | `isalnum() or _ or -`（**去空格、中文保留**） | `profiles/<平台>/<主账号ID>/` | ✅ 保留为唯一载体 |
+| **B'（B 的两份副本）** | `pwcli_native.session_manager_safe_token`、`scripts/pwcli_workflow.py._session_manager_safe_token` | 同 B | 同 B | **代码重复三份** → 应收敛到 B 的单一来源 |
+| **C（巡店工作目录 / session 名）** | `scripts/pwcli_account_inventory.py` 的 `slugify` / `work_tag` | 小写 + 非 ASCII 走 sha1 短哈希 | `output/playwright/work/<平台>/<work_tag>` | 保留（不是存储路径） |
+| **D（profile 但用店铺账号 ID）** | `persistent_browser_manager.get_persistent_profile_path` 喂入 `shop_account_id` | 同 B，**但键不同** | `profiles/<平台>/<店铺账号ID>/` | 🔴 **仍是活的生产者**：`login_orchestrator` / `enhanced_recording_wizard` / `shopee_playwright_exporter` / **`tools/launch_inspector_recorder.py`** |
+
+> `modules/utils/sessions/legacy_shop_artifact_cleanup.py` 正把 `profiles/<平台>/<店铺账号ID>` 列为「遗留物」，但规则 D 的代码仍在持续制造它 → **步 8 必须清零**。
+
+### B.4 Task 8 的字段收敛表（按规范 v3）
+
+| 旧字段 | 新字段 | 动作 |
+|---|---|---|
+| `session_quality_score` / `session_quality_gate_passed` / `session_quality_source` / `session_manual_seeded` / `session_protected` | — | **删**（5 个） |
+| `persistent_profile_path` | **`session_profile_path`** | **改名**（不是新增） |
+| `profile_contains_state` | **`session_reused`** | **改名**（不是新增） |
+| `session_source`（4 值：`persistent_profile`/`manual_storage_state`/`storage_state`/`fresh_login`） | `session_source` = **`profile`** | **取值收敛为单值** |
+| — | **`session_proxy`**（脱敏） | **新增**（用 `account_proxy_config.mask_proxy_server`） |
+
+### B.5 Task 8 的七个坑（不处理就白做或会崩）
+
+| # | 问题 | 处置 |
+|---|---|---|
+| 1 | **新字段不提升到顶层就白做** —— router 只提升 7 个键，`TaskResponse` schema 也没声明其余 | **同时**改 router 顶层提升 + schema 声明 |
+| 2 | **并行路径没有任何会话诊断** —— `execute_parallel_domains` 只设 `session_metadata`，从不调 `_runtime_session_diagnostics` | 要在并行侧取证就得补一次诊断写入 |
+| 3 | **`session_reused` 语义失真** —— 只判「profile 目录非空」，而取路径会 mkdir 空目录 | 同步修判定，或用更诚实的措辞 |
+| 4 | **前端守卫测试不进 CI** —— `frontend/scripts/*.mjs` 不在 CI 执行集 | 只能手工 `node --test` 跑；把反向断言写进去 |
+| 5 | **前端契约测试会红** —— 断言了 `"storage_state_available"` 与 `"storage_state 会话快照"` | 改标签映射必须同步改写（**原计划 Task 8 漏列了这项**） |
+| 6 | **Task 8 与 Task 7 强耦合** | Task 8 必须连带删 `_resolve_session_metadata` + 三处 `params["session_metadata"]` |
+| 7 | **`session_proxy` 需要新增 import** + 给 `_runtime_session_diagnostics` 加 `proxy=` 参数 | 两个调用点都要传 `proxy=proxy` |
+
+> 另注：前端 `getSessionSourceLabel` 的映射**缺 `manual_storage_state`** → 旧语义下会原样显示英文；收敛成单值 `profile` 后该问题自然消失。
+
+### B.6 Task 8 会连带失效的测试（盘点逐条核实）
+
+| 文件 | 失效原因 |
+|---|---|
+| `backend/tests/test_collection_task_runtime_metadata.py` | 断言了 `persistent_profile_path` / `profile_contains_state` / 5 个旧字段 / `session_source` 取值 |
+| `backend/tests/test_collection_frontend_contracts.py` | `:258` 断言 `"storage_state_available"`、`:259` 断言 `"storage_state 会话快照"`（**原计划 Task 8 未列此项**） |
+| `frontend/scripts/collectionTaskSessionQualityUi.test.mjs` | 断言 5 个旧字段名 → 改写为新字段名 + **反向断言**（旧字段名不应再出现），建议同时改名文件 |
+| `backend/tests/test_collection_executor_session_alignment.py` | 断言 `session_source == "storage_state"` → 恒为 `"persistent_profile"` |
+
+### B.7 盘点没能确认的地方（实施时要补）
+
+1. **`data/sessions/` 磁盘真实状态与清理清单** —— 哪些是事故现场证据、哪些是遗留孤儿 → **必须由运维确认**，代码不自动删。
+2. **`_alt` 旁路 profile 是否还有实体目录**、以及删掉旁路后「主 profile 被锁 → 落普通 context（无登录态）」的行为变化是否可接受 → 需产品/运维判断。
+3. **`session_reused` 到底该判什么** —— 是否检查 `Default/Network/Cookies` 是否存在 / mtime？取决于本机 Chromium 实际写出的目录结构，**需要真机看一次 profile 目录内容**。
+4. **`session_proxy` 的脱敏粒度** —— 本机 19 个 enabled 账号的 proxy 配置**全为 NULL**，没有真实样本可验证脱敏后的辨识度。
+5. **「巡店登录 → 采集复用」的实际可用性** —— 规则 D 的几条路径（`launch_inspector_recorder` / `login_orchestrator` / `enhanced_recording_wizard` / `shopee_playwright_exporter`）产生的登录态，采集是否真的读得到 → **需要跑一次真机才能确认**。
