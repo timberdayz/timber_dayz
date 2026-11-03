@@ -128,7 +128,18 @@ class MiaoshouSmartLogin:
             
             # 如果使用会话,设置持久化上下文
             if use_session:
-                session_dir = self.session_manager.get_profile_path("miaoshou_erp", account_id)
+                # [2026-11 收尾] 登录态只认**持久 profile**(规则 B):
+                # ``profiles/<平台>/<主账号ID>``。
+                # 旧实现在这里用 legacy ``get_profile_path("miaoshou_erp", ...)``
+                # -> ``data/session_profiles/miaoshou_erp/<account_id>``,
+                # 那是**第二个**目录(且带 mkdir 副作用), 与主链路口径分裂 ——
+                # 采集侧按主账号 ID 开 profile, 根本读不到那里。
+                # 现在统一走 ``get_persistent_profile_path``, 平台名用
+                # ``miaoshou``(与 ``core.main_accounts.platform`` 一致)。
+                #
+                # ⚠️ ``account_id`` 必须是**主账号 ID**(净化后即目录名);
+                # 若传的是店铺账号 ID, 目录同样会与主链路口径分裂。
+                session_dir = self.session_manager.get_persistent_profile_path("miaoshou", account_id)
                 if session_dir and session_dir.exists():
                     context_args = {}
                     if proxy_config:

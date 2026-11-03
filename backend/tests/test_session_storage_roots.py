@@ -4,6 +4,8 @@
 
 - R1 真相源唯一：登录态只由 ``profiles/<平台>/<主账号ID>/`` 承载。
 - D5：会话文件（``data/sessions/**``）**彻底废除**。
+- 2026-11 收尾：legacy 持久化上下文目录（``data/session_profiles/**``）
+  **一并废除**（最后一个使用者 ``miaoshou_smart_login`` 已切换）。
 - 验收口径 E：``data/sessions/`` 不再产生新文件，目录可整体删除。
 
 因此 ``SessionManager`` 收窄为「只解析 profile 路径」，不再暴露任何
@@ -84,7 +86,7 @@ def test_session_manager_relative_defaults_are_repo_root_anchored(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """保留的两个路径都锚定在仓库根下（不再有 ``base_path`` 形参）。"""
+    """保留的路径锚定在仓库根下（不再有 ``base_path`` 形参）。"""
     from modules.utils.sessions import session_manager as session_manager_module
 
     repo_root = tmp_path / "repo"
@@ -93,7 +95,6 @@ def test_session_manager_relative_defaults_are_repo_root_anchored(
 
     manager = session_manager_module.SessionManager()
 
-    assert manager.profiles_path == repo_root / "data" / "session_profiles"
     assert manager.persistent_profiles_path == repo_root / "profiles"
     assert not hasattr(manager, "base_path"), "base_path 形参与属性都应随会话文件废除"
 
@@ -137,11 +138,16 @@ def test_get_persistent_profile_path_is_the_single_naming_rule(
     assert manager.get_persistent_profile_path("tiktok", "Tiktok 1店").name == "Tiktok1店"
 
 
-def test_get_profile_path_legacy_is_still_available(
+def test_legacy_session_profiles_api_is_gone(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """legacy ``data/session_profiles`` 路径解析仍保留（miaoshou_smart_login 在用）。"""
+    """legacy ``data/session_profiles`` 解析已整体下线（2026-11 收尾）。
+
+    最后一个使用者 ``modules/collectors/miaoshou_smart_login.py`` 已改用
+    ``get_persistent_profile_path``；留着旧接口只会让人再写出一个
+    **第二个**登录态目录。
+    """
     from modules.utils.sessions import session_manager as session_manager_module
 
     repo_root = tmp_path / "repo"
@@ -149,10 +155,42 @@ def test_get_profile_path_legacy_is_still_available(
     monkeypatch.setattr(session_manager_module, "REPO_ROOT", repo_root)
 
     manager = session_manager_module.SessionManager()
-    legacy_path = manager.get_profile_path("miaoshou_erp", "acc-1")
 
-    assert legacy_path.parent.parent == repo_root / "data" / "session_profiles"
-    assert legacy_path.name == "acc-1"
+    assert not hasattr(manager, "get_profile_path"), (
+        "legacy get_profile_path 必须随 data/session_profiles 一并下线"
+    )
+    assert not hasattr(manager, "profiles_path"), (
+        "legacy profiles_path 属性必须随 data/session_profiles 一并下线"
+    )
+
+
+def test_miaoshou_login_uses_the_single_profile_rule() -> None:
+    """妙手登录必须落在**唯一**的 profile 规则上（``profiles/miaoshou/<主账号ID>``）。"""
+    from modules.utils.sessions.session_manager import SessionManager
+
+    manager = SessionManager()
+
+    profile_dir = manager.get_persistent_profile_path("miaoshou", "miaoshou_real_001")
+    assert profile_dir.parent.name == "miaoshou"
+    assert profile_dir.name == "miaoshou_real_001"
+
+    # 源码里不得再出现 legacy 的 platform 键("miaoshou_erp")与旧接口
+    # (只看**代码行**: 注释里可以解释「以前是怎么错的」)
+    login_src = (
+        Path(__file__).resolve().parents[2]
+        / "modules"
+        / "collectors"
+        / "miaoshou_smart_login.py"
+    ).read_text(encoding="utf-8")
+    code_lines = [
+        line for line in login_src.splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    code = "\n".join(code_lines)
+    assert "get_profile_path" not in code, "妙手登录不得再调用 legacy get_profile_path"
+    assert 'get_persistent_profile_path("miaoshou"' in code, (
+        "妙手登录必须走 get_persistent_profile_path('miaoshou', ...)"
+    )
 
 
 def test_persistent_browser_manager_downloads_root_is_repo_root_anchored(

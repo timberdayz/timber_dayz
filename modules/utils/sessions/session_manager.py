@@ -10,6 +10,9 @@
   承载，不再有第二份副本，也不需要任何「谁覆盖谁」的仲裁规则。
 - D5：会话文件（``data/sessions/**``）**彻底废除** —— 它的读写、评分、
   保护、过期清理能力在这里一并下线。
+- 2026-11 收尾：legacy 持久化上下文目录（``data/session_profiles/**``）
+  **一并废除** —— 最后一个使用者（``modules/collectors/miaoshou_smart_login.py``）
+  已改用本模块唯一的 :meth:`get_persistent_profile_path`。
 
 所以本模块现在只负责一件事：**把「平台 + 主账号」解析成 profile 目录路径**。
 """
@@ -37,9 +40,6 @@ class SessionManager:
         **不创建任何目录**：会话文件体系废除后，本模块没有任何写盘行为；
         凭空 mkdir 会让「查一下路径」变成「产生一个空目录」。
         """
-        # legacy 持久化上下文目录（``miaoshou_smart_login`` 仍在用）
-        self.profiles_path = self._repo_relative("data/session_profiles")
-
         # 持久化 Profile 路径（每账号独立目录）—— 登录态的唯一载体
         self.persistent_profiles_path = self._repo_relative("profiles")
 
@@ -68,32 +68,3 @@ class SessionManager:
         safe_account_id = "".join(c for c in str(account_id) if c.isalnum() or c in "_-")
 
         return self.persistent_profiles_path / safe_platform / safe_account_id
-
-    def get_profile_path(self, platform: str, account_id: str) -> Path:
-        """
-        获取 legacy 持久化上下文目录路径
-
-        这是 ``data/session_profiles`` 下的旧目录规则，**不是**登录态的唯一载体
-        （登录态只认 :meth:`get_persistent_profile_path`）。目前只有
-        ``modules/collectors/miaoshou_smart_login.py`` 还在用它。
-
-        Args:
-            platform: 平台名称
-            account_id: 账号ID
-
-        Returns:
-            持久化上下文目录路径
-        """
-        platform_path = self.profiles_path / platform.lower()
-        platform_path.mkdir(parents=True, exist_ok=True)
-
-        # legacy 目录规则（与登录态载体的规则 B 不同）：保留空格，非法字符换 `_`，
-        # 截断 50 字符。规则 A 的公共入口（会话目录命名函数）已随会话文件体系
-        # 一起删除，这里就地保留，避免改变 legacy 目录的既有指向。
-        safe_account_id = str(account_id)
-        for char in '<>:"/\\|?*':
-            safe_account_id = safe_account_id.replace(char, "_")
-        if len(safe_account_id) > 50:
-            safe_account_id = safe_account_id[:50]
-
-        return platform_path / safe_account_id
