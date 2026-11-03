@@ -105,6 +105,38 @@ class HeadfulLoginFallbackRequired(Exception):
         super().__init__(f"Headful login fallback required: {verification_type}")
 
 
+class _ProfileSessionLockHandle:
+    """已持有的账号会话锁(幂等释放)。
+
+    为什么要有这个句柄
+    ------------------
+    * **释放必须幂等**: 异常路径与正常路径都可能走到放锁, 重复放锁会让
+      续期心跳一直续下去 -> 同账号的其他任务永远等不到;
+    * **释放必须晚于持久 context 正常关闭**(R7): Chromium 在 context
+      **正常关闭**时才把登录态刷盘, 先放锁会让另一个进程在 Chromium 仍占用
+      目录时打开它 -> ``Failed to create a ProcessSingleton for your profile
+      directory``。
+    """
+
+    def __init__(self, context_manager: Any) -> None:
+        self._context_manager = context_manager
+        self._released = False
+
+    @property
+    def released(self) -> bool:
+        return self._released
+
+    async def release(self) -> None:
+        """释放锁(幂等)。释放动作本身失败不应顶替掉真正的异常。"""
+        if self._released:
+            return
+        self._released = True
+        try:
+            await self._context_manager.__aexit__(None, None, None)
+        except BaseException as exc:  # pragma: no cover - 释放失败只记录
+            logger.warning("[ACCOUNT_SESSION_LOCK] 释放账号会话锁失败(将等 TTL 自然过期): %s", exc)
+
+
 class ComponentTester:
     """
     组件测试器
@@ -152,6 +184,12 @@ class ComponentTester:
         self.runtime_config = dict(runtime_config or {})
         self.progress_callback = progress_callback  # [*] v4.7.3: 进度回调
         self.test_dir = Path(test_dir) if test_dir else None  # 验证码回传轮询目录
+
+        # Task 6.5: 跨进程账号会话锁(与采集侧同一把锁)
+        # - `_profile_session_lock`: 锁实例(复用同一个实例 -> 同协程重入不会自死锁)
+        # - `_profile_lock_handle`: 本次运行已持有的锁句柄(持有到持久 context 关闭之后)
+        self._profile_session_lock = None
+        self._profile_lock_handle: Optional["_ProfileSessionLockHandle"] = None
 
         # 组件加载器
         self.component_loader = ComponentLoader()
@@ -241,6 +279,185 @@ class ComponentTester:
         if component_type in ["export", "navigation", "date_picker", "filters", "shop_switch"]:
             return "reused"
         return None
+
+    # -- profile 身份(Task 6.5) ------------------------------------------------
+    #
+    # 目标架构: **持久化 profile 目录是登录态的唯一载体**, 目录名统一按
+    # **主账号** 命名(``profiles/<平台>/<主账号ID>``)。采集侧与录制/组件测试
+    # 子进程必须落在**同一个**目录, 否则录制时登录的登录态采集永远读不到。
+    # 遗留的 ``profiles/<平台>/<店铺账号ID>`` 命名空间自本改动起**不再有生产者**。
+
+    def _resolve_profile_identity(
+        self,
+        account_info: Optional[Dict[str, Any]],
+        *,
+        session_owner_id: Optional[str] = None,
+    ) -> str:
+        """解析 **profile 目录身份** —— 必须是**主账号 ID**。
+
+        取值顺序(第一个非空者胜出):
+
+        1. ``session_owner_id`` —— 显式指定的主账号 ID(覆盖一切);
+        2. ``account_info['main_account_id']`` —— 主账号 ID(与采集侧同一命名空间);
+        3. ``self.account_id`` —— 构造测试器时传入的账号 ID;
+        4. ``account_info['account_id']`` —— 店铺账号 ID(最后的兜底)。
+
+        注意: ``main_account_id`` 可能是**空串**(库里没配主账号) -> 必须当作
+        「没有」处理, 由 ``or`` 链自然落到下一个候选。
+        """
+        info = account_info or {}
+        resolved = (
+            session_owner_id
+            or info.get("main_account_id")
+            or self.account_id
+            or info.get("account_id")
+            or "default"
+        )
+        return str(resolved)
+
+    @staticmethod
+    def _profile_session_lock_identity(
+        *,
+        persistent_context_mode: Optional[str],
+        session_owner_id: Optional[str],
+    ) -> Optional[str]:
+        """本次执行是否需要**账号会话锁**, 需要时返回主账号 ID, 否则 ``None``。
+
+        只有 ``reused`` 模式会打开**共享的**持久 profile 目录 -> 必须加锁;
+        临时目录(``ephemeral``)不与任何人冲突 -> 不加锁。
+        """
+        if persistent_context_mode != "reused":
+            return None
+        identity = str(session_owner_id or "").strip()
+        return identity or None
+
+    async def _build_profile_session_lock_backend(self) -> Any:
+        """构建**跨进程**账号会话锁的后端。
+
+        为什么必须跨进程
+        ----------------
+        录制/组件测试跑在**子进程**里(``tools/run_component_test.py``), 父进程
+        (FastAPI)与子进程是**不同进程** -> 进程内 ``asyncio.Lock`` 对子进程完全
+        无效, 必须用 Redis ``SET NX``(Task 3 的 ``MainAccountSessionLock``)。
+
+        选型(与采集侧共用同一个 key 空间 ``build_lock_key(platform, main_account_id)``):
+
+        * ``ACCOUNT_SESSION_LOCK_BACKEND=redis`` 或生产环境 -> 必须 Redis,
+          拿不到就**报错**(fail-closed);
+        * ``auto`` + 非生产 + 配了 ``REDIS_URL`` -> **显式**走 Redis(进程内锁对
+          子进程无效), 拿不到 Redis 就**明确报错** —— 宁可报错, 也不要让 Chromium
+          抛 ``Failed to create a ProcessSingleton for your profile directory``
+          那种天书错误;
+        * ``auto`` + 非生产 + 没有 ``REDIS_URL``(独立跑 CLI) -> 进程内锁 +
+          **明确告警**「跨进程保护未启用」(单机单任务场景不会冲突)。
+        """
+        from backend.services.main_account_session_lock import (
+            MainAccountSessionLockUnavailableError,
+            RedisSessionLockBackend,
+            get_local_session_lock_backend,
+            get_shared_redis_client,
+        )
+        from backend.utils.config import (
+            account_session_lock_backend,
+            account_session_lock_environment,
+        )
+
+        mode = (account_session_lock_backend() or "auto").strip().lower()
+        if mode not in {"auto", "redis", "local"}:
+            mode = "auto"
+        environment = account_session_lock_environment()
+
+        if mode == "local":
+            logger.warning(
+                "[ACCOUNT_SESSION_LOCK] 账号会话锁后端被显式设为 local: "
+                "跨进程保护未启用(录制子进程与采集进程可能同时打开同一个 profile 目录)"
+            )
+            return get_local_session_lock_backend()
+
+        redis_required = mode == "redis" or environment == "production"
+        redis_url_configured = bool((os.getenv("REDIS_URL") or "").strip())
+        if not redis_required and not redis_url_configured:
+            logger.warning(
+                "[ACCOUNT_SESSION_LOCK] 未配置 REDIS_URL, 跨进程保护未启用: "
+                "录制子进程与采集任务可能同时打开同一个 profile 目录"
+                "(单机单任务场景不会冲突; 需要跨进程保护请配置 REDIS_URL)"
+            )
+            return get_local_session_lock_backend()
+
+        client = await get_shared_redis_client()
+        if client is None:
+            raise MainAccountSessionLockUnavailableError(
+                "账号会话锁服务不可用, 无法安全地打开 profile: "
+                "录制子进程与采集任务会争用同一个 Chromium profile 目录。"
+                "请检查 Redis 是否可达以及 REDIS_URL/REDIS_PASSWORD 配置"
+                "(确认不需要跨进程保护可设置 ACCOUNT_SESSION_LOCK_BACKEND=local)"
+            )
+        return RedisSessionLockBackend(client)
+
+    async def _acquire_profile_session_lock(self, *, main_account_id: str) -> Any:
+        """获取**跨进程**账号会话锁(与采集侧同一个 key)。"""
+        from backend.services.main_account_session_lock import MainAccountSessionLock
+        from backend.utils.config import account_session_lock_wait_timeout
+
+        if self._profile_session_lock is None:
+            backend = await self._build_profile_session_lock_backend()
+            # 等待锁的时间必须**短于**父进程给子进程的 300s 超时, 否则子进程会被
+            # 父进程直接杀掉, 用户只看到「返回码 -9」这种没头没尾的报错;
+            # 短等待能让「账号会话被其它采集任务占用」明确报出来。
+            wait_timeout = min(float(account_session_lock_wait_timeout()), 120.0)
+            self._profile_session_lock = MainAccountSessionLock(
+                backend=backend,
+                task_id="component_test_subprocess",
+                wait_timeout=wait_timeout,
+            )
+        lock = self._profile_session_lock
+        context_manager = lock.acquire(self.platform, main_account_id)
+        await context_manager.__aenter__()
+        logger.info(
+            "[ACCOUNT_SESSION_LOCK] 已获取账号会话锁: platform=%s, main_account_id=%s",
+            self.platform,
+            main_account_id,
+        )
+        return context_manager
+
+    async def _open_profile_session_lock(
+        self,
+        *,
+        persistent_context_mode: Optional[str],
+        session_owner_id: Optional[str],
+    ) -> Optional["_ProfileSessionLockHandle"]:
+        """按需获取账号会话锁; 同一次测试运行内**复用同一把锁**。
+
+        复用而不是二次 acquire 的原因: 回退阶段会在**同一个协程**里再次打开
+        同一个 profile 目录, 若再取一次锁就会自死锁(同一把 Redis key)。
+        """
+        identity = self._profile_session_lock_identity(
+            persistent_context_mode=persistent_context_mode,
+            session_owner_id=session_owner_id,
+        )
+        if not identity:
+            return None
+
+        held = self._profile_lock_handle
+        if held is not None and not held.released:
+            logger.info(
+                "[ACCOUNT_SESSION_LOCK] 复用本次运行已持有的账号会话锁: platform=%s, main_account_id=%s",
+                self.platform,
+                identity,
+            )
+            return held
+
+        context_manager = await self._acquire_profile_session_lock(main_account_id=identity)
+        handle = _ProfileSessionLockHandle(context_manager)
+        self._profile_lock_handle = handle
+        return handle
+
+    async def _release_profile_session_lock(self) -> None:
+        """释放账号会话锁(幂等)。必须在持久 context 关闭之后调用。"""
+        handle = self._profile_lock_handle
+        self._profile_lock_handle = None
+        if handle is not None:
+            await handle.release()
 
     def _choose_runtime_strategy(
         self,
@@ -672,25 +889,13 @@ class ComponentTester:
             
             # 验证组件结构
             validation_passed = self._validate_component_structure(component)
-            # #region agent log
-            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({'location':'test_component.py:191','message':'test_component: validation result','data':{'validation_passed':validation_passed},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'I'})+'\n')
-            # #endregion
             if not validation_passed:
                 result.status = TestStatus.FAILED
                 result.error = "Component structure validation failed"
                 return result
             
             # 如果有Playwright，执行实际测试
-            # #region agent log
-            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({'location':'test_component.py:202','message':'test_component: before _test_with_browser','data':{},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'F_G'})+'\n')
-            # #endregion
             browser_test_passed = await self._test_with_browser(component, result)
-            # #region agent log
-            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({'location':'test_component.py:209','message':'test_component: after _test_with_browser','data':{'browser_test_passed':browser_test_passed,'step_results_count':len(result.step_results)},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'F_G'})+'\n')
-            # #endregion
             if browser_test_passed:
                 result.status = TestStatus.PASSED
             else:
@@ -991,121 +1196,127 @@ class ComponentTester:
             headless=effective_headless,
         )
 
-    async def _recreate_context_with_saved_session(
-        self,
-        *,
-        browser,
-        old_context,
-        account_info: Dict[str, Any],
-    ):
-        account_id = self._get_session_owner_id(account_info)
-        storage_state = None
-        if account_id:
-            try:
-                from modules.apps.collection_center.runtime_session import (
-                    load_or_bootstrap_runtime_storage_state,
-                )
-
-                storage_state = await load_or_bootstrap_runtime_storage_state(
-                    platform=self.platform,
-                    session_owner_id=account_id,
-                    account=account_info,
-                    max_age_days=30,
-                )
-            except Exception as e:
-                logger.warning("Reload saved session failed for %s/%s: %s", self.platform, account_id, e)
-
-        try:
-            await old_context.close()
-        except Exception as e:
-            logger.debug("Close old context before session recreation failed: %s", e)
-
-        from modules.apps.collection_center.runtime_session import (
-            open_storage_state_runtime_bundle,
-        )
-
-        runtime_bundle = await open_storage_state_runtime_bundle(
-            browser=browser,
-            platform=self.platform,
-            session_owner_id=account_id,
-            account=account_info,
-            storage_state=storage_state,
-            headless=self.headless,
-        )
-        new_context = runtime_bundle.context
-        new_page = runtime_bundle.page
-        await self._prime_page_for_login_gate(new_page, account_info)
-        return new_context, new_page
-
     async def _run_headful_login_fallback(
         self,
         *,
-        browser,
+        browser_type=None,
         old_context,
         account_info: Dict[str, Any],
         login_class,
         component_name: str,
         result: ComponentTestResult,
     ):
-        from playwright.async_api import async_playwright
+        """有头人工验证码回退（profile 单一载体，与采集侧同构）。
+
+        流程：关掉旧 context（释放 Chromium ProcessSingleton 锁）→ 在**同一个
+        profile 目录**上开有头持久 context → 人工登录 → 正常 close（Chromium 自己
+        刷盘，R7）→ 重开同一 profile 的持久 context → **prime 页面**（导航到登录
+        入口）→ 交回新的 context/page。
+
+        全程**不写/读会话文件**：登录态由 Chromium 直接写进 profile（profile 是
+        登录态的唯一载体）。旧实现是「另起有头浏览器 → 写会话文件 → 读会话文件
+        重建主 context」，而采集侧已不再读取该会话文件 -> 调试时产生误导
+        （以为登录态传过去了，其实没有），且后续废除会话文件时必然漏改。
+
+        prime 为什么是硬要求：重开后的持久 context 页面停在 ``about:blank``，
+        而登录闸门（``LoginStatusDetector``）在 ``about:blank`` 上只能返回
+        UNKNOWN（置信度上限 0.59），达不到 READY 门槛（``logged_in`` +
+        ``confidence >= 0.7``）-> 平台必然判失败。所以必须把页面导航到登录入口。
+        """
         from modules.apps.collection_center.python_component_adapter import create_adapter
+        from modules.apps.collection_center.runtime_session import (
+            open_persistent_runtime_bundle,
+            prime_runtime_page_for_login_gate,
+        )
+        from modules.utils.sessions.session_manager import SessionManager
 
         account_id = self._get_session_owner_id(account_info)
+        profile_path = SessionManager().get_persistent_profile_path(self.platform, account_id)
         adapter_config = self._build_runtime_component_config()
         if self.test_dir:
             adapter_config.setdefault("task", {})["screenshot_dir"] = str(self.test_dir)
 
-        async with async_playwright() as playwright:
-            headed_browser = await playwright.chromium.launch(
-                **self._build_browser_launch_kwargs(
-                    headless=False,
-                    args=["--start-maximized"],
-                )
-            )
-            try:
-                context_options = await self._build_component_browser_context_options(
-                    account_id=account_id,
-                    account_info=account_info,
-                    storage_state=None,
-                    headless=False,
-                )
-                headed_context = await headed_browser.new_context(**context_options)
-                try:
-                    headed_page = await headed_context.new_page()
-                    adapter = create_adapter(
-                        platform=self.platform,
-                        account=account_info,
-                        config=adapter_config,
-                        step_callback=self.progress_callback,
-                        is_test_mode=True,
-                        override_login_class=login_class,
-                    )
-
-                    exec_result = await self._run_login_with_verification_support(
-                        adapter=adapter,
-                        page=headed_page,
-                        component_name=component_name,
-                        result=result,
-                        allow_headful_fallback=False,
-                    )
-                    if not exec_result.success:
-                        return False, old_context, None
-
-                    await self._save_context_session(headed_context, account_info)
-                finally:
-                    await headed_context.close()
-            finally:
-                await headed_browser.close()
-
-        if browser is None:
-            return False, old_context, None
-
-        new_context, new_page = await self._recreate_context_with_saved_session(
-            browser=browser,
-            old_context=old_context,
-            account_info=account_info,
+        # 与采集侧**同一把**跨进程账号锁：回退阶段会再次打开同一个 profile 目录。
+        # 若本次运行已经持有这把锁(同协程重入), 这里直接复用, 不会自死锁。
+        await self._open_profile_session_lock(
+            persistent_context_mode="reused",
+            session_owner_id=account_id,
         )
-        return True, new_context, new_page
+
+        if browser_type is None:
+            # 没有调用方给的 browser_type 时自建一个 Playwright 实例。
+            # 注意: **不能** stop() —— 重开的持久 context 还要交给调用方继续用,
+            # 只能等进程退出时随进程一起回收(录制/组件测试跑在短命子进程里)。
+            from playwright.async_api import async_playwright
+
+            logger.warning(
+                "[HEADFUL_FALLBACK] 未提供 browser_type, 自建 Playwright 实例"
+                "(该实例会随子进程退出一起回收)"
+            )
+            playwright_owner = await async_playwright().start()
+            browser_type = playwright_owner.chromium
+
+        # R6：同一 profile 目录不能被两个浏览器进程同时打开 —— 必须先关旧 context。
+        if old_context is not None:
+            try:
+                await old_context.close()
+            except Exception as close_err:
+                logger.debug("Close old context before headful fallback failed: %s", close_err)
+
+        headed_bundle = await open_persistent_runtime_bundle(
+            browser_type=browser_type,
+            platform=self.platform,
+            session_owner_id=account_id,
+            account=account_info,
+            launch_kwargs={"headless": False, "args": ["--start-maximized"]},
+            profile_path_override=str(profile_path),
+        )
+        headed_context = headed_bundle.context
+        headed_page = headed_bundle.page
+        try:
+            adapter = create_adapter(
+                platform=self.platform,
+                account=account_info,
+                config=adapter_config,
+                step_callback=self.progress_callback,
+                is_test_mode=True,
+                override_login_class=login_class,
+            )
+
+            exec_result = await self._run_login_with_verification_support(
+                adapter=adapter,
+                page=headed_page,
+                component_name=component_name,
+                result=result,
+                allow_headful_fallback=False,
+            )
+            if not exec_result.success:
+                return False, old_context, None
+        finally:
+            # R7：正常关闭才能让 Chromium 把登录态刷进 profile。
+            try:
+                await headed_context.close()
+            except Exception as close_err:
+                logger.warning("Close headful fallback context failed: %s", close_err)
+
+        # 重开同一个 profile 目录 → 主 context 仍是**持久 context**(profile 仍是唯一载体)。
+        new_bundle = await open_persistent_runtime_bundle(
+            browser_type=browser_type,
+            platform=self.platform,
+            session_owner_id=account_id,
+            account=account_info,
+            launch_kwargs=self._build_browser_launch_kwargs(
+                args=["--start-maximized"] if not self.headless else []
+            ),
+            profile_path_override=str(profile_path),
+        )
+        # prime：重开后页面停在 about:blank, 登录闸门在 about:blank 上判定不了登录态。
+        await prime_runtime_page_for_login_gate(
+            page=new_bundle.page,
+            platform=self.platform,
+            account=account_info,
+        )
+        return True, new_bundle.context, new_bundle.page
 
     async def _run_login_before_non_login(
         self,
@@ -1114,6 +1325,7 @@ class ComponentTester:
         page,
         account_info: Dict[str, Any],
         result: ComponentTestResult,
+        browser_type=None,
     ):
         """
         1.6: 非登录组件测试前先登录或复用会话。若无会话则选平台稳定版 login 按 file_path 加载并执行，
@@ -1183,7 +1395,7 @@ class ComponentTester:
             )
         except HeadfulLoginFallbackRequired:
             ok, new_context, new_page = await self._run_headful_login_fallback(
-                browser=browser,
+                browser_type=browser_type,
                 old_context=context,
                 account_info=account_info,
                 login_class=login_class,
@@ -1377,6 +1589,7 @@ class ComponentTester:
                     if not login_gate_ready:
                         login_ok, context, page = await self._run_login_before_non_login(
                             browser=browser,
+                            browser_type=p.chromium,
                             context=context,
                             page=page,
                             account_info=account_info,
@@ -1605,7 +1818,11 @@ class ComponentTester:
                     pass
 
             return False
-    
+        finally:
+            # [Task 6.5] R7: 持久 context 已经在上面正常关闭, 这时才放锁 ——
+            # 否则另一个进程会在 Chromium 仍占用 profile 目录时打开它。
+            await self._release_profile_session_lock()
+
     def _validate_component_structure(self, component: Dict[str, Any]) -> bool:
         """
         验证组件结构。
@@ -1750,12 +1967,6 @@ class ComponentTester:
         
         account_info = self.get_account_info()
         
-        # #region agent log
-        import json
-        with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({'location':'test_component.py:293','message':'_test_with_browser: got account_info','data':{'has_account':account_info is not None,'account_id':self.account_id},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H'})+'\n')
-        # #endregion
-        
         # Phase 12.5: 判断是否需要使用持久化上下文
         component_type = component.get('type', '')
         persistent_context_mode = self._persistent_context_mode(component_type)
@@ -1771,13 +1982,30 @@ class ComponentTester:
                 return False
         
         browser = None  # 持久化上下文不直接管理浏览器
-        
+
+        # [Task 6.5] 打开**真实** profile 目录前先拿**跨进程**账号会话锁。
+        #
+        # 为什么必须有: 录制/组件测试子进程与采集任务会打开**同一个** Chromium
+        # user-data-dir -> Chromium 的 ProcessSingleton 让第二个进程直接启动失败
+        # (``Failed to create a ProcessSingleton for your profile directory``),
+        # 采集任务会因此崩掉。锁的 key 与采集侧完全一致(同一把锁)。
+        #
+        # 锁的持有期必须覆盖「打开 profile -> 关闭 profile」全过程(R7):
+        # Chromium 在 context **正常关闭**时才把登录态刷盘, 先放锁会让另一个
+        # 进程在 Chromium 仍占用目录时打开它。
+        try:
+            profile_lock = await self._open_profile_session_lock(
+                persistent_context_mode=persistent_context_mode,
+                session_owner_id=session_owner_id,
+            )
+        except Exception as lock_error:
+            # 加锁失败必须**明确报错**(中文), 而不是让 Chromium 抛天书错误
+            logger.error("[ACCOUNT_SESSION_LOCK] 获取账号会话锁失败: %s", lock_error)
+            result.error = str(lock_error)
+            return False
+
         try:
             async with async_playwright() as p:
-                # #region agent log
-                with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({'location':'test_component.py:301','message':'_test_with_browser: launching browser','data':{'headless':self.headless,'use_persistent':use_persistent_context},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'G'})+'\n')
-                # #endregion
                 
                 # Phase 12.5: 根据组件类型选择浏览器上下文
                 if use_persistent_context:
@@ -1789,7 +2017,12 @@ class ComponentTester:
                         )
                         
                         # 获取 profile 路径
-                        account_id = session_owner_id or self.account_id or account_info.get('account_id', 'default')
+                        # Task 6.5: profile 目录身份必须是**主账号 ID**(与采集侧同一目录);
+                        # 顺序: session_owner_id > main_account_id > account_id > 店铺账号 ID
+                        account_id = self._resolve_profile_identity(
+                            account_info,
+                            session_owner_id=session_owner_id,
+                        )
                         if persistent_context_mode == "reused":
                             from modules.utils.sessions.session_manager import SessionManager
 
@@ -1861,11 +2094,6 @@ class ComponentTester:
                     context = runtime_bundle.context
                     page = runtime_bundle.page
                 
-                # #region agent log
-                with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({'location':'test_component.py:315','message':'_test_with_browser: browser ready','data':{'use_persistent':use_persistent_context},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'G'})+'\n')
-                # #endregion
-                
                 # Phase 12: 判断是否为发现模式组件
                 is_discovery_mode = component_type in ['date_picker', 'filters'] and 'open_action' in component
                 
@@ -1900,11 +2128,6 @@ class ComponentTester:
                     await page.wait_for_timeout(1000)  # 等待页面稳定
                     print(f"  [OK] Popup cleanup completed\n")
             
-                # #region agent log
-                with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({'location':'test_component.py:320','message':'_test_with_browser: starting step loop','data':{'steps_count':len(steps),'steps_summary':[{'action':s.get('action'),'selector':s.get('selector')} for s in steps]},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H5,H6'})+'\n')
-                # #endregion
-                
                 for i, step in enumerate(steps):
                     step_id = step.get('id', f'step_{i+1}')
                     action = step.get('action', 'unknown')
@@ -1935,11 +2158,6 @@ class ComponentTester:
                                 })
                         except Exception as cb_err:
                             logger.warning(f"Progress callback error (step_start): {cb_err}")
-                    
-                    # #region agent log
-                    with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({'location':'test_component.py:330','message':f'_test_with_browser: executing step {i+1}','data':{'step_id':step_id,'action':action,'has_selector':step.get('selector') is not None,'is_optional':is_optional},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'I'})+'\n')
-                    # #endregion
                     
                     step_result = StepResult(
                         step_id=step_id,
@@ -2009,10 +2227,6 @@ class ComponentTester:
                     if not step_succeeded and last_error:
                         e = last_error
                         if isinstance(e, PlaywrightTimeout):
-                            # #region agent log
-                            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                                f.write(json.dumps({'location':'test_component.py:357','message':f'_test_with_browser: step {i+1} timeout','data':{'step_id':step_id,'action':action,'is_optional':is_optional,'error':str(e)},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'I'})+'\n')
-                            # #endregion
                             
                             # [OK] 检查是否为可选步骤
                             if is_optional:
@@ -2035,10 +2249,6 @@ class ComponentTester:
                                     step_result.screenshot = screenshot_path
                                     await self._save_failure_artifacts(page, component['name'], step_id)
                         else:
-                            # #region agent log
-                            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                                f.write(json.dumps({'location':'test_component.py:371','message':f'_test_with_browser: step {i+1} exception','data':{'step_id':step_id,'action':action,'is_optional':is_optional,'error_type':type(e).__name__,'error':str(e)},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'I'})+'\n')
-                            # #endregion
                             
                             # [OK] 检查是否为可选步骤
                             if is_optional:
@@ -2092,11 +2302,6 @@ class ComponentTester:
                         logger.warning(f"Stopping test due to failed required step {i+1}")
                         break
                 
-                # #region agent log
-                with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                    f.write(json.dumps({'location':'test_component.py:396','message':'_test_with_browser: all steps completed, closing browser','data':{'steps_total':len(steps),'steps_passed':result.steps_passed,'steps_failed':result.steps_failed,'current_url':page.url if page else None},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H5,H7,H8'})+'\n')
-                # #endregion
-                
                 # [OK] 新增：验证success_criteria（如果有）
                 success_criteria_passed = True
                 if result.steps_failed == 0:  # 只有步骤全部成功才验证
@@ -2119,17 +2324,16 @@ class ComponentTester:
                 return result.steps_failed == 0 and success_criteria_passed
         
         except Exception as e:
-            # #region agent log
-            import traceback
-            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({'location':'test_component.py:401','message':'_test_with_browser: EXCEPTION in async with','data':{'error_type':type(e).__name__,'error':str(e),'error_repr':repr(e),'traceback':''.join(traceback.format_tb(e.__traceback__))},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'G'})+'\n')
-            # #endregion
             logger.error(f"Browser test failed: {e}", exc_info=True)
             result.error = str(e) if str(e) else type(e).__name__
             if 'page' in locals() and page is not None:
                 await self._save_failure_artifacts(page, component['name'], 'browser_exception')
             return False
         finally:
+            # R7: 持久 context 已经在上面的 async with 里正常关闭, 这时才放锁。
+            if profile_lock is not None:
+                await profile_lock.release()
+                self._profile_lock_handle = None
             if ephemeral_profile_dir:
                 try:
                     shutil.rmtree(ephemeral_profile_dir, ignore_errors=True)
@@ -2738,12 +2942,6 @@ class ComponentTester:
             if account_info:
                 url = self._replace_variables(url, account_info)
             
-            # #region agent log
-            import json
-            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({'location':'test_component.py:_execute_step:navigate','message':'Starting navigation','data':{'url':url,'action':action},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H8'})+'\n')
-            # #endregion
-            
             # 修复1：完整的页面加载等待
             await page.goto(url, wait_until='domcontentloaded', timeout=timeout)
             
@@ -2755,11 +2953,6 @@ class ComponentTester:
             
             # 额外等待1秒确保JavaScript渲染完成
             await page.wait_for_timeout(1000)
-            
-            # #region agent log
-            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({'location':'test_component.py:_execute_step:navigate_done','message':'Navigation completed','data':{'final_url':page.url},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H8'})+'\n')
-            # #endregion
             
             logger.info(f"[OK] Page loaded and ready: {url}")
         
