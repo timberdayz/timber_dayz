@@ -22,6 +22,11 @@ services:
       REDIS_URL: redis://${REDIS_HOST:-host.docker.internal}:${REDIS_PORT:-6379}/0
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       ACCOUNT_SESSION_LOCK_BACKEND: ${ACCOUNT_SESSION_LOCK_BACKEND:-redis}
+      # 锁服务不可用时是否 fail-closed（留空 = 沿用代码默认：非生产 fail-open，
+      # ENVIRONMENT=production 时 fail-closed）。
+      # ⚠️ 生产部署请显式设为 true：Redis 不可达时直接拒绝采集，
+      #    而不是降级为进程内锁（跨进程保护会失效 → 同一 profile 可能被双开）。
+      ACCOUNT_SESSION_LOCK_FAIL_CLOSED: ${ACCOUNT_SESSION_LOCK_FAIL_CLOSED:-}
 
       # Playwright配置
       PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
@@ -63,6 +68,13 @@ services:
 
     ports:
       - "${COLLECTION_PORT:-8002}:8000"
+
+    # host.docker.internal 是 Docker Desktop(Win/macOS) 的特性，**Linux 宿主上不解析**
+    # → REDIS_URL 连不上 → 账号会话锁静默降级为进程内锁（跨进程保护失效）。
+    # host-gateway 是 Docker 20.10+ 的内置 magic name：在 Linux 上把
+    # host.docker.internal 指向宿主网关（Win/macOS 上本来就指向宿主 IP，无害）。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     volumes:
       # 数据卷
@@ -125,6 +137,9 @@ services:
       - ./logs/scheduler:/app/logs
     networks:
       - erp_network
+    # 同 collection：REDIS_HOST 默认走 host.docker.internal，Linux 上必须显式映射
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       collection:
         condition: service_healthy

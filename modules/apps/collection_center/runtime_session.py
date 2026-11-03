@@ -1127,12 +1127,28 @@ async def prime_runtime_page_for_login_gate(
     page: Any,
     platform: str,
     account: Optional[Dict[str, Any]],
+    force_navigate: bool = False,
 ) -> None:
+    """把页面带到「登录闸门可判定」的状态(全仓唯一的导航实现)。
+
+    * ``force_navigate=False``(默认): URL 为空或 ``about:blank`` → 导航到平台入口;
+      否则只等页面稳定。
+    * ``force_navigate=True``: **无论当前 URL 是什么**都导航到平台入口。
+
+    为什么需要 ``force_navigate``
+    --------------------------
+    持久 context 启动时 Playwright push 的首屏是 ``about:blank``
+    (``chromium.js``: ``if (isPersistent) chromeArguments.push("about:blank")``)
+    → 登录态探测拿不到可判定的 URL → 闸门必然不通过。
+    而 Chromium「干净关闭后重开」可能**恢复上次会话的标签页**, 那个标签页未必
+    是平台页 → 同样会让闸门误判。所以这两种情况都必须显式导航到平台入口,
+    而不是只在「当前是 about:blank」时才导航。
+    """
     if not hasattr(page, "goto"):
         return
 
     current_url = str(getattr(page, "url", "") or "").strip().lower()
-    if current_url and current_url != "about:blank":
+    if not force_navigate and current_url and current_url != "about:blank":
         await wait_for_runtime_page_stable(page=page, platform=platform)
         return
 

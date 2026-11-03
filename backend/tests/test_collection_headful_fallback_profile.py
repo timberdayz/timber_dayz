@@ -11,6 +11,12 @@
 - H1 回退后的主 context 必须仍是**持久 context**（不是 browser.new_context）
 - H2 回退路径不得注入全量指纹
 - H3 回退不得再"读会话文件 → 二次开同一 profile 目录"
+
+评审修复覆盖点：
+- F1 重开持久 context 后的页面必须被导航到平台入口（不能停在 about:blank）
+- F5 旧/有头 context 关闭失败必须中止回退（不能撞 Chromium profile 独占锁）
+- F6 有头 context 的关闭必须发生在重开之前
+- F12 「不写会话文件」的断言范围只覆盖回退函数内部
 """
 
 from __future__ import annotations
@@ -23,7 +29,15 @@ import pytest
 
 from modules.apps.collection_center import executor_v2 as executor_v2_module
 from modules.apps.collection_center import runtime_session
-from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
+from modules.apps.collection_center.executor_v2 import (
+    CollectionExecutorV2,
+    StepExecutionError,
+)
+from backend.services.platform_login_entry_service import get_platform_login_entry
+
+
+#: shopee 的平台标准入口（回归点 F1：重开后的页面必须导航到这里）
+SHOPEE_LOGIN_ENTRY = get_platform_login_entry("shopee")
 
 
 class _FakePage:
@@ -36,32 +50,76 @@ class _FakePage:
         return None
 
 
+class _NavigablePage:
+    """支持 goto 的 page 替身。
+
+    默认首屏是 ``about:blank`` —— 这正是 Playwright 启动**持久 context** 时的真实
+    行为（``chromium.js``: ``if (isPersistent) chromeArguments.push("about:blank")``）。
+    """
+
+    def __init__(self, url: str = "about:blank") -> None:
+        self.url = url
+        self.goto_calls: list[str] = []
+
+    async def goto(self, url: str, **kwargs) -> None:
+        self.goto_calls.append(url)
+        self.url = url
+
+    async def wait_for_load_state(self, state: str, timeout: int = 0) -> None:
+        return None
+
+    async def wait_for_timeout(self, ms: int) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
 class _FakePersistentContext:
     """模拟 launch_persistent_context 返回的**持久 context**。"""
 
-    def __init__(self, user_data_dir: str, events: list[str]) -> None:
+    def __init__(
+        self,
+        user_data_dir: str,
+        events: list[str],
+        *,
+        page_factory=None,
+        close_error: Exception | None = None,
+    ) -> None:
         self.user_data_dir = user_data_dir
         self.events = events
         self.pages: list[_FakePage] = []
         self.closed = False
+        self._page_factory = page_factory or _FakePage
+        self._close_error = close_error
 
     async def new_page(self) -> _FakePage:
-        page = _FakePage()
+        page = self._page_factory()
         self.pages.append(page)
         return page
 
     async def close(self) -> None:
-        self.closed = True
         self.events.append(f"close:{self.user_data_dir}")
+        if self._close_error is not None:
+            raise self._close_error
+        self.closed = True
 
 
 class _FakeBrowserType:
     """模拟 Playwright BrowserType：只提供持久 context 入口。"""
 
-    def __init__(self, events: list[str]) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        page_factory=None,
+        fail_close_on_launch: int | None = None,
+    ) -> None:
         self.events = events
         self.launch_calls: list[dict] = []
         self.contexts: list[_FakePersistentContext] = []
+        self._page_factory = page_factory
+        self._fail_close_on_launch = fail_close_on_launch
 
     async def launch_persistent_context(self, **kwargs):
         self.launch_calls.append(dict(kwargs))
@@ -71,7 +129,15 @@ class _FakeBrowserType:
         profile_dir = Path(user_data_dir)
         profile_dir.mkdir(parents=True, exist_ok=True)
         (profile_dir / "Cookies").write_text("[]", encoding="utf-8")
-        context = _FakePersistentContext(user_data_dir, self.events)
+        close_error = None
+        if self._fail_close_on_launch == len(self.launch_calls) - 1:
+            close_error = RuntimeError("Target page, context or browser has been closed")
+        context = _FakePersistentContext(
+            user_data_dir,
+            self.events,
+            page_factory=self._page_factory,
+            close_error=close_error,
+        )
         self.contexts.append(context)
         return context
 
@@ -86,6 +152,18 @@ class _OldContext:
     async def close(self) -> None:
         self.closed = True
         self.events.append("close:old_context")
+
+
+class _FailingCloseContext:
+    """close() 抛异常：模拟旧 Chromium 没退干净（仍占用 profile 目录）。"""
+
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.closed = False
+
+    async def close(self) -> None:
+        self.events.append("close-failed:old_context")
+        raise RuntimeError("Target page, context or browser has been closed")
 
 
 class _ForbiddenBrowser:
@@ -105,6 +183,7 @@ class _ForbiddenBrowser:
 class _RecordingLogger:
     def __init__(self) -> None:
         self.debug_messages: list[str] = []
+        self.warning_messages: list[str] = []
 
     def debug(self, msg, *args, **kwargs) -> None:
         self.debug_messages.append(str(msg) % args if args else str(msg))
@@ -113,7 +192,81 @@ class _RecordingLogger:
         return None
 
     def warning(self, msg, *args, **kwargs) -> None:
-        return None
+        self.warning_messages.append(str(msg) % args if args else str(msg))
+
+
+# ---------------------------------------------------------------------------
+# legacy 回退路径的替身（没有持久化 profile 目标时走这条分支）
+# ---------------------------------------------------------------------------
+
+
+class _FakeLegacyContext:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.pages: list[_FakePage] = []
+
+    async def new_page(self) -> _FakePage:
+        page = _FakePage()
+        self.pages.append(page)
+        return page
+
+    async def close(self) -> None:
+        self.events.append("close:legacy_context")
+
+
+class _FakeLegacyBrowser:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.context_kwargs: dict = {}
+
+    async def new_context(self, **kwargs):
+        self.context_kwargs.update(kwargs)
+        self.events.append("new_context")
+        return _FakeLegacyContext(self.events)
+
+    async def close(self) -> None:
+        self.events.append("close:legacy_browser")
+
+
+class _FakeChromium:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.launched: list[dict] = []
+
+    async def launch(self, **kwargs):
+        self.launched.append(kwargs)
+        return _FakeLegacyBrowser(self.events)
+
+
+class _FakePlaywrightManager:
+    def __init__(self, chromium) -> None:
+        self._chromium = chromium
+
+    async def __aenter__(self):
+        return type("PW", (), {"chromium": self._chromium})()
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def _install_legacy_playwright(monkeypatch, events: list[str]) -> _FakeChromium:
+    chromium = _FakeChromium(events)
+    monkeypatch.setattr(
+        "playwright.async_api.async_playwright",
+        lambda: _FakePlaywrightManager(chromium),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2."
+        "_get_fingerprint_context_options_async",
+        AsyncMock(
+            return_value={
+                "locale": "zh-CN",
+                "viewport": {"width": 1280, "height": 800},
+                "accept_downloads": True,
+            }
+        ),
+    )
+    return chromium
 
 
 @pytest.fixture
@@ -266,7 +419,15 @@ async def test_headful_fallback_does_not_write_session_files(
     monkeypatch,
     profile_runtime,
 ):
-    """回退全程不得写 data/sessions（profile 是唯一载体，R1/R2）。"""
+    """回退**本函数内**不得写 data/sessions（profile 是唯一载体，R1/R2）。
+
+    覆盖范围说明（评审 F12）：本用例只调用 ``_run_headful_login_fallback``，
+    因此它钉住的是「**回退函数内部**不写会话文件」，**不是**「整条登录流程都不写」。
+    真实流程里回退返回后 ``_execute_shared_login_phase`` 仍可能走
+    ``save_session_after_login`` → ``_save_session_async``（目前只有
+    TikTok + persistent_profile 会跳过；非 TikTok 平台登录后仍会落盘 ——
+    那是计划里的后续待修项，不在本用例范围内）。
+    """
     executor = _build_executor(monkeypatch)
     events: list[str] = []
     browser_type = _FakeBrowserType(events)
@@ -350,7 +511,12 @@ async def test_headful_fallback_closes_old_context_before_opening_headed_profile
     monkeypatch,
     profile_runtime,
 ):
-    """R6：旧 context 必须先 close，否则同一 profile 目录 ProcessSingleton 冲突。"""
+    """R6：旧 context 必须先 close，否则同一 profile 目录 ProcessSingleton 冲突。
+
+    评审 F6：不仅要断言「旧 context 先关」，还要钉住**有头 context 的关闭发生在
+    重开之前** —— 否则有人把 headed close 挪到重开之后，两条断言仍然成立，
+    但运行时会在同一 profile 目录上同时开两个持久 context。
+    """
     executor = _build_executor(monkeypatch)
     events: list[str] = []
     browser_type = _FakeBrowserType(events)
@@ -367,6 +533,163 @@ async def test_headful_fallback_closes_old_context_before_opening_headed_profile
     assert old_context.closed is True
     assert events[0] == "close:old_context"
     assert events[1] == f"launch_persistent:{profile_runtime.profile_dir}"
+    # 有头 context 必须在**重开之前**关闭
+    assert events[2].startswith("close:")
+    assert events[3] == f"launch_persistent:{profile_runtime.profile_dir}"
+    # 全局顺序：所有 close 事件都必须早于最后一次 launch_persistent
+    close_indexes = [i for i, event in enumerate(events) if event.startswith("close:")]
+    last_launch_index = max(
+        i for i, event in enumerate(events) if event.startswith("launch_persistent:")
+    )
+    assert close_indexes, "回退过程必须有关闭事件"
+    assert max(close_indexes) < last_launch_index
+
+
+@pytest.mark.asyncio
+async def test_headful_fallback_reopened_page_is_navigated_to_platform_entry(
+    monkeypatch,
+    profile_runtime,
+):
+    """评审 F1：重开持久 context 后的页面必须被导航到平台入口。
+
+    Playwright 启动持久 context 时 push 的首屏是 ``about:blank`` → 登录态探测只能
+    给 UNKNOWN → 闸门 READY 要求 logged_in + 置信度 >= 0.7 → **必然失败**，
+    而且报错只说 ``url=about:blank``，完全指不到真因。
+    """
+    executor = _build_executor(monkeypatch)
+    events: list[str] = []
+    browser_type = _FakeBrowserType(events, page_factory=_NavigablePage)
+
+    result = await _run_profile_fallback(
+        executor,
+        browser_type=browser_type,
+        profile_dir=profile_runtime.profile_dir,
+        old_context=_OldContext(events),
+        browser=_ForbiddenBrowser(),
+    )
+
+    _login_success, _context, page, _outcome = result
+    assert page.goto_calls, "重开后的页面必须被导航到平台入口"
+    assert page.url != "about:blank"
+    assert page.goto_calls[0] == SHOPEE_LOGIN_ENTRY
+    assert page.url == SHOPEE_LOGIN_ENTRY
+
+
+@pytest.mark.asyncio
+async def test_headful_fallback_navigates_platform_entry_even_when_previous_tab_restored(
+    monkeypatch,
+    profile_runtime,
+):
+    """评审 F1 的另一半：Chromium 恢复上次会话标签页时也必须导航。
+
+    评审未能实测「干净关闭后重开」Chromium 是否恢复标签页，所以修法必须两种情况
+    都成立：**无论当前 URL 是不是 about:blank**，都要确保页面被导航到平台入口
+    （恢复的标签页未必是平台页，同样会让闸门误判）。
+    """
+    executor = _build_executor(monkeypatch)
+    events: list[str] = []
+
+    def _restored_tab_page() -> _NavigablePage:
+        # 模拟 Chromium 恢复了上次会话的标签页（非平台页）
+        return _NavigablePage("https://example.com/previous-tab")
+
+    browser_type = _FakeBrowserType(events, page_factory=_restored_tab_page)
+
+    result = await _run_profile_fallback(
+        executor,
+        browser_type=browser_type,
+        profile_dir=profile_runtime.profile_dir,
+        old_context=_OldContext(events),
+        browser=_ForbiddenBrowser(),
+    )
+
+    _login_success, _context, page, _outcome = result
+    assert page.goto_calls, "非 about:blank 的恢复标签页也必须被导航到平台入口"
+    assert page.goto_calls[0] == SHOPEE_LOGIN_ENTRY
+    assert page.url == SHOPEE_LOGIN_ENTRY
+
+
+@pytest.mark.asyncio
+async def test_headful_fallback_page_navigation_failure_does_not_crash_fallback(
+    monkeypatch,
+    profile_runtime,
+):
+    """评审 F1：导航失败**不能**让流程崩成看不懂的错（要有清晰中文日志）。"""
+    executor = _build_executor(monkeypatch)
+    events: list[str] = []
+    recording_logger = _RecordingLogger()
+    monkeypatch.setattr(executor_v2_module, "logger", recording_logger)
+
+    class _BrokenGotoPage(_NavigablePage):
+        async def goto(self, url: str, **kwargs) -> None:
+            raise TimeoutError("page.goto: Timeout 60000ms exceeded")
+
+    browser_type = _FakeBrowserType(events, page_factory=_BrokenGotoPage)
+
+    result = await _run_profile_fallback(
+        executor,
+        browser_type=browser_type,
+        profile_dir=profile_runtime.profile_dir,
+        old_context=_OldContext(events),
+        browser=_ForbiddenBrowser(),
+    )
+
+    login_success, _context, _page, outcome = result
+    assert login_success is True
+    assert outcome == "success"
+    assert any(
+        "导航到平台入口失败" in message
+        for message in recording_logger.warning_messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_headful_fallback_aborts_when_old_context_close_fails(
+    monkeypatch,
+    profile_runtime,
+):
+    """评审 F5：旧 context 关不掉必须**中止回退**（否则撞 Chromium 独占锁）。"""
+    executor = _build_executor(monkeypatch)
+    events: list[str] = []
+    browser_type = _FakeBrowserType(events)
+
+    with pytest.raises(StepExecutionError, match="profile 独占锁冲突"):
+        await _run_profile_fallback(
+            executor,
+            browser_type=browser_type,
+            profile_dir=profile_runtime.profile_dir,
+            old_context=_FailingCloseContext(events),
+            browser=_ForbiddenBrowser(),
+        )
+
+    # 旧 context 没关掉 → 绝不能再开持久 context
+    assert browser_type.launch_calls == []
+
+
+@pytest.mark.asyncio
+async def test_headful_fallback_aborts_when_headed_context_close_fails(
+    monkeypatch,
+    profile_runtime,
+):
+    """评审 F5：有头 context 关不掉也必须中止（登录态可能没刷盘 + 独占锁冲突）。"""
+    executor = _build_executor(monkeypatch)
+    events: list[str] = []
+    browser_type = _FakeBrowserType(
+        events,
+        fail_close_on_launch=0,
+    )
+
+    with pytest.raises(StepExecutionError, match="profile 独占锁冲突"):
+        await _run_profile_fallback(
+            executor,
+            browser_type=browser_type,
+            profile_dir=profile_runtime.profile_dir,
+            old_context=_OldContext(events),
+            browser=_ForbiddenBrowser(),
+        )
+
+    # 有头 context 没关掉 → 绝不能重开同一 profile 目录
+    assert len(browser_type.launch_calls) == 1
 
 
 @pytest.mark.asyncio
@@ -495,3 +818,91 @@ def test_executor_no_longer_has_session_file_recreation_helper():
         CollectionExecutorV2,
         "_recreate_runtime_page_with_saved_session",
     )
+
+
+@pytest.mark.asyncio
+async def test_legacy_fallback_keeps_login_state_when_session_account_id_is_empty(
+    monkeypatch,
+    profile_runtime,
+):
+    """评审 F3：session_account_id 为空时**也必须**把登录态交给主 context。
+
+    旧写法只看 ``session_account_id`` → 它为空时整份登录态被丢弃 → 主 context
+    以完全未登录的状态继续采集（后续 401 / 跳登录页 / 结果为空）。
+    """
+    executor = _build_executor(monkeypatch)
+    events: list[str] = []
+    _install_legacy_playwright(monkeypatch, events)
+
+    captured: list[tuple[str, str]] = []
+    storage_state = {"cookies": [{"name": "sid", "value": "v"}]}
+
+    async def _fake_capture(*, page, session_platform, session_account_id):
+        captured.append((session_platform, session_account_id))
+        return dict(storage_state)
+
+    executor._wait_and_capture_high_quality_tiktok_session = _fake_capture
+
+    main_browser = _FakeLegacyBrowser(events)
+
+    result = await executor._run_headful_login_fallback(
+        task_id="task-1",
+        platform="shopee",
+        account={"account_id": "acc-1"},
+        params={"params": {}},
+        browser=main_browser,
+        old_context=_OldContext(events),
+        session_platform="shopee",
+        session_account_id="",
+        runtime_manifests={"login": {"component": "login"}},
+        proxy=None,
+        browser_type=None,
+        profile_path=None,
+        launch_kwargs={"headless": True},
+    )
+
+    login_success, _context, _page, outcome = result
+    assert login_success is True
+    assert outcome == "success"
+    # 采集必须发生，且用的是已解析好的 account_id
+    assert captured == [("shopee", "acc-1")]
+    # 主 context 必须带上登录态（否则等于未登录采集）
+    assert main_browser.context_kwargs.get("storage_state") == storage_state
+
+
+@pytest.mark.asyncio
+async def test_legacy_fallback_fails_loudly_when_login_state_cannot_be_captured(
+    monkeypatch,
+    profile_runtime,
+):
+    """评审 F3：拿不到登录态必须**显式报错**，不能静默造一个未登录的 context。"""
+    executor = _build_executor(monkeypatch)
+    events: list[str] = []
+    _install_legacy_playwright(monkeypatch, events)
+
+    async def _fake_capture(*, page, session_platform, session_account_id):
+        return None
+
+    executor._wait_and_capture_high_quality_tiktok_session = _fake_capture
+
+    main_browser = _FakeLegacyBrowser(events)
+
+    with pytest.raises(StepExecutionError, match="未能取到登录态快照"):
+        await executor._run_headful_login_fallback(
+            task_id="task-1",
+            platform="shopee",
+            account={"account_id": "acc-1"},
+            params={"params": {}},
+            browser=main_browser,
+            old_context=_OldContext(events),
+            session_platform="shopee",
+            session_account_id="",
+            runtime_manifests={"login": {"component": "login"}},
+            proxy=None,
+            browser_type=None,
+            profile_path=None,
+            launch_kwargs={"headless": True},
+        )
+
+    # 绝不能造一个「没有 storage_state」的未登录 context 继续跑
+    assert "storage_state" not in main_browser.context_kwargs
