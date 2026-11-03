@@ -1,95 +1,60 @@
+"""顺序采集路径的会话载体契约（Task 4.2：profile 是唯一载体）。
+
+旧契约：人工巡店保存的会话（``data/sessions/**``）**优先于**持久 profile 目录。
+Task 4.2 之后：正式采集**恒走持久 profile**（R1 真相源唯一）——
+会话文件不再是载体，顺序路径不再读它，也不再从它 bootstrap。
+"""
+
 from pathlib import Path
 
 import pytest
 
 
-@pytest.mark.asyncio
-async def test_load_or_bootstrap_session_prefers_existing_storage_state(monkeypatch):
+# Task 4.2 删除清单：这些 executor 侧入口必须**整体消失**。
+_DEAD_EXECUTOR_HELPERS = (
+    "_manual_storage_state_path",
+    "_manual_storage_state_exists",
+    "_load_or_bootstrap_session_async",
+    "_should_prefer_manual_storage_state",
+    "_prepare_runtime_page_bundle",
+)
+
+
+def test_executor_no_longer_has_session_file_entrypoints():
+    """executor 侧不得再保留「读会话文件 / bootstrap / 人工会话优先」的入口。"""
     from modules.apps.collection_center import executor_v2
 
-    existing = {"storage_state": {"cookies": [], "origins": []}}
-
-    async def _fake_load(platform, account_id, max_age_days=30):
-        return existing
-
-    monkeypatch.setattr(executor_v2, "_load_session_async", _fake_load)
-    monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session._bootstrap_session_from_profile_sync",
-        lambda platform, account_id, account_config=None: {"storage_state": {"unexpected": True}},
-    )
-
-    session_data = await executor_v2._load_or_bootstrap_session_async(
-        "miaoshou",
-        "acc-1",
-        {"account_id": "acc-1"},
-    )
-
-    assert session_data == existing
+    source = Path(executor_v2.__file__).read_text(encoding="utf-8")
+    for name in _DEAD_EXECUTOR_HELPERS:
+        assert f"def {name}" not in source, f"executor 侧仍保留 {name}"
+    # 会话文件读取入口也必须消失（只剩 Task 7 要处理的「登录后写盘」）
+    assert "def _load_session_async" not in source, "executor 侧仍保留会话文件读取入口"
 
 
-@pytest.mark.asyncio
-async def test_load_or_bootstrap_session_falls_back_to_profile_bootstrap(monkeypatch):
-    from modules.apps.collection_center import executor_v2
+def test_executor_does_not_keep_duplicate_profile_bootstrap():
+    """executor 侧不得再保留一份自己的 profile bootstrap（spec D6）。
 
-    async def _fake_load(platform, account_id, max_age_days=30):
-        return None
-
-    monkeypatch.setattr(executor_v2, "_load_session_async", _fake_load)
-    monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session._bootstrap_session_from_profile_sync",
-        lambda platform, account_id, account_config=None: {"storage_state": {"cookies": ["from_profile"]}},
-    )
-
-    session_data = await executor_v2._load_or_bootstrap_session_async(
-        "miaoshou",
-        "acc-1",
-        {"account_id": "acc-1"},
-    )
-
-    assert session_data == {"storage_state": {"cookies": ["from_profile"]}}
-
-
-def test_manual_storage_state_wins_over_existing_profile():
-    """人工巡店保存的会话必须优先于持久 profile 目录被读取。"""
-    from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
-
-    # profile 目录非空（has_persistent_profile=True）但人工会话存在 -> 必须读人工会话
-    assert CollectionExecutorV2._should_prefer_manual_storage_state(
-        has_persistent_profile=True,
-        has_manual_storage_state=True,
-    )
-    assert not CollectionExecutorV2._should_prefer_manual_storage_state(
-        has_persistent_profile=True,
-        has_manual_storage_state=False,
-    )
-
-
-def test_manual_storage_state_probe_uses_session_manager_path(monkeypatch, tmp_path):
-    """人工会话的探测路径必须与 ``SessionManager.get_session_path`` 完全一致。
-
-    路径规则不一致（原始 account_id vs 净化后的目录名）→ 采集侧读不到巡店面板
-    保存的会话（spec D5 / D6）。
+    ``runtime_session._bootstrap_session_from_profile_sync`` 才有 TikTok 质量门禁；
+    executor 侧那份副本没有 → 低质量 state 会被提升为正式会话。
     """
     from modules.apps.collection_center import executor_v2
-    from modules.utils.sessions import session_manager as session_manager_module
 
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.setattr(session_manager_module, "REPO_ROOT", repo_root)
-
-    manager = session_manager_module.SessionManager()
-    session_file = manager.get_session_path("shopee", "hongxikeji:main")
-    session_file.write_text("{}", encoding="utf-8")
-
-    assert executor_v2._manual_storage_state_exists("shopee", "hongxikeji:main") is True
-    assert executor_v2._manual_storage_state_exists("shopee", "hongxikeji:other") is False
+    source = Path(executor_v2.__file__).read_text(encoding="utf-8")
+    assert "def _bootstrap_session_from_profile_sync" not in source, (
+        "executor 侧仍有一份自己的 _bootstrap_session_from_profile_sync（缺 TikTok 质量门禁），"
+        "应改为复用 runtime_session 的实现"
+    )
 
 
 @pytest.mark.asyncio
-async def test_open_runtime_bundle_auto_prefers_manual_session_over_persistent_profile(
+async def test_open_runtime_bundle_auto_always_uses_persistent_profile(
     monkeypatch,
 ):
-    """auto 模式下：已有持久 profile + 人工会话 → 必须走人工会话（spec D6 / A4）。"""
+    """auto 模式下**恒走持久 profile**：人工会话文件存在也不例外（R1 真相源唯一）。
+
+    旧契约是「人工巡店保存的会话优先于 profile 目录」（spec D6 / A4）；
+    Task 4.2 之后会话文件整体废除 → 顺序路径只剩 profile 一个载体。
+    """
     from modules.apps.collection_center import executor_v2
 
     executor = executor_v2.CollectionExecutorV2()
@@ -108,23 +73,6 @@ async def test_open_runtime_bundle_auto_prefers_manual_session_over_persistent_p
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
         lambda platform, session_owner_id: True,
     )
-    monkeypatch.setattr(
-        executor_v2,
-        "_manual_storage_state_exists",
-        lambda platform, account_id: True,
-    )
-
-    async def _fake_load_or_bootstrap(platform, account_id, account_config=None, **kwargs):
-        return {
-            "storage_state": {"cookies": [{"name": "sessionid"}], "origins": []},
-            "metadata": {"manual_seeded": True, "protected": True},
-        }
-
-    monkeypatch.setattr(
-        executor_v2,
-        "_load_or_bootstrap_session_async",
-        _fake_load_or_bootstrap,
-    )
 
     bundle = await executor._open_runtime_bundle(
         session_runtime_mode="auto",
@@ -137,25 +85,75 @@ async def test_open_runtime_bundle_auto_prefers_manual_session_over_persistent_p
         launch_kwargs={"headless": True},
     )
 
-    assert bundle is storage_open.result
-    assert persistent_open.calls == []
-    assert storage_open.calls, "人工会话存在时必须走 storage_state 通道"
-    assert getattr(bundle, "session_source", None) == "manual_storage_state"
+    assert bundle is persistent_open.result
+    assert persistent_open.calls, "正式采集必须走 profile 通道"
+    assert storage_open.calls == [], "不得再退回 storage_state 扇出通道"
+    assert getattr(bundle, "session_source", None) == "persistent_profile"
 
 
-def test_executor_does_not_keep_duplicate_profile_bootstrap():
-    """executor 侧不得再保留一份自己的 profile bootstrap（spec D6）。
+@pytest.mark.asyncio
+async def test_open_runtime_bundle_never_reads_session_file(monkeypatch):
+    """打开 runtime bundle 的过程中**不得读会话文件**（profile 是唯一载体）。
 
-    ``runtime_session._bootstrap_session_from_profile_sync`` 才有 TikTok 质量门禁；
-    executor 侧那份副本没有 → 低质量 state 会被提升为正式会话。
+    这是「不读会话文件」这条验收口径的守门用例：
+    只要有人把「读会话文件 / bootstrap」重新接回顺序路径，这里立刻变红。
     """
     from modules.apps.collection_center import executor_v2
 
-    source = Path(executor_v2.__file__).read_text(encoding="utf-8")
-    assert "def _bootstrap_session_from_profile_sync" not in source, (
-        "executor 侧仍有一份自己的 _bootstrap_session_from_profile_sync（缺 TikTok 质量门禁），"
-        "应改为复用 runtime_session 的实现"
+    executor = executor_v2.CollectionExecutorV2()
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("顺序采集路径不得读会话文件")
+
+    monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager.load_session",
+        _boom,
     )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.load_runtime_session_candidate",
+        _boom,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.open_persistent_runtime_bundle",
+        _AsyncRecorder(_FakeBundle("persistent-bundle")),
+    )
+
+    bundle = await executor._open_runtime_bundle(
+        session_runtime_mode="auto",
+        browser=object(),
+        browser_type=object(),
+        platform="shopee",
+        session_owner_id="main-1",
+        runtime_account={"login_url": "https://seller.shopee.cn"},
+        storage_state=None,
+        launch_kwargs={"headless": True},
+    )
+
+    assert getattr(bundle, "session_source", None) == "persistent_profile"
+
+
+@pytest.mark.asyncio
+async def test_open_runtime_bundle_rejects_storage_state_fanout_mode():
+    """显式请求 storage_state 扇出必须给出清晰错误（该模式已废除）。"""
+    from modules.apps.collection_center import executor_v2
+
+    executor = executor_v2.CollectionExecutorV2()
+
+    with pytest.raises(ValueError) as excinfo:
+        await executor._open_runtime_bundle(
+            session_runtime_mode="storage_state_fanout",
+            browser=object(),
+            browser_type=object(),
+            platform="shopee",
+            session_owner_id="main-1",
+            runtime_account={"login_url": "https://seller.shopee.cn"},
+            storage_state={"cookies": [], "origins": []},
+            launch_kwargs={"headless": True},
+        )
+
+    message = str(excinfo.value)
+    assert "profile" in message
+    assert "storage_state" in message
 
 
 class _FakeBundle:

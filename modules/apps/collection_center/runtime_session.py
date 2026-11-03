@@ -528,6 +528,21 @@ def choose_runtime_strategy(
     component_type: str | None,
     parallel_mode: bool,
 ) -> RuntimeStrategyDecision:
+    # [Task 4.2] 正式采集**恒走持久 profile**：profile 是登录态的唯一载体（R1），
+    # 会话文件（``data/sessions/**``）整体废除（D5）→ 不再存在「人工会话优先 /
+    # 读会话文件 / bootstrap」的分支。这一条放在最前面，保证正式采集的结论
+    # **与任何探针结果无关**（有没有会话文件、profile 目录存不存在都一样）。
+    #
+    # 工具与录制路径（``execution_kind="component_test"``）保持原有判定树不变。
+    if execution_kind == "formal_collection":
+        return RuntimeStrategyDecision(
+            mode="persistent_profile",
+            reason="profile_is_single_source_of_truth",
+            used_storage_state=False,
+            used_persistent_profile=True,
+            fallback_allowed=False,
+        )
+
     if force_persistent_profile:
         return RuntimeStrategyDecision(
             mode="persistent_profile",

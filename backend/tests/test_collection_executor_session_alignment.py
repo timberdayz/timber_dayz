@@ -51,9 +51,14 @@ async def test_executor_open_runtime_bundle_uses_persistent_profile_helper(
 
 
 @pytest.mark.asyncio
-async def test_executor_open_runtime_bundle_uses_storage_state_helper_for_fanout(
+async def test_executor_open_runtime_bundle_rejects_storage_state_fanout_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Task 4.2：storage_state 扇出模式已废除 —— profile 是顺序路径唯一载体。
+
+    旧实现里 ``storage_state_fanout`` 会去读会话文件 / bootstrap profile；
+    现在这条分支整体不存在，显式请求它必须得到清晰错误而不是静默降级。
+    """
     executor = CollectionExecutorV2()
     persistent_open = AsyncMock(return_value="persistent-bundle")
     storage_open = AsyncMock(return_value="storage-bundle")
@@ -67,26 +72,30 @@ async def test_executor_open_runtime_bundle_uses_storage_state_helper_for_fanout
         storage_open,
     )
 
-    result = await executor._open_runtime_bundle(
-        session_runtime_mode="storage_state_fanout",
-        browser=object(),
-        browser_type=object(),
-        platform="tiktok",
-        session_owner_id="main-1",
-        runtime_account={"login_url": "https://seller.tiktok.com"},
-        storage_state={"cookies": [], "origins": []},
-        launch_kwargs={"headless": True},
-    )
+    with pytest.raises(ValueError) as excinfo:
+        await executor._open_runtime_bundle(
+            session_runtime_mode="storage_state_fanout",
+            browser=object(),
+            browser_type=object(),
+            platform="tiktok",
+            session_owner_id="main-1",
+            runtime_account={"login_url": "https://seller.tiktok.com"},
+            storage_state={"cookies": [], "origins": []},
+            launch_kwargs={"headless": True},
+        )
 
-    assert result == "storage-bundle"
-    storage_open.assert_awaited_once()
+    message = str(excinfo.value)
+    assert "profile" in message
+    assert "storage_state" in message
     persistent_open.assert_not_awaited()
+    storage_open.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_executor_open_runtime_bundle_auto_prefers_storage_state_helper(
+async def test_executor_open_runtime_bundle_auto_always_prefers_persistent_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """auto 模式恒走 profile：会话候选加载器**不得**被调用（R1 真相源唯一）。"""
     executor = CollectionExecutorV2()
     persistent_open = AsyncMock(return_value="persistent-bundle")
     storage_open = AsyncMock(return_value="storage-bundle")
@@ -99,19 +108,12 @@ async def test_executor_open_runtime_bundle_auto_prefers_storage_state_helper(
         "modules.apps.collection_center.runtime_session.open_storage_state_runtime_bundle",
         storage_open,
     )
+    candidate_loader = AsyncMock(
+        side_effect=AssertionError("顺序路径不得再加载会话候选")
+    )
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.load_runtime_session_candidate",
-        AsyncMock(
-            return_value=type(
-                "Candidate",
-                (),
-                {
-                    "storage_state": {"cookies": [], "origins": []},
-                    "metadata": {},
-                    "manual_seeded": False,
-                },
-            )()
-        ),
+        candidate_loader,
     )
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
@@ -132,6 +134,7 @@ async def test_executor_open_runtime_bundle_auto_prefers_storage_state_helper(
     assert result == "persistent-bundle"
     persistent_open.assert_awaited_once()
     storage_open.assert_not_awaited()
+    candidate_loader.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -154,10 +157,6 @@ async def test_execute_passes_resolved_runtime_mode_to_open_runtime_bundle(
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
         lambda platform, session_owner_id: True,
-    )
-    monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._manual_storage_state_exists",
-        lambda platform, account_id: False,
     )
 
     observed: dict = {}
@@ -236,10 +235,6 @@ async def test_execute_raises_clear_error_when_profile_mode_lacks_browser_type(
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
         lambda platform, session_owner_id: True,
-    )
-    monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._manual_storage_state_exists",
-        lambda platform, account_id: False,
     )
 
     with pytest.raises(ValueError) as excinfo:
@@ -954,9 +949,10 @@ async def test_wait_and_capture_high_quality_tiktok_session_waits_for_stable_qua
 
 
 @pytest.mark.asyncio
-async def test_executor_open_runtime_bundle_auto_falls_back_to_persistent_profile_when_storage_state_missing(
+async def test_executor_open_runtime_bundle_auto_uses_persistent_profile_without_session_bootstrap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """auto 模式恒走 profile：**不做** storage_state bootstrap（R1 真相源唯一）。"""
     executor = CollectionExecutorV2()
     persistent_open = AsyncMock(return_value="persistent-bundle")
     storage_open = AsyncMock(return_value="storage-bundle")
@@ -969,9 +965,12 @@ async def test_executor_open_runtime_bundle_auto_falls_back_to_persistent_profil
         "modules.apps.collection_center.runtime_session.open_storage_state_runtime_bundle",
         storage_open,
     )
+    bootstrap_loader = AsyncMock(
+        side_effect=AssertionError("顺序路径不得再 bootstrap 会话")
+    )
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.load_or_bootstrap_runtime_storage_state",
-        AsyncMock(return_value=None),
+        bootstrap_loader,
     )
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
@@ -992,15 +991,20 @@ async def test_executor_open_runtime_bundle_auto_falls_back_to_persistent_profil
     assert result == "persistent-bundle"
     persistent_open.assert_awaited_once()
     storage_open.assert_not_awaited()
+    bootstrap_loader.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_execute_auto_mode_launchs_browser_when_no_browser_or_page_provided(
+async def test_execute_auto_mode_does_not_launch_extra_browser_in_profile_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Task 4.2 / F4-3：profile 模式下**不再多开一个 Chromium**。
+
+    profile context 自己就是浏览器进程；多开的那一个纯属浪费（多一个进程、
+    多一份内存，退出顺序还容易和 profile 独占锁打架）。
+    """
     executor = CollectionExecutorV2()
-    launched_browser = object()
-    browser_type = type("BrowserType", (), {"launch": AsyncMock(return_value=launched_browser)})()
+    browser_type = type("BrowserType", (), {"launch": AsyncMock(return_value=object())})()
 
     monkeypatch.setattr(
         executor,
@@ -1013,11 +1017,12 @@ async def test_execute_auto_mode_launchs_browser_when_no_browser_or_page_provide
                     "context": object(),
                     "page": object(),
                     "reused_session": True,
-                    "mode": "storage_state_fanout",
+                    "mode": "persistent_profile",
                 },
             )()
         ),
     )
+
     class _NoopLock:
         async def __aenter__(self):
             return None
@@ -1069,7 +1074,8 @@ async def test_execute_auto_mode_launchs_browser_when_no_browser_or_page_provide
     )
 
     assert result.status == "completed"
-    browser_type.launch.assert_awaited_once()
+    # profile 模式下不得再 launch 一个多余的 Chromium
+    browser_type.launch.assert_not_awaited()
 
 
 def test_build_runtime_launch_kwargs_uses_headed_when_debug_mode_enabled() -> None:
@@ -1179,6 +1185,161 @@ def test_runtime_metadata_details_include_session_diagnostics() -> None:
         "https://seller.tiktok.com/homepage",
         "https://seller.tiktok.com/account/login",
     ]
+
+
+@pytest.mark.asyncio
+async def test_parallel_fanout_fingerprint_policy_matches_sequential_profile_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """R8：顺序路径与并行扇出**同一套指纹口径** —— 都不注入运行时覆盖项。
+
+    顺序路径（profile）由 ``normalize_persistent_profile_context_options`` 剥离
+    user_agent / locale / timezone_id；并行扇出必须复用**同一个**函数，
+    否则两条路径的指纹行为不一致（R8 的推论：以 profile 原生环境为准）。
+    """
+    from backend.services.main_account_session_coordinator import (
+        MainAccountSessionCoordinator,
+    )
+    from modules.apps.collection_center import runtime_session
+
+    executor = CollectionExecutorV2(
+        main_account_session_coordinator=MainAccountSessionCoordinator()
+    )
+    executor.downloads_dir = tmp_path / "downloads"
+    executor.screenshots_dir = tmp_path / "screenshots"
+    executor._update_status = AsyncMock()
+    executor._process_files = AsyncMock(return_value=[])
+    executor._ensure_login_gate_ready = AsyncMock()
+
+    class _DummyLock:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    async def _async_false(platform, main_account_id):
+        return False
+
+    async def _async_zero(platform, main_account_id):
+        return 0
+
+    coordinator = executor.main_account_session_coordinator
+    coordinator.acquire = lambda platform, main_account_id: _DummyLock()
+    coordinator.is_locked = lambda platform, main_account_id: False
+    coordinator.waiter_count = lambda platform, main_account_id: 0
+    coordinator.is_locked_async = _async_false
+    coordinator.waiter_count_async = _async_zero
+
+    captured_context_kwargs: list[dict] = []
+
+    class _FakePage:
+        url = "https://seller.shopee.cn/"
+
+    class _FakeContext:
+        async def add_init_script(self, script: str) -> None:
+            return None
+
+        async def new_page(self):
+            return _FakePage()
+
+    class _FakeBrowser:
+        async def new_context(self, **kwargs):
+            captured_context_kwargs.append(kwargs)
+            return _FakeContext()
+
+    async def _fake_open_runtime_bundle(**kwargs):
+        return type(
+            "Bundle",
+            (),
+            {
+                "reused_session": False,
+                "context": type(
+                    "Ctx",
+                    (),
+                    {"close": AsyncMock(), "cookies": AsyncMock(return_value=[])},
+                )(),
+                "page": type("Page", (), {"close": AsyncMock()})(),
+                "mode": "persistent_profile",
+            },
+        )()
+
+    # 指纹里带全套运行时覆盖项 —— 若扇出路径不剥离，它们会原样进 new_context。
+    monkeypatch.setattr(
+        "modules.utils.sessions.device_fingerprint.DeviceFingerprintManager."
+        "get_or_create_fingerprint",
+        lambda self, platform, account_id, account_config=None: {
+            "user_agent": "Fake-UA",
+            "viewport": {"width": 1920, "height": 1080},
+            "locale": "zh-CN",
+            "timezone": "Asia/Shanghai",
+            "device_scale_factor": 1,
+            "is_mobile": False,
+            "has_touch": False,
+        },
+    )
+    monkeypatch.setattr(executor, "_open_runtime_bundle", _fake_open_runtime_bundle)
+    monkeypatch.setattr(
+        executor,
+        "_run_runtime_manifest_component",
+        AsyncMock(return_value=type("R", (), {"success": True})()),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2.runtime_session."
+        "snapshot_runtime_storage_state",
+        AsyncMock(return_value={"cookies": [], "origins": []}),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2."
+        "_record_platform_shop_discovery_async",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2.runtime_session."
+        "apply_stealth_init_scripts",
+        AsyncMock(),
+    )
+
+    await executor.execute_parallel_domains(
+        task_id="task-r8",
+        platform="shopee",
+        account_id="shopee_sg_x",
+        account={
+            "account_id": "shopee_sg_x",
+            "main_account_id": "main-1",
+            "login_url": "https://seller.shopee.cn",
+        },
+        data_domains=["orders"],
+        date_range={"start": "2025-01-01", "end": "2025-01-31"},
+        granularity="daily",
+        browser=_FakeBrowser(),
+        browser_type=object(),
+        max_parallel=1,
+        debug_mode=False,
+        runtime_manifests={"login": {}, "exports_by_domain": {"orders": {}}},
+    )
+
+    # 顺序路径的基准：profile 模式下同样不注入这些覆盖项。
+    sequential_options = runtime_session.normalize_persistent_profile_context_options(
+        platform="shopee",
+        context_options={
+            "user_agent": "Fake-UA",
+            "locale": "zh-CN",
+            "timezone_id": "Asia/Shanghai",
+            "extra_http_headers": {"Accept-Language": "zh-CN"},
+            "accept_downloads": True,
+        },
+    )
+    assert "user_agent" not in sequential_options
+    assert "locale" not in sequential_options
+    assert "timezone_id" not in sequential_options
+
+    assert captured_context_kwargs, "并行扇出必须创建 context"
+    for kwargs in captured_context_kwargs:
+        assert "user_agent" not in kwargs, "并行扇出与顺序路径的指纹口径不一致"
+        assert "locale" not in kwargs, "并行扇出与顺序路径的指纹口径不一致"
+        assert "timezone_id" not in kwargs, "并行扇出与顺序路径的指纹口径不一致"
 
 
 @pytest.mark.asyncio

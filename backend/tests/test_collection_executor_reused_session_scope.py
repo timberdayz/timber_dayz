@@ -15,11 +15,41 @@ from modules.apps.collection_center.executor_v2 import (
 )
 
 
+def _fake_open_persistent_bundle(page, context):
+    """构造一个假的 ``open_persistent_runtime_bundle``。
+
+    Task 4.2：正式采集**恒走持久 profile**（R1 真相源唯一）→ runtime bundle
+    一律由 profile 通道产出，顺序路径不再读会话文件。
+    """
+
+    async def _open(**kwargs):
+        return type(
+            "Bundle",
+            (),
+            {
+                "reused_session": False,
+                "mode": "persistent_profile",
+                "profile_path": "profiles/shopee/main-1",
+                "context": context,
+                "page": page,
+            },
+        )()
+
+    return _open
+
+
 def test_execute_defines_reused_session_before_runtime_task_params_call():
+    """并行路径里 reused_session 必须在构造 runtime task params **之前**定下来。
+
+    Task 4.2 删掉了 executor 侧那份死代码（``_prepare_runtime_page_bundle``），
+    全局首个 ``reused_session = False`` 已不在顺序路径里 → 断言范围收窄到
+    真正持有这个变量的并行函数内。
+    """
     source = Path("modules/apps/collection_center/executor_v2.py").read_text(encoding="utf-8")
 
-    reused_index = source.index("reused_session = False")
-    build_params_index = source.index("params = _build_runtime_task_params(")
+    parallel_source = source[source.index("async def execute_parallel_domains(") :]
+    reused_index = parallel_source.index("reused_session = False")
+    build_params_index = parallel_source.index("params = _build_runtime_task_params(")
 
     assert reused_index < build_params_index
 
@@ -133,7 +163,9 @@ async def test_execute_parallel_domains_requires_main_account_id_before_collecti
 
 
 @pytest.mark.asyncio
-async def test_execute_shared_login_phase_receives_adapter_in_standard_execute_path(monkeypatch):
+async def test_execute_shared_login_phase_receives_adapter_in_standard_execute_path(
+    monkeypatch,
+):
     class FakePage:
         url = "about:blank"
 
@@ -151,9 +183,10 @@ async def test_execute_shared_login_phase_receives_adapter_in_standard_execute_p
     executor = CollectionExecutorV2()
     executor._update_status = AsyncMock()
 
+    # Task 4.2：正式采集恒走持久 profile → runtime bundle 由 profile 通道产出。
     monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._load_or_bootstrap_session_async",
-        AsyncMock(return_value=None),
+        "modules.apps.collection_center.runtime_session.open_persistent_runtime_bundle",
+        _fake_open_persistent_bundle(FakePage(), FakeContext()),
     )
     monkeypatch.setattr(
         "modules.apps.collection_center.executor_v2._get_fingerprint_context_options_async",
@@ -191,6 +224,7 @@ async def test_execute_shared_login_phase_receives_adapter_in_standard_execute_p
         date_range={"start": "2026-04-01", "end": "2026-04-01"},
         granularity="daily",
         browser=FakeBrowser(),
+        browser_type=object(),
     )
 
     assert result == "ok"
@@ -397,9 +431,15 @@ async def test_executor_shared_state_phase_allows_different_main_accounts():
 
 
 @pytest.mark.asyncio
-async def test_execute_reloads_main_account_session_after_waiting_for_lock(
+async def test_execute_reopens_profile_after_waiting_for_lock(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    """第二个任务等锁期间**重新打开 profile** → 必须拿到刷新后的登录态。
+
+    Task 4.2：登录态只由 profile 承载（R1）→ 「重新加载会话」= 「重新打开 profile
+    目录」，不再是「重读会话文件」。本用例守的就是这条语义没被改回去。
+    """
+
     class FakePage:
         def __init__(self, context):
             self.context = context
@@ -416,24 +456,27 @@ async def test_execute_reloads_main_account_session_after_waiting_for_lock(
         async def close(self):
             return None
 
-    class FakeBrowser:
-        def __init__(self):
-            self.context_versions: list[str] = []
-
-        async def new_context(self, **kwargs):
-            storage_state = kwargs.get("storage_state") or {}
-            version = storage_state.get("version", "missing")
-            self.context_versions.append(version)
-            return FakeContext(version)
-
     executor = CollectionExecutorV2()
     executor._update_status = AsyncMock()
 
     current_session = {"version": "stale"}
     first_phase_entered = asyncio.Event()
 
-    async def fake_load_session(platform, account_id, account_config=None, max_age_days=30):
-        return {"storage_state": dict(current_session)}
+    async def fake_open_persistent_bundle(**kwargs):
+        # 每次打开 profile 都拿到「当前」的登录态
+        # （模拟 Chromium 从 profile 目录读到的最新状态）
+        context = FakeContext(current_session["version"])
+        return type(
+            "Bundle",
+            (),
+            {
+                "reused_session": True,
+                "mode": "persistent_profile",
+                "profile_path": "profiles/tiktok/main-1",
+                "context": context,
+                "page": FakePage(context),
+            },
+        )()
 
     async def fake_execute_shared_login_phase(**kwargs):
         if kwargs["task_id"] == "task-1":
@@ -446,8 +489,8 @@ async def test_execute_reloads_main_account_session_after_waiting_for_lock(
         return kwargs["play_context"].version
 
     monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._load_or_bootstrap_session_async",
-        fake_load_session,
+        "modules.apps.collection_center.runtime_session.open_persistent_runtime_bundle",
+        fake_open_persistent_bundle,
     )
     monkeypatch.setattr(
         "modules.apps.collection_center.executor_v2._get_fingerprint_context_options_async",
@@ -464,7 +507,6 @@ async def test_execute_reloads_main_account_session_after_waiting_for_lock(
         fake_execute_with_python_components,
     )
 
-    browser = FakeBrowser()
     account = {
         "account_id": "shop-1",
         "main_account_id": "main-1",
@@ -481,7 +523,8 @@ async def test_execute_reloads_main_account_session_after_waiting_for_lock(
             data_domains=["products"],
             date_range={"start": "2026-04-01", "end": "2026-04-01"},
             granularity="daily",
-            browser=browser,
+            browser=None,
+            browser_type=object(),
         )
     )
     await first_phase_entered.wait()
@@ -494,7 +537,8 @@ async def test_execute_reloads_main_account_session_after_waiting_for_lock(
             data_domains=["products"],
             date_range={"start": "2026-04-01", "end": "2026-04-01"},
             granularity="daily",
-            browser=browser,
+            browser=None,
+            browser_type=object(),
         )
     )
 

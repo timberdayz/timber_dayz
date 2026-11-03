@@ -940,10 +940,6 @@ async def test_requires_profile_session_lock_only_for_profile_modes(
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
         lambda platform, session_owner_id: True,
     )
-    monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._manual_storage_state_exists",
-        lambda platform, account_id: False,
-    )
     assert (
         executor._requires_profile_session_lock(
             platform="shopee",
@@ -973,10 +969,6 @@ async def test_requires_profile_session_lock_locks_auto_without_profile_dir(
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
         lambda platform, session_owner_id: False,
     )
-    monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._manual_storage_state_exists",
-        lambda platform, account_id: False,
-    )
 
     assert (
         executor._requires_profile_session_lock(
@@ -1001,10 +993,6 @@ async def test_requires_profile_session_lock_follows_mode_not_directory_state(
         monkeypatch.setattr(
             "modules.apps.collection_center.runtime_session.runtime_profile_exists",
             lambda platform, session_owner_id, _has=has_profile: _has,
-        )
-        monkeypatch.setattr(
-            "modules.apps.collection_center.executor_v2._manual_storage_state_exists",
-            lambda platform, account_id: False,
         )
 
         # 显式走 profile → 加锁
@@ -1056,10 +1044,6 @@ async def test_auto_mode_takes_account_lock_even_when_profile_dir_missing(
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
         lambda platform, session_owner_id: False,
-    )
-    monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._manual_storage_state_exists",
-        lambda platform, account_id: False,
     )
 
     class _Ctx:

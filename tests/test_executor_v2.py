@@ -59,6 +59,36 @@ def mock_popup_handler():
     return handler
 
 
+class _FakePersistentBrowserType:
+    """最小可用的 ``browser_type`` 替身（Task 4.2）。
+
+    正式采集恒走**持久 profile** 之后, ``execute()`` 会调用
+    ``browser_type.launch_persistent_context(...)`` 拿 context, 再从
+    ``context.pages[0]``(没有则 ``context.new_page()``)取 page。
+
+    这些用例以前传的是 ``object()`` —— 在 profile 分支上会直接抛
+    ``AttributeError: 'object' object has no attribute 'launch_persistent_context'``。
+    """
+
+    def __init__(self, context):
+        self._context = context
+        self.launch_kwargs: list = []
+
+    async def launch_persistent_context(self, **kwargs):
+        self.launch_kwargs.append(kwargs)
+        return self._context
+
+
+@pytest.fixture
+def fake_browser_type(mock_page):
+    """给 ``execute()`` 提供可用的持久 context 替身。"""
+    context = mock_page.context  # 复用既有 mock context, 保留 browser 等属性
+    context.pages = [mock_page]
+    context.new_page = AsyncMock(return_value=mock_page)
+    context.close = AsyncMock()
+    return _FakePersistentBrowserType(context)
+
+
 @pytest.fixture
 def mock_page():
     """创建模拟的Playwright Page（含 context.browser 供执行器 new_context 使用）"""
@@ -120,7 +150,7 @@ class TestCollectionExecutorV2:
         assert executor.popup_handler is not None
         assert executor._task_contexts == {}
     
-    async def test_execute_basic_flow(self, executor, mock_page, mock_component_loader):
+    async def test_execute_basic_flow(self, executor, mock_page, mock_component_loader, fake_browser_type):
         """测试基本执行流程（Python 组件模式：mock adapter 避免真实登录/导出）"""
         # 返回带 _python_component_class 的 dict，走 Python 分支；adapter 由下方 patch 提供
         def mock_load(path, params=None):
@@ -170,6 +200,7 @@ class TestCollectionExecutorV2:
                 date_range={"start": "2025-01-01", "end": "2025-01-31"},
                 granularity="daily",
                 page=mock_page,
+                browser_type=fake_browser_type,
             )
 
         assert result.task_id == "test-task-1"
@@ -177,9 +208,14 @@ class TestCollectionExecutorV2:
         assert result.duration_seconds >= 0
 
     async def test_execute_uses_runtime_manifest_file_paths_for_login_and_export(
-        self, executor, mock_page
+        self, executor, mock_page, fake_browser_type, tmp_path
     ):
         """正式运行应按 stable runtime manifest 的 file_path 加载组件。"""
+        # 导出产物必须是**真实存在的文件** —— 执行器会用
+        # ``_ensure_export_complete`` 校验导出是否落地，文件不存在会被判失败
+        # （任务状态退化成 partial_success）。
+        export_file = tmp_path / "orders.xlsx"
+        export_file.write_text("fake-export", encoding="utf-8")
 
         class _Result:
             def __init__(self, success=True, message="ok", file_path=None):
@@ -206,7 +242,7 @@ class TestCollectionExecutorV2:
                 self.ctx = ctx
 
             async def run(self, page, *args, **kwargs):
-                return _Result(success=True, message="export ok", file_path="temp/orders.xlsx")
+                return _Result(success=True, message="export ok", file_path=str(export_file))
 
         runtime_manifests = {
             "login": RuntimeComponentManifest(
@@ -250,6 +286,7 @@ class TestCollectionExecutorV2:
                 date_range={"start": "2025-01-01", "end": "2025-01-31"},
                 granularity="daily",
                 page=mock_page,
+                browser_type=fake_browser_type,
                 runtime_manifests=runtime_manifests,
             )
 
@@ -261,9 +298,14 @@ class TestCollectionExecutorV2:
         assert export_call.args[0] == runtime_manifests["exports_by_domain"]["orders"].file_path
 
     async def test_execute_with_runtime_manifests_does_not_use_adapter_loading(
-        self, executor, mock_page
+        self, executor, mock_page, fake_browser_type, tmp_path
     ):
         """正式运行提供 manifest 时，不应再依赖 adapter 的模块名加载路径。"""
+        # 导出产物必须是**真实存在的文件** —— 执行器会用
+        # ``_ensure_export_complete`` 校验导出是否落地，文件不存在会被判失败
+        # （任务状态退化成 partial_success）。
+        export_file = tmp_path / "orders.xlsx"
+        export_file.write_text("fake-export", encoding="utf-8")
 
         class _Result:
             def __init__(self, success=True, message="ok", file_path=None):
@@ -290,7 +332,7 @@ class TestCollectionExecutorV2:
                 self.ctx = ctx
 
             async def run(self, page, *args, **kwargs):
-                return _Result(success=True, file_path="temp/orders.xlsx")
+                return _Result(success=True, file_path=str(export_file))
 
         runtime_manifests = {
             "login": RuntimeComponentManifest(
@@ -337,6 +379,7 @@ class TestCollectionExecutorV2:
                 date_range={"start": "2025-01-01", "end": "2025-01-31"},
                 granularity="daily",
                 page=mock_page,
+                browser_type=fake_browser_type,
                 runtime_manifests=runtime_manifests,
             )
 
@@ -368,6 +411,7 @@ class TestCollectionExecutorV2:
                 date_range={'start': '2025-01-01', 'end': '2025-01-31'},
                 granularity='daily',
                 page=mock_page,
+                browser_type=fake_browser_type,
             )
         except:
             pass
@@ -376,7 +420,7 @@ class TestCollectionExecutorV2:
         assert len(status_updates) > 0
         assert status_updates[0][0] == 'test-task-2'
     
-    async def test_task_cancellation(self, mock_component_loader, mock_popup_handler, mock_page):
+    async def test_task_cancellation(self, mock_component_loader, mock_popup_handler, mock_page, fake_browser_type):
         """测试任务取消"""
         async def is_cancelled(task_id):
             return True  # 模拟任务被取消
@@ -396,6 +440,7 @@ class TestCollectionExecutorV2:
             date_range={'start': '2025-01-01', 'end': '2025-01-31'},
             granularity='daily',
             page=mock_page,
+            browser_type=fake_browser_type,
         )
         
         assert result.status == 'cancelled'
