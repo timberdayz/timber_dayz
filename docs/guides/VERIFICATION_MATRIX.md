@@ -19,6 +19,13 @@ This file maps changed surfaces to repository-specific checks. The active verifi
 - Prefer targeted backend tests under `backend/tests/`.
 - Check async database usage when touching runtime database code.
 - Verify typed endpoints use schemas from `backend/schemas/`.
+- The repository carries a pre-existing failing-test baseline, so "no new failures" must be
+  proven by a **failure-set diff**, not by a count. Produce a junit XML for both the base
+  revision and the changed revision
+  (`python -m pytest <target> -q --tb=no --junitxml=<file>.xml`), then run
+  `python scripts/diff_pytest_junit.py <before.xml> <after.xml>` — it prints
+  `NEW` / `FIXED` / `COMMON` and exits `1` when new failures appear. See
+  `docs/superpowers/plans/2026-11-02-collection-profile-only-architecture.md` Task 10.
 
 ## Frontend Changes
 
