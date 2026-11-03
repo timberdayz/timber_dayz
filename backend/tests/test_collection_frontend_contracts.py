@@ -255,8 +255,32 @@ def test_collection_tasks_detail_drawer_shows_runtime_metadata():
     assert "getRuntimeSessionModeLabel" in text
     assert "getSessionSourceLabel" in text
     assert "getRuntimeStrategyReasonLabel" in text
-    assert "storage_state_available" in text
-    assert "storage_state 会话快照" in text
+    assert "profile_is_single_source_of_truth" in text
+    assert "persistent_profile_available" in text
+
+
+def test_collection_tasks_detail_drawer_uses_profile_session_diagnostics():
+    text = COLLECTION_TASKS_VIEW.read_text(encoding="utf-8")
+
+    assert "session_profile_path" in text
+    assert "session_reused" in text
+    assert "session_proxy" in text
+
+    for removed in (
+        "session_quality_score",
+        "session_quality_gate_passed",
+        "session_quality_source",
+        "session_manual_seeded",
+        "session_protected",
+        "getSessionQualitySourceLabel",
+        "persistent_profile_path",
+        "profile_contains_state",
+        "storage_state_available",
+        "storage_state_missing",
+        "manual_storage_state_available",
+        "storage_state 会话快照",
+    ):
+        assert removed not in text, f"旧会话诊断字段/文案应已移除: {removed}"
 
 
 def test_account_management_does_not_offer_free_form_login_url_editing():
