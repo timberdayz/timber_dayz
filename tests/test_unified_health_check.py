@@ -41,7 +41,9 @@ def test_system_discovery():
     assert count > 0, "应该能发现至少一个应用"
     
     apps = registry.list_applications()
-    expected_apps = ["account_manager", "collection_center", "web_interface_manager"]
+    # 注(2026-11-03): 遗留 CLI 老程序(collection_center/app.py)已退役,
+    # collection_center 不再是可注册应用。
+    expected_apps = ["account_manager", "web_interface_manager"]
     
     for expected_app in expected_apps:
         assert expected_app in apps, f"应该能发现 {expected_app}"
