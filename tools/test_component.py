@@ -340,59 +340,27 @@ class ComponentTester:
         (FastAPI)与子进程是**不同进程** -> 进程内 ``asyncio.Lock`` 对子进程完全
         无效, 必须用 Redis ``SET NX``(Task 3 的 ``MainAccountSessionLock``)。
 
-        选型(与采集侧共用同一个 key 空间 ``build_lock_key(platform, main_account_id)``):
+        判定**不再各写一套**
+        -------------------
+        父进程(采集)与子进程(录制)统一走
+        ``backend.services.main_account_session_lock.create_default_backend()``
+        (同一个 ``resolve_session_lock_backend_mode()`` 判定 + 同一套
+        fail-closed / fail-open 分级降级), 否则两侧会各自为政 ->
+        互相排斥不了 -> 采集持锁期间录制照样能打开同一个 profile 目录。
 
-        * ``ACCOUNT_SESSION_LOCK_BACKEND=redis`` 或生产环境 -> 必须 Redis,
-          拿不到就**报错**(fail-closed);
-        * ``auto`` + 非生产 + 配了 ``REDIS_URL`` -> **显式**走 Redis(进程内锁对
-          子进程无效), 拿不到 Redis 就**明确报错** —— 宁可报错, 也不要让 Chromium
-          抛 ``Failed to create a ProcessSingleton for your profile directory``
-          那种天书错误;
-        * ``auto`` + 非生产 + 没有 ``REDIS_URL``(独立跑 CLI) -> 进程内锁 +
-          **明确告警**「跨进程保护未启用」(单机单任务场景不会冲突)。
+        统一后的规则:
+
+        * ``ACCOUNT_SESSION_LOCK_BACKEND=redis`` -> 强制 Redis, 拿不到按
+          fail-closed 分级(生产报错 / 非生产降级为进程内锁 + error 级日志);
+        * ``ACCOUNT_SESSION_LOCK_BACKEND=local`` -> 进程内锁,
+          **一个 Redis 连接都不建**;
+        * ``auto``(默认) -> 生产 -> Redis; 非生产但配了 Redis 地址 -> 也走 Redis
+          (父子同一个 key, 互相排斥); 未配 -> 进程内锁 + **明确告警**
+          「跨进程保护未启用」。
         """
-        from backend.services.main_account_session_lock import (
-            MainAccountSessionLockUnavailableError,
-            RedisSessionLockBackend,
-            get_local_session_lock_backend,
-            get_shared_redis_client,
-        )
-        from backend.utils.config import (
-            account_session_lock_backend,
-            account_session_lock_environment,
-        )
+        from backend.services.main_account_session_lock import create_default_backend
 
-        mode = (account_session_lock_backend() or "auto").strip().lower()
-        if mode not in {"auto", "redis", "local"}:
-            mode = "auto"
-        environment = account_session_lock_environment()
-
-        if mode == "local":
-            logger.warning(
-                "[ACCOUNT_SESSION_LOCK] 账号会话锁后端被显式设为 local: "
-                "跨进程保护未启用(录制子进程与采集进程可能同时打开同一个 profile 目录)"
-            )
-            return get_local_session_lock_backend()
-
-        redis_required = mode == "redis" or environment == "production"
-        redis_url_configured = bool((os.getenv("REDIS_URL") or "").strip())
-        if not redis_required and not redis_url_configured:
-            logger.warning(
-                "[ACCOUNT_SESSION_LOCK] 未配置 REDIS_URL, 跨进程保护未启用: "
-                "录制子进程与采集任务可能同时打开同一个 profile 目录"
-                "(单机单任务场景不会冲突; 需要跨进程保护请配置 REDIS_URL)"
-            )
-            return get_local_session_lock_backend()
-
-        client = await get_shared_redis_client()
-        if client is None:
-            raise MainAccountSessionLockUnavailableError(
-                "账号会话锁服务不可用, 无法安全地打开 profile: "
-                "录制子进程与采集任务会争用同一个 Chromium profile 目录。"
-                "请检查 Redis 是否可达以及 REDIS_URL/REDIS_PASSWORD 配置"
-                "(确认不需要跨进程保护可设置 ACCOUNT_SESSION_LOCK_BACKEND=local)"
-            )
-        return RedisSessionLockBackend(client)
+        return await create_default_backend()
 
     async def _acquire_profile_session_lock(self, *, main_account_id: str) -> Any:
         """获取**跨进程**账号会话锁(与采集侧同一个 key)。"""

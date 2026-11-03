@@ -11,8 +11,9 @@
 
 1. profile 目录身份 = **主账号 ID**(显式优先级链, 防回退到店铺账号 ID);
 2. 打开**真实** profile 目录时持有**跨进程**账号会话锁(与采集侧同一个 key),
-   临时目录不加锁; 锁服务不可用时**明确报错**(而不是让 Chromium 抛
-   ProcessSingleton 天书错误);
+   临时目录不加锁; 锁服务不可用时按 fail-closed / fail-open **分级**
+   (生产报错 / 非生产降级为进程内锁 + error 级日志) —— 判定与采集侧
+   **共用同一个入口**(``create_default_backend()``), 不再各写一套;
 3. ``tools/test_component.py`` 里不再有硬编码本机绝对路径的调试写入 ——
    那类代码在别的机器上会直接抛 ``FileNotFoundError`` 打崩子进程。
 """
@@ -278,12 +279,38 @@ async def test_lock_backend_uses_redis_in_non_production_when_redis_url_configur
 
 
 @pytest.mark.asyncio
-async def test_lock_backend_raises_when_redis_is_configured_but_unreachable(
+async def test_lock_backend_degrades_to_local_when_redis_is_configured_but_unreachable(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """配了 Redis 却拿不到 -> 明确报错(中文), 而不是让 Chromium 报天书错误。"""
+    """配了 Redis 却拿不到 -> 按 fail-closed **分级**: 非生产降级 + error 级日志。
+
+    判定统一到父进程的 ``create_default_backend()`` 之后, 子进程不再自带一套
+    「一律报错」的规则 —— 那正是父子两侧再次分叉的源头。
+    """
     monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "auto")
     monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+
+    async def _no_client() -> Any:
+        return None
+
+    monkeypatch.setattr(lock_module, "get_shared_redis_client", _no_client)
+
+    with caplog.at_level("ERROR"):
+        backend = await _tester()._build_profile_session_lock_backend()
+
+    assert backend is lock_module.get_local_session_lock_backend()
+    assert "跨进程保护已失效" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_lock_backend_fails_closed_in_production_when_redis_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """生产 -> 拿不到 Redis 必须**报错**(fail-closed), 不允许静默降级。"""
+    monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "auto")
+    monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
 
     async def _no_client() -> Any:
@@ -296,21 +323,24 @@ async def test_lock_backend_raises_when_redis_is_configured_but_unreachable(
 
     message = str(excinfo.value)
     assert "账号会话锁服务不可用" in message
-    assert "profile" in message
 
 
 @pytest.mark.asyncio
 async def test_lock_backend_falls_back_to_local_without_redis_url(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """独立跑 CLI(没有 REDIS_URL) -> 进程内锁 + 明确告警, 不报错。"""
+    """独立跑 CLI(没有 Redis 地址) -> 进程内锁 + 明确告警, 不报错。"""
     monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "auto")
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("CELERY_BROKER_URL", raising=False)
 
-    backend = await _tester()._build_profile_session_lock_backend()
+    with caplog.at_level("WARNING"):
+        backend = await _tester()._build_profile_session_lock_backend()
 
     assert backend is lock_module.get_local_session_lock_backend()
+    assert "跨进程保护未启用" in caplog.text
 
 
 @pytest.mark.asyncio

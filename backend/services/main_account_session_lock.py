@@ -486,7 +486,10 @@ async def get_shared_redis_client() -> Optional[Any]:
     # 本次连接开始时的 epoch(评审 F11): 连接期间若发生 reset, epoch 会变。
     epoch = _redis_client_epoch
 
-    from backend.utils.config import account_session_lock_redis_retry_cooldown_seconds
+    from backend.utils.config import (
+        account_session_lock_redis_retry_cooldown_seconds,
+        account_session_lock_redis_url,
+    )
 
     cooldown = float(account_session_lock_redis_retry_cooldown_seconds())
     if _redis_client_failed_at is not None:
@@ -499,11 +502,14 @@ async def get_shared_redis_client() -> Optional[Any]:
             )
             return None
 
-    redis_url = (os.getenv("REDIS_URL") or "").strip()
+    # 用**有效地址**(REDIS_URL 优先, 其次 CELERY_BROKER_URL)——
+    # 必须与 ``resolve_session_lock_backend_mode()`` 的判定口径完全一致,
+    # 否则会出现「判定说配了 Redis, 连接却去连另一个地址」。
+    redis_url = account_session_lock_redis_url()
     if not redis_url:
         _redis_client_failed_at = time.monotonic()
         logger.error(
-            "[AccountSessionLock] 未配置 REDIS_URL, 账号会话锁不可用"
+            "[AccountSessionLock] 未配置 REDIS_URL / CELERY_BROKER_URL, 账号会话锁不可用"
             "(生产 fail-closed 会拒绝全部采集); 请检查采集容器的 REDIS_URL 配置, "
             "将在 %.0fs 后自动重试",
             cooldown,
@@ -599,16 +605,33 @@ async def reset_shared_redis_client() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _backend_mode() -> str:
-    """后端模式: ``auto`` / ``redis`` / ``local``。
+def resolve_session_lock_backend_mode() -> str:
+    """**统一**的账号会话锁后端判定: ``redis`` / ``local``。
 
-    * ``auto``(默认): 生产强制 Redis; 非生产用进程内锁(测试绝不连真实 Redis, L8)。
-    * ``redis``: 强制 Redis(不可用时按 fail-closed 分级)。
-    * ``local``: 强制进程内锁。
+    为什么必须只有这一处
+    ------------------
+    父进程(FastAPI 采集任务)与子进程(录制/组件测试 ``tools/test_component.py``)
+    是**两个进程**: 进程内 ``asyncio.Lock`` 只在同进程内互斥。两侧各选各的后端
+    -> 父进程拿进程内锁、子进程拿 Redis 锁 -> **互相排斥不了**
+    -> 采集任务正持有某账号的 profile 时, 录制照样能打开同一个目录
+    -> 撞 Chromium 的 profile 独占锁(``SingletonLock``)。
+
+    规则(纯静态判定, **不做连接探测**)
+    ------------------------------------
+    * ``redis``(显式) -> 强制 Redis; 拿不到时按 fail-closed 分级。
+    * ``local``(显式) -> 强制进程内锁; **一个 Redis 连接都不建**。
+    * ``auto``(默认) -> 生产环境 -> Redis(行为不变);
+      非生产但**配置上指向了 Redis**(``REDIS_URL`` / ``CELERY_BROKER_URL``)
+      -> 也走 Redis(父子一致, 同一个 key 互相排斥); 其余 -> 进程内锁。
+
+    「配了地址但连不上」(例如 compose 里 ``REDIS_URL`` 恒有值而宿主 Redis 没起)
+    由 ``create_default_backend()`` 的**分级降级**兜底: 生产 fail-closed 报错 /
+    非生产 fail-open 降级为进程内锁 + error 级日志。
     """
     from backend.utils.config import (
         account_session_lock_backend,
         account_session_lock_environment,
+        account_session_lock_redis_url,
     )
 
     mode = account_session_lock_backend()
@@ -617,9 +640,30 @@ def _backend_mode() -> str:
             "[AccountSessionLock] 未知的 ACCOUNT_SESSION_LOCK_BACKEND=%r, 回退 auto", mode
         )
         mode = "auto"
-    if mode == "auto":
-        return "redis" if account_session_lock_environment() == "production" else "local"
-    return mode
+    if mode != "auto":
+        return mode
+    if account_session_lock_environment() == "production":
+        return "redis"
+    if account_session_lock_redis_url():
+        return "redis"
+    return "local"
+
+
+def _warn_cross_process_protection_disabled() -> None:
+    """进程内锁 = 跨进程保护未启用 -> **必须**明确告警(否则等于静默降级)。"""
+    from backend.utils.config import account_session_lock_backend
+
+    if account_session_lock_backend() == "local":
+        logger.warning(
+            "[AccountSessionLock] 账号会话锁后端被显式设为 local: 跨进程保护未启用"
+            "(同一账号可能被两个进程同时打开同一个 profile 目录)"
+        )
+        return
+    logger.warning(
+        "[AccountSessionLock] 未配置 Redis 地址(REDIS_URL / CELERY_BROKER_URL), "
+        "跨进程保护未启用: 同一账号可能被两个进程同时打开同一个 profile 目录"
+        "(单机单任务场景不会冲突; 需要跨进程保护请配置 REDIS_URL)"
+    )
 
 
 def default_fail_closed() -> bool:
@@ -630,8 +674,10 @@ def default_fail_closed() -> bool:
 
 
 async def create_default_backend(*, fail_closed: Optional[bool] = None) -> SessionLockBackend:
-    """按当前配置创建默认后端。"""
-    if _backend_mode() == "local":
+    """按**统一**判定创建默认后端(父进程与录制子进程共用这一个入口)。"""
+    mode = resolve_session_lock_backend_mode()
+    if mode == "local":
+        _warn_cross_process_protection_disabled()
         return get_local_session_lock_backend()
 
     client = await get_shared_redis_client()

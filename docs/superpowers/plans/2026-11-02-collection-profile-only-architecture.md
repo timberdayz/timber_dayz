@@ -40,6 +40,7 @@
 | Task 4 补地基 | ✅ | `035523b7`；11 个新用例（TDD 证明 8 个在旧码上红）；`backend/tests` 两种顺序 NEW=0 / FIXED=0 |
 | Task 6.0 清理遗留老程序 | ✅ | `6e63f501`；删 `app.py`(5170 行) + `handlers.py`(2524 行) + 2 个测试；路由表 740 条不变；NEW=0 / FIXED=0 |
 | Task 6.5 录制子进程对齐 profile | ✅ | `b9fdcb62`；profile 身份改主账号 ID + 接入跨进程锁 + 删 14 处硬编码调试写入；NEW=0 / FIXED=0 |
+| Task 3.1 账号锁后端统一 | ✅ | 分支 `feature/session-profile-only-t31`；父子进程共用 `resolve_session_lock_backend_mode()`；两种顺序 NEW=0 / FIXED=0；锁模块覆盖率仍 100% |
 | Task 4.2 顺序路径收敛 | ⏳ 进行中 | 分支 `feature/session-profile-only-t42` |
 | Task 5 / 6 / 7 | ⏳ 进行中 | Task 5 分支 `...-t5`、Task 6 分支 `...-t6`；Task 7 已完成二次只读盘点，见各自章节的修订表 |
 | Task 8 / 9 / 10 | ⏳ | Task 10 **必须在合并回 main 之后**跑（profile 根是仓库根相对，worktree 的 `profiles/` 是空的） |
@@ -1355,6 +1356,46 @@ if mode == "auto":
 - 非生产 + 配了 `REDIS_URL` → 父进程与子进程都拿 **Redis** 锁 → 同一个 key 互相排斥。
 - 未配 `REDIS_URL` → 两侧都退化为进程内锁并**明确告警**。
 - 锁不可达时的降级行为保持分级（生产 fail-closed / 非生产 fail-open），并有 error 级日志。
+
+### 实施结果（2026-11-03，分支 `feature/session-profile-only-t31`）
+
+**统一后的判定**（`backend/services/main_account_session_lock.py` 的
+`resolve_session_lock_backend_mode()`，父进程与录制子进程**共用**这一个入口）：
+
+| 输入 | 结果 |
+|---|---|
+| `ACCOUNT_SESSION_LOCK_BACKEND=redis` | 强制 Redis；拿不到按 fail-closed 分级（生产报错 / 非生产降级为进程内锁 + error 级日志） |
+| `ACCOUNT_SESSION_LOCK_BACKEND=local` | 进程内锁；**一个 Redis 连接都不建** |
+| `auto` + `ENVIRONMENT=production` | Redis（生产行为不变） |
+| `auto` + 非生产 + **配置上指向了 Redis**（`REDIS_URL` 优先，其次 `CELERY_BROKER_URL`） | Redis（父子一致 → 同一个 key 互相排斥） |
+| `auto` + 非生产 + 未配置 Redis 地址 | 进程内锁 + **明确告警**「跨进程保护未启用」 |
+
+> 判定是**纯静态**的（不引入连接探测，避免每次判定都去连 Redis）。「配了地址但连不上」
+> （compose 里 `REDIS_URL` 恒有值而宿主 Redis 没起）由既有的**分级降级**兜底。
+> 「配置上指向了 Redis」与「真正建连用的地址」取的是**同一个**函数
+> `backend/utils/config.py:account_session_lock_redis_url()` —— 判定与建连不会打架。
+
+**改动文件**：
+
+| 文件 | 改了什么 |
+|---|---|
+| `backend/services/main_account_session_lock.py` | `_backend_mode()` → 公开的 `resolve_session_lock_backend_mode()`；`auto` 判定改为「生产 **或** 配置上指向了 Redis → Redis」；`create_default_backend()` 在进程内锁时**明确告警**「跨进程保护未启用」；`get_shared_redis_client()` 改用同一个有效地址 |
+| `backend/utils/config.py` | 新增 `account_session_lock_redis_url()`（有效 Redis 地址：`REDIS_URL` 优先，其次 `CELERY_BROKER_URL`） |
+| `tools/test_component.py` | 录制子进程**不再自带一套判定**，改调 `create_default_backend()`（与采集侧同一入口 + 同一套 fail-closed / fail-open 分级） |
+| `backend/tests/test_main_account_session_lock.py` | 统一判定用例、显式 local「一个 Redis 连接都不建」（**不靠 mock**，断言客户端状态未被触碰）、未配 Redis 明确告警、连不上按分级降级 |
+| `backend/tests/test_component_test_profile_identity.py` | 子进程侧改按**分级**断言（非生产降级 + error 级日志 / 生产 fail-closed 报错） |
+| `backend/tests/test_session_lock_backend_unification.py`（新增） | 钉住「父子同一判定 + 同一 key」契约，并用 AST 断言子进程**不得**再出现自己的后端判定 |
+
+**单元测试隔离**：靠 `backend/tests/conftest.py` 把 `ACCOUNT_SESSION_LOCK_BACKEND` 钉成
+显式 `local` 的护栏，**不依赖** `auto` 的非生产语义 —— 改 `auto` 不会让测试连上真实 Redis。
+
+**验证**：
+- 锁模块覆盖率：`main_account_session_lock.py` / `main_account_session_coordinator.py` 仍 **100%**（含分支）。
+- 守卫脚本：`verify_rules_completeness.py` / `verify_root_md_whitelist.py` / `verify_utf8_source_hygiene.py` 全部 exit 0。
+- 真机实测（本机 Redis `:16379`）：父进程（采集侧入口）持锁时，录制子进程侧
+  （`tools/test_component.py` 的后端构建）**拿不到锁**并报「账号会话被其它采集任务占用」；
+  父进程放锁后子进程可正常拿到锁；未配 Redis 地址时两侧都退化为进程内锁并告警；
+  显式 `local` 时客户端状态未被触碰且 Redis 里没有锁 key。
 
 ---
 
