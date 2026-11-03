@@ -966,6 +966,77 @@ git commit -m "refactor(collection): 并行快照改为纯内存，不再落盘�
 
 ---
 
+## Task 6.0: 清理遗留「采集中心老程序」（D8，用户 2026-11-03 拍板）
+
+> **背景**：B1 的根因是**遗留老程序**（`modules/apps/collection_center/app.py` 4568 行 + `handlers.py` 2094 行）
+> 用 `shop_account_id` 命名 profile，与采集的 `main_account_id` 命名空间冲突。
+> 用户明确：「**老程序没有用了，我甚至觉得可以直接清理掉老代码，避免后续误用**」。
+
+### 影响面（已独立核实）
+
+| 事实 | 证据 |
+|---|---|
+| **没有任何生产代码 import `app.py` 或 `handlers.py`** | 全仓 grep：只有 `modules/apps/collection_center/__init__.py:10`（`from .app import CollectionCenterApp`）、`app.py:129/309`（包内 import handlers）、`contract_tests.py:129`（包内）、`backend/tests/test_recording_handler_manual_session_metadata.py:3`（**唯一**的外部测试引用） |
+| `CollectionCenterApp` 只在自己 `__main__` 里被实例化 | `app.py:5097-5099`（`if __name__ == "__main__"`）→ 独立 CLI 程序，**不经 FastAPI** |
+| 正式采集走 HTTP API，不经老程序 | `collection_tasks.py:1630/1815` → `CollectionExecutorV2`；`app.py:44-45` 自己的注释也写明「正式采集走 POST /api/collection/tasks，**不经过本 CLI**」 |
+| 老程序贡献了 17 处 `get_or_create_persistent_context`（shop_account_id 命名空间） | `app.py:659/845/1032/1184/1241/1279/1326/1401/1612/1866/2335/4587/4664`(13) + `handlers.py:498/580/1392/1423`(4) |
+| **pwcli 本身没有录制命令** | `pwcli_native.py` 的命令只有 open/list/close/close-all/reload/snapshot/click/fill/press/screenshot/state-save/state-load → pwcli 是**浏览器自动化 CLI**，不是录制器 |
+| **录制/组件测试是另一条活链路，不能一起删** | `backend/domains/collection/routers/component_recorder.py`（FastAPI 路由）→ `ComponentTestService.run_component_test_subprocess`（`component_test_service.py:94`）→ **子进程** `tools/test_component.py` |
+
+### 要做的
+
+1. **删除** `modules/apps/collection_center/app.py`、`modules/apps/collection_center/handlers.py`。
+2. **改** `modules/apps/collection_center/__init__.py`：去掉 `from .app import CollectionCenterApp` 与 `__all__`。
+3. **处理** `modules/apps/collection_center/contract_tests.py`（包内引用 `handlers`）—— 删除或改写。
+4. **删除** `backend/tests/test_recording_handler_manual_session_metadata.py`。
+5. **排查删除后变死代码的模块**（逐个确认还有没有别的调用方再决定删不删，**不要顺手大删**）：
+   - `modules/utils/persistent_browser_manager.py`（老程序贡献了大量调用方）
+   - `modules/utils/account_manager.py`（`handlers.py` 的账号来源）
+   - `modules/apps/collection_center/component_loader.py` 等包内其它文件
+6. **`legacy_shop_artifact_cleanup.py:48`** 把 `profiles/<平台>/<shop_account_id>` 列为遗留物 → 老程序删掉后，**这个清理规则可以正式生效**（把仍在生产的 `tools/test_component.py` 产出的目录也纳入清理范围，见 Task 6.5）。
+7. **文档同步**（Task 9）：`docs/guides/` 与 `openspec/` 里凡提到「采集中心应用 / 一键采集 CLI / `CollectionCenterApp`」的地方要改。
+
+### 不在范围
+
+- **不要**动 `tools/test_component.py` 的存在与否 —— 它是**活的**录制/组件测试子进程。改它的 profile 命名空间属于 **Task 6.5**。
+- **不要**动 `executor_v2.py` / `runtime_session.py` / `collection_tasks.py` —— 那是别的 Task 的事。
+- **不要**顺手重构 `modules/utils/` 下与老程序无关的模块。
+
+---
+
+## Task 6.5: 录制/组件测试子进程改用 main_account_id（与 Task 6.0 配套）
+
+老程序删掉后，`profiles/<平台>/<shop_account_id>` 命名空间的**唯一活的生产者**只剩录制/组件测试子进程 `tools/test_component.py`。
+
+- **位置**：`tools/test_component.py:1792` → `session_owner_id or self.account_id or account_info.get('account_id')`
+- **事实**：`backend/services/component_test_service.py:69-72` **已经同时产出** `account_id`（shop）与 `main_account_id`，只是子进程**优先用了 shop 的**。
+- **要求**：改成**优先用 `account_info['main_account_id']`** → 录制子进程与采集共用同一个 profile 目录 → R6「同一账号串行」成立、录制时登录的登录态**也能**让采集免验证码。
+- **配套**：录制子进程也要走**同一把跨进程账号锁**（否则采集持锁时录制仍会打开同一目录）。
+- **注意**：这条改完，`profiles/<平台>/<shop_account_id>` 就彻底没有生产者了 → Task 6.0 第 6 条的清理规则可以正式启用。
+
+### Task 6.5 附带项：`tools/test_component.py` 里 14 处硬编码调试写入（🔴 会打崩子进程）
+
+**实测发现**：`tools/test_component.py` 有 **14 处**遗留的 agent 调试代码，行号 `676 / 686 / 691 / 1755 / 1778 / 1865 / 1904 / 1940 / 2013 / 2039 / 2096 / 2124 / 2743 / 2760`，形态是：
+
+```python
+with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+    f.write(json.dumps({'location':'test_component.py:301', ...}) + '\n')
+```
+
+**危害**：
+1. 路径是**硬编码的本机绝对路径** → 在**任何别的机器**（同事的开发机、生产服务器）上，`open(..., 'a')` 会抛 `FileNotFoundError`（父目录不存在）→ **直接把录制/组件测试子进程打崩**。本机因为 `.cursor/` 目录存在才没暴露。
+2. 里面写的 `location` 是**过期行号**（如 `test_component.py:301`），说明是历史注入的残留。
+3. 本机 `.cursor/debug.log` 已累积 **538 KB** 噪音。
+
+**要求**：**全部 14 处删除**（连同 `# region agent log` / `# endregion` 注释块）。
+**注意**：
+- 删除后要检查这些 `with open(...)` 块里**有没有夹带业务逻辑**（本意只是写日志，但必须逐处确认，别连带删掉真实语句）。
+- 有些块里包着**真正要执行的语句**（例如打印、赋值、调用），不能整块删 —— 要把调试写入摘掉、**保留**业务语句。
+- 删完做一次语法自检：`python -c "import ast,sys; ast.parse(open('tools/test_component.py',encoding='utf-8').read())"`。
+- 若同文件还有其它形式的调试残留（`print(` 调试输出、`# TODO`、临时 `logger.debug` 洪水），**只清理这 14 处**，其余不要顺手改（避免超范围）。
+
+---
+
 ## Task 6: 巡店面板删除「保存会话」（D6 / R3）
 
 **Files:**
@@ -1029,13 +1100,19 @@ git commit -m "refactor(collection): 并行快照改为纯内存，不再落盘�
 
 - [ ] **Step 6.7: 巡店也纳入同一把账号锁（F6-9 / R6 系统级闭合）**
 
-Task 3 只给**采集**加了跨进程账号锁。巡店（`modules/apps/collection_center/app.py:657/845/1032/1184`、`handlers.py:498/580/1392/1423`）与录制（`backend/domains/collection/routers/component_recorder.py:553-634`，**子进程**）仍然直接打开 profile 目录 → 采集持锁期间它们照样能打开同一个目录 → **Chromium ProcessSingleton 冲突**，或更糟：双开导致 profile 损坏。
+> **范围已随 Task 6.0 收窄**：遗留 TUI 巡店（`app.py`/`handlers.py`）**已被删除** → 不再需要给它加锁。
+> 剩下需要纳入同一把锁的是两条：
+> ① **pwcli 巡店面板**（`scripts/pwcli_inspection_panel.py` → `pwcli_native.py`）—— `main_account_id` 直接可得（`pwcli_account_inventory.py:130`）
+> ② **录制/组件测试子进程**（`tools/test_component.py`，Task 6.5）
+
+Task 3 只给**采集**加了跨进程账号锁。巡店与录制仍然直接打开 profile 目录 → 采集持锁期间它们照样能打开同一个目录 → **Chromium ProcessSingleton 冲突**，或更糟：双开导致 profile 损坏。
 
 要求：
 1. 巡店打开 profile 前，必须用**同一把** `MainAccountSessionLock`（key = `build_lock_key(platform, main_account_id)`）取锁，并**持有到巡店浏览器关闭**（R7：正常关闭 → 刷盘 → 再放锁）。
-2. 锁被占用时，巡店面板必须给出**明确提示**（「该账号正在采集中，请稍后再打开」），而不是让 Chromium 自己报 ProcessSingleton 错误。
-3. 录制子进程需要能拿到锁：优先复用 `MainAccountSessionLock` 的 Redis 后端（子进程自己连 Redis），不要在父进程里代持（父进程退出就会放锁，子进程还在跑）。
-
+2. 锁被占用时，巡店面板必须给出**明确提示**（「该账号正在采集中，请稍后再打开」），而不是让 Chromium 自己报 ProcessSingleton 错误。HTTP 状态码用 **409**（现有通路是 500，语义不对）。
+3. **锁的持有期**：`pwcli open` 是一次性命令（`command_open:742` 返回 0，PowerShell/Python 结束，**Chromium 还活着**）→ 当前架构里**没有自然持有者**。
+   - **推荐方案**：面板（常驻 uvicorn，`pwcli_inspection_panel.py:229`）在 `/api/accounts/open` 前取 Redis 锁 → 启动后从 `output/playwright/.pwcli_native/sessions/<session>/session.json` 读 `pid` → 轮询 `is_process_alive(pid)`（`:451-453`）→ 进程消失即放锁。
+   - 面板 `run_action:176` 现在是 **sync def**（`subprocess.run` 阻塞）→ 端点要改 `async def` + `await` 取锁 + `asyncio.create_task` 后台轮询放锁。面板进程崩溃 → 锁泄漏到 TTL（靠 TTL + 心跳兜底）。
 > **这一步是 R6「同一账号串行」在系统层面闭合的前提**，与 Task 3 的锁是同一把锁，不是新增一把。
 
 - [ ] **Step 7: 跑测试并提交**
@@ -1122,7 +1199,7 @@ git commit -m "feat(pwcli): 巡店面板移除保存会话，登录态由 profil
 
 | # | 问题 | 后果 | 处置 |
 |---|---|---|---|
-| **B1** | **profile 身份有三套命名空间**：采集 `profiles/<平台>/<main_account_id>`；pwcli 面板 `profiles/<平台>/<main_account_id>` ✅；**TUI 巡店/组件调试台/录制子进程 `profiles/<平台>/<shop_account_id>`** ❌ | ① TUI 巡店登录的登录态落在**采集永远不读**的目录；② 讽刺的是，**目前是它靠「人工会话优先」这条规则在给采集喂登录态**（`executor_v2.py:1020-1029` → `_should_prefer_manual_storage_state` 恒 True）→ **Task 7 删掉会话文件后这条桥彻底断**；③ `legacy_shop_artifact_cleanup.py:48` 把 `profiles/<平台>/<shop_account_id>` 列为「遗留物」→ **代码在持续制造被自己标记为垃圾的目录** | **已提请用户拍板**（三选一：全部统一到 main_account_id / 承认它是独立调试工具 / 本轮先按独立工具做、统一化排后续） |
+| **B1** | **profile 身份有三套命名空间**：采集 `profiles/<平台>/<main_account_id>`；pwcli 面板 `profiles/<平台>/<main_account_id>` ✅；**TUI 巡店/组件调试台/录制子进程 `profiles/<平台>/<shop_account_id>`** ❌ | ① TUI 巡店登录的登录态落在**采集永远不读**的目录；② 讽刺的是，**目前是它靠「人工会话优先」这条规则在给采集喂登录态**（`executor_v2.py:1020-1029` → `_should_prefer_manual_storage_state` 恒 True）→ **Task 7 删掉会话文件后这条桥彻底断**；③ `legacy_shop_artifact_cleanup.py:48` 把 `profiles/<平台>/<shop_account_id>` 列为「遗留物」→ **代码在持续制造被自己标记为垃圾的目录** | ✅ **用户已拍板（2026-11-03）：「老程序没有用了，可以直接清理掉老代码，避免后续误用」** → 见 **Task 6.0**（删除遗留老程序）+ **Task 6.5**（录制子进程改用 main_account_id） |
 | **B2** | Task 7 删文件后 `_manual_storage_state_exists` 恒 False → 采集行为从「读人工会话」**静默翻转**为「走 profile」 | 方向正确（符合 R1/R4），但**必须在测试里显式断言这个翻转**，否则是静默行为变更 | Task 4.2 的测试改写清单里补一条「人工会话文件存在时也恒走 profile」 |
 | **B3** | Step 6.7 的锁在 **TUI 巡店**路径上拿不到 `main_account_id` | `app.py`/`handlers.py` 的 account dict 来自 `AccountManager` 的**文件配置**（`accounts.enc`/`local_accounts.py`），**没有 `main_account_id` 字段** → 要新增 DB 查询 `core.shop_accounts.shop_account_id → main_account_id`。录制子进程**有**（`component_test_service.py:69-72`）但没被用（`tools/test_component.py:1792` 优先取 `session_owner_id or self.account_id`） | 随 B1 的拍板结果处理 |
 | **B4** | `command_state_load`（`pwcli_native.py:948`）是第 11 个写入点，计划漏列 | 账号级 session 下它写 `data/sessions` | Task 6 必须单独把该分支置空 |
