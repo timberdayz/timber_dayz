@@ -1837,14 +1837,28 @@ runtime_locale       = null
 
 ##### 第 0 步：起本地后端
 
-```powershell
-Set-Location F:\Vscode\python_programme\AI_code\xihong_erp
-python run.py --local
+**推荐：双击仓库根目录的 `local_console.cmd`**（= 正式采集模式，本机已实测全绿）。
+
+```text
+F:\Vscode\python_programme\AI_code\xihong_erp\local_console.cmd
 ```
 
-- 日志里会打印本机后端与前端的**实际地址**（本机实测后端 `http://127.0.0.1:8001`、前端 `http://127.0.0.1:51730`）。
-- ⚠️ **`.env.local` 里已经把 `CLOUD_DATABASE_URL` 置空** —— 不置空后端起不来（它会连一个不存在的云库并直接退出）。
-  这一行只在本机 `.env.local`（已被 gitignore）里，不影响别人。
+浏览器打开控制台后 → 点「**本地采集系统**」→ 它会走 `scripts/start_collection_formal.ps1`：
+自动起 SSH 云同步隧道（`127.0.0.1:15433`）→ 跑本地库迁移 → 跑环境校验 → 起本机有头后端 + 前端。
+本机实测结果：**隧道通、云同步启动检查 status=ok、采集运行时 status=ready
+（leader_lock=acquired / scheduler=running / queue_runner=running）**。
+
+也可以直接跑脚本：
+
+```powershell
+Set-Location F:\Vscode\python_programme\AI_code\xihong_erp
+powershell -ExecutionPolicy Bypass -File .\scripts\start_collection_formal.ps1
+```
+
+- 后端 `http://127.0.0.1:8001`（740 条路由）、前端 `http://127.0.0.1:5173`。
+- ⚠️ **别用 `python run.py --local` 来跑正式采集**：那是**开发** profile（`XIHONG_ENV_PROFILE` 未设），
+  云同步是关的；正式采集要用 collection profile（`start_collection_formal.ps1` 会自己设）。
+  `run.py --local` 只适合「只想起个后端调接口」，采集验收请用上面的正式模式。
 
 ##### 第 1 步：登录
 
@@ -2177,7 +2191,7 @@ Expected: 工作区干净。
 | # | 现象 | 原因 | 处理 |
 |---|---|---|---|
 | 1 | 后端在 **8001** 而不是 8000 | `run.py --local` 的本机后端端口配置 | 计划 §10.4.1 的 curl 已同步改成 8001 |
-| 2 | 后端启动即退出：`cloud sync startup checks failed` | `.env` 的 `CLOUD_DATABASE_URL` 指向不存在的云库 `127.0.0.1:15433` → 检查判 `error` → `main.py:544` 抛 `RuntimeError` | 在 **`.env.local`**（gitignored）把 `CLOUD_DATABASE_URL` 置空 → 检查判 `degraded` → 正常启动。**不动代码** |
+| 2 | 后端启动即退出：`cloud sync startup checks failed` | `.env` 的 `CLOUD_DATABASE_URL` 指向本机没有的云库 `127.0.0.1:15433` → 检查判 `error` → `main.py:544` 抛 `RuntimeError` | **正式采集模式不需要手工处理**：`.env.collection.local` 里有 `CLOUD_SYNC_TUNNEL_*`，`start_collection_formal.ps1` 会自己起 SSH 隧道（实测 `deploy@134.175.222.171` → 本机 15433），起完云同步检查就是 `status=ok`。⚠️ 但要注意 **`.env.local` 里 `CLOUD_DATABASE_URL` 被置空**（为了让**开发** profile 的 `run.py --local` 能起）：采集 profile 的加载顺序是 `.env` → `.env.local` → `.env.collection.local`（每层 `override=True`），空值会被 `.env.local` 带进采集 profile —— 所以 **`.env.collection.local` 里必须显式重新声明一遍真值**，否则 `check_local_run_env.py --profile collection` 会报 "CLOUD_DATABASE_URL is required for cloud sync"（本机已于 2026-11-03 修好并实测通过） |
 | 3 | 采集必须在**本机**跑 | 采集任务由 API 进程内 `asyncio.create_task` 执行（`collection_tasks.py:750`），**不走 Celery**；Docker celery worker **没挂载 `profiles/`** | 本机 API 以 `DEPLOYMENT_ROLE=collector` 启动并**持有** collection leader lock（实测 `leader_lock: acquired`）→ 调度与队列都在本机 |
 
 #### B.9.4 人工环节卡在哪（已按用户决定移交用户自行验证）

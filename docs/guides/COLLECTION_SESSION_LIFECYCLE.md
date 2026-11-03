@@ -340,8 +340,12 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 **本机跑验收的三个前提**（踩过一次，记下来）：
 
 1. 后端端口是 **8001**（不是 8000）；`run.py --local` 会自动选端口，日志里有。
-2. `.env` 里的 `CLOUD_DATABASE_URL` 指向**不存在的**云库（`127.0.0.1:15433`）→ 启动检查判定 `error` → 后端直接退出。
-   本地验收需在 **`.env.local`** 里把它置空（`.env.local` 在 `.env` 之后加载且 `override=True`，能覆盖 `.env`）。
+2. **正式采集用 `local_console.cmd`（= `start_collection_formal.ps1`）**，它会自己起 SSH 云同步隧道，
+   本机实测云同步启动检查 `status=ok`、采集运行时 `status=ready`。
+   ⚠️ 但注意**加载顺序**：`.env` → `.env.local` → `.env.collection.local`（每层 `override=True`）。
+   本机 `.env.local` 里 `CLOUD_DATABASE_URL` 被置空（让**开发** profile 的 `run.py --local` 能起），
+   所以 **`.env.collection.local` 必须显式重新声明一遍真值** —— 否则采集 profile 会拿到空值，
+   `check_local_run_env.py --profile collection` 直接报 "CLOUD_DATABASE_URL is required for cloud sync"。
 3. **采集任务由本机 API 进程内 `asyncio.create_task` 执行，不走 Celery。**
    Docker celery worker **没有挂载 `profiles/`** → 采集必须由本机后端执行；容器里执行会看不到主机的登录态。
 
