@@ -281,7 +281,6 @@ async def test_refresh_materialization_replays_core_targets_after_heavy_refresh(
             "modules": {
                 "business_overview": {"status": "ready", "ready": True},
                 "clearance_ranking": {"status": "ready", "ready": True},
-                "annual_summary": {"status": "ready", "ready": True},
             },
         }
 

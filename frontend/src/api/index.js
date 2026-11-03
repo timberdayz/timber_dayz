@@ -2407,52 +2407,6 @@ export default {
     return await this._get('/dashboard/clearance-ranking', { params })
   },
 
-  // ========== 店铺分析API ==========
-
-  // 获取店铺GMV趋势
-  async getStoreGMVTrend(params = {}) {
-    return await this._get('/store-analytics/gmv-trend', { params })
-  },
-
-  // 获取店铺转化率分析
-  async getStoreConversionAnalysis(params = {}) {
-    return await this._get('/store-analytics/conversion-analysis', { params })
-  },
-
-  // 获取店铺健康度评分
-  async getStoreHealthScores(params = {}) {
-    return await this._get('/store-analytics/health-scores', { params })
-  },
-
-  // 计算店铺健康度评分
-  async calculateStoreHealthScores(params = {}) {
-    return await this._post('/store-analytics/health-scores/calculate', null, {
-      params
-    })
-  },
-
-  // 获取店铺流量分析
-  async getStoreTrafficAnalysis(params = {}) {
-    return await this._get('/store-analytics/traffic-analysis', { params })
-  },
-
-  // 获取店铺对比分析
-  async getStoreComparison(params = {}) {
-    return await this._get('/store-analytics/comparison', { params })
-  },
-
-  // 获取店铺预警提醒
-  async getStoreAlerts(params = {}) {
-    return await this._get('/store-analytics/alerts', { params })
-  },
-
-  // 生成店铺预警
-  async generateStoreAlerts(params = {}) {
-    return await this._post('/store-analytics/alerts/generate', null, {
-      params
-    })
-  },
-
   // ========== 业务概览API（v4.11.0新增） ==========
 
   // 获取业务概览5个核心KPI指标

@@ -39,7 +39,7 @@ def main() -> int:
         "--ignore-glob=*migration*",
         "--ignore=backend/tests/test_account_management_import_path_removed.py",
         "-k",
-        "cache or ssot or import_path or legacy_shop_session_cleanup or dashboard_cache_singleflight_route or annual_summary_target_completion",
+        "cache or ssot or import_path or legacy_shop_session_cleanup or dashboard_cache_singleflight_route",
     ]
     return subprocess.call(backend_contract_args, cwd=str(repo_root))
 

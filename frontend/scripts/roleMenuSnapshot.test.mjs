@@ -68,8 +68,8 @@ test('visible menu snapshot stays stable for current non-admin roles', () => {
   assert.deepEqual(getVisibleMenuSnapshot('manager'), [
     { title: '工作台', items: ['/business-overview'] },
     { title: '销售与分析', items: ['/sales-dashboard-v3', '/sales/order-management'] },
-    { title: '财务管理', items: ['/financial-management', '/expense-management', '/b-cost-analysis', '/finance-reports', '/fx-management', '/fiscal-periods'] },
-    { title: '店铺运营', items: ['/store-analytics'] },
+    { title: '商品中心', items: ['/product-center'] },
+    { title: '财务管理', items: ['/financial-management', '/expense-management', '/b-cost-analysis'] },
     { title: '人力资源', items: ['/employee-management', '/my-follow-investment-income'] },
     { title: '审批中心', items: ['/my-tasks', '/my-requests', '/approval-history'] },
     { title: '消息中心', items: ['/system-notifications', '/alerts', '/message-settings'] },
@@ -81,7 +81,7 @@ test('visible menu snapshot stays stable for current non-admin roles', () => {
   assert.deepEqual(getVisibleMenuSnapshot('operator'), [
     { title: '工作台', items: ['/business-overview'] },
     { title: '销售与分析', items: ['/sales-dashboard-v3', '/sales/order-management'] },
-    { title: '店铺运营', items: ['/store-analytics'] },
+    { title: '商品中心', items: ['/product-center'] },
     { title: '人力资源', items: ['/employee-management', '/my-follow-investment-income'] },
     { title: '审批中心', items: ['/my-tasks', '/my-requests', '/approval-history'] },
     { title: '消息中心', items: ['/system-notifications', '/alerts', '/message-settings'] },
@@ -93,7 +93,8 @@ test('visible menu snapshot stays stable for current non-admin roles', () => {
   assert.deepEqual(getVisibleMenuSnapshot('finance'), [
     { title: '工作台', items: ['/business-overview'] },
     { title: '销售与分析', items: ['/sales-dashboard-v3', '/sales/order-management'] },
-    { title: '财务管理', items: ['/financial-management', '/expense-management', '/b-cost-analysis', '/finance-reports', '/fx-management', '/fiscal-periods'] },
+    { title: '商品中心', items: ['/product-center'] },
+    { title: '财务管理', items: ['/financial-management', '/expense-management', '/b-cost-analysis'] },
     { title: '人力资源', items: ['/employee-management', '/my-follow-investment-income'] },
     { title: '审批中心', items: ['/my-tasks', '/my-requests', '/approval-history'] },
     { title: '消息中心', items: ['/system-notifications', '/alerts', '/message-settings'] },

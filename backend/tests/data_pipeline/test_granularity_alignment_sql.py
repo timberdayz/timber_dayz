@@ -24,10 +24,13 @@ def test_shop_month_kpi_does_not_fallback_to_daily():
 
     assert "semantic.fact_orders_monthly_atomic" in sql_text
     assert "semantic.fact_analytics_monthly_atomic" in sql_text
-    assert "fact_shopee_orders_monthly" in orders_sql_text
+    # 月粒度事实表已由月度物化视图提供，月度视图只允许指向该 MV，不得回退日/周粒度源
+    assert "semantic.fact_orders_monthly_atomic_mv" in orders_sql_text
     assert "fact_tiktok_orders_daily" not in orders_sql_text
     assert "fact_miaoshou_orders_weekly" not in orders_sql_text
-    assert "fact_shopee_analytics_monthly" in analytics_sql_text
+    assert "fact_orders_daily" not in orders_sql_text
+    assert "fact_orders_weekly" not in orders_sql_text
+    assert "semantic.fact_analytics_monthly_atomic_mv" in analytics_sql_text
     assert "fact_tiktok_analytics_daily" not in analytics_sql_text
     assert "fact_miaoshou_analytics_weekly" not in analytics_sql_text
 
@@ -54,14 +57,6 @@ def test_platform_month_kpi_does_not_force_missing_rollups_to_zero():
     assert "COALESCE(SUM(gmv), 0) AS gmv" not in sql_text
     assert "COALESCE(SUM(visitor_count), 0) AS visitor_count" not in sql_text
     assert "COALESCE(SUM(profit), 0) AS profit" not in sql_text
-
-
-def test_annual_summary_shop_month_does_not_force_missing_costs_to_zero():
-    sql_text = _read_sql("sql/mart/annual_summary_shop_month.sql")
-
-    assert "COALESCE(c.total_cost, 0) AS total_cost" not in sql_text
-    assert "COALESCE(m.profit, 0)" not in sql_text
-    assert "COALESCE(m.gmv, 0)" not in sql_text
 
 
 @pytest.mark.pg_only

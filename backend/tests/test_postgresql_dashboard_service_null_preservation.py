@@ -2,7 +2,6 @@ import pytest
 
 from backend.services.postgresql_dashboard_service import (
     PostgresqlDashboardService,
-    reduce_annual_summary_kpi_rows,
     reduce_business_overview_comparison_rows,
     reduce_business_overview_kpi_rows,
 )
@@ -64,18 +63,6 @@ def test_reduce_business_overview_comparison_rows_preserves_missing_metrics():
     assert result["target"]["achievement_rate"] is None
 
 
-def test_reduce_annual_summary_kpi_rows_preserves_missing_total_cost():
-    result = reduce_annual_summary_kpi_rows(
-        [
-            {"gmv": 100, "total_cost": None, "profit": 20},
-        ]
-    )
-
-    assert result["total_cost"] is None
-    assert result["net_margin"] is None
-    assert result["roi"] is None
-
-
 @pytest.mark.asyncio
 async def test_operational_metrics_aggregation_preserves_missing_values(monkeypatch):
     service = PostgresqlDashboardService()
@@ -96,10 +83,14 @@ async def test_operational_metrics_aggregation_preserves_missing_values(monkeypa
             }
         ]
 
-    async def fake_load_target_summary(granularity, period_start, period_end, platform=None):
+    async def fake_load_target_summary(
+        granularity, period_start, period_end, platform=None, shop_id=None
+    ):
         return {"target_amount": None, "target_quantity": None}
 
-    async def fake_load_operating_expenses_summary(period_month):
+    async def fake_load_operating_expenses_summary(
+        period_month, *, platform=None, shop_id=None
+    ):
         return None
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
@@ -155,4 +146,5 @@ async def test_comparison_service_preserves_missing_target_summary_values(monkey
     assert result["metrics"]["sales_amount"]["today"] == 5000
     assert result["target"]["sales_amount"] is None
     assert result["target"]["sales_quantity"] is None
-    assert result["target"]["achievement_rate"] == 0
+    # 目标缺失时达成率应为 None（不得强行补 0）
+    assert result["target"]["achievement_rate"] is None

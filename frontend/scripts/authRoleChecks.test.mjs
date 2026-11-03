@@ -26,7 +26,7 @@ test('hasAnyRole matches normalized object roles', () => {
 
 test('hasPermissionForRoles grants permissions through configured roles', () => {
   const financeRoles = [{ role_code: 'finance' }]
-  assert.equal(hasPermissionForRoles(financeRoles, 'finance-reports'), true)
+  assert.equal(hasPermissionForRoles(financeRoles, 'b-cost-analysis'), true)
   assert.equal(hasPermissionForRoles(financeRoles, 'role-management'), false)
 })
 

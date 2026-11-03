@@ -30,9 +30,4 @@ def test_smoke_script_builds_expected_plan():
         "business_overview_comparison",
         "business_overview_shop_racing",
         "business_overview_operational_metrics",
-        "annual_summary_kpi",
-        "annual_summary_trend",
-        "annual_summary_platform_share",
-        "annual_summary_by_shop",
-        "annual_summary_target_completion",
     ]

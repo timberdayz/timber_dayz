@@ -57,28 +57,6 @@ async def test_dashboard_online_query_policy_forbids_raw_sources(monkeypatch):
     await service.get_business_overview_inventory_backlog(min_days=45, limit=20, granularity="monthly", target_date="2026-04-01")
     await service.get_clearance_ranking(min_days=45, limit=10, granularity="monthly", target_date="2026-04-01")
 
-    # Store analysis
-    await service.get_store_analysis_capabilities(platform="shopee", shop_id="shop-a")
-    await service.get_store_analysis_shops(platform="shopee")
-    await service.get_store_analysis_overview(
-        platform="shopee",
-        shop_id="shop-a",
-        granularity="monthly",
-        target_date="2026-04-01",
-    )
-    await service.get_store_analysis_traffic_summary(
-        platform="shopee",
-        shop_id="shop-a",
-        granularity="monthly",
-        target_date="2026-04-01",
-    )
-    await service.get_store_analysis_traffic_trend(
-        platform="shopee",
-        shop_id="shop-a",
-        granularity="monthly",
-        target_date="2026-04-01",
-    )
-
     # Cost analysis
     await service.get_b_cost_analysis_overview(period_month="2026-04-01", platform=None, shop_id=None)
     await service.get_b_cost_analysis_shop_month(period_month="2026-04-01", platform=None, shop_id=None)
@@ -89,12 +67,6 @@ async def test_dashboard_online_query_policy_forbids_raw_sources(monkeypatch):
         page=1,
         page_size=20,
     )
-
-    # Annual summary
-    await service.get_annual_summary_kpi(granularity="monthly", period="2026-04-01")
-    await service.get_annual_summary_trend(granularity="monthly", period="2026-04-01")
-    await service.get_annual_summary_platform_share(granularity="monthly", period="2026-04-01")
-    await service.get_annual_summary_by_shop(granularity="monthly", period="2026-04-01")
 
     forbidden = (
         "raw_data->>",

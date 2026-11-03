@@ -86,17 +86,6 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
                 "operating_result_text": "盈利",
             }
 
-        async def get_annual_summary_target_completion(self, db, granularity, period):
-            return {
-                "target_gmv": 1000,
-                "achieved_gmv": 800,
-                "achievement_rate_gmv": 80.0,
-                "target_orders": 80,
-                "target_profit": None,
-                "achieved_profit": 120,
-                "achievement_rate_profit": None,
-            }
-
     monkeypatch.setattr(
         "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _PostgresqlServiceStub(),
@@ -364,69 +353,6 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                         1.5::numeric AS attach_rate,
                         15::numeric AS total_items,
                         120::numeric AS profit
-                    """
-                )
-            )
-            await session.execute(
-                text(
-                    """
-                    CREATE OR REPLACE VIEW api.annual_summary_kpi_module AS
-                    SELECT
-                        DATE '2026-01-01' AS period_month,
-                        800::numeric AS gmv,
-                        300::numeric AS total_cost,
-                        120::numeric AS profit,
-                        15::numeric AS gross_margin,
-                        -22.5::numeric AS net_margin,
-                        -0.6::numeric AS roi
-                    """
-                )
-            )
-            await session.execute(
-                text(
-                    """
-                    CREATE OR REPLACE VIEW api.annual_summary_trend_module AS
-                    SELECT
-                        DATE '2026-01-01' AS period_month,
-                        800::numeric AS gmv,
-                        300::numeric AS total_cost,
-                        120::numeric AS profit
-                    UNION ALL
-                    SELECT
-                        DATE '2026-02-01', 900, 320, 140
-                    """
-                )
-            )
-            await session.execute(
-                text(
-                    """
-                    CREATE OR REPLACE VIEW api.annual_summary_platform_share_module AS
-                    SELECT
-                        DATE '2026-01-01' AS period_month,
-                        'shopee'::varchar AS platform_code,
-                        800::numeric AS gmv
-                    UNION ALL
-                    SELECT
-                        DATE '2026-02-01', 'shopee', 900
-                    """
-                )
-            )
-            await session.execute(
-                text(
-                    """
-                    CREATE OR REPLACE VIEW api.annual_summary_by_shop_module AS
-                    SELECT
-                        DATE '2026-01-01' AS period_month,
-                        'shopee'::varchar AS platform_code,
-                        'shop-a'::varchar AS shop_id,
-                        800::numeric AS gmv,
-                        10::numeric AS order_count,
-                        200::numeric AS visitor_count,
-                        300::numeric AS total_cost,
-                        120::numeric AS profit,
-                        15::numeric AS gross_margin,
-                        -22.5::numeric AS net_margin,
-                        -0.6::numeric AS roi
                     """
                 )
             )

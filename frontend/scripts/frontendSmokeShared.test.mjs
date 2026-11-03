@@ -32,7 +32,6 @@ test('smoke routes cover the agreed core frontend pages', () => {
     '/data-sync/tasks',
     '/data-sync/history',
     '/component-versions',
-    '/store-analytics',
     '/financial-overview',
     '/expense-management',
     '/inventory-dashboard-v3',

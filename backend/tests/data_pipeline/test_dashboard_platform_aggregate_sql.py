@@ -32,18 +32,3 @@ def test_platform_month_kpi_no_longer_requires_full_shop_completeness():
     assert "COUNT(visitor_count) AS visitor_count_row_count" not in sql_text
     assert "CASE WHEN gmv_row_count = shop_row_count THEN gmv END" not in sql_text
     assert "semantic.fact_orders_monthly_atomic" in sql_text or "mart.shop_month_kpi" not in sql_text
-
-
-def test_annual_summary_modules_do_not_use_strict_shop_null_gating():
-    kpi_sql = _read_sql("sql/api_modules/annual_summary_kpi_module.sql")
-    trend_sql = _read_sql("sql/api_modules/annual_summary_trend_module.sql")
-    share_sql = _read_sql("sql/api_modules/annual_summary_platform_share_module.sql")
-
-    assert "COUNT(*) AS shop_row_count" not in kpi_sql
-    assert "CASE WHEN COUNT(gmv) = COUNT(*) THEN SUM(gmv) END" not in trend_sql
-    assert "CASE WHEN COUNT(gmv) = COUNT(*) THEN SUM(gmv) END" not in share_sql
-    assert (
-        "mart.annual_summary_shop_month" in kpi_sql
-        or "platform_month_kpi" in kpi_sql
-        or "platform_month_cost" in kpi_sql
-    )

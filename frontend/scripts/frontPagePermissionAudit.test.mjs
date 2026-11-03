@@ -100,36 +100,28 @@ test('employee management no longer relies on implicit open metadata', () => {
   assert.ok(Array.isArray(route.roles) && route.roles.length > 0)
 })
 
-test('sales and store operation pages remain admin only', () => {
+test('sales pages remain admin only', () => {
   for (const routePath of [
     '/sales-campaign-management',
     '/customer-management',
     '/order-management',
     '/sales/sales-detail-by-product',
-    '/store-management',
   ]) {
     const route = findRoute(routePath)
     assert.deepEqual(route.roles, ['admin'])
   }
 })
 
-test('sales and store view pages remain broadly visible to operations roles', () => {
+test('sales view pages remain broadly visible to operations roles', () => {
   const salesDashboard = findRoute('/sales-dashboard-v3')
   assert.deepEqual(salesDashboard.roles, ['admin', 'manager', 'operator', 'finance'])
-
-  const storeAnalytics = findRoute('/store-analytics')
-  assert.deepEqual(storeAnalytics.roles, ['admin', 'manager', 'operator'])
 })
 
-test('legacy report center routes are absent and finance reports use current route', () => {
+test('legacy report center routes are absent', () => {
   for (const routePath of ['/sales-reports', '/inventory-reports', '/vendor-reports', '/finance-reports-detail', '/custom-reports']) {
     const route = routes.find((item) => item.path === routePath)
     assert.equal(route, undefined)
   }
-
-  const financeReports = findRoute('/finance-reports')
-  assert.deepEqual(financeReports.roles, ['admin', 'manager', 'finance'])
-  assert.equal(financeReports.permission, 'finance-reports')
 })
 
 test('hr approval and messaging pages follow personal view operation classification', () => {

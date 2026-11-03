@@ -31,6 +31,11 @@ def test_permission_service_does_not_expose_retired_frontend_page_permissions():
         "user-guide",
         "video-tutorials",
         "faq",
+        "finance-reports",
+        "fx-management",
+        "fiscal-periods",
+        "store-management",
+        "store-analytics",
     }:
         assert retired_permission not in permission_ids
 

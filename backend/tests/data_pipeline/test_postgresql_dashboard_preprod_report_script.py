@@ -28,13 +28,13 @@ def test_preprod_report_script_parses_smoke_lines():
     rows = script.parse_smoke_lines(
         [
             '{"name":"business_overview_kpi","status_code":200,"ok":true,"url":"http://x/api/dashboard/business-overview/kpi"}',
-            '{"name":"annual_summary_kpi","status_code":503,"ok":false,"url":"http://x/api/dashboard/annual-summary/kpi"}',
+            '{"name":"business_overview_shop_racing","status_code":503,"ok":false,"url":"http://x/api/dashboard/business-overview/shop-racing"}',
         ]
     )
 
     assert rows[0]["name"] == "business_overview_kpi"
     assert rows[0]["status"] == "200"
-    assert rows[1]["name"] == "annual_summary_kpi"
+    assert rows[1]["name"] == "business_overview_shop_racing"
     assert rows[1]["status"] == "503"
 
 
@@ -51,7 +51,7 @@ def test_preprod_report_script_renders_markdown_report():
         test_summary="93 passed",
         smoke_rows=[
             {"name": "business_overview_kpi", "path": "/api/dashboard/business-overview/kpi", "status": "200", "notes": "ok"},
-            {"name": "annual_summary_kpi", "path": "/api/dashboard/annual-summary/kpi", "status": "503", "notes": "failed"},
+            {"name": "business_overview_shop_racing", "path": "/api/dashboard/business-overview/shop-racing", "status": "503", "notes": "failed"},
         ],
         ops_ok=True,
     )
@@ -60,5 +60,5 @@ def test_preprod_report_script_renders_markdown_report():
     assert "codex/postgresql-api-semantic-mart-cutover" in report
     assert "93 passed" in report
     assert "/api/dashboard/business-overview/kpi" in report
-    assert "/api/dashboard/annual-summary/kpi" in report
+    assert "/api/dashboard/business-overview/shop-racing" in report
     assert "yes" in report

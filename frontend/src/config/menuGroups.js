@@ -81,10 +81,7 @@ export const menuGroups = [
     items: [
       '/financial-management',   // 财务结算中心
       '/expense-management',     // 费用管理
-      '/b-cost-analysis',        // B类成本分析
-      '/finance-reports',        // 财务报表
-      '/fx-management',          // 汇率管理
-      '/fiscal-periods'          // 会计期间
+      '/b-cost-analysis'         // B类成本分析
     ]
   },
   {
@@ -94,8 +91,6 @@ export const menuGroups = [
     order: 7,
     defaultExpanded: false,
     items: [
-      '/store-management',       // 店铺管理
-      '/store-analytics',        // 店铺分析
       '/account-management',     // 账号管理
       '/account-alignment'       // 店铺别名对齐
     ]

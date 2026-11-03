@@ -39,31 +39,6 @@ def build_smoke_plan() -> list[dict[str, Any]]:
             "path": "/api/dashboard/business-overview/operational-metrics",
             "params": {"month": "2026-03-01"},
         },
-        {
-            "name": "annual_summary_kpi",
-            "path": "/api/dashboard/annual-summary/kpi",
-            "params": {"granularity": "yearly", "period": "2026"},
-        },
-        {
-            "name": "annual_summary_trend",
-            "path": "/api/dashboard/annual-summary/trend",
-            "params": {"granularity": "yearly", "period": "2026"},
-        },
-        {
-            "name": "annual_summary_platform_share",
-            "path": "/api/dashboard/annual-summary/platform-share",
-            "params": {"granularity": "yearly", "period": "2026"},
-        },
-        {
-            "name": "annual_summary_by_shop",
-            "path": "/api/dashboard/annual-summary/by-shop",
-            "params": {"granularity": "yearly", "period": "2026"},
-        },
-        {
-            "name": "annual_summary_target_completion",
-            "path": "/api/dashboard/annual-summary/target-completion",
-            "params": {"granularity": "yearly", "period": "2026"},
-        },
     ]
 
 

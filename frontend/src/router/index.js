@@ -133,17 +133,6 @@ const routes = [
     }
   },
   {
-    path: '/store-management',
-    name: 'StoreManagement',
-    component: () => import('@/domains/business/views/StoreManagement.vue'),
-    meta: {
-      title: '店铺管理',
-      icon: 'Shop',
-      permission: 'store-management',
-      roles: ['admin']
-    }
-  },
-  {
     path: '/system-config',
     name: 'SystemConfig',
     component: () => import('@/domains/platform/views/system/SystemConfig.vue'),
@@ -589,55 +578,8 @@ const routes = [
       roles: ['admin', 'manager', 'finance']
     }
   },
-  {
-    path: '/finance-reports',
-    name: 'FinanceReports',
-    component: () => import('@/domains/business/views/finance/FinanceReports.vue'),
-    meta: {
-      title: '财务报表',
-      icon: 'Document',
-      permission: 'finance-reports',
-      roles: ['admin', 'manager', 'finance']
-    }
-  },
-  {
-    path: '/fx-management',
-    name: 'FXManagement',
-    component: () => import('@/domains/business/views/finance/FXManagement.vue'),
-    meta: {
-      title: '汇率管理',
-      icon: 'Money',
-      permission: 'fx-management',
-      roles: ['admin', 'manager', 'finance']
-    }
-  },
-  {
-    path: '/fiscal-periods',
-    name: 'FiscalPeriods',
-    component: () => import('@/domains/business/views/finance/FiscalPeriods.vue'),
-    meta: {
-      title: '会计期间',
-      icon: 'Calendar',
-      permission: 'fiscal-periods',
-      roles: ['admin', 'manager', 'finance']
-    }
-  },
-  
-  // ==================== 店铺扩展 ====================
-  {
-    path: '/store-analytics',
-    name: 'StoreAnalytics',
-    component: () => import('@/domains/business/views/store/StoreAnalytics.vue'),
-    meta: {
-      title: '店铺分析',
-      icon: 'DataAnalysis',
-      permission: 'store-analytics',
-      roles: ['admin', 'manager', 'operator']
-    }
-  },
-  
   // ==================== 报表中心 ====================
-  
+
   // ==================== 人力资源扩展 ====================
   {
     path: '/employee-management',

@@ -5,10 +5,10 @@ from pathlib import Path
 def test_legacy_has_permission_uses_explicit_permissions_payload_first():
     user = {
         "role": "manager",
-        "permissions": ["finance-reports", "order-management"],
+        "permissions": ["campaign:read", "order-management"],
     }
 
-    assert has_permission(user, "finance-reports") is True
+    assert has_permission(user, "campaign:read") is True
     assert has_permission(user, "campaign:delete") is False
 
 

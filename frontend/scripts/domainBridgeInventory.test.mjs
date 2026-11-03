@@ -10,9 +10,9 @@ const routerPath = path.join(frontendRoot, 'src/router/index.js')
 
 const EXPECTED_ROUTE_WRAPPER_COUNT = 0
 const EXPECTED_UNIQUE_WRAPPER_COUNT = 0
-const EXPECTED_DIRECT_DOMAIN_ROUTE_COUNT = 105
+const EXPECTED_DIRECT_DOMAIN_ROUTE_COUNT = 100
 const EXPECTED_DIRECT_DOMAIN_COUNTS = {
-  business: 52,
+  business: 47,
   collection: 6,
   data_platform: 9,
   platform: 38,
@@ -38,7 +38,6 @@ const EXPECTED_ROUTE_SPECIFIERS = [
   '@/domains/business/views/inventory/InventoryOpeningBalances.vue',
   '@/domains/business/views/HumanResources.vue',
   '@/domains/business/views/FinancialManagement.vue',
-  '@/domains/business/views/StoreManagement.vue',
   '@/domains/platform/views/system/SystemConfig.vue',
   '@/domains/platform/views/system/DatabaseConfig.vue',
   '@/domains/platform/views/system/SecuritySettings.vue',
@@ -83,10 +82,6 @@ const EXPECTED_ROUTE_SPECIFIERS = [
   '@/domains/business/views/sales/CampaignManagement.vue',
   '@/domains/business/views/finance/ExpenseManagement.vue',
   '@/domains/business/views/finance/BCostAnalysis.vue',
-  '@/domains/business/views/finance/FinanceReports.vue',
-  '@/domains/business/views/finance/FXManagement.vue',
-  '@/domains/business/views/finance/FiscalPeriods.vue',
-  '@/domains/business/views/store/StoreAnalytics.vue',
   '@/domains/business/views/reports/SalesReports.vue',
   '@/domains/business/views/reports/InventoryReports.vue',
   '@/domains/business/views/reports/FinanceReportsDetail.vue',

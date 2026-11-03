@@ -22,7 +22,6 @@ export const SMOKE_ROUTES = [
   { name: 'DataSyncTasks', path: '/data-sync/tasks', expectedTitle: '同步任务' },
   { name: 'DataSyncHistory', path: '/data-sync/history', expectedTitle: '同步历史' },
   { name: 'ComponentVersions', path: '/component-versions', expectedTitle: '组件版本管理' },
-  { name: 'StoreAnalytics', path: '/store-analytics', expectedTitle: '店铺分析' },
   { name: 'FinancialManagement', path: '/financial-overview', expectedTitle: '财务总览' },
   { name: 'ExpenseManagement', path: '/expense-management', expectedTitle: '费用管理' },
   { name: 'InventoryDashboardV3', path: '/inventory-dashboard-v3', expectedTitle: '库存看板v3' },

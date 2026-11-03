@@ -49,6 +49,10 @@ async def test_default_system_roles_do_not_keep_retired_frontend_page_permission
         "vendor-reports",
         "finance-reports-detail",
         "sales-dashboard-v3",
+        "finance-reports",
+        "fx-management",
+        "fiscal-periods",
+        "store-analytics",
     }:
         assert retired_permission not in manager_permissions
         assert retired_permission not in operator_permissions

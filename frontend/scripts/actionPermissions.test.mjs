@@ -71,11 +71,11 @@ test('admin role bypasses scoped action restrictions', () => {
 
 test('unknown action permissions fall back to role-config permissions', () => {
   assert.equal(
-    hasScopedActionPermission({ roles: ['manager'], activeRole: 'manager', permission: 'finance-reports' }),
+    hasScopedActionPermission({ roles: ['manager'], activeRole: 'manager', permission: 'b-cost-analysis' }),
     true,
   )
   assert.equal(
-    hasScopedActionPermission({ roles: ['operator'], activeRole: 'operator', permission: 'finance-reports' }),
+    hasScopedActionPermission({ roles: ['operator'], activeRole: 'operator', permission: 'b-cost-analysis' }),
     false,
   )
 })

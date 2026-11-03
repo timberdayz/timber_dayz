@@ -15,6 +15,27 @@ const routerSource = fs.readFileSync(routerPath, 'utf8')
 const businessOverviewSource = fs.readFileSync(businessOverviewPath, 'utf8')
 const dataSyncTemplatesSource = fs.readFileSync(dataSyncTemplatesPath, 'utf8')
 
+test('sunset store and finance placeholder modules are removed from router and sidebar', () => {
+  for (const routePath of [
+    '/store-management',
+    '/store-analytics',
+    '/finance-reports',
+    '/fx-management',
+    '/fiscal-periods',
+  ]) {
+    assert.equal(
+      routerSource.includes(`path: '${routePath}'`),
+      false,
+      `${routePath} should be removed from the router`
+    )
+    assert.equal(
+      menuGroupsSource.includes(`'${routePath}'`),
+      false,
+      `${routePath} should be removed from the sidebar`
+    )
+  }
+})
+
 test('sunset modules are removed from menu groups while inventory dependencies stay online', () => {
   for (const groupId of ['product-inventory', 'procurement', 'reports']) {
     assert.equal(

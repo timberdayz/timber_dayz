@@ -10,7 +10,6 @@ from backend.services.postgresql_dashboard_service import (
     PostgresqlDashboardService,
     get_postgresql_dashboard_service,
     rank_inventory_backlog_rows,
-    reduce_annual_summary_kpi_rows,
     reduce_business_overview_comparison_rows,
     reduce_business_overview_kpi_rows,
     rank_shop_racing_rows,
@@ -557,32 +556,6 @@ async def test_load_active_employee_count_returns_zero_when_employee_table_missi
 
 
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_annual_summary_kpi_uses_platform_month_aggregate(
-    monkeypatch,
-):
-    service = PostgresqlDashboardService()
-    captured: list[tuple[str, dict[str, object]]] = []
-
-    async def fake_fetch_rows(query, params):
-        captured.append((query, params))
-        return [
-            {"gmv": 100, "total_cost": 40, "profit": 20},
-            {"gmv": 200, "total_cost": 60, "profit": 50},
-        ]
-
-    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
-
-    result = await service.get_annual_summary_kpi(granularity="yearly", period="2026")
-
-    assert result["gmv"] == 300
-    assert len(captured) == 1
-    query, params = captured[0]
-    assert "platform_month" in query.lower()
-    assert "annual_summary_shop_month" not in query
-    assert str(params["period_start"]) == "2026-01-01"
-
-
-@pytest.mark.asyncio
 async def test_postgresql_dashboard_service_inventory_backlog_honors_limit(monkeypatch):
     service = PostgresqlDashboardService()
 
@@ -853,79 +826,6 @@ def test_rank_inventory_backlog_rows_drops_unknown_restock_rows():
     )
 
     assert result == []
-
-
-def test_reduce_annual_summary_kpi_rows_yearly():
-    result = reduce_annual_summary_kpi_rows(
-        [
-            {"gmv": 100, "total_cost": 40, "profit": 20},
-            {"gmv": 200, "total_cost": 60, "profit": 50},
-        ]
-    )
-
-    assert result["gmv"] == 300
-    assert result["total_cost"] == 100
-    assert result["profit"] == 70
-    assert result["gross_margin"] == 23.33
-    assert result["net_margin"] == -10.0
-    assert result["roi"] == -0.3
-
-
-def test_reduce_annual_summary_target_completion():
-    target_gmv = 1000
-    target_orders = 80
-    achieved = {"gmv": 800, "profit": 120}
-
-    achievement_rate_gmv = round(achieved["gmv"] / target_gmv * 100, 2)
-
-    assert target_gmv == 1000
-    assert target_orders == 80
-    assert achieved["gmv"] == 800
-    assert achievement_rate_gmv == 80.0
-
-
-class _FetchOneResult:
-    def __init__(self, row):
-        self._row = row
-
-    def fetchone(self):
-        return self._row
-
-
-@pytest.mark.asyncio
-async def test_annual_summary_target_completion_reads_active_parent_targets(
-    monkeypatch,
-):
-    service = PostgresqlDashboardService()
-    service.get_annual_summary_kpi = AsyncMock(
-        return_value={"gmv": 200000.0, "profit": 50000.0}
-    )
-
-    class _Db:
-        def __init__(self):
-            self.statements = []
-            self.params = []
-
-        async def execute(self, statement, params):
-            self.statements.append(str(statement))
-            self.params.append(params)
-            return _FetchOneResult((400000.0, 3000))
-
-    db = _Db()
-
-    result = await service.get_annual_summary_target_completion(
-        db, "monthly", "2026-04"
-    )
-
-    assert "a_class.sales_targets" in db.statements[0]
-    assert "sales_targets_a" not in db.statements[0]
-    assert db.params[0] == {
-        "period_start": date(2026, 4, 1),
-        "period_end": date(2026, 4, 30),
-    }
-    assert result["target_gmv"] == 400000.0
-    assert result["target_orders"] == 3000
-    assert result["achievement_rate_gmv"] == 50.0
 
 
 def test_rank_shop_racing_rows_desc_by_gmv():
@@ -3143,39 +3043,6 @@ async def test_postgresql_dashboard_service_traffic_ranking_account_group_uses_s
     assert result[0]["order_count"] == 6
     assert result[0]["uv_conversion_rate"] == 4.0
     assert result[0]["pv_conversion_rate"] == 1.2
-
-
-@pytest.mark.asyncio
-async def test_store_analysis_traffic_summary_uses_page_views_per_visitor_instead_of_conversion_rate(
-    monkeypatch,
-):
-    service = PostgresqlDashboardService()
-
-    async def fake_fetch_rows(query, params):
-        return [
-            {
-                "period_start": "2026-03-01",
-                "period_end": "2026-03-01",
-                "visitor_count": 50,
-                "page_views": 100,
-                "conversion_rate": 999,
-                "page_views_per_visitor": 2.0,
-            }
-        ]
-
-    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
-
-    result = await service.get_store_analysis_traffic_summary(
-        platform="shopee",
-        shop_id="shop-a",
-        granularity="daily",
-        target_date="2026-03-01",
-    )
-
-    assert result["visitor_count"] == 50
-    assert result["page_views"] == 100
-    assert result["conversion_rate"] is None
-    assert result["page_views_per_visitor"] == 2.0
 
 
 @pytest.mark.pg_only

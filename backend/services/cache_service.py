@@ -58,16 +58,11 @@ class CacheService:
         "dashboard_operational_metrics": 180,
         "dashboard_clearance_ranking": 300,
         "dashboard_inventory_backlog": 300,
-        "annual_summary_kpi": 180,  # 年度数据总结 KPI（add-annual-data-summary）
         # add-redis-cache-uncached-endpoints
         "performance_scores": 180,
         "performance_scores_shop": 180,
         "hr_shop_profit_statistics": 300,
         "hr_annual_profit_statistics": 300,
-        "annual_summary_by_shop": 180,
-        "annual_summary_trend": 180,
-        "annual_summary_platform_share": 180,
-        "annual_summary_target_completion": 180,
         "expense_summary_monthly": 300,
         "expense_summary_yearly": 300,
         "target_by_month": 180,
@@ -407,13 +402,14 @@ class CacheService:
 
     async def invalidate_dashboard_business_overview(self) -> int:
         """
-        写时失效：业务概览与年度总结相关 Dashboard 缓存（proposal 约定集中在此执行）。
+        写时失效：业务概览相关 Dashboard 缓存（proposal 约定集中在此执行）。
         在数据同步完成、经营目标/配置更新等事件后调用，确保后续请求命中 PostgreSQL dashboard 数据。
-        Key 约定：xihong_erp:dashboard_*、xihong_erp:annual_summary_*
+        Key 约定：xihong_erp:dashboard_*
+
+        注：年度总结（annual_summary）模块已于 v7.12.9 退役，不再维护其缓存；
+        历史遗留 key 会按 TTL（180s）自动过期。
         """
-        n1 = await self.delete_pattern(f"{self.CACHE_PREFIX}dashboard_*")
-        n2 = await self.delete_pattern(f"{self.CACHE_PREFIX}annual_summary_*")
-        total = n1 + n2
+        total = await self.delete_pattern(f"{self.CACHE_PREFIX}dashboard_*")
         if total > 0:
             logger.info(f"[Cache] 写时失效 Dashboard 相关缓存: 共 {total} 个 key")
         return total
