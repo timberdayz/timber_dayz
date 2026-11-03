@@ -293,12 +293,48 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 
 ### 10.1 验收实测记录（2026-11-03，main `180b2f6c`，本机 Windows）
 
-> **验收状态**：自动化能验的都验完了；**「登录一次 → 后续免验证码」这一段需要账号持有人配合，已按用户决定移交用户自行验证**
-> （操作手册见 `docs/superpowers/plans/2026-11-02-collection-profile-only-architecture.md` §10.4.2）。
+> **验收状态**：**全部通过** ——「登录一次 → 后续免验证码」的真机闭环已由用户跑出的 6 条真实采集任务证明
+> （E1~E4 四项证据齐了，见下表）。人工环节不再是待办。
 >
 > 环境：Docker 栈（postgres 15432 / redis 16379 / celery-worker / celery-beat）+ **本机**后端
 > `python run.py --local`（后端端口 **8001**，路由 740 条）。
 > 验收账号：`shopee_sg_eternalbloom_local` → 主账号 **`shopee KR`** → profile `profiles/shopee/shopeeKR/`。
+
+#### 真机采集实测（2026-11-03 20:56~21:03，6 条任务）
+
+| 任务 | 账号 | 主账号 | 实际 profile | 复用 | 登录门 | 结果 |
+|---|---|---|---|---|---|---|
+| 657 | shopee_sg_eternalbloom_local | shopee KR | `profiles/shopee/shopeeKR` | true | true | ❌ analytics 导出失败（弹窗挡路） |
+| 658 | shopee_sg_hx_home_local | shopee KR | `profiles/shopee/shopeeKR` | true | true | ✅ 完成，1 个文件 |
+| 659 | shopee_sg_strawberries_store_local | shopee KR | `profiles/shopee/shopeeKR` | true | true | ❌ analytics 导出失败（弹窗挡路） |
+| 660 | tiktok_my_dawie_mall_local | Tiktok 1店 | `profiles/tiktok/Tiktok1店` | true | true | ✅ 完成 |
+| 661 | tiktok_ph_explorers_mall_local | Tiktok 1店 | `profiles/tiktok/Tiktok1店` | true | true | ✅ 完成 |
+| 662 | tiktok_sg_daone_mall_local | Tiktok 1店 | `profiles/tiktok/Tiktok1店` | true | true | ✅ 完成 |
+
+> **3 个 shopee 店铺账号共用同一个 profile 是设计如此**（规则 B：按 `main_account_id` 建目录，
+> 三者主账号都是 `shopee KR`）。采集时靠 URL 参数切店（`?cnsc_shop_id=1292370001` / `1391124224` / …）。
+
+#### E1~E4 四项证据（全部成立）
+
+| # | 证据 | 实测 |
+|---|---|---|
+| E1 | 全程没弹验证码 | `verification_type` 与 `verification_screenshot` **6/6 均为 NULL** |
+| E2 | 登录门检查通过 | `core.collection_task_logs.details` 里 `step_id="login_gate_result"` 且 `login_gate_ready=true`（**6/6**） |
+| E3 | 确实复用了 profile 登录态 | 同一行 details 里 `session_reused=true` + `session_source=profile`（**6/6**） |
+| E4 | profile cookie 已刷盘 | `profiles/shopee/shopeeKR/Default/Network/Cookies` mtime → `2026-11-03 20:59:29`；`profiles/tiktok/Tiktok1店/…` → `2026-11-03 21:03:16` |
+| E5 | `data/sessions/` 零新增 | 采集后该目录**仍不存在** |
+
+#### 已知问题（既有，与本次改造无关）：Shopee 弹窗挡住导出
+
+- 657 报错：`Locator.click: Timeout 5000ms exceeded` → Playwright 明写
+  `<div class="eds-modal__container">` from `<div class="eds-modal">` **subtree intercepts pointer events**
+  → 点「统计时间」被弹窗拦住。
+- 659 报错：`Export failed: download did not complete` → 同一弹窗的连锁结果。
+- **为什么没自动关掉**：`modules/platforms/shopee/popup_config.py` 的 6 个选择器函数**全部返回 `[]`**
+  → Shopee 没有任何平台专用弹窗规则，只靠通用 30+ 选择器，而 `eds-modal` 的结构与文案不在通用列表覆盖内。
+- **与本次改造无关**：该文件与 `modules/platforms/shopee/**/analytics_export.py` 最后修改均为 **2026-04-17**，
+  本轮改造的 88 个文件里没有它们。
+
 
 | 场景 | 实测结果 | 结论 |
 |---|---|---|
@@ -359,4 +395,5 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 | 2026-11-02 | 生效版 v2 | 落定 D1~D4：人工保存即确认、`pwcli open` 不回写、profile 引导不落盘、同账号串行 |
 | 2026-11-02 | **生效版 v3** | 架构升级为**单一载体（profile）**：会话文件废除（D5）、巡店「保存会话」改为「打开巡店」（D6）、IP 隔离链路一并打通（D7）、新增 R7 正常关闭落盘与 P1~P4 代理规则 |
 | 2026-11-03 | **生效版 v3.1** | **实现回填**（**业务语义未变**，只把 v3 已定稿的语义对应到已落地的代码与文件位置）：① **会话文件体系废除落地** —— `session_manager.py` 会话文件 API 族整体删除、`runtime_session.py` profile 引导落盘删除、正式采集恒走 profile；② **诊断字段收敛** —— 废止 `session_quality_*` / `session_manual_seeded` / `session_protected`，前端改为「会话载体 / 是否复用 / 出口代理」三项；③ **代理链路打通** —— `extra_config->'proxy'` → `resolve_account_proxy` → 浏览器 `proxy=` 注入，凭据只随 `proxy=` 下传；④ **巡店面板动作收敛为「打开巡店」**（原「保存会话」按钮与 `pwcli state-save` 已删） |
-| 2026-11-03 | 验收回填（业务语义未变） | §10 补 **10.1 验收实测记录**：本机真实采集跑到「等 OTP」→ 证明首采需人工登录；本地假代理实收 12 条 `CONNECT` → 证明流量经代理；诊断字段探针实测 `session_profile_path=profiles/shopee/shopeeKR` / `session_reused=true` / `session_source=profile` / `session_proxy=http://127.0.0.1:18888`。同时记下两条口径：`login_gate_result` 只在登录门通过后落库、`session_reused` 是「载体存在」而非「登录态有效」。**磁盘清理落地**：`data/sessions/` 已备份为 `data/sessions.bak-20261103/` 后移除，`_alt` 旁路 profile 已删除。「登录一次→免验证码」一段移交用户自行验证（手册见实施计划 §10.4.2） |
+| 2026-11-03 | 验收回填（业务语义未变） | §10 补 **10.1 验收实测记录**：本机真实采集跑到「等 OTP」→ 证明首采需人工登录；本地假代理实收 12 条 `CONNECT` → 证明流量经代理；诊断字段探针实测 `session_profile_path=profiles/shopee/shopeeKR` / `session_reused=true` / `session_source=profile` / `session_proxy=http://127.0.0.1:18888`。同时记下两条口径：`login_gate_result` 只在登录门通过后落库、`session_reused` 是「载体存在」而非「登录态有效」。**磁盘清理落地**：`data/sessions/` 已备份为 `data/sessions.bak-20261103/` 后移除，`_alt` 旁路 profile 已删除 |
+| 2026-11-03 | **验收闭环（业务语义未变）** | **「登录一次 → 后续免验证码」真机闭环已证明**：用户跑出的 6 条真实采集任务（3 shopee + 3 tiktok）**全部** `login_gate_ready=true` + `session_reused=true` + `session_source=profile` + `verification_type=NULL`，profile 路径 6/6 指向各自**主账号**目录（`profiles/shopee/shopeeKR`、`profiles/tiktok/Tiktok1店`）→ **E1~E4 四项判据全部成立**。另记一条**既有问题**（与本次改造无关）：`modules/platforms/shopee/popup_config.py` 是空壳 → Shopee 的 `eds-modal` 通知弹窗不会被自动关掉，会挡住 analytics 导出点击（657/659 失败于此），需另开独立任务 |

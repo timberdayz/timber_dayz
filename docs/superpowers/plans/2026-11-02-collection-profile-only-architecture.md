@@ -1764,10 +1764,10 @@ Get-Item "profiles\shopee\shopeeKR\Default\Network\Cookies" | Select-Object Full
 | 1''（`_alt` 旁路 profile） | 消除登录态分散 | **用户 2026-11-03 决定删除** → `profiles/shopee/虾皮巴西东朗照明主体_alt/`（16 条目 + Cookies 20480）已移入回收站；主 profile `profiles/shopee/shopeeKR/` 完好（Cookies 28672 bytes） | ✅ |
 | 2（备份 profile） | 为「首次登录」清空载体 | **未清空**（保留现有 `profiles/shopee/shopeeKR`，避免 3 个店铺账号无谓掉登录态） | ⏭ 主动不做 |
 | 3/4（采集 A → 需登录） | 要求登录 + 验证码 | 任务 `41500205-…` 真实跑到 `status=verification_required` / `verification_type=otp`；Shopee 登录页**自动填好**主账号 `Leslieshop:main` 与密码；OTP 发往 `+86 191****371` | ✅ 前半段符合 |
-| 5（立刻再跑，免验证码） | E1~E4 同时成立 | **未验** —— 依赖 3/4 的登录成功，OTP 只能由账号持有人提供 | ⏸ **用户自行验证**（见 §10.4.2） |
+| 5（立刻再跑，免验证码） | E1~E4 同时成立 | ✅ **已成立**（2026-11-03 20:56~21:03，用户跑出 6 条真实任务）：E1 `verification_type`/`verification_screenshot` **6/6 NULL**；E2 `login_gate_ready=true` **6/6**；E3 `session_reused=true` + `session_source=profile` **6/6**；E4 `profiles/shopee/shopeeKR/…/Cookies` mtime → `2026-11-03 20:59:29` | ✅ |
 | 6（巡店登录 → 采集复用） | 同一 profile 目录 | 面板 `account_id` **就是** `main_account_id`；巡店侧 `pwcli_native.runtime_account_profile_dir` 与采集侧 `SessionManager.get_persistent_profile_path` **都指向** `profiles/shopee/shopeeKR` | ✅ 路径一致（代码核对 + 运行时探针） |
 | 7（面板无「保存会话」） | 按钮消失 | 全仓 grep：生产代码里「保存会话」/`Save-Pwcli*State`/`pwcli state-save` **全部清零** | ✅ |
-| 8（并行采集 + 无新文件） | 任务成功且无新会话文件 | 未验（同样卡在登录环节） | ⏸ **用户自行验证** |
+| 8（并行采集 + 无新文件） | 任务成功且无新会话文件 | ⏸ 单域实测已过（6/6），**并行模式未单独跑**（本轮 6 条都是单数据域） | ⏸ 部分 |
 | 9（代理灰度） | 假代理收到平台请求 + `session_proxy` 脱敏 | 本地假代理 `127.0.0.1:18888` 实收 **12 条**，含 `CONNECT seller.shopee.cn:443`、`CONNECT seller.shopee.sg:443`、`CONNECT patronus.idata.shopeemobile.com:443`；`session_proxy=http://127.0.0.1:18888`（脱敏）；`http://user:pass@proxy.example.com:8080` → `http://proxy.example.com:8080` | ✅ 链路通（**真实出口 IP 待真凭据补验**） |
 
 **诊断字段实测值**（运行时探针，走生产代码 `open_persistent_runtime_bundle` → `_runtime_session_diagnostics`）：
@@ -2194,16 +2194,24 @@ Expected: 工作区干净。
 | 2 | 后端启动即退出：`cloud sync startup checks failed` | `.env` 的 `CLOUD_DATABASE_URL` 指向本机没有的云库 `127.0.0.1:15433` → 检查判 `error` → `main.py:544` 抛 `RuntimeError` | **正式采集模式不需要手工处理**：`.env.collection.local` 里有 `CLOUD_SYNC_TUNNEL_*`，`start_collection_formal.ps1` 会自己起 SSH 隧道（实测 `deploy@134.175.222.171` → 本机 15433），起完云同步检查就是 `status=ok`。⚠️ 但要注意 **`.env.local` 里 `CLOUD_DATABASE_URL` 被置空**（为了让**开发** profile 的 `run.py --local` 能起）：采集 profile 的加载顺序是 `.env` → `.env.local` → `.env.collection.local`（每层 `override=True`），空值会被 `.env.local` 带进采集 profile —— 所以 **`.env.collection.local` 里必须显式重新声明一遍真值**，否则 `check_local_run_env.py --profile collection` 会报 "CLOUD_DATABASE_URL is required for cloud sync"（本机已于 2026-11-03 修好并实测通过） |
 | 3 | 采集必须在**本机**跑 | 采集任务由 API 进程内 `asyncio.create_task` 执行（`collection_tasks.py:750`），**不走 Celery**；Docker celery worker **没挂载 `profiles/`** | 本机 API 以 `DEPLOYMENT_ROLE=collector` 启动并**持有** collection leader lock（实测 `leader_lock: acquired`）→ 调度与队列都在本机 |
 
-#### B.9.4 人工环节卡在哪（已按用户决定移交用户自行验证）
+#### B.9.4 人工环节：已完成（2026-11-03 20:56~21:03）
 
 真实采集跑到 Shopee 的**手机 OTP** 弹窗（`+86 191****371`，主账号 `Leslieshop:main`）→
 `verification_type=otp` / `verification_input_mode=code_entry`。
 OTP 只能由账号持有人提供；系统支持 `POST /api/collection/tasks/{task_id}/resume` 传 `{"otp": "..."}` 在**同一个 page** 里回填后继续。
-登录成功后 Chromium 会把新 cookie 写回 `profiles/shopee/shopeeKR` → 紧接着再跑一次采集，才有条件拿齐 E1~E4 四项证据（免验证码）。
 
-**用户决定（2026-11-03）**：这一步等做完后由用户自己去验，代码侧把其他工作做完。
-→ **移交物**：完整操作手册见本文件 **§10.4.2 用户自行验收操作手册**
-（起后端 → 登录 → 发起采集 → 回填 OTP 或用巡店面板手动登录 → 再跑一次 → 四项证据取证 SQL → 排障对照表）。
-→ 本机环境已就位：`.env.local` 里 `CLOUD_DATABASE_URL` 已置空（否则后端起不来）、
-`acceptance_admin` 超级用户已建（口令在 `.env.local` 的 `ACCEPT_ADMIN_PASSWORD`）。
+**闭环已闭合**：用户随后跑出的 6 条真实采集任务（3 shopee + 3 tiktok）**全部**：
+`login_gate_ready=true` + `session_reused=true` + `session_source=profile` + `verification_type=NULL`
+→ **登录一次、后续免验证码**在真机上被证明。profile 路径 6/6 全部指向各自的**主账号**目录
+（`profiles/shopee/shopeeKR`、`profiles/tiktok/Tiktok1店`）。
+唯一没验的是**并行模式**（本轮 6 条都是单数据域）。
+
+#### B.9.5 新发现的既有问题（不在本计划范围）：Shopee 弹窗挡住导出
+
+| 项 | 事实 |
+|---|---|
+| 现象 | 657 报 `Locator.click: Timeout 5000ms exceeded`，Playwright 明写 `<div class="eds-modal__container">` from `<div class="eds-modal">` **subtree intercepts pointer events**（点「统计时间」被挡）；659 报 `Export failed: download did not complete`（同一弹窗的连锁结果）。两条都挂在 **analytics 域的导出步骤** |
+| 为什么没自动关 | `modules/platforms/shopee/popup_config.py` 的 6 个选择器函数**全部 `return []`** → Shopee 没有任何平台专用弹窗规则，只靠 `popup_handler.UNIVERSAL_CLOSE_SELECTORS`（30+ 通用选择器），而 `eds-modal` 的结构与文案不在通用列表覆盖内（通用列表有「我知道了」但没有「知道了」） |
+| 与本计划无关 | 该文件与 `modules/platforms/shopee/**/analytics_export.py` 最后修改均为 **2026-04-17**；本轮改造的 88 个文件里没有它们。`modules/services/shopee_exporter.py` 虽在改动清单里，但改的是**删掉** `from_persistent_session`（读会话文件的入口，Task 7 步 4），与导出流程无关 |
+| 处置 | **另开独立任务**。修法：在 `modules/platforms/shopee/popup_config.py` 补 `eds-modal` 的关闭选择器（需要真实 DOM 证据 —— 在有头浏览器里开着弹窗取 class/文案）。**本计划不动它** |
 
