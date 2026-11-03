@@ -28,6 +28,7 @@ from urllib.parse import parse_qs, urlparse
 
 from modules.core.logger import get_logger
 from backend.services.account_proxy_config import (
+    mask_proxy_server,
     resolve_account_proxy,
     strip_account_proxy_credentials,
 )
@@ -312,6 +313,25 @@ def _build_runtime_account(platform: str, account: Dict[str, Any]) -> Dict[str, 
     runtime_account = strip_account_proxy_credentials(account)
     runtime_account["login_url"] = get_platform_login_entry(platform)
     return runtime_account
+
+
+def _mask_runtime_proxy(proxy: Optional[Dict[str, Any]]) -> Optional[str]:
+    """诊断字段用：把 Playwright 形态的代理参数压成脱敏后的 server 标识。
+
+    规范 §8 要求 ``session_proxy`` 只暴露「生效的代理标识（脱敏）」：
+    只留 scheme+host，凭据必须抹掉。没有代理时返回 ``None``（前端显示 "-"）。
+    """
+    if not isinstance(proxy, dict):
+        return None
+    server = str(proxy.get("server") or "").strip()
+    if not server:
+        return None
+    masked = mask_proxy_server(
+        server,
+        username=str(proxy.get("username") or ""),
+        password=str(proxy.get("password") or ""),
+    )
+    return masked or None
 
 
 async def _get_fingerprint_context_options_async(
@@ -924,6 +944,7 @@ class CollectionExecutorV2:
         platform: str,
         params: Dict[str, Any],
         runtime_bundle: Any,
+        proxy: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         session_owner_id = params.get("main_account_id")
         context_options = getattr(runtime_bundle, "context_options", {}) or {}
@@ -931,15 +952,23 @@ class CollectionExecutorV2:
         return {
             "session_owner_id": session_owner_id,
             "shop_account_id": params.get("shop_account_id"),
-            "persistent_profile_path": getattr(runtime_bundle, "profile_path", None),
-            "profile_contains_state": bool(
+            # [Task 8] profile 是登录态的**唯一载体** → 诊断字段收敛成
+            # 「路径 / 是否复用 / 来源 / 出口代理」四项，不再有质量分与仲裁语义。
+            "session_profile_path": getattr(runtime_bundle, "profile_path", None),
+            "session_reused": bool(
                 getattr(runtime_bundle, "reused_session", False)
             ),
             "selected_page_url": getattr(runtime_bundle, "selected_page_url", None),
             "available_page_urls": getattr(runtime_bundle, "available_page_urls", []),
             "runtime_context_summary": getattr(runtime_bundle, "context_summary", {}),
             "runtime_strategy_reason": getattr(runtime_bundle, "strategy_reason", None),
-            "session_source": getattr(runtime_bundle, "session_source", None),
+            # 对外只有单值 ``profile``：``_open_runtime_bundle`` 对非 profile 模式
+            # 直接抛错（R1 真相源唯一），不存在第二种来源。
+            # bundle 上的 ``session_source`` 仍是内部策略标记（值 ``persistent_profile``），
+            # 不再直接对外暴露，避免同一概念出现两套取值。
+            "session_source": "profile",
+            # 出口代理只留 scheme+host，凭据必须抹掉（规范 §8）。
+            "session_proxy": _mask_runtime_proxy(proxy),
             "user_agent": context_options.get("user_agent"),
             "runtime_locale": context_options.get("locale"),
             "runtime_timezone": context_options.get("timezone_id"),
@@ -1924,6 +1953,7 @@ class CollectionExecutorV2:
                             platform=platform,
                             params=params,
                             runtime_bundle=runtime_bundle,
+                            proxy=proxy,
                         )
                     )
                     adapter = None
@@ -2044,6 +2074,7 @@ class CollectionExecutorV2:
                         platform=platform,
                         params=params,
                         runtime_bundle=runtime_bundle,
+                        proxy=proxy,
                     )
                 )
                 play_context = runtime_bundle.context
