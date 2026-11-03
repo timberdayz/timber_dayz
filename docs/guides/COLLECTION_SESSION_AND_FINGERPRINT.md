@@ -1,6 +1,6 @@
 # 数据采集：按账号持久化会话与指纹
 
-> 会话的**生命周期与保存语义**（覆盖写入、写入门槛、失败不写、禁止打开即回写）以
+> 会话的**生命周期与载体语义**（profile 单一载体、禁止人工覆盖、禁止打开即回写）以
 > [`COLLECTION_SESSION_LIFECYCLE.md`](COLLECTION_SESSION_LIFECYCLE.md) 为准；本文只定义存储路径与指纹策略。
 
 ## 概述
@@ -9,12 +9,13 @@
 
 ## 会话持久化
 
-- **存储路径**：`data/sessions/<platform>/<account_id>/storage_state.json`（由 SessionManager 管理，文件内容为带包装的 session_data，其中 `storage_state` 字段用于注入 Playwright context）。
+- **存储路径**：登录态的**唯一载体**是 Chromium 持久 profile —— `profiles/<platform>/<main_account_id>/`，由 `SessionManager.get_persistent_profile_path` 解析（目录名净化规则：`isalnum() or _ or -`，即**空格被去掉、中文保留**，所以账号 `shopee KR` 的目录是 `profiles/shopee/shopeeKR`）。**会话文件体系（`data/sessions/**`）已整体废除**，读写、评分、过期清理能力一并下线。
 - **行为**：
-  - 任务启动时优先按 `platform + account_id` 加载该账号的会话（有效期与 SessionManager 一致，默认 max_age_days=30）；若存在且有效则注入 `browser.new_context(storage_state=...)` 并执行登录组件，并传入 `config['reused_session']=True`。
-  - 登录组件在复用会话时须先做**已登录检测**（如已在后台工作台页）；若已登录则跳过，若已登出或需安全验证则执行完整登录。仅在本轮**成功完成登录**后才将会话保存/覆盖到该账号路径；任务失败且未成功登录时不覆盖已有会话。
-  - 若会话文件不存在、已过期或损坏，则视为无可用会话，直接走完整登录并在成功后保存新会话。
-- **安全**：`data/sessions` 与 `profiles` 目录不进入 VCS、仅后端节点访问、权限按现有规范管理；会话文件仅限采集服务使用。
+  - 采集启动时按 `platform + main_account_id` 打开该账号的持久 profile（`launch_persistent_context(user_data_dir=...)`）。**登录态由 Chromium 自己维护** —— 采集链路不复制、不仲裁、不落第二份快照。
+  - 正式采集**恒走持久 profile**（`choose_runtime_strategy` 对 `formal_collection` 直接返回 `persistent_profile`），不再探测任何会话文件。
+  - 登录组件在复用 profile 时须先做**已登录检测**（如已在后台工作台页）；已登录则跳过，若已登出或需安全验证则执行完整登录。
+  - 并行采集走**内存快照扇出**：主 profile 打开一次，快照只在内存中分发，**不落盘**。
+- **安全**：`profiles` 目录不进入 VCS、仅后端节点访问、权限按现有规范管理。profile 内直接存放认证 cookie，访问控制要求与会话文件时代同级。
 
 ## 按账号固定指纹
 
@@ -27,7 +28,7 @@
 
 ## 登录组件契约
 
-- 复用会话时执行器传入 `config['reused_session']=True`。各平台登录组件（当前主采集为 shopee、tiktok、miaoshou）按统一契约实现：先做已登录检测（如 URL/元素判断已在工作台），已登录则跳过并返回 success=True，未登录或需安全验证则执行完整登录并返回相应 success。执行器据此决定是否触发完整登录与 save_session。
+- 复用会话时执行器传入 `config['reused_session']=True`。各平台登录组件（当前主采集为 shopee、tiktok、miaoshou）按统一契约实现：先做已登录检测（如 URL/元素判断已在工作台），已登录则跳过并返回 success=True，未登录或需安全验证则执行完整登录并返回相应 success。执行器据此决定是否触发完整登录。
 
 ## 代理（已实现）
 
@@ -39,16 +40,15 @@
 
 ## 运维提醒
 
-- **避免同一账号并发执行采集任务**，以防会话文件 load/save 竞态。该约束在 [`COLLECTION_SESSION_LIFECYCLE.md`](COLLECTION_SESSION_LIFECYCLE.md) R6 中升级为硬规则：同一 `main_account_id` 的采集任务必须账号级串行。
+- **避免同一账号并发执行采集任务**。会话文件体系已废除，但 profile 目录是**同一份**登录态：同一 `main_account_id` 并发打开同一个 profile 会撞 Chromium 的 ProcessSingleton。该约束在 [`COLLECTION_SESSION_LIFECYCLE.md`](COLLECTION_SESSION_LIFECYCLE.md) R6 中升级为硬规则：同一 `main_account_id` 的采集任务必须账号级串行（跨进程账号锁）。
 
 ## 2026-04 对齐更新
 
 - `SessionManager`、`PersistentBrowserManager`、`pwcli` 账号模式现在统一以仓库根目录为锚点，不再依赖当前工作目录。
 - 账号级会话命名统一优先使用 `account_id`，缺失时才回退到 `username`、`store_name`、`name`、`label`。
-- `pwcli` 人工调试如果要与正式采集共享账号级持久会话，必须带账号参数：
+- `pwcli` 人工调试如果要与正式采集共享账号级持久会话，必须带账号参数（`Open-*` 打开的浏览器用的就是正式采集那个 profile 目录）：
   - `Open-PwcliTiktok -AccountId '<account_id>'`
   - `Open-PwcliShopee -AccountId '<account_id>'`
-  - `Save-PwcliTiktokState -AccountId '<account_id>'`
-  - `Save-PwcliShopeeState -AccountId '<account_id>'`
+  - 人工在浏览器里登录成功后**直接关闭浏览器即可** —— 登录态由 Chromium 自己写进 profile，无需再执行任何「保存会话」动作（`Save-Pwcli*State` 系列已随会话文件体系废除）。
 - 不带 `AccountId` 的 `pwcli` 会话仍可用于临时探索，但它属于平台级共享调试空间，不应视为正式账号级持久会话来源。
 - TikTok 如果打开后仍然回到登录页，优先判断为“该账号当前会话失效，需要重新登录刷新”，而不是继续排查会话命名空间。
