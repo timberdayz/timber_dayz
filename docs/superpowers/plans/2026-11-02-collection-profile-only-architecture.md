@@ -1634,9 +1634,17 @@ Expected: exit=0。
 在**本地笔记本**上按序执行：
 
 1. 备份并清空旧的会话目录（不进 VCS）：把 `data/sessions/` 整体改名为 `data/sessions.bak-<日期>`
-2. 清空验收账号对应的 profile 目录（或整个目录改名备份）。**账号与目录的对应关系**（实测）：`shopee_sg_eternalbloom_local` → `profiles/shopee/shopee_sg_eternalbloom_local`（下划线保留）。`profiles/shopee/shopeeKR` 是账号 "shopee KR" 的**旧目录**，不是验收账号的目录
+2. 清空验收账号对应的 profile 目录（或整个目录改名备份）。
+   > ⚠️ **本条已按「规则 B（按主账号 ID 建目录）」修正**（2026-11-03 复核 live 库 + 代码）：
+   > 采集时 `session_owner_id = params["main_account_id"]`（`collection_tasks.py:1853` 把 `shop_payload["main_account"]["main_account_id"]` 塞进 `account`），
+   > 而 `get_persistent_profile_path` 的目录名净化规则是 `isalnum() or _ or -`（**空格去掉、中文保留**）。
+   > → 验收账号 `shopee_sg_eternalbloom_local` 的 `main_account_id` 是 **`shopee KR`** → profile 目录是 **`profiles/shopee/shopeeKR/`**（不是 `profiles/shopee/shopee_sg_eternalbloom_local/`）。
+   > → 原计划「`profiles/shopee/shopeeKR` 是旧目录、不是验收账号的目录」这句**是错的**（那是按「店铺账号 ID 建目录」的旧假设写的）。
+   > → `profiles/shopee/shopeeKR/` 实测存在且有真实 cookie 库（`Default/Network/Cookies`，mtime 2026-11-02 00:32）。
+   > → **注意它被 3 个 enabled 店铺账号共用**（`shopee_sg_eternalbloom_local` / `shopee_sg_hx_home_local` / `shopee_sg_strawberries_store_local`，主账号都是 `shopee KR`）→ 改名备份会让这 3 个店一起退回到「需重新登录」，属预期（验收要证明的就是「登录一次、后续复用」）。
 3. 采集任务 A（`shopee_sg_eternalbloom_local`）→ 应要求登录 + 验证码
-4. **检查 `profiles/shopee/shopee_sg_eternalbloom_local/Default/Network/Cookies` 的 mtime 已更新**（⚠️ **不是** `Default/Cookies` —— 本机 Chromium 的 cookie 库实际在 `Default/Network/Cookies`，实测存在），且 `data/sessions/` 下**没有**新文件
+4. **检查 `profiles/shopee/shopeeKR/Default/Network/Cookies` 的 mtime 已更新**（⚠️ **不是** `Default/Cookies` —— 本机 Chromium 的 cookie 库实际在 `Default/Network/Cookies`，实测存在），且 `data/sessions/` 下**没有**新文件
+   > 验收账号的**可用数据域**（live 库 `core.shop_account_capabilities` 实测）：`products` / `services` / `analytics` 为 `enabled=true`；`orders` / `finance` / `inventory` 为 `enabled=false` → 最小可跑域是 `products`。
 5. 立刻再跑一次采集 A' → **必须免验证码**
 6. 巡店面板「打开巡店」→ 浏览器用的是**同一个** profile 目录（核对进程参数 `--user-data-dir`）→ 人工登录 → 关闭浏览器 → 再次采集应免验证码
 7. 巡店面板**没有**「保存会话」按钮
