@@ -1586,11 +1586,15 @@ git commit -m "docs(session): 回填 profile 单一载体架构实施结果"
 
 ## Task 10: 全量验收
 
-- [ ] **Step 0: 落一份可复用的基线快照**
+- [x] **Step 0: 落一份可复用的基线快照**
 
 仓库里**没有** pytest 基线对比脚本，「143 failed + 22 errors」这个基线也没有任何文档记录 → 判定「零新增失败」不可复现。**先落一份基线快照文件**（含失败用例 id 列表），后续每次验收都拿它做集合 diff。
 
-- [ ] **Step 1: 后端全量测试**
+> ✅ **已完成**（2026-11-03）：`scripts/diff_pytest_junit.py`（支持 `--save-baseline`）+
+> 基线快照 `docs/superpowers/plans/2026-11-02-collection-profile-only-baseline.txt`（165 条）。
+> junit 用例键必须是 `classname::name`（pytest 不写 `id` 属性）。
+
+- [x] **Step 1: 后端全量测试**
 
 ```powershell
 python -m pytest backend/tests -q --tb=no -rfE
@@ -1604,7 +1608,7 @@ Expected: **失败数不高于基线**，且**新增失败必须定位到本计�
 >
 > ⚠️ 跑全量会改写 `modules/platforms/shopee/components/login_v1_0_0.py` 的行尾 → 跑完 `git checkout --` 复原，不要提交它。
 
-- [ ] **Step 2: 前端构建 + 守卫测试**
+- [x] **Step 2: 前端构建 + 守卫测试**
 
 ```powershell
 cd frontend
@@ -1617,7 +1621,10 @@ Expected: exit=0。
 > ⚠️ `frontend/scripts/*.mjs` **不进 CI**（`.github/workflows/ci.yml:242-243` 只跑 `ci_frontend_test_silence_gate.py`）→ 必须手工跑。
 > ⚠️ Task 8 已把守卫测试改名为 `collectionTaskSessionDiagnosticsUi.test.mjs` → 此处命令已同步。
 
-- [ ] **Step 3: 发布前门禁**
+> ✅ **已完成**（2026-11-03）：`npm run build` → `✓ built in 9.47s`（exit=0）；
+> 守卫测试 **5 pass / 0 fail**（`collectionTaskSessionDiagnosticsUi.test.mjs`）。
+
+- [x] **Step 3: 发布前门禁**
 
 ```powershell
 python scripts/verify_release_local.py --skip-build
@@ -1629,7 +1636,12 @@ Expected: exit=0。
 >
 > 跑不通时改为**只跑只读的那几项门禁**（`verify_rules_completeness.py` / `verify_root_md_whitelist.py` / `verify_utf8_source_hygiene.py`），并在验收记录里注明「发布门禁因缺 `.env.production` 未执行」。
 
-- [ ] **Step 4: 真实采集验收（关键）**
+> ✅ **已完成**（2026-11-03）：只读门禁三项 **全绿** ——
+> `verify_rules_completeness.py` exit=0（Rule files match the Codex-first model）、
+> `verify_root_md_whitelist.py` exit=0、`verify_utf8_source_hygiene.py` exit=0。
+> **发布门禁 `verify_release_local.py --skip-build` 未执行**（本地缺 `.env.production`，且其内部 `--repair` 会写库）。
+
+- [ ] **Step 4: 真实采集验收（关键）** ⏸ **部分完成，剩人工环节**
 
 在**本地笔记本**上按序执行：
 
@@ -1672,16 +1684,22 @@ Expected: exit=0。
 **环境（实测）**：本机 postgres 在 `15432`、redis 在 `16379`（容器 6379），`ACCOUNT_ENCRYPTION_KEY` 需在 `.env` 里；
 后端 API 默认**没在跑**（本机实测 8000/8001 无监听）→ 要先起。
 
+> ⚠️ **端口是 8001，不是 8000**（2026-11-03 实测）：`run.py --local` 的本机后端监听 **8001**，`/health` 返回 `routes.total=740`。
+> ⚠️ **`.env` 里的 `CLOUD_DATABASE_URL` 会让后端起不来**（实测）：它指向不存在的云库 `127.0.0.1:15433` →
+> 云同步启动检查判 `error` → `RuntimeError` → 应用退出。**本地验收需在 `.env.local` 里把它置空**
+> （`.env.local` 在 `.env` 之后加载且 `override=True`，能覆盖 `.env`；该文件已被 gitignore）。
+> ⚠️ **管理员口令**：`.env.local` 里的 `LOCAL_DEV_ADMIN_PASSWORD` 只对**新建**账号生效，
+> 已存在的 `xihong` 不会重置口令（实测 401）。本次验收另建了 `acceptance_admin` 超级用户。
+
 ```powershell
 # 0) 起本地后端（含前端）
 Set-Location F:\Vscode\python_programme\AI_code\xihong_erp
 python run.py --local
 
 # 1) 登录拿 token（本机超级用户 xihong / xihong@xihong.com；口令由运维提供）
-curl -s -X POST http://127.0.0.1:8000/api/auth/login -H 'Content-Type: application/json' `
+curl -s -X POST http://127.0.0.1:8001/api/auth/login -H 'Content-Type: application/json' `
   -d '{"username":"xihong","password":"<口令>"}'
 # -> 取返回里的 access_token
-
 # 2) 备份会话目录（代码已不读它，这一步只为「无新文件」判据干净）
 Rename-Item "data\sessions" "data\sessions.bak-20261103"
 
@@ -1689,7 +1707,7 @@ Rename-Item "data\sessions" "data\sessions.bak-20261103"
 Rename-Item "profiles\shopee\shopeeKR" "profiles\shopee\shopeeKR.bak-20261103"
 
 # 4) 建采集任务（shopee_sg_eternalbloom_local 的可用数据域：products / services / analytics）
-curl -s -X POST http://127.0.0.1:8000/api/collection/tasks -H 'Content-Type: application/json' `
+curl -s -X POST http://127.0.0.1:8001/api/collection/tasks -H 'Content-Type: application/json' `
   -H "Authorization: Bearer <token>" `
   -d '{"platform":"shopee","account_id":"shopee_sg_eternalbloom_local","data_domains":["products"],"granularity":"daily","date_range":{"start":"2026-11-01","end":"2026-11-02"}}'
 ```
@@ -1737,6 +1755,52 @@ Get-Item "profiles\shopee\shopeeKR\Default\Network\Cookies" | Select-Object Full
 
 **Expected**：第 4、5、6、7、8、9 步全部符合。**第 4 或第 5 步不过 → 停下报告，不要加临时补丁。**
 
+##### 实测结果（2026-11-03，本机，main `180b2f6c`）
+
+| 步 | 期望 | 实测 | 结论 |
+|---|---|---|---|
+| 1（备份 `data/sessions/`） | 采集后无新会话文件 | 采集前后均 **19 个 `storage_state.json`（1.47 MB）**，无新增 | ✅ |
+| 2（备份 profile） | 为「首次登录」清空载体 | **未清空**（保留现有 `profiles/shopee/shopeeKR`，避免 3 个店铺账号无谓掉登录态） | ⏭ 主动不做 |
+| 3/4（采集 A → 需登录） | 要求登录 + 验证码 | 任务 `41500205-…` 真实跑到 `status=verification_required` / `verification_type=otp`；Shopee 登录页**自动填好**主账号 `Leslieshop:main` 与密码；OTP 发往 `+86 191****371` | ✅ 前半段符合 |
+| 5（立刻再跑，免验证码） | E1~E4 同时成立 | **未验** —— 依赖 3/4 的登录成功，OTP 只能由账号持有人提供 | ⏸ **待人工** |
+| 6（巡店登录 → 采集复用） | 同一 profile 目录 | 面板 `account_id` **就是** `main_account_id`；巡店侧 `pwcli_native.runtime_account_profile_dir` 与采集侧 `SessionManager.get_persistent_profile_path` **都指向** `profiles/shopee/shopeeKR` | ✅ 路径一致（代码核对 + 运行时探针） |
+| 7（面板无「保存会话」） | 按钮消失 | 全仓 grep：生产代码里「保存会话」/`Save-Pwcli*State`/`pwcli state-save` **全部清零** | ✅ |
+| 8（并行采集 + 无新文件） | 任务成功且无新会话文件 | 未验（同样卡在登录环节） | ⏸ 待人工 |
+| 9（代理灰度） | 假代理收到平台请求 + `session_proxy` 脱敏 | 本地假代理 `127.0.0.1:18888` 实收 **12 条**，含 `CONNECT seller.shopee.cn:443`、`CONNECT seller.shopee.sg:443`、`CONNECT patronus.idata.shopeemobile.com:443`；`session_proxy=http://127.0.0.1:18888`（脱敏）；`http://user:pass@proxy.example.com:8080` → `http://proxy.example.com:8080` | ✅ 链路通（**真实出口 IP 待真凭据补验**） |
+
+**诊断字段实测值**（运行时探针，走生产代码 `open_persistent_runtime_bundle` → `_runtime_session_diagnostics`）：
+
+```
+session_profile_path = F:\...\xihong_erp\profiles\shopee\shopeeKR   # 主账号 ID 目录，非店铺账号 ID
+session_reused       = true
+session_source       = profile                                       # 对外单值
+session_proxy        = http://127.0.0.1:18888                        # 脱敏后不含凭据
+user_agent           = null                                          # 指纹取 profile 原生环境
+runtime_locale       = null
+```
+
+**两条口径（实测得出，写下来避免误判）**：
+
+1. **`login_gate_result` 只在「登录门通过后」才落库。**
+   登录未完成（等 OTP）时，`core.collection_task_logs` 里**只有**「任务已创建」「等待验证码回填」两行，
+   `session_reused` / `session_source` / `session_profile_path` / `session_proxy` **一个都拿不到**。
+   → 计划 §10 的取证 SQL 必须挑**登录成功过的那次任务**，不能拿首次登录的任务当证据。
+2. **`session_reused` 是「载体判据」，不是「登录态有效性判据」。**
+   判据 = Chromium cookie 库文件存在（`Default/Network/Cookies`）。
+   实测：profile 有 cookie 库 → `session_reused=true`，但 cookie 已过期，采集仍要求重新登录（OTP）。
+   → 语义是「**有**可复用的载体」，不代表「**当前有效**」；后者由 `login_gate_ready` 回答。
+
+**本机跑验收的三个前提**（踩过一次，记下来）：
+
+1. 后端端口是 **8001**（不是 8000）；`run.py --local` 会自动选端口，日志里有。
+2. `.env` 里的 `CLOUD_DATABASE_URL` 指向**不存在的**云库（`127.0.0.1:15433`）→ 启动检查判 `error` → 后端直接退出。
+   本地验收需在 **`.env.local`** 里把它置空（`.env.local` 在 `.env` 之后加载且 `override=True`，能覆盖 `.env`）。
+3. **采集任务由本机 API 进程内 `asyncio.create_task` 执行，不走 Celery**（`collection_tasks.py:750`）。
+   Docker celery worker **没有挂载 `profiles/`** → 采集必须由本机后端执行，容器里执行看不到主机登录态。
+   另：本地 API 以 `DEPLOYMENT_ROLE=collector` 启动，会与容器 worker 争 collection leader lock，
+   **本机后端已持有**（实测 `leader_lock: acquired`），所以调度与队列都在本机。
+
+
 > ⚠️ **前置依赖**：本步依赖 Task 3 / 4 / 5 / 6 / 7 **全部完成**。在 Task 7 落地前，`SessionManager.__init__` 仍会 mkdir 并写 `data/sessions/`（`session_manager.py:169-170`）→ 第 1/4/5/8 步必然失败。
 >
 > ⚠️ **profile 根目录是「仓库根相对」的，不是 cwd 相对**（实测）：`session_manager.py:25` 的 `REPO_ROOT = Path(__file__).resolve().parents[3]`，
@@ -1762,9 +1826,11 @@ Get-Item "profiles\shopee\shopeeKR\Default\Network\Cookies" | Select-Object Full
 >
 > ⚠️ **并行侧无诊断**（F8-6）：第 8 步拿不到 profile/复用/代理证据，只能靠「任务成功 + `data/sessions/` 无新文件」判定。
 
-- [ ] **Step 5: 记录验收结论**
+- [x] **Step 5: 记录验收结论**
 
 写进 `docs/guides/COLLECTION_SESSION_LIFECYCLE.md` §10。
+
+> ✅ **已完成**（2026-11-03）：已回填到规范 §10.1「验收实测记录」+ §11 变更记录（标注「验收回填，业务语义未变」）。
 
 - [ ] **Step 6: 提交**
 
@@ -1943,3 +2009,43 @@ Expected: 工作区干净。
 |---|---|---|
 | `scripts/probe_miaoshou_inventory_date_filter.py` / `scripts/probe_miaoshou_warehouse_scope.py` | 仍在读 `data/sessions/**`（违反「会话文件写入点清零」验收） | Task 7 一并改走 profile |
 | `tools/test_component.py:1523` | `_choose_runtime_strategy` 调用漏传必填关键字参数 `has_manual_storage_state` → 运行期 `TypeError`（**基线 `fa91f7ae` 同样存在**，由 `ba637e85` 引入） | 随形参整体删除而消失 |
+
+---
+
+### B.9 Task 10 验收实测结论（2026-11-03，main `180b2f6c`，本机）
+
+#### B.9.1 B.7 五条悬案的本轮结论
+
+| # | 悬案 | 本轮结论 |
+|---|---|---|
+| 1 | `data/sessions/` 磁盘真实状态与清理清单 | **仍需运维确认**（代码不自动删）。本轮实测：采集前后均为 19 个 `storage_state.json`（1.47 MB），**无新增** → 「会话文件写入点清零」在运行期成立 |
+| 2 | `_alt` 旁路 profile 是否还有实体目录 | 本轮**未动**（需产品/运维拍板）。注意它与主 profile 共用同一把 `main_account_id` 锁，不会交叉双开 |
+| 3 | `session_reused` 到底该判什么 | **已落地并实测**：判据 = Chromium cookie 库文件存在。本轮探针实测 `session_reused=true`。⚠️ **新增认知**：这是「**载体存在**」判据，**不是**「登录态有效」判据 —— 实测 profile 有 cookie 库但 cookie 已过期，采集仍要求重新登录（OTP） |
+| 4 | `session_proxy` 的脱敏粒度 | **已实测**：真代理样本缺失 → 用本地假代理补齐。`session_proxy=http://127.0.0.1:18888`（无凭据）；`http://user:pass@proxy.example.com:8080` → `http://proxy.example.com:8080`；`http://user:pass`（缺 host）→ `http://***` |
+| 5 | 「巡店登录 → 采集复用」的实际可用性 | **面板这条链路已确认一致**：面板 `account_id` 就是 `main_account_id`（`build_inspection_accounts`），巡店侧 `pwcli_native.runtime_account_profile_dir` 与采集侧 `SessionManager.get_persistent_profile_path` **都指向** `profiles/shopee/shopeeKR`。剩余风险：`login_orchestrator` / `enhanced_recording_wizard` / `shopee_playwright_exporter` 三条**规则 D 残留**路径仍用店铺账号 ID 建 profile 目录 —— 但**采集执行器完全不 import 这三者**（`executor_v2.py` 里 grep 零命中），它们是独立工具，风险面不落在「巡店→采集」主链路上 |
+
+#### B.9.2 本轮新增的三条口径（写进规范 §10.1）
+
+1. **`login_gate_result` 只在登录门通过后落库** → 登录未完成时 `core.collection_task_logs` 里**只有**「任务已创建」「等待验证码回填」两行，
+   `session_reused` / `session_source` / `session_profile_path` / `session_proxy` **一个都拿不到**。
+   → 计划 §10 的取证 SQL 必须挑**登录成功过的那次任务**。
+2. **`session_reused` 是载体判据**（见上表第 3 条）。
+3. **诊断字段只走 `core.collection_task_logs.details`**：`TaskResponse` 顶层那 4 个字段是从最近 50 条日志里**反查**出来的
+   （`_load_task_runtime_metadata` → `_extract_runtime_metadata_from_logs`），不是任务表上的列。
+
+#### B.9.3 本机跑验收的三个环境前提（都踩过）
+
+| # | 现象 | 原因 | 处理 |
+|---|---|---|---|
+| 1 | 后端在 **8001** 而不是 8000 | `run.py --local` 的本机后端端口配置 | 计划 §10.4.1 的 curl 已同步改成 8001 |
+| 2 | 后端启动即退出：`cloud sync startup checks failed` | `.env` 的 `CLOUD_DATABASE_URL` 指向不存在的云库 `127.0.0.1:15433` → 检查判 `error` → `main.py:544` 抛 `RuntimeError` | 在 **`.env.local`**（gitignored）把 `CLOUD_DATABASE_URL` 置空 → 检查判 `degraded` → 正常启动。**不动代码** |
+| 3 | 采集必须在**本机**跑 | 采集任务由 API 进程内 `asyncio.create_task` 执行（`collection_tasks.py:750`），**不走 Celery**；Docker celery worker **没挂载 `profiles/`** | 本机 API 以 `DEPLOYMENT_ROLE=collector` 启动并**持有** collection leader lock（实测 `leader_lock: acquired`）→ 调度与队列都在本机 |
+
+#### B.9.4 人工环节卡在哪（唯一剩余阻塞）
+
+真实采集跑到 Shopee 的**手机 OTP** 弹窗（`+86 191****371`，主账号 `Leslieshop:main`）→
+`verification_type=otp` / `verification_input_mode=code_entry`。
+OTP 只能由账号持有人提供；系统支持 `POST /api/collection/tasks/{task_id}/resume` 传 `{"otp": "..."}` 在**同一个 page** 里回填后继续。
+→ 登录成功后 Chromium 会把新 cookie 写回 `profiles/shopee/shopeeKR` → 紧接着再跑一次采集，
+才有条件拿齐 E1~E4 四项证据（免验证码）。
+

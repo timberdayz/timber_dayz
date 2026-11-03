@@ -291,6 +291,55 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 | H. 指纹一致 | 顺序与并行路径的 UA / locale / 时区都来自 profile 原生环境，不再被运行时注入覆盖 |
 | I. 异常退出 | 强杀浏览器后重跑，登录态自愈（Chromium 重新拿 cookie） |
 
+### 10.1 验收实测记录（2026-11-03，main `180b2f6c`，本机 Windows）
+
+> 环境：Docker 栈（postgres 15432 / redis 16379 / celery-worker / celery-beat）+ **本机**后端
+> `python run.py --local`（后端端口 **8001**，路由 740 条）。
+> 验收账号：`shopee_sg_eternalbloom_local` → 主账号 **`shopee KR`** → profile `profiles/shopee/shopeeKR/`。
+
+| 场景 | 实测结果 | 结论 |
+|---|---|---|
+| A. 首次采集需登录 | 采集任务真实跑到 `status=verification_required` / `verification_type=otp`；Shopee 登录页已**自动填好**主账号 `Leslieshop:main` 与密码；OTP 发往 `+86 191****371` | ✅ 前半段符合；「登录成功后 cookie 有效期在未来」**待人工回填 OTP 后**验 |
+| B. 紧接着再采集免验证码 | 依赖 A 的登录成功 | ⏸ **待人工**（OTP 只能由账号持有人提供） |
+| C. 巡店登录 → 采集复用 | 面板 `account_id` **就是** `main_account_id`（`build_inspection_accounts`）；巡店侧 `pwcli_native.runtime_account_profile_dir` = `profiles/<平台>/<主账号ID去空格>` → `profiles/shopee/shopeeKR`；采集侧 `SessionManager.get_persistent_profile_path` **同一目录** | ✅ 路径一致（代码核对 + 运行时探针实测） |
+| D. 巡店面板无「保存会话」 | 全仓 grep：生产代码里「保存会话」按钮、`Save-Pwcli*State`、`pwcli state-save` **全部清零**（只剩测试与文档里的「已删除」记录） | ✅ |
+| E. `data/sessions/` 不新增 | 采集前后均为 **19 个 `storage_state.json`（1.47 MB）**，无新增 | ✅ |
+| F. 同主账号串行 | 本机后端持有 collection leader lock（`leader_lock: acquired`），容器 worker 处于 standby | ✅ |
+| G. IP 隔离（流量经代理） | 本地假代理 `127.0.0.1:18888` 实收 **12 条**请求行，含 `CONNECT seller.shopee.cn:443`、`CONNECT seller.shopee.sg:443`、`CONNECT patronus.idata.shopeemobile.com:443` | ✅ 链路通；**真实出口 IP 待真凭据补验** |
+| H. 指纹不被运行时覆盖 | 运行时探针 `user_agent=null` / `runtime_locale=null` → 取 profile 原生环境，未被注入覆盖 | ✅ |
+| I. 异常退出自愈 | — | ⏸ 未验（需人工中断浏览器） |
+
+**诊断字段实测值**（运行时探针，走生产代码 `open_persistent_runtime_bundle` → `_runtime_session_diagnostics`）：
+
+| 字段 | 实测值 |
+|---|---|
+| `session_profile_path` | `profiles/shopee/shopeeKR`（主账号 ID 目录，非店铺账号 ID） |
+| `session_reused` | `true` |
+| `session_source` | `profile`（对外单值） |
+| `session_proxy` | `http://127.0.0.1:18888`（脱敏后不含凭据） |
+
+凭据脱敏实测：`http://user:pass@proxy.example.com:8080` → `http://proxy.example.com:8080`；
+`http://user:pass`（缺 host）→ `http://***`。
+
+**两条必须记住的口径（实测得出，写下来避免误判）**：
+
+1. **`login_gate_result` 只在「登录门通过后」才落库。**
+   登录未完成（等 OTP）时，`core.collection_task_logs` 里**只有**「任务已创建」「等待验证码回填」两行，
+   `session_reused` / `session_source` / `session_profile_path` / `session_proxy` 全部拿不到。
+   → 验收取证 SQL 必须挑**登录成功过的那次任务**，不能拿首次登录的任务当证据。
+2. **`session_reused` 是「载体判据」，不是「登录态有效性判据」。**
+   判据 = Chromium 的 cookie 库文件存在（`Default/Network/Cookies`）。
+   实测：profile 有 cookie 库 → `session_reused=true`，但 cookie 已过期，采集仍要求重新登录（OTP）。
+   → 它的语义是「**有**可复用的载体」，不代表「**当前有效**」；后者由 `login_gate_ready` 回答。
+
+**本机跑验收的三个前提**（踩过一次，记下来）：
+
+1. 后端端口是 **8001**（不是 8000）；`run.py --local` 会自动选端口，日志里有。
+2. `.env` 里的 `CLOUD_DATABASE_URL` 指向**不存在的**云库（`127.0.0.1:15433`）→ 启动检查判定 `error` → 后端直接退出。
+   本地验收需在 **`.env.local`** 里把它置空（`.env.local` 在 `.env` 之后加载且 `override=True`，能覆盖 `.env`）。
+3. **采集任务由本机 API 进程内 `asyncio.create_task` 执行，不走 Celery。**
+   Docker celery worker **没有挂载 `profiles/`** → 采集必须由本机后端执行；容器里执行会看不到主机的登录态。
+
 ---
 
 ## 11. 变更记录
@@ -301,3 +350,4 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 | 2026-11-02 | 生效版 v2 | 落定 D1~D4：人工保存即确认、`pwcli open` 不回写、profile 引导不落盘、同账号串行 |
 | 2026-11-02 | **生效版 v3** | 架构升级为**单一载体（profile）**：会话文件废除（D5）、巡店「保存会话」改为「打开巡店」（D6）、IP 隔离链路一并打通（D7）、新增 R7 正常关闭落盘与 P1~P4 代理规则 |
 | 2026-11-03 | **生效版 v3.1** | **实现回填**（**业务语义未变**，只把 v3 已定稿的语义对应到已落地的代码与文件位置）：① **会话文件体系废除落地** —— `session_manager.py` 会话文件 API 族整体删除、`runtime_session.py` profile 引导落盘删除、正式采集恒走 profile；② **诊断字段收敛** —— 废止 `session_quality_*` / `session_manual_seeded` / `session_protected`，前端改为「会话载体 / 是否复用 / 出口代理」三项；③ **代理链路打通** —— `extra_config->'proxy'` → `resolve_account_proxy` → 浏览器 `proxy=` 注入，凭据只随 `proxy=` 下传；④ **巡店面板动作收敛为「打开巡店」**（原「保存会话」按钮与 `pwcli state-save` 已删） |
+| 2026-11-03 | 验收回填（业务语义未变） | §10 补 **10.1 验收实测记录**：本机真实采集跑到「等 OTP」→ 证明首采需人工登录；本地假代理实收 12 条 `CONNECT` → 证明流量经代理；诊断字段探针实测 `session_profile_path=profiles/shopee/shopeeKR` / `session_reused=true` / `session_source=profile` / `session_proxy=http://127.0.0.1:18888`。同时记下两条口径：`login_gate_result` 只在登录门通过后落库、`session_reused` 是「载体存在」而非「登录态有效」 |
