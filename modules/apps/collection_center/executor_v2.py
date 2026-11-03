@@ -539,12 +539,19 @@ async def _prepare_runtime_page_bundle(
             )
 
             context_options = get_browser_context_args()
+            # O1：回退路径也必须显式带上账号代理 —— get_browser_context_args()
+            # 明确不含 proxy，漏掉就是**静默直连**（账号从宿主 IP 出现，
+            # IP 隔离形同虚设）。有代理就必须有代理。
+            if proxy:
+                context_options["proxy"] = proxy
     else:
         from modules.apps.collection_center.browser_config_helper import (
             get_browser_context_args,
         )
 
         context_options = get_browser_context_args()
+        if proxy:
+            context_options["proxy"] = proxy
 
     context_options.setdefault("accept_downloads", True)
     if storage_state:
@@ -1994,7 +2001,7 @@ class CollectionExecutorV2:
             and browser_type is not None
         ):
             # 浏览器级全局代理：账号自有代理必须在浏览器进程级注入。
-            # 实测（Playwright 1.54.1）：per-context proxy 无需浏览器全局代理即可生效，
+            # 实测：per-context proxy 无需浏览器全局代理即可生效，
             # 且会覆盖全局代理；进程数也不因 per-context proxy 而增加。
             # 浏览器级代理仍保留：浏览器自身的请求（不经 context 的）也要走同一出口 IP。
             launch_kwargs = self._build_runtime_launch_kwargs(debug_mode=debug_mode)

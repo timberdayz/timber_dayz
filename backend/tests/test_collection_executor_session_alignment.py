@@ -985,7 +985,17 @@ def test_runtime_metadata_details_include_session_diagnostics() -> None:
 async def test_execute_parallel_domains_uses_auto_runtime_strategy_for_shared_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    executor = CollectionExecutorV2()
+    from backend.services.main_account_session_coordinator import (
+        MainAccountSessionCoordinator,
+    )
+
+    # P0：必须给 executor 注入**独立**的 coordinator 实例。
+    # 默认拿到的是模块级单例（backend/services/main_account_session_coordinator.py:60），
+    # 直接改它的方法会永久污染全局：后续用例里的第二个任务不再等锁，
+    # 抢在第一个任务写入新会话前就加载了旧会话，断言假红。
+    executor = CollectionExecutorV2(
+        main_account_session_coordinator=MainAccountSessionCoordinator()
+    )
     executor._update_status = AsyncMock()
     executor._process_files = AsyncMock(return_value=[])
 
@@ -996,9 +1006,11 @@ async def test_execute_parallel_domains_uses_auto_runtime_strategy_for_shared_lo
         async def __aexit__(self, exc_type, exc, tb):
             return None
 
-    executor.main_account_session_coordinator.acquire = lambda platform, main_account_id: _DummyLock()
-    executor.main_account_session_coordinator.is_locked = lambda platform, main_account_id: False
-    executor.main_account_session_coordinator.waiter_count = lambda platform, main_account_id: 0
+    # 只改这个用例自己持有的 coordinator 实例，不碰模块级单例。
+    coordinator = executor.main_account_session_coordinator
+    coordinator.acquire = lambda platform, main_account_id: _DummyLock()
+    coordinator.is_locked = lambda platform, main_account_id: False
+    coordinator.waiter_count = lambda platform, main_account_id: 0
 
     observed = {}
 
@@ -1063,6 +1075,9 @@ async def test_execute_parallel_domains_uses_auto_runtime_strategy_for_shared_lo
             "shop_account_id": "shop-1",
             "main_account_id": "main-1",
             "login_url": "https://seller.tiktok.com/account/login",
+            # N5：账号自有代理必须原样转发给 _open_runtime_bundle（含凭据）
+            "proxy_enabled": True,
+            "proxy_server": "http://embedded:embeddedpass@10.0.0.9:8080",
         },
         data_domains=[],
         date_range={"start": "2025-01-01", "end": "2025-01-31"},
@@ -1077,6 +1092,42 @@ async def test_execute_parallel_domains_uses_auto_runtime_strategy_for_shared_lo
     assert result.status == "failed"
     assert result.error_message == "No data domains provided"
     assert observed["session_runtime_mode"] == "auto"
+    # N5：executor 转发给 _open_runtime_bundle 的 proxy 必须等于解析出的完整代理
+    # （含 username/password）—— 把转发点改成 None 的变异必须被这条断言挡住。
+    assert observed["proxy"] == {
+        "server": "http://10.0.0.9:8080",
+        "username": "embedded",
+        "password": "embeddedpass",
+    }
+
+
+@pytest.mark.asyncio
+async def test_parallel_domains_case_does_not_pollute_module_coordinator_singleton(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P0 防复发：测试**不得**污染模块级 coordinator 单例。
+
+    单例一旦被污染（``acquire`` 换成永不阻塞的假锁），后续用例里的第二个任务
+    就不再等锁 —— 抢在第一个任务写入新会话前就加载了旧会话，断言假红。
+    """
+    from backend.services.main_account_session_coordinator import (
+        MainAccountSessionCoordinator,
+        get_main_account_session_coordinator,
+    )
+
+    singleton = get_main_account_session_coordinator()
+    before = (singleton.acquire, singleton.is_locked, singleton.waiter_count)
+
+    await test_execute_parallel_domains_uses_auto_runtime_strategy_for_shared_login(
+        monkeypatch
+    )
+
+    after = (singleton.acquire, singleton.is_locked, singleton.waiter_count)
+    assert after == before, "模块级 coordinator 单例被用例污染了"
+    # 单例必须仍是类上的原始实现（没有被实例属性覆盖）
+    assert before[0] == MainAccountSessionCoordinator.acquire.__get__(singleton)
+    assert before[1] == MainAccountSessionCoordinator.is_locked.__get__(singleton)
+    assert before[2] == MainAccountSessionCoordinator.waiter_count.__get__(singleton)
 
 
 def test_manual_seeded_session_is_not_skipped_for_tiktok():

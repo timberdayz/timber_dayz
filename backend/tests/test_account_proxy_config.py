@@ -21,6 +21,30 @@ from backend.services.account_proxy_config import (
     split_proxy_credentials,
 )
 
+# 遗留地区池链路的标识符（含 fallback_to_direct 静默直连）。
+# N6：补上 ProxyConfigManager —— 早期只按小写模块名判定，
+# ``from ... import ProxyConfigManager`` 这种写法检测不到。
+_FORBIDDEN_PROXY_CHAIN_NAMES = frozenset(
+    {
+        "proxy_config_manager",
+        "ProxyConfigManager",
+        "get_playwright_proxy_config",
+        "get_account_proxy",
+        "fallback_to_direct",
+    }
+)
+
+# 代理链路上真正会写 proxy 的文件（不只解析模块）。
+# N6：补上指纹层与浏览器配置层 —— 它们同样会把 proxy 写进 context options。
+_PROXY_CHAIN_SCANNED_FILES = (
+    "backend/services/account_proxy_config.py",
+    "backend/domains/collection/routers/collection_tasks.py",
+    "modules/apps/collection_center/executor_v2.py",
+    "modules/apps/collection_center/runtime_session.py",
+    "modules/utils/sessions/device_fingerprint.py",
+    "modules/apps/collection_center/browser_config_helper.py",
+)
+
 
 def _make_service() -> AccountLoaderService:
     """构造一个不需要真实密钥的 loader（测试里不需要真的解密）。"""
@@ -281,6 +305,35 @@ def test_resolve_account_proxy_ignores_legacy_region_pool_signals():
     assert "singapore" not in str(resolved)
 
 
+def _collect_referenced_names(source: str) -> set[str]:
+    """收集源码里引用到的标识符（含 import 的模块路径分段）。
+
+    N6：早期实现只收 ``ast.Name`` / ``ast.Attribute`` / ``alias.name``，
+    **从不收** ``ast.ImportFrom.module`` —— 于是
+    ``from modules.utils.proxy_config_manager import ProxyConfigManager``
+    （本仓 ``modules/collectors/shopee_collector.py:47`` 的写法）检测不到。
+    这里把 import 的模块路径也按 ``.`` 拆开收集，模块路径与被导入名都算命中。
+    """
+    import ast
+
+    tree = ast.parse(source)
+    referenced: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            referenced.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            referenced.add(node.attr)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                referenced.update(alias.name.split("."))
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                referenced.update(node.module.split("."))
+            for alias in node.names:
+                referenced.update(alias.name.split("."))
+    return referenced
+
+
 def test_account_proxy_chain_never_references_legacy_direct_fallback():
     """C1/C2：代理链路不得引用遗留地区池链路。
 
@@ -290,38 +343,42 @@ def test_account_proxy_chain_never_references_legacy_direct_fallback():
     这条扫描的是**整条代理链路**上真正会写 proxy 的文件（不只解析模块），
     只要有人重新 import/调用遗留链路就会红。
     """
-    import ast
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[2]
-    forbidden = {
-        "proxy_config_manager",
-        "get_playwright_proxy_config",
-        "get_account_proxy",
-        "fallback_to_direct",
-    }
-    scanned = (
-        "backend/services/account_proxy_config.py",
-        "backend/domains/collection/routers/collection_tasks.py",
-        "modules/apps/collection_center/executor_v2.py",
-        "modules/apps/collection_center/runtime_session.py",
-    )
-    for relative_path in scanned:
+    for relative_path in _PROXY_CHAIN_SCANNED_FILES:
         source = (repo_root / relative_path).read_text(
             encoding="utf-8", errors="replace"
         )
-        tree = ast.parse(source)
-        referenced: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name):
-                referenced.add(node.id)
-            elif isinstance(node, ast.Attribute):
-                referenced.add(node.attr)
-            elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                for alias in node.names:
-                    referenced.add(alias.name)
-        leaked = referenced & forbidden
+        leaked = _collect_referenced_names(source) & set(_FORBIDDEN_PROXY_CHAIN_NAMES)
         assert not leaked, f"{relative_path} 引用了遗留代理链路: {sorted(leaked)}"
+
+
+def test_legacy_proxy_chain_guard_detects_import_from_module_path():
+    """N6：``from ... import ProxyConfigManager`` 形式也必须被守卫检出。
+
+    早期实现只收 ``alias.name``，漏掉 ``ImportFrom.module`` ——
+    于是本仓 ``modules/collectors/shopee_collector.py:47`` 的写法检测不到。
+    """
+    from_import = _collect_referenced_names(
+        "from modules.utils.proxy_config_manager import ProxyConfigManager\n"
+    )
+    assert "ProxyConfigManager" in from_import
+    assert "proxy_config_manager" in from_import
+
+    plain_import = _collect_referenced_names(
+        "import modules.utils.proxy_config_manager\n"
+    )
+    assert "proxy_config_manager" in plain_import
+
+    # 早前就能检出的形态不得退化
+    assert "get_account_proxy" in _collect_referenced_names(
+        "from modules.utils.proxy_config_manager import get_account_proxy\n"
+    )
+    # 属性访问形态同样要能检出
+    assert "get_playwright_proxy_config" in _collect_referenced_names(
+        "manager.get_playwright_proxy_config(account)\n"
+    )
 
 
 
@@ -630,6 +687,95 @@ def test_split_proxy_credentials_keeps_non_http_scheme(raw, expected):
     assert split_proxy_credentials(raw) == expected
 
 
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        # 空端口：主机还在，缺的是端口 —— 不能被判成 userinfo
+        ("http://h:", {"server": "http://h:"}),
+        # 带路径：端口位是 "8080"，不是 "8080/path" —— 不能被判成 userinfo
+        ("http://host:8080/path", {"server": "http://host:8080/path"}),
+        # 裸 IPv6：不是 userinfo（主机是在的）
+        ("http://::1:8080", {"server": "http://::1:8080"}),
+        # 括号 IPv6：已经正确的形态，不能被破坏
+        ("http://[::1]:8080", {"server": "http://[::1]:8080"}),
+        (
+            "http://u:p@[::1]:8080",
+            {"server": "http://[::1]:8080", "username": "u", "password": "p"},
+        ),
+        # socks5：已经正确的形态，不能被破坏
+        ("socks5://h:1080", {"server": "socks5://h:1080"}),
+        # 空 userinfo：不得产出空的 username/password 键
+        ("http://@h:8080", {"server": "http://h:8080"}),
+    ],
+)
+def test_split_proxy_credentials_handles_malformed_proxy_strings(raw, expected):
+    """N1/N2/N4：畸形代理串的处理必须一致，且不能误伤已经正确的形态。
+
+    早期实现把"空端口""带路径""裸 IPv6"一律当成 userinfo → server 被剥成
+    "http://"，于是代理串里的主机（其实在）被误报成"缺少代理主机"。
+    """
+    assert split_proxy_credentials(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (
+            "http://u:p@h:8080",
+            {"server": "http://h:8080", "username": "u", "password": "p"},
+        ),
+        # 只有用户名：不得产出空 password 键
+        ("http://u:@h:8080", {"server": "http://h:8080", "username": "u"}),
+        # 只有密码：不得产出空 username 键
+        ("http://:p@h:8080", {"server": "http://h:8080", "password": "p"}),
+        # 空 userinfo：两个键都不产出
+        ("http://@h:8080", {"server": "http://h:8080"}),
+    ],
+)
+def test_split_proxy_credentials_never_emits_empty_credential_keys(raw, expected):
+    """N2：空凭据不得产出空的 username/password 键。
+
+    空键带给 Playwright 会被当成"有用户名无密码"，需要认证的代理直接 407。
+    """
+    assert split_proxy_credentials(raw) == expected
+
+
+def test_split_proxy_credentials_keeps_lettered_userinfo_out_of_bare_ipv6_rule():
+    """N1：裸 IPv6 判定不能误伤带字母的凭据串。
+
+    ``user::pass`` 含 ``::`` 但不是 IPv6 字面量 —— 那种串拆不出主机，
+    凭据必须从 server 里剥掉（否则明文密码会留在 server 里）。
+    """
+    result = split_proxy_credentials("http://user::pass")
+    assert result["server"] == "http://"
+    assert result["username"] == "user"
+    assert result["password"] == ":pass"
+
+
+def test_resolve_account_proxy_keeps_host_of_malformed_but_parseable_strings():
+    """N1/N2：主机还在的畸形串不得被误报成"缺少代理主机"。
+
+    早期实现把这些串判成 userinfo → server 变成 "http://" → 抛出的报错
+    指向"缺少主机"，但主机其实在，提示会误导运维去查错方向。
+    """
+    assert resolve_account_proxy(
+        {"proxy_enabled": True, "proxy_server": "http://h:"}
+    ) == {"server": "http://h:"}
+    assert resolve_account_proxy(
+        {"proxy_enabled": True, "proxy_server": "http://host:8080/path"}
+    ) == {"server": "http://host:8080/path"}
+    assert resolve_account_proxy(
+        {"proxy_enabled": True, "proxy_server": "http://::1:8080"}
+    ) == {"server": "http://::1:8080"}
+
+
+def test_mask_proxy_server_never_leaks_credentials_of_malformed_strings():
+    """N2：畸形串的脱敏结果同样不得带明文凭据。"""
+    assert mask_proxy_server("http://@h:8080") == "http://h:8080"
+    assert mask_proxy_server("http://u:@h:8080") == "http://h:8080"
+    assert "user" not in mask_proxy_server("http://user::pass")
+
+
 def test_mask_proxy_server_normalizes_missing_scheme():
     """脱敏结果同样要带 scheme（与 split 的归一口径一致）。"""
     assert mask_proxy_server("h:8080") == "http://h:8080"
@@ -732,6 +878,29 @@ def test_strip_account_proxy_credentials_removes_all_credentials():
     assert "proxy_server" not in malformed
 
 
+def test_strip_account_proxy_credentials_drops_proxy_server_without_host():
+    """N4：拆不出主机就删键 —— 与 "user:pass" 口径一致。
+
+    早期实现把 "http://user:pass" 剥成 "http://" 这种垃圾代理地址留在
+    组件 config 里，而 "user:pass" 会删键 —— 同一件事两种语义。
+    """
+    from backend.services.account_proxy_config import strip_account_proxy_credentials
+
+    assert "proxy_server" not in strip_account_proxy_credentials(
+        {"proxy_server": "http://user:pass"}
+    )
+    assert "proxy_server" not in strip_account_proxy_credentials(
+        {"proxy_server": "user:pass"}
+    )
+    # 主机还在的串：保留剥掉凭据后的地址
+    assert strip_account_proxy_credentials(
+        {"proxy_server": "http://embedded:embeddedpass@h:8080"}
+    )["proxy_server"] == "http://h:8080"
+    assert strip_account_proxy_credentials(
+        {"proxy_server": "http://h:"}
+    )["proxy_server"] == "http://h:"
+
+
 def test_runtime_account_drops_proxy_credentials():
     """P0-4：runtime_account（进组件/指纹链路）不得带明文凭据。"""
     from modules.apps.collection_center.executor_v2 import _build_runtime_account
@@ -824,6 +993,111 @@ async def test_account_proxy_reaches_browser_context_in_storage_state_path(monke
     }
 
 
+async def test_runtime_fingerprint_failure_fallback_keeps_account_proxy(monkeypatch):
+    """O1：指纹加载失败回退时，context options 仍必须带账号代理。
+
+    ``get_browser_context_args()`` 明确不含 proxy —— 回退时漏掉就是
+    **静默直连**（账号从宿主 IP 出现，IP 隔离形同虚设）。
+    """
+    from modules.apps.collection_center import runtime_session
+
+    async def _broken_fingerprint(*args, **kwargs):
+        raise RuntimeError("fingerprint broken")
+
+    monkeypatch.setattr(
+        runtime_session,
+        "_get_fingerprint_context_options_async",
+        _broken_fingerprint,
+    )
+
+    proxy = {
+        "server": "http://10.0.0.9:8080",
+        "username": "u",
+        "password": "p",
+    }
+    context_options = await runtime_session.build_runtime_context_options(
+        platform="shopee",
+        session_owner_id="main-1",
+        account={"account_id": "shopee_sg_x"},
+        proxy=proxy,
+    )
+
+    assert context_options["proxy"] == proxy
+
+
+async def test_executor_fingerprint_failure_fallback_keeps_account_proxy(
+    monkeypatch,
+    tmp_path,
+):
+    """O1：executor 侧的指纹回退分支同样必须带账号代理。
+
+    这段代码当前是死代码（Task 4 会删），但评审点名了它的回退分支 ——
+    在被删掉之前，回退路径不得留下"静默直连"的坑。
+    """
+    from modules.apps.collection_center import executor_v2
+
+    captured: dict[str, object] = {}
+
+    class _FakeContext:
+        async def new_page(self):
+            return object()
+
+    class _FakeBrowser:
+        async def new_context(self, **kwargs):
+            captured.update(kwargs)
+            return _FakeContext()
+
+    async def _broken_fingerprint(*args, **kwargs):
+        raise RuntimeError("fingerprint broken")
+
+    async def _no_session(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        executor_v2,
+        "_get_fingerprint_context_options_async",
+        _broken_fingerprint,
+    )
+    monkeypatch.setattr(
+        executor_v2,
+        "_load_or_bootstrap_session_async",
+        _no_session,
+    )
+    monkeypatch.setattr(
+        executor_v2.runtime_session,
+        "apply_stealth_init_scripts",
+        AsyncMock(),
+    )
+
+    proxy = {
+        "server": "http://10.0.0.9:8080",
+        "username": "u",
+        "password": "p",
+    }
+    bundle = await executor_v2._prepare_runtime_page_bundle(
+        task_id="task-1",
+        platform="shopee",
+        session_owner_id="main-1",
+        runtime_account={"account_id": "shopee_sg_x"},
+        raw_account={"account_id": "shopee_sg_x"},
+        granularity="daily",
+        normalized_date_range={
+            "date_from": "2025-01-01",
+            "date_to": "2025-01-31",
+        },
+        task_download_dir=tmp_path,
+        screenshot_dir=tmp_path,
+        shop_account_id="shopee_sg_x",
+        use_account_session_fingerprint=True,
+        browser_instance=_FakeBrowser(),
+        runtime_manifests={"login": {}},
+        proxy=proxy,
+    )
+
+    assert captured["proxy"] == proxy
+    assert bundle["context_options"]["proxy"] == proxy
+
+
 async def test_account_proxy_reaches_browser_context_in_parallel_fanout(monkeypatch, tmp_path):
     """P1-3：并行扇出的每个 context 都必须带账号代理。
 
@@ -831,9 +1105,19 @@ async def test_account_proxy_reaches_browser_context_in_parallel_fanout(monkeypa
     账号 dict 里的凭据被剔除只是发生在组件 config 上，executor 拿到的原始
     account 仍然带凭据，兜底解析必须拿得到完整代理。
     """
+    from backend.services.main_account_session_coordinator import (
+        MainAccountSessionCoordinator,
+    )
     from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
 
-    executor = CollectionExecutorV2()
+    # P0：必须给 executor 注入**独立**的 coordinator 实例。
+    # 默认拿到的是模块级单例（backend/services/main_account_session_coordinator.py:60），
+    # 直接改它的方法会永久污染全局：后续用例里的第二个任务不再等锁，
+    # 抢在第一个任务写入新会话前就加载了旧会话，断言假红
+    # （test_collection_executor_reused_session_scope::test_execute_reloads_main_account_session_after_waiting_for_lock）。
+    executor = CollectionExecutorV2(
+        main_account_session_coordinator=MainAccountSessionCoordinator()
+    )
     executor.downloads_dir = tmp_path / "downloads"
     executor.screenshots_dir = tmp_path / "screenshots"
     executor._update_status = AsyncMock()
@@ -848,15 +1132,11 @@ async def test_account_proxy_reaches_browser_context_in_parallel_fanout(monkeypa
         async def __aexit__(self, exc_type, exc, tb):
             return None
 
-    executor.main_account_session_coordinator.acquire = (
-        lambda platform, main_account_id: _DummyLock()
-    )
-    executor.main_account_session_coordinator.is_locked = (
-        lambda platform, main_account_id: False
-    )
-    executor.main_account_session_coordinator.waiter_count = (
-        lambda platform, main_account_id: 0
-    )
+    # 只改这个用例自己持有的 coordinator 实例，不碰模块级单例。
+    coordinator = executor.main_account_session_coordinator
+    coordinator.acquire = lambda platform, main_account_id: _DummyLock()
+    coordinator.is_locked = lambda platform, main_account_id: False
+    coordinator.waiter_count = lambda platform, main_account_id: 0
 
     captured_context_kwargs: list[dict] = []
 
@@ -963,6 +1243,39 @@ async def test_account_proxy_reaches_browser_context_in_parallel_fanout(monkeypa
         config_account = (call.kwargs.get("config") or {}).get("account") or {}
         assert "proxy_username" not in config_account
         assert "proxy_password" not in config_account
+
+
+async def test_parallel_fanout_case_does_not_pollute_module_coordinator_singleton(
+    monkeypatch,
+    tmp_path,
+):
+    """P0 防复发：测试**不得**污染模块级 coordinator 单例。
+
+    单例一旦被污染（``acquire`` 换成永不阻塞的假锁），后续用例里的第二个任务
+    就不再等锁 —— 抢在第一个任务写入新会话前就加载了旧会话，断言假红
+    （``test_collection_executor_reused_session_scope::
+    test_execute_reloads_main_account_session_after_waiting_for_lock``）。
+
+    这里取"执行前/执行后"的方法引用做对比，钉死全局单例不被用例改写。
+    """
+    from backend.services.main_account_session_coordinator import (
+        MainAccountSessionCoordinator,
+        get_main_account_session_coordinator,
+    )
+
+    singleton = get_main_account_session_coordinator()
+    before = (singleton.acquire, singleton.is_locked, singleton.waiter_count)
+
+    await test_account_proxy_reaches_browser_context_in_parallel_fanout(
+        monkeypatch, tmp_path
+    )
+
+    after = (singleton.acquire, singleton.is_locked, singleton.waiter_count)
+    assert after == before, "模块级 coordinator 单例被用例污染了"
+    # 单例必须仍是类上的原始实现（没有被实例属性覆盖）
+    assert before[0] == MainAccountSessionCoordinator.acquire.__get__(singleton)
+    assert before[1] == MainAccountSessionCoordinator.is_locked.__get__(singleton)
+    assert before[2] == MainAccountSessionCoordinator.waiter_count.__get__(singleton)
 
 
 async def test_headful_login_fallback_uses_passed_proxy_with_credentials(monkeypatch):

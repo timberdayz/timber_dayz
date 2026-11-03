@@ -649,8 +649,15 @@ async def build_runtime_context_options(
                 exc,
             )
             context_options = get_browser_context_args()
+            # O1：回退路径也必须显式带上账号代理 —— get_browser_context_args()
+            # 明确不含 proxy，漏掉就是**静默直连**（账号从宿主 IP 出现，
+            # IP 隔离形同虚设）。有代理就必须有代理。
+            if proxy:
+                context_options["proxy"] = proxy
     else:
         context_options = get_browser_context_args()
+        if proxy:
+            context_options["proxy"] = proxy
 
     context_options = dict(context_options)
     context_options["accept_downloads"] = accept_downloads

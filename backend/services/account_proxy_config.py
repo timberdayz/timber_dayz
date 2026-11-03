@@ -119,13 +119,33 @@ def _authority_of(raw: str) -> str:
     return host if at else rest
 
 
+# 裸 IPv6 字面量（"::1:8080"）的合法字符集：十六进制数字、冒号、点
+_IPV6_LITERAL_CHARS = frozenset("0123456789abcdefABCDEF:.")
+
+
+def _looks_like_bare_ipv6(text: str) -> bool:
+    """裸 IPv6 字面量（``::1:8080``）不是 userinfo。
+
+    括号形式（``[::1]:8080``）由调用方先排除；这里只认**裸**写法：
+    含 ``::`` 且整串只由十六进制数字、冒号、点组成。
+
+    含字母的形态（例如 ``user::pass``）仍然是 userinfo —— 那种串拆不出主机，
+    凭据必须从 server 里剥掉，否则明文密码会进日志、也会被当成代理地址下发。
+    """
+    if "::" not in text:
+        return False
+    return all(ch in _IPV6_LITERAL_CHARS for ch in text)
+
+
 def _looks_like_userinfo(authority: str) -> bool:
     """authority 形如 ``user:pass``（漏写 host）时必须按 userinfo 处理。
 
     判定规则：
 
-    - IPv6 字面量（``[::1]:8080``）不是 userinfo；
+    - IPv6 字面量（``[::1]:8080``、裸 ``::1:8080``）不是 userinfo；
+    - 路径段不参与判定：``host:8080/path`` 的端口位是 ``8080``（不是 ``8080/path``）；
     - 端口位是纯数字时是正常的 ``host:port``；
+    - 端口位为空（``h:``）也是 ``host`` 形态 —— 主机还在，缺的是端口；
     - 其余带 ``:`` 的形态（端口位不是数字、或有多个 ``:``）都按 userinfo 处理 ——
       这种串拆不出可用主机，凭据必须从 server 里剥掉，否则明文密码会进日志、
       也会被当成代理地址下发。
@@ -135,9 +155,16 @@ def _looks_like_userinfo(authority: str) -> bool:
         return False
     if text.startswith("["):
         return False
+    # 路径段（"host:8080/path"）不参与 userinfo 判定；整串以 "/" 开头时保持原样。
+    text = text.split("/", 1)[0] or text
+    if _looks_like_bare_ipv6(text):
+        return False
     if text.count(":") > 1:
         return True
     _host, _sep, port = text.rpartition(":")
+    if not port:
+        # 空端口（"h:"）：主机还在，缺的是端口 —— 不是 userinfo
+        return False
     return not port.isdigit()
 
 
@@ -161,11 +188,14 @@ def split_proxy_credentials(proxy_server: str) -> Dict[str, str]:
     if at:
         username, _, password = userinfo.partition(":")
         host_with_scheme = f"{scheme}://{host_part}" if scheme else host_part
-        return {
-            "server": _normalize_proxy_server(host_with_scheme),
-            "username": username,
-            "password": password,
-        }
+        split = {"server": _normalize_proxy_server(host_with_scheme)}
+        # 空 userinfo（"http://@h:8080"）不产出空的 username/password 键：
+        # 空凭据键带给 Playwright 会被当成"有用户名无密码"，代理直接 407。
+        if username:
+            split["username"] = username
+        if password:
+            split["password"] = password
+        return split
     if _looks_like_userinfo(host_part):
         # 形如 "http://user:pass"（漏写 host）：按 userinfo 拆，凭据从 server 里剥掉
         username, _, password = host_part.partition(":")
@@ -205,6 +235,9 @@ def _proxy_server_has_host(server: str) -> bool:
     host_part = netloc if sep else text
     if host_part.startswith("["):
         return bool(host_part[1:].split("]")[0].strip())
+    if _looks_like_bare_ipv6(host_part):
+        # 裸 IPv6（"::1:8080"）：主机是在的，只是没写括号 —— 不该报"缺少代理主机"
+        return True
     return bool(host_part.split(":")[0].strip())
 
 
@@ -278,11 +311,11 @@ def strip_account_proxy_credentials(
     server = _normalize_text(data.get("proxy_server"))
     if server:
         split = split_proxy_credentials(server)
-        if split.get("server"):
+        if split.get("server") and _proxy_server_has_host(split["server"]):
             data["proxy_server"] = split["server"]
         else:
-            # 畸形串（拆不出主机，例如 "user:pass"）：宁可丢掉这个键，
-            # 也不能把明文凭据留在组件 config 里。
+            # 畸形串（拆不出主机，例如 "user:pass" / "http://user:pass"）：宁可丢掉这个键，
+            # 也不能把明文凭据或垃圾代理地址（"http://"）留在组件 config 里。
             data.pop("proxy_server", None)
     return data
 
