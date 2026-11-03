@@ -99,7 +99,11 @@ def test_warn_legacy_shop_session_artifacts_reports_detected_paths(tmp_path, mon
     result = module.warn_legacy_shop_session_artifacts(tmp_path)
 
     assert result is True
-    assert any("历史残留" in message for message in messages)
+    # 告警语义已从「店铺级会话历史残留」改为「店铺级 profile 遗留」——
+    # 会话文件体系废除后，磁盘上残留的会话文件不再被任何代码读取，
+    # 需要提示运维清理的是**店铺级 profile**（profiles/<平台>/<店铺账号ID>）。
+    assert any("店铺级 profile 遗留" in message for message in messages)
+    assert not any("历史残留" in message for message in messages)
     assert any("cleanup_legacy_shop_session_artifacts.py --delete" in message for message in messages)
 
 

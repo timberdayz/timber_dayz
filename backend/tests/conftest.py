@@ -102,6 +102,23 @@ _ORIGINAL_DATABASE_URL = os.environ.get("DATABASE_URL")
 os.environ[TEST_DATABASE_URL_VAR] = _start_isolated_postgres()
 os.environ[TEST_ENV_GUARD_VAR] = "1"
 
+# ---------------------------------------------------------------------------
+# 护栏: 测试绝不能连上真实 Redis
+# ---------------------------------------------------------------------------
+#
+# 账号会话锁(Task 3)在生产用 Redis ``SET NX`` 做**跨进程**互斥; 开发/测试
+# 默认走进程内锁。但本机**确实**跑着 Redis(``.env`` 里的 ``REDIS_URL`` 指向
+# localhost:16379), 一旦锁模块在测试里自动去连, 单元测试就会写到真实 Redis ——
+# 与上面「测试写生产数据」是同一类事故(只是这次写的是锁 key 与等待者 Hash)。
+#
+# 因此这里**无条件**把后端模式钉成 ``local``: 单元测试里的账号会话锁一律用
+# 假后端/进程内锁, 需要验证 Redis 语义的用例自己注入假后端
+# (见 ``backend/tests/test_main_account_session_lock.py``)。
+os.environ["ACCOUNT_SESSION_LOCK_BACKEND"] = "local"
+# 兜底: 万一某个用例漏释放了账号锁, 下一个用例最多等 10 秒就报「账号会话被占用」,
+# 而不是干等 30 分钟把整个测试会话拖死。
+os.environ["ACCOUNT_SESSION_LOCK_WAIT_TIMEOUT"] = "10"
+
 from modules.core.db import Base  # noqa: E402  (必须晚于上面的护栏设置)
 
 
@@ -519,7 +536,7 @@ async def pricing_seed(pg_session):
     """返回「种数据」的协程；用例结束后自动清理干净。
 
     ⚠️ **必须清理**：pg 容器是 **session 级**的，而端点内部会 `db.commit()`——
-    种下去的行会被**提交**，不会��� pg_session 的 teardown `rollback()` 掉。
+    种下去的行会被**提交**，不会被 pg_session 的 teardown `rollback()` 掉。
     不清理的话，下一个用例种同样的主键会撞
     `UniqueViolationError: duplicate key value violates unique constraint "dim_users_pkey"`。
     """

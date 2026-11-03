@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.account_proxy_config import extract_proxy_config
 from backend.services.encryption_service import get_encryption_service
 from backend.services.platform_login_entry_service import normalize_main_account_login_url
 from backend.services.shopee_shop_id_resolver import resolve_shopee_platform_shop_id
@@ -55,6 +56,10 @@ class ShopAccountLoaderService:
             store_name=shop_account.store_name,
             platform_shop_id=shop_account.platform_shop_id,
         )
+        # 账号级代理：与 AccountLoaderService 共用同一套解析规则（单一来源），
+        # 数据来自 core.shop_accounts.extra_config["proxy"]（不加列、不写迁移）。
+        # getattr 兜底与本方法里 email/phone 的写法一致：字段缺失时按"没配代理"处理。
+        proxy = extract_proxy_config(getattr(shop_account, "extra_config", None))
         compat_account = {
             "account_id": shop_account.shop_account_id,
             "main_account_id": main_account.main_account_id,
@@ -71,6 +76,13 @@ class ShopAccountLoaderService:
             "phone": getattr(main_account, "phone", None) or "",
             "enabled": shop_account.enabled,
             "capabilities": capabilities,
+            # 代理相关键：消费方是 backend/services/account_proxy_config.resolve_account_proxy，
+            # 它只认账号自有的 proxy_server（不读遗留地区池，也不读 proxy_required）。
+            "proxy_enabled": proxy["proxy_enabled"],
+            "proxy_server": proxy["proxy_server"],
+            "proxy_region": proxy["proxy_region"],
+            "proxy_username": proxy["proxy_username"],
+            "proxy_password": proxy["proxy_password"],
         }
         return {
             "main_account": {

@@ -420,21 +420,15 @@ Open-PwcliTiktok -WorkTag "orders-export"
 - 同一个平台下只要继续使用同一个 profile 目录，通常不需要重新登录
 - 同一个 profile 目录不要同时被多个浏览器会话共用
 
-如需额外保存认证状态快照，可在登录成功后执行：
+登录状态由浏览器的 profile 目录自动保存（Chromium 自己把 cookie 写盘），**没有**额外的「保存会话」命令：登录成功后直接关闭浏览器窗口即可。
 
-```powershell
-Save-PwcliMiaoshouState
-Save-PwcliShopeeState
-Save-PwcliTiktokState
-```
-
-之后可通过以下方式加载：
+平台级（不带账号）的人工会话快照仍可导出/加载:
 
 ```powershell
 pwcli state-load ".\output\playwright\state\miaoshou.json"
 ```
 
-在当前仓库场景下，推荐优先使用 `--profile`，`state-save/state-load` 作为补充备份。
+在当前仓库场景下，推荐优先使用 `--profile`；`state-load` 只作为平台级会话快照的补充手段。
 
 ---
 
@@ -452,7 +446,6 @@ pwcli press Enter
 pwcli screenshot --filename ".\01-home.png"
 pwcli reload
 pwcli list
-pwcli state-save ".\session-state.json"
 ```
 
 说明：

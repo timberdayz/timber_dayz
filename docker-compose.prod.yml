@@ -106,6 +106,10 @@ services:
       # Redis配置
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
 
+      # 账号会话锁后端（Task 3）：同一主账号的持久 profile 目录不能被两个进程同时打开
+      # → 锁必须跨进程（Redis SET NX）。显式指定 Redis，不再依赖 ENVIRONMENT 的隐式推断。
+      ACCOUNT_SESSION_LOCK_BACKEND: ${ACCOUNT_SESSION_LOCK_BACKEND:-redis}
+
       # 安全配置
       SECRET_KEY: ${SECRET_KEY}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
@@ -148,6 +152,14 @@ services:
       - ./logs:/app/logs
       - ./temp:/app/temp
       - ./uploads:/app/uploads
+      # 持久化 Profile 目录（登录态的唯一载体）：必须挂到宿主机，
+      # 否则容器一重建，所有账号的 Chromium 登录态全部丢失（每次都要重新人工登录 + 过验证码）
+      - ./profiles:/app/profiles
+    # 防御性配置：生产当前用的是内网服务名 redis:6379（不依赖 host.docker.internal），
+    # 但若将来把 REDIS_URL 指回宿主，Linux 上没有这条映射会解析失败 → 账号会话锁
+    # 静默降级为进程内锁（跨进程保护失效）。host-gateway 需要 Docker 20.10+。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # 生产最小端口暴露：backend 不映射宿主机端口（通过 nginx 反向代理访问 /api/）
     depends_on:
       postgres:
@@ -189,6 +201,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-xihong_erp}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      # 账号会话锁后端（Task 3）：显式指定 Redis，不再依赖 ENVIRONMENT 的隐式推断
+      ACCOUNT_SESSION_LOCK_BACKEND: ${ACCOUNT_SESSION_LOCK_BACKEND:-redis}
       SECRET_KEY: ${SECRET_KEY}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       ACCOUNT_ENCRYPTION_KEY: ${ACCOUNT_ENCRYPTION_KEY}

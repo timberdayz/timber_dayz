@@ -237,6 +237,17 @@ class Settings:
     PLAYWRIGHT_HEADLESS: bool = os.getenv("PLAYWRIGHT_HEADLESS", "false").lower() == "true"
     PLAYWRIGHT_SLOW_MO: int = int(os.getenv("PLAYWRIGHT_SLOW_MO", "0"))
     
+    # ------------------------------------------------------------------
+    # 账号会话锁(Task 3 / R6)后端开关见本模块底部的模块级函数
+    # (account_session_lock_backend / ..._ttl_seconds / ..._fail_closed)。
+    #
+    # 刻意**不**做成 Settings 的 property:
+    #   * 锁与鉴权无关 —— 不能因为 Settings() 在生产环境校验 JWT 密钥而抛
+    #     RuntimeError(否则账号锁会因为一个无关配置直接不可用);
+    #   * 环境变量必须**实时**读 —— 测试期护栏(backend/tests/conftest.py)
+    #     是在 import 之后才设的, import 期求值的类属性会读到旧值。
+    # ------------------------------------------------------------------
+
     @property
     def rate_limit_storage_uri(self) -> str:
         """
@@ -309,3 +320,111 @@ class Settings:
 def get_settings() -> Settings:
     """获取配置实例"""
     return Settings()
+
+
+# ---------------------------------------------------------------------------
+# 账号会话锁(Task 3 / R6)后端开关
+# ---------------------------------------------------------------------------
+#
+# 同一主账号(main_account_id)的持久 profile 目录**不能被两个浏览器进程同时打开**
+# → 锁必须跨进程(Redis SET NX)。这几个开关决定锁后端与降级策略。
+#
+# 做成**模块级函数**而不是 Settings 的 property:
+#   * 锁与鉴权无关 —— 不能因为 Settings() 在生产环境校验 JWT 密钥而抛
+#     RuntimeError(否则账号锁会因为一个无关配置直接不可用);
+#   * 环境变量必须**实时**读 —— 测试期护栏(backend/tests/conftest.py)
+#     是在 import 之后才设的, import 期求值的类属性会读到旧值。
+
+#: 账号会话锁后端模式取值
+ACCOUNT_SESSION_LOCK_BACKEND_MODES = ("auto", "redis", "local")
+
+
+def account_session_lock_environment() -> str:
+    """锁后端判定用的环境名(实时读环境变量)。"""
+    return (os.getenv("ENVIRONMENT") or "development").strip().lower()
+
+
+def account_session_lock_redis_url() -> str:
+    """账号会话锁的**有效 Redis 地址**(实时读环境变量)。
+
+    口径: ``REDIS_URL`` 优先, 其次 ``CELERY_BROKER_URL``(与
+    ``backend/celery_app.py`` 的 broker 口径一致); 都没有 -> 空串(未配置 Redis)。
+
+    这个地址**同时**用于两处, 保证「判定」与「实际连的地址」永不打架:
+
+    1. ``auto`` 模式的判定(配了地址 -> 走 Redis);
+    2. 账号会话锁建连时真正用的 URL。
+
+    刻意**不做连接探测**: 这段判定会被频繁调用, 每次探测都要白等一次连接
+    超时。「配了地址但连不上」(例如 compose 里 ``REDIS_URL`` 恒有值而宿主 Redis
+    没起)由 fail-closed / fail-open 的**分级降级**兜底 —— 生产报错 / 非生产
+    降级为进程内锁 + error 级日志。
+    """
+    for var in ("REDIS_URL", "CELERY_BROKER_URL"):
+        value = (os.getenv(var) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def account_session_lock_backend() -> str:
+    """账号会话锁后端模式(原始值): ``auto`` / ``redis`` / ``local``。
+
+    * ``auto``(默认): 生产 -> Redis; 非生产但**配置上指向了 Redis** -> 也走 Redis
+      (父进程与录制子进程必须一致, 否则两侧互相排斥不了); 其余 -> 进程内锁。
+      单元测试**绝不**连真实 Redis —— 靠 ``backend/tests/conftest.py`` 把模式
+      钉成显式 ``local`` 的护栏, **不依赖** ``auto`` 的非生产语义。
+    * ``redis``: 强制 Redis(不可用时按 fail-closed 分级)。
+    * ``local``: 强制进程内锁(仅同进程互斥; 一个 Redis 连接都不建)。
+
+    ``auto`` 的解析在 ``backend/services/main_account_session_lock.py`` 的
+    ``resolve_session_lock_backend_mode()`` 里 —— 父进程(采集)与录制子进程
+    **共用这一个入口**, 与告警日志放在一起。
+    """
+    return (os.getenv("ACCOUNT_SESSION_LOCK_BACKEND") or "auto").strip().lower()
+
+
+def account_session_lock_ttl_seconds() -> int:
+    """账号会话锁 TTL(秒)。靠**续期**维持, 不是靠一次长 EX。"""
+    try:
+        return int(os.getenv("ACCOUNT_SESSION_LOCK_TTL_SECONDS") or 300)
+    except ValueError:
+        return 300
+
+
+def account_session_lock_wait_timeout() -> int:
+    """等待账号会话锁的最长时间(秒)。"""
+    try:
+        return int(os.getenv("ACCOUNT_SESSION_LOCK_WAIT_TIMEOUT") or 1800)
+    except ValueError:
+        return 1800
+
+
+def account_session_lock_redis_retry_cooldown_seconds() -> float:
+    """Redis 连接失败后的**重试冷却窗**(秒)。
+
+    冷却窗内直接判定「账号会话锁后端不可用」(fail-closed 语义**不变**), 只是
+    **不再白等**一次 ``socket_connect_timeout``(5s); 冷却窗外才会真正重连。
+
+    默认 30s 的理由: 足够覆盖一次常见的网络抖动(Redis 重启/连接被 reset),
+    又不会让进程在 Redis 长时间宕机时每秒重试一次(每次重试都要等 5s 超时)。
+    """
+    raw = (os.getenv("ACCOUNT_SESSION_LOCK_REDIS_RETRY_COOLDOWN_SECONDS") or "").strip()
+    if not raw:
+        return 30.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 30.0
+
+
+def account_session_lock_fail_closed() -> bool:
+    """锁服务不可用时是否 fail-closed。
+
+    生产默认 True(拒绝采集, 避免 profile 双开导致会话互相覆盖);
+    非生产默认 False(降级到进程内锁)。
+    """
+    raw = (os.getenv("ACCOUNT_SESSION_LOCK_FAIL_CLOSED") or "").strip().lower()
+    if raw:
+        return raw in {"1", "true", "yes", "on"}
+    return account_session_lock_environment() == "production"

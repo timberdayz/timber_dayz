@@ -44,12 +44,6 @@ def render_account_block(row: MainAccountRow) -> str:
             f"{helpers['open']} -WorkTag {tag} -AccountId '{account_id}'",
             "```",
             "",
-            "\u4fdd\u5b58:",
-            "",
-            "```powershell",
-            f"{helpers['save']} -AccountId '{account_id}'",
-            "```",
-            "",
             "\u68c0\u67e5:",
             "",
             "```powershell",
@@ -96,30 +90,32 @@ def render_document(rows: list[MainAccountRow]) -> str:
         ". .\\scripts\\pwcli_helpers.ps1",
         "```",
         "",
-        "## 推荐日常方式",
+        "## \u63a8\u8350\u65e5\u5e38\u65b9\u5f0f",
         "",
-        "日常人工巡店优先使用本地网页巡店面板，减少复制命令和手写账号参数:",
+        "\u65e5\u5e38\u4eba\u5de5\u5de1\u5e97\u4f18\u5148\u4f7f\u7528\u672c\u5730\u7f51\u9875\u5de1\u5e97\u9762\u677f\uff0c\u51cf\u5c11\u590d\u5236\u547d\u4ee4\u548c\u624b\u5199\u8d26\u53f7\u53c2\u6570:",
         "",
         "```powershell",
         "python scripts\\pwcli_inspection_panel.py",
         "```",
         "",
-        "网页面板只监听本机 `127.0.0.1`，通过按钮打开账号会话，并在人工确认后保存。",
+        "\u7f51\u9875\u9762\u677f\u53ea\u76d1\u542c\u672c\u673a `127.0.0.1`\uff0c\u901a\u8fc7\u6309\u94ae\u6253\u5f00\u8d26\u53f7\u6d4f\u89c8\u5668\uff1b"
+        "\u767b\u5f55\u5b8c\u6210\u540e\u76f4\u63a5\u5173\u95ed\u6d4f\u89c8\u5668\u7a97\u53e3\uff0c\u767b\u5f55\u6001\u7531\u6d4f\u89c8\u5668 profile \u81ea\u52a8\u4fdd\u5b58\u3002",
         "",
-        "如果网页面板不可用，可使用 CLI 菜单兜底:",
+        "\u5982\u679c\u7f51\u9875\u9762\u677f\u4e0d\u53ef\u7528\uff0c\u53ef\u4f7f\u7528 CLI \u83dc\u5355\u515c\u5e95:",
         "",
         "```powershell",
         ". .\\scripts\\pwcli_helpers.ps1",
         "Start-PwcliDailyInspection",
         "```",
         "",
-        "这些工具只负责打开账号会话和等待人工确认保存，不会自动点击页面、关闭弹窗或处理验证码。",
+        "\u8fd9\u4e9b\u5de5\u5177\u53ea\u8d1f\u8d23\u6253\u5f00\u8d26\u53f7\u6d4f\u89c8\u5668\uff0c\u4e0d\u4f1a\u81ea\u52a8\u70b9\u51fb\u9875\u9762\u3001"
+        "\u5173\u95ed\u5f39\u7a97\u6216\u5904\u7406\u9a8c\u8bc1\u7801\u3002",
         "",
         "\u89c4\u5219:",
         "",
         "1. \u5148\u6267\u884c\u201c\u6253\u5f00\u547d\u4ee4\u201d",
-        "2. \u5728\u6253\u5f00\u7684\u6d4f\u89c8\u5668\u91cc\u4eba\u5de5\u5de1\u5e97\u3001\u4eba\u5de5\u64cd\u4f5c",
-        "3. \u64cd\u4f5c\u7ed3\u675f\u540e\u6267\u884c\u201c\u4fdd\u5b58\u547d\u4ee4\u201d",
+        "2. \u5728\u6253\u5f00\u7684\u6d4f\u89c8\u5668\u91cc\u4eba\u5de5\u767b\u5f55\u3001\u4eba\u5de5\u5de1\u5e97",
+        "3. \u767b\u5f55\u5b8c\u6210\u540e\u76f4\u63a5\u5173\u95ed\u6d4f\u89c8\u5668\u7a97\u53e3\uff08\u767b\u5f55\u6001\u7531 profile \u81ea\u52a8\u4fdd\u5b58\uff09",
         "4. \u5982\u9700\u786e\u8ba4\u8def\u5f84\u662f\u5426\u6b63\u786e\uff0c\u53ef\u6267\u884c\u201c\u68c0\u67e5\u547d\u4ee4\u201d",
         "",
         "\u6ce8\u610f:",
@@ -134,7 +130,6 @@ def render_document(rows: list[MainAccountRow]) -> str:
         "",
         "```powershell",
         "Open-PwcliShopee -WorkTag <fixed-worktag> -AccountId '<main-account-id>'",
-        "Save-PwcliShopeeState -AccountId '<main-account-id>'",
         "Show-PwcliPaths -Platform shopee -AccountId '<main-account-id>' -WorkTag <fixed-worktag>",
         "```",
         "",
@@ -142,7 +137,6 @@ def render_document(rows: list[MainAccountRow]) -> str:
         "",
         "```powershell",
         "Open-PwcliTiktok -WorkTag <fixed-worktag> -AccountId '<main-account-id>'",
-        "Save-PwcliTiktokState -AccountId '<main-account-id>'",
         "Show-PwcliPaths -Platform tiktok -AccountId '<main-account-id>' -WorkTag <fixed-worktag>",
         "```",
         "",
@@ -150,7 +144,6 @@ def render_document(rows: list[MainAccountRow]) -> str:
         "",
         "```powershell",
         "Open-PwcliMiaoshou -WorkTag <fixed-worktag> -AccountId '<main-account-id>'",
-        "Save-PwcliMiaoshouState -AccountId '<main-account-id>'",
         "Show-PwcliPaths -Platform miaoshou -AccountId '<main-account-id>' -WorkTag <fixed-worktag>",
         "```",
         "",
@@ -169,20 +162,16 @@ def render_document(rows: list[MainAccountRow]) -> str:
     lines.extend(
         [
             "",
-            "## \u4fdd\u5b58\u65f6\u673a",
+            "## \u767b\u5f55\u6001\u8bf4\u660e",
             "",
-            "\u53ea\u6709\u5728\u4ee5\u4e0b\u573a\u666f\u624d\u5efa\u8bae\u4fdd\u5b58:",
+            "\u767b\u5f55\u6001\u7531\u6d4f\u89c8\u5668\u7684 profile \u76ee\u5f55\u81ea\u52a8\u4fdd\u5b58\uff08Chromium \u81ea\u5df1\u628a cookie \u5199\u76d8\uff09\uff0c"
+            "\u4e0d\u518d\u6709\u300c\u4fdd\u5b58\u4f1a\u8bdd\u300d\u547d\u4ee4\uff1a",
             "",
-            "1. \u5df2\u7ecf\u7a33\u5b9a\u8fdb\u5165\u540e\u53f0\u9996\u9875",
-            "2. \u5df2\u7ecf\u5b8c\u6210\u9a8c\u8bc1\u7801\u6216\u4e8c\u6b21\u9a8c\u8bc1",
-            "3. \u5f53\u524d\u9875\u9762\u4e0d\u662f\u767b\u5f55\u9875\u3001\u62a5\u9519\u9875\u3001\u9a8c\u8bc1\u9875",
-            "",
-            "\u4e0d\u8981\u5728\u4ee5\u4e0b\u573a\u666f\u4fdd\u5b58:",
-            "",
-            "1. \u521a\u6253\u5f00\u8fd8\u5728\u8df3\u8f6c",
-            "2. \u505c\u7559\u5728\u767b\u5f55\u9875",
-            "3. \u505c\u7559\u5728\u9a8c\u8bc1\u7801\u9875",
-            "4. \u9875\u9762\u660e\u663e\u5f02\u5e38",
+            "1. \u6253\u5f00\u8d26\u53f7\u6d4f\u89c8\u5668\u540e\u4eba\u5de5\u767b\u5f55\u3001\u4eba\u5de5\u5de1\u5e97",
+            "2. \u767b\u5f55\u5b8c\u6210\u540e\u76f4\u63a5\u5173\u95ed\u6d4f\u89c8\u5668\u7a97\u53e3\u5373\u53ef\uff0c"
+            "\u4e0d\u8981\u5f3a\u6740\u6d4f\u89c8\u5668\u8fdb\u7a0b\uff08\u5f3a\u6740\u4f1a\u8ba9 Chromium \u6765\u4e0d\u53ca\u5199\u76d8\uff0c\u767b\u5f55\u6001\u4f1a\u4e22\uff09",
+            "3. \u5982\u679c\u505c\u7559\u5728\u767b\u5f55\u9875\u3001\u9a8c\u8bc1\u7801\u9875\u3001\u62a5\u9519\u9875\u6216\u5f02\u5e38\u9875\uff0c"
+            "\u8bf4\u660e\u8fd9\u6b21\u767b\u5f55\u6ca1\u6709\u771f\u6b63\u5b8c\u6210\uff0c\u9700\u91cd\u65b0\u767b\u5f55",
             "",
             "## \u66f4\u65b0\u65b9\u5f0f",
             "",
@@ -199,6 +188,12 @@ def render_document(rows: list[MainAccountRow]) -> str:
 
 
 def main() -> int:
+    import logging
+
+    # 解析账号代理要用 backend 服务，那条 import 链会往 stdout 打 INFO 日志 ->
+    # 生成的清单输出被污染。这里先关掉 INFO 及以下级别。
+    logging.disable(logging.INFO)
+
     rows = load_accounts()
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(render_document(rows), encoding="utf-8")

@@ -160,12 +160,16 @@ Live deployment verified:
 
 ### 运营提示
 
-- Task 13 让「30 天过期」真正生效，需知会运营。
-  本机 `data/sessions/` 实测 19 个会话文件中 16 个已超 30 天
-  （最旧 2025-08-18），仍有效的仅 3 个：
-  tiktok `chenzeweinbnb@163.com`（2026-10-07）、
-  miaoshou `miaoshou_real_001`（2026-10-26）、
-  shopee KR（2026-11-01）。真实环境影响量需在生产评估。
+- ~~Task 13 让「30 天过期」真正生效，需知会运营。~~ —— **已作废**：该 Task 13
+  实现的是**会话文件**（`data/sessions/**`）的 30 天过期门禁，而会话文件体系已被
+  「Session Profile-Only Architecture」整体废除（见上方条目），30 天门禁随之下线，
+  **无需再知会运营**。本机 `data/sessions/` 残留的 19 个会话文件也不再被任何代码读取；
+  磁盘清理按该计划的附录 B 步 9 走「备份 → 观察 1~2 周 → 删除」，由运维执行。
+
+## Session Profile-Only Architecture (2026-11)
+
+- Plan: `docs/superpowers/plans/2026-11-02-collection-profile-only-architecture.md`
+- Spec: `docs/guides/COLLECTION_SESSION_LIFECYCLE.md` (v3.1)
 
 ## Notes
 

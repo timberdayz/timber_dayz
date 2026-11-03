@@ -2,7 +2,7 @@
 
 > 自动生成文件，请勿手工修改。
 > 刷新命令: `python scripts/generate_pwcli_account_commands.py`
-> 生成时间: `2026-07-05 12:27:06 UTC`
+> 生成时间: `2026-11-03 08:36:42 UTC`
 > 数据来源: `postgresql://erp_user:erp_pass_2025@localhost:15432/xihong_erp` 中的 `core.main_accounts where enabled = true`
 
 本文档提供给业务同事直接复制使用。
@@ -21,7 +21,7 @@
 python scripts\pwcli_inspection_panel.py
 ```
 
-网页面板只监听本机 `127.0.0.1`，通过按钮打开账号会话，并在人工确认后保存。
+网页面板只监听本机 `127.0.0.1`，通过按钮打开账号浏览器；登录完成后直接关闭浏览器窗口，登录态由浏览器 profile 自动保存。
 
 如果网页面板不可用，可使用 CLI 菜单兜底:
 
@@ -30,13 +30,13 @@ python scripts\pwcli_inspection_panel.py
 Start-PwcliDailyInspection
 ```
 
-这些工具只负责打开账号会话和等待人工确认保存，不会自动点击页面、关闭弹窗或处理验证码。
+这些工具只负责打开账号浏览器，不会自动点击页面、关闭弹窗或处理验证码。
 
 规则:
 
 1. 先执行“打开命令”
-2. 在打开的浏览器里人工巡店、人工操作
-3. 操作结束后执行“保存命令”
+2. 在打开的浏览器里人工登录、人工巡店
+3. 登录完成后直接关闭浏览器窗口（登录态由 profile 自动保存）
 4. 如需确认路径是否正确，可执行“检查命令”
 
 注意:
@@ -51,7 +51,6 @@ Shopee:
 
 ```powershell
 Open-PwcliShopee -WorkTag <fixed-worktag> -AccountId '<main-account-id>'
-Save-PwcliShopeeState -AccountId '<main-account-id>'
 Show-PwcliPaths -Platform shopee -AccountId '<main-account-id>' -WorkTag <fixed-worktag>
 ```
 
@@ -59,7 +58,6 @@ TikTok:
 
 ```powershell
 Open-PwcliTiktok -WorkTag <fixed-worktag> -AccountId '<main-account-id>'
-Save-PwcliTiktokState -AccountId '<main-account-id>'
 Show-PwcliPaths -Platform tiktok -AccountId '<main-account-id>' -WorkTag <fixed-worktag>
 ```
 
@@ -67,7 +65,6 @@ Show-PwcliPaths -Platform tiktok -AccountId '<main-account-id>' -WorkTag <fixed-
 
 ```powershell
 Open-PwcliMiaoshou -WorkTag <fixed-worktag> -AccountId '<main-account-id>'
-Save-PwcliMiaoshouState -AccountId '<main-account-id>'
 Show-PwcliPaths -Platform miaoshou -AccountId '<main-account-id>' -WorkTag <fixed-worktag>
 ```
 
@@ -80,7 +77,7 @@ Show-PwcliPaths -Platform miaoshou -AccountId '<main-account-id>' -WorkTag <fixe
 | Shopee | shopee新加坡3C店 | `chenewei666:main` | `shopee-chenewei666-main-inspect` |
 | Shopee | hongxikeji:main | `hongxikeji:main` | `shopee-hongxikeji-main-inspect` |
 | Shopee | Leslieshop:main | `shopee KR` | `shopee-shopee-kr-inspect` |
-| TikTok | Tiktok 1店 (chenzewei666666@163.com) | `Tiktok 1店` | `tiktok-tiktok-1-inspect` |
+| TikTok | Tiktok 1店 (chenzewei666666@163.com) | `Tiktok 1店` | `tiktok-tiktok-1-a9983eb0-inspect` |
 | TikTok | Tiktok 2店 | `chenzeweinbnb@163.com` | `tiktok-chenzeweinbnb-163-com-inspect` |
 
 ## 妙手
@@ -91,12 +88,6 @@ Show-PwcliPaths -Platform miaoshou -AccountId '<main-account-id>' -WorkTag <fixe
 
 ```powershell
 Open-PwcliMiaoshou -WorkTag miaoshou-miaoshou-real-001-inspect -AccountId 'miaoshou_real_001'
-```
-
-保存:
-
-```powershell
-Save-PwcliMiaoshouState -AccountId 'miaoshou_real_001'
 ```
 
 检查:
@@ -115,12 +106,6 @@ Show-PwcliPaths -Platform miaoshou -AccountId 'miaoshou_real_001' -WorkTag miaos
 Open-PwcliShopee -WorkTag shopee-accept-main-1775126941575-inspect -AccountId 'accept_main_1775126941575'
 ```
 
-保存:
-
-```powershell
-Save-PwcliShopeeState -AccountId 'accept_main_1775126941575'
-```
-
 检查:
 
 ```powershell
@@ -133,12 +118,6 @@ Show-PwcliPaths -Platform shopee -AccountId 'accept_main_1775126941575' -WorkTag
 
 ```powershell
 Open-PwcliShopee -WorkTag shopee-chenewei666-main-inspect -AccountId 'chenewei666:main'
-```
-
-保存:
-
-```powershell
-Save-PwcliShopeeState -AccountId 'chenewei666:main'
 ```
 
 检查:
@@ -155,12 +134,6 @@ Show-PwcliPaths -Platform shopee -AccountId 'chenewei666:main' -WorkTag shopee-c
 Open-PwcliShopee -WorkTag shopee-hongxikeji-main-inspect -AccountId 'hongxikeji:main'
 ```
 
-保存:
-
-```powershell
-Save-PwcliShopeeState -AccountId 'hongxikeji:main'
-```
-
 检查:
 
 ```powershell
@@ -173,12 +146,6 @@ Show-PwcliPaths -Platform shopee -AccountId 'hongxikeji:main' -WorkTag shopee-ho
 
 ```powershell
 Open-PwcliShopee -WorkTag shopee-shopee-kr-inspect -AccountId 'shopee KR'
-```
-
-保存:
-
-```powershell
-Save-PwcliShopeeState -AccountId 'shopee KR'
 ```
 
 检查:
@@ -194,19 +161,13 @@ Show-PwcliPaths -Platform shopee -AccountId 'shopee KR' -WorkTag shopee-shopee-k
 打开:
 
 ```powershell
-Open-PwcliTiktok -WorkTag tiktok-tiktok-1-inspect -AccountId 'Tiktok 1店'
-```
-
-保存:
-
-```powershell
-Save-PwcliTiktokState -AccountId 'Tiktok 1店'
+Open-PwcliTiktok -WorkTag tiktok-tiktok-1-a9983eb0-inspect -AccountId 'Tiktok 1店'
 ```
 
 检查:
 
 ```powershell
-Show-PwcliPaths -Platform tiktok -AccountId 'Tiktok 1店' -WorkTag tiktok-tiktok-1-inspect
+Show-PwcliPaths -Platform tiktok -AccountId 'Tiktok 1店' -WorkTag tiktok-tiktok-1-a9983eb0-inspect
 ```
 
 ### Tiktok 2店
@@ -217,32 +178,19 @@ Show-PwcliPaths -Platform tiktok -AccountId 'Tiktok 1店' -WorkTag tiktok-tiktok
 Open-PwcliTiktok -WorkTag tiktok-chenzeweinbnb-163-com-inspect -AccountId 'chenzeweinbnb@163.com'
 ```
 
-保存:
-
-```powershell
-Save-PwcliTiktokState -AccountId 'chenzeweinbnb@163.com'
-```
-
 检查:
 
 ```powershell
 Show-PwcliPaths -Platform tiktok -AccountId 'chenzeweinbnb@163.com' -WorkTag tiktok-chenzeweinbnb-163-com-inspect
 ```
 
-## 保存时机
+## 登录态说明
 
-只有在以下场景才建议保存:
+登录态由浏览器的 profile 目录自动保存（Chromium 自己把 cookie 写盘），不再有「保存会话」命令：
 
-1. 已经稳定进入后台首页
-2. 已经完成验证码或二次验证
-3. 当前页面不是登录页、报错页、验证页
-
-不要在以下场景保存:
-
-1. 刚打开还在跳转
-2. 停留在登录页
-3. 停留在验证码页
-4. 页面明显异常
+1. 打开账号浏览器后人工登录、人工巡店
+2. 登录完成后直接关闭浏览器窗口即可，不要强杀浏览器进程（强杀会让 Chromium 来不及写盘，登录态会丢）
+3. 如果停留在登录页、验证码页、报错页或异常页，说明这次登录没有真正完成，需重新登录
 
 ## 更新方式
 

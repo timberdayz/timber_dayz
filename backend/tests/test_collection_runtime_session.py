@@ -7,13 +7,11 @@ import pytest
 
 from modules.apps.collection_center.runtime_session import (
     RuntimeContextBundle,
-    RuntimeSessionCandidate,
     RuntimeSessionScope,
     choose_runtime_strategy,
     build_runtime_login_gate_probe_urls,
     build_runtime_context_options,
     check_login_gate_ready,
-    load_runtime_session_candidate,
     open_persistent_runtime_bundle,
     open_storage_state_runtime_bundle,
     probe_runtime_login_gate,
@@ -47,8 +45,10 @@ async def test_open_persistent_runtime_bundle_uses_launch_persistent_context(
     tmp_path: Path,
 ) -> None:
     profile_path = tmp_path / "profiles" / "miaoshou" / "main-1"
-    profile_path.mkdir(parents=True)
-    (profile_path / "Preferences").write_text("{}", encoding="utf-8")
+    # 有登录态的 profile 一定有 Chromium 的 cookie 库（Chromium 110+：
+    # Default/Network/Cookies）
+    (profile_path / "Default" / "Network").mkdir(parents=True)
+    (profile_path / "Default" / "Network" / "Cookies").write_bytes(b"")
 
     page = object()
     launch_kwargs: dict[str, object] = {}
@@ -98,6 +98,77 @@ async def test_open_persistent_runtime_bundle_uses_launch_persistent_context(
     assert launch_kwargs["accept_downloads"] is True
     assert "locale" not in launch_kwargs
     assert launch_kwargs["viewport"] == {"width": 1920, "height": 1080}
+
+
+@pytest.mark.asyncio
+async def test_open_persistent_runtime_bundle_does_not_treat_started_profile_as_logged_in(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """「启动过但没登录」的 profile **不算**有登录态。
+
+    Chromium 只要启动过一次就会写 ``Default/``、``Crashpad/`` 等 —— 用「目录非空」
+    判定会把没登录的 profile 误判成有登录态，进而让 ``session_reused`` 失真。
+    判据必须是 Chromium 的 cookie 库（``Default/Network/Cookies``）。
+    """
+    profile_path = tmp_path / "profiles" / "miaoshou" / "main-1"
+    (profile_path / "Default").mkdir(parents=True)
+    (profile_path / "Default" / "Preferences").write_text("{}", encoding="utf-8")
+
+    class _FakeContext:
+        pages = [object()]
+
+        async def add_init_script(self, script: str) -> None:
+            return None
+
+    class _FakeBrowserType:
+        async def launch_persistent_context(self, **kwargs):
+            return _FakeContext()
+
+    monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager.get_persistent_profile_path",
+        lambda self, platform, account_id: profile_path,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.build_runtime_context_options",
+        AsyncMock(return_value={"accept_downloads": True}),
+    )
+
+    bundle = await open_persistent_runtime_bundle(
+        browser_type=_FakeBrowserType(),
+        platform="miaoshou",
+        session_owner_id="main-1",
+        account={"login_url": "https://erp.91miaoshou.com/login"},
+        launch_kwargs={"headless": True},
+    )
+
+    assert bundle.reused_session is False
+
+
+def test_profile_contains_state_requires_cookie_store(tmp_path: Path) -> None:
+    """``_profile_contains_state`` 只认 cookie 库：两条路径都查（新版 / 旧版）。"""
+    from modules.apps.collection_center.runtime_session import _profile_contains_state
+
+    empty_profile = tmp_path / "empty"
+    empty_profile.mkdir()
+    assert _profile_contains_state(empty_profile) is False
+
+    started_only = tmp_path / "started"
+    (started_only / "Default").mkdir(parents=True)
+    assert _profile_contains_state(started_only) is False
+
+    modern = tmp_path / "modern"
+    (modern / "Default" / "Network").mkdir(parents=True)
+    (modern / "Default" / "Network" / "Cookies").write_bytes(b"")
+    assert _profile_contains_state(modern) is True
+
+    legacy = tmp_path / "legacy"
+    (legacy / "Default").mkdir(parents=True)
+    (legacy / "Default" / "Cookies").write_bytes(b"")
+    assert _profile_contains_state(legacy) is True
+
+    # 路径不存在时必须安全返回 False
+    assert _profile_contains_state(tmp_path / "missing") is False
 
 
 @pytest.mark.asyncio
@@ -514,12 +585,16 @@ def test_build_runtime_login_gate_probe_urls_skips_region_scoped_homepage_for_ti
     ]
 
 
-def test_formal_sequential_runtime_prefers_storage_state_when_available() -> None:
+def test_formal_sequential_runtime_always_prefers_persistent_profile() -> None:
+    """Task 4.2：正式采集**恒走持久 profile**，与「有没有会话文件」无关（R1）。
+
+    旧契约是「storage_state 优先 / profile 兜底」；会话文件整体废除（D5）之后，
+    profile 就是顺序路径的唯一载体。
+    """
     decision = choose_runtime_strategy(
         platform="miaoshou",
         session_owner_id="main-1",
         has_storage_state=True,
-        has_manual_storage_state=False,
         has_persistent_profile=True,
         force_persistent_profile=False,
         execution_kind="formal_collection",
@@ -528,9 +603,10 @@ def test_formal_sequential_runtime_prefers_storage_state_when_available() -> Non
     )
 
     assert decision.mode == "persistent_profile"
-    assert decision.reason == "persistent_profile_available"
+    assert decision.reason == "profile_is_single_source_of_truth"
     assert decision.used_storage_state is False
     assert decision.used_persistent_profile is True
+    assert decision.fallback_allowed is False
 
 
 def test_formal_sequential_runtime_allows_preferring_persistent_profile_for_tiktok_when_enabled(
@@ -540,7 +616,6 @@ def test_formal_sequential_runtime_allows_preferring_persistent_profile_for_tikt
         platform="tiktok",
         session_owner_id="main-1",
         has_storage_state=True,
-        has_manual_storage_state=False,
         has_persistent_profile=True,
         force_persistent_profile=False,
         execution_kind="formal_collection",
@@ -549,28 +624,89 @@ def test_formal_sequential_runtime_allows_preferring_persistent_profile_for_tikt
     )
 
     assert decision.mode == "persistent_profile"
-    assert decision.reason == "persistent_profile_available"
+    assert decision.reason == "profile_is_single_source_of_truth"
     assert decision.used_persistent_profile is True
     assert decision.used_storage_state is False
 
 
-def test_formal_sequential_runtime_prefers_manual_storage_state_when_available() -> None:
+def test_manual_storage_state_arbitration_is_gone() -> None:
+    """「人工会话优先于机器会话」的仲裁规则整体废除（D5 / R1）。
+
+    旧契约：人工巡店保存的会话（``data/sessions/**``）优先于 profile。
+    会话文件体系废除后，这条分支**在代码结构上就不存在**了 ——
+    ``choose_runtime_strategy`` 不再接受 ``has_manual_storage_state`` 参数。
+    """
+    import inspect
+
+    signature = inspect.signature(choose_runtime_strategy)
+
+    assert "has_manual_storage_state" not in signature.parameters
+
     decision = choose_runtime_strategy(
         platform="tiktok",
         session_owner_id="main-1",
         has_storage_state=True,
-        has_manual_storage_state=True,
-        has_persistent_profile=True,
+        has_persistent_profile=False,
         force_persistent_profile=False,
-        execution_kind="formal_collection",
+        execution_kind="component_test",
         component_type="export",
         parallel_mode=False,
     )
 
-    assert decision.mode == "persistent_profile"
-    assert decision.reason == "persistent_profile_available"
-    assert decision.used_storage_state is False
-    assert decision.used_persistent_profile is True
+    assert decision.reason != "manual_storage_state_available"
+
+
+def test_formal_collection_strategy_ignores_every_storage_state_probe() -> None:
+    """正式采集的结论**与任何探针结果无关**（profile 是唯一载体）。
+
+    这条守住「顺序路径恒走 profile」：只要有人把「读会话文件 / 人工会话优先」
+    的分支加回判定树，这里立刻变红。
+    """
+    probes = (
+        (False, False),
+        (True, False),
+        (True, True),
+        (False, True),
+    )
+    for has_storage_state, has_persistent_profile in probes:
+        decision = choose_runtime_strategy(
+            platform="shopee",
+            session_owner_id="main-1",
+            has_storage_state=has_storage_state,
+            has_persistent_profile=has_persistent_profile,
+            force_persistent_profile=False,
+            execution_kind="formal_collection",
+            component_type="export",
+            parallel_mode=False,
+        )
+
+        assert decision.mode == "persistent_profile", (
+            has_storage_state,
+            has_persistent_profile,
+        )
+        assert decision.reason == "profile_is_single_source_of_truth"
+        assert decision.used_storage_state is False
+        assert decision.used_persistent_profile is True
+        assert decision.fallback_allowed is False
+
+
+def test_component_test_strategy_keeps_legacy_decision_tree() -> None:
+    """工具 / 录制路径（``component_test``）不受正式采集收敛影响（R5 修订表）。"""
+    decision = choose_runtime_strategy(
+        platform="shopee",
+        session_owner_id="main-1",
+        has_storage_state=True,
+        has_persistent_profile=False,
+        force_persistent_profile=False,
+        execution_kind="component_test",
+        component_type="export",
+        parallel_mode=False,
+    )
+
+    assert decision.mode == "storage_state_fanout"
+    assert decision.reason == "storage_state_available"
+    assert decision.used_storage_state is True
+    assert decision.used_persistent_profile is False
 
 
 def test_tiktok_storage_state_quality_gate_rejects_shallow_bootstrap_state() -> None:
@@ -709,43 +845,29 @@ async def test_probe_runtime_login_gate_primes_root_page_for_tiktok_when_blank(
 
 
 @pytest.mark.asyncio
-async def test_load_runtime_session_candidate_accepts_manual_seeded_tiktok_state_even_when_quality_gate_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    low_quality_state = {
-        "cookies": [
-            {"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-        ],
-        "origins": [],
-    }
+async def test_session_file_read_entrypoints_are_gone() -> None:
+    """会话文件体系废除后，runtime_session 侧不得再有会话文件读入口（D5 / R1）。
 
-    monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session._load_session_async",
-        AsyncMock(
-            return_value={
-                "storage_state": low_quality_state,
-                "metadata": {
-                    "manual_seeded": True,
-                    "protected": True,
-                    "quality_source": "manual",
-                },
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session._bootstrap_session_from_profile_sync",
-        lambda platform, session_owner_id, account_config=None: {"storage_state": {"unexpected": True}},
-    )
+    旧实现是 ``load_runtime_session_candidate`` → ``_load_session_async``（读会话文件）
+    + ``_bootstrap_session_from_profile_sync``（把 profile 复制成会话文件）。
+    现在登录态只由 profile 承载，这条链路整体下线。
+    """
+    from modules.apps.collection_center import runtime_session
 
-    candidate = await load_runtime_session_candidate(
-        platform="tiktok",
-        session_owner_id="main-1",
-        account={"login_url": "https://seller.tiktokshopglobalselling.com/account/login"},
-    )
+    for name in (
+        "load_runtime_session_candidate",
+        "load_or_bootstrap_runtime_storage_state",
+        "_load_session_async",
+        "_bootstrap_session_from_profile_sync",
+        "_save_session_async",
+        "RuntimeSessionCandidate",
+    ):
+        assert not hasattr(runtime_session, name), (
+            f"runtime_session 仍保留会话文件入口 {name}"
+        )
 
-    assert isinstance(candidate, RuntimeSessionCandidate)
-    assert candidate.storage_state == low_quality_state
-    assert candidate.manual_seeded is True
+    # profile → 内存快照的能力保留（只活在内存里，不落盘）。
+    assert hasattr(runtime_session, "snapshot_profile_storage_state_sync")
 
 
 @pytest.mark.asyncio

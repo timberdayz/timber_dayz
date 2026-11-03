@@ -353,7 +353,7 @@ def ensure_local_schema_ready():
 
 
 def warn_legacy_shop_session_artifacts(project_root):
-    """启动期告警：提醒当前磁盘上仍有店铺级会话残留。"""
+    """启动期告警：提醒当前磁盘上仍有店铺级 profile 遗留。"""
     try:
         from backend.utils.config import get_settings
         from modules.utils.sessions.legacy_shop_artifact_cleanup import (
@@ -365,13 +365,13 @@ def warn_legacy_shop_session_artifacts(project_root):
             get_settings().DATABASE_URL,
         )
     except Exception as e:
-        safe_print(f"  [WARNING] 遗留店铺会话残留检查失败: {e}")
+        safe_print(f"  [WARNING] 遗留店铺级 profile 检查失败: {e}")
         return True
 
     if not artifacts:
         return True
 
-    safe_print("  [WARNING] 检测到店铺级会话历史残留，当前运行不会使用它们，但建议及时清理:")
+    safe_print("  [WARNING] 检测到店铺级 profile 遗留，当前运行不会使用它们，但建议及时清理:")
     for artifact in artifacts[:10]:
         safe_print(f"    {artifact}")
     if len(artifacts) > 10:

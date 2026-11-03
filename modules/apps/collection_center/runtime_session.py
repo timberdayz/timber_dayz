@@ -238,28 +238,25 @@ def _get_executor_pool() -> ThreadPoolExecutor:
     return _executor_pool
 
 
-async def _load_session_async(
+def snapshot_profile_storage_state_sync(
     platform: str,
     account_id: str,
-    *,
-    max_age_days: int = 30,
 ) -> Optional[Dict[str, Any]]:
-    from modules.utils.sessions.session_manager import SessionManager
+    """从**持久 profile** 导出一份**内存** storage_state 快照。
 
-    loop = asyncio.get_event_loop()
+    登录态的唯一载体是 profile（R1）。这份快照是**派生产物**：只活在内存里，
+    不落盘、不写会话文件（R5），用完即可从 profile 重新生成。
 
-    def _load() -> Optional[Dict[str, Any]]:
-        manager = SessionManager()
-        return manager.load_session(platform, account_id, max_age_days=max_age_days)
+    工具路径（组件测试 / 录制）需要「拿一份登录态喂给普通 context」时才用它；
+    正式采集恒走持久 profile，不需要快照。
 
-    return await loop.run_in_executor(_get_executor_pool(), _load)
+    Args:
+        platform: 平台名称。
+        account_id: 主账号 ID。
 
-
-def _bootstrap_session_from_profile_sync(
-    platform: str,
-    account_id: str,
-    account_config: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
+    Returns:
+        ``{"storage_state": ...}``；profile 没有登录态或读取失败时返回 ``None``。
+    """
     from playwright.sync_api import sync_playwright
     from modules.utils.sessions.session_manager import SessionManager
 
@@ -286,112 +283,14 @@ def _bootstrap_session_from_profile_sync(
                 context.close()
     except Exception as exc:
         logger.warning(
-            "Bootstrap session from profile failed for %s/%s: %s",
+            "Snapshot profile storage state failed for %s/%s: %s",
             platform,
             account_id,
             exc,
         )
         return None
 
-    if str(platform or "").strip().lower() == "tiktok":
-        if not tiktok_storage_state_meets_quality_gate(storage_state):
-            logger.warning(
-                "Skip promoting bootstrapped TikTok storage_state without seller-quality session (score=%s) for %s/%s",
-                tiktok_storage_state_quality_score(storage_state),
-                platform,
-                account_id,
-            )
-            return {"storage_state": storage_state}
-
-    manager.save_session(
-        platform,
-        account_id,
-        storage_state,
-        metadata={"bootstrapped_from_profile": True},
-    )
     return {"storage_state": storage_state}
-
-
-async def _save_session_async(
-    platform: str,
-    account_id: str,
-    storage_state: Dict[str, Any],
-) -> bool:
-    from modules.utils.sessions.session_manager import SessionManager
-
-    loop = asyncio.get_event_loop()
-
-    def _save() -> bool:
-        manager = SessionManager()
-        return manager.save_session(platform, account_id, storage_state)
-
-    return await loop.run_in_executor(_get_executor_pool(), _save)
-
-
-async def load_or_bootstrap_runtime_storage_state(
-    *,
-    platform: str,
-    session_owner_id: str,
-    account: Optional[Dict[str, Any]] = None,
-    max_age_days: int = 30,
-) -> Optional[Dict[str, Any]]:
-    candidate = await load_runtime_session_candidate(
-        platform=platform,
-        session_owner_id=session_owner_id,
-        account=account,
-        max_age_days=max_age_days,
-    )
-    return candidate.storage_state
-
-
-async def load_runtime_session_candidate(
-    *,
-    platform: str,
-    session_owner_id: str,
-    account: Optional[Dict[str, Any]] = None,
-    max_age_days: int = 30,
-) -> RuntimeSessionCandidate:
-    session_data = await _load_session_async(
-        platform,
-        session_owner_id,
-        max_age_days=max_age_days,
-    )
-    metadata = session_data.get("metadata") if isinstance(session_data, dict) else {}
-    metadata = metadata if isinstance(metadata, dict) else {}
-    manual_seeded = bool(metadata.get("manual_seeded") or metadata.get("protected"))
-
-    if session_data and isinstance(session_data.get("storage_state"), dict):
-        candidate = session_data["storage_state"]
-        if str(platform or "").strip().lower() == "tiktok" and not manual_seeded:
-            if not tiktok_storage_state_meets_quality_gate(candidate):
-                logger.warning(
-                    "Ignore low-quality persisted TikTok storage_state during runtime bootstrap (score=%s) for %s/%s",
-                    tiktok_storage_state_quality_score(candidate),
-                    platform,
-                    session_owner_id,
-                )
-            else:
-                return RuntimeSessionCandidate(storage_state=candidate, metadata=metadata)
-        else:
-            return RuntimeSessionCandidate(storage_state=candidate, metadata=metadata)
-
-    loop = asyncio.get_event_loop()
-    bootstrapped = await loop.run_in_executor(
-        _get_executor_pool(),
-        lambda: _bootstrap_session_from_profile_sync(
-            platform,
-            session_owner_id,
-            account,
-        ),
-    )
-    if bootstrapped and isinstance(bootstrapped.get("storage_state"), dict):
-        boot_metadata = bootstrapped.get("metadata") if isinstance(bootstrapped, dict) else {}
-        boot_metadata = boot_metadata if isinstance(boot_metadata, dict) else {}
-        return RuntimeSessionCandidate(
-            storage_state=bootstrapped["storage_state"],
-            metadata=boot_metadata,
-        )
-    return RuntimeSessionCandidate(storage_state=None, metadata=metadata)
 
 
 async def _get_fingerprint_context_options_async(
@@ -434,6 +333,8 @@ def _build_playwright_context_options_from_fingerprint(
         "ignore_https_errors",
         "java_script_enabled",
         "accept_downloads",
+        # 代理必须进白名单：否则 context options 会把账号级代理丢掉（断点③）
+        "proxy",
     }
     result: Dict[str, Any] = {}
     for key, value in (fingerprint_options or {}).items():
@@ -456,8 +357,21 @@ def _apply_runtime_viewport_policy(
 
 
 def _profile_contains_state(profile_path: Path) -> bool:
+    """判断 profile 里是否真的有 Chromium 写下的 cookie 库。
+
+    不能用「目录非空」：Chromium 只要启动过一次（哪怕登录失败、用户没登进去）
+    就会往 profile 里写 ``Default/``、``Crashpad/`` 等 → 目录非空 → 会把
+    「没登录」误判成「有登录态」。
+
+    实测（本机 18 个真实 profile vs 7 个空 profile）：有登录态的 profile 一律有
+    ``Default/Network/Cookies``（Chromium 110+），空 profile 连 ``Default/`` 都没有。
+    旧版 Chromium 用 ``Default/Cookies`` → 两条路径都查。
+    """
     try:
-        return profile_path.exists() and any(profile_path.iterdir())
+        for relative in ("Default/Network/Cookies", "Default/Cookies"):
+            if (profile_path / relative).exists():
+                return True
+        return False
     except Exception:
         return False
 
@@ -489,7 +403,6 @@ class RuntimeContextBundle:
     profile_path: Optional[str] = None
     strategy_reason: Optional[str] = None
     session_source: Optional[str] = None
-    session_metadata: Dict[str, Any] = field(default_factory=dict)
     available_page_urls: list[str] = field(default_factory=list)
     selected_page_url: Optional[str] = None
     context_summary: Dict[str, Any] = field(default_factory=dict)
@@ -504,28 +417,32 @@ class RuntimeStrategyDecision:
     fallback_allowed: bool
 
 
-@dataclass(frozen=True)
-class RuntimeSessionCandidate:
-    storage_state: Optional[Dict[str, Any]]
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def manual_seeded(self) -> bool:
-        return bool(self.metadata.get("manual_seeded") or self.metadata.get("protected"))
-
-
 def choose_runtime_strategy(
     *,
     platform: str,
     session_owner_id: str | None,
     has_storage_state: bool,
-    has_manual_storage_state: bool,
     has_persistent_profile: bool,
     force_persistent_profile: bool,
     execution_kind: str,
     component_type: str | None,
     parallel_mode: bool,
 ) -> RuntimeStrategyDecision:
+    # [Task 4.2] 正式采集**恒走持久 profile**：profile 是登录态的唯一载体（R1），
+    # 会话文件（``data/sessions/**``）整体废除（D5）→ 不再存在「人工会话优先 /
+    # 读会话文件 / bootstrap」的分支。这一条放在最前面，保证正式采集的结论
+    # **与任何探针结果无关**（有没有会话文件、profile 目录存不存在都一样）。
+    #
+    # 工具与录制路径（``execution_kind="component_test"``）保持原有判定树不变。
+    if execution_kind == "formal_collection":
+        return RuntimeStrategyDecision(
+            mode="persistent_profile",
+            reason="profile_is_single_source_of_truth",
+            used_storage_state=False,
+            used_persistent_profile=True,
+            fallback_allowed=False,
+        )
+
     if force_persistent_profile:
         return RuntimeStrategyDecision(
             mode="persistent_profile",
@@ -551,15 +468,6 @@ def choose_runtime_strategy(
             used_storage_state=False,
             used_persistent_profile=True,
             fallback_allowed=True,
-        )
-
-    if has_manual_storage_state:
-        return RuntimeStrategyDecision(
-            mode="storage_state_fanout",
-            reason="manual_storage_state_available",
-            used_storage_state=True,
-            used_persistent_profile=False,
-            fallback_allowed=bool(has_persistent_profile or session_owner_id),
         )
 
     if has_storage_state:
@@ -647,8 +555,15 @@ async def build_runtime_context_options(
                 exc,
             )
             context_options = get_browser_context_args()
+            # O1：回退路径也必须显式带上账号代理 —— get_browser_context_args()
+            # 明确不含 proxy，漏掉就是**静默直连**（账号从宿主 IP 出现，
+            # IP 隔离形同虚设）。有代理就必须有代理。
+            if proxy:
+                context_options["proxy"] = proxy
     else:
         context_options = get_browser_context_args()
+        if proxy:
+            context_options["proxy"] = proxy
 
     context_options = dict(context_options)
     context_options["accept_downloads"] = accept_downloads
@@ -754,9 +669,15 @@ async def open_persistent_runtime_bundle(
         headless=bool((launch_kwargs or {}).get("headless", True)),
     )
     launch_options = enforce_official_playwright_browser(dict(launch_kwargs or {}))
+    # profile 模式下 proxy 是**浏览器进程级**参数（launch_persistent_context 的 proxy），
+    # 与 context 级 proxy 不同义；context_options 里若也带了 proxy，重复传同一个 key
+    # 会抛 TypeError，所以这里显式取出、只传一次。
+    launch_options.pop("proxy", None)
+    context_options.pop("proxy", None)
 
     context = await browser_type.launch_persistent_context(
         user_data_dir=str(profile_path),
+        **({"proxy": proxy} if proxy else {}),
         **launch_options,
         **context_options,
     )
@@ -837,8 +758,17 @@ async def snapshot_runtime_storage_state(
     platform: str,
     session_owner_id: str,
     context: Any,
-    persist: bool = True,
 ) -> Optional[Dict[str, Any]]:
+    """读取当前上下文的 storage_state 快照（**只在内存里**，不落盘）。
+
+    [Task 5 / R5] 登录态只由 Chromium 持久 profile 承载：快照不再回写会话文件，
+    ``data/sessions`` 不再因为「取一份快照」而产生新文件；调用方拿到的 dict
+    直接在内存里扇出给各采集上下文。
+
+    返回 ``None`` 表示读取失败 —— 调用方必须显式失败，不允许带着
+    ``storage_state=None`` 继续扇出（否则采集上下文会完全没有登录态，
+    却在登录页上白跑一遍）。
+    """
     normalized_platform = str(platform or "").strip().lower()
     try:
         storage_state = await read_context_storage_state(
@@ -927,41 +857,10 @@ async def snapshot_runtime_storage_state(
         except Exception:
             pass
 
-    if persist and session_owner_id:
-        try:
-            if normalized_platform == "tiktok":
-                origins = storage_state.get("origins") if isinstance(storage_state, dict) else None
-                origins = origins if isinstance(origins, list) else []
-                seller_local_storage = 0
-                if isinstance(storage_state, dict):
-                    seller_local_storage = _seller_local_storage_max(storage_state)
-                if not origins or seller_local_storage <= 0:
-                    logger.warning(
-                        "Skip persisting TikTok storage_state without seller localStorage (origins=%s sellerLocalStorage=%s) (%s/%s)",
-                        len(origins),
-                        seller_local_storage,
-                        platform,
-                        session_owner_id,
-                    )
-                    return storage_state
-            await _save_session_async(platform, session_owner_id, storage_state)
-        except Exception as exc:
-            logger.warning(
-                "Failed to persist storage state for %s/%s: %s",
-                platform,
-                session_owner_id,
-                exc,
-            )
+    # [Task 5 / R5] 快照只在内存里传递，不再落盘到 data/sessions。
+    # 登录态的唯一载体是 Chromium 持久 profile 目录（profiles/<平台>/<主账号ID>），
+    # 由 Chromium 自己刷盘。
     return storage_state
-
-
-async def persist_runtime_session_state(
-    *,
-    platform: str,
-    session_owner_id: str,
-    storage_state: Dict[str, Any],
-) -> bool:
-    return await _save_session_async(platform, session_owner_id, storage_state)
 
 
 def _normalize_probe_base_url(
@@ -1112,12 +1011,28 @@ async def prime_runtime_page_for_login_gate(
     page: Any,
     platform: str,
     account: Optional[Dict[str, Any]],
+    force_navigate: bool = False,
 ) -> None:
+    """把页面带到「登录闸门可判定」的状态(全仓唯一的导航实现)。
+
+    * ``force_navigate=False``(默认): URL 为空或 ``about:blank`` → 导航到平台入口;
+      否则只等页面稳定。
+    * ``force_navigate=True``: **无论当前 URL 是什么**都导航到平台入口。
+
+    为什么需要 ``force_navigate``
+    --------------------------
+    持久 context 启动时 Playwright push 的首屏是 ``about:blank``
+    (``chromium.js``: ``if (isPersistent) chromeArguments.push("about:blank")``)
+    → 登录态探测拿不到可判定的 URL → 闸门必然不通过。
+    而 Chromium「干净关闭后重开」可能**恢复上次会话的标签页**, 那个标签页未必
+    是平台页 → 同样会让闸门误判。所以这两种情况都必须显式导航到平台入口,
+    而不是只在「当前是 about:blank」时才导航。
+    """
     if not hasattr(page, "goto"):
         return
 
     current_url = str(getattr(page, "url", "") or "").strip().lower()
-    if current_url and current_url != "about:blank":
+    if not force_navigate and current_url and current_url != "about:blank":
         await wait_for_runtime_page_stable(page=page, platform=platform)
         return
 

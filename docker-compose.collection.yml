@@ -16,6 +16,18 @@ services:
       # 数据库配置（连接主数据库）
       DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@${POSTGRES_HOST:-host.docker.internal}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-xihong_erp}
 
+      # 账号会话锁后端（Task 3）：同一主账号的持久 profile 目录不能被两个进程同时打开
+      # → 锁必须跨进程（Redis SET NX）。这里显式指定 Redis，不再依赖 ENVIRONMENT 的隐式推断，
+      #    否则采集服务会静默降级为进程内锁（只同进程互斥，跨进程仍可能双开）。
+      REDIS_URL: redis://${REDIS_HOST:-host.docker.internal}:${REDIS_PORT:-6379}/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      ACCOUNT_SESSION_LOCK_BACKEND: ${ACCOUNT_SESSION_LOCK_BACKEND:-redis}
+      # 锁服务不可用时是否 fail-closed（留空 = 沿用代码默认：非生产 fail-open，
+      # ENVIRONMENT=production 时 fail-closed）。
+      # ⚠️ 生产部署请显式设为 true：Redis 不可达时直接拒绝采集，
+      #    而不是降级为进程内锁（跨进程保护会失效 → 同一 profile 可能被双开）。
+      ACCOUNT_SESSION_LOCK_FAIL_CLOSED: ${ACCOUNT_SESSION_LOCK_FAIL_CLOSED:-}
+
       # Playwright配置
       PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
       PLAYWRIGHT_TIMEOUT: ${PLAYWRIGHT_TIMEOUT:-30000}
@@ -57,6 +69,13 @@ services:
     ports:
       - "${COLLECTION_PORT:-8002}:8000"
 
+    # host.docker.internal 是 Docker Desktop(Win/macOS) 的特性，**Linux 宿主上不解析**
+    # → REDIS_URL 连不上 → 账号会话锁静默降级为进程内锁（跨进程保护失效）。
+    # host-gateway 是 Docker 20.10+ 的内置 magic name：在 Linux 上把
+    # host.docker.internal 指向宿主网关（Win/macOS 上本来就指向宿主 IP，无害）。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     volumes:
       # 数据卷
       - ./data:/app/data
@@ -67,6 +86,9 @@ services:
       - collection_browser_data:/app/data/browser_sessions
       # 设备指纹持久化
       - collection_fingerprints:/app/data/device_fingerprints
+      # 持久化 Profile 目录（登录态的唯一载体）：必须挂到宿主机，
+      # 否则容器一重建，所有账号的 Chromium 登录态全部丢失（每次都要重新人工登录 + 过验证码）
+      - ./profiles:/app/profiles
 
     networks:
       - erp_network
@@ -115,6 +137,9 @@ services:
       - ./logs/scheduler:/app/logs
     networks:
       - erp_network
+    # 同 collection：REDIS_HOST 默认走 host.docker.internal，Linux 上必须显式映射
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       collection:
         condition: service_healthy

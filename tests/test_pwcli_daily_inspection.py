@@ -81,9 +81,28 @@ def test_daily_inspection_cli_outputs_json_from_monkeypatched_loader(monkeypatch
             "display_name": "xihong",
             "account_id": "miaoshou_real_001",
             "work_tag": "miaoshou-miaoshou-real-001-inspect",
+            # CLI 清单带账号代理（只在管道里传，不进 HTTP 响应）
+            "proxy_server": "",
+            "proxy_username": "",
+            "proxy_password": "",
         }
     ]
     assert "Skipping unsupported platform account: unknown:legacy" in cli.LAST_STDERR
+
+
+def test_daily_inspection_cli_stdout_is_pure_json(monkeypatch):
+    """stdout 必须是**纯 JSON**：PowerShell 侧直接 ConvertFrom-Json，日志噪音会把它打挂。"""
+    import scripts.pwcli_daily_inspection as cli
+
+    monkeypatch.setattr(
+        cli,
+        "load_accounts",
+        lambda: [MainAccountRow("miaoshou", "miaoshou_real_001", "xihong", "")],
+    )
+
+    assert cli.main(["list-accounts", "--format", "json"]) == 0
+    assert cli.LAST_STDOUT.startswith("[")
+    json.loads(cli.LAST_STDOUT)
 
 
 def test_daily_inspection_cli_script_has_list_accounts_json_entrypoint():

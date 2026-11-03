@@ -18,7 +18,7 @@ from typing import Dict, Optional, Any, Union
 from datetime import datetime
 from loguru import logger
 
-from playwright.sync_api import Browser, BrowserContext, Page, Playwright
+from playwright.sync_api import Browser, BrowserContext, Playwright
 from modules.apps.collection_center.browser_config_helper import (
     enforce_official_playwright_browser,
 )
@@ -193,8 +193,21 @@ class PersistentBrowserManager:
                     if attempt == 0:
                         user_dir = profile_path
                     else:
+                        # [Task 3 / F7-1] 旁路 profile 与主 profile 属于**同一个逻辑账号**,
+                        # 跨进程账号锁按 (platform, main_account_id) 加锁,
+                        # 而账号会话锁的 key 构造会把旁路身份归一化回主身份
+                        # (``main_account_session_lock.normalize_profile_identity``)
+                        # -> **同一把锁覆盖 <account> 与 <account>_alt 两个目录**,
+                        # 不会出现「主 profile 被 A 锁住、旁路 profile 被 B 打开」的交叉双开。
+                        #
+                        # 但旁路 profile 会把登录态**分散到第二个目录**, 违反「profile 是唯一
+                        # 登录态载体」—— Task 7 会彻底删掉这个旁路。
                         user_dir = profile_path.with_name(profile_path.name + "_alt")
                         user_dir.mkdir(parents=True, exist_ok=True)
+                        logger.warning(
+                            "持久化上下文回退到旁路 profile: %s (与主 profile 共用同一把账号会话锁)",
+                            user_dir,
+                        )
                     context = self.playwright.chromium.launch_persistent_context(
                         user_data_dir=str(user_dir),
                         **context_options,
@@ -308,69 +321,33 @@ class PersistentBrowserManager:
         context: BrowserContext,
         platform: str,
         account_id: str,
-        session_metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """
-        保存上下文状态(稳健版)
+        """不再写会话文件：登录态只由 Chromium 持久 profile 承载。
 
-        - 在某些环境下,context.storage_state() 可能触发 Protocol error (Target.createTarget)
-          通常发生在所有页面被关闭、或上下文即将关闭时。
-        - 此方法通过“必要时临时打开一页 + 重试”来规避,同时将失败降级为 warning,避免噪音。
+        profile 是登录态的**唯一**载体（R1）。Chromium 只在 profile context
+        **正常关闭**时把 cookie / localStorage 刷回 profile 目录（R7），
+        所以这一步唯一的动作就是正常关闭 profile context —— 由浏览器自己落盘。
+
+        Args:
+            context: profile context。
+            platform: 平台名称。
+            account_id: 账号 ID。
+
+        Returns:
+            是否成功关闭（context 已关闭视为成功）。
         """
-        # 1) 快速判定上下文可用
         try:
-            _ = context.pages  # 触发一次访问,若已关闭会抛错
-        except Exception as e:
-            logger.warning(f"保存上下文状态跳过(上下文可能已关闭): {platform}/{account_id} - {e}")
+            context.close()
+        except Exception as exc:
+            message = str(exc)
+            if "closed" in message.lower():
+                logger.info(f"profile context 已关闭: {platform}/{account_id}")
+                return True
+            logger.warning(f"关闭 profile context 失败({platform}/{account_id}): {exc}")
             return False
 
-        # 2) 尝试直接获取;失败则在短暂重试中创建临时页
-        for attempt in range(2):
-            temp_page: Optional[Page] = None
-            try:
-                try:
-                    storage_state = context.storage_state()
-                except Exception:
-                    # 如果第一页失败且没有可用页面,尝试创建临时页后再试一次
-                    if attempt == 0:
-                        try:
-                            temp_page = context.new_page()
-                        except Exception as ne:
-                            logger.debug(f"创建临时页失败: {ne}")
-                    storage_state = context.storage_state()
-
-                metadata = {
-                    'saved_at': time.time(),
-                    'persistent_profile': True,
-                    'context_type': 'persistent',
-                }
-                if isinstance(session_metadata, dict) and session_metadata:
-                    metadata.update(session_metadata)
-
-                success = self.session_manager.save_session(
-                    platform,
-                    account_id,
-                    storage_state,
-                    metadata=metadata,
-                )
-                if success:
-                    logger.info(f"上下文状态已保存: {platform}/{account_id}")
-                return success
-            except Exception as e:
-                msg = str(e)
-                # 对已关闭上下文的典型报错不再告警,直接信息级跳过
-                if "has been closed" in msg or "Target.createTarget" in msg or "Target page, context or browser has been closed" in msg:
-                    logger.info(f"跳过保存(上下文已结束): {platform}/{account_id}")
-                    return False
-                logger.warning(f"保存上下文状态失败(第{attempt+1}次): {msg}")
-                time.sleep(0.2)
-            finally:
-                if temp_page is not None:
-                    try:
-                        temp_page.close()
-                    except Exception:
-                        pass
-        return False
+        logger.info(f"profile context 已关闭，登录态由 Chromium 写回 profile: {platform}/{account_id}")
+        return True
 
     def close_context(self, platform: str, account_id: str):
         """关闭指定账号的上下文"""
@@ -378,15 +355,11 @@ class PersistentBrowserManager:
 
         if context_key in self.active_contexts:
             try:
-                context = self.active_contexts[context_key]
+                context = self.active_contexts.pop(context_key)
 
-                # 保存状态
+                # 正常关闭 profile context → Chromium 把登录态刷回 profile（R7）
                 self.save_context_state(context, platform, account_id)
 
-                # 关闭上下文
-                context.close()
-
-                del self.active_contexts[context_key]
                 logger.info(f"上下文已关闭: {context_key}")
 
             except Exception as e:
@@ -422,6 +395,17 @@ class PersistentBrowserManager:
         context_key = f"{platform}_{account_id}"
         profile_path = self.session_manager.get_persistent_profile_path(platform, account_id)
 
+        profile_has_cookie_store = False
+        try:
+            # 与 runtime_session 的 cookie 库判据一致：看 Chromium 的 cookie 库
+            # （不是「目录非空」—— 启动过一次的 profile 也会非空）。
+            profile_has_cookie_store = any(
+                (profile_path / relative).exists()
+                for relative in ("Default/Network/Cookies", "Default/Cookies")
+            )
+        except Exception:
+            profile_has_cookie_store = False
+
         return {
             'platform': platform,
             'account_id': account_id,
@@ -429,5 +413,7 @@ class PersistentBrowserManager:
             'profile_path': str(profile_path),
             'is_active': context_key in self.active_contexts,
             'profile_exists': profile_path.exists(),
-            'session_exists': self.session_manager.is_session_valid(platform, account_id)
+            # 登录态只由 profile 承载；「会话文件是否存在」这个概念已废除。
+            # [Task 8] 旧诊断字段名整体收敛为 profile 载体语义。
+            'profile_has_cookie_store': profile_has_cookie_store,
         }

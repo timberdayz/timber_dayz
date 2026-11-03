@@ -197,7 +197,7 @@
     <header>
       <div>
         <h1>PWCLI 本地巡店面板</h1>
-        <p class="subtitle">通过按钮打开账号会话，人工巡店后再确认保存。本页面只连接本机服务，不会自动点击页面、关闭弹窗或处理验证码。</p>
+        <p class="subtitle">通过按钮打开账号浏览器，人工登录并巡店后直接关闭浏览器即可；登录态由浏览器 profile 自动保存。本页面只连接本机服务，不会自动点击页面、关闭弹窗或处理验证码。</p>
       </div>
       <button id="refreshButton" class="secondary">刷新账号</button>
     </header>
@@ -220,7 +220,7 @@
     </section>
 
     <section class="notice">
-      是否保存由人工判断。请只在你确认页面状态值得保留时点击“保存会话”；如果停留在登录页、验证码页、报错页或异常页，请点击“跳过/清除状态”。
+      打开账号浏览器后人工登录并巡店；登录完成后直接关闭浏览器窗口，登录态会由浏览器 profile 自动保存。如果停留在登录页、验证码页、报错页或异常页，请点击“跳过”。
     </section>
 
     <section id="accountGrid" class="grid" aria-live="polite"></section>
@@ -287,8 +287,7 @@
           </div>
           <div class="actions">
             <button class="open">打开巡店</button>
-            <button class="save danger">保存会话</button>
-            <button class="skip secondary">跳过/清除状态</button>
+            <button class="skip secondary">跳过</button>
           </div>
         `;
         card.querySelector('.name').textContent = account.display_name;
@@ -296,7 +295,6 @@
         codeNodes[0].textContent = account.account_id;
         codeNodes[1].textContent = account.work_tag;
         card.querySelector('.open').addEventListener('click', () => runAction('open', account));
-        card.querySelector('.save').addEventListener('click', () => runAction('save', account));
         card.querySelector('.skip').addEventListener('click', () => runAction('skip', account));
         accountGrid.appendChild(card);
       }

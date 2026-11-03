@@ -366,20 +366,14 @@
             <el-descriptions-item v-if="detailTask.session_source" label="会话来源">
               {{ getSessionSourceLabel(detailTask.session_source) }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="detailTask.session_quality_source" label="质量来源">
-              {{ getSessionQualitySourceLabel(detailTask.session_quality_source) }}
+            <el-descriptions-item v-if="detailTask.session_profile_path" label="会话载体">
+              {{ detailTask.session_profile_path }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="detailTask.session_quality_score !== null && detailTask.session_quality_score !== undefined" label="质量评分">
-              {{ detailTask.session_quality_score }}
+            <el-descriptions-item v-if="detailTask.session_reused !== null && detailTask.session_reused !== undefined" label="是否复用">
+              {{ detailTask.session_reused ? '是' : '否' }}
             </el-descriptions-item>
-            <el-descriptions-item v-if="detailTask.session_quality_gate_passed !== null && detailTask.session_quality_gate_passed !== undefined" label="质量门槛">
-              {{ detailTask.session_quality_gate_passed ? '通过' : '未通过' }}
-            </el-descriptions-item>
-            <el-descriptions-item v-if="detailTask.session_manual_seeded !== null && detailTask.session_manual_seeded !== undefined" label="人工播种">
-              {{ detailTask.session_manual_seeded ? '是' : '否' }}
-            </el-descriptions-item>
-            <el-descriptions-item v-if="detailTask.session_protected !== null && detailTask.session_protected !== undefined" label="会话保护">
-              {{ detailTask.session_protected ? '是' : '否' }}
+            <el-descriptions-item label="出口代理">
+              {{ detailTask.session_proxy || '-' }}
             </el-descriptions-item>
             <el-descriptions-item v-if="detailTask.runtime_strategy_reason" label="会话策略原因">
               {{ getRuntimeStrategyReasonLabel(detailTask.runtime_strategy_reason) }}
@@ -1091,31 +1085,23 @@ const getRuntimeSessionModeLabel = (mode) => {
 }
 
 const getSessionSourceLabel = (source) => {
+  // [Task 8] 持久化 profile 是登录态的**唯一载体** → 会话来源只有 `profile` 一个取值。
+  // 兜底保留 `source` 原值：后端过渡期若仍下发旧取值，直接原样显示而不是空白。
   const labels = {
-    storage_state: 'storage_state 会话快照',
-    persistent_profile: '持久化浏览器档案',
-    fresh_login: '本次重新登录'
-  }
-  return labels[source] || source || '-'
-}
-
-const getSessionQualitySourceLabel = (source) => {
-  const labels = {
-    manual: '人工保存',
-    automatic: '自动生成'
+    profile: '持久化浏览器档案'
   }
   return labels[source] || source || '-'
 }
 
 const getRuntimeStrategyReasonLabel = (reason) => {
+  // [Task 8] 会话文件体系已废除 → 凡是描述「读会话快照 / 人工保存会话」的策略取值
+  // 后端已不再产出，对应映射一并删除（只剩 profile 相关取值）。
   const labels = {
-    manual_storage_state_available: '已命中人工保存会话，优先按完整快照恢复',
-    storage_state_available: '已找到 storage_state，会先按快照恢复页面',
-    storage_state_missing: '未找到 storage_state，回退到 profile',
+    profile_is_single_source_of_truth: '持久化浏览器档案是登录态的唯一载体',
+    persistent_profile_available: '已存在持久化浏览器档案，直接复用',
     fresh_login_required: '无可复用会话，需要重新登录',
     parallel_bootstrap: '并行模式先做主会话引导',
     persistent_profile: '固定使用持久化浏览器档案',
-    storage_state_fanout: '固定使用 storage_state 复用',
     forced: '已强制指定会话运行策略'
   }
   return labels[reason] || reason || '-'

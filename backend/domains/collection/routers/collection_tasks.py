@@ -57,6 +57,7 @@ from backend.services.collection_account_runtime_service import (
     CollectionAccountRuntimeError,
     load_collection_account_runtime,
 )
+from backend.services.account_proxy_config import resolve_account_proxy
 from backend.services.websocket_manager import connection_manager
 from backend.services.collection_task_status import STATUS as TASK_STATUS, TERMINAL_STATUSES, ACTIVE_STATUSES
 
@@ -448,20 +449,17 @@ def _extract_runtime_metadata_from_logs(logs: List[Any]) -> Optional[dict]:
             "login_gate_url": details.get("login_gate_url"),
             "session_owner_id": details.get("session_owner_id"),
             "shop_account_id": details.get("shop_account_id"),
-            "persistent_profile_path": details.get("persistent_profile_path"),
-            "profile_contains_state": details.get("profile_contains_state"),
+            # [Task 8] 会话诊断收敛为 profile 载体语义：路径 / 是否复用 / 来源 / 出口代理。
+            "session_profile_path": details.get("session_profile_path"),
+            "session_reused": details.get("session_reused"),
             "runtime_strategy_reason": details.get("runtime_strategy_reason"),
             "session_source": details.get("session_source"),
+            "session_proxy": details.get("session_proxy"),
             "user_agent": details.get("user_agent"),
             "runtime_locale": details.get("runtime_locale"),
             "runtime_timezone": details.get("runtime_timezone"),
             "runtime_accept_language": details.get("runtime_accept_language"),
             "probe_urls": details.get("probe_urls"),
-            "session_quality_score": details.get("session_quality_score"),
-            "session_quality_gate_passed": details.get("session_quality_gate_passed"),
-            "session_quality_source": details.get("session_quality_source"),
-            "session_manual_seeded": details.get("session_manual_seeded"),
-            "session_protected": details.get("session_protected"),
         }
     return None
 
@@ -535,6 +533,11 @@ def _build_task_response_payload_with_runtime_metadata(
         "login_gate_url": runtime_metadata.get("login_gate_url") if runtime_metadata else None,
         "runtime_strategy_reason": runtime_metadata.get("runtime_strategy_reason") if runtime_metadata else None,
         "session_source": runtime_metadata.get("session_source") if runtime_metadata else None,
+        # [Task 8] 新字段必须提升到**顶层** —— 前端读的是顶层字段，
+        # 只留在 runtime_metadata 嵌套里等于没做。
+        "session_profile_path": runtime_metadata.get("session_profile_path") if runtime_metadata else None,
+        "session_reused": runtime_metadata.get("session_reused") if runtime_metadata else None,
+        "session_proxy": runtime_metadata.get("session_proxy") if runtime_metadata else None,
         "runtime_metadata": runtime_metadata,
     }
 
@@ -1697,12 +1700,16 @@ async def _execute_collection_task_background_v2(
 
             browser = None
             try:
+                # 账号级代理：账号自有的 proxy_server 优先，绝不回退到遗留地区池
+                account_proxy = resolve_account_proxy(account)
                 if parallel_mode:
                     browser = await p.chromium.launch(
                         **get_browser_launch_args(
                             debug_mode=debug_mode,
                             execution_mode=execution_mode,
-                        )
+                        ),
+                        # 浏览器级全局代理：并行扇出的所有 context 都继承同一个出口 IP
+                        **({"proxy": account_proxy} if account_proxy else {}),
                     )
                     logger.info(
                         f"Task {task_id}: Using PARALLEL execution mode (max_parallel={max_parallel})"
@@ -1720,6 +1727,7 @@ async def _execute_collection_task_background_v2(
                         max_parallel=max_parallel,
                         debug_mode=debug_mode,
                         runtime_manifests=runtime_manifests,
+                        proxy=account_proxy,
                     )
                 else:
                     result = await executor.execute(
@@ -1736,6 +1744,7 @@ async def _execute_collection_task_background_v2(
                         debug_mode=debug_mode,
                         runtime_manifests=runtime_manifests,
                         session_runtime_mode="auto",
+                        proxy=account_proxy,
                     )
             finally:
                 if browser is not None:
@@ -1892,12 +1901,16 @@ async def _execute_collection_task_background(
 
                 browser = None
                 try:
+                    # 账号级代理：账号自有的 proxy_server 优先，绝不回退到遗留地区池
+                    account_proxy = resolve_account_proxy(account)
                     if parallel_mode:
                         browser = await p.chromium.launch(
                             **get_browser_launch_args(
                                 debug_mode=debug_mode,
                                 execution_mode=execution_mode,
-                            )
+                            ),
+                            # 浏览器级全局代理：并行扇出的所有 context 都继承同一个出口 IP
+                            **({"proxy": account_proxy} if account_proxy else {}),
                         )
                         logger.info(
                             f"Task {task_id}: Using PARALLEL execution mode (max_parallel={max_parallel})"
@@ -1915,6 +1928,7 @@ async def _execute_collection_task_background(
                             max_parallel=max_parallel,
                             debug_mode=debug_mode,
                             runtime_manifests=runtime_manifests,
+                            proxy=account_proxy,
                         )
                     else:
                         result = await executor.execute(
@@ -1931,6 +1945,7 @@ async def _execute_collection_task_background(
                             debug_mode=debug_mode,
                             runtime_manifests=runtime_manifests,
                             session_runtime_mode="auto",
+                            proxy=account_proxy,
                         )
 
                     task.status = result.status

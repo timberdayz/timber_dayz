@@ -1,8 +1,13 @@
-from tools.test_component import ComponentTester
+from tools.test_component import (
+    ComponentTestResult,
+    ComponentTester,
+    TestStatus,
+)
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import json
+import tempfile
 
 import pytest
 
@@ -63,28 +68,35 @@ def test_component_tester_uses_reused_persistent_context_for_export():
     assert tester._persistent_context_mode("export") == "reused"
 
 
-def test_component_tester_runtime_strategy_does_not_force_profile_level_reuse():
+def test_component_tester_runtime_strategy_prefers_persistent_profile():
+    """组件测试器（录制）也以**持久 profile 目录**为登录态载体。
+
+    旧语义是「storage_state 优先」—— 那套会话文件已经是待废除的对象。
+    现在录制子进程与正式采集落在**同一个** profile 目录
+    （Task 6.5：profile 身份统一为主账号 ID），
+    所以「profile 目录存在 → 用 profile」是两侧一致的正确行为。
+    """
     tester = ComponentTester(platform="tiktok", account_id="acc-1")
 
     decision = tester._choose_runtime_strategy(
         session_owner_id="main-1",
         has_storage_state=True,
-        has_manual_storage_state=False,
         has_persistent_profile=True,
         component_type="export",
     )
 
-    assert decision.mode == "storage_state_fanout"
+    assert decision.mode == "persistent_profile"
+    assert decision.reason == "persistent_profile_available"
 
 
-def test_component_tester_and_formal_collection_share_storage_state_first_default():
+def test_component_tester_and_formal_collection_share_profile_first_default():
+    """组件测试与正式采集**共用**同一套策略结论（都以 profile 为载体）。"""
     from modules.apps.collection_center.runtime_session import choose_runtime_strategy
 
     decision = choose_runtime_strategy(
         platform="shopee",
         session_owner_id="main-1",
         has_storage_state=True,
-        has_manual_storage_state=False,
         has_persistent_profile=True,
         force_persistent_profile=False,
         execution_kind="component_test",
@@ -92,8 +104,8 @@ def test_component_tester_and_formal_collection_share_storage_state_first_defaul
         parallel_mode=False,
     )
 
-    assert decision.mode == "storage_state_fanout"
-    assert decision.reason == "storage_state_available"
+    assert decision.mode == "persistent_profile"
+    assert decision.reason == "persistent_profile_available"
 
 
 def test_component_tester_runtime_strategy_delegates_to_shared_runtime_session(monkeypatch):
@@ -112,7 +124,6 @@ def test_component_tester_runtime_strategy_delegates_to_shared_runtime_session(m
     decision = tester._choose_runtime_strategy(
         session_owner_id="main-1",
         has_storage_state=True,
-        has_manual_storage_state=False,
         has_persistent_profile=True,
         component_type="export",
     )
@@ -329,79 +340,95 @@ async def test_component_tester_tiktok_login_gate_allows_login_shell_recovery_be
 
 
 @pytest.mark.asyncio
-async def test_component_tester_persists_session_after_login_success(monkeypatch):
+async def test_component_tester_no_longer_persists_session_after_login_success():
+    """登录成功后**不再写会话文件**：登录态只由 Chromium 持久 profile 承载（D5 / R1）。
+
+    旧的 ``_save_context_session`` 入口连同 ``SessionManager.save_session``
+    一起下线 —— 「人工保存会话」这个概念整体废除。
+    """
     tester = ComponentTester(platform="shopee", account_id="shop-1")
 
-    fake_context = AsyncMock()
-    fake_context.storage_state = AsyncMock(return_value={"cookies": [], "origins": []})
-
-    saved = {}
-
-    async def _fake_save(*, platform, session_owner_id, storage_state):
-        saved["platform"] = platform
-        saved["account_id"] = session_owner_id
-        saved["storage_state"] = storage_state
-        return True
-
-    monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session.persist_runtime_session_state",
-        _fake_save,
+    assert not hasattr(tester, "_save_context_session"), (
+        "组件测试子进程仍保留会话文件写入入口"
     )
+    from modules.utils.sessions.session_manager import SessionManager
 
-    ok = await tester._save_context_session(
-        fake_context,
-        {"account_id": "shop-1", "main_account_id": "main-1"},
-    )
-
-    assert ok is True
-    assert saved == {
-        "platform": "shopee",
-        "account_id": "main-1",
-        "storage_state": {"cookies": [], "origins": []},
-    }
+    assert not hasattr(SessionManager, "save_session"), "会话文件写入口仍存在"
 
 
 @pytest.mark.asyncio
-async def test_component_tester_recreates_context_with_main_account_session_scope(monkeypatch):
+async def test_component_tester_rebuild_uses_main_account_profile_scope_without_session_file(monkeypatch):
+    """重开走**主账号的 profile 目录**(profile 单一载体), 不再读会话文件。
+
+    旧实现是「读会话文件 -> 重建 context」, 与采集侧已脱节; 现在改成
+    「在同一个 profile 目录上重开持久 context」。
+    """
     tester = ComponentTester(platform="shopee", account_id="shop-1")
 
-    old_context = AsyncMock()
-    new_context = AsyncMock()
-    new_page = AsyncMock()
-    new_context.new_page = AsyncMock(return_value=new_page)
-    browser = AsyncMock()
-    browser.new_context = AsyncMock(return_value=new_context)
+    profile_dir = Path(tempfile.gettempdir()) / "t65-profile-scope" / "main-1"
+    opened: list = []
+    snapshotted: list = []
 
-    loaded = {}
+    async def _fake_open_persistent_runtime_bundle(**kwargs):
+        opened.append(kwargs)
+        return SimpleNamespace(context=AsyncMock(), page=AsyncMock())
 
-    async def _fake_load(*, platform, session_owner_id, account, max_age_days=30):
-        loaded["platform"] = platform
-        loaded["account_id"] = session_owner_id
-        loaded["account_info"] = account
-        loaded["max_age_days"] = max_age_days
+    def _fake_snapshot(platform, account_id):
+        snapshotted.append((platform, account_id))
         return {"storage_state": {"cookies": ["from-main"], "origins": []}}
 
     monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session.load_or_bootstrap_runtime_storage_state",
-        _fake_load,
+        "modules.apps.collection_center.runtime_session.open_persistent_runtime_bundle",
+        _fake_open_persistent_runtime_bundle,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.prime_runtime_page_for_login_gate",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.runtime_session.snapshot_profile_storage_state_sync",
+        _fake_snapshot,
+    )
+    monkeypatch.setattr(
+        "modules.utils.sessions.session_manager.SessionManager.get_persistent_profile_path",
+        lambda self, platform, account_id: profile_dir,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.python_component_adapter.create_adapter",
+        lambda *args, **kwargs: object(),
     )
     monkeypatch.setattr(
         tester,
-        "_build_component_browser_context_options",
-        AsyncMock(return_value={"storage_state": {"cookies": ["from-main"], "origins": []}}),
+        "_run_login_with_verification_support",
+        AsyncMock(return_value=SimpleNamespace(success=True)),
     )
-    monkeypatch.setattr(tester, "_prime_page_for_login_gate", AsyncMock())
+    # 账号锁用假实现(避免按住进程内锁单例, 污染同会话其它用例)
+    monkeypatch.setattr(
+        tester,
+        "_open_profile_session_lock",
+        AsyncMock(return_value=None),
+    )
 
-    rebuilt_context, rebuilt_page = await tester._recreate_context_with_saved_session(
-        browser=browser,
-        old_context=old_context,
+    ok, _new_context, _new_page = await tester._run_headful_login_fallback(
+        browser_type=object(),
+        old_context=AsyncMock(),
         account_info={"account_id": "shop-1", "main_account_id": "main-1"},
+        login_class=object(),
+        component_name="shopee/login",
+        result=ComponentTestResult(
+            component_name="login",
+            platform="shopee",
+            status=TestStatus.PENDING,
+        ),
     )
 
-    assert rebuilt_context is new_context
-    assert rebuilt_page is new_page
-    assert loaded["platform"] == "shopee"
-    assert loaded["account_id"] == "main-1"
+    assert ok is True
+    assert opened, "回退必须在持久 profile 上重开 context"
+    for call in opened:
+        assert call["session_owner_id"] == "main-1"
+        assert call["profile_path_override"] == str(profile_dir)
+    # 会话文件不再参与这条链路；回退直接在持久 profile 上重开
+    assert snapshotted == []
 
 
 class _FailureBodyLocator:

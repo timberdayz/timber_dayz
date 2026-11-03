@@ -426,10 +426,19 @@ class ProxyConfigManager:
     def should_use_proxy(self, account_info: Dict[str, Any]) -> bool:
         """
         判断账号是否应该使用代理
-        
+
+        ⚠️ 边界说明（账号级代理链路，2026-11-02）：
+        本模块是**遗留地区池链路**：只按 account_id + 地区池 key 选代理，
+        完全不读账号自有的 ``proxy_server``（core.shop_accounts.extra_config["proxy"]）。
+        采集主链路**不走这里** —— 主链路用
+        ``backend/services/account_proxy_config.resolve_account_proxy``，
+        账号自有代理优先且绝不回退到本模块（一账号两个 IP 会违反 IP 隔离）。
+        另外本模块依赖 ``PROXY_STRATEGY.global.fallback_to_direct``（代理失败静默直连），
+        自有代理场景**不允许**这条回退，必须显式失败。
+
         Args:
             account_info: 账号信息
-            
+
         Returns:
             是否应该使用代理
         """

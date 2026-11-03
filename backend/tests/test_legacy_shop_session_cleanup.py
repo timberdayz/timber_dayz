@@ -12,12 +12,16 @@ def test_collect_legacy_shop_artifact_paths_only_returns_shop_scoped_artifacts(t
 
     # Shop-scoped legacy artifacts that should be cleaned.
     targets = [
-        root / "data" / "sessions" / "shopee" / "shopee_sg_chenewei666_local",
         root / "profiles" / "shopee" / "shopee_sg_chenewei666_local",
         root / "data" / "session_profiles" / "shopee" / "shopee_sg_chenewei666_local",
     ]
     for target in targets:
         target.mkdir(parents=True, exist_ok=True)
+
+    # 会话文件目录（data/sessions/**）已随会话文件体系整体废除：新代码根本不读它，
+    # 所以它不再是「会被误用的店铺级遗留物」——留着只会让运维去删一批无害文件。
+    retired_session_dir = root / "data" / "sessions" / "shopee" / "shopee_sg_chenewei666_local"
+    retired_session_dir.mkdir(parents=True, exist_ok=True)
 
     fingerprint_manager = DeviceFingerprintManager(base_path=root / "data" / "device_fingerprints")
     fingerprint_file = fingerprint_manager.get_fingerprint_file(
@@ -46,6 +50,9 @@ def test_collect_legacy_shop_artifact_paths_only_returns_shop_scoped_artifacts(t
     actual = collect_legacy_shop_artifact_paths(root, scopes)
 
     assert actual == sorted(targets + [fingerprint_file])
+    # 会话文件目录不再被当作「需要清理的店铺级遗留物」
+    assert retired_session_dir not in actual
+    assert keep_dir not in actual
 
 
 def test_collect_legacy_shop_artifact_paths_ignores_missing_artifacts(tmp_path: Path):

@@ -441,8 +441,9 @@ class DeviceFingerprintManager:
             "java_script_enabled": True,
         }
         
-        # 添加代理配置
-        if proxy and account_config and account_config.get("proxy_required", False):
+        # 添加代理配置：代理已由账号配置解析并注入，此处不再依赖旧的 proxy_required 布尔标记
+        # （账号 dict 里从来没有这个字段，恒为假 —— 代理因此一直进不了 context）
+        if proxy:
             context_options["proxy"] = proxy
         
         logger.debug(f"生成上下文选项: {platform}/{account_id}")
