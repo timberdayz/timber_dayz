@@ -917,7 +917,29 @@ return True, new_bundle.context, new_bundle.page, "success"
 - `_recreate_runtime_page_with_saved_session`（`:3065-3116`）整体删除 —— 它的存在意义就是「读会话文件 → `browser.new_context` 注入」，与 profile 单一载体直接冲突。**连带消除 H3**（它调的 `_load_or_bootstrap_session_async` → `_bootstrap_session_from_profile_sync` 会二次开同一 profile 目录）
 - `_run_headful_login_fallback` 里的 `_save_session_async` 调用（`:3230`）与「读回会话文件」逻辑
 
+### Task 4.5 质量评审结论（2026-11-03，VERDICT: NEEDS_FIX）
+
+代码质量评审（不是规格评审）结论：**1 个 🔴 + 5 个 🟠 + 6 个 🟡**。评审已核实「无问题」的 18 项也一并记录，避免以后重复查。
+
+| # | 级别 | 问题 | 位置 | 修法 |
+|---|---|---|---|---|
+| **F1** | 🔴 | **profile 回退重开的页面停在 `about:blank`，从未 prime → 登录闸门检查必然失败**。Playwright 对持久 context 启动时 push 的 URL 就是 `about:blank`（`chromium.js:254-255`）→ `context.pages[0]` 是空白页；而全仓只有 `:1310`（主流程）与 `:3402`（legacy 回退）两处调 `_prime_runtime_page_for_login_gate`，**新写的 profile 分支两处都没有** → 回退返回后 `:1407` 直接 `_ensure_login_gate_ready(page)` → `login_status_detector.py:809-819` 对 about:blank 明确返回 UNKNOWN/置信度≤0.59，而 `transition_gates.py:91-99` 的 READY 门槛是 `logged_in` + `confidence>=0.7` → **TikTok 平台确定性失败**，且报错完全指不到真因 | `executor_v2.py:3296-3306` | 重开后 prime（`await self._prime_runtime_page_for_login_gate(new_bundle.page, platform, account)`，`account` 要带 `login_url`）+ 调用方侧加「仍 about:blank 就主动导航」兜底。**修法要保证「页面是不是 about:blank」两种情况都成立** |
+| **F2** | 🟠 | **并发首连用例假绿**：只断言 `len(created)==2` 与「关了 1 个连接」，**分辨不出关的是不是共享单例** → 把 `await client.aclose()` 改成 `await existing.aclose()` 照样全绿。**当前实现是对的**（评审实测 `LEAKED: []`），问题在测试守不住 | `test_main_account_session_lock.py:1371-1409` | 断言改成**身份级**：被关的是非单例那个，且**单例 `closed is False`** |
+| **F3** | 🟠 | legacy 路径在 `session_account_id` 为空时**把登录态整个丢弃**：采集条件用 `session_platform and session_account_id`，而 `_run_headful_login_fallback` 自己已算出 `account_id = session_account_id or account["account_id"]`（`:3191`）却没用 → 主 context 以**完全未登录**状态创建 → 401/跳登录页，结果为空且错误现场与「有头登录已成功」脱节 | `executor_v2.py:3361-3370`、`:3386-3403` | 条件改用 `account_id`；`storage_state` 仍为空时**显式报错**，不静默造未登录 context。**不要**把 `_load_or_bootstrap_session_async` 加回 profile 路径（那是刻意删的，为了消除同目录二次开 profile） |
+| **F4** | 🟠 | **`docker-compose.collection.yml` 的 `REDIS_HOST` 默认 `host.docker.internal` 在 Linux 不解析**（两个 compose 都没有 `extra_hosts: host-gateway`）→ 连不上 Redis；且 `collection` 服务**没设 `ENVIRONMENT`** → `account_session_lock_fail_closed()` 返回 False → **fail-open 降级为进程内锁** → compose 注释承诺的「显式指定 Redis ⇒ 不再降级」在默认 Linux 部署下**不成立** | `docker-compose.collection.yml:22/:24` | 优先补 `extra_hosts: ["host.docker.internal:host-gateway"]`；**不要**擅自把 `ENVIRONMENT` 改成 production（该 compose 也用于开发，Redis 不可达时会从「能跑」变成「拒绝采集」）。fail-closed 开关交给环境变量 |
+| **F5** | 🟠 | 旧 context 关闭失败只 `logger.debug` → 而它**正是 ProcessSingleton 冲突的根因** → 根因在默认日志里看不见，暴露出来的却是 Chromium 原始报错 → 运维误判为 profile 损坏 | `executor_v2.py:3260-3264` → `_close_playwright_resource:5965-5973` | 至少提到 `warning` 并提示「可能触发 profile 独占锁冲突」；更好的做法是 **close 失败 → 直接中止回退并给清晰中文错误**，别继续撞 Chromium 原始异常 |
+| **F6** | 🟠 | 测试没断言「headed context 在**重开之前**已关闭」的**顺序**：关闭用例只断言最终状态 `closed is True` → 有人把 close 挪到重开之后，两条断言仍成立 → 运行时同目录**同时开两个持久 context** | `test_collection_headful_fallback_profile.py:348-369`、`:373-393` | 补断言：**所有 close 事件的下标都小于最后一次 launch_persistent 的下标** |
+| **F8** | 🟡 | `inject_redis_password` 对「无 scheme 的畸形 URL」**不是原样返回**，而是产出更畸形的 URL（`urlsplit("host:6379")` 不抛异常，把 `host` 当 scheme）→ 实测 `host://:pw@/6379` | `main_account_session_lock.py:405-433` | 注入前先校验 scheme ∈ `{redis, rediss, unix}`，不匹配则原样返回 |
+| **F9** | 🟡 | `LocalSessionLockBackend._locks` **永不回收**（实测 200 个 loop → 200 条目）；`asyncio.Lock` 竞争后会持有 loop 强引用 → 阻止 loop 回收 | `main_account_session_lock.py:277-283`、`:307-318` | `delete_if_token` 释放后，若该 scope 无 holder 无 waiter → `pop` 掉 `_locks` 条目 |
+| **F10** | 🟡 | 连接失败日志**不带脱敏后的 URL** → 运维拿不到「连的是哪个 host:port/db」 | `main_account_session_lock.py:503-509` | 失败日志也带 `sanitize_redis_url_for_log(effective_url)` |
+| **F11** | 🟡 | `reset_shared_redis_client()` 与并发首连**竞态**：reset 清了单例后，在途的 `ping()` 醒来仍会 `_redis_client_singleton = client` → **复活刚清掉的单例**；且成功后 `_redis_client_failed_at` 不清理 | `main_account_session_lock.py:533-542`、`:512-530` | 成功分支清 `_redis_client_failed_at`；reset 加「epoch」计数，在途连接醒来发现 epoch 变了就自行关闭丢弃 |
+| **F12** | 🟡 | 「回退全程不写会话文件」的断言**覆盖面不足**，给人虚假安全感：该用例只调了 `_run_headful_login_fallback`；真实流程里 `_execute_shared_login_phase:1434` 仍会走 `save_session_after_login` → `_save_session_async` 写会话文件（非 TikTok 平台） | `test_collection_headful_fallback_profile.py:264-294` | 选 (a)：把断言文档字符串改准确（「本函数内不写」）。**不要**选 (b)，那会与「非 TikTok 仍落盘」这个待修项（F4-7，属后续 Task）冲突 |
+| **F13** | 🟡 | 改写后的用例引用**真实仓库路径** `profiles/<platform>/<id>`（该目录被 gitignore）→ 将来换成真 Playwright 或让 fake 建目录就会在仓库里生成目录 | `test_collection_executor_session_alignment.py:186` | 改用 `tmp_path`（同批新用例已这么做） |
+
+**评审已核实「无问题」的 18 项**（避免重复查）：密码不进日志 ✅ / `redis://:@host` **不会发空 AUTH**（redis-py `parse_url` 是 `if url.password:`，空串 falsy）✅ / IPv6 URL 往返完好 ✅ / 特殊字符密码 round-trip 正确 ✅ / 等待者 Hash 与锁 key 命名空间不冲突 ✅ / 等待者 TTL 计算正确 ✅ / 降级路径的 error 级日志覆盖完整 ✅ / 冷却窗用 `time.monotonic()` 正确 ✅ / 并发首连**实现本身正确** ✅ / `WeakKeyDictionary` 用 loop 做 key 安全 ✅ / 部署契约测试是**真解析 YAML** ✅ / R8 断言方式正确（断言 key 不存在）✅ / 代理未被从已 strip 的 account 重解析 ✅ / legacy 主 context 新增代理安全（Playwright 允许 browser 级 + context 级并存）✅ / `_recreate_runtime_page_with_saved_session` 全仓无残留引用 ✅ / compose 的 profiles 挂载与既有约定一致 ✅ / fallback 返回值 3/4 元组兼容保持 ✅ / `fallback_outcome == "timeout"` 语义保持 ✅。
+
 **注意**：`open_persistent_runtime_bundle` 的 `profile_path_override` 参数已存在（`runtime_session.py:741`），**不需要新增**。
+
 
 ---
 
