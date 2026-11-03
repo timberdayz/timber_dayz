@@ -26,7 +26,10 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs, urlparse
 
 from modules.core.logger import get_logger
-from backend.services.account_proxy_config import resolve_account_proxy
+from backend.services.account_proxy_config import (
+    resolve_account_proxy,
+    strip_account_proxy_credentials,
+)
 from backend.services.verification_protocol import (
     apply_verification_result_to_params,
     verification_input_mode,
@@ -331,7 +334,9 @@ def _build_runtime_task_params(
     reused_session: bool,
 ) -> Dict[str, Any]:
     params: Dict[str, Any] = {
-        "account": account,
+        # P0-4：组件 config 不能带明文代理密码 —— 账号字典会整体扩散给组件，
+        # 也可能被组件打日志/落盘。凭据只随 proxy= 参数下传。
+        "account": strip_account_proxy_credentials(account),
         "params": {
             "date_from": normalized_date_range.get("date_from", ""),
             "date_to": normalized_date_range.get("date_to", ""),
@@ -391,7 +396,10 @@ def _build_runtime_task_params(
 
 
 def _build_runtime_account(platform: str, account: Dict[str, Any]) -> Dict[str, Any]:
-    runtime_account = dict(account or {})
+    # P0-4：runtime_account 会进指纹链路与组件 config，不能带明文代理密码。
+    # 注意这里只改"给组件/指纹用的副本"：executor 拿到的原始 account 仍带凭据，
+    # resolve_account_proxy 的兜底解析不受影响。
+    runtime_account = strip_account_proxy_credentials(account)
     runtime_account["login_url"] = get_platform_login_entry(platform)
     return runtime_account
 
@@ -1187,6 +1195,7 @@ class CollectionExecutorV2:
         save_session_after_login: bool,
         start_time: datetime,
         total_domains_count: int,
+        proxy: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Any, Any, Optional[CollectionResult]]:
         await self._update_status(task_id, 5, "正在登录...")
         await self._check_cancelled(task_id)
@@ -1226,6 +1235,7 @@ class CollectionExecutorV2:
                         session_platform=session_platform,
                         session_account_id=session_account_id,
                         runtime_manifests=runtime_manifests,
+                        proxy=proxy,
                     )
                     if len(fallback_result) == 4:
                         login_success, play_context, page, fallback_outcome = (
@@ -1876,6 +1886,10 @@ class CollectionExecutorV2:
         legacy_direct_page_mode = False
         # 账号级代理：调用方没显式传就从账号配置解析（自有代理优先，绝不走遗留地区池）
         proxy = proxy or resolve_account_proxy(account)
+        # P0-4：代理解析完就把明文凭据从账号字典里剔掉 —— 之后这个 dict 会流进
+        # 组件 ctx/config（组件可能整体打日志或落盘）；凭据只随上面的 proxy= 下传。
+        # 注意：这里改的是副本，调用方手里的原始 account 不受影响。
+        account = strip_account_proxy_credentials(account)
 
         # 1.0 统一约定: 规范化 account_id, 决定是否使用按账号会话/指纹
         session_owner_id, shop_account_id, use_account_session_fingerprint = (
@@ -1980,8 +1994,9 @@ class CollectionExecutorV2:
             and browser_type is not None
         ):
             # 浏览器级全局代理：账号自有代理必须在浏览器进程级注入。
-            # context 级 proxy 的生效前提就是浏览器带了全局代理，否则会静默直连
-            # （C2：自有代理场景不允许回退直连）。
+            # 实测（Playwright 1.54.1）：per-context proxy 无需浏览器全局代理即可生效，
+            # 且会覆盖全局代理；进程数也不因 per-context proxy 而增加。
+            # 浏览器级代理仍保留：浏览器自身的请求（不经 context 的）也要走同一出口 IP。
             launch_kwargs = self._build_runtime_launch_kwargs(debug_mode=debug_mode)
             launch_kwargs.pop("proxy", None)
             browser_instance = await browser_type.launch(
@@ -2076,6 +2091,7 @@ class CollectionExecutorV2:
                                 and bool(session_owner_id),
                                 start_time=start_time,
                                 total_domains_count=total_domains_count,
+                                proxy=proxy,
                             )
                         )
                     except Exception:
@@ -2205,6 +2221,7 @@ class CollectionExecutorV2:
                     session_platform=platform,
                     session_account_id=session_owner_id,
                     runtime_manifests=runtime_manifests,
+                    proxy=proxy,
                 )
 
             # ===== 以下为旧的 YAML 组件执行流程(将被废弃) =====
@@ -2958,13 +2975,16 @@ class CollectionExecutorV2:
         session_platform: str,
         session_account_id: str,
         runtime_manifests: Optional[Dict[str, Any]] = None,
+        proxy: Optional[Dict[str, Any]] = None,
     ):
         from playwright.async_api import async_playwright
 
         account_id = session_account_id or str(account.get("account_id") or "").strip()
-        # 有头登录回退也必须走账号自己的代理（P2：登录与使用同 IP；
-        # 自有代理场景下静默直连等于放弃 IP 隔离）
-        proxy = resolve_account_proxy(account)
+        # 有头登录回退必须用**调用方已解析好的**代理对象（可能带凭据）。
+        # 这里绝不能从 account 重新解析：account 已被 strip_account_proxy_credentials
+        # 去掉了凭据（P0-4），重新解析会得到无凭据代理 → 需要认证的代理直接 407，
+        # 人工登录流程在最需要它的场景（风控要人工过验证码）走不通。
+        # 该代理对象只流向 Playwright 的 launch(proxy=...)，不进入组件 config。
 
         async with async_playwright() as playwright:
             headed_browser = await playwright.chromium.launch(
@@ -3101,6 +3121,7 @@ class CollectionExecutorV2:
         session_platform: str = "",
         session_account_id: str = "",
         runtime_manifests: Optional[Dict[str, Any]] = None,
+        proxy: Optional[Dict[str, Any]] = None,
     ) -> CollectionResult:
         """
         v4.8.0: 使用 Python 组件执行采集流程
@@ -3157,6 +3178,7 @@ class CollectionExecutorV2:
                             session_platform=session_platform,
                             session_account_id=session_account_id,
                             runtime_manifests=runtime_manifests,
+                            proxy=proxy,
                         )
                         if len(fallback_result) == 4:
                             login_success, play_context, page, fallback_outcome = (
@@ -5788,6 +5810,8 @@ class CollectionExecutorV2:
         start_time = datetime.now()
         # 账号级代理：调用方没显式传就从账号配置解析（自有代理优先，绝不走遗留地区池）
         proxy = proxy or resolve_account_proxy(account)
+        # P0-4：代理解析完就把明文凭据从账号字典里剔掉（组件 ctx/config 不带明文密码）
+        account = strip_account_proxy_credentials(account)
         session_owner_id, shop_account_id, use_account_session_fingerprint = (
             _resolve_session_scope(account_id, account)
         )

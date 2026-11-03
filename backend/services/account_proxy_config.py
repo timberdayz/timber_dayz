@@ -24,6 +24,18 @@
 loader 层（``AccountLoaderService._build_account_dict`` /
 ``ShopAccountLoaderService._build_payload``）不承诺这一点：它们在解析代理之前
 就会访问 legacy 字段，属性缺失会先抛 ``AttributeError``。
+
+关于凭据安全
+------------
+本模块保证：**代理凭据不会留在 ``server`` 字段里**（``server`` 会进日志、也会
+作为 Playwright 的代理地址下发）。
+
+- 内嵌形态（``http://user:pass@host:port``）拆成 server/username/password；
+- 漏写 host 的形态（``http://user:pass``）同样按 userinfo 拆，server 只剩 scheme；
+- 拆不出主机部分时 :func:`resolve_account_proxy` **显式失败**（不静默直连），
+  报错信息用脱敏后的代理标识；
+- 独立形态的凭据由 :func:`strip_account_proxy_credentials` 从账号 dict 里剔除，
+  凭据只随 ``proxy=`` 参数下传，不随账号字典扩散进组件 config。
 """
 
 from typing import Any, Dict, Mapping, Optional
@@ -97,13 +109,47 @@ def _normalize_proxy_server(proxy_server: str) -> str:
     return f"{_DEFAULT_PROXY_SCHEME}://{raw}"
 
 
+def _authority_of(raw: str) -> str:
+    """取 authority 部分（去掉 userinfo，即最后一个 "@" 之前的部分）。"""
+    text = (raw or "").strip()
+    _scheme, sep, rest = text.partition("://")
+    if not sep:
+        rest = text
+    _userinfo, at, host = rest.rpartition("@")
+    return host if at else rest
+
+
+def _looks_like_userinfo(authority: str) -> bool:
+    """authority 形如 ``user:pass``（漏写 host）时必须按 userinfo 处理。
+
+    判定规则：
+
+    - IPv6 字面量（``[::1]:8080``）不是 userinfo；
+    - 端口位是纯数字时是正常的 ``host:port``；
+    - 其余带 ``:`` 的形态（端口位不是数字、或有多个 ``:``）都按 userinfo 处理 ——
+      这种串拆不出可用主机，凭据必须从 server 里剥掉，否则明文密码会进日志、
+      也会被当成代理地址下发。
+    """
+    text = (authority or "").strip()
+    if not text or ":" not in text:
+        return False
+    if text.startswith("["):
+        return False
+    if text.count(":") > 1:
+        return True
+    _host, _sep, port = text.rpartition(":")
+    return not port.isdigit()
+
+
 def split_proxy_credentials(proxy_server: str) -> Dict[str, str]:
     """http://user:pass@host:port -> Playwright 的 server/username/password。
 
     两种凭据形态在这里只认「内嵌在 URL 里的 user:pass」；独立的
     ``proxy.username`` / ``proxy.password`` 由 :func:`resolve_account_proxy` 叠加。
 
-    缺 scheme 的输入会被归一成 ``http://``（见 :func:`_normalize_proxy_server`）。
+    - 缺 scheme 的输入会被归一成 ``http://``（见 :func:`_normalize_proxy_server`）；
+    - 缺 host 的 ``user:pass`` 形态（没有 ``@``）同样按 userinfo 拆开，
+      **凭据绝不会留在 server 里**（否则明文密码会进日志、也会被当成代理地址下发）。
     """
     raw = (proxy_server or "").strip()
     if not raw:
@@ -112,15 +158,23 @@ def split_proxy_credentials(proxy_server: str) -> Dict[str, str]:
     if not sep:
         scheme, rest = "", raw
     userinfo, at, host_part = rest.rpartition("@")
-    if not at:
-        return {"server": _normalize_proxy_server(raw)}
-    username, _, password = userinfo.partition(":")
-    host_with_scheme = f"{scheme}://{host_part}" if scheme else host_part
-    return {
-        "server": _normalize_proxy_server(host_with_scheme),
-        "username": username,
-        "password": password,
-    }
+    if at:
+        username, _, password = userinfo.partition(":")
+        host_with_scheme = f"{scheme}://{host_part}" if scheme else host_part
+        return {
+            "server": _normalize_proxy_server(host_with_scheme),
+            "username": username,
+            "password": password,
+        }
+    if _looks_like_userinfo(host_part):
+        # 形如 "http://user:pass"（漏写 host）：按 userinfo 拆，凭据从 server 里剥掉
+        username, _, password = host_part.partition(":")
+        return {
+            "server": _normalize_proxy_server(f"{scheme}://" if scheme else ""),
+            "username": username,
+            "password": password,
+        }
+    return {"server": _normalize_proxy_server(raw)}
 
 
 def mask_proxy_server(
@@ -131,15 +185,27 @@ def mask_proxy_server(
     """诊断字段用：只留 scheme+host，抹掉凭据（规范 §8 要求脱敏）。
 
     凭据有两种形态：内嵌在 URL 里的 ``user:pass``、以及独立的
-    ``username`` / ``password``。两种形态都不得出现在诊断字段里，
-    所以独立形态的凭据也在这里一并抹掉。
+    ``username`` / ``password``。独立形态的凭据本来就不在 server 字符串里，
+    所以这里**不做任何字符串替换**（早期实现用 replace 会误伤 host 段/端口/scheme）。
+    ``username`` / ``password`` 形参保留给调用方显式声明"这里有凭据"，
+    结果里不会出现它们。
     """
-    masked = split_proxy_credentials(proxy_server).get("server", "")
-    for secret in (username, password):
-        text = str(secret or "").strip()
-        if text:
-            masked = masked.replace(text, "***")
-    return masked
+    raw = (proxy_server or "").strip()
+    if _looks_like_userinfo(_authority_of(raw)):
+        # 兜底：authority 形如 user:pass（缺 host），拆不出可用 server —— 整体脱敏
+        scheme, sep, _ = raw.partition("://")
+        return f"{scheme}://***" if sep else "***"
+    return split_proxy_credentials(raw).get("server", "")
+
+
+def _proxy_server_has_host(server: str) -> bool:
+    """server 里是否真有主机部分（只有 scheme 不算）。"""
+    text = (server or "").strip()
+    _scheme, sep, netloc = text.partition("://")
+    host_part = netloc if sep else text
+    if host_part.startswith("["):
+        return bool(host_part[1:].split("]")[0].strip())
+    return bool(host_part.split(":")[0].strip())
 
 
 def resolve_account_proxy(account: Optional[Mapping[str, Any]]) -> Optional[Dict[str, str]]:
@@ -155,6 +221,8 @@ def resolve_account_proxy(account: Optional[Mapping[str, Any]]) -> Optional[Dict
       代理失败静默回退直连会让账号从宿主 IP 出现，IP 隔离形同虚设。
       自有代理场景下代理不可用必须**显式失败**（浏览器导航报错、任务失败），
       不得直连。新链路不经过那条静默回退。
+    - 代理串拆不出主机部分（例如漏写 host 的 ``http://user:pass``）时**抛 ValueError**：
+      配置坏了必须显式失败，不能退回"没配代理"（那等于静默直连）。
     - 返回 Playwright 形态：``{"server": ..., "username": ..., "password": ...}``。
     """
     data = account if isinstance(account, Mapping) else {}
@@ -163,6 +231,17 @@ def resolve_account_proxy(account: Optional[Mapping[str, Any]]) -> Optional[Dict
         return None
 
     proxy = split_proxy_credentials(server)
+    account_label = (
+        _normalize_text(data.get("account_id"))
+        or _normalize_text(data.get("main_account_id"))
+    )
+    if not proxy.get("server") or not _proxy_server_has_host(proxy["server"]):
+        # 配置坏了（例如漏写 host 的 http://user:pass）：显式失败，绝不静默直连（C2）。
+        # 报错信息用脱敏后的代理标识，不能带明文凭据。
+        raise ValueError(
+            f"账号代理配置无效（缺少代理主机）: {mask_proxy_server(server)}"
+            f" account_id={account_label}"
+        )
 
     # 独立的 username/password 形态优先；没有才用 URL 内嵌凭据。
     username = _normalize_text(data.get("proxy_username"))
@@ -172,10 +251,38 @@ def resolve_account_proxy(account: Optional[Mapping[str, Any]]) -> Optional[Dict
     if password:
         proxy["password"] = password
 
-    logger.info(
+    logger.debug(
         "账号级代理已解析: account_id=%s proxy=%s",
-        _normalize_text(data.get("account_id"))
-        or _normalize_text(data.get("main_account_id")),
+        account_label,
         mask_proxy_server(server, username=username, password=password),
     )
     return proxy
+
+
+def strip_account_proxy_credentials(
+    account: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """P0-4：把账号 dict 里的代理凭据剔除（组件 config 不能带明文密码）。
+
+    组件 config（``params["account"]``）会整体扩散给组件，也可能进日志或落盘；
+    代理凭据只应随 ``proxy=`` 参数下传，不该跟着账号字典走。
+
+    - 独立的 ``proxy_username`` / ``proxy_password`` 直接删掉；
+    - ``proxy_server`` 里内嵌的 ``user:pass`` 也被剥掉，只留 scheme+host。
+
+    返回**新字典**，不改调用方手里的原对象（调用方还要用它解析代理）。
+    """
+    data = dict(account or {})
+    data.pop("proxy_username", None)
+    data.pop("proxy_password", None)
+    server = _normalize_text(data.get("proxy_server"))
+    if server:
+        split = split_proxy_credentials(server)
+        if split.get("server"):
+            data["proxy_server"] = split["server"]
+        else:
+            # 畸形串（拆不出主机，例如 "user:pass"）：宁可丢掉这个键，
+            # 也不能把明文凭据留在组件 config 里。
+            data.pop("proxy_server", None)
+    return data
+
