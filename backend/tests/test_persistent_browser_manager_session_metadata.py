@@ -1,6 +1,13 @@
-from __future__ import annotations
+"""``persistent_browser_manager.save_context_state`` 的新契约（Task 7）。
 
-from types import SimpleNamespace
+会话文件体系废除后，这个方法**不再写任何会话文件**：登录态只由 Chromium
+持久 profile 承载，而 Chromium 只在 profile context **正常关闭**时把 cookie /
+localStorage 刷回 profile 目录（R7）。
+
+所以「保存会话」这一步的落地方式只剩一个：**正常关闭 profile context**。
+"""
+
+from __future__ import annotations
 
 from modules.utils.persistent_browser_manager import PersistentBrowserManager
 
@@ -8,23 +15,20 @@ from modules.utils.persistent_browser_manager import PersistentBrowserManager
 class _FakeContext:
     def __init__(self) -> None:
         self.pages = [object()]
-        self.created_pages: list[object] = []
+        self.closed = False
 
-    def storage_state(self):  # noqa: ANN001
-        return {"cookies": [{"name": "session"}], "origins": []}
-
-    def new_page(self):  # noqa: ANN001
-        page = SimpleNamespace(close=lambda: None)
-        self.created_pages.append(page)
-        return page
+    def close(self) -> None:
+        self.closed = True
 
 
 class _FakeSessionManager:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str, dict, dict]] = []
+    """旧实现依赖的会话文件写入接口 —— Task 7 后不应再被调用。"""
 
-    def save_session(self, platform, account_id, storage_state, metadata=None):  # noqa: ANN001
-        self.calls.append((platform, account_id, storage_state, metadata or {}))
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def save_session(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201
+        self.calls.append((args, kwargs))
         return True
 
 
@@ -35,40 +39,37 @@ def _manager_with_fake_session_manager() -> tuple[PersistentBrowserManager, _Fak
     return manager, fake_session_manager
 
 
-def test_save_context_state_keeps_automatic_metadata_by_default() -> None:
+def test_save_context_state_does_not_write_session_file() -> None:
+    """会话文件已废除：这个方法不得再调用任何会话写入接口。"""
     manager, fake_session_manager = _manager_with_fake_session_manager()
+    context = _FakeContext()
 
-    success = manager.save_context_state(_FakeContext(), "shopee", "shop-1")
+    ok = manager.save_context_state(context, "shopee", "shop-1")
 
-    assert success is True
-    _, _, storage_state, metadata = fake_session_manager.calls[0]
-    assert storage_state == {"cookies": [{"name": "session"}], "origins": []}
-    assert metadata["persistent_profile"] is True
-    assert metadata["context_type"] == "persistent"
-    assert "saved_at" in metadata
-    assert "manual_seeded" not in metadata
-    assert "protected" not in metadata
+    assert ok is True
+    assert fake_session_manager.calls == [], "会话文件已废除，不得再写"
 
 
-def test_save_context_state_merges_manual_session_metadata() -> None:
-    manager, fake_session_manager = _manager_with_fake_session_manager()
+def test_save_context_state_closes_profile_context() -> None:
+    """登录态要落到 profile，Chromium 必须被正常关闭（R7）。"""
+    manager, _ = _manager_with_fake_session_manager()
+    context = _FakeContext()
 
-    success = manager.save_context_state(
-        _FakeContext(),
-        "shopee",
-        "shop-2",
-        session_metadata={
-            "quality_source": "manual",
-            "manual_seeded": True,
-            "protected": True,
-        },
-    )
+    manager.save_context_state(context, "shopee", "shop-1")
 
-    assert success is True
-    _, _, _, metadata = fake_session_manager.calls[0]
-    assert metadata["persistent_profile"] is True
-    assert metadata["context_type"] == "persistent"
-    assert "saved_at" in metadata
-    assert metadata["quality_source"] == "manual"
-    assert metadata["manual_seeded"] is True
-    assert metadata["protected"] is True
+    assert context.closed is True
+
+
+def test_save_context_state_tolerates_already_closed_context() -> None:
+    """重复关闭（先关后 close_context）不得抛错。"""
+    manager, _ = _manager_with_fake_session_manager()
+
+    class _ClosedContext:
+        pages = [object()]
+
+        def close(self):
+            raise RuntimeError("Target page, context or browser has been closed")
+
+    ok = manager.save_context_state(_ClosedContext(), "shopee", "shop-1")
+
+    assert ok is True

@@ -184,26 +184,6 @@ class ShopeeExporter:
         """获取 SPC_CDS 参数,这里使用固定值,实际可能需要从页面动态获取"""
         return "84cc39dc-9437-4f51-908d-1a1104b84c9f"
 
-    @classmethod
-    def from_persistent_session(cls, platform: str, account_id: str) -> 'ShopeeExporter':
-        """从持久化会话创建导出器"""
-        try:
-            from modules.utils.sessions.session_manager import SessionManager
-            
-            sm = SessionManager()
-            session_data = sm.load_session(platform, account_id)
-            
-            if session_data and 'cookies' in session_data:
-                cookies = {cookie['name']: cookie['value'] for cookie in session_data['cookies']}
-                return cls(session_cookies=cookies)
-            else:
-                logger.warning(f"未找到持久化会话: {platform}/{account_id}")
-                return cls()
-                
-        except Exception as e:
-            logger.error(f"加载持久化会话失败: {e}")
-            return cls()
-
 
 def get_week_range(week_offset: int = 0) -> Tuple[str, str]:
     """

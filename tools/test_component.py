@@ -432,7 +432,6 @@ class ComponentTester:
         *,
         session_owner_id: str,
         has_storage_state: bool,
-        has_manual_storage_state: bool,
         has_persistent_profile: bool,
         component_type: Optional[str],
     ):
@@ -442,7 +441,6 @@ class ComponentTester:
             platform=self.platform,
             session_owner_id=session_owner_id,
             has_storage_state=has_storage_state,
-            has_manual_storage_state=has_manual_storage_state,
             has_persistent_profile=has_persistent_profile,
             force_persistent_profile=False,
             execution_kind="component_test",
@@ -638,32 +636,6 @@ class ComponentTester:
 
         await page.goto(probe_urls[0], wait_until="domcontentloaded", timeout=60000)
         await self._wait_for_probe_page_ready(page, settle_ms=800)
-
-    async def _save_context_session(self, context, account_info: Optional[Dict[str, Any]]) -> bool:
-        account_id = self._get_session_owner_id(account_info)
-
-        try:
-            storage_state = await context.storage_state()
-        except Exception as e:
-            logger.warning("Failed to read context storage_state for %s/%s: %s", self.platform, account_id, e)
-            return False
-
-        try:
-            # [Task 5] runtime_session 不再暴露「落盘会话」的入口
-            # （persist_runtime_session_state 已删除），这里直接用现成的
-            # SessionManager.save_session：录制/组件测试子进程仍要保存登录态，
-            # 会话文件体系整体收窄由 Task 7 负责。
-            from modules.utils.sessions.session_manager import SessionManager
-
-            return await asyncio.to_thread(
-                SessionManager().save_session,
-                self.platform,
-                account_id,
-                storage_state,
-            )
-        except Exception as e:
-            logger.warning("Failed to save session for %s/%s: %s", self.platform, account_id, e)
-            return False
 
     async def _check_login_gate(self, page, result: ComponentTestResult, component_name: str) -> bool:
         await self._wait_for_probe_page_ready(page)
@@ -1381,7 +1353,8 @@ class ComponentTester:
             result.phase_component_version = getattr(stable_login, 'version', '') or ''
             result.error = result.error or getattr(exec_result, 'message', '登录失败')
             return False, context, page
-        await self._save_context_session(context, account_info)
+        # [Task 7 / R1] 登录态不再复制成「会话文件」：唯一载体是 Chromium 持久
+        # profile（人工登录路径会写进 profile；普通 context 里的登录不落盘）。
         return True, context, page
 
     async def _test_python_component_with_browser(
@@ -1494,15 +1467,17 @@ class ComponentTester:
                     try:
                         from modules.apps.collection_center.runtime_session import (
                             build_runtime_context_options,
-                            load_or_bootstrap_runtime_storage_state,
                             runtime_profile_exists,
+                            snapshot_profile_storage_state_sync,
                         )
-                        storage_state = await load_or_bootstrap_runtime_storage_state(
-                            platform=self.platform,
-                            session_owner_id=session_owner_id,
-                            account=account_info,
-                            max_age_days=30,
+                        # [Task 7 / R1] 登录态只有 profile 一个载体：
+                        # 这里取的是**从 profile 导出的内存快照**（R5），不再读会话文件。
+                        snapshot = await asyncio.to_thread(
+                            snapshot_profile_storage_state_sync,
+                            self.platform,
+                            session_owner_id,
                         )
+                        storage_state = (snapshot or {}).get("storage_state")
                         context_options = await build_runtime_context_options(
                             platform=self.platform,
                             session_owner_id=session_owner_id,
@@ -1684,8 +1659,8 @@ class ComponentTester:
                         component_name=component_name,
                         result=result,
                     )
-                    if exec_result.success:
-                        await self._save_context_session(context, account_info)
+                    # [Task 7 / R1] 登录成功的落盘已废除：登录态只由 Chromium 持久
+                    # profile 承载，不再复制成第二份「会话文件」。
                 elif component_type == 'navigation':
                     exec_result = await adapter.navigate(page, target_page=component_name)
                 elif component_type == 'export':

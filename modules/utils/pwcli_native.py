@@ -319,19 +319,18 @@ def _supplement_tiktok_storage_state_from_pages(context, storage_state: dict[str
     return merged
 
 
-def save_default_storage_state_from_context(metadata: dict[str, Any], context, session_metadata: dict[str, Any] | None = None) -> None:
-    """会话文件不再写：登录态只由浏览器 profile 承载。
+def save_default_storage_state_from_context(metadata: dict[str, Any], context) -> None:
+    """账号级**不写任何会话文件**：登录态只由浏览器 profile 承载。
 
-    ``session_manager`` 分支**直接返回**（既不读也不写）——
-    profile 目录里的 Chromium 自己会把 cookie 写盘，不需要再复制一份会话文件。
+    账号级巡店既没有 ``default_state_path`` 也没有 ``default_state_mode``
+    （见 ``resolve_default_state_config``）→ 这里直接返回，profile 目录里的
+    Chromium 自己会把 cookie 写盘，不需要再复制一份会话文件（R1/R2）。
 
-    ``raw_json`` 分支保留：平台级「人工导出会话」的能力与账号会话文件无关。
+    ``raw_json`` 分支保留：平台级（无账号）「人工导出会话」的能力与账号会话文件无关。
     """
     state_path = str(metadata.get("default_state_path") or "").strip()
     state_mode = str(metadata.get("default_state_mode") or "").strip().lower()
-    if not state_path or not state_mode:
-        return
-    if state_mode == "session_manager":
+    if not state_path or state_mode != "raw_json":
         return
 
     storage_state = read_storage_state_for_pwcli(metadata, context)

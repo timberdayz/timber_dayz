@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from modules.apps.collection_center import executor_v2
 from modules.apps.collection_center.executor_v2 import (
     CollectionExecutorV2,
     CollectionResult,
@@ -108,12 +109,11 @@ async def test_executor_open_runtime_bundle_auto_always_prefers_persistent_profi
         "modules.apps.collection_center.runtime_session.open_storage_state_runtime_bundle",
         storage_open,
     )
-    candidate_loader = AsyncMock(
-        side_effect=AssertionError("顺序路径不得再加载会话候选")
-    )
-    monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session.load_runtime_session_candidate",
-        candidate_loader,
+    from modules.apps.collection_center import runtime_session as runtime_session_module
+
+    # 会话文件体系废除后，顺序路径**没有**会话候选读入口可调。
+    assert not hasattr(runtime_session_module, "load_runtime_session_candidate"), (
+        "顺序路径不得再有会话候选读入口"
     )
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
@@ -134,7 +134,6 @@ async def test_executor_open_runtime_bundle_auto_always_prefers_persistent_profi
     assert result == "persistent-bundle"
     persistent_open.assert_awaited_once()
     storage_open.assert_not_awaited()
-    candidate_loader.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -388,7 +387,6 @@ async def test_shared_login_phase_does_not_probe_runtime_gate_before_login_compo
         runtime_manifests=None,
         session_platform="tiktok",
         session_account_id="acc-1",
-        save_session_after_login=False,
         start_time=__import__("datetime").datetime.now(),
         total_domains_count=0,
     )
@@ -440,7 +438,6 @@ async def test_shared_login_phase_primes_page_before_login_component(
         runtime_manifests=None,
         session_platform="shopee",
         session_account_id="main-1",
-        save_session_after_login=False,
         start_time=__import__("datetime").datetime.now(),
         total_domains_count=0,
     )
@@ -494,7 +491,6 @@ async def test_shared_login_phase_applies_interaction_viewport_after_login_gate_
         runtime_manifests=None,
         session_platform="shopee",
         session_account_id="main-1",
-        save_session_after_login=False,
         start_time=__import__("datetime").datetime.now(),
         total_domains_count=0,
     )
@@ -548,7 +544,6 @@ async def test_shared_login_phase_applies_interaction_viewport_in_headed_mode(
         runtime_manifests=None,
         session_platform="shopee",
         session_account_id="main-1",
-        save_session_after_login=False,
         start_time=__import__("datetime").datetime.now(),
         total_domains_count=0,
     )
@@ -627,7 +622,6 @@ async def test_shared_login_phase_does_not_probe_storage_state_runtime_gate_befo
         runtime_manifests=None,
         session_platform="miaoshou",
         session_account_id="acc-1",
-        save_session_after_login=False,
         start_time=__import__("datetime").datetime.now(),
         total_domains_count=0,
     )
@@ -670,10 +664,6 @@ async def test_shared_login_phase_does_not_write_session_file_after_login(
     )
 
     saved = AsyncMock(return_value=True)
-    monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._save_session_async",
-        saved,
-    )
     monkeypatch.setattr(
         executor,
         "_wait_and_capture_high_quality_tiktok_session",
@@ -724,12 +714,11 @@ async def test_shared_login_phase_does_not_write_session_file_after_login(
         runtime_manifests=None,
         session_platform="miaoshou",
         session_account_id="main-1",
-        save_session_after_login=True,
         start_time=__import__("datetime").datetime.now(),
         total_domains_count=0,
     )
 
-    saved.assert_not_awaited()
+    assert not hasattr(executor_v2, "_save_session_async"), "会话文件写入口仍存在"
     sessions_dir = repo_root / "data" / "sessions"
     # 验收口径：data/sessions 下**不产生新文件**（空目录不算）
     assert [p for p in sessions_dir.rglob("*") if p.is_file()] == []
@@ -761,12 +750,7 @@ async def test_shared_login_phase_skips_blocking_tiktok_session_persist_for_reus
     )
 
     wait_capture = AsyncMock(side_effect=AssertionError("should not block on session persist"))
-    saved = AsyncMock()
     monkeypatch.setattr(executor, "_wait_and_capture_high_quality_tiktok_session", wait_capture)
-    monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._save_session_async",
-        saved,
-    )
     monkeypatch.setattr(
         "modules.apps.collection_center.executor_v2._record_platform_shop_discovery_async",
         AsyncMock(),
@@ -797,7 +781,6 @@ async def test_shared_login_phase_skips_blocking_tiktok_session_persist_for_reus
         runtime_manifests=None,
         session_platform="tiktok",
         session_account_id="main-1",
-        save_session_after_login=True,
         start_time=__import__("datetime").datetime.now(),
         total_domains_count=0,
     )
@@ -805,7 +788,7 @@ async def test_shared_login_phase_skips_blocking_tiktok_session_persist_for_reus
     assert result is None
     assert context.current_component_index == 1
     wait_capture.assert_not_awaited()
-    saved.assert_not_awaited()
+    assert not hasattr(executor_v2, "_save_session_async"), "会话文件写入口仍存在"
     sessions_dir = repo_root / "data" / "sessions"
     # 验收口径：data/sessions 下**不产生新文件**（空目录不算）
     assert [p for p in sessions_dir.rglob("*") if p.is_file()] == []
@@ -843,12 +826,7 @@ async def test_shared_login_phase_does_not_write_session_file_for_manual_tiktok_
     )
 
     wait_capture = AsyncMock(return_value={"cookies": ["fresh"], "origins": []})
-    saved = AsyncMock(return_value=True)
     monkeypatch.setattr(executor, "_wait_and_capture_high_quality_tiktok_session", wait_capture)
-    monkeypatch.setattr(
-        "modules.apps.collection_center.executor_v2._save_session_async",
-        saved,
-    )
     monkeypatch.setattr(
         "modules.apps.collection_center.executor_v2._record_platform_shop_discovery_async",
         AsyncMock(),
@@ -880,13 +858,12 @@ async def test_shared_login_phase_does_not_write_session_file_for_manual_tiktok_
         runtime_manifests=None,
         session_platform="tiktok",
         session_account_id="main-1",
-        save_session_after_login=True,
         start_time=__import__("datetime").datetime.now(),
         total_domains_count=0,
     )
 
     wait_capture.assert_not_awaited()
-    saved.assert_not_awaited()
+    assert not hasattr(executor_v2, "_save_session_async"), "会话文件写入口仍存在"
     sessions_dir = repo_root / "data" / "sessions"
     # 验收口径：data/sessions 下**不产生新文件**（空目录不算）
     assert [p for p in sessions_dir.rglob("*") if p.is_file()] == []
@@ -971,12 +948,11 @@ async def test_executor_open_runtime_bundle_auto_uses_persistent_profile_without
         "modules.apps.collection_center.runtime_session.open_storage_state_runtime_bundle",
         storage_open,
     )
-    bootstrap_loader = AsyncMock(
-        side_effect=AssertionError("顺序路径不得再 bootstrap 会话")
-    )
-    monkeypatch.setattr(
-        "modules.apps.collection_center.runtime_session.load_or_bootstrap_runtime_storage_state",
-        bootstrap_loader,
+    from modules.apps.collection_center import runtime_session as runtime_session_module
+
+    # 会话文件体系废除后，「bootstrap 一份会话出来」这个入口**本身不存在**。
+    assert not hasattr(runtime_session_module, "load_or_bootstrap_runtime_storage_state"), (
+        "顺序路径不得再有会话 bootstrap 入口"
     )
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
@@ -997,7 +973,6 @@ async def test_executor_open_runtime_bundle_auto_uses_persistent_profile_without
     assert result == "persistent-bundle"
     persistent_open.assert_awaited_once()
     storage_open.assert_not_awaited()
-    bootstrap_loader.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1522,78 +1497,48 @@ def test_executor_does_not_duplicate_profile_bootstrap():
     )
 
 
-def test_resolve_session_metadata_prefers_runtime_bundle_metadata() -> None:
-    """bundle 上已带元数据时直接用它，不再回落到 SessionManager。"""
+def test_session_metadata_resolution_is_gone() -> None:
+    """会话元数据解析入口整体废除（D5 / R1）。
+
+    旧实现 ``_resolve_session_metadata`` 的唯一价值是回答「这份登录态是不是
+    人工保存 / 受保护的」—— 那是**第二份载体**才需要的问题。profile 是唯一
+    载体之后，这个问题不存在，入口随之删除。
+    """
+    assert not hasattr(CollectionExecutorV2, "_resolve_session_metadata"), (
+        "会话元数据解析入口仍存在"
+    )
+
+
+def test_runtime_session_diagnostics_has_no_legacy_quality_fields() -> None:
+    """诊断里不得再出现「质量分 / 人工播种 / 保护」这 5 个旧字段。"""
     bundle = type(
         "Bundle",
         (),
-        {"session_metadata": {"manual_seeded": True, "protected": True}},
+        {
+            "context_options": {},
+            "profile_path": "profiles/tiktok/main-1",
+            "reused_session": True,
+            "session_source": "persistent_profile",
+        },
     )()
 
-    metadata = CollectionExecutorV2._resolve_session_metadata(
+    diagnostics = CollectionExecutorV2._runtime_session_diagnostics(
         platform="tiktok",
         params={"main_account_id": "main-1"},
         runtime_bundle=bundle,
     )
 
-    assert metadata == {"manual_seeded": True, "protected": True}
+    for legacy_field in (
+        "session_quality_score",
+        "session_quality_gate_passed",
+        "session_quality_source",
+        "session_manual_seeded",
+        "session_protected",
+    ):
+        assert legacy_field not in diagnostics, f"诊断里仍存在旧字段 {legacy_field}"
 
-
-def test_resolve_session_metadata_falls_back_to_session_manager(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """bundle 没有元数据时回退到 SessionManager（人工巡店会话的落盘位置）。"""
-    monkeypatch.setattr(
-        "modules.utils.sessions.session_manager.SessionManager.get_session_metadata",
-        lambda self, platform, account_id: {"manual_seeded": True, "protected": True},
-    )
-
-    metadata = CollectionExecutorV2._resolve_session_metadata(
-        platform="tiktok",
-        params={"main_account_id": "main-1"},
-        runtime_bundle=object(),
-    )
-
-    assert metadata == {"manual_seeded": True, "protected": True}
-
-
-def test_persistent_profile_bundle_reads_manual_marker_from_disk_session(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """持久 profile 分支的 bundle 不带 session_metadata → 必须从磁盘会话读到人工标记。
-
-    持久 profile 的 ``RuntimeContextBundle`` 由 ``runtime_session`` 构造，
-    它的 ``session_metadata`` 恒为空 dict；人工巡店保存的会话落在
-    ``data/sessions/<platform>/<owner>/storage_state.json`` 里，
-    所以标记只能经 ``SessionManager`` 读回来。
-    """
-    from modules.utils.sessions import session_manager as session_manager_module
-
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.setattr(session_manager_module, "REPO_ROOT", repo_root)
-
-    manager = session_manager_module.SessionManager()
-    session_file = manager.get_session_path("tiktok", "main-1")
-    session_file.parent.mkdir(parents=True, exist_ok=True)
-    session_file.write_text(
-        '{"platform": "tiktok", "account_id": "main-1", "storage_state": {},'
-        ' "metadata": {"manual_seeded": true, "protected": true}}',
-        encoding="utf-8",
-    )
-
-    # 持久 profile 的 bundle 不带任何 session_metadata
-    persistent_bundle = type("Bundle", (), {"session_metadata": {}})()
-
-    metadata = CollectionExecutorV2._resolve_session_metadata(
-        platform="tiktok",
-        params={"main_account_id": "main-1"},
-        runtime_bundle=persistent_bundle,
-    )
-
-    assert metadata["manual_seeded"] is True
-    assert metadata["protected"] is True
+    assert diagnostics["profile_contains_state"] is True
+    assert diagnostics["session_source"] == "persistent_profile"
 
 
 @pytest.mark.asyncio
@@ -1856,18 +1801,16 @@ async def test_parallel_domains_fans_out_memory_snapshot_without_writing_session
     assert [p for p in sessions_dir.rglob("*") if p.is_file()] == []
 
 
-def test_load_session_does_not_write_back_to_disk(
+def test_session_file_read_path_is_gone(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """[Task 5 / F5-3] 读会话不得回写磁盘。
+    """会话文件的**读**路径整体下线（D5 / R1）。
 
-    ``load_session`` 以前会刷新 ``last_used_at`` 并把文件重写一遍 ——
-    「只是读一下」也会产生磁盘写，等于会话文件体系还在被使用。
+    旧实现 ``SessionManager.load_session`` 曾经会在「只是读一下」时刷新
+    ``last_used_at`` 并把文件重写一遍。Task 7 之后不是「读不回写」，
+    而是**根本不存在会话文件读入口** —— 登录态只由 Chromium 持久 profile 承载。
     """
-    import json
-    import time
-
     from modules.utils.sessions import session_manager as session_manager_module
 
     repo_root = tmp_path / "repo"
@@ -1875,27 +1818,14 @@ def test_load_session_does_not_write_back_to_disk(
     monkeypatch.setattr(session_manager_module, "REPO_ROOT", repo_root)
 
     manager = session_manager_module.SessionManager()
-    session_file = manager.get_session_path("miaoshou", "main-1")
-    session_file.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "platform": "miaoshou",
-        "account_id": "main-1",
-        "storage_state": {"cookies": [], "origins": []},
-        "created_at": 1000.0,
-        "last_used_at": 1000.0,
-        "metadata": {"saved_at": time.time()},
-    }
-    session_file.write_text(json.dumps(payload), encoding="utf-8")
-    before_content = session_file.read_text(encoding="utf-8")
-    before_mtime = session_file.stat().st_mtime_ns
 
-    session_data = manager.load_session("miaoshou", "main-1")
+    assert not hasattr(manager, "load_session"), "会话文件读入口仍存在"
+    assert not hasattr(manager, "get_session_path"), "会话文件路径入口仍存在"
+    assert not (repo_root / "data" / "sessions").exists(), (
+        "SessionManager 初始化不得再创建 data/sessions 目录"
+    )
 
-    assert session_data is not None
-    assert session_data["storage_state"] == {"cookies": [], "origins": []}
-    # 文件内容与 mtime 都必须原封不动
-    assert session_file.read_text(encoding="utf-8") == before_content
-    assert session_file.stat().st_mtime_ns == before_mtime
+
 class _BlankFallbackPage:
     """回退返回的页面停在 about:blank（持久 context 的默认首屏）。"""
 
@@ -1958,7 +1888,6 @@ async def test_shared_login_phase_navigates_blank_page_returned_by_headful_fallb
         runtime_manifests=None,
         session_platform="shopee",
         session_account_id="main-1",
-        save_session_after_login=False,
         start_time=__import__("datetime").datetime.now(),
         total_domains_count=0,
     )

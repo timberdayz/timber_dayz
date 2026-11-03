@@ -232,21 +232,6 @@ async def _record_platform_shop_discovery_async(
         logger.warning("Failed to record platform shop discovery: %s", e)
 
 
-async def _save_session_async(
-    platform: str, account_id: str, storage_state: Dict[str, Any]
-) -> bool:
-    """在线程池中保存会话。"""
-    from modules.utils.sessions.session_manager import SessionManager
-
-    loop = asyncio.get_running_loop()
-
-    def _save() -> bool:
-        sm = SessionManager()
-        return sm.save_session(platform, account_id, storage_state)
-
-    return await loop.run_in_executor(_get_executor_pool(), _save)
-
-
 def _build_runtime_task_params(
     *,
     task_id: str,
@@ -826,7 +811,6 @@ class CollectionExecutorV2:
             platform=platform,
             session_owner_id=session_owner_id,
             has_storage_state=False,
-            has_manual_storage_state=False,
             has_persistent_profile=False,
             force_persistent_profile=False,
             execution_kind="formal_collection",
@@ -935,34 +919,6 @@ class CollectionExecutorV2:
         return details
 
     @staticmethod
-    def _resolve_session_metadata(
-        *,
-        platform: str,
-        params: Dict[str, Any],
-        runtime_bundle: Any,
-    ) -> Dict[str, Any]:
-        """取会话元数据（``manual_seeded`` / ``protected`` 标记的来源）。
-
-        优先用 runtime bundle 上已经填好的元数据；没有就回退到 ``SessionManager``
-        里落盘的会话元数据 —— 人工巡店保存的会话正是走这条路径。
-        """
-        bundle_metadata = getattr(runtime_bundle, "session_metadata", None)
-        if isinstance(bundle_metadata, dict) and bundle_metadata:
-            return dict(bundle_metadata)
-        session_owner_id = params.get("main_account_id")
-        if not session_owner_id:
-            return {}
-        try:
-            from modules.utils.sessions.session_manager import SessionManager
-
-            metadata = SessionManager().get_session_metadata(
-                platform, session_owner_id
-            )
-        except Exception:
-            return {}
-        return dict(metadata) if isinstance(metadata, dict) else {}
-
-    @staticmethod
     def _runtime_session_diagnostics(
         *,
         platform: str,
@@ -970,13 +926,6 @@ class CollectionExecutorV2:
         runtime_bundle: Any,
     ) -> Dict[str, Any]:
         session_owner_id = params.get("main_account_id")
-        session_metadata = params.get("session_metadata")
-        if not isinstance(session_metadata, dict):
-            session_metadata = CollectionExecutorV2._resolve_session_metadata(
-                platform=platform,
-                params=params,
-                runtime_bundle=runtime_bundle,
-            )
         context_options = getattr(runtime_bundle, "context_options", {}) or {}
         extra_headers = context_options.get("extra_http_headers", {}) or {}
         return {
@@ -1003,11 +952,8 @@ class CollectionExecutorV2:
                     else None
                 ),
             ),
-            "session_quality_score": session_metadata.get("quality_score"),
-            "session_quality_gate_passed": session_metadata.get("quality_gate_passed"),
-            "session_quality_source": session_metadata.get("quality_source"),
-            "session_manual_seeded": session_metadata.get("manual_seeded"),
-            "session_protected": session_metadata.get("protected"),
+            # [Task 7 / R5] 会话文件体系废除后，「质量分 / 人工播种 / 保护」这些
+            # 仲裁字段全部消失 —— profile 是唯一载体，不需要择优。
         }
 
     @staticmethod
@@ -1043,7 +989,6 @@ class CollectionExecutorV2:
         runtime_manifests: Optional[Dict[str, Any]],
         session_platform: str,
         session_account_id: str,
-        save_session_after_login: bool,
         start_time: datetime,
         total_domains_count: int,
         proxy: Optional[Dict[str, Any]] = None,
@@ -1190,15 +1135,8 @@ class CollectionExecutorV2:
             params=params,
             account=account,
         )
-        if save_session_after_login and session_platform and session_account_id:
-            # [Task 5 / R5] 登录态只由 Chromium 持久 profile 承载：
-            # 登录后不再回写会话文件（data/sessions 不再产生新文件）。
-            logger.info(
-                "Task %s: post-login session persist skipped (profile-only runtime) (%s/%s)",
-                task_id,
-                session_platform,
-                session_account_id,
-            )
+        # [Task 7 / R1] 登录态只由 Chromium 持久 profile 承载：
+        # 登录后不再回写会话文件（data/sessions 不再产生新文件）。
         context.current_component_index = 1
         return play_context, page, None
 
@@ -1973,11 +1911,6 @@ class CollectionExecutorV2:
                     if shop_account_id:
                         params["shop_account_id"] = shop_account_id
                     params["_runtime_session_mode"] = runtime_bundle.mode
-                    params["session_metadata"] = self._resolve_session_metadata(
-                        platform=platform,
-                        params=params,
-                        runtime_bundle=runtime_bundle,
-                    )
                     params["_actual_execution_mode"] = (
                         "headless"
                         if self._build_runtime_launch_kwargs(debug_mode=debug_mode).get(
@@ -2015,8 +1948,6 @@ class CollectionExecutorV2:
                                 runtime_manifests=runtime_manifests,
                                 session_platform=session_platform,
                                 session_account_id=session_account_id,
-                                save_session_after_login=use_account_session_fingerprint
-                                and bool(session_owner_id),
                                 start_time=start_time,
                                 total_domains_count=total_domains_count,
                                 proxy=proxy,
@@ -2100,11 +2031,6 @@ class CollectionExecutorV2:
                 if shop_account_id:
                     params["shop_account_id"] = shop_account_id
                 params["_runtime_session_mode"] = runtime_bundle.mode
-                params["session_metadata"] = self._resolve_session_metadata(
-                    platform=platform,
-                    params=params,
-                    runtime_bundle=runtime_bundle,
-                )
                 params["_actual_execution_mode"] = (
                     "headless"
                     if self._build_runtime_launch_kwargs(debug_mode=debug_mode).get(
@@ -2176,8 +2102,6 @@ class CollectionExecutorV2:
                     sub_domains=sub_domains,
                     total_domains_count=total_domains_count,
                     start_time=start_time,
-                    save_session_after_login=use_account_session_fingerprint
-                    and bool(session_owner_id),
                     session_platform=platform,
                     session_account_id=session_owner_id,
                     runtime_manifests=runtime_manifests,
@@ -3275,7 +3199,6 @@ class CollectionExecutorV2:
         sub_domains: Optional[List[str]],
         total_domains_count: int,
         start_time: datetime,
-        save_session_after_login: bool = False,
         session_platform: str = "",
         session_account_id: str = "",
         runtime_manifests: Optional[Dict[str, Any]] = None,
@@ -3288,7 +3211,7 @@ class CollectionExecutorV2:
         v4.8.0: 使用 Python 组件执行采集流程
 
         执行顺序:
-        1. Login(登录组件); 若 save_session_after_login 则在成功后保存会话
+        1. Login(登录组件)
         2. Loop: Export(循环执行各数据域的导出组件)
         """
         adapter = None
@@ -3413,15 +3336,8 @@ class CollectionExecutorV2:
                 params=params,
                 account=account,
             )
-            if save_session_after_login and session_platform and session_account_id:
-                # [Task 5 / R5] 登录态只由 Chromium 持久 profile 承载：
-                # 登录后不再回写会话文件（data/sessions 不再产生新文件）。
-                logger.info(
-                    "Task %s: post-login session persist skipped (profile-only runtime) (%s/%s)",
-                    task_id,
-                    session_platform,
-                    session_account_id,
-                )
+            # [Task 7 / R1] 登录态只由 Chromium 持久 profile 承载：
+            # 登录后不再回写会话文件（data/sessions 不再产生新文件）。
             context.current_component_index = 1
 
         # 2. 循环执行各数据域导出
@@ -6086,11 +6002,6 @@ class CollectionExecutorV2:
             if shop_account_id:
                 params["shop_account_id"] = shop_account_id
             params["_runtime_session_mode"] = runtime_bundle.mode
-            params["session_metadata"] = self._resolve_session_metadata(
-                platform=platform,
-                params=params,
-                runtime_bundle=runtime_bundle,
-            )
             adapter = None
             if runtime_manifests is None:
                 adapter = create_adapter(

@@ -4,19 +4,13 @@
 
 --------------------------------------------------------------------
 1. **登录态来源修正**
-   采集任务把**内层** storage_state 直接喂给 Playwright
-   （见 ``modules/apps/collection_center/executor_v2.py``：
-   ``context_options["storage_state"] = storage_state``），
-   而会话文件 ``data/sessions/<platform>/<account>/storage_state.json``
-   是**外层包装**：
-
-       { "platform": ..., "account_id": ..., "storage_state": {"cookies": [...], "origins": [...]}, ... }
-
-   上一版探针把**整个包装**喂给 ``new_context(storage_state=...)``
+   登录态只由 Chromium 持久 profile 承载（``profiles/<平台>/<主账号ID>/``），
+   会话文件体系已废除 → 探针不再从任何「会话文件」里取第二份副本，
+   而是**直接用 profile 开持久 context**（``launch_persistent_context``）。
+   上一版探针把会话文件的**整个包装**喂给 ``new_context(storage_state=...)``
    → 顶层没有 ``cookies``/``origins`` 键 → 实际 cookie 数 = 0
    → 永远被重定向回登录页 → 被误判成「登录态失效」。
    真凶是**探针取错了那一层**，不是妙手把 Walter 踢下线。
-   现在探针按 ``session_manager._extract_state_payload`` 的同一规则取内层。
 
 2. **点击落点取证**
    上一版只记「找到 / 没找到」，无法回答
@@ -57,7 +51,8 @@ from urllib.parse import unquote_plus
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ACCOUNT = "miaoshou_real_001"
-DEFAULT_SESSION_DIR = REPO_ROOT / "data" / "sessions" / "miaoshou" / DEFAULT_ACCOUNT
+# 登录态只由 Chromium 持久 profile 承载（会话文件体系已废除）→ 探针直接跑在 profile 上。
+DEFAULT_PROFILE_DIR = REPO_ROOT / "profiles" / "miaoshou" / DEFAULT_ACCOUNT
 CHECKLIST_URL = "https://erp.91miaoshou.com/warehouse/checklist"
 OUTPUT_DIR = REPO_ROOT / "output"
 
@@ -642,32 +637,6 @@ async def _dump_date_panel(page: Any) -> dict[str, Any]:
         return {"error": str(exc)}
 
 
-def _load_storage_state(session_dir: Path) -> Optional[dict[str, Any]]:
-    """取会话文件里的**内层** Playwright storage_state。
-
-    会话文件是外层包装（platform/account_id/storage_state/metadata），
-    真正能被 Playwright 吃的是 ``storage_state`` 那一层。
-    """
-    session_file = session_dir / "storage_state.json"
-    if not session_file.exists():
-        print(f"[probe] 找不到会话文件：{session_file}")
-        return None
-    try:
-        raw = json.loads(session_file.read_text(encoding="utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        print(f"[probe] 读会话文件失败：{exc}")
-        return None
-    inner = raw.get("storage_state") if isinstance(raw, dict) else None
-    payload = inner if isinstance(inner, dict) else raw
-    cookies = payload.get("cookies") if isinstance(payload, dict) else None
-    count = len(cookies) if isinstance(cookies, list) else 0
-    print(f"[probe] 会话文件：{session_file}（内层 cookie 数 = {count}）")
-    if count == 0:
-        print("[probe] **内层没有 cookie** —— 探针会跳回登录页，这是取证失败不是结论。")
-        return None
-    return payload
-
-
 async def _wait_page_ready(page: Any, timeout_ms: int = 20000) -> bool:
     """等筛选栏和结果计数都渲染出来（关弹窗会触发一次重渲染）。"""
     waited = 0
@@ -688,18 +657,21 @@ async def _wait_page_ready(page: Any, timeout_ms: int = 20000) -> bool:
     return False
 
 
-async def probe(session_dir: Path, headed: bool, mode: str) -> int:
+async def probe(profile_dir: Path, headed: bool, mode: str) -> int:
     """执行取证。返回进程退出码（0 成功 / 1 登录态失效）。"""
     from playwright.async_api import async_playwright
 
-    storage_state = _load_storage_state(session_dir)
-    if storage_state is None:
+    if not profile_dir.exists():
+        print(f"[probe] 找不到 profile 目录：{profile_dir}")
+        print("[probe] 请先用巡店面板打开该账号登录（Chromium 会把登录态写进 profile）后再运行本探针。")
         return 1
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=not headed)
-        context = await browser.new_context(
-            storage_state=storage_state,
+        # 登录态只由 Chromium 持久 profile 承载：探针直接在这个 profile 上跑，
+        # 不再从任何「会话文件」里取第二份副本。
+        context = await pw.chromium.launch_persistent_context(
+            user_data_dir=str(profile_dir),
+            headless=not headed,
             viewport={"width": 1920, "height": 1080},
             locale="zh-CN",
             timezone_id="Asia/Shanghai",
@@ -709,15 +681,16 @@ async def probe(session_dir: Path, headed: bool, mode: str) -> int:
             return await _probe_page(page, mode)
         finally:
             await context.close()
-            await browser.close()
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="妙手库存日期筛选只读取证探针")
     parser.add_argument(
+        "--profile-dir",
         "--session-dir",
-        default=str(DEFAULT_SESSION_DIR),
-        help="会话目录（含 storage_state.json）",
+        dest="profile_dir",
+        default=str(DEFAULT_PROFILE_DIR),
+        help="持久 profile 目录（登录态的唯一载体）",
     )
     parser.add_argument(
         "--mode",
@@ -727,7 +700,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--headed", action="store_true", help="有头模式（默认无头）")
     args = parser.parse_args(argv)
-    return asyncio.run(probe(Path(args.session_dir), args.headed, args.mode))
+    return asyncio.run(probe(Path(args.profile_dir), args.headed, args.mode))
 
 
 if __name__ == "__main__":

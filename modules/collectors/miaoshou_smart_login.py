@@ -88,10 +88,7 @@ class MiaoshouSmartLogin:
             login_success = await self._perform_smart_login(account_config, miaoshou_strategy)
             
             if login_success:
-                # 保存会话状态
-                if use_session:
-                    await self._save_session(account_id)
-                
+                # 登录态由 Chromium 持久 profile 承载，不再回写会话文件（Task 7 / R1）。
                 logger.success(f"妙手ERP登录成功: {account_id}")
                 return True
             else:
@@ -495,17 +492,6 @@ class MiaoshouSmartLogin:
                     break
             except:
                 continue
-    
-    async def _save_session(self, account_id: str):
-        """保存会话状态"""
-        try:
-            if self.context:
-                # 保存storage state
-                session_data = await self.context.storage_state()
-                self.session_manager.save_session("miaoshou_erp", account_id, session_data)
-                logger.success(f"会话状态已保存: {account_id}")
-        except Exception as e:
-            logger.warning(f"保存会话状态失败: {e}")
     
     async def _take_error_screenshot(self, account_id: str):
         """错误时截图"""

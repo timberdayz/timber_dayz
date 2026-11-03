@@ -151,7 +151,6 @@ async def test_headful_fallback_uses_same_profile_dir_and_primes_reopened_page(
 
     opened: List[Dict[str, Any]] = []
     primed: List[Dict[str, Any]] = []
-    saved_sessions: List[Any] = []
 
     async def _fake_open_persistent_runtime_bundle(**kwargs: Any) -> _FakeBundle:
         opened.append(kwargs)
@@ -163,10 +162,6 @@ async def test_headful_fallback_uses_same_profile_dir_and_primes_reopened_page(
 
     async def _fake_login(**kwargs: Any) -> Any:
         return SimpleNamespace(success=True)
-
-    async def _fake_save_context_session(context: Any, account_info: Any) -> bool:
-        saved_sessions.append(context)
-        return True
 
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.open_persistent_runtime_bundle",
@@ -185,7 +180,6 @@ async def test_headful_fallback_uses_same_profile_dir_and_primes_reopened_page(
         lambda self, platform, account_id: profile_dir,
     )
     monkeypatch.setattr(tester, "_run_login_with_verification_support", _fake_login)
-    monkeypatch.setattr(tester, "_save_context_session", _fake_save_context_session)
 
     # 账号锁用假实现: 既验证「回退阶段也要走同一把跨进程锁」, 又不会把进程内锁
     # 单例按住不放(会污染同会话里其它用例)。
@@ -230,8 +224,8 @@ async def test_headful_fallback_uses_same_profile_dir_and_primes_reopened_page(
     # 3) 旧 context 必须先关掉(释放 Chromium ProcessSingleton)
     assert old_context.closed == 1
 
-    # 4) 不再写会话文件
-    assert saved_sessions == []
+    # 4) 不再写会话文件：会话文件写入口本身已经不存在（Task 7 / D5）
+    assert not hasattr(tester, "_save_context_session"), "会话文件写入口仍存在"
 
     # 5) 重开后必须 prime 页面(否则登录闸门在 about:blank 上判定不了登录态)
     assert len(primed) == 1
