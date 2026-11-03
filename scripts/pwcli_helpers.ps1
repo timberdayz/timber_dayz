@@ -208,6 +208,7 @@ function Open-PwcliPlatform {
         [string]$WorkTag = "",
         [string]$Url,
         [string]$AccountId,
+        [string]$ProxyServer = "",
         [switch]$NoCd
     )
 
@@ -228,11 +229,15 @@ function Open-PwcliPlatform {
         $Url = Get-PwcliDefaultUrl -Platform $platformName
     }
 
+    $openArgs = @("--session", $session, "open", $Url, "--headed")
     if ($AccountId) {
-        pwcli --session $session open $Url --headed --account-id $AccountId
-    } else {
-        pwcli --session $session open $Url --headed
+        $openArgs += @("--account-id", $AccountId)
     }
+    if ($ProxyServer) {
+        # 代理地址不含凭据；凭据走 PWCLI_PROXY_USERNAME / PWCLI_PROXY_PASSWORD 环境变量
+        $openArgs += @("--proxy-server", $ProxyServer)
+    }
+    pwcli @openArgs
 
     if (-not $AccountId -and (Test-Path $stateFile)) {
         $loadOutput = (pwcli --session $session state-load $stateFile 2>&1 | Out-String)
@@ -243,63 +248,6 @@ function Open-PwcliPlatform {
         } else {
             Write-Warning "Failed to load pwcli state from $stateFile. Continuing with a fresh browser state."
         }
-    }
-}
-
-function Save-PwcliPlatformState {
-    param(
-        [Parameter(Mandatory = $true)]
-        [ValidateSet("miaoshou", "shopee", "tiktok")]
-        [string]$Platform,
-        [string]$AccountId,
-        [string]$Filename,
-        [string]$WorkTag
-    )
-
-    $platformName = $Platform.ToLower()
-
-    if ($AccountId -and $WorkTag) {
-        # session 名必须与 Open-PwcliPlatform 完全一致（同一平台 + 同一 work tag）。
-        # 不能依赖 $env:PLAYWRIGHT_CLI_SESSION —— 面板每次动作都是新进程，变量不在里面。
-        $session = "$platformName-$WorkTag"
-        pwcli --session $session state-save
-        if ($LASTEXITCODE -ne 0) {
-            throw "pwcli state-save failed for session '$session' (exit code $LASTEXITCODE)"
-        }
-        return
-    }
-
-    if ($AccountId) {
-        # 手工 SOP 形态（同一个 shell 里先 open 再 save）：
-        # Open-PwcliPlatform 会把 $env:PLAYWRIGHT_CLI_SESSION 设成 "$platformName-$WorkTag"，
-        # 这里直接复用既有的 Get-PwcliActiveSession 解析（今天这条路径就是好的，见 Step 5c）。
-        $session = Get-PwcliActiveSession
-        if (-not $session) {
-            # 既没有 -WorkTag、又没有活动会话 -> 定位不到会话。
-            # 这里必须报错：再往下走会退化成 `pwcli state-save`，
-            # session 被解析成 "default" 并失败（正是 spec 断点 A）。
-            throw "Save-PwcliPlatformState cannot locate the browser session for account '$AccountId': pass -WorkTag, or open the session in this shell first"
-        }
-        pwcli --session $session state-save
-        if ($LASTEXITCODE -ne 0) {
-            throw "pwcli state-save failed for session '$session' (exit code $LASTEXITCODE)"
-        }
-        return
-    }
-
-    if (-not $Filename) {
-        $Filename = Get-PwcliStateFile -Platform $platformName
-    }
-
-    New-Item -ItemType Directory -Force (Split-Path -Parent $Filename) | Out-Null
-    $session = Get-PwcliActiveSession
-    if ($session) {
-        pwcli --session $session state-save $Filename
-    } else {
-        pwcli state-save $Filename
-    }
-    if ($LASTEXITCODE -ne 0) {
-        throw "pwcli state-save failed for session '$session' (exit code $LASTEXITCODE)"
     }
 }
 
@@ -332,45 +280,33 @@ function Open-PwcliMiaoshou {
     param(
         [string]$WorkTag = "",
         [string]$Url = "https://erp.91miaoshou.com/welcome",
-        [string]$AccountId
+        [string]$AccountId,
+        [string]$ProxyServer = ""
     )
 
-    Open-PwcliPlatform -Platform miaoshou -WorkTag $WorkTag -Url $Url -AccountId $AccountId
+    Open-PwcliPlatform -Platform miaoshou -WorkTag $WorkTag -Url $Url -AccountId $AccountId -ProxyServer $ProxyServer
 }
 
 function Open-PwcliShopee {
     param(
         [string]$WorkTag = "",
         [string]$Url = "https://seller.shopee.cn/",
-        [string]$AccountId
+        [string]$AccountId,
+        [string]$ProxyServer = ""
     )
 
-    Open-PwcliPlatform -Platform shopee -WorkTag $WorkTag -Url $Url -AccountId $AccountId
+    Open-PwcliPlatform -Platform shopee -WorkTag $WorkTag -Url $Url -AccountId $AccountId -ProxyServer $ProxyServer
 }
 
 function Open-PwcliTiktok {
     param(
         [string]$WorkTag = "",
         [string]$Url = "https://seller.tiktokglobalshop.com/",
-        [string]$AccountId
+        [string]$AccountId,
+        [string]$ProxyServer = ""
     )
 
-    Open-PwcliPlatform -Platform tiktok -WorkTag $WorkTag -Url $Url -AccountId $AccountId
-}
-
-function Save-PwcliMiaoshouState {
-    param([string]$AccountId, [string]$WorkTag)
-    Save-PwcliPlatformState -Platform miaoshou -AccountId $AccountId -WorkTag $WorkTag
-}
-
-function Save-PwcliShopeeState {
-    param([string]$AccountId, [string]$WorkTag)
-    Save-PwcliPlatformState -Platform shopee -AccountId $AccountId -WorkTag $WorkTag
-}
-
-function Save-PwcliTiktokState {
-    param([string]$AccountId, [string]$WorkTag)
-    Save-PwcliPlatformState -Platform tiktok -AccountId $AccountId -WorkTag $WorkTag
+    Open-PwcliPlatform -Platform tiktok -WorkTag $WorkTag -Url $Url -AccountId $AccountId -ProxyServer $ProxyServer
 }
 
 function pwsnap {
@@ -526,15 +462,25 @@ function Start-PwcliDailyInspection {
         }
 
         $account = $accounts[$selectedIndex - 1]
+        $proxyServer = [string]$account.proxy_server
+        if ($proxyServer) {
+            # 代理凭据只走环境变量：命令行在进程列表里可见
+            $env:PWCLI_PROXY_USERNAME = [string]$account.proxy_username
+            $env:PWCLI_PROXY_PASSWORD = [string]$account.proxy_password
+        } else {
+            Remove-Item Env:PWCLI_PROXY_USERNAME -ErrorAction SilentlyContinue
+            Remove-Item Env:PWCLI_PROXY_PASSWORD -ErrorAction SilentlyContinue
+        }
+
         switch ($account.platform) {
             "miaoshou" {
-                Open-PwcliMiaoshou -WorkTag $account.work_tag -AccountId $account.account_id
+                Open-PwcliMiaoshou -WorkTag $account.work_tag -AccountId $account.account_id -ProxyServer $proxyServer
             }
             "shopee" {
-                Open-PwcliShopee -WorkTag $account.work_tag -AccountId $account.account_id
+                Open-PwcliShopee -WorkTag $account.work_tag -AccountId $account.account_id -ProxyServer $proxyServer
             }
             "tiktok" {
-                Open-PwcliTiktok -WorkTag $account.work_tag -AccountId $account.account_id
+                Open-PwcliTiktok -WorkTag $account.work_tag -AccountId $account.account_id -ProxyServer $proxyServer
             }
             default {
                 Write-Warning "Unsupported platform: $($account.platform)"
@@ -544,31 +490,19 @@ function Start-PwcliDailyInspection {
 
         Write-Output ""
         Write-Output "Browser opened. Complete manual inspection, close popups, and finish verification in the browser."
-        Write-Output "Before saving, make sure the page is not a login, captcha, error, or abnormal page."
-        $saveChoice = Read-Host "Press Enter to save, s to skip save, or q to quit"
-        if ($saveChoice -eq "q") {
+        Write-Output "Login state is stored by the browser profile automatically. Close the browser window when you are done."
+        $closeChoice = Read-Host "Press Enter after the browser is closed, or q to quit"
+        if ($closeChoice -eq "q") {
             return
         }
-        if ($saveChoice -eq "s") {
-            Write-Output "Skipped state save."
-            continue
-        }
 
-        switch ($account.platform) {
-            "miaoshou" {
-                Save-PwcliMiaoshouState -AccountId $account.account_id -WorkTag $account.work_tag
-            }
-            "shopee" {
-                Save-PwcliShopeeState -AccountId $account.account_id -WorkTag $account.work_tag
-            }
-            "tiktok" {
-                Save-PwcliTiktokState -AccountId $account.account_id -WorkTag $account.work_tag
-            }
-            default {
-                Write-Warning "Unsupported platform: $($account.platform)"
-                continue
+        # 优雅关闭：CDP Browser.close -> Chromium 刷盘 -> profile 记住登录态
+        $activeSession = Get-PwcliActiveSession
+        if ($activeSession) {
+            $closeResult = Invoke-PwcliSessionCommand -Arguments @("close")
+            if ($closeResult.ExitCode -ne 0) {
+                Write-Warning "Failed to close browser session '$activeSession': $($closeResult.Output)"
             }
         }
-        Write-Output "State saved."
     }
 }
