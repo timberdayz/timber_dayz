@@ -344,16 +344,42 @@ def account_session_lock_environment() -> str:
     return (os.getenv("ENVIRONMENT") or "development").strip().lower()
 
 
+def account_session_lock_redis_url() -> str:
+    """账号会话锁的**有效 Redis 地址**(实时读环境变量)。
+
+    口径: ``REDIS_URL`` 优先, 其次 ``CELERY_BROKER_URL``(与
+    ``backend/celery_app.py`` 的 broker 口径一致); 都没有 -> 空串(未配置 Redis)。
+
+    这个地址**同时**用于两处, 保证「判定」与「实际连的地址」永不打架:
+
+    1. ``auto`` 模式的判定(配了地址 -> 走 Redis);
+    2. 账号会话锁建连时真正用的 URL。
+
+    刻意**不做连接探测**: 这段判定会被频繁调用, 每次探测都要白等一次连接
+    超时。「配了地址但连不上」(例如 compose 里 ``REDIS_URL`` 恒有值而宿主 Redis
+    没起)由 fail-closed / fail-open 的**分级降级**兜底 —— 生产报错 / 非生产
+    降级为进程内锁 + error 级日志。
+    """
+    for var in ("REDIS_URL", "CELERY_BROKER_URL"):
+        value = (os.getenv(var) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def account_session_lock_backend() -> str:
     """账号会话锁后端模式(原始值): ``auto`` / ``redis`` / ``local``。
 
-    * ``auto``(默认): 生产强制 Redis; 非生产用进程内锁
-      (单元测试**绝不**连真实 Redis —— 见 ``backend/tests/conftest.py`` 的护栏)。
+    * ``auto``(默认): 生产 -> Redis; 非生产但**配置上指向了 Redis** -> 也走 Redis
+      (父进程与录制子进程必须一致, 否则两侧互相排斥不了); 其余 -> 进程内锁。
+      单元测试**绝不**连真实 Redis —— 靠 ``backend/tests/conftest.py`` 把模式
+      钉成显式 ``local`` 的护栏, **不依赖** ``auto`` 的非生产语义。
     * ``redis``: 强制 Redis(不可用时按 fail-closed 分级)。
-    * ``local``: 强制进程内锁(仅同进程互斥)。
+    * ``local``: 强制进程内锁(仅同进程互斥; 一个 Redis 连接都不建)。
 
-    ``auto`` 的解析(生产 → redis / 其余 → local)在
-    ``backend/services/main_account_session_lock.py`` 里, 与告警日志放在一起。
+    ``auto`` 的解析在 ``backend/services/main_account_session_lock.py`` 的
+    ``resolve_session_lock_backend_mode()`` 里 —— 父进程(采集)与录制子进程
+    **共用这一个入口**, 与告警日志放在一起。
     """
     return (os.getenv("ACCOUNT_SESSION_LOCK_BACKEND") or "auto").strip().lower()
 

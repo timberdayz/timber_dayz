@@ -679,8 +679,33 @@ async def test_shared_redis_client_returns_none_without_redis_url(
 
     await lock_module.reset_shared_redis_client()
     monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("CELERY_BROKER_URL", raising=False)
 
     assert await lock_module.get_shared_redis_client() is None
+
+
+@pytest.mark.asyncio
+async def test_shared_redis_client_falls_back_to_celery_broker_url(
+    monkeypatch,
+) -> None:
+    """只配了 ``CELERY_BROKER_URL`` -> 有效地址用它(与判定口径一致)。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    await lock_module.reset_shared_redis_client()
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+    monkeypatch.setenv("CELERY_BROKER_URL", "redis://broker.internal:6379/0")
+
+    used: Dict[str, Any] = {}
+
+    def _from_url(url: str, **kwargs):
+        used["url"] = url
+        raise RuntimeError("stop here")
+
+    _install_fake_redis_asyncio(monkeypatch, _from_url)
+
+    assert await lock_module.get_shared_redis_client() is None
+    assert used["url"] == "redis://broker.internal:6379/0"
 
 
 @pytest.mark.asyncio
@@ -1303,7 +1328,7 @@ async def test_local_backend_release_when_lock_not_held() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 后端模式与分级
+# 后端模式与分级(统一判定: 父进程与录制子进程共用同一个入口)
 # ---------------------------------------------------------------------------
 
 
@@ -1311,21 +1336,46 @@ def test_backend_mode_selection(monkeypatch) -> None:
     from backend.services import main_account_session_lock as lock_module
 
     monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "local")
-    assert lock_module._backend_mode() == "local"
+    assert lock_module.resolve_session_lock_backend_mode() == "local"
 
     monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "redis")
-    assert lock_module._backend_mode() == "redis"
+    assert lock_module.resolve_session_lock_backend_mode() == "redis"
 
+    # auto + 非生产 + 未配 Redis 地址 -> 进程内锁
     monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "auto")
     monkeypatch.setenv("ENVIRONMENT", "development")
-    assert lock_module._backend_mode() == "local"
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("CELERY_BROKER_URL", raising=False)
+    assert lock_module.resolve_session_lock_backend_mode() == "local"
+
+    # auto + 非生产 + 配了 Redis 地址 -> Redis(父子两侧一致的关键)
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    assert lock_module.resolve_session_lock_backend_mode() == "redis"
+
+    # auto + 生产 -> Redis(生产行为不变)
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("CELERY_BROKER_URL", raising=False)
     monkeypatch.setenv("ENVIRONMENT", "production")
-    assert lock_module._backend_mode() == "redis"
+    assert lock_module.resolve_session_lock_backend_mode() == "redis"
 
     # 未知值 -> 回退 auto
     monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "nonsense")
     monkeypatch.setenv("ENVIRONMENT", "development")
-    assert lock_module._backend_mode() == "local"
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("CELERY_BROKER_URL", raising=False)
+    assert lock_module.resolve_session_lock_backend_mode() == "local"
+
+
+def test_backend_mode_auto_uses_redis_with_celery_broker_url_only(monkeypatch) -> None:
+    """有效 Redis 地址也认 ``CELERY_BROKER_URL``(与 celery_app 的 broker 同口径)。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "auto")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.setenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+
+    assert lock_module.resolve_session_lock_backend_mode() == "redis"
 
 
 def test_fail_closed_env_override(monkeypatch) -> None:
@@ -1347,6 +1397,31 @@ async def test_create_default_backend_local_mode(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_default_backend_local_mode_builds_no_redis_connection(
+    monkeypatch,
+) -> None:
+    """显式 local: **一个 Redis 连接都不建**(不靠 mock 证明)。
+
+    判据: 走 local 分支时 ``get_shared_redis_client()`` 根本不会被调用 ——
+    任何一次连接尝试都会留下痕迹(成功 -> ``_redis_client_resolved`` 置位;
+    失败 -> ``_redis_client_failed_at`` 记录时间)。这里故意把 REDIS_URL 指向
+    一个**连不上**的地址: 万一代码去连, 必然失败并留下痕迹。
+    """
+    from backend.services import main_account_session_lock as lock_module
+
+    await lock_module.reset_shared_redis_client()
+    monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "local")
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:1/0")
+
+    backend = await lock_module.create_default_backend()
+
+    assert isinstance(backend, lock_module.LocalSessionLockBackend)
+    assert lock_module._redis_client_singleton is None
+    assert lock_module._redis_client_resolved is False
+    assert lock_module._redis_client_failed_at is None
+
+
+@pytest.mark.asyncio
 async def test_create_default_backend_redis_mode(monkeypatch) -> None:
     from backend.services import main_account_session_lock as lock_module
 
@@ -1360,6 +1435,79 @@ async def test_create_default_backend_redis_mode(monkeypatch) -> None:
 
     backend = await lock_module.create_default_backend()
     assert isinstance(backend, lock_module.RedisSessionLockBackend)
+
+
+@pytest.mark.asyncio
+async def test_create_default_backend_auto_uses_redis_when_redis_configured(
+    monkeypatch,
+) -> None:
+    """auto + 非生产 + 配了 Redis 地址 -> 走 Redis(与录制子进程同一套判定)。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "auto")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    client = FakeRedisClient()
+
+    async def _fake_client():
+        return client
+
+    monkeypatch.setattr(lock_module, "get_shared_redis_client", _fake_client)
+
+    backend = await lock_module.create_default_backend()
+    assert isinstance(backend, lock_module.RedisSessionLockBackend)
+
+
+@pytest.mark.asyncio
+async def test_create_default_backend_auto_uses_redis_in_production(monkeypatch) -> None:
+    """生产行为不变: ``ENVIRONMENT=production`` -> Redis。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "auto")
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    client = FakeRedisClient()
+
+    async def _fake_client():
+        return client
+
+    monkeypatch.setattr(lock_module, "get_shared_redis_client", _fake_client)
+
+    backend = await lock_module.create_default_backend()
+    assert isinstance(backend, lock_module.RedisSessionLockBackend)
+
+
+@pytest.mark.asyncio
+async def test_create_default_backend_warns_when_redis_not_configured(
+    monkeypatch,
+    caplog,
+) -> None:
+    """auto + 未配 Redis 地址 -> 进程内锁 + **明确告警**(跨进程保护未启用)。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "auto")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("CELERY_BROKER_URL", raising=False)
+
+    with caplog.at_level("WARNING"):
+        backend = await lock_module.create_default_backend()
+
+    assert isinstance(backend, lock_module.LocalSessionLockBackend)
+    assert "跨进程保护未启用" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_create_default_backend_warns_when_explicitly_local(monkeypatch, caplog) -> None:
+    """显式 local -> 进程内锁 + 明确告警(跨进程保护未启用)。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "local")
+
+    with caplog.at_level("WARNING"):
+        backend = await lock_module.create_default_backend()
+
+    assert isinstance(backend, lock_module.LocalSessionLockBackend)
+    assert "跨进程保护未启用" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1390,6 +1538,30 @@ async def test_create_default_backend_falls_open_without_redis(monkeypatch) -> N
 
     backend = await lock_module.create_default_backend(fail_closed=False)
     assert isinstance(backend, lock_module.LocalSessionLockBackend)
+
+
+@pytest.mark.asyncio
+async def test_create_default_backend_auto_falls_open_when_redis_unreachable(
+    monkeypatch,
+    caplog,
+) -> None:
+    """auto + 配了地址但连不上 -> 非生产 fail-open + error 级日志(降级必须出声)。"""
+    from backend.services import main_account_session_lock as lock_module
+
+    monkeypatch.setenv("ACCOUNT_SESSION_LOCK_BACKEND", "auto")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+
+    async def _no_client():
+        return None
+
+    monkeypatch.setattr(lock_module, "get_shared_redis_client", _no_client)
+
+    with caplog.at_level("ERROR"):
+        backend = await lock_module.create_default_backend()
+
+    assert isinstance(backend, lock_module.LocalSessionLockBackend)
+    assert "跨进程保护已失效" in caplog.text
 
 
 # ---------------------------------------------------------------------------
