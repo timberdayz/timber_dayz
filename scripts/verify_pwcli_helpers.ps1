@@ -7,9 +7,6 @@ $requiredHelpers = @(
     "Open-PwcliMiaoshou",
     "Open-PwcliShopee",
     "Open-PwcliTiktok",
-    "Save-PwcliMiaoshouState",
-    "Save-PwcliShopeeState",
-    "Save-PwcliTiktokState",
     "Show-PwcliPaths",
     "Start-PwcliDailyInspection",
     "pwsnap",
@@ -17,6 +14,14 @@ $requiredHelpers = @(
     "pwshot",
     "pwpack",
     "pwcap"
+)
+
+# 登录态只由浏览器 profile 承载：保存会话的辅助函数必须已经消失。
+$removedHelpers = @(
+    "Save-PwcliPlatformState",
+    "Save-PwcliMiaoshouState",
+    "Save-PwcliShopeeState",
+    "Save-PwcliTiktokState"
 )
 
 $requiredScripts = @(
@@ -43,6 +48,13 @@ foreach ($helper in $requiredHelpers) {
     }
 }
 
+$stillPresent = @()
+foreach ($helper in $removedHelpers) {
+    if (Get-Command $helper -ErrorAction SilentlyContinue) {
+        $stillPresent += $helper
+    }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $missingScripts = @()
 foreach ($script in $requiredScripts) {
@@ -59,6 +71,13 @@ if ($missingHelpers.Count -gt 0) {
     }
 }
 
+if ($stillPresent.Count -gt 0) {
+    Write-Output "[FAIL] Removed PowerShell pwcli helper commands are still available:"
+    foreach ($helper in $stillPresent) {
+        Write-Output "  - $helper"
+    }
+}
+
 if ($missingScripts.Count -gt 0) {
     Write-Output "[FAIL] Missing repo-local pwcli fallback scripts:"
     foreach ($script in $missingScripts) {
@@ -66,7 +85,7 @@ if ($missingScripts.Count -gt 0) {
     }
 }
 
-if ($missingHelpers.Count -gt 0 -or $missingScripts.Count -gt 0) {
+if ($missingHelpers.Count -gt 0 -or $missingScripts.Count -gt 0 -or $stillPresent.Count -gt 0) {
     exit 1
 }
 

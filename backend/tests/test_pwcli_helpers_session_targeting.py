@@ -19,9 +19,8 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _save_helper_block() -> str:
-    text = _read(HELPERS)
-    return text.split("function Save-PwcliPlatformState", 1)[1].split("\nfunction ", 1)[0]
+def _helpers_text() -> str:
+    return _read(HELPERS)
 
 
 def test_launcher_propagates_exit_code():
@@ -30,33 +29,20 @@ def test_launcher_propagates_exit_code():
     assert re.search(r"exit\s+\$LASTEXITCODE", text), "pwcli.ps1 缺少 exit $LASTEXITCODE"
 
 
-def test_save_helper_accepts_work_tag():
-    """保存函数必须能按账号定位会话，不能只依赖环境变量。"""
-    block = _save_helper_block()
-    assert "WorkTag" in block, "Save-PwcliPlatformState 缺少 -WorkTag 参数"
-    assert '"$platformName-$WorkTag"' in block, "保存函数没有用 platform+WorkTag 拼 session 名"
+def test_save_helpers_are_removed():
+    """登录态只由浏览器 profile 承载：保存会话的 PowerShell 函数必须全部删掉。
+
+    只要还留着 ``Save-Pwcli*State``，运维就还能走「打开 -> 保存」的老路径，
+    而那条路径写的是 ``data/sessions`` 下的会话文件 —— 与 profile 单一载体冲突。
+    """
+    text = _helpers_text()
+
+    assert "Save-Pwcli" not in text, "pwcli_helpers.ps1 仍保留 Save-Pwcli*State"
+    assert "state-save" not in text, "pwcli_helpers.ps1 仍调用 pwcli state-save"
 
 
-def test_save_helper_throws_on_nonzero_exit():
-    """保存失败必须抛错，让调用方拿到非 0 退出码。"""
-    block = _save_helper_block()
-    assert "$LASTEXITCODE" in block
-    assert "throw" in block
-
-
-def test_save_helper_rejects_unresolvable_session():
-    """既没有 -WorkTag、又没有活动会话时必须报错，不能静默退回 session=default。"""
-    block = _save_helper_block()
-    assert "cannot locate the browser session" in block, (
-        "定位不到会话时必须报错（否则会退回 pwcli state-save -> session=default -> 断点 A）"
-    )
-    assert "Get-PwcliActiveSession" in block, "必须复用既有 Get-PwcliActiveSession 解析活动会话"
-
-
-def test_panel_save_command_passes_work_tag():
-    """面板的保存命令必须带上 -WorkTag，否则 session 又会退回 default。"""
-    import sys
-
+def test_panel_rejects_save_action():
+    """面板不再支持「保存」动作（端点已删，命令构造也必须拒绝）。"""
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
     from pwcli_inspection_panel import build_pwcli_action_command
 
@@ -66,56 +52,98 @@ def test_panel_save_command_passes_work_tag():
         "work_tag": "shopee-hongxikeji-main-inspect",
         "display_name": "hongxikeji:main",
     }
-    command = build_pwcli_action_command("save", account, REPO_ROOT)
-    joined = " ".join(command)
-    assert "-WorkTag" in joined, "面板保存命令缺少 -WorkTag"
-    assert "shopee-hongxikeji-main-inspect" in joined, "面板保存命令没有传具体 work_tag"
+
+    with pytest.raises(ValueError):
+        build_pwcli_action_command("save", account, REPO_ROOT)
 
 
-def test_inspection_loop_passes_work_tag_on_every_platform_branch():
-    """巡店循环的**三个**平台分支都必须传 -WorkTag。
+def test_panel_open_command_passes_work_tag():
+    """面板的打开命令必须带上 -WorkTag，否则 session 会退回 default。"""
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from pwcli_inspection_panel import build_pwcli_action_command
 
-    计划自称 Step 5b 是"最易漏的一步"：漏掉任何一条，
-    该平台的 session 名就会退回 default -> 存错地方 -> 下次读不到。
+    account = {
+        "platform": "shopee",
+        "account_id": "hongxikeji:main",
+        "work_tag": "shopee-hongxikeji-main-inspect",
+        "display_name": "hongxikeji:main",
+    }
 
-    这里按**调用点**逐条锁定（不是只查函数签名）：
-    巡店循环里恰好有 3 处 `Save-Pwcli*State -AccountId $account.account_id` 调用，
-    且每一处都带 `-WorkTag $account.work_tag`。
-    （函数**定义**形如 `Save-PwcliShopeeState {`，不带 -AccountId，天然不会被误计。）
-    """
-    text = _read(HELPERS)
+    joined = " ".join(build_pwcli_action_command("open", account, REPO_ROOT))
+
+    assert "-WorkTag" in joined, "面板打开命令缺少 -WorkTag"
+    assert "shopee-hongxikeji-main-inspect" in joined, "面板打开命令没有传具体 work_tag"
+
+
+def test_panel_open_command_forwards_proxy_server():
+    """账号代理必须一路传到 pwcli 命令行（代理服务器地址不带凭据）。"""
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from pwcli_inspection_panel import build_pwcli_action_command
+
+    account = {
+        "platform": "shopee",
+        "account_id": "hongxikeji:main",
+        "work_tag": "shopee-hongxikeji-main-inspect",
+        "display_name": "hongxikeji:main",
+    }
+
+    joined = " ".join(
+        build_pwcli_action_command(
+            "open",
+            account,
+            REPO_ROOT,
+            proxy_server="http://10.0.0.9:8080",
+        )
+    )
+
+    assert "-ProxyServer" in joined, "面板打开命令缺少 -ProxyServer"
+    assert "10.0.0.9:8080" in joined, "面板打开命令没有把代理地址传下去"
+
+
+def test_open_helper_forwards_proxy_server_to_pwcli():
+    """PowerShell 侧的 Open 函数必须把代理地址转成 pwcli 的 --proxy-server 参数。"""
+    block = _helpers_text().split("function Open-PwcliPlatform", 1)[1].split("\nfunction ", 1)[0]
+
+    assert "--proxy-server" in block, "Open-PwcliPlatform 没有把代理地址传给 pwcli open"
+    assert "ProxyServer" in block, "Open-PwcliPlatform 缺少 -ProxyServer 参数"
+
+
+def test_inspection_loop_no_longer_saves_state():
+    """交互式巡店循环不得再调用 Save-*，改成「关掉浏览器即由 profile 保存」。"""
+    text = _helpers_text()
 
     calls = re.findall(
-        r"Save-Pwcli(Miaoshou|Shopee|Tiktok)State\s+-AccountId\s+\$account\.account_id(?P<rest>[^\r\n]*)",
+        r"Save-Pwcli(Miaoshou|Shopee|Tiktok)State\s+-AccountId\s+\$account\.account_id",
         text,
     )
-    assert len(calls) == 3, (
-        f"应恰好有 3 处 Save-Pwcli*State 调用（巡店循环的三个平台分支），实际 {len(calls)} 处：{calls}"
-    )
-    for platform, rest in calls:
-        assert "-WorkTag" in rest, f"{platform} 分支没有传 -WorkTag（实际：{rest.strip()!r}）"
-        assert "$account.work_tag" in rest, (
-            f"{platform} 分支传的 -WorkTag 不是 $account.work_tag（实际：{rest.strip()!r}）"
-        )
-
-    # 三个平台一个都不能少
-    assert {platform for platform, _ in calls} == {"Miaoshou", "Shopee", "Tiktok"}
+    assert not calls, f"巡店循环仍在调用保存函数: {calls}"
+    assert "Press Enter to save" not in text, "巡店循环仍提示保存会话"
+    assert "Read-Host" in text, "巡店循环必须仍然等待人工确认"
 
 
-def test_platform_save_wrappers_forward_work_tag():
-    """三个 Save-Pwcli{Platform}State 包装必须把 -WorkTag 透传给 Save-PwcliPlatformState。
+def test_inspection_loop_tells_operator_to_close_the_browser():
+    """循环提示必须明确「关闭浏览器后登录态由 profile 保存」。"""
+    text = _helpers_text()
+    loop = text.split("function Start-PwcliDailyInspection", 1)[1]
 
-    包装层漏传的话，即使巡店循环传了 work_tag，session 名仍然退回 default。
+    assert "close the browser" in loop.lower(), "巡店循环没有提示关闭浏览器"
+    assert "profile" in loop.lower(), "巡店循环没有说明登录态由浏览器 profile 保存"
+
+
+def test_open_helper_resolves_work_tag_from_account():
+    """Open-PwcliPlatform 必须把账号拼进 work tag，不能默认用平台级的 "explore"。
+
+    否则手工执行 `Open-PwcliShopee -AccountId X`（不带 -WorkTag）时，
+    同平台的多个账号会共用 `shopee-explore` 这一个 session 名 ——
+    后开的窗口会把先开的窗口杀掉（spec D9 / ③一账号一巡店窗口）。
+
+    这里锁定的是**函数体**而不是字面量：只要 Open 走了 Resolve-PwcliWorkTag，
+    推导规则怎么变都不会退化回平台级 session 名。
     """
-    text = _read(HELPERS)
-    for platform in ("miaoshou", "shopee", "tiktok"):
-        pattern = (
-            rf"function Save-Pwcli{platform.capitalize()}State\s*\{{[^}}]*"
-            rf"Save-PwcliPlatformState\s+-Platform\s+{platform}\s+-AccountId\s+\$AccountId\s+-WorkTag\s+\$WorkTag"
-        )
-        assert re.search(pattern, text, re.IGNORECASE | re.DOTALL), (
-            f"Save-Pwcli{platform.capitalize()}State 没有把 -WorkTag 透传给 Save-PwcliPlatformState"
-        )
+    text = _helpers_text()
+    block = text.split("function Open-PwcliPlatform", 1)[1].split("\nfunction ", 1)[0]
+    assert "Resolve-PwcliWorkTag" in block, "Open-PwcliPlatform 没有按账号解析 work tag"
+    assert "$resolvedWorkTag" in block, "Open-PwcliPlatform 没有用解析出来的 work tag 拼 session 名"
 
 
 def _powershell_work_tag(platform: str, account_id: str) -> str:
@@ -139,22 +167,6 @@ def _powershell_work_tag(platform: str, account_id: str) -> str:
     output = (result.stdout or "").strip()
     assert result.returncode == 0, f"PowerShell 执行失败：{result.stdout}\n{result.stderr}"
     return output
-
-
-def test_open_helper_resolves_work_tag_from_account():
-    """Open-PwcliPlatform 必须把账号拼进 work tag，不能默认用平台级的 "explore"。
-
-    否则手工执行 `Open-PwcliShopee -AccountId X`（不带 -WorkTag）时，
-    同平台的多个账号会共用 `shopee-explore` 这一个 session 名 ——
-    后开的窗口会把先开的窗口杀掉（spec D9 / ③一账号一巡店窗口）。
-
-    这里锁定的是**函数体**而不是字面量：只要 Open 走了 Resolve-PwcliWorkTag，
-    推导规则怎么变都不会退化回平台级 session 名。
-    """
-    text = _read(HELPERS)
-    block = text.split("function Open-PwcliPlatform", 1)[1].split("\nfunction ", 1)[0]
-    assert "Resolve-PwcliWorkTag" in block, "Open-PwcliPlatform 没有按账号解析 work tag"
-    assert "$resolvedWorkTag" in block, "Open-PwcliPlatform 没有用解析出来的 work tag 拼 session 名"
 
 
 @pytest.mark.skipif(shutil.which("powershell") is None, reason="requires Windows PowerShell")

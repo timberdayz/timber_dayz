@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -10,7 +11,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.pwcli_account_inventory import build_inspection_accounts, load_accounts
+from scripts.pwcli_account_inventory import (
+    build_inspection_accounts_with_proxy,
+    load_accounts,
+)
 
 
 LAST_STDOUT = ""
@@ -48,11 +52,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     LAST_STDOUT = ""
     LAST_STDERR = ""
 
+    # 本命令的 stdout 是**机器可读 JSON**（PowerShell 侧 ConvertFrom-Json 直接消费）。
+    # 解析账号代理要用 backend 服务，那条 import 链会往 stdout 打 INFO 日志 ->
+    # JSON 会被污染，PowerShell 侧直接解析失败。这里先关掉 INFO 及以下级别。
+    logging.disable(logging.INFO)
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.command == "list-accounts":
-        accounts, skipped = build_inspection_accounts(load_accounts())
+        # CLI 清单带代理信息（只在管道里传，不进 HTTP 响应）
+        accounts, skipped = build_inspection_accounts_with_proxy(load_accounts())
         if skipped:
             _write_stderr(
                 "\n".join(f"Skipping unsupported platform account: {item}" for item in skipped)

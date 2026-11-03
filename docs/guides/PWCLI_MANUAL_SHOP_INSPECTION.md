@@ -109,23 +109,14 @@ Open-PwcliMiaoshou -WorkTag <work-tag> -AccountId '<main-account-id>'
 - 一次性轮询大量主账号
 - 用人工巡店窗口做批量自动脚本操作
 
-### 3. 在稳定页面保存会话
+### 3. 在稳定页面关闭浏览器
 
-操作完成后，确认当前页面已经稳定进入后台首页或正常业务页面，再保存:
+登录态由浏览器的 profile 目录自动保存（Chromium 自己把 cookie 写盘），**没有**「保存会话」这一步。
 
-Shopee:
+操作完成后，确认当前页面已经稳定进入后台首页或正常业务页面，然后**直接关闭浏览器窗口**即可:
 
-```powershell
-Save-PwcliShopeeState -AccountId 'hongxikeji:main'
-```
-
-也可以显式按 session 保存:
-
-```powershell
-pwcli --session shopee-hongxi-main-manual state-save
-```
-
-保存前不要停留在以下页面:
+- 不要强杀浏览器进程（`taskkill /F`），否则 Chromium 来不及写盘，登录态会丢;
+- 关闭前不要停留在以下页面:
 
 - 登录页
 - 验证码页
@@ -135,21 +126,17 @@ pwcli --session shopee-hongxi-main-manual state-save
 
 ### 4. 让正式采集复用
 
-人工保存成功后，不需要再做额外同步。正式采集会按现有 runtime 规则读取该主账号会话并复用。
+人工登录成功后，不需要再做额外同步。正式采集会按现有 runtime 规则读取该主账号会话并复用。
 
 ## Shopee 推荐命令模板
 
-### 首次按新标准手动登录并保存
+### 首次按新标准手动登录
 
 ```powershell
 Open-PwcliShopee -WorkTag hongxi-main-refresh -AccountId 'hongxikeji:main'
 ```
 
-人工登录成功后:
-
-```powershell
-Save-PwcliShopeeState -AccountId 'hongxikeji:main'
-```
+人工登录成功后**直接关闭浏览器窗口**即可（登录态由 profile 自动保存）。
 
 ### 日常人工巡店
 
@@ -157,11 +144,7 @@ Save-PwcliShopeeState -AccountId 'hongxikeji:main'
 Open-PwcliShopee -WorkTag hongxi-main-inspect -AccountId 'hongxikeji:main'
 ```
 
-巡店完成后:
-
-```powershell
-Save-PwcliShopeeState -AccountId 'hongxikeji:main'
-```
+巡店完成后直接关闭浏览器窗口即可。
 
 ### 检查路径是否正确
 
@@ -179,7 +162,7 @@ Show-PwcliPaths -Platform shopee -AccountId 'hongxikeji:main' -WorkTag hongxi-ma
 2. 同一账号短时间内频繁切换网络、机器、profile。
 3. 同一账号被人工巡店和正式采集并发使用。
 4. 虽然是 `pwcli` 打开的窗口，但实际执行的是批量自动化操作。
-5. 在异常页面保存低质量会话，导致后续频繁重登和重复验证。
+5. 在异常页面关闭浏览器，导致登录态没落盘，后续频繁重登和重复验证。
 
 降低风险的建议:
 
@@ -210,7 +193,7 @@ Show-PwcliPaths -Platform shopee -AccountId 'hongxikeji:main' -WorkTag hongxi-ma
 
 ## 什么时候需要重新手动登录
 
-出现以下任一情况时，建议重新手动登录并保存:
+出现以下任一情况时，建议重新手动登录（登录后关闭浏览器即可）:
 
 - 打开后回到登录页
 - 打开后跳到安全验证页
@@ -226,8 +209,8 @@ Show-PwcliPaths -Platform shopee -AccountId 'hongxikeji:main' -WorkTag hongxi-ma
 本指南只定义:
 
 - 人怎么打开
-- 人怎么保存
-- 什么时候允许保存
+- 人怎么关闭（关闭即保存）
+- 什么时候需要重新登录
 - 什么时候不该覆盖
 - 如何降低风控风险
 
