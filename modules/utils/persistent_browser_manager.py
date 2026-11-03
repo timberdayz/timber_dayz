@@ -193,8 +193,21 @@ class PersistentBrowserManager:
                     if attempt == 0:
                         user_dir = profile_path
                     else:
+                        # [Task 3 / F7-1] 旁路 profile 与主 profile 属于**同一个逻辑账号**,
+                        # 跨进程账号锁按 (platform, main_account_id) 加锁,
+                        # 而账号会话锁的 key 构造会把旁路身份归一化回主身份
+                        # (``main_account_session_lock.normalize_profile_identity``)
+                        # -> **同一把锁覆盖 <account> 与 <account>_alt 两个目录**,
+                        # 不会出现「主 profile 被 A 锁住、旁路 profile 被 B 打开」的交叉双开。
+                        #
+                        # 但旁路 profile 会把登录态**分散到第二个目录**, 违反「profile 是唯一
+                        # 登录态载体」—— Task 7 会彻底删掉这个旁路。
                         user_dir = profile_path.with_name(profile_path.name + "_alt")
                         user_dir.mkdir(parents=True, exist_ok=True)
+                        logger.warning(
+                            "持久化上下文回退到旁路 profile: %s (与主 profile 共用同一把账号会话锁)",
+                            user_dir,
+                        )
                     context = self.playwright.chromium.launch_persistent_context(
                         user_data_dir=str(user_dir),
                         **context_options,

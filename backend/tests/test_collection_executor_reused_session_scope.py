@@ -233,16 +233,119 @@ async def test_executor_shared_state_phase_serializes_same_main_account():
     assert results == ["first", "second"]
 
 
-def test_execute_parallel_domains_mentions_main_account_shared_state_preparation():
-    source = Path("modules/apps/collection_center/executor_v2.py").read_text(encoding="utf-8")
+@pytest.mark.asyncio
+async def test_execute_parallel_domains_releases_account_lock_after_profile_closed(
+    monkeypatch,
+):
+    """并行路径: 账号锁必须持有到 profile context **真正关闭**之后才释放。
 
-    parallel_index = source.index("async def execute_parallel_domains(")
-    lock_markers = [
-        "_run_with_main_account_session_lock(",
-        "main_account_session_coordinator.acquire(",
-    ]
+    锁在 Chromium 仍占用 profile 目录时就释放 → 另一个进程可能立刻打开同一目录
+    → profile 双开 → 登录态互相覆盖(Task 3 / F3)。
+    """
+    events = []
 
-    assert any(source.find(marker, parallel_index) > parallel_index for marker in lock_markers)
+    class _RecordingCoordinator:
+        def acquire(self, platform, main_account_id):
+            coordinator = self
+
+            class _CM:
+                async def __aenter__(self):
+                    coordinator.events.append("lock-acquire")
+                    return None
+
+                async def __aexit__(self, exc_type, exc, tb):
+                    coordinator.events.append("lock-release")
+                    return None
+
+            return _CM()
+
+        def is_locked(self, platform, main_account_id):
+            return False
+
+        def waiter_count(self, platform, main_account_id):
+            return 0
+
+        async def is_locked_async(self, platform, main_account_id):
+            return False
+
+        async def waiter_count_async(self, platform, main_account_id):
+            return 0
+
+    coordinator = _RecordingCoordinator()
+    coordinator.events = events
+
+    executor = CollectionExecutorV2(main_account_session_coordinator=coordinator)
+    executor._update_status = AsyncMock()
+
+    class _FakeContext:
+        async def close(self):
+            events.append("context-closed")
+
+        async def cookies(self):
+            return []
+
+    class _FakePage:
+        async def close(self):
+            events.append("page-closed")
+
+    async def _fake_open_runtime_bundle(**kwargs):
+        events.append("profile-opened")
+        return type(
+            "Bundle",
+            (),
+            {
+                "reused_session": False,
+                "context": _FakeContext(),
+                "page": _FakePage(),
+                "mode": "persistent_profile",
+            },
+        )()
+
+    monkeypatch.setattr(executor, "_open_runtime_bundle", _fake_open_runtime_bundle)
+    monkeypatch.setattr(executor, "_ensure_login_gate_ready", AsyncMock())
+    monkeypatch.setattr(
+        executor,
+        "_run_runtime_manifest_component",
+        AsyncMock(return_value=type("R", (), {"success": True})()),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2.runtime_session.snapshot_runtime_storage_state",
+        AsyncMock(return_value={"cookies": [], "origins": []}),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._record_platform_shop_discovery_async",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        executor,
+        "_wait_and_capture_high_quality_tiktok_session",
+        AsyncMock(return_value={"cookies": [], "origins": []}),
+    )
+
+    await executor.execute_parallel_domains(
+        task_id="task-1",
+        platform="tiktok",
+        account_id="shop-1",
+        account={
+            "account_id": "shop-1",
+            "shop_account_id": "shop-1",
+            "main_account_id": "main-1",
+            "login_url": "https://seller.tiktok.com/account/login",
+        },
+        data_domains=[],
+        date_range={"start": "2025-01-01", "end": "2025-01-31"},
+        granularity="daily",
+        browser=object(),
+        browser_type=object(),
+        max_parallel=3,
+        debug_mode=False,
+        runtime_manifests={"login": {}, "exports_by_domain": {}},
+    )
+
+    assert "lock-acquire" in events
+    assert "lock-release" in events
+    # 锁的释放必须发生在 profile context 关闭之后
+    assert events.index("lock-release") > events.index("context-closed")
 
 
 def test_executor_uses_platform_login_entry_service_for_formal_collection():

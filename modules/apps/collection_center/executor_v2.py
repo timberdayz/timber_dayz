@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import asyncio
+import contextlib
 import time
 import uuid
 import shutil
@@ -848,6 +849,70 @@ class CollectionExecutorV2:
 
         return _on_step
 
+    async def _is_main_account_session_busy(
+        self,
+        platform: str,
+        main_account_id: str,
+    ) -> bool:
+        """该主账号会话当前是否「有人在用或有人在等」。
+
+        必须读**跨进程**视图(L7): 争用方通常在别的 gunicorn worker / 容器里,
+        只看本进程会永远得到 False → 「等待主账号会话」的状态推送永不触发。
+        """
+        coordinator = self.main_account_session_coordinator
+        try:
+            if await coordinator.is_locked_async(platform, main_account_id):
+                return True
+            return await coordinator.waiter_count_async(platform, main_account_id) > 0
+        except Exception:
+            logger.debug(
+                "Failed to read main account session state: %s/%s",
+                platform,
+                main_account_id,
+                exc_info=True,
+            )
+            return (
+                coordinator.is_locked(platform, main_account_id)
+                or coordinator.waiter_count(platform, main_account_id) > 0
+            )
+
+    async def _acquire_main_account_session_lock(
+        self,
+        *,
+        task_id: str,
+        platform: str,
+        main_account_id: str,
+    ):
+        """获取主账号会话锁(含等待态提示), 返回**已进入**的 context manager。
+
+        锁的**持有范围由调用方决定** —— 顺序路径必须持有到 profile 关闭(F3),
+        所以这里只负责「拿锁 + 推状态」, 释放交给调用方。
+        """
+        if await self._is_main_account_session_busy(platform, main_account_id):
+            await self._update_status(
+                task_id,
+                5,
+                MAIN_ACCOUNT_SESSION_STEP_MESSAGES["waiting_for_main_account_session"],
+            )
+
+        coordinator_cm = self.main_account_session_coordinator.acquire(
+            platform, main_account_id
+        )
+        await coordinator_cm.__aenter__()
+        try:
+            await self._update_status(
+                task_id,
+                5,
+                MAIN_ACCOUNT_SESSION_STEP_MESSAGES["preparing_main_account_session"],
+            )
+        except BaseException:
+            # 拿锁之后、交给调用方之前出错 -> 必须自己释放, 否则这把锁会被续期心跳
+            # 一直续下去, 同账号的其他任务永远等不到。
+            with contextlib.suppress(Exception):
+                await coordinator_cm.__aexit__(None, None, None)
+            raise
+        return coordinator_cm
+
     async def _run_with_main_account_session_lock(
         self,
         *,
@@ -856,28 +921,59 @@ class CollectionExecutorV2:
         main_account_id: str,
         operation: Callable[[], Awaitable[Any]],
     ) -> Any:
-        if (
-            self.main_account_session_coordinator.is_locked(platform, main_account_id)
-            or self.main_account_session_coordinator.waiter_count(
-                platform, main_account_id
-            )
-            > 0
-        ):
-            await self._update_status(
-                task_id,
-                5,
-                MAIN_ACCOUNT_SESSION_STEP_MESSAGES["waiting_for_main_account_session"],
-            )
+        """在主账号会话锁内执行一段操作(锁在操作返回时释放)。
 
-        async with self.main_account_session_coordinator.acquire(
-            platform, main_account_id
-        ):
-            await self._update_status(
-                task_id,
-                5,
-                MAIN_ACCOUNT_SESSION_STEP_MESSAGES["preparing_main_account_session"],
-            )
+        仅用于**不涉及持久 profile 目录**的短操作; 顺序路径的 profile 生命周期
+        必须用 ``_acquire_main_account_session_lock`` 显式持有到 context 关闭。
+        """
+        coordinator_cm = await self._acquire_main_account_session_lock(
+            task_id=task_id,
+            platform=platform,
+            main_account_id=main_account_id,
+        )
+        try:
             return await operation()
+        finally:
+            await coordinator_cm.__aexit__(None, None, None)
+
+    def _requires_profile_session_lock(
+        self,
+        *,
+        platform: str,
+        session_owner_id: str,
+        session_runtime_mode: str,
+    ) -> bool:
+        """本次执行是否会打开**持久 profile 目录**。
+
+        只有真正要打开 profile 时才加锁 —— 纯 storage_state 扇出不碰 profile 目录,
+        不该被账号锁串行化。
+
+        判定口径与 ``_open_runtime_bundle`` 的模式解析保持一致:
+        ``persistent_profile`` 显式模式 → 一定开;
+        ``auto`` 模式 → profile 目录存在且没有人工巡店会话(人工会话优先, 见 spec D6) → 开。
+        """
+        normalized = str(session_runtime_mode or "").strip().lower()
+        if not session_owner_id:
+            return False
+        if normalized == "persistent_profile":
+            return True
+        if normalized != "auto":
+            return False
+        try:
+            has_profile = runtime_session.runtime_profile_exists(
+                platform, session_owner_id
+            )
+        except Exception:
+            logger.debug(
+                "Failed to probe persistent profile for %s/%s",
+                platform,
+                session_owner_id,
+                exc_info=True,
+            )
+            return False
+        if not has_profile:
+            return False
+        return not _manual_storage_state_exists(platform, session_owner_id)
 
     @staticmethod
     def _should_prefer_manual_storage_state(
@@ -2020,6 +2116,39 @@ class CollectionExecutorV2:
                 "execute() requires browser_type= when session_runtime_mode='persistent_profile'"
             )
 
+        # [Task 3 / F3] 锁边界 = 「打开 profile → 关闭 profile」。
+        #
+        # 原来锁只包住 ``_coordinated_login``(打开 profile + 登录), 登录一返回就释放,
+        # 而 persistent profile context 一直活到 ``finally`` 的 ``_cleanup_browser_runtime``
+        # 才关闭 → **锁在 profile 仍被 Chromium 占用时就释放了** → 换成跨进程锁后仍会双开。
+        #
+        # 因此这里在 try 之前拿锁, 在 ``_cleanup_browser_runtime`` **之后**才释放。
+        # 只有真正会打开持久 profile 目录时才加锁(纯 storage_state 扇出不碰 profile 目录)。
+        session_lock_cm = None
+        session_lock_released = False
+
+        async def _release_session_lock():
+            """释放账号锁(幂等)。漏释放的话续期心跳会一直续下去, 同账号永远等不到。"""
+            nonlocal session_lock_released
+            if session_lock_cm is None or session_lock_released:
+                return
+            session_lock_released = True
+            # BaseException: 取消路径下释放动作本身也可能被取消打断,
+            # 那时不能让它顶替掉真正的原始异常(锁会等 TTL 自然过期)。
+            with contextlib.suppress(BaseException):
+                await session_lock_cm.__aexit__(None, None, None)
+
+        if self._requires_profile_session_lock(
+            platform=platform,
+            session_owner_id=session_owner_id,
+            session_runtime_mode=session_runtime_mode,
+        ):
+            session_lock_cm = await self._acquire_main_account_session_lock(
+                task_id=task_id,
+                platform=platform,
+                main_account_id=session_owner_id,
+            )
+
         try:
             # 执行器统一建 context: 由执行器创建带指纹与可选会话的 context
             if context.current_component_index == 0:
@@ -2117,12 +2246,17 @@ class CollectionExecutorV2:
                         "login_result": login_result,
                     }
 
-                bundle = await self._run_with_main_account_session_lock(
-                    task_id=task_id,
-                    platform=platform,
-                    main_account_id=session_owner_id,
-                    operation=_coordinated_login,
-                )
+                if session_lock_cm is not None:
+                    # 外层已持有「打开 profile → 关闭 profile」的全生命周期锁,
+                    # 这里不能再取一次(否则锁会在登录结束时被提前释放)。
+                    bundle = await _coordinated_login()
+                else:
+                    bundle = await self._run_with_main_account_session_lock(
+                        task_id=task_id,
+                        platform=platform,
+                        main_account_id=session_owner_id,
+                        operation=_coordinated_login,
+                    )
                 params = bundle["params"]
                 play_context = bundle["play_context"]
                 page = bundle["page"]
@@ -2194,6 +2328,8 @@ class CollectionExecutorV2:
                 )
 
         except TaskCancelledError:
+            # 登录阶段被取消 -> profile 不会进入后面的组件执行段, 必须在这里释放锁
+            await _release_session_lock()
             return CollectionResult(
                 task_id=task_id,
                 status=TASK_STATUS.CANCELLED,
@@ -2205,6 +2341,12 @@ class CollectionExecutorV2:
                 failed_domains=context.failed_domains,
                 total_domains=total_domains_count,
             )
+
+        except BaseException:
+            # 登录阶段抛出非取消类异常 -> 下面的组件执行段不会执行,
+            # 账号锁必须在这里释放, 否则这把锁会被续期心跳一直续下去。
+            await _release_session_lock()
+            raise
 
         try:
             if self.use_python_components:
@@ -2667,6 +2809,9 @@ class CollectionExecutorV2:
                 scope="main",
                 extra_context=page_context_to_close,
             )
+            # [Task 3 / F3] profile context 已真正关闭 → 现在才释放账号锁。
+            # 顺序不能反: 先释放锁会让另一个进程在 Chromium 仍占用 profile 目录时打开它。
+            await _release_session_lock()
 
     async def _record_version_usage(
         self, component: Dict[str, Any], success: bool
@@ -5866,13 +6011,8 @@ class CollectionExecutorV2:
         reused_session = False
 
         coordinator_cm = None
-        if (
-            self.main_account_session_coordinator.is_locked(platform, session_owner_id)
-            or self.main_account_session_coordinator.waiter_count(
-                platform, session_owner_id
-            )
-            > 0
-        ):
+        coordinator_entered = False
+        if await self._is_main_account_session_busy(platform, session_owner_id):
             await self._update_status(
                 task_id,
                 5,
@@ -5896,6 +6036,7 @@ class CollectionExecutorV2:
                 platform, session_owner_id
             )
             await coordinator_cm.__aenter__()
+            coordinator_entered = True
             await self._update_status(
                 task_id,
                 5,
@@ -6026,12 +6167,15 @@ class CollectionExecutorV2:
             )
             raise
         finally:
-            if coordinator_cm is not None:
-                await coordinator_cm.__aexit__(None, None, None)
             if login_page is not None:
                 await login_page.close()
             if login_context is not None:
                 await login_context.close()
+            # [Task 3 / F3] profile context 已真正关闭 → 现在才释放账号锁。
+            # 顺序不能反: 先释放锁会让另一个进程在 Chromium 仍占用 profile 目录时打开它。
+            if coordinator_cm is not None and coordinator_entered:
+                with contextlib.suppress(Exception):
+                    await coordinator_cm.__aexit__(None, None, None)
 
         # 2. 并行执行各个数据域
         await self._update_status(

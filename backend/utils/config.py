@@ -237,6 +237,17 @@ class Settings:
     PLAYWRIGHT_HEADLESS: bool = os.getenv("PLAYWRIGHT_HEADLESS", "false").lower() == "true"
     PLAYWRIGHT_SLOW_MO: int = int(os.getenv("PLAYWRIGHT_SLOW_MO", "0"))
     
+    # ------------------------------------------------------------------
+    # 账号会话锁(Task 3 / R6)后端开关见本模块底部的模块级函数
+    # (account_session_lock_backend / ..._ttl_seconds / ..._fail_closed)。
+    #
+    # 刻意**不**做成 Settings 的 property:
+    #   * 锁与鉴权无关 —— 不能因为 Settings() 在生产环境校验 JWT 密钥而抛
+    #     RuntimeError(否则账号锁会因为一个无关配置直接不可用);
+    #   * 环境变量必须**实时**读 —— 测试期护栏(backend/tests/conftest.py)
+    #     是在 import 之后才设的, import 期求值的类属性会读到旧值。
+    # ------------------------------------------------------------------
+
     @property
     def rate_limit_storage_uri(self) -> str:
         """
@@ -309,3 +320,67 @@ class Settings:
 def get_settings() -> Settings:
     """获取配置实例"""
     return Settings()
+
+
+# ---------------------------------------------------------------------------
+# 账号会话锁(Task 3 / R6)后端开关
+# ---------------------------------------------------------------------------
+#
+# 同一主账号(main_account_id)的持久 profile 目录**不能被两个浏览器进程同时打开**
+# → 锁必须跨进程(Redis SET NX)。这几个开关决定锁后端与降级策略。
+#
+# 做成**模块级函数**而不是 Settings 的 property:
+#   * 锁与鉴权无关 —— 不能因为 Settings() 在生产环境校验 JWT 密钥而抛
+#     RuntimeError(否则账号锁会因为一个无关配置直接不可用);
+#   * 环境变量必须**实时**读 —— 测试期护栏(backend/tests/conftest.py)
+#     是在 import 之后才设的, import 期求值的类属性会读到旧值。
+
+#: 账号会话锁后端模式取值
+ACCOUNT_SESSION_LOCK_BACKEND_MODES = ("auto", "redis", "local")
+
+
+def account_session_lock_environment() -> str:
+    """锁后端判定用的环境名(实时读环境变量)。"""
+    return (os.getenv("ENVIRONMENT") or "development").strip().lower()
+
+
+def account_session_lock_backend() -> str:
+    """账号会话锁后端模式(原始值): ``auto`` / ``redis`` / ``local``。
+
+    * ``auto``(默认): 生产强制 Redis; 非生产用进程内锁
+      (单元测试**绝不**连真实 Redis —— 见 ``backend/tests/conftest.py`` 的护栏)。
+    * ``redis``: 强制 Redis(不可用时按 fail-closed 分级)。
+    * ``local``: 强制进程内锁(仅同进程互斥)。
+
+    ``auto`` 的解析(生产 → redis / 其余 → local)在
+    ``backend/services/main_account_session_lock.py`` 里, 与告警日志放在一起。
+    """
+    return (os.getenv("ACCOUNT_SESSION_LOCK_BACKEND") or "auto").strip().lower()
+
+
+def account_session_lock_ttl_seconds() -> int:
+    """账号会话锁 TTL(秒)。靠**续期**维持, 不是靠一次长 EX。"""
+    try:
+        return int(os.getenv("ACCOUNT_SESSION_LOCK_TTL_SECONDS") or 300)
+    except ValueError:
+        return 300
+
+
+def account_session_lock_wait_timeout() -> int:
+    """等待账号会话锁的最长时间(秒)。"""
+    try:
+        return int(os.getenv("ACCOUNT_SESSION_LOCK_WAIT_TIMEOUT") or 1800)
+    except ValueError:
+        return 1800
+
+
+def account_session_lock_fail_closed() -> bool:
+    """锁服务不可用时是否 fail-closed。
+
+    生产默认 True(拒绝采集, 避免 profile 双开导致会话互相覆盖);
+    非生产默认 False(降级到进程内锁)。
+    """
+    raw = (os.getenv("ACCOUNT_SESSION_LOCK_FAIL_CLOSED") or "").strip().lower()
+    if raw:
+        return raw in {"1", "true", "yes", "on"}
+    return account_session_lock_environment() == "production"

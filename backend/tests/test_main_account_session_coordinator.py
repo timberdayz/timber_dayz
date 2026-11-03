@@ -82,3 +82,38 @@ async def test_main_account_session_coordinator_reports_waiter_count():
 
     release.set()
     await holder_task
+
+
+@pytest.mark.asyncio
+async def test_main_account_session_coordinator_waiter_count_excludes_holder():
+    """等锁者计数只算「等待者」, 不算持锁者(Task 3 的兼容语义)。
+
+    跨进程实现下「持锁者」与「等待者」是两个集合: 持锁者在锁 key 上,
+    等待者在独立的 Hash 里。计数若把持锁者也算进去, 「等待主账号会话」的
+    状态推送就会在没有争用时也被触发。
+    """
+    from backend.services.main_account_session_coordinator import (
+        MainAccountSessionCoordinator,
+    )
+
+    coordinator = MainAccountSessionCoordinator()
+    acquired = asyncio.Event()
+    release = asyncio.Event()
+
+    async def holder():
+        async with coordinator.acquire("shopee", "main-b"):
+            acquired.set()
+            await release.wait()
+
+    holder_task = asyncio.create_task(holder())
+    await acquired.wait()
+
+    # 只有持锁者、没有等待者 -> 计数必须是 0
+    assert coordinator.waiter_count("shopee", "main-b") == 0
+    assert coordinator.is_locked("shopee", "main-b") is True
+
+    release.set()
+    await holder_task
+
+    assert coordinator.is_locked("shopee", "main-b") is False
+    assert coordinator.waiter_count("shopee", "main-b") == 0

@@ -829,13 +829,24 @@ async def test_execute_auto_mode_launchs_browser_when_no_browser_or_page_provide
             )()
         ),
     )
-    async def _fake_lock(**kwargs):
-        return await kwargs["operation"]()
+    class _NoopLock:
+        async def __aenter__(self):
+            return None
 
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    async def _fake_acquire_lock(**kwargs):
+        return _NoopLock()
+
+    # 账号锁在两条路径上都会被取:
+    #   * profile 路径: execute() 在 try 之前取, 直到 _cleanup_browser_runtime 之后才释放;
+    #   * 非 profile 路径: _run_with_main_account_session_lock 内部取。
+    # 因此桩在更底层的 _acquire_main_account_session_lock 上, 两条路径都覆盖得到。
     monkeypatch.setattr(
         executor,
-        "_run_with_main_account_session_lock",
-        AsyncMock(side_effect=_fake_lock),
+        "_acquire_main_account_session_lock",
+        AsyncMock(side_effect=_fake_acquire_lock),
     )
     monkeypatch.setattr(
         executor,
@@ -1006,11 +1017,20 @@ async def test_execute_parallel_domains_uses_auto_runtime_strategy_for_shared_lo
         async def __aexit__(self, exc_type, exc, tb):
             return None
 
+    async def _async_false(platform, main_account_id):
+        return False
+
+    async def _async_zero(platform, main_account_id):
+        return 0
+
     # 只改这个用例自己持有的 coordinator 实例，不碰模块级单例。
     coordinator = executor.main_account_session_coordinator
     coordinator.acquire = lambda platform, main_account_id: _DummyLock()
     coordinator.is_locked = lambda platform, main_account_id: False
     coordinator.waiter_count = lambda platform, main_account_id: 0
+    # 跨进程视图(Task 3 / L7): 执行器读的是异步版本, 必须一起打桩。
+    coordinator.is_locked_async = _async_false
+    coordinator.waiter_count_async = _async_zero
 
     observed = {}
 
