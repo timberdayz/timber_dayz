@@ -23,7 +23,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          # [FIX v7.12.9] 依赖单一真相源：
+          # requirements.lock.txt 是完整传递依赖闭包（全部 == 钉死），先装它，
+          # CI 与生产镜像解析到同一套版本；requirements.txt 只是运行时直接依赖清单。
+          if [ -f requirements.lock.txt ]; then pip install -r requirements.lock.txt; fi
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Create temp directory
         run: mkdir -p temp
@@ -80,7 +84,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          # [FIX v7.12.9] 依赖单一真相源：
+          # requirements.lock.txt 是完整传递依赖闭包（全部 == 钉死），先装它，
+          # CI 与生产镜像解析到同一套版本；requirements.txt 只是运行时直接依赖清单。
+          if [ -f requirements.lock.txt ]; then pip install -r requirements.lock.txt; fi
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Set up database
         env:

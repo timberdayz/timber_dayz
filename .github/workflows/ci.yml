@@ -48,25 +48,30 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          # ⚠️ pytest/pytest-asyncio 必须**钉版本**，与 requirements.txt 声明保持一致。
-          # 不钉的话这行会把 requirements.txt 里的 pytest==7.4.3 / pytest-asyncio==0.21.1
-          # 升级成 1.x —— 1.x 移除了 conftest.py 里的 session 级 event_loop fixture 覆盖，
-          # session 级 async fixture（pg_engine）会绑到别的 event loop，
-          # 用到 testcontainers 的用例整片报
+          # [FIX v7.12.9] 依赖单一真相源：
+          #   1) requirements.lock.txt = 生产运行时依赖的唯一真相源（完整传递依赖，
+          #      全部 == 钉死）。先装它，CI 与生产镜像装的是同一套版本。
+          #   2) requirements.txt = 运行时直接依赖清单（同样 == 钉死，与 lock 一致）。
+          #   3) requirements-dev.txt = 开发/测试工具，不进生产镜像。
+          # ⚠️ pytest/pytest-asyncio 必须**钉版本**（pytest==7.4.3 /
+          #    pytest-asyncio==0.21.1，与生产镜像此前验证过的组合一致，
+          #    也钉在 requirements-dev.txt 里）。
+          # 不钉的话这行会把 pytest 升级成 1.x —— 1.x 移除了 conftest.py 里的
+          # session 级 event_loop fixture 覆盖，session 级 async fixture（pg_engine）
+          # 会绑到别的 event loop，用到 testcontainers 的用例整片报
           # "another operation is in progress" / "attached to a different loop"。
-          pip install "pytest==7.4.3" "pytest-asyncio==0.21.1" pytest-cov black==25.1.0 ruff mypy
+          if [ -f requirements.lock.txt ]; then pip install -r requirements.lock.txt; fi
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           # 注意: pyproject.toml 只包含工具配置（black/ruff/pytest），不是可安装包
-          # 项目依赖通过 requirements.txt 安装，不需要 pip install -e .
+          # 项目依赖通过 requirements*.txt 安装，不需要 pip install -e .
 
       - name: Verify skill-first rule consistency
         run: |
@@ -78,7 +83,9 @@ jobs:
 
       - name: Install Playwright browsers
         run: |
-          pip install playwright || echo "Playwright installation failed, continuing..."
+          # [FIX v7.12.9] 钉死版本，与 requirements.lock.txt 保持一致，
+          # 避免 CI 的 playwright 与生产镜像漂移。
+          pip install "playwright==1.64.1" || echo "Playwright installation failed, continuing..."
           playwright install chromium || echo "Chromium installation failed, continuing..."
         continue-on-error: true
 
@@ -303,7 +310,7 @@ jobs:
         continue-on-error: true
         run: |
           FILE_ARGS=""
-          for f in requirements.txt backend/requirements.txt requirements-dev.txt; do
+          for f in requirements.lock.txt requirements.txt requirements-dev.txt; do
             if [ -f "$f" ]; then
               FILE_ARGS="$FILE_ARGS -r $f"
             fi
@@ -323,7 +330,7 @@ jobs:
           cp .safety-policy.yml "${POLICY_PATH}"
 
           FILE_ARGS=""
-          for f in requirements.txt backend/requirements.txt requirements-dev.txt; do
+          for f in requirements.lock.txt requirements.txt requirements-dev.txt; do
             if [ -f "$f" ]; then
               FILE_ARGS="$FILE_ARGS -r $f"
             fi
@@ -398,7 +405,7 @@ jobs:
       - name: Validate configuration files
         run: |
           # 验证YAML配置文件语法
-          pip install pyyaml || true
+          pip install "pyyaml==6.0.3" || true
           python -c "
           import yaml
           import os

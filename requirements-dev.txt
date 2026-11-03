@@ -1,7 +1,33 @@
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
-testcontainers[postgres]>=4.5.0
-mypy>=1.10.0
+# ==============================================================================
+# 开发/测试依赖（**不进入生产镜像**）
+# ==============================================================================
+# 维护规则：
+#   1. 版本一律用 == 钉死，禁止 >= 浮动范围。
+#   2. 生产镜像只安装 requirements.lock.txt，本文件里的包不会出现在生产镜像。
+#   3. pytest / pytest-asyncio 的版本必须与生产镜像此前验证过的组合保持一致
+#      （pytest==7.4.3 / pytest-asyncio==0.21.1）。pytest-asyncio 1.x 移除了
+#      conftest.py 里的 session 级 event_loop fixture 覆盖，session 级 async
+#      fixture（pg_engine）会绑到别的 event loop，用到 testcontainers 的用例
+#      整片报 "another operation is in progress" / "attached to a different loop"。
+#   4. 本文件里的包与 requirements.lock.txt 重叠时，版本必须与 lock 一致。
+# ==============================================================================
+
+# 测试框架
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==7.1.0
+coverage==7.11.0  # pytest-cov 的运行时依赖（不在 lock 文件里）
+
+# 代码质量与静态检查
+black==25.1.0
+isort==5.12.0
+flake8==6.1.0
+ruff==0.17.3
+mypy==2.4.1  # mypy 自身的传递依赖（librt / ast-serialize）由 pip 解析
+
+# 集成测试容器（PostgresContainer）
+testcontainers[postgres]==4.15.0
+docker==7.1.0  # testcontainers 的运行时依赖（不在 lock 文件里）
 
 # Load testing (install separately as a binary, not via pip)
 # k6: https://k6.io/docs/get-started/installation/

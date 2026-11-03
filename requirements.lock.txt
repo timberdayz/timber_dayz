@@ -1,0 +1,149 @@
+# ==============================================================================
+# 生产运行时依赖锁定文件（单一真相源）
+# ==============================================================================
+# 本文件由生产 v7.12.8 镜像的实测 pip freeze 清单逐字落地，**每个包的版本都是
+# 实测值，不是推导值**。生产镜像（Dockerfile.backend / Dockerfile.collection）
+# 只安装本文件，不再做任何浮动解析。
+#
+# 事故背景（v7.12.7）：
+#   旧 Dockerfile.backend 分两步安装依赖，根 requirements.txt 用浮动范围
+#   （celery>=5.3.0 / redis>=5.0.0），而 celery 的传递依赖 kombu 没被任何
+#   文件钉住 -> 两次构建之间 kombu 从 5.6.2 漂到 5.7.0，而 kombu 5.7.0 硬性
+#   要求 redis-py>=6.1.0，与钉死的 redis==5.0.1 冲突 ->
+#   celery-worker 上线即抛 kombu.exceptions.VersionMismatch 崩溃循环，
+#   定时任务（自动入库 / 低库存告警 / 数据库备份）停摆约 30 分钟。
+#   pip 在安装期不报这个冲突，所以镜像构建一直是绿的，坏镜像一路推到生产。
+#
+# 维护约定：
+#   1. 本文件 = 生产镜像内实际包集合的唯一真相源。改版本 = 改运行时行为，
+#      必须在同一次提交里说明原因（见 docs/guides/RELEASE_CHECKLIST.md）。
+#   2. 升级某个包时，必须同步更新：
+#        - requirements.lock.txt（本文件）
+#        - requirements.txt（若它是运行时直接依赖）
+#      两者的版本必须一致，scripts/verify_image_dependency_pins.py 会交叉校验。
+#   3. 新增运行时直接依赖时：先在 requirements.txt 里声明，再把它的传递
+#      依赖闭包补进本文件，然后重跑镜像校验门禁。
+#   4. 开发/测试工具一律放 requirements-dev.txt，**不进生产镜像**。
+#      本文件里保留的 pytest / black / flake8 / isort 等历史条目已在
+#      v7.12.9 迁移到 requirements-dev.txt，生产镜像不再携带。
+#
+# 校验门禁：
+#   python scripts/verify_image_dependency_pins.py --image <镜像名>
+# ==============================================================================
+
+aiofiles==23.2.1
+aiohttp==3.9.1
+aiosignal==1.4.0
+aiosqlite==0.22.1
+alembic==1.20.1
+amqp==5.4.1
+annotated-types==0.8.0
+anyio==3.7.1
+APScheduler==3.11.3
+asyncpg==0.32.0
+attrs==26.1.0
+bcrypt==4.1.2
+beautifulsoup4==4.15.0
+billiard==4.3.1
+celery==5.3.4
+certifi==2026.10.23
+cffi==2.1.1
+charset-normalizer==3.5.2
+click==8.5.0
+click-didyoumean==0.3.1
+click-plugins==1.1.1.2
+click-repl==0.4.1
+contourpy==1.3.3
+cryptography==50.0.2
+cycler==0.12.1
+Deprecated==1.3.1
+dnspython==2.9.1
+ecdsa==0.19.2
+email-validator==2.1.0
+et_xmlfile==2.0.0
+evdev==2.0.0
+fastapi==0.110.0
+fonttools==4.68.0
+frozenlist==1.8.0
+greenlet==3.5.6
+gunicorn==26.2.0
+h11==0.16.0
+html5lib==1.1
+httpcore==1.0.9
+httptools==0.9.0
+httpx==0.25.2
+idna==3.20
+iniconfig==2.3.1
+kiwisolver==1.5.1
+kombu==5.6.2
+limits==5.8.0
+loguru==0.7.2
+lxml==6.1.3
+Mako==1.4.3
+MarkupSafe==3.0.4
+matplotlib==3.11.2
+mccabe==0.7.0
+multidict==6.9.1
+mypy_extensions==1.2.0
+narwhals==2.28.0
+numpy==2.4.6
+openpyxl==3.1.2
+packaging==26.3
+pandas==2.3.3
+passlib==1.7.4
+pathspec==1.1.1
+pillow==13.0.0
+pip==26.3
+platformdirs==4.14.3
+playwright==1.64.1
+plotly==7.1.0
+pluggy==1.7.0
+prompt_toolkit==3.0.53
+propcache==0.5.4
+psutil==5.9.6
+psycopg2-binary==2.9.9
+pyasn1==0.6.5
+pycodestyle==2.11.1
+pycparser==3.12
+pydantic==2.5.0
+pydantic_core==2.14.1
+pydantic-settings==2.1.0
+pyee==13.0.1
+pyflakes==3.1.0
+PyJWT==2.8.0
+pynput==1.8.2
+pyparsing==3.3.3
+python-calamine==0.6.2
+python-dateutil==4.0.0
+python-dotenv==1.0.0
+python-jose==3.3.0
+python-multipart==0.0.6
+python-xlib==0.33
+pytz==2026.6
+PyYAML==6.0.3
+redis==5.0.1
+requests==2.34.2
+rsa==4.9.1
+seaborn==0.13.2
+setuptools==79.0.1
+six==1.17.0
+slowapi==0.1.10
+sniffio==1.3.1
+soupsieve==4.0
+SQLAlchemy==2.0.23
+starlette==0.36.3
+typing_extensions==4.16.0
+tzdata==2026.6
+tzlocal==5.4.5
+urllib3==2.8.0
+uvicorn==0.54.0
+uvloop==0.23.0
+vine==5.1.0
+watchfiles==1.3.0
+wcwidth==0.9.4
+webencodings==0.6.1
+websockets==17.4
+wheel==0.46.3
+wrapt==2.5.2
+xlrd==1.2.0
+yarl==1.25.1

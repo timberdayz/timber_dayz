@@ -39,8 +39,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # [FIX v7.12.9] 先装锁文件（生产运行时依赖的唯一真相源），
+          # 再装直接依赖清单与开发依赖清单。
+          if [ -f requirements.lock.txt ]; then pip install -r requirements.lock.txt; fi
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
       - name: Prepare env

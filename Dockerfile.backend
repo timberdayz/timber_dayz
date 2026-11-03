@@ -20,17 +20,19 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件
-COPY backend/requirements.txt requirements.txt
-COPY requirements.txt requirements_base.txt
+# 复制依赖文件（锁文件 = 生产运行时依赖的单一真相源）
+COPY requirements.lock.txt requirements.lock.txt
 
-# 安装Python依赖
-# [FIX v7.12.8] 最后一步的 gunicorn / uvicorn 属于 API 进程管理器，一旦随上游发版
-# 漂移会直接打挂整个 API；必须钉死，钉值取当前生产验证过的版本。
+# 安装Python依赖（单步安装，版本全部锁死）
+# [FIX v7.12.9] 旧版分两步安装（backend/requirements.txt + 根 requirements.txt），
+# 两份清单有 26 个包互相矛盾且第二步会覆盖第一步；更严重的是 celery 的传递依赖
+# kombu 没被任何文件钉住，两次构建之间从 5.6.2 漂到 5.7.0，而 kombu 5.7.0 硬性
+# 要求 redis-py>=6.1.0，与钉死的 redis==5.0.1 冲突 ->
+# celery-worker 上线即抛 kombu.exceptions.VersionMismatch 崩溃循环（v7.12.7 事故）。
+# 现在只装 requirements.lock.txt：全部传递依赖版本锁死，不再有任何浮动解析。
+# gunicorn / uvicorn[standard] 已在 lock 文件内，不再单独安装。
 RUN pip install --upgrade pip && \
-    pip install -r requirements.txt && \
-    pip install -r requirements_base.txt && \
-    pip install gunicorn==26.2.0 uvicorn[standard]==0.54.0
+    pip install -r requirements.lock.txt
 
 # 复制应用代码
 COPY backend /app/backend

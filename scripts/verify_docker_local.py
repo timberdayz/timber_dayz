@@ -254,8 +254,11 @@ def check_build_files():
         safe_print("  [WARN] .dockerignore 不存在（建议添加）")
     
     # 检查必要的构建文件
+    # 注：v7.12.9 起依赖单一真相源，后端镜像只装 requirements.lock.txt；
+    # backend/requirements.txt 已删除。
     build_files = [
-        "backend/requirements.txt",
+        "requirements.lock.txt",
+        "requirements.txt",
         "frontend/package.json",
     ]
     

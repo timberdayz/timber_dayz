@@ -1,23 +1,42 @@
+# ==============================================================================
+# 生产运行时**直接依赖**清单（依赖单一真相源）
+# ==============================================================================
+# 维护规则：
+#   1. 本文件只声明直接依赖，版本一律用 == 钉死，禁止再出现 >= 浮动范围。
+#   2. 传递依赖的确切版本全部记录在 requirements.lock.txt —— 生产镜像
+#      （Dockerfile.backend / Dockerfile.collection）只安装那一个 lock 文件。
+#   3. 本文件的每个版本必须与 requirements.lock.txt 一致；
+#      scripts/verify_image_dependency_pins.py 会做交叉校验，不一致即失败。
+#   4. 开发/测试工具一律放 requirements-dev.txt，**不进生产镜像**。
+#   5. 改版本 = 改运行时行为，必须在同一次提交里说明原因。
+#
+# 历史（v7.12.7 生产事故）：旧 Dockerfile.backend 分两步装依赖，根清单用浮动
+# 范围，celery 的传递依赖 kombu 没被任何文件钉住 -> kombu 从 5.6.2 漂到 5.7.0，
+# 而 kombu 5.7.0 硬性要求 redis-py>=6.1.0，与钉死的 redis==5.0.1 冲突 ->
+# celery-worker 上线即崩溃循环，定时任务停摆约 30 分钟。
+# 结论：凡是没被显式钉死的传递依赖，都会在两次构建之间随上游发版漂移。
+# ==============================================================================
+
 # Web 框架 (FastAPI 是后端 API 必需)
 fastapi==0.110.0
-starlette<0.37
+starlette==0.36.3
 
 # 数据处理
-pandas>=2.2.0
-numpy>=1.24.0
-openpyxl>=3.1.0
+pandas==2.3.3
+numpy==2.4.6
+openpyxl==3.1.2
 xlrd==1.2.0
-python-calamine>=0.6.2
+python-calamine==0.6.2
 
 # 数据库
-sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.9  # PostgreSQL驱动（同步）
-asyncpg>=0.29.0  # PostgreSQL异步驱动（v4.18.2新增）
-aiosqlite>=0.19.0  # SQLite异步驱动（开发/测试环境，v4.18.2新增）
-alembic>=1.13.0  # 数据库迁移工具
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9  # PostgreSQL驱动（同步）
+asyncpg==0.32.0  # PostgreSQL异步驱动（v4.18.2新增）
+aiosqlite==0.22.1  # SQLite异步驱动（开发/测试环境，v4.18.2新增）
+alembic==1.20.1  # 数据库迁移工具
 
 # 异步文件操作（v4.18.2新增）
-aiofiles>=23.0.0  # 异步文件I/O，优化上传/下载性能
+aiofiles==23.2.1  # 异步文件I/O，优化上传/下载性能
 
 # 异步任务队列和缓存
 # [FIX v7.12.8] Celery 全链路必须钉死版本，禁止使用浮动范围。
@@ -31,67 +50,70 @@ kombu==5.6.2  # Celery 消息传输层（必须钉死）
 amqp==5.4.1  # kombu 的 AMQP 依赖（必须钉死）
 billiard==4.3.1  # Celery 进程池依赖（必须钉死）
 redis==5.0.1  # Redis客户端
-apscheduler>=3.10.0  # 定时任务调度器（C类数据计算）
+apscheduler==3.11.3  # 定时任务调度器（C类数据计算）
 
 # Web框架
 # Streamlit已移除 - 项目已迁移到Vue.js 3前端
-# streamlit>=1.28.0
-# streamlit-aggrid>=0.3.0
-# streamlit-antd-components>=0.3.0
-# streamlit-option-menu>=0.3.6
+# streamlit==1.28.0
+# streamlit-aggrid==0.3.0
+# streamlit-antd-components==0.3.0
+# streamlit-option-menu==0.3.6
 
 # 系统监控
-psutil>=5.9.0
+psutil==5.9.6
 
 # 数据可视化
-plotly>=5.15.0
-matplotlib>=3.7.0
-seaborn>=0.12.0
+plotly==7.1.0
+matplotlib==3.11.2
+seaborn==0.13.2
 
 # 网络请求
-requests>=2.31.0
-httpx>=0.24.0  # 异步HTTP客户端（Metabase API调用需要）
+requests==2.34.2
+httpx==0.25.2  # 异步HTTP客户端（Metabase API调用需要）
+aiohttp==3.9.1  # 异步HTTP客户端（modules/utils/proxy_provider.py 运行时使用）
 
-# 开发：uvicorn 与热重载（Windows 下 WatchFiles 更稳定；Python 3.13 需 uvicorn>=0.38.0）
+# 服务进程与热重载
 # [FIX v7.12.8] uvicorn 是 API 的进程管理器，钉死避免随上游发版漂移打挂 API。
+# uvicorn[standard] 的 extras（uvloop/httptools/watchfiles/python-dotenv/PyYAML/websockets）
+# 全部在 requirements.lock.txt 里钉死，不会被浮动解析换掉。
 uvicorn[standard]==0.54.0
-watchfiles>=0.21.0
+gunicorn==26.2.0  # 生产进程管理器（Dockerfile.backend 的 CMD 使用）
+watchfiles==1.3.0
 
 # 数据采集 (Playwright替代Selenium)
-playwright>=1.40.0
+playwright==1.64.1
 
 # 配置管理
-pyyaml>=6.0
-python-dotenv>=1.0.0
-pydantic>=2.0.0  # 数据验证（modules/core/config_validator.py需要）
-pydantic-settings>=2.0.0  # Pydantic设置管理
+pyyaml==6.0.3
+python-dotenv==1.0.0
+pydantic==2.5.0  # 数据验证（modules/core/config_validator.py需要）
+pydantic-settings==2.1.0  # Pydantic设置管理
 
 # 日志记录
-loguru>=0.7.0
+loguru==0.7.2
 
 # 加密和安全
-cryptography>=41.0.0
-PyJWT>=2.8.0  # JWT认证（阶段2新增）
-passlib>=1.7.4  # 密码加密（阶段2新增）
-python-multipart>=0.0.6  # 文件上传支持（阶段2新增）
-bcrypt>=4.0.0  # 密码哈希（backend.services.auth_service 需要）
+cryptography==50.0.2
+PyJWT==2.8.0  # JWT认证（阶段2新增）
+python-jose==3.3.0  # JWT 备用实现（随 backend/requirements.txt 合并保留）
+passlib==1.7.4  # 密码加密（阶段2新增）
+python-multipart==0.0.6  # 文件上传支持（阶段2新增）
+bcrypt==4.1.2  # 密码哈希（backend.services.auth_service 需要）
 
 # 限流（slowapi - backend.middleware.rate_limiter 需要）
-slowapi>=0.1.10
-limits>=2.3.0
+slowapi==0.1.10
+limits==5.8.0
 
 # Email 验证（pydantic[email] - EmailStr 字段需要）
-email-validator>=2.0.0
-dnspython>=2.0.0
+email-validator==2.1.0
+dnspython==2.9.1
 
 # 其他工具
-python-dateutil>=2.8.0
-pytz>=2023.3
-pynput>=1.8.0
-
-
+python-dateutil==4.0.0
+pytz==2026.6
+pynput==1.8.2
 
 # HTML/Excel 伪装文件解析（orders 域 .xls→HTML）
-lxml>=5.0.0
-beautifulsoup4>=4.13.0
-html5lib>=1.1
+lxml==6.1.3
+beautifulsoup4==4.15.0
+html5lib==1.1

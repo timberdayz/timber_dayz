@@ -62,19 +62,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件
-COPY backend/requirements.txt requirements_backend.txt
-COPY requirements.txt requirements_base.txt
+# 复制依赖文件（锁文件 = 生产运行时依赖的单一真相源）
+COPY requirements.lock.txt requirements.lock.txt
 
-# 安装Python依赖
+# 安装Python依赖（单步安装，版本全部锁死）
+# [FIX v7.12.9] 旧版分两步安装 backend/requirements.txt + 根 requirements.txt，
+# 两份清单互相矛盾；现在只装 requirements.lock.txt，不再有浮动解析。
+# uvicorn[standard] 已在 lock 文件内，不再单独安装。
 RUN pip install --upgrade pip && \
-    pip install -r requirements_backend.txt && \
-    pip install -r requirements_base.txt && \
-    pip install uvicorn[standard]
+    pip install -r requirements.lock.txt
 
-# 安装Playwright并下载Chromium
-RUN pip install playwright && \
-    playwright install chromium && \
+# 下载Playwright浏览器
+# [FIX v7.12.9] playwright 已在 requirements.lock.txt 里钉死为 1.64.1；
+# 这里不再单独 `pip install playwright`（那会拉最新版本，导致采集镜像的
+# playwright 与后端镜像不一致而漂移）。
+RUN playwright install chromium && \
     playwright install-deps chromium
 
 # 复制应用代码

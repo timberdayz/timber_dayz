@@ -4,7 +4,7 @@
 背景（v7.12.7 生产事故）：
     2026-11-03 发布 v7.12.7 后，生产 celery-worker 与 celery-beat 崩溃循环，
     定时任务（自动入库、低库存告警、数据库备份）停摆约 30 分钟。
-    根因不是业务代码：Dockerfile.backend 分两步安装依赖，根 requirements.txt 里
+    根因不是业务代码：旧 Dockerfile.backend 分两步安装依赖，根 requirements.txt 里
     `celery>=5.3.0` / `redis>=5.0.0` 是浮动范围，而 celery 的传递依赖 kombu
     没有被任何文件钉住 —— kombu 5.6.2（v7.12.6 构建当天解析到的最新版）
     -> 5.7.0（v7.12.7 构建当天上游刚好发版）。kombu 5.7.0 的 redis transport
@@ -14,6 +14,17 @@
         versions 6.1.0 or later. You have 5.0.1
     pip 在安装期不报这个冲突，所以镜像构建一直是绿的，坏镜像一路推到了生产。
 
+v7.12.9 的改造（依赖单一真相源 + 锁文件）：
+    1. `requirements.lock.txt` 成为生产运行时依赖的**唯一真相源**：完整传递依赖
+       闭包，全部用 `==` 钉死，生产镜像只安装它。基线由本脚本**从 lock 文件自动
+       推导**，不再手工维护 CRITICAL_PACKAGES 列表（手抄就是下一个漂移源）。
+    2. `requirements.txt` 只声明运行时**直接依赖**，同样全部 `==` 钉死；它与
+       lock 文件必须逐包一致，本脚本做交叉校验。
+    3. `backend/requirements.txt` 已删除 —— 它与根清单重复且互相矛盾（26 个包），
+       其中 alembic 钉 1.12.1、根清单要求 >=1.13.0，镜像里实际装的是 1.20.1。
+    4. `requirements-dev.txt` 承载开发/测试工具（pytest / black / testcontainers 等），
+       **不进生产镜像**。
+
 本脚本的作用：
     把"静默漂移"变成"构建失败"。构建完成后比对镜像内实际安装的版本与基线，
     不一致就 exit 1，让 CI 在推 CNB 镜像和执行生产部署之前就拦住。
@@ -22,14 +33,9 @@
     python scripts/verify_image_dependency_pins.py --image <镜像名或镜像ID>
 
 基线维护约定：
-    只有在明确接受某个依赖升级时才修改 CRITICAL_PACKAGES，并在同一次提交里
-    说明原因（见 docs/guides/RELEASE_CHECKLIST.md）。本文件的基线必须与
-    requirements.txt / backend/requirements.txt / Dockerfile.backend 中的钉版
-    一致，脚本会交叉校验，不一致同样失败。
-
-已知未覆盖项（见 RELEASE_CHECKLIST.md 的"依赖版本漂移"条目）：
-    numpy / pandas / starlette / pydantic / sqlalchemy / playwright / alembic
-    目前仍是浮动或分散在两份 requirements 里，尚未纳入本基线。
+    只有在明确接受某个依赖升级时才修改 `requirements.lock.txt`，并在同一次提交里
+    说明原因（见 docs/guides/RELEASE_CHECKLIST.md）。本脚本的基线由该文件自动
+    推导，因此升级只需改一处；lock 与 requirements.txt 不一致同样失败。
 """
 
 from __future__ import annotations
@@ -43,28 +49,24 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# 基线 = v7.12.6 生产验证通过的组合（celery 那一组），叠加 v7.12.7 上线后
-# 核对过的 API 进程管理器版本。OSV 对 kombu 5.6.2 / redis 5.0.1 无任何漏洞公告。
-CRITICAL_PACKAGES: dict[str, str] = {
-    # Celery 全链路：v7.12.7 事故点，必须钉死
-    "celery": "5.3.4",
-    "kombu": "5.6.2",
-    "amqp": "5.4.1",
-    "billiard": "4.3.1",
-    "redis": "5.0.1",
-    # API 进程管理器：漂移会直接打挂整个 API，同样必须钉死
-    "gunicorn": "26.2.0",
-    "uvicorn": "0.54.0",
-}
+# 生产运行时依赖的唯一真相源：完整传递依赖闭包，全部 == 钉死。
+LOCK_FILE = PROJECT_ROOT / "requirements.lock.txt"
 
-# 钉版来源文件：包名 -> 文件相对路径（用于交叉校验）
-REQUIREMENT_FILES = (
-    PROJECT_ROOT / "requirements.txt",
-    PROJECT_ROOT / "backend" / "requirements.txt",
+# 运行时直接依赖清单（只声明直接依赖，版本同样 == 钉死）。
+RUNTIME_REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
+
+# 生产镜像的 Dockerfile：必须只安装 lock 文件。
+DOCKERFILES = (
+    PROJECT_ROOT / "Dockerfile.backend",
+    PROJECT_ROOT / "Dockerfile.collection",
 )
 
 PIN_PATTERN = re.compile(
     r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?\s*==\s*([^\s;#]+)"
+)
+# 任何非 `==` 的版本约束（浮动范围 / 兼容约束）都是漂移源，一律视为违规。
+FLOATING_PATTERN = re.compile(
+    r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?\s*(>=|<=|~=|>|<|!=)\s*([^\s;#]+)"
 )
 
 
@@ -93,56 +95,75 @@ def parse_pins(path: Path) -> dict[str, str]:
     return pins
 
 
-def parse_dockerfile_pins() -> dict[str, str]:
-    """读取 Dockerfile.backend 里 `pip install` 命令上的钉版。"""
-    dockerfile = PROJECT_ROOT / "Dockerfile.backend"
-    pins: dict[str, str] = {}
-    if not dockerfile.exists():
-        return pins
-    for raw_line in dockerfile.read_text(encoding="utf-8").splitlines():
+def parse_floating_specs(path: Path) -> list[str]:
+    """返回文件里所有使用浮动范围（非 `==`）的依赖声明。"""
+    offenders: list[str] = []
+    if not path.exists():
+        return offenders
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.split("#", 1)[0]
-        if "pip install" not in line:
+        if not line.strip():
             continue
-        for match in re.finditer(
-            r"([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?==([^\s\\]+)", line
-        ):
-            pins[match.group(1).lower()] = match.group(3).strip()
-    return pins
+        match = FLOATING_PATTERN.match(line)
+        if match:
+            offenders.append(line.strip())
+    return offenders
+
+
+def load_lock_pins() -> dict[str, str]:
+    """从 requirements.lock.txt 推导基线（自动推导，避免手抄错误）。"""
+    return parse_pins(LOCK_FILE)
+
+
+# 基线 = requirements.lock.txt 的全部钉版（v7.12.9 起自动推导，不再手抄）。
+CRITICAL_PACKAGES: dict[str, str] = load_lock_pins()
 
 
 def collect_declared_pins() -> tuple[dict[str, str], list[str]]:
-    """汇总三处声明的钉版，并报告关键包之间互相冲突的项。
+    """交叉校验 requirements.txt 的直接依赖声明与 lock 文件是否一致。
 
-    只检查 CRITICAL_PACKAGES 覆盖的包：仓库里本来就存在若干历史遗留的版本分歧
-    （fastapi / alembic / numpy 等），那些不在本次门禁范围内，不应让门禁永远失败。
+    只比较 requirements.txt 里声明过的包：lock 文件里还有大量传递依赖
+    （kombu / amqp / billiard / greenlet ...），它们不是项目直接依赖，
+    不应该出现在 requirements.txt 里。
     """
-    declared: dict[str, str] = {}
+    declared: dict[str, str] = parse_pins(RUNTIME_REQUIREMENTS_FILE)
     conflicts: list[str] = []
-    sources: list[tuple[str, Path]] = [
-        (str(path.relative_to(PROJECT_ROOT)), path) for path in REQUIREMENT_FILES
-    ]
-    for label, path in sources:
-        for name, version in parse_pins(path).items():
-            if name not in CRITICAL_PACKAGES:
-                continue
-            existing = declared.get(name)
-            if existing is not None and existing != version:
-                conflicts.append(
-                    f"{name}: {label} 钉 {version}，此前已声明 {existing}"
-                )
-                continue
-            declared[name] = version
-    for name, version in parse_dockerfile_pins().items():
-        if name not in CRITICAL_PACKAGES:
-            continue
-        existing = declared.get(name)
-        if existing is not None and existing != version:
+    baseline = load_lock_pins()
+
+    for name, version in sorted(declared.items()):
+        expected = baseline.get(name)
+        if expected is None:
             conflicts.append(
-                f"{name}: Dockerfile.backend 钉 {version}，此前已声明 {existing}"
+                f"{name}: requirements.txt 声明了 {version}，但 requirements.lock.txt 里没有这个包"
             )
-            continue
-        declared[name] = version
+        elif expected != version:
+            conflicts.append(
+                f"{name}: requirements.txt 钉 {version}，requirements.lock.txt 钉 {expected}（两者需同步）"
+            )
     return declared, conflicts
+
+
+def check_dockerfiles() -> list[str]:
+    """检查生产镜像的 Dockerfile：必须只安装 lock 文件，不允许二次安装。"""
+    failures: list[str] = []
+    for dockerfile in DOCKERFILES:
+        if not dockerfile.exists():
+            failures.append(f"{dockerfile.name}: 文件不存在")
+            continue
+        content = dockerfile.read_text(encoding="utf-8")
+        name = dockerfile.name
+        if "pip install -r requirements.lock.txt" not in content:
+            failures.append(f"{name}: 未安装 requirements.lock.txt")
+        for raw_line in content.splitlines():
+            line = raw_line.split("#", 1)[0]
+            if "pip install" not in line:
+                continue
+            if "-r requirements.lock.txt" in line:
+                continue
+            if "pip install --upgrade pip" in line:
+                continue
+            failures.append(f"{name}: 存在 lock 之外的依赖安装命令：{line.strip()}")
+    return failures
 
 
 def read_image_versions(image: str) -> dict[str, str]:
@@ -179,17 +200,29 @@ def read_image_versions(image: str) -> dict[str, str]:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
+    if not LOCK_FILE.exists():
+        print(f"[FAIL] 缺少依赖锁文件：{LOCK_FILE}")
+        return 1
+
+    baseline = load_lock_pins()
+    if not baseline:
+        print(f"[FAIL] 依赖锁文件没有任何钉版：{LOCK_FILE}")
+        return 1
+
     declared, conflicts = collect_declared_pins()
+    failures: list[str] = list(conflicts)
+    failures.extend(check_dockerfiles())
+
+    for path in (LOCK_FILE, RUNTIME_REQUIREMENTS_FILE):
+        for offender in parse_floating_specs(path):
+            failures.append(f"{path.name}: 存在浮动版本范围：{offender}")
+
     installed = read_image_versions(args.image)
 
-    failures: list[str] = []
-    if conflicts:
-        failures.extend(conflicts)
-
     print(f"[dependency-pins] image: {args.image}")
-    for name, expected in sorted(CRITICAL_PACKAGES.items()):
+    print(f"[dependency-pins] baseline: {LOCK_FILE.name} ({len(baseline)} 个钉版)")
+    for name, expected in sorted(baseline.items()):
         actual = installed.get(name)
-        declared_version = declared.get(name)
         status = "OK"
         if actual is None:
             failures.append(f"{name}: 镜像内未安装（期望 {expected}）")
@@ -197,26 +230,35 @@ def main(argv: list[str] | None = None) -> int:
         elif actual != expected:
             failures.append(f"{name}: 镜像内为 {actual}，期望 {expected}")
             status = "MISMATCH"
-        elif declared_version is not None and declared_version != expected:
+        elif declared.get(name) is not None and declared[name] != expected:
             failures.append(
-                f"{name}: 依赖文件钉 {declared_version}，基线为 {expected}（两者需同步）"
+                f"{name}: 依赖文件钉 {declared[name]}，基线为 {expected}（两者需同步）"
             )
             status = "BASELINE-DRIFT"
-        print(f"  {name:<12} baseline={expected:<10} image={actual or '-':<10} {status}")
+        print(f"  {name:<24} baseline={expected:<12} image={actual or '-':<12} {status}")
+
+    # 镜像里出现 lock 之外的包 = 有人绕过锁文件装了东西，同样要拦住。
+    for name in sorted(set(installed) - set(baseline)):
+        failures.append(
+            f"{name}: 镜像内为 {installed[name]}，但不在 requirements.lock.txt 中（锁外安装）"
+        )
+        print(f"  {name:<24} baseline={'-':<12} image={installed[name]:<12} EXTRA")
 
     if failures:
         print("[FAIL] 镜像依赖版本校验未通过：")
         for item in failures:
             print(f"  - {item}")
         print(
-            "[HINT] 若这是有意接受的升级，请同步更新 "
-            "scripts/verify_image_dependency_pins.py 的 CRITICAL_PACKAGES 与 "
-            "requirements.txt / backend/requirements.txt 的钉版；"
+            "[HINT] 若这是有意接受的升级，请同步更新 requirements.lock.txt 与 "
+            "requirements.txt 的钉版，并重跑本门禁；"
             "否则请把依赖钉死，避免随上游发版漂移。"
         )
         return 1
 
-    print(f"[PASS] {len(CRITICAL_PACKAGES)} 个关键依赖版本与基线一致。")
+    print(
+        f"[PASS] {len(baseline)} 个依赖版本与 {LOCK_FILE.name} 一致，"
+        "镜像内无锁外依赖。"
+    )
     return 0
 
 
