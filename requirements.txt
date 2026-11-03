@@ -20,8 +20,17 @@ alembic>=1.13.0  # 数据库迁移工具
 aiofiles>=23.0.0  # 异步文件I/O，优化上传/下载性能
 
 # 异步任务队列和缓存
-celery>=5.3.0  # 异步任务队列
-redis>=5.0.0  # Redis客户端
+# [FIX v7.12.8] Celery 全链路必须钉死版本，禁止使用浮动范围。
+# 事故背景：v7.12.7 构建时 kombu 从 5.6.2 自动漂到 5.7.0，而 kombu 5.7.0 的 redis
+# transport 硬性要求 redis-py>=6.1.0，与下方钉死的 redis==5.0.1 冲突 ->
+# celery-worker 启动即抛 kombu.exceptions.VersionMismatch 崩溃循环，定时任务停摆。
+# 结论：凡是没有被显式钉死的传递依赖，都会在两次构建之间随上游发版漂移。
+# 此处的钉版组合 = v7.12.6 生产验证过的组合，且 OSV 无相关漏洞公告。
+celery==5.3.4  # 异步任务队列
+kombu==5.6.2  # Celery 消息传输层（必须钉死）
+amqp==5.4.1  # kombu 的 AMQP 依赖（必须钉死）
+billiard==4.3.1  # Celery 进程池依赖（必须钉死）
+redis==5.0.1  # Redis客户端
 apscheduler>=3.10.0  # 定时任务调度器（C类数据计算）
 
 # Web框架
@@ -44,7 +53,8 @@ requests>=2.31.0
 httpx>=0.24.0  # 异步HTTP客户端（Metabase API调用需要）
 
 # 开发：uvicorn 与热重载（Windows 下 WatchFiles 更稳定；Python 3.13 需 uvicorn>=0.38.0）
-uvicorn[standard]>=0.38.0
+# [FIX v7.12.8] uvicorn 是 API 的进程管理器，钉死避免随上游发版漂移打挂 API。
+uvicorn[standard]==0.54.0
 watchfiles>=0.21.0
 
 # 数据采集 (Playwright替代Selenium)

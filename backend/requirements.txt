@@ -1,7 +1,8 @@
 # FastAPI后端依赖
 fastapi==0.104.1
 # Python 3.13 需 uvicorn>=0.38.0，否则 run(app,...) 报 TypeError（见 run.py --local 后端窗口）
-uvicorn[standard]>=0.38.0
+# [FIX v7.12.8] 钉死，避免 API 进程管理器随上游发版漂移。
+uvicorn[standard]==0.54.0
 sqlalchemy==2.0.23
 alembic==1.12.1
 pydantic==2.5.0
@@ -21,7 +22,12 @@ email-validator==2.1.0
 psycopg2-binary==2.9.9  # PostgreSQL驱动
 
 # 异步任务和缓存
+# [FIX v7.12.8] 与根 requirements.txt 保持同一组钉版，防止两步安装时 kombu 漂到
+# 5.7.0（要求 redis-py>=6.1.0）而 redis 仍被钉在 5.0.1 -> celery 崩溃循环。
 celery==5.3.4
+kombu==5.6.2
+amqp==5.4.1
+billiard==4.3.1
 redis==5.0.1
 
 # API速率限制（v4.6.3新增）

@@ -277,6 +277,20 @@ jobs:
           build-args: |
             PYTHON_VERSION=3.11
 
+      # [FIX v7.12.8] 依赖版本漂移门禁
+      # v7.12.7 把 kombu 从 5.6.2 漂到 5.7.0，害得 celery-worker 上线即崩溃循环，
+      # 而 pip 安装期不报这个冲突，所以构建一直是绿的。构建完立刻核对镜像内的关键
+      # 依赖版本，不一致就中断本 job：CNB 镜像推送与生产部署都依赖本 job 成功，
+      # 因此坏镜像到不了生产。
+      - name: Verify backend image dependency pins (Release Gate)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          BACKEND_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${TAG}"
+          docker pull "${BACKEND_IMAGE}"
+          python3 scripts/verify_image_dependency_pins.py --image "${BACKEND_IMAGE}"
+
       - name: Build and push backend-full image (collection, Dockerfile.collection)
         uses: docker/build-push-action@v6
         with:
@@ -350,6 +364,26 @@ jobs:
             -e AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false \
             "${BACKEND_IMAGE}" \
             sh -lc "gunicorn backend.main:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 60 --access-logfile - --error-logfile - --log-level info & pid=\$!; sleep 20; kill \$pid; wait \$pid || true"
+
+          # [FIX v7.12.8] Celery 连通性冒烟
+          # v7.12.7 的 celery-worker 崩溃循环正是 broker 依赖版本漂移造成的，
+          # 而当时的冒烟只测了 API 导入和 gunicorn 启动，从没启动过 celery，
+          # 所以坏镜像一路到了生产。这里真起一次 worker 连一次 broker，
+          # 同类漂移再发生就会在这里被拦住。
+          docker run --rm --network "${NETWORK_NAME}" \
+            -e DATABASE_URL=postgresql://erp_user:smoke_pg_pass@xihong_erp_backend_smoke_postgres:5432/xihong_erp \
+            -e REDIS_URL=redis://:redis_pass_2025@xihong_erp_backend_smoke_redis:6379/0 \
+            -e CELERY_BROKER_URL=redis://:redis_pass_2025@xihong_erp_backend_smoke_redis:6379/0 \
+            -e CELERY_RESULT_BACKEND=redis://:redis_pass_2025@xihong_erp_backend_smoke_redis:6379/0 \
+            -e SECRET_KEY=smoke-secret-key \
+            -e JWT_SECRET_KEY=smoke-jwt-secret-key \
+            -e ACCOUNT_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY= \
+            -e RUN_MIGRATIONS=0 \
+            -e ENVIRONMENT=development \
+            -e APP_ENV=development \
+            -e DEPLOYMENT_ROLE=api \
+            "${BACKEND_IMAGE}" \
+            sh -lc "celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=1 & pid=\$!; sleep 30; if kill -0 \$pid 2>/dev/null; then echo '[smoke] celery worker alive'; kill \$pid; wait \$pid || true; else echo '[smoke] celery worker died during startup'; exit 1; fi"
 
       - name: Build and push frontend image
         uses: docker/build-push-action@v6

@@ -25,10 +25,12 @@ COPY backend/requirements.txt requirements.txt
 COPY requirements.txt requirements_base.txt
 
 # 安装Python依赖
+# [FIX v7.12.8] 最后一步的 gunicorn / uvicorn 属于 API 进程管理器，一旦随上游发版
+# 漂移会直接打挂整个 API；必须钉死，钉值取当前生产验证过的版本。
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt && \
     pip install -r requirements_base.txt && \
-    pip install gunicorn uvicorn[standard]
+    pip install gunicorn==26.2.0 uvicorn[standard]==0.54.0
 
 # 复制应用代码
 COPY backend /app/backend

@@ -75,6 +75,56 @@ same SHA.
 - The collector machine's `REDIS_PORT` must point at the **host** Redis port
   (on this workstation: **16379**), not the container default `6379`.
 
+### Dependency Version Drift (v7.12.7 incident)
+
+`Dockerfile.backend` installs dependencies in **two** steps:
+
+```dockerfile
+pip install -r requirements.txt        # = backend/requirements.txt  (mostly pinned)
+pip install -r requirements_base.txt   # = root requirements.txt     (mostly floating)
+```
+
+The second step wins. Whatever is left floating there is re-resolved on **every
+build**, so two builds of nearby commits can end up with different transitive
+dependency versions. That is exactly what broke v7.12.7:
+
+| package | v7.12.6 (good) | v7.12.7 (broken) |
+|---|---|---|
+| kombu | 5.6.2 | **5.7.0** |
+| redis (redis-py) | 5.0.1 | 5.0.1 |
+
+`kombu 5.7.0` requires `redis-py>=6.1.0` for its Redis transport, but `redis-py` is
+pinned at `5.0.1` in `backend/requirements.txt`. pip does **not** report this
+conflict at install time, so the build stayed green and the image shipped. In
+production the worker then died on startup:
+
+```
+kombu.exceptions.VersionMismatch: Redis transport requires redis-py versions
+6.1.0 or later. You have 5.0.1
+```
+
+Both `celery-worker` and `celery-beat` crash-looped, so scheduled jobs (auto
+invoicing, low-stock alerts, DB backups) stopped. The collection chain was **not**
+affected — collection runs inside the API process via asyncio, not through Celery.
+
+**Rule**: every dependency in the Celery stack or in the API process manager must be
+pinned with `==` in **both** `requirements.txt` and `backend/requirements.txt`. Never
+rely on a floating range for it.
+
+**Guards added in v7.12.8**:
+
+- `scripts/verify_image_dependency_pins.py` compares the versions actually installed
+  in a built image against the baseline in that script, and cross-checks the baseline
+  against the `==` pins in the requirements files.
+- The release workflow runs that check right after the backend image is built, so a
+  drifted image never reaches the CNB mirror and never gets deployed.
+- The startup smoke test now also starts a real Celery worker against a throwaway
+  Redis, so a broker-connectivity regression fails the build instead of production.
+
+**Known gap**: `numpy`, `pandas`, `starlette`, `pydantic`, `sqlalchemy`, `playwright`
+and `alembic` are still floating or split across the two requirements files. A full
+lock file (`pip-compile`) is the real fix and is still open.
+
 ## Before Tagging
 
 1. Confirm the working tree is clean or only contains intended release changes
@@ -91,6 +141,9 @@ same SHA.
    ```bash
    git diff --name-only v<previous-tag>..HEAD -- sql/
    ```
+7. If any dependency file changed, confirm the pins are explicit (`==`) and that the
+   baseline in `scripts/verify_image_dependency_pins.py` still matches them — see
+   "Dependency Version Drift" above.
 
 ## Tag Release
 
@@ -198,7 +251,11 @@ Expected order:
 1. Confirm the backend health endpoint
 2. Confirm key pages load
 3. Confirm database migrations are applied
-4. Confirm Redis and Celery services are healthy
+4. Confirm Redis and Celery services are healthy — `celery-worker` must show
+   `Up ... (healthy)`, **not** `Restarting`. A container that has only been up for a
+   few seconds is crash-looping, and `celery-beat` reports `healthy` while it is
+   dying the same way. Read the worker log for a `VersionMismatch` traceback instead
+   of trusting the container status alone (see "Dependency Version Drift" above).
 5. Confirm the deployed tag matches the intended release
 6. If `sql/` view assets changed, confirm Phase 2.7 succeeded:
    - server log: `${PRODUCTION_PATH}/deploy-logs/rebuild_views_<timestamp>.log`
