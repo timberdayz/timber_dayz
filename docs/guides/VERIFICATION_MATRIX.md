@@ -49,6 +49,23 @@ not gate the release. Fix it in the post-launch V2 rebuild — the fix is to mak
 loader restore `os.environ` after the test (or to use `monkeypatch.setenv` for the values
 it writes).
 
+### Inventory backlog age-tier mismatch (post-launch V2 debt, recorded 2026-11-04)
+
+`api.inventory_backlog_summary_module` buckets stock by `days_since_restock` as
+active `<30`, mid `90-180`, deep `>=180`, which leaves **30-90 days unbucketed**, while the
+business pricing tiers in `finance.sku_pricing_policies` (`min_restock_days` 0 / 60 / 90 /
+120) already count stock as stale at **60 days**. Measured in production on 2026-11-04:
+167 rows / 167 SKUs / value 47,430.31 are already "stale 30 days" for pricing but show up
+as `mid=0, deep=0, active=30` on the dashboard card, and a further 321 rows
+(value 150,756.31, 63% of the 239,733.02 total) fall into neither tier system. The card's
+`total_value` is a full total while its row/SKU counters cover only 30 rows, so the card
+reads as "almost no backlog" while the clearance list holds 513 SKUs.
+
+Non-blocking: the underlying data is correct, only the display buckets disagree. Fix it in
+the post-launch V2 rebuild by aligning the view buckets with
+`finance.sku_pricing_policies` (or adding the 30-90 band). Do **not** change the
+`days_since_restock` source or the clearance criterion — the current numbers are real.
+
 ## Frontend Changes
 
 - Prefer targeted frontend checks for the affected module.
