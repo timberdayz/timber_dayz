@@ -11,8 +11,9 @@
 2. **配置字典里 traffic 与 analytics 各写一份** —— `data_standardizer.py`、
    `event_listeners.py`、`deduplication_fields_config.py` 三处都有两份条目，
    内容还互不相同（有的多一个字段、有的少两个刷新目标）；
-3. **采集侧把 analytics 反向转回 traffic** —— `collection_center/app.py`
-   里 `analytics -> traffic`，使新采集的文件又被写回已废弃的域名。
+3. **采集侧把 analytics 反向转回 traffic** —— 原 `collection_center/app.py`
+   里 `analytics -> traffic`，使新采集的文件又被写回已废弃的域名
+   （该遗留 CLI 老程序已于 2026-11-03 退役删除）。
 
 结果是同一个业务域在不同链路上被当成两个域：统计口径漂移、白名单与实际写入不一致、
 `data_domain` 字段在库里出现历史遗留值。
