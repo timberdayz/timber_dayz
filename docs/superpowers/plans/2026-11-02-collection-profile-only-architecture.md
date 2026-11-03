@@ -1661,11 +1661,79 @@ Expected: exit=0。
 |---|---|---|
 | E1 | 全程没弹验证码 | `core.collection_tasks.verification_type` 与 `verification_screenshot` **均为 NULL** |
 | E2 | 登录门检查通过 | `core.collection_task_logs.details` 里 `step_id="login_gate_result"` 的 `login_gate_ready=true` |
-| E3 | 确实复用了 profile 登录态 | 同一行 details 里 `reused_session=true` + 诊断 `session_reused=true` + `session_source=profile` |
+| E3 | 确实复用了 profile 登录态 | 同一行 details 里 `session_reused=true` + `session_source=profile`（**注意**：details 里的键是 `session_reused`，不是 `reused_session` —— 后者是 `params` 里的内部键，只会出现在日志 **message** 文本 `Login completed successfully (reused_session=True)` 里） |
 | E4 | profile cookie 已刷盘 | `profiles/<p>/<a>/Default/Network/Cookies` 的 **mtime 前进** |
 
 > E1~E3 可直接用 SQL 从 `core.collection_task_logs` 取证；E4 从文件系统取证。
 > 「无验证码截图」可作辅助证据：`temp/screenshots/verification_<platform>_<时间戳>.png` 在采集窗口内**没有**新文件。
+
+#### 10.4.1 可执行清单（2026-11-03 实测校准）
+
+**环境（实测）**：本机 postgres 在 `15432`、redis 在 `16379`（容器 6379），`ACCOUNT_ENCRYPTION_KEY` 需在 `.env` 里；
+后端 API 默认**没在跑**（本机实测 8000/8001 无监听）→ 要先起。
+
+```powershell
+# 0) 起本地后端（含前端）
+Set-Location F:\Vscode\python_programme\AI_code\xihong_erp
+python run.py --local
+
+# 1) 登录拿 token（本机超级用户 xihong / xihong@xihong.com；口令由运维提供）
+curl -s -X POST http://127.0.0.1:8000/api/auth/login -H 'Content-Type: application/json' `
+  -d '{"username":"xihong","password":"<口令>"}'
+# -> 取返回里的 access_token
+
+# 2) 备份会话目录（代码已不读它，这一步只为「无新文件」判据干净）
+Rename-Item "data\sessions" "data\sessions.bak-20261103"
+
+# 3) 备份验收账号的 profile（注意：它被 3 个店铺账号共用）
+Rename-Item "profiles\shopee\shopeeKR" "profiles\shopee\shopeeKR.bak-20261103"
+
+# 4) 建采集任务（shopee_sg_eternalbloom_local 的可用数据域：products / services / analytics）
+curl -s -X POST http://127.0.0.1:8000/api/collection/tasks -H 'Content-Type: application/json' `
+  -H "Authorization: Bearer <token>" `
+  -d '{"platform":"shopee","account_id":"shopee_sg_eternalbloom_local","data_domains":["products"],"granularity":"daily","date_range":{"start":"2026-11-01","end":"2026-11-02"}}'
+```
+
+**取证 SQL**（`docker exec xihong_erp_postgres psql -U erp_user -d xihong_erp`）：
+
+```sql
+-- E1：本次任务没有验证码
+select task_id, status, verification_type, verification_screenshot, started_at, completed_at
+from core.collection_tasks order by id desc limit 3;
+
+-- E2 + E3：登录门结果 + 复用证据 + 新诊断字段
+-- （details 列类型是 json 不是 jsonb -> 不能用 ? 操作符，用 ->> 或 ::text）
+select l.task_id, l.level, l.message,
+       l.details->>'login_gate_ready' as gate_ready,
+       l.details->>'session_reused'    as reused,
+       l.details->>'session_source'    as source,
+       l.details->>'session_profile_path' as profile_path,
+       l.details->>'session_proxy'      as proxy
+from core.collection_task_logs l
+where l.details is not null
+  and (l.details::text like '%login_gate_result%' or l.details::text like '%session_reused%')
+order by l.id desc limit 10;
+
+-- E3 单独看诊断字段（session_profile_path / session_reused / session_proxy / session_source）
+select l.task_id, l.details->>'session_profile_path' as profile_path,
+       l.details->>'session_reused' as reused,
+       l.details->>'session_source' as source,
+       l.details->>'session_proxy' as proxy
+from core.collection_task_logs l
+where l.details::text like '%session_reused%'
+order by l.id desc limit 5;
+```
+
+**E4 取证**（文件系统）：
+```powershell
+Get-Item "profiles\shopee\shopeeKR\Default\Network\Cookies" | Select-Object FullName, Length, LastWriteTime
+```
+
+**第 5 步的判读**：第一次跑完 → profile 的 Cookies mtime 前进；**立刻再跑一次** → 任务 `status=success`、
+`verification_type` 仍为 NULL、日志里 `login_gate_ready=true` + `reused_session=true` + `session_reused=true` + `session_source=profile`
+→ 四项同时成立才算「免验证码」通过。
+
+> ⚠️ **第 3 步会让 3 个店铺账号一起退回「需重新登录」**（它们共用主账号 `shopee KR` 的 profile）—— 这是预期，且只改名不删除，随时可还原。
 
 **Expected**：第 4、5、6、7、8、9 步全部符合。**第 4 或第 5 步不过 → 停下报告，不要加临时补丁。**
 
