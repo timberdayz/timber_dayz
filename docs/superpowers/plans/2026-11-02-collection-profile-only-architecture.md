@@ -1244,6 +1244,23 @@ Expected: exit=0。
 
 > ⚠️ **前置依赖**：本步依赖 Task 3 / 4 / 5 / 6 / 7 **全部完成**。在 Task 7 落地前，`SessionManager.__init__` 仍会 mkdir 并写 `data/sessions/`（`session_manager.py:169-170`）→ 第 1/4/5/8 步必然失败。
 >
+> ⚠️ **profile 根目录是「仓库根相对」的，不是 cwd 相对**（实测）：`session_manager.py:25` 的 `REPO_ROOT = Path(__file__).resolve().parents[3]`，
+> `get_persistent_profile_path` 用 `REPO_ROOT / "profiles" / <platform> / <safe_account_id>`。
+> → **从 worktree 跑验收，用的是 worktree 自己的 `profiles/`，里面是空的**（只有 6 个测试残留的空目录：
+> `miaoshou/acc-1`、`miaoshou/main-1`、`shopee/account-1`、`shopee/account-2`、`shopee/main-1`、`shopee/shopee_sg_x`）。
+> → **主仓 `profiles/` 实测有 18 个真实 profile**（每个含 `Default/Network/Cookies`），例如
+> `shopee/Leslieshopmain`（2026-11-1）、`shopee/shopeeKR`（2026-11-2）、`tiktok/Tiktok1店`（2026-11-2）；
+> 还存在一个 `_alt` 旁路目录 `shopee/虾皮巴西东朗照明主体_alt`（Task 7 要清理）。
+> → **验收账号 `shopee_sg_eternalbloom_local` 在主仓 `profiles/` 里没有对应目录** → 第 2 步是「无 profile 可清」，
+> 第 3 步必然是**首次人工登录**。
+> → **因此真实采集验收必须在「分支合并回 main 之后」跑**（或在 worktree 里先把主仓 profile 拷过去）。
+> 在 worktree 里跑只能证明「首次登录能落进 profile」，**证明不了「第二次免验证码」**（那是本步的核心）。
+>
+> ⚠️ **`safe_account_id` 的净化规则**（`session_manager.py:213`）：`isalnum() or _ or -` → **空格被去掉，中文保留**。
+> 所以账号 "shopee KR" 的 profile 目录是 `profiles/shopee/shopeeKR/`，
+> 账号 "虾皮巴西东朗照明主体" 的目录是 `profiles/shopee/虾皮巴西东朗照明主体/`。
+> 这与会话目录规则 A（`safe_session_account_dirname`，**保留空格**）**不同** —— 两套命名规则并存是既有事实，不要混用。
+>
 > ⚠️ **本地触发采集的唯一入口是 HTTP API**：`POST /api/collection/tasks`（需管理员登录）。仓库里**没有**创建采集任务的 CLI 脚本。巡店面板启动：`python scripts/pwcli_inspection_panel.py`（自动开 `http://127.0.0.1:<port>/?token=<token>`）。
 >
 > ⚠️ **代理配置无 UI**：只能直接改 DB 的 `core.shop_accounts.extra_config["proxy"]`。
