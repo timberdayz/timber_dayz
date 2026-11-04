@@ -197,7 +197,7 @@ def upgrade():
 
 ## 相关文档
 
-- [用户管理API文档](../API_CONTRACT.md)
+- [用户管理API文档](archive/root-md-cleanup-2026-11-04/API_CONTRACT_v1.1_v4x_20250131.md)
 - [用户状态设计](../openspec/changes/archive/2026-01-05-add-user-registration-approval/proposal.md)
 - [审计日志规范](../DEVELOPMENT_RULES/ERROR_HANDLING_AND_LOGGING.md)
 

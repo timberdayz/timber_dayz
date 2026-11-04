@@ -181,7 +181,7 @@ restoreUser(userId)                // 恢复用户
 ## 相关文档
 
 - [用户软删除功能实现](./SOFT_DELETE_USER_IMPLEMENTATION.md)
-- [用户管理API文档](../API_CONTRACT.md)
+- [用户管理API文档](archive/root-md-cleanup-2026-11-04/API_CONTRACT_v1.1_v4x_20250131.md)
 
 ---
 

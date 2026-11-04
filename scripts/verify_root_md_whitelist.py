@@ -13,7 +13,6 @@ from pathlib import Path
 
 ALLOWED = {
     "AGENTS.md",
-    "API_CONTRACT.md",
     "CHANGELOG.md",
     "CLAUDE.md",
     "FIELD_DICTIONARY_REFERENCE.md",

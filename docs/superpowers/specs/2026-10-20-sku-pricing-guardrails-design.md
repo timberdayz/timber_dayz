@@ -699,7 +699,7 @@ age_days = None → 命中 min_age_days 最小的一行（兜底档，正常是 
 > 实测复现：`duplicate key value violates unique constraint "uq_sku_pricing_policies_current"，
 > DETAIL: Key (min_age_days)=(60) already exists`。
 >
-> 这不是缺陷，是「一个库龄起点只能有一档」这条业务规则��直接体现。
+> 这不是缺陷，是「一个库龄起点只能有一档」这条业务规则的直接体现。
 > 但它**限制了运营能改的范围**：想把 60 改成 45 可以（45 空闲），
 > 想把 60 改成 30 就不行（30 已经是另一档）。
 > 界面上必须提示这一点，运营才会知道自己该先动哪一档。
@@ -1255,6 +1255,8 @@ const fromPercent = (value, fallback = 0) => value == null || value === "" ? fal
 - `frontend/tests/productCenterUi.test.mjs` 其余断言不受影响。
 
 **无需改动的文档**：根目录 `API_CONTRACT.md` 与 `docs/API_CONTRACTS.md` 均为通用契约规范（响应格式、错误处理约定），**未列出商品中心的具体路由**，因此本次新增端点不需要更新它们。
+
+> 注（2026-11-04）：根目录 `API_CONTRACT.md` 已归档到 `docs/archive/root-md-cleanup-2026-11-04/API_CONTRACT_v1.1_v4x_20250131.md` —— 它停留在 v4.x 时代，声明的 21 个接口里已有 12 个在生产不存在。接口契约的现行真源是运行时 `/api/openapi.json`、`docs/API_CONTRACTS.md`，以及 CI 实际执行的 `scripts/validate_api_contracts.py` / `scripts/verify_api_contract_consistency.py`。
 
 ---
 

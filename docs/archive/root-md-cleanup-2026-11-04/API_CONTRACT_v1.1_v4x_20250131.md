@@ -1,8 +1,31 @@
+# API 契约（v1.1，2025-01-31）—— 已归档，不再是接口依据
+
+> **本文件已归档，请勿再作为接口契约的参考来源。**
+>
+> - **归档日期**：2026-11-04（v7.12.9 收尾，随本轮根目录 Markdown 清理一并归档）
+> - **归档原因**：本文档停留在 v4.x 时代。把它声明的 21 个接口与生产 `v7.12.9` 的
+>   `/api/openapi.json`（490 条路径）逐条比对，**21 个里有 12 个已不存在**（占 43%），
+>   包括 `/api/dashboard/overview`、全部 `/api/store-analytics/*`（v7.12.9 已退役）、
+>   `/api/business-overview/*`（路径已变更）、`/api/field-mapping/apply-template`、
+>   `/api/target-management/{id}/calculate` 等。
+>   本文档自称「唯一真源」，但它既不在 `docs/ACTIVE_DOCS.md` 的活跃清单里，
+>   也不是 CI 实际校验的对象 —— 继续留在根目录只会误导人。
+> - **接口契约的现行真源**（按可靠性排序）：
+>   1. **运行时 OpenAPI**：`/api/openapi.json`（本地 `http://127.0.0.1:8000/api/openapi.json`）
+>      —— 由代码自动生成，永远与实际路由一致；
+>   2. **统一响应格式与错误处理标准**：`docs/API_CONTRACTS.md`；
+>   3. **实现规范**：`docs/DEVELOPMENT_RULES/API_AND_CONTRACTS.md`（活跃文档）；
+>   4. **CI 实际执行的校验**：`scripts/validate_api_contracts.py`（响应格式）、
+>      `scripts/verify_api_contract_consistency.py`（前后端路径一致性）。
+> - **内容处理**：以下正文**原样保留**，仅供历史追溯。
+
+---
+
 # API 契约（唯一真源）
 
 版本: v1.1
 更新日期: 2025-01-31
-状态: 稳定
+状态: 已失效（原为「稳定」；2026-11-04 归档，接口已大幅变更，见上方归档说明）
 
 本文件定义后端查询与字段映射相关接口的入参、出参与约束，前后端以及脚本均以此为唯一参考，不在其他文档重复维护。
 
@@ -721,8 +744,13 @@
 
 ---
 
-## 变更流程
+## 变更流程（已失效，保留供追溯）
 - 破坏性修改需在此文件先更新契约，并在`CHANGELOG.md`记录；前端/脚本变更后同步合并。
-- 本文件为根目录白名单文档之一：README.md / CHANGELOG.md / API_CONTRACT.md。
+- ~~本文件为根目录白名单文档之一：README.md / CHANGELOG.md / API_CONTRACT.md。~~
+  → 2026-11-04 起本文件已移出根目录（归档到 `docs/archive/root-md-cleanup-2026-11-04/`），
+  根目录 Markdown 白名单只剩 `README.md` / `CHANGELOG.md`。
+  **接口变更的正确落点是**：`/api/openapi.json`（自动生成）+
+  `docs/API_CONTRACTS.md`（响应格式标准）+
+  `scripts/validate_api_contracts.py` / `scripts/verify_api_contract_consistency.py`（CI 校验）。
 
 

@@ -102,7 +102,7 @@
 - [C类数据核心字段定义](C_CLASS_DATA_CORE_FIELDS.md)
 - [货币策略文档](CURRENCY_POLICY.md)
 - [数据质量保障指南](DATA_QUALITY_GUIDE.md)
-- [API契约更新](API_CONTRACT.md)
+- [API契约更新](archive/root-md-cleanup-2026-11-04/API_CONTRACT_v1.1_v4x_20250131.md)
 
 ---
 

@@ -533,7 +533,7 @@ WHERE exchange_rate > 100 OR exchange_rate < 0.0001;
 ### **技术文档**
 
 - [架构设计指南](V4_6_0_ARCHITECTURE_GUIDE.md) - 深入理解v4.6.0设计
-- [API契约](../API_CONTRACT.md) - API接口文档
+- [API契约](archive/root-md-cleanup-2026-11-04/API_CONTRACT_v1.1_v4x_20250131.md) - API接口文档
 - [更新日志](../CHANGELOG.md) - v4.6.0详细变更
 
 ### **开发规范**
