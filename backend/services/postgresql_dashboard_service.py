@@ -5,13 +5,18 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 
 from backend.models.database import AsyncSessionLocal, apply_statement_timeout
 from backend.services.inventory.inventory_dos_service import compute_dos
 from backend.services.inventory.inventory_restock_service import classify_restock_tier
-from backend.services.labor_cost_policy_service import LaborCostPolicyService
+from backend.services.labor_cost_projection_service import (
+    LABOR_COST_CALCULATION_VERSION,
+)
 from backend.utils.config import get_settings
+from modules.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 #: Dashboard 家族请求内的 DB 语句超时预算(毫秒)。
 #: 前端 axios 对 /dashboard/* 的超时是 70 秒,这里必须严格小于它。
@@ -1313,12 +1318,6 @@ class PostgresqlDashboardService:
         """Use the same persisted expense and projected-labor sources as expense management."""
         year_month = period_month.strftime("%Y-%m")
         async with AsyncSessionLocal() as session:
-            effective_month = await LaborCostPolicyService(
-                session
-            ).get_effective_month()
-            use_projected_labor = bool(
-                effective_month is not None and year_month >= effective_month
-            )
             params: dict[str, Any] = {"year_month": year_month}
             filters = ['"年月" = :year_month', '"删除时间" IS NULL']
             if platform:
@@ -1327,6 +1326,56 @@ class PostgresqlDashboardService:
             if shop_id:
                 filters.append('"店铺ID" = :shop_id')
                 params["shop_id"] = shop_id
+
+            # ── 先查人力成本投影，再决定手工「人力费用」要不要被扣掉 ──
+            #
+            # 以前这里看的是 system_config.labor_cost_auto_effective_month：
+            # 没配、或月份早于生效月 ⇒ 看板走手工人力费用，
+            # 而薪资链路已经在往 V2 投影里写数 ⇒ **看板与利润基数两套口径**。
+            # 现在改成**看数据本身**：这个月有 V2 投影行就用投影口径
+            # （扣掉手工人力费用、加上投影金额，两边不会重复计）；
+            # 没有投影行就保留手工人力费用 —— 不再依赖一个没人维护的配置开关。
+            labor_filters = [
+                "period_month = :year_month",
+                "calculation_version = :labor_calculation_version",
+            ]
+            if platform:
+                labor_filters.append(
+                    "LOWER(COALESCE(platform_code, '')) = :platform_code"
+                )
+            if shop_id:
+                labor_filters.append("shop_id = :shop_id")
+            if platform or shop_id:
+                labor_filters.append("allocation_scope = 'shop'")
+            # ⚠️ **缺表必须降级而不是抛错**：
+            # 人力成本分摊表属于薪资链路，在部分环境（未跑完迁移的库、
+            # 精简测试库）里可能根本不存在。查不到就退回「手工人力费用」口径，
+            # 而不是让整个看板接口 500 —— 与
+            # ``LaborCostPolicyService.get_effective_month`` 的降级策略一致。
+            try:
+                labor_result = await session.execute(
+                    text(
+                        f"""
+                        SELECT SUM(total_amount)
+                        FROM finance.employee_labor_cost_allocations
+                        WHERE {' AND '.join(labor_filters)}
+                        """
+                    ),
+                    {
+                        **params,
+                        "labor_calculation_version": LABOR_COST_CALCULATION_VERSION,
+                    },
+                )
+                projected_total = _to_optional_float(labor_result.scalar_one_or_none())
+            except SQLAlchemyError as exc:
+                logger.warning(
+                    "[Dashboard] 读取 finance.employee_labor_cost_allocations 失败，"
+                    "本次退回手工人力费用口径：%s",
+                    exc,
+                )
+                await session.rollback()
+                projected_total = None
+            use_projected_labor = projected_total is not None
 
             manual_result = await session.execute(
                 text(
@@ -1356,27 +1405,6 @@ class PostgresqlDashboardService:
             manual_total = _to_optional_float(manual_result.scalar_one_or_none())
             if not use_projected_labor:
                 return manual_total
-
-            labor_filters = ["period_month = :year_month"]
-            if platform:
-                labor_filters.append(
-                    "LOWER(COALESCE(platform_code, '')) = :platform_code"
-                )
-            if shop_id:
-                labor_filters.append("shop_id = :shop_id")
-            if platform or shop_id:
-                labor_filters.append("allocation_scope = 'shop'")
-            labor_result = await session.execute(
-                text(
-                    f"""
-                    SELECT SUM(total_amount)
-                    FROM finance.employee_labor_cost_allocations
-                    WHERE {' AND '.join(labor_filters)}
-                    """
-                ),
-                params,
-            )
-            projected_total = _to_optional_float(labor_result.scalar_one_or_none())
             if manual_total is None and projected_total is None:
                 return None
             return round((manual_total or 0.0) + (projected_total or 0.0), 2)
@@ -2534,8 +2562,12 @@ class PostgresqlDashboardService:
                 FROM finance.employee_labor_cost_allocations
                 WHERE period_month = :period_month
                   AND allocation_scope = 'company'
+                  AND calculation_version = :labor_calculation_version
                 """,
-                {"period_month": period_month.strftime("%Y-%m")},
+                {
+                    "period_month": period_month.strftime("%Y-%m"),
+                    "labor_calculation_version": LABOR_COST_CALCULATION_VERSION,
+                },
             )
             if public_labor_rows:
                 public_labor_cost = (

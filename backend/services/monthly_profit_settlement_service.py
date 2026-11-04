@@ -24,6 +24,10 @@ from modules.core.db import (
     PerformanceScore,
     ShopProfitBasis,
 )
+from backend.services.labor_cost_projection_service import (
+    LABOR_COST_CALCULATION_VERSION,
+)
+from backend.services.payroll_period_lock_service import PAYROLL_LOCKED_STATUSES
 from backend.services.performance_readiness_service import PerformanceReadinessService
 
 
@@ -165,6 +169,9 @@ class MonthlyProfitSettlementService:
             ).where(
                 EmployeeLaborCostAllocation.period_month == period_month,
                 EmployeeLaborCostAllocation.allocation_scope == "company",
+                # 只认 V2 口径：历史 V1 行与同月 V2 行并存时会把人力成本算两遍
+                EmployeeLaborCostAllocation.calculation_version
+                == LABOR_COST_CALCULATION_VERSION,
             )
         )
         public_labor_amount = self._to_float(public_labor_result.scalar_one_or_none())
@@ -177,7 +184,7 @@ class MonthlyProfitSettlementService:
                     select(EmployeeLaborCostAllocation).where(
                         EmployeeLaborCostAllocation.period_month == period_month,
                         EmployeeLaborCostAllocation.source_payroll_status.in_(
-                            ("confirmed", "paid")
+                            PAYROLL_LOCKED_STATUSES
                         ),
                     )
                 )

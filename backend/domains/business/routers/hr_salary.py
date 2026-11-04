@@ -40,6 +40,7 @@ from backend.services.employee_target_allocation_service import (
 from backend.services.payroll_generation_service import PayrollGenerationService
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
 from backend.services.payroll_period_lock_service import (
+    PAYROLL_LOCKED_STATUSES,
     PayrollPeriodLockedError,
     PayrollPeriodLockService,
 )
@@ -138,7 +139,7 @@ async def _compute_payroll_stale_flags(
         }
 
     payroll_status = getattr(record, "status", None)
-    is_locked = payroll_status in {"confirmed", "paid", "approved"}
+    is_locked = payroll_status in PAYROLL_LOCKED_STATUSES
     if not is_locked:
         return {
             "is_locked": False,
@@ -168,13 +169,19 @@ async def _compute_payroll_stale_flags(
             EmployeePerformance.year_month == year_month,
         )
     )
-    performance_times = [row[0] for row in performance_result.all() if row[0] is not None]
+    performance_times = [
+        row[0] for row in performance_result.all() if row[0] is not None
+    ]
     all_times = [*commission_times, *performance_times]
     latest_dt = max(all_times) if all_times else None
-    payroll_updated_at = getattr(record, "updated_at", None) or getattr(record, "created_at", None)
+    payroll_updated_at = getattr(record, "updated_at", None) or getattr(
+        record, "created_at", None
+    )
     return {
         "is_locked": True,
-        "is_stale_against_latest_calc": bool(latest_dt and payroll_updated_at and latest_dt > payroll_updated_at),
+        "is_stale_against_latest_calc": bool(
+            latest_dt and payroll_updated_at and latest_dt > payroll_updated_at
+        ),
         "latest_calculated_at": latest_dt.isoformat() if latest_dt else None,
     }
 
@@ -184,17 +191,18 @@ def _employee_identity_allows_salary(employee: Employee | None) -> bool:
         return True
     status = getattr(employee, "status", "active")
     identity = getattr(employee, "employee_identity_type", "employee")
-    return (
-        status == "active"
-        and identity == "employee"
-    )
+    return status == "active" and identity == "employee"
 
 
 def _extract_optional_employee(result: Any) -> Employee | None:
     scalar_getter = getattr(result, "scalar_one_or_none", None)
     if callable(scalar_getter) and not inspect.iscoroutinefunction(scalar_getter):
         employee = scalar_getter()
-        if not inspect.isawaitable(employee) and employee is not None and hasattr(employee, "employee_code"):
+        if (
+            not inspect.isawaitable(employee)
+            and employee is not None
+            and hasattr(employee, "employee_code")
+        ):
             return employee
 
     scalars_getter = getattr(result, "scalars", None)
@@ -241,7 +249,9 @@ async def _load_salary_structure_versions(
     return result.scalars().all()
 
 
-def _pick_current_salary_structure(rows: List[SalaryStructure]) -> Optional[SalaryStructure]:
+def _pick_current_salary_structure(
+    rows: List[SalaryStructure],
+) -> Optional[SalaryStructure]:
     if not rows:
         return None
     today = date.today()
@@ -271,15 +281,28 @@ async def list_salary_structures(
         query = select(SalaryStructure)
         if status:
             query = query.where(SalaryStructure.status == status)
-        query = query.order_by(SalaryStructure.employee_code).offset((page - 1) * page_size).limit(page_size)
+        query = (
+            query.order_by(SalaryStructure.employee_code)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
         result = await db.execute(query)
-        return [SalaryStructureResponse.model_validate(row) for row in result.scalars().all()]
+        return [
+            SalaryStructureResponse.model_validate(row)
+            for row in result.scalars().all()
+        ]
     except Exception as e:
         logger.error("获取薪资结构列表失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取薪资结构列表失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取薪资结构列表失败: {str(e)}",
+            status_code=500,
+        )
 
 
-@router.get("/salary-structures/{employee_code}", response_model=SalaryStructureResponse)
+@router.get(
+    "/salary-structures/{employee_code}", response_model=SalaryStructureResponse
+)
 async def get_salary_structure(
     employee_code: str,
     db: AsyncSession = Depends(get_async_db),
@@ -288,14 +311,25 @@ async def get_salary_structure(
         rows = await _load_salary_structure_versions(db, employee_code)
         structure = _pick_current_salary_structure(rows)
         if not structure:
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"薪资结构不存在: {employee_code}", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"薪资结构不存在: {employee_code}",
+                status_code=404,
+            )
         return SalaryStructureResponse.model_validate(structure)
     except Exception as e:
         logger.error("获取薪资结构失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取薪资结构失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取薪资结构失败: {str(e)}",
+            status_code=500,
+        )
 
 
-@router.get("/salary-structures/{employee_code}/history", response_model=List[SalaryStructureResponse])
+@router.get(
+    "/salary-structures/{employee_code}/history",
+    response_model=List[SalaryStructureResponse],
+)
 async def list_salary_structure_history(
     employee_code: str,
     db: AsyncSession = Depends(get_async_db),
@@ -305,10 +339,16 @@ async def list_salary_structure_history(
         return [SalaryStructureResponse.model_validate(row) for row in rows]
     except Exception as e:
         logger.error("鑾峰彇钖祫缁撴瀯鍘嗗彶澶辫触: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鑾峰彇钖祫缁撴瀯鍘嗗彶澶辫触: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"鑾峰彇钖祫缁撴瀯鍘嗗彶澶辫触: {str(e)}",
+            status_code=500,
+        )
 
 
-@router.post("/salary-structures", response_model=SalaryStructureResponse, status_code=201)
+@router.post(
+    "/salary-structures", response_model=SalaryStructureResponse, status_code=201
+)
 async def create_salary_structure(
     structure: SalaryStructureCreate,
     db: AsyncSession = Depends(get_async_db),
@@ -319,7 +359,11 @@ async def create_salary_structure(
         )
         employee = _extract_optional_employee(employee)
         if not employee:
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {structure.employee_code}", status_code=400)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"员工不存在: {structure.employee_code}",
+                status_code=400,
+            )
 
         if not _employee_identity_allows_salary(employee):
             return _salary_identity_rejection()
@@ -333,7 +377,11 @@ async def create_salary_structure(
             )
         )
         if existing.scalar_one_or_none():
-            return error_response(ErrorCode.DATA_ALREADY_EXISTS, f"薪资结构已存在: {structure.employee_code}", status_code=400)
+            return error_response(
+                ErrorCode.DATA_ALREADY_EXISTS,
+                f"薪资结构已存在: {structure.employee_code}",
+                status_code=400,
+            )
 
         await PayrollPeriodLockService(db).assert_salary_effective_date_mutable(
             employee_code=structure.employee_code,
@@ -350,10 +398,16 @@ async def create_salary_structure(
     except Exception as e:
         await db.rollback()
         logger.error("创建薪资结构失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建薪资结构失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"创建薪资结构失败: {str(e)}",
+            status_code=500,
+        )
 
 
-@router.put("/salary-structures/{employee_code}", response_model=SalaryStructureResponse)
+@router.put(
+    "/salary-structures/{employee_code}", response_model=SalaryStructureResponse
+)
 async def update_salary_structure(
     employee_code: str,
     body: SalaryStructureUpdate,
@@ -365,14 +419,22 @@ async def update_salary_structure(
         )
         employee = _extract_optional_employee(employee)
         if not employee:
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"鍛樺伐涓嶅瓨鍦? {employee_code}", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"鍛樺伐涓嶅瓨鍦? {employee_code}",
+                status_code=404,
+            )
         if not _employee_identity_allows_salary(employee):
             return _salary_identity_rejection()
 
         rows = await _load_salary_structure_versions(db, employee_code)
         record = _pick_current_salary_structure(rows)
         if not record:
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"钖祫缁撴瀯涓嶅瓨鍦? {employee_code}", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"钖祫缁撴瀯涓嶅瓨鍦? {employee_code}",
+                status_code=404,
+            )
         await PayrollPeriodLockService(db).assert_salary_effective_date_mutable(
             employee_code=employee_code,
             effective_date=record.effective_date,
@@ -388,13 +450,19 @@ async def update_salary_structure(
     except Exception as e:
         await db.rollback()
         logger.error("鏇存柊钖祫缁撴瀯澶辫触: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鏇存柊钖祫缁撴瀯澶辫触: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"鏇存柊钖祫缁撴瀯澶辫触: {str(e)}",
+            status_code=500,
+        )
 
 
 def _manual_input_success(record: PayrollManualInput) -> Dict[str, Any]:
     return {
         "success": True,
-        "data": PayrollManualInputResponse.model_validate(record).model_dump(mode="json"),
+        "data": PayrollManualInputResponse.model_validate(record).model_dump(
+            mode="json"
+        ),
     }
 
 
@@ -405,7 +473,9 @@ def _validate_year_month(year_month: str) -> None:
         raise ValueError("year_month format must be YYYY-MM") from exc
 
 
-@router.get("/payroll-manual-inputs/{employee_code}/{year_month}", response_model=Dict[str, Any])
+@router.get(
+    "/payroll-manual-inputs/{employee_code}/{year_month}", response_model=Dict[str, Any]
+)
 async def get_payroll_manual_input(
     employee_code: str,
     year_month: str,
@@ -414,7 +484,11 @@ async def get_payroll_manual_input(
 ):
     try:
         if not is_admin_user(current_user):
-            return error_response(ErrorCode.PERMISSION_DENIED, "需要管理员权限才能查看月度人工录入", status_code=403)
+            return error_response(
+                ErrorCode.PERMISSION_DENIED,
+                "需要管理员权限才能查看月度人工录入",
+                status_code=403,
+            )
         _validate_year_month(year_month)
         result = await db.execute(
             select(PayrollManualInput).where(
@@ -424,16 +498,24 @@ async def get_payroll_manual_input(
         )
         record = result.scalar_one_or_none()
         if record is None:
-            return error_response(ErrorCode.DATA_NOT_FOUND, "月度人工录入不存在", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND, "月度人工录入不存在", status_code=404
+            )
         return _manual_input_success(record)
     except ValueError as exc:
         return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=400)
     except Exception as e:
         logger.error("获取月度人工录入失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取月度人工录入失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取月度人工录入失败: {str(e)}",
+            status_code=500,
+        )
 
 
-@router.put("/payroll-manual-inputs/{employee_code}/{year_month}", response_model=Dict[str, Any])
+@router.put(
+    "/payroll-manual-inputs/{employee_code}/{year_month}", response_model=Dict[str, Any]
+)
 async def upsert_payroll_manual_input(
     employee_code: str,
     year_month: str,
@@ -443,14 +525,22 @@ async def upsert_payroll_manual_input(
 ):
     try:
         if not is_admin_user(current_user):
-            return error_response(ErrorCode.PERMISSION_DENIED, "需要管理员权限才能保存月度人工录入", status_code=403)
+            return error_response(
+                ErrorCode.PERMISSION_DENIED,
+                "需要管理员权限才能保存月度人工录入",
+                status_code=403,
+            )
         _validate_year_month(year_month)
         employee_result = await db.execute(
             select(Employee).where(Employee.employee_code == employee_code)
         )
         employee = _extract_optional_employee(employee_result)
         if employee is None:
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {employee_code}", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"员工不存在: {employee_code}",
+                status_code=404,
+            )
         if not _employee_identity_allows_salary(employee):
             return _salary_identity_rejection()
 
@@ -465,7 +555,10 @@ async def upsert_payroll_manual_input(
             )
         )
         payroll = payroll_result.scalar_one_or_none()
-        if payroll is not None and getattr(payroll, "status", None) in {"confirmed", "paid"}:
+        if (
+            payroll is not None
+            and getattr(payroll, "status", None) in PAYROLL_LOCKED_STATUSES
+        ):
             return error_response(
                 ErrorCode.PARAMETER_INVALID,
                 "已确认或已发放工资单不可修改月度人工录入",
@@ -508,7 +601,11 @@ async def upsert_payroll_manual_input(
     except Exception as e:
         await db.rollback()
         logger.error("保存月度人工录入失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"保存月度人工录入失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"保存月度人工录入失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.post("/payroll-records/{employee_code}/{year_month}/refresh")
@@ -523,9 +620,17 @@ async def refresh_payroll_record(
         )
         employee = _extract_optional_employee(employee)
         if employee is None:
-            employee = SimpleNamespace(employee_code=employee_code, status="active", employee_identity_type="employee")
+            employee = SimpleNamespace(
+                employee_code=employee_code,
+                status="active",
+                employee_identity_type="employee",
+            )
         if not employee:
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"鍛樺伐涓嶅瓨鍦? {employee_code}", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"鍛樺伐涓嶅瓨鍦? {employee_code}",
+                status_code=404,
+            )
         if not _employee_identity_allows_salary(employee):
             return _salary_identity_rejection()
 
@@ -545,7 +650,9 @@ async def refresh_payroll_record(
                 "当前月份尚未初始化工资单，请先按月份刷新全部工资单",
                 status_code=409,
             )
-        result = await PayrollGenerationService(db).generate_employee_month(employee_code, year_month)
+        result = await PayrollGenerationService(db).generate_employee_month(
+            employee_code, year_month
+        )
         record = result.get("payroll_record")
         if record is not None and result.get("payroll_upserts", 0) > 0:
             await db.commit()
@@ -561,13 +668,21 @@ async def refresh_payroll_record(
             "is_locked": stale_flags["is_locked"],
             "is_stale_against_latest_calc": stale_flags["is_stale_against_latest_calc"],
             "latest_calculated_at": stale_flags["latest_calculated_at"],
-            "data": PayrollRecordResponse.model_validate(record).model_dump(mode="json") if record else None,
+            "data": (
+                PayrollRecordResponse.model_validate(record).model_dump(mode="json")
+                if record
+                else None
+            ),
         }
     except PayrollPeriodLockedError as exc:
         return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         logger.error("鍒锋柊鍛樺伐鏈堝害宸ヨ祫鍗曞け璐? %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鍒锋柊鍛樺伐鏈堝害宸ヨ祫鍗曞け璐? {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"鍒锋柊鍛樺伐鏈堝害宸ヨ祫鍗曞け璐? {str(e)}",
+            status_code=500,
+        )
 
 
 @router.post("/payroll-records/{year_month}/refresh-all")
@@ -581,7 +696,11 @@ async def refresh_payroll_records_for_month(
         return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         logger.error("鎸夋湀浠芥壒閲忓埛鏂板伐璧勫崟澶辫触: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鎸夋湀浠芥壒閲忓埛鏂板伐璧勫崟澶辫触: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"鎸夋湀浠芥壒閲忓埛鏂板伐璧勫崟澶辫触: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.get("/labor-cost-allocations", response_model=List[Dict[str, Any]])
@@ -604,15 +723,19 @@ async def list_labor_cost_allocations(
     if shop_id:
         query = query.where(EmployeeLaborCostAllocation.shop_id == shop_id)
     rows = (
-        await db.execute(
-            query.order_by(
-                EmployeeLaborCostAllocation.allocation_scope,
-                EmployeeLaborCostAllocation.employee_code,
-                EmployeeLaborCostAllocation.platform_code,
-                EmployeeLaborCostAllocation.shop_id,
+        (
+            await db.execute(
+                query.order_by(
+                    EmployeeLaborCostAllocation.allocation_scope,
+                    EmployeeLaborCostAllocation.employee_code,
+                    EmployeeLaborCostAllocation.platform_code,
+                    EmployeeLaborCostAllocation.shop_id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
         {
             "id": row.id,
@@ -654,12 +777,22 @@ async def list_payroll_records(
             conditions.append(PayrollRecord.status == status)
         if conditions:
             query = query.where(and_(*conditions))
-        query = query.order_by(PayrollRecord.year_month.desc(), PayrollRecord.employee_code).offset((page - 1) * page_size).limit(page_size)
+        query = (
+            query.order_by(PayrollRecord.year_month.desc(), PayrollRecord.employee_code)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
         result = await db.execute(query)
-        return [PayrollRecordResponse.model_validate(row) for row in result.scalars().all()]
+        return [
+            PayrollRecordResponse.model_validate(row) for row in result.scalars().all()
+        ]
     except Exception as e:
         logger.error("获取工资单列表失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取工资单列表失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取工资单列表失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.get("/payroll-records/{employee_code}/{year_month}")
@@ -677,14 +810,20 @@ async def get_payroll_record_detail(
         )
         record = result.scalar_one_or_none()
         if not record:
-            return error_response(ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404
+            )
         stale_flags = await _compute_payroll_stale_flags(db=db, record=record)
         payload = PayrollRecordResponse.model_validate(record).model_dump(mode="json")
         payload.update(stale_flags)
         return {"success": True, "data": payload}
     except Exception as e:
         logger.error("获取工资单详情失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取工资单详情失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取工资单详情失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.put("/payroll-records/{record_id}")
@@ -696,15 +835,25 @@ async def update_payroll_record(
 ):
     try:
         if not is_admin_user(current_user):
-            return error_response(ErrorCode.PERMISSION_DENIED, "需要管理员权限才能编辑工资单", status_code=403)
+            return error_response(
+                ErrorCode.PERMISSION_DENIED,
+                "需要管理员权限才能编辑工资单",
+                status_code=403,
+            )
         result = await db.execute(
             select(PayrollRecord).where(PayrollRecord.id == record_id)
         )
         record = result.scalar_one_or_none()
         if not record:
-            return error_response(ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404
+            )
         if record.status != "draft":
-            return error_response(ErrorCode.PARAMETER_INVALID, "非 draft 工资单不允许编辑", status_code=409)
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "非 draft 工资单不允许编辑",
+                status_code=409,
+            )
         values = body.model_dump(exclude_unset=True)
         for key, value in values.items():
             setattr(record, key, value)
@@ -735,7 +884,11 @@ async def update_payroll_record(
     except Exception as e:
         await db.rollback()
         logger.error("更新工资单失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新工资单失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"更新工资单失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.post("/payroll-records/{record_id}/confirm")
@@ -749,24 +902,39 @@ async def confirm_payroll_record(
         )
         record = result.scalar_one_or_none()
         if not record:
-            return error_response(ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404
+            )
         if record.status == "paid":
-            return error_response(ErrorCode.PARAMETER_INVALID, "已发放工资单不可再次确认", status_code=409)
+            return error_response(
+                ErrorCode.PARAMETER_INVALID, "已发放工资单不可再次确认", status_code=409
+            )
         if record.status != "draft":
-            return error_response(ErrorCode.PARAMETER_INVALID, "仅草稿工资单可以确认", status_code=409)
+            return error_response(
+                ErrorCode.PARAMETER_INVALID, "仅草稿工资单可以确认", status_code=409
+            )
         period_lock = PayrollPeriodLockService(db)
         await period_lock.acquire_month_transaction_lock(year_month=record.year_month)
         await db.refresh(record)
         if record.status != "draft":
-            return error_response(ErrorCode.PARAMETER_INVALID, "工资单状态已变更，请刷新后重试", status_code=409)
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "工资单状态已变更，请刷新后重试",
+                status_code=409,
+            )
         allocations = (
-            await db.execute(
-                select(EmployeeLaborCostAllocation).where(
-                    EmployeeLaborCostAllocation.period_month == record.year_month,
-                    EmployeeLaborCostAllocation.employee_code == record.employee_code,
+            (
+                await db.execute(
+                    select(EmployeeLaborCostAllocation).where(
+                        EmployeeLaborCostAllocation.period_month == record.year_month,
+                        EmployeeLaborCostAllocation.employee_code
+                        == record.employee_code,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if not allocations:
             return error_response(
                 ErrorCode.PARAMETER_INVALID,
@@ -778,14 +946,18 @@ async def confirm_payroll_record(
             employee_codes={record.employee_code},
         )
         assignments = (
-            await db.execute(
-                select(EmployeeShopAssignment).where(
-                    EmployeeShopAssignment.year_month == record.year_month,
-                    EmployeeShopAssignment.employee_code == record.employee_code,
-                    EmployeeShopAssignment.status == "active",
+            (
+                await db.execute(
+                    select(EmployeeShopAssignment).where(
+                        EmployeeShopAssignment.year_month == record.year_month,
+                        EmployeeShopAssignment.employee_code == record.employee_code,
+                        EmployeeShopAssignment.status == "active",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assigned_shop_keys = {
             (
                 str(assignment.platform_code or "").lower(),
@@ -795,13 +967,17 @@ async def confirm_payroll_record(
         }
         if assigned_shop_keys:
             month_assignments = (
-                await db.execute(
-                    select(EmployeeShopAssignment).where(
-                        EmployeeShopAssignment.year_month == record.year_month,
-                        EmployeeShopAssignment.status == "active",
+                (
+                    await db.execute(
+                        select(EmployeeShopAssignment).where(
+                            EmployeeShopAssignment.year_month == record.year_month,
+                            EmployeeShopAssignment.status == "active",
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             ratio_by_shop: Dict[tuple[str, str], float] = {}
             for assignment in month_assignments:
                 shop_key = (
@@ -836,7 +1012,10 @@ async def confirm_payroll_record(
             basis_version=basis_version,
             commit=False,
         )
-        if getattr(getattr(getattr(db, "bind", None), "dialect", None), "name", None) == "postgresql":
+        if (
+            getattr(getattr(getattr(db, "bind", None), "dialect", None), "name", None)
+            == "postgresql"
+        ):
             await period_lock.assert_month_mutable(year_month=record.year_month)
         record.status = "confirmed"
         locked_at = datetime.now(timezone.utc)
@@ -853,7 +1032,11 @@ async def confirm_payroll_record(
     except Exception as e:
         await db.rollback()
         logger.error("确认工资单失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"确认工资单失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"确认工资单失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.post("/payroll-records/{record_id}/reopen")
@@ -867,39 +1050,58 @@ async def reopen_payroll_record(
         )
         record = result.scalar_one_or_none()
         if not record:
-            return error_response(ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404
+            )
         if record.status == "paid":
-            return error_response(ErrorCode.PARAMETER_INVALID, "已发放工资单不可退回 draft", status_code=409)
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "已发放工资单不可退回 draft",
+                status_code=409,
+            )
         record.status = "draft"
         remaining_locked_records = (
-            await db.execute(
-                select(PayrollRecord).where(
-                    PayrollRecord.year_month == record.year_month,
-                    PayrollRecord.status.in_(("confirmed", "paid")),
-                )
-            )
-        ).scalars().all()
-        if not remaining_locked_records:
-            allocations = (
+            (
                 await db.execute(
-                    select(EmployeeLaborCostAllocation).where(
-                        EmployeeLaborCostAllocation.period_month == record.year_month,
+                    select(PayrollRecord).where(
+                        PayrollRecord.year_month == record.year_month,
+                        PayrollRecord.status.in_(("confirmed", "paid")),
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
+        )
+        if not remaining_locked_records:
+            allocations = (
+                (
+                    await db.execute(
+                        select(EmployeeLaborCostAllocation).where(
+                            EmployeeLaborCostAllocation.period_month
+                            == record.year_month,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
             for allocation in allocations:
                 allocation.source_payroll_status = "draft"
                 allocation.calculation_status = "projected"
                 allocation.pre_commission_locked_at = None
 
             snapshots = (
-                await db.execute(
-                    select(ShopProfitBasis).where(
-                        ShopProfitBasis.period_month == record.year_month,
-                        ShopProfitBasis.is_locked.is_(True),
+                (
+                    await db.execute(
+                        select(ShopProfitBasis).where(
+                            ShopProfitBasis.period_month == record.year_month,
+                            ShopProfitBasis.is_locked.is_(True),
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for snapshot in snapshots:
                 snapshot.is_locked = False
         await db.commit()
@@ -908,7 +1110,11 @@ async def reopen_payroll_record(
     except Exception as e:
         await db.rollback()
         logger.error("退回工资单失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"退回工资单失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"退回工资单失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.post("/payroll-records/{record_id}/pay")
@@ -929,9 +1135,15 @@ async def mark_payroll_record_paid(
         )
         record = result.scalar_one_or_none()
         if not record:
-            return error_response(ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404
+            )
         if record.status != "confirmed":
-            return error_response(ErrorCode.PARAMETER_INVALID, "仅已确认工资单允许标记为已发放", status_code=409)
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "仅已确认工资单允许标记为已发放",
+                status_code=409,
+            )
         record.status = "paid"
         if not record.pay_date:
             from datetime import date
@@ -958,7 +1170,11 @@ async def mark_payroll_record_paid(
     except Exception as e:
         await db.rollback()
         logger.error("标记工资单已发放失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"标记工资单已发放失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"标记工资单已发放失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.get("/employee-targets", response_model=List[EmployeeTargetResponse])
@@ -982,15 +1198,29 @@ async def list_employee_targets(
             conditions.append(EmployeeTarget.target_type == target_type)
         if conditions:
             query = query.where(and_(*conditions))
-        query = query.order_by(EmployeeTarget.year_month.desc(), EmployeeTarget.employee_code).offset((page - 1) * page_size).limit(page_size)
+        query = (
+            query.order_by(
+                EmployeeTarget.year_month.desc(), EmployeeTarget.employee_code
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
         result = await db.execute(query)
-        return [EmployeeTargetResponse.model_validate(row) for row in result.scalars().all()]
+        return [
+            EmployeeTargetResponse.model_validate(row) for row in result.scalars().all()
+        ]
     except Exception as e:
         logger.error("获取员工目标列表失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工目标列表失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取员工目标列表失败: {str(e)}",
+            status_code=500,
+        )
 
 
-@router.get("/employee-target-summary", response_model=List[EmployeeTargetSummaryResponse])
+@router.get(
+    "/employee-target-summary", response_model=List[EmployeeTargetSummaryResponse]
+)
 async def list_employee_target_summary(
     year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
     employee_code: Optional[str] = Query(None),
@@ -1003,13 +1233,21 @@ async def list_employee_target_summary(
             employee_code=employee_code,
         )
     except ValueError:
-        return error_response(ErrorCode.PARAMETER_INVALID, "月份格式应为 YYYY-MM", status_code=400)
+        return error_response(
+            ErrorCode.PARAMETER_INVALID, "月份格式应为 YYYY-MM", status_code=400
+        )
     except Exception as e:
         logger.error("获取个人目标汇总失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取个人目标汇总失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取个人目标汇总失败: {str(e)}",
+            status_code=500,
+        )
 
 
-@router.post("/employee-targets", response_model=EmployeeTargetResponse, status_code=201)
+@router.post(
+    "/employee-targets", response_model=EmployeeTargetResponse, status_code=201
+)
 async def create_employee_target(
     target: EmployeeTargetCreate,
     db: AsyncSession = Depends(get_async_db),
@@ -1020,7 +1258,11 @@ async def create_employee_target(
             select(Employee).where(Employee.employee_code == target.employee_code)
         )
         if not employee.scalar_one_or_none():
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {target.employee_code}", status_code=400)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"员工不存在: {target.employee_code}",
+                status_code=400,
+            )
 
         existing = await db.execute(
             select(EmployeeTarget).where(
@@ -1046,7 +1288,12 @@ async def create_employee_target(
     except Exception as e:
         await db.rollback()
         logger.error("创建员工目标失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建员工目标失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"创建员工目标失败: {str(e)}",
+            status_code=500,
+        )
+
 
 @router.put("/employee-targets/{target_id}", response_model=EmployeeTargetResponse)
 async def update_employee_target(
@@ -1056,10 +1303,16 @@ async def update_employee_target(
 ):
     """更新个人目标规划层记录，不直接参与个人绩效结果和工资单计算。"""
     try:
-        result = await db.execute(select(EmployeeTarget).where(EmployeeTarget.id == target_id))
+        result = await db.execute(
+            select(EmployeeTarget).where(EmployeeTarget.id == target_id)
+        )
         record = result.scalar_one_or_none()
         if not record:
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工目标不存在: {target_id}", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"员工目标不存在: {target_id}",
+                status_code=404,
+            )
 
         update_data = target.model_dump(exclude_unset=True)
         for field, value in update_data.items():
@@ -1071,7 +1324,11 @@ async def update_employee_target(
     except Exception as e:
         await db.rollback()
         logger.error("更新员工目标失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新员工目标失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"更新员工目标失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.delete("/employee-targets/{target_id}", status_code=204)
@@ -1081,10 +1338,16 @@ async def delete_employee_target(
 ):
     """删除个人目标规划层记录，不直接影响已生成绩效结果。"""
     try:
-        result = await db.execute(select(EmployeeTarget).where(EmployeeTarget.id == target_id))
+        result = await db.execute(
+            select(EmployeeTarget).where(EmployeeTarget.id == target_id)
+        )
         record = result.scalar_one_or_none()
         if not record:
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工目标不存在: {target_id}", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"员工目标不存在: {target_id}",
+                status_code=404,
+            )
         delete_result = db.delete(record)
         if hasattr(delete_result, "__await__"):
             await delete_result
@@ -1093,4 +1356,8 @@ async def delete_employee_target(
     except Exception as e:
         await db.rollback()
         logger.error("删除员工目标失败: %s", e, exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"删除员工目标失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"删除员工目标失败: {str(e)}",
+            status_code=500,
+        )

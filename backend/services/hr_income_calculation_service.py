@@ -15,7 +15,7 @@ import inspect
 from calendar import monthrange
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from sqlalchemy import and_, delete, or_, select, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,7 +67,9 @@ class HRIncomeCalculationService:
             "pending_labor_allocation",
             "data_incomplete",
         }:
-            raise ValueError(f"missing labor allocation for V2 profit basis: {shop_key}")
+            raise ValueError(
+                f"missing labor allocation for V2 profit basis: {shop_key}"
+            )
 
     @staticmethod
     def _field(record: Any, name: str, default: Any = None) -> Any:
@@ -132,14 +134,19 @@ class HRIncomeCalculationService:
                     "metric_direction": metric.get("metric_direction"),
                     "target_value": metric.get("default_target_value"),
                     "input_payload": dict(
-                        (entry_details.get(metric_code) or {}).get("input_payload") or {}
+                        (entry_details.get(metric_code) or {}).get("input_payload")
+                        or {}
                     ),
                     "max_score": metric.get("max_score"),
                     "auto_score": entry_scores.get(metric_code),
                     "formula": metric.get("guidance"),
                     "completion_status": (entry_details.get(metric_code) or {}).get(
                         "completion_status",
-                        "completed" if entry_scores.get(metric_code) is not None else "pending",
+                        (
+                            "completed"
+                            if entry_scores.get(metric_code) is not None
+                            else "pending"
+                        ),
                     ),
                 }
                 for metric, metric_code in zip(metrics, metric_codes)
@@ -165,8 +172,12 @@ class HRIncomeCalculationService:
                 continue
 
             store_base_score = weighted_score_numerator / target_weight_total
-            personal_target_score = sum(int(entry_scores[code]) for code in metric_codes)
-            final_score = min(max(store_base_score * 0.8 + personal_target_score, 0.0), 100.0)
+            personal_target_score = sum(
+                int(entry_scores[code]) for code in metric_codes
+            )
+            final_score = min(
+                max(store_base_score * 0.8 + personal_target_score, 0.0), 100.0
+            )
             results[employee_code] = {
                 "performance_score": final_score,
                 "calculation_status": "complete",
@@ -188,7 +199,7 @@ class HRIncomeCalculationService:
 
     @staticmethod
     def partition_controlled_commission_codes(
-        results: dict[str, dict[str, Any]]
+        results: dict[str, dict[str, Any]],
     ) -> tuple[set[str], set[str]]:
         """Personal partial rows block commission; excluded rows retain independent commission."""
         blocked = {
@@ -205,14 +216,18 @@ class HRIncomeCalculationService:
         if not employee_codes:
             return {}
         records = (
-            await self.db.execute(
-                select(PayrollRecord).where(
-                    PayrollRecord.year_month == year_month,
-                    PayrollRecord.status == "draft",
-                    PayrollRecord.employee_code.in_(employee_codes),
+            (
+                await self.db.execute(
+                    select(PayrollRecord).where(
+                        PayrollRecord.year_month == year_month,
+                        PayrollRecord.status == "draft",
+                        PayrollRecord.employee_code.in_(employee_codes),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for record in records:
             record.performance_salary = 0
             record.commission = 0
@@ -292,37 +307,58 @@ class HRIncomeCalculationService:
                 )
             )
         ).scalar_one_or_none()
-        if plan is None or getattr(plan, "calculation_mode", None) != "controlled_targets_v1":
+        if (
+            plan is None
+            or getattr(plan, "calculation_mode", None) != "controlled_targets_v1"
+        ):
             return None
 
         scopes = (
-            await self.db.execute(
-                select(PersonalPerformanceEmployeeScope).where(
-                    PersonalPerformanceEmployeeScope.plan_id == plan.id
+            (
+                await self.db.execute(
+                    select(PersonalPerformanceEmployeeScope).where(
+                        PersonalPerformanceEmployeeScope.plan_id == plan.id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         scope_by_id = {row.id: row for row in scopes}
         assignments = (
-            await self.db.execute(
-                select(PersonalPerformanceAssignmentSnapshot).where(
-                    PersonalPerformanceAssignmentSnapshot.scope_id.in_(scope_by_id)
+            (
+                await self.db.execute(
+                    select(PersonalPerformanceAssignmentSnapshot).where(
+                        PersonalPerformanceAssignmentSnapshot.scope_id.in_(scope_by_id)
+                    )
                 )
             )
-        ).scalars().all() if scope_by_id else []
+            .scalars()
+            .all()
+            if scope_by_id
+            else []
+        )
         assignments_by_employee: dict[str, list[Any]] = {}
         for assignment in assignments:
             scope = scope_by_id.get(assignment.scope_id)
             if scope is not None:
-                assignments_by_employee.setdefault(scope.employee_code, []).append(assignment)
+                assignments_by_employee.setdefault(scope.employee_code, []).append(
+                    assignment
+                )
 
         entries = (
-            await self.db.execute(
-                select(PersonalPerformanceEntry).where(
-                    PersonalPerformanceEntry.scope_id.in_(scope_by_id)
+            (
+                await self.db.execute(
+                    select(PersonalPerformanceEntry).where(
+                        PersonalPerformanceEntry.scope_id.in_(scope_by_id)
+                    )
                 )
             )
-        ).scalars().all() if scope_by_id else []
+            .scalars()
+            .all()
+            if scope_by_id
+            else []
+        )
         entry_scores_by_employee: dict[str, dict[str, int | None]] = {}
         entry_details_by_employee: dict[str, dict[str, dict[str, Any]]] = {}
         for entry in entries:
@@ -339,10 +375,16 @@ class HRIncomeCalculationService:
                 }
 
         score_rows = (
-            await self.db.execute(
-                select(PerformanceScore).where(PerformanceScore.period == year_month)
+            (
+                await self.db.execute(
+                    select(PerformanceScore).where(
+                        PerformanceScore.period == year_month
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         shop_scores = {
             self._shop_key(row.platform_code, row.shop_id): self._to_float(
                 row.total_score
@@ -354,7 +396,9 @@ class HRIncomeCalculationService:
             "scope_confirmed": getattr(plan, "scope_confirmed_at", None) is not None,
             "scopes": scopes,
             "assignments_by_employee": assignments_by_employee,
-            "metrics": list((getattr(plan, "rule_snapshot", {}) or {}).get("metrics", [])),
+            "metrics": list(
+                (getattr(plan, "rule_snapshot", {}) or {}).get("metrics", [])
+            ),
             "entry_scores_by_employee": entry_scores_by_employee,
             "entry_details_by_employee": entry_details_by_employee,
             "shop_scores": shop_scores,
@@ -764,6 +808,38 @@ class HRIncomeCalculationService:
                 ratio_by_employee[employee_code] = ratio
         return ratio_by_employee
 
+    def _resolve_commission_ratio(
+        self,
+        row: Any,
+        *,
+        employee_code: str,
+        default_commission_ratio_by_employee: Mapping[str, float],
+    ) -> tuple[float, str]:
+        """解析「这个员工在这个店铺」的提成比例，返回 ``(比例, 来源)``。
+
+        比例有**两个来源**，权威性不同：
+
+        1. ``a_class.employee_shop_assignments.commission_ratio`` —— **权威来源**。
+           它是「谁负责哪个店、这个店给他多少提成比例」的正式定义（可为空）。
+        2. ``a_class.salary_structures.commission_ratio`` —— **员工级兜底**。
+           归属行没填比例时用它；它是薪资结构上的默认值（NOT NULL DEFAULT 0）。
+
+        以前这段「先取归属行、取不到再取薪资结构」的逻辑被**抄了三遍**
+        （金额聚合 / 系数加权 / 店铺分摊），改一处必漏两处 ⇒ 现在收敛成一个方法。
+
+        来源标记会写进 ``calculation_details``，让「这个人的提成比例到底哪来的」
+        可审计 —— 之前完全看不出来，只能靠猜。
+        """
+        ratio = self._to_float(getattr(row, "commission_ratio", None), 0.0)
+        if ratio > 0:
+            return ratio, "shop_assignment"
+        fallback = self._to_float(
+            default_commission_ratio_by_employee.get(employee_code), 0.0
+        )
+        if fallback > 0:
+            return fallback, "salary_structure_fallback"
+        return 0.0, "missing"
+
     async def calculate_month(
         self,
         year_month: str,
@@ -936,7 +1012,7 @@ class HRIncomeCalculationService:
             )
         )
 
-        commission_agg: Dict[str, Dict[str, float]] = {}
+        commission_agg: Dict[str, Dict[str, Any]] = {}
         performance_agg: Dict[str, Dict[str, float]] = {}
         for row in assignments:
             employee_code = (row.employee_code or "").strip()
@@ -981,14 +1057,11 @@ class HRIncomeCalculationService:
                 perf_rec["weighted_score_den"] += store_weight
 
             # Commission aggregation: still based on commission ratio.
-            ratio = self._to_float(row.commission_ratio, 0.0)
-            if ratio <= 0:
-                ratio = self._to_float(
-                    default_commission_ratio_by_employee.get(employee_code),
-                    0.0,
-                )
-            if ratio <= 0:
-                continue
+            ratio, ratio_source = self._resolve_commission_ratio(
+                row,
+                employee_code=employee_code,
+                default_commission_ratio_by_employee=default_commission_ratio_by_employee,
+            )
             comm_rec = commission_agg.setdefault(
                 employee_code,
                 {
@@ -996,8 +1069,13 @@ class HRIncomeCalculationService:
                     "commission_amount": 0.0,
                     "weighted_rate_num": 0.0,
                     "weighted_rate_den": 0.0,
+                    "ratio_sources": set(),
+                    "has_positive_ratio": False,
                 },
             )
+            if ratio > 0:
+                comm_rec["has_positive_ratio"] = True
+                comm_rec["ratio_sources"].add(ratio_source)
             sales_share = monthly_sales * ratio
             comm_rec["sales_amount"] += sales_share
             comm_rec["commission_amount"] += alloc_profit * ratio
@@ -1027,10 +1105,16 @@ class HRIncomeCalculationService:
             if controlled_context["scope_confirmed"]:
                 controlled_results = self.build_controlled_personal_results(
                     scopes=controlled_context["scopes"],
-                    assignments_by_employee=controlled_context["assignments_by_employee"],
+                    assignments_by_employee=controlled_context[
+                        "assignments_by_employee"
+                    ],
                     metrics=controlled_context["metrics"],
-                    entry_scores_by_employee=controlled_context["entry_scores_by_employee"],
-                    entry_details_by_employee=controlled_context["entry_details_by_employee"],
+                    entry_scores_by_employee=controlled_context[
+                        "entry_scores_by_employee"
+                    ],
+                    entry_details_by_employee=controlled_context[
+                        "entry_details_by_employee"
+                    ],
                     shop_scores=controlled_context["shop_scores"],
                 )
             else:
@@ -1050,14 +1134,16 @@ class HRIncomeCalculationService:
             _, blocked_commission_codes = self.partition_controlled_commission_codes(
                 controlled_results
             )
-            refreshed_draft_payrolls = await self._refresh_draft_payroll_variable_income(
-                year_month=year_month,
-                employee_codes={
-                    employee_code
-                    for employee_code, result in controlled_results.items()
-                    if result.get("calculation_status")
-                    in {"partial", "pending_scope", "not_participating"}
-                },
+            refreshed_draft_payrolls = (
+                await self._refresh_draft_payroll_variable_income(
+                    year_month=year_month,
+                    employee_codes={
+                        employee_code
+                        for employee_code, result in controlled_results.items()
+                        if result.get("calculation_status")
+                        in {"partial", "pending_scope", "not_participating"}
+                    },
+                )
             )
             if blocked_commission_codes:
                 await self.db.execute(
@@ -1081,12 +1167,11 @@ class HRIncomeCalculationService:
             for row in assignments:
                 if (row.employee_code or "").strip() != employee_code:
                     continue
-                ratio = self._to_float(row.commission_ratio, 0.0)
-                if ratio <= 0:
-                    ratio = self._to_float(
-                        default_commission_ratio_by_employee.get(employee_code),
-                        0.0,
-                    )
+                ratio, _ratio_source = self._resolve_commission_ratio(
+                    row,
+                    employee_code=employee_code,
+                    default_commission_ratio_by_employee=default_commission_ratio_by_employee,
+                )
                 if ratio <= 0:
                     continue
                 shop_key = self._shop_key(row.platform_code, row.shop_id)
@@ -1116,12 +1201,11 @@ class HRIncomeCalculationService:
             for row in assignments:
                 if (row.employee_code or "").strip() != employee_code:
                     continue
-                ratio = self._to_float(row.commission_ratio, 0.0)
-                if ratio <= 0:
-                    ratio = self._to_float(
-                        default_commission_ratio_by_employee.get(employee_code),
-                        0.0,
-                    )
+                ratio, _ratio_source = self._resolve_commission_ratio(
+                    row,
+                    employee_code=employee_code,
+                    default_commission_ratio_by_employee=default_commission_ratio_by_employee,
+                )
                 if ratio <= 0:
                     continue
                 shop_key = self._shop_key(row.platform_code, row.shop_id)
@@ -1145,6 +1229,28 @@ class HRIncomeCalculationService:
                     }
                 )
 
+            ratio_sources = sorted(
+                str(item) for item in (rec.get("ratio_sources") or ())
+            )
+            has_ratio = bool(rec.get("has_positive_ratio"))
+            calculation_status = "calculated" if has_ratio else "no_ratio"
+            calculation_details: Dict[str, Any] = {
+                "ratio_sources": ratio_sources,
+                "commission_rate": round(commission_rate, 6),
+                "sales_amount": round(sales_amount, 2),
+                "inherited_coefficient": round(inherited_coefficient, 6),
+                "allocation_count": len(commission_allocations),
+            }
+            if not has_ratio:
+                # 以前这里会直接跳过 ⇒ 连一行记录都不留，
+                # 工资单提成恒 0，界面上却看不出「他压根没配提成比例」。
+                # 现在照样落一行（金额 0）+ 明确状态，并把原因写进审计字段。
+                calculation_details["reason"] = (
+                    "no commission ratio configured; set "
+                    "employee_shop_assignments.commission_ratio or "
+                    "salary_structures.commission_ratio"
+                )
+
             comm = (
                 await self.db.execute(
                     select(EmployeeCommission).where(
@@ -1157,6 +1263,8 @@ class HRIncomeCalculationService:
                 comm.sales_amount = sales_amount
                 comm.commission_amount = commission_amount
                 comm.commission_rate = commission_rate
+                comm.calculation_status = calculation_status
+                comm.calculation_details = calculation_details
                 comm.calculated_at = datetime.now(timezone.utc)
             else:
                 self.db.add(
@@ -1166,6 +1274,8 @@ class HRIncomeCalculationService:
                         sales_amount=sales_amount,
                         commission_amount=commission_amount,
                         commission_rate=commission_rate,
+                        calculation_status=calculation_status,
+                        calculation_details=calculation_details,
                         calculated_at=datetime.now(timezone.utc),
                     )
                 )

@@ -77,7 +77,6 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
         "mart.inventory_state",
     ],
     "mart.spu_operating_current": ["mart.inventory_age_current"],
-    "mart.hr_shop_monthly_profit": ["semantic.fact_orders_atomic"],
     "mart.b_cost_shop_month": ["semantic.fact_orders_atomic_mv"],
     "mart.shop_month_labor_cost": [],
     "api.business_overview_kpi_module": ["mart.platform_month_kpi"],

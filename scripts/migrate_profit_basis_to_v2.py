@@ -25,6 +25,11 @@ from sqlalchemy.engine import URL, make_url
 
 V2_VERSION = "A_PRE_COMMISSION_LABOR_V2"
 LABOR_V2_CALCULATION_VERSION = "LABOR_COST_V2"
+# ⚠️ 这份「受保护工资单状态」必须与
+#    ``backend/services/payroll_period_lock_service.py`` 的
+#    ``PAYROLL_LOCKED_STATUSES`` 保持一致（approved / confirmed / paid）。
+#    那里是运行时的唯一定义源；这里是独立运维脚本，故意不 import 后端模块
+#    （避免 CLI 启动时拉起整套应用初始化）。**改一处必须改另一处。**
 PROTECTED_PAYROLL_STATUSES = frozenset({"confirmed", "paid", "approved"})
 PROTECTED_SETTLEMENT_STATUSES = frozenset(
     {"submitted", "approved", "locked", "completed", "paid"}
@@ -63,7 +68,12 @@ def _row_dict(row: Any) -> dict[str, Any]:
 
 def resolve_database_url(explicit_url: str | None = None) -> str:
     """Resolve a database URL without printing credentials."""
-    database_url = (explicit_url or os.getenv("CLOUD_DATABASE_URL") or os.getenv("DATABASE_URL") or "").strip()
+    database_url = (
+        explicit_url
+        or os.getenv("CLOUD_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+        or ""
+    ).strip()
     if not database_url:
         raise MigrationSafetyError("DATABASE_URL or CLOUD_DATABASE_URL is required")
     try:
@@ -79,7 +89,9 @@ def _protected_statuses(report: Mapping[str, Any]) -> list[str]:
     problems: list[str] = []
     for month in report.get("months", []):
         period = month.get("period_month", "unknown")
-        payroll_statuses = {str(status).lower() for status in month.get("payroll_statuses", [])}
+        payroll_statuses = {
+            str(status).lower() for status in month.get("payroll_statuses", [])
+        }
         protected_payroll = sorted(payroll_statuses & PROTECTED_PAYROLL_STATUSES)
         if protected_payroll:
             problems.append(f"{period}: payroll status {','.join(protected_payroll)}")
@@ -117,18 +129,28 @@ def validate_apply_report(
         if int(month.get("locked_basis_rows") or 0) > 0
     ]
     if protected and not allow_protected:
-        raise MigrationSafetyError("protected payroll/settlement data: " + "; ".join(protected))
+        raise MigrationSafetyError(
+            "protected payroll/settlement data: " + "; ".join(protected)
+        )
     if allow_protected and protected:
         if not str(migration_batch_id or "").strip():
-            raise MigrationSafetyError("migration batch id is required for protected history")
+            raise MigrationSafetyError(
+                "migration batch id is required for protected history"
+            )
         if actor_user_id is None or int(actor_user_id) <= 0:
-            raise MigrationSafetyError("actor user id is required for protected history")
+            raise MigrationSafetyError(
+                "actor user id is required for protected history"
+            )
         if not str(reason or "").strip():
             raise MigrationSafetyError("reason is required for protected history")
     if locked_basis:
-        raise MigrationSafetyError("locked profit-basis snapshots for: " + ", ".join(locked_basis))
+        raise MigrationSafetyError(
+            "locked profit-basis snapshots for: " + ", ".join(locked_basis)
+        )
     if missing:
-        raise MigrationSafetyError("missing labor allocation for: " + ", ".join(missing))
+        raise MigrationSafetyError(
+            "missing labor allocation for: " + ", ".join(missing)
+        )
     if missing_shops:
         raise MigrationSafetyError(
             "missing labor allocation for shops: " + "; ".join(missing_shops)
@@ -240,7 +262,9 @@ def _query_month_report(connection: Any) -> dict[str, Any]:
         item["payroll_statuses"] = list(item.get("payroll_statuses") or [])
         item["allocation_versions"] = list(item.get("allocation_versions") or [])
         item["missing_labor_shop_ids"] = list(item.get("missing_labor_shop_ids") or [])
-        item["missing_labor_allocation"] = bool(item["payroll_rows"] and not item["allocation_rows"])
+        item["missing_labor_allocation"] = bool(
+            item["payroll_rows"] and not item["allocation_rows"]
+        )
         months.append(item)
     report: dict[str, Any] = {"months": months}
     report["batch_fingerprint"] = compute_batch_fingerprint(report)
@@ -256,11 +280,20 @@ def collect_report(database_url: str) -> dict[str, Any]:
         engine.dispose()
 
 
-def _pg_dump_command(database_url: str, output_path: Path) -> tuple[list[str], dict[str, str]]:
+def _pg_dump_command(
+    database_url: str, output_path: Path
+) -> tuple[list[str], dict[str, str]]:
     parsed: URL = make_url(database_url)
     if parsed.drivername.split("+")[0] not in {"postgresql", "postgres"}:
         raise MigrationSafetyError("backup requires a PostgreSQL database")
-    command = ["pg_dump", "--no-owner", "--no-acl", "--format=custom", "--file", str(output_path)]
+    command = [
+        "pg_dump",
+        "--no-owner",
+        "--no-acl",
+        "--format=custom",
+        "--file",
+        str(output_path),
+    ]
     if parsed.host:
         command.extend(["--host", parsed.host])
     if parsed.port:
@@ -281,11 +314,15 @@ def export_backup(database_url: str, backup_dir: Path, fingerprint: str) -> Path
     output_path = backup_dir / f"profit_basis_v2_{timestamp}_{fingerprint[:12]}.dump"
     command, environment = _pg_dump_command(database_url, output_path)
     try:
-        subprocess.run(command, env=environment, check=True, capture_output=True, text=True)
+        subprocess.run(
+            command, env=environment, check=True, capture_output=True, text=True
+        )
     except FileNotFoundError as exc:
         raise MigrationSafetyError("pg_dump is required before --apply") from exc
     except subprocess.CalledProcessError as exc:
-        raise MigrationSafetyError(f"pg_dump failed: {exc.stderr.strip() or exc.returncode}") from exc
+        raise MigrationSafetyError(
+            f"pg_dump failed: {exc.stderr.strip() or exc.returncode}"
+        ) from exc
     return output_path
 
 
@@ -414,17 +451,23 @@ def _reopen_protected_history(
         {"user_id": actor_user_id},
     ).scalar_one_or_none()
     if not username:
-        raise MigrationSafetyError("actor user id does not resolve to an active audit identity")
+        raise MigrationSafetyError(
+            "actor user id does not resolve to an active audit identity"
+        )
 
-    months = connection.execute(
-        text(
-            """
+    months = (
+        connection.execute(
+            text(
+                """
             SELECT DISTINCT period_month FROM finance.shop_profit_basis
             UNION SELECT DISTINCT year_month FROM a_class.payroll_records
             UNION SELECT DISTINCT period_month FROM finance.monthly_profit_settlements
             """
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for period_month in months:
         payroll_before = connection.execute(
             text(
@@ -459,16 +502,20 @@ def _reopen_protected_history(
             ),
             {"period_month": period_month},
         )
-        settlement_ids = connection.execute(
-            text(
-                """
+        settlement_ids = (
+            connection.execute(
+                text(
+                    """
                 SELECT id FROM finance.monthly_profit_settlements
                 WHERE period_month = :period_month
                   AND status IN ('submitted', 'approved', 'locked', 'completed', 'paid')
                 """
-            ),
-            {"period_month": period_month},
-        ).scalars().all()
+                ),
+                {"period_month": period_month},
+            )
+            .scalars()
+            .all()
+        )
         if settlement_ids:
             for table_name in (
                 "monthly_profit_shop_basis_snapshots",
@@ -562,7 +609,9 @@ def apply_migration(
         reason=reason,
     )
     backup_dir = Path(os.getenv("PROFIT_BASIS_BACKUP_DIR", "backups"))
-    backup_path = export_backup(database_url, backup_dir, str(report["batch_fingerprint"]))
+    backup_path = export_backup(
+        database_url, backup_dir, str(report["batch_fingerprint"])
+    )
     manifest_path = write_backup_manifest(backup_path, report)
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
@@ -596,10 +645,18 @@ def reopen_protected_history(
     """Explicit first stage for histories that must refresh allocations before apply."""
     # The first-stage command is allowed to run before allocations exist, but it
     # still requires the same audited administrator context as --allow-protected.
-    if not str(migration_batch_id or "").strip() or actor_user_id is None or not str(reason or "").strip():
-        raise MigrationSafetyError("migration batch id, actor user id, and reason are required for protected history")
+    if (
+        not str(migration_batch_id or "").strip()
+        or actor_user_id is None
+        or not str(reason or "").strip()
+    ):
+        raise MigrationSafetyError(
+            "migration batch id, actor user id, and reason are required for protected history"
+        )
     backup_dir = Path(os.getenv("PROFIT_BASIS_BACKUP_DIR", "backups"))
-    backup_path = export_backup(database_url, backup_dir, str(report["batch_fingerprint"]))
+    backup_path = export_backup(
+        database_url, backup_dir, str(report["batch_fingerprint"])
+    )
     manifest_path = write_backup_manifest(backup_path, report)
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
@@ -620,7 +677,17 @@ def reopen_protected_history(
     }
 
 
-def run(*, report: Mapping[str, Any], apply: bool, backup_dir: Path | None = None, database_url: str | None = None, allow_protected: bool = False, migration_batch_id: str | None = None, actor_user_id: int | None = None, reason: str | None = None) -> dict[str, Any]:
+def run(
+    *,
+    report: Mapping[str, Any],
+    apply: bool,
+    backup_dir: Path | None = None,
+    database_url: str | None = None,
+    allow_protected: bool = False,
+    migration_batch_id: str | None = None,
+    actor_user_id: int | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
     """Run a supplied report; useful for tests and operational wrappers."""
     if not apply:
         return {"mode": "dry-run", "report": report}
@@ -638,16 +705,34 @@ def run(*, report: Mapping[str, Any], apply: bool, backup_dir: Path | None = Non
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Migrate profit basis data to V2 safely")
+    parser = argparse.ArgumentParser(
+        description="Migrate profit basis data to V2 safely"
+    )
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--dry-run", action="store_true", help="read and report only (default)")
-    mode.add_argument("--apply", action="store_true", help="backup then apply; protected data aborts")
-    mode.add_argument("--reopen-protected", action="store_true", help="audited first stage: reopen protected history before payroll allocation refresh")
-    parser.add_argument("--database-url", help="PostgreSQL URL; defaults to CLOUD_DATABASE_URL")
+    mode.add_argument(
+        "--dry-run", action="store_true", help="read and report only (default)"
+    )
+    mode.add_argument(
+        "--apply", action="store_true", help="backup then apply; protected data aborts"
+    )
+    mode.add_argument(
+        "--reopen-protected",
+        action="store_true",
+        help="audited first stage: reopen protected history before payroll allocation refresh",
+    )
+    parser.add_argument(
+        "--database-url", help="PostgreSQL URL; defaults to CLOUD_DATABASE_URL"
+    )
     parser.add_argument("--backup-dir", type=Path, default=Path("backups"))
-    parser.add_argument("--allow-protected", action="store_true", help="reopen protected history only with the required audited migration context")
+    parser.add_argument(
+        "--allow-protected",
+        action="store_true",
+        help="reopen protected history only with the required audited migration context",
+    )
     parser.add_argument("--migration-batch-id", help="required with --allow-protected")
-    parser.add_argument("--actor-user-id", type=int, help="required with --allow-protected")
+    parser.add_argument(
+        "--actor-user-id", type=int, help="required with --allow-protected"
+    )
     parser.add_argument("--reason", help="required with --allow-protected")
     return parser
 

@@ -30,18 +30,36 @@ from backend.schemas.hr import (
     EmployeePerformanceResponse,
     EmployeeCommissionResponse,
     ShopCommissionResponse,
-    EmployeePerformanceAdjustmentCreate, EmployeePerformanceAdjustmentResponse, EmployeePerformanceAdjustmentUpdate,
-    EmployeePerformanceInputCreate, EmployeePerformanceInputResponse, EmployeePerformanceInputUpdate,
-    EmployeePerformanceTemplateApplyRequest, EmployeePerformanceTemplateMetric, EmployeePerformanceTemplateResponse,
-    EmployeeShopAssignmentCreate, EmployeeShopAssignmentResponse, EmployeeShopAssignmentUpdate,
+    EmployeePerformanceAdjustmentCreate,
+    EmployeePerformanceAdjustmentResponse,
+    EmployeePerformanceAdjustmentUpdate,
+    EmployeePerformanceInputCreate,
+    EmployeePerformanceInputResponse,
+    EmployeePerformanceInputUpdate,
+    EmployeePerformanceTemplateApplyRequest,
+    EmployeePerformanceTemplateMetric,
+    EmployeePerformanceTemplateResponse,
+    EmployeeShopAssignmentCreate,
+    EmployeeShopAssignmentResponse,
+    EmployeeShopAssignmentUpdate,
     ShopCommissionConfigUpdate,
     CopyFromPrevMonthBody,
 )
 from modules.core.db import (
-    ShopAccount, Employee, DimShop, DimUser, Position,
-    EmployeePerformance, EmployeeCommission, ShopCommission,
-    EmployeePerformanceAdjustment, EmployeePerformanceInput,
-    EmployeeShopAssignment, ShopCommissionConfig, EmployeeTarget, ShopProfitBasis,
+    ShopAccount,
+    Employee,
+    DimShop,
+    DimUser,
+    Position,
+    EmployeePerformance,
+    EmployeeCommission,
+    ShopCommission,
+    EmployeePerformanceAdjustment,
+    EmployeePerformanceInput,
+    EmployeeShopAssignment,
+    ShopCommissionConfig,
+    EmployeeTarget,
+    ShopProfitBasis,
     PersonalPerformancePlan,
 )
 
@@ -52,20 +70,92 @@ DEFAULT_PERFORMANCE_TEMPLATES = {
         "template_name": "通用运营模板",
         "match_keywords": ["运营", "operator", "操作员"],
         "metrics": [
-            {"metric_code": "sales_execution", "metric_name": "销售执行", "metric_direction": "up", "target_value": 100.0, "achieved_value": 0.0, "max_score": 40.0, "manual_score_enabled": False, "manual_score_value": None},
-            {"metric_code": "service_timeliness", "metric_name": "服务时效", "metric_direction": "up", "target_value": 100.0, "achieved_value": 0.0, "max_score": 20.0, "manual_score_enabled": False, "manual_score_value": None},
-            {"metric_code": "training_check", "metric_name": "培训检核", "metric_direction": "up", "target_value": 0.0, "achieved_value": 0.0, "max_score": 20.0, "manual_score_enabled": True, "manual_score_value": None},
-            {"metric_code": "attendance_quality", "metric_name": "出勤质量", "metric_direction": "up", "target_value": 0.0, "achieved_value": 0.0, "max_score": 20.0, "manual_score_enabled": True, "manual_score_value": None},
+            {
+                "metric_code": "sales_execution",
+                "metric_name": "销售执行",
+                "metric_direction": "up",
+                "target_value": 100.0,
+                "achieved_value": 0.0,
+                "max_score": 40.0,
+                "manual_score_enabled": False,
+                "manual_score_value": None,
+            },
+            {
+                "metric_code": "service_timeliness",
+                "metric_name": "服务时效",
+                "metric_direction": "up",
+                "target_value": 100.0,
+                "achieved_value": 0.0,
+                "max_score": 20.0,
+                "manual_score_enabled": False,
+                "manual_score_value": None,
+            },
+            {
+                "metric_code": "training_check",
+                "metric_name": "培训检核",
+                "metric_direction": "up",
+                "target_value": 0.0,
+                "achieved_value": 0.0,
+                "max_score": 20.0,
+                "manual_score_enabled": True,
+                "manual_score_value": None,
+            },
+            {
+                "metric_code": "attendance_quality",
+                "metric_name": "出勤质量",
+                "metric_direction": "up",
+                "target_value": 0.0,
+                "achieved_value": 0.0,
+                "max_score": 20.0,
+                "manual_score_enabled": True,
+                "manual_score_value": None,
+            },
         ],
     },
     "general_sales": {
         "template_name": "通用销售模板",
         "match_keywords": ["销售", "sale"],
         "metrics": [
-            {"metric_code": "personal_sales_execution", "metric_name": "个人销售执行", "metric_direction": "up", "target_value": 100.0, "achieved_value": 0.0, "max_score": 50.0, "manual_score_enabled": False, "manual_score_value": None},
-            {"metric_code": "customer_follow_up", "metric_name": "客户跟进", "metric_direction": "up", "target_value": 100.0, "achieved_value": 0.0, "max_score": 20.0, "manual_score_enabled": False, "manual_score_value": None},
-            {"metric_code": "training_check", "metric_name": "培训检核", "metric_direction": "up", "target_value": 0.0, "achieved_value": 0.0, "max_score": 15.0, "manual_score_enabled": True, "manual_score_value": None},
-            {"metric_code": "attendance_quality", "metric_name": "出勤质量", "metric_direction": "up", "target_value": 0.0, "achieved_value": 0.0, "max_score": 15.0, "manual_score_enabled": True, "manual_score_value": None},
+            {
+                "metric_code": "personal_sales_execution",
+                "metric_name": "个人销售执行",
+                "metric_direction": "up",
+                "target_value": 100.0,
+                "achieved_value": 0.0,
+                "max_score": 50.0,
+                "manual_score_enabled": False,
+                "manual_score_value": None,
+            },
+            {
+                "metric_code": "customer_follow_up",
+                "metric_name": "客户跟进",
+                "metric_direction": "up",
+                "target_value": 100.0,
+                "achieved_value": 0.0,
+                "max_score": 20.0,
+                "manual_score_enabled": False,
+                "manual_score_value": None,
+            },
+            {
+                "metric_code": "training_check",
+                "metric_name": "培训检核",
+                "metric_direction": "up",
+                "target_value": 0.0,
+                "achieved_value": 0.0,
+                "max_score": 15.0,
+                "manual_score_enabled": True,
+                "manual_score_value": None,
+            },
+            {
+                "metric_code": "attendance_quality",
+                "metric_name": "出勤质量",
+                "metric_direction": "up",
+                "target_value": 0.0,
+                "achieved_value": 0.0,
+                "max_score": 15.0,
+                "manual_score_enabled": True,
+                "manual_score_value": None,
+            },
         ],
     },
 }
@@ -79,6 +169,48 @@ def _shop_key(platform_code: str | None, shop_id: str | None) -> str:
     return f"{(platform_code or '').lower()}|{str(shop_id or '').lower()}"
 
 
+async def _load_shop_display_names(db: AsyncSession) -> Dict[tuple[str, str], str]:
+    """加载「(平台, 店铺键) → 店名」的映射。
+
+    为什么直接查 ``core.shop_accounts`` 而不是 ``core.dim_shops``
+    ----------------------------------------------------------
+    ``core.dim_shops`` 是**派生展示维度表**（由 ``core.shop_accounts`` 派生），
+    它曾经长期是 0 行 ⇒ 这几个接口的 ``shop_name`` 恒为 ``None``，
+    界面上的「来源店铺」是空的。派生表一旦没同步，名称就整片变空。
+
+    ``core.shop_accounts`` 是**权威主数据**，永远有值。
+    键派生与语义层保持一致：
+    ``COALESCE(platform_shop_id, shop_account_id, id::text)`` ——
+    不一致的话 JOIN 会落空，等于没改。
+    """
+    rows = (
+        (
+            await db.execute(
+                text(
+                    """
+                    SELECT LOWER(COALESCE(platform, '')) AS platform_code,
+                           COALESCE(
+                               NULLIF(TRIM(COALESCE(platform_shop_id, '')), ''),
+                               NULLIF(TRIM(COALESCE(shop_account_id, '')), ''),
+                               id::text
+                           ) AS resolved_shop_id,
+                           TRIM(COALESCE(store_name, '')) AS store_name
+                    FROM core.shop_accounts
+                    """
+                )
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return {
+        (str(row["platform_code"] or ""), str(row["resolved_shop_id"] or "")): str(
+            row["store_name"] or ""
+        )
+        for row in rows
+    }
+
+
 def _validate_shop_assignment_ratio_limit(
     *,
     existing_rows: List[Any],
@@ -86,26 +218,79 @@ def _validate_shop_assignment_ratio_limit(
     commission_ratio: float | None,
     current_assignment_id: int | None,
 ) -> str | None:
-    next_ratio = float(commission_ratio or 0)
+    """校验「一个员工在一个店铺、当月的提成比例总和不超过 100%」。
+
+    NULL 的含义
+    -----------
+    ``a_class.employee_shop_assignments.commission_ratio`` 是**可空**的：
+    NULL = 「这个店不给这个员工算提成」（按 0 计入），
+    **不是**「忘了填」。以前一律用 ``or 0`` 抹平，
+    于是「忘了填」和「故意设 0」在系统里长得一模一样，
+    工资单提成变 0 也看不出原因 ⇒ 现在显式区分，并写进提成的审计字段。
+
+    为什么不能直接信任库里的比例
+    ---------------------------
+    API 层的 schema 把比例限制在 ``[0, 1]``，但**历史数据或直连写库**
+    可能留下负数。负数会让总和变小 ⇒ **绕过 100% 上限**。
+    所以这里把负数按 0 计，并明确报出来，而不是悄悄放行。
+    """
+    if commission_ratio is None:
+        next_ratio = 0.0
+    else:
+        next_ratio = float(commission_ratio)
+        if next_ratio < 0:
+            return "提成比例不能为负数"
+        if next_ratio > 1.0 + 1e-9:
+            return "单个店铺的提成比例不能超过 100%"
+
     active_total = 0.0
+    missing_ratio_shops: List[str] = []
+    invalid_ratio_shops: List[str] = []
     normalized_employee_code = (employee_code or "").strip()
 
     for row in existing_rows:
         if getattr(row, "status", "active") != "active":
             continue
-        if current_assignment_id is not None and getattr(row, "id", None) == current_assignment_id:
+        if (
+            current_assignment_id is not None
+            and getattr(row, "id", None) == current_assignment_id
+        ):
             continue
-        active_total += float(getattr(row, "commission_ratio", 0) or 0)
+        row_ratio = getattr(row, "commission_ratio", None)
+        if row_ratio is None:
+            # 「这个店不给这个人算提成」：按 0 计入，但要能被看见
+            missing_ratio_shops.append(str(getattr(row, "shop_id", "") or ""))
+            continue
+        if float(row_ratio) < 0:
+            invalid_ratio_shops.append(str(getattr(row, "shop_id", "") or ""))
+            continue
+        active_total += float(row_ratio)
 
     if active_total + next_ratio > 1.0 + 1e-9:
-        return "该店铺该月份人员提成比例总和不能超过100%"
+        detail = ""
+        if missing_ratio_shops:
+            detail += (
+                f"（另有 {len(missing_ratio_shops)} 个店铺尚未设置提成比例："
+                f"{'、'.join(missing_ratio_shops)}）"
+            )
+        if invalid_ratio_shops:
+            detail += (
+                f"（另有 {len(invalid_ratio_shops)} 个店铺的提成比例为负数，已按 0 计："
+                f"{'、'.join(invalid_ratio_shops)}）"
+            )
+        return f"该店铺该月份人员提成比例总和不能超过100%{detail}"
 
     for row in existing_rows:
         if getattr(row, "status", "active") != "active":
             continue
-        if current_assignment_id is not None and getattr(row, "id", None) == current_assignment_id:
+        if (
+            current_assignment_id is not None
+            and getattr(row, "id", None) == current_assignment_id
+        ):
             continue
-        if (getattr(row, "employee_code", None) or "").strip() == normalized_employee_code:
+        if (
+            getattr(row, "employee_code", None) or ""
+        ).strip() == normalized_employee_code:
             return "该员工在该店铺该月份已存在归属记录"
 
     return None
@@ -137,7 +322,7 @@ async def _ensure_dim_shop_exists(
         await db.execute(
             select(ShopAccount).where(
                 func.lower(ShopAccount.platform) == normalized_platform_code,
-                ShopAccount.enabled == True,
+                ShopAccount.enabled.is_(True),
                 ShopAccount.business_role == "operating_store",
                 or_(
                     ShopAccount.platform_shop_id == normalized_shop_id,
@@ -161,68 +346,6 @@ async def _ensure_dim_shop_exists(
             currency="CNY",
         ),
     )
-
-
-async def _legacy_employee_performance_loader_unused(
-    db: AsyncSession,
-    employee_code: Optional[str],
-    year_month: Optional[str],
-    page: int,
-    page_size: int,
-) -> List[EmployeePerformanceResponse]:
-    sql = """
-        select
-          id,
-          "员工编号" as employee_code,
-          "年月" as year_month,
-          "实际销售额" as actual_sales,
-          "达成率" as achievement_rate,
-          "绩效得分" as performance_score,
-          "计算时间" as calculated_at
-        from c_class.employee_performance
-        where 1=1
-    """
-    params: Dict[str, Any] = {"limit": page_size, "offset": (page - 1) * page_size}
-    if employee_code:
-        sql += ' and "员工编号" = :employee_code'
-        params["employee_code"] = employee_code
-    if year_month:
-        sql += ' and "年月" = :year_month'
-        params["year_month"] = year_month
-    sql += ' order by "年月" desc, "员工编号" limit :limit offset :offset'
-    rows = (await db.execute(text(sql), params)).mappings().all()
-    return [EmployeePerformanceResponse.model_validate(dict(row)) for row in rows]
-
-
-async def _legacy_employee_commissions_loader_unused(
-    db: AsyncSession,
-    employee_code: Optional[str],
-    year_month: Optional[str],
-    page: int,
-    page_size: int,
-) -> List[EmployeeCommissionResponse]:
-    sql = """
-        select
-          id,
-          "员工编号" as employee_code,
-          "年月" as year_month,
-          "销售额" as sales_amount,
-          "提成金额" as commission_amount,
-          "提成比例" as commission_rate,
-          "计算时间" as calculated_at
-        from c_class.employee_commissions
-        where 1=1
-    """
-    params: Dict[str, Any] = {"limit": page_size, "offset": (page - 1) * page_size}
-    if employee_code:
-        sql += ' and "员工编号" = :employee_code'
-        params["employee_code"] = employee_code
-    if year_month:
-        sql += ' and "年月" = :year_month'
-        params["year_month"] = year_month
-    sql += ' order by "年月" desc, "员工编号" limit :limit offset :offset'
-    rows = (await db.execute(text(sql), params)).mappings().all()
-    return [EmployeeCommissionResponse.model_validate(dict(row)) for row in rows]
 
 
 async def _list_employee_performance_adjustments(
@@ -249,23 +372,31 @@ async def _list_employee_performance_adjustments(
         await db.execute(select(func.count()).select_from(query.subquery()))
     ).scalar() or 0
     rows = (
-        await db.execute(
-            query.order_by(
-                EmployeePerformanceAdjustment.year_month.desc(),
-                EmployeePerformanceAdjustment.employee_code,
-                EmployeePerformanceAdjustment.id.desc(),
+        (
+            await db.execute(
+                query.order_by(
+                    EmployeePerformanceAdjustment.year_month.desc(),
+                    EmployeePerformanceAdjustment.employee_code,
+                    EmployeePerformanceAdjustment.id.desc(),
+                )
+                .offset((page - 1) * page_size)
+                .limit(page_size)
             )
-            .offset((page - 1) * page_size)
-            .limit(page_size)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
-    employee_codes = sorted({row.employee_code for row in rows if getattr(row, "employee_code", None)})
+    employee_codes = sorted(
+        {row.employee_code for row in rows if getattr(row, "employee_code", None)}
+    )
     name_map: Dict[str, str] = {}
     if employee_codes:
         name_rows = (
             await db.execute(
-                select(Employee.employee_code, Employee.name).where(Employee.employee_code.in_(employee_codes))
+                select(Employee.employee_code, Employee.name).where(
+                    Employee.employee_code.in_(employee_codes)
+                )
             )
         ).all()
         name_map = {row[0]: row[1] or row[0] for row in name_rows}
@@ -311,7 +442,10 @@ async def _controlled_personal_target_write_conflict(
             )
         )
     ).scalar_one_or_none()
-    if plan is not None and getattr(plan, "calculation_mode", None) == "controlled_targets_v1":
+    if (
+        plan is not None
+        and getattr(plan, "calculation_mode", None) == "controlled_targets_v1"
+    ):
         return error_response(
             ErrorCode.PARAMETER_INVALID,
             "This month uses controlled personal performance targets; legacy inputs are read-only.",
@@ -337,10 +471,16 @@ async def _create_employee_performance_adjustment(
         return controlled_conflict
 
     employee = (
-        await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
+        await db.execute(
+            select(Employee).where(Employee.employee_code == body.employee_code)
+        )
     ).scalar_one_or_none()
     if not employee:
-        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
+        return error_response(
+            ErrorCode.DATA_NOT_FOUND,
+            f"员工不存在: {body.employee_code}",
+            status_code=400,
+        )
 
     conflict = await _employee_month_lock_conflict(
         db=db,
@@ -358,7 +498,11 @@ async def _create_employee_performance_adjustment(
         source=body.source,
         reason=body.reason,
         status="active",
-        created_by=str(getattr(current_user, "username", None) or getattr(current_user, "user_id", None) or "system"),
+        created_by=str(
+            getattr(current_user, "username", None)
+            or getattr(current_user, "user_id", None)
+            or "system"
+        ),
     )
     db.add(record)
     await db.commit()
@@ -376,11 +520,17 @@ async def _update_employee_performance_adjustment(
 ) -> Dict[str, Any]:
     record = (
         await db.execute(
-            select(EmployeePerformanceAdjustment).where(EmployeePerformanceAdjustment.id == adjustment_id)
+            select(EmployeePerformanceAdjustment).where(
+                EmployeePerformanceAdjustment.id == adjustment_id
+            )
         )
     ).scalar_one_or_none()
     if not record:
-        return error_response(ErrorCode.DATA_NOT_FOUND, f"绩效调整项不存在: {adjustment_id}", status_code=404)
+        return error_response(
+            ErrorCode.DATA_NOT_FOUND,
+            f"绩效调整项不存在: {adjustment_id}",
+            status_code=404,
+        )
 
     controlled_conflict = await _controlled_personal_target_write_conflict(
         db=db, year_month=record.year_month
@@ -402,7 +552,9 @@ async def _update_employee_performance_adjustment(
     await db.commit()
     await db.refresh(record)
     employee_name = (
-        await db.execute(select(Employee.name).where(Employee.employee_code == record.employee_code))
+        await db.execute(
+            select(Employee.name).where(Employee.employee_code == record.employee_code)
+        )
     ).scalar_one_or_none()
     payload = EmployeePerformanceAdjustmentResponse.model_validate(record)
     payload.employee_name = employee_name or record.employee_code
@@ -416,11 +568,17 @@ async def _delete_employee_performance_adjustment(
 ) -> Dict[str, Any]:
     record = (
         await db.execute(
-            select(EmployeePerformanceAdjustment).where(EmployeePerformanceAdjustment.id == adjustment_id)
+            select(EmployeePerformanceAdjustment).where(
+                EmployeePerformanceAdjustment.id == adjustment_id
+            )
         )
     ).scalar_one_or_none()
     if not record:
-        return error_response(ErrorCode.DATA_NOT_FOUND, f"绩效调整项不存在: {adjustment_id}", status_code=404)
+        return error_response(
+            ErrorCode.DATA_NOT_FOUND,
+            f"绩效调整项不存在: {adjustment_id}",
+            status_code=404,
+        )
 
     controlled_conflict = await _controlled_personal_target_write_conflict(
         db=db, year_month=record.year_month
@@ -463,30 +621,36 @@ async def _list_employee_performance_inputs(
         query = query.where(and_(*conditions))
 
     total = (
-        await db.execute(
-            select(func.count()).select_from(query.subquery())
-        )
+        await db.execute(select(func.count()).select_from(query.subquery()))
     ).scalar() or 0
 
     rows = (
-        await db.execute(
-            query.order_by(
-                EmployeePerformanceInput.year_month.desc(),
-                EmployeePerformanceInput.employee_code,
-                EmployeePerformanceInput.metric_code,
-                EmployeePerformanceInput.id.desc(),
+        (
+            await db.execute(
+                query.order_by(
+                    EmployeePerformanceInput.year_month.desc(),
+                    EmployeePerformanceInput.employee_code,
+                    EmployeePerformanceInput.metric_code,
+                    EmployeePerformanceInput.id.desc(),
+                )
+                .offset((page - 1) * page_size)
+                .limit(page_size)
             )
-            .offset((page - 1) * page_size)
-            .limit(page_size)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
-    employee_codes = sorted({row.employee_code for row in rows if getattr(row, "employee_code", None)})
+    employee_codes = sorted(
+        {row.employee_code for row in rows if getattr(row, "employee_code", None)}
+    )
     name_map: Dict[str, str] = {}
     if employee_codes:
         name_rows = (
             await db.execute(
-                select(Employee.employee_code, Employee.name).where(Employee.employee_code.in_(employee_codes))
+                select(Employee.employee_code, Employee.name).where(
+                    Employee.employee_code.in_(employee_codes)
+                )
             )
         ).all()
         name_map = {row[0]: row[1] or row[0] for row in name_rows}
@@ -512,10 +676,16 @@ async def _create_employee_performance_input(
         return controlled_conflict
 
     employee = (
-        await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
+        await db.execute(
+            select(Employee).where(Employee.employee_code == body.employee_code)
+        )
     ).scalar_one_or_none()
     if not employee:
-        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
+        return error_response(
+            ErrorCode.DATA_NOT_FOUND,
+            f"员工不存在: {body.employee_code}",
+            status_code=400,
+        )
 
     conflict = await _employee_month_lock_conflict(
         db=db,
@@ -555,7 +725,11 @@ async def _create_employee_performance_input(
         source=body.source,
         reason=body.reason,
         status="active",
-        created_by=str(getattr(current_user, "username", None) or getattr(current_user, "user_id", None) or "system"),
+        created_by=str(
+            getattr(current_user, "username", None)
+            or getattr(current_user, "user_id", None)
+            or "system"
+        ),
     )
     db.add(record)
     await db.commit()
@@ -573,11 +747,17 @@ async def _update_employee_performance_input(
 ) -> Dict[str, Any]:
     record = (
         await db.execute(
-            select(EmployeePerformanceInput).where(EmployeePerformanceInput.id == input_id)
+            select(EmployeePerformanceInput).where(
+                EmployeePerformanceInput.id == input_id
+            )
         )
     ).scalar_one_or_none()
     if not record:
-        return error_response(ErrorCode.DATA_NOT_FOUND, f"个人绩效输入项不存在: {input_id}", status_code=404)
+        return error_response(
+            ErrorCode.DATA_NOT_FOUND,
+            f"个人绩效输入项不存在: {input_id}",
+            status_code=404,
+        )
 
     controlled_conflict = await _controlled_personal_target_write_conflict(
         db=db, year_month=record.year_month
@@ -599,7 +779,9 @@ async def _update_employee_performance_input(
     await db.commit()
     await db.refresh(record)
     employee_name = (
-        await db.execute(select(Employee.name).where(Employee.employee_code == record.employee_code))
+        await db.execute(
+            select(Employee.name).where(Employee.employee_code == record.employee_code)
+        )
     ).scalar_one_or_none()
     payload = EmployeePerformanceInputResponse.model_validate(record)
     payload.employee_name = employee_name or record.employee_code
@@ -613,11 +795,17 @@ async def _delete_employee_performance_input(
 ) -> Dict[str, Any]:
     record = (
         await db.execute(
-            select(EmployeePerformanceInput).where(EmployeePerformanceInput.id == input_id)
+            select(EmployeePerformanceInput).where(
+                EmployeePerformanceInput.id == input_id
+            )
         )
     ).scalar_one_or_none()
     if not record:
-        return error_response(ErrorCode.DATA_NOT_FOUND, f"个人绩效输入项不存在: {input_id}", status_code=404)
+        return error_response(
+            ErrorCode.DATA_NOT_FOUND,
+            f"个人绩效输入项不存在: {input_id}",
+            status_code=404,
+        )
 
     controlled_conflict = await _controlled_personal_target_write_conflict(
         db=db, year_month=record.year_month
@@ -657,11 +845,17 @@ async def _build_employee_performance_templates(
     recommended_code = "general_operator"
     if employee_code:
         employee = (
-            await db.execute(select(Employee).where(Employee.employee_code == employee_code))
+            await db.execute(
+                select(Employee).where(Employee.employee_code == employee_code)
+            )
         ).scalar_one_or_none()
         if employee and getattr(employee, "position_id", None):
             position_name = (
-                await db.execute(select(Position.position_name).where(Position.id == employee.position_id))
+                await db.execute(
+                    select(Position.position_name).where(
+                        Position.id == employee.position_id
+                    )
+                )
             ).scalar_one_or_none()
         recommended_code = _select_performance_template_code(position_name)
 
@@ -671,9 +865,14 @@ async def _build_employee_performance_templates(
             EmployeePerformanceTemplateResponse(
                 template_code=template_code,
                 template_name=config["template_name"],
-                position_name=position_name if template_code == recommended_code else None,
+                position_name=(
+                    position_name if template_code == recommended_code else None
+                ),
                 recommended=(template_code == recommended_code),
-                metrics=[EmployeePerformanceTemplateMetric(**metric) for metric in config["metrics"]],
+                metrics=[
+                    EmployeePerformanceTemplateMetric(**metric)
+                    for metric in config["metrics"]
+                ],
             )
         )
     return {
@@ -698,10 +897,16 @@ async def _apply_employee_performance_template(
         return controlled_conflict
 
     employee = (
-        await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
+        await db.execute(
+            select(Employee).where(Employee.employee_code == body.employee_code)
+        )
     ).scalar_one_or_none()
     if not employee:
-        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
+        return error_response(
+            ErrorCode.DATA_NOT_FOUND,
+            f"员工不存在: {body.employee_code}",
+            status_code=400,
+        )
 
     conflict = await _employee_month_lock_conflict(
         db=db,
@@ -714,29 +919,47 @@ async def _apply_employee_performance_template(
     position_name = None
     if employee and getattr(employee, "position_id", None):
         position_name = (
-            await db.execute(select(Position.position_name).where(Position.id == employee.position_id))
+            await db.execute(
+                select(Position.position_name).where(
+                    Position.id == employee.position_id
+                )
+            )
         ).scalar_one_or_none()
 
-    template_code = body.template_code or _select_performance_template_code(position_name)
+    template_code = body.template_code or _select_performance_template_code(
+        position_name
+    )
     template = DEFAULT_PERFORMANCE_TEMPLATES.get(template_code)
     if not template:
-        return error_response(ErrorCode.DATA_NOT_FOUND, f"绩效模板不存在: {template_code}", status_code=404)
+        return error_response(
+            ErrorCode.DATA_NOT_FOUND,
+            f"绩效模板不存在: {template_code}",
+            status_code=404,
+        )
 
     existing_rows = (
-        await db.execute(
-            select(EmployeePerformanceInput).where(
-                EmployeePerformanceInput.employee_code == body.employee_code,
-                EmployeePerformanceInput.year_month == body.year_month,
-                EmployeePerformanceInput.status == "active",
+        (
+            await db.execute(
+                select(EmployeePerformanceInput).where(
+                    EmployeePerformanceInput.employee_code == body.employee_code,
+                    EmployeePerformanceInput.year_month == body.year_month,
+                    EmployeePerformanceInput.status == "active",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     existing_by_metric = {row.metric_code: row for row in existing_rows}
 
     created_count = 0
     updated_count = 0
     skipped_count = 0
-    created_by = str(getattr(current_user, "username", None) or getattr(current_user, "user_id", None) or "system")
+    created_by = str(
+        getattr(current_user, "username", None)
+        or getattr(current_user, "user_id", None)
+        or "system"
+    )
 
     for metric in template["metrics"]:
         existing = existing_by_metric.get(metric["metric_code"])
@@ -803,7 +1026,11 @@ async def list_employee_performance_templates(
         )
     except Exception as e:
         logger.error(f"获取个人绩效模板失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取个人绩效模板失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取个人绩效模板失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.post("/performance-input-templates/apply")
@@ -821,7 +1048,11 @@ async def apply_employee_performance_template(
     except Exception as e:
         await db.rollback()
         logger.error(f"套用个人绩效模板失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"套用个人绩效模板失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"套用个人绩效模板失败: {str(e)}",
+            status_code=500,
+        )
 
 
 async def _load_profit_basis_map(
@@ -834,13 +1065,17 @@ async def _load_profit_basis_map(
         db
     ).get_profit_basis_version(year_month)
     rows = (
-        await db.execute(
-            select(ShopProfitBasis).where(
-                ShopProfitBasis.period_month == year_month,
-                ShopProfitBasis.basis_version == basis_version,
+        (
+            await db.execute(
+                select(ShopProfitBasis).where(
+                    ShopProfitBasis.period_month == year_month,
+                    ShopProfitBasis.basis_version == basis_version,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     basis_by_shop: Dict[str, Dict[str, float]] = {}
     for row in rows:
         if not bool(getattr(row, "is_locked", False)):
@@ -849,11 +1084,15 @@ async def _load_profit_basis_map(
             "profit_basis_amount": float(row.profit_basis_amount or 0),
             "orders_profit_amount": float(row.orders_profit_amount or 0),
             "a_class_cost_amount": float(row.a_class_cost_amount or 0),
-            "other_a_class_cost_amount": float(getattr(row, "other_a_class_cost_amount", 0) or 0),
+            "other_a_class_cost_amount": float(
+                getattr(row, "other_a_class_cost_amount", 0) or 0
+            ),
             "pre_commission_labor_cost_amount": float(
                 getattr(row, "pre_commission_labor_cost_amount", 0) or 0
             ),
-            "basis_version": str(getattr(row, "basis_version", "") or "A_PRE_COMMISSION_LABOR_V2"),
+            "basis_version": str(
+                getattr(row, "basis_version", "") or "A_PRE_COMMISSION_LABOR_V2"
+            ),
             "cost_status": str(getattr(row, "cost_status", "") or "locked"),
         }
 
@@ -872,9 +1111,15 @@ async def _load_profit_basis_map(
             "profit_basis_amount": float(basis.get("profit_basis_amount") or 0),
             "orders_profit_amount": float(basis.get("orders_profit_amount") or 0),
             "a_class_cost_amount": float(basis.get("a_class_cost_amount") or 0),
-            "other_a_class_cost_amount": float(basis.get("other_a_class_cost_amount") or 0),
-            "pre_commission_labor_cost_amount": float(basis.get("pre_commission_labor_cost_amount") or 0),
-            "basis_version": str(basis.get("basis_version") or "A_PRE_COMMISSION_LABOR_V2"),
+            "other_a_class_cost_amount": float(
+                basis.get("other_a_class_cost_amount") or 0
+            ),
+            "pre_commission_labor_cost_amount": float(
+                basis.get("pre_commission_labor_cost_amount") or 0
+            ),
+            "basis_version": str(
+                basis.get("basis_version") or "A_PRE_COMMISSION_LABOR_V2"
+            ),
             "cost_status": str(basis.get("cost_status") or "missing_labor_allocation"),
         }
     return basis_by_shop
@@ -886,36 +1131,49 @@ async def list_employee_performance(
     year_month: Optional[str] = Query(None, description="目标月份筛选(YYYY-MM)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取员工绩效列表(从 employee_performance 表读取)"""
     try:
         query = select(EmployeePerformance)
         conditions = []
-        
+
         if employee_code:
             conditions.append(EmployeePerformance.employee_code == employee_code)
         if year_month:
             conditions.append(EmployeePerformance.year_month == year_month)
-        
+
         if conditions:
             query = query.where(and_(*conditions))
-        
+
         offset = (page - 1) * page_size
-        query = query.order_by(EmployeePerformance.year_month.desc(), EmployeePerformance.employee_code).offset(offset).limit(page_size)
-        
+        query = (
+            query.order_by(
+                EmployeePerformance.year_month.desc(), EmployeePerformance.employee_code
+            )
+            .offset(offset)
+            .limit(page_size)
+        )
+
         result = await db.execute(query)
         performances = result.scalars().all()
-        
-        return [EmployeePerformanceResponse.model_validate(perf) for perf in performances]
+
+        return [
+            EmployeePerformanceResponse.model_validate(perf) for perf in performances
+        ]
     except Exception as e:
         logger.error(f"获取员工绩效列表失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工绩效列表失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取员工绩效列表失败: {str(e)}",
+            status_code=500,
+        )
 
 
 # ============================================================================
 # 提成查询API（只读）
 # ============================================================================
+
 
 @router.get("/performance-adjustments")
 async def list_employee_performance_adjustments(
@@ -938,7 +1196,11 @@ async def list_employee_performance_adjustments(
         )
     except Exception as e:
         logger.error(f"获取个人绩效调整项列表失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取个人绩效调整项列表失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取个人绩效调整项列表失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.post("/performance-adjustments")
@@ -956,7 +1218,11 @@ async def create_employee_performance_adjustment(
     except Exception as e:
         await db.rollback()
         logger.error(f"创建个人绩效调整项失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建个人绩效调整项失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"创建个人绩效调整项失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.put("/performance-adjustments/{adjustment_id}")
@@ -975,7 +1241,11 @@ async def update_employee_performance_adjustment(
     except Exception as e:
         await db.rollback()
         logger.error(f"更新个人绩效调整项失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新个人绩效调整项失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"更新个人绩效调整项失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.delete("/performance-adjustments/{adjustment_id}")
@@ -992,7 +1262,11 @@ async def delete_employee_performance_adjustment(
     except Exception as e:
         await db.rollback()
         logger.error(f"停用个人绩效调整项失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"停用个人绩效调整项失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"停用个人绩效调整项失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.get("/performance-inputs")
@@ -1016,7 +1290,11 @@ async def list_employee_performance_inputs(
         )
     except Exception as e:
         logger.error(f"获取个人绩效输入项列表失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取个人绩效输入项列表失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取个人绩效输入项列表失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.post("/performance-inputs")
@@ -1034,7 +1312,11 @@ async def create_employee_performance_input(
     except Exception as e:
         await db.rollback()
         logger.error(f"创建个人绩效输入项失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建个人绩效输入项失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"创建个人绩效输入项失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.put("/performance-inputs/{input_id}")
@@ -1053,7 +1335,11 @@ async def update_employee_performance_input(
     except Exception as e:
         await db.rollback()
         logger.error(f"更新个人绩效输入项失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新个人绩效输入项失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"更新个人绩效输入项失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.delete("/performance-inputs/{input_id}")
@@ -1070,41 +1356,11 @@ async def delete_employee_performance_input(
     except Exception as e:
         await db.rollback()
         logger.error(f"停用个人绩效输入项失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"停用个人绩效输入项失败: {str(e)}", status_code=500)
-
-
-@router.get("/performance-input-templates")
-async def list_employee_performance_templates(
-    employee_code: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(get_current_user),
-):
-    try:
-        return await _build_employee_performance_templates(
-            db=db,
-            employee_code=employee_code,
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"停用个人绩效输入项失败: {str(e)}",
+            status_code=500,
         )
-    except Exception as e:
-        logger.error(f"获取个人绩效模板失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取个人绩效模板失败: {str(e)}", status_code=500)
-
-
-@router.post("/performance-input-templates/apply")
-async def apply_employee_performance_template(
-    body: EmployeePerformanceTemplateApplyRequest,
-    db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(require_admin),
-):
-    try:
-        return await _apply_employee_performance_template(
-            body=body,
-            db=db,
-            current_user=current_user,
-        )
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"套用个人绩效模板失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"套用个人绩效模板失败: {str(e)}", status_code=500)
 
 
 @router.get("/commissions/employee", response_model=List[EmployeeCommissionResponse])
@@ -1113,31 +1369,41 @@ async def list_employee_commissions(
     year_month: Optional[str] = Query(None, description="目标月份筛选(YYYY-MM)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取员工提成列表(从 employee_commissions 表读取)"""
     try:
         query = select(EmployeeCommission)
         conditions = []
-        
+
         if employee_code:
             conditions.append(EmployeeCommission.employee_code == employee_code)
         if year_month:
             conditions.append(EmployeeCommission.year_month == year_month)
-        
+
         if conditions:
             query = query.where(and_(*conditions))
-        
+
         offset = (page - 1) * page_size
-        query = query.order_by(EmployeeCommission.year_month.desc(), EmployeeCommission.employee_code).offset(offset).limit(page_size)
-        
+        query = (
+            query.order_by(
+                EmployeeCommission.year_month.desc(), EmployeeCommission.employee_code
+            )
+            .offset(offset)
+            .limit(page_size)
+        )
+
         result = await db.execute(query)
         commissions = result.scalars().all()
-        
+
         return [EmployeeCommissionResponse.model_validate(comm) for comm in commissions]
     except Exception as e:
         logger.error(f"获取员工提成列表失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工提成列表失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取员工提成列表失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.get("/commissions/shop", response_model=List[ShopCommissionResponse])
@@ -1146,36 +1412,46 @@ async def list_shop_commissions(
     year_month: Optional[str] = Query(None, description="目标月份筛选(YYYY-MM)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取店铺提成列表(从 shop_commissions 表读取)"""
     try:
         query = select(ShopCommission)
         conditions = []
-        
+
         if shop_id:
             conditions.append(ShopCommission.shop_id == shop_id)
         if year_month:
             conditions.append(ShopCommission.year_month == year_month)
-        
+
         if conditions:
             query = query.where(and_(*conditions))
-        
+
         offset = (page - 1) * page_size
-        query = query.order_by(ShopCommission.year_month.desc(), ShopCommission.shop_id).offset(offset).limit(page_size)
-        
+        query = (
+            query.order_by(ShopCommission.year_month.desc(), ShopCommission.shop_id)
+            .offset(offset)
+            .limit(page_size)
+        )
+
         result = await db.execute(query)
         commissions = result.scalars().all()
-        
+
         return [ShopCommissionResponse.model_validate(comm) for comm in commissions]
     except Exception as e:
         logger.error(f"获取店铺提成列表失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取店铺提成列表失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取店铺提成列表失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.get("/employee-shop-assignments")
 async def list_employee_shop_assignments(
-    year_month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$", description="适用月份 YYYY-MM"),
+    year_month: Optional[str] = Query(
+        None, pattern=r"^\d{4}-\d{2}$", description="适用月份 YYYY-MM"
+    ),
     employee_code: Optional[str] = Query(None),
     shop_id: Optional[str] = Query(None),
     platform_code: Optional[str] = Query(None),
@@ -1206,51 +1482,61 @@ async def list_employee_shop_assignments(
         total = total_result.scalar() or 0
 
         offset = (page - 1) * page_size
-        query = base_query.order_by(
-            EmployeeShopAssignment.employee_code,
-            EmployeeShopAssignment.platform_code,
-            EmployeeShopAssignment.shop_id,
-        ).offset(offset).limit(page_size)
+        query = (
+            base_query.order_by(
+                EmployeeShopAssignment.employee_code,
+                EmployeeShopAssignment.platform_code,
+                EmployeeShopAssignment.shop_id,
+            )
+            .offset(offset)
+            .limit(page_size)
+        )
         result = await db.execute(query)
         rows = result.scalars().all()
 
         items = []
+        shop_display_names = await _load_shop_display_names(db)
         for r in rows:
             emp_name = None
             shop_name = None
-            emp_res = await db.execute(select(Employee.name).where(Employee.employee_code == r.employee_code))
+            emp_res = await db.execute(
+                select(Employee.name).where(Employee.employee_code == r.employee_code)
+            )
             if emp_row := emp_res.scalar_one_or_none():
                 emp_name = emp_row
-            shop_res = await db.execute(
-                select(DimShop.shop_name).where(
-                    DimShop.platform_code == r.platform_code,
-                    DimShop.shop_id == r.shop_id,
+            shop_res = shop_display_names.get(
+                (str(r.platform_code or "").lower(), str(r.shop_id or ""))
+            )
+            if shop_res:
+                shop_name = shop_res
+            items.append(
+                EmployeeShopAssignmentResponse(
+                    id=r.id,
+                    year_month=r.year_month,
+                    employee_code=r.employee_code,
+                    employee_name=emp_name,
+                    platform_code=r.platform_code,
+                    shop_id=r.shop_id,
+                    shop_name=shop_name,
+                    commission_ratio=r.commission_ratio,
+                    target_allocation_ratio=r.target_allocation_ratio,
+                    target_allocation_ratio_source=r.target_allocation_ratio_source,
+                    role=r.role,
+                    effective_from=r.effective_from,
+                    effective_to=r.effective_to,
+                    status=r.status,
+                    created_at=r.created_at,
+                    updated_at=r.updated_at,
                 )
             )
-            if shop_row := shop_res.scalar_one_or_none():
-                shop_name = shop_row
-            items.append(EmployeeShopAssignmentResponse(
-                id=r.id,
-                year_month=r.year_month,
-                employee_code=r.employee_code,
-                employee_name=emp_name,
-                platform_code=r.platform_code,
-                shop_id=r.shop_id,
-                shop_name=shop_name,
-                commission_ratio=r.commission_ratio,
-                target_allocation_ratio=r.target_allocation_ratio,
-                target_allocation_ratio_source=r.target_allocation_ratio_source,
-                role=r.role,
-                effective_from=r.effective_from,
-                effective_to=r.effective_to,
-                status=r.status,
-                created_at=r.created_at,
-                updated_at=r.updated_at,
-            ))
         return {"success": True, "data": {"items": items, "total": total}}
     except Exception as e:
         logger.error(f"获取归属列表失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取归属列表失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取归属列表失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.post("/employee-shop-assignments", status_code=201)
@@ -1268,9 +1554,15 @@ async def create_employee_shop_assignment(
             employee_code=body.employee_code,
             year_month=body.year_month,
         )
-        emp_res = await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
+        emp_res = await db.execute(
+            select(Employee).where(Employee.employee_code == body.employee_code)
+        )
         if not emp_res.scalar_one_or_none():
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"员工不存在: {body.employee_code}",
+                status_code=400,
+            )
         shop = await _ensure_dim_shop_exists(
             db,
             platform_code=body.platform_code,
@@ -1292,16 +1584,24 @@ async def create_employee_shop_assignment(
             )
         )
         if dup.scalar_one_or_none():
-            return error_response(ErrorCode.DATA_ALREADY_EXISTS, "该员工在该月已关联该店铺", status_code=409)
+            return error_response(
+                ErrorCode.DATA_ALREADY_EXISTS,
+                "该员工在该月已关联该店铺",
+                status_code=409,
+            )
         same_shop_rows = (
-            await db.execute(
-                select(EmployeeShopAssignment).where(
-                    EmployeeShopAssignment.year_month == body.year_month,
-                    EmployeeShopAssignment.platform_code == body.platform_code,
-                    EmployeeShopAssignment.shop_id == body.shop_id,
+            (
+                await db.execute(
+                    select(EmployeeShopAssignment).where(
+                        EmployeeShopAssignment.year_month == body.year_month,
+                        EmployeeShopAssignment.platform_code == body.platform_code,
+                        EmployeeShopAssignment.shop_id == body.shop_id,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         validation_error = _validate_shop_assignment_ratio_limit(
             existing_rows=same_shop_rows,
             employee_code=body.employee_code,
@@ -1309,7 +1609,9 @@ async def create_employee_shop_assignment(
             current_assignment_id=None,
         )
         if validation_error:
-            return error_response(ErrorCode.DATA_VALIDATION_FAILED, validation_error, status_code=400)
+            return error_response(
+                ErrorCode.DATA_VALIDATION_FAILED, validation_error, status_code=400
+            )
 
         rec = EmployeeShopAssignment(
             year_month=body.year_month,
@@ -1326,8 +1628,15 @@ async def create_employee_shop_assignment(
         db.add(rec)
         await db.commit()
         await db.refresh(rec)
-        emp = (await db.execute(select(Employee.name).where(Employee.employee_code == rec.employee_code))).scalar_one_or_none()
-        shop = (await db.execute(select(DimShop.shop_name).where(DimShop.platform_code == rec.platform_code, DimShop.shop_id == rec.shop_id))).scalar_one_or_none()
+        emp = (
+            await db.execute(
+                select(Employee.name).where(Employee.employee_code == rec.employee_code)
+            )
+        ).scalar_one_or_none()
+        shop_display_names = await _load_shop_display_names(db)
+        shop = shop_display_names.get(
+            (str(rec.platform_code or "").lower(), str(rec.shop_id or ""))
+        )
         resp = EmployeeShopAssignmentResponse.model_validate(rec)
         resp.employee_name = emp
         resp.shop_name = shop
@@ -1337,7 +1646,9 @@ async def create_employee_shop_assignment(
     except Exception as e:
         await db.rollback()
         logger.error(f"新增归属失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"新增归属失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR, f"新增归属失败: {str(e)}", status_code=500
+        )
 
 
 @router.put("/employee-shop-assignments/{id}")
@@ -1349,10 +1660,14 @@ async def update_employee_shop_assignment(
 ):
     """更新归属"""
     try:
-        result = await db.execute(select(EmployeeShopAssignment).where(EmployeeShopAssignment.id == id))
+        result = await db.execute(
+            select(EmployeeShopAssignment).where(EmployeeShopAssignment.id == id)
+        )
         rec = result.scalar_one_or_none()
         if not rec:
-            return error_response(ErrorCode.DATA_NOT_FOUND, "归属记录不存在", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND, "归属记录不存在", status_code=404
+            )
         await PayrollPeriodLockService(db).acquire_month_transaction_lock(
             year_month=rec.year_month
         )
@@ -1361,15 +1676,23 @@ async def update_employee_shop_assignment(
             year_month=rec.year_month,
         )
         same_shop_rows = (
-            await db.execute(
-                select(EmployeeShopAssignment).where(
-                    EmployeeShopAssignment.year_month == rec.year_month,
-                    EmployeeShopAssignment.platform_code == rec.platform_code,
-                    EmployeeShopAssignment.shop_id == rec.shop_id,
+            (
+                await db.execute(
+                    select(EmployeeShopAssignment).where(
+                        EmployeeShopAssignment.year_month == rec.year_month,
+                        EmployeeShopAssignment.platform_code == rec.platform_code,
+                        EmployeeShopAssignment.shop_id == rec.shop_id,
+                    )
                 )
             )
-        ).scalars().all()
-        next_commission_ratio = body.commission_ratio if body.commission_ratio is not None else rec.commission_ratio
+            .scalars()
+            .all()
+        )
+        next_commission_ratio = (
+            body.commission_ratio
+            if body.commission_ratio is not None
+            else rec.commission_ratio
+        )
         validation_error = _validate_shop_assignment_ratio_limit(
             existing_rows=same_shop_rows,
             employee_code=rec.employee_code,
@@ -1377,14 +1700,23 @@ async def update_employee_shop_assignment(
             current_assignment_id=id,
         )
         if validation_error:
-            return error_response(ErrorCode.DATA_VALIDATION_FAILED, validation_error, status_code=400)
+            return error_response(
+                ErrorCode.DATA_VALIDATION_FAILED, validation_error, status_code=400
+            )
         update_data = body.model_dump(exclude_unset=True)
         for k, v in update_data.items():
             setattr(rec, k, v)
         await db.commit()
         await db.refresh(rec)
-        emp = (await db.execute(select(Employee.name).where(Employee.employee_code == rec.employee_code))).scalar_one_or_none()
-        shop = (await db.execute(select(DimShop.shop_name).where(DimShop.platform_code == rec.platform_code, DimShop.shop_id == rec.shop_id))).scalar_one_or_none()
+        emp = (
+            await db.execute(
+                select(Employee.name).where(Employee.employee_code == rec.employee_code)
+            )
+        ).scalar_one_or_none()
+        shop_display_names = await _load_shop_display_names(db)
+        shop = shop_display_names.get(
+            (str(rec.platform_code or "").lower(), str(rec.shop_id or ""))
+        )
         resp = EmployeeShopAssignmentResponse.model_validate(rec)
         resp.employee_name = emp
         resp.shop_name = shop
@@ -1394,7 +1726,9 @@ async def update_employee_shop_assignment(
     except Exception as e:
         await db.rollback()
         logger.error(f"更新归属失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新归属失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR, f"更新归属失败: {str(e)}", status_code=500
+        )
 
 
 @router.delete("/employee-shop-assignments/{id}", status_code=204)
@@ -1405,10 +1739,14 @@ async def delete_employee_shop_assignment(
 ):
     """删除归属"""
     try:
-        result = await db.execute(select(EmployeeShopAssignment).where(EmployeeShopAssignment.id == id))
+        result = await db.execute(
+            select(EmployeeShopAssignment).where(EmployeeShopAssignment.id == id)
+        )
         rec = result.scalar_one_or_none()
         if not rec:
-            return error_response(ErrorCode.DATA_NOT_FOUND, "归属记录不存在", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND, "归属记录不存在", status_code=404
+            )
         await PayrollPeriodLockService(db).acquire_month_transaction_lock(
             year_month=rec.year_month
         )
@@ -1424,7 +1762,9 @@ async def delete_employee_shop_assignment(
     except Exception as e:
         await db.rollback()
         logger.error(f"删除归属失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"删除归属失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR, f"删除归属失败: {str(e)}", status_code=500
+        )
 
 
 @router.get("/shop-commission-config")
@@ -1438,35 +1778,46 @@ async def get_shop_commission_config(
         shop_query = (
             select(ShopAccount)
             .where(
-                ShopAccount.enabled == True,
+                ShopAccount.enabled.is_(True),
                 ShopAccount.business_role == "operating_store",
             )
             .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         shop_rows = (await db.execute(shop_query)).scalars().all()
-        config_query = (
-            select(ShopCommissionConfig)
-            .where(ShopCommissionConfig.year_month == year_month)
+        config_query = select(ShopCommissionConfig).where(
+            ShopCommissionConfig.year_month == year_month
         )
         config_rows = (await db.execute(config_query)).scalars().all()
         config_by_key = {
-            f"{(c.platform_code or '').lower()}|{c.shop_id}": float(c.allocatable_profit_rate or 0)
+            f"{(c.platform_code or '').lower()}|{c.shop_id}": float(
+                c.allocatable_profit_rate or 0
+            )
             for c in config_rows
         }
         items = []
         for r in shop_rows:
             pc = (r.platform or "").lower()
-            sid = getattr(r, "platform_shop_id", None) or getattr(r, "shop_account_id", None) or getattr(r, "shop_id", None) or getattr(r, "account_id", None) or str(r.id)
+            sid = (
+                getattr(r, "platform_shop_id", None)
+                or getattr(r, "shop_account_id", None)
+                or getattr(r, "shop_id", None)
+                or getattr(r, "account_id", None)
+                or str(r.id)
+            )
             key = f"{pc}|{sid}"
-            items.append({
-                "platform_code": pc,
-                "shop_id": sid,
-                "allocatable_profit_rate": config_by_key.get(key, 0),
-            })
+            items.append(
+                {
+                    "platform_code": pc,
+                    "shop_id": sid,
+                    "allocatable_profit_rate": config_by_key.get(key, 0),
+                }
+            )
         return {"success": True, "data": items}
     except Exception as e:
         logger.error(f"获取店铺可分配利润率配置失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取配置失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR, f"获取配置失败: {str(e)}", status_code=500
+        )
 
 
 @router.put("/shop-commission-config/{platform_code}/{shop_id}")
@@ -1487,7 +1838,11 @@ async def put_shop_commission_config(
             shop_id=sid,
         )
         if not shop:
-            return error_response(ErrorCode.DATA_NOT_FOUND, "该店铺尚未同步至系统，请先在账号管理中同步", status_code=400)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                "该店铺尚未同步至系统，请先在账号管理中同步",
+                status_code=400,
+            )
         await PayrollPeriodLockService(db).assert_shop_month_mutable(
             platform_code=pc,
             shop_id=sid,
@@ -1528,7 +1883,9 @@ async def put_shop_commission_config(
     except Exception as e:
         await db.rollback()
         logger.error(f"保存店铺可分配利润率失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"保存失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR, f"保存失败: {str(e)}", status_code=500
+        )
 
 
 @router.post("/employee-shop-assignments/copy-from-prev-month")
@@ -1553,28 +1910,35 @@ async def copy_employee_shop_assignments_from_prev_month(
         )
         prev_rows = (await db.execute(prev_query)).scalars().all()
         prev_config_rows = (
-            await db.execute(
-                select(ShopCommissionConfig).where(
-                    ShopCommissionConfig.year_month == prev_month
+            (
+                await db.execute(
+                    select(ShopCommissionConfig).where(
+                        ShopCommissionConfig.year_month == prev_month
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         # 查目标月已有人员归属和店铺利润率
-        target_query = (
-            select(EmployeeShopAssignment)
-            .where(EmployeeShopAssignment.year_month == body.year_month)
+        target_query = select(EmployeeShopAssignment).where(
+            EmployeeShopAssignment.year_month == body.year_month
         )
         target_rows = (await db.execute(target_query)).scalars().all()
         target_by_key = {
             (r.employee_code, r.platform_code, r.shop_id): r for r in target_rows
         }
         target_config_rows = (
-            await db.execute(
-                select(ShopCommissionConfig).where(
-                    ShopCommissionConfig.year_month == body.year_month
+            (
+                await db.execute(
+                    select(ShopCommissionConfig).where(
+                        ShopCommissionConfig.year_month == body.year_month
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         target_config_by_key = {
             (r.platform_code, r.shop_id): r for r in target_config_rows
         }
@@ -1627,11 +1991,23 @@ async def copy_employee_shop_assignments_from_prev_month(
             target_config.allocatable_profit_rate = prev_config.allocatable_profit_rate
             updated += 1
         await db.commit()
-        return {"success": True, "data": {"copied": copied, "updated": updated, "from_month": prev_month, "to_month": body.year_month}}
+        return {
+            "success": True,
+            "data": {
+                "copied": copied,
+                "updated": updated,
+                "from_month": prev_month,
+                "to_month": body.year_month,
+            },
+        }
     except Exception as e:
         await db.rollback()
         logger.error(f"复制上月配置失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"复制上月配置失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"复制上月配置失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.get("/shop-profit-statistics")
@@ -1643,17 +2019,21 @@ async def get_shop_profit_statistics(
 ):
     """获取店铺月度销售额与利润统计（用于人员店铺归属统计页）"""
     try:
-        # 解析月份为月初日期
+        # 解析月份为月初日期（这里只用它的**校验**作用：格式不对直接 400）
         try:
-            month_date = year_month_to_first_day(month)
+            year_month_to_first_day(month)
         except (ValueError, IndexError):
-            return error_response(ErrorCode.PARAMETER_INVALID, "月份格式应为 YYYY-MM", status_code=400)
+            return error_response(
+                ErrorCode.PARAMETER_INVALID, "月份格式应为 YYYY-MM", status_code=400
+            )
 
         cache_params = {"month": month}
         cache_status = "BYPASS"
         if request and hasattr(request.app.state, "cache_service"):
             cache_service = request.app.state.cache_service
-            cached = await cache_service.get("hr_shop_profit_statistics", **cache_params)
+            cached = await cache_service.get(
+                "hr_shop_profit_statistics", **cache_params
+            )
             if cached is not None:
                 return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
             cache_status = "MISS"
@@ -1662,7 +2042,7 @@ async def get_shop_profit_statistics(
         shop_query = (
             select(ShopAccount)
             .where(
-                ShopAccount.enabled == True,
+                ShopAccount.enabled.is_(True),
                 ShopAccount.business_role == "operating_store",
             )
             .order_by(ShopAccount.platform, ShopAccount.store_name)
@@ -1671,8 +2051,15 @@ async def get_shop_profit_statistics(
         shop_list = [
             {
                 "platform_code": (r.platform or "").lower(),
-                "shop_id": getattr(r, "platform_shop_id", None) or getattr(r, "shop_account_id", None) or getattr(r, "shop_id", None) or getattr(r, "account_id", None) or str(r.id),
-                "shop_name": getattr(r, "store_name", None) or getattr(r, "shop_account_id", None) or getattr(r, "account_id", None) or "",
+                "shop_id": getattr(r, "platform_shop_id", None)
+                or getattr(r, "shop_account_id", None)
+                or getattr(r, "shop_id", None)
+                or getattr(r, "account_id", None)
+                or str(r.id),
+                "shop_name": getattr(r, "store_name", None)
+                or getattr(r, "shop_account_id", None)
+                or getattr(r, "account_id", None)
+                or "",
             }
             for r in shop_rows
         ]
@@ -1686,7 +2073,9 @@ async def get_shop_profit_statistics(
         )
         config_rows = (await db.execute(config_query)).scalars().all()
         allocatable_by_shop: Dict[str, float] = {
-            f"{(c.platform_code or '').lower()}|{str(c.shop_id or '').lower()}": float(c.allocatable_profit_rate or 0)
+            f"{(c.platform_code or '').lower()}|{str(c.shop_id or '').lower()}": float(
+                c.allocatable_profit_rate or 0
+            )
             for c in config_rows
         }
         # 4. 获取归属配置（用于计算主管/操作员利润）：仅取该月的配置
@@ -1734,50 +2123,72 @@ async def get_shop_profit_statistics(
         items = []
         for s in shop_list:
             key = f"{s['platform_code']}|{str(s['shop_id']).lower()}"
-            m = metrics_by_shop.get(key) or metrics_by_shop.get(f"{s['platform_code']}|{s['shop_id']}") or {}
+            m = (
+                metrics_by_shop.get(key)
+                or metrics_by_shop.get(f"{s['platform_code']}|{s['shop_id']}")
+                or {}
+            )
             monthly_sales = float(m.get("monthly_sales", 0))
             monthly_profit = float(m.get("monthly_profit", 0))
             basis = basis_by_shop.get(key, {})
             profit_basis_amount = float(basis.get("profit_basis_amount", 0))
             a_class_cost_amount = float(basis.get("a_class_cost_amount", 0))
-            orders_profit_amount = float(basis.get("orders_profit_amount", monthly_profit))
+            orders_profit_amount = float(
+                basis.get("orders_profit_amount", monthly_profit)
+            )
             other_a_class_cost_amount = float(basis.get("other_a_class_cost_amount", 0))
-            pre_commission_labor_cost_amount = float(basis.get("pre_commission_labor_cost_amount", 0))
+            pre_commission_labor_cost_amount = float(
+                basis.get("pre_commission_labor_cost_amount", 0)
+            )
             achievement_rate = m.get("achievement_rate")
-            allocatable_rate = allocatable_by_shop.get(key, 1.0)  # 无配置时默认 100% 可分配
+            allocatable_rate = allocatable_by_shop.get(
+                key, 1.0
+            )  # 无配置时默认 100% 可分配
             allocatable_profit = max(profit_basis_amount, 0.0) * allocatable_rate
             ass = assign_by_shop.get(key, {})
             sup_ratios = ass.get("supervisors", [])
             op_ratios = ass.get("operators", [])
-            supervisor_profit = allocatable_profit * sum(sup_ratios) if sup_ratios else 0
+            supervisor_profit = (
+                allocatable_profit * sum(sup_ratios) if sup_ratios else 0
+            )
             operator_profit = allocatable_profit * sum(op_ratios) if op_ratios else 0
             estimated_total_commission = supervisor_profit + operator_profit
-            items.append({
-                "platform_code": s["platform_code"],
-                "shop_id": s["shop_id"],
-                "shop_name": s["shop_name"],
-                "monthly_sales": monthly_sales,
-                "monthly_profit": monthly_profit,
-                "orders_profit_amount": orders_profit_amount,
-                "a_class_cost_amount": a_class_cost_amount,
-                "other_a_class_cost_amount": other_a_class_cost_amount,
-                "pre_commission_labor_cost_amount": pre_commission_labor_cost_amount,
-                "basis_version": basis.get("basis_version") or "A_PRE_COMMISSION_LABOR_V2",
-                "cost_status": basis.get("cost_status") or "missing_labor_allocation",
-                "profit_basis_amount": profit_basis_amount,
-                "allocatable_profit_amount": allocatable_profit,
-                "achievement_rate": achievement_rate,
-                "supervisor_profit": supervisor_profit,
-                "operator_profit": operator_profit,
-                "estimated_total_commission": estimated_total_commission,
-            })
+            items.append(
+                {
+                    "platform_code": s["platform_code"],
+                    "shop_id": s["shop_id"],
+                    "shop_name": s["shop_name"],
+                    "monthly_sales": monthly_sales,
+                    "monthly_profit": monthly_profit,
+                    "orders_profit_amount": orders_profit_amount,
+                    "a_class_cost_amount": a_class_cost_amount,
+                    "other_a_class_cost_amount": other_a_class_cost_amount,
+                    "pre_commission_labor_cost_amount": pre_commission_labor_cost_amount,
+                    "basis_version": basis.get("basis_version")
+                    or "A_PRE_COMMISSION_LABOR_V2",
+                    "cost_status": basis.get("cost_status")
+                    or "missing_labor_allocation",
+                    "profit_basis_amount": profit_basis_amount,
+                    "allocatable_profit_amount": allocatable_profit,
+                    "achievement_rate": achievement_rate,
+                    "supervisor_profit": supervisor_profit,
+                    "operator_profit": operator_profit,
+                    "estimated_total_commission": estimated_total_commission,
+                }
+            )
         result = {"success": True, "data": items}
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("hr_shop_profit_statistics", result, **cache_params)
+            await request.app.state.cache_service.set(
+                "hr_shop_profit_statistics", result, **cache_params
+            )
         return JSONResponse(content=result, headers={"X-Cache": cache_status})
     except Exception as e:
         logger.error(f"获取店铺利润统计失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取店铺利润统计失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取店铺利润统计失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.get("/annual-profit-statistics")
@@ -1793,7 +2204,9 @@ async def get_annual_profit_statistics(
         cache_status = "BYPASS"
         if request and hasattr(request.app.state, "cache_service"):
             cache_service = request.app.state.cache_service
-            cached = await cache_service.get("hr_annual_profit_statistics", **cache_params)
+            cached = await cache_service.get(
+                "hr_annual_profit_statistics", **cache_params
+            )
             if cached is not None:
                 return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
             cache_status = "MISS"
@@ -1801,21 +2214,32 @@ async def get_annual_profit_statistics(
         # 1. 店铺列表（全年共用）
         shop_query = (
             select(ShopAccount)
-            .where(ShopAccount.enabled == True)
+            .where(ShopAccount.enabled.is_(True))
             .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         shop_rows = (await db.execute(shop_query)).scalars().all()
         shop_list = [
             {
                 "platform_code": (r.platform or "").lower(),
-                "shop_id": getattr(r, "platform_shop_id", None) or getattr(r, "shop_account_id", None) or getattr(r, "shop_id", None) or getattr(r, "account_id", None) or str(r.id),
-                "shop_name": getattr(r, "store_name", None) or getattr(r, "shop_account_id", None) or getattr(r, "account_id", None) or "",
+                "shop_id": getattr(r, "platform_shop_id", None)
+                or getattr(r, "shop_account_id", None)
+                or getattr(r, "shop_id", None)
+                or getattr(r, "account_id", None)
+                or str(r.id),
+                "shop_name": getattr(r, "store_name", None)
+                or getattr(r, "shop_account_id", None)
+                or getattr(r, "account_id", None)
+                or "",
             }
             for r in shop_rows
         ]
 
-        by_employee: Dict[str, Dict[str, Any]] = {}  # employee_code -> { months: {"01": profit}, year_total_profit }
-        by_shop: Dict[str, Dict[str, Any]] = {}  # key -> { platform_code, shop_id, shop_name, months: {"01": {...}}, year_total_sales, year_total_profit }
+        by_employee: Dict[str, Dict[str, Any]] = (
+            {}
+        )  # employee_code -> { months: {"01": profit}, year_total_profit }
+        by_shop: Dict[str, Dict[str, Any]] = (
+            {}
+        )  # key -> { platform_code, shop_id, shop_name, months: {"01": {...}}, year_total_sales, year_total_profit }
         for s in shop_list:
             key = f"{s['platform_code']}|{str(s['shop_id']).lower()}"
             by_shop[key] = {
@@ -1832,24 +2256,33 @@ async def get_annual_profit_statistics(
         for month_num in range(1, 13):
             month_str = f"{year}-{month_num:02d}"
             try:
-                month_date = date(year, month_num, 1)
+                # 只用它的**校验**作用（year 越界时 ValueError）
+                date(year, month_num, 1)
             except (ValueError, TypeError):
                 continue
 
             config_rows = (
-                await db.execute(
-                    select(ShopCommissionConfig).where(
-                        ShopCommissionConfig.year_month == month_str
+                (
+                    await db.execute(
+                        select(ShopCommissionConfig).where(
+                            ShopCommissionConfig.year_month == month_str
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             allocatable_by_shop: Dict[str, float] = {
-                f"{(c.platform_code or '').lower()}|{c.shop_id}": float(c.allocatable_profit_rate or 0)
+                f"{(c.platform_code or '').lower()}|{c.shop_id}": float(
+                    c.allocatable_profit_rate or 0
+                )
                 for c in config_rows
             }
 
             try:
-                metrics_by_shop: Dict[str, Dict] = await load_shop_monthly_metrics(db, month_str)
+                metrics_by_shop: Dict[str, Dict] = await load_shop_monthly_metrics(
+                    db, month_str
+                )
             except Exception as e:
                 logger.warning(f"PostgreSQL 月度 {month_str} 查询失败: {e}")
                 metrics_by_shop = {}
@@ -1887,7 +2320,11 @@ async def get_annual_profit_statistics(
 
             for s in shop_list:
                 key = f"{s['platform_code']}|{str(s['shop_id']).lower()}"
-                m = metrics_by_shop.get(key) or metrics_by_shop.get(f"{s['platform_code']}|{s['shop_id']}") or {}
+                m = (
+                    metrics_by_shop.get(key)
+                    or metrics_by_shop.get(f"{s['platform_code']}|{s['shop_id']}")
+                    or {}
+                )
                 monthly_sales = float(m.get("monthly_sales", 0))
                 monthly_profit = float(m.get("monthly_profit", 0))
                 profit_basis_amount = float(
@@ -1924,10 +2361,12 @@ async def get_annual_profit_statistics(
                         by_employee[emp_code] = {"months": {}, "year_total_profit": 0.0}
                     profit_this_month = allocatable_profit * ratio
                     by_employee[emp_code]["months"][month_key] = (
-                        by_employee[emp_code]["months"].get(month_key, 0.0) + profit_this_month
+                        by_employee[emp_code]["months"].get(month_key, 0.0)
+                        + profit_this_month
                     )
                     by_employee[emp_code]["year_total_profit"] = (
-                        by_employee[emp_code].get("year_total_profit", 0.0) + profit_this_month
+                        by_employee[emp_code].get("year_total_profit", 0.0)
+                        + profit_this_month
                     )
 
         # 补全 by_employee 各月键（无数据月份为 0）
@@ -1975,7 +2414,9 @@ async def get_annual_profit_statistics(
                 "year_total_profit": round(row["year_total_profit"], 2),
                 "year_total_profit_basis": round(row["year_total_profit_basis"], 2),
             }
-            for row in sorted(by_shop.values(), key=lambda x: (x["platform_code"], x["shop_id"]))
+            for row in sorted(
+                by_shop.values(), key=lambda x: (x["platform_code"], x["shop_id"])
+            )
         ]
 
         result = {
@@ -1987,8 +2428,14 @@ async def get_annual_profit_statistics(
             },
         }
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("hr_annual_profit_statistics", result, **cache_params)
+            await request.app.state.cache_service.set(
+                "hr_annual_profit_statistics", result, **cache_params
+            )
         return JSONResponse(content=result, headers={"X-Cache": cache_status})
     except Exception as e:
         logger.error(f"获取年度利润统计失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取年度利润统计失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取年度利润统计失败: {str(e)}",
+            status_code=500,
+        )

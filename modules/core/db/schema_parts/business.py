@@ -3081,17 +3081,24 @@ class PerformanceScore(Base):
     total_score = Column(Float, nullable=False, default=0.0, comment="总分(0-100)")
 
     # 各项得分(权重 × 达成率)
+    #
+    # ⚠️ 这里**不要**把百分比写死在注释里：权重来自 ``a_class.performance_config``，
+    # 每个周期都可以改（默认 40/40/0/20）。以前这里写死「30%/25%/25%/20%」，
+    # 与实际默认值对不上 —— 看注释的人会以为配置没生效。
     sales_score = Column(
-        Float, nullable=False, default=0.0, comment="销售额得分(权重30%)"
+        Float, nullable=False, default=0.0, comment="销售额得分（权重由绩效配置决定）"
     )
     profit_score = Column(
-        Float, nullable=False, default=0.0, comment="毛利得分(权重25%)"
+        Float, nullable=False, default=0.0, comment="毛利得分（权重由绩效配置决定）"
     )
     key_product_score = Column(
-        Float, nullable=False, default=0.0, comment="重点产品得分(权重25%)"
+        Float,
+        nullable=False,
+        default=0.0,
+        comment="重点产品得分（该维度尚未启用，恒为0）",
     )
     operation_score = Column(
-        Float, nullable=False, default=0.0, comment="运营得分(权重20%)"
+        Float, nullable=False, default=0.0, comment="运营得分（权重由绩效配置决定）"
     )
 
     # 得分明细(JSONB存储详细计算过程)
@@ -4683,6 +4690,12 @@ class EmployeeCommission(Base):
     commission_rate = Column(
         Float, nullable=False, default=0.0
     )  # 迁移时将重命名为"提成比例"
+    calculation_status = Column(
+        String(32), nullable=False, default="calculated"
+    )  # 提成计算状态：calculated / no_ratio / blocked
+    calculation_details = Column(
+        JSON_COMPAT, nullable=True, comment="Commission calculation audit"
+    )
     calculated_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )  # 迁移时将重命名为"计算时间"

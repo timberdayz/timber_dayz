@@ -3,10 +3,9 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
-from types import SimpleNamespace
 from typing import Any, Dict
 
-from sqlalchemy import desc, select, text
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
@@ -20,6 +19,7 @@ from modules.core.db import (
     SalaryStructure,
 )
 from modules.core.logger import get_logger
+from backend.services.payroll_period_lock_service import PAYROLL_LOCKED_STATUSES
 from backend.services.performance_readiness_service import PerformanceReadinessService
 
 logger = get_logger(__name__)
@@ -75,12 +75,16 @@ class PayrollGenerationService:
         ):
             return None
         scopes = (
-            await self.db.execute(
-                select(PersonalPerformanceEmployeeScope).where(
-                    PersonalPerformanceEmployeeScope.plan_id == plan.id
+            (
+                await self.db.execute(
+                    select(PersonalPerformanceEmployeeScope).where(
+                        PersonalPerformanceEmployeeScope.plan_id == plan.id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return {
             str(scope.employee_code).strip(): bool(getattr(scope, "is_included", False))
             for scope in scopes
@@ -123,150 +127,6 @@ class PayrollGenerationService:
         if eligible_rows:
             return eligible_rows[0]
         return salary_rows[0]
-
-    async def _load_employee_commission(self, employee_code: str, year_month: str):
-        try:
-            return (
-                await self.db.execute(
-                    select(EmployeeCommission).where(
-                        EmployeeCommission.employee_code == employee_code,
-                        EmployeeCommission.year_month == year_month,
-                    )
-                )
-            ).scalar_one_or_none()
-        except Exception:
-            await self.db.rollback()
-            row = (
-                (
-                    await self.db.execute(
-                        text(
-                            """
-                        select
-                          "提成金额" as commission_amount,
-                          "销售额" as sales_amount,
-                          "提成比例" as commission_rate
-                        from c_class.employee_commissions
-                        where "员工编号" = :employee_code
-                          and "年月" = :year_month
-                        limit 1
-                        """
-                        ),
-                        {"employee_code": employee_code, "year_month": year_month},
-                    )
-                )
-                .mappings()
-                .first()
-            )
-            return SimpleNamespace(**dict(row)) if row else None
-
-    async def _load_employee_performance(self, employee_code: str, year_month: str):
-        try:
-            return (
-                await self.db.execute(
-                    select(EmployeePerformance).where(
-                        EmployeePerformance.employee_code == employee_code,
-                        EmployeePerformance.year_month == year_month,
-                    )
-                )
-            ).scalar_one_or_none()
-        except Exception:
-            await self.db.rollback()
-            row = (
-                (
-                    await self.db.execute(
-                        text(
-                            """
-                        select
-                          "绩效得分" as performance_score,
-                          "实际销售额" as actual_sales,
-                          "达成率" as achievement_rate
-                        from c_class.employee_performance
-                        where "员工编号" = :employee_code
-                          and "年月" = :year_month
-                        limit 1
-                        """
-                        ),
-                        {"employee_code": employee_code, "year_month": year_month},
-                    )
-                )
-                .mappings()
-                .first()
-            )
-            return SimpleNamespace(**dict(row)) if row else None
-
-    async def _load_employee_commission_rows(self, year_month: str):
-        try:
-            return (
-                (
-                    await self.db.execute(
-                        select(EmployeeCommission).where(
-                            EmployeeCommission.year_month == year_month
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-        except Exception:
-            await self.db.rollback()
-            rows = (
-                (
-                    await self.db.execute(
-                        text(
-                            """
-                        select
-                          "员工编号" as employee_code,
-                          "提成金额" as commission_amount,
-                          "销售额" as sales_amount,
-                          "提成比例" as commission_rate
-                        from c_class.employee_commissions
-                        where "年月" = :year_month
-                        """
-                        ),
-                        {"year_month": year_month},
-                    )
-                )
-                .mappings()
-                .all()
-            )
-            return [SimpleNamespace(**dict(row)) for row in rows]
-
-    async def _load_employee_performance_rows(self, year_month: str):
-        try:
-            return (
-                (
-                    await self.db.execute(
-                        select(EmployeePerformance).where(
-                            EmployeePerformance.year_month == year_month
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-        except Exception:
-            await self.db.rollback()
-            rows = (
-                (
-                    await self.db.execute(
-                        text(
-                            """
-                        select
-                          "员工编号" as employee_code,
-                          "绩效得分" as performance_score,
-                          "实际销售额" as actual_sales,
-                          "达成率" as achievement_rate
-                        from c_class.employee_performance
-                        where "年月" = :year_month
-                        """
-                        ),
-                        {"year_month": year_month},
-                    )
-                )
-                .mappings()
-                .all()
-            )
-            return [SimpleNamespace(**dict(row)) for row in rows]
 
     # Cleanup-phase override: prefer English ORM columns only.
     async def _load_employee_commission(self, employee_code: str, year_month: str):
@@ -437,14 +297,20 @@ class PayrollGenerationService:
             "commission": commission_amount,
             "allowances": allowances,
             "status": getattr(existing, "status", "draft") or "draft",
-            "pay_date": getattr(manual_input, "pay_date", getattr(existing, "pay_date", None)),
-            "remark": getattr(manual_input, "remark", getattr(existing, "remark", None)),
+            "pay_date": getattr(
+                manual_input, "pay_date", getattr(existing, "pay_date", None)
+            ),
+            "remark": getattr(
+                manual_input, "remark", getattr(existing, "remark", None)
+            ),
         }
         for field in cls.MANUAL_MONEY_FIELDS:
             source = manual_input if manual_input is not None else existing
             payload[field] = cls._to_money(getattr(source, field, 0))
         payload["backfill_source_month"] = getattr(
-            manual_input, "backfill_source_month", getattr(existing, "backfill_source_month", None)
+            manual_input,
+            "backfill_source_month",
+            getattr(existing, "backfill_source_month", None),
         )
         payload["backfill_note"] = getattr(
             manual_input, "backfill_note", getattr(existing, "backfill_note", None)
@@ -558,7 +424,9 @@ class PayrollGenerationService:
             )
         ).scalar_one_or_none()
         controlled_scope = await self._controlled_scope_membership(year_month)
-        if controlled_scope is not None and not controlled_scope.get(employee_code, False):
+        if controlled_scope is not None and not controlled_scope.get(
+            employee_code, False
+        ):
             performance = None
         existing = (
             await self.db.execute(
@@ -595,7 +463,7 @@ class PayrollGenerationService:
         )
 
         locked_status = getattr(existing, "status", None)
-        if locked_status in {"confirmed", "paid"}:
+        if locked_status in PAYROLL_LOCKED_STATUSES:
             if self._has_locked_conflict(existing, payload):
                 return {
                     "employee_code": employee_code,
@@ -663,12 +531,16 @@ class PayrollGenerationService:
         commission_rows = await self._load_employee_commission_rows(year_month)
         performance_rows = await self._load_employee_performance_rows(year_month)
         manual_input_rows = (
-            await self.db.execute(
-                select(PayrollManualInput).where(
-                    PayrollManualInput.year_month == year_month,
+            (
+                await self.db.execute(
+                    select(PayrollManualInput).where(
+                        PayrollManualInput.year_month == year_month,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         controlled_scope = await self._controlled_scope_membership(year_month)
         existing_rows = (
             (
@@ -752,7 +624,7 @@ class PayrollGenerationService:
             )
 
             locked_status = getattr(existing, "status", None)
-            if locked_status in {"confirmed", "paid"}:
+            if locked_status in PAYROLL_LOCKED_STATUSES:
                 if self._has_locked_conflict(existing, payload):
                     locked_conflicts += 1
                     locked_conflict_details.append(

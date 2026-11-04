@@ -146,9 +146,7 @@ def _controlled_person_calculation_details_for_display(
     return display_details
 
 
-@router.get(
-    "/personal-workbench", response_model=PersonalPerformanceWorkbenchResponse
-)
+@router.get("/personal-workbench", response_model=PersonalPerformanceWorkbenchResponse)
 async def get_personal_performance_workbench(
     year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
     db: AsyncSession = Depends(get_async_db),
@@ -157,9 +155,7 @@ async def get_personal_performance_workbench(
     return await PersonalPerformanceWorkbenchService(db).get_workbench(year_month)
 
 
-@router.put(
-    "/personal-workbench", response_model=PersonalPerformanceWorkbenchResponse
-)
+@router.put("/personal-workbench", response_model=PersonalPerformanceWorkbenchResponse)
 async def apply_personal_performance_workbench(
     request: PersonalPerformanceWorkbenchApplyRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -553,6 +549,19 @@ async def create_performance_config(
                 recovery_suggestion="请调整权重值,确保总和为100",
                 status_code=400,
             )
+        # 重点产品维度**目前没有实现**：打分时 key_product_score 被硬编码成 0。
+        # 以前这里只校验「四个权重加起来 = 100」，于是管理员把
+        # key_product_weight 调成 >0 也能保存成功 —— 但这个权重**永远不生效**，
+        # 表现为「配了没用」的总分。
+        # 现在直接拒绝保存，并说清楚原因，避免配置与实际口径不一致。
+        if request.key_product_weight > 0:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="重点产品权重目前尚未启用，该维度暂不参与打分",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请将重点产品权重设为0，由销售/利润/运营三项承担100%权重",
+                status_code=400,
+            )
 
         # 创建配置
         config = PerformanceConfig(
@@ -674,6 +683,15 @@ async def update_performance_config(
                     message=f"权重总和必须为100,当前为{total_weight}",
                     error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
                     recovery_suggestion="请调整权重值,确保总和为100",
+                    status_code=400,
+                )
+            # 同新建：重点产品维度尚未实现，权重 >0 就是「配了不生效」⇒ 直接拒绝
+            if key_product_weight > 0:
+                return error_response(
+                    code=ErrorCode.DATA_VALIDATION_FAILED,
+                    message="重点产品权重目前尚未启用，该维度暂不参与打分",
+                    error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                    recovery_suggestion="请将重点产品权重设为0，由销售/利润/运营三项承担100%权重",
                     status_code=400,
                 )
 
@@ -1334,7 +1352,9 @@ def _calculate_auto_integer_operation_metrics_for_shop(
     for target in operation_targets:
         if not bool(getattr(target, "is_enabled", True)):
             continue
-        rules.append((target, OperationPerformanceWorkbenchService._auto_integer_rule(target)))
+        rules.append(
+            (target, OperationPerformanceWorkbenchService._auto_integer_rule(target))
+        )
 
     configured_max_score = sum(int(rule["max_score"]) for _, rule in rules)
     if configured_max_score != int(expected_max_score):
@@ -1345,9 +1365,7 @@ def _calculate_auto_integer_operation_metrics_for_shop(
     items: list[dict[str, Any]] = []
     for target, rule in rules:
         breakdown = shop_breakdowns.get(getattr(target, "id", None))
-        payload = dict(
-            getattr(breakdown, "operation_input_payload", None) or {}
-        )
+        payload = dict(getattr(breakdown, "operation_input_payload", None) or {})
         score, detail = OperationPerformanceScoringService.calculate_metric_score(
             metric=rule,
             payload=payload or None,
@@ -1503,9 +1521,7 @@ def _confirmed_included_operation_scope_keys(rows: list[Any]) -> set[str] | None
 def _filter_source_rows_by_operation_scope(
     source_rows: Dict[str, Dict[str, Any]], included_scope_keys: set[str]
 ) -> Dict[str, Dict[str, Any]]:
-    return {
-        key: row for key, row in source_rows.items() if key in included_scope_keys
-    }
+    return {key: row for key, row in source_rows.items() if key in included_scope_keys}
 
 
 async def _remove_excluded_operation_performance_scores(
@@ -1985,7 +2001,9 @@ async def list_performance_scores(
                         ),
                         "calculation_status": getattr(ep, "calculation_status", None)
                         or "historical_unknown",
-                        "calculation_details": _controlled_person_calculation_details_for_display(ep),
+                        "calculation_details": _controlled_person_calculation_details_for_display(
+                            ep
+                        ),
                         "personal_adjustment_total": adjustment_total_by_code.get(ec),
                         "total_score": scr,
                         "rank": rank_by_code.get(ec),
@@ -2440,7 +2458,9 @@ async def calculate_performance_scores(
                 for target in operation_targets
                 if getattr(target, "scoring_model_version", None) == "auto_integer_v1"
             ]
-            if auto_integer_targets and len(auto_integer_targets) != len(operation_targets):
+            if auto_integer_targets and len(auto_integer_targets) != len(
+                operation_targets
+            ):
                 return error_response(
                     code=ErrorCode.DATA_VALIDATION_FAILED,
                     message="运营绩效不能混用 auto_integer_v1 与旧评分规则",

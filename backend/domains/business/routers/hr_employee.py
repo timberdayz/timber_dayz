@@ -20,16 +20,33 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 from backend.schemas import MyIncomeResponse, IncomeCalculationResponse
 from backend.schemas.hr import (
-    EmployeeCreate, EmployeeResponse, EmployeeUpdate, MeProfileUpdate,
+    EmployeeCreate,
+    EmployeeResponse,
+    EmployeeUpdate,
+    MeProfileUpdate,
 )
 from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from backend.services.base_service import provide_service
+from backend.services.payroll_period_lock_service import PAYROLL_LOCKED_STATUSES
 from backend.utils.year_month_utils import year_month_to_first_day
 from modules.core.db import (
-    Employee, DimUser, MonthlyProfitPayrollSnapshot, MonthlyProfitSettlement, PayrollRecord,
-    EmployeeCommission, EmployeePerformance, EmployeePerformanceInput, EmployeePerformanceAdjustment,
-    EmployeeShopAssignment, ShopCommissionConfig, PerformanceScore, ShopProfitBasis, Position,
-    PersonalPerformanceAssignmentSnapshot, PersonalPerformanceEmployeeScope, PersonalPerformancePlan,
+    Employee,
+    DimUser,
+    MonthlyProfitPayrollSnapshot,
+    MonthlyProfitSettlement,
+    PayrollRecord,
+    EmployeeCommission,
+    EmployeePerformance,
+    EmployeePerformanceInput,
+    EmployeePerformanceAdjustment,
+    EmployeeShopAssignment,
+    ShopCommissionConfig,
+    PerformanceScore,
+    ShopProfitBasis,
+    Position,
+    PersonalPerformanceAssignmentSnapshot,
+    PersonalPerformanceEmployeeScope,
+    PersonalPerformancePlan,
 )
 
 router = APIRouter(prefix="/api/hr", tags=["HR-员工档案"])
@@ -38,12 +55,20 @@ router = APIRouter(prefix="/api/hr", tags=["HR-员工档案"])
 # 员工管理API
 # ============================================================================
 
+
 def _audit_performance_inputs(
     *, legacy_rows: list[Any], employee_performance: Any | None
 ) -> list[dict[str, Any]]:
-    if getattr(employee_performance, "performance_source_type", None) == "controlled_targets_v1":
+    if (
+        getattr(employee_performance, "performance_source_type", None)
+        == "controlled_targets_v1"
+    ):
         details = getattr(employee_performance, "calculation_details", None) or {}
-        entries = details.get("personal_target_entries", []) if isinstance(details, dict) else []
+        entries = (
+            details.get("personal_target_entries", [])
+            if isinstance(details, dict)
+            else []
+        )
         result = []
         for entry in entries:
             payload = dict(entry.get("input_payload") or {})
@@ -53,12 +78,24 @@ def _audit_performance_inputs(
                     "metric_code": entry.get("metric_code"),
                     "metric_name": entry.get("metric_name"),
                     "metric_direction": entry.get("metric_direction"),
-                    "target_value": float(entry["target_value"]) if entry.get("target_value") is not None else None,
+                    "target_value": (
+                        float(entry["target_value"])
+                        if entry.get("target_value") is not None
+                        else None
+                    ),
                     "achieved_value": float(actual) if actual is not None else None,
-                    "max_score": float(entry["max_score"]) if entry.get("max_score") is not None else None,
+                    "max_score": (
+                        float(entry["max_score"])
+                        if entry.get("max_score") is not None
+                        else None
+                    ),
                     "manual_score_enabled": False,
                     "manual_score_value": None,
-                    "auto_score": float(entry["auto_score"]) if entry.get("auto_score") is not None else None,
+                    "auto_score": (
+                        float(entry["auto_score"])
+                        if entry.get("auto_score") is not None
+                        else None
+                    ),
                     "completion_status": entry.get("completion_status"),
                     "input_payload": payload,
                     "source": "controlled_targets_v1",
@@ -75,7 +112,11 @@ def _audit_performance_inputs(
             "achieved_value": float(row.achieved_value or 0),
             "max_score": float(row.max_score or 0),
             "manual_score_enabled": bool(row.manual_score_enabled),
-            "manual_score_value": float(row.manual_score_value) if row.manual_score_value is not None else None,
+            "manual_score_value": (
+                float(row.manual_score_value)
+                if row.manual_score_value is not None
+                else None
+            ),
             "source": row.source,
             "reason": row.reason,
         }
@@ -101,17 +142,29 @@ def _display_employee_performance(employee_performance: Any) -> dict[str, Any]:
         }
     score = getattr(employee_performance, "performance_score", None)
     return {
-        "actual_sales": round(float(getattr(employee_performance, "actual_sales", 0) or 0), 2),
-        "achievement_rate": round(float(getattr(employee_performance, "achievement_rate", 0) or 0), 4),
+        "actual_sales": round(
+            float(getattr(employee_performance, "actual_sales", 0) or 0), 2
+        ),
+        "achievement_rate": round(
+            float(getattr(employee_performance, "achievement_rate", 0) or 0), 4
+        ),
         "performance_score": round(float(score), 1) if score is not None else None,
         "calculation_status": getattr(employee_performance, "calculation_status", None),
-        "performance_source_type": getattr(employee_performance, "performance_source_type", None),
+        "performance_source_type": getattr(
+            employee_performance, "performance_source_type", None
+        ),
         "calculation_details": display_details,
-        "calculated_at": getattr(employee_performance, "calculated_at", None).isoformat() if getattr(employee_performance, "calculated_at", None) else None,
+        "calculated_at": (
+            getattr(employee_performance, "calculated_at", None).isoformat()
+            if getattr(employee_performance, "calculated_at", None)
+            else None
+        ),
     }
 
 
-async def _username_for_user_id(db: AsyncSession, user_id: Optional[int]) -> Optional[str]:
+async def _username_for_user_id(
+    db: AsyncSession, user_id: Optional[int]
+) -> Optional[str]:
     """根据 dim_users.user_id 查询 username，用于 EmployeeResponse.username"""
     if not user_id:
         return None
@@ -123,10 +176,12 @@ async def _username_for_user_id(db: AsyncSession, user_id: Optional[int]) -> Opt
 @router.get("/me/profile", response_model=EmployeeResponse)
 async def get_me_profile(
     current_user: DimUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """我的档案：当前登录用户关联的员工档案；未关联时首次访问自动创建最小员工并关联（系统主要面向内部员工，注册并登录即可用）。路由须在 /employees/{employee_code} 之前。"""
-    result = await db.execute(select(Employee).where(Employee.user_id == current_user.user_id))
+    result = await db.execute(
+        select(Employee).where(Employee.user_id == current_user.user_id)
+    )
     employee = result.scalar_one_or_none()
     if not employee:
         # 首次访问自动创建最小员工并关联
@@ -145,7 +200,9 @@ async def get_me_profile(
         db.add(employee)
         await db.commit()
         await db.refresh(employee)
-        logger.info(f"我的档案自动创建员工: {employee_code} (user_id={current_user.user_id})")
+        logger.info(
+            f"我的档案自动创建员工: {employee_code} (user_id={current_user.user_id})"
+        )
     username = await _username_for_user_id(db, employee.user_id)
     resp = EmployeeResponse.model_validate(employee)
     return resp.model_copy(update={"username": username})
@@ -155,13 +212,19 @@ async def get_me_profile(
 async def put_me_profile(
     body: MeProfileUpdate,
     current_user: DimUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """我的档案：仅接受白名单字段 phone/email/address/emergency_contact/emergency_phone。"""
-    result = await db.execute(select(Employee).where(Employee.user_id == current_user.user_id))
+    result = await db.execute(
+        select(Employee).where(Employee.user_id == current_user.user_id)
+    )
     employee = result.scalar_one_or_none()
     if not employee:
-        return error_response(ErrorCode.DATA_NOT_FOUND, "您尚未关联员工档案，请联系管理员", status_code=404)
+        return error_response(
+            ErrorCode.DATA_NOT_FOUND,
+            "您尚未关联员工档案，请联系管理员",
+            status_code=404,
+        )
     update_data = body.model_dump(exclude_unset=True)
     for key in ("phone", "email", "address", "emergency_contact", "emergency_phone"):
         if key in update_data:
@@ -175,11 +238,16 @@ async def put_me_profile(
 
 
 async def _log_me_income_access(
-    request: Request, user_id: int, period: Optional[str], result_status: str, db: AsyncSession
+    request: Request,
+    user_id: int,
+    period: Optional[str],
+    result_status: str,
+    db: AsyncSession,
 ) -> None:
     """记录「我的收入」访问审计（仅 endpoint/user_id/request_time/result_status，不记录敏感字段）。"""
     try:
         from backend.services.audit_service import audit_service
+
         client_host = request.client.host if request.client else ""
         user_agent = (request.headers.get("user-agent") or "")[:500]
         await audit_service.log_action(
@@ -190,7 +258,7 @@ async def _log_me_income_access(
             user_agent=user_agent,
             resource_id=period,
             details={"result_status": result_status},
-            db=db
+            db=db,
         )
     except Exception as e:
         logger.warning("me/income audit log write failed: %s", e)
@@ -201,25 +269,31 @@ async def get_my_income(
     request: Request,
     year_month: Optional[str] = Query(None, description="月份(YYYY-MM)，不填则当月"),
     current_user: DimUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """我的收入：根据当前用户关联的员工返回收入数据；未关联时返回 200 + linked: false。仅允许本人访问，记录访问审计（不记录敏感薪资字段）。"""
     current_user_id = current_user.user_id
-    result = await db.execute(select(Employee).where(Employee.user_id == current_user_id))
+    result = await db.execute(
+        select(Employee).where(Employee.user_id == current_user_id)
+    )
     employee = result.scalar_one_or_none()
     if not employee:
-        await _log_me_income_access(request, current_user_id, year_month, "linked_false", db)
+        await _log_me_income_access(
+            request, current_user_id, year_month, "linked_false", db
+        )
         return MyIncomeResponse(linked=False)
     if getattr(employee, "employee_identity_type", None) not in {None, "employee"}:
-        await _log_me_income_access(request, current_user_id, year_month, "linked_false", db)
+        await _log_me_income_access(
+            request, current_user_id, year_month, "linked_false", db
+        )
         return MyIncomeResponse(linked=False)
     period = year_month or datetime.now(timezone.utc).strftime("%Y-%m")
     employee_code = employee.employee_code
-    base_salary = None
+    # ⚠️ 这里原来还预置了 base_salary / performance_score / achievement_rate / breakdown
+    # 四个变量，但后面真正用的是 fixed_salary、以及响应里直接写死的
+    # performance_score=None / achievement_rate=None / breakdown={...} ——
+    # 这四个初始值从头到尾没被读过，留着只会让人以为它们参与计算。
     commission_amount = 0.0
-    performance_score = None
-    achievement_rate = None
-    breakdown = {}
     settlement_result = await db.execute(
         select(MonthlyProfitSettlement).where(
             MonthlyProfitSettlement.period_month == period
@@ -232,7 +306,8 @@ async def get_my_income(
     if settlement and getattr(settlement, "status", None) == "approved":
         snapshot_result = await db.execute(
             select(MonthlyProfitPayrollSnapshot).where(
-                MonthlyProfitPayrollSnapshot.settlement_id == getattr(settlement, "id", None),
+                MonthlyProfitPayrollSnapshot.settlement_id
+                == getattr(settlement, "id", None),
                 MonthlyProfitPayrollSnapshot.employee_code == employee_code,
                 MonthlyProfitPayrollSnapshot.snapshot_status == "active",
             )
@@ -246,12 +321,14 @@ async def get_my_income(
         pr_result = await db.execute(
             select(PayrollRecord).where(
                 PayrollRecord.employee_code == employee_code,
-                PayrollRecord.year_month == period
+                PayrollRecord.year_month == period,
             )
         )
         pr = pr_result.scalar_one_or_none()
     if not pr:
-        await _log_me_income_access(request, current_user_id, period, "payroll_missing", db)
+        await _log_me_income_access(
+            request, current_user_id, period, "payroll_missing", db
+        )
         return MyIncomeResponse(
             linked=True,
             period=period,
@@ -259,11 +336,13 @@ async def get_my_income(
             breakdown=None,
         )
 
-    fixed_salary = float((getattr(pr, "base_salary", 0) or 0) + (getattr(pr, "position_salary", 0) or 0))
+    fixed_salary = float(
+        (getattr(pr, "base_salary", 0) or 0) + (getattr(pr, "position_salary", 0) or 0)
+    )
     commission_amount = float(getattr(pr, "commission", 0) or 0)
     net_salary = float(getattr(pr, "net_salary", 0) or 0)
     payroll_status = getattr(pr, "status", None) or getattr(pr, "payroll_status", None)
-    is_locked = payroll_status in {"confirmed", "paid", "approved"}
+    is_locked = payroll_status in PAYROLL_LOCKED_STATUSES
     latest_calculated_at = None
     is_stale_against_latest_calc = False
 
@@ -274,20 +353,34 @@ async def get_my_income(
                 EmployeeCommission.year_month == period,
             )
         )
-        commission_times = [row[0] for row in commission_result.all() if row[0] is not None]
+        commission_times = [
+            row[0] for row in commission_result.all() if row[0] is not None
+        ]
         performance_result = await db.execute(
             select(EmployeePerformance.calculated_at).where(
                 EmployeePerformance.employee_code == employee_code,
                 EmployeePerformance.year_month == period,
             )
         )
-        performance_times = [row[0] for row in performance_result.all() if row[0] is not None]
+        performance_times = [
+            row[0] for row in performance_result.all() if row[0] is not None
+        ]
         all_times = [*commission_times, *performance_times]
         if all_times:
             latest_dt = max(all_times)
-            latest_calculated_at = latest_dt.isoformat() if hasattr(latest_dt, "isoformat") else str(latest_dt)
-            payroll_updated_at = getattr(pr, "updated_at", None) or getattr(pr, "created_at", None)
-            if is_locked and payroll_updated_at is not None and latest_dt > payroll_updated_at:
+            latest_calculated_at = (
+                latest_dt.isoformat()
+                if hasattr(latest_dt, "isoformat")
+                else str(latest_dt)
+            )
+            payroll_updated_at = getattr(pr, "updated_at", None) or getattr(
+                pr, "created_at", None
+            )
+            if (
+                is_locked
+                and payroll_updated_at is not None
+                and latest_dt > payroll_updated_at
+            ):
                 is_stale_against_latest_calc = True
 
     payroll_breakdown = {
@@ -299,17 +392,25 @@ async def get_my_income(
         "allowances": float(getattr(pr, "allowances", 0) or 0),
         "bonus": float(getattr(pr, "bonus", 0) or 0),
         "gross_salary": float(getattr(pr, "gross_salary", 0) or 0),
-        "social_insurance_personal": float(getattr(pr, "social_insurance_personal", 0) or 0),
+        "social_insurance_personal": float(
+            getattr(pr, "social_insurance_personal", 0) or 0
+        ),
         "housing_fund_personal": float(getattr(pr, "housing_fund_personal", 0) or 0),
         "income_tax": float(getattr(pr, "income_tax", 0) or 0),
         "other_deductions": float(getattr(pr, "other_deductions", 0) or 0),
         "total_deductions": float(getattr(pr, "total_deductions", 0) or 0),
         "net_salary": net_salary,
-        "social_insurance_company": float(getattr(pr, "social_insurance_company", 0) or 0),
+        "social_insurance_company": float(
+            getattr(pr, "social_insurance_company", 0) or 0
+        ),
         "housing_fund_company": float(getattr(pr, "housing_fund_company", 0) or 0),
         "total_cost": float(getattr(pr, "total_cost", 0) or 0),
         "status": payroll_status,
-        "pay_date": getattr(pr, "pay_date", None).isoformat() if getattr(pr, "pay_date", None) else None,
+        "pay_date": (
+            getattr(pr, "pay_date", None).isoformat()
+            if getattr(pr, "pay_date", None)
+            else None
+        ),
         "remark": getattr(pr, "remark", None),
         "data_source": payroll_data_source,
         "is_locked": is_locked,
@@ -325,9 +426,7 @@ async def get_my_income(
         performance_score=None,
         achievement_rate=None,
         total_income=net_salary,
-        breakdown={
-            "payroll": payroll_breakdown
-        },
+        breakdown={"payroll": payroll_breakdown},
     )
 
 
@@ -341,14 +440,20 @@ async def _build_employee_income_audit(
     db: AsyncSession,
 ) -> Dict[str, Any]:
     employee = (
-        await db.execute(select(Employee).where(Employee.employee_code == employee_code))
+        await db.execute(
+            select(Employee).where(Employee.employee_code == employee_code)
+        )
     ).scalar_one_or_none()
     if not employee:
-        return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {employee_code}", status_code=404)
+        return error_response(
+            ErrorCode.DATA_NOT_FOUND, f"员工不存在: {employee_code}", status_code=404
+        )
 
     settlement = (
         await db.execute(
-            select(MonthlyProfitSettlement).where(MonthlyProfitSettlement.period_month == year_month)
+            select(MonthlyProfitSettlement).where(
+                MonthlyProfitSettlement.period_month == year_month
+            )
         )
     ).scalar_one_or_none()
 
@@ -379,7 +484,9 @@ async def _build_employee_income_audit(
                         PersonalPerformanceAssignmentSnapshot.scope_id == scope.id
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
             if scope is not None and bool(getattr(scope, "is_included", False))
             else []
         )
@@ -395,14 +502,18 @@ async def _build_employee_income_audit(
         ]
     else:
         assignments = (
-            await db.execute(
-                select(EmployeeShopAssignment).where(
-                    EmployeeShopAssignment.employee_code == employee_code,
-                    EmployeeShopAssignment.year_month == year_month,
-                    EmployeeShopAssignment.status == "active",
+            (
+                await db.execute(
+                    select(EmployeeShopAssignment).where(
+                        EmployeeShopAssignment.employee_code == employee_code,
+                        EmployeeShopAssignment.year_month == year_month,
+                        EmployeeShopAssignment.status == "active",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     shop_rows = []
     for assignment in assignments:
@@ -440,37 +551,86 @@ async def _build_employee_income_audit(
             {
                 "platform_code": platform_code,
                 "shop_id": shop_id,
-                "commission_ratio": float(getattr(assignment, "commission_ratio", 0) or 0),
+                "commission_ratio": float(
+                    getattr(assignment, "commission_ratio", 0) or 0
+                ),
                 "role": getattr(assignment, "role", None),
-                "sales_target_amount": float(getattr(assignment, "sales_target_amount", 0) or 0) if getattr(assignment, "sales_target_amount", None) is not None else None,
-                "allocatable_profit_rate": float(getattr(alloc_cfg, "allocatable_profit_rate", 0) or 0) if alloc_cfg else None,
-                "profit_basis_amount": float(getattr(profit_basis, "profit_basis_amount", 0) or 0) if profit_basis else None,
-                "shop_performance_score": float(getattr(perf, "total_score", 0) or 0) if perf else None,
-                "shop_performance_coefficient": float(getattr(perf, "performance_coefficient", 0) or 0) if perf else None,
-                "shop_performance_status": ((getattr(perf, "score_details", None) or {}).get("summary") or {}).get("status") if perf else None,
-                "shop_performance_ready_dimensions": ((getattr(perf, "score_details", None) or {}).get("summary") or {}).get("ready_dimensions") if perf else None,
-                "shop_performance_pending_dimensions": ((getattr(perf, "score_details", None) or {}).get("summary") or {}).get("pending_dimensions") if perf else None,
+                "sales_target_amount": (
+                    float(getattr(assignment, "sales_target_amount", 0) or 0)
+                    if getattr(assignment, "sales_target_amount", None) is not None
+                    else None
+                ),
+                "allocatable_profit_rate": (
+                    float(getattr(alloc_cfg, "allocatable_profit_rate", 0) or 0)
+                    if alloc_cfg
+                    else None
+                ),
+                "profit_basis_amount": (
+                    float(getattr(profit_basis, "profit_basis_amount", 0) or 0)
+                    if profit_basis
+                    else None
+                ),
+                "shop_performance_score": (
+                    float(getattr(perf, "total_score", 0) or 0) if perf else None
+                ),
+                "shop_performance_coefficient": (
+                    float(getattr(perf, "performance_coefficient", 0) or 0)
+                    if perf
+                    else None
+                ),
+                "shop_performance_status": (
+                    (
+                        (getattr(perf, "score_details", None) or {}).get("summary")
+                        or {}
+                    ).get("status")
+                    if perf
+                    else None
+                ),
+                "shop_performance_ready_dimensions": (
+                    (
+                        (getattr(perf, "score_details", None) or {}).get("summary")
+                        or {}
+                    ).get("ready_dimensions")
+                    if perf
+                    else None
+                ),
+                "shop_performance_pending_dimensions": (
+                    (
+                        (getattr(perf, "score_details", None) or {}).get("summary")
+                        or {}
+                    ).get("pending_dimensions")
+                    if perf
+                    else None
+                ),
             }
         )
 
     perf_inputs = (
-        await db.execute(
-            select(EmployeePerformanceInput).where(
-                EmployeePerformanceInput.employee_code == employee_code,
-                EmployeePerformanceInput.year_month == year_month,
-                EmployeePerformanceInput.status == "active",
+        (
+            await db.execute(
+                select(EmployeePerformanceInput).where(
+                    EmployeePerformanceInput.employee_code == employee_code,
+                    EmployeePerformanceInput.year_month == year_month,
+                    EmployeePerformanceInput.status == "active",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     adjustments = (
-        await db.execute(
-            select(EmployeePerformanceAdjustment).where(
-                EmployeePerformanceAdjustment.employee_code == employee_code,
-                EmployeePerformanceAdjustment.year_month == year_month,
-                EmployeePerformanceAdjustment.status == "active",
+        (
+            await db.execute(
+                select(EmployeePerformanceAdjustment).where(
+                    EmployeePerformanceAdjustment.employee_code == employee_code,
+                    EmployeePerformanceAdjustment.year_month == year_month,
+                    EmployeePerformanceAdjustment.status == "active",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     employee_performance = (
         await db.execute(
             select(EmployeePerformance).where(
@@ -499,24 +659,40 @@ async def _build_employee_income_audit(
     my_income_like = None
     if payroll:
         payroll_status = getattr(payroll, "status", None)
-        is_locked = payroll_status in {"confirmed", "paid", "approved"}
+        is_locked = payroll_status in PAYROLL_LOCKED_STATUSES
         latest_calc_times = []
         if employee_commission and getattr(employee_commission, "calculated_at", None):
             latest_calc_times.append(getattr(employee_commission, "calculated_at"))
-        if employee_performance and getattr(employee_performance, "calculated_at", None):
+        if employee_performance and getattr(
+            employee_performance, "calculated_at", None
+        ):
             latest_calc_times.append(getattr(employee_performance, "calculated_at"))
         latest_dt = max(latest_calc_times) if latest_calc_times else None
-        payroll_updated_at = getattr(payroll, "updated_at", None) or getattr(payroll, "created_at", None)
+        payroll_updated_at = getattr(payroll, "updated_at", None) or getattr(
+            payroll, "created_at", None
+        )
         my_income_like = {
-            "fixed_salary": float((getattr(payroll, "base_salary", 0) or 0) + (getattr(payroll, "position_salary", 0) or 0)),
+            "fixed_salary": float(
+                (getattr(payroll, "base_salary", 0) or 0)
+                + (getattr(payroll, "position_salary", 0) or 0)
+            ),
             "performance_salary": float(getattr(payroll, "performance_salary", 0) or 0),
             "commission": float(getattr(payroll, "commission", 0) or 0),
             "net_salary": float(getattr(payroll, "net_salary", 0) or 0),
             "payroll_status": payroll_status,
             "is_locked": is_locked,
-            "is_stale_against_latest_calc": bool(is_locked and latest_dt and payroll_updated_at and latest_dt > payroll_updated_at),
+            "is_stale_against_latest_calc": bool(
+                is_locked
+                and latest_dt
+                and payroll_updated_at
+                and latest_dt > payroll_updated_at
+            ),
             "latest_calculated_at": latest_dt.isoformat() if latest_dt else None,
-            "data_source": "payroll_snapshot" if settlement and getattr(settlement, "status", None) == "approved" else "payroll_record",
+            "data_source": (
+                "payroll_snapshot"
+                if settlement and getattr(settlement, "status", None) == "approved"
+                else "payroll_record"
+            ),
         }
 
     return {
@@ -529,10 +705,14 @@ async def _build_employee_income_audit(
                 "position_id": getattr(employee, "position_id", None),
                 "department_id": getattr(employee, "department_id", None),
                 "status": getattr(employee, "status", None),
-                "employee_identity_type": getattr(employee, "employee_identity_type", None),
+                "employee_identity_type": getattr(
+                    employee, "employee_identity_type", None
+                ),
             },
             "year_month": year_month,
-            "settlement_status": getattr(settlement, "status", None) if settlement else None,
+            "settlement_status": (
+                getattr(settlement, "status", None) if settlement else None
+            ),
             "my_income_projection": my_income_like,
             "shop_assignments": shop_rows,
             "performance_inputs": _audit_performance_inputs(
@@ -555,10 +735,20 @@ async def _build_employee_income_audit(
             ),
             "employee_commission": (
                 {
-                    "sales_amount": float(getattr(employee_commission, "sales_amount", 0) or 0),
-                    "commission_rate": float(getattr(employee_commission, "commission_rate", 0) or 0),
-                    "commission_amount": float(getattr(employee_commission, "commission_amount", 0) or 0),
-                    "calculated_at": getattr(employee_commission, "calculated_at", None).isoformat() if getattr(employee_commission, "calculated_at", None) else None,
+                    "sales_amount": float(
+                        getattr(employee_commission, "sales_amount", 0) or 0
+                    ),
+                    "commission_rate": float(
+                        getattr(employee_commission, "commission_rate", 0) or 0
+                    ),
+                    "commission_amount": float(
+                        getattr(employee_commission, "commission_amount", 0) or 0
+                    ),
+                    "calculated_at": (
+                        getattr(employee_commission, "calculated_at", None).isoformat()
+                        if getattr(employee_commission, "calculated_at", None)
+                        else None
+                    ),
                 }
                 if employee_commission
                 else None
@@ -567,18 +757,28 @@ async def _build_employee_income_audit(
                 {
                     "id": getattr(payroll, "id", None),
                     "base_salary": float(getattr(payroll, "base_salary", 0) or 0),
-                    "position_salary": float(getattr(payroll, "position_salary", 0) or 0),
-                    "performance_salary": float(getattr(payroll, "performance_salary", 0) or 0),
+                    "position_salary": float(
+                        getattr(payroll, "position_salary", 0) or 0
+                    ),
+                    "performance_salary": float(
+                        getattr(payroll, "performance_salary", 0) or 0
+                    ),
                     "commission": float(getattr(payroll, "commission", 0) or 0),
                     "allowances": float(getattr(payroll, "allowances", 0) or 0),
                     "bonus": float(getattr(payroll, "bonus", 0) or 0),
                     "overtime_pay": float(getattr(payroll, "overtime_pay", 0) or 0),
                     "gross_salary": float(getattr(payroll, "gross_salary", 0) or 0),
-                    "total_deductions": float(getattr(payroll, "total_deductions", 0) or 0),
+                    "total_deductions": float(
+                        getattr(payroll, "total_deductions", 0) or 0
+                    ),
                     "net_salary": float(getattr(payroll, "net_salary", 0) or 0),
                     "total_cost": float(getattr(payroll, "total_cost", 0) or 0),
                     "status": getattr(payroll, "status", None),
-                    "updated_at": getattr(payroll, "updated_at", None).isoformat() if getattr(payroll, "updated_at", None) else None,
+                    "updated_at": (
+                        getattr(payroll, "updated_at", None).isoformat()
+                        if getattr(payroll, "updated_at", None)
+                        else None
+                    ),
                 }
                 if payroll
                 else None
@@ -646,20 +846,24 @@ async def get_employee_income_audit(
 async def list_employees(
     department_id: Optional[int] = Query(None, description="部门ID筛选"),
     position_id: Optional[int] = Query(None, description="职位ID筛选"),
-    status: Optional[str] = Query(None, description="状态筛选(active/inactive/probation/leave)"),
+    status: Optional[str] = Query(
+        None, description="状态筛选(active/inactive/probation/leave)"
+    ),
     keyword: Optional[str] = Query(None, description="关键字搜索(姓名/工号)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=500, description="每页数量"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取员工列表(分页、筛选)"""
     try:
-        query = select(Employee, Position.position_code, Position.position_name).outerjoin(
+        query = select(
+            Employee, Position.position_code, Position.position_name
+        ).outerjoin(
             Position,
             Employee.position_id == Position.id,
         )
         conditions = []
-        
+
         if department_id is not None:
             conditions.append(Employee.department_id == department_id)
         if position_id is not None:
@@ -670,16 +874,16 @@ async def list_employees(
             conditions.append(
                 or_(
                     Employee.name.ilike(f"%{keyword}%"),
-                    Employee.employee_code.ilike(f"%{keyword}%")
+                    Employee.employee_code.ilike(f"%{keyword}%"),
                 )
             )
-        
+
         if conditions:
             query = query.where(and_(*conditions))
-        
+
         offset = (page - 1) * page_size
         query = query.order_by(Employee.employee_code).offset(offset).limit(page_size)
-        
+
         result = await db.execute(query)
         employee_rows = result.all()
         out = []
@@ -696,50 +900,63 @@ async def list_employees(
         return out
     except Exception as e:
         logger.error(f"获取员工列表失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工列表失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取员工列表失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.get("/employees/count")
 async def count_employees(
     status: Optional[str] = Query(None, description="状态筛选"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取员工总数（用于人效计算等）"""
     try:
         query = select(func.count(Employee.id))
-        
+
         if status:
             query = query.where(Employee.status == status)
-        
+
         result = await db.execute(query)
         count = result.scalar()
-        
+
         return {"count": count, "status": status or "all"}
     except Exception as e:
         logger.error(f"获取员工总数失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工总数失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取员工总数失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.get("/employees/{employee_code}", response_model=EmployeeResponse)
-async def get_employee(
-    employee_code: str,
-    db: AsyncSession = Depends(get_async_db)
-):
+async def get_employee(employee_code: str, db: AsyncSession = Depends(get_async_db)):
     """获取员工详情"""
     try:
         result = await db.execute(
             select(Employee).where(Employee.employee_code == employee_code)
         )
         employee = result.scalar_one_or_none()
-        
+
         if not employee:
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {employee_code}", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"员工不存在: {employee_code}",
+                status_code=404,
+            )
         username = await _username_for_user_id(db, employee.user_id)
         resp = EmployeeResponse.model_validate(employee)
         return resp.model_copy(update={"username": username})
     except Exception as e:
         logger.error(f"获取员工详情失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工详情失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取员工详情失败: {str(e)}",
+            status_code=500,
+        )
 
 
 async def _generate_employee_code(db: AsyncSession) -> str:
@@ -753,7 +970,7 @@ async def _generate_employee_code(db: AsyncSession) -> str:
     max_seq = 0
     for code in rows:
         try:
-            seq = int(code[len(prefix):]) if len(code) > len(prefix) else 0
+            seq = int(code[len(prefix) :]) if len(code) > len(prefix) else 0
             if seq > max_seq:
                 max_seq = seq
         except ValueError:
@@ -763,8 +980,7 @@ async def _generate_employee_code(db: AsyncSession) -> str:
 
 @router.post("/employees", response_model=EmployeeResponse, status_code=201)
 async def create_employee(
-    employee: EmployeeCreate,
-    db: AsyncSession = Depends(get_async_db)
+    employee: EmployeeCreate, db: AsyncSession = Depends(get_async_db)
 ):
     """创建员工；员工编号不传或为空时自动生成"""
     try:
@@ -778,12 +994,22 @@ async def create_employee(
             select(Employee).where(Employee.employee_code == employee_code)
         )
         if existing.scalar_one_or_none():
-            return error_response(ErrorCode.DATA_ALREADY_EXISTS, f"员工编号已存在: {employee_code}", status_code=400)
+            return error_response(
+                ErrorCode.DATA_ALREADY_EXISTS,
+                f"员工编号已存在: {employee_code}",
+                status_code=400,
+            )
         user_id = data.get("user_id")
         if user_id is not None:
-            other = await db.execute(select(Employee).where(Employee.user_id == user_id))
+            other = await db.execute(
+                select(Employee).where(Employee.user_id == user_id)
+            )
             if other.scalar_one_or_none():
-                return error_response(ErrorCode.DATA_ALREADY_EXISTS, "该登录账号已关联其他员工", status_code=400)
+                return error_response(
+                    ErrorCode.DATA_ALREADY_EXISTS,
+                    "该登录账号已关联其他员工",
+                    status_code=400,
+                )
         new_employee = Employee(**data)
         db.add(new_employee)
         await db.commit()
@@ -795,14 +1021,16 @@ async def create_employee(
     except Exception as e:
         await db.rollback()
         logger.error(f"创建员工失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建员工失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR, f"创建员工失败: {str(e)}", status_code=500
+        )
 
 
 @router.put("/employees/{employee_code}", response_model=EmployeeResponse)
 async def update_employee(
     employee_code: str,
     employee_update: EmployeeUpdate,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """更新员工信息"""
     try:
@@ -810,19 +1038,27 @@ async def update_employee(
             select(Employee).where(Employee.employee_code == employee_code)
         )
         employee = result.scalar_one_or_none()
-        
+
         if not employee:
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {employee_code}", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"员工不存在: {employee_code}",
+                status_code=404,
+            )
         update_data = employee_update.model_dump(exclude_unset=True)
         if "user_id" in update_data and update_data["user_id"] is not None:
             other = await db.execute(
                 select(Employee).where(
                     Employee.user_id == update_data["user_id"],
-                    Employee.id != employee.id
+                    Employee.id != employee.id,
                 )
             )
             if other.scalar_one_or_none():
-                return error_response(ErrorCode.DATA_ALREADY_EXISTS, "该登录账号已关联其他员工", status_code=400)
+                return error_response(
+                    ErrorCode.DATA_ALREADY_EXISTS,
+                    "该登录账号已关联其他员工",
+                    status_code=400,
+                )
         for key, value in update_data.items():
             setattr(employee, key, value)
         employee.updated_at = datetime.now(timezone.utc)
@@ -835,30 +1071,37 @@ async def update_employee(
     except Exception as e:
         await db.rollback()
         logger.error(f"更新员工失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新员工失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR, f"更新员工失败: {str(e)}", status_code=500
+        )
 
 
 @router.delete("/employees/{employee_code}", status_code=204)
-async def delete_employee(
-    employee_code: str,
-    db: AsyncSession = Depends(get_async_db)
-):
+async def delete_employee(employee_code: str, db: AsyncSession = Depends(get_async_db)):
     """删除员工(软删除:设置status为inactive)"""
     try:
         result = await db.execute(
             select(Employee).where(Employee.employee_code == employee_code)
         )
         employee = result.scalar_one_or_none()
-        
+
         if not employee:
-            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {employee_code}", status_code=404)
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"员工不存在: {employee_code}",
+                status_code=404,
+            )
         assign_result = await db.execute(
             select(EmployeeShopAssignment).where(
                 EmployeeShopAssignment.employee_code == employee_code
             )
         )
         if assign_result.scalars().first():
-            return error_response(ErrorCode.DATA_INTEGRITY_VIOLATION, "请先解除该员工的店铺归属", status_code=400)
+            return error_response(
+                ErrorCode.DATA_INTEGRITY_VIOLATION,
+                "请先解除该员工的店铺归属",
+                status_code=400,
+            )
         employee.status = "inactive"
         employee.updated_at = datetime.now(timezone.utc)
         await db.commit()
@@ -867,7 +1110,9 @@ async def delete_employee(
     except Exception as e:
         await db.rollback()
         logger.error(f"删除员工失败: {e}", exc_info=True)
-        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"删除员工失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR, f"删除员工失败: {str(e)}", status_code=500
+        )
 
 
 # ============================================================================

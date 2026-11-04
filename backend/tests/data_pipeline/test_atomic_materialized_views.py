@@ -152,16 +152,24 @@ def test_slow_consumers_read_the_materialized_views():
             assert analytics_mv in sql_text, "{0} 必须读物化视图".format(asset_path)
 
 
-def test_hr_profit_view_keeps_reading_plain_view():
-    """``mart.hr_shop_monthly_profit`` 不是 registry 可重建目标。
+def test_registry_does_not_register_objects_that_never_existed():
+    """依赖表里不能登记「从来不存在、也没人能建出来」的对象。
 
-    它一旦改读物化视图，物化视图的 DROP CASCADE 会把它删掉且无人重建
-    → 薪资链路断掉。所以它必须继续读普通视图。
+    ``mart.hr_shop_monthly_profit`` 曾经登记在这里，但这个视图**从来没有建过**：
+
+    - 仓库里没有对应的资产文件（``sql/mart/`` 下没有它）；
+    - 生产库里也查不到它（2026-11-04 部署 v7.13.2 之前就查不到）；
+    - 没有任何后端代码、SQL 资产或前端接口引用它。
+
+    它属于「计划了但没实现」的悬空登记 —— 看起来像有一条薪资利润链路，其实没有。
+    现在登记已删除，并把「登记的每个目标都必须能被资产文件重建」固化成断言，
+    防止同类悬空登记再出现。
     """
-    assert PIPELINE_DEPENDENCIES["mart.hr_shop_monthly_profit"] == [
-        "semantic.fact_orders_atomic"
-    ]
-    assert "mart.hr_shop_monthly_profit" not in SQL_TARGET_PATHS
+    assert "mart.hr_shop_monthly_profit" not in PIPELINE_DEPENDENCIES
+    for target in PIPELINE_DEPENDENCIES:
+        assert (
+            target in SQL_TARGET_PATHS
+        ), "{0} 登记在依赖表里，却没有任何资产文件能重建它".format(target)
 
 
 def test_refresh_plan_orders_materialized_view_before_consumers():

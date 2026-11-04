@@ -9,6 +9,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from modules.core.db import EmployeeShopAssignment, PayrollRecord
 
 
+# 工资单「已锁定」的**唯一定义源**。
+#
+# 历史上这里有三份各说各话的集合：
+#   - 锁定服务   (confirmed, paid)
+#   - 工资单路由 (confirmed, paid, approved)
+#   - 我的收入路由 (confirmed, paid, approved)
+#   - 工资单生成 (confirmed, paid)
+# 后果：状态为 ``approved`` 的工资单在界面上显示「已锁定」，
+# 但锁定服务并不认为它被锁 ⇒ 整月重算会**静默改掉**用户以为已经锁住的工资单。
+#
+# 现在统一成一份：``approved`` / ``confirmed`` / ``paid`` 三种状态都视为锁定。
+# 判断「锁了没有」的任何地方都必须引用本常量，不要就地写字面量。
+PAYROLL_LOCKED_STATUSES: tuple[str, ...] = ("approved", "confirmed", "paid")
+
+
 class PayrollPeriodLockedError(ValueError):
     """Raised when an upstream item would alter a confirmed payroll month."""
 
@@ -16,7 +31,7 @@ class PayrollPeriodLockedError(ValueError):
 class PayrollPeriodLockService:
     """Own the payroll-confirmation guard shared by salary and commission flows."""
 
-    LOCKED_STATUSES = ("confirmed", "paid")
+    LOCKED_STATUSES = PAYROLL_LOCKED_STATUSES
 
     def __init__(self, db: AsyncSession):
         self.db = db

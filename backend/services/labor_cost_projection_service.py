@@ -11,6 +11,7 @@ from modules.core.db import (
     EmployeeShopAssignment,
     PayrollRecord,
 )
+from backend.services.payroll_period_lock_service import PAYROLL_LOCKED_STATUSES
 
 
 MONEY_QUANT = Decimal("0.01")
@@ -66,7 +67,10 @@ class LaborCostProjectionService:
             if str(getattr(assignment, "status", "active") or "active") == "active"
         ]
         pre_commission = sum(
-            (cls._money(getattr(payroll, field, 0)) for field in cls.PRE_COMMISSION_FIELDS),
+            (
+                cls._money(getattr(payroll, field, 0))
+                for field in cls.PRE_COMMISSION_FIELDS
+            ),
             Decimal("0.00"),
         )
         performance = cls._money(getattr(payroll, "performance_salary", 0))
@@ -125,30 +129,45 @@ class LaborCostProjectionService:
         self,
         year_month: str,
         *,
-        commission_by_employee_shop: Mapping[str, Mapping[tuple[str, str], Any]] | None = None,
+        commission_by_employee_shop: (
+            Mapping[str, Mapping[tuple[str, str], Any]] | None
+        ) = None,
         commit: bool = True,
     ) -> dict[str, Any]:
         payroll_rows = (
-            await self.db.execute(
-                select(PayrollRecord).where(PayrollRecord.year_month == year_month)
+            (
+                await self.db.execute(
+                    select(PayrollRecord).where(PayrollRecord.year_month == year_month)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assignment_rows = (
-            await self.db.execute(
-                select(EmployeeShopAssignment).where(
-                    EmployeeShopAssignment.year_month == year_month,
-                    EmployeeShopAssignment.status == "active",
+            (
+                await self.db.execute(
+                    select(EmployeeShopAssignment).where(
+                        EmployeeShopAssignment.year_month == year_month,
+                        EmployeeShopAssignment.status == "active",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         existing_rows = (
-            await self.db.execute(
-                select(EmployeeLaborCostAllocation).where(
-                    EmployeeLaborCostAllocation.period_month == year_month,
-                    EmployeeLaborCostAllocation.calculation_version == LABOR_COST_CALCULATION_VERSION,
+            (
+                await self.db.execute(
+                    select(EmployeeLaborCostAllocation).where(
+                        EmployeeLaborCostAllocation.period_month == year_month,
+                        EmployeeLaborCostAllocation.calculation_version
+                        == LABOR_COST_CALCULATION_VERSION,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         assignments_by_employee: dict[str, list[Any]] = {}
         for assignment in assignment_rows:
@@ -165,17 +184,20 @@ class LaborCostProjectionService:
             shop_id = str(getattr(record, "shop_id", "") or "")
             existing_by_key[(employee_code, scope, platform_code, shop_id)] = record
             if scope == "shop":
-                commission_by_employee.setdefault(employee_code, {})[(platform_code, shop_id)] = self._money(
-                    getattr(record, "commission_amount", 0)
-                )
+                commission_by_employee.setdefault(employee_code, {})[
+                    (platform_code, shop_id)
+                ] = self._money(getattr(record, "commission_amount", 0))
 
         for employee_code, values in (commission_by_employee_shop or {}).items():
             commission_by_employee[str(employee_code)] = {
-                (str(platform_code or "").lower(), str(shop_id or "")): self._money(amount)
+                (str(platform_code or "").lower(), str(shop_id or "")): self._money(
+                    amount
+                )
                 for (platform_code, shop_id), amount in values.items()
             }
 
         allocation_upserts = 0
+        target_keys: set[tuple[str, str, str, str]] = set()
         for payroll in payroll_rows:
             employee_code = str(getattr(payroll, "employee_code", "") or "").strip()
             if not employee_code:
@@ -190,14 +212,24 @@ class LaborCostProjectionService:
                 platform_code = str(row["platform_code"] or "").lower()
                 shop_id = str(row["shop_id"] or "")
                 key = (employee_code, scope, platform_code, shop_id)
+                target_keys.add(key)
                 record = existing_by_key.get(key)
-                if record is not None and getattr(record, "pre_commission_locked_at", None):
-                    if self._money(getattr(record, "pre_commission_amount", 0)) != row["pre_commission_amount"]:
+                if record is not None and getattr(
+                    record, "pre_commission_locked_at", None
+                ):
+                    if (
+                        self._money(getattr(record, "pre_commission_amount", 0))
+                        != row["pre_commission_amount"]
+                    ):
                         raise ValueError(
                             f"pre-commission labor cost is locked for {employee_code}; reopen settlement before refresh"
                         )
 
-                status = "confirmed" if row["source_payroll_status"] in {"confirmed", "paid"} else "projected"
+                status = (
+                    "confirmed"
+                    if row["source_payroll_status"] in PAYROLL_LOCKED_STATUSES
+                    else "projected"
+                )
                 values = {
                     **row,
                     "period_month": year_month,
@@ -214,6 +246,38 @@ class LaborCostProjectionService:
                         setattr(record, field, value)
                 allocation_upserts += 1
 
+        # ── 清理陈旧分配行 ──
+        #
+        # 以前这个方法**只 upsert、从不删除** ⇒ 员工换店、归属比例调整、
+        # 或者某个月的工资单被删掉之后，他原来那些「已经不成立」的分摊行
+        # 会**永久留在表里**，而看板/利润基数是把整张表 SUM 起来用的
+        # ⇒ 同一份人力成本被重复计入。
+        #
+        # 判定标准很简单：这次算出来的 key 集合里没有、但表里有的行 ⇒ 陈旧。
+        # 已锁定（pre_commission_locked_at 有值）的行**不删**，直接报错 ——
+        # 那行已经被月结引用，删了等于偷偷改已结账的钱，必须人工退回再重算。
+        stale_deleted = 0
+        stale_locked: list[tuple[str, str, str, str]] = []
+        for key, record in existing_by_key.items():
+            if key in target_keys:
+                continue
+            if getattr(record, "pre_commission_locked_at", None):
+                stale_locked.append(key)
+                continue
+            await self.db.delete(record)
+            stale_deleted += 1
+
+        if stale_locked:
+            raise ValueError(
+                "labor cost allocations are locked but no longer produced by the "
+                f"current calculation for {year_month}: {stale_locked}; "
+                "reopen settlement before refresh"
+            )
+
         if commit:
             await self.db.commit()
-        return {"year_month": year_month, "allocation_upserts": allocation_upserts}
+        return {
+            "year_month": year_month,
+            "allocation_upserts": allocation_upserts,
+            "allocation_stale_deleted": stale_deleted,
+        }
