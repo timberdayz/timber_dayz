@@ -40,7 +40,7 @@ async def test_refresh_safety_net_enqueues_repair_for_drifted_dashboard_assets(m
                     "status": "drift",
                     "core_missing_objects": ["api.business_overview_kpi_module"],
                 },
-                "clearance_ranking": {
+                "inventory_backlog": {
                     "status": "ready",
                 },
             },

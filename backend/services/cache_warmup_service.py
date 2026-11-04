@@ -24,7 +24,6 @@ _DEFAULT_P1_TARGETS = [
     "business_overview_traffic_ranking",
     "business_overview_inventory_backlog",
     "business_overview_operational_metrics",
-    "clearance_ranking",
 ]
 
 # target_name -> (cache_type, 默认参数字典；值可为 callable() 表示运行时计算)
@@ -93,14 +92,6 @@ _WARMUP_SPEC: Dict[str, Tuple[str, Dict[str, Any]]] = {
             "period_key": lambda: _current_month(),
             "platform_code": None,
             "shop_id": None,
-        },
-    ),
-    "clearance_ranking": (
-        "dashboard_clearance_ranking",
-        {
-            "limit": 10,
-            "granularity": "monthly",
-            "date": lambda: _current_month(),
         },
     ),
 }
@@ -271,13 +262,6 @@ async def _query_postgresql_dashboard(service, target_name: str, params: Dict[st
         return await service.get_business_overview_operational_metrics(
             month=params.get("period_key"),
             platform=params.get("platform_code"),
-        )
-    if target_name == "clearance_ranking":
-        limit = params.get("limit")
-        return await service.get_clearance_ranking(
-            limit=int(limit) if limit else 10,
-            granularity=params.get("granularity") or "monthly",
-            target_date=params.get("date") or _current_month(),
         )
     raise ValueError(f"unsupported_postgresql_warmup_target:{target_name}")
 

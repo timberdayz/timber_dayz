@@ -101,20 +101,6 @@ export default {
   },
 
   /**
-   * 查询清仓排名数据
-   * @param {Object} params - 查询参数
-   * @param {string} params.start_date - 开始日期
-   * @param {string} params.end_date - 结束日期
-   * @param {string} params.platforms - 平台代码（逗号分隔）
-   * @param {string} params.shops - 店铺ID（逗号分隔）
-   * @param {number} params.limit - 返回数量
-   * @returns {Promise} 清仓排名数据
-   */
-  async queryClearanceRanking(params = {}) {
-    return await api._get('/dashboard/clearance-ranking', { params })
-  },
-
-  /**
    * B类成本分析 - 概览 KPI
    */
   async queryBCostAnalysisOverview(params = {}) {

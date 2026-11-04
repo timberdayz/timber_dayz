@@ -17,7 +17,6 @@ from backend.domains.business.routers.dashboard_api_postgresql import (
     get_business_overview_operational_metrics_postgresql,
     get_business_overview_shop_racing_postgresql,
     get_business_overview_traffic_ranking_postgresql,
-    get_clearance_ranking_postgresql,
     router,
 )
 
@@ -44,7 +43,7 @@ def _make_request(path: str):
                         "status": "ready",
                         "ready": True,
                     },
-                    "clearance": {
+                    "inventory_backlog": {
                         "status": "ready",
                         "ready": True,
                     },
@@ -748,7 +747,8 @@ def test_postgresql_dashboard_router_exposes_compatibility_paths():
     assert "/api/dashboard/business-overview/traffic-ranking" in paths
     assert "/api/dashboard/business-overview/inventory-backlog" in paths
     assert "/api/dashboard/business-overview/operational-metrics" in paths
-    assert "/api/dashboard/clearance-ranking" in paths
+    # 2026-11-04：滞销清理排名模块整体下线，路由必须不存在
+    assert "/api/dashboard/clearance-ranking" not in paths
 
 
 def test_postgresql_inventory_backlog_route_returns_summary_payload(monkeypatch):
@@ -885,86 +885,6 @@ async def test_postgresql_inventory_backlog_route_uses_extended_singleflight_tim
     assert singleflight_call[2]["wait_timeout"] >= 30
 
 
-def test_postgresql_clearance_ranking_route_returns_priority_fields(monkeypatch):
-    class _ServiceStub:
-        async def get_clearance_ranking(
-            self,
-            limit,
-            min_days=30,
-            granularity=None,
-            target_date=None,
-        ):
-            return [
-                {
-                    "platform_code": "shopee",
-                    "platform_sku": "SKU-1",
-                    "estimated_turnover_days": 80,
-                    "estimated_stagnant_days": 14,
-                    "stagnant_snapshot_count": 3,
-                    "risk_level": "high",
-                    "clearance_priority_score": 456.7,
-                }
-            ]
-
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _ServiceStub(),
-    )
-
-    response = asyncio.run(
-        get_clearance_ranking_postgresql(
-            request=_make_request("/api/dashboard/clearance-ranking"),
-            limit=10,
-        )
-    )
-
-    body = json.loads(response.body.decode("utf-8"))
-    assert body["success"] is True
-    assert body["data"][0]["risk_level"] == "high"
-    assert body["data"][0]["clearance_priority_score"] == 456.7
-
-
-def test_postgresql_clearance_ranking_route_forwards_granularity_and_date(monkeypatch):
-    captured = {}
-
-    class _ServiceStub:
-        async def get_clearance_ranking(
-            self,
-            limit,
-            min_days=30,
-            granularity=None,
-            target_date=None,
-        ):
-            captured["limit"] = limit
-            captured["min_days"] = min_days
-            captured["granularity"] = granularity
-            captured["target_date"] = target_date
-            return []
-
-    monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
-        lambda: _ServiceStub(),
-    )
-
-    response = asyncio.run(
-        get_clearance_ranking_postgresql(
-            request=_make_request("/api/dashboard/clearance-ranking"),
-            limit=10,
-            granularity="monthly",
-            date="2026-03-01",
-        )
-    )
-
-    body = json.loads(response.body.decode("utf-8"))
-    assert body["success"] is True
-    assert captured == {
-        "limit": 10,
-        "min_days": 30,
-        "granularity": "monthly",
-        "target_date": "2026-03-01",
-    }
-
-
 @pytest.mark.parametrize(
     ("route_func", "kwargs"),
     [
@@ -984,13 +904,6 @@ def test_postgresql_clearance_ranking_route_forwards_granularity_and_date(monkey
                 "period_key": "2026-03-01",
                 "platform_code": None,
                 "shop_id": None,
-            },
-        ),
-        (
-            get_clearance_ranking_postgresql,
-            {
-                "request": _make_dashboard_not_ready_request("/api/dashboard/clearance-ranking"),
-                "limit": 10,
             },
         ),
     ],

@@ -29,7 +29,7 @@ REQUIRED_LITERALS = [
     # 已存在的普通视图，生产又关掉了启动自愈 ⇒ 少了这一步，改过的 sql/ 资产不会生效。
     "run --rm --no-deps backend-api python3 /app/scripts/rebuild_views.py",
     "DEPLOY_REBUILD_VIEW_TARGETS",
-    "api.clearance_ranking_module",
+    "api.business_overview_inventory_backlog_module",
     # 重建后必须再确认目标视图确实存在（rebuild_views.py 对「目标不在库里」
     # 会跳过并返回 0，那是静默成功）。
     "rebuild_dashboard_view_definitions",

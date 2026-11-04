@@ -40,9 +40,9 @@ def test_dashboard_module_targets_track_business_overview_refreshing_targets():
 
 
 def test_dashboard_asset_fingerprint_is_stable_across_project_roots(monkeypatch):
-    target_name = "api.clearance_ranking_module"
+    target_name = "api.inventory_backlog_summary_module"
     sql_rel_path = dashboard_bootstrap.SQL_TARGET_PATHS[target_name]
-    sql_bytes = b"CREATE OR REPLACE VIEW api.clearance_ranking_module AS SELECT 1;"
+    sql_bytes = b"CREATE OR REPLACE VIEW api.inventory_backlog_summary_module AS SELECT 1;"
 
     class FakeTargetPath:
         def __init__(self, root_label: str, relative_path: str):
@@ -177,8 +177,8 @@ async def test_inspect_dashboard_assets_ignores_stale_refreshing_state(monkeypat
     business_refresh_fp = dashboard_bootstrap._compute_targets_fingerprint(
         dashboard_bootstrap._module_refresh_plan("business_overview")
     )
-    clearance_core_fp = dashboard_bootstrap._compute_targets_fingerprint(
-        dashboard_bootstrap._module_core_plan("clearance_ranking")
+    backlog_core_fp = dashboard_bootstrap._compute_targets_fingerprint(
+        dashboard_bootstrap._module_core_plan("inventory_backlog")
     )
 
     async def fake_load_state(_session):
@@ -188,9 +188,9 @@ async def test_inspect_dashboard_assets_ignores_stale_refreshing_state(monkeypat
                 "asset_fingerprint_applied": business_core_fp,
                 "details_json": {"refresh_fingerprint_applied": business_refresh_fp},
             },
-            "clearance_ranking": {
+            "inventory_backlog": {
                 "status": "ready",
-                "asset_fingerprint_applied": clearance_core_fp,
+                "asset_fingerprint_applied": backlog_core_fp,
                 "details_json": {},
             },
         }
@@ -280,7 +280,7 @@ async def test_refresh_materialization_replays_core_targets_after_heavy_refresh(
             "ready": True,
             "modules": {
                 "business_overview": {"status": "ready", "ready": True},
-                "clearance_ranking": {"status": "ready", "ready": True},
+                "inventory_backlog": {"status": "ready", "ready": True},
             },
         }
 
@@ -313,7 +313,6 @@ async def test_refresh_materialization_replays_core_targets_after_heavy_refresh(
     ("path", "module_name"),
     [
         ("/api/dashboard/business-overview/kpi", "business_overview"),
-        ("/api/dashboard/clearance-ranking", "clearance_ranking"),
     ],
 )
 @pytest.mark.asyncio

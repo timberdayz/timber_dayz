@@ -57,7 +57,7 @@ def _should_refresh_inventory_layers(
 
     判据是「库存事实有没有被重建」，不是「事件有没有声明 domain」：
     orders 域的刷新闭包里同样含库存事实
-    （`api.clearance_ranking_module` → `mart.inventory_backlog_base`
+    （`api.business_overview_inventory_backlog_module` → `mart.inventory_backlog_base`
     → `mart.inventory_state` → `semantic.fact_inventory_snapshot`），
     所以订单采集也会顺带把状态层刷对 —— 这正是生产需要的自愈能力。
     """
@@ -125,11 +125,10 @@ async def _invalidate_refresh_target_caches(targets: list[str]) -> None:
         cache_service = get_cache_service()
         if "business_overview" in modules:
             await cache_service.invalidate_dashboard_business_overview()
-        if "clearance_ranking" in modules:
-            await cache_service.invalidate("dashboard_clearance_ranking")
+        if "inventory_backlog" in modules:
             # 业务概览的「库存积压」四张卡读的是 api.business_overview_inventory_backlog_module，
             # 它的缓存键是 dashboard_inventory_backlog（TTL 300s）。
-            # 积压资产组归到 clearance_ranking 模块后，inventory 域刷新不再命中
+            # 积压资产组归到 inventory_backlog 模块后，inventory 域刷新不再命中
             # business_overview → invalidate_dashboard_business_overview() 不会被调用 →
             # 这张卡会吃到上一轮采集的旧数据。显式补一次失效。
             await cache_service.invalidate("dashboard_inventory_backlog")

@@ -17,7 +17,7 @@ WITH monthly_base AS (
         SUM(platform_voucher) AS platform_voucher,
         SUM(platform_service_fee) AS platform_service_fee,
         SUM(platform_total_cost_itemized) AS platform_total_cost_itemized
-    FROM semantic.fact_orders_atomic
+    FROM semantic.fact_orders_atomic_mv
     GROUP BY date_trunc('month', metric_date)::date, platform_code, shop_id, currency_code
 ),
 costed AS (

@@ -26,7 +26,7 @@ def test_deploy_script_rebuilds_view_definitions():
     source = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
 
     assert "python3 /app/scripts/rebuild_views.py" in source
-    assert "api.clearance_ranking_module" in source
+    assert "api.business_overview_inventory_backlog_module" in source
     # 目标清单可覆盖 ⇒ 以后有新视图资产变更不用改脚本
     assert "DEPLOY_REBUILD_VIEW_TARGETS" in source
     # 重建后必须再确认视图确实存在：rebuild_views.py 对「目标不在库里」

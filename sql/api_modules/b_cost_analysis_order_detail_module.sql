@@ -34,7 +34,7 @@ WITH base AS (
             + COALESCE(warehouse_operation_fee, 0)
             + COALESCE(platform_total_cost_itemized, 0)
         ) AS total_cost_b
-    FROM semantic.fact_orders_atomic
+    FROM semantic.fact_orders_atomic_mv
 )
 SELECT
     period_month,

@@ -12,7 +12,7 @@ WITH weekly_orders AS (
         END AS order_count,
         SUM(product_quantity) AS total_items,
         SUM(profit) AS profit
-    FROM semantic.fact_orders_atomic
+    FROM semantic.fact_orders_atomic_mv
     WHERE granularity = 'weekly'
     GROUP BY date_trunc('week', metric_date)::date, platform_code
 ),
@@ -23,7 +23,7 @@ weekly_traffic AS (
         SUM(visitor_count) AS visitor_count,
         SUM(page_views) AS page_views,
         SUM(impressions) AS impressions
-    FROM semantic.fact_analytics_atomic
+    FROM semantic.fact_analytics_atomic_mv
     WHERE granularity = 'weekly'
     GROUP BY date_trunc('week', metric_date)::date, platform_code
 )

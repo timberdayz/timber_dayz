@@ -25,7 +25,6 @@ CONTRACTS = ROOT / "backend" / "services" / "collection_contracts.py"
 DOWNSTREAM_VIEWS = (
     "api.business_overview_inventory_backlog_module",
     "api.inventory_backlog_summary_module",
-    "api.clearance_ranking_module",
 )
 
 

@@ -56,7 +56,6 @@ class CacheService:
         "dashboard_shop_racing": 180,
         "dashboard_traffic_ranking": 180,
         "dashboard_operational_metrics": 180,
-        "dashboard_clearance_ranking": 300,
         "dashboard_inventory_backlog": 300,
         # add-redis-cache-uncached-endpoints
         "performance_scores": 180,

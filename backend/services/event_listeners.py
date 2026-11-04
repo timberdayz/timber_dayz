@@ -64,12 +64,10 @@ DATA_INGESTED_PIPELINE_TARGETS: Dict[str, list[str]] = {
     # [D8] 原独立的 "traffic" 条目已并入 "analytics"(traffic 域自 v4.10.0 起废弃),
     #      两个 key 指向同一个业务域,保留两份会让刷新目标随时间各自漂移
     "products": [
-        "api.clearance_ranking_module",
         "mart.spu_operating_current",
     ],
     "inventory": [
         "api.business_overview_inventory_backlog_module",
-        "api.clearance_ranking_module",
         "mart.spu_operating_current",
     ],
     "services": [

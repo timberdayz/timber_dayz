@@ -62,7 +62,7 @@ async def test_refresh_queue_api_lists_tasks_and_filters_by_status(refresh_queue
                 trigger_type="data_ingested",
                 pipeline_name="data_ingested_refresh",
                 dedupe_key="k2",
-                targets_json=["api.clearance_ranking_module"],
+                targets_json=["api.business_overview_inventory_backlog_module"],
                 context_json={"file_id": 2},
                 status="failed",
                 last_error="boom",

@@ -28,8 +28,11 @@ const TIMEOUTS = {
   preview: 60000, // 预览文件60秒
   ingest: 180000, // 数据入库180秒
   // Dashboard 查询：为 PostgreSQL Dashboard 聚合接口保留更宽裕超时
-  // 保持 DB statement_timeout < Backend -> Frontend 的超时约束
-  dashboard: 70000, // Dashboard 查询70秒
+  // 保持 DB statement_timeout < Backend -> Frontend 的超时约束。
+  // 2026-11-04：70s -> 120s。原来 DB 预算 60s、前端 70s、nginx 60s 三者贴太近，
+  // nginx 抢先断 → 用户只看到 504 空白页。现在留足后端组装响应与序列化的余量，
+  // 让后端那条可读的「查询超时」能真正送到浏览器。
+  dashboard: 120000, // Dashboard 查询120秒
   collection: 300000, // 数据采集300秒（5分钟）
   mapping: 90000, // 字段映射90秒
   sync: 120000, // ⭐ v4.19.5 新增：数据同步120秒（2分钟）
@@ -2400,12 +2403,6 @@ export default {
   },
 
   // ========== 库存API ==========
-
-  // 获取滞销清理排名（v4.11.0：从dashboard API获取）
-  async getClearanceRanking(params = {}) {
-    // TODO: 需要创建专门的API端点，暂时使用dashboard数据
-    return await this._get('/dashboard/clearance-ranking', { params })
-  },
 
   // ========== 业务概览API（v4.11.0新增） ==========
 

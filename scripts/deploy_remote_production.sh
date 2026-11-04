@@ -952,7 +952,7 @@ sys.exit(asyncio.run(main()))
   return 0
 }
 
-if ! rebuild_dashboard_view_definitions "${DEPLOY_REBUILD_VIEW_TARGETS:-api.clearance_ranking_module}"; then
+if ! rebuild_dashboard_view_definitions "${DEPLOY_REBUILD_VIEW_TARGETS:-api.business_overview_inventory_backlog_module}"; then
   echo "[INFO] Deployment blocked before application startup"
   exit 1
 fi

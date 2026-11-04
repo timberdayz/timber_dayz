@@ -25,7 +25,7 @@ def test_bootstrap_script_exposes_dashboard_targets():
     script = load_script_module()
 
     assert "business_overview" in script.DASHBOARD_MODULE_TARGETS
-    assert "clearance_ranking" in script.DASHBOARD_MODULE_TARGETS
+    assert "inventory_backlog" in script.DASHBOARD_MODULE_TARGETS
     assert "ops.pipeline_run_log" in script.DASHBOARD_REQUIRED_OBJECTS
     assert "ops.dashboard_asset_state" in script.DASHBOARD_REQUIRED_OBJECTS
 

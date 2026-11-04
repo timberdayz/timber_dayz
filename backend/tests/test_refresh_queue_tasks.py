@@ -206,7 +206,7 @@ async def test_process_refresh_queue_task_invalidates_clearance_cache(monkeypatc
         job_id = "job-12"
         trigger_type = "cloud_sync"
         pipeline_name = "data_ingested_refresh"
-        targets_json = ["api.clearance_ranking_module"]
+        targets_json = ["api.business_overview_inventory_backlog_module"]
         context_json = {
             "source_table_name": "fact_shopee_products_daily",
             "data_domain": "products",
@@ -266,7 +266,7 @@ async def test_process_refresh_queue_task_invalidates_clearance_cache(monkeypatc
     result = await task_module._async_process_refresh_queue_task()
 
     assert result["status"] == "success"
-    assert ("invalidate", "dashboard_clearance_ranking") in calls
+    assert ("invalidate", "dashboard_inventory_backlog") in calls
     assert "invalidate_business_overview" not in calls
 
 
@@ -743,7 +743,7 @@ async def test_process_refresh_queue_task_syncs_inventory_skus_before_age_refres
         job_id = "job-20"
         trigger_type = "data_ingested"
         pipeline_name = "data_ingested_refresh"
-        targets_json = ["api.clearance_ranking_module"]
+        targets_json = ["api.business_overview_inventory_backlog_module"]
         context_json = {"file_id": 2764, "data_domain": "inventory"}
 
     class _FakeSession:
@@ -862,11 +862,11 @@ def test_inventory_layer_refresh_trigger_follows_targets_not_event_fields():
     from backend.tasks import refresh_queue_tasks as task_module
 
     # 订单域的刷新闭包里也含库存事实
-    # （clearance_ranking → backlog_base → inventory_state → fact_inventory_snapshot）
+    # （business_overview_inventory_backlog → backlog_base → inventory_state → fact_inventory_snapshot）
     # ⇒ 订单采集也必须把状态层刷对。
     assert (
         task_module._should_refresh_inventory_layers(
-            ["api.clearance_ranking_module", "semantic.fact_inventory_snapshot"],
+            ["api.business_overview_inventory_backlog_module", "semantic.fact_inventory_snapshot"],
             {},
         )
         is True
@@ -909,7 +909,7 @@ async def test_process_refresh_queue_task_refreshes_state_when_targets_cover_inv
         targets_json = [
             "semantic.fact_inventory_snapshot",
             "mart.inventory_backlog_base",
-            "api.clearance_ranking_module",
+            "api.business_overview_inventory_backlog_module",
         ]
         # 注意：没有 data_domain（云同步路径不会带这个字段）
         context_json = {"source_table_name": "fact_shopee_orders_daily"}
@@ -1020,7 +1020,7 @@ async def test_process_refresh_queue_task_refreshes_state_when_targets_cover_inv
 
 
 def test_inventory_refresh_invalidates_inventory_backlog_cache(monkeypatch):
-    """积压资产组归到 clearance_ranking 模块后，业务概览的库存积压卡缓存也必须失效。
+    """积压资产组归到 inventory_backlog 模块后，业务概览的库存积压卡缓存也必须失效。
 
     业务概览那四张卡读的是 api.business_overview_inventory_backlog_module，
     缓存键是 dashboard_inventory_backlog（TTL 300s）。
@@ -1051,4 +1051,3 @@ def test_inventory_refresh_invalidates_inventory_backlog_cache(monkeypatch):
     )
 
     assert "dashboard_inventory_backlog" in invalidated
-    assert "dashboard_clearance_ranking" in invalidated

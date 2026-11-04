@@ -52,10 +52,6 @@ async def test_cache_warmup_uses_postgresql_service_when_router_enabled(monkeypa
             called.append(("operational_metrics", month, platform))
             return {}
 
-        async def get_clearance_ranking(self, limit=10, granularity=None, target_date=None):
-            called.append(("clearance_ranking", limit))
-            return []
-
     monkeypatch.setenv("USE_POSTGRESQL_DASHBOARD_ROUTER", "true")
     monkeypatch.setattr(
         "backend.services.cache_warmup_service.get_cache_service",
@@ -68,14 +64,13 @@ async def test_cache_warmup_uses_postgresql_service_when_router_enabled(monkeypa
 
     result = await cache_warmup_service.run_dashboard_cache_warmup()
 
-    assert result["ok"] == 8
+    assert result["ok"] == 7
     assert result["failed"] == 0
-    assert len(stored) == 8
+    assert len(stored) == 7
     assert any(item[0] == "dashboard_business_overview_bootstrap" for item in stored)
     assert any(item[0] == "dashboard_kpi" for item in stored)
     assert any(call[0] == "kpi" for call in called)
     assert ("inventory_backlog", 30, 20) in called
-    assert any(call[0] == "clearance_ranking" for call in called)
 
 
 @pytest.mark.asyncio

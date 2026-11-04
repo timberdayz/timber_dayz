@@ -71,9 +71,8 @@ def test_expand_downstream_targets_includes_all_order_dashboard_dependents():
         "api.business_overview_comparison_platform_module",
         "api.business_overview_shop_racing_module",
         "api.business_overview_shop_racing_monthly_module",
-        # 2026-10-24：滞销判据换成「库存停滞时长」→ 滞销模块不再依赖订单域，
-        # 但月度店铺排名仍然要订单数据，所以它仍在下游集合里。
-        "api.clearance_ranking_module",
+        # 2026-11-04：滞销清理排名模块整体下线，订单域下游不再含
+        # api.clearance_ranking_module；库存积压视图改由 inventory 域刷新。
     }
 
     assert expected_targets.issubset(set(targets))

@@ -7,7 +7,7 @@ from backend.services.data_pipeline import dashboard_bootstrap
 
 def test_dashboard_bootstrap_targets_cover_key_modules():
     assert "business_overview" in dashboard_bootstrap.DASHBOARD_MODULE_TARGETS
-    assert "clearance_ranking" in dashboard_bootstrap.DASHBOARD_MODULE_TARGETS
+    assert "inventory_backlog" in dashboard_bootstrap.DASHBOARD_MODULE_TARGETS
     assert "ops.dashboard_asset_state" in dashboard_bootstrap.DASHBOARD_REQUIRED_OBJECTS
 
 
@@ -33,7 +33,7 @@ def test_bootstrap_dashboard_assets_relaxes_statement_timeout(monkeypatch):
                 "missing_schemas": [],
                 "modules": {
                     "business_overview": {"status": "ready", "ready": True},
-                    "clearance_ranking": {"status": "ready", "ready": True},
+                    "inventory_backlog": {"status": "ready", "ready": True},
                 },
             }
         ),

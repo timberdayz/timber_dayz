@@ -20,6 +20,10 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     ],
     "semantic.fact_orders_atomic": ["semantic.shop_identity_resolution_candidates"],
     "semantic.fact_analytics_atomic": ["semantic.shop_identity_resolution_candidates"],
+    # 原子层的物化副本：正文与普通视图完全一致（SELECT *），只把「每行跑一次
+    # 店铺别名解析」从请求路径搬到刷新路径。口径零变化。
+    "semantic.fact_orders_atomic_mv": ["semantic.fact_orders_atomic"],
+    "semantic.fact_analytics_atomic_mv": ["semantic.fact_analytics_atomic"],
     "semantic.fact_orders_monthly_atomic": ["semantic.fact_orders_monthly_atomic_mv"],
     "semantic.fact_analytics_monthly_atomic": [
         "semantic.fact_analytics_monthly_atomic_mv"
@@ -29,24 +33,24 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.fact_services_atomic": [],
     "semantic.shop_month_other_operating_cost": [],
     "mart.shop_day_kpi": [
-        "semantic.fact_orders_atomic",
-        "semantic.fact_analytics_atomic",
+        "semantic.fact_orders_atomic_mv",
+        "semantic.fact_analytics_atomic_mv",
     ],
     "mart.shop_week_kpi": [
-        "semantic.fact_orders_atomic",
-        "semantic.fact_analytics_atomic",
+        "semantic.fact_orders_atomic_mv",
+        "semantic.fact_analytics_atomic_mv",
     ],
     "mart.shop_month_kpi": [
         "semantic.fact_orders_monthly_atomic",
         "semantic.fact_analytics_monthly_atomic",
     ],
     "mart.platform_day_kpi": [
-        "semantic.fact_orders_atomic",
-        "semantic.fact_analytics_atomic",
+        "semantic.fact_orders_atomic_mv",
+        "semantic.fact_analytics_atomic_mv",
     ],
     "mart.platform_week_kpi": [
-        "semantic.fact_orders_atomic",
-        "semantic.fact_analytics_atomic",
+        "semantic.fact_orders_atomic_mv",
+        "semantic.fact_analytics_atomic_mv",
     ],
     "mart.platform_month_kpi": ["mart.shop_month_kpi"],
     "mart.product_day_kpi": ["semantic.fact_products_atomic"],
@@ -64,7 +68,7 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     ],
     "mart.spu_operating_current": ["mart.inventory_age_current"],
     "mart.hr_shop_monthly_profit": ["semantic.fact_orders_atomic"],
-    "mart.b_cost_shop_month": ["semantic.fact_orders_atomic"],
+    "mart.b_cost_shop_month": ["semantic.fact_orders_atomic_mv"],
     "mart.shop_month_labor_cost": [],
     "api.business_overview_kpi_module": ["mart.platform_month_kpi"],
     "api.business_overview_comparison_platform_module": [
@@ -96,17 +100,17 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "api.inventory_age_summary_module": ["mart.inventory_age_current"],
     "api.business_overview_operational_metrics_module": [
         "mart.shop_month_kpi",
+        # ⚠️ 这个模块的 SQL 资产里有一处 LEFT JOIN mart.shop_day_kpi
+        #    （today_sales / today_order_count 来自日粒度）。
+        #    依赖表里必须写上，否则它可能在 mart.shop_day_kpi 之前重建，
+        #    拿到旧的日粒度数据。
+        "mart.shop_day_kpi",
         "semantic.shop_month_other_operating_cost",
         "mart.shop_month_labor_cost",
     ],
     "api.b_cost_analysis_overview_module": ["mart.b_cost_shop_month"],
     "api.b_cost_analysis_shop_month_module": ["mart.b_cost_shop_month"],
-    "api.b_cost_analysis_order_detail_module": ["semantic.fact_orders_atomic"],
-    "api.clearance_ranking_module": [
-        "mart.inventory_backlog_base",
-        "api.inventory_backlog_summary_module",
-        "semantic.fact_orders_atomic",
-    ],
+    "api.b_cost_analysis_order_detail_module": ["semantic.fact_orders_atomic_mv"],
     # SKU 级滞销清单：判据来自状态层（距上次进货天数），ERP 主数据补定价原料。
     # 2026-10-31：不再依赖 semantic.fact_orders_atomic —— 近30天动销改用妙手自带的
     # 窗口销量（状态层里已有），跨系统对账口径恒为 0，且那个视图每行跑一次店铺别名
@@ -121,6 +125,8 @@ SQL_TARGET_PATHS: dict[str, str] = {
     "semantic.fact_analytics_monthly_atomic_mv": "sql/semantic/analytics_monthly_atomic_mv.sql",
     "semantic.fact_orders_atomic": "sql/semantic/orders_atomic.sql",
     "semantic.fact_analytics_atomic": "sql/semantic/analytics_atomic.sql",
+    "semantic.fact_orders_atomic_mv": "sql/semantic/orders_atomic_mv.sql",
+    "semantic.fact_analytics_atomic_mv": "sql/semantic/analytics_atomic_mv.sql",
     "semantic.fact_orders_monthly_atomic": "sql/semantic/orders_monthly_atomic.sql",
     "semantic.fact_analytics_monthly_atomic": "sql/semantic/analytics_monthly_atomic.sql",
     "semantic.fact_products_atomic": "sql/semantic/products_atomic.sql",
@@ -160,7 +166,6 @@ SQL_TARGET_PATHS: dict[str, str] = {
     "api.b_cost_analysis_overview_module": "sql/api_modules/b_cost_analysis_overview_module.sql",
     "api.b_cost_analysis_shop_month_module": "sql/api_modules/b_cost_analysis_shop_month_module.sql",
     "api.b_cost_analysis_order_detail_module": "sql/api_modules/b_cost_analysis_order_detail_module.sql",
-    "api.clearance_ranking_module": "sql/api_modules/clearance_ranking_module.sql",
     "api.sku_clearance_ranking_module": "sql/api_modules/sku_clearance_ranking_module.sql",
 }
 
@@ -263,11 +268,13 @@ def _base_targets_for_refresh_domain(domain: str) -> list[str]:
     if domain == "orders":
         return [
             "semantic.fact_orders_atomic",
+            "semantic.fact_orders_atomic_mv",
             "semantic.fact_orders_monthly_atomic_mv",
         ]
     if domain == "analytics":
         return [
             "semantic.fact_analytics_atomic",
+            "semantic.fact_analytics_atomic_mv",
             "semantic.fact_analytics_monthly_atomic_mv",
         ]
     if domain == "products":
@@ -285,15 +292,14 @@ def _extra_targets_for_refresh_domain(domain: str) -> list[str]:
             "api.business_overview_shop_racing_monthly_module",
         ]
     if domain == "inventory":
-        # ⚠️ 这四个 api 视图都依赖 `mart.inventory_backlog_base`，
-        #    而基表删列 → 必须 DROP 重建 → DROP 会连带删掉这四个下游。
+        # ⚠️ 这三个 api 视图都依赖 `mart.inventory_backlog_base`，
+        #    而基表删列 → 必须 DROP 重建 → DROP 会连带删掉这三个下游。
         #    refresh pipeline 只重建列出来的目标 → 少列一个就少重建一个，
         #    表现为「采集跑完，业务概览的积压视图突然 missing」。
-        #    → 四个全带。
+        #    → 三个全带。
         return [
             "api.business_overview_inventory_backlog_module",
             "api.inventory_backlog_summary_module",
-            "api.clearance_ranking_module",
             "api.sku_clearance_ranking_module",
         ]
     return []

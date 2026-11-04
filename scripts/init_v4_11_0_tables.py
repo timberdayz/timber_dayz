@@ -26,7 +26,6 @@ from modules.core.db import (
     ShopAlert,
     PerformanceScore,
     PerformanceConfig,
-    ClearanceRanking
 )
 from modules.core.logger import get_logger
 
@@ -55,7 +54,6 @@ def create_tables():
         ("shop_alerts", ShopAlert),
         ("performance_scores", PerformanceScore),
         ("performance_config", PerformanceConfig),
-        ("clearance_rankings", ClearanceRanking),
     ]
     
     created_count = 0

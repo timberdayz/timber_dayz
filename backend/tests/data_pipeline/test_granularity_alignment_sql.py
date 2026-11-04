@@ -319,6 +319,26 @@ async def test_shop_day_kpi_keeps_missing_traffic_as_null():
                     """
                 )
             )
+            # 原子层的物化副本（2026-11-04）：mart.shop_day_kpi 改读物化视图
+            # → 测试库必须先把这两个 MV 建出来。
+            # ⚠️ 必须建在 INSERT **之后**：物化视图是「建的那一刻」把数据拍平，
+            #    早建就会拿到空表。
+            await session.execute(
+                text(
+                    """
+                    CREATE MATERIALIZED VIEW semantic.fact_orders_atomic_mv
+                    AS SELECT * FROM semantic.fact_orders_atomic
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE MATERIALIZED VIEW semantic.fact_analytics_atomic_mv
+                    AS SELECT * FROM semantic.fact_analytics_atomic
+                    """
+                )
+            )
             await execute_sql_target(session, "mart.shop_day_kpi")
             await session.commit()
 

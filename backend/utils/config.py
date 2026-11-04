@@ -131,14 +131,20 @@ class Settings:
     DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "60"))  # 连接超时60秒
     DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "1800")) # 连接回收30分钟(避免长连接问题)
 
-    # ── 超时预算对齐(2026-10-30)────────────────────────────────
+    # ── 超时预算对齐(2026-10-30，2026-11-04 复核)──────────────────────────
     # 背景:前端 axios 超时(frontend/src/api/index.js 的 TIMEOUTS)必须**大于**后端
     # DB statement_timeout。否则前端先放弃(报"网络连接失败"),后端 SQL 还在跑,
     # 拖住事件循环与连接池 —— 这就是"超时预算倒置"。
     # 规则:DB statement_timeout < 前端 axios 超时,中间留出响应组装与序列化的余量。
     # 详见 docs/architecture/SYNC_MODULE_REFACTOR_PLAN.md 第 4 批。
     #
-    # Dashboard 家族的 DB 预算(前端 /dashboard/* 是 70s,这里留 10s 余量)。
+    # 2026-11-04 复核出的真问题:nginx 的 proxy_read_timeout 也是 60s,
+    # 与 DB 预算**完全相等** ⇒ DB 报错和 nginx 掐连接同时发生,nginx 永远先断,
+    # 用户只看到 504 空白页,后端那条可读的「查询超时」永远送不到浏览器。
+    # 现在三层是 **DB 60s < 前端 axios 120s < nginx 300s**,顺序正确:
+    # DB 先失败 → 后端返回 500 → nginx 如实转发 → 浏览器看到可读错误。
+    #
+    # Dashboard 家族的 DB 预算(前端 /dashboard/* 是 120s,这里留 60s 余量)。
     DB_STATEMENT_TIMEOUT_MS: int = int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "60000"))
     # 请求级 DB 超时预算(毫秒):按请求路径片段匹配。
     # 键顺序 = 前端 URL 匹配的判定顺序(frontend/src/api/index.js)。
@@ -152,7 +158,7 @@ class Settings:
         "/preview": int(os.getenv("DB_TIMEOUT_PREVIEW_MS", "50000")),
         # 前端 180s
         "/ingest": int(os.getenv("DB_TIMEOUT_INGEST_MS", "170000")),
-        # 前端 70s
+        # 前端 120s
         "/dashboard": DB_STATEMENT_TIMEOUT_MS,
         # 前端 300s
         "/collection": int(os.getenv("DB_TIMEOUT_COLLECTION_MS", "290000")),

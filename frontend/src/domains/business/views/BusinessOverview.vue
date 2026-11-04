@@ -1134,139 +1134,6 @@
       </el-card>
     </div>
 
-    <!-- 滞销清理排名模块 -->
-    <div class="clearance-ranking-section">
-      <el-row :gutter="20">
-        <!-- 月度排名 -->
-        <el-col :span="24">
-          <el-card class="chart-card" shadow="hover">
-            <template #header>
-                <div class="card-header">
-                <span>滞销清理排名（月度）</span>
-                <div class="header-controls">
-                  <el-tooltip
-                    :content="
-                      globalGranularity === 'monthly'
-                        ? useGlobalDate.clearance
-                          ? '已跟随全局月份'
-                          : '点击恢复跟随全局'
-                        : '仅月度时跟随，当前全局不是月度'
-                    "
-                  >
-                    <el-button
-                      :type="useGlobalDate.clearance && globalGranularity === 'monthly' ? 'primary' : 'default'"
-                      link
-                      size="small"
-                      :disabled="globalGranularity !== 'monthly'"
-                      @click="syncModuleToGlobal('clearance')"
-                    >
-                      <el-icon><Link /></el-icon>
-                      {{ useGlobalDate.clearance ? '跟随' : '恢复' }}
-                    </el-button>
-                  </el-tooltip>
-                  <el-date-picker
-                    v-model="clearanceMonth"
-                    type="month"
-                    format="YYYY-MM"
-                    value-format="YYYY-MM"
-                    placeholder="选择月份"
-                    size="small"
-                    class="control-w-150"
-                    @change="onClearanceMonthChange"
-                  />
-                  <el-button
-                    size="small"
-                    @click="loadMonthlyClearanceRanking"
-                  >
-                    <el-icon><Refresh /></el-icon>
-                    刷新
-                  </el-button>
-                </div>
-              </div>
-            </template>
-            <el-table
-              :data="monthlyClearanceRanking"
-              stripe
-              class="erp-w-full erp-table"
-              size="small"
-              v-loading="loadingClearanceRanking"
-            >
-              <el-table-column
-                prop="rank"
-                label="排名"
-                width="80"
-                fixed="left"
-                align="center"
-              >
-                <template #default="{ row }">
-                  <el-tag
-                    :type="
-                      row.rank === 1
-                        ? 'success'
-                        : row.rank === 2
-                          ? 'warning'
-                          : row.rank === 3
-                            ? 'info'
-                            : 'primary'
-                    "
-                    size="small"
-                  >
-                    {{ row.rank }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column
-                prop="shop_name"
-                label="店铺名称"
-                width="200"
-                fixed="left"
-                show-overflow-tooltip
-              />
-              <el-table-column
-                prop="clearance_amount"
-                label="清理金额"
-                width="150"
-                align="right"
-                sortable
-              >
-                <template #default="{ row }">
-                  {{ formatCurrency(row.clearance_amount) }}
-                </template>
-              </el-table-column>
-              <el-table-column
-                prop="clearance_quantity"
-                label="清理数量"
-                width="120"
-                align="right"
-                sortable
-              />
-              <el-table-column
-                prop="incentive_amount"
-                label="激励金额"
-                width="120"
-                align="right"
-                sortable
-              >
-                <template #default="{ row }">
-                  {{ formatCurrency(row.incentive_amount) }}
-                </template>
-              </el-table-column>
-              <el-table-column
-                prop="total_incentive"
-                label="总计激励"
-                width="120"
-                align="right"
-                sortable
-              >
-                <template #default="{ row }">
-                  {{ formatCurrency(row.total_incentive) }}
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-card>
-        </el-col>
-      </el-row>
-    </div>
   </div>
 </template>
 
@@ -1291,7 +1158,6 @@ import {
   businessOverviewKpiMeta,
   getKpiHelpMeta
 } from './businessOverviewKpiMeta.js'
-import { normalizeClearanceRankingResponse } from '@/utils/businessOverviewData'
 import { buildShopAccountLookup, resolveShopDisplay } from '@/utils/shopDisplay'
 import PageHeader from '@/components/common/PageHeader.vue'
 
@@ -1321,7 +1187,7 @@ function clearDashboardAssetNotice() {
 function setDashboardAssetNotice({ moduleName = '', status = 'warning', message = '', hint = null }) {
   const labels = {
     business_overview: '业务概览',
-    clearance_ranking: '滞销清理排名'
+    inventory_backlog: '库存积压'
   }
   dashboardAssetNotice.value = {
     title:
@@ -1416,7 +1282,7 @@ async function refreshDashboardAssetNotice() {
   try {
     const payload = await api.getDashboardAssetsStatus()
     const modules = payload?.report?.modules || {}
-    const blocked = [modules.business_overview, modules.clearance_ranking].filter(
+    const blocked = [modules.business_overview, modules.inventory_backlog].filter(
       (moduleReport) => moduleReport && moduleReport.status && moduleReport.status !== 'ready'
     )
     if (!blocked.length) {
@@ -1442,8 +1308,7 @@ const useGlobalDate = ref({
   trafficRanking: true,
   inventory: true,
   operational: true,
-  kpi: true, // 仅当全局为月时同步
-  clearance: true // 月/周分别对齐
+  kpi: true // 仅当全局为月时同步
 })
 const _syncingFromGlobal = ref(false)
 const _globalAutoRefreshReady = ref(false)
@@ -1607,11 +1472,6 @@ function applyGlobalToModules() {
       kpiMonth.value = dateStr
     }
   }
-  // 清理排名只采用月度正式口径。
-  if (useGlobalDate.value.clearance && gr === 'monthly' && dateStr) {
-      const [y, m] = dateStr.split('-').map(Number)
-      clearanceMonth.value = `${y}-${String(m).padStart(2, '0')}`
-  }
 
   nextTick(() => {
     _syncingFromGlobal.value = false
@@ -1640,9 +1500,6 @@ function loadModulesAfterGlobalChange() {
     if (useGlobalDate.value.shopRacing) tasks.push(loadShopRacingData())
     if (useGlobalDate.value.trafficRanking) tasks.push(loadTrafficRanking())
     if (useGlobalDate.value.inventory) tasks.push(loadInventoryBacklog())
-    if (useGlobalDate.value.clearance && globalGranularity.value === 'monthly') {
-      tasks.push(loadMonthlyClearanceRanking())
-    }
     if (tasks.length) Promise.all(tasks).catch(() => {})
   }, 250)
 }
@@ -1666,9 +1523,6 @@ async function refreshFollowedModules() {
   if (useGlobalDate.value.shopRacing) tasks.push(loadShopRacingData())
   if (useGlobalDate.value.trafficRanking) tasks.push(loadTrafficRanking())
   if (useGlobalDate.value.inventory) tasks.push(loadInventoryBacklog())
-  if (useGlobalDate.value.clearance && globalGranularity.value === 'monthly') {
-    tasks.push(loadMonthlyClearanceRanking())
-  }
   if (tasks.length) {
     await Promise.allSettled(tasks)
   }
@@ -1681,8 +1535,7 @@ async function onGlobalGranularityChange() {
     trafficRanking: true,
     inventory: true,
     operational: true,
-    kpi: true,
-    clearance: true
+    kpi: true
   }
   const today = new Date()
   const y = today.getFullYear()
@@ -1710,8 +1563,7 @@ async function onGlobalDateChange() {
     trafficRanking: true,
     inventory: true,
     operational: true,
-    kpi: true,
-    clearance: true
+    kpi: true
   }
   await refreshFollowedModules()
 }
@@ -1724,9 +1576,6 @@ function syncModuleToGlobal(module) {
   else if (module === 'trafficRanking') loadTrafficRanking()
   else if (module === 'operational') loadOperationalMetrics()
   else if (module === 'kpi') loadKPIData()
-  else if (module === 'clearance' && globalGranularity.value === 'monthly') {
-    loadMonthlyClearanceRanking()
-  }
 }
 
 // KPI 筛选参数（默认与全局一致：当前月 YYYY-MM-01）
@@ -2377,20 +2226,6 @@ const onTrafficRankingGranularityChange = () => {
 const onTrafficRankingDateChange = () => {
   if (!_syncingFromGlobal.value) useGlobalDate.value.trafficRanking = false
   loadTrafficRanking()
-}
-
-// 滞销清理排名数据（默认与全局一致）
-const loadingClearanceRanking = ref(false)
-const monthlyClearanceRanking = ref([])
-const clearanceMonth = ref(
-  (() => {
-    const t = new Date()
-    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`
-  })()
-)
-const onClearanceMonthChange = () => {
-  if (!_syncingFromGlobal.value) useGlobalDate.value.clearance = false
-  loadMonthlyClearanceRanking()
 }
 
 // 经营指标
@@ -3110,33 +2945,6 @@ const loadInventoryBacklog = async () => {
   }
 }
 
-// 加载月度滞销清理排名。
-const loadMonthlyClearanceRanking = async () => {
-  loadingClearanceRanking.value = true
-  try {
-    const params = {}
-    if (clearanceMonth.value) {
-      params.date = normalizeAnchorDate(clearanceMonth.value, 'monthly')
-    }
-    params.granularity = 'monthly'
-    params.limit = 10
-
-    // 响应拦截器已处理success字段，直接使用data
-    const response = await api.getClearanceRanking(params)
-
-    const rankingRows = normalizeClearanceRankingResponse(response)
-
-    monthlyClearanceRanking.value = rankingRows
-  } catch (error) {
-    console.error('加载滞销清理排名失败:', error)
-    if (!consumeDashboardAssetError(error, 'clearance_ranking')) {
-      handleApiError(error, { showMessage: true, logError: true })
-    }
-  } finally {
-    loadingClearanceRanking.value = false
-  }
-}
-
 // 获取周数辅助函数
 const getWeekNumber = (date) => {
   const d = new Date(
@@ -3236,8 +3044,7 @@ const refreshData = async () => {
     const results = await Promise.allSettled([
       loadShopRacingData(),
       loadTrafficRanking(),
-      loadInventoryBacklog(),
-      loadMonthlyClearanceRanking()
+      loadInventoryBacklog()
     ])
 
     const failedResults = results.filter((result) => result.status === 'rejected')
@@ -3275,8 +3082,7 @@ watch(
       trafficRanking: true,
       inventory: true,
       operational: true,
-      kpi: true,
-      clearance: true
+      kpi: true
     }
     await nextTick()
     refreshData()
@@ -3293,8 +3099,7 @@ watch(
       trafficRanking: true,
       inventory: true,
       operational: true,
-      kpi: true,
-      clearance: true
+      kpi: true
     }
     await nextTick()
     refreshData()

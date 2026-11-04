@@ -251,10 +251,19 @@ async def test_b_cost_views_are_queryable_with_currency_and_detail_columns():
                     """
                 )
             )
+            # 原子层的物化副本（2026-11-04）：B 成本相关视图改读物化视图
+            # → 测试库必须先把 MV 建出来。
+            await session.execute(
+                text(
+                    """
+                    CREATE MATERIALIZED VIEW semantic.fact_orders_atomic_mv
+                    AS SELECT * FROM semantic.fact_orders_atomic
+                    """
+                )
+            )
             await execute_sql_text(session, _read_sql("sql/mart/b_cost_shop_month.sql"))
             await execute_sql_text(session, _read_sql("sql/api_modules/b_cost_analysis_order_detail_module.sql"))
             await session.commit()
-
             mart_rows = (
                 await session.execute(
                     text(

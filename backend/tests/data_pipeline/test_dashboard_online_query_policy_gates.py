@@ -49,13 +49,12 @@ async def test_dashboard_online_query_policy_forbids_raw_sources(monkeypatch):
     monkeypatch.setattr(service, "_fetch_rows_with_statement_timeout", fake_fetch_rows_with_statement_timeout)
     monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
 
-    # Business overview + clearance (homepage/secondary)
+    # Business overview (homepage/secondary)
     await service.get_business_overview_kpi(month="2026-04-01", platform=None)
     await service.get_business_overview_comparison(granularity="monthly", target_date="2026-04-01", platform=None)
     await service.get_business_overview_operational_metrics(month="2026-04-01", platform=None)
     await service.get_business_overview_traffic_ranking(granularity="monthly", target_date="2026-04-01", dimension="pv", platform=None)
     await service.get_business_overview_inventory_backlog(min_days=45, limit=20, granularity="monthly", target_date="2026-04-01")
-    await service.get_clearance_ranking(min_days=45, limit=10, granularity="monthly", target_date="2026-04-01")
 
     # Cost analysis
     await service.get_b_cost_analysis_overview(period_month="2026-04-01", platform=None, shop_id=None)

@@ -16,5 +16,13 @@ test('BusinessOverview requests dashboard-sized stagnant board payloads', () => 
   assert.equal(viewSource.includes('limit: 20,'), true)
   assert.equal(viewSource.includes('granularity: globalGranularity.value'), true)
   assert.equal(viewSource.includes('date: targetDate || undefined'), true)
-  assert.equal(viewSource.includes("params.limit = 10"), true)
+})
+
+test('BusinessOverview no longer ships the retired clearance ranking board', () => {
+  // 2026-11-04：滞销清理排名（月度）模块整体下线，前端不得再有任何残留
+  assert.equal(viewSource.includes('monthlyClearanceRanking'), false)
+  assert.equal(viewSource.includes('loadMonthlyClearanceRanking'), false)
+  assert.equal(viewSource.includes('滞销清理排名'), false)
+  assert.equal(apiSource.includes('getClearanceRanking'), false)
+  assert.equal(apiSource.includes('/dashboard/clearance-ranking'), false)
 })

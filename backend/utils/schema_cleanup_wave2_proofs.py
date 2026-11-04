@@ -72,7 +72,6 @@ def collect_wave2_candidate_proofs() -> dict[str, dict[str, object]]:
                 PROJECT_ROOT / "backend/routers/performance_management.py",
                 PROJECT_ROOT / "backend/routers/sales_campaign.py",
                 PROJECT_ROOT / "backend/routers/target_management.py",
-                PROJECT_ROOT / "backend/services/clearance_ranking_service.py",
                 PROJECT_ROOT / "backend/services/c_class_data_service.py",
                 PROJECT_ROOT / "sql/metabase_questions/business_overview_operational_metrics.sql",
             ],

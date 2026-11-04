@@ -1,5 +1,34 @@
 # Changelog - 西虹 ERP 系统
 
+## [v7.13.0] - 2026-11-04 - 下线滞销清理排名模块 + 重排超时预算 + 放宽数据库内存
+
+### 退役
+
+- **「滞销清理排名（月度）」整模块下线**（业务概览页）。这个模块不是慢，是**设计本身有问题**：它把「店铺级月度排名」和「SKU 级库龄/动销」两套口径揉在一张表里，排名口径依赖订单域全量重算，且语义层对不上店的行会落进 `unknown` 桶 —— 排名里会出现"某个不存在的店铺"。前端区块、API 封装、后端端点、服务方法、SQL 视图、刷新注册、缓存预热、事件监听、部署契约一并移除。
+- 库存域的「SKU 级滞销清单」（`api.sku_clearance_ranking_module`，走 `mart.inventory_state`）是**另一套东西，保持不变**。
+- 同模块的死代码一并清掉：`backend/services/clearance_ranking_service.py`（零活引用）、ORM 模型 `ClearanceRanking` 与死表 `c_class.clearance_rankings`（生产 0 行，唯一写入方就是上面那个 service）、Metabase 遗留 `sql/metabase_questions/clearance_ranking.sql`。**留着那张表等于留着一条"复活已退役模块"的写入路径。**
+- 刷新管线模块键 `clearance_ranking` 更名为 `inventory_backlog`（它真正持有的是库存积压资产组），基表与全部下游仍在同一模块内 —— 「基表与它的全部下游必须同属一个模块」这条不变量没有被破坏。
+- 迁移 `20261104_drop_clearance_ranking_module`：DROP 视图（不带 CASCADE）+ DROP 死表（fail-closed：非空则中止）+ 清理 `ops.dashboard_asset_state` / `ops.data_freshness_log` / `ops.data_lineage_registry` 里的僵尸行，避免新监控把已退役对象报成 missing。
+- 部署期默认视图重建目标从 `api.clearance_ranking_module` 换成 `api.business_overview_inventory_backlog_module`。
+
+### 性能
+
+- **超时预算重排，504 变成可读的 500**：原来 nginx `proxy_read_timeout` = 60s 与后端 DB `statement_timeout` = 60s **完全相等**，DB 报错与 nginx 掐连接同时发生，nginx 永远先断 ⇒ 用户只看到 504 空白页，后端那条可读的"查询超时"永远送不到浏览器。现在是 **DB 60s < 前端 axios 120s < nginx 300s**（nginx 读/写超时 60s → 300s，前端 dashboard 超时 70s → 120s），DB 先失败、后端如实返回 500、nginx 如实转发。
+- **原子层物化：业务概览与 B 成本页的 20 秒级慢查询根治**。根因是 `mart.shop_day_kpi` 读的 `semantic.fact_orders_atomic` 是**普通视图**，每次请求都要 9 张订单表全量 UNION + `ROW_NUMBER()` 去重 + 逐行 LATERAL 身份解析，且 PostgreSQL **无法把 `metric_date` 过滤下推到窗口函数之下**（EXPLAIN 实测：9 张表全部 Seq Scan，单日聚合约 20.2 秒）。
+  - 新增两个物化视图 `semantic.fact_orders_atomic_mv` / `semantic.fact_analytics_atomic_mv`，正文就是对应普通视图的正文（`SELECT * FROM <普通视图>`）⇒ **口径零变化**：同一份定义、同一套去重、同一套身份解析、同一批行，物化只改变「什么时候算」。
+  - **为什么不是"按粒度换源重建 MV"**：生产测绘显示订单事实共 38,607 行 = 月 36,624（GMV 93.79%）+ 周 1,506（3.86%）+ 日 477（2.35%），且去重窗口在生产上一次都没合并过（38,607 组 = 38,607 行）。纯月表源会少算 1,983 行订单（GMV 6.2%）⇒ B 成本金额漂移 ⇒ 换源方案已否决。
+  - **为什么不用 `DROP MATERIALIZED VIEW ... CASCADE`**：CASCADE 会连带删掉 `mart.hr_shop_monthly_profit`、`mart.inventory_backlog_base_mv`（不是 registry 可重建目标）与 B 成本链（不在 bootstrap 计划里）⇒ 删了没人重建。改用「存在则 REFRESH（原地刷新）/ 不存在则 CREATE」：不删任何下游，也没有「视图短暂消失」的窗口；且 MV 正文引用的是普通视图，普通视图更新后 MV 刷新即跟进，不会漂移。
+  - 6 个慢消费方改读物化视图：`mart.shop_day_kpi` / `shop_week_kpi` / `platform_day_kpi` / `platform_week_kpi` / `b_cost_shop_month` / `api.b_cost_analysis_order_detail_module`。
+  - 迁移 `20261105_create_atomic_materialized_views`：建两个 MV + 4 个索引，并用 `sql/` 资产文件重建 6 个消费方视图（视图定义的 SSOT 仍是资产文件，迁移不抄第二份）。
+  - 顺带修正 `api.business_overview_operational_metrics_module` 的依赖表：它的 SQL 资产里有一处 `LEFT JOIN mart.shop_day_kpi`，但依赖表里没写 → 可能拿到旧日粒度数据。
+- 数据库容器内存上限 2G → 4G：线上实测上限只有 1.5GiB，而 `shared_buffers=512MB` + `work_mem=32MB×4` 并行 worker 在重分析查询时瞬时占用很高，历史上有过 OOMKilled（内核杀 PG → 连接重置 → nginx 记 502）。
+
+### 验证
+
+- 后端大范围回归（`backend/tests/data_pipeline` + 刷新队列 + `tests/`）与 HEAD 基线做**失败集 diff**：0 个新增失败；8 个清仓排名相关用例随模块下线一并移除。
+- 前端哑测试门禁：静态路径检查 0 问题、运行时"没跑起来"0 问题，普通断言失败 8 个（与基线一致）。
+- 生产只读实测：清仓排名 504 已从 nginx 错误日志消失；`store-analysis/shops` 现为 404（v7.12.9 已退役，非本次范围）。
+
 ## [v7.12.9] - 2026-11-04 - 退役 5 个失效模块 + 监控存在性校验 + 依赖单一真相源
 
 ### 退役

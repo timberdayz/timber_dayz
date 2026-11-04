@@ -677,44 +677,6 @@ async def test_inventory_backlog_rows_keep_missing_30d_sales_as_none(monkeypatch
     assert rows[0]["sold_units_30d"] is None
 
 
-@pytest.mark.asyncio
-async def test_postgresql_dashboard_service_inventory_backlog_filters_by_requested_period(
-    monkeypatch,
-):
-    service = PostgresqlDashboardService()
-    captured = {}
-
-    async def fake_summary(period_start=None, period_end=None):
-        captured["summary_period_start"] = period_start
-        captured["summary_period_end"] = period_end
-        return {"total_value": 1000}
-
-    async def fake_ranked_rows(
-        *, source_table, min_days, limit, period_start=None, period_end=None
-    ):
-        captured["rows_period_start"] = period_start
-        captured["rows_period_end"] = period_end
-        return [{"rank": 1}]
-
-    monkeypatch.setattr(service, "_load_inventory_backlog_summary", fake_summary)
-    monkeypatch.setattr(
-        service, "_load_ranked_inventory_backlog_module_rows", fake_ranked_rows
-    )
-
-    result = await service.get_business_overview_inventory_backlog(
-        min_days=30,
-        limit=20,
-        granularity="weekly",
-        target_date="2026-04-15",
-    )
-
-    assert result["top_products"] == [{"rank": 1}]
-    assert str(captured["summary_period_start"]) == "2026-04-13"
-    assert str(captured["summary_period_end"]) == "2026-04-19"
-    assert str(captured["rows_period_start"]) == "2026-04-13"
-    assert str(captured["rows_period_end"]) == "2026-04-19"
-
-
 def test_get_postgresql_dashboard_service_returns_singleton():
     service_a = get_postgresql_dashboard_service()
     service_b = get_postgresql_dashboard_service()
@@ -2099,89 +2061,6 @@ async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_mod
     assert result["top_products"][1]["restock_tier"] == "active"
 
 
-@pytest.mark.asyncio
-async def test_postgresql_dashboard_service_clearance_ranking_reads_from_api_module(
-    monkeypatch,
-):
-    service = PostgresqlDashboardService()
-    captured: list[tuple[str, dict[str, object]]] = []
-
-    async def fake_fetch_rows(query, params):
-        captured.append((query, params))
-        if "FROM api.clearance_ranking_module" in query:
-            return [
-                {
-                    "snapshot_date": "2026-04-14",
-                    "platform_code": "shopee",
-                    "shop_id": "shop-a",
-                    "product_id": "P2",
-                    "product_name": "Beta",
-                    "platform_sku": "SKU-2",
-                    "product_sku": "PSKU-2",
-                    "available_stock": 10,
-                    "inventory_value": 100,
-                    "estimated_turnover_days": 100,
-                    "daily_avg_sales": 0,
-                    "estimated_stagnant_days": 14,
-                    "stagnant_snapshot_count": 3,
-                    "risk_level": "high",
-                    "clearance_priority_score": 1100,
-                }
-            ]
-        raise AssertionError(f"unexpected query: {query}")
-
-    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
-
-    result = await service.get_clearance_ranking(min_days=45, limit=10)
-
-    assert len(result) == 1
-    query, params = captured[0]
-    assert "FROM api.clearance_ranking_module" in query
-    assert "FROM mart.inventory_snapshot_latest" not in query
-    assert "raw_data->>" not in query
-    assert "REGEXP_REPLACE" not in query
-    assert "FROM b_class." not in query
-    assert "ORDER BY clearance_priority_score DESC" in query
-    assert "LIMIT :limit" in query
-    assert params == {
-        "min_days": 45,
-        "limit": 10,
-        "period_start": None,
-        "period_end": None,
-    }
-    assert result[0]["rank"] == 1
-    assert result[0]["risk_level"] == "high"
-
-
-@pytest.mark.asyncio
-async def test_postgresql_dashboard_service_clearance_ranking_filters_by_requested_period(
-    monkeypatch,
-):
-    service = PostgresqlDashboardService()
-    captured: list[tuple[str, dict[str, object]]] = []
-
-    async def fake_fetch_rows(query, params):
-        captured.append((query, params))
-        return []
-
-    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
-
-    await service.get_clearance_ranking(
-        min_days=45,
-        limit=10,
-        granularity="monthly",
-        target_date="2026-04-15",
-    )
-
-    query, params = captured[0]
-    assert "snapshot_date >= :period_start" in query
-    assert "snapshot_date <= :period_end" in query
-    assert params["min_days"] == 45
-    assert params["limit"] == 10
-    assert str(params["period_start"]) == "2026-04-01"
-    assert str(params["period_end"]) == "2026-04-30"
-
-
 @pytest.mark.pg_only
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_comparison_loads_total_month_target_when_rows_have_none(
@@ -3134,6 +3013,24 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     """
                 )
             )
+            # 原子层的物化副本（2026-11-04）：日/周粒度 KPI 与 B 成本页
+            # 改读物化视图 → 测试库必须先把这两个 MV 建出来。
+            await session.execute(
+                text(
+                    """
+                    CREATE MATERIALIZED VIEW semantic.fact_orders_atomic_mv
+                    AS SELECT * FROM semantic.fact_orders_atomic
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE MATERIALIZED VIEW semantic.fact_analytics_atomic_mv
+                    AS SELECT * FROM semantic.fact_analytics_atomic
+                    """
+                )
+            )
             await session.execute(
                 text(
                     """
@@ -3777,7 +3674,6 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypat
                 "mart.inventory_backlog_base",
                 "api.business_overview_inventory_backlog_module",
                 "api.inventory_backlog_summary_module",
-                "api.clearance_ranking_module",
             ):
                 await execute_sql_target(session, target)
             await session.commit()
@@ -3808,7 +3704,6 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypat
         )
         service = PostgresqlDashboardService()
         backlog = await service.get_business_overview_inventory_backlog(min_days=30)
-        clearance = await service.get_clearance_ranking(min_days=30, limit=10)
 
         assert "summary" in backlog
         assert "top_products" in backlog
@@ -3817,7 +3712,5 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypat
         assert backlog["top_products"][0]["rank"] == 1
         assert "restock_tier" in backlog["top_products"][0]
         assert backlog["top_products"][0]["days_since_restock"] >= 90
-        assert len(clearance) == 1
-        assert clearance[0]["platform_code"] == "shopee"
 
         await engine.dispose()

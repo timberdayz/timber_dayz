@@ -190,6 +190,120 @@ carry live logic (fiscal periods are still written by
 `profit_basis_service.ensure_fiscal_period_exists()`, and the fiscal calendar table
 is referenced by 5 other business tables).
 
+## Module Retirement (v7.13.0)
+
+v7.13.0 retires the **business-overview 「滞销清理排名（月度）」board** — a section
+inside the business overview page, not a route.
+
+| retired thing | where | why |
+| --- | --- | --- |
+| 滞销清理排名（月度） board | `frontend/src/domains/business/views/BusinessOverview.vue` | shop-level monthly ranking vs SKU-level ageing are two different calibers mixed into one board; the ranking reads the order domain and re-derives identities every request |
+| `GET /api/dashboard/clearance-ranking` | `backend/domains/business/routers/dashboard_api_postgresql.py` | endpoint of the retired board |
+| `PostgresqlDashboardService.get_clearance_ranking` | `backend/services/postgresql_dashboard_service.py` | service of the retired board |
+| `api.clearance_ranking_module` | `sql/api_modules/clearance_ranking_module.sql` | the view behind it |
+| `dashboard_clearance_ranking` cache key | `backend/services/cache_service.py` | warmup + invalidation of the retired endpoint |
+
+**Protected — do not delete**: `api.sku_clearance_ranking_module` and
+`backend/services/inventory/sku_clearance_service.py`. The SKU-level clearance
+list (库存 → 滞销清单) is a **different** module: it reads `mart.inventory_state`
+(distance since last restock), not the order domain, and it stays.
+
+Also removed in v7.13.0 (the dead write path of the retired board):
+
+- `backend/services/clearance_ranking_service.py` — zero live references.
+- ORM model `ClearanceRanking` and table `c_class.clearance_rankings` — the
+  table's only writer was that service, and it had 0 rows in production.
+  Leaving the table would leave a **write path that can resurrect a retired
+  module**, so it goes with the model (schema SSOT + baseline + migration).
+- `sql/metabase_questions/clearance_ranking.sql` — Metabase-era leftover.
+
+Retirement pattern for a **pipeline module** (extends the v7.12.9 pattern):
+
+- The pipeline module key in `DASHBOARD_MODULE_TARGETS` was `clearance_ranking`
+  but it actually owned the **inventory-backlog asset group**
+  (`mart.inventory_backlog_base` + its downstream api views). It was renamed to
+  `inventory_backlog` rather than deleted, because the invariant
+  *「基表与它的全部下游必须放在同一个模块里」* must hold: dropping the module
+  would have left `mart.inventory_backlog_base` with no owner and the business
+  overview 库存积压 cards would never be rebuilt after a collection.
+- The frontend still checks **two** modules for `blocked`
+  (`business_overview` + `inventory_backlog`) — same protection as before.
+- A migration must clean the **monitoring** rows, not just the view:
+  `ops.dashboard_asset_state` (module row), `ops.data_freshness_log`
+  (zombie freshness — v7.12.9's monitoring reports a registered target whose
+  object no longer exists as `status=missing`) and `ops.data_lineage_registry`
+  (zombie lineage edges).
+- `sql/api_modules/<name>.sql` must also be removed from
+  `backend/services/data_pipeline/refresh_registry.py`
+  (`PIPELINE_DEPENDENCIES` + `SQL_TARGET_PATHS`),
+  `backend/services/data_pipeline/dashboard_bootstrap.py` (asset group),
+  `backend/services/event_listeners.py` (refresh targets) and
+  `backend/tasks/refresh_queue_tasks.py` (cache invalidation).
+- The **deploy-time default view rebuild target** lives in
+  `scripts/deploy_remote_production.sh` (`DEPLOY_REBUILD_VIEW_TARGETS`) and is
+  **asserted as a literal** by `scripts/verify_remote_deploy_contracts.py` —
+  retiring a view means changing both.
+
+## Materialized View for a Slow Semantic Layer (v7.13.0)
+
+The business overview and B-cost pages were 504-ing because
+`semantic.fact_orders_atomic` is a **plain view**: every row runs a shop-alias
+resolution (`LEFT JOIN LATERAL`), and PostgreSQL cannot push a `metric_date`
+filter below the dedup window, so each request re-scans and re-parses all 9
+B-class order tables (~20 s). The fix is to **materialize the atomic layer**.
+
+Pattern to copy when a semantic view is the slow part of a request path:
+
+| step | what | why |
+| --- | --- | --- |
+| 1 | measure the **row/caliber composition** of the source tables in production before designing | it decides whether a *source swap* is even safe (here: 38,607 rows = monthly 36,624 + weekly 1,506 + daily 477, and the dedup window never actually merged anything) |
+| 2 | materialize the **whole** atomic view (`SELECT * FROM <plain view>`), not a per-granularity rebuild | the MV body is the plain view body ⇒ **zero caliber change**; a source swap changes the row set and drifts money |
+| 3 | refresh with **「exists → REFRESH in place / not exists → CREATE」**, never `DROP ... CASCADE` | CASCADE deletes downstream objects — including ones that are **not registry-rebuildable** (`mart.hr_shop_monthly_profit`, `mart.inventory_backlog_base_mv`) and ones outside the bootstrap plan (the B-cost chain) ⇒ deleted and never rebuilt |
+| 4 | keep the MV body referencing the plain view | the MV then always follows the plain view's latest definition (`CREATE OR REPLACE VIEW`) ⇒ no "file changed but MV is stale" drift |
+| 5 | register the MV in `refresh_registry.PIPELINE_DEPENDENCIES` + `SQL_TARGET_PATHS`, and in `dashboard_bootstrap`'s `refresh_targets` | refresh order is enforced by the dependency graph; the MV must be rebuilt before its consumers |
+| 6 | migration creates the MV + indexes and rebuilds the consumers **from the `sql/` assets** | the asset files stay the SSOT for view definitions; copying them into the migration creates a second copy that drifts |
+
+Guards live in `backend/tests/data_pipeline/test_atomic_materialized_views.py`:
+the MV body must be `SELECT * FROM <plain view>`, the MV assets must not contain
+`DROP MATERIALIZED VIEW`, and the two non-rebuildable downstream views must keep
+reading the plain view.
+
+### v7.13.0 post-deploy acceptance (atomic materialization)
+
+The deploy runs migration `20261105_create_atomic_materialized_views`, which
+creates the two materialized views and rebuilds the six consumers from the
+`sql/` assets. **Capture the caliber baseline BEFORE deploying** (read-only),
+then compare after:
+
+```sql
+-- baseline: B-cost per-month totals (before/after must be byte-identical)
+WITH monthly_base AS (
+    SELECT date_trunc('month', metric_date)::date AS period_month,
+           platform_code, shop_id, currency_code,
+           SUM(paid_amount) AS gmv, SUM(purchase_amount) AS purchase_amount,
+           SUM(warehouse_operation_fee) AS wh_fee,
+           SUM(platform_total_cost_itemized) AS platform_itemized
+    FROM semantic.fact_orders_atomic
+    GROUP BY 1, 2, 3, 4
+)
+SELECT period_month, count(*), round(sum(gmv), 2), round(sum(purchase_amount), 2),
+       round(sum(wh_fee), 2), round(sum(platform_itemized), 2)
+FROM monthly_base GROUP BY period_month ORDER BY period_month;
+```
+
+Also compare `mart.shop_day_kpi` / `mart.shop_week_kpi` /
+`mart.platform_day_kpi` / `mart.platform_week_kpi` row-by-row.
+
+Acceptance:
+
+- B-cost per-month totals: **identical** (not "close"). A difference means the
+  MV is not the same row set as the plain view — stop and roll back.
+- `operational-metrics` and `bootstrap` P95 < 3s (was ~23s).
+- B-cost endpoints P95 < 5s (were 20s+).
+- `mart.hr_shop_monthly_profit` and `mart.inventory_backlog_base_mv` still
+  exist and still query — they read the plain view on purpose.
+- nginx error log: **0 new 5xx** over 24h.
+
 ## Monitoring Existence Check (v7.12.9)
 
 `GET /api/data-pipeline/freshness` used to report only what happened **at the time

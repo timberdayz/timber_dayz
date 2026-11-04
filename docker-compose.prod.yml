@@ -47,7 +47,12 @@ services:
       resources:
         limits:
           cpus: "2"
-          memory: 2G
+          # 2026-11-04：1.5~2G 上限曾把 PG OOMKill 过（实测线上容器上限 1.5GiB、
+          # 存量 shared_buffers=512MB + work_mem=32MB×4 并行 worker）。
+          # 业务概览的重分析查询（大窗口 GROUP BY + 排序）瞬时占用很高，
+          # 内存不够时 PG 被内核杀掉 → 连接被重置 → nginx 记 502。
+          # 放宽到 4G 给重查询留余量；数据在 volume 里，重建容器不丢数据。
+          memory: 4G
         reservations:
           cpus: "1"
           memory: 1G

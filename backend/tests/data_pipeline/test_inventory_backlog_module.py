@@ -165,23 +165,3 @@ def test_inventory_backlog_summary_module_sql_asset():
             "unknown_restock_row_count",
         ),
     )
-
-
-def test_clearance_ranking_module_sql_asset():
-    _assert_sql_asset(
-        "sql/api_modules/clearance_ranking_module.sql",
-        "CREATE OR REPLACE VIEW api.clearance_ranking_module AS",
-        (
-            "mart.inventory_backlog_base",
-            "estimated_turnover_days",
-            "daily_avg_sales",
-            "stagnant_snapshot_count",
-            "estimated_stagnant_days",
-            "risk_level",
-            "clearance_priority_score",
-            "inventory_value",
-            "platform_code",
-            "shop_id",
-            "platform_sku",
-        ),
-    )

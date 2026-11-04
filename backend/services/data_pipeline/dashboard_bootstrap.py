@@ -16,20 +16,19 @@ from backend.services.data_pipeline.refresh_runner import execute_refresh_plan, 
 
 # ── 积压资产组 ──────────────────────────────────────────────────────────
 # ⚠️ `mart.inventory_backlog_base` 删列 → 必须 DROP 重建 → DROP 会**连带删掉**
-#    它的四个下游 api 视图。bootstrap / 采集后刷新 / 安全网自愈 **三条路径**
+#    它的下游 api 视图。bootstrap / 采集后刷新 / 安全网自愈 **三条路径**
 #    都会重建基表，而每条路径只重建「自己计划里列出来的」目标 →
 #    少列一个下游就少重建一个（表现为「跑完了，但某个视图 missing」）。
 #
 #    → 正解：**基表与它的全部下游必须放在同一个模块里**，且该模块列全下游。
-#      business_overview 不再持有积压视图 → 它的运行不会碰基表；
-#      clearance_ranking = 积压资产组 → 重建基表时四个下游一起重建回来。
+#      business_overview 不持有积压视图 → 它的运行不会碰基表；
+#      inventory_backlog = 积压资产组 → 重建基表时下游一起重建回来。
 #
 # 前端 `blocked` 同时检查两个模块 → 业务概览的「库存积压」面板照样受保护。
 _INVENTORY_BACKLOG_ASSET_GROUP = [
     "mart.inventory_backlog_base",
     "api.business_overview_inventory_backlog_module",
     "api.inventory_backlog_summary_module",
-    "api.clearance_ranking_module",
     # SKU 级滞销清单（判据来自状态层）—— 缺了它，新环境/部署就没有这个视图
     "api.sku_clearance_ranking_module",
 ]
@@ -46,11 +45,17 @@ DASHBOARD_MODULE_TARGETS: dict[str, dict[str, list[str]]] = {
             "api.business_overview_operational_metrics_module",
         ],
         "refresh_targets": [
+            # 月度链（既有）
             "semantic.fact_orders_monthly_atomic_mv",
             "semantic.fact_analytics_monthly_atomic_mv",
+            # 原子层物化副本（2026-11-04）：把「每行跑一次店铺别名解析」
+            # 从请求路径搬到刷新路径。口径零变化（正文 = 普通视图正文）。
+            # 日/周粒度 KPI 与 B 成本页读的都是这一层。
+            "semantic.fact_orders_atomic_mv",
+            "semantic.fact_analytics_atomic_mv",
         ],
     },
-    "clearance_ranking": {
+    "inventory_backlog": {
         "core_targets": list(_INVENTORY_BACKLOG_ASSET_GROUP),
         "refresh_targets": [],
     },

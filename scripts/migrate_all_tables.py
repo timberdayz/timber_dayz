@@ -95,7 +95,6 @@ C_CLASS_TABLES = [
     "performance_scores",  # 旧表，c_class已有performance_scores_c
     "performance_scores_c",  # c_class已有，可能是重复
     "shop_health_scores",
-    "clearance_rankings",
 ]
 
 # finance Schema - 财务域表

@@ -51,7 +51,6 @@ _BUSINESS_OVERVIEW_LEGACY_QUERY_KEYS = {
 }
 
 _DASHBOARD_MODULE_ROUTE_PREFIXES = {
-    "clearance_ranking": ("/api/dashboard/clearance-ranking",),
     "business_overview": (
         "/api/dashboard/business-overview/",
         "/api/dashboard/b-cost-analysis/",
@@ -1102,42 +1101,3 @@ async def get_b_cost_analysis_order_detail_postgresql(
     except Exception as e:
         logger.error(f"PostgreSQL b cost analysis order detail query failed: {e}", exc_info=True)
         return error_response(ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500)
-
-
-@router.get("/clearance-ranking")
-async def get_clearance_ranking_postgresql(
-    request: Request,
-    limit: int = Query(100, description="row limit"),
-    granularity: Optional[str] = Query(None, description="daily/weekly/monthly"),
-    date: Optional[str] = Query(None, description="anchor date"),
-    month: Optional[str] = Query(None, description="legacy month alias"),
-):
-    try:
-        await _require_dashboard_assets_ready(request)
-        target_date = date or month
-        params = {"limit": limit, "granularity": granularity, "date": target_date}
-        cache_params = _normalize_cache_params(params)
-
-        async def _produce_payload():
-            service = get_postgresql_dashboard_service()
-            result = await service.get_clearance_ranking(
-                limit=limit,
-                granularity=granularity,
-                target_date=target_date,
-            )
-            return json.loads(success_response(data=result).body.decode())
-
-        payload, cache_status = await _resolve_cached_payload(
-            request,
-            "dashboard_clearance_ranking",
-            cache_params,
-            _produce_payload,
-        )
-        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
-    except HTTPException:
-        raise
-    except ValueError as e:
-        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
-    except Exception as e:
-        logger.error(f"PostgreSQL clearance ranking query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)

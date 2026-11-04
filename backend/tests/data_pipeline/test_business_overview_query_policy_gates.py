@@ -49,7 +49,6 @@ async def test_business_overview_online_query_policy_forbids_raw_json_parsing(mo
     await service.get_business_overview_comparison(granularity="monthly", target_date="2026-04-01", platform=None)
     await service.get_business_overview_operational_metrics(month="2026-04-01", platform=None)
     await service.get_business_overview_traffic_ranking(granularity="monthly", target_date="2026-04-01", dimension="pv", platform=None)
-    await service.get_clearance_ranking(min_days=45, limit=10, granularity="monthly", target_date="2026-04-01")
 
     forbidden = ("raw_data->>", "REGEXP_REPLACE", "FROM b_class.", "FROM semantic.fact_orders_atomic")
     for query in captured:
@@ -58,4 +57,3 @@ async def test_business_overview_online_query_policy_forbids_raw_json_parsing(mo
 
     assert any("FROM api.business_overview_kpi_module" in query for query in captured)
     assert any("FROM api.business_overview_traffic_ranking_module" in query for query in captured)
-    assert any("FROM api.clearance_ranking_module" in query for query in captured)
