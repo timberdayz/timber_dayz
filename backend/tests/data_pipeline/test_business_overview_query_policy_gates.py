@@ -38,7 +38,7 @@ async def test_business_overview_online_query_policy_forbids_raw_json_parsing(
     async def fake_load_target_summary(*_args, **_kwargs):
         return {"target_amount": 0.0, "target_quantity": 0.0}
 
-    async def fake_load_operating_expenses_summary(_period_month):
+    async def fake_load_operating_expenses_summary(*_args, **_kwargs):
         return None
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)

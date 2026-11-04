@@ -633,8 +633,18 @@ def test_postgresql_traffic_ranking_route_returns_service_payload(monkeypatch):
         ):
             return [{"name": "shop-a", "visitor_count": 100, "rank": 1}]
 
+        async def get_business_overview_identity_health(
+            self, granularity, target_date, platform
+        ):
+            # 路由在拿到 payload 后还会取一次身份健康度，塞进 meta
+            return {"status": "ok", "unmatched_rows": 0}
+
     monkeypatch.setattr(
         "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+    monkeypatch.setattr(
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _ServiceStub(),
     )
 
