@@ -59,6 +59,11 @@ def run(
             env={**os.environ, **env} if isinstance(env, dict) else env,
             capture_output=True,
             text=True,
+            # 子进程输出是 UTF-8（迁移日志里有中文）。Windows 上 ``text=True``
+            # 默认按 GBK 解码，会抛 UnicodeDecodeError 并**把真正的迁移错误吞掉**
+            # —— 迁移失败时只看到一段乱码，什么原因都看不到。
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
         out = (r.stdout or "") + (r.stderr or "")

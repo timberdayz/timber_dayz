@@ -556,7 +556,7 @@ alias_resolved AS (
             SELECT
                 count(DISTINCT c.resolved_shop_id)::int AS candidate_count,
                 array_agg(DISTINCT c.resolved_shop_id ORDER BY c.resolved_shop_id) AS candidate_shop_ids
-            FROM semantic.shop_identity_resolution_candidates c
+            FROM semantic.shop_identity_resolution_candidates_v2_mv c
             WHERE c.platform_code = lower(COALESCE(d.platform_code, ''))
               AND c.identity_value_normalized = ANY (d.normalized_identity_candidates)
               -- 区域感知匹配：层 1 = 区域精确匹配；层 2 = 完整候选集（层 1 为空时的兜底）。
@@ -569,7 +569,7 @@ alias_resolved AS (
                     )
                     OR NOT EXISTS (
                         SELECT 1
-                        FROM semantic.shop_identity_resolution_candidates c_exact
+                        FROM semantic.shop_identity_resolution_candidates_v2_mv c_exact
                         WHERE c_exact.platform_code = lower(COALESCE(d.platform_code, ''))
                           AND c_exact.identity_value_normalized = ANY (d.normalized_identity_candidates)
                           AND c_exact.identity_shop_region IS NOT NULL
@@ -586,7 +586,7 @@ alias_resolved AS (
                    c.resolution_method,
                    c.resolution_priority,
                    c.identity_source_value
-            FROM semantic.shop_identity_resolution_candidates c
+            FROM semantic.shop_identity_resolution_candidates_v2_mv c
             WHERE c.platform_code = lower(COALESCE(d.platform_code, ''))
               AND c.identity_value_normalized = ANY (d.normalized_identity_candidates)
               -- 与 ① 计数子查询**同一段**区域过滤，否则计数与归属会不一致
@@ -598,7 +598,7 @@ alias_resolved AS (
                     )
                     OR NOT EXISTS (
                         SELECT 1
-                        FROM semantic.shop_identity_resolution_candidates c_exact
+                        FROM semantic.shop_identity_resolution_candidates_v2_mv c_exact
                         WHERE c_exact.platform_code = lower(COALESCE(d.platform_code, ''))
                           AND c_exact.identity_value_normalized = ANY (d.normalized_identity_candidates)
                           AND c_exact.identity_shop_region IS NOT NULL

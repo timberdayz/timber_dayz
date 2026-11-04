@@ -11,12 +11,11 @@ from modules.core.data_domains import (
 
 PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.alias_registry": [],
-    # 身份解析候选集的**正本**是物化副本（136 行，毫秒级刷新）。
-    # 转发视图 `semantic.shop_identity_resolution_candidates` 依赖它 ——
-    # 顺序反了就循环依赖。
-    "semantic.shop_identity_resolution_candidates_v2_mv": [],
-    "semantic.shop_identity_resolution_candidates": [
-        "semantic.shop_identity_resolution_candidates_v2_mv"
+    # 身份解析候选集的**正本**仍是普通视图（从 core 表现算）；物化副本是它的
+    # 快照，原子层两个普通视图改读物化副本。顺序不能反，否则建 MV 时正本还不存在。
+    "semantic.shop_identity_resolution_candidates": [],
+    "semantic.shop_identity_resolution_candidates_v2_mv": [
+        "semantic.shop_identity_resolution_candidates"
     ],
     "semantic.fact_orders_monthly_atomic_mv": [
         "semantic.shop_identity_resolution_candidates"
@@ -24,8 +23,13 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.fact_analytics_monthly_atomic_mv": [
         "semantic.shop_identity_resolution_candidates"
     ],
-    "semantic.fact_orders_atomic": ["semantic.shop_identity_resolution_candidates"],
-    "semantic.fact_analytics_atomic": ["semantic.shop_identity_resolution_candidates"],
+    # 原子层的两个**普通视图**改读物化副本（口径等价：副本正文 = 正本正文）
+    "semantic.fact_orders_atomic": [
+        "semantic.shop_identity_resolution_candidates_v2_mv"
+    ],
+    "semantic.fact_analytics_atomic": [
+        "semantic.shop_identity_resolution_candidates_v2_mv"
+    ],
     # 原子层的物化副本：正文与普通视图完全一致（SELECT *），只把「每行跑一次
     # 店铺别名解析」从请求路径搬到刷新路径。口径零变化。
     "semantic.fact_orders_atomic_mv": ["semantic.fact_orders_atomic"],
@@ -176,6 +180,27 @@ SQL_TARGET_PATHS: dict[str, str] = {
     "api.b_cost_analysis_shop_month_module": "sql/api_modules/b_cost_analysis_shop_month_module.sql",
     "api.b_cost_analysis_order_detail_module": "sql/api_modules/b_cost_analysis_order_detail_module.sql",
     "api.sku_clearance_ranking_module": "sql/api_modules/sku_clearance_ranking_module.sql",
+}
+
+#: 建对象**前置**：目标资产在执行前必须先就位的对象。
+#:
+#: 与 ``PIPELINE_DEPENDENCIES`` 的区别：
+#: - ``PIPELINE_DEPENDENCIES`` 是「刷新顺序」（谁先刷）；
+#: - 这里是「**建对象**的前置」—— 目标资产的正文**引用**了这些对象，
+#:   它们不存在时建视图会直接报 ``relation does not exist``。
+#:
+#: 例：``semantic.fact_orders_atomic`` 的正文引用候选集物化副本
+#: ``semantic.shop_identity_resolution_candidates_v2_mv``（把「每行订单事实
+#: 重算 136 行候选集」的 N+1 干掉），副本不存在 ⇒ 建视图失败。
+#:
+#: 前置对象已存在时会被跳过/刷新，代价可忽略（副本只有 136 行，刷新毫秒级）。
+ASSET_PREREQUISITES: dict[str, list[str]] = {
+    "semantic.fact_orders_atomic": [
+        "semantic.shop_identity_resolution_candidates_v2_mv"
+    ],
+    "semantic.fact_analytics_atomic": [
+        "semantic.shop_identity_resolution_candidates_v2_mv"
+    ],
 }
 
 

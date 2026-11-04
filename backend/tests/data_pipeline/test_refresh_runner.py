@@ -85,18 +85,64 @@ def test_refresh_registry_exposes_dependency_order():
         topologically_sort_targets,
     )
 
-    assert PIPELINE_DEPENDENCIES["semantic.fact_orders_atomic"] == ["semantic.shop_identity_resolution_candidates"]
-    assert SQL_TARGET_PATHS["semantic.fact_orders_atomic"] == "sql/semantic/orders_atomic.sql"
-    assert PIPELINE_DEPENDENCIES["semantic.fact_orders_monthly_atomic_mv"] == ["semantic.shop_identity_resolution_candidates"]
-    assert SQL_TARGET_PATHS["semantic.fact_orders_monthly_atomic_mv"] == "sql/semantic/orders_monthly_atomic_mv.sql"
-    assert PIPELINE_DEPENDENCIES["semantic.fact_analytics_monthly_atomic_mv"] == ["semantic.shop_identity_resolution_candidates"]
-    assert SQL_TARGET_PATHS["semantic.fact_analytics_monthly_atomic_mv"] == "sql/semantic/analytics_monthly_atomic_mv.sql"
-    assert PIPELINE_DEPENDENCIES["semantic.fact_orders_monthly_atomic"] == ["semantic.fact_orders_monthly_atomic_mv"]
-    assert PIPELINE_DEPENDENCIES["semantic.fact_analytics_monthly_atomic"] == ["semantic.fact_analytics_monthly_atomic_mv"]
-    assert SQL_TARGET_PATHS["semantic.fact_orders_monthly_atomic"] == "sql/semantic/orders_monthly_atomic.sql"
-    assert PIPELINE_DEPENDENCIES["semantic.fact_products_atomic"] == ["semantic.alias_registry"]
-    assert SQL_TARGET_PATHS["semantic.alias_registry"] == "sql/semantic/semantic_alias_registry.sql"
-    assert SQL_TARGET_PATHS["api.business_overview_kpi_module"] == "sql/api_modules/business_overview_kpi_module.sql"
+    # 原子层的两个普通视图改读物化候选集副本（口径等价：副本正文 = 正本正文）
+    assert PIPELINE_DEPENDENCIES["semantic.fact_orders_atomic"] == [
+        "semantic.shop_identity_resolution_candidates_v2_mv"
+    ]
+    assert PIPELINE_DEPENDENCIES["semantic.fact_analytics_atomic"] == [
+        "semantic.shop_identity_resolution_candidates_v2_mv"
+    ]
+    assert (
+        SQL_TARGET_PATHS["semantic.fact_orders_atomic"]
+        == "sql/semantic/orders_atomic.sql"
+    )
+    assert (
+        SQL_TARGET_PATHS["semantic.fact_analytics_atomic"]
+        == "sql/semantic/analytics_atomic.sql"
+    )
+    # 副本依赖正本（顺序反了就建不出 MV）
+    assert PIPELINE_DEPENDENCIES[
+        "semantic.shop_identity_resolution_candidates_v2_mv"
+    ] == ["semantic.shop_identity_resolution_candidates"]
+    assert (
+        SQL_TARGET_PATHS["semantic.shop_identity_resolution_candidates_v2_mv"]
+        == "sql/semantic/shop_identity_resolution_candidates_v2_mv.sql"
+    )
+    assert PIPELINE_DEPENDENCIES["semantic.fact_orders_monthly_atomic_mv"] == [
+        "semantic.shop_identity_resolution_candidates"
+    ]
+    assert (
+        SQL_TARGET_PATHS["semantic.fact_orders_monthly_atomic_mv"]
+        == "sql/semantic/orders_monthly_atomic_mv.sql"
+    )
+    assert PIPELINE_DEPENDENCIES["semantic.fact_analytics_monthly_atomic_mv"] == [
+        "semantic.shop_identity_resolution_candidates"
+    ]
+    assert (
+        SQL_TARGET_PATHS["semantic.fact_analytics_monthly_atomic_mv"]
+        == "sql/semantic/analytics_monthly_atomic_mv.sql"
+    )
+    assert PIPELINE_DEPENDENCIES["semantic.fact_orders_monthly_atomic"] == [
+        "semantic.fact_orders_monthly_atomic_mv"
+    ]
+    assert PIPELINE_DEPENDENCIES["semantic.fact_analytics_monthly_atomic"] == [
+        "semantic.fact_analytics_monthly_atomic_mv"
+    ]
+    assert (
+        SQL_TARGET_PATHS["semantic.fact_orders_monthly_atomic"]
+        == "sql/semantic/orders_monthly_atomic.sql"
+    )
+    assert PIPELINE_DEPENDENCIES["semantic.fact_products_atomic"] == [
+        "semantic.alias_registry"
+    ]
+    assert (
+        SQL_TARGET_PATHS["semantic.alias_registry"]
+        == "sql/semantic/semantic_alias_registry.sql"
+    )
+    assert (
+        SQL_TARGET_PATHS["api.business_overview_kpi_module"]
+        == "sql/api_modules/business_overview_kpi_module.sql"
+    )
     ordered = topologically_sort_targets(
         [
             "api.business_overview_kpi_module",
@@ -108,15 +154,29 @@ def test_refresh_registry_exposes_dependency_order():
             "semantic.fact_analytics_monthly_atomic",
         ]
     )
-    assert ordered.index("semantic.fact_orders_monthly_atomic_mv") < ordered.index("semantic.fact_orders_monthly_atomic")
-    assert ordered.index("semantic.fact_analytics_monthly_atomic_mv") < ordered.index("semantic.fact_analytics_monthly_atomic")
-    assert ordered.index("semantic.fact_orders_monthly_atomic") < ordered.index("mart.shop_month_kpi")
-    assert ordered.index("semantic.fact_analytics_monthly_atomic") < ordered.index("mart.shop_month_kpi")
-    assert ordered.index("mart.shop_month_kpi") < ordered.index("mart.platform_month_kpi")
-    assert ordered.index("mart.shop_month_kpi") < ordered.index("api.business_overview_kpi_module")
+    assert ordered.index("semantic.fact_orders_monthly_atomic_mv") < ordered.index(
+        "semantic.fact_orders_monthly_atomic"
+    )
+    assert ordered.index("semantic.fact_analytics_monthly_atomic_mv") < ordered.index(
+        "semantic.fact_analytics_monthly_atomic"
+    )
+    assert ordered.index("semantic.fact_orders_monthly_atomic") < ordered.index(
+        "mart.shop_month_kpi"
+    )
+    assert ordered.index("semantic.fact_analytics_monthly_atomic") < ordered.index(
+        "mart.shop_month_kpi"
+    )
+    assert ordered.index("mart.shop_month_kpi") < ordered.index(
+        "mart.platform_month_kpi"
+    )
+    assert ordered.index("mart.shop_month_kpi") < ordered.index(
+        "api.business_overview_kpi_module"
+    )
 
     products_ordered = topologically_sort_targets(["mart.product_day_kpi"])
-    assert products_ordered.index("semantic.alias_registry") < products_ordered.index("semantic.fact_products_atomic")
+    assert products_ordered.index("semantic.alias_registry") < products_ordered.index(
+        "semantic.fact_products_atomic"
+    )
 
 
 def test_refresh_runner_builds_step_plan():
@@ -136,7 +196,9 @@ def test_refresh_runner_builds_step_plan():
 
 
 @pytest.mark.asyncio
-async def test_execute_refresh_plan_returns_structured_partial_failed_result(monkeypatch):
+async def test_execute_refresh_plan_returns_structured_partial_failed_result(
+    monkeypatch,
+):
     from backend.services.data_pipeline import refresh_runner
 
     calls = []
@@ -173,10 +235,14 @@ async def test_execute_refresh_plan_returns_structured_partial_failed_result(mon
         calls.append(("executed", target))
         return "run-x"
 
-    monkeypatch.setattr(refresh_runner, "_ensure_ops_tables", lambda db: _fake_insert_run_log())
+    monkeypatch.setattr(
+        refresh_runner, "_ensure_ops_tables", lambda db: _fake_insert_run_log()
+    )
     monkeypatch.setattr(refresh_runner, "_insert_run_log", _fake_insert_run_log)
     monkeypatch.setattr(refresh_runner, "_update_run_log", _fake_update_run_log)
-    monkeypatch.setattr(refresh_runner, "_insert_skipped_step_log", _fake_insert_skipped_step_log)
+    monkeypatch.setattr(
+        refresh_runner, "_insert_skipped_step_log", _fake_insert_skipped_step_log
+    )
     monkeypatch.setattr(refresh_runner, "execute_sql_target", _fake_execute_sql_target)
 
     result = await refresh_runner.execute_refresh_plan(
@@ -229,7 +295,9 @@ async def test_ensure_ops_tables_runs_bootstrap_only_once_per_process(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_ensure_ops_tables_skips_bootstrap_when_required_tables_exist(monkeypatch):
+async def test_ensure_ops_tables_skips_bootstrap_when_required_tables_exist(
+    monkeypatch,
+):
     from backend.services.data_pipeline import refresh_runner
 
     calls = []
@@ -331,7 +399,9 @@ async def test_execute_sql_target_records_pipeline_metadata(tmp_path):
         original_paths = dict(refresh_registry.SQL_TARGET_PATHS)
         original_dependencies = dict(refresh_registry.PIPELINE_DEPENDENCIES)
         refresh_registry.SQL_TARGET_PATHS[target_name] = str(sql_path)
-        refresh_registry.PIPELINE_DEPENDENCIES[target_name] = ["semantic.fact_orders_atomic"]
+        refresh_registry.PIPELINE_DEPENDENCIES[target_name] = [
+            "semantic.fact_orders_atomic"
+        ]
 
         try:
             async with session_factory() as session:
@@ -399,7 +469,11 @@ async def test_execute_sql_target_records_pipeline_metadata(tmp_path):
                         {"target_name": target_name},
                     )
                 ).fetchone()
-                assert lineage_row == (target_name, "semantic.fact_orders_atomic", "semantic")
+                assert lineage_row == (
+                    target_name,
+                    "semantic.fact_orders_atomic",
+                    "semantic",
+                )
         finally:
             refresh_registry.SQL_TARGET_PATHS.clear()
             refresh_registry.SQL_TARGET_PATHS.update(original_paths)
@@ -555,7 +629,9 @@ async def test_execute_sql_target_retries_and_recovers(monkeypatch, tmp_path):
 
                 run_row = (
                     await session.execute(
-                        text("SELECT status FROM ops.pipeline_run_log WHERE run_id = :run_id"),
+                        text(
+                            "SELECT status FROM ops.pipeline_run_log WHERE run_id = :run_id"
+                        ),
                         {"run_id": run_id},
                     )
                 ).scalar_one()
@@ -581,7 +657,9 @@ async def test_execute_sql_target_retries_and_recovers(monkeypatch, tmp_path):
             refresh_registry.SQL_TARGET_PATHS.update(original_paths)
             refresh_registry.PIPELINE_DEPENDENCIES.clear()
             refresh_registry.PIPELINE_DEPENDENCIES.update(original_dependencies)
-            monkeypatch.setattr(refresh_runner, "execute_sql_file", original_execute_sql_file)
+            monkeypatch.setattr(
+                refresh_runner, "execute_sql_file", original_execute_sql_file
+            )
             await engine.dispose()
 
 
@@ -648,7 +726,9 @@ async def test_execute_refresh_plan_marks_partial_failed_and_skips_downstream(tm
 
                 run_status = (
                     await session.execute(
-                        text("SELECT status FROM ops.pipeline_run_log WHERE run_id = :run_id"),
+                        text(
+                            "SELECT status FROM ops.pipeline_run_log WHERE run_id = :run_id"
+                        ),
                         {"run_id": run_id},
                     )
                 ).scalar_one()

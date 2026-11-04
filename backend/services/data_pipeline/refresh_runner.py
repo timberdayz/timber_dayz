@@ -9,10 +9,14 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.data_pipeline.refresh_registry import (
+    ASSET_PREREQUISITES,
     SQL_TARGET_PATHS,
     topologically_sort_targets,
 )
-from backend.services.data_pipeline.sql_loader import load_sql_text, split_sql_statements
+from backend.services.data_pipeline.sql_loader import (
+    load_sql_text,
+    split_sql_statements,
+)
 from modules.core.logger import get_logger
 
 
@@ -41,7 +45,9 @@ def extract_refresh_status(refresh_result: str | dict[str, Any]) -> str:
 
 def extract_failed_targets(refresh_result: str | dict[str, Any]) -> list[str]:
     if isinstance(refresh_result, dict):
-        return [str(target) for target in (refresh_result.get("failed_targets", []) or [])]
+        return [
+            str(target) for target in (refresh_result.get("failed_targets", []) or [])
+        ]
     return []
 
 
@@ -372,6 +378,7 @@ async def execute_sql_target(
     resolve_dependencies: bool = False,
     recreate_views: bool = False,
 ) -> str:
+    """执行一个刷新目标（及其上游依赖，若显式要求）。"""
     active_run_id = run_id or f"run_{uuid.uuid4().hex}"
     await _ensure_ops_tables(db)
     if run_id is None:
@@ -394,6 +401,20 @@ async def execute_sql_target(
         ordered_targets = build_refresh_plan([target])
     else:
         ordered_targets = [target]
+    # 建对象前置：目标资产的正文引用了别的对象，那些对象必须先在。
+    # 例：``semantic.fact_orders_atomic`` 读候选集物化副本
+    # ``semantic.shop_identity_resolution_candidates_v2_mv`` —— 副本不存在时
+    # 建视图会直接报 ``relation does not exist``。
+    prerequisites: list[str] = []
+    for planned_target in ordered_targets:
+        for prerequisite in ASSET_PREREQUISITES.get(planned_target, []):
+            if (
+                prerequisite not in prerequisites
+                and prerequisite not in ordered_targets
+            ):
+                prerequisites.append(prerequisite)
+    if prerequisites:
+        ordered_targets = prerequisites + ordered_targets
     last_error: Exception | None = None
     last_sql_path: str | None = None
     last_attempt = 0
@@ -405,7 +426,10 @@ async def execute_sql_target(
             else:
                 sql_path = SQL_TARGET_PATHS[planned_target]
             last_sql_path = str(sql_path)
-            if not recreate_views and await _target_view_kind(db, planned_target) == "v":
+            if (
+                not recreate_views
+                and await _target_view_kind(db, planned_target) == "v"
+            ):
                 # 普通视图的数据是**查询时实时算**的 → 数据刷新时根本不需要重建它。
                 # 而重建要走 CREATE OR REPLACE VIEW → 拿 ACCESS EXCLUSIVE 排他锁 →
                 # 期间**所有**并发读写都被挡住（商品中心保存会卡住），
@@ -485,7 +509,9 @@ async def execute_sql_target(
     except Exception as exc:
         last_error = exc
         await _upsert_freshness_log(db, target, "failed")
-        await _update_step_log(db, active_run_id, target, "failed", error_message=str(last_error))
+        await _update_step_log(
+            db, active_run_id, target, "failed", error_message=str(last_error)
+        )
         await _replace_step_details(
             db,
             run_id=active_run_id,
@@ -500,7 +526,9 @@ async def execute_sql_target(
             },
         )
         if run_id is None:
-            await _update_run_log(db, active_run_id, "failed", error_message=str(last_error))
+            await _update_run_log(
+                db, active_run_id, "failed", error_message=str(last_error)
+            )
         raise
 
 
@@ -533,7 +561,9 @@ async def execute_refresh_plan(
     failed_targets: set[str] = set()
     try:
         for target in ordered_targets:
-            from backend.services.data_pipeline.refresh_registry import PIPELINE_DEPENDENCIES
+            from backend.services.data_pipeline.refresh_registry import (
+                PIPELINE_DEPENDENCIES,
+            )
 
             failed_dependencies = [
                 dependency
@@ -571,8 +601,12 @@ async def execute_refresh_plan(
     except Exception as exc:
         if continue_on_error:
             failed_targets.add(target)
-            for remaining_target in ordered_targets[ordered_targets.index(target) + 1 :]:
-                from backend.services.data_pipeline.refresh_registry import PIPELINE_DEPENDENCIES
+            for remaining_target in ordered_targets[
+                ordered_targets.index(target) + 1 :
+            ]:
+                from backend.services.data_pipeline.refresh_registry import (
+                    PIPELINE_DEPENDENCIES,
+                )
 
                 failed_dependencies = [
                     dependency

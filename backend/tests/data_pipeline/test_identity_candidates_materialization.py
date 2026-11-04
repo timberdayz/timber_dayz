@@ -1,4 +1,4 @@
-"""店铺身份解析候选集物化（2026-11-06）的结构契约。
+"""店铺身份解析候选集物化（2026-11-05）的结构契约。
 
 背景
 ----
@@ -8,13 +8,12 @@
 
 修法是把候选集物化。本文件守住四条不变量：
 
-1. **口径零变化** —— 4 个下游原子层视图的正文**一个字都不改**，
-   它们继续引用 ``semantic.shop_identity_resolution_candidates``；
-   只是这个转发视图改为读物化副本。
-2. **顺序不能反** —— 正本（物化副本）必须先于转发视图存在，否则循环依赖。
-3. **不删任何下游** —— 物化副本的刷新走「存在则 REFRESH / 不存在则 CREATE」，
+1. **口径零变化** —— 物化副本的正文就是正本正文的 ``SELECT *``；
+   正本（普通视图）一个字都不改，既有断言全部继续有效。
+2. **顺序不能反** —— 正本必须先于副本存在，否则建 MV 时找不到源表。
+3. **不删任何下游** —— 副本的刷新走「存在则 REFRESH / 不存在则 CREATE」，
    不用 ``DROP ... CASCADE``；删旧版 v1 时也故意不带 CASCADE（fail-closed）。
-4. **有机器口径守护** —— 迁移在改造前后比内容指纹，不一致就回滚。
+4. **有机器口径守护** —— 迁移建完副本后比内容指纹，不一致就回滚。
 """
 
 from pathlib import Path
@@ -33,10 +32,14 @@ FORWARDING_VIEW = "semantic.shop_identity_resolution_candidates"
 CANDIDATES_MV_ASSET = "sql/semantic/shop_identity_resolution_candidates_v2_mv.sql"
 FORWARDING_VIEW_ASSET = "sql/semantic/shop_identity_resolution_candidates.sql"
 
-#: 4 个下游原子层视图资产（正文不许动）
-DOWNSTREAM_ATOMIC_ASSETS = (
+#: 改读物化副本的原子层**普通视图**（正文里换掉了候选集引用）
+ATOMIC_VIEW_ASSETS = (
     "sql/semantic/orders_atomic.sql",
     "sql/semantic/analytics_atomic.sql",
+)
+
+#: **不动**的既有物化视图（完整定义 + DROP CASCADE 重建，改了要动生产）
+LEGACY_MONTHLY_MV_ASSETS = (
     "sql/semantic/orders_monthly_atomic_mv.sql",
     "sql/semantic/analytics_monthly_atomic_mv.sql",
 )
@@ -67,37 +70,77 @@ def test_materialized_view_is_registered_as_refresh_target() -> None:
     assert SQL_TARGET_PATHS[FORWARDING_VIEW] == FORWARDING_VIEW_ASSET
 
 
-def test_materialized_view_comes_before_forwarding_view() -> None:
-    """顺序反了就是循环依赖（正本引用转发视图）。"""
-    assert PIPELINE_DEPENDENCIES[CANDIDATES_MV] == []
-    assert PIPELINE_DEPENDENCIES[FORWARDING_VIEW] == [CANDIDATES_MV]
+def test_materialized_view_comes_after_the_source_view() -> None:
+    """顺序反了就建不出 MV（副本的正文是 ``SELECT * FROM`` 正本）。"""
+    assert PIPELINE_DEPENDENCIES[CANDIDATES_MV] == [FORWARDING_VIEW]
 
     ordered = topologically_sort_targets([CANDIDATES_MV, FORWARDING_VIEW])
-    assert ordered.index(CANDIDATES_MV) < ordered.index(FORWARDING_VIEW)
+    assert ordered.index(FORWARDING_VIEW) < ordered.index(CANDIDATES_MV)
 
 
-def test_forwarding_view_reads_the_materialized_copy() -> None:
-    sql_text = _read(FORWARDING_VIEW_ASSET)
-    assert CANDIDATES_MV in sql_text
-    assert (
-        "SELECT * FROM semantic.shop_identity_resolution_candidates_v2_mv" in sql_text
-    )
+def test_materialized_view_body_is_self_contained() -> None:
+    """副本正文**自包含**（从 core 表现算），不引用正本。
 
-
-def test_downstream_atomic_views_keep_reading_the_forwarding_view() -> None:
-    """口径零变化的守卫：4 个下游视图的正文不许改引用。
-
-    它们继续引用 ``semantic.shop_identity_resolution_candidates``（转发视图），
-    而不是直接引用物化副本 —— 改了就等于改了口径，需要重新验证金额。
+    为什么不能写成 ``SELECT * FROM <正本>``：
+    - 正本在不同环境里列数不同 —— 生产是 8 列（含 ``identity_shop_region``），
+      全新库 baseline 建的是 7 列旧版（``shop_region`` 列是 20261101 才加的）。
+      副本引用正本 ⇒ 全新库建不出 8 列副本。
+    - 引用正本 = 副本依赖正本，刷新语义会绕一圈。
     """
-    for rel_path in DOWNSTREAM_ATOMIC_ASSETS:
+    sql_text = _read(CANDIDATES_MV_ASSET)
+    assert (
+        "CREATE MATERIALIZED VIEW semantic.shop_identity_resolution_candidates_v2_mv"
+        in sql_text
+    )
+    assert "core.shop_accounts" in sql_text
+    assert "core.shop_account_aliases" in sql_text
+    assert "identity_shop_region" in sql_text
+    assert (
+        "FROM semantic.shop_identity_resolution_candidates " not in sql_text
+    ), "副本正文不应引用正本"
+
+
+def test_materialized_copy_matches_the_source_view_definition() -> None:
+    """两份定义（正本 + 副本）必须保持同构 —— 副本是手抄的，会有漂移风险。
+
+    守住两处最容易漂移的地方：4 路 UNION 的分支数、以及区域维度列。
+    """
+    source = _read(FORWARDING_VIEW_ASSET)
+    copy = _read(CANDIDATES_MV_ASSET)
+    for text in (source, copy):
+        assert text.count("UNION ALL") == 3, "候选集的 UNION 分支数变了（应为 4 路）"
+        assert "identity_shop_region" in text
+        assert "candidate_shop_region" in text
+
+
+def test_source_view_asset_is_untouched() -> None:
+    """正本仍是从 core 表现算的普通视图（既有断言继续有效）。"""
+    sql_text = _read(FORWARDING_VIEW_ASSET)
+    assert (
+        "CREATE OR REPLACE VIEW semantic.shop_identity_resolution_candidates AS"
+        in sql_text
+    )
+    assert "core.shop_accounts" in sql_text
+    assert "core.shop_account_aliases" in sql_text
+
+
+def test_atomic_views_read_the_materialized_copy() -> None:
+    """两个原子层普通视图必须读物化副本（否则 N+1 还在）。"""
+    for rel_path in ATOMIC_VIEW_ASSETS:
         sql_text = _read(rel_path)
-        assert FORWARDING_VIEW in sql_text, rel_path
+        assert CANDIDATES_MV in sql_text, rel_path
+        # 不再直接引用正本（否则等于没物化）
         assert (
-            CANDIDATES_MV not in sql_text
-        ), "{path} 不该直接引用物化副本：会让 4 个下游视图的正文发生变化".format(
-            path=rel_path
-        )
+            "FROM semantic.shop_identity_resolution_candidates " not in sql_text
+        ), rel_path
+
+
+def test_legacy_monthly_materialized_views_are_left_alone() -> None:
+    """既有 monthly MV 的定义是 ``DROP ... CASCADE`` + ``CREATE``，改了要动生产。"""
+    for rel_path in LEGACY_MONTHLY_MV_ASSETS:
+        sql_text = _read(rel_path)
+        assert CANDIDATES_MV not in sql_text, rel_path
+        assert FORWARDING_VIEW in sql_text, rel_path
 
 
 def test_materialized_view_asset_never_drops_cascade() -> None:
@@ -109,20 +152,38 @@ def test_materialized_view_asset_never_drops_cascade() -> None:
 
 
 def test_migration_guards_content_fingerprint() -> None:
-    """迁移必须做「改造前后内容指纹一致」的比对，不一致就回滚。"""
+    """迁移必须做「副本 == 正本」的内容指纹比对，不一致就回滚。"""
     migration = _read(
-        "current_migrations/versions/20261106_materialize_identity_candidates.py"
+        "current_migrations/versions/20261105_create_identity_candidates_mv.py"
     )
     assert "_fingerprint" in migration
     assert "md5(" in migration
     assert "拒绝继续" in migration
 
 
-def test_migration_is_chained_after_atomic_materialization() -> None:
-    migration = _read(
-        "current_migrations/versions/20261106_materialize_identity_candidates.py"
+def test_migration_is_chained_before_atomic_materialization() -> None:
+    candidates_migration = _read(
+        "current_migrations/versions/20261105_create_identity_candidates_mv.py"
+    )
+    atomic_migration = _read(
+        "current_migrations/versions/20261106_create_atomic_materialized_views.py"
     )
     assert (
-        'down_revision = "current_schema_20261105_create_atomic_materialized_views"'
-        in migration
+        'down_revision = "current_schema_20261104_drop_clearance_ranking_module"'
+        in candidates_migration
     )
+    assert (
+        'down_revision = "current_schema_20261105_create_identity_candidates_mv"'
+        in atomic_migration
+    )
+
+
+def test_atomic_migration_rebuilds_source_views_before_materializing() -> None:
+    """原子层普通视图必须先重建（引用已切换 + 数值校验），再建物化视图。"""
+    atomic_migration = _read(
+        "current_migrations/versions/20261106_create_atomic_materialized_views.py"
+    )
+    assert "SOURCE_VIEW_ASSETS" in atomic_migration
+    source_index = atomic_migration.index("SOURCE_VIEW_ASSETS")
+    materialize_index = atomic_migration.index("_materialize()")
+    assert source_index < materialize_index

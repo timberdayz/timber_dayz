@@ -63,8 +63,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "current_schema_20261105_create_atomic_materialized_views"
-down_revision = "current_schema_20261104_drop_clearance_ranking_module"
+revision = "current_schema_20261106_create_atomic_materialized_views"
+down_revision = "current_schema_20261105_create_identity_candidates_mv"
 branch_labels = None
 depends_on = None
 
@@ -91,6 +91,23 @@ CONSUMER_VIEW_ASSETS = (
         "api.b_cost_analysis_order_detail_module",
         "sql/api_modules/b_cost_analysis_order_detail_module.sql",
     ),
+)
+
+#: 需要**先重建**的原子层普通视图（它们是物化视图的正文来源）。
+#:
+#: 两个改动叠在一起，必须在建物化视图**之前**重建：
+#: 1. 改读物化候选集（``semantic.shop_identity_resolution_candidates_v2_mv``，
+#:    迁移 20261105 建的）—— 根治「每行订单事实重算候选集」的 N+1；
+#: 2. ``analytics_atomic.sql`` 补了数值合法性校验 —— 之前的清洗正则
+#:    ``'[^0-9.-]'`` 会**保留** ``.`` 与 ``-``，脏值 ``"-"`` 清洗后仍是 ``"-"``，
+#:    ``'.'::numeric`` 直接抛 ``invalid input syntax for type numeric``。
+#:    这个缺陷平时被 PostgreSQL 的**列裁剪**掩盖了（``SELECT count(*)`` 不算
+#:    这些列），直到 ``CREATE MATERIALIZED VIEW`` 要物化**全部列**才炸出来。
+#:
+#: 正文仍然是 ``sql/`` 下的资产文件（SSOT），迁移不抄第二份。
+SOURCE_VIEW_ASSETS = (
+    ("semantic.fact_orders_atomic", "sql/semantic/orders_atomic.sql"),
+    ("semantic.fact_analytics_atomic", "sql/semantic/analytics_atomic.sql"),
 )
 
 INDEX_STATEMENTS = (
@@ -130,13 +147,66 @@ def _with_extended_statement_timeout(action):
     # SET 是 utility statement，**不接受参数占位符**（会退化成
     # ``SET statement_timeout = $1`` → 语法错误），只能拼字面量。
     # 两个值都是可信来源：内部常量 + 数据库自己 ``SHOW`` 出来的原值。
-    bind.exec_driver_sql(
+    restore_sql = "SET statement_timeout = '{value}'".format(value=original)
+    _exec_sql(
         "SET statement_timeout = '{ms}'".format(ms=MATERIALIZE_STATEMENT_TIMEOUT_MS)
     )
     try:
-        return action()
-    finally:
-        bind.exec_driver_sql("SET statement_timeout = '{value}'".format(value=original))
+        result = action()
+    except BaseException:
+        # 失败时事务已经 aborted，再执行 SET 会抛 InFailedSqlTransaction ——
+        # 那会把**原始错误盖掉**（v7.13.1 就是这么把真正的
+        # ``invalid input syntax for type numeric`` 藏掉的）。
+        # 这里吞掉恢复异常，让原始错误冒到最外层。
+        # 事务回滚时 ``SET statement_timeout`` 本身也会被回滚，不会残留。
+        try:
+            _exec_sql(restore_sql)
+        except Exception:  # noqa: BLE001
+            pass
+        raise
+    _exec_sql(restore_sql)
+    return result
+
+
+def _driver_connection():
+    """拿到原生 psycopg2 连接。
+
+    ``Connection.connection`` 是**属性**（不是方法），返回连接池代理
+    ``_ConnectionFairy``；真正的驱动连接在它的 ``driver_connection`` 上。
+    注意后面**不能加括号** —— 返回的对象不可调用，加括号会报
+    ``TypeError: '_ConnectionFairy' object is not callable``。
+
+    这与 schema baseline（``20260805_current_schema_baseline.py``）用的是
+    同一套取法。
+    """
+    pool_conn = op.get_bind().connection
+    return getattr(pool_conn, "driver_connection", pool_conn)
+
+
+def _exec_sql(statement: str) -> None:
+    """执行一条原生 SQL。
+
+    **不用** ``exec_driver_sql``：它会把空参数字典（SQLAlchemy 的
+    ``immutabledict``）交给 psycopg2 的 ``cursor.execute``，而 psycopg2 只接受
+    真正的 ``dict``/序列 ⇒
+    ``TypeError: sqlalchemy.cyextension.immutabledict.immutabledict is not a sequence``。
+    """
+    with _driver_connection().cursor() as cursor:
+        cursor.execute(statement)
+
+
+def _exec_sql_text(sql_text: str) -> None:
+    """执行一段原生 SQL（**可以含多条语句**）。
+
+    psycopg2 走 PostgreSQL 的**简单查询协议**（``PQexec``），一条 query 里
+    可以带多条语句，由数据库自己按分号切分，**并且数据库自己认 dollar-quoted
+    块**（``DO $$ ... $$`` 不会被切坏）。
+
+    应用侧走 asyncpg，不支持多语句，所以那边必须自己切（见
+    ``backend/services/data_pipeline/sql_loader.py``）。
+    """
+    with _driver_connection().cursor() as cursor:
+        cursor.execute(sql_text)
 
 
 def _exists(name: str) -> bool:
@@ -153,60 +223,25 @@ def _create_materialized_view(mv_name: str, source_view: str) -> None:
     """建物化视图（已存在则跳过）。
 
     正文是 ``SELECT * FROM <普通视图>`` —— 与普通视图同一份定义，口径零变化。
-    不用 ``op.execute(statement, parameters)``：本仓库锁定的 alembic 版本
-    不接受第二个位置参数，必须自己绑参或用 driver 级执行。
     """
     if _exists(mv_name):
         return
-    op.get_bind().exec_driver_sql(
+    _exec_sql(
         "CREATE MATERIALIZED VIEW {mv} AS SELECT * FROM {src}".format(
             mv=mv_name, src=source_view
         )
     )
 
 
-def _split_statements(sql_text: str) -> list[str]:
-    """按 ``;`` 切分语句（跳过字符串字面量与行注释里的分号）。
-
-    应用侧用的是 asyncpg，**不支持一次执行多条语句**，所以必须切。
-    这里只处理本迁移会用到的资产文件形态：普通 SQL + 单引号字符串 + ``--`` 注释。
-    """
-    statements: list[str] = []
-    current: list[str] = []
-    in_single_quote = False
-    index = 0
-    length = len(sql_text)
-    while index < length:
-        char = sql_text[index]
-        next_char = sql_text[index + 1] if index + 1 < length else ""
-        if not in_single_quote and char == "-" and next_char == "-":
-            end_of_line = sql_text.find("\n", index)
-            if end_of_line == -1:
-                break
-            current.append(sql_text[index:end_of_line])
-            index = end_of_line
-            continue
-        if char == "'":
-            in_single_quote = not in_single_quote
-        if char == ";" and not in_single_quote:
-            statement = "".join(current).strip()
-            if statement:
-                statements.append(statement)
-            current = []
-            index += 1
-            continue
-        current.append(char)
-        index += 1
-    tail = "".join(current).strip()
-    if tail:
-        statements.append(tail)
-    return statements
-
-
 def _rebuild_consumer_view(view_name: str, asset_rel_path: str) -> bool:
     """用 ``sql/`` 下的资产文件重建消费方视图。
 
     资产文件缺失 → 返回 False（跳过并告警），不阻断迁移。
+
+    整份文件一次执行（psycopg2 简单查询协议，数据库自己切语句）：
+    资产里既有 ``CREATE SCHEMA`` 也有视图定义，整批执行保证它们在同一个
+    隐式事务里 —— 中途失败会整批回滚，不会留下「schema 建了、视图没建」
+    的半截状态。
     """
     asset_path = REPO_ROOT / asset_rel_path
     if not asset_path.is_file():
@@ -217,18 +252,17 @@ def _rebuild_consumer_view(view_name: str, asset_rel_path: str) -> bool:
         )
         return False
     sql_text = asset_path.read_text(encoding="utf-8")
-    if "$$" in sql_text:
-        raise RuntimeError(
-            "{path} 含 dollar-quoted 块，本迁移的执行器不支持".format(
-                path=asset_rel_path
-            )
-        )
-    for statement in _split_statements(sql_text):
-        op.get_bind().exec_driver_sql(statement)
+    _exec_sql_text(sql_text)
     return True
 
 
 def upgrade() -> None:
+    # 0) 先重建两个原子层普通视图（它们是物化视图的正文来源）：
+    #    改读物化候选集 + analytics 数值合法性校验。
+    #    必须在建物化视图**之前** —— 否则物化出来的是旧定义。
+    for view_name, asset_rel_path in SOURCE_VIEW_ASSETS:
+        _rebuild_consumer_view(view_name, asset_rel_path)
+
     # 1) + 2) 物化视图与索引
     #    这一步是**长任务**：全量重算原子视图（实测 114.6 秒）还要写 38,607 行
     #    并建 4 个索引，远超生产默认的 statement_timeout=120s ⇒ 必须临时抬高预算，
@@ -238,7 +272,7 @@ def upgrade() -> None:
         for mv_name, source_view in MATERIALIZED_VIEWS:
             _create_materialized_view(mv_name, source_view)
         for statement in INDEX_STATEMENTS:
-            op.get_bind().exec_driver_sql(statement)
+            _exec_sql(statement)
 
     _with_extended_statement_timeout(_materialize)
 
@@ -248,18 +282,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """回滚：删掉两个物化视图，并把消费方视图改回读普通视图。
+    """回滚：把消费方视图改回读普通视图，再删掉两个物化视图。
 
-    消费方视图用资产文件重建 —— 资产文件里此刻已经是「读物化视图」的版本，
-    所以回滚时改读**基线里那份普通视图口径**：直接把 FROM 换回去即可，
-    语义与本迁移前完全一致（物化视图正文 = 普通视图正文）。
+    **顺序很关键**：必须先把消费方改回普通视图，再删物化视图。
+    反过来（先删 MV）会失败 —— MV 上有依赖。
+
+    刻意**不用** ``DROP MATERIALIZED VIEW ... CASCADE``：
+    CASCADE 会连带删掉下游对象，而下游里存在**不是 refresh registry 可重建
+    目标**的对象（例如 ``mart.inventory_backlog_base_mv``）⇒ 删了就没人重建，
+    库存积压口径直接空掉。先改引用、再无 CASCADE 删除 ⇒ 不会误伤任何东西。
     """
-    for mv_name, _source_view in MATERIALIZED_VIEWS:
-        if _exists(mv_name):
-            op.get_bind().exec_driver_sql(
-                "DROP MATERIALIZED VIEW IF EXISTS {mv} CASCADE".format(mv=mv_name)
-            )
-
     for view_name, asset_rel_path in CONSUMER_VIEW_ASSETS:
         asset_path = REPO_ROOT / asset_rel_path
         if not asset_path.is_file():
@@ -268,5 +300,8 @@ def downgrade() -> None:
         sql_text = sql_text.replace(
             "semantic.fact_orders_atomic_mv", "semantic.fact_orders_atomic"
         ).replace("semantic.fact_analytics_atomic_mv", "semantic.fact_analytics_atomic")
-        for statement in _split_statements(sql_text):
-            op.get_bind().exec_driver_sql(statement)
+        _exec_sql_text(sql_text)
+
+    for mv_name, _source_view in MATERIALIZED_VIEWS:
+        if _exists(mv_name):
+            _exec_sql("DROP MATERIALIZED VIEW IF EXISTS {mv}".format(mv=mv_name))

@@ -29,16 +29,25 @@ CREATE SCHEMA IF NOT EXISTS semantic;
 -- 物化之后，候选集变成**一张 136 行的表**，LATERAL 变成索引扫描，
 -- 重算成本从「分钟级」降到「秒级」。
 --
--- 为什么**不**改 4 个下游视图去直接读这个 MV
--- -------------------------------------------
--- 下游是 `semantic.fact_orders_atomic` / `fact_analytics_atomic` /
--- `fact_orders_monthly_atomic_mv` / `fact_analytics_monthly_atomic_mv`，
--- 它们的正文里引用的是 `semantic.shop_identity_resolution_candidates`
--- （**普通视图**）。本文件不改这 4 个视图的任何一个字 ——
--- 改成让**普通视图本身**转发到物化副本（见
--- `sql/semantic/shop_identity_resolution_candidates.sql`）。
--- ⇒ 下游定义不变 ⇒ **口径零变化**，不需要重建任何一个下游视图，
--- 也不需要重新验证任何金额。
+-- 下游是 `semantic.fact_orders_atomic` / `fact_analytics_atomic`（两个**普通**
+-- 视图），它们的正文改为读这个副本。
+-- `fact_orders_monthly_atomic_mv` / `fact_analytics_monthly_atomic_mv` 是**既有**
+-- 物化视图的完整定义（`DROP ... CASCADE` + `CREATE`），改了要在生产重建它们
+-- ⇒ 有风险 ⇒ **保持不动**，它们继续读正本，既有行为不变。
+--
+-- 正文为什么是**自包含**的一份定义（而不是 `SELECT * FROM` 正本）
+-- -------------------------------------------------------------------
+-- 两个原因：
+-- 1. **正本在不同环境里列数不同** —— 生产上是 8 列（含
+--    `identity_shop_region`，区域消歧那套逻辑后来才加的），而全新库的
+--    20260805 schema baseline 建的是 **7 列旧版**（`shop_region` 列是
+--    20261101 迁移才加的）。副本引用正本 ⇒ 全新库根本建不出 8 列副本。
+-- 2. 引用正本 = 副本依赖正本，刷新语义绕一圈。
+--
+-- 所以这里**手抄一份**定义。副本与正本必须保持同构 ——
+-- `backend/tests/data_pipeline/test_identity_candidates_materialization.py`
+-- 守着两处最容易漂移的地方（4 路 UNION 的分支数、区域维度列），迁移
+-- `20261105` 还会在生产上比**内容指纹**（行数 + 全量 md5），不一致直接回滚。
 --
 -- 为什么叫 v2
 -- -----------

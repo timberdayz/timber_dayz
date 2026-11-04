@@ -1,15 +1,33 @@
 # Changelog - 西虹 ERP 系统
 
-## [v7.13.2] - 2026-11-04 - 物化店铺身份候选集，根治「每行订单重算候选集」的 N+1
+## [v7.13.2] - 2026-11-04 - 物化店铺身份候选集 + 修 analytics 数值转换脏数据
+
+### 修复
+
+- **`fact_analytics_atomic` 的数值转换会崩**（v7.13.1 发布时暴露）：清洗正则 `'[^0-9.-]'` 会**保留** `.` 与 `-`，所以脏值 `"-"` 清洗后仍是 `"-"`，`NULLIF` 挡不住 → `'.'::numeric` 直接抛 `invalid input syntax for type numeric`。
+  - 这个缺陷平时被 PostgreSQL 的**列裁剪**掩盖了 —— `SELECT count(*)` 不计算这些列，所以查询看着正常；直到 `CREATE MATERIALIZED VIEW` 要物化**全部列**才炸出来。
+  - 修法：给 analytics 层 12 处数值转换补上与 `orders_atomic.sql` **完全一致**的正则合法性校验（`^-?(?:\d+(?:\.\d*)?|\.\d+)$`，不合法 → NULL）。订单层本来就有，analytics 层漏了 ⇒ 现在两层对齐。
+  - 口径影响：命中脏值的行，**原来整个查询报错**（什么都看不到），现在该字段为 NULL、其余字段正常 —— 是从「崩」变成「空」，不是改口径。
 
 ### 性能
 
 - **根因**：`semantic.shop_identity_resolution_candidates` 这个候选集只有 **136 行**（52 个账号 + 21 条别名派生），却是**普通视图**；而订单/流量原子层是**每行**都要做一次身份解析（`LEFT JOIN LATERAL`）⇒ 每一行订单事实都把候选集重新展开、把 `regexp_replace` 之类的规范化表达式重算一遍、再排序一次。生产 `EXPLAIN ANALYZE` 实测全量重算 38,607 行要 **119 秒**，计划里 `shop_account_aliases`（只有 21 行的小表）被扫了 **148 万次**（38,607 行 × 38 次）—— 典型的 N+1：小表被当成逐行计算的表达式。
-- **修法**：把候选集物化成 `semantic.shop_identity_resolution_candidates_v2_mv`（136 行，刷新成本毫秒级），并把 `semantic.shop_identity_resolution_candidates` 改成**转发视图**（`SELECT * FROM ..._v2_mv`）。
-  - ⇒ **4 个下游原子层视图（`fact_orders_atomic` / `fact_analytics_atomic` / `fact_orders_monthly_atomic_mv` / `fact_analytics_monthly_atomic_mv`）的正文一个字都不用改** —— 它们继续引用同一个视图名。口径零变化，不需要重建下游，不需要重新验证任何金额。
-  - **机器口径守护**：迁移 `20261106` 在改造前先给旧候选视图算内容指纹（行数 + 全量内容 md5），改造后对物化副本算同样的指纹，**不一致直接抛错回滚** —— 「物化副本 == 改造前普通视图」由机器证明，不靠人眼比对。
-  - 顺手删掉 20260805 schema baseline 建的旧版候选集物化视图（只有 7 列、缺 `identity_shop_region`、没有任何对象引用它）；删除时**故意不带 CASCADE** —— 万一有依赖就让迁移失败（fail-closed），而不是悄悄把下游删掉。
-  - 这条修完，v7.13.1 物化层的「刷新要 115 秒」才真正降下来：刷新窗口从分钟级回到秒级，不再出现「刷新时全员卡住」。
+- **修法**：新增物化副本 `semantic.shop_identity_resolution_candidates_v2_mv`，原子层的两个**普通视图**（`fact_orders_atomic` / `fact_analytics_atomic`）改读它。
+  - **正本（普通视图）一个字都没改** —— 它仍从 core 表现算（已用 git diff 逐字节核对），既有的断言全部继续有效。
+  - 副本正文是**自包含的一份定义**（从 core 表现算），不是 `SELECT * FROM 正本`。原因：正本在不同环境里列数不同（生产 8 列、含区域消歧列；全新库 baseline 建的是 7 列旧版）⇒ 引用正本在全新库根本建不出副本。代价是两份定义，用契约测试（4 路 UNION 分支数、区域列）+ 迁移里的**内容指纹**守护防漂移。
+  - ⇒ **口径零变化**：迁移建完副本立刻比对它与正本的**内容指纹**（行数 + 全量 md5），不一致直接抛错回滚 —— 「副本 == 正本」由机器证明，不靠人眼比对。生产实测 136 行逐字节一致。
+  - **不动** `orders_monthly_atomic_mv` / `analytics_monthly_atomic_mv`：那是既有物化视图的完整定义（`DROP ... CASCADE` + `CREATE`），改了要在生产重建它们 ⇒ 有风险。它们继续读正本，既有行为不变。
+  - 新增「建对象前置」机制（`ASSET_PREREQUISITES`）：目标资产的正文引用了别的对象时，那些对象必须先在 —— 副本不存在时建原子层视图会直接报 `relation does not exist`。
+  - 顺手删掉 20260805 schema baseline 建的旧版候选集物化视图（只有 7 列、缺 `identity_shop_region`、没有任何对象引用它）；删除时**故意不带 CASCADE** —— 万一有依赖就让迁移失败（fail-closed），而不是悄悄删下游。
+  - **实测效果**：全量重算从 113.5 秒降到 **9.2 秒（提速 12.3 倍）**；v7.13.1 物化层的「刷新要 115 秒」才真正降下来 —— 刷新窗口从分钟级回到秒级，不再出现「刷新时全员卡住」。
+
+### 工程
+
+- **迁移侧统一走原生 psycopg2 cursor**（与 schema baseline 同一范式）。SQLAlchemy 的 `exec_driver_sql` 在本仓库锁定的版本 + psycopg2 组合下会把空参数字典（`immutabledict`）交给 `cursor.execute`，而 psycopg2 只接受真正的 `dict`/序列 ⇒ 必然抛 `TypeError: immutabledict is not a sequence`。原生 cursor 走 PostgreSQL **简单查询协议**，多语句由数据库自己切分（`DO $$ ... $$` 不会被切坏）。
+- **回滚路径修正**：物化视图的 `downgrade` 改成「先把消费方改回普通视图、再删物化视图」，并且**不再用 `DROP MATERIALIZED VIEW ... CASCADE`** —— CASCADE 会连带删掉 `mart.inventory_backlog_base_mv` 这类**不是 refresh registry 可重建目标**的对象，删了没人重建。
+- `scripts/validate_migrations_fresh_db.py` 修掉一个**会吞掉真实报错**的 bug：Windows 下子进程输出按 GBK 解码，迁移一旦报中文/编码错会被当成「空输出」从而掩盖真因。
+- **验证**：全新库 fail-closed 迁移门禁通过（迁移 + 数据同步关键列校验 + ORM Schema 一致性校验全绿）；后端大范围回归失败集 diff **新增失败 = 0**。
+
 
 ## [v7.13.1] - 2026-11-04 - 修复物化视图建表超时预算 + 收口 CI 格式与 lint 欠账
 
