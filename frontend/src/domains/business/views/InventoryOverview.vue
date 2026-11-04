@@ -67,7 +67,11 @@
             <el-table-column prop="platform_sku" label="SKU" width="180" />
             <el-table-column prop="product_name" label="商品名称" min-width="220" show-overflow-tooltip />
             <el-table-column prop="platform_code" label="平台" width="100" />
-            <el-table-column prop="shop_id" label="店铺" width="120" />
+            <el-table-column prop="shop_id" label="店铺" width="140">
+              <template #default="{ row }">
+                <ShopDisplayText :row="row" />
+              </template>
+            </el-table-column>
             <el-table-column prop="stock" label="库存" width="100" />
             <el-table-column prop="price" label="单价" width="100">
               <template #default="{ row }">¥{{ Number(row.price || 0).toFixed(2) }}</template>
@@ -97,7 +101,7 @@
       <el-descriptions v-if="currentProduct.platform_sku" :column="2" border>
         <el-descriptions-item label="SKU">{{ currentProduct.platform_sku }}</el-descriptions-item>
         <el-descriptions-item label="平台">{{ currentProduct.platform_code }}</el-descriptions-item>
-        <el-descriptions-item label="店铺">{{ currentProduct.shop_id }}</el-descriptions-item>
+        <el-descriptions-item label="店铺">{{ resolveShopDisplay(currentProduct).display_name }}</el-descriptions-item>
         <el-descriptions-item label="仓库">{{ currentProduct.warehouse || '-' }}</el-descriptions-item>
         <el-descriptions-item label="商品名称" :span="2">{{ currentProduct.product_name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="库存">{{ currentProduct.stock }}</el-descriptions-item>
@@ -118,6 +122,10 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import inventoryOverviewApi from '@/api/inventoryOverview'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
+import { useShopDisplay } from '@/composables/useShopDisplay'
+
+const { resolveShopDisplay } = useShopDisplay()
 
 const loading = ref(false)
 const detailVisible = ref(false)

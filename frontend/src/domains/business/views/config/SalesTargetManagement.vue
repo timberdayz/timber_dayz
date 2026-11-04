@@ -25,7 +25,7 @@
             <el-option
               v-for="shop in store.shops"
               :key="`${shop.platform_code || 'unknown'}-${shop.shop_id}`"
-              :label="shop.shop_name || shop.shop_id"
+              :label="resolveShopDisplay(shop).display_name"
               :value="shop.shop_id"
             />
           </el-select>
@@ -58,7 +58,11 @@
         stripe
         class="erp-table"
       >
-        <el-table-column prop="shop_id" label="店铺ID" min-width="140" />
+        <el-table-column prop="shop_id" label="店铺" min-width="140">
+          <template #default="{ row }">
+            <ShopDisplayText :row="row" />
+          </template>
+        </el-table-column>
         <el-table-column prop="year_month" label="目标月份" width="120" />
         <el-table-column prop="target_sales_amount" label="目标销售额" width="160" align="right">
           <template #default="{ row }">
@@ -103,7 +107,7 @@
             <el-option
               v-for="shop in store.shops"
               :key="`${shop.platform_code || 'unknown'}-${shop.shop_id}`"
-              :label="shop.shop_name || shop.shop_id"
+              :label="resolveShopDisplay(shop).display_name"
               :value="shop.shop_id"
             />
           </el-select>
@@ -158,6 +162,10 @@ import { Histogram, Plus, Refresh } from '@element-plus/icons-vue'
 
 import PageHeader from '@/components/common/PageHeader.vue'
 import { useSalesTargetsStore } from '@/stores/salesTargets.js'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
+import { useShopDisplay } from '@/composables/useShopDisplay'
+
+const { resolveShopDisplay } = useShopDisplay()
 
 const store = useSalesTargetsStore()
 const formRef = ref(null)
@@ -243,7 +251,7 @@ async function submitForm() {
 async function confirmDelete(row) {
   try {
     await ElMessageBox.confirm(
-      `确定要删除店铺 ${row.shop_id} 在 ${row.year_month} 的销售目标吗？`,
+      `确定要删除店铺 ${resolveShopDisplay(row).display_name} 在 ${row.year_month} 的销售目标吗？`,
       '确认删除',
       { type: 'warning' }
     )

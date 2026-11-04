@@ -182,7 +182,11 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="shop_name" label="店铺名称" />
+            <el-table-column prop="shop_name" label="店铺名称" min-width="180">
+              <template #default="{ row }">
+                <ShopDisplayText :row="row" />
+              </template>
+            </el-table-column>
             <el-table-column prop="sales_amount" label="销售额" width="150" align="right">
               <template #default="{ row }">
                 ¥{{ row.sales_amount.toFixed(2) }}
@@ -209,6 +213,7 @@ import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useSalesStore } from '@/stores/sales'
 import { useUserStore } from '@/stores/user'
 import { hasScopedActionPermission } from '@/utils/actionPermissions'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const salesStore = useSalesStore()
 const userStore = useUserStore()
@@ -217,7 +222,7 @@ const hasPermission = (permission) =>
   hasScopedActionPermission({
     roles: userStore.roles || [],
     activeRole: localStorage.getItem('activeRole') || '',
-    permission,
+    permission
   })
 
 // 战役列表数据

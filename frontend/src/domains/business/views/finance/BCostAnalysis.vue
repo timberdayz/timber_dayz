@@ -77,7 +77,11 @@
       <el-table :data="shopMonthRows" border stripe v-loading="shopMonthLoading">
         <el-table-column prop="period_month" label="月份" width="120" />
         <el-table-column prop="platform_code" label="平台" width="120" />
-        <el-table-column prop="shop_id" label="店铺ID" min-width="140" />
+        <el-table-column prop="shop_id" label="店铺" min-width="140">
+          <template #default="{ row }">
+            <ShopDisplayText :row="row" />
+          </template>
+        </el-table-column>
         <el-table-column prop="currency_code" label="币种" width="100" />
         <el-table-column prop="gmv" label="GMV" min-width="140" align="right">
           <template #default="{ row }">{{ formatCurrency(row.gmv) }}</template>
@@ -137,8 +141,10 @@
         <el-table-column prop="platform_code" label="平台" width="110">
           <template #default="{ row }">{{ row.platform_code || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="shop_id" label="店铺ID" min-width="140">
-          <template #default="{ row }">{{ row.shop_id || '-' }}</template>
+        <el-table-column prop="shop_id" label="店铺" min-width="140">
+          <template #default="{ row }">
+            <ShopDisplayText :row="row" />
+          </template>
         </el-table-column>
         <el-table-column label="SKU" min-width="160">
           <template #default="{ row }">{{ row.platform_sku || row.product_sku || '-' }}</template>
@@ -206,6 +212,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import dayjs from 'dayjs'
 import dashboardApi from '@/api/dashboard'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const getCurrentMonth = () => dayjs().format('YYYY-MM')
 const periodMonth = ref(getCurrentMonth())
@@ -218,7 +225,7 @@ const orderDetailTotal = ref(0)
 const filters = reactive({
   period_month: periodMonth.value,
   platform: '',
-  shop_id: '',
+  shop_id: ''
 })
 
 const overviewLoading = ref(false)
@@ -238,7 +245,7 @@ const orderDetailDrawerVisible = ref(false)
 const toOverviewPayload = () => ({
   period_month: filters.period_month || periodMonth.value,
   platform: filters.platform || undefined,
-  shop_id: filters.shop_id || undefined,
+  shop_id: filters.shop_id || undefined
 })
 
 const toOrderDetailPayload = (row) => ({
@@ -246,7 +253,7 @@ const toOrderDetailPayload = (row) => ({
   platform: row?.platform_code || filters.platform || undefined,
   shop_id: row?.shop_id || filters.shop_id || undefined,
   page: orderDetailPage.value,
-  page_size: orderDetailPageSize.value,
+  page_size: orderDetailPageSize.value
 })
 
 const unwrapObject = (response) => response?.data ?? response ?? {}
@@ -310,7 +317,7 @@ const kpiCards = computed(() => {
     { key: 'warehouse_operation_fee', title: '仓库操作费', value: formatCurrency(data.warehouse_operation_fee) },
     { key: 'platform_total_cost_itemized', title: '平台费用合计', value: formatCurrency(data.platform_total_cost_itemized) },
     { key: 'gmv', title: 'GMV', value: formatCurrency(data.gmv) },
-    { key: 'b_cost_ratio', title: 'B类成本占GMV比', value: formatPercent(bCostRatio) },
+    { key: 'b_cost_ratio', title: 'B类成本占GMV比', value: formatPercent(bCostRatio) }
   ]
 })
 

@@ -78,7 +78,11 @@
         <el-table-column prop="period_month" label="月份" width="120" />
         <el-table-column prop="investor_name" label="投资人" width="140" />
         <el-table-column prop="platform_code" label="平台" width="120" />
-        <el-table-column prop="shop_id" label="店铺ID" min-width="140" />
+        <el-table-column prop="shop_id" label="店铺" min-width="140">
+          <template #default="{ row }">
+            <ShopDisplayText :row="row" />
+          </template>
+        </el-table-column>
         <el-table-column prop="profit_basis_amount" label="结算基准利润" width="160" align="right">
           <template #default="{ row }">{{ formatMoney(row.profit_basis_amount) }}</template>
         </el-table-column>
@@ -110,6 +114,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import financeApi from '@/api/finance'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const selectedMonth = ref(new Date().toISOString().slice(0, 7))
 const loading = ref(false)

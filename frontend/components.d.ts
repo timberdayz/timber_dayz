@@ -83,6 +83,7 @@ declare module 'vue' {
     PageHeader: typeof import('./src/components/common/PageHeader.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    ShopDisplayText: typeof import('./src/components/common/ShopDisplayText.vue')['default']
     SimpleAccountSwitcher: typeof import('./src/components/common/SimpleAccountSwitcher.vue')['default']
     TemplateBuilderWorkspace: typeof import('./src/components/dataSync/TemplateBuilderWorkspace.vue')['default']
     TemplateChangeSummaryCard: typeof import('./src/components/dataSync/TemplateChangeSummaryCard.vue')['default']

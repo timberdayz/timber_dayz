@@ -3,47 +3,115 @@ import assert from 'node:assert/strict'
 
 import {
   buildShopAccountLookup,
-  resolveShopDisplay,
+  createDisplayMeta,
+  decorateShopEntity,
+  resolveShopDisplay
 } from '../src/utils/shopDisplay.js'
 
-test('resolveShopDisplay prefers account alias and keeps canonical name as secondary text', () => {
-  const lookup = buildShopAccountLookup([
-    {
-      platform: 'shopee',
-      account_alias: '西航新加坡1店',
-      store_name: 'HongXi Singapore Local',
-      platform_shop_id: 'shop-001',
-      shop_account_id: 'shopee_sg_hongxi_local',
-    },
-  ])
+const ACCOUNTS = [
+  {
+    platform_code: 'shopee',
+    shop_account_id: 'shopee_sg_xhkj11_local',
+    platform_shop_id: '123456',
+    store_name: 'xhkj11.sg',
+    internal_code: 'XHKJ11_SG',
+    account_alias: '新加坡西虹11',
+    enabled: true
+  },
+  {
+    platform_code: 'tiktok',
+    shop_account_id: 'tiktok_sg_hx_home_local',
+    platform_shop_id: '',
+    store_name: 'Singapore(HX Home)',
+    internal_code: 'SINGAPORE_HX_HOME_SG',
+    account_alias: '',
+    enabled: true
+  }
+]
 
-  const result = resolveShopDisplay(
-    {
-      platform_code: 'shopee',
-      shop_id: 'shop-001',
-      shop_name: 'HongXi Singapore Local',
-    },
-    lookup,
-  )
-
-  assert.equal(result.display_name, '西航新加坡1店')
-  assert.equal(result.secondary_name, 'HongXi Singapore Local')
-  assert.equal(result.option_label, '西航新加坡1店')
-  assert.match(result.search_text, /西航新加坡1店/i)
-  assert.match(result.search_text, /HongXi Singapore Local/i)
+test('主名优先用 internal_code，店名作为副显', () => {
+  const meta = createDisplayMeta(ACCOUNTS[0])
+  assert.equal(meta.display_name, 'XHKJ11_SG')
+  assert.equal(meta.secondary_name, 'xhkj11.sg')
+  assert.equal(meta.canonical_name, 'xhkj11.sg')
 })
 
-test('resolveShopDisplay falls back to canonical name when no alias is configured', () => {
-  const lookup = buildShopAccountLookup([])
-  const result = resolveShopDisplay(
-    {
-      platform_code: 'tiktok',
-      shop_id: 'acc-ph',
-      shop_name: 'Tiktok PH Store',
-    },
-    lookup,
-  )
+test('没有 internal_code 时退回别名，再退回店名', () => {
+  assert.equal(createDisplayMeta({ account_alias: '别名', store_name: '店名' }).display_name, '别名')
+  assert.equal(createDisplayMeta({ store_name: '店名' }).display_name, '店名')
+  assert.equal(createDisplayMeta({ shop_id: 'k' }).display_name, 'k')
+  assert.equal(createDisplayMeta({}).display_name, '未命名店铺')
+})
 
-  assert.equal(result.display_name, 'Tiktok PH Store')
-  assert.equal(result.secondary_name, '')
+test('搜索文本同时包含内部编号、别名、店名与键值', () => {
+  const meta = createDisplayMeta(ACCOUNTS[0])
+  assert.ok(meta.search_text.includes('xhkj11_sg'))
+  assert.ok(meta.search_text.includes('新加坡西虹11'))
+  assert.ok(meta.search_text.includes('xhkj11.sg'))
+  assert.ok(meta.search_text.includes('123456'))
+})
+
+test('lookup 能用平台店铺ID / 店铺账号ID / 内部编号命中', () => {
+  const lookup = buildShopAccountLookup(ACCOUNTS)
+  assert.equal(
+    resolveShopDisplay({ platform_code: 'shopee', shop_id: '123456' }, lookup).display_name,
+    'XHKJ11_SG'
+  )
+  assert.equal(
+    resolveShopDisplay(
+      { platform_code: 'shopee', shop_id: 'shopee_sg_xhkj11_local' },
+      lookup
+    ).display_name,
+    'XHKJ11_SG'
+  )
+  assert.equal(
+    resolveShopDisplay({ platform_code: 'shopee', internal_code: 'XHKJ11_SG' }, lookup).display_name,
+    'XHKJ11_SG'
+  )
+})
+
+test('平台前缀键优先：跨平台同名不会被串到别的店', () => {
+  const lookup = buildShopAccountLookup([
+    { platform_code: 'shopee', shop_account_id: 'a', store_name: '同名店', internal_code: 'A_SG' },
+    { platform_code: 'tiktok', shop_account_id: 'b', store_name: '同名店', internal_code: 'B_SG' }
+  ])
+  assert.equal(
+    resolveShopDisplay({ platform_code: 'tiktok', store_name: '同名店' }, lookup).display_name,
+    'B_SG'
+  )
+  assert.equal(
+    resolveShopDisplay({ platform_code: 'shopee', store_name: '同名店' }, lookup).display_name,
+    'A_SG'
+  )
+})
+
+test('匹配不上时退回实体自身字段', () => {
+  const meta = resolveShopDisplay(
+    { platform_code: 'shopee', shop_id: 'unknown' },
+    buildShopAccountLookup([])
+  )
+  assert.equal(meta.display_name, 'unknown')
+})
+
+test('decorateShopEntity 保留装饰前的原始店名', () => {
+  const lookup = buildShopAccountLookup(ACCOUNTS)
+  const decorated = decorateShopEntity(
+    { platform_code: 'shopee', shop_id: '123456', store_name: 'xhkj11.sg' },
+    lookup
+  )
+  assert.equal(decorated.display_name, 'XHKJ11_SG')
+  assert.equal(decorated.raw_shop_name, 'xhkj11.sg')
+  assert.equal(decorated.shop_name, 'XHKJ11_SG')
+})
+
+test('重复装饰不会让原始店名被显示名顶替', () => {
+  const lookup = buildShopAccountLookup(ACCOUNTS)
+  const once = decorateShopEntity(
+    { platform_code: 'shopee', shop_id: '123456', store_name: 'xhkj11.sg' },
+    lookup
+  )
+  const twice = decorateShopEntity(once, lookup)
+  assert.equal(twice.canonical_name, 'xhkj11.sg')
+  assert.equal(twice.raw_shop_name, 'xhkj11.sg')
+  assert.equal(twice.display_name, 'XHKJ11_SG')
 })

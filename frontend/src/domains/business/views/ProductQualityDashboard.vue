@@ -170,7 +170,11 @@
           </template>
           
           <el-table :data="shopData" stripe style="width: 100%">
-            <el-table-column prop="shop_name" label="店铺" width="150" />
+            <el-table-column prop="shop_name" label="店铺" width="180">
+              <template #default="{ row }">
+                <ShopDisplayText :row="row" />
+              </template>
+            </el-table-column>
             <el-table-column label="总产品数" width="120" align="right">
               <template #default="{row}">{{ formatNumber(row.total_products) }}</template>
             </el-table-column>
@@ -216,6 +220,7 @@ import { ref, onMounted, nextTick } from 'vue'
 import api from '@/api'
 import { ElMessage } from 'element-plus'
 import echarts from '@/utils/echarts'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const loading = ref(false)
 const shopData = ref([])

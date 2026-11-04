@@ -22,7 +22,11 @@
           <el-table :data="rows" v-loading="loading" stripe>
             <el-table-column prop="period" label="期间" width="120" />
             <el-table-column prop="platform_code" label="平台" width="100" />
-            <el-table-column prop="shop_id" label="店铺" width="120" />
+            <el-table-column prop="shop_id" label="店铺" width="140">
+              <template #default="{ row }">
+                <ShopDisplayText :row="row" />
+              </template>
+            </el-table-column>
             <el-table-column prop="platform_sku" label="SKU" min-width="180" />
             <el-table-column prop="opening_qty" label="期初数量" width="100" />
             <el-table-column prop="opening_cost" label="单位成本" width="100" />
@@ -39,6 +43,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import inventoryDomainApi from '@/api/inventoryDomain'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const loading = ref(false)
 const rows = ref([])

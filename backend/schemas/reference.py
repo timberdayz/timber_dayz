@@ -8,6 +8,8 @@ class ShopDirectoryItemResponse(BaseModel):
     main_account_id: str
     display_name: str
     canonical_name: str
+    internal_code: str = ""
+    secondary_name: str = ""
     account_alias: str | None = None
     shop_region: str | None = None
     enabled: bool

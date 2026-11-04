@@ -415,7 +415,10 @@
                 <template #default="{ row }">{{ row.allocation_scope === 'company' ? '公司公共成本' : '店铺成本' }}</template>
               </el-table-column>
               <el-table-column label="店铺" min-width="150">
-                <template #default="{ row }">{{ row.shop_id || '未归属店铺' }}</template>
+                <template #default="{ row }">
+                  <ShopDisplayText v-if="row.shop_id" :row="row" />
+                  <span v-else>未归属店铺</span>
+                </template>
               </el-table-column>
               <el-table-column label="提成前人力" width="130" align="right">
                 <template #default="{ row }">{{ formatMoney(row.pre_commission_amount) }}</template>
@@ -440,6 +443,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/api'
 import { formatPayrollLockedConflictSummary } from '@/utils/payrollConflict'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const authStore = useAuthStore()
 

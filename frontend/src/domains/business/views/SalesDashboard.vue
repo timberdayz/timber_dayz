@@ -75,7 +75,11 @@
       
       <el-table :data="shopPerformance.data" stripe v-loading="shopPerformance.loading" class="erp-table">
         <el-table-column prop="shop_region" label="店铺地区" width="120" fixed="left" />
-        <el-table-column prop="shop_name" label="店铺名称" width="200" fixed="left" show-overflow-tooltip />
+        <el-table-column prop="shop_name" label="店铺名称" width="200" fixed="left" show-overflow-tooltip>
+          <template #default="{ row }">
+            <ShopDisplayText :row="row" />
+          </template>
+        </el-table-column>
         <el-table-column label="销售数量" width="150">
           <template #default="{ row }">
             <div>
@@ -150,7 +154,11 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="shop_name" label="店铺名称" width="200" fixed="left" show-overflow-tooltip />
+        <el-table-column prop="shop_name" label="店铺名称" width="200" fixed="left" show-overflow-tooltip>
+          <template #default="{ row }">
+            <ShopDisplayText :row="row" />
+          </template>
+        </el-table-column>
         <el-table-column prop="shop_region" label="地区" width="120" />
         <el-table-column prop="sales_amount" label="销售额" width="150" sortable>
           <template #default="{ row }">
@@ -290,6 +298,7 @@ import api from '@/api'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, Picture } from '@element-plus/icons-vue'
 import { useSalesStore } from '@/stores/sales'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const salesStore = useSalesStore()
 

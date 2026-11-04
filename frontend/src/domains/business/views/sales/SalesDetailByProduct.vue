@@ -99,7 +99,11 @@
         <el-table-column prop="product_id" label="产品ID（SN）" width="120" fixed="left" />
         <el-table-column prop="order_id" label="订单ID" width="180" />
         <el-table-column prop="platform_code" label="平台" width="100" />
-        <el-table-column prop="shop_id" label="店铺" width="120" />
+        <el-table-column prop="shop_id" label="店铺" width="140">
+          <template #default="{ row }">
+            <ShopDisplayText :row="row" />
+          </template>
+        </el-table-column>
         <el-table-column prop="platform_sku" label="平台SKU" width="150" />
         <el-table-column prop="product_name" label="产品名称" width="200" show-overflow-tooltip />
         <el-table-column prop="sale_date" label="销售日期" width="120" />
@@ -159,6 +163,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, Download } from '@element-plus/icons-vue'
 import api from '@/api'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 // 状态
 const loading = ref(false)

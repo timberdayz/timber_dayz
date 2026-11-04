@@ -348,7 +348,11 @@
           <el-table :data="deletedMonthlyData" size="small" border>
             <el-table-column prop="year_month" label="月份" width="110" />
             <el-table-column prop="platform_code" label="平台" width="110" />
-            <el-table-column prop="shop_id" label="店铺ID" min-width="180" />
+            <el-table-column prop="shop_id" label="店铺" min-width="180">
+              <template #default="{ row }">
+                <ShopDisplayText :row="row" />
+              </template>
+            </el-table-column>
             <el-table-column prop="total_cost" label="成本合计" width="120" align="right">
               <template #default="{ row }">
                 {{ formatNumber(row.total_cost) }}
@@ -772,6 +776,7 @@ import api from '@/api'
 import PageHeader from '@/components/common/PageHeader.vue'
 import employeeTasksApi from '@/api/employeeTasks.js'
 import { buildShopAccountLookup, resolveShopDisplay } from '@/utils/shopDisplay'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const route = useRoute()
 let shopAccountLookup = new Map()

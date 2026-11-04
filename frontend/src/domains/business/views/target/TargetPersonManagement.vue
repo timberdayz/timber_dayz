@@ -37,7 +37,11 @@
       <el-table-column type="expand" width="52">
         <template #default="{ row }">
           <el-table :data="row.shop_summaries" size="small" border class="shop-source-table">
-            <el-table-column prop="shop_name" label="来源店铺" min-width="160" />
+            <el-table-column prop="shop_name" label="来源店铺" min-width="180">
+              <template #default="{ row }">
+                <ShopDisplayText :row="row" />
+              </template>
+            </el-table-column>
             <el-table-column label="销售目标 / 实际 / 达成" min-width="220" align="right">
               <template #default="{ row: shop }">
                 {{ formatNumber(shop.sales_target) }} / {{ formatNumber(shop.sales_actual) }} / {{ formatPercent(shop.sales_achievement_rate) }}
@@ -92,6 +96,7 @@ import { useRouter } from 'vue-router'
 import PageHeader from '@/components/common/PageHeader.vue'
 import api from '@/api'
 import { normalizeApiList } from './personTargetUtils'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const router = useRouter()
 const loading = ref(false)

@@ -97,7 +97,11 @@
       <el-table :data="orders" v-loading="loading" stripe style="width: 100%">
         <el-table-column prop="order_id" label="订单ID" width="180" />
         <el-table-column prop="platform_code" label="平台" width="100" />
-        <el-table-column prop="shop_id" label="店铺" width="120" />
+        <el-table-column prop="shop_id" label="店铺" width="140">
+          <template #default="{ row }">
+            <ShopDisplayText :row="row" />
+          </template>
+        </el-table-column>
         <el-table-column prop="order_date" label="订单日期" width="120" />
         <el-table-column prop="order_time_utc" label="订单时间" width="160" />
         <el-table-column prop="total_amount_rmb" label="订单金额" width="120" align="right">
@@ -146,6 +150,7 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, Download } from '@element-plus/icons-vue'
 import api from '@/api'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 // 状态
 const loading = ref(false)

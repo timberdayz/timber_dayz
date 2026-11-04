@@ -63,7 +63,11 @@
 
       <el-table v-loading="loadingScope" :data="scopeShops" border stripe class="erp-table">
         <el-table-column prop="platform_code" label="平台" width="140" />
-        <el-table-column prop="shop_id" label="店铺 ID" min-width="180" />
+        <el-table-column prop="shop_id" label="店铺" min-width="180">
+          <template #default="{ row }">
+            <ShopDisplayText :row="row" />
+          </template>
+        </el-table-column>
         <el-table-column prop="standard_name" label="标准店铺名" min-width="180"><template #default="{ row }">{{ row.standard_name || row.shop_id }}</template></el-table-column>
         <el-table-column label="店铺别名" min-width="200"><template #default="{ row }"><span>{{ (row.aliases || []).join('、') || '-' }}</span></template></el-table-column>
         <el-table-column label="是否参与" width="125" align="center"><template #default="{ row }"><el-switch v-model="row.is_included" active-text="参与" inactive-text="不参与" @change="scopeDirty = true" /></template></el-table-column>
@@ -91,7 +95,11 @@
         </section>
         <el-table v-loading="loadingEntries" :data="entryShops" border stripe class="erp-table entry-shop-table">
           <el-table-column prop="platform_code" label="平台" width="130" />
-          <el-table-column prop="shop_id" label="店铺 ID" min-width="165" />
+          <el-table-column prop="shop_id" label="店铺" min-width="165">
+            <template #default="{ row }">
+              <ShopDisplayText :row="row" />
+            </template>
+          </el-table-column>
           <el-table-column prop="standard_name" label="标准店铺名" min-width="160"><template #default="{ row }">{{ row.standard_name || row.shop_id }}</template></el-table-column>
           <el-table-column label="店铺别名" min-width="180"><template #default="{ row }">{{ (row.aliases || []).join('、') || '-' }}</template></el-table-column>
           <el-table-column label="完成状态" width="120" align="center"><template #default="{ row }"><el-tag :type="getLiveStoreEntryStatus(row) === 'completed' ? 'success' : 'warning'">{{ getLiveStoreEntryStatus(row) === 'completed' ? '已完成' : '待录入' }}</el-tag></template></el-table-column>
@@ -135,6 +143,7 @@ import api from '@/api'
 import { buildEntryPayload, buildScopePayload } from './operationPerformanceWorkbench'
 import { allocateOperationMetricScores, buildOperationEntryPreview } from './operationTargetFormula'
 import { formatWorkbenchDirection, formatWorkbenchGuidance } from './workbenchDisplay'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const yearMonth = ref(new Date().toISOString().slice(0, 7))
 const activeStep = ref(0)

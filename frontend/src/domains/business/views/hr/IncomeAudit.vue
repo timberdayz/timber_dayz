@@ -52,7 +52,11 @@
       <template #header>店铺归属与店铺绩效</template>
       <el-table :data="audit.shop_assignments || []" border stripe>
         <el-table-column prop="platform_code" label="平台" width="100" />
-        <el-table-column prop="shop_id" label="店铺" min-width="160" />
+        <el-table-column prop="shop_id" label="店铺" min-width="160">
+          <template #default="{ row }">
+            <ShopDisplayText :row="row" />
+          </template>
+        </el-table-column>
         <el-table-column prop="commission_ratio" label="提成比例" width="100" align="right" />
         <el-table-column prop="allocatable_profit_rate" label="可分配利润率" width="120" align="right" />
         <el-table-column prop="profit_basis_amount" label="利润基数" width="120" align="right">
@@ -110,6 +114,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { getControlledPersonalAuditNotice } from './incomeAuditStatus'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const loading = ref(false)
 const audit = ref(null)

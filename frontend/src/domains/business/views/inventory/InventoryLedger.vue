@@ -15,7 +15,11 @@
         <el-table-column prop="transaction_date" label="日期" width="120" />
         <el-table-column prop="movement_type" label="类型" width="120" />
         <el-table-column prop="platform_code" label="平台" width="100" />
-        <el-table-column prop="shop_id" label="店铺" width="120" />
+        <el-table-column prop="shop_id" label="店铺" width="140">
+          <template #default="{ row }">
+            <ShopDisplayText :row="row" />
+          </template>
+        </el-table-column>
         <el-table-column prop="platform_sku" label="SKU" min-width="180" />
         <el-table-column prop="qty_before" label="变更前" width="100" />
         <el-table-column prop="qty_in" label="入" width="80" />
@@ -30,6 +34,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import inventoryDomainApi from '@/api/inventoryDomain'
+import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const loading = ref(false)
 const rows = ref([])
