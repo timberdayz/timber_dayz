@@ -61,7 +61,9 @@ class _FakeSession:
         if "pg_class" in sql:
             self.existence_params.append(dict(params or {}))
             targets = set((params or {}).get("targets") or [])
-            return _FakeRowsResult([(name,) for name in sorted(self.existing_objects & targets)])
+            return _FakeRowsResult(
+                [(name,) for name in sorted(self.existing_objects & targets)]
+            )
         raise AssertionError(f"unexpected SQL: {sql}")
 
 
@@ -111,12 +113,22 @@ async def test_find_missing_targets_resolves_logical_target_to_its_real_object()
 
 @pytest.mark.asyncio
 async def test_pipeline_freshness_marks_targets_whose_object_is_missing():
-    from backend.domains.data_platform.routers.data_pipeline import get_pipeline_freshness
+    from backend.domains.data_platform.routers.data_pipeline import (
+        get_pipeline_freshness,
+    )
 
     session = _FakeSession(
         freshness_rows=[
-            {"target_name": "api.present_module", "target_type": "view", "status": "success"},
-            {"target_name": "api.gone_module", "target_type": "view", "status": "success"},
+            {
+                "target_name": "api.present_module",
+                "target_type": "view",
+                "status": "success",
+            },
+            {
+                "target_name": "api.gone_module",
+                "target_type": "view",
+                "status": "success",
+            },
             {"target_name": "plain_target", "target_type": "task", "status": "success"},
         ],
         existing_objects={"api.present_module"},
@@ -178,7 +190,9 @@ async def test_pipeline_lineage_flags_edges_whose_object_is_missing():
 # --------------------------------------------------------------------------
 _CREATE_OBJECT_RE = re.compile(
     r"CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP\s+|TEMPORARY\s+|UNLOGGED\s+)?"
-    r"(?:TABLE|VIEW|MATERIALIZED\s+VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+    # FUNCTION 也要认：有些逻辑目标建的是函数（如共享的店铺身份解析函数），
+    # 函数不在 pg_class 里，存在性核对走 pg_proc。
+    r"(?:TABLE|VIEW|MATERIALIZED\s+VIEW|FUNCTION)\s+(?:IF\s+NOT\s+EXISTS\s+)?"
     r"([A-Za-z_][\w$]*)\.([A-Za-z_][\w$]*)",
     re.IGNORECASE,
 )
@@ -200,7 +214,9 @@ def test_every_logical_target_is_registered_with_its_real_object_name():
         sql_path = repo_root / relative_path
         assert sql_path.exists(), f"SQL 资产缺失: {relative_path}"
         sql_text = sql_path.read_text(encoding="utf-8", errors="replace")
-        created = {f"{schema}.{name}" for schema, name in _CREATE_OBJECT_RE.findall(sql_text)}
+        created = {
+            f"{schema}.{name}" for schema, name in _CREATE_OBJECT_RE.findall(sql_text)
+        }
         if target not in created:
             mismatches[target] = created
 
@@ -217,9 +233,9 @@ def test_every_logical_target_is_registered_with_its_real_object_name():
 
     # 反向：登记表里不允许出现「其实同名」的目标（否则等于白白走别名）
     for target, object_name in LOGICAL_TARGET_OBJECTS.items():
-        assert target in mismatches, (
-            f"{target} 的 SQL 实际创建同名对象 {object_name}，不需要登记为逻辑目标"
-        )
+        assert (
+            target in mismatches
+        ), f"{target} 的 SQL 实际创建同名对象 {object_name}，不需要登记为逻辑目标"
 
 
 def _split_sql_statements(sql_text: str) -> list[str]:
@@ -229,10 +245,14 @@ def _split_sql_statements(sql_text: str) -> list[str]:
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_pipeline_freshness_marks_missing_object_against_real_postgres(pg_session):
+async def test_pipeline_freshness_marks_missing_object_against_real_postgres(
+    pg_session,
+):
     from sqlalchemy import text
 
-    from backend.domains.data_platform.routers.data_pipeline import get_pipeline_freshness
+    from backend.domains.data_platform.routers.data_pipeline import (
+        get_pipeline_freshness,
+    )
 
     ddl = Path("sql/ops/create_pipeline_tables.sql").read_text(encoding="utf-8")
     for statement in _split_sql_statements(ddl):

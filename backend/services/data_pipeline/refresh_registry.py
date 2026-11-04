@@ -38,9 +38,20 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.fact_analytics_monthly_atomic": [
         "semantic.fact_analytics_monthly_atomic_mv"
     ],
-    "semantic.fact_products_atomic": ["semantic.alias_registry"],
-    "semantic.fact_inventory_snapshot": [],
-    "semantic.fact_services_atomic": [],
+    # 共享的「原始店铺标识 → 规范店铺键」解析函数。
+    # 它读候选集的物化副本 ⇒ 必须在副本之后建（函数体在建函数时就校验依赖）。
+    "semantic.shop_identity_resolver": [
+        "semantic.shop_identity_resolution_candidates_v2_mv"
+    ],
+    # 下面三条链路以前**完全没做身份解析**，直接把采集文件里的原始 shop_id 透传出去
+    # ⇒ 同一个店在不同链路里是三种键（平台店铺ID / 业务店铺ID / 原始店名 / 占位键）。
+    # 现在统一走 resolve_shop_identity（口径与 orders_atomic 一致）。
+    "semantic.fact_products_atomic": [
+        "semantic.alias_registry",
+        "semantic.shop_identity_resolver",
+    ],
+    "semantic.fact_inventory_snapshot": ["semantic.shop_identity_resolver"],
+    "semantic.fact_services_atomic": ["semantic.shop_identity_resolver"],
     "semantic.shop_month_other_operating_cost": [],
     "mart.shop_day_kpi": [
         "semantic.fact_orders_atomic_mv",
@@ -133,6 +144,7 @@ SQL_TARGET_PATHS: dict[str, str] = {
         "sql/semantic/shop_identity_resolution_candidates_v2_mv.sql"
     ),
     "semantic.shop_identity_resolution_candidates": "sql/semantic/shop_identity_resolution_candidates.sql",
+    "semantic.shop_identity_resolver": "sql/semantic/shop_identity_resolver.sql",
     "semantic.fact_orders_monthly_atomic_mv": "sql/semantic/orders_monthly_atomic_mv.sql",
     "semantic.fact_analytics_monthly_atomic_mv": "sql/semantic/analytics_monthly_atomic_mv.sql",
     "semantic.fact_orders_atomic": "sql/semantic/orders_atomic.sql",

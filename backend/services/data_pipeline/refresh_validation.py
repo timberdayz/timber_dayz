@@ -42,11 +42,15 @@ class RefreshValidationReport:
 # 维护约束：新增逻辑目标时必须登记在这里，由 test_data_pipeline_freshness_existence 守护。
 LOGICAL_TARGET_OBJECTS: dict[str, str] = {
     "semantic.alias_registry": "semantic.semantic_field_aliases",
+    # 共享的店铺身份解析函数：SQL 建的是**函数**，不是关系（pg_class 里没有）
+    "semantic.shop_identity_resolver": "semantic.resolve_shop_identity",
 }
 
 
 async def _target_exists(db: AsyncSession, target: str) -> bool:
-    result = await db.execute(text("SELECT to_regclass(:target_name)"), {"target_name": target})
+    result = await db.execute(
+        text("SELECT to_regclass(:target_name)"), {"target_name": target}
+    )
     return result.scalar_one_or_none() is not None
 
 
@@ -77,12 +81,21 @@ async def find_missing_targets(
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname || '.' || c.relname = ANY(:targets)
+            UNION
+            -- 有些逻辑目标建的是**函数**（如共享的店铺身份解析函数），
+            -- 函数不在 pg_class 里 ⇒ 必须单独查 pg_proc，否则会被误报成 missing。
+            SELECT n.nspname || '.' || p.proname
+            FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname || '.' || p.proname = ANY(:targets)
             """
         ),
         {"targets": object_names},
     )
     existing = {row[0] for row in result.fetchall()}
-    return {name for name, object_name in resolved.items() if object_name not in existing}
+    return {
+        name for name, object_name in resolved.items() if object_name not in existing
+    }
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -101,7 +114,9 @@ def _parse_datetime(value: Any) -> datetime | None:
         return None
 
 
-async def _load_target_last_succeeded_at(db: AsyncSession, target: str) -> datetime | None:
+async def _load_target_last_succeeded_at(
+    db: AsyncSession, target: str
+) -> datetime | None:
     result = await db.execute(
         text(
             """
@@ -130,7 +145,9 @@ async def _target_is_fresh_enough(
     try:
         return last_succeeded_at >= source_latest_ingest
     except TypeError:
-        return last_succeeded_at.replace(tzinfo=None) >= source_latest_ingest.replace(tzinfo=None)
+        return last_succeeded_at.replace(tzinfo=None) >= source_latest_ingest.replace(
+            tzinfo=None
+        )
 
 
 def _module_status_is_ready(module_report: dict[str, Any] | None) -> bool:
@@ -163,7 +180,9 @@ async def validate_refresh_result(
             missing_objects.append(str(target))
 
     stale_targets: list[str] = []
-    source_latest_ingest = _parse_datetime(context.get("source_latest_ingest_timestamp"))
+    source_latest_ingest = _parse_datetime(
+        context.get("source_latest_ingest_timestamp")
+    )
     written_rows = int(context.get("written_rows") or context.get("row_count") or 0)
     if source_latest_ingest is not None and written_rows > 0:
         for target in targets:
@@ -182,14 +201,20 @@ async def validate_refresh_result(
         report = await inspect_dashboard_assets(db)
         module_reports = report.get("modules") if isinstance(report, dict) else {}
         for module_name in module_names:
-            module_report = module_reports.get(module_name) if isinstance(module_reports, dict) else None
+            module_report = (
+                module_reports.get(module_name)
+                if isinstance(module_reports, dict)
+                else None
+            )
             if not _module_status_is_ready(module_report):
                 failed_modules.append(module_name)
 
     if missing_objects or stale_targets or failed_modules:
         error_parts: list[str] = []
         if failed_modules:
-            error_parts.append(f"dashboard_modules_not_ready:{','.join(failed_modules)}")
+            error_parts.append(
+                f"dashboard_modules_not_ready:{','.join(failed_modules)}"
+            )
         return RefreshValidationReport(
             status="failed",
             missing_objects=missing_objects,

@@ -1,7 +1,9 @@
 from pathlib import Path
 
 
-def _assert_semantic_sql(path_str: str, view_name: str, required_fields: tuple[str, ...]) -> None:
+def _assert_semantic_sql(
+    path_str: str, view_name: str, required_fields: tuple[str, ...]
+) -> None:
     sql_path = Path(path_str)
     assert sql_path.exists()
     sql_text = sql_path.read_text(encoding="utf-8")
@@ -72,7 +74,11 @@ def test_services_atomic_sql_asset():
 
 def test_services_atomic_preserves_existing_gmv_column_order_before_buyer_count():
     sql_text = Path("sql/semantic/services_atomic.sql").read_text(encoding="utf-8")
-    final_select = sql_text.rsplit("FROM deduplicated", 1)[0].rsplit("SELECT", 1)[-1]
+    # 最终 SELECT 的数据源：接入身份解析后是 `FROM resolved`（原来是 FROM deduplicated）
+    source_marker = (
+        "FROM resolved" if "FROM resolved" in sql_text else "FROM deduplicated"
+    )
+    final_select = sql_text.rsplit(source_marker, 1)[0].rsplit("SELECT", 1)[-1]
 
     assert "COALESCE(gmv, 0) AS gmv" in final_select
     assert "COALESCE(buyer_count, 0) AS buyer_count" in final_select

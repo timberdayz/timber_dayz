@@ -63,11 +63,39 @@ WITH raw_inventory AS (
 mapped AS (
     SELECT
         platform_code,
+        -- ⚠️ 这一列以前叫 shop_id，但它是**采集层写进来的原始标识**：
+        --   库存采集文件把店铺归属放在 raw_data 里，表列只落了一个占位值 'xihong'
+        --   （实测 4,111 行里 2,726 行 raw_data->>'shop_id'='xihong'、
+        --     1,385 行='miaoshou_real_001'，而表列 shop_id 全是 'xihong'）。
+        --   ⇒ 库存看板按店拆不开的根因就在这里。
+        -- 现在保留原值（去重分区口径不变），最后再解析成规范键。
         COALESCE(
             NULLIF(TRIM(COALESCE(shop_id, '')), ''),
             NULLIF(TRIM(COALESCE(raw_data->>'shop_id', '')), ''),
             'unknown'
-        ) AS shop_id,
+        ) AS source_shop_id,
+        -- 身份候选值：与 orders_atomic 的 normalized_identity_candidates 同构。
+        -- raw_data 里的 shop_account_id 是采集文件自带的店铺账号ID —— 最可靠的一路。
+        ARRAY_REMOVE(
+            ARRAY[
+                LOWER(COALESCE(NULLIF(TRIM(COALESCE(raw_data->>'shop_account_id', '')), ''), '')),
+                LOWER(COALESCE(NULLIF(TRIM(COALESCE(raw_data->>'platform_shop_id', '')), ''), '')),
+                LOWER(COALESCE(NULLIF(TRIM(COALESCE(raw_data->>'shop_id', '')), ''), '')),
+                LOWER(COALESCE(NULLIF(TRIM(COALESCE(shop_id, '')), ''), '')),
+                REGEXP_REPLACE(
+                    REGEXP_REPLACE(
+                        LOWER(TRIM(COALESCE(NULLIF(TRIM(COALESCE(raw_data->>'store_name', '')), ''), ''))),
+                        '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
+                        '',
+                        'i'
+                    ),
+                    '[[:space:]_()/-]+',
+                    '',
+                    'g'
+                )
+            ],
+            ''
+        ) AS identity_candidates,
         data_domain,
         granularity,
         metric_date::date AS metric_date,
@@ -205,7 +233,8 @@ mapped AS (
 cleaned AS (
     SELECT
         platform_code,
-        shop_id,
+        source_shop_id,
+        identity_candidates,
         data_domain,
         granularity,
         metric_date,
@@ -223,7 +252,28 @@ cleaned AS (
         warehouse_code,
         CASE
             WHEN available_stock_raw IS NULL THEN NULL
-            ELSE NULLIF(
+            WHEN NULLIF(
+                REGEXP_REPLACE(
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(available_stock_raw, ',', ''),
+                                ' ',
+                                ''
+                            ),
+                            CHR(8212),
+                            ''
+                        ),
+                        CHR(8211),
+                        ''
+                    ),
+                    '[^0-9.-]',
+                    '',
+                    'g'
+                ),
+                ''
+            ) ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(
                 REGEXP_REPLACE(
                     REPLACE(
                         REPLACE(
@@ -244,10 +294,32 @@ cleaned AS (
                 ),
                 ''
             )::numeric
+            ELSE NULL
         END AS available_stock,
         CASE
             WHEN on_hand_stock_raw IS NULL THEN NULL
-            ELSE NULLIF(
+            WHEN NULLIF(
+                REGEXP_REPLACE(
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(on_hand_stock_raw, ',', ''),
+                                ' ',
+                                ''
+                            ),
+                            CHR(8212),
+                            ''
+                        ),
+                        CHR(8211),
+                        ''
+                    ),
+                    '[^0-9.-]',
+                    '',
+                    'g'
+                ),
+                ''
+            ) ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(
                 REGEXP_REPLACE(
                     REPLACE(
                         REPLACE(
@@ -268,10 +340,32 @@ cleaned AS (
                 ),
                 ''
             )::numeric
+            ELSE NULL
         END AS on_hand_stock,
         CASE
             WHEN reserved_stock_raw IS NULL THEN NULL
-            ELSE NULLIF(
+            WHEN NULLIF(
+                REGEXP_REPLACE(
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(reserved_stock_raw, ',', ''),
+                                ' ',
+                                ''
+                            ),
+                            CHR(8212),
+                            ''
+                        ),
+                        CHR(8211),
+                        ''
+                    ),
+                    '[^0-9.-]',
+                    '',
+                    'g'
+                ),
+                ''
+            ) ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(
                 REGEXP_REPLACE(
                     REPLACE(
                         REPLACE(
@@ -292,10 +386,32 @@ cleaned AS (
                 ),
                 ''
             )::numeric
+            ELSE NULL
         END AS reserved_stock,
         CASE
             WHEN in_transit_stock_raw IS NULL THEN NULL
-            ELSE NULLIF(
+            WHEN NULLIF(
+                REGEXP_REPLACE(
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(in_transit_stock_raw, ',', ''),
+                                ' ',
+                                ''
+                            ),
+                            CHR(8212),
+                            ''
+                        ),
+                        CHR(8211),
+                        ''
+                    ),
+                    '[^0-9.-]',
+                    '',
+                    'g'
+                ),
+                ''
+            ) ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(
                 REGEXP_REPLACE(
                     REPLACE(
                         REPLACE(
@@ -316,10 +432,32 @@ cleaned AS (
                 ),
                 ''
             )::numeric
+            ELSE NULL
         END AS in_transit_stock,
         CASE
             WHEN stockout_qty_raw IS NULL THEN NULL
-            ELSE NULLIF(
+            WHEN NULLIF(
+                REGEXP_REPLACE(
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(stockout_qty_raw, ',', ''),
+                                ' ',
+                                ''
+                            ),
+                            CHR(8212),
+                            ''
+                        ),
+                        CHR(8211),
+                        ''
+                    ),
+                    '[^0-9.-]',
+                    '',
+                    'g'
+                ),
+                ''
+            ) ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(
                 REGEXP_REPLACE(
                     REPLACE(
                         REPLACE(
@@ -340,10 +478,32 @@ cleaned AS (
                 ),
                 ''
             )::numeric
+            ELSE NULL
         END AS stockout_qty,
         CASE
             WHEN reorder_point_raw IS NULL THEN NULL
-            ELSE NULLIF(
+            WHEN NULLIF(
+                REGEXP_REPLACE(
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(reorder_point_raw, ',', ''),
+                                ' ',
+                                ''
+                            ),
+                            CHR(8212),
+                            ''
+                        ),
+                        CHR(8211),
+                        ''
+                    ),
+                    '[^0-9.-]',
+                    '',
+                    'g'
+                ),
+                ''
+            ) ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(
                 REGEXP_REPLACE(
                     REPLACE(
                         REPLACE(
@@ -364,10 +524,32 @@ cleaned AS (
                 ),
                 ''
             )::numeric
+            ELSE NULL
         END AS reorder_point,
         CASE
             WHEN safety_stock_raw IS NULL THEN NULL
-            ELSE NULLIF(
+            WHEN NULLIF(
+                REGEXP_REPLACE(
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(safety_stock_raw, ',', ''),
+                                ' ',
+                                ''
+                            ),
+                            CHR(8212),
+                            ''
+                        ),
+                        CHR(8211),
+                        ''
+                    ),
+                    '[^0-9.-]',
+                    '',
+                    'g'
+                ),
+                ''
+            ) ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(
                 REGEXP_REPLACE(
                     REPLACE(
                         REPLACE(
@@ -388,10 +570,32 @@ cleaned AS (
                 ),
                 ''
             )::numeric
+            ELSE NULL
         END AS safety_stock,
         CASE
             WHEN unit_cost_raw IS NULL THEN NULL
-            ELSE NULLIF(
+            WHEN NULLIF(
+                REGEXP_REPLACE(
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(unit_cost_raw, ',', ''),
+                                ' ',
+                                ''
+                            ),
+                            CHR(8212),
+                            ''
+                        ),
+                        CHR(8211),
+                        ''
+                    ),
+                    '[^0-9.-]',
+                    '',
+                    'g'
+                ),
+                ''
+            ) ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(
                 REGEXP_REPLACE(
                     REPLACE(
                         REPLACE(
@@ -412,10 +616,32 @@ cleaned AS (
                 ),
                 ''
             )::numeric
+            ELSE NULL
         END AS unit_cost,
         CASE
             WHEN inventory_value_raw IS NULL THEN NULL
-            ELSE NULLIF(
+            WHEN NULLIF(
+                REGEXP_REPLACE(
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(inventory_value_raw, ',', ''),
+                                ' ',
+                                ''
+                            ),
+                            CHR(8212),
+                            ''
+                        ),
+                        CHR(8211),
+                        ''
+                    ),
+                    '[^0-9.-]',
+                    '',
+                    'g'
+                ),
+                ''
+            ) ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(
                 REGEXP_REPLACE(
                     REPLACE(
                         REPLACE(
@@ -436,6 +662,7 @@ cleaned AS (
                 ),
                 ''
             )::numeric
+            ELSE NULL
         END AS inventory_value,
         -- 行级「最后修改时间」：库存停滞时长的时间基准。
         -- 非标准格式一律落 NULL（不得让整批查询失败）。
@@ -455,19 +682,27 @@ cleaned AS (
         -- 「销量列存在且为 0」= 真的零销量。两者必须可区分。
         CASE
             WHEN sales_7d_raw IS NULL THEN NULL
-            ELSE NULLIF(REGEXP_REPLACE(REPLACE(sales_7d_raw, ',', ''), '[^0-9.-]', '', 'g'), '')::numeric
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(sales_7d_raw, ',', ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(sales_7d_raw, ',', ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
         END AS checklist_sales_7d,
         CASE
             WHEN sales_30d_raw IS NULL THEN NULL
-            ELSE NULLIF(REGEXP_REPLACE(REPLACE(sales_30d_raw, ',', ''), '[^0-9.-]', '', 'g'), '')::numeric
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(sales_30d_raw, ',', ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(sales_30d_raw, ',', ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
         END AS checklist_sales_30d,
         CASE
             WHEN sales_60d_raw IS NULL THEN NULL
-            ELSE NULLIF(REGEXP_REPLACE(REPLACE(sales_60d_raw, ',', ''), '[^0-9.-]', '', 'g'), '')::numeric
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(sales_60d_raw, ',', ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(sales_60d_raw, ',', ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
         END AS checklist_sales_60d,
         CASE
             WHEN sales_90d_raw IS NULL THEN NULL
-            ELSE NULLIF(REGEXP_REPLACE(REPLACE(sales_90d_raw, ',', ''), '[^0-9.-]', '', 'g'), '')::numeric
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(sales_90d_raw, ',', ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(sales_90d_raw, ',', ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
         END AS checklist_sales_90d,
         raw_data,
         header_columns,
@@ -480,10 +715,34 @@ deduplicated AS (
     SELECT
         *,
         ROW_NUMBER() OVER (
-            PARTITION BY platform_code, shop_id, data_hash
+            PARTITION BY platform_code, source_shop_id, data_hash
             ORDER BY ingest_timestamp DESC
         ) AS rn
     FROM cleaned
+),
+resolved AS (
+    -- 解析成规范店铺键（口径见 sql/semantic/shop_identity_resolver.sql）。
+    -- 候选 = 1 ⇒ 用规范键（唯一命中）。
+    -- 候选 = 0 ⇒ 这个店在本系统里没有账号 ⇒ **保留原始键**。
+    -- 候选 > 1 ⇒ 有歧义 ⇒ **也保留原始键**：
+    --   原始键是采集文件里数据自己写的（如平台店铺ID，有唯一约束），
+    --   歧义来自「同一个源行的其它身份路径命中了别的账号」。
+    --   抹成 unknown 会让看板再也查不到店名（显示名 JOIN 靠的正是原始键），
+    --   猜一个则是在编数据 ⇒ 两者都不做，保留原值 + 暴露候选数。
+    SELECT
+        d.*,
+        CASE
+            WHEN r.candidate_count = 1 THEN r.resolved_shop_id
+            ELSE d.source_shop_id
+        END AS shop_id,
+        r.resolved_shop_account_id AS resolved_shop_account_id,
+        COALESCE(r.candidate_count, 0) AS identity_candidate_count
+    FROM deduplicated d
+    LEFT JOIN LATERAL (
+        SELECT *
+          FROM semantic.resolve_shop_identity(d.platform_code, d.identity_candidates, NULL)
+    ) r ON TRUE
+    WHERE d.rn = 1
 )
 SELECT
     platform_code,
@@ -529,6 +788,10 @@ SELECT
     checklist_sales_7d,
     checklist_sales_30d,
     checklist_sales_60d,
-    checklist_sales_90d
-FROM deduplicated
-WHERE rn = 1;
+    checklist_sales_90d,
+    -- ↓ 新增列必须追加在末尾（CREATE OR REPLACE VIEW 不允许改变已有列的位置）
+    -- 解析出的店铺账号ID（NULL = 没解析出来，键仍是原始标识）。
+    resolved_shop_account_id,
+    -- 身份候选数：0 = 没匹配到账号；1 = 唯一命中；>1 = 有歧义（已落 unknown）。
+    identity_candidate_count
+FROM resolved;

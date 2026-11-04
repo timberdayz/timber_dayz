@@ -133,8 +133,24 @@ def test_refresh_registry_exposes_dependency_order():
         == "sql/semantic/orders_monthly_atomic.sql"
     )
     assert PIPELINE_DEPENDENCIES["semantic.fact_products_atomic"] == [
-        "semantic.alias_registry"
+        "semantic.alias_registry",
+        "semantic.shop_identity_resolver",
     ]
+    # 三条以前没做身份解析的链路，现在统一走共享解析函数。
+    assert PIPELINE_DEPENDENCIES["semantic.fact_inventory_snapshot"] == [
+        "semantic.shop_identity_resolver"
+    ]
+    assert PIPELINE_DEPENDENCIES["semantic.fact_services_atomic"] == [
+        "semantic.shop_identity_resolver"
+    ]
+    # 解析函数读候选集的物化副本 ⇒ 顺序不能反（建函数时就校验依赖）。
+    assert PIPELINE_DEPENDENCIES["semantic.shop_identity_resolver"] == [
+        "semantic.shop_identity_resolution_candidates_v2_mv"
+    ]
+    assert (
+        SQL_TARGET_PATHS["semantic.shop_identity_resolver"]
+        == "sql/semantic/shop_identity_resolver.sql"
+    )
     assert (
         SQL_TARGET_PATHS["semantic.alias_registry"]
         == "sql/semantic/semantic_alias_registry.sql"
