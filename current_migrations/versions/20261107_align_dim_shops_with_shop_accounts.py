@@ -45,9 +45,10 @@
 - 只写 ``core.dim_platforms`` 里已存在的平台（``dim_shops.platform_code`` 有外键）。
 - 同名不同账号不会造成重复行：``dim_shops`` 的主键就是
   ``(platform_code, shop_id)`` ⇒ JOIN 最多命中一行 ⇒ 不会把看板金额**翻倍**。
-- 清理「源里已不存在」的历史行时**不带 CASCADE**：若历史业务表（绩效、提成、
-  告警等 10 张表都有外键指向 ``dim_shops``）仍引用着某一行，删除会直接报错
-  ⇒ 迁移失败（fail-closed），不会悄悄改坏业务数据。
+- 清理「源里已不存在」的派生行时**只删没人引用的行**：``core.dim_shops`` 被 10
+  张业务表当外键目标（绩效、提成、告警、目标拆解……）。历史数据引用的行**必须
+  留着** —— 删了就是删业务数据。「有没有人引用」从系统目录里现场读（不写死
+  表名），判断不了就干脆不删（保守）。
 """
 
 from alembic import op
@@ -105,11 +106,15 @@ ON CONFLICT (platform_code, shop_id) DO UPDATE SET
     updated_at = NOW()
 """
 
-#: 清掉「源里已经不存在」的派生行 —— 让「重跑」真的是**全量对齐**。
+#: 清理「源里已经不存在」的派生行 —— 让「重跑」真的是**全量对齐**。
 #:
-#: 不带 CASCADE：历史业务表对 ``core.dim_shops`` 有外键，若仍引用着某一行，
-#: 删除会直接报错 ⇒ 迁移失败（fail-closed），而不是悄悄删掉业务数据。
-_PRUNE_SQL = """
+#: **只清理没有人引用的行**：``core.dim_shops`` 被 10 张业务表当外键目标
+#: （绩效、提成、告警、目标拆解……）。历史数据引用的行**必须留着** —— 删了就是
+#: 删业务数据，而且会直接撞外键约束让迁移失败。
+#:
+#: 「有没有人引用」从系统目录里现场读（不写死表名）：有指向
+#: ``core.dim_shops`` 的外键，就把这些表拼成 ``NOT EXISTS`` 判定。
+_PRUNE_BASE_SQL = """
 DELETE FROM core.dim_shops ds
 WHERE NOT EXISTS (
     SELECT 1
@@ -124,6 +129,79 @@ WHERE NOT EXISTS (
           ) = ds.shop_id
 )
 """
+
+
+def _foreign_key_references() -> (
+    list[tuple[str, str, tuple[str, ...], tuple[str, ...]]]
+):
+    """找出所有外键指向 ``core.dim_shops`` 的表。
+
+    返回 ``(schema, table, 源列, 目标列)`` 四元组。目标列必须正好是
+    ``(platform_code, shop_id)`` 才有办法生成等值判定 —— 其它的外键一律
+    视为「不可安全判定」⇒ 调用方会跳过清理（保守）。
+    """
+    bind = op.get_bind()
+    rows = bind.execute(
+        sa.text(
+            """
+            SELECT
+                src_ns.nspname,
+                src.relname,
+                ARRAY(
+                    SELECT att.attname
+                    FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+                    JOIN pg_attribute att
+                      ON att.attrelid = con.conrelid AND att.attnum = k.attnum
+                    ORDER BY k.ord
+                ) AS src_cols,
+                ARRAY(
+                    SELECT att.attname
+                    FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
+                    JOIN pg_attribute att
+                      ON att.attrelid = con.confrelid AND att.attnum = k.attnum
+                    ORDER BY k.ord
+                ) AS tgt_cols
+            FROM pg_constraint con
+            JOIN pg_class src ON src.oid = con.conrelid
+            JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace
+            JOIN pg_class tgt ON tgt.oid = con.confrelid
+            JOIN pg_namespace tgt_ns ON tgt_ns.oid = tgt.relnamespace
+            WHERE con.contype = 'f'
+              AND tgt_ns.nspname = 'core'
+              AND tgt.relname = 'dim_shops'
+            """
+        )
+    ).all()
+    return [(str(row[0]), str(row[1]), tuple(row[2]), tuple(row[3])) for row in rows]
+
+
+def _build_prune_sql() -> str | None:
+    """生成「只删没人引用的行」的 DELETE；无法安全判定时返回 None（不删）。"""
+    references = _foreign_key_references()
+    if not references:
+        return _PRUNE_BASE_SQL
+
+    conditions: list[str] = []
+    for schema, table, src_cols, tgt_cols in references:
+        if tuple(tgt_cols) != ("platform_code", "shop_id"):
+            # 目标列不是 (platform_code, shop_id) ⇒ 生成不出等值判定 ⇒ 保守起见
+            # 放弃清理（宁可不删，也不要误删业务数据）。
+            print(
+                "[WARN] dim_shops 存在非标准外键（{schema}.{table} → {cols}），跳过陈旧行清理".format(
+                    schema=schema, table=table, cols=list(tgt_cols)
+                )
+            )
+            return None
+        eq = " AND ".join(
+            "t.{src} = ds.{tgt}".format(src=src, tgt=tgt)
+            for src, tgt in zip(src_cols, tgt_cols)
+        )
+        conditions.append(
+            "NOT EXISTS (SELECT 1 FROM {schema}.{table} t WHERE {eq})".format(
+                schema=schema, table=table, eq=eq
+            )
+        )
+    return _PRUNE_BASE_SQL + "  AND " + "\n  AND ".join(conditions) + "\n"
 
 
 def _table_exists(schema: str, table: str) -> bool:
@@ -153,7 +231,9 @@ def upgrade() -> None:
 
     before = _row_count("core", "dim_shops")
     op.get_bind().execute(sa.text(_ALIGN_SQL))
-    op.get_bind().execute(sa.text(_PRUNE_SQL))
+    prune_sql = _build_prune_sql()
+    if prune_sql:
+        op.get_bind().execute(sa.text(prune_sql))
     after = _row_count("core", "dim_shops")
     print(
         "[OK] core.dim_shops 与 core.shop_accounts 对齐：{before} → {after} 行".format(
