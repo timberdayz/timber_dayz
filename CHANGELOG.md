@@ -1,5 +1,23 @@
 # Changelog - 西虹 ERP 系统
 
+## [v7.13.3] - 2026-11-04 - 看板查询超时降级兜底（返回上次成功快照 + 数据时间提示）
+
+### 可靠性
+
+- **看板不再「超时即空白页」**：数据库语句超时时，后端不再直接返回 500，而是返回**上一次成功算出来的结果**，并在响应里明确标出「这份数据是截至什么时候的」。
+  - 降级只发生在**超时**这一种故障上。语法错、权限不足、连接断开照常 500 —— 把它们伪装成「数据有点旧」会把真 bug 藏起来。
+  - 超时**且**没有可用快照时，仍然返回 500 —— 不能凭空造数。
+  - 客户端断开（`asyncio.CancelledError`）不算超时：那是用户走了或服务在停机，不该拿旧数据糊弄过去。
+- **快照按端点分桶**（`<端点>:last_success`）：不同端点的查询参数可能完全一样（kpi 与 operational-metrics 都是 `granularity/period_key/platform_code/shop_id`），共用一个键会把 A 端点的数字当成 B 端点的发出去。
+- **快照活 24 小时**（普通看板缓存只有 180 秒）：快照的用途正是「现在算不出来时还能给用户看点什么」，活得比普通缓存短就没意义了。
+- 响应里新增 `meta.data_status="degraded"`、`meta.data_as_of`（那次成功结果的时间）、`meta.degraded_reason`，以及一条人话 warning；响应头 `X-Cache: DEGRADED`。前端业务概览页顶部弹出黄色提示条，明说「当前展示的是上一次成功的结果，不是最新数据」。
+- 降级记录挂在 `request.state` 上而不是 ContextVar：bootstrap 端点用 `asyncio.gather` 并发跑 7 个模块，而 **Task 会复制一份 contextvars 上下文** —— 子任务里 `ContextVar.set()` 传不回父任务。
+
+### 工程
+
+- 新增 `backend/utils/query_timeout.py`：沿异常链（`__cause__` / `__context__` / SQLAlchemy 的 `orig`）识别超时 —— asyncpg 的 `QueryCanceledError`、psycopg2 的 `QueryCanceled`、`sqlalchemy.exc.TimeoutError` 都能认，同时不会把普通异常误判成超时。
+- 新增 `backend/tests/data_pipeline/test_dashboard_timeout_fallback.py`（10 个用例）：超时降级、非超时不解降、无快照仍 500、快照按端点隔离、超时识别（含「客户端断开不算超时」）。
+
 ## [v7.13.2] - 2026-11-04 - 物化店铺身份候选集 + 修 analytics 数值转换脏数据
 
 ### 修复

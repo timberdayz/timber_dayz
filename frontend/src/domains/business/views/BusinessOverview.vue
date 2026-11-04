@@ -24,6 +24,16 @@
     />
 
     <el-alert
+      v-if="businessOverviewDegradedAlert"
+      :title="businessOverviewDegradedAlert.title"
+      :description="businessOverviewDegradedAlert.description"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="dashboard-freshness-alert"
+    />
+
+    <el-alert
       v-if="businessOverviewFreshnessAlert"
       :title="businessOverviewFreshnessAlert.title"
       :description="businessOverviewFreshnessAlert.description"
@@ -1165,6 +1175,8 @@ import PageHeader from '@/components/common/PageHeader.vue'
 const loading = ref(false)
 const dashboardAssetNotice = ref(null)
 const businessOverviewDataFreshness = ref(null)
+// 后端「查询超时降级」标记（meta.data_status === 'degraded'）
+const businessOverviewDegradedMeta = ref(null)
 const trafficRankingIdentityHealth = ref(null)
 const loadingKPI = ref(false)
 const loadingComparison = ref(false)
@@ -1223,6 +1235,16 @@ const formatFreshnessTime = (value) => {
   return String(value).replace('T', ' ').slice(0, 19)
 }
 
+// 后端在「查询超时降级」时会在 meta 里写 data_status='degraded' 与
+// data_as_of（那次成功结果的时间）。只认 degraded，其余一律当作正常。
+const extractDegradedMeta = (meta) => {
+  if (!meta || meta.data_status !== 'degraded') return null
+  return {
+    data_as_of: meta.data_as_of || null,
+    degraded_reason: meta.degraded_reason || 'query_timeout'
+  }
+}
+
 const businessOverviewFreshnessAlert = computed(() => {
   const freshness = businessOverviewDataFreshness.value
   if (!freshness || !freshness.is_stale) return null
@@ -1236,6 +1258,21 @@ const businessOverviewFreshnessAlert = computed(() => {
       `订单最新入库 ${formatFreshnessTime(orders.latest_ingest_timestamp)}，` +
       `流量最新入库 ${formatFreshnessTime(traffic.latest_ingest_timestamp)}。` +
       '请检查是否存在模板变更阻断或待确认文件。'
+  }
+})
+
+// 「查询超时降级」提示：后端在语句超时时返回上一次成功的结果，
+// 并在 meta 里标明数据截至什么时候 —— 这儿要把它说清楚，不能让用户
+// 以为看到的是最新数据。
+const businessOverviewDegradedAlert = computed(() => {
+  const degraded = businessOverviewDegradedMeta.value
+  if (!degraded) return null
+  const asOf = degraded.data_as_of ? formatFreshnessTime(degraded.data_as_of) : '--'
+  return {
+    title: '数据查询超时，当前展示的是上一次成功的结果',
+    description:
+      `本次查询超过数据库语句超时上限，页面展示的是 ${asOf} 那次成功计算的结果，` +
+      '不是最新数据。稍后刷新即可拿到最新结果。'
   }
 })
 
@@ -2527,6 +2564,7 @@ const loadKPIData = async () => {
     if (response) {
       const data = response
       businessOverviewDataFreshness.value = data.meta?.data_freshness || null
+      businessOverviewDegradedMeta.value = extractDegradedMeta(data.meta)
       applyKpiCards(data)
     }
   } catch (error) {
@@ -3018,6 +3056,7 @@ const loadCriticalTierBootstrap = async () => {
     applyComparisonPayload(payload?.comparison)
     applyOperationalPayload(payload?.operational_metrics)
     businessOverviewDataFreshness.value = payload?.meta?.data_freshness || null
+    businessOverviewDegradedMeta.value = extractDegradedMeta(payload?.meta)
   } catch (error) {
     console.error('[BusinessOverview] bootstrap 加载失败:', error)
     if (!consumeDashboardAssetError(error, 'business_overview')) {

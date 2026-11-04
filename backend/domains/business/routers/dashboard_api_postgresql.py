@@ -30,6 +30,7 @@ from backend.services.postgresql_dashboard_service import (
 )
 from backend.utils.api_response import error_response, success_response
 from backend.utils.error_codes import ErrorCode
+from backend.utils.query_timeout import is_query_timeout_error
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -38,6 +39,25 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard-postgresql"])
 _B_COST_ALLOWED_ROLES = {"admin", "manager", "finance"}
 _DASHBOARD_SINGLEFLIGHT_LOCK_TTL = 60
 _DASHBOARD_SINGLEFLIGHT_WAIT_TIMEOUT = 35.0
+
+#: 「上次成功快照」的缓存类型前缀 —— 降级兜底的数据来源。
+#:
+#: 与普通看板缓存（180 秒）分开存：普通缓存过期就没了，而降级快照要活得久
+#: —— 它的用途正是「现在算不出来，能不能给用户看上一次成功的结果」。
+#:
+#: 快照按**端点**分桶（``<端点 cache_type>:last_success``）：不同端点的
+#: 查询参数可能完全一样（例如 kpi 与 operational_metrics 都是
+#: ``granularity/period_key/platform_code/shop_id``），共用一个键会把
+#: A 端点的数据当成 B 端点的快照发出去。
+_DASHBOARD_SNAPSHOT_TTL_SECONDS = 24 * 60 * 60
+
+#: 本次请求的降级记录挂在 ``request.state`` 上。
+#:
+#: 为什么不用 ContextVar：业务概览的 bootstrap 端点用 ``asyncio.gather``
+#: 并发跑 7 个模块，而 **Task 会复制一份 contextvars 上下文** ——
+#: 子任务里 ``ContextVar.set()`` 传不回父任务。``request.state`` 是同一个
+#: 对象，跨任务共享 ✅。
+_DEGRADATIONS_STATE_KEY = "dashboard_degradations"
 _BUSINESS_OVERVIEW_CANONICAL_ONLY = os.getenv(
     "BUSINESS_OVERVIEW_CANONICAL_ONLY",
     "true",
@@ -286,6 +306,7 @@ def _wrap_business_overview_envelope(
     platform_code: Optional[str],
     shop_id: Optional[str] = None,
     cache_status: Optional[str] = None,
+    request: Request | None = None,
 ) -> dict[str, Any]:
     if isinstance(module_payload, dict) and {"meta", "data"}.issubset(
         module_payload.keys()
@@ -297,6 +318,7 @@ def _wrap_business_overview_envelope(
         )
         data = module_payload.get("data")
         module_payload["meta"] = _apply_business_overview_empty_period_meta(meta, data)
+        _apply_degradation_meta(module_payload["meta"], request)
         return module_payload
 
     meta: dict[str, Any] = {
@@ -318,6 +340,7 @@ def _wrap_business_overview_envelope(
         "is_empty_period": False,
     }
     _apply_business_overview_empty_period_meta(meta, module_payload)
+    _apply_degradation_meta(meta, request)
     return {"meta": meta, "data": module_payload}
 
 
@@ -328,8 +351,9 @@ def _build_business_overview_meta(
     platform_code: Optional[str],
     shop_id: Optional[str] = None,
     cache_status: Optional[str] = None,
+    request: Request | None = None,
 ) -> dict[str, Any]:
-    return {
+    meta = {
         "granularity": granularity,
         "period_key": period_key,
         "platform_code": platform_code,
@@ -347,6 +371,7 @@ def _build_business_overview_meta(
         "data_status": "ok",
         "is_empty_period": False,
     }
+    return _apply_degradation_meta(meta, request)
 
 
 async def _try_attach_business_overview_freshness(
@@ -397,27 +422,194 @@ def _normalize_period_month_for_cache(period_month: Optional[str]) -> Optional[s
         return period_month
 
 
+def _snapshot_cache_type(cache_type: str) -> str:
+    """按端点分桶的快照缓存类型。"""
+    return "{cache_type}:last_success".format(cache_type=cache_type)
+
+
+async def _save_last_success_snapshot(
+    cache_service: Any,
+    cache_type: str,
+    cache_params: Dict[str, Any],
+    payload: Any,
+) -> None:
+    """把这次**成功**的响应存成「上次成功快照」。
+
+    快照比普通缓存活得久（24 小时），它的唯一用途是：现在算不出来时，
+    还能不能给用户看上一次成功的结果 + 那次结果是什么时候的。
+    """
+    if cache_service is None or payload is None:
+        return
+    try:
+        await cache_service.set(
+            _snapshot_cache_type(cache_type),
+            {"payload": payload, "saved_at": _isoformat_utc_now_seconds()},
+            ttl=_DASHBOARD_SNAPSHOT_TTL_SECONDS,
+            **cache_params,
+        )
+    except Exception as exc:  # noqa: BLE001 - 快照失败不能影响正常响应
+        logger.warning("[Dashboard] 保存上次成功快照失败: %s", exc)
+
+
+async def _load_last_success_snapshot(
+    cache_service: Any,
+    cache_type: str,
+    cache_params: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """读「上次成功快照」；没有就返回 None。"""
+    if cache_service is None:
+        return None
+    try:
+        snapshot = await cache_service.get(
+            _snapshot_cache_type(cache_type), **cache_params
+        )
+    except Exception as exc:  # noqa: BLE001 - 读失败等于没有快照
+        logger.warning("[Dashboard] 读取上次成功快照失败: %s", exc)
+        return None
+    if not isinstance(snapshot, dict) or "payload" not in snapshot:
+        return None
+    return snapshot
+
+
+def _record_degradation(request: Request, degradation: Dict[str, Any]) -> None:
+    """把一次降级记到 request 上（跨 gather 子任务共享）。"""
+    if request is None:
+        return
+    try:
+        recorded = getattr(request.state, _DEGRADATIONS_STATE_KEY, None)
+        if not isinstance(recorded, list):
+            recorded = []
+            setattr(request.state, _DEGRADATIONS_STATE_KEY, recorded)
+        recorded.append(degradation)
+    except Exception as exc:  # noqa: BLE001 - 记录失败不能影响响应
+        logger.warning("[Dashboard] 记录降级信息失败: %s", exc)
+
+
+def _apply_degradation_meta(
+    meta: Dict[str, Any], request: Request | None = None
+) -> Dict[str, Any]:
+    """把「本次走了降级兜底」写进 meta。
+
+    对外要说清三件事：
+    - 数据不是最新的（``data_status = "degraded"``）
+    - 数据是什么时候的（``data_as_of``）
+    - 为什么降级（``degraded_reason``）+ 一个给人看的 warning
+    """
+    degradations: list[Dict[str, Any]] = []
+    if request is not None:
+        recorded = getattr(request.state, _DEGRADATIONS_STATE_KEY, None)
+        if isinstance(recorded, list):
+            degradations = [item for item in recorded if isinstance(item, dict)]
+    if not degradations:
+        return meta
+
+    meta["data_status"] = "degraded"
+    reasons: list[str] = []
+    data_as_of_values: list[str] = []
+    for degradation in degradations:
+        reason = degradation.get("reason", "query_timeout")
+        if reason not in reasons:
+            reasons.append(reason)
+        saved_at = degradation.get("saved_at")
+        if saved_at and saved_at not in data_as_of_values:
+            data_as_of_values.append(saved_at)
+    meta["degraded_reason"] = reasons[0] if len(reasons) == 1 else reasons
+    if data_as_of_values:
+        meta["data_as_of"] = (
+            data_as_of_values[0]
+            if len(data_as_of_values) == 1
+            else min(data_as_of_values)
+        )
+    warnings = meta.get("warnings")
+    if not isinstance(warnings, list):
+        warnings = []
+        meta["warnings"] = warnings
+    warning = "serving_stale_snapshot: query timed out, serving last successful result"
+    if warning not in warnings:
+        warnings.append(warning)
+    return meta
+
+
+def _inject_degradation_into_payload(
+    payload: Any, request: Request | None = None
+) -> Any:
+    """把降级信息写进响应体里**已经存在**的 meta。
+
+    业务概览那批端点会在拿到 payload 之后**重建** meta，所以它们走
+    ``_build_business_overview_meta`` 里的合并；B 成本那批端点直接返回
+    payload，这里补一刀。
+    """
+    if not isinstance(payload, dict):
+        return payload
+    meta = payload.get("meta")
+    if not isinstance(meta, dict):
+        data = payload.get("data")
+        meta = data.get("meta") if isinstance(data, dict) else None
+    if not isinstance(meta, dict):
+        meta = {}
+        payload["meta"] = meta
+    return _apply_degradation_meta(meta, request)
+
+
 async def _resolve_cached_payload(
     request: Request,
     cache_type: str,
     cache_params: Dict[str, Any],
     producer,
 ):
-    if request and hasattr(request.app.state, "cache_service"):
-        cache_service = request.app.state.cache_service
-        cached = await cache_service.get(cache_type, **cache_params)
-        if cached is not None:
-            return cached, "HIT"
-        payload = await cache_service.get_or_set_singleflight(
-            cache_type,
-            producer,
-            lock_ttl=_DASHBOARD_SINGLEFLIGHT_LOCK_TTL,
-            wait_timeout=_DASHBOARD_SINGLEFLIGHT_WAIT_TIMEOUT,
-            **cache_params,
+    """取看板响应：缓存优先；**查询超时**时降级到上次成功快照。
+
+    降级只在**超时**这一种故障上发生：
+    - 超时 ⇒ 用户看到的是「数据截至 X 时刻」的上一次成功结果（``X-Cache: DEGRADED``）
+    - 其它异常（语法错、权限、连接断）⇒ 照常抛出去，让上层返回 500
+    - 超时**且**没有可用快照 ⇒ 照常抛出去（不能凭空造数）
+    """
+    cache_service = (
+        getattr(request.app.state, "cache_service", None) if request else None
+    )
+    try:
+        if cache_service is not None:
+            cached = await cache_service.get(cache_type, **cache_params)
+            if cached is not None:
+                await _save_last_success_snapshot(
+                    cache_service, cache_type, cache_params, cached
+                )
+                return cached, "HIT"
+            payload = await cache_service.get_or_set_singleflight(
+                cache_type,
+                producer,
+                lock_ttl=_DASHBOARD_SINGLEFLIGHT_LOCK_TTL,
+                wait_timeout=_DASHBOARD_SINGLEFLIGHT_WAIT_TIMEOUT,
+                **cache_params,
+            )
+            await _save_last_success_snapshot(
+                cache_service, cache_type, cache_params, payload
+            )
+            return payload, "MISS"
+        payload = await producer()
+        return payload, "BYPASS"
+    except Exception as exc:
+        if not is_query_timeout_error(exc):
+            raise
+        snapshot = await _load_last_success_snapshot(
+            cache_service, cache_type, cache_params
         )
-        return payload, "MISS"
-    payload = await producer()
-    return payload, "BYPASS"
+        if snapshot is None:
+            logger.error("[Dashboard] 查询超时且没有可用快照，维持 500: %s", exc)
+            raise
+        degradation = {
+            "reason": "query_timeout",
+            "saved_at": snapshot.get("saved_at"),
+        }
+        _record_degradation(request, degradation)
+        logger.warning(
+            "[Dashboard] 查询超时，降级到上次成功快照（saved_at=%s）: %s",
+            snapshot.get("saved_at"),
+            exc,
+        )
+        degraded_payload = snapshot.get("payload")
+        _inject_degradation_into_payload(degraded_payload, request)
+        return degraded_payload, "DEGRADED"
 
 
 async def _resolve_cached_data(
@@ -528,6 +720,7 @@ async def get_business_overview_kpi_postgresql(
                 platform_code=effective_platform_code,
                 shop_id=shop_id,
                 cache_status=cache_status,
+                request=request,
             )
             if isinstance(payload.get("meta"), dict):
                 _apply_business_overview_empty_period_meta(
@@ -608,6 +801,7 @@ async def get_business_overview_comparison_postgresql(
                 platform_code=effective_platform_code,
                 shop_id=shop_id,
                 cache_status=cache_status,
+                request=request,
             )
             if isinstance(payload.get("meta"), dict):
                 _apply_business_overview_empty_period_meta(
@@ -805,6 +999,7 @@ async def get_business_overview_bootstrap_postgresql(
                 platform_code=effective_platform_code,
                 shop_id=shop_id,
                 cache_status=cache_status,
+                request=request,
             )
             if isinstance(payload.get("meta"), dict):
                 _apply_business_overview_empty_period_meta(
@@ -888,6 +1083,7 @@ async def get_business_overview_shop_racing_postgresql(
                 platform_code=effective_platform,
                 shop_id=shop_id,
                 cache_status=cache_status,
+                request=request,
             )
             if isinstance(payload.get("meta"), dict):
                 _apply_business_overview_empty_period_meta(
@@ -960,6 +1156,7 @@ async def get_business_overview_traffic_ranking_postgresql(
                 platform_code=effective_platform,
                 shop_id=shop_id,
                 cache_status=cache_status,
+                request=request,
             )
             if isinstance(payload.get("meta"), dict):
                 service = get_postgresql_dashboard_service()
@@ -1086,6 +1283,7 @@ async def get_business_overview_operational_metrics_postgresql(
                 platform_code=effective_platform_code,
                 shop_id=shop_id,
                 cache_status=cache_status,
+                request=request,
             )
             if isinstance(payload.get("meta"), dict):
                 _apply_business_overview_empty_period_meta(
