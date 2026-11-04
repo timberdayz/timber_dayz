@@ -1,107 +1,42 @@
 CREATE SCHEMA IF NOT EXISTS semantic;
 
+-- ---------------------------------------------------------------------------
+-- 店铺身份解析候选集（转发视图）
+--
+-- **正本已经搬到物化副本**：
+-- `sql/semantic/shop_identity_resolution_candidates_v2_mv.sql`
+--
+-- 为什么转发
+-- --------
+-- 这个候选集只有 136 行，却会被订单/流量原子层**逐行**做身份解析
+-- （LEFT JOIN LATERAL）。它是普通视图时，每一行订单事实都会把候选集
+-- 的 CTE 展开、把规范化表达式重算一遍 —— 生产实测全量重算 38,607 行要
+-- **119 秒**，计划里 `shop_account_aliases` 被扫了 **148 万次**。
+--
+-- 物化之后，候选集变成一张 136 行的表，重算成本降到秒级。
+--
+-- **本文件只做转发**，所以 4 个下游原子层视图
+-- （`semantic.fact_orders_atomic` / `fact_analytics_atomic` /
+-- `fact_orders_monthly_atomic_mv` / `fact_analytics_monthly_atomic_mv`）
+-- 的正文**一个字都不用改** ⇒ 口径零变化、不需要重建、不需要重新验证金额。
+--
+-- 依赖方向（不能反，否则循环依赖）：
+--     semantic.shop_identity_resolution_candidates_v2_mv   （正本，从 core 表算）
+--       → semantic.shop_identity_resolution_candidates    （本文件，转发）
+--         → 4 个原子层视图
+--
+-- 执行顺序要求：**v2_mv 必须先存在**，否则本文件会失败。
+-- 迁移 `20261106_materialize_identity_candidates` 与
+-- `refresh_registry.PIPELINE_DEPENDENCIES` 都强制了这个顺序。
+--
 -- Best practice note:
 -- Avoid DO/EXECUTE dynamic SQL inside SQL assets. If performance requires materialization,
 -- implement it in the Python bootstrap runner, not inside the SQL file.
+-- （物化本身放在 v2_mv 资产里，用的是「存在则 REFRESH / 不存在则 CREATE」，
+--   与 orders_atomic_mv.sql 同一范式 —— 不 DROP ... CASCADE。）
+-- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW semantic.shop_identity_resolution_candidates AS
-WITH active_shop_accounts AS (
-    SELECT
-        sa.id AS shop_account_pk,
-        LOWER(COALESCE(sa.platform, '')) AS platform_code,
-        NULLIF(TRIM(COALESCE(sa.shop_account_id, '')), '') AS resolved_shop_account_id,
-        NULLIF(TRIM(COALESCE(sa.platform_shop_id, '')), '') AS candidate_platform_shop_id,
-        NULLIF(TRIM(COALESCE(sa.store_name, '')), '') AS candidate_store_label,
-        -- 店铺自身的区域（大写，如 MY / PH / SG）；NULL = 不限区域
-        NULLIF(TRIM(COALESCE(sa.shop_region, '')), '') AS candidate_shop_region,
-        COALESCE(
-            NULLIF(TRIM(COALESCE(sa.platform_shop_id, '')), ''),
-            NULLIF(TRIM(COALESCE(sa.shop_account_id, '')), ''),
-            sa.id::text
-        ) AS resolved_shop_id
-    FROM core.shop_accounts sa
-),
-identity_rows AS (
-    SELECT
-        platform_code,
-        resolved_shop_id,
-        resolved_shop_account_id,
-        'platform_shop_id'::varchar AS resolution_method,
-        1 AS resolution_priority,
-        LOWER(candidate_platform_shop_id) AS identity_value_normalized,
-        candidate_platform_shop_id AS identity_source_value,
-        candidate_shop_region AS identity_shop_region
-    FROM active_shop_accounts
-    WHERE candidate_platform_shop_id IS NOT NULL
-
-    UNION ALL
-
-    SELECT
-        platform_code,
-        resolved_shop_id,
-        resolved_shop_account_id,
-        'shop_account_id'::varchar AS resolution_method,
-        2 AS resolution_priority,
-        LOWER(resolved_shop_account_id) AS identity_value_normalized,
-        resolved_shop_account_id AS identity_source_value,
-        candidate_shop_region AS identity_shop_region
-    FROM active_shop_accounts
-    WHERE resolved_shop_account_id IS NOT NULL
-
-    UNION ALL
-
-    SELECT
-        asa.platform_code,
-        asa.resolved_shop_id,
-        asa.resolved_shop_account_id,
-        'alias_match'::varchar AS resolution_method,
-        3 AS resolution_priority,
-        LOWER(TRIM(saa.alias_normalized)) AS identity_value_normalized,
-        saa.alias_value AS identity_source_value,
-        -- 别名自己的区域（第一批 Task 5 新增列）；NULL = 不限区域
-        NULLIF(TRIM(COALESCE(saa.shop_region, '')), '') AS identity_shop_region
-    FROM active_shop_accounts asa
-    INNER JOIN core.shop_account_aliases saa
-      ON saa.shop_account_id = asa.shop_account_pk
-     AND saa.is_active = TRUE
-    WHERE NULLIF(TRIM(COALESCE(saa.alias_normalized, '')), '') IS NOT NULL
-
-    UNION ALL
-
-    SELECT
-        platform_code,
-        resolved_shop_id,
-        resolved_shop_account_id,
-        'store_name_match'::varchar AS resolution_method,
-        4 AS resolution_priority,
-        REGEXP_REPLACE(
-            LOWER(
-                TRIM(BOTH FROM REGEXP_REPLACE(
-                    TRIM(BOTH FROM COALESCE(active_shop_accounts.candidate_store_label, '')),
-                    '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
-                    '',
-                    'i'
-                ))
-            ),
-            '[\s_()/-]+',
-            '',
-            'g'
-        ) AS identity_value_normalized,
-        candidate_store_label AS identity_source_value,
-        candidate_shop_region AS identity_shop_region
-    FROM active_shop_accounts
-    WHERE candidate_store_label IS NOT NULL
-)
-SELECT
-    platform_code,
-    identity_value_normalized,
-    identity_source_value,
-    resolved_shop_id,
-    resolved_shop_account_id,
-    resolution_method,
-    resolution_priority,
-    identity_shop_region
-FROM identity_rows
-WHERE NULLIF(TRIM(COALESCE(identity_value_normalized, '')), '') IS NOT NULL;
+SELECT * FROM semantic.shop_identity_resolution_candidates_v2_mv;
 
 CREATE INDEX IF NOT EXISTS ix_shop_accounts_platform_shop_id_lookup
 ON core.shop_accounts (

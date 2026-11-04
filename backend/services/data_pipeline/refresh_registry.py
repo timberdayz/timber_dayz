@@ -11,7 +11,13 @@ from modules.core.data_domains import (
 
 PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.alias_registry": [],
-    "semantic.shop_identity_resolution_candidates": [],
+    # 身份解析候选集的**正本**是物化副本（136 行，毫秒级刷新）。
+    # 转发视图 `semantic.shop_identity_resolution_candidates` 依赖它 ——
+    # 顺序反了就循环依赖。
+    "semantic.shop_identity_resolution_candidates_v2_mv": [],
+    "semantic.shop_identity_resolution_candidates": [
+        "semantic.shop_identity_resolution_candidates_v2_mv"
+    ],
     "semantic.fact_orders_monthly_atomic_mv": [
         "semantic.shop_identity_resolution_candidates"
     ],
@@ -120,6 +126,9 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
 
 SQL_TARGET_PATHS: dict[str, str] = {
     "semantic.alias_registry": "sql/semantic/semantic_alias_registry.sql",
+    "semantic.shop_identity_resolution_candidates_v2_mv": (
+        "sql/semantic/shop_identity_resolution_candidates_v2_mv.sql"
+    ),
     "semantic.shop_identity_resolution_candidates": "sql/semantic/shop_identity_resolution_candidates.sql",
     "semantic.fact_orders_monthly_atomic_mv": "sql/semantic/orders_monthly_atomic_mv.sql",
     "semantic.fact_analytics_monthly_atomic_mv": "sql/semantic/analytics_monthly_atomic_mv.sql",
