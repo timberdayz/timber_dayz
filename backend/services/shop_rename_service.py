@@ -47,6 +47,48 @@ FORMER_NAME_ALIAS_TYPE = "former_name"
 PRIMARY_ALIAS_TYPE = "primary"
 #: 别名来源标记（改名联动写入的别名）
 RENAME_ALIAS_SOURCE = "store_name_rename"
+#: 曾用平台店铺ID的别名类型（换绑平台店铺时写入）
+FORMER_PLATFORM_SHOP_ID_ALIAS_TYPE = "former_platform_shop_id"
+#: 别名来源标记（换绑平台店铺ID联动写入的别名）
+PLATFORM_SHOP_ID_ALIAS_SOURCE = "platform_shop_id_rebind"
+
+
+async def retain_previous_platform_shop_id_as_alias(
+    db: AsyncSession,
+    shop_account: ShopAccount,
+    previous_platform_shop_id: Optional[str],
+) -> Optional[ShopAccountAlias]:
+    """换绑平台店铺ID 时，把**旧值留成别名** ⇒ 这家店的历史数据不会失联。
+
+    为什么必须留
+    ------------
+    历史行（订单 / 商品 / 服务 / 库存）的店铺键是采集时的平台店铺ID。
+    换绑后账号上的 ``platform_shop_id`` 变成新值 ⇒ 旧值不再命中任何候选
+    ⇒ 这家店的历史数据全部落进 ``unknown`` ⇒ **看板上这家店的历史直接消失**。
+
+    改名（store_name）早就做了这件事（旧名转 ``former_name`` 别名），
+    换绑平台店铺ID 却漏了 —— 同一类问题的两个入口，只堵了一个。
+
+    留成别名即可：候选集里别名行与平台店铺ID行走同一套匹配，
+    旧值命中别名行 ⇒ 仍然解析回同一个账号 ⇒ 历史数据不搬家、不改写。
+
+    做法上与改名联动完全一致：已存在则复用，别名被别人占用则 409（不静默覆盖）。
+    """
+    previous_value = str(previous_platform_shop_id or "").strip()
+    if not previous_value:
+        return None
+    current_value = str(shop_account.platform_shop_id or "").strip()
+    if previous_value == current_value:
+        return None
+    return await _upsert_shop_alias(
+        db,
+        shop_account=shop_account,
+        alias_value=previous_value,
+        alias_type=FORMER_PLATFORM_SHOP_ID_ALIAS_TYPE,
+        is_primary=False,
+        is_active=True,
+        source=PLATFORM_SHOP_ID_ALIAS_SOURCE,
+    )
 
 
 @dataclass(frozen=True)
@@ -94,7 +136,9 @@ async def apply_store_name_rename(
     Returns:
         :class:`RenameResult`
     """
-    previous_name = str(old_store_name if old_store_name is not None else shop_account.store_name or "").strip()
+    previous_name = str(
+        old_store_name if old_store_name is not None else shop_account.store_name or ""
+    ).strip()
     target_name = str(new_store_name or "").strip()
     if not target_name or target_name == previous_name:
         return RenameResult(
@@ -109,8 +153,8 @@ async def apply_store_name_rename(
 
     # 规范化后与旧名相同的（例如 DAONE Mall -> DAONE MALL）属于「只是大小写/分隔符变了」，
     # 别名语义没变 —— 跳过别名写入（否则会撞库层唯一约束），只改 store_name。
-    alias_semantics_changed = (
-        normalize_alias_key(previous_name) != normalize_alias_key(target_name)
+    alias_semantics_changed = normalize_alias_key(previous_name) != normalize_alias_key(
+        target_name
     )
 
     if alias_semantics_changed:
@@ -178,8 +222,8 @@ async def _demote_primary_aliases(db: AsyncSession, shop_account_db_id: int) -> 
     result = await db.execute(
         select(ShopAccountAlias).where(
             ShopAccountAlias.shop_account_id == shop_account_db_id,
-            ShopAccountAlias.is_active == True,
-            ShopAccountAlias.is_primary == True,
+            ShopAccountAlias.is_active.is_(True),
+            ShopAccountAlias.is_primary.is_(True),
         )
     )
     for alias in result.scalars().all():
@@ -194,6 +238,7 @@ async def _upsert_shop_alias(
     alias_type: str,
     is_primary: bool,
     is_active: bool = True,
+    source: str = RENAME_ALIAS_SOURCE,
 ) -> ShopAccountAlias:
     """写一条别名；已存在则复用，别名被别人占用则 409（不静默覆盖）。"""
     normalized_value = normalize_alias_text(alias_value) or ""
@@ -202,13 +247,17 @@ async def _upsert_shop_alias(
     platform = str(shop_account.platform or "").strip()
 
     existing = (
-        await db.execute(
-            select(ShopAccountAlias).where(
-                ShopAccountAlias.shop_account_id == shop_account.id,
-                ShopAccountAlias.alias_normalized == alias_normalized,
+        (
+            await db.execute(
+                select(ShopAccountAlias).where(
+                    ShopAccountAlias.shop_account_id == shop_account.id,
+                    ShopAccountAlias.alias_normalized == alias_normalized,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if existing is not None:
         existing.alias_value = normalized_value
         existing.alias_type = alias_type
@@ -216,6 +265,7 @@ async def _upsert_shop_alias(
         existing.shop_region = shop_region
         existing.is_primary = is_primary
         existing.is_active = is_active
+        existing.source = source
         return existing
 
     await assert_alias_available(
@@ -232,7 +282,7 @@ async def _upsert_shop_alias(
         alias_value=normalized_value,
         alias_normalized=alias_normalized,
         alias_type=alias_type,
-        source=RENAME_ALIAS_SOURCE,
+        source=source,
         shop_region=shop_region,
         is_primary=is_primary,
         is_active=is_active,
@@ -274,7 +324,7 @@ async def assert_alias_available(
     stmt = select(ShopAccountAlias).where(
         ShopAccountAlias.platform == platform,
         ShopAccountAlias.alias_normalized == alias_normalized,
-        ShopAccountAlias.is_active == True,
+        ShopAccountAlias.is_active.is_(True),
     )
     if shop_region is None:
         stmt = stmt.where(ShopAccountAlias.shop_region.is_(None))
@@ -295,9 +345,10 @@ async def assert_alias_available(
         owner.shop_account_id if owner is not None else str(conflict.shop_account_id)
     )
     owner_region = (
-        (str(owner.shop_region).strip() if owner is not None and owner.shop_region else "")
-        or "不限区域"
-    )
+        str(owner.shop_region).strip()
+        if owner is not None and owner.shop_region
+        else ""
+    ) or "不限区域"
     raise HTTPException(
         status_code=409,
         detail=(
@@ -335,13 +386,17 @@ async def _sync_dim_shop_name(
         try:
             async with db.begin_nested():
                 dim_shop = (
-                    await db.execute(
-                        select(DimShop).where(
-                            DimShop.platform_code == platform_code,
-                            DimShop.shop_id == shop_id,
+                    (
+                        await db.execute(
+                            select(DimShop).where(
+                                DimShop.platform_code == platform_code,
+                                DimShop.shop_id == shop_id,
+                            )
                         )
                     )
-                ).scalars().first()
+                    .scalars()
+                    .first()
+                )
                 if dim_shop is None:
                     continue
                 dim_shop.shop_name = new_store_name
@@ -417,7 +472,5 @@ async def _sync_internal_code_after_rename(
     )
     new_code = ensure_unique_internal_code(candidate, used)
     shop_account.internal_code = new_code
-    logger.info(
-        "[ShopRename] internal_code auto-updated: %s -> %s", previous, new_code
-    )
+    logger.info("[ShopRename] internal_code auto-updated: %s -> %s", previous, new_code)
     return new_code, True

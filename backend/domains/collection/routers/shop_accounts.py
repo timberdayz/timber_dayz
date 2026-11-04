@@ -22,6 +22,7 @@ from backend.services.shop_internal_code_service import (
 )
 from backend.services.shop_rename_service import (
     apply_store_name_rename as _apply_store_name_rename,
+    retain_previous_platform_shop_id_as_alias as _retain_previous_platform_shop_id_as_alias,
 )
 from backend.services.shop_sync_service import sync_shop_account_to_dim_shop
 from backend.utils.text_normalization import normalize_alias_key, normalize_alias_text
@@ -44,6 +45,12 @@ router = APIRouter(
 logger = get_logger(__name__)
 
 _SHOP_IDENTITY_REFRESH_TARGETS = [
+    # 候选集的**物化副本**必须刷。
+    # 原子层（orders / analytics / products / services / inventory）读的是它的快照，
+    # 不是实时算的 ⇒ 别名或平台店铺ID 改了以后不刷副本，那些链路就一直用旧快照
+    # ⇒ 新别名不生效、这家店的历史仍然落进 unknown。
+    # 副本只有 136 行，刷新是毫秒级。
+    "semantic.shop_identity_resolution_candidates_v2_mv",
     "semantic.fact_orders_monthly_atomic_mv",
     "semantic.fact_analytics_monthly_atomic_mv",
 ]
@@ -657,6 +664,16 @@ async def update_shop_account(
             update_data["store_name"],
             old_store_name=original_store_name,
             original_internal_code=original_internal_code,
+        )
+    # 2.5) 换绑平台店铺ID 时把**旧值留成别名**。
+    #     历史行的店铺键是采集时的平台店铺ID；换绑后旧值不再命中任何候选
+    #     ⇒ 这家店的历史数据全部落进 unknown ⇒ 看板上这家店的历史直接消失。
+    #     改名（旧名转 former_name 别名）早就堵住了，换绑却漏了 —— 同一个问题的两个入口。
+    if "platform_shop_id" in update_data:
+        await _retain_previous_platform_shop_id_as_alias(
+            db,
+            record,
+            original_platform_shop_id,
         )
     # 3) 展示维度表同步（core.dim_shops 是店铺账号的派生物）
     await sync_shop_account_to_dim_shop(db, record)

@@ -8,6 +8,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.data_pipeline.dashboard_bootstrap import inspect_dashboard_assets
+from backend.services.data_pipeline.refresh_registry import LOGICAL_TARGET_OBJECTS
+
+
+__all__ = ["LOGICAL_TARGET_OBJECTS", "RefreshValidationReport", "find_missing_targets"]
 
 
 @dataclass
@@ -35,23 +39,39 @@ class RefreshValidationReport:
         return "; ".join(parts)
 
 
-# 目标名与真实数据库对象名不一致的「逻辑目标」。
-# 例：semantic.alias_registry 的 SQL 建的是表 semantic.semantic_field_aliases，
-# 目标名只是刷新流程里的一个代号。存在性核对必须按真实对象名进行，
-# 否则会把活着的目标误报成 missing。
-# 维护约束：新增逻辑目标时必须登记在这里，由 test_data_pipeline_freshness_existence 守护。
-LOGICAL_TARGET_OBJECTS: dict[str, str] = {
-    "semantic.alias_registry": "semantic.semantic_field_aliases",
-    # 共享的店铺身份解析函数：SQL 建的是**函数**，不是关系（pg_class 里没有）
-    "semantic.shop_identity_resolver": "semantic.resolve_shop_identity",
-}
+# 目标名与真实数据库对象名不一致的「逻辑目标」——
+# 登记表在 ``refresh_registry``（本模块与 ``dashboard_bootstrap`` 都要用它，
+# 而本模块已经 import 了 ``dashboard_bootstrap`` ⇒ 反向 import 会成环）。
+LOGICAL_TARGET_OBJECTS = LOGICAL_TARGET_OBJECTS
 
 
 async def _target_exists(db: AsyncSession, target: str) -> bool:
+    """目标对象是否存在（**关系或函数**都算）。
+
+    ``to_regclass`` 只认表/视图/物化视图/序列，**认不出函数**
+    ⇒ 函数型目标（如共享的店铺身份解析函数）会被永远算成 missing。
+    """
+    object_name = LOGICAL_TARGET_OBJECTS.get(target, target)
     result = await db.execute(
-        text("SELECT to_regclass(:target_name)"), {"target_name": target}
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname || '.' || c.relname = :object_name
+            )
+            OR EXISTS (
+                SELECT 1
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE n.nspname || '.' || p.proname = :object_name
+            )
+            """
+        ),
+        {"object_name": object_name},
     )
-    return result.scalar_one_or_none() is not None
+    return bool(result.scalar_one_or_none())
 
 
 async def find_missing_targets(

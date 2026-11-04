@@ -27,7 +27,9 @@ from modules.core.db import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ROUTER = REPO_ROOT / "backend" / "domains" / "collection" / "routers" / "shop_accounts.py"
+ROUTER = (
+    REPO_ROOT / "backend" / "domains" / "collection" / "routers" / "shop_accounts.py"
+)
 SERVICE = REPO_ROOT / "backend" / "services" / "shop_rename_service.py"
 
 
@@ -38,7 +40,11 @@ def test_rename_flow_is_wired():
     不能在 ``update_shop_account`` 函数体内找字符串 —— 联动逻辑放在独立服务里，
     在函数体内找 ``former_name`` / ``dim_shops`` 永远找不到。
     """
-    body = ROUTER.read_text(encoding="utf-8").split("async def update_shop_account", 1)[1].split("\nasync def ", 1)[0]
+    body = (
+        ROUTER.read_text(encoding="utf-8")
+        .split("async def update_shop_account", 1)[1]
+        .split("\nasync def ", 1)[0]
+    )
 
     # 1) 改名分支必须调用具名的联动服务
     assert "_apply_store_name_rename" in body, "update_shop_account 没有调用改名联动"
@@ -46,7 +52,9 @@ def test_rename_flow_is_wired():
     # 2) 现有的通用赋值与 platform_shop_id 唯一性校验必须保留
     #    （前端每次编辑提交整个表单，改名分支若用 if/else 会把其它字段全丢掉）
     assert "setattr(record, field, value)" in body, "改名把原有的字段赋值分支弄丢了"
-    assert "_assert_platform_shop_id_unique" in body, "改名把 platform_shop_id 唯一性校验弄丢了"
+    assert (
+        "_assert_platform_shop_id_unique" in body
+    ), "改名把 platform_shop_id 唯一性校验弄丢了"
 
     # 3) 联动服务里必须有曾用名、主别名接管、dim_shops 同步
     assert SERVICE.exists(), "缺少改名联动服务 backend/services/shop_rename_service.py"
@@ -59,11 +67,13 @@ def test_rename_flow_is_wired():
 def test_rename_refresh_targets_cover_identity_recomputation():
     """改名后必须能重算归属。
 
-    两个 monthly 物化视图是唯一会缓存归属结果的对象；它们在
-    ``refresh_registry`` 里都依赖 ``semantic.shop_identity_resolution_candidates``，
-    刷新计划会把候选视图先重建、再刷新物化视图。
-    ``semantic.fact_orders_atomic`` / ``semantic.fact_analytics_atomic`` 是普通 VIEW
-    （读时求值），候选视图一重建它们就自动是新归属 —— 不需要单独重建。
+    月度物化视图读候选集**正本**（``semantic.shop_identity_resolution_candidates``，
+    普通视图、读时求值）⇒ 刷新计划先把它准备好、再刷物化视图。
+
+    ⚠️ 原子层（``semantic.fact_orders_atomic`` / ``semantic.fact_analytics_atomic``）
+    读的是候选集的**物化副本** ``semantic.shop_identity_resolution_candidates_v2_mv``
+    —— 那是**快照**，重建正本不改变它的内容 ⇒ 只刷正本对原子层无效。
+    所以刷新目标里必须**显式带上副本**，否则新别名在原子层永远不生效。
     """
     from backend.services.data_pipeline.refresh_registry import (
         PIPELINE_DEPENDENCIES,
@@ -78,6 +88,17 @@ def test_rename_refresh_targets_cover_identity_recomputation():
         assert "semantic.shop_identity_resolution_candidates" in (
             PIPELINE_DEPENDENCIES.get(target, [])
         ), f"{target} 不再依赖候选视图 -> 改名后归属不会重算"
+
+    # 原子层读的是副本 ⇒ 副本必须在刷新目标里，否则别名/换绑在原子层不生效
+    snapshot = "semantic.shop_identity_resolution_candidates_v2_mv"
+    assert snapshot in SQL_TARGET_PATHS
+    for consumer in (
+        "semantic.fact_orders_atomic",
+        "semantic.fact_analytics_atomic",
+    ):
+        assert snapshot in PIPELINE_DEPENDENCIES.get(
+            consumer, []
+        ), f"{consumer} 不再依赖候选集副本 -> 别名变更不会传导到它"
 
 
 # ---------------------------------------------------------------------------
@@ -152,9 +173,7 @@ async def _seed_rename_data(session_factory, *, with_dim_shop=True):
             )
         )
         if with_dim_shop:
-            session.add(
-                DimPlatform(platform_code="tiktok", name="TikTok")
-            )
+            session.add(DimPlatform(platform_code="tiktok", name="TikTok"))
             session.add(
                 DimShop(
                     platform_code="tiktok",
@@ -205,7 +224,9 @@ async def rename_client(rename_session_factory, monkeypatch):
                 "is_active": True,
                 "status": "active",
                 "is_superuser": True,
-                "roles": [type("Role", (), {"role_code": "admin", "role_name": "admin"})()],
+                "roles": [
+                    type("Role", (), {"role_code": "admin", "role_name": "admin"})()
+                ],
             },
         )()
 
@@ -303,10 +324,14 @@ async def test_rename_keeps_old_alias_active_so_old_data_still_matches(
 
     async with rename_session_factory() as session:
         active_aliases = (
-            await session.execute(
-                select(ShopAccountAlias).where(ShopAccountAlias.is_active == True)  # noqa: E712
+            (
+                await session.execute(
+                    select(ShopAccountAlias).where(ShopAccountAlias.is_active.is_(True))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         active_values = {alias.alias_value for alias in active_aliases}
 
     assert "DAONE Mall" in active_values, "旧名必须仍是 active 别名，老数据才能继续命中"
@@ -488,7 +513,9 @@ async def alias_api_client(rename_session_factory, monkeypatch):
                 "is_active": True,
                 "status": "active",
                 "is_superuser": True,
-                "roles": [type("Role", (), {"role_code": "admin", "role_name": "admin"})()],
+                "roles": [
+                    type("Role", (), {"role_code": "admin", "role_name": "admin"})()
+                ],
             },
         )()
 

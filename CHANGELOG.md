@@ -1,5 +1,70 @@
 # Changelog - 西虹 ERP 系统
 
+## [v7.13.6] - 2026-11-05 - 换绑平台店铺ID时保留旧值别名 + 修复部署阻断（函数型目标存在性核对）
+
+> 本版本同时包含 v7.13.5 的全部内容（三条链路接入店铺身份解析、数值守卫、
+> 停用店不再重采）。v7.13.5 的部署在最后的资产校验环节被拦下并自动回滚 ——
+> 应用与生产数据均未受影响（已逐项核对：容器恢复、基线全绿、库存占位键已归零），
+> 本次一并上线。
+
+### 部署阻断修复：函数型目标被误判成「不存在」
+
+- `semantic.shop_identity_resolver` 这个刷新目标建的是**函数**
+  `semantic.resolve_shop_identity`。函数不在 `pg_class`，也不在
+  `information_schema` 的表与视图清单里。
+- 而资产盘点只查关系型对象 ⇒ 这个目标**永远**被判成 missing
+  ⇒ 积压资产组被判 drift ⇒ **部署 bootstrap 失败、应用被回滚**。
+  而那个函数其实好好地躺在库里。
+- 两处一起修：资产盘点补查 `pg_proc`；逻辑目标名 ↔ 真实对象名改成**双向**映射
+  （真实名存在 ⇒ 逻辑名也算存在）。
+- `LOGICAL_TARGET_OBJECTS` 登记表移到 `refresh_registry`
+  （`refresh_validation` 与 `dashboard_bootstrap` 都要用它，而前者已经 import 了
+  后者 ⇒ 反向 import 会成环）。
+
+### 同一类问题的四个入口，之前只堵了一个
+
+- **改名（店名）早就堵住了**：改店名时旧名会转成 `former_name` 别名（活跃、非主名），
+  所以旧数据仍能匹配到同一个店。
+- **换绑平台店铺ID 漏了**：账号上的 `platform_shop_id` 改成新值后，
+  **旧值直接消失**，没有留任何痕迹。
+  而历史行（订单 / 商品 / 服务 / 库存）的店铺键就是**采集时的平台店铺ID**
+  ⇒ 旧值不再命中任何候选 ⇒ 这家店的历史数据全部落进 `unknown`
+  ⇒ **看板上这家店的历史直接消失**。
+- 现在换绑时把旧值也留成别名（`alias_type='former_platform_shop_id'`，
+  `source='platform_shop_id_rebind'`，活跃、非主名）。
+  候选集里别名行与平台店铺ID行走同一套匹配
+  ⇒ 旧值命中别名行 ⇒ 仍然解析回同一个账号 ⇒ **历史数据不搬家、不改写**。
+- **补齐自动绑定路径**：除了运营在后台改，自动绑定（`record_runtime_discovery` /
+  `record_manual_discovery`）和人工确认（`confirm_discovery`）也会覆盖
+  `platform_shop_id` —— 这三个入口本版同样补上「旧值留别名」。
+- 这条修复的价值在于：**不用把全系统的键值改写成账号ID**（那要动所有业务表、
+  重建外键、改写生产数据），却达到了同一个业务目标。
+
+### 别名写了还不够：候选集快照必须跟着刷新
+
+- 原子层（orders / analytics / products / services / inventory）读的是
+  `semantic.shop_identity_resolution_candidates_v2_mv` 的**快照**，
+  不是实时算的候选集。
+- 改名/换绑后的刷新目标里**只有候选集正本**（普通视图）和两个**月度**物化视图
+  ⇒ 重建正本**不改变副本的内容** ⇒ 新别名在原子层永远不生效，
+  这家店的历史仍然落进 `unknown`。
+- 现在刷新目标里**显式带上物化副本**（副本只有 136 行，刷新是毫秒级）
+  ⇒ 别名/换绑之后，所有链路的归属立刻重算。
+
+### 工程
+
+- 新增 `backend/tests/data_pipeline/test_function_target_existence.py`（6 例）守护部署阻断：
+  盘点必须看得到函数、逻辑名必须做映射、函数真不在时仍然要报 drift。
+- 新增 `backend/tests/test_shop_platform_id_rebind_alias.py`（9 例：换绑留别名 / 幂等 /
+  没换绑不写 / 原来没有平台ID不写 / 三个自动绑定入口都留别名 /
+  刷新目标含候选集副本 / 副本已登记且排在消费者之前）。
+- 更新 `backend/tests/test_shop_rename_flow.py`：原文写着「重建候选视图，原子层自动是新归属」
+  —— 这在原子层改读物化副本之后已经不成立，改正并补上副本依赖断言。
+- 顺带收掉 `shop_rename_service.py`、`shop_account_aliases.py`、
+  `platform_shop_discovery_service.py`、`test_shop_rename_flow.py` 上 9 处既有 E712
+  （`== True` → `.is_(True)`）—— 这些文件这次被改动 ⇒ CI 会检查它们 ⇒ 不修就是新红灯。
+  其中 `test_shop_rename_flow.py` 那处 `# noqa: E712` 写在**下一行**，对 ruff 无效。
+
 ## [v7.13.5] - 2026-11-05 - 商品/服务/库存三条链路接入店铺身份解析 + 停用店不再参与重采
 
 ### 库存看板「按店拆不开」的根因被修掉

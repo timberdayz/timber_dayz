@@ -15,7 +15,15 @@ from backend.schemas.shop_discovery import (
     ShopDiscoveryPayload,
     ShopDiscoveryRunResponse,
 )
-from modules.core.db import PlatformShopDiscovery, ShopAccount, ShopAccountAlias, ShopAccountCapability
+from backend.services.shop_rename_service import (
+    retain_previous_platform_shop_id_as_alias,
+)
+from modules.core.db import (
+    PlatformShopDiscovery,
+    ShopAccount,
+    ShopAccountAlias,
+    ShopAccountCapability,
+)
 
 
 class PlatformShopDiscoveryService:
@@ -53,7 +61,7 @@ class PlatformShopDiscoveryService:
                 select(ShopAccount.shop_account_id).where(
                     func.lower(ShopAccount.platform) == platform.lower(),
                     ShopAccount.platform_shop_id == detected_platform_shop_id,
-                    ShopAccount.enabled == True,
+                    ShopAccount.enabled.is_(True),
                     ShopAccount.business_role == "operating_store",
                 )
             )
@@ -63,12 +71,14 @@ class PlatformShopDiscoveryService:
             normalized_alias = self._normalize_alias(detected_store_name)
             alias_result = await db.execute(
                 select(ShopAccount.shop_account_id)
-                .join(ShopAccountAlias, ShopAccountAlias.shop_account_id == ShopAccount.id)
+                .join(
+                    ShopAccountAlias, ShopAccountAlias.shop_account_id == ShopAccount.id
+                )
                 .where(
                     func.lower(ShopAccountAlias.platform) == platform.lower(),
                     ShopAccountAlias.alias_normalized == normalized_alias,
-                    ShopAccountAlias.is_active == True,
-                    ShopAccount.enabled == True,
+                    ShopAccountAlias.is_active.is_(True),
+                    ShopAccount.enabled.is_(True),
                     ShopAccount.business_role == "operating_store",
                 )
             )
@@ -77,7 +87,7 @@ class PlatformShopDiscoveryService:
             shop_stmt = select(ShopAccount.shop_account_id).where(
                 func.lower(ShopAccount.platform) == platform.lower(),
                 ShopAccount.store_name == detected_store_name,
-                ShopAccount.enabled == True,
+                ShopAccount.enabled.is_(True),
                 ShopAccount.business_role == "operating_store",
             )
             if detected_region:
@@ -120,12 +130,20 @@ class PlatformShopDiscoveryService:
 
         shop_account = (
             await db.execute(
-                select(ShopAccount).where(ShopAccount.shop_account_id == shop_account_id)
+                select(ShopAccount).where(
+                    ShopAccount.shop_account_id == shop_account_id
+                )
             )
         ).scalar_one_or_none()
         if shop_account is not None:
+            previous_platform_shop_id = shop_account.platform_shop_id
             shop_account.platform_shop_id = detected_platform_shop_id
             shop_account.platform_shop_id_status = "auto_bound"
+            # 换绑平台店铺ID 时把**旧值留成别名** ⇒ 这家店的历史数据不会失联。
+            # 自动绑定与运营手动改是同一个问题的两个入口，只堵一个就会漏。
+            await retain_previous_platform_shop_id_as_alias(
+                db, shop_account, previous_platform_shop_id
+            )
 
         await db.commit()
         await db.refresh(discovery)
@@ -189,13 +207,20 @@ class PlatformShopDiscoveryService:
         if status == "auto_bound":
             shop_account = (
                 await db.execute(
-                    select(ShopAccount).where(ShopAccount.shop_account_id == candidates[0])
+                    select(ShopAccount).where(
+                        ShopAccount.shop_account_id == candidates[0]
+                    )
                 )
             ).scalar_one_or_none()
             if shop_account is not None and detected_platform_shop_id:
+                previous_platform_shop_id = shop_account.platform_shop_id
                 shop_account.platform_shop_id = detected_platform_shop_id
                 shop_account.platform_shop_id_status = "auto_bound"
                 discovery_record.status = "auto_bound"
+                # 自动绑定也会换绑平台店铺ID ⇒ 旧值同样要留成别名。
+                await retain_previous_platform_shop_id_as_alias(
+                    db, shop_account, previous_platform_shop_id
+                )
 
         await db.commit()
         await db.refresh(discovery_record)
@@ -229,7 +254,9 @@ class PlatformShopDiscoveryService:
     ) -> PlatformShopDiscovery:
         discovery = (
             await db.execute(
-                select(PlatformShopDiscovery).where(PlatformShopDiscovery.id == discovery_id)
+                select(PlatformShopDiscovery).where(
+                    PlatformShopDiscovery.id == discovery_id
+                )
             )
         ).scalar_one_or_none()
         if discovery is None:
@@ -237,15 +264,22 @@ class PlatformShopDiscoveryService:
 
         shop_account = (
             await db.execute(
-                select(ShopAccount).where(ShopAccount.shop_account_id == shop_account_id)
+                select(ShopAccount).where(
+                    ShopAccount.shop_account_id == shop_account_id
+                )
             )
         ).scalar_one_or_none()
         if shop_account is None:
             raise ValueError("shop account not found")
 
+        previous_platform_shop_id = shop_account.platform_shop_id
         shop_account.platform_shop_id = discovery.detected_platform_shop_id
         shop_account.platform_shop_id_status = "manual_confirmed"
         discovery.status = "manual_confirmed"
+        # 人工确认也可能是换绑（平台把店ID换了）⇒ 旧值留成别名。
+        await retain_previous_platform_shop_id_as_alias(
+            db, shop_account, previous_platform_shop_id
+        )
 
         await db.commit()
         await db.refresh(discovery)
@@ -259,7 +293,9 @@ class PlatformShopDiscoveryService:
     ) -> PlatformShopDiscovery:
         discovery = (
             await db.execute(
-                select(PlatformShopDiscovery).where(PlatformShopDiscovery.id == discovery_id)
+                select(PlatformShopDiscovery).where(
+                    PlatformShopDiscovery.id == discovery_id
+                )
             )
         ).scalar_one_or_none()
         if discovery is None:
@@ -267,7 +303,9 @@ class PlatformShopDiscoveryService:
 
         existing_shop = (
             await db.execute(
-                select(ShopAccount).where(ShopAccount.shop_account_id == payload.shop_account_id)
+                select(ShopAccount).where(
+                    ShopAccount.shop_account_id == payload.shop_account_id
+                )
             )
         ).scalar_one_or_none()
         if existing_shop is not None:
@@ -279,9 +317,9 @@ class PlatformShopDiscoveryService:
             main_account_id=discovery.main_account_id,
             store_name=payload.store_name,
             platform_shop_id=discovery.detected_platform_shop_id,
-            platform_shop_id_status="manual_confirmed"
-            if discovery.detected_platform_shop_id
-            else "missing",
+            platform_shop_id_status=(
+                "manual_confirmed" if discovery.detected_platform_shop_id else "missing"
+            ),
             shop_region=payload.shop_region or discovery.detected_region,
             shop_type=payload.shop_type,
             enabled=True,
@@ -292,7 +330,9 @@ class PlatformShopDiscoveryService:
         db.add(shop_account)
         await db.flush()
 
-        for domain, enabled in self._default_capabilities_for(payload.shop_type).items():
+        for domain, enabled in self._default_capabilities_for(
+            payload.shop_type
+        ).items():
             db.add(
                 ShopAccountCapability(
                     shop_account_id=shop_account.id,

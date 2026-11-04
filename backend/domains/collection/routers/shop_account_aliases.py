@@ -12,7 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 from backend.schemas.account import UnmatchedShopAliasItem, UnmatchedShopAliasResponse
-from backend.schemas.shop_account_alias import ShopAccountAliasCreate, ShopAccountAliasResponse
+from backend.schemas.shop_account_alias import (
+    ShopAccountAliasCreate,
+    ShopAccountAliasResponse,
+)
 from backend.services.cache_service import get_cache_service
 from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
 from backend.services.shop_rename_service import assert_alias_available
@@ -30,6 +33,12 @@ router = APIRouter(
 logger = get_logger(__name__)
 
 _SHOP_IDENTITY_REFRESH_TARGETS = [
+    # 候选集的**物化副本**必须刷。
+    # 原子层（orders / analytics / products / services / inventory）读的是它的快照，
+    # 不是实时算的 ⇒ 别名或平台店铺ID 改了以后不刷副本，那些链路就一直用旧快照
+    # ⇒ 新别名不生效、这家店的历史仍然落进 unknown。
+    # 副本只有 136 行，刷新是毫秒级。
+    "semantic.shop_identity_resolution_candidates_v2_mv",
     "semantic.fact_orders_monthly_atomic_mv",
     "semantic.fact_analytics_monthly_atomic_mv",
 ]
@@ -133,7 +142,9 @@ class _PlatformAliasOccupancy:
     claimable_shop_accounts: int = 0
 
 
-async def _load_platform_alias_occupancy(db: AsyncSession) -> dict[str, _PlatformAliasOccupancy]:
+async def _load_platform_alias_occupancy(
+    db: AsyncSession,
+) -> dict[str, _PlatformAliasOccupancy]:
     """统计每个平台下有多少店铺账号、已被其它标签 1:1 占满多少、还能直接认领多少。
 
     认领接口对「已持有其它主动别名」的店铺账号直接返回 409，因此只有没有任何主动
@@ -147,10 +158,14 @@ async def _load_platform_alias_occupancy(db: AsyncSession) -> dict[str, _Platfor
                     ShopAccountAlias.is_primary == True,  # noqa: E712
                 )
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     account_rows = (
-        await db.execute(select(ShopAccount.platform, ShopAccount.id, ShopAccount.business_role))
+        await db.execute(
+            select(ShopAccount.platform, ShopAccount.id, ShopAccount.business_role)
+        )
     ).all()
 
     buckets: dict[str, dict[str, int]] = {}
@@ -204,7 +219,9 @@ def _build_unmatched_alias_items(
     for row in rows:
         payload = dict(row)
         platform_key = (payload.get("platform") or "").strip().lower()
-        payload["claim_hint"] = _build_claim_hint(occupancy_by_platform.get(platform_key))
+        payload["claim_hint"] = _build_claim_hint(
+            occupancy_by_platform.get(platform_key)
+        )
         items.append(UnmatchedShopAliasItem(**payload))
     return items
 
@@ -237,14 +254,18 @@ def _serialize_alias(record: ShopAccountAlias) -> ShopAccountAliasResponse:
     )
 
 
-async def _get_shop_account_or_404(db: AsyncSession, shop_account_id: str) -> ShopAccount:
+async def _get_shop_account_or_404(
+    db: AsyncSession, shop_account_id: str
+) -> ShopAccount:
     shop_account = (
         await db.execute(
             select(ShopAccount).where(ShopAccount.shop_account_id == shop_account_id)
         )
     ).scalar_one_or_none()
     if shop_account is None:
-        raise HTTPException(status_code=404, detail=f"shop account id '{shop_account_id}' not found")
+        raise HTTPException(
+            status_code=404, detail=f"shop account id '{shop_account_id}' not found"
+        )
     return shop_account
 
 
@@ -257,8 +278,8 @@ async def _clear_primary_aliases(
     alias_result = await db.execute(
         select(ShopAccountAlias).where(
             ShopAccountAlias.shop_account_id == shop_account_db_id,
-            ShopAccountAlias.is_active == True,
-            ShopAccountAlias.is_primary == True,
+            ShopAccountAlias.is_active.is_(True),
+            ShopAccountAlias.is_primary.is_(True),
         )
     )
     for alias in alias_result.scalars().all():
@@ -319,7 +340,9 @@ async def _enqueue_shop_identity_refresh(
 @router.get("", response_model=List[ShopAccountAliasResponse])
 async def list_shop_account_aliases(db: AsyncSession = Depends(get_async_db)):
     result = await db.execute(
-        select(ShopAccountAlias).order_by(ShopAccountAlias.platform, ShopAccountAlias.alias_value)
+        select(ShopAccountAlias).order_by(
+            ShopAccountAlias.platform, ShopAccountAlias.alias_value
+        )
     )
     return [_serialize_alias(record) for record in result.scalars().all()]
 
@@ -396,8 +419,8 @@ async def claim_shop_account_alias(
         await db.execute(
             select(ShopAccountAlias).where(
                 ShopAccountAlias.shop_account_id == shop_account.id,
-                ShopAccountAlias.is_active == True,
-                ShopAccountAlias.is_primary == True,
+                ShopAccountAlias.is_active.is_(True),
+                ShopAccountAlias.is_primary.is_(True),
             )
         )
     ).scalar_one_or_none()
@@ -425,13 +448,17 @@ async def claim_shop_account_alias(
 
     await _clear_primary_aliases(db, shop_account.id)
     existing = (
-        await db.execute(
-            select(ShopAccountAlias).where(
-                ShopAccountAlias.shop_account_id == shop_account.id,
-                ShopAccountAlias.alias_normalized == alias_normalized,
+        (
+            await db.execute(
+                select(ShopAccountAlias).where(
+                    ShopAccountAlias.shop_account_id == shop_account.id,
+                    ShopAccountAlias.alias_normalized == alias_normalized,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     if existing is not None:
         existing.alias_value = alias_value

@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.data_pipeline.refresh_registry import (
+    LOGICAL_TARGET_OBJECTS,
     PIPELINE_DEPENDENCIES,
     SQL_TARGET_PATHS,
 )
@@ -358,11 +359,28 @@ async def _collect_existing_assets(session: AsyncSession) -> tuple[set[str], set
             SELECT schemaname AS table_schema, matviewname AS table_name
             FROM pg_matviews
             WHERE schemaname = ANY(:schemas)
+            UNION
+            -- **函数**型目标（如共享的店铺身份解析函数 semantic.resolve_shop_identity）
+            -- 不在 information_schema.tables / views 里 ⇒ 只查关系会把它永远算成
+            -- missing ⇒ 模块被判 drift ⇒ 部署 bootstrap 失败。
+            SELECT n.nspname AS table_schema, p.proname AS table_name
+            FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = ANY(:schemas)
             """
         ),
         {"schemas": ["semantic", "mart", "api", "ops", "core"]},
     )
     existing_objects = {f"{row[0]}.{row[1]}" for row in object_result.fetchall()}
+
+    # 逻辑目标 ↔ 真实对象名 是**双向**的：
+    # 存在性核对用的是逻辑名（如 ``semantic.shop_identity_resolver``），
+    # 库里躺着的是真实名（如 ``semantic.resolve_shop_identity``）
+    # ⇒ 真实名存在时，逻辑名也算存在。
+    # 不做这一步 ⇒ 函数型目标永远被判 missing ⇒ 模块 drift ⇒ 部署被拦。
+    for logical_name, object_name in LOGICAL_TARGET_OBJECTS.items():
+        if object_name in existing_objects:
+            existing_objects.add(logical_name)
     return existing_schemas, existing_objects
 
 
@@ -381,9 +399,17 @@ def _build_module_report(
     details = _normalize_json_value((module_state or {}).get("details_json"))
     core_applied = (module_state or {}).get("asset_fingerprint_applied")
     refresh_applied = details.get("refresh_fingerprint_applied")
-    core_missing = [target for target in core_targets if target not in existing_objects]
+    core_missing = [
+        target
+        for target in core_targets
+        if target not in existing_objects
+        and LOGICAL_TARGET_OBJECTS.get(target) not in existing_objects
+    ]
     refresh_missing = [
-        target for target in refresh_targets if target not in existing_objects
+        target
+        for target in refresh_targets
+        if target not in existing_objects
+        and LOGICAL_TARGET_OBJECTS.get(target) not in existing_objects
     ]
     stored_status = (module_state or {}).get("status")
     active_refreshing = active_refresh_run is not None

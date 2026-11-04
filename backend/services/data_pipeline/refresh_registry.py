@@ -9,6 +9,22 @@ from modules.core.data_domains import (
 )
 
 
+#: 刷新目标名与**真实数据库对象名**不一致的「逻辑目标」。
+#:
+#: 例：``semantic.alias_registry`` 的 SQL 建的是表 ``semantic.semantic_field_aliases``；
+#: ``semantic.shop_identity_resolver`` 建的是**函数** ``semantic.resolve_shop_identity``。
+#: 目标名只是刷新流程里的代号，存在性核对必须按真实对象名进行，
+#: 否则会把活着的目标误报成 missing（⇒ 模块判 drift ⇒ 部署 bootstrap 被拦）。
+#:
+#: 维护约束：新增逻辑目标时必须登记在这里，由
+#: ``test_data_pipeline_freshness_existence`` 守护。
+LOGICAL_TARGET_OBJECTS: dict[str, str] = {
+    "semantic.alias_registry": "semantic.semantic_field_aliases",
+    # 共享的店铺身份解析函数：SQL 建的是**函数**，不是关系（pg_class 里没有）
+    "semantic.shop_identity_resolver": "semantic.resolve_shop_identity",
+}
+
+
 PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.alias_registry": [],
     # 身份解析候选集的**正本**仍是普通视图（从 core 表现算）；物化副本是它的
