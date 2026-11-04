@@ -1,5 +1,65 @@
 # Changelog - 西虹 ERP 系统
 
+## [v7.13.5] - 2026-11-05 - 商品/服务/库存三条链路接入店铺身份解析 + 停用店不再参与重采
+
+### 库存看板「按店拆不开」的根因被修掉
+
+- **根因不是缺数据，是键被写错了**。库存采集文件里每行都带真实店铺身份
+  （`raw_data` 里的 `shop_id` / `store_name` / `shop_account_id` / `platform_code`），
+  但写入事实表时**店铺键落成了占位值 `xihong`** ⇒ 生产上 4,111 行库存全部挂在
+  一个虚拟店下面 ⇒ 库存健康、库存周转、滞销清单这些看板**按店拆不开**。
+- 现在这 4,111 行**100% 能解析到店铺账号**（实测 `raw_data->>'shop_account_id'`
+  命中率 4111/4111）⇒ 库存终于能按店归属。
+
+### 键位统一：语义层 5 条链路里 3 条一直没做身份解析
+
+- 语义层有 5 条链路（orders / analytics / products / services / inventory）。
+  以前**只有 orders 与 analytics 做了身份解析**（而且那段逻辑在两个文件里各抄了一份），
+  products / services / inventory **完全没解析**，直接把采集文件里的原始 shop_id 透传出去。
+  ⇒ 同一个店在不同链路里是三种键：平台店铺ID / 业务店铺ID / 原始店名 / 占位键。
+  - Shopee 商品/服务行用的是平台店铺ID（`1308200832`）；
+  - TikTok 商品/服务行用的是「地区(店名)」这种原始店名（`Malaysia(Flora Mall)`）；
+  - 库存行全是占位键 `xihong`。
+- 新增共享解析入口 `sql/semantic/shop_identity_resolver.sql`
+  （`semantic.resolve_shop_identity()`）：把「候选计数 + 区域两层消歧 + 取最优候选」
+  收敛成**一份**，products / services / inventory 三条链路统一调用，
+  口径与 `orders_atomic` 逐条对齐。
+- **解析失败保留原始键，不抹成 `unknown`**：候选为 0 说明这个店在本系统里没有账号，
+  抹成 unknown 等于把「看得见的原始标识」变成「看不出所以然」；
+  只有**候选 > 1（有歧义）**才落 unknown —— 挑一个就是猜。
+- **去重口径零变化**：去重分区仍用原始键（`source_shop_id`），行数与金额与改造前完全一致。
+
+### 服务看板一读就崩：满意度列的数值转换没做合法性校验
+
+- **现象**：语义层 `semantic.fact_services_atomic` 一读 `satisfaction` 就报
+  `invalid input syntax for type numeric: "--"`，整条查询直接失败。
+- **根因**：`b_class.fact_tiktok_services_agent_monthly` 有 **137 行满意度是 `'--'`**
+  （平台导出里的「无数据」占位符）。原来的转换写法
+  `NULLIF(REGEXP_REPLACE(x, '[^0-9.-]', '', 'g'), '')::numeric` 对 `'--'` 会得到 `'--'`
+  —— 非空 ⇒ 走进 `::numeric` ⇒ 炸。
+- **为什么一直没被发现**：PostgreSQL 的**列裁剪**会把坏列优化掉 ——
+  `SELECT count(*)` 正常返回 469 行，一读数值列才报错。
+  ⇒ **「count(*) 通过」不代表视图健康**（这条已经吃过三次亏）。
+- analytics 层在 v7.13.2 已经补过正则合法性校验，但
+  **products / services / inventory 三层都还没补** ⇒ 同样的坑还在。
+- 现在这三层共 **30 处**数值转换全部补上校验
+  （`^-?(?:\d+(?:\.\d*)?|\.\d+)$`，与 analytics 层逐字一致）：
+  非法值一律落 **NULL 而不是 0** —— 「取不到」和「真的是零」必须可区分。
+
+### 停用店不再参与重采
+
+- 生产 52 个店铺账号里有 **33 个是停用状态**（32 个 Shopee + 1 个测试账号）。
+  它们的历史采集文件还躺在 `public.catalog_files` 里（实测 18 行）。
+- 以前清空事实数据时，这些文件会被**一起**重置成 `pending` ⇒ 重采去连那些已经停掉的店：
+  一边白跑采集，一边又把停用店的数据灌回事实表。
+- 现在清理重采时**跳过停用店的文件**（平台店铺ID / 业务店铺ID / 账号主键三种身份键都认）。
+
+### 工程
+
+- 新增 `backend/tests/data_pipeline/test_shop_identity_resolver.py`（口径守护：
+  三条链路必须接入解析、必须保留原始键、新增列必须追加在末尾、资产不得含 DROP/CASCADE）。
+- 新增 `backend/tests/test_data_sync_cleanup_disabled_shops.py`（停用店不重采 + 缺表优雅降级）。
+
 ## [v7.13.4] - 2026-11-05 - 员工薪资/提成/绩效链路打通 + 店铺显示名统一
 
 ### 薪资链路：口径不再各说各话
