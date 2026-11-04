@@ -1,8 +1,8 @@
 # Changelog - 西虹 ERP 系统
 
-## [v7.13.3] - 2026-11-04 - 看板查询超时降级兜底（返回上次成功快照 + 数据时间提示）
+## [v7.13.3] - 2026-11-04 - 看板超时降级兜底 + 数据地基（dim_shops 对齐 / 改名占用预检 / 状态服务端派生）
 
-### 可靠性
+### 可靠性：看板查询超时不再「空白页」
 
 - **看板不再「超时即空白页」**：数据库语句超时时，后端不再直接返回 500，而是返回**上一次成功算出来的结果**，并在响应里明确标出「这份数据是截至什么时候的」。
   - 降级只发生在**超时**这一种故障上。语法错、权限不足、连接断开照常 500 —— 把它们伪装成「数据有点旧」会把真 bug 藏起来。
@@ -13,10 +13,29 @@
 - 响应里新增 `meta.data_status="degraded"`、`meta.data_as_of`（那次成功结果的时间）、`meta.degraded_reason`，以及一条人话 warning；响应头 `X-Cache: DEGRADED`。前端业务概览页顶部弹出黄色提示条，明说「当前展示的是上一次成功的结果，不是最新数据」。
 - 降级记录挂在 `request.state` 上而不是 ContextVar：bootstrap 端点用 `asyncio.gather` 并发跑 7 个模块，而 **Task 会复制一份 contextvars 上下文** —— 子任务里 `ContextVar.set()` 传不回父任务。
 
+### 数据地基
+
+- **`core.dim_shops` 全量对齐（生产此前是 0 行）**：看板的显示名 JOIN 读这张表，而它**一行都没有** ⇒ JOIN 永远落空，显示名只能靠 `core.shop_accounts.store_name` 兜底；绩效/提成/告警等 10 张业务表也以它为外键目标，等于全在裸奔。
+  - 根因：这张表的唯一写入方从**旧模型** `core.platform_accounts` 同步，而旧模型早已被 `core.shop_accounts` 取代（生产：旧模型 11 行残留，新模型 52 行才是权威）；那个同步只在「建提成配置/建目标」时顺带被调用 ⇒ 从没跑过。
+  - 修法：迁移 `20261107` 把 `core.dim_shops` 变成 **`core.shop_accounts` 的派生表**，键派生与语义层**逐字一致**（`resolved_shop_id = COALESCE(platform_shop_id, shop_account_id, id::text)`）—— 派生不一致 ⇒ JOIN 落空 ⇒ 这次修复等于没做。
+  - **可重跑**：upsert + 清掉源里已不存在的派生行 ⇒ P3 改键后重跑一次即可全量对齐。清理**不带 CASCADE**：历史业务表有外键指向它，真有引用就让迁移失败（fail-closed），不会悄悄删数据。
+  - 写入路径同步补齐：新建/编辑店铺账号立刻 upsert 维度行（并按需补平台维度），不再靠「碰巧走到某个接口」才写进去。
+  - 安全边界：`dim_shops` 主键就是 `(platform_code, shop_id)` ⇒ 看板 JOIN 最多命中一行 ⇒ **不会把金额翻倍**。
+- **改名新名的跨主账号占用预检**：店名是身份解析的**第 4 路匹配键**（`store_name_match`），语义层按 `(platform, 规范化店名)` 找候选、**不区分主账号** ⇒ 两个不同主账号的店铺用了同一个店名 ⇒ 候选数 = 2 ⇒ 原子层判为 `ambiguous_shop_label` ⇒ 这些行的 `shop_id` 落进 `'unknown'` ⇒ **这家店的钱在看板上直接消失**。原来的校验只覆盖「同一个主账号」，跨主账号撞车要到语义层才炸 —— 那时已经在算钱、已经算错了。现在提前拦在写入侧（409，人话说明占用方）。
+  - 规范化口径与语义层一致（`normalize_alias_key`：剥平台前缀 → 小写 → 折叠分隔符），否则「看着不一样、匹配时一样」。
+  - 区域语义与别名表唯一约束一致：同名 + **不同**区域 ⇒ 允许（区域消歧就是为了让同平台同名在不同区域并存）；一方区域为空（不限区域）⇒ 与另一方也为空才算冲突。
+- **`platform_shop_id_status` 改为服务端派生**：它回答「这个平台店铺ID是什么来路、靠不靠谱」，必须与数据一致 —— 没有平台店铺ID却标成 `manual_confirmed` 就是在骗下游（看板身份健康度、采集对账都拿它当依据）。
+  - 没有平台店铺ID ⇒ `missing`（客户端说什么都不作数）；
+  - 平台店铺ID 变了（人工填的）⇒ `manual_confirmed`；
+  - 平台店铺ID 没变 ⇒ **保留原状态**（`auto_bound` / `confirmed` 不被一次无关字段的编辑改写掉）。
+  - 「变化了没有」按**派生结果**判定，不按客户端声称 ⇒ 派生结果没变就不触发归属重算（避免无谓的刷新风暴）。
+
 ### 工程
 
 - 新增 `backend/utils/query_timeout.py`：沿异常链（`__cause__` / `__context__` / SQLAlchemy 的 `orig`）识别超时 —— asyncpg 的 `QueryCanceledError`、psycopg2 的 `QueryCanceled`、`sqlalchemy.exc.TimeoutError` 都能认，同时不会把普通异常误判成超时。
-- 新增 `backend/tests/data_pipeline/test_dashboard_timeout_fallback.py`（10 个用例）：超时降级、非超时不解降、无快照仍 500、快照按端点隔离、超时识别（含「客户端断开不算超时」）。
+- 新增 `backend/tests/data_pipeline/test_dashboard_timeout_fallback.py`（10 个用例）与 `backend/tests/test_dim_shops_alignment.py`（11 个用例）。
+- 顺手修掉 `shop_accounts.py` 里一处既有 ruff 违规（`is_active == True` → `.is_(True)`）：该文件这次被改动 ⇒ CI 会检查它 ⇒ 不修就是一条新红灯。
+
 
 ## [v7.13.2] - 2026-11-04 - 物化店铺身份候选集 + 修 analytics 数值转换脏数据
 
