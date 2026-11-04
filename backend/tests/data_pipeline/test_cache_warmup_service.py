@@ -26,15 +26,21 @@ async def test_cache_warmup_uses_postgresql_service_when_router_enabled(monkeypa
             called.append(("kpi", month, platform, granularity, target_date))
             return {"gmv": 100}
 
-        async def get_business_overview_comparison(self, granularity, target_date, platform):
+        async def get_business_overview_comparison(
+            self, granularity, target_date, platform
+        ):
             called.append(("comparison", granularity, target_date, platform))
             return {"metrics": {}}
 
-        async def get_business_overview_shop_racing(self, granularity, target_date, group_by):
+        async def get_business_overview_shop_racing(
+            self, granularity, target_date, group_by
+        ):
             called.append(("shop_racing", granularity, target_date, group_by))
             return []
 
-        async def get_business_overview_traffic_ranking(self, granularity, target_date, dimension):
+        async def get_business_overview_traffic_ranking(
+            self, granularity, target_date, dimension
+        ):
             called.append(("traffic_ranking", granularity, target_date, dimension))
             return []
 
@@ -48,7 +54,9 @@ async def test_cache_warmup_uses_postgresql_service_when_router_enabled(monkeypa
             called.append(("inventory_backlog", min_days, limit))
             return []
 
-        async def get_business_overview_operational_metrics(self, month, platform, shop_id=None):
+        async def get_business_overview_operational_metrics(
+            self, month, platform, shop_id=None
+        ):
             called.append(("operational_metrics", month, platform))
             return {}
 
@@ -91,7 +99,9 @@ async def test_cache_warmup_never_uses_metabase_fallback(monkeypatch):
         lambda: _CacheServiceStub(),
     )
 
-    with pytest.raises(RuntimeError, match="Legacy non-PostgreSQL warmup path has been retired"):
+    with pytest.raises(
+        RuntimeError, match="Legacy non-PostgreSQL warmup path has been retired"
+    ):
         await cache_warmup_service.run_dashboard_cache_warmup()
 
     assert stored == []

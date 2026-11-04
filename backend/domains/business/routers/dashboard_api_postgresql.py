@@ -24,7 +24,10 @@ from fastapi.responses import JSONResponse
 from backend.dependencies.auth import get_current_user
 from backend.models.database import AsyncSessionLocal
 from backend.services.data_pipeline.dashboard_bootstrap import inspect_dashboard_assets
-from backend.services.postgresql_dashboard_service import _normalize_period_start, get_postgresql_dashboard_service
+from backend.services.postgresql_dashboard_service import (
+    _normalize_period_start,
+    get_postgresql_dashboard_service,
+)
 from backend.utils.api_response import error_response, success_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
@@ -65,7 +68,11 @@ def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
 def _reject_business_overview_legacy_params(request: Request) -> None:
     if not _BUSINESS_OVERVIEW_CANONICAL_ONLY:
         return
-    legacy = [key for key in _BUSINESS_OVERVIEW_LEGACY_QUERY_KEYS if key in request.query_params]
+    legacy = [
+        key
+        for key in _BUSINESS_OVERVIEW_LEGACY_QUERY_KEYS
+        if key in request.query_params
+    ]
     if not legacy:
         return
     raise HTTPException(
@@ -109,16 +116,29 @@ async def _require_dashboard_assets_ready(request: Request) -> None:
         if not isinstance(report, dict):
             return
 
-    module_name = _resolve_dashboard_module_name(getattr(request, "url", None).path if getattr(request, "url", None) else request.scope.get("path", ""))
+    module_name = _resolve_dashboard_module_name(
+        getattr(request, "url", None).path
+        if getattr(request, "url", None)
+        else request.scope.get("path", "")
+    )
     modules = report.get("modules")
-    module_report = modules.get(module_name) if isinstance(modules, dict) and module_name else None
+    module_report = (
+        modules.get(module_name) if isinstance(modules, dict) and module_name else None
+    )
 
     if isinstance(module_report, dict):
         if module_report.get("status") not in {"ready", "refreshing"}:
             report = await _refresh_dashboard_assets_report(request) or report
             modules = report.get("modules")
-            module_report = modules.get(module_name) if isinstance(modules, dict) and module_name else module_report
-        if isinstance(module_report, dict) and module_report.get("status") in {"ready", "refreshing"}:
+            module_report = (
+                modules.get(module_name)
+                if isinstance(modules, dict) and module_name
+                else module_report
+            )
+        if isinstance(module_report, dict) and module_report.get("status") in {
+            "ready",
+            "refreshing",
+        }:
             return
         detail: dict[str, Any] = {
             "message": "PostgreSQL dashboard assets are not ready. Run deploy-time bootstrap and retry.",
@@ -128,10 +148,16 @@ async def _require_dashboard_assets_ready(request: Request) -> None:
             "assets_drift": module_report.get("assets_drift"),
             "core_missing_objects": module_report.get("core_missing_objects"),
             "refresh_missing_objects": module_report.get("refresh_missing_objects"),
-            "asset_fingerprint_expected": module_report.get("asset_fingerprint_expected"),
+            "asset_fingerprint_expected": module_report.get(
+                "asset_fingerprint_expected"
+            ),
             "asset_fingerprint_applied": module_report.get("asset_fingerprint_applied"),
-            "refresh_fingerprint_expected": module_report.get("refresh_fingerprint_expected"),
-            "refresh_fingerprint_applied": module_report.get("refresh_fingerprint_applied"),
+            "refresh_fingerprint_expected": module_report.get(
+                "refresh_fingerprint_expected"
+            ),
+            "refresh_fingerprint_applied": module_report.get(
+                "refresh_fingerprint_applied"
+            ),
             "hint": {
                 "bootstrap_command": f"python scripts/bootstrap_postgresql_dashboard.py --module {module_name}",
                 "startup_policy": "runtime only inspects readiness; SQL asset publish happens at deploy time",
@@ -162,6 +188,7 @@ async def get_dashboard_assets_status(request: Request):
     ready = bool(report.get("ready")) if isinstance(report, dict) else False
     return success_response(data={"ready": bool(ready), "report": report})
 
+
 def _isoformat_utc_now_seconds() -> str:
     now = datetime.now(timezone.utc).replace(microsecond=0)
     return f"{now.isoformat()}Z"
@@ -186,7 +213,13 @@ def _detect_business_overview_empty_period(data: Any) -> bool:
         return True
     if not isinstance(data, dict):
         return False
-    bootstrap_keys = {"kpi", "comparison", "operational_metrics", "traffic_ranking", "shop_racing"}
+    bootstrap_keys = {
+        "kpi",
+        "comparison",
+        "operational_metrics",
+        "traffic_ranking",
+        "shop_racing",
+    }
     if bootstrap_keys.issubset(data.keys()):
         return (
             _detect_business_overview_empty_period(data.get("kpi"))
@@ -227,7 +260,9 @@ def _detect_business_overview_empty_period(data: Any) -> bool:
     return False
 
 
-def _apply_business_overview_empty_period_meta(meta: dict[str, Any], data: Any) -> dict[str, Any]:
+def _apply_business_overview_empty_period_meta(
+    meta: dict[str, Any], data: Any
+) -> dict[str, Any]:
     warnings = meta.get("warnings")
     if not isinstance(warnings, list):
         meta["warnings"] = []
@@ -252,8 +287,14 @@ def _wrap_business_overview_envelope(
     shop_id: Optional[str] = None,
     cache_status: Optional[str] = None,
 ) -> dict[str, Any]:
-    if isinstance(module_payload, dict) and {"meta", "data"}.issubset(module_payload.keys()):
-        meta = module_payload.get("meta") if isinstance(module_payload.get("meta"), dict) else {}
+    if isinstance(module_payload, dict) and {"meta", "data"}.issubset(
+        module_payload.keys()
+    ):
+        meta = (
+            module_payload.get("meta")
+            if isinstance(module_payload.get("meta"), dict)
+            else {}
+        )
         data = module_payload.get("data")
         module_payload["meta"] = _apply_business_overview_empty_period_meta(meta, data)
         return module_payload
@@ -266,7 +307,11 @@ def _wrap_business_overview_envelope(
         "generated_at": _isoformat_utc_now_seconds(),
         "cache": {
             "status": cache_status,
-            "hit": True if cache_status == "HIT" else False if cache_status in {"MISS", "BYPASS"} else None,
+            "hit": (
+                True
+                if cache_status == "HIT"
+                else False if cache_status in {"MISS", "BYPASS"} else None
+            ),
         },
         "warnings": [],
         "data_status": "ok",
@@ -292,7 +337,11 @@ def _build_business_overview_meta(
         "generated_at": _isoformat_utc_now_seconds(),
         "cache": {
             "status": cache_status,
-            "hit": True if cache_status == "HIT" else False if cache_status in {"MISS", "BYPASS"} else None,
+            "hit": (
+                True
+                if cache_status == "HIT"
+                else False if cache_status in {"MISS", "BYPASS"} else None
+            ),
         },
         "warnings": [],
         "data_status": "ok",
@@ -313,7 +362,9 @@ async def _try_attach_business_overview_freshness(
             shop_id=shop_id,
         )
     except Exception as exc:
-        logger.warning("Business Overview freshness query failed: %s", exc, exc_info=True)
+        logger.warning(
+            "Business Overview freshness query failed: %s", exc, exc_info=True
+        )
         warnings = meta.get("warnings")
         if not isinstance(warnings, list):
             warnings = []
@@ -385,7 +436,11 @@ async def _resolve_cached_data(
         cache_params,
         _produce_payload,
     )
-    if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
+    if (
+        isinstance(payload, dict)
+        and payload.get("success") is True
+        and "data" in payload
+    ):
         return payload["data"], cache_status
     return payload, cache_status
 
@@ -413,7 +468,9 @@ def _require_b_cost_role(current_user: Any) -> Any:
     raise HTTPException(status_code=403, detail="Insufficient permissions")
 
 
-async def _get_b_cost_authorized_user(current_user: Any = Depends(get_current_user)) -> Any:
+async def _get_b_cost_authorized_user(
+    current_user: Any = Depends(get_current_user),
+) -> Any:
     return _require_b_cost_role(current_user)
 
 
@@ -457,8 +514,14 @@ async def get_business_overview_kpi_postgresql(
             cache_params,
             _produce_payload,
         )
-        if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
-            period_key = _normalize_business_overview_period_key(effective_granularity, effective_date)
+        if (
+            isinstance(payload, dict)
+            and payload.get("success") is True
+            and "data" in payload
+        ):
+            period_key = _normalize_business_overview_period_key(
+                effective_granularity, effective_date
+            )
             payload["meta"] = _build_business_overview_meta(
                 granularity=effective_granularity,
                 period_key=period_key,
@@ -467,7 +530,9 @@ async def get_business_overview_kpi_postgresql(
                 cache_status=cache_status,
             )
             if isinstance(payload.get("meta"), dict):
-                _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
+                _apply_business_overview_empty_period_meta(
+                    payload["meta"], payload.get("data")
+                )
                 await _try_attach_business_overview_freshness(
                     payload["meta"],
                     platform_code=effective_platform_code,
@@ -488,7 +553,9 @@ async def get_business_overview_kpi_postgresql(
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
         logger.error(f"PostgreSQL KPI query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500
+        )
 
 
 @router.get("/business-overview/comparison")
@@ -527,8 +594,14 @@ async def get_business_overview_comparison_postgresql(
             cache_params,
             _produce_payload,
         )
-        if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
-            normalized_period_key = _normalize_business_overview_period_key(granularity, effective_period_key)
+        if (
+            isinstance(payload, dict)
+            and payload.get("success") is True
+            and "data" in payload
+        ):
+            normalized_period_key = _normalize_business_overview_period_key(
+                granularity, effective_period_key
+            )
             payload["meta"] = _build_business_overview_meta(
                 granularity=granularity,
                 period_key=normalized_period_key,
@@ -537,7 +610,9 @@ async def get_business_overview_comparison_postgresql(
                 cache_status=cache_status,
             )
             if isinstance(payload.get("meta"), dict):
-                _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
+                _apply_business_overview_empty_period_meta(
+                    payload["meta"], payload.get("data")
+                )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except HTTPException:
         raise
@@ -549,7 +624,9 @@ async def get_business_overview_comparison_postgresql(
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
         logger.error(f"PostgreSQL comparison query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500
+        )
 
 
 @router.get("/business-overview/bootstrap")
@@ -583,7 +660,9 @@ async def get_business_overview_bootstrap_postgresql(
             service = get_postgresql_dashboard_service()
             started = time.perf_counter()
 
-            async def _timed_module(name: str, cache_type: str, module_params: dict[str, Any], producer):
+            async def _timed_module(
+                name: str, cache_type: str, module_params: dict[str, Any], producer
+            ):
                 module_started = time.perf_counter()
                 result, module_cache_status = await _resolve_cached_data(
                     request,
@@ -591,7 +670,12 @@ async def get_business_overview_bootstrap_postgresql(
                     _normalize_cache_params(module_params),
                     producer,
                 )
-                return name, result, (time.perf_counter() - module_started) * 1000.0, module_cache_status
+                return (
+                    name,
+                    result,
+                    (time.perf_counter() - module_started) * 1000.0,
+                    module_cache_status,
+                )
 
             module_results = await asyncio.gather(
                 _timed_module(
@@ -676,8 +760,14 @@ async def get_business_overview_bootstrap_postgresql(
                     ),
                 ),
             )
-            data = {name: result for name, result, _elapsed_ms, _cache_status in module_results}
-            elapsed_ms = {name: elapsed_ms for name, _result, elapsed_ms, _cache_status in module_results}
+            data = {
+                name: result
+                for name, result, _elapsed_ms, _cache_status in module_results
+            }
+            elapsed_ms = {
+                name: elapsed_ms
+                for name, _result, elapsed_ms, _cache_status in module_results
+            }
             total_ms = (time.perf_counter() - started) * 1000.0
 
             # Observability: break down slow bootstrap into its subcalls.
@@ -701,8 +791,14 @@ async def get_business_overview_bootstrap_postgresql(
             cache_params,
             _produce_payload,
         )
-        if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
-            period_key = _normalize_business_overview_period_key(effective_granularity, effective_date)
+        if (
+            isinstance(payload, dict)
+            and payload.get("success") is True
+            and "data" in payload
+        ):
+            period_key = _normalize_business_overview_period_key(
+                effective_granularity, effective_date
+            )
             payload["meta"] = _build_business_overview_meta(
                 granularity=effective_granularity,
                 period_key=period_key,
@@ -711,7 +807,9 @@ async def get_business_overview_bootstrap_postgresql(
                 cache_status=cache_status,
             )
             if isinstance(payload.get("meta"), dict):
-                _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
+                _apply_business_overview_empty_period_meta(
+                    payload["meta"], payload.get("data")
+                )
                 await _try_attach_business_overview_freshness(
                     payload["meta"],
                     platform_code=effective_platform_code,
@@ -729,8 +827,12 @@ async def get_business_overview_bootstrap_postgresql(
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
-        logger.error(f"PostgreSQL business overview bootstrap query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500)
+        logger.error(
+            f"PostgreSQL business overview bootstrap query failed: {e}", exc_info=True
+        )
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR, f"鏌ヨ澶辫触: {str(e)}", status_code=500
+        )
 
 
 @router.get("/business-overview/shop-racing")
@@ -772,8 +874,14 @@ async def get_business_overview_shop_racing_postgresql(
             cache_params,
             _produce_payload,
         )
-        if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
-            normalized_period_key = _normalize_business_overview_period_key(granularity, effective_period_key)
+        if (
+            isinstance(payload, dict)
+            and payload.get("success") is True
+            and "data" in payload
+        ):
+            normalized_period_key = _normalize_business_overview_period_key(
+                granularity, effective_period_key
+            )
             payload["meta"] = _build_business_overview_meta(
                 granularity=granularity,
                 period_key=normalized_period_key,
@@ -782,15 +890,21 @@ async def get_business_overview_shop_racing_postgresql(
                 cache_status=cache_status,
             )
             if isinstance(payload.get("meta"), dict):
-                _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
+                _apply_business_overview_empty_period_meta(
+                    payload["meta"], payload.get("data")
+                )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except HTTPException:
         raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
-        logger.error(f"PostgreSQL compatibility shop racing query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+        logger.error(
+            f"PostgreSQL compatibility shop racing query failed: {e}", exc_info=True
+        )
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500
+        )
 
 
 @router.get("/business-overview/traffic-ranking")
@@ -832,8 +946,14 @@ async def get_business_overview_traffic_ranking_postgresql(
             cache_params,
             _produce_payload,
         )
-        if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
-            period_key = _normalize_business_overview_period_key(granularity, target_date)
+        if (
+            isinstance(payload, dict)
+            and payload.get("success") is True
+            and "data" in payload
+        ):
+            period_key = _normalize_business_overview_period_key(
+                granularity, target_date
+            )
             payload["meta"] = _build_business_overview_meta(
                 granularity=granularity,
                 period_key=period_key,
@@ -849,15 +969,21 @@ async def get_business_overview_traffic_ranking_postgresql(
                     platform=effective_platform,
                 )
                 payload["meta"]["identity_health"] = jsonable_encoder(identity_health)
-                _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
+                _apply_business_overview_empty_period_meta(
+                    payload["meta"], payload.get("data")
+                )
         return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except HTTPException:
         raise
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
-        logger.error(f"PostgreSQL compatibility traffic ranking query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+        logger.error(
+            f"PostgreSQL compatibility traffic ranking query failed: {e}", exc_info=True
+        )
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500
+        )
 
 
 @router.get("/business-overview/inventory-backlog")
@@ -870,7 +996,12 @@ async def get_business_overview_inventory_backlog_postgresql(
 ):
     try:
         await _require_dashboard_assets_ready(request)
-        params = {"days": days, "limit": limit, "granularity": granularity, "date": date}
+        params = {
+            "days": days,
+            "limit": limit,
+            "granularity": granularity,
+            "date": date,
+        }
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
@@ -896,13 +1027,17 @@ async def get_business_overview_inventory_backlog_postgresql(
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
         logger.error(f"PostgreSQL inventory backlog query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500
+        )
 
 
 @router.get("/business-overview/operational-metrics")
 async def get_business_overview_operational_metrics_postgresql(
     request: Request,
-    granularity: Optional[str] = Query(None, description="canonical granularity (only monthly supported)"),
+    granularity: Optional[str] = Query(
+        None, description="canonical granularity (only monthly supported)"
+    ),
     period_key: str = Query(..., description="canonical period key (ISO date)"),
     platform_code: Optional[str] = Query(None, description="canonical platform code"),
     shop_id: Optional[str] = Query(None, description="canonical shop id"),
@@ -937,8 +1072,14 @@ async def get_business_overview_operational_metrics_postgresql(
             cache_params,
             _produce_payload,
         )
-        if isinstance(payload, dict) and payload.get("success") is True and "data" in payload:
-            period_key = _normalize_business_overview_period_key("monthly", effective_month)
+        if (
+            isinstance(payload, dict)
+            and payload.get("success") is True
+            and "data" in payload
+        ):
+            period_key = _normalize_business_overview_period_key(
+                "monthly", effective_month
+            )
             payload["meta"] = _build_business_overview_meta(
                 granularity="monthly",
                 period_key=period_key,
@@ -947,14 +1088,22 @@ async def get_business_overview_operational_metrics_postgresql(
                 cache_status=cache_status,
             )
             if isinstance(payload.get("meta"), dict):
-                _apply_business_overview_empty_period_meta(payload["meta"], payload.get("data"))
+                _apply_business_overview_empty_period_meta(
+                    payload["meta"], payload.get("data")
+                )
                 if effective_platform_code and isinstance(payload.get("data"), dict):
-                    data_meta = payload["data"].get("meta") if isinstance(payload["data"], dict) else None
+                    data_meta = (
+                        payload["data"].get("meta")
+                        if isinstance(payload["data"], dict)
+                        else None
+                    )
                     warnings = payload["meta"].get("warnings")
                     if not isinstance(warnings, list):
                         payload["meta"]["warnings"] = []
                         warnings = payload["meta"]["warnings"]
-                    if isinstance(data_meta, dict) and isinstance(data_meta.get("warnings"), list):
+                    if isinstance(data_meta, dict) and isinstance(
+                        data_meta.get("warnings"), list
+                    ):
                         for warning in data_meta["warnings"]:
                             if warning not in warnings:
                                 warnings.append(warning)
@@ -964,8 +1113,13 @@ async def get_business_overview_operational_metrics_postgresql(
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
-        logger.error(f"PostgreSQL compatibility operational metrics query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+        logger.error(
+            f"PostgreSQL compatibility operational metrics query failed: {e}",
+            exc_info=True,
+        )
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500
+        )
 
 
 @router.get("/b-cost-analysis/overview")
@@ -978,7 +1132,6 @@ async def get_b_cost_analysis_overview_postgresql(
 ):
     try:
         await _require_dashboard_assets_ready(request)
-        params = {"period_month": period_month, "platform": platform, "shop_id": shop_id}
         cache_params = _normalize_cache_params(
             {
                 "period_month": _normalize_period_month_for_cache(period_month),
@@ -1006,8 +1159,12 @@ async def get_b_cost_analysis_overview_postgresql(
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
-        logger.error(f"PostgreSQL b cost analysis overview query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500)
+        logger.error(
+            f"PostgreSQL b cost analysis overview query failed: {e}", exc_info=True
+        )
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500
+        )
 
 
 @router.get("/b-cost-analysis/shop-month")
@@ -1020,7 +1177,6 @@ async def get_b_cost_analysis_shop_month_postgresql(
 ):
     try:
         await _require_dashboard_assets_ready(request)
-        params = {"period_month": period_month, "platform": platform, "shop_id": shop_id}
         cache_params = _normalize_cache_params(
             {
                 "period_month": _normalize_period_month_for_cache(period_month),
@@ -1048,8 +1204,12 @@ async def get_b_cost_analysis_shop_month_postgresql(
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
-        logger.error(f"PostgreSQL b cost analysis shop month query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500)
+        logger.error(
+            f"PostgreSQL b cost analysis shop month query failed: {e}", exc_info=True
+        )
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500
+        )
 
 
 @router.get("/b-cost-analysis/order-detail")
@@ -1099,5 +1259,9 @@ async def get_b_cost_analysis_order_detail_postgresql(
     except ValueError as e:
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
-        logger.error(f"PostgreSQL b cost analysis order detail query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500)
+        logger.error(
+            f"PostgreSQL b cost analysis order detail query failed: {e}", exc_info=True
+        )
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500
+        )

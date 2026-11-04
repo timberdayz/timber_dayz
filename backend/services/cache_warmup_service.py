@@ -11,7 +11,9 @@ from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 from modules.core.logger import get_logger
 from backend.services.cache_service import get_cache_service
-from backend.services.postgresql_dashboard_service import get_postgresql_dashboard_service
+from backend.services.postgresql_dashboard_service import (
+    get_postgresql_dashboard_service,
+)
 
 logger = get_logger(__name__)
 
@@ -112,6 +114,7 @@ def _month_end() -> str:
     else:
         next_first = date(t.year, t.month + 1, 1)
     from datetime import timedelta
+
     return (next_first - timedelta(days=1)).isoformat()
 
 
@@ -183,7 +186,9 @@ async def run_dashboard_cache_warmup() -> Dict[str, Any]:
         params = _resolve_params(raw_params)
         cache_params = _normalize_cache_params(params)
         try:
-            result = await _query_postgresql_dashboard(postgresql_service, target_name, params)
+            result = await _query_postgresql_dashboard(
+                postgresql_service, target_name, params
+            )
             response = {
                 "success": True,
                 "data": result,
@@ -202,7 +207,9 @@ async def run_dashboard_cache_warmup() -> Dict[str, Any]:
     return {"ok": ok, "failed": failed, "errors": errors}
 
 
-async def _query_postgresql_dashboard(service, target_name: str, params: Dict[str, Any]) -> Any:
+async def _query_postgresql_dashboard(
+    service, target_name: str, params: Dict[str, Any]
+) -> Any:
     if target_name == "business_overview_bootstrap":
         period_key = params.get("period_key") or _current_month()
         granularity = params.get("granularity") or "monthly"

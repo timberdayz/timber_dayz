@@ -55,10 +55,10 @@ def create_tables():
         ("performance_scores", PerformanceScore),
         ("performance_config", PerformanceConfig),
     ]
-    
+
     created_count = 0
     existing_count = 0
-    
+
     for table_name, model_class in tables_to_create:
         schema = getattr(model_class.__table__, "schema", None) or "public"
         if check_table_exists(table_name, schema):
@@ -71,24 +71,23 @@ def create_tables():
                 created_count += 1
             except Exception as e:
                 logger.error(f"[ERROR] 表 {table_name} 创建失败: {e}")
-    
+
     logger.info(f"\n创建结果: 新建 {created_count} 张表, 已存在 {existing_count} 张表")
     return created_count, existing_count
 
 
 if __name__ == "__main__":
     logger.info("开始初始化 v4.11.0 数据库表...")
-    
+
     try:
         created, existing = create_tables()
-        
+
         if created > 0:
             logger.info(f"\n[OK] 成功创建 {created} 张新表")
         else:
             logger.info("\n[OK] 所有表已存在，无需创建")
-        
+
         logger.info("\n数据库表初始化完成！")
     except Exception as e:
         logger.error(f"\n[FAIL] 数据库表初始化失败: {e}", exc_info=True)
         sys.exit(1)
-

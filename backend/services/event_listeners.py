@@ -85,10 +85,16 @@ def determine_pipeline_targets_for_data_ingested(event: DataIngestedEvent) -> li
     if not requested_targets:
         # [D8] 归一数据域(traffic -> analytics)后再取默认刷新目标
         requested_targets = list(
-            DATA_INGESTED_PIPELINE_TARGETS.get(normalize_data_domain(event.data_domain), [])
+            DATA_INGESTED_PIPELINE_TARGETS.get(
+                normalize_data_domain(event.data_domain), []
+            )
         )
-    registered_targets = [target for target in requested_targets if target in SQL_TARGET_PATHS]
-    dropped_targets = [target for target in requested_targets if target not in SQL_TARGET_PATHS]
+    registered_targets = [
+        target for target in requested_targets if target in SQL_TARGET_PATHS
+    ]
+    dropped_targets = [
+        target for target in requested_targets if target not in SQL_TARGET_PATHS
+    ]
     if dropped_targets:
         logger.warning(
             "[EventListener] dropping unregistered refresh targets: domain=%s, file_id=%s, targets=%s",
@@ -99,7 +105,9 @@ def determine_pipeline_targets_for_data_ingested(event: DataIngestedEvent) -> li
     return registered_targets
 
 
-async def run_pipeline_refresh_for_data_ingested_event(event: DataIngestedEvent) -> Optional[str]:
+async def run_pipeline_refresh_for_data_ingested_event(
+    event: DataIngestedEvent,
+) -> Optional[str]:
     targets = determine_pipeline_targets_for_data_ingested(event)
     if not targets:
         logger.info(
@@ -138,9 +146,9 @@ async def run_pipeline_refresh_for_data_ingested_event(event: DataIngestedEvent)
             if event.data_domain == "inventory":
                 if hasattr(session, "execute"):
                     await sync_inventory_skus(session, source_file_id=event.file_id)
-                inventory_age_result = await InventoryAgeRefreshService(session).refresh(
-                    force_full=False
-                )
+                inventory_age_result = await InventoryAgeRefreshService(
+                    session
+                ).refresh(force_full=False)
                 await session.commit()
                 logger.info(
                     "[EventListener] Inventory age replay completed: "
@@ -150,7 +158,9 @@ async def run_pipeline_refresh_for_data_ingested_event(event: DataIngestedEvent)
             return run_id
 
 
-async def enqueue_refresh_for_data_ingested_event(event: DataIngestedEvent) -> Optional[str]:
+async def enqueue_refresh_for_data_ingested_event(
+    event: DataIngestedEvent,
+) -> Optional[str]:
     targets = determine_pipeline_targets_for_data_ingested(event)
     if not targets:
         logger.info(
@@ -174,7 +184,9 @@ async def enqueue_refresh_for_data_ingested_event(event: DataIngestedEvent) -> O
                 "row_count": event.row_count,
                 "source_table_name": event.source_table_name,
                 "timestamp": event.timestamp,
-                "related_file_ids": [event.file_id] if event.file_id is not None else [],
+                "related_file_ids": (
+                    [event.file_id] if event.file_id is not None else []
+                ),
             },
         )
         logger.info(
@@ -237,7 +249,9 @@ class EventListener:
             else:
                 # 有事件循环时只能尽力而为:调用方若是 asyncio.run(...),
                 # 收尾时未完成的 task 会被取消。生产路径请走 handle_data_ingested_async。
-                task = asyncio.create_task(enqueue_refresh_for_data_ingested_event(event))
+                task = asyncio.create_task(
+                    enqueue_refresh_for_data_ingested_event(event)
+                )
                 logger.info(
                     "[EventListener] PostgreSQL refresh enqueue task scheduled: "
                     f"file_id={event.file_id}, task={task!r}"

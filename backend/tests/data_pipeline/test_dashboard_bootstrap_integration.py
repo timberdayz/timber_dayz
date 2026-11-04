@@ -21,8 +21,12 @@ def test_backend_main_only_inspects_dashboard_assets_on_startup():
 def test_bootstrap_dashboard_assets_relaxes_statement_timeout(monkeypatch):
     session = AsyncMock()
     monkeypatch.setattr(dashboard_bootstrap, "execute_sql_file", AsyncMock())
-    monkeypatch.setattr(dashboard_bootstrap, "execute_refresh_plan", AsyncMock(return_value="run-1"))
-    monkeypatch.setattr(dashboard_bootstrap, "_load_dashboard_asset_state", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        dashboard_bootstrap, "execute_refresh_plan", AsyncMock(return_value="run-1")
+    )
+    monkeypatch.setattr(
+        dashboard_bootstrap, "_load_dashboard_asset_state", AsyncMock(return_value={})
+    )
     monkeypatch.setattr(
         dashboard_bootstrap,
         "inspect_dashboard_assets",

@@ -9,6 +9,7 @@ from testcontainers.postgres import PostgresContainer
 
 from backend.services.data_pipeline.refresh_runner import execute_sql_text
 
+
 def _read_sql(path_str: str) -> str:
     sql_path = Path(path_str)
     assert sql_path.exists(), f"missing sql asset: {path_str}"
@@ -69,8 +70,7 @@ def test_b_cost_shop_month_sql_asset_has_required_upstream_fields_and_formulas()
     assert (
         "coalesce(purchase_amount,0)"
         "+coalesce(warehouse_operation_fee,0)"
-        "+coalesce(platform_total_cost_itemized,0)"
-        in normalized
+        "+coalesce(platform_total_cost_itemized,0)" in normalized
     )
     assert "(gmv-purchase_amount)/nullif(gmv,0)" in normalized
     assert "(gmv-total_cost_b)/nullif(gmv,0)" in normalized
@@ -98,7 +98,10 @@ def test_b_cost_analysis_overview_module_sql_asset():
         "(gmv - purchase_amount) / NULLIF(gmv, 0) AS gross_margin_ref",
         "(gmv - total_cost_b) / NULLIF(gmv, 0) AS net_margin_ref",
     ]
-    assert _extract_final_select_columns(sql_text, "api.b_cost_analysis_overview_module") == expected_projection
+    assert (
+        _extract_final_select_columns(sql_text, "api.b_cost_analysis_overview_module")
+        == expected_projection
+    )
 
 
 def test_b_cost_analysis_shop_month_module_sql_asset():
@@ -125,21 +128,25 @@ def test_b_cost_analysis_shop_month_module_sql_asset():
         "gross_margin_ref",
         "net_margin_ref",
     ]
-    assert _extract_final_select_columns(sql_text, "api.b_cost_analysis_shop_month_module") == expected_projection
+    assert (
+        _extract_final_select_columns(sql_text, "api.b_cost_analysis_shop_month_module")
+        == expected_projection
+    )
 
 
 def test_b_cost_analysis_order_detail_module_sql_asset():
     sql_text = _read_sql("sql/api_modules/b_cost_analysis_order_detail_module.sql")
     normalized = _normalized(sql_text)
 
-    assert "CREATE OR REPLACE VIEW api.b_cost_analysis_order_detail_module AS" in sql_text
+    assert (
+        "CREATE OR REPLACE VIEW api.b_cost_analysis_order_detail_module AS" in sql_text
+    )
     assert "semantic.fact_orders_atomic" in sql_text
     assert "platform_code||'|'||shop_id" in normalized
     assert (
         "coalesce(purchase_amount,0)"
         "+coalesce(warehouse_operation_fee,0)"
-        "+coalesce(platform_total_cost_itemized,0)"
-        in normalized
+        "+coalesce(platform_total_cost_itemized,0)" in normalized
     )
     assert "(gmv-total_cost_b)/nullif(gmv,0)" in normalized
     expected_projection = [
@@ -173,7 +180,12 @@ def test_b_cost_analysis_order_detail_module_sql_asset():
         "(gmv - purchase_amount) / NULLIF(gmv, 0) AS gross_margin_ref",
         "(gmv - total_cost_b) / NULLIF(gmv, 0) AS net_margin_ref",
     ]
-    assert _extract_final_select_columns(sql_text, "api.b_cost_analysis_order_detail_module") == expected_projection
+    assert (
+        _extract_final_select_columns(
+            sql_text, "api.b_cost_analysis_order_detail_module"
+        )
+        == expected_projection
+    )
 
 
 @pytest.mark.pg_only
@@ -262,20 +274,27 @@ async def test_b_cost_views_are_queryable_with_currency_and_detail_columns():
                 )
             )
             await execute_sql_text(session, _read_sql("sql/mart/b_cost_shop_month.sql"))
-            await execute_sql_text(session, _read_sql("sql/api_modules/b_cost_analysis_order_detail_module.sql"))
+            await execute_sql_text(
+                session,
+                _read_sql("sql/api_modules/b_cost_analysis_order_detail_module.sql"),
+            )
             await session.commit()
             mart_rows = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT currency_code, total_cost_b
                         FROM mart.b_cost_shop_month
                         WHERE platform_code = 'tiktok' AND shop_id = 'shop-1'
                         ORDER BY currency_code
                         """
+                        )
                     )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
             assert len(mart_rows) == 2
             assert mart_rows[0]["currency_code"] == "HKD"
             assert mart_rows[1]["currency_code"] == "USD"
@@ -283,18 +302,22 @@ async def test_b_cost_views_are_queryable_with_currency_and_detail_columns():
             assert mart_rows[1]["total_cost_b"] is not None
 
             detail_columns = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT column_name
                         FROM information_schema.columns
                         WHERE table_schema = 'api'
                           AND table_name = 'b_cost_analysis_order_detail_module'
                         ORDER BY ordinal_position
                         """
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for column_name in (
                 "currency_code",
                 "order_original_amount",
@@ -310,9 +333,10 @@ async def test_b_cost_views_are_queryable_with_currency_and_detail_columns():
                 assert column_name in detail_columns
 
             detail_row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT
                             currency_code,
                             order_original_amount,
@@ -323,9 +347,12 @@ async def test_b_cost_views_are_queryable_with_currency_and_detail_columns():
                         FROM api.b_cost_analysis_order_detail_module
                         WHERE order_id = 'ORD-USD-1'
                         """
+                        )
                     )
                 )
-            ).mappings().one()
+                .mappings()
+                .one()
+            )
             assert detail_row["currency_code"] == "USD"
             assert float(detail_row["order_original_amount"]) == 150.0
             assert detail_row["product_id"] == "P-USD"

@@ -2,7 +2,9 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_refresh_safety_net_enqueues_repair_for_drifted_dashboard_assets(monkeypatch):
+async def test_refresh_safety_net_enqueues_repair_for_drifted_dashboard_assets(
+    monkeypatch,
+):
     from backend.tasks import refresh_queue_tasks as task_module
 
     calls = []
@@ -19,7 +21,9 @@ async def test_refresh_safety_net_enqueues_repair_for_drifted_dashboard_assets(m
             calls.append(("recover", timeout_seconds))
             return 1
 
-        async def enqueue_refresh(self, *, trigger_type, pipeline_name, targets, context=None):
+        async def enqueue_refresh(
+            self, *, trigger_type, pipeline_name, targets, context=None
+        ):
             calls.append(
                 (
                     "enqueue",
@@ -46,16 +50,27 @@ async def test_refresh_safety_net_enqueues_repair_for_drifted_dashboard_assets(m
             },
         }
 
-    monkeypatch.setattr(task_module, "AsyncSessionLocal", lambda: _FakeSession(), raising=False)
-    monkeypatch.setattr(task_module, "RefreshQueueService", _FakeQueueService, raising=False)
-    monkeypatch.setattr(task_module, "inspect_dashboard_assets", _fake_inspect_dashboard_assets, raising=False)
+    monkeypatch.setattr(
+        task_module, "AsyncSessionLocal", lambda: _FakeSession(), raising=False
+    )
+    monkeypatch.setattr(
+        task_module, "RefreshQueueService", _FakeQueueService, raising=False
+    )
+    monkeypatch.setattr(
+        task_module,
+        "inspect_dashboard_assets",
+        _fake_inspect_dashboard_assets,
+        raising=False,
+    )
 
     result = await task_module._async_dashboard_refresh_safety_net()
 
     assert result["status"] == "success"
     assert result["recovered_stale_tasks"] == 1
     assert result["enqueued_repairs"] == 1
-    enqueue_call = next(call for call in calls if isinstance(call, tuple) and call[0] == "enqueue")
+    enqueue_call = next(
+        call for call in calls if isinstance(call, tuple) and call[0] == "enqueue"
+    )
     assert enqueue_call[1] == "safety_net"
     assert enqueue_call[2] == "dashboard_safety_net_repair"
     assert "api.business_overview_kpi_module" in enqueue_call[3]

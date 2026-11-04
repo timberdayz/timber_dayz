@@ -11,7 +11,11 @@ from backend.services.data_pipeline.refresh_registry import (
     PIPELINE_DEPENDENCIES,
     SQL_TARGET_PATHS,
 )
-from backend.services.data_pipeline.refresh_runner import execute_refresh_plan, execute_sql_file, extract_run_id
+from backend.services.data_pipeline.refresh_runner import (
+    execute_refresh_plan,
+    execute_sql_file,
+    extract_run_id,
+)
 
 
 # ── 积压资产组 ──────────────────────────────────────────────────────────
@@ -228,7 +232,9 @@ async def _load_active_dashboard_refresh_runs(
 
 
 async def _try_advisory_lock(session: AsyncSession, key: int) -> bool:
-    result = await session.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": key})
+    result = await session.execute(
+        text("SELECT pg_try_advisory_lock(:key)"), {"key": key}
+    )
     return bool(result.scalar_one())
 
 
@@ -243,9 +249,13 @@ async def _advisory_lock(session: AsyncSession, key: int) -> None:
     await session.execute(text("SELECT pg_advisory_lock(:key)"), {"key": key})
 
 
-async def _load_dashboard_asset_state(session: AsyncSession) -> dict[str, dict[str, Any]]:
+async def _load_dashboard_asset_state(
+    session: AsyncSession,
+) -> dict[str, dict[str, Any]]:
     try:
-        reg = await session.execute(text("SELECT to_regclass('ops.dashboard_asset_state')"))
+        reg = await session.execute(
+            text("SELECT to_regclass('ops.dashboard_asset_state')")
+        )
         if reg.scalar_one_or_none() is None:
             return {}
         result = await session.execute(
@@ -363,7 +373,6 @@ def _build_module_report(
     existing_objects: set[str],
     active_refresh_run: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    module = DASHBOARD_MODULE_TARGETS[module_name]
     core_targets = _module_core_plan(module_name)
     refresh_targets = _module_refresh_plan(module_name)
     core_expected = _compute_targets_fingerprint(core_targets)
@@ -373,11 +382,17 @@ def _build_module_report(
     core_applied = (module_state or {}).get("asset_fingerprint_applied")
     refresh_applied = details.get("refresh_fingerprint_applied")
     core_missing = [target for target in core_targets if target not in existing_objects]
-    refresh_missing = [target for target in refresh_targets if target not in existing_objects]
+    refresh_missing = [
+        target for target in refresh_targets if target not in existing_objects
+    ]
     stored_status = (module_state or {}).get("status")
     active_refreshing = active_refresh_run is not None
 
-    if core_missing or (core_expected and core_applied != core_expected) or stored_status == "failed":
+    if (
+        core_missing
+        or (core_expected and core_applied != core_expected)
+        or stored_status == "failed"
+    ):
         status = "drift"
         ready = False
     elif refresh_targets and (
@@ -425,7 +440,9 @@ async def inspect_dashboard_assets(session: AsyncSession) -> dict[str, Any]:
         )
 
     missing_schemas = [
-        schema for schema in DASHBOARD_REQUIRED_SCHEMAS if schema not in existing_schemas
+        schema
+        for schema in DASHBOARD_REQUIRED_SCHEMAS
+        if schema not in existing_schemas
     ]
     missing_objects = [
         name for name in DASHBOARD_REQUIRED_OBJECTS if name not in existing_objects
@@ -460,7 +477,9 @@ async def bootstrap_dashboard_assets(
         refresh_targets = _module_refresh_plan(module_name)
         core_expected = _compute_targets_fingerprint(core_targets)
         refresh_expected = _compute_targets_fingerprint(refresh_targets)
-        existing_state = (await _load_dashboard_asset_state(session)).get(module_name, {})
+        existing_state = (await _load_dashboard_asset_state(session)).get(
+            module_name, {}
+        )
         existing_details = _normalize_json_value(existing_state.get("details_json"))
 
         await _upsert_dashboard_asset_state(
@@ -473,7 +492,9 @@ async def bootstrap_dashboard_assets(
             details_json={
                 **existing_details,
                 "refresh_fingerprint_expected": refresh_expected,
-                "refresh_fingerprint_applied": existing_details.get("refresh_fingerprint_applied"),
+                "refresh_fingerprint_applied": existing_details.get(
+                    "refresh_fingerprint_applied"
+                ),
                 "core_targets": core_targets,
                 "refresh_targets": refresh_targets,
             },
@@ -521,7 +542,11 @@ async def bootstrap_dashboard_assets(
             run_id=run_id,
             details_json={
                 "refresh_fingerprint_expected": refresh_expected,
-                "refresh_fingerprint_applied": refresh_expected if refresh_targets else existing_details.get("refresh_fingerprint_applied"),
+                "refresh_fingerprint_applied": (
+                    refresh_expected
+                    if refresh_targets
+                    else existing_details.get("refresh_fingerprint_applied")
+                ),
                 "refresh_run_id": refresh_run_id,
                 "core_targets": core_targets,
                 "refresh_targets": refresh_targets,

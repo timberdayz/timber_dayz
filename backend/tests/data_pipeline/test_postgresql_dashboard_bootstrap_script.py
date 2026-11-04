@@ -11,7 +11,9 @@ def load_script_module():
     if not SCRIPT_PATH.exists():
         raise FileNotFoundError(f"Missing bootstrap script: {SCRIPT_PATH}")
 
-    spec = importlib.util.spec_from_file_location("bootstrap_postgresql_dashboard", SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "bootstrap_postgresql_dashboard", SCRIPT_PATH
+    )
     assert spec is not None
     assert spec.loader is not None
 

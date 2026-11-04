@@ -51,7 +51,7 @@ def _make_request(path: str):
                         "status": "ready",
                         "ready": True,
                     },
-                }
+                },
             }
         )
     )
@@ -182,7 +182,9 @@ def test_postgresql_kpi_route_serializes_freshness_dates(monkeypatch):
                 "orders": {
                     "period_start_date": date(2026, 6, 1),
                     "period_end_date": date(2026, 6, 30),
-                    "latest_ingest_timestamp": datetime(2026, 6, 17, 12, 30, tzinfo=timezone.utc),
+                    "latest_ingest_timestamp": datetime(
+                        2026, 6, 17, 12, 30, tzinfo=timezone.utc
+                    ),
                 },
                 "traffic": {
                     "period_start_date": date(2026, 6, 1),
@@ -320,7 +322,9 @@ def test_postgresql_kpi_route_forwards_shop_id(monkeypatch):
 @pytest.mark.asyncio
 async def test_postgresql_kpi_route_rejects_legacy_month_param(monkeypatch):
     def _service_should_not_be_called():
-        raise AssertionError("Service should not be called when legacy params are provided")
+        raise AssertionError(
+            "Service should not be called when legacy params are provided"
+        )
 
     monkeypatch.setattr(
         "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
@@ -337,12 +341,19 @@ async def test_postgresql_kpi_route_rejects_legacy_month_param(monkeypatch):
     ) as client:
         response = await client.get(
             "/api/dashboard/business-overview/kpi",
-            params={"granularity": "monthly", "period_key": "2026-03-01", "month": "2026-03-01"},
+            params={
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "month": "2026-03-01",
+            },
         )
 
     body = json.loads(response.content.decode("utf-8"))
     assert response.status_code == 422
-    assert body["detail"]["message"] == "Business Overview API no longer accepts legacy query params."
+    assert (
+        body["detail"]["message"]
+        == "Business Overview API no longer accepts legacy query params."
+    )
     assert "month" in body["detail"]["legacy_params"]
 
 
@@ -416,10 +427,17 @@ async def test_dashboard_readiness_guard_refreshes_stale_app_state(monkeypatch):
 
 def test_postgresql_comparison_route_returns_service_payload(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_comparison(self, granularity, target_date, platform):
+        async def get_business_overview_comparison(
+            self, granularity, target_date, platform
+        ):
             return {
                 "metrics": {
-                    "sales_amount": {"today": 100, "yesterday": 90, "average": 10, "change": 11.11}
+                    "sales_amount": {
+                        "today": 100,
+                        "yesterday": 90,
+                        "average": 10,
+                        "change": 11.11,
+                    }
                 },
                 "target": {"sales_amount": 120, "achievement_rate": 83.33},
             }
@@ -445,7 +463,9 @@ def test_postgresql_comparison_route_returns_service_payload(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_postgresql_business_overview_bootstrap_runs_module_calls_concurrently(monkeypatch):
+async def test_postgresql_business_overview_bootstrap_runs_module_calls_concurrently(
+    monkeypatch,
+):
     active = 0
     max_active = 0
 
@@ -474,7 +494,9 @@ async def test_postgresql_business_overview_bootstrap_runs_module_calls_concurre
             return await tracked([{"name": "shop-a", "rank": 1}])
 
         async def get_business_overview_data_freshness(self, **_kwargs):
-            return await tracked({"orders": {}, "traffic": {}, "is_stale": False, "warnings": []})
+            return await tracked(
+                {"orders": {}, "traffic": {}, "is_stale": False, "warnings": []}
+            )
 
     monkeypatch.setattr(
         "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
@@ -507,7 +529,9 @@ async def test_postgresql_business_overview_bootstrap_runs_module_calls_concurre
 
 
 @pytest.mark.asyncio
-async def test_postgresql_business_overview_bootstrap_miss_reuses_module_caches(monkeypatch):
+async def test_postgresql_business_overview_bootstrap_miss_reuses_module_caches(
+    monkeypatch,
+):
     cache_calls = []
 
     class _CacheServiceStub:
@@ -576,7 +600,9 @@ async def test_postgresql_business_overview_bootstrap_miss_reuses_module_caches(
 
 def test_postgresql_shop_racing_route_returns_service_payload(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_shop_racing(self, granularity, target_date, group_by, platform):
+        async def get_business_overview_shop_racing(
+            self, granularity, target_date, group_by, platform
+        ):
             return [{"name": "shop-a", "gmv": 100, "rank": 1}]
 
     monkeypatch.setattr(
@@ -602,7 +628,9 @@ def test_postgresql_shop_racing_route_returns_service_payload(monkeypatch):
 
 def test_postgresql_traffic_ranking_route_returns_service_payload(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_traffic_ranking(self, granularity, target_date, dimension, platform):
+        async def get_business_overview_traffic_ranking(
+            self, granularity, target_date, dimension, platform
+        ):
             return [{"name": "shop-a", "visitor_count": 100, "rank": 1}]
 
     monkeypatch.setattr(
@@ -627,11 +655,15 @@ def test_postgresql_traffic_ranking_route_returns_service_payload(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_postgresql_traffic_ranking_route_rejects_legacy_date_value_alias(monkeypatch):
+async def test_postgresql_traffic_ranking_route_rejects_legacy_date_value_alias(
+    monkeypatch,
+):
     captured = {}
 
     class _ServiceStub:
-        async def get_business_overview_traffic_ranking(self, granularity, target_date, dimension, platform):
+        async def get_business_overview_traffic_ranking(
+            self, granularity, target_date, dimension, platform
+        ):
             captured["granularity"] = granularity
             captured["target_date"] = target_date
             captured["dimension"] = dimension
@@ -663,13 +695,18 @@ async def test_postgresql_traffic_ranking_route_rejects_legacy_date_value_alias(
 
     body = json.loads(response.content.decode("utf-8"))
     assert response.status_code == 422
-    assert body["detail"]["message"] == "Business Overview API no longer accepts legacy query params."
+    assert (
+        body["detail"]["message"]
+        == "Business Overview API no longer accepts legacy query params."
+    )
     assert "date_value" in body["detail"]["legacy_params"]
 
 
 def test_postgresql_operational_metrics_route_returns_service_payload(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_operational_metrics(self, month, platform, shop_id=None):
+        async def get_business_overview_operational_metrics(
+            self, month, platform, shop_id=None
+        ):
             return {
                 "monthly_target": 100,
                 "monthly_total_achieved": 80,
@@ -688,7 +725,9 @@ def test_postgresql_operational_metrics_route_returns_service_payload(monkeypatc
 
     response = asyncio.run(
         get_business_overview_operational_metrics_postgresql(
-            request=_make_request("/api/dashboard/business-overview/operational-metrics"),
+            request=_make_request(
+                "/api/dashboard/business-overview/operational-metrics"
+            ),
             granularity="monthly",
             period_key="2026-03-01",
             platform_code=None,
@@ -705,7 +744,9 @@ def test_postgresql_operational_metrics_route_forwards_shop_id(monkeypatch):
     captured = {}
 
     class _ServiceStub:
-        async def get_business_overview_operational_metrics(self, month, platform, shop_id=None):
+        async def get_business_overview_operational_metrics(
+            self, month, platform, shop_id=None
+        ):
             captured.update({"month": month, "platform": platform, "shop_id": shop_id})
             return {
                 "monthly_target": 100,
@@ -725,7 +766,9 @@ def test_postgresql_operational_metrics_route_forwards_shop_id(monkeypatch):
 
     response = asyncio.run(
         get_business_overview_operational_metrics_postgresql(
-            request=_make_request("/api/dashboard/business-overview/operational-metrics"),
+            request=_make_request(
+                "/api/dashboard/business-overview/operational-metrics"
+            ),
             granularity="monthly",
             period_key="2026-03-01",
             platform_code="shopee",
@@ -835,7 +878,9 @@ def test_postgresql_inventory_backlog_route_forwards_limit(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_postgresql_inventory_backlog_route_uses_extended_singleflight_timeouts(monkeypatch):
+async def test_postgresql_inventory_backlog_route_uses_extended_singleflight_timeouts(
+    monkeypatch,
+):
     cache_calls = []
 
     class _ServiceStub:
@@ -877,7 +922,9 @@ async def test_postgresql_inventory_backlog_route_uses_extended_singleflight_tim
         )
 
     assert response.status_code == 200
-    singleflight_call = next(call for call in cache_calls if call[0] == "get_or_set_singleflight")
+    singleflight_call = next(
+        call for call in cache_calls if call[0] == "get_or_set_singleflight"
+    )
     assert singleflight_call[1] == "dashboard_inventory_backlog"
     assert singleflight_call[2]["days"] == "30"
     assert singleflight_call[2]["limit"] == "20"
@@ -891,7 +938,9 @@ async def test_postgresql_inventory_backlog_route_uses_extended_singleflight_tim
         (
             get_business_overview_inventory_backlog_postgresql,
             {
-                "request": _make_dashboard_not_ready_request("/api/dashboard/business-overview/inventory-backlog"),
+                "request": _make_dashboard_not_ready_request(
+                    "/api/dashboard/business-overview/inventory-backlog"
+                ),
                 "days": 30,
                 "limit": 20,
             },
@@ -899,7 +948,9 @@ async def test_postgresql_inventory_backlog_route_uses_extended_singleflight_tim
         (
             get_business_overview_operational_metrics_postgresql,
             {
-                "request": _make_dashboard_not_ready_request("/api/dashboard/business-overview/operational-metrics"),
+                "request": _make_dashboard_not_ready_request(
+                    "/api/dashboard/business-overview/operational-metrics"
+                ),
                 "granularity": "monthly",
                 "period_key": "2026-03-01",
                 "platform_code": None,

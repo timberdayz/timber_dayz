@@ -38,16 +38,20 @@ def test_refresh_registry_includes_labor_cost_dashboard_pipeline():
 
     assert expected_targets.issubset(PIPELINE_DEPENDENCIES.keys())
     assert expected_targets.issubset(SQL_TARGET_PATHS.keys())
-    assert "semantic.shop_month_other_operating_cost" in PIPELINE_DEPENDENCIES[
-        "api.business_overview_operational_metrics_module"
-    ]
-    assert "mart.shop_month_labor_cost" in PIPELINE_DEPENDENCIES[
-        "api.business_overview_operational_metrics_module"
-    ]
+    assert (
+        "semantic.shop_month_other_operating_cost"
+        in PIPELINE_DEPENDENCIES["api.business_overview_operational_metrics_module"]
+    )
+    assert (
+        "mart.shop_month_labor_cost"
+        in PIPELINE_DEPENDENCIES["api.business_overview_operational_metrics_module"]
+    )
 
 
 def test_expand_downstream_targets_includes_all_order_dashboard_dependents():
-    from backend.services.data_pipeline.refresh_registry import expand_downstream_targets
+    from backend.services.data_pipeline.refresh_registry import (
+        expand_downstream_targets,
+    )
 
     targets = expand_downstream_targets(
         [
@@ -76,7 +80,9 @@ def test_expand_downstream_targets_includes_all_order_dashboard_dependents():
     }
 
     assert expected_targets.issubset(set(targets))
-    assert targets.index("semantic.fact_orders_atomic") < targets.index("mart.platform_day_kpi")
+    assert targets.index("semantic.fact_orders_atomic") < targets.index(
+        "mart.platform_day_kpi"
+    )
     assert targets.index("mart.platform_day_kpi") < targets.index(
         "api.business_overview_comparison_platform_module"
     )
@@ -84,7 +90,9 @@ def test_expand_downstream_targets_includes_all_order_dashboard_dependents():
 
 
 def test_resolve_refresh_targets_for_shopee_orders_monthly_expands_cascade_dependents():
-    from backend.services.data_pipeline.refresh_registry import resolve_refresh_targets_for_source_table
+    from backend.services.data_pipeline.refresh_registry import (
+        resolve_refresh_targets_for_source_table,
+    )
 
     targets = resolve_refresh_targets_for_source_table(
         source_table_name="fact_shopee_orders_monthly",
@@ -106,7 +114,9 @@ def test_resolve_refresh_targets_for_shopee_orders_monthly_expands_cascade_depen
 
 
 def test_resolve_refresh_targets_for_traffic_alias_uses_analytics_pipeline():
-    from backend.services.data_pipeline.refresh_registry import resolve_refresh_targets_for_source_table
+    from backend.services.data_pipeline.refresh_registry import (
+        resolve_refresh_targets_for_source_table,
+    )
 
     targets = resolve_refresh_targets_for_source_table(
         source_table_name="fact_shopee_traffic_monthly",
@@ -120,7 +130,9 @@ def test_resolve_refresh_targets_for_traffic_alias_uses_analytics_pipeline():
 
 
 def test_resolve_refresh_targets_for_unknown_source_table_returns_empty_list():
-    from backend.services.data_pipeline.refresh_registry import resolve_refresh_targets_for_source_table
+    from backend.services.data_pipeline.refresh_registry import (
+        resolve_refresh_targets_for_source_table,
+    )
 
     assert (
         resolve_refresh_targets_for_source_table(

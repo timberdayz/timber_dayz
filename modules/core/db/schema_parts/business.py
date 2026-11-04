@@ -747,13 +747,23 @@ class LogisticsBill(Base):
     voided_at = Column(DateTime(timezone=True), nullable=True)
     voided_by = Column(Integer, nullable=True)
     void_reason = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     __table_args__ = (
         UniqueConstraint("bill_no", name="uq_logistics_bills_bill_no"),
         CheckConstraint("currency = 'CNY'", name="ck_logistics_bills_currency"),
-        CheckConstraint("transport_type IS NULL OR transport_type IN ('sea', 'air', 'rail')", name="ck_logistics_bills_transport_type"),
+        CheckConstraint(
+            "transport_type IS NULL OR transport_type IN ('sea', 'air', 'rail')",
+            name="ck_logistics_bills_transport_type",
+        ),
         Index("ix_logistics_bills_date_status", "bill_date", "status"),
         {"schema": "finance"},
     )
@@ -766,7 +776,11 @@ class LogisticsProviderRule(Base):
 
     rule_id = Column(Integer, primary_key=True, autoincrement=True)
     logistics_provider = Column(String(128), nullable=False)
-    warehouse_code = Column(String(128), ForeignKey("core.dim_warehouses.warehouse_code", ondelete="RESTRICT"), nullable=True)
+    warehouse_code = Column(
+        String(128),
+        ForeignKey("core.dim_warehouses.warehouse_code", ondelete="RESTRICT"),
+        nullable=True,
+    )
     transport_type = Column(String(64), nullable=True)
     cargo_class = Column(String(64), nullable=True)
     is_sensitive = Column(Boolean, nullable=False, default=False)
@@ -783,12 +797,28 @@ class LogisticsProviderRule(Base):
     source = Column(String(128), nullable=True)
     version = Column(String(64), nullable=True)
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     __table_args__ = (
-        CheckConstraint("transport_type IS NULL OR transport_type IN ('sea', 'air', 'rail')", name="ck_logistics_provider_rules_transport_type"),
-        Index("ix_logistics_provider_rules_scope", "logistics_provider", "warehouse_code", "transport_type", "effective_from"),
+        CheckConstraint(
+            "transport_type IS NULL OR transport_type IN ('sea', 'air', 'rail')",
+            name="ck_logistics_provider_rules_transport_type",
+        ),
+        Index(
+            "ix_logistics_provider_rules_scope",
+            "logistics_provider",
+            "warehouse_code",
+            "transport_type",
+            "effective_from",
+        ),
         Index(
             "uq_logistics_provider_rules_default_scope",
             text("COALESCE(warehouse_code, '')"),
@@ -796,7 +826,9 @@ class LogisticsProviderRule(Base):
             text("COALESCE(cargo_class, '')"),
             "is_sensitive",
             unique=True,
-            postgresql_where=text("is_default AND status = 'active' AND effective_to IS NULL"),
+            postgresql_where=text(
+                "is_default AND status = 'active' AND effective_to IS NULL"
+            ),
         ),
         {"schema": "finance"},
     )
@@ -808,7 +840,11 @@ class WarehouseStorageRule(Base):
     __tablename__ = "warehouse_storage_rules"
 
     rule_id = Column(Integer, primary_key=True, autoincrement=True)
-    warehouse_code = Column(String(128), ForeignKey("core.dim_warehouses.warehouse_code", ondelete="RESTRICT"), nullable=False)
+    warehouse_code = Column(
+        String(128),
+        ForeignKey("core.dim_warehouses.warehouse_code", ondelete="RESTRICT"),
+        nullable=False,
+    )
     billing_basis = Column(String(32), nullable=False, default="volume")
     billing_unit = Column(String(32), nullable=False, default="CNY/CBM/month")
     unit_rate_cny = Column(Numeric(18, 6), nullable=False)
@@ -819,16 +855,37 @@ class WarehouseStorageRule(Base):
     source = Column(String(128), nullable=True)
     version = Column(String(64), nullable=True)
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     __table_args__ = (
-        CheckConstraint("billing_basis = 'volume'", name="ck_warehouse_storage_rules_basis"),
-        CheckConstraint("billing_unit = 'CNY/CBM/month'", name="ck_warehouse_storage_rules_unit"),
+        CheckConstraint(
+            "billing_basis = 'volume'", name="ck_warehouse_storage_rules_basis"
+        ),
+        CheckConstraint(
+            "billing_unit = 'CNY/CBM/month'", name="ck_warehouse_storage_rules_unit"
+        ),
         CheckConstraint("unit_rate_cny >= 0", name="ck_warehouse_storage_rules_rate"),
-        CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_warehouse_storage_rules_window"),
-        CheckConstraint("status IN ('active', 'inactive')", name="ck_warehouse_storage_rules_status"),
-        Index("uq_warehouse_storage_rules_current", "warehouse_code", unique=True, postgresql_where=text("status = 'active' AND effective_to IS NULL")),
+        CheckConstraint(
+            "effective_to IS NULL OR effective_to >= effective_from",
+            name="ck_warehouse_storage_rules_window",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'inactive')", name="ck_warehouse_storage_rules_status"
+        ),
+        Index(
+            "uq_warehouse_storage_rules_current",
+            "warehouse_code",
+            unique=True,
+            postgresql_where=text("status = 'active' AND effective_to IS NULL"),
+        ),
         Index("ix_warehouse_storage_rules_lookup", "warehouse_code", "effective_from"),
         {"schema": "finance"},
     )
@@ -840,9 +897,19 @@ class LogisticsBillPurchaseOrder(Base):
     __tablename__ = "logistics_bill_purchase_orders"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    bill_id = Column(Integer, ForeignKey("finance.logistics_bills.bill_id", ondelete="CASCADE"), nullable=False)
-    po_id = Column(String(64), ForeignKey("finance.po_headers.po_id", ondelete="RESTRICT"), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    bill_id = Column(
+        Integer,
+        ForeignKey("finance.logistics_bills.bill_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    po_id = Column(
+        String(64),
+        ForeignKey("finance.po_headers.po_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
     __table_args__ = (
         UniqueConstraint("bill_id", "po_id", name="uq_logistics_bill_purchase_order"),
@@ -857,11 +924,27 @@ class LogisticsBillLine(Base):
     __tablename__ = "logistics_bill_lines"
 
     line_id = Column(Integer, primary_key=True, autoincrement=True)
-    bill_id = Column(Integer, ForeignKey("finance.logistics_bills.bill_id", ondelete="CASCADE"), nullable=False)
+    bill_id = Column(
+        Integer,
+        ForeignKey("finance.logistics_bills.bill_id", ondelete="CASCADE"),
+        nullable=False,
+    )
     line_no = Column(Integer, nullable=False)
-    sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=True)
-    po_id = Column(String(64), ForeignKey("finance.po_headers.po_id", ondelete="RESTRICT"), nullable=True)
-    warehouse_code = Column(String(128), ForeignKey("core.dim_warehouses.warehouse_code", ondelete="RESTRICT"), nullable=False)
+    sku_id = Column(
+        Integer,
+        ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    po_id = Column(
+        String(64),
+        ForeignKey("finance.po_headers.po_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    warehouse_code = Column(
+        String(128),
+        ForeignKey("core.dim_warehouses.warehouse_code", ondelete="RESTRICT"),
+        nullable=False,
+    )
     billing_basis = Column(String(32), nullable=False, default="volume")
     billing_unit = Column(String(32), nullable=False, default="CNY/CBM")
     billing_unit_rate = Column(Numeric(18, 6), nullable=True)
@@ -913,9 +996,21 @@ class LogisticsBillLineAllocation(Base):
     __tablename__ = "logistics_bill_line_allocations"
 
     allocation_id = Column(Integer, primary_key=True, autoincrement=True)
-    bill_line_id = Column(Integer, ForeignKey("finance.logistics_bill_lines.line_id", ondelete="CASCADE"), nullable=False)
-    sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=False)
-    po_id = Column(String(64), ForeignKey("finance.po_headers.po_id", ondelete="RESTRICT"), nullable=True)
+    bill_line_id = Column(
+        Integer,
+        ForeignKey("finance.logistics_bill_lines.line_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sku_id = Column(
+        Integer,
+        ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    po_id = Column(
+        String(64),
+        ForeignKey("finance.po_headers.po_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     allocated_quantity = Column(Numeric(18, 3), nullable=True)
     allocation_ratio = Column(Numeric(12, 8), nullable=True)
     allocated_amount = Column(Numeric(18, 2), nullable=False, default=0)
@@ -950,11 +1045,23 @@ class ProductCostAssumptionProfile(Base):
     assumption_source = Column(String(128), nullable=True)
     confidence_level = Column(String(16), nullable=False, default="medium")
     active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     __table_args__ = (
-        Index("ix_cost_assumption_scope", "destination", "transport_type", "effective_from"),
+        Index(
+            "ix_cost_assumption_scope",
+            "destination",
+            "transport_type",
+            "effective_from",
+        ),
         {"schema": "finance"},
     )
 
@@ -965,11 +1072,21 @@ class SkuProfitEstimate(Base):
     __tablename__ = "sku_profit_estimates"
 
     estimate_id = Column(Integer, primary_key=True, autoincrement=True)
-    sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=False)
-    operating_profile_id = Column(Integer, ForeignKey("finance.sku_operating_profiles.profile_id", ondelete="SET NULL"), nullable=True)
+    sku_id = Column(
+        Integer,
+        ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    operating_profile_id = Column(
+        Integer,
+        ForeignKey("finance.sku_operating_profiles.profile_id", ondelete="SET NULL"),
+        nullable=True,
+    )
     platform_code = Column(String(32), nullable=True)
     warehouse_code = Column(String(128), nullable=True)
-    estimate_as_of = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    estimate_as_of = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     assumption_version = Column(String(64), nullable=False)
     scenario = Column(String(32), nullable=False, default="base")
     selling_price = Column(Numeric(18, 2), nullable=True)
@@ -980,7 +1097,13 @@ class SkuProfitEstimate(Base):
     logistics_cost_source = Column(String(64), nullable=True)
     storage_cost = Column(Numeric(18, 2), nullable=True)
     storage_cost_source = Column(String(64), nullable=True)
-    assumption_profile_id = Column(Integer, ForeignKey("finance.product_cost_assumption_profiles.profile_id", ondelete="SET NULL"), nullable=True)
+    assumption_profile_id = Column(
+        Integer,
+        ForeignKey(
+            "finance.product_cost_assumption_profiles.profile_id", ondelete="SET NULL"
+        ),
+        nullable=True,
+    )
     platform_fee = Column(Numeric(18, 2), nullable=True)
     expected_return_loss = Column(Numeric(18, 2), nullable=True)
     expected_damage_loss = Column(Numeric(18, 2), nullable=True)
@@ -1008,15 +1131,27 @@ class SkuProfitEstimate(Base):
     storage_cost_variance = Column(Numeric(18, 2), nullable=True)
     total_cost_variance = Column(Numeric(18, 2), nullable=True)
     reference_storage_days = Column(Integer, nullable=True)
-    storage_rule_id = Column(Integer, ForeignKey("finance.warehouse_storage_rules.rule_id", ondelete="SET NULL"), nullable=True)
+    storage_rule_id = Column(
+        Integer,
+        ForeignKey("finance.warehouse_storage_rules.rule_id", ondelete="SET NULL"),
+        nullable=True,
+    )
     storage_rule_version = Column(String(64), nullable=True)
     cost_completeness = Column(String(32), nullable=False, default="incomplete")
     confidence_level = Column(String(16), nullable=False, default="medium")
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
     __table_args__ = (
-        CheckConstraint("scenario IN ('base', 'conservative', 'optimistic')", name="ck_sku_profit_estimate_scenario"),
-        CheckConstraint("calculation_basis IN ('estimated', 'actual_recost')", name="ck_sku_profit_estimate_basis"),
+        CheckConstraint(
+            "scenario IN ('base', 'conservative', 'optimistic')",
+            name="ck_sku_profit_estimate_scenario",
+        ),
+        CheckConstraint(
+            "calculation_basis IN ('estimated', 'actual_recost')",
+            name="ck_sku_profit_estimate_basis",
+        ),
         Index("ix_sku_profit_estimates_sku_time", "sku_id", "estimate_as_of"),
         {"schema": "finance"},
     )
@@ -1028,8 +1163,16 @@ class SkuOperatingProfile(Base):
     __tablename__ = "sku_operating_profiles"
 
     profile_id = Column(Integer, primary_key=True, autoincrement=True)
-    sku_id = Column(Integer, ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"), nullable=False)
-    platform_code = Column(String(32), ForeignKey("core.dim_platforms.platform_code", ondelete="RESTRICT"), nullable=False)
+    sku_id = Column(
+        Integer,
+        ForeignKey("core.dim_erp_sku.sku_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    platform_code = Column(
+        String(32),
+        ForeignKey("core.dim_platforms.platform_code", ondelete="RESTRICT"),
+        nullable=False,
+    )
     warehouse_code = Column(String(128), nullable=False)
     warehouse_name = Column(String(256), nullable=True)
     transport_type = Column(String(64), nullable=True)
@@ -1049,8 +1192,15 @@ class SkuOperatingProfile(Base):
     effective_to = Column(Date, nullable=True)
     created_by = Column(Integer, nullable=True)
     updated_by = Column(Integer, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     __table_args__ = (
         Index(
@@ -2604,9 +2754,7 @@ class PersonalPerformancePlan(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint(
-            "year_month", name="uq_personal_performance_plan_month"
-        ),
+        UniqueConstraint("year_month", name="uq_personal_performance_plan_month"),
         CheckConstraint(
             "calculation_mode = 'controlled_targets_v1'",
             name="chk_personal_performance_plan_controlled_mode",
@@ -2654,9 +2802,7 @@ class PersonalPerformanceEmployeeScope(Base):
             "employee_code",
             name="uq_personal_performance_scope_plan_employee",
         ),
-        Index(
-            "ix_personal_performance_scope_plan_included", "plan_id", "is_included"
-        ),
+        Index("ix_personal_performance_scope_plan_included", "plan_id", "is_included"),
         {"schema": "a_class"},
     )
 
@@ -4346,7 +4492,9 @@ class PayrollManualInput(Base):
     remark = Column(Text, nullable=True)
     backfill_source_month = Column(String(7), nullable=True)
     backfill_note = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -5123,27 +5271,59 @@ class SkuPricingPolicy(Base):
     __tablename__ = "sku_pricing_policies"
 
     policy_id = Column(Integer, primary_key=True, autoincrement=True)
-    min_restock_days = Column(Integer, nullable=False)          # 库龄起点（含），从该天数起本行生效
-    tier_label = Column(String(32), nullable=False)         # 档位名（自解释形式，如「库龄≥60天」）
+    min_restock_days = Column(
+        Integer, nullable=False
+    )  # 库龄起点（含），从该天数起本行生效
+    tier_label = Column(
+        String(32), nullable=False
+    )  # 档位名（自解释形式，如「库龄≥60天」）
     discount_rate = Column(Numeric(12, 8), nullable=False)  # 本档唯一折扣率
     target_margin_rate = Column(Numeric(12, 8), nullable=False)  # 本档目标利润率
-    platform_basis = Column(String(32), nullable=False)     # 成本口径平台（底线是公司统一口径）
+    platform_basis = Column(
+        String(32), nullable=False
+    )  # 成本口径平台（底线是公司统一口径）
     effective_from = Column(Date, nullable=False)
     effective_to = Column(Date, nullable=True)
-    status = Column(String(16), nullable=False, default="active", server_default="active")
+    status = Column(
+        String(16), nullable=False, default="active", server_default="active"
+    )
     source = Column(String(128), nullable=True)
     version = Column(String(64), nullable=True)
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     __table_args__ = (
-        UniqueConstraint("min_restock_days", "effective_from", name="uq_sku_pricing_policy_tier_start"),
-        CheckConstraint("min_restock_days >= 0", name="ck_sku_pricing_policy_age_start"),
-        CheckConstraint("discount_rate >= 0 AND discount_rate <= 1", name="ck_sku_pricing_policy_discount_rate"),
-        CheckConstraint("target_margin_rate >= 0 AND target_margin_rate < 1", name="ck_sku_pricing_policy_target_margin"),
-        CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_sku_pricing_policy_window"),
-        CheckConstraint("status IN ('active', 'inactive')", name="ck_sku_pricing_policy_status"),
+        UniqueConstraint(
+            "min_restock_days",
+            "effective_from",
+            name="uq_sku_pricing_policy_tier_start",
+        ),
+        CheckConstraint(
+            "min_restock_days >= 0", name="ck_sku_pricing_policy_age_start"
+        ),
+        CheckConstraint(
+            "discount_rate >= 0 AND discount_rate <= 1",
+            name="ck_sku_pricing_policy_discount_rate",
+        ),
+        CheckConstraint(
+            "target_margin_rate >= 0 AND target_margin_rate < 1",
+            name="ck_sku_pricing_policy_target_margin",
+        ),
+        CheckConstraint(
+            "effective_to IS NULL OR effective_to >= effective_from",
+            name="ck_sku_pricing_policy_window",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'inactive')", name="ck_sku_pricing_policy_status"
+        ),
         # 每个库龄档位至多一条「当前生效行」；schema 由表继承，Index 不接受 schema= 关键字
         Index(
             "uq_sku_pricing_policies_current",

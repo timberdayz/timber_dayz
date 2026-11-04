@@ -51,10 +51,26 @@ MATERIALIZED_VIEW_ASSETS = (
 
 #: 必须改读物化视图的消费方（否则还是 20 秒级）
 CONSUMER_VIEW_ASSETS = (
-    ("sql/mart/shop_day_kpi.sql", "semantic.fact_orders_atomic_mv", "semantic.fact_analytics_atomic_mv"),
-    ("sql/mart/shop_week_kpi.sql", "semantic.fact_orders_atomic_mv", "semantic.fact_analytics_atomic_mv"),
-    ("sql/mart/platform_day_kpi.sql", "semantic.fact_orders_atomic_mv", "semantic.fact_analytics_atomic_mv"),
-    ("sql/mart/platform_week_kpi.sql", "semantic.fact_orders_atomic_mv", "semantic.fact_analytics_atomic_mv"),
+    (
+        "sql/mart/shop_day_kpi.sql",
+        "semantic.fact_orders_atomic_mv",
+        "semantic.fact_analytics_atomic_mv",
+    ),
+    (
+        "sql/mart/shop_week_kpi.sql",
+        "semantic.fact_orders_atomic_mv",
+        "semantic.fact_analytics_atomic_mv",
+    ),
+    (
+        "sql/mart/platform_day_kpi.sql",
+        "semantic.fact_orders_atomic_mv",
+        "semantic.fact_analytics_atomic_mv",
+    ),
+    (
+        "sql/mart/platform_week_kpi.sql",
+        "semantic.fact_orders_atomic_mv",
+        "semantic.fact_analytics_atomic_mv",
+    ),
     ("sql/mart/b_cost_shop_month.sql", "semantic.fact_orders_atomic_mv", None),
     (
         "sql/api_modules/b_cost_analysis_order_detail_module.sql",
@@ -66,7 +82,9 @@ CONSUMER_VIEW_ASSETS = (
 
 def test_materialized_view_assets_are_registered():
     for mv_name, source_view, asset_path in MATERIALIZED_VIEW_ASSETS:
-        assert mv_name in SQL_TARGET_PATHS, "{0} 未登记到 SQL_TARGET_PATHS".format(mv_name)
+        assert mv_name in SQL_TARGET_PATHS, "{0} 未登记到 SQL_TARGET_PATHS".format(
+            mv_name
+        )
         assert SQL_TARGET_PATHS[mv_name] == asset_path
         assert mv_name in PIPELINE_DEPENDENCIES
         # 物化视图必须排在它所物化的普通视图**之后**
@@ -107,10 +125,10 @@ def test_materialized_view_refresh_never_drops_downstream():
     for mv_name, _source_view, asset_path in MATERIALIZED_VIEW_ASSETS:
         sql_text = _read(asset_path)
         executable = _strip_sql_comments(sql_text)
-        assert "DROP MATERIALIZED VIEW" not in executable, (
-            "{0} 不允许 DROP MATERIALIZED VIEW —— 会连带删掉不可重建的下游".format(
-                asset_path
-            )
+        assert (
+            "DROP MATERIALIZED VIEW" not in executable
+        ), "{0} 不允许 DROP MATERIALIZED VIEW —— 会连带删掉不可重建的下游".format(
+            asset_path
         )
         assert "REFRESH MATERIALIZED VIEW {mv}".format(mv=mv_name) in executable
         assert "to_regclass('{mv}')".format(mv=mv_name) in executable
@@ -158,7 +176,9 @@ def test_refresh_plan_orders_materialized_view_before_consumers():
     assert plan.index("semantic.fact_orders_atomic") < plan.index(
         "semantic.fact_orders_atomic_mv"
     )
-    assert plan.index("semantic.fact_orders_atomic_mv") < plan.index("mart.shop_day_kpi")
+    assert plan.index("semantic.fact_orders_atomic_mv") < plan.index(
+        "mart.shop_day_kpi"
+    )
     assert plan.index("semantic.fact_orders_atomic_mv") < plan.index(
         "mart.b_cost_shop_month"
     )

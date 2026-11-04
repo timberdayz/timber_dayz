@@ -27,7 +27,14 @@ async def refresh_queue_client():
             yield session
 
     async def override_current_user():
-        return SimpleNamespace(user_id=1, username="admin", is_active=True, status="active", is_superuser=True, roles=[])
+        return SimpleNamespace(
+            user_id=1,
+            username="admin",
+            is_active=True,
+            status="active",
+            is_superuser=True,
+            roles=[],
+        )
 
     app.dependency_overrides[get_async_db] = override_get_async_db
     app.dependency_overrides[get_current_user] = override_current_user
@@ -41,7 +48,9 @@ async def refresh_queue_client():
 
 
 @pytest.mark.asyncio
-async def test_refresh_queue_api_lists_tasks_and_filters_by_status(refresh_queue_client):
+async def test_refresh_queue_api_lists_tasks_and_filters_by_status(
+    refresh_queue_client,
+):
     client, session_factory = refresh_queue_client
 
     async with session_factory() as session:
@@ -76,7 +85,9 @@ async def test_refresh_queue_api_lists_tasks_and_filters_by_status(refresh_queue
     assert payload["success"] is True
     assert len(payload["data"]) == 2
 
-    failed_response = await client.get("/api/refresh-queue/tasks", params={"status": "failed"})
+    failed_response = await client.get(
+        "/api/refresh-queue/tasks", params={"status": "failed"}
+    )
     assert failed_response.status_code == 200
     failed_payload = failed_response.json()
     assert failed_payload["success"] is True

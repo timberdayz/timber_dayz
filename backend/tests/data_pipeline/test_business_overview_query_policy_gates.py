@@ -4,7 +4,9 @@ from backend.services.postgresql_dashboard_service import PostgresqlDashboardSer
 
 
 @pytest.mark.asyncio
-async def test_business_overview_online_query_policy_forbids_raw_json_parsing(monkeypatch):
+async def test_business_overview_online_query_policy_forbids_raw_json_parsing(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     captured: list[str] = []
 
@@ -40,20 +42,44 @@ async def test_business_overview_online_query_policy_forbids_raw_json_parsing(mo
         return None
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
-    monkeypatch.setattr(service, "_fetch_rows_with_statement_timeout", fake_fetch_rows_with_statement_timeout)
-    monkeypatch.setattr(service, "_load_active_employee_count", fake_load_active_employee_count)
+    monkeypatch.setattr(
+        service,
+        "_fetch_rows_with_statement_timeout",
+        fake_fetch_rows_with_statement_timeout,
+    )
+    monkeypatch.setattr(
+        service, "_load_active_employee_count", fake_load_active_employee_count
+    )
     monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
-    monkeypatch.setattr(service, "_load_operating_expenses_summary", fake_load_operating_expenses_summary)
+    monkeypatch.setattr(
+        service,
+        "_load_operating_expenses_summary",
+        fake_load_operating_expenses_summary,
+    )
 
     await service.get_business_overview_kpi(month="2026-04-01", platform=None)
-    await service.get_business_overview_comparison(granularity="monthly", target_date="2026-04-01", platform=None)
-    await service.get_business_overview_operational_metrics(month="2026-04-01", platform=None)
-    await service.get_business_overview_traffic_ranking(granularity="monthly", target_date="2026-04-01", dimension="pv", platform=None)
+    await service.get_business_overview_comparison(
+        granularity="monthly", target_date="2026-04-01", platform=None
+    )
+    await service.get_business_overview_operational_metrics(
+        month="2026-04-01", platform=None
+    )
+    await service.get_business_overview_traffic_ranking(
+        granularity="monthly", target_date="2026-04-01", dimension="pv", platform=None
+    )
 
-    forbidden = ("raw_data->>", "REGEXP_REPLACE", "FROM b_class.", "FROM semantic.fact_orders_atomic")
+    forbidden = (
+        "raw_data->>",
+        "REGEXP_REPLACE",
+        "FROM b_class.",
+        "FROM semantic.fact_orders_atomic",
+    )
     for query in captured:
         for token in forbidden:
             assert token not in query
 
     assert any("FROM api.business_overview_kpi_module" in query for query in captured)
-    assert any("FROM api.business_overview_traffic_ranking_module" in query for query in captured)
+    assert any(
+        "FROM api.business_overview_traffic_ranking_module" in query
+        for query in captured
+    )

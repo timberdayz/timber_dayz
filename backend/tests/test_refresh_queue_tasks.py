@@ -866,7 +866,10 @@ def test_inventory_layer_refresh_trigger_follows_targets_not_event_fields():
     # ⇒ 订单采集也必须把状态层刷对。
     assert (
         task_module._should_refresh_inventory_layers(
-            ["api.business_overview_inventory_backlog_module", "semantic.fact_inventory_snapshot"],
+            [
+                "api.business_overview_inventory_backlog_module",
+                "semantic.fact_inventory_snapshot",
+            ],
             {},
         )
         is True

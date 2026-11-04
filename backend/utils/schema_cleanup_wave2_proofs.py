@@ -46,7 +46,10 @@ def collect_wave2_candidate_proofs() -> dict[str, dict[str, object]]:
                 PROJECT_ROOT / "docs/DATABASE_SCHEMA_SEPARATION_GUIDE.md",
                 PROJECT_ROOT / "docs/DATABASE_SCHEMA_SEPARATION_TASK_UPDATE.md",
             ],
-            "target_literals": ["b_class.entity_aliases", "entity_aliases SET SCHEMA b_class"],
+            "target_literals": [
+                "b_class.entity_aliases",
+                "entity_aliases SET SCHEMA b_class",
+            ],
             "risk_level": "medium",
             "blocker_reason": "target schema is documented, but runtime proof is still missing",
         },
@@ -60,7 +63,10 @@ def collect_wave2_candidate_proofs() -> dict[str, dict[str, object]]:
                 PROJECT_ROOT / "docs/DATABASE_SCHEMA_SEPARATION_GUIDE.md",
                 PROJECT_ROOT / "docs/DATABASE_SCHEMA_SEPARATION_TASK_UPDATE.md",
             ],
-            "target_literals": ["b_class.staging_raw_data", "staging_raw_data SET SCHEMA b_class"],
+            "target_literals": [
+                "b_class.staging_raw_data",
+                "staging_raw_data SET SCHEMA b_class",
+            ],
             "risk_level": "medium",
             "blocker_reason": "target schema is documented, but runtime proof is still missing",
         },
@@ -73,7 +79,8 @@ def collect_wave2_candidate_proofs() -> dict[str, dict[str, object]]:
                 PROJECT_ROOT / "backend/routers/sales_campaign.py",
                 PROJECT_ROOT / "backend/routers/target_management.py",
                 PROJECT_ROOT / "backend/services/c_class_data_service.py",
-                PROJECT_ROOT / "sql/metabase_questions/business_overview_operational_metrics.sql",
+                PROJECT_ROOT
+                / "sql/metabase_questions/business_overview_operational_metrics.sql",
             ],
             "runtime_write_files": [
                 PROJECT_ROOT / "backend/services/shop_sync_service.py",
@@ -93,9 +100,25 @@ def collect_wave2_candidate_proofs() -> dict[str, dict[str, object]]:
     for table_name, config in candidates.items():
         model = config["model"]
         model_schema = model.__table__.schema or "public"
-        read_count, read_files = _count_refs(config["runtime_read_files"], [table_name, model.__name__, "DimShop" if table_name == "dim_shops" else model.__name__])
-        write_count, write_files = _count_refs(config["runtime_write_files"], [table_name, model.__name__, "DimShop(" if table_name == "dim_shops" else model.__name__])
-        historical_count, historical_files = _count_refs(config["historical_target_files"], config["target_literals"])
+        read_count, read_files = _count_refs(
+            config["runtime_read_files"],
+            [
+                table_name,
+                model.__name__,
+                "DimShop" if table_name == "dim_shops" else model.__name__,
+            ],
+        )
+        write_count, write_files = _count_refs(
+            config["runtime_write_files"],
+            [
+                table_name,
+                model.__name__,
+                "DimShop(" if table_name == "dim_shops" else model.__name__,
+            ],
+        )
+        historical_count, historical_files = _count_refs(
+            config["historical_target_files"], config["target_literals"]
+        )
 
         report[table_name] = {
             "expected_target_schema": config["expected_target_schema"],

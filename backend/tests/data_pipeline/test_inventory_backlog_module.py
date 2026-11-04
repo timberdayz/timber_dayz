@@ -8,7 +8,9 @@ def _strip_sql_comments(sql_text: str) -> str:
     )
 
 
-def _assert_sql_asset(path_str: str, expected_prefix: str, required_terms: tuple[str, ...]) -> None:
+def _assert_sql_asset(
+    path_str: str, expected_prefix: str, required_terms: tuple[str, ...]
+) -> None:
     sql_path = Path(path_str)
     assert sql_path.exists()
     sql_text = sql_path.read_text(encoding="utf-8")
@@ -85,7 +87,12 @@ def test_inventory_backlog_base_sql_does_not_divide_in_sql():
     """DOS 的除法必须在 Python（唯一实现），SQL 只放原子事实。"""
     sql_text = Path("sql/mart/inventory_backlog_base.sql").read_text(encoding="utf-8")
     assert "checklist_sales_90d::numeric /" not in sql_text
-    assert "/" not in sql_text.split("days_since_restock")[0].split("AS days_since_restock")[-1][-60:]
+    assert (
+        "/"
+        not in sql_text.split("days_since_restock")[0].split("AS days_since_restock")[
+            -1
+        ][-60:]
+    )
 
 
 def test_inventory_backlog_base_sql_drops_order_domain_sales_cte():
@@ -95,7 +102,9 @@ def test_inventory_backlog_base_sql_drops_order_domain_sales_cte():
 
 
 def test_inventory_snapshot_latest_sql_uses_company_scope_not_shop_scope():
-    sql_text = Path("sql/mart/inventory_snapshot_latest.sql").read_text(encoding="utf-8")
+    sql_text = Path("sql/mart/inventory_snapshot_latest.sql").read_text(
+        encoding="utf-8"
+    )
     assert "PARTITION BY platform_code" in sql_text
     assert "COALESCE(shop_id, '')" not in sql_text
     # 增量模式下同一天可能落多批 → 必须先按 (snapshot_date, SKU×仓) 取最新一行，
@@ -106,7 +115,9 @@ def test_inventory_snapshot_latest_sql_uses_company_scope_not_shop_scope():
 
 
 def test_inventory_snapshot_change_sql_uses_company_scope_not_shop_scope():
-    sql_text = Path("sql/mart/inventory_snapshot_change.sql").read_text(encoding="utf-8")
+    sql_text = Path("sql/mart/inventory_snapshot_change.sql").read_text(
+        encoding="utf-8"
+    )
     assert "PARTITION BY platform_code" in sql_text
     assert "COALESCE(shop_id, '')" not in sql_text
     assert "ROW_NUMBER() OVER" in sql_text
@@ -136,9 +147,9 @@ def test_inventory_backlog_module_sql_asset():
             "platform_sku",
         ),
     )
-    sql_text = Path("sql/api_modules/business_overview_inventory_backlog_module.sql").read_text(
-        encoding="utf-8"
-    )
+    sql_text = Path(
+        "sql/api_modules/business_overview_inventory_backlog_module.sql"
+    ).read_text(encoding="utf-8")
     # 旧字段（estimated_turnover_days / risk_level / clearance_priority_score 等）
     # 必须整条链都消失：源头、api 视图都不许再出现
     for removed in (

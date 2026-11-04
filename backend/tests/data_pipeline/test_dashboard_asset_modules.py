@@ -25,7 +25,9 @@ def _make_request(path: str, report: dict):
 
 
 def test_dashboard_module_targets_exclude_heavy_mv_from_business_overview_core():
-    targets = dashboard_bootstrap.DASHBOARD_MODULE_TARGETS["business_overview"]["core_targets"]
+    targets = dashboard_bootstrap.DASHBOARD_MODULE_TARGETS["business_overview"][
+        "core_targets"
+    ]
 
     assert "semantic.fact_orders_monthly_atomic_mv" not in targets
     assert "api.business_overview_operational_metrics_module" in targets
@@ -33,7 +35,9 @@ def test_dashboard_module_targets_exclude_heavy_mv_from_business_overview_core()
 
 
 def test_dashboard_module_targets_track_business_overview_refreshing_targets():
-    targets = dashboard_bootstrap.DASHBOARD_MODULE_TARGETS["business_overview"]["refresh_targets"]
+    targets = dashboard_bootstrap.DASHBOARD_MODULE_TARGETS["business_overview"][
+        "refresh_targets"
+    ]
 
     assert "semantic.fact_orders_monthly_atomic_mv" in targets
     assert "semantic.fact_analytics_monthly_atomic_mv" in targets
@@ -42,7 +46,9 @@ def test_dashboard_module_targets_track_business_overview_refreshing_targets():
 def test_dashboard_asset_fingerprint_is_stable_across_project_roots(monkeypatch):
     target_name = "api.inventory_backlog_summary_module"
     sql_rel_path = dashboard_bootstrap.SQL_TARGET_PATHS[target_name]
-    sql_bytes = b"CREATE OR REPLACE VIEW api.inventory_backlog_summary_module AS SELECT 1;"
+    sql_bytes = (
+        b"CREATE OR REPLACE VIEW api.inventory_backlog_summary_module AS SELECT 1;"
+    )
 
     class FakeTargetPath:
         def __init__(self, root_label: str, relative_path: str):
@@ -77,10 +83,14 @@ def test_dashboard_asset_fingerprint_is_stable_across_project_roots(monkeypatch)
             return FakeModulePath(self.root_label)
 
     monkeypatch.setattr(dashboard_bootstrap, "Path", FakePathFactory("F:/repo"))
-    windows_fingerprint = dashboard_bootstrap._compute_targets_fingerprint([target_name])
+    windows_fingerprint = dashboard_bootstrap._compute_targets_fingerprint(
+        [target_name]
+    )
 
     monkeypatch.setattr(dashboard_bootstrap, "Path", FakePathFactory("/app"))
-    container_fingerprint = dashboard_bootstrap._compute_targets_fingerprint([target_name])
+    container_fingerprint = dashboard_bootstrap._compute_targets_fingerprint(
+        [target_name]
+    )
 
     assert windows_fingerprint == container_fingerprint
     assert sql_rel_path == dashboard_bootstrap.SQL_TARGET_PATHS[target_name]
@@ -146,9 +156,13 @@ def test_build_module_report_marks_drift_when_ready_state_hides_missing_core_obj
         module_name="business_overview",
         module_state={
             "status": "ready",
-            "asset_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(core_plan),
+            "asset_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(
+                core_plan
+            ),
             "details_json": {
-                "refresh_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(refresh_plan)
+                "refresh_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(
+                    refresh_plan
+                )
             },
         },
         existing_objects=existing_objects,
@@ -157,7 +171,10 @@ def test_build_module_report_marks_drift_when_ready_state_hides_missing_core_obj
 
     assert report["status"] == "drift"
     assert report["ready"] is False
-    assert "api.business_overview_comparison_platform_module" in report["core_missing_objects"]
+    assert (
+        "api.business_overview_comparison_platform_module"
+        in report["core_missing_objects"]
+    )
 
 
 @pytest.mark.asyncio
@@ -196,7 +213,10 @@ async def test_inspect_dashboard_assets_ignores_stale_refreshing_state(monkeypat
         }
 
     monkeypatch.setattr(dashboard_bootstrap, "_collect_existing_assets", fake_collect)
-    monkeypatch.setattr(dashboard_bootstrap, "_load_dashboard_asset_state", fake_load_state)
+    monkeypatch.setattr(
+        dashboard_bootstrap, "_load_dashboard_asset_state", fake_load_state
+    )
+
     async def fake_load_active_runs(_session):
         return {}
 
@@ -212,7 +232,9 @@ async def test_inspect_dashboard_assets_ignores_stale_refreshing_state(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_inspect_dashboard_assets_ready_state_does_not_mask_missing_objects(monkeypatch):
+async def test_inspect_dashboard_assets_ready_state_does_not_mask_missing_objects(
+    monkeypatch,
+):
     core_plan = dashboard_bootstrap._module_core_plan("business_overview")
     refresh_plan = dashboard_bootstrap._module_refresh_plan("business_overview")
     existing_objects = set()
@@ -229,9 +251,13 @@ async def test_inspect_dashboard_assets_ready_state_does_not_mask_missing_object
         return {
             "business_overview": {
                 "status": "ready",
-                "asset_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(core_plan),
+                "asset_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(
+                    core_plan
+                ),
                 "details_json": {
-                    "refresh_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(refresh_plan)
+                    "refresh_fingerprint_applied": dashboard_bootstrap._compute_targets_fingerprint(
+                        refresh_plan
+                    )
                 },
             }
         }
@@ -240,7 +266,9 @@ async def test_inspect_dashboard_assets_ready_state_does_not_mask_missing_object
         return {}
 
     monkeypatch.setattr(dashboard_bootstrap, "_collect_existing_assets", fake_collect)
-    monkeypatch.setattr(dashboard_bootstrap, "_load_dashboard_asset_state", fake_load_state)
+    monkeypatch.setattr(
+        dashboard_bootstrap, "_load_dashboard_asset_state", fake_load_state
+    )
     monkeypatch.setattr(
         dashboard_bootstrap,
         "_load_active_dashboard_refresh_runs",
@@ -251,11 +279,15 @@ async def test_inspect_dashboard_assets_ready_state_does_not_mask_missing_object
 
     assert report["ready"] is False
     assert report["modules"]["business_overview"]["status"] == "drift"
-    assert "api.business_overview_comparison_platform_module" in report["missing_objects"]
+    assert (
+        "api.business_overview_comparison_platform_module" in report["missing_objects"]
+    )
 
 
 @pytest.mark.asyncio
-async def test_refresh_materialization_replays_core_targets_after_heavy_refresh(monkeypatch):
+async def test_refresh_materialization_replays_core_targets_after_heavy_refresh(
+    monkeypatch,
+):
     calls = []
 
     async def fake_execute_refresh_plan(session, targets, **kwargs):
@@ -295,9 +327,15 @@ async def test_refresh_materialization_replays_core_targets_after_heavy_refresh(
 
             return _Scalar()
 
-    monkeypatch.setattr(dashboard_bootstrap, "execute_refresh_plan", fake_execute_refresh_plan)
-    monkeypatch.setattr(dashboard_bootstrap, "_load_dashboard_asset_state", fake_load_state)
-    monkeypatch.setattr(dashboard_bootstrap, "_upsert_dashboard_asset_state", fake_upsert)
+    monkeypatch.setattr(
+        dashboard_bootstrap, "execute_refresh_plan", fake_execute_refresh_plan
+    )
+    monkeypatch.setattr(
+        dashboard_bootstrap, "_load_dashboard_asset_state", fake_load_state
+    )
+    monkeypatch.setattr(
+        dashboard_bootstrap, "_upsert_dashboard_asset_state", fake_upsert
+    )
     monkeypatch.setattr(dashboard_bootstrap, "inspect_dashboard_assets", fake_inspect)
 
     report = await dashboard_bootstrap.refresh_dashboard_materialization_assets(
@@ -316,7 +354,9 @@ async def test_refresh_materialization_replays_core_targets_after_heavy_refresh(
     ],
 )
 @pytest.mark.asyncio
-async def test_dashboard_asset_ready_error_includes_module_name(path, module_name, monkeypatch):
+async def test_dashboard_asset_ready_error_includes_module_name(
+    path, module_name, monkeypatch
+):
     report = {
         "ready": False,
         "modules": {

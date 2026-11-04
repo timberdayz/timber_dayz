@@ -13,4 +13,3 @@ def test_staging_raw_data_fk_targets_public_catalog_files():
     fk_targets = {fk.target_fullname for fk in StagingRawData.__table__.foreign_keys}
 
     assert "public.catalog_files.id" in fk_targets
-
