@@ -104,6 +104,40 @@ INDEX_STATEMENTS = (
     "ON semantic.fact_analytics_atomic_mv (platform_code, shop_id, data_hash)",
 )
 
+#: 物化时用的语句超时预算（毫秒）。
+#:
+#: 生产实测（2026-11-04）：``SELECT count(*) FROM semantic.fact_orders_atomic``
+#: 单独就要 **114.6 秒**（38,607 行，9 表全量 UNION + 逐行 LATERAL 身份解析）。
+#: 而生产的 ``statement_timeout`` 是 **2min = 120s** ⇒ 首次 ``CREATE MATERIALIZED
+#: VIEW`` 必然被数据库掐断（v7.13.0 首次发布就是这么失败的：迁移事务整体回滚，
+#: 生产已自动回滚到 v7.12.9，无残留）。
+#:
+#: CREATE 还要把 38,607 行**写进物化存储**并建 4 个索引，比只读 count 更重，
+#: 所以预算按「count 的 3~4 倍」给，留足余量：30 分钟。
+MATERIALIZE_STATEMENT_TIMEOUT_MS = 30 * 60 * 1000
+
+
+def _with_extended_statement_timeout(action):
+    """在 ``action`` 执行期间把语句超时提到物化预算，结束后恢复原值。
+
+    用会话级 ``SET``（不是 ``SET LOCAL``）：alembic 迁移在事务里跑，
+    ``SET LOCAL`` 只在事务内有效，而这里要保证**跨语句**生效（建 MV 与建索引
+    是多条语句）。会话级设置必须在 ``finally`` 里恢复 —— 迁移用的连接
+    之后会归还连接池，带着 30 分钟超时会污染后续应用查询。
+    """
+    bind = op.get_bind()
+    original = bind.execute(sa.text("SHOW statement_timeout")).scalar_one()
+    # SET 是 utility statement，**不接受参数占位符**（会退化成
+    # ``SET statement_timeout = $1`` → 语法错误），只能拼字面量。
+    # 两个值都是可信来源：内部常量 + 数据库自己 ``SHOW`` 出来的原值。
+    bind.exec_driver_sql(
+        "SET statement_timeout = '{ms}'".format(ms=MATERIALIZE_STATEMENT_TIMEOUT_MS)
+    )
+    try:
+        return action()
+    finally:
+        bind.exec_driver_sql("SET statement_timeout = '{value}'".format(value=original))
+
 
 def _exists(name: str) -> bool:
     bind = op.get_bind()
@@ -196,10 +230,17 @@ def _rebuild_consumer_view(view_name: str, asset_rel_path: str) -> bool:
 
 def upgrade() -> None:
     # 1) + 2) 物化视图与索引
-    for mv_name, source_view in MATERIALIZED_VIEWS:
-        _create_materialized_view(mv_name, source_view)
-    for statement in INDEX_STATEMENTS:
-        op.get_bind().exec_driver_sql(statement)
+    #    这一步是**长任务**：全量重算原子视图（实测 114.6 秒）还要写 38,607 行
+    #    并建 4 个索引，远超生产默认的 statement_timeout=120s ⇒ 必须临时抬高预算，
+    #    否则 v7.13.0 首次发布就是这么失败的（迁移事务整体回滚，生产自动回滚到
+    #    v7.12.9，无残留）。
+    def _materialize() -> None:
+        for mv_name, source_view in MATERIALIZED_VIEWS:
+            _create_materialized_view(mv_name, source_view)
+        for statement in INDEX_STATEMENTS:
+            op.get_bind().exec_driver_sql(statement)
+
+    _with_extended_statement_timeout(_materialize)
 
     # 3) 消费方视图改读物化视图
     for view_name, asset_rel_path in CONSUMER_VIEW_ASSETS:
@@ -226,8 +267,6 @@ def downgrade() -> None:
         sql_text = asset_path.read_text(encoding="utf-8")
         sql_text = sql_text.replace(
             "semantic.fact_orders_atomic_mv", "semantic.fact_orders_atomic"
-        ).replace(
-            "semantic.fact_analytics_atomic_mv", "semantic.fact_analytics_atomic"
-        )
+        ).replace("semantic.fact_analytics_atomic_mv", "semantic.fact_analytics_atomic")
         for statement in _split_statements(sql_text):
             op.get_bind().exec_driver_sql(statement)
