@@ -25,6 +25,15 @@ LOGICAL_TARGET_OBJECTS: dict[str, str] = {
 }
 
 
+#: 语义层的**原子层视图**（普通视图，不是物化副本）。
+#:
+#: 为什么单独登记：它们的**定义**变更不会随数据刷新或 bootstrap 自动生效
+#: （两者都跳过「已存在的普通视图」，见 ``refresh_runner.execute_sql_target``
+#: 的 ``recreate_views=False``）⇒ 部署时必须**显式重建**，
+#: 否则改了 ``sql/`` 资产也等于没改（曾经因此让商品/服务两条链路长期停在旧口径）。
+#:
+#: 部署脚本 ``scripts/deploy_remote_production.sh`` 的 ``DEPLOY_REBUILD_VIEW_TARGETS``
+#: 默认值必须覆盖这一组，由 ``tests/test_verify_remote_deploy_contracts.py`` 守护。
 PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.alias_registry": [],
     # 身份解析候选集的**正本**仍是普通视图（从 core 表现算）；物化副本是它的
@@ -208,6 +217,21 @@ SQL_TARGET_PATHS: dict[str, str] = {
     "api.b_cost_analysis_order_detail_module": "sql/api_modules/b_cost_analysis_order_detail_module.sql",
     "api.sku_clearance_ranking_module": "sql/api_modules/sku_clearance_ranking_module.sql",
 }
+
+#: 语义层的**原子层视图**（普通视图，不是物化副本）。
+#:
+#: 为什么单独登记：它们的**定义**变更不会随数据刷新或 bootstrap 自动生效
+#: （两者都跳过「已存在的普通视图」，见 ``refresh_runner.execute_sql_target``
+#: 的 ``recreate_views=False``）⇒ 部署时必须**显式重建**，
+#: 否则改了 ``sql/`` 资产也等于没改（曾经因此让商品/服务两条链路长期停在旧口径）。
+#:
+#: 部署脚本 ``scripts/deploy_remote_production.sh`` 的 ``DEPLOY_REBUILD_VIEW_TARGETS``
+#: 默认值必须覆盖这一组，由 ``tests/test_verify_remote_deploy_contracts.py`` 守护。
+SEMANTIC_ATOMIC_VIEW_TARGETS: list[str] = sorted(
+    target
+    for target in SQL_TARGET_PATHS
+    if target.startswith("semantic.fact_") and not target.endswith("_mv")
+)
 
 #: 建对象**前置**：目标资产在执行前必须先就位的对象。
 #:

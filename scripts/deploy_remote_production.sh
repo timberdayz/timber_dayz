@@ -952,7 +952,20 @@ sys.exit(asyncio.run(main()))
   return 0
 }
 
-if ! rebuild_dashboard_view_definitions "${DEPLOY_REBUILD_VIEW_TARGETS:-api.business_overview_inventory_backlog_module}"; then
+# 默认重建清单：语义层**原子层视图**（普通视图）+ 积压资产组的下游视图。
+#
+# 为什么必须列全：数据刷新流程与 dashboard bootstrap 都会跳过「已存在的普通视图」
+# （recreate_views=False），生产又关掉了启动自愈
+# （AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP=false）
+# ⇒ 改了 sql/ 里的视图定义，光部署**不会生效**。
+# 漏掉一个 = 这次发布对它完全白改 —— 商品/服务两条链路曾因此长期停在旧口径。
+#
+# 这份清单必须覆盖 backend/services/data_pipeline/refresh_registry.py 里的
+# SEMANTIC_ATOMIC_VIEW_TARGETS，由 tests/test_verify_remote_deploy_contracts.py 守护
+# （新增语义层链路时忘了加进来，测试会直接失败）。
+DEFAULT_REBUILD_VIEW_TARGETS="semantic.fact_analytics_atomic semantic.fact_analytics_monthly_atomic semantic.fact_inventory_snapshot semantic.fact_orders_atomic semantic.fact_orders_monthly_atomic semantic.fact_products_atomic semantic.fact_services_atomic api.business_overview_inventory_backlog_module"
+
+if ! rebuild_dashboard_view_definitions "${DEPLOY_REBUILD_VIEW_TARGETS:-${DEFAULT_REBUILD_VIEW_TARGETS}}"; then
   echo "[INFO] Deployment blocked before application startup"
   exit 1
 fi

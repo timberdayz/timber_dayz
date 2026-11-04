@@ -34,6 +34,33 @@ def test_deploy_script_rebuilds_view_definitions():
     assert "-e REBUILD_VERIFY_TARGETS" in source
 
 
+def test_deploy_script_rebuilds_every_semantic_atomic_view():
+    """部署时必须重建**全部**语义层原子层视图。
+
+    背景：改了 ``sql/`` 里的视图定义，光部署**不会生效** ——
+    数据刷新流程与 dashboard bootstrap 都跳过「已存在的普通视图」
+    （``recreate_views=False``），生产又关掉了启动自愈。
+    所以部署脚本的重建清单漏一个 = **这次发布对它完全白改**。
+
+    商品/服务两条链路曾因此长期停在旧口径：占位键没拆开、
+    满意度列读崩也没修好，而发布记录上却写着「已上线」。
+    """
+    from backend.services.data_pipeline.refresh_registry import (
+        SEMANTIC_ATOMIC_VIEW_TARGETS,
+    )
+
+    source = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
+    match = re.search(r'DEFAULT_REBUILD_VIEW_TARGETS="([^"]*)"', source)
+    assert match, "部署脚本缺少 DEFAULT_REBUILD_VIEW_TARGETS 定义"
+
+    listed = set(match.group(1).split())
+    missing = sorted(set(SEMANTIC_ATOMIC_VIEW_TARGETS) - listed)
+    assert not missing, (
+        f"语义层原子层视图 {missing} 不在部署重建清单里 ⇒ "
+        "改了它们的 sql/ 资产也不会在生产生效"
+    )
+
+
 def test_view_rebuild_runs_before_application_layer_starts():
     """重建必须早于应用层启动，否则旧定义会先上线一轮。"""
     source = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
