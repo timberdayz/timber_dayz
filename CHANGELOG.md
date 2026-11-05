@@ -1,5 +1,91 @@
 # Changelog - 西虹 ERP 系统
 
+## [未发布] - 2026-11-05 - 提成→工资链路本地端到端验证 + 生产「0 元提成」根因定位 + openclaw 内存排查
+
+> 本次**不改计算代码**（核对结论：计算代码是对的），只补验证工具与结论记录。
+> 全部验证在**本地开发库**完成，未触碰生产数据。
+
+### 一、提成→工资链路：本地端到端跑通，四个恒等式全通过
+
+本地库其实**一直有完整的 mock 数据**（员工-店铺归属 433 行、店铺可分配利润率 225 行、
+店铺绩效评分 81 行）—— 生产才是空表。本地把 schema 迁到最新 head、
+补齐缺失的看板视图后，用官方编排器 `V2MonthlyRefreshService.refresh_month` 跑通了
+「提成计算 → 工资单生成 → 人力成本分摊 → 看板口径」全链路（2026-07）：
+
+```
+commission_upserts=5  performance_upserts=9  payroll_upserts=8
+labor_cost_allocation_upserts=46  profit_basis_shop_count=16  calculation_passes=2
+```
+
+四个恒等式**全部通过**：
+
+| # | 恒等式 | 结果 |
+| --- | --- | --- |
+| 1 | 员工提成金额 == 工资单里的提成 | PASS（逐人一致） |
+| 2 | 分摊表提成合计 == 员工提成合计 | PASS |
+| 3 | 看板口径 == 分摊表 shop 范围 V2 合计 | PASS（21,231.58） |
+| 4 | 逐人反算 `Σ(max(利润基数,0) × 可分配利润率 × 个人比例) × 店铺绩效系数` | PASS（5 人差额**全为 0.00**） |
+
+⇒ **计算公式本身没有问题，不需要改。**
+
+### 二、生产「2026-08 起提成为 0」的真正根因
+
+- 不是「店铺可分配利润率表为空」—— 查证后发现该表为空时会**按 100% 分配**，
+  不会归零（`:1033` `allocatable_by_shop.get(shop_key, 1.0)`）。
+- 真正的断点是**员工的个人提成比例**：
+  - 比例取值优先级 = 归属表 `commission_ratio` → 薪资结构 `commission_ratio` → 0；
+  - 生产薪资结构里 7 人**除 1 人外 `commission_ratio` 全是 0**；
+  - 2026-03/04/07 的提成非零（说明当时归属表里有真实比例），
+    **2026-08 起归零** ⇒ 归属表里的个人比例在这期间被清空/清零。
+- 而**现在**生产归属表整体 0 行 ⇒ 补数据后重算即可拿回正确金额。
+
+### 三、验证出代码其实已经修好了「无声归零」
+
+本地实验（把某员工归属比例置空、让其回落到薪资结构的 0）：
+
+```
+ratio=0.000000  金额=0.00  状态=no_ratio
+details.reason = "no commission ratio configured; set
+  employee_shop_assignments.commission_ratio or salary_structures.commission_ratio"
+```
+
+⇒ **现代码会把「比例没配」标成 `no_ratio` 并写明原因**，不再无声归零。
+生产那 5 条 `calculated` + 0 元的行，是**修复前旧代码算出来的历史遗留**
+（`calculation_details` 全为 NULL ⇒ 审计列是后加的，没回填历史）。
+
+另有一个实测结论：**归属被清空时系统不会写提成行**（`commission_upserts=0`，
+旧行原样保留）⇒ 「0 元」只可能来自「比例取不到」，不可能来自「表为空」。
+
+### 四、本地要补的数据（已补齐并复验）
+
+本地 mock 数据里 `EMP260009` 被登记成 `visitor` 身份且没有薪资结构
+⇒ 算得出提成（957.59）却拿不到工资单 ⇒ 分摊表少一笔。
+补齐（改 `employee_identity_type='employee'` + 补 `salary_structures`）后，
+恒等式 2 由 FAIL 转 PASS。**这说明「有提成但没进工资单」是能在对账里被抓住的。**
+
+### 五、新增可复跑的验证脚本
+
+- `scripts/verify_local_payroll_chain.py`：一条命令跑完
+  「重算 → 打印四张表 → 校验四个恒等式 → 逐人反算」，不通过则退出码非 0。
+- **硬保护**：只允许连 `127.0.0.1:15432`（本地开发库），
+  且主动忽略 `CLOUD_DATABASE_URL`（它指向云库隧道）⇒ 不会误连云库/生产库。
+- `--skip-refresh` 只对账不写库。
+
+### 六、openclaw 内存增长排查结论（只读，未改配置）
+
+- 内存构成：**匿名内存 2.32 GiB（占 RSS 98%）+ 文件缓存 45 MiB**
+  ⇒ 是 V8 JS 堆，不是文件页缓存。
+- 90 秒连续采样：RSS 2,344,240 KB → 2,345,280 KB（+1 MB），swap 稳定
+  ⇒ **当前没有持续泄漏**，是「稳态占用偏高」。
+- 磁盘上却有 **约 1.87 GiB 垃圾**：
+  `_trash/2026-10-24` 768 MiB（56388 个文件，升级时的旧运行时）、
+  `agents/main/session-sqlite-import-archive` 661 MiB（已导入的中间产物）、
+  `backups` 321 MiB、`tmp/plugin-captures` 118 MiB。
+- 另有一处隐患：`state/openclaw.sqlite-wal` 卡在 64 MiB 上限
+  ⇒ 有长读事务挡住 checkpoint。
+- 已有的三层保护：4 GiB 硬上限（`oom_kill=0`，从未触发）+
+  本次加的 3 GiB 软限（立即生效、服务零中断）+ 宿主机 4 GiB swap。
+
 ## [未发布] - 2026-11-05 - 生产内存收口（宿主机 7.4 GiB，openclaw 常驻 2.8 GiB）
 
 > 本次只改**生产基础设施配置**，不动后端代码与镜像，无需发版。
