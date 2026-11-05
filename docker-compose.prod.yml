@@ -389,7 +389,7 @@ services:
     # - data_sync: 数据同步任务（主要业务任务）
     # - scheduled: 定时任务（由 Celery Beat 调度）
     # - data_processing: 数据处理任务（可选，如果不需要可以移除）
-    command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=4
+    command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing,refresh_queue --concurrency=4
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0

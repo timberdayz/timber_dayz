@@ -35,6 +35,10 @@ async def list_refresh_queue_tasks(
                 "context_json": row.context_json or {},
                 "status": row.status,
                 "attempt_count": row.attempt_count,
+                "domain": row.domain,
+                "next_retry_at": (
+                    row.next_retry_at.isoformat() if row.next_retry_at else None
+                ),
                 "last_error": row.last_error,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
                 "started_at": row.started_at.isoformat() if row.started_at else None,
@@ -42,7 +46,9 @@ async def list_refresh_queue_tasks(
             }
             for row in rows
         ]
-        return success_response(data=data, message=f"获取到{len(data)}条refresh queue任务")
+        return success_response(
+            data=data, message=f"获取到{len(data)}条refresh queue任务"
+        )
     except Exception as exc:
         logger.error("[RefreshQueueAPI] 获取任务失败: %s", exc, exc_info=True)
         return error_response(

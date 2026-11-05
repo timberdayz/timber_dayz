@@ -7,11 +7,24 @@ from collections.abc import Iterable
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import create_engine, insert, inspect as sa_inspect, select, text, update
+from sqlalchemy import (
+    create_engine,
+    insert,
+    inspect as sa_inspect,
+    select,
+    text,
+    update,
+)
 
 from backend.services.cloud_b_class_mirror_manager import build_canonical_columns
-from backend.services.cloud_b_class_sync_utils import quote_ident, validate_b_class_table_name
-from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
+from backend.services.cloud_b_class_sync_utils import (
+    quote_ident,
+    validate_b_class_table_name,
+)
+from backend.services.data_pipeline.refresh_queue_service import (
+    RefreshQueueService,
+    resolve_refresh_lane,
+)
 from modules.core.db import CloudSyncReceiveLog, RefreshQueueTask
 
 
@@ -66,12 +79,17 @@ class SQLAlchemyBClassSourceReader:
         )
 
     def __call__(self, table_name: str, checkpoint, batch_size: int = 1000):
-        where_sql, params = CloudBClassSyncService._build_checkpoint_where_clause(checkpoint)
+        where_sql, params = CloudBClassSyncService._build_checkpoint_where_clause(
+            checkpoint
+        )
         inspector = sa_inspect(self.engine)
         available_columns = {
-            column["name"] for column in inspector.get_columns(table_name, schema="b_class")
+            column["name"]
+            for column in inspector.get_columns(table_name, schema="b_class")
         }
-        sql = self._build_select_sql(table_name, where_sql, available_columns=available_columns)
+        sql = self._build_select_sql(
+            table_name, where_sql, available_columns=available_columns
+        )
         bind_params = dict(params)
         bind_params["batch_size"] = batch_size
         with self.engine.begin() as conn:
@@ -96,12 +114,22 @@ class SQLAlchemyCloudWriter:
         update_fields = ", ".join(
             f"{column} = EXCLUDED.{column}"
             for column in columns
-            if column not in {"platform_code", "shop_id", "data_domain", "granularity", "sub_domain", "data_hash"}
+            if column
+            not in {
+                "platform_code",
+                "shop_id",
+                "data_domain",
+                "granularity",
+                "sub_domain",
+                "data_hash",
+            }
         )
         if data_domain == "services":
             conflict_clause = "(data_domain, sub_domain, granularity, data_hash)"
         else:
-            conflict_clause = "(platform_code, shop_id, data_domain, granularity, data_hash)"
+            conflict_clause = (
+                "(platform_code, shop_id, data_domain, granularity, data_hash)"
+            )
         return (
             f'INSERT INTO {SQLAlchemyCloudWriter.TARGET_SCHEMA}."{table_name}" ({column_list}) '
             f"VALUES ({bind_list}) "
@@ -153,7 +181,9 @@ class SQLAlchemyCloudWriter:
             if isinstance(record.get("raw_data"), dict):
                 record["raw_data"] = json.dumps(record["raw_data"], ensure_ascii=False)
             if isinstance(record.get("header_columns"), list):
-                record["header_columns"] = json.dumps(record["header_columns"], ensure_ascii=False)
+                record["header_columns"] = json.dumps(
+                    record["header_columns"], ensure_ascii=False
+                )
             prepared_rows.append(record)
         return prepared_rows
 
@@ -179,10 +209,19 @@ class CloudSyncReceiveLogRecorder:
             return None
 
     @classmethod
-    def _business_date_range(cls, rows: list[dict[str, Any]]) -> tuple[date | None, date | None]:
+    def _business_date_range(
+        cls, rows: list[dict[str, Any]]
+    ) -> tuple[date | None, date | None]:
         dates: list[date] = []
         for row in rows:
-            for key in ("business_date", "period_end_date", "analytics_date", "order_date", "stat_date", "date"):
+            for key in (
+                "business_date",
+                "period_end_date",
+                "analytics_date",
+                "order_date",
+                "stat_date",
+                "date",
+            ):
                 parsed = cls._coerce_business_date(row.get(key))
                 if parsed is not None:
                     dates.append(parsed)
@@ -227,7 +266,11 @@ class CloudSyncReceiveLogRecorder:
         )
         with self.engine.begin() as conn:
             conn.execute(insert(CloudSyncReceiveLog.__table__).values(**payload))
-        return {"status": "completed", "receive_id": payload["receive_id"], "written_rows": written_rows}
+        return {
+            "status": "completed",
+            "receive_id": payload["receive_id"],
+            "written_rows": written_rows,
+        }
 
     def record_success_on_connection(
         self,
@@ -257,7 +300,11 @@ class CloudSyncReceiveLogRecorder:
             rows=rows,
         )
         conn.execute(insert(CloudSyncReceiveLog.__table__).values(**payload))
-        return {"status": "completed", "receive_id": payload["receive_id"], "written_rows": written_rows}
+        return {
+            "status": "completed",
+            "receive_id": payload["receive_id"],
+            "written_rows": written_rows,
+        }
 
     def _build_success_payload(
         self,
@@ -281,8 +328,13 @@ class CloudSyncReceiveLogRecorder:
             "source_environment": self.source_environment,
             "checkpoint_scope": checkpoint_scope,
             "source_table_name": source_table_name,
-            "source_file_id": source_file_id if source_file_id is not None else self._first_non_empty(rows, "file_id"),
-            "platform_code": platform_code or self._first_non_empty(rows, "platform_code"),
+            "source_file_id": (
+                source_file_id
+                if source_file_id is not None
+                else self._first_non_empty(rows, "file_id")
+            ),
+            "platform_code": platform_code
+            or self._first_non_empty(rows, "platform_code"),
             "data_domain": data_domain or self._first_non_empty(rows, "data_domain"),
             "granularity": granularity or self._first_non_empty(rows, "granularity"),
             "business_date_min": business_date_min,
@@ -311,7 +363,9 @@ class CloudRefreshQueueEnqueuer:
         checkpoint_scope: str,
         source_latest_ingest_timestamp: Any | None = None,
     ) -> dict[str, Any]:
-        from backend.services.event_listeners import determine_pipeline_targets_for_data_ingested
+        from backend.services.event_listeners import (
+            determine_pipeline_targets_for_data_ingested,
+        )
         from backend.utils.events import DataIngestedEvent
 
         event = DataIngestedEvent(
@@ -336,17 +390,30 @@ class CloudRefreshQueueEnqueuer:
             "related_table_names": [source_table_name],
         }
         if source_latest_ingest_timestamp is not None:
-            context["source_latest_ingest_timestamp"] = str(source_latest_ingest_timestamp)
+            context["source_latest_ingest_timestamp"] = str(
+                source_latest_ingest_timestamp
+            )
         dedupe_key = RefreshQueueService.build_dedupe_key(self.PIPELINE_NAME, targets)
         table = RefreshQueueTask.__table__
+        # 业务域分道（2026-11-11）：这条路径**直接写表**入队（不走服务层），
+        # 所以域必须在这里算出来写进去 ——
+        # 漏了的话，所有云同步任务都会落进 default 共享道（= 串行），
+        # 而云同步恰恰是生产上失败最多的一条触发路径（262 次 / 30% 失败）。
+        lane = resolve_refresh_lane(context)
 
         with self.engine.begin() as conn:
-            existing = conn.execute(
-                select(table.c.id, table.c.job_id, table.c.context_json)
-                .where(table.c.dedupe_key == dedupe_key, table.c.status == "pending")
-                .order_by(table.c.id.asc())
-                .limit(1)
-            ).mappings().first()
+            existing = (
+                conn.execute(
+                    select(table.c.id, table.c.job_id, table.c.context_json)
+                    .where(
+                        table.c.dedupe_key == dedupe_key, table.c.status == "pending"
+                    )
+                    .order_by(table.c.id.asc())
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
 
             if existing is not None:
                 merged_context = RefreshQueueService._merge_context(
@@ -356,7 +423,7 @@ class CloudRefreshQueueEnqueuer:
                 conn.execute(
                     update(table)
                     .where(table.c.id == existing["id"])
-                    .values(context_json=merged_context)
+                    .values(context_json=merged_context, domain=lane)
                 )
                 return {
                     "status": "queued",
@@ -372,10 +439,13 @@ class CloudRefreshQueueEnqueuer:
                     trigger_type=self.TRIGGER_TYPE,
                     pipeline_name=self.PIPELINE_NAME,
                     dedupe_key=dedupe_key,
-                    targets_json=sorted(str(target).strip() for target in targets if str(target).strip()),
+                    targets_json=sorted(
+                        str(target).strip() for target in targets if str(target).strip()
+                    ),
                     context_json=context,
                     status="pending",
                     attempt_count=0,
+                    domain=lane,
                 )
             )
             return {
@@ -424,7 +494,9 @@ class CloudBClassSyncService:
             self.receive_log_recorder = CloudSyncReceiveLogRecorder(cloud_engine)
 
     @staticmethod
-    def _should_advance_checkpoint(write_succeeded: bool, dry_run: bool = False) -> bool:
+    def _should_advance_checkpoint(
+        write_succeeded: bool, dry_run: bool = False
+    ) -> bool:
         return bool(write_succeeded) and not dry_run
 
     @staticmethod
@@ -521,10 +593,14 @@ class CloudBClassSyncService:
             return []
         inspected = self.table_inspector()
         if inspect.isawaitable(inspected):
-            raise RuntimeError("Async table inspector is not supported in synchronous list_b_class_tables")
+            raise RuntimeError(
+                "Async table inspector is not supported in synchronous list_b_class_tables"
+            )
         return self._filter_b_class_tables(inspected)
 
-    async def sync_table(self, table_name: str, batch_size: int = 1000) -> dict[str, Any]:
+    async def sync_table(
+        self, table_name: str, batch_size: int = 1000
+    ) -> dict[str, Any]:
         try:
             validate_b_class_table_name(table_name)
             checkpoint = self.checkpoint_service.create_or_get_checkpoint(
@@ -587,14 +663,18 @@ class CloudBClassSyncService:
                     }
 
                 receive_id = f"receive-{uuid.uuid4().hex}"
-                source_file_id = CloudSyncReceiveLogRecorder._first_non_empty(rows, "file_id")
+                source_file_id = CloudSyncReceiveLogRecorder._first_non_empty(
+                    rows, "file_id"
+                )
                 for payload_row in payload_rows:
                     raw_payload = payload_row.get("raw_data")
                     if not isinstance(raw_payload, dict):
                         raw_payload = {}
                     raw_payload["_cloud_sync_receive_id"] = receive_id
                     if source_file_id is not None:
-                        raw_payload.setdefault("_cloud_sync_source_file_id", source_file_id)
+                        raw_payload.setdefault(
+                            "_cloud_sync_source_file_id", source_file_id
+                        )
                     payload_row["raw_data"] = raw_payload
 
                 receive_log_context = {
@@ -602,16 +682,25 @@ class CloudBClassSyncService:
                     "receive_id": receive_id,
                     "source_file_id": source_file_id,
                     "data_domain": data_domain,
-                    "granularity": (payload_rows[0] or {}).get("granularity") if payload_rows else None,
-                    "platform_code": (payload_rows[0] or {}).get("platform_code") if payload_rows else None,
+                    "granularity": (
+                        (payload_rows[0] or {}).get("granularity")
+                        if payload_rows
+                        else None
+                    ),
+                    "platform_code": (
+                        (payload_rows[0] or {}).get("platform_code")
+                        if payload_rows
+                        else None
+                    ),
                     "checkpoint_scope": self.checkpoint_scope,
-                    "source_latest_ingest_timestamp": rows[-1].get("ingest_timestamp") if rows else None,
+                    "source_latest_ingest_timestamp": (
+                        rows[-1].get("ingest_timestamp") if rows else None
+                    ),
                     "written_rows": len(rows),
                     "rows": rows,
                 }
-                if (
-                    self.receive_log_recorder is not None
-                    and hasattr(self.remote_writer, "write_rows_with_receive_log")
+                if self.receive_log_recorder is not None and hasattr(
+                    self.remote_writer, "write_rows_with_receive_log"
                 ):
                     write_result = await self._maybe_await(
                         self.remote_writer.write_rows_with_receive_log(
@@ -637,7 +726,9 @@ class CloudBClassSyncService:
                         "status": "failed",
                         "table_name": table_name,
                         "written_rows": total_written_rows,
-                        "error": write_result.get("error") or write_result.get("detail") or "sync_failed",
+                        "error": write_result.get("error")
+                        or write_result.get("detail")
+                        or "sync_failed",
                         "error_code": write_result.get("error_code") or "sync_failed",
                     }
 
@@ -651,7 +742,9 @@ class CloudBClassSyncService:
                         self.receive_log_recorder.record_success(**receive_log_context)
                     )
                 dry_run_seen = dry_run_seen or bool(write_result.get("dry_run"))
-                if self._should_advance_checkpoint(write_succeeded, dry_run=bool(write_result.get("dry_run"))):
+                if self._should_advance_checkpoint(
+                    write_succeeded, dry_run=bool(write_result.get("dry_run"))
+                ):
                     last_row = rows[-1]
                     latest_ingest_timestamp = last_row["ingest_timestamp"]
                     self.checkpoint_service.advance_checkpoint(
@@ -701,7 +794,10 @@ class CloudBClassSyncService:
                     self.local_engine.dispose()
                 except Exception:
                     pass
-            if self.cloud_engine is not None and self.cloud_engine is not self.local_engine:
+            if (
+                self.cloud_engine is not None
+                and self.cloud_engine is not self.local_engine
+            ):
                 try:
                     self.cloud_engine.dispose()
                 except Exception:

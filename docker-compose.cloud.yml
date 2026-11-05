@@ -71,7 +71,7 @@ services:
           cpus: '0.25'
           memory: 256M
     # 降低并发数（2核服务器）
-    command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=2
+    command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing,refresh_queue --concurrency=2
 
   # Celery Beat - 资源优化
   celery-beat:

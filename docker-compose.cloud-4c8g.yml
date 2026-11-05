@@ -40,7 +40,7 @@ services:
           memory: 768M
 
   celery-worker:
-    command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=2
+    command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing,refresh_queue --concurrency=2
     deploy:
       resources:
         limits:

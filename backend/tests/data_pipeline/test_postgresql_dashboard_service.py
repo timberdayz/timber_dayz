@@ -3550,7 +3550,8 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypat
                         impressions NUMERIC,
                         clicks NUMERIC,
                         conversion_rate NUMERIC,
-                        review_count NUMERIC
+                        review_count NUMERIC,
+                        data_hash VARCHAR(64)
                     )
                     """
                 )
@@ -3665,6 +3666,9 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypat
 
         async with session_factory() as session:
             for target in (
+                # 商品日 KPI 现在读物化副本（2026-11-11）⇒ 必须先把副本建出来。
+                # 生产里这一步由迁移完成（迁移先建 MV 再重建消费方视图）。
+                "semantic.fact_products_atomic_mv",
                 "mart.product_day_kpi",
                 "mart.inventory_snapshot_history",
                 "mart.inventory_snapshot_latest",

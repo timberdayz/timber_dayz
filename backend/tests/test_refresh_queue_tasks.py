@@ -89,7 +89,9 @@ async def test_process_refresh_queue_task_claims_executes_and_completes(monkeypa
             calls.append(("completed", task_id))
             return None
 
-        async def mark_failed(self, task_id: int, error_message: str):
+        async def mark_failed(
+            self, task_id: int, error_message: str, *, retryable: bool = False
+        ):
             calls.append(("failed", task_id, error_message))
             return None
 
@@ -160,7 +162,9 @@ async def test_process_refresh_queue_task_invalidates_dashboard_cache_after_busi
         async def mark_completed(self, task_id: int):
             calls.append(("completed", task_id))
 
-        async def mark_failed(self, task_id: int, error_message: str):
+        async def mark_failed(
+            self, task_id: int, error_message: str, *, retryable: bool = False
+        ):
             calls.append(("failed", task_id, error_message))
 
     class _FakeCacheService:
@@ -235,7 +239,9 @@ async def test_process_refresh_queue_task_invalidates_clearance_cache(monkeypatc
         async def mark_completed(self, task_id: int):
             calls.append(("completed", task_id))
 
-        async def mark_failed(self, task_id: int, error_message: str):
+        async def mark_failed(
+            self, task_id: int, error_message: str, *, retryable: bool = False
+        ):
             calls.append(("failed", task_id, error_message))
 
     class _FakeCacheService:
@@ -312,7 +318,9 @@ async def test_process_refresh_queue_task_repairs_drifted_dashboard_assets_befor
         async def mark_completed(self, task_id: int):
             calls.append(("completed", task_id))
 
-        async def mark_failed(self, task_id: int, error_message: str):
+        async def mark_failed(
+            self, task_id: int, error_message: str, *, retryable: bool = False
+        ):
             calls.append(("failed", task_id, error_message))
 
     async def _fake_inspect_dashboard_assets(db):
@@ -408,7 +416,9 @@ async def test_process_refresh_queue_task_repairs_after_refresh_validation_failu
         async def mark_completed(self, task_id: int):
             calls.append(("completed", task_id))
 
-        async def mark_failed(self, task_id: int, error_message: str):
+        async def mark_failed(
+            self, task_id: int, error_message: str, *, retryable: bool = False
+        ):
             calls.append(("failed", task_id, error_message))
 
     class _Report:
@@ -527,7 +537,9 @@ async def test_process_refresh_queue_task_fails_when_post_refresh_repair_cannot_
         async def mark_completed(self, task_id: int):
             calls.append(("completed", task_id))
 
-        async def mark_failed(self, task_id: int, error_message: str):
+        async def mark_failed(
+            self, task_id: int, error_message: str, *, retryable: bool = False
+        ):
             calls.append(("failed", task_id, error_message))
 
     class _Report:
@@ -626,7 +638,9 @@ async def test_process_refresh_queue_task_marks_failed_on_partial_failed_run(
             calls.append(("completed", task_id))
             return None
 
-        async def mark_failed(self, task_id: int, error_message: str):
+        async def mark_failed(
+            self, task_id: int, error_message: str, *, retryable: bool = False
+        ):
             calls.append(("failed", task_id, error_message))
             return None
 
@@ -698,7 +712,9 @@ async def test_process_refresh_queue_task_marks_failed_on_exception(monkeypatch)
             calls.append(("completed", task_id))
             return None
 
-        async def mark_failed(self, task_id: int, error_message: str):
+        async def mark_failed(
+            self, task_id: int, error_message: str, *, retryable: bool = False
+        ):
             calls.append(("failed", task_id, error_message))
             return None
 
@@ -769,7 +785,9 @@ async def test_process_refresh_queue_task_syncs_inventory_skus_before_age_refres
         async def mark_completed(self, task_id: int):
             calls.append(("completed", task_id))
 
-        async def mark_failed(self, task_id: int, error_message: str):
+        async def mark_failed(
+            self, task_id: int, error_message: str, *, retryable: bool = False
+        ):
             calls.append(("failed", task_id, error_message))
 
     class _FakeCacheService:
@@ -941,7 +959,9 @@ async def test_process_refresh_queue_task_refreshes_state_when_targets_cover_inv
             calls.append("completed")
             return None
 
-        async def mark_failed(self, task_id: int, error_message: str):
+        async def mark_failed(
+            self, task_id: int, error_message: str, *, retryable: bool = False
+        ):
             calls.append(("failed", error_message))
             return None
 

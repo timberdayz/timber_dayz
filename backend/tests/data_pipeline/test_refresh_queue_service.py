@@ -60,8 +60,14 @@ async def test_enqueue_refresh_coalesces_same_pending_targets(refresh_queue_sess
     )
 
     rows = (
-        await refresh_queue_session.execute(select(RefreshQueueTask).order_by(RefreshQueueTask.id))
-    ).scalars().all()
+        (
+            await refresh_queue_session.execute(
+                select(RefreshQueueTask).order_by(RefreshQueueTask.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     assert len(rows) == 1
     assert first.id == second.id
@@ -69,7 +75,9 @@ async def test_enqueue_refresh_coalesces_same_pending_targets(refresh_queue_sess
 
 
 @pytest.mark.asyncio
-async def test_claim_next_refresh_task_marks_oldest_pending_running(refresh_queue_session):
+async def test_claim_next_refresh_task_marks_oldest_pending_running(
+    refresh_queue_session,
+):
     from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
 
     service = RefreshQueueService(refresh_queue_session)
@@ -129,7 +137,9 @@ async def test_mark_completed_and_failed_update_terminal_state(refresh_queue_ses
 
 
 @pytest.mark.asyncio
-async def test_claim_next_refresh_task_skips_when_another_task_is_running(refresh_queue_session):
+async def test_claim_next_refresh_task_skips_when_another_task_is_running(
+    refresh_queue_session,
+):
     from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
 
     service = RefreshQueueService(refresh_queue_session)
@@ -154,12 +164,24 @@ async def test_claim_next_refresh_task_skips_when_another_task_is_running(refres
 
     assert claimed is None
 
-    refreshed_pending = await refresh_queue_session.get(RefreshQueueTask, pending_task.id)
+    refreshed_pending = await refresh_queue_session.get(
+        RefreshQueueTask, pending_task.id
+    )
     assert refreshed_pending.status == "pending"
 
 
 @pytest.mark.asyncio
-async def test_recover_stale_running_tasks_marks_timed_out_rows_failed(refresh_queue_session):
+async def test_recover_stale_running_tasks_requeues_timed_out_rows(
+    refresh_queue_session,
+):
+    """跑太久没回来的任务**收回队列**，不是直接判死。
+
+    ``running`` 超时只说明执行它的 worker 没了（被 kill / 容器重启），
+    不代表这件事做不了 ⇒ 收回队列重排才是对的。
+
+    以前这里是直接判 ``failed`` ⇒ 这条刷新永远不再自动执行
+    （生产 144 条失败里就有一批是这样丢掉的）。
+    """
     from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
 
     service = RefreshQueueService(refresh_queue_session)
@@ -177,5 +199,36 @@ async def test_recover_stale_running_tasks_marks_timed_out_rows_failed(refresh_q
 
     assert recovered == 1
     refreshed = await refresh_queue_session.get(RefreshQueueTask, task.id)
-    assert refreshed.status == "failed"
+    assert refreshed.status == "pending"
+    assert refreshed.next_retry_at is not None
     assert "timed out" in (refreshed.last_error or "")
+
+
+@pytest.mark.asyncio
+async def test_recover_stale_running_tasks_stops_retrying_after_max_attempts(
+    refresh_queue_session,
+):
+    """自动重排队有次数上界 —— 不然会变成无限重排队。"""
+    from backend.services.data_pipeline.refresh_queue_service import (
+        MAX_AUTO_RETRY_ATTEMPTS,
+        RefreshQueueService,
+    )
+
+    service = RefreshQueueService(refresh_queue_session)
+    task = await service.enqueue_refresh(
+        trigger_type="data_ingested",
+        pipeline_name="pipeline-exhausted",
+        targets=["semantic.exhausted"],
+        context={"file_id": 21},
+    )
+    task.status = "running"
+    task.attempt_count = MAX_AUTO_RETRY_ATTEMPTS
+    task.started_at = datetime.now(timezone.utc) - timedelta(minutes=15)
+    await refresh_queue_session.commit()
+
+    recovered = await service.recover_stale_running_tasks(timeout_seconds=60)
+
+    assert recovered == 1
+    refreshed = await refresh_queue_session.get(RefreshQueueTask, task.id)
+    assert refreshed.status == "failed"
+    assert refreshed.next_retry_at is None

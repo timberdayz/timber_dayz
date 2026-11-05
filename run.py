@@ -552,7 +552,7 @@ def _read_nvmrc_version(project_root):
 def start_celery_worker():
     """启动Celery worker（v4.19.6新增）"""
     safe_print("\n[启动] Celery Worker服务...")
-    safe_print("  队列: data_sync, scheduled, data_processing, collection")
+    safe_print("  队列: data_sync, scheduled, data_processing, refresh_queue")
     
     backend_dir = Path(__file__).parent / "backend"
     project_root = Path(__file__).parent
@@ -562,7 +562,7 @@ def start_celery_worker():
         # 反引号转义 $ 避免父 PowerShell 展开 $env:PYTHONPATH 导致子窗口收到 "=路径" 报 CommandNotFoundException
         work_dir = str(project_root.resolve())
         work_dir_ps = work_dir.replace("'", "''")
-        celery_cmd = "`$env:PYTHONPATH='{}'; python -m celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --pool=solo --concurrency=4".format(work_dir_ps)
+        celery_cmd = "`$env:PYTHONPATH='{}'; python -m celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing,refresh_queue --pool=solo --concurrency=4".format(work_dir_ps)
         cmd = (
             'Start-Process powershell -ArgumentList "-NoExit", "-Command", "{}" -WorkingDirectory "{}"'
         ).format(celery_cmd.replace('"', '`"'), work_dir.replace('"', '`"'))
@@ -579,7 +579,7 @@ def start_celery_worker():
         # Unix: 直接启动
         process = subprocess.Popen(
             [sys.executable, "-m", "celery", "-A", "backend.celery_app", "worker",
-             "--loglevel=info", "--queues=data_sync,scheduled,data_processing", "--concurrency=4"],
+             "--loglevel=info", "--queues=data_sync,scheduled,data_processing,refresh_queue", "--concurrency=4"],
             cwd=project_root
         )
         safe_print("  [OK] Celery Worker已启动")

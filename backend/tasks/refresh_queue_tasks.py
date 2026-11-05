@@ -31,11 +31,67 @@ from backend.services.data_pipeline.refresh_runner import (
     extract_failed_targets,
     extract_refresh_status,
     extract_run_id,
+    extract_sqlstate,
 )
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
-REFRESH_QUEUE_RUNNING_TIMEOUT_SECONDS = 10 * 60
+
+#: 「running 多久算死了」的阈值（秒）。
+#:
+#: 必须**大于** Celery 的硬超时（``time_limit=1800``）。
+#: 旧阈值是 600 秒 —— 比软超时（1500 秒）还小 ⇒ 任务还在正常跑，
+#: 就被另一个 worker 判成死的并重排队 ⇒ 同一条刷新被跑第二遍，还可能并发。
+#: 40 分钟 = 硬超时 30 分钟 + 10 分钟余量。
+REFRESH_QUEUE_RUNNING_TIMEOUT_SECONDS = 40 * 60
+
+#: 可以**自动重排队**的 SQLSTATE（环境类故障：重跑可能就好了）。
+#:
+#: - ``40001`` 序列化失败、``40P01`` 死锁、``55P03`` 锁不可用
+#: - ``57014`` 查询被取消（含语句超时）
+#: - ``53200`` 内存不足、``53300`` 连接数超限
+#: - ``08006`` / ``08003`` / ``08001`` 连接类故障
+#: - ``57P01`` / ``57P02`` / ``57P03`` 服务端关停 / 重启
+#:
+#: 不在表里的（``22P02`` 类型转换错、``42P01`` 表不存在、``42703`` 列不存在 等）
+#: 一律**不重试**：重跑一百遍还是错，重排队只会把队列堵死。
+RETRYABLE_SQLSTATES = frozenset(
+    {
+        "40001",
+        "40P01",
+        "55P03",
+        "57014",
+        "53200",
+        "53300",
+        "08006",
+        "08003",
+        "08001",
+        "57P01",
+        "57P02",
+        "57P03",
+    }
+)
+
+
+def is_retryable_failure(errors: dict[str, dict[str, str]] | None) -> bool:
+    """这些失败该不该自动重排队。
+
+    保守原则：**全部**失败都是可重试的环境类故障，才重排队。
+    混着「口径写错」「对象缺失」就不重排队 —— 那种重跑也没用。
+    """
+    if not errors:
+        return False
+    for detail in errors.values():
+        sqlstate = str((detail or {}).get("sqlstate") or "")
+        if sqlstate not in RETRYABLE_SQLSTATES:
+            return False
+    return True
+
+
+def is_retryable_exception(exc: BaseException) -> bool:
+    """单个异常该不该自动重排队（按 SQLSTATE 判）。"""
+    return extract_sqlstate(exc) in RETRYABLE_SQLSTATES
+
 
 #: 库存事实来源资产 —— 「本次刷新重建了它」就意味着状态层必须跟着重算。
 #:
@@ -291,6 +347,7 @@ async def _async_process_refresh_queue_task() -> dict:
         task = await queue_service.claim_next_refresh_task()
         if task is None:
             return {"status": "skipped", "reason": "no_pending_refresh_queue_task"}
+        lane = getattr(task, "domain", None) or "default"
 
         try:
             targets = list(task.targets_json or [])
@@ -315,12 +372,24 @@ async def _async_process_refresh_queue_task() -> dict:
                     f"refresh pipeline {refresh_status}: "
                     f"{', '.join(str(target) for target in failed_targets) or 'unknown target'}"
                 )
-                await queue_service.mark_failed(task.id, error_message)
+                # 只有「环境类故障」（锁冲突 / 超时 / 连接断了）才自动重排队。
+                # 口径错、对象缺失这类重跑也没用 ⇒ 直接判失败，留给人工看。
+                failure_details = (
+                    refresh_result.get("failed_target_errors")
+                    if isinstance(refresh_result, dict)
+                    else None
+                )
+                retryable = is_retryable_failure(failure_details)
+                await queue_service.mark_failed(
+                    task.id, error_message, retryable=retryable
+                )
                 return {
                     "status": "failed",
                     "job_id": task.job_id,
                     "run_id": run_id,
+                    "domain": lane,
                     "error": error_message,
+                    "retryable": retryable,
                 }
             validation_report, repair_result = await _validate_refresh_with_repair(
                 db,
@@ -334,29 +403,45 @@ async def _async_process_refresh_queue_task() -> dict:
                 run_id = extract_run_id(repair_result) or run_id
             if not validation_report.is_success():
                 error_message = validation_report.to_error_message()
+                # 校验失败 = 数据/口径不对（缺对象、口径漂移）⇒ 不自动重试。
                 await queue_service.mark_failed(task.id, error_message)
                 return {
                     "status": "failed",
                     "job_id": task.job_id,
                     "run_id": run_id,
+                    "domain": lane,
                     "error": error_message,
                     "missing_objects": validation_report.missing_objects,
                     "stale_targets": validation_report.stale_targets,
                 }
             await _invalidate_refresh_target_caches(targets)
             await queue_service.mark_completed(task.id)
-            return {"status": "success", "job_id": task.job_id, "run_id": run_id}
+            return {
+                "status": "success",
+                "job_id": task.job_id,
+                "run_id": run_id,
+                "domain": lane,
+            }
         except Exception as exc:  # noqa: BLE001
             if hasattr(db, "rollback"):
                 await db.rollback()
-            await queue_service.mark_failed(task.id, str(exc))
+            retryable = is_retryable_exception(exc)
+            await queue_service.mark_failed(task.id, str(exc), retryable=retryable)
             logger.warning(
-                "[RefreshQueue] queue task failed: job_id=%s, error=%s",
+                "[RefreshQueue] queue task failed: job_id=%s domain=%s retryable=%s error=%s",
                 task.job_id,
+                lane,
+                retryable,
                 exc,
                 exc_info=True,
             )
-            return {"status": "failed", "job_id": task.job_id, "error": str(exc)}
+            return {
+                "status": "failed",
+                "job_id": task.job_id,
+                "domain": lane,
+                "error": str(exc),
+                "retryable": retryable,
+            }
     finally:
         await db.close()
 
@@ -364,7 +449,9 @@ async def _async_process_refresh_queue_task() -> dict:
 @celery_app.task(
     name="backend.tasks.refresh_queue_tasks.process_refresh_queue_task",
     bind=True,
-    queue="scheduled",
+    # 独立队列：刷新任务单条最长 250 秒（生产实测），和「定时任务」挤在同一个
+    # 队列里会被拖慢，也让「最多 2 道」的并发上限不好观察。
+    queue="refresh_queue",
     priority=5,
     time_limit=1800,
     soft_time_limit=1500,

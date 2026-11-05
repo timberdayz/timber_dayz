@@ -59,6 +59,10 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     # 店铺别名解析」从请求路径搬到刷新路径。口径零变化。
     "semantic.fact_orders_atomic_mv": ["semantic.fact_orders_atomic"],
     "semantic.fact_analytics_atomic_mv": ["semantic.fact_analytics_atomic"],
+    # 商品原子层的物化副本（2026-11-05）：商品日 KPI 读普通视图时每次请求都要
+    # 重做「多表 UNION + 逐行 JSON 解析 + 逐行身份解析」（生产实测 14.1 秒），
+    # 物化后请求侧毫秒级。正文 = 普通视图正文（SELECT *）⇒ 口径零变化。
+    "semantic.fact_products_atomic_mv": ["semantic.fact_products_atomic"],
     "semantic.fact_orders_monthly_atomic": ["semantic.fact_orders_monthly_atomic_mv"],
     "semantic.fact_analytics_monthly_atomic": [
         "semantic.fact_analytics_monthly_atomic_mv"
@@ -99,7 +103,7 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
         "semantic.fact_analytics_atomic_mv",
     ],
     "mart.platform_month_kpi": ["mart.shop_month_kpi"],
-    "mart.product_day_kpi": ["semantic.fact_products_atomic"],
+    "mart.product_day_kpi": ["semantic.fact_products_atomic_mv"],
     "mart.inventory_snapshot_history": ["semantic.fact_inventory_snapshot"],
     "mart.inventory_snapshot_latest": ["mart.inventory_snapshot_history"],
     "mart.inventory_snapshot_change": ["mart.inventory_snapshot_history"],
@@ -179,6 +183,7 @@ SQL_TARGET_PATHS: dict[str, str] = {
     "semantic.fact_orders_monthly_atomic": "sql/semantic/orders_monthly_atomic.sql",
     "semantic.fact_analytics_monthly_atomic": "sql/semantic/analytics_monthly_atomic.sql",
     "semantic.fact_products_atomic": "sql/semantic/products_atomic.sql",
+    "semantic.fact_products_atomic_mv": "sql/semantic/products_atomic_mv.sql",
     "semantic.fact_inventory_snapshot": "sql/semantic/inventory_snapshot.sql",
     "semantic.fact_services_atomic": "sql/semantic/services_atomic.sql",
     "semantic.shop_month_other_operating_cost": "sql/semantic/shop_month_other_operating_cost.sql",
@@ -363,7 +368,13 @@ def _base_targets_for_refresh_domain(domain: str) -> list[str]:
             "semantic.fact_analytics_monthly_atomic_mv",
         ]
     if domain == "products":
-        return ["semantic.fact_products_atomic"]
+        # 物化副本必须显式列出来（2026-11-11）：
+        # 商品域的刷新链是「普通视图 → 物化副本 → 商品日 KPI」，
+        # 副本不在链上 ⇒ 商品经营分析页会永远读着一份建库时的旧快照。
+        return [
+            "semantic.fact_products_atomic",
+            "semantic.fact_products_atomic_mv",
+        ]
     if domain == "inventory":
         return ["semantic.fact_inventory_snapshot"]
     if domain == "services":

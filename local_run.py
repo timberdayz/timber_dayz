@@ -126,7 +126,7 @@ def start_celery_worker():
     work_dir = str(_project_root.resolve())
     if sys_platform.system() == "Windows":
         work_dir_ps = work_dir.replace("'", "''")
-        celery_cmd = "`$env:PYTHONPATH='{}'; python -m celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --pool=solo --concurrency=4".format(work_dir_ps)
+        celery_cmd = "`$env:PYTHONPATH='{}'; python -m celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing,refresh_queue --pool=solo --concurrency=4".format(work_dir_ps)
         cmd = 'Start-Process powershell -ArgumentList "-NoExit", "-Command", "{}" -WorkingDirectory "{}"'.format(
             celery_cmd.replace('"', '`"'), work_dir.replace('"', '`"')
         )
@@ -135,7 +135,7 @@ def start_celery_worker():
     else:
         subprocess.Popen(
             [sys.executable, "-m", "celery", "-A", "backend.celery_app", "worker",
-             "--loglevel=info", "--queues=data_sync,scheduled,data_processing", "--concurrency=4"],
+             "--loglevel=info", "--queues=data_sync,scheduled,data_processing,refresh_queue", "--concurrency=4"],
             cwd=_project_root,
         )
         safe_print("  [OK] Celery 已启动")

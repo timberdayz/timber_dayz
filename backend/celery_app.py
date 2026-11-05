@@ -38,44 +38,46 @@ celery_app = Celery(
         "backend.tasks.image_extraction",  # [*] 图片提取任务模块
         # [WARN] v4.6.0 DSS架构重构:已删除mv_refresh(Metabase直接查询原始表,无需物化视图)
         # [WARN] v4.6.0 DSS架构重构:已删除c_class_calculation(C类数据由Metabase定时计算)
-    ]
+    ],
 )
 
 # Celery配置
 celery_app.conf.update(
     # 时区设置
-    timezone='Asia/Shanghai',
+    timezone="Asia/Shanghai",
     enable_utc=True,
-    
     # 任务序列化
-    task_serializer='json',
-    accept_content=['json'],
-    result_serializer='json',
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
     result_expires=86400,  # 结果过期时间(24小时)，控制 Redis result 占用
-    
     # 性能配置
     worker_prefetch_multiplier=4,  # 预取任务数
     worker_max_tasks_per_child=1000,  # 每个worker最多处理1000个任务后重启(防止内存泄漏)
-    
     # 并发配置
     worker_concurrency=4,  # 并发worker数量
-    
     # 任务路由
     task_routes={
-        'backend.tasks.data_processing.*': {'queue': 'data_processing'},
-        'backend.tasks.scheduled_tasks.*': {'queue': 'scheduled'},
-        'backend.tasks.data_sync_tasks.*': {'queue': 'data_sync'},  # [*] v4.19.1 恢复:数据同步队列
-        'backend.tasks.price_adjust_notify_tasks.*': {'queue': 'scheduled'},
-        'extract_product_images': {'queue': 'data_processing'},  # [*] 图片提取任务路由到 data_processing 队列
+        "backend.tasks.data_processing.*": {"queue": "data_processing"},
+        "backend.tasks.scheduled_tasks.*": {"queue": "scheduled"},
+        "backend.tasks.data_sync_tasks.*": {
+            "queue": "data_sync"
+        },  # [*] v4.19.1 恢复:数据同步队列
+        "backend.tasks.price_adjust_notify_tasks.*": {"queue": "scheduled"},
+        "extract_product_images": {
+            "queue": "data_processing"
+        },  # [*] 图片提取任务路由到 data_processing 队列
+        # 刷新队列独立成一条道（2026-11-11）：按业务域分道并发，最多 2 道同时跑。
+        # 独立队列的好处：刷新任务单条最长 250 秒，不跟「定时任务」互相拖慢。
+        "backend.tasks.refresh_queue_tasks.process_refresh_queue_task": {
+            "queue": "refresh_queue"
+        },
     },
-    
     # [*] v4.19.1 新增:任务优先级(需要 Redis >= 5.0 支持)
     task_default_priority=5,  # 默认优先级(1-10,10最高)
-    
     # [*] v4.19.1 新增:任务持久化
     task_acks_late=True,  # 任务完成后才确认(支持任务恢复)
     task_reject_on_worker_lost=True,  # Worker 崩溃时重新分配任务
-    
     # [*] v4.19.1 新增:任务超时
     task_time_limit=1800,  # 30分钟硬超时(强制终止)
     task_soft_time_limit=1500,  # 25分钟软超时(发送 SoftTimeLimitExceeded 异常)
@@ -92,59 +94,67 @@ celery_app.conf.beat_schedule = {
     #     'task': 'backend.tasks.scheduled_tasks.refresh_inventory_finance_views',
     #     'schedule': crontab(minute='*/10'),
     # },
-    
     # 每15分钟自动入库兜底扫描
-    'auto-ingest-pending-files-every-15min': {
-        'task': 'backend.tasks.scheduled_tasks.auto_ingest_pending_files',
-        'schedule': crontab(minute='*/15'),
+    "auto-ingest-pending-files-every-15min": {
+        "task": "backend.tasks.scheduled_tasks.auto_ingest_pending_files",
+        "schedule": crontab(minute="*/15"),
     },
-    'cleanup-stale-auto-ingest-every-5min': {
-        'task': 'backend.tasks.scheduled_tasks.cleanup_stale_auto_ingest_tasks',
-        'schedule': crontab(minute='*/5'),
+    "cleanup-stale-auto-ingest-every-5min": {
+        "task": "backend.tasks.scheduled_tasks.cleanup_stale_auto_ingest_tasks",
+        "schedule": crontab(minute="*/5"),
     },
-
-    'process-refresh-queue-every-minute': {
-        'task': 'backend.tasks.refresh_queue_tasks.process_refresh_queue_task',
-        'schedule': crontab(minute='*'),
+    # 每分钟派 2 道刷新任务（2026-11-11）。
+    #
+    # 为什么是 2 条而不是 1 条：刷新按**业务域分道**（orders / analytics /
+    # products / inventory / services），同一个域永远串行，不同域可以并行。
+    # 派 2 条 = 最多有 2 道同时在跑，慢域不再堵住快域。
+    #
+    # 真正的并发上限在**库里**（``refresh_queue_service.REFRESH_QUEUE_MAX_CONCURRENT``），
+    # 这里派多了也只是「领不到任务、空手而归」⇒ 派 2 条是安全上限，不会跑飞。
+    #
+    # 注意：这两个条目用的是**同一个任务**、只是名字不同（Celery Beat 要求条目名唯一），
+    # 两条消息在同一个时刻进队列 ⇒ 两个 worker 槽位同时领活。
+    "process-refresh-queue-every-minute": {
+        "task": "backend.tasks.refresh_queue_tasks.process_refresh_queue_task",
+        "schedule": crontab(minute="*"),
     },
-    'cloud-sync-auto-recovery-every-minute': {
-        'task': 'backend.tasks.scheduled_tasks.cloud_sync_auto_recovery',
-        'schedule': crontab(minute='*'),
+    "process-refresh-queue-lane-2-every-minute": {
+        "task": "backend.tasks.refresh_queue_tasks.process_refresh_queue_task",
+        "schedule": crontab(minute="*"),
     },
-    
+    "cloud-sync-auto-recovery-every-minute": {
+        "task": "backend.tasks.scheduled_tasks.cloud_sync_auto_recovery",
+        "schedule": crontab(minute="*"),
+    },
     # 每6小时检查低库存
-    'dashboard-refresh-safety-net-every-5min': {
-        'task': 'backend.tasks.refresh_queue_tasks.dashboard_refresh_safety_net',
-        'schedule': crontab(minute='*/5'),
+    "dashboard-refresh-safety-net-every-5min": {
+        "task": "backend.tasks.refresh_queue_tasks.dashboard_refresh_safety_net",
+        "schedule": crontab(minute="*/5"),
     },
-
-    'check-low-stock-every-6hours': {
-        'task': 'backend.tasks.scheduled_tasks.check_low_stock_alert',
-        'schedule': crontab(hour='*/6', minute=0),  # 每6小时
+    "check-low-stock-every-6hours": {
+        "task": "backend.tasks.scheduled_tasks.check_low_stock_alert",
+        "schedule": crontab(hour="*/6", minute=0),  # 每6小时
     },
-    
     # 每日检查应收账款逾期(每天早上9点)
-    'check-overdue-ar-daily': {
-        'task': 'backend.tasks.scheduled_tasks.check_overdue_accounts_receivable',
-        'schedule': crontab(hour=9, minute=0),  # 每天9:00
+    "check-overdue-ar-daily": {
+        "task": "backend.tasks.scheduled_tasks.check_overdue_accounts_receivable",
+        "schedule": crontab(hour=9, minute=0),  # 每天9:00
     },
-    
     # 每日数据库备份(每天凌晨3点)
-    'backup-database-daily': {
-        'task': 'backend.tasks.scheduled_tasks.backup_database',
-        'schedule': crontab(hour=3, minute=0),  # 每天3:00
+    "backup-database-daily": {
+        "task": "backend.tasks.scheduled_tasks.backup_database",
+        "schedule": crontab(hour=3, minute=0),  # 每天3:00
     },
-
     # 最低售价变更检测与飞书通知（每天10:00）
     # 为什么是每天一次而不是跟库龄采集同步触发：最低售价的输入有七类
     # （库龄档位 / 采购成本 / 平台费率 / SPU 两率 / 参考售价 / 档位规则 / 人工覆盖），
     # 只有库龄是周节奏，其余是事件驱动。每天全量比对一次 = 任何输入变化最迟当天被抓住。
     # 时间定在 10:00，是给 09:00 的库存采集留出缓冲（采集当天库龄才会真的前进）。
-    'price-adjust-notify-daily': {
-        'task': 'backend.tasks.price_adjust_notify_tasks.detect_and_notify_price_adjustments',
-        'schedule': crontab(hour=10, minute=0),
+    "price-adjust-notify-daily": {
+        "task": "backend.tasks.price_adjust_notify_tasks.detect_and_notify_price_adjustments",
+        "schedule": crontab(hour=10, minute=0),
     },
 }
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     celery_app.start()
