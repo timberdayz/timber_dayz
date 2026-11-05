@@ -8,6 +8,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import re
 import uuid
 import json
 
@@ -24,6 +25,20 @@ logger = get_logger(__name__)
 
 #: bcrypt 的哈希前缀（``$2a$`` / ``$2b$`` / ``$2x$`` / ``$2y$``）。
 BCRYPT_HASH_PREFIXES = ("$2a$", "$2b$", "$2x$", "$2y$")
+
+#: 一个**结构完整**的 bcrypt 哈希长什么样：``$2b$`` + 2 位代价 + ``$`` +
+#: 22 位盐 + 31 位校验值 = 60 字符，字符集是 bcrypt 的 base64 字母表。
+#:
+#: 为什么必须先校验再交给 bcrypt
+#: ------------------------------
+#: 生产 / CI 装的是 **bcrypt 4.1.2**（Rust 后端），本机开发环境装的是 5.x。
+#: 4.1.2 碰到**畸形**哈希（长度不对 / 盐太短）不是抛 ``ValueError``，而是
+#: 直接 **panic**，在 Python 侧表现为 ``pyo3_runtime.PanicException`` ——
+#: 那是 ``BaseException`` 的子类，**普通 ``except Exception`` 接不住**，
+#: 会一路冒到登录接口 ⇒ HTTP 500。
+#:
+#: 所以：结构不合法的哈希**根本不进 bcrypt**，直接判"密码错误"。
+_BCRYPT_HASH_PATTERN = re.compile(r"^\$2[abxy]\$\d{2}\$[./A-Za-z0-9]{53}$")
 
 #: 早期版本用 passlib ``pbkdf2_sha256`` 存的口令哈希前缀。
 #:
@@ -156,14 +171,23 @@ class AuthService:
             return False
         candidate = hashed_password.strip()
         if candidate.startswith(BCRYPT_HASH_PREFIXES):
+            if not _BCRYPT_HASH_PATTERN.match(candidate):
+                # 畸形哈希：连 bcrypt 都不让它进门（bcrypt 4.1.2 的 Rust 后端会 panic）
+                logger.warning(
+                    "[AuthService] malformed bcrypt hash rejected before checkpw"
+                )
+                return False
             try:
                 return bcrypt.checkpw(
                     password.encode("utf-8"), candidate.encode("utf-8")
                 )
-            except (ValueError, TypeError):
-                # 损坏的 bcrypt 哈希：按"密码错误"处理，而不是 500
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException:  # noqa: BLE001
+                # 含 Rust 后端的 PanicException（BaseException 子类）：
+                # 一律按"密码错误"处理，绝不让它冒成 HTTP 500。
                 logger.warning(
-                    "[AuthService] bcrypt verification failed on a malformed hash"
+                    "[AuthService] bcrypt verification raised; treated as mismatch"
                 )
                 return False
         if candidate.startswith(PBKDF2_HASH_PREFIX):

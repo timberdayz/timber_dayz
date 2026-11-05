@@ -90,7 +90,13 @@ def test_production_pbkdf2_hash_never_raises():
 
 
 def test_malformed_hashes_return_false_without_raising():
-    """畸形哈希 = 密码错误，不是服务异常。"""
+    """畸形哈希 = 密码错误，不是服务异常。
+
+    特别提醒：生产 / CI 装的是 **bcrypt 4.1.2**（Rust 后端），它碰到畸形
+    哈希抛的是 ``pyo3_runtime.PanicException``（``BaseException`` 子类），
+    普通 ``except Exception`` 接不住 ⇒ 会冒成 HTTP 500。
+    所以实现必须**在调用 bcrypt 之前**就把结构不合法的哈希挡掉。
+    """
     service = AuthService()
     malformed = [
         "",
@@ -100,6 +106,8 @@ def test_malformed_hashes_return_false_without_raising():
         "$pbkdf2-sha256$29000$not-base64!!$aGFzaA",
         "$2b$12$broken",
         "$2b$12",
+        "$2b$12$" + "a" * 53,
+        "$2b$12$" + "!" * 53,
         "plaintext-password",
         "$argon2id$v=19$m=65536,t=3,p=4$aaaa$bbbb",
     ]
