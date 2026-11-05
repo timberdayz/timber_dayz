@@ -36,6 +36,7 @@ celery_app = Celery(
         "backend.tasks.refresh_queue_tasks",
         "backend.tasks.price_adjust_notify_tasks",  # 最低售价变更检测与飞书通知
         "backend.tasks.image_extraction",  # [*] 图片提取任务模块
+        "backend.tasks.source_freshness_tasks",  # 源数据新鲜度巡检（断流告警）
         # [WARN] v4.6.0 DSS架构重构:已删除mv_refresh(Metabase直接查询原始表,无需物化视图)
         # [WARN] v4.6.0 DSS架构重构:已删除c_class_calculation(C类数据由Metabase定时计算)
     ],
@@ -64,6 +65,9 @@ celery_app.conf.update(
             "queue": "data_sync"
         },  # [*] v4.19.1 恢复:数据同步队列
         "backend.tasks.price_adjust_notify_tasks.*": {"queue": "scheduled"},
+        # 源数据新鲜度巡检：轻量只读巡检，放定时任务队列即可。
+        # 断流时它会把结论写进 ops.pipeline_run_log（状态 partial_failed）。
+        "backend.tasks.source_freshness_tasks.*": {"queue": "scheduled"},
         "extract_product_images": {
             "queue": "data_processing"
         },  # [*] 图片提取任务路由到 data_processing 队列
@@ -153,6 +157,18 @@ celery_app.conf.beat_schedule = {
     "price-adjust-notify-daily": {
         "task": "backend.tasks.price_adjust_notify_tasks.detect_and_notify_price_adjustments",
         "schedule": crontab(hour=10, minute=0),
+    },
+    # 源数据新鲜度巡检（每小时一次，整点后 13 分跑，避开整点高峰）。
+    #
+    # 为什么必须有它：刷新链路全绿 ≠ 业务数据是新的。
+    # 2026-10-19 之后商品/服务两条链断了几个月，刷新照跑不误、监控一片绿，
+    # 因为我们只监控了「视图有没有重建成功」，没监控「数据有没有进来」。
+    # 这个任务盯的是 b_class.fact_* 的最新业务日期，
+    # 一旦某条链超过该粒度允许的滞后天数，巡检 run 就是 partial_failed，
+    # 在数据平台运行列表里直接能看到是哪条链断了。
+    "source-freshness-check-hourly": {
+        "task": "backend.tasks.source_freshness_tasks.check_source_data_freshness",
+        "schedule": crontab(minute=13),
     },
 }
 

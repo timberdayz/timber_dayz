@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.database import get_async_db
 from backend.services.data_pipeline.refresh_validation import find_missing_targets
+from backend.services.data_pipeline.source_freshness_service import (
+    collect_source_freshness,
+)
 from backend.utils.api_response import success_response
 
 router = APIRouter(prefix="/api/data-pipeline", tags=["data-pipeline"])
@@ -102,15 +105,39 @@ async def get_pipeline_lineage(
     # 这里实时核对目标与来源对象，暴露「注册还在、对象已删」的情况。
     missing_objects = await find_missing_targets(
         db,
-        [row.get("target_name") for row in edges] + [row.get("source_name") for row in edges],
+        [row.get("target_name") for row in edges]
+        + [row.get("source_name") for row in edges],
     )
     for row in edges:
-        row["target_object_exists"] = _object_exists_flag(row.get("target_name"), missing_objects)
-        row["source_object_exists"] = _object_exists_flag(row.get("source_name"), missing_objects)
+        row["target_object_exists"] = _object_exists_flag(
+            row.get("target_name"), missing_objects
+        )
+        row["source_object_exists"] = _object_exists_flag(
+            row.get("source_name"), missing_objects
+        )
 
     return success_response(
         data={
             "edges": edges,
             "missing_objects": sorted(missing_objects),
+        }
+    )
+
+
+@router.get("/source-freshness")
+async def get_source_freshness(
+    db: AsyncSession = Depends(get_async_db),
+):
+    """源数据（业务事实表）新鲜度。
+
+    与 ``/freshness`` 的分工：``/freshness`` 看的是「视图/接口上次刷新有没有成功」，
+    这里看的是「业务数据本身有多旧」。断流的第一现场在后者——
+    刷新链路可以全绿，而底下的业务数据已经几个月没更新过。
+    """
+    report = await collect_source_freshness(db)
+    return success_response(
+        data={
+            "summary": report.to_summary(),
+            "chains": [row.to_dict() for row in report.rows],
         }
     )
