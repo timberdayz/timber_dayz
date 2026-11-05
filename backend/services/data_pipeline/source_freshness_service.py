@@ -470,11 +470,12 @@ async def record_source_freshness_run(
             "started_at": report.started_at,
             "completed_at": report.finished_at,
             "error_message": report.to_error_message(),
-            "context": str(
+            "context": json.dumps(
                 {
                     **report.to_summary(),
                     "chains": [row.to_dict() for row in report.rows],
-                }
+                },
+                ensure_ascii=False,
             ),
         },
     )
@@ -515,7 +516,7 @@ async def record_source_freshness_run(
                 "completed_at": report.finished_at,
                 "affected_rows": row.row_count,
                 "error_message": error_message,
-                "details": str(row.to_dict()),
+                "details": json.dumps(row.to_dict(), ensure_ascii=False),
             },
         )
 

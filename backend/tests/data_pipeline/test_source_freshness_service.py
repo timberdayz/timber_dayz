@@ -209,6 +209,44 @@ def test_collect_source_freshness_keeps_on_demand_chains_out_of_alarm():
     assert by_table["fact_shopee_products_daily"].max_age_days == 30
 
 
+def test_record_source_freshness_run_writes_valid_json_payloads():
+    """context / details 必须能被 PostgreSQL 的 jsonb 解析（单引号 repr 是不行的）。"""
+    session = _FakeSession(
+        discovered=["fact_shopee_products_monthly"],
+        ready=["fact_shopee_products_monthly"],
+        aggregate=[
+            (
+                "fact_shopee_products_monthly",
+                31173,
+                date(2026, 9, 1),
+                datetime(2026, 10, 19, 4, 45, tzinfo=timezone.utc),
+            ),
+        ],
+    )
+    report = asyncio.run(
+        collect_source_freshness(
+            session,
+            now=datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc),
+        )
+    )
+    asyncio.run(record_source_freshness_run(session, report))
+
+    inserted = [
+        params
+        for sql, params in session.statements
+        if sql.lstrip().upper().startswith("INSERT")
+    ]
+    payloads = [
+        params[key]
+        for params in inserted
+        for key in ("context", "details")
+        if params.get(key)
+    ]
+    assert payloads
+    for payload in payloads:
+        json.loads(payload)  # 解析失败说明写进 jsonb 会被数据库拒
+
+
 def test_collect_source_freshness_skips_tables_without_metric_columns():
     session = _FakeSession(
         discovered=["fact_shopee_products_monthly", "fact_shopee_broken"],
