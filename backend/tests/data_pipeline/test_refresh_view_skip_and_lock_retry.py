@@ -82,9 +82,7 @@ async def test_data_refresh_skips_rebuilding_existing_plain_view(monkeypatch):
         executed_files.append(str(path))
 
     monkeypatch.setattr(refresh_runner, "execute_sql_file", _fake_execute_sql_file)
-    monkeypatch.setattr(
-        refresh_runner, "_ensure_ops_tables", lambda db: _noop()
-    )
+    monkeypatch.setattr(refresh_runner, "_ensure_ops_tables", lambda db: _noop())
 
     await refresh_runner.execute_sql_target(
         session,
@@ -97,8 +95,73 @@ async def test_data_refresh_skips_rebuilding_existing_plain_view(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_data_refresh_still_recreates_materialized_view(monkeypatch):
-    """物化视图**要**重建 —— 它的数据是物理存的，刷新就是刷数据。"""
+async def test_view_kind_detection_handles_asyncpg_bytes(monkeypatch):
+    """``pg_class.relkind`` 经 asyncpg 返回的是 **bytes**，不解码就永远匹配不上。
+
+    不修的后果（生产实测确认）：「普通视图跳过重建」这条对策
+    （2026-10-26 排他锁事故的正解）从来没生效过 ——
+    ``_target_view_kind`` 永远返回 None，于是每次数据刷新都在
+    ``CREATE OR REPLACE VIEW``，拿 ACCESS EXCLUSIVE 排他锁，
+    把并发读写的 pg_dump 堵死（2026-11 本地启动失败事故）。
+    """
+    from backend.services.data_pipeline import refresh_runner
+
+    session = _FakeSession({"mart.inventory_snapshot_history": b"v"})
+
+    executed_files: list[str] = []
+
+    async def _fake_execute_sql_file(db: Any, path: Any) -> None:
+        executed_files.append(str(path))
+
+    monkeypatch.setattr(refresh_runner, "execute_sql_file", _fake_execute_sql_file)
+    monkeypatch.setattr(refresh_runner, "_ensure_ops_tables", lambda db: _noop())
+
+    await refresh_runner.execute_sql_target(
+        session,
+        "mart.inventory_snapshot_history",
+        run_id="run-test",
+    )
+
+    assert executed_files == [], "bytes 形式的 relkind 也必须识别成普通视图并跳过重建"
+
+
+@pytest.mark.asyncio
+async def test_matview_detection_handles_asyncpg_bytes(monkeypatch):
+    """同理：物化视图也必须被识别成 'm'，否则会退回执行带 DROP CASCADE 的资产文件。"""
+    from backend.services.data_pipeline import refresh_runner
+
+    session = _FakeSession({"semantic.fact_orders_monthly_atomic_mv": b"m"})
+
+    executed_files: list[str] = []
+
+    async def _fake_execute_sql_file(db: Any, path: Any) -> None:
+        executed_files.append(str(path))
+
+    monkeypatch.setattr(refresh_runner, "execute_sql_file", _fake_execute_sql_file)
+    monkeypatch.setattr(refresh_runner, "_ensure_ops_tables", lambda db: _noop())
+
+    await refresh_runner.execute_sql_target(
+        session,
+        "semantic.fact_orders_monthly_atomic_mv",
+        run_id="run-test",
+    )
+
+    assert executed_files == [], "bytes 形式的 relkind 也必须识别成物化视图并原地刷新"
+    assert any(
+        "REFRESH MATERIALIZED VIEW semantic.fact_orders_monthly_atomic_mv" in text
+        for text in session.executed
+    ), session.executed
+
+
+@pytest.mark.asyncio
+async def test_data_refresh_refreshes_materialized_view_in_place(monkeypatch):
+    """数据刷新时物化视图**原地 REFRESH**，不重建。
+
+    物化视图的数据是物理存的，刷新就是刷数据 —— 但「刷数据」不需要
+    「重建对象」：重建要走资产文件里的 ``DROP MATERIALIZED VIEW ... CASCADE``，
+    连带删掉全部下游视图（monthly 那条链有 10 个对象），并长时间持排他锁，
+    把并发读写的 pg_dump 堵死（2026-11 本地启动失败事故的放大器）。
+    """
     from backend.services.data_pipeline import refresh_runner
 
     session = _FakeSession({"semantic.fact_orders_monthly_atomic_mv": "m"})
@@ -117,7 +180,60 @@ async def test_data_refresh_still_recreates_materialized_view(monkeypatch):
         run_id="run-test",
     )
 
-    assert executed_files, "物化视图必须仍然重建"
+    assert (
+        executed_files == []
+    ), "数据刷新不该重建物化视图（资产文件带 DROP ... CASCADE）"
+    assert any(
+        "REFRESH MATERIALIZED VIEW semantic.fact_orders_monthly_atomic_mv" in text
+        for text in session.executed
+    ), session.executed
+    assert not any("DROP MATERIALIZED VIEW" in text for text in session.executed)
+
+
+@pytest.mark.asyncio
+async def test_data_refresh_keeps_materialized_view_indexes(monkeypatch):
+    """索引是 MV 创建时带出来的，REFRESH 不会重建 —— 新增索引要能自动补上。"""
+    from backend.services.data_pipeline import refresh_runner
+
+    session = _FakeSession({"semantic.fact_orders_monthly_atomic_mv": "m"})
+
+    monkeypatch.setattr(refresh_runner, "_ensure_ops_tables", lambda db: _noop())
+
+    await refresh_runner.execute_sql_target(
+        session,
+        "semantic.fact_orders_monthly_atomic_mv",
+        run_id="run-test",
+    )
+
+    assert any("CREATE INDEX" in text for text in session.executed), session.executed
+
+
+@pytest.mark.asyncio
+async def test_explicit_rebuild_of_materialized_view_still_executes_asset_file(
+    monkeypatch,
+):
+    """显式重建（scripts/rebuild_views.py）→ 仍走资产文件，改了定义才生效。"""
+    from backend.services.data_pipeline import refresh_runner
+
+    session = _FakeSession({"semantic.fact_orders_monthly_atomic_mv": "m"})
+
+    executed_files: list[str] = []
+
+    async def _fake_execute_sql_file(db: Any, path: Any) -> None:
+        executed_files.append(str(path))
+
+    monkeypatch.setattr(refresh_runner, "execute_sql_file", _fake_execute_sql_file)
+    monkeypatch.setattr(refresh_runner, "_ensure_ops_tables", lambda db: _noop())
+
+    await refresh_runner.execute_sql_target(
+        session,
+        "semantic.fact_orders_monthly_atomic_mv",
+        run_id="run-test",
+        recreate_views=True,
+    )
+
+    assert executed_files, "显式重建时必须执行资产文件（定义变更要能生效）"
+    assert not any("REFRESH MATERIALIZED VIEW" in text for text in session.executed)
 
 
 @pytest.mark.asyncio
@@ -142,6 +258,44 @@ async def test_missing_view_is_created_on_data_refresh(monkeypatch):
     )
 
     assert executed_files, "不存在的视图必须被创建"
+
+
+@pytest.mark.asyncio
+async def test_missing_materialized_view_is_created_from_asset_file(monkeypatch):
+    """物化视图**不存在** → 跑资产文件把它建出来（不能只 REFRESH）。
+
+    这个场景真实存在：普通视图 ``semantic.fact_analytics_atomic`` 的资产文件
+    开头是 ``DROP VIEW IF EXISTS semantic.fact_analytics_atomic CASCADE``，
+    重建它会把下游的 ``semantic.fact_analytics_atomic_mv`` **连带删掉**
+    （生产 pg_depend 闭包实测）。
+
+    那些物化视图资产文件自带「存在则 REFRESH / 不存在则 CREATE」的自愈逻辑，
+    但**只有真的去执行它**才会生效 —— 只 REFRESH 会直接报
+    ``relation "semantic.fact_analytics_atomic_mv" does not exist``，
+    看板当场查不出来。
+    """
+    from backend.services.data_pipeline import refresh_runner
+
+    session = _FakeSession({})
+
+    executed_files: list[str] = []
+
+    async def _fake_execute_sql_file(db: Any, path: Any) -> None:
+        executed_files.append(str(path))
+
+    monkeypatch.setattr(refresh_runner, "execute_sql_file", _fake_execute_sql_file)
+    monkeypatch.setattr(refresh_runner, "_ensure_ops_tables", lambda db: _noop())
+
+    await refresh_runner.execute_sql_target(
+        session,
+        "semantic.fact_analytics_atomic_mv",
+        run_id="run-test",
+    )
+
+    assert executed_files, "物化视图不存在时必须跑资产文件把它建出来"
+    assert not any(
+        "REFRESH MATERIALIZED VIEW" in text for text in session.executed
+    ), "不存在的物化视图不能只 REFRESH"
 
 
 @pytest.mark.asyncio

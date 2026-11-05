@@ -30,7 +30,9 @@ def test_run_py_does_not_keep_duplicate_entrypoint_definitions():
         "_resolve_npm_path",
         "wait_for_frontend_port",
     ]:
-        matches = re.findall(rf"^def {re.escape(func_name)}\(", text, flags=re.MULTILINE)
+        matches = re.findall(
+            rf"^def {re.escape(func_name)}\(", text, flags=re.MULTILINE
+        )
         assert len(matches) == 1, f"{func_name} should be defined exactly once"
 
 
@@ -45,7 +47,9 @@ def test_start_frontend_fails_early_when_vite_dependency_missing(tmp_path, monke
 
     monkeypatch.setattr(module, "__file__", str(tmp_path / "run.py"))
     monkeypatch.setattr(module, "safe_print", messages.append)
-    monkeypatch.setattr(module, "_require_local_port_available", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        module, "_require_local_port_available", lambda *args, **kwargs: True
+    )
     monkeypatch.setattr(module, "_resolve_npm_path", lambda: "C:/fake/npm.cmd")
     monkeypatch.setattr(module.subprocess, "Popen", lambda *args, **kwargs: object())
 
@@ -71,7 +75,9 @@ def test_start_backend_checks_active_backend_port(tmp_path, monkeypatch):
     class DummyProcess:
         pass
 
-    monkeypatch.setattr(module.subprocess, "Popen", lambda *args, **kwargs: DummyProcess())
+    monkeypatch.setattr(
+        module.subprocess, "Popen", lambda *args, **kwargs: DummyProcess()
+    )
 
     result = module.start_backend()
 
@@ -79,7 +85,9 @@ def test_start_backend_checks_active_backend_port(tmp_path, monkeypatch):
     assert checked == [(18001, "后端服务")]
 
 
-def test_warn_legacy_shop_session_artifacts_reports_detected_paths(tmp_path, monkeypatch):
+def test_warn_legacy_shop_session_artifacts_reports_detected_paths(
+    tmp_path, monkeypatch
+):
     module = _load_run_module()
     messages = []
 
@@ -104,10 +112,15 @@ def test_warn_legacy_shop_session_artifacts_reports_detected_paths(tmp_path, mon
     # 需要提示运维清理的是**店铺级 profile**（profiles/<平台>/<店铺账号ID>）。
     assert any("店铺级 profile 遗留" in message for message in messages)
     assert not any("历史残留" in message for message in messages)
-    assert any("cleanup_legacy_shop_session_artifacts.py --delete" in message for message in messages)
+    assert any(
+        "cleanup_legacy_shop_session_artifacts.py --delete" in message
+        for message in messages
+    )
 
 
-def test_warn_legacy_shop_session_artifacts_stays_quiet_when_no_paths(tmp_path, monkeypatch):
+def test_warn_legacy_shop_session_artifacts_stays_quiet_when_no_paths(
+    tmp_path, monkeypatch
+):
     module = _load_run_module()
     messages = []
 
@@ -154,7 +167,11 @@ def test_resolve_docker_compose_command_falls_back_to_v1(monkeypatch):
     monkeypatch.setattr(
         module.shutil,
         "which",
-        lambda name: "C:/Program Files/Docker/docker-compose.exe" if name == "docker-compose" else None,
+        lambda name: (
+            "C:/Program Files/Docker/docker-compose.exe"
+            if name == "docker-compose"
+            else None
+        ),
     )
 
     assert module._resolve_docker_compose_command() == ["docker-compose"]
@@ -165,8 +182,14 @@ def test_report_migrate_failure_prints_migrate_diagnostics(monkeypatch):
     messages = []
 
     monkeypatch.setattr(module, "safe_print", messages.append)
-    monkeypatch.setattr(module, "get_docker_container_status", lambda name: f"status:{name}")
-    monkeypatch.setattr(module, "show_docker_container_logs", lambda name, lines=30: f"log:{name}:{lines}")
+    monkeypatch.setattr(
+        module, "get_docker_container_status", lambda name: f"status:{name}"
+    )
+    monkeypatch.setattr(
+        module,
+        "show_docker_container_logs",
+        lambda name, lines=30: f"log:{name}:{lines}",
+    )
 
     result = module._report_migrate_failure("迁移失败")
 
@@ -192,12 +215,29 @@ def test_run_py_local_mode_mentions_required_docker_services():
 
 
 def test_local_collection_mode_script_stops_conflicting_docker_backends():
+    """本地采集模式启动前必须停掉所有会写同一个库的 Docker 后端容器。
+
+    celery worker/beat 也在写同一个库，刷新物化视图时长期持锁，
+    会把迁移前的 pg_dump 备份堵死 ⇒ 备份校验失败 ⇒ 启动被 fail-closed 拦停。
+
+    而且必须**逐个**停：``docker stop a b c`` 里只要有一个不存在，
+    整条命令就失败，后面的容器根本没被停。
+    """
     text = Path("scripts/start_local_collection_mode.ps1").read_text(
         encoding="utf-8",
         errors="replace",
     )
 
-    assert "docker stop xihong_erp_backend_api xihong_erp_backend_collector" in text
+    for container in (
+        "xihong_erp_backend_api",
+        "xihong_erp_backend_collector",
+        "xihong_erp_celery_worker",
+        "xihong_erp_celery_beat",
+    ):
+        assert f'"{container}"' in text, f"{container} 不在要停的容器清单里"
+
+    assert "docker stop $conflictContainer" in text
+    assert "docker stop xihong_erp_backend_api xihong_erp_backend_collector" not in text
 
 
 def test_run_py_reports_redis_aof_corruption_diagnostics(monkeypatch):

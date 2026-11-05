@@ -1,11 +1,138 @@
 # Changelog - 西虹 ERP 系统
 
-## [未发布] - 2026-11-05 - 提成→工资链路本地端到端验证 + 生产「0 元提成」根因定位 + openclaw 内存排查
+## [v7.13.7] - 2026-11-05 - 修掉「刷新时重建视图」这个长期空转的对策 + 本地启动失败根因 + openclaw 磁盘清理
+
+> 本版本同时包含下方「同日另一批」小节的全部内容（提成→工资链路本地端到端验证与
+> 「0 元提成」根因定位、生产内存收口、openclaw 内存排查）。
+
+### 一、本地启动失败的真正根因：不是 celery，是一个从来没生效过的「对策」
+
+用户现象：用 `local_console` 启动做「采集→同步→收入」复核验收，启动被拦停，报
+`migration_backup_failed`（迁移前的库备份做不出来）。
+
+完整链路：
+
+1. 启动前要给本地库做一次 `pg_dump` 备份。备份做不出来就 fail-closed 拒绝迁移 ——
+   这一步是对的（不能盲改库），但它只是**症状**。
+2. 备份做不出来的原因：本地常驻的 celery 在刷看板数据，刷新过程要拿排他锁，
+   `pg_dump` 排在后面等锁 → 一直等 → 备份超时 → 启动被拦停。
+3. **真正的放大器（本次才发现）**：看板刷新时**一直在重建视图**。
+   2026-10-26 那次线上事故的对策「刷新时跳过已存在的普通视图」**从来没生效过** ——
+   根因是一个类型细节：`pg_class.relkind` 经 asyncpg 返回的是 **bytes**（`b'v'` / `b'm'`），
+   代码却拿它跟字符串比 → 永远不相等 → 「是不是普通视图」永远判定失败 → 跳过逻辑从不触发。
+
+   于是每次数据刷新都在做两件危险的事：
+   - 普通视图 `CREATE OR REPLACE VIEW` → 拿 ACCESS EXCLUSIVE 排他锁 → 挡住所有并发读写；
+   - 物化视图执行带 `DROP MATERIALIZED VIEW ... CASCADE` 的资产文件 → 连带删掉
+     **10 个下游对象**再逐个重建（`semantic.fact_orders_monthly_atomic`、
+     `mart.shop_month_kpi` / `platform_month_kpi`、`api.business_overview_*` 共 8 个）。
+
+   锁窗口被拉得很长 → `pg_dump` 必然被堵 → 备份必然失败 → 启动必然被拦停。
+
+### 二、本次做了三层（越靠前越直接）
+
+- **直接**：启动前**逐个**停掉会写同一个库的 Docker 后端容器。
+  原来是一条 `docker stop a b c`，只要有一个容器不存在，整条命令就失败 ⇒ 其余容器
+  根本没被停 ⇒ celery 一直在跑。顺带修掉一个自己引入的坑：`2>&1` 会把 docker 的
+  `No such container` 转成 PowerShell ErrorRecord，在 `$ErrorActionPreference=Stop`
+  下直接把脚本打断 —— 改成只重定向 stdout、单独取 `$LASTEXITCODE`。
+- **兜底**：`pg_dump` 自带服务端锁等待上限（`lock_timeout=60s`）与命令超时（300s），
+  被锁住就明确报错退出，不再无限期挂住；失败信息**脱敏**（不泄露主机地址/库名/凭据）
+  但保留可诊断的原因（修复前只有一句 "migration backup command failed"）。
+- **治本**：数据刷新时
+  - 普通视图**跳过重建**（恢复 2026-10-26 的对策）；
+  - 物化视图**原地 REFRESH**，不再 `DROP ... CASCADE` 删下游、不再重建 10 个下游视图；
+  - 索引照旧补齐（`REFRESH` 不会重建索引，资产文件里的 `CREATE INDEX IF NOT EXISTS`
+    仍然执行，新增索引照样自动生效）。
+  - 物化视图**不存在**时回落到跑资产文件创建（见下面「连带删掉」那个坑）。
+
+### 三、「跳过重建」带来的定义新鲜度，由部署期兜底
+
+跳过重建意味着「改了 `sql/` 里的视图定义不会自动生效」—— 这本来就是设计，
+但必须有人负责落地，否则就是「改了口径但看板数字不动」的**静默漂移**。
+
+- 部署脚本现在默认重建**全部**普通视图（`--all-plain-views`），清单由
+  refresh registry + 库里实际存在的视图算出，**不写死**（写死一定会漏新加的视图）；
+  物化视图**不在**其中 —— 它们由迁移负责建、由数据刷新负责原地 `REFRESH`，
+  部署期重建要全量重算（生产实测单个月粒度 MV 就超过 120s `statement_timeout`，
+  v7.13.0 首次发布就是这么失败的）。
+- 部署后用脚本自己报告的重建清单（`REBUILT_TARGETS:`）做存在性复核，
+  避免「部署显示成功、视图其实根本没重建」这种静默成功。
+- dashboard bootstrap 的 **core 计划（= 定义计划）改为真的重建**：它跑完之后会把
+  `asset_fingerprint_applied` 无条件写成 expected，core 计划若只是「跳过」，
+  库里还留着旧定义而系统却以为已经是新的 ⇒ 静默漂移。
+
+#### 补一个「连带删掉」的坑（生产 pg_depend 闭包实测才发现）
+
+`sql/semantic/analytics_atomic.sql` 开头是
+`DROP VIEW IF EXISTS semantic.fact_analytics_atomic CASCADE`，
+而 `semantic.fact_analytics_atomic_mv` **正是它的下游**（生产实测闭包）⇒
+重建这个普通视图会把那个物化视图**连带删掉**。
+
+物化视图又**不在**部署期的重建清单里（重建要全量重算，生产实测单个月粒度 MV
+就超过 120s `statement_timeout`）⇒ 重建结束后它就「凭空消失」了，
+看板当场查不出来 —— 而部署会显示「成功」。
+
+现在补了两层：
+
+1. **重建脚本当场自愈**：每重建一个目标就检查一次「有没有物化视图被连带删掉」，
+   有就**立刻**按资产文件建回来（那些资产文件自带「存在则 REFRESH /
+   不存在则 CREATE」，重建代价很低：流量原子层只有 4,431 行）；
+   建不回来就**明确失败**、不让半坏的库上线。部署脚本的复核清单也把它算进去。
+
+   ⚠️ 必须「当场」而不是「最后」：本地实跑抓到过真实失败 ——
+   `mart.shop_day_kpi` 的定义**要读** `semantic.fact_analytics_atomic_mv`，
+   等到全部重建完再自愈就已经晚了，那一步会直接报
+   `relation "semantic.fact_analytics_atomic_mv" does not exist`。
+2. **数据刷新兜底**：物化视图不存在时**回落到跑资产文件**创建
+   （只 `REFRESH` 会直接报 `relation does not exist`）。
+   这条自愈能力本来就是资产文件设计出来的，不能因为改成「原地刷新」就丢掉。
+
+### 四、openclaw 磁盘垃圾清理
+
+- 删掉 `_trash/2026-10-24`（768MiB / 56388 个文件）、`tmp/plugin-captures`（118MiB）、
+  旧版升级备份 `openclaw-2026.4.22.tgz`（321MiB）—— 保留升级前最新那份完整备份。
+- 删掉 `agents/main/session-sqlite-import-archive`（661MiB / 1325 个文件）。
+  **删除前逐项核对**：1325 个文件**全部**带 `.imported-<时间戳>` 标记（0 个未导入），
+  且 openclaw 自己的代码里写明归档缺失时「No import is needed」（`archive is missing
+  without a recorded prior restore`），会话正文已在 sqlite 里
+  （`transcript_events` 9961 行 / `trajectory_runtime_events` 8849 行 /
+  `session_transcript_fts` 2208 行），删完逐表行数分毫未变、`PRAGMA integrity_check`
+  之外的全量行数与刷新前一致、服务 PID 未变、HTTP 200 全程无中断。
+- 结果：`.openclaw` 从 **1.87G → 696M**，宿主机可用内存进一步回升。
+  剩下的 696M 是**活数据**（备份 309M / npm 92M / sqlite 84M / workspace 68M /
+  控制台静态资源 35M / 媒体 15M），不是垃圾。
+
+### 五、本地验证
+
+- 物化视图原地刷新（`recreate_views=False`）：**10 个下游对象一个不少**（修复前全部丢失），
+  数据行数与校验和与刷新前**完全一致**，耗时 104.6s。
+- 资产文件定义 vs 库里已存定义：行数 34085、校验和 `6a0e137146ae29ee3c82d03df1a92de9`
+  **完全一致** ⇒ 原地 REFRESH 与「重建」产出等价。
+- 本地实跑 `rebuild_views.py --all-plain-views`：**39 个普通视图全部重建成功、
+  0 失败**（修复前会失败 1 个：`mart.shop_day_kpi` 报
+  `relation "semantic.fact_analytics_atomic_mv" does not exist`），
+  被 CASCADE 连带删掉的 `semantic.fact_analytics_atomic_mv` 被**当场自愈**建回，
+  耗时 2.8 秒；重建前后「视图 + 物化视图」集合 196 → 196（一个都没少），
+  关键视图行数分毫未变，**定义校验和重建前后完全一致**（说明重建是幂等的，
+  库里定义已经与 `sql/` 资产文件对齐）。
+- 新增/更新守护测试 24 例（bytes 形式的 relkind 识别、物化视图原地刷新、索引补齐、
+  显式重建仍走资产文件、物化视图不存在时回落创建、core 计划必须真重建、
+  重建后自愈被 CASCADE 删掉的物化视图、备份超时/脱敏、容器逐个停止）；
+  另删除 1 例编码旧行为（「刷新时重建物化视图」）的契约测试。
+- **广口径全量跑的失败集归属已用 A/B 对照钉死**：全量 4,936 例里的 183 个失败，
+  在「改动前的干净 HEAD worktree」上跑同样这 73 个文件，失败集**逐条一致**
+  （NEW=0 / FIXED=0 / ADDED=0）⇒ 那些失败全是**既有问题**，与本次改动无关。
+
+---
+
+## [同日另一批] - 2026-11-05 - 提成→工资链路本地端到端验证 + 生产「0 元提成」根因定位 + 生产内存收口 + openclaw 内存排查
+
 
 > 本次**不改计算代码**（核对结论：计算代码是对的），只补验证工具与结论记录。
 > 全部验证在**本地开发库**完成，未触碰生产数据。
 
-### 一、提成→工资链路：本地端到端跑通，四个恒等式全通过
+#### 一、提成→工资链路：本地端到端跑通，四个恒等式全通过
 
 本地库其实**一直有完整的 mock 数据**（员工-店铺归属 433 行、店铺可分配利润率 225 行、
 店铺绩效评分 81 行）—— 生产才是空表。本地把 schema 迁到最新 head、
@@ -28,7 +155,7 @@ labor_cost_allocation_upserts=46  profit_basis_shop_count=16  calculation_passes
 
 ⇒ **计算公式本身没有问题，不需要改。**
 
-### 二、生产「2026-08 起提成为 0」的真正根因
+#### 二、生产「2026-08 起提成为 0」的真正根因
 
 - 不是「店铺可分配利润率表为空」—— 查证后发现该表为空时会**按 100% 分配**，
   不会归零（`:1033` `allocatable_by_shop.get(shop_key, 1.0)`）。
@@ -39,7 +166,7 @@ labor_cost_allocation_upserts=46  profit_basis_shop_count=16  calculation_passes
     **2026-08 起归零** ⇒ 归属表里的个人比例在这期间被清空/清零。
 - 而**现在**生产归属表整体 0 行 ⇒ 补数据后重算即可拿回正确金额。
 
-### 三、验证出代码其实已经修好了「无声归零」
+#### 三、验证出代码其实已经修好了「无声归零」
 
 本地实验（把某员工归属比例置空、让其回落到薪资结构的 0）：
 
@@ -56,14 +183,14 @@ details.reason = "no commission ratio configured; set
 另有一个实测结论：**归属被清空时系统不会写提成行**（`commission_upserts=0`，
 旧行原样保留）⇒ 「0 元」只可能来自「比例取不到」，不可能来自「表为空」。
 
-### 四、本地要补的数据（已补齐并复验）
+#### 四、本地要补的数据（已补齐并复验）
 
 本地 mock 数据里 `EMP260009` 被登记成 `visitor` 身份且没有薪资结构
 ⇒ 算得出提成（957.59）却拿不到工资单 ⇒ 分摊表少一笔。
 补齐（改 `employee_identity_type='employee'` + 补 `salary_structures`）后，
 恒等式 2 由 FAIL 转 PASS。**这说明「有提成但没进工资单」是能在对账里被抓住的。**
 
-### 五、新增可复跑的验证脚本
+#### 五、新增可复跑的验证脚本
 
 - `scripts/verify_local_payroll_chain.py`：一条命令跑完
   「重算 → 打印四张表 → 校验四个恒等式 → 逐人反算」，不通过则退出码非 0。
@@ -71,7 +198,7 @@ details.reason = "no commission ratio configured; set
   且主动忽略 `CLOUD_DATABASE_URL`（它指向云库隧道）⇒ 不会误连云库/生产库。
 - `--skip-refresh` 只对账不写库。
 
-### 六、openclaw 内存增长排查结论（只读，未改配置）
+#### 六、openclaw 内存增长排查结论（只读，未改配置）
 
 - 内存构成：**匿名内存 2.32 GiB（占 RSS 98%）+ 文件缓存 45 MiB**
   ⇒ 是 V8 JS 堆，不是文件页缓存。
@@ -86,12 +213,12 @@ details.reason = "no commission ratio configured; set
 - 已有的三层保护：4 GiB 硬上限（`oom_kill=0`，从未触发）+
   本次加的 3 GiB 软限（立即生效、服务零中断）+ 宿主机 4 GiB swap。
 
-## [未发布] - 2026-11-05 - 生产内存收口（宿主机 7.4 GiB，openclaw 常驻 2.8 GiB）
+### 2026-11-05 - 生产内存收口（宿主机 7.4 GiB，openclaw 常驻 2.8 GiB）
 
 > 本次只改**生产基础设施配置**，不动后端代码与镜像，无需发版。
 > 改动同步落在 `docker-compose.prod.yml`，随下次发布自动带到生产（否则会被覆盖回旧值）。
 
-### 内存到底被谁吃了
+#### 内存到底被谁吃了
 
 - 宿主机物理内存 7.4 GiB，**swap 为 0**，且 openclaw 常驻 2.8 GiB。
   这 2.8 GiB **不是西虹 ERP 的组件**（openclaw gateway，Node 服务，
@@ -106,7 +233,7 @@ details.reason = "no commission ratio configured; set
   - `effective_cache_size=4GB` —— 宿主机 buff/cache 实际只有 2.1 GiB，
     等于骗优化器说「内存够放」，让它挑「能全放内存」的激进计划。
 
-### 处置一：PG 参数收口（容器重建，约 20 秒）
+#### 处置一：PG 参数收口（容器重建，约 20 秒）
 
 | 参数 | 调整前 | 调整后 |
 | --- | --- | --- |
@@ -122,14 +249,14 @@ details.reason = "no commission ratio configured; set
 - 这几个参数写在 compose 的 `command:` 里，**不是** `postgresql.conf` ——
   命令行 `-c` 优先级更高，改配置文件不生效。
 
-### 处置二：宿主机加 4 GiB swap（全局兜底）
+#### 处置二：宿主机加 4 GiB swap（全局兜底）
 
 - `/swapfile` 4 GiB，已 `swapon` 生效并写入 `/etc/fstab`（重启后自动挂载）。
 - 意义不只是「多 4 GiB」：此前宿主机 **没有 swap** ⇒ 任何进程涨到极限，
   内核只能启动全局 OOM killer 随机杀进程（可能正好杀掉 PG 或 backend）。
   有了 swap，超限进程会先落盘变慢，**不会突然把整个服务打死**。
 
-### 处置三：openclaw 保住正常运行（不重启、不停服）
+#### 处置三：openclaw 保住正常运行（不重启、不停服）
 
 - 它已经有一道**生效中的硬上限** `MemoryMax=4G`（cgroup 层面确认
   `memory.max=4294967296`，`oom_kill` 计数为 0），所以它不会无限涨把宿主机吃干。
@@ -140,7 +267,7 @@ details.reason = "no commission ratio configured; set
   让它重启后仍然保留。
 - 长期方向仍是把机器升到 16 GiB，或把 openclaw 迁到独立机器。
 
-### 重建后逐项核对（全绿）
+#### 重建后逐项核对（全绿）
 
 - 容器：postgres 重建后 healthy，其余 6 个容器未重启、未受影响。
 - 数据零漂移：11 张关键表行数逐项一致；
@@ -151,12 +278,11 @@ details.reason = "no commission ratio configured; set
   连接池正常（size 30 / checked_out 1 / overflow -28）。
 - nginx 访问日志无 502。
 
-### 守护
+#### 守护
 
 - `tests/test_verify_remote_deploy_contracts.py` 新增 3 条：
   PG 内存参数不能退回旧值、理论峰值必须留在容器上限内、
   PG 容器内存上限不得抬到超过宿主机能给量。
-
 ## [v7.13.6] - 2026-11-05 - 换绑平台店铺ID时保留旧值别名 + 修复部署阻断（函数型目标存在性核对）
 
 > 本版本同时包含 v7.13.5 的全部内容（三条链路接入店铺身份解析、数值守卫、

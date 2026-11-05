@@ -555,6 +555,11 @@ async def bootstrap_dashboard_assets(
                 "refresh_run_id": refresh_run_id,
             },
             preordered=True,
+            # core 计划 = **定义**计划（普通视图 + 物化视图）。
+            # 必须真的重建：跑完之后会把 asset_fingerprint_applied 写成 expected，
+            # 跳过的目标就变成「系统以为定义已生效、库里其实还是旧定义」的静默漂移。
+            # 这条计划在部署/迁移期跑（应用层已停），排他锁不会挡线上查询。
+            recreate_views=True,
         )
         run_id = extract_run_id(run_result)
         module_run_ids[module_name] = run_id
@@ -629,6 +634,9 @@ async def refresh_dashboard_materialization_assets(
                 "refresh_run_id": refresh_run_id,
             },
             preordered=True,
+            # core 计划是**定义**计划 —— 必须真的重建，否则指纹会撒谎
+            # （asset_fingerprint_applied 被写成 expected，库里却还是旧定义）。
+            recreate_views=True,
         )
         run_id = extract_run_id(run_result)
         module_run_ids[module_name] = run_id

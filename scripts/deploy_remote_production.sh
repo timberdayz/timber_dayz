@@ -883,6 +883,22 @@ rebuild_dashboard_view_definitions() {
     rebuild_args+=(--target "${rebuild_target}")
   done
 
+  # 默认重建**全部**普通视图（清单由 refresh registry 算出，不写死 ——
+  # 写死一定会漏新加的视图）。
+  #
+  # 为什么必须这么做：数据刷新流程会**跳过**「已存在的普通视图」
+  # （2026-10-26 排他锁事故的正解：刷新时重建视图要拿 ACCESS EXCLUSIVE，
+  #  期间所有并发读写都被挡住，两个刷新进程还会沿视图链 ABBA 死锁）。
+  # 跳过 ⇒ 视图**定义**的变更只能靠部署期这次显式重建落地，
+  # 否则「改了 sql/ 里的定义，光部署不会生效」。
+  #
+  # 物化视图不在其中：它们由迁移负责建、由数据刷新负责原地 REFRESH，
+  # 部署期重建要全量重算（生产实测单个月粒度 MV 就超过 120s statement_timeout，
+  # v7.13.0 首次发布就是这么失败的）。
+  if [ "${REBUILD_ALL_PLAIN_VIEWS:-1}" = "1" ]; then
+    rebuild_args+=(--all-plain-views)
+  fi
+
   if [ ${#rebuild_args[@]} -eq 0 ]; then
     echo "[INFO] Phase 2.7: No view rebuild targets configured, skipping"
     return 0
@@ -905,8 +921,13 @@ rebuild_dashboard_view_definitions() {
 
   # rebuild_views.py 在「目标不在库里」时会跳过并返回 0 —— 那是**静默成功**。
   # 这里再确认目标视图确实存在，避免「部署显示成功、视图其实根本没重建」。
+  # 复核清单 = 脚本自己报告的「实际重建了哪些」+「自愈重建回来的物化视图」+ 显式目标清单。
   echo "[INFO] Phase 2.7b: Verifying rebuilt view definitions exist..."
-  export REBUILD_VERIFY_TARGETS="${rebuild_targets}"
+  local rebuilt_targets
+  local recreated_matviews
+  rebuilt_targets="$(grep '^REBUILT_TARGETS:' "${rebuild_log_file}" 2>/dev/null | tail -n 1 | cut -d' ' -f2- || true)"
+  recreated_matviews="$(grep '^RECREATED_MATERIALIZED_VIEWS:' "${rebuild_log_file}" 2>/dev/null | tail -n 1 | cut -d' ' -f2- || true)"
+  export REBUILD_VERIFY_TARGETS="${rebuilt_targets} ${recreated_matviews} ${rebuild_targets}"
   set +e
   "${compose_cmd_base[@]}" run --rm --no-deps -e REBUILD_VERIFY_TARGETS backend-api python3 -c '
 import asyncio

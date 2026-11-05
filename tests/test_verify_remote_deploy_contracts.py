@@ -36,6 +36,43 @@ def test_deploy_script_rebuilds_view_definitions():
     assert "-e REBUILD_VERIFY_TARGETS" in source
 
 
+def test_deploy_script_rebuilds_all_plain_views():
+    """部署期必须重建**全部**普通视图。
+
+    数据刷新流程会跳过「已存在的普通视图」（2026-10-26 排他锁事故的正解：
+    刷新时重建视图要拿 ACCESS EXCLUSIVE，期间所有并发读写都被挡住）。
+    跳过 ⇒ 视图**定义**的变更只能靠部署期这次显式重建落地，
+    否则「改了 sql/ 里的定义，光部署不会生效」。
+
+    清单必须由 refresh registry 算出（``--all-plain-views``），
+    写死一份列表一定会漏掉新加的视图。
+    """
+    source = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "--all-plain-views" in source
+    # 物化视图不能进部署期重建：重建要全量重算，生产实测单个月粒度 MV
+    # 就超过 120s statement_timeout（v7.13.0 首次发布就是这么失败的）。
+    rebuild_script = Path("scripts/rebuild_views.py").read_text(encoding="utf-8")
+    assert "relkind = 'v'" in rebuild_script
+    assert "_plain_view_targets" in rebuild_script
+
+
+def test_deploy_script_verifies_self_healed_materialized_views():
+    """部署必须复核「自愈重建回来的物化视图」。
+
+    普通视图的资产文件里有 ``DROP VIEW ... CASCADE``（生产实测：
+    ``semantic.fact_analytics_atomic`` 会连带删掉
+    ``semantic.fact_analytics_atomic_mv``），而物化视图不在部署期重建清单里
+    （全量重算会超 statement_timeout）⇒ rebuild_views.py 重建后会把消失的
+    物化视图建回来。部署必须确认它们真的在，否则就是「部署显示成功、
+    看板其实查不出来」。
+    """
+    source = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "RECREATED_MATERIALIZED_VIEWS:" in source
+    assert "recreated_matviews" in source
+
+
 def test_deploy_script_rebuilds_every_semantic_atomic_view():
     """部署时必须重建**全部**语义层原子层视图。
 

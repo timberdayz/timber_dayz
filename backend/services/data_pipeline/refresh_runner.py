@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import asyncio
+import re
 import uuid
 from typing import Any, Optional
 
@@ -29,6 +30,16 @@ _OPS_REQUIRED_TABLES = {
 }
 _OPS_TABLES_READY_SIGNATURE: tuple[str, str] | None = None
 logger = get_logger(__name__)
+
+#: 物化视图目标名（``schema.name``）。目标名来自 ``SQL_TARGET_PATHS``（仓库常量），
+#: 这里再校验一次，避免任何拼接出来的名字变成可执行 SQL。
+_MATERIALIZED_VIEW_PATTERN = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$"
+)
+_CREATE_INDEX_PATTERN = re.compile(
+    r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b", re.IGNORECASE | re.MULTILINE
+)
+_LINE_COMMENT_PATTERN = re.compile(r"--[^\n]*")
 
 
 def extract_run_id(refresh_result: str | dict[str, Any]) -> str:
@@ -344,6 +355,12 @@ async def _target_view_kind(db: AsyncSession, target: str) -> Optional[str]:
     返回 ``'v'``=普通视图、``'m'``=物化视图、``None``=不存在（或不是视图）。
 
     用 ``pg_class`` 目录查（一次索引查找，很便宜）。
+
+    ⚠️ ``pg_class.relkind`` 的列类型是 PostgreSQL 内部的 ``"char"``，
+    asyncpg 把它映射成 **bytes**（``b'v'`` / ``b'm'``），不是 str。
+    不解码就直接和 ``("v", "m")`` 比会**永远不相等** ——
+    于是「普通视图跳过重建」这条对策（2026-10-26 排他锁事故的正解）
+    从来没生效过，每次数据刷新都在 ``CREATE OR REPLACE VIEW``。
     """
     if "." not in target:
         return None
@@ -363,7 +380,64 @@ async def _target_view_kind(db: AsyncSession, target: str) -> Optional[str]:
     except Exception:  # noqa: BLE001
         return None
     kind = result.scalar_one_or_none()
+    if isinstance(kind, (bytes, bytearray)):
+        kind = bytes(kind).decode("ascii", errors="replace")
     return kind if kind in ("v", "m") else None
+
+
+async def _refresh_materialized_view(
+    db: AsyncSession, target: str, sql_path: str | Path
+) -> None:
+    """数据刷新时**原地刷新**物化视图，不执行它的 SQL 资产文件。
+
+    为什么不能直接跑资产文件
+    ----------------------
+    物化视图的资产文件里带 ``DROP MATERIALIZED VIEW ... CASCADE``
+    （见 ``sql/semantic/orders_monthly_atomic_mv.sql``），而资产文件
+    **每次数据刷新都会被执行**。于是每次刷新都会：
+
+    1. 连带删掉全部下游视图（monthly 那条链有 10 个对象：
+       ``semantic.fact_orders_monthly_atomic``、``mart.shop_month_kpi``、
+       ``mart.platform_month_kpi``、``api.business_overview_*`` 共 8 个），
+       它们必须被重新建回来 → 期间看板查询直接报 ``relation does not exist``；
+    2. 长时间持排他锁，把并发读写的 ``pg_dump`` 堵死 ——
+       2026-11 本地启动失败事故（``migration_backup_failed``）的放大器就是它；
+    3. 全量重算 + 重建 10 个下游，刷新窗口被拉长到分钟级。
+
+    数据刷新要的是「**数据变新**」，不是「定义变新」。
+    定义变更走 ``scripts/rebuild_views.py``（显式重建）那条路 ——
+    那条路本来就会重建下游，语义保持不变。
+
+    索引照旧补齐
+    ------------
+    索引是 MV 创建时带出来的，``REFRESH`` 不会重建它 —— 所以这里把资产文件里
+    的 ``CREATE INDEX IF NOT EXISTS`` 照常执行（它们是幂等的），
+    这样「新增索引」仍然能自动生效。
+
+    物化视图**不存在**时：回落到跑资产文件
+    -------------------------------------
+    物化视图有可能被**普通视图的重建**连带删掉 ——
+    ``sql/semantic/analytics_atomic.sql`` 开头是
+    ``DROP VIEW IF EXISTS semantic.fact_analytics_atomic CASCADE``，
+    而 ``semantic.fact_analytics_atomic_mv`` 正是它的下游
+    （生产实测的 pg_depend 闭包）。这类资产文件里的
+    「存在则 REFRESH / 不存在则 CREATE」（见 ``analytics_atomic_mv.sql``）
+    本来就是为这个场景准备的**自愈**机制。
+
+    所以这里必须保留这条回落路径：只 ``REFRESH`` 会直接报
+    ``relation "..." does not exist``，看板当场查不出来。
+    """
+    if not _MATERIALIZED_VIEW_PATTERN.match(target):
+        raise ValueError(f"invalid materialized view target: {target}")
+    if await _target_view_kind(db, target) != "m":
+        # 不存在 → 跑资产文件：它的正文自带「存在则 REFRESH / 不存在则 CREATE」。
+        await execute_sql_file(db, sql_path)
+        return
+    await db.execute(text(f"REFRESH MATERIALIZED VIEW {target}"))
+    for statement in split_sql_statements(load_sql_text(sql_path)):
+        without_comments = _LINE_COMMENT_PATTERN.sub("", statement)
+        if _CREATE_INDEX_PATTERN.match(without_comments):
+            await db.execute(text(statement))
 
 
 async def execute_sql_target(
@@ -426,10 +500,10 @@ async def execute_sql_target(
             else:
                 sql_path = SQL_TARGET_PATHS[planned_target]
             last_sql_path = str(sql_path)
-            if (
-                not recreate_views
-                and await _target_view_kind(db, planned_target) == "v"
-            ):
+            target_kind = None
+            if not recreate_views:
+                target_kind = await _target_view_kind(db, planned_target)
+            if not recreate_views and target_kind == "v":
                 # 普通视图的数据是**查询时实时算**的 → 数据刷新时根本不需要重建它。
                 # 而重建要走 CREATE OR REPLACE VIEW → 拿 ACCESS EXCLUSIVE 排他锁 →
                 # 期间**所有**并发读写都被挡住（商品中心保存会卡住），
@@ -463,7 +537,15 @@ async def execute_sql_target(
                 )
                 try:
                     async with db.begin_nested():
-                        await execute_sql_file(db, sql_path)
+                        if not recreate_views and target_kind == "m":
+                            # 物化视图：数据刷新只做**原地 REFRESH**，
+                            # 不跑资产文件（文件里的 DROP ... CASCADE 会删掉下游，
+                            # 还会长时间持锁把 pg_dump 堵死）。
+                            await _refresh_materialized_view(
+                                db, planned_target, sql_path
+                            )
+                        else:
+                            await execute_sql_file(db, sql_path)
                     await _sync_lineage_registry(db, planned_target)
                     await _upsert_freshness_log(db, planned_target, "success")
                     last_success_target = planned_target

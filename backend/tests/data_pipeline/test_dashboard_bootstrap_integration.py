@@ -56,3 +56,56 @@ def test_bootstrap_dashboard_assets_relaxes_statement_timeout(monkeypatch):
     executed_sql = str(session.execute.await_args_list[0].args[0])
     assert "SET LOCAL statement_timeout = 0" in executed_sql
     assert report["run_ids"]["business_overview"] == "run-1"
+
+
+def test_bootstrap_core_plan_really_rebuilds_view_definitions(monkeypatch):
+    """core 计划是**定义**计划 —— 必须真的重建。
+
+    数据刷新流程会跳过「已存在的普通视图」（2026-10-26 排他锁事故的正解）。
+    core 计划跑完之后会把 ``asset_fingerprint_applied`` 无条件写成 expected ——
+    如果 core 计划只是「跳过」，库里还留着旧定义，系统却以为已经是新的
+    ⇒ **静默漂移**：改了口径但看板数字不动，也没有任何告警。
+
+    所以 core 计划必须带 ``recreate_views=True``。
+    """
+    session = AsyncMock()
+    calls: list[dict] = []
+
+    async def _fake_execute_refresh_plan(_session, **kwargs):
+        calls.append(kwargs)
+        return "run-1"
+
+    monkeypatch.setattr(dashboard_bootstrap, "execute_sql_file", AsyncMock())
+    monkeypatch.setattr(
+        dashboard_bootstrap, "execute_refresh_plan", _fake_execute_refresh_plan
+    )
+    monkeypatch.setattr(
+        dashboard_bootstrap, "_load_dashboard_asset_state", AsyncMock(return_value={})
+    )
+    monkeypatch.setattr(
+        dashboard_bootstrap,
+        "inspect_dashboard_assets",
+        AsyncMock(return_value={"ready": True, "modules": {}}),
+    )
+
+    asyncio.run(dashboard_bootstrap.bootstrap_dashboard_assets(session))
+
+    assert calls, "core 计划必须真的执行"
+    core_calls = [
+        call
+        for call in calls
+        if call.get("pipeline_name", "").startswith("bootstrap_postgresql_dashboard.")
+    ]
+    assert core_calls, calls
+    for call in core_calls:
+        assert call.get("recreate_views") is True, call
+    # refresh 计划（物化视图）走**原地 REFRESH**，不重建
+    refresh_calls = [
+        call
+        for call in calls
+        if call.get("pipeline_name", "").startswith(
+            "bootstrap_postgresql_dashboard_refresh."
+        )
+    ]
+    for call in refresh_calls:
+        assert not call.get("recreate_views"), call
