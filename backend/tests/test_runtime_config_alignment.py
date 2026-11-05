@@ -172,6 +172,28 @@ def test_dev_runtime_services_mount_sql_directory_for_refresh_pipeline():
         ), f"{service_name} must mount sql assets into /app/sql for refresh execution"
 
 
+def test_dev_runtime_services_mount_current_migrations_for_schema_chain():
+    compose = _read_yaml("docker-compose.dev.yml")
+    services = compose["services"]
+
+    for service_name in (
+        "backend-api",
+        "backend-collector",
+        "celery-worker",
+        "celery-beat",
+        "migrate",
+    ):
+        volumes = services[service_name]["volumes"]
+        assert any(
+            str(volume).startswith("./current_migrations:/app/current_migrations")
+            for volume in volumes
+        ), (
+            f"{service_name} must mount the live current_migrations directory; "
+            "an image-baked snapshot makes the container-side migration whitelist "
+            "reject the current revision and fail-closed the local startup"
+        )
+
+
 def test_dev_compose_includes_celery_beat_for_automatic_sync_scheduling():
     compose = _read_yaml("docker-compose.dev.yml")
     services = compose["services"]

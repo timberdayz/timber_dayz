@@ -55,6 +55,10 @@ services:
       - ./modules:/app/modules
       - ./models:/app/models
       - ./migrations:/app/migrations
+      # current-schema 迁移链必须挂宿主机目录：
+      # 镜像里的 current_migrations 是构建时的快照，仓库新增迁移后镜像就会过期，
+      # 容器内迁移白名单会把当前 revision 判成"不受支持的版本"并 fail-closed 拒绝写入。
+      - ./current_migrations:/app/current_migrations
       - ./sql:/app/sql
       - ./tools:/app/tools
       - ./profiles:/app/profiles
@@ -128,6 +132,7 @@ services:
       - ./backend:/app/backend
       - ./modules:/app/modules
       - ./migrations:/app/migrations
+      - ./current_migrations:/app/current_migrations
       - ./sql:/app/sql
       - ./data:/app/data
       - ./logs:/app/logs
@@ -222,6 +227,7 @@ services:
       - ./backend:/app/backend
       - ./modules:/app/modules
       - ./migrations:/app/migrations
+      - ./current_migrations:/app/current_migrations
       - ./sql:/app/sql
       - ./data:/app/data
       - ./logs:/app/logs
@@ -272,6 +278,7 @@ services:
       - ./modules:/app/modules
       - ./sql:/app/sql
       - ./migrations:/app/migrations
+      - ./current_migrations:/app/current_migrations
       - ./data:/app/data
       - ./logs:/app/logs
       - ./temp:/app/temp
