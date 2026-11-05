@@ -135,6 +135,20 @@ python .\scripts\run_current_schema_migrations.py --diagnose --json
 4. Only perform database restore, rebuild, Docker volume deletion, or approval
    policy changes after an explicit human decision. These actions are not
    exposed through Local Console.
+5. If the failure summary says `<revision> is not a supported current revision`,
+   the one-off `migrate` container is running an image that predates the current
+   current-schema migration chain. The container-side whitelist then rejects the
+   database revision that the host-side migration already applied, and the Local
+   Console stops the backend before startup completes. Rebuild the local
+   development images so the container sees the same chain as the repository:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full build migrate backend-api celery-worker celery-beat
+```
+
+   `docker-compose.dev.yml` mounts the live `./current_migrations` directory into
+   the migrate, backend, worker, and beat services, so migration files added
+   after the image was built no longer require an image rebuild.
 
 Never manually edit an Alembic version table, run Alembic `stamp` directly,
 delete archived migration metadata, add an unknown fingerprint to policy, or
