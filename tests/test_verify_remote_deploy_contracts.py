@@ -6,6 +6,8 @@ from scripts.verify_remote_deploy_contracts import verify_remote_deploy_contract
 
 DEPLOY_SCRIPT_PATH = Path("scripts/deploy_remote_production.sh")
 DOCKERFILE_BACKEND_PATH = Path("Dockerfile.backend")
+COMPOSE_PROD_PATH = Path("docker-compose.prod.yml")
+COMPOSE_CLOUD_PATH = Path("docker-compose.cloud.yml")
 
 # 部署脚本里内联 Python 的写法：python3 -c '<换行>代码<换行>'
 INLINE_PYTHON_PATTERN = re.compile(r"python3 -c '\n(.*?)\n'", re.DOTALL)
@@ -172,3 +174,87 @@ def test_inventory_state_rebuild_script_dry_run_lists_targets():
     assert result.returncode == 0, result.stderr
     assert "semantic.fact_inventory_snapshot" in result.stdout
     assert "mart.inventory_state" in result.stdout
+
+
+def _postgres_c_params() -> dict:
+    """取 compose 里 postgres 容器实际生效的 ``-c key=value`` 参数。
+
+    注意：这些参数写在 ``command:`` 里而不是 postgresql.conf ——
+    命令行 ``-c`` 的优先级**高于** postgresql.conf，
+    所以改配置文件不会生效，必须改这里。
+    """
+    import yaml
+
+    data = yaml.safe_load(COMPOSE_PROD_PATH.read_text(encoding="utf-8"))
+    command = data["services"]["postgres"]["command"]
+    params = {}
+    for item in command:
+        if isinstance(item, str) and "=" in item and not item.startswith("-"):
+            key, _, value = item.partition("=")
+            params[key] = value
+    return params
+
+
+def test_production_postgres_memory_budget_is_bounded():
+    """生产 PG 的内存参数必须收口，不能退回过高的默认值。
+
+    背景：宿主机只有 7.4 GiB，openclaw 常驻 2.8 GiB，且当时 swap 为 0。
+    ``work_mem × max_connections`` 的理论峰值曾是 32MB × 100 = 3.2 GiB，
+    而 PG 容器上限只有 1.5 GiB ⇒ PG 已被 OOMKill 过
+    （连接被重置 → nginx 记 502 → 页面打不开）。
+
+    2026-11-05 收口后：8MB × 80 = 640 MiB，实测 PG 常驻 716 MiB → 356 MiB。
+    """
+    params = _postgres_c_params()
+
+    assert params.get("work_mem") == "8MB"
+    assert params.get("shared_buffers") == "256MB"
+    assert params.get("effective_cache_size") == "2GB"
+    assert params.get("max_connections") == "80"
+    # 长查询超时不能被顺带关掉
+    assert params.get("statement_timeout") == "120s"
+
+
+def test_production_postgres_memory_peak_stays_under_container_limit():
+    """理论峰值必须留在 PG 容器内存上限以内。
+
+    上限来自 docker-compose.cloud.yml 的 limits（1.5 GiB）。
+    """
+    params = _postgres_c_params()
+    work_mem_mb = int(re.match(r"(\d+)MB", params["work_mem"]).group(1))
+    max_connections = int(params["max_connections"])
+    peak_mb = work_mem_mb * max_connections
+
+    assert peak_mb <= 1024, (
+        f"work_mem({work_mem_mb}MB) × max_connections({max_connections}) "
+        f"= {peak_mb}MB，超过 PG 容器 1.5GiB 上限的安全线 ⇒ 会被 OOMKill"
+    )
+
+
+def _memory_to_mb(value) -> int:
+    """把 compose 的 memory 写法（``1.5G`` / ``512M`` / 字节数）统一成 MiB。"""
+    text = str(value).strip()
+    if text.endswith("G"):
+        return int(float(text[:-1]) * 1024)
+    if text.endswith("M"):
+        return int(float(text[:-1]))
+    if text.endswith("K"):
+        return int(float(text[:-1]) / 1024)
+    return int(int(text) / (1024 * 1024))
+
+
+def test_cloud_postgres_memory_limit_not_raised_above_host_capacity():
+    """PG 容器的内存上限不能被调高到超过宿主机能给的量。
+
+    宿主机 7.4 GiB，openclaw 常驻 2.8 GiB 且不可停 ⇒ PG 实际可用余量有限。
+    把 PG 上限抬到 4 GiB 只会让它在峰值时被 OOMKill，而不会多拿到内存。
+    """
+    import yaml
+
+    data = yaml.safe_load(COMPOSE_CLOUD_PATH.read_text(encoding="utf-8"))
+    limit = data["services"]["postgres"]["deploy"]["resources"]["limits"]["memory"]
+    limit_mb = _memory_to_mb(limit)
+
+    assert (
+        limit_mb <= 2048
+    ), f"PG 容器内存上限 {limit} 超过宿主机实际能给量（openclaw 占 2.8 GiB）"

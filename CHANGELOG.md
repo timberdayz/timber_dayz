@@ -1,5 +1,76 @@
 # Changelog - 西虹 ERP 系统
 
+## [未发布] - 2026-11-05 - 生产内存收口（宿主机 7.4 GiB，openclaw 常驻 2.8 GiB）
+
+> 本次只改**生产基础设施配置**，不动后端代码与镜像，无需发版。
+> 改动同步落在 `docker-compose.prod.yml`，随下次发布自动带到生产（否则会被覆盖回旧值）。
+
+### 内存到底被谁吃了
+
+- 宿主机物理内存 7.4 GiB，**swap 为 0**，且 openclaw 常驻 2.8 GiB。
+  这 2.8 GiB **不是西虹 ERP 的组件**（openclaw gateway，Node 服务，
+  监听 127.0.0.1:18789，运行 11 天）。
+- 西虹 ERP 自身的占用其实很健康：PG 716 MiB、backend 868 MiB、
+  celery worker 354 MiB、beat 166 MiB、其余容器合计不到 40 MiB。
+- 真正的病灶在 **PG 的配置被配过头了**：
+  - `shared_buffers=512MB` —— 整个库才 764 MB，缓冲区比库还大；
+  - `work_mem=32MB` × `max_connections=100` ⇒ **理论峰值 3.2 GiB**，
+    而 PG 容器上限只有 1.5 GiB ⇒ PG 已经被内核 OOMKill 过
+    （连接被重置 → nginx 记 502 → 页面打不开）；
+  - `effective_cache_size=4GB` —— 宿主机 buff/cache 实际只有 2.1 GiB，
+    等于骗优化器说「内存够放」，让它挑「能全放内存」的激进计划。
+
+### 处置一：PG 参数收口（容器重建，约 20 秒）
+
+| 参数 | 调整前 | 调整后 |
+| --- | --- | --- |
+| `work_mem` | 32MB | **8MB** |
+| `shared_buffers` | 512MB | **256MB** |
+| `effective_cache_size` | 4GB | **2GB** |
+| `max_connections` | 100 | **80** |
+
+- 理论峰值 3.2 GiB → **640 MiB**；实测 PG 常驻 **716 MiB → 356 MiB**（省 360 MiB）。
+- `max_connections` 取 80 而不是更紧的数：实测常驻连接 48 个
+  （backend 连接池 30+30 × 3 个 gunicorn worker 的预热上限是 90），
+  压到 60 会有真实拒连风险；而真正的大头是 `work_mem`，它已经降了 75%。
+- 这几个参数写在 compose 的 `command:` 里，**不是** `postgresql.conf` ——
+  命令行 `-c` 优先级更高，改配置文件不生效。
+
+### 处置二：宿主机加 4 GiB swap（全局兜底）
+
+- `/swapfile` 4 GiB，已 `swapon` 生效并写入 `/etc/fstab`（重启后自动挂载）。
+- 意义不只是「多 4 GiB」：此前宿主机 **没有 swap** ⇒ 任何进程涨到极限，
+  内核只能启动全局 OOM killer 随机杀进程（可能正好杀掉 PG 或 backend）。
+  有了 swap，超限进程会先落盘变慢，**不会突然把整个服务打死**。
+
+### 处置三：openclaw 保住正常运行（不重启、不停服）
+
+- 它已经有一道**生效中的硬上限** `MemoryMax=4G`（cgroup 层面确认
+  `memory.max=4294967296`，`oom_kill` 计数为 0），所以它不会无限涨把宿主机吃干。
+- 新增**软上限** `MemoryHigh=3G`：超过 3 GiB 时内核开始回收它的内存并施加压力，
+  逼它主动让路，但**不会杀它**。
+- 实施方式：直接写 cgroup `memory.high`（立即生效，**服务零中断**，
+  PID 未变、端口 18789 正常、HTTP 200），同时落一份 systemd drop-in
+  让它重启后仍然保留。
+- 长期方向仍是把机器升到 16 GiB，或把 openclaw 迁到独立机器。
+
+### 重建后逐项核对（全绿）
+
+- 容器：postgres 重建后 healthy，其余 6 个容器未重启、未受影响。
+- 数据零漂移：11 张关键表行数逐项一致；
+  B 成本月度基线四项金额逐项一致
+  （gmv 2,650,053.02 / 采购 1,030,829.91 / 仓储费 304,689.88 / 平台总成本 686,401.84）；
+  `core.alembic_version` 未变；看板资产数（物化视图 17 / 视图 39）未变。
+- 接口：`/healthz/ready` = ready，`dashboard.status` = ready，609 个路由在册，
+  连接池正常（size 30 / checked_out 1 / overflow -28）。
+- nginx 访问日志无 502。
+
+### 守护
+
+- `tests/test_verify_remote_deploy_contracts.py` 新增 3 条：
+  PG 内存参数不能退回旧值、理论峰值必须留在容器上限内、
+  PG 容器内存上限不得抬到超过宿主机能给量。
+
 ## [v7.13.6] - 2026-11-05 - 换绑平台店铺ID时保留旧值别名 + 修复部署阻断（函数型目标存在性核对）
 
 > 本版本同时包含 v7.13.5 的全部内容（三条链路接入店铺身份解析、数值守卫、

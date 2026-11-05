@@ -4,18 +4,31 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: xihong_erp_postgres
-    # A3: 显式注入 4 个 -c 参数。
+    # A3: 显式注入 -c 参数。
     # 之前 prod overlay 没有 command 段，compose merge 把 base 的 command 整体替换为空，
     # 导致生产实际拿不到 statement_timeout / work_mem / shared_buffers / max_parallel_workers_per_gather，
     # 静默回退到镜像默认（statement_timeout=0、work_mem=4MB、shared_buffers=128MB）。
+    #
+    # 2026-11-05：PG 内存收口（宿主机 7.4 GiB，openclaw 常驻 2.8 GiB，swap 0）。
+    #   work_mem 32MB→8MB、shared_buffers 512MB→256MB、effective_cache_size 4GB→2GB、
+    #   max_connections 100→80。
+    #   原因：work_mem × max_connections 的理论峰值曾是 32MB×100 = 3.2 GiB，
+    #   而 PG 容器上限只有 1.5 GiB ⇒ PG 已被 OOMKill 过（连接被重置 → nginx 记 502）。
+    #   收口后理论峰值 8MB×80 = 640 MiB，实测 PG 常驻从 716 MiB 降到 356 MiB。
+    #   effective_cache_size 4GB 与宿主机实际 buff/cache（2.1 GiB）严重不符，
+    #   会误导优化器选「能全放内存」的激进计划；改成 2GB 后计划更贴近现实。
     command:
       - postgres
       - -c
       - statement_timeout=120s
       - -c
-      - work_mem=32MB
+      - work_mem=8MB
       - -c
-      - shared_buffers=512MB
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=2GB
+      - -c
+      - max_connections=80
       - -c
       - max_parallel_workers_per_gather=4
     restart: always
