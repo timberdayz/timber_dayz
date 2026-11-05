@@ -769,7 +769,22 @@ class EmployeePerformanceResponse(BaseModel):
     year_month: str
     actual_sales: Decimal
     achievement_rate: float
-    performance_score: float
+    #: 绩效得分**可能为空**。
+    #:
+    #: ``c_class.employee_performance.performance_score`` 这一列可空，
+    #: 而且现在的计算口径就是"算不出来就写 NULL + 明确状态"
+    #: （``calculation_status`` = ``pending_store_performance`` /
+    #: ``pending_personal_input``），**不再写 0 / 1 这种像"算出来是 0 分"
+    #: 的占位值**。
+    #:
+    #: 旧契约把它声明成 ``float``（必填）⇒ 只要有员工当月绩效待补，
+    #: 整个列表接口就 500（``Input should be a valid number, input_value=None``），
+    #: 一个人的待补会把所有人的页面一起打挂。
+    performance_score: Optional[float] = None
+    #: 该行绩效分的计算状态（complete / pending_* / historical_unknown / ...）
+    calculation_status: str = "historical_unknown"
+    #: 绩效分来源（controlled_targets_v1 / personal_inputs / shop_inherited / ...）
+    performance_source_type: str = "historical"
     calculated_at: datetime
 
     class Config:
@@ -1031,9 +1046,7 @@ class PersonalPerformanceWorkbenchMetricInput(BaseModel):
 class PersonalPerformanceWorkbenchApplyRequest(BaseModel):
     year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
     expected_plan_version: Optional[int] = Field(default=None, ge=1)
-    metrics: List[PersonalPerformanceWorkbenchMetricInput] = Field(
-        default_factory=list
-    )
+    metrics: List[PersonalPerformanceWorkbenchMetricInput] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_unique_metric_codes(self):
@@ -1053,9 +1066,7 @@ class PersonalPerformanceScopeApplyRequest(BaseModel):
     year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
     expected_plan_version: int = Field(..., ge=1)
     expected_updated_at: Optional[datetime] = None
-    employees: List[PersonalPerformanceScopeEmployeeInput] = Field(
-        default_factory=list
-    )
+    employees: List[PersonalPerformanceScopeEmployeeInput] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_unique_employee_codes(self):
@@ -1077,7 +1088,9 @@ class PersonalPerformanceEntryInput(BaseModel):
     @model_validator(mode="after")
     def validate_controlled_input_kind(self):
         has_numeric = self.actual_value is not None
-        has_training = self.completed_count is not None or self.required_count is not None
+        has_training = (
+            self.completed_count is not None or self.required_count is not None
+        )
         has_special_task = self.result is not None or self.note is not None
         if sum((has_numeric, has_training, has_special_task)) != 1:
             raise ValueError("exactly one controlled input is required")

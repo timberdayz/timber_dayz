@@ -4,8 +4,11 @@ JWT authentication service.
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
-import uuid
+import base64
+import binascii
 import hashlib
+import hmac
+import uuid
 import json
 
 import bcrypt
@@ -17,6 +20,102 @@ from modules.core.logger import get_logger
 
 settings = get_settings()
 logger = get_logger(__name__)
+
+
+#: bcrypt 的哈希前缀（``$2a$`` / ``$2b$`` / ``$2x$`` / ``$2y$``）。
+BCRYPT_HASH_PREFIXES = ("$2a$", "$2b$", "$2x$", "$2y$")
+
+#: 早期版本用 passlib ``pbkdf2_sha256`` 存的口令哈希前缀。
+#:
+#: 历史事实：``backend/utils/auth.py`` 里的 ``pwd_context`` 用的是 pbkdf2_sha256，
+#: 而所有**写入**口令的路径（注册 / 改密 / 建用户 / 各种脚本）后来都换成了 bcrypt。
+#: 于是库里同时存在两种算法的哈希 —— 只认 bcrypt 的校验逻辑碰到 pbkdf2 哈希时
+#: 会抛 ``ValueError: Invalid salt``，登录接口直接 500（而不是 401）。
+PBKDF2_HASH_PREFIX = "$pbkdf2-sha256$"
+
+
+def _b64_decode(value: str) -> bytes:
+    """解 passlib 用的 base64（**不带** ``=`` 补位）。
+
+    passlib 的 ``ab64_decode`` = **标准 base64**，只把 bcrypt 风格的
+    ``.`` 当作 ``+``（bcrypt 的 altchars）。补位规则与它保持一致：
+    长度 % 4 == 1 是非法 base64（直接判失败）。
+    """
+    data = value.replace(".", "+")
+    remainder = len(data) & 3
+    if remainder == 1:
+        raise ValueError("invalid base64 input")
+    if remainder == 2:
+        data += "=="
+    elif remainder == 3:
+        data += "="
+    return base64.b64decode(data)
+
+
+def _decode_candidates(value: str) -> list[bytes]:
+    """给一个 base64 片段准备所有可能的原始字节。
+
+    候选 1：按 passlib 的 altchars 规则解码（``.`` 当作 ``+``）得到的字节；
+    候选 2：字面字符串的 UTF-8 字节（某些工具直接拿字符串当盐）。
+    """
+    candidates: list[bytes] = []
+    try:
+        decoded = _b64_decode(value)
+    except (ValueError, TypeError, binascii.Error):
+        decoded = b""
+    if decoded:
+        candidates.append(decoded)
+    literal = value.encode("utf-8")
+    if literal and literal not in candidates:
+        candidates.append(literal)
+    return candidates
+
+
+def verify_pbkdf2_sha256(password: str, hashed_password: str) -> bool:
+    """校验 passlib ``pbkdf2_sha256`` 哈希。
+
+    格式：``$pbkdf2-sha256$<rounds>$<salt_b64>$<checksum_b64>``，
+    其中 salt/checksum 都是 **bcrypt 风格 altchars 的 base64**
+    （标准 base64，只是把 ``.`` 当作 ``+``；无 ``=`` 补位），
+    checksum = ``pbkdf2_hmac('sha256', password, salt_bytes, rounds)``。
+
+    只用标准库实现 —— 不引入 passlib 依赖，也不和
+    ``backend/utils/auth.py`` 形成循环 import（那边 import 本模块）。
+    任何解析异常都当成"校验不通过"，绝不向上抛。
+
+    盐 / 校验值各准备**两个候选**（base64 解码后的字节、字面字符串字节），
+    两两组合都试一遍 —— 这样无论存量哈希当年是用哪种工具生成的，
+    都能被正确校验，而不是"格式对但永远不通过"。
+    """
+    try:
+        parts = hashed_password.split("$")
+        # ['', 'pbkdf2-sha256', rounds, salt, checksum]
+        if len(parts) != 5:
+            return False
+        rounds = int(parts[2])
+        if rounds <= 0:
+            return False
+
+        salt_candidates = _decode_candidates(parts[3])
+        checksum_candidates = _decode_candidates(parts[4])
+        if not salt_candidates or not checksum_candidates:
+            return False
+
+        secret = password.encode("utf-8")
+        for salt in salt_candidates:
+            for expected in checksum_candidates:
+                derived = hashlib.pbkdf2_hmac(
+                    "sha256",
+                    secret,
+                    salt,
+                    rounds,
+                    dklen=len(expected),
+                )
+                if hmac.compare_digest(derived, expected):
+                    return True
+        return False
+    except (ValueError, TypeError, binascii.Error):
+        return False
 
 
 class AuthService:
@@ -34,13 +133,53 @@ class AuthService:
         return hashed.decode("utf-8")
 
     def verify_password(self, password: str, hashed_password: str) -> bool:
-        return bcrypt.checkpw(password.encode("utf-8"), hashed_password.encode("utf-8"))
+        """按哈希前缀选算法校验口令。
+
+        为什么不能只认 bcrypt
+        ------------------
+        库里同时存在 bcrypt（``$2b$12$...``）和早期 passlib
+        ``pbkdf2_sha256``（``$pbkdf2-sha256$...``）两种哈希。直接
+        ``bcrypt.checkpw(pbkdf2_hash)`` 会抛 ``ValueError: Invalid salt``，
+        登录接口就变成 **HTTP 500**（账号"服务异常"），而不是正常的
+        401「账号或密码错误」—— 用户既登不进去，也看不出到底哪里错了。
+
+        现在的规则
+        ----------
+        - ``$2a$`` / ``$2b$`` / ``$2x$`` / ``$2y$`` → bcrypt
+        - ``$pbkdf2-sha256$`` → pbkdf2_sha256（标准库实现）
+        - 其它 / 损坏的哈希 → **返回 False**（⇒ 401），绝不抛异常
+
+        写入口径统一是 bcrypt（见 ``hash_password``），所以新密码一定是
+        bcrypt；这里的兼容分支只负责让**存量**老账号能登录。
+        """
+        if not hashed_password:
+            return False
+        candidate = hashed_password.strip()
+        if candidate.startswith(BCRYPT_HASH_PREFIXES):
+            try:
+                return bcrypt.checkpw(
+                    password.encode("utf-8"), candidate.encode("utf-8")
+                )
+            except (ValueError, TypeError):
+                # 损坏的 bcrypt 哈希：按"密码错误"处理，而不是 500
+                logger.warning(
+                    "[AuthService] bcrypt verification failed on a malformed hash"
+                )
+                return False
+        if candidate.startswith(PBKDF2_HASH_PREFIX):
+            return verify_pbkdf2_sha256(password, candidate)
+        logger.warning(
+            "[AuthService] unsupported password hash scheme: %s",
+            candidate[:16],
+        )
+        return False
 
     def create_access_token(self, data: Dict[str, Any]) -> str:
         payload = data.copy()
         payload.update(
             {
-                "exp": datetime.now(timezone.utc) + timedelta(minutes=self.access_token_expire_minutes),
+                "exp": datetime.now(timezone.utc)
+                + timedelta(minutes=self.access_token_expire_minutes),
                 "type": "access",
                 "jti": uuid.uuid4().hex,
             }
@@ -51,7 +190,8 @@ class AuthService:
         payload = data.copy()
         payload.update(
             {
-                "exp": datetime.now(timezone.utc) + timedelta(days=self.refresh_token_expire_days),
+                "exp": datetime.now(timezone.utc)
+                + timedelta(days=self.refresh_token_expire_days),
                 "type": "refresh",
                 "jti": uuid.uuid4().hex,
             }
@@ -152,12 +292,16 @@ class AuthService:
                 detail="Refresh token service unavailable",
             ) from exc
 
-    async def _add_refresh_token_to_blacklist_atomic(self, refresh_token: str, expire_seconds: int) -> bool:
+    async def _add_refresh_token_to_blacklist_atomic(
+        self, refresh_token: str, expire_seconds: int
+    ) -> bool:
         redis_client = self._require_refresh_blacklist_client()
         token_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
         blacklist_key = f"xihong_erp:refresh_token_blacklist:{token_hash}"
         try:
-            result = await redis_client.set(blacklist_key, "1", ex=expire_seconds, nx=True)
+            result = await redis_client.set(
+                blacklist_key, "1", ex=expire_seconds, nx=True
+            )
             if result:
                 return True
             logger.warning(f"[Auth] Refresh token already revoked: {token_hash[:8]}...")
@@ -180,7 +324,9 @@ class AuthService:
     ) -> Dict[str, str] | None:
         redis_client = self._require_refresh_blacklist_client()
         try:
-            raw_value = await redis_client.get(self._refresh_rotation_result_key(refresh_token))
+            raw_value = await redis_client.get(
+                self._refresh_rotation_result_key(refresh_token)
+            )
         except Exception as exc:
             logger.error(f"[Auth] Failed to read refresh rotation result: {exc}")
             raise HTTPException(
@@ -252,16 +398,22 @@ class AuthService:
         expire_seconds = int(exp - datetime.now(timezone.utc).timestamp())
         if expire_seconds <= 0:
             return False
-        return await self._add_refresh_token_to_blacklist_atomic(refresh_token, expire_seconds)
+        return await self._add_refresh_token_to_blacklist_atomic(
+            refresh_token, expire_seconds
+        )
 
-    async def refresh_token_pair(self, refresh_token: str, session_id: str | None = None) -> Dict[str, str]:
+    async def refresh_token_pair(
+        self, refresh_token: str, session_id: str | None = None
+    ) -> Dict[str, str]:
         payload = self.verify_token(refresh_token, "refresh")
         resolved_session_id = session_id or payload.get("sid") or uuid.uuid4().hex
         payload_with_session = dict(payload)
         payload_with_session["sid"] = resolved_session_id
 
         if await self._is_refresh_token_blacklisted(refresh_token):
-            cached_pair = await self._get_refresh_rotation_result(refresh_token, payload_with_session)
+            cached_pair = await self._get_refresh_rotation_result(
+                refresh_token, payload_with_session
+            )
             if cached_pair:
                 return cached_pair
             raise HTTPException(
@@ -285,9 +437,13 @@ class AuthService:
                 )
                 expire_seconds = max_lifetime
 
-            added = await self._add_refresh_token_to_blacklist_atomic(refresh_token, expire_seconds)
+            added = await self._add_refresh_token_to_blacklist_atomic(
+                refresh_token, expire_seconds
+            )
             if not added:
-                cached_pair = await self._get_refresh_rotation_result(refresh_token, payload_with_session)
+                cached_pair = await self._get_refresh_rotation_result(
+                    refresh_token, payload_with_session
+                )
                 if cached_pair:
                     return cached_pair
                 raise HTTPException(
@@ -307,7 +463,9 @@ class AuthService:
             "token_type": "bearer",
             "session_id": resolved_session_id,
         }
-        await self._store_refresh_rotation_result(refresh_token, payload_with_session, token_pair)
+        await self._store_refresh_rotation_result(
+            refresh_token, payload_with_session, token_pair
+        )
         return token_pair
 
 
