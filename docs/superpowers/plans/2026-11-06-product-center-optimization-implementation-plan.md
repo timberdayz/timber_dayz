@@ -1457,6 +1457,20 @@ ROI 算出来的保本 ROI 也会跟着错）。改法有两个方向，见 §13
 > 实测数据与验证结果。方案正文（§4.1）里对应位置都加了「实施调整」提示，
 > 两边不重复展开，以本附录为准。
 
+**阶段 2.1 的提交与合并状态**
+
+| 提交 | 内容 |
+|---|---|
+| `f51ceb46` | 阶段 2.1 代码 + 测试（20 个文件里的大部分） |
+| `f0a9c52f` | 附录 D 实施记录 + 全量回归对比结果 |
+| `f6f99fd8` | 把 main（`74a32a53` 店铺身份治理）合进分支（**无冲突**） |
+| `f25b0b01` | 修复合并后暴露的两处迁移链缺陷（**发布级**，见 D.6） |
+| — | `git merge --no-edit feature/product-center-stage0` ⇒ **main HEAD = `f25b0b01`**（快进，合并预演无冲突） |
+
+**开发库实测（合并后 main 上复算，数字与 D.3 一致）**：
+SKU `751` 的 TikTok 底线 **109.08** / Shopee 底线 **146.84**，Shopee 相对 TikTok 低估 **25.7%**；
+修复前两个平台同为 109.08。
+
 ### D.1 改动清单
 
 | # | 文件 | 改动 |
@@ -1478,6 +1492,8 @@ ROI 算出来的保本 ROI 也会跟着错）。改法有两个方向，见 §13
 | 15 | `backend/tests/data_pipeline/test_sku_clearance_ranking.py` | 打桩改新接口；**+2 条**（行平台回落公司级 / 行平台用自己的费率） |
 | 16 | `backend/tests/conftest.py` | 定价种子清理清单加 `shopee` 平台（PG 容器是 session 级，不清理会撞下一条用例） |
 | 17 | `frontend/tests/productCenterUi.test.mjs` | **+4 条**（45 条全绿） |
+| 18 | `current_migrations/versions/20261116_add_tiktok_export_store_name_aliases.py` | **合并产物**：`down_revision` 从 `20261114_add_sku_roi_columns` 改到 `20261115_add_sku_platform_pricing`（恢复单 head，见 D.6.①） |
+| 19 | `current_migrations/versions/20261117_remediate_shopee_row_identity_conflicts.py` | **合并产物**：运行期 `.format(table=table)` → `.replace("{table}", table)`（`upgrade()` / `downgrade()` 两处，见 D.6.②） |
 
 ### D.2 与原方案不同的四处（实施时修正）
 
@@ -1554,6 +1570,14 @@ Shopee 的底线修复前被低估 **(146.84 − 109.08) / 146.84 = 25.7%**。
 生产库的偏差更大（§11.2② 实测）：SKU `166851422928` 的 Shopee 底线
 59.29 vs 应有的 103.36，**偏低 74.3%**。
 
+> **这两个绝对值的前提**（2026-11-07 合并后复算时补记）：
+> 开发库 `mart.inventory_state` 共 1,232 行，但**没有 SKU 751 的行**
+> ⇒ 该 SKU 走旧库龄兜底口径 ⇒ 命中**日常档**（目标利润率 25% / 折扣 10%）。
+> 档位由「距上次进货天数」决定，**不由平台决定** ⇒ 两个平台用同一档，
+> 所以「同一 SKU 两条底线、差值只来自平台费率」这个结论不受影响；
+> 但 109.08 / 146.84 这两个**绝对值**是开发库这条数据特有的，
+> 换一条有库存快照的 SKU 数字会不同（档位不同 ⇒ 目标利润率不同）。
+
 ### D.4 测试
 
 | 文件 | 条数 | 对应 §4.1.5 |
@@ -1575,6 +1599,10 @@ Shopee 的底线修复前被低估 **(146.84 − 109.08) / 146.84 = 25.7%**。
 | ⑥ 护栏按平台 | `test_guardrail_uses_the_floor_of_the_requested_platform`（**同一个价格 35.00：TikTok 放行 201、Shopee 拦下 422**）、`test_candidate_list_reports_the_floor_of_the_selected_platform` |
 
 ### D.5 全量回归对比（worktree vs main，同一份文件清单）
+
+> 本节的对照组是 main 的 `1e61a3c9`（阶段 1 合并后的 main）。
+> 阶段 2.1 合并 main（`74a32a53` 店铺身份治理）**之后**又跑了一轮「合并产物」的对比，
+> 对照组换成 **main@`74a32a53`**（不含阶段 2.1）—— 见 **D.6.④**。
 
 | | worktree（阶段 2.1） | main 基线（`1e61a3c9`） |
 |---|---|---|
@@ -1631,7 +1659,7 @@ Shopee 的底线修复前被低估 **(146.84 − 109.08) / 146.84 = 25.7%**。
 > 不要挂在阶段 2.1 上。
 
 
-### D.6 合并 main 的产物：迁移链修复（发布级）
+### D.6 合并 main 的产物：迁移链修复 + 合并后复验（发布级）
 
 阶段 2.1 合并 main（`74a32a53` 店铺身份治理）时暴露了**两处迁移链缺陷**，
 都不是阶段 2.1 的业务代码问题，但**都会卡住发布**，必须在这一轮修掉。
@@ -1683,6 +1711,8 @@ IndexError: Replacement index 0 out of range for positional args tuple
 | 项 | 结果 |
 |---|---|
 | `alembic heads` | **单 head**：`current_schema_20261117_remediate_shopee_row_identity_conflicts` |
+| `alembic branches` | **无输出** ⇒ 迁移链是一条直线（`11→12→13→14→15→16→17`），没有分叉、没有多 head |
+| 生产库现状（只读复核） | `public.current_schema_alembic_version` = `current_schema_20261111_add_refresh_queue_domain_and_retry`；`finance.sku_platform_pricing` 在生产库**不存在** ⇒ D.6.① 的安全前提仍然成立 |
 | `downgrade -1` → `upgrade head` | ✅ 还原 1,946 行（18 + 1,909 + 19）→ 重订正 1,946 行 |
 | 整链往返 `downgrade → 20261114` → `upgrade head` | ✅ `17→16→15→14→15→16→17` 全绿，退出码 0 |
 | 开发库结构 | `finance.sku_platform_pricing` 12 列 / 0 行；`ops.price_adjust_baselines` PK = `(sku_id, platform_code)`；基线 tiktok 1121 + shopee 1，`platform_code` 无 NULL；`core.dim_erp_sku.min_selling_price_override` 非空 0 条 |
@@ -1690,6 +1720,42 @@ IndexError: Replacement index 0 out of range for positional args tuple
 | 店铺身份域定向测试 | 23 文件 **194 passed** |
 | 合计 | **453 passed / 0 failed**（上一次是 299 passed / 1 failed，那 1 条就是 D.6.② 的缺陷） |
 | `python scripts/run_lint.py` | 退出码 0 |
+| `python scripts/run_typecheck.py` | ⚠️ **门禁本身跑不起来（既有缺陷，与本阶段无关）** —— 见 D.7。改用 mypy 单独跑存活目标：`modules/core/db/schema.py`（本阶段改过）+ `modules/utils/email_otp_service.py` ⇒ **Success: no issues found in 2 source files** |
+
+#### D.6.④ 合并产物的全量回归（对照组换成 main@`74a32a53`）
+
+D.5 那轮的对照组是 main 的 `1e61a3c9`。阶段 2.1 合并 main（`74a32a53` 店铺身份治理）之后，
+再跑一轮「合并产物」的对比：**对照组 = main@`74a32a53`**（含店铺身份治理、**不含**阶段 2.1），
+**实验组 = 合并后的 main**（`f25b0b01` = 阶段 2.1 + 店铺身份治理）。
+
+| | 对照组 main@`74a32a53` | 实验组 合并后 main（`f25b0b01`） | 差 |
+|---|---|---|---|
+| 测试文件数 | 676 | **677** | +1（新增 `test_sku_platform_pricing.py`） |
+| 用例总数 | 4544 | **4563** | **+19**（17 条新文件 + 2 条清货） |
+| 通过 | 4391 | **4410** | **+19**（19 条新用例全过） |
+| 失败 | 124 | **124** | 0 |
+| 错误 | 22 | **22** | 0 |
+| 跳过 | 7 | **7** | 0 |
+| 失败/错误去重 | **146** | **146** | **0** |
+| **相对对照组新增失败** | —— | **0** | —— |
+
+**逐条测试 ID 对比**：**新增 0 / 修好 0 / 失败类型变化（FAIL↔ERROR）0**
+⇒ 两边的失败集合**完全相同**，一条不多一条不少。
+
+19 条新用例**全部只出现在实验组**（合并后 main），且**全部通过**：
+
+- `backend.tests.test_sku_platform_pricing` **17 条**（阶段 2.1 新建）
+- `backend.tests.data_pipeline.test_sku_clearance_ranking` **2 条**（D.2-① 的两条钉死用例）
+
+跑法与 D.5.1 一致：10 个子块（每块 600s 超时守护）→ 超时的块再**逐文件**跑
+（每文件 150s 超时）→ 两侧**逐个测试 ID** 对比。
+两侧的「10 子块」里都有且仅有第 5 块超时（内容都是 HR 绩效 + 任务中心那批文件），
+逐文件补跑 **68 个文件全部跑完、0 超时**。
+
+> ⚠️ 顺带记一笔：**子块之间的数字不能直接比**。
+> `run_chunk_with_timeout.py` 按 `files[i::n_sub]` 分组，多一个测试文件就会让
+> **大部分文件的分组位置整体平移** ⇒ 「子块 0 失败 6 条 vs 失败 6 条」这种巧合没有意义，
+> **只有按测试 ID 的集合对比算数**。
 
 ### D.7 遗留
 
@@ -1699,4 +1765,6 @@ IndexError: Replacement index 0 out of range for positional args tuple
 | 清货排名的平台粒度 | 视图粒度是库存来源平台 ⇒ 底线仍是公司级。要做「按渠道出清货排名」，得先给视图加销售渠道维度（join `finance.sku_operating_profiles`）—— 生产库该表只有 6 行，覆盖率不足以支撑，**暂不做** |
 | `amazon` 无费率 | 销售平台但三个费率全 NULL ⇒ 不可定价、不跟踪。等配了费率自动进 `priceable_platform_codes` |
 | 旧列删列 | `core.dim_erp_sku.min_selling_price_override` 保留一个版本周期，删列单独一个迁移（不与本阶段混） |
+| **`scripts/run_typecheck.py` 门禁已失效（既有缺陷）** | 脚本硬编码的检查目标 `backend/routers/dashboard_api.py` 在 `f34eee24`（2026-11-04「清理店铺分析等 5 个退役模块与配套死代码」）就被删了，而脚本自 2026-05-08 起再没改过 ⇒ **阶段 0 / 1 / 2.1 之前就已经跑不起来**（`mypy: error: Cannot read file 'backend\routers\dashboard_api.py'`）。本阶段用 mypy 单独跑存活目标补验，**通过**。修法：把退役的那个目标换成现存的等价入口（或直接删掉），属于既有排期，**不在本阶段改** |
+| 全量回归的测试隔离问题 | 见 D.5.1：多会话并发下会卡死（`starlette.testclient` 阻塞 portal 不返回），**main 同样复现** ⇒ 非阶段 2.1 引入。建议单独立项修测试隔离，不要挂在阶段 2.1 上 |
 
