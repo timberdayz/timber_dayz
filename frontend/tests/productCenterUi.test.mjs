@@ -211,7 +211,7 @@ test("达人佣金率带 % 后缀且说明只放在表头", () => {
   // 输入框填的是百分数，界面必须有 % 才看得出「11 = 11%」
   const commission = source.slice(
     source.indexOf('label="达人佣金率"'),
-    source.indexOf('label="售价来源"'),
+    source.indexOf('label="基准售价来源"'),
   );
   assert.match(commission, /rate-suffix/);
   // 「留空表示不单独设置」不该每行重复一遍
@@ -722,4 +722,147 @@ test("两个口径互斥：改广告分成率清掉目标 ROI，改目标 ROI �
   assert.match(source, /row\.adRateEscapeUsed = false/);
   // 提示语要说明发生了什么
   assert.match(source, /已改用广告分成率口径/);
+});
+
+// ---------------------------------------------------------------------------
+// 阶段 4 · 基准售价治理（前端部分，2026-11-07）
+// ---------------------------------------------------------------------------
+
+test("基准售价来源改成枚举下拉，只留三档", () => {
+  // 自由文本来源会被后端的枚举校验直接 422，历史脏值也没法归一化
+  assert.match(source, /const SELLING_PRICE_SOURCE_OPTIONS = \[/);
+  assert.match(source, /value: "platform_listing", label: "平台挂牌价"/);
+  assert.match(source, /value: "erp", label: "ERP 价"/);
+  assert.match(source, /value: "manual", label: "人工填写"/);
+  const sourceColumn = source.slice(
+    source.indexOf('label="基准售价来源"'),
+    source.indexOf('label="周转类型"'),
+  );
+  assert.match(sourceColumn, /<el-select v-model="row\.selling_price_source"/);
+  assert.match(sourceColumn, /v-for="option in SELLING_PRICE_SOURCE_OPTIONS"/);
+  // 不能再是自由文本输入框
+  assert.doesNotMatch(sourceColumn, /<el-input v-model="row\.selling_price_source"/);
+});
+
+test("列表补齐确认日期、售价账龄与是否过期三列", () => {
+  assert.match(source, /label="确认日期"/);
+  assert.match(source, /label="售价账龄\(天\)"/);
+  assert.match(source, /label="是否过期"/);
+  assert.match(source, /formatConfirmedAt\(row\.selling_price_confirmed_at\)/);
+  assert.match(source, /row\.selling_price_age_days/);
+  assert.match(source, /row\.selling_price_stale/);
+  // 过期要标红
+  assert.match(source, /row\.selling_price_stale \? "已过期" : "正常"/);
+  assert.match(source, /:type="row\.selling_price_stale \? 'danger' : 'success'"/);
+  // 确认日期超过 90 天要标黄（与「是否过期」列的标红是两件事）
+  assert.match(source, /'stale-date': row\.selling_price_stale/);
+  assert.match(source, /\.stale-date \{/);
+  assert.match(source, /\.stale-hint \{/);
+});
+
+test("基准售价改动即时调预览接口，且只对已保存的 SKU 调", () => {
+  assert.match(api, /previewSkuSellingPrice/);
+  assert.match(api, /selling-price-preview/);
+  assert.match(source, /@input="scheduleSellingPricePreview\(row\)"/);
+  assert.match(
+    source,
+    /@change="markDirty\('sku', row\); scheduleSellingPricePreview\(row\)"/,
+  );
+  const schedule = source.slice(
+    source.indexOf("const scheduleSellingPricePreview"),
+    source.indexOf("const runSellingPricePreview"),
+  );
+  // 新增行还没落库 ⇒ 不调（后端没有这条 SKU，也没有「当前值」可比）
+  assert.match(schedule, /if \(!key\) return;/);
+  // 输入防抖：别每敲一下就请求一次后端
+  assert.match(source, /const SELLING_PRICE_PREVIEW_DEBOUNCE_MS = 300/);
+});
+
+test("预览展示各平台最低售价的当前→预览变化并标明原因", () => {
+  assert.match(source, /最低售价将从 /);
+  assert.match(source, /const sellingPriceChangeText = /);
+  // 原因复用同一份来源标签字典，不另造一份
+  assert.match(
+    source,
+    /sourceLabel: item\.source_preview \? pricingSourceLabel\(item\.source_preview\) : ""/,
+  );
+  // 抬价超过 20% 才提示（阈值与后端一致，不在前端另立口径）
+  assert.match(source, /const SELLING_PRICE_PREVIEW_WARN_PCT = 20/);
+  // 预览只是假设，必须说清「保存后才会生效」
+  assert.match(source, /保存后生效/);
+});
+
+test("有人工覆盖的平台不能说成「涨到 63」", () => {
+  assert.match(
+    source,
+    /const SELLING_PRICE_OVERRIDE_LOCKED_TEXT = "该平台已有人工覆盖，改基准售价不生效"/,
+  );
+  const preview = source.slice(
+    source.indexOf("const applySellingPricePreview"),
+    source.indexOf("const scheduleSellingPricePreview"),
+  );
+  assert.match(preview, /const locked = !!item\.override_locked/);
+  assert.match(preview, /lockedText: SELLING_PRICE_OVERRIDE_LOCKED_TEXT/);
+});
+
+test("预览失败静默降级：清掉旧结果，不弹错误框也不打断输入", () => {
+  const runner = source.slice(
+    source.indexOf("const runSellingPricePreview"),
+    source.indexOf("const formatConfirmedAt"),
+  );
+  assert.match(runner, /state\.platforms = \[\];/);
+  assert.match(runner, /state\.warnings = \[\];/);
+  assert.doesNotMatch(runner, /ElMessage/);
+  assert.doesNotMatch(runner, /ElMessageBox/);
+});
+
+test("连续改价时旧预览结果不能盖掉新的", () => {
+  const runner = source.slice(
+    source.indexOf("const runSellingPricePreview"),
+    source.indexOf("const formatConfirmedAt"),
+  );
+  assert.match(runner, /const seq = state\.seq \+ 1;/);
+  assert.match(runner, /if \(state\.seq !== seq\) return;/);
+});
+
+test("基准售价巡检是显式按钮触发，且带 loading 态", () => {
+  assert.match(api, /checkSkuSellingPrice/);
+  assert.match(api, /selling-price-check/);
+  // 接口很慢，超时必须放宽，否则正常计算会被判成失败
+  assert.match(api, /timeout: 180000/);
+  assert.match(source, /@click="runSellingPriceCheck"/);
+  assert.match(source, /:loading="sellingPriceCheck\.loading"/);
+  // 绝不能挂在列表加载路径上：那会把每次刷新都变成一次全表扫描
+  const load = source.slice(
+    source.indexOf("const loadSkus"),
+    source.indexOf("const refreshSkuPricingRow"),
+  );
+  assert.doesNotMatch(load, /runSellingPriceCheck|checkSkuSellingPrice/);
+});
+
+test("巡检结果分三类，「算不出偏差」不等于没问题", () => {
+  assert.match(source, /title="算不出偏差 ≠ 没问题"/);
+  assert.match(source, /sellingPriceCheckGroups/);
+  const groups = source.slice(
+    source.indexOf("const sellingPriceCheckGroups"),
+    source.indexOf("const SELLING_PRICE_UNVERIFIED_REASONS"),
+  );
+  assert.match(groups, /exceeds_threshold/);
+  assert.match(groups, /item\.stale/);
+  assert.match(groups, /available === false/);
+  // 三个计数都要露出来
+  assert.match(source, /deviation_count/);
+  assert.match(source, /stale_count/);
+  assert.match(source, /unverified_count/);
+});
+
+test("服务端算出来的基准售价字段不回提交", () => {
+  const section = source.slice(
+    source.indexOf("const payloadSku"),
+    source.indexOf("const validateSpu"),
+  );
+  assert.match(section, /delete payload\.selling_price_age_days/);
+  assert.match(section, /delete payload\.selling_price_stale/);
+  assert.match(section, /delete payload\.selling_price_source_cleaned_at/);
+  assert.match(section, /delete payload\.selling_price_confirmed_at/);
 });

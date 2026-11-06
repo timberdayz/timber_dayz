@@ -57,6 +57,31 @@ export default {
   setSkuPricingOverride(skuId, payload) {
     return api._patch(`/skus/${skuId}/pricing-override`, payload);
   },
+  // 基准售价即时影响预览（阶段 4 工具 3）。
+  // ⚠️ 预览是**假设**：不写库、不写审计。真正生效要等运营保存 SKU 主数据。
+  // ⚠️ `reference_selling_price` **必填**（可以是 null = 预览「清空基准售价」）：
+  //    少传这个键后端会 422，所以这里即使值是 null 也必须出现在 body 里。
+  previewSkuSellingPrice(skuId, referenceSellingPrice) {
+    return api._post(`/skus/${skuId}/selling-price-preview`, {
+      reference_selling_price: referenceSellingPrice,
+    });
+  },
+  // 基准售价体检（阶段 4 工具 4）：偏差校验 + 过期巡检。
+  // ⚠️ 这个接口很慢（带偏差时要扫订单事实表，单次可能几十秒），
+  //    所以只允许运营**显式点击**时调用，绝不能挂在列表加载路径上。
+  //    超时必须放宽：默认 30s 会把一次正常计算判成失败。
+  checkSkuSellingPrice({ skuId, includeDeviation } = {}) {
+    return api._get("/skus/selling-price-check", {
+      params: {
+        sku_id: skuId ?? undefined,
+        include_deviation: includeDeviation ?? true,
+      },
+      timeout: 180000,
+      // 关掉 axios 的自动重试：重试也是一次全量扫描，
+      // 3 次重试 = 4 × 180s ≈ 12 分钟的转圈，比直接报错还糟。
+      retryCount: 3,
+    });
+  },
   previewSkuDeletion(skuId) {
     return api._post(`/skus/${skuId}/deletion-preview`, {});
   },

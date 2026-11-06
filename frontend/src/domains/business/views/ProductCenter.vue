@@ -206,6 +206,11 @@
             plain
             @click="openPlatformFeeDrawer('tiers')"
             >定价设置</el-button
+          ><el-button
+            plain
+            :loading="sellingPriceCheck.loading"
+            @click="runSellingPriceCheck"
+            >基准售价巡检</el-button
           >
         </div>
         <el-table
@@ -279,7 +284,10 @@
           ><el-table-column label="采购成本" width="115"><template #default="{ row }"><el-input-number v-model="row.default_purchase_cost" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="采购成本来源" width="120"><template #default="{ row }">{{ row.purchase_cost_source || "待补充" }}</template></el-table-column
           ><el-table-column label="采购成本确认时间" width="145"><template #default="{ row }">{{ row.purchase_cost_confirmed_at || "-" }}</template></el-table-column
-          ><el-table-column label="基准售价" width="115"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
+          ><el-table-column label="基准售价" width="260"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :precision="2" :controls="false" size="small" @input="scheduleSellingPricePreview(row)" @change="markDirty('sku', row); scheduleSellingPricePreview(row)" /><div v-if="sellingPricePreviewState(row)" class="selling-price-preview"><div class="selling-price-preview-title">最低售价会怎么变（保存后生效）</div><div v-for="item in sellingPricePreviewState(row).platforms" :key="item.platform_code" class="selling-price-preview-line"><template v-if="item.locked"><el-tag size="small" type="warning">{{ item.lockedText }}</el-tag></template><template v-else><span class="selling-price-preview-platform">{{ item.platformName }}</span><span class="selling-price-preview-change">{{ item.changeText }}<template v-if="item.pctText">（{{ item.pctText }}）</template></span><el-tag v-if="item.sourceLabel" size="small" :type="item.sourceTagType">{{ item.sourceLabel }}</el-tag><el-tag v-if="item.warn" size="small" type="danger">抬价超 20%</el-tag></template></div><div v-for="warning in sellingPricePreviewState(row).warnings" :key="warning" class="selling-price-preview-warning">{{ warning }}</div><div v-if="sellingPricePreviewState(row).loading" class="selling-price-preview-hint">正在计算…</div><div v-if="sellingPricePreviewState(row).error" class="selling-price-preview-hint">{{ sellingPricePreviewState(row).error }}</div></div></template></el-table-column
+          ><el-table-column label="确认日期" width="130"><template #default="{ row }"><span class="readonly-cell" :class="{ 'stale-date': row.selling_price_stale }">{{ formatConfirmedAt(row.selling_price_confirmed_at) }}</span></template></el-table-column
+          ><el-table-column label="售价账龄(天)" width="115"><template #default="{ row }"><span>{{ row.selling_price_age_days ?? "-" }}</span><div v-if="row.selling_price_stale" class="pricing-tier-hint stale-hint">基准售价已 {{ row.selling_price_age_days }} 天未确认，纪律线可能失真</div><div v-else-if="row.reference_selling_price != null && row.selling_price_age_days == null" class="pricing-tier-hint">基准售价从未确认</div></template></el-table-column
+          ><el-table-column label="是否过期" width="100"><template #default="{ row }"><el-tag size="small" :type="row.selling_price_stale ? 'danger' : 'success'">{{ row.selling_price_stale ? "已过期" : "正常" }}</el-tag></template></el-table-column
           ><el-table-column label="当前让利上限" width="110"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column
           ><el-table-column label="清货让利上限" width="110"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column
           ><el-table-column label="最低售价" width="340"
@@ -344,7 +352,7 @@
               </div></template
             ></el-table-column
           ><el-table-column label="达人佣金率" width="145"><template #header><el-tooltip content="留空表示不单独设置，按平台默认计算" placement="top"><span class="pricing-header">达人佣金率<el-icon class="pricing-header-help"><QuestionFilled /></el-icon></span></el-tooltip></template><template #default="{ row }"><div class="rate-cell"><el-input-number :model-value="toPercent(row.creator_commission_rate)" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" :placeholder="row.creator_commission_rate_fallback != null ? percent(row.creator_commission_rate_fallback) : '按平台默认'" @update:model-value="row.creator_commission_rate = fromPercent($event, null); markDirty('sku', row)" /><span class="rate-suffix">%</span></div></template></el-table-column
-          ><el-table-column label="售价来源" width="120"><template #default="{ row }"><el-input v-model="row.selling_price_source" size="small" @change="markDirty('sku', row)" /></template></el-table-column
+          ><el-table-column label="基准售价来源" width="140"><template #default="{ row }"><el-select v-model="row.selling_price_source" size="small" placeholder="选择来源" @change="markDirty('sku', row)"><el-option v-for="option in SELLING_PRICE_SOURCE_OPTIONS" :key="option.value" :label="option.label" :value="option.value" /></el-select></template></el-table-column
           ><el-table-column label="周转类型" width="120"><template #default="{ row }"><el-select v-model="row.turnover_class" size="small" placeholder="选择" @change="markDirty('sku', row)"><el-option label="快销商品（30天）" value="fast" /><el-option label="普通商品（60天）" value="normal" /><el-option label="慢销商品（90天）" value="slow" /></el-select></template></el-table-column
           ><el-table-column label="参考仓储天数" width="120"><template #default="{ row }">{{ referenceStorageDays(row.turnover_class) || "待设置" }}</template></el-table-column
           ><el-table-column
@@ -1063,6 +1071,82 @@
           prop="binding_status"
           label="状态" /></el-table
     ></el-drawer>
+    <el-drawer v-model="sellingPriceCheck.visible" title="基准售价巡检" size="760px"
+      ><el-alert
+        v-if="sellingPriceCheck.loading"
+        type="info"
+        :closable="false"
+        show-icon
+        title="正在巡检"
+        description="带偏差校验要扫描历史成交数据，可能需要几十秒，请耐心等待。"
+      /><el-alert
+        v-else-if="sellingPriceCheck.error"
+        type="error"
+        :closable="false"
+        show-icon
+        title="巡检失败"
+        :description="sellingPriceCheck.error"
+      /><template v-else
+        ><div class="selling-price-check-summary"
+          ><el-tag type="danger"
+            >偏差超阈值 {{ sellingPriceCheck.result?.deviation_count ?? 0 }}</el-tag
+          ><el-tag type="warning"
+            >过期未确认 {{ sellingPriceCheck.result?.stale_count ?? 0 }}</el-tag
+          ><el-tag type="info"
+            >算不出偏差 {{ sellingPriceCheck.result?.unverified_count ?? 0 }}</el-tag
+          ></div
+        ><el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+          title="算不出偏差 ≠ 没问题"
+          description="算不出来是因为缺历史成交数据，不是检查通过。这些 SKU 需要人工看一眼。"
+        /><div class="selling-price-check-block"
+          ><div class="selling-price-check-title"
+            >偏差超阈值（与历史成交价中位数偏离超过 30%）</div
+          ><el-table :data="sellingPriceCheckGroups.deviation" stripe size="small" border
+            ><el-table-column prop="sku_key" label="SKU" width="150" /><el-table-column
+              label="基准售价"
+              width="100"
+              ><template #default="{ row }">{{ money(row.reference_selling_price) }}</template></el-table-column
+            ><el-table-column label="历史成交价中位数" width="140"
+              ><template #default="{ row }">{{ money(row.deviation?.median_price) }}</template></el-table-column
+            ><el-table-column label="偏差" width="90"
+              ><template #default="{ row }">{{ sellingPriceDeviationText(row) }}</template></el-table-column
+            ><el-table-column label="样本行数" width="90"
+              ><template #default="{ row }">{{ row.deviation?.sample_size ?? "-" }}</template></el-table-column
+            ></el-table
+          ></div
+        ><div class="selling-price-check-block"
+          ><div class="selling-price-check-title">过期未确认（超过 90 天没确认）</div
+          ><el-table :data="sellingPriceCheckGroups.stale" stripe size="small" border
+            ><el-table-column prop="sku_key" label="SKU" width="150" /><el-table-column
+              label="基准售价"
+              width="100"
+              ><template #default="{ row }">{{ money(row.reference_selling_price) }}</template></el-table-column
+            ><el-table-column label="确认日期" width="140"
+              ><template #default="{ row }">{{ formatConfirmedAt(row.selling_price_confirmed_at) }}</template></el-table-column
+            ><el-table-column label="账龄(天)" width="90"
+              ><template #default="{ row }">{{ row.age_days ?? "-" }}</template></el-table-column
+            ></el-table
+          ></div
+        ><div class="selling-price-check-block"
+          ><div class="selling-price-check-title">算不出偏差（缺输入，不等于检查通过）</div
+          ><el-table :data="sellingPriceCheckGroups.unverified" stripe size="small" border
+            ><el-table-column prop="sku_key" label="SKU" width="150" /><el-table-column
+              label="基准售价"
+              width="100"
+              ><template #default="{ row }">{{ money(row.reference_selling_price) }}</template></el-table-column
+            ><el-table-column label="算不出的原因" min-width="200"
+              ><template #default="{ row }">{{ sellingPriceUnverifiedReason(row.deviation?.reason) }}</template></el-table-column
+            ></el-table
+          ></div
+        ></template
+      ><template #footer
+        ><el-button @click="sellingPriceCheck.visible = false">关闭</el-button
+        ></template
+      ></el-drawer
+    >
   </div>
 </template>
 
@@ -1086,7 +1170,7 @@ const loadingBills = ref(false);
 // SKU 资料 tab 中视觉标记为可填项的列名（仅改表头颜色，不动字段必填校验）
 // ⚠️ 「基准售价」2026-10-21 起移出本列表：蓝色表头在数据表里读起来像可点击链接，
 // 而它其实是「这列可以不填」的标记，容易被误读。按要求改为与其他列一致的黑色。
-const skuOptionalColumnLabels = ["规格", "重量 kg", "箱规（件/箱）", "售价来源"];
+const skuOptionalColumnLabels = ["规格", "重量 kg", "箱规（件/箱）", "基准售价来源"];
 const skuHeaderCellStyle = ({ column }) => {
   if (skuOptionalColumnLabels.includes(column.label)) {
     return { color: "#79bbff", fontWeight: "normal" };
@@ -1276,7 +1360,10 @@ const blankSku = () => ({
 // --- SKU 定价底线的展示辅助 ---
 const PRICING_SOURCE_LABELS = {
   manual_override: "人工设定",
-  discount_guard: "折扣纪律",
+  // ⚠️ 必须与后端 product_selling_price_service.PRICING_SOURCE_LABELS 逐字一致。
+  //    之前这里写「折扣纪律」、后端写「基准售价纪律」，同一个东西在同一个页面上
+  //    出现两个名字（预览提示来自后端、来源标签来自前端），运营会以为是两回事。
+  discount_guard: "基准售价纪律",
   cost_floor: "成本底线",
   unavailable: "无法计算",
 };
@@ -1289,6 +1376,204 @@ const PRICING_SOURCE_TOOLTIPS = {
 const pricingSourceLabel = (source) => PRICING_SOURCE_LABELS[source] || "-";
 const pricingSourceTagType = (source) =>
   ({ manual_override: "danger", discount_guard: "warning", cost_floor: "success" })[source] || "info";
+
+// ---------------------------------------------------------------------------
+// 阶段 4 · 基准售价治理（前端部分）
+// ---------------------------------------------------------------------------
+
+// 基准售价来源枚举。
+// ⚠️ 之前这里是自由文本，运营能随手写「客户报价」「展会价」……，
+// 而后端只认这三个值 —— 填了枚举外的东西等于「没有来源」，
+// 历史脏值也只能靠后端迁移归一化。所以改成下拉，让来源只能是这三档。
+const SELLING_PRICE_SOURCE_OPTIONS = [
+  { value: "platform_listing", label: "平台挂牌价" },
+  { value: "erp", label: "ERP 价" },
+  { value: "manual", label: "人工填写" },
+];
+
+// --- 基准售价即时影响预览（阶段 4 工具 3） ---
+//
+// 为什么必须有「预览」：基准售价填错最典型的后果是**纪律线被顶上去**，
+// 货直接卖不动（护栏把品拦死）。填完要等保存、甚至等下一个巡检周期才发现，
+// 代价太大。预览与保存走服务端同一套定价函数，
+// 所以「预览说涨到 63」与「保存后变成 63」必然一致。
+//
+// ⚠️ 预览是**假设**：不写库、不写审计。界面上必须说清「保存后才会生效」。
+const SELLING_PRICE_PREVIEW_DEBOUNCE_MS = 300;
+// 抬价超过这个幅度才提示 —— 与后端 _preview_warnings 的阈值一致。
+// 前端不要另立一套口径，否则两边提示会打架。
+const SELLING_PRICE_PREVIEW_WARN_PCT = 20;
+// 人工覆盖的平台：底线根本不会跟着基准售价动。
+// ⚠️ 这里**不能**显示成「涨到 63」—— 那是在报一个根本没发生的变化。
+const SELLING_PRICE_OVERRIDE_LOCKED_TEXT = "该平台已有人工覆盖，改基准售价不生效";
+
+// 预览状态按 SKU 分开存。
+// ⚠️ 不能挂在 row 上：row 会被 loadSkus 整表替换，预览结果会跟着一起消失，
+// 运营刚打完字就看到预览没了，比不给预览更糟。
+const sellingPricePreviews = reactive({});
+const sellingPricePreviewTimers = reactive({});
+
+const sellingPricePreviewKey = (row) => (row?.sku_id ? String(row.sku_id) : "");
+// 只读不建：没碰过的行不该凭空多出一个空预览块。
+const sellingPricePreviewState = (row) => {
+  const key = sellingPricePreviewKey(row);
+  return key ? sellingPricePreviews[key] || null : null;
+};
+const ensureSellingPricePreview = (row) => {
+  const key = sellingPricePreviewKey(row);
+  if (!key) return null;
+  if (!sellingPricePreviews[key]) {
+    sellingPricePreviews[key] = {
+      sku_id: row.sku_id,
+      platforms: [],
+      warnings: [],
+      loading: false,
+      error: "",
+      reference: null,
+      seq: 0,
+    };
+  }
+  return sellingPricePreviews[key];
+};
+// 「从 X 变为 Y」的文案。三种边界都得说清楚：
+// 算不出来既不是 0 也不是「没变化」—— 直接套模板会显示成「从 - 变为 -」。
+const sellingPriceChangeText = (item) => {
+  const current = item.min_selling_price_current;
+  const next = item.min_selling_price_preview;
+  if (current == null && next == null) {
+    return "资料不全，最低售价算不出来，改基准售价也不影响";
+  }
+  if (current == null) return `最低售价将从算不出来变为 ${money(next)}`;
+  if (next == null) return `最低售价将从 ${money(current)} 变为算不出来`;
+  return `最低售价将从 ${money(current)} 变为 ${money(next)}`;
+};
+const applySellingPricePreview = (state, res) => {
+  state.platforms = (res?.platforms || []).map((item) => {
+    const locked = !!item.override_locked;
+    const changePct = item.change_pct == null ? null : Number(item.change_pct);
+    return {
+      platform_code: item.platform_code,
+      platformName: platformDisplayName(item.platform_code),
+      locked,
+      lockedText: SELLING_PRICE_OVERRIDE_LOCKED_TEXT,
+      changeText: sellingPriceChangeText(item),
+      pctText:
+        changePct == null ? "" : `${changePct >= 0 ? "+" : ""}${changePct.toFixed(1)}%`,
+      sourceLabel: item.source_preview ? pricingSourceLabel(item.source_preview) : "",
+      sourceTagType: pricingSourceTagType(item.source_preview),
+      warn:
+        !locked &&
+        changePct != null &&
+        changePct >= SELLING_PRICE_PREVIEW_WARN_PCT,
+      message: item.message || "",
+    };
+  });
+  state.warnings = res?.warnings || [];
+  state.reference = res?.reference_selling_price_preview ?? null;
+};
+// 输入防抖：运营连续敲数字时不该每敲一下就请求一次后端。
+const scheduleSellingPricePreview = (row) => {
+  const key = sellingPricePreviewKey(row);
+  // 新增行还没落库，后端没有这条 SKU ⇒ 算不了预览，也没有「当前值」可比。
+  if (!key) return;
+  if (sellingPricePreviewTimers[key]) {
+    clearTimeout(sellingPricePreviewTimers[key]);
+  }
+  sellingPricePreviewTimers[key] = setTimeout(() => {
+    sellingPricePreviewTimers[key] = null;
+    runSellingPricePreview(row);
+  }, SELLING_PRICE_PREVIEW_DEBOUNCE_MS);
+};
+const runSellingPricePreview = async (row) => {
+  const key = sellingPricePreviewKey(row);
+  if (!key) return;
+  const state = ensureSellingPricePreview(row);
+  // 请求序号：连着改价会连发多个请求，后到的**旧**响应不能盖掉新结果。
+  const seq = state.seq + 1;
+  state.seq = seq;
+  state.loading = true;
+  state.error = "";
+  try {
+    const res = await productCenterApi.previewSkuSellingPrice(
+      row.sku_id,
+      row.reference_selling_price ?? null,
+    );
+    if (state.seq !== seq) return;
+    applySellingPricePreview(state, res);
+  } catch {
+    if (state.seq !== seq) return;
+    // 预览失败**静默降级**：清掉上一次的结果，不弹错误框、不打断输入。
+    // 理由：预览与保存走同一套定价口径，给一个来路不明的数字比不给更糟。
+    state.platforms = [];
+    state.warnings = [];
+    state.error = "预览暂不可用，保存后以实际结果为准";
+  } finally {
+    if (state.seq === seq) state.loading = false;
+  }
+};
+// 确认日期只显示到分钟：秒对运营没有意义，反而把列撑宽。
+const formatConfirmedAt = (value) => {
+  if (!value) return "-";
+  const text = String(value).trim();
+  if (!text) return "-";
+  const normalized = text.replace("T", " ").replace("Z", "");
+  return normalized.length > 16 ? normalized.slice(0, 16) : normalized;
+};
+
+// --- 基准售价巡检（阶段 4 工具 4） ---
+//
+// ⚠️ 这个接口带偏差校验要扫历史成交事实表，一次调用几十秒 ——
+//    只能运营显式点击触发，绝不能挂在 loadSkus 后面自动跑
+//    （那会把每次列表刷新都变成一次全表扫描）。
+const sellingPriceCheck = reactive({
+  visible: false,
+  loading: false,
+  error: "",
+  result: null,
+});
+const runSellingPriceCheck = async () => {
+  if (sellingPriceCheck.loading) return;
+  sellingPriceCheck.visible = true;
+  sellingPriceCheck.loading = true;
+  sellingPriceCheck.error = "";
+  try {
+    const res = await productCenterApi.checkSkuSellingPrice({ includeDeviation: true });
+    sellingPriceCheck.result = res || null;
+  } catch (error) {
+    sellingPriceCheck.result = null;
+    sellingPriceCheck.error = error?.message || "基准售价巡检失败";
+  } finally {
+    sellingPriceCheck.loading = false;
+  }
+};
+// 巡检结果分三类。三类**不能合并**：
+// 「算不出偏差」不是「没问题」—— 合并就等于把没检查过的说成检查过了。
+const sellingPriceCheckGroups = computed(() => {
+  const items = sellingPriceCheck.result?.items || [];
+  return {
+    deviation: items.filter(
+      (item) => item.deviation?.available && item.deviation?.exceeds_threshold,
+    ),
+    stale: items.filter((item) => item.stale),
+    unverified: items.filter(
+      (item) => item.deviation && item.deviation.available === false,
+    ),
+  };
+});
+// 「算不出偏差」的原因码 → 中文。算不出来要说清缺什么，不能报成没问题。
+const SELLING_PRICE_UNVERIFIED_REASONS = {
+  no_reference_price: "没有基准售价",
+  no_transaction_price: "没有历史成交记录",
+};
+const sellingPriceUnverifiedReason = (reason) =>
+  SELLING_PRICE_UNVERIFIED_REASONS[reason] || "数据不足，算不出偏差";
+// 偏差百分比：后端给的是「相对历史成交价中位数」的有符号偏差。
+const sellingPriceDeviationText = (item) => {
+  const value = item?.deviation?.deviation_pct;
+  if (value == null) return "-";
+  const number = Number(value);
+  return `${number >= 0 ? "+" : ""}${number.toFixed(1)}%`;
+};
 // --- 平台级最低售价底线（阶段 2.1b） ---
 // 底线是 **SKU × 平台** 的量：TikTok 与 Shopee 的平台其他成本率差一截
 // （27.27% vs 41.65%），同一件商品在两个平台有两条不同的底线。
@@ -1992,6 +2277,16 @@ const payloadSku = (row) => {
   delete payload.min_selling_price_override;
   // ⚠️ min_selling_price_by_platform 是后端下发的**只读**分平台数据，也不能回提交。
   delete payload.min_selling_price_by_platform;
+  // ⚠️ 阶段 4 的这几个基准售价字段同样是**服务端算出来**的：
+  //   selling_price_age_days / selling_price_stale 是账龄与过期判定，
+  //   selling_price_source_cleaned_at 是枚举清洗时间戳，
+  //   selling_price_confirmed_at 由服务端在保存时自动写入。
+  // 回提交等于把服务端刚算出来的状态当成「运营填的」再写回去，
+  // 过期状态会被钉死在库里 ⇒ 必须剔除。
+  delete payload.selling_price_age_days;
+  delete payload.selling_price_stale;
+  delete payload.selling_price_source_cleaned_at;
+  delete payload.selling_price_confirmed_at;
   // creator_commission_rate 必须**保留**：它是可写字段（单独谈的达人佣金率）。
   // 清空要显式传 null，不是删掉这个键。
   payload.purchase_cost_currency = "CNY";
@@ -2860,6 +3155,59 @@ onMounted(async () => {
   font-size: 12px;
   line-height: 1.5;
   color: var(--el-text-color-secondary);
+}
+/* --- 阶段 4：基准售价即时影响预览 --- */
+.selling-price-preview {
+  margin-top: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-regular);
+  background-color: var(--el-fill-color-lighter);
+  border-radius: 4px;
+}
+.selling-price-preview-title {
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+}
+.selling-price-preview-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.selling-price-preview-platform {
+  font-weight: 600;
+}
+.selling-price-preview-warning {
+  color: var(--el-color-danger);
+}
+.selling-price-preview-hint {
+  color: var(--el-text-color-secondary);
+}
+/* 过期未确认：标黄，提醒纪律线用的价格可能已经失真 */
+.stale-hint {
+  color: var(--el-color-warning);
+}
+/* 确认日期超过 90 天：标黄（与「是否过期」列的标红是两件事，
+   一个是提醒价可能失真，一个是给出状态判定） */
+.stale-date {
+  color: var(--el-color-warning);
+  border-color: var(--el-color-warning);
+  font-weight: 600;
+}
+/* --- 阶段 4：基准售价巡检 --- */
+.selling-price-check-summary {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.selling-price-check-block {
+  margin-top: 14px;
+}
+.selling-price-check-title {
+  margin-bottom: 6px;
+  font-weight: 600;
 }
 /* 表头的问号提示：说明只说一次，不用每行重复 */
 .pricing-header {
