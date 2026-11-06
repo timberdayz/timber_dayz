@@ -1023,6 +1023,57 @@ ambiguous 18→0、跨账号认领 1,946→0、幂等、回滚后完全复原）
 | `temp/verify_identity_remediation_outcome.py` | 退出码 **2** + 明确报错「迁移尚未落库」⇒ **不会**在未落库时误判通过 |
 | `temp/verify_reconcile_matches_migration.py`（只读） | 矛盾行 1,946 / 口径一致 **1,946** / 不一致 **0** / 无法确定 **0** |
 
+### 13.8 落库完成（2026-11-07 04:0x，外部依赖已解除）
+
+**触发**：product-center 会话把 `20261115` 合入 main（main HEAD = `f25b0b01`，
+`main..feature/product-center-stage0` = 0 提交）⇒ 定时任务本轮自动续接。
+
+**第二步实际无需执行** —— product-center 合并时已把 `20261116.down_revision`
+改成 `current_schema_20261115_add_sku_platform_pricing`，链为
+`20261114 → 20261115 → 20261116 → 20261117`，**单头**（`check_migration_chain.py` 退出码 0）。
+⇒ 没有改文件、没有产生空提交。
+
+**迁移落库**：开发库 `public.current_schema_alembic_version` 已是
+`current_schema_20261117_remediate_shopee_row_identity_conflicts` ——
+即 product-center 会话跑迁移时，把链上我这两个迁移**一并应用了**。
+本次再跑守护入口为 no-op（`[OK] Current-schema migration action completed: upgrade`，退出码 0）。
+
+**别名产物已确认落库**：`core.shop_account_aliases` 中 `source='shop_identity_remediation'` = **6 条**
+（DAONE Mall / DAWIE Mall / Explorers Mall / Malaysia(Flora Mall) /
+Philippines(DAJU Mall) / Singapore(HX Home)，区域全对）。
+
+**验收结果**（`temp/verify_identity_remediation_outcome.py`，退出码 **0**，8 项全 OK）：
+
+| 指标 | 订正前 | 实测 | 目标 | 判定 |
+|---|---|---|---|---|
+| unknown 行数 | 951 | **213** | 213 | OK |
+| unknown UV | 117,181 | **8** | 8 | OK |
+| ambiguous 行数 | 18 | **0** | 0 | OK |
+| ambiguous UV | 8,409 | **0** | 0 | OK |
+| 跨账号认领行数 | 1,946 | **0** | 0 | OK |
+| 总行数 | 3,634 | **3,634** | 3,634 | OK |
+| 总 UV | 683,497 | **683,497** | 683,497 | OK |
+| 补录别名数 | 0 | **6** | 6 | OK |
+
+⇒ **8,409 UV 的歧义行归零、1,946 行跨账号认领归零、720 行 TikTok 导出流量归位，
+且总行数与总 UV 一字未动**（只改身份归属，不搬数据）。
+
+#### 刷 MV 前的安全检查
+
+刷之前先确认 6 个目标在库里都是 **物化视图**（`pg_class.relkind='m'`）——
+`execute_sql_target` 对**普通视图**会改走资产文件路径，而资产文件里带
+`DROP VIEW ... CASCADE`（历史上连删过 10 个对象）。确认后 6 个全走**原地 REFRESH**。
+
+#### 本轮又暴露的第 4 个脚本缺陷（`refresh_identity_mvs.py`）
+
+| 现象 | 根因 | 修正 |
+|---|---|---|
+| `ModuleNotFoundError: No module named 'backend'` | 脚本在 `temp/` 下直接运行 ⇒ `sys.path[0]` 是 `temp/` 而不是仓库根 | 显式把仓库根插进 `sys.path` |
+| `ImportError: cannot import name 'AsyncSessionLocal' from 'modules.core.db'` | 入口写错了 —— 正确出处是 `backend.models.database`（与 `scripts/rebuild_views.py` 一致） | 改用 `from backend.models.database import AsyncSessionLocal` |
+
+> 前三个缺陷在 §13.7 已记；这第四个是**真跑到那一步**才暴露的 ——
+> 说明「脚本存在」不等于「脚本可跑」，交接脚本必须**真跑一遍**才算数。
+
 
 
 
