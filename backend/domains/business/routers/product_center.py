@@ -2863,6 +2863,112 @@ async def _platform_profit_missing_fields(
     return list(dict.fromkeys(missing))
 
 
+def _evaluate_roi_guard(values: dict, preview: dict, missing_fields: list[str]) -> dict:
+    """ROI 投放护栏判定（阶段 2.2）。
+
+    返回 ``{"error": dict | None, "warnings": list}``：
+    - ``error`` 非 None ⇒ 调用方要抛 ``BusinessValidationError``（护栏拦住）
+    - ``warnings`` 是**不拦**的提示（例如广告空间不足）
+
+    判定顺序（**不能改**）
+    --------------------
+    1. **目标 ROI 没填 ⇒ 不参与护栏**。
+       平台报告 ROI（``actual_roi``）是**事实记录**，永远不拦 ——
+       拦了就等于不许记录亏损投放（真实亏过的投放恰恰要留痕）。
+    2. **成本齐全** ⇒ 保本 ROI 可算：
+       - ``target_roi < break_even_roi`` ⇒ ``below_break_even_roi``（拦）
+       - 建议 ROI 超过平台可填上限 ⇒ ``roi_out_of_platform_range``
+         （**提示，不拦** —— 广告空间不足是客观限制，不是操作错误）
+    3. **成本不全** ⇒ 保本 ROI 算不出来：
+       - 用保本 ROI 的**下界**（未知成本一律当 0）去**证明**：
+         ``target_roi < 下界`` ⇒ ``below_break_even_roi``（拦 —— 已经能确定必亏）
+       - 证不出来 ⇒ ``roi_cost_incomplete``（拦 —— 成本不全 ⇒ 保本 ROI 不可信，
+         不可乐观地放行）
+
+    ⚠️ **护栏必须排在「资料完整性」校验之前**（沿用 ``below_min_selling_price``
+    的顺序逻辑）。缺物流规则时，运营更需要先知道"你填的目标 ROI 连最乐观的
+    保本线都够不着"——补完物流规则他可能**还是**亏；反过来先报"去补物流规则"
+    会让人以为补完就没事了。
+
+    ⚠️ 下界的性质：它**只可能偏松**（把未知成本当 0），所以只能用来"证死"
+    （连它都够不着 ⇒ 一定亏），不能用来"证活"。证不出来就不拦。
+    """
+    warnings: list[dict] = []
+    target_roi = values.get("target_roi")
+    if target_roi is None:
+        return {"error": None, "warnings": warnings}
+
+    target = Decimal(str(target_roi))
+    expected = (preview.get("expected") or {})
+    break_even_roi = expected.get("break_even_roi")
+    lower_bound = expected.get("break_even_roi_lower_bound")
+
+    def _detail(code: str, basis: str, threshold) -> dict:
+        if basis == "exact":
+            message = f"目标 ROI {target} 低于保本线 {threshold}，这单投了就是亏"
+        else:
+            # basis = 'lower_bound'：成本不全 ⇒ 只能给出保本线的**下界**，
+            # 但下界只可能偏松 ⇒ target_roi 低于它就**一定**亏。
+            message = (
+                f"目标 ROI {target} 低于保本线（至少 {threshold}），"
+                "这单投了就是亏"
+            )
+        return {
+            "code": code,
+            "message": message,
+            "basis": basis,
+            "target_roi": float(target),
+            "break_even_roi": float(threshold),
+            "sku_id": values.get("sku_id"),
+            "platform_code": values.get("platform_code"),
+        }
+
+    if break_even_roi is not None:
+        threshold = Decimal(str(break_even_roi))
+        if target < threshold:
+            return {
+                "error": _detail("below_break_even_roi", "exact", threshold),
+                "warnings": warnings,
+            }
+        # 广告空间不足：建议 ROI 超过平台可填上限 ⇒ 提示，不拦。
+        # ⚠️ 用 ROI 服务算好的 ``suggestion_note``，因为它用的是**生效**上限
+        #    （平台没配上限时用模块默认值 50），不要在这里自己比一个可能为 None 的上限。
+        if expected.get("suggestion_note") == "above_platform_ceiling":
+            warnings.append(
+                {
+                    "code": "roi_out_of_platform_range",
+                    "message": "建议 ROI 超过平台可填上限，广告空间不足",
+                    "suggested_roi": float(expected.get("suggested_roi") or 0),
+                    "target_roi_ceiling": (
+                        float(preview.get("target_roi_ceiling"))
+                        if preview.get("target_roi_ceiling") is not None
+                        else None
+                    ),
+                }
+            )
+        return {"error": None, "warnings": warnings}
+
+    # 成本不全 ⇒ 保本 ROI 不可信。用**下界**去证明"必亏"。
+    if lower_bound is not None:
+        threshold = Decimal(str(lower_bound))
+        if target < threshold:
+            return {
+                "error": _detail("below_break_even_roi", "lower_bound", threshold),
+                "warnings": warnings,
+            }
+    return {
+        "error": {
+            "code": "roi_cost_incomplete",
+            "message": "成本资料未完整，保本 ROI 不可信，不能据此设定目标 ROI",
+            "target_roi": float(target),
+            "sku_id": values.get("sku_id"),
+            "platform_code": values.get("platform_code"),
+            "missing_fields": list(missing_fields or []),
+        },
+        "warnings": warnings,
+    }
+
+
 @router.post("/api/platform-sku-profit/drafts", status_code=201)
 async def save_platform_sku_profit_draft(body: PlatformSkuProfitDraftRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
     values = body.model_dump()
@@ -2881,7 +2987,7 @@ async def save_platform_sku_profit_draft(body: PlatformSkuProfitDraftRequest, db
             created_by=getattr(_user, "user_id", None),
         )
         db.add(profile)
-    for key in ("transport_type", "competitor_price", "expected_selling_price", "seller_coupon_amount", "expected_ad_rate"):
+    for key in ("transport_type", "competitor_price", "expected_selling_price", "seller_coupon_amount", "expected_ad_rate", "target_roi"):
         setattr(profile, key, values.get(key))
     sku = await db.get(DimErpSku, values["sku_id"])
     platform = await db.get(DimPlatform, values["platform_code"])
@@ -2893,6 +2999,13 @@ async def save_platform_sku_profit_draft(body: PlatformSkuProfitDraftRequest, db
         "user_input"
         if values.get("expected_selling_price") is not None
         else ("sku_reference" if sku is not None and sku.reference_selling_price is not None else None)
+    )
+    # 目标 ROI 来源（阶段 2.2）：目前只有人工填写这一条来源。
+    # 阶段 3 会把存量 SKU 的老口径「广告分成率」反解成 target_roi，来源标记
+    # 会变成 'migrated_from_legacy_rate' —— 两者在利润表里长得一样但可信度不同，
+    # 所以必须留痕，不能事后靠猜。
+    profile.target_roi_source = (
+        "user_input" if values.get("target_roi") is not None else None
     )
     finance = ProductFinanceService(db)
     profile.expected_label_fee = await finance.find_reference_label_fee(values["warehouse_code"])
@@ -2946,6 +3059,16 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
             },
         ) from exc
     missing_fields = await _platform_profit_missing_fields(db, values, preview)
+    # ROI 护栏（阶段 2.2）：**必须排在「资料完整性」校验之前**。
+    # 缺成本时也要能判"目标 ROI 连最乐观的保本线都够不着" ——
+    # 补完物流规则他可能**还是**亏，先报"去补物流规则"会让人以为补完就没事了。
+    # 详见 `_evaluate_roi_guard` 的口径说明。
+    roi_guard = _evaluate_roi_guard(values, preview, missing_fields)
+    if roi_guard["error"] is not None:
+        raise BusinessValidationError(
+            message=roi_guard["error"].get("message") or "ROI 投放护栏未通过",
+            detail=roi_guard["error"],
+        )
     if missing_fields:
         raise BusinessValidationError(
             message="资料未完整，不能保存利润版本",
@@ -2958,7 +3081,7 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
     if profile is None:
         profile = SkuOperatingProfile(sku_id=values["sku_id"], platform_code=values["platform_code"], warehouse_code=values["warehouse_code"], status="active", created_by=getattr(_user, "user_id", None))
         db.add(profile)
-    for key in ("transport_type", "competitor_price", "expected_selling_price", "seller_coupon_amount", "expected_ad_rate"):
+    for key in ("transport_type", "competitor_price", "expected_selling_price", "seller_coupon_amount", "expected_ad_rate", "target_roi"):
         setattr(profile, key, values.get(key))
     sku = await db.get(DimErpSku, values["sku_id"])
     profile.reference_selling_price = sku.reference_selling_price if sku else None
@@ -2970,6 +3093,10 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
         "user_input"
         if values.get("expected_selling_price") is not None
         else ("sku_reference" if sku is not None and sku.reference_selling_price is not None else None)
+    )
+    # 目标 ROI 来源（阶段 2.2）：与草稿保存同一套口径。
+    profile.target_roi_source = (
+        "user_input" if values.get("target_roi") is not None else None
     )
     finance = ProductFinanceService(db)
     profile.expected_label_fee = await finance.find_reference_label_fee(values["warehouse_code"])
@@ -3004,6 +3131,15 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
             suggested_roi_clamped=section.get("suggested_roi_clamped"),
             equivalent_target_roi=section.get("equivalent_target_roi"),
             expected_selling_price_source=preview.get("expected_selling_price_source"),
+            # 平台报告 ROI（阶段 2.2）：**事实记录**，不是判定依据。
+            # 它记的是"平台后台回传的这次投放实际 ROI" —— 低于保本线也照样存，
+            # 因为真实亏过的投放恰恰要留痕（拦了就等于不许记录亏损投放）。
+            # ⚠️ 同一版利润会落两行（estimated / actual_recost），两行记的是**同一次投放**，
+            #    所以这个值在两行上是一样的 —— 不是复制错误，是同一个事实的两份视角。
+            actual_roi=values.get("actual_roi"),
+            actual_roi_source=(
+                "user_input" if values.get("actual_roi") is not None else None
+            ),
             # ⚠️ `cost_completeness` 这一列的语义是「**参考成本**（预估口径）齐不齐」，
             # 取值域 complete/partial/incomplete。必须**固定取 expected 段**，
             # 不能取 `section` —— 因为 section 会随 basis 在 expected / actual_recost 之间变，
@@ -3023,10 +3159,23 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
             "profile_id": profile.profile_id,
             "estimate_count": len(estimates),
             "calculation_bases": [basis for basis, _section in versions],
+            # ROI 投放输入（阶段 2.2）：目标 ROI 进档案、平台报告 ROI 进利润版本。
+            # 两者来源不同、落点不同，审计里必须能分清。
+            "target_roi": values.get("target_roi"),
+            "target_roi_source": profile.target_roi_source,
+            "actual_roi": values.get("actual_roi"),
+            "actual_roi_source": (
+                "user_input" if values.get("actual_roi") is not None else None
+            ),
         },
     )
     await db.commit()
-    return {"profile_id": profile.profile_id, "estimate_ids": [row.estimate_id for row in estimates]}
+    return {
+        "profile_id": profile.profile_id,
+        "estimate_ids": [row.estimate_id for row in estimates],
+        # 不拦的提示（例如广告空间不足）。护栏拦住时是异常，不走这里。
+        "roi_warnings": roi_guard["warnings"],
+    }
 
 
 @router.get("/api/platform-sku-profit/estimates")
@@ -3046,7 +3195,7 @@ async def list_platform_sku_profit_estimates(
         filters.append(SkuProfitEstimate.calculation_basis == calculation_basis)
     total = int((await db.execute(select(func.count()).select_from(SkuProfitEstimate).where(*filters))).scalar() or 0)
     rows = (await db.execute(select(SkuProfitEstimate).where(*filters).order_by(SkuProfitEstimate.estimate_as_of.desc()).offset((page - 1) * page_size).limit(page_size))).scalars().all()
-    return {"data": [_decimal_payload({"estimate_id": row.estimate_id, "sku_id": row.sku_id, "calculation_basis": row.calculation_basis, "expected_profit": row.expected_profit, "expected_margin_rate": row.expected_margin_rate, "actual_recost_profit": row.actual_recost_profit, "actual_recost_margin_rate": row.actual_recost_margin_rate, "actual_recost_completeness": row.actual_recost_completeness, "estimate_as_of": row.estimate_as_of, "break_even_roi": row.break_even_roi, "suggested_roi": row.suggested_roi, "suggested_roi_clamped": row.suggested_roi_clamped, "equivalent_target_roi": row.equivalent_target_roi, "expected_selling_price_source": row.expected_selling_price_source}) for row in rows], "page": page, "page_size": page_size, "total": total, "total_pages": (total + page_size - 1) // page_size}
+    return {"data": [_decimal_payload({"estimate_id": row.estimate_id, "sku_id": row.sku_id, "calculation_basis": row.calculation_basis, "expected_profit": row.expected_profit, "expected_margin_rate": row.expected_margin_rate, "actual_recost_profit": row.actual_recost_profit, "actual_recost_margin_rate": row.actual_recost_margin_rate, "actual_recost_completeness": row.actual_recost_completeness, "estimate_as_of": row.estimate_as_of, "break_even_roi": row.break_even_roi, "suggested_roi": row.suggested_roi, "suggested_roi_clamped": row.suggested_roi_clamped, "equivalent_target_roi": row.equivalent_target_roi, "expected_selling_price_source": row.expected_selling_price_source, "actual_roi": row.actual_roi, "actual_roi_source": row.actual_roi_source}) for row in rows], "page": page, "page_size": page_size, "total": total, "total_pages": (total + page_size - 1) // page_size}
 
 
 @router.get("/api/sku-operating-profiles", response_model=list[SkuOperatingProfileResponse])

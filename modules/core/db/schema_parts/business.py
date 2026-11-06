@@ -1143,6 +1143,14 @@ class SkuProfitEstimate(Base):
     suggested_roi_clamped = Column(Numeric(12, 4), nullable=True)
     # 老口径「广告分成率」翻译成的等效目标 ROI（阶段 3 迁移存量时用）
     equivalent_target_roi = Column(Numeric(12, 4), nullable=True)
+    # --- ROI 投放输入（阶段 2.2）---
+    # 平台报告 ROI：运营从平台后台抄回来的实际投放 ROI。
+    # 它是**事实记录**，不是判定依据 —— 低于保本线只标红，不拦保存
+    # （拦了就等于不许记录亏损的真实投放）。
+    actual_roi = Column(Numeric(12, 4), nullable=True)
+    # 来源标记：'user_input'（运营抄录）/ 'platform_report'（平台 API 取回，
+    # 目前无数据源，等 Q10 平台广告数据采集立项）。
+    actual_roi_source = Column(String(32), nullable=True)
     reference_storage_days = Column(Integer, nullable=True)
     storage_rule_id = Column(
         Integer,
@@ -1215,6 +1223,13 @@ class SkuOperatingProfile(Base):
     expected_selling_price_source = Column(String(32), nullable=True)
     seller_coupon_amount = Column(Numeric(18, 2), nullable=True)
     expected_ad_rate = Column(Numeric(12, 8), nullable=True)
+    # --- ROI 投放输入（阶段 2.2）---
+    # 目标 ROI：运营打算投到多少（商家实收 ÷ 广告费的口径，与平台标尺一致）。
+    # NULL = 没填 ⇒ 不参与保本 ROI 护栏。
+    target_roi = Column(Numeric(12, 4), nullable=True)
+    # 来源标记：'user_input'（运营自己填）/ 'migrated_from_legacy_rate'（阶段 3 从
+    # 老口径「广告分成率」反解）。两者在利润表里长得一样，但可信度不同 ⇒ 必须留痕。
+    target_roi_source = Column(String(32), nullable=True)
     status = Column(String(16), nullable=False, default="active")
     effective_from = Column(Date, nullable=False, server_default=func.current_date())
     effective_to = Column(Date, nullable=True)

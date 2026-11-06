@@ -3,7 +3,10 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable
 
-from .product_roi_service import compute_roi_metrics
+from .product_roi_service import (
+    compute_break_even_roi_lower_bound,
+    compute_roi_metrics,
+)
 
 
 MONEY_QUANTUM = Decimal("0.01")
@@ -268,6 +271,26 @@ def build_platform_profit_preview(
             damage_loss,
         ]
 
+    def _pre_ad_profit_upper_bound(use_actual: bool) -> Decimal | None:
+        """广告前利润的**上界**：把未知成本一律当 0 算。
+
+        未知成本（缺物流规则 / 缺仓储规则 / 没绑 SPU …）的真值 ≥ 0，
+        所以「当 0」算出来的利润只会**大于**真值 ⇒ 它是上界。
+
+        用途（阶段 2.2 护栏）：成本不全时 ``break_even_roi`` 算不出来，
+        但仍能给出保本 ROI 的**下界**（见 ``compute_break_even_roi_lower_bound``），
+        用来**证明**「运营填的目标 ROI 连最乐观的保本线都够不着 ⇒ 必亏」。
+
+        ⚠️ 这是**证明**，不是估算：上界偏松 ⇒ 下界偏小 ⇒ 只能用来"证死"，
+        不能用来"证活"。证不出来就不拦（交给 ``roi_cost_incomplete``）。
+        """
+        if revenue is None:
+            return None
+        components = _pre_ad_components(use_actual)
+        return revenue - sum(
+            (c if c is not None else Decimal("0")) for c in components
+        )
+
     def _ad_cost_and_profit(
         use_actual: bool,
     ) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
@@ -325,6 +348,16 @@ def build_platform_profit_preview(
         safety_margin=roi_safety_margin,
         target_roi_ceiling=target_roi_ceiling,
         expected_ad_rate=expected_ad_rate,
+    )
+    # 保本 ROI 的**下界**（阶段 2.2 护栏用）：成本不全时也算得出来，
+    # 用来证明"目标 ROI 连最乐观的保本线都够不着 ⇒ 这单投了就是亏"。
+    expected_roi_lower_bound = compute_break_even_roi_lower_bound(
+        net_revenue=revenue,
+        pre_ad_profit_upper_bound=_pre_ad_profit_upper_bound(use_actual=False),
+    )
+    actual_roi_lower_bound = compute_break_even_roi_lower_bound(
+        net_revenue=revenue,
+        pre_ad_profit_upper_bound=_pre_ad_profit_upper_bound(use_actual=True),
     )
     actual_logistics = (
         optional_money(actual_logistics_cost)
@@ -384,6 +417,15 @@ def build_platform_profit_preview(
             # 广告前利润（**没扣广告费**）：ROI 计算的分母，见 `product_roi_service.py`
             "pre_ad_profit": expected_pre_ad_profit,
             **_roi_payload(expected_roi),
+            # 保本 ROI 的**下界**（阶段 2.2 护栏用）：成本不全时也能算出来。
+            # ⚠️ 它**不是**保本线本身 —— 是保本线的下界，只可能偏松，
+            #    只能用来"证死"（目标 ROI 连它都够不着 ⇒ 必亏），不能用来"证活"。
+            "break_even_roi_lower_bound": expected_roi_lower_bound.get(
+                "break_even_roi_lower_bound"
+            ),
+            "break_even_roi_lower_bound_missing_reasons": list(
+                expected_roi_lower_bound.get("missing_reasons") or []
+            ),
             # 预估口径的完整度：成本项齐不齐（缺任何一项 → profit 为 None → incomplete）。
             # ⚠️ 这个键以前**不存在** —— 调用方 `section.get("completeness", "complete")`
             # 在 expected 段永远取到默认值 "complete"，于是同一列在 estimated 版本写
@@ -416,6 +458,13 @@ def build_platform_profit_preview(
             # 广告前利润（实际物流/仓储口径，**没扣广告费**）
             "pre_ad_profit": actual_pre_ad_profit,
             **_roi_payload(actual_roi),
+            # 同上：实际成本口径的保本 ROI 下界。
+            "break_even_roi_lower_bound": actual_roi_lower_bound.get(
+                "break_even_roi_lower_bound"
+            ),
+            "break_even_roi_lower_bound_missing_reasons": list(
+                actual_roi_lower_bound.get("missing_reasons") or []
+            ),
             "margin_rate": (
                 (actual_profit / revenue).quantize(Decimal("0.00000001"))
                 if actual_profit is not None and revenue

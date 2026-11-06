@@ -64,6 +64,72 @@ def _roi(value) -> Decimal:
     return Decimal(value).quantize(ROI_QUANTUM, rounding=ROUND_HALF_UP)
 
 
+def compute_break_even_roi_lower_bound(
+    *,
+    net_revenue,
+    pre_ad_profit_upper_bound,
+) -> dict:
+    """保本 ROI 的**下界** —— 成本不全时仍能给出的**保守**判定依据（阶段 2.2）。
+
+    为什么需要它
+    ------------
+    ``break_even_roi = net_revenue ÷ pre_ad_profit``，而 ``pre_ad_profit`` 需要
+    采购/物流/仓储/平台佣金/达人佣金/货损/退货**全部**齐了才算得出来。
+    缺一项（比如缺物流规则）⇒ ``break_even_roi`` 就是 ``None`` ⇒
+    护栏无从判断"运营填的目标 ROI 是不是在亏本线以下"。
+
+    但**完全跳过护栏**有个危险：运营填一个极低的 ROI（明显低于任何合理保本线），
+    系统会因为"算不出保本线"而放行 —— 等于给"必亏的投放"开了后门。
+
+    这里的办法（**证明，不是估算**）
+    ------------------------------
+    把**所有未知成本一律当 0**，算出"最乐观情况下"的广告前利润
+    ``pre_ad_profit_upper_bound``。因为未知成本的真值 ≥ 0：
+
+    .. code-block:: text
+
+        真实 pre_ad_profit ≤ pre_ad_profit_upper_bound
+        ⇒ 真实 break_even_roi = net_revenue ÷ 真实 pre_ad_profit
+          ≥ net_revenue ÷ pre_ad_profit_upper_bound
+          = 保本 ROI 的下界
+
+    于是只要 ``target_roi < 下界 ≤ 真实保本线``，就**可以确定**这单投了就是亏 ⇒ 拦得住。
+
+    ⚠️ 口径纪律（重要）
+    ------------------
+    这里**不是**"乐观地估算一个保本线"，而是拿一个**只可能偏松**的下界去
+    **证明**"低于它就一定亏"。**证明成立才拦，证不出来就不拦** ——
+    证不出来时交给 ``roi_cost_incomplete``（成本不全 ⇒ 保本ROI 不可信，不可乐观）。
+
+    ``pre_ad_profit_upper_bound ≤ 0`` 时**没有下界**
+    （未知成本全部当 0 都不赚钱 ⇒ 不投广告也亏 ⇒ 这不是 ROI 问题，是成本问题），
+    返回 ``None`` + ``missing_reasons``。
+
+    参数
+    ----
+    net_revenue:
+        商家实收（= 测算售价 − 卖家优惠券）。
+    pre_ad_profit_upper_bound:
+        广告前利润的**上界**（未知成本当 0 算出来的那个数）。
+    """
+    missing_reasons: list[str] = []
+    revenue = _decimal(net_revenue)
+    upper_bound = _decimal(pre_ad_profit_upper_bound)
+
+    if revenue is None or revenue <= 0:
+        missing_reasons.append("non_positive_revenue")
+        return {"break_even_roi_lower_bound": None, "missing_reasons": missing_reasons}
+    if upper_bound is None or upper_bound <= 0:
+        # 未知成本全当 0 都不赚钱 ⇒ 没有任何 ROI 能救 ⇒ 谈不上"低于保本线"
+        missing_reasons.append("non_positive_cost_upper_bound")
+        return {"break_even_roi_lower_bound": None, "missing_reasons": missing_reasons}
+
+    return {
+        "break_even_roi_lower_bound": revenue / upper_bound,
+        "missing_reasons": missing_reasons,
+    }
+
+
 def compute_roi_metrics(
     *,
     net_revenue,

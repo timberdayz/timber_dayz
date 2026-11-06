@@ -759,6 +759,13 @@ class SkuOperatingProfileResponse(SkuOperatingProfileCreateRequest):
     actual_logistics_cost: Optional[float] = None
     actual_storage_cost: Optional[float] = None
     cost_completeness: Optional[str] = None
+    # --- ROI 投放输入（阶段 2.2）---
+    # 目标 ROI：运营打算投到多少（商家实收 ÷ 广告费的口径，与平台标尺一致）。
+    # NULL = 没填 ⇒ 不参与保本 ROI 护栏。
+    target_roi: Optional[float] = None
+    # 来源标记：'user_input'（运营自己填）/ 'migrated_from_legacy_rate'（阶段 3 反解）。
+    # 两者在利润表里长得一样但可信度不同 ⇒ 必须留痕，不能事后靠猜。
+    target_roi_source: Optional[str] = None
     confidence_level: Optional[str] = None
     latest_estimate_as_of: Optional[datetime] = None
     latest_estimate_id: Optional[int] = None
@@ -846,6 +853,12 @@ class PlatformSkuProfitPreviewRequest(BaseModel):
     expected_selling_price: Optional[float] = Field(default=None, gt=0)
     seller_coupon_amount: float = Field(default=0, ge=0)
     expected_ad_rate: float = Field(default=0, ge=0, le=1)
+    # --- ROI 投放输入（阶段 2.2）---
+    # 目标 ROI：运营打算投到多少。> 0 才有效；不填 = 不参与保本 ROI 护栏。
+    target_roi: Optional[float] = Field(default=None, gt=0)
+    # 平台报告 ROI：运营从平台后台抄回来的实际投放 ROI。
+    # ⚠️ 它是**事实记录**，低于保本线只标红不拦（拦了就等于不许记录亏损投放）。
+    actual_roi: Optional[float] = Field(default=None, gt=0)
 
 
 class PlatformSkuProfitEstimateRequest(PlatformSkuProfitPreviewRequest):
