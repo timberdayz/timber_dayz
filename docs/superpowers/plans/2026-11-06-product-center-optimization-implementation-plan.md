@@ -898,9 +898,12 @@ python scripts/run_typecheck.py
 | 分支 | `feature/product-center-stage0` |
 | worktree | `.worktrees/product-center-stage0` |
 | 起点 | `d2d4e05f`（与 main 同起点） |
-| 合并回 main | **待 Walter 确认后执行** |
+| 合并回 main | **已合并**（`dea7bb1e`，快进；main 与该分支同起点，无冲突） |
 
-> 主工作区保持干净（只有其它会话的 `shop-identity-alignment-remediation.md`），本会话的全部改动只存在于本分支。
+> 合并前主工作区保持干净（只有其它会话的 `shop-identity-alignment-remediation.md`），本会话的全部改动只存在于本分支。
+> 合并时另有一个并行会话的分支 `e18e2c75`（采集运行时探测修复），与本次改动的文件**零交集**，互不影响。
+> worktree 与分支保留未删：里面还有 5 份分块测试日志作为验证证据。确认不再需要时执行
+> `git worktree remove .worktrees/product-center-stage0` 与 `git branch -d feature/product-center-stage0`。
 
 ### B.2 实际改动清单（7 改 + 4 增）
 
