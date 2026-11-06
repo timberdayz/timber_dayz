@@ -607,6 +607,43 @@ async def test_preview_endpoint_agrees_with_the_stored_floor(
     )
 
 
+@pytest.mark.asyncio
+async def test_check_endpoint_separates_exceeded_stale_and_unverified(
+    selling_price_sqlite_session
+):
+    """巡检接口把三类分开报：**算不出偏差 ≠ 没问题**。
+
+    这一条钉的是**计数口径**：偏差超阈值的、被判定过期的、算不出偏差的，
+    三个数各自独立，且「算不出」必须单独归类 ——
+    把没检查过的合并进「检查通过」，等于把没数据说成没问题。
+    """
+    from backend.domains.business.routers import product_center as pc_router
+    from modules.core.db import DimErpSku
+
+    sku_id = await _seed_sku(selling_price_sqlite_session)
+
+    # 关掉偏差计算（它要扫订单事实表，SQLite 上没有那张视图）
+    response = await pc_router.check_sku_selling_prices(
+        sku_id=None,
+        include_deviation=False,
+        db=selling_price_sqlite_session,
+    )
+
+    assert response.deviation_count == 0
+    # 种子的确认日期是 2026-01-01 ⇒ 早已超过 90 天阈值 ⇒ 过期计数为 1
+    assert response.stale_count == 1
+    # 算不出偏差 ⇒ 单独归类，**不是**「偏差正常」
+    assert response.unverified_count == 1
+
+    item = next(i for i in response.items if i.sku_id == sku_id)
+    assert item.stale is True
+    assert item.age_days is not None and item.age_days > 90
+    assert item.deviation.available is False
+    assert item.deviation.deviation_pct is None
+    assert item.deviation.exceeds_threshold is False
+    assert item.deviation.reason == "no_transaction_price"
+
+
 # ---------------------------------------------------------------------------
 # ⑦ 迁移：来源清洗 + 确认日期回填 + 约束
 # ---------------------------------------------------------------------------
