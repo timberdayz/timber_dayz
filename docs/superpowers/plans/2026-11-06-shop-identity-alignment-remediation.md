@@ -959,14 +959,71 @@ TikTok 6 个在营店 **0/6 有**（TikTok 的锚点只能是别名表）。
    （不改会双头 —— `20261114` 有两个后继；改早了会链断 —— 引用不存在的 revision。
    **两种情形都是 fail-closed，不会损坏数据**，但第 2 步必须在第 1 步之后做。）
 3. `python scripts/run_current_schema_migrations.py`（走守护入口）；
-4. `python temp/refresh_identity_mvs.py` 刷 3 个物化视图；
-5. `python temp/verify_identity_remediation_outcome.py` 验收：
-   期望 unknown 行 951 → **213**（剩余 213 = 停用店，8 UV，属预期）、
-   ambiguous 18 → **0**、跨账号认领 1,946 → **0**、总行数/总 UV **不变**、别名 +6。
+4. `python temp/refresh_identity_mvs.py` 刷物化视图 ——
+   **清单由脚本自己从两个迁移文件解析 `_REQUIRED_REFRESH_TARGETS` 取并集 = 6 个**
+   （`shop_identity_resolution_candidates_v2_mv` / `fact_analytics_atomic_mv` /
+   `fact_analytics_monthly_atomic_mv` / `fact_orders_atomic_mv` /
+   `fact_orders_monthly_atomic_mv` / `fact_products_atomic_mv`），
+   顺序按依赖排列（候选集最先）；
+   ⚠️ **漏刷 `shop_identity_resolution_candidates_v2_mv` ⇒ TikTok 新别名不生效**
+   （别名表是实时读的，但候选集是它的**物化副本**）⇒ 720 行仍然落 `unknown`
+   ⇒ 验收必然不过 —— 所以这一步的清单**不能手写**（手写过一次，正好漏了这 3 个）。
+5. `python temp/verify_identity_remediation_outcome.py` 验收（**看退出码，不看打印文字**）：
+   - `0` ⇒ 通过：unknown 行 951 → **213**（剩余 213 = 停用店，8 UV，属预期）、
+     unknown UV 117,181 → **8**、ambiguous 18 → **0**、ambiguous UV 8,409 → **0**、
+     跨账号认领 1,946 → **0**、总行数/总 UV **不变**（3,634 / 683,497）、别名 **+6**；
+   - `2` ⇒ **迁移尚未落库**（版本链还没走到 `20261117`）⇒ **不算通过**；
+     此时指标等于订正前基线是正常的，要回头查第三步是否真的应用了
+     （看 `public.current_schema_alembic_version.version_num`），**绝不要**手工改版本表；
+   - `1` ⇒ 已落库但指标与目标不符 ⇒ 如实报告哪些指标不符。
 
 ⚠️ 两个迁移的 SQL 逻辑本身**已在真实开发库上单事务实测通过**（unknown 951→213、
 ambiguous 18→0、跨账号认领 1,946→0、幂等、回滚后完全复原）——
 即「订正本身是有效的」，待补的只是**走守护入口的正式落库**这一步。
+
+---
+
+### 13.7 自动续接已就位 + 交接脚本的三处修正（2026-11-07）
+
+按用户授权（「迁移落库被外部依赖阻塞时，设定时检查，就绪后自动跑完剩余步骤并报结果」），
+已注册定时任务接管 §13.6 的五步：
+
+| 项 | 值 |
+|---|---|
+| cronId | `644823b3-6593-45c4-8a67-ea7f980ba8eb` |
+| 名称 | 店铺身份订正 · 迁移落库自动续接 |
+| 频率 | `*/15 * * * *`（Asia/Hong_Kong） |
+| 绑定会话 | `sessionId` = 本会话（`mvs_706fd47e912847d09c642f7943b44884`） |
+| 每轮逻辑 | 先**只读**查 `main` 上有没有 `20261115` ⇒ 没有就一句话跳过、不做任何写操作；⇒ 有就按 §13.6 全流程跑完 |
+| 自删条件 | 仅当**验收脚本退出码为 0** 才 `cron_delete` 自删；任一步失败 ⇒ 保留任务等下一轮 |
+
+> ⚠️ 隔离纪律：任务 prompt 里写死「不要碰 `.worktrees/inventory-aging-pipeline-recovery`
+> 与 `.worktrees/product-center-stage0`」「不要在 main 上改除 20261116 迁移文件以外的任何文件」。
+
+**首轮已实测触发**（02:40:00，`triggerSource=scheduled`）；`main` HEAD 保持 `90facb9c`
+未被改动 —— 符合「依赖未就绪 ⇒ 只读检查后跳过」的预期。
+
+#### 交接脚本的三处修正（都是会**真实打断**自动流程的缺陷）
+
+| # | 缺陷 | 后果 | 修正 |
+|---|---|---|---|
+| ① | 三个交接脚本打印 `✓` / `⇒` / `⚠️`，而 Windows 控制台默认 **GBK** | 脚本在打印时抛 `UnicodeEncodeError`，**退出码非 0** ⇒ 自动流程把它们当成「这一步失败」而中止 | 脚本内 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`（顺带把乱码中文也修成可读） |
+| ② | 验收脚本的判定是**单向**的（`after <= before`） | 迁移**根本没落库**时，所有指标仍等于订正前基线 ⇒ 脚本照样打印「全部通过」+ 退出码 0 ⇒ 定时任务会**误判成功并自删**，自动续接能力就此丢失 | 改为「**先判迁移落没落库**（静态解析迁移链，判断版本表 head 是否在 `20261117` 的下游）⇒ 落库后再按**目标值严格比对**」；退出码 `0`=通过 / `2`=未落库 / `1`=指标不符 |
+| ③ | 刷新脚本的 MV 清单是**手写**的 3 个 | 漏了 `shop_identity_resolution_candidates_v2_mv`（别名生效的唯一入口）⇒ TikTok 720 行仍落 `unknown` ⇒ 验收必然不过 | 改为**从两个迁移文件解析 `_REQUIRED_REFRESH_TARGETS` 取并集**（= 6 个），顺序按依赖排列 |
+
+> 三者都在 `temp/`（已 gitignore）⇒ 不进仓库、不影响 `main` 的代码与迁移；
+> 但**会**影响自动流程的成败，所以必须修。
+
+#### 修正后的实测（2026-11-07，开发库仍是订正前状态）
+
+| 脚本 | 结果 |
+|---|---|
+| `temp/check_migration_chain.py` | 退出码 **0**，输出「[OK] 迁移链单头」；链单头（head = `20261117`），49 个迁移文件 |
+| `temp/refresh_identity_mvs.py`（只解析，不刷库） | 目标清单解析出 **6** 个，顺序 = 候选集 → analytics → analytics 月度 → orders → orders 月度 → products |
+| `temp/verify_identity_remediation_outcome.py` | 退出码 **2** + 明确报错「迁移尚未落库」⇒ **不会**在未落库时误判通过 |
+| `temp/verify_reconcile_matches_migration.py`（只读） | 矛盾行 1,946 / 口径一致 **1,946** / 不一致 **0** / 无法确定 **0** |
+
+
 
 
 
