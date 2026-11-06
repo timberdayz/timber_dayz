@@ -748,6 +748,13 @@ const roiGuarded = (row) => row.reference_cost_status !== "ready";
 - 草稿不拦截：`POST /drafts` 在目标ROI低于保本线时仍返回 201
 - ROI 来源标记：`target_roi` 落 profile、`actual_roi` 落 estimate，各带 `*_roi_source`
 
+> **实施调整（2026-11 落地）**：第一条用例在原成本模型下**不可达** ——
+> 缺物流规则 ⇒ `break_even_roi` 必为 `None`，「低于保本线」无从比较。
+> 解法不是放宽，而是引入**可证明的保本 ROI 下界**（把未知成本当 0 得上界，取倒数得下界）：
+> `target_roi < 下界 ≤ 真实保本线` ⇒ **可确定必亏** ⇒ 仍拦 `below_break_even_roi`
+> （`basis='lower_bound'`）。**证明成立才拦，证不出来交 `roi_cost_incomplete`**。
+> 详见 **附录 E.3**。
+
 ---
 
 ## 5. 阶段 3 · 广告分成率降级 + 字段瘦身
@@ -766,6 +773,18 @@ const roiGuarded = (row) => row.reference_cost_status !== "ready";
 - **存量 SKU 用 `等效目标ROI = 保本ROI ÷ s` 反解出 `target_roi` 初值**，源标记 `migrated_from_legacy_rate`
   （开发库现状：`sku_operating_profiles` 3 行全部 `expected_ad_rate = 0.15`，`dim_platforms` **没有广告费率默认列** → 这个 15% 是人工填的。**生产库的填充率必须先查**，见 §11 前置核查）
 - 字段 `expected_ad_rate` **保留**，不删列，只改语义标注
+
+> **实施调整（2026-11 落地）**：
+> - **两个口径是精确等式**（不是近似）：`target_roi = 保本ROI ÷ s ⇒ 商家实收 ÷ target_roi = 广告前利润 × s`
+>   ⇒ 反解再切回不改变利润（差异只来自 `Numeric(12,4)` 量化，≤0.01 元/单）。
+>   **这是存量反解可以放心做的前提。**
+> - 反解逻辑放在**服务层**（`product_target_roi_backfill_service.py`）而不是 alembic 迁移 ——
+>   保本ROI 需要完整的物流/仓储规则选取，在 SQL 里重写就是**第二份口径**。
+> - **生产库填充率已查**（§11.1 D1）：6 条全部 = 0.15，覆盖 4 个 SKU，`sku_profit_estimates` 0 行
+>   ⇒ **反解只影响 6 条，不需要分批策略**。
+> - 顺手修掉一个老缺陷：广告前利润 ≤ 0 时老写法算出**负广告费** ⇒ 亏损被缩小（乐观）。
+>   现改为广告预算 0、利润如实显示亏损。
+> - 详见 **附录 E.4**。
 
 ### 5.2 列瘦身
 
@@ -814,6 +833,9 @@ const roiGuarded = (row) => row.reference_cost_status !== "ready";
 
 **风险等级：低**（无人会被系统批量改动底线）。
 
+> **实施调整（2026-11 落地）**：本节的四样工具已实现，但**成交价口径与方案设想不同**，
+> 且「确认日期」约束需要先回填存量才能加。详见 **附录 E.5**（含三个口径坑与爆炸半径实测）。
+
 ### 6.1 交付的四样工具
 
 | # | 工具 | 实现 | 验收 |
@@ -837,6 +859,14 @@ const roiGuarded = (row) => row.reference_cost_status !== "ready";
 2. 加 CHECK 约束 `ck_dim_erp_sku_selling_price_source`
 3. `selling_price_confirmed_at` 加条件 NOT NULL 检查（有基准售价时必须有确认日期）—— 建议用 CHECK 而非 NOT NULL，因为历史数据有缺口
 
+> **实施调整（2026-11 落地）**：
+> - 迁移文件名实际为 **`20261121_selling_price_source_enum.py`**（挂在阶段 3 改名迁移之后）。
+> - 第 3 步**必须先回填确认日期再加约束**：存量有基准售价的行全部没有确认日期
+>   （生产 4 行 / 开发 18 行），不回填则约束加不上、迁移直接失败。
+>   回填用 **`created_at`**（记录进入系统的时间），**不能用 `updated_at`** —— 那是同步时间。
+> - 清洗规则细化：来源为空串且**有**基准售价 → `manual`；来源为空串且**无**基准售价 → `NULL`
+>   （没有价格就没有来源，不编造）。详见 **附录 E.5.3**。
+
 ### 6.3 阶段 4 测试
 
 - 基准售价即时预览：填基准售价时返回的「补齐后最低售价」与手算一致（成本线 28.23 / 基准售价 70 → 最低售价 63.00）
@@ -853,6 +883,14 @@ const roiGuarded = (row) => row.reference_cost_status !== "ready";
 2. `metric-status.md` 登记状态：建议先给 `observe` + `conditional`，待有实际投放数据后再升 `stable`
    （注意 `roas` / `mer` 当前是 `blocked`，见 `metric-status.md:28-29`，owner=marketing）
 3. `platform-mapping.md` 的 blocked 列表同步
+
+> **实施调整（2026-11 落地）**：实际登记了 **5 个**指标 ——
+> 方案要求的 3 个（保本ROI / 建议ROI / 广告前贡献毛利率），
+> 加上阶段 2.2 / 3 引入的两个**输入**（目标ROI / 平台报告ROI）。
+> 不登记这两个就正好是本节自己警告的「野生指标」。
+> 另补了 `metric-usage-matrix.md`（场景可用性）。
+> 两条关键澄清写进了文档：**不得用保本ROI/建议ROI 冒充 `roas`/`mer`**；
+> 「广告前贡献毛利率」「平台报告ROI」必须写全称（简称是禁用词）。详见 **附录 E.6**。
 
 ---
 
@@ -1768,3 +1806,296 @@ D.5 那轮的对照组是 main 的 `1e61a3c9`。阶段 2.1 合并 main（`74a32a
 | **`scripts/run_typecheck.py` 门禁已失效（既有缺陷）** | 脚本硬编码的检查目标 `backend/routers/dashboard_api.py` 在 `f34eee24`（2026-11-04「清理店铺分析等 5 个退役模块与配套死代码」）就被删了，而脚本自 2026-05-08 起再没改过 ⇒ **阶段 0 / 1 / 2.1 之前就已经跑不起来**（`mypy: error: Cannot read file 'backend\routers\dashboard_api.py'`）。本阶段用 mypy 单独跑存活目标补验，**通过**。修法：把退役的那个目标换成现存的等价入口（或直接删掉），属于既有排期，**不在本阶段改** |
 | 全量回归的测试隔离问题 | 见 D.5.1：多会话并发下会卡死（`starlette.testclient` 阻塞 portal 不返回），**main 同样复现** ⇒ 非阶段 2.1 引入。建议单独立项修测试隔离，不要挂在阶段 2.1 上 |
 
+---
+
+## 附录 E · 阶段 2.1b / 2.2 / 3 / 4 / 5 实施记录（2026-11 完成）
+
+> 本附录记录 **阶段 2.1b（人工覆盖下沉）、2.2（ROI 输入与判定）、3（广告分成率降级 + 改名 + 反解）、
+> 4（基准售价工具）、5（指标口径登记）** 的实际改动、与原方案的偏离、实测数据与验证结果。
+> 方案正文对应位置都加了「实施调整」提示，以本附录为准。
+
+### E.0 分支与提交
+
+| 提交 | 内容 |
+|---|---|
+| `32462047` | 阶段 2.1b：人工覆盖下沉到「SKU × 平台」+ SKU 资料页按平台分行 + 删旧列迁移 |
+| `f898222e` | 阶段 2.1b 遗留三处修复（**含一个真 bug**，见 E.2） |
+| `e7b323cc` | 阶段 2.2 后端：ROI 投放输入与护栏判定 |
+| `898a2ad8` | 阶段 2.2 前端：两个 ROI 手填列 + 三色判定 + 归因警示 |
+| `37d22ef9` | 阶段 3：广告分成率降级 + 15 项列改名 + 存量反解 + 档位改名 |
+| （阶段 4 + 5） | 见 E.9 提交表 |
+
+工作位置：`.worktrees/product-center-stage0`（分支 `feature/product-center-stage0`）。
+**阶段 2.1b–5 尚未合并回 main**（合并与验收见 E.10）。
+
+---
+
+### E.1 阶段 2.1b · 人工覆盖下沉到「SKU × 平台」
+
+**为什么必须做**：阶段 2.1 把底线变成了 SKU × 平台的量，但人工覆盖还挂在
+`core.dim_erp_sku.min_selling_price_override`（**公司级单值**）。一个数套所有平台，
+而各平台费率差一截（TikTok 27.27% vs Shopee 41.65%）⇒ 口径错位。
+
+**改动**：
+
+| 文件 | 改动 |
+|---|---|
+| `modules/core/db/schema_parts/business.py` | 新表 `finance.sku_platform_pricing`（SKU × 平台 → 人工覆盖）。**刻意不带外键** |
+| `modules/core/db/schema_parts/dimensions.py` | 删 `DimErpSku.min_selling_price_override` + 加 CHECK |
+| `current_migrations/versions/20261118_sink_manual_override_to_platform.py` | 摘外键 → 旧值复制到**每个可定价销售平台** → 删旧列。downgrade 反向取字典序最小 |
+| `backend/services/product_pricing_override_service.py` | 新增：`set/clear/get_platform_override`（值必须 > 0） |
+| `backend/domains/business/routers/product_center.py` | 新增 `PATCH /api/skus/{sku_id}/pricing-override`（错误码 `pricing_override_unknown_platform` / `pricing_override_platform_not_sales`） |
+| `backend/schemas/product_center.py` | `list_skus` 返回 `min_selling_price_by_platform`；三个写模型移除旧字段；新增 `SkuPricingOverrideRequest/Response` |
+
+**迁移里发现的三处真实数据丢失隐患**（这是本阶段最重要的产出）：
+
+1. **旧列会被同步抹掉**：`scripts/sync_product_center_to_cloud.py:290` 对
+   `core.dim_erp_sku` 做 `TRUNCATE ... RESTART IDENTITY CASCADE` ⇒ 人工覆盖每次同步都蒸发。
+2. **PostgreSQL 的 `TRUNCATE CASCADE` 不看引用侧的 `ondelete`**：只要有外键指着被清空的表，
+   那张表就一起被清空（开发库 `pg_constraint` 实证）⇒ 新表**必须**不带外键。
+3. **连带清空的范围比想象大**：全仓 8 张表被连带清空，其中 `core.dim_shops`（既有，55 行）
+   **不在同步清单内** —— 它是被别人的外键连带清掉的。
+
+⇒ **结论**：凡是「运营手工维护、且要活过同步」的量，都不能住在 `core.dim_erp_sku` 里。
+覆盖值因此落在 `finance.sku_platform_pricing`（不参与同步）。
+
+---
+
+### E.2 阶段 2.1b 遗留修复（`f898222e`）
+
+| # | 问题 | 性质 |
+|---|---|---|
+| 1 | **人工覆盖在不传平台时被静默忽略** | **真 bug**：`compute_pricing_state` 里费率走回落后的 basis 平台，覆盖却按原始 `platform_code=None` 查 ⇒ 两处不是同一个平台。改用 `resolve_pricing_platform_code()` 出来的**实际生效平台**查覆盖，并补回归 `test_manual_override_applies_even_when_platform_is_not_passed` |
+| 2 | 迁移 `20261118` 在**没有 `mart` 表**的环境里卡死 | 视图正文查 `mart.inventory_state`，而 `mart.*` 是数据管道物化表、不在 ORM 元数据里 ⇒ 全新安装会挂。新增 `_clearance_view_exists()` 守卫 |
+| 3 | 测试种子清理漏了 `finance.sku_platform_pricing` | 覆盖行留着会污染下一个用例 |
+
+---
+
+### E.3 阶段 2.2 · ROI 投放输入与判定
+
+**两个手填输入**：
+
+| 输入 | 落点 | 来源标记 |
+|---|---|---|
+| **目标ROI** | `finance.sku_operating_profiles.target_roi` | `user_input` / `migrated_from_legacy_rate` / `platform_report` |
+| **平台报告ROI** | `finance.sku_profit_estimates.actual_roi` | 同上 |
+
+**护栏**（`BusinessValidationError`，顶层无 `detail` 键）：
+
+| 错误码 | 行为 |
+|---|---|
+| `below_break_even_roi` | **拦**（目标 ROI 低于保本线） |
+| `roi_cost_incomplete` | **拦**（成本不全 ⇒ 保本线不可信） |
+| `roi_out_of_platform_range` | **只提示不拦**（走响应 `roi_warnings`） |
+
+- 护栏顺序：ROI 护栏排在「资料完整性」校验**之前**。
+- **平台报告ROI 低于保本线只标红不拦** —— 拦了就等于不许记录亏损投放。
+- **草稿不拦截**（草稿是「还在填」的中间态）。
+
+**保本 ROI 下界（方案 §4.4 的可达性问题与解法）**：
+
+方案 §4.4 要求「目标ROI 低于保本线且缺物流规则 ⇒ 返回 `below_break_even_roi`」。
+但在原成本模型下这**不可达**：缺物流 ⇒ `break_even_roi` 必为 `None`。
+
+解法不是放宽，而是引入**可证明的下界**：
+
+```
+未知成本真值 ≥ 0
+⇒ 真实 pre_ad_profit ≤ 把未知成本当 0 算出的 pre_ad_profit 上界
+⇒ 真实 break_even_roi = 商家实收 ÷ 真实 pre_ad_profit ≥ 商家实收 ÷ 上界 = 保本 ROI 下界
+```
+
+于是 `target_roi < 下界 ≤ 真实保本线` ⇒ **可确定必亏** ⇒ 仍拦 `below_break_even_roi`
+（`basis='lower_bound'`）。**证明成立才拦，证不出来交 `roi_cost_incomplete`** ——
+既满足方案字面要求，又不违反「缺输入宁可不算不可乐观」。
+
+---
+
+### E.4 阶段 3 · 广告分成率降级 + 列改名 + 存量反解
+
+**主输入收敛为「目标ROI」**：广告费用 = 商家实收 ÷ 目标ROI；老口径「广告分成率」降级为
+**高级逃生口**（默认折叠，`showAdRateEscape` ref + 全局 checkbox），旁边永远并排显示「等效目标ROI」。
+
+**两个口径是精确等式（不是近似）**：
+
+```
+target_roi = 保本ROI ÷ s = (revenue ÷ pre_ad_profit) ÷ s
+⇒ revenue ÷ target_roi = pre_ad_profit × s
+```
+
+差异只来自 `Numeric(12,4)` 量化（≤ 0.01 元/单）。**这是存量反解可以放心做的前提**。
+
+**存量反解**（`backend/services/product_target_roi_backfill_service.py` +
+`scripts/migrate_legacy_ad_rate_to_target_roi.py`，**默认干跑，`--apply` 才写库**）：
+
+- 复用页面同一个 `preview_platform_sku_profit` 算保本ROI —— **不在 SQL 里重写物流/仓储规则选取**
+  （那是第二份口径）；
+- 写库前逐行**自证等价**（广告费/利润差 > 0.01 就跳过）；保本ROI 算不出来就跳过；
+- 只动 `target_roi IS NULL` ⇒ 幂等。
+
+**开发库实测**：3 行扫到、1 行反解成功（`target_roi 58.1395`，来源 `migrated_from_legacy_rate`，
+广告费 0.52→0.52、利润 2.92→2.92 完全不变）、2 行因成本不全跳过。
+**生产库实测**：`finance.sku_operating_profiles` 6 条、`expected_ad_rate` 全部 0.15
+（无 null、无 0、1 个 distinct 值），覆盖 4 个 SKU；`finance.sku_profit_estimates` 0 行
+⇒ **反解只影响 6 条，不需要分批策略**。
+
+**顺手修掉的老缺陷：广告费不能是负数**。老写法 `ad_cost = pre_ad_profit × s` 在
+`pre_ad_profit ≤ 0` 时算出**负广告费** ⇒ 亏损被缩小（乐观）。
+改为：广告前利润 ≤ 0 ⇒ 广告预算 0（这品不该投广告），利润如实显示亏损。
+
+**档位身份 vs 显示名**：档位**身份** = `min_restock_days`（`pricing_tier_min_restock_days`），
+通知归因改比身份；显示名可改，改名不能引发通知风暴。
+档位改名（滞销30天→库龄≥60天 等）时，迁移同时改 `sku_pricing_policies.tier_label`
+**与** `price_adjust_baselines.last_notified_context` JSONB 里的同名字段。
+
+**15 项列改名**（§8 / §5.2）见方案正文改名总表；同时**移除重复的「物流方式」列**。
+
+---
+
+### E.5 阶段 4 · 基准售价工具
+
+**归属决策（Q6 已定）**：基准售价由**对应运营自己填**，系统侧只给工具，
+**不推动批量补齐、不替业务判断价格**。
+
+| 工具 | 实现 | 验收 |
+|---|---|---|
+| 1 来源可追溯 | `selling_price_source` 改枚举 `platform_listing` / `erp` / `manual` + DB CHECK + 历史自由文本清洗 | 枚举 CHECK 生效；历史已清洗 |
+| 2 确认日期 | `selling_price_confirmed_at` 自动写入（价格变了 ⇒ 日期跟着走；价格清空 ⇒ 日期清空）+ SKU 资料页输入 | 填值自动写当天 |
+| 3 **即时影响预览** | `POST /api/skus/{sku_id}/selling-price-preview`，按平台返回「从 X 变为 Y（±Z%）」+ 原因 | 预览值 = 保存后的真实值 |
+| 4 偏差校验 + 过期巡检 | `GET /api/skus/selling-price-check` + `scripts/check_selling_price_deviation.py` | 算不出就不给结论 |
+
+#### E.5.1 工具 3 的核心保证：预览 = 保存后的真实结果
+
+预览**不另写一套算法**：现在值与预览值都走 `compute_pricing_state`（共享定价入口），
+只是把同一个函数用旧价、新价各跑一遍。测试 `test_preview_matches_the_pricing_computed_after_saving`
+直接断言「预览的 `min_selling_price_preview` == 保存后重算的 `min_selling_price`」。
+
+人工覆盖**直接替换**底线 ⇒ 预览必须说「改了也不用」，而不是显示成「涨到 63」。
+这由 `override_locked` 标记承担。
+
+#### E.5.2 工具 4 的「历史成交价」口径（三个坑，都踩过）
+
+| # | 坑 | 结论 |
+|---|---|---|
+| 1 | 语义视图的 `order_original_amount` 是**平台币种**（MYR）且**含运费** | 实测同一行 `订单原始金额` = 264.0 而 `订单原始金额(RMB)` = 28.17，**差 9 倍**（差额是运费补贴与折扣）。直接当单价用 ⇒ 中位数抬到 2~3 倍 ⇒ **偏差校验变成全线报警的假阳性机器**（18 个有价 SKU 里 15 个被误判） |
+| 2 | `core.dim_exchange_rates` 的汇率是 **2025-11-01 手工种子值**，已陈旧近一年 | 改用订单事实表 `raw_data` 里的 **`(RMB)` 版本**（妙手系统自己折算的人民币金额），顺带绕开汇率表 |
+| 3 | `core.bridge_erp_sku_keys` 的 `source_platform` 是**字面量 `'miaoshou'`**（来源系统），不是 shopee/tiktok | 按 `source_platform` 一起 join ⇒ **命中 0 行**。必须**只按 `source_key` join**（实测订单侧 31,199 行商品键 **100%** 命中，且无任何 `source_key` 对应多个 SKU ⇒ 无歧义） |
+
+最终口径：**成交价 = 买家实付金额（CNY）/ 数量**，只统计**已完成/已发货**的订单
+（`已关闭` 占 10%~14%，混进来会拉偏中位数），统计窗口相对**数据里最新的一天**
+（采集管道可能滞后，按「今天往前 180 天」会取到空集）。
+
+#### E.5.3 确认日期约束的爆炸半径（实施中实测）
+
+`ck_dim_erp_sku_selling_price_confirmed`（有基准售价 ⇒ 必须有确认日期）会让
+**「有价无确认日期」的 INSERT 直接失败**。全仓扫描结果：
+
+- 生产代码里只有两个写入点（`create_sku` / `bulk_save_skus`），已由自动写入覆盖 ✔；
+- `sync_inventory_skus` 建的新行**没有基准售价** ⇒ 不受影响 ✔；
+- ERP 导入链路**根本不写这个字段** ✔；
+- **云同步脚本**复制全部列 ⇒ 迁移先回填确认日期，同步才带得过去 ✔；
+- ⚠️ **测试夹具**有 4 处插入「有价无日期」的 SKU（`conftest.py`、
+  `test_sku_platform_pricing.py`、`test_sku_platform_pricing_override.py`、
+  `test_price_adjust_notification.py`）⇒ 已按新 schema 补上确认日期。
+
+**迁移回填用 `created_at` 而不是 `updated_at`**：`updated_at` 是「采集机 → 云端」同步的时间
+（生产库实测：两条 SKU 的 `updated_at` 就是同步当天），拿它回填会让所有历史价格
+看起来「刚确认过」，过期巡检就永远不会报警。
+
+#### E.5.4 实施中发现的业务事实
+
+- 生产库 `core.dim_erp_sku` 4 个 SKU 有基准售价，其中 2 个来源为 NULL、1 个是空串
+  ⇒ 迁移后 4 个全部归一到 `manual`，4 个全部补上确认日期（用 `created_at`）。
+- 开发库 18 个 SKU 有基准售价、全部无确认日期 ⇒ 迁移后 18 个全部补上。
+- **偏差校验揭示的存量问题**：按最终口径，开发库 16 个可比对 SKU 里 15 个偏差 > 30%。
+  抽查发现 `SBF001-*` 一族的「基准售价」恰好等于该 SKU 的**采购成本**（如 `SBF001-KDM-035`
+  基准售价 22.5 = 采购成本 22.5），而实际成交价中位数是 34.68 ——
+  **这些行的基准售价像是把采购成本填成了基准售价**。这不是工具的误报，是工具报出来的真问题。
+
+---
+
+### E.6 阶段 5 · 指标口径登记
+
+**纯文档，无代码**。登记了 5 个指标（方案 §7 要求的 3 个 + 阶段 2.2/3 引入的 2 个输入）：
+
+| 指标 | 标准键 | 状态 |
+|---|---|---|
+| 保本 ROI | `break_even_roi` | `observe` / `conditional` |
+| 建议 ROI | `suggested_roi` | `observe` / `conditional` |
+| 广告前贡献毛利率 | `advertising_contribution_margin_rate` | `observe` / `conditional` |
+| 目标 ROI | `target_roi` | `observe` / `conditional` |
+| 平台报告 ROI | `platform_reported_roi` | `observe` / `conditional` |
+
+改动文件：`metrics-dictionary.md`（正式定义：公式、维度、口径声明、禁用词提醒）、
+`metric-status.md`（状态登记）、`metric-usage-matrix.md`（场景可用性）、
+`platform-mapping.md`（ROI 一节 + blocked 列表同步）。
+
+**两条关键澄清**（写进文档，防止被误用）：
+
+1. **不得用「保本 ROI / 建议 ROI」冒充 `roas` / `mer`**：前者是投放**前**算的**财务边界**，
+   后者是投放**后**的**实际回报**（至今没有统一系统口径，仍 `blocked`）。
+2. **命名纪律**：「广告前贡献毛利率」必须写全称（单独的「毛利率」是禁用词）；
+   「平台报告 ROI」必须写全称（单独的「实际 ROI」是禁用词 —— 本仓库的「实际」指**实际成本**）。
+
+---
+
+### E.7 与原方案的差异（实施中修正）
+
+| # | 方案原写法 | 实际改成 | 为什么 |
+|---|---|---|---|
+| 1 | §4.4「目标ROI 低于保本线且缺物流规则 ⇒ 返回 `below_break_even_roi`」 | 引入**保本 ROI 下界**（可证明必亏）后才拦 | 原成本模型下该判定**不可达**（缺物流 ⇒ 保本线必为 None）。解法是引入可证明的下界，而不是放宽判定 |
+| 2 | §6.2 迁移只写「清洗来源 + 两个 CHECK」 | 额外要求**回填确认日期**才能加约束 | 有基准售价但没确认日期的存量行会被新 CHECK 拒绝 ⇒ 不先回填，迁移直接失败 |
+| 3 | §6.1 工具 4「与历史成交价中位数偏差」 | 口径定为**买家实付金额（CNY）/ 数量**、只看已完成订单、窗口相对数据最新日 | 语义视图那一列是平台币种且含运费（差 9 倍）⇒ 按原口径做，工具会变成全线报警的假阳性机器 |
+| 4 | §6.1 工具 4 的「join `bridge_erp_sku_keys`」 | 只按 `source_key` join，**不加** `source_platform` | 别名表里的 `source_platform` 是字面量 `'miaoshou'`，加上这个条件命中 **0 行** |
+| 5 | §7 登记 3 个指标 | 登记 **5 个** | `target_roi` / `platform_reported_roi` 是阶段 2.2/3 引入的真实系统指标，不登记就正好是「野生指标」 |
+
+---
+
+### E.8 生产库部署前置（2026-11 实测，只读）
+
+| 项 | 生产现状 | 影响 |
+|---|---|---|
+| `core.alembic_version` | `20260805_payroll_backfill_audit` | 生产**尚未纳入** `current_migrations` 链（`current_schema_20260805` 基线就是从这个历史版本生成的静态 DDL）⇒ 阶段 2.1/2.1b/2.2/3/4 的迁移都要经「历史库采纳」流程上生产 |
+| `finance.sku_platform_pricing` | **不存在** | 阶段 2.1 未上生产 |
+| `target_roi` / `actual_roi` 列 | **不存在** | 阶段 2.2 / 3 未上生产 |
+| `core.bridge_erp_sku_keys` | 1118 行，**全部 `product-catalog` 源**，**没有 `miaoshou` 源** | ⚠️ **阶段 4 的偏差校验在生产上算不出任何 SKU**（全部落「算不出」）。生产要让别名表补上 miaoshou 源（属库存管道那条线的产出）才有效 |
+| `semantic.fact_orders_atomic` | 38,607 行 | 订单原料在，缺的是别名映射 |
+| 飞书投影 | **生产是启用的**（`ops.feishu_projection_configs` 存在，181 条投影任务） | ⇒ **阶段 3 的飞书字段改名不能单独上**（飞书表列名是已建表的契约，只改代码会写入报 field validation failed）。必须与「飞书表列改名」同窗口做 —— **已知遗留** |
+
+---
+
+### E.9 提交与验证
+
+| 阶段 | 提交 | 结果 |
+|---|---|---|
+| 阶段 2.1b | `32462047` | 受影响测试 **126 passed**；迁移三步可重复；前端 **51 passed** + vite build ✓ |
+| 阶段 2.1b 遗留 | `f898222e` | guardrails **44 passed**；2.1b 迁移测试 **12 passed**；开发库 downgrade 两级 → upgrade head 往返成功 |
+| 阶段 2.2 后端 | `e7b323cc` | `test_sku_roi_guard` **20 passed**；受影响集 **235 passed**；开发库 4 个新列在位 |
+| 阶段 2.2 前端 | `898a2ad8` | 前端 **57 passed** + build ✓ |
+| 阶段 3 | `37d22ef9` | `test_product_target_roi_backfill` **12 passed**；受影响后端 **150 passed**；前端 **62 passed** + build ✓；开发库档位名与基线快照一致（1122 条） |
+| 阶段 4 后端 | `71b30faf` | 新增 `test_sku_selling_price_tools` **34 passed**；受影响集 **224 passed**；迁移 upgrade→downgrade→upgrade 可重复、单 head `current_schema_20261121_selling_price_source_enum`；开发库 18 个有价 SKU 全部补上确认日期、两个 CHECK 实测会拒 |
+| 阶段 4 前端 | `0ae5e05e` | `node --test tests/productCenterUi.test.mjs` **72 passed**（基线 62 + 新增 10）；`npx vite build` ✓（12.14s）；禁用词表 0 命中；ProductCenter.vue 行尾风格未变（全 CRLF 3300 行） |
+| 阶段 5 | `db2fc9fc` | 5 个指标进字典 / 状态 / 矩阵 / 平台映射；两条关键澄清（不得用保本ROI/建议ROI 冒充 `roas`/`mer`；平台报告ROI 达标 ≠ 赚钱） |
+| 提交态复验 | — | 定向 6 个测试文件 **103 passed**；`scripts/run_lint.py` → **All checks passed!**；迁移三步可重复、单 head |
+
+#### E.9.1 阶段 4 前端顺带对齐的一处口径不一致
+
+前端 `PRICING_SOURCE_LABELS.discount_guard` 原本写「折扣纪律」，后端
+`product_selling_price_service.PRICING_SOURCE_LABELS` 写「基准售价纪律」。
+同一个东西在**同一个页面**上出现两个名字（预览提示文字来自后端、
+来源标签来自前端），运营会以为是两回事 —— 后端的注释里也明确写了「两边必须一致」。
+
+已把前端改成「基准售价纪律」，与后端逐字一致。
+
+⚠️ **还有一处没改**：`frontend/src/domains/business/views/inventory/InventoryAging.vue`
+的 `minSellingPriceSourceLabel` 仍写「折扣护栏」。那是**库存库龄**页、属于另一个
+会话的域（`feature/inventory-aging-pipeline-recovery`），本分支不动它，
+避免与那边的改动撞车。⇒ 合并后应与库存管道那条线一起把三处名字收敛成一种。
+
+---
+
+### E.10 合并回 main 与验收
+
+（合并、main 上复验、全量回归对比结果在合并完成后回写。）
+
+---
