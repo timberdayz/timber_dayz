@@ -2012,6 +2012,29 @@ target_roi = 保本ROI ÷ s = (revenue ÷ pre_ad_profit) ÷ s
   基准售价 22.5 = 采购成本 22.5），而实际成交价中位数是 34.68 ——
   **这些行的基准售价像是把采购成本填成了基准售价**。这不是工具的误报，是工具报出来的真问题。
 
+#### E.5.5 单测全绿却跑不起来的 SQL（`bf478b8b`，真库跑出来才暴露）
+
+阶段 4 的单测、迁移三步、前端构建**全绿**，但拿开发库真数据一跑，
+**偏差校验的 SQL 当场炸掉**。两个错误：
+
+| # | 错在哪 | 为什么单测没抓到 |
+|---|---|---|
+| 1 | `IN :statuses` —— PostgreSQL 要求 `IN` 后面跟括号里的表达式列表，`IN $1` 是**语法错误**（asyncpg 下必炸） | 单测只测了纯函数 `assess_selling_price_deviation`，**从没让这条 SQL 落到真库上** |
+| 2 | CTE 命名为 `window` —— 那是 PostgreSQL 的保留字（窗口函数帧的关键字），直接语法错误 | 同上 |
+
+处置：列表参数改成 SQLAlchemy 的 `bindparam(..., expanding=True)`
+（渲染成 `IN ('已完成', '已发货')`，psycopg2 / asyncpg 都安全）；
+CTE 改名 `date_window`；顺手修掉 `percentile_cont` 的 float → Decimal 二进制误差
+（126.2 曾经变成 126.2000000000000028421709430404007…，页面会显示一串天书）。
+
+**并补两条真正打到 PostgreSQL 的集成测试**（`pg_session` fixture，asyncpg 驱动，
+与生产同驱动）：建一张最小的 `semantic.fact_orders_atomic`，插 5 笔成交 + 1 笔「已关闭」，
+断言中位数 = 80、样本数 = 5、窗口末日 = 数据最新日、没有成交记录 ⇒ 结果里没有这个 SKU。
+
+教训（值得写进仓库）：**「纯函数测过」不等于「这条 SQL 能跑」**。
+凡是直接手写 SQL 的读路径，必须有一条能在真 PostgreSQL 上落地的集成测试；
+`text()` 里的列表参数一律用 `expanding=True`，`IN` 后面永远带括号。
+
 ---
 
 ### E.6 阶段 5 · 指标口径登记
