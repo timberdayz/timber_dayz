@@ -276,6 +276,15 @@ class ProductCenterItem(BaseModel):
     actual_storage_cost: Optional[float] = None
     data_completeness: Optional[str] = None
     updated_at: Optional[datetime] = None
+    # ⚠️ SPU 软删标记（dim_spu.active）。**这个字段以前根本不在响应里**，
+    # 而前端多处依赖它：`row.active === false` 决定「恢复」按钮是否出现、
+    # 「删除」按钮是否禁用、批量软删选中项过滤、以及整行灰显。
+    # 字段缺失 ⇒ 这些判断全部恒为 false ⇒
+    #   * 已软删的 SPU 在 UI 上**看不出自己被删了**（不灰显）；
+    #   * 「恢复」按钮**永远不出现** ⇒ 软删成了不可逆操作；
+    #   * 已软删的 SPU 仍能被选中、仍能被再次软删。
+    # 只对 SPU 有值；SKU 行没有 active 列（SKU 用 status），恒为 None。
+    active: Optional[bool] = None
     # --- SKU 定价底线（全部 Optional：ProductCenterItem 会被用于校验裸 ORM 行）---
     creator_commission_rate: Optional[float] = None
     creator_commission_rate_fallback: Optional[float] = None
@@ -817,10 +826,16 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     seller_coupon_amount: Optional[float] = None
     expected_ad_rate: Optional[float] = None
     actual_logistics_cost: Optional[float] = None
+    # 实际仓储成本：**恒为 None**。系统里不存在仓储费账单（LogisticsBill 的费用构成
+    # 全是运费），只有 WarehouseStorageRule 的规则预估。保留字段是为了不破坏契约，
+    # 但**前端不应展示它**（展示恒空列只会误导），UI 上该列已删除。
     actual_storage_cost: Optional[float] = None
     platform_fee_rate: Optional[float] = None
     logistics_damage_rate: Optional[float] = None
     return_loss_rate: Optional[float] = None
+    # ⚠️ 这里说的是「经营档案配没配」，**不是成本完整度**。
+    # 以前前端把它当完整度的兜底值，导致「重估完整度」列在缺失时显示 configured/unconfigured
+    # —— 两种不相干的语义混在一列。前端已改为不再使用它。
     configuration_status: str
     turnover_class: Optional[str] = None
     reference_storage_days: Optional[int] = None

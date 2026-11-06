@@ -35,6 +35,14 @@ from backend.models.database import DATABASE_URL
 
 
 # Tier-1 product-center tables, in FK-safe insert order (parents first).
+#
+# ⚠️ `finance.sku_pricing_policies`（库龄档位规则表）**必须**在清单里。
+# 它没有任何外键 —— 不引用别的表，也没有别的表引用它 —— 所以：
+#   - TRUNCATE 其它表时的 CASCADE **不会**把它一起清掉；
+#   - 它自己也不会被本脚本的 INSERT 覆盖。
+# 结果就是：云端这张表会**永远停留在从未被同步过的状态**（空表，或某次手工导入的旧规则）。
+# 后果是「最低售价」这条底线在云端整体算不出来，或按过期档位算出与本地不一致的数。
+# 这是静默失败 —— 表在、行数校验也过，只有业务结果不对。
 PRODUCT_CENTER_TABLES = [
     ("core", "dim_platforms"),
     ("core", "dim_warehouses"),
@@ -42,6 +50,8 @@ PRODUCT_CENTER_TABLES = [
     ("finance", "product_cost_assumption_profiles"),
     ("finance", "warehouse_storage_rules"),
     ("finance", "logistics_provider_rules"),
+    # 档位规则表：公司级库龄档位 → 最低售价的唯一来源（无外键，可放任意位置）
+    ("finance", "sku_pricing_policies"),
     ("core", "dim_spu"),
     ("core", "dim_erp_sku"),
     ("core", "bridge_erp_sku_keys"),
@@ -53,6 +63,14 @@ PRODUCT_CENTER_TABLES = [
     ("finance", "logistics_bill_purchase_orders"),
     ("finance", "sku_profit_estimates"),
 ]
+
+# 同步后必须非空的关键表 —— 空了就说明"底线算不出来"或"主数据没同步过去"。
+# 这些表为空时业务无法工作，但行数校验本身不会报错，属于静默失败。
+CRITICAL_TABLES = (
+    ("core", "dim_erp_sku"),
+    ("core", "dim_spu"),
+    ("finance", "sku_pricing_policies"),
+)
 
 # Truncate order = reversed (leaves first, CASCADE handles the rest).
 TRUNCATE_ORDER = list(reversed(PRODUCT_CENTER_TABLES))
@@ -163,7 +181,10 @@ def cmd_plan(_args) -> int:
         print(f"\n[ABORT] {len(missing)} table(s) missing on cloud: {', '.join(missing)}")
         return 1
 
-    print("\n[OK] All 16 tier-1 product-center tables present on both sides.")
+    print(
+        f"\n[OK] All {len(PRODUCT_CENTER_TABLES)} tier-1 product-center tables "
+        "present on both sides."
+    )
     print("Next: run `backup` then `overwrite --i-understand-this-overwrites-cloud`.")
     return 0
 
@@ -234,6 +255,26 @@ def cmd_overwrite(args) -> int:
             print(f"[ABORT] {schema}.{table} missing on cloud. Refusing to truncate.", file=sys.stderr)
             return 1
 
+    # 【破坏性操作之前的闸门】源表关键内容为空时拒绝清空云端。
+    # TRUNCATE 一旦提交就撤不回来，所以必须在它之前拦。
+    # sku_pricing_policies 为空 ⇒ 云端所有 SKU 都会落进 missing_pricing_policy
+    # ⇒ 最低售价（底线）整体算不出来、护栏同时失效 —— 这时候云端哪怕还有一份能用的旧规则，
+    # 也不该被一份没有规则的源库覆盖掉。
+    empty_source = []
+    for schema, table in CRITICAL_TABLES:
+        n = _count_rows(local_engine, schema, table)
+        print(f"  [GATE] source {schema}.{table}: {n} rows")
+        if not n:
+            empty_source.append(f"{schema}.{table}")
+    if empty_source:
+        print(
+            "[ABORT] 本地源表为空："
+            + ", ".join(empty_source)
+            + " —— 拒绝清空云端（底线会整体算不出来）。请先补齐本地数据。",
+            file=sys.stderr,
+        )
+        return 1
+
     # Truncate in reverse order (leaves first). CASCADE handles the rest.
     print("\n[STEP 1] Truncate cloud tables (reverse order)")
     with cloud_engine.begin() as conn:
@@ -272,6 +313,25 @@ def cmd_overwrite(args) -> int:
     print("\n[STEP 3] Summary")
     for schema, table, n in summary:
         print(f"  {schema}.{table}: {n} rows")
+
+    # 复制完成后的关键表校验：源表非空（上面已 gate），这里确认云端确实拿到了行。
+    failed = []
+    for schema, table in CRITICAL_TABLES:
+        cloud_n = _count_rows(cloud_engine, schema, table)
+        local_n = _count_rows(local_engine, schema, table)
+        ok = cloud_n == local_n and cloud_n > 0
+        if not ok:
+            failed.append(f"{schema}.{table} (local={local_n}, cloud={cloud_n})")
+        print(f"  [CHECK] {schema}.{table}: cloud={cloud_n} local={local_n} {'OK' if ok else 'FAIL'}")
+    if failed:
+        print(
+            "[FAIL] 关键表校验未通过："
+            + "; ".join(failed)
+            + " —— 云端底线可能算不出来，请重跑 sync 并检查 verify。",
+            file=sys.stderr,
+        )
+        return 1
+
     print("\n[DONE] Overwrite complete. Run `verify` to confirm row counts match.")
     return 0
 
@@ -291,7 +351,25 @@ def cmd_verify(_args) -> int:
     if mismatches:
         print(f"\n[FAIL] {mismatches} table(s) have row-count mismatches.")
         return 1
-    print("\n[OK] All 16 tier-1 product-center tables match.")
+
+    # 行数对得上不等于能用：关键表为空 ⇒ 底线算不出来。
+    empty_critical = []
+    for schema, table in CRITICAL_TABLES:
+        n = _count_rows(cloud_engine, schema, table)
+        if not n:
+            empty_critical.append(f"{schema}.{table}")
+        print(f"  [CHECK] {schema}.{table}: {n} rows")
+    if empty_critical:
+        print(
+            "\n[FAIL] 云端关键表为空："
+            + ", ".join(empty_critical)
+            + " —— 最低售价会整体算不出来（missing_pricing_policy）。"
+        )
+        return 1
+
+    print(
+        f"\n[OK] All {len(PRODUCT_CENTER_TABLES)} tier-1 product-center tables match."
+    )
     return 0
 
 

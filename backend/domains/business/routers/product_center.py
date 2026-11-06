@@ -1196,6 +1196,7 @@ async def _compute_sku_min_selling_price(db: AsyncSession, sku_id: int) -> Decim
 async def list_skus(
     keyword: str | None = Query(None),
     spu: str | None = Query(None),
+    status: str | None = Query(None, description="按 SKU 状态过滤（active/inactive/...）；不传则不过滤"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
@@ -1214,6 +1215,10 @@ async def list_skus(
                 )
             )
         )
+    if status:
+        # 停用 SKU 与在售 SKU 之前是混排的，工具栏又没有状态筛选器，
+        # 运营只能靠翻页找。dim_erp_sku.status 上有索引（ix_dim_erp_sku_status）。
+        filters.append(DimErpSku.status == status)
     total = int((await db.execute(select(func.count()).select_from(DimErpSku).where(*filters))).scalar() or 0)
     rows = (await db.execute(select(DimErpSku).where(*filters).order_by(DimErpSku.sku_key).offset((page - 1) * page_size).limit(page_size))).scalars().all()
     sku_ids = [row.sku_id for row in rows]
@@ -2810,7 +2815,14 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
             actual_recost_profit=preview["actual_recost"].get("profit"), actual_recost_margin_rate=preview["actual_recost"].get("margin_rate"), actual_recost_completeness=preview["actual_recost"].get("completeness"),
             logistics_cost_variance=preview["variance"].get("logistics"), storage_cost_variance=preview["variance"].get("storage"), total_cost_variance=preview["variance"].get("total"),
             reference_storage_days=preview.get("reference_storage_days"), storage_rule_id=preview.get("reference_storage_rule_id"), storage_rule_version=preview.get("reference_storage_rule_version"),
-            estimated_contribution_profit=section.get("profit"), estimated_margin_rate=section.get("margin_rate"), cost_completeness=section.get("completeness", "complete"), confidence_level="medium",
+            estimated_contribution_profit=section.get("profit"), estimated_margin_rate=section.get("margin_rate"),
+            # ⚠️ `cost_completeness` 这一列的语义是「**参考成本**（预估口径）齐不齐」，
+            # 取值域 complete/partial/incomplete。必须**固定取 expected 段**，
+            # 不能取 `section` —— 因为 section 会随 basis 在 expected / actual_recost 之间变，
+            # 而 actual_recost 段的 completeness 是另一套值域（incomplete/estimated/mixed/actual），
+            # 写进这一列会违反 schema 的 pattern，也把两种语义混在同一列。
+            # actual_recost 段的完整度由 `actual_recost_completeness` 列承载（见上一行）。
+            cost_completeness=preview["expected"].get("completeness", "incomplete"), confidence_level="medium",
         )
         db.add(row)
         estimates.append(row)

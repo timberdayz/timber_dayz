@@ -41,6 +41,7 @@
           stripe
           border
           class="flat-table"
+          :row-class-name="spuRowClass"
           @selection-change="onSpuSelectionChange"
           ><el-table-column type="selection" width="48" :selectable="(row) => !row.__new && row.active !== false"
           /><el-table-column label="SPU" min-width="150"
@@ -54,14 +55,15 @@
             ><template #default="{ row }"
               ><el-input
                 v-model="row.spu_name"
-                size="small" /></template></el-table-column
+                size="small"
+                @change="markDirty('spu', row)" /></template></el-table-column
           ><el-table-column label="一级品类" width="150"
             ><template #default="{ row }"
               ><el-select
                 v-model="row.category_l1_code"
                 size="small"
                 placeholder="选择"
-                @change="row.category_l2_code = ''"
+                @change="onSpuL1CategoryChange(row)"
                 ><el-option
                   v-for="cat in l1Categories"
                   :key="categoryCode(cat)"
@@ -76,6 +78,7 @@
                 v-model="row.category_l2_code"
                 size="small"
                 placeholder="选择"
+                @change="markDirty('spu', row)"
                 ><el-option
                   v-for="cat in childCategories(row.category_l1_code)"
                   :key="categoryCode(cat)"
@@ -108,7 +111,7 @@
                   size="small" /><span class="rate-suffix">%</span></div></template></el-table-column
           ><el-table-column label="状态" width="110"
             ><template #default="{ row }"
-              ><el-select v-model="row.biz_status" size="small"
+              ><el-select v-model="row.biz_status" size="small" @change="markDirty('spu', row)"
                 ><el-option label="候选" value="candidate" /><el-option
                   label="测试"
                   value="testing" /><el-option
@@ -122,7 +125,8 @@
                 v-model="row.owner_user_id"
                 :min="1"
                 :controls="false"
-                size="small" /></template></el-table-column
+                size="small"
+                @change="markDirty('spu', row)" /></template></el-table-column
           ><el-table-column label="操作" width="220" fixed="right"
             ><template #default="{ row }"
               ><el-button link type="primary" @click="showBindings(row)"
@@ -170,6 +174,14 @@
               :key="spu.spu"
               :label="`${spu.spu} ${spu.spu_name || ''}`"
               :value="spu.spu" /></el-select
+          ><el-select
+            v-model="skuQuery.status"
+            clearable
+            placeholder="全部状态"
+            @change="loadSkus"
+            ><el-option label="在售" value="active" /><el-option
+              label="停用"
+              value="inactive" /></el-select
           ><el-button type="primary" :icon="Plus" @click="addSkuRow"
             >新增行</el-button
           ><el-button
@@ -218,12 +230,14 @@
             ><template #default="{ row }"
               ><el-input
                 v-model="row.sku_name"
-                size="small" /></template></el-table-column
+                size="small"
+                @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="规格" width="140"
             ><template #default="{ row }"
               ><el-input
                 v-model="row.specification"
-                size="small" /></template></el-table-column
+                size="small"
+                @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="重量 kg" width="105"
             ><template #default="{ row }"
               ><el-input-number
@@ -231,7 +245,8 @@
                 :min="0"
                 :precision="3"
                 :controls="false"
-                size="small" /></template></el-table-column
+                size="small"
+                @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="单件体积 m³" width="125"
             ><template #default="{ row }"
               ><el-input-number
@@ -248,7 +263,8 @@
                 v-model="row.units_per_carton"
                 :min="1"
                 :controls="false"
-                size="small" /></template></el-table-column
+                size="small"
+                @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="采购成本" width="115"><template #default="{ row }"><el-input-number v-model="row.default_purchase_cost" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="采购成本来源" width="120"><template #default="{ row }">{{ row.purchase_cost_source || "待补充" }}</template></el-table-column
           ><el-table-column label="采购成本确认时间" width="145"><template #default="{ row }">{{ row.purchase_cost_confirmed_at || "-" }}</template></el-table-column
@@ -393,18 +409,6 @@
           <el-table-column label="预计广告费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.ad_cost) }}</template></el-table-column>
           <el-table-column label="继承货损率" width="110"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
           <el-table-column label="继承退货损失率" width="130"><template #default="{ row }">{{ percent(row.return_loss_rate) }}</template></el-table-column>
-          <el-table-column label="实际物流" width="110"
-            ><template #default="{ row }">{{
-              money(row.actual_logistics_cost)
-            }}</template></el-table-column
-          >
-          <el-table-column label="实际仓储" width="110"
-            ><template #default="{ row }">{{
-              row.actual_storage_cost == null
-                ? "未录入/参考回退"
-                : money(row.actual_storage_cost)
-            }}</template></el-table-column
-          >
           <el-table-column label="预计利润" width="120"
             ><template #default="{ row }">{{
               money(row.preview?.expected?.profit)
@@ -415,8 +419,28 @@
               percent(row.preview?.expected?.margin_rate)
             }}</template></el-table-column
           >
-          <el-table-column label="重估利润" width="120"><template #default="{ row }">{{ money(row.preview?.actual_recost?.profit) }}</template></el-table-column>
-          <el-table-column label="重估完整度" width="105"><template #default="{ row }">{{ row.preview?.actual_recost?.completeness || row.configuration_status }}</template></el-table-column>
+          <el-table-column label="混合成本利润" width="120"
+            ><template #default="{ row }"
+              >{{ money(row.preview?.actual_recost?.profit) }}
+              <el-tooltip
+                placement="top"
+                :content="`物流 ${money(row.actual_logistics_cost)}（真实账单）｜仓储 ${money(row.preview?.actual_recost?.storage_cost)}（规则预估——系统里没有仓储费账单）`"
+              >
+                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
+              </el-tooltip></template
+            ></el-table-column
+          >
+          <el-table-column label="混合成本完整度" width="120"
+            ><template #default="{ row }"
+              >{{ row.preview?.actual_recost?.completeness || "-" }}
+              <el-tooltip
+                placement="top"
+                content="这一版用了多少真实成本：incomplete=没算出来 / estimated=全预估 / mixed=一半真实 / actual=全真实"
+              >
+                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
+              </el-tooltip></template
+            ></el-table-column
+          >
           <el-table-column label="操作" width="180" fixed="right"
             ><template #default="{ row }"
               ><el-button link type="primary" @click="previewOperatingRow(row)">试算</el-button
@@ -513,7 +537,7 @@
               ></el-table></el-tab-pane
           ><el-tab-pane label="仓储规则" name="storage-rules"
             ><div class="toolbar">
-              <el-button type="primary" :icon="Plus" @click="addStorageRuleRow">新增仓储规则</el-button>
+              <el-button v-if="canManagePlatformFee" type="primary" :icon="Plus" @click="addStorageRuleRow">新增仓储规则</el-button>
               <span class="muted">固定按体积计费：CNY/CBM/月</span>
             </div>
             <el-table :data="storageRules" v-loading="loadingStorageRules" stripe border>
@@ -527,7 +551,7 @@
               <el-table-column label="版本" width="120"><template #default="{ row }"><el-input v-model="row.version" size="small" /></template></el-table-column>
               <el-table-column label="来源" width="130"><template #default="{ row }"><el-input v-model="row.source" size="small" /></template></el-table-column>
               <el-table-column label="备注" min-width="150"><template #default="{ row }"><el-input v-model="row.notes" size="small" /></template></el-table-column>
-              <el-table-column label="操作" width="240" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveStorageRule(row)">保存（自动新版本）</el-button><el-button v-if="!row.__new && row.status === 'active'" link type="danger" @click="disableStorageRule(row)">停用</el-button><el-button v-if="!row.__new && row.status !== 'active'" link type="success" @click="enableStorageRule(row)">启用</el-button><el-button v-if="!row.__new" link type="danger" @click="removeStorageRuleRow(row)">删除</el-button></template></el-table-column>
+              <el-table-column v-if="canManagePlatformFee" label="操作" width="240" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveStorageRule(row)">保存（自动新版本）</el-button><el-button v-if="!row.__new && row.status === 'active'" link type="danger" @click="disableStorageRule(row)">停用</el-button><el-button v-if="!row.__new && row.status !== 'active'" link type="success" @click="enableStorageRule(row)">启用</el-button><el-button v-if="!row.__new" link type="danger" @click="removeStorageRuleRow(row)">删除</el-button></template></el-table-column>
             </el-table></el-tab-pane
           ><el-tab-pane label="物流批次" name="batches"
             ><div class="toolbar">
@@ -735,6 +759,7 @@
           ><template #default="{ row }"
             ><el-input-number
               v-model="row.actual_total_volume_cbm"
+              :class="{ 'volume-missing': volumeMissing(row) }"
               :min="0"
               :precision="4"
               :controls="false"
@@ -818,6 +843,14 @@
         show-icon
         title="以下采购单 SKU 待映射，无法生成物流账单行"
         :description="unmappedPurchaseSkus.join('；')"
+      />
+      <el-alert
+        v-if="missingVolumeSkus.length"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="以下 SKU 未填单件体积，按体积计费的金额会偏低（可继续保存）"
+        :description="missingVolumeSkus.map((x) => x.label).join('；')"
       />
       <div class="batch-summary">
         <span>账单总额：{{ money(batchDrawer.form.total_amount) }}</span
@@ -941,6 +974,8 @@ const baseRatePct = computed(() => {
 const billStatus = ref("");
 const selectedPurchaseOrders = ref([]);
 const unmappedPurchaseSkus = ref([]);
+// 单件体积未填的 SKU —— 提示但不阻断：账单金额会偏低，可由运营自行决定是否先补资料
+const missingVolumeSkus = ref([]);
 const dirtyRows = ref(new Set());
 const dirtyRuleRows = ref(new Set());
 const spuQuery = reactive({
@@ -949,7 +984,7 @@ const spuQuery = reactive({
   page: 1,
   page_size: 20,
 });
-const skuQuery = reactive({ keyword: "", page: 1, page_size: 20 });
+const skuQuery = reactive({ keyword: "", status: "", page: 1, page_size: 20 });
 const batchDrawer = reactive({
   visible: false,
   editing: false,
@@ -1014,6 +1049,15 @@ const markDirty = (kind, row) =>
   dirtyRows.value.add(
     `${kind}:${row[kind === "spu" ? "spu" : "sku_id"] || row.sku_key}`,
   );
+// 一级品类变更：清空二级品类 **并且** 标脏。
+// ⚠️ 这两件事必须放在同一个 handler 里 —— 一个 el-select 只能挂一个 @change，
+// 分开挂会导致第二次覆盖第一次，改了品类却不标脏 → 保存时这行不在 payload 里 → 静默丢失。
+const onSpuL1CategoryChange = (row) => {
+  row.category_l2_code = "";
+  markDirty("spu", row);
+};
+// 已软删的 SPU 灰显 —— 让运营一眼看出这行「已删除但可恢复」，避免误当成在售品编辑
+const spuRowClass = ({ row }) => (row.active === false ? "spu-inactive-row" : "");
 const markRuleDirty = (row) => dirtyRuleRows.value.add(row.rule_id);
 const blankSpu = () => ({
   __new: true,
@@ -1099,7 +1143,12 @@ const addRuleRow = () =>
 const loadSpus = async () => {
   loadingSpus.value = true;
   try {
-    const res = await productCenterApi.listSpus(spuQuery);
+    const res = await productCenterApi.listSpus({
+      ...spuQuery,
+      // 已软删的 SPU 必须列出来，否则「恢复」按钮永远不可达（软删就变成不可逆了）。
+      // 后端 list_spus 的 include_inactive 默认 False。
+      include_inactive: true,
+    });
     spus.value = (res.data || []).map((row) => ({
       ...row,
       category_l1_code: row.category_l1_code || row.category_l1 || "",
@@ -1118,6 +1167,7 @@ const loadSkus = async () => {
     const res = await productCenterApi.listSkus({
       ...skuQuery,
       spu: skuSpuFilter.value || undefined,
+      status: skuQuery.status || undefined,
     });
     skus.value = (res.data || []).map((row) => ({
       ...row,
@@ -1928,6 +1978,7 @@ const openBatchCreate = () => {
   });
   selectedPurchaseOrders.value = [];
   unmappedPurchaseSkus.value = [];
+  missingVolumeSkus.value = [];
 };
 const editBatch = async (row) => {
   try {
@@ -1943,6 +1994,7 @@ const editBatch = async (row) => {
     });
     selectedPurchaseOrders.value = detail.purchase_orders || [];
     unmappedPurchaseSkus.value = [];
+    missingVolumeSkus.value = [];
   } catch (error) {
     ElMessage.error(error.message || "加载物流批次失败");
   }
@@ -2058,6 +2110,7 @@ const applyRuleToBatchLines = () => {
 const generateBatchLinesFromPurchaseOrders = async (orders) => {
   const lines = [];
   const unmapped = [];
+  const missingVolume = [];
   for (const order of orders) {
     const poLines = await productCenterApi.listPurchaseOrderLines(order.po_id);
     for (const poLine of poLines) {
@@ -2066,7 +2119,16 @@ const generateBatchLinesFromPurchaseOrders = async (orders) => {
         skus.value.find((item) => item.sku_key === poLine.platform_sku);
       if (sku) {
         const shippedQty = poLine.qty_received || poLine.qty_ordered || 0;
-        const unitVolume = Number(formatVolume(sku)) || 0;
+        const unitVolume = formatVolume(sku);
+        // 单件体积没填 → 行体积为 0 → 按体积计费的金额偏低，但**不报错**。
+        // 这是另一种静默失败：账单能保存、能确认，只是钱算少了。
+        // 所以这里不丢行（丢了会卡住批次流程），而是记下来在抽屉里显式提示。
+        if (!hasVolume(sku)) {
+          missingVolume.push({
+            id: sku.sku_id,
+            label: `${sku.sku_key || sku.sku_id}（单件体积未填，金额会偏低）`,
+          });
+        }
         lines.push({
           po_id: order.po_id,
           warehouse_code: poLine.warehouse || order.warehouse || batchDrawer.form.warehouse_code,
@@ -2099,6 +2161,7 @@ const generateBatchLinesFromPurchaseOrders = async (orders) => {
   }
   batchDrawer.lines = lines;
   unmappedPurchaseSkus.value = unmapped;
+  missingVolumeSkus.value = missingVolume;
   applyRuleToBatchLines();
 };
 watch(selectedPurchaseOrders, (orders) => {
@@ -2122,6 +2185,16 @@ const fromPercent = (value, fallback = 0) =>
 const money = (value) => (value == null ? "-" : `¥${Number(value).toFixed(2)}`);
 const percent = (value) =>
   value == null ? "-" : `${(Number(value) * 100).toFixed(1)}%`;
+// SKU 单件体积（m³）。物流/仓储账单按体积计费，行体积 = 单件体积 × 发货数量。
+// ⚠️ 体积未填时返回 0 —— 账单金额会偏低但**不报错**，所以调用方必须能区分
+// 「体积是 0」和「体积没填」，见 generateBatchLinesFromPurchaseOrders 的 missing_volume 归集。
+const formatVolume = (sku) => {
+  const value = Number(sku?.unit_volume_cbm);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+};
+const hasVolume = (sku) => formatVolume(sku) > 0;
+const volumeMissing = (row) =>
+  missingVolumeSkus.value.some((item) => item.id === row.sku_id);
 const referenceCostDisplay = (row, kind) => {
   const value = kind === "logistics" ? referenceLogisticsCost(row) : referenceStorageCost(row);
   if (value != null) return money(value);
@@ -2257,6 +2330,17 @@ onMounted(async () => {
 .price-below-floor :deep(.el-input__inner) {
   border-color: var(--el-color-danger);
   box-shadow: 0 0 0 1px var(--el-color-danger) inset;
+}
+/* 已软删的 SPU 行灰显 */
+.spu-inactive-row :deep(.el-table__cell) {
+  color: var(--el-text-color-secondary);
+  background-color: var(--el-fill-color-light);
+  opacity: 0.75;
+}
+/* 物流批次：单件体积未填 → 行体积为 0 → 金额偏低，标红提示 */
+.volume-missing :deep(.el-input__inner) {
+  border-color: var(--el-color-warning);
+  box-shadow: 0 0 0 1px var(--el-color-warning) inset;
 }
 .price-floor-hint {
   font-size: 12px;
