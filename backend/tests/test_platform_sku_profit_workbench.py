@@ -286,3 +286,54 @@ def test_platform_roi_config_is_passed_into_the_preview():
     # 上限 2 → 被截断
     assert expected["suggested_roi_clamped"] == Decimal("2")
     assert expected["suggestion_note"] == "above_platform_ceiling"
+
+
+def test_saved_profit_version_persists_the_roi_numbers():
+    """保存利润版本时要把 ROI 一起存下来。
+
+    运营投的那个 ROI 必须能从利润版本里解释出来 —— 否则事后只有利润数字，
+    不知道当时是按什么 ROI 投的。
+    """
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    section = source[
+        source.index("async def save_platform_sku_profit_estimates") : source.index(
+            '@router.get("/api/platform-sku-profit/estimates")'
+        )
+    ]
+
+    for column in (
+        "break_even_roi",
+        "suggested_roi",
+        "suggested_roi_clamped",
+        "equivalent_target_roi",
+        "expected_selling_price_source",
+    ):
+        assert f"{column}=" in section, column
+    # ROI 必须取本 section（estimated / actual_recost 各算各的），不能固定取 expected 段
+    assert 'break_even_roi=section.get("break_even_roi")' in section
+    assert 'suggested_roi_clamped=section.get("suggested_roi_clamped")' in section
+
+
+def test_operating_profile_records_where_the_measured_price_came_from():
+    """经营档案要记住测算售价的来源（运营填的 / SKU 参考售价兜底的）。"""
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    draft_section = source[
+        source.index("async def save_platform_sku_profit_draft") : source.index(
+            '@router.post("/api/platform-sku-profit/estimates"'
+        )
+    ]
+    estimate_section = source[
+        source.index("async def save_platform_sku_profit_estimates") : source.index(
+            '@router.get("/api/platform-sku-profit/estimates")'
+        )
+    ]
+
+    # 草稿和利润版本两条写入路径都要留痕
+    for section in (draft_section, estimate_section):
+        assert "profile.expected_selling_price_source" in section
+        assert '"user_input"' in section
+        assert '"sku_reference"' in section
