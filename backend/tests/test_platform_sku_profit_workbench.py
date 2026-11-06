@@ -195,3 +195,145 @@ def test_workbench_candidates_do_not_default_transport_or_include_non_sales_plat
 
     assert 'platform.platform_role != "sales"' in source
     assert 'profile.transport_type if profile else "sea"' not in source
+
+
+def test_preview_exposes_pre_ad_profit_and_roi_metrics():
+    """ROI 的分母是广告前利润，必须从利润预览里直接暴露出来。
+
+    以前 pre_ad_profit 只是 `_ad_cost_and_profit` 的中间变量，算完就被丢掉 ——
+    ROI 只能在外层把成本重算一遍，口径必然漂移。
+    """
+    result = build_platform_profit_preview(
+        expected_selling_price=Decimal("100"),
+        competitor_price=None,
+        seller_coupon_amount=Decimal("10"),
+        purchase_cost=Decimal("30"),
+        expected_logistics_cost=Decimal("8"),
+        expected_storage_cost=Decimal("2"),
+        actual_logistics_cost=None,
+        actual_storage_cost=None,
+        platform_fee_rate=Decimal("0.10"),
+        expected_ad_rate=Decimal("0.10"),
+        return_rate=Decimal("0.03"),
+        damage_rate=Decimal("0.02"),
+    )
+
+    expected = result["expected"]
+    # revenue = 90；pre_ad = 90 − (30+8+2+0+9+0+2.70+1.80) = 36.50
+    assert expected["net_revenue"] == Decimal("90")
+    assert expected["pre_ad_profit"] == Decimal("36.50")
+    assert expected["break_even_roi"] == Decimal("90") / Decimal("36.50")
+    assert expected["suggested_roi"] == expected["break_even_roi"] * Decimal("1.20")
+    assert expected["suggested_roi_clamped"] is not None
+    assert expected["roi_missing_reasons"] == []
+    assert expected["roi_anomalies"] == []
+    # 实际成本口径那一段也要有自己的一份
+    assert result["actual_recost"]["pre_ad_profit"] == Decimal("36.50")
+    assert result["actual_recost"]["break_even_roi"] == expected["break_even_roi"]
+
+
+def test_roi_is_not_computed_when_a_reference_cost_is_missing():
+    """成本不全守卫：成本缺一项 → pre_ad_profit 算不出来 → ROI 全部 None。
+
+    缺输入宁可不算不可乐观：成本不全时保本 ROI 偏松，运营照着投广告就是亏。
+    """
+    result = build_platform_profit_preview(
+        expected_selling_price=Decimal("100"),
+        competitor_price=None,
+        seller_coupon_amount=Decimal("0"),
+        purchase_cost=Decimal("30"),
+        expected_logistics_cost=None,
+        expected_storage_cost=Decimal("2"),
+        actual_logistics_cost=None,
+        actual_storage_cost=None,
+        platform_fee_rate=Decimal("0"),
+        expected_ad_rate=Decimal("0"),
+        return_rate=Decimal("0"),
+        damage_rate=Decimal("0"),
+    )
+
+    expected = result["expected"]
+    assert expected["pre_ad_profit"] is None
+    assert expected["break_even_roi"] is None
+    assert expected["suggested_roi"] is None
+    assert expected["suggested_roi_clamped"] is None
+    assert expected["equivalent_ad_cost_per_order"] is None
+    assert expected["roi_missing_reasons"] == ["non_positive_cost_denominator"]
+
+
+def test_platform_roi_config_is_passed_into_the_preview():
+    """平台级 ROI 配置（安全边际 / 可填上限）必须传进利润预览，否则封顶值永远是默认值。"""
+    result = build_platform_profit_preview(
+        expected_selling_price=Decimal("100"),
+        competitor_price=None,
+        seller_coupon_amount=Decimal("0"),
+        purchase_cost=Decimal("30"),
+        expected_logistics_cost=Decimal("8"),
+        expected_storage_cost=Decimal("2"),
+        actual_logistics_cost=None,
+        actual_storage_cost=None,
+        platform_fee_rate=Decimal("0"),
+        expected_ad_rate=Decimal("0"),
+        return_rate=Decimal("0"),
+        damage_rate=Decimal("0"),
+        roi_safety_margin=Decimal("0.50"),
+        target_roi_ceiling=Decimal("2"),
+    )
+
+    expected = result["expected"]
+    # 安全边际 50% → 建议 ROI = 保本ROI × 1.5
+    assert expected["suggested_roi"] == expected["break_even_roi"] * Decimal("1.50")
+    # 上限 2 → 被截断
+    assert expected["suggested_roi_clamped"] == Decimal("2")
+    assert expected["suggestion_note"] == "above_platform_ceiling"
+
+
+def test_saved_profit_version_persists_the_roi_numbers():
+    """保存利润版本时要把 ROI 一起存下来。
+
+    运营投的那个 ROI 必须能从利润版本里解释出来 —— 否则事后只有利润数字，
+    不知道当时是按什么 ROI 投的。
+    """
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    section = source[
+        source.index("async def save_platform_sku_profit_estimates") : source.index(
+            '@router.get("/api/platform-sku-profit/estimates")'
+        )
+    ]
+
+    for column in (
+        "break_even_roi",
+        "suggested_roi",
+        "suggested_roi_clamped",
+        "equivalent_target_roi",
+        "expected_selling_price_source",
+    ):
+        assert f"{column}=" in section, column
+    # ROI 必须取本 section（estimated / actual_recost 各算各的），不能固定取 expected 段
+    assert 'break_even_roi=section.get("break_even_roi")' in section
+    assert 'suggested_roi_clamped=section.get("suggested_roi_clamped")' in section
+
+
+def test_operating_profile_records_where_the_measured_price_came_from():
+    """经营档案要记住测算售价的来源（运营填的 / SKU 参考售价兜底的）。"""
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    draft_section = source[
+        source.index("async def save_platform_sku_profit_draft") : source.index(
+            '@router.post("/api/platform-sku-profit/estimates"'
+        )
+    ]
+    estimate_section = source[
+        source.index("async def save_platform_sku_profit_estimates") : source.index(
+            '@router.get("/api/platform-sku-profit/estimates")'
+        )
+    ]
+
+    # 草稿和利润版本两条写入路径都要留痕
+    for section in (draft_section, estimate_section):
+        assert "profile.expected_selling_price_source" in section
+        assert '"user_input"' in section
+        assert '"sku_reference"' in section

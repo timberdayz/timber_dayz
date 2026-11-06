@@ -372,3 +372,68 @@ test("利润测算页不再展示恒为空的实际仓储列", () => {
 test("完整度列不再拿 configuration_status 兜底", () => {
   assert.doesNotMatch(source, /configuration_status/);
 });
+
+// ---------------------------------------------------------------------------
+// 阶段 1 · ROI 只读层（2026-11-07）
+// 上游设计稿：docs/superpowers/specs/2026-11-06-product-center-caliber-naming-and-roi-design.md §2.5
+// ---------------------------------------------------------------------------
+
+// 断言必须限定在「平台 SKU 利润测算」区域 —— SKU 资料页也有「最低售价」列
+const operatingSection = source.slice(
+  source.indexOf('label="平台 SKU 利润测算"'),
+  source.indexOf('label="物流仓储管理"'),
+);
+
+test("利润测算页给出广告前贡献毛利率 / 保本ROI / 建议ROI 三个只读列", () => {
+  assert.match(operatingSection, /label="广告前贡献毛利率"/);
+  assert.match(operatingSection, /label="保本ROI"/);
+  assert.match(operatingSection, /label="建议ROI"/);
+  // 数据源在 preview 段（自由 dict，不改 Pydantic 契约）
+  assert.match(
+    operatingSection,
+    /row\.preview\?\.expected\?\.advertising_contribution_margin_rate/,
+  );
+  assert.match(operatingSection, /row\.preview\?\.expected\?\.break_even_roi/);
+  assert.match(operatingSection, /row\.preview\?\.expected\?\.suggested_roi_clamped/);
+});
+
+test("三个 ROI 列排在最低售价右侧、预计售价之前", () => {
+  const floor = operatingSection.indexOf('label="最低售价"');
+  const margin = operatingSection.indexOf('label="广告前贡献毛利率"');
+  const breakEven = operatingSection.indexOf('label="保本ROI"');
+  const suggested = operatingSection.indexOf('label="建议ROI"');
+  const price = operatingSection.indexOf('label="预计售价"');
+  assert.ok(floor >= 0 && margin > floor, "广告前贡献毛利率必须紧跟最低售价");
+  assert.ok(breakEven > margin, "保本ROI 必须在广告前贡献毛利率之后");
+  assert.ok(suggested > breakEven, "建议ROI 必须在保本ROI 之后");
+  assert.ok(price > suggested, "三个 ROI 列必须在预计售价之前");
+});
+
+test("成本不全时 ROI 一律置灰并提示保本ROI 偏乐观", () => {
+  // 成本不全 → pre_ad_profit 高估 → 保本ROI 偏松 → 运营真投广告就亏。
+  // 这个守卫是阶段 1 的硬前提，没有它本阶段不能上线。
+  assert.match(
+    source,
+    /const roiGuarded = \(row\) => row\.reference_cost_status !== "ready"/,
+  );
+  assert.match(operatingSection, /'roi-guarded': roiGuarded\(row\)/);
+  assert.match(source, /成本不全，保本ROI 偏乐观/);
+  // 缺失原因按三份清单分列（缺物流 / 缺仓储 / 缺体积）
+  assert.match(source, /缺物流规则/);
+  assert.match(source, /缺仓储规则/);
+  assert.match(source, /缺 SKU 体积\/重量/);
+});
+
+test("ROI 列挂两条免责提示", () => {
+  // ① 本表不预测销量（提价掉量模型看不见）
+  // ② 平台报告 ROI 含自然/达人归因，达标 ≠ 赚钱
+  assert.match(operatingSection, /本表不预测销量/);
+  assert.match(operatingSection, /达标 ≠ 赚钱/);
+});
+
+test("建议 ROI 超过平台可填上限时提示广告空间不足并保留未封顶原值", () => {
+  assert.match(operatingSection, /above_platform_ceiling/);
+  assert.match(operatingSection, /广告空间不足/);
+  // 未封顶原值必须能看到 —— 运营要知道自己离平台上限差多少
+  assert.match(source, /未封顶原值/);
+});

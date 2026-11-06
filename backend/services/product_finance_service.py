@@ -1094,8 +1094,12 @@ class ProductFinanceService:
         )
         spu = await self.db.get(DimSpu, binding.spu) if binding else None
         expected_selling_price = data.get("expected_selling_price")
+        expected_selling_price_source = "user_input"
         if expected_selling_price is None:
             expected_selling_price = sku.reference_selling_price
+            expected_selling_price_source = (
+                "sku_reference" if sku.reference_selling_price is not None else None
+            )
         if expected_selling_price is None:
             raise ValueError(
                 "expected_selling_price or reference_selling_price is required"
@@ -1125,6 +1129,9 @@ class ProductFinanceService:
                 if sku.creator_commission_rate is not None
                 else platform.default_creator_commission_rate
             ),
+            # 平台级 ROI 配置（阶段 1）
+            roi_safety_margin=platform.roi_safety_margin,
+            target_roi_ceiling=platform.target_roi_ceiling,
         )
         result.update(
             {
@@ -1133,6 +1140,10 @@ class ProductFinanceService:
                 "platform_code": data["platform_code"],
                 "warehouse_code": data["warehouse_code"],
                 "platform_fee_rate": platform.default_fee_rate,
+                # 测算售价来源 + ROI 平台配置（阶段 1）
+                "expected_selling_price_source": expected_selling_price_source,
+                "roi_safety_margin": platform.roi_safety_margin,
+                "target_roi_ceiling": platform.target_roi_ceiling,
                 "actual_storage_cost": None,
                 "transport_type": transport_type,
                 "reference_logistics_cost": reference_logistics,
@@ -1175,8 +1186,7 @@ class ProductFinanceService:
             operating_profile_id=profile.profile_id,
             platform_code=profile.platform_code,
             warehouse_code=profile.warehouse_code,
-            assumption_version=data.get("assumption_version")
-            or preview["assumption_version"],
+            assumption_version=data.get("assumption_version") or preview["assumption_version"],
             scenario="base",
             selling_price=preview["net_revenue"]
             + Decimal(
@@ -1210,8 +1220,7 @@ class ProductFinanceService:
         preview = await self.preview_profit(data)
         row = SkuProfitEstimate(
             sku_id=preview["sku_id"],
-            assumption_version=data.get("assumption_version")
-            or preview["assumption_version"],
+            assumption_version=data.get("assumption_version") or preview["assumption_version"],
             scenario="base",
             selling_price=data["selling_price"],
             coupon_amount=data.get("coupon_amount", 0),

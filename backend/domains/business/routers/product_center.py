@@ -2595,12 +2595,25 @@ async def list_platform_sku_profit_candidates(
                 if row.creator_commission_rate is not None
                 else platform.default_creator_commission_rate
             ),
+            # 平台级 ROI 配置（阶段 1）：安全边际 + 平台可填上限
+            roi_safety_margin=platform.roi_safety_margin,
+            target_roi_ceiling=platform.target_roi_ceiling,
         )
         items.append({
             "sku_id": row.sku_id, "sku_key": row.sku_key, "sku_name": row.sku_name, "specification": row.specification,            "spu": assigned_spu, "reference_selling_price": row.reference_selling_price,
             "purchase_cost": purchase_cost,
             "platform_code": platform_code, "warehouse_code": warehouse_code, "transport_type": transport_type,
             "expected_selling_price": expected_selling_price,
+            # 测算售价来源（阶段 1）：优先用经营档案里记下来的来源
+            # （user_input / sku_reference），老档案没记过就退化成 'profile'
+            "expected_selling_price_source": (
+                (
+                    profile.expected_selling_price_source or "profile"
+                    if profile is not None and profile.expected_selling_price is not None
+                    else None
+                )
+                or ("sku_reference" if row.reference_selling_price is not None else None)
+            ),
             "competitor_price": profile.competitor_price if profile else None,
             "seller_coupon_amount": seller_coupon_amount,
             "expected_ad_rate": expected_ad_rate,
@@ -2608,6 +2621,9 @@ async def list_platform_sku_profit_candidates(
             "expected_storage_cost": reference_storage,
             "actual_logistics_cost": actual_logistics, "actual_storage_cost": None,
             "platform_fee_rate": platform.default_fee_rate,
+            # ROI 配置（阶段 1）：前端要显示「建议 ROI 封顶值」并提示广告空间不足
+            "roi_safety_margin": platform.roi_safety_margin,
+            "target_roi_ceiling": platform.target_roi_ceiling,
             "logistics_damage_rate": assigned.logistics_damage_rate if assigned else None,
             "return_loss_rate": assigned.return_loss_rate if assigned else None,
             "configuration_status": "configured" if profile else "unconfigured",
@@ -2723,6 +2739,13 @@ async def save_platform_sku_profit_draft(body: PlatformSkuProfitDraftRequest, db
     platform = await db.get(DimPlatform, values["platform_code"])
     profile.reference_selling_price = sku.reference_selling_price if sku else None
     profile.platform_fee_rate = platform.default_fee_rate if platform else None
+    # 测算售价来源：运营自己填的 / SKU 参考售价兜底的 —— 两者在利润表里长得一样，
+    # 但在 ROI 判定里可信度不同，必须留痕。
+    profile.expected_selling_price_source = (
+        "user_input"
+        if values.get("expected_selling_price") is not None
+        else ("sku_reference" if sku is not None and sku.reference_selling_price is not None else None)
+    )
     finance = ProductFinanceService(db)
     profile.expected_label_fee = await finance.find_reference_label_fee(values["warehouse_code"])
     try:
@@ -2790,6 +2813,13 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
     profile.reference_selling_price = sku.reference_selling_price if sku else None
     platform = await db.get(DimPlatform, values["platform_code"])
     profile.platform_fee_rate = platform.default_fee_rate if platform else None
+    # 测算售价来源：运营自己填的 / SKU 参考售价兜底的 —— 两者在利润表里长得一样，
+    # 但在 ROI 判定里可信度不同，必须留痕。
+    profile.expected_selling_price_source = (
+        "user_input"
+        if values.get("expected_selling_price") is not None
+        else ("sku_reference" if sku is not None and sku.reference_selling_price is not None else None)
+    )
     finance = ProductFinanceService(db)
     profile.expected_label_fee = await finance.find_reference_label_fee(values["warehouse_code"])
     await db.flush()
@@ -2816,6 +2846,13 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
             logistics_cost_variance=preview["variance"].get("logistics"), storage_cost_variance=preview["variance"].get("storage"), total_cost_variance=preview["variance"].get("total"),
             reference_storage_days=preview.get("reference_storage_days"), storage_rule_id=preview.get("reference_storage_rule_id"), storage_rule_version=preview.get("reference_storage_rule_version"),
             estimated_contribution_profit=section.get("profit"), estimated_margin_rate=section.get("margin_rate"),
+            # ROI 投放边界：跟着这一版利润一起存下来，否则运营投的那个 ROI 事后无从解释。
+            # 取本 section 自己的值（estimated 段 / actual_recost 段各算各的 —— 两段成本口径不同）。
+            break_even_roi=section.get("break_even_roi"),
+            suggested_roi=section.get("suggested_roi"),
+            suggested_roi_clamped=section.get("suggested_roi_clamped"),
+            equivalent_target_roi=section.get("equivalent_target_roi"),
+            expected_selling_price_source=preview.get("expected_selling_price_source"),
             # ⚠️ `cost_completeness` 这一列的语义是「**参考成本**（预估口径）齐不齐」，
             # 取值域 complete/partial/incomplete。必须**固定取 expected 段**，
             # 不能取 `section` —— 因为 section 会随 basis 在 expected / actual_recost 之间变，
@@ -2858,7 +2895,7 @@ async def list_platform_sku_profit_estimates(
         filters.append(SkuProfitEstimate.calculation_basis == calculation_basis)
     total = int((await db.execute(select(func.count()).select_from(SkuProfitEstimate).where(*filters))).scalar() or 0)
     rows = (await db.execute(select(SkuProfitEstimate).where(*filters).order_by(SkuProfitEstimate.estimate_as_of.desc()).offset((page - 1) * page_size).limit(page_size))).scalars().all()
-    return {"data": [_decimal_payload({"estimate_id": row.estimate_id, "sku_id": row.sku_id, "calculation_basis": row.calculation_basis, "expected_profit": row.expected_profit, "expected_margin_rate": row.expected_margin_rate, "actual_recost_profit": row.actual_recost_profit, "actual_recost_margin_rate": row.actual_recost_margin_rate, "actual_recost_completeness": row.actual_recost_completeness, "estimate_as_of": row.estimate_as_of}) for row in rows], "page": page, "page_size": page_size, "total": total, "total_pages": (total + page_size - 1) // page_size}
+    return {"data": [_decimal_payload({"estimate_id": row.estimate_id, "sku_id": row.sku_id, "calculation_basis": row.calculation_basis, "expected_profit": row.expected_profit, "expected_margin_rate": row.expected_margin_rate, "actual_recost_profit": row.actual_recost_profit, "actual_recost_margin_rate": row.actual_recost_margin_rate, "actual_recost_completeness": row.actual_recost_completeness, "estimate_as_of": row.estimate_as_of, "break_even_roi": row.break_even_roi, "suggested_roi": row.suggested_roi, "suggested_roi_clamped": row.suggested_roi_clamped, "equivalent_target_roi": row.equivalent_target_roi, "expected_selling_price_source": row.expected_selling_price_source}) for row in rows], "page": page, "page_size": page_size, "total": total, "total_pages": (total + page_size - 1) // page_size}
 
 
 @router.get("/api/sku-operating-profiles", response_model=list[SkuOperatingProfileResponse])

@@ -3,6 +3,8 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable
 
+from .product_roi_service import compute_roi_metrics
+
 
 MONEY_QUANTUM = Decimal("0.01")
 MEASURE_QUANTUM = Decimal("0.001")
@@ -172,7 +174,9 @@ def build_platform_profit_preview(
     return_rate: Decimal | int | float | None,
     damage_rate: Decimal | int | float | None,
     creator_commission_rate: Decimal | int | float | None = None,
-) -> dict[str, dict[str, Decimal | str | None]]:
+    roi_safety_margin: Decimal | int | float | None = None,
+    target_roi_ceiling: Decimal | int | float | None = None,
+) -> dict[str, dict[str, Decimal | str | list[str] | None]]:
     """Build side-by-side expected and actual-cost recost profit results.
 
     ``expected_ad_rate`` is interpreted as the share of pre-ad profit allocated
@@ -189,6 +193,12 @@ def build_platform_profit_preview(
     缺它会让 pre_ad_profit → None → 整条利润链算不出来（利润空白、completeness=incomplete）。
     口径与 ``creator_commission_rate`` 一致。缺失时 ``label_fee_source`` = ``assumed_zero``，
     前端据此提示"贴单费未配置"（利润是按 0 算的，不是"确实没有这项成本"）。
+
+    ``roi_safety_margin`` / ``target_roi_ceiling`` 是**平台级 ROI 配置**
+    （安全边际、平台可填上限）。传 None 表示调用方没有平台配置，用模块默认值
+    （安全边际 0.20、上限 50）。
+    ROI 在**这里**算而不是在路由里算：候选列表和单 SKU 试算走的是同一个函数，
+    两边必须给出同一个数 —— 分头算必然漂移（设计稿 §2.5「实现时只写一处」）。
     """
 
     def optional_money(value: Decimal | int | float | None) -> Decimal | None:
@@ -258,10 +268,19 @@ def build_platform_profit_preview(
             damage_loss,
         ]
 
-    def _ad_cost_and_profit(use_actual: bool) -> tuple[Decimal | None, Decimal | None]:
+    def _ad_cost_and_profit(
+        use_actual: bool,
+    ) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
+        """返回 ``(ad_cost, profit, pre_ad_profit)``。
+
+        ``pre_ad_profit`` 是**广告前利润**（扣完采购/物流/仓储/贴单/平台佣金/达人佣金/
+        货损/退货，但**没扣广告费**）。它是 ROI 计算的分母，必须暴露出去 ——
+        以前它只作为中间变量存在，算完就被丢掉，导致 ROI 只能在外层重算一遍成本
+        （口径必然漂移）。
+        """
         components = _pre_ad_components(use_actual)
         if revenue is None or any(c is None for c in components):
-            return None, None
+            return None, None, None
         pre_ad_profit = revenue - sum(components, Decimal("0"))
         ad = (
             _money(pre_ad_profit * Decimal(str(expected_ad_rate)))
@@ -269,10 +288,44 @@ def build_platform_profit_preview(
             else None
         )
         profit = _money(pre_ad_profit - ad) if ad is not None else None
-        return ad, profit
+        return ad, profit, pre_ad_profit
 
-    ad_cost, expected_profit = _ad_cost_and_profit(use_actual=False)
-    _, actual_profit = _ad_cost_and_profit(use_actual=True)
+    ad_cost, expected_profit, expected_pre_ad_profit = _ad_cost_and_profit(use_actual=False)
+    _, actual_profit, actual_pre_ad_profit = _ad_cost_and_profit(use_actual=True)
+
+    def _roi_payload(metrics: dict) -> dict:
+        """把 ROI 计算结果铺进 preview 段。
+
+        两个 list 键改名为 ``roi_missing_reasons`` / ``roi_anomalies``：
+        它们说的是「ROI 算不出来 / 数值异常」，和「成本资料缺失」
+        （``reference_cost_missing_reasons``）是两回事，不改名会被读混。
+        """
+        payload = {
+            key: value
+            for key, value in metrics.items()
+            if key not in {"missing_reasons", "anomalies"}
+        }
+        payload["roi_missing_reasons"] = list(metrics.get("missing_reasons") or [])
+        payload["roi_anomalies"] = list(metrics.get("anomalies") or [])
+        return payload
+
+    # ROI 的分母是**广告前利润**（没扣广告费），所以两段各算一次。
+    # 分母算不出来（成本缺一项）时 compute_roi_metrics 一律返回 None + 缺输入原因，
+    # 绝不返回乐观值。
+    expected_roi = compute_roi_metrics(
+        net_revenue=revenue,
+        pre_ad_profit=expected_pre_ad_profit,
+        safety_margin=roi_safety_margin,
+        target_roi_ceiling=target_roi_ceiling,
+        expected_ad_rate=expected_ad_rate,
+    )
+    actual_roi = compute_roi_metrics(
+        net_revenue=revenue,
+        pre_ad_profit=actual_pre_ad_profit,
+        safety_margin=roi_safety_margin,
+        target_roi_ceiling=target_roi_ceiling,
+        expected_ad_rate=expected_ad_rate,
+    )
     actual_logistics = (
         optional_money(actual_logistics_cost)
         if actual_logistics_cost is not None
@@ -328,6 +381,9 @@ def build_platform_profit_preview(
             "return_loss": return_loss,
             "damage_loss": damage_loss,
             "profit": expected_profit,
+            # 广告前利润（**没扣广告费**）：ROI 计算的分母，见 `product_roi_service.py`
+            "pre_ad_profit": expected_pre_ad_profit,
+            **_roi_payload(expected_roi),
             # 预估口径的完整度：成本项齐不齐（缺任何一项 → profit 为 None → incomplete）。
             # ⚠️ 这个键以前**不存在** —— 调用方 `section.get("completeness", "complete")`
             # 在 expected 段永远取到默认值 "complete"，于是同一列在 estimated 版本写
@@ -357,6 +413,9 @@ def build_platform_profit_preview(
                 "actual_storage" if has_actual_storage else "expected_fallback"
             ),
             "profit": actual_profit,
+            # 广告前利润（实际物流/仓储口径，**没扣广告费**）
+            "pre_ad_profit": actual_pre_ad_profit,
+            **_roi_payload(actual_roi),
             "margin_rate": (
                 (actual_profit / revenue).quantize(Decimal("0.00000001"))
                 if actual_profit is not None and revenue

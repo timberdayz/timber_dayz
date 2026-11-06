@@ -1111,6 +1111,10 @@ class SkuProfitEstimate(Base):
     estimated_margin_rate = Column(Numeric(12, 8), nullable=True)
     calculation_basis = Column(String(32), nullable=False, default="estimated")
     expected_selling_price = Column(Numeric(18, 2), nullable=True)
+    # 测算售价的来源（阶段 1）：'user_input' / 'sku_reference' / 'profile'。
+    # 记下来是为了日后能区分「运营自己填的价」和「系统兜底带的价」——
+    # 两者在利润表里长得一样，但在 ROI 判定里可信度不同。
+    expected_selling_price_source = Column(String(32), nullable=True)
     competitor_price = Column(Numeric(18, 2), nullable=True)
     expected_ad_rate = Column(Numeric(12, 8), nullable=True)
     expected_ad_cost = Column(Numeric(18, 2), nullable=True)
@@ -1130,6 +1134,15 @@ class SkuProfitEstimate(Base):
     logistics_cost_variance = Column(Numeric(18, 2), nullable=True)
     storage_cost_variance = Column(Numeric(18, 2), nullable=True)
     total_cost_variance = Column(Numeric(18, 2), nullable=True)
+    # --- ROI 广告投放边界（阶段 1，全部可空：算不出来就存 NULL，不存乐观值）---
+    # 保本 ROI：低于它投广告就是亏的（分母是商家实收，与平台 GMV 同一把标尺）
+    break_even_roi = Column(Numeric(12, 4), nullable=True)
+    # 建议 ROI = 保本ROI × (1 + 安全边际)，**未封顶原值**
+    suggested_roi = Column(Numeric(12, 4), nullable=True)
+    # 建议 ROI 封顶后的值（平台可填上限）——运营真正能填进后台的那个数
+    suggested_roi_clamped = Column(Numeric(12, 4), nullable=True)
+    # 老口径「广告分成率」翻译成的等效目标 ROI（阶段 3 迁移存量时用）
+    equivalent_target_roi = Column(Numeric(12, 4), nullable=True)
     reference_storage_days = Column(Integer, nullable=True)
     storage_rule_id = Column(
         Integer,
@@ -1151,6 +1164,19 @@ class SkuProfitEstimate(Base):
         CheckConstraint(
             "calculation_basis IN ('estimated', 'actual_recost')",
             name="ck_sku_profit_estimate_basis",
+        ),
+        # 完整度取值域收口（阶段 0 只在 Python 层做，这里是 DB 层兜底）。
+        # ⚠️ 代价完整度与实际成本完整度是**两套不同的值域**，混在一列是阶段 0 的 C2 缺陷：
+        #   cost_completeness         ∈ complete / partial / incomplete
+        #   actual_recost_completeness ∈ incomplete / estimated / mixed / actual
+        CheckConstraint(
+            "cost_completeness IN ('complete', 'partial', 'incomplete')",
+            name="ck_sku_profit_estimate_cost_completeness",
+        ),
+        CheckConstraint(
+            "actual_recost_completeness IS NULL "
+            "OR actual_recost_completeness IN ('incomplete', 'estimated', 'mixed', 'actual')",
+            name="ck_sku_profit_estimate_actual_completeness",
         ),
         Index("ix_sku_profit_estimates_sku_time", "sku_id", "estimate_as_of"),
         {"schema": "finance"},
@@ -1185,6 +1211,8 @@ class SkuOperatingProfile(Base):
     reference_selling_price = Column(Numeric(18, 2), nullable=True)
     competitor_price = Column(Numeric(18, 2), nullable=True)
     expected_selling_price = Column(Numeric(18, 2), nullable=True)
+    # 测算售价来源（阶段 1）：'user_input' / 'sku_reference' / 'profile'
+    expected_selling_price_source = Column(String(32), nullable=True)
     seller_coupon_amount = Column(Numeric(18, 2), nullable=True)
     expected_ad_rate = Column(Numeric(12, 8), nullable=True)
     status = Column(String(16), nullable=False, default="active")
