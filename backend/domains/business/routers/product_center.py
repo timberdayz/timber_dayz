@@ -2604,11 +2604,15 @@ async def list_platform_sku_profit_candidates(
             "purchase_cost": purchase_cost,
             "platform_code": platform_code, "warehouse_code": warehouse_code, "transport_type": transport_type,
             "expected_selling_price": expected_selling_price,
-            # 测算售价来源（阶段 1）：经营档案带的 / SKU 参考售价兜底的
+            # 测算售价来源（阶段 1）：优先用经营档案里记下来的来源
+            # （user_input / sku_reference），老档案没记过就退化成 'profile'
             "expected_selling_price_source": (
-                "profile"
-                if profile is not None and profile.expected_selling_price is not None
-                else ("sku_reference" if row.reference_selling_price is not None else None)
+                (
+                    profile.expected_selling_price_source or "profile"
+                    if profile is not None and profile.expected_selling_price is not None
+                    else None
+                )
+                or ("sku_reference" if row.reference_selling_price is not None else None)
             ),
             "competitor_price": profile.competitor_price if profile else None,
             "seller_coupon_amount": seller_coupon_amount,

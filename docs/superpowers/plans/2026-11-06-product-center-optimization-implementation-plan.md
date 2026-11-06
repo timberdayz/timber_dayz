@@ -1327,6 +1327,23 @@ ROI 算出来的保本 ROI 也会跟着错）。改法有两个方向，见 §13
 | 8 | `current_migrations/versions/20261113_add_platform_roi_config.py` | **新建**：平台 ROI 配置 + 回填 TikTok 20 / Shopee 50 |
 | 9 | `current_migrations/versions/20261114_add_sku_roi_columns.py` | **新建**：业务列 + C2 约束（先清洗存量再加约束） |
 | 10 | `frontend/src/domains/business/views/ProductCenter.vue` | 3 个只读列 + 成本完整度守卫 + 2 条免责提示 + 缺资料标签抽成共用 map |
+| 11 | `backend/domains/business/routers/product_center.py`（保存路径） | 利润版本落库时写入 4 个 ROI 列 + `expected_selling_price_source`；经营档案记 `expected_selling_price_source`；利润版本查询接口回读 |
+
+### C.1.1 列加了还不够，得有人写
+
+第 7/9 项加的列如果只有 schema 没有写入路径，就是**空壳** —— 运营投的那个 ROI
+事后仍然无从解释。所以：
+
+- `POST /api/platform-sku-profit/estimates` 保存利润版本时，把 **本 section 自己的**
+  ROI 写进 `finance.sku_profit_estimates`（estimated 段与 actual_recost 段各算各的 ——
+  两段成本口径不同，ROI 也不该混）。
+- `finance.sku_operating_profiles` 记 `expected_selling_price_source`
+  （`user_input` / `sku_reference`）：运营自己填的价和 SKU 参考售价兜底的价，
+  在利润表里长得一样，在 ROI 判定里可信度不同，必须留痕。
+- `GET /api/platform-sku-profit/estimates` 回读这 4 个 ROI 字段与来源。
+
+`expected_selling_price_source` 在候选列表里的取值优先级：
+**经营档案里记下来的来源** → 老档案没记过时退化成 `profile` → 都没有时按 SKU 参考售价记 `sku_reference`。
 
 ### C.2 三处与原方案不同的地方（实施时修正）
 
