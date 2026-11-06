@@ -33,6 +33,8 @@ from backend.schemas.product_center import (
     ProductCategoryUpdateRequest,
     ProductCenterItem,
     ProductCenterListResponse,
+    SkuPricingOverrideRequest,
+    SkuPricingOverrideResponse,
     ProductWarehouseCreateRequest,
     ProductWarehouseUpdateRequest,
     PlatformFeeRateUpdateRequest,
@@ -117,8 +119,13 @@ from backend.services.product_pricing_service import (
 )
 from backend.services.product_pricing_query_service import (
     compute_pricing_for_sku as _compute_pricing_for_sku,
+    compute_pricing_state as _compute_pricing_state,
     load_pricing_context as _pricing_context,
     resolve_pricing_platform_code as _pricing_platform_code,
+)
+from backend.services.product_pricing_override_service import (
+    clear_platform_override,
+    set_platform_override,
 )
 from backend.services.sku_pricing_policy_service import (
     load_current_policies,
@@ -1174,6 +1181,32 @@ async def bulk_save_spus(body: SpuBulkRequest, db: AsyncSession = Depends(get_as
 # 口径一致是**结构性保证**（同一个函数被两边调用），不是靠一条容易跳过的 DB 测试。
 
 
+def _pricing_by_platform(context: dict, sku_row, linked_spu) -> dict[str, dict]:
+    """**各可定价平台**各自的底线与人工覆盖（阶段 2.1b）。
+
+    前端要「按平台分行」展示与编辑人工覆盖，就必须一次拿到所有可定价平台的数 ——
+    列表接口一次只传一个 ``platform_code``，让前端发 N 次请求既慢又容易不一致。
+
+    这里走的是**同一个**计算函数（``compute_pricing_state``），
+    所以每一行的数字与「按该平台单独查一次」必然一致 —— 不存在第二份口径。
+    """
+    out: dict[str, dict] = {}
+    for code in context.get("priceable_platform_codes") or []:
+        pricing = _compute_pricing_state(
+            context=context,
+            sku_row=sku_row,
+            linked_spu=linked_spu,
+            platform_code=code,
+        )["pricing"]
+        out[code] = {
+            "min_selling_price": pricing.get("min_selling_price"),
+            "min_selling_price_override": pricing.get("min_selling_price_override"),
+            "min_selling_price_source": pricing.get("min_selling_price_source"),
+            "min_selling_price_is_override": pricing.get("min_selling_price_is_override"),
+        }
+    return out
+
+
 async def _compute_sku_min_selling_price(
     db: AsyncSession, sku_id: int, platform_code: str | None = None
 ) -> Decimal | None:
@@ -1280,6 +1313,10 @@ async def list_skus(
         payload["min_selling_price_platform"] = _pricing_platform_code(
             pricing_context, platform_code
         )
+        # 各可定价平台各自的底线与人工覆盖（阶段 2.1b：前端按平台分行）
+        payload["min_selling_price_by_platform"] = _pricing_by_platform(
+            pricing_context, row, linked_spu
+        )
         items.append(ProductCenterItem(**payload))
     return ProductCenterListResponse(data=items, page=page, page_size=page_size, total=total, total_pages=(total + page_size - 1) // page_size)
 
@@ -1320,6 +1357,89 @@ async def update_sku(sku_id: int, body: SkuUpdateRequest, db: AsyncSession = Dep
     await db.refresh(row)
     asyncio.create_task(trigger_pending_projection_delivery())
     return ProductCenterItem.model_validate(row)
+
+
+@router.patch(
+    "/api/skus/{sku_id}/pricing-override", response_model=SkuPricingOverrideResponse
+)
+async def set_sku_pricing_override(
+    sku_id: int,
+    body: SkuPricingOverrideRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_editor),
+):
+    """设置 / 重置某 SKU 在**某个平台**上的最低售价人工覆盖（阶段 2.1b）。
+
+    为什么是独立接口，而不是 SKU 主数据的保存字段：
+
+    1. **口径**：人工覆盖是 SKU × 平台的量（底线就是 SKU × 平台的量）。
+       挂在 SKU 主数据上只能存一个数，等于「一套覆盖值管所有平台」。
+    2. **数据安全**：`core.dim_erp_sku` 参与「采集机 → 云端」同步，
+       同步对它做 `TRUNCATE ... CASCADE` ⇒ 覆盖值每次同步都会被抹掉。
+       覆盖值住在 `finance.sku_platform_pricing`（不参与同步，且刻意不带外键）。
+
+    `min_selling_price_override` 传 **null** = 重置为自动值。
+    """
+    sku_row = await db.get(DimErpSku, sku_id)
+    if sku_row is None:
+        raise HTTPException(status_code=404, detail="SKU not found")
+
+    platform = await db.get(DimPlatform, body.platform_code)
+    if platform is None:
+        raise BusinessValidationError(
+            message=f"platform {body.platform_code} not found",
+            detail={"code": "pricing_override_unknown_platform",
+                    "platform_code": body.platform_code},
+        )
+    if platform.platform_role != "sales":
+        raise BusinessValidationError(
+            message=f"platform {body.platform_code} is not a sales platform",
+            detail={"code": "pricing_override_platform_not_sales",
+                    "platform_code": body.platform_code},
+        )
+
+    user_id = getattr(_user, "user_id", None)
+    if body.min_selling_price_override is None:
+        cleared = await clear_platform_override(
+            db, sku_id=sku_id, platform_code=body.platform_code
+        )
+        await _write_product_center_audit(
+            db, _user, action_type="update", resource_type="sku_pricing_override",
+            resource_id=f"{sku_id}:{body.platform_code}",
+            changes={"min_selling_price_override": None, "cleared": cleared},
+        )
+        await db.commit()
+        return SkuPricingOverrideResponse(
+            sku_id=sku_id,
+            platform_code=body.platform_code,
+            min_selling_price_override=None,
+            min_selling_price_source=None,
+            cleared=cleared,
+        )
+
+    row = await set_platform_override(
+        db,
+        sku_id=sku_id,
+        platform_code=body.platform_code,
+        value=body.min_selling_price_override,
+        user_id=user_id,
+    )
+    await _write_product_center_audit(
+        db, _user, action_type="update", resource_type="sku_pricing_override",
+        resource_id=f"{sku_id}:{body.platform_code}",
+        changes={
+            "min_selling_price_override": float(row.min_selling_price_override),
+            "min_selling_price_source": row.min_selling_price_source,
+        },
+    )
+    await db.commit()
+    return SkuPricingOverrideResponse(
+        sku_id=sku_id,
+        platform_code=body.platform_code,
+        min_selling_price_override=float(row.min_selling_price_override),
+        min_selling_price_source=row.min_selling_price_source,
+        cleared=False,
+    )
 
 
 async def _apply_bulk_sku_spu_binding(

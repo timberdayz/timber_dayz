@@ -1271,16 +1271,21 @@ class SkuPlatformPricing(Base):
     __tablename__ = "sku_platform_pricing"
 
     pricing_id = Column(Integer, primary_key=True, autoincrement=True)
-    sku_id = Column(
-        Integer,
-        ForeignKey("core.dim_erp_sku.sku_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    platform_code = Column(
-        String(32),
-        ForeignKey("core.dim_platforms.platform_code", ondelete="RESTRICT"),
-        nullable=False,
-    )
+    # ⚠️ 这里**刻意不加外键**（阶段 2.1b）。
+    #
+    # 商品中心的 SKU 主数据有一条「采集机 → 云端」的同步链路，
+    # 它对 ``core.dim_erp_sku`` 与 ``core.dim_platforms`` 做的是
+    # **TRUNCATE ... RESTART IDENTITY CASCADE**。
+    # 而 PostgreSQL 的 ``TRUNCATE ... CASCADE`` **不看引用侧的 ondelete** ——
+    # 只要有外键指着被清空的表，那张表就一起被清空
+    # （RESTRICT / CASCADE / NO ACTION 在 TRUNCATE 面前行为完全一样）。
+    #
+    # ⇒ 带外键的话，运营设的「人工覆盖最低售价」每次同步都会被抹掉，
+    #    而这恰恰是护栏依赖的上限，抹掉 = 护栏形同虚设。
+    # ⇒ 所以这里用**不带外键的普通列**，与 ``ops.price_adjust_baselines`` 同一套做法
+    #    （那张表也是不带外键的 ``sku_id`` 整数列）。
+    sku_id = Column(Integer, nullable=False)
+    platform_code = Column(String(32), nullable=False)
     # 人工覆盖：该 SKU 在该平台上的最低售价下限。
     # NULL = 没有人工覆盖，走系统算的底线。
     min_selling_price_override = Column(Numeric(18, 2), nullable=True)

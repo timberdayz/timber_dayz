@@ -107,7 +107,10 @@ class SkuBulkItem(BaseModel):
     selling_price_confirmed_at: Optional[datetime] = None
     turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
     creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
-    min_selling_price_override: Optional[float] = Field(default=None, gt=0)
+    # ⚠️ 这里**不再有** `min_selling_price_override`（阶段 2.1b）：
+    # 人工覆盖是 **SKU × 平台** 的量，挂在 SKU 主数据的保存流程上既口径不对
+    # （一个数套所有平台），又会被「采集机 → 云端」同步 TRUNCATE 抹掉。
+    # 它改走 `PATCH /api/skus/{sku_id}/pricing-override`（平台级独立接口）。
 
     @model_validator(mode="after")
     def cny_only(self):
@@ -189,7 +192,10 @@ class SkuCreateRequest(BaseModel):
     selling_price_confirmed_at: Optional[datetime] = None
     turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
     creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
-    min_selling_price_override: Optional[float] = Field(default=None, gt=0)
+    # ⚠️ 这里**不再有** `min_selling_price_override`（阶段 2.1b）：
+    # 人工覆盖是 **SKU × 平台** 的量，挂在 SKU 主数据的保存流程上既口径不对
+    # （一个数套所有平台），又会被「采集机 → 云端」同步 TRUNCATE 抹掉。
+    # 它改走 `PATCH /api/skus/{sku_id}/pricing-override`（平台级独立接口）。
 
     @model_validator(mode="after")
     def cny_only(self):
@@ -219,7 +225,10 @@ class SkuUpdateRequest(BaseModel):
     selling_price_confirmed_at: Optional[datetime] = None
     turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
     creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
-    min_selling_price_override: Optional[float] = Field(default=None, gt=0)
+    # ⚠️ 这里**不再有** `min_selling_price_override`（阶段 2.1b）：
+    # 人工覆盖是 **SKU × 平台** 的量，挂在 SKU 主数据的保存流程上既口径不对
+    # （一个数套所有平台），又会被「采集机 → 云端」同步 TRUNCATE 抹掉。
+    # 它改走 `PATCH /api/skus/{sku_id}/pricing-override`（平台级独立接口）。
 
     @model_validator(mode="after")
     def cny_only(self):
@@ -232,6 +241,32 @@ class SkuUpdateRequest(BaseModel):
 class SpuSkuBindingRequest(BaseModel):
     sku_id: int = Field(gt=0)
     effective_from: date
+
+
+class SkuPricingOverrideRequest(BaseModel):
+    """**平台级**最低售价人工覆盖的设置 / 重置请求（阶段 2.1b）。
+
+    - `platform_code`：**必填**。人工覆盖是 SKU × 平台的量，不传平台就说不清
+      要覆盖谁 —— 与「底线按平台算」是同一件事的两面。
+    - `min_selling_price_override`：**传 null 表示「重置为自动值」**；
+      传数字表示设置该平台的人工覆盖上限（必须 > 0）。
+
+    ⚠️ 不接受 0 或负数：0 不是「不设覆盖」，而是「把底线压到 0」= 把护栏关掉。
+    """
+
+    platform_code: str = Field(min_length=1, max_length=32)
+    min_selling_price_override: Optional[float] = Field(default=None, gt=0)
+
+
+class SkuPricingOverrideResponse(BaseModel):
+    """平台级人工覆盖的写后回执。"""
+
+    sku_id: int
+    platform_code: str
+    min_selling_price_override: Optional[float] = None
+    min_selling_price_source: Optional[str] = None
+    #: True = 已重置为自动值（该平台不再有人工覆盖）
+    cleared: bool = False
 
 
 class ProductCenterItem(BaseModel):
@@ -301,6 +336,16 @@ class ProductCenterItem(BaseModel):
     pricing_tier_label: Optional[str] = None
     pricing_days_since_restock: Optional[int] = None
     pricing_tier_source: Optional[str] = None
+    #: **各可定价平台**各自的底线与人工覆盖（阶段 2.1b）。
+    #:
+    #: 形如 ``{"tiktok": {"min_selling_price": 127.61, "min_selling_price_override": None,
+    #: "min_selling_price_source": "cost_floor", "min_selling_price_is_override": False},
+    #: "shopee": {...}}``。
+    #:
+    #: 为什么要有它：底线是 SKU × 平台的量，前端要「按平台分行」展示与编辑，
+    #: 就必须一次拿到**所有**可定价平台的数 —— 而列表接口一次只传一个
+    #: ``platform_code``，让前端发 N 次请求既慢又容易出不一致。
+    min_selling_price_by_platform: Optional[dict[str, dict]] = None
 
 
 class ProductCenterListResponse(BaseModel):

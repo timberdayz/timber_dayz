@@ -93,13 +93,17 @@ WITH state AS (
 ),
 erp AS (
     -- ERP 主数据：只取定价需要的原料列
+    -- ⚠️ 这里**不再取** `min_selling_price_override`（阶段 2.1b）：
+    --    人工覆盖已经下沉到 `finance.sku_platform_pricing`（SKU × 平台），
+    --    由 backend/services/inventory/sku_clearance_service.py 在 Python 侧
+    --    按「行平台 → 销售平台则用它自己的、否则回落公司级」的同一套规则加载。
+    --    放回 SQL 会变成第二份口径，且把平台级的东西又压回 SKU 级。
     SELECT
         sku_id,
         sku_key,
         sku_name,
         default_purchase_cost,
-        reference_selling_price,
-        min_selling_price_override
+        reference_selling_price
     FROM core.dim_erp_sku
 )
 SELECT
@@ -120,8 +124,7 @@ SELECT
     COALESCE(s.sold_units_30d, 0)       AS sold_units_30d,
     erp.sku_id,
     erp.default_purchase_cost,
-    erp.reference_selling_price,
-    erp.min_selling_price_override
+    erp.reference_selling_price
 FROM state s
 LEFT JOIN erp
        ON erp.sku_key = s.sku_key;

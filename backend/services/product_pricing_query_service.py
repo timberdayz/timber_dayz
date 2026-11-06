@@ -196,15 +196,17 @@ def resolve_pricing_platform_code(context: dict, platform_code: Optional[str]) -
 
 
 def resolve_pricing_override(context: dict, sku_id: int, platform_code: Optional[str]):
-    """取某 SKU 在某平台的**新表**人工覆盖值；没有则返回 None。
+    """取某 SKU 在某平台的**人工覆盖值**；没有则返回 None。
 
-    **回落链**（由调用方补齐第二段）：
-    新表（SKU × 平台）→ SKU 级旧列（``dim_erp_sku.min_selling_price_override``，
-    deprecated，保留一个版本周期）。
+    覆盖值住在 ``finance.sku_platform_pricing``（阶段 2.1b 迁入）——
+    **SKU × 平台** 的量，因为底线就是 SKU × 平台的量。
 
-    新表里没有行 ⇒ 用旧列 ⇒ 旧列也没有 ⇒ 没有人工覆盖（走系统算的底线）。
-    旧列的回落是**兼容历史数据**用的：生产库里人工覆盖目前是 0 条，
-    所以这条分支几乎不会被走到，但走错了会让老数据突然失去覆盖值。
+    ⚠️ 以前它住在 ``core.dim_erp_sku.min_selling_price_override``（公司级），
+    现在那一列**已删**：
+    - 口径错位（一个数套所有平台，而各平台费率差一截）；
+    - 而且那张表会被「采集机 → 云端」同步 TRUNCATE ⇒ 覆盖值每次同步都蒸发。
+
+    覆盖值为空 ⇒ 没有人工覆盖（走系统算的底线）。
     """
     overrides = context.get("overrides") or {}
     if not platform_code:
@@ -243,10 +245,9 @@ def compute_pricing_state(
     policy = select_restock_tier(policies, days_since_restock)
     deepest = max(policies, key=lambda p: p["min_restock_days"]) if policies else None
 
-    # 人工覆盖：新表（SKU × 平台）优先，没有则回落 SKU 级旧列（deprecated）
+    # 人工覆盖：平台级（SKU × 平台）。以前还有一段「回落 SKU 级旧列」，
+    # 阶段 2.1b 起那列已删（口径错位 + 会被同步 TRUNCATE 抹掉）。
     override = resolve_pricing_override(context, sku_row.sku_id, platform_code)
-    if override is None:
-        override = sku_row.min_selling_price_override
 
     pricing = compute_sku_pricing(
         purchase_cost=sku_row.default_purchase_cost,

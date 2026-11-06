@@ -46,6 +46,17 @@ export default {
   updateSku(skuId, payload) {
     return api._patch(`/skus/${skuId}`, payload);
   },
+  // 平台级最低售价人工覆盖（阶段 2.1b）。
+  // ⚠️ 为什么是独立接口，而不是 SKU 主数据的保存字段：
+  // ① 人工覆盖是 **SKU × 平台** 的量（TikTok 与 Shopee 的平台成本率不同，底线也不同），
+  //    挂在 SKU 主数据上等于一个数套所有平台；
+  // ② `core.dim_erp_sku` 参与「采集机 → 云端」同步，同步脚本对它做
+  //    `TRUNCATE ... RESTART IDENTITY CASCADE` ⇒ 挂在 SKU 上的覆盖值每次同步都被抹掉，
+  //    护栏上限形同虚设。
+  // 传 `min_selling_price_override: null` 表示「重置为自动值」。
+  setSkuPricingOverride(skuId, payload) {
+    return api._patch(`/skus/${skuId}/pricing-override`, payload);
+  },
   previewSkuDeletion(skuId) {
     return api._post(`/skus/${skuId}/deletion-preview`, {});
   },

@@ -37,7 +37,13 @@ from backend.services.sku_pricing_policy_service import (
     load_current_policies,
     to_policy_rows,
 )
-from modules.core.db import BridgeSpuSku, DimErpSku, DimPlatform, DimSpu
+from modules.core.db import (
+    BridgeSpuSku,
+    DimErpSku,
+    DimPlatform,
+    DimSpu,
+    SkuPlatformPricing,
+)
 
 # 视图名：唯一的查询入口。测试会断言 SQL 里只出现它。
 CLEARANCE_VIEW = "api.sku_clearance_ranking_module"
@@ -64,8 +70,7 @@ _SELECT_COLUMNS = """
     sold_units_30d,
     sku_id,
     default_purchase_cost,
-    reference_selling_price,
-    min_selling_price_override
+    reference_selling_price
 """
 
 
@@ -78,6 +83,7 @@ def _resolve_pricing(
     platform: Optional[DimPlatform],
     days_since_restock: Optional[int],
     pricing_matched: bool,
+    min_selling_price_override: Any = None,
 ) -> tuple[dict, Optional[float]]:
     """算出一行的定价字段与目标利润率。
 
@@ -86,6 +92,10 @@ def _resolve_pricing(
     就用公司级兜底费率。底线是「SKU × 平台」的量，
     拿别的平台的费率算出来的底线是错的（Shopee 41.65% vs TikTok 27.27%）；
     但**拿不到费率**比口径不一致更糟 —— 底线会整个消失。
+
+    ⚠️ `min_selling_price_override` 同样按**这个平台**取（阶段 2.1b）：
+    人工覆盖已经下沉到 ``finance.sku_platform_pricing``（SKU × 平台），
+    视图不再带这一列，由调用方在 Python 侧加载。
 
     未匹配 ERP 主数据的 SKU：定价字段整体留空（spec §3.6）。
     这类 SKU 在视图里 LEFT JOIN 出来的采购成本/参考售价本来就是 NULL，
@@ -118,7 +128,7 @@ def _resolve_pricing(
         spu_damage_rate=inputs.get("spu_damage_rate"),
         policy=policy,
         deepest_policy=deepest_policy,
-        min_selling_price_override=row.get("min_selling_price_override"),
+        min_selling_price_override=min_selling_price_override,
         days_since_restock=days_since_restock,
     )
     target_margin_rate = float(policy["target_margin_rate"]) if policy else None
@@ -167,11 +177,9 @@ def _to_item_response(
             if row.get("reference_selling_price") is not None
             else None
         ),
-        min_selling_price_override=(
-            float(row["min_selling_price_override"])
-            if row.get("min_selling_price_override") is not None
-            else None
-        ),
+        # 人工覆盖（阶段 2.1b）：值来自**本次实际用的那个平台**的覆盖，
+        # 不再从视图行里取 —— 视图已经不带这一列了（SKU 级旧列已删）。
+        min_selling_price_override=pricing.get("min_selling_price_override"),
         pricing_tier_label=pricing.get("pricing_tier_label"),
         current_discount_rate=pricing.get("current_discount_rate"),
         current_target_margin_rate=target_margin_rate,
@@ -345,6 +353,38 @@ class SkuClearanceService:
             fallback = await self.db.get(DimPlatform, basis)
         return platforms, fallback
 
+    async def _load_platform_overrides(
+        self,
+        sku_ids: list[int],
+        platforms: dict[str, DimPlatform],
+    ) -> dict[tuple[int, str], Any]:
+        """平台级人工覆盖：``{(sku_id, platform_code): 覆盖值}``（阶段 2.1b）。
+
+        只查**销售平台**的行：库存来源平台（'miaoshou'）上不会有覆盖值 ——
+        覆盖是「这个 SKU 在这个销售渠道上的最低售价下限」，
+        库存来源平台不是销售渠道。
+        """
+        if not sku_ids or not platforms or self.db is None:
+            return {}
+        sales_codes = [
+            code for code, row in platforms.items() if row.platform_role == "sales"
+        ]
+        if not sales_codes:
+            return {}
+        rows = (
+            await self.db.execute(
+                select(SkuPlatformPricing).where(
+                    SkuPlatformPricing.sku_id.in_(sku_ids),
+                    SkuPlatformPricing.platform_code.in_(sales_codes),
+                    SkuPlatformPricing.min_selling_price_override.is_not(None),
+                )
+            )
+        ).scalars().all()
+        return {
+            (row.sku_id, row.platform_code): row.min_selling_price_override
+            for row in rows
+        }
+
     # ------------------------------------------------------------------
     # 主方法
     # ------------------------------------------------------------------
@@ -390,6 +430,13 @@ class SkuClearanceService:
         pricing_inputs = await self._load_pricing_inputs(rows)
         policy_rows = await self._load_policy_rows()
         platforms, default_platform = await self._load_pricing_platforms(policy_rows)
+        # 人工覆盖（阶段 2.1b）：SKU × 平台，住在 finance.sku_platform_pricing。
+        # 取值平台与取费率平台**同一套规则**（行平台是销售平台就用它自己的，
+        # 否则回落公司级兜底平台）—— 覆盖值与费率必须落在同一个平台上。
+        overrides = await self._load_platform_overrides(
+            [int(row["sku_id"]) for row in rows if row.get("sku_id") is not None],
+            platforms,
+        )
         deepest = (
             max(policy_rows, key=lambda p: p["min_restock_days"])
             if policy_rows
@@ -406,6 +453,7 @@ class SkuClearanceService:
                 deepest_policy=deepest,
                 platforms=platforms,
                 default_platform=default_platform,
+                overrides=overrides,
             )
             for row in rows
         ]
@@ -532,6 +580,7 @@ class SkuClearanceService:
         deepest_policy: Optional[dict],
         platforms: dict[str, DimPlatform],
         default_platform: Optional[DimPlatform],
+        overrides: Optional[dict[tuple[int, str], Any]] = None,
     ) -> SkuClearanceRankingItemResponse:
         sku_id = row.get("sku_id")
         days_since_restock = row.get("days_since_restock")
@@ -546,6 +595,11 @@ class SkuClearanceService:
         #    成本线算不出来，底线只剩纪律线 —— 底线比口径不一致更危险。
         platform = platforms.get(str(row.get("platform_code") or "")) or default_platform
 
+        # 人工覆盖按**同一个平台**取（阶段 2.1b）：覆盖值是 SKU × 平台的量。
+        override = None
+        if sku_id is not None and platform is not None:
+            override = (overrides or {}).get((int(sku_id), platform.platform_code))
+
         pricing, target_margin_rate = _resolve_pricing(
             row,
             pricing_inputs=pricing_inputs,
@@ -554,6 +608,7 @@ class SkuClearanceService:
             platform=platform,
             days_since_restock=days_since_restock,
             pricing_matched=pricing_matched,
+            min_selling_price_override=override,
         )
 
         # DOS 参考值：**走 inventory_dos_service 的唯一实现**，与业务概览同一口径。

@@ -282,7 +282,67 @@
           ><el-table-column label="参考售价" width="115"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="当前可优惠" width="110"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column
           ><el-table-column label="滞销可优惠" width="110"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column
-          ><el-table-column label="最低售价" width="230"><template #default="{ row }"><div class="pricing-cell"><div class="pricing-cell-head"><span class="readonly-cell" :class="{ 'pending-override': pendingOverride(row) != null }">{{ pendingOverride(row) != null ? `保存后生效：${money(pendingOverride(row))}` : money(row.min_selling_price) }}</span><el-tag v-if="pendingOverride(row) == null" size="small" :type="pricingSourceTagType(row.min_selling_price_source)" :title="PRICING_SOURCE_TOOLTIPS[row.min_selling_price_source]">{{ pricingSourceLabel(row.min_selling_price_source) }}</el-tag><el-button v-if="row.min_selling_price_is_override || row.min_selling_price_override != null" link type="warning" @click="resetMinSellingPrice(row)">重置为自动值</el-button></div><el-input-number v-model="row.min_selling_price_override" :min="0.01" :precision="2" :controls="false" size="small" :placeholder="row.min_selling_price != null ? money(row.min_selling_price) : '自动'" @change="markDirty('sku', row)" /><div class="pricing-tier-hint">{{ row.pricing_tier_label || "-" }}<template v-if="row.pricing_days_since_restock != null">（库龄 {{ row.pricing_days_since_restock }} 天）</template><el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag></div><div class="pricing-tier-hint">底线按 {{ skuPricingPlatform || '默认平台' }} 的成本率计算</div><div class="pricing-tier-hint">人工覆盖是公司级的，对所有平台生效</div></div></template></el-table-column
+          ><el-table-column label="最低售价" width="340"
+            ><template #default="{ row }"
+              ><div class="pricing-cell">
+                <!-- 每个可定价平台一行：底线是 SKU × 平台的量，TikTok 与 Shopee 的平台成本率不同
+                     （27.27% vs 41.65%），同一件商品在两个平台有两条不同的底线。 -->
+                <div
+                  v-for="item in skuPricingPlatformRows(row)"
+                  :key="item.platform_code"
+                  class="pricing-platform-row"
+                >
+                  <div class="pricing-cell-head">
+                    <span class="pricing-platform-name">{{ item.name }}</span>
+                    <span
+                      class="readonly-cell"
+                      :class="{ 'pending-override': pendingPlatformOverride(row, item) != null }"
+                      >{{ pendingPlatformOverride(row, item) != null ? `保存后生效：${money(pendingPlatformOverride(row, item))}` : money(item.min_selling_price) }}</span
+                    ><el-tag
+                      size="small"
+                      :type="pricingSourceTagType(item.min_selling_price_source)"
+                      :title="PRICING_SOURCE_TOOLTIPS[item.min_selling_price_source]"
+                      >{{ pricingSourceLabel(item.min_selling_price_source) }}</el-tag
+                    >
+                  </div>
+                  <div class="pricing-override-row">
+                    <el-input-number
+                      :model-value="platformOverrideDraft(row, item)"
+                      :min="0.01"
+                      :precision="2"
+                      :controls="false"
+                      size="small"
+                      :disabled="!row.sku_id"
+                      :placeholder="item.min_selling_price != null ? money(item.min_selling_price) : '自动'"
+                      @update:model-value="setPlatformOverrideDraft(row, item, $event)"
+                    />
+                    <el-button
+                      size="small"
+                      plain
+                      :disabled="!row.sku_id || platformOverrideDraft(row, item) == null"
+                      :loading="savingOverrideKey === overrideSavingKey(row, item)"
+                      @click="savePlatformOverride(row, item)"
+                      >保存覆盖</el-button
+                    ><el-button
+                      v-if="item.min_selling_price_is_override || item.min_selling_price_override != null"
+                      size="small"
+                      link
+                      type="warning"
+                      :disabled="!row.sku_id"
+                      @click="resetPlatformOverride(row, item)"
+                      >重置为自动值</el-button
+                    >
+                  </div>
+                </div>
+                <div
+                  v-if="!skuPricingPlatformRows(row).length"
+                  class="pricing-tier-hint"
+                >暂无可定价平台，无法计算底线</div>
+                <div class="pricing-tier-hint">{{ row.pricing_tier_label || "-" }}<template v-if="row.pricing_days_since_restock != null">（库龄 {{ row.pricing_days_since_restock }} 天）</template><el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag></div>
+                <div class="pricing-tier-hint">底线按 {{ skuPricingPlatform || '默认平台' }} 的成本率计算</div>
+                <div class="pricing-tier-hint">人工覆盖按平台生效，各平台底线互相独立</div>
+              </div></template
+            ></el-table-column
           ><el-table-column label="达人佣金率" width="145"><template #header><el-tooltip content="留空表示不单独设置，按平台默认计算" placement="top"><span class="pricing-header">达人佣金率<el-icon class="pricing-header-help"><QuestionFilled /></el-icon></span></el-tooltip></template><template #default="{ row }"><div class="rate-cell"><el-input-number :model-value="toPercent(row.creator_commission_rate)" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" :placeholder="row.creator_commission_rate_fallback != null ? percent(row.creator_commission_rate_fallback) : '按平台默认'" @update:model-value="row.creator_commission_rate = fromPercent($event, null); markDirty('sku', row)" /><span class="rate-suffix">%</span></div></template></el-table-column
           ><el-table-column label="售价来源" width="120"><template #default="{ row }"><el-input v-model="row.selling_price_source" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="周转类型" width="120"><template #default="{ row }"><el-select v-model="row.turnover_class" size="small" placeholder="选择" @change="markDirty('sku', row)"><el-option label="快销商品（30天）" value="fast" /><el-option label="普通商品（60天）" value="normal" /><el-option label="慢销商品（90天）" value="slow" /></el-select></template></el-table-column
@@ -1147,7 +1207,6 @@ const blankSku = () => ({
   purchase_cost_source: "manual",
   purchase_cost_confidence: "low",
   creator_commission_rate: null,
-  min_selling_price_override: null,
 });
 // --- SKU 定价底线的展示辅助 ---
 const PRICING_SOURCE_LABELS = {
@@ -1165,23 +1224,123 @@ const PRICING_SOURCE_TOOLTIPS = {
 const pricingSourceLabel = (source) => PRICING_SOURCE_LABELS[source] || "-";
 const pricingSourceTagType = (source) =>
   ({ manual_override: "danger", discount_guard: "warning", cost_floor: "success" })[source] || "info";
-const resetMinSellingPrice = (row) => {
-  row.min_selling_price_override = null;
-  markDirty("sku", row);
+// --- 平台级最低售价底线（阶段 2.1b） ---
+// 底线是 **SKU × 平台** 的量：TikTok 与 Shopee 的平台其他成本率差一截
+// （27.27% vs 41.65%），同一件商品在两个平台有两条不同的底线。
+// 所以「最低售价」列按平台分行，人工覆盖也按平台分行、各自独立。
+//
+// 平台名取自经营维度里的销售平台；找不到就退回平台代码本身。
+const platformDisplayName = (platformCode) => {
+  const hit = (operatingDimensions.platforms || []).find(
+    (item) => item.platform_code === platformCode,
+  );
+  return hit?.name || platformCode;
+};
+// 把后端下发的 {平台代码: {...}} 摊平成可直接渲染的分行
+const skuPricingPlatformRows = (row) =>
+  Object.entries(row.min_selling_price_by_platform || {}).map(
+    ([platformCode, item]) => ({
+      platform_code: platformCode,
+      name: platformDisplayName(platformCode),
+      min_selling_price: item?.min_selling_price ?? null,
+      min_selling_price_override: item?.min_selling_price_override ?? null,
+      min_selling_price_source: item?.min_selling_price_source ?? null,
+      min_selling_price_is_override: !!item?.min_selling_price_is_override,
+    }),
+  );
+// 人工覆盖不再随 SKU 主数据一起保存（阶段 2.1b），而是走平台级独立接口
+// （PATCH /api/skus/{sku_id}/pricing-override）。
+// 所以输入框里的值必须单独存着 —— 不能挂在 row 上：row 会在重新拉取后被整体替换。
+const pricingOverrideDrafts = reactive({});
+const pricingOverrideKey = (row, platformCode) =>
+  `${row.sku_id || row.sku_key || "new"}::${platformCode}`;
+const platformOverrideDraft = (row, item) => {
+  const draft = pricingOverrideDrafts[pricingOverrideKey(row, item.platform_code)];
+  if (draft !== undefined) return draft;
+  return item.min_selling_price_override ?? null;
+};
+const setPlatformOverrideDraft = (row, item, value) => {
+  const num = value == null ? null : Number(value);
+  // 0 不是「不设覆盖」，而是「把底线压到 0」= 把护栏关掉 ⇒ 与后端一致，当成没填。
+  pricingOverrideDrafts[pricingOverrideKey(row, item.platform_code)] =
+    num == null || !Number.isFinite(num) || num <= 0 ? null : num;
 };
 // 输入框里填了、但还没保存的覆盖值。
-// 只读值显示的是**服务端已保存**的生效值，运营在输入框里改完还没点保存时，
+// 只读值显示的是**服务端已保存**的生效值，运营在输入框里改完还没点「保存覆盖」时，
 // 上方那个数不会变——容易被误读成「我改了没生效」。
 // 这个函数把「待生效的覆盖值」挑出来，界面据此改成显示「保存后生效：¥X」。
-const pendingOverride = (row) => {
-  const typed = row.min_selling_price_override;
+const pendingPlatformOverride = (row, item) => {
+  const typed = platformOverrideDraft(row, item);
   if (typed == null) return null;
   // 之前没设过覆盖值 -> 现在填的是新增
-  if (!row.min_selling_price_is_override) return Number(typed);
+  if (!item.min_selling_price_is_override) return Number(typed);
   // 之前设过覆盖值 -> 已保存的生效值就等于当时的覆盖值；与现在输入的不一致即为待生效
-  if (row.min_selling_price == null) return Number(typed);
-  if (Number(typed) !== Number(row.min_selling_price)) return Number(typed);
+  if (item.min_selling_price == null) return Number(typed);
+  if (Number(typed) !== Number(item.min_selling_price)) return Number(typed);
   return null;
+};
+const savingOverrideKey = ref("");
+const overrideSavingKey = (row, item) => pricingOverrideKey(row, item.platform_code);
+// 平台级覆盖值的报错文案：后端走统一错误信封，结构化业务码在 error.detail.code。
+const pricingOverrideErrorText = (error) => {
+  const detail = readApiErrorDetail(error);
+  if (detail?.code === "pricing_override_unknown_platform") {
+    return `平台 ${detail.platform_code || ""} 不存在，不能设置底线`;
+  }
+  if (detail?.code === "pricing_override_platform_not_sales") {
+    return `平台 ${detail.platform_code || ""} 不是销售平台，不能设置底线`;
+  }
+  return detail?.reason || error?.message || "保存平台最低售价失败";
+};
+// 保存某个平台的最低售价人工覆盖（平台级独立接口，不走 SKU 主数据保存）。
+// ⚠️ 为什么不能挂在 SKU 主数据上：`core.dim_erp_sku` 参与「采集机 → 云端」同步，
+// 同步脚本对它做 `TRUNCATE ... RESTART IDENTITY CASCADE` ⇒ 覆盖值每次同步都被抹掉，
+// 护栏上限形同虚设。
+const savePlatformOverride = async (row, item) => {
+  if (!row.sku_id) {
+    ElMessage.warning("请先保存这个 SKU，再设置平台底线");
+    return;
+  }
+  const value = platformOverrideDraft(row, item);
+  if (value == null) {
+    ElMessage.warning("请先填写人工覆盖值");
+    return;
+  }
+  savingOverrideKey.value = overrideSavingKey(row, item);
+  try {
+    await productCenterApi.setSkuPricingOverride(row.sku_id, {
+      platform_code: item.platform_code,
+      min_selling_price_override: Number(value),
+    });
+    delete pricingOverrideDrafts[pricingOverrideKey(row, item.platform_code)];
+    await refreshSkuPricingRow(row);
+    ElMessage.success(`${item.name} 的最低售价底线已保存`);
+  } catch (error) {
+    ElMessage.error(pricingOverrideErrorText(error));
+  } finally {
+    savingOverrideKey.value = "";
+  }
+};
+// 「重置为自动值」= 同一个接口，`min_selling_price_override` 传 null
+const resetPlatformOverride = async (row, item) => {
+  if (!row.sku_id) {
+    ElMessage.warning("请先保存这个 SKU，再重置平台底线");
+    return;
+  }
+  savingOverrideKey.value = overrideSavingKey(row, item);
+  try {
+    await productCenterApi.setSkuPricingOverride(row.sku_id, {
+      platform_code: item.platform_code,
+      min_selling_price_override: null,
+    });
+    delete pricingOverrideDrafts[pricingOverrideKey(row, item.platform_code)];
+    await refreshSkuPricingRow(row);
+    ElMessage.success(`${item.name} 已重置为自动值`);
+  } catch (error) {
+    ElMessage.error(pricingOverrideErrorText(error));
+  } finally {
+    savingOverrideKey.value = "";
+  }
 };
 const addSpuRow = () => spus.value.unshift(blankSpu());
 const addSkuRow = () => skus.value.unshift(blankSku());
@@ -1238,6 +1397,31 @@ const loadSkus = async () => {
     ElMessage.error(error.message || "加载 SKU 失败");
   } finally {
     loadingSkus.value = false;
+  }
+};
+// 保存平台级人工覆盖后，**只把这一行的定价数据**合并回来。
+// ⚠️ 不能整表重载（loadSkus）：整表重载会把运营在同一页还没保存的其它字段编辑冲掉
+// —— 覆盖值保存与 SKU 主数据保存是两条互不相干的流程，谁都不该把对方的数据擦掉。
+const refreshSkuPricingRow = async (row) => {
+  const res = await productCenterApi.listSkus({
+    ...skuQuery,
+    spu: skuSpuFilter.value || undefined,
+    status: skuQuery.status || undefined,
+    platform_code: skuPricingPlatform.value || undefined,
+  });
+  const fresh = (res.data || []).find((item) => item.sku_id === row.sku_id);
+  if (!fresh) return;
+  for (const field of [
+    "min_selling_price",
+    "min_selling_price_source",
+    "min_selling_price_is_override",
+    "min_selling_price_override",
+    "min_selling_price_by_platform",
+    "pricing_tier_label",
+    "pricing_days_since_restock",
+    "pricing_tier_source",
+  ]) {
+    row[field] = fresh[field];
   }
 };
 const loadCategories = async () => {
@@ -1699,9 +1883,16 @@ const payloadSku = (row) => {
   delete payload.pricing_days_since_restock;
   delete payload.pricing_tier_source;
   delete payload.creator_commission_rate_fallback;
-  // ⚠️ min_selling_price_override 与 creator_commission_rate 必须**保留**：
-  // 它们是**可写字段**（人工覆盖值 / 单独谈的达人佣金率）。
-  // 清空覆盖值要显式传 null，不是删掉这个键。
+  // ⚠️ min_selling_price_override 也必须剔除（阶段 2.1b）：
+  // 人工覆盖是 **SKU × 平台** 的量，已经从 SKU 主数据里拆出去，
+  // 改走独立接口 PATCH /api/skus/{sku_id}/pricing-override。
+  // 后端已从 SkuCreateRequest / SkuUpdateRequest / SkuBulkItem 移除该字段，
+  // 留在载荷里会被判 422 或被静默丢弃。
+  delete payload.min_selling_price_override;
+  // ⚠️ min_selling_price_by_platform 是后端下发的**只读**分平台数据，也不能回提交。
+  delete payload.min_selling_price_by_platform;
+  // creator_commission_rate 必须**保留**：它是可写字段（单独谈的达人佣金率）。
+  // 清空要显式传 null，不是删掉这个键。
   payload.purchase_cost_currency = "CNY";
   payload.selling_price_currency = "CNY";
   return payload;
@@ -2402,6 +2593,42 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+/* 最低售价按平台分行：每个可定价平台一个小块 */
+.pricing-platform-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--el-border-color-lighter);
+}
+.pricing-platform-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.pricing-platform-name {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+  white-space: nowrap;
+}
+/* 底线数与来源标签跟在平台名后面，数字占剩余空间 */
+.pricing-cell-head .readonly-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+.pricing-cell-head .el-tag {
+  flex: 0 0 auto;
+}
+.pricing-override-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pricing-override-row :deep(.el-input-number) {
+  width: 120px;
 }
 .pricing-tier-hint {
   font-size: 12px;

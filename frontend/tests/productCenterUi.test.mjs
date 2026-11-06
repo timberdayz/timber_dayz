@@ -174,11 +174,13 @@ test("SKU 资料页展示定价底线四列", () => {
   assert.match(source, /达人佣金率/);
   assert.match(source, /row\.current_discount_rate/);
   assert.match(source, /row\.clearance_max_discount_rate/);
-  assert.match(source, /row\.min_selling_price_override/);
+  // 阶段 2.1b：人工覆盖不再是 SKU 级的 row.min_selling_price_override，
+  // 而是按平台分行的 item.min_selling_price_override。
+  assert.match(source, /item\.min_selling_price_override/);
   assert.match(source, /row\.creator_commission_rate/);
 });
 
-test("SKU 保存剔除只读计算字段但保留可写字段", () => {  const section = source.slice(
+test("SKU 保存剔除只读计算字段与已拆出的平台级覆盖值", () => {  const section = source.slice(
     source.indexOf("const payloadSku"),
     source.indexOf("const validateSpu"),
   );
@@ -186,14 +188,18 @@ test("SKU 保存剔除只读计算字段但保留可写字段", () => {  const s
   assert.match(section, /delete payload\.min_selling_price/);
   // 平台兜底值只是展示，不能回提交成「SKU 单独设置过」
   assert.match(section, /delete payload\.creator_commission_rate_fallback/);
-  assert.doesNotMatch(section, /delete payload\.min_selling_price_override/);
+  // 阶段 2.1b：人工覆盖已从 SKU 主数据里拆出去（走平台级独立接口），
+  // 留在保存载荷里会被判 422 或被静默丢弃 ⇒ 必须剔除。
+  assert.match(section, /delete payload\.min_selling_price_override/);
+  // 分平台底线数据是后端下发的只读结果，也不能回提交
+  assert.match(section, /delete payload\.min_selling_price_by_platform/);
   assert.doesNotMatch(section, /delete payload\.creator_commission_rate;/);
 });
 
 test("最低售价在覆盖值未保存时提示「保存后生效」", () => {
   // 只读值显示的是服务端已保存的生效值；运营改了输入框还没保存时，
   // 必须明确提示「保存后生效」，否则会被误读成「改了没生效」
-  assert.match(source, /pendingOverride/);
+  assert.match(source, /pendingPlatformOverride/);
   assert.match(source, /保存后生效/);
   assert.match(source, /pending-override/);
 });
@@ -462,8 +468,9 @@ test("SKU 列表按所选平台取底线", () => {
 test("SKU 资料页说清底线口径与人工覆盖的作用域", () => {
   // ① 这条底线是按哪个平台的费率算的
   assert.match(source, /底线按 \{\{ skuPricingPlatform \|\| '默认平台' \}\} 的成本率计算/);
-  // ② 人工覆盖是公司级的 —— 避免运营以为"在 TikTok 改的只影响 TikTok"
-  assert.match(source, /人工覆盖是公司级的，对所有平台生效/);
+  // ② 人工覆盖是 SKU × 平台的量 —— 阶段 2.1b 之后不再说「公司级、对所有平台生效」
+  assert.match(source, /人工覆盖按平台生效/);
+  assert.doesNotMatch(source, /人工覆盖是公司级的/);
 });
 
 test("利润测算页的最低售价说明按平台口径，不再说公司统一口径", () => {
@@ -471,4 +478,104 @@ test("利润测算页的最低售价说明按平台口径，不再说公司统�
   // 底线就是按平台算的，留着会直接误导运营。
   assert.doesNotMatch(source, /公司统一口径，不随平台\/仓库变化/);
   assert.match(operatingSection, /平台成本率计算，不同平台底线不同/);
+});
+
+// ---------------------------------------------------------------------------
+// 阶段 2.1b · 人工覆盖下沉到「SKU × 平台」
+// ---------------------------------------------------------------------------
+
+// SKU 资料页的「最低售价」列（第一个 label="最低售价" 就是它，
+// 利润测算页那个在 operatingSection 之后）。
+const skuPricingColumn = source.slice(
+  source.indexOf('label="最低售价"'),
+  source.indexOf('label="达人佣金率"'),
+);
+
+test("SKU 资料页的最低售价按平台分行", () => {
+  // 底线是 SKU × 平台的量：TikTok 与 Shopee 的平台其他成本率差一截
+  // （27.27% vs 41.65%）⇒ 同一件商品在两个平台有两条不同的底线，
+  // 一行一个平台才看得出「我看到的这条底线是谁的」。
+  assert.match(source, /skuPricingPlatformRows/);
+  // 数据源是列表接口下发的分平台底线
+  assert.match(source, /row\.min_selling_price_by_platform/);
+  // 每个可定价平台渲染一行
+  assert.match(skuPricingColumn, /v-for="item in skuPricingPlatformRows\(row\)"/);
+  // 一行里有：平台名 + 该平台底线 + 该平台来源 + 该平台覆盖输入框
+  assert.match(skuPricingColumn, /pricing-platform-name/);
+  assert.match(skuPricingColumn, /item\.min_selling_price\b/);
+  assert.match(skuPricingColumn, /item\.min_selling_price_source/);
+  assert.match(skuPricingColumn, /item\.min_selling_price_is_override/);
+  // 平台名取自经营维度；找不到就退回平台代码本身
+  assert.match(source, /platformDisplayName/);
+  assert.match(source, /hit\?\.name \|\| platformCode/);
+  // 「重置为自动值」只在**该平台**有覆盖值时出现
+  assert.match(
+    skuPricingColumn,
+    /v-if="item\.min_selling_price_is_override \|\| item\.min_selling_price_override != null"/,
+  );
+});
+
+test("人工覆盖的保存走平台级独立接口", () => {
+  // 接口：PATCH /api/skus/{sku_id}/pricing-override
+  assert.match(api, /setSkuPricingOverride/);
+  assert.match(api, /\/skus\/\$\{skuId\}\/pricing-override/);
+  // 保存：载荷必须带 platform_code（人工覆盖是 SKU × 平台的量）
+  assert.match(
+    source,
+    /setSkuPricingOverride\(row\.sku_id, \{\s*platform_code: item\.platform_code,\s*min_selling_price_override: Number\(value\)/,
+  );
+  // 「重置为自动值」= 同一个接口，min_selling_price_override 传 null
+  assert.match(
+    source,
+    /setSkuPricingOverride\(row\.sku_id, \{\s*platform_code: item\.platform_code,\s*min_selling_price_override: null/,
+  );
+  // 覆盖值不再随 SKU 主数据一起标脏保存
+  assert.doesNotMatch(skuPricingColumn, /markDirty\('sku', row\)/);
+  assert.doesNotMatch(source, /v-model="row\.min_selling_price_override"/);
+});
+
+test("SKU 主数据保存载荷不再包含人工覆盖字段", () => {
+  const section = source.slice(
+    source.indexOf("const payloadSku"),
+    source.indexOf("const validateSpu"),
+  );
+  // 后端已从 SkuCreateRequest / SkuUpdateRequest / SkuBulkItem 移除该字段，
+  // 留在载荷里会被判 422 或被静默丢弃 ⇒ 必须剔除。
+  assert.match(section, /delete payload\.min_selling_price_override/);
+  assert.match(section, /delete payload\.min_selling_price_by_platform/);
+  // 新增行也不再预置这个字段
+  const blankSkuSection = source.slice(
+    source.indexOf("const blankSku"),
+    source.indexOf("const PRICING_SOURCE_LABELS"),
+  );
+  assert.doesNotMatch(blankSkuSection, /min_selling_price_override/);
+});
+
+test("文案不再声称人工覆盖是公司级的", () => {
+  assert.doesNotMatch(source, /人工覆盖是公司级的/);
+  assert.doesNotMatch(source, /对所有平台生效/);
+  assert.match(source, /人工覆盖按平台生效/);
+});
+
+test("覆盖值保存失败给出可见报错，成功后刷新该行底线", () => {
+  // 失败必须有可见提示（不能静默失败）
+  assert.match(source, /pricingOverrideErrorText/);
+  assert.match(source, /ElMessage\.error\(pricingOverrideErrorText\(error\)\)/);
+  // 统一错误信封里的结构化业务码要能被读出来并翻译
+  assert.match(source, /pricing_override_unknown_platform/);
+  assert.match(source, /pricing_override_platform_not_sales/);
+  // 成功后刷新**这一行**（整表重载会冲掉运营还没保存的其它字段编辑）
+  assert.match(source, /const refreshSkuPricingRow = async \(row\) =>/);
+  assert.match(source, /await refreshSkuPricingRow\(row\)/);
+});
+
+test("「底线按平台」选择器保留且仍参与列表取数", () => {
+  assert.match(source, /v-model="skuPricingPlatform"/);
+  assert.match(source, /placeholder="底线按平台"/);
+  assert.match(source, /@change="loadSkus"/);
+  const loadSkus = source.slice(
+    source.indexOf("const loadSkus"),
+    source.indexOf("const validateSku"),
+  );
+  assert.match(loadSkus, /platform_code: skuPricingPlatform\.value \|\| undefined/);
 });

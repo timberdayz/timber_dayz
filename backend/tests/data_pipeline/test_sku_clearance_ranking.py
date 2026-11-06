@@ -50,12 +50,17 @@ def _fake_platform():
 
     没有平台成本率时 `compute_sku_pricing` 会记 `missing_platform_cost_rate`
     并拒绝计算成本线（这是设计如此，不是 bug）。
+
+    `platform_role` 是阶段 2.1b 加的：覆盖值按**销售平台**取
+    （`_load_platform_overrides` 只查 platform_role='sales' 的行），
+    缺这个属性会让取覆盖值的分支直接抛 AttributeError。
     """
     return type(
         "FakePlatform",
         (),
         {
             "platform_code": "tiktok",
+            "platform_role": "sales",
             "other_cost_rate": Decimal("0.06"),
             "default_creator_commission_rate": Decimal("0.0606"),
         },
@@ -338,6 +343,7 @@ async def test_row_platform_uses_its_own_rates_when_it_is_a_sales_platform(monke
         (),
         {
             "platform_code": "shopee",
+            "platform_role": "sales",
             "other_cost_rate": Decimal("0.4165"),
             "default_creator_commission_rate": Decimal("0.0111"),
         },

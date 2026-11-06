@@ -390,15 +390,23 @@ async def test_new_table_override_is_scoped_to_its_platform(pricing_sqlite_sessi
 
 
 @pytest.mark.asyncio
-async def test_new_table_override_wins_over_the_legacy_sku_column(pricing_sqlite_session):
-    """新表优先于 SKU 级旧列（旧列 deprecated，保留一个版本周期）。"""
-    from modules.core.db import DimErpSku, SkuPlatformPricing
+async def test_new_table_override_wins_over_the_legacy_sku_column(
+    pricing_sqlite_session,
+):
+    """新表的覆盖值**取代**底线。
+
+    ⚠️ 阶段 2.1b 起**没有**「回落 SKU 级旧列」这条分支了 ——
+    旧列 ``core.dim_erp_sku.min_selling_price_override`` 已删：
+    它是公司级的（一个数套所有平台），而且那张表会被「采集机 → 云端」
+    同步 TRUNCATE ⇒ 覆盖值每次同步都蒸发。
+    平台级覆盖的读写与平台隔离另见
+    ``backend/tests/test_sku_platform_pricing_override.py``。
+    """
+    from modules.core.db import SkuPlatformPricing
 
     session = pricing_sqlite_session
     sku_id = await _seed_two_platforms(session)
 
-    sku_row = await session.get(DimErpSku, sku_id)
-    sku_row.min_selling_price_override = Decimal("150.00")
     session.add(
         SkuPlatformPricing(
             sku_id=sku_id,
@@ -409,33 +417,22 @@ async def test_new_table_override_wins_over_the_legacy_sku_column(pricing_sqlite
     await session.flush()
 
     floors = await _floors_by_platform(session, sku_id)
-    # Shopee 有新表行 ⇒ 用新表的值
+    # Shopee 有平台级覆盖 ⇒ 底线被取代
     assert floors["shopee"] == Decimal("200.00")
-    # TikTok 没有新表行 ⇒ 回落 SKU 级旧列
-    assert floors["tiktok"] == Decimal("150.00")
+    # TikTok 没有覆盖 ⇒ 走系统算的底线（**不再**回落到任何 SKU 级旧列）
+    assert floors["tiktok"] == TIKTOK_FLOOR
 
 
 @pytest.mark.asyncio
-async def test_legacy_sku_level_override_is_the_fallback_for_every_platform(
-    pricing_sqlite_session,
-):
-    """新表没有行时，回落到 SKU 级旧列 —— 旧列是**公司级**的，对所有平台生效。
+async def test_legacy_sku_level_override_column_is_gone(pricing_sqlite_session):
+    """SKU 级旧列已从 ORM 里删掉 —— 覆盖值只能是平台级的。
 
-    这条回落分支是为了兼容历史数据（生产库人工覆盖目前 0 条，
-    所以它几乎不会被走到，但走错了会让老数据突然失去覆盖值）。
+    这条是「口径不再错位 + 不会被同步抹掉」的结构性保证。
     """
     from modules.core.db import DimErpSku
 
-    session = pricing_sqlite_session
-    sku_id = await _seed_two_platforms(session)
-
-    sku_row = await session.get(DimErpSku, sku_id)
-    sku_row.min_selling_price_override = Decimal("150.00")
-    await session.flush()
-
-    floors = await _floors_by_platform(session, sku_id)
-    assert floors["tiktok"] == Decimal("150.00")
-    assert floors["shopee"] == Decimal("150.00")
+    columns = {c.name for c in DimErpSku.__table__.columns}
+    assert "min_selling_price_override" not in columns
 
 
 @pytest.mark.asyncio

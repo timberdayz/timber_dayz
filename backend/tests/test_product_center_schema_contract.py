@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import inspect
 
 from backend.schemas.product_center import ProductCenterBindingResponse
@@ -77,7 +79,27 @@ def test_sku_write_models_accept_pricing_overrides():
 
     for model in (SkuUpdateRequest, SkuBulkItem, SkuCreateRequest):
         assert "creator_commission_rate" in model.model_fields
-        assert "min_selling_price_override" in model.model_fields
+        # 阶段 2.1b：人工覆盖**不再**是 SKU 主数据的字段 ——
+        # 它是 SKU × 平台的量，走独立接口 PATCH /api/skus/{id}/pricing-override。
+        # 留在主数据保存流程里既口径不对，又会被同步 TRUNCATE 抹掉。
+        assert "min_selling_price_override" not in model.model_fields
+
+
+def test_pricing_override_request_model_requires_platform():
+    """平台级覆盖请求**必须带平台** —— 不带平台就说不清要覆盖谁。"""
+    from backend.schemas.product_center import SkuPricingOverrideRequest
+
+    fields = SkuPricingOverrideRequest.model_fields
+    assert "platform_code" in fields
+    assert "min_selling_price_override" in fields
+    # 覆盖值必须 > 0：0 不是「不设覆盖」，而是「把底线压到 0」= 把护栏关掉
+    with pytest.raises(ValidationError):
+        SkuPricingOverrideRequest(platform_code="shopee", min_selling_price_override=0)
+    with pytest.raises(ValidationError):
+        SkuPricingOverrideRequest(platform_code="shopee", min_selling_price_override=-5)
+    # 平台必填：不带平台就说不清要覆盖谁
+    with pytest.raises(ValidationError):
+        SkuPricingOverrideRequest(min_selling_price_override=100)
 
 
 def test_pricing_policy_request_models_expose_single_discount_rate():
@@ -217,7 +239,10 @@ def test_orm_models_expose_pricing_columns_and_policy_table():
     from modules.core.db import DimErpSku, DimPlatform, SkuPricingPolicy
 
     sku_columns = {c.name for c in DimErpSku.__table__.columns}
-    assert {"creator_commission_rate", "min_selling_price_override"} <= sku_columns
+    # 阶段 2.1b：``min_selling_price_override`` 已从 SKU 主数据移走
+    # （它是 SKU × 平台的量，且那张表会被同步 TRUNCATE）。
+    assert "creator_commission_rate" in sku_columns
+    assert "min_selling_price_override" not in sku_columns
 
     platform_columns = {c.name for c in DimPlatform.__table__.columns}
     assert {"default_creator_commission_rate", "other_cost_rate"} <= platform_columns
