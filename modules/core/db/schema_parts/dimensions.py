@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -35,6 +37,21 @@ class DimPlatform(Base):
     default_creator_commission_rate = Column(Numeric(12, 8), nullable=True)
     # 平台其他成本率：恒等式反推值，**已含平台佣金率**，不重复计入底线分母
     other_cost_rate = Column(Numeric(12, 8), nullable=True)
+    # --- ROI 广告投放配置（阶段 1）---
+    # 安全边际：建议 ROI = 保本ROI × (1 + roi_safety_margin)。
+    # 业界实测 12%–25%，取下沿 20% 做保守默认（设计稿 §2.5⑨）。
+    roi_safety_margin = Column(
+        Numeric(6, 4), nullable=False, default=Decimal("0.20"), server_default="0.20"
+    )
+    # 平台后台可填的目标 ROI 上限（硬约束）。TikTok 20 / Shopee 50。
+    # 建议 ROI 超过它就被截断（**只封顶不封底**）。
+    target_roi_ceiling = Column(
+        Numeric(10, 2), nullable=False, default=Decimal("50"), server_default="50"
+    )
+    # 平台可填下限：**当前不参与 clamp**，只记录平台允许的最小值（预留）
+    target_roi_floor = Column(
+        Numeric(10, 2), nullable=False, default=Decimal("1"), server_default="1"
+    )
     platform_role = Column(String(16), nullable=False, default="source", server_default="source")
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -46,6 +63,9 @@ class DimPlatform(Base):
         CheckConstraint("default_fee_rate IS NULL OR (default_fee_rate >= 0 AND default_fee_rate <= 1)", name="ck_dim_platforms_fee_rate_range"),
         CheckConstraint("default_creator_commission_rate IS NULL OR (default_creator_commission_rate >= 0 AND default_creator_commission_rate <= 1)", name="ck_dim_platforms_creator_commission_rate_range"),
         CheckConstraint("other_cost_rate IS NULL OR (other_cost_rate >= 0 AND other_cost_rate < 1)", name="ck_dim_platforms_other_cost_rate_range"),
+        CheckConstraint("roi_safety_margin >= 0 AND roi_safety_margin < 1", name="ck_dim_platforms_roi_safety_margin_range"),
+        CheckConstraint("target_roi_ceiling >= 1", name="ck_dim_platforms_target_roi_ceiling_range"),
+        CheckConstraint("target_roi_floor >= 1", name="ck_dim_platforms_target_roi_floor_range"),
         {"schema": "core"},
     )
 

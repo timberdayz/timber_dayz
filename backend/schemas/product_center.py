@@ -822,9 +822,16 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     warehouse_code: str
     transport_type: str
     expected_selling_price: Optional[float] = None
+    # 测算售价来源（阶段 1）：'user_input' / 'sku_reference' / 'profile'
+    expected_selling_price_source: Optional[str] = None
     competitor_price: Optional[float] = None
     seller_coupon_amount: Optional[float] = None
     expected_ad_rate: Optional[float] = None
+    # --- ROI 广告投放配置（阶段 1）---
+    # 安全边际：建议 ROI = 保本ROI × (1 + roi_safety_margin)，默认 0.20
+    roi_safety_margin: Optional[float] = None
+    # 平台后台可填的目标 ROI 上限（TikTok 20 / Shopee 50），建议 ROI 超了会被截断
+    target_roi_ceiling: Optional[float] = None
     actual_logistics_cost: Optional[float] = None
     # 实际仓储成本：**恒为 None**。系统里不存在仓储费账单（LogisticsBill 的费用构成
     # 全是运费），只有 WarehouseStorageRule 的规则预估。保留字段是为了不破坏契约，

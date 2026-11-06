@@ -138,6 +138,80 @@ def test_platform_option_and_fee_rate_request_expose_cost_rates():
         assert "other_cost_rate" in model.model_fields
 
 
+def test_profit_candidate_response_declares_roi_fields():
+    """候选接口的 response_model 必须声明 ROI 顶层字段。
+
+    Pydantic v2 默认 extra='ignore'：路由返回的字典里没在这里声明的字段
+    **序列化时会被全部丢弃** —— 前端拿到的是没有 ROI 的行，列永远空白，
+    而且没有任何报错。
+    """
+    from backend.schemas.product_center import PlatformSkuProfitCandidateResponse
+
+    fields = PlatformSkuProfitCandidateResponse.model_fields
+    for name in (
+        "expected_selling_price_source",
+        "roi_safety_margin",
+        "target_roi_ceiling",
+    ):
+        assert name in fields, name
+        assert fields[name].is_required() is False, name
+
+
+def test_profit_candidate_response_keeps_roi_fields_after_serialization():
+    """回归护栏：声明了还不够，得真的**留在序列化结果里**。"""
+    from backend.schemas.product_center import PlatformSkuProfitCandidateResponse
+
+    payload = PlatformSkuProfitCandidateResponse(
+        sku_id=1,
+        sku_key="XH-TEST-1",
+        platform_code="tiktok",
+        warehouse_code="WH-CN",
+        transport_type="sea",
+        configuration_status="configured",
+        expected_selling_price_source="profile",
+        roi_safety_margin=0.2,
+        target_roi_ceiling=20,
+    )
+    dumped = payload.model_dump()
+    assert dumped["expected_selling_price_source"] == "profile"
+    assert dumped["roi_safety_margin"] == 0.2
+    assert dumped["target_roi_ceiling"] == 20
+
+
+def test_orm_models_expose_roi_columns_and_completeness_constraints():
+    """ROI 列 + C2 完整度取值域约束的 ORM 层断言。"""
+    from modules.core.db import DimPlatform, SkuOperatingProfile, SkuProfitEstimate
+
+    platform_columns = {c.name for c in DimPlatform.__table__.columns}
+    assert {"roi_safety_margin", "target_roi_ceiling", "target_roi_floor"} <= platform_columns
+
+    profile_columns = {c.name for c in SkuOperatingProfile.__table__.columns}
+    assert "expected_selling_price_source" in profile_columns
+
+    estimate_columns = {c.name for c in SkuProfitEstimate.__table__.columns}
+    assert {
+        "expected_selling_price_source",
+        "break_even_roi",
+        "suggested_roi",
+        "suggested_roi_clamped",
+        "equivalent_target_roi",
+    } <= estimate_columns
+
+    # C2 的 DB 层收口：两套完整度取值域必须是两个独立约束
+    constraint_names = {c.name for c in SkuProfitEstimate.__table__.constraints}
+    assert {
+        "ck_sku_profit_estimate_cost_completeness",
+        "ck_sku_profit_estimate_actual_completeness",
+    } <= constraint_names
+
+    platform_constraint_names = {c.name for c in DimPlatform.__table__.constraints}
+    assert {
+        "ck_dim_platforms_roi_safety_margin_range",
+        "ck_dim_platforms_target_roi_ceiling_range",
+        "ck_dim_platforms_target_roi_floor_range",
+    } <= platform_constraint_names
+
+
 def test_orm_models_expose_pricing_columns_and_policy_table():
     """ORM 层断言：能提前抓住 import 期崩溃（例如 Index 误传 schema=）。"""
     from modules.core.db import DimErpSku, DimPlatform, SkuPricingPolicy

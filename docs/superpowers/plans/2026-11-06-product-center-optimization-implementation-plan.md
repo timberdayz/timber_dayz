@@ -453,12 +453,18 @@ def compute_roi_metrics(
 
 **建议拆成 2 个**，理由见上游设计稿 §11：平台级配置无 FK、先做；两张 finance 表有 FK、后做。任何一个环节出问题都能单独回滚。
 
-**迁移 A** `current_migrations/versions/20261112_add_platform_roi_config.py`
+**迁移 A** `current_migrations/versions/20261113_add_platform_roi_config.py`
 
 ```python
-revision = "current_schema_20261112_add_platform_roi_config"
-down_revision = "current_schema_20261111_add_refresh_queue_domain_and_retry"
+revision = "current_schema_20261113_add_platform_roi_config"
+down_revision = "current_schema_20261112_realign_identity_candidates_anchor"
 ```
+
+> ⚠️ **实施时改了日期**（2026-11-12 → 2026-11-13 / 2026-11-14）：`20261112` 这个日期前缀
+> 已被另一条会话的 `20261112_realign_identity_candidates_anchor.py` 占用（它把迁移链的
+> head 推到了 `current_schema_20261112_realign_identity_candidates_anchor`）。
+> 日期前缀重复不会冲突（唯一性只看 revision id），但同一目录里两个 `20261112_` 开头的
+> 文件会让人以为它们是一对。**down_revision 必须指向真实 head**，所以照抄本文档会失败。
 
 给 `core.dim_platforms` 加 3 列：
 
@@ -475,11 +481,11 @@ UPDATE core.dim_platforms SET target_roi_ceiling = 20 WHERE platform_code = 'tik
 UPDATE core.dim_platforms SET target_roi_ceiling = 50 WHERE platform_code = 'shopee';
 ```
 
-**迁移 B** `current_migrations/versions/20261113_add_sku_roi_columns.py`
+**迁移 B** `current_migrations/versions/20261114_add_sku_roi_columns.py`
 
 ```python
-revision = "current_schema_20261113_add_sku_roi_columns"
-down_revision = "current_schema_20261112_add_platform_roi_config"
+revision = "current_schema_20261114_add_sku_roi_columns"
+down_revision = "current_schema_20261113_add_platform_roi_config"
 ```
 
 | 表 | 列 | 类型 | 可空 |
@@ -1302,3 +1308,71 @@ ROI 算出来的保本 ROI 也会跟着错）。改法有两个方向，见 §13
 | alembic rehearsal 失败 | `test_schema_cleanup_rehearsal.py`、`test_sync_progress_submitted_status_migration_contract.py` | `alembic upgrade head` 在隔离库上失败 |
 | SQLite 建表报 `unknown database ops` | `test_task_center_*.py`（17 条 ERROR） | 仓库用 PG 命名空间，SQLite 建不出来（conftest 注释里已承认 `sqlite_session` 一直是坏的） |
 | 前端契约断言中文乱码 | `test_hr_performance_adjustment_frontend_contract.py` 等 | 断言串是 GBK/mojibake，与 UTF-8 源文件不匹配 |
+
+---
+
+## 附录 C · 阶段 1 实施记录（2026-11-07 完成）
+
+### C.1 改动清单
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `backend/services/product_roi_service.py` | **新建**：纯函数模块 `compute_roi_metrics` |
+| 2 | `backend/services/product_profit_service.py` | `_ad_cost_and_profit` 多返回 `pre_ad_profit`；`build_platform_profit_preview` 新增 `roi_safety_margin`/`target_roi_ceiling` 入参并**在内部算 ROI**；`expected`/`actual_recost` 段各带一份 ROI 指标 |
+| 3 | `backend/services/product_finance_service.py` | `preview_platform_sku_profit` 传平台 ROI 配置、带出 `expected_selling_price_source` / `roi_safety_margin` / `target_roi_ceiling` |
+| 4 | `backend/domains/business/routers/product_center.py` | 候选列表同样传平台 ROI 配置并带出三个顶层字段 |
+| 5 | `backend/schemas/product_center.py` | `PlatformSkuProfitCandidateResponse` 增 3 个顶层字段（**漏声明会被 `extra='ignore'` 静默丢弃**） |
+| 6 | `modules/core/db/schema_parts/dimensions.py` | `core.dim_platforms` 增 `roi_safety_margin` / `target_roi_ceiling` / `target_roi_floor` + 3 个 CHECK |
+| 7 | `modules/core/db/schema_parts/business.py` | `finance.sku_operating_profiles` 增 `expected_selling_price_source`；`finance.sku_profit_estimates` 增 `expected_selling_price_source` + 4 个 ROI 列；**C2 的 2 个完整度 CHECK 收口** |
+| 8 | `current_migrations/versions/20261113_add_platform_roi_config.py` | **新建**：平台 ROI 配置 + 回填 TikTok 20 / Shopee 50 |
+| 9 | `current_migrations/versions/20261114_add_sku_roi_columns.py` | **新建**：业务列 + C2 约束（先清洗存量再加约束） |
+| 10 | `frontend/src/domains/business/views/ProductCenter.vue` | 3 个只读列 + 成本完整度守卫 + 2 条免责提示 + 缺资料标签抽成共用 map |
+
+### C.2 三处与原方案不同的地方（实施时修正）
+
+1. **ROI 在 `build_platform_profit_preview` 内部算，不在路由里算。**
+   原方案说接入点是 `preview_platform_sku_profit`（`product_finance_service.py:1053`），
+   但**前端表格读的是候选列表的行**（`row.preview.expected.*`），而候选列表在
+   `product_center.py` 里**自己调** `build_platform_profit_preview`。
+   两处分头算必然漂移，所以把计算下沉到共同的那一层，两个调用点自动一致。
+
+2. **`suggested_roi_clamped` 是「两位小数的可执行值」，不是 `min(原值, 上限)` 的原样结果。**
+   理由：运营填进平台后台的是**两位小数**的数；表上保本 ROI 显示 1.97，
+   运营自己算 1.97 × 1.2 = 2.36，表上写的必须是 **2.36** 才对得上账。
+   等效单均广告费/净利也由这个数推出 ⇒ 68 ÷ 2.36 = **28.81**、净利 **5.68**、净利率 **8.35%**，
+   与上游设计稿 §2.5⑪ 的示例**完全一致**。
+   全精度的未封顶原值保留在 `suggested_roi`（超上限时在 tooltip 里显示真实差距）。
+
+3. **迁移日期从 20261112/20261113 顺延到 20261113/20261114**（见 §3.3 的说明）。
+
+### C.3 口径核对（开发库实测）
+
+| 平台 | `target_roi_ceiling` | `break_even_roi` | `suggested_roi_clamped` | 等效单均广告费 |
+|---|---|---|---|---|
+| tiktok | 20.00 | 2.6371308016877637 | **3.17** | 15.77 |
+| shopee | 50.00 | 2.9380341880341883 | **3.53** | 15.58 |
+
+同一 SKU 在两个平台的 ROI 不同 —— 因为费率不同，利润链不同，**ROI 必须跟着平台走**
+（这正是阶段 2.1「底线下沉到平台」要修的同一个病根：底线取的是单一 basis 平台的费率）。
+
+成本不全的行：`reference_cost_status = "incomplete"` ⇒ `pre_ad_profit` 算不出来 ⇒
+**ROI 三个数全部为 None** + `roi_missing_reasons = ["non_positive_revenue"]`（或
+`non_positive_cost_denominator`），前端同时置灰。
+
+### C.4 测试
+
+| 文件 | 条数 | 说明 |
+|---|---|---|
+| `backend/tests/test_product_roi_service.py` | 12（新增） | 方案 §3.6 用例 1–9 + 口径补充 |
+| `backend/tests/test_product_roi_migration_contract.py` | 4（新增） | 源码契约 3 条 + **真实 PG 上跑 upgrade×2 → downgrade → upgrade** 1 条 |
+| `backend/tests/test_product_center_schema_contract.py` | +3 | 用例 10、11 + ORM 列与约束 |
+| `backend/tests/test_platform_sku_profit_workbench.py` | +3 | 用例 12 + `pre_ad_profit` 暴露 + 平台配置生效 |
+| `frontend/tests/productCenterUi.test.mjs` | +5（41 条全绿） | 用例 14：3 列渲染 / 列序 / 置灰守卫 / 免责提示 / 封顶提示 |
+
+### C.5 顺手修掉的既有失败（1 条）
+
+`test_product_category_contract.py::test_profit_save_uses_the_preview_version_when_the_client_does_not_supply_one`
+—— 断言要求 `assumption_version=data.get("assumption_version") or preview["assumption_version"]`
+**写在同一行**，而源码被换行拆成两行（`product_finance_service.py`），于是永远找不到。
+行为本身是对的。把两处表达式合回一行即可，**零行为变更**。
+（该用例原本被记在 §B.9「阶段 0 已识别的既有失败」里，现已消除。）

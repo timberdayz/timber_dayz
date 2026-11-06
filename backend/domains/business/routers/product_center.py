@@ -2595,12 +2595,21 @@ async def list_platform_sku_profit_candidates(
                 if row.creator_commission_rate is not None
                 else platform.default_creator_commission_rate
             ),
+            # 平台级 ROI 配置（阶段 1）：安全边际 + 平台可填上限
+            roi_safety_margin=platform.roi_safety_margin,
+            target_roi_ceiling=platform.target_roi_ceiling,
         )
         items.append({
             "sku_id": row.sku_id, "sku_key": row.sku_key, "sku_name": row.sku_name, "specification": row.specification,            "spu": assigned_spu, "reference_selling_price": row.reference_selling_price,
             "purchase_cost": purchase_cost,
             "platform_code": platform_code, "warehouse_code": warehouse_code, "transport_type": transport_type,
             "expected_selling_price": expected_selling_price,
+            # 测算售价来源（阶段 1）：经营档案带的 / SKU 参考售价兜底的
+            "expected_selling_price_source": (
+                "profile"
+                if profile is not None and profile.expected_selling_price is not None
+                else ("sku_reference" if row.reference_selling_price is not None else None)
+            ),
             "competitor_price": profile.competitor_price if profile else None,
             "seller_coupon_amount": seller_coupon_amount,
             "expected_ad_rate": expected_ad_rate,
@@ -2608,6 +2617,9 @@ async def list_platform_sku_profit_candidates(
             "expected_storage_cost": reference_storage,
             "actual_logistics_cost": actual_logistics, "actual_storage_cost": None,
             "platform_fee_rate": platform.default_fee_rate,
+            # ROI 配置（阶段 1）：前端要显示「建议 ROI 封顶值」并提示广告空间不足
+            "roi_safety_margin": platform.roi_safety_margin,
+            "target_roi_ceiling": platform.target_roi_ceiling,
             "logistics_damage_rate": assigned.logistics_damage_rate if assigned else None,
             "return_loss_rate": assigned.return_loss_rate if assigned else None,
             "configuration_status": "configured" if profile else "unconfigured",

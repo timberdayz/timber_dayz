@@ -348,6 +348,10 @@
           <el-button v-if="canManagePlatformFee" plain @click="openPlatformFeeDrawer('platform')">定价设置</el-button>
         </div>
         <el-alert v-if="!operatingQuery.platform_code || !operatingQuery.warehouse_code || !operatingQuery.transport_type" type="info" :closable="false" title="请选择平台、收货仓库和物流方式后加载 SKU 测算数据" />
+        <div class="roi-disclaimer">
+          <div>① 本表不预测销量：提价会不会掉量看不到（缺历史投放数据，做不了销量预测）。</div>
+          <div>② 平台报告 ROI 含自然流量/达人归因，达标 ≠ 赚钱；投多少不亏以本表「保本ROI」为准。</div>
+        </div>
         <el-table
           :data="operatingProfiles"
           v-loading="loadingOperating"
@@ -370,6 +374,45 @@
                 <el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag>
               </div>
               <div class="pricing-tier-hint">公司统一口径，不随平台/仓库变化</div></template
+          ></el-table-column>
+          <el-table-column label="广告前贡献毛利率" width="140"
+            ><template #default="{ row }"
+              ><span :class="{ 'roi-guarded': roiGuarded(row) }">{{
+                percent(row.preview?.expected?.advertising_contribution_margin_rate)
+              }}</span>
+              <el-tooltip
+                placement="top"
+                content="扣掉采购、物流、仓储、贴单、平台佣金、达人佣金、货损、退货后的占比。分母是商家实收（售价−优惠券），与平台 GMV 同一口径"
+              >
+                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
+              </el-tooltip></template
+          ></el-table-column>
+          <el-table-column label="保本ROI" width="150"
+            ><template #default="{ row }"
+              ><span :class="{ 'roi-guarded': roiGuarded(row) }">{{
+                roiDisplay(row.preview?.expected?.break_even_roi)
+              }}</span>
+              <el-tooltip placement="top" :content="roiGuardTooltip(row)">
+                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
+              </el-tooltip>
+              <div v-if="roiGuarded(row)" class="roi-guard-hint">
+                成本不全，保本ROI 偏乐观
+              </div></template
+          ></el-table-column>
+          <el-table-column label="建议ROI" width="150"
+            ><template #default="{ row }"
+              ><span :class="{ 'roi-guarded': roiGuarded(row) }">{{
+                roiDisplay(row.preview?.expected?.suggested_roi_clamped)
+              }}</span>
+              <el-tag
+                v-if="row.preview?.expected?.suggestion_note === 'above_platform_ceiling'"
+                size="small"
+                type="warning"
+                >广告空间不足</el-tag
+              >
+              <el-tooltip placement="top" :content="roiSuggestionTooltip(row)">
+                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
+              </el-tooltip></template
           ></el-table-column>
           <el-table-column label="预计售价" width="110"
             ><template #default="{ row }"
@@ -2195,20 +2238,59 @@ const formatVolume = (sku) => {
 const hasVolume = (sku) => formatVolume(sku) > 0;
 const volumeMissing = (row) =>
   missingVolumeSkus.value.some((item) => item.id === row.sku_id);
+// 缺资料原因 → 中文话术。ROI 守卫和参考成本列共用一份，别各写各的。
+const MISSING_REASON_LABELS = {
+  missing_sku_volume: "待补 SKU 体积",
+  missing_sku_weight: "待补 SKU 重量",
+  missing_turnover_class: "待设置周转类型",
+  missing_logistics_rule: "待配置参考物流规则",
+  missing_storage_rule: "待配置仓储规则",
+  ambiguous_logistics_rule: "参考物流规则待指定默认",
+};
+const missingReasonLabel = (reason) => MISSING_REASON_LABELS[reason] || "待补资料";
 const referenceCostDisplay = (row, kind) => {
   const value = kind === "logistics" ? referenceLogisticsCost(row) : referenceStorageCost(row);
   if (value != null) return money(value);
   const reason = (kind === "logistics"
     ? row.reference_logistics_missing_reasons
     : row.reference_storage_missing_reasons)?.[0];
-  return ({
-    missing_sku_volume: "待补 SKU 体积",
-    missing_sku_weight: "待补 SKU 重量",
-    missing_turnover_class: "待设置周转类型",
-    missing_logistics_rule: "待配置参考物流规则",
-    missing_storage_rule: "待配置仓储规则",
-    ambiguous_logistics_rule: "参考物流规则待指定默认",
-  })[reason] || "待补资料";
+  return missingReasonLabel(reason);
+};
+// ROI 展示：两位小数（运营填进平台后台的精度），算不出来显示 "-"
+const roiDisplay = (value) => (value == null ? "-" : Number(value).toFixed(2));
+// 成本完整度守卫（阶段 1 硬前提）：成本不全 → pre_ad_profit 高估 → 保本ROI 偏松
+// → 看着宽松 → 运营真投广告 → 亏损。缺输入宁可不算不可乐观：三个 ROI 一律置灰。
+const roiGuarded = (row) => row.reference_cost_status !== "ready";
+// 缺失原因按三份清单分列（缺物流 / 缺仓储 / 缺体积），别混成一坨看不清缺什么
+const roiGuardTooltip = (row) => {
+  if (!roiGuarded(row)) {
+    return "低于这个 ROI，广告就是亏的（财务口径）。分母为商家实收，与平台 GMV 同一把标尺";
+  }
+  const lines = ["成本不全，保本ROI 偏乐观"];
+  const logistics = (row.reference_logistics_missing_reasons || []).map(missingReasonLabel);
+  const storage = (row.reference_storage_missing_reasons || []).map(missingReasonLabel);
+  const volume = (row.reference_cost_missing_reasons || [])
+    .filter((reason) => reason === "missing_sku_volume" || reason === "missing_sku_weight")
+    .map(missingReasonLabel);
+  if (logistics.length) lines.push(`缺物流规则：${logistics.join("、")}`);
+  if (storage.length) lines.push(`缺仓储规则：${storage.join("、")}`);
+  if (volume.length) lines.push(`缺 SKU 体积/重量：${volume.join("、")}`);
+  return lines.join("\n");
+};
+// 建议ROI 的 tooltip：把这个数「意味着什么」翻译给运营
+const roiSuggestionTooltip = (row) => {
+  const expected = row.preview?.expected;
+  const lines = ["保本线上浮 20%（业界惯例 20–30%），超过平台可填上限时截断"];
+  if (expected?.suggestion_note === "above_platform_ceiling") {
+    lines.push(
+      `未封顶原值 ${roiDisplay(expected.suggested_roi)}，超过平台可填上限 ${roiDisplay(row.target_roi_ceiling)}：广告空间不足，优先走自然流量/达人`,
+    );
+  } else if (expected?.suggested_roi != null) {
+    lines.push(
+      `按这个数投：单均广告费 ${money(expected.equivalent_ad_cost_per_order)}，单均净利 ${money(expected.equivalent_net_profit_per_order)}`,
+    );
+  }
+  return lines.join("\n");
 };
 // 优先用**试算里实际扣的金额**（preview.expected.label_fee），
 // 退而用行上的参考贴单费——两者口径不一致时，以实际扣款为准，
@@ -2325,6 +2407,27 @@ onMounted(async () => {
   color: var(--el-color-warning);
   border-color: var(--el-color-warning);
   font-weight: 600;
+}
+/* ROI 守卫：成本不全时三个 ROI 一律置灰（缺输入宁可不算不可乐观） */
+.roi-guarded {
+  color: var(--el-text-color-placeholder);
+  text-decoration: line-through;
+  text-decoration-color: var(--el-text-color-placeholder);
+}
+.roi-guard-hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--el-color-warning);
+}
+/* ROI 免责提示：两条必须一直挂在表头上 */
+.roi-disclaimer {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-lighter);
+  border-radius: 4px;
 }
 /* 利润测算页：预计售价低于最低售价时标红 */
 .price-below-floor :deep(.el-input__inner) {
