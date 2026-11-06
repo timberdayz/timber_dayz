@@ -26,6 +26,77 @@ from backend.services.data_pipeline.refresh_queue_service import (
     resolve_refresh_lane,
 )
 from modules.core.db import CloudSyncReceiveLog, RefreshQueueTask
+from modules.core.logger import get_logger
+
+
+logger = get_logger(__name__)
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def split_rows_by_identity_consistency(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """把待同步的行分成「身份自洽」与「身份矛盾」两组。
+
+    为什么需要这一步
+    ----------------
+    同步的 upsert 冲突键是 ``(platform_code, shop_id, data_domain, granularity,
+    data_hash)``, 而 ``data_hash`` **不含 raw_data** ⇒ 两行只要核心业务字段相同,
+    就会撞到同一个冲突键上。
+
+    于是: 本地第一行(列 ``shop_id``=A、raw_data 身份=A) 写进去之后,
+    第二行(列 ``shop_id``=A、raw_data 身份=**B**) 会命中冲突键,
+    ``DO UPDATE`` 把 raw_data 改成 B 的 ⇒ 云端留下一行
+    「列是 A、内容是 B」的**混合行**。这正是同步侧的**放大器**。
+
+    判据(纯本地, 不需要连主数据)
+    --------------------------
+    1. 事实表的 ``shop_id`` **列** vs ``raw_data['shop_id']``;
+    2. ``raw_data['platform_shop_id']`` vs ``raw_data['shop_id']``。
+
+    两者任一不一致 ⇒ 这一行的「列」与「内容」不同源 ⇒ **不写云端**。
+    宁可少同步一行, 也不要把混合行搬进云端 ——
+    云端那一份是看板与对比分析的数据源, 污染它比缺它更难发现。
+
+    返回:
+        ``(自洽行, 矛盾行)``
+    """
+    consistent: list[dict[str, Any]] = []
+    conflicting: list[dict[str, Any]] = []
+
+    for row in rows or []:
+        column_shop_id = _text(row.get("shop_id"))
+        raw_data = row.get("raw_data")
+        raw = raw_data if isinstance(raw_data, dict) else {}
+
+        raw_shop_id = _text(raw.get("shop_id"))
+        raw_platform_shop_id = _text(raw.get("platform_shop_id"))
+
+        mismatch = ""
+        if column_shop_id and raw_shop_id and column_shop_id != raw_shop_id:
+            mismatch = (
+                "shop_id column=%s but raw_data.shop_id=%s"
+                % (column_shop_id, raw_shop_id)
+            )
+        elif (
+            raw_platform_shop_id
+            and raw_shop_id
+            and raw_platform_shop_id != raw_shop_id
+        ):
+            mismatch = (
+                "raw_data.platform_shop_id=%s but raw_data.shop_id=%s"
+                % (raw_platform_shop_id, raw_shop_id)
+            )
+
+        if mismatch:
+            conflicting.append(row)
+        else:
+            consistent.append(row)
+
+    return consistent, conflicting
 
 
 def build_sync_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -111,13 +182,18 @@ class SQLAlchemyCloudWriter:
         columns = build_canonical_columns()
         column_list = ", ".join(columns)
         bind_list = ", ".join(f":{column}" for column in columns)
+        # [*] shop_id 与 raw_data **绑定**: 两者要么一起更新, 要么都不更新。
+        #
+        # 为什么不把 shop_id 留在「不更新」那一组: 冲突键里就带着 shop_id
+        # (services 域除外), 留着不更新就会产生「列是 A、内容是 B」的混合行 ——
+        # 而 raw_data 恰恰是**要被更新**的那个, 两者一拆开就必然不同源。
+        # 把它放进更新组, 就等于宣告「这一行的身份与内容同进同退」。
         update_fields = ", ".join(
             f"{column} = EXCLUDED.{column}"
             for column in columns
             if column
             not in {
                 "platform_code",
-                "shop_id",
                 "data_domain",
                 "granularity",
                 "sub_domain",
@@ -140,11 +216,24 @@ class SQLAlchemyCloudWriter:
         if self.dry_run:
             return {"success": True, "written_rows": len(rows), "dry_run": True}
 
+        consistent, conflicting = split_rows_by_identity_consistency(rows)
+        if conflicting:
+            logger.error(
+                "[CloudSync] [%s] %d 行身份不自洽(列与 raw_data 不同源), 已跳过不写云端",
+                table_name,
+                len(conflicting),
+            )
+
         sql = self._build_upsert_sql(table_name, data_domain)
-        prepared_rows = self._prepare_rows_for_insert(rows)
+        prepared_rows = self._prepare_rows_for_insert(consistent)
         with self.engine.begin() as conn:
-            conn.execute(text(sql), prepared_rows)
-        return {"success": True, "written_rows": len(rows)}
+            if prepared_rows:
+                conn.execute(text(sql), prepared_rows)
+        return {
+            "success": True,
+            "written_rows": len(consistent),
+            "identity_conflict_rows": len(conflicting),
+        }
 
     def write_rows_with_receive_log(
         self,
@@ -158,17 +247,27 @@ class SQLAlchemyCloudWriter:
         if self.dry_run:
             return {"success": True, "written_rows": len(rows), "dry_run": True}
 
+        consistent, conflicting = split_rows_by_identity_consistency(rows)
+        if conflicting:
+            logger.error(
+                "[CloudSync] [%s] %d 行身份不自洽(列与 raw_data 不同源), 已跳过不写云端",
+                table_name,
+                len(conflicting),
+            )
+
         sql = self._build_upsert_sql(table_name, data_domain)
-        prepared_rows = self._prepare_rows_for_insert(rows)
+        prepared_rows = self._prepare_rows_for_insert(consistent)
         with self.engine.begin() as conn:
-            conn.execute(text(sql), prepared_rows)
+            if prepared_rows:
+                conn.execute(text(sql), prepared_rows)
             receive_result = receive_log_recorder.record_success_on_connection(
                 conn,
                 **receive_log_context,
             )
         return {
             "success": True,
-            "written_rows": len(rows),
+            "written_rows": len(consistent),
+            "identity_conflict_rows": len(conflicting),
             "receive_log": receive_result,
             "receive_id": receive_result.get("receive_id"),
         }
