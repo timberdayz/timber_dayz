@@ -58,6 +58,11 @@ _IDENTITY_WARNING_REASON_BY_CODE = {
     # 「同一个账号出现了多个 shop_id」: 流量与订单对不上 / 账号被多个键认领
     "identity_conflict": "conflict",
     "traffic_without_order_match_due_to_identity": "conflict",
+    # [*] 2026-11 新增: 「行内编号与行内标签指向不同账号」。
+    #     这是 2026-06 那批 Shopee 错配数据的原貌 —— 采集侧算错编号,
+    #     标签被整组贴到别的店上。归到 conflict 类(「去查数据串了」),
+    #     因为它的处置方向与 unmatched(去补别名)完全不同。
+    "platform_shop_id_conflict": "conflict",
 }
 
 
@@ -2484,8 +2489,11 @@ class PostgresqlDashboardService:
         )
         params: dict[str, Any] = {"period_key": period_key}
         platform_filter = ""
+        conflict_platform_filter = ""
         if platform:
             platform_filter = "AND platform_code = :platform_code"
+            # 诊断 CTE 里同时 JOIN 了 owner / target 两张账号表, 裸列名有歧义 ⇒ 要带表别名
+            conflict_platform_filter = "AND f.platform_code = :platform_code"
             params["platform_code"] = platform
 
         query = f"""
@@ -2533,6 +2541,55 @@ class PostgresqlDashboardService:
                 GROUP BY period_month, platform_code, resolved_shop_account_id
                 HAVING COUNT(DISTINCT shop_id) > 1
             ),
+            platform_shop_id_conflicts AS (
+                -- [*] 2026-11: 「行内编号与行内标签指向不同账号」的行。
+                --
+                -- 为什么直接查 b_class 事实表而不是语义层 MV:
+                --   语义层只输出「候选数」, 不输出「编号命中了哪个账号」,
+                --   分不出「歧义来自编号」还是「歧义来自两个店名」。
+                --   而给 MV 加列需要**重建物化视图**(REFRESH 不能改定义),
+                --   DROP ... CASCADE 会连删下游对象 ⇒ 风险远大于收益。
+                --   这里用查询期诊断, 零迁移、零 MV 重建。
+                --
+                -- 判据与历史订正迁移(20261117)完全一致:
+                --   行内 shop_id 能反查到账号 B, 而行内 shop_account_id 指向账号 A,
+                --   A ≠ B ⇒ 编号与标签打架。
+                SELECT
+                    date_trunc('month', f.metric_date)::date AS period_month,
+                    f.platform_code,
+                    f.raw_data ->> 'shop_account_id' AS shop_account_id,
+                    f.shop_id::text AS shop_id,
+                    target.shop_account_id AS conflicting_shop_account_id,
+                    COUNT(*)::int AS conflict_row_count,
+                    SUM(
+                        NULLIF(
+                            REGEXP_REPLACE(
+                                COALESCE(f.raw_data ->> '访客数', ''),
+                                '[^0-9.]',
+                                '',
+                                'g'
+                            ),
+                            ''
+                        )::numeric
+                    ) AS visitor_count
+                FROM b_class.fact_shopee_analytics_monthly f
+                INNER JOIN core.shop_accounts owner
+                        ON owner.shop_account_id = f.raw_data ->> 'shop_account_id'
+                INNER JOIN core.shop_accounts target
+                        ON LOWER(NULLIF(TRIM(target.platform_shop_id), ''))
+                           = LOWER(NULLIF(TRIM(f.shop_id), ''))
+                       AND LOWER(TRIM(COALESCE(target.platform, '')))
+                           = LOWER(TRIM(COALESCE(f.platform_code, '')))
+                WHERE owner.enabled IS TRUE
+                  AND owner.business_role = 'operating_store'
+                  AND target.enabled IS TRUE
+                  AND target.business_role = 'operating_store'
+                  AND owner.id <> target.id
+                  AND f.metric_date >= :period_key
+                  AND f.metric_date < (:period_key + INTERVAL '1 month')
+                  {conflict_platform_filter}
+                GROUP BY 1, 2, 3, 4, 5
+            ),
             warnings AS (
                 SELECT
                     'identity_conflict'::varchar AS warning_code,
@@ -2544,6 +2601,19 @@ class PostgresqlDashboardService:
                     NULL::numeric AS visitor_count,
                     NULL::numeric AS page_views
                 FROM identity_conflicts
+
+                UNION ALL
+
+                SELECT
+                    'platform_shop_id_conflict'::varchar AS warning_code,
+                    platform_code,
+                    shop_account_id,
+                    shop_id,
+                    conflicting_shop_account_id::text AS related_shop_ids,
+                    NULL::numeric AS order_count,
+                    visitor_count,
+                    NULL::numeric AS page_views
+                FROM platform_shop_id_conflicts
 
                 UNION ALL
 

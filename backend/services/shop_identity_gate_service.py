@@ -230,3 +230,83 @@ def summarize_identity_signal(rows: Sequence[Mapping[str, Any]]) -> Dict[str, An
         "stamped_rows": stamped,
         "distinct_shop_account_ids": sorted(values),
     }
+
+
+# ── 行内身份自洽性复核(收敛之后的最后一道防线) ──────────────────────────
+
+
+@dataclass(frozen=True)
+class RowIdentityConsistencyReport:
+    """行内身份自洽性复核结果。
+
+    为什么需要它
+    ------------
+    :func:`evaluate_shop_identity_gate` 管的是「**有没有**稳定身份戳」, 它在**盖戳之前**跑,
+    所以只比 ``shop_account_id`` —— 本次事故的行里「编号错、标签对」,
+    两边账号 ID 一致 ⇒ 门禁放行 ⇒ 矛盾带进了 b_class。
+
+    行内身份收敛(``shop_identity_reconciliation_service``)把矛盾**修好**,
+    但它可能被关掉(``SHOP_IDENTITY_RECONCILIATION_ENABLED=0``)或因主数据索引加载失败而跳过。
+    本复核就是那道兜底: **收敛之后**再核一次「行内编号 == 主数据登记编号」。
+
+    ⚠️ 本复核**只报告、不拒收** —— 拒收会让「主数据没登记编号的平台」(如 TikTok)
+    或「采集器故意用别的编号」的数据整批落 ``needs_shop``, 风险远大于收益。
+    它把不一致行数写进日志与入库返回值, 由看板的 ``platform_shop_id_conflict`` 告警承接。
+    """
+
+    checked_rows: int
+    inconsistent_rows: int
+    samples: tuple[Dict[str, Any], ...] = ()
+
+
+def evaluate_row_identity_consistency(
+    rows: Sequence[Mapping[str, Any]],
+    account_numbers: Mapping[str, str],
+) -> RowIdentityConsistencyReport:
+    """复核行内身份与主数据登记编号是否一致。
+
+    Args:
+        rows: 事实行(``raw_data`` 形态的 dict)。
+        account_numbers: ``{shop_account_id: platform_shop_id}`` ——
+            只应包含**主数据登记了平台编号**的账号; 没有编号就没有可比对的基准, 直接跳过。
+
+    Returns:
+        :class:`RowIdentityConsistencyReport`。
+    """
+    checked = 0
+    inconsistent = 0
+    samples: list[Dict[str, Any]] = []
+
+    for row in rows or []:
+        getter = getattr(row, "get", None)
+        if getter is None:
+            continue
+        shop_account_id = _normalize_identity(getter("shop_account_id"))
+        if not shop_account_id:
+            continue
+        expected = account_numbers.get(shop_account_id)
+        if not expected:
+            # 主数据没登记平台编号(如 TikTok) ⇒ 没有基准可比
+            continue
+        row_number = _normalize_identity(getter("shop_id"))
+        if not row_number:
+            # 行内没编号 ⇒ 无从判矛盾
+            continue
+        checked += 1
+        if row_number == expected:
+            continue
+        inconsistent += 1
+        if len(samples) < 5:
+            samples.append(
+                {
+                    "shop_account_id": shop_account_id,
+                    "row_shop_id": row_number,
+                    "master_platform_shop_id": expected,
+                }
+            )
+
+    return RowIdentityConsistencyReport(
+        checked_rows=checked,
+        inconsistent_rows=inconsistent,
+        samples=tuple(samples),
+    )

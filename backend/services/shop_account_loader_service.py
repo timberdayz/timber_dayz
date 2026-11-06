@@ -10,7 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.account_proxy_config import extract_proxy_config
 from backend.services.encryption_service import get_encryption_service
 from backend.services.platform_login_entry_service import normalize_main_account_login_url
-from backend.services.shopee_shop_id_resolver import resolve_shopee_platform_shop_id
+from backend.services.shop_account_identity_service import (
+    identity_from_shop_account_row,
+    pick_master_platform_shop_id,
+)
 from modules.core.db import MainAccount, ShopAccount, ShopAccountCapability
 from modules.core.logger import get_logger
 
@@ -50,11 +53,10 @@ class ShopAccountLoaderService:
             main_account.platform,
             main_account.login_url,
         )
-        resolved_shop_id = resolve_shopee_platform_shop_id(
-            platform=shop_account.platform or main_account.platform,
-            account_id=shop_account.shop_account_id,
-            store_name=shop_account.store_name,
-            platform_shop_id=shop_account.platform_shop_id,
+        # 平台店铺编号只认主数据 core.shop_accounts.platform_shop_id;
+        # 主数据没登记就留空, 绝不回退到账号上下文里的来路不明编号, 也不猜。
+        resolved_shop_id = pick_master_platform_shop_id(
+            identity_from_shop_account_row(shop_account)
         )
         # 账号级代理：与 AccountLoaderService 共用同一套解析规则（单一来源），
         # 数据来自 core.shop_accounts.extra_config["proxy"]（不加列、不写迁移）。

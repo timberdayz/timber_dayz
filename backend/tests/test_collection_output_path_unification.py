@@ -218,12 +218,21 @@ def test_executor_infers_analytics_from_traffic_overview_path_without_false_serv
     assert inferred == "analytics"
 
 
-def test_shopee_standard_output_root_resolves_known_store_name_before_account_id(tmp_path, monkeypatch):
+def _stub_master_shop_id(monkeypatch, shop_id: str) -> None:
+    """把「主数据 core.shop_accounts.platform_shop_id」固定成给定值。"""
+    monkeypatch.setattr(
+        "backend.services.shop_account_identity_service.resolve_master_platform_shop_id_sync",
+        lambda shop_account_id: shop_id,
+    )
+
+
+def test_shopee_standard_output_root_uses_master_platform_shop_id(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "modules.components.export.base.get_downloads_dir",
         lambda: tmp_path,
         raising=False,
     )
+    _stub_master_shop_id(monkeypatch, "1407964586")
 
     ctx = ExecutionContext(
         platform="shopee",
@@ -238,6 +247,34 @@ def test_shopee_standard_output_root_resolves_known_store_name_before_account_id
 
     assert "zewei_toys.sg__1407964586" in str(root).replace("\\", "/")
     assert "zewei_toys.sg__1227491331" not in str(root).replace("\\", "/")
+
+
+def test_shopee_standard_output_root_leaves_shop_id_empty_when_master_missing(
+    tmp_path, monkeypatch
+):
+    """主数据没登记编号 ⇒ 目录里不留编号段,也不拿 account_id 顶替。"""
+    monkeypatch.setattr(
+        "modules.components.export.base.get_downloads_dir",
+        lambda: tmp_path,
+        raising=False,
+    )
+    _stub_master_shop_id(monkeypatch, "")
+
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={
+            "account_id": "shopee_sg_zewei_toys_local",
+            "store_name": "zewei_toys.sg",
+        },
+        config={"shop_name": "zewei_toys.sg", "granularity": "monthly"},
+    )
+
+    root = build_standard_output_root(ctx, data_type="analytics", granularity="monthly")
+    normalized = str(root).replace("\\", "/")
+
+    assert "zewei_toys.sg__" not in normalized
+    assert "shopee_sg_zewei_toys_local" not in normalized
+    assert normalized.endswith("/zewei_toys.sg/analytics/monthly")
 
 
 @pytest.mark.asyncio
@@ -270,6 +307,8 @@ async def test_executor_rejects_shopee_raw_promotion_when_store_name_and_shop_id
     executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
     executor._infer_data_domain_from_path = lambda file_path, data_domains, idx: "analytics"
     executor._infer_sub_domain_from_path = lambda file_path, data_domain=None: ""
+    # 主数据登记的编号与路径里的编号不一致 ⇒ 拒收
+    executor._load_master_platform_shop_id = AsyncMock(return_value="1407964586")
 
     processed = await CollectionExecutorV2._process_files(
         executor,
@@ -335,6 +374,7 @@ async def test_executor_writes_consistent_shopee_store_name_and_resolved_shop_id
     )
 
     executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
+    executor._load_master_platform_shop_id = AsyncMock(return_value="1407964586")
 
     processed = await CollectionExecutorV2._process_files(
         executor,

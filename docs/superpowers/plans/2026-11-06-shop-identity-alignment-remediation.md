@@ -821,3 +821,210 @@ P0-2 / P0-2b / P0-3  历史数据回填与清理
 | 迁移守护测试 2 条误判 | 断言去源码里找 `CASCADE` / `DROP VIEW` 字样，把**解释性 docstring**当成了执行 | 改成**行为断言**：把真实资产喂给迁移的 `_strip_cascade_drop()`，看结果里还有没有 `DROP VIEW` / `CASCADE` |
 
 
+---
+
+## 13. Shopee 歧义的成因与修法（2026-11 复核，取代 §12.5 的归属表述）
+
+### 13.1 成因：采集侧的硬编码覆盖表**漏了 3 个在营店**
+
+`backend/services/shopee_shop_id_resolver.py` 里两张硬编码覆盖表
+（`SHOPEE_PLATFORM_SHOP_ID_OVERRIDES` / `SHOPEE_STORE_NAME_OVERRIDES`，各 11 条）
+是本次事故的直接病因：
+
+* 开发库共 **13 个在营 Shopee 店**，覆盖表只命中 **10 个**；
+* 没命中的正好是出错的那 3 个：`shopee_sg_xhkj11_local`(xhkj11.sg)、
+  `shopee_ph_xh_home_local`(xh_home.ph)、`shopee_my_xhkj12_local`(xhkj12.my)；
+* 这 3 个店落到 `shopee_shop_id_resolver.py:61-67` 的**回退分支** ——
+  去拿「账号上下文里的 `platform_shop_id`/`shop_id`」，来路不明 ⇒ 拿到**别的店**的编号；
+* ⇒ 行内 ``shop_id``（别的店的编号）与 ``store_name`` / ``shop_account_id``（本店的）
+  互相矛盾 ⇒ 语义层候选数 2 ⇒ 整行落 ``unknown``。
+
+覆盖表与守卫由 commit `1cabb3cb`（2026-06-09）引入；错数据采于 2026-06-22 ~ 06-30
+（守卫已在但没拦住 —— 因为守卫的「期望编号」复用同一个坏解析器）。
+
+配套证据：12 个在营 Shopee 店 **12/12 有** `core.shop_accounts.platform_shop_id`（零缺口），
+TikTok 6 个在营店 **0/6 有**（TikTok 的锚点只能是别名表）。
+
+### 13.2 「编号权威」的硬证据：UV 量级
+
+§12.5 曾把 18 行歧义行的归属写成「改成 `shop_account_id` 所属账号」。
+本节用 UV 量级复核后**纠正**这一表述 —— 正确的归属是**编号所属账号**。
+
+| 标签所属店 | 正常行 UV avg | 错配行 UV avg | 编号所属店 | 正常行 UV avg |
+|---|---|---|---|---|
+| `shopee_sg_xhkj11_local` | **314.7** | **786.9** | `shopee_ph_xhkj11_local` | **896.4** |
+| `shopee_ph_xh_home_local` | **362.6** | **147.4** | `shopee_my_xhkj1_local` | **141.2** |
+
+错配行的 UV 吻合**编号所属**的店，不吻合**标签所属**的店 ⇒
+**数据是编号那个店的，标签被整组贴错了**。
+
+> 复现脚本：`temp/verify_reconcile_matches_migration.py`（只读，不写库）
+
+这条证据同时说明**标签两票一致并不代表标签对** ——
+`raw_data.store_name` 与 `raw_data.shop_account_id` 实测 **0 行**不一致
+（两者同源于账号上下文 ⇒ 一起错），只有编号是独立来源。
+
+⇒ 结论：**平台店铺编号是权威的**。语义层候选池早在 2026-11-06 就写过同样的判断
+（「`platform_shop_id` 会被采集器污染」），本次事故是那条警告的兑现。
+
+### 13.3 本批次落地范围（2026-11 用户拍板）
+
+用户拍板：**三条源头全做 + 历史清理 + 别名补录**；**硬编码覆盖表直接删除**（不降级为兜底）；
+**入库时收敛改写 `raw_data` 为主数据值**（不是校验拒收）。
+
+| 工作包 | 交付物 | 状态 |
+|---|---|---|
+| WP-1 采集侧单一源头 | 删 `shopee_shop_id_resolver.py`，新建 `shop_account_identity_service.py`，改 6 处调用点 | **完成**（守护测试 11 passed） |
+| WP-2 入库收敛 | 新建 `backend/services/shop_identity_reconciliation_service.py`，接入 `data_ingestion_service.py` | **完成**（守护测试 25 passed） |
+| WP-3 门禁兜底 | `shop_identity_gate_service.py` 新增 `evaluate_row_identity_consistency()`（收敛后复核） | **完成** |
+| WP-4 同步放大器 | `cloud_b_class_sync_service.py`：①``shop_id`` 与 ``raw_data`` **绑定**（同进同退，不再一个更新一个不动）；②upsert 前拦截「列与 raw_data 不同源」的行，不写云端并计数 | **完成**（守护测试 9 passed） |
+| WP-5 冲突告警 | 看板新增 ``platform_shop_id_conflict`` 原因码 + **查询期诊断**（直查事实行，不改 MV） | **完成**（守护测试 5 passed；开发库实测检出 18 行 / 8,409 UV） |
+| WP-6 历史订正 | `20261117_remediate_shopee_row_identity_conflicts.py` | **完成**（行为守护测试 9 passed + 单事务实测通过） |
+| WP-7 别名补录 | `20261116_add_tiktok_export_store_name_aliases.py`（TikTok 6 条导出店名别名） | **完成**（守护测试 12 passed + 单事务实测通过） |
+
+> ⚠️ **WP-5 为什么不做成「语义层 MV 加列」**：
+> 给物化视图加列必须**重建 MV**（``REFRESH`` 只能重算数据、不能改定义），
+> 而 ``DROP MATERIALIZED VIEW ... CASCADE`` 会连删下游对象
+> （历史上 ``analytics_atomic.sql`` 的 ``DROP VIEW CASCADE`` 连删过 10 个对象）。
+> ⇒ 改用**查询期诊断**：在看板告警查询里直查事实行算「编号与标签打架」，
+> 零迁移、零 MV 重建、零下游影响。判据与历史订正迁移同构。
+
+> ⚠️ **WP-4 的两处改动缺一不可**：
+> 只做 ②（拦截不自洽行）能挡住「新造的混合行」；
+> 只做 ①（绑定）挡不住「冲突键撞车后 ``raw_data`` 被覆盖」。
+> 两者一起才闭环。
+
+
+### 13.4 入库收敛的口径
+
+| 项 | 规则 |
+|---|---|
+| 信号优先级 | `platform_shop_id` → `shop_id` → `shop_account_id` → `store_name`（编号权威） |
+| 归属判定 | 第一个**唯一命中**账号的信号决定归属；命中多账号的信号**不可用**（跳过），换下一个 |
+| 全都定不了 | **不收敛**（原样保留 ⇒ 语义层落 `unknown` + 看板告警）—— 绝不静默挑一个 |
+| 收敛值 | 一律取 `core.shop_accounts` 的登记值，不从行内观测值推导 |
+| 改动范围 | **只改身份键**（`shop_id` / `shop_account_id` / `store_name` / `platform_shop_id` 及其中文别名键），业务字段一个不动 |
+| `shop_id` 列 | **有**平台编号才改（Shopee）；**没有**则保留原值（TikTok）—— 改了会动文件级 upsert 冲突键 ⇒ 重采会插重复行 |
+| `data_hash` | 不变（作用域取文件级值，与行内身份无关）⇒ 重采覆盖同一行，不重复入库 |
+
+### 13.5 验证结果
+
+| 项 | 结果 |
+|---|---|
+| 收敛守护测试 | `backend/tests/test_shop_identity_reconciliation.py` **25 passed** |
+| 收敛 vs 迁移口径一致 | 1,946 行矛盾行 **100% 吻合**（0 不一致 / 0 无法确定）⇒ 新采数据与历史数据不分叉 |
+| 语义层候选数前后对比 | 收敛前候选数 = **2**（⇒ unknown）；收敛后 = **1**（⇒ 唯一命中）|
+| 迁移行为守护测试 | `backend/tests/data_pipeline/test_shopee_row_identity_remediation.py` **9 passed**（隔离库自造数据，订正方向 / 只改身份字段 / data_hash 不变 / 幂等 / 回滚 / 停用店不动 / 未登记编号不动） |
+| 别名迁移守护测试 | `backend/tests/data_pipeline/test_tiktok_export_store_name_aliases.py` **12 passed** |
+| 采集侧守护测试 | `backend/tests/test_shop_account_identity_service.py` **11 passed** |
+| 同步侧守护测试 | `backend/tests/test_cloud_sync_identity_guard.py` **9 passed** |
+| 看板告警守护测试 | `backend/tests/test_dashboard_identity_conflict_alert.py` **5 passed** |
+| **本次新增 + 改动的 9 个测试文件** | 全量回归里 **108/108 全过、零失败**（含 4 个被适配的既有测试文件 25+7+5+5 = 42 例） |
+| 看板诊断实测 | 开发库上精确检出 **18 行 / 8,409 UV** 的编号与标签打架 —— 与事故影响面完全吻合 |
+| 两个迁移单事务实测 | unknown 行 951 → **213**（剩余 213 = 停用店，8 UV，属预期）、ambiguous 18 → **0**、跨账号认领 1,946 → **0**；总行数/总 UV 不变；重跑幂等；回滚后与改动前完全一致 |
+| 架构 SSOT 校验 | `scripts/verify_architecture_ssot.py` 3 PASS / 1 FAIL —— 唯一 FAIL 是 §12 已记录的**既有违规**（2 个未归档 legacy 文件），与本次改动无关 |
+
+
+> ⚠️ 迁移链注意事项：`20261116` 的 `down_revision` 目前指向 `current_schema_20261114_add_sku_roi_columns`。
+> 应用迁移必须走 `python scripts/run_current_schema_migrations.py`（fail-closed），
+> **禁止**手工 `alembic stamp`。
+
+> ⚠️ **本分支的基线是 `main@e69a29e3`**，而 main 在本批次期间又前进到了 `1e61a3c9`
+> （product-center 阶段 1 的 6 个提交，含 `20261113` / `20261114` 两个新迁移）。
+> ⇒ 本 worktree 里**看不到**那两个迁移文件，静态查链会误报「双头」。
+> ⇒ 正确顺序：**先 commit → 把 main 合进本分支 → 再跑最终回归**，
+> 这样最终验证跑的是「main 最新内容 + 本次全部改动」。
+
+---
+
+### 13.6 当前状态与交接动作（2026-11-07）
+
+**已完成**：代码已合并回 `main`（快进，`76d3d911`），回归零新增失败。
+
+**尚未完成：迁移尚未应用到开发库。** 原因是**外部依赖**，不是本次改动的问题：
+
+| 项 | 现状 |
+|---|---|
+| 开发库版本 | `current_schema_20261115_add_sku_platform_pricing` |
+| 该迁移文件是否在 main | **否** —— 只在 `feature/product-center-stage0` 分支（commit `f51ceb46`） |
+| 守护入口判定 | `failure_code=environment_invalid`，`'…20261115…' is not a supported current revision`，`recommended_action=manual_source_approval` |
+| 本次能否绕过 | **不能**，也不应该 —— 绕过 fail-closed 正是仓库明令禁止的 |
+
+#### 交接动作（顺序不能颠倒）
+
+1. **等 product-center 会话把 `20261115_add_sku_platform_pricing` 合入 main**；
+2. 立刻把 `20261116_add_tiktok_export_store_name_aliases.py` 的 `down_revision`
+   从 `current_schema_20261114_add_sku_roi_columns` 改成
+   `current_schema_20261115_add_sku_platform_pricing`；
+   （不改会双头 —— `20261114` 有两个后继；改早了会链断 —— 引用不存在的 revision。
+   **两种情形都是 fail-closed，不会损坏数据**，但第 2 步必须在第 1 步之后做。）
+3. `python scripts/run_current_schema_migrations.py`（走守护入口）；
+4. `python temp/refresh_identity_mvs.py` 刷物化视图 ——
+   **清单由脚本自己从两个迁移文件解析 `_REQUIRED_REFRESH_TARGETS` 取并集 = 6 个**
+   （`shop_identity_resolution_candidates_v2_mv` / `fact_analytics_atomic_mv` /
+   `fact_analytics_monthly_atomic_mv` / `fact_orders_atomic_mv` /
+   `fact_orders_monthly_atomic_mv` / `fact_products_atomic_mv`），
+   顺序按依赖排列（候选集最先）；
+   ⚠️ **漏刷 `shop_identity_resolution_candidates_v2_mv` ⇒ TikTok 新别名不生效**
+   （别名表是实时读的，但候选集是它的**物化副本**）⇒ 720 行仍然落 `unknown`
+   ⇒ 验收必然不过 —— 所以这一步的清单**不能手写**（手写过一次，正好漏了这 3 个）。
+5. `python temp/verify_identity_remediation_outcome.py` 验收（**看退出码，不看打印文字**）：
+   - `0` ⇒ 通过：unknown 行 951 → **213**（剩余 213 = 停用店，8 UV，属预期）、
+     unknown UV 117,181 → **8**、ambiguous 18 → **0**、ambiguous UV 8,409 → **0**、
+     跨账号认领 1,946 → **0**、总行数/总 UV **不变**（3,634 / 683,497）、别名 **+6**；
+   - `2` ⇒ **迁移尚未落库**（版本链还没走到 `20261117`）⇒ **不算通过**；
+     此时指标等于订正前基线是正常的，要回头查第三步是否真的应用了
+     （看 `public.current_schema_alembic_version.version_num`），**绝不要**手工改版本表；
+   - `1` ⇒ 已落库但指标与目标不符 ⇒ 如实报告哪些指标不符。
+
+⚠️ 两个迁移的 SQL 逻辑本身**已在真实开发库上单事务实测通过**（unknown 951→213、
+ambiguous 18→0、跨账号认领 1,946→0、幂等、回滚后完全复原）——
+即「订正本身是有效的」，待补的只是**走守护入口的正式落库**这一步。
+
+---
+
+### 13.7 自动续接已就位 + 交接脚本的三处修正（2026-11-07）
+
+按用户授权（「迁移落库被外部依赖阻塞时，设定时检查，就绪后自动跑完剩余步骤并报结果」），
+已注册定时任务接管 §13.6 的五步：
+
+| 项 | 值 |
+|---|---|
+| cronId | `644823b3-6593-45c4-8a67-ea7f980ba8eb` |
+| 名称 | 店铺身份订正 · 迁移落库自动续接 |
+| 频率 | `*/15 * * * *`（Asia/Hong_Kong） |
+| 绑定会话 | `sessionId` = 本会话（`mvs_706fd47e912847d09c642f7943b44884`） |
+| 每轮逻辑 | 先**只读**查 `main` 上有没有 `20261115` ⇒ 没有就一句话跳过、不做任何写操作；⇒ 有就按 §13.6 全流程跑完 |
+| 自删条件 | 仅当**验收脚本退出码为 0** 才 `cron_delete` 自删；任一步失败 ⇒ 保留任务等下一轮 |
+
+> ⚠️ 隔离纪律：任务 prompt 里写死「不要碰 `.worktrees/inventory-aging-pipeline-recovery`
+> 与 `.worktrees/product-center-stage0`」「不要在 main 上改除 20261116 迁移文件以外的任何文件」。
+
+**首轮已实测触发**（02:40:00，`triggerSource=scheduled`）；`main` HEAD 保持 `90facb9c`
+未被改动 —— 符合「依赖未就绪 ⇒ 只读检查后跳过」的预期。
+
+#### 交接脚本的三处修正（都是会**真实打断**自动流程的缺陷）
+
+| # | 缺陷 | 后果 | 修正 |
+|---|---|---|---|
+| ① | 三个交接脚本打印 `✓` / `⇒` / `⚠️`，而 Windows 控制台默认 **GBK** | 脚本在打印时抛 `UnicodeEncodeError`，**退出码非 0** ⇒ 自动流程把它们当成「这一步失败」而中止 | 脚本内 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`（顺带把乱码中文也修成可读） |
+| ② | 验收脚本的判定是**单向**的（`after <= before`） | 迁移**根本没落库**时，所有指标仍等于订正前基线 ⇒ 脚本照样打印「全部通过」+ 退出码 0 ⇒ 定时任务会**误判成功并自删**，自动续接能力就此丢失 | 改为「**先判迁移落没落库**（静态解析迁移链，判断版本表 head 是否在 `20261117` 的下游）⇒ 落库后再按**目标值严格比对**」；退出码 `0`=通过 / `2`=未落库 / `1`=指标不符 |
+| ③ | 刷新脚本的 MV 清单是**手写**的 3 个 | 漏了 `shop_identity_resolution_candidates_v2_mv`（别名生效的唯一入口）⇒ TikTok 720 行仍落 `unknown` ⇒ 验收必然不过 | 改为**从两个迁移文件解析 `_REQUIRED_REFRESH_TARGETS` 取并集**（= 6 个），顺序按依赖排列 |
+
+> 三者都在 `temp/`（已 gitignore）⇒ 不进仓库、不影响 `main` 的代码与迁移；
+> 但**会**影响自动流程的成败，所以必须修。
+
+#### 修正后的实测（2026-11-07，开发库仍是订正前状态）
+
+| 脚本 | 结果 |
+|---|---|
+| `temp/check_migration_chain.py` | 退出码 **0**，输出「[OK] 迁移链单头」；链单头（head = `20261117`），49 个迁移文件 |
+| `temp/refresh_identity_mvs.py`（只解析，不刷库） | 目标清单解析出 **6** 个，顺序 = 候选集 → analytics → analytics 月度 → orders → orders 月度 → products |
+| `temp/verify_identity_remediation_outcome.py` | 退出码 **2** + 明确报错「迁移尚未落库」⇒ **不会**在未落库时误判通过 |
+| `temp/verify_reconcile_matches_migration.py`（只读） | 矛盾行 1,946 / 口径一致 **1,946** / 不一致 **0** / 无法确定 **0** |
+
+
+
+
+
+

@@ -4995,8 +4995,45 @@ class CollectionExecutorV2:
             or ""
         ).strip()
 
-    def _resolve_collection_shop_id(
+    async def _load_master_platform_shop_id(
         self, platform: str, account: Dict[str, Any]
+    ) -> str:
+        """按店铺账号从主数据取平台店铺编号。
+
+        唯一权威源 = ``core.shop_accounts.platform_shop_id``;
+        取不到(非 Shopee / 账号查无 / 主数据未登记 / 数据库不可用)→ 空串。
+        """
+        if str(platform or "").strip().lower() != "shopee":
+            return ""
+        shop_account_id = str(
+            account.get("shop_account_id") or account.get("account_id") or ""
+        ).strip()
+        if not shop_account_id:
+            return ""
+        try:
+            from backend.models.database import AsyncSessionLocal
+            from backend.services.shop_account_identity_service import (
+                load_master_identities,
+                pick_master_platform_shop_id,
+            )
+
+            async with AsyncSessionLocal() as db:
+                identities = await load_master_identities(db, [shop_account_id])
+        except Exception as exc:
+            logger.warning(
+                "[ShopIdentityGuard] Failed to load master platform_shop_id: shop_account_id=%s error=%s",
+                shop_account_id,
+                exc,
+            )
+            return ""
+        return pick_master_platform_shop_id(identities.get(shop_account_id))
+
+    def _resolve_collection_shop_id(
+        self,
+        platform: str,
+        account: Dict[str, Any],
+        *,
+        master_shop_id: str = "",
     ) -> str:
         raw_shop_id = str(
             account.get("shop_id")
@@ -5007,22 +5044,9 @@ class CollectionExecutorV2:
         if str(platform or "").strip().lower() != "shopee":
             return raw_shop_id or str(account.get("store_name") or "").strip()
 
-        from backend.services.shopee_shop_id_resolver import (
-            resolve_shopee_platform_shop_id,
-        )
-
-        store_name = self._resolve_collection_store_name(account)
-        return (
-            resolve_shopee_platform_shop_id(
-                platform="shopee",
-                account_id=account.get("shop_account_id") or account.get("account_id"),
-                store_name=store_name,
-                platform_shop_id=account.get("platform_shop_id"),
-                shop_id=raw_shop_id,
-            )
-            or raw_shop_id
-            or store_name
-        )
+        # Shopee:编号只认主数据;主数据为空就留空,
+        # 不回退到账号上下文里的 shop_id / platform_shop_id,也不拿店名顶替。
+        return str(master_shop_id or "").strip()
 
     def _shopee_shop_identity_rejection_reason(
         self,
@@ -5030,7 +5054,7 @@ class CollectionExecutorV2:
         source_path: Path,
         data_domain: str,
         account: Dict[str, Any],
-        resolved_shop_id: str,
+        expected_shop_id: str,
     ) -> Optional[str]:
         path_store_name, path_shop_id = self._extract_shopee_path_identity(
             str(source_path),
@@ -5039,19 +5063,9 @@ class CollectionExecutorV2:
         if not path_store_name and not path_shop_id:
             return None
 
-        from backend.services.shopee_shop_id_resolver import (
-            resolve_shopee_platform_shop_id,
-        )
-
         account_store_name = self._resolve_collection_store_name(account)
-        expected_shop_id = resolve_shopee_platform_shop_id(
-            platform="shopee",
-            account_id=account.get("shop_account_id") or account.get("account_id"),
-            store_name=account_store_name or path_store_name,
-            platform_shop_id=account.get("platform_shop_id"),
-            shop_id=resolved_shop_id or path_shop_id,
-        )
-
+        # expected_shop_id = 主数据登记值。主数据为空 ⇒ 不做编号冲突判定,
+        # 只保留下面的店名维度判定(不猜编号)。
         if path_shop_id and expected_shop_id and path_shop_id != expected_shop_id:
             return (
                 f"path shop_id {path_shop_id} conflicts with expected "
@@ -5133,7 +5147,10 @@ class CollectionExecutorV2:
             ).strip()
             or None
         )
-        shop_id = self._resolve_collection_shop_id(platform, account)
+        master_shop_id = await self._load_master_platform_shop_id(platform, account)
+        shop_id = self._resolve_collection_shop_id(
+            platform, account, master_shop_id=master_shop_id
+        )
         store_name = self._resolve_collection_store_name(account)
 
         # 提取日期范围
@@ -5167,7 +5184,7 @@ class CollectionExecutorV2:
                         source_path=source_path,
                         data_domain=data_domain,
                         account=account,
-                        resolved_shop_id=shop_id,
+                        expected_shop_id=master_shop_id,
                     )
                     if rejection_reason:
                         summary["shop_identity_rejected_count"] += 1

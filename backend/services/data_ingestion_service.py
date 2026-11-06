@@ -56,8 +56,18 @@ from backend.services.operational_data_importer import (
 from backend.services.raw_data_importer import get_raw_data_importer
 from backend.services.deduplication_service import DeduplicationService
 from backend.services.shop_identity_gate_service import (
+    evaluate_row_identity_consistency,
     evaluate_shop_identity_gate,
 )  # [*] P2-1 入库身份硬门禁
+from backend.services.shop_identity_reconciliation_service import (
+    RECONCILIATION_ENABLED,
+    STATUS_CONVERGED,
+    apply_reconciliation,
+    collect_row_signals,
+    converged_shop_id_value,
+    load_identity_index,
+    reconcile_identity,
+)  # [*] v4.20.0 入库前的行内身份收敛(一行只带一套身份)
 from backend.services.currency_extractor import (
     get_currency_extractor,
 )  # [*] v4.15.0新增
@@ -284,12 +294,32 @@ class DataIngestionService:
             db: 异步数据库会话(AsyncSession)
         """
         self.db = db
+        # [*] v4.20.0 行内身份收敛用的主数据索引(账号 + 别名), 按实例缓存一次
+        self._identity_index_cache = None
         # [*] 统一读表头入口(入库链路与判定链路共用同一套解析规则)
         self._header_reader = get_spreadsheet_header_reader(
             strict_allowed_roots=True,
             log_prefix="Ingest",
             executor_manager_factory=lambda: get_executor_manager(),
         )
+
+    async def _load_identity_index(self):
+        """取「账号 + 别名」反查索引(实例级缓存)。
+
+        取不到就返回 ``None`` —— 调用方据此**跳过收敛**(不改数据),
+        绝不让一次索引失败把整条入库链路带崩。
+        """
+        if self._identity_index_cache is not None:
+            return self._identity_index_cache
+        try:
+            self._identity_index_cache = await load_identity_index(self.db)
+        except Exception as exc:  # pragma: no cover - 兜底路径
+            logger.warning(
+                "[Ingest] [v4.20.0] [WARN] 主数据身份索引加载失败, 跳过行内身份收敛: %s",
+                exc,
+            )
+            return None
+        return self._identity_index_cache
 
     def _safe_resolve_path(self, file_path: str) -> str:
         """安全解析文件路径(兼容绝对路径和相对路径)。
@@ -768,6 +798,114 @@ class DataIngestionService:
                         f"提取到{sum(1 for c in currency_codes if c)}个货币代码,"
                         f"字段名归一化完成: {len(normalized_rows)}行"
                     )
+
+                    # ------------------------------------------------------------
+                    # [*] v4.20.0 入库前的「行内身份收敛」
+                    #
+                    # 采集侧算错平台店铺编号时, 一行会同时带着「别的店的编号」和
+                    # 「本店的标签」⇒ 语义层把它当两路独立候选去计数 ⇒ 候选数 2
+                    # ⇒ 整行落 unknown(2026-11 实测 1,946 行矛盾, 8,409 UV 从看板消失)。
+                    #
+                    # 这里先把归属账号定下来(**编号权威** —— UV 量级与语义层候选池
+                    # 优先级都指向它), 再把行内的身份键统一改写成该账号在
+                    # core.shop_accounts 里的登记值 ⇒ 行内只剩一套身份。
+                    #
+                    # 实测: 2026-11 开发库有 **1,946 行**「行内编号指向 A、标签指向 B」
+                    # 的矛盾行(analytics 18 / products 1,909 / services 19),
+                    # 收敛后语义层候选数由 2 变 1。
+                    #
+                    # ⚠️ 只改身份键, 业务字段一个都不动;
+                    # ⚠️ data_hash 的作用域取文件级值, 收敛不影响它 ⇒ 重采不重复入库。
+                    # ------------------------------------------------------------
+                    reconciled_shop_id = (
+                        getattr(file_record, "shop_id", None) if file_record else None
+                    )
+                    if RECONCILIATION_ENABLED and normalized_rows:
+                        identity_index = await self._load_identity_index()
+                        if identity_index is None:
+                            logger.warning(
+                                "[Ingest] [v4.20.0] [WARN] 无主数据身份索引, "
+                                "跳过行内身份收敛(不改任何身份键)"
+                            )
+                        else:
+                            reconcile_platform = (
+                                file_platform_code
+                                if "file_platform_code" in locals()
+                                else platform
+                            )
+                            converged_values: set[str] = set()
+                            converged_rows = 0
+                            conflict_rows = 0
+                            unresolved_rows = 0
+                            for row_index, row in enumerate(normalized_rows):
+                                result = reconcile_identity(
+                                    identity_index,
+                                    platform_code=reconcile_platform,
+                                    signals=collect_row_signals(row),
+                                )
+                                if result.status == STATUS_CONVERGED:
+                                    normalized_rows[row_index] = apply_reconciliation(
+                                        row, result
+                                    )
+                                    converged_rows += 1
+                                    converged_values.add(
+                                        converged_shop_id_value(
+                                            result.identity,
+                                            fallback=str(row.get("shop_id") or ""),
+                                        )
+                                    )
+                                elif result.conflict_signals:
+                                    conflict_rows += 1
+                                else:
+                                    unresolved_rows += 1
+
+                            if len(converged_values) == 1:
+                                reconciled_shop_id = converged_values.pop()
+                            elif len(converged_values) > 1:
+                                logger.warning(
+                                    "[Ingest] [v4.20.0] [WARN] 同一文件收敛出多个店铺身份(%s), "
+                                    "shop_id 列保持文件级原值",
+                                    sorted(converged_values),
+                                )
+                            logger.info(
+                                "[Ingest] [v4.20.0] 行内身份收敛完成: 收敛=%d, 冲突=%d, 未定=%d, shop_id=%s",
+                                converged_rows,
+                                conflict_rows,
+                                unresolved_rows,
+                                reconciled_shop_id,
+                            )
+
+                            # ------------------------------------------------------------
+                            # [*] v4.20.0 收敛之后的行内身份复核(兜底)
+                            #
+                            # 收敛可能被关掉(SHOP_IDENTITY_RECONCILIATION_ENABLED=0)
+                            # 或因主数据索引加载失败而跳过 ⇒ 这里再核一次
+                            # 「行内编号 == 主数据登记编号」。
+                            #
+                            # ⚠️ 只报告、不拒收: 主数据没登记编号的平台(TikTok)没有基准,
+                            #    硬拒收会把整批正常数据打进 needs_shop。
+                            # ------------------------------------------------------------
+                            account_numbers = {
+                                identity.shop_account_id: identity.platform_shop_id
+                                for identities in identity_index.by_shop_account_id.values()
+                                for identity in identities
+                                if identity.platform_shop_id
+                            }
+                            consistency = evaluate_row_identity_consistency(
+                                normalized_rows, account_numbers
+                            )
+                            if consistency.inconsistent_rows:
+                                logger.error(
+                                    "[Ingest] [v4.20.0] [ERROR] 收敛后仍有 %d/%d 行的编号与主数据登记不符: %s",
+                                    consistency.inconsistent_rows,
+                                    consistency.checked_rows,
+                                    list(consistency.samples),
+                                )
+                            else:
+                                logger.info(
+                                    "[Ingest] [v4.20.0] 行内身份复核通过: 核对 %d 行, 0 行不一致",
+                                    consistency.checked_rows,
+                                )
                     logger.info(
                         "[Ingest] raw import date context: file_id=%s, date_from=%s, date_to=%s, field_parse_rules=%s",
                         file_id,
@@ -838,11 +976,7 @@ class DataIngestionService:
                         data_domain=domain,
                         granularity=granularity,
                         platform_code=platform_code_for_table,  # [*] v4.17.0修复:使用正确的platform_code
-                        shop_id=(
-                            getattr(file_record, "shop_id", None)
-                            if file_record
-                            else None
-                        ),
+                        shop_id=reconciled_shop_id,
                         file_id=file_id,
                         header_columns=normalized_header_columns,  # [*] v4.16.0修复:使用归一化的header_columns用于动态列管理(避免创建重复列)
                         currency_codes=currency_codes,  # [*] v4.15.0新增:货币代码列表
