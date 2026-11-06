@@ -579,3 +579,71 @@ test("「底线按平台」选择器保留且仍参与列表取数", () => {
   );
   assert.match(loadSkus, /platform_code: skuPricingPlatform\.value \|\| undefined/);
 });
+
+test("测算页提供目标ROI与平台报告ROI两个手填列", () => {
+  assert.match(source, /label="目标ROI"/);
+  assert.match(source, /label="平台报告ROI"/);
+  assert.match(source, /v-model="row\.target_roi"/);
+  assert.match(source, /v-model="row\.actual_roi"/);
+});
+
+test("ROI 投放输入进草稿与利润版本的载荷", () => {
+  const payload = source.slice(
+    source.indexOf("const operatingPayload"),
+    source.indexOf("const clearOperatingSkuOutsideSpu"),
+  );
+  assert.match(payload, /target_roi: row\.target_roi \?\? null/);
+  assert.match(payload, /actual_roi: row\.actual_roi \?\? null/);
+});
+
+test("平台报告ROI不预填，避免把上一轮投放事实悄悄带进新一版", () => {
+  const load = source.slice(
+    source.indexOf("const loadOperatingProfiles"),
+    source.indexOf("const resetOperatingPage"),
+  );
+  // 目标ROI 是当前意图，存在经营档案里 ⇒ 预填
+  assert.match(load, /target_roi: row\.target_roi \?\? null/);
+  // 平台报告ROI 是某一次投放的历史事实 ⇒ 每轮重新填
+  assert.match(load, /actual_roi: null/);
+});
+
+test("ROI 三色判定按保本线与建议ROI分档", () => {
+  const verdict = source.slice(
+    source.indexOf("const roiVerdict ="),
+    source.indexOf("const targetRoiBelowBreakEven"),
+  );
+  assert.match(verdict, /亏损投放/);
+  assert.match(verdict, /有利润但未达财务目标/);
+  assert.match(verdict, /达标/);
+  // 保本线算不出来 ⇒ 不判定（缺输入宁可不算）
+  assert.match(verdict, /if \(breakEven == null\) return null/);
+  // 目标 ROI 低于保本线单独标红
+  assert.match(source, /const targetRoiBelowBreakEven =/);
+  assert.match(source, /低于保本线/);
+});
+
+test("「达标」带归因警示且不给归因放大系数", () => {
+  const tooltip = source.slice(
+    source.indexOf("const roiVerdictTooltip ="),
+    source.indexOf("const referenceLabelFee ="),
+  );
+  assert.match(tooltip, /归因可能虚高/);
+  assert.match(tooltip, /自然流量和达人带货/);
+  // 给不出数字时宁可不给，不能编
+  assert.doesNotMatch(tooltip, /归因系数|放大系数\s*[:：=]/);
+  assert.match(tooltip, /只提示、不给数字/);
+});
+
+test("保存利润版本时 ROI 护栏错误给出可执行提示", () => {
+  assert.match(source, /below_break_even_roi/);
+  assert.match(source, /roi_cost_incomplete/);
+  // 护栏错误要排在「资料未完整」之前处理
+  const save = source.slice(
+    source.indexOf("const saveOperatingEstimate"),
+    source.indexOf("const payloadSpu"),
+  );
+  const roiAt = save.indexOf("below_break_even_roi");
+  const missingAt = save.indexOf("detail?.missing_fields");
+  assert.ok(roiAt > 0, "必须处理 ROI 护栏错误码");
+  assert.ok(missingAt > roiAt, "ROI 护栏错误必须排在资料未完整之前");
+});

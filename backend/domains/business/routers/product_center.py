@@ -2763,6 +2763,13 @@ async def list_platform_sku_profit_candidates(
             "competitor_price": profile.competitor_price if profile else None,
             "seller_coupon_amount": seller_coupon_amount,
             "expected_ad_rate": expected_ad_rate,
+            # 目标 ROI（阶段 2.2）：运营的**当前意图**，存在经营档案里 ⇒ 列表要回带，
+            # 前端才能把上一轮填的值预填进输入框（与测算售价/广告费率同一套预填口径）。
+            # ⚠️ 平台报告 ROI（actual_roi）**故意不预填**：它是"某一次投放"的历史事实，
+            #    预填了再存进新一版利润版本，就会把上一轮的事实悄悄带过去 ——
+            #    事后没人说得清这一版的 ROI 是哪一轮的。留空，由运营每次照平台后台重新填。
+            "target_roi": profile.target_roi if profile else None,
+            "target_roi_source": profile.target_roi_source if profile else None,
             "expected_logistics_cost": reference_logistics,
             "expected_storage_cost": reference_storage,
             "actual_logistics_cost": actual_logistics, "actual_storage_cost": None,

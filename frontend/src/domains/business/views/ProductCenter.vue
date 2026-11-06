@@ -485,6 +485,40 @@
                 <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
               </el-tooltip></template
           ></el-table-column>
+          <el-table-column label="目标ROI" width="135"
+            ><template #default="{ row }"
+              ><div class="rate-cell"
+                ><el-input-number
+                  v-model="row.target_roi"
+                  :min="0"
+                  :step="0.1"
+                  :controls="false"
+                  size="small" /></div
+              >
+              <el-tag v-if="targetRoiBelowBreakEven(row)" size="small" type="danger"
+                >低于保本线</el-tag
+              >
+              <el-tooltip placement="top" :content="targetRoiTooltip(row)">
+                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
+              </el-tooltip></template
+          ></el-table-column>
+          <el-table-column label="平台报告ROI" width="175"
+            ><template #default="{ row }"
+              ><div class="rate-cell"
+                ><el-input-number
+                  v-model="row.actual_roi"
+                  :min="0"
+                  :step="0.1"
+                  :controls="false"
+                  size="small" /></div
+              >
+              <el-tag v-if="roiVerdict(row)" size="small" :type="roiVerdict(row).type">{{
+                roiVerdict(row).label
+              }}</el-tag>
+              <el-tooltip placement="top" :content="roiVerdictTooltip(row)">
+                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
+              </el-tooltip></template
+          ></el-table-column>
           <el-table-column label="预计售价" width="110"
             ><template #default="{ row }"
               ><el-input-number
@@ -1756,6 +1790,11 @@ const loadOperatingProfiles = async () => {
       expected_selling_price: row.expected_selling_price ?? row.reference_selling_price,
       seller_coupon_amount: row.seller_coupon_amount ?? 0,
       expected_ad_rate_pct: toPercent(row.expected_ad_rate ?? 0),
+      // 目标 ROI 预填：它是运营的**当前意图**，存在经营档案里 ⇒ 上一轮填的值继续带着。
+      // ⚠️ 平台报告 ROI **不预填**：它是"某一次投放"的历史事实，预填了再存进新一版
+      //    利润版本，就会把上一轮的事实悄悄带过去 —— 事后没人说得清这一版是哪一轮的。
+      target_roi: row.target_roi ?? null,
+      actual_roi: null,
     }));
     operatingTotal.value = response.total ?? 0;
   } catch (error) {
@@ -1779,6 +1818,12 @@ const operatingPayload = (row) => ({
   expected_selling_price: row.expected_selling_price ?? null,
   seller_coupon_amount: row.seller_coupon_amount ?? 0,
   expected_ad_rate: fromPercent(row.expected_ad_rate_pct, 0),
+  // --- ROI 投放输入（阶段 2.2）---
+  // 目标 ROI：运营打算投到多少。留空 = 不参与保本 ROI 护栏。
+  target_roi: row.target_roi ?? null,
+  // 平台报告 ROI：运营从平台后台抄回来的这次投放实际 ROI。
+  // 它是**事实记录**，低于保本线也照样存（后端只标红不拦）。
+  actual_roi: row.actual_roi ?? null,
 });
 const clearOperatingSkuOutsideSpu = () => {
   if (operatingQuery.sku_id && !filteredOperatingSkus.value.some((item) => item.sku_id === operatingQuery.sku_id)) {
@@ -1843,6 +1888,29 @@ const saveOperatingEstimate = async (row) => {
     if (detail?.code === "below_min_selling_price") {
       ElMessage.error(
         `预计售价低于最低售价 ${money(detail.min_selling_price)}（当前 ${money(detail.expected_selling_price)}）`,
+      );
+      return;
+    }
+    // --- ROI 投放护栏（阶段 2.2）---
+    // ⚠️ 护栏错误排在「资料未完整」**之前** ⇒ 运营看到的第一个原因是 ROI，
+    //    不是"去补物流规则"（补完可能还是亏）。
+    if (detail?.code === "below_break_even_roi") {
+      // basis=lower_bound 表示成本不全、只能给出保本线的**下界**：
+      // 下界只可能偏松，所以"低于下界"是**已经能确定**亏，不是估计。
+      const threshold =
+        detail.basis === "lower_bound"
+          ? `至少 ${roiDisplay(detail.break_even_roi)}`
+          : roiDisplay(detail.break_even_roi);
+      ElMessage.error(
+        `目标 ROI ${roiDisplay(detail.target_roi)} 低于保本线（${threshold}），这一单投了就是亏`,
+      );
+      return;
+    }
+    if (detail?.code === "roi_cost_incomplete") {
+      ElMessage.error(
+        `成本资料未完整，保本 ROI 不可信，不能据此设定目标 ROI${
+          detail.missing_fields?.length ? `：${detail.missing_fields.join("、")}` : ""
+        }`,
       );
       return;
     }
@@ -2497,6 +2565,90 @@ const roiSuggestionTooltip = (row) => {
     lines.push(
       `按这个数投：单均广告费 ${money(expected.equivalent_ad_cost_per_order)}，单均净利 ${money(expected.equivalent_net_profit_per_order)}`,
     );
+  }
+  return lines.join("\n");
+};
+// --- ROI 投放判定（阶段 2.2）---
+//
+// 三色判定（上游设计稿 §2.5⑪）：
+//   平台报告 ROI < 保本 ROI            → 亏损投放（红）
+//   保本 ROI ≤ 平台报告 ROI < 建议 ROI  → 有利润但未达财务目标（黄）
+//   平台报告 ROI ≥ 建议 ROI             → 达标（绿）
+//   目标 ROI < 保本 ROI                  → 目标 ROI 低于保本线（红）
+//
+// ⚠️ 成本不全时**一律不判**：保本 ROI 算不出来 ⇒ 三色判定没有依据。
+//    缺输入宁可不算，不可乐观 —— 宁可留白，也不要给一个看着能过的结论。
+const roiVerdict = (row) => {
+  const expected = row.preview?.expected;
+  const actual = row.actual_roi;
+  if (actual == null || expected == null) return null;
+  const breakEven = expected.break_even_roi;
+  if (breakEven == null) return null;
+  // 用**表上显示的那个**建议 ROI（封顶后）做比较：运营看到什么就按什么判。
+  // 封顶后仍达不到才叫"未达目标"；封顶前达不到是"广告空间不足"，那是另一条提示。
+  const suggested = expected.suggested_roi_clamped ?? expected.suggested_roi;
+  if (Number(actual) < Number(breakEven)) {
+    return { type: "danger", label: "亏损投放", level: "red" };
+  }
+  if (suggested != null && Number(actual) >= Number(suggested)) {
+    return { type: "success", label: "达标", level: "green" };
+  }
+  return { type: "warning", label: "有利润但未达财务目标", level: "yellow" };
+};
+const targetRoiBelowBreakEven = (row) => {
+  const breakEven = row.preview?.expected?.break_even_roi;
+  if (row.target_roi == null || breakEven == null) return false;
+  return Number(row.target_roi) < Number(breakEven);
+};
+// 目标 ROI 的 tooltip：把这个数「意味着什么」翻译给运营
+const targetRoiTooltip = (row) => {
+  const lines = ["运营打算投到的 ROI（商家实收 ÷ 广告费，与平台后台同一把标尺）"];
+  const breakEven = row.preview?.expected?.break_even_roi;
+  if (row.target_roi == null) {
+    lines.push("留空 = 不参与保本 ROI 护栏");
+    return lines.join("\n");
+  }
+  if (breakEven == null) {
+    lines.push("成本不全，保本 ROI 算不出来 ⇒ 护栏按「成本不全」处理");
+    return lines.join("\n");
+  }
+  if (targetRoiBelowBreakEven(row)) {
+    lines.push(`低于保本线 ${roiDisplay(breakEven)}：这一单投了就是亏`);
+  } else {
+    lines.push(`保本线 ${roiDisplay(breakEven)}：不低于它，单均广告费才不超单均广告前利润`);
+  }
+  return lines.join("\n");
+};
+// 平台报告 ROI 的 tooltip：三色判定 + **归因警示**
+//
+// ⚠️ 归因警示是必须的（上游设计稿 §2.5⑧）：GMV Max 之类的归因窗口把自然流量和
+//    达人带货也算进归因 GMV ⇒ 「达标」很可能只是归因虚高。
+//    商品中心**目前拿不到归因放大系数**（没有平台广告数据源），
+//    所以这里**只给警示文案、不给数字** —— 给不出数字时宁可不给，不能编。
+const roiVerdictTooltip = (row) => {
+  const verdict = roiVerdict(row);
+  const expected = row.preview?.expected;
+  const lines = [];
+  if (row.actual_roi == null) {
+    lines.push("运营从平台后台抄回来的这次投放实际 ROI");
+    lines.push("留空 = 这次没有记录投放结果");
+    return lines.join("\n");
+  }
+  if (!verdict) {
+    lines.push("成本不全，保本 ROI 算不出来 ⇒ 不做判定（缺输入宁可不算）");
+    return lines.join("\n");
+  }
+  lines.push(
+    verdict.level === "red"
+      ? `平台报告 ROI ${roiDisplay(row.actual_roi)} 低于保本线 ${roiDisplay(expected.break_even_roi)}：这次投放是亏的`
+      : verdict.level === "green"
+        ? `平台报告 ROI ${roiDisplay(row.actual_roi)} 已达到建议 ROI ${roiDisplay(expected.suggested_roi_clamped ?? expected.suggested_roi)}`
+        : `平台报告 ROI ${roiDisplay(row.actual_roi)}：有利润，但没达到建议 ROI ${roiDisplay(expected.suggested_roi_clamped ?? expected.suggested_roi)}`,
+  );
+  if (verdict.level === "green") {
+    lines.push("⚠ 达标归因可能虚高：平台归因窗口把自然流量和达人带货也算进归因 GMV");
+    lines.push("商品中心目前拿不到归因放大系数（没有平台广告数据源），所以只提示、不给数字");
+    lines.push("投多少不亏，以本表「保本ROI」为准");
   }
   return lines.join("\n");
 };

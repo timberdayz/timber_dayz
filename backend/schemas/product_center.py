@@ -888,6 +888,11 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     competitor_price: Optional[float] = None
     seller_coupon_amount: Optional[float] = None
     expected_ad_rate: Optional[float] = None
+    # --- ROI 投放输入（阶段 2.2）---
+    # 目标 ROI：运营的当前意图，存经营档案 ⇒ 列表回带供前端预填。
+    target_roi: Optional[float] = None
+    # 来源标记：'user_input' / 'migrated_from_legacy_rate'（阶段 3 反解）。
+    target_roi_source: Optional[str] = None
     # --- ROI 广告投放配置（阶段 1）---
     # 安全边际：建议 ROI = 保本ROI × (1 + roi_safety_margin)，默认 0.20
     roi_safety_margin: Optional[float] = None
