@@ -877,7 +877,7 @@ TikTok 6 个在营店 **0/6 有**（TikTok 的锚点只能是别名表）。
 | WP-1 采集侧单一源头 | 删 `shopee_shop_id_resolver.py`，新建 `shop_account_identity_service.py`，改 6 处调用点 | **完成**（守护测试 11 passed） |
 | WP-2 入库收敛 | 新建 `backend/services/shop_identity_reconciliation_service.py`，接入 `data_ingestion_service.py` | **完成**（守护测试 25 passed） |
 | WP-3 门禁兜底 | `shop_identity_gate_service.py` 新增 `evaluate_row_identity_consistency()`（收敛后复核） | **完成** |
-| WP-4 同步放大器 | `cloud_b_class_sync_service.py`：①``shop_id`` 与 ``raw_data`` **绑定**（同进同退，不再一个更新一个不动）；②upsert 前拦截「列与 raw_data 不同源」的行，不写云端并计数 | **完成**（守护测试 12 passed） |
+| WP-4 同步放大器 | `cloud_b_class_sync_service.py`：①``shop_id`` 与 ``raw_data`` **绑定**（同进同退，不再一个更新一个不动）；②upsert 前拦截「列与 raw_data 不同源」的行，不写云端并计数 | **完成**（守护测试 9 passed） |
 | WP-5 冲突告警 | 看板新增 ``platform_shop_id_conflict`` 原因码 + **查询期诊断**（直查事实行，不改 MV） | **完成**（守护测试 5 passed；开发库实测检出 18 行 / 8,409 UV） |
 | WP-6 历史订正 | `20261117_remediate_shopee_row_identity_conflicts.py` | **完成**（行为守护测试 9 passed + 单事务实测通过） |
 | WP-7 别名补录 | `20261116_add_tiktok_export_store_name_aliases.py`（TikTok 6 条导出店名别名） | **完成**（守护测试 12 passed + 单事务实测通过） |
@@ -917,8 +917,9 @@ TikTok 6 个在营店 **0/6 有**（TikTok 的锚点只能是别名表）。
 | 迁移行为守护测试 | `backend/tests/data_pipeline/test_shopee_row_identity_remediation.py` **9 passed**（隔离库自造数据，订正方向 / 只改身份字段 / data_hash 不变 / 幂等 / 回滚 / 停用店不动 / 未登记编号不动） |
 | 别名迁移守护测试 | `backend/tests/data_pipeline/test_tiktok_export_store_name_aliases.py` **12 passed** |
 | 采集侧守护测试 | `backend/tests/test_shop_account_identity_service.py` **11 passed** |
-| 同步侧守护测试 | `backend/tests/test_cloud_sync_identity_guard.py` **12 passed** |
+| 同步侧守护测试 | `backend/tests/test_cloud_sync_identity_guard.py` **9 passed** |
 | 看板告警守护测试 | `backend/tests/test_dashboard_identity_conflict_alert.py` **5 passed** |
+| **本次新增 + 改动的 9 个测试文件** | 全量回归里 **108/108 全过、零失败**（含 4 个被适配的既有测试文件 25+7+5+5 = 42 例） |
 | 看板诊断实测 | 开发库上精确检出 **18 行 / 8,409 UV** 的编号与标签打架 —— 与事故影响面完全吻合 |
 | 两个迁移单事务实测 | unknown 行 951 → **213**（剩余 213 = 停用店，8 UV，属预期）、ambiguous 18 → **0**、跨账号认领 1,946 → **0**；总行数/总 UV 不变；重跑幂等；回滚后与改动前完全一致 |
 | 架构 SSOT 校验 | `scripts/verify_architecture_ssot.py` 3 PASS / 1 FAIL —— 唯一 FAIL 是 §12 已记录的**既有违规**（2 个未归档 legacy 文件），与本次改动无关 |
