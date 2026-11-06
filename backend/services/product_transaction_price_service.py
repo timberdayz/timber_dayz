@@ -46,7 +46,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Iterable, Optional
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -70,6 +70,12 @@ _INCLUDED_ORDER_STATUSES = ("已完成", "已发货")
 #: ⚠️ ``::`` 的优先级高于 ``->>``，取 raw_data 的值**必须**加括号，
 #:    否则 PostgreSQL 会解析成 ``raw_data ->> ('key'::numeric)`` 直接报错。
 #: ⚠️ 金额字段可能是空串或非数字（导出里常见），用正则守卫后再转 numeric。
+#: ⚠️ 列表参数（订单状态、SKU 集合）一律用 SQLAlchemy 的 ``expanding=True``
+#:    绑定渲染成 ``IN ('已完成', '已发货')``。
+#:    **不要写成 ``IN :param``**：PostgreSQL 的语法要求 ``IN`` 后面必须跟
+#:    括号里的表达式列表，``IN $1`` 直接是语法错误（asyncpg 下必炸），
+#:    而 ``= ANY($1)`` 虽然语法对，但参数类型在 ``text()`` 里无法推断，
+#:    换个驱动/后端就可能变成另一种错。``expanding`` 是唯一两种都安全的写法。
 _BAND_SQL = """
 WITH b AS (
     SELECT source_key, sku_id
@@ -95,19 +101,21 @@ base AS (
      WHERE o.product_quantity > 0
        AND COALESCE(o.raw_data->>'订单状态', '') IN :statuses
 ),
-window AS (
+-- ⚠️ CTE 不能叫 ``window``：那是 PostgreSQL 的保留字（窗口函数帧的关键字），
+--    拿来当 CTE 名会直接报 "syntax error at or near window"。
+date_window AS (
     SELECT max(metric_date) AS max_date FROM base
 ),
 selected AS (
     SELECT base.sku_id, base.paid_cny, base.qty
-      FROM base, window
-     WHERE window.max_date IS NOT NULL
-       AND base.metric_date >= window.max_date - (:lookback_days || ' days')::interval
+      FROM base, date_window
+     WHERE date_window.max_date IS NOT NULL
+       AND base.metric_date >= date_window.max_date - make_interval(days => :lookback_days)
 )
 SELECT sku_id,
        count(*) AS sample_size,
        percentile_cont(0.5) WITHIN GROUP (ORDER BY paid_cny / qty) AS median_price,
-       (SELECT max_date FROM window) AS window_end
+       (SELECT max_date FROM date_window) AS window_end
   FROM selected
  WHERE paid_cny IS NOT NULL AND paid_cny > 0
  GROUP BY sku_id
@@ -133,18 +141,25 @@ async def load_transaction_price_bands(
     逐个 SKU 调用会重复付这条成本。
     """
     ids = [int(value) for value in (sku_ids or []) if value is not None]
-    sku_filter = ""
     params: dict = {
         "lookback_days": int(lookback_days),
-        "statuses": tuple(_INCLUDED_ORDER_STATUSES),
+        "statuses": list(_INCLUDED_ORDER_STATUSES),
     }
+    # ⚠️ expanding=True：把列表渲染成 `IN ('已完成', '已发货')` 这种字面量列表。
+    #    见 _BAND_SQL 上面的说明 —— 写成 `IN :statuses` 在 PostgreSQL 上是语法错误。
+    statement = text(_BAND_SQL.format(sku_filter="")).bindparams(
+        bindparam("statuses", expanding=True)
+    )
     if ids:
-        sku_filter = "AND sku_id = ANY(:sku_ids)"
-        params["sku_ids"] = tuple(ids)
+        statement = text(
+            _BAND_SQL.format(sku_filter="AND sku_id IN :sku_ids")
+        ).bindparams(
+            bindparam("statuses", expanding=True),
+            bindparam("sku_ids", expanding=True),
+        )
+        params["sku_ids"] = ids
 
-    rows = (
-        await db.execute(text(_BAND_SQL.format(sku_filter=sku_filter)), params)
-    ).mappings().all()
+    rows = (await db.execute(statement, params)).mappings().all()
 
     bands: dict[int, dict] = {}
     for row in rows:
@@ -159,7 +174,12 @@ async def load_transaction_price_bands(
         if window_end is not None:
             window_start = window_end - timedelta(days=lookback_days)
         bands[int(row["sku_id"])] = {
-            "median_price": Decimal(median) if not isinstance(median, Decimal) else median,
+            # ⚠️ ``percentile_cont`` 返回 double precision，直接 ``Decimal(float)`` 会把
+            #    二进制误差原样带进来（126.2 ⇒ 126.2000000000000028421709430404007...），
+            #    页面会显示一串天书。走 ``str()`` 再转，十进制表示就干净了。
+            "median_price": (
+                median if isinstance(median, Decimal) else Decimal(str(median))
+            ),
             "sample_size": sample_size,
             "window_start": window_start,
             "window_end": window_end,

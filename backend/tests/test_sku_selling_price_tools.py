@@ -759,3 +759,125 @@ def test_source_enum_migration_cleans_history_and_backfills_confirmation(isolate
     for row in rows:
         assert row[2] is not None, "有基准售价就必须有确认日期"
         assert row[3] is not None, "被清洗过的行应记录清洗时间"
+
+
+# ---------------------------------------------------------------------------
+# 成交价带 SQL 必须在真 PostgreSQL 上跑通（这条测试是被两次真炸出来的）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_transaction_price_band_sql_runs_on_postgres(pg_session):
+    """成交价带的 SQL 必须能在 PostgreSQL 上跑通，并给出正确的中位数。
+
+    ⚠️ 这条测试是被两次真炸出来的：
+
+    ① SQL 写成 ``IN :statuses`` —— PostgreSQL 的语法要求 ``IN`` 后面必须跟
+       括号里的表达式列表，``IN $1`` 是**语法错误**（asyncpg 下必炸）。
+    ② CTE 命名为 ``window`` —— 那是 PostgreSQL 的保留字（窗口函数帧的关键字），
+       拿来当 CTE 名直接语法错误。
+
+    两次都**不是单测能发现的**：单测只测了纯函数
+    ``assess_selling_price_deviation``，从没让这条 SQL 落到真库上。
+    ⇒ 这里用真实的 PostgreSQL（asyncpg，与生产同驱动）跑一遍，把缺口堵上。
+    """
+    from modules.core.db.schema_parts.dimensions import BridgeErpSkuKey, DimErpSku
+    from backend.services.product_transaction_price_service import (
+        load_transaction_price_bands,
+    )
+
+    await pg_session.execute(text('CREATE SCHEMA IF NOT EXISTS "semantic"'))
+    await pg_session.execute(
+        text(
+            """
+            CREATE TABLE semantic.fact_orders_atomic (
+                id integer PRIMARY KEY,
+                metric_date date,
+                product_sku text,
+                product_quantity numeric,
+                raw_data jsonb
+            )
+            """
+        )
+    )
+
+    sku = DimErpSku(
+        sku_id=9001,
+        sku_key="PG-BAND-001",
+        reference_selling_price=100.0,
+        selling_price_source="manual",
+        selling_price_confirmed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    pg_session.add(sku)
+    await pg_session.flush()
+    pg_session.add(
+        BridgeErpSkuKey(
+            source_system="miaoshou",
+            source_platform="miaoshou",
+            source_key_type="product_sku",
+            source_key="KEY-1",
+            sku_id=9001,
+            effective_from=date(2025, 1, 1),
+            active=True,
+        )
+    )
+    await pg_session.flush()
+
+    # 五笔成交：单价 40 / 60 / 80 / 100 / 100（最后一笔是 2 件 200 元）
+    # 外加一笔「已关闭」，它不该被算进来。
+    await pg_session.execute(
+        text(
+            """
+            INSERT INTO semantic.fact_orders_atomic
+                (id, metric_date, product_sku, product_quantity, raw_data)
+            VALUES
+                (1, DATE '2026-01-10', 'KEY-1', 1, '{"订单状态": "已完成", "买家支付(RMB)": "40.00"}'::jsonb),
+                (2, DATE '2026-01-11', 'KEY-1', 1, '{"订单状态": "已完成", "买家支付(RMB)": "60.00"}'::jsonb),
+                (3, DATE '2026-01-12', 'KEY-1', 1, '{"订单状态": "已完成", "买家支付(RMB)": "80.00"}'::jsonb),
+                (4, DATE '2026-01-13', 'KEY-1', 1, '{"订单状态": "已发货", "买家支付(RMB)": "100.00"}'::jsonb),
+                (5, DATE '2026-01-14', 'KEY-1', 2, '{"订单状态": "已完成", "买家支付(RMB)": "200.00"}'::jsonb),
+                (6, DATE '2026-01-15', 'KEY-1', 1, '{"订单状态": "已关闭", "买家支付(RMB)": "999.00"}'::jsonb)
+            """
+        )
+    )
+
+    bands = await load_transaction_price_bands(pg_session, [9001])
+
+    assert 9001 in bands, "成交价带算不出来 —— SQL 在真库上没跑通"
+    band = bands[9001]
+    assert band["sample_size"] == 5, "已关闭的订单不该被算进来"
+    # 单价 40 / 60 / 80 / 100 / 100 ⇒ 中位数 80（落在真实数据点上，不靠插值）
+    assert abs(float(band["median_price"]) - 80.0) < 0.01, band["median_price"]
+    assert band["window_end"] == date(2026, 1, 14), band["window_end"]
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_transaction_price_band_reports_missing_as_unavailable(pg_session):
+    """算不出成交价 ⇒ 结果里**没有这个 SKU**（调用方必须理解成「算不出」）。
+
+    「没出现」不等于「没有偏差」—— 这个区分是偏差校验存在的意义。
+    """
+    from backend.services.product_transaction_price_service import (
+        load_transaction_price_bands,
+    )
+
+    await pg_session.execute(text('CREATE SCHEMA IF NOT EXISTS "semantic"'))
+    await pg_session.execute(
+        text(
+            """
+            CREATE TABLE semantic.fact_orders_atomic (
+                id integer PRIMARY KEY,
+                metric_date date,
+                product_sku text,
+                product_quantity numeric,
+                raw_data jsonb
+            )
+            """
+        )
+    )
+
+    bands = await load_transaction_price_bands(pg_session, [999999])
+
+    assert 999999 not in bands, "没有成交记录时不应给出成交价带"
