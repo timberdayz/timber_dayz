@@ -25,3 +25,8 @@
 | labor_efficiency | no | no | no | no |
 | roas | no | no | no | blocked |
 | mer | no | no | no | blocked |
+| break_even_roi | no | conditional | no | conditional |
+| suggested_roi | no | conditional | no | conditional |
+| advertising_contribution_margin_rate | conditional | conditional | no | conditional |
+| target_roi | no | no | no | conditional |
+| platform_reported_roi | no | conditional | no | conditional |
