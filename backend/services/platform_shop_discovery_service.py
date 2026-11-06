@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,40 @@ from modules.core.db import (
     ShopAccount,
     ShopAccountAlias,
     ShopAccountCapability,
+)
+
+# ---------------------------------------------------------------------------
+# 探测状态机
+# ---------------------------------------------------------------------------
+#
+# ``core.platform_shop_discoveries.status`` 是这套系统里**唯一**记录
+# 「采集时看到的店铺编号到底指向谁」的地方。状态写错 ⇒ 运营以为一切正常,
+# 实际数据已经带着错的编号落盘了。
+#
+# 状态语义:
+#
+# - ``detected_single_bound``      探测值 == 目标账号当前编号(确认通过)
+# - ``stale_url``                  探测值 != 目标账号当前编号, 且目标账号**有**编号
+#                                  (URL 还停在别的店 —— 切店尚未生效)
+# - ``conflict_detected``          探测值被**另一个**账号占着
+# - ``unmatched_platform_shop_id`` 探测值**对不上任何账号**, 且目标账号自己
+#                                  还没有平台编号(无从判断绑定关系)
+#
+# 最后这个状态是 H4 的正解: 以前「对不上任何账号」会被归进
+# ``detected_single_bound`` —— **看起来像成功**, 实际是彻底没绑上。
+
+PLATFORM_SHOP_DISCOVERY_STATUS_DETECTED_SINGLE_BOUND = "detected_single_bound"
+PLATFORM_SHOP_DISCOVERY_STATUS_STALE_URL = "stale_url"
+PLATFORM_SHOP_DISCOVERY_STATUS_CONFLICT_DETECTED = "conflict_detected"
+PLATFORM_SHOP_DISCOVERY_STATUS_UNMATCHED = "unmatched_platform_shop_id"
+
+#: 需要人看一眼的状态 —— 这些不是「成功」, 是「采集期就发现身份对不上」。
+PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES: frozenset[str] = frozenset(
+    {
+        PLATFORM_SHOP_DISCOVERY_STATUS_STALE_URL,
+        PLATFORM_SHOP_DISCOVERY_STATUS_CONFLICT_DETECTED,
+        PLATFORM_SHOP_DISCOVERY_STATUS_UNMATCHED,
+    }
 )
 
 
@@ -206,10 +241,12 @@ class PlatformShopDiscoveryService:
 
         状态语义
         --------
-        - ``detected_single_bound``：探测值与目标账号当前编号一致（确认通过）
-        - ``stale_url``            ：探测值与目标账号当前编号**不一致**
+        - ``detected_single_bound``      ：探测值与目标账号当前编号一致（确认通过）
+        - ``stale_url``                  ：探测值与目标账号当前编号**不一致**
           （URL 还停在别的店 —— 切店尚未生效）
-        - ``conflict_detected``    ：探测值被**另一个**账号占着
+        - ``conflict_detected``          ：探测值被**另一个**账号占着
+        - ``unmatched_platform_shop_id`` ：探测值**对不上任何账号**，且目标账号
+          自己还没有平台编号 ⇒ 无从判断绑定关系，**不算成功**
         """
         if not detected_platform_shop_id:
             return None
@@ -233,11 +270,17 @@ class PlatformShopDiscoveryService:
         )
 
         if decision == "conflict":
-            status = "conflict_detected"
+            status = PLATFORM_SHOP_DISCOVERY_STATUS_CONFLICT_DETECTED
         elif current and current != detected:
-            status = "stale_url"
+            status = PLATFORM_SHOP_DISCOVERY_STATUS_STALE_URL
+        elif not current:
+            # 目标账号自己还没有平台编号 ⇒ 探测值既不是本账号的,
+            # 也没被别的账号占着(否则上面就是 conflict)。
+            # 这种「什么都没对上」以前会被写成 detected_single_bound,
+            # 看起来像成功 —— 实际是压根没绑上, 必须显式标出来。
+            status = PLATFORM_SHOP_DISCOVERY_STATUS_UNMATCHED
         else:
-            status = "detected_single_bound"
+            status = PLATFORM_SHOP_DISCOVERY_STATUS_DETECTED_SINGLE_BOUND
 
         discovery = PlatformShopDiscovery(
             platform=platform,
@@ -504,6 +547,116 @@ class PlatformShopDiscoveryService:
         await db.commit()
         await db.refresh(discovery)
         return discovery
+
+    # ------------------------------------------------------------------
+    # 可见性: 让「采集期就发现身份对不上」这件事能被看见
+    # ------------------------------------------------------------------
+
+    async def list_platform_shop_discoveries(
+        self,
+        db: AsyncSession,
+        *,
+        statuses: Sequence[str] | None = None,
+        only_issues: bool = False,
+    ) -> list[PlatformShopDiscovery]:
+        """按状态过滤列出探测记录。
+
+        Args:
+            statuses: 只保留这些状态(大小写不敏感); ``None`` 表示不过滤
+            only_issues: 只保留「需要人看一眼」的状态
+                (``PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES``)
+        """
+        stmt = select(PlatformShopDiscovery).order_by(PlatformShopDiscovery.created_at.desc())
+
+        effective = {str(s).strip() for s in (statuses or []) if str(s).strip()}
+        if only_issues:
+            effective |= set(PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES)
+        if effective:
+            stmt = stmt.where(PlatformShopDiscovery.status.in_(sorted(effective)))
+
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def summarize_platform_shop_discovery_issues(
+        self,
+        db: AsyncSession,
+        *,
+        platform: str | None = None,
+    ) -> dict[str, object]:
+        """汇总「采集期身份对不上」的探测记录。
+
+        返回:
+
+        - ``total``        探测记录总数
+        - ``issue_count``  问题态记录数(``stale_url`` / ``conflict_detected`` /
+          ``unmatched_platform_shop_id``)
+        - ``by_status``    各状态计数
+        - ``issues``       问题态明细(轻量字段, 供告警面板直接展示)
+
+        这是「让问题下次自己冒出来」的落点: 采集期探测到的身份冲突,
+        比等数据落错之后再从看板上倒查**早一个数量级**。
+        """
+        count_stmt = select(
+            PlatformShopDiscovery.status,
+            func.count(),
+        ).group_by(PlatformShopDiscovery.status)
+        issue_stmt = select(
+            PlatformShopDiscovery.id,
+            PlatformShopDiscovery.platform,
+            PlatformShopDiscovery.main_account_id,
+            PlatformShopDiscovery.detected_store_name,
+            PlatformShopDiscovery.detected_platform_shop_id,
+            PlatformShopDiscovery.candidate_shop_account_ids,
+            PlatformShopDiscovery.status,
+            PlatformShopDiscovery.created_at,
+        ).where(
+            PlatformShopDiscovery.status.in_(sorted(PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES))
+        )
+
+        if platform:
+            normalized_platform = str(platform).strip().lower()
+            if normalized_platform:
+                count_stmt = count_stmt.where(
+                    func.lower(PlatformShopDiscovery.platform) == normalized_platform
+                )
+                issue_stmt = issue_stmt.where(
+                    func.lower(PlatformShopDiscovery.platform) == normalized_platform
+                )
+
+        by_status = {
+            str(status): int(count)
+            for status, count in (await db.execute(count_stmt)).all()
+        }
+        total = sum(by_status.values())
+        issue_count = sum(
+            count
+            for status, count in by_status.items()
+            if status in PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES
+        )
+
+        issue_rows = (
+            await db.execute(issue_stmt.order_by(PlatformShopDiscovery.created_at.desc()))
+        ).all()
+        issues = [
+            {
+                "id": row.id,
+                "platform": row.platform,
+                "main_account_id": row.main_account_id,
+                "detected_store_name": row.detected_store_name,
+                "detected_platform_shop_id": row.detected_platform_shop_id,
+                "candidate_shop_account_ids": row.candidate_shop_account_ids or [],
+                "status": row.status,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in issue_rows
+        ]
+
+        return {
+            "total": total,
+            "issue_count": issue_count,
+            "by_status": by_status,
+            "issues": issues,
+        }
 
 
 _platform_shop_discovery_service: PlatformShopDiscoveryService | None = None

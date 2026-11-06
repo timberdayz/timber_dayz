@@ -707,3 +707,117 @@ P0-2 / P0-2b / P0-3  历史数据回填与清理
 2. **（保留）`b_class` 事实层的数据修正需要同意在开发库先行验证、生产择时执行**（低峰 + 备份）—— 若后续决定也修历史数据。
 
 > 其余部分（缺陷 1 守卫、入库硬门禁、锚点优先级倒置、候选池补过滤、守护测试）均为**纯技术修复**，不依赖业务决策，可直接进入实施计划。
+
+---
+
+## 12. 实施记录（2026-11-06 落地情况）
+
+> 落地方式：独立 git worktree `feature/shop-identity-alignment`，与主仓隔离；完整验证通过后合并回 main。
+
+### 12.1 逐项状态
+
+| 项 | 状态 | 落点 | 关键结论 |
+|---|---|---|---|
+| **P0-1** 采集守卫 | ✅ 已提交（`e18e2c75`） | `backend/services/platform_shop_discovery_service.py` | 运行时探测**只记录证据、不改主数据**；三个会改主数据的入口统一走具名归属守卫 `_guard_platform_shop_id_binding()` |
+| **P2-1** 入库硬门禁 | ✅ 已落地 | 新增 `backend/services/shop_identity_gate_service.py`；`data_ingestion_service` / `data_sync_service` / `data_sync_file_state_service` / `catalog_scanner` / `field_mapping_status` | 缺 `shop_account_id` 的店铺数据**在盖戳前拒收**，落 `needs_shop` 终态（**不落 failed**：重试必然再失败，不是可重试故障） |
+| **P1-1** 锚点优先级倒置 | ✅ 已落地 | `sql/semantic/shop_identity_resolution_candidates.sql` + `..._v2_mv.sql`（正本与副本**指纹一致**） | `shop_account_id` 升 priority 1、`platform_shop_id` 降 2；**计数口径一字未动**（歧义行仍落 `unknown`） |
+| **P1-2** 候选池补过滤 | ✅ 已落地 | 同上 | `enabled IS TRUE` + `business_role='operating_store'` —— **补的是系统其它环节都有的过滤**，不是新口径 |
+| **P2-2** 探测状态机 | ✅ 已落地 | `platform_shop_discovery_service.py` / `platform_shop_discoveries.py` / `postgresql_dashboard_service.py` | 见 §12.2 |
+| **P2-3** 看板拆因 | ✅ 已落地 | `backend/services/postgresql_dashboard_service.py` | `warning_breakdown` 按 `unmatched` / `ambiguous` / `conflict` / `other` 分组，各给 UV / PV / 订单数；`warning_count` 改为**真实总数**（列表仍只展示前 50 条） |
+| **P2-4** 守护测试 | ✅ 已落地 | 新增 3 个测试文件 + 补齐既有守护 | 见 §12.3 |
+
+### 12.2 P2-2 探测状态机：补上的那个洞
+
+方案原文只说「status 增加 `conflict_detected` / `stale_url`」（已随 P0-1 落地）。实施时发现判定还有**第三个分支没覆盖**：
+
+> 账号自己**还没有**平台编号时，探测值谁都对不上 —— 以前会落进 `detected_single_bound`，
+> **看起来像成功**，实际是压根没绑上。
+
+开发库实测佐证：26 条探测记录里有 3 条（id 23 / 65 / 69）的 `detected_platform_shop_id` 对不上任何账号，状态却是 `detected_single_bound`。
+
+⇒ 新增状态 **`unmatched_platform_shop_id`**，并把状态判定与「问题态清单」收拢成**具名常量**（看板与列表引用同一份，避免两边漂移）。
+
+可见性落在两处：
+
+1. **列表层**：`GET /platform-shop-discoveries` 支持 `?status=a,b` 与 `?only_issues=true`；新增 `GET /platform-shop-discoveries/issues/summary`（问题态汇总）与 `GET /platform-shop-discoveries/statuses`（状态字典）。
+2. **看板层**：`get_business_overview_identity_health` 新增 `discovery_issues` 区块 —— 这是**第二层信号**：
+   - 语义层告警（`warning_count`）= **事后**信号：数据已经落错、已经进了看板；
+   - 采集期探测异常 = **事前**信号：这次采集读到的编号就对不上账号。
+   
+   只有事后信号 ⇒ 问题会反复出现。前端「店铺身份未对齐」告警文案把两层合并展示。
+
+### 12.3 守护测试补齐
+
+| 用例 | 落点 | 状态 |
+|---|---|---|
+| 探测到他人 ID 不得覆盖账号主数据 | `backend/tests/test_shop_platform_id_rebind_alias.py` | ✅ |
+| 三个改主数据入口共用同一守卫 | 同上（按**计数**断言） | ✅ |
+| 改名后旧店名仍能解析回原账号 | `backend/tests/test_shop_rename_flow.py` | ✅ 既有 |
+| 候选池不产生自别名 / 不跨账号认领 | `backend/tests/data_pipeline/test_shop_identity_candidate_anchor.py` | ✅ 新增 |
+| analytics 资产不得出现区域列 | `backend/tests/data_pipeline/test_shop_identity_resolution_sql.py` | ✅ 既有 |
+| unknown 按原因分组 | `backend/tests/data_pipeline/test_business_overview_module_consistency.py` | ✅ 新增（P2-3） |
+| 入库身份门禁（文件级 + 行级） | `backend/tests/test_shop_identity_ingest_gate.py` | ✅ 新建（14 条） |
+| 探测状态机（含 `unmatched`） | `backend/tests/test_platform_shop_discovery_state_machine.py` | ✅ 新建（14 条） |
+| 候选集锚点重锚（5 条不变量 A~E） | `backend/tests/data_pipeline/test_shop_identity_candidate_anchor.py` | ✅ 新建（13 条） |
+
+### 12.4 迁移：live 开发库实测
+
+迁移：`current_migrations/versions/20261112_realign_identity_candidates_anchor.py`
+（revision `current_schema_20261112_realign_identity_candidates_anchor`，down_revision 接在链头 `current_schema_20261111_...` 之后）。
+
+**upgrade → downgrade → upgrade 三段在 live 开发库跑通**，且每段都校验：
+
+- 正本与物化副本**内容指纹一致**（`md5` 逐行聚合）；
+- `semantic.fact_analytics_atomic_mv` / `mart.shop_day_kpi` / `api.business_overview_traffic_ranking_module` **一个没少**；
+- 验证脚本跑完**显式回滚**，开发库回到原状（候选集 138 行、alembic 版本未变）。
+
+三条**硬约束**（live 实测得出，勿回退）：
+
+1. 解析函数 `semantic.resolve_shop_identity` 是 `LANGUAGE sql`，被 `fact_inventory_snapshot` / `fact_products_atomic` / `fact_services_atomic` 依赖 ⇒ **不能 `DROP FUNCTION`**（报 `DependentObjectsStillExist`），必须先把函数体里的副本引用换成正本（`CREATE OR REPLACE` 保持 OID）。
+2. 两个原子层普通视图 `fact_orders_atomic` / `fact_analytics_atomic` **也**对副本有被跟踪依赖 ⇒ DROP 副本前必须先重建它们指向正本。
+3. `sql/semantic/analytics_atomic.sql` 顶部的 `DROP VIEW ... CASCADE` **会连带删掉 10 个对象** ⇒ 迁移里用 `_strip_cascade_drop()` 去掉该语句，改用 `CREATE OR REPLACE VIEW`（保持视图 OID）。
+
+### 12.5 口径影响实测（单事务内受控前后对比）
+
+| 项 | 结果 |
+|---|---|
+| 候选集规模 | 138 → **66** 行（shop_account_id 18 / platform_shop_id 12 / alias 18 / store_name 18） |
+| 自别名 | 2 → **0** |
+| A2 不变量（一个 identity_value 对应 >1 账号） | 仍为 **0** 行 |
+| analytics 月度 MV 的 18 行歧义行 | 归属**全部改对**（`shopee_my_xhkj1_local → shopee_ph_xh_home_local` 9 行 / `shopee_ph_xhkj11_local → shopee_sg_xhkj11_local` 9 行） |
+| 停用店流量 | 213 行（eternalbloom 152 + chenewei666 61）落 `unmatched` —— 合计仅 **8 UV** |
+| **看板 UV 变化** | **0**（`shop_id` 变化 213 行，UV 零变化）⇒ A6d 达成，看板数字零变化 |
+| orders 月度 MV（34085 行） | `shop_id` / `warning_code` / 金额**全部零变化** |
+
+### 12.6 验证结论（junit XML 前后 diff）
+
+按 `docs/guides/VERIFICATION_MATRIX.md`：回归判定用**失败用例集合的差**，不用失败计数。
+为了让「新增失败」判定可靠，**在 `main` 的对照 worktree 上用同一份文件清单跑了一遍 before**，
+再与本分支的 after 逐组对比。
+
+| 组 | 文件范围 | before | after | 新增失败(回归) | 既有失败(两边一致) | 新增用例 |
+|---|---|---|---|---|---|---|
+| A | 候选集 / 盖戳 / 改名 / 采集守卫 / 前端单测 | 113 例 / 1 失败 | 163 例 / 1 失败 | **0** | 1 | 59 |
+| B | 语义层 PG 链路 + 看板模块（testcontainers） | 125 例 / 1 失败 | 130 例 / 1 失败 | **0** | 1 | 5 |
+| C | 受影响的其它测试文件（数据同步 / 扫描器 / 探测 API 等） | 138 例 / 2 失败 | 142 例 / 2 失败 | **0** | 2 | 12 |
+
+**新增失败总数 = 0** ⇒ 零回归。
+
+3 个既有失败（**在本分支与 main 上表现完全一致**，与本次改动无关）：
+
+| 用例 | 现象 |
+|---|---|
+| `test_business_overview_frontend_units::test_business_overview_frontend_expense_tooltip_includes_labor_cost` | 断言 `人力费用` 字样，Vue 里没有（文案口径问题） |
+| `test_dashboard_router_switch::test_switched_app_serves_real_postgresql_dashboard_routes` | comparison 端点 500（`:443`） |
+| `test_data_sync_governance_status_consistency::test_governance_detailed_coverage_skips_temp_development_sample_files` | `IndexError`（临时开发样例文件） |
+
+另有 `scripts/verify_architecture_ssot.py` 报 1 项既有违规（2 个未归档 legacy 文件），**main 上完全相同**，与本次改动无关。
+
+#### 落地过程中被守护测试抓出来、并已修掉的问题
+
+| 问题 | 根因 | 处置 |
+|---|---|---|
+| PG 组 2 条用例 `column sa.enabled does not exist` | 候选池加了 `enabled` / `business_role` 过滤，但 **6 处测试桩的 `core.shop_accounts` 表没这两列**（真实表本来就有） | 补齐 6 处桩表列定义（带生产同款默认值） |
+| 迁移守护测试 2 条误判 | 断言去源码里找 `CASCADE` / `DROP VIEW` 字样，把**解释性 docstring**当成了执行 | 改成**行为断言**：把真实资产喂给迁移的 `_strip_cascade_drop()`，看结果里还有没有 `DROP VIEW` / `CASCADE` |
+
+

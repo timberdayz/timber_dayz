@@ -81,6 +81,16 @@ async def auth_contract_client():
             },
         ),
         (
+            "get",
+            "/api/platform-shop-discoveries/issues/summary",
+            None,
+        ),
+        (
+            "get",
+            "/api/platform-shop-discoveries/statuses",
+            None,
+        ),
+        (
             "post",
             "/api/platform-shop-discoveries/1/confirm",
             {"shop_account_id": "shop-1"},
@@ -181,6 +191,16 @@ async def test_high_risk_admin_routes_require_authentication(
                 "store_name": "Auth Check Shop",
                 "enabled": True,
             },
+        ),
+        (
+            "get",
+            "/api/platform-shop-discoveries/issues/summary",
+            None,
+        ),
+        (
+            "get",
+            "/api/platform-shop-discoveries/statuses",
+            None,
         ),
         (
             "post",

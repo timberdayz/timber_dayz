@@ -33,6 +33,67 @@ def _to_optional_float(value: Any) -> float | None:
     return float(value)
 
 
+# ── 身份告警的原因归类（P2-3）────────────────────────────────────────
+#
+# 为什么要在**返回体里**就拆开
+# ------------------------------
+# 身份健康度原先把三类原因混在一个 ``warning_count`` 里:
+# ``identity_conflict`` / ``traffic_without_order_match_due_to_identity`` /
+# 行级的 ``identity_warning_code``。
+#
+# 混在一起会让排查方向跑偏 —— 实测 738 行 unknown 里 **93% 是 unmatched**
+# (TikTok 改名没留曾用名别名), 只有 7% 是 ambiguous; 而 conflict 又是另一回事
+# (同一个账号出现了多个 shop_id)。三者对应的处置完全不同:
+#   unmatched ⇒ 去补别名/账号绑定;  ambiguous ⇒ 去消歧;  conflict ⇒ 去查数据串了。
+#
+# 所以这里给出**按原因分组**的 UV / PV / 订单数, 让人一眼看出该查哪一头。
+IDENTITY_WARNING_REASONS = ("unmatched", "ambiguous", "conflict", "other")
+
+_IDENTITY_WARNING_REASON_BY_CODE = {
+    # 「认不出是哪家店」: 候选数 = 0
+    "unmatched_shop_label": "unmatched",
+    "missing_identity": "unmatched",
+    # 「有多家候选」: 候选数 > 1 —— 不猜, 落 unknown
+    "ambiguous_shop_label": "ambiguous",
+    # 「同一个账号出现了多个 shop_id」: 流量与订单对不上 / 账号被多个键认领
+    "identity_conflict": "conflict",
+    "traffic_without_order_match_due_to_identity": "conflict",
+}
+
+
+def _identity_warning_reason(warning_code: Any) -> str:
+    """把一条身份告警的 ``warning_code`` 归到三大原因之一(外加 other)。"""
+    code = str(warning_code or "").strip()
+    return _IDENTITY_WARNING_REASON_BY_CODE.get(code, "other")
+
+
+def _empty_identity_warning_breakdown() -> dict[str, dict[str, float]]:
+    return {
+        reason: {
+            "warning_count": 0,
+            "visitor_count": 0.0,
+            "page_views": 0.0,
+            "order_count": 0.0,
+        }
+        for reason in IDENTITY_WARNING_REASONS
+    }
+
+
+# ── 采集期的身份异常（P2-2）───────────────────────────────────────────
+#
+# 语义层告警是**事后**信号: 数据已经落错、已经进了看板。
+# 探测状态机是**事前**信号: 采集时读到的平台店铺编号就对不上账号了。
+#
+# 两层都要看 —— 事后信号告诉你「哪块数据不可信」, 事前信号告诉你
+# 「下一次采集还会继续错」。只留事后信号, 问题会反复出现。
+def _empty_discovery_issue_summary() -> dict[str, Any]:
+    return {
+        "issue_count": 0,
+        "by_status": {},
+        "issues": [],
+    }
+
+
 def _round_or_none(value: float | None, digits: int = 2) -> float | None:
     if value is None:
         return None
@@ -2322,6 +2383,85 @@ class PostgresqlDashboardService:
                 )
         return rank_traffic_rows(normalized_rows, dimension="pv")
 
+    async def _load_discovery_issue_summary(
+        self,
+        platform: str | None = None,
+    ) -> dict[str, Any]:
+        """采集期身份异常(探测状态机)—— 语义层告警之外的**第二层**信号。
+
+        语义层告警是事后信号(数据已经落错), 这里是事前信号(采集时读到的
+        平台店铺编号就对不上账号了)。两者都要有: 事后信号告诉你哪块数据
+        不可信, 事前信号告诉你下一次采集还会继续错。
+        """
+        from backend.services.platform_shop_discovery_service import (
+            PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES,
+        )
+
+        issue_statuses = sorted(PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES)
+        params: dict[str, Any] = {"issue_statuses": issue_statuses}
+        platform_clause = ""
+        if platform:
+            platform_clause = " AND lower(platform) = :platform"
+            params["platform"] = str(platform).strip().lower()
+
+        count_query = f"""
+            SELECT status, count(*)::int AS issue_count
+            FROM core.platform_shop_discoveries
+            WHERE status = ANY(CAST(:issue_statuses AS text[]))
+            {platform_clause}
+            GROUP BY status
+        """
+        detail_query = f"""
+            SELECT
+                id,
+                platform,
+                main_account_id,
+                detected_store_name,
+                detected_platform_shop_id,
+                candidate_shop_account_ids,
+                status,
+                created_at
+            FROM core.platform_shop_discoveries
+            WHERE status = ANY(CAST(:issue_statuses AS text[]))
+            {platform_clause}
+            ORDER BY created_at DESC
+            LIMIT 20
+        """
+
+        try:
+            count_rows = await self._fetch_rows(count_query, params)
+            detail_rows = await self._fetch_rows(detail_query, params)
+        except SQLAlchemyError:
+            # 表不存在 / 连接异常 ⇒ 这层信号拿不到, 但不能把整个身份健康度带崩
+            return _empty_discovery_issue_summary()
+
+        by_status = {
+            str(row.get("status")): int(row.get("issue_count") or 0)
+            for row in count_rows
+        }
+        issues = []
+        for row in detail_rows:
+            created_at = row.get("created_at")
+            issues.append(
+                {
+                    "id": row.get("id"),
+                    "platform": row.get("platform"),
+                    "main_account_id": row.get("main_account_id"),
+                    "detected_store_name": row.get("detected_store_name"),
+                    "detected_platform_shop_id": row.get("detected_platform_shop_id"),
+                    "candidate_shop_account_ids": row.get("candidate_shop_account_ids")
+                    or [],
+                    "status": row.get("status"),
+                    "created_at": created_at.isoformat() if created_at else None,
+                }
+            )
+
+        return {
+            "issue_count": sum(by_status.values()),
+            "by_status": by_status,
+            "issues": issues,
+        }
+
     async def get_business_overview_identity_health(
         self,
         granularity: str,
@@ -2330,7 +2470,13 @@ class PostgresqlDashboardService:
     ) -> dict[str, Any]:
         normalized_granularity = str(granularity or "").strip().lower()
         if normalized_granularity != "monthly":
-            return {"status": "ok", "warning_count": 0, "warnings": []}
+            return {
+                "status": "ok",
+                "warning_count": 0,
+                "warnings": [],
+                "warning_breakdown": _empty_identity_warning_breakdown(),
+                "discovery_issues": _empty_discovery_issue_summary(),
+            }
 
         period_key = self._business_overview_kpi_period_key(
             normalized_granularity,
@@ -2456,18 +2602,41 @@ class PostgresqlDashboardService:
             SELECT *
             FROM warnings
             ORDER BY warning_code, platform_code, shop_account_id NULLS LAST, shop_id NULLS LAST
-            LIMIT 50
         """
         try:
             rows = await self._fetch_rows(query, params)
         except ProgrammingError:
-            return {"status": "unavailable", "warning_count": 0, "warnings": []}
+            return {
+                "status": "unavailable",
+                "warning_count": 0,
+                "warnings": [],
+                "warning_breakdown": _empty_identity_warning_breakdown(),
+                "discovery_issues": _empty_discovery_issue_summary(),
+            }
 
         warnings = [dict(row) for row in rows]
+        breakdown = _empty_identity_warning_breakdown()
+        for warning in warnings:
+            reason = _identity_warning_reason(warning.get("warning_code"))
+            warning["warning_reason"] = reason
+            bucket = breakdown[reason]
+            bucket["warning_count"] += 1
+            for metric in ("visitor_count", "page_views", "order_count"):
+                value = _to_optional_float(warning.get(metric))
+                if value:
+                    bucket[metric] += value
+
+        warning_count = len(warnings)
+        discovery_issues = await self._load_discovery_issue_summary(platform)
         return {
-            "status": "warning" if warnings else "ok",
-            "warning_count": len(warnings),
-            "warnings": warnings,
+            "status": "warning" if warning_count else "ok",
+            "warning_count": warning_count,
+            # 列表只给前 50 条做展示, 但 ``warning_count`` 与
+            # ``warning_breakdown`` 统计的是**全部**告警 —— 截断只发生在展示层。
+            "warnings": warnings[:50],
+            "warning_breakdown": breakdown,
+            # 采集期(事前)信号: 与上面的语义层(事后)告警是两层, 不能互相替代。
+            "discovery_issues": discovery_issues,
         }
 
     async def get_business_overview_operational_metrics(

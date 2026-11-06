@@ -1278,11 +1278,20 @@ const businessOverviewDegradedAlert = computed(() => {
 
 const businessOverviewIdentityHealthAlert = computed(() => {
   const health = trafficRankingIdentityHealth.value
-  if (!health || health.status !== 'warning' || !health.warning_count) return null
+  if (!health) return null
+  // 两层信号:
+  //   warning_count    —— 语义层(事后): 数据已经落错、进了看板
+  //   discovery_issues —— 采集期(事前): 采集时读到的平台店铺编号就对不上账号
+  const semanticCount = Number(health.warning_count || 0)
+  const discoveryCount = Number(health.discovery_issues?.issue_count || 0)
+  if (!semanticCount && !discoveryCount) return null
+  const parts = []
+  if (semanticCount) parts.push(`发现 ${semanticCount} 个订单/流量店铺身份异常`)
+  if (discoveryCount) parts.push(`采集期探测到 ${discoveryCount} 次店铺身份异常`)
   return {
     title: '店铺身份未对齐',
     description:
-      `发现 ${health.warning_count} 个订单/流量店铺身份异常。` +
+      `${parts.join('；')}。` +
       '账号管理是权威来源，请检查店铺别名、平台店铺ID，并重新触发身份重算。'
   }
 })

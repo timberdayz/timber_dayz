@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.dependencies.auth import require_admin
@@ -12,6 +13,7 @@ from backend.schemas.platform_shop_discovery import (
     PlatformShopDiscoveryResponse,
 )
 from backend.services.platform_shop_discovery_service import (
+    PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES,
     get_platform_shop_discovery_service,
 )
 from modules.core.db import PlatformShopDiscovery
@@ -24,12 +26,54 @@ router = APIRouter(
 )
 
 
+def _parse_statuses(raw: Optional[str]) -> list[str]:
+    """把 ``?status=a,b,c`` 解析成状态列表(忽略空串)。"""
+    if not raw:
+        return []
+    return [part.strip() for part in str(raw).split(",") if part.strip()]
+
+
+@router.get("/issues/summary")
+async def summarize_platform_shop_discovery_issues(
+    platform: Optional[str] = Query(default=None),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """采集期身份异常的汇总 —— 给「店铺身份未对齐」告警面板用。
+
+    单独一个端点而不是把摘要塞进列表返回体: 列表返回的是**数组**,
+    塞元数据会破坏既有前端契约。
+    """
+    service = get_platform_shop_discovery_service()
+    return await service.summarize_platform_shop_discovery_issues(db, platform=platform)
+
+
+@router.get("/statuses")
+async def list_platform_shop_discovery_statuses():
+    """状态字典 —— 让前端/排查脚本知道有哪些状态、哪些算问题态。"""
+    return {
+        "issue_statuses": sorted(PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES),
+    }
+
+
 @router.get("", response_model=list[PlatformShopDiscoveryResponse])
-async def list_platform_shop_discoveries(db: AsyncSession = Depends(get_async_db)):
-    result = await db.execute(
-        select(PlatformShopDiscovery).order_by(PlatformShopDiscovery.created_at.desc())
+async def list_platform_shop_discoveries(
+    status: Optional[str] = Query(
+        default=None,
+        description="按状态过滤, 多个用逗号分隔(如 stale_url,conflict_detected)",
+    ),
+    only_issues: bool = Query(
+        default=False,
+        description="只返回采集期就发现身份对不上的记录",
+    ),
+    db: AsyncSession = Depends(get_async_db),
+):
+    service = get_platform_shop_discovery_service()
+    records = await service.list_platform_shop_discoveries(
+        db,
+        statuses=_parse_statuses(status),
+        only_issues=only_issues,
     )
-    return result.scalars().all()
+    return records
 
 
 @router.post("/{discovery_id}/confirm", response_model=PlatformShopDiscoveryResponse)
