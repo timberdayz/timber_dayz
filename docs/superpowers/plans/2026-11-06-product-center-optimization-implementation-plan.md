@@ -2062,6 +2062,30 @@ target_roi = 保本ROI ÷ s = (revenue ÷ pre_ad_profit) ÷ s
 | `semantic.fact_orders_atomic` | 38,607 行 | 订单原料在，缺的是别名映射 |
 | 飞书投影 | **生产是启用的**（`ops.feishu_projection_configs` 存在，181 条投影任务） | ⇒ **阶段 3 的飞书字段改名不能单独上**（飞书表列名是已建表的契约，只改代码会写入报 field validation failed）。必须与「飞书表列改名」同窗口做 —— **已知遗留** |
 
+#### E.8.1 生产采纳当前迁移链的可行性（2026-11 只读实测）
+
+生产要用 `scripts/run_current_schema_migrations.py` 采纳当前迁移链
+（它会先做只读的版本与 schema 指纹核对，通过后 stamp `current_schema_20260805` 再升到 head）。
+这条链上有一道**数据前置检查**：`current_schema_20261116_add_tiktok_export_store_name_aliases`
+要求 `core.shop_accounts` 里存在 6 个 TikTok 账号，且区域 / 在营 / `business_role='operating_store'`
+三项全对得上，否则 fail-closed 直接抛 RuntimeError。
+
+**生产实测：6/6 全部满足**（DAONE SG、DAWIE MY、Explorers PH、Flora MY、DAJU PH、HX Home SG，
+区域全对、全部在营、全部是经营店），且目标别名键在生产**一条都不存在**（无认领冲突）。
+⇒ **生产采纳当前迁移链时这一关能过，不需要先做别名补救。**
+
+⚠️ 但发版前的 `scripts/validate_migrations_fresh_db.py`（**建空库**跑全链）**在 main 上就已失败** ——
+空库里没有那 6 个账号 ⇒ 20261116 抛错 ⇒ 后面的迁移全被挡住。
+这是**别的域的既有缺陷**（`f25b0b01` 引入，不在本分支范围内），且只影响「空库校验」，
+不影响生产（有数据）。两条处置路径：
+1. 由店铺身份那条线（`feature/shop-identity-alias-remediation`）把该迁移改成
+   「账号不存在时跳过而不是拒绝」，让空库能从头建起；
+2. 或让空库校验脚本像本次验证那样，把前置数据先种进去。
+
+本分支已单独验证：越过 20261116 之后，本次新增的 3 条迁移
+（20261119 / 20261120 / 20261121）在**干净库上一次性 upgrade head 干净通过**，
+head 正确、`selling_price_source_cleaned_at` 在位、两条 CHECK 在位、4 个 ROI 列在位。
+
 ---
 
 ### E.9 提交与验证
