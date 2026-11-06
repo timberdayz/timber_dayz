@@ -602,7 +602,7 @@ d(利润)/dP = (1−s) − 1/R
 | B4 | SKU 列表无 status 过滤 | `list_skus:1195-1202` | 停用 SKU 与在售混排，工具栏无状态筛选器 |
 | B5 | 仓储规则按钮无权限门禁 | 后端 `_require_platform_fee_editor`（`:1888` / `:1941` / `:2000`），前端 4 个按钮（`ProductCenter.vue:516`、`:530`）全无门禁 | operator 可见可点 → 必得 403 |
 | B6 | 同步清单缺档位规则表 | `scripts/sync_product_center_to_cloud.py:38-55` 的 16 张表含 `dim_platforms` / `dim_erp_sku`，**唯独没有 `finance.sku_pricing_policies`** | 该表**没有任何外键**（不引用别的表，也没有别的表引用它）⇒ `TRUNCATE ... CASCADE` 不会清掉它，它自己也不在 INSERT 清单里 ⇒ **云端这张表永远停留在「从未被同步过」的状态**。两种后果都是静默失败：① 空表 → 全 SKU 落 `missing_pricing_policy` → **最低售价整体算不出来**、护栏同时失效；② 旧规则 → 云端按过期档位算出与本地不一致的底线，**表面看一切正常**（更隐蔽） |
-| **B7** | **Shopee 完全没有库龄档位规则** | 生产库 `finance.sku_pricing_policies` 共 4 条，`platform_basis` **全部为 `tiktok`**（源 `industry_benchmark_2026`，2026-11-07 生产库实测） | **Shopee 侧一条规则都没有** ⇒ Shopee 的 SKU 全部落进 `missing_pricing_policy` ⇒ **最低售价（底线）在 Shopee 上根本算不出来**。这比 B6 更根本：B6 修好只是"同步过去"，但**规则本身就不存在**。而目标 ROI 上限更高的恰恰是 Shopee（50 vs TikTok 20）⇒ **必须作为阶段 1 的前置任务补建规则**（档位值待拍板） |
+| **B7** | **底线计算的平台成本率取自「规则表的单一 basis 平台」，而不是 SKU 实际在卖的那个平台** | `product_pricing_query_service.py:49-50`：`basis = policy_rows[0]["platform_basis"]` → `platform = await db.get(DimPlatform, basis)`。规则是**公司级**的（`load_current_policies` 谓词只有 `status='active' AND effective_to IS NULL AND effective_from <= today`，**不按平台过滤** —— 这一点 Walter 已确认是对的），但**平台费率**却只从这一行的 `platform_basis` 取，而 4 条规则的 `platform_basis` 全是 `tiktok` | 生产实测：`other_cost_rate` TikTok **0.2727** vs Shopee **0.4165**；达人佣金 TikTok **6.06%** vs Shopee **1.11%**。⇒ **同一个 SKU 在 Shopee 和 TikTok 上算出的最低售价完全一样**。实测两个 Shopee 档案：底线被低估 **34.6%** 与 **74.3%**（59.29 应为 103.36，差 44 元）。方向是**偏低** ⇒ Shopee 商品按一个过松的底线放行，**存在真亏本的风险**。同一套系统里利润测算走的是「所选平台」费率（`product_center.py:2592-2597`），**底线与利润两边口径不一致** |
 
 ---
 
@@ -624,7 +624,7 @@ d(利润)/dP = (1−s) − 1/R
 | C7 成本不全时保本ROI 偏松 | **阶段 1** | 成本完整度守卫（硬前提） |
 | C8 飞书投影列名未同步 | **阶段 3** | 投影层术语同步（不改投影逻辑） |
 | B1–B3、B5、B6 | **阶段 0** | 纯代码修复，不动业务语义 |
-| **B7 Shopee 无档位规则** | **阶段 1 前置** | 补建 Shopee 的库龄档位规则；否则底线在 Shopee 上算不出来（2026-11-07 生产库实测） |
+| **B7 底线用单一 basis 平台的费率** | **阶段 1 前置** | 底线计算改为按 SKU 实际平台取 `dim_platforms` 费率（2026-11-07 生产库实测：Shopee 底线被低估 34.6%–74.3%） |
 | B4 SKU 列表无状态过滤 | **阶段 0** | 补状态筛选器 |
 | §5.3 销量不可知 | **阶段 1** | 免责提示随 ROI 列一起上（永久限制，非缺陷） |
 | §2.5⑧ 归因虚高 | **阶段 1（警示文案）+ 阶段 2（判定带警示）** | 拿不到归因放大系数前只给文案，不给数字（§12-9） |
