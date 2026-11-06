@@ -926,8 +926,6 @@ TikTok 6 个在营店 **0/6 有**（TikTok 的锚点只能是别名表）。
 
 
 > ⚠️ 迁移链注意事项：`20261116` 的 `down_revision` 目前指向 `current_schema_20261114_add_sku_roi_columns`。
-> 合并前必须**重对一次 main 的链尾** —— 若 `20261115_add_sku_platform_pricing` 已合入 main，
-> 需改指 `current_schema_20261115_add_sku_platform_pricing`（否则 alembic 双头）。
 > 应用迁移必须走 `python scripts/run_current_schema_migrations.py`（fail-closed），
 > **禁止**手工 `alembic stamp`。
 
@@ -936,7 +934,39 @@ TikTok 6 个在营店 **0/6 有**（TikTok 的锚点只能是别名表）。
 > ⇒ 本 worktree 里**看不到**那两个迁移文件，静态查链会误报「双头」。
 > ⇒ 正确顺序：**先 commit → 把 main 合进本分支 → 再跑最终回归**，
 > 这样最终验证跑的是「main 最新内容 + 本次全部改动」。
-> 合并后链应为：… → `20261112` → `20261113` → `20261114` → `20261115` → `20261116` → `20261117`（单头）。
+
+---
+
+### 13.6 当前状态与交接动作（2026-11-07）
+
+**已完成**：代码已合并回 `main`（快进，`76d3d911`），回归零新增失败。
+
+**尚未完成：迁移尚未应用到开发库。** 原因是**外部依赖**，不是本次改动的问题：
+
+| 项 | 现状 |
+|---|---|
+| 开发库版本 | `current_schema_20261115_add_sku_platform_pricing` |
+| 该迁移文件是否在 main | **否** —— 只在 `feature/product-center-stage0` 分支（commit `f51ceb46`） |
+| 守护入口判定 | `failure_code=environment_invalid`，`'…20261115…' is not a supported current revision`，`recommended_action=manual_source_approval` |
+| 本次能否绕过 | **不能**，也不应该 —— 绕过 fail-closed 正是仓库明令禁止的 |
+
+#### 交接动作（顺序不能颠倒）
+
+1. **等 product-center 会话把 `20261115_add_sku_platform_pricing` 合入 main**；
+2. 立刻把 `20261116_add_tiktok_export_store_name_aliases.py` 的 `down_revision`
+   从 `current_schema_20261114_add_sku_roi_columns` 改成
+   `current_schema_20261115_add_sku_platform_pricing`；
+   （不改会双头 —— `20261114` 有两个后继；改早了会链断 —— 引用不存在的 revision。
+   **两种情形都是 fail-closed，不会损坏数据**，但第 2 步必须在第 1 步之后做。）
+3. `python scripts/run_current_schema_migrations.py`（走守护入口）；
+4. `python temp/refresh_identity_mvs.py` 刷 3 个物化视图；
+5. `python temp/verify_identity_remediation_outcome.py` 验收：
+   期望 unknown 行 951 → **213**（剩余 213 = 停用店，8 UV，属预期）、
+   ambiguous 18 → **0**、跨账号认领 1,946 → **0**、总行数/总 UV **不变**、别名 +6。
+
+⚠️ 两个迁移的 SQL 逻辑本身**已在真实开发库上单事务实测通过**（unknown 951→213、
+ambiguous 18→0、跨账号认领 1,946→0、幂等、回滚后完全复原）——
+即「订正本身是有效的」，待补的只是**走守护入口的正式落库**这一步。
 
 
 
