@@ -238,25 +238,41 @@ def test_all_discovery_binding_paths_keep_the_previous_id_as_alias():
     source = DISCOVERY_SERVICE.read_text(encoding="utf-8")
 
     assert (
-        source.count("previous_platform_shop_id = shop_account.platform_shop_id") == 3
+        source.count("previous_platform_shop_id = shop_account.platform_shop_id") == 2
     ), "有入口覆盖了平台店铺ID 却没有先捕获旧值"
     assert (
-        source.count("await retain_previous_platform_shop_id_as_alias(") == 3
+        source.count("await retain_previous_platform_shop_id_as_alias(") == 2
     ), "有入口覆盖了平台店铺ID 却没有把旧值留成别名"
 
 
+def test_every_master_data_writing_path_calls_the_shared_ownership_guard():
+    """所有改主数据的入口都必须走**同一个**具名归属守卫。
+
+    守卫没被调用 = 某个入口可以覆盖别人的平台店铺ID。
+    断言写成计数：漏一个入口时计数会变。
+    """
+    source = DISCOVERY_SERVICE.read_text(encoding="utf-8")
+
+    assert (
+        source.count("await self._guard_platform_shop_id_binding(") == 4
+    ), "有改主数据的入口没有走具名归属守卫"
+    assert "_owner_of_platform_shop_id" in source
+
+
 @pytest.mark.asyncio
-async def test_auto_bound_discovery_keeps_previous_platform_shop_id_as_alias(
-    alias_session,
-):
-    """自动绑定把平台店铺ID 换成新值后，旧值必须成为别名。"""
+async def test_runtime_discovery_never_writes_master_data(alias_session):
+    """运行时探测**不得**改账号主数据。
+
+    运行时探测发生在「登录刚结束、切店组件还没跑」的位置，
+    URL 上的编号是**上一家店**的 ⇒ 写进主数据会让账号整体错位一位。
+    """
     account = _account()
     alias_session.add(account)
     await alias_session.commit()
     await alias_session.refresh(account)
 
     service = PlatformShopDiscoveryService()
-    await service.record_runtime_discovery(
+    discovery = await service.record_runtime_discovery(
         alias_session,
         platform="shopee",
         main_account_id="main_1",
@@ -266,6 +282,200 @@ async def test_auto_bound_discovery_keeps_previous_platform_shop_id_as_alias(
         detected_region="MY",
     )
 
+    await alias_session.refresh(account)
+    assert account.platform_shop_id == "1308200832", "运行时探测改了账号主数据"
+    assert account.platform_shop_id_status != "auto_bound"
+    # 证据仍然要留下来
+    assert discovery is not None
+    assert discovery.detected_platform_shop_id == "1407964586"
+    assert discovery.status == "stale_url"
+
+
+@pytest.mark.asyncio
+async def test_runtime_discovery_marks_stale_url_when_id_differs(alias_session):
+    """探测值与账号当前编号不一致 ⇒ ``stale_url``（URL 还停在别的店）。"""
+    account = _account()
+    alias_session.add(account)
+    await alias_session.commit()
+    await alias_session.refresh(account)
+
+    service = PlatformShopDiscoveryService()
+    discovery = await service.record_runtime_discovery(
+        alias_session,
+        platform="shopee",
+        main_account_id="main_1",
+        shop_account_id="shopee_my_xhkj1_local",
+        detected_store_name="xhkj1.my",
+        detected_platform_shop_id="9999999999",
+        detected_region="MY",
+    )
+
+    await alias_session.refresh(account)
+    assert account.platform_shop_id == "1308200832"
+    assert discovery.status == "stale_url"
+
+
+@pytest.mark.asyncio
+async def test_runtime_discovery_marks_conflict_when_id_owned_by_another(alias_session):
+    """探测值被**另一个**账号占着 ⇒ ``conflict_detected``，且不改主数据。"""
+    account = _account()
+    other = _account(
+        shop_account_id="shopee_sg_xhkj33_local",
+        store_name="xhkj33.sg",
+        internal_code="XHKJ33_SG",
+        platform_shop_id="1308200825",
+    )
+    alias_session.add_all([account, other])
+    await alias_session.commit()
+    await alias_session.refresh(account)
+
+    service = PlatformShopDiscoveryService()
+    discovery = await service.record_runtime_discovery(
+        alias_session,
+        platform="shopee",
+        main_account_id="main_1",
+        shop_account_id="shopee_my_xhkj1_local",
+        detected_store_name="xhkj1.my",
+        detected_platform_shop_id="1308200825",
+        detected_region="MY",
+    )
+
+    await alias_session.refresh(account)
+    assert account.platform_shop_id == "1308200832"
+    assert discovery.status == "conflict_detected"
+    assert discovery.candidate_shop_account_ids == ["shopee_sg_xhkj33_local"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_discovery_is_idempotent_when_detected_matches_current(alias_session):
+    """探测值与账号当前编号一致 ⇒ 确认通过，且不产生别名。"""
+    account = _account()
+    alias_session.add(account)
+    await alias_session.commit()
+    await alias_session.refresh(account)
+
+    service = PlatformShopDiscoveryService()
+    discovery = await service.record_runtime_discovery(
+        alias_session,
+        platform="shopee",
+        main_account_id="main_1",
+        shop_account_id="shopee_my_xhkj1_local",
+        detected_store_name="xhkj1.my",
+        detected_platform_shop_id="1308200832",
+        detected_region="MY",
+    )
+
+    await alias_session.refresh(account)
+    assert account.platform_shop_id == "1308200832"
+    assert discovery.status == "detected_single_bound"
+
+    aliases = (
+        (
+            await alias_session.execute(
+                select(ShopAccountAlias).where(
+                    ShopAccountAlias.shop_account_id == account.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert aliases == []
+
+
+@pytest.mark.asyncio
+async def test_confirm_discovery_refuses_to_take_over_another_accounts_id(
+    alias_session,
+):
+    """人工确认也不能把**别人**的编号抢到自己名下。"""
+    account = _account()
+    other = _account(
+        shop_account_id="shopee_sg_xhkj33_local",
+        store_name="xhkj33.sg",
+        internal_code="XHKJ33_SG",
+        platform_shop_id="1308200825",
+    )
+    alias_session.add_all([account, other])
+    await alias_session.commit()
+    await alias_session.refresh(account)
+
+    service = PlatformShopDiscoveryService()
+    discovery = await service.record_runtime_discovery(
+        alias_session,
+        platform="shopee",
+        main_account_id="main_1",
+        shop_account_id="shopee_my_xhkj1_local",
+        detected_store_name="xhkj1.my",
+        detected_platform_shop_id="1308200825",
+        detected_region="MY",
+    )
+
+    with pytest.raises(ValueError):
+        await service.confirm_discovery(
+            alias_session, discovery.id, "shopee_my_xhkj1_local"
+        )
+
+    await alias_session.refresh(account)
+    assert account.platform_shop_id == "1308200832", "人工确认抢走了别人的编号"
+
+
+@pytest.mark.asyncio
+async def test_manual_auto_bound_refuses_to_take_over_another_accounts_id(
+    alias_session,
+):
+    """人工探测的自动绑定同样要过归属校验。"""
+    account = _account(platform_shop_id=None, store_name="xhkj1.my")
+    other = _account(
+        shop_account_id="shopee_sg_xhkj33_local",
+        store_name="xhkj33.sg",
+        internal_code="XHKJ33_SG",
+        platform_shop_id="1308200825",
+    )
+    alias_session.add_all([account, other])
+    await alias_session.commit()
+    await alias_session.refresh(account)
+
+    service = PlatformShopDiscoveryService()
+    result = await service.record_manual_discovery(
+        alias_session,
+        platform="shopee",
+        main_account_id="main_1",
+        detected_store_name="xhkj1.my",
+        detected_platform_shop_id="1308200825",
+        detected_region="MY",
+        raw_payload={"current_url": "https://seller.example/path"},
+        confidence=0.9,
+        source={"platform_shop_id": "url"},
+        screenshot_path=None,
+    )
+
+    await alias_session.refresh(account)
+    assert account.platform_shop_id is None, "自动绑定抢走了别人的编号"
+    assert result.match.status == "pending_confirm"
+
+
+@pytest.mark.asyncio
+async def test_manual_rebind_keeps_previous_platform_shop_id_as_alias(alias_session):
+    """人工换绑后旧值成为别名（活跃、非主名）⇒ 历史数据仍能解析回这个账号。"""
+    account = _account()
+    alias_session.add(account)
+    await alias_session.commit()
+    await alias_session.refresh(account)
+
+    service = PlatformShopDiscoveryService()
+    discovery = await service.record_runtime_discovery(
+        alias_session,
+        platform="shopee",
+        main_account_id="main_1",
+        shop_account_id="shopee_my_xhkj1_local",
+        detected_store_name="xhkj1.my",
+        detected_platform_shop_id="1407964586",
+        detected_region="MY",
+    )
+
+    await service.confirm_discovery(
+        alias_session, discovery.id, "shopee_my_xhkj1_local"
+    )
     await alias_session.refresh(account)
     assert account.platform_shop_id == "1407964586"
 
