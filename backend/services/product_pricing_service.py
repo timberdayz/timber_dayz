@@ -227,6 +227,13 @@ def compute_sku_pricing(
         "min_selling_price_override": float(override) if override is not None else None,
         "min_selling_price_missing_reasons": all_reasons,
         "pricing_tier_label": policy["tier_label"] if policy else None,
+        # 档位的**身份** = 库龄起点（阶段 3）。
+        # ⚠️ 为什么要有它：``tier_label`` 是**显示名**，是可以改的
+        #    （阶段 3 就把「滞销30天」改成「库龄≥60天」）。
+        #    拿显示名当"档位身份" ⇒ 改一次名字，全库 SKU 看起来都"跨了档"
+        #    ⇒ 最低售价变更通知会误报成"库龄跨档" ⇒ 通知风暴。
+        #    身份必须用**规则行自己的库龄起点**，它不随显示名变化。
+        "pricing_tier_min_restock_days": policy["min_restock_days"] if policy else None,
         "pricing_days_since_restock": days_since_restock,
         "pricing_tier_source": (
         "restock_days" if days_since_restock is not None else "fallback_no_restock_days"

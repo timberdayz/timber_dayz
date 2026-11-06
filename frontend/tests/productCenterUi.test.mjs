@@ -168,8 +168,11 @@ test("定价设置抽屉区分「成本率合计」与「底线基数」", () =>
 });
 
 test("SKU 资料页展示定价底线四列", () => {
-  assert.match(source, /当前可优惠/);
-  assert.match(source, /滞销可优惠/);
+  // 阶段 3：旧名「当前可优惠 / 滞销可优惠」已改成「当前让利上限 / 清货让利上限」
+  assert.match(source, /当前让利上限/);
+  assert.match(source, /清货让利上限/);
+  assert.doesNotMatch(source, /当前可优惠/);
+  assert.doesNotMatch(source, /滞销可优惠/);
   assert.match(source, /最低售价/);
   assert.match(source, /达人佣金率/);
   assert.match(source, /row\.current_discount_rate/);
@@ -275,7 +278,9 @@ test("SKU 资料直接维护单件体积，箱规明确为件每箱", () => {
 });
 
 test("测算页使用百分比输入并支持草稿与不完整提示", () => {
-  assert.match(source, /广告费率/);
+  // 阶段 3：「广告费率」改名「广告分成率」
+  assert.match(source, /广告分成率/);
+  assert.doesNotMatch(source, /广告费率/);
   assert.match(source, /%/);
   assert.match(source, /toPercent|fromPercent/);
   assert.match(source, /保存测算草稿/);
@@ -403,16 +408,17 @@ test("利润测算页给出广告前贡献毛利率 / 保本ROI / 建议ROI 三�
   assert.match(operatingSection, /row\.preview\?\.expected\?\.suggested_roi_clamped/);
 });
 
-test("三个 ROI 列排在最低售价右侧、预计售价之前", () => {
+test("三个 ROI 列排在最低售价右侧、测算售价之前", () => {
   const floor = operatingSection.indexOf('label="最低售价"');
   const margin = operatingSection.indexOf('label="广告前贡献毛利率"');
   const breakEven = operatingSection.indexOf('label="保本ROI"');
   const suggested = operatingSection.indexOf('label="建议ROI"');
-  const price = operatingSection.indexOf('label="预计售价"');
+  // 阶段 3：「预计售价」改名「测算售价」
+  const price = operatingSection.indexOf('label="测算售价"');
   assert.ok(floor >= 0 && margin > floor, "广告前贡献毛利率必须紧跟最低售价");
   assert.ok(breakEven > margin, "保本ROI 必须在广告前贡献毛利率之后");
   assert.ok(suggested > breakEven, "建议ROI 必须在保本ROI 之后");
-  assert.ok(price > suggested, "三个 ROI 列必须在预计售价之前");
+  assert.ok(price > suggested, "三个 ROI 列必须在测算售价之前");
 });
 
 test("成本不全时 ROI 一律置灰并提示保本ROI 偏乐观", () => {
@@ -646,4 +652,74 @@ test("保存利润版本时 ROI 护栏错误给出可执行提示", () => {
   const missingAt = save.indexOf("detail?.missing_fields");
   assert.ok(roiAt > 0, "必须处理 ROI 护栏错误码");
   assert.ok(missingAt > roiAt, "ROI 护栏错误必须排在资料未完整之前");
+});
+
+// ---------------------------------------------------------------------------
+// 阶段 3 · 广告分成率降级 + 列改名（2026-11-07）
+// ---------------------------------------------------------------------------
+
+test("阶段 3 的列改名全部落地，旧名一个都不剩", () => {
+  // 旧名以**列标签**的形态核对：像「参考物流规则」这种**规则名**不在改名范围内
+  //（§8 改的是列名，不是 LogisticsProviderRule 这个业务对象的叫法）。
+  const renames = [
+    ["label=\"基准售价\"", "label=\"参考售价\""],
+    ["label=\"测算售价\"", "label=\"预计售价\""],
+    ["label=\"参考成本利润\"", "label=\"预计利润\""],
+    ["label=\"广告分成率\"", "label=\"广告费率\""],
+    ["label=\"平台佣金率\"", "label=\"平台费率\""],
+    ["label=\"平台佣金\"", "label=\"平台费用\""],
+    ["label=\"预估物流成本\"", "label=\"参考物流\""],
+    ["label=\"预估仓储成本\"", "label=\"参考仓储\""],
+    ["label=\"贴单费\"", "label=\"参考贴单费\""],
+    ["label=\"物流货损率（SPU）\"", "label=\"继承货损率\""],
+    ["label=\"退货损失率（SPU）\"", "label=\"继承退货损失率\""],
+    ["label=\"当前让利上限\"", "label=\"当前可优惠\""],
+    ["label=\"清货让利上限\"", "label=\"清货极限\""],
+    ["label=\"清货让利上限\"", "label=\"滞销可优惠\""],
+  ];
+  for (const [label, old] of renames) {
+    assert.match(source, new RegExp(label.replace(/"/g, '\\"')), `新名必须出现：${label}`);
+    assert.doesNotMatch(
+      source,
+      new RegExp(old.replace(/"/g, '\\"')),
+      `旧名必须消失：${old}`,
+    );
+  }
+  // 「优惠券」补上限定语：是谁承担的
+  assert.match(source, /优惠券（商家承担）/);
+});
+
+test("利润测算页不再有重复的「物流方式」列", () => {
+  // 物流方式已经在顶部筛选器里选过了，表里再放一列是重复
+  assert.doesNotMatch(operatingSection, /label="物流方式"/);
+  // 顶部筛选器仍然保留（它是唯一的入口）
+  assert.match(source, /operatingQuery\.transport_type/);
+});
+
+test("广告分成率降级为高级逃生口，默认折叠", () => {
+  // 默认折叠：要显式展开才改得了
+  assert.match(source, /const showAdRateEscape = ref\(false\)/);
+  assert.match(source, /v-model="showAdRateEscape"/);
+  assert.match(source, /v-if="showAdRateEscape"/);
+  // 折叠态显示当前生效口径，不给输入框
+  assert.match(source, /按目标ROI口径/);
+});
+
+test("广告分成率旁边永远并排显示等效目标 ROI", () => {
+  assert.match(operatingSection, /等效目标ROI/);
+  assert.match(
+    operatingSection,
+    /row\.preview\?\.expected\?\.equivalent_target_roi/,
+  );
+});
+
+test("两个口径互斥：改广告分成率清掉目标 ROI，改目标 ROI 取消分成率口径", () => {
+  // 两个输入填着就打架（后端只能取一个）⇒ 动了哪一个就以那个为准
+  assert.match(source, /const onAdRateEscapeInput = \(row\) => \{/);
+  assert.match(source, /row\.target_roi = null/);
+  assert.match(source, /row\.adRateEscapeUsed = true/);
+  assert.match(source, /const onTargetRoiInput = \(row\) => \{/);
+  assert.match(source, /row\.adRateEscapeUsed = false/);
+  // 提示语要说明发生了什么
+  assert.match(source, /已改用广告分成率口径/);
 });

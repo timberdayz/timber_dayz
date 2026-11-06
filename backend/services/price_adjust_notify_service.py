@@ -176,7 +176,19 @@ def classify_change_reason(prev: dict, cur: dict) -> str:
         return REASON_PLATFORM_RATE
 
     # 5) 命中的档位本身变了 = 库龄跨档
-    if prev.get("pricing_tier_label") != cur.get("pricing_tier_label"):
+    #    ⚠️ 比的是档位的**身份**（库龄起点），不是它的**显示名** ——
+    #    显示名是可以改的（阶段 3 就把「滞销30天」改成「库龄≥60天」），
+    #    拿显示名当身份 ⇒ 改一次名字，全库 SKU 都看起来"跨了档"
+    #    ⇒ 最低售价变更通知会误报成「库龄跨档」⇒ 通知风暴。
+    prev_tier_key = prev.get("pricing_tier_min_restock_days")
+    cur_tier_key = cur.get("pricing_tier_min_restock_days")
+    if prev_tier_key is not None and cur_tier_key is not None:
+        tier_changed = prev_tier_key != cur_tier_key
+    else:
+        # 老快照还没有身份字段（改名之前存下来的）⇒ 退回比显示名。
+        # 只影响该行**第一次**通知的归因，之后的新快照就带身份了。
+        tier_changed = prev.get("pricing_tier_label") != cur.get("pricing_tier_label")
+    if tier_changed:
         return REASON_TIER_CHANGE
 
     # 6) 档位没变但折扣率变了 = 规则表在同一档上改了参数
@@ -253,6 +265,9 @@ def build_context(
         "min_selling_price_is_override": bool(pricing.get("min_selling_price_is_override")),
         "pricing_tier_source": pricing.get("pricing_tier_source"),
         "pricing_tier_label": pricing.get("pricing_tier_label"),
+        # 档位的**身份**（库龄起点）：显示名可以改（阶段 3 就改过），
+        # 拿它当身份 ⇒ 改一次名字全库看起来都"跨了档" ⇒ 通知风暴。
+        "pricing_tier_min_restock_days": pricing.get("pricing_tier_min_restock_days"),
         "target_margin_rate": _decimal_to_str(target_margin_rate),
         "discount_rate": _decimal_to_str(discount_rate),
         "age_days": age_days,

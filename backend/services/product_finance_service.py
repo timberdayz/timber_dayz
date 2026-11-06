@@ -1120,6 +1120,8 @@ class ProductFinanceService:
             actual_storage_cost=None,
             platform_fee_rate=platform.default_fee_rate,
             expected_ad_rate=data.get("expected_ad_rate"),
+            # 目标 ROI（阶段 3）：主输入。给了它就按平台口径算广告费用。
+            target_roi=data.get("target_roi"),
             return_rate=spu.return_loss_rate if spu else None,
             damage_rate=spu.logistics_damage_rate if spu else None,
             # 达人佣金：SKU 自己设的值优先，否则用所选平台的默认兜底

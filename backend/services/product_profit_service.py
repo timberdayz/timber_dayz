@@ -174,6 +174,7 @@ def build_platform_profit_preview(
     actual_storage_cost: Decimal | int | float | None,
     platform_fee_rate: Decimal | int | float | None,
     expected_ad_rate: Decimal | int | float | None,
+    target_roi: Decimal | int | float | None = None,
     return_rate: Decimal | int | float | None,
     damage_rate: Decimal | int | float | None,
     creator_commission_rate: Decimal | int | float | None = None,
@@ -185,6 +186,11 @@ def build_platform_profit_preview(
     ``expected_ad_rate`` is interpreted as the share of pre-ad profit allocated
     to advertising (``ad_cost = pre_ad_profit × expected_ad_rate``), not as a
     fraction of revenue.
+
+    ``target_roi``（阶段 3）是**主输入**：广告费用按平台口径算
+    （``ad_cost = net_revenue ÷ target_roi``）。给了它就用它算，没给才回落到
+    老口径 ``expected_ad_rate``。两个口径在数值上等价（见 ``_ad_cost_and_profit``
+    的推导），所以切换不改变利润。
 
     ``creator_commission_rate`` 是达人佣金率（占收入的百分比）。
     达人佣金是**真实现金流出**，必须从利润里扣掉，否则利润会被系统性高估
@@ -293,28 +299,71 @@ def build_platform_profit_preview(
 
     def _ad_cost_and_profit(
         use_actual: bool,
-    ) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
-        """返回 ``(ad_cost, profit, pre_ad_profit)``。
+    ) -> tuple[Decimal | None, Decimal | None, Decimal | None, Decimal | None]:
+        """返回 ``(ad_cost, profit, pre_ad_profit, effective_ad_rate)``。
 
         ``pre_ad_profit`` 是**广告前利润**（扣完采购/物流/仓储/贴单/平台佣金/达人佣金/
         货损/退货，但**没扣广告费**）。它是 ROI 计算的分母，必须暴露出去 ——
         以前它只作为中间变量存在，算完就被丢掉，导致 ROI 只能在外层重算一遍成本
         （口径必然漂移）。
+
+        广告费用（阶段 3）
+        ----------------
+        **优先用「目标 ROI」**（平台语言：商家实收 ÷ 目标ROI），没有才用老口径
+        「广告分成率」``expected_ad_rate``。
+
+        ⚠️ 两个口径在数值上**完全等价**，不是近似：
+
+            target_roi = 保本ROI ÷ s = (revenue ÷ pre_ad_profit) ÷ s
+            ⇒ revenue ÷ target_roi = pre_ad_profit × s
+
+        所以「从广告分成率反解成目标 ROI」再切回目标 ROI 口径，广告费与利润
+        一个数都不变 —— 这正是存量反解迁移可以放心做的前提。
+
+        ``effective_ad_rate`` 是**实际生效**的广告分成率（口径换算后的那个数），
+        喂给 ROI 计算用；这样 ``equivalent_target_roi`` 在两种口径下都对得上：
+        目标 ROI 口径 ⇒ 等效目标 ROI 恰好等于运营填的那个数。
         """
         components = _pre_ad_components(use_actual)
         if revenue is None or any(c is None for c in components):
-            return None, None, None
+            return None, None, None, None
         pre_ad_profit = revenue - sum(components, Decimal("0"))
-        ad = (
-            _money(pre_ad_profit * Decimal(str(expected_ad_rate)))
-            if expected_ad_rate is not None
-            else None
-        )
+        ad = None
+        effective_ad_rate = None
+        if target_roi is not None and Decimal(str(target_roi)) > 0:
+            ad = _money(revenue / Decimal(str(target_roi)))
+            # 反算成"广告分成率"口径，好让 equivalent_target_roi 恰好等于 target_roi。
+            # 公式与 compute_roi_metrics 内部一致（分母同一个未量化的 pre_ad_profit）。
+            effective_ad_rate = (
+                (revenue / pre_ad_profit) / Decimal(str(target_roi))
+                if pre_ad_profit > 0
+                else None
+            )
+        elif expected_ad_rate is not None:
+            # ⚠️ **广告费不能是负数**（阶段 3 修正的老缺陷）：
+            #    老写法 ad_cost = pre_ad_profit × s，在 pre_ad_profit ≤ 0 时算出**负广告费**，
+            #    于是 profit = pre_ad_profit − 负数 ⇒ **亏损被缩小**（看起来没那么亏）。
+            #    那等于假设"投广告能把亏回来的钱赚回来" —— 乐观，且广告预算是负数，
+            #    业务上根本不成立。
+            #    正确口径：广告前利润 ≤ 0 ⇒ 这品**不该投广告** ⇒ 广告预算 0 ⇒
+            #    利润就等于广告前利润（把亏损如实显示出来）。
+            #    ⚠️ 目标 ROI 口径不会有这个问题：revenue ÷ target_roi 恒为正，
+            #    而且保本 ROI 算不出来时 ROI 护栏会先把它拦下来（roi_cost_incomplete）。
+            ad = (
+                _money(pre_ad_profit * Decimal(str(expected_ad_rate)))
+                if pre_ad_profit > 0
+                else Decimal("0")
+            )
+            effective_ad_rate = Decimal(str(expected_ad_rate))
         profit = _money(pre_ad_profit - ad) if ad is not None else None
-        return ad, profit, pre_ad_profit
+        return ad, profit, pre_ad_profit, effective_ad_rate
 
-    ad_cost, expected_profit, expected_pre_ad_profit = _ad_cost_and_profit(use_actual=False)
-    _, actual_profit, actual_pre_ad_profit = _ad_cost_and_profit(use_actual=True)
+    ad_cost, expected_profit, expected_pre_ad_profit, expected_ad_rate_effective = (
+        _ad_cost_and_profit(use_actual=False)
+    )
+    _, actual_profit, actual_pre_ad_profit, actual_ad_rate_effective = (
+        _ad_cost_and_profit(use_actual=True)
+    )
 
     def _roi_payload(metrics: dict) -> dict:
         """把 ROI 计算结果铺进 preview 段。
@@ -340,14 +389,14 @@ def build_platform_profit_preview(
         pre_ad_profit=expected_pre_ad_profit,
         safety_margin=roi_safety_margin,
         target_roi_ceiling=target_roi_ceiling,
-        expected_ad_rate=expected_ad_rate,
+        expected_ad_rate=expected_ad_rate_effective,
     )
     actual_roi = compute_roi_metrics(
         net_revenue=revenue,
         pre_ad_profit=actual_pre_ad_profit,
         safety_margin=roi_safety_margin,
         target_roi_ceiling=target_roi_ceiling,
-        expected_ad_rate=expected_ad_rate,
+        expected_ad_rate=actual_ad_rate_effective,
     )
     # 保本 ROI 的**下界**（阶段 2.2 护栏用）：成本不全时也算得出来，
     # 用来证明"目标 ROI 连最乐观的保本线都够不着 ⇒ 这单投了就是亏"。
@@ -411,6 +460,15 @@ def build_platform_profit_preview(
             "creator_commission": creator_commission,
             "creator_commission_rate": creator_commission_rate,
             "ad_cost": ad_cost,
+            # 实际生效的广告分成率（阶段 3）：口径换算后的那个数。
+            # 目标 ROI 口径下它 = 保本ROI ÷ target_roi；老口径下它就是手填值。
+            "ad_cost_rate": expected_ad_rate_effective,
+            # 广告费用的口径来源：'target_roi'（平台口径，主输入）/ 'legacy_ad_rate'（老口径逃生口）/ None
+            "ad_cost_source": (
+                "target_roi"
+                if target_roi is not None and Decimal(str(target_roi)) > 0
+                else ("legacy_ad_rate" if expected_ad_rate is not None else None)
+            ),
             "return_loss": return_loss,
             "damage_loss": damage_loss,
             "profit": expected_profit,
@@ -457,6 +515,13 @@ def build_platform_profit_preview(
             "profit": actual_profit,
             # 广告前利润（实际物流/仓储口径，**没扣广告费**）
             "pre_ad_profit": actual_pre_ad_profit,
+            # 实际成本口径下的广告分成率与口径来源（阶段 3）。
+            "ad_cost_rate": actual_ad_rate_effective,
+            "ad_cost_source": (
+                "target_roi"
+                if target_roi is not None and Decimal(str(target_roi)) > 0
+                else ("legacy_ad_rate" if expected_ad_rate is not None else None)
+            ),
             **_roi_payload(actual_roi),
             # 同上：实际成本口径的保本 ROI 下界。
             "break_even_roi_lower_bound": actual_roi_lower_bound.get(

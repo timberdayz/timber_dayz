@@ -279,9 +279,9 @@
           ><el-table-column label="采购成本" width="115"><template #default="{ row }"><el-input-number v-model="row.default_purchase_cost" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="采购成本来源" width="120"><template #default="{ row }">{{ row.purchase_cost_source || "待补充" }}</template></el-table-column
           ><el-table-column label="采购成本确认时间" width="145"><template #default="{ row }">{{ row.purchase_cost_confirmed_at || "-" }}</template></el-table-column
-          ><el-table-column label="参考售价" width="115"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
-          ><el-table-column label="当前可优惠" width="110"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column
-          ><el-table-column label="滞销可优惠" width="110"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column
+          ><el-table-column label="基准售价" width="115"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
+          ><el-table-column label="当前让利上限" width="110"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column
+          ><el-table-column label="清货让利上限" width="110"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column
           ><el-table-column label="最低售价" width="340"
             ><template #default="{ row }"
               ><div class="pricing-cell">
@@ -417,6 +417,9 @@
             <el-option v-for="item in filteredOperatingSkus" :key="item.sku_id" :label="item.sku_key" :value="item.sku_id" />
           </el-select>
           <el-button v-if="canManagePlatformFee" plain @click="openPlatformFeeDrawer('platform')">定价设置</el-button>
+          <el-checkbox v-model="showAdRateEscape" class="ad-rate-escape-toggle">
+            高级：按广告分成率口径（默认用目标ROI）
+          </el-checkbox>
         </div>
         <el-alert v-if="!operatingQuery.platform_code || !operatingQuery.warehouse_code || !operatingQuery.transport_type" type="info" :closable="false" title="请选择平台、收货仓库和物流方式后加载 SKU 测算数据" />
         <div class="roi-disclaimer">
@@ -433,10 +436,10 @@
           <el-table-column prop="spu" label="SPU" width="160" />
           <el-table-column prop="sku_key" label="ERP SKU" width="155" />
           <el-table-column prop="sku_name" label="商品名称" min-width="200" show-overflow-tooltip />
-          <el-table-column label="参考售价" width="105"><template #default="{ row }">{{ money(row.reference_selling_price) }}</template></el-table-column>
+          <el-table-column label="基准售价" width="105"><template #default="{ row }">{{ money(row.reference_selling_price) }}</template></el-table-column>
           <el-table-column label="竞品价格" width="110"><template #default="{ row }"><el-input-number v-model="row.competitor_price" :min="0" :controls="false" size="small" /></template></el-table-column>
-          <el-table-column label="当前可优惠" width="100"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column>
-          <el-table-column label="清货极限" width="100"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column>
+          <el-table-column label="当前让利上限" width="100"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column>
+          <el-table-column label="清货让利上限" width="100"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column>
           <el-table-column label="最低售价" width="120"
             ><template #default="{ row }"
               ><span class="readonly-cell">{{ money(row.min_selling_price) }}</span>
@@ -493,7 +496,8 @@
                   :min="0"
                   :step="0.1"
                   :controls="false"
-                  size="small" /></div
+                  size="small"
+                  @input="onTargetRoiInput(row)" /></div
               >
               <el-tag v-if="targetRoiBelowBreakEven(row)" size="small" type="danger"
                 >低于保本线</el-tag
@@ -519,7 +523,7 @@
                 <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
               </el-tooltip></template
           ></el-table-column>
-          <el-table-column label="预计售价" width="110"
+          <el-table-column label="测算售价" width="110"
             ><template #default="{ row }"
               ><el-input-number
                 v-model="row.expected_selling_price"
@@ -532,7 +536,7 @@
                 低于最低售价 {{ money(row.min_selling_price) }}
               </div></template
           ></el-table-column>
-          <el-table-column label="优惠券" width="110"
+          <el-table-column label="优惠券（商家承担）" width="110"
             ><template #default="{ row }"
               ><el-input-number
                 v-model="row.seller_coupon_amount"
@@ -546,18 +550,47 @@
               money(row.purchase_cost)
             }}</template></el-table-column
           >
-          <el-table-column label="物流方式" width="100"><template #default="{ row }">{{ transportLabel(row.transport_type) }}</template></el-table-column>
-          <el-table-column label="参考物流" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
-          <el-table-column label="参考仓储" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "storage") }}</template></el-table-column>
-          <el-table-column label="参考贴单费" width="115"><template #default="{ row }">{{ referenceLabelFeeDisplay(row) }}</template></el-table-column>
-          <el-table-column label="广告费率" width="115"><template #default="{ row }"><div class="rate-cell"><el-input-number v-model="row.expected_ad_rate_pct" :min="0" :max="100" :step="0.1" :controls="false" size="small" @input="scheduleOperatingPreview(row)" /><span class="rate-suffix">%</span></div></template></el-table-column>
-          <el-table-column label="平台费率" width="100"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
-          <el-table-column label="平台费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
+          <el-table-column label="预估物流成本" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
+          <el-table-column label="预估仓储成本" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "storage") }}</template></el-table-column>
+          <el-table-column label="贴单费" width="115"><template #default="{ row }">{{ referenceLabelFeeDisplay(row) }}</template></el-table-column>
+          <el-table-column label="广告分成率" width="225"
+            ><template #default="{ row }"
+              ><!--
+                广告分成率是**高级逃生口**（阶段 3）：主输入是「目标 ROI」
+                （平台语言：商家实收 ÷ 目标ROI）。手填分成率默认折叠，
+                要显式展开才改得了；旁边**永远**并排显示「等效目标 ROI」，
+                那是同一件事的平台语言说法（保本ROI ÷ 广告分成率）。
+                两个口径在数值上等价，所以切换不改变利润。
+              -->
+              <div class="rate-cell">
+                <el-input-number
+                  v-if="showAdRateEscape"
+                  v-model="row.expected_ad_rate_pct"
+                  :min="0"
+                  :max="100"
+                  :step="0.1"
+                  :controls="false"
+                  size="small"
+                  @input="onAdRateEscapeInput(row)" />
+                <span v-else class="rate-locked">{{
+                  percent(row.preview?.expected?.ad_cost_rate)
+                }}（按目标ROI口径）</span>
+                <span class="rate-suffix">%</span>
+              </div>
+              <div class="ad-rate-equivalent">
+                等效目标ROI {{ roiDisplay(row.preview?.expected?.equivalent_target_roi) }}
+              </div>
+              <div v-if="row.adRateEscapeUsed" class="price-floor-hint">
+                已改用广告分成率口径（目标ROI 已清空）
+              </div></template
+          ></el-table-column>
+          <el-table-column label="平台佣金率" width="100"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
+          <el-table-column label="平台佣金" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
           <el-table-column label="达人佣金" width="120"><template #default="{ row }"><div class="rate-cell"><span>{{ percent(row.preview?.expected?.creator_commission_rate) }}</span></div>{{ money(row.preview?.expected?.creator_commission) }}</template></el-table-column>
           <el-table-column label="预计广告费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.ad_cost) }}</template></el-table-column>
-          <el-table-column label="继承货损率" width="110"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
-          <el-table-column label="继承退货损失率" width="130"><template #default="{ row }">{{ percent(row.return_loss_rate) }}</template></el-table-column>
-          <el-table-column label="预计利润" width="120"
+          <el-table-column label="物流货损率（SPU）" width="110"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
+          <el-table-column label="退货损失率（SPU）" width="130"><template #default="{ row }">{{ percent(row.return_loss_rate) }}</template></el-table-column>
+          <el-table-column label="参考成本利润" width="120"
             ><template #default="{ row }">{{
               money(row.preview?.expected?.profit)
             }}</template></el-table-column
@@ -793,7 +826,7 @@
           </el-form>
         </el-tab-pane>
         <el-tab-pane label="库龄档位规则" name="tiers">
-          <el-alert type="info" :closable="false" title="库龄起点 = 从该天数起，本行规则生效。折扣力度完全由库龄档位触发，每档只有一个折扣率。" />
+          <el-alert type="info" :closable="false" title="库龄起点 = 从该天数起，本行规则生效。折扣力度完全由库龄档位触发，每档只有一个让利率。" />
           <el-table :data="pricingDrawer.policies" size="small" border>
             <el-table-column label="库龄起点" width="120">
               <template #default="{ row }">
@@ -805,7 +838,7 @@
                 <el-input v-model="row.tier_label" size="small" />
               </template>
             </el-table-column>
-            <el-table-column label="折扣率" width="120">
+            <el-table-column label="让利率" width="120">
               <template #default="{ row }">
                 <div class="rate-cell"><el-input-number v-model="row.discount_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" /><span class="rate-suffix">%</span></div>
               </template>
@@ -817,7 +850,7 @@
             </el-table-column>
           </el-table>
           <div class="pricing-tier-hint">
-            最深档（120 天）的折扣率 30% 同时就是 SKU 资料页「滞销可优惠」列的清货极限。
+            最深档（120 天）的让利率 30% 同时就是 SKU 资料页「清货让利上限」列。
             改「库龄起点」= 改滞销阈值，保存时关旧档、开新档，历史留档。
           </div>
         </el-tab-pane>
@@ -1051,7 +1084,7 @@ const loadingSkus = ref(false);
 const loadingBills = ref(false);
 
 // SKU 资料 tab 中视觉标记为可填项的列名（仅改表头颜色，不动字段必填校验）
-// ⚠️ 「参考售价」2026-10-21 起移出本列表：蓝色表头在数据表里读起来像可点击链接，
+// ⚠️ 「基准售价」2026-10-21 起移出本列表：蓝色表头在数据表里读起来像可点击链接，
 // 而它其实是「这列可以不填」的标记，容易被误读。按要求改为与其他列一致的黑色。
 const skuOptionalColumnLabels = ["规格", "重量 kg", "箱规（件/箱）", "售价来源"];
 const skuHeaderCellStyle = ({ column }) => {
@@ -1174,8 +1207,6 @@ const filteredOperatingSkus = computed(() => {
 });
 const referenceStorageDays = (turnoverClass) =>
   ({ fast: 30, normal: 60, slow: 90 })[turnoverClass] || null;
-const transportLabel = (value) =>
-  ({ sea: "海运", air: "空运", rail: "铁路运输" })[value] || "待选择";
 const referenceLogisticsCost = (row) =>
   row.reference_logistics_cost ?? row.expected_logistics_cost ?? null;
 const referenceStorageCost = (row) =>
@@ -1251,7 +1282,7 @@ const PRICING_SOURCE_LABELS = {
 };
 const PRICING_SOURCE_TOOLTIPS = {
   manual_override: "有人工覆盖值，以上面填写的数字为准（变更留审计）",
-  discount_guard: "参考售价 × (1 − 当前档折扣率)",
+  discount_guard: "基准售价 × (1 − 当前档让利率)",
   cost_floor: "采购成本与目标利润率反解出的保本价",
   unavailable: "数据不全，最低售价算不出来",
 };
@@ -1795,6 +1826,8 @@ const loadOperatingProfiles = async () => {
       //    利润版本，就会把上一轮的事实悄悄带过去 —— 事后没人说得清这一版是哪一轮的。
       target_roi: row.target_roi ?? null,
       actual_roi: null,
+      // 这一行是不是在用「广告分成率」口径（阶段 3 的高级逃生口）
+      adRateEscapeUsed: false,
     }));
     operatingTotal.value = response.total ?? 0;
   } catch (error) {
@@ -1834,7 +1867,7 @@ const handleOperatingSpuChange = () => {
   clearOperatingSkuOutsideSpu();
   resetOperatingPage();
 };
-// 预计售价 / 优惠券 / 广告费率一改，下面的利润就该跟着变。
+// 测算售价 / 优惠券 / 广告分成率一改，下面的利润就该跟着变。
 // el-input-number 的 change 事件要等失焦或回车才触发，
 // 运营在格子里打完价直接看下一行的利润，就会看到**上一次的旧利润**。
 // 用 input 事件 + 每行 400ms 防抖：边打边更新，又不会每个键都打一次接口。
@@ -1887,7 +1920,7 @@ const saveOperatingEstimate = async (row) => {
     const detail = readApiErrorDetail(error);
     if (detail?.code === "below_min_selling_price") {
       ElMessage.error(
-        `预计售价低于最低售价 ${money(detail.min_selling_price)}（当前 ${money(detail.expected_selling_price)}）`,
+        `测算售价低于最低售价 ${money(detail.min_selling_price)}（当前 ${money(detail.expected_selling_price)}）`,
       );
       return;
     }
@@ -2600,6 +2633,28 @@ const targetRoiBelowBreakEven = (row) => {
   if (row.target_roi == null || breakEven == null) return false;
   return Number(row.target_roi) < Number(breakEven);
 };
+// --- 广告分成率（高级逃生口）与目标 ROI 的口径切换（阶段 3）---
+//
+// 两个口径说的是同一件事：广告费用占多少。
+//   目标 ROI 口径（主输入）：广告费用 = 商家实收 ÷ 目标ROI（平台语言）
+//   广告分成率口径（逃生口）：广告费用 = 广告前利润 × 分成率（老口径）
+// 两者**数值等价**（目标ROI = 保本ROI ÷ 分成率 ⇒ 商家实收 ÷ 目标ROI = 广告前利润 × 分成率），
+// 所以切换口径**不改变利润**。
+//
+// 为什么要清掉另一个：两个输入填着就"打架"（后端只能取一个）。
+// 运营动了哪一个，就以那个为准 —— 另一个**可见地**清空，不搞"悄悄生效"。
+const showAdRateEscape = ref(false);
+// 运营改「广告分成率」⇒ 走老口径 ⇒ 清掉目标 ROI（后端就会用分成率算广告费）
+const onAdRateEscapeInput = (row) => {
+  row.target_roi = null;
+  row.adRateEscapeUsed = true;
+  scheduleOperatingPreview(row);
+};
+// 运营改「目标 ROI」⇒ 走平台口径 ⇒ 广告分成率不再参与计算（标记一下，提示语会跟着变）
+const onTargetRoiInput = (row) => {
+  row.adRateEscapeUsed = false;
+  scheduleOperatingPreview(row);
+};
 // 目标 ROI 的 tooltip：把这个数「意味着什么」翻译给运营
 const targetRoiTooltip = (row) => {
   const lines = ["运营打算投到的 ROI（商家实收 ÷ 广告费，与平台后台同一把标尺）"];
@@ -2653,7 +2708,7 @@ const roiVerdictTooltip = (row) => {
   return lines.join("\n");
 };
 // 优先用**试算里实际扣的金额**（preview.expected.label_fee），
-// 退而用行上的参考贴单费——两者口径不一致时，以实际扣款为准，
+// 退而用行上的贴单费——两者口径不一致时，以实际扣款为准，
 // 否则会出现「列显示 -、利润却扣了钱」的错觉。
 const referenceLabelFee = (row) =>
   row.preview?.expected?.label_fee ??
@@ -2718,6 +2773,25 @@ onMounted(async () => {
 }
 .rate-suffix {
   flex: none;
+  color: var(--el-text-color-secondary);
+}
+/* --- 广告分成率（高级逃生口）：折叠态显示"当前生效口径"，旁边永远并排等效目标ROI --- */
+.rate-locked {
+  flex: 1;
+  min-width: 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ad-rate-equivalent {
+  margin-top: 2px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.ad-rate-escape-toggle {
+  margin-left: 12px;
   color: var(--el-text-color-secondary);
 }
 .sku-table :deep(.el-table__cell) {
@@ -2825,7 +2899,7 @@ onMounted(async () => {
   background: var(--el-fill-color-lighter);
   border-radius: 4px;
 }
-/* 利润测算页：预计售价低于最低售价时标红 */
+/* 利润测算页：测算售价低于最低售价时标红 */
 .price-below-floor :deep(.el-input__inner) {
   border-color: var(--el-color-danger);
   box-shadow: 0 0 0 1px var(--el-color-danger) inset;

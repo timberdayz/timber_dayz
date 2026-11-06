@@ -2733,6 +2733,9 @@ async def list_platform_sku_profit_candidates(
             actual_storage_cost=None,
             platform_fee_rate=platform.default_fee_rate,
             expected_ad_rate=expected_ad_rate,
+            # 目标 ROI（阶段 3）：广告费用的主输入口径。
+            # 候选列表直接用经营档案里存的那一个（运营的当前意图）。
+            target_roi=profile.target_roi if profile else None,
             return_rate=assigned.return_loss_rate if assigned else None,
             damage_rate=assigned.logistics_damage_rate if assigned else None,
             # 达人佣金：SKU 自己设的值优先，否则用所选平台的默认兜底
