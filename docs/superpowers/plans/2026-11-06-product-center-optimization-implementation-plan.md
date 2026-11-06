@@ -1393,3 +1393,38 @@ ROI 算出来的保本 ROI 也会跟着错）。改法有两个方向，见 §13
 **写在同一行**，而源码被换行拆成两行（`product_finance_service.py`），于是永远找不到。
 行为本身是对的。把两处表达式合回一行即可，**零行为变更**。
 （该用例原本被记在 §B.9「阶段 0 已识别的既有失败」里，现已消除。）
+
+### C.6 全量回归对比（worktree vs main，同一份文件清单）
+
+单进程跑全量太慢（`conftest.py:102` 在**模块导入时**就拉一次性 PG 容器，
+`pg_engine`（`:288`）session 级 fixture 再拉一个），所以按文件清单 **5 进程并行分块**跑。
+文件清单：`backend/tests` 下 **rglob `test_*.py` 共 671 个**（main 基线 669 个 —— 扣掉本次新增的 2 个测试文件）。
+
+| | worktree（本次） | main 基线（`e69a29e3`） |
+|---|---|---|
+| 用例总数 | **4474** | 4450 |
+| 通过 | **4293** | 4281 |
+| 失败 | **161** | 162 |
+| 错误 | 22 | 22 |
+| 跳过 | 7 | 7 |
+| 失败/错误用例数（去重） | **183** | 184 |
+
+**逐条对比失败清单**：
+
+| 差异 | 条数 | 明细 |
+|---|---|---|
+| worktree **新增**的失败（本次引入的回归） | **0** | —— |
+| main 有、worktree 没有（**被修好**） | **1** | `test_product_category_contract::test_profit_save_uses_the_preview_version_when_the_client_does_not_supply_one`（见 C.5） |
+
+其余 183 条失败**全部落在商品中心域之外**（Shopee 导出组件约 40 条、SQLite 建表
+`unknown database ops` 17 条、HR 前端契约断言乱码、legacy 启动入口、alembic rehearsal
+等），与阶段 0 的基线一致，属于仓库既有问题（见 §B.9），阶段 1 不处理。
+
+**商品中心域 + ROI 相关的测试文件：0 失败**（`test_product_roi_service.py` 12、
+`test_product_roi_migration_contract.py` 4、`test_product_center_schema_contract.py`、
+`test_platform_sku_profit_workbench.py` 14、`test_product_profit_calculator.py`、
+`test_product_pricing_guardrails.py` 全绿）。
+
+前端：`node --test frontend/tests/productCenterUi.test.mjs` **41 passed**（新增 5 条）；
+`vite build` ✓（ProductCenter chunk 75.76 kB，较阶段 0 的 73.18 kB +2.58 kB）；
+`ruff` 全绿。
