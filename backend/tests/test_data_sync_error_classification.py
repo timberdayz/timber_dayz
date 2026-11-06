@@ -76,6 +76,7 @@ async def test_ingest_data_reports_raw_storage_stage_for_importer_failures(
         data_domain="orders",
         platform_code="shopee",
         shop_id="shop-1",
+        shop_account_id="shop-1",
         granularity="daily",
         sub_domain=None,
     )

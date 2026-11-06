@@ -63,6 +63,7 @@ from backend.services.data_sync_status_semantics import (
 )
 from backend.services.spreadsheet_header_reader import get_spreadsheet_header_reader
 from backend.services.data_sync_file_state_service import (
+    apply_identity_blocked_state,
     apply_template_blocked_state,
     resolve_template_blocked_catalog_status,
 )
@@ -1433,6 +1434,7 @@ class DataSyncService:
                 )
 
                 # 更新状态
+                final_status = "success"
                 if result.get("success"):
                     # [*] v4.15.0增强:区分跳过原因(重复数据 vs 空文件)
                     skip_reason = result.get("skip_reason", "")
@@ -1489,10 +1491,24 @@ class DataSyncService:
                     else:
                         self._mark_file_ingested(catalog_file)
                         self._record_status(catalog_file, "success", f"入库成功")
-                else:
-                    self._mark_file_failed(
-                        catalog_file, result.get("message", "未知错误")
+                elif result.get("identity_blocked"):
+                    # [*] P2-1 身份门禁拒收: 店铺数据缺稳定身份戳(shop_account_id)。
+                    # 落 ``needs_shop`` 终态等人工补身份, **不落 failed** ——
+                    # 「重试必然再失败」不是可重试故障, 落 failed 会误导运维反复重试。
+                    reason = result.get("message") or "缺少稳定店铺身份(shop_account_id)"
+                    final_status = apply_identity_blocked_state(
+                        catalog_file,
+                        reason=reason,
+                        skip_reason=result.get("skip_reason"),
                     )
+                    self._record_status(catalog_file, final_status, reason)
+                    logger.error(
+                        f"[DataSync] [P2-1] 文件{file_id}({catalog_file.file_name})"
+                        f"身份门禁拒收, 已落 {final_status} 待人工指派店铺: {reason}"
+                    )
+                else:
+                    final_status = "failed"
+                    self._mark_file_failed(catalog_file, result.get("message", "未知错误"))
                     self._record_status(
                         catalog_file, "failed", result.get("message", "未知错误")
                     )
@@ -1503,7 +1519,7 @@ class DataSyncService:
                     "success": result.get("success", False),
                     "file_id": file_id,
                     "file_name": catalog_file.file_name,
-                    "status": "success" if result.get("success") else "failed",
+                    "status": final_status,
                     "message": result.get("message")
                     or "数据入库失败(未提供错误信息)",  # [*] v4.15.0修复:确保有错误消息
                     "staged": result.get("staged", 0),

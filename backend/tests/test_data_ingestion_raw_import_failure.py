@@ -66,6 +66,7 @@ async def test_ingest_data_returns_root_cause_and_does_not_mark_file_ingested_on
         data_domain="orders",
         platform_code="shopee",
         shop_id="shop-1",
+        shop_account_id="shop-1",
         granularity="daily",
         sub_domain=None,
     )

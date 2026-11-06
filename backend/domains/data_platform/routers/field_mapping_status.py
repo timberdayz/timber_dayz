@@ -505,7 +505,25 @@ async def assign_shop_to_files(request: dict, db: AsyncSession = Depends(get_asy
         
         updated_count = 0
         retried_count = 0
-        
+        unresolved_count = 0
+
+        # [*] P2-1: 指派店铺之后还要能解析出稳定身份(shop_account_id)。
+        # 入库门禁要求「店铺数据必须带 shop_account_id」, 如果只写 shop_id 就放行,
+        # 文件会在 needs_shop <-> pending 之间来回空转(入库一次、拒收一次)。
+        # 这里一次性把候选读出来, 逐文件按「唯一命中才用」的规则解析(不猜)。
+        from modules.services.catalog_scanner import (
+            load_shop_account_identity_candidates_async,
+            match_shop_account_by_identity,
+        )
+
+        try:
+            identity_accounts, identity_aliases = (
+                await load_shop_account_identity_candidates_async(db)
+            )
+        except Exception as identity_err:  # noqa: BLE001
+            logger.warning(f"读取店铺账号候选失败, 跳过身份解析: {identity_err}")
+            identity_accounts, identity_aliases = [], []
+
         for file_id in file_ids:
             catalog_file_result = await db.execute(select(CatalogFile).where(CatalogFile.id == file_id))
             catalog_file = catalog_file_result.scalar_one_or_none()
@@ -513,9 +531,28 @@ async def assign_shop_to_files(request: dict, db: AsyncSession = Depends(get_asy
                 continue
             
             catalog_file.shop_id = shop_id
+
+            if not catalog_file.shop_account_id and identity_accounts:
+                resolved_identity = match_shop_account_by_identity(
+                    identity_accounts,
+                    identity_aliases,
+                    platform_code=(
+                        catalog_file.platform_code or catalog_file.source_platform
+                    ),
+                    source_platform=catalog_file.source_platform,
+                    platform_shop_id=catalog_file.platform_shop_id,
+                    store_name=catalog_file.store_name,
+                    shop_id=shop_id,
+                )
+                if resolved_identity and resolved_identity.get("shop_account_id"):
+                    catalog_file.shop_account_id = resolved_identity["shop_account_id"]
             
             if catalog_file.status == 'needs_shop':
-                catalog_file.status = 'pending'
+                if catalog_file.shop_account_id:
+                    catalog_file.status = 'pending'
+                else:
+                    # 身份仍然解析不出来 -> 保持 needs_shop, 别让文件空转
+                    unresolved_count += 1
             
             meta = catalog_file.file_metadata or {}
             if 'shop_resolution' not in meta:
@@ -539,12 +576,21 @@ async def assign_shop_to_files(request: dict, db: AsyncSession = Depends(get_asy
         data = {
             "updated_count": updated_count,
             "shop_id": shop_id,
-            "retried_ingest": retried_count if auto_retry else None
+            "retried_ingest": retried_count if auto_retry else None,
+            # [*] P2-1: 身份没解析出来的文件仍在 needs_shop, 需要人工补账号绑定
+            "unresolved_identity_count": unresolved_count,
         }
+        
+        message = f"成功指派{updated_count}个文件到店铺{shop_id}"
+        if unresolved_count:
+            message += (
+                f"; 其中{unresolved_count}个文件仍解析不出店铺账号身份(shop_account_id), "
+                "已保留「需要指派店铺」状态, 请先在店铺账号管理里补齐账号绑定"
+            )
         
         return success_response(
             data=data,
-            message=f"成功指派{updated_count}个文件到店铺{shop_id}"
+            message=message
         )
     except Exception as e:
         await db.rollback()

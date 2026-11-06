@@ -574,6 +574,71 @@ def resolve_shop_account_by_identity(
     )
 
 
+async def load_shop_account_identity_candidates_async(
+    session,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """异步版的 :func:`load_shop_account_identity_candidates`（给 ``AsyncSession`` 用）。"""
+    from modules.core.db import ShopAccount, ShopAccountAlias
+
+    account_rows = (
+        await session.execute(
+            select(
+                ShopAccount.id,
+                ShopAccount.shop_account_id,
+                ShopAccount.platform,
+                ShopAccount.main_account_id,
+                ShopAccount.store_name,
+                ShopAccount.platform_shop_id,
+                ShopAccount.shop_region,
+            )
+        )
+    ).mappings().all()
+
+    alias_rows = (
+        await session.execute(
+            select(
+                ShopAccountAlias.shop_account_id.label("shop_account_pk"),
+                ShopAccountAlias.platform,
+                ShopAccountAlias.alias_normalized,
+                ShopAccountAlias.is_active,
+            )
+        )
+    ).mappings().all()
+
+    return [dict(row) for row in account_rows], [dict(row) for row in alias_rows]
+
+
+async def resolve_shop_account_by_identity_async(
+    session,
+    *,
+    platform_code: Optional[str] = None,
+    source_platform: Optional[str] = None,
+    platform_shop_id: Optional[str] = None,
+    store_name: Optional[str] = None,
+    shop_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """异步版的 :func:`resolve_shop_account_by_identity`（给 ``AsyncSession`` 用）。
+
+    纯匹配逻辑复用同一个 :func:`match_shop_account_by_identity`，这里只负责把
+    候选行读出来 —— 查不到或查到多个同样返回 ``None``（**不猜**）。
+    """
+    try:
+        accounts, aliases = await load_shop_account_identity_candidates_async(session)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[CatalogScanner] 读取店铺账号候选失败(异步), 跳过身份反查: %s", exc)
+        return None
+
+    return match_shop_account_by_identity(
+        accounts,
+        aliases,
+        platform_code=platform_code,
+        source_platform=source_platform,
+        platform_shop_id=platform_shop_id,
+        store_name=store_name,
+        shop_id=shop_id,
+    )
+
+
 def _apply_resolved_shop_account(
     session,
     standard_identity: Optional[Dict[str, Any]],
@@ -1232,9 +1297,13 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                                 existing_meta['shop_resolution'] = shop_resolution_meta
                                 existing.file_metadata = existing_meta
                         
-                        # 状态更新:若之前是needs_shop且现在解析到了,则改为pending
-                        if existing.status == 'needs_shop' and initial_shop_id:
-                            existing.status = 'pending'
+                        # 状态更新:若之前是needs_shop(店铺身份不完整)且现在身份补齐了,则改为pending
+                        # [*] P2-1: needs_shop 同时也是「入库身份门禁拒收」的终态(缺 shop_account_id)。
+                        #          只有 shop_account_id 真的补上了才放行, 否则会在
+                        #          「扫描 -> 入库 -> 拒收 -> needs_shop」之间反复空转。
+                        if existing.status == 'needs_shop':
+                            if existing.shop_account_id:
+                                existing.status = 'pending'
                         elif not initial_shop_id and existing.status == 'pending':
                             existing.status = 'needs_shop'
 
@@ -1610,8 +1679,11 @@ def register_single_file(file_path: str) -> Optional[int]:
                     existing_meta['shop_resolution'] = shop_resolution_meta
                     existing.file_metadata = existing_meta
             
-            if existing.status == 'needs_shop' and initial_shop_id:
-                existing.status = 'pending'
+            # [*] P2-1: 同 scan_catalog —— needs_shop 现在也是「入库身份门禁拒收」的终态,
+            #          只有 shop_account_id 补齐了才放回 pending(否则会空转)。
+            if existing.status == 'needs_shop':
+                if existing.shop_account_id:
+                    existing.status = 'pending'
             elif not initial_shop_id and existing.status == 'pending':
                 existing.status = 'needs_shop'
 

@@ -292,6 +292,63 @@ def apply_template_blocked_state(
     return target_status
 
 
+# ── 「缺稳定店铺身份」的终态归属 ───────────────────────────────────────
+#
+# 「文件没有稳定身份编号(shop_account_id)」和「无模板」一样, 是**确定性终态** ——
+# 重试不会让 ``shop_account_id`` 凭空出现, 只能靠人工补身份。
+#
+# 如果不落终态而是落 ``failed``:
+#   ``CloudSyncAutoRecoveryService.recover_failed_catalog_files`` 只捞
+#   ``error_code`` 属于瞬时故障集合的文件 —— 身份缺失不在里面, 所以不会自愈重试;
+#   但 ``failed`` 这个状态本身语义是「上次同步失败, 可重试」,
+#   会让人以为再试一次就能过, 而实际上重试必然再失败。
+#
+# 所以复用系统里**已经存在**的 ``needs_shop``(店铺归属待人工指派):
+#   * 它在 ``modules/core/catalog_status.py`` 的合法状态集合里(数据库有 CHECK 约束);
+#   * 前端文件列表已有展示(「需要指派店铺」);
+#   * ``resolve_file_disposition`` 已经把它映射成
+#     ``FILE_STATE_NEEDS_SHOP`` / ``FILE_ACTION_MANUAL_REPAIR`` / 需人工;
+#   * 自动入库只捞 ``status == 'pending'``, 所以**不会**形成无限重试闭环。
+def resolve_identity_blocked_catalog_status() -> str:
+    """「缺稳定店铺身份」的文件该落到哪个 ``catalog_files.status``。"""
+    return CATALOG_FILE_STATUS_NEEDS_SHOP
+
+
+def apply_identity_blocked_state(
+    catalog_file: Any,
+    *,
+    reason: str,
+    skip_reason: Optional[str] = None,
+) -> str:
+    """把「缺稳定店铺身份」的文件落到 ``needs_shop`` 终态(纯写库, 不做 IO)。
+
+    与 :func:`apply_template_blocked_state` 同构, 但额外写
+    ``catalog_files.auto_ingest_skip_reason`` —— 那一列的语义就是
+    「自动入库跳过原因」, 正好用来记门禁拒收的原因码。
+    """
+    meta = (
+        catalog_file.file_metadata
+        if isinstance(getattr(catalog_file, "file_metadata", None), dict)
+        else {}
+    )
+    auto_meta = meta.get("auto_ingest")
+    if not isinstance(auto_meta, dict):
+        auto_meta = {}
+    auto_meta["last_status"] = CATALOG_FILE_STATUS_NEEDS_SHOP
+    auto_meta["last_reason"] = reason
+    # [*] 释放认领: 不清掉的话, 看门狗会把「自己认领的文件」当成别人正在跑的任务。
+    auto_meta["current_task_id"] = None
+    if skip_reason:
+        auto_meta["last_skip_reason"] = skip_reason
+    meta["auto_ingest"] = auto_meta
+    catalog_file.file_metadata = meta
+    catalog_file.status = CATALOG_FILE_STATUS_NEEDS_SHOP
+    catalog_file.error_message = reason
+    if skip_reason and hasattr(catalog_file, "auto_ingest_skip_reason"):
+        catalog_file.auto_ingest_skip_reason = skip_reason
+    return CATALOG_FILE_STATUS_NEEDS_SHOP
+
+
 def _disposition(
     file_state: str,
     *,

@@ -55,6 +55,9 @@ from backend.services.operational_data_importer import (
 # [*] v4.6.0 DSS架构:使用RawDataImporter写入JSONB格式
 from backend.services.raw_data_importer import get_raw_data_importer
 from backend.services.deduplication_service import DeduplicationService
+from backend.services.shop_identity_gate_service import (
+    evaluate_shop_identity_gate,
+)  # [*] P2-1 入库身份硬门禁
 from backend.services.currency_extractor import (
     get_currency_extractor,
 )  # [*] v4.15.0新增
@@ -528,6 +531,40 @@ class DataIngestionService:
                         f"[Ingest] [v4.18.1] 文件级别shop_id为空,稳定身份编号回退为{file_shop_id}"
                         f"(将使用数据库账号主数据进行关联)"
                     )
+
+                # [*] P2-1 入库身份硬门禁: 店铺数据必须带稳定身份戳, 否则拒收。
+                # 放在**盖戳之前**, 才能保证「缺戳的数据根本不落库」。
+                # 拒收不是错误, 是「等人工补身份」—— 文件会落到 needs_shop 终态,
+                # 由调用方(data_sync_service)统一写终态, 这里只负责判定与返回。
+                identity_decision = evaluate_shop_identity_gate(
+                    file_record=file_record,
+                    domain=domain,
+                    rows=enhanced_rows,
+                )
+                if not identity_decision.allowed:
+                    logger.error(
+                        f"[Ingest] [P2-1] 身份门禁拒收: file_id={file_id}, "
+                        f"file_name={getattr(file_record, 'file_name', None)}, "
+                        f"reason={identity_decision.skip_reason}, "
+                        f"detail={identity_decision.detail}"
+                    )
+                    return {
+                        "success": False,
+                        "message": identity_decision.message,
+                        "staged": 0,
+                        "imported": 0,
+                        "amount_imported": 0,
+                        "quarantined": 0,
+                        "skipped": True,
+                        "skip_reason": identity_decision.skip_reason,
+                        "identity_blocked": True,
+                        "image_extraction_started": False,
+                        "normalization_report": (
+                            normalization_report
+                            if "normalization_report" in locals()
+                            else {}
+                        ),
+                    }
 
                 # 批量应用到所有行(静默处理,不逐行输出日志)
                 for row in enhanced_rows:
