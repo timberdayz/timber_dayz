@@ -89,7 +89,11 @@ test("平台 SKU 利润测算通过候选 SKU 自动加载而不是新增经营�
   assert.match(source, /listPlatformSkuProfitCandidates/);
   assert.match(source, /previewOperatingRow/);
   assert.match(source, /预计广告费用/);
-  assert.match(source, /重估利润/);
+  // 「重估利润」→「混合成本利润」：物流是真实账单、仓储是规则预估，不是全实际
+  assert.match(source, /混合成本利润/);
+  assert.match(source, /混合成本完整度/);
+  assert.doesNotMatch(source, /重估利润/);
+  assert.doesNotMatch(source, /重估完整度/);
   assert.match(api, /platform-sku-profit\/candidates/);
   assert.match(api, /platform-sku-profit\/preview/);
 });
@@ -117,7 +121,10 @@ test("平台 SKU 利润测算按平台、仓库和运输方式自动计算参考
   assert.match(source, /v-model="operatingQuery\.transport_type"/);
   assert.match(source, /参考物流/);
   assert.match(source, /参考仓储/);
-  assert.match(source, /未录入\/参考回退/);
+  // 「实际仓储」列已删除：它恒为 null（系统里没有仓储费账单，只有规则预估），
+  // 展示一个恒空列只会误导。回退信息折进「混合成本利润」的 tooltip。
+  assert.doesNotMatch(source, /label="实际仓储"/);
+  assert.match(source, /规则预估/);
   assert.doesNotMatch(source, /v-model="row\.expected_logistics_cost"/);
   assert.doesNotMatch(source, /v-model="row\.expected_storage_cost"/);
   assert.match(source, /transport_type: operatingQuery\.transport_type/);
@@ -274,4 +281,94 @@ test("仓储规则允许当前行保存为自动版本", () => {
   assert.match(source, /storage_rule_versioned|新版本/);
   assert.match(source, /__original/);
   assert.doesNotMatch(source, /v-model="row\.unit_rate_cny"[^\n]*:disabled="!row\.__new"/);
+});
+
+// ---------------------------------------------------------------------------
+// 阶段 0 · 稳定性修复（2026-11-06）
+// 上游设计稿：docs/superpowers/specs/2026-11-06-product-center-caliber-naming-and-roi-design.md §5.4
+// ---------------------------------------------------------------------------
+
+test("9 个可编辑字段都会标脏，改动不会在保存时丢失", () => {
+  // saveSpuRows / saveSkuRows 只提交 dirtyRows 里的行；没标脏的行根本不在 payload 里。
+  // 用「字段 → 后面 260 字符」的切片来断言，失败时只报切片内容，不会把整个源码打出来。
+  const cases = [
+    ["spu_name", "spu"],
+    ["category_l2_code", "spu"],
+    ["biz_status", "spu"],
+    ["owner_user_id", "spu"],
+    ["sku_name", "sku"],
+    ["specification", "sku"],
+    ["weight_kg", "sku"],
+    ["units_per_carton", "sku"],
+  ];
+  for (const [field, kind] of cases) {
+    const at = source.indexOf(`v-model="row.${field}"`);
+    assert.notEqual(at, -1, `找不到字段 ${field}`);
+    const slice = source.slice(at, at + 260);
+    assert.match(
+      slice,
+      new RegExp(`markDirty\\('${kind}', row\\)`),
+      `${field} 应当触发 markDirty('${kind}', row)`,
+    );
+  }
+  // 一级品类：清空二级 + 标脏必须合并成一个 handler（一个 el-select 只能挂一个 @change）
+  assert.match(source, /onSpuL1CategoryChange/);
+  assert.match(
+    source,
+    /onSpuL1CategoryChange = \(row\) => \{[\s\S]{0,200}category_l2_code = "";[\s\S]{0,200}markDirty\("spu", row\)/,
+  );
+  assert.doesNotMatch(source, /@change="row\.category_l2_code = ''"/);
+});
+
+test("物流批次体积换算有实现，且体积缺失会被显式提示而不是静默算 0", () => {
+  assert.match(source, /const formatVolume = \(sku\) =>/);
+  assert.match(source, /unit_volume_cbm/);
+  assert.match(source, /hasVolume/);
+  assert.match(source, /missingVolumeSkus/);
+  assert.match(source, /单件体积未填/);
+});
+
+test("SPU 列表带出已软删的行，软删可恢复", () => {
+  assert.match(source, /include_inactive: true/);
+  assert.match(source, /spuRowClass/);
+  assert.match(source, /spu-inactive-row/);
+  // 「恢复」按钮 / 「删除」禁用 / 选中过滤 / 整行灰显 **全部**依赖 row.active。
+  // 后端响应必须真的下发 active，否则这些判断恒为 false ⇒ 恢复按钮永远不出现。
+  assert.match(source, /v-if="row\.active === false"[\s\S]{0,200}handleRestoreSpu/);
+  assert.match(source, /row\.active === false \? "spu-inactive-row" : ""/);
+  assert.match(api, /listSpus\(params = \{\}\)/);
+  assert.match(api, /listSkus\(params = \{\}\)/);
+});
+
+test("仓储规则写入口按权限隐藏，operator 不会点了报 403", () => {
+  assert.match(source, /canManagePlatformFee/);
+  // 新增按钮
+  const addAt = source.indexOf("addStorageRuleRow");
+  assert.notEqual(addAt, -1);
+  assert.match(source.slice(Math.max(0, addAt - 120), addAt), /v-if="canManagePlatformFee"/);
+  // 操作列：整列 v-if（4 个按钮全都要 admin/manager/finance）
+  const opAt = source.indexOf('label="操作" width="240"');
+  assert.notEqual(opAt, -1);
+  assert.match(
+    source.slice(Math.max(0, opAt - 80), opAt),
+    /<el-table-column v-if="canManagePlatformFee"/,
+  );
+  assert.match(source.slice(opAt, opAt + 400), /saveStorageRule/);
+});
+
+test("SKU 列表提供状态筛选，停用与在售不再混排", () => {
+  assert.match(source, /v-model="skuQuery\.status"/);
+  assert.match(source, /全部状态/);
+  assert.match(source, /value="active"/);
+  assert.match(source, /value="inactive"/);
+});
+
+test("利润测算页不再展示恒为空的实际仓储列", () => {
+  assert.doesNotMatch(source, /label="实际仓储"/);
+  // 实际物流折进混合成本利润的 tooltip
+  assert.match(source, /实际物流|actual_logistics_cost/);
+});
+
+test("完整度列不再拿 configuration_status 兜底", () => {
+  assert.doesNotMatch(source, /configuration_status/);
 });

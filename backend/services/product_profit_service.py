@@ -328,6 +328,11 @@ def build_platform_profit_preview(
             "return_loss": return_loss,
             "damage_loss": damage_loss,
             "profit": expected_profit,
+            # 预估口径的完整度：成本项齐不齐（缺任何一项 → profit 为 None → incomplete）。
+            # ⚠️ 这个键以前**不存在** —— 调用方 `section.get("completeness", "complete")`
+            # 在 expected 段永远取到默认值 "complete"，于是同一列在 estimated 版本写
+            # "complete"、在 actual_recost 版本写 "estimated/mixed/actual"，两种语义混在一列。
+            "completeness": "complete" if complete_inputs else "incomplete",
             "margin_rate": (
                 (expected_profit / revenue).quantize(Decimal("0.00000001"))
                 if expected_profit is not None and revenue
