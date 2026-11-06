@@ -31,7 +31,9 @@ async def test_analytics_monthly_atomic_resolves_shop_account_identity_to_canoni
                         shop_account_id VARCHAR(100) NOT NULL,
                         store_name VARCHAR(200) NOT NULL,
                         platform_shop_id VARCHAR(256),
-                        shop_region VARCHAR(50)
+                        shop_region VARCHAR(50),
+                        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                        business_role VARCHAR(50) NOT NULL DEFAULT 'operating_store'
                     )
                     """
                 )
@@ -144,7 +146,9 @@ async def test_analytics_monthly_atomic_treats_dash_placeholders_as_null_metrics
                         shop_account_id VARCHAR(100) NOT NULL,
                         store_name VARCHAR(200) NOT NULL,
                         platform_shop_id VARCHAR(256),
-                        shop_region VARCHAR(50)
+                        shop_region VARCHAR(50),
+                        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                        business_role VARCHAR(50) NOT NULL DEFAULT 'operating_store'
                     )
                     """
                 )

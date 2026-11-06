@@ -87,7 +87,9 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                         shop_account_id VARCHAR(100) NOT NULL,
                         store_name VARCHAR(200) NOT NULL,
                         platform_shop_id VARCHAR(256),
-                        shop_region VARCHAR(50)
+                        shop_region VARCHAR(50),
+                        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                        business_role VARCHAR(50) NOT NULL DEFAULT 'operating_store'
                     )
                     """
                 )

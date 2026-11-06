@@ -167,7 +167,9 @@ async def _create_orders_b_class_tables(session) -> None:
                 shop_account_id VARCHAR(100) NOT NULL,
                 store_name VARCHAR(200) NOT NULL,
                 platform_shop_id VARCHAR(256),
-                shop_region VARCHAR(50)
+                shop_region VARCHAR(50),
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                business_role VARCHAR(50) NOT NULL DEFAULT 'operating_store'
             )
             """
         )

@@ -93,6 +93,10 @@ BEGIN
                         sa.id::text
                     ) AS resolved_shop_id
                 FROM core.shop_accounts sa
+                -- [*] 2026-11-06: 与正本同步 —— 候选池只收「在营经营店」
+                --     (enabled IS TRUE AND business_role = 'operating_store')。
+                WHERE sa.enabled IS TRUE
+                  AND sa.business_role = 'operating_store'
             ),
             identity_rows AS (
                 SELECT
@@ -100,7 +104,7 @@ BEGIN
                     resolved_shop_id,
                     resolved_shop_account_id,
                     'platform_shop_id'::varchar AS resolution_method,
-                    1 AS resolution_priority,
+                    2 AS resolution_priority,
                     LOWER(candidate_platform_shop_id) AS identity_value_normalized,
                     candidate_platform_shop_id AS identity_source_value,
                     candidate_shop_region AS identity_shop_region
@@ -114,7 +118,7 @@ BEGIN
                     resolved_shop_id,
                     resolved_shop_account_id,
                     'shop_account_id'::varchar AS resolution_method,
-                    2 AS resolution_priority,
+                    1 AS resolution_priority,
                     LOWER(resolved_shop_account_id) AS identity_value_normalized,
                     resolved_shop_account_id AS identity_source_value,
                     candidate_shop_region AS identity_shop_region
@@ -138,6 +142,17 @@ BEGIN
                   ON saa.shop_account_id = asa.shop_account_pk
                  AND saa.is_active = TRUE
                 WHERE NULLIF(TRIM(COALESCE(saa.alias_normalized, '')), '') IS NOT NULL
+                  -- [*] 与正本同步: 别名这一路不得认领任何账号的平台店铺编号
+                  --     (自别名 / 跨账号认领) —— 否则同一串身份值指向两个账号,
+                  --     候选数变 2, 整行落 unknown。
+                  AND NOT EXISTS (
+                        SELECT 1
+                        FROM core.shop_accounts alias_owner
+                        WHERE alias_owner.enabled IS TRUE
+                          AND alias_owner.business_role = 'operating_store'
+                          AND LOWER(NULLIF(TRIM(COALESCE(alias_owner.platform_shop_id, '')), ''))
+                              = LOWER(TRIM(COALESCE(saa.alias_normalized, '')))
+                    )
 
                 UNION ALL
 

@@ -173,7 +173,9 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                         platform_shop_id varchar(256),
                         shop_account_id varchar(256),
                         main_account_id varchar(128),
-                        store_name varchar(256)
+                        store_name varchar(256),
+                        enabled boolean NOT NULL DEFAULT TRUE,
+                        business_role varchar(50) NOT NULL DEFAULT 'operating_store'
                     )
                     """
                 )

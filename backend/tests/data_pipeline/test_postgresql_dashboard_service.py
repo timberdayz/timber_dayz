@@ -1526,7 +1526,9 @@ async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_
                         main_account_id VARCHAR(100),
                         store_name VARCHAR(200),
                         platform_shop_id VARCHAR(256),
-                        shop_account_id VARCHAR(100)
+                        shop_account_id VARCHAR(100),
+                        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                        business_role VARCHAR(50) NOT NULL DEFAULT 'operating_store'
                     )
                     """
                 )
@@ -2956,7 +2958,9 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                         platform VARCHAR(50) NOT NULL,
                         store_name VARCHAR(200) NOT NULL,
                         platform_shop_id VARCHAR(256),
-                        shop_region VARCHAR(50)
+                        shop_region VARCHAR(50),
+                        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                        business_role VARCHAR(50) NOT NULL DEFAULT 'operating_store'
                     )
                     """
                 )
@@ -3218,7 +3222,9 @@ async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate
                         platform VARCHAR(50) NOT NULL,
                         store_name VARCHAR(200) NOT NULL,
                         platform_shop_id VARCHAR(256),
-                        shop_region VARCHAR(50)
+                        shop_region VARCHAR(50),
+                        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                        business_role VARCHAR(50) NOT NULL DEFAULT 'operating_store'
                     )
                     """
                 )
@@ -3403,7 +3409,9 @@ async def test_business_overview_kpi_module_exposes_pv_uv_conversion_rates():
                         store_name VARCHAR(200),
                         platform_shop_id VARCHAR(256),
                         shop_account_id VARCHAR(256),
-                        shop_region VARCHAR(50)
+                        shop_region VARCHAR(50),
+                        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                        business_role VARCHAR(50) NOT NULL DEFAULT 'operating_store'
                     )
                     """
                 )
