@@ -1631,7 +1631,67 @@ Shopee 的底线修复前被低估 **(146.84 − 109.08) / 146.84 = 25.7%**。
 > 不要挂在阶段 2.1 上。
 
 
-### D.6 遗留
+### D.6 合并 main 的产物：迁移链修复（发布级）
+
+阶段 2.1 合并 main（`74a32a53` 店铺身份治理）时暴露了**两处迁移链缺陷**，
+都不是阶段 2.1 的业务代码问题，但**都会卡住发布**，必须在这一轮修掉。
+
+#### D.6.① 两个 head ⇒ `alembic upgrade head` 直接报错
+
+两个分支各自在 `20261114_add_sku_roi_columns` 后面挂了一个新迁移：
+
+| 迁移 | 来源 | 原 `down_revision` |
+|---|---|---|
+| `current_schema_20261115_add_sku_platform_pricing` | 阶段 2.1（本分支） | `20261114_add_sku_roi_columns` |
+| `current_schema_20261116_add_tiktok_export_store_name_aliases` | main（店铺身份治理） | `20261114_add_sku_roi_columns` |
+
+⇒ 合并后是**兄弟节点** ⇒ **两个 head** ⇒ `alembic upgrade head` 报
+`Multiple head revisions` ⇒ **迁移链必须是单 head**（仓库规则），发布阻塞。
+
+**改法**：把 `20261116` 的 `down_revision` 改挂到 `20261115` 后面，
+恢复**日期序单链** `11 → 12 → 13 → 14 → 15 → 16 → 17`。
+
+**为什么安全**（生产库 2026-11-07 只读核查实测）：
+生产库的 `public.current_schema_alembic_version` 仍停在
+`current_schema_20261111_add_refresh_queue_domain_and_retry`
+⇒ **12 / 13 / 14 / 16 / 17 都还没上过生产**
+⇒ 生产升级时按新链序依次执行 ⇒ 不会出现「已经是 17 却漏掉 15」的情况。
+
+#### D.6.② `alembic downgrade` 不可用（`IndexError`）
+
+`20261117_remediate_shopee_row_identity_conflicts.py` 的 `_UPDATE_SQL` /
+`_ROLLBACK_SQL` 在**模块加载时**已经 `.format(table="{table}", audit_key=...)` 过一次
+⇒ 模板里的 `{{}}` 已经变成**字面 `{}`**（JSONB 空对象）。
+运行期再走一次 `.format(table=table)`，那个裸 `{}` 会被当成**自动编号字段**：
+
+```
+IndexError: Replacement index 0 out of range for positional args tuple
+```
+
+⇒ **`alembic downgrade` 直接炸、回滚不可用**（已实测复现）。
+仓库规则要求 `upgrade` / `downgrade` 都写，§9.2 验证清单要求「迁移三步可重复」。
+
+**改法**：运行期一律用 `.replace("{table}", table)`，
+与守护测试 `backend/tests/data_pipeline/test_shopee_row_identity_remediation.py`
+的 `_update_sql` / `_rollback_sql` 本来就有的口径**一致**（`upgrade()` / `downgrade()` 两处）。
+
+> ⚠️ 这两处改的是**另一个会话的迁移文件**，但属于**发布级阻塞**，已在本阶段一并修掉。
+> 修法是「让运行期格式化方式与模块加载期对齐」，不改任何业务语义。
+
+#### D.6.③ 修完后的验证结果
+
+| 项 | 结果 |
+|---|---|
+| `alembic heads` | **单 head**：`current_schema_20261117_remediate_shopee_row_identity_conflicts` |
+| `downgrade -1` → `upgrade head` | ✅ 还原 1,946 行（18 + 1,909 + 19）→ 重订正 1,946 行 |
+| 整链往返 `downgrade → 20261114` → `upgrade head` | ✅ `17→16→15→14→15→16→17` 全绿，退出码 0 |
+| 开发库结构 | `finance.sku_platform_pricing` 12 列 / 0 行；`ops.price_adjust_baselines` PK = `(sku_id, platform_code)`；基线 tiktok 1121 + shopee 1，`platform_code` 无 NULL；`core.dim_erp_sku.min_selling_price_override` 非空 0 条 |
+| 商品中心域定向测试 | 15 文件 **259 passed** |
+| 店铺身份域定向测试 | 23 文件 **194 passed** |
+| 合计 | **453 passed / 0 failed**（上一次是 299 passed / 1 failed，那 1 条就是 D.6.② 的缺陷） |
+| `python scripts/run_lint.py` | 退出码 0 |
+
+### D.7 遗留
 
 | 项 | 说明 |
 |---|---|

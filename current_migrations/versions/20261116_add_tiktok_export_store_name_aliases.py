@@ -71,7 +71,19 @@ import sqlalchemy as sa
 
 
 revision = "current_schema_20261116_add_tiktok_export_store_name_aliases"
-down_revision = "current_schema_20261114_add_sku_roi_columns"
+# ⚠️ 2026-11-07 合并修正：本迁移原本挂在 ``20261114_add_sku_roi_columns`` 下面，
+# 与阶段 2.1 的 ``20261115_add_sku_platform_pricing`` 成了**兄弟节点** ⇒
+# 两个 head ⇒ ``alembic upgrade head`` 直接报错（"Multiple head revisions"）。
+#
+# 改挂到 ``20261115`` 之后：迁移链恢复成**日期序**的单链
+# 11 → 12 → 13 → 14 → 15 → 16 → 17。
+#
+# 为什么安全（生产库实测，2026-11-07 只读核查）：
+# 生产库的 ``public.current_schema_alembic_version`` 仍停在
+# ``current_schema_20261111_add_refresh_queue_domain_and_retry``
+# ⇒ 12/13/14/16/17 **都还没上过生产** ⇒ 生产升级时会按新链序依次执行，
+# 不会出现「已经是 17 却漏掉 15」的情况。
+down_revision = "current_schema_20261115_add_sku_platform_pricing"
 branch_labels = None
 depends_on = None
 

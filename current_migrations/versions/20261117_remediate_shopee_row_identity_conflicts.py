@@ -192,6 +192,17 @@ _UPDATE_SQL = """
 
 
 #: 回滚语句: 从留痕还原 4 个身份字段, 并删掉留痕键。
+#:
+#: ⚠️ 2026-11-07 修正：**模板里只能有「一次」格式化**。
+#: 这段 SQL 在模块加载时已经 ``.format(table="{table}", audit_key=...)`` 过一次
+#: ⇒ 里面的 ``{{}}`` 已经变成字面 ``{}``（JSONB 空对象）。
+#: 如果运行期再走一次 ``.format(table=table)``，那个裸 ``{}`` 会被当成
+#: **自动编号字段** ⇒ ``IndexError: Replacement index 0 out of range for
+#: positional args tuple`` ⇒ ``alembic downgrade`` 直接炸、回滚不可用。
+#:
+#: 所以运行期一律用 ``.replace("{table}", table)``（守护测试
+#: ``backend/tests/data_pipeline/test_shopee_row_identity_remediation.py``
+#: 的 ``_update_sql`` / ``_rollback_sql`` 本来就是这么写的，两边口径一致）。
 _ROLLBACK_SQL = """
     UPDATE {table} r
     SET
@@ -227,7 +238,7 @@ def upgrade() -> None:
             continue
 
         result = _bind().execute(
-            sa.text(_UPDATE_SQL.format(table=table))
+            sa.text(_UPDATE_SQL.replace("{table}", table))
         )
         changed = int(result.rowcount or 0)
 
@@ -281,7 +292,7 @@ def downgrade() -> None:
         if not _table_exists(table):
             continue
         result = _bind().execute(
-            sa.text(_ROLLBACK_SQL.format(table=table))
+            sa.text(_ROLLBACK_SQL.replace("{table}", table))
         )
         changed = int(result.rowcount or 0)
         total += changed
