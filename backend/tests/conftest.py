@@ -422,6 +422,9 @@ PRICING_SEED_CLEANUP_SQL = (
     "DELETE FROM finance.logistics_provider_rules WHERE logistics_provider = 'TEST-LOG'",
     "DELETE FROM finance.warehouse_storage_rules WHERE warehouse_code = 'MY-01'",
     "DELETE FROM core.bridge_spu_sku WHERE sku_id = 9001",
+    # 平台级人工覆盖（阶段 2.1b）：这行一旦留着，下一个用例算出来的底线
+    # 就是被覆盖过的值（20.00 而不是成本线）⇒ 断言会莫名其妙地挂。
+    "DELETE FROM finance.sku_platform_pricing WHERE sku_id = 9001",
     "DELETE FROM core.dim_erp_sku WHERE sku_id = 9001",
     "DELETE FROM core.dim_spu WHERE spu = 'TEST-SPU-1'",
     "DELETE FROM core.dim_warehouses WHERE warehouse_code = 'MY-01'",

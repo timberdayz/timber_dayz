@@ -247,7 +247,17 @@ def compute_pricing_state(
 
     # 人工覆盖：平台级（SKU × 平台）。以前还有一段「回落 SKU 级旧列」，
     # 阶段 2.1b 起那列已删（口径错位 + 会被同步 TRUNCATE 抹掉）。
-    override = resolve_pricing_override(context, sku_row.sku_id, platform_code)
+    #
+    # ⚠️ 必须用**实际生效的平台代码**去查覆盖，不能用调用方传的原始值：
+    #    调用方不传平台时，费率走的是回落后的 basis 平台（见上面的 `platform`），
+    #    而覆盖如果按 None 查 ⇒ 找不到 ⇒ **人工覆盖被静默忽略**。
+    #    这两处必须是**同一个平台**，否则「覆盖值设了却不生效」，
+    #    运营会以为系统坏了。`resolve_pricing_platform_code` 出来的就是
+    #    本次算底线实际用的那个平台代码。
+    effective_platform_code = resolve_pricing_platform_code(context, platform_code)
+    override = resolve_pricing_override(
+        context, sku_row.sku_id, effective_platform_code
+    )
 
     pricing = compute_sku_pricing(
         purchase_cost=sku_row.default_purchase_cost,

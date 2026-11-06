@@ -671,11 +671,14 @@ async def test_list_skus_reflects_manual_override_and_creator_commission(
     # 兜底值仍是平台默认，不受 SKU 值影响
     assert row["creator_commission_rate_fallback"] == pytest.approx(0.0606)
 
-    # 人工覆盖值可以低于成本线（人工有权拍板）
+    # 人工覆盖值可以低于成本线（人工有权拍板）。
+    # ⚠️ 阶段 2.1b 起覆盖是 **SKU × 平台** 的量，写在独立接口上，
+    #    不再挂在 SKU 主数据上（一个数套所有平台，口径不对；而且那张表
+    #    会被「采集机 → 云端」同步 TRUNCATE ⇒ 覆盖值每次同步都蒸发）。
     resp = await pg_async_client.patch(
-        "/api/skus/9001",
+        "/api/skus/9001/pricing-override",
         headers=pricing_auth_headers,
-        json={"min_selling_price_override": 20.0},
+        json={"platform_code": "tiktok", "min_selling_price_override": 20.0},
     )
     assert resp.status_code == 200, resp.text
     resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
@@ -684,6 +687,42 @@ async def test_list_skus_reflects_manual_override_and_creator_commission(
     assert row["min_selling_price_source"] == "manual_override"
     assert row["min_selling_price_is_override"] is True
     assert row["min_selling_price_override"] == pytest.approx(20.0, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_manual_override_applies_even_when_platform_is_not_passed(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    """**不传平台**时人工覆盖也要生效（阶段 2.1b 的回归防线）。
+
+    背景：底线的费率在"不传平台"时走的是**回落后的 basis 平台**，
+    而覆盖值如果按"调用方传的原始平台"去查（这里是 None）⇒ 找不到
+    ⇒ **人工覆盖被静默忽略** —— 运营设了覆盖，页面却还是显示成本线，
+    看起来就像系统坏了。两处必须是**同一个平台**。
+    """
+    await pricing_seed()
+
+    resp = await pg_async_client.patch(
+        "/api/skus/9001/pricing-override",
+        headers=pricing_auth_headers,
+        json={"platform_code": "tiktok", "min_selling_price_override": 20.0},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 不带 platform_code 查询 —— 走 basis 平台回落
+    resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
+    row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
+    assert row["min_selling_price"] == pytest.approx(20.0, abs=0.01)
+    assert row["min_selling_price_source"] == "manual_override"
+    assert row["min_selling_price_is_override"] is True
+
+    # 明确按平台查，结果必须与上面**完全一致**（不存在第二份口径）
+    resp = await pg_async_client.get(
+        "/api/skus", headers=pricing_auth_headers, params={"platform_code": "tiktok"}
+    )
+    row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
+    assert row["min_selling_price"] == pytest.approx(20.0, abs=0.01)
+    assert row["min_selling_price_source"] == "manual_override"
 
 
 @pytest.mark.asyncio

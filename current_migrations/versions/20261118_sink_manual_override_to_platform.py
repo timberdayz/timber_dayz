@@ -154,6 +154,21 @@ def _exec_sql_text(sql_text: str) -> None:
         cursor.execute(sql_text)
 
 
+def _clearance_view_exists() -> bool:
+    """清货排名视图在不在（``api.sku_clearance_ranking_module``）。
+
+    用 ``pg_class`` 查而不是 ``has_table``：视图不是表，``has_table`` 对它不灵。
+    """
+    row = op.get_bind().execute(
+        sa.text(
+            "SELECT 1 FROM pg_class t JOIN pg_namespace n ON n.oid = t.relnamespace "
+            "WHERE n.nspname = 'api' AND t.relname = 'sku_clearance_ranking_module' "
+            "AND t.relkind = 'v'"
+        )
+    ).first()
+    return row is not None
+
+
 def _rebuild_clearance_view() -> None:
     """按**正本资产**重建清货排名视图。
 
@@ -167,7 +182,16 @@ def _rebuild_clearance_view() -> None:
 
     正本资产里那一列已经被去掉（人工覆盖改由 Python 侧按平台加载），
     所以重建后视图的列数会少一列 —— 这正是本阶段要的口径。
+
+    ⚠️ **视图不存在就跳过**（而不是硬重建）：
+    视图的正文查 ``mart.inventory_state``，而 ``mart.*`` 是数据管道物化出来的表、
+    **不在 ORM 元数据里** ⇒ 一套"从 ORM 建库"的全新环境（以及隔离测试库）
+    里根本没有它 ⇒ 重建视图会直接报 UndefinedTable，把整条迁移卡死。
+    而视图本来就不存在 ⇒ 旧列也压根没有被它引用 ⇒ 直接删列即可。
     """
+    if not _clearance_view_exists():
+        print("[WARN] 清货排名视图不存在，跳过视图重建（无对象引用旧列）")
+        return
     asset_path = REPO_ROOT / CLEARANCE_VIEW_ASSET
     if not asset_path.is_file():
         print("[WARN] 资产文件缺失，跳过视图重建：{0}".format(CLEARANCE_VIEW_ASSET))
@@ -176,7 +200,15 @@ def _rebuild_clearance_view() -> None:
 
 
 def _restore_old_clearance_view() -> None:
-    """回滚：把带旧列的旧视图定义装回去。"""
+    """回滚：把带旧列的旧视图定义装回去。
+
+    ⚠️ 视图本来就不存在时**不装** —— 回滚要把库恢复成"升级前的样子"，
+    而不是凭空多出一个视图；而且旧视图正文同样查 ``mart.inventory_state``，
+    在没有 mart 表的环境里建它必然失败。
+    """
+    if not _clearance_view_exists():
+        print("[WARN] 清货排名视图不存在，跳过旧视图恢复")
+        return
     _exec_sql_text(_OLD_CLEARANCE_VIEW_SQL)
 
 
