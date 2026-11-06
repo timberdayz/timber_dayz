@@ -626,6 +626,13 @@ const roiGuarded = (row) => row.reference_cost_status !== "ready";
 - 迁移回填：把旧列的值**复制到该 SKU 所有经营档案出现过的平台**。
 - 下个大版本删列（删列单独一个迁移，不与本阶段混在一起）。
 
+> ⚠️ **实施调整（2026-11-07）**：**写路径没有在本阶段下沉**，拆到**阶段 2.1b**
+> （覆盖值按平台分行 + SKU 资料页按平台分行 + 删 SKU 级旧列）。
+> 理由：生产库与开发库的 `min_selling_price_override` **均为 0 条** ⇒ 没有运营在用 ⇒
+> 本阶段先只做读路径 + 回落链（新表 → 旧列），行为对运营**完全不变**，
+> 风险最小；等真有人开始按平台调价时再动写入路径。
+> 详见附录 D.2。
+
 **③ `ops.price_adjust_baselines` 主键下沉**
 
 现主键是 `sku_id`（`collection.py:1220`）⇒ 改成 `(sku_id, platform_code)` 复合主键。
@@ -653,11 +660,24 @@ const roiGuarded = (row) => row.reference_cost_status !== "ready";
 | 7 | 库存清货排名 | `sku_clearance_service.py`（12 处引用）+ `sql/api_modules/sku_clearance_ranking_module.sql` | 清货是"这个 SKU 在这个平台降多少" ⇒ 按平台出 |
 | 8 | 前端 | `ProductCenter.vue`（31 处）+ `InventoryAging.vue`（2 处） | 最低售价列移到利润测算 tab；人工覆盖按平台 |
 
+> ⚠️ **实施调整（2026-11-07）**：第 1、8 项的「把最低售价列移走」**没有照做** ——
+> SKU 资料页保留「最低售价」列，改为**加一个「底线按平台」选择器**（列表按所选平台取底线）。
+> 理由：运营现在就在这一页看底线并做人工覆盖，把列搬走等于砍掉他们已有的工作流；
+> 加选择器同样能把「平台口径」显式化，成本更低、风险更小。详见附录 D.2。
+>
+> ⚠️ **实施调整（2026-11-07）**：第 7 项「清货按平台出」的**前提不成立** ——
+> 清货视图的 `platform_code` 来自 `mart.inventory_state`，生产库 1232 行**恒为** `'miaoshou'`
+> （库存来源平台），**不是销售渠道** ⇒ 按行平台查销售平台费率查不到 ⇒
+> 成本线算不出 ⇒ **底线整个消失**（只剩纪律线）。
+> 底线比口径不一致更危险，所以改成两级取费率（行平台是销售平台就用它自己的，
+> 否则回落公司级费率 ⇒ 与改造前**完全一致**）。详见附录 D.2。
+
+
 **Schema**：`backend/schemas/product_center.py`（14 处）、`backend/schemas/inventory.py`（3 处）要加平台维度字段。
 
 #### 4.1.4 迁移
 
-`current_migrations/versions/20260707_add_sku_platform_pricing.py`（幂等范式：`_has_table` / `_has_column` / `_has_index` 守卫，
+`current_migrations/versions/20261115_add_sku_platform_pricing.py`（幂等范式：`_has_table` / `_has_column` / `_has_index` 守卫，
 `upgrade` 与 `downgrade` 都写）。**本阶段有 DDL 变更** —— 仓库规矩是 ORM SSOT 在
 `modules/core/db/schema_parts/`，迁移只负责把库里已有的表对齐到 SSOT。
 
@@ -1428,3 +1448,195 @@ ROI 算出来的保本 ROI 也会跟着错）。改法有两个方向，见 §13
 前端：`node --test frontend/tests/productCenterUi.test.mjs` **41 passed**（新增 5 条）；
 `vite build` ✓（ProductCenter chunk 75.76 kB，较阶段 0 的 73.18 kB +2.58 kB）；
 `ruff` 全绿。
+
+---
+
+## 附录 D · 阶段 2.1 实施记录（2026-11-07 完成）
+
+> 本附录记录**阶段 2.1（底线下沉到「SKU × 平台」）**的实际改动、与原方案的偏离、
+> 实测数据与验证结果。方案正文（§4.1）里对应位置都加了「实施调整」提示，
+> 两边不重复展开，以本附录为准。
+
+### D.1 改动清单
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `backend/services/product_pricing_query_service.py` | 取数层新增 `load_pricing_platforms` / `load_platform_pricing_overrides` / `resolve_pricing_platform` / `resolve_pricing_platform_code` / `resolve_pricing_override`；`load_pricing_context` 增 `platform_codes` 参数，返回 `platforms` 字典 + `priceable_platform_codes` + `overrides`；`compute_pricing_state` / `compute_pricing_for_sku` / `resolve_effective_creator_rate` 增 `platform_code` 参数；人工覆盖回落链 = **新表 → SKU 级旧列** |
+| 2 | `modules/core/db/schema_parts/business.py` | **新建** `SkuPlatformPricing`（`finance.sku_platform_pricing`，12 列，`UNIQUE (sku_id, platform_code)`） |
+| 3 | `modules/core/db/schema.py` | 导出 `SkuPlatformPricing` |
+| 4 | `modules/core/db/schema_parts/collection.py` | `PriceAdjustBaseline` 主键改复合 `(sku_id, platform_code)` |
+| 5 | `current_migrations/versions/20261115_add_sku_platform_pricing.py` | **新建**：建新表 + 基线表加 `platform_code` 并回填 + 换复合主键；`downgrade` 反向（同一 SKU 多平台行只保留平台字典序最小的一条，否则建主键撞重复行） |
+| 6 | `backend/domains/business/routers/product_center.py` | `_compute_sku_min_selling_price` 增 `platform_code`；`list_skus` 增 `platform_code` 查询参数；**候选列表 / 保存护栏 / 落库护栏**全部按请求里的平台算底线；响应带出 `min_selling_price_platform` |
+| 7 | `backend/schemas/product_center.py` | `ProductCenterItem` 与 `PlatformSkuProfitCandidateResponse` 增 `min_selling_price_platform`（**漏声明会被 `extra='ignore'` 静默丢弃**） |
+| 8 | `backend/services/price_adjust_notify_service.py` | `build_context` 增 `platform_code`；`collect_pricing_states` / `load_baselines` 的键改 `(sku_id, platform_code)`；`detect_changes` / `advance_baselines` / `advance_baseline_for_sku` 跟着改 |
+| 9 | `backend/tasks/price_adjust_notify_tasks.py` | 去重键改 `sku_id:platform_code`（`_business_key`）；payload 带 `platform_code` |
+| 10 | `backend/services/feishu_projection_service.py` | 调价记录表加「平台」列；回写基线传 `platform_code` |
+| 11 | `backend/services/inventory/sku_clearance_service.py` | `_load_platform` → `_load_pricing_platforms`（返回「各销售平台费率 + 公司级兜底平台」）；`_build_item` 按行自己的平台取费率，取不到回落兜底（见 D.2-①） |
+| 12 | `frontend/src/domains/business/views/ProductCenter.vue` | SKU 资料页加「底线按平台」选择器；`listSkus` 传 `platform_code`；两处最低售价口径提示改为按平台 |
+| 13 | `backend/tests/test_sku_platform_pricing.py` | **新建** 17 条（§4.1.5 六条 + 口径补充 + 迁移幂等 + 护栏端到端） |
+| 14 | `backend/tests/test_price_adjust_notification.py` | 基线键改 `(1, "tiktok")`；`_state` 带 `platform_code`；SQLite fixture 补 `finance.sku_platform_pricing` |
+| 15 | `backend/tests/data_pipeline/test_sku_clearance_ranking.py` | 打桩改新接口；**+2 条**（行平台回落公司级 / 行平台用自己的费率） |
+| 16 | `backend/tests/conftest.py` | 定价种子清理清单加 `shopee` 平台（PG 容器是 session 级，不清理会撞下一条用例） |
+| 17 | `frontend/tests/productCenterUi.test.mjs` | **+4 条**（45 条全绿） |
+
+### D.2 与原方案不同的四处（实施时修正）
+
+**① 清货排名：视图粒度是「库存来源平台」，不是销售渠道**
+
+原方案 §4.1.3 第 7 项写的是「清货是『这个 SKU 在这个平台降多少』⇒ 按平台出」。
+**这个前提在数据上不成立**：
+
+- 清货视图 `api.sku_clearance_ranking_module` 的 `platform_code` 来自
+  `mart.inventory_state.platform_code`；
+- 生产库该表 1232 行**恒为** `'miaoshou'`（库存来源平台 = 妙手 ERP），**不是** tiktok / shopee；
+- `core.dim_platforms` 里 `'miaoshou'` 的 `platform_role = 'source'`、`other_cost_rate` 为 NULL。
+
+所以「按行平台查销售平台费率」会**查不到** ⇒ 没有 `other_cost_rate` ⇒ 成本线算不出来 ⇒
+**底线整个消失**（只剩纪律线）。而**底线比口径不一致更危险**：口径不一致只是数字难看，
+底线消失是护栏形同虚设 —— 正好是本阶段要修的那个病（方向是偏松 ⇒ 放行本该拦住的品）。
+
+**改法**：两级取费率（`sku_clearance_service._build_item`）
+
+1. 行里的 `platform_code` **是销售平台** ⇒ 用它自己的费率；
+2. 行里是**库存来源平台**（今天的生产数据）⇒ 回落**公司级**费率
+   （规则表 basis 平台，与本阶段改造前**完全一致** ⇒ 零行为变化）。
+
+SQL 视图**不用改**。新增 2 条用例把这条钉死
+（`test_row_platform_falls_back_to_company_rates_for_inventory_source_rows` /
+`test_row_platform_uses_its_own_rates_when_it_is_a_sales_platform`）。
+
+> 这条也说明：**「底线按平台」不是一个能一刀切的口径**。
+> 凡是数据粒度里**没有销售渠道**的报表，底线只能是公司级的 ——
+> 硬套平台口径只会把底线算没。
+
+**② SKU 资料页保留「最低售价」列，改加「底线按平台」选择器**
+
+原方案说「底线的展示移到利润测算 tab，SKU 资料 tab 只留人工覆盖，按平台分行」。
+实际做的是：SKU 资料页**保留**最低售价列，加一个平台选择器（列表按所选平台取底线），
+并在列下方明写「底线按 X 的成本率计算」「人工覆盖是公司级的，对所有平台生效」。
+
+理由：运营现在就在这一页看底线并做人工覆盖，把列搬走等于砍掉他们已有的工作流；
+而「让平台口径显式化」这个目的，用一个选择器就能达到，成本更低、风险更小。
+
+**③ 人工覆盖的「写路径」没有在本阶段下沉**（拆到阶段 2.1b）
+
+本阶段只做了**读路径 + 回落链**：新表有行就用新表，没有就回落 SKU 级旧列。
+写入仍然写旧列。理由：
+
+- 生产库与开发库的 `core.dim_erp_sku.min_selling_price_override` **均为 0 条** ⇒
+  现在没有运营在用这一列 ⇒ 本阶段不碰写入路径，对运营**行为完全不变**；
+- 等真有人开始按平台调价时再动写入路径（阶段 2.1b：覆盖值按平台分行 +
+  SKU 资料页按平台分行 + 删 SKU 级旧列）。
+
+> ⚠️ 代价要说清楚：这样一来，**人工覆盖仍然是公司级的**（对所有平台生效），
+> 只有**系统算出来的底线**是平台级的。界面上已明写这一点，避免误读。
+
+**④ 「可定价平台」的定义** = `platform_role = 'sales'` **AND** `other_cost_rate IS NOT NULL`
+
+`amazon` 是销售平台但三个费率全 NULL（生产库实测）⇒ 算不出底线（成本线分母里缺
+`other_cost_rate`）⇒ 建了基线也是一列 NULL ⇒ **不跟踪**，等它配了费率再进来。
+`source` / `test` 平台（妙手、验证码测试账号）没有对外售价，不参与。
+
+### D.3 核心修复实测（开发库）
+
+SKU `751`「XH-MC-吸鼻器」（采购成本 40.00，SPU `XH-BABY-MC` 退货损失 3.5% / 货损 1.5%，
+日常档 目标利润率 25% / 折扣 10%），开发库迁移已生效：
+
+| | 底线 | 来源 |
+|---|---|---|
+| **修复后** · TikTok（other 27.27% / 达人 6.06%） | **109.08** | cost_floor |
+| **修复后** · Shopee（other 41.65% / 达人 1.11%） | **146.84** | cost_floor |
+| **修复前**（两个平台都用 basis 平台 tiktok 的费率） | 109.08 / 109.08 | cost_floor |
+
+⇒ 同一个 SKU 在两个平台**终于有两条不同的底线**；
+Shopee 的底线修复前被低估 **(146.84 − 109.08) / 146.84 = 25.7%**。
+
+生产库的偏差更大（§11.2② 实测）：SKU `166851422928` 的 Shopee 底线
+59.29 vs 应有的 103.36，**偏低 74.3%**。
+
+### D.4 测试
+
+| 文件 | 条数 | 对应 §4.1.5 |
+|---|---|---|
+| `backend/tests/test_sku_platform_pricing.py` | **17（新建）** | 六条全覆盖 + 口径补充 |
+| `backend/tests/data_pipeline/test_sku_clearance_ranking.py` | +2 | D.2-① 的两条钉死用例 |
+| `backend/tests/test_price_adjust_notification.py` | 38（改基线键） | 第 4 条（基线粒度） |
+| `frontend/tests/productCenterUi.test.mjs` | **45**（+4） | 平台选择器 / 列表传参 / 口径提示 / 删掉过时文案 |
+
+`test_sku_platform_pricing.py` 的六条对应：
+
+| §4.1.5 | 用例 |
+|---|---|
+| ① 同一 SKU 两平台两条底线 | `test_same_sku_has_one_floor_per_platform`、`test_each_platform_uses_its_own_rate`（**逐条手算验算**，不只比大小） |
+| ② 取数层返回两个平台费率 | `test_pricing_context_exposes_both_platforms_rates`、`test_floor_no_longer_follows_the_policy_basis_platform`（**改规则表 basis 平台，底线一条都不变** —— 钉死「basis 平台不再决定费率」） |
+| ③ 人工覆盖新表读写 + 回落旧列 | `test_new_table_override_is_scoped_to_its_platform`、`test_new_table_override_wins_over_the_legacy_sku_column`、`test_legacy_sku_level_override_is_the_fallback_for_every_platform`、`test_override_is_flagged_as_manual_override` |
+| ④ 基线 `(sku_id, platform_code)` 粒度 | `test_baselines_are_keyed_by_sku_and_platform`、`test_price_change_on_one_platform_does_not_notify_the_other`（**Shopee 变价只报 Shopee**）、`test_platform_is_recorded_in_the_attribution_context` |
+| ⑤ 迁移幂等 + downgrade | `test_migration_is_chained_on_the_current_head`、`test_migration_guards_every_object`、`test_migration_is_repeatable_and_rolls_back_cleanly`（**真实 PG 上跑 upgrade×2 → downgrade → upgrade**）、`test_migration_backfills_the_baseline_platform` |
+| ⑥ 护栏按平台 | `test_guardrail_uses_the_floor_of_the_requested_platform`（**同一个价格 35.00：TikTok 放行 201、Shopee 拦下 422**）、`test_candidate_list_reports_the_floor_of_the_selected_platform` |
+
+### D.5 全量回归对比（worktree vs main，同一份文件清单）
+
+| | worktree（阶段 2.1） | main 基线（`1e61a3c9`） |
+|---|---|---|
+| 测试文件数 | **672** | 671（差 1 = 本阶段新增的 `test_sku_platform_pricing.py`） |
+| 覆盖到的测试模块 | **705** | 704（差 1 同上） |
+| 用例总数 | **4783** | 4765（差 18 = 新增 17 条 + 1 条抖动用例） |
+| 通过 | **4629** | 4612 |
+| 失败 | **125** | 124 |
+| 错误 | **22** | 22 |
+| 跳过 | **7** | 7 |
+| 失败/错误去重条数 | **147** | 146 |
+
+**逐条对比失败清单**：
+
+| 差异 | 条数 | 明细 |
+|---|---|---|
+| worktree **新增**的失败（本次引入的回归） | **0** | —— |
+| main 有、worktree 没有 | **1** | `test_field_mapping_template_timestamp_defaults_migration_contract::test_field_mapping_template_timestamp_migration_repairs_drifted_postgres_table` —— **抖动，不是修复**：单独复跑该文件在 worktree 上 **3/3 通过**（连跑两次都是），失败只在「同进程里跟着别的迁移契约测试一起跑」时出现 |
+
+> **两侧剩余的 147 / 146 条失败全部落在商品中心域之外**（Shopee 导出组件约 40 条、
+> HR/绩效/任务中心、SQLite 建表 `unknown database ops`、迁移契约的 PG 漂移用例、
+> legacy 启动入口等），与阶段 0 / 阶段 1 的基线一致，属于仓库既有问题（见 §B.9）。
+
+**商品中心域相关：0 失败** —— `test_sku_platform_pricing.py` 17、`test_price_adjust_notification.py` 38、
+`test_product_pricing_guardrails.py`、`test_platform_sku_profit_workbench.py` 14、
+`test_product_profit_calculator.py`、`test_product_center_schema_contract.py`、
+`test_sku_clearance_ranking.py` 26、`test_product_center_sync_contract.py` 6、
+`test_profit_basis_schema_contract.py` 2 全绿。
+
+前端：`node --test frontend/tests/productCenterUi.test.mjs` **45 passed**（新增 4 条）；
+`vite build` ✓（ProductCenter chunk 76.30 kB，较阶段 1 的 75.76 kB +0.54 kB）；
+`python scripts/run_lint.py` 退出码 0。
+
+#### D.5.1 这次的全量回归为什么换了跑法（阶段 1 是「5 块并行」）
+
+阶段 1 用「5 个大块并行」跑完全量，本阶段**同样的跑法会卡死**：
+某个 67 文件的块跑到 `test_hr_performance_input_routes.py` 时，
+`starlette.testclient` 的阻塞 portal 一直不返回 —— 线程挂着、CPU 不动、**不报错**。
+
+排查结论（py-spy dump 线程栈）：
+
+- 卡住的位置在 **HR 绩效输入路由的 TestClient POST**，与商品中心**完全无关**；
+- **main（不含阶段 2.1 的任何改动）跑同一组文件会以同样方式卡住** ⇒ 不是本次引入；
+- 该文件**单独跑 23 秒通过**；二分到 4 个文件一组也都能过 ⇒ 触发条件是
+  **同进程内若干文件的组合状态**，不是单个文件的问题；
+- 同时还有**另一个会话在跑同一套全量回归**，两边互相拖慢会放大这个现象。
+
+所以本阶段把跑法换成：**10 个子块（每块带超时）→ 超时的块再逐文件跑（每文件带超时）**
+→ 两侧**逐个测试 ID 对比**，而不是只比聚合计数。逐文件跑时 57 + 17 个文件
+全部正常跑完、**0 超时**。
+
+> 顺带记一笔：这属于**仓库既有的测试隔离问题**（共享 PG 容器 + 同进程状态残留），
+> 与商品中心无关，但会让「全量回归」在多会话并发时变得不可靠。建议单独立项修，
+> 不要挂在阶段 2.1 上。
+
+
+### D.6 遗留
+
+| 项 | 说明 |
+|---|---|
+| **阶段 2.1b** | 人工覆盖写入路径下沉到平台级 + SKU 资料页按平台分行 + 删 `core.dim_erp_sku.min_selling_price_override` |
+| 清货排名的平台粒度 | 视图粒度是库存来源平台 ⇒ 底线仍是公司级。要做「按渠道出清货排名」，得先给视图加销售渠道维度（join `finance.sku_operating_profiles`）—— 生产库该表只有 6 行，覆盖率不足以支撑，**暂不做** |
+| `amazon` 无费率 | 销售平台但三个费率全 NULL ⇒ 不可定价、不跟踪。等配了费率自动进 `priceable_platform_codes` |
+| 旧列删列 | `core.dim_erp_sku.min_selling_price_override` 保留一个版本周期，删列单独一个迁移（不与本阶段混） |
+
