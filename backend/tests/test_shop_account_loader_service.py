@@ -44,7 +44,43 @@ def test_shop_account_loader_service_uses_platform_login_entry():
     )
 
 
-def test_shop_account_loader_service_fills_missing_shopee_shop_id_from_override():
+def test_shop_account_loader_service_uses_master_platform_shop_id():
+    service = ShopAccountLoaderService()
+    service._decrypt_password = lambda encrypted: "plain-password"
+
+    payload = service._build_payload(
+        SimpleNamespace(
+            id=1,
+            platform="shopee",
+            main_account_id="hongxikeji:main",
+            username="demo-user",
+            password_encrypted="enc",
+            login_url="https://seller.shopee.cn/account/signin?next=%2Fportal%2Fhome",
+            enabled=True,
+            notes="",
+        ),
+        SimpleNamespace(
+            id=2,
+            platform="shopee",
+            shop_account_id="shopee_my_xhkj13_local",
+            main_account_id="hongxikeji:main",
+            store_name="xhkj13.my",
+            platform_shop_id="1540271744",
+            platform_shop_id_status="confirmed",
+            shop_region="MY",
+            shop_type="local",
+            enabled=True,
+            notes="",
+        ),
+        {"products": True},
+    )
+
+    assert payload["compat_account"]["shop_id"] == "1540271744"
+    assert payload["shop_context"]["platform_shop_id"] == "1540271744"
+
+
+def test_shop_account_loader_service_leaves_shop_id_empty_when_master_missing():
+    """主数据没登记编号 ⇒ 留空;不回退到任何硬编码覆盖表。"""
     service = ShopAccountLoaderService()
     service._decrypt_password = lambda encrypted: "plain-password"
 
@@ -75,8 +111,8 @@ def test_shop_account_loader_service_fills_missing_shopee_shop_id_from_override(
         {"products": True},
     )
 
-    assert payload["compat_account"]["shop_id"] == "1540271744"
-    assert payload["shop_context"]["platform_shop_id"] == "1540271744"
+    assert payload["compat_account"]["shop_id"] == ""
+    assert payload["shop_context"]["platform_shop_id"] is None
 
 
 def test_shop_account_loader_service_exposes_region_and_contact_fields_for_runtime_fingerprint():

@@ -18,7 +18,10 @@ from modules.core.logger import get_logger
 from modules.core.db import ComponentTestHistory
 from backend.services.encryption_service import get_encryption_service
 from backend.services.platform_login_entry_service import normalize_main_account_login_url
-from backend.services.shopee_shop_id_resolver import resolve_shopee_platform_shop_id
+from backend.services.shop_account_identity_service import (
+    pick_master_platform_shop_id,
+    resolve_master_identity_for_account,
+)
 
 logger = get_logger(__name__)
 
@@ -59,12 +62,10 @@ class ComponentTestService:
         except Exception as e:
             logger.warning(f"Normalize login_url failed, use raw: {e}")
             login_url = raw_login_url or ""
-        resolved_shop_id = resolve_shopee_platform_shop_id(
-            platform=platform,
-            account_id=getattr(account, 'account_id', None) or getattr(account, 'shop_account_id', None),
-            store_name=getattr(account, 'store_name', None),
-            platform_shop_id=getattr(account, 'platform_shop_id', None),
-            shop_id=getattr(account, 'shop_id', None),
+        # 平台店铺编号只认主数据 core.shop_accounts.platform_shop_id;
+        # 主数据没登记(账号查无 / 行内为空)就留空, 不回退到任何覆盖表或账号上下文编号。
+        resolved_shop_id = pick_master_platform_shop_id(
+            resolve_master_identity_for_account(account)
         )
         account_info = {
             'account_id': getattr(account, 'account_id', None) or getattr(account, 'shop_account_id', None),

@@ -99,7 +99,9 @@ def test_prepare_account_info_uses_platform_login_entry_for_shopee(monkeypatch):
     )
 
 
-def test_prepare_account_info_fills_missing_shopee_shop_id_from_override(monkeypatch):
+def test_prepare_account_info_leaves_shop_id_empty_when_master_missing(monkeypatch):
+    """主数据没登记编号 ⇒ 编号留空;不再回退到任何硬编码覆盖表。"""
+
     class _FakeAccount:
         account_id = "shopee_my_xhkj1_local"
         platform = "shopee"
@@ -129,11 +131,13 @@ def test_prepare_account_info_fills_missing_shopee_shop_id_from_override(monkeyp
 
     account_info = ComponentTestService.prepare_account_info(_FakeAccount())
 
-    assert account_info["shop_id"] == "1540271739"
-    assert account_info["platform_shop_id"] == "1540271739"
+    assert account_info["shop_id"] == ""
+    assert account_info["platform_shop_id"] == ""
 
 
-def test_prepare_account_info_ignores_invalid_nonnumeric_shopee_shop_id_and_uses_override(monkeypatch):
+def test_prepare_account_info_uses_master_platform_shop_id(monkeypatch):
+    """编号只认主数据 core.shop_accounts.platform_shop_id(原样透传)。"""
+
     class _FakeAccount:
         account_id = "shopee_sg_hx_home_local"
         platform = "shopee"
@@ -149,7 +153,7 @@ def test_prepare_account_info_ignores_invalid_nonnumeric_shopee_shop_id_and_uses
         currency = "CNY"
         shop_region = "SG"
         notes = "demo"
-        platform_shop_id = "xihong"
+        platform_shop_id = "1391124228"
 
     class _FakeEncryptionService:
         def decrypt_password(self, encrypted):  # noqa: ANN001

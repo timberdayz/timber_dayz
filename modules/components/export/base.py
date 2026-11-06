@@ -66,22 +66,25 @@ def build_standard_output_root(
         or account.get("cnsc_shop_id")
         or account.get("platform_shop_id")
     )
-    # 平台特例:TikTok 仅在明确识别到店铺代码时才追加 shop_id;不要回退到 account_id,避免出现“__账号标签”
+    # 平台特例:Shopee 的平台店铺编号只认主数据 core.shop_accounts.platform_shop_id。
+    # 主数据没登记就留空 —— 不回退到账号上下文里的 platform_shop_id / shop_id,
+    # 也不回退到 account_id(那不是店铺编号, 会把账号标签写进目录名)。
     platform_name = str(getattr(ctx, "platform", "")).lower()
     if platform_name == "shopee":
-        from backend.services.shopee_shop_id_resolver import (
-            resolve_shopee_platform_shop_id,
+        from backend.services.shop_account_identity_service import (
+            resolve_master_platform_shop_id_sync,
         )
 
-        shop_id = resolve_shopee_platform_shop_id(
-            platform=platform_name,
-            account_id=account.get("shop_account_id") or account.get("account_id"),
-            store_name=shop_name or account.get("store_name"),
-            platform_shop_id=cfg.get("platform_shop_id") or account.get("platform_shop_id"),
-            shop_id=shop_id,
+        shop_account_id = str(
+            account.get("shop_account_id") or account.get("account_id") or ""
+        ).strip()
+        shop_id = (
+            resolve_master_platform_shop_id_sync(shop_account_id)
+            if shop_account_id
+            else ""
         )
-
-    if not shop_id and platform_name != "tiktok":
+    elif not shop_id and platform_name != "tiktok":
+        # 其它平台保留既有兜底(TikTok 例外: 不允许出现“__账号标签”)
         shop_id = account.get("account_id")
     include_shop_id = get_config_value(
         "data_collection", "path_options.include_shop_id", True

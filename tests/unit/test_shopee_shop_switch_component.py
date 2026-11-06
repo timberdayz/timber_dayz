@@ -20,6 +20,18 @@ def _ctx(
     )
 
 
+def _stub_master_shop_id(monkeypatch, shop_id: str) -> None:
+    """固定「主数据 core.shop_accounts.platform_shop_id」的取值。"""
+
+    async def _fake_resolve(shop_account_id: str) -> str:
+        return shop_id
+
+    monkeypatch.setattr(
+        "backend.services.shop_account_identity_service.resolve_master_platform_shop_id",
+        _fake_resolve,
+    )
+
+
 class _FakeLocator:
     def __init__(self, text: str = "", *, visible: bool = True) -> None:
         self._text = text
@@ -115,9 +127,14 @@ class _UiFallbackPage:
 
 
 @pytest.mark.asyncio
-async def test_shopee_shop_switch_noops_when_url_shop_id_already_matches() -> None:
+async def test_shopee_shop_switch_noops_when_url_shop_id_already_matches(monkeypatch) -> None:
+    _stub_master_shop_id(monkeypatch, "1227491331")
     ctx = _ctx(
-        account={"platform_shop_id": "1227491331", "store_name": "Demo Shop", "shop_region": "SG"},
+        account={
+            "shop_account_id": "shopee_sg_demo_local",
+            "store_name": "Demo Shop",
+            "shop_region": "SG",
+        },
     )
     page = _UrlSwitchPage(
         "https://seller.shopee.cn/datacenter/home?cnsc_shop_id=1227491331",
@@ -134,9 +151,14 @@ async def test_shopee_shop_switch_noops_when_url_shop_id_already_matches() -> No
 
 
 @pytest.mark.asyncio
-async def test_shopee_shop_switch_rewrites_cnsc_shop_id_and_preserves_path_and_query() -> None:
+async def test_shopee_shop_switch_rewrites_cnsc_shop_id_and_preserves_path_and_query(monkeypatch) -> None:
+    _stub_master_shop_id(monkeypatch, "1227491331")
     ctx = _ctx(
-        account={"platform_shop_id": "1227491331", "store_name": "Demo Shop", "shop_region": "SG"},
+        account={
+            "shop_account_id": "shopee_sg_demo_local",
+            "store_name": "Demo Shop",
+            "shop_region": "SG",
+        },
     )
     page = _UrlSwitchPage(
         "https://seller.shopee.cn/datacenter/product/performance?cnsc_shop_id=999&foo=1",
@@ -152,8 +174,12 @@ async def test_shopee_shop_switch_rewrites_cnsc_shop_id_and_preserves_path_and_q
 
 
 @pytest.mark.asyncio
-async def test_shopee_shop_switch_waits_for_delayed_url_shop_id_refresh() -> None:
-    ctx = _ctx(config={"cnsc_shop_id": "1227491331", "shop_name": "Demo Shop"})
+async def test_shopee_shop_switch_waits_for_delayed_url_shop_id_refresh(monkeypatch) -> None:
+    _stub_master_shop_id(monkeypatch, "1227491331")
+    ctx = _ctx(
+        account={"shop_account_id": "shopee_sg_demo_local"},
+        config={"cnsc_shop_id": "1227491331", "shop_name": "Demo Shop"},
+    )
     target_url = "https://seller.shopee.cn/datacenter/home?cnsc_shop_id=1227491331"
     page = _DelayedUrlSwitchPage(
         "https://seller.shopee.cn/datacenter/home?cnsc_shop_id=999",
@@ -168,8 +194,12 @@ async def test_shopee_shop_switch_waits_for_delayed_url_shop_id_refresh() -> Non
 
 
 @pytest.mark.asyncio
-async def test_shopee_shop_switch_fails_when_url_shop_id_cannot_be_confirmed() -> None:
-    ctx = _ctx(config={"cnsc_shop_id": "1227491331", "shop_name": "Demo Shop"})
+async def test_shopee_shop_switch_fails_when_url_shop_id_cannot_be_confirmed(monkeypatch) -> None:
+    _stub_master_shop_id(monkeypatch, "1227491331")
+    ctx = _ctx(
+        account={"shop_account_id": "shopee_sg_demo_local"},
+        config={"cnsc_shop_id": "1227491331", "shop_name": "Demo Shop"},
+    )
     page = _UrlSwitchPage("https://seller.shopee.cn/datacenter/home?cnsc_shop_id=999")
 
     async def _stubborn_goto(url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:

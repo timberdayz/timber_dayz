@@ -37,36 +37,25 @@ class ShopeeShopSwitch:
         except Exception:
             return None
 
-    def _target_shop_id(self) -> str | None:
-        cfg = self.ctx.config or {}
+    async def _target_shop_id(self) -> str | None:
+        """目标店铺编号 = 主数据 core.shop_accounts.platform_shop_id。
+
+        取不到(账号查无 / 主数据未登记)→ 返回 None, 由调用方走「按店名 UI 兜底切换」。
+        绝不回退到 ctx.config / ctx.account 里的来路不明编号。
+        """
         account = self.ctx.account or {}
-        shop_id = str(
-            cfg.get("cnsc_shop_id")
-            or cfg.get("shop_id")
-            or account.get("cnsc_shop_id")
-            or account.get("platform_shop_id")
-            or account.get("shop_id")
-            or ""
+        shop_account_id = str(
+            account.get("shop_account_id") or account.get("account_id") or ""
         ).strip()
-        from backend.services.shopee_shop_id_resolver import (
-            resolve_shopee_platform_shop_id,
+        if not shop_account_id:
+            return None
+
+        from backend.services.shop_account_identity_service import (
+            resolve_master_platform_shop_id,
         )
 
-        resolved = resolve_shopee_platform_shop_id(
-            platform=self.ctx.platform,
-            account_id=account.get("shop_account_id") or account.get("account_id"),
-            store_name=(
-                cfg.get("shop_name")
-                or account.get("store_name")
-                or account.get("selected_shop_name")
-                or account.get("display_shop_name")
-            ),
-            platform_shop_id=cfg.get("platform_shop_id") or account.get("platform_shop_id"),
-            shop_id=shop_id,
-        )
-        if resolved:
-            return resolved
-        return shop_id or None
+        resolved = await resolve_master_platform_shop_id(shop_account_id)
+        return resolved or None
 
     def _rewrite_cnsc_shop_id(self, url: str | None, target_shop_id: str) -> str:
         parts = urlsplit(str(url or ""))
@@ -194,7 +183,7 @@ class ShopeeShopSwitch:
         if not target_shop:
             return ShopSelectResult(success=True, message="no target shop")
 
-        target_shop_id = self._target_shop_id()
+        target_shop_id = await self._target_shop_id()
         current_url = str(getattr(page, "url", "") or "")
         current_shop_id = self._current_shop_id_from_url(current_url)
         if self.logger and target_shop_id:
