@@ -182,6 +182,17 @@
             ><el-option label="在售" value="active" /><el-option
               label="停用"
               value="inactive" /></el-select
+          ><el-select
+            v-model="skuPricingPlatform"
+            clearable
+            placeholder="底线按平台"
+            @change="loadSkus"
+            ><el-option
+              v-for="item in operatingDimensions.platforms || []"
+              :key="item.platform_code"
+              :label="`${item.name || item.platform_code} 底线`"
+              :value="item.platform_code"
+          /></el-select
           ><el-button type="primary" :icon="Plus" @click="addSkuRow"
             >新增行</el-button
           ><el-button
@@ -271,7 +282,7 @@
           ><el-table-column label="参考售价" width="115"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="当前可优惠" width="110"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column
           ><el-table-column label="滞销可优惠" width="110"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column
-          ><el-table-column label="最低售价" width="230"><template #default="{ row }"><div class="pricing-cell"><div class="pricing-cell-head"><span class="readonly-cell" :class="{ 'pending-override': pendingOverride(row) != null }">{{ pendingOverride(row) != null ? `保存后生效：${money(pendingOverride(row))}` : money(row.min_selling_price) }}</span><el-tag v-if="pendingOverride(row) == null" size="small" :type="pricingSourceTagType(row.min_selling_price_source)" :title="PRICING_SOURCE_TOOLTIPS[row.min_selling_price_source]">{{ pricingSourceLabel(row.min_selling_price_source) }}</el-tag><el-button v-if="row.min_selling_price_is_override || row.min_selling_price_override != null" link type="warning" @click="resetMinSellingPrice(row)">重置为自动值</el-button></div><el-input-number v-model="row.min_selling_price_override" :min="0.01" :precision="2" :controls="false" size="small" :placeholder="row.min_selling_price != null ? money(row.min_selling_price) : '自动'" @change="markDirty('sku', row)" /><div class="pricing-tier-hint">{{ row.pricing_tier_label || "-" }}<template v-if="row.pricing_days_since_restock != null">（库龄 {{ row.pricing_days_since_restock }} 天）</template><el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag></div></div></template></el-table-column
+          ><el-table-column label="最低售价" width="230"><template #default="{ row }"><div class="pricing-cell"><div class="pricing-cell-head"><span class="readonly-cell" :class="{ 'pending-override': pendingOverride(row) != null }">{{ pendingOverride(row) != null ? `保存后生效：${money(pendingOverride(row))}` : money(row.min_selling_price) }}</span><el-tag v-if="pendingOverride(row) == null" size="small" :type="pricingSourceTagType(row.min_selling_price_source)" :title="PRICING_SOURCE_TOOLTIPS[row.min_selling_price_source]">{{ pricingSourceLabel(row.min_selling_price_source) }}</el-tag><el-button v-if="row.min_selling_price_is_override || row.min_selling_price_override != null" link type="warning" @click="resetMinSellingPrice(row)">重置为自动值</el-button></div><el-input-number v-model="row.min_selling_price_override" :min="0.01" :precision="2" :controls="false" size="small" :placeholder="row.min_selling_price != null ? money(row.min_selling_price) : '自动'" @change="markDirty('sku', row)" /><div class="pricing-tier-hint">{{ row.pricing_tier_label || "-" }}<template v-if="row.pricing_days_since_restock != null">（库龄 {{ row.pricing_days_since_restock }} 天）</template><el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag></div><div class="pricing-tier-hint">底线按 {{ skuPricingPlatform || '默认平台' }} 的成本率计算</div><div class="pricing-tier-hint">人工覆盖是公司级的，对所有平台生效</div></div></template></el-table-column
           ><el-table-column label="达人佣金率" width="145"><template #header><el-tooltip content="留空表示不单独设置，按平台默认计算" placement="top"><span class="pricing-header">达人佣金率<el-icon class="pricing-header-help"><QuestionFilled /></el-icon></span></el-tooltip></template><template #default="{ row }"><div class="rate-cell"><el-input-number :model-value="toPercent(row.creator_commission_rate)" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" :placeholder="row.creator_commission_rate_fallback != null ? percent(row.creator_commission_rate_fallback) : '按平台默认'" @update:model-value="row.creator_commission_rate = fromPercent($event, null); markDirty('sku', row)" /><span class="rate-suffix">%</span></div></template></el-table-column
           ><el-table-column label="售价来源" width="120"><template #default="{ row }"><el-input v-model="row.selling_price_source" size="small" @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="周转类型" width="120"><template #default="{ row }"><el-select v-model="row.turnover_class" size="small" placeholder="选择" @change="markDirty('sku', row)"><el-option label="快销商品（30天）" value="fast" /><el-option label="普通商品（60天）" value="normal" /><el-option label="慢销商品（90天）" value="slow" /></el-select></template></el-table-column
@@ -373,7 +384,7 @@
                 {{ row.pricing_tier_label || "-" }}
                 <el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag>
               </div>
-              <div class="pricing-tier-hint">公司统一口径，不随平台/仓库变化</div></template
+              <div class="pricing-tier-hint">按 {{ row.platform_code }} 平台成本率计算，不同平台底线不同</div></template
           ></el-table-column>
           <el-table-column label="广告前贡献毛利率" width="140"
             ><template #default="{ row }"
@@ -1028,6 +1039,9 @@ const spuQuery = reactive({
   page_size: 20,
 });
 const skuQuery = reactive({ keyword: "", status: "", page: 1, page_size: 20 });
+// SKU 资料页的定价底线按**平台**算（阶段 2.1）：平台成本率不同，底线就不同。
+// 不选平台时后端回落到历史 basis 平台，界面要能看出来用的是哪套口径。
+const skuPricingPlatform = ref("");
 const batchDrawer = reactive({
   visible: false,
   editing: false,
@@ -1211,6 +1225,9 @@ const loadSkus = async () => {
       ...skuQuery,
       spu: skuSpuFilter.value || undefined,
       status: skuQuery.status || undefined,
+      // 底线按平台算：不传平台后端会回落到历史 basis 平台（TikTok），
+      // 那对 Shopee 是错的（偏低三到七成）。
+      platform_code: skuPricingPlatform.value || undefined,
     });
     skus.value = (res.data || []).map((row) => ({
       ...row,

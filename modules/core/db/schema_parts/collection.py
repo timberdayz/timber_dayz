@@ -1213,11 +1213,18 @@ class PriceAdjustBaseline(Base):
     判据是「有没有行」而不是「价格列是不是 NULL」：
     算不出最低售价的 SKU（缺采购成本 / 缺 SPU 率）它的基线价格本来就是 NULL，
     但它同样被处理过、同样有上下文。
+
+    **主键是 (sku_id, platform_code)**（阶段 2.1）：底线是「SKU × 平台」的量
+    （平台其他成本率 TikTok 27.27% vs Shopee 41.65%），所以"底线有没有变"
+    也必须按平台判定 —— Shopee 的底线动了**不是** TikTok 的底线动了。
+    以前主键只有 sku_id，于是一个平台的变化会被记成所有平台的变化。
     """
 
     __tablename__ = "price_adjust_baselines"
 
     sku_id = Column(Integer, primary_key=True, autoincrement=False)
+    # 底线所属平台。与 sku_id 一起构成主键（底线是 SKU × 平台的量）。
+    platform_code = Column(String(32), primary_key=True, autoincrement=False)
     # 上一次已处理的最低售价；NULL = 当时算不出底线（本身就是一个有效的基线状态）
     last_notified_min_price = Column(Numeric(18, 2), nullable=True)
     # 上一次已处理的定价输入快照（档位 / 库龄 / 成本 / 费率 / 参考售价 / 来源标记），

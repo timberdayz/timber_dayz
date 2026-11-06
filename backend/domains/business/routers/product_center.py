@@ -118,6 +118,7 @@ from backend.services.product_pricing_service import (
 from backend.services.product_pricing_query_service import (
     compute_pricing_for_sku as _compute_pricing_for_sku,
     load_pricing_context as _pricing_context,
+    resolve_pricing_platform_code as _pricing_platform_code,
 )
 from backend.services.sku_pricing_policy_service import (
     load_current_policies,
@@ -1173,8 +1174,14 @@ async def bulk_save_spus(body: SpuBulkRequest, db: AsyncSession = Depends(get_as
 # 口径一致是**结构性保证**（同一个函数被两边调用），不是靠一条容易跳过的 DB 测试。
 
 
-async def _compute_sku_min_selling_price(db: AsyncSession, sku_id: int) -> Decimal | None:
-    """单 SKU 的最低售价，供利润测算保存拦截复用。"""
+async def _compute_sku_min_selling_price(
+    db: AsyncSession, sku_id: int, platform_code: str | None = None
+) -> Decimal | None:
+    """单 SKU 在**指定平台**上的最低售价，供利润测算保存拦截复用。
+
+    ⚠️ `platform_code` 决定用哪个平台的费率算底线 —— 不传就回落到历史 basis 平台，
+    那会让 Shopee 拿 TikTok 的费率算底线（偏低三到七成）。
+    """
     sku_row = await db.get(DimErpSku, sku_id)
     if sku_row is None:
         return None
@@ -1186,8 +1193,13 @@ async def _compute_sku_min_selling_price(db: AsyncSession, sku_id: int) -> Decim
         )
     )).scalars().first()
     linked_spu = await db.get(DimSpu, binding.spu) if binding else None
-    context = await _pricing_context(db, [sku_id])
-    payload = _compute_pricing_for_sku(context=context, sku_row=sku_row, linked_spu=linked_spu)
+    context = await _pricing_context(db, [sku_id], [platform_code] if platform_code else None)
+    payload = _compute_pricing_for_sku(
+        context=context,
+        sku_row=sku_row,
+        linked_spu=linked_spu,
+        platform_code=platform_code,
+    )
     value = payload["min_selling_price"]
     return Decimal(str(value)) if value is not None else None
 
@@ -1197,6 +1209,7 @@ async def list_skus(
     keyword: str | None = Query(None),
     spu: str | None = Query(None),
     status: str | None = Query(None, description="按 SKU 状态过滤（active/inactive/...）；不传则不过滤"),
+    platform_code: str | None = Query(None, description="按哪个平台算定价底线（底线是 SKU × 平台的量）；不传则回落到历史 basis 平台"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
@@ -1239,7 +1252,11 @@ async def list_skus(
         if allocation.sku_id not in actual_logistics and allocation.allocated_quantity:
             actual_logistics[allocation.sku_id] = float(allocation.allocated_amount / allocation.allocated_quantity)
     # 定价底线：一次取齐规则表 / 平台成本率 / 库龄，循环内只做纯计算
-    pricing_context = await _pricing_context(db, [row.sku_id for row in rows])
+    # ⚠️ 底线是「SKU × 平台」的量 ⇒ 费率按传入的平台取；
+    #    不传平台时回落到历史 basis 平台（前端应始终传平台）。
+    pricing_context = await _pricing_context(
+        db, [row.sku_id for row in rows], [platform_code] if platform_code else None
+    )
     items = []
     for row in rows:
         payload = ProductCenterItem.model_validate(row).model_dump()
@@ -1257,7 +1274,12 @@ async def list_skus(
             context=pricing_context,
             sku_row=row,
             linked_spu=linked_spu,
+            platform_code=platform_code,
         ))
+        # 这条底线是按哪个平台的成本率算的（前端要显示，别让人误以为是 SKU 级的数）
+        payload["min_selling_price_platform"] = _pricing_platform_code(
+            pricing_context, platform_code
+        )
         items.append(ProductCenterItem(**payload))
     return ProductCenterListResponse(data=items, page=page, page_size=page_size, total=total, total_pages=(total + page_size - 1) // page_size)
 
@@ -2540,7 +2562,11 @@ async def list_platform_sku_profit_candidates(
         sku_rows, warehouse_code, transport_type
     )
     # 定价底线：一次取齐，循环内只做纯计算（候选一次最多 100 行，不要逐行 await）
-    pricing_context = await _pricing_context(db, [row.sku_id for row in sku_rows])
+    # ⚠️ 平台费率按**本次所选平台**取 —— 底线是「SKU × 平台」的量，
+    #    拿 TikTok 的费率算 Shopee 的底线会偏低三到七成。
+    pricing_context = await _pricing_context(
+        db, [row.sku_id for row in sku_rows], [platform_code]
+    )
     items = []
     for row in sku_rows:
         profile = profile_by_sku.get(row.sku_id)
@@ -2643,7 +2669,9 @@ async def list_platform_sku_profit_candidates(
             context=pricing_context,
             sku_row=row,
             linked_spu=assigned,
+            platform_code=platform_code,
         )
+        pricing_payload["min_selling_price_platform"] = platform_code
         floor = pricing_payload["min_selling_price"]
         pricing_payload["min_selling_price_below"] = bool(
             floor is not None
@@ -2769,9 +2797,12 @@ async def save_platform_sku_profit_estimates(body: PlatformSkuProfitEstimateRequ
     # 护栏：**排在「资料完整性」校验之前**。
     # 若排在后面，缺物流/仓储规则时会先撞 cannot_save_profit_version（缺资料），
     # 用户永远看不到「低于最低售价」这个更可执行的原因。
-    # 护栏的输入（采购成本 + 平台成本率 + 参考售价 + 规则表）不依赖物流/仓储规则，
+    # 护栏的输入（采购成本 + **该平台**的成本率 + 参考售价 + 规则表）不依赖物流/仓储规则，
     # 底线算不出来时 floor 为 None，护栏自动跳过，交给后面的缺资料校验。
-    floor = await _compute_sku_min_selling_price(db, values["sku_id"])
+    # ⚠️ 底线是「SKU × 平台」的量 ⇒ 必须按**请求里的平台**算，不能用 SKU 级底线。
+    floor = await _compute_sku_min_selling_price(
+        db, values["sku_id"], values["platform_code"]
+    )
     if floor is not None and values.get("expected_selling_price") is not None:
         if Decimal(str(values["expected_selling_price"])) < floor:
             raise BusinessValidationError(

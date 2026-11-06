@@ -437,3 +437,38 @@ test("建议 ROI 超过平台可填上限时提示广告空间不足并保留未
   // 未封顶原值必须能看到 —— 运营要知道自己离平台上限差多少
   assert.match(source, /未封顶原值/);
 });
+
+// ---------------------------------------------------------------------------
+// 阶段 2.1 · 底线下沉到「SKU × 平台」
+// ---------------------------------------------------------------------------
+
+test("SKU 资料页提供「底线按平台」选择器", () => {
+  // 底线是 SKU × 平台的量（Shopee 41.65% vs TikTok 27.27%）：
+  // 不让运营选平台，界面上的底线就是"某个平台的底线"而运营不知道是谁的。
+  assert.match(source, /skuPricingPlatform/);
+  assert.match(source, /底线按平台/);
+  // 选项来自经营维度里的销售平台，不是硬编码
+  assert.match(source, /operatingDimensions\.platforms \|\| \[\]/);
+});
+
+test("SKU 列表按所选平台取底线", () => {
+  const loadSkus = source.slice(
+    source.indexOf("const loadSkus"),
+    source.indexOf("const validateSku"),
+  );
+  assert.match(loadSkus, /platform_code: skuPricingPlatform\.value \|\| undefined/);
+});
+
+test("SKU 资料页说清底线口径与人工覆盖的作用域", () => {
+  // ① 这条底线是按哪个平台的费率算的
+  assert.match(source, /底线按 \{\{ skuPricingPlatform \|\| '默认平台' \}\} 的成本率计算/);
+  // ② 人工覆盖是公司级的 —— 避免运营以为"在 TikTok 改的只影响 TikTok"
+  assert.match(source, /人工覆盖是公司级的，对所有平台生效/);
+});
+
+test("利润测算页的最低售价说明按平台口径，不再说公司统一口径", () => {
+  // 旧文案「公司统一口径，不随平台/仓库变化」在本阶段已经不成立 ——
+  // 底线就是按平台算的，留着会直接误导运营。
+  assert.doesNotMatch(source, /公司统一口径，不随平台\/仓库变化/);
+  assert.match(operatingSection, /平台成本率计算，不同平台底线不同/);
+});

@@ -32,14 +32,18 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 
-async def _existing_price_adjust_sku_ids(db, sku_ids: list[int]) -> set[int]:
-    """这些 SKU 是否已经有在途的价格调整任务。
+async def _existing_price_adjust_business_keys(db, keys: list[str]) -> set[str]:
+    """这些「SKU × 平台」是否已经有在途的价格调整任务。
 
     同一次变化如果上一轮投递失败，基线不会推进，下一轮又会检测到差异。
     若不加这道闸，会为同一次变化反复建任务 → payload 哈希相同撞唯一约束，
     或者产生重复通知行。
+
+    ⚠️ 去重键是 ``sku_id:platform_code``（阶段 2.1）：底线是「SKU × 平台」的量，
+    同一件商品在 TikTok 和 Shopee 上是**两次独立的变化** ——
+    只按 sku_id 去重会把第二个平台的变更吞掉。
     """
-    if not sku_ids:
+    if not keys:
         return set()
     rows = (
         await db.execute(
@@ -48,14 +52,19 @@ async def _existing_price_adjust_sku_ids(db, sku_ids: list[int]) -> set[int]:
                 FeishuProjectionTask.status,
             ).where(
                 FeishuProjectionTask.entity_type == "price_adjust",
-                FeishuProjectionTask.business_key.in_([str(s) for s in sku_ids]),
+                FeishuProjectionTask.business_key.in_(keys),
                 FeishuProjectionTask.status.in_(
                     ("pending", "running", "failed", "completed")
                 ),
             )
         )
     ).all()
-    return {int(row.business_key) for row in rows if str(row.business_key).isdigit()}
+    return {row.business_key for row in rows}
+
+
+def _business_key(change: dict) -> str:
+    """「SKU × 平台」的去重键。"""
+    return f"{change['sku_id']}:{change.get('platform_code') or 'tiktok'}"
 
 
 def _build_payload(change: dict) -> dict:
@@ -67,6 +76,7 @@ def _build_payload(change: dict) -> dict:
     """
     return {
         "sku_id": change["sku_id"],
+        "platform_code": change.get("platform_code"),
         "sku_key": change["sku_key"],
         "spu": change["spu"],
         "sku_name": change["sku_name"],
@@ -97,16 +107,17 @@ async def _async_detect_and_enqueue_price_adjustments() -> dict:
         skipped = 0
         if notify:
             projection = FeishuProjectionService(db)
-            existing = await _existing_price_adjust_sku_ids(
-                db, [change["sku_id"] for change in notify]
+            existing = await _existing_price_adjust_business_keys(
+                db, [_business_key(change) for change in notify]
             )
             for change in notify:
-                if change["sku_id"] in existing:
+                business_key = _business_key(change)
+                if business_key in existing:
                     skipped += 1
                     continue
                 await projection.enqueue(
                     "price_adjust",
-                    str(change["sku_id"]),
+                    business_key,
                     _build_payload(change),
                 )
                 enqueued += 1

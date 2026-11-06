@@ -237,12 +237,17 @@ def build_context(
     spu_return_loss_rate: Any,
     spu_damage_rate: Any,
     reference_selling_price: Any,
+    platform_code: Optional[str] = None,
 ) -> dict:
     """组装归因上下文快照。
 
     存的是**归因需要的全部输入**，这样下一次变化时能准确说出"为什么变"。
+
+    ⚠️ `platform_code` 也要存进去：底线是「SKU × 平台」的量，
+    归因时得知道这次变的是哪个平台的底线。
     """
     return {
+        "platform_code": platform_code,
         "min_selling_price": pricing.get("min_selling_price"),
         "min_selling_price_source": pricing.get("min_selling_price_source"),
         "min_selling_price_is_override": bool(pricing.get("min_selling_price_is_override")),
@@ -306,12 +311,17 @@ class PriceAdjustNotifyService:
         spu_map = {row.spu: row for row in spu_rows}
         return {sku_id: spu_map.get(spu_by_sku.get(sku_id)) for sku_id in sku_ids}
 
-    async def collect_pricing_states(self) -> dict[int, dict]:
-        """全量重算所有 active SKU 的最低售价与归因上下文。
+    async def collect_pricing_states(self) -> dict[tuple[int, str], dict]:
+        """全量重算所有 active SKU 在**每个可定价平台**上的最低售价与归因上下文。
 
         与商品中心走**同一个**计算函数、**同一份**库龄取数
         （`backend/services/product_pricing_query_service.py`），
         所以「页面显示的最低售价」和「通知里说的最低售价」必然一致。
+
+        ⚠️ **键是 (sku_id, platform_code)**（阶段 2.1）：底线是「SKU × 平台」的量
+        （平台其他成本率 TikTok 27.27% vs Shopee 41.65%），
+        同一件商品在两个平台的底线不同 —— 基线也必须按平台分开记。
+        以前键只有 sku_id，于是 Shopee 的底线动了会被记成「TikTok 的底线也动了」。
         """
         sku_rows = (
             await self.db.execute(
@@ -324,54 +334,59 @@ class PriceAdjustNotifyService:
         sku_ids = [row.sku_id for row in sku_rows]
         context = await load_pricing_context(self.db, sku_ids)
         spu_by_sku = await self._load_spu_by_sku(sku_ids)
-        platform = context["platform"]
-        other_cost_rate = platform.other_cost_rate if platform else None
+        platform_codes = list(context.get("priceable_platform_codes") or [])
         restock_rows = context["restock_rows"]
 
-        states: dict[int, dict] = {}
-        for row in sku_rows:
-            linked_spu = spu_by_sku.get(row.sku_id)
-            state = compute_pricing_state(
-                context=context,
-                sku_row=row,
-                linked_spu=linked_spu,
-            )
-            pricing = state["pricing"]
-            policy = state["policy"]
-            days_since_restock = state["days_since_restock"]
-            restock_row = restock_rows.get(row.sku_id)
+        states: dict[tuple[int, str], dict] = {}
+        for platform_code in platform_codes:
+            platform = context["platforms"].get(platform_code)
+            other_cost_rate = platform.other_cost_rate if platform else None
+            for row in sku_rows:
+                linked_spu = spu_by_sku.get(row.sku_id)
+                state = compute_pricing_state(
+                    context=context,
+                    sku_row=row,
+                    linked_spu=linked_spu,
+                    platform_code=platform_code,
+                )
+                pricing = state["pricing"]
+                policy = state["policy"]
+                days_since_restock = state["days_since_restock"]
+                restock_row = restock_rows.get(row.sku_id)
 
-            snapshot = build_context(
-                pricing=pricing,
-                age_days=days_since_restock,
-                target_margin_rate=policy["target_margin_rate"] if policy else None,
-                discount_rate=policy["discount_rate"] if policy else None,
-                purchase_cost=row.default_purchase_cost,
-                other_cost_rate=other_cost_rate,
-                creator_commission_rate=resolve_effective_creator_rate(
-                    context=context, sku_row=row
-                ),
-                spu_return_loss_rate=linked_spu.return_loss_rate if linked_spu else None,
-                spu_damage_rate=linked_spu.logistics_damage_rate if linked_spu else None,
-                reference_selling_price=row.reference_selling_price,
-            )
+                snapshot = build_context(
+                    pricing=pricing,
+                    age_days=days_since_restock,
+                    target_margin_rate=policy["target_margin_rate"] if policy else None,
+                    discount_rate=policy["discount_rate"] if policy else None,
+                    purchase_cost=row.default_purchase_cost,
+                    other_cost_rate=other_cost_rate,
+                    creator_commission_rate=resolve_effective_creator_rate(
+                        context=context, sku_row=row, platform_code=platform_code
+                    ),
+                    spu_return_loss_rate=linked_spu.return_loss_rate if linked_spu else None,
+                    spu_damage_rate=linked_spu.logistics_damage_rate if linked_spu else None,
+                    reference_selling_price=row.reference_selling_price,
+                    platform_code=platform_code,
+                )
 
-            states[row.sku_id] = {
-                "sku_id": row.sku_id,
-                "sku_key": row.sku_key,
-                "spu": linked_spu.spu if linked_spu else None,
-                "sku_name": row.sku_name,
-                "specification": row.specification,
-                "min_selling_price": pricing.get("min_selling_price"),
-                "context": snapshot,
-                "age_days": days_since_restock,
-                "current_qty": restock_row.get("current_qty") if restock_row else None,
-                "inventory_value": restock_row.get("inventory_value") if restock_row else None,
-            }
+                states[(row.sku_id, platform_code)] = {
+                    "sku_id": row.sku_id,
+                    "platform_code": platform_code,
+                    "sku_key": row.sku_key,
+                    "spu": linked_spu.spu if linked_spu else None,
+                    "sku_name": row.sku_name,
+                    "specification": row.specification,
+                    "min_selling_price": pricing.get("min_selling_price"),
+                    "context": snapshot,
+                    "age_days": days_since_restock,
+                    "current_qty": restock_row.get("current_qty") if restock_row else None,
+                    "inventory_value": restock_row.get("inventory_value") if restock_row else None,
+                }
         return states
 
-    async def load_baselines(self) -> dict[int, dict]:
-        """已建基线的 SKU：{sku_id: {"min_selling_price": Decimal|None, "context": dict}}。
+    async def load_baselines(self) -> dict[tuple[int, str], dict]:
+        """已建基线的 SKU × 平台：``{(sku_id, platform_code): {"min_selling_price", "context"}}``。
 
         基线住在 ``ops.price_adjust_baselines``（**不参与商品中心同步**）：
         ``core.dim_erp_sku`` 会被「采集机 → 云端」同步做 TRUNCATE + 全量重灌，
@@ -389,14 +404,15 @@ class PriceAdjustNotifyService:
             await self.db.execute(
                 select(
                     PriceAdjustBaseline.sku_id,
+                    PriceAdjustBaseline.platform_code,
                     PriceAdjustBaseline.last_notified_min_price,
                     PriceAdjustBaseline.last_notified_context,
                 )
             )
         ).all()
-        baselines: dict[int, dict] = {}
+        baselines: dict[tuple[int, str], dict] = {}
         for row in rows:
-            baselines[row.sku_id] = {
+            baselines[(row.sku_id, row.platform_code)] = {
                 "min_selling_price": row.last_notified_min_price,
                 "context": dict(row.last_notified_context or {}),
             }
@@ -422,8 +438,8 @@ class PriceAdjustNotifyService:
         notify: list[dict] = []
         silent: list[dict] = []
 
-        for sku_id, cur in states.items():
-            prev = baselines.get(sku_id)
+        for (sku_id, platform_code), cur in states.items():
+            prev = baselines.get((sku_id, platform_code))
             new_price = cur["min_selling_price"]
 
             if prev is None:
@@ -431,6 +447,7 @@ class PriceAdjustNotifyService:
                 silent.append(
                     {
                         "sku_id": sku_id,
+                        "platform_code": platform_code,
                         "min_selling_price": new_price,
                         "context": cur["context"],
                     }
@@ -452,6 +469,7 @@ class PriceAdjustNotifyService:
                 silent.append(
                     {
                         "sku_id": sku_id,
+                        "platform_code": platform_code,
                         "min_selling_price": new_price,
                         "context": cur_context,
                     }
@@ -461,6 +479,7 @@ class PriceAdjustNotifyService:
             notify.append(
                 {
                     "sku_id": sku_id,
+                    "platform_code": platform_code,
                     "sku_key": cur["sku_key"],
                     "spu": cur["spu"],
                     "sku_name": cur["sku_name"],
@@ -488,7 +507,7 @@ class PriceAdjustNotifyService:
         """批量推进基线（首次建基线 / 被排除的变更）。
 
         一次 SELECT 把已有基线读出来，内存里 upsert，再批量写回——
-        逐条 SELECT+INSERT 会让 1122 个 SKU 跑成两千多次往返。
+        逐条 SELECT+INSERT 会让上千个 SKU × 平台跑成两千多次往返。
 
         写的是 ``ops.price_adjust_baselines``，**不碰** ``core.dim_erp_sku``：
         后者会被商品中心同步 TRUNCATE 掉。
@@ -496,13 +515,15 @@ class PriceAdjustNotifyService:
         if not entries:
             return 0
 
-        sku_ids = [entry["sku_id"] for entry in entries]
+        sku_ids = {entry["sku_id"] for entry in entries}
+        platform_codes = {entry["platform_code"] for entry in entries}
         existing = {
-            row.sku_id: row
+            (row.sku_id, row.platform_code): row
             for row in (
                 await self.db.execute(
                     select(PriceAdjustBaseline).where(
-                        PriceAdjustBaseline.sku_id.in_(sku_ids)
+                        PriceAdjustBaseline.sku_id.in_(sku_ids),
+                        PriceAdjustBaseline.platform_code.in_(platform_codes),
                     )
                 )
             ).scalars().all()
@@ -510,13 +531,15 @@ class PriceAdjustNotifyService:
 
         for entry in entries:
             sku_id = entry["sku_id"]
+            platform_code = entry["platform_code"]
             price = entry["min_selling_price"]
             context = entry["context"]
-            row = existing.get(sku_id)
+            row = existing.get((sku_id, platform_code))
             if row is None:
                 self.db.add(
                     PriceAdjustBaseline(
                         sku_id=sku_id,
+                        platform_code=platform_code,
                         last_notified_min_price=_to_decimal(price),
                         last_notified_context=context,
                     )
@@ -527,8 +550,10 @@ class PriceAdjustNotifyService:
         await self.db.flush()
         return len(entries)
 
-    async def advance_baseline_for_sku(self, sku_id: int, price: Any, context: dict) -> None:
-        """推进单个 SKU 的基线——**投递成功后**调用。
+    async def advance_baseline_for_sku(
+        self, sku_id: int, price: Any, context: dict, platform_code: str | None = None
+    ) -> None:
+        """推进单个 SKU 在某平台的基线——**投递成功后**调用。
 
         写入 ``ops.price_adjust_baselines``，不碰 ``core.dim_erp_sku``——
         后者会被商品中心同步 TRUNCATE 掉。
@@ -536,16 +561,24 @@ class PriceAdjustNotifyService:
         这里用「先查后写」而不是方言专属的 ``ON CONFLICT``：
         基线写入是低频（每天一次 × 变更数）且由单个任务串行执行，
         先查后写在 PostgreSQL / SQLite 上行为一致，不必写两套方言分支。
+
+        ⚠️ `platform_code` 不传时回落到历史 basis 平台，
+        只为兼容老调用方；新代码必须显式传平台。
         """
+        platform_code = platform_code or context.get("platform_code") or "tiktok"
         row = (
             await self.db.execute(
-                select(PriceAdjustBaseline).where(PriceAdjustBaseline.sku_id == sku_id)
+                select(PriceAdjustBaseline).where(
+                    PriceAdjustBaseline.sku_id == sku_id,
+                    PriceAdjustBaseline.platform_code == platform_code,
+                )
             )
         ).scalar_one_or_none()
         if row is None:
             self.db.add(
                 PriceAdjustBaseline(
                     sku_id=sku_id,
+                    platform_code=platform_code,
                     last_notified_min_price=_to_decimal(price),
                     last_notified_context=context,
                 )

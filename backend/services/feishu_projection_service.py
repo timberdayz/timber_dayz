@@ -385,6 +385,8 @@ class FeishuProjectionService:
         fields: dict[str, Any] = {
             "ERP SKU": payload.get("sku_key"),
             "SPU": payload.get("spu") or "",
+            # 平台：底线是「SKU × 平台」的量（阶段 2.1），不写平台根本不知道这次变的是哪边
+            "平台": payload.get("platform_code") or "",
             "商品名称": payload.get("sku_name") or "",
             "规格": payload.get("specification") or "",
             "上次最低售价": _to_float(payload.get("old_min_selling_price")),
@@ -401,10 +403,8 @@ class FeishuProjectionService:
             fields["变动方向"] = [payload["direction"]]
         if payload.get("reason"):
             fields["变动原因"] = [payload["reason"]]
-        # 「平台」「当前售价」第一版不写：
-        #   平台——第一版按 SKU 粒度推送，平台粒度等售价数据源打通后再细化
-        #   当前售价——目前没有可靠数据源（平台 SKU 档案靠人工维护，覆盖率未知），
-        #            填一个可能错的数比留空更危险
+        # 「当前售价」不写：目前没有可靠数据源（平台 SKU 档案靠人工维护，覆盖率未知），
+        # 填一个可能错的数比留空更危险
         return {key: value for key, value in fields.items() if value is not None}
 
     async def _advance_price_adjust_baseline(self, task: FeishuProjectionTask) -> None:
@@ -428,6 +428,7 @@ class FeishuProjectionService:
             int(sku_id),
             payload.get("new_min_selling_price"),
             context,
+            payload.get("platform_code"),
         )
 
     async def _process_price_adjust_tasks(

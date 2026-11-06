@@ -15,15 +15,29 @@
 
 「口径一致」在这里是**结构性保证**（同一个函数被两边调用），
 而不是靠一条容易在别的环境下被跳过的数据库测试来保证。
+
+平台维度（阶段 2.1）
+--------------------
+**底线是「SKU × 平台」的量**：TikTok 与 Shopee 的平台其他成本率差了一截
+（27.27% vs 41.65%），同一件商品在两个平台的底线**必须不同**。
+
+以前这里取的是规则表指定的**单一 basis 平台**（`platform_basis`）的费率，
+于是所有平台的底线都用 TikTok 的成本结构算 —— Shopee 的底线被低估三到七成，
+护栏「预计售价低于最低售价」会放行本该拦住的品。
+
+现在改成：取数层一次把**所有销售平台**读出来（``platforms`` 字典），
+计算层按 ``platform_code`` 取该平台的费率。**「basis 平台」这个概念随之消失** ——
+规则表里的 ``platform_basis`` 只是历史字段，不再参与费率选择。
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from modules.core.db import DimPlatform
+from modules.core.db import DimPlatform, SkuPlatformPricing
 
 from .inventory.inventory_age_query_service import load_current_inventory_ages
 from .inventory.inventory_restock_query_service import load_current_restock_days
@@ -31,13 +45,47 @@ from .product_pricing_service import compute_sku_pricing, select_restock_tier
 from .sku_pricing_policy_service import load_current_policies, to_policy_rows
 
 
-async def load_pricing_context(db: AsyncSession, sku_ids: list[int]) -> dict:
-    """一次性把规则表、平台成本率、库龄读出来，供批量计算。
+async def load_pricing_platforms(
+    db: AsyncSession, platform_codes: Iterable[str] | None = None
+) -> dict[str, DimPlatform]:
+    """可定价平台：``{platform_code: DimPlatform}``。
+
+    「可定价」= ``platform_role = 'sales'``（真正对外销售的平台）。
+    ``source`` / ``test`` 平台没有对外售价，不参与底线计算。
+
+    传了 ``platform_codes`` 就只取那几个（外加全部销售平台，保证调用方要的平台一定在）。
+    """
+    codes: set[str] = set(platform_codes or ())
+    rows = (
+        await db.execute(select(DimPlatform).where(DimPlatform.platform_role == "sales"))
+    ).scalars().all()
+    platforms = {row.platform_code: row for row in rows}
+    if codes:
+        missing = codes - set(platforms)
+        if missing:
+            extra = (
+                await db.execute(
+                    select(DimPlatform).where(DimPlatform.platform_code.in_(missing))
+                )
+            ).scalars().all()
+            platforms.update({row.platform_code: row for row in extra})
+    return platforms
+
+
+async def load_pricing_context(
+    db: AsyncSession,
+    sku_ids: list[int],
+    platform_codes: Iterable[str] | None = None,
+) -> dict:
+    """一次性把规则表、平台成本率、库龄、平台级人工覆盖读出来，供批量计算。
 
     返回：
 
     - ``policies``：当前生效的规则行（标量字典，已转 Decimal 费率）
-    - ``platform``：规则行指定的平台维度行（``dim_platforms``）
+    - ``platforms``：``{platform_code: DimPlatform}`` —— **按平台各一条底线**要用它
+    - ``platform``：历史别名，仍指向规则表 basis 平台（**仅向后兼容**，
+      新代码请用 ``platforms[platform_code]``）
+    - ``overrides``：``{(sku_id, platform_code): SkuPlatformPricing}`` —— 平台级人工覆盖
     - ``days_since_restock``：``{sku_id: 距上次进货天数}``，缺失的 SKU **不在字典里**
     - ``restock_rows``：``{sku_id: {"days_since_restock", "current_qty", "inventory_value"}}``，
       通知侧要写库存数量/库存金额时用这一份
@@ -47,7 +95,10 @@ async def load_pricing_context(db: AsyncSession, sku_ids: list[int]) -> dict:
     """
     policy_rows = to_policy_rows(await load_current_policies(db))
     basis = policy_rows[0]["platform_basis"] if policy_rows else "tiktok"
-    platform = await db.get(DimPlatform, basis)
+    platforms = await load_pricing_platforms(db, platform_codes)
+    basis_platform = platforms.get(basis)
+    if basis_platform is None:
+        basis_platform = await db.get(DimPlatform, basis)
     restock_rows = await load_current_restock_days(db, sku_ids)
     if restock_rows:
         days_since_restock = {
@@ -71,9 +122,22 @@ async def load_pricing_context(db: AsyncSession, sku_ids: list[int]) -> dict:
             for sku_id, row in restock_rows.items()
         }
         restock_source = "legacy_age_days"
+
+    overrides = await load_platform_pricing_overrides(db, sku_ids, platforms)
+    # 「可定价平台」= 有平台其他成本率的销售平台。
+    # 没有 other_cost_rate 的平台算不出底线（成本线分母里缺这一项），
+    # 建了基线也是一列 NULL —— 不如不跟踪，等它配了费率再进来。
+    priceable = {
+        code
+        for code, row in platforms.items()
+        if row.platform_role == "sales" and row.other_cost_rate is not None
+    }
     return {
         "policies": policy_rows,
-        "platform": platform,
+        "platform": basis_platform,
+        "platforms": platforms,
+        "priceable_platform_codes": sorted(priceable),
+        "overrides": overrides,
         "days_since_restock": days_since_restock,
         "restock_rows": restock_rows,
         "restock_source": restock_source,
@@ -83,15 +147,83 @@ async def load_pricing_context(db: AsyncSession, sku_ids: list[int]) -> dict:
     }
 
 
+async def load_platform_pricing_overrides(
+    db: AsyncSession,
+    sku_ids: list[int],
+    platforms: dict[str, DimPlatform],
+) -> dict[tuple[int, str], SkuPlatformPricing]:
+    """平台级人工覆盖：``{(sku_id, platform_code): SkuPlatformPricing}``。
+
+    只读**有覆盖值**的行 —— 没有人工覆盖的 SKU 不占内存，
+    底线的来源标记仍然是 ``cost_floor`` / ``discount_guard``。
+    """
+    if not sku_ids or not platforms:
+        return {}
+    rows = (
+        await db.execute(
+            select(SkuPlatformPricing).where(
+                SkuPlatformPricing.sku_id.in_(sku_ids),
+                SkuPlatformPricing.platform_code.in_(list(platforms)),
+                SkuPlatformPricing.min_selling_price_override.is_not(None),
+            )
+        )
+    ).scalars().all()
+    return {(row.sku_id, row.platform_code): row for row in rows}
+
+
+def resolve_pricing_platform(context: dict, platform_code: Optional[str]):
+    """取某个平台的费率行；没给平台时回落到历史 basis 平台。"""
+    platforms = context.get("platforms") or {}
+    if platform_code:
+        platform = platforms.get(platform_code)
+        if platform is not None:
+            return platform
+    return context.get("platform")
+
+
+def resolve_pricing_platform_code(context: dict, platform_code: Optional[str]) -> Optional[str]:
+    """这次算底线的**实际**平台代码。
+
+    不传平台时回落到历史 basis 平台 —— 前端要显示出来，
+    否则运营不知道自己看的是 TikTok 的底线还是 Shopee 的底线。
+    """
+    if platform_code:
+        platform = (context.get("platforms") or {}).get(platform_code)
+        if platform is not None:
+            return platform.platform_code
+    fallback = context.get("platform")
+    return fallback.platform_code if fallback is not None else None
+
+
+def resolve_pricing_override(context: dict, sku_id: int, platform_code: Optional[str]):
+    """取某 SKU 在某平台的**新表**人工覆盖值；没有则返回 None。
+
+    **回落链**（由调用方补齐第二段）：
+    新表（SKU × 平台）→ SKU 级旧列（``dim_erp_sku.min_selling_price_override``，
+    deprecated，保留一个版本周期）。
+
+    新表里没有行 ⇒ 用旧列 ⇒ 旧列也没有 ⇒ 没有人工覆盖（走系统算的底线）。
+    旧列的回落是**兼容历史数据**用的：生产库里人工覆盖目前是 0 条，
+    所以这条分支几乎不会被走到，但走错了会让老数据突然失去覆盖值。
+    """
+    overrides = context.get("overrides") or {}
+    if not platform_code:
+        return None
+    row = overrides.get((sku_id, platform_code))
+    return row.min_selling_price_override if row is not None else None
+
+
 def compute_pricing_state(
     *,
     context: dict,
     sku_row,
     linked_spu,
+    platform_code: Optional[str] = None,
 ) -> dict:
-    """算出一个 SKU 的定价状态（含命中的档位）。
+    """算出一个 SKU 在**某个平台**上的定价状态（含命中的档位）。
 
-    返回 ``{"pricing": {...}, "policy": 命中的档位|None, "days_since_restock": int|None}``：
+    返回 ``{"pricing": {...}, "policy": 命中的档位|None, "days_since_restock": int|None,
+    "platform_code": str|None}``：
 
     - ``pricing`` 就是纯函数 `compute_sku_pricing` 的返回值（页面直接用）
     - ``policy`` 是命中的档位字典，通知侧要拿它的 ``target_margin_rate`` /
@@ -100,13 +232,21 @@ def compute_pricing_state(
 
     ⚠️ `linked_spu` 传 None 表示「没绑 SPU」或「绑了但 SPU 行查不到」，
     两种情况都按 `missing_spu_binding` 缺料处理——与商品中心页面口径一致。
+
+    ⚠️ `platform_code` 不传时回落到历史 basis 平台 —— 只为兼容老调用方，
+    **新代码必须显式传平台**，否则所有平台又会共用一套费率（那正是阶段 2.1 要修的缺陷）。
     """
     policies = context["policies"]
-    platform = context["platform"]
+    platform = resolve_pricing_platform(context, platform_code)
     days_since_restock = context["days_since_restock"].get(sku_row.sku_id)
 
     policy = select_restock_tier(policies, days_since_restock)
     deepest = max(policies, key=lambda p: p["min_restock_days"]) if policies else None
+
+    # 人工覆盖：新表（SKU × 平台）优先，没有则回落 SKU 级旧列（deprecated）
+    override = resolve_pricing_override(context, sku_row.sku_id, platform_code)
+    if override is None:
+        override = sku_row.min_selling_price_override
 
     pricing = compute_sku_pricing(
         purchase_cost=sku_row.default_purchase_cost,
@@ -121,13 +261,14 @@ def compute_pricing_state(
         spu_damage_rate=linked_spu.logistics_damage_rate if linked_spu else None,
         policy=policy,
         deepest_policy=deepest,
-        min_selling_price_override=sku_row.min_selling_price_override,
+        min_selling_price_override=override,
         days_since_restock=days_since_restock,
     )
     return {
         "pricing": pricing,
         "policy": policy,
         "days_since_restock": days_since_restock,
+        "platform_code": platform_code,
     }
 
 
@@ -136,6 +277,7 @@ def compute_pricing_for_sku(
     context: dict,
     sku_row,
     linked_spu,
+    platform_code: Optional[str] = None,
 ) -> dict:
     """只要定价字段本身（页面用）。
 
@@ -146,6 +288,7 @@ def compute_pricing_for_sku(
         context=context,
         sku_row=sku_row,
         linked_spu=linked_spu,
+        platform_code=platform_code,
     )["pricing"]
 
 
@@ -153,6 +296,7 @@ def resolve_effective_creator_rate(
     *,
     context: dict,
     sku_row,
+    platform_code: Optional[str] = None,
 ) -> Optional[Any]:
     """实际生效的达人佣金率：SKU 自己设了就用它的，没设就用平台默认值。
 
@@ -161,7 +305,7 @@ def resolve_effective_creator_rate(
     """
     from decimal import Decimal
 
-    platform = context["platform"]
+    platform = resolve_pricing_platform(context, platform_code)
     platform_rate = platform.default_creator_commission_rate if platform else None
 
     sku_rate = sku_row.creator_commission_rate

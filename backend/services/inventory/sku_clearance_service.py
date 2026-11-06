@@ -81,6 +81,12 @@ def _resolve_pricing(
 ) -> tuple[dict, Optional[float]]:
     """算出一行的定价字段与目标利润率。
 
+    ⚠️ `platform` 必须是**这一行能对应到的费率平台**：
+    行里带销售平台就用它自己的费率；行里是库存来源平台（生产恒为 'miaoshou'）
+    就用公司级兜底费率。底线是「SKU × 平台」的量，
+    拿别的平台的费率算出来的底线是错的（Shopee 41.65% vs TikTok 27.27%）；
+    但**拿不到费率**比口径不一致更糟 —— 底线会整个消失。
+
     未匹配 ERP 主数据的 SKU：定价字段整体留空（spec §3.6）。
     这类 SKU 在视图里 LEFT JOIN 出来的采购成本/参考售价本来就是 NULL，
     硬算也只会得到一个「看起来能定价、其实没主数据支撑」的数字。
@@ -304,12 +310,40 @@ class SkuClearanceService:
             return []
         return to_policy_rows(await load_current_policies(self.db))
 
-    async def _load_platform(self, policy_rows: list[dict]) -> Optional[DimPlatform]:
-        """平台成本率：按规则表的 platform_basis 取（与商品中心同一口径）。"""
+    async def _load_pricing_platforms(
+        self, policy_rows: list[dict]
+    ) -> tuple[dict[str, DimPlatform], Optional[DimPlatform]]:
+        """取费率：``(各销售平台的费率, 公司级兜底平台)``。
+
+        ⚠️ **清货视图的 ``platform_code`` 不是销售渠道**：
+        它来自 ``mart.inventory_state.platform_code``，
+        生产库 1232 行**恒为** ``'miaoshou'``（库存来源平台），不是 tiktok / shopee。
+        直接拿行里的 platform_code 去查销售平台费率会**查不到**，
+        底线会整个消失（只剩纪律线）—— 那比口径不一致更糟。
+
+        所以取**两级**：
+
+        1. 行里带的是**销售平台**（将来视图接上销售渠道维度时）⇒ 用它自己的费率；
+        2. 行里是库存来源平台（今天的生产数据）⇒ 回落到**公司级**费率
+           （规则表 basis 平台，与本阶段改造前**完全一致** ⇒ 零行为变化）。
+
+        ⚠️ 这条与实施方案 §4.1.3 第 7 项「清货按平台出」的假设**不一致** ——
+        视图粒度是库存来源平台，不是销售渠道，按渠道出底线在当前数据模型下做不到。
+        偏离与理由记在方案附录 D。
+        """
         if self.db is None:
-            return None
+            return {}, None
+        rows = (
+            await self.db.execute(
+                select(DimPlatform).where(DimPlatform.platform_role == "sales")
+            )
+        ).scalars().all()
+        platforms = {row.platform_code: row for row in rows}
         basis = policy_rows[0]["platform_basis"] if policy_rows else "tiktok"
-        return await self.db.get(DimPlatform, basis)
+        fallback = platforms.get(basis)
+        if fallback is None:
+            fallback = await self.db.get(DimPlatform, basis)
+        return platforms, fallback
 
     # ------------------------------------------------------------------
     # 主方法
@@ -355,7 +389,7 @@ class SkuClearanceService:
 
         pricing_inputs = await self._load_pricing_inputs(rows)
         policy_rows = await self._load_policy_rows()
-        platform = await self._load_platform(policy_rows)
+        platforms, default_platform = await self._load_pricing_platforms(policy_rows)
         deepest = (
             max(policy_rows, key=lambda p: p["min_restock_days"])
             if policy_rows
@@ -370,7 +404,8 @@ class SkuClearanceService:
                 pricing_inputs=pricing_inputs,
                 policy_rows=policy_rows,
                 deepest_policy=deepest,
-                platform=platform,
+                platforms=platforms,
+                default_platform=default_platform,
             )
             for row in rows
         ]
@@ -495,7 +530,8 @@ class SkuClearanceService:
         pricing_inputs: dict[int, dict],
         policy_rows: list[dict],
         deepest_policy: Optional[dict],
-        platform: Optional[DimPlatform],
+        platforms: dict[str, DimPlatform],
+        default_platform: Optional[DimPlatform],
     ) -> SkuClearanceRankingItemResponse:
         sku_id = row.get("sku_id")
         days_since_restock = row.get("days_since_restock")
@@ -503,6 +539,12 @@ class SkuClearanceService:
             int(days_since_restock) if days_since_restock is not None else None
         )
         pricing_matched = sku_id is not None
+        # 费率取法（两级）：
+        # 1) 行里的 platform_code 是**销售平台** → 用它自己的费率；
+        # 2) 行里是**库存来源平台**（生产上恒为 'miaoshou'）→ 回落到公司级费率。
+        # ⚠️ 第 2 条不能省：省了就等于没有 other_cost_rate，
+        #    成本线算不出来，底线只剩纪律线 —— 底线比口径不一致更危险。
+        platform = platforms.get(str(row.get("platform_code") or "")) or default_platform
 
         pricing, target_margin_rate = _resolve_pricing(
             row,

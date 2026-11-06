@@ -1245,6 +1245,72 @@ class SkuOperatingProfile(Base):
     )
 
 
+class SkuPlatformPricing(Base):
+    """SKU × 平台 的**定价底线人工覆盖**与派生快照（阶段 2.1）。
+
+    为什么底线要下沉到平台
+    ----------------------
+    底线的成本分母里有平台其他成本率（``other_cost_rate``，**已含平台佣金**）。
+    TikTok 27.27% vs Shopee 41.65% —— 差了一截。
+    以前底线是 SKU 级的、费率取自规则表指定的**单一 basis 平台**（TikTok），
+    于是 Shopee 的底线被低估三到七成，护栏「预计售价低于最低售价」放行本该拦住的品。
+    底线必须是 **SKU × 平台** 的量。
+
+    为什么单独一张表、而不是塞进 ``finance.sku_operating_profiles``
+    ----------------------------------------------------------
+    经营档案的唯一键是 ``(sku_id, platform_code, warehouse_code)``，
+    **同一平台多个仓会有多条档案** —— 底线放进去会重复。
+
+    为什么只存「人工覆盖 + 派生快照」，不存算出来的底线
+    --------------------------------------------------
+    系统算出的 ``min_selling_price`` **不入库**（``core.dim_erp_sku`` 也没有这一列），
+    底线是查询时派生的。存一份派生值会与实时计算漂移（费率、库龄、采购成本都会变），
+    漂移出来的底线比没有底线更危险 —— 护栏会拿一个过期的数去拦真实的品。
+    """
+
+    __tablename__ = "sku_platform_pricing"
+
+    pricing_id = Column(Integer, primary_key=True, autoincrement=True)
+    sku_id = Column(
+        Integer,
+        ForeignKey("core.dim_erp_sku.sku_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    platform_code = Column(
+        String(32),
+        ForeignKey("core.dim_platforms.platform_code", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    # 人工覆盖：该 SKU 在该平台上的最低售价下限。
+    # NULL = 没有人工覆盖，走系统算的底线。
+    min_selling_price_override = Column(Numeric(18, 2), nullable=True)
+    # 最后一次写入的来源标记（如 manual_override）
+    min_selling_price_source = Column(String(32), nullable=True)
+    # 派生快照：算这条底线时命中的档位与库龄（供通知归因与排查用）
+    pricing_tier_label = Column(String(32), nullable=True)
+    pricing_days_since_restock = Column(Integer, nullable=True)
+    pricing_tier_source = Column(String(32), nullable=True)
+    created_by = Column(Integer, nullable=True)
+    updated_by = Column(Integer, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "sku_id", "platform_code", name="uq_sku_platform_pricing_sku_platform"
+        ),
+        Index("ix_sku_platform_pricing_platform", "platform_code"),
+        {"schema": "finance"},
+    )
+
+
 class TaxVoucher(Base):
     """税务凭证表"""
 

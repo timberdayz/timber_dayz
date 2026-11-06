@@ -426,6 +426,8 @@ PRICING_SEED_CLEANUP_SQL = (
     "DELETE FROM core.dim_spu WHERE spu = 'TEST-SPU-1'",
     "DELETE FROM core.dim_warehouses WHERE warehouse_code = 'MY-01'",
     "DELETE FROM core.dim_platforms WHERE platform_code = 'tiktok'",
+    # 阶段 2.1：底线按平台分 ⇒ 用例会补一个 Shopee 平台来对比两条底线
+    "DELETE FROM core.dim_platforms WHERE platform_code = 'shopee'",
     "DELETE FROM core.dim_users WHERE user_id = 1",
 )
 

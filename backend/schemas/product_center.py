@@ -291,6 +291,9 @@ class ProductCenterItem(BaseModel):
     current_discount_rate: Optional[float] = None
     clearance_max_discount_rate: Optional[float] = None
     min_selling_price: Optional[float] = None
+    # 这条底线是按**哪个平台**的成本率算出来的（阶段 2.1：底线是 SKU × 平台的量）。
+    # 不带它前端只能显示「默认平台」，运营不知道自己看的是 TikTok 还是 Shopee 的底线。
+    min_selling_price_platform: Optional[str] = None
     min_selling_price_source: Optional[str] = None
     min_selling_price_is_override: Optional[bool] = None
     min_selling_price_override: Optional[float] = None
@@ -864,6 +867,9 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     current_discount_rate: Optional[float] = None
     clearance_max_discount_rate: Optional[float] = None
     min_selling_price: Optional[float] = None
+    # 这条底线是按**哪个平台**的成本率算出来的（阶段 2.1：底线是 SKU × 平台的量）。
+    # 不带它前端只能显示「默认平台」，运营不知道自己看的是 TikTok 还是 Shopee 的底线。
+    min_selling_price_platform: Optional[str] = None
     min_selling_price_source: Optional[str] = None
     min_selling_price_is_override: Optional[bool] = None
     min_selling_price_override: Optional[float] = None

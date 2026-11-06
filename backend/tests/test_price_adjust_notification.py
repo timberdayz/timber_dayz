@@ -309,6 +309,8 @@ class _FakeService(PriceAdjustNotifyService):
 def _state(sku_id, price, context, **extra):
     payload = {
         "sku_id": sku_id,
+        # 底线是「SKU × 平台」的量 ⇒ 状态与基线都按 (sku_id, platform_code) 归位
+        "platform_code": "tiktok",
         "sku_key": f"SKU-{sku_id}",
         "spu": "SPU-1",
         "sku_name": f"商品{sku_id}",
@@ -329,7 +331,7 @@ async def test_first_run_only_builds_baseline_without_notifying():
 
     否则第一天就会把全量 SKU 当成"变了"推一遍。
     """
-    service = _FakeService({1: _state(1, 128.56, _context())}, {})
+    service = _FakeService({(1, "tiktok"): _state(1, 128.56, _context())}, {})
     notify, silent = await service.detect_changes()
 
     assert notify == []
@@ -341,8 +343,8 @@ async def test_first_run_only_builds_baseline_without_notifying():
 @pytest.mark.asyncio
 async def test_unchanged_floor_produces_no_change():
     service = _FakeService(
-        {1: _state(1, 128.56, _context())},
-        {1: {"min_selling_price": Decimal("128.56"), "context": _context()}},
+        {(1, "tiktok"): _state(1, 128.56, _context())},
+        {(1, "tiktok"): {"min_selling_price": Decimal("128.56"), "context": _context()}},
     )
     notify, silent = await service.detect_changes()
 
@@ -362,8 +364,8 @@ async def test_dropped_floor_produces_a_downward_notification():
         age_days=125,
     )
     service = _FakeService(
-        {1: _state(1, 90.82, cur)},
-        {1: {"min_selling_price": Decimal("128.56"), "context": prev}},
+        {(1, "tiktok"): _state(1, 90.82, cur)},
+        {(1, "tiktok"): {"min_selling_price": Decimal("128.56"), "context": prev}},
     )
     notify, silent = await service.detect_changes()
 
@@ -399,8 +401,8 @@ async def test_delisting_jump_is_excluded_but_baseline_still_advances():
         age_days=None,
     )
     service = _FakeService(
-        {1: _state(1, 128.56, cur)},
-        {1: {"min_selling_price": Decimal("90.82"), "context": prev}},
+        {(1, "tiktok"): _state(1, 128.56, cur)},
+        {(1, "tiktok"): {"min_selling_price": Decimal("90.82"), "context": prev}},
     )
     notify, silent = await service.detect_changes()
 
@@ -419,8 +421,8 @@ async def test_protection_loss_produces_a_notification():
         missing_reasons=["missing_purchase_cost"],
     )
     service = _FakeService(
-        {1: _state(1, None, cur)},
-        {1: {"min_selling_price": Decimal("128.56"), "context": prev}},
+        {(1, "tiktok"): _state(1, None, cur)},
+        {(1, "tiktok"): {"min_selling_price": Decimal("128.56"), "context": prev}},
     )
     notify, silent = await service.detect_changes()
 
@@ -447,8 +449,8 @@ async def test_protection_recovery_produces_a_notification():
     )
     cur = _context(min_selling_price="128.56", missing_reasons=[])
     service = _FakeService(
-        {1: _state(1, 128.56, cur)},
-        {1: {"min_selling_price": None, "context": prev}},
+        {(1, "tiktok"): _state(1, 128.56, cur)},
+        {(1, "tiktok"): {"min_selling_price": None, "context": prev}},
     )
     notify, silent = await service.detect_changes()
 
@@ -483,6 +485,7 @@ async def core_sqlite_session():
     wanted = (
         "core.dim_platforms",
         "finance.sku_pricing_policies",
+        "finance.sku_platform_pricing",
         "core.dim_spu",
         "core.dim_erp_sku",
         "core.bridge_spu_sku",
@@ -606,25 +609,27 @@ async def test_router_and_detection_share_one_pricing_implementation(core_sqlite
     sku_id = await _seed_pricing_fixture(session)
 
     # 路由侧（商品中心页面）
-    router_context = await _pricing_context(session, [sku_id])
+    router_context = await _pricing_context(session, [sku_id], ["tiktok"])
     router_payload = _compute_pricing_for_sku(
         context=router_context,
         sku_row=await session.get(DimErpSku, sku_id),
         linked_spu=await session.get(DimSpu, "SPU-1"),
+        platform_code="tiktok",
     )
 
     # 共享实现（唯一计算入口）
-    shared_context = await load_pricing_context(session, [sku_id])
+    shared_context = await load_pricing_context(session, [sku_id], ["tiktok"])
     shared_payload = compute_pricing_for_sku(
         context=shared_context,
         sku_row=await session.get(DimErpSku, sku_id),
         linked_spu=await session.get(DimSpu, "SPU-1"),
+        platform_code="tiktok",
     )
 
     # 通知侧
     service = PriceAdjustNotifyService(session)
     states = await service.collect_pricing_states()
-    detected = states[sku_id]["min_selling_price"]
+    detected = states[(sku_id, "tiktok")]["min_selling_price"]
 
     assert router_payload["min_selling_price"] is not None
     assert router_payload["min_selling_price"] == shared_payload["min_selling_price"]
@@ -658,6 +663,7 @@ async def test_baseline_with_null_price_is_still_treated_as_processed(core_sqlit
     session.add(
         PriceAdjustBaseline(
             sku_id=sku_id,
+            platform_code="tiktok",
             last_notified_min_price=None,
             last_notified_context={
                 "min_selling_price": None,
@@ -669,9 +675,10 @@ async def test_baseline_with_null_price_is_still_treated_as_processed(core_sqlit
 
     service = PriceAdjustNotifyService(session)
     baselines = await service.load_baselines()
-    assert sku_id in baselines, "价格列为 NULL 但基线行存在的 SKU 必须被当成已处理"
-    assert baselines[sku_id]["min_selling_price"] is None
-    assert baselines[sku_id]["context"]["missing_reasons"] == ["missing_purchase_cost"]
+    key = (sku_id, "tiktok")
+    assert key in baselines, "价格列为 NULL 但基线行存在的 SKU 必须被当成已处理"
+    assert baselines[key]["min_selling_price"] is None
+    assert baselines[key]["context"]["missing_reasons"] == ["missing_purchase_cost"]
 
 
 @pytest.mark.asyncio
@@ -1025,8 +1032,9 @@ async def test_detection_and_product_center_agree_on_min_selling_price(
     service = PriceAdjustNotifyService(pg_session)
     states = await service.collect_pricing_states()
     assert states, "seed 之后应当能算出至少一个 SKU 的定价状态"
-    sku_id = next(iter(states))
-    detected = states[sku_id]["min_selling_price"]
+    # 状态按 (sku_id, platform_code) 归位
+    (sku_id, platform_code), first_state = next(iter(states.items()))
+    detected = first_state["min_selling_price"]
 
     from modules.core.db import BridgeSpuSku, DimErpSku, DimSpu
     from sqlalchemy import select
@@ -1043,13 +1051,19 @@ async def test_detection_and_product_center_agree_on_min_selling_price(
     ).scalars().first()
     linked_spu = await pg_session.get(DimSpu, binding.spu) if binding else None
 
-    context = await load_pricing_context(pg_session, [sku_id])
+    context = await load_pricing_context(pg_session, [sku_id], [platform_code])
     shared_payload = compute_pricing_for_sku(
-        context=context, sku_row=sku_row, linked_spu=linked_spu
+        context=context,
+        sku_row=sku_row,
+        linked_spu=linked_spu,
+        platform_code=platform_code,
     )
-    router_context = await _pricing_context(pg_session, [sku_id])
+    router_context = await _pricing_context(pg_session, [sku_id], [platform_code])
     router_payload = _compute_pricing_for_sku(
-        context=router_context, sku_row=sku_row, linked_spu=linked_spu
+        context=router_context,
+        sku_row=sku_row,
+        linked_spu=linked_spu,
+        platform_code=platform_code,
     )
 
     assert shared_payload["min_selling_price"] == detected

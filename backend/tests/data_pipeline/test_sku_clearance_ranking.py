@@ -97,6 +97,7 @@ def _build_service(
     pricing_inputs=None,
     policy_rows=None,
     platform=None,
+    platforms=None,
 ):
     service = SkuClearanceService(db=None)
     captured: list[tuple[str, dict]] = []
@@ -124,13 +125,19 @@ def _build_service(
     async def fake_load_policy_rows():
         return policy_rows if policy_rows is not None else POLICY_ROWS
 
-    async def fake_load_platform(_policy_rows):
-        return platform
+    async def fake_load_pricing_platforms(_policy_rows):
+        """费率取法（阶段 2.1）：(各销售平台费率, 公司级兜底平台)。
+
+        ⚠️ 清货视图的 platform_code 是**库存来源平台**（'miaoshou'），
+        不是销售渠道 ⇒ 销售平台字典查不到它 ⇒ 落到公司级兜底。
+        所以这里销售平台字典默认给 ``{}``，兜底给假平台 —— 与改造前口径一致。
+        """
+        return dict(platforms or {}), platform
 
     monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
     monkeypatch.setattr(service, "_load_pricing_inputs", fake_load_pricing_inputs)
     monkeypatch.setattr(service, "_load_policy_rows", fake_load_policy_rows)
-    monkeypatch.setattr(service, "_load_platform", fake_load_platform)
+    monkeypatch.setattr(service, "_load_pricing_platforms", fake_load_pricing_platforms)
     return service, captured
 
 
@@ -285,6 +292,77 @@ async def test_pricing_uses_pure_function_and_reports_tier(monkeypatch):
     assert item.min_selling_price is not None
     # 参考售价缺失 -> 清货回款算不出来（None），不是 0
     assert item.clearance_recovery_amount is None
+
+
+@pytest.mark.asyncio
+async def test_row_platform_falls_back_to_company_rates_for_inventory_source_rows(
+    monkeypatch,
+):
+    """清货视图的行平台是**库存来源平台**（生产恒为 'miaoshou'），不是销售渠道。
+
+    阶段 2.1 把底线沉到「SKU × 平台」后，很容易顺手写成「按行里的 platform_code 查费率」——
+    但查不到（'miaoshou' 不是销售平台）⇒ 没有 ``other_cost_rate`` ⇒ 成本线算不出来 ⇒
+    **底线整个消失**（只剩纪律线）。
+
+    底线比口径不一致更危险：口径不一致只是数字难看，底线消失是护栏形同虚设。
+    所以这里钉死：**行平台查不到销售平台费率时，必须回落到公司级费率**。
+    """
+    service, _ = _build_service(
+        monkeypatch,
+        rows=[_row(platform_code="miaoshou", days_since_restock=0)],
+        pricing_inputs={
+            1001: {
+                "creator_commission_rate": None,
+                "spu_bound": True,
+                "spu_return_loss_rate": Decimal("0.02"),
+                "spu_damage_rate": Decimal("0.01"),
+            }
+        },
+        platform=_fake_platform(),
+        platforms={"tiktok": _fake_platform()},
+    )
+
+    result = await service.get_sku_clearance_ranking(min_restock_days=0)
+
+    item = result.items[0]
+    # 底线必须还在：46.5 ÷ (1 − 0.06 − 0.0606 − 0.02 − 0.01 − 0.25) = 77.58
+    assert item.min_selling_price == pytest.approx(77.58, abs=0.01)
+    assert item.min_selling_price_source == "cost_floor"
+
+
+@pytest.mark.asyncio
+async def test_row_platform_uses_its_own_rates_when_it_is_a_sales_platform(monkeypatch):
+    """行平台**是**销售平台时，用它自己的费率（而不是公司级兜底）。"""
+    shopee = type(
+        "FakeShopee",
+        (),
+        {
+            "platform_code": "shopee",
+            "other_cost_rate": Decimal("0.4165"),
+            "default_creator_commission_rate": Decimal("0.0111"),
+        },
+    )()
+    service, _ = _build_service(
+        monkeypatch,
+        rows=[_row(platform_code="shopee", days_since_restock=0)],
+        pricing_inputs={
+            1001: {
+                "creator_commission_rate": None,
+                "spu_bound": True,
+                "spu_return_loss_rate": Decimal("0.02"),
+                "spu_damage_rate": Decimal("0.01"),
+            }
+        },
+        platform=_fake_platform(),
+        platforms={"tiktok": _fake_platform(), "shopee": shopee},
+    )
+
+    result = await service.get_sku_clearance_ranking(min_restock_days=0)
+
+    item = result.items[0]
+    # 46.5 ÷ (1 − 0.4165 − 0.0111 − 0.02 − 0.01 − 0.25) = 159.03
+    assert item.min_selling_price == pytest.approx(159.03, abs=0.01)
+    assert item.min_selling_price_source == "cost_floor"
 
 
 @pytest.mark.asyncio
