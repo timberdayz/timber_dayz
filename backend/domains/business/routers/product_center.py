@@ -35,6 +35,10 @@ from backend.schemas.product_center import (
     ProductCenterListResponse,
     SkuPricingOverrideRequest,
     SkuPricingOverrideResponse,
+    SkuSellingPricePreviewRequest,
+    SkuSellingPricePreviewResponse,
+    SkuSellingPriceCheck,
+    SkuSellingPriceCheckResponse,
     ProductWarehouseCreateRequest,
     ProductWarehouseUpdateRequest,
     PlatformFeeRateUpdateRequest,
@@ -127,6 +131,15 @@ from backend.services.product_pricing_override_service import (
     clear_platform_override,
     set_platform_override,
 )
+from backend.services.product_selling_price_service import (
+    apply_selling_price_confirmation,
+    assess_selling_price_deviation,
+    build_selling_price_preview,
+    compute_selling_price_age,
+)
+from backend.services.product_transaction_price_service import (
+    load_transaction_price_bands,
+)
 from backend.services.sku_pricing_policy_service import (
     load_current_policies,
     policy_current_predicate,
@@ -138,6 +151,25 @@ from backend.services.feishu_projection_service import FeishuProjectionService, 
 
 router = APIRouter(tags=["商品中心"], dependencies=[Depends(get_current_user)])
 logger = get_logger(__name__)
+
+
+def _jsonable(values: dict) -> dict:
+    """把写入字典转成能进 JSON 审计字段的样子。
+
+    审计里要记**实际写入**的值（含系统自动写的字段），所以不能只靠
+    Pydantic 的 ``model_dump(mode="json")`` —— 那是给请求体用的。
+    """
+    out: dict = {}
+    for key, value in (values or {}).items():
+        if isinstance(value, datetime):
+            out[key] = value.isoformat()
+        elif isinstance(value, Decimal):
+            out[key] = float(value)
+        elif isinstance(value, (date,)):
+            out[key] = value.isoformat()
+        else:
+            out[key] = value
+    return out
 _EDITOR_ROLES = {"admin", "manager", "finance", "operator"}
 
 
@@ -1317,20 +1349,37 @@ async def list_skus(
         payload["min_selling_price_by_platform"] = _pricing_by_platform(
             pricing_context, row, linked_spu
         )
+        # 阶段 4 工具 4 · 过期巡检：基准售价多久没确认了。
+        # 纯计算，不查订单数据 ⇒ 列表接口零额外开销。
+        # ⚠️ 只对**有基准售价**的 SKU 算：没有价格就没有「该确认什么」。
+        if row.reference_selling_price is not None:
+            age_days, stale = compute_selling_price_age(row.selling_price_confirmed_at)
+            payload["selling_price_age_days"] = age_days
+            payload["selling_price_stale"] = stale
         items.append(ProductCenterItem(**payload))
     return ProductCenterListResponse(data=items, page=page, page_size=page_size, total=total, total_pages=(total + page_size - 1) // page_size)
 
 
 @router.post("/api/skus", response_model=ProductCenterItem, status_code=201)
 async def create_sku(body: SkuCreateRequest, db: AsyncSession = Depends(get_async_db), _user=Depends(_require_editor)):
-    row = DimErpSku(**body.model_dump())
+    values = body.model_dump()
+    # 阶段 4 工具 2：新建时填了基准售价 ⇒ 确认日期自动写当天。
+    # ⚠️ `values` 是完整 dump（`selling_price_confirmed_at` 一定在里面，值为 None），
+    #    所以「运营有没有显式给过确认日期」不能靠字典推断，要看 `exclude_unset` 的那份。
+    apply_selling_price_confirmation(
+        values,
+        current_price=None,
+        current_confirmed_at=None,
+        confirmed_at_provided="selling_price_confirmed_at" in body.model_dump(exclude_unset=True),
+    )
+    row = DimErpSku(**values)
     db.add(row)
     try:
         await db.flush()
         await _enqueue_sku_projection(db, row)
         await _write_product_center_audit(
             db, _user, action_type="create", resource_type="sku",
-            resource_id=str(row.sku_id), changes=body.model_dump(mode="json"),
+            resource_id=str(row.sku_id), changes=_jsonable(values),
         )
         await db.commit()
         await db.refresh(row)
@@ -1346,17 +1395,136 @@ async def update_sku(sku_id: int, body: SkuUpdateRequest, db: AsyncSession = Dep
     row = await db.get(DimErpSku, sku_id)
     if row is None:
         raise HTTPException(status_code=404, detail="SKU not found")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    values = body.model_dump(exclude_unset=True)
+    # 阶段 4 工具 2：基准售价变了 ⇒ 确认日期自动跟着走（清空则一并清空）。
+    apply_selling_price_confirmation(
+        values,
+        current_price=row.reference_selling_price,
+        current_confirmed_at=row.selling_price_confirmed_at,
+    )
+    for key, value in values.items():
         setattr(row, key, value)
     await _enqueue_sku_projection(db, row)
     await _write_product_center_audit(
         db, _user, action_type="update", resource_type="sku",
-        resource_id=str(row.sku_id), changes=body.model_dump(exclude_unset=True, mode="json"),
+        resource_id=str(row.sku_id),
+        # 审计记录**实际写入**的值（含自动写的确认日期），不是客户端原始请求体 ——
+        # 否则事后看审计会以为确认日期是运营填的。
+        changes=_jsonable(values),
     )
     await db.commit()
     await db.refresh(row)
     asyncio.create_task(trigger_pending_projection_delivery())
     return ProductCenterItem.model_validate(row)
+
+
+@router.post("/api/skus/{sku_id}/selling-price-preview", response_model=SkuSellingPricePreviewResponse)
+async def preview_sku_selling_price(
+    sku_id: int,
+    body: SkuSellingPricePreviewRequest,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """**基准售价即时影响预览**（阶段 4 工具 3）。
+
+    运营改基准售价时调用，返回「最低售价会从多少变成多少」。
+
+    ⚠️ 这是**只读**的：不写库、不写审计。真正生效要等运营保存 SKU 主数据。
+    ⚠️ 预览与保存走**同一个**定价函数（``compute_pricing_state``），
+    所以「预览说涨到 63」与「保存后变成 63」必然一致。
+    """
+    row = await db.get(DimErpSku, sku_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="SKU not found")
+    binding = (await db.execute(
+        select(BridgeSpuSku).where(
+            BridgeSpuSku.sku_id == sku_id,
+            BridgeSpuSku.binding_status == "active",
+            BridgeSpuSku.effective_to.is_(None),
+        )
+    )).scalars().first()
+    linked_spu = await db.get(DimSpu, binding.spu) if binding else None
+    context = await _pricing_context(db, [sku_id])
+    payload = build_selling_price_preview(
+        context=context,
+        sku_row=row,
+        linked_spu=linked_spu,
+        reference_selling_price=body.reference_selling_price,
+    )
+    return SkuSellingPricePreviewResponse(**payload)
+
+
+@router.get("/api/skus/selling-price-check", response_model=SkuSellingPriceCheckResponse)
+async def check_sku_selling_prices(
+    sku_id: int | None = Query(None, description="只查某个 SKU；不传则查全部有基准售价的 SKU"),
+    include_deviation: bool = Query(
+        True,
+        description=(
+            "是否算「与历史成交价的偏差」。关掉它就只做过期巡检（快）。"
+            "⚠️ 打开它要扫订单事实表，一次调用要几十秒。"
+        ),
+    ),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """基准售价体检（阶段 4 工具 4）：偏差校验 + 过期巡检。
+
+    - **过期巡检**：确认日期超过阈值（默认 90 天）⇒ ``stale``。
+    - **偏差校验**：基准售价与历史成交价中位数偏差超过 30% ⇒ ``exceeds_threshold``。
+
+    ⚠️ 算不出历史成交价的 SKU 会落在 ``unverified_count`` 里 ——
+    **「算不出」不等于「没问题」**，前端要分开显示。
+    """
+    statement = select(DimErpSku).where(DimErpSku.reference_selling_price.isnot(None))
+    if sku_id is not None:
+        statement = statement.where(DimErpSku.sku_id == sku_id)
+    rows = (await db.execute(statement.order_by(DimErpSku.sku_key))).scalars().all()
+
+    bands: dict = {}
+    if include_deviation and rows:
+        bands = await load_transaction_price_bands(db, [row.sku_id for row in rows])
+
+    items: list[SkuSellingPriceCheck] = []
+    deviation_count = 0
+    stale_count = 0
+    unverified_count = 0
+    for row in rows:
+        age_days, stale = compute_selling_price_age(row.selling_price_confirmed_at)
+        if stale:
+            stale_count += 1
+        band = bands.get(row.sku_id)
+        deviation = assess_selling_price_deviation(
+            row.reference_selling_price,
+            band.get("median_price") if band else None,
+        )
+        if band:
+            # 把「算这个偏差用的历史成交价」一并带出去 ——
+            # 只给一个百分比，运营没法判断这个提示可不可信。
+            deviation["median_price"] = float(band["median_price"])
+            deviation["sample_size"] = band.get("sample_size")
+            deviation["window_start"] = band.get("window_start")
+            deviation["window_end"] = band.get("window_end")
+        if deviation["available"]:
+            if deviation["exceeds_threshold"]:
+                deviation_count += 1
+        else:
+            unverified_count += 1
+        items.append(
+            SkuSellingPriceCheck(
+                sku_id=row.sku_id,
+                sku_key=row.sku_key,
+                reference_selling_price=row.reference_selling_price,
+                selling_price_source=row.selling_price_source,
+                selling_price_confirmed_at=row.selling_price_confirmed_at,
+                age_days=age_days,
+                stale=stale,
+                deviation=deviation,
+            )
+        )
+    return SkuSellingPriceCheckResponse(
+        items=items,
+        deviation_count=deviation_count,
+        stale_count=stale_count,
+        unverified_count=unverified_count,
+    )
 
 
 @router.patch(
@@ -1495,6 +1663,12 @@ async def bulk_save_skus(body: SkuBulkRequest, db: AsyncSession = Depends(get_as
                 row = (
                     await db.execute(select(DimErpSku).where(DimErpSku.sku_key == item.sku_key))
                 ).scalars().first()
+            # 阶段 4 工具 2：批量保存同样自动维护确认日期。
+            apply_selling_price_confirmation(
+                values,
+                current_price=row.reference_selling_price if row is not None else None,
+                current_confirmed_at=row.selling_price_confirmed_at if row is not None else None,
+            )
             if row is None:
                 row = DimErpSku(**values)
                 db.add(row)

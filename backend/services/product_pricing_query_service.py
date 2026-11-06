@@ -45,6 +45,14 @@ from .product_pricing_service import compute_sku_pricing, select_restock_tier
 from .sku_pricing_policy_service import load_current_policies, to_policy_rows
 
 
+#: 「不覆盖」的哨兵。
+#:
+#: 为什么不能直接用 ``None``：阶段 4 的「基准售价即时预览」要能预览
+#: **清空基准售价**的效果（reference_selling_price = None），
+#: 而「不传这个参数、沿用 SKU 当前值」也是 ``None`` —— 两者必须区分开。
+_UNSET = object()
+
+
 async def load_pricing_platforms(
     db: AsyncSession, platform_codes: Iterable[str] | None = None
 ) -> dict[str, DimPlatform]:
@@ -221,6 +229,7 @@ def compute_pricing_state(
     sku_row,
     linked_spu,
     platform_code: Optional[str] = None,
+    reference_selling_price=_UNSET,
 ) -> dict:
     """算出一个 SKU 在**某个平台**上的定价状态（含命中的档位）。
 
@@ -237,6 +246,11 @@ def compute_pricing_state(
 
     ⚠️ `platform_code` 不传时回落到历史 basis 平台 —— 只为兼容老调用方，
     **新代码必须显式传平台**，否则所有平台又会共用一套费率（那正是阶段 2.1 要修的缺陷）。
+
+    ⚠️ `reference_selling_price` 是**阶段 4 的预览开关**：不传就沿用 SKU 当前值；
+    传了就用传进来的值算纪律线（可以是 None = 预览「清空基准售价」）。
+    预览**必须**走这个函数而不是另写一套算法 —— 否则「预览说涨到 63」而
+    「保存后实际变成 58」，运营会以为系统坏了。
     """
     policies = context["policies"]
     platform = resolve_pricing_platform(context, platform_code)
@@ -261,7 +275,11 @@ def compute_pricing_state(
 
     pricing = compute_sku_pricing(
         purchase_cost=sku_row.default_purchase_cost,
-        reference_selling_price=sku_row.reference_selling_price,
+        reference_selling_price=(
+            sku_row.reference_selling_price
+            if reference_selling_price is _UNSET
+            else reference_selling_price
+        ),
         creator_commission_rate=sku_row.creator_commission_rate,
         platform_creator_commission_rate=(
             platform.default_creator_commission_rate if platform else None

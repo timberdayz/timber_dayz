@@ -87,10 +87,22 @@ def test_migration_module_imports_and_defines_its_constants():
 
 
 def test_orm_exposes_pricing_columns_and_policy_table():
-    from modules.core.db import DimErpSku, DimPlatform, SkuPricingPolicy
+    from modules.core.db import DimErpSku, DimPlatform, SkuPlatformPricing, SkuPricingPolicy
 
     sku_columns = {c.name for c in DimErpSku.__table__.columns}
-    assert {"creator_commission_rate", "min_selling_price_override"} <= sku_columns
+    # ⚠️ `min_selling_price_override` **不在** SKU 主数据上了（阶段 2.1b）：
+    #    人工覆盖是「SKU × 平台」的量（底线就是 SKU × 平台的量），挂在 SKU 主数据上
+    #    只能存一个数 ⇒ 一个数套所有平台。
+    #    而且 `core.dim_erp_sku` 参与「采集机 → 云端」同步（TRUNCATE + 全量重灌），
+    #    住在这里的覆盖值每次同步都会被抹掉 ⇒ 覆盖值住在 `finance.sku_platform_pricing`
+    #    （不参与同步，且刻意不带外键）。
+    assert "creator_commission_rate" in sku_columns
+    assert "min_selling_price_override" not in sku_columns, (
+        "人工覆盖已下沉到平台级，SKU 主数据上不该再有公司级覆盖列"
+    )
+
+    override_columns = {c.name for c in SkuPlatformPricing.__table__.columns}
+    assert {"sku_id", "platform_code", "min_selling_price_override"} <= override_columns
 
     platform_columns = {c.name for c in DimPlatform.__table__.columns}
     assert {"default_creator_commission_rate", "other_cost_rate"} <= platform_columns

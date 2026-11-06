@@ -231,8 +231,18 @@ class DimErpSku(Base):
     expected_storage_cost = Column(Float, nullable=True)
     reference_selling_price = Column(Float, nullable=True)
     selling_price_currency = Column(String(8), nullable=False, default="CNY")
+    # 「基准售价来源」是**枚举**，不是自由文本（阶段 4 工具 1）。
+    # 取值：platform_listing（平台商品页）/ erp（ERP 主数据）/ manual（人工填写）。
+    #
+    # ⚠️ `platform_listing` 保留了枚举位但**当前没有可靠数据源**
+    #    （平台 SKU 档案靠人工维护，覆盖率未知）⇒ 保留位置，不承诺可采集。
     selling_price_source = Column(String(64), nullable=True)
+    # 「基准售价确认日期」：运营最后一次确认基准售价的时间（阶段 4 工具 2）。
+    # 填基准售价时自动写当天；基准售价被清空时一并清空（价格没了，确认日期无意义）。
     selling_price_confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    # 枚举清洗的时间戳（阶段 4 迁移 20261121）。
+    # 历史自由文本被归一到枚举的那一刻 —— 只写一次，之后不再动。
+    selling_price_source_cleaned_at = Column(DateTime(timezone=True), nullable=True)
     turnover_class = Column(String(16), nullable=True)
     # 该 SKU 的达人佣金率；NULL = 未单独设置，计算时取平台默认值兜底
     creator_commission_rate = Column(Numeric(12, 8), nullable=True)
@@ -260,6 +270,17 @@ class DimErpSku(Base):
         CheckConstraint("unit_volume_cbm IS NULL OR unit_volume_cbm >= 0", name="ck_dim_erp_sku_unit_volume_cbm"),
         Index("ix_dim_erp_sku_unit_volume_cbm", "unit_volume_cbm"),
         CheckConstraint("creator_commission_rate IS NULL OR (creator_commission_rate >= 0 AND creator_commission_rate <= 1)", name="ck_dim_erp_sku_creator_commission_rate"),
+        # 阶段 4 工具 1：基准售价来源必须是枚举值。
+        CheckConstraint(
+            "selling_price_source IS NULL OR selling_price_source IN ('platform_listing', 'erp', 'manual')",
+            name="ck_dim_erp_sku_selling_price_source",
+        ),
+        # 阶段 4 工具 2：有基准售价就必须有确认日期。
+        # 用 CHECK 而不是 NOT NULL：历史数据有缺口（迁移会先回填，再加约束）。
+        CheckConstraint(
+            "reference_selling_price IS NULL OR selling_price_confirmed_at IS NOT NULL",
+            name="ck_dim_erp_sku_selling_price_confirmed",
+        ),
         {"schema": "core"},
     )
 

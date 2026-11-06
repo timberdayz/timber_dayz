@@ -9,6 +9,24 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 _CODE_PATTERN = r"^[A-Z0-9]+(?:-[A-Z0-9]+)*$"
 _CATEGORY_CODE_PATTERN = r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$"
 
+#: 「基准售价来源」的**枚举**取值（阶段 4 工具 1）。
+#:
+#: - ``platform_listing``：平台商品页价格。**保留枚举位，但当前没有可靠数据源**
+#:   （平台 SKU 档案靠人工维护，覆盖率未知）⇒ 不承诺可采集。
+#: - ``erp``：ERP 主数据带过来的。
+#: - ``manual``：运营在商品中心手填的。
+SELLING_PRICE_SOURCES = ("platform_listing", "erp", "manual")
+
+#: 写入侧的取值校验。自由文本在这里**不再被接受** —— 枚举化是这一阶段的目的。
+SELLING_PRICE_SOURCE_PATTERN = r"^(?:platform_listing|erp|manual)$"
+
+#: 基准售价多久没被确认就算「过期」（阶段 4 工具 4）。
+#: 90 天 = 一个季度的经营周期；超过它，纪律线用的价格就该重新看一眼。
+SELLING_PRICE_STALE_DAYS = 90
+
+#: 基准售价与历史成交价中位数的允许偏差（阶段 4 工具 4）。超过就提示。
+SELLING_PRICE_DEVIATION_THRESHOLD = 0.30
+
 
 class ProductCategoryCreateRequest(BaseModel):
     category_code: str = Field(min_length=1, max_length=64, pattern=_CATEGORY_CODE_PATTERN)
@@ -103,7 +121,7 @@ class SkuBulkItem(BaseModel):
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
     reference_selling_price: Optional[float] = Field(default=None, ge=0)
     selling_price_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
-    selling_price_source: Optional[str] = Field(default=None, max_length=64)
+    selling_price_source: Optional[str] = Field(default=None, pattern=SELLING_PRICE_SOURCE_PATTERN)
     selling_price_confirmed_at: Optional[datetime] = None
     turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
     creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
@@ -188,7 +206,7 @@ class SkuCreateRequest(BaseModel):
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
     reference_selling_price: Optional[float] = Field(default=None, ge=0)
     selling_price_currency: str = Field(default="CNY", min_length=3, max_length=8)
-    selling_price_source: Optional[str] = Field(default=None, max_length=64)
+    selling_price_source: Optional[str] = Field(default=None, pattern=SELLING_PRICE_SOURCE_PATTERN)
     selling_price_confirmed_at: Optional[datetime] = None
     turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
     creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
@@ -221,7 +239,7 @@ class SkuUpdateRequest(BaseModel):
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
     reference_selling_price: Optional[float] = Field(default=None, ge=0)
     selling_price_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
-    selling_price_source: Optional[str] = Field(default=None, max_length=64)
+    selling_price_source: Optional[str] = Field(default=None, pattern=SELLING_PRICE_SOURCE_PATTERN)
     selling_price_confirmed_at: Optional[datetime] = None
     turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
     creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
@@ -269,6 +287,114 @@ class SkuPricingOverrideResponse(BaseModel):
     cleared: bool = False
 
 
+# ==================== 阶段 4 · 基准售价工具 ====================
+
+
+class SkuSellingPricePreviewRequest(BaseModel):
+    """**基准售价即时影响预览**的请求（阶段 4 工具 3）。
+
+    运营在 SKU 资料页改基准售价时调用：给一个「如果基准售价改成这个数」，
+    服务端按**完全相同的定价口径**算一遍纪律线与底线，返回各平台会怎么变。
+
+    ⚠️ 预览是**假设**，不写库；真正生效要等运营保存。
+    """
+
+    #: 待预览的基准售价。**必填**（可以是 null）。
+    #: null = 预览「清空基准售价」的效果。
+    #: ⚠️ 不能给默认值：默认值 None 会让「没传这个字段」和「预览清空」变成同一件事。
+    reference_selling_price: Optional[float] = Field(..., ge=0)
+
+
+class SkuSellingPricePreviewPlatform(BaseModel):
+    """某个平台上的预览结果。"""
+
+    platform_code: str
+    #: 现在的最低售价（当前基准售价下算出来的）
+    min_selling_price_current: Optional[float] = None
+    #: 换成新基准售价后的最低售价
+    min_selling_price_preview: Optional[float] = None
+    #: 变化额（预览 − 现在）
+    change: Optional[float] = None
+    #: 变化幅度（相对现在的百分比）
+    change_pct: Optional[float] = None
+    #: 现在的底线来源（cost_floor / discount_guard / manual_override / unavailable）
+    source_current: Optional[str] = None
+    #: 预览后的底线来源
+    source_preview: Optional[str] = None
+    #: 该平台是否有人工覆盖。人工覆盖**直接替换**底线 ⇒ 纪律线改了也不生效。
+    override_locked: bool = False
+    #: 一句话说明（中文，直接给运营看）
+    message: Optional[str] = None
+
+
+class SkuSellingPricePreviewResponse(BaseModel):
+    """基准售价即时影响预览的响应。"""
+
+    sku_id: int
+    sku_key: Optional[str] = None
+    #: 现在库里存的基准售价
+    reference_selling_price_current: Optional[float] = None
+    #: 本次预览用的基准售价
+    reference_selling_price_preview: Optional[float] = None
+    #: 命中档位的显示名（纪律线用的让利率来自这里）
+    pricing_tier_label: Optional[str] = None
+    #: 命中档位的身份（库龄起点）
+    pricing_tier_min_restock_days: Optional[int] = None
+    platforms: list[SkuSellingPricePreviewPlatform] = Field(default_factory=list)
+    #: 整体提示（例如「纪律线生效，最低售价被抬高 123%」）
+    warnings: list[str] = Field(default_factory=list)
+
+
+class SkuSellingPriceDeviation(BaseModel):
+    """基准售价 vs 历史成交价中位数的偏差（阶段 4 工具 4 · 偏差校验）。
+
+    ⚠️ `available = False` 表示**算不出来**（没有成交记录 / 样本太少 / 没有汇率），
+    这时**不给任何结论** —— 缺输入宁可不算，不可乐观。
+    """
+
+    available: bool = False
+    #: 算不出来的原因（available=False 时有值）
+    reason: Optional[str] = None
+    #: 历史成交价中位数（CNY）
+    median_price: Optional[float] = None
+    #: 参与中位数计算的成交行数
+    sample_size: Optional[int] = None
+    #: 统计窗口
+    window_start: Optional[date] = None
+    window_end: Optional[date] = None
+    #: 偏差（相对历史成交价中位数的百分比，正数 = 基准售价更高）
+    deviation_pct: Optional[float] = None
+    #: 是否超过阈值（默认 30%）
+    exceeds_threshold: bool = False
+
+
+class SkuSellingPriceCheck(BaseModel):
+    """单个 SKU 的基准售价体检结果。"""
+
+    sku_id: int
+    sku_key: Optional[str] = None
+    reference_selling_price: Optional[float] = None
+    selling_price_source: Optional[str] = None
+    selling_price_confirmed_at: Optional[datetime] = None
+    #: 距上次确认多少天；从未确认 ⇒ None
+    age_days: Optional[int] = None
+    #: 是否超过过期阈值（默认 90 天）
+    stale: bool = False
+    deviation: SkuSellingPriceDeviation
+
+
+class SkuSellingPriceCheckResponse(BaseModel):
+    """基准售价体检（偏差 + 过期）的响应。"""
+
+    items: list[SkuSellingPriceCheck] = Field(default_factory=list)
+    #: 偏差超阈值的条数
+    deviation_count: int = 0
+    #: 过期未确认的条数
+    stale_count: int = 0
+    #: 有基准售价但**算不出**偏差的条数（缺输入，不是「没问题」）
+    unverified_count: int = 0
+
+
 class ProductCenterItem(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -304,6 +430,13 @@ class ProductCenterItem(BaseModel):
     selling_price_currency: Optional[str] = None
     selling_price_source: Optional[str] = None
     selling_price_confirmed_at: Optional[datetime] = None
+    #: 枚举清洗时间戳（阶段 4 迁移）。历史自由文本被归一到枚举的那一刻。
+    selling_price_source_cleaned_at: Optional[datetime] = None
+    #: 基准售价已过多少天没确认（阶段 4 工具 4 · 过期巡检）。
+    #: 没有确认日期 ⇒ None（**不是 0**）：「从没确认过」和「今天刚确认」是两回事。
+    selling_price_age_days: Optional[int] = None
+    #: 确认日期是否已超过阈值（默认 90 天）⇒ 页面标黄「纪律线可能失真」。
+    selling_price_stale: bool = False
     turnover_class: Optional[str] = None
     logistics_damage_rate: Optional[float] = None
     return_loss_rate: Optional[float] = None

@@ -450,7 +450,7 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
     用来验证**护栏排在缺资料校验之前**——用完整 seed 时 `missing_fields` 恒为 `[]`，
     那条断言永远观察不到差别。
     """
-    from datetime import date
+    from datetime import date, datetime, timezone
 
     from modules.core.db import (
         BridgeSpuSku, DimErpSku, DimPlatform, DimSpu, DimUser, DimWarehouse,
@@ -492,6 +492,8 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
     pg_session.add(DimErpSku(
         sku_id=9001, sku_key="TEST-SKU-1", sku_name="测试SKU",
         status="active", default_purchase_cost=10, reference_selling_price=30,
+        # 阶段 4 工具 2：有基准售价就必须有确认日期（DB 约束 ck_dim_erp_sku_selling_price_confirmed）
+        selling_price_confirmed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         weight_kg=0.5, unit_volume_cbm=0.01, turnover_class="slow",
     ))
     await pg_session.flush()

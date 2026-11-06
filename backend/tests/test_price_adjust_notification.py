@@ -508,7 +508,7 @@ async def _seed_pricing_fixture(session) -> int:
     库龄表（mart 层）在 SQLite 里不存在 → 库龄回落「无库龄」，
     这正是要覆盖的场景：两边都必须在**没有库龄**时给出同一个答案。
     """
-    from datetime import date
+    from datetime import date, datetime, timezone
 
     from modules.core.db import BridgeSpuSku, DimErpSku, DimPlatform, DimSpu, SkuPricingPolicy
 
@@ -566,6 +566,8 @@ async def _seed_pricing_fixture(session) -> int:
         purchase_cost_currency="CNY",
         purchase_cost_confidence="high",
         reference_selling_price=30.00,
+        # 阶段 4 工具 2：有基准售价就必须有确认日期
+        selling_price_confirmed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         selling_price_currency="CNY",
         status="active",
     )

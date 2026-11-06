@@ -27,7 +27,7 @@
 from __future__ import annotations
 
 import importlib.util
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -190,6 +190,8 @@ async def _seed_two_platforms(session) -> int:
         purchase_cost_currency="CNY",
         purchase_cost_confidence="high",
         reference_selling_price=REFERENCE_SELLING_PRICE,
+        # 阶段 4 工具 2：有基准售价就必须有确认日期
+        selling_price_confirmed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         selling_price_currency="CNY",
         status="active",
     )
