@@ -1484,9 +1484,9 @@ class ShopeeProductsExport(ExportComponent):
         await self._ensure_shop_selected(page)
 
     async def ensure_date_ready(self, page: Any) -> None:
-        from modules.platforms.shopee.components.date_picker import ShopeeDatePicker
-
-        picker = ShopeeDatePicker(self.ctx)
+        # 选择器必须与组件同源(与 _date_picker_helper 同一口径), 否则调用方自定义过
+        # ProductsSelectors 时, 日期阶段会走另一套文案/粒度口径。
+        picker = self._date_picker_helper()
         result = await picker.run(page, picker._resolve_option_from_context())
         if not getattr(result, "success", False):
             raise RuntimeError(getattr(result, "message", "date picker failed"))

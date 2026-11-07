@@ -560,22 +560,38 @@ class ShopeeDatePicker(DatePickerComponent):
         return self._selection_state_from_text(trigger_text)
 
     async def _current_date_summary_text(self, page: Any) -> str | None:
+        """当前生效的日期摘要文本。
+
+        摘要容器与日期触发器都能拿到文本时, 取**信息更丰富**的那个:
+        容器常常只印「统计时间」四个字, 而触发器才带「按月 2026.03 (GMT+08)」
+        这种真正能判断是否已应用的粒度/日期信息。
+        （旧实现是「容器含『统计时间』就返回」, 在那句文案还是乱码时该分支恒不成立,
+        修正文案后才暴露语义差异 —— 见 50ba79c4。）
+        """
+        container_text: str | None = None
         summary_container = await self._find_date_summary_container(page)
         if summary_container is not None:
             try:
-                summary_text = await summary_container.text_content()
+                container_text = await summary_container.text_content()
             except Exception:
-                summary_text = None
-            if summary_text and "统计时间" in str(summary_text):
-                return summary_text
+                container_text = None
+            if container_text and "统计时间" not in str(container_text):
+                # 不是摘要容器 ⇒ 不作为候选
+                container_text = None
 
+        trigger_text: str | None = None
         trigger = await self._find_date_picker_trigger(page)
-        if trigger is None:
-            return None
-        try:
-            return await trigger.text_content()
-        except Exception:
-            return None
+        if trigger is not None:
+            try:
+                trigger_text = await trigger.text_content()
+            except Exception:
+                trigger_text = None
+
+        if container_text and trigger_text:
+            container_len = len(str(container_text).strip())
+            trigger_len = len(str(trigger_text).strip())
+            return container_text if container_len >= trigger_len else trigger_text
+        return container_text or trigger_text
 
     async def _current_date_trigger_text(self, page: Any) -> str | None:
         trigger = await self._find_date_picker_trigger(page)
@@ -605,8 +621,13 @@ class ShopeeDatePicker(DatePickerComponent):
             *self.sel.granularity_labels.values(),
         ):
             try:
-                locator = page.get_by_text(text, exact=False).first
-                if await locator.is_visible(timeout=500):
+                # 同名文本可能在 DOM 里出现多次(日期面板的菜单项常渲染在 portal 末尾),
+                # 取**可见**的那个, 不要只认首个匹配 —— 否则隐藏元素会把标签识别带偏。
+                locator = await self._pick_visible_locator(
+                    page.get_by_text(text, exact=False),
+                    timeout_ms=500,
+                )
+                if locator is not None:
                     return text
             except Exception:
                 continue
