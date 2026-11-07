@@ -375,3 +375,73 @@ G-2（变体按业务形态）、G-3（前端按业务维度建）**，但**没�
 1. **历史那条假冲突（id=72）保留原样**，不删历史。若要让运营侧告警归零，需要**人工确认**后把它改判为 `failed`（与 2026-04 的 3 条同口径）—— 这是改历史判定，必须由人拍板。
 2. **资产指纹账本仍可能落后于文件**（迁移重建了资产但没回写账本）。现在只作为可见性字段存在，**不再驱动判定与重试**；
    要彻底消除需要「落库只有一个入口 + 由它回写账本」，列入 **V2**。
+
+---
+
+## 13. 采集 404 归位 + 库龄分档「彻底一致」（2026-11-29）
+
+> 详细方案见 `docs/superpowers/plans/2026-11-29-404-landing-and-aging-tier-alignment.md`。
+> 本节只记**结论与证据**。
+
+### 13.1 404 根因（实测，非推断）
+
+登录检测器对 Shopee 整站 URL 做**子串匹配**，「已登录关键词」里的 `"/seller"`
+命中的是**域名** ⇒ `https://seller.shopee.cn/404?…` 与 `/account/signin` **都被判成 logged_in(0.85)**
+⇒ 登录闸门放行 ⇒ 没有任何一层纠正页面 ⇒ 持久 profile 恢复出来的 404 被原样保留
+⇒ 切店只改 query、保留 path ⇒ 一直在 404 上打转。
+
+**TikTok 看起来没事不是它自己会重定向** —— 两边登录短路逻辑一模一样，
+真正原因是我们的关键词是**路径级**、对 TikTok 拦得对、对 Shopee 放行错了。
+结构性佐证：Shopee 把店铺编号明文放在 URL query（`cnsc_shop_id`），陈旧 URL 一恢复就带出上一家店的编号；
+TikTok 的身份参数是 `shop_region`，探测只认 `cnsc_shop_id`/`shop_id` ⇒ 提取不到 ⇒ 根本不落记录。
+**库里 28 条探测记录 100% 是 shopee**，一条 TikTok 都没有。
+
+### 13.2 修法（用户拍板：404 确实是已登录页面，只是需要重新导航）
+
+- **不改登录判定**（改了会让采集器白跑一遍重新登录、甚至弹验证码）；
+- 新增 `runtime_session.ensure_platform_landing_page()`：**只有当前页确实是错误页时**
+  才导航回平台入口，正常页面一次额外导航都不加 ⇒ 采集流程零影响；
+- 探测读 URL 前先归位：成功读到**真实**身份，失败仍记「探测失败」，
+  残留编号**连参数都不给它**（服务层丢弃是第二道防线），证据留在 `raw_payload`；
+- 错误页判据下沉到 `modules/apps/collection_center/platform_error_page.py`
+  （`runtime_session` 也要用 ⇒ 同文件会循环依赖），`executor_v2` 保留同名别名，
+  迁移口径**逐字未变**；
+- 顺手修掉 `get_platform_login_entry` 对未知平台抛 `ValueError` 会带崩采集的真 bug。
+
+### 13.3 库龄分档「彻底一致」
+
+- 粒度改 **SKU 级**（库龄取各仓最长、只算还有可售库存的仓）—— 与商品中心定价一致，
+  货值与 SKU 数**互斥可加**；
+- SQL 视图阈值**不写死**，直接读 `finance.sku_pricing_policies` 当前生效行
+  ⇒ 业务改档位表，看板自动跟着变；
+- 服务层两条 SQL 路径合并为一个 Python 汇总（`build_restock_tier_buckets`，唯一实现），
+  不再两份 CASE 各写一遍阈值；
+- 业务概览卡 + 库存概览页都改按业务档位展示，并补「共 N 行 · M 个 SKU」；
+- 旧标准指标 `deep_stagnant_value`(≥180) / `mid_stagnant_value`(90~180) 口径**不变**、
+  仍随接口返回（它们是「深度积压」独立指标，不是分档体系）；
+- 指标词典「两套分档并存」⇒「**分档只有一套**」（两份副本同步）。
+
+**改前 vs 改后（开发库实测）**：167 个 SKU / 货值 ¥50,648 原来在看板上是
+「中度 0 / 重度 0 / 活跃」（30~90 无档）⇒ 现在落在「压60-90天」档，**看得见了**。
+
+### 13.4 回归证据
+
+| 项 | 结果 |
+|---|---|
+| `backend/tests/test_platform_landing_page.py`（新增） | 11 passed |
+| `backend/tests/data_pipeline/test_inventory_backlog_tier_consistency.py`（新增） | 4 passed |
+| 全量后端回归（junit 失败**集合** diff） | before 156 failed / 4850 collected → after **156 failed / 4869** collected；**NEW = 0 ／ FIXED = 0 ／ COMMON = 156**，diff 脚本退出码 0 |
+| 前端守卫（全部 `.test.mjs`） | 失败名单与基线**逐条一致**（8 个历史遗留），零新增 |
+| 前端构建 | `npx vite build` ✓ built in 14.21s |
+| Python 汇总 vs SQL 视图（真实库对账） | **逐档完全一致**；档位货值合计 ¥232,560.05 == 总货值；档位 SKU 合计 511 == 总 SKU 数 |
+
+### 13.5 本节新记的 V2 债务
+
+1. `LoginStatusDetector` 的 `"/seller"` 是**域名级**关键词 ⇒ Shopee 整站任何页面都被判「已登录」。
+   本次**刻意不动**（登录态判定是对的，改了会让采集流程冒风险）；根治应把 URL 关键词判定改成**只看 path**。
+2. Shopee 切店组件只改 query、保留 path ⇒ `/404` 路径会被保留；本次靠「页面归位」兜住。
+3. `finance.sku_pricing_policies` 的门槛与 `RESTOCK_TIER_THRESHOLDS` 仍是**两份拷贝**
+   （本次用守护测试锁住一致）；根治应让 Python 侧从档位表派生。
+4. `mart.inventory_backlog_base` 的 `days_since_restock` 缺失仍回落 0（老 V2 条目）——
+   本次新增的 `unknown_restock_row_count` 让缺失**在数据上可见**，但底层「缺失伪装成 0 天」尚未修。
+
