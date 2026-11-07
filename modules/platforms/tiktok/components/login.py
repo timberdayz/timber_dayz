@@ -562,7 +562,7 @@ class TiktokLogin(LoginComponent):
             return False
 
         signal_count = 0
-        for text in ("TikTok Shop", "棣栭〉", "鏁版嵁鍒嗘瀽", "璁㈠崟", "鍟嗗搧", "Seller Center"):
+        for text in ("TikTok Shop", "首页", "数据分析", "订单", "商品", "Seller Center"):
             try:
                 if await self._locator_is_visible(page.get_by_text(text, exact=False).first, timeout=300):
                     signal_count += 1

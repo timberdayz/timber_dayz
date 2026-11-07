@@ -2413,7 +2413,7 @@ async def calculate_performance_scores(
             metrics_by_shop = await load_shop_monthly_metrics(db, period)
         except Exception as e:
             logger.warning(
-                "缁╂晥璁＄畻 PostgreSQL 搴楅摵鏈堝害鎸囨爣鍔犺浇澶辫触: %s", e
+                "绩效计算 PostgreSQL 店铺月度指标加载失败: %s", e
             )
 
         profit_basis_by_shop = await _load_profit_basis_for_performance(

@@ -457,7 +457,7 @@ async def _load_file_update_summary(
     catalog_file = file_result.scalar_one_or_none()
 
     if not catalog_file:
-        raise ValueError(f"file_id={file_id} 瀵瑰簲鐨勬枃浠朵笉瀛樺湪")
+        raise ValueError(f"file_id={file_id} 对应的文件不存在")
 
     file_path = to_absolute_path(catalog_file.file_path)
     loop = asyncio.get_running_loop()

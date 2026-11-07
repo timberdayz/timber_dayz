@@ -46,7 +46,7 @@ class TiktokShopSwitch:
 
     @staticmethod
     def _extract_shop_code_from_text(text: str) -> Optional[str]:
-        m = re.search(r"搴楅摵浠ｇ爜\s*[::]\s*([A-Z0-9]+)", text)
+        m = re.search(r"店铺代码\s*[::]\s*([A-Z0-9]+)", text)
         if not m:
             m = re.search(r"Shop\s*code\s*[::]\s*([A-Z0-9]+)", text, re.I)
         return m.group(1) if m else None

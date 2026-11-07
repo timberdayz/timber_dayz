@@ -121,8 +121,8 @@ class TiktokExporterComponent(ExportComponent):
             dict.fromkeys(
                 [
                     *list(getattr(service_sel, "DATA_READY_PROBES", getattr(service_sel, "data_ready_probes", []))),
-                    "[role='tab'][aria-selected='true']:has-text(\"鑱婂ぉ璇︽儏\")",
-                    ".theme-arco-tabs-header-title-active:has-text(\"鑱婂ぉ璇︽儏\")",
+                    "[role='tab'][aria-selected='true']:has-text(\"聊天详情\")",
+                    ".theme-arco-tabs-header-title-active:has-text(\"聊天详情\")",
                     *list(export_buttons),
                 ]
             )

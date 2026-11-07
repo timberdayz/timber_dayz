@@ -163,7 +163,7 @@ async def test_tiktok_login_homepage_dom_detection_rejects_intermediate_homepage
     component = TiktokLogin(_ctx(config={"shop_region": "SG"}))
     page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?lng=zh-CN&region_check=1&register_libra=")
     page.text_map["TikTok Shop"] = _FakeLocator()
-    page.text_map["棣栭〉"] = _FakeLocator()
+    page.text_map["首页"] = _FakeLocator()
     page.selector_map['a[href*="/homepage"]'] = _FakeLocator()
 
     assert await component._homepage_dom_looks_ready(page) is False
@@ -769,12 +769,12 @@ async def test_tiktok_login_post_otp_wait_waits_for_region_scoped_homepage_after
         if len(page.timeout_calls) == 1:
             page.url = "https://seller.tiktokshopglobalselling.com/homepage?lng=zh-CN&region_check=1&register_libra="
             page.text_map["TikTok Shop"] = _FakeLocator()
-            page.text_map["棣栭〉"] = _FakeLocator()
+            page.text_map["首页"] = _FakeLocator()
             page.selector_map['a[href*="/homepage"]'] = _FakeLocator()
         elif len(page.timeout_calls) >= 2:
             page.url = "https://seller.tiktokshopglobalselling.com/homepage?lng=zh-CN&region_check=1&shop_region=SG"
             page.text_map["SG"] = _FakeLocator()
-            page.text_map["鏁版嵁鍒嗘瀽"] = _FakeLocator()
+            page.text_map["数据分析"] = _FakeLocator()
             page.selector_map['a[href*="/compass/"]'] = _FakeLocator()
 
     monkeypatch.setattr(page, "wait_for_timeout", _advance_page)

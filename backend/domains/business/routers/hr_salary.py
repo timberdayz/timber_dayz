@@ -695,10 +695,10 @@ async def refresh_payroll_records_for_month(
     except PayrollPeriodLockedError as exc:
         return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
-        logger.error("鎸夋湀浠芥壒閲忓埛鏂板伐璧勫崟澶辫触: %s", e, exc_info=True)
+        logger.error("按月份批量刷新工资单失败: %s", e, exc_info=True)
         return error_response(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"鎸夋湀浠芥壒閲忓埛鏂板伐璧勫崟澶辫触: {str(e)}",
+            f"按月份批量刷新工资单失败: {str(e)}",
             status_code=500,
         )
 
