@@ -445,3 +445,173 @@ TikTok 的身份参数是 `shop_region`，探测只认 `cnsc_shop_id`/`shop_id` 
 4. `mart.inventory_backlog_base` 的 `days_since_restock` 缺失仍回落 0（老 V2 条目）——
    本次新增的 `unknown_restock_row_count` 让缺失**在数据上可见**，但底层「缺失伪装成 0 天」尚未修。
 
+
+---
+
+## 14. 本会话收口：基线红清理 + 中文乱码 + 采集组件缺陷 + hash 实跑回放
+
+> 本节记录「把所有已知还没做完的内容一次性做完」这一轮的全部产出。
+> 详细文档：`docs/superpowers/plans/2026-11-29-hash-replay-by-real-ingestion-path.md`
+> （前序的 404 / 库龄见 `2026-11-29-404-landing-and-aging-tier-alignment.md`）
+
+### 14.1 基线红（156 条历史失败）分五组清零
+
+按域切成 5 组并行处理，每组限定「只能改自己清单内的测试文件 + 禁止改实现代码」，杜绝并行写冲突。
+
+| 组 | 范围 | 条数 | 主要根因 | 验收 |
+|---|---|---|---|---|
+| A | task_center | 19 | sqlite fixture 漏 ATTACH `ops`/`semantic`；补齐后暴露 `a_class.operating_costs` 的 PG 专有 DDL；桩用户非管理员；桩签名过期 | 19 passed |
+| B | collection | 20 | 断言过期（默认子型 / purchase 域 / interrupted 终态）；基建缺陷（缺表、`main_account_id` NOT NULL）；桩过期（按名导入导致打桩失效、全局 `asyncio` 污染） | 71 passed |
+| C | data_pipeline 迁移契约 | 24 | 断言过期（别名治理下沉、ORM 已对齐）；路径过期（兼容壳降级、规则源退役）；资产过期（旧迁移链只读 ⇒ 改在临时库重放当前链基线） | 82 passed |
+| D | 业务杂项 | 47 | **black 重排导致按固定偏移切片的断言失配**；功能已迁移/下线；桩过期；依赖被 `.gitignore` 的数据文件 | 192 passed |
+| E | shopee 导出组件 | 25 | 桩打在了**转发层**而非承载逻辑的 helper 实例；报表行假数据不真实（缺业务前缀） | 78 passed |
+
+**红线**：不允许把过期断言改成迎合实现的错误行为；发现真缺陷先修实现再让测试变绿。
+
+几个值得记住的判定要点：
+
+- **域迁移后 legacy 兼容壳打桩无效** —— `backend/routers/*.py` 现在只是 re-export 壳
+  （`import ... as domain_module` + `__getattr__` 委托，或 `from ... import *`），
+  桩必须直接打到真身模块路径；用 fixture 在壳与真身之间桥接会让 monkeypatch teardown
+  把桥接函数**永久泄漏**回壳的 `__dict__`，下一条用例经 `__getattr__` 绕回自己 ⇒ `RecursionError`。
+- **组件下沉 helper 后，桩要打在 helper 实例上** —— 仓库内既有正确范例：
+  `picker = component._date_picker_helper()` + `monkeypatch.setattr(component, "_date_picker_helper", lambda: picker)`。
+- **black 重排会让「按固定偏移切片取源码片段」的断言全部失配** —— 改用空白无关的压缩/正则匹配，
+  断言语义不变。
+
+#### 最后一条红：进程级环境变量污染造成的顺序依赖
+
+清完 A~E 五组后，全量回归里**仅剩 1 条**红。它不是本轮引入的，而是**被测试基建失败掩盖的存量顺序依赖**
+（基线上它的失败原因是 sqlite fixture 建表报错，断言根本没跑到）。
+
+- **现象**：单独跑该文件 2 passed；跑 `cloud* + collection* + t*`（108 个文件）就复现
+  `assert 'pending' == 'completed'`。
+- **定位**（目录二分 → 临时诊断打印）：`CloudSyncAdminCommandService.update_settings()`
+  会把自动同步开关**直接写进进程级环境变量** `os.environ["CLOUD_SYNC_AUTO_SYNC_ENABLED"]`；
+  `test_cloud_sync_admin_command_service.py` 调用 `update_settings(enabled=False)` 后**不还原**
+  ⇒ 同进程后续用例里 `CloudBClassAutoSyncWorker._auto_sync_enabled()` 读到 `false`
+  ⇒ worker 直接不 claim 任务 ⇒ 任务永远停在 `pending`（与业务数据无关的假失败）。
+- **修法**：给两个直接写该环境变量的测试文件加 autouse fixture，用例结束还原环境变量原值。
+  **生产代码不动** —— 开关语义变更属于上线前不做大改的范围（相关产品级问题见 14.5 第 16 条）。
+
+### 14.2 中文乱码（GBK 误解码）—— 生产功能实际失效
+
+全仓扫描出 16 处「UTF-8 被按 GBK 解码」的中文串：
+
+1. **选择器 / 判据（功能实际失效）**
+   - `modules/platforms/tiktok/components/login.py:565` 登录态信号词「首页 / 数据分析 / 订单 / 商品」全是乱码
+     ⇒ 中文信号**一个都不命中**，实际只剩 `TikTok Shop` / `Seller Center` 两个英文词在起作用；
+   - `modules/platforms/tiktok/archive/export.py`「聊天详情」、`archive/shop_switch.py`「店铺代码」；
+   - `modules/platforms/shopee/components/date_picker.py`「统计时间」
+     —— 该文件里 `_find_date_summary_container` 还**被定义了两次**（乱码版 + 正确版），后者覆盖前者。
+2. **用户可见错误消息**：`field_mapping_templates.py` / `hr_salary.py` / `performance_management.py`。
+3. **测试基线**：`test_tiktok_login_component.py`（与实现同步修正）。
+
+> `backend/tests/test_backend_startup_dashboard_log_contract.py` 里的 `"璧勪骇"` 是**故意的乱码守卫**
+> （断言 `main.py` 不得含乱码），属于扫描误报，**不改**。
+
+### 14.3 采集组件三处真缺陷（会导致导出到错店铺 / 日期口径错乱）
+
+1. **店铺切换判定是纯子串匹配**（`shop_switch.py::_shop_name_looks_selected`）
+   - 「所有店铺」聚合标签被判为**已切到目标店** ⇒ 切店失败也会判成功 ⇒ **导出拿到多店混合数据**；
+   - **区域上下文形同虚设** —— `巴西 / chenewei666.sg` 配 SG 目标仍判 True。
+   改法：新增聚合标签识别 + 「区域 / 店铺」标签的区域解析（显式带出且不符才否决）。
+2. **日期摘要「容器优先」语义错** —— 容器常只印「统计时间」四个字，触发器才带「按月 2026.03 (GMT+08)」
+   这种能判断「是否已应用」的信息 ⇒ 旧语义让「已应用则跳过」判断失效，每次都重选日期区间。
+   改法：两个候选都在时取**信息更丰富者**。
+3. **标签回退只认首个匹配** —— 同名文本常有多份（隐藏副本 / portal 末尾的菜单项）⇒ 改用
+   `_pick_visible_locator` 择优**可见**项。
+
+另外把「组件与 helper 共用同一套选择器」这条口径贯彻到底
+（`ShopeeDatePicker` / `ShopeeShopSwitch` 接受组件传入的 `ProductsSelectors`），
+消除了原先「组件层一套、helper 层一套」的日期文案/粒度口径。
+
+### 14.4 hash 口径回放：按**实跑路径**重做
+
+「翻 `SYNC_CORE_FIELDS_HASH_ENABLED` 前必须按实跑路径重做 hash 回放」这一条本次落地。
+
+**旧回放为什么不能作数**（自己拼字段集合，与入库路径三处对不上）：
+漏传 `identity_values`；`core_fields` 用推导值且 `field_parse_rules` 取自 `variants` 表
+（入库用的是**版本行**的清单）；漏了 orders 域的 `prepare_orders_rows_for_b_class` 行改写。
+
+**本次改造**：把 hash 计算抽成公共函数
+`backend/services/data_ingestion_service.py::compute_ingestion_data_hashes()`，
+**入库路径与回放脚本共用同一条链** ⇒ 结论与实跑同源，回放不会再漂移。
+回放脚本只在**进程内**临时切换开关，不改任何持久化配置；**生产开关仍关闭**。
+
+**实测结论（更正了早先的错误判断）**：
+
+```
+实跑回放合计: 1094 行, 口径切换后 hash 变化 0 行
+```
+
+⇒ **切换不会改任何一行的 `data_hash` ⇒ 无需回填**。
+
+早先「字段数不同 ⇒ 键集合不同 ⇒ hash 会变」的推断是**错的**：切换只改「怎么取」，不改「取哪些键」——
+键仍是完整字段链（含自动追加的 `platform_code` / `shop_id` / `metric_date` / orders 扩展 /
+`_source_line_index`），清单只决定取值方式（逐字优先、语义兜底），所以键不变、值也不变。
+**回放必须与实跑同源，否则结论不可用。**
+
+### 14.5 本节新记的 V2 债务
+
+**数据正确性（需要业务决策，优先级最高）**
+
+1. **products 语义层别名缺口（最严重）** —— `sql/semantic/semantic_alias_registry.sql` 与
+   `backend/services/semantic_alias_registry.py` 的 `BUILTIN_ALIASES` 两侧不同源, 且都缺
+   「已付款订单 / 已确认订单 / 已确定订单」三变体与带币种后缀的表头
+   ⇒ `semantic.fact_products_atomic` 里 shopee **25810 行**的
+   `sales_amount / sales_volume / order_count / conversion_rate` **全为 0**（仅 tiktok 174 行有值）。
+   影响 Shopee 商品维度指标与下游看板/利润口径。修它涉及别名登记单一来源化 + 视图重建 + 数据回填。
+2. **部分文件在旧口径下「前 10 行 hash 相同」** —— `shopee/analytics/daily`、`tiktok/products/monthly`
+   ⇒ 存量去重粒度问题（明细行算不出不同 hash ⇒ 去重会当重复行丢数据）。
+3. **`shopee/services` 三个模板版本（1 / 53 / 60）解析规则与文件列名对不上**
+   （用 `metric_date` 而文件是「日期」/「日期期间」）⇒ `[date_format_mismatch]`，**这些版本入库会直接失败**。
+
+**接口健壮性**
+
+4. **看板缺表不降级** —— `postgresql_dashboard_service.py:2792-2805` 查
+   `finance.employee_labor_cost_allocations` 无 try/except（同文件 `:1411-1438` 明确写了
+   「缺表必须降级」）⇒ 未跑完迁移的部署里看板整块 500；`:1441-1461` 的 `a_class.operating_costs` 同样。
+
+**可维护性 / 测试基建**
+
+5. `core_fields` 清单（DB 版本行）与 `derive_core_fields`（Python 推导）**并存** ⇒ 应收敛为单一来源。
+6. `a_class.operating_costs` 的 `server_default=text("'[]'::jsonb")` 在 SQLite 建不了表
+   ⇒ 任何在 SQLite 上做全量 `create_all` 的测试都会踩到（测试侧已按既有约定排除该表）。
+7. `backend/utils/schema_cleanup_wave1_preplan.py` 仍硬编码 `source_schema="public"` /
+   `operation="archive_rename"`，而当前事实源只建 `a_class.*` ⇒ 预演动作在当前 schema 下是空操作。
+8. `collection_account_runtime_service.py:10` 按名导入 ⇒ 外部打桩**静默失效**（所有按旧路径打桩的测试都会
+   走到真实 loader 并以 `shop_account_missing`(404) 失败）。
+9. `collection_tasks.py:1612` 入库投影**无条件另开 DB 会话** ⇒ 按会话顺序断言很脆弱；
+   `:1697` 浏览器参数是函数内延迟导入 ⇒ 预检失败时整链提前 return。
+10. `hr_commission.py` 的 SQL 含 `id::text`（PG 专有）⇒ 该读路径无法用内存 sqlite 端到端覆盖。
+11. `target_management.py` 的 409 守卫在旧校验之前 ⇒ 运营目标分支成为**不可达死代码**。
+12. `excel_parser.py:71` 向 float64 列写空串 ⇒ pandas FutureWarning，未来版本会直接报错。
+13. `backend/main.py` 与根 `run.py` 在 import 时 `load_project_env(override=True)`
+    ⇒ 路由注册类用例变成顺序依赖。
+14. `frontend/src/stores/user.js` 仍 import 已不再使用的 `hasPermissionForRoles`。
+15. `tests/unit/test_template_hash_hygiene_audit.py` 2 条既有红（度量字段未被工作台剔除）
+    —— 只依赖 `template_hash_policy` / `template_save_readiness_service`，与本轮改动无关。
+16. **自动同步开关存在进程级环境变量里** —— `CloudSyncAdminCommandService.update_settings()`
+    把 `CLOUD_SYNC_AUTO_SYNC_ENABLED` 写进 `os.environ`。后端是多进程部署（web / celery-worker /
+    celery-beat 各自独立进程），管理端在 web 进程改开关，**其它进程读不到**
+    （环境变量不跨进程共享）⇒「管理页显示已暂停」与「采集入库仍按开启执行」可能不一致。
+    根治方向：开关只以 DB（`SystemConfig`）为事实源（worker 的 `_auto_sync_enabled()` 已支持读 DB），
+    env 只作为进程启动默认值；本次**不动生产语义**。
+
+### 14.6 回归证据
+
+| 项 | 结果 |
+|---|---|
+| **全量后端回归**（junit 失败**集合** diff，脚本退出码 0） | before **156 failed** / 4869 collected → after **0 failed** / 4871 collected；**NEW = 0 ／ FIXED = 156 ／ COMMON = 0** |
+| 分组验收 | A 19 passed ／ B 71 passed ／ C 82 passed ／ D 192 passed ／ E 78 passed |
+| 本会话改动过的 64 个测试文件（组合跑） | 498 passed |
+| `tests/unit`（**不在** `backend/tests` 全量范围内） | 137 passed / 2 failed（2 条为既有红，只依赖 `template_hash_policy` / `template_save_readiness_service`，与本轮无关） |
+| 前端守卫（全部 `.test.mjs`） | 失败名单与基线**逐条一致**（8 个历史遗留），零新增；本会话**未改动任何前端源码** |
+| 前端构建 | `npx vite build` ✓ built in 10.68s |
+| hash 实跑回放（生产开关保持关闭） | 实跑回放合计 **1094 行**，口径切换后 hash 变化 **0 行** ⇒ 无需回填 |
+
+**本会话提交（11 个）**：`5e472db2` 乱码 → `d6f10365` hash 实跑回放 → `9f77545b` 结论更正 →
+`50ba79c4` 切店判定 → `9e7a0a5b` A 组 → `0a6bbda4` D 组 → `2bb6d7c6` B 组 → `503895b1` C 组 →
+`679244bf` 日期摘要 → `fff13425` E 组 → `ba927bed` 环境变量隔离。
+
