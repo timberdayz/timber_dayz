@@ -2366,4 +2366,24 @@ CI 用的是仓库 `pyproject.toml` 里的**全量 `select = ["E", "F"]`**。
 > 若把 `run_lint.py` 改成与 CI 同规则（`ruff check` 走仓库配置 + 加 black 检查），
 > 以后这类问题就能在本地第一时间发现。
 
+#### E.12.7 生产库只读复核（发布后验收）
+
+部署流水线成功后，对生产库做了一次**全程只读**复核（`readonly=True` 会话，只 SELECT）：
+
+| 检查项 | 结果 |
+|---|---|
+| 迁移版本 `public.current_schema_alembic_version` | **head = `current_schema_20261121_selling_price_source_enum`** ✓ |
+| 阶段 1 ROI 只读列 | `finance.sku_profit_estimates` 有 `break_even_roi` / `equivalent_target_roi` / `suggested_roi` / `suggested_roi_clamped` ✓ |
+| 阶段 2.1 平台级定价 | `finance.sku_platform_pricing` 存在，含 `min_selling_price_override` / `min_selling_price_source` ✓ |
+| 阶段 2.1b 旧列下沉 | `core.dim_erp_sku.min_selling_price_override` **已删除** ✓，覆盖值下沉到平台级列 ✓ |
+| 阶段 2.2 ROI 输入列 | `finance.sku_operating_profiles.target_roi`(+`_source`)、`finance.sku_profit_estimates.actual_roi`(+`_source`) ✓ |
+| 阶段 4 来源列与约束 | `selling_price_source` ✓、`selling_price_source_cleaned_at` ✓、`ck_dim_erp_sku_selling_price_source` CHECK 在位（platform_listing / erp / manual）✓ |
+
+生产数据现状：`core.dim_erp_sku` 1122 行，其中 **4 行有基准售价、4 行已确认日期**，
+来源分布为 `manual` 6 行 / 其余为空值；`finance.sku_operating_profiles` 6 行，
+`sku_profit_estimates` 与 `sku_platform_pricing` 当前为 0 行（这两个表由业务数据填充，
+不是迁移负责的事）。
+
+⇒ **五个阶段的结构在生产上全部就位，v7.15.5 验收通过。**
+
 ---
