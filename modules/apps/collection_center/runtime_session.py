@@ -14,6 +14,7 @@ from modules.apps.collection_center.browser_config_helper import (
     enforce_official_playwright_browser,
     get_browser_context_args,
 )
+from modules.apps.collection_center.platform_error_page import is_platform_error_page
 from modules.apps.collection_center.transition_gates import (
     GateResult,
     GateStatus,
@@ -1043,6 +1044,122 @@ async def prime_runtime_page_for_login_gate(
         return
     await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
     await wait_for_runtime_page_stable(page=page, platform=platform)
+
+
+@dataclass
+class PlatformLandingOutcome:
+    """「页面归位」的结果。
+
+    ``navigated`` 只说明**有没有真的导航过**；
+    ``ready`` 说明归位后页面是不是**可用的正常页**（不再是错误页）。
+    """
+
+    navigated: bool = False
+    ready: bool = False
+    current_url: str = ""
+    reason: str = ""
+
+
+async def ensure_platform_landing_page(
+    *,
+    page: Any,
+    platform: str,
+    account: Optional[Dict[str, Any]] = None,
+    timeout_ms: int = 60000,
+) -> PlatformLandingOutcome:
+    """停在**错误页**时，把浏览器导航回平台入口（会话有效时平台会自己导回正常页）。
+
+    为什么需要这一步
+    ----------------
+    持久 profile 启动后，Chromium 会**恢复上次会话停着的标签页**。那个标签页
+    可能是平台的错误页（``https://seller.shopee.cn/404?cnsc_shop_id=...``）：
+    会话失效 / 深链过期时平台会跳到 404，而下一次开箱就把它原样恢复了出来。
+
+    关键认知：**404 页不等于「没登录」** —— 登录态其实还在，只是页面停错了地方。
+    所以这里**不重新登录**，只**重新导航**：导航到平台入口，会话有效时平台会
+    自己导回带店铺编号的正常页。
+
+    对正常路径**零影响**：只有当前页确实是错误页时才会导航，正常页面
+    **一次额外导航都不加** ⇒ 采集流程完全不受影响（采集组件照常自行导航到
+    业务页）。
+
+    归位失败（跳登录页 / 仍停在错误页）⇒ ``ready=False``，
+    调用方据此记「探测失败」，**绝不**拿错误页上的残留编号当探测结果。
+    """
+    current_url = str(getattr(page, "url", "") or "")
+    if not is_platform_error_page(current_url):
+        return PlatformLandingOutcome(
+            navigated=False,
+            ready=True,
+            current_url=current_url,
+            reason="already_on_landing_page",
+        )
+
+    if not hasattr(page, "goto"):
+        return PlatformLandingOutcome(
+            navigated=False,
+            ready=False,
+            current_url=current_url,
+            reason="page_not_navigable",
+        )
+
+    try:
+        login_url = str(
+            (account or {}).get("login_url") or get_platform_login_entry(platform) or ""
+        ).strip()
+    except Exception as exc:
+        # ``get_platform_login_entry`` 对未知平台会抛 ValueError ——
+        # 归位失败不该把采集流程带崩，记成「无入口」即可。
+        logger.warning(
+            "[PlatformLanding] no login entry platform=%s error=%s", platform, exc
+        )
+        login_url = ""
+    if not login_url:
+        return PlatformLandingOutcome(
+            navigated=False,
+            ready=False,
+            current_url=current_url,
+            reason="no_platform_login_entry",
+        )
+
+    try:
+        await page.goto(login_url, wait_until="domcontentloaded", timeout=timeout_ms)
+    except Exception as exc:
+        logger.warning(
+            "[PlatformLanding] goto failed platform=%s login_url=%s error=%s",
+            platform,
+            login_url,
+            exc,
+        )
+        return PlatformLandingOutcome(
+            navigated=False,
+            ready=False,
+            current_url=current_url,
+            reason=f"goto_failed: {exc}",
+        )
+
+    await wait_for_runtime_page_stable(page=page, platform=platform)
+
+    landed_url = str(getattr(page, "url", "") or "")
+    if is_platform_error_page(landed_url):
+        return PlatformLandingOutcome(
+            navigated=True,
+            ready=False,
+            current_url=landed_url,
+            reason="landed_on_error_page",
+        )
+
+    logger.info(
+        "[PlatformLanding] platform=%s re-navigated from error page to %s",
+        platform,
+        landed_url,
+    )
+    return PlatformLandingOutcome(
+        navigated=True,
+        ready=True,
+        current_url=landed_url,
+        reason="landed",
+    )
 
 
 async def check_login_gate_ready(
