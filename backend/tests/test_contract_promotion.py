@@ -80,7 +80,17 @@ class _StubMatcher:
     async def find_best_template(self, **_kwargs):
         return self.published
 
-    async def detect_header_changes(self, template_id, current_columns, account=None):
+    async def detect_header_changes(
+        self,
+        template_id,
+        current_columns,
+        account=None,
+        *,
+        sample_rows=None,
+        companion_date_from=None,
+        companion_date_to=None,
+        field_parse_rules=None,
+    ):
         self.calls.append(template_id)
         if template_id in self.drift_template_ids:
             return {
@@ -92,6 +102,15 @@ class _StubMatcher:
                 "blocking_changes": ["商品卡 GMV"],
                 "non_blocking_changes": [],
                 "match_rate": 96.6,
+                # [*] 批次 B: 值形态漂移信号
+                "format_drift": False,
+                "value_shape": {
+                    "checked_rules": 0,
+                    "checked_values": 0,
+                    "format_drift": False,
+                    "error_codes": [],
+                    "issues": [],
+                },
             }
         if template_id in self.ready_template_ids:
             return {
@@ -103,6 +122,15 @@ class _StubMatcher:
                 "blocking_changes": [],
                 "non_blocking_changes": [],
                 "match_rate": 100.0,
+                # [*] 批次 B: 值形态漂移信号
+                "format_drift": False,
+                "value_shape": {
+                    "checked_rules": 0,
+                    "checked_values": 0,
+                    "format_drift": False,
+                    "error_codes": [],
+                    "issues": [],
+                },
             }
         raise AssertionError(f"未预期的模板: {template_id}")
 

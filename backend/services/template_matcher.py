@@ -29,6 +29,10 @@ from modules.core.logger import get_logger
 from backend.services.currency_extractor import get_currency_extractor  # [*] v4.15.0新增
 from backend.services.semantic_field_contract_service import SemanticFieldContractService
 from backend.services.template_alias_registry import get_header_alias_mapping
+from backend.services.template_parse_rules_service import (
+    DATE_ERROR_FORMAT_DRIFT_CODES,
+    evaluate_date_value_shape,
+)
 
 logger = get_logger(__name__)
 
@@ -242,10 +246,17 @@ class TemplateFileResolution:
 def _pick_by_sample_rows(
     candidates: List[FieldMappingTemplate],
     sample_rows: Optional[List[Dict[str, Any]]],
+    *,
+    file_date_from: Any = None,
+    file_date_to: Any = None,
 ) -> FieldMappingTemplate:
     """在同级别的候选里挑一个「解析规则与样本行吻合」的模板。
 
     没有样本行时直接取第一个(版本号最高、通用模板优先)。
+
+    [*] 批次 A 回归修复: 必须把**文件期间**一起传下去, 否则
+    ``auto_by_companion_period`` 的规则永远判为「解不出样本」,
+    候选里如果混着别的模板就会被挑错 ⇒ 用错解析规则 ⇒ 整份文件入库失败。
     """
     if not sample_rows:
         return candidates[0]
@@ -254,7 +265,10 @@ def _pick_by_sample_rows(
 
     for candidate in candidates:
         if _variant_matches_sample_rows(
-            candidate.field_parse_rules or [], sample_rows
+            candidate.field_parse_rules or [],
+            sample_rows,
+            companion_date_from=file_date_from,
+            companion_date_to=file_date_to,
         ):
             return candidate
     return candidates[0]
@@ -269,6 +283,8 @@ async def resolve_template_for_file(
     sub_domain: Optional[str] = None,
     account: Optional[str] = None,
     sample_rows: Optional[List[Dict[str, Any]]] = None,
+    file_date_from: Any = None,
+    file_date_to: Any = None,
 ) -> TemplateFileResolution:
     """唯一入口: 解析「解释这个文件的模板」。
 
@@ -279,6 +295,8 @@ async def resolve_template_for_file(
         sub_domain: 子域(可选)
         account: 账号/地区(可选)
         sample_rows: 样本行(可选) —— 给出时优先选解析规则吻合的模板
+        file_date_from / file_date_to: 文件期间(可选) —— ``auto_by_companion_period``
+            的规则**必须**拿到期间才能判定样本是否吻合
 
     Returns:
         :class:`TemplateFileResolution`; ``template`` 为 None 表示没匹配到。
@@ -309,7 +327,12 @@ async def resolve_template_for_file(
         if not candidates:
             continue
 
-        template = _pick_by_sample_rows(candidates, sample_rows)
+        template = _pick_by_sample_rows(
+            candidates,
+            sample_rows,
+            file_date_from=file_date_from,
+            file_date_to=file_date_to,
+        )
         logger.debug(
             f"[TemplateMatcher] 命中模板({level_name}): {template.template_name} "
             f"(v{template.version}, {platform}/{data_domain}/"
@@ -351,6 +374,8 @@ def resolve_template_for_file_sync(
     sub_domain: Optional[str] = None,
     account: Optional[str] = None,
     sample_rows: Optional[List[Dict[str, Any]]] = None,
+    file_date_from: Any = None,
+    file_date_to: Any = None,
 ) -> TemplateFileResolution:
     """同步会话版的唯一入口(采集落库登记链路)。
 
@@ -381,7 +406,12 @@ def resolve_template_for_file_sync(
         candidates = list(session.execute(stmt).scalars().all())
         if not candidates:
             continue
-        template = _pick_by_sample_rows(candidates, sample_rows)
+        template = _pick_by_sample_rows(
+            candidates,
+            sample_rows,
+            file_date_from=file_date_from,
+            file_date_to=file_date_to,
+        )
         return TemplateFileResolution(
             template=template,
             level=level_name,
@@ -826,21 +856,34 @@ class TemplateMatcher:
         template_id: int,
         current_columns: List[str],
         account: Optional[str] = None,
+        *,
+        sample_rows: Optional[List[Dict[str, Any]]] = None,
+        companion_date_from: Any = None,
+        companion_date_to: Any = None,
+        field_parse_rules: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         检测表头变化(v4.14.0安全版本,v4.18.2异步支持)
-        
+
         [WARN] 安全原则:不进行相似度匹配,任何变化都需要用户手动确认
-        
+
         比较当前表头与模板表头,检测:
         - 新增字段(current中有,template中没有)
         - 删除字段(template中有,current中没有)
         - 字段顺序变化(通过完全匹配检查)
-        
+
+        [*] 批次 B: 同时做**值形态**体检。
+        表头一模一样也可能出事 —— 平台把日期从 ``01/10/2026`` 改成
+        ``01-10-2026``, 列名一个没动, 但模板声明的格式已经解不出来了。
+        这里用样本行试解析一遍声明的日期格式, 解不出来 ⇒ ``format_drift``。
+
         Args:
             template_id: 模板ID
             current_columns: 当前表头字段列表
-        
+            sample_rows: 文件样本行(用于值形态体检; 没有则跳过该维度)
+            companion_date_from/to: 文件期间(用于 auto 模式消歧)
+            field_parse_rules: 生效的日期解析规则; 缺省用模板自身的
+
         Returns:
             {
                 'detected': bool,
@@ -870,7 +913,15 @@ class TemplateMatcher:
                     'match_rate': 0.0,
                     'is_exact_match': False,
                     'template_columns': [],
-                    'current_columns': current_columns
+                    'current_columns': current_columns,
+                    'format_drift': False,
+                    'value_shape': {
+                        'checked_rules': 0,
+                        'checked_values': 0,
+                        'format_drift': False,
+                        'error_codes': [],
+                        'issues': [],
+                    },
                 }
             
             template_columns = template.header_columns or []
@@ -922,6 +973,28 @@ class TemplateMatcher:
                 normalized_removed_fields,
                 added_fields,
             )
+            # [*] 批次 B: 值形态体检(列名没变, 但值的形态变了)。
+            #
+            # 用样本行试解析模板声明的日期格式 —— 解不出来就是 ``format_drift``。
+            # 没有样本行时不判(不误伤)。
+            effective_rules = (
+                field_parse_rules
+                if field_parse_rules is not None
+                else (template.field_parse_rules or [])
+            )
+            value_shape_report = evaluate_date_value_shape(
+                effective_rules,
+                sample_rows,
+                companion_date_from=companion_date_from,
+                companion_date_to=companion_date_to,
+            )
+            value_shape = value_shape_report.to_dict()
+            format_drift = bool(value_shape_report.format_drift)
+            format_drift_columns = [
+                issue["source_column"]
+                for issue in value_shape.get("issues") or []
+                if issue.get("error_code") in DATE_ERROR_FORMAT_DRIFT_CODES
+            ]
             semantic_contract = await SemanticFieldContractService(self.db).evaluate(
                 platform=template.platform,
                 data_domain=template.data_domain,
@@ -984,7 +1057,32 @@ class TemplateMatcher:
                     "blocking_changes": blocking_changes,
                     "non_blocking_changes": non_blocking_changes,
                 }
-            
+
+            # [*] 批次 B: 值形态漂移是**阻断**项。
+            #
+            # 列名一模一样、但值的形态变了 ⇒ 这份文件入库必然整份失败
+            # (解析器抛 "failed to parse ...")。所以它必须进 blocking,
+            # 让治理面板在入库前就提示「模板的日期格式要改」。
+            if format_drift:
+                drift_set = set(format_drift_columns)
+                change_classification = {
+                    "blocking_changes": list(
+                        dict.fromkeys(
+                            [
+                                *(change_classification.get("blocking_changes") or []),
+                                *format_drift_columns,
+                            ]
+                        )
+                    ),
+                    "non_blocking_changes": [
+                        item
+                        for item in (
+                            change_classification.get("non_blocking_changes") or []
+                        )
+                        if item not in drift_set
+                    ],
+                }
+
             # [*] v4.14.0安全版本:移除相似度匹配逻辑
             # 任何字段名变化都需要用户手动确认
             # [*] v4.15.0更新:但货币代码差异不视为变化(已通过归一化处理)
@@ -1027,6 +1125,9 @@ class TemplateMatcher:
                 'normalized_removed_fields': normalized_removed_fields,
                 'blocking_changes': change_classification["blocking_changes"],
                 'non_blocking_changes': change_classification["non_blocking_changes"],
+                # [*] 批次 B: 值形态体检结果
+                'format_drift': format_drift,
+                'value_shape': value_shape,
                 **semantic_summary,
             }
             
@@ -1048,7 +1149,16 @@ class TemplateMatcher:
                 'match_rate': 0.0,
                 'is_exact_match': False,
                 'template_columns': [],
-                'current_columns': current_columns if 'current_columns' in locals() else []
+                'current_columns': current_columns if 'current_columns' in locals() else [],
+                # [*] 批次 B: 检测失败时**不**谎报格式漂移, 但形状保持一致。
+                'format_drift': False,
+                'value_shape': {
+                    'checked_rules': 0,
+                    'checked_values': 0,
+                    'format_drift': False,
+                    'error_codes': [],
+                    'issues': [],
+                },
             }
 
 

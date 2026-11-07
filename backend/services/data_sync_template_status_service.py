@@ -17,6 +17,7 @@ from backend.services.template_family_service import get_template_resolver
 from backend.services.template_matcher import get_template_matcher
 from backend.services.data_sync_status_semantics import (
     GOVERNANCE_STATUS_BREAKING_DRIFT,
+    GOVERNANCE_STATUS_FORMAT_DRIFT,
     GOVERNANCE_STATUS_MISSING_FAMILY,
     GOVERNANCE_STATUS_MISSING_VARIANT,
     GOVERNANCE_STATUS_NON_BREAKING_DRIFT,
@@ -26,6 +27,7 @@ from backend.services.data_sync_status_semantics import (
     TEMPLATE_BASELINE_CURRENT,
     TEMPLATE_BASELINE_NONE,
     TEMPLATE_STATUS_ALIAS_ONLY,
+    TEMPLATE_STATUS_FORMAT_DRIFT,
     TEMPLATE_STATUS_MISSING,
     TEMPLATE_STATUS_MISSING_VARIANT,
     TEMPLATE_STATUS_READY,
@@ -173,6 +175,10 @@ class DataSyncTemplateStatusService:
                 header_row=header_row,
                 header_columns=current_columns or [],
                 sample_rows=sample_rows or [],
+                # [*] 批次 A 回归修复: 文件期间必须一起传下去,
+                #     否则 auto_by_companion_period 的变体永远判成「解不出样本」。
+                file_date_from=getattr(catalog_file, "date_from", None),
+                file_date_to=getattr(catalog_file, "date_to", None),
             )
         except OperationalError:
             resolver_result = None
@@ -357,10 +363,22 @@ class DataSyncTemplateStatusService:
                 **contract_signals,
             }
 
+        # [*] 批次 B: 值形态体检用的解析规则。
+        #
+        # 用**生效**的那一份(变体优先) —— 入库时真正被消费的是变体的规则,
+        # 拿 legacy 模板的规则去体检, 体检的就不是真正会失败的那份配置。
+        effective_parse_rules = list(
+            (resolver_result or {}).get("field_parse_rules") or []
+        ) or list(getattr(comparison_template, "field_parse_rules", None) or [])
+
         header_changes = await self.template_matcher.detect_header_changes(
             comparison_template.id,
             current_columns,
             account=normalized_account,
+            sample_rows=sample_rows,
+            companion_date_from=getattr(catalog_file, "date_from", None),
+            companion_date_to=getattr(catalog_file, "date_to", None),
+            field_parse_rules=effective_parse_rules,
         )
 
         blocking_changes = header_changes.get("blocking_changes")
@@ -370,7 +388,19 @@ class DataSyncTemplateStatusService:
         if not isinstance(non_blocking_changes, list):
             non_blocking_changes = []
 
-        if header_changes.get("is_exact_match", False):
+        # [*] 批次 B: 值形态漂移优先于「精确匹配」。
+        #
+        # 表头一个字段都没变, 但日期值从 ``01/10/2026`` 变成了 ``01-10-2026`` ——
+        # 这时候 ``is_exact_match`` 是 True, 但这份文件入库**必然**整份失败。
+        # 所以先判 format_drift, 不要被「精确匹配」盖过去。
+        format_drift = bool(header_changes.get("format_drift", False))
+
+        if format_drift:
+            status = TEMPLATE_STATUS_FORMAT_DRIFT
+            governance_status = GOVERNANCE_STATUS_FORMAT_DRIFT
+            should_auto_sync = False
+            update_required = True
+        elif header_changes.get("is_exact_match", False):
             status = TEMPLATE_STATUS_READY
             governance_status = GOVERNANCE_STATUS_READY
             should_auto_sync = True
@@ -502,11 +532,22 @@ class DataSyncTemplateStatusService:
             "template_name": comparison_template.template_name,
             "template_header_row": getattr(comparison_template, "header_row", None),
             "template_update_required": update_required,
-            "update_reason": None if status in {"ready", "alias_only"} else "header_changed",
-            "error_code": None if status in {"ready", "alias_only"} else "HEADER_CHANGED",
+            "update_reason": (
+                "format_drift"
+                if status == TEMPLATE_STATUS_FORMAT_DRIFT
+                else (None if status in {"ready", "alias_only"} else "header_changed")
+            ),
+            "error_code": (
+                "FORMAT_DRIFT"
+                if status == TEMPLATE_STATUS_FORMAT_DRIFT
+                else (None if status in {"ready", "alias_only"} else "HEADER_CHANGED")
+            ),
             "should_auto_sync": should_auto_sync,
             "exact_match": header_changes.get("is_exact_match", False),
             "semantic_match": header_changes.get("is_semantic_match", False),
+            # [*] 批次 B: 值形态漂移信号
+            "format_drift": format_drift,
+            "value_shape": header_changes.get("value_shape") or {},
             "semantic_contract_status": header_changes.get("semantic_contract_status"),
             "missing_required_keys": header_changes.get("missing_required_keys", []),
             "missing_optional_keys": header_changes.get("missing_optional_keys", []),

@@ -347,7 +347,13 @@ def _required_headers(template: FieldMappingTemplate) -> list[str]:
     return [str(column).strip() for column in (template.header_columns or []) if str(column).strip()]
 
 
-def _match_rule_to_row(rule: dict[str, Any], row: dict[str, Any]) -> bool:
+def _match_rule_to_row(
+    rule: dict[str, Any],
+    row: dict[str, Any],
+    *,
+    companion_date_from: Any = None,
+    companion_date_to: Any = None,
+) -> bool:
     source_column = str(rule.get("source_column", "")).strip()
     if not source_column:
         return False
@@ -364,6 +370,13 @@ def _match_rule_to_row(rule: dict[str, Any], row: dict[str, Any]) -> bool:
             value_kind=str(rule.get("value_kind", "single_date")).strip(),
             range_pick=rule.get("range_pick"),
             date_anchor=rule.get("date_anchor"),
+            # [*] 批次 A 回归修复: ``auto_by_companion_period`` **必须**拿到文件期间,
+            # 否则解析器直接抛 "companion date_from/date_to is required" ——
+            # 变体选择器会把这个变体判成「解不出样本」而整个丢掉,
+            # 于是刚修好的 Shopee 流量月度模板在**没有契约**的文件上又会失配。
+            companion_date_from=companion_date_from,
+            companion_date_to=companion_date_to,
+            format_candidates=rule.get("format_candidates"),
         )
     except Exception:
         return False
@@ -373,13 +386,24 @@ def _match_rule_to_row(rule: dict[str, Any], row: dict[str, Any]) -> bool:
 def _variant_matches_sample_rows(
     field_parse_rules: Iterable[dict[str, Any]],
     sample_rows: Iterable[dict[str, Any]],
+    *,
+    companion_date_from: Any = None,
+    companion_date_to: Any = None,
 ) -> bool:
     rules = list(field_parse_rules or [])
     rows = list(sample_rows or [])
     if not rules or not rows:
         return True
     for rule in rules:
-        if any(_match_rule_to_row(rule, row) for row in rows):
+        if any(
+            _match_rule_to_row(
+                rule,
+                row,
+                companion_date_from=companion_date_from,
+                companion_date_to=companion_date_to,
+            )
+            for row in rows
+        ):
             continue
         return False
     return True
@@ -1205,6 +1229,8 @@ class TemplateResolver:
         sheet_name: Optional[str] = None,
         header_columns: Optional[list[str]] = None,
         sample_rows: Optional[list[dict[str, Any]]] = None,
+        file_date_from: Any = None,
+        file_date_to: Any = None,
     ) -> dict[str, Any]:
         family = await self.family_service.ensure_projected_family(
             platform=platform,
@@ -1233,6 +1259,8 @@ class TemplateResolver:
                     header_columns=header_columns or [],
                     sample_rows=sample_rows or [],
                     selected_variant=None,
+                    file_date_from=file_date_from,
+                    file_date_to=file_date_to,
                 ),
             }
 
@@ -1260,6 +1288,8 @@ class TemplateResolver:
                     header_columns=header_columns or [],
                     sample_rows=sample_rows or [],
                     selected_variant=None,
+                    file_date_from=file_date_from,
+                    file_date_to=file_date_to,
                 ),
             }
 
@@ -1270,6 +1300,8 @@ class TemplateResolver:
             sheet_name=sheet_name,
             header_columns=header_columns or [],
             sample_rows=sample_rows or [],
+            file_date_from=file_date_from,
+            file_date_to=file_date_to,
         )
 
         # [D7] 本 family 内没有匹配变体时 -> 跨 family 兜底(同 platform + 同 data_domain)。
@@ -1291,6 +1323,8 @@ class TemplateResolver:
                 granularity=granularity,
                 sub_domain=sub_domain,
                 account=account,
+                file_date_from=file_date_from,
+                file_date_to=file_date_to,
             )
             if takeover is not None:
                 selected_variant = takeover["variant"]
@@ -1306,6 +1340,8 @@ class TemplateResolver:
             header_columns=header_columns or [],
             sample_rows=sample_rows or [],
             selected_variant=selected_variant,
+            file_date_from=file_date_from,
+            file_date_to=file_date_to,
         )
         semantic_bindings = list(active_version.get("header_bindings") or [])
         deduplication_fields = list(active_version.get("deduplication_fields") or [])
@@ -1349,6 +1385,8 @@ class TemplateResolver:
         sheet_name: Optional[str],
         header_columns: list[str],
         sample_rows: list[dict[str, Any]],
+        file_date_from: Any = None,
+        file_date_to: Any = None,
     ) -> Optional[dict[str, Any]]:
         candidates: list[tuple[int, int, dict[str, Any]]] = []
         normalized_headers = {str(column).strip().lower() for column in header_columns}
@@ -1371,6 +1409,8 @@ class TemplateResolver:
             if not _variant_matches_sample_rows(
                 variant.get("field_parse_rules") or [],
                 sample_rows,
+                companion_date_from=file_date_from,
+                companion_date_to=file_date_to,
             ):
                 continue
             if sample_rows and variant.get("field_parse_rules"):
@@ -1483,6 +1523,8 @@ class TemplateResolver:
         granularity: Optional[str] = None,
         sub_domain: Optional[str] = None,
         account: Optional[str] = None,
+        file_date_from: Any = None,
+        file_date_to: Any = None,
     ) -> Optional[dict[str, Any]]:
         """跨 family 变体接管 (D7) —— 本 family 内没有匹配变体时的兜底。
 
@@ -1519,7 +1561,10 @@ class TemplateResolver:
                 continue
             # 样本行校验: 与 family 内选择保持同一套硬约束
             if sample_rows and not _variant_matches_sample_rows(
-                variant.get("field_parse_rules") or [], sample_rows
+                variant.get("field_parse_rules") or [],
+                sample_rows,
+                companion_date_from=file_date_from,
+                companion_date_to=file_date_to,
             ):
                 continue
             evaluated.append({**candidate, "decision": decision})
@@ -1561,6 +1606,8 @@ class TemplateResolver:
         header_columns: list[str],
         sample_rows: list[dict[str, Any]],
         selected_variant: Optional[dict[str, Any]],
+        file_date_from: Any = None,
+        file_date_to: Any = None,
     ) -> dict[str, Any]:
         """对照: 「投影变体指向的模板」与「唯一解析入口选出的模板」是不是同一版。
 
@@ -1576,6 +1623,8 @@ class TemplateResolver:
             sub_domain=sub_domain,
             account=account,
             sample_rows=sample_rows or None,
+            file_date_from=file_date_from,
+            file_date_to=file_date_to,
         )
         legacy_template = resolution.template
         projected_legacy_template_id = (

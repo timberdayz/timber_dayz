@@ -94,7 +94,12 @@
           <el-table-column prop="file_count" label="文件数" width="100" align="center" />
           <el-table-column label="状态" width="120">
             <template #default="{ row }">
-              <el-tag v-if="row.governance_status === 'breaking_drift'" type="warning" size="small">
+              <!-- [*] 批次 B: 值形态漂移 —— 列名没变, 但日期值的形态变了 -->
+              <el-tag v-if="row.governance_status === 'format_drift'" type="danger" size="small">
+                <el-icon><Warning /></el-icon>
+                格式漂移
+              </el-tag>
+              <el-tag v-else-if="row.governance_status === 'breaking_drift'" type="warning" size="small">
                 <el-icon><Refresh /></el-icon>
                 需新版本
               </el-tag>
@@ -121,7 +126,17 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="update_reason" label="更新原因" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="update_reason" label="更新原因" min-width="200" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-tooltip
+                :content="buildDriftDetail(row)"
+                placement="top"
+                :disabled="!hasDriftDetail(row)"
+              >
+                <span>{{ formatUpdateReason(row) }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
           <el-table-column label="Action" width="160" fixed="right">
             <template #default="{ row }">
               <el-button size="small" type="primary" @click="$emit('manual-update', row)">
@@ -202,6 +217,39 @@ const summary = computed(() => props.detailedCoverage?.summary ?? {})
 const coveredRows = computed(() => props.detailedCoverage?.current_covered ?? props.detailedCoverage?.covered ?? [])
 const missingRows = computed(() => props.detailedCoverage?.current_missing ?? props.detailedCoverage?.missing ?? [])
 const needsUpdateRows = computed(() => props.detailedCoverage?.current_needs_update ?? props.detailedCoverage?.needs_update ?? [])
+
+// [*] 批次 B: 值形态漂移的展示口径。
+const UPDATE_REASON_LABELS = {
+  format_drift: '日期格式与文件不匹配',
+}
+
+function formatUpdateReason(row) {
+  const reason = row?.update_reason || ''
+  return UPDATE_REASON_LABELS[reason] || reason || '-'
+}
+
+function getValueShapeIssues(row) {
+  const shape = row?.value_shape || row?.drift_snapshot?.value_shape || {}
+  return Array.isArray(shape.issues) ? shape.issues : []
+}
+
+function hasDriftDetail(row) {
+  return getValueShapeIssues(row).length > 0
+}
+
+function buildDriftDetail(row) {
+  const parts = []
+  for (const issue of getValueShapeIssues(row)) {
+    parts.push(
+      `${issue.source_column || issue.target_field || '-'}：${issue.detail || issue.error_code || ''}`,
+    )
+  }
+  const snapshot = row?.drift_snapshot
+  if (snapshot?.template_name) {
+    parts.push(`漂移时的模板：${snapshot.template_name} v${snapshot.template_version ?? '-'}`)
+  }
+  return parts.join('\n')
+}
 </script>
 
 <style scoped>

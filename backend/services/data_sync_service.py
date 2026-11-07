@@ -426,6 +426,12 @@ class DataSyncService:
 
     @staticmethod
     def _is_blocking_header_change(header_changes: Dict[str, Any]) -> bool:
+        # [*] 批次 B: 值形态漂移优先判定。
+        #
+        # 表头可能**一个字段都没变**(is_exact_match=True), 但值的形态变了 ——
+        # 这时候这份文件入库必然整份失败, 所以不能被「精确匹配」放过去。
+        if header_changes.get("format_drift"):
+            return True
         if not header_changes.get("detected"):
             return False
         if header_changes.get("is_exact_match", False):
@@ -543,6 +549,8 @@ class DataSyncService:
                 sub_domain=normalized_sub_domain,
                 header_columns=[],
                 sample_rows=[],
+                file_date_from=getattr(catalog_file, "date_from", None),
+                file_date_to=getattr(catalog_file, "date_to", None),
             )
         except Exception:
             resolver_result = None
@@ -922,6 +930,8 @@ class DataSyncService:
                     sub_domain=normalized_sub_domain,
                     header_columns=[],
                     sample_rows=[],
+                    file_date_from=getattr(catalog_file, "date_from", None),
+                    file_date_to=getattr(catalog_file, "date_to", None),
                 )
             except Exception:
                 resolve_result = None
@@ -1157,6 +1167,10 @@ class DataSyncService:
                     header_row=header_row,
                     header_columns=columns,
                     sample_rows=sample_rows,
+                    # [*] 批次 A 回归修复: 文件期间必须一起传下去,
+                    #     否则 auto_by_companion_period 的变体永远判成「解不出样本」。
+                    file_date_from=getattr(catalog_file, "date_from", None),
+                    file_date_to=getattr(catalog_file, "date_to", None),
                 )
             except Exception:
                 preview_resolve_result = None

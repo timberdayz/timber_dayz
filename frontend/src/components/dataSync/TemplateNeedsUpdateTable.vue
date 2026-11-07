@@ -21,7 +21,11 @@
     <el-table-column prop="sample_file_name" label="样本文件" min-width="220" show-overflow-tooltip />
     <el-table-column label="治理状态" width="120">
       <template #default="{ row }">
-        <el-tag v-if="row.governance_status === 'missing_variant'" type="danger" size="small">
+        <!-- [*] 批次 B: 值形态漂移 —— 列名没变, 但日期值的形态变了 -->
+        <el-tag v-if="row.governance_status === 'format_drift'" type="danger" size="small">
+          格式漂移
+        </el-tag>
+        <el-tag v-else-if="row.governance_status === 'missing_variant'" type="danger" size="small">
           缺少变体
         </el-tag>
         <el-tag v-else type="warning" size="small">
@@ -32,7 +36,7 @@
     <el-table-column prop="update_reason" label="更新原因" min-width="220" show-overflow-tooltip>
       <template #default="{ row }">
         <el-tooltip :content="buildDriftDetail(row)" placement="top" :disabled="!hasDriftDetail(row)">
-          <span>{{ row.update_reason || '-' }}</span>
+          <span>{{ formatUpdateReason(row) }}</span>
         </el-tooltip>
       </template>
     </el-table-column>
@@ -97,6 +101,22 @@ function getDriftFields(row, key) {
 function hasDriftDetail(row) {
   return getDriftFields(row, 'added_fields').length > 0
     || getDriftFields(row, 'removed_fields').length > 0
+    || getValueShapeIssues(row).length > 0
+}
+
+// [*] 批次 B: 值形态漂移的展示口径
+const UPDATE_REASON_LABELS = {
+  format_drift: '日期格式与文件不匹配',
+}
+
+function formatUpdateReason(row) {
+  const reason = row?.update_reason || ''
+  return UPDATE_REASON_LABELS[reason] || reason || '-'
+}
+
+function getValueShapeIssues(row) {
+  const shape = row?.value_shape || row?.drift_snapshot?.value_shape || {}
+  return Array.isArray(shape.issues) ? shape.issues : []
 }
 
 function buildDriftDetail(row) {
@@ -108,6 +128,11 @@ function buildDriftDetail(row) {
   }
   if (removed.length) {
     parts.push(`删除字段：${removed.join('、')}`)
+  }
+  for (const issue of getValueShapeIssues(row)) {
+    parts.push(
+      `${issue.source_column || issue.target_field || '-'}：${issue.detail || issue.error_code || ''}`,
+    )
   }
   const snapshot = row?.drift_snapshot
   if (snapshot?.template_name) {

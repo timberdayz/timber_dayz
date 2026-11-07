@@ -455,6 +455,10 @@ class TemplateResolveRequest(BaseModel):
     sheet_name: Optional[str] = None
     header_columns: List[str] = Field(default_factory=list)
     sample_rows: List[Dict[str, Any]] = Field(default_factory=list)
+    # [*] 批次 A 回归修复: ``auto_by_companion_period`` 的规则**必须**拿到文件期间
+    #     才能判定样本是否吻合; 没有期间时该规则永远判成「解不出」。
+    file_date_from: Optional[str] = None
+    file_date_to: Optional[str] = None
 
 
 class TemplateResolveShadowCompare(BaseModel):

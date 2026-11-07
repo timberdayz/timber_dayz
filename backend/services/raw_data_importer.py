@@ -41,8 +41,39 @@ from backend.services.orders_ingestion_normalizer import (
 from backend.services.platform_table_manager import (
     get_platform_table_manager,
 )  # [*] v4.17.0新增
+from backend.services.template_parse_rules_service import (  # [*] 批次 B
+    DATE_ERROR_FORMAT_MISMATCH,
+    DATE_ERROR_OUT_OF_PERIOD,
+    analyze_date_value_shape,
+)
 
 logger = get_logger(__name__)
+
+
+def _classify_date_parse_error(
+    raw_value: object,
+    *,
+    rule: Dict[str, Any],
+    date_anchor: object = None,
+    file_date_from: object = None,
+    file_date_to: object = None,
+) -> str:
+    """把一次日期解析失败归类成**结构化错误码**。
+
+    口径与 :func:`backend.services.template_parse_rules_service.analyze_date_value_shape`
+    完全一致 —— 守卫测试会锁住这两处不漂移。
+    """
+    error_code, _detail = analyze_date_value_shape(
+        raw_value,
+        date_format=str(rule.get("date_format", "")).strip(),
+        value_kind=str(rule.get("value_kind", "single_date")).strip(),
+        format_candidates=rule.get("format_candidates"),
+        range_pick=rule.get("range_pick"),
+        date_anchor=date_anchor,
+        companion_date_from=file_date_from,
+        companion_date_to=file_date_to,
+    )
+    return error_code or DATE_ERROR_FORMAT_MISMATCH
 
 
 class RawDataImporter:
@@ -107,11 +138,13 @@ class RawDataImporter:
 
         if file_date_from and metric_date < file_date_from:
             raise ValueError(
-                f"metric_date {metric_date.isoformat()} is earlier than file_date_from {file_date_from.isoformat()}"
+                f"[{DATE_ERROR_OUT_OF_PERIOD}] metric_date {metric_date.isoformat()} "
+                f"is earlier than file_date_from {file_date_from.isoformat()}"
             )
         if file_date_to and metric_date > file_date_to:
             raise ValueError(
-                f"metric_date {metric_date.isoformat()} is later than file_date_to {file_date_to.isoformat()}"
+                f"[{DATE_ERROR_OUT_OF_PERIOD}] metric_date {metric_date.isoformat()} "
+                f"is later than file_date_to {file_date_to.isoformat()}"
             )
 
     def _validate_business_date_against_file_range(
@@ -127,11 +160,13 @@ class RawDataImporter:
 
         if file_date_from and value < file_date_from:
             raise ValueError(
-                f"{field_name} {value.isoformat()} is earlier than file_date_from {file_date_from.isoformat()}"
+                f"[{DATE_ERROR_OUT_OF_PERIOD}] {field_name} {value.isoformat()} "
+                f"is earlier than file_date_from {file_date_from.isoformat()}"
             )
         if file_date_to and value > file_date_to:
             raise ValueError(
-                f"{field_name} {value.isoformat()} is later than file_date_to {file_date_to.isoformat()}"
+                f"[{DATE_ERROR_OUT_OF_PERIOD}] {field_name} {value.isoformat()} "
+                f"is later than file_date_to {file_date_to.isoformat()}"
             )
 
     def _validate_business_dates_against_file_range(
@@ -623,12 +658,27 @@ class RawDataImporter:
                     format_candidates=rule.get("format_candidates"),
                 )
             except ValueError as exc:
+                # [*] 批次 B: 错误带上**结构化错误码**。
+                #
+                # 以前只有一句自然语言, 前端只能靠字符串猜原因, 于是
+                # 「格式不匹配」「日期超出文件期间」「日期歧义」三种完全不同的
+                # 处置全都被显示成同一句「解析失败」。
+                # 现在统一用 ``[错误码] 原始信息`` 的形式, 前端按错误码分流。
+                error_code = _classify_date_parse_error(
+                    raw_value,
+                    rule=rule,
+                    date_anchor=date_anchor,
+                    file_date_from=getattr(self, "file_date_from", None),
+                    file_date_to=getattr(self, "file_date_to", None),
+                )
                 raise ValueError(
-                    f"failed to parse {target_field} from source_column={source_column}: {raw_value}"
+                    f"[{error_code}] failed to parse {target_field} "
+                    f"from source_column={source_column}: {raw_value}"
                 ) from exc
             if parsed_date is None:
                 raise ValueError(
-                    f"failed to parse {target_field} from source_column={source_column}: {raw_value}"
+                    f"[{DATE_ERROR_FORMAT_MISMATCH}] failed to parse {target_field} "
+                    f"from source_column={source_column}: {raw_value}"
                 )
 
             if target_field == "metric_date":

@@ -2226,6 +2226,8 @@ async def resolve_template_candidate(
             sheet_name=request.sheet_name,
             header_columns=request.header_columns,
             sample_rows=request.sample_rows,
+            file_date_from=request.file_date_from,
+            file_date_to=request.file_date_to,
         )
         return TemplateResolveResponse(success=True, data=TemplateResolveData(**data))
     except Exception as exc:

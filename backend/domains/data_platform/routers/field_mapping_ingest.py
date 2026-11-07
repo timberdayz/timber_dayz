@@ -153,6 +153,10 @@ async def _load_template_identity_config_for_file(
             sub_domain=getattr(file_record, "sub_domain", None),
             header_columns=header_columns,
             sample_rows=sample_rows,
+            # [*] 批次 A 回归修复: 文件期间必须一起传下去,
+            #     否则 auto_by_companion_period 的变体永远判成「解不出样本」。
+            file_date_from=getattr(file_record, "date_from", None),
+            file_date_to=getattr(file_record, "date_to", None),
         )
         variant = resolve_result.get("variant") or {}
         variant_config = _template_identity_config(variant)

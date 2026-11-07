@@ -486,6 +486,15 @@ v4.6.0新增：独立的数据同步系统
               <el-icon><Warning /></el-icon>
               文件异常
             </el-tag>
+            <!-- [*] 批次 B: 值形态漂移 —— 列名没变, 但日期值的形态变了 -->
+            <el-tag
+              v-else-if="row.template_status === 'format_drift'"
+              type="danger"
+              size="small"
+            >
+              <el-icon><Warning /></el-icon>
+              格式漂移
+            </el-tag>
             <el-tag
               v-else-if="row.template_status === 'update_required'"
               type="danger"
@@ -988,13 +997,13 @@ const displayFiles = computed(() => {
         file.status === 'pending' &&
         file.has_template &&
         !file.template_update_required &&
-        !['semantic_invalid', 'breaking_drift', 'missing_family', 'missing_variant'].includes(file.governance_status)
+        !['semantic_invalid', 'breaking_drift', 'missing_family', 'missing_variant', 'format_drift'].includes(file.governance_status)
     )
   }
   if (activeFileView.value === 'anomaly') {
     return files.value.filter((file) =>
       file.status === 'source_missing' ||
-      ['semantic_invalid', 'parse_failed', 'file_missing'].includes(file.governance_status || file.template_status)
+      ['semantic_invalid', 'parse_failed', 'file_missing', 'format_drift'].includes(file.governance_status || file.template_status)
     )
   }
   if (activeFileView.value === 'legacy') {
@@ -1474,6 +1483,10 @@ const isRowSyncable = (row) => {
   if (row?.status === 'ingested') return false
   if (row?.status === 'source_missing') return false
   if (templateStatus === 'update_required' || templateStatus === 'parse_failed' || templateStatus === 'file_missing' || templateStatus === 'semantic_invalid') {
+    return false
+  }
+  // [*] 批次 B: 值形态漂移是阻断项 —— 这份文件入库必然整份失败, 不要让它进同步队列。
+  if (templateStatus === 'format_drift' || governanceStatus === 'format_drift') {
     return false
   }
   if (governanceStatus === 'missing_variant' || governanceStatus === 'missing_family' || governanceStatus === 'breaking_drift' || governanceStatus === 'semantic_invalid') {
