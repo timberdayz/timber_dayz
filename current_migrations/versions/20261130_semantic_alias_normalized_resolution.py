@@ -147,23 +147,25 @@ def _assert_normalization_matches(bind) -> None:
             f"{raw!r} 期望 {expected!r} 实得 {actual!r}"
             for raw, expected, actual in mismatches
         )
-        raise RuntimeError(
-            "PG 侧归一化与 Python 侧不一致, 迁移回滚: " + details
-        )
+        raise RuntimeError("PG 侧归一化与 Python 侧不一致, 迁移回滚: " + details)
 
 
 def _assert_seed_landed(bind) -> None:
     """seed 必须真的落库了 —— 别名表是视图取数的唯一事实源。"""
-    row = bind.execute(
-        sa.text(
-            """
+    row = (
+        bind.execute(
+            sa.text(
+                """
             SELECT count(*) AS total,
                    count(*) FILTER (WHERE normalized_alias IS NOT NULL) AS with_norm
             FROM semantic.semantic_field_aliases
             WHERE data_domain = 'products'
             """
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     total = int(row["total"] or 0)
     with_norm = int(row["with_norm"] or 0)
     if total < 36:
@@ -224,7 +226,11 @@ def downgrade() -> None:
             {"raw_aliases": list(raw_aliases)},
         )
 
-    bind.execute(sa.text("DROP FUNCTION IF EXISTS semantic.resolve_alias_normalized(TEXT, TEXT, TEXT, TEXT, TEXT)"))
+    bind.execute(
+        sa.text(
+            "DROP FUNCTION IF EXISTS semantic.resolve_alias_normalized(TEXT, TEXT, TEXT, TEXT, TEXT)"
+        )
+    )
     bind.execute(sa.text("DROP FUNCTION IF EXISTS semantic.normalize_alias(TEXT)"))
     bind.execute(
         sa.text(

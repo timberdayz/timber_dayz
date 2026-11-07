@@ -20,7 +20,9 @@ from backend.schemas.inventory_overview import (
 from backend.services.inventory.inventory_restock_service import (
     normalize_policy_tier_buckets,
 )
-from backend.services.inventory.reconciliation_service import InventoryReconciliationService
+from backend.services.inventory.reconciliation_service import (
+    InventoryReconciliationService,
+)
 from modules.core.db import FactProductMetric
 
 
@@ -46,9 +48,7 @@ class InventoryOverviewService:
         shop_id: Optional[str] = None,
         keyword: Optional[str] = None,
     ):
-        filters = [
-            FactProductMetric.data_domain == "inventory"
-        ]
+        filters = [FactProductMetric.data_domain == "inventory"]
         if platform:
             filters.append(FactProductMetric.platform_code == platform)
         if shop_id:
@@ -86,7 +86,11 @@ class InventoryOverviewService:
                 )
                 .label("rn"),
             )
-            .where(*self._base_product_filters(platform=platform, shop_id=shop_id, keyword=keyword))
+            .where(
+                *self._base_product_filters(
+                    platform=platform, shop_id=shop_id, keyword=keyword
+                )
+            )
             .subquery()
         )
         return select(ranked).where(ranked.c.rn == 1).subquery()
@@ -156,37 +160,49 @@ class InventoryOverviewService:
             0,
         )
         summary_row = (
-            await self.db.execute(
-                select(
-                    func.count().label("total_products"),
-                    func.coalesce(func.sum(stock_expr), 0).label("total_stock"),
-                    func.coalesce(
-                        func.sum(stock_expr * func.coalesce(latest_products.c.price, 0.0)),
-                        0.0,
-                    ).label("total_value"),
-                    func.coalesce(
-                        func.sum(case((stock_expr < 10, 1), else_=0)),
-                        0,
-                    ).label("low_stock_count"),
-                    func.coalesce(
-                        func.sum(case((stock_expr == 0, 1), else_=0)),
-                        0,
-                    ).label("out_of_stock_count"),
+            (
+                await self.db.execute(
+                    select(
+                        func.count().label("total_products"),
+                        func.coalesce(func.sum(stock_expr), 0).label("total_stock"),
+                        func.coalesce(
+                            func.sum(
+                                stock_expr * func.coalesce(latest_products.c.price, 0.0)
+                            ),
+                            0.0,
+                        ).label("total_value"),
+                        func.coalesce(
+                            func.sum(case((stock_expr < 10, 1), else_=0)),
+                            0,
+                        ).label("low_stock_count"),
+                        func.coalesce(
+                            func.sum(case((stock_expr == 0, 1), else_=0)),
+                            0,
+                        ).label("out_of_stock_count"),
+                    )
                 )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
 
         breakdown_rows = (
-            await self.db.execute(
-                select(
-                    func.coalesce(latest_products.c.platform_code, "unknown").label("platform"),
-                    func.count().label("product_count"),
-                    func.coalesce(func.sum(stock_expr), 0).label("total_stock"),
+            (
+                await self.db.execute(
+                    select(
+                        func.coalesce(latest_products.c.platform_code, "unknown").label(
+                            "platform"
+                        ),
+                        func.count().label("product_count"),
+                        func.coalesce(func.sum(stock_expr), 0).label("total_stock"),
+                    )
+                    .group_by(latest_products.c.platform_code)
+                    .order_by(latest_products.c.platform_code.asc())
                 )
-                .group_by(latest_products.c.platform_code)
-                .order_by(latest_products.c.platform_code.asc())
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         breakdown = [
             InventoryOverviewPlatformBreakdownResponse(
                 platform=row["platform"],
@@ -198,9 +214,10 @@ class InventoryOverviewService:
 
         try:
             risk_summary_row = (
-                await self.db.execute(
-                    text(
-                        """
+                (
+                    await self.db.execute(
+                        text(
+                            """
                         SELECT
                             COALESCE(deep_stagnant_sku_count, 0) AS deep_stagnant_sku_count,
                             COALESCE(mid_stagnant_sku_count, 0) AS mid_stagnant_sku_count,
@@ -209,9 +226,12 @@ class InventoryOverviewService:
                         FROM api.inventory_backlog_summary_module
                         LIMIT 1
                         """
+                        )
                     )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
         except SQLAlchemyError:
             risk_summary_row = None
 
@@ -241,9 +261,21 @@ class InventoryOverviewService:
             total_value=float(summary_row["total_value"] or 0.0),
             low_stock_count=int(summary_row["low_stock_count"] or 0),
             out_of_stock_count=int(summary_row["out_of_stock_count"] or 0),
-            deep_stagnant_sku_count=int(risk_summary_row.get("deep_stagnant_sku_count") or 0) if risk_summary_row else 0,
-            mid_stagnant_sku_count=int(risk_summary_row.get("mid_stagnant_sku_count") or 0) if risk_summary_row else 0,
-            active_sku_count=int(risk_summary_row.get("active_sku_count") or 0) if risk_summary_row else 0,
+            deep_stagnant_sku_count=(
+                int(risk_summary_row.get("deep_stagnant_sku_count") or 0)
+                if risk_summary_row
+                else 0
+            ),
+            mid_stagnant_sku_count=(
+                int(risk_summary_row.get("mid_stagnant_sku_count") or 0)
+                if risk_summary_row
+                else 0
+            ),
+            active_sku_count=(
+                int(risk_summary_row.get("active_sku_count") or 0)
+                if risk_summary_row
+                else 0
+            ),
             restock_tiers=restock_tiers,
             platform_breakdown=breakdown,
         )
@@ -278,22 +310,25 @@ class InventoryOverviewService:
             or 0
         )
         start = (page - 1) * page_size
-        end = start + page_size
         rows = (
-            await self.db.execute(
-                select(latest_products)
-                .where(*filters)
-                .order_by(
-                    latest_products.c.metric_date.desc(),
-                    latest_products.c.updated_at.desc(),
-                    latest_products.c.platform_code.asc(),
-                    latest_products.c.shop_id.asc(),
-                    latest_products.c.platform_sku.asc(),
+            (
+                await self.db.execute(
+                    select(latest_products)
+                    .where(*filters)
+                    .order_by(
+                        latest_products.c.metric_date.desc(),
+                        latest_products.c.updated_at.desc(),
+                        latest_products.c.platform_code.asc(),
+                        latest_products.c.shop_id.asc(),
+                        latest_products.c.platform_sku.asc(),
+                    )
+                    .offset(start)
+                    .limit(page_size)
                 )
-                .offset(start)
-                .limit(page_size)
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         page_items = [self._to_product_item(SimpleNamespace(**row)) for row in rows]
         total_pages = (total + page_size - 1) // page_size if page_size else 0
 
@@ -320,7 +355,10 @@ class InventoryOverviewService:
                 FactProductMetric.platform_code == platform,
                 FactProductMetric.shop_id == shop_id,
             )
-            .order_by(FactProductMetric.metric_date.desc(), FactProductMetric.updated_at.desc())
+            .order_by(
+                FactProductMetric.metric_date.desc(),
+                FactProductMetric.updated_at.desc(),
+            )
         )
         product = (await self.db.execute(stmt)).scalars().first()
         if product is None:

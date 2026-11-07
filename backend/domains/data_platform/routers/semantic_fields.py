@@ -99,9 +99,15 @@ async def get_semantic_field_definitions(
     response_model=SemanticAliasListResponse,
 )
 async def list_semantic_aliases(
-    data_domain: Optional[str] = Query(None, description="按数据域过滤, '*' 表示不限域"),
-    status: Optional[str] = Query(None, description="按状态过滤: active / disabled / conflict"),
-    source: Optional[str] = Query(None, description="按来源过滤: builtin / template_confirmed / manual"),
+    data_domain: Optional[str] = Query(
+        None, description="按数据域过滤, '*' 表示不限域"
+    ),
+    status: Optional[str] = Query(
+        None, description="按状态过滤: active / disabled / conflict"
+    ),
+    source: Optional[str] = Query(
+        None, description="按来源过滤: builtin / template_confirmed / manual"
+    ),
     limit: int = Query(200, ge=1, le=2000, description="最多返回多少行"),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -142,8 +148,12 @@ async def list_semantic_aliases(
                 source=str(row.get("source") or "builtin"),
                 confidence=float(row.get("confidence") or 1.0),
                 status=str(row.get("status") or "active"),
-                created_at=row["created_at"].isoformat() if row.get("created_at") else None,
-                updated_at=row["updated_at"].isoformat() if row.get("updated_at") else None,
+                created_at=(
+                    row["created_at"].isoformat() if row.get("created_at") else None
+                ),
+                updated_at=(
+                    row["updated_at"].isoformat() if row.get("updated_at") else None
+                ),
             )
             for row in rows
         ]
@@ -214,14 +224,20 @@ async def list_semantic_alias_conflicts(
                     granularity=row.get("granularity"),
                     active_semantic_key=str(row.get("active_standard_field") or ""),
                     conflicting_semantic_key=conflicting_key,
-                    conflict_id=int(row["conflict_id"]) if row.get("conflict_id") is not None else None,
+                    conflict_id=(
+                        int(row["conflict_id"])
+                        if row.get("conflict_id") is not None
+                        else None
+                    ),
                     source=str(row.get("source") or "manual"),
                     status=str(row.get("status") or "conflict"),
                 )
             )
         return SemanticAliasConflictListResponse(
             success=True,
-            data=SemanticAliasConflictListData(conflicts=conflicts, total=len(conflicts)),
+            data=SemanticAliasConflictListData(
+                conflicts=conflicts, total=len(conflicts)
+            ),
             message="获取别名冲突列表成功",
         )
     except Exception as exc:
@@ -283,14 +299,19 @@ async def resolve_semantic_alias(
                 """
             )
             affected += int(
-                (await db.execute(disable_sql, {
-                    "now": now_value,
-                    "data_domain": data_domain,
-                    "raw_alias": raw_alias,
-                    "platform_code": payload.platform_code,
-                    "granularity": payload.granularity,
-                    "semantic_key": semantic_key,
-                })).rowcount
+                (
+                    await db.execute(
+                        disable_sql,
+                        {
+                            "now": now_value,
+                            "data_domain": data_domain,
+                            "raw_alias": raw_alias,
+                            "platform_code": payload.platform_code,
+                            "granularity": payload.granularity,
+                            "semantic_key": semantic_key,
+                        },
+                    )
+                ).rowcount
                 or 0
             )
             # 2. 新语义键写成 active
@@ -310,14 +331,19 @@ async def resolve_semantic_alias(
                 """
             )
             affected += int(
-                (await db.execute(upsert_sql, {
-                    "now": now_value,
-                    "data_domain": data_domain,
-                    "semantic_key": semantic_key,
-                    "raw_alias": raw_alias,
-                    "platform_code": payload.platform_code,
-                    "granularity": payload.granularity,
-                })).rowcount
+                (
+                    await db.execute(
+                        upsert_sql,
+                        {
+                            "now": now_value,
+                            "data_domain": data_domain,
+                            "semantic_key": semantic_key,
+                            "raw_alias": raw_alias,
+                            "platform_code": payload.platform_code,
+                            "granularity": payload.granularity,
+                        },
+                    )
+                ).rowcount
                 or 0
             )
         elif payload.action == "disable":
@@ -333,13 +359,18 @@ async def resolve_semantic_alias(
                 """
             )
             affected += int(
-                (await db.execute(disable_sql, {
-                    "now": now_value,
-                    "data_domain": data_domain,
-                    "raw_alias": raw_alias,
-                    "platform_code": payload.platform_code,
-                    "granularity": payload.granularity,
-                })).rowcount
+                (
+                    await db.execute(
+                        disable_sql,
+                        {
+                            "now": now_value,
+                            "data_domain": data_domain,
+                            "raw_alias": raw_alias,
+                            "platform_code": payload.platform_code,
+                            "granularity": payload.granularity,
+                        },
+                    )
+                ).rowcount
                 or 0
             )
 
@@ -356,13 +387,18 @@ async def resolve_semantic_alias(
             """
         )
         affected += int(
-            (await db.execute(clear_conflict_sql, {
-                "now": now_value,
-                "data_domain": data_domain,
-                "raw_alias": raw_alias,
-                "platform_code": payload.platform_code,
-                "granularity": payload.granularity,
-            })).rowcount
+            (
+                await db.execute(
+                    clear_conflict_sql,
+                    {
+                        "now": now_value,
+                        "data_domain": data_domain,
+                        "raw_alias": raw_alias,
+                        "platform_code": payload.platform_code,
+                        "granularity": payload.granularity,
+                    },
+                )
+            ).rowcount
             or 0
         )
         await db.commit()

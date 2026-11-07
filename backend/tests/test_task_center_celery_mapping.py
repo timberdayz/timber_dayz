@@ -39,10 +39,20 @@ async def task_center_sqlite_session():
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
 
     async with engine.begin() as conn:
-        for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "ops", "semantic"):
+        for schema_name in (
+            "core",
+            "a_class",
+            "b_class",
+            "c_class",
+            "finance",
+            "ops",
+            "semantic",
+        ):
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
         await conn.run_sync(
-            lambda sync_conn: Base.metadata.create_all(sync_conn, tables=_sqlite_tables())
+            lambda sync_conn: Base.metadata.create_all(
+                sync_conn, tables=_sqlite_tables()
+            )
         )
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -161,4 +171,7 @@ async def test_task_center_stores_submission_metadata_for_retry(
     )
     task = result.scalar_one()
 
-    assert task.details_json["task_details"]["submission_args"]["file_id"] == seeded_catalog_file.id
+    assert (
+        task.details_json["task_details"]["submission_args"]["file_id"]
+        == seeded_catalog_file.id
+    )

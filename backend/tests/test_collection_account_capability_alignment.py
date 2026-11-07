@@ -54,7 +54,9 @@ class _FakeAdminUser:
 
 
 @pytest.mark.asyncio
-async def test_create_task_filters_domains_before_runtime_manifest_resolution(monkeypatch):
+async def test_create_task_filters_domains_before_runtime_manifest_resolution(
+    monkeypatch,
+):
     captured = {}
     fake_db = MagicMock()
     fake_db.add = MagicMock()
@@ -216,7 +218,9 @@ async def test_create_task_preserves_config_origin(monkeypatch):
     assert body["config_id"] == 11
     assert body["trigger_type"] == "config"
 
-    created_task = next(obj for obj in added_objects if obj.__class__.__name__ == "CollectionTask")
+    created_task = next(
+        obj for obj in added_objects if obj.__class__.__name__ == "CollectionTask"
+    )
     assert created_task.config_id == 11
     assert created_task.trigger_type == "config"
 

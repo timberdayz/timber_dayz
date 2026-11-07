@@ -231,12 +231,14 @@ async def test_tier_buckets_are_mutually_exclusive_and_additive(tier_env):
     assert sum(bucket["value"] for bucket in view_buckets) == pytest.approx(
         view_totals["total_value"]
     )
-    assert sum(bucket["sku_count"] for bucket in view_buckets) == view_totals[
-        "total_sku_count"
-    ]
-    assert sum(bucket["row_count"] for bucket in view_buckets) == view_totals[
-        "total_row_count"
-    ]
+    assert (
+        sum(bucket["sku_count"] for bucket in view_buckets)
+        == view_totals["total_sku_count"]
+    )
+    assert (
+        sum(bucket["row_count"] for bucket in view_buckets)
+        == view_totals["total_row_count"]
+    )
     # 30~90 天**不再无档**：压60-90天这一档必须有货
     light = next(b for b in view_buckets if b["tier"] == "light")
     assert light["sku_count"] == 1

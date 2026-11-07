@@ -632,17 +632,21 @@ async def _disable_shop_in_collection_scopes(
     返回被摘掉的 scope 行数。
     """
     scopes = (
-        await db.execute(
-            select(CollectionConfigShopScope)
-            .where(
-                CollectionConfigShopScope.shop_account_id == shop_account_id,
-                # 只动**当前还参与**的 scope —— 早已 disabled 的不必再改一遍
-                # (改了也是空操作, 但会把 updated_at 搅乱、让计数失真)。
-                CollectionConfigShopScope.enabled.is_(True),
+        (
+            await db.execute(
+                select(CollectionConfigShopScope)
+                .where(
+                    CollectionConfigShopScope.shop_account_id == shop_account_id,
+                    # 只动**当前还参与**的 scope —— 早已 disabled 的不必再改一遍
+                    # (改了也是空操作, 但会把 updated_at 搅乱、让计数失真)。
+                    CollectionConfigShopScope.enabled.is_(True),
+                )
+                .order_by(CollectionConfigShopScope.shop_account_id)
             )
-            .order_by(CollectionConfigShopScope.shop_account_id)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if not scopes:
         return 0
 
@@ -662,18 +666,21 @@ async def _disable_shop_in_collection_scopes(
         if config is None:
             continue
         remaining = (
-            await db.execute(
-                select(CollectionConfigShopScope)
-                .where(
-                    CollectionConfigShopScope.config_id == config_id,
-                    CollectionConfigShopScope.enabled.is_(True),
+            (
+                await db.execute(
+                    select(CollectionConfigShopScope).where(
+                        CollectionConfigShopScope.config_id == config_id,
+                        CollectionConfigShopScope.enabled.is_(True),
+                    )
+                    # ⚠️ 排序必须与迁移内联实现一致(按 shop_account_id) ——
+                    # 否则「停用联动算出来的摘要」与「迁移算出来的摘要」顺序不同,
+                    # 用户下次保存配置时摘要就会跳动。
+                    .order_by(CollectionConfigShopScope.shop_account_id)
                 )
-                # ⚠️ 排序必须与迁移内联实现一致(按 shop_account_id) ——
-                # 否则「停用联动算出来的摘要」与「迁移算出来的摘要」顺序不同,
-                # 用户下次保存配置时摘要就会跳动。
-                .order_by(CollectionConfigShopScope.shop_account_id)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         # 用 dict 喂 summarize_shop_scopes —— 它对 ORM 对象走 dict(obj),
         # 而 SQLAlchemy 实体不可 dict() ⇒ 必须显式转成 dict。
         summary = summarize_shop_scopes(

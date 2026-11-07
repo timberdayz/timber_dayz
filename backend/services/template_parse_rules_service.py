@@ -72,7 +72,9 @@ def validate_declared_date_formats(
         if not date_format:
             # 「非空」由 router 的既有校验负责, 这里不重复报。
             continue
-        value_kind = str(rule.get("value_kind") or "single_date").strip() or "single_date"
+        value_kind = (
+            str(rule.get("value_kind") or "single_date").strip() or "single_date"
+        )
 
         if not is_supported_declared_date_format(date_format):
             problems.append(
@@ -188,7 +190,9 @@ class DateValueShapeReport:
         「日期超出文件期间」不计入: 越界是**文件期间元数据**的问题,
         不是模板声明的格式变了, 混进来会把模板治理与文件治理搅在一起。
         """
-        return any(issue.error_code in DATE_ERROR_FORMAT_DRIFT_CODES for issue in self.issues)
+        return any(
+            issue.error_code in DATE_ERROR_FORMAT_DRIFT_CODES for issue in self.issues
+        )
 
     @property
     def error_codes(self) -> List[str]:
@@ -404,9 +408,14 @@ def evaluate_date_value_shape(
         date_format = str(rule.get("date_format") or "").strip()
         if not date_format:
             continue
-        value_kind = str(rule.get("value_kind") or "single_date").strip() or "single_date"
+        value_kind = (
+            str(rule.get("value_kind") or "single_date").strip() or "single_date"
+        )
         source_column = str(rule.get("source_column") or "").strip()
-        if not source_column or source_column in {"__file_date_from__", "__file_date_to__"}:
+        if not source_column or source_column in {
+            "__file_date_from__",
+            "__file_date_to__",
+        }:
             # 伴生日期列取的是文件日期, 不是文件里的某一列 ⇒ 没有样本值可试。
             continue
 

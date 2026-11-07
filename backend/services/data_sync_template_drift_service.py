@@ -88,7 +88,9 @@ class DataSyncTemplateDriftService:
             "removed_fields": list(header_changes.get("removed_fields") or []),
             "match_rate": header_changes.get("match_rate"),
             "blocking_changes": list(header_changes.get("blocking_changes") or []),
-            "non_blocking_changes": list(header_changes.get("non_blocking_changes") or []),
+            "non_blocking_changes": list(
+                header_changes.get("non_blocking_changes") or []
+            ),
             # [*] 批次 B: 值形态漂移(列名没变, 值的形态变了)
             "format_drift": bool(header_changes.get("format_drift", False)),
             "value_shape": header_changes.get("value_shape") or {},

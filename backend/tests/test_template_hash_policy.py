@@ -1,5 +1,7 @@
 from backend.services.template_hash_policy import TemplateHashPolicyService
-from backend.services.template_save_readiness_service import TemplateSaveReadinessService
+from backend.services.template_save_readiness_service import (
+    TemplateSaveReadinessService,
+)
 from backend.services.semantic_field_registry import (
     get_semantic_field_meta,
     is_canonical_semantic_key,
@@ -132,7 +134,10 @@ def test_products_monthly_requires_product_id_not_optional_product_identity_fiel
 
     assert result.passed is False
     assert result.missing_required_groups[0]["accepted_keys"] == ["product_id"]
-    assert result.missing_required_groups[0]["message"] == "products monthly 需要选择 product_id。"
+    assert (
+        result.missing_required_groups[0]["message"]
+        == "products monthly 需要选择 product_id。"
+    )
     assert result.invalid_keys == []
 
 
@@ -160,7 +165,7 @@ def test_products_monthly_passes_with_product_id_and_auto_period_date():
                 "target_field": "period_end_date",
                 "source_column": "__file_date_to__",
                 "value_kind": "single_date",
-            }
+            },
         ],
     )
 
@@ -272,7 +277,10 @@ def test_hash_policy_rejects_non_semantic_deduplication_field():
     )
 
     assert result.passed is False
-    assert "deduplication_fields must be confirmed semantic keys: status" in result.blocking_errors
+    assert (
+        "deduplication_fields must be confirmed semantic keys: status"
+        in result.blocking_errors
+    )
 
 
 def test_traffic_daily_requires_metric_date_identity():
@@ -402,7 +410,10 @@ def test_sample_diagnostics_treats_file_date_rule_as_derived_hash_field():
 
     assert result.passed is True
     assert result.sample_diagnostics["field_null_rates"]["metric_date"] == 0.0
-    assert result.sample_diagnostics["auto_date_fields"]["metric_date"]["source_column"] == "__file_date_from__"
+    assert (
+        result.sample_diagnostics["auto_date_fields"]["metric_date"]["source_column"]
+        == "__file_date_from__"
+    )
     assert not any("metric_date null rate" in warning for warning in result.warnings)
 
 
@@ -430,7 +441,7 @@ def test_products_monthly_period_parse_rules_without_user_selection_passes():
                 "target_field": "period_end_date",
                 "source_column": "__file_date_to__",
                 "value_kind": "single_date",
-            }
+            },
         ],
     )
 
@@ -564,7 +575,10 @@ def test_products_daily_keeps_product_name_optional_but_requires_product_id():
     assert result.passed is False
     assert result.invalid_keys == []
     assert result.missing_required_groups[0]["accepted_keys"] == ["product_id"]
-    assert result.missing_required_groups[0]["message"] == "products daily 需要选择 product_id。"
+    assert (
+        result.missing_required_groups[0]["message"]
+        == "products daily 需要选择 product_id。"
+    )
     assert any("product_name" in warning for warning in result.warnings)
 
 

@@ -83,24 +83,46 @@ def _semantic_kind(semantic_key: str) -> str:
 
 DEFAULT_CONTRACTS: dict[str, tuple[SemanticContractDefinition, ...]] = {
     "orders": (
-        SemanticContractDefinition("order_id", "required", impact_description="业务概览订单数无法计算"),
-        SemanticContractDefinition("shop_id", "required", impact_description="业务概览无法按店铺归属订单"),
-        SemanticContractDefinition("order_date", "required", impact_description="业务概览无法按期间归集订单"),
-        SemanticContractDefinition("sales_volume", "required", impact_description="业务概览销售数量无法计算"),
-        SemanticContractDefinition("paid_amount", "required", impact_description="业务概览销售额和转化率无法计算"),
-        SemanticContractDefinition("profit", "required", impact_description="业务概览利润指标无法计算"),
+        SemanticContractDefinition(
+            "order_id", "required", impact_description="业务概览订单数无法计算"
+        ),
+        SemanticContractDefinition(
+            "shop_id", "required", impact_description="业务概览无法按店铺归属订单"
+        ),
+        SemanticContractDefinition(
+            "order_date", "required", impact_description="业务概览无法按期间归集订单"
+        ),
+        SemanticContractDefinition(
+            "sales_volume", "required", impact_description="业务概览销售数量无法计算"
+        ),
+        SemanticContractDefinition(
+            "paid_amount",
+            "required",
+            impact_description="业务概览销售额和转化率无法计算",
+        ),
+        SemanticContractDefinition(
+            "profit", "required", impact_description="业务概览利润指标无法计算"
+        ),
         SemanticContractDefinition("estimated_settlement_amount", "optional"),
         SemanticContractDefinition("settlement_time", "optional"),
         SemanticContractDefinition("cost_profit_rate", "optional"),
     ),
     "analytics": (
-        SemanticContractDefinition("metric_date", "required", impact_description="业务概览流量无法按日期归集"),
+        SemanticContractDefinition(
+            "metric_date", "required", impact_description="业务概览流量无法按日期归集"
+        ),
         # [*] shop_id 降级为 optional: TikTok 流量导出格式里**没有店铺列**,
         # 店铺归属来自 catalog_files.shop_id(文件元数据), 而不是表头。
         # 之前把 shop_id 列为 required, 导致 analytics 契约永远 breaking_drift。
-        SemanticContractDefinition("shop_id", "optional", impact_description="业务概览无法按店铺归属流量"),
-        SemanticContractDefinition("visitor_count", "required", impact_description="业务概览UV无法计算"),
-        SemanticContractDefinition("page_views", "required", impact_description="业务概览PV无法计算"),
+        SemanticContractDefinition(
+            "shop_id", "optional", impact_description="业务概览无法按店铺归属流量"
+        ),
+        SemanticContractDefinition(
+            "visitor_count", "required", impact_description="业务概览UV无法计算"
+        ),
+        SemanticContractDefinition(
+            "page_views", "required", impact_description="业务概览PV无法计算"
+        ),
         SemanticContractDefinition("conversion_rate", "optional"),
         SemanticContractDefinition("order_count", "optional"),
         SemanticContractDefinition("gmv", "optional"),
@@ -203,7 +225,11 @@ class SemanticFieldContractService:
             if raw_name in current_set
         }
         resolved_keys.update(inferred_current_keys)
-        resolved_keys.update(column for column in current_set if column in {item.semantic_key for item in definitions})
+        resolved_keys.update(
+            column
+            for column in current_set
+            if column in {item.semantic_key for item in definitions}
+        )
 
         template_declared_keys = set(raw_to_semantic.values())
         template_declared_keys.update(inferred_template_keys)
@@ -236,7 +262,8 @@ class SemanticFieldContractService:
         optional_keys = [
             item.semantic_key
             for item in definitions
-            if item.importance == "optional" and item.semantic_key in template_declared_keys
+            if item.importance == "optional"
+            and item.semantic_key in template_declared_keys
         ]
         missing_required = [key for key in required_keys if key not in resolved_keys]
         missing_optional = [key for key in optional_keys if key not in resolved_keys]
@@ -283,9 +310,7 @@ class SemanticFieldContractService:
             if item.impact_description
         }
         impact_descriptions = [
-            impact_by_key[key]
-            for key in missing_required
-            if key in impact_by_key
+            impact_by_key[key] for key in missing_required if key in impact_by_key
         ]
 
         # [*] 批次 F-3: 域级下限缺口 —— 域级契约 required 里, **模板清单还没覆盖**的键。
@@ -314,8 +339,12 @@ class SemanticFieldContractService:
             should_block=should_block,
             missing_required_keys=missing_required,
             missing_optional_keys=missing_optional,
-            resolved_required_keys=[key for key in required_keys if key in resolved_keys],
-            resolved_optional_keys=[key for key in optional_keys if key in resolved_keys],
+            resolved_required_keys=[
+                key for key in required_keys if key in resolved_keys
+            ],
+            resolved_optional_keys=[
+                key for key in optional_keys if key in resolved_keys
+            ],
             extra_raw_fields=extra_raw_fields,
             impact_descriptions=impact_descriptions,
             has_contract=True,
@@ -345,7 +374,9 @@ class SemanticFieldContractService:
         return {
             semantic_key
             for semantic_key, aliases in aliases_by_key.items()
-            if any(cls._normalize_alias(alias) in normalized_columns for alias in aliases)
+            if any(
+                cls._normalize_alias(alias) in normalized_columns for alias in aliases
+            )
         }
 
     @staticmethod
@@ -389,9 +420,24 @@ class SemanticFieldContractService:
                 .where(SemanticFieldContract.enabled.is_(True))
                 .where(SemanticFieldContract.data_domain == data_domain)
                 .where(SemanticFieldContract.consumer == consumer)
-                .where(or_(SemanticFieldContract.platform == platform, SemanticFieldContract.platform.is_(None)))
-                .where(or_(SemanticFieldContract.granularity == granularity, SemanticFieldContract.granularity.is_(None)))
-                .where(or_(SemanticFieldContract.sub_domain == sub_domain, SemanticFieldContract.sub_domain.is_(None)))
+                .where(
+                    or_(
+                        SemanticFieldContract.platform == platform,
+                        SemanticFieldContract.platform.is_(None),
+                    )
+                )
+                .where(
+                    or_(
+                        SemanticFieldContract.granularity == granularity,
+                        SemanticFieldContract.granularity.is_(None),
+                    )
+                )
+                .where(
+                    or_(
+                        SemanticFieldContract.sub_domain == sub_domain,
+                        SemanticFieldContract.sub_domain.is_(None),
+                    )
+                )
             )
             result = await self.db.execute(stmt)
             rows = result.scalars().all()

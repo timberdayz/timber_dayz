@@ -263,7 +263,9 @@ def main() -> int:
     content = HEADER + SEED_HEADER + ",\n".join(lines) + "\n" + SEED_FOOTER
     ASSET_TARGET.parent.mkdir(parents=True, exist_ok=True)
     ASSET_TARGET.write_text(content, encoding="utf-8", newline="\n")
-    print(f"[OK] 已生成资产: {ASSET_TARGET} ({len(content)} bytes, 别名 {len(aliases)} 条)")
+    print(
+        f"[OK] 已生成资产: {ASSET_TARGET} ({len(content)} bytes, 别名 {len(aliases)} 条)"
+    )
     return 0
 
 

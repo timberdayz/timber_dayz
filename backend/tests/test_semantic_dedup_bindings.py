@@ -1,4 +1,7 @@
-from backend.services.semantic_field_registry import infer_semantic_key, resolve_semantic_value
+from backend.services.semantic_field_registry import (
+    infer_semantic_key,
+    resolve_semantic_value,
+)
 
 
 def test_semantic_registry_maps_order_number_aliases_to_order_id():

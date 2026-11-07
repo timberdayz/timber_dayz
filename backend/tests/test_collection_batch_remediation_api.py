@@ -38,21 +38,31 @@ async def test_batch_remediation_creates_one_enabled_headless_config_per_uncover
     ]
 
     configs = (
-        await collection_coverage_session.execute(
-            select(CollectionConfig).where(CollectionConfig.name.like("batch-remediate-%"))
+        (
+            await collection_coverage_session.execute(
+                select(CollectionConfig).where(
+                    CollectionConfig.name.like("batch-remediate-%")
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     assert len(configs) == 2
 
-    my_config = next(config for config in configs if config.account_ids == ["shop-my-1"])
+    my_config = next(
+        config for config in configs if config.account_ids == ["shop-my-1"]
+    )
     assert my_config.execution_mode == "headless"
     assert my_config.is_active is True
     assert my_config.granularity == "daily"
     assert my_config.data_domains == ["orders"]
     assert my_config.sub_domains == {"orders": ["shopee", "tiktok"]}
 
-    ph_config = next(config for config in configs if config.account_ids == ["shop-ph-1"])
+    ph_config = next(
+        config for config in configs if config.account_ids == ["shop-ph-1"]
+    )
     assert ph_config.execution_mode == "headless"
     assert ph_config.is_active is True
     assert ph_config.granularity == "daily"

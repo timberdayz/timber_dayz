@@ -80,7 +80,9 @@ def test_orders_normalize_table_still_forward_fills_order_identity_fields():
     assert "店铺" in report["filled_columns"]
 
 
-def test_orders_normalize_table_restores_real_blank_profit_cells_from_merged_source_file(tmp_path):
+def test_orders_normalize_table_restores_real_blank_profit_cells_from_merged_source_file(
+    tmp_path,
+):
     """真实「合并单元格」源文件：订单级利润/买家支付在明细行必须保持空白。
 
     原始用例依赖本机 raw 目录下的 .xls 导出件（``data/**/*.xls`` 已被 .gitignore

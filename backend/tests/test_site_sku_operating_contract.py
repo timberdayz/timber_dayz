@@ -29,7 +29,10 @@ def test_operating_profile_has_platform_warehouse_sku_grain():
     assert any(
         constraint.name == "uq_sku_operating_profile_current"
         for constraint in SkuOperatingProfile.__table__.constraints
-    ) or any(index.name == "uq_sku_operating_profile_current" for index in SkuOperatingProfile.__table__.indexes)
+    ) or any(
+        index.name == "uq_sku_operating_profile_current"
+        for index in SkuOperatingProfile.__table__.indexes
+    )
 
 
 def test_profit_estimate_has_platform_warehouse_columns_without_site_scope():
@@ -86,7 +89,9 @@ def test_operating_profile_response_contract_includes_sku_identity_and_latest_pr
 
 
 def test_operating_profit_queries_confirmed_logistics_by_warehouse():
-    source = Path("backend/services/product_finance_service.py").read_text(encoding="utf-8")
+    source = Path("backend/services/product_finance_service.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "warehouse_code: str | None" in source
     assert "LogisticsBillLine.warehouse_code == warehouse_code" in source
@@ -94,8 +99,12 @@ def test_operating_profit_queries_confirmed_logistics_by_warehouse():
 
 
 def test_site_sku_projection_has_a_separate_table_and_idempotent_business_key():
-    service_source = Path("backend/services/feishu_projection_service.py").read_text(encoding="utf-8")
-    schema_source = Path("modules/core/db/schema_parts/collection.py").read_text(encoding="utf-8")
+    service_source = Path("backend/services/feishu_projection_service.py").read_text(
+        encoding="utf-8"
+    )
+    schema_source = Path("modules/core/db/schema_parts/collection.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "platform_sku_profit_table_id" in schema_source
     assert "ERP-平台SKU利润" in service_source
@@ -103,7 +112,9 @@ def test_site_sku_projection_has_a_separate_table_and_idempotent_business_key():
 
 
 def test_feishu_projection_keeps_legacy_spu_sku_delivery_when_site_table_is_not_initialized():
-    source = Path("backend/services/feishu_projection_service.py").read_text(encoding="utf-8")
+    source = Path("backend/services/feishu_projection_service.py").read_text(
+        encoding="utf-8"
+    )
 
     # 镜像表 id 未配齐时整体不投递（black 会把这条守卫拆成多行，用正则匹配）
     assert re.search(
@@ -114,29 +125,49 @@ def test_feishu_projection_keeps_legacy_spu_sku_delivery_when_site_table_is_not_
 
 
 def test_site_projection_enqueue_is_limited_to_site_sku_mutations():
-    source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
-    category_block = source[source.index("async def create_product_category"):source.index("async def update_product_category")]
-    bill_block = source[source.index("async def create_logistics_bill"):source.index("async def create_logistics_batch")]
+    source = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
+    category_block = source[
+        source.index("async def create_product_category") : source.index(
+            "async def update_product_category"
+        )
+    ]
+    bill_block = source[
+        source.index("async def create_logistics_bill") : source.index(
+            "async def create_logistics_batch"
+        )
+    ]
 
     assert "_enqueue_site_sku_projection" not in category_block
     assert "_enqueue_site_sku_projection" not in bill_block
 
 
 def test_site_operating_migration_and_projection_are_safe_for_transport_and_decimal_payloads():
-    migration = Path("current_migrations/versions/20260913_sku_operating_profiles.py").read_text(encoding="utf-8")
-    router = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    migration = Path(
+        "current_migrations/versions/20260913_sku_operating_profiles.py"
+    ).read_text(encoding="utf-8")
+    router = Path("backend/domains/business/routers/product_center.py").read_text(
+        encoding="utf-8"
+    )
 
     assert 'sa.Column("transport_type", sa.String(64)' in migration
     # Decimal -> float 的安全转换（允许 black 把三元表达式拆行/加括号）
-    assert re.search(
-        r'"selling_price":\s*\(?\s*float\(row\.selling_price\)', router
-    )
+    assert re.search(r'"selling_price":\s*\(?\s*float\(row\.selling_price\)', router)
 
 
 def test_warehouse_contract_is_single_country_and_transport_is_fixed():
     columns = {column.name for column in inspect(DimWarehouse).columns}
-    assert {"warehouse_code", "warehouse_name", "country_code", "country_name", "status"} <= columns
-    schema_source = Path("modules/core/db/schema_parts/business.py").read_text(encoding="utf-8")
+    assert {
+        "warehouse_code",
+        "warehouse_name",
+        "country_code",
+        "country_name",
+        "status",
+    } <= columns
+    schema_source = Path("modules/core/db/schema_parts/business.py").read_text(
+        encoding="utf-8"
+    )
     assert "IN ('sea', 'air', 'rail')" in schema_source
 
 
@@ -155,26 +186,37 @@ def test_active_product_center_requests_do_not_accept_destination_or_site_scope(
 
 
 def test_warehouse_scope_migration_is_forward_only_and_renames_projection_config():
-    migration = Path("current_migrations/versions/20260914_warehouse_platform_profit.py").read_text(encoding="utf-8")
+    migration = Path(
+        "current_migrations/versions/20260914_warehouse_platform_profit.py"
+    ).read_text(encoding="utf-8")
     assert "current_schema_20260914_warehouse_platform_profit" in migration
     assert "platform_sku_profit_table_id" in migration
     assert '"dim_warehouses"' in migration
     assert '"default_fee_rate"' in migration
     assert "_guard_empty" in migration
-    assert "raise RuntimeError(\"warehouse scope migration is intentionally forward-only\")" in migration
+    assert (
+        'raise RuntimeError("warehouse scope migration is intentionally forward-only")'
+        in migration
+    )
 
 
 def test_confirmed_logistics_cost_uses_exists_for_warehouse_filter_without_grn_multiplication():
-    source = Path("backend/services/product_finance_service.py").read_text(encoding="utf-8")
+    source = Path("backend/services/product_finance_service.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "LogisticsBillLine.warehouse_code == warehouse_code" in source
 
 
 def test_saving_site_profit_persists_current_price_and_coupon_and_refreshes_projection():
-    finance_source = Path("backend/services/product_finance_service.py").read_text(encoding="utf-8")
-    router_source = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
+    finance_source = Path("backend/services/product_finance_service.py").read_text(
+        encoding="utf-8"
+    )
+    router_source = Path(
+        "backend/domains/business/routers/product_center.py"
+    ).read_text(encoding="utf-8")
 
-    assert "profile.selling_price = data[\"selling_price\"]" in finance_source
-    assert "profile.default_coupon_amount = data[\"coupon_amount\"]" in finance_source
+    assert 'profile.selling_price = data["selling_price"]' in finance_source
+    assert 'profile.default_coupon_amount = data["coupon_amount"]' in finance_source
     assert "site_profiles =" in router_source
     assert "await _enqueue_platform_sku_profit_projection(db, profile)" in router_source

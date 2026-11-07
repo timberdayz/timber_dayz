@@ -182,13 +182,17 @@ def _rehearse_current_chain() -> dict[str, object]:
         future=True,
     )
     database_name = f"schema_cleanup_rehearsal_{uuid.uuid4().hex[:10]}"
-    temp_url = base_url.set(database=database_name).render_as_string(hide_password=False)
+    temp_url = base_url.set(database=database_name).render_as_string(
+        hide_password=False
+    )
     env = os.environ.copy()
     env["DATABASE_URL"] = temp_url
 
     try:
         with admin_engine.connect() as conn:
-            conn.execute(text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)'))
+            conn.execute(
+                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
+            )
             conn.execute(text(f'CREATE DATABASE "{database_name}"'))
 
         _run_alembic(["upgrade", CURRENT_BASELINE_REVISION], env)
@@ -231,7 +235,9 @@ def _rehearse_current_chain() -> dict[str, object]:
         return completeness
     finally:
         with admin_engine.connect() as conn:
-            conn.execute(text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)'))
+            conn.execute(
+                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
+            )
         admin_engine.dispose()
 
 

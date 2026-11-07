@@ -15,17 +15,38 @@ from backend.services.collection_contracts import (
 
 
 def test_derive_granularity_from_preset_follows_global_hard_rules():
-    assert derive_granularity_from_time_selection({"mode": "preset", "preset": "today"}) == "daily"
-    assert derive_granularity_from_time_selection({"mode": "preset", "preset": "yesterday"}) == "daily"
-    assert derive_granularity_from_time_selection({"mode": "preset", "preset": "last_7_days"}) == "weekly"
-    assert derive_granularity_from_time_selection({"mode": "preset", "preset": "last_30_days"}) == "monthly"
+    assert (
+        derive_granularity_from_time_selection({"mode": "preset", "preset": "today"})
+        == "daily"
+    )
+    assert (
+        derive_granularity_from_time_selection(
+            {"mode": "preset", "preset": "yesterday"}
+        )
+        == "daily"
+    )
+    assert (
+        derive_granularity_from_time_selection(
+            {"mode": "preset", "preset": "last_7_days"}
+        )
+        == "weekly"
+    )
+    assert (
+        derive_granularity_from_time_selection(
+            {"mode": "preset", "preset": "last_30_days"}
+        )
+        == "monthly"
+    )
 
 
 def test_derive_granularity_from_custom_requires_manual_input():
-    assert derive_granularity_from_time_selection(
-        {"mode": "custom", "start_date": "2026-03-01", "end_date": "2026-03-07"},
-        "daily",
-    ) == "daily"
+    assert (
+        derive_granularity_from_time_selection(
+            {"mode": "custom", "start_date": "2026-03-01", "end_date": "2026-03-07"},
+            "daily",
+        )
+        == "daily"
+    )
 
     with pytest.raises(ValueError, match="granularity is required for custom"):
         derive_granularity_from_time_selection(
@@ -162,7 +183,9 @@ def test_time_selection_payload_rejects_preset_without_preset_value():
 
 
 def test_time_selection_payload_rejects_custom_without_date_range():
-    with pytest.raises(ValueError, match="custom time selection requires start_date and end_date"):
+    with pytest.raises(
+        ValueError, match="custom time selection requires start_date and end_date"
+    ):
         TimeSelectionPayload(mode="custom")
 
 

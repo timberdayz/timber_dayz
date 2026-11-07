@@ -146,7 +146,11 @@ def should_start_collection_queue_runner(background_role: str) -> bool:
 
 os.environ.setdefault(
     "AUTO_BOOTSTRAP_DASHBOARD_ASSETS_ON_STARTUP",
-    "true" if should_auto_bootstrap_dashboard_on_startup(settings.ENVIRONMENT) else "false",
+    (
+        "true"
+        if should_auto_bootstrap_dashboard_on_startup(settings.ENVIRONMENT)
+        else "false"
+    ),
 )
 
 
@@ -157,7 +161,11 @@ async def collect_dashboard_bootstrap_report(
     inspect_assets=None,
     bootstrap_assets_if_needed=None,
 ) -> dict:
-    if session_factory is None or inspect_assets is None or bootstrap_assets_if_needed is None:
+    if (
+        session_factory is None
+        or inspect_assets is None
+        or bootstrap_assets_if_needed is None
+    ):
         from backend.models.database import AsyncSessionLocal
         from backend.services.data_pipeline.dashboard_bootstrap import (
             bootstrap_dashboard_assets_if_needed,
@@ -188,9 +196,12 @@ async def collect_dashboard_bootstrap_report(
         report["startup_policy"] = "inspect_only"
         return report
 
+
 if not should_init_db_on_startup(settings.ENVIRONMENT):
+
     def init_db() -> None:  # type: ignore[no-redef]
         return None
+
 
 # 安全认证
 @asynccontextmanager
@@ -240,8 +251,12 @@ async def lifespan(app: FastAPI):
                 async def stop(self):
                     return None
 
-            _resource_monitor_module.get_resource_monitor = lambda: _SkippedResourceMonitor()
-            logger.info("[ResourceMonitor] Pre-skipped for background role: %s", background_role)
+            _resource_monitor_module.get_resource_monitor = (
+                lambda: _SkippedResourceMonitor()
+            )
+            logger.info(
+                "[ResourceMonitor] Pre-skipped for background role: %s", background_role
+            )
         except Exception as resource_gate_err:
             logger.warning("[ResourceMonitor] Skip hook failed: %s", resource_gate_err)
 
@@ -253,7 +268,9 @@ async def lifespan(app: FastAPI):
                 return None
 
             _notification_ws_module.start_cleanup_task = _skip_cleanup_task
-            logger.info("[WS] Cleanup pre-skipped for background role: %s", background_role)
+            logger.info(
+                "[WS] Cleanup pre-skipped for background role: %s", background_role
+            )
         except Exception as websocket_gate_err:
             logger.warning("[WS] Skip hook failed: %s", websocket_gate_err)
 
@@ -328,7 +345,9 @@ async def lifespan(app: FastAPI):
                         logger.error(
                             f"[ERROR] ... 还有 {len(result['missing_tables']) - 10} 张表缺失"
                         )
-                    logger.error("[ERROR] %s", emit_schema_failure_protocol(result)["hint"])
+                    logger.error(
+                        "[ERROR] %s", emit_schema_failure_protocol(result)["hint"]
+                    )
                     raise RuntimeError(
                         f"Schema incompleteness: {len(result['missing_tables'])} tables missing"
                     )
@@ -343,7 +362,9 @@ async def lifespan(app: FastAPI):
                         logger.error(
                             f"[ERROR] ... 还有 {len(result['missing_columns']) - 10} 个关键列缺失"
                         )
-                    logger.error("[ERROR] %s", emit_schema_failure_protocol(result)["hint"])
+                    logger.error(
+                        "[ERROR] %s", emit_schema_failure_protocol(result)["hint"]
+                    )
                     raise RuntimeError(
                         f"Schema missing critical columns: {len(result.get('missing_columns', []))}"
                     )
@@ -358,7 +379,9 @@ async def lifespan(app: FastAPI):
                     logger.error(
                         f"[ERROR] 最新版本: {result.get('head_revision', 'N/A')}"
                     )
-                    logger.error("[ERROR] 请通过 Local Console 重启以执行受保护的 current-schema 迁移")
+                    logger.error(
+                        "[ERROR] 请通过 Local Console 重启以执行受保护的 current-schema 迁移"
+                    )
                     raise RuntimeError(
                         f"Migration status invalid: {result['migration_status']}"
                     )
@@ -379,7 +402,9 @@ async def lifespan(app: FastAPI):
                         f"[ERROR] 开发环境表结构不完整, 缺失表 ({len(result['missing_tables'])} 张): "
                         f"{', '.join(missing_tables)}"
                     )
-                    logger.error("[ERROR] %s", emit_schema_failure_protocol(result)["hint"])
+                    logger.error(
+                        "[ERROR] %s", emit_schema_failure_protocol(result)["hint"]
+                    )
                     raise RuntimeError(
                         f"Development schema incompleteness: {len(result['missing_tables'])} tables missing"
                     )
@@ -390,7 +415,9 @@ async def lifespan(app: FastAPI):
                         f"[ERROR] 开发环境关键列缺失({len(result.get('missing_columns', []))} 列): "
                         f"{', '.join(missing_columns)}"
                     )
-                    logger.error("[ERROR] %s", emit_schema_failure_protocol(result)["hint"])
+                    logger.error(
+                        "[ERROR] %s", emit_schema_failure_protocol(result)["hint"]
+                    )
                     raise RuntimeError(
                         f"Development schema missing critical columns: {len(result.get('missing_columns', []))}"
                     )
@@ -405,7 +432,9 @@ async def lifespan(app: FastAPI):
                     logger.error(
                         f"[ERROR] 最新版本: {result.get('head_revision', 'N/A')}"
                     )
-                    logger.error("[ERROR] 请通过 Local Console 重启以执行受保护的 current-schema 迁移")
+                    logger.error(
+                        "[ERROR] 请通过 Local Console 重启以执行受保护的 current-schema 迁移"
+                    )
                     raise RuntimeError(
                         f"Development migration status invalid: {result['migration_status']}"
                     )
@@ -449,9 +478,14 @@ async def lifespan(app: FastAPI):
             # Expose readiness report for route-level graceful degradation.
             try:
                 app.state.dashboard_assets_report = dashboard_bootstrap_report
-                app.state.dashboard_assets_ready = bool(dashboard_bootstrap_report.get("ready"))
+                app.state.dashboard_assets_ready = bool(
+                    dashboard_bootstrap_report.get("ready")
+                )
             except Exception:
-                app.state.dashboard_assets_report = {"ready": False, "error": "failed to persist report"}
+                app.state.dashboard_assets_report = {
+                    "ready": False,
+                    "error": "failed to persist report",
+                }
                 app.state.dashboard_assets_ready = False
             startup_metrics["dashboard_bootstrap"] = time.time() - step_start
             if dashboard_bootstrap_report.get("skipped"):
@@ -559,7 +593,11 @@ async def lifespan(app: FastAPI):
             try:
                 startup_checks = run_cloud_sync_startup_checks_from_env()
                 app.state.cloud_sync_startup_checks = startup_checks
-                logger.info("[CloudSync] Startup checks status=%s details=%s", startup_checks["status"], startup_checks["checks"])
+                logger.info(
+                    "[CloudSync] Startup checks status=%s details=%s",
+                    startup_checks["status"],
+                    startup_checks["checks"],
+                )
                 if startup_checks.get("status") == "error":
                     raise RuntimeError(
                         f"cloud sync startup checks failed: {startup_checks.get('checks')}"
@@ -691,7 +729,9 @@ async def lifespan(app: FastAPI):
 
         # v4.7.0新增:标记中断的采集任务并初始化调度器
         # collection scheduler + queue runner leader lock gating
-        enable_collection = should_start_collection_scheduler(background_role) and os.getenv("ENABLE_COLLECTION", "true").lower() in (
+        enable_collection = should_start_collection_scheduler(
+            background_role
+        ) and os.getenv("ENABLE_COLLECTION", "true").lower() in (
             "true",
             "1",
         )
@@ -729,7 +769,6 @@ async def lifespan(app: FastAPI):
             )
             from backend.models.database import SessionLocal
 
-
             # [*] v4.18.2修复:使用run_in_executor包装同步数据库操作
             def _sync_mark_interrupted_tasks():
                 """同步标记中断任务(在线程池中执行)"""
@@ -749,7 +788,9 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"[恢复] 标记 {interrupted_count} 个中断任务")
 
             # 按部署角色决定是否启动采集调度器（v4.19.x 本地与云端部署角色区分）
-            enable_collection = should_start_collection_scheduler(background_role) and os.getenv("ENABLE_COLLECTION", "true").lower() in (
+            enable_collection = should_start_collection_scheduler(
+                background_role
+            ) and os.getenv("ENABLE_COLLECTION", "true").lower() in (
                 "true",
                 "1",
             )
@@ -785,9 +826,11 @@ async def lifespan(app: FastAPI):
                     async def list_enabled_config_crons() -> dict[int, str]:
                         async with AsyncSessionLocal() as db:
                             result = await db.execute(
-                                select(CollectionConfig.id, CollectionConfig.schedule_cron).where(
-                                    CollectionConfig.schedule_enabled == True,
-                                    CollectionConfig.is_active == True,
+                                select(
+                                    CollectionConfig.id, CollectionConfig.schedule_cron
+                                ).where(
+                                    CollectionConfig.schedule_enabled.is_(True),
+                                    CollectionConfig.is_active.is_(True),
                                     CollectionConfig.schedule_cron.isnot(None),
                                 )
                             )
@@ -830,7 +873,9 @@ async def lifespan(app: FastAPI):
                                 ).scalar()
                             )
                             if not acquired:
-                                logger.info("[调度器] daily_cleanup 任务注册跳过(未获取到锁)")
+                                logger.info(
+                                    "[调度器] daily_cleanup 任务注册跳过(未获取到锁)"
+                                )
                             else:
                                 job_exists = bool(
                                     _lock_db.execute(
@@ -875,17 +920,25 @@ async def lifespan(app: FastAPI):
             logger.warning(f"[调度器] 初始化失败(不影响主功能): {scheduler_err}")
 
         try:
-            enable_collection = should_start_collection_queue_runner(background_role) and os.getenv("ENABLE_COLLECTION", "true").lower() in (
+            enable_collection = should_start_collection_queue_runner(
+                background_role
+            ) and os.getenv("ENABLE_COLLECTION", "true").lower() in (
                 "true",
                 "1",
             )
             deployment_role = os.getenv("DEPLOYMENT_ROLE", "").lower()
-            if enable_collection and deployment_role != "cloud" and leader_lock_acquired:
+            if (
+                enable_collection
+                and deployment_role != "cloud"
+                and leader_lock_acquired
+            ):
                 from backend.models.database import AsyncSessionLocal
                 from backend.services.collection_config_run_service import (
                     CollectionConfigRunService,
                 )
-                from backend.services.collection_queue_runner import CollectionQueueRunner
+                from backend.services.collection_queue_runner import (
+                    CollectionQueueRunner,
+                )
 
                 async with AsyncSessionLocal() as db:
                     run_service = CollectionConfigRunService(db)
@@ -905,7 +958,11 @@ async def lifespan(app: FastAPI):
                 await queue_runner.start()
                 app.state.collection_queue_runner = queue_runner
                 logger.info("[QueueRunner] Collection config queue runner started")
-            elif enable_collection and deployment_role != "cloud" and not leader_lock_acquired:
+            elif (
+                enable_collection
+                and deployment_role != "cloud"
+                and not leader_lock_acquired
+            ):
                 logger.info(
                     "[CollectionLeaderLock] Leader lock not acquired; skip CollectionQueueRunner start"
                 )
@@ -944,12 +1001,16 @@ async def lifespan(app: FastAPI):
             engine.dispose()
             logger.info("[DBEngine] Sync engine disposed (startup-fail fallback)")
         except Exception as dispose_err:
-            logger.warning(f"[DBEngine] Startup-fail sync dispose error (non-blocking): {dispose_err}")
+            logger.warning(
+                f"[DBEngine] Startup-fail sync dispose error (non-blocking): {dispose_err}"
+            )
         try:
             await async_engine.dispose()
             logger.info("[DBEngine] Async engine disposed (startup-fail fallback)")
         except Exception as dispose_err:
-            logger.warning(f"[DBEngine] Startup-fail async dispose error (non-blocking): {dispose_err}")
+            logger.warning(
+                f"[DBEngine] Startup-fail async dispose error (non-blocking): {dispose_err}"
+            )
         raise
 
         # Legacy dashboard scheduler notes retained for historical context only.
@@ -1256,6 +1317,7 @@ async def root():
 
 
 # 注册路由(全部启用 - v4.1.0优化版)
+
 
 def resolve_runtime_mode(runtime_mode: str | None = None) -> str:
     return resolve_runtime_mode_impl(settings, runtime_mode)

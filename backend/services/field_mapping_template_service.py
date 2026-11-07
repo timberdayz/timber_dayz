@@ -13,7 +13,9 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.services.deduplication_fields_config import get_default_deduplication_fields
+from backend.services.deduplication_fields_config import (
+    get_default_deduplication_fields,
+)
 from backend.services.template_family_service import _normalize_dimension
 from modules.core.db import FieldMappingTemplate
 from modules.core.logger import get_logger
@@ -91,10 +93,14 @@ class FieldMappingTemplateService:
                 raise ValueError(f"header_row必须在0-100之间, 当前值: {header_row}")
 
             if not header_columns or not isinstance(header_columns, list):
-                raise ValueError(f"header_columns必须是非空列表, 当前值: {header_columns}")
+                raise ValueError(
+                    f"header_columns必须是非空列表, 当前值: {header_columns}"
+                )
 
             if deduplication_fields is None:
-                deduplication_fields = get_default_deduplication_fields(data_domain, sub_domain)
+                deduplication_fields = get_default_deduplication_fields(
+                    data_domain, sub_domain
+                )
                 logger.debug(f"[Template] 使用默认核心字段配置: {deduplication_fields}")
             elif not isinstance(deduplication_fields, list):
                 raise ValueError(
@@ -120,9 +126,9 @@ class FieldMappingTemplateService:
 
             new_version = 1
             if existing_templates:
-                new_version = max(
-                    (item.version or 0) for item in existing_templates
-                ) + 1
+                new_version = (
+                    max((item.version or 0) for item in existing_templates) + 1
+                )
 
             current_time = datetime.now(timezone.utc)
             resolved_template_name = self._resolve_template_name(
@@ -241,12 +247,14 @@ class FieldMappingTemplateService:
                     # [*] 家族投影: 与模板写入**同一个事务**。
                     #     commit=False —— 提交权归外层事务。
                     try:
-                        projection_family_id, projection_version_id = await self._project_family(
-                            platform=platform,
-                            data_domain=data_domain,
-                            granularity=granularity,
-                            sub_domain=sub_domain,
-                            account=account,
+                        projection_family_id, projection_version_id = (
+                            await self._project_family(
+                                platform=platform,
+                                data_domain=data_domain,
+                                granularity=granularity,
+                                sub_domain=sub_domain,
+                                account=account,
+                            )
                         )
                     except TemplateFamilyProjectionError:
                         raise
@@ -307,7 +315,9 @@ class FieldMappingTemplateService:
         from backend.services.template_family_service import get_template_family_service
 
         try:
-            projection = await get_template_family_service(self.db).project_legacy_templates(
+            projection = await get_template_family_service(
+                self.db
+            ).project_legacy_templates(
                 platform=platform,
                 data_domain=data_domain,
                 commit=False,
@@ -347,7 +357,9 @@ class FieldMappingTemplateService:
         template_name: Optional[str],
         version: int,
     ) -> str:
-        default_name = f"{platform}_{data_domain}_{sub_domain or ''}_{granularity}_v{version}"
+        default_name = (
+            f"{platform}_{data_domain}_{sub_domain or ''}_{granularity}_v{version}"
+        )
         if not template_name:
             return default_name
         if VERSION_SUFFIX_PATTERN.search(template_name):
@@ -398,7 +410,9 @@ class FieldMappingTemplateService:
                         "usage_count": tmpl.usage_count,
                         "success_rate": tmpl.success_rate,
                         "created_by": tmpl.created_by,
-                        "created_at": tmpl.created_at.isoformat() if tmpl.created_at else None,
+                        "created_at": (
+                            tmpl.created_at.isoformat() if tmpl.created_at else None
+                        ),
                     }
                 )
 
@@ -454,7 +468,8 @@ class FieldMappingTemplateService:
             unmatched_columns = []
 
             template_normalized = {
-                re.sub(r"[\s_\-()（）]", "", col.lower()): col for col in template_header_columns
+                re.sub(r"[\s_\-()（）]", "", col.lower()): col
+                for col in template_header_columns
             }
 
             for column in current_columns:
@@ -474,7 +489,9 @@ class FieldMappingTemplateService:
                 template.updated_at = datetime.now(timezone.utc)
                 await self.db.commit()
 
-            match_rate = round(matched / len(current_columns) * 100, 1) if current_columns else 0
+            match_rate = (
+                round(matched / len(current_columns) * 100, 1) if current_columns else 0
+            )
             logger.info(
                 f"[Template] 应用模板{template_id}: {matched}/{len(current_columns)}匹配 ({match_rate}%)"
             )
@@ -532,7 +549,8 @@ class FieldMappingTemplateService:
         except TemplateFamilyProjectionError:
             await self.db.rollback()
             logger.error(
-                "[Template] 删除失败: 家族重投影失败, 已回滚归档: template_id=%s", template_id
+                "[Template] 删除失败: 家族重投影失败, 已回滚归档: template_id=%s",
+                template_id,
             )
             raise
         except Exception as exc:

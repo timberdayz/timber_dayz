@@ -8,7 +8,10 @@ def _orders_bindings(include_paid_amount: bool = True):
         {"raw_name": "order_created_at", "semantic_key": "order_date"},
         {"raw_name": "sold_qty", "semantic_key": "sales_volume"},
         {"raw_name": "profit_amount", "semantic_key": "profit"},
-        {"raw_name": "estimated_settlement", "semantic_key": "estimated_settlement_amount"},
+        {
+            "raw_name": "estimated_settlement",
+            "semantic_key": "estimated_settlement_amount",
+        },
     ]
     if include_paid_amount:
         bindings.append({"raw_name": "buyer_paid", "semantic_key": "paid_amount"})
@@ -17,7 +20,9 @@ def _orders_bindings(include_paid_amount: bool = True):
 
 @pytest.mark.asyncio
 async def test_orders_optional_field_drop_is_non_breaking_semantic_contract():
-    from backend.services.semantic_field_contract_service import SemanticFieldContractService
+    from backend.services.semantic_field_contract_service import (
+        SemanticFieldContractService,
+    )
 
     service = SemanticFieldContractService(db=None)
     result = await service.evaluate(
@@ -26,7 +31,14 @@ async def test_orders_optional_field_drop_is_non_breaking_semantic_contract():
         granularity="monthly",
         sub_domain=None,
         header_bindings=_orders_bindings(),
-        current_columns=["order_no", "shop_name", "order_created_at", "sold_qty", "buyer_paid", "profit_amount"],
+        current_columns=[
+            "order_no",
+            "shop_name",
+            "order_created_at",
+            "sold_qty",
+            "buyer_paid",
+            "profit_amount",
+        ],
     )
 
     assert result.status == "non_breaking_drift"
@@ -46,7 +58,9 @@ async def test_orders_metric_paid_amount_drop_is_domain_floor_not_blocking():
     ⇒ 缺口落到 ``below_domain_floor_keys``, 由治理面板引导用户去勾;
     用户勾了 ⇒ 进**模板级** required ⇒ 那时才阻断。
     """
-    from backend.services.semantic_field_contract_service import SemanticFieldContractService
+    from backend.services.semantic_field_contract_service import (
+        SemanticFieldContractService,
+    )
 
     service = SemanticFieldContractService(db=None)
     result = await service.evaluate(
@@ -55,7 +69,13 @@ async def test_orders_metric_paid_amount_drop_is_domain_floor_not_blocking():
         granularity="weekly",
         sub_domain=None,
         header_bindings=_orders_bindings(include_paid_amount=True),
-        current_columns=["order_no", "shop_name", "order_created_at", "sold_qty", "profit_amount"],
+        current_columns=[
+            "order_no",
+            "shop_name",
+            "order_created_at",
+            "sold_qty",
+            "profit_amount",
+        ],
     )
 
     assert result.status != "breaking_drift"
@@ -71,7 +91,9 @@ async def test_orders_identity_contract_key_still_blocks_when_absent():
     「缺了店铺 / 缺了下单日期 ⇒ 这一行归属不明 ⇒ 整行无意义」,
     这种要求不能让位给「域级下限」, 否则护栏就空了。
     """
-    from backend.services.semantic_field_contract_service import SemanticFieldContractService
+    from backend.services.semantic_field_contract_service import (
+        SemanticFieldContractService,
+    )
 
     service = SemanticFieldContractService(db=None)
     result = await service.evaluate(
@@ -80,7 +102,13 @@ async def test_orders_identity_contract_key_still_blocks_when_absent():
         granularity="weekly",
         sub_domain=None,
         header_bindings=[],
-        current_columns=["order_no", "order_created_at", "sold_qty", "buyer_paid", "profit_amount"],
+        current_columns=[
+            "order_no",
+            "order_created_at",
+            "sold_qty",
+            "buyer_paid",
+            "profit_amount",
+        ],
         template_columns=[
             "order_no",
             "shop_name",
@@ -105,7 +133,9 @@ async def test_template_level_core_field_required_is_primary_blocking_source():
     规格 §3.4: 「模板级 ``core_fields.required`` 是主来源(用户勾的)」。
     ⇒ 契约降级**不会**削弱用户自己勾出来的要求。
     """
-    from backend.services.semantic_field_contract_service import SemanticFieldContractService
+    from backend.services.semantic_field_contract_service import (
+        SemanticFieldContractService,
+    )
 
     service = SemanticFieldContractService(db=None)
     result = await service.evaluate(
@@ -114,7 +144,13 @@ async def test_template_level_core_field_required_is_primary_blocking_source():
         granularity="weekly",
         sub_domain=None,
         header_bindings=_orders_bindings(include_paid_amount=True),
-        current_columns=["order_no", "shop_name", "order_created_at", "sold_qty", "profit_amount"],
+        current_columns=[
+            "order_no",
+            "shop_name",
+            "order_created_at",
+            "sold_qty",
+            "profit_amount",
+        ],
         core_fields=[
             {
                 "semantic_key": "paid_amount",
@@ -134,7 +170,9 @@ async def test_template_level_core_field_required_is_primary_blocking_source():
 
 @pytest.mark.asyncio
 async def test_extra_raw_fields_do_not_block_when_required_semantic_keys_resolve():
-    from backend.services.semantic_field_contract_service import SemanticFieldContractService
+    from backend.services.semantic_field_contract_service import (
+        SemanticFieldContractService,
+    )
 
     service = SemanticFieldContractService(db=None)
     result = await service.evaluate(
@@ -162,7 +200,9 @@ async def test_extra_raw_fields_do_not_block_when_required_semantic_keys_resolve
 
 @pytest.mark.asyncio
 async def test_orders_chinese_headers_resolve_required_keys_when_bindings_are_incomplete():
-    from backend.services.semantic_field_contract_service import SemanticFieldContractService
+    from backend.services.semantic_field_contract_service import (
+        SemanticFieldContractService,
+    )
 
     service = SemanticFieldContractService(db=None)
     result = await service.evaluate(
@@ -210,7 +250,9 @@ async def test_orders_chinese_headers_resolve_required_keys_when_bindings_are_in
 @pytest.mark.asyncio
 async def test_orders_chinese_headers_do_not_block_when_metric_is_absent():
     """[*] 批次 F-3: 指标类缺失不再阻断批次(降为域级下限)。"""
-    from backend.services.semantic_field_contract_service import SemanticFieldContractService
+    from backend.services.semantic_field_contract_service import (
+        SemanticFieldContractService,
+    )
 
     service = SemanticFieldContractService(db=None)
     result = await service.evaluate(

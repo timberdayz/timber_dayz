@@ -13,7 +13,10 @@ from sqlalchemy import and_, event, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.core_fields_service import derive_core_fields
-from backend.services.semantic_field_registry import is_canonical_semantic_key, normalize_semantic_key
+from backend.services.semantic_field_registry import (
+    is_canonical_semantic_key,
+    normalize_semantic_key,
+)
 from backend.services.template_matcher import resolve_template_for_file
 from backend.services.template_variant_takeover import (
     TAKEOVER_FLAG,
@@ -94,7 +97,9 @@ def _watch_engine_writes(engine: Any) -> None:
     """
 
     @event.listens_for(engine, "after_cursor_execute")
-    def _on_execute(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
+    def _on_execute(
+        conn, cursor, statement, parameters, context, executemany
+    ):  # noqa: ANN001
         head = statement.lstrip().lower()
         if not head.startswith(("insert ", "update ", "delete ")):
             return
@@ -219,13 +224,19 @@ def _extract_semantic_key_sets(
 
     for field in deduplication_fields or []:
         semantic_key = normalize_semantic_key(field)
-        if semantic_key and is_canonical_semantic_key(semantic_key) and semantic_key not in seen_hash:
+        if (
+            semantic_key
+            and is_canonical_semantic_key(semantic_key)
+            and semantic_key not in seen_hash
+        ):
             seen_hash.add(semantic_key)
             hash_keys.append(semantic_key)
 
     for binding in header_bindings or []:
         semantic_key = normalize_semantic_key(
-            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+            binding.get("semantic_key")
+            or binding.get("semantic_role")
+            or binding.get("display_name")
         )
         if not semantic_key:
             continue
@@ -351,7 +362,9 @@ def build_variant_kind(
 
 
 def _header_signature(columns: Iterable[str]) -> str:
-    normalized = [str(column).strip().lower() for column in columns if str(column).strip()]
+    normalized = [
+        str(column).strip().lower() for column in columns if str(column).strip()
+    ]
     joined = "|".join(normalized)
     if not joined:
         return "empty"
@@ -359,7 +372,13 @@ def _header_signature(columns: Iterable[str]) -> str:
 
 
 #: 解析规则里参与「解析方式签名」的字段(顺序固定 ⇒ 签名可复现)。
-_PARSE_SIGNATURE_FIELDS = ("target_field", "source_column", "value_kind", "date_format", "strict")
+_PARSE_SIGNATURE_FIELDS = (
+    "target_field",
+    "source_column",
+    "value_kind",
+    "date_format",
+    "strict",
+)
 
 
 def _parse_signature(rules: Iterable[dict[str, Any]]) -> str:
@@ -442,7 +461,11 @@ def _build_parse_profile(template: FieldMappingTemplate) -> dict[str, Any]:
 
 
 def _required_headers(template: FieldMappingTemplate) -> list[str]:
-    return [str(column).strip() for column in (template.header_columns or []) if str(column).strip()]
+    return [
+        str(column).strip()
+        for column in (template.header_columns or [])
+        if str(column).strip()
+    ]
 
 
 def _match_rule_to_row(
@@ -624,7 +647,9 @@ class TemplateFamilyService:
 
         返回值给调用方回传投影结果(家族 ID / 激活版本 ID)。
         """
-        stmt = select(FieldMappingTemplate).where(FieldMappingTemplate.status == "published")
+        stmt = select(FieldMappingTemplate).where(
+            FieldMappingTemplate.status == "published"
+        )
         if platform:
             stmt = stmt.where(FieldMappingTemplate.platform == platform)
         if data_domain:
@@ -632,7 +657,10 @@ class TemplateFamilyService:
         result = await self.db.execute(stmt)
         templates = list(result.scalars().all())
 
-        groups: dict[tuple[str, str, Optional[str], Optional[str], Optional[str]], list[FieldMappingTemplate]] = defaultdict(list)
+        groups: dict[
+            tuple[str, str, Optional[str], Optional[str], Optional[str]],
+            list[FieldMappingTemplate],
+        ] = defaultdict(list)
         for template in templates:
             groups[
                 _dimension_key(
@@ -691,7 +719,10 @@ class TemplateFamilyService:
             key = self._family_dimension_key(family)
             if key in projected_keys:
                 continue
-            if family.governance_status == "missing_template" and family.active_version_id is None:
+            if (
+                family.governance_status == "missing_template"
+                and family.active_version_id is None
+            ):
                 continue
 
             logger.info(
@@ -817,7 +848,9 @@ class TemplateFamilyService:
                 sub_domain=sub_domain,
                 granularity=granularity,
                 account=account,
-                display_name=self._build_display_name(platform, data_domain, sub_domain, granularity),
+                display_name=self._build_display_name(
+                    platform, data_domain, sub_domain, granularity
+                ),
                 governance_status="ready",
                 source_mode="legacy_projection",
             )
@@ -865,7 +898,8 @@ class TemplateFamilyService:
             )
         )
         existing_variants = {
-            variant.variant_key: variant for variant in existing_variants_result.scalars().all()
+            variant.variant_key: variant
+            for variant in existing_variants_result.scalars().all()
         }
         # [*] 批次 G(G-2): 存量变体的 key 按「来源模板」建索引 ——
         #     投影时优先复用, 避免「key 生成规则变了 ⇒ 存量变体被删重建」。
@@ -876,7 +910,9 @@ class TemplateFamilyService:
                     variant.variant_key
                 )
 
-        sorted_group = sorted(group, key=lambda item: (item.version or 0, item.id or 0), reverse=True)
+        sorted_group = sorted(
+            group, key=lambda item: (item.version or 0, item.id or 0), reverse=True
+        )
         desired_variant_keys: set[str] = set()
         desired_variants: list[tuple[str, int, FieldMappingTemplate]] = []
         for index, template in enumerate(sorted_group):
@@ -917,7 +953,9 @@ class TemplateFamilyService:
 
         family.active_version_id = version.id
         family.governance_status = "ready"
-        family.display_name = self._build_display_name(platform, data_domain, sub_domain, granularity)
+        family.display_name = self._build_display_name(
+            platform, data_domain, sub_domain, granularity
+        )
 
         return {
             "family_id": family.id,
@@ -956,13 +994,15 @@ class TemplateFamilyService:
             # [*] 批次 E: 核心字段清单落版本级。
             #     legacy 行没存清单 ⇒ 按 ``deduplication_fields`` 现推一份
             #     (保证版本上永远有一份可用的清单, 不出现「有列没值」)。
-            core_fields=list(payload["core_fields"])
-            if payload.get("core_fields") is not None
-            else derive_core_fields(
-                deduplication_fields=list(payload["deduplication_fields"]),
-                header_bindings=list(payload["header_bindings"]),
-                data_domain=family.data_domain or "",
-                sub_domain=family.sub_domain,
+            core_fields=(
+                list(payload["core_fields"])
+                if payload.get("core_fields") is not None
+                else derive_core_fields(
+                    deduplication_fields=list(payload["deduplication_fields"]),
+                    header_bindings=list(payload["header_bindings"]),
+                    data_domain=family.data_domain or "",
+                    sub_domain=family.sub_domain,
+                )
             ),
             # [*] 批次 E(E-8): 解析规则上移到版本级。
             field_parse_rules=list(payload.get("field_parse_rules") or []),
@@ -1004,7 +1044,9 @@ class TemplateFamilyService:
             )
         return self._prefer_family_record(families)
 
-    async def _get_active_version(self, family_id: int) -> Optional[FieldMappingTemplateVersion]:
+    async def _get_active_version(
+        self, family_id: int
+    ) -> Optional[FieldMappingTemplateVersion]:
         result = await self.db.execute(
             select(FieldMappingTemplateVersion).where(
                 and_(
@@ -1087,17 +1129,21 @@ class TemplateFamilyService:
         for family in raw_families:
             grouped_families[self._family_dimension_key(family)].append(family)
         families = [
-            self._prefer_family_record(items)
-            for items in grouped_families.values()
+            self._prefer_family_record(items) for items in grouped_families.values()
         ]
         payload: list[dict[str, Any]] = []
         for family in families:
             version = await self._get_active_version(family.id)
             variants_result = await self.db.execute(
-                select(FieldMappingTemplateVariant).where(
-                    FieldMappingTemplateVariant.template_version_id == (version.id if version else -1)
+                select(FieldMappingTemplateVariant)
+                .where(
+                    FieldMappingTemplateVariant.template_version_id
+                    == (version.id if version else -1)
                 )
-                .order_by(FieldMappingTemplateVariant.match_priority.asc(), FieldMappingTemplateVariant.id.asc())
+                .order_by(
+                    FieldMappingTemplateVariant.match_priority.asc(),
+                    FieldMappingTemplateVariant.id.asc(),
+                )
             )
             variants = list(variants_result.scalars().all())
             primary_variant = variants[0] if variants else None
@@ -1137,7 +1183,8 @@ class TemplateFamilyService:
             )
             pending_file_count = int(pending_file_count_result.scalar() or 0)
             sample_file_result = await self.db.execute(
-                select(CatalogFile).where(
+                select(CatalogFile)
+                .where(
                     and_(
                         CatalogFile.platform_code == family.platform,
                         CatalogFile.data_domain == family.data_domain,
@@ -1145,10 +1192,14 @@ class TemplateFamilyService:
                         CatalogFile.granularity == family.granularity,
                         CatalogFile.status.in_(["pending", "failed", "ingested"]),
                     )
-                ).order_by(CatalogFile.first_seen_at.desc(), CatalogFile.id.desc()).limit(1)
+                )
+                .order_by(CatalogFile.first_seen_at.desc(), CatalogFile.id.desc())
+                .limit(1)
             )
             sample_file = sample_file_result.scalar_one_or_none()
-            legacy_template_ids = list(getattr(version, "legacy_template_ids", None) or [])
+            legacy_template_ids = list(
+                getattr(version, "legacy_template_ids", None) or []
+            )
             payload.append(
                 {
                     "id": family.id,
@@ -1161,7 +1212,9 @@ class TemplateFamilyService:
                     "governance_status": family.governance_status or "ready",
                     "display_governance_status": family.governance_status or "ready",
                     "variant_count": len(variants),
-                    "file_count": current_file_count or pending_file_count or file_count,
+                    "file_count": current_file_count
+                    or pending_file_count
+                    or file_count,
                     "current_file_count": current_file_count,
                     "pending_file_count": pending_file_count,
                     "historical_file_count": file_count,
@@ -1184,11 +1237,20 @@ class TemplateFamilyService:
                     ),
                 }
             )
-        payload.sort(key=lambda item: (item["platform"], item["data_domain"], item["sub_domain"] or "", item["granularity"] or ""))
+        payload.sort(
+            key=lambda item: (
+                item["platform"],
+                item["data_domain"],
+                item["sub_domain"] or "",
+                item["granularity"] or "",
+            )
+        )
         cache.set(cache_key, payload)
         return payload
 
-    async def get_family_versions(self, family_id: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    async def get_family_versions(
+        self, family_id: int
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         # [*] 目录缓存: 版本/变体是纯目录数据, 目录一变立即作废
         cache = _cache_for(self.db)
         cache_key = f"get_family_versions|{family_id}"
@@ -1200,8 +1262,12 @@ class TemplateFamilyService:
         family = await self.db.get(FieldMappingTemplateFamily, family_id)
         if family is None:
             raise ValueError(f"template family {family_id} not found")
-        families = await self.list_families(platform=family.platform, data_domain=family.data_domain)
-        family_payload = next((item for item in families if item["id"] == family_id), None)
+        families = await self.list_families(
+            platform=family.platform, data_domain=family.data_domain
+        )
+        family_payload = next(
+            (item for item in families if item["id"] == family_id), None
+        )
         if family_payload is None:
             logger.debug(
                 "[TemplateFamily] requested family_id=%s hidden by normalized duplicate; using raw family row",
@@ -1211,14 +1277,20 @@ class TemplateFamilyService:
             variants: list[FieldMappingTemplateVariant] = []
             if version:
                 variants_result = await self.db.execute(
-                    select(FieldMappingTemplateVariant).where(
+                    select(FieldMappingTemplateVariant)
+                    .where(
                         FieldMappingTemplateVariant.template_version_id == version.id
                     )
-                    .order_by(FieldMappingTemplateVariant.match_priority.asc(), FieldMappingTemplateVariant.id.asc())
+                    .order_by(
+                        FieldMappingTemplateVariant.match_priority.asc(),
+                        FieldMappingTemplateVariant.id.asc(),
+                    )
                 )
                 variants = list(variants_result.scalars().all())
             primary_variant = variants[0] if variants else None
-            legacy_template_ids = list(getattr(version, "legacy_template_ids", None) or [])
+            legacy_template_ids = list(
+                getattr(version, "legacy_template_ids", None) or []
+            )
             family_payload = {
                 "id": family.id,
                 "platform": family.platform,
@@ -1254,9 +1326,12 @@ class TemplateFamilyService:
             }
 
         versions_result = await self.db.execute(
-            select(FieldMappingTemplateVersion).where(
-                FieldMappingTemplateVersion.family_id == family_id
-            ).order_by(FieldMappingTemplateVersion.version_no.desc(), FieldMappingTemplateVersion.id.desc())
+            select(FieldMappingTemplateVersion)
+            .where(FieldMappingTemplateVersion.family_id == family_id)
+            .order_by(
+                FieldMappingTemplateVersion.version_no.desc(),
+                FieldMappingTemplateVersion.id.desc(),
+            )
         )
         versions = list(versions_result.scalars().all())
         payload: list[dict[str, Any]] = []
@@ -1267,9 +1342,11 @@ class TemplateFamilyService:
                 )
             )
             variants = list(variants_result.scalars().all())
-            required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
-                list(version.deduplication_fields or []),
-                list(version.header_bindings or []),
+            required_semantic_keys, hash_participating_semantic_keys = (
+                _extract_semantic_key_sets(
+                    list(version.deduplication_fields or []),
+                    list(version.header_bindings or []),
+                )
             )
             payload.append(
                 {
@@ -1290,14 +1367,18 @@ class TemplateFamilyService:
                     "notes": version.notes,
                     "variant_count": len(variants),
                     "created_by": version.created_by,
-                    "created_at": version.created_at.isoformat() if version.created_at else None,
+                    "created_at": (
+                        version.created_at.isoformat() if version.created_at else None
+                    ),
                     "legacy_template_ids": list(version.legacy_template_ids or []),
                 }
             )
         cache.set(cache_key, (family_payload, payload))
         return family_payload, payload
 
-    async def get_version_variants(self, version_id: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    async def get_version_variants(
+        self, version_id: int
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         # [*] 目录缓存: 变体是纯目录数据
         cache = _cache_for(self.db)
         cache_key = f"get_version_variants|{version_id}"
@@ -1312,9 +1393,12 @@ class TemplateFamilyService:
         family_payload, versions = await self.get_family_versions(version.family_id)
         version_payload = next(item for item in versions if item["id"] == version_id)
         variants_result = await self.db.execute(
-            select(FieldMappingTemplateVariant).where(
-                FieldMappingTemplateVariant.template_version_id == version_id
-            ).order_by(FieldMappingTemplateVariant.match_priority.asc(), FieldMappingTemplateVariant.id.asc())
+            select(FieldMappingTemplateVariant)
+            .where(FieldMappingTemplateVariant.template_version_id == version_id)
+            .order_by(
+                FieldMappingTemplateVariant.match_priority.asc(),
+                FieldMappingTemplateVariant.id.asc(),
+            )
         )
         variants = list(variants_result.scalars().all())
         payload = [
@@ -1332,7 +1416,9 @@ class TemplateFamilyService:
                 "field_parse_rules": list(variant.field_parse_rules or []),
                 "source_legacy_template_id": variant.source_legacy_template_id,
                 "template_name": variant.template_name,
-                "created_at": variant.created_at.isoformat() if variant.created_at else None,
+                "created_at": (
+                    variant.created_at.isoformat() if variant.created_at else None
+                ),
                 "family": family_payload,
             }
             for variant in variants
@@ -1413,8 +1499,12 @@ class TemplateResolver:
                 ),
             }
 
-        family_payload, versions = await self.family_service.get_family_versions(family.id)
-        active_version = next((item for item in versions if item["status"] == "active"), None)
+        family_payload, versions = await self.family_service.get_family_versions(
+            family.id
+        )
+        active_version = next(
+            (item for item in versions if item["status"] == "active"), None
+        )
         if active_version is None:
             # [*] 家族存在但没有激活版本 = 该维度**没有已发布模板**(第 3 批 3.6)。
             #     明确把家族级状态透出去, 别让上层只看到 "missing_variant"。
@@ -1442,7 +1532,9 @@ class TemplateResolver:
                 ),
             }
 
-        _version_payload, variants = await self.family_service.get_version_variants(active_version["id"])
+        _version_payload, variants = await self.family_service.get_version_variants(
+            active_version["id"]
+        )
         selected_variant = self._select_variant(
             variants=variants,
             header_row=header_row,
@@ -1497,7 +1589,9 @@ class TemplateResolver:
         # [*] 批次 E(E-8): 解析规则的取值顺序 = **变体优先, 版本兜底**。
         #     变体上的同名列降级为「变体级覆盖」; 版本级才是业务契约的主体
         #     (审一次全变体生效)。
-        field_parse_rules = list((selected_variant or {}).get("field_parse_rules") or [])
+        field_parse_rules = list(
+            (selected_variant or {}).get("field_parse_rules") or []
+        )
         if not field_parse_rules:
             field_parse_rules = list(active_version.get("field_parse_rules") or [])
         # [*] 批次 E: 版本级核心字段清单。
@@ -1520,9 +1614,11 @@ class TemplateResolver:
                 legacy_rules = list(legacy_template.field_parse_rules or [])
                 if legacy_rules:
                     field_parse_rules = legacy_rules
-        required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
-            deduplication_fields,
-            semantic_bindings,
+        required_semantic_keys, hash_participating_semantic_keys = (
+            _extract_semantic_key_sets(
+                deduplication_fields,
+                semantic_bindings,
+            )
         )
         if not core_fields and deduplication_fields:
             core_fields = derive_core_fields(
@@ -1569,12 +1665,15 @@ class TemplateResolver:
             if header_row is not None and variant.get("header_row") == header_row:
                 score += 3
             if variant.get("sheet_name_pattern") and sheet_name:
-                if re.search(str(variant["sheet_name_pattern"]), sheet_name, flags=re.IGNORECASE):
+                if re.search(
+                    str(variant["sheet_name_pattern"]), sheet_name, flags=re.IGNORECASE
+                ):
                     score += 2
                 else:
                     continue
             required_headers = {
-                str(column).strip().lower() for column in (variant.get("required_headers") or [])
+                str(column).strip().lower()
+                for column in (variant.get("required_headers") or [])
             }
             if required_headers:
                 if not required_headers.issubset(normalized_headers):
@@ -1589,7 +1688,9 @@ class TemplateResolver:
                 continue
             if sample_rows and variant.get("field_parse_rules"):
                 score += 20
-            candidates.append((score, int(variant.get("match_priority") or 100), variant))
+            candidates.append(
+                (score, int(variant.get("match_priority") or 100), variant)
+            )
 
         if not candidates:
             return None
@@ -1802,7 +1903,9 @@ class TemplateResolver:
         )
         legacy_template = resolution.template
         projected_legacy_template_id = (
-            selected_variant.get("source_legacy_template_id") if selected_variant else None
+            selected_variant.get("source_legacy_template_id")
+            if selected_variant
+            else None
         )
         if legacy_template is None:
             return {

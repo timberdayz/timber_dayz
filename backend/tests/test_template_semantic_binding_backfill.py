@@ -30,7 +30,9 @@ async def template_session_factory():
 
 
 @pytest.mark.asyncio
-async def test_backfill_updates_only_published_shopee_orders_daily_and_monthly(template_session_factory):
+async def test_backfill_updates_only_published_shopee_orders_daily_and_monthly(
+    template_session_factory,
+):
     from backend.services.template_semantic_binding_backfill import (
         backfill_published_shopee_orders_template_bindings,
     )
@@ -91,7 +93,11 @@ async def test_backfill_updates_only_published_shopee_orders_daily_and_monthly(t
         await session.refresh(archived_monthly)
         await session.refresh(published_weekly)
 
-    assert result == {"templates_checked": 1, "templates_updated": 1, "bindings_updated": 5}
+    assert result == {
+        "templates_checked": 1,
+        "templates_updated": 1,
+        "bindings_updated": 5,
+    }
     bindings = {item["raw_name"]: item for item in published_monthly.header_bindings}
     assert bindings["销售数量"]["semantic_key"] == "sales_volume"
     # [*] 批次 E(D2): ``hash_participates`` 已下线, 回填不再写这个投影字段。
@@ -100,5 +106,9 @@ async def test_backfill_updates_only_published_shopee_orders_daily_and_monthly(t
     assert bindings["利润(RMB)"]["semantic_key"] == "profit"
     assert bindings["预估回款金额"]["semantic_key"] == "estimated_settlement_amount"
     assert bindings["结算时间"]["semantic_key"] == "settlement_time"
-    assert archived_monthly.header_bindings == [{"raw_name": "销售数量", "semantic_key": None}]
-    assert published_weekly.header_bindings == [{"raw_name": "销售数量", "semantic_key": None}]
+    assert archived_monthly.header_bindings == [
+        {"raw_name": "销售数量", "semantic_key": None}
+    ]
+    assert published_weekly.header_bindings == [
+        {"raw_name": "销售数量", "semantic_key": None}
+    ]

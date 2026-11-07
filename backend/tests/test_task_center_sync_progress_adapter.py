@@ -30,10 +30,20 @@ async def task_center_sqlite_session():
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
 
     async with engine.begin() as conn:
-        for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "ops", "semantic"):
+        for schema_name in (
+            "core",
+            "a_class",
+            "b_class",
+            "c_class",
+            "finance",
+            "ops",
+            "semantic",
+        ):
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
         await conn.run_sync(
-            lambda sync_conn: Base.metadata.create_all(sync_conn, tables=_sqlite_tables())
+            lambda sync_conn: Base.metadata.create_all(
+                sync_conn, tables=_sqlite_tables()
+            )
         )
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -74,7 +84,9 @@ async def task_center_async_client(task_center_sqlite_session):
 
 
 @pytest.mark.asyncio
-async def test_sync_progress_tracker_uses_task_center_storage(task_center_sqlite_session):
+async def test_sync_progress_tracker_uses_task_center_storage(
+    task_center_sqlite_session,
+):
     tracker = SyncProgressTracker(task_center_sqlite_session)
 
     await tracker.create_task(task_id="sync-1", total_files=2, task_type="bulk_ingest")
@@ -95,7 +107,9 @@ async def test_data_sync_progress_endpoint_keeps_legacy_shape(
     task_center_async_client,
 ):
     tracker = SyncProgressTracker(task_center_sqlite_session)
-    await tracker.create_task(task_id="sync-route-1", total_files=2, task_type="bulk_ingest")
+    await tracker.create_task(
+        task_id="sync-route-1", total_files=2, task_type="bulk_ingest"
+    )
     await tracker.update_task(
         "sync-route-1",
         {
@@ -105,7 +119,9 @@ async def test_data_sync_progress_endpoint_keeps_legacy_shape(
         },
     )
 
-    response = await task_center_async_client.get("/api/data-sync/progress/sync-route-1")
+    response = await task_center_async_client.get(
+        "/api/data-sync/progress/sync-route-1"
+    )
 
     assert response.status_code == 200
     payload = response.json()["data"]
@@ -115,9 +131,13 @@ async def test_data_sync_progress_endpoint_keeps_legacy_shape(
 
 
 @pytest.mark.asyncio
-async def test_sync_progress_tracker_reconciles_successful_celery_result(task_center_sqlite_session, monkeypatch):
+async def test_sync_progress_tracker_reconciles_successful_celery_result(
+    task_center_sqlite_session, monkeypatch
+):
     tracker = SyncProgressTracker(task_center_sqlite_session)
-    await tracker.create_task(task_id="sync-celery-success", total_files=1, task_type="single_file")
+    await tracker.create_task(
+        task_id="sync-celery-success", total_files=1, task_type="single_file"
+    )
     await tracker.set_runner(
         "sync-celery-success",
         runner_kind="celery",
@@ -136,7 +156,10 @@ async def test_sync_progress_tracker_reconciles_successful_celery_result(task_ce
             "skipped_files": 0,
         }
 
-    monkeypatch.setattr("backend.services.sync_progress_tracker.celery_app.AsyncResult", lambda _id: _Result())
+    monkeypatch.setattr(
+        "backend.services.sync_progress_tracker.celery_app.AsyncResult",
+        lambda _id: _Result(),
+    )
 
     payload = await tracker.get_task("sync-celery-success")
 
@@ -148,9 +171,13 @@ async def test_sync_progress_tracker_reconciles_successful_celery_result(task_ce
 
 
 @pytest.mark.asyncio
-async def test_sync_progress_tracker_reconciles_started_celery_result(task_center_sqlite_session, monkeypatch):
+async def test_sync_progress_tracker_reconciles_started_celery_result(
+    task_center_sqlite_session, monkeypatch
+):
     tracker = SyncProgressTracker(task_center_sqlite_session)
-    await tracker.create_task(task_id="sync-celery-running", total_files=1, task_type="single_file")
+    await tracker.create_task(
+        task_id="sync-celery-running", total_files=1, task_type="single_file"
+    )
     await tracker.set_runner(
         "sync-celery-running",
         runner_kind="celery",
@@ -161,7 +188,10 @@ async def test_sync_progress_tracker_reconciles_started_celery_result(task_cente
         state = "STARTED"
         result = None
 
-    monkeypatch.setattr("backend.services.sync_progress_tracker.celery_app.AsyncResult", lambda _id: _Result())
+    monkeypatch.setattr(
+        "backend.services.sync_progress_tracker.celery_app.AsyncResult",
+        lambda _id: _Result(),
+    )
 
     payload = await tracker.get_task("sync-celery-running")
 

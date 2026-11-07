@@ -27,10 +27,20 @@ async def task_center_engine():
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
 
     async with engine.begin() as conn:
-        for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "ops", "semantic"):
+        for schema_name in (
+            "core",
+            "a_class",
+            "b_class",
+            "c_class",
+            "finance",
+            "ops",
+            "semantic",
+        ):
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
         await conn.run_sync(
-            lambda sync_conn: Base.metadata.create_all(sync_conn, tables=_sqlite_tables())
+            lambda sync_conn: Base.metadata.create_all(
+                sync_conn, tables=_sqlite_tables()
+            )
         )
 
     yield engine
@@ -52,7 +62,9 @@ async def task_center_async_client():
 
 
 @pytest.mark.asyncio
-async def test_legacy_progress_tracker_survives_process_restart(task_center_session_factory):
+async def test_legacy_progress_tracker_survives_process_restart(
+    task_center_session_factory,
+):
     from backend.services.progress_tracker import ProgressTracker
 
     tracker = ProgressTracker(async_session_factory=task_center_session_factory)
@@ -88,7 +100,9 @@ async def test_field_mapping_progress_endpoint_keeps_legacy_shape(
 
     monkeypatch.setattr(field_mapping_status, "progress_tracker", tracker)
 
-    response = await task_center_async_client.get("/api/field-mapping/progress/legacy-route-1")
+    response = await task_center_async_client.get(
+        "/api/field-mapping/progress/legacy-route-1"
+    )
 
     assert response.status_code == 200
     payload = response.json()["data"]["progress"]

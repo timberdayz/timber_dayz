@@ -110,15 +110,21 @@ def test_business_overview_frontend_keeps_module_positions_and_uses_adaptive_tab
     assert '<div class="traffic-ranking-section">' not in text
     assert 'label="\u5bf9\u6bd4\u671fUV"' not in text
     assert 'label="\u5bf9\u6bd4\u671fPV"' not in text
-    assert 'prop="visitor_count"\n            label="\u8bbf\u5ba2\u6570(UV)"\n            min-width="92"' in text
-    assert 'prop="page_views"\n            label="\u6d4f\u89c8\u91cf(PV)"\n            min-width="92"' in text
+    assert (
+        'prop="visitor_count"\n            label="\u8bbf\u5ba2\u6570(UV)"\n            min-width="92"'
+        in text
+    )
+    assert (
+        'prop="page_views"\n            label="\u6d4f\u89c8\u91cf(PV)"\n            min-width="92"'
+        in text
+    )
     assert 'prop="gmv" label="\u9500\u552e\u989d" min-width="86"' in text
     assert 'prop="profit" label="\u5229\u6da6" min-width="86"' in text
     assert 'prop="profit_margin" min-width="60" align="right">' in text
-    assert '<span>利润率</span>' in text
+    assert "<span>利润率</span>" in text
     assert 'prop="order_count" label="\u8ba2\u5355\u6570" min-width="72"' in text
     assert 'prop="avg_order_value" min-width="68" align="right">' in text
-    assert '<span>客单价</span>' in text
+    assert "<span>客单价</span>" in text
     assert 'prop="achievement_rate" label="\u5b8c\u6210\u7387" min-width="96"' in text
 
 
@@ -128,16 +134,25 @@ def test_business_overview_frontend_compacts_spacing_and_controls():
         errors="replace",
     )
 
-    assert '.overview-pair-section {\n  margin-bottom: 18px;' in text
-    assert '.overview-pair-section :deep(.el-table .cell) {\n  padding: 0 6px;' in text
-    assert '.header-controls {\n  display: flex;\n  align-items: center;\n  gap: 8px;' in text
-    assert 'flex-wrap: wrap;' in text
-    assert '.target-progress-section {\n  margin-bottom: 10px;\n  padding: 10px 12px;' in text
-    assert '.comparison-table-container {\n  padding: 2px 0;' in text
-    assert '.racing-table {\n  min-width: 762px;' in text
-    assert '.metric-stack {\n  display: inline-flex;\n  flex-direction: column;\n  align-items: flex-end;\n  gap: 1px;' in text
-    assert '.metric-previous {\n  color: #909399;\n  font-size: 9px;' in text
-    assert '.metric-delta {\n  font-size: 10px;' in text
+    assert ".overview-pair-section {\n  margin-bottom: 18px;" in text
+    assert ".overview-pair-section :deep(.el-table .cell) {\n  padding: 0 6px;" in text
+    assert (
+        ".header-controls {\n  display: flex;\n  align-items: center;\n  gap: 8px;"
+        in text
+    )
+    assert "flex-wrap: wrap;" in text
+    assert (
+        ".target-progress-section {\n  margin-bottom: 10px;\n  padding: 10px 12px;"
+        in text
+    )
+    assert ".comparison-table-container {\n  padding: 2px 0;" in text
+    assert ".racing-table {\n  min-width: 762px;" in text
+    assert (
+        ".metric-stack {\n  display: inline-flex;\n  flex-direction: column;\n  align-items: flex-end;\n  gap: 1px;"
+        in text
+    )
+    assert ".metric-previous {\n  color: #909399;\n  font-size: 9px;" in text
+    assert ".metric-delta {\n  font-size: 10px;" in text
 
 
 def test_business_overview_frontend_profit_margin_previous_uses_shared_formula_and_negative_state():
@@ -148,7 +163,10 @@ def test_business_overview_frontend_profit_margin_previous_uses_shared_formula_a
 
     assert "calculateProfitMargin(row.profit_previous, row.gmv_previous)" in text
     assert "metric-previous--negative" in text
-    assert ":class=\"{ 'metric-previous--negative': Number(calculateProfitMargin(row.profit_previous, row.gmv_previous)) < 0 }\"" in text
+    assert (
+        ":class=\"{ 'metric-previous--negative': Number(calculateProfitMargin(row.profit_previous, row.gmv_previous)) < 0 }\""
+        in text
+    )
 
 
 def test_business_overview_frontend_rank_cards_share_equal_height_scroll_area():
@@ -158,10 +176,19 @@ def test_business_overview_frontend_rank_cards_share_equal_height_scroll_area():
     )
 
     assert 'class="chart-card ranking-card"' in text
-    assert '<div class="traffic-ranking-container" v-loading="loadingTrafficRanking">' in text
-    assert '.overview-rank-section :deep(.el-col) {\n  display: flex;' in text
-    assert '.ranking-card {\n  display: flex;\n  flex-direction: column;\n  width: 100%;\n  height: 100%;' in text
-    assert '.racing-container,\n.traffic-ranking-container {\n  flex: 1;\n  min-height: 720px;\n  max-height: 720px;\n  overflow: auto;' in text
+    assert (
+        '<div class="traffic-ranking-container" v-loading="loadingTrafficRanking">'
+        in text
+    )
+    assert ".overview-rank-section :deep(.el-col) {\n  display: flex;" in text
+    assert (
+        ".ranking-card {\n  display: flex;\n  flex-direction: column;\n  width: 100%;\n  height: 100%;"
+        in text
+    )
+    assert (
+        ".racing-container,\n.traffic-ranking-container {\n  flex: 1;\n  min-height: 720px;\n  max-height: 720px;\n  overflow: auto;"
+        in text
+    )
     assert "600px" in text
 
 
@@ -221,7 +248,10 @@ def test_business_overview_frontend_renders_freshness_alert():
     )
 
     assert "businessOverviewFreshnessAlert" in text
-    assert "businessOverviewDataFreshness.value = payload?.meta?.data_freshness || null" in text
+    assert (
+        "businessOverviewDataFreshness.value = payload?.meta?.data_freshness || null"
+        in text
+    )
     assert "订单/流量数据新鲜度不一致" in text
 
 
@@ -232,6 +262,9 @@ def test_business_overview_frontend_renders_identity_health_alert_and_conversion
     )
 
     assert "businessOverviewIdentityHealthAlert" in text
-    assert "trafficRankingIdentityHealth.value = response?.meta?.identity_health || null" in text
+    assert (
+        "trafficRankingIdentityHealth.value = response?.meta?.identity_health || null"
+        in text
+    )
     assert "getTrafficConversionMissingReason(row)" in text
     assert "店铺身份未对齐" in text

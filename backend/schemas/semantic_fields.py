@@ -31,13 +31,26 @@ class SemanticFieldDefinition(BaseModel):
     description: str = Field("", description="What this field identifies")
     kind: SemanticFieldKind = Field("attribute", description="Field category")
     domain: str = Field("common", description="Data domain this field belongs to")
-    required: bool = Field(False, description="Whether the field is required by the domain contract")
-    hash_eligible: bool = Field(False, description="Whether the field may take part in data_hash")
-    default_hash: bool = Field(False, description="Whether the field is part of data_hash by default")
-    system_scope: bool = Field(False, description="Whether the field comes from system scope, not from the file")
-    identity_strength: Optional[str] = Field(None, description="identity / strong / weak")
+    required: bool = Field(
+        False, description="Whether the field is required by the domain contract"
+    )
+    hash_eligible: bool = Field(
+        False, description="Whether the field may take part in data_hash"
+    )
+    default_hash: bool = Field(
+        False, description="Whether the field is part of data_hash by default"
+    )
+    system_scope: bool = Field(
+        False,
+        description="Whether the field comes from system scope, not from the file",
+    )
+    identity_strength: Optional[str] = Field(
+        None, description="identity / strong / weak"
+    )
     hash_warning: Optional[str] = Field(None, description="Human-readable hash caution")
-    aliases: List[str] = Field(default_factory=list, description="All alternative labels")
+    aliases: List[str] = Field(
+        default_factory=list, description="All alternative labels"
+    )
     option_group: str = Field("attribute", description="Frontend option group key")
 
 
@@ -88,7 +101,9 @@ class SemanticFieldDefinitionsData(BaseModel):
     column_overrides: List[SemanticColumnOverrideEntry] = Field(default_factory=list)
     system_hash_scope_fields: List[str] = Field(default_factory=list)
     hash_identity_keys: List[str] = Field(default_factory=list)
-    runtime_alias_count: int = Field(0, description="Number of alias rows loaded from the database")
+    runtime_alias_count: int = Field(
+        0, description="Number of alias rows loaded from the database"
+    )
     runtime_alias_loaded: bool = Field(False)
     runtime_alias_index: Dict[str, Dict[str, str]] = Field(
         default_factory=dict,
@@ -110,7 +125,9 @@ class SemanticAliasRow(BaseModel):
     """别名表里的一行。"""
 
     id: Optional[int] = None
-    data_domain: str = Field(..., description="'*' means the alias applies to every domain")
+    data_domain: str = Field(
+        ..., description="'*' means the alias applies to every domain"
+    )
     standard_field: str
     raw_alias: str
     platform_code: Optional[str] = None
@@ -141,7 +158,9 @@ class SemanticAliasConflict(BaseModel):
     platform_code: Optional[str] = None
     granularity: Optional[str] = None
     active_semantic_key: str = Field(..., description="The alias currently in effect")
-    conflicting_semantic_key: str = Field(..., description="The newly asserted semantic key")
+    conflicting_semantic_key: str = Field(
+        ..., description="The newly asserted semantic key"
+    )
     conflict_id: Optional[int] = None
     source: str = "manual"
     status: SemanticAliasStatus = "conflict"
@@ -161,9 +180,13 @@ class SemanticAliasConflictListResponse(BaseModel):
 class SemanticAliasResolveRequest(BaseModel):
     """别名裁决请求(API-5)。"""
 
-    data_domain: str = Field(..., description="Domain of the alias, '*' for global scope")
+    data_domain: str = Field(
+        ..., description="Domain of the alias, '*' for global scope"
+    )
     raw_alias: str = Field(..., min_length=1, description="Physical column name")
-    semantic_key: str = Field(..., min_length=1, description="The semantic key the user picked")
+    semantic_key: str = Field(
+        ..., min_length=1, description="The semantic key the user picked"
+    )
     platform_code: Optional[str] = None
     granularity: Optional[str] = None
     action: Literal["accept", "disable", "reject"] = Field(
@@ -199,7 +222,9 @@ class SemanticColumnResolveRequest(BaseModel):
     """
 
     data_domain: str = Field("", description="Data domain of the columns")
-    columns: List[str] = Field(default_factory=list, description="Physical column names")
+    columns: List[str] = Field(
+        default_factory=list, description="Physical column names"
+    )
 
 
 class SemanticColumnResolveItem(BaseModel):

@@ -91,10 +91,12 @@ async def test_collection_step_status_callback_broadcasts_progress(monkeypatch):
         "backend.models.database.AsyncSessionLocal", lambda: _SessionManager()
     )
     monkeypatch.setattr(
-        "backend.domains.collection.routers.collection_tasks._mirror_collection_task", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task",
+        AsyncMock(),
     )
     monkeypatch.setattr(
-        "backend.domains.collection.routers.collection_tasks._mirror_collection_task_log", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task_log",
+        AsyncMock(),
     )
     monkeypatch.setattr(
         "backend.domains.collection.routers.collection_tasks.connection_manager.send_progress",
@@ -118,7 +120,9 @@ async def test_collection_step_status_callback_broadcasts_progress(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_collection_step_status_callback_keeps_current_step_for_browser_diagnostics(monkeypatch):
+async def test_collection_step_status_callback_keeps_current_step_for_browser_diagnostics(
+    monkeypatch,
+):
     from backend.routers.collection_tasks import _collection_step_status_callback
 
     task = _make_task(current_step="等待验证码回填", progress=5)
@@ -142,10 +146,12 @@ async def test_collection_step_status_callback_keeps_current_step_for_browser_di
         "backend.models.database.AsyncSessionLocal", lambda: _SessionManager()
     )
     monkeypatch.setattr(
-        "backend.domains.collection.routers.collection_tasks._mirror_collection_task", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task",
+        AsyncMock(),
     )
     monkeypatch.setattr(
-        "backend.domains.collection.routers.collection_tasks._mirror_collection_task_log", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task_log",
+        AsyncMock(),
     )
     monkeypatch.setattr(
         "backend.domains.collection.routers.collection_tasks.connection_manager.send_progress",
@@ -230,7 +236,8 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
         "backend.models.database.AsyncSessionLocal", lambda: _DbSessionManager()
     )
     monkeypatch.setattr(
-        "backend.domains.collection.routers.collection_tasks._mirror_collection_task", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task",
+        AsyncMock(),
     )
     monkeypatch.setattr(
         "backend.domains.collection.routers.collection_tasks.load_collection_account_runtime",
@@ -480,7 +487,8 @@ async def test_execute_collection_task_background_parallel_mode_still_launches_b
         "backend.models.database.AsyncSessionLocal", lambda: _DbSessionManager()
     )
     monkeypatch.setattr(
-        "backend.domains.collection.routers.collection_tasks._mirror_collection_task", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task",
+        AsyncMock(),
     )
     monkeypatch.setattr(
         "backend.domains.collection.routers.collection_tasks.load_collection_account_runtime",
@@ -585,10 +593,12 @@ async def test_retry_task_requeues_background_execution(monkeypatch):
         _AsyncioProxy(asyncio, create_task=_capture_background_task),
     )
     monkeypatch.setattr(
-        "backend.domains.collection.routers.collection_tasks._mirror_collection_task", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task",
+        AsyncMock(),
     )
     monkeypatch.setattr(
-        "backend.domains.collection.routers.collection_tasks._mirror_collection_task_log", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task_log",
+        AsyncMock(),
     )
 
     request = SimpleNamespace(app=SimpleNamespace())

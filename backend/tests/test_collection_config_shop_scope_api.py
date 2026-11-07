@@ -127,7 +127,9 @@ async def test_collection_config_can_own_multiple_shop_scopes(
     await collection_shop_scope_session.commit()
 
     result = await collection_shop_scope_session.execute(
-        select(CollectionConfigShopScope).where(CollectionConfigShopScope.config_id == config.id)
+        select(CollectionConfigShopScope).where(
+            CollectionConfigShopScope.config_id == config.id
+        )
     )
     scopes = result.scalars().all()
 
@@ -171,5 +173,7 @@ async def test_deleting_collection_config_removes_shop_scopes(
     await collection_shop_scope_session.delete(config)
     await collection_shop_scope_session.commit()
 
-    remaining = await collection_shop_scope_session.execute(select(CollectionConfigShopScope))
+    remaining = await collection_shop_scope_session.execute(
+        select(CollectionConfigShopScope)
+    )
     assert remaining.scalars().all() == []

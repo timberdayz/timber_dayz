@@ -194,9 +194,7 @@ def governance_status_for(template_status: Optional[str]) -> str:
     """
     if not template_status:
         return GOVERNANCE_STATUS_PARSE_FAILED
-    return TEMPLATE_STATUS_TO_GOVERNANCE.get(
-        str(template_status), str(template_status)
-    )
+    return TEMPLATE_STATUS_TO_GOVERNANCE.get(str(template_status), str(template_status))
 
 
 def is_blocking_governance_status(governance_status: Optional[str]) -> bool:
@@ -213,7 +211,8 @@ def is_breaking_drift(*statuses: Optional[str]) -> bool:
     避免"这个 breaking_drift 和那个 breaking_drift 是不是一回事"的疑问。
     """
     return any(
-        str(status) in {GOVERNANCE_STATUS_BREAKING_DRIFT, SEMANTIC_CONTRACT_STATUS_BREAKING_DRIFT}
+        str(status)
+        in {GOVERNANCE_STATUS_BREAKING_DRIFT, SEMANTIC_CONTRACT_STATUS_BREAKING_DRIFT}
         for status in statuses
         if status
     )

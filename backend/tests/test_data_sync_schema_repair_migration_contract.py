@@ -37,7 +37,9 @@ CURRENT_BASELINE_REVISION = "current_schema_20260805"
 def _find_data_sync_schema_repair_migration() -> Path:
     versions_dir = Path("migrations/versions")
     matches = sorted(versions_dir.glob("*data_sync*schema*repair*.py"))
-    assert matches, "expected a data-sync schema repair migration in migrations/versions"
+    assert (
+        matches
+    ), "expected a data-sync schema repair migration in migrations/versions"
     return matches[-1]
 
 
@@ -163,10 +165,15 @@ def test_data_sync_schema_repair_columns_present_in_current_schema_baseline():
                 "resolved_at",
                 "resolution_note",
             }.issubset(data_quarantine_columns)
-            assert {"platform_code", "ingest_task_id", "file_id"}.issubset(staging_orders_columns)
-            assert {"platform_code", "platform_sku", "ingest_task_id", "file_id"}.issubset(
-                staging_metrics_columns
+            assert {"platform_code", "ingest_task_id", "file_id"}.issubset(
+                staging_orders_columns
             )
+            assert {
+                "platform_code",
+                "platform_sku",
+                "ingest_task_id",
+                "file_id",
+            }.issubset(staging_metrics_columns)
         finally:
             conn.close()
     finally:

@@ -6,8 +6,17 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from backend.routers.target_management import create_target, generate_daily_breakdown, list_target_products, update_target
-from backend.schemas.target import GenerateDailyBreakdownRequest, TargetCreateRequest, TargetUpdateRequest
+from backend.routers.target_management import (
+    create_target,
+    generate_daily_breakdown,
+    list_target_products,
+    update_target,
+)
+from backend.schemas.target import (
+    GenerateDailyBreakdownRequest,
+    TargetCreateRequest,
+    TargetUpdateRequest,
+)
 
 # 运营目标（target_type=operation）已迁移到「运营绩效工作台」，
 # 旧 /targets 接口一律 409 拒绝。佐证：

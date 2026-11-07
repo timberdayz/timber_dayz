@@ -158,7 +158,9 @@ _DECLARED_FORMATS_BY_VALUE_KIND: dict[str, frozenset[str]] = {
     "single_date": frozenset(_DECLARED_SINGLE_FORMATS.keys()),
     "single_datetime": frozenset(_DECLARED_SINGLE_FORMATS.keys()),
     "datetime_range": frozenset(
-        token for token, (_fmt, has_time) in _DECLARED_SINGLE_FORMATS.items() if has_time
+        token
+        for token, (_fmt, has_time) in _DECLARED_SINGLE_FORMATS.items()
+        if has_time
     ),
     "time_of_day": frozenset(_DECLARED_TIME_FORMATS.keys()),
     "time_range": frozenset(_DECLARED_TIME_FORMATS.keys()),
@@ -322,7 +324,10 @@ def _split_declared_range_value(value: str, component_length: int) -> tuple[str,
             return start_str.strip(), end_str.strip()
 
     if len(normalized) >= component_length * 2 + 1:
-        return normalized[:component_length].strip(), normalized[-component_length:].strip()
+        return (
+            normalized[:component_length].strip(),
+            normalized[-component_length:].strip(),
+        )
 
     raise ValueError(f"unable to split declared date range: {value}")
 
@@ -394,7 +399,9 @@ def _parse_by_companion_period(
     start_date = _coerce_optional_date(companion_date_from)
     end_date = _coerce_optional_date(companion_date_to)
     if start_date is None and end_date is None:
-        raise ValueError("companion date_from/date_to is required for auto companion period parsing")
+        raise ValueError(
+            "companion date_from/date_to is required for auto companion period parsing"
+        )
 
     matches: list[tuple[str, Optional[date], Optional[datetime]]] = []
     for candidate in _candidate_formats_for_auto(
@@ -488,9 +495,13 @@ def parse_date_by_declared_format(
     if normalized_kind == "datetime_range":
         format_spec = _DECLARED_SINGLE_FORMATS.get(normalized_format)
         if not format_spec or not format_spec[1]:
-            raise ValueError(f"unsupported declared datetime range format: {date_format}")
+            raise ValueError(
+                f"unsupported declared datetime range format: {date_format}"
+            )
         if range_pick not in {"start", "end"}:
-            raise ValueError(f"range_pick is required for declared datetime range format: {date_format}")
+            raise ValueError(
+                f"range_pick is required for declared datetime range format: {date_format}"
+            )
         fmt = format_spec[0]
         component_length = len(datetime(2026, 4, 18, 13, 0, 0).strftime(fmt))
         start_str, end_str = _split_declared_range_value(raw, component_length)
@@ -503,7 +514,9 @@ def parse_date_by_declared_format(
         if not fmt:
             raise ValueError(f"unsupported declared time range format: {date_format}")
         if range_pick not in {"start", "end"}:
-            raise ValueError(f"range_pick is required for declared time range format: {date_format}")
+            raise ValueError(
+                f"range_pick is required for declared time range format: {date_format}"
+            )
         anchor = _coerce_anchor_date(date_anchor)
         component_length = len(datetime(2026, 4, 18, 13, 0, 0).strftime(fmt))
         start_str, end_str = _split_declared_range_value(raw, component_length)
@@ -516,13 +529,15 @@ def parse_date_by_declared_format(
     if not base_fmt:
         raise ValueError(f"unsupported declared range format: {date_format}")
     if range_pick not in {"start", "end"}:
-        raise ValueError(f"range_pick is required for declared date range format: {date_format}")
+        raise ValueError(
+            f"range_pick is required for declared date range format: {date_format}"
+        )
 
     component_length = len(datetime(2026, 4, 18).strftime(base_fmt))
     start_str, end_str = _split_declared_range_value(raw, component_length)
     start_date = datetime.strptime(start_str, base_fmt).date()
     end_date = datetime.strptime(end_str, base_fmt).date()
-    return ((start_date, None) if range_pick == "start" else (end_date, None))
+    return (start_date, None) if range_pick == "start" else (end_date, None)
 
 
 DATE_PROBE_PARSED = "parsed"
@@ -613,7 +628,9 @@ def probe_date(
             ),
         )
 
-    for dayfirst in ([prefer_dayfirst] if prefer_dayfirst is not None else [None, True, False]):
+    for dayfirst in (
+        [prefer_dayfirst] if prefer_dayfirst is not None else [None, True, False]
+    ):
         try:
             dt = pd.to_datetime(s, dayfirst=bool(dayfirst), errors="raise")
             return DateProbe(dt.date(), DATE_PROBE_PARSED)
@@ -713,9 +730,7 @@ _RANGE_DATE_TIME_PATTERN = (
 )
 _RANGE_DATE_PATTERN = r"(?:\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}[-/]\d{1,2}[-/]\d{1,2})"
 
-_RANGE_DASH_TIME_CLEANUP = re.compile(
-    r"(\d{4}[-/]\d{1,2}[-/]\d{1,2})-(\d{1,2}:\d{2})"
-)
+_RANGE_DASH_TIME_CLEANUP = re.compile(r"(\d{4}[-/]\d{1,2}[-/]\d{1,2})-(\d{1,2}:\d{2})")
 
 
 def split_date_range_value(value: object) -> Optional[tuple[str, str]]:
@@ -735,9 +750,7 @@ def split_date_range_value(value: object) -> Optional[tuple[str, str]]:
         return None
 
     for separator in _RANGE_SEPARATORS:
-        pattern = (
-            rf"({_RANGE_DATE_TIME_PATTERN})\s*{separator}\s*({_RANGE_DATE_TIME_PATTERN})"
-        )
+        pattern = rf"({_RANGE_DATE_TIME_PATTERN})\s*{separator}\s*({_RANGE_DATE_TIME_PATTERN})"
         match = re.search(pattern, text)
         if match:
             start_str = _RANGE_DASH_TIME_CLEANUP.sub(r"\1 \2", match.group(1).strip())

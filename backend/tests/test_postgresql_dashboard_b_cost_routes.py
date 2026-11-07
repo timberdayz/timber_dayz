@@ -53,6 +53,7 @@ def _build_app_with_auth_override(user: SimpleNamespace | None = None) -> FastAP
     _mark_dashboard_assets_ready(app)
 
     if user is not None:
+
         async def _override_current_user():
             return user
 
@@ -69,11 +70,15 @@ def test_postgresql_b_cost_routes_are_registered():
 
 
 @pytest.mark.asyncio
-async def test_postgresql_b_cost_overview_route_returns_service_payload_and_passes_filters(monkeypatch):
+async def test_postgresql_b_cost_overview_route_returns_service_payload_and_passes_filters(
+    monkeypatch,
+):
     captured = {}
 
     class _ServiceStub:
-        async def get_b_cost_analysis_overview(self, period_month, platform=None, shop_id=None):
+        async def get_b_cost_analysis_overview(
+            self, period_month, platform=None, shop_id=None
+        ):
             captured["period_month"] = period_month
             captured["platform"] = platform
             captured["shop_id"] = shop_id
@@ -111,11 +116,15 @@ async def test_postgresql_b_cost_overview_route_returns_service_payload_and_pass
 
 
 @pytest.mark.asyncio
-async def test_postgresql_b_cost_shop_month_route_returns_service_payload_and_passes_filters(monkeypatch):
+async def test_postgresql_b_cost_shop_month_route_returns_service_payload_and_passes_filters(
+    monkeypatch,
+):
     captured = {}
 
     class _ServiceStub:
-        async def get_b_cost_analysis_shop_month(self, period_month, platform=None, shop_id=None):
+        async def get_b_cost_analysis_shop_month(
+            self, period_month, platform=None, shop_id=None
+        ):
             captured["period_month"] = period_month
             captured["platform"] = platform
             captured["shop_id"] = shop_id
@@ -153,7 +162,9 @@ async def test_postgresql_b_cost_shop_month_route_returns_service_payload_and_pa
 
 
 @pytest.mark.asyncio
-async def test_postgresql_b_cost_order_detail_route_returns_paginated_payload_and_passes_pagination(monkeypatch):
+async def test_postgresql_b_cost_order_detail_route_returns_paginated_payload_and_passes_pagination(
+    monkeypatch,
+):
     captured = {}
 
     class _ServiceStub:
@@ -271,7 +282,9 @@ async def test_postgresql_b_cost_order_detail_route_maps_value_error_to_400():
 
 
 @pytest.mark.asyncio
-async def test_postgresql_b_cost_service_order_detail_normalizes_period_month_to_month_start(monkeypatch):
+async def test_postgresql_b_cost_service_order_detail_normalizes_period_month_to_month_start(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     calls = []
 
@@ -302,7 +315,9 @@ async def test_postgresql_b_cost_service_order_detail_normalizes_period_month_to
 
 
 @pytest.mark.asyncio
-async def test_postgresql_b_cost_service_overview_normalizes_period_month_to_month_start(monkeypatch):
+async def test_postgresql_b_cost_service_overview_normalizes_period_month_to_month_start(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     calls = []
 
@@ -323,7 +338,9 @@ async def test_postgresql_b_cost_service_overview_normalizes_period_month_to_mon
 
 
 @pytest.mark.asyncio
-async def test_postgresql_b_cost_service_shop_month_normalizes_period_month_to_month_start(monkeypatch):
+async def test_postgresql_b_cost_service_shop_month_normalizes_period_month_to_month_start(
+    monkeypatch,
+):
     service = PostgresqlDashboardService()
     calls = []
 
@@ -344,11 +361,15 @@ async def test_postgresql_b_cost_service_shop_month_normalizes_period_month_to_m
 
 
 @pytest.mark.asyncio
-async def test_postgresql_b_cost_overview_route_normalizes_period_month_for_cache(monkeypatch):
+async def test_postgresql_b_cost_overview_route_normalizes_period_month_for_cache(
+    monkeypatch,
+):
     cache_calls = []
 
     class _ServiceStub:
-        async def get_b_cost_analysis_overview(self, period_month, platform=None, shop_id=None):
+        async def get_b_cost_analysis_overview(
+            self, period_month, platform=None, shop_id=None
+        ):
             return {"ok": True}
 
     class _CacheServiceStub:
@@ -427,7 +448,9 @@ async def test_postgresql_b_cost_overview_route_returns_403_when_role_not_allowe
 @pytest.mark.asyncio
 async def test_postgresql_b_cost_overview_route_allows_finance_role(monkeypatch):
     class _ServiceStub:
-        async def get_b_cost_analysis_overview(self, period_month, platform=None, shop_id=None):
+        async def get_b_cost_analysis_overview(
+            self, period_month, platform=None, shop_id=None
+        ):
             return {"summary": "ok"}
 
     monkeypatch.setattr(
@@ -450,9 +473,13 @@ async def test_postgresql_b_cost_overview_route_allows_finance_role(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_postgresql_b_cost_overview_route_masks_internal_exception_message(monkeypatch):
+async def test_postgresql_b_cost_overview_route_masks_internal_exception_message(
+    monkeypatch,
+):
     class _ServiceStub:
-        async def get_b_cost_analysis_overview(self, period_month, platform=None, shop_id=None):
+        async def get_b_cost_analysis_overview(
+            self, period_month, platform=None, shop_id=None
+        ):
             raise RuntimeError("db exploded: super-secret")
 
     monkeypatch.setattr(

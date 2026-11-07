@@ -123,7 +123,9 @@ def test_value_kind_compatibility_matrix():
     assert not is_declared_date_format_compatible("time_of_day", "yyyy-mm-dd")
     # auto 只对有候选集的 kind 有效
     assert is_declared_date_format_compatible("single_date", "auto_by_companion_period")
-    assert not is_declared_date_format_compatible("time_of_day", "auto_by_companion_period")
+    assert not is_declared_date_format_compatible(
+        "time_of_day", "auto_by_companion_period"
+    )
     # 未知 kind ⇒ 一律不兼容(不静默放行)
     assert declared_date_formats_for_value_kind("no_such_kind") == frozenset()
     assert not is_declared_date_format_compatible("no_such_kind", "yyyy-mm-dd")
@@ -389,7 +391,9 @@ def test_migration_rewrite_is_idempotent_and_reversible(migration):
     assert migration._rewrite_rules(upgraded, target=migration._NEW_DATE_FORMAT) is None
 
     # 可逆: 回滚恢复原声明并清掉候选
-    downgraded = migration._rewrite_rules(upgraded, target=migration._ORIGINAL_DATE_FORMAT)
+    downgraded = migration._rewrite_rules(
+        upgraded, target=migration._ORIGINAL_DATE_FORMAT
+    )
     assert downgraded is not None
     assert downgraded[0]["date_format"] == "dd/mm/yyyy"
     assert "format_candidates" not in downgraded[0]
@@ -585,9 +589,7 @@ async def test_migration_is_idempotent(pg_session, migration):
 
 def _frontend_date_format_tokens() -> set[str]:
     source = FRONTEND_RULES_PATH.read_text(encoding="utf-8")
-    block = re.search(
-        r"export const DATE_FORMAT_OPTIONS = \[(.*?)\n\]", source, re.S
-    )
+    block = re.search(r"export const DATE_FORMAT_OPTIONS = \[(.*?)\n\]", source, re.S)
     assert block, "DATE_FORMAT_OPTIONS not found in frontend util"
     return set(re.findall(r"value: '([^']+)'", block.group(1)))
 

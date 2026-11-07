@@ -72,7 +72,9 @@ def _js_header(payload: Dict[str, Any]) -> str:
 
 
 def build_payload() -> Dict[str, Any]:
-    from backend.services.semantic_field_registry import build_semantic_field_snapshot_payload
+    from backend.services.semantic_field_registry import (
+        build_semantic_field_snapshot_payload,
+    )
 
     payload = build_semantic_field_snapshot_payload()
     payload["generated_at"] = ""
@@ -104,7 +106,9 @@ def main() -> int:
                     "请运行 python scripts/generate_semantic_field_snapshot.py 重写"
                 )
             else:
-                print("[FAIL] 快照与后端定义已漂移, 请运行 python scripts/generate_semantic_field_snapshot.py")
+                print(
+                    "[FAIL] 快照与后端定义已漂移, 请运行 python scripts/generate_semantic_field_snapshot.py"
+                )
             return 1
         print("[OK] 快照与后端定义一致")
         return 0

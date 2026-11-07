@@ -7,7 +7,7 @@ def test_operating_cost_platform_code_migration_mentions_backfill_and_constraint
     )
     source = migration.read_text(encoding="utf-8")
 
-    assert 'op.add_column(' in source
+    assert "op.add_column(" in source
     assert '"platform_code"' in source
     assert "core.shop_accounts" in source
     assert "platform_shop_id" in source

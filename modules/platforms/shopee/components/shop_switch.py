@@ -48,7 +48,9 @@ class ShopeeShopSwitch:
         ("CO", ("colombia", "co", "哥伦比亚")),
     )
 
-    def __init__(self, ctx: ExecutionContext, selectors: ProductsSelectors | None = None) -> None:
+    def __init__(
+        self, ctx: ExecutionContext, selectors: ProductsSelectors | None = None
+    ) -> None:
         self.ctx = ctx
         self.logger = getattr(ctx, "logger", None)
         # 选择器与调用方同源，避免店铺切换触发器出现两套口径

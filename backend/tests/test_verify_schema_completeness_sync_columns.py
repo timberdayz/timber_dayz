@@ -67,7 +67,9 @@ def test_verify_schema_completeness_reports_missing_sync_columns(monkeypatch):
     monkeypatch.setattr(
         database_module,
         "_find_missing_critical_columns",
-        lambda _inspector, existing_tables=None: ["core.data_quarantine.catalog_file_id"],
+        lambda _inspector, existing_tables=None: [
+            "core.data_quarantine.catalog_file_id"
+        ],
         raising=False,
     )
 

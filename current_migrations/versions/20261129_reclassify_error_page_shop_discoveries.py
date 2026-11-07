@@ -80,6 +80,7 @@ _ERROR_SEGMENTS = (
     "login",
 )
 
+
 #: URL 去掉 query 后的 path 最后一段。
 def _segment_sql(url_expr: str) -> str:
     """给定「URL 文本表达式」，返回「path 最后一段」的 SQL 表达式。"""

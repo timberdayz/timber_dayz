@@ -134,13 +134,13 @@ PRUNE_MARKER = "-- 陈旧 builtin 行清理"
 def render_prune_sql(rows: Sequence[dict]) -> str:
     """渲染「陈旧 builtin 行清理」语句。
 
-字典是唯一事实源 —— ``source='builtin'`` 的行是**字典派生**的,
-    它若不在当前 seed 里, 说明字典已经删掉/改写了这条映射。
-    留着它 = DB 认着一套字典里没有的映射 ⇒ 事实源漂移。
+    字典是唯一事实源 —— ``source='builtin'`` 的行是**字典派生**的,
+        它若不在当前 seed 里, 说明字典已经删掉/改写了这条映射。
+        留着它 = DB 认着一套字典里没有的映射 ⇒ 事实源漂移。
 
-    只删 ``builtin`` 行: ``template_confirmed`` / ``manual`` / ``conflict``
-    是**用户确认过**的, 不归字典管, 谁也不许动。
-"""
+        只删 ``builtin`` 行: ``template_confirmed`` / ``manual`` / ``conflict``
+        是**用户确认过**的, 不归字典管, 谁也不许动。
+    """
     if not rows:
         raise ValueError("没有可生成的 seed 行")
     domains = sorted({str(row["data_domain"]) for row in rows})
@@ -163,7 +163,9 @@ def render_prune_sql(rows: Sequence[dict]) -> str:
         ")",
         "DELETE FROM semantic.semantic_field_aliases a",
         "WHERE a.source = 'builtin'",
-        "  AND a.data_domain IN ({})".format(", ".join("'{}'".format(_escape(d)) for d in domains)),
+        "  AND a.data_domain IN ({})".format(
+            ", ".join("'{}'".format(_escape(d)) for d in domains)
+        ),
         "  AND NOT EXISTS (",
         "      SELECT 1 FROM current_seed s",
         "      WHERE s.data_domain = a.data_domain",
@@ -218,7 +220,17 @@ def render_seed_sql(rows: Sequence[dict]) -> str:
 
 def render_normalized_tsv(rows: Sequence[dict]) -> str:
     """渲染归一化形态清单(TSV, 首行是列名)。"""
-    lines = ["\t".join(("data_domain", "standard_field", "raw_alias", "normalized_alias", "normalized_alias_history"))]
+    lines = [
+        "\t".join(
+            (
+                "data_domain",
+                "standard_field",
+                "raw_alias",
+                "normalized_alias",
+                "normalized_alias_history",
+            )
+        )
+    ]
     for row in rows:
         lines.append(
             "\t".join(

@@ -161,7 +161,11 @@ class SemanticHashPolicyService:
             recommended=bool(eligible and meta.get("default_hash")),
             weak_identity=weak_identity,
             legacy_compatible=False,
-            blocked_reason=None if eligible else "This semantic field is not configured as a Data Hash identity field.",
+            blocked_reason=(
+                None
+                if eligible
+                else "This semantic field is not configured as a Data Hash identity field."
+            ),
             warning=warning,
             raw_name=raw_name,
         )
@@ -183,12 +187,15 @@ class SemanticHashPolicyService:
             if not semantic_key or semantic_key in seen:
                 continue
             seen.add(semantic_key)
-            raw_name = str(
-                binding.get("raw_name")
-                or binding.get("source_header")
-                or binding.get("display_name")
-                or ""
-            ).strip() or None
+            raw_name = (
+                str(
+                    binding.get("raw_name")
+                    or binding.get("source_header")
+                    or binding.get("display_name")
+                    or ""
+                ).strip()
+                or None
+            )
             options.append(
                 self.evaluate_option(
                     data_domain=data_domain,

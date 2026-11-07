@@ -61,7 +61,9 @@ async def collection_config_async_client(collection_config_sqlite_session):
                 "is_active": True,
                 "status": "active",
                 "is_superuser": True,
-                "roles": [type("Role", (), {"role_code": "admin", "role_name": "admin"})()],
+                "roles": [
+                    type("Role", (), {"role_code": "admin", "role_name": "admin"})()
+                ],
             },
         )()
 

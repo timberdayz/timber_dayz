@@ -62,7 +62,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-DEFAULT_DATABASE_URL = "postgresql+asyncpg://erp_user:erp_pass_2025@localhost:15432/xihong_erp"
+DEFAULT_DATABASE_URL = (
+    "postgresql+asyncpg://erp_user:erp_pass_2025@localhost:15432/xihong_erp"
+)
 HASH_ENV_KEY = "SYNC_CORE_FIELDS_HASH_ENABLED"
 
 
@@ -82,7 +84,9 @@ def _database_url() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _read_rows(file_path: Path, header_row: int, limit: int, data_domain: str) -> List[Dict[str, Any]]:
+def _read_rows(
+    file_path: Path, header_row: int, limit: int, data_domain: str
+) -> List[Dict[str, Any]]:
     """按入库路径的方式读文件并规范化(列名必须与入库一致, 否则 hash 不可比)。"""
     from backend.services.excel_parser import ExcelParser
 
@@ -239,7 +243,10 @@ async def run(args) -> int:
             header_row_by_version: Dict[int, int] = {}
             for row in variant_result.mappings().all():
                 version_id = int(row["template_version_id"])
-                if row.get("header_row") is not None and version_id not in header_row_by_version:
+                if (
+                    row.get("header_row") is not None
+                    and version_id not in header_row_by_version
+                ):
                     header_row_by_version[version_id] = int(row["header_row"])
 
             file_result = await session.execute(
@@ -302,13 +309,18 @@ async def run(args) -> int:
                     }
                 )
                 if not file_row:
-                    replay_rows.append({"label": label, "status": "没有已入库文件可回放"})
+                    replay_rows.append(
+                        {"label": label, "status": "没有已入库文件可回放"}
+                    )
                     continue
 
                 file_path = REPO_ROOT / str(file_row["file_path"])
                 if not file_path.exists():
                     replay_rows.append(
-                        {"label": label, "status": f"文件不存在: {file_row['file_path']}"}
+                        {
+                            "label": label,
+                            "status": f"文件不存在: {file_row['file_path']}",
+                        }
                     )
                     continue
 
@@ -350,7 +362,9 @@ async def run(args) -> int:
                     replay_rows.append({"label": label, "status": f"计算失败: {exc}"})
                     continue
 
-                changed = sum(1 for old, new in zip(off_hashes, on_hashes) if old != new)
+                changed = sum(
+                    1 for old, new in zip(off_hashes, on_hashes) if old != new
+                )
                 # 自检: 同一开关状态下两次计算必须一致(否则说明有隐藏状态)
                 self_consistent = off_hashes == off_hashes2 and on_hashes == on_hashes2
                 replay_rows.append(
@@ -385,7 +399,9 @@ def _print_static(static_rows: List[Dict[str, Any]]) -> int:
     return 0
 
 
-def _print_report(static_rows: List[Dict[str, Any]], replay_rows: List[Dict[str, Any]]) -> int:
+def _print_report(
+    static_rows: List[Dict[str, Any]], replay_rows: List[Dict[str, Any]]
+) -> int:
     print("=" * 78)
     print("批次 E 前置 · 新旧口径 hash **实跑路径** 回放报告")
     print("=" * 78)
@@ -428,7 +444,9 @@ def _print_report(static_rows: List[Dict[str, Any]], replay_rows: List[Dict[str,
     print("\n【三】结论与回填方案")
     print("-" * 78)
     if total_changed == 0 and not inconsistent:
-        print("切换到 core_fields **不会**改任何一行的 data_hash ⇒ 无需回填, 可以切换。")
+        print(
+            "切换到 core_fields **不会**改任何一行的 data_hash ⇒ 无需回填, 可以切换。"
+        )
         print("(仍建议保留显式开关, 出问题一键回退; 开关默认关闭。)")
         print("\n回填方案: 不需要。")
     else:

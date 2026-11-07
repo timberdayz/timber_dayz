@@ -65,7 +65,9 @@ async def collection_coverage_client(collection_coverage_session):
                 "is_active": True,
                 "status": "active",
                 "is_superuser": True,
-                "roles": [type("Role", (), {"role_code": "admin", "role_name": "admin"})()],
+                "roles": [
+                    type("Role", (), {"role_code": "admin", "role_name": "admin"})()
+                ],
             },
         )()
 

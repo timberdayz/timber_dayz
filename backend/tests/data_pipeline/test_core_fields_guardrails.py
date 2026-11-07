@@ -86,9 +86,7 @@ def test_migration_embedded_canonical_keys_match_registry():
     """
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location(
-        "_mig_20261125", MIGRATION_PATH
-    )
+    spec = importlib.util.spec_from_file_location("_mig_20261125", MIGRATION_PATH)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -97,15 +95,14 @@ def test_migration_embedded_canonical_keys_match_registry():
     registry = set(SEMANTIC_FIELD_DEFINITIONS.keys())
 
     dropped = sorted(embedded - registry)
-    assert not dropped, (
-        "迁移内嵌的规范语义键在注册表里没了(被删或改名): " f"{dropped}"
-    )
+    assert not dropped, "迁移内嵌的规范语义键在注册表里没了(被删或改名): " f"{dropped}"
 
     # 运行期推导必须认得迁移引用的每一个键
     for key in sorted(embedded):
-        assert is_canonical_semantic_key(key), (
-            f"运行期不再把 {key!r} 当规范语义键 —— 迁移回填与运行期推导会分叉"
-        )
+        assert is_canonical_semantic_key(
+            key
+        ), f"运行期不再把 {key!r} 当规范语义键 —— 迁移回填与运行期推导会分叉"
+
 
 # ---------------------------------------------------------------------------
 # 2) hash 键名口径
@@ -119,12 +116,31 @@ def test_core_field_hash_identities_use_raw_name_first():
     ⇒ 键变了 ⇒ hash 变了 ⇒ 已入库的行全部变成新数据。
     """
     core_fields = [
-        {"semantic_key": "product_id", "raw_name": "商品编号", "required": False, "in_hash": True},
-        {"semantic_key": "metric_date", "raw_name": None, "required": True, "in_hash": True},
-        {"semantic_key": None, "raw_name": "*商品SKU", "required": False, "in_hash": True},
+        {
+            "semantic_key": "product_id",
+            "raw_name": "商品编号",
+            "required": False,
+            "in_hash": True,
+        },
+        {
+            "semantic_key": "metric_date",
+            "raw_name": None,
+            "required": True,
+            "in_hash": True,
+        },
+        {
+            "semantic_key": None,
+            "raw_name": "*商品SKU",
+            "required": False,
+            "in_hash": True,
+        },
     ]
 
-    assert core_field_hash_identities(core_fields) == ["商品编号", "metric_date", "*商品SKU"]
+    assert core_field_hash_identities(core_fields) == [
+        "商品编号",
+        "metric_date",
+        "*商品SKU",
+    ]
 
 
 def test_core_fields_preserve_legacy_hash_keys_order():
@@ -264,7 +280,12 @@ _EQUIVALENCE_CASES: List[Dict[str, Any]] = [
                 "semantic_review_source": "user",
             }
         ],
-        "row": {"product_id": "P-1", "platform_sku": "SKU-1", "order_id": "SO-1", "qty": 3},
+        "row": {
+            "product_id": "P-1",
+            "platform_sku": "SKU-1",
+            "order_id": "SO-1",
+            "qty": 3,
+        },
     },
     {
         "name": "物理列名条目(翻译得出)",
@@ -534,7 +555,12 @@ def test_hash_participates_has_no_live_code_reference():
         "temp/",
     )
     banned_suffixes = (".py", ".js", ".mjs", ".vue", ".ts")
-    scan_roots = ("backend/services", "backend/domains", "backend/schemas", "frontend/src")
+    scan_roots = (
+        "backend/services",
+        "backend/domains",
+        "backend/schemas",
+        "frontend/src",
+    )
 
     reference_re = re.compile(
         r"""["']hash_participates["']      # 字符串字面量(字典键 / 传参)
@@ -561,9 +587,9 @@ def test_hash_participates_has_no_live_code_reference():
                 if reference_re.search(line):
                     offenders.append(f"{relative}:{lineno}: {line.strip()[:120]}")
 
-    assert not offenders, (
-        "hash_participates 在活代码里还有引用(应已下线):\n" + "\n".join(offenders)
-    )
+    assert (
+        not offenders
+    ), "hash_participates 在活代码里还有引用(应已下线):\n" + "\n".join(offenders)
 
 
 def test_metric_fields_are_hash_eligible_but_not_default():

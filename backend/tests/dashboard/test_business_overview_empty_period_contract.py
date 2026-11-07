@@ -120,13 +120,29 @@ def test_bo_kpi_route_marks_empty_period_meta(monkeypatch):
 
 def test_bo_comparison_route_marks_empty_period_meta(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_comparison(self, granularity, target_date, platform):
+        async def get_business_overview_comparison(
+            self, granularity, target_date, platform
+        ):
             return {
                 "metrics": {
-                    "sales_amount": {"today": 0, "yesterday": 0, "average": 0, "change": None},
-                    "conversion_rate": {"today": None, "yesterday": None, "average": None, "change": None},
+                    "sales_amount": {
+                        "today": 0,
+                        "yesterday": 0,
+                        "average": 0,
+                        "change": None,
+                    },
+                    "conversion_rate": {
+                        "today": None,
+                        "yesterday": None,
+                        "average": None,
+                        "change": None,
+                    },
                 },
-                "target": {"sales_amount": None, "sales_quantity": None, "achievement_rate": None},
+                "target": {
+                    "sales_amount": None,
+                    "sales_quantity": None,
+                    "achievement_rate": None,
+                },
             }
 
     _patch_dashboard_service(monkeypatch, _ServiceStub())
@@ -150,12 +166,23 @@ def test_bo_comparison_route_marks_empty_period_meta(monkeypatch):
 @pytest.mark.parametrize(
     "endpoint_fn,path",
     [
-        (get_business_overview_traffic_ranking_postgresql, "/api/dashboard/business-overview/traffic-ranking"),
-        (get_business_overview_shop_racing_postgresql, "/api/dashboard/business-overview/shop-racing"),
-        (get_business_overview_operational_metrics_postgresql, "/api/dashboard/business-overview/operational-metrics"),
+        (
+            get_business_overview_traffic_ranking_postgresql,
+            "/api/dashboard/business-overview/traffic-ranking",
+        ),
+        (
+            get_business_overview_shop_racing_postgresql,
+            "/api/dashboard/business-overview/shop-racing",
+        ),
+        (
+            get_business_overview_operational_metrics_postgresql,
+            "/api/dashboard/business-overview/operational-metrics",
+        ),
     ],
 )
-def test_bo_list_modules_empty_period_returns_empty_list(monkeypatch, endpoint_fn, path: str):
+def test_bo_list_modules_empty_period_returns_empty_list(
+    monkeypatch, endpoint_fn, path: str
+):
     class _ServiceStub:
         async def get_business_overview_traffic_ranking(self, **kwargs):
             return []
@@ -218,10 +245,24 @@ def test_bo_bootstrap_route_marks_empty_period_meta(monkeypatch):
         async def get_business_overview_comparison(self, **kwargs):
             return {
                 "metrics": {
-                    "sales_amount": {"today": 0, "yesterday": 0, "average": 0, "change": None},
-                    "conversion_rate": {"today": None, "yesterday": None, "average": None, "change": None},
+                    "sales_amount": {
+                        "today": 0,
+                        "yesterday": 0,
+                        "average": 0,
+                        "change": None,
+                    },
+                    "conversion_rate": {
+                        "today": None,
+                        "yesterday": None,
+                        "average": None,
+                        "change": None,
+                    },
                 },
-                "target": {"sales_amount": None, "sales_quantity": None, "achievement_rate": None},
+                "target": {
+                    "sales_amount": None,
+                    "sales_quantity": None,
+                    "achievement_rate": None,
+                },
             }
 
         async def get_business_overview_operational_metrics(self, **kwargs):
@@ -275,7 +316,11 @@ def test_bo_bootstrap_route_forwards_shop_id_to_kpi_and_operational(monkeypatch)
         async def get_business_overview_comparison(self, **kwargs):
             return {
                 "metrics": {},
-                "target": {"sales_amount": None, "sales_quantity": None, "achievement_rate": None},
+                "target": {
+                    "sales_amount": None,
+                    "sales_quantity": None,
+                    "achievement_rate": None,
+                },
             }
 
         async def get_business_overview_operational_metrics(self, **kwargs):

@@ -1,4 +1,6 @@
-from backend.domains.business.routers.expense_management import _merge_labor_cost_for_response
+from backend.domains.business.routers.expense_management import (
+    _merge_labor_cost_for_response,
+)
 from unittest.mock import AsyncMock
 from datetime import date as date_cls
 
@@ -89,7 +91,9 @@ async def test_projected_labor_cost_uses_fixed_v2_basis_for_all_months(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_business_overview_expenses_merge_manual_cost_and_system_labor_for_shop(monkeypatch):
+async def test_business_overview_expenses_merge_manual_cost_and_system_labor_for_shop(
+    monkeypatch,
+):
     """看板费用口径：手工费用扣掉人力费用后 + V2 投影人力成本。
 
     佐证：commit 42c97563「不再看 system_config.labor_cost_auto_effective_month，
@@ -108,7 +112,9 @@ async def test_business_overview_expenses_merge_manual_cost_and_system_labor_for
     class _Session:
         def __init__(self):
             # 顺序：先查人力成本投影(V2)，再查手工费用。
-            self.execute = AsyncMock(side_effect=[_ScalarResult(350), _ScalarResult(800)])
+            self.execute = AsyncMock(
+                side_effect=[_ScalarResult(350), _ScalarResult(800)]
+            )
 
         async def __aenter__(self):
             return self

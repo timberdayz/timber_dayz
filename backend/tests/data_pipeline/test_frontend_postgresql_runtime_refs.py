@@ -30,9 +30,7 @@ def test_active_frontend_dashboard_files_no_longer_reference_metabase_runtime():
             assert term not in text, f"{path_str} still contains {term!r}"
 
     # 已删除的年度汇总页不允许被重新引入(否则它会绕过 PostgreSQL 看板)
-    assert not Path(
-        "frontend/src/domains/business/views/AnnualSummary.vue"
-    ).exists()
+    assert not Path("frontend/src/domains/business/views/AnnualSummary.vue").exists()
 
 
 def test_frontend_metabase_embed_assets_are_archived():

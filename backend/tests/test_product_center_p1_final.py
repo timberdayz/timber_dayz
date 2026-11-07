@@ -51,7 +51,7 @@ def _section(source: str, start_marker: str, end_marker: str) -> str:
 _PURCHASE_COST_FALLBACK = (
     r'purchase_cost=\(?cost_inputs\["purchase_cost"\]'
     r'ifcost_inputs\["purchase_cost"\]isnotNone'
-    r'elserow\.default_purchase_cost'
+    r"elserow\.default_purchase_cost"
 )
 
 

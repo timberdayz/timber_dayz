@@ -1224,9 +1224,11 @@ class RawDataImporter:
                         if existing_raw_data and isinstance(
                             record_copy.get("raw_data"), dict
                         ):
-                            record_copy["raw_data"] = merge_orders_raw_data_prefer_non_empty(
-                                existing_raw_data,
-                                record_copy["raw_data"],
+                            record_copy["raw_data"] = (
+                                merge_orders_raw_data_prefer_non_empty(
+                                    existing_raw_data,
+                                    record_copy["raw_data"],
+                                )
                             )
 
                     # 转换raw_data(dict -> JSON字符串)

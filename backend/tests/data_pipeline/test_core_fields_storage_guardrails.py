@@ -74,9 +74,24 @@ def test_storage_column_names_use_raw_name_not_semantic_key():
     语义键 ``product_id`` 也不等于文件里的物理列名 ⇒ 都建不了列。
     """
     core_fields = [
-        {"semantic_key": "product_id", "raw_name": "商品编号", "required": False, "in_hash": True},
-        {"semantic_key": "metric_date", "raw_name": None, "required": True, "in_hash": True},
-        {"semantic_key": "sales_amount", "raw_name": "销售额", "required": False, "in_hash": True},
+        {
+            "semantic_key": "product_id",
+            "raw_name": "商品编号",
+            "required": False,
+            "in_hash": True,
+        },
+        {
+            "semantic_key": "metric_date",
+            "raw_name": None,
+            "required": True,
+            "in_hash": True,
+        },
+        {
+            "semantic_key": "sales_amount",
+            "raw_name": "销售额",
+            "required": False,
+            "in_hash": True,
+        },
     ]
 
     assert core_field_storage_column_names(core_fields) == ["商品编号", "销售额"]
@@ -84,8 +99,18 @@ def test_storage_column_names_use_raw_name_not_semantic_key():
 
 def test_storage_column_names_dedup_and_keep_order():
     core_fields = [
-        {"semantic_key": None, "raw_name": "商品编号", "required": False, "in_hash": True},
-        {"semantic_key": "product_id", "raw_name": "商品编号", "required": False, "in_hash": True},
+        {
+            "semantic_key": None,
+            "raw_name": "商品编号",
+            "required": False,
+            "in_hash": True,
+        },
+        {
+            "semantic_key": "product_id",
+            "raw_name": "商品编号",
+            "required": False,
+            "in_hash": True,
+        },
         {"semantic_key": None, "raw_name": "仓库", "required": False, "in_hash": True},
     ]
 
@@ -192,7 +217,9 @@ def test_ensure_columns_exist_keeps_legacy_behavior_without_core_columns(monkeyp
         header_columns=["商品编号", "商品", "销售额", "规格编号"],
     )
 
-    assert sorted(_added_columns(db)) == sorted(["商品编号", "商品", "销售额", "规格编号"])
+    assert sorted(_added_columns(db)) == sorted(
+        ["商品编号", "商品", "销售额", "规格编号"]
+    )
 
 
 def test_ensure_columns_exist_keeps_existing_legacy_columns(monkeypatch):
@@ -364,15 +391,22 @@ def test_semantic_views_only_select_system_columns():
                 if col.lower() not in SYSTEM_COLUMN_WHITELIST:
                     offenders.append(f"{sql_path.name}: {col}")
 
-    assert not offenders, (
-        "semantic view 开始引用业务动态列 ⇒ 落库列收窄会断链: " + "; ".join(offenders)
-    )
+    assert (
+        not offenders
+    ), "semantic view 开始引用业务动态列 ⇒ 落库列收窄会断链: " + "; ".join(offenders)
 
 
 def test_core_fields_normalization_keeps_raw_name():
     """清单规整后 ``raw_name`` 必须保留(它是建列与降级匹配的依据)。"""
     normalized = normalize_core_fields(
-        [{"semantic_key": "product_id", "raw_name": "商品编号", "required": False, "in_hash": True}]
+        [
+            {
+                "semantic_key": "product_id",
+                "raw_name": "商品编号",
+                "required": False,
+                "in_hash": True,
+            }
+        ]
     )
 
     assert normalized[0]["raw_name"] == "商品编号"
@@ -382,8 +416,18 @@ def test_core_fields_normalization_keeps_raw_name():
 def test_storage_column_names_ignore_duplicate_semantic_entries():
     """同一个语义键出现多次时, 建列口径仍然只保留物理列名一次。"""
     core_fields: List[Dict[str, Any]] = [
-        {"semantic_key": None, "raw_name": "商品编号", "required": False, "in_hash": True},
-        {"semantic_key": None, "raw_name": "商品编号", "required": True, "in_hash": False},
+        {
+            "semantic_key": None,
+            "raw_name": "商品编号",
+            "required": False,
+            "in_hash": True,
+        },
+        {
+            "semantic_key": None,
+            "raw_name": "商品编号",
+            "required": True,
+            "in_hash": False,
+        },
     ]
 
     assert core_field_storage_column_names(core_fields) == ["商品编号"]

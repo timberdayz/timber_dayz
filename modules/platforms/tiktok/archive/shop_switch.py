@@ -84,7 +84,9 @@ class TiktokShopSwitch:
                 shop_code = None
                 if nav_ok:
                     try:
-                        loc = page.locator("div.text-p4-regular.text-neutral-text4.mb-4.px-24.break-all")
+                        loc = page.locator(
+                            "div.text-p4-regular.text-neutral-text4.mb-4.px-24.break-all"
+                        )
                         texts = []
                         try:
                             texts = await loc.all_inner_texts() or []
@@ -113,7 +115,12 @@ class TiktokShopSwitch:
             self.ctx.config["shop_region"] = picked_region
             if shop_code:
                 self.ctx.config["shop_id"] = shop_code
-            account_label = (acc.get("label") or acc.get("store_name") or acc.get("username") or "unknown")
+            account_label = (
+                acc.get("label")
+                or acc.get("store_name")
+                or acc.get("username")
+                or "unknown"
+            )
             self.ctx.config["shop_name"] = f"{account_label}_{picked_region.lower()}"
             self._log(
                 "info",

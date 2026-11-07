@@ -17,7 +17,9 @@ def test_api_index_exposes_hr_performance_adjustment_methods():
 
 
 def test_hr_performance_management_view_exposes_adjustment_panel():
-    text = Path("frontend/src/domains/business/views/hr/PerformanceManagement.vue").read_text(encoding="utf-8")
+    text = Path(
+        "frontend/src/domains/business/views/hr/PerformanceManagement.vue"
+    ).read_text(encoding="utf-8")
 
     assert "adjustmentDialogVisible" in text
     assert "openCreateAdjustment" in text
@@ -35,15 +37,21 @@ def test_hr_performance_management_view_exposes_adjustment_panel():
 
 
 def test_employee_salary_view_mentions_stale_payroll_warning():
-    text = Path("frontend/src/domains/business/views/hr/EmployeeSalary.vue").read_text(encoding="utf-8")
+    text = Path("frontend/src/domains/business/views/hr/EmployeeSalary.vue").read_text(
+        encoding="utf-8"
+    )
 
     assert "is_stale_against_latest_calc" in text
     assert "结果已过期" in text
 
 
 def test_performance_views_expose_ranking_pool_and_alert_helpers():
-    mgmt = Path("frontend/src/domains/business/views/hr/PerformanceManagement.vue").read_text(encoding="utf-8")
-    display = Path("frontend/src/domains/business/views/hr/PerformanceDisplay.vue").read_text(encoding="utf-8")
+    mgmt = Path(
+        "frontend/src/domains/business/views/hr/PerformanceManagement.vue"
+    ).read_text(encoding="utf-8")
+    display = Path(
+        "frontend/src/domains/business/views/hr/PerformanceDisplay.vue"
+    ).read_text(encoding="utf-8")
 
     assert "rankingPoolText" in mgmt
     assert "performanceAlertText" in mgmt
@@ -60,7 +68,9 @@ def test_performance_views_expose_ranking_pool_and_alert_helpers():
 
 
 def test_person_target_page_marks_boundary_with_performance_inputs():
-    text = Path("frontend/src/domains/business/views/target/TargetPersonManagement.vue").read_text(encoding="utf-8")
+    text = Path(
+        "frontend/src/domains/business/views/target/TargetPersonManagement.vue"
+    ).read_text(encoding="utf-8")
 
     # 人员绩效输入入口：按钮文案 + 跳转目标（commit a12d49bf 把这个入口搬到本页面）
     assert "人员绩效输入" in text
@@ -72,7 +82,9 @@ def test_person_target_page_marks_boundary_with_performance_inputs():
 
 
 def test_legacy_target_management_page_is_downgraded_to_split_entry():
-    text = Path("frontend/src/domains/business/views/target/TargetManagement.vue").read_text(encoding="utf-8")
+    text = Path(
+        "frontend/src/domains/business/views/target/TargetManagement.vue"
+    ).read_text(encoding="utf-8")
 
     assert "历史入口" in text
     assert "/target-management/shop" in text
@@ -86,7 +98,9 @@ def test_legacy_target_management_page_is_downgraded_to_split_entry():
 def test_income_audit_route_and_view_exist():
     router_text = Path("frontend/src/router/index.js").read_text(encoding="utf-8")
     menu_text = Path("frontend/src/config/menuGroups.js").read_text(encoding="utf-8")
-    view_text = Path("frontend/src/domains/business/views/hr/IncomeAudit.vue").read_text(encoding="utf-8")
+    view_text = Path(
+        "frontend/src/domains/business/views/hr/IncomeAudit.vue"
+    ).read_text(encoding="utf-8")
 
     assert "/hr-income-audit" in router_text
     assert "/hr-income-audit" in menu_text

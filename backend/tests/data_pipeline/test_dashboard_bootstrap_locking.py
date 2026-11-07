@@ -29,7 +29,9 @@ async def test_bootstrap_skips_when_lock_not_acquired(monkeypatch):
         raise AssertionError("bootstrap_dashboard_assets should not run without lock")
 
     monkeypatch.setattr(dashboard_bootstrap, "inspect_dashboard_assets", fake_inspect)
-    monkeypatch.setattr(dashboard_bootstrap, "bootstrap_dashboard_assets", should_not_run)
+    monkeypatch.setattr(
+        dashboard_bootstrap, "bootstrap_dashboard_assets", should_not_run
+    )
 
     class _Scalar:
         def __init__(self, value):
@@ -67,7 +69,9 @@ async def test_bootstrap_acquires_lock_and_unlocks(monkeypatch):
         return {"ready": True, "run_id": "run_test"}
 
     monkeypatch.setattr(dashboard_bootstrap, "inspect_dashboard_assets", fake_inspect)
-    monkeypatch.setattr(dashboard_bootstrap, "bootstrap_dashboard_assets", fake_bootstrap)
+    monkeypatch.setattr(
+        dashboard_bootstrap, "bootstrap_dashboard_assets", fake_bootstrap
+    )
 
     class _Scalar:
         def __init__(self, value):
@@ -113,7 +117,9 @@ async def test_bootstrap_deploy_mode_zeroes_statement_timeout_before_locking(
         return {"ready": True}
 
     monkeypatch.setattr(dashboard_bootstrap, "inspect_dashboard_assets", fake_inspect)
-    monkeypatch.setattr(dashboard_bootstrap, "bootstrap_dashboard_assets", fake_bootstrap)
+    monkeypatch.setattr(
+        dashboard_bootstrap, "bootstrap_dashboard_assets", fake_bootstrap
+    )
 
     class _Scalar:
         def __init__(self, value):

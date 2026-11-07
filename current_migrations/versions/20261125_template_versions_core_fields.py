@@ -229,13 +229,19 @@ def _derive_core_fields_sql() -> str:
 
 def apply_upgrade(bind) -> dict:
     """upgrade 的真实逻辑(守护测试直接调它)。"""
-    stats = {"core_fields_backfilled": 0, "parse_rules_backfilled": 0, "hash_participates_cleaned": 0}
+    stats = {
+        "core_fields_backfilled": 0,
+        "parse_rules_backfilled": 0,
+        "hash_participates_cleaned": 0,
+    }
 
     bind.execute(
         sa.text(f"ALTER TABLE {_VERSIONS} ADD COLUMN IF NOT EXISTS core_fields JSONB")
     )
     bind.execute(
-        sa.text(f"ALTER TABLE {_VERSIONS} ADD COLUMN IF NOT EXISTS field_parse_rules JSONB")
+        sa.text(
+            f"ALTER TABLE {_VERSIONS} ADD COLUMN IF NOT EXISTS field_parse_rules JSONB"
+        )
     )
 
     # ── legacy 编辑面也加一列 core_fields(与版本级同构) ─────────────────
@@ -351,7 +357,9 @@ def apply_downgrade(bind) -> dict:
         )
     )
     bind.execute(sa.text(f"ALTER TABLE {_VERSIONS} DROP COLUMN IF EXISTS core_fields"))
-    bind.execute(sa.text(f"ALTER TABLE {_VERSIONS} DROP COLUMN IF EXISTS field_parse_rules"))
+    bind.execute(
+        sa.text(f"ALTER TABLE {_VERSIONS} DROP COLUMN IF EXISTS field_parse_rules")
+    )
     bind.execute(sa.text(f"ALTER TABLE {_LEGACY} DROP COLUMN IF EXISTS core_fields"))
     return stats
 

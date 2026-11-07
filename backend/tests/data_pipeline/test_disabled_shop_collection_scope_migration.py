@@ -87,7 +87,9 @@ def test_migration_chain(migration):
         migration.revision
         == "current_schema_20261122_remove_disabled_shop_collection_scopes"
     )
-    assert migration.down_revision == "current_schema_20261121_selling_price_source_enum"
+    assert (
+        migration.down_revision == "current_schema_20261121_selling_price_source_enum"
+    )
 
 
 def test_migration_mentions_all_three_layers(migration):
@@ -117,7 +119,11 @@ def test_inline_summary_matches_authoritative_implementation(migration):
         [],
         [(ACTIVE_A_SAID, ["analytics"], None)],
         [
-            (ACTIVE_A_SAID, ["products", "analytics", "services"], {"services": ["agent"]}),
+            (
+                ACTIVE_A_SAID,
+                ["products", "analytics", "services"],
+                {"services": ["agent"]},
+            ),
             (ACTIVE_B_SAID, ["analytics"], None),
         ],
         [(ACTIVE_A_SAID, ["services"], {"services": ["agent", "ai_assistant"]})],
@@ -346,17 +352,21 @@ async def test_config_summary_is_recalculated(migration, pg_session):
     await _run_upgrade(migration, pg_session)
 
     row = (
-        await pg_session.execute(
-            text(
-                """
+        (
+            await pg_session.execute(
+                text(
+                    """
                 SELECT account_ids, data_domains, sub_domains
                 FROM core.collection_configs
                 WHERE id = :config_id
                 """
-            ),
-            {"config_id": CONFIG_ID},
+                ),
+                {"config_id": CONFIG_ID},
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
 
     account_ids = row["account_ids"]
     if isinstance(account_ids, str):
@@ -391,7 +401,9 @@ async def test_template_scope_of_disabled_shop_is_disabled(migration, pg_session
         )
     ).scalar_one()
     scopes = row if isinstance(row, list) else json.loads(row)
-    state = {scope["shop_account_id"]: bool(scope.get("enabled", True)) for scope in scopes}
+    state = {
+        scope["shop_account_id"]: bool(scope.get("enabled", True)) for scope in scopes
+    }
     assert state[DISABLED_SAID] is False
     assert state[ACTIVE_A_SAID] is True
 
@@ -412,13 +424,17 @@ async def test_template_summary_drops_disabled_shop_scope(migration, pg_session)
 
     await _seed(pg_session)
     row = (
-        await pg_session.execute(
-            text(
-                "SELECT * FROM core.collection_config_templates WHERE id = :template_id"
-            ),
-            {"template_id": TEMPLATE_ID},
+        (
+            await pg_session.execute(
+                text(
+                    "SELECT * FROM core.collection_config_templates WHERE id = :template_id"
+                ),
+                {"template_id": TEMPLATE_ID},
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     template = CollectionConfigTemplate(**dict(row))
 
     summary = _build_template_summary(
@@ -503,24 +519,32 @@ async def test_upgrade_is_idempotent(migration, pg_session):
     await _seed(pg_session)
     await _run_upgrade(migration, pg_session)
     first = (
-        await pg_session.execute(
-            text(
-                "SELECT account_ids, data_domains, sub_domains "
-                "FROM core.collection_configs WHERE id = :config_id"
-            ),
-            {"config_id": CONFIG_ID},
+        (
+            await pg_session.execute(
+                text(
+                    "SELECT account_ids, data_domains, sub_domains "
+                    "FROM core.collection_configs WHERE id = :config_id"
+                ),
+                {"config_id": CONFIG_ID},
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     await _run_upgrade(migration, pg_session)
     second = (
-        await pg_session.execute(
-            text(
-                "SELECT account_ids, data_domains, sub_domains "
-                "FROM core.collection_configs WHERE id = :config_id"
-            ),
-            {"config_id": CONFIG_ID},
+        (
+            await pg_session.execute(
+                text(
+                    "SELECT account_ids, data_domains, sub_domains "
+                    "FROM core.collection_configs WHERE id = :config_id"
+                ),
+                {"config_id": CONFIG_ID},
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert dict(first) == dict(second)
 
 
@@ -715,9 +739,7 @@ async def test_update_shop_account_disabling_cleans_up_scopes(pg_session):
     await _seed(pg_session)
     session = _NoCommitSession(pg_session)
 
-    await update_shop_account(
-        ACTIVE_A_SAID, ShopAccountUpdate(enabled=False), session
-    )
+    await update_shop_account(ACTIVE_A_SAID, ShopAccountUpdate(enabled=False), session)
 
     state = await _scope_enabled_map(pg_session)
     assert state[ACTIVE_A_SAID] is False
@@ -759,9 +781,9 @@ async def test_delete_shop_account_cleans_up_scopes(pg_session):
 def test_frontend_hides_rows_without_account():
     """前端必须过滤掉「账号查不到」的行(停用/已删除)。"""
     source = COLLECTION_CONFIG_VUE.read_text(encoding="utf-8")
-    assert ".filter((row) => row.account)" in source, (
-        "采集工作区必须过滤掉账号查不到的行 —— 否则停用店会变成一排点不动的复选框"
-    )
+    assert (
+        ".filter((row) => row.account)" in source
+    ), "采集工作区必须过滤掉账号查不到的行 —— 否则停用店会变成一排点不动的复选框"
 
 
 def test_frontend_scope_row_maps_account():

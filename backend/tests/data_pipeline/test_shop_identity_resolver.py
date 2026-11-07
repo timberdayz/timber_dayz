@@ -55,6 +55,7 @@ def _flat(body: str) -> str:
     """把 SQL 里的换行/缩进压成单空格 —— 让分区字面量不必逐字对齐。"""
     return " ".join(body.split())
 
+
 def _read_asset(target: str) -> str:
     path = REPO_ROOT / SQL_TARGET_PATHS[target]
     return path.read_text(encoding="utf-8")
@@ -80,6 +81,7 @@ def test_chain_keeps_source_key_and_resolves_after_dedup(target: str) -> None:
     assert (
         "PARTITION BY platform_code, shop_id, data_hash" not in flat
     ), f"{target} 用了解析后的店铺键去重 —— 解析必须发生在去重之后"
+
 
 @pytest.mark.parametrize("target", UNRESOLVED_CHAINS)
 def test_unmatched_rows_keep_source_key(target: str) -> None:

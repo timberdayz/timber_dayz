@@ -12,7 +12,10 @@ from backend.services.platform_login_entry_service import get_platform_login_ent
 from modules.components.base import ExecutionContext
 from modules.components.login.base import LoginComponent, LoginResult
 from modules.platforms.tiktok.archive.analytics_config import AnalyticsSelectors
-from modules.platforms.tiktok.components._navigation import page_looks_loading, wait_until_bootstrap_finishes
+from modules.platforms.tiktok.components._navigation import (
+    page_looks_loading,
+    wait_until_bootstrap_finishes,
+)
 
 
 class TiktokLogin(LoginComponent):
@@ -52,7 +55,10 @@ class TiktokLogin(LoginComponent):
         cur = str(url or "").strip().lower()
         if not cur:
             return False
-        if "seller.tiktokshopglobalselling.com" not in cur and "seller.tiktokglobalshop.com" not in cur:
+        if (
+            "seller.tiktokshopglobalselling.com" not in cur
+            and "seller.tiktokglobalshop.com" not in cur
+        ):
             return False
         if "/account/login" in cur:
             return False
@@ -61,7 +67,12 @@ class TiktokLogin(LoginComponent):
     def _credential_value_for_mode(self, account: dict[str, Any], mode: str) -> str:
         if mode == "phone":
             return str(account.get("phone") or account.get("username") or "").strip()
-        return str(account.get("email") or account.get("username") or account.get("phone") or "").strip()
+        return str(
+            account.get("email")
+            or account.get("username")
+            or account.get("phone")
+            or ""
+        ).strip()
 
     async def _wait_for_reused_session_redirect(
         self,
@@ -107,17 +118,26 @@ class TiktokLogin(LoginComponent):
             except Exception:
                 pass
 
-            seller_error = await self._find_visible_text(page, self._seller_context_error_texts())
+            seller_error = await self._find_visible_text(
+                page, self._seller_context_error_texts()
+            )
             if seller_error:
-                self._log_info("tiktok_login reused_session_bootstrap seller_context_error=%s", seller_error)
+                self._log_info(
+                    "tiktok_login reused_session_bootstrap seller_context_error=%s",
+                    seller_error,
+                )
                 return "login_error"
 
             if await self._target_looks_ready(page):
-                self._log_url_event("reused_session_bootstrap_target_ready", getattr(page, "url", ""))
+                self._log_url_event(
+                    "reused_session_bootstrap_target_ready", getattr(page, "url", "")
+                )
                 return "success"
 
             if await self._is_otp_visible(page):
-                self._log_url_event("reused_session_bootstrap_otp_visible", getattr(page, "url", ""))
+                self._log_url_event(
+                    "reused_session_bootstrap_otp_visible", getattr(page, "url", "")
+                )
                 return "otp"
 
             current_url = str(getattr(page, "url", "") or "").strip().lower()
@@ -125,7 +145,9 @@ class TiktokLogin(LoginComponent):
                 waited += settle_timeout
                 continue
 
-            if "/account/login" not in current_url and self._login_looks_successful(current_url):
+            if "/account/login" not in current_url and self._login_looks_successful(
+                current_url
+            ):
                 waited += settle_timeout
                 continue
 
@@ -268,7 +290,9 @@ class TiktokLogin(LoginComponent):
             return "email"
         if await self._locator_is_visible(self._phone_input_locator(page), timeout=300):
             return "phone"
-        if await self._locator_is_visible(self._phone_login_switch_locator(page), timeout=300):
+        if await self._locator_is_visible(
+            self._phone_login_switch_locator(page), timeout=300
+        ):
             return "email"
         return "phone"
 
@@ -316,12 +340,18 @@ class TiktokLogin(LoginComponent):
             raise RuntimeError(f"cannot switch login mode to {target_mode}")
 
     async def _is_otp_visible(self, page: Any) -> bool:
-        input_locator = await self._first_visible_locator(self._otp_input_locators(page), timeout=1000)
-        confirm_locator = await self._first_visible_locator(self._otp_confirm_locators(page), timeout=1000)
+        input_locator = await self._first_visible_locator(
+            self._otp_input_locators(page), timeout=1000
+        )
+        confirm_locator = await self._first_visible_locator(
+            self._otp_confirm_locators(page), timeout=1000
+        )
         input_visible = input_locator is not None
         confirm_visible = confirm_locator is not None
         surface_text = await self._find_visible_text(page, self._otp_surface_texts())
-        surface_text_count = await self._count_visible_texts(page, self._otp_surface_texts())
+        surface_text_count = await self._count_visible_texts(
+            page, self._otp_surface_texts()
+        )
 
         if input_visible and confirm_visible:
             return True
@@ -339,15 +369,23 @@ class TiktokLogin(LoginComponent):
         if not credential:
             raise RuntimeError(f"missing credential value for {mode} login mode")
 
-        locator = self._phone_input_locator(page) if mode == "phone" else self._email_input_locator(page)
+        locator = (
+            self._phone_input_locator(page)
+            if mode == "phone"
+            else self._email_input_locator(page)
+        )
         await locator.fill(credential, timeout=10000)
-        await self._password_locator(page).fill(str(account.get("password") or "").strip(), timeout=10000)
+        await self._password_locator(page).fill(
+            str(account.get("password") or "").strip(), timeout=10000
+        )
 
     async def _submit_credentials(self, page: Any) -> None:
         await self._login_button_locator(page).click(timeout=5000)
 
     async def _fill_otp(self, page: Any, otp_value: str) -> None:
-        locator = await self._first_visible_locator(self._otp_input_locators(page), timeout=1000)
+        locator = await self._first_visible_locator(
+            self._otp_input_locators(page), timeout=1000
+        )
         if locator is None:
             locator = self._otp_input_locator(page)
         await locator.fill(otp_value, timeout=5000)
@@ -381,7 +419,9 @@ class TiktokLogin(LoginComponent):
             pass
 
     async def _confirm_otp(self, page: Any) -> None:
-        locator = await self._first_visible_locator(self._otp_confirm_locators(page), timeout=1000)
+        locator = await self._first_visible_locator(
+            self._otp_confirm_locators(page), timeout=1000
+        )
         if locator is None:
             locator = self._otp_confirm_locator(page)
         await locator.click(timeout=5000)
@@ -392,11 +432,11 @@ class TiktokLogin(LoginComponent):
     def _configured_shop_region(self) -> str:
         config = self.ctx.config or {}
         account = self.ctx.account or {}
-        return str(
-            config.get("shop_region")
-            or account.get("shop_region")
-            or ""
-        ).strip().upper()
+        return (
+            str(config.get("shop_region") or account.get("shop_region") or "")
+            .strip()
+            .upper()
+        )
 
     def _homepage_has_region_context(self, url: str) -> bool:
         current = str(url or "").strip().lower()
@@ -458,7 +498,9 @@ class TiktokLogin(LoginComponent):
         current_url = str(getattr(page, "url", "") or "").strip().lower()
         local_storage_ready = False
 
-        if "/homepage" in current_url and not self._homepage_has_region_context(current_url):
+        if "/homepage" in current_url and not self._homepage_has_region_context(
+            current_url
+        ):
             return False
 
         # TikTok homepage often lands first, then continues its own bootstrap (loading overlay + async init)
@@ -482,7 +524,9 @@ class TiktokLogin(LoginComponent):
         if region:
             for token in (region, f"{region} ", f"{region} Singapore"):
                 try:
-                    if await self._locator_is_visible(page.get_by_text(token, exact=False).first, timeout=300):
+                    if await self._locator_is_visible(
+                        page.get_by_text(token, exact=False).first, timeout=300
+                    ):
                         signal_count += 1
                         break
                 except Exception:
@@ -490,7 +534,9 @@ class TiktokLogin(LoginComponent):
 
         for text in ("TikTok Shop", "首页", "数据分析", "订单", "商品"):
             try:
-                if await self._locator_is_visible(page.get_by_text(text, exact=False).first, timeout=300):
+                if await self._locator_is_visible(
+                    page.get_by_text(text, exact=False).first, timeout=300
+                ):
                     signal_count += 1
             except Exception:
                 continue
@@ -502,7 +548,9 @@ class TiktokLogin(LoginComponent):
             'a[href*="/order"]',
         ):
             try:
-                if await self._locator_is_visible(page.locator(selector).first, timeout=300):
+                if await self._locator_is_visible(
+                    page.locator(selector).first, timeout=300
+                ):
                     signal_count += 1
             except Exception:
                 continue
@@ -519,7 +567,9 @@ class TiktokLogin(LoginComponent):
         if await self._locator_is_visible(self._password_locator(page), timeout=300):
             return False
 
-        if await self._locator_is_visible(self._login_button_locator(page), timeout=300):
+        if await self._locator_is_visible(
+            self._login_button_locator(page), timeout=300
+        ):
             return False
 
         return True
@@ -527,14 +577,18 @@ class TiktokLogin(LoginComponent):
     async def _data_overview_dom_looks_ready(self, page: Any) -> bool:
         for probe in AnalyticsSelectors.DATA_READY_PROBES:
             try:
-                if await self._locator_is_visible(page.locator(probe).first, timeout=300):
+                if await self._locator_is_visible(
+                    page.locator(probe).first, timeout=300
+                ):
                     return True
             except Exception:
                 continue
 
         for text in ("GMV",):
             try:
-                if await self._locator_is_visible(page.get_by_text(text, exact=False).first, timeout=300):
+                if await self._locator_is_visible(
+                    page.get_by_text(text, exact=False).first, timeout=300
+                ):
                     return True
             except Exception:
                 continue
@@ -545,7 +599,9 @@ class TiktokLogin(LoginComponent):
         current_url = str(getattr(page, "url", "") or "").strip().lower()
         if not self._login_looks_successful(current_url):
             return False
-        if "/homepage" in current_url and not self._homepage_has_region_context(current_url):
+        if "/homepage" in current_url and not self._homepage_has_region_context(
+            current_url
+        ):
             return False
         try:
             if await page_looks_loading(page):
@@ -558,13 +614,24 @@ class TiktokLogin(LoginComponent):
             return False
         if await self._locator_is_visible(self._password_locator(page), timeout=300):
             return False
-        if await self._locator_is_visible(self._login_button_locator(page), timeout=300):
+        if await self._locator_is_visible(
+            self._login_button_locator(page), timeout=300
+        ):
             return False
 
         signal_count = 0
-        for text in ("TikTok Shop", "首页", "数据分析", "订单", "商品", "Seller Center"):
+        for text in (
+            "TikTok Shop",
+            "首页",
+            "数据分析",
+            "订单",
+            "商品",
+            "Seller Center",
+        ):
             try:
-                if await self._locator_is_visible(page.get_by_text(text, exact=False).first, timeout=300):
+                if await self._locator_is_visible(
+                    page.get_by_text(text, exact=False).first, timeout=300
+                ):
                     signal_count += 1
             except Exception:
                 continue
@@ -577,7 +644,9 @@ class TiktokLogin(LoginComponent):
             'a[href*="/manage"]',
         ):
             try:
-                if await self._locator_is_visible(page.locator(selector).first, timeout=300):
+                if await self._locator_is_visible(
+                    page.locator(selector).first, timeout=300
+                ):
                     signal_count += 1
             except Exception:
                 continue
@@ -631,9 +700,13 @@ class TiktokLogin(LoginComponent):
                 self._log_info("tiktok_login %s otp_error=%s", phase, otp_error)
                 return "otp_error"
 
-            seller_error = await self._find_visible_text(page, self._seller_context_error_texts())
+            seller_error = await self._find_visible_text(
+                page, self._seller_context_error_texts()
+            )
             if seller_error:
-                self._log_info("tiktok_login %s seller_context_error=%s", phase, seller_error)
+                self._log_info(
+                    "tiktok_login %s seller_context_error=%s", phase, seller_error
+                )
                 return "login_error"
 
             if await self._target_looks_ready(page):
@@ -651,18 +724,24 @@ class TiktokLogin(LoginComponent):
         self._log_url_event(f"{phase}_timeout", last_logged_url)
         return "timeout"
 
-    async def _raise_otp_verification_required(self, page: Any, config: dict[str, Any]) -> None:
+    async def _raise_otp_verification_required(
+        self, page: Any, config: dict[str, Any]
+    ) -> None:
         screenshot_dir = (config or {}).get("task", {}).get("screenshot_dir")
         if screenshot_dir:
             os.makedirs(screenshot_dir, exist_ok=True)
             screenshot_path = os.path.join(screenshot_dir, "tiktok-login-otp.png")
         else:
-            fd, screenshot_path = tempfile.mkstemp(suffix=".png", prefix="tiktok_login_otp_")
+            fd, screenshot_path = tempfile.mkstemp(
+                suffix=".png", prefix="tiktok_login_otp_"
+            )
             os.close(fd)
         await page.screenshot(path=screenshot_path, timeout=5000)
         raise VerificationRequiredError("otp", screenshot_path)
 
-    async def _raise_manual_intervention_required(self, page: Any, config: dict[str, Any]) -> None:
+    async def _raise_manual_intervention_required(
+        self, page: Any, config: dict[str, Any]
+    ) -> None:
         screenshot_dir = (config or {}).get("task", {}).get("screenshot_dir")
         if screenshot_dir:
             os.makedirs(screenshot_dir, exist_ok=True)
@@ -689,13 +768,19 @@ class TiktokLogin(LoginComponent):
             return LoginResult(success=True, message="ok")
         if outcome == "otp_error":
             otp_error = await self._find_visible_otp_error(page)
-            return LoginResult(success=False, message=otp_error or "otp verification failed")
+            return LoginResult(
+                success=False, message=otp_error or "otp verification failed"
+            )
         if outcome == "login_error":
             login_error = await self._find_visible_login_error(page)
-            return LoginResult(success=False, message=login_error or "login failed after otp submit")
+            return LoginResult(
+                success=False, message=login_error or "login failed after otp submit"
+            )
         if outcome == "timeout":
             await self._raise_manual_intervention_required(page, self.ctx.config or {})
-        return LoginResult(success=False, message="otp did not leave verification screen")
+        return LoginResult(
+            success=False, message="otp did not leave verification screen"
+        )
 
     async def run(self, page: Any) -> LoginResult:
         acc = self.ctx.account or {}
@@ -704,7 +789,9 @@ class TiktokLogin(LoginComponent):
         current_url = str(getattr(page, "url", "") or "")
         otp_value = str(params.get("captcha_code") or params.get("otp") or "").strip()
         manual_completed = bool(params.get("manual_completed"))
-        reused_session = bool(params.get("reused_session") or config.get("reused_session"))
+        reused_session = bool(
+            params.get("reused_session") or config.get("reused_session")
+        )
 
         if self._login_looks_successful(current_url):
             self._log_url_event("already_logged_in", current_url)
@@ -737,13 +824,17 @@ class TiktokLogin(LoginComponent):
                     message="manual verification did not reach otp or homepage",
                 )
 
-            login_url = str(acc.get("login_url") or get_platform_login_entry(self.platform)).strip()
+            login_url = str(
+                acc.get("login_url") or get_platform_login_entry(self.platform)
+            ).strip()
             self._log_url_event("run_start", current_url)
             self._log_url_event("login_entry", login_url)
 
             password = str(acc.get("password") or "").strip()
             if not password:
-                return LoginResult(success=False, message="password is required in account")
+                return LoginResult(
+                    success=False, message="password is required in account"
+                )
 
             if reused_session:
                 redirected = await self._wait_for_reused_session_redirect(page)
@@ -763,8 +854,13 @@ class TiktokLogin(LoginComponent):
                         return await self._submit_resumed_otp(page, otp_value)
                     if bootstrap_outcome == "login_error":
                         login_error = await self._find_visible_login_error(page)
-                        seller_error = await self._find_visible_text(page, self._seller_context_error_texts())
-                        return LoginResult(success=False, message=login_error or seller_error or "login failed")
+                        seller_error = await self._find_visible_text(
+                            page, self._seller_context_error_texts()
+                        )
+                        return LoginResult(
+                            success=False,
+                            message=login_error or seller_error or "login failed",
+                        )
 
             current_url = str(getattr(page, "url", "") or "").strip()
             if "/account/login" in current_url.lower():
@@ -787,7 +883,9 @@ class TiktokLogin(LoginComponent):
             await self._wait_for_login_surface_ready(page)
 
             if self._login_looks_successful(str(getattr(page, "url", "") or "")):
-                self._log_url_event("login_short_circuit_success", getattr(page, "url", ""))
+                self._log_url_event(
+                    "login_short_circuit_success", getattr(page, "url", "")
+                )
                 await self._cleanup_after_login(page)
                 return LoginResult(success=True, message="ok")
 
@@ -797,7 +895,9 @@ class TiktokLogin(LoginComponent):
             self._log_url_event("credentials_filled", getattr(page, "url", ""))
             await self._submit_credentials(page)
             self._log_url_event("credentials_submitted", getattr(page, "url", ""))
-            outcome = await self._wait_for_post_login_outcome(page, phase="post_credentials")
+            outcome = await self._wait_for_post_login_outcome(
+                page, phase="post_credentials"
+            )
             if outcome == "success":
                 self._log_url_event("login_success", getattr(page, "url", ""))
                 await self._cleanup_after_login(page)
@@ -813,7 +913,9 @@ class TiktokLogin(LoginComponent):
             if outcome == "timeout":
                 await self._raise_manual_intervention_required(page, config)
 
-            return LoginResult(success=False, message="login did not reach homepage or otp step")
+            return LoginResult(
+                success=False, message="login did not reach homepage or otp step"
+            )
         except VerificationRequiredError:
             raise
         except Exception as e:

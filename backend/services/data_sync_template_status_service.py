@@ -62,7 +62,9 @@ class DataSyncTemplateStatusService:
         self.template_matcher = get_template_matcher(db)
         self.template_resolver = get_template_resolver(db)
 
-    async def _load_legacy_template(self, template_id: Any) -> Optional[FieldMappingTemplate]:
+    async def _load_legacy_template(
+        self, template_id: Any
+    ) -> Optional[FieldMappingTemplate]:
         """按模板行 ID 取模板行(用于跨 family 接管时取被接管变体的模板)。"""
         if template_id is None:
             return None
@@ -158,11 +160,11 @@ class DataSyncTemplateStatusService:
         published_template: Optional[FieldMappingTemplate] = None,
     ) -> Dict[str, Any]:
         resolver_result = None
-        normalized_sub_domain = catalog_file.sub_domain if catalog_file.sub_domain else None
-        # [*] 账号/地区维度: 不同地区的导出表头可能不同, 优先匹配账号专属模板
-        normalized_account = (
-            getattr(catalog_file, "account", None) or None
+        normalized_sub_domain = (
+            catalog_file.sub_domain if catalog_file.sub_domain else None
         )
+        # [*] 账号/地区维度: 不同地区的导出表头可能不同, 优先匹配账号专属模板
+        normalized_account = getattr(catalog_file, "account", None) or None
         try:
             resolver_result = await self.template_resolver.resolve(
                 platform=catalog_file.platform_code,
@@ -283,9 +285,7 @@ class DataSyncTemplateStatusService:
         # [*] 契约是否已过时: 契约存在, 但实际解释这个文件的基准不是它 ——
         #     说明采集登记时按粒度选错了模板(导出格式不跟着粒度走), 需要修正。
         contract_stale = bool(
-            contract
-            and baseline_kind
-            and baseline_kind != TEMPLATE_BASELINE_CONTRACT
+            contract and baseline_kind and baseline_kind != TEMPLATE_BASELINE_CONTRACT
         )
 
         # [*] 契约信号(第 3 批 3.3): 契约失效必须**显式**留痕, 不允许无声回退
@@ -305,7 +305,9 @@ class DataSyncTemplateStatusService:
                 if resolver_result
                 else GOVERNANCE_STATUS_MISSING_FAMILY
             )
-            active_version = resolver_result.get("active_version") if resolver_result else None
+            active_version = (
+                resolver_result.get("active_version") if resolver_result else None
+            )
             return {
                 "template_status": (
                     TEMPLATE_STATUS_MISSING_VARIANT
@@ -314,11 +316,17 @@ class DataSyncTemplateStatusService:
                 ),
                 "governance_status": governance_status,
                 "has_template": governance_status == "missing_variant",
-                "template_name": active_version.get("template_name") if active_version else None,
+                "template_name": (
+                    active_version.get("template_name") if active_version else None
+                ),
                 "template_header_row": None,
                 "template_update_required": False,
                 "update_reason": None,
-                "error_code": "MISSING_VARIANT" if governance_status == "missing_variant" else "NO_TEMPLATE",
+                "error_code": (
+                    "MISSING_VARIANT"
+                    if governance_status == "missing_variant"
+                    else "NO_TEMPLATE"
+                ),
                 "should_auto_sync": False,
                 "exact_match": False,
                 "semantic_match": False,
@@ -331,8 +339,12 @@ class DataSyncTemplateStatusService:
                 "takeover": takeover_report,
                 "template_outdated": False,
                 "baseline_template_id": baseline_info.get("baseline_template_id"),
-                "baseline_template_version": baseline_info.get("baseline_template_version"),
-                "shadow_compare": resolver_result.get("shadow_compare") if resolver_result else None,
+                "baseline_template_version": baseline_info.get(
+                    "baseline_template_version"
+                ),
+                "shadow_compare": (
+                    resolver_result.get("shadow_compare") if resolver_result else None
+                ),
                 **contract_signals,
             }
 
@@ -358,8 +370,12 @@ class DataSyncTemplateStatusService:
                 "takeover": takeover_report,
                 "template_outdated": bool(baseline_info.get("template_outdated")),
                 "baseline_template_id": baseline_info.get("baseline_template_id"),
-                "baseline_template_version": baseline_info.get("baseline_template_version"),
-                "shadow_compare": resolver_result.get("shadow_compare") if resolver_result else None,
+                "baseline_template_version": baseline_info.get(
+                    "baseline_template_version"
+                ),
+                "shadow_compare": (
+                    resolver_result.get("shadow_compare") if resolver_result else None
+                ),
                 **contract_signals,
             }
 
@@ -477,10 +493,7 @@ class DataSyncTemplateStatusService:
         ):
             contract_captured_at = parse_contract_captured_at(contract)
             published_created_at = getattr(published_template, "created_at", None)
-            if (
-                published_created_at is not None
-                and published_created_at.tzinfo is None
-            ):
+            if published_created_at is not None and published_created_at.tzinfo is None:
                 # SQLite / naive datetime 统一按 UTC 处理 —— 只比较相对先后
                 published_created_at = published_created_at.replace(tzinfo=timezone.utc)
             is_after_the_fact = (
@@ -568,6 +581,8 @@ class DataSyncTemplateStatusService:
             "baseline_template_id": baseline_info.get("baseline_template_id"),
             "baseline_template_version": baseline_info.get("baseline_template_version"),
             "baseline_valid": bool(baseline_info.get("baseline_valid")),
-            "shadow_compare": resolver_result.get("shadow_compare") if resolver_result else None,
+            "shadow_compare": (
+                resolver_result.get("shadow_compare") if resolver_result else None
+            ),
             **contract_signals,
         }

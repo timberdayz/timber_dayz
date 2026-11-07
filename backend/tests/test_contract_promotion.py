@@ -433,7 +433,9 @@ async def test_build_promoted_contract_without_signal_is_none():
         async def get(self, _model, _pk):
             raise AssertionError("没有晋升信号时不该去取模板")
 
-    assert await _build_promoted_contract(_LocalDb(), {"should_auto_sync": True}) is None
+    assert (
+        await _build_promoted_contract(_LocalDb(), {"should_auto_sync": True}) is None
+    )
 
 
 # ── 表头读取缓存 ─────────────────────────────────────────────────────
@@ -470,7 +472,9 @@ async def test_header_read_is_cached_by_file_mtime(monkeypatch, tmp_path):
         staticmethod(_fake_read_excel),
     )
 
-    reader = shr.get_spreadsheet_header_reader(log_prefix="Test", use_cpu_executor=False)
+    reader = shr.get_spreadsheet_header_reader(
+        log_prefix="Test", use_cpu_executor=False
+    )
 
     first = await reader.read_columns(str(target), header_row=0, nrows=5)
     second = await reader.read_columns(str(target), header_row=0, nrows=5)

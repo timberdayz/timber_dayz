@@ -160,14 +160,24 @@ ORDERS_STANDARD_FIELDS: Tuple[SemanticCoverageField, ...] = (
     SemanticCoverageField("product_sku", "product_sku", FIELD_KIND_TEXT),
     SemanticCoverageField("product_name", "product_name", FIELD_KIND_TEXT),
     SemanticCoverageField("purchase_amount", "purchase_amount", FIELD_KIND_NUMERIC),
-    SemanticCoverageField("order_original_amount", "order_original_amount", FIELD_KIND_NUMERIC),
-    SemanticCoverageField("warehouse_operation_fee", "warehouse_operation_fee", FIELD_KIND_NUMERIC),
+    SemanticCoverageField(
+        "order_original_amount", "order_original_amount", FIELD_KIND_NUMERIC
+    ),
+    SemanticCoverageField(
+        "warehouse_operation_fee", "warehouse_operation_fee", FIELD_KIND_NUMERIC
+    ),
     SemanticCoverageField("shipping_fee", "shipping_fee", FIELD_KIND_NUMERIC),
     SemanticCoverageField("promotion_fee", "promotion_fee", FIELD_KIND_NUMERIC),
-    SemanticCoverageField("platform_commission", "platform_commission", FIELD_KIND_NUMERIC),
-    SemanticCoverageField("platform_deduction_fee", "platform_deduction_fee", FIELD_KIND_NUMERIC),
+    SemanticCoverageField(
+        "platform_commission", "platform_commission", FIELD_KIND_NUMERIC
+    ),
+    SemanticCoverageField(
+        "platform_deduction_fee", "platform_deduction_fee", FIELD_KIND_NUMERIC
+    ),
     SemanticCoverageField("platform_voucher", "platform_voucher", FIELD_KIND_NUMERIC),
-    SemanticCoverageField("platform_service_fee", "platform_service_fee", FIELD_KIND_NUMERIC),
+    SemanticCoverageField(
+        "platform_service_fee", "platform_service_fee", FIELD_KIND_NUMERIC
+    ),
 )
 
 
@@ -228,7 +238,9 @@ def _build_alias_coverage_sql(domain: SemanticCoverageDomain) -> str:
         f"AS {_resolved_column_name(field.standard_field)}"
         for field in domain.fields
     )
-    any_resolved = " OR ".join(f"c_{field.standard_field} IS NOT NULL" for field in domain.fields)
+    any_resolved = " OR ".join(
+        f"c_{field.standard_field} IS NOT NULL" for field in domain.fields
+    )
     carried_columns = ",\n                ".join(
         f"r.c_{field.standard_field}" for field in domain.fields
     )
@@ -274,7 +286,9 @@ def _build_column_coverage_sql(domain: SemanticCoverageDomain) -> str:
         f"AS {_resolved_column_name(field.standard_field)}"
         for field in domain.fields
     )
-    any_resolved = " OR ".join(f"({_column_expression(field)})" for field in domain.fields)
+    any_resolved = " OR ".join(
+        f"({_column_expression(field)})" for field in domain.fields
+    )
     return f"""
         SELECT
             platform_code,
@@ -350,14 +364,16 @@ def build_coverage_report(
             # 这一组全是空壳行 ⇒ 没有可判定的数据, 不进解析率, 也不告警。
             continue
 
-        for field in domain.fields:
-            resolved_rows = _to_int(row.get(_resolved_column_name(field.standard_field)))
+        for field_spec in domain.fields:
+            resolved_rows = _to_int(
+                row.get(_resolved_column_name(field_spec.standard_field))
+            )
             resolution_rate = _rate(resolved_rows, payload_rows)
             entries.append(
                 SemanticCoverageEntry(
                     platform_code=platform_code,
                     granularity=granularity,
-                    standard_field=field.standard_field,
+                    standard_field=field_spec.standard_field,
                     resolved_rows=resolved_rows,
                     total_rows=payload_rows,
                     resolution_rate=resolution_rate,
@@ -365,7 +381,7 @@ def build_coverage_report(
             )
             if resolution_rate < threshold:
                 warnings.append(
-                    f"{platform_code}/{granularity} 的 {field.standard_field} "
+                    f"{platform_code}/{granularity} 的 {field_spec.standard_field} "
                     f"解析率 {resolution_rate:.0%}，疑似语义映射缺失"
                 )
 

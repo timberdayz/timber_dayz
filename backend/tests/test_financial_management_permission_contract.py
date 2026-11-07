@@ -15,7 +15,10 @@ def test_user_store_resolves_permission_from_backend_permission_list():
     assert "const hasPermission = (permission) => {" in text
     assert "if (hasAnyRole(roles.value, ['admin'])) return true" in text
     assert "return permissions.value.includes(permission)" in text
-    assert "const hasRole = (requiredRoles) => hasAnyRole(roles.value, requiredRoles)" in text
+    assert (
+        "const hasRole = (requiredRoles) => hasAnyRole(roles.value, requiredRoles)"
+        in text
+    )
 
 
 def test_financial_management_route_requires_finance_permission_and_roles():

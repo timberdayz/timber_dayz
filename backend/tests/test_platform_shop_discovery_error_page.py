@@ -175,16 +175,17 @@ async def test_error_page_probe_is_recorded_as_failed(discovery_session):
     assert discovery.detected_store_name is None
     assert list(discovery.candidate_shop_account_ids or []) == []
     # 证据留着。
-    assert discovery.raw_payload["current_url"].endswith(
-        "/404?cnsc_shop_id=1391124228"
-    )
+    assert discovery.raw_payload["current_url"].endswith("/404?cnsc_shop_id=1391124228")
     assert discovery.raw_payload["probe_failed"] is True
 
 
 @pytest.mark.asyncio
 async def test_failed_status_is_not_an_identity_issue():
     """「没探测到」**不是**「探测到且对不上」⇒ 不进身份异常告警。"""
-    assert PLATFORM_SHOP_DISCOVERY_STATUS_FAILED not in PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES
+    assert (
+        PLATFORM_SHOP_DISCOVERY_STATUS_FAILED
+        not in PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES
+    )
 
 
 @pytest.mark.asyncio

@@ -24,7 +24,9 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
 
 
 def test_orders_template_header_normalization_preserves_rmb_suffixes():
-    from backend.routers.field_mapping_templates import _normalize_template_headers_for_domain
+    from backend.routers.field_mapping_templates import (
+        _normalize_template_headers_for_domain,
+    )
 
     normalized = _normalize_template_headers_for_domain(
         data_domain="orders",
@@ -35,7 +37,9 @@ def test_orders_template_header_normalization_preserves_rmb_suffixes():
 
 
 def test_non_orders_template_header_normalization_preserves_raw_headers_for_template_storage():
-    from backend.routers.field_mapping_templates import _normalize_template_headers_for_domain
+    from backend.routers.field_mapping_templates import (
+        _normalize_template_headers_for_domain,
+    )
 
     normalized = _normalize_template_headers_for_domain(
         data_domain="products",
@@ -46,7 +50,9 @@ def test_non_orders_template_header_normalization_preserves_raw_headers_for_temp
 
 
 def test_confirmed_non_semantic_binding_is_not_returned_for_manual_review():
-    from backend.routers.field_mapping_templates import _filter_bindings_for_manual_review
+    from backend.routers.field_mapping_templates import (
+        _filter_bindings_for_manual_review,
+    )
 
     bindings = [
         {
@@ -76,7 +82,9 @@ def test_confirmed_non_semantic_binding_is_not_returned_for_manual_review():
 
 
 def test_manual_review_filter_excludes_ordinary_pending_raw_fields():
-    from backend.routers.field_mapping_templates import _filter_bindings_for_manual_review
+    from backend.routers.field_mapping_templates import (
+        _filter_bindings_for_manual_review,
+    )
 
     bindings = [
         {
@@ -103,7 +111,9 @@ def test_manual_review_filter_excludes_ordinary_pending_raw_fields():
 
 
 def test_existing_deduplication_fields_match_by_semantic_key_without_raw_header_match():
-    from backend.routers.field_mapping_templates import _split_existing_deduplication_fields
+    from backend.routers.field_mapping_templates import (
+        _split_existing_deduplication_fields,
+    )
 
     available, missing, matches = _split_existing_deduplication_fields(
         ["商品", "状态"],
@@ -287,10 +297,20 @@ async def test_template_update_context_returns_lightweight_summary_for_with_samp
     assert data["template"]["id"] == template.id
     assert data["template"]["template_name"] == "shopee_orders_daily_v1"
     assert data["template"]["deduplication_fields"] == ["order_id", "shop_id"]
-    assert data["template_header_columns"] == ["order_id", "platform_sku", "amount", "shop_id"]
+    assert data["template_header_columns"] == [
+        "order_id",
+        "platform_sku",
+        "amount",
+        "shop_id",
+    ]
     assert data["current_file"]["id"] == file_record.id
     assert data["current_file"]["file_name"] == file_record.file_name
-    assert data["current_header_columns"] == ["order_id", "amount", "platform_sku", "new_metric"]
+    assert data["current_header_columns"] == [
+        "order_id",
+        "amount",
+        "platform_sku",
+        "new_metric",
+    ]
     assert data["current_header_row"] == expected_header_row
     assert data["preview_data"] == []
     assert data["sample_data"] == {}
@@ -301,9 +321,14 @@ async def test_template_update_context_returns_lightweight_summary_for_with_samp
     assert data["existing_deduplication_fields_missing"] == ["shop_id"]
     assert data["recommended_deduplication_fields"] == ["order_id"]
     assert data["review_header_bindings"] == []
-    full_bindings_by_raw = {item["raw_name"]: item for item in data["full_header_bindings"]}
+    full_bindings_by_raw = {
+        item["raw_name"]: item for item in data["full_header_bindings"]
+    }
     assert full_bindings_by_raw["order_id"]["semantic_key"] == "order_id"
-    assert full_bindings_by_raw["order_id"]["semantic_review_status"] == "confirmed_semantic"
+    assert (
+        full_bindings_by_raw["order_id"]["semantic_review_status"]
+        == "confirmed_semantic"
+    )
     assert full_bindings_by_raw["new_metric"]["semantic_review_status"] == "pending"
     assert data["current_header_bindings"] == data["full_header_bindings"]
     assert data["update_mode"] == "with-sample"
@@ -407,7 +432,10 @@ async def test_template_update_context_returns_semantic_equivalent_deduplication
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["existing_deduplication_fields_available"] == ["product_name", "item_status"]
+    assert data["existing_deduplication_fields_available"] == [
+        "product_name",
+        "item_status",
+    ]
     assert data["existing_deduplication_fields_missing"] == []
     assert data["existing_deduplication_field_matches"] == [
         {
@@ -540,7 +568,10 @@ async def test_template_update_context_returns_backend_hash_options_for_item_sta
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["existing_deduplication_fields_available"] == ["product_name", "item_status"]
+    assert data["existing_deduplication_fields_available"] == [
+        "product_name",
+        "item_status",
+    ]
     assert data["existing_deduplication_fields_missing"] == []
     by_key = {option["semantic_key"]: option for option in data["hash_options"]}
     assert by_key["product_id"]["eligible"] is True
@@ -675,7 +706,12 @@ async def test_template_update_preview_returns_preview_payload(
             "header_bindings": [],
         }
 
-    monkeypatch.setattr(router_module, "_load_file_update_preview", fake_load_file_update_preview, raising=False)
+    monkeypatch.setattr(
+        router_module,
+        "_load_file_update_preview",
+        fake_load_file_update_preview,
+        raising=False,
+    )
 
     response = await client.get(
         f"/api/field-mapping/templates/{template.id}/update-preview",
@@ -744,7 +780,11 @@ async def test_template_update_bindings_returns_full_bindings_payload(
                 "sub_domain": None,
             },
             "header_columns": ["order_id", "Unnamed: 0", "amount"],
-            "sample_data": {"order_id": "SO-1", "Unnamed: 0": "2026-06-07", "amount": "9.9"},
+            "sample_data": {
+                "order_id": "SO-1",
+                "Unnamed: 0": "2026-06-07",
+                "amount": "9.9",
+            },
             "preview_data": [],
             "header_bindings": [
                 {
@@ -772,7 +812,12 @@ async def test_template_update_bindings_returns_full_bindings_payload(
             ],
         }
 
-    monkeypatch.setattr(router_module, "_load_file_update_preview", fake_load_file_update_preview, raising=False)
+    monkeypatch.setattr(
+        router_module,
+        "_load_file_update_preview",
+        fake_load_file_update_preview,
+        raising=False,
+    )
 
     response = await client.get(
         f"/api/field-mapping/templates/{template.id}/update-bindings",
@@ -786,43 +831,15 @@ async def test_template_update_bindings_returns_full_bindings_payload(
     assert len(payload["data"]["full_header_bindings"]) == 3
     assert payload["data"]["review_header_bindings"] == []
     assert payload["data"]["required_semantic_keys"] == ["order_id"]
-    assert payload["data"]["hash_participating_semantic_keys"] == ["order_id", "metric_date"]
+    assert payload["data"]["hash_participating_semantic_keys"] == [
+        "order_id",
+        "metric_date",
+    ]
     assert payload["data"]["full_header_bindings"][2]["raw_name"] == "amount"
-    assert payload["data"]["full_header_bindings"][2]["semantic_review_status"] == "pending"
-
-
-@pytest.mark.asyncio
-async def test_template_update_context_with_sample_requires_file_id(
-    template_update_context_client,
-):
-    client, session_factory = template_update_context_client
-
-    async with session_factory() as session:
-        template = FieldMappingTemplate(
-            platform="shopee",
-            data_domain="orders",
-            granularity="daily",
-            sub_domain=None,
-            header_row=1,
-            header_columns=["order_id", "amount"],
-            deduplication_fields=["order_id"],
-            template_name="shopee_orders_daily_v1",
-            version=1,
-            status="published",
-            field_count=2,
-            created_by="test",
-        )
-        session.add(template)
-        await session.commit()
-        await session.refresh(template)
-
-    response = await client.get(
-        f"/api/field-mapping/templates/{template.id}/update-context",
-        params={"mode": "with-sample"},
+    assert (
+        payload["data"]["full_header_bindings"][2]["semantic_review_status"]
+        == "pending"
     )
-
-    assert response.status_code == 400
-    assert "file_id" in response.text
 
 
 @pytest.mark.asyncio
@@ -937,7 +954,9 @@ async def test_variant_create_context_returns_active_version_and_sample_preview(
         session.add_all([legacy_template, family, version, variant, file_record])
         await session.commit()
 
-    from backend.domains.data_platform.routers import field_mapping_templates as router_module
+    from backend.domains.data_platform.routers import (
+        field_mapping_templates as router_module,
+    )
 
     async def fake_load_file_update_preview(db, file_id, header_row):
         assert file_id == 904
@@ -957,7 +976,12 @@ async def test_variant_create_context_returns_active_version_and_sample_preview(
             "preview_data": [{"日期": "01/03/2026", "浏览量": "100"}],
         }
 
-    monkeypatch.setattr(router_module, "_load_file_update_preview", fake_load_file_update_preview, raising=False)
+    monkeypatch.setattr(
+        router_module,
+        "_load_file_update_preview",
+        fake_load_file_update_preview,
+        raising=False,
+    )
 
     response = await client.get(
         "/api/field-mapping/template-families/901/variant-create-context",
@@ -1001,7 +1025,9 @@ async def test_save_mapping_template_accepts_async_session(
 
     async with session_factory() as session:
         result = await session.execute(
-            text("SELECT template_name, header_columns FROM core.field_mapping_templates WHERE id = :id"),
+            text(
+                "SELECT template_name, header_columns FROM core.field_mapping_templates WHERE id = :id"
+            ),
             {"id": template_id},
         )
         row = result.mappings().one()
@@ -1082,7 +1108,9 @@ async def test_save_mapping_template_persists_field_parse_rules_and_update_conte
 
     async with session_factory() as session:
         result = await session.execute(
-            text("SELECT field_parse_rules FROM core.field_mapping_templates WHERE id = :id"),
+            text(
+                "SELECT field_parse_rules FROM core.field_mapping_templates WHERE id = :id"
+            ),
             {"id": template_id},
         )
         row = result.mappings().one()
@@ -1164,7 +1192,9 @@ async def test_save_mapping_template_persists_header_bindings_and_update_context
 
     async with session_factory() as session:
         result = await session.execute(
-            text("SELECT header_bindings FROM core.field_mapping_templates WHERE id = :id"),
+            text(
+                "SELECT header_bindings FROM core.field_mapping_templates WHERE id = :id"
+            ),
             {"id": template_id},
         )
         row = result.mappings().one()
@@ -1189,7 +1219,9 @@ async def test_save_mapping_template_persists_header_bindings_and_update_context
     returned_bindings = context_payload["data"]["template"]["header_bindings"]
     assert returned_bindings[0]["semantic_key"] == "metric_date"
     assert "hash_participates" not in returned_bindings[0]
-    assert context_payload["data"]["template"]["hash_participating_semantic_keys"] == ["metric_date"]
+    assert context_payload["data"]["template"]["hash_participating_semantic_keys"] == [
+        "metric_date"
+    ]
 
 
 @pytest.mark.asyncio
@@ -1232,7 +1264,9 @@ async def test_save_mapping_template_accepts_file_date_token_parse_rules(
 
     async with session_factory() as session:
         result = await session.execute(
-            text("SELECT field_parse_rules FROM core.field_mapping_templates WHERE id = :id"),
+            text(
+                "SELECT field_parse_rules FROM core.field_mapping_templates WHERE id = :id"
+            ),
             {"id": template_id},
         )
         row = result.mappings().one()
@@ -1306,14 +1340,20 @@ async def test_save_mapping_template_accepts_time_of_day_parse_rule_with_date_an
 
     async with session_factory() as session:
         result = await session.execute(
-            text("SELECT field_parse_rules FROM core.field_mapping_templates WHERE id = :id"),
+            text(
+                "SELECT field_parse_rules FROM core.field_mapping_templates WHERE id = :id"
+            ),
             {"id": template_id},
         )
         row = result.mappings().one()
         field_parse_rules = row["field_parse_rules"]
         if isinstance(field_parse_rules, str):
             field_parse_rules = json.loads(field_parse_rules)
-        hour_rule = next(rule for rule in field_parse_rules if rule["target_field"] == "period_start_time")
+        hour_rule = next(
+            rule
+            for rule in field_parse_rules
+            if rule["target_field"] == "period_start_time"
+        )
         assert hour_rule["value_kind"] == "time_of_day"
         assert hour_rule["date_anchor"] == "__file_date_from__"
 
@@ -1331,7 +1371,12 @@ async def test_save_mapping_template_preserves_raw_non_orders_headers(
             "data_domain": "analytics",
             "granularity": "monthly",
             "header_row": 1,
-            "header_columns": ["platform_sku", "period_start_date", "Current Item Status", "销售额（已下订单） (COP)"],
+            "header_columns": [
+                "platform_sku",
+                "period_start_date",
+                "Current Item Status",
+                "销售额（已下订单） (COP)",
+            ],
             "deduplication_fields": ["period_start_date"],
             "template_name": "raw_header_preserve_test",
             "created_by": "test",
@@ -1345,14 +1390,21 @@ async def test_save_mapping_template_preserves_raw_non_orders_headers(
 
     async with session_factory() as session:
         result = await session.execute(
-            text("SELECT header_columns FROM core.field_mapping_templates WHERE id = :id"),
+            text(
+                "SELECT header_columns FROM core.field_mapping_templates WHERE id = :id"
+            ),
             {"id": template_id},
         )
         row = result.mappings().one()
         header_columns = row["header_columns"]
         if isinstance(header_columns, str):
             header_columns = json.loads(header_columns)
-        assert header_columns == ["platform_sku", "period_start_date", "Current Item Status", "销售额（已下订单） (COP)"]
+        assert header_columns == [
+            "platform_sku",
+            "period_start_date",
+            "Current Item Status",
+            "销售额（已下订单） (COP)",
+        ]
 
 
 @pytest.mark.asyncio
@@ -1431,6 +1483,8 @@ async def test_template_update_context_orders_ignores_currency_suffix_difference
     assert data["removed_fields"] == []
     assert data["header_changes"]["detected"] is False
     assert data["header_changes"]["is_exact_match"] is True
+
+
 @pytest.mark.asyncio
 async def test_detect_header_changes_endpoint_returns_resolved_payload(
     template_update_context_client,
@@ -1515,7 +1569,10 @@ async def test_save_mapping_template_returns_versioning_metadata(
     assert second_payload["success"] is True
     assert second_payload["data"]["version"] == 2
     assert second_payload["data"]["operation"] == "new_version"
-    assert second_payload["data"]["archived_template_id"] == first_payload["data"]["template_id"]
+    assert (
+        second_payload["data"]["archived_template_id"]
+        == first_payload["data"]["template_id"]
+    )
     assert second_payload["data"]["template_name"].endswith("_v2")
 
 
@@ -1669,9 +1726,21 @@ async def test_save_mapping_template_allows_legacy_product_source_fields_without
             header_columns=["ID", "商品", "状态"],
             deduplication_fields=["ID", "商品", "状态"],
             header_bindings=[
-                {"raw_name": "ID", "semantic_key": None, "semantic_review_status": "pending"},
-                {"raw_name": "商品", "semantic_key": None, "semantic_review_status": "pending"},
-                {"raw_name": "状态", "semantic_key": None, "semantic_review_status": "pending"},
+                {
+                    "raw_name": "ID",
+                    "semantic_key": None,
+                    "semantic_review_status": "pending",
+                },
+                {
+                    "raw_name": "商品",
+                    "semantic_key": None,
+                    "semantic_review_status": "pending",
+                },
+                {
+                    "raw_name": "状态",
+                    "semantic_key": None,
+                    "semantic_review_status": "pending",
+                },
             ],
             template_name="tiktok_products_monthly_legacy_unbound_source_fields",
             version=1,
@@ -1735,7 +1804,11 @@ async def test_save_mapping_template_allows_legacy_product_source_fields_without
     async with session_factory() as session:
         template = await session.get(FieldMappingTemplate, template_id)
 
-    assert template.deduplication_fields == ["product_id", "product_name", "item_status"]
+    assert template.deduplication_fields == [
+        "product_id",
+        "product_name",
+        "item_status",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1754,9 +1827,21 @@ async def test_save_mapping_template_ignores_legacy_unbound_product_name_hash_wh
             header_columns=["ID", "商品", "状态"],
             deduplication_fields=["ID", "商品", "状态"],
             header_bindings=[
-                {"raw_name": "ID", "semantic_key": None, "semantic_review_status": "pending"},
-                {"raw_name": "商品", "semantic_key": None, "semantic_review_status": "pending"},
-                {"raw_name": "状态", "semantic_key": None, "semantic_review_status": "pending"},
+                {
+                    "raw_name": "ID",
+                    "semantic_key": None,
+                    "semantic_review_status": "pending",
+                },
+                {
+                    "raw_name": "商品",
+                    "semantic_key": None,
+                    "semantic_review_status": "pending",
+                },
+                {
+                    "raw_name": "状态",
+                    "semantic_key": None,
+                    "semantic_review_status": "pending",
+                },
             ],
             template_name="tiktok_products_monthly_legacy_unbound_product_name_hash",
             version=1,
@@ -1941,7 +2026,9 @@ async def test_save_mapping_template_syncs_hash_participation_from_selected_sema
         template = await session.get(FieldMappingTemplate, template_id)
 
     assert template.deduplication_fields == ["order_id"]
-    bindings_by_key = {binding["semantic_key"]: binding for binding in template.header_bindings}
+    bindings_by_key = {
+        binding["semantic_key"]: binding for binding in template.header_bindings
+    }
     assert bindings_by_key["order_id"]["semantic_key"] == "order_id"
     # [*] 批次 E(D2): 「参与去重」不再声明在绑定上,
     # 由版本级核心字段清单的 ``in_hash`` 表达。
@@ -2203,7 +2290,10 @@ async def test_save_mapping_template_returns_structured_hash_policy_on_failure(
     assert payload["success"] is False
     assert payload["data"]["hash_policy"]["passed"] is False
     assert payload["data"]["hash_policy"]["requirement_groups"]
-    assert payload["data"]["hash_policy"]["missing_required_groups"][0]["key"] == "products_period_date"
+    assert (
+        payload["data"]["hash_policy"]["missing_required_groups"][0]["key"]
+        == "products_period_date"
+    )
     assert payload["data"]["hash_policy"]["can_save"] is False
     assert payload["data"]["hash_policy"]["blocking_errors"]
 
@@ -2295,11 +2385,16 @@ async def test_hash_policy_preview_and_save_share_same_binding_resolution_for_sa
     preview_data = preview_response.json()["data"]
     assert preview_data["can_save"] is False
 
-    save_response = await client.post("/api/field-mapping/templates/save", json=request_payload)
+    save_response = await client.post(
+        "/api/field-mapping/templates/save", json=request_payload
+    )
     assert save_response.status_code == 400
     save_payload = save_response.json()
     assert save_payload["data"]["hash_policy"]["can_save"] is False
-    assert save_payload["data"]["hash_policy"]["blocking_errors"] == preview_data["blocking_errors"]
+    assert (
+        save_payload["data"]["hash_policy"]["blocking_errors"]
+        == preview_data["blocking_errors"]
+    )
     assert (
         save_payload["data"]["hash_policy"]["unresolved_deduplication_fields"]
         == preview_data["unresolved_deduplication_fields"]

@@ -140,7 +140,9 @@ def build_domain_alias_records(data_domain: str = "products") -> List[AliasRecor
 
     # 2) 全局别名(补裸名), 只取该域用到的字段, 且不许与口径冲突
     for standard_field in relevant_fields:
-        field_caliber = SEMANTIC_FIELD_DEFINITIONS.get(standard_field, {}).get("caliber")
+        field_caliber = SEMANTIC_FIELD_DEFINITIONS.get(standard_field, {}).get(
+            "caliber"
+        )
         for alias in SEMANTIC_FIELD_ALIASES.get(standard_field, []):
             alias_caliber = detect_alias_caliber(alias)
             if field_caliber and alias_caliber and field_caliber != alias_caliber:
@@ -232,7 +234,10 @@ class SemanticAliasRegistryService:
     ) -> Optional[str]:
         del platform_code, granularity
         for alias in [*self._builtin_aliases, *(extra_aliases or [])]:
-            if alias.get("data_domain") != data_domain or alias.get("standard_field") != standard_field:
+            if (
+                alias.get("data_domain") != data_domain
+                or alias.get("standard_field") != standard_field
+            ):
                 continue
             value = raw_data.get(alias.get("raw_alias"))
             if value is not None and str(value).strip() != "":
@@ -266,10 +271,20 @@ class SemanticAliasRegistryService:
             if binding.get("semantic_review_status") != "confirmed_semantic":
                 continue
             standard_field = binding.get("semantic_key")
-            raw_alias = binding.get("source_header") or binding.get("raw_name") or binding.get("display_name")
+            raw_alias = (
+                binding.get("source_header")
+                or binding.get("raw_name")
+                or binding.get("display_name")
+            )
             if not standard_field or not raw_alias:
                 continue
-            key = (scope_domain, standard_field, raw_alias, scope_platform, scope_granularity)
+            key = (
+                scope_domain,
+                standard_field,
+                raw_alias,
+                scope_platform,
+                scope_granularity,
+            )
             if key in seen:
                 continue
             seen.add(key)
@@ -345,7 +360,10 @@ class SemanticAliasRegistryService:
             await db.rollback()
             logger.warning("[SemanticAlias] 别名沉淀失败: %s", exc)
             return AliasUpsertSummary(
-                aliases=aliases, conflicts=conflicts, created=created, unchanged=unchanged
+                aliases=aliases,
+                conflicts=conflicts,
+                created=created,
+                unchanged=unchanged,
             )
 
         if conflicts:

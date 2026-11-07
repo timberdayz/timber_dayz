@@ -125,10 +125,9 @@ def _covered_raw_aliases(standard_field: str) -> set[str]:
     """该标准字段在别名治理三层里能被认领的原始表头集合。"""
     documented = set(DOCUMENTED_ACCEPTED_RAW_FIELDS[standard_field])
     normalization = _normalization_map()
-    covered = (
-        _registry_seed_aliases().get(standard_field, set())
-        | _builtin_aliases().get(standard_field, set())
-    )
+    covered = _registry_seed_aliases().get(
+        standard_field, set()
+    ) | _builtin_aliases().get(standard_field, set())
     # 入库前归一层: 变体表头(键)与归一后的规范表头(值)都算被认领
     covered |= {
         header

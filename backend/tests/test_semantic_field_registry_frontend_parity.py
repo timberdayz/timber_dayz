@@ -31,9 +31,9 @@ FRONTEND_UTILS = (
 
 def _snapshot_fields() -> dict[str, dict]:
     """从生成快照里读出「字段键 -> 字段定义」。"""
-    source = (
-        FRONTEND_UTILS / "semanticFieldRegistrySnapshot.js"
-    ).read_text(encoding="utf-8")
+    source = (FRONTEND_UTILS / "semanticFieldRegistrySnapshot.js").read_text(
+        encoding="utf-8"
+    )
     match = re.search(
         r"export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = (?P<body>\{.*?\n\})",
         source,
@@ -66,7 +66,9 @@ def test_frontend_has_no_handwritten_standard_field_copy():
 
 def test_frontend_registry_is_loaded_from_api():
     """标准字段注册表必须**从接口取**(API-1), 快照只作兜底。"""
-    loader = (FRONTEND_UTILS / "semanticFieldRegistryApi.js").read_text(encoding="utf-8")
+    loader = (FRONTEND_UTILS / "semanticFieldRegistryApi.js").read_text(
+        encoding="utf-8"
+    )
     assert "getSemanticFieldDefinitions" in loader, "前端注册表应通过 API-1 接口加载"
     assert "hydrateSemanticFieldRegistry" in loader, "接口数据应灌进前端注册表"
     assert "source: 'api'" in loader, "接口来源必须被标记出来(快照只是兜底)"

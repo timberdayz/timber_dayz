@@ -67,7 +67,9 @@ def _seed_row_count(asset_text: str) -> int:
     """数出清理段里登记的 seed 行数(= 字典派生出来的 builtin 行数)。"""
     start = asset_text.find(_PRUNE_MARKER)
     if start < 0:
-        raise RuntimeError("\u522b\u540d\u8d44\u4ea7\u91cc\u6ca1\u6709\u9648\u65e7 builtin \u884c\u6e05\u7406\u6bb5")
+        raise RuntimeError(
+            "\u522b\u540d\u8d44\u4ea7\u91cc\u6ca1\u6709\u9648\u65e7 builtin \u884c\u6e05\u7406\u6bb5"
+        )
     end = asset_text.find(";", start)
     segment = asset_text[start:end] if end > 0 else asset_text[start:]
     return len(_SEED_TUPLE_PATTERN.findall(segment))

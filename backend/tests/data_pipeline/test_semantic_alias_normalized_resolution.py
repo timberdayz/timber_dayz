@@ -81,9 +81,10 @@ def test_migration_expectations_match_python_normalization(migration_module):
         for raw, expected in cases
         if normalize_semantic_alias(raw) != expected
     ]
-    assert not mismatches, (
-        "迁移里的期望归一结果与 Python 侧不一致(迁移会误判 PG 或误放行): "
-        + "; ".join(f"{r!r} 期望 {e!r} 实得 {a!r}" for r, e, a in mismatches)
+    assert (
+        not mismatches
+    ), "迁移里的期望归一结果与 Python 侧不一致(迁移会误判 PG 或误放行): " + "; ".join(
+        f"{r!r} 期望 {e!r} 实得 {a!r}" for r, e, a in mismatches
     )
 
 
@@ -131,7 +132,8 @@ def test_asset_defines_both_functions(asset_text):
 def test_asset_seed_only_targets_products_domain(asset_text):
     """全局桶(data_domain='*')会在所有域优先生效 ⇒ 跨域污染 ⇒ 禁止。"""
     seed_rows = re.findall(
-        r"\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,", asset_text
+        r"\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,",
+        asset_text,
     )
     assert seed_rows, "资产里没有找到任何 seed 行"
     domains = {row[0] for row in seed_rows}
@@ -153,7 +155,9 @@ def test_asset_seed_rows_are_still_backed_by_dictionary(asset_text):
     * 资产里的行必须是当前字典派生结果(products 域)的**子集**
       ⇒ 资产不会跑到字典前面去。
     """
-    from scripts.generate_semantic_alias_normalize_asset import _collect_products_aliases
+    from scripts.generate_semantic_alias_normalize_asset import (
+        _collect_products_aliases,
+    )
 
     expected = _collect_products_aliases()
     expected_keys = {
@@ -162,14 +166,18 @@ def test_asset_seed_rows_are_still_backed_by_dictionary(asset_text):
     }
 
     seed_rows = re.findall(
-        r"\(\s*'products'\s*,\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,", asset_text
+        r"\(\s*'products'\s*,\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,",
+        asset_text,
     )
-    actual = [(standard_field, raw_alias, normalized) for standard_field, raw_alias, normalized in seed_rows]
+    actual = [
+        (standard_field, raw_alias, normalized)
+        for standard_field, raw_alias, normalized in seed_rows
+    ]
     assert actual, "资产里没有 seed 行"
 
     missing = [item for item in actual if item not in expected_keys]
-    assert not missing, (
-        "冻结资产里有字典已不再背书的别名(资产与字典漂移): " + repr(missing[:5])
+    assert not missing, "冻结资产里有字典已不再背书的别名(资产与字典漂移): " + repr(
+        missing[:5]
     )
 
 
@@ -182,7 +190,8 @@ def test_asset_rows_are_internally_consistent(asset_text):
     from backend.services.semantic_field_registry import normalize_semantic_alias
 
     seed_rows = re.findall(
-        r"\(\s*'products'\s*,\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,", asset_text
+        r"\(\s*'products'\s*,\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,",
+        asset_text,
     )
     assert seed_rows, "资产里没有 seed 行"
     for standard_field, raw_alias, normalized in seed_rows:
@@ -210,7 +219,8 @@ def test_asset_normalization_keeps_caliber_suffix(asset_text):
     **原样保留**该口径词 —— 一旦被剥掉, 两套口径就会塌陷成同一个字段。
     """
     seed_rows = re.findall(
-        r"\(\s*'products'\s*,\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,", asset_text
+        r"\(\s*'products'\s*,\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,",
+        asset_text,
     )
     caliber_words = ("已付款订单", "已下订单", "已确定订单", "已确认订单")
     checked = 0
@@ -218,9 +228,9 @@ def test_asset_normalization_keeps_caliber_suffix(asset_text):
         for word in caliber_words:
             if word in raw_alias:
                 checked += 1
-                assert word in normalized, (
-                    f"口径词 {word!r} 在归一化时被剥掉了: {raw_alias!r} -> {normalized!r}"
-                )
+                assert (
+                    word in normalized
+                ), f"口径词 {word!r} 在归一化时被剥掉了: {raw_alias!r} -> {normalized!r}"
     assert checked > 0, "seed 里没有任何带口径词的别名, 断言没生效"
 
 

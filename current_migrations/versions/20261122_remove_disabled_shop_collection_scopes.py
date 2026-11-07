@@ -203,7 +203,9 @@ def _normalize_domain_subtypes(*, data_domains: list, sub_domains: object) -> di
     if isinstance(sub_domains, dict):
         raw_mapping.update(sub_domains)
 
-    legacy_values = _as_string_list(sub_domains) if not isinstance(sub_domains, dict) else []
+    legacy_values = (
+        _as_string_list(sub_domains) if not isinstance(sub_domains, dict) else []
+    )
 
     for domain in data_domains or []:
         allowed_subtypes = _DATA_DOMAIN_SUB_TYPES.get(domain, [])
@@ -313,9 +315,7 @@ def apply_cleanup(bind) -> dict:
     affected_config_ids = sorted(
         {
             int(row[0])
-            for row in bind.execute(
-                sa.text(_fmt(_AFFECTED_CONFIG_IDS_SQL))
-            ).all()
+            for row in bind.execute(sa.text(_fmt(_AFFECTED_CONFIG_IDS_SQL))).all()
         }
     )
 
@@ -338,7 +338,9 @@ def apply_cleanup(bind) -> dict:
             JOIN {schema}.shop_accounts AS a
               ON a.shop_account_id = s.shop_account_id
             WHERE a.enabled IS FALSE AND s.enabled IS TRUE
-            """.format(schema=_SCHEMA, scope_table=_SCOPE_TABLE)
+            """.format(
+                schema=_SCHEMA, scope_table=_SCOPE_TABLE
+            )
         )
     ).scalar()
     if remaining:
@@ -366,7 +368,9 @@ def apply_restore(bind) -> dict:
               AND s.enabled IS FALSE
               AND s.data_domains IS NOT NULL
             RETURNING s.config_id
-            """.format(schema=_SCHEMA, scope_table=_SCOPE_TABLE)
+            """.format(
+                schema=_SCHEMA, scope_table=_SCOPE_TABLE
+            )
         )
     ).all()
 

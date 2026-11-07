@@ -21,7 +21,9 @@
 被阻塞的条目必须给出具体阻塞理由。
 """
 
-from backend.utils.schema_cleanup_low_risk_proofs import collect_low_risk_candidate_proofs
+from backend.utils.schema_cleanup_low_risk_proofs import (
+    collect_low_risk_candidate_proofs,
+)
 from backend.utils.schema_cleanup_wave1_preplan import build_wave1_preplan
 
 

@@ -78,7 +78,9 @@ OTHER_DOMAIN_ONLY_ALIASES: Tuple[str, ...] = (
 
 def _load_generator() -> ModuleType:
     """按文件路径加载生成器脚本(它不在包里, 但要被契约测试直接调用)。"""
-    spec = importlib.util.spec_from_file_location("generate_semantic_alias_seed", GENERATOR_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "generate_semantic_alias_seed", GENERATOR_PATH
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -122,9 +124,9 @@ def test_every_builtin_alias_comes_from_the_dictionary(builtin_aliases):
     for record in builtin_aliases:
         standard_field = str(record.get("standard_field") or "")
         raw_alias = str(record.get("raw_alias") or "")
-        assert record.get("data_domain") == "products", (
-            f"products 域的派生结果里出现了别的域: {record}"
-        )
+        assert (
+            record.get("data_domain") == "products"
+        ), f"products 域的派生结果里出现了别的域: {record}"
         if raw_alias not in allowed.get(standard_field, set()):
             unknown.append(f"{standard_field} <- {raw_alias}")
 
@@ -157,7 +159,9 @@ def test_builtin_alias_has_no_duplicate_column(builtin_aliases):
 
 
 @pytest.mark.parametrize(("raw_alias", "standard_field"), REQUIRED_PRODUCT_HEADERS)
-def test_required_product_headers_are_derived(builtin_aliases, raw_alias, standard_field):
+def test_required_product_headers_are_derived(
+    builtin_aliases, raw_alias, standard_field
+):
     """真实表头必须被认领, 且落到正确的标准字段上。"""
     matched = [
         record
@@ -185,9 +189,9 @@ def test_products_real_headers_cover_caliber_variants(builtin_aliases):
     }
     for header in placed_headers:
         assert header in mapping, f"下单口径表头 {header!r} 没被派生出来"
-        assert mapping[header].endswith("_placed"), (
-            f"{header!r} 落到了 {mapping[header]}, 应当落在 *_placed 字段上"
-        )
+        assert mapping[header].endswith(
+            "_placed"
+        ), f"{header!r} 落到了 {mapping[header]}, 应当落在 *_placed 字段上"
 
 
 def test_other_domain_aliases_do_not_leak_into_products(builtin_aliases):
@@ -203,7 +207,9 @@ def test_other_domain_aliases_do_not_leak_into_products(builtin_aliases):
 
 
 @pytest.mark.parametrize(("paid_field", "placed_field"), CALIBER_PAIRS)
-def test_caliber_pairs_use_distinct_standard_fields(builtin_aliases, paid_field, placed_field):
+def test_caliber_pairs_use_distinct_standard_fields(
+    builtin_aliases, paid_field, placed_field
+):
     """已付款口径与已下单口径必须落在**不同**的标准字段上。"""
     mapping = {
         str(record["raw_alias"]): str(record["standard_field"])
@@ -224,9 +230,9 @@ def test_caliber_pairs_use_distinct_standard_fields(builtin_aliases, paid_field,
 
     for paid_header in paid_headers:
         for placed_header in placed_headers:
-            assert mapping[paid_header] != mapping[placed_header], (
-                f"{paid_header} 与 {placed_header} 落到了同一个标准字段"
-            )
+            assert (
+                mapping[paid_header] != mapping[placed_header]
+            ), f"{paid_header} 与 {placed_header} 落到了同一个标准字段"
 
 
 def test_no_column_maps_to_two_calibers(builtin_aliases):
@@ -245,8 +251,7 @@ def test_no_column_maps_to_two_calibers(builtin_aliases):
     mixed: List[str] = []
     for raw_alias, fields in owners.items():
         calibers = {
-            SEMANTIC_FIELD_DEFINITIONS.get(field, {}).get("caliber")
-            for field in fields
+            SEMANTIC_FIELD_DEFINITIONS.get(field, {}).get("caliber") for field in fields
         }
         if CALIBER_PAID in calibers and CALIBER_PLACED in calibers:
             mixed.append(raw_alias)
@@ -300,7 +305,9 @@ def test_generator_check_detects_difference_and_does_not_write(tmp_path):
         "生成结果与 SQL 资产不一致时 --check 必须返回非零退出码\n"
         f"stdout:\n{result.stdout}"
     )
-    assert "缺失" in result.stdout, f"--check 必须打印差异明细\nstdout:\n{result.stdout}"
+    assert (
+        "缺失" in result.stdout
+    ), f"--check 必须打印差异明细\nstdout:\n{result.stdout}"
     assert broken_asset.read_bytes() == before, "--check 模式不许写文件"
 
 
@@ -321,13 +328,14 @@ def test_generator_check_passes_when_asset_is_in_sync():
 
 def test_generator_stdout_is_compatible_with_sql_asset_shape(generator):
     """生成的 seed 段与现有 SQL 资产的 INSERT 段同形(同样的列 + ON CONFLICT)。"""
-    sql_text = generator.render_seed_sql(generator.build_domain_alias_records("products"))
+    sql_text = generator.render_seed_sql(
+        generator.build_domain_alias_records("products")
+    )
 
     assert "INSERT INTO semantic.semantic_field_aliases" in sql_text
     assert (
         "    (data_domain, standard_field, raw_alias, normalized_alias, "
-        "source, confidence, status)"
-        in sql_text
+        "source, confidence, status)" in sql_text
     )
     assert "ON CONFLICT (" in sql_text
     assert "COALESCE(platform_code, '')" in sql_text
@@ -351,9 +359,9 @@ def test_generator_seed_rows_are_parseable_and_round_trip(generator):
     sql_text = generator.render_seed_sql(rows)
     parsed = generator.parse_seed_rows(sql_text)
     missing, extra = generator.diff_seed_rows(rows, parsed)
-    assert not missing and not extra, (
-        f"生成结果与自身解析结果不一致: 缺失 {missing}, 多余 {extra}"
-    )
+    assert (
+        not missing and not extra
+    ), f"生成结果与自身解析结果不一致: 缺失 {missing}, 多余 {extra}"
 
 
 def test_generator_and_builtin_share_the_same_source(generator, builtin_aliases):
@@ -413,4 +421,6 @@ def test_caliber_history_variant_is_reported(generator):
     assert "已下单" in str(row["normalized_alias_history"])
 
     # 未登记沿革的平台不折算
-    assert generator.normalize_alias("已确定订单", platform_code="tiktok") == "已确定订单"
+    assert (
+        generator.normalize_alias("已确定订单", platform_code="tiktok") == "已确定订单"
+    )

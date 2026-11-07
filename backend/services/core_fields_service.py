@@ -213,7 +213,9 @@ def derive_core_fields(
     Returns:
         ``core_fields`` 清单。
     """
-    required_keys = {str(key).strip() for key in (required_semantic_keys or []) if str(key).strip()}
+    required_keys = {
+        str(key).strip() for key in (required_semantic_keys or []) if str(key).strip()
+    }
 
     core_fields: List[Dict[str, Any]] = []
     seen: set[str] = set()
@@ -274,7 +276,11 @@ def normalize_core_fields(raw: Any) -> List[Dict[str, Any]]:
             text = item.strip()
             if not text:
                 continue
-            semantic_key = normalize_semantic_key(text) if is_canonical_semantic_key(text) else None
+            semantic_key = (
+                normalize_semantic_key(text)
+                if is_canonical_semantic_key(text)
+                else None
+            )
             entry = {
                 "semantic_key": semantic_key,
                 "raw_name": None if semantic_key else text,
@@ -478,7 +484,8 @@ def merge_core_fields(
             used_existing.add(key)
             merged.append(
                 {
-                    "semantic_key": previous.get("semantic_key") or entry.get("semantic_key"),
+                    "semantic_key": previous.get("semantic_key")
+                    or entry.get("semantic_key"),
                     # 键名沿用旧清单 ⇒ hash 口径不变
                     "raw_name": previous.get("raw_name"),
                     "required": bool(previous.get("required")),

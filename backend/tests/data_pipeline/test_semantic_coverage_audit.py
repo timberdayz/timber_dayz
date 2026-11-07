@@ -111,7 +111,9 @@ def _row(
         "all_unresolved_rows": all_unresolved_rows,
     }
     for field in PRODUCTS_STANDARD_FIELDS:
-        row[f"resolved_{field.standard_field}"] = int((resolved or {}).get(field.standard_field, 0))
+        row[f"resolved_{field.standard_field}"] = int(
+            (resolved or {}).get(field.standard_field, 0)
+        )
     return row
 
 
@@ -232,7 +234,9 @@ def test_warning_threshold_is_parameterizable():
     )
     assert default_report.warnings == ()
 
-    strict_report = build_coverage_report(rows, domain=_products_domain(), threshold=0.9)
+    strict_report = build_coverage_report(
+        rows, domain=_products_domain(), threshold=0.9
+    )
     assert strict_report.warnings
     assert any("sales_amount" in w for w in strict_report.warnings)
 
@@ -253,7 +257,9 @@ async def test_service_reads_threshold_from_constructor_and_call_site():
     assert service.available_domains() == ("orders", "products")
 
     # 调用点覆盖成 0.5 ⇒ sales_amount(80%)不再告警。
-    report = await service.audit(_FakeSession(rows=rows), domain="products", threshold=0.5)
+    report = await service.audit(
+        _FakeSession(rows=rows), domain="products", threshold=0.5
+    )
     assert report.warnings == ()
     assert report.threshold == 0.5
 
@@ -468,7 +474,13 @@ def test_empty_shell_detection_is_present_in_both_domains():
 
 def test_orders_domain_excludes_coalesce_masked_numeric_columns():
     """订单域不得包含被 COALESCE(...,0) 掩盖、无法判定解析失败的列。"""
-    masked = {"sales_amount", "paid_amount", "profit", "product_quantity", "buyer_count"}
+    masked = {
+        "sales_amount",
+        "paid_amount",
+        "profit",
+        "product_quantity",
+        "buyer_count",
+    }
     audited = {field.standard_field for field in ORDERS_STANDARD_FIELDS}
 
     assert not (audited & masked)

@@ -79,16 +79,20 @@ def _asset(relative_path: str) -> str:
 
 def _assert_view_shape(bind) -> None:
     """新列必须真的在视图里 —— 视图是所有下游取数的根。"""
-    rows = bind.execute(
-        sa.text(
-            """
+    rows = (
+        bind.execute(
+            sa.text(
+                """
             SELECT column_name
             FROM information_schema.columns
             WHERE table_schema = 'semantic'
               AND table_name = 'fact_products_atomic'
             """
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     columns = set(rows)
     missing = [name for name in _EXPECTED_VIEW_COLUMNS if name not in columns]
     if missing:

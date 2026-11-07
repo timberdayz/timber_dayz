@@ -31,7 +31,15 @@ def _sqlite_tables():
 def _build_engine():
     engine = create_engine("sqlite://", future=True)
     with engine.begin() as conn:
-        for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "ops", "semantic"):
+        for schema_name in (
+            "core",
+            "a_class",
+            "b_class",
+            "c_class",
+            "finance",
+            "ops",
+            "semantic",
+        ):
             conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
         Base.metadata.create_all(bind=conn, tables=_sqlite_tables())
     return engine
@@ -60,7 +68,9 @@ def test_cloud_sync_enqueue_writes_task_center_row():
     engine, db = _build_session()
     table_name = "fact_shopee_orders_daily"
     try:
-        payload = CloudBClassAutoSyncDispatchService(db).enqueue_or_coalesce(_build_event(table_name))
+        payload = CloudBClassAutoSyncDispatchService(db).enqueue_or_coalesce(
+            _build_event(table_name)
+        )
         mirrored = db.execute(
             select(TaskCenterTask).where(TaskCenterTask.task_id == payload["job_id"])
         ).scalar_one_or_none()
@@ -88,7 +98,9 @@ def test_cloud_sync_worker_updates_task_center_status():
     engine, db = _build_session()
     table_name = "fact_shopee_orders_daily_worker"
     try:
-        payload = CloudBClassAutoSyncDispatchService(db).enqueue_or_coalesce(_build_event(table_name))
+        payload = CloudBClassAutoSyncDispatchService(db).enqueue_or_coalesce(
+            _build_event(table_name)
+        )
         worker = CloudBClassAutoSyncWorker(db, sync_executor=_FakeSyncExecutor())
 
         asyncio.run(worker.run_one(worker_id="worker-1"))

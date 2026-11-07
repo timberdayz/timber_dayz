@@ -99,7 +99,9 @@ def _load_header_columns() -> dict[str, list[str]]:
 
 
 def _load_generator_module():
-    spec = importlib.util.spec_from_file_location("semantic_snapshot_generator", GENERATOR_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "semantic_snapshot_generator", GENERATOR_PATH
+    )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -267,11 +269,13 @@ def test_hit_rate_does_not_regress_per_domain():
         data_domain = template_key.split("/")[1]
         columns = columns_by_template[template_key]
         hits = sum(
-            1 for column in columns if infer_semantic_key_for_domain(data_domain, column)
+            1
+            for column in columns
+            if infer_semantic_key_for_domain(data_domain, column)
         )
-        assert hits >= baseline, (
-            f"{template_key} 命中率退步: {hits}/{len(columns)} < 基线 {baseline}"
-        )
+        assert (
+            hits >= baseline
+        ), f"{template_key} 命中率退步: {hits}/{len(columns)} < 基线 {baseline}"
 
 
 def test_overall_hit_rate_does_not_regress():
@@ -283,14 +287,16 @@ def test_overall_hit_rate_does_not_regress():
     for template_key, columns in columns_by_template.items():
         data_domain = template_key.split("/")[1]
         total_hits += sum(
-            1 for column in columns if infer_semantic_key_for_domain(data_domain, column)
+            1
+            for column in columns
+            if infer_semantic_key_for_domain(data_domain, column)
         )
         total_columns += len(columns)
 
     rate = 100.0 * total_hits / total_columns
-    assert rate >= BASELINE_OVERALL_RATE, (
-        f"全域命中率退步: {rate:.1f}% < 基线 {BASELINE_OVERALL_RATE}%"
-    )
+    assert (
+        rate >= BASELINE_OVERALL_RATE
+    ), f"全域命中率退步: {rate:.1f}% < 基线 {BASELINE_OVERALL_RATE}%"
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +359,9 @@ def _confirmed_bindings(semantic_key: str, raw_name: str) -> list[dict]:
 
 
 @pytest.mark.asyncio
-async def test_confirmed_alias_settles_globally_and_hits_other_templates(alias_session_factory):
+async def test_confirmed_alias_settles_globally_and_hits_other_templates(
+    alias_session_factory,
+):
     """D-3: 用户在一个模板对齐一次 ⇒ 其它模板自动命中。"""
     from backend.services.semantic_alias_registry import (
         GLOBAL_ALIAS_DOMAIN,
@@ -389,9 +397,7 @@ async def test_confirmed_alias_settles_globally_and_hits_other_templates(alias_s
         assert GLOBAL_ALIAS_DOMAIN in snapshot["confirmed"]
 
         # 另一个域也能命中 —— 这就是「一处生效」。
-        assert (
-            infer_semantic_key_for_domain("inventory", "商品编号X") == "product_id"
-        )
+        assert infer_semantic_key_for_domain("inventory", "商品编号X") == "product_id"
         assert infer_semantic_key_for_domain("orders", "商品编号X") == "product_id"
 
 

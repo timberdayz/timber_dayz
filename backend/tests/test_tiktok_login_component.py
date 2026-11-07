@@ -58,7 +58,9 @@ class _FakePage:
     async def wait_for_timeout(self, ms: int) -> None:
         self.timeout_calls.append(ms)
 
-    async def reload(self, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
+    async def reload(
+        self, wait_until: str = "domcontentloaded", timeout: int = 60000
+    ) -> None:
         self.reload_calls += 1
 
     async def screenshot(self, path: str, timeout: int = 5000) -> None:
@@ -102,7 +104,9 @@ def test_tiktok_login_success_detection_accepts_non_login_seller_urls() -> None:
     component = TiktokLogin(_ctx())
 
     assert (
-        component._login_looks_successful("https://seller.tiktokshopglobalselling.com/homepage")
+        component._login_looks_successful(
+            "https://seller.tiktokshopglobalselling.com/homepage"
+        )
         is True
     )
     assert (
@@ -115,25 +119,38 @@ def test_tiktok_login_success_detection_rejects_login_urls() -> None:
     component = TiktokLogin(_ctx())
 
     assert (
-        component._login_looks_successful("https://seller.tiktokshopglobalselling.com/account/login")
+        component._login_looks_successful(
+            "https://seller.tiktokshopglobalselling.com/account/login"
+        )
         is False
     )
-    assert component._login_looks_successful("https://seller.tiktokglobalshop.com/account/login") is False
+    assert (
+        component._login_looks_successful(
+            "https://seller.tiktokglobalshop.com/account/login"
+        )
+        is False
+    )
 
 
 @pytest.mark.asyncio
 async def test_tiktok_login_homepage_dom_detection_uses_shop_region_signal() -> None:
     component = TiktokLogin(_ctx(config={"shop_region": "SG"}))
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+    )
     page.text_map["SG"] = _FakeLocator()
 
     assert await component._homepage_dom_looks_ready(page) is True
 
 
 @pytest.mark.asyncio
-async def test_tiktok_login_homepage_dom_detection_does_not_hard_require_local_storage_markers() -> None:
+async def test_tiktok_login_homepage_dom_detection_does_not_hard_require_local_storage_markers() -> (
+    None
+):
     component = TiktokLogin(_ctx(config={"shop_region": "SG"}))
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+    )
     page.text_map["SG"] = _FakeLocator()
     page.text_map["数据分析"] = _FakeLocator()
 
@@ -143,15 +160,21 @@ async def test_tiktok_login_homepage_dom_detection_does_not_hard_require_local_s
 @pytest.mark.asyncio
 async def test_tiktok_login_homepage_dom_detection_rejects_blank_homepage() -> None:
     component = TiktokLogin(_ctx(config={"shop_region": "SG"}))
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+    )
 
     assert await component._homepage_dom_looks_ready(page) is False
 
 
 @pytest.mark.asyncio
-async def test_tiktok_login_homepage_dom_detection_accepts_left_nav_signals_without_shop_region() -> None:
+async def test_tiktok_login_homepage_dom_detection_accepts_left_nav_signals_without_shop_region() -> (
+    None
+):
     component = TiktokLogin(_ctx(config={}))
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+    )
     page.text_map["首页"] = _FakeLocator()
     page.text_map["数据分析"] = _FakeLocator()
 
@@ -159,9 +182,13 @@ async def test_tiktok_login_homepage_dom_detection_accepts_left_nav_signals_with
 
 
 @pytest.mark.asyncio
-async def test_tiktok_login_homepage_dom_detection_rejects_intermediate_homepage_without_region_context() -> None:
+async def test_tiktok_login_homepage_dom_detection_rejects_intermediate_homepage_without_region_context() -> (
+    None
+):
     component = TiktokLogin(_ctx(config={"shop_region": "SG"}))
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?lng=zh-CN&region_check=1&register_libra=")
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/homepage?lng=zh-CN&region_check=1&register_libra="
+    )
     page.text_map["TikTok Shop"] = _FakeLocator()
     page.text_map["首页"] = _FakeLocator()
     page.selector_map['a[href*="/homepage"]'] = _FakeLocator()
@@ -170,14 +197,22 @@ async def test_tiktok_login_homepage_dom_detection_rejects_intermediate_homepage
 
 
 @pytest.mark.asyncio
-async def test_tiktok_login_data_overview_dom_detection_accepts_probe_or_metric_text() -> None:
-    component = TiktokLogin(_ctx(config={"params": {"login_success_target": "data_overview"}}))
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG")
+async def test_tiktok_login_data_overview_dom_detection_accepts_probe_or_metric_text() -> (
+    None
+):
+    component = TiktokLogin(
+        _ctx(config={"params": {"login_success_target": "data_overview"}})
+    )
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG"
+    )
     page.selector_map["[role='grid'], table"] = _FakeLocator()
 
     assert await component._data_overview_dom_looks_ready(page) is True
 
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG")
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG"
+    )
     page.text_map["GMV"] = _FakeLocator()
 
     assert await component._data_overview_dom_looks_ready(page) is True
@@ -226,15 +261,23 @@ async def test_tiktok_login_falls_back_to_platform_login_entry_when_login_url_mi
         "modules.platforms.tiktok.components.login.get_platform_login_entry",
         lambda platform: "https://seller.tiktokshopglobalselling.com/account/login",
     )
-    monkeypatch.setattr(component, "_wait_for_login_surface_ready", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        component, "_wait_for_login_surface_ready", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(component, "_ensure_login_mode", AsyncMock())
     monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
     monkeypatch.setattr(component, "_submit_credentials", AsyncMock())
-    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value="bad credentials"))
+    monkeypatch.setattr(
+        component,
+        "_find_visible_login_error",
+        AsyncMock(return_value="bad credentials"),
+    )
 
     result = await component.run(page)
 
-    assert page.goto_calls == ["https://seller.tiktokshopglobalselling.com/account/login"]
+    assert page.goto_calls == [
+        "https://seller.tiktokshopglobalselling.com/account/login"
+    ]
     assert result.success is False
     assert result.message == "bad credentials"
 
@@ -251,7 +294,11 @@ async def test_tiktok_login_does_not_repeat_goto_when_already_on_login_page_with
     monkeypatch.setattr(component, "_ensure_login_mode", AsyncMock())
     monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
     monkeypatch.setattr(component, "_submit_credentials", AsyncMock())
-    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value="bad credentials"))
+    monkeypatch.setattr(
+        component,
+        "_find_visible_login_error",
+        AsyncMock(return_value="bad credentials"),
+    )
 
     result = await component.run(page)
 
@@ -266,20 +313,28 @@ async def test_tiktok_login_reused_session_observes_redirect_before_touching_log
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     component = TiktokLogin(_ctx(config={"reused_session": True, "params": {}}))
-    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+    )
     calls: list[str] = []
 
     async def _wait_reused_session_redirect(current_page) -> bool:
         calls.append("wait_reused_session_redirect")
-        current_page.url = "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+        current_page.url = (
+            "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+        )
         return True
 
     async def _wait_reused_session_bootstrap(current_page, **kwargs) -> str:
         calls.append("wait_reused_session_bootstrap")
         return "success"
 
-    monkeypatch.setattr(component, "_wait_for_reused_session_redirect", _wait_reused_session_redirect)
-    monkeypatch.setattr(component, "_wait_for_reused_session_bootstrap", _wait_reused_session_bootstrap)
+    monkeypatch.setattr(
+        component, "_wait_for_reused_session_redirect", _wait_reused_session_redirect
+    )
+    monkeypatch.setattr(
+        component, "_wait_for_reused_session_bootstrap", _wait_reused_session_bootstrap
+    )
     monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
     monkeypatch.setattr(component, "_submit_credentials", AsyncMock())
     monkeypatch.setattr(component, "_ensure_login_mode", AsyncMock())
@@ -311,13 +366,23 @@ async def test_tiktok_login_reused_session_waits_for_bootstrap_before_manual_log
         calls.append("wait_login_surface_ready")
         return True
 
-    monkeypatch.setattr(component, "_wait_for_reused_session_redirect", _wait_reused_session_redirect)
-    monkeypatch.setattr(component, "_wait_for_reused_session_bootstrap", _wait_reused_session_bootstrap)
-    monkeypatch.setattr(component, "_wait_for_login_surface_ready", _wait_login_surface_ready)
+    monkeypatch.setattr(
+        component, "_wait_for_reused_session_redirect", _wait_reused_session_redirect
+    )
+    monkeypatch.setattr(
+        component, "_wait_for_reused_session_bootstrap", _wait_reused_session_bootstrap
+    )
+    monkeypatch.setattr(
+        component, "_wait_for_login_surface_ready", _wait_login_surface_ready
+    )
     monkeypatch.setattr(component, "_ensure_login_mode", AsyncMock())
     monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
     monkeypatch.setattr(component, "_submit_credentials", AsyncMock())
-    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value="bad credentials"))
+    monkeypatch.setattr(
+        component,
+        "_find_visible_login_error",
+        AsyncMock(return_value="bad credentials"),
+    )
 
     result = await component.run(page)
 
@@ -359,7 +424,9 @@ async def test_tiktok_login_raises_verification_required_when_otp_is_needed_with
     monkeypatch.setattr(component, "_ensure_login_mode", AsyncMock())
     monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
     monkeypatch.setattr(component, "_submit_credentials", AsyncMock())
-    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        component, "_find_visible_login_error", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=True))
     monkeypatch.setattr(component, "_ensure_trust_device_checked", AsyncMock())
 
@@ -383,7 +450,9 @@ async def test_tiktok_login_resume_with_runtime_otp_reaches_success(
     )
     page = _FakePage("https://seller.tiktokglobalshop.com/account/login")
 
-    monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(side_effect=[True, False]))
+    monkeypatch.setattr(
+        component, "_is_otp_visible", AsyncMock(side_effect=[True, False])
+    )
     monkeypatch.setattr(component, "_fill_otp", AsyncMock())
     monkeypatch.setattr(component, "_ensure_trust_device_checked", AsyncMock())
 
@@ -392,7 +461,9 @@ async def test_tiktok_login_resume_with_runtime_otp_reaches_success(
         current_page.text_map["TikTok Shop"] = _FakeLocator()
 
     monkeypatch.setattr(component, "_confirm_otp", _confirm)
-    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        component, "_find_visible_otp_error", AsyncMock(return_value=None)
+    )
 
     result = await component.run(page)
 
@@ -415,11 +486,15 @@ async def test_tiktok_login_raises_manual_intervention_when_post_credentials_tim
     )
     page = _FakePage("https://seller.tiktokglobalshop.com/account/login")
 
-    monkeypatch.setattr(component, "_wait_for_login_surface_ready", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        component, "_wait_for_login_surface_ready", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(component, "_ensure_login_mode", AsyncMock())
     monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
     monkeypatch.setattr(component, "_submit_credentials", AsyncMock())
-    monkeypatch.setattr(component, "_wait_for_post_login_outcome", AsyncMock(return_value="timeout"))
+    monkeypatch.setattr(
+        component, "_wait_for_post_login_outcome", AsyncMock(return_value="timeout")
+    )
 
     with pytest.raises(VerificationRequiredError) as exc_info:
         await component.run(page)
@@ -447,7 +522,9 @@ async def test_tiktok_login_submit_resumed_otp_raises_manual_intervention_when_h
     monkeypatch.setattr(component, "_ensure_trust_device_checked", AsyncMock())
     monkeypatch.setattr(component, "_fill_otp", AsyncMock())
     monkeypatch.setattr(component, "_confirm_otp", AsyncMock())
-    monkeypatch.setattr(component, "_wait_for_post_login_outcome", AsyncMock(return_value="timeout"))
+    monkeypatch.setattr(
+        component, "_wait_for_post_login_outcome", AsyncMock(return_value="timeout")
+    )
 
     with pytest.raises(VerificationRequiredError) as exc_info:
         await component.run(page)
@@ -472,7 +549,9 @@ async def test_tiktok_login_manual_completed_timeout_re_raises_manual_interventi
     page = _FakePage("https://seller.tiktokglobalshop.com/account/login")
 
     monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
-    monkeypatch.setattr(component, "_wait_for_post_login_outcome", AsyncMock(return_value="timeout"))
+    monkeypatch.setattr(
+        component, "_wait_for_post_login_outcome", AsyncMock(return_value="timeout")
+    )
 
     with pytest.raises(VerificationRequiredError) as exc_info:
         await component.run(page)
@@ -501,7 +580,9 @@ async def test_tiktok_login_submit_resumed_otp_checks_trust_device_before_fillin
     monkeypatch.setattr(component, "_ensure_trust_device_checked", _trust_device)
     monkeypatch.setattr(component, "_fill_otp", _fill_otp)
     monkeypatch.setattr(component, "_confirm_otp", _confirm)
-    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        component, "_find_visible_otp_error", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(
         component,
         "_wait_for_post_login_outcome",
@@ -526,8 +607,12 @@ async def test_tiktok_login_submit_resumed_otp_waits_for_post_login_outcome(
     monkeypatch.setattr(component, "_ensure_trust_device_checked", AsyncMock())
     monkeypatch.setattr(component, "_fill_otp", AsyncMock())
     monkeypatch.setattr(component, "_confirm_otp", AsyncMock())
-    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
-    monkeypatch.setattr(component, "_wait_for_post_login_outcome", wait_for_outcome, raising=False)
+    monkeypatch.setattr(
+        component, "_find_visible_otp_error", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        component, "_wait_for_post_login_outcome", wait_for_outcome, raising=False
+    )
 
     result = await component._submit_resumed_otp(page, "123456")
 
@@ -542,8 +627,12 @@ async def test_tiktok_login_post_credentials_wait_detects_delayed_otp(
     component = TiktokLogin(_ctx())
     page = _FakePage("https://seller.tiktokglobalshop.com/account/login")
 
-    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
-    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        component, "_find_visible_login_error", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        component, "_find_visible_otp_error", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(
         component,
         "_is_otp_visible",
@@ -561,7 +650,9 @@ async def test_tiktok_login_post_credentials_wait_detects_delayed_otp(
 
 
 @pytest.mark.asyncio
-async def test_tiktok_login_is_otp_visible_accepts_textual_otp_signals_when_primary_locators_are_unstable() -> None:
+async def test_tiktok_login_is_otp_visible_accepts_textual_otp_signals_when_primary_locators_are_unstable() -> (
+    None
+):
     component = TiktokLogin(_ctx())
     page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
     page.text_map["双重验证"] = _FakeLocator()
@@ -572,7 +663,9 @@ async def test_tiktok_login_is_otp_visible_accepts_textual_otp_signals_when_prim
 
 
 @pytest.mark.asyncio
-async def test_tiktok_login_fill_otp_uses_accessible_textbox_fallback_when_css_locator_is_unstable() -> None:
+async def test_tiktok_login_fill_otp_uses_accessible_textbox_fallback_when_css_locator_is_unstable() -> (
+    None
+):
     component = TiktokLogin(_ctx())
     page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
     textbox = _FakeLocator()
@@ -597,8 +690,12 @@ async def test_tiktok_login_post_otp_wait_supports_data_overview_target(
     )
     page = _FakePage("https://seller.tiktokglobalshop.com/account/login")
 
-    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
-    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        component, "_find_visible_login_error", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        component, "_find_visible_otp_error", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
 
     async def _advance_page(ms: int) -> None:
@@ -632,8 +729,12 @@ async def test_tiktok_login_logs_url_transitions_during_post_login_wait(
     )
     page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
 
-    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
-    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        component, "_find_visible_login_error", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        component, "_find_visible_otp_error", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
 
     async def _advance_page(ms: int) -> None:
@@ -673,14 +774,22 @@ async def test_tiktok_login_post_otp_wait_does_not_exit_early_when_otp_surface_l
     )
     page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
 
-    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
-    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
-    monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(side_effect=[True, False, False]))
+    monkeypatch.setattr(
+        component, "_find_visible_login_error", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        component, "_find_visible_otp_error", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        component, "_is_otp_visible", AsyncMock(side_effect=[True, False, False])
+    )
 
     async def _advance_page(ms: int) -> None:
         page.timeout_calls.append(ms)
         if len(page.timeout_calls) >= 2:
-            page.url = "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+            page.url = (
+                "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+            )
             page.text_map["SG"] = _FakeLocator()
 
     monkeypatch.setattr(page, "wait_for_timeout", _advance_page)
@@ -702,14 +811,20 @@ async def test_tiktok_login_post_otp_wait_accepts_homepage_url_plus_left_nav_sig
     component = TiktokLogin(_ctx(config={}))
     page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
 
-    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
-    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        component, "_find_visible_login_error", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        component, "_find_visible_otp_error", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
 
     async def _advance_page(ms: int) -> None:
         page.timeout_calls.append(ms)
         if len(page.timeout_calls) >= 2:
-            page.url = "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+            page.url = (
+                "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+            )
             page.text_map["首页"] = _FakeLocator()
             page.text_map["数据分析"] = _FakeLocator()
 
@@ -732,8 +847,12 @@ async def test_tiktok_login_post_credentials_wait_observes_homepage_without_relo
     component = TiktokLogin(_ctx(config={"shop_region": "SG"}))
     page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
 
-    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
-    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        component, "_find_visible_login_error", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        component, "_find_visible_otp_error", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
 
     async def _advance_page(ms: int) -> None:
@@ -760,8 +879,12 @@ async def test_tiktok_login_post_otp_wait_waits_for_region_scoped_homepage_after
     component = TiktokLogin(_ctx(config={"shop_region": "SG"}))
     page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
 
-    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
-    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        component, "_find_visible_login_error", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        component, "_find_visible_otp_error", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
 
     async def _advance_page(ms: int) -> None:
@@ -796,14 +919,20 @@ async def test_tiktok_login_post_otp_wait_accepts_authenticated_shell_without_ho
     component = TiktokLogin(_ctx(config={}))
     page = _FakePage("https://seller.tiktokglobalshop.com/account/login")
 
-    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
-    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        component, "_find_visible_login_error", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        component, "_find_visible_otp_error", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
 
     async def _advance_page(ms: int) -> None:
         page.timeout_calls.append(ms)
         if len(page.timeout_calls) >= 2:
-            page.url = "https://seller.tiktokshopglobalselling.com/order/list?shop_region=SG"
+            page.url = (
+                "https://seller.tiktokshopglobalselling.com/order/list?shop_region=SG"
+            )
             page.text_map["订单"] = _FakeLocator()
             page.text_map["商品"] = _FakeLocator()
             page.selector_map['a[href*="/order"]'] = _FakeLocator()
@@ -835,20 +964,39 @@ async def test_tiktok_login_wait_for_login_surface_ready_handles_delayed_login_s
 
     monkeypatch.setattr(component, "_locator_is_visible", _fake_locator_is_visible)
 
-    assert await component._wait_for_login_surface_ready(page, timeout_ms=10, poll_ms=1) is True
+    assert (
+        await component._wait_for_login_surface_ready(page, timeout_ms=10, poll_ms=1)
+        is True
+    )
 
 
 @pytest.mark.asyncio
 async def test_tiktok_login_ensure_login_mode_retries_when_switch_is_delayed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    component = TiktokLogin(_ctx(account={"email": "demo@example.com", "password": "secret", "login_url": "https://seller.tiktokglobalshop.com/account/login"}))
+    component = TiktokLogin(
+        _ctx(
+            account={
+                "email": "demo@example.com",
+                "password": "secret",
+                "login_url": "https://seller.tiktokglobalshop.com/account/login",
+            }
+        )
+    )
     page = _FakePage("https://seller.tiktokglobalshop.com/account/login")
     switch = _FakeLocator(visible=True)
 
-    monkeypatch.setattr(component, "_current_login_mode", AsyncMock(side_effect=["phone", "phone", "email"]))
-    monkeypatch.setattr(component, "_email_login_switch_locator", lambda current_page: switch)
-    monkeypatch.setattr(component, "_locator_is_visible", AsyncMock(side_effect=[False, True]))
+    monkeypatch.setattr(
+        component,
+        "_current_login_mode",
+        AsyncMock(side_effect=["phone", "phone", "email"]),
+    )
+    monkeypatch.setattr(
+        component, "_email_login_switch_locator", lambda current_page: switch
+    )
+    monkeypatch.setattr(
+        component, "_locator_is_visible", AsyncMock(side_effect=[False, True])
+    )
 
     await component._ensure_login_mode(page, "email")
 

@@ -6,7 +6,11 @@ import re
 from typing import Any
 
 from modules.components.base import ExecutionContext
-from modules.components.date_picker.base import DateOption, DatePickResult, DatePickerComponent
+from modules.components.date_picker.base import (
+    DateOption,
+    DatePickResult,
+    DatePickerComponent,
+)
 from modules.platforms.shopee.components.business_analysis_common import (
     build_domain_path,
     granularity_label,
@@ -23,16 +27,18 @@ class ShopeeDatePicker(DatePickerComponent):
     component_type = "date_picker"
     data_domain = None
 
-    def __init__(self, ctx: ExecutionContext, selectors: ProductsSelectors | None = None) -> None:
+    def __init__(
+        self, ctx: ExecutionContext, selectors: ProductsSelectors | None = None
+    ) -> None:
         super().__init__(ctx)
         cfg = self.ctx.config or {}
         domain = str(cfg.get("data_domain") or "products").strip().lower()
         self.data_domain = domain
-        subtype = str(
-            cfg.get("services_subtype")
-            or cfg.get("sub_domain")
-            or ""
-        ).strip().lower()
+        subtype = (
+            str(cfg.get("services_subtype") or cfg.get("sub_domain") or "")
+            .strip()
+            .lower()
+        )
         service_selectors = ServicesSelectors()
 
         overview_path = build_domain_path("products")
@@ -42,7 +48,9 @@ class ShopeeDatePicker(DatePickerComponent):
             overview_path = service_selectors.service_paths[subtype]
 
         # 选择器与调用方同源，避免组件层与 helper 层出现两套文案/粒度口径
-        selectors = replace(selectors or ProductsSelectors(), overview_path=overview_path)
+        selectors = replace(
+            selectors or ProductsSelectors(), overview_path=overview_path
+        )
         self._delegate = ShopeeProductsExport(self.ctx, selectors=selectors)
         self.sel = self._delegate.sel
         self.service_sel = service_selectors
@@ -63,7 +71,9 @@ class ShopeeDatePicker(DatePickerComponent):
         escaped = re.escape(str(text or "").strip())
         return re.compile(rf"^\s*{escaped}\s*$")
 
-    async def _first_visible_locator(self, page: Any, selectors: tuple[str, ...]) -> Any | None:
+    async def _first_visible_locator(
+        self, page: Any, selectors: tuple[str, ...]
+    ) -> Any | None:
         for selector in selectors:
             try:
                 locator = page.locator(selector).first
@@ -73,7 +83,9 @@ class ShopeeDatePicker(DatePickerComponent):
                 continue
         return None
 
-    async def _pick_visible_locator(self, match_group: Any, *, timeout_ms: int = 1000) -> Any | None:
+    async def _pick_visible_locator(
+        self, match_group: Any, *, timeout_ms: int = 1000
+    ) -> Any | None:
         if match_group is None:
             return None
 
@@ -161,7 +173,11 @@ class ShopeeDatePicker(DatePickerComponent):
         return None
 
     def _date_panel_anchor_texts(self) -> tuple[str, ...]:
-        domain = str((self.ctx.config or {}).get("data_domain") or "products").strip().lower()
+        domain = (
+            str((self.ctx.config or {}).get("data_domain") or "products")
+            .strip()
+            .lower()
+        )
         anchors: list[str] = [
             self.sel.granularity_labels.get("daily", ""),
             self.sel.granularity_labels.get("weekly", ""),
@@ -231,7 +247,9 @@ class ShopeeDatePicker(DatePickerComponent):
                 for idx in range(count - 1, -1, -1):
                     candidate = locator.nth(idx)
                     if await candidate.is_visible(timeout=500):
-                        score = await self._score_date_panel_candidate(candidate, anchor_texts)
+                        score = await self._score_date_panel_candidate(
+                            candidate, anchor_texts
+                        )
                         if score[0] <= 0:
                             continue
                         if best_score is None or score > best_score:
@@ -255,7 +273,9 @@ class ShopeeDatePicker(DatePickerComponent):
                     candidate = locator.nth(idx)
                     if not await candidate.is_visible(timeout=300):
                         continue
-                    score = await self._score_date_panel_candidate(candidate, anchor_texts)
+                    score = await self._score_date_panel_candidate(
+                        candidate, anchor_texts
+                    )
                     if score[0] <= 0:
                         continue
                     if best_score is None or score > best_score:
@@ -269,7 +289,9 @@ class ShopeeDatePicker(DatePickerComponent):
         panel = await self._find_date_panel(page)
         try:
             pattern = self._build_loose_text_pattern(text)
-            matches = panel.get_by_text(pattern, exact=False) if panel is not None else None
+            matches = (
+                panel.get_by_text(pattern, exact=False) if panel is not None else None
+            )
         except Exception:
             matches = None
 
@@ -281,7 +303,9 @@ class ShopeeDatePicker(DatePickerComponent):
             global_matches = page.get_by_text(pattern, exact=False)
         except Exception:
             return None
-        global_locator = await self._pick_visible_locator(global_matches, timeout_ms=2000)
+        global_locator = await self._pick_visible_locator(
+            global_matches, timeout_ms=2000
+        )
         if global_locator is not None:
             return global_locator
         return None
@@ -363,7 +387,9 @@ class ShopeeDatePicker(DatePickerComponent):
             ),
         }
         for canonical, variants in variant_map.items():
-            normalized_variants = tuple(self._normalize_date_text(item) for item in variants)
+            normalized_variants = tuple(
+                self._normalize_date_text(item) for item in variants
+            )
             if any(variant and variant in content for variant in normalized_variants):
                 return canonical
         return None
@@ -400,7 +426,9 @@ class ShopeeDatePicker(DatePickerComponent):
                 values.append(parsed_value)
         return tuple(values)
 
-    def _extract_summary_month_value(self, summary: str | None) -> tuple[int, int] | None:
+    def _extract_summary_month_value(
+        self, summary: str | None
+    ) -> tuple[int, int] | None:
         text = str(summary or "").strip()
         if not text:
             return None
@@ -433,7 +461,9 @@ class ShopeeDatePicker(DatePickerComponent):
             }
 
         normalized_label = self._normalize_date_text(label)
-        if normalized_label == self._normalize_date_text(self.sel.granularity_labels.get("monthly")):
+        if normalized_label == self._normalize_date_text(
+            self.sel.granularity_labels.get("monthly")
+        ):
             month_value = self._extract_summary_month_value(text)
             if month_value is not None:
                 year, month = month_value
@@ -445,7 +475,11 @@ class ShopeeDatePicker(DatePickerComponent):
                 }
 
         summary_dates = self._extract_summary_date_values(text)
-        if normalized_label == self._normalize_date_text(self.sel.granularity_labels.get("weekly")) and len(summary_dates) >= 2:
+        if (
+            normalized_label
+            == self._normalize_date_text(self.sel.granularity_labels.get("weekly"))
+            and len(summary_dates) >= 2
+        ):
             return {
                 "mode": "weekly",
                 "start_date": summary_dates[0],
@@ -453,7 +487,11 @@ class ShopeeDatePicker(DatePickerComponent):
                 "label": label,
             }
 
-        if normalized_label == self._normalize_date_text(self.sel.granularity_labels.get("daily")) and summary_dates:
+        if (
+            normalized_label
+            == self._normalize_date_text(self.sel.granularity_labels.get("daily"))
+            and summary_dates
+        ):
             return {
                 "mode": "daily",
                 "date": summary_dates[0],
@@ -475,11 +513,17 @@ class ShopeeDatePicker(DatePickerComponent):
         if label:
             state["label"] = label
             normalized_label = self._normalize_date_text(label)
-            if normalized_label == self._normalize_date_text(self.sel.granularity_labels.get("daily")):
+            if normalized_label == self._normalize_date_text(
+                self.sel.granularity_labels.get("daily")
+            ):
                 state["mode"] = "daily"
-            elif normalized_label == self._normalize_date_text(self.sel.granularity_labels.get("weekly")):
+            elif normalized_label == self._normalize_date_text(
+                self.sel.granularity_labels.get("weekly")
+            ):
                 state["mode"] = "weekly"
-            elif normalized_label == self._normalize_date_text(self.sel.granularity_labels.get("monthly")):
+            elif normalized_label == self._normalize_date_text(
+                self.sel.granularity_labels.get("monthly")
+            ):
                 state["mode"] = "monthly"
             else:
                 preset_value = self._preset_value_from_label(label)
@@ -531,8 +575,7 @@ class ShopeeDatePicker(DatePickerComponent):
 
         if normalized_granularity == "weekly":
             return (
-                state.get("mode") == "weekly"
-                and state.get("start_date") == start_date
+                state.get("mode") == "weekly" and state.get("start_date") == start_date
             )
 
         if normalized_granularity == "monthly" and start_date:
@@ -650,7 +693,9 @@ class ShopeeDatePicker(DatePickerComponent):
             return None
         return time_selection
 
-    def _custom_range_bounds(self, config: dict[str, Any]) -> tuple[str | None, str | None]:
+    def _custom_range_bounds(
+        self, config: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
         custom_selection = self._custom_time_selection(config) or {}
         start_value = (
             str(custom_selection.get("start_date") or "").strip()
@@ -795,7 +840,10 @@ class ShopeeDatePicker(DatePickerComponent):
             except ValueError:
                 target_date = None
             month_value = self._extract_summary_month_value(summary)
-            if target_date is not None and month_value == (target_date.year, target_date.month):
+            if target_date is not None and month_value == (
+                target_date.year,
+                target_date.month,
+            ):
                 return True
 
         parsed_summary = self._parse_date_summary(summary)
@@ -826,21 +874,31 @@ class ShopeeDatePicker(DatePickerComponent):
         expected_label = None
         if normalized_granularity in {"daily", "weekly", "monthly"}:
             expected_label = self.sel.granularity_labels.get(normalized_granularity)
-        if expected_label and self._normalize_date_text(expected_label) not in normalized_summary:
+        if (
+            expected_label
+            and self._normalize_date_text(expected_label) not in normalized_summary
+        ):
             return False
 
         primary_signatures: list[str] = []
         if normalized_granularity == "daily":
-            primary_signatures.extend(self._date_value_signatures(start_date or end_date))
+            primary_signatures.extend(
+                self._date_value_signatures(start_date or end_date)
+            )
         elif normalized_granularity == "weekly":
             primary_signatures.extend(self._date_value_signatures(start_date))
         elif normalized_granularity == "monthly" and start_date:
             primary_signatures.extend(self._month_summary_signatures(start_date))
 
         normalized_signatures = tuple(
-            self._normalize_date_text(signature) for signature in primary_signatures if signature
+            self._normalize_date_text(signature)
+            for signature in primary_signatures
+            if signature
         )
-        return any(signature and signature in normalized_summary for signature in normalized_signatures)
+        return any(
+            signature and signature in normalized_summary
+            for signature in normalized_signatures
+        )
 
     def _resolve_custom_target(self, config: dict[str, Any]) -> dict[str, Any]:
         granularity = str(config.get("granularity") or "").strip().lower()
@@ -890,8 +948,16 @@ class ShopeeDatePicker(DatePickerComponent):
                     except Exception:
                         text_content = ""
                     score = (
-                        1 if self._parse_month_panel_year(text_content) is not None else 0,
-                        sum(1 for label in self._month_grid_labels() if label in text_content),
+                        (
+                            1
+                            if self._parse_month_panel_year(text_content) is not None
+                            else 0
+                        ),
+                        sum(
+                            1
+                            for label in self._month_grid_labels()
+                            if label in text_content
+                        ),
                         len(text_content),
                     )
                     if best_score is None or score > best_score:
@@ -952,7 +1018,9 @@ class ShopeeDatePicker(DatePickerComponent):
             for selector in selectors:
                 try:
                     locator = container.locator(selector).first
-                    if await locator.count() > 0 and await locator.is_visible(timeout=500):
+                    if await locator.count() > 0 and await locator.is_visible(
+                        timeout=500
+                    ):
                         text_content = await locator.text_content()
                         if self._parse_month_panel_year(text_content) is not None:
                             return text_content
@@ -962,7 +1030,9 @@ class ShopeeDatePicker(DatePickerComponent):
             if container is None:
                 continue
             try:
-                locator = await self._pick_visible_locator(container.get_by_text(re.compile(r"20\d{2}"), exact=False))
+                locator = await self._pick_visible_locator(
+                    container.get_by_text(re.compile(r"20\d{2}"), exact=False)
+                )
                 if locator is None:
                     continue
                 text_content = await locator.text_content()
@@ -991,14 +1061,16 @@ class ShopeeDatePicker(DatePickerComponent):
             waited += poll_ms
         return None
 
-    async def _click_month_panel_year_nav_button(self, page: Any, direction: str) -> bool:
+    async def _click_month_panel_year_nav_button(
+        self, page: Any, direction: str
+    ) -> bool:
         selector_map = {
             "prev": (
                 'button[aria-label*="previous year"]',
                 'button[aria-label*="previous"]',
-                '.arco-picker-header-super-prev-btn',
+                ".arco-picker-header-super-prev-btn",
                 '.arco-picker-header-prev-btn:not([class*="super"])',
-                '.ant-picker-header-super-prev-btn',
+                ".ant-picker-header-super-prev-btn",
                 '.ant-picker-header-prev-btn:not([class*="super"])',
                 '[class*="super-prev"]',
                 '[class*="prev-btn"]:not([class*="super"])',
@@ -1008,9 +1080,9 @@ class ShopeeDatePicker(DatePickerComponent):
             "next": (
                 'button[aria-label*="next year"]',
                 'button[aria-label*="next"]',
-                '.arco-picker-header-super-next-btn',
+                ".arco-picker-header-super-next-btn",
                 '.arco-picker-header-next-btn:not([class*="super"])',
-                '.ant-picker-header-super-next-btn',
+                ".ant-picker-header-super-next-btn",
                 '.ant-picker-header-next-btn:not([class*="super"])',
                 '[class*="super-next"]',
                 '[class*="next-btn"]:not([class*="super"])',
@@ -1027,7 +1099,9 @@ class ShopeeDatePicker(DatePickerComponent):
             for selector in selector_map.get(direction, ()):
                 try:
                     locator = container.locator(selector).first
-                    if await locator.count() > 0 and await locator.is_visible(timeout=500):
+                    if await locator.count() > 0 and await locator.is_visible(
+                        timeout=500
+                    ):
                         await locator.click(timeout=5000)
                         if hasattr(page, "wait_for_timeout"):
                             await page.wait_for_timeout(250)
@@ -1044,7 +1118,9 @@ class ShopeeDatePicker(DatePickerComponent):
             if container is None:
                 continue
             try:
-                locator = await self._pick_visible_locator(container.get_by_text(pattern, exact=False))
+                locator = await self._pick_visible_locator(
+                    container.get_by_text(pattern, exact=False)
+                )
                 if locator is not None:
                     return locator
             except Exception:
@@ -1053,14 +1129,18 @@ class ShopeeDatePicker(DatePickerComponent):
             if container is None:
                 continue
             try:
-                locator = await self._pick_visible_locator(container.get_by_text(month_label, exact=True))
+                locator = await self._pick_visible_locator(
+                    container.get_by_text(month_label, exact=True)
+                )
                 if locator is not None:
                     return locator
             except Exception:
                 continue
         return None
 
-    def _parse_calendar_header_month_year_zh(self, header_text: str | None) -> tuple[int, int] | None:
+    def _parse_calendar_header_month_year_zh(
+        self, header_text: str | None
+    ) -> tuple[int, int] | None:
         text = str(header_text or "").strip()
         if not text:
             return None
@@ -1076,7 +1156,9 @@ class ShopeeDatePicker(DatePickerComponent):
 
         month_year_numeric_match = re.search(r"(\d{1,2})\s*\u6708\s*(20\d{2})", text)
         if month_year_numeric_match:
-            return int(month_year_numeric_match.group(2)), int(month_year_numeric_match.group(1))
+            return int(month_year_numeric_match.group(2)), int(
+                month_year_numeric_match.group(1)
+            )
 
         month_labels = (
             ("\u5341\u4e00\u6708", 11),
@@ -1133,7 +1215,9 @@ class ShopeeDatePicker(DatePickerComponent):
             for selector in selectors:
                 try:
                     locator = container.locator(selector).first
-                    if await locator.count() > 0 and await locator.is_visible(timeout=500):
+                    if await locator.count() > 0 and await locator.is_visible(
+                        timeout=500
+                    ):
                         text_content = await locator.text_content()
                         if text_content and text_content.strip():
                             return text_content
@@ -1171,7 +1255,9 @@ class ShopeeDatePicker(DatePickerComponent):
             for selector in selector_groups:
                 try:
                     locator = container.locator(selector).first
-                    if await locator.count() > 0 and await locator.is_visible(timeout=500):
+                    if await locator.count() > 0 and await locator.is_visible(
+                        timeout=500
+                    ):
                         await locator.click(timeout=5000)
                         if hasattr(page, "wait_for_timeout"):
                             await page.wait_for_timeout(250)
@@ -1197,7 +1283,9 @@ class ShopeeDatePicker(DatePickerComponent):
                 '[class*="next"]:not([class*="super"])',
             ),
         }
-        if await self._click_popup_nav_button_from_selectors(page, selector_map.get(direction, ())):
+        if await self._click_popup_nav_button_from_selectors(
+            page, selector_map.get(direction, ())
+        ):
             return True
 
         text_map = {
@@ -1211,7 +1299,9 @@ class ShopeeDatePicker(DatePickerComponent):
                 continue
             for label in text_map.get(direction, ()):
                 try:
-                    locator = await self._pick_visible_locator(container.get_by_text(label, exact=True))
+                    locator = await self._pick_visible_locator(
+                        container.get_by_text(label, exact=True)
+                    )
                     if locator is None:
                         continue
                     await locator.click(timeout=5000)
@@ -1222,7 +1312,9 @@ class ShopeeDatePicker(DatePickerComponent):
                     continue
         return False
 
-    async def _navigate_calendar_panel_to_month(self, page: Any, target_year: int, target_month: int) -> bool:
+    async def _navigate_calendar_panel_to_month(
+        self, page: Any, target_year: int, target_month: int
+    ) -> bool:
         header_text = await self._current_popup_header_text(page)
         for _ in range(24):
             current = self._parse_calendar_header_month_year_zh(header_text)
@@ -1245,7 +1337,10 @@ class ShopeeDatePicker(DatePickerComponent):
             if updated_header is None:
                 return False
             header_text = updated_header
-        return self._parse_calendar_header_month_year_zh(header_text) == (target_year, target_month)
+        return self._parse_calendar_header_month_year_zh(header_text) == (
+            target_year,
+            target_month,
+        )
 
     async def _navigate_month_panel_to_year(self, page: Any, target_year: int) -> bool:
         header_text = await self._current_month_panel_year_text(page)
@@ -1253,10 +1348,16 @@ class ShopeeDatePicker(DatePickerComponent):
             current_year = self._parse_month_panel_year(header_text)
             if current_year == target_year:
                 return True
-            direction = "next" if current_year is not None and current_year < target_year else "prev"
+            direction = (
+                "next"
+                if current_year is not None and current_year < target_year
+                else "prev"
+            )
             if not await self._click_month_panel_year_nav_button(page, direction):
                 return False
-            updated_header = await self._wait_month_panel_year_changed(page, header_text)
+            updated_header = await self._wait_month_panel_year_changed(
+                page, header_text
+            )
             if updated_header is None:
                 return False
             header_text = updated_header
@@ -1282,7 +1383,11 @@ class ShopeeDatePicker(DatePickerComponent):
                 end_date=end_date,
             ):
                 return True
-            summary = state.get("raw_text") if state else await self._current_date_summary_text(page)
+            summary = (
+                state.get("raw_text")
+                if state
+                else await self._current_date_summary_text(page)
+            )
             if self._custom_date_summary_matches(
                 summary,
                 granularity=granularity,
@@ -1291,11 +1396,15 @@ class ShopeeDatePicker(DatePickerComponent):
             ):
                 return True
             trigger_text = await self._current_date_trigger_text(page)
-            if trigger_text and trigger_text != summary and self._custom_date_summary_matches(
-                trigger_text,
-                granularity=granularity,
-                start_date=start_date,
-                end_date=end_date,
+            if (
+                trigger_text
+                and trigger_text != summary
+                and self._custom_date_summary_matches(
+                    trigger_text,
+                    granularity=granularity,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
             ):
                 return True
             if await self._selection_hints_visible(
@@ -1333,7 +1442,9 @@ class ShopeeDatePicker(DatePickerComponent):
             target_date = datetime.strptime(str(iso_date), "%Y-%m-%d")
         except ValueError:
             return False
-        if not await self._navigate_calendar_panel_to_month(page, target_date.year, target_date.month):
+        if not await self._navigate_calendar_panel_to_month(
+            page, target_date.year, target_date.month
+        ):
             return False
         return await self._select_calendar_day(page, target_date.day)
 
@@ -1355,7 +1466,9 @@ class ShopeeDatePicker(DatePickerComponent):
                     try:
                         in_view_scope = container.locator(in_view_selector)
                         matches = in_view_scope.get_by_text(candidate, exact=True)
-                        locator = await self._pick_visible_locator(matches, timeout_ms=1000)
+                        locator = await self._pick_visible_locator(
+                            matches, timeout_ms=1000
+                        )
                         if locator is not None:
                             await locator.click(timeout=5000)
                             if hasattr(page, "wait_for_timeout"):
@@ -1375,12 +1488,16 @@ class ShopeeDatePicker(DatePickerComponent):
                     continue
         return False
 
-    async def _select_week_range_value(self, page: Any, start_date: str, end_date: str) -> bool:
+    async def _select_week_range_value(
+        self, page: Any, start_date: str, end_date: str
+    ) -> bool:
         try:
             start_value = datetime.strptime(str(start_date), "%Y-%m-%d")
         except ValueError:
             return False
-        if not await self._navigate_calendar_panel_to_month(page, start_value.year, start_value.month):
+        if not await self._navigate_calendar_panel_to_month(
+            page, start_value.year, start_value.month
+        ):
             return False
         return await self._select_calendar_day(page, start_value.day)
 
@@ -1412,16 +1529,24 @@ class ShopeeDatePicker(DatePickerComponent):
 
     def _resolve_option_from_context(self) -> DateOption:
         config = self.ctx.config or {}
-        time_selection = config.get("time_selection") if isinstance(config.get("time_selection"), dict) else {}
+        time_selection = (
+            config.get("time_selection")
+            if isinstance(config.get("time_selection"), dict)
+            else {}
+        )
         if str(time_selection.get("mode") or "").strip().lower() == "preset":
             raw = str(time_selection.get("preset") or "").strip().lower()
         else:
-            raw = str(
-                config.get("date_preset")
-                or config.get("preset")
-                or config.get("granularity")
-                or "daily"
-            ).strip().lower()
+            raw = (
+                str(
+                    config.get("date_preset")
+                    or config.get("preset")
+                    or config.get("granularity")
+                    or "daily"
+                )
+                .strip()
+                .lower()
+            )
 
         if raw in {"today", "today_realtime"}:
             return DateOption.TODAY_REALTIME
@@ -1436,13 +1561,28 @@ class ShopeeDatePicker(DatePickerComponent):
         return DateOption.YESTERDAY
 
     def _target_date_label(self, config: dict[str, Any]) -> str:
-        domain = str((self.ctx.config or {}).get("data_domain") or self.data_domain or "products").strip().lower()
+        domain = (
+            str(
+                (self.ctx.config or {}).get("data_domain")
+                or self.data_domain
+                or "products"
+            )
+            .strip()
+            .lower()
+        )
         time_selection = config.get("time_selection")
         if isinstance(time_selection, dict):
-            if str(time_selection.get("mode") or "").strip().lower() == "preset" and time_selection.get("preset"):
+            if str(
+                time_selection.get("mode") or ""
+            ).strip().lower() == "preset" and time_selection.get("preset"):
                 preset_value = str(time_selection["preset"])
-                if domain == "services" and str(preset_value).strip().lower() == "today_realtime":
-                    raise ValueError("unsupported preset 'today_realtime' for shopee/services")
+                if (
+                    domain == "services"
+                    and str(preset_value).strip().lower() == "today_realtime"
+                ):
+                    raise ValueError(
+                        "unsupported preset 'today_realtime' for shopee/services"
+                    )
                 normalized = normalize_time_request(
                     domain,
                     time_mode="preset",
@@ -1452,8 +1592,13 @@ class ShopeeDatePicker(DatePickerComponent):
 
         if config.get("date_preset"):
             preset_value = str(config["date_preset"])
-            if domain == "services" and preset_value.strip().lower() == "today_realtime":
-                raise ValueError("unsupported preset 'today_realtime' for shopee/services")
+            if (
+                domain == "services"
+                and preset_value.strip().lower() == "today_realtime"
+            ):
+                raise ValueError(
+                    "unsupported preset 'today_realtime' for shopee/services"
+                )
             normalized = normalize_time_request(
                 domain,
                 time_mode="preset",
@@ -1463,8 +1608,13 @@ class ShopeeDatePicker(DatePickerComponent):
 
         if "preset" in config:
             preset_value = str(config["preset"])
-            if domain == "services" and preset_value.strip().lower() == "today_realtime":
-                raise ValueError("unsupported preset 'today_realtime' for shopee/services")
+            if (
+                domain == "services"
+                and preset_value.strip().lower() == "today_realtime"
+            ):
+                raise ValueError(
+                    "unsupported preset 'today_realtime' for shopee/services"
+                )
             normalized = normalize_time_request(
                 domain,
                 time_mode="preset",
@@ -1515,7 +1665,9 @@ class ShopeeDatePicker(DatePickerComponent):
         if granularity == "daily":
             if not await self._hover_text_option(page, "按日"):
                 raise RuntimeError("date option was not clicked")
-            if not target["target_iso_date"] or not await self._select_single_day_value(page, target["target_iso_date"]):
+            if not target["target_iso_date"] or not await self._select_single_day_value(
+                page, target["target_iso_date"]
+            ):
                 raise RuntimeError("date option was not clicked")
             if not await self._wait_custom_date_selection_applied(
                 page,
@@ -1529,7 +1681,11 @@ class ShopeeDatePicker(DatePickerComponent):
         if granularity == "weekly":
             if not await self._hover_text_option(page, "按周"):
                 raise RuntimeError("date option was not clicked")
-            if not start_date or not end_date or not await self._select_week_range_value(page, start_date, end_date):
+            if (
+                not start_date
+                or not end_date
+                or not await self._select_week_range_value(page, start_date, end_date)
+            ):
                 raise RuntimeError("date option was not clicked")
             if not await self._wait_custom_date_selection_applied(
                 page,
@@ -1543,7 +1699,9 @@ class ShopeeDatePicker(DatePickerComponent):
         if granularity == "monthly":
             if not await self._hover_text_option(page, "按月"):
                 raise RuntimeError("date option was not clicked")
-            if not target["target_iso_date"] or not await self._select_month_value(page, target["target_iso_date"]):
+            if not target["target_iso_date"] or not await self._select_month_value(
+                page, target["target_iso_date"]
+            ):
                 raise RuntimeError("date option was not clicked")
             if not await self._wait_custom_date_selection_applied(
                 page,
@@ -1602,4 +1760,6 @@ class ShopeeDatePicker(DatePickerComponent):
                 await self._run_preset_selection(page)
             return DatePickResult(success=True, message="ok", option=resolved_option)
         except Exception as exc:
-            return DatePickResult(success=False, message=str(exc), option=resolved_option)
+            return DatePickResult(
+                success=False, message=str(exc), option=resolved_option
+            )

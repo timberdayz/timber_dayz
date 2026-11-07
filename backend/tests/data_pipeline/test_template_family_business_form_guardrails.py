@@ -147,10 +147,9 @@ def test_canonical_dimension_rank_ignores_account():
         granularity="monthly",
         account=None,
     )
-    assert (
-        TemplateFamilyService._canonical_dimension_rank(with_account)
-        == TemplateFamilyService._canonical_dimension_rank(without_account)
-    )
+    assert TemplateFamilyService._canonical_dimension_rank(
+        with_account
+    ) == TemplateFamilyService._canonical_dimension_rank(without_account)
 
 
 @pytest.mark.asyncio
@@ -179,14 +178,20 @@ async def test_account_count_does_not_change_template_count(family_session):
     from sqlalchemy import select
 
     families = (
-        await family_session.execute(select(FieldMappingTemplateFamily))
-    ).scalars().all()
+        (await family_session.execute(select(FieldMappingTemplateFamily)))
+        .scalars()
+        .all()
+    )
     versions = (
-        await family_session.execute(select(FieldMappingTemplateVersion))
-    ).scalars().all()
+        (await family_session.execute(select(FieldMappingTemplateVersion)))
+        .scalars()
+        .all()
+    )
     variants = (
-        await family_session.execute(select(FieldMappingTemplateVariant))
-    ).scalars().all()
+        (await family_session.execute(select(FieldMappingTemplateVariant)))
+        .scalars()
+        .all()
+    )
 
     assert len(families) == 1, "账号数变化不应让模板族变多"
     assert len([item for item in versions if item.status == "active"]) == 1
@@ -203,7 +208,9 @@ def test_variant_kind_ignores_template_name():
     """模板名(文件名)不再决定变体身份。"""
     a = _make_template(template_name="shopee_analytics__monthly_slash_v3")
     b = _make_template(template_name="shopee_analytics__月度_下划线_完全不同的名字")
-    assert infer_variant_key_from_legacy_template(a) == infer_variant_key_from_legacy_template(b)
+    assert infer_variant_key_from_legacy_template(
+        a
+    ) == infer_variant_key_from_legacy_template(b)
 
 
 def test_variant_kind_reflects_parse_rules():
@@ -245,7 +252,9 @@ def test_variant_kind_is_stable_under_rule_order():
     assert build_variant_kind(
         header_columns=_COLUMNS, field_parse_rules=two_rules, header_row=3
     ) == build_variant_kind(
-        header_columns=_COLUMNS, field_parse_rules=list(reversed(two_rules)), header_row=3
+        header_columns=_COLUMNS,
+        field_parse_rules=list(reversed(two_rules)),
+        header_row=3,
     )
 
 

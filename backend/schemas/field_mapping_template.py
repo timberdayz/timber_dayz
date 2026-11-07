@@ -17,17 +17,29 @@ TemplateFieldParseRuleValueKind = Literal[
     "time_range",
 ]
 TemplateFieldParseRuleRangePick = Literal["start", "end"]
-TemplateSemanticReviewStatus = Literal["pending", "confirmed_semantic", "confirmed_non_semantic"]
+TemplateSemanticReviewStatus = Literal[
+    "pending", "confirmed_semantic", "confirmed_non_semantic"
+]
 TemplateSemanticReviewSource = Literal["user", "inferred"]
 
 
 class TemplateHeaderBinding(BaseModel):
     raw_name: str = Field(..., description="Physical source column name")
-    display_name: Optional[str] = Field(None, description="Human-readable semantic label")
-    semantic_key: Optional[str] = Field(None, description="Stable semantic identity key such as order_id")
-    semantic_role: Optional[str] = Field(None, description="Semantic role such as metric_date")
-    aliases: List[str] = Field(default_factory=list, description="Alternative labels for matching")
-    required: Optional[bool] = Field(None, description="Whether this semantic binding is required for sync")
+    display_name: Optional[str] = Field(
+        None, description="Human-readable semantic label"
+    )
+    semantic_key: Optional[str] = Field(
+        None, description="Stable semantic identity key such as order_id"
+    )
+    semantic_role: Optional[str] = Field(
+        None, description="Semantic role such as metric_date"
+    )
+    aliases: List[str] = Field(
+        default_factory=list, description="Alternative labels for matching"
+    )
+    required: Optional[bool] = Field(
+        None, description="Whether this semantic binding is required for sync"
+    )
     # [*] 批次 E(D2): ``hash_participates`` 已下线 ——
     # 「参与去重」由版本级核心字段清单(``core_fields``)的 ``in_hash`` 表达,
     # 绑定级不再重复声明同一事实。
@@ -51,10 +63,18 @@ class TemplateHeaderBinding(BaseModel):
 class TemplateFieldParseRule(BaseModel):
     target_field: str = Field(..., description="Target standard field")
     source_column: str = Field(..., description="Original source column")
-    source_label: Optional[str] = Field(None, description="Semantic display label for source column")
-    source_aliases: List[str] = Field(default_factory=list, description="Alternative source labels")
-    source_semantic_role: Optional[str] = Field(None, description="Semantic role for source column")
-    value_kind: TemplateFieldParseRuleValueKind = Field(..., description="Declared parse value kind")
+    source_label: Optional[str] = Field(
+        None, description="Semantic display label for source column"
+    )
+    source_aliases: List[str] = Field(
+        default_factory=list, description="Alternative source labels"
+    )
+    source_semantic_role: Optional[str] = Field(
+        None, description="Semantic role for source column"
+    )
+    value_kind: TemplateFieldParseRuleValueKind = Field(
+        ..., description="Declared parse value kind"
+    )
     date_format: str = Field(..., description="Declared date format")
     format_candidates: List[str] = Field(
         default_factory=list,
@@ -88,14 +108,20 @@ class TemplateCoreField(BaseModel):
 
     semantic_key: Optional[str] = Field(None, description="Canonical semantic key")
     raw_name: Optional[str] = Field(None, description="Physical source column name")
-    required: bool = Field(False, description="Whether a missing value blocks ingestion")
-    in_hash: bool = Field(True, description="Whether the field participates in data_hash")
+    required: bool = Field(
+        False, description="Whether a missing value blocks ingestion"
+    )
+    in_hash: bool = Field(
+        True, description="Whether the field participates in data_hash"
+    )
 
 
 class TemplateSaveRequest(BaseModel):
     platform: str = Field(..., description="Platform code")
     data_domain: str = Field(..., description="Data domain")
-    header_columns: List[str] = Field(..., min_length=1, description="Original header columns")
+    header_columns: List[str] = Field(
+        ..., min_length=1, description="Original header columns"
+    )
     granularity: Optional[str] = Field(None, description="Granularity")
     account: Optional[str] = Field(None, description="Account")
     template_name: Optional[str] = Field(None, description="Template name")
@@ -104,12 +130,16 @@ class TemplateSaveRequest(BaseModel):
     sub_domain: Optional[str] = Field(None, description="Sub domain")
     sheet_name: Optional[str] = Field(None, description="Sheet name")
     encoding: str = Field("utf-8", description="File encoding")
-    deduplication_fields: Optional[List[str]] = Field(None, description="Core deduplication fields")
+    deduplication_fields: Optional[List[str]] = Field(
+        None, description="Core deduplication fields"
+    )
     header_bindings: Optional[List[TemplateHeaderBinding]] = Field(
         None,
         description="Template column semantic bindings",
     )
-    sample_data: Dict[str, Any] = Field(default_factory=dict, description="Preview sample row keyed by source column")
+    sample_data: Dict[str, Any] = Field(
+        default_factory=dict, description="Preview sample row keyed by source column"
+    )
     field_parse_rules: Optional[List[TemplateFieldParseRule]] = Field(
         None,
         description="Field-level parsing rules",
@@ -126,7 +156,9 @@ class TemplateSaveRequest(BaseModel):
         None,
         description="Confirmed-but-ignored extra raw columns",
     )
-    mappings: Dict[str, Any] = Field(default_factory=dict, description="Legacy compatible mappings payload")
+    mappings: Dict[str, Any] = Field(
+        default_factory=dict, description="Legacy compatible mappings payload"
+    )
     save_mode: TemplateSaveMode = Field("create", description="Save mode")
     base_template_id: Optional[int] = Field(None, description="Base template id")
 
@@ -135,7 +167,9 @@ class HashPolicyPreviewRequest(BaseModel):
     data_domain: str = Field(..., description="Data domain")
     granularity: Optional[str] = Field(None, description="Granularity")
     sub_domain: Optional[str] = Field(None, description="Sub domain")
-    deduplication_fields: List[str] = Field(default_factory=list, description="Canonical hash identity keys")
+    deduplication_fields: List[str] = Field(
+        default_factory=list, description="Canonical hash identity keys"
+    )
     header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
     field_parse_rules: List[TemplateFieldParseRule] = Field(default_factory=list)
     sample_rows: List[Dict[str, Any]] = Field(default_factory=list)
@@ -153,7 +187,9 @@ class HashPolicyPreviewData(BaseModel):
     missing_required_groups: List[Dict[str, Any]] = Field(default_factory=list)
     sample_diagnostics: Dict[str, Any] = Field(default_factory=dict)
     normalized_deduplication_fields: List[str] = Field(default_factory=list)
-    normalized_header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
+    normalized_header_bindings: List[TemplateHeaderBinding] = Field(
+        default_factory=list
+    )
     unresolved_deduplication_fields: List[str] = Field(default_factory=list)
     hash_options: List[Dict[str, Any]] = Field(default_factory=list)
     family_hash_keys: List[str] = Field(default_factory=list)
@@ -182,7 +218,9 @@ class HeaderChangesPayload(BaseModel):
 
 class DetectHeaderChangesRequest(BaseModel):
     template_id: int = Field(..., description="Template id")
-    current_columns: List[str] = Field(..., min_length=1, description="Current file columns")
+    current_columns: List[str] = Field(
+        ..., min_length=1, description="Current file columns"
+    )
 
 
 class DetectHeaderChangesResponse(BaseModel):
@@ -288,7 +326,9 @@ class TemplateUpdateContextData(BaseModel):
     removed_fields: List[str]
     existing_deduplication_fields_available: List[str] = Field(default_factory=list)
     existing_deduplication_fields_missing: List[str] = Field(default_factory=list)
-    existing_deduplication_field_matches: List[Dict[str, Any]] = Field(default_factory=list)
+    existing_deduplication_field_matches: List[Dict[str, Any]] = Field(
+        default_factory=list
+    )
     recommended_deduplication_fields: List[str] = Field(default_factory=list)
     hash_options: List[Dict[str, Any]] = Field(default_factory=list)
     required_semantic_keys: List[str] = Field(default_factory=list)

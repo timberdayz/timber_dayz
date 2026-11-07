@@ -12,8 +12,12 @@ def test_template_router_is_split_out_of_dictionary_router():
     ).read_text(encoding="utf-8")
 
     assert '@router.post("/templates/save"' not in dictionary_router
-    assert '@router.get("/templates/default-deduplication-fields"' not in dictionary_router
-    assert '@router.get("/templates/{template_id}/update-context"' not in dictionary_router
+    assert (
+        '@router.get("/templates/default-deduplication-fields"' not in dictionary_router
+    )
+    assert (
+        '@router.get("/templates/{template_id}/update-context"' not in dictionary_router
+    )
     assert '@router.post("/templates/detect-header-changes"' not in dictionary_router
 
     assert '@router.post("/templates/save"' in template_router

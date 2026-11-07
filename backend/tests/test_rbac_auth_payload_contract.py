@@ -108,7 +108,9 @@ async def test_login_response_contains_backend_permissions_payload(monkeypatch):
         url=SimpleNamespace(scheme="http"),
     )
 
-    monkeypatch.setattr(auth_router.auth_service, "verify_password", lambda plain, hashed: True)
+    monkeypatch.setattr(
+        auth_router.auth_service, "verify_password", lambda plain, hashed: True
+    )
     monkeypatch.setattr(
         auth_router.auth_service,
         "create_token_pair",
@@ -123,7 +125,9 @@ async def test_login_response_contains_backend_permissions_payload(monkeypatch):
     monkeypatch.setattr(auth_router.audit_service, "log_action", AsyncMock())
 
     response = await auth_router.login(
-        credentials=LoginRequest(username="admin", password="password", remember_me=False),
+        credentials=LoginRequest(
+            username="admin", password="password", remember_me=False
+        ),
         request=request,
         db=db,
     )

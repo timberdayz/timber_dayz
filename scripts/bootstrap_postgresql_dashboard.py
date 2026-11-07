@@ -29,9 +29,15 @@ from backend.services.data_pipeline.dashboard_bootstrap import (
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Bootstrap PostgreSQL Dashboard assets")
-    parser.add_argument("--check", action="store_true", help="Only inspect assets and exit")
-    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    parser = argparse.ArgumentParser(
+        description="Bootstrap PostgreSQL Dashboard assets"
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="Only inspect assets and exit"
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="Print machine-readable JSON"
+    )
     parser.add_argument(
         "--module",
         choices=[*DASHBOARD_MODULE_TARGETS.keys(), "all"],
@@ -55,7 +61,9 @@ def _print_report(report: dict, as_json: bool) -> None:
     print(f"ready: {report['ready']}")
     if report.get("module"):
         print(f"module: {report['module']}")
-    print(f"existing_schemas: {', '.join(report.get('existing_schemas', [])) or '(none)'}")
+    print(
+        f"existing_schemas: {', '.join(report.get('existing_schemas', [])) or '(none)'}"
+    )
     if report.get("missing_schemas"):
         print(f"missing_schemas: {', '.join(report['missing_schemas'])}")
     if report.get("missing_objects"):
@@ -99,7 +107,9 @@ async def _async_main(args: argparse.Namespace) -> int:
         if args.refresh_materializations:
             if not args.json:
                 print(f"[refresh] module={args.module} phase=refresh-materializations")
-            report = await refresh_dashboard_materialization_assets(session, module=args.module)
+            report = await refresh_dashboard_materialization_assets(
+                session, module=args.module
+            )
             await session.commit()
             report["module"] = args.module
             _print_report(report, args.json)

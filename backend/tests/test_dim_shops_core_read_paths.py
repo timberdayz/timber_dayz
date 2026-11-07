@@ -61,12 +61,21 @@ def _request_stub():
 
 
 @pytest.mark.asyncio
-async def test_target_breakdown_list_reads_shop_name_from_core_dim_shops(dim_shops_core_read_session):
+async def test_target_breakdown_list_reads_shop_name_from_core_dim_shops(
+    dim_shops_core_read_session,
+):
     from backend.routers.target_management import list_breakdowns
 
-    dim_shops_core_read_session.add(DimPlatform(platform_code="shopee", name="Shopee", is_active=True))
     dim_shops_core_read_session.add(
-        DimShop(platform_code="shopee", shop_id="shop-1", shop_name="Core Shop", shop_slug="core-shop")
+        DimPlatform(platform_code="shopee", name="Shopee", is_active=True)
+    )
+    dim_shops_core_read_session.add(
+        DimShop(
+            platform_code="shopee",
+            shop_id="shop-1",
+            shop_name="Core Shop",
+            shop_slug="core-shop",
+        )
     )
     dim_shops_core_read_session.add(
         SalesTarget(
@@ -107,12 +116,23 @@ async def test_target_breakdown_list_reads_shop_name_from_core_dim_shops(dim_sho
 
 
 @pytest.mark.asyncio
-async def test_shop_performance_reads_shop_name_from_core_dim_shops(dim_shops_core_read_session):
-    from backend.domains.business.routers.performance_management import get_shop_performance
+async def test_shop_performance_reads_shop_name_from_core_dim_shops(
+    dim_shops_core_read_session,
+):
+    from backend.domains.business.routers.performance_management import (
+        get_shop_performance,
+    )
 
-    dim_shops_core_read_session.add(DimPlatform(platform_code="shopee", name="Shopee", is_active=True))
     dim_shops_core_read_session.add(
-        DimShop(platform_code="shopee", shop_id="shop-2", shop_name="Perf Shop", shop_slug="perf-shop")
+        DimPlatform(platform_code="shopee", name="Shopee", is_active=True)
+    )
+    dim_shops_core_read_session.add(
+        DimShop(
+            platform_code="shopee",
+            shop_id="shop-2",
+            shop_name="Perf Shop",
+            shop_slug="perf-shop",
+        )
     )
     dim_shops_core_read_session.add(
         PerformanceScore(
@@ -154,7 +174,9 @@ async def test_employee_assignment_list_resolves_shop_name_from_core_shop_accoun
     - 再用替身 loader 验证接口把权威店名透传到响应（派生表里的旧名不得被采用）。
     """
     from backend.domains.business.routers import hr_commission
-    from backend.domains.business.routers.hr_commission import list_employee_shop_assignments
+    from backend.domains.business.routers.hr_commission import (
+        list_employee_shop_assignments,
+    )
 
     source = Path("backend/domains/business/routers/hr_commission.py").read_text(
         encoding="utf-8"
@@ -167,13 +189,18 @@ async def test_employee_assignment_list_resolves_shop_name_from_core_shop_accoun
     assert "FROM core.shop_accounts" in loader_source
     assert "FROM core.dim_shops" not in loader_source
 
-    dim_shops_core_read_session.add(DimPlatform(platform_code="shopee", name="Shopee", is_active=True))
     dim_shops_core_read_session.add(
-        DimShop(platform_code="shopee", shop_id="shop-3", shop_name="Derived Shop", shop_slug="commission-shop")
+        DimPlatform(platform_code="shopee", name="Shopee", is_active=True)
     )
     dim_shops_core_read_session.add(
-        Employee(id=1, employee_code="E001", name="Alice")
+        DimShop(
+            platform_code="shopee",
+            shop_id="shop-3",
+            shop_name="Derived Shop",
+            shop_slug="commission-shop",
+        )
     )
+    dim_shops_core_read_session.add(Employee(id=1, employee_code="E001", name="Alice"))
     dim_shops_core_read_session.add(
         EmployeeShopAssignment(
             id=1,

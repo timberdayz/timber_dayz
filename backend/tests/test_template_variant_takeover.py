@@ -356,8 +356,8 @@ def test_template_baseline_constants_are_single_sourced():
 @pytest.mark.parametrize(
     "contract_id,template_id,expect_stale",
     [
-        (362, 362, False),   # 契约指向的就是接管模板 -> 不算过时
-        (350, 362, True),    # 契约指向别的模板 -> 需要修正
+        (362, 362, False),  # 契约指向的就是接管模板 -> 不算过时
+        (350, 362, True),  # 契约指向别的模板 -> 需要修正
     ],
 )
 def test_contract_stale_detection(contract_id, template_id, expect_stale):

@@ -69,16 +69,21 @@ async def shop_account_client(monkeypatch):
                 "is_active": True,
                 "status": "active",
                 "is_superuser": True,
-                "roles": [type("Role", (), {"role_code": "admin", "role_name": "admin"})()],
+                "roles": [
+                    type("Role", (), {"role_code": "admin", "role_name": "admin"})()
+                ],
             },
         )()
 
     app.dependency_overrides[get_async_db] = override_get_async_db
     from backend.dependencies.auth import get_current_user
+
     app.dependency_overrides[get_current_user] = override_current_user
     monkeypatch.setattr(
         "backend.domains.collection.routers.main_accounts.get_encryption_service",
-        lambda: type("Enc", (), {"encrypt_password": lambda self, value: f"enc:{value}"})(),
+        lambda: type(
+            "Enc", (), {"encrypt_password": lambda self, value: f"enc:{value}"}
+        )(),
     )
 
     transport = ASGITransport(app=app)
@@ -336,7 +341,9 @@ async def test_platform_shop_id_is_cleared_only_when_explicitly_submitted_as_nul
 
 
 @pytest.mark.asyncio
-async def test_update_shop_account_returns_409_when_platform_shop_id_conflicts(shop_account_client):
+async def test_update_shop_account_returns_409_when_platform_shop_id_conflicts(
+    shop_account_client,
+):
     create_main = await shop_account_client.post(
         "/api/main-accounts",
         json={

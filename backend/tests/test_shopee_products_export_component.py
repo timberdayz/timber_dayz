@@ -11,9 +11,13 @@ from modules.components.export.base import ExportMode
 from modules.apps.collection_center import executor_v2
 from modules.platforms.shopee.components.date_picker import ShopeeDatePicker
 from modules.platforms.shopee.components.products_export import ShopeeProductsExport
-from modules.platforms.shopee.components.services_agent_export import ShopeeServicesAgentExport
+from modules.platforms.shopee.components.services_agent_export import (
+    ShopeeServicesAgentExport,
+)
 from modules.platforms.shopee.components.shop_switch import ShopeeShopSwitch
-from modules.platforms.shopee.components.services_ai_assistant_export import ShopeeServicesAiAssistantExport
+from modules.platforms.shopee.components.services_ai_assistant_export import (
+    ShopeeServicesAiAssistantExport,
+)
 
 
 def _ctx(config: dict | None = None) -> ExecutionContext:
@@ -25,7 +29,8 @@ def _ctx(config: dict | None = None) -> ExecutionContext:
             "login_url": "https://seller.shopee.cn/account/signin?next=%2F",
         },
         logger=None,
-        config=config or {
+        config=config
+        or {
             "shop_name": "shop-a",
             "granularity": "daily",
         },
@@ -62,7 +67,12 @@ class _DynamicSelectorPage(_FakePage):
     def locator(self, selector: str):
         index = min(len(self.wait_calls), len(self._states) - 1)
         state = self._states[index]
-        loading_family = {"#loading-screen", ".loading-screen", ".spinning-ring", ".spinning-s"}
+        loading_family = {
+            "#loading-screen",
+            ".loading-screen",
+            ".spinning-ring",
+            ".spinning-s",
+        }
         if selector in state:
             visible = bool(state.get(selector, False))
         elif selector in loading_family:
@@ -85,7 +95,13 @@ class _ExactSelectorPage(_FakePage):
 
 
 class _FakeDownload:
-    def __init__(self, suggested_filename: str = "products-export.xlsx", *, payload: bytes | None = None, no_op: bool = False) -> None:
+    def __init__(
+        self,
+        suggested_filename: str = "products-export.xlsx",
+        *,
+        payload: bytes | None = None,
+        no_op: bool = False,
+    ) -> None:
         self.suggested_filename = suggested_filename
         self._payload = payload
         self._no_op = no_op
@@ -142,7 +158,9 @@ class _FakeLocator:
         return self._bbox
 
     def locator(self, selector: str):
-        return self._selector_locators.get(selector, _FakeLocator(visible=False, count=0))
+        return self._selector_locators.get(
+            selector, _FakeLocator(visible=False, count=0)
+        )
 
 
 class _FakeTextMatch:
@@ -157,11 +175,19 @@ class _FakeLocatorGroup:
 
     @property
     def first(self):
-        return self._locators[0] if self._locators else _FakeLocator(visible=False, count=0)
+        return (
+            self._locators[0]
+            if self._locators
+            else _FakeLocator(visible=False, count=0)
+        )
 
     @property
     def last(self):
-        return self._locators[-1] if self._locators else _FakeLocator(visible=False, count=0)
+        return (
+            self._locators[-1]
+            if self._locators
+            else _FakeLocator(visible=False, count=0)
+        )
 
     async def count(self) -> int:
         return len(self._locators)
@@ -205,10 +231,16 @@ class _DateMenuPage(_FakePage):
             for key, match in self.text_matches.items():
                 if text.search(key):
                     return match
-            return _FakeTextMatch(_FakeLocator(visible=False, count=0), _FakeLocator(visible=False, count=0))
+            return _FakeTextMatch(
+                _FakeLocator(visible=False, count=0),
+                _FakeLocator(visible=False, count=0),
+            )
         return self.text_matches.get(
             text,
-            _FakeTextMatch(_FakeLocator(visible=False, count=0), _FakeLocator(visible=False, count=0)),
+            _FakeTextMatch(
+                _FakeLocator(visible=False, count=0),
+                _FakeLocator(visible=False, count=0),
+            ),
         )
 
 
@@ -221,10 +253,16 @@ class _FakePanel:
             for key, match in self.text_matches.items():
                 if text.search(key):
                     return match
-            return _FakeTextMatch(_FakeLocator(visible=False, count=0), _FakeLocator(visible=False, count=0))
+            return _FakeTextMatch(
+                _FakeLocator(visible=False, count=0),
+                _FakeLocator(visible=False, count=0),
+            )
         return self.text_matches.get(
             text,
-            _FakeTextMatch(_FakeLocator(visible=False, count=0), _FakeLocator(visible=False, count=0)),
+            _FakeTextMatch(
+                _FakeLocator(visible=False, count=0),
+                _FakeLocator(visible=False, count=0),
+            ),
         )
 
 
@@ -237,13 +275,23 @@ class _ReportRow(_FakeLocator):
         status_text: str | None = None,
         visible: bool = True,
     ) -> None:
-        self.action_locator = _FakeLocator(action_text, visible=visible, count=1 if action_text else 0)
-        self.status_locator = _FakeLocator(status_text, visible=visible, count=1 if status_text else 0)
-        button_locators = [locator for locator in (self.action_locator, self.status_locator) if _locator_is_visible(locator)]
+        self.action_locator = _FakeLocator(
+            action_text, visible=visible, count=1 if action_text else 0
+        )
+        self.status_locator = _FakeLocator(
+            status_text, visible=visible, count=1 if status_text else 0
+        )
+        button_locators = [
+            locator
+            for locator in (self.action_locator, self.status_locator)
+            if _locator_is_visible(locator)
+        ]
         selector_locators = {
             "button, a, [role='button']": _FakeLocatorGroup(button_locators),
             ".status": _FakeLocatorGroup([self.status_locator] if status_text else []),
-            '[class*="status"]': _FakeLocatorGroup([self.status_locator] if status_text else []),
+            '[class*="status"]': _FakeLocatorGroup(
+                [self.status_locator] if status_text else []
+            ),
         }
         super().__init__(
             row_text,
@@ -259,7 +307,9 @@ def _locator_is_visible(locator: _FakeLocator) -> bool:
 
 class _ReportPanelLocator(_FakeLocator):
     def __init__(self, rows: list[_ReportRow], *, visible: bool = True) -> None:
-        super().__init__("latest-report-panel", visible=visible, count=1 if visible else 0)
+        super().__init__(
+            "latest-report-panel", visible=visible, count=1 if visible else 0
+        )
         self._rows = rows
 
     def locator(self, selector: str):
@@ -288,33 +338,47 @@ class _DownloadEventPage(_FakePage):
         assert event_name == "download"
         if not self.button.clicked:
             raise RuntimeError("download not started")
-        return _FakeDownload(suggested_filename="services-agent-export.xlsx", payload=b"file-bytes")
+        return _FakeDownload(
+            suggested_filename="services-agent-export.xlsx", payload=b"file-bytes"
+        )
 
 
 class _NavPanel(_FakePanel):
-    def __init__(self, text_matches: dict[str, object], selector_locators: dict[str, _FakeLocator] | None = None) -> None:
+    def __init__(
+        self,
+        text_matches: dict[str, object],
+        selector_locators: dict[str, _FakeLocator] | None = None,
+    ) -> None:
         super().__init__({})
         self.text_matches = text_matches
         self.selector_locators = selector_locators or {}
 
     def locator(self, selector: str):
-        return self.selector_locators.get(selector, _FakeLocator(visible=False, count=0))
+        return self.selector_locators.get(
+            selector, _FakeLocator(visible=False, count=0)
+        )
 
 
 def test_shopee_products_export_accepts_products_performance_url() -> None:
     component = ShopeeProductsExport(_ctx())
 
-    assert component._products_page_looks_ready(
-        "https://seller.shopee.cn/datacenter/product/performance?cnsc_shop_id=1"
-    ) is True
+    assert (
+        component._products_page_looks_ready(
+            "https://seller.shopee.cn/datacenter/product/performance?cnsc_shop_id=1"
+        )
+        is True
+    )
 
 
 def test_shopee_products_export_rejects_non_products_url() -> None:
     component = ShopeeProductsExport(_ctx())
 
-    assert component._products_page_looks_ready(
-        "https://seller.shopee.cn/datacenter/home?cnsc_shop_id=1"
-    ) is False
+    assert (
+        component._products_page_looks_ready(
+            "https://seller.shopee.cn/datacenter/home?cnsc_shop_id=1"
+        )
+        is False
+    )
 
 
 @pytest.mark.asyncio
@@ -335,7 +399,12 @@ async def test_shopee_products_export_business_ready_rejects_404_shell_even_unde
         AsyncMock(return_value=None),
         raising=False,
     )
-    monkeypatch.setattr(ShopeeDatePicker, "_first_visible_locator", AsyncMock(return_value=None), raising=False)
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_first_visible_locator",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
 
     ready = await component._products_page_business_ready(page)
 
@@ -358,7 +427,12 @@ async def test_shopee_products_export_business_ready_accepts_real_products_page_
         AsyncMock(return_value=_FakeLocator("导出数据", visible=True)),
         raising=False,
     )
-    monkeypatch.setattr(ShopeeDatePicker, "_first_visible_locator", AsyncMock(return_value=_FakeLocator("导出数据", visible=True)), raising=False)
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_first_visible_locator",
+        AsyncMock(return_value=_FakeLocator("导出数据", visible=True)),
+        raising=False,
+    )
 
     ready = await component._products_page_business_ready(page)
 
@@ -378,7 +452,9 @@ async def test_shopee_products_export_ensure_page_ready_waits_for_late_business_
         return len(readiness_checks) >= 3
 
     monkeypatch.setattr(component, "_current_shop_id", lambda _page: "1", raising=False)
-    monkeypatch.setattr(component, "_products_page_business_ready", _business_ready, raising=False)
+    monkeypatch.setattr(
+        component, "_products_page_business_ready", _business_ready, raising=False
+    )
 
     await component._ensure_products_page_ready(page)
 
@@ -395,7 +471,9 @@ async def test_shopee_services_page_ready_waits_for_late_business_markers(
 ) -> None:
     page = _GotoPage()
     component = ShopeeServicesAgentExport(
-        _ctx({"shop_name": "shop-a", "services_subtype": "agent", "granularity": "daily"})
+        _ctx(
+            {"shop_name": "shop-a", "services_subtype": "agent", "granularity": "daily"}
+        )
     )
     readiness_checks: list[int] = []
 
@@ -403,14 +481,16 @@ async def test_shopee_services_page_ready_waits_for_late_business_markers(
         readiness_checks.append(len(page.wait_calls))
         return len(readiness_checks) >= 3
 
-    monkeypatch.setattr(component, "_resolved_subtype", lambda config=None: "agent", raising=False)
-    monkeypatch.setattr(component, "_wait_services_business_ready", _business_ready, raising=False)
+    monkeypatch.setattr(
+        component, "_resolved_subtype", lambda config=None: "agent", raising=False
+    )
+    monkeypatch.setattr(
+        component, "_wait_services_business_ready", _business_ready, raising=False
+    )
 
     await component.ensure_page_ready(page)
 
-    assert page.goto_calls == [
-        "https://seller.shopee.cn/datacenter/services/agent"
-    ]
+    assert page.goto_calls == ["https://seller.shopee.cn/datacenter/services/agent"]
     assert readiness_checks == [1, 2, 3]
     assert page.wait_calls == [1200, 500, 500]
 
@@ -421,7 +501,13 @@ async def test_shopee_services_ai_assistant_page_ready_waits_for_late_business_m
 ) -> None:
     page = _GotoPage()
     component = ShopeeServicesAiAssistantExport(
-        _ctx({"shop_name": "shop-a", "services_subtype": "ai_assistant", "granularity": "daily"})
+        _ctx(
+            {
+                "shop_name": "shop-a",
+                "services_subtype": "ai_assistant",
+                "granularity": "daily",
+            }
+        )
     )
     readiness_checks: list[int] = []
 
@@ -429,7 +515,9 @@ async def test_shopee_services_ai_assistant_page_ready_waits_for_late_business_m
         readiness_checks.append(len(page.wait_calls))
         return len(readiness_checks) >= 3
 
-    monkeypatch.setattr(component, "_wait_services_business_ready", _business_ready, raising=False)
+    monkeypatch.setattr(
+        component, "_wait_services_business_ready", _business_ready, raising=False
+    )
 
     await component.ensure_page_ready(page)
 
@@ -441,7 +529,9 @@ async def test_shopee_services_ai_assistant_page_ready_waits_for_late_business_m
 
 
 @pytest.mark.asyncio
-async def test_shopee_services_business_ready_requires_loading_to_clear_and_stabilize() -> None:
+async def test_shopee_services_business_ready_requires_loading_to_clear_and_stabilize() -> (
+    None
+):
     loading_selector = "#loading-screen"
     page = _DynamicSelectorPage(
         "https://seller.shopee.cn/datacenter/services/agent?cnsc_shop_id=1",
@@ -453,10 +543,14 @@ async def test_shopee_services_business_ready_requires_loading_to_clear_and_stab
         ],
     )
     component = ShopeeServicesAgentExport(
-        _ctx({"shop_name": "shop-a", "services_subtype": "agent", "granularity": "daily"})
+        _ctx(
+            {"shop_name": "shop-a", "services_subtype": "agent", "granularity": "daily"}
+        )
     )
 
-    ready = await component._wait_services_business_ready(page, timeout_ms=1500, poll_ms=200)
+    ready = await component._wait_services_business_ready(
+        page, timeout_ms=1500, poll_ms=200
+    )
 
     assert ready is True
     assert page.wait_calls == [200, 200, 200]
@@ -473,10 +567,14 @@ async def test_shopee_services_business_ready_recognizes_real_chinese_markers() 
         },
     )
     component = ShopeeServicesAgentExport(
-        _ctx({"shop_name": "shop-a", "services_subtype": "agent", "granularity": "daily"})
+        _ctx(
+            {"shop_name": "shop-a", "services_subtype": "agent", "granularity": "daily"}
+        )
     )
 
-    ready = await component._wait_services_business_ready(page, timeout_ms=600, poll_ms=200)
+    ready = await component._wait_services_business_ready(
+        page, timeout_ms=600, poll_ms=200
+    )
 
     assert ready is True
 
@@ -491,15 +589,35 @@ def test_shopee_products_export_detects_throttled_text() -> None:
 def test_shopee_products_export_shop_label_detection_requires_current_value() -> None:
     component = ShopeeProductsExport(_ctx())
 
-    assert component._shop_name_looks_selected("新加坡 / chenewei666.sg", "chenewei666.sg") is True
-    assert component._shop_name_looks_selected("所有店铺 chenewei666.sg zewei_toys.sg", "chenewei666.sg") is False
+    assert (
+        component._shop_name_looks_selected("新加坡 / chenewei666.sg", "chenewei666.sg")
+        is True
+    )
+    assert (
+        component._shop_name_looks_selected(
+            "所有店铺 chenewei666.sg zewei_toys.sg", "chenewei666.sg"
+        )
+        is False
+    )
 
 
 def test_shopee_products_export_shop_label_detection_respects_region_context() -> None:
-    component = ShopeeProductsExport(_ctx({"shop_name": "chenewei666.sg", "shop_region": "SG"}))
+    component = ShopeeProductsExport(
+        _ctx({"shop_name": "chenewei666.sg", "shop_region": "SG"})
+    )
 
-    assert component._shop_name_looks_selected("新加坡 / chenewei666.sg", "chenewei666.sg", "SG") is True
-    assert component._shop_name_looks_selected("巴西 / chenewei666.sg", "chenewei666.sg", "SG") is False
+    assert (
+        component._shop_name_looks_selected(
+            "新加坡 / chenewei666.sg", "chenewei666.sg", "SG"
+        )
+        is True
+    )
+    assert (
+        component._shop_name_looks_selected(
+            "巴西 / chenewei666.sg", "chenewei666.sg", "SG"
+        )
+        is False
+    )
 
 
 def test_shopee_products_export_maps_granularity_to_summary_preset_labels() -> None:
@@ -510,7 +628,9 @@ def test_shopee_products_export_maps_granularity_to_summary_preset_labels() -> N
     assert component._target_date_label({"granularity": "monthly"}) == "过去30天"
 
 
-def test_shopee_products_export_resolve_custom_target_uses_start_date_for_daily() -> None:
+def test_shopee_products_export_resolve_custom_target_uses_start_date_for_daily() -> (
+    None
+):
     component = ShopeeProductsExport(
         _ctx(
             {
@@ -533,7 +653,9 @@ def test_shopee_products_export_resolve_custom_target_uses_start_date_for_daily(
     assert target["target_day"] == 9
 
 
-def test_shopee_products_export_resolve_custom_target_uses_start_date_for_weekly() -> None:
+def test_shopee_products_export_resolve_custom_target_uses_start_date_for_weekly() -> (
+    None
+):
     component = ShopeeProductsExport(
         _ctx(
             {
@@ -556,7 +678,9 @@ def test_shopee_products_export_resolve_custom_target_uses_start_date_for_weekly
     assert target["target_day"] == 3
 
 
-def test_shopee_products_export_resolve_custom_target_uses_start_date_for_monthly() -> None:
+def test_shopee_products_export_resolve_custom_target_uses_start_date_for_monthly() -> (
+    None
+):
     component = ShopeeProductsExport(
         _ctx(
             {
@@ -615,7 +739,9 @@ def test_shopee_products_export_parse_date_summary_parses_daily_summary() -> Non
 def test_shopee_products_export_parse_date_summary_parses_weekly_summary() -> None:
     component = ShopeeProductsExport(_ctx())
 
-    parsed = component._parse_date_summary("统计时间 按周 23-02-2026 - 01-03-2026 (GMT+08)")
+    parsed = component._parse_date_summary(
+        "统计时间 按周 23-02-2026 - 01-03-2026 (GMT+08)"
+    )
 
     assert parsed == {
         "mode": "weekly",
@@ -638,7 +764,9 @@ def test_shopee_products_export_parse_date_summary_parses_monthly_summary() -> N
     }
 
 
-def test_shopee_products_export_custom_date_summary_matches_weekly_minimal_signal() -> None:
+def test_shopee_products_export_custom_date_summary_matches_weekly_minimal_signal() -> (
+    None
+):
     component = ShopeeProductsExport(_ctx())
 
     matched = component._custom_date_summary_matches(
@@ -651,7 +779,9 @@ def test_shopee_products_export_custom_date_summary_matches_weekly_minimal_signa
     assert matched is True
 
 
-def test_shopee_products_export_custom_date_summary_matches_monthly_minimal_signal() -> None:
+def test_shopee_products_export_custom_date_summary_matches_monthly_minimal_signal() -> (
+    None
+):
     component = ShopeeProductsExport(_ctx())
 
     matched = component._custom_date_summary_matches(
@@ -668,7 +798,9 @@ def test_shopee_products_export_custom_date_summary_matches_monthly_minimal_sign
 async def test_shopee_products_export_current_date_label_reads_trigger_summary_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     # 组件层的 _current_date_label 已下沉到 ShopeeDatePicker，且 helper 用
@@ -680,7 +812,12 @@ async def test_shopee_products_export_current_date_label_reads_trigger_summary_t
         AsyncMock(return_value=_FakeLocator("统计时间 今日实时 今日 14:00 (GMT+08)")),
         raising=False,
     )
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_picker_trigger", AsyncMock(return_value=_FakeLocator("统计时间 今日实时 今日 14:00 (GMT+08)")), raising=False)
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_date_picker_trigger",
+        AsyncMock(return_value=_FakeLocator("统计时间 今日实时 今日 14:00 (GMT+08)")),
+        raising=False,
+    )
     monkeypatch.setattr(component, "_visible_text", AsyncMock(return_value=False))
 
     current = await component._current_date_label(page)
@@ -692,7 +829,9 @@ async def test_shopee_products_export_current_date_label_reads_trigger_summary_t
 async def test_shopee_products_export_current_date_summary_text_prefers_summary_container_over_partial_trigger(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     monkeypatch.setattr(
@@ -701,14 +840,24 @@ async def test_shopee_products_export_current_date_summary_text_prefers_summary_
         AsyncMock(return_value=_FakeLocator("按月")),
         raising=False,
     )
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_picker_trigger", AsyncMock(return_value=_FakeLocator("按月")), raising=False)
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_date_picker_trigger",
+        AsyncMock(return_value=_FakeLocator("按月")),
+        raising=False,
+    )
     monkeypatch.setattr(
         component,
         "_find_date_summary_container",
         AsyncMock(return_value=_FakeLocator("统计时间 按月 2026.02 (GMT+08)")),
         raising=False,
     )
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_summary_container", AsyncMock(return_value=_FakeLocator("统计时间 按月 2026.02 (GMT+08)")), raising=False)
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_date_summary_container",
+        AsyncMock(return_value=_FakeLocator("统计时间 按月 2026.02 (GMT+08)")),
+        raising=False,
+    )
 
     summary = await component._current_date_summary_text(page)
 
@@ -719,16 +868,31 @@ async def test_shopee_products_export_current_date_summary_text_prefers_summary_
 async def test_shopee_products_export_current_date_label_recognizes_range_summary_variant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     monkeypatch.setattr(
         component,
         "_find_date_picker_trigger",
-        AsyncMock(return_value=_FakeLocator("统计时间 过去7 天 24-03-2026 - 30-03-2026 (GMT+08)")),
+        AsyncMock(
+            return_value=_FakeLocator(
+                "统计时间 过去7 天 24-03-2026 - 30-03-2026 (GMT+08)"
+            )
+        ),
         raising=False,
     )
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_picker_trigger", AsyncMock(return_value=_FakeLocator("统计时间 过去7 天 24-03-2026 - 30-03-2026 (GMT+08)")), raising=False)
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_date_picker_trigger",
+        AsyncMock(
+            return_value=_FakeLocator(
+                "统计时间 过去7 天 24-03-2026 - 30-03-2026 (GMT+08)"
+            )
+        ),
+        raising=False,
+    )
     monkeypatch.setattr(component, "_visible_text", AsyncMock(return_value=False))
 
     current = await component._current_date_label(page)
@@ -746,12 +910,27 @@ async def test_shopee_products_export_current_date_label_uses_visible_match_not_
     # 断言强度不变：存在隐藏重复元素时仍须命中可见元素、不得回落到隐藏元素。
     page = _DateMenuPage(
         "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1",
-        {"过去30天": _FakeTextMatch(_FakeLocator("过去30天", visible=True), _FakeLocator("过去30天", visible=False))},
+        {
+            "过去30天": _FakeTextMatch(
+                _FakeLocator("过去30天", visible=True),
+                _FakeLocator("过去30天", visible=False),
+            )
+        },
     )
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_date_picker_trigger", AsyncMock(return_value=None), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_picker_trigger", AsyncMock(return_value=None), raising=False)
+    monkeypatch.setattr(
+        component,
+        "_find_date_picker_trigger",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_date_picker_trigger",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
 
     current = await component._current_date_label(page)
 
@@ -795,7 +974,9 @@ async def test_shopee_products_export_open_date_picker_waits_for_panel_to_appear
         return None
 
     monkeypatch.setattr(component, "_find_date_panel", _find_panel, raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_panel", _find_panel, raising=False)
+    monkeypatch.setattr(
+        ShopeeDatePicker, "_find_date_panel", _find_panel, raising=False
+    )
 
     await component._open_date_picker(page)
 
@@ -805,7 +986,9 @@ async def test_shopee_products_export_open_date_picker_waits_for_panel_to_appear
 
 
 @pytest.mark.asyncio
-async def test_shopee_products_export_click_text_option_prefers_date_menu_entry_over_summary() -> None:
+async def test_shopee_products_export_click_text_option_prefers_date_menu_entry_over_summary() -> (
+    None
+):
     summary = _FakeLocator("过去7天", visible=True)
     menu_item = _FakeLocator("过去7天", visible=True)
     page = _DateMenuPage(
@@ -828,14 +1011,28 @@ async def test_shopee_products_export_find_date_option_locator_prefers_panel_sco
 ) -> None:
     page = _DateMenuPage(
         "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1",
-        {"过去7天": _FakeTextMatch(_FakeLocator("过去7天", visible=True), _FakeLocator("过去7天", visible=True))},
+        {
+            "过去7天": _FakeTextMatch(
+                _FakeLocator("过去7天", visible=True),
+                _FakeLocator("过去7天", visible=True),
+            )
+        },
     )
     panel_item = _FakeLocator("过去7天", visible=True)
-    panel = _FakePanel({"过去7天": _FakeTextMatch(_FakeLocator("过去7天", visible=True), panel_item)})
+    panel = _FakePanel(
+        {"过去7天": _FakeTextMatch(_FakeLocator("过去7天", visible=True), panel_item)}
+    )
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
+    monkeypatch.setattr(
+        component, "_find_date_panel", AsyncMock(return_value=panel), raising=False
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_date_panel",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
 
     locator = await component._find_date_option_locator(page, "过去7天")
 
@@ -847,15 +1044,24 @@ async def test_shopee_products_export_find_date_option_locator_matches_panel_tex
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     panel_item = _FakeLocator("过去7 天", visible=True)
-    panel = _FakePanel({"过去7 天": _FakeTextMatch(_FakeLocator("过去7 天", visible=True), panel_item)})
+    panel = _FakePanel(
+        {"过去7 天": _FakeTextMatch(_FakeLocator("过去7 天", visible=True), panel_item)}
+    )
     page = _DateMenuPage(
         "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1",
         {},
     )
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
+    monkeypatch.setattr(
+        component, "_find_date_panel", AsyncMock(return_value=panel), raising=False
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_date_panel",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
 
     locator = await component._find_date_option_locator(page, "过去7天")
 
@@ -866,12 +1072,24 @@ async def test_shopee_products_export_find_date_option_locator_matches_panel_tex
 async def test_shopee_products_export_hover_text_option_clicks_mode_entry_after_hover(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     mode_item = _FakeLocator("按周", visible=True)
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_date_option_locator", AsyncMock(return_value=mode_item), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_option_locator", AsyncMock(return_value=mode_item), raising=False)
+    monkeypatch.setattr(
+        component,
+        "_find_date_option_locator",
+        AsyncMock(return_value=mode_item),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_date_option_locator",
+        AsyncMock(return_value=mode_item),
+        raising=False,
+    )
 
     activated = await component._hover_text_option(page, "按周")
 
@@ -884,17 +1102,37 @@ async def test_shopee_products_export_hover_text_option_clicks_mode_entry_after_
 async def test_shopee_products_export_waits_for_shop_selection_to_apply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
-    component = ShopeeProductsExport(_ctx({"shop_name": "chenewei666.sg", "shop_region": "SG"}))
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
+    component = ShopeeProductsExport(
+        _ctx({"shop_name": "chenewei666.sg", "shop_region": "SG"})
+    )
 
     monkeypatch.setattr(
         component,
         "_visible_text_content",
-        AsyncMock(side_effect=["所有店铺 chenewei666.sg zewei_toys.sg", "新加坡 / chenewei666.sg"]),
+        AsyncMock(
+            side_effect=[
+                "所有店铺 chenewei666.sg zewei_toys.sg",
+                "新加坡 / chenewei666.sg",
+            ]
+        ),
     )
-    monkeypatch.setattr(ShopeeShopSwitch, "_visible_text_content", AsyncMock(side_effect=["所有店铺 chenewei666.sg zewei_toys.sg", "新加坡 / chenewei666.sg"]))
+    monkeypatch.setattr(
+        ShopeeShopSwitch,
+        "_visible_text_content",
+        AsyncMock(
+            side_effect=[
+                "所有店铺 chenewei666.sg zewei_toys.sg",
+                "新加坡 / chenewei666.sg",
+            ]
+        ),
+    )
 
-    applied = await component._wait_shop_selection_applied(page, "chenewei666.sg", "SG", timeout_ms=1000, poll_ms=200)
+    applied = await component._wait_shop_selection_applied(
+        page, "chenewei666.sg", "SG", timeout_ms=1000, poll_ms=200
+    )
 
     assert applied is True
     assert page.wait_calls == [200]
@@ -904,11 +1142,19 @@ async def test_shopee_products_export_waits_for_shop_selection_to_apply(
 async def test_shopee_products_export_skips_date_picker_when_target_already_applied(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
-    component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", "granularity": "daily"}))
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
+    component = ShopeeProductsExport(
+        _ctx({"shop_name": "shop-a", "granularity": "daily"})
+    )
 
-    monkeypatch.setattr(component, "_current_date_label", AsyncMock(return_value="昨天"))
-    monkeypatch.setattr(ShopeeDatePicker, "_current_date_label", AsyncMock(return_value="昨天"))
+    monkeypatch.setattr(
+        component, "_current_date_label", AsyncMock(return_value="昨天")
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker, "_current_date_label", AsyncMock(return_value="昨天")
+    )
     monkeypatch.setattr(component, "_open_date_picker", AsyncMock())
     monkeypatch.setattr(ShopeeDatePicker, "_open_date_picker", AsyncMock())
     monkeypatch.setattr(component, "_click_text_option", AsyncMock())
@@ -924,7 +1170,9 @@ async def test_shopee_products_export_skips_date_picker_when_target_already_appl
 async def test_shopee_products_export_uses_single_day_selection_for_yesterday_preset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(
         _ctx(
             {
@@ -940,12 +1188,18 @@ async def test_shopee_products_export_uses_single_day_selection_for_yesterday_pr
     # （products_export.py:1311），真实调用发生在 helper 实例上，断言必须打在同一个实例上。
     picker = component._date_picker_helper()
     monkeypatch.setattr(component, "_date_picker_helper", lambda: picker)
-    monkeypatch.setattr(picker, "_current_date_label", AsyncMock(return_value="今日实时"))
+    monkeypatch.setattr(
+        picker, "_current_date_label", AsyncMock(return_value="今日实时")
+    )
     monkeypatch.setattr(picker, "_open_date_picker", AsyncMock())
     monkeypatch.setattr(picker, "_click_text_option", AsyncMock(return_value=False))
     monkeypatch.setattr(picker, "_hover_text_option", AsyncMock(return_value=True))
-    monkeypatch.setattr(picker, "_select_single_day_value", AsyncMock(return_value=True))
-    monkeypatch.setattr(picker, "_wait_date_selection_applied", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        picker, "_select_single_day_value", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        picker, "_wait_date_selection_applied", AsyncMock(return_value=True)
+    )
 
     await component._ensure_date_selection(page)
 
@@ -958,9 +1212,17 @@ async def test_shopee_products_export_uses_single_day_selection_for_yesterday_pr
 async def test_shopee_products_export_ensure_date_selection_raises_when_summary_does_not_change(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(
-        _ctx({"shop_name": "shop-a", "date_preset": "last_7_days", "granularity": "weekly"})
+        _ctx(
+            {
+                "shop_name": "shop-a",
+                "date_preset": "last_7_days",
+                "granularity": "weekly",
+            }
+        )
     )
 
     monkeypatch.setattr(
@@ -968,13 +1230,27 @@ async def test_shopee_products_export_ensure_date_selection_raises_when_summary_
         "_current_date_label",
         AsyncMock(return_value="今日实时"),
     )
-    monkeypatch.setattr(ShopeeDatePicker, "_current_date_label", AsyncMock(return_value="今日实时"))
+    monkeypatch.setattr(
+        ShopeeDatePicker, "_current_date_label", AsyncMock(return_value="今日实时")
+    )
     monkeypatch.setattr(component, "_open_date_picker", AsyncMock())
     monkeypatch.setattr(ShopeeDatePicker, "_open_date_picker", AsyncMock())
     monkeypatch.setattr(component, "_click_text_option", AsyncMock(return_value=True))
-    monkeypatch.setattr(ShopeeDatePicker, "_click_text_option", AsyncMock(return_value=True))
-    monkeypatch.setattr(component, "_wait_date_selection_applied", AsyncMock(return_value=False), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_wait_date_selection_applied", AsyncMock(return_value=False), raising=False)
+    monkeypatch.setattr(
+        ShopeeDatePicker, "_click_text_option", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        component,
+        "_wait_date_selection_applied",
+        AsyncMock(return_value=False),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_wait_date_selection_applied",
+        AsyncMock(return_value=False),
+        raising=False,
+    )
 
     with pytest.raises(RuntimeError, match="date selection"):
         await component._ensure_date_selection(page)
@@ -984,17 +1260,31 @@ async def test_shopee_products_export_ensure_date_selection_raises_when_summary_
 async def test_shopee_products_export_ensure_date_selection_raises_when_quick_option_not_clicked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(
-        _ctx({"shop_name": "shop-a", "date_preset": "last_7_days", "granularity": "weekly"})
+        _ctx(
+            {
+                "shop_name": "shop-a",
+                "date_preset": "last_7_days",
+                "granularity": "weekly",
+            }
+        )
     )
 
-    monkeypatch.setattr(component, "_current_date_label", AsyncMock(return_value="今日实时"))
-    monkeypatch.setattr(ShopeeDatePicker, "_current_date_label", AsyncMock(return_value="今日实时"))
+    monkeypatch.setattr(
+        component, "_current_date_label", AsyncMock(return_value="今日实时")
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker, "_current_date_label", AsyncMock(return_value="今日实时")
+    )
     monkeypatch.setattr(component, "_open_date_picker", AsyncMock())
     monkeypatch.setattr(ShopeeDatePicker, "_open_date_picker", AsyncMock())
     monkeypatch.setattr(component, "_click_text_option", AsyncMock(return_value=False))
-    monkeypatch.setattr(ShopeeDatePicker, "_click_text_option", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        ShopeeDatePicker, "_click_text_option", AsyncMock(return_value=False)
+    )
 
     with pytest.raises(RuntimeError, match="date option"):
         await component._ensure_date_selection(page)
@@ -1004,7 +1294,9 @@ async def test_shopee_products_export_ensure_date_selection_raises_when_quick_op
 async def test_shopee_products_export_custom_weekly_uses_week_mode_instead_of_quick_preset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(
         _ctx(
             {
@@ -1025,17 +1317,25 @@ async def test_shopee_products_export_custom_weekly_uses_week_mode_instead_of_qu
     # 组件层只做转发，断言必须打在固定的 helper 实例上。
     picker = component._date_picker_helper()
     monkeypatch.setattr(component, "_date_picker_helper", lambda: picker)
-    monkeypatch.setattr(picker, "_current_date_summary_text", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        picker, "_current_date_summary_text", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(picker, "_open_date_picker", AsyncMock())
     monkeypatch.setattr(picker, "_click_text_option", AsyncMock(return_value=False))
     monkeypatch.setattr(picker, "_hover_text_option", AsyncMock(return_value=True))
-    monkeypatch.setattr(picker, "_select_week_range_value", AsyncMock(return_value=True))
-    monkeypatch.setattr(picker, "_wait_custom_date_selection_applied", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        picker, "_select_week_range_value", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        picker, "_wait_custom_date_selection_applied", AsyncMock(return_value=True)
+    )
 
     await component._ensure_date_selection(page)
 
     picker._hover_text_option.assert_awaited_once_with(page, "按周")
-    picker._select_week_range_value.assert_awaited_once_with(page, "2026-03-09", "2026-03-15")
+    picker._select_week_range_value.assert_awaited_once_with(
+        page, "2026-03-09", "2026-03-15"
+    )
     picker._click_text_option.assert_not_awaited()
 
 
@@ -1043,7 +1343,9 @@ async def test_shopee_products_export_custom_weekly_uses_week_mode_instead_of_qu
 async def test_shopee_products_export_custom_monthly_uses_month_mode_instead_of_quick_preset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(
         _ctx(
             {
@@ -1064,12 +1366,16 @@ async def test_shopee_products_export_custom_monthly_uses_month_mode_instead_of_
     # 组件层只做转发，断言必须打在固定的 helper 实例上。
     picker = component._date_picker_helper()
     monkeypatch.setattr(component, "_date_picker_helper", lambda: picker)
-    monkeypatch.setattr(picker, "_current_date_summary_text", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        picker, "_current_date_summary_text", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(picker, "_open_date_picker", AsyncMock())
     monkeypatch.setattr(picker, "_click_text_option", AsyncMock(return_value=False))
     monkeypatch.setattr(picker, "_hover_text_option", AsyncMock(return_value=True))
     monkeypatch.setattr(picker, "_select_month_value", AsyncMock(return_value=True))
-    monkeypatch.setattr(picker, "_wait_custom_date_selection_applied", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        picker, "_wait_custom_date_selection_applied", AsyncMock(return_value=True)
+    )
 
     await component._ensure_date_selection(page)
 
@@ -1082,7 +1388,9 @@ async def test_shopee_products_export_custom_monthly_uses_month_mode_instead_of_
 async def test_shopee_products_export_dynamic_monthly_execution_reuses_custom_month_flow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     params = executor_v2._build_runtime_task_params(
         task_id="task-dynamic-shopee-monthly",
         account={"account_id": "acc-dynamic"},
@@ -1115,12 +1423,23 @@ async def test_shopee_products_export_dynamic_monthly_execution_reuses_custom_mo
     picker = component._date_picker_helper()
 
     monkeypatch.setattr(component, "_date_picker_helper", lambda: picker)
-    monkeypatch.setattr(picker, "_current_date_label", AsyncMock(return_value="今日实时"))
+    monkeypatch.setattr(
+        picker, "_current_date_label", AsyncMock(return_value="今日实时")
+    )
     monkeypatch.setattr(picker, "_open_date_picker", AsyncMock())
     monkeypatch.setattr(picker, "_click_text_option", AsyncMock(return_value=False))
-    monkeypatch.setattr(picker, "_hover_text_option", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(picker, "_select_month_value", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(picker, "_wait_custom_date_selection_applied", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(
+        picker, "_hover_text_option", AsyncMock(return_value=True), raising=False
+    )
+    monkeypatch.setattr(
+        picker, "_select_month_value", AsyncMock(return_value=True), raising=False
+    )
+    monkeypatch.setattr(
+        picker,
+        "_wait_custom_date_selection_applied",
+        AsyncMock(return_value=True),
+        raising=False,
+    )
 
     await component._ensure_date_selection(page)
 
@@ -1132,64 +1451,30 @@ async def test_shopee_products_export_dynamic_monthly_execution_reuses_custom_mo
 
 
 @pytest.mark.asyncio
-async def test_shopee_products_export_select_month_value_navigates_year_before_clicking_month(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
-    component = ShopeeProductsExport(_ctx())
-    month_leaf = _FakeLocator("2月", visible=True)
-
-    monkeypatch.setattr(component, "_navigate_month_panel_to_year", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_navigate_month_panel_to_year", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_find_month_leaf_locator", AsyncMock(return_value=month_leaf), raising=False)
-
-    selected = await component._select_month_value(page, "2026-02-01")
-
-    assert selected is True
-    component._navigate_month_panel_to_year.assert_awaited_once_with(page, 2026)
-    assert month_leaf.clicked is True
-
-
-@pytest.mark.asyncio
-async def test_shopee_products_export_select_month_value_does_not_misclick_december_for_february(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
-    december = _FakeLocator("12月", visible=True)
-    february = _FakeLocator("2月", visible=True)
-    panel = _FakePanel(
-        {
-            "12月": _FakeTextMatch(_FakeLocator("12月", visible=True), december),
-            "2月": _FakeTextMatch(_FakeLocator("2月", visible=True), february),
-        }
-    )
-    component = ShopeeProductsExport(_ctx())
-
-    monkeypatch.setattr(component, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
-    monkeypatch.setattr(component, "_navigate_month_panel_to_year", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_navigate_month_panel_to_year", AsyncMock(return_value=True), raising=False)
-
-    selected = await component._select_month_value(page, "2026-02-01")
-
-    assert selected is True
-    assert december.clicked is False
-    assert february.clicked is True
-
-
-@pytest.mark.asyncio
 async def test_shopee_products_export_find_month_leaf_locator_falls_back_when_panel_scope_misses_month_grid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     page = _DateMenuPage(
         "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1",
-        {"\u4e8c\u6708": _FakeTextMatch(_FakeLocator("\u4e8c\u6708", visible=True), _FakeLocator("\u4e8c\u6708", visible=True))},
+        {
+            "\u4e8c\u6708": _FakeTextMatch(
+                _FakeLocator("\u4e8c\u6708", visible=True),
+                _FakeLocator("\u4e8c\u6708", visible=True),
+            )
+        },
     )
     panel = _FakePanel({})
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
+    monkeypatch.setattr(
+        component, "_find_date_panel", AsyncMock(return_value=panel), raising=False
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_date_panel",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
 
     locator = await component._find_month_leaf_locator(page, "2026-02-01")
 
@@ -1215,8 +1500,15 @@ async def test_shopee_products_export_find_month_leaf_locator_uses_month_specifi
         },
     )
     component = ShopeeProductsExport(_ctx())
-    monkeypatch.setattr(component, "_find_date_panel", AsyncMock(return_value=None), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_panel", AsyncMock(return_value=None), raising=False)
+    monkeypatch.setattr(
+        component, "_find_date_panel", AsyncMock(return_value=None), raising=False
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_date_panel",
+        AsyncMock(return_value=None),
+        raising=False,
+    )
 
     locator = await component._find_month_leaf_locator(page, "2026-02-01")
 
@@ -1225,29 +1517,12 @@ async def test_shopee_products_export_find_month_leaf_locator_uses_month_specifi
 
 
 @pytest.mark.asyncio
-async def test_shopee_products_export_select_week_range_value_navigates_calendar_month_before_clicking_day(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
-    component = ShopeeProductsExport(_ctx())
-
-    monkeypatch.setattr(component, "_navigate_calendar_panel_to_month", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_navigate_calendar_panel_to_month", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_select_calendar_day", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_select_calendar_day", AsyncMock(return_value=True), raising=False)
-
-    selected = await component._select_week_range_value(page, "2026-03-09", "2026-03-15")
-
-    assert selected is True
-    component._navigate_calendar_panel_to_month.assert_awaited_once_with(page, 2026, 3)
-    component._select_calendar_day.assert_awaited_once_with(page, 15)
-
-
-@pytest.mark.asyncio
 async def test_shopee_products_export_succeeds_when_download_completes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock())
@@ -1255,7 +1530,9 @@ async def test_shopee_products_export_succeeds_when_download_completes(
     # run() 走 ensure_date_ready（products_export.py:1505），不是 _ensure_date_selection
     monkeypatch.setattr(component, "ensure_date_ready", AsyncMock())
     monkeypatch.setattr(component, "_trigger_export", AsyncMock())
-    monkeypatch.setattr(component, "_detect_export_throttled", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        component, "_detect_export_throttled", AsyncMock(return_value=False)
+    )
     monkeypatch.setattr(
         component,
         "_wait_export_post_action_state",
@@ -1280,7 +1557,9 @@ async def test_shopee_products_export_wait_download_complete_rejects_stale_exist
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
     stale_file = tmp_path / "products-export.xlsx"
     stale_file.write_bytes(b"old-data")
@@ -1304,7 +1583,9 @@ async def test_shopee_products_export_wait_download_complete_rejects_empty_file(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     future = asyncio.get_running_loop().create_future()
@@ -1325,11 +1606,19 @@ async def test_shopee_products_export_wait_download_complete_rejects_empty_file(
 async def test_shopee_products_export_capture_latest_report_baseline_skips_list_header_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
-    component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", "granularity": "monthly"}))
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
+    component = ShopeeProductsExport(
+        _ctx({"shop_name": "shop-a", "granularity": "monthly"})
+    )
 
     header_row = _ReportRow("报告名称 操作", visible=True)
-    report_row = _ReportRow("parentskudetail.20260101_20260131.xlsx download", action_text="download-old", status_text="download-old")
+    report_row = _ReportRow(
+        "parentskudetail.20260101_20260131.xlsx download",
+        action_text="download-old",
+        status_text="download-old",
+    )
     panel = _ReportPanelLocator([header_row, report_row])
 
     monkeypatch.setattr(
@@ -1338,24 +1627,47 @@ async def test_shopee_products_export_capture_latest_report_baseline_skips_list_
         AsyncMock(return_value=panel),
         raising=False,
     )
-    monkeypatch.setattr(ShopeeDatePicker, "_first_visible_locator", AsyncMock(return_value=panel), raising=False)
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_first_visible_locator",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
 
     await component._capture_latest_report_baseline(page)
 
-    assert component._latest_report_baseline_rows == [("parentskudetail.20260101_20260131.xlsx", "download")]
+    assert component._latest_report_baseline_rows == [
+        ("parentskudetail.20260101_20260131.xlsx", "download")
+    ]
 
 
 @pytest.mark.asyncio
 async def test_shopee_products_export_wait_top_report_download_button_targets_inserted_top_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
-    component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", "granularity": "monthly"}))
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
+    component = ShopeeProductsExport(
+        _ctx({"shop_name": "shop-a", "granularity": "monthly"})
+    )
     component._download_waiter = asyncio.get_running_loop().create_future()
 
-    old_row = _ReportRow("parentskudetail.20260101_20260131.xlsx download", action_text="download-old", status_text="download-old")
-    processing_row = _ReportRow("parentskudetail.20260201_20260228.xlsx processing", action_text="processing", status_text="processing")
-    ready_row = _ReportRow("parentskudetail.20260201_20260228.xlsx download", action_text="download-new", status_text="download-new")
+    old_row = _ReportRow(
+        "parentskudetail.20260101_20260131.xlsx download",
+        action_text="download-old",
+        status_text="download-old",
+    )
+    processing_row = _ReportRow(
+        "parentskudetail.20260201_20260228.xlsx processing",
+        action_text="processing",
+        status_text="processing",
+    )
+    ready_row = _ReportRow(
+        "parentskudetail.20260201_20260228.xlsx download",
+        action_text="download-new",
+        status_text="download-new",
+    )
     processing_panel = _ReportPanelLocator([processing_row, old_row])
     ready_panel = _ReportPanelLocator([ready_row, old_row])
     panels = iter([processing_panel, ready_panel])
@@ -1376,10 +1688,15 @@ async def test_shopee_products_export_wait_top_report_download_button_targets_in
     component._latest_report_baseline_rows = [
         ("parentskudetail.20260101_20260131.xlsx", "download"),
     ]
-    component._latest_report_top_snapshot = ("parentskudetail.20260101_20260131.xlsx", "download")
+    component._latest_report_top_snapshot = (
+        "parentskudetail.20260101_20260131.xlsx",
+        "download",
+    )
     component._latest_report_count_snapshot = 1
 
-    button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)
+    button = await component._wait_top_report_download_button(
+        page, timeout_ms=10, poll_ms=1
+    )
 
     assert await button.text_content() == "download-new"
 
@@ -1388,14 +1705,30 @@ async def test_shopee_products_export_wait_top_report_download_button_targets_in
 async def test_shopee_products_export_wait_top_report_download_button_ignores_list_header_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
-    component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", "granularity": "monthly"}))
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
+    component = ShopeeProductsExport(
+        _ctx({"shop_name": "shop-a", "granularity": "monthly"})
+    )
     component._download_waiter = asyncio.get_running_loop().create_future()
 
     header_row = _ReportRow("报告名称 操作", visible=True)
-    old_row = _ReportRow("parentskudetail.20260101_20260131.xlsx download", action_text="download-old", status_text="download-old")
-    processing_row = _ReportRow("parentskudetail.20260201_20260228.xlsx processing", action_text="processing", status_text="processing")
-    ready_row = _ReportRow("parentskudetail.20260201_20260228.xlsx download", action_text="download-new", status_text="download-new")
+    old_row = _ReportRow(
+        "parentskudetail.20260101_20260131.xlsx download",
+        action_text="download-old",
+        status_text="download-old",
+    )
+    processing_row = _ReportRow(
+        "parentskudetail.20260201_20260228.xlsx processing",
+        action_text="processing",
+        status_text="processing",
+    )
+    ready_row = _ReportRow(
+        "parentskudetail.20260201_20260228.xlsx download",
+        action_text="download-new",
+        status_text="download-new",
+    )
     processing_panel = _ReportPanelLocator([header_row, processing_row, old_row])
     ready_panel = _ReportPanelLocator([header_row, ready_row, old_row])
     panels = iter([processing_panel, ready_panel])
@@ -1416,10 +1749,15 @@ async def test_shopee_products_export_wait_top_report_download_button_ignores_li
     component._latest_report_baseline_rows = [
         ("parentskudetail.20260101_20260131.xlsx", "download"),
     ]
-    component._latest_report_top_snapshot = ("parentskudetail.20260101_20260131.xlsx", "download")
+    component._latest_report_top_snapshot = (
+        "parentskudetail.20260101_20260131.xlsx",
+        "download",
+    )
     component._latest_report_count_snapshot = 1
 
-    button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)
+    button = await component._wait_top_report_download_button(
+        page, timeout_ms=10, poll_ms=1
+    )
 
     assert await button.text_content() == "download-new"
 
@@ -1428,13 +1766,29 @@ async def test_shopee_products_export_wait_top_report_download_button_ignores_li
 async def test_shopee_products_export_wait_top_report_download_button_does_not_fallback_to_second_row_while_top_is_processing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
-    component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", "granularity": "monthly"}))
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
+    component = ShopeeProductsExport(
+        _ctx({"shop_name": "shop-a", "granularity": "monthly"})
+    )
     component._download_waiter = asyncio.get_running_loop().create_future()
 
-    old_row = _ReportRow("parentskudetail.20260101_20260131.xlsx download", action_text="download-old", status_text="download-old")
-    processing_top_row = _ReportRow("parentskudetail.20260201_20260228.xlsx processing", action_text="processing", status_text="processing")
-    ready_top_row = _ReportRow("parentskudetail.20260201_20260228.xlsx download", action_text="download-new", status_text="download-new")
+    old_row = _ReportRow(
+        "parentskudetail.20260101_20260131.xlsx download",
+        action_text="download-old",
+        status_text="download-old",
+    )
+    processing_top_row = _ReportRow(
+        "parentskudetail.20260201_20260228.xlsx processing",
+        action_text="processing",
+        status_text="processing",
+    )
+    ready_top_row = _ReportRow(
+        "parentskudetail.20260201_20260228.xlsx download",
+        action_text="download-new",
+        status_text="download-new",
+    )
     processing_panel = _ReportPanelLocator([processing_top_row, old_row])
     ready_panel = _ReportPanelLocator([ready_top_row, old_row])
     panels = iter([processing_panel, ready_panel])
@@ -1451,15 +1805,25 @@ async def test_shopee_products_export_wait_top_report_download_button_does_not_f
         AsyncMock(side_effect=_panel_side_effect),
         raising=False,
     )
-    monkeypatch.setattr(component, "_detect_inserted_top_row", lambda baseline_rows, current_rows: None, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_detect_inserted_top_row",
+        lambda baseline_rows, current_rows: None,
+        raising=False,
+    )
 
     component._latest_report_baseline_rows = [
         ("parentskudetail.20260101_20260131.xlsx", "download"),
     ]
-    component._latest_report_top_snapshot = ("parentskudetail.20260101_20260131.xlsx", "download")
+    component._latest_report_top_snapshot = (
+        "parentskudetail.20260101_20260131.xlsx",
+        "download",
+    )
     component._latest_report_count_snapshot = 1
 
-    button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)
+    button = await component._wait_top_report_download_button(
+        page, timeout_ms=10, poll_ms=1
+    )
 
     assert await button.text_content() == "download-new"
 
@@ -1468,14 +1832,30 @@ async def test_shopee_products_export_wait_top_report_download_button_does_not_f
 async def test_shopee_products_export_wait_top_report_download_button_waits_for_first_row_to_change_before_clicking(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
-    component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", "granularity": "monthly"}))
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
+    component = ShopeeProductsExport(
+        _ctx({"shop_name": "shop-a", "granularity": "monthly"})
+    )
     component._download_waiter = asyncio.get_running_loop().create_future()
 
-    old_top_row = _ReportRow("parentskudetail.20260101_20260131.xlsx download", action_text="download-old", status_text="download-old")
+    old_top_row = _ReportRow(
+        "parentskudetail.20260101_20260131.xlsx download",
+        action_text="download-old",
+        status_text="download-old",
+    )
     unchanged_panel = _ReportPanelLocator([old_top_row])
-    new_top_row = _ReportRow("parentskudetail.20260201_20260228.xlsx download", action_text="download-new", status_text="download-new")
-    shifted_old_row = _ReportRow("parentskudetail.20260101_20260131.xlsx download", action_text="download-old", status_text="download-old")
+    new_top_row = _ReportRow(
+        "parentskudetail.20260201_20260228.xlsx download",
+        action_text="download-new",
+        status_text="download-new",
+    )
+    shifted_old_row = _ReportRow(
+        "parentskudetail.20260101_20260131.xlsx download",
+        action_text="download-old",
+        status_text="download-old",
+    )
     ready_panel = _ReportPanelLocator([new_top_row, shifted_old_row])
     panels = iter([unchanged_panel, ready_panel])
 
@@ -1495,10 +1875,15 @@ async def test_shopee_products_export_wait_top_report_download_button_waits_for_
     component._latest_report_baseline_rows = [
         ("parentskudetail.20260101_20260131.xlsx", "download"),
     ]
-    component._latest_report_top_snapshot = ("parentskudetail.20260101_20260131.xlsx", "download")
+    component._latest_report_top_snapshot = (
+        "parentskudetail.20260101_20260131.xlsx",
+        "download",
+    )
     component._latest_report_count_snapshot = 1
 
-    button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)
+    button = await component._wait_top_report_download_button(
+        page, timeout_ms=10, poll_ms=1
+    )
 
     assert await button.text_content() == "download-new"
 
@@ -1507,13 +1892,29 @@ async def test_shopee_products_export_wait_top_report_download_button_waits_for_
 async def test_shopee_products_export_wait_top_report_download_button_does_not_fallback_when_first_row_state_is_unknown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
-    component = ShopeeProductsExport(_ctx({"shop_name": "shop-a", "granularity": "monthly"}))
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
+    component = ShopeeProductsExport(
+        _ctx({"shop_name": "shop-a", "granularity": "monthly"})
+    )
     component._download_waiter = asyncio.get_running_loop().create_future()
 
-    unknown_top_row = _ReportRow("parentskudetail.20260201_20260228.xlsx pending", action_text="查看", status_text="查看")
-    old_second_row = _ReportRow("parentskudetail.20260101_20260131.xlsx download", action_text="download-old", status_text="download-old")
-    ready_top_row = _ReportRow("parentskudetail.20260201_20260228.xlsx download", action_text="download-new", status_text="download-new")
+    unknown_top_row = _ReportRow(
+        "parentskudetail.20260201_20260228.xlsx pending",
+        action_text="查看",
+        status_text="查看",
+    )
+    old_second_row = _ReportRow(
+        "parentskudetail.20260101_20260131.xlsx download",
+        action_text="download-old",
+        status_text="download-old",
+    )
+    ready_top_row = _ReportRow(
+        "parentskudetail.20260201_20260228.xlsx download",
+        action_text="download-new",
+        status_text="download-new",
+    )
     pending_panel = _ReportPanelLocator([unknown_top_row, old_second_row])
     ready_panel = _ReportPanelLocator([ready_top_row, old_second_row])
     panels = iter([pending_panel, ready_panel])
@@ -1530,15 +1931,25 @@ async def test_shopee_products_export_wait_top_report_download_button_does_not_f
         AsyncMock(side_effect=_panel_side_effect),
         raising=False,
     )
-    monkeypatch.setattr(component, "_detect_inserted_top_row", lambda baseline_rows, current_rows: None, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_detect_inserted_top_row",
+        lambda baseline_rows, current_rows: None,
+        raising=False,
+    )
 
     component._latest_report_baseline_rows = [
         ("parentskudetail.20260101_20260131.xlsx", "download"),
     ]
-    component._latest_report_top_snapshot = ("parentskudetail.20260101_20260131.xlsx", "download")
+    component._latest_report_top_snapshot = (
+        "parentskudetail.20260101_20260131.xlsx",
+        "download",
+    )
     component._latest_report_count_snapshot = 1
 
-    button = await component._wait_top_report_download_button(page, timeout_ms=10, poll_ms=1)
+    button = await component._wait_top_report_download_button(
+        page, timeout_ms=10, poll_ms=1
+    )
 
     assert await button.text_content() == "download-new"
 
@@ -1553,7 +1964,9 @@ async def test_shopee_services_agent_wait_download_complete_clicks_ui_download_b
         download_button,
         "https://seller.shopee.cn/datacenter/services/agent?cnsc_shop_id=1",
     )
-    component = ShopeeServicesAgentExport(_ctx({"shop_name": "shop-a", "granularity": "daily", "sub_domain": "agent"}))
+    component = ShopeeServicesAgentExport(
+        _ctx({"shop_name": "shop-a", "granularity": "daily", "sub_domain": "agent"})
+    )
 
     monkeypatch.setattr(
         component,
@@ -1577,13 +1990,19 @@ async def test_shopee_services_agent_wait_download_complete_clicks_ui_download_b
 async def test_shopee_products_export_wait_export_post_action_state_returns_unknown_when_dom_stays_same(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_detect_export_throttled", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        component, "_detect_export_throttled", AsyncMock(return_value=False)
+    )
     component._download_waiter = None
 
-    state = await component._wait_export_post_action_state(page, timeout_ms=1000, poll_ms=500)
+    state = await component._wait_export_post_action_state(
+        page, timeout_ms=1000, poll_ms=500
+    )
 
     assert state == "unknown"
     assert page.wait_calls == [500, 500, 500]
@@ -1593,7 +2012,9 @@ async def test_shopee_products_export_wait_export_post_action_state_returns_unkn
 async def test_shopee_products_export_retries_after_throttled_warning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock())
@@ -1611,7 +2032,9 @@ async def test_shopee_products_export_retries_after_throttled_warning(
         "_detect_export_throttled",
         AsyncMock(return_value=False),
     )
-    monkeypatch.setattr(component, "_wait_export_retry_ready", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        component, "_wait_export_retry_ready", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(
         component,
         "_wait_download_complete",
@@ -1629,7 +2052,9 @@ async def test_shopee_products_export_retries_after_throttled_warning(
 async def test_shopee_products_export_rechecks_post_action_state_after_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock())
@@ -1642,8 +2067,12 @@ async def test_shopee_products_export_rechecks_post_action_state_after_retry(
         "_wait_export_post_action_state",
         AsyncMock(side_effect=["throttled", "download_started"]),
     )
-    monkeypatch.setattr(component, "_detect_export_throttled", AsyncMock(return_value=False))
-    monkeypatch.setattr(component, "_wait_export_retry_ready", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        component, "_detect_export_throttled", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(
+        component, "_wait_export_retry_ready", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(
         component,
         "_wait_download_complete",
@@ -1660,7 +2089,9 @@ async def test_shopee_products_export_rechecks_post_action_state_after_retry(
 async def test_shopee_products_export_fails_when_throttled_and_never_recovers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     monkeypatch.setattr(component, "_ensure_products_page_ready", AsyncMock())
@@ -1668,8 +2099,12 @@ async def test_shopee_products_export_fails_when_throttled_and_never_recovers(
     # run() 走 ensure_date_ready（products_export.py:1505），不是 _ensure_date_selection
     monkeypatch.setattr(component, "ensure_date_ready", AsyncMock())
     monkeypatch.setattr(component, "_trigger_export", AsyncMock())
-    monkeypatch.setattr(component, "_detect_export_throttled", AsyncMock(return_value=True))
-    monkeypatch.setattr(component, "_wait_export_retry_ready", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        component, "_detect_export_throttled", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        component, "_wait_export_retry_ready", AsyncMock(return_value=False)
+    )
 
     result = await component.run(page, mode=ExportMode.STANDARD)
 
@@ -1695,8 +2130,16 @@ async def test_shopee_products_export_run_switches_shop_before_checking_products
     monkeypatch.setattr(component, "ensure_page_ready", _page_ready)
     monkeypatch.setattr(component, "ensure_date_ready", AsyncMock())
     monkeypatch.setattr(component, "trigger_export", AsyncMock())
-    monkeypatch.setattr(component, "_wait_export_post_action_state", AsyncMock(return_value="download_started"))
-    monkeypatch.setattr(component, "_wait_download_complete", AsyncMock(return_value="F:/tmp/products.xlsx"))
+    monkeypatch.setattr(
+        component,
+        "_wait_export_post_action_state",
+        AsyncMock(return_value="download_started"),
+    )
+    monkeypatch.setattr(
+        component,
+        "_wait_download_complete",
+        AsyncMock(return_value="F:/tmp/products.xlsx"),
+    )
 
     result = await component.run(page, mode=ExportMode.STANDARD)
 
@@ -1708,7 +2151,9 @@ async def test_shopee_products_export_run_switches_shop_before_checking_products
 async def test_shopee_products_export_select_month_value_navigates_year_before_clicking_month(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
     month_leaf = _FakeLocator("\u4e8c\u6708", visible=True)
 
@@ -1716,8 +2161,12 @@ async def test_shopee_products_export_select_month_value_navigates_year_before_c
     # 组件层只做转发，桩与断言都落在固定的 helper 实例上。
     picker = component._date_picker_helper()
     monkeypatch.setattr(component, "_date_picker_helper", lambda: picker)
-    monkeypatch.setattr(picker, "_navigate_month_panel_to_year", AsyncMock(return_value=True))
-    monkeypatch.setattr(picker, "_find_month_grid_cell", AsyncMock(return_value=month_leaf))
+    monkeypatch.setattr(
+        picker, "_navigate_month_panel_to_year", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        picker, "_find_month_grid_cell", AsyncMock(return_value=month_leaf)
+    )
 
     selected = await component._select_month_value(page, "2026-02-01")
 
@@ -1731,19 +2180,32 @@ async def test_shopee_products_export_select_month_value_navigates_year_before_c
 async def test_shopee_products_export_select_month_value_does_not_misclick_december_for_february(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     december = _FakeLocator("\u5341\u4e8c\u6708", visible=True)
     february = _FakeLocator("\u4e8c\u6708", visible=True)
     panel = _FakePanel(
         {
-            "\u5341\u4e8c\u6708": _FakeTextMatch(_FakeLocator("\u5341\u4e8c\u6708", visible=True), december),
-            "\u4e8c\u6708": _FakeTextMatch(_FakeLocator("\u4e8c\u6708", visible=True), february),
+            "\u5341\u4e8c\u6708": _FakeTextMatch(
+                _FakeLocator("\u5341\u4e8c\u6708", visible=True), december
+            ),
+            "\u4e8c\u6708": _FakeTextMatch(
+                _FakeLocator("\u4e8c\u6708", visible=True), february
+            ),
         }
     )
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_month_panel", AsyncMock(return_value=panel), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_month_panel", AsyncMock(return_value=panel), raising=False)
+    monkeypatch.setattr(
+        component, "_find_month_panel", AsyncMock(return_value=panel), raising=False
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_month_panel",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
 
     selected = await component._find_month_grid_cell(page, "\u4e8c\u6708")
 
@@ -1755,17 +2217,23 @@ async def test_shopee_products_export_select_month_value_does_not_misclick_decem
 async def test_shopee_products_export_select_week_range_value_navigates_calendar_month_before_clicking_day(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     # 周区间选择在 ShopeeDatePicker 上实现（date_picker.py:1357），
     # 组件层只做转发，桩与断言都落在固定的 helper 实例上。
     picker = component._date_picker_helper()
     monkeypatch.setattr(component, "_date_picker_helper", lambda: picker)
-    monkeypatch.setattr(picker, "_navigate_calendar_panel_to_month", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        picker, "_navigate_calendar_panel_to_month", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(picker, "_select_calendar_day", AsyncMock(return_value=True))
 
-    selected = await component._select_week_range_value(page, "2026-03-09", "2026-03-15")
+    selected = await component._select_week_range_value(
+        page, "2026-03-09", "2026-03-15"
+    )
 
     assert selected is True
     picker._navigate_calendar_panel_to_month.assert_awaited_once_with(page, 2026, 3)
@@ -1776,18 +2244,24 @@ async def test_shopee_products_export_select_week_range_value_navigates_calendar
 async def test_shopee_products_export_select_week_range_value_does_not_fallback_to_range_text_clicks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     # 周区间选择在 ShopeeDatePicker 上实现（date_picker.py:1357），
     # 组件层只做转发，桩与断言都落在固定的 helper 实例上。
     picker = component._date_picker_helper()
     monkeypatch.setattr(component, "_date_picker_helper", lambda: picker)
-    monkeypatch.setattr(picker, "_navigate_calendar_panel_to_month", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        picker, "_navigate_calendar_panel_to_month", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(picker, "_select_calendar_day", AsyncMock(return_value=False))
     monkeypatch.setattr(picker, "_click_text_option", AsyncMock(return_value=True))
 
-    selected = await component._select_week_range_value(page, "2026-03-30", "2026-04-05")
+    selected = await component._select_week_range_value(
+        page, "2026-03-30", "2026-04-05"
+    )
 
     assert selected is False
     picker._navigate_calendar_panel_to_month.assert_awaited_once_with(page, 2026, 3)
@@ -1799,14 +2273,18 @@ async def test_shopee_products_export_select_week_range_value_does_not_fallback_
 async def test_shopee_products_export_select_single_day_value_navigates_calendar_month_before_clicking_day(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     # 单日选择在 ShopeeDatePicker 上实现（date_picker.py:1310），
     # 组件层只做转发，桩与断言都落在固定的 helper 实例上。
     picker = component._date_picker_helper()
     monkeypatch.setattr(component, "_date_picker_helper", lambda: picker)
-    monkeypatch.setattr(picker, "_navigate_calendar_panel_to_month", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        picker, "_navigate_calendar_panel_to_month", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(picker, "_select_calendar_day", AsyncMock(return_value=True))
 
     selected = await component._select_single_day_value(page, "2026-03-09")
@@ -1835,8 +2313,15 @@ async def test_shopee_products_export_select_calendar_day_prefers_in_view_cell_f
     )
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
+    monkeypatch.setattr(
+        component, "_find_date_panel", AsyncMock(return_value=panel), raising=False
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_date_panel",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
 
     selected = await component._select_calendar_day(page, 2)
 
@@ -1849,7 +2334,9 @@ async def test_shopee_products_export_select_calendar_day_prefers_in_view_cell_f
 async def test_shopee_products_export_navigate_calendar_month_uses_month_arrows_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     # 日历月份导航在 ShopeeDatePicker 上实现（date_picker.py:1204），
@@ -1861,8 +2348,15 @@ async def test_shopee_products_export_navigate_calendar_month_uses_month_arrows_
         "_current_popup_header_text",
         AsyncMock(side_effect=["\u4e09\u67082026", "\u4e8c\u67082026"]),
     )
-    monkeypatch.setattr(picker, "_click_popup_month_nav_button", AsyncMock(return_value=True))
-    monkeypatch.setattr(picker, "_click_popup_year_nav_button", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(
+        picker, "_click_popup_month_nav_button", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        picker,
+        "_click_popup_year_nav_button",
+        AsyncMock(return_value=True),
+        raising=False,
+    )
 
     reached = await component._navigate_calendar_panel_to_month(page, 2026, 2)
 
@@ -1874,8 +2368,14 @@ async def test_shopee_products_export_navigate_calendar_month_uses_month_arrows_
 def test_shopee_products_export_parse_calendar_header_month_year_zh() -> None:
     component = ShopeeProductsExport(_ctx())
 
-    assert component._parse_calendar_header_month_year_zh("\u56db\u67082026") == (2026, 4)
-    assert component._parse_calendar_header_month_year_zh("\u5341\u4e8c\u67082025") == (2025, 12)
+    assert component._parse_calendar_header_month_year_zh("\u56db\u67082026") == (
+        2026,
+        4,
+    )
+    assert component._parse_calendar_header_month_year_zh("\u5341\u4e8c\u67082025") == (
+        2025,
+        12,
+    )
     assert component._parse_calendar_header_month_year_zh("2026.04") is None
 
 
@@ -1883,7 +2383,9 @@ def test_shopee_products_export_parse_calendar_header_month_year_zh() -> None:
 async def test_shopee_products_export_navigate_calendar_month_waits_for_header_change_between_clicks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     # 日历月份导航在 ShopeeDatePicker 上实现（date_picker.py:1204），
@@ -1893,9 +2395,13 @@ async def test_shopee_products_export_navigate_calendar_month_waits_for_header_c
     monkeypatch.setattr(
         picker,
         "_current_popup_header_text",
-        AsyncMock(side_effect=["\u56db\u67082026", "\u4e09\u67082026", "\u4e8c\u67082026"]),
+        AsyncMock(
+            side_effect=["\u56db\u67082026", "\u4e09\u67082026", "\u4e8c\u67082026"]
+        ),
     )
-    monkeypatch.setattr(picker, "_click_popup_month_nav_button", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        picker, "_click_popup_month_nav_button", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(
         picker,
         "_wait_calendar_header_changed",
@@ -1914,7 +2420,9 @@ async def test_shopee_products_export_navigate_calendar_month_waits_for_header_c
 async def test_shopee_products_export_navigate_month_panel_uses_year_arrows_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     # 年份面板导航在 ShopeeDatePicker 上实现（date_picker.py:1229），
@@ -1926,9 +2434,15 @@ async def test_shopee_products_export_navigate_month_panel_uses_year_arrows_only
         "_current_month_panel_year_text",
         AsyncMock(side_effect=["2026", "2025"]),
     )
-    monkeypatch.setattr(picker, "_click_month_panel_year_nav_button", AsyncMock(return_value=True))
-    monkeypatch.setattr(picker, "_click_popup_month_nav_button", AsyncMock(return_value=True))
-    monkeypatch.setattr(picker, "_wait_month_panel_year_changed", AsyncMock(return_value="2025"))
+    monkeypatch.setattr(
+        picker, "_click_month_panel_year_nav_button", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        picker, "_click_popup_month_nav_button", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        picker, "_wait_month_panel_year_changed", AsyncMock(return_value="2025")
+    )
 
     reached = await component._navigate_month_panel_to_year(page, 2025)
 
@@ -1952,7 +2466,9 @@ def test_shopee_products_export_parse_month_panel_year() -> None:
 async def test_shopee_products_export_wait_custom_monthly_selection_accepts_range_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     monkeypatch.setattr(
@@ -1961,7 +2477,12 @@ async def test_shopee_products_export_wait_custom_monthly_selection_accepts_rang
         AsyncMock(return_value="统计时间 按月 2025-11-01 - 2025-11-30 (GMT+08)"),
         raising=False,
     )
-    monkeypatch.setattr(ShopeeDatePicker, "_current_date_summary_text", AsyncMock(return_value="统计时间 按月 2025-11-01 - 2025-11-30 (GMT+08)"), raising=False)
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_current_date_summary_text",
+        AsyncMock(return_value="统计时间 按月 2025-11-01 - 2025-11-30 (GMT+08)"),
+        raising=False,
+    )
 
     applied = await component._wait_custom_date_selection_applied(
         page,
@@ -1979,7 +2500,9 @@ async def test_shopee_products_export_wait_custom_monthly_selection_accepts_rang
 async def test_shopee_products_export_skips_custom_monthly_selection_when_summary_already_matches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(
         _ctx(
             {
@@ -2000,15 +2523,46 @@ async def test_shopee_products_export_skips_custom_monthly_selection_when_summar
         AsyncMock(return_value="统计时间 按月 2025-11-01 - 2025-11-30 (GMT+08)"),
         raising=False,
     )
-    monkeypatch.setattr(ShopeeDatePicker, "_current_date_summary_text", AsyncMock(return_value="统计时间 按月 2025-11-01 - 2025-11-30 (GMT+08)"), raising=False)
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_current_date_summary_text",
+        AsyncMock(return_value="统计时间 按月 2025-11-01 - 2025-11-30 (GMT+08)"),
+        raising=False,
+    )
     monkeypatch.setattr(component, "_open_date_picker", AsyncMock(), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_open_date_picker", AsyncMock(), raising=False)
-    monkeypatch.setattr(component, "_hover_text_option", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_hover_text_option", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_select_month_value", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_select_month_value", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_wait_custom_date_selection_applied", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_wait_custom_date_selection_applied", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(
+        ShopeeDatePicker, "_open_date_picker", AsyncMock(), raising=False
+    )
+    monkeypatch.setattr(
+        component, "_hover_text_option", AsyncMock(return_value=True), raising=False
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_hover_text_option",
+        AsyncMock(return_value=True),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        component, "_select_month_value", AsyncMock(return_value=True), raising=False
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_select_month_value",
+        AsyncMock(return_value=True),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        component,
+        "_wait_custom_date_selection_applied",
+        AsyncMock(return_value=True),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_wait_custom_date_selection_applied",
+        AsyncMock(return_value=True),
+        raising=False,
+    )
 
     await component._ensure_date_selection(page)
 
@@ -2021,7 +2575,9 @@ async def test_shopee_products_export_skips_custom_monthly_selection_when_summar
 async def test_shopee_products_export_navigate_month_panel_waits_for_year_change_between_clicks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     # 年份面板导航在 ShopeeDatePicker 上实现（date_picker.py:1229），
@@ -2033,8 +2589,12 @@ async def test_shopee_products_export_navigate_month_panel_waits_for_year_change
         "_current_month_panel_year_text",
         AsyncMock(side_effect=["2027", "2026", "2025"]),
     )
-    monkeypatch.setattr(picker, "_click_month_panel_year_nav_button", AsyncMock(return_value=True))
-    monkeypatch.setattr(picker, "_click_popup_month_nav_button", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        picker, "_click_month_panel_year_nav_button", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        picker, "_click_popup_month_nav_button", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(
         picker,
         "_wait_month_panel_year_changed",
@@ -2060,11 +2620,20 @@ async def test_shopee_products_export_click_popup_year_nav_button_falls_back_to_
             "<<": _FakeLocatorGroup([prev_text]),
         }
     )
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
+    monkeypatch.setattr(
+        component, "_find_date_panel", AsyncMock(return_value=panel), raising=False
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_date_panel",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
 
     clicked = await component._click_popup_year_nav_button(page, "prev")
 
@@ -2081,16 +2650,35 @@ async def test_shopee_products_export_click_month_panel_year_nav_button_uses_sta
         "2026",
         visible=True,
         selector_locators={
-            ".arco-picker-header-prev-btn:not([class*=\"super\"])": prev_button,
+            '.arco-picker-header-prev-btn:not([class*="super"])': prev_button,
         },
     )
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_month_panel_header", AsyncMock(return_value=header), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_month_panel_header", AsyncMock(return_value=header), raising=False)
-    monkeypatch.setattr(component, "_find_month_panel", AsyncMock(return_value=header), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_month_panel", AsyncMock(return_value=header), raising=False)
+    monkeypatch.setattr(
+        component,
+        "_find_month_panel_header",
+        AsyncMock(return_value=header),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_month_panel_header",
+        AsyncMock(return_value=header),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        component, "_find_month_panel", AsyncMock(return_value=header), raising=False
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_month_panel",
+        AsyncMock(return_value=header),
+        raising=False,
+    )
 
     clicked = await component._click_month_panel_year_nav_button(page, "prev")
 
@@ -2103,14 +2691,35 @@ async def test_shopee_products_export_click_month_panel_year_nav_button_uses_sta
 async def test_shopee_products_export_click_month_panel_year_nav_button_does_not_blind_click_header_when_no_arrow_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    header = _FakeLocator("2026", visible=True, bbox={"x": 0, "y": 0, "width": 120, "height": 24})
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    header = _FakeLocator(
+        "2026", visible=True, bbox={"x": 0, "y": 0, "width": 120, "height": 24}
+    )
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_month_panel_header", AsyncMock(return_value=header), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_month_panel_header", AsyncMock(return_value=header), raising=False)
-    monkeypatch.setattr(component, "_find_month_panel", AsyncMock(return_value=header), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_month_panel", AsyncMock(return_value=header), raising=False)
+    monkeypatch.setattr(
+        component,
+        "_find_month_panel_header",
+        AsyncMock(return_value=header),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_month_panel_header",
+        AsyncMock(return_value=header),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        component, "_find_month_panel", AsyncMock(return_value=header), raising=False
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_month_panel",
+        AsyncMock(return_value=header),
+        raising=False,
+    )
 
     clicked = await component._click_month_panel_year_nav_button(page, "prev")
 
@@ -2127,14 +2736,25 @@ async def test_shopee_products_export_find_month_leaf_locator_scans_all_visible_
     hidden_last = _FakeLocator("\u4e8c\u6708", visible=False)
     panel = _NavPanel(
         {
-            "\u4e8c\u6708": _FakeLocatorGroup([hidden_first, target_middle, hidden_last]),
+            "\u4e8c\u6708": _FakeLocatorGroup(
+                [hidden_first, target_middle, hidden_last]
+            ),
         }
     )
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_month_panel", AsyncMock(return_value=panel), raising=False)
-    monkeypatch.setattr(ShopeeDatePicker, "_find_month_panel", AsyncMock(return_value=panel), raising=False)
+    monkeypatch.setattr(
+        component, "_find_month_panel", AsyncMock(return_value=panel), raising=False
+    )
+    monkeypatch.setattr(
+        ShopeeDatePicker,
+        "_find_month_panel",
+        AsyncMock(return_value=panel),
+        raising=False,
+    )
 
     locator = await component._find_month_grid_cell(page, "\u4e8c\u6708")
 
@@ -2145,7 +2765,9 @@ async def test_shopee_products_export_find_month_leaf_locator_scans_all_visible_
 async def test_shopee_products_export_select_month_value_uses_month_grid_cell_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
     month_cell = _FakeLocator("\u4e8c\u6708", visible=True)
 
@@ -2153,8 +2775,12 @@ async def test_shopee_products_export_select_month_value_uses_month_grid_cell_he
     # 组件层只做转发，桩与断言都落在固定的 helper 实例上。
     picker = component._date_picker_helper()
     monkeypatch.setattr(component, "_date_picker_helper", lambda: picker)
-    monkeypatch.setattr(picker, "_navigate_month_panel_to_year", AsyncMock(return_value=True))
-    monkeypatch.setattr(picker, "_find_month_grid_cell", AsyncMock(return_value=month_cell))
+    monkeypatch.setattr(
+        picker, "_navigate_month_panel_to_year", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        picker, "_find_month_grid_cell", AsyncMock(return_value=month_cell)
+    )
 
     selected = await component._select_month_value(page, "2026-02-01")
 
@@ -2167,7 +2793,9 @@ async def test_shopee_products_export_select_month_value_uses_month_grid_cell_he
 async def test_shopee_products_export_navigate_month_panel_to_year_uses_month_panel_helpers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    page = _FakePage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1"
+    )
     component = ShopeeProductsExport(_ctx())
 
     # 年份面板导航在 ShopeeDatePicker 上实现（date_picker.py:1229），
@@ -2179,7 +2807,9 @@ async def test_shopee_products_export_navigate_month_panel_to_year_uses_month_pa
         "_current_month_panel_year_text",
         AsyncMock(side_effect=["2027", "2026", "2025"]),
     )
-    monkeypatch.setattr(picker, "_click_month_panel_year_nav_button", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        picker, "_click_month_panel_year_nav_button", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(
         picker,
         "_wait_month_panel_year_changed",

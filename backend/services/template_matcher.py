@@ -24,10 +24,15 @@ from sqlalchemy import select, desc, or_, case
 from datetime import datetime
 
 from modules.core.db import FieldMappingTemplate
+
 # FieldMappingTemplateItem,  # v4.6.0移除:不再使用明细表,改用header_columns JSONB
 from modules.core.logger import get_logger
-from backend.services.currency_extractor import get_currency_extractor  # [*] v4.15.0新增
-from backend.services.semantic_field_contract_service import SemanticFieldContractService
+from backend.services.currency_extractor import (
+    get_currency_extractor,
+)  # [*] v4.15.0新增
+from backend.services.semantic_field_contract_service import (
+    SemanticFieldContractService,
+)
 from backend.services.template_alias_registry import get_header_alias_mapping
 from backend.services.template_parse_rules_service import (
     DATE_ERROR_FORMAT_DRIFT_CODES,
@@ -145,13 +150,17 @@ def build_template_match_levels(
         level0_conditions = [
             FieldMappingTemplate.platform == platform,
             FieldMappingTemplate.data_domain == data_domain,
-            match_dimension_condition(FieldMappingTemplate.granularity, norm_granularity),
+            match_dimension_condition(
+                FieldMappingTemplate.granularity, norm_granularity
+            ),
             match_dimension_condition(FieldMappingTemplate.account, norm_account),
             FieldMappingTemplate.status == "published",
         ]
         if norm_sub_domain is not None:
             level0_conditions.append(
-                match_dimension_condition(FieldMappingTemplate.sub_domain, norm_sub_domain)
+                match_dimension_condition(
+                    FieldMappingTemplate.sub_domain, norm_sub_domain
+                )
             )
         levels.append((MATCH_LEVEL_ACCOUNT_SCOPED, level0_conditions))
 
@@ -181,9 +190,8 @@ def build_template_match_levels(
 
     # Level 2: 忽略sub_domain(向后兼容)
     # [*] v4.16.0修复:services域不允许忽略sub_domain(ai_assistant和agent表头完全不同)
-    level2_allowed = (
-        norm_granularity is not None
-        or (sub_domain is not None and normalized_domain != "services")
+    level2_allowed = norm_granularity is not None or (
+        sub_domain is not None and normalized_domain != "services"
     )
     services_blocked = normalized_domain == "services" and norm_sub_domain is not None
     if level2_allowed and not services_blocked:
@@ -464,28 +472,28 @@ def find_best_template_sync(
 class TemplateMatcher:
     """
     统一模板匹配服务
-    
+
     核心原则:
     - 精确匹配:(platform, data_domain, granularity)
     - 状态筛选:status = 'published'(只用已发布模板)
     - 版本选择:MAX(version)(最新版本)
     - 忽略sub_domain:宽松匹配,提高覆盖率
-    
+
     v4.18.2新增:
     - 支持异步会话(AsyncSession)
     v4.19.0更新:
     - 移除同步/异步双模式支持,统一为异步架构
     """
-    
+
     def __init__(self, db: AsyncSession):
         """
         初始化模板匹配器
-        
+
         Args:
             db: 异步数据库会话(AsyncSession)
         """
         self.db = db
-    
+
     @staticmethod
     def _match_dimension(column, value: Optional[str]):
         """
@@ -623,14 +631,14 @@ class TemplateMatcher:
         except Exception as e:
             logger.error(f"[TemplateMatcher] 查找模板失败: {e}", exc_info=True)
             return None
-    
+
     async def get_template_config(self, template_id: int) -> Dict[str, Any]:
         """
         获取模板的完整配置(v4.6.0重构版,v4.18.2异步支持)
-        
+
         v4.6.0变更:
         - mappings改为header_columns(原始表头字段列表)
-        
+
         包含:
         - header_row: 表头行索引
         - sub_domain: 子数据类型
@@ -647,43 +655,43 @@ class TemplateMatcher:
                 )
             )
             template = result.scalar_one_or_none()
-            
+
             if not template:
                 logger.warning(f"[TemplateMatcher] 模板不存在: ID={template_id}")
                 return {}
-            
+
             # v4.6.0:从header_columns读取原始表头字段列表
             header_columns = template.header_columns or []
-            
+
             return {
-                'header_row': template.header_row or 0,
-                'sub_domain': template.sub_domain,
-                'sheet_name': template.sheet_name,
-                'encoding': template.encoding or 'utf-8',
-                'field_count': template.field_count or len(header_columns),
-                'header_columns': header_columns,  # v4.6.0:返回原始表头字段列表
-                'header_bindings': template.header_bindings or [],
-                'template_name': template.template_name,
-                'version': template.version,
-                'status': template.status
+                "header_row": template.header_row or 0,
+                "sub_domain": template.sub_domain,
+                "sheet_name": template.sheet_name,
+                "encoding": template.encoding or "utf-8",
+                "field_count": template.field_count or len(header_columns),
+                "header_columns": header_columns,  # v4.6.0:返回原始表头字段列表
+                "header_bindings": template.header_bindings or [],
+                "template_name": template.template_name,
+                "version": template.version,
+                "status": template.status,
             }
-            
+
         except Exception as e:
             logger.error(f"[TemplateMatcher] 获取模板配置失败: {e}", exc_info=True)
             return {}
-    
+
     async def get_template_mappings(self, template_id: int) -> Dict[str, Dict]:
         """
         获取模板的字段映射(v4.6.0重构版,v4.18.2异步支持)
-        
+
         v4.6.0变更:
         - 不再查询FieldMappingTemplateItem表
         - 改为从template.header_columns读取原始表头字段列表
         - 返回格式:{original_field: {standard_field: None, confidence: 1.0, method: 'template', reason: '模板应用'}}
-        
+
         Args:
             template_id: 模板ID
-        
+
         Returns:
             {original_field: {standard_field, confidence, ...}}
         """
@@ -695,95 +703,97 @@ class TemplateMatcher:
                 )
             )
             template = result.scalar_one_or_none()
-            
+
             if not template:
                 logger.warning(f"[TemplateMatcher] 模板不存在: ID={template_id}")
                 return {}
-            
+
             header_columns = template.header_columns or []
-            
+
             # 构建映射字典(v4.6.0:不再有标准字段映射,只返回原始表头)
             mappings = {}
             for col in header_columns:
                 mappings[col] = {
-                    'standard_field': None,  # v4.6.0:不再存储标准字段映射
-                    'confidence': 1.0,
-                    'method': 'template',
-                    'reason': f'模板应用(原始表头)'
+                    "standard_field": None,  # v4.6.0:不再存储标准字段映射
+                    "confidence": 1.0,
+                    "method": "template",
+                    "reason": f"模板应用(原始表头)",
                 }
-            
+
             logger.info(f"[TemplateMatcher] 获取模板映射: {len(mappings)}个字段")
             return mappings
-            
+
         except Exception as e:
             logger.error(f"[TemplateMatcher] 获取模板映射失败: {e}", exc_info=True)
             return {}
-    
+
     async def apply_template_to_columns(
-        self, 
-        template: FieldMappingTemplate,
-        columns: List[str]
+        self, template: FieldMappingTemplate, columns: List[str]
     ) -> Dict[str, Dict]:
         """
         应用模板到列(匹配列名,v4.18.2异步支持)
-        
+
         支持:
         - 精确匹配
         - 模糊匹配(去除空格、特殊字符)
-        
+
         Args:
             template: 模板对象
             columns: 列名列表
-        
+
         Returns:
             {column: {standard_field, confidence, method, reason}}
         """
         import re
-        
+
         try:
             # [*] v4.18.2:获取模板映射(异步)
             template_mappings = await self.get_template_mappings(template.id)
-            
+
             # 应用到列
             result = {}
             for col in columns:
                 matched = False
-                
+
                 # 1. 精确匹配
                 if col in template_mappings:
                     result[col] = template_mappings[col]
-                    result[col]['reason'] = f'模板: {template.template_name}'
+                    result[col]["reason"] = f"模板: {template.template_name}"
                     matched = True
                 else:
                     # 2. 模糊匹配(去除空格、特殊字符)
-                    col_normalized = re.sub(r'[\s_\-()()]', '', col.lower())
+                    col_normalized = re.sub(r"[\s_\-()()]", "", col.lower())
                     for template_col, mapping in template_mappings.items():
-                        template_col_normalized = re.sub(r'[\s_\-()()]', '', template_col.lower())
+                        template_col_normalized = re.sub(
+                            r"[\s_\-()()]", "", template_col.lower()
+                        )
                         if col_normalized == template_col_normalized:
                             result[col] = mapping.copy()
-                            result[col]['reason'] = f'模板: {template.template_name} (模糊匹配)'
+                            result[col][
+                                "reason"
+                            ] = f"模板: {template.template_name} (模糊匹配)"
                             matched = True
                             break
-                
+
                 if not matched:
                     # 未匹配的列不强制映射(由AI建议兜底)
                     pass
-            
+
             logger.info(
                 f"[TemplateMatcher] 应用模板: {template.template_name}, "
                 f"匹配 {len(result)}/{len(columns)} 个字段"
             )
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"[TemplateMatcher] 应用模板失败: {e}", exc_info=True)
             return {}
-    
+
     async def get_template_coverage(self, platform: str = None) -> Dict[str, Any]:
         """
         获取模板覆盖度统计(v4.18.2异步支持)
-        
+
         返回:
         - total_combinations: 总的域×粒度组合数
         - covered_combinations: 有模板覆盖的组合数
@@ -792,65 +802,61 @@ class TemplateMatcher:
         """
         try:
             from modules.core.db import CatalogFile
-            
+
             # 查询所有唯一的域×粒度组合(从catalog_files)
-            stmt = select(
-                CatalogFile.data_domain,
-                CatalogFile.granularity
-            ).where(
-                CatalogFile.status == 'pending'  # 只统计待处理的
-            ).distinct()
-            
+            stmt = (
+                select(CatalogFile.data_domain, CatalogFile.granularity)
+                .where(CatalogFile.status == "pending")  # 只统计待处理的
+                .distinct()
+            )
+
             if platform:
                 stmt = stmt.where(CatalogFile.platform_code == platform)
-            
+
             # [*] v4.18.2:支持异步会话
             result = await self.db.execute(stmt)
             all_combinations = result.all()
-            
+
             total = len(all_combinations)
-            
+
             # 查询有模板的组合
             covered = []
             missing = []
-            
+
             for domain, granularity in all_combinations:
                 if granularity is None:
                     continue  # 跳过无粒度的文件
-                
+
                 # [*] v4.18.2:异步调用
                 template = await self.find_best_template(
-                    platform or 'shopee',  # 如果未指定,默认shopee
-                    domain,
-                    granularity
+                    platform or "shopee", domain, granularity  # 如果未指定,默认shopee
                 )
-                
+
                 if template:
                     covered.append((domain, granularity))
                 else:
                     missing.append((domain, granularity))
-            
+
             coverage_percentage = (len(covered) / total * 100) if total > 0 else 0
-            
+
             return {
-                'total_combinations': total,
-                'covered_combinations': len(covered),
-                'coverage_percentage': round(coverage_percentage, 1),
-                'missing_combinations': [
-                    {'domain': d, 'granularity': g} 
-                    for d, g in missing
-                ]
+                "total_combinations": total,
+                "covered_combinations": len(covered),
+                "coverage_percentage": round(coverage_percentage, 1),
+                "missing_combinations": [
+                    {"domain": d, "granularity": g} for d, g in missing
+                ],
             }
-            
+
         except Exception as e:
             logger.error(f"[TemplateMatcher] 获取模板覆盖度失败: {e}", exc_info=True)
             return {
-                'total_combinations': 0,
-                'covered_combinations': 0,
-                'coverage_percentage': 0,
-                'missing_combinations': []
+                "total_combinations": 0,
+                "covered_combinations": 0,
+                "coverage_percentage": 0,
+                "missing_combinations": [],
             }
-    
+
     async def detect_header_changes(
         self,
         template_id: int,
@@ -904,29 +910,29 @@ class TemplateMatcher:
                 )
             )
             template = result.scalar_one_or_none()
-            
+
             if not template:
                 logger.warning(f"[HeaderChange] 模板不存在: ID={template_id}")
                 return {
-                    'detected': True,  # 模板不存在视为变化
-                    'added_fields': [],
-                    'removed_fields': [],
-                    'match_rate': 0.0,
-                    'is_exact_match': False,
-                    'template_columns': [],
-                    'current_columns': current_columns,
-                    'format_drift': False,
-                    'value_shape': {
-                        'checked_rules': 0,
-                        'checked_values': 0,
-                        'format_drift': False,
-                        'error_codes': [],
-                        'issues': [],
+                    "detected": True,  # 模板不存在视为变化
+                    "added_fields": [],
+                    "removed_fields": [],
+                    "match_rate": 0.0,
+                    "is_exact_match": False,
+                    "template_columns": [],
+                    "current_columns": current_columns,
+                    "format_drift": False,
+                    "value_shape": {
+                        "checked_rules": 0,
+                        "checked_values": 0,
+                        "format_drift": False,
+                        "error_codes": [],
+                        "issues": [],
                     },
                 }
-            
+
             template_columns = template.header_columns or []
-            
+
             # [*] v4.15.0新增:货币代码归一化
             # 在比较前,将字段名归一化(移除货币代码部分)
             normalized_current = self._normalize_headers_for_compare(
@@ -937,7 +943,7 @@ class TemplateMatcher:
                 template.data_domain,
                 template_columns,
             )
-            
+
             semantic_current = self._apply_header_aliases(
                 template.platform,
                 template.data_domain,
@@ -958,14 +964,16 @@ class TemplateMatcher:
             template_set = set(normalized_template)
             semantic_current_set = set(semantic_current)
             semantic_template_set = set(semantic_template)
-            
+
             # 1. 检测新增字段(current中有,template中没有)
             added_fields = list(current_set - template_set)
-            
+
             # 2. 检测删除字段(template中有,current中没有)
             removed_fields = list(template_set - current_set)
             normalized_added_fields = list(semantic_current_set - semantic_template_set)
-            normalized_removed_fields = list(semantic_template_set - semantic_current_set)
+            normalized_removed_fields = list(
+                semantic_template_set - semantic_current_set
+            )
             change_classification = self._classify_header_changes(
                 template.platform,
                 template.data_domain,
@@ -1008,7 +1016,8 @@ class TemplateMatcher:
                 core_fields=core_fields,
                 # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单 ——
                 #     用户勾过的列不再算成新增噪音。
-                ignored_extra_fields=getattr(template, "ignored_extra_fields", None) or [],
+                ignored_extra_fields=getattr(template, "ignored_extra_fields", None)
+                or [],
             )
             semantic_summary = semantic_contract.to_dict()
             if semantic_contract.has_contract:
@@ -1020,7 +1029,9 @@ class TemplateMatcher:
                 #   2) 当契约解析不出 required 语义键时(missing_required 恒非空),
                 #      blocking 里塞的是与本次漂移无关的假缺失, 判定结果与真实漂移脱钩
                 #      —— 实测 TikTok 月度流量: 100% 精确匹配仍报「缺 shop_id/visitor_count/page_views」。
-                base_blocking = list(change_classification.get("blocking_changes") or [])
+                base_blocking = list(
+                    change_classification.get("blocking_changes") or []
+                )
                 base_non_blocking = list(
                     change_classification.get("non_blocking_changes") or []
                 )
@@ -1037,11 +1048,7 @@ class TemplateMatcher:
                     ]
                     base_non_blocking = [
                         *base_non_blocking,
-                        *[
-                            item
-                            for item in removed_fields
-                            if item in optional_removed
-                        ],
+                        *[item for item in removed_fields if item in optional_removed],
                     ]
                 contract_blocking = list(semantic_contract.missing_required_keys or [])
                 contract_non_blocking = [
@@ -1092,78 +1099,83 @@ class TemplateMatcher:
             # [*] v4.14.0安全版本:移除相似度匹配逻辑
             # 任何字段名变化都需要用户手动确认
             # [*] v4.15.0更新:但货币代码差异不视为变化(已通过归一化处理)
-            
+
             # 3. 计算匹配率(基于归一化后的字段集合的交集)
             matched_fields = len(current_set & template_set)
             total_fields = len(current_set | template_set)
-            match_rate = (matched_fields / total_fields * 100) if total_fields > 0 else 0.0
-            
+            match_rate = (
+                (matched_fields / total_fields * 100) if total_fields > 0 else 0.0
+            )
+
             # 4. 检查是否完全匹配(归一化后的字段名和顺序都一致)
             is_exact_match = (
-                len(added_fields) == 0 and 
-                len(removed_fields) == 0 and 
-                normalized_current == normalized_template  # 顺序也要一致(基于归一化后的字段名)
+                len(added_fields) == 0
+                and len(removed_fields) == 0
+                and normalized_current
+                == normalized_template  # 顺序也要一致(基于归一化后的字段名)
             )
             is_semantic_match = (
                 len(normalized_added_fields) == 0
                 and len(normalized_removed_fields) == 0
                 and semantic_current == semantic_template
             )
-            
+
             # 5. 判断是否检测到变化
             # [WARN] 安全原则:任何变化(新增、删除、顺序变化)都视为变化
             detected = not is_exact_match
-            
+
             result_dict = {
-                'detected': detected,
-                'added_fields': added_fields,
-                'removed_fields': removed_fields,
-                'match_rate': round(match_rate, 1),
-                'is_exact_match': is_exact_match,
-                'is_semantic_match': is_semantic_match,
-                'template_columns': template_columns,  # 返回原始模板字段列表(供前端对比,保留货币代码)
-                'current_columns': current_columns,     # 返回原始当前字段列表(供前端对比,保留货币代码)
-                'normalized_template_columns': normalized_template,  # [*] v4.15.0新增:归一化后的模板字段
-                'normalized_current_columns': normalized_current,     # [*] v4.15.0新增:归一化后的当前字段
-                'semantic_template_columns': semantic_template,
-                'semantic_current_columns': semantic_current,
-                'normalized_added_fields': normalized_added_fields,
-                'normalized_removed_fields': normalized_removed_fields,
-                'blocking_changes': change_classification["blocking_changes"],
-                'non_blocking_changes': change_classification["non_blocking_changes"],
+                "detected": detected,
+                "added_fields": added_fields,
+                "removed_fields": removed_fields,
+                "match_rate": round(match_rate, 1),
+                "is_exact_match": is_exact_match,
+                "is_semantic_match": is_semantic_match,
+                "template_columns": template_columns,  # 返回原始模板字段列表(供前端对比,保留货币代码)
+                "current_columns": current_columns,  # 返回原始当前字段列表(供前端对比,保留货币代码)
+                "normalized_template_columns": normalized_template,  # [*] v4.15.0新增:归一化后的模板字段
+                "normalized_current_columns": normalized_current,  # [*] v4.15.0新增:归一化后的当前字段
+                "semantic_template_columns": semantic_template,
+                "semantic_current_columns": semantic_current,
+                "normalized_added_fields": normalized_added_fields,
+                "normalized_removed_fields": normalized_removed_fields,
+                "blocking_changes": change_classification["blocking_changes"],
+                "non_blocking_changes": change_classification["non_blocking_changes"],
                 # [*] 批次 B: 值形态体检结果
-                'format_drift': format_drift,
-                'value_shape': value_shape,
+                "format_drift": format_drift,
+                "value_shape": value_shape,
                 **semantic_summary,
             }
-            
+
             if detected:
                 logger.warning(
                     f"[HeaderChange] [WARN] 检测到表头变化: "
                     f"新增{len(added_fields)}个, 删除{len(removed_fields)}个, "
                     f"匹配率{match_rate:.1f}% - 需要用户手动确认"
                 )
-            
+
             return result_dict
-            
+
         except Exception as e:
             logger.error(f"[HeaderChange] 检测表头变化失败: {e}", exc_info=True)
             return {
-                'detected': True,  # 检测失败视为变化(安全策略)
-                'added_fields': [],
-                'removed_fields': [],
-                'match_rate': 0.0,
-                'is_exact_match': False,
-                'template_columns': [],
-                'current_columns': current_columns if 'current_columns' in locals() else [],
+                "detected": True,  # 检测失败视为变化(安全策略)
+                "added_fields": [],
+                "removed_fields": [],
+                "match_rate": 0.0,
+                "is_exact_match": False,
+                "template_columns": [],
+                "current_columns": (
+                    current_columns if "current_columns" in locals() else []
+                ),
                 # [*] 批次 B: 检测失败时**不**谎报格式漂移, 但形状保持一致。
-                'format_drift': False,
-                'value_shape': {
-                    'checked_rules': 0,
-                    'checked_values': 0,
-                    'format_drift': False,
-                    'error_codes': [],
-                    'issues': [],
+                "format_drift": False,
+                "value_shape": {
+                    "checked_rules": 0,
+                    "checked_values": 0,
+                    "format_drift": False,
+                    "error_codes": [],
+                    "issues": [],
                 },
             }
 
@@ -1171,7 +1183,7 @@ class TemplateMatcher:
 def get_template_matcher(db: AsyncSession) -> TemplateMatcher:
     """
     获取模板匹配器实例
-    
+
     v4.18.2新增:支持异步会话(AsyncSession)
     v4.19.0更新:移除同步/异步双模式支持,统一为异步架构
     """

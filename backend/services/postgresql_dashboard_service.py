@@ -1085,9 +1085,9 @@ class PostgresqlDashboardService:
             FROM api.business_overview_inventory_backlog_module
             {where_clause}
             """.format(
-                where_clause=("WHERE " + " AND ".join(where_clauses))
-                if where_clauses
-                else ""
+                where_clause=(
+                    ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+                )
             ),
             params,
         )

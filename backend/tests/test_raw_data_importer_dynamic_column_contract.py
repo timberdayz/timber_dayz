@@ -16,7 +16,9 @@ def test_raw_data_importer_dynamic_column_update_deduplicates_normalized_assignm
     compact = _compact(source)
 
     # 一个规范化列名可能对应多个原始列名 ⇒ 必须成组收集，逐个取值
-    assert "column_mapping.setdefault(normalized_col,[]).append(original_col)" in compact
+    assert (
+        "column_mapping.setdefault(normalized_col,[]).append(original_col)" in compact
+    )
     assert re.search(
         r"for\s*\(\s*normalized_col,\s*original_columns,?\s*\)\s*in\s*column_mapping\.items\(\)\s*:",
         source,

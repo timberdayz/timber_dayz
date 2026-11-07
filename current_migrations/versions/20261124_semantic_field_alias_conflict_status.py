@@ -71,7 +71,9 @@ _BEFORE_STATUSES = ("active", "disabled")
 
 
 def _drop_constraint(bind) -> None:
-    bind.execute(sa.text(f"ALTER TABLE {_TABLE} DROP CONSTRAINT IF EXISTS {_CONSTRAINT}"))
+    bind.execute(
+        sa.text(f"ALTER TABLE {_TABLE} DROP CONSTRAINT IF EXISTS {_CONSTRAINT}")
+    )
 
 
 def _add_constraint(bind, statuses: tuple[str, ...]) -> None:

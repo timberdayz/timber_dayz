@@ -39,7 +39,9 @@ def test_validate_time_request_rejects_today_realtime_for_analytics() -> None:
 
 
 def test_normalize_time_request_accepts_monthly_granularity() -> None:
-    assert normalize_time_request("products", time_mode="granularity", value="monthly") == {
+    assert normalize_time_request(
+        "products", time_mode="granularity", value="monthly"
+    ) == {
         "time_mode": "granularity",
         "value": "monthly",
     }

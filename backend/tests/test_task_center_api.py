@@ -28,10 +28,20 @@ async def task_center_sqlite_session():
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
 
     async with engine.begin() as conn:
-        for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "ops", "semantic"):
+        for schema_name in (
+            "core",
+            "a_class",
+            "b_class",
+            "c_class",
+            "finance",
+            "ops",
+            "semantic",
+        ):
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
         await conn.run_sync(
-            lambda sync_conn: Base.metadata.create_all(sync_conn, tables=_sqlite_tables())
+            lambda sync_conn: Base.metadata.create_all(
+                sync_conn, tables=_sqlite_tables()
+            )
         )
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -134,7 +144,9 @@ async def test_task_center_tasks_endpoint_reports_total_beyond_page_size(
 
 
 @pytest.mark.asyncio
-async def test_task_center_detail_returns_404_when_task_missing(task_center_async_client):
+async def test_task_center_detail_returns_404_when_task_missing(
+    task_center_async_client,
+):
     response = await task_center_async_client.get("/api/task-center/tasks/missing-task")
 
     assert response.status_code == 404
@@ -142,6 +154,8 @@ async def test_task_center_detail_returns_404_when_task_missing(task_center_asyn
 
 @pytest.mark.asyncio
 async def test_task_center_logs_returns_404_when_task_missing(task_center_async_client):
-    response = await task_center_async_client.get("/api/task-center/tasks/missing-task/logs")
+    response = await task_center_async_client.get(
+        "/api/task-center/tasks/missing-task/logs"
+    )
 
     assert response.status_code == 404

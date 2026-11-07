@@ -352,7 +352,15 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "default_hash": False,
         "identity_strength": "weak",
         "hash_warning": "商品名可能重名或改名，优先使用商品 ID / SKU。",
-        "aliases": ["item_name", "product name", "item name", "商品", "商品名", "商品名称", "产品名称"],
+        "aliases": [
+            "item_name",
+            "product name",
+            "item name",
+            "商品",
+            "商品名",
+            "商品名称",
+            "产品名称",
+        ],
     },
     "item_status": {
         "label": "商品状态",
@@ -360,7 +368,14 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "products",
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["product_status", "listing_status", "item status", "product status", "发品状态", "商品状态"],
+        "aliases": [
+            "product_status",
+            "listing_status",
+            "item status",
+            "product status",
+            "发品状态",
+            "商品状态",
+        ],
     },
     # ── products 域的**口径变体**(2026-11-08 新增) ─────────────────────
     #
@@ -377,7 +392,12 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "caliber": CALIBER_PLACED,
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["销售额（已下单）", "销售额（已下订单）", "销售额（已确定订单）", "下单销售额"],
+        "aliases": [
+            "销售额（已下单）",
+            "销售额（已下订单）",
+            "销售额（已确定订单）",
+            "下单销售额",
+        ],
     },
     "sales_volume_placed": {
         "label": "销量（下单口径）",
@@ -386,7 +406,12 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "caliber": CALIBER_PLACED,
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["销量（已下单）", "件数（已下单）", "件数（已下订单）", "件数（已确定订单）"],
+        "aliases": [
+            "销量（已下单）",
+            "件数（已下单）",
+            "件数（已下订单）",
+            "件数（已确定订单）",
+        ],
     },
     "order_count_placed": {
         "label": "订单量（下单口径）",
@@ -413,7 +438,11 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "caliber": CALIBER_PLACED,
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["订单转化率（已下单）", "订单转化率（已下订单）", "订单转化率（已确定订单）"],
+        "aliases": [
+            "订单转化率（已下单）",
+            "订单转化率（已下订单）",
+            "订单转化率（已确定订单）",
+        ],
     },
     "buyer_count_placed": {
         "label": "买家数（下单口径）",
@@ -431,7 +460,11 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "caliber": CALIBER_PLACED,
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["每笔订单销售额（已下单）", "每笔订单销售额（已下订单）", "每笔订单销售额（已确定订单）"],
+        "aliases": [
+            "每笔订单销售额（已下单）",
+            "每笔订单销售额（已下订单）",
+            "每笔订单销售额（已确定订单）",
+        ],
     },
     # ── products 域此前**根本没有落点**的指标(2026-11-08 新增) ─────────
     #
@@ -453,7 +486,11 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "products",
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["不重复的商品曝光量", "去重商品曝光次数", "去重商品曝光次数（视频）"],
+        "aliases": [
+            "不重复的商品曝光量",
+            "去重商品曝光次数",
+            "去重商品曝光次数（视频）",
+        ],
     },
     "unique_clicks": {
         "label": "去重点击量",
@@ -487,7 +524,6 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "default_hash": False,
         "aliases": ["去重点击成交转化率（SKU 订单）"],
     },
-
     "buyer_count": {
         "label": "买家数",
         "kind": "metric",
@@ -495,7 +531,11 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "caliber": CALIBER_PAID,
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["买家数（已付款订单）", "买家数（已下订单）", "买家数（已确定订单）"],
+        "aliases": [
+            "买家数（已付款订单）",
+            "买家数（已下订单）",
+            "买家数（已确定订单）",
+        ],
     },
     "aov": {
         "label": "每笔订单销售额",
@@ -504,7 +544,11 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "caliber": CALIBER_PAID,
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["每笔订单销售额（已付款订单）", "每笔订单销售额（已下订单）", "每笔订单销售额"],
+        "aliases": [
+            "每笔订单销售额（已付款订单）",
+            "每笔订单销售额（已下订单）",
+            "每笔订单销售额",
+        ],
     },
     "add_to_cart_count": {
         "label": "加购件数",
@@ -520,7 +564,11 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "products",
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["已加购的用户数", "已加购的用户数（直播）", "已加购的用户数（视频）"],
+        "aliases": [
+            "已加购的用户数",
+            "已加购的用户数（直播）",
+            "已加购的用户数（视频）",
+        ],
     },
     "add_to_cart_rate": {
         "label": "加购率",
@@ -584,7 +632,11 @@ for _metric_key, _metric_meta in SEMANTIC_FIELD_DEFINITIONS.items():
         _metric_meta.setdefault("hash_warning", METRIC_HASH_WARNING)
 
 SEMANTIC_FIELD_META = {
-    key: {meta_key: meta_value for meta_key, meta_value in definition.items() if meta_key != "aliases"}
+    key: {
+        meta_key: meta_value
+        for meta_key, meta_value in definition.items()
+        if meta_key != "aliases"
+    }
     for key, definition in SEMANTIC_FIELD_DEFINITIONS.items()
 }
 
@@ -726,8 +778,23 @@ DOMAIN_COLUMN_SEMANTIC_OVERRIDES: Dict[str, Dict[str, str]] = {
 ORDER_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
     "order_id": ("订单编号", "订单号", "order_id", "order no", "order_no", "order id"),
     "shop_id": ("店铺", "店铺id", "shop_id", "shop id", "shop_name", "shop name"),
-    "order_date": ("下单时间", "下单日期", "订单日期", "订单时间", "order_date", "order time", "order_time"),
-    "sales_volume": ("销售数量", "出库数量", "销量", "sold_qty", "sales_volume", "quantity"),
+    "order_date": (
+        "下单时间",
+        "下单日期",
+        "订单日期",
+        "订单时间",
+        "order_date",
+        "order time",
+        "order_time",
+    ),
+    "sales_volume": (
+        "销售数量",
+        "出库数量",
+        "销量",
+        "sold_qty",
+        "sales_volume",
+        "quantity",
+    ),
     "paid_amount": (
         "买家支付",
         "买家支付(rmb)",
@@ -736,7 +803,14 @@ ORDER_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
         "buyer_paid",
         "paid_amount",
     ),
-    "profit": ("利润", "利润(rmb)", "利润（rmb）", "profit", "profit_amount", "profit_rmb"),
+    "profit": (
+        "利润",
+        "利润(rmb)",
+        "利润（rmb）",
+        "profit",
+        "profit_amount",
+        "profit_rmb",
+    ),
     "estimated_settlement_amount": (
         "预估回款金额",
         "预估回款金额(rmb)",
@@ -759,7 +833,14 @@ ANALYTICS_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
     "metric_date": ("日期", "统计日期", "交易日期", "日期时间", "date"),
     "shop_id": ("店铺", "店铺id", "店铺名称", "shop_id", "shop id"),
     "visitor_count": ("商品访客数", "访客数", "访客量", "访问用户数", "uv"),
-    "page_views": ("页面浏览次数", "页面浏览量", "页面浏览数", "商品浏览量", "浏览量", "pv"),
+    "page_views": (
+        "页面浏览次数",
+        "页面浏览量",
+        "页面浏览数",
+        "商品浏览量",
+        "浏览量",
+        "pv",
+    ),
     "conversion_rate": ("转化率", "conversion_rate"),
     "order_count": ("订单数", "支付订单数", "成交订单数", "order_count"),
     "gmv": ("gmv", "成交金额", "成交额", "交易额"),
@@ -812,7 +893,10 @@ PRODUCTS_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
     ),
     "sales_volume_placed": ("件数（已下订单）", "件数（已确定订单）"),
     "conversion_rate_placed": ("转化率（已下订单）", "转化率（已确定订单）"),
-    "order_conversion_rate_placed": ("订单转化率（已下订单）", "订单转化率（已确定订单）"),
+    "order_conversion_rate_placed": (
+        "订单转化率（已下订单）",
+        "订单转化率（已确定订单）",
+    ),
     "buyer_count_placed": ("买家数（已下订单）", "买家数（已确定订单）"),
     "aov_placed": (
         "每笔订单销售额（已下订单）",
@@ -863,12 +947,8 @@ DOMAIN_SEMANTIC_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
 #
 # 注意: 归一化**只用于匹配**, 原始列名一律保留在 raw_data 里 ——
 # 归一化不是为了改数据, 是为了让「同一个意思」能被认出来。
-_CURRENCY_SUFFIX_PATTERN = re.compile(
-    r"[（(]\s*[A-Za-z]{3}\s*[)）]\s*$"
-)
-_CURRENCY_NO_PAREN_PATTERN = re.compile(
-    r"[（(][^（()）]{0,12}[)）]\s*$"
-)
+_CURRENCY_SUFFIX_PATTERN = re.compile(r"[（(]\s*[A-Za-z]{3}\s*[)）]\s*$")
+_CURRENCY_NO_PAREN_PATTERN = re.compile(r"[（(][^（()）]{0,12}[)）]\s*$")
 _FULLWIDTH_PUNCTUATION = {
     "（": "(",
     "）": ")",
@@ -971,7 +1051,6 @@ def apply_caliber_history(normalized: str, platform_code: Optional[str] = None) 
     return normalized
 
 
-
 #: 口径沿革**旧词**别名的置信度 —— 低于当前措辞的 1.000。
 #:
 #: 为什么需要: shopee 同一份报表里「已下订单」与「已确定订单」两列并存
@@ -979,7 +1058,6 @@ def apply_caliber_history(normalized: str, platform_code: Optional[str] = None) 
 #: ``semantic.resolve_alias()`` 只能挑一条 —— 若置信度相同就退化成按 id 挑,
 #: 等于把两个数混着报。旧词降级 ⇒ **稳定选当前措辞**。
 LEGACY_CALIBER_ALIAS_CONFIDENCE = 0.900
-
 
 
 #: 报表**分块列**的判定 —— 列名末尾带 ``.N`` 序号。
@@ -999,6 +1077,7 @@ LEGACY_CALIBER_ALIAS_CONFIDENCE = 0.900
 #: (它们各自的语义需要结合报表结构单独建模, 记为 V2。)
 #: 报表分块列的判定正则 —— 列名末尾带 ``.N`` 序号。
 BLOCK_COLUMN_ALIAS_PATTERN = re.compile(r"\.\d+$")
+
 
 def is_block_column_alias(raw_alias: Optional[str]) -> bool:
     """这个列名是报表分块列(末尾带 ``.N``)吗?"""
@@ -1122,7 +1201,9 @@ _RUNTIME_ALIAS_LOADED = False
 GLOBAL_ALIAS_DOMAIN = "*"
 
 
-def _runtime_alias_bucket(index: Dict[str, Dict[str, str]], domain: str) -> Dict[str, str]:
+def _runtime_alias_bucket(
+    index: Dict[str, Dict[str, str]], domain: str
+) -> Dict[str, str]:
     """取「域内 + 全局」的合并视图(域内优先)。"""
     merged: Dict[str, str] = {}
     merged.update(index.get(GLOBAL_ALIAS_DOMAIN, {}))
@@ -1157,7 +1238,10 @@ async def load_runtime_aliases(db) -> int:
         return 0
 
     for row in rows:
-        domain = str(getattr(row, "data_domain", "") or "").strip().lower() or GLOBAL_ALIAS_DOMAIN
+        domain = (
+            str(getattr(row, "data_domain", "") or "").strip().lower()
+            or GLOBAL_ALIAS_DOMAIN
+        )
         semantic_key = str(getattr(row, "standard_field", "") or "").strip()
         raw_alias = str(getattr(row, "raw_alias", "") or "").strip()
         source = str(getattr(row, "source", "") or "").strip()
@@ -1168,7 +1252,11 @@ async def load_runtime_aliases(db) -> int:
         normalized = normalize_semantic_alias(raw_alias)
         if not normalized:
             continue
-        bucket = confirmed_bucket if source in {"manual", "template_confirmed"} else builtin_bucket
+        bucket = (
+            confirmed_bucket
+            if source in {"manual", "template_confirmed"}
+            else builtin_bucket
+        )
         bucket.setdefault(domain, {}).setdefault(normalized, semantic_key)
 
     _RUNTIME_ALIAS_INDEX = builtin_bucket
@@ -1183,9 +1271,12 @@ async def load_runtime_aliases(db) -> int:
 def runtime_alias_snapshot() -> Dict[str, Dict[str, str]]:
     """当前生效的运行时别名快照(给接口与测试用)。"""
     return {
-        "builtin": {domain: dict(items) for domain, items in _RUNTIME_ALIAS_INDEX.items()},
+        "builtin": {
+            domain: dict(items) for domain, items in _RUNTIME_ALIAS_INDEX.items()
+        },
         "confirmed": {
-            domain: dict(items) for domain, items in _RUNTIME_CONFIRMED_ALIAS_INDEX.items()
+            domain: dict(items)
+            for domain, items in _RUNTIME_CONFIRMED_ALIAS_INDEX.items()
         },
         "loaded": _RUNTIME_ALIAS_LOADED,
     }
@@ -1195,6 +1286,7 @@ def runtime_alias_count() -> int:
     return sum(len(item) for item in _RUNTIME_ALIAS_INDEX.values()) + sum(
         len(item) for item in _RUNTIME_CONFIRMED_ALIAS_INDEX.values()
     )
+
 
 SEMANTIC_HASH_IDENTITY_KEYS = {
     key for key, meta in SEMANTIC_FIELD_META.items() if meta.get("hash_eligible")
@@ -1482,9 +1574,7 @@ def resolve_semantic_value(
         seen_names.append(str(name).strip())
 
     row_lookup = {
-        str(key).strip().lower(): key
-        for key in row.keys()
-        if str(key).strip()
+        str(key).strip().lower(): key for key in row.keys() if str(key).strip()
     }
     for candidate in seen_names:
         matched_key = row_lookup.get(candidate.lower())
@@ -1494,7 +1584,10 @@ def resolve_semantic_value(
     for key, value in row.items():
         key_variants = _normalize_key_variants(str(key))
         for candidate in seen_names:
-            if any(candidate_variant in key_variants for candidate_variant in _normalize_key_variants(candidate)):
+            if any(
+                candidate_variant in key_variants
+                for candidate_variant in _normalize_key_variants(candidate)
+            ):
                 return value, key
     return None, None
 
@@ -1551,13 +1644,19 @@ _ATTRIBUTION_METRIC_KEYS = frozenset(
 )
 
 
-def semantic_option_group_key(semantic_key: Optional[str], meta: Optional[Dict[str, Any]] = None) -> str:
+def semantic_option_group_key(
+    semantic_key: Optional[str], meta: Optional[Dict[str, Any]] = None
+) -> str:
     """判定一个语义键属于哪个下拉分组。
 
     规则与前端旧实现逐条对应(前端旧实现是这段逻辑的**副本**,
     现在前端直接用后端算好的 ``group``)。
     """
-    meta = meta if meta is not None else SEMANTIC_FIELD_META.get(str(semantic_key or ""), {})
+    meta = (
+        meta
+        if meta is not None
+        else SEMANTIC_FIELD_META.get(str(semantic_key or ""), {})
+    )
     key = str(semantic_key or "")
     kind = str(meta.get("kind") or "")
     domain = str(meta.get("domain") or "common")
@@ -1656,7 +1755,8 @@ def build_semantic_field_definitions_payload() -> Dict[str, Any]:
         # [*] 运行时别名索引 —— 这两份是**活的**: 用户在模板里沉淀一次,
         #     别名就多一条 ⇒ 前端必须每次从接口拿, 不能用快照。
         "runtime_alias_index": {
-            domain: dict(items) for domain, items in _RUNTIME_CONFIRMED_ALIAS_INDEX.items()
+            domain: dict(items)
+            for domain, items in _RUNTIME_CONFIRMED_ALIAS_INDEX.items()
         },
         "runtime_builtin_alias_index": {
             domain: dict(items) for domain, items in _RUNTIME_ALIAS_INDEX.items()
@@ -1723,10 +1823,10 @@ def build_semantic_field_snapshot_payload() -> Dict[str, Any]:
         domain: dict(items) for domain, items in _NORMALIZED_DOMAIN_ALIAS_INDEX.items()
     }
     payload["domain_column_index"] = {
-        domain: dict(items) for domain, items in _NORMALIZED_COLUMN_OVERRIDE_INDEX.items()
+        domain: dict(items)
+        for domain, items in _NORMALIZED_COLUMN_OVERRIDE_INDEX.items()
     }
     payload["normalization_samples"] = [
         [raw, normalize_semantic_alias(raw)] for raw in NORMALIZATION_SAMPLE_VALUES
     ]
     return payload
-

@@ -94,7 +94,9 @@ def validate_field_parse_rules_against_samples(
         date_format = str(rule.get("date_format") or "").strip()
         if not date_format:
             continue
-        value_kind = str(rule.get("value_kind") or "single_date").strip() or "single_date"
+        value_kind = (
+            str(rule.get("value_kind") or "single_date").strip() or "single_date"
+        )
         source_column = str(rule.get("source_column") or "").strip()
 
         values = _collect_sample_values(rule, rows)
@@ -477,7 +479,9 @@ class TemplateSaveReadinessService:
         # 「参与去重」由**版本级核心字段清单**的 ``in_hash`` 表达
         # (:mod:`backend.services.core_fields_service`)。
         # 绑定上不再重复声明同一事实(否则「同一事实两处真相」)。
-        normalized_header_bindings = [dict(binding) for binding in header_bindings or []]
+        normalized_header_bindings = [
+            dict(binding) for binding in header_bindings or []
+        ]
         hash_options = self._semantic_hash_policy_service.build_options(
             data_domain=data_domain,
             granularity=granularity,
@@ -509,7 +513,8 @@ class TemplateSaveReadinessService:
         if sample_parse_problems:
             blocking_errors.extend(sample_parse_problems)
             blocking_messages.extend(
-                "日期解析规则与样本数据不匹配：" + problem for problem in sample_parse_problems
+                "日期解析规则与样本数据不匹配：" + problem
+                for problem in sample_parse_problems
             )
         blocking_messages.extend(list(hash_policy.blocking_messages))
         warnings = list(hash_policy.warnings)

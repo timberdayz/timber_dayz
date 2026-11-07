@@ -94,9 +94,10 @@ def upgrade() -> None:
     bind.execute(sa.text(_asset(_NORMALIZE_ASSET)))
 
     # 3) 自检 ①: builtin 行数必须与字典一致(不多不少)
-    row = bind.execute(
-        sa.text(
-            """
+    row = (
+        bind.execute(
+            sa.text(
+                """
             SELECT
                 count(*) FILTER (WHERE source = 'builtin') AS builtin_rows,
                 count(*) FILTER (
@@ -105,8 +106,11 @@ def upgrade() -> None:
             FROM semantic.semantic_field_aliases
             WHERE data_domain = 'products'
             """
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     builtin_rows = int(row["builtin_rows"] or 0)
     without_normalized = int(row["builtin_without_normalized"] or 0)
 
@@ -134,7 +138,9 @@ def upgrade() -> None:
         )
     ).scalar()
     if withdrawn:
-        raise RuntimeError("\u5b57\u5178\u5df2\u64a4\u56de\u7684\u522b\u540d\u4ecd\u5728\u522b\u540d\u8868\u91cc")
+        raise RuntimeError(
+            "\u5b57\u5178\u5df2\u64a4\u56de\u7684\u522b\u540d\u4ecd\u5728\u522b\u540d\u8868\u91cc"
+        )
 
 
 def downgrade() -> None:

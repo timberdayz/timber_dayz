@@ -30,7 +30,9 @@ def test_readme_documents_postgresql_dashboard_without_runtime_metabase_fallback
 
 
 def test_agent_start_here_no_longer_describes_runtime_metabase_fallback():
-    text = Path("docs/AGENT_START_HERE.md").read_text(encoding="utf-8", errors="replace")
+    text = Path("docs/AGENT_START_HERE.md").read_text(
+        encoding="utf-8", errors="replace"
+    )
     assert "PostgreSQL Dashboard" in text
     assert "USE_POSTGRESQL_DASHBOARD_ROUTER" not in text
     assert "--with-metabase" not in text

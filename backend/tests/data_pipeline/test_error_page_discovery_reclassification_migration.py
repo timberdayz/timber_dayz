@@ -62,9 +62,7 @@ def _load_migration():
 
 async def _disable_fk_triggers(pg_session) -> None:
     """探测记录有指向 ``core.main_accounts`` 的外键；本测试只关心改判逻辑。"""
-    await pg_session.execute(
-        text("SET session_replication_role = replica")
-    )
+    await pg_session.execute(text("SET session_replication_role = replica"))
     await pg_session.flush()
 
 
@@ -97,9 +95,9 @@ async def test_sql_criteria_matches_python_error_page_detector(pg_session):
     assert len(results) == len(URL_CASES)
     for index, url in enumerate(URL_CASES):
         expected = _is_platform_error_page(url)
-        assert results[index] is expected, (
-            f"URL={url!r} SQL={results[index]} Python={expected}"
-        )
+        assert (
+            results[index] is expected
+        ), f"URL={url!r} SQL={results[index]} Python={expected}"
 
 
 @pytest.mark.asyncio
@@ -268,7 +266,5 @@ async def test_migration_downgrade_restores_original_values(pg_session):
     assert row["detected_platform_shop_id"] == "1391124228"
     assert row["detected_store_name"] == "strawberries_store.sg"
     assert row["detected_region"] == "SG"
-    assert list(row["candidate_shop_account_ids"] or []) == [
-        "shopee_sg_hx_home_local"
-    ]
+    assert list(row["candidate_shop_account_ids"] or []) == ["shopee_sg_hx_home_local"]
     assert "probe_failed" not in (row["raw_payload"] or {})

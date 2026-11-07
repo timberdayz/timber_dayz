@@ -88,12 +88,26 @@ async def _seed_config(session):
     id_map = {shop.shop_account_id: shop.id for shop in shops}
     session.add_all(
         [
-            ShopAccountCapability(shop_account_id=id_map["shop-sg-1"], data_domain="orders", enabled=True),
-            ShopAccountCapability(shop_account_id=id_map["shop-sg-1"], data_domain="services", enabled=True),
-            ShopAccountCapability(shop_account_id=id_map["shop-my-1"], data_domain="products", enabled=True),
+            ShopAccountCapability(
+                shop_account_id=id_map["shop-sg-1"], data_domain="orders", enabled=True
+            ),
+            ShopAccountCapability(
+                shop_account_id=id_map["shop-sg-1"],
+                data_domain="services",
+                enabled=True,
+            ),
+            ShopAccountCapability(
+                shop_account_id=id_map["shop-my-1"],
+                data_domain="products",
+                enabled=True,
+            ),
             # 未显式声明的域会按默认能力回填为启用（resolve_shop_capabilities），
             # 这里显式关闭 services 以表达 shop-my-1 仅支持 products
-            ShopAccountCapability(shop_account_id=id_map["shop-my-1"], data_domain="services", enabled=False),
+            ShopAccountCapability(
+                shop_account_id=id_map["shop-my-1"],
+                data_domain="services",
+                enabled=False,
+            ),
         ]
     )
 
@@ -138,7 +152,9 @@ async def _seed_config(session):
 
 async def _seed_config_run(session, *, config_id: int) -> int:
     config = (
-        await session.execute(select(CollectionConfig).where(CollectionConfig.id == config_id))
+        await session.execute(
+            select(CollectionConfig).where(CollectionConfig.id == config_id)
+        )
     ).scalar_one()
     run = CollectionConfigRun(
         run_id="run-1",
@@ -157,7 +173,9 @@ async def _seed_config_run(session, *, config_id: int) -> int:
 @pytest.mark.asyncio
 async def test_create_tasks_for_config_expands_per_shop_scope(config_execution_session):
     config_id = await _seed_config(config_execution_session)
-    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+    config_run_id = await _seed_config_run(
+        config_execution_session, config_id=config_id
+    )
 
     tasks = await create_tasks_for_config(
         config_execution_session,
@@ -186,7 +204,9 @@ async def test_create_tasks_for_config_resolves_dynamic_time_window(
     config_execution_session,
 ):
     config_id = await _seed_config(config_execution_session)
-    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+    config_run_id = await _seed_config_run(
+        config_execution_session, config_id=config_id
+    )
 
     config = (
         await config_execution_session.execute(
@@ -214,21 +234,22 @@ async def test_create_tasks_for_config_resolves_dynamic_time_window(
     assert {task.date_range["start_date"] for task in tasks} == {"2026-07-01"}
     assert {task.date_range["end_date"] for task in tasks} == {"2026-07-04"}
     assert all(
-        task.date_range["time_selection"]["strategy"] == "current_month_to_available_day"
+        task.date_range["time_selection"]["strategy"]
+        == "current_month_to_available_day"
         for task in tasks
     )
     assert {task.date_range["execution_time_selection"]["mode"] for task in tasks} == {
         "custom"
     }
-    assert {task.date_range["execution_time_selection"]["granularity"] for task in tasks} == {
-        "monthly"
-    }
-    assert {task.date_range["execution_time_selection"]["start_date"] for task in tasks} == {
-        "2026-07-01"
-    }
-    assert {task.date_range["execution_time_selection"]["end_date"] for task in tasks} == {
-        "2026-07-04"
-    }
+    assert {
+        task.date_range["execution_time_selection"]["granularity"] for task in tasks
+    } == {"monthly"}
+    assert {
+        task.date_range["execution_time_selection"]["start_date"] for task in tasks
+    } == {"2026-07-01"}
+    assert {
+        task.date_range["execution_time_selection"]["end_date"] for task in tasks
+    } == {"2026-07-04"}
 
 
 @pytest.mark.asyncio
@@ -236,7 +257,9 @@ async def test_create_tasks_for_config_defaults_order_subtypes_for_config_scopes
     config_execution_session,
 ):
     config_id = await _seed_config(config_execution_session)
-    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+    config_run_id = await _seed_config_run(
+        config_execution_session, config_id=config_id
+    )
 
     scope_result = await config_execution_session.execute(
         select(CollectionConfigShopScope).where(
@@ -268,7 +291,9 @@ async def test_create_tasks_for_config_preserves_explicit_order_subtype_selectio
     config_execution_session,
 ):
     config_id = await _seed_config(config_execution_session)
-    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+    config_run_id = await _seed_config_run(
+        config_execution_session, config_id=config_id
+    )
 
     scope_result = await config_execution_session.execute(
         select(CollectionConfigShopScope).where(
@@ -295,11 +320,17 @@ async def test_create_tasks_for_config_preserves_explicit_order_subtype_selectio
 
 
 @pytest.mark.asyncio
-async def test_create_tasks_for_config_skips_conflicted_shop_without_blocking_others(config_execution_session):
+async def test_create_tasks_for_config_skips_conflicted_shop_without_blocking_others(
+    config_execution_session,
+):
     config_id = await _seed_config(config_execution_session)
-    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+    config_run_id = await _seed_config_run(
+        config_execution_session, config_id=config_id
+    )
 
-    config_result = await config_execution_session.execute(select(CollectionConfig).where(CollectionConfig.id == config_id))
+    config_result = await config_execution_session.execute(
+        select(CollectionConfig).where(CollectionConfig.id == config_id)
+    )
     config = config_result.scalar_one()
     config_execution_session.add(
         CollectionTask(
@@ -345,7 +376,9 @@ async def test_create_tasks_for_config_treats_verification_states_as_active_conf
     active_status: str,
 ):
     config_id = await _seed_config(config_execution_session)
-    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+    config_run_id = await _seed_config_run(
+        config_execution_session, config_id=config_id
+    )
 
     config_result = await config_execution_session.execute(
         select(CollectionConfig).where(CollectionConfig.id == config_id)
@@ -390,7 +423,9 @@ async def test_create_tasks_for_config_does_not_crash_when_multiple_active_tasks
     config_execution_session,
 ):
     config_id = await _seed_config(config_execution_session)
-    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+    config_run_id = await _seed_config_run(
+        config_execution_session, config_id=config_id
+    )
 
     config_result = await config_execution_session.execute(
         select(CollectionConfig).where(CollectionConfig.id == config_id)
@@ -456,16 +491,28 @@ async def test_create_tasks_for_config_prunes_unsupported_subtypes_without_skipp
     monkeypatch,
 ):
     config_id = await _seed_config(config_execution_session)
-    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+    config_run_id = await _seed_config_run(
+        config_execution_session, config_id=config_id
+    )
 
     class _FakeResolver:
         async def resolve_login_component(self, platform):
             return {"component_name": f"{platform}/login"}
 
         async def resolve_export_component(self, *, platform, data_domain, sub_domain):
-            if platform == "tiktok" and data_domain == "services" and sub_domain == "ai_assistant":
-                raise NoStableComponentVersionError(f"{platform}/{data_domain}_{sub_domain}_export")
-            suffix = f"{data_domain}_{sub_domain}_export" if sub_domain else f"{data_domain}_export"
+            if (
+                platform == "tiktok"
+                and data_domain == "services"
+                and sub_domain == "ai_assistant"
+            ):
+                raise NoStableComponentVersionError(
+                    f"{platform}/{data_domain}_{sub_domain}_export"
+                )
+            suffix = (
+                f"{data_domain}_{sub_domain}_export"
+                if sub_domain
+                else f"{data_domain}_export"
+            )
             return {"component_name": f"{platform}/{suffix}"}
 
     monkeypatch.setattr(
@@ -480,20 +527,28 @@ async def test_create_tasks_for_config_prunes_unsupported_subtypes_without_skipp
     ).scalar_one()
     config_execution_session.add_all(
         [
-            ShopAccountCapability(shop_account_id=shop.id, data_domain="products", enabled=True),
-            ShopAccountCapability(shop_account_id=shop.id, data_domain="analytics", enabled=True),
+            ShopAccountCapability(
+                shop_account_id=shop.id, data_domain="products", enabled=True
+            ),
+            ShopAccountCapability(
+                shop_account_id=shop.id, data_domain="analytics", enabled=True
+            ),
         ]
     )
     await config_execution_session.commit()
 
     config = (
-        await config_execution_session.execute(select(CollectionConfig).where(CollectionConfig.id == config_id))
+        await config_execution_session.execute(
+            select(CollectionConfig).where(CollectionConfig.id == config_id)
+        )
     ).scalar_one()
     config.platform = "tiktok"
     await config_execution_session.commit()
 
     scope_result = await config_execution_session.execute(
-        select(CollectionConfigShopScope).where(CollectionConfigShopScope.config_id == config_id)
+        select(CollectionConfigShopScope).where(
+            CollectionConfigShopScope.config_id == config_id
+        )
     )
     scopes = scope_result.scalars().all()
     for scope in scopes:
@@ -526,14 +581,20 @@ async def test_create_tasks_for_config_keeps_background_launch_disabled(
     monkeypatch,
 ):
     config_id = await _seed_config(config_execution_session)
-    config_run_id = await _seed_config_run(config_execution_session, config_id=config_id)
+    config_run_id = await _seed_config_run(
+        config_execution_session, config_id=config_id
+    )
 
     class _FakeResolver:
         async def resolve_login_component(self, platform):
             return {"component_name": f"{platform}/login"}
 
         async def resolve_export_component(self, *, platform, data_domain, sub_domain):
-            suffix = f"{data_domain}_{sub_domain}_export" if sub_domain else f"{data_domain}_export"
+            suffix = (
+                f"{data_domain}_{sub_domain}_export"
+                if sub_domain
+                else f"{data_domain}_export"
+            )
             return {"component_name": f"{platform}/{suffix}"}
 
     monkeypatch.setattr(

@@ -6,7 +6,9 @@ import pytest_asyncio
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from backend.services.cloud_sync_admin_command_service import CloudSyncAdminCommandService
+from backend.services.cloud_sync_admin_command_service import (
+    CloudSyncAdminCommandService,
+)
 from backend.services.task_center_sync_service import TaskCenterSyncService
 from backend.services.cloud_b_class_auto_sync_factory import _build_checkpoint_scope_key
 from modules.core.db import Base
@@ -43,7 +45,9 @@ async def cloud_sync_sqlite_session():
     async with engine.begin() as conn:
         for schema_name in ("core", "a_class", "b_class", "c_class", "finance"):
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
-        await conn.execute(text("CREATE TABLE core.dim_users (user_id INTEGER PRIMARY KEY)"))
+        await conn.execute(
+            text("CREATE TABLE core.dim_users (user_id INTEGER PRIMARY KEY)")
+        )
         await conn.run_sync(
             Base.metadata.create_all,
             tables=[
@@ -71,7 +75,9 @@ async def test_command_service_rejects_invalid_table_name(cloud_sync_sqlite_sess
 
 
 @pytest.mark.asyncio
-async def test_command_service_trigger_sync_creates_pending_task(cloud_sync_sqlite_session):
+async def test_command_service_trigger_sync_creates_pending_task(
+    cloud_sync_sqlite_session,
+):
     service = CloudSyncAdminCommandService(cloud_sync_sqlite_session)
 
     payload = await service.trigger_sync("fact_tiktok_orders_daily")
@@ -112,7 +118,9 @@ async def test_command_service_can_retry_and_cancel_task(cloud_sync_sqlite_sessi
 
 
 @pytest.mark.asyncio
-async def test_command_service_dry_run_executes_sync_table(monkeypatch, cloud_sync_sqlite_session):
+async def test_command_service_dry_run_executes_sync_table(
+    monkeypatch, cloud_sync_sqlite_session
+):
     class FakeSyncService:
         async def sync_table(self, table_name: str, batch_size: int = 1000):
             return {
@@ -139,7 +147,9 @@ async def test_command_service_dry_run_executes_sync_table(monkeypatch, cloud_sy
 
 
 @pytest.mark.asyncio
-async def test_command_service_repair_checkpoint_resets_checkpoint(cloud_sync_sqlite_session):
+async def test_command_service_repair_checkpoint_resets_checkpoint(
+    cloud_sync_sqlite_session,
+):
     current_scope = _build_checkpoint_scope_key(
         os.getenv("CLOUD_DATABASE_URL"),
         dry_run=False,
@@ -157,7 +167,9 @@ async def test_command_service_repair_checkpoint_resets_checkpoint(cloud_sync_sq
     service = CloudSyncAdminCommandService(cloud_sync_sqlite_session)
     payload = await service.repair_checkpoint("fact_shopee_orders_daily")
 
-    refreshed = await cloud_sync_sqlite_session.get(CloudBClassSyncCheckpoint, checkpoint.id)
+    refreshed = await cloud_sync_sqlite_session.get(
+        CloudBClassSyncCheckpoint, checkpoint.id
+    )
 
     assert payload["status"] == "repaired"
     assert refreshed.last_source_id is None
@@ -222,7 +234,9 @@ async def test_command_service_repair_checkpoint_only_resets_current_scope(
 
 
 @pytest.mark.asyncio
-async def test_command_service_refresh_projection_executes_refresh_plan(monkeypatch, cloud_sync_sqlite_session):
+async def test_command_service_refresh_projection_executes_refresh_plan(
+    monkeypatch, cloud_sync_sqlite_session
+):
     calls = {}
 
     async def fake_bootstrap_dashboard_assets_if_needed(db, wait_for_lock, module):
@@ -233,7 +247,16 @@ async def test_command_service_refresh_projection_executes_refresh_plan(monkeypa
         }
         return {"ready": True}
 
-    async def fake_execute_refresh_plan(db, targets, pipeline_name, trigger_source, context, continue_on_error, max_attempts, retry_backoff_seconds):
+    async def fake_execute_refresh_plan(
+        db,
+        targets,
+        pipeline_name,
+        trigger_source,
+        context,
+        continue_on_error,
+        max_attempts,
+        retry_backoff_seconds,
+    ):
         calls["targets"] = targets
         calls["pipeline_name"] = pipeline_name
         calls["trigger_source"] = trigger_source
@@ -262,7 +285,9 @@ async def test_command_service_refresh_projection_executes_refresh_plan(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_command_service_sync_now_returns_submitted_response(monkeypatch, cloud_sync_sqlite_session):
+async def test_command_service_sync_now_returns_submitted_response(
+    monkeypatch, cloud_sync_sqlite_session
+):
     service = CloudSyncAdminCommandService(cloud_sync_sqlite_session)
 
     payload = await service.sync_now()
@@ -272,7 +297,9 @@ async def test_command_service_sync_now_returns_submitted_response(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_command_service_sync_now_only_enqueues_tables_ahead_of_checkpoint(cloud_sync_sqlite_session):
+async def test_command_service_sync_now_only_enqueues_tables_ahead_of_checkpoint(
+    cloud_sync_sqlite_session,
+):
     current_scope = _build_checkpoint_scope_key(
         os.getenv("CLOUD_DATABASE_URL"),
         dry_run=False,
@@ -318,14 +345,18 @@ async def test_command_service_sync_now_only_enqueues_tables_ahead_of_checkpoint
                 table_schema=current_scope,
                 table_name="fact_sync_due",
                 last_source_id=1,
-                last_ingest_timestamp=datetime(2026, 4, 6, 10, 0, 0, tzinfo=timezone.utc),
+                last_ingest_timestamp=datetime(
+                    2026, 4, 6, 10, 0, 0, tzinfo=timezone.utc
+                ),
                 last_status="completed",
             ),
             CloudBClassSyncCheckpoint(
                 table_schema=current_scope,
                 table_name="fact_up_to_date",
                 last_source_id=1,
-                last_ingest_timestamp=datetime(2026, 4, 6, 9, 0, 0, tzinfo=timezone.utc),
+                last_ingest_timestamp=datetime(
+                    2026, 4, 6, 9, 0, 0, tzinfo=timezone.utc
+                ),
                 last_status="completed",
             ),
         ]
@@ -336,11 +367,21 @@ async def test_command_service_sync_now_only_enqueues_tables_ahead_of_checkpoint
     payload = await service.sync_now()
 
     tasks = (
-        await cloud_sync_sqlite_session.execute(
-            select(CloudBClassSyncTask).order_by(CloudBClassSyncTask.source_table_name.asc())
+        (
+            await cloud_sync_sqlite_session.execute(
+                select(CloudBClassSyncTask).order_by(
+                    CloudBClassSyncTask.source_table_name.asc()
+                )
+            )
         )
-    ).scalars().all()
-    runs = (await cloud_sync_sqlite_session.execute(select(CloudBClassSyncRun))).scalars().all()
+        .scalars()
+        .all()
+    )
+    runs = (
+        (await cloud_sync_sqlite_session.execute(select(CloudBClassSyncRun)))
+        .scalars()
+        .all()
+    )
 
     assert payload["status"] == "submitted"
     assert payload["metadata"]["checked_table_count"] == 2
@@ -386,14 +427,18 @@ async def test_command_service_sync_now_uses_current_scope_for_catch_up(
                 table_schema="cloud_sync:09b8b3953565ee58",
                 table_name="fact_scope_sensitive",
                 last_source_id=2,
-                last_ingest_timestamp=datetime(2026, 4, 6, 11, 0, 0, tzinfo=timezone.utc),
+                last_ingest_timestamp=datetime(
+                    2026, 4, 6, 11, 0, 0, tzinfo=timezone.utc
+                ),
                 last_status="completed",
             ),
             CloudBClassSyncCheckpoint(
                 table_schema="cloud_sync:342f438665dd617a",
                 table_name="fact_scope_sensitive",
                 last_source_id=1,
-                last_ingest_timestamp=datetime(2026, 4, 6, 10, 0, 0, tzinfo=timezone.utc),
+                last_ingest_timestamp=datetime(
+                    2026, 4, 6, 10, 0, 0, tzinfo=timezone.utc
+                ),
                 last_status="completed",
             ),
         ]
@@ -403,12 +448,16 @@ async def test_command_service_sync_now_uses_current_scope_for_catch_up(
     service = CloudSyncAdminCommandService(cloud_sync_sqlite_session)
     payload = await service.sync_now()
     tasks = (
-        await cloud_sync_sqlite_session.execute(
-            select(CloudBClassSyncTask).where(
-                CloudBClassSyncTask.source_table_name == "fact_scope_sensitive"
+        (
+            await cloud_sync_sqlite_session.execute(
+                select(CloudBClassSyncTask).where(
+                    CloudBClassSyncTask.source_table_name == "fact_scope_sensitive"
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     assert payload["status"] == "submitted"
     assert payload["metadata"]["enqueued_table_count"] == 1
@@ -417,7 +466,9 @@ async def test_command_service_sync_now_uses_current_scope_for_catch_up(
 
 
 @pytest.mark.asyncio
-async def test_command_service_retry_failed_only_retries_failed_and_partial_success(cloud_sync_sqlite_session):
+async def test_command_service_retry_failed_only_retries_failed_and_partial_success(
+    cloud_sync_sqlite_session,
+):
     failed_task = CloudBClassSyncTask(
         job_id="job-failed",
         dedupe_key="fact_shopee_orders_daily",
@@ -513,12 +564,17 @@ async def test_command_service_recover_stale_tasks_handles_current_and_legacy_sc
     assert current_task.status == "pending"
     assert current_task.claimed_by is None
     assert current_task.lease_expires_at is None
-    assert current_task.metadata_json["recovery_reason"] == "stale_running_recovered_on_demand"
+    assert (
+        current_task.metadata_json["recovery_reason"]
+        == "stale_running_recovered_on_demand"
+    )
 
     assert legacy_task.status == "failed"
     assert legacy_task.claimed_by is None
     assert legacy_task.lease_expires_at is None
-    assert legacy_task.metadata_json["recovery_reason"] == "legacy_scope_stale_recovered"
+    assert (
+        legacy_task.metadata_json["recovery_reason"] == "legacy_scope_stale_recovered"
+    )
     assert legacy_task.metadata_json["original_checkpoint_scope"] == other_scope
     assert legacy_task.metadata_json["recovered_by_scope"] == current_scope
     assert legacy_task.error_code == "legacy_scope_stale_recovered"
@@ -552,7 +608,11 @@ async def test_task_center_sync_service_can_project_cloud_sync_task_state(
         last_error="boom",
         error_code="cloud_db_connection_closed",
         finished_at=None,
-        metadata_json={"checkpoint_scope": _build_checkpoint_scope_key(os.getenv("CLOUD_DATABASE_URL"), dry_run=False)},
+        metadata_json={
+            "checkpoint_scope": _build_checkpoint_scope_key(
+                os.getenv("CLOUD_DATABASE_URL"), dry_run=False
+            )
+        },
     )
     cloud_sync_sqlite_session.add(task)
     await cloud_sync_sqlite_session.commit()
@@ -572,7 +632,10 @@ async def test_task_center_sync_service_can_project_cloud_sync_task_state(
     assert mirrored.status == "running"
     assert mirrored.claimed_by == "worker-1"
     assert mirrored.error_summary == "boom"
-    assert mirrored.details_json["cloud_sync"]["error_code"] == "cloud_db_connection_closed"
+    assert (
+        mirrored.details_json["cloud_sync"]["error_code"]
+        == "cloud_db_connection_closed"
+    )
 
 
 @pytest.mark.asyncio
@@ -605,7 +668,9 @@ async def test_command_service_retry_task_updates_task_center_projection(
 
     mirrored = (
         await cloud_sync_sqlite_session.execute(
-            select(TaskCenterTask).where(TaskCenterTask.task_id == "job-retry-projection")
+            select(TaskCenterTask).where(
+                TaskCenterTask.task_id == "job-retry-projection"
+            )
         )
     ).scalar_one()
 
@@ -618,7 +683,9 @@ async def test_command_service_retry_task_updates_task_center_projection(
 
 
 @pytest.mark.asyncio
-async def test_command_service_update_settings_returns_pause_state(cloud_sync_sqlite_session):
+async def test_command_service_update_settings_returns_pause_state(
+    cloud_sync_sqlite_session,
+):
     service = CloudSyncAdminCommandService(cloud_sync_sqlite_session)
 
     payload = await service.update_settings(enabled=False)
@@ -627,16 +694,24 @@ async def test_command_service_update_settings_returns_pause_state(cloud_sync_sq
     assert payload["metadata"]["auto_sync_enabled"] is False
 
     stored = (
-        await cloud_sync_sqlite_session.execute(
-            select(SystemConfig).where(SystemConfig.config_key == "cloud_sync_auto_sync_enabled")
+        (
+            await cloud_sync_sqlite_session.execute(
+                select(SystemConfig).where(
+                    SystemConfig.config_key == "cloud_sync_auto_sync_enabled"
+                )
+            )
         )
-    ).scalars().one()
+        .scalars()
+        .one()
+    )
 
     assert stored.config_value == "false"
 
 
 @pytest.mark.asyncio
-async def test_command_service_sync_now_empty_database_is_safe(cloud_sync_sqlite_session):
+async def test_command_service_sync_now_empty_database_is_safe(
+    cloud_sync_sqlite_session,
+):
     service = CloudSyncAdminCommandService(cloud_sync_sqlite_session)
 
     payload = await service.sync_now()
@@ -683,14 +758,18 @@ async def test_command_service_sync_now_only_considers_current_cloud_scope(
                 table_schema=current_scope,
                 table_name="fact_scope_sensitive",
                 last_source_id=1,
-                last_ingest_timestamp=datetime(2026, 4, 6, 10, 0, 0, tzinfo=timezone.utc),
+                last_ingest_timestamp=datetime(
+                    2026, 4, 6, 10, 0, 0, tzinfo=timezone.utc
+                ),
                 last_status="completed",
             ),
             CloudBClassSyncCheckpoint(
                 table_schema=other_scope,
                 table_name="fact_scope_sensitive",
                 last_source_id=2,
-                last_ingest_timestamp=datetime(2026, 4, 6, 11, 0, 0, tzinfo=timezone.utc),
+                last_ingest_timestamp=datetime(
+                    2026, 4, 6, 11, 0, 0, tzinfo=timezone.utc
+                ),
                 last_status="completed",
             ),
         ]
@@ -701,12 +780,16 @@ async def test_command_service_sync_now_only_considers_current_cloud_scope(
     payload = await service.sync_now()
 
     tasks = (
-        await cloud_sync_sqlite_session.execute(
-            select(CloudBClassSyncTask).where(
-                CloudBClassSyncTask.source_table_name == "fact_scope_sensitive"
+        (
+            await cloud_sync_sqlite_session.execute(
+                select(CloudBClassSyncTask).where(
+                    CloudBClassSyncTask.source_table_name == "fact_scope_sensitive"
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     assert payload["metadata"]["checked_table_count"] == 1
     assert payload["metadata"]["enqueued_table_count"] == 1

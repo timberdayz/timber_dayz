@@ -65,7 +65,9 @@ def test_caliber_variants_never_share_one_standard_field():
         paid = infer_semantic_key_for_domain("products", paid_header)
         placed = infer_semantic_key_for_domain("products", placed_header)
         assert paid and placed
-        assert paid != placed, f"{paid_header} 与 {placed_header} 落到了同一个字段 {paid}"
+        assert (
+            paid != placed
+        ), f"{paid_header} 与 {placed_header} 落到了同一个字段 {paid}"
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +94,10 @@ def test_caliber_history_is_platform_scoped():
     )
 
     raw = "销售额（已确定订单）"
-    assert apply_caliber_history(normalize_semantic_alias(raw), "shopee") == "销售额(已下单)"
+    assert (
+        apply_caliber_history(normalize_semantic_alias(raw), "shopee")
+        == "销售额(已下单)"
+    )
     assert apply_caliber_history(normalize_semantic_alias(raw), "tiktok") == (
         normalize_semantic_alias(raw)
     )
@@ -196,6 +201,8 @@ def test_every_standard_field_has_a_description():
     )
 
     missing = [
-        key for key in SEMANTIC_FIELD_DEFINITIONS if key not in SEMANTIC_FIELD_DESCRIPTIONS
+        key
+        for key in SEMANTIC_FIELD_DEFINITIONS
+        if key not in SEMANTIC_FIELD_DESCRIPTIONS
     ]
     assert not missing, f"缺说明文案的标准字段: {missing}"

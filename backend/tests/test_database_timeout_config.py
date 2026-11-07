@@ -29,7 +29,9 @@ def _frontend_timeout_ms(name: str) -> int:
 
 def test_database_layer_reads_statement_timeout_from_settings():
     """连接池级 statement_timeout 必须读配置，且不再硬编码 120000。"""
-    text = Path("backend/models/database.py").read_text(encoding="utf-8", errors="replace")
+    text = Path("backend/models/database.py").read_text(
+        encoding="utf-8", errors="replace"
+    )
 
     assert "statement_timeout=120000" not in text
     assert 'cursor.execute("SET statement_timeout TO 120000")' not in text
@@ -41,7 +43,9 @@ def test_database_layer_reads_statement_timeout_from_settings():
 
 def test_request_scope_uses_set_local_not_pool_wide_change():
     """请求级收紧必须用 SET LOCAL（事务内局部），不能改连接池默认值。"""
-    text = Path("backend/models/database.py").read_text(encoding="utf-8", errors="replace")
+    text = Path("backend/models/database.py").read_text(
+        encoding="utf-8", errors="replace"
+    )
 
     assert "SET LOCAL statement_timeout" in text
     assert "resolve_request_statement_timeout_ms" in text
@@ -56,10 +60,7 @@ def test_statement_timeout_defaults_are_below_frontend_budgets():
     #   DB 保持 60s 不砍 ⇒ DB 60s < 前端 120s < nginx 300s）
     assert settings.DB_STATEMENT_TIMEOUT_MS < _frontend_timeout_ms("dashboard")
     # 普通接口：前端默认 30s
-    assert (
-        settings.DB_REQUEST_STATEMENT_TIMEOUT_MS
-        < _frontend_timeout_ms("default")
-    )
+    assert settings.DB_REQUEST_STATEMENT_TIMEOUT_MS < _frontend_timeout_ms("default")
     # 每条按路径的预算都必须小于它对应的前端超时
     frontend_budgets = {
         "/governance/detailed-coverage": ("governance", 120_000),
@@ -72,7 +73,9 @@ def test_statement_timeout_defaults_are_below_frontend_budgets():
     }
     for fragment, (frontend_name, frontend_budget) in frontend_budgets.items():
         budget = settings.REQUEST_STATEMENT_TIMEOUT_MS[fragment]
-        assert budget < frontend_budget, f"{fragment} 的 DB 预算 {budget} >= 前端 {frontend_budget}"
+        assert (
+            budget < frontend_budget
+        ), f"{fragment} 的 DB 预算 {budget} >= 前端 {frontend_budget}"
         assert _frontend_timeout_ms(frontend_name) == frontend_budget
     # 连接池级默认仍保留 120s：Celery/后台批量采集导入不经过请求级预算，
     # 把池默认值砍小会打断这些长事务。

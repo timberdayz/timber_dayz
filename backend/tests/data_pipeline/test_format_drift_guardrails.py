@@ -263,7 +263,10 @@ def test_format_drift_is_registered_in_status_semantics():
         TEMPLATE_STATUS_TO_GOVERNANCE[TEMPLATE_STATUS_FORMAT_DRIFT]
         == GOVERNANCE_STATUS_FORMAT_DRIFT
     )
-    assert governance_status_for(TEMPLATE_STATUS_FORMAT_DRIFT) == GOVERNANCE_STATUS_FORMAT_DRIFT
+    assert (
+        governance_status_for(TEMPLATE_STATUS_FORMAT_DRIFT)
+        == GOVERNANCE_STATUS_FORMAT_DRIFT
+    )
     # 值形态漂移 ⇒ 继续入库只会整份失败 ⇒ 阻断
     assert is_blocking_governance_status(GOVERNANCE_STATUS_FORMAT_DRIFT) is True
     assert GOVERNANCE_STATUS_FORMAT_DRIFT in BLOCKING_GOVERNANCE_STATUSES
@@ -293,7 +296,9 @@ def test_blocking_header_change_treats_format_drift_as_blocking():
 
 
 @pytest.mark.asyncio
-async def test_detect_header_changes_flags_format_drift_on_unchanged_header(status_session_factory):
+async def test_detect_header_changes_flags_format_drift_on_unchanged_header(
+    status_session_factory,
+):
     from backend.services.template_matcher import TemplateMatcher
 
     now = datetime.now(timezone.utc)
@@ -338,7 +343,9 @@ async def test_detect_header_changes_flags_format_drift_on_unchanged_header(stat
 
 
 @pytest.mark.asyncio
-async def test_detect_header_changes_reports_no_drift_when_format_matches(status_session_factory):
+async def test_detect_header_changes_reports_no_drift_when_format_matches(
+    status_session_factory,
+):
     from backend.services.template_matcher import TemplateMatcher
 
     now = datetime.now(timezone.utc)
@@ -416,7 +423,9 @@ def test_pick_by_sample_rows_passes_period_to_auto_rules():
 
     now = datetime.now(timezone.utc)
 
-    def _template(template_id: int, name: str, date_format: str) -> FieldMappingTemplate:
+    def _template(
+        template_id: int, name: str, date_format: str
+    ) -> FieldMappingTemplate:
         return FieldMappingTemplate(
             id=template_id,
             platform="shopee",

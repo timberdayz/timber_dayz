@@ -8,9 +8,9 @@ def test_expense_schema_requires_platform_code():
 
 
 def test_expense_router_reads_and_returns_platform_code():
-    source = Path(
-        "backend/domains/business/routers/expense_management.py"
-    ).read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/expense_management.py").read_text(
+        encoding="utf-8"
+    )
 
     assert '"platform_code"' in source
     assert '"platform_code" as platform_code' in source
@@ -18,9 +18,9 @@ def test_expense_router_reads_and_returns_platform_code():
 
 
 def test_expense_router_limits_shop_scope_to_operating_store():
-    source = Path(
-        "backend/domains/business/routers/expense_management.py"
-    ).read_text(encoding="utf-8")
+    source = Path("backend/domains/business/routers/expense_management.py").read_text(
+        encoding="utf-8"
+    )
 
     assert 'ShopAccount.business_role == "operating_store"' in source
 
@@ -34,7 +34,10 @@ def test_expense_frontend_delete_copy_and_blank_save_guard_exist():
     assert "删除后会保留一条空白编辑行，可重新保存恢复" in source
     assert "空白费用记录无需保存，请直接保留空白行" in source
     assert "buildExpenseRowKey" in source
-    assert "platform_code: shop.platform_code" in source or "row.platform_code = shop.platform_code" in source
+    assert (
+        "platform_code: shop.platform_code" in source
+        or "row.platform_code = shop.platform_code" in source
+    )
     assert 'prop="labor_cost"' in source
     # 人力费用已改为「系统人力成本」（薪资链路投影），前端只读；
     # 保存时系统口径的行必须回传 0，避免与投影行双算。

@@ -110,7 +110,6 @@ class _FakeTaskCenterService:
         return {}
 
 
-
 @pytest.mark.asyncio
 async def test_resume_task_updates_status_to_verification_submitted():
     task = _make_task()
@@ -211,8 +210,14 @@ async def test_cancel_task_allows_verification_required_status(monkeypatch):
     mirror_log = AsyncMock()
     delete_task_center = AsyncMock()
 
-    monkeypatch.setattr("backend.domains.collection.routers.collection_tasks._mirror_collection_task", mirror_task)
-    monkeypatch.setattr("backend.domains.collection.routers.collection_tasks._mirror_collection_task_log", mirror_log)
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task",
+        mirror_task,
+    )
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task_log",
+        mirror_log,
+    )
 
     class _TaskCenterService:
         def __init__(self, _db):
@@ -221,7 +226,10 @@ async def test_cancel_task_allows_verification_required_status(monkeypatch):
         async def delete_task(self, task_id):
             await delete_task_center(task_id)
 
-    monkeypatch.setattr("backend.domains.collection.routers.collection_tasks.TaskCenterService", _TaskCenterService)
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.collection_tasks.TaskCenterService",
+        _TaskCenterService,
+    )
 
     body = await cancel_or_delete_task(task_id="task-1", db=db)
 
@@ -282,7 +290,9 @@ async def test_on_verification_required_broadcasts_websocket_event(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_verification_required_marks_manual_continue_types_as_manual_intervention(monkeypatch):
+async def test_on_verification_required_marks_manual_continue_types_as_manual_intervention(
+    monkeypatch,
+):
     from backend.routers.collection_tasks import _on_verification_required
 
     task = _make_task(verification_type=None, status="running")
@@ -303,7 +313,9 @@ async def test_on_verification_required_marks_manual_continue_types_as_manual_in
             return False
 
     broadcast = AsyncMock()
-    monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _SessionManager())
+    monkeypatch.setattr(
+        "backend.models.database.AsyncSessionLocal", lambda: _SessionManager()
+    )
     monkeypatch.setattr(
         "backend.domains.collection.routers.collection_tasks.connection_manager.send_verification_required",
         broadcast,
@@ -370,8 +382,13 @@ async def test_on_verification_required_stops_waiting_when_task_cancelled(monkey
     mirror_task = AsyncMock()
     broadcast = AsyncMock()
 
-    monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _SessionManager())
-    monkeypatch.setattr("backend.domains.collection.routers.collection_tasks._mirror_collection_task", mirror_task)
+    monkeypatch.setattr(
+        "backend.models.database.AsyncSessionLocal", lambda: _SessionManager()
+    )
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task",
+        mirror_task,
+    )
     monkeypatch.setattr(
         "backend.domains.collection.routers.collection_tasks.connection_manager.send_verification_required",
         broadcast,
@@ -384,8 +401,14 @@ async def test_on_verification_required_stops_waiting_when_task_cancelled(monkey
             get_running_loop=lambda: fake_loop,
         ),
     )
-    monkeypatch.setattr("backend.domains.collection.routers.collection_tasks.VERIFICATION_WAIT_TIMEOUT", 0.3)
-    monkeypatch.setattr("backend.domains.collection.routers.collection_tasks.VERIFICATION_POLL_INTERVAL", 0.1)
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.collection_tasks.VERIFICATION_WAIT_TIMEOUT",
+        0.3,
+    )
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.collection_tasks.VERIFICATION_POLL_INTERVAL",
+        0.1,
+    )
 
     app = SimpleNamespace(state=SimpleNamespace(redis=redis))
     value = await _on_verification_required(
@@ -400,8 +423,12 @@ async def test_on_verification_required_stops_waiting_when_task_cancelled(monkey
 
 
 @pytest.mark.asyncio
-async def test_get_task_screenshot_resolves_relative_path_from_project_root(tmp_path, monkeypatch):
-    from backend.domains.collection.routers import collection_tasks as domain_collection_tasks
+async def test_get_task_screenshot_resolves_relative_path_from_project_root(
+    tmp_path, monkeypatch
+):
+    from backend.domains.collection.routers import (
+        collection_tasks as domain_collection_tasks,
+    )
 
     task = _make_task(
         verification_screenshot="temp/screenshots/task-1/captcha.png",
@@ -416,7 +443,14 @@ async def test_get_task_screenshot_resolves_relative_path_from_project_root(tmp_
     screenshot_path.parent.mkdir(parents=True, exist_ok=True)
     screenshot_path.write_bytes(b"fake-image")
 
-    fake_router_file = project_root / "backend" / "domains" / "collection" / "routers" / "collection_tasks.py"
+    fake_router_file = (
+        project_root
+        / "backend"
+        / "domains"
+        / "collection"
+        / "routers"
+        / "collection_tasks.py"
+    )
     fake_router_file.parent.mkdir(parents=True, exist_ok=True)
     fake_router_file.write_text("# stub", encoding="utf-8")
 
@@ -431,8 +465,12 @@ async def test_get_task_screenshot_resolves_relative_path_from_project_root(tmp_
 
 
 @pytest.mark.asyncio
-async def test_persist_collection_task_result_clears_verification_fields_on_terminal_status(monkeypatch):
-    from backend.domains.collection.routers.collection_tasks import _persist_collection_task_result
+async def test_persist_collection_task_result_clears_verification_fields_on_terminal_status(
+    monkeypatch,
+):
+    from backend.domains.collection.routers.collection_tasks import (
+        _persist_collection_task_result,
+    )
 
     task = _make_task(
         status="verification_required",
@@ -479,7 +517,9 @@ async def test_persist_collection_task_result_clears_verification_fields_on_term
 
 @pytest.mark.asyncio
 async def test_persist_collection_task_result_preserves_cancelled_status(monkeypatch):
-    from backend.domains.collection.routers.collection_tasks import _persist_collection_task_result
+    from backend.domains.collection.routers.collection_tasks import (
+        _persist_collection_task_result,
+    )
     from modules.core.db import CollectionTask
     import backend.models.database as database_module
 
@@ -519,7 +559,9 @@ async def test_persist_collection_task_result_preserves_cancelled_status(monkeyp
     original_async_session_local = database_module.AsyncSessionLocal
     database_module.AsyncSessionLocal = lambda: _DbSessionManager()
     try:
-        persisted = await _persist_collection_task_result("task-cancelled", final_result)
+        persisted = await _persist_collection_task_result(
+            "task-cancelled", final_result
+        )
     finally:
         database_module.AsyncSessionLocal = original_async_session_local
 

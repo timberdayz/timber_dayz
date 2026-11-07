@@ -82,7 +82,9 @@ from backend.services.template_save_readiness_service import (
     normalize_deduplication_fields_for_template as service_normalize_deduplication_fields_for_template,
     validate_deduplication_fields_against_bindings as service_validate_deduplication_fields_against_bindings,
 )
-from backend.services.template_semantic_coverage_checker import TemplateSemanticCoverageChecker
+from backend.services.template_semantic_coverage_checker import (
+    TemplateSemanticCoverageChecker,
+)
 from backend.services.template_parse_rules_service import validate_declared_date_formats
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
@@ -139,7 +141,9 @@ def _normalize_dimension_value(value: Any) -> Optional[str]:
     return text or None
 
 
-def _binding_lookup_by_source(header_bindings: list[dict[str, Any]] | None) -> dict[str, str]:
+def _binding_lookup_by_source(
+    header_bindings: list[dict[str, Any]] | None,
+) -> dict[str, str]:
     """列名 → 语义键 的映射(只认**显式确认**的绑定)。
 
     [*] 为什么必须是「显式确认」而不是「推断出来的语义键也算确认」
@@ -171,7 +175,9 @@ def _binding_lookup_by_source(header_bindings: list[dict[str, Any]] | None) -> d
         ):
             continue
         semantic_key = normalize_semantic_key(
-            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+            binding.get("semantic_key")
+            or binding.get("semantic_role")
+            or binding.get("display_name")
         )
         if not semantic_key or not is_canonical_semantic_key(semantic_key):
             continue
@@ -223,9 +229,7 @@ def _hash_field_pairs(
     # [*] 用模板的表头列构造一个「只有列名、没有值」的行:
     #     resolve_semantic_value 返回 (值, 命中的列名), 值我们不需要, 列名才是比对对象。
     row = {
-        str(column): None
-        for column in (header_columns or [])
-        if str(column).strip()
+        str(column): None for column in (header_columns or []) if str(column).strip()
     }
     pairs: dict[str, str] = {}
     for field in fields or []:
@@ -299,11 +303,7 @@ def _compare_hash_field_pairs(
     for semantic_key in sorted(comparable_existing_keys & current_keys):
         family_raw_name = existing_pairs.get(semantic_key)
         current_raw_name = current_pairs.get(semantic_key)
-        if (
-            family_raw_name
-            and current_raw_name
-            and family_raw_name != current_raw_name
-        ):
+        if family_raw_name and current_raw_name and family_raw_name != current_raw_name:
             source_field_changes.append(
                 {
                     "semantic_key": semantic_key,
@@ -314,9 +314,7 @@ def _compare_hash_field_pairs(
 
     semantic_hash_key_changes = [
         {"change": "missing", "semantic_key": key} for key in missing_keys
-    ] + [
-        {"change": "added", "semantic_key": key} for key in extra_keys
-    ]
+    ] + [{"change": "added", "semantic_key": key} for key in extra_keys]
 
     return {
         "missing_keys": missing_keys,
@@ -349,7 +347,9 @@ def _family_hash_change_payload(
     if comparison["semantic_hash_key_changes"]:
         suggested_action = (
             "migrate_family_hash_keys"
-            if data_domain == "products" and "product_name" in comparable_existing_keys and "product_id" in current_keys
+            if data_domain == "products"
+            and "product_name" in comparable_existing_keys
+            and "product_id" in current_keys
             else "create_new_family"
         )
     return {
@@ -409,7 +409,9 @@ async def _load_file_update_preview(
     if not file_exists:
         raise ValueError(f"文件不存在: {catalog_file.file_path}")
 
-    df = await loop.run_in_executor(None, ExcelParser.read_excel, file_path, header_row, 50)
+    df = await loop.run_in_executor(
+        None, ExcelParser.read_excel, file_path, header_row, 50
+    )
     df.columns = [str(col).strip() for col in df.columns]
     df = df.dropna(how="all").fillna("")
 
@@ -466,7 +468,9 @@ async def _load_file_update_summary(
         raise ValueError(f"鏂囦欢涓嶅瓨鍦? {catalog_file.file_path}")
 
     # First-paint only needs headers plus one sample row for lightweight semantic hints.
-    df = await loop.run_in_executor(None, ExcelParser.read_excel, file_path, header_row, 1)
+    df = await loop.run_in_executor(
+        None, ExcelParser.read_excel, file_path, header_row, 1
+    )
     df.columns = [str(col).strip() for col in df.columns]
     df = df.dropna(how="all").fillna("")
 
@@ -516,9 +520,7 @@ def _filter_bindings_for_manual_review(
         review_status = resolve_binding_review_status(binding)
         has_conflict = bool(semantic_key and semantic_counts.get(semantic_key, 0) > 1)
         is_key_review_candidate = bool(
-            binding.get("required")
-            or binding.get("hash_eligible")
-            or semantic_key
+            binding.get("required") or binding.get("hash_eligible") or semantic_key
         )
         if review_status == "confirmed_non_semantic" and not has_conflict:
             continue
@@ -537,7 +539,9 @@ def _split_existing_deduplication_fields(
     granularity: Optional[str] = None,
     sub_domain: Optional[str] = None,
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
-    current_lookup = {str(field).strip().lower(): field for field in current_header_columns}
+    current_lookup = {
+        str(field).strip().lower(): field for field in current_header_columns
+    }
     current_bindings = list(current_header_bindings or [])
     existing_bindings = list(existing_header_bindings or [])
 
@@ -545,9 +549,15 @@ def _split_existing_deduplication_fields(
         if not binding:
             return None
         semantic_key = normalize_semantic_key(
-            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+            binding.get("semantic_key")
+            or binding.get("semantic_role")
+            or binding.get("display_name")
         )
-        return semantic_key if semantic_key and is_canonical_semantic_key(semantic_key) else None
+        return (
+            semantic_key
+            if semantic_key and is_canonical_semantic_key(semantic_key)
+            else None
+        )
 
     def binding_field_name(binding: dict[str, Any] | None) -> Optional[str]:
         if not binding:
@@ -587,7 +597,11 @@ def _split_existing_deduplication_fields(
         old_binding = existing_binding_by_raw.get(requested_key)
         old_semantic_key = binding_semantic_key(old_binding)
         normalized_semantic_key = normalize_semantic_key(requested_field)
-        if not old_semantic_key and normalized_semantic_key and is_canonical_semantic_key(normalized_semantic_key):
+        if (
+            not old_semantic_key
+            and normalized_semantic_key
+            and is_canonical_semantic_key(normalized_semantic_key)
+        ):
             old_semantic_key = normalized_semantic_key
 
         current_binding = current_binding_by_semantic.get(old_semantic_key or "")
@@ -662,6 +676,7 @@ def _normalize_template_headers_for_domain(
     # 货币/地区代码归一化只用于比较、匹配和同步入库，不用于模板本体。
     return list(header_columns)
 
+
 def _extract_standard_field(mapping_info: Any) -> Optional[str]:
     if isinstance(mapping_info, dict):
         standard_field = mapping_info.get("standard_field")
@@ -676,7 +691,9 @@ def _extract_standard_field(mapping_info: Any) -> Optional[str]:
     return None
 
 
-def _normalize_field_parse_rules(request_rules: list[Any] | None) -> list[dict[str, Any]]:
+def _normalize_field_parse_rules(
+    request_rules: list[Any] | None,
+) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for rule in request_rules or []:
         if hasattr(rule, "model_dump"):
@@ -764,7 +781,11 @@ def _normalize_header_bindings(
         display_name = str(requested.get("display_name", "")).strip() or raw_name
         semantic_key = requested.get("semantic_key")
         semantic_role = requested.get("semantic_role")
-        aliases = [str(alias).strip() for alias in requested.get("aliases", []) if str(alias).strip()]
+        aliases = [
+            str(alias).strip()
+            for alias in requested.get("aliases", [])
+            if str(alias).strip()
+        ]
         # 请求里显式带了的语义键优先（用户已经选过）；
         # 没带时按数据域推断列名，域内没命中再回落到全局别名表。
         requested_semantic_key = normalize_semantic_key(semantic_key)
@@ -779,7 +800,9 @@ def _normalize_header_bindings(
                 *aliases,
             )
         semantic_requirements = get_semantic_requirements(inferred_semantic_key)
-        requested_review_status = str(requested.get("semantic_review_status") or "").strip()
+        requested_review_status = str(
+            requested.get("semantic_review_status") or ""
+        ).strip()
         if requested_review_status not in {
             "pending",
             "confirmed_semantic",
@@ -798,11 +821,31 @@ def _normalize_header_bindings(
                 semantic_role = "metric_date"
             inferred_semantic_key = inferred_semantic_key or "metric_date"
             semantic_requirements = get_semantic_requirements(inferred_semantic_key)
-            aliases = list(dict.fromkeys([display_name, "日期", "统计日期", *aliases, *get_semantic_aliases(inferred_semantic_key)]))
+            aliases = list(
+                dict.fromkeys(
+                    [
+                        display_name,
+                        "日期",
+                        "统计日期",
+                        *aliases,
+                        *get_semantic_aliases(inferred_semantic_key),
+                    ]
+                )
+            )
         elif display_name != raw_name:
-            aliases = list(dict.fromkeys([display_name, *aliases, *get_semantic_aliases(inferred_semantic_key)]))
+            aliases = list(
+                dict.fromkeys(
+                    [
+                        display_name,
+                        *aliases,
+                        *get_semantic_aliases(inferred_semantic_key),
+                    ]
+                )
+            )
         elif inferred_semantic_key:
-            aliases = list(dict.fromkeys([*aliases, *get_semantic_aliases(inferred_semantic_key)]))
+            aliases = list(
+                dict.fromkeys([*aliases, *get_semantic_aliases(inferred_semantic_key)])
+            )
 
         if requested_review_status:
             semantic_review_status = requested_review_status
@@ -820,7 +863,9 @@ def _normalize_header_bindings(
         if requested_review_source not in {REVIEW_SOURCE_USER, REVIEW_SOURCE_INFERRED}:
             # 兼容旧前端：没有来源标记时，按请求里是否显式带了复核状态来区分。
             requested_review_source = (
-                REVIEW_SOURCE_USER if requested_review_status else REVIEW_SOURCE_INFERRED
+                REVIEW_SOURCE_USER
+                if requested_review_status
+                else REVIEW_SOURCE_INFERRED
             )
         semantic_review_source = requested_review_source
 
@@ -873,14 +918,20 @@ def _apply_mapping_semantics_to_header_bindings(
     for binding in header_bindings:
         raw_name = str(binding.get("raw_name", "")).strip()
         standard_field = mapping_by_raw.get(raw_name)
-        semantic_key = normalize_semantic_key(standard_field) if standard_field else None
+        semantic_key = (
+            normalize_semantic_key(standard_field) if standard_field else None
+        )
         if semantic_key and is_canonical_semantic_key(semantic_key):
             semantic_requirements = get_semantic_requirements(semantic_key)
             enriched.append(
                 {
                     **binding,
                     "semantic_key": semantic_key,
-                    "semantic_role": "metric_date" if semantic_key == "metric_date" else binding.get("semantic_role"),
+                    "semantic_role": (
+                        "metric_date"
+                        if semantic_key == "metric_date"
+                        else binding.get("semantic_role")
+                    ),
                     "aliases": list(
                         dict.fromkeys(
                             [
@@ -889,7 +940,9 @@ def _apply_mapping_semantics_to_header_bindings(
                             ]
                         )
                     ),
-                    "required": bool(binding.get("required") or semantic_requirements["required"]),
+                    "required": bool(
+                        binding.get("required") or semantic_requirements["required"]
+                    ),
                     "semantic_review_status": "confirmed_semantic",
                 }
             )
@@ -924,13 +977,19 @@ def _extract_semantic_key_sets(
 
     for field in deduplication_fields or []:
         semantic_key = normalize_semantic_key(field)
-        if semantic_key and is_canonical_semantic_key(semantic_key) and semantic_key not in seen_hash:
+        if (
+            semantic_key
+            and is_canonical_semantic_key(semantic_key)
+            and semantic_key not in seen_hash
+        ):
             seen_hash.add(semantic_key)
             hash_keys.append(semantic_key)
 
     for binding in header_bindings or []:
         semantic_key = normalize_semantic_key(
-            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+            binding.get("semantic_key")
+            or binding.get("semantic_role")
+            or binding.get("display_name")
         )
         if not semantic_key:
             continue
@@ -963,7 +1022,9 @@ def _recommended_deduplication_fields(
     current_lookup = {str(field).lower() for field in header_columns}
     binding_semantic_keys = {
         normalize_semantic_key(
-            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+            binding.get("semantic_key")
+            or binding.get("semantic_role")
+            or binding.get("display_name")
         )
         for binding in (header_bindings or [])
     }
@@ -974,7 +1035,10 @@ def _recommended_deduplication_fields(
         semantic_key = normalize_semantic_key(field)
         if not semantic_key:
             continue
-        if semantic_key in binding_semantic_keys or str(field).lower() in current_lookup:
+        if (
+            semantic_key in binding_semantic_keys
+            or str(field).lower() in current_lookup
+        ):
             if semantic_key in seen:
                 continue
             seen.add(semantic_key)
@@ -1024,7 +1088,9 @@ def _enrich_field_parse_rules(
                 enriched_rule["source_label"] = binding["display_name"]
             if binding.get("aliases") and not enriched_rule.get("source_aliases"):
                 enriched_rule["source_aliases"] = list(binding["aliases"])
-            if binding.get("semantic_role") and not enriched_rule.get("source_semantic_role"):
+            if binding.get("semantic_role") and not enriched_rule.get(
+                "source_semantic_role"
+            ):
                 enriched_rule["source_semantic_role"] = binding["semantic_role"]
         enriched.append(enriched_rule)
     return enriched
@@ -1068,8 +1134,13 @@ def _validate_field_parse_rules(
     for target_field, rule in rules_by_target.items():
         source_column = str(rule.get("source_column", "")).strip()
         if not source_column:
-            raise ValueError(f"field_parse_rules for {target_field} must define source_column")
-        if source_column not in FILE_DATE_SOURCE_COLUMNS and source_column.lower() not in header_lookup:
+            raise ValueError(
+                f"field_parse_rules for {target_field} must define source_column"
+            )
+        if (
+            source_column not in FILE_DATE_SOURCE_COLUMNS
+            and source_column.lower() not in header_lookup
+        ):
             raise ValueError(
                 f"field_parse_rules for {target_field} references unknown source_column: {source_column}"
             )
@@ -1080,9 +1151,15 @@ def _validate_field_parse_rules(
             )
         date_format = str(rule.get("date_format", "")).strip()
         if not date_format:
-            raise ValueError(f"field_parse_rules for {target_field} must define date_format")
+            raise ValueError(
+                f"field_parse_rules for {target_field} must define date_format"
+            )
         date_anchor = str(rule.get("date_anchor", "") or "").strip()
-        if date_anchor and date_anchor not in FILE_DATE_SOURCE_COLUMNS and date_anchor.lower() not in header_lookup:
+        if (
+            date_anchor
+            and date_anchor not in FILE_DATE_SOURCE_COLUMNS
+            and date_anchor.lower() not in header_lookup
+        ):
             raise ValueError(
                 f"field_parse_rules for {target_field} references unknown date_anchor: {date_anchor}"
             )
@@ -1096,16 +1173,20 @@ def _validate_field_parse_rules(
     if not date_targets:
         return
 
-    missing_targets = sorted(target for target in date_targets if target not in rules_by_target)
+    missing_targets = sorted(
+        target for target in date_targets if target not in rules_by_target
+    )
     if missing_targets:
         raise ValueError(
-            "field_parse_rules is missing required date targets: " + ", ".join(missing_targets)
+            "field_parse_rules is missing required date targets: "
+            + ", ".join(missing_targets)
         )
 
     for target_field in sorted(date_targets):
         if target_field not in rules_by_target:
             raise ValueError(
-                "field_parse_rules is missing required date targets: " + ", ".join(missing_targets)
+                "field_parse_rules is missing required date targets: "
+                + ", ".join(missing_targets)
             )
 
 
@@ -1149,8 +1230,10 @@ async def _validate_template_family_hash_keys(
             and_(
                 FieldMappingTemplate.platform == platform,
                 FieldMappingTemplate.data_domain == data_domain,
-                FieldMappingTemplate.granularity == _normalize_dimension_value(granularity),
-                FieldMappingTemplate.sub_domain == _normalize_dimension_value(sub_domain),
+                FieldMappingTemplate.granularity
+                == _normalize_dimension_value(granularity),
+                FieldMappingTemplate.sub_domain
+                == _normalize_dimension_value(sub_domain),
                 FieldMappingTemplate.account == _normalize_dimension_value(account),
             )
         )
@@ -1240,7 +1323,9 @@ async def _validate_template_family_hash_keys(
 
     details: list[str] = []
     if comparison["missing_keys"]:
-        details.append("缺少必要 hash 语义字段: " + ", ".join(comparison["missing_keys"]))
+        details.append(
+            "缺少必要 hash 语义字段: " + ", ".join(comparison["missing_keys"])
+        )
     if comparison["extra_keys"]:
         details.append("新增 hash 语义字段: " + ", ".join(comparison["extra_keys"]))
     if comparison["source_field_changes"]:
@@ -1357,7 +1442,9 @@ async def save_mapping_template(
 
         deduplication_fields = request.deduplication_fields
         if deduplication_fields is None:
-            from backend.services.deduplication_fields_config import get_default_deduplication_fields
+            from backend.services.deduplication_fields_config import (
+                get_default_deduplication_fields,
+            )
 
             deduplication_fields = get_default_deduplication_fields(
                 data_domain=request.data_domain,
@@ -1367,9 +1454,13 @@ async def save_mapping_template(
                 f"[Template] [WARN] 保存模板时未提供deduplication_fields, 使用默认配置: {deduplication_fields}"
             )
         elif not isinstance(deduplication_fields, list):
-            raise ValueError(f"deduplication_fields必须是列表, 当前值: {deduplication_fields}")
+            raise ValueError(
+                f"deduplication_fields必须是列表, 当前值: {deduplication_fields}"
+            )
         elif len(deduplication_fields) == 0:
-            raise ValueError("deduplication_fields不能为空列表, 至少需要选择1个核心字段")
+            raise ValueError(
+                "deduplication_fields不能为空列表, 至少需要选择1个核心字段"
+            )
         elif not all(isinstance(field, str) for field in deduplication_fields):
             raise ValueError("deduplication_fields列表中的元素必须是字符串")
         readiness = _build_template_save_readiness(
@@ -1393,7 +1484,9 @@ async def save_mapping_template(
                 if normalized_field:
                     found = any(
                         normalize_semantic_key(
-                            binding.get("semantic_key") or binding.get("semantic_role") or binding.get("display_name")
+                            binding.get("semantic_key")
+                            or binding.get("semantic_role")
+                            or binding.get("display_name")
                         )
                         == normalized_field
                         for binding in header_bindings
@@ -1535,7 +1628,9 @@ async def save_mapping_template(
             granularity=request.granularity,
             header_bindings=header_bindings,
         )
-        governance_checks = TemplateSemanticCoverageChecker(alias_registry).build_summary(
+        governance_checks = TemplateSemanticCoverageChecker(
+            alias_registry
+        ).build_summary(
             data_domain=request.data_domain,
             platform_code=request.platform,
             granularity=request.granularity,
@@ -1696,16 +1791,20 @@ async def get_template_update_context(
 
         template_header_columns = template.header_columns or []
         template_deduplication_fields = template.deduplication_fields or []
-        effective_header_row = header_row if header_row is not None else (template.header_row or 0)
+        effective_header_row = (
+            header_row if header_row is not None else (template.header_row or 0)
+        )
         normalized_template_bindings = _normalize_header_bindings(
             template.header_bindings,
             template_header_columns,
             {},
             data_domain=template.data_domain,
         )
-        required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
-            template_deduplication_fields,
-            normalized_template_bindings,
+        required_semantic_keys, hash_participating_semantic_keys = (
+            _extract_semantic_key_sets(
+                template_deduplication_fields,
+                normalized_template_bindings,
+            )
         )
         response_data: Dict[str, Any] = {
             "resolved_object_type": "template_update",
@@ -1773,14 +1872,16 @@ async def get_template_update_context(
             raise ValueError("file_id is required when mode is with-sample")
 
         if mode == "core-only":
-            available_fields, missing_fields, field_matches = _split_existing_deduplication_fields(
-                template_deduplication_fields,
-                template_header_columns,
-                normalized_template_bindings,
-                existing_header_bindings=normalized_template_bindings,
-                data_domain=template.data_domain,
-                granularity=template.granularity,
-                sub_domain=template.sub_domain,
+            available_fields, missing_fields, field_matches = (
+                _split_existing_deduplication_fields(
+                    template_deduplication_fields,
+                    template_header_columns,
+                    normalized_template_bindings,
+                    existing_header_bindings=normalized_template_bindings,
+                    data_domain=template.data_domain,
+                    granularity=template.granularity,
+                    sub_domain=template.sub_domain,
+                )
             )
             recommended_fields = _recommended_deduplication_fields(
                 default_fields,
@@ -1791,7 +1892,9 @@ async def get_template_update_context(
                 {
                     "current_header_columns": template_header_columns,
                     "current_header_bindings": normalized_template_bindings,
-                    "review_header_bindings": _filter_bindings_for_manual_review(normalized_template_bindings),
+                    "review_header_bindings": _filter_bindings_for_manual_review(
+                        normalized_template_bindings
+                    ),
                     "full_header_bindings": normalized_template_bindings,
                     "header_changes": {
                         "detected": False,
@@ -1815,7 +1918,9 @@ async def get_template_update_context(
                 }
             )
         elif file_id is not None:
-            file_summary = await _load_file_update_summary(db, file_id, effective_header_row)
+            file_summary = await _load_file_update_summary(
+                db, file_id, effective_header_row
+            )
             current_header_columns = file_summary["header_columns"]
             current_header_bindings = _normalize_header_bindings(
                 file_summary.get("header_bindings", []),
@@ -1828,17 +1933,18 @@ async def get_template_update_context(
                 template_id,
                 current_header_columns,
             )
-            current_lookup = {str(field).lower(): field for field in current_header_columns}
             added_fields = header_changes.get("added_fields", [])
             removed_fields = header_changes.get("removed_fields", [])
-            available_fields, missing_fields, field_matches = _split_existing_deduplication_fields(
-                template_deduplication_fields,
-                current_header_columns,
-                current_header_bindings,
-                existing_header_bindings=normalized_template_bindings,
-                data_domain=template.data_domain,
-                granularity=template.granularity,
-                sub_domain=template.sub_domain,
+            available_fields, missing_fields, field_matches = (
+                _split_existing_deduplication_fields(
+                    template_deduplication_fields,
+                    current_header_columns,
+                    current_header_bindings,
+                    existing_header_bindings=normalized_template_bindings,
+                    data_domain=template.data_domain,
+                    granularity=template.granularity,
+                    sub_domain=template.sub_domain,
+                )
             )
             recommended_fields = _recommended_deduplication_fields(
                 default_fields,
@@ -1850,7 +1956,9 @@ async def get_template_update_context(
                     "current_file": file_summary["file"],
                     "current_header_columns": current_header_columns,
                     "current_header_bindings": current_header_bindings,
-                    "review_header_bindings": _filter_bindings_for_manual_review(current_header_bindings),
+                    "review_header_bindings": _filter_bindings_for_manual_review(
+                        current_header_bindings
+                    ),
                     "full_header_bindings": current_header_bindings,
                     "current_header_row": effective_header_row,
                     "sample_data": {},
@@ -1924,8 +2032,12 @@ async def get_template_update_preview(
                 status_code=404,
             )
 
-        effective_header_row = header_row if header_row is not None else (template.header_row or 0)
-        file_preview = await _load_file_update_preview(db, file_id, effective_header_row)
+        effective_header_row = (
+            header_row if header_row is not None else (template.header_row or 0)
+        )
+        file_preview = await _load_file_update_preview(
+            db, file_id, effective_header_row
+        )
         return TemplateUpdatePreviewResponse(
             success=True,
             data=TemplateUpdatePreviewData(
@@ -1984,17 +2096,23 @@ async def get_template_update_bindings(
                 status_code=404,
             )
 
-        effective_header_row = header_row if header_row is not None else (template.header_row or 0)
-        file_preview = await _load_file_update_preview(db, file_id, effective_header_row)
+        effective_header_row = (
+            header_row if header_row is not None else (template.header_row or 0)
+        )
+        file_preview = await _load_file_update_preview(
+            db, file_id, effective_header_row
+        )
         current_header_bindings = _normalize_header_bindings(
             file_preview.get("header_bindings", []),
             file_preview.get("header_columns", []),
             file_preview.get("sample_data", {}),
             data_domain=template.data_domain,
         )
-        required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
-            template.deduplication_fields or [],
-            current_header_bindings,
+        required_semantic_keys, hash_participating_semantic_keys = (
+            _extract_semantic_key_sets(
+                template.deduplication_fields or [],
+                current_header_bindings,
+            )
         )
         return TemplateUpdateBindingsResponse(
             success=True,
@@ -2003,7 +2121,9 @@ async def get_template_update_bindings(
                 current_header_columns=file_preview.get("header_columns", []),
                 current_header_row=effective_header_row,
                 current_header_bindings=current_header_bindings,
-                review_header_bindings=_filter_bindings_for_manual_review(current_header_bindings),
+                review_header_bindings=_filter_bindings_for_manual_review(
+                    current_header_bindings
+                ),
                 full_header_bindings=current_header_bindings,
                 required_semantic_keys=required_semantic_keys,
                 hash_participating_semantic_keys=hash_participating_semantic_keys,
@@ -2011,7 +2131,9 @@ async def get_template_update_bindings(
             message="鑾峰彇妯℃澘鏇存柊璇箟缁戝畾鎴愬姛",
         )
     except ValueError as exc:
-        logger.error(f"鑾峰彇妯℃澘鏇存柊璇箟缁戝畾澶辫触(鍙傛暟閿欒): {exc}", exc_info=True)
+        logger.error(
+            f"鑾峰彇妯℃澘鏇存柊璇箟缁戝畾澶辫触(鍙傛暟閿欒): {exc}", exc_info=True
+        )
         return error_response(
             code=ErrorCode.DATA_VALIDATION_FAILED,
             message="鑾峰彇妯℃澘鏇存柊璇箟缁戝畾澶辫触",
@@ -2045,29 +2167,43 @@ async def get_template_variant_create_context(
     try:
         family_service = get_template_family_service(db)
         family, versions = await family_service.get_family_versions(family_id)
-        active_version = next((item for item in versions if item["status"] == "active"), None)
+        active_version = next(
+            (item for item in versions if item["status"] == "active"), None
+        )
         if active_version is None:
             raise ValueError(f"template family {family_id} has no active version")
 
-        _version_payload, variants = await family_service.get_version_variants(active_version["id"])
+        _version_payload, variants = await family_service.get_version_variants(
+            active_version["id"]
+        )
         legacy_template_ids = list(active_version.get("legacy_template_ids") or [])
         if not legacy_template_ids:
-            raise ValueError(f"template family {family_id} has no compatible legacy template")
+            raise ValueError(
+                f"template family {family_id} has no compatible legacy template"
+            )
 
         template_result = await db.execute(
-            select(FieldMappingTemplate).where(FieldMappingTemplate.id == legacy_template_ids[0])
+            select(FieldMappingTemplate).where(
+                FieldMappingTemplate.id == legacy_template_ids[0]
+            )
         )
         template = template_result.scalar_one_or_none()
         if not template:
             raise ValueError(f"legacy template {legacy_template_ids[0]} not found")
 
-        effective_header_row = header_row if header_row is not None else (template.header_row or 0)
-        file_preview = await _load_file_update_preview(db, file_id, effective_header_row)
+        effective_header_row = (
+            header_row if header_row is not None else (template.header_row or 0)
+        )
+        file_preview = await _load_file_update_preview(
+            db, file_id, effective_header_row
+        )
         current_header_columns = file_preview["header_columns"]
         current_header_bindings = file_preview.get("header_bindings", [])
-        required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
-            list(active_version.get("deduplication_fields") or []),
-            current_header_bindings,
+        required_semantic_keys, hash_participating_semantic_keys = (
+            _extract_semantic_key_sets(
+                list(active_version.get("deduplication_fields") or []),
+                current_header_bindings,
+            )
         )
 
         resolver = get_template_resolver(db)
@@ -2084,9 +2220,9 @@ async def get_template_variant_create_context(
         # [*] 批次 G(G-3): 推荐的变体按**业务形态**给, 不再按文件名给。
         #     形态 = 列集合 + 解析方式 + 表头行(+ 工作表名模式)。
         #     解析规则沿用 E-8 的取值顺序: 变体优先、版本兜底。
-        current_parse_rules = list((recommended_variant or {}).get("field_parse_rules") or []) or list(
-            active_version.get("field_parse_rules") or []
-        )
+        current_parse_rules = list(
+            (recommended_variant or {}).get("field_parse_rules") or []
+        ) or list(active_version.get("field_parse_rules") or [])
         recommended_variant_kind = build_variant_kind(
             header_columns=current_header_columns,
             field_parse_rules=current_parse_rules,
@@ -2207,7 +2343,9 @@ async def list_template_family_versions(
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
-        family, versions = await get_template_family_service(db).get_family_versions(family_id)
+        family, versions = await get_template_family_service(db).get_family_versions(
+            family_id
+        )
         return TemplateFamilyVersionsResponse(
             success=True,
             data=TemplateFamilyVersionsData(family=family, versions=versions),
@@ -2242,7 +2380,9 @@ async def list_template_version_variants(
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
-        version, variants = await get_template_family_service(db).get_version_variants(version_id)
+        version, variants = await get_template_family_service(db).get_version_variants(
+            version_id
+        )
         return TemplateVersionVariantsResponse(
             success=True,
             data=TemplateVersionVariantsData(version=version, variants=variants),
@@ -2309,7 +2449,9 @@ async def list_mapping_templates(
     """列出模板。"""
     try:
         template_service = get_template_service(db)
-        templates = await template_service.list_templates(platform or None, data_domain or None)
+        templates = await template_service.list_templates(
+            platform or None, data_domain or None
+        )
         return TemplateListResponse(
             success=True,
             data=TemplateListData(templates=templates, count=len(templates)),

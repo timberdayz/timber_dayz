@@ -231,7 +231,9 @@ async def test_template_family_endpoints_group_legacy_templates_into_variants(
     # 旧口径(按模板名里的 slash/dash 关键词)已经退役。
     assert not {"monthly_dash", "monthly_slash"} & variant_keys
     # 业务形态标识已落库, 与 key 一致。
-    assert {item["variant_kind"] for item in variant_payload["data"]["variants"]} == variant_keys
+    assert {
+        item["variant_kind"] for item in variant_payload["data"]["variants"]
+    } == variant_keys
 
 
 @pytest.mark.asyncio
@@ -297,7 +299,9 @@ async def test_template_resolve_endpoint_matches_variant_and_reports_shadow_comp
         )
         await session.commit()
 
-    from backend.domains.data_platform.routers import field_mapping_templates as router_module
+    from backend.domains.data_platform.routers import (
+        field_mapping_templates as router_module,
+    )
 
     monkeypatch.setattr(
         router_module,
@@ -328,7 +332,10 @@ async def test_template_resolve_endpoint_matches_variant_and_reports_shadow_comp
     )
     assert payload["data"]["variant"]["variant_key"] != "monthly_slash"
     assert payload["data"]["active_version"]["version_no"] == 3
-    assert payload["data"]["shadow_compare"]["legacy_template_name"] == "shopee_analytics__monthly_slash_v3"
+    assert (
+        payload["data"]["shadow_compare"]["legacy_template_name"]
+        == "shopee_analytics__monthly_slash_v3"
+    )
     assert payload["data"]["shadow_compare"]["is_consistent"] is True
 
 
@@ -424,7 +431,10 @@ async def test_template_resolve_uses_selected_variant_bindings_not_active_versio
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["data"]["variant"]["template_name"] == "shopee_analytics__monthly_slash_v3"
+    assert (
+        payload["data"]["variant"]["template_name"]
+        == "shopee_analytics__monthly_slash_v3"
+    )
     assert payload["data"]["active_version"]["version_no"] == 4
     assert payload["data"]["semantic_bindings"][0]["raw_name"] == "slash_date"
     assert payload["data"]["hash_participating_semantic_keys"] == ["metric_date"]
@@ -452,9 +462,23 @@ async def test_template_family_projection_keeps_distinct_variants_with_same_head
                     status="published",
                     field_count=28,
                     header_columns=[
-                        "Unnamed: 0", "GMV", "订单数", "客户数", "商品成交件数", "已退款的商品件数",
-                        "SKU 订单数", "总成交额", "页面浏览次数", "商品访客数", "转化率", "商品曝光次数",
-                        "去重商品曝光次数", "商品点击量", "去重点击次数", "平均订单金额", "达人直播归因 GMV",
+                        "Unnamed: 0",
+                        "GMV",
+                        "订单数",
+                        "客户数",
+                        "商品成交件数",
+                        "已退款的商品件数",
+                        "SKU 订单数",
+                        "总成交额",
+                        "页面浏览次数",
+                        "商品访客数",
+                        "转化率",
+                        "商品曝光次数",
+                        "去重商品曝光次数",
+                        "商品点击量",
+                        "去重点击次数",
+                        "平均订单金额",
+                        "达人直播归因 GMV",
                     ],
                     deduplication_fields=["metric_date"],
                     created_at=now,
@@ -472,9 +496,22 @@ async def test_template_family_projection_keeps_distinct_variants_with_same_head
                     status="published",
                     field_count=16,
                     header_columns=[
-                        "Unnamed: 0", "GMV", "订单数", "客户数", "商品成交件数", "已退款的商品件数",
-                        "SKU 订单数", "总成交额", "页面浏览次数", "商品访客数", "转化率", "商品曝光次数",
-                        "去重商品曝光次数", "商品点击量", "去重点击次数", "平均订单金额",
+                        "Unnamed: 0",
+                        "GMV",
+                        "订单数",
+                        "客户数",
+                        "商品成交件数",
+                        "已退款的商品件数",
+                        "SKU 订单数",
+                        "总成交额",
+                        "页面浏览次数",
+                        "商品访客数",
+                        "转化率",
+                        "商品曝光次数",
+                        "去重商品曝光次数",
+                        "商品点击量",
+                        "去重点击次数",
+                        "平均订单金额",
                     ],
                     deduplication_fields=["metric_date"],
                     created_at=now,
@@ -491,7 +528,9 @@ async def test_template_family_projection_keeps_distinct_variants_with_same_head
     family = next(
         item
         for item in families
-        if item["platform"] == "tiktok" and item["data_domain"] == "analytics" and item["granularity"] == "daily"
+        if item["platform"] == "tiktok"
+        and item["data_domain"] == "analytics"
+        and item["granularity"] == "daily"
     )
 
     version_response = await client.get(
@@ -510,7 +549,9 @@ async def test_template_family_projection_keeps_distinct_variants_with_same_head
 
 
 @pytest.mark.asyncio
-async def test_template_family_list_tolerates_duplicate_family_rows(template_family_client):
+async def test_template_family_list_tolerates_duplicate_family_rows(
+    template_family_client,
+):
     client, session_factory = template_family_client
     now = datetime.now(timezone.utc)
 
@@ -617,7 +658,9 @@ async def test_get_family_versions_uses_requested_family_when_normalized_duplica
 
         from backend.services.template_family_service import TemplateFamilyService
 
-        family_payload, versions = await TemplateFamilyService(session).get_family_versions(201)
+        family_payload, versions = await TemplateFamilyService(
+            session
+        ).get_family_versions(201)
 
     assert family_payload["id"] == 201
     assert family_payload["sub_domain"] is None

@@ -7,27 +7,36 @@ async def test_builtin_alias_resolves_new_tiktok_product_headers():
 
     service = SemanticAliasRegistryService()
 
-    assert service.resolve_alias_from_row(
-        {"商品 ID": "172939", "商品名": "Summer Shirt", "发品状态": "active"},
-        data_domain="products",
-        standard_field="product_id",
-        platform_code="tiktok",
-        granularity="daily",
-    ) == "172939"
-    assert service.resolve_alias_from_row(
-        {"商品 ID": "172939", "商品名": "Summer Shirt", "发品状态": "active"},
-        data_domain="products",
-        standard_field="product_name",
-        platform_code="tiktok",
-        granularity="daily",
-    ) == "Summer Shirt"
-    assert service.resolve_alias_from_row(
-        {"商品 ID": "172939", "商品名": "Summer Shirt", "发品状态": "active"},
-        data_domain="products",
-        standard_field="item_status",
-        platform_code="tiktok",
-        granularity="daily",
-    ) == "active"
+    assert (
+        service.resolve_alias_from_row(
+            {"商品 ID": "172939", "商品名": "Summer Shirt", "发品状态": "active"},
+            data_domain="products",
+            standard_field="product_id",
+            platform_code="tiktok",
+            granularity="daily",
+        )
+        == "172939"
+    )
+    assert (
+        service.resolve_alias_from_row(
+            {"商品 ID": "172939", "商品名": "Summer Shirt", "发品状态": "active"},
+            data_domain="products",
+            standard_field="product_name",
+            platform_code="tiktok",
+            granularity="daily",
+        )
+        == "Summer Shirt"
+    )
+    assert (
+        service.resolve_alias_from_row(
+            {"商品 ID": "172939", "商品名": "Summer Shirt", "发品状态": "active"},
+            data_domain="products",
+            standard_field="item_status",
+            platform_code="tiktok",
+            granularity="daily",
+        )
+        == "active"
+    )
 
 
 def test_template_confirmed_bindings_create_aliases_without_duplicates():

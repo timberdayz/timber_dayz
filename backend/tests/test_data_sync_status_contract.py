@@ -150,7 +150,10 @@ class _TwoPhaseTemplateResolverStub:
             "matched": True,
             "governance_status": "ready",
             "family": {"id": 15},
-            "active_version": {"id": 8, "deduplication_fields": self.deduplication_fields},
+            "active_version": {
+                "id": 8,
+                "deduplication_fields": self.deduplication_fields,
+            },
             "variant": {
                 "id": 3,
                 "source_legacy_template_id": self.template_id,
@@ -180,7 +183,9 @@ async def _success_ingest_stub(**_kwargs):
 
 
 @pytest.mark.asyncio
-async def test_failed_sync_updates_catalog_file_status_and_error_message(monkeypatch, tmp_path):
+async def test_failed_sync_updates_catalog_file_status_and_error_message(
+    monkeypatch, tmp_path
+):
     file_path = tmp_path / "orders.xlsx"
     file_path.write_bytes(b"test")
 
@@ -204,7 +209,9 @@ async def test_failed_sync_updates_catalog_file_status_and_error_message(monkeyp
 
     monkeypatch.setattr(service, "_safe_resolve_path", lambda _path: str(file_path))
     monkeypatch.setattr(service, "template_matcher", _TemplateMatcherStub())
-    monkeypatch.setattr(service, "template_status_service", _TemplateStatusServiceStub())
+    monkeypatch.setattr(
+        service, "template_status_service", _TemplateStatusServiceStub()
+    )
     monkeypatch.setattr(
         "backend.services.data_sync_service.get_executor_manager",
         lambda: _ExecutorManagerStub(),
@@ -233,7 +240,9 @@ async def test_failed_sync_updates_catalog_file_status_and_error_message(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_successful_sync_clears_stale_error_and_updates_last_processed_at(monkeypatch, tmp_path):
+async def test_successful_sync_clears_stale_error_and_updates_last_processed_at(
+    monkeypatch, tmp_path
+):
     file_path = tmp_path / "orders.xlsx"
     file_path.write_bytes(b"test")
 
@@ -257,7 +266,9 @@ async def test_successful_sync_clears_stale_error_and_updates_last_processed_at(
 
     monkeypatch.setattr(service, "_safe_resolve_path", lambda _path: str(file_path))
     monkeypatch.setattr(service, "template_matcher", _TemplateMatcherStub())
-    monkeypatch.setattr(service, "template_status_service", _TemplateStatusServiceStub())
+    monkeypatch.setattr(
+        service, "template_status_service", _TemplateStatusServiceStub()
+    )
     monkeypatch.setattr(
         "backend.services.data_sync_service.get_executor_manager",
         lambda: _ExecutorManagerStub(),
@@ -287,7 +298,9 @@ async def test_successful_sync_clears_stale_error_and_updates_last_processed_at(
 
 
 @pytest.mark.asyncio
-async def test_sync_single_file_prefers_resolver_selected_legacy_template(monkeypatch, tmp_path):
+async def test_sync_single_file_prefers_resolver_selected_legacy_template(
+    monkeypatch, tmp_path
+):
     file_path = tmp_path / "orders.xlsx"
     file_path.write_bytes(b"test")
 
@@ -337,7 +350,9 @@ async def test_sync_single_file_prefers_resolver_selected_legacy_template(monkey
 
     monkeypatch.setattr(service, "_safe_resolve_path", lambda _path: str(file_path))
     monkeypatch.setattr(service, "template_matcher", _TemplateMatcherStub())
-    monkeypatch.setattr(service, "template_status_service", _TemplateStatusServiceStub())
+    monkeypatch.setattr(
+        service, "template_status_service", _TemplateStatusServiceStub()
+    )
     monkeypatch.setattr(service, "template_resolver", _TemplateResolverStub(888))
     monkeypatch.setattr(service.db, "get", _fake_db_get, raising=False)
     monkeypatch.setattr(
@@ -446,7 +461,9 @@ async def test_sync_single_file_re_resolves_after_preview_and_uses_semantic_payl
 
     monkeypatch.setattr(service, "_safe_resolve_path", lambda _path: str(file_path))
     monkeypatch.setattr(service, "template_matcher", matcher)
-    monkeypatch.setattr(service, "template_status_service", _TemplateStatusServiceStub())
+    monkeypatch.setattr(
+        service, "template_status_service", _TemplateStatusServiceStub()
+    )
     monkeypatch.setattr(service, "template_resolver", resolver)
     monkeypatch.setattr(service.db, "get", _fake_db_get, raising=False)
     monkeypatch.setattr(

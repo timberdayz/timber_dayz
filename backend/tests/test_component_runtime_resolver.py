@@ -44,7 +44,9 @@ def collection_app():
 
 
 @pytest.mark.asyncio
-async def test_resolve_runtime_component_requires_stable_version(component_version_session, tmp_path: Path, monkeypatch):
+async def test_resolve_runtime_component_requires_stable_version(
+    component_version_session, tmp_path: Path, monkeypatch
+):
     from backend.services.component_runtime_resolver import (
         ComponentRuntimeResolver,
         NoStableComponentVersionError,
@@ -54,7 +56,9 @@ async def test_resolve_runtime_component_requires_stable_version(component_versi
         "backend.services.component_runtime_resolver.is_active_component_name",
         lambda name: True,
     )
-    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+    resolver = ComponentRuntimeResolver(
+        component_version_session, project_root=tmp_path
+    )
 
     with pytest.raises(NoStableComponentVersionError):
         await resolver.resolve_export_component(
@@ -65,7 +69,9 @@ async def test_resolve_runtime_component_requires_stable_version(component_versi
 
 
 @pytest.mark.asyncio
-async def test_resolve_runtime_component_rejects_multiple_stable_versions(component_version_session, tmp_path: Path, monkeypatch):
+async def test_resolve_runtime_component_rejects_multiple_stable_versions(
+    component_version_session, tmp_path: Path, monkeypatch
+):
     from backend.services.component_runtime_resolver import (
         ComponentRuntimeResolver,
         MultipleStableComponentVersionsError,
@@ -95,7 +101,9 @@ async def test_resolve_runtime_component_rejects_multiple_stable_versions(compon
     )
     await component_version_session.commit()
 
-    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+    resolver = ComponentRuntimeResolver(
+        component_version_session, project_root=tmp_path
+    )
 
     with pytest.raises(MultipleStableComponentVersionsError):
         await resolver.resolve_export_component(
@@ -106,7 +114,9 @@ async def test_resolve_runtime_component_rejects_multiple_stable_versions(compon
 
 
 @pytest.mark.asyncio
-async def test_resolve_runtime_component_rejects_missing_file_path(component_version_session, tmp_path: Path, monkeypatch):
+async def test_resolve_runtime_component_rejects_missing_file_path(
+    component_version_session, tmp_path: Path, monkeypatch
+):
     from backend.services.component_runtime_resolver import (
         ComponentRuntimeResolver,
         MissingStableComponentFileError,
@@ -127,7 +137,9 @@ async def test_resolve_runtime_component_rejects_missing_file_path(component_ver
     )
     await component_version_session.commit()
 
-    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+    resolver = ComponentRuntimeResolver(
+        component_version_session, project_root=tmp_path
+    )
 
     with pytest.raises(MissingStableComponentFileError):
         await resolver.resolve_export_component(
@@ -138,7 +150,9 @@ async def test_resolve_runtime_component_rejects_missing_file_path(component_ver
 
 
 @pytest.mark.asyncio
-async def test_resolve_runtime_component_returns_manifest_for_single_stable(component_version_session, tmp_path: Path, monkeypatch):
+async def test_resolve_runtime_component_returns_manifest_for_single_stable(
+    component_version_session, tmp_path: Path, monkeypatch
+):
     from backend.services.component_runtime_resolver import ComponentRuntimeResolver
 
     monkeypatch.setattr(
@@ -161,7 +175,9 @@ async def test_resolve_runtime_component_returns_manifest_for_single_stable(comp
     )
     await component_version_session.commit()
 
-    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+    resolver = ComponentRuntimeResolver(
+        component_version_session, project_root=tmp_path
+    )
     manifest = await resolver.resolve_export_component(
         platform="shopee",
         data_domain="orders",
@@ -178,10 +194,14 @@ async def test_resolve_runtime_component_returns_manifest_for_single_stable(comp
 
 
 @pytest.mark.asyncio
-async def test_preflight_create_task_rejects_when_export_component_has_no_stable(collection_app, monkeypatch):
+async def test_preflight_create_task_rejects_when_export_component_has_no_stable(
+    collection_app, monkeypatch
+):
     from backend.dependencies.auth import require_admin
     from backend.models.database import get_async_db
-    from backend.services.component_runtime_resolver import NoStableComponentVersionError
+    from backend.services.component_runtime_resolver import (
+        NoStableComponentVersionError,
+    )
 
     class _AdminUser:
         user_id = 1
@@ -264,7 +284,9 @@ async def test_preflight_create_task_rejects_when_export_component_has_no_stable
 
 @pytest.mark.asyncio
 async def test_scheduler_runtime_manifest_helper_uses_stable_resolver(monkeypatch):
-    from backend.services.collection_config_execution import _resolve_runnable_scope_runtime
+    from backend.services.collection_config_execution import (
+        _resolve_runnable_scope_runtime,
+    )
 
     expected = {
         "login": {"component_name": "shopee/login"},
@@ -302,7 +324,9 @@ async def test_scheduler_runtime_manifest_helper_uses_stable_resolver(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_resolve_task_manifests_supports_domain_scoped_subtypes(component_version_session, tmp_path: Path, monkeypatch):
+async def test_resolve_task_manifests_supports_domain_scoped_subtypes(
+    component_version_session, tmp_path: Path, monkeypatch
+):
     from backend.services.component_runtime_resolver import ComponentRuntimeResolver
 
     monkeypatch.setattr(
@@ -343,7 +367,9 @@ async def test_resolve_task_manifests_supports_domain_scoped_subtypes(component_
     )
     await component_version_session.commit()
 
-    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+    resolver = ComponentRuntimeResolver(
+        component_version_session, project_root=tmp_path
+    )
     manifests = await resolver.resolve_task_manifests(
         platform="shopee",
         data_domains=["orders", "services", "products"],
@@ -361,7 +387,9 @@ async def test_resolve_task_manifests_supports_domain_scoped_subtypes(component_
 
 
 @pytest.mark.asyncio
-async def test_runtime_resolver_supports_miaoshou_orders_subtypes(component_version_session, tmp_path: Path, monkeypatch):
+async def test_runtime_resolver_supports_miaoshou_orders_subtypes(
+    component_version_session, tmp_path: Path, monkeypatch
+):
     from backend.services.component_runtime_resolver import ComponentRuntimeResolver
 
     monkeypatch.setattr(
@@ -400,7 +428,9 @@ async def test_runtime_resolver_supports_miaoshou_orders_subtypes(component_vers
     )
     await component_version_session.commit()
 
-    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+    resolver = ComponentRuntimeResolver(
+        component_version_session, project_root=tmp_path
+    )
     manifests = await resolver.resolve_task_manifests(
         platform="miaoshou",
         data_domains=["orders"],
@@ -414,7 +444,9 @@ async def test_runtime_resolver_supports_miaoshou_orders_subtypes(component_vers
 
 
 @pytest.mark.asyncio
-async def test_runtime_resolver_supports_miaoshou_inventory_snapshot_alias(component_version_session, tmp_path: Path, monkeypatch):
+async def test_runtime_resolver_supports_miaoshou_inventory_snapshot_alias(
+    component_version_session, tmp_path: Path, monkeypatch
+):
     from backend.services.component_runtime_resolver import ComponentRuntimeResolver
 
     monkeypatch.setattr(
@@ -446,7 +478,9 @@ async def test_runtime_resolver_supports_miaoshou_inventory_snapshot_alias(compo
     )
     await component_version_session.commit()
 
-    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+    resolver = ComponentRuntimeResolver(
+        component_version_session, project_root=tmp_path
+    )
     manifest = await resolver.resolve_export_component(
         platform="miaoshou",
         data_domain="inventory",
@@ -458,7 +492,9 @@ async def test_runtime_resolver_supports_miaoshou_inventory_snapshot_alias(compo
 
 
 @pytest.mark.asyncio
-async def test_runtime_resolver_rejects_non_active_component_name(component_version_session, tmp_path: Path):
+async def test_runtime_resolver_rejects_non_active_component_name(
+    component_version_session, tmp_path: Path
+):
     from backend.services.component_runtime_resolver import (
         ComponentRuntimeResolver,
         NoStableComponentVersionError,
@@ -480,7 +516,9 @@ async def test_runtime_resolver_rejects_non_active_component_name(component_vers
     )
     await component_version_session.commit()
 
-    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+    resolver = ComponentRuntimeResolver(
+        component_version_session, project_root=tmp_path
+    )
 
     with pytest.raises(NoStableComponentVersionError):
         await resolver.resolve_export_component(
@@ -491,7 +529,9 @@ async def test_runtime_resolver_rejects_non_active_component_name(component_vers
 
 
 @pytest.mark.asyncio
-async def test_runtime_resolver_rejects_archive_only_stable_file(component_version_session, tmp_path: Path):
+async def test_runtime_resolver_rejects_archive_only_stable_file(
+    component_version_session, tmp_path: Path
+):
     from backend.services.component_runtime_resolver import (
         ComponentRuntimeResolver,
         MissingStableComponentFileError,
@@ -513,7 +553,9 @@ async def test_runtime_resolver_rejects_archive_only_stable_file(component_versi
     )
     await component_version_session.commit()
 
-    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+    resolver = ComponentRuntimeResolver(
+        component_version_session, project_root=tmp_path
+    )
 
     with pytest.raises(MissingStableComponentFileError):
         await resolver.resolve_export_component(

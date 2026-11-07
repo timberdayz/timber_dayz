@@ -31,7 +31,9 @@ class ShopeeProductsExport(ExportComponent):
     data_domain = "products"
     DOWNLOAD_EVENT_TIMEOUT_MS = 180000
 
-    def __init__(self, ctx: ExecutionContext, selectors: ProductsSelectors | None = None) -> None:
+    def __init__(
+        self, ctx: ExecutionContext, selectors: ProductsSelectors | None = None
+    ) -> None:
         super().__init__(ctx)
         self.sel = selectors or ProductsSelectors()
         self.service_sel = ServicesSelectors()
@@ -121,7 +123,9 @@ class ShopeeProductsExport(ExportComponent):
             return False
         return any(token.lower() in content for token in self._known_throttled_texts())
 
-    async def _first_visible_locator(self, page: Any, selectors: tuple[str, ...]) -> Any | None:
+    async def _first_visible_locator(
+        self, page: Any, selectors: tuple[str, ...]
+    ) -> Any | None:
         for selector in selectors:
             try:
                 locator = page.locator(selector).first
@@ -159,7 +163,9 @@ class ShopeeProductsExport(ExportComponent):
         except Exception:
             return False
 
-    async def _visible_text_content(self, page: Any, selectors: tuple[str, ...]) -> str | None:
+    async def _visible_text_content(
+        self, page: Any, selectors: tuple[str, ...]
+    ) -> str | None:
         locator = await self._first_visible_locator(page, selectors)
         if locator is None:
             return None
@@ -198,7 +204,9 @@ class ShopeeProductsExport(ExportComponent):
     def _extract_summary_date_values(self, summary: str | None) -> tuple[str, ...]:
         return self._date_picker_helper()._extract_summary_date_values(summary)
 
-    def _extract_summary_month_value(self, summary: str | None) -> tuple[int, int] | None:
+    def _extract_summary_month_value(
+        self, summary: str | None
+    ) -> tuple[int, int] | None:
         return self._date_picker_helper()._extract_summary_month_value(summary)
 
     def _parse_date_summary(self, summary: str | None) -> dict[str, Any] | None:
@@ -216,7 +224,9 @@ class ShopeeProductsExport(ExportComponent):
     def _custom_time_selection(self, config: dict[str, Any]) -> dict[str, Any] | None:
         return self._date_picker_helper()._custom_time_selection(config)
 
-    def _custom_range_bounds(self, config: dict[str, Any]) -> tuple[str | None, str | None]:
+    def _custom_range_bounds(
+        self, config: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
         custom_selection = self._custom_time_selection(config) or {}
         start_value = (
             str(custom_selection.get("start_date") or "").strip()
@@ -255,7 +265,9 @@ class ShopeeProductsExport(ExportComponent):
         )
         return (zh_months[target_date.month],)
 
-    async def _pick_visible_locator(self, match_group: Any, *, timeout_ms: int = 1000) -> Any | None:
+    async def _pick_visible_locator(
+        self, match_group: Any, *, timeout_ms: int = 1000
+    ) -> Any | None:
         if match_group is None:
             return None
 
@@ -347,8 +359,12 @@ class ShopeeProductsExport(ExportComponent):
             poll_ms=poll_ms,
         )
 
-    async def _click_month_panel_year_nav_button(self, page: Any, direction: str) -> bool:
-        return await self._date_picker_helper()._click_month_panel_year_nav_button(page, direction)
+    async def _click_month_panel_year_nav_button(
+        self, page: Any, direction: str
+    ) -> bool:
+        return await self._date_picker_helper()._click_month_panel_year_nav_button(
+            page, direction
+        )
 
     async def _find_month_grid_cell(self, page: Any, month_label: str) -> Any | None:
         return await self._date_picker_helper()._find_month_grid_cell(page, month_label)
@@ -360,7 +376,9 @@ class ShopeeProductsExport(ExportComponent):
                 return locator
         return None
 
-    def _week_range_label_candidates(self, start_date: str, end_date: str) -> tuple[str, ...]:
+    def _week_range_label_candidates(
+        self, start_date: str, end_date: str
+    ) -> tuple[str, ...]:
         try:
             start_value = datetime.strptime(str(start_date), "%Y-%m-%d")
             end_value = datetime.strptime(str(end_date), "%Y-%m-%d")
@@ -389,7 +407,9 @@ class ShopeeProductsExport(ExportComponent):
             for selector in selectors:
                 try:
                     locator = container.locator(selector).first
-                    if await locator.count() > 0 and await locator.is_visible(timeout=500):
+                    if await locator.count() > 0 and await locator.is_visible(
+                        timeout=500
+                    ):
                         text_content = await locator.text_content()
                         if text_content and text_content.strip():
                             return text_content
@@ -408,7 +428,9 @@ class ShopeeProductsExport(ExportComponent):
             for selector in selector_groups:
                 try:
                     locator = container.locator(selector).first
-                    if await locator.count() > 0 and await locator.is_visible(timeout=500):
+                    if await locator.count() > 0 and await locator.is_visible(
+                        timeout=500
+                    ):
                         await locator.click(timeout=5000)
                         if hasattr(page, "wait_for_timeout"):
                             await page.wait_for_timeout(250)
@@ -421,20 +443,22 @@ class ShopeeProductsExport(ExportComponent):
         selector_map = {
             "prev": (
                 'button[aria-label*="previous year"]',
-                '.arco-picker-header-super-prev-btn',
-                '.ant-picker-header-super-prev-btn',
+                ".arco-picker-header-super-prev-btn",
+                ".ant-picker-header-super-prev-btn",
                 '[class*="super-prev"]',
                 '[class*="double-left"]',
             ),
             "next": (
                 'button[aria-label*="next year"]',
-                '.arco-picker-header-super-next-btn',
-                '.ant-picker-header-super-next-btn',
+                ".arco-picker-header-super-next-btn",
+                ".ant-picker-header-super-next-btn",
                 '[class*="super-next"]',
                 '[class*="double-right"]',
             ),
         }
-        if await self._click_popup_nav_button_from_selectors(page, selector_map.get(direction, ())):
+        if await self._click_popup_nav_button_from_selectors(
+            page, selector_map.get(direction, ())
+        ):
             return True
 
         text_map = {
@@ -448,7 +472,9 @@ class ShopeeProductsExport(ExportComponent):
                 continue
             for label in text_map.get(direction, ()):
                 try:
-                    locator = await self._pick_visible_locator(container.get_by_text(label, exact=True))
+                    locator = await self._pick_visible_locator(
+                        container.get_by_text(label, exact=True)
+                    )
                     if locator is None:
                         continue
                     await locator.click(timeout=5000)
@@ -476,7 +502,9 @@ class ShopeeProductsExport(ExportComponent):
                 '[class*="next"]:not([class*="super"])',
             ),
         }
-        if await self._click_popup_nav_button_from_selectors(page, selector_map.get(direction, ())):
+        if await self._click_popup_nav_button_from_selectors(
+            page, selector_map.get(direction, ())
+        ):
             return True
 
         text_map = {
@@ -490,7 +518,9 @@ class ShopeeProductsExport(ExportComponent):
                 continue
             for label in text_map.get(direction, ()):
                 try:
-                    locator = await self._pick_visible_locator(container.get_by_text(label, exact=True))
+                    locator = await self._pick_visible_locator(
+                        container.get_by_text(label, exact=True)
+                    )
                     if locator is None:
                         continue
                     await locator.click(timeout=5000)
@@ -501,10 +531,16 @@ class ShopeeProductsExport(ExportComponent):
                     continue
         return False
 
-    def _parse_calendar_header_month_year_zh(self, header_text: str | None) -> tuple[int, int] | None:
-        return self._date_picker_helper()._parse_calendar_header_month_year_zh(header_text)
+    def _parse_calendar_header_month_year_zh(
+        self, header_text: str | None
+    ) -> tuple[int, int] | None:
+        return self._date_picker_helper()._parse_calendar_header_month_year_zh(
+            header_text
+        )
 
-    def _parse_calendar_header_year_month(self, header_text: str | None) -> tuple[int, int] | None:
+    def _parse_calendar_header_year_month(
+        self, header_text: str | None
+    ) -> tuple[int, int] | None:
         parsed = self._parse_calendar_header_month_year_zh(header_text)
         if parsed is not None:
             return parsed
@@ -543,7 +579,9 @@ class ShopeeProductsExport(ExportComponent):
             target_date.strftime("%Y/%m/%d"),
         )
 
-    def _date_range_signatures(self, start_date: str | None, end_date: str | None) -> tuple[str, ...]:
+    def _date_range_signatures(
+        self, start_date: str | None, end_date: str | None
+    ) -> tuple[str, ...]:
         if not start_date or not end_date:
             return ()
         start_variants = self._date_value_signatures(start_date)
@@ -603,21 +641,31 @@ class ShopeeProductsExport(ExportComponent):
         expected_label = None
         if normalized_granularity in {"daily", "weekly", "monthly"}:
             expected_label = self.sel.granularity_labels.get(normalized_granularity)
-        if expected_label and self._normalize_date_text(expected_label) not in normalized_summary:
+        if (
+            expected_label
+            and self._normalize_date_text(expected_label) not in normalized_summary
+        ):
             return False
 
         primary_signatures: list[str] = []
         if normalized_granularity == "daily":
-            primary_signatures.extend(self._date_value_signatures(start_date or end_date))
+            primary_signatures.extend(
+                self._date_value_signatures(start_date or end_date)
+            )
         elif normalized_granularity == "weekly":
             primary_signatures.extend(self._date_value_signatures(start_date))
         elif normalized_granularity == "monthly" and start_date:
             primary_signatures.extend(self._month_summary_signatures(start_date))
 
         normalized_signatures = tuple(
-            self._normalize_date_text(signature) for signature in primary_signatures if signature
+            self._normalize_date_text(signature)
+            for signature in primary_signatures
+            if signature
         )
-        return any(signature and signature in normalized_summary for signature in normalized_signatures)
+        return any(
+            signature and signature in normalized_summary
+            for signature in normalized_signatures
+        )
 
     async def _wait_calendar_header_changed(
         self,
@@ -639,10 +687,16 @@ class ShopeeProductsExport(ExportComponent):
         return None
 
     async def _navigate_month_panel_to_year(self, page: Any, target_year: int) -> bool:
-        return await self._date_picker_helper()._navigate_month_panel_to_year(page, target_year)
+        return await self._date_picker_helper()._navigate_month_panel_to_year(
+            page, target_year
+        )
 
-    async def _navigate_calendar_panel_to_month(self, page: Any, target_year: int, target_month: int) -> bool:
-        return await self._date_picker_helper()._navigate_calendar_panel_to_month(page, target_year, target_month)
+    async def _navigate_calendar_panel_to_month(
+        self, page: Any, target_year: int, target_month: int
+    ) -> bool:
+        return await self._date_picker_helper()._navigate_calendar_panel_to_month(
+            page, target_year, target_month
+        )
 
     async def _current_date_summary_text(self, page: Any) -> str | None:
         return await self._date_picker_helper()._current_date_summary_text(page)
@@ -804,7 +858,9 @@ class ShopeeProductsExport(ExportComponent):
     ) -> Any | None:
         waited = 0
         while waited <= timeout_ms:
-            panel = await self._first_visible_locator(page, self.service_sel.latest_report_panels)
+            panel = await self._first_visible_locator(
+                page, self.service_sel.latest_report_panels
+            )
             if panel is not None:
                 return panel
             if hasattr(page, "wait_for_timeout"):
@@ -826,10 +882,14 @@ class ShopeeProductsExport(ExportComponent):
                         return locator.first
                 except Exception:
                     continue
-        return await self._first_visible_locator(page, self.service_sel.latest_report_triggers)
+        return await self._first_visible_locator(
+            page, self.service_sel.latest_report_triggers
+        )
 
     async def _ensure_latest_report_panel_open(self, page: Any) -> Any | None:
-        panel = await self._first_visible_locator(page, self.service_sel.latest_report_panels)
+        panel = await self._first_visible_locator(
+            page, self.service_sel.latest_report_panels
+        )
         if panel is not None:
             return panel
         trigger = await self._find_latest_report_trigger(page)
@@ -862,10 +922,11 @@ class ShopeeProductsExport(ExportComponent):
             except Exception:
                 text = ""
             normalized = str(text).strip()
-            if any(token in normalized for token in self.service_sel.panel_action_tokens):
+            if any(
+                token in normalized for token in self.service_sel.panel_action_tokens
+            ):
                 return candidate, normalized
         return None, None
-
 
     def _latest_report_download_tokens(self) -> tuple[str, ...]:
         return ("\u4e0b\u8f7d", "download")
@@ -908,17 +969,23 @@ class ShopeeProductsExport(ExportComponent):
         return identity
 
     def _current_report_identity_tokens(self) -> tuple[str, ...]:
-        data_domain = str(getattr(self, "data_domain", "products") or "products").strip().lower()
+        data_domain = (
+            str(getattr(self, "data_domain", "products") or "products").strip().lower()
+        )
         if data_domain == "analytics":
             return ("traffic_overview", "trafficoverview")
         if data_domain == "services":
             cfg = self.ctx.config or {}
-            subtype = str(
-                cfg.get("services_subtype")
-                or cfg.get("sub_domain")
-                or getattr(self, "sub_domain", "")
-                or ""
-            ).strip().lower()
+            subtype = (
+                str(
+                    cfg.get("services_subtype")
+                    or cfg.get("sub_domain")
+                    or getattr(self, "sub_domain", "")
+                    or ""
+                )
+                .strip()
+                .lower()
+            )
             if subtype == "ai_assistant":
                 return ("shop_ai_assistant",)
             if subtype == "agent":
@@ -954,7 +1021,10 @@ class ShopeeProductsExport(ExportComponent):
             *self._latest_report_processing_tokens(),
             *self._latest_report_downloaded_tokens(),
         )
-        return any(self._normalize_report_row_text(token) in normalized_action for token in known_tokens)
+        return any(
+            self._normalize_report_row_text(token) in normalized_action
+            for token in known_tokens
+        )
 
     async def _visible_report_rows(self, panel: Any) -> list[Any]:
         row_selectors = (
@@ -990,7 +1060,9 @@ class ShopeeProductsExport(ExportComponent):
         return []
 
     async def _capture_latest_report_baseline(self, page: Any) -> None:
-        panel = await self._first_visible_locator(page, self.service_sel.latest_report_panels)
+        panel = await self._first_visible_locator(
+            page, self.service_sel.latest_report_panels
+        )
         if panel is None:
             self._latest_report_baseline_rows = []
             return
@@ -1068,9 +1140,13 @@ class ShopeeProductsExport(ExportComponent):
         normalized = self._normalize_report_row_text(f"{row_text} {status_text}")
         if any(token in normalized for token in self._latest_report_download_tokens()):
             return "download"
-        if any(token in normalized for token in self._latest_report_processing_tokens()):
+        if any(
+            token in normalized for token in self._latest_report_processing_tokens()
+        ):
             return "processing"
-        if any(token in normalized for token in self._latest_report_downloaded_tokens()):
+        if any(
+            token in normalized for token in self._latest_report_downloaded_tokens()
+        ):
             return "downloaded"
         return "unknown"
 
@@ -1121,7 +1197,9 @@ class ShopeeProductsExport(ExportComponent):
                 row_text = ""
             normalized_row = self._normalize_report_row_identity(row_text)
             state = self._row_state(row_text, action_text)
-            if not self._looks_like_report_entry(identity=normalized_row, state=state, action_text=action_text):
+            if not self._looks_like_report_entry(
+                identity=normalized_row, state=state, action_text=action_text
+            ):
                 continue
             candidates.append(
                 {
@@ -1169,7 +1247,11 @@ class ShopeeProductsExport(ExportComponent):
             ):
                 return True
 
-        return bool((baseline_snapshot is None and current_snapshot is not None) or count_increased or current_changed)
+        return bool(
+            (baseline_snapshot is None and current_snapshot is not None)
+            or count_increased
+            or current_changed
+        )
 
     def _detect_inserted_top_row(
         self,
@@ -1186,7 +1268,10 @@ class ShopeeProductsExport(ExportComponent):
         if current_second["text"] != baseline_first_text:
             return None
 
-        if current_top["text"] == baseline_first_text and current_top["state"] == baseline_rows[0][1]:
+        if (
+            current_top["text"] == baseline_first_text
+            and current_top["state"] == baseline_rows[0][1]
+        ):
             return None
 
         if len(baseline_rows) >= 2 and len(current_rows) >= 3:
@@ -1236,7 +1321,9 @@ class ShopeeProductsExport(ExportComponent):
 
                 top_candidate = row_candidates[0] if row_candidates else None
                 if top_candidate is not None and not target_top_row_locked:
-                    inserted_top = self._detect_inserted_top_row(baseline_rows, row_candidates)
+                    inserted_top = self._detect_inserted_top_row(
+                        baseline_rows, row_candidates
+                    )
                     if inserted_top is not None:
                         target_top_row_locked = True
                     elif baseline_rows:
@@ -1248,7 +1335,9 @@ class ShopeeProductsExport(ExportComponent):
                             or top_candidate["text"] != baseline_first_text
                         ):
                             target_top_row_locked = True
-                    elif baseline_snapshot is None or current_changed or count_increased:
+                    elif (
+                        baseline_snapshot is None or current_changed or count_increased
+                    ):
                         target_top_row_locked = True
 
                 if top_candidate is not None and target_top_row_locked:
@@ -1284,7 +1373,7 @@ class ShopeeProductsExport(ExportComponent):
             waited += poll_ms
         timeout_row_text = None
         timeout_row_state = None
-        if 'top_candidate' in locals() and top_candidate is not None:
+        if "top_candidate" in locals() and top_candidate is not None:
             timeout_row_text = top_candidate["text"]
             timeout_row_state = top_candidate["state"]
         self._warn_export_diagnostic(
@@ -1350,8 +1439,12 @@ class ShopeeProductsExport(ExportComponent):
     async def _select_month_value(self, page: Any, iso_date: str) -> bool:
         return await self._date_picker_helper()._select_month_value(page, iso_date)
 
-    async def _select_week_range_value(self, page: Any, start_date: str, end_date: str) -> bool:
-        return await self._date_picker_helper()._select_week_range_value(page, start_date, end_date)
+    async def _select_week_range_value(
+        self, page: Any, start_date: str, end_date: str
+    ) -> bool:
+        return await self._date_picker_helper()._select_week_range_value(
+            page, start_date, end_date
+        )
 
     async def _trigger_export(self, page: Any) -> None:
         button = await self._first_visible_locator(page, self.sel.export_buttons)
@@ -1394,7 +1487,9 @@ class ShopeeProductsExport(ExportComponent):
                 return "download_started"
 
             if await self._latest_report_progress_started(page):
-                self._log_export_diagnostic("latest_report_progress_started", waited_ms=waited)
+                self._log_export_diagnostic(
+                    "latest_report_progress_started", waited_ms=waited
+                )
                 return "report_progress"
 
             if await self._detect_export_throttled(page):
@@ -1411,7 +1506,9 @@ class ShopeeProductsExport(ExportComponent):
             await page.wait_for_timeout(1500)
         return not await self._detect_export_throttled(page)
 
-    def _build_download_target_path(self, out_root: Path, suggested_filename: str) -> Path:
+    def _build_download_target_path(
+        self, out_root: Path, suggested_filename: str
+    ) -> Path:
         candidate = out_root / suggested_filename
         if not candidate.exists():
             return candidate
@@ -1443,7 +1540,9 @@ class ShopeeProductsExport(ExportComponent):
                     "wait_direct_download_event",
                     timeout_ms=self.DOWNLOAD_EVENT_TIMEOUT_MS,
                 )
-                download = await page.wait_for_event("download", timeout=self.DOWNLOAD_EVENT_TIMEOUT_MS)
+                download = await page.wait_for_event(
+                    "download", timeout=self.DOWNLOAD_EVENT_TIMEOUT_MS
+                )
             except Exception:
                 return None
         else:
@@ -1455,9 +1554,13 @@ class ShopeeProductsExport(ExportComponent):
                 self._download_waiter = None
 
         granularity = str((self.ctx.config or {}).get("granularity") or "manual")
-        out_root = build_standard_output_root(self.ctx, data_type="products", granularity=granularity)
+        out_root = build_standard_output_root(
+            self.ctx, data_type="products", granularity=granularity
+        )
         out_root.mkdir(parents=True, exist_ok=True)
-        suggested = getattr(download, "suggested_filename", None) or "products-export.xlsx"
+        suggested = (
+            getattr(download, "suggested_filename", None) or "products-export.xlsx"
+        )
         target = self._build_download_target_path(out_root, suggested)
         try:
             await download.save_as(str(target))
@@ -1495,7 +1598,9 @@ class ShopeeProductsExport(ExportComponent):
         await self._trigger_export(page)
         return True
 
-    async def collect_download_result(self, page: Any, _trigger_state: Any) -> str | None:
+    async def collect_download_result(
+        self, page: Any, _trigger_state: Any
+    ) -> str | None:
         return await self._wait_download_complete(page)
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
@@ -1515,9 +1620,13 @@ class ShopeeProductsExport(ExportComponent):
             if throttled:
                 retry_ready = await self._wait_export_retry_ready(page)
                 if not retry_ready:
-                    return ExportResult(success=False, message="export throttled and retry not ready")
+                    return ExportResult(
+                        success=False, message="export throttled and retry not ready"
+                    )
                 await self.trigger_export(page)
-                retry_post_action_state = await self._wait_export_post_action_state(page)
+                retry_post_action_state = await self._wait_export_post_action_state(
+                    page
+                )
                 if retry_post_action_state in {"download_started", "report_progress"}:
                     throttled = False
                 elif retry_post_action_state == "throttled":
@@ -1526,11 +1635,17 @@ class ShopeeProductsExport(ExportComponent):
                     throttled = await self._detect_export_throttled(page)
                 if throttled:
                     await self._cancel_download_waiter()
-                    return ExportResult(success=False, message="export throttled and retry not ready")
+                    return ExportResult(
+                        success=False, message="export throttled and retry not ready"
+                    )
 
             file_path = await self.collect_download_result(page, True)
             if file_path:
-                return ExportResult(success=True, message="download complete", file_path=file_path)
-            return ExportResult(success=False, message="download did not complete", file_path=None)
+                return ExportResult(
+                    success=True, message="download complete", file_path=file_path
+                )
+            return ExportResult(
+                success=False, message="download did not complete", file_path=None
+            )
         except Exception as exc:
             return ExportResult(success=False, message=str(exc), file_path=None)

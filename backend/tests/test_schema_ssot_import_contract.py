@@ -81,14 +81,20 @@ def test_schema_public_export_surface_is_explicit_and_minimal() -> None:
     assert set(db_package.__all__) == expected_exports
 
     schema_public_names = {name for name in dir(schema) if not name.startswith("_")}
-    package_public_names = {name for name in dir(db_package) if not name.startswith("_")}
+    package_public_names = {
+        name for name in dir(db_package) if not name.startswith("_")
+    }
     assert schema_public_names >= expected_exports
     assert package_public_names >= expected_exports
 
     leaked_from_schema = HELPER_LEAK_NAMES & schema_public_names
     leaked_from_package = HELPER_LEAK_NAMES & package_public_names
-    assert not leaked_from_schema, f"Unexpected helper exports in schema: {sorted(leaked_from_schema)}"
-    assert not leaked_from_package, f"Unexpected helper exports in package: {sorted(leaked_from_package)}"
+    assert (
+        not leaked_from_schema
+    ), f"Unexpected helper exports in schema: {sorted(leaked_from_schema)}"
+    assert (
+        not leaked_from_package
+    ), f"Unexpected helper exports in package: {sorted(leaked_from_package)}"
 
 
 def test_schema_re_exports_every_slice_orm_class() -> None:
@@ -121,7 +127,9 @@ def test_schema_public_symbols_preserve_identity() -> None:
     from modules.core.db import Base as package_base
     from modules.core.db.schema import Base, CatalogFile, DimPlatform, FactOrderAmount
     from modules.core.db.schema_parts.base import Base as split_base
-    from modules.core.db.schema_parts.dimensions import DimPlatform as split_dim_platform
+    from modules.core.db.schema_parts.dimensions import (
+        DimPlatform as split_dim_platform,
+    )
     from modules.core.db.schema_parts.facts import (
         CatalogFile as split_catalog_file,
         FactOrderAmount as split_fact_order_amount,
@@ -196,7 +204,9 @@ def test_schema_business_slice_public_symbols_preserve_identity() -> None:
 def test_schema_metadata_contains_representative_tables() -> None:
     from modules.core.db.schema import Base
 
-    assert Base.metadata.tables, "Schema import should register tables into Base.metadata"
+    assert (
+        Base.metadata.tables
+    ), "Schema import should register tables into Base.metadata"
 
     required_table_names = [
         "core.dim_platforms",
@@ -211,7 +221,9 @@ def test_schema_metadata_contains_representative_tables() -> None:
         "approval_instances",
     ]
 
-    missing = [name for name in required_table_names if name not in Base.metadata.tables]
+    missing = [
+        name for name in required_table_names if name not in Base.metadata.tables
+    ]
     assert not missing, f"Missing tables: {missing}"
 
 

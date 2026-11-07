@@ -148,9 +148,7 @@ def test_missing_refresh_object_is_drift_not_refreshing():
 @pytest.mark.parametrize("status", ["ready", "refreshing"])
 def test_validation_accepts_available_module_statuses(status):
     """``refreshing`` 是**可用**状态 —— 修复方不能把它当成失败条件。"""
-    assert (
-        refresh_validation._module_status_is_ready({"status": status}) is True
-    )
+    assert refresh_validation._module_status_is_ready({"status": status}) is True
 
 
 @pytest.mark.parametrize("status", ["drift", "failed", ""])
@@ -177,7 +175,9 @@ def test_validation_and_runtime_gate_share_one_status_source():
         validation_says_ready = refresh_validation._module_status_is_ready(
             module_report
         )
-        gate_says_ready = status in dashboard_bootstrap.DASHBOARD_ASSET_AVAILABLE_STATUSES
+        gate_says_ready = (
+            status in dashboard_bootstrap.DASHBOARD_ASSET_AVAILABLE_STATUSES
+        )
         assert validation_says_ready == gate_says_ready, status
 
 
@@ -356,6 +356,4 @@ async def test_safety_net_reaps_stale_running_refresh_runs(monkeypatch):
     result = await task_module._async_dashboard_refresh_safety_net()
 
     assert result["reaped_stale_refresh_runs"] == 3
-    assert any(
-        "UPDATE ops.pipeline_run_log" in sql for sql in session.executed
-    )
+    assert any("UPDATE ops.pipeline_run_log" in sql for sql in session.executed)

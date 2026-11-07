@@ -129,27 +129,27 @@ def test_ingest_path_does_not_fall_back_to_loose_date_parser():
         "def ", 1
     )[0]
 
-    assert "self.extract_period_dates(" not in method_source, (
-        "入库路径不得回落到宽松解析(extract_period_dates)"
-    )
-    assert "prefer_dayfirst=True" not in source, (
-        "raw_data_importer 不得硬编码 prefer_dayfirst=True"
-    )
+    assert (
+        "self.extract_period_dates(" not in method_source
+    ), "入库路径不得回落到宽松解析(extract_period_dates)"
+    assert (
+        "prefer_dayfirst=True" not in source
+    ), "raw_data_importer 不得硬编码 prefer_dayfirst=True"
 
 
 def test_ingest_path_without_rules_and_without_period_fails_loudly():
     """既无声明式规则又无文件期间 ⇒ 明确失败, 不猜。"""
     import backend.services.raw_data_importer as importer_module
 
-    importer = importer_module.RawDataImporter.__new__(
-        importer_module.RawDataImporter
-    )
+    importer = importer_module.RawDataImporter.__new__(importer_module.RawDataImporter)
     importer.field_parse_rules = []
     importer.file_date_from = None
     importer.file_date_to = None
 
     with pytest.raises(ValueError) as excinfo:
-        importer._resolve_period_dates_for_insert({"日期": "01/10/2026"}, ["日期"], "monthly")
+        importer._resolve_period_dates_for_insert(
+            {"日期": "01/10/2026"}, ["日期"], "monthly"
+        )
 
     assert "refusing to guess" in str(excinfo.value)
 
@@ -158,9 +158,7 @@ def test_ingest_path_with_declared_rules_is_unaffected():
     """有声明式规则时仍走严格声明式(批次 A 的口径)。"""
     import backend.services.raw_data_importer as importer_module
 
-    importer = importer_module.RawDataImporter.__new__(
-        importer_module.RawDataImporter
-    )
+    importer = importer_module.RawDataImporter.__new__(importer_module.RawDataImporter)
     importer.field_parse_rules = [
         {
             "target_field": "metric_date",
@@ -173,7 +171,9 @@ def test_ingest_path_with_declared_rules_is_unaffected():
     importer.file_date_to = date(2026, 10, 31)
 
     metric_date, period_start, period_end, _, _ = (
-        importer._resolve_period_dates_for_insert({"日期": "01-10-2026"}, ["日期"], "monthly")
+        importer._resolve_period_dates_for_insert(
+            {"日期": "01-10-2026"}, ["日期"], "monthly"
+        )
     )
 
     assert metric_date == date(2026, 10, 1)

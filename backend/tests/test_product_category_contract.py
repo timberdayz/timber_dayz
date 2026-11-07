@@ -36,24 +36,69 @@ APPROVED_V1_CATEGORIES = {
     "BEAUTY_SKINCARE": ("BEAUTY_PERSONAL_CARE", 2, "护肤", "美妆个护/护肤"),
     "BEAUTY_MAKEUP": ("BEAUTY_PERSONAL_CARE", 2, "彩妆", "美妆个护/彩妆"),
     "BEAUTY_TOOLS": ("BEAUTY_PERSONAL_CARE", 2, "美妆工具", "美妆个护/美妆工具"),
-    "BEAUTY_HAIRCARE_STYLING": ("BEAUTY_PERSONAL_CARE", 2, "洗护造型", "美妆个护/洗护造型"),
-    "BEAUTY_PERSONAL_HYGIENE": ("BEAUTY_PERSONAL_CARE", 2, "个人清洁护理", "美妆个护/个人清洁护理"),
-    "BEAUTY_DEVICES": ("BEAUTY_PERSONAL_CARE", 2, "美容个护电器", "美妆个护/美容个护电器"),
+    "BEAUTY_HAIRCARE_STYLING": (
+        "BEAUTY_PERSONAL_CARE",
+        2,
+        "洗护造型",
+        "美妆个护/洗护造型",
+    ),
+    "BEAUTY_PERSONAL_HYGIENE": (
+        "BEAUTY_PERSONAL_CARE",
+        2,
+        "个人清洁护理",
+        "美妆个护/个人清洁护理",
+    ),
+    "BEAUTY_DEVICES": (
+        "BEAUTY_PERSONAL_CARE",
+        2,
+        "美容个护电器",
+        "美妆个护/美容个护电器",
+    ),
     "FASHION_ACCESSORIES": (None, 1, "服饰鞋包配饰", "服饰鞋包配饰"),
     "FASHION_WOMENSWEAR": ("FASHION_ACCESSORIES", 2, "女装", "服饰鞋包配饰/女装"),
     "FASHION_MENSWEAR": ("FASHION_ACCESSORIES", 2, "男装", "服饰鞋包配饰/男装"),
-    "FASHION_UNDERWEAR_SLEEPWEAR": ("FASHION_ACCESSORIES", 2, "内衣家居服", "服饰鞋包配饰/内衣家居服"),
+    "FASHION_UNDERWEAR_SLEEPWEAR": (
+        "FASHION_ACCESSORIES",
+        2,
+        "内衣家居服",
+        "服饰鞋包配饰/内衣家居服",
+    ),
     "FASHION_SHOES": ("FASHION_ACCESSORIES", 2, "鞋靴", "服饰鞋包配饰/鞋靴"),
-    "FASHION_BAGS_LUGGAGE": ("FASHION_ACCESSORIES", 2, "箱包旅行", "服饰鞋包配饰/箱包旅行"),
-    "FASHION_JEWELRY_ACCESSORIES": ("FASHION_ACCESSORIES", 2, "时尚配饰", "服饰鞋包配饰/时尚配饰"),
-    "FASHION_MODEST_TRADITIONAL": ("FASHION_ACCESSORIES", 2, "穆斯林与传统服饰", "服饰鞋包配饰/穆斯林与传统服饰"),
+    "FASHION_BAGS_LUGGAGE": (
+        "FASHION_ACCESSORIES",
+        2,
+        "箱包旅行",
+        "服饰鞋包配饰/箱包旅行",
+    ),
+    "FASHION_JEWELRY_ACCESSORIES": (
+        "FASHION_ACCESSORIES",
+        2,
+        "时尚配饰",
+        "服饰鞋包配饰/时尚配饰",
+    ),
+    "FASHION_MODEST_TRADITIONAL": (
+        "FASHION_ACCESSORIES",
+        2,
+        "穆斯林与传统服饰",
+        "服饰鞋包配饰/穆斯林与传统服饰",
+    ),
     "SPORTS_OUTDOORS": (None, 1, "运动户外", "运动户外"),
     "SPORTS_FITNESS": ("SPORTS_OUTDOORS", 2, "运动健身", "运动户外/运动健身"),
     "SPORTS_CAMPING_HIKING": ("SPORTS_OUTDOORS", 2, "露营徒步", "运动户外/露营徒步"),
     "SPORTS_BALL_RACKET": ("SPORTS_OUTDOORS", 2, "球类运动", "运动户外/球类运动"),
-    "SPORTS_CYCLING_WHEELED": ("SPORTS_OUTDOORS", 2, "骑行与轮滑", "运动户外/骑行与轮滑"),
+    "SPORTS_CYCLING_WHEELED": (
+        "SPORTS_OUTDOORS",
+        2,
+        "骑行与轮滑",
+        "运动户外/骑行与轮滑",
+    ),
     "SPORTS_WATER": ("SPORTS_OUTDOORS", 2, "水上运动", "运动户外/水上运动"),
-    "SPORTS_PROTECTION_ACCESSORIES": ("SPORTS_OUTDOORS", 2, "运动防护配件", "运动户外/运动防护配件"),
+    "SPORTS_PROTECTION_ACCESSORIES": (
+        "SPORTS_OUTDOORS",
+        2,
+        "运动防护配件",
+        "运动户外/运动防护配件",
+    ),
     "PET_SUPPLIES": (None, 1, "宠物用品", "宠物用品"),
     "PET_FEEDING": ("PET_SUPPLIES", 2, "喂养用品", "宠物用品/喂养用品"),
     "PET_CLEANING_TOILETING": ("PET_SUPPLIES", 2, "清洁如厕", "宠物用品/清洁如厕"),
@@ -75,12 +120,42 @@ APPROVED_V1_CATEGORIES = {
     "TOYS_GAMES_PUZZLES": ("TOYS_HOBBIES", 2, "游戏拼图", "玩具爱好/游戏拼图"),
     "HOBBIES_COLLECTIBLES": ("TOYS_HOBBIES", 2, "兴趣收藏", "玩具爱好/兴趣收藏"),
     "ELECTRONICS_ACCESSORIES": (None, 1, "数码与配件", "数码与配件"),
-    "ELEC_MOBILE_TABLET_ACCESSORIES": ("ELECTRONICS_ACCESSORIES", 2, "手机平板配件", "数码与配件/手机平板配件"),
-    "ELEC_AUDIO_VIDEO": ("ELECTRONICS_ACCESSORIES", 2, "影音设备", "数码与配件/影音设备"),
-    "ELEC_SMART_WEARABLE": ("ELECTRONICS_ACCESSORIES", 2, "智能穿戴", "数码与配件/智能穿戴"),
-    "ELEC_CAMERA_ACCESSORIES": ("ELECTRONICS_ACCESSORIES", 2, "相机配件", "数码与配件/相机配件"),
-    "ELEC_COMPUTER_OFFICE": ("ELECTRONICS_ACCESSORIES", 2, "电脑办公数码", "数码与配件/电脑办公数码"),
-    "ELEC_SMART_HOME": ("ELECTRONICS_ACCESSORIES", 2, "智能家居", "数码与配件/智能家居"),
+    "ELEC_MOBILE_TABLET_ACCESSORIES": (
+        "ELECTRONICS_ACCESSORIES",
+        2,
+        "手机平板配件",
+        "数码与配件/手机平板配件",
+    ),
+    "ELEC_AUDIO_VIDEO": (
+        "ELECTRONICS_ACCESSORIES",
+        2,
+        "影音设备",
+        "数码与配件/影音设备",
+    ),
+    "ELEC_SMART_WEARABLE": (
+        "ELECTRONICS_ACCESSORIES",
+        2,
+        "智能穿戴",
+        "数码与配件/智能穿戴",
+    ),
+    "ELEC_CAMERA_ACCESSORIES": (
+        "ELECTRONICS_ACCESSORIES",
+        2,
+        "相机配件",
+        "数码与配件/相机配件",
+    ),
+    "ELEC_COMPUTER_OFFICE": (
+        "ELECTRONICS_ACCESSORIES",
+        2,
+        "电脑办公数码",
+        "数码与配件/电脑办公数码",
+    ),
+    "ELEC_SMART_HOME": (
+        "ELECTRONICS_ACCESSORIES",
+        2,
+        "智能家居",
+        "数码与配件/智能家居",
+    ),
     "FOOD_BEVERAGE": (None, 1, "食品饮料", "食品饮料"),
     "FOOD_SNACKS_CONFECTIONERY": ("FOOD_BEVERAGE", 2, "休闲食品", "食品饮料/休闲食品"),
     "FOOD_BEVERAGES": ("FOOD_BEVERAGE", 2, "饮品", "食品饮料/饮品"),
@@ -88,27 +163,84 @@ APPROVED_V1_CATEGORIES = {
     "FOOD_TEA_COFFEE": ("FOOD_BEVERAGE", 2, "茶咖冲饮", "食品饮料/茶咖冲饮"),
     "HEALTH_WELLNESS": (None, 1, "健康护理", "健康护理"),
     "HEALTH_SUPPLEMENTS": ("HEALTH_WELLNESS", 2, "营养补充", "健康护理/营养补充"),
-    "HEALTH_CARE_DEVICES": ("HEALTH_WELLNESS", 2, "健康护理设备", "健康护理/健康护理设备"),
-    "HEALTH_PROTECTION_FIRST_AID": ("HEALTH_WELLNESS", 2, "防护急救用品", "健康护理/防护急救用品"),
+    "HEALTH_CARE_DEVICES": (
+        "HEALTH_WELLNESS",
+        2,
+        "健康护理设备",
+        "健康护理/健康护理设备",
+    ),
+    "HEALTH_PROTECTION_FIRST_AID": (
+        "HEALTH_WELLNESS",
+        2,
+        "防护急救用品",
+        "健康护理/防护急救用品",
+    ),
     "TOOLS_HOME_IMPROVEMENT": (None, 1, "工具家装园艺", "工具家装园艺"),
-    "TOOLS_HAND_POWER": ("TOOLS_HOME_IMPROVEMENT", 2, "手动与电动工具", "工具家装园艺/手动与电动工具"),
-    "TOOLS_HARDWARE": ("TOOLS_HOME_IMPROVEMENT", 2, "五金配件", "工具家装园艺/五金配件"),
-    "HOME_IMPROVEMENT_ELECTRICAL_LIGHTING": ("TOOLS_HOME_IMPROVEMENT", 2, "家装电工照明", "工具家装园艺/家装电工照明"),
-    "GARDEN_OUTDOOR_LIVING": ("TOOLS_HOME_IMPROVEMENT", 2, "园艺户外生活", "工具家装园艺/园艺户外生活"),
+    "TOOLS_HAND_POWER": (
+        "TOOLS_HOME_IMPROVEMENT",
+        2,
+        "手动与电动工具",
+        "工具家装园艺/手动与电动工具",
+    ),
+    "TOOLS_HARDWARE": (
+        "TOOLS_HOME_IMPROVEMENT",
+        2,
+        "五金配件",
+        "工具家装园艺/五金配件",
+    ),
+    "HOME_IMPROVEMENT_ELECTRICAL_LIGHTING": (
+        "TOOLS_HOME_IMPROVEMENT",
+        2,
+        "家装电工照明",
+        "工具家装园艺/家装电工照明",
+    ),
+    "GARDEN_OUTDOOR_LIVING": (
+        "TOOLS_HOME_IMPROVEMENT",
+        2,
+        "园艺户外生活",
+        "工具家装园艺/园艺户外生活",
+    ),
     "AUTOMOTIVE_MOTORCYCLE": (None, 1, "汽摩用品", "汽摩用品"),
-    "AUTO_INTERIOR_EXTERIOR": ("AUTOMOTIVE_MOTORCYCLE", 2, "汽车内外饰", "汽摩用品/汽车内外饰"),
-    "AUTO_CARE_MAINTENANCE": ("AUTOMOTIVE_MOTORCYCLE", 2, "汽车清洁养护", "汽摩用品/汽车清洁养护"),
-    "MOTORCYCLE_RIDING_ACCESSORIES": ("AUTOMOTIVE_MOTORCYCLE", 2, "摩托骑行配件", "汽摩用品/摩托骑行配件"),
+    "AUTO_INTERIOR_EXTERIOR": (
+        "AUTOMOTIVE_MOTORCYCLE",
+        2,
+        "汽车内外饰",
+        "汽摩用品/汽车内外饰",
+    ),
+    "AUTO_CARE_MAINTENANCE": (
+        "AUTOMOTIVE_MOTORCYCLE",
+        2,
+        "汽车清洁养护",
+        "汽摩用品/汽车清洁养护",
+    ),
+    "MOTORCYCLE_RIDING_ACCESSORIES": (
+        "AUTOMOTIVE_MOTORCYCLE",
+        2,
+        "摩托骑行配件",
+        "汽摩用品/摩托骑行配件",
+    ),
     "OFFICE_SCHOOL_SUPPLIES": (None, 1, "办公文教", "办公文教"),
     "OFFICE_STATIONERY": ("OFFICE_SCHOOL_SUPPLIES", 2, "文具办公", "办公文教/文具办公"),
-    "OFFICE_SCHOOL_LEARNING": ("OFFICE_SCHOOL_SUPPLIES", 2, "学习教育", "办公文教/学习教育"),
-    "OFFICE_PRINTING_PACKAGING": ("OFFICE_SCHOOL_SUPPLIES", 2, "打印包装耗材", "办公文教/打印包装耗材"),
+    "OFFICE_SCHOOL_LEARNING": (
+        "OFFICE_SCHOOL_SUPPLIES",
+        2,
+        "学习教育",
+        "办公文教/学习教育",
+    ),
+    "OFFICE_PRINTING_PACKAGING": (
+        "OFFICE_SCHOOL_SUPPLIES",
+        2,
+        "打印包装耗材",
+        "办公文教/打印包装耗材",
+    ),
 }
 
 
 def _load_taxonomy_migration():
     assert MIGRATION_PATH.exists(), "the v1 taxonomy migration must exist"
-    spec = importlib.util.spec_from_file_location("internal_product_category_taxonomy_v1", MIGRATION_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "internal_product_category_taxonomy_v1", MIGRATION_PATH
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -203,7 +335,14 @@ def test_spu_and_sku_master_data_include_cost_and_loss_drivers():
 
 
 def test_bulk_requests_are_explicit_and_non_empty():
-    assert len(SpuBulkRequest(items=[SpuCreateRequest(spu="HOME-0001", spu_name="收纳")]).items) == 1
+    assert (
+        len(
+            SpuBulkRequest(
+                items=[SpuCreateRequest(spu="HOME-0001", spu_name="收纳")]
+            ).items
+        )
+        == 1
+    )
     assert len(SkuBulkRequest(items=[]).items) == 0
 
 

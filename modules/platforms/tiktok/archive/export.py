@@ -38,21 +38,41 @@ class TiktokExporterComponent(ExportComponent):
             is_vis = False
         # explicit disabled detection
         try:
-            aria_disabled = (await el.get_attribute("aria-disabled") or "").lower() == "true"
+            aria_disabled = (
+                await el.get_attribute("aria-disabled") or ""
+            ).lower() == "true"
             has_disabled_attr = await el.get_attribute("disabled") is not None
             klass = (await el.get_attribute("class") or "").lower()
             # handle both theme-arco-btn-disabled and arco-btn-disabled etc.
-            class_disabled = any(sub in klass for sub in ("theme-arco-btn-disabled", "arco-btn-disabled", "is-disabled", " disabled", "-disabled"))
+            class_disabled = any(
+                sub in klass
+                for sub in (
+                    "theme-arco-btn-disabled",
+                    "arco-btn-disabled",
+                    "is-disabled",
+                    " disabled",
+                    "-disabled",
+                )
+            )
             style_attr = (await el.get_attribute("style") or "").lower()
-            style_block = ("pointer-events: none" in style_attr) or ("not-allowed" in style_attr)
+            style_block = ("pointer-events: none" in style_attr) or (
+                "not-allowed" in style_attr
+            )
         except Exception:
             aria_disabled = False
             has_disabled_attr = False
             class_disabled = False
             style_block = False
-        return bool(is_vis and not (aria_disabled or has_disabled_attr or class_disabled or style_block))
+        return bool(
+            is_vis
+            and not (
+                aria_disabled or has_disabled_attr or class_disabled or style_block
+            )
+        )
 
-    async def _first_click(self, page: Any, selectors: Iterable[str], *, timeout: int = 5000) -> bool:
+    async def _first_click(
+        self, page: Any, selectors: Iterable[str], *, timeout: int = 5000
+    ) -> bool:
         """Click the first visible AND enabled element among selectors.
         Avoid clicking greyed/disabled buttons that would never trigger download.
         """
@@ -116,13 +136,21 @@ class TiktokExporterComponent(ExportComponent):
                 continue
         return False
 
-    async def _wait_service_analytics_ready(self, page: Any, service_sel: Any, export_buttons: Iterable[str]) -> None:
+    async def _wait_service_analytics_ready(
+        self, page: Any, service_sel: Any, export_buttons: Iterable[str]
+    ) -> None:
         probes = list(
             dict.fromkeys(
                 [
-                    *list(getattr(service_sel, "DATA_READY_PROBES", getattr(service_sel, "data_ready_probes", []))),
+                    *list(
+                        getattr(
+                            service_sel,
+                            "DATA_READY_PROBES",
+                            getattr(service_sel, "data_ready_probes", []),
+                        )
+                    ),
                     "[role='tab'][aria-selected='true']:has-text(\"聊天详情\")",
-                    ".theme-arco-tabs-header-title-active:has-text(\"聊天详情\")",
+                    '.theme-arco-tabs-header-title-active:has-text("聊天详情")',
                     *list(export_buttons),
                 ]
             )
@@ -138,14 +166,23 @@ class TiktokExporterComponent(ExportComponent):
         except Exception:
             pass
 
-    def _write_manifest(self, target: Path, cfg: dict, account_label: str, shop_name: str, data_type: str) -> None:
+    def _write_manifest(
+        self,
+        target: Path,
+        cfg: dict,
+        account_label: str,
+        shop_name: str,
+        data_type: str,
+    ) -> None:
         try:
             from datetime import datetime
+
             meta = {
                 "platform": getattr(self.ctx, "platform", "tiktok"),
                 "account_label": account_label,
                 "shop_name": shop_name,
-                "shop_id": (self.ctx.config or {}).get("shop_id") or (self.ctx.account or {}).get("shop_id"),
+                "shop_id": (self.ctx.config or {}).get("shop_id")
+                or (self.ctx.account or {}).get("shop_id"),
                 "region": (self.ctx.config or {}).get("shop_region")
                 or (self.ctx.account or {}).get("shop_region")
                 or (self.ctx.account or {}).get("region"),
@@ -189,9 +226,15 @@ class TiktokExporterComponent(ExportComponent):
         """
         try:
             # Load selectors from all tiktok configs
-            from modules.platforms.tiktok.components.products_config import ProductsSelectors
-            from modules.platforms.tiktok.components.analytics_config import AnalyticsSelectors
-            from modules.platforms.tiktok.components.service_config import ServiceSelectors
+            from modules.platforms.tiktok.components.products_config import (
+                ProductsSelectors,
+            )
+            from modules.platforms.tiktok.components.analytics_config import (
+                AnalyticsSelectors,
+            )
+            from modules.platforms.tiktok.components.service_config import (
+                ServiceSelectors,
+            )
 
             products_sel = ProductsSelectors()
             analytics_sel = AnalyticsSelectors()
@@ -221,16 +264,24 @@ class TiktokExporterComponent(ExportComponent):
                     [
                         *list(getattr(products_sel, "download_buttons", [])),
                         *list(
-                            getattr(analytics_sel, "DOWNLOAD_BUTTON_SELECTORS", getattr(analytics_sel, "download_buttons", []))
+                            getattr(
+                                analytics_sel,
+                                "DOWNLOAD_BUTTON_SELECTORS",
+                                getattr(analytics_sel, "download_buttons", []),
+                            )
                         ),
                         *list(
-                            getattr(service_sel, "DOWNLOAD_BUTTON_SELECTORS", getattr(service_sel, "download_buttons", []))
+                            getattr(
+                                service_sel,
+                                "DOWNLOAD_BUTTON_SELECTORS",
+                                getattr(service_sel, "download_buttons", []),
+                            )
                         ),
                         # 额外兜底
-                        "button:has-text(\"确认\")",
-                        "button:has-text(\"确定\")",
-                        "button:has-text(\"导出\")",
-                        "button:has-text(\"Export\")",
+                        'button:has-text("确认")',
+                        'button:has-text("确定")',
+                        'button:has-text("导出")',
+                        'button:has-text("Export")',
                     ]
                 )
             )
@@ -240,8 +291,20 @@ class TiktokExporterComponent(ExportComponent):
                 dict.fromkeys(
                     [
                         *list(getattr(products_sel, "data_ready_probes", [])),
-                        *list(getattr(analytics_sel, "DATA_READY_PROBES", getattr(analytics_sel, "data_ready_probes", []))),
-                        *list(getattr(service_sel, "DATA_READY_PROBES", getattr(service_sel, "data_ready_probes", []))),
+                        *list(
+                            getattr(
+                                analytics_sel,
+                                "DATA_READY_PROBES",
+                                getattr(analytics_sel, "data_ready_probes", []),
+                            )
+                        ),
+                        *list(
+                            getattr(
+                                service_sel,
+                                "DATA_READY_PROBES",
+                                getattr(service_sel, "data_ready_probes", []),
+                            )
+                        ),
                     ]
                 )
             )
@@ -262,11 +325,11 @@ class TiktokExporterComponent(ExportComponent):
             if "/service-analytics" in _u:
                 switched = False
                 for sel in [
-                    ".theme-m4b-tabs .theme-arco-tabs-header-title:has(.theme-arco-tabs-header-title-text:has-text(\"聊天详情\"))",
-                    ".theme-arco-tabs-header-title:has(span.theme-arco-tabs-header-title-text:has-text(\"聊天详情\"))",
+                    '.theme-m4b-tabs .theme-arco-tabs-header-title:has(.theme-arco-tabs-header-title-text:has-text("聊天详情"))',
+                    '.theme-arco-tabs-header-title:has(span.theme-arco-tabs-header-title-text:has-text("聊天详情"))',
                     "[role='tab']:has-text(\"聊天详情\")",
-                    "button:has-text(\"聊天详情\")",
-                    "a:has-text(\"聊天详情\")",
+                    'button:has-text("聊天详情")',
+                    'a:has-text("聊天详情")',
                     "text=聊天详情",
                 ]:
                     try:
@@ -277,13 +340,16 @@ class TiktokExporterComponent(ExportComponent):
                         continue
                 if not switched:
                     try:
-                        await page.get_by_role("tab", name="聊天详情").click(timeout=2500)
+                        await page.get_by_role("tab", name="聊天详情").click(
+                            timeout=2500
+                        )
                         switched = True
                     except Exception:
                         pass
                 if switched:
-                    await self._wait_service_analytics_ready(page, service_sel, export_buttons)
-
+                    await self._wait_service_analytics_ready(
+                        page, service_sel, export_buttons
+                    )
 
             # Before waiting for download, ensure export is available and enabled
             try:
@@ -293,7 +359,9 @@ class TiktokExporterComponent(ExportComponent):
 
             # Probe export button state without clicking; if none clickable on service-analytics, treat as no data and skip
             # Only consider button-like selectors during precheck to avoid matching wrapper spans by "text=..."
-            precheck_selectors = [s for s in export_buttons if not s.startswith("text=")]
+            precheck_selectors = [
+                s for s in export_buttons if not s.startswith("text=")
+            ]
             has_clickable_export = False
             disabled_found = False
             for sel in precheck_selectors:
@@ -307,14 +375,24 @@ class TiktokExporterComponent(ExportComponent):
                         else:
                             # record disabled state for later decision
                             try:
-                                aria_disabled = (await el.get_attribute("aria-disabled") or "").lower() == "true"
-                                has_disabled_attr = await el.get_attribute("disabled") is not None
+                                aria_disabled = (
+                                    await el.get_attribute("aria-disabled") or ""
+                                ).lower() == "true"
+                                has_disabled_attr = (
+                                    await el.get_attribute("disabled") is not None
+                                )
                                 klass = (await el.get_attribute("class") or "").lower()
-                                style_attr = (await el.get_attribute("style") or "").lower()
+                                style_attr = (
+                                    await el.get_attribute("style") or ""
+                                ).lower()
                                 if (
                                     aria_disabled
                                     or has_disabled_attr
-                                    or ("-disabled" in klass or "theme-arco-btn-disabled" in klass or "arco-btn-disabled" in klass)
+                                    or (
+                                        "-disabled" in klass
+                                        or "theme-arco-btn-disabled" in klass
+                                        or "arco-btn-disabled" in klass
+                                    )
                                     or ("pointer-events: none" in style_attr)
                                 ):
                                     disabled_found = True
@@ -326,7 +404,7 @@ class TiktokExporterComponent(ExportComponent):
             # Additional page-wide disabled evidence (service analytics often wraps button in span with cursor: not-allowed)
             try:
                 page_disabled_probe = page.locator(
-                    "button:has-text(\"导出数据\")[disabled], button[disabled]:has-text(\"Export\"), .theme-arco-btn-disabled:has-text(\"导出\"), span[style*='not-allowed'] >> button:has-text(\"导出数据\")"
+                    'button:has-text("导出数据")[disabled], button[disabled]:has-text("Export"), .theme-arco-btn-disabled:has-text("导出"), span[style*=\'not-allowed\'] >> button:has-text("导出数据")'
                 )
                 if await page_disabled_probe.count() > 0:
                     disabled_found = True
@@ -351,16 +429,26 @@ class TiktokExporterComponent(ExportComponent):
             default_timeout = 90000
             timeout_ms = int(
                 cfg.get("export_timeout_ms")
-                or (240000 if (cfg.get("one_click") or days >= 28 or str(cfg.get("granularity") or "").lower() == "monthly") else default_timeout)
+                or (
+                    240000
+                    if (
+                        cfg.get("one_click")
+                        or days >= 28
+                        or str(cfg.get("granularity") or "").lower() == "monthly"
+                    )
+                    else default_timeout
+                )
             )
 
             # 2) Install global download taps (page + context)
             _latest: dict[str, Any] = {"dl": None}
+
             def _on_dl(ev):
                 try:
                     _latest["dl"] = ev
                 except Exception:
                     pass
+
             try:
                 page.on("download", _on_dl)
             except Exception:
@@ -379,8 +467,12 @@ class TiktokExporterComponent(ExportComponent):
                 try:
                     async with page.expect_download(timeout=timeout_ms) as dl_info:
                         # Now click export and then any confirm/download buttons
-                        if not await self._first_click(page, export_buttons, timeout=8000):
-                            return self._build_error_result("export button not found or disabled")
+                        if not await self._first_click(
+                            page, export_buttons, timeout=8000
+                        ):
+                            return self._build_error_result(
+                                "export button not found or disabled"
+                            )
                         try:
                             await page.wait_for_timeout(800)
                         except Exception:
@@ -394,9 +486,13 @@ class TiktokExporterComponent(ExportComponent):
                             page.locator(".arco-modal-footer").last,
                         ]
                         for _ in range(2):
-                            if await self._first_click_in_scopes(page, dialog_scopes, download_buttons, timeout=3000):
+                            if await self._first_click_in_scopes(
+                                page, dialog_scopes, download_buttons, timeout=3000
+                            ):
                                 break
-                            if await self._first_click(page, download_buttons, timeout=3000):
+                            if await self._first_click(
+                                page, download_buttons, timeout=3000
+                            ):
                                 break
                             try:
                                 await page.wait_for_timeout(400)
@@ -420,16 +516,22 @@ class TiktokExporterComponent(ExportComponent):
                     raise
 
             if download is None:
-                return self._build_error_result(f"download timeout after {timeout_ms}ms")
+                return self._build_error_result(
+                    f"download timeout after {timeout_ms}ms"
+                )
 
             # Infer data_type from URL
-            url = str(getattr(page, 'url', ''))
-            data_type = self._infer_data_type(url, getattr(products_sel, 'data_type_dir', 'products'))
+            url = str(getattr(page, "url", ""))
+            data_type = self._infer_data_type(
+                url, getattr(products_sel, "data_type_dir", "products")
+            )
 
             # Compute output dir
             cfg = self.ctx.config or {}
             gran = (cfg.get("granularity") or "range").lower()
-            out_root: Path = build_standard_output_root(self.ctx, data_type=data_type, granularity=gran)
+            out_root: Path = build_standard_output_root(
+                self.ctx, data_type=data_type, granularity=gran
+            )
             out_root.mkdir(parents=True, exist_ok=True)
 
             # Save to temp then normalize filename
@@ -439,8 +541,14 @@ class TiktokExporterComponent(ExportComponent):
 
             # Build normalized filename
             from datetime import datetime as _dt
+
             account = self.ctx.account or {}
-            account_label = account.get("label") or account.get("store_name") or account.get("username") or "unknown"
+            account_label = (
+                account.get("label")
+                or account.get("store_name")
+                or account.get("username")
+                or "unknown"
+            )
             # 优先使用上下文中的规范化店铺名(店铺名__区域/代码)
             shop_name = (
                 (self.ctx.config or {}).get("shop_name")
@@ -468,6 +576,7 @@ class TiktokExporterComponent(ExportComponent):
                 tmp_path.rename(target)
             except Exception:
                 import shutil
+
                 shutil.copy2(tmp_path, target)
                 try:
                     tmp_path.unlink(missing_ok=True)

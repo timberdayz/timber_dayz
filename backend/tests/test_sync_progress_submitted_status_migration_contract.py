@@ -32,7 +32,9 @@ CURRENT_BASELINE_REVISION = "current_schema_20260805"
 def _find_sync_progress_submitted_migration() -> Path:
     versions_dir = Path("migrations/versions")
     matches = sorted(versions_dir.glob("*sync*progress*submitted*.py"))
-    assert matches, "expected a sync-progress submitted-status migration in migrations/versions"
+    assert (
+        matches
+    ), "expected a sync-progress submitted-status migration in migrations/versions"
     return matches[-1]
 
 
