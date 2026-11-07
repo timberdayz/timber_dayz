@@ -2264,3 +2264,64 @@ CNB 镜像由 deploy 工作流自己推送）。所以「打 tag」等价于「�
 由 CI 在 tag 触发的构建流程兜底。
 
 ---
+
+### E.12 发版日补记：CI 格式门禁与「源文本断言」的冲突
+
+tag 推上 GitHub 后，main 分支的 CI（run 42333221723）红了。
+**红的两个点都不是这次改动引入的**，但其中一个必须当场修掉才能让后续 push 不再红。
+
+#### E.12.1 红点一：`Code formatting check` 失败（仓库既有的 black 漂移）
+
+CI 的做法是 `black --quiet <改动的 py 文件>` 之后 `git diff --exit-code`
+⇒ **改动的 Python 文件必须已经是 black 格式化过的**。
+
+- 本仓库 `pyproject.toml` 配的就是 `line-length = 88`，本机 black 25.1.0，
+  与 CI 装的版本、配置完全一致 ⇒ 不是版本漂移。
+- **但 `scripts/run_lint.py` 只跑 ruff，从不跑 black**
+  ⇒ 本地任何一次「lint 通过」都不能证明格式门禁会过。这是本轮第一次撞上的盲区。
+- 量化：本次改动的 91 个 py 文件里 **69 个未通过 black**。
+  其中 **34 个在 v7.15.4 时点就已不合规**（既有漂移），
+  另外 35 个是本次新增的文件（商品中心与店铺身份两条线都有）。
+- 旁证：v7.15.3 那次 main 推送的 CI 同样是红的 ⇒ 不是本轮引入。
+
+#### E.12.2 红点二：pytest 失败 1 条（看板域既有失败）
+
+`backend/tests/data_pipeline/test_dashboard_router_switch.py::test_switched_app_serves_real_postgresql_dashboard_routes`
+（`assert 500 == 200`）。
+这条在 **main 的既有回归基线里就是失败**（`pcreg3/main-26.xml` 有 FAIL 记录），
+属于**看板域的既有失败**，不是本次引入。
+CI 的 `test` job 没有起 PostgreSQL service，而这条用例要真库才能跑通。
+
+#### E.12.3 顺带暴露的第三个冲突：源文本断言 vs black
+
+把 69 个文件跑完 black 之后，
+`test_product_pricing_guardrails.py::test_router_exposes_pricing_policy_routes`
+**从通过变成失败**：它用源码文本匹配路由装饰器
+（`assert '@router.get("/api/sku-pricing-policies/current"' in source`），
+而 black 会把 `@router.get("...", response_model=...)` 按行宽拆成多行，字符串不再连续。
+
+⇒ **CI 的 black 门禁与这条源文本断言天然互相打架**：
+只要某个 push 同时改了路由文件和这条测试，就必然红。
+
+**修法**：把该用例从「源码文本匹配」改成 **AST 解析**——
+遍历装饰器里的 `router.get/post/put` 调用，取第一个常量参数当路径，
+再看关键字参数里有没有 `response_model`。只看结构、不看排版，与 black 完全解耦。
+
+#### E.12.4 本次做了什么
+
+- 对本次改动的 91 个 py 文件跑 black（实际改动 69 个文件，纯排版，语义不变）。
+- 把那条源文本断言改成 AST 断言。
+- 复验：CI 同款 pytest（41 个改动测试文件）**598 passed / 1 failed**，
+  与格式化前**逐条一致**，唯一失败就是 E.12.2 那条既有看板失败；
+  `scripts/run_lint.py` 通过；91 个文件 `black --check` 全过。
+
+#### E.12.5 还没解决的（留给后续，本次没动）
+
+CI 仍会因为 E.12.2 那条看板用例红。需要单独决定怎么改，二选一：
+
+- 给 CI 的 `test` job 加 PostgreSQL service（改 `.github/workflows/ci.yml`），让这条用例能跑通；
+- 或把该用例在没有真库时标记为 skip（改测试本身）。
+
+⚠️ 这属于**发版工具链 / 看板域**，不在本方案范围内。
+
+---
