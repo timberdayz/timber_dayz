@@ -56,7 +56,14 @@ async def test_batch_remediation_creates_one_enabled_headless_config_per_uncover
     assert ph_config.execution_mode == "headless"
     assert ph_config.is_active is True
     assert ph_config.granularity == "daily"
-    assert ph_config.data_domains == ["analytics", "finance", "inventory", "orders", "products"]
+    assert ph_config.data_domains == [
+        "analytics",
+        "finance",
+        "inventory",
+        "orders",
+        "products",
+        "purchase",
+    ]
     assert ph_config.sub_domains == {"orders": ["shopee", "tiktok"]}
 
 

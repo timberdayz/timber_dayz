@@ -4,7 +4,15 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from modules.core.db import CollectionConfig, MainAccount, ShopAccount, ShopAccountCapability
+from modules.core.db import (
+    CollectionConfig,
+    CollectionConfigRun,
+    CollectionConfigShopScope,
+    CollectionTask,
+    MainAccount,
+    ShopAccount,
+    ShopAccountCapability,
+)
 
 
 @pytest_asyncio.fixture
@@ -18,6 +26,9 @@ async def collection_coverage_engine():
         await conn.run_sync(ShopAccount.__table__.create)
         await conn.run_sync(ShopAccountCapability.__table__.create)
         await conn.run_sync(CollectionConfig.__table__.create)
+        await conn.run_sync(CollectionConfigRun.__table__.create)
+        await conn.run_sync(CollectionConfigShopScope.__table__.create)
+        await conn.run_sync(CollectionTask.__table__.create)
 
     yield engine
     await engine.dispose()
@@ -125,10 +136,36 @@ async def _seed_accounts(session):
 
     shop_by_id = {shop.shop_account_id: shop for shop in shops}
 
+    # 能力表未显式声明的域会按默认值回填为启用（resolve_shop_capabilities），
+    # 因此这里显式写入关闭行，才能表达“该店铺仅支持指定数据域”。
+    capability_specs = {
+        "shop-sg-1": {
+            "orders": True,
+            "products": True,
+            "analytics": False,
+            "finance": False,
+            "services": False,
+            "inventory": False,
+            "purchase": False,
+        },
+        "shop-my-1": {
+            "orders": True,
+            "products": False,
+            "analytics": False,
+            "finance": False,
+            "services": False,
+            "inventory": False,
+            "purchase": False,
+        },
+    }
     capability_rows = [
-        ShopAccountCapability(shop_account_id=shop_by_id["shop-sg-1"].id, data_domain="orders", enabled=True),
-        ShopAccountCapability(shop_account_id=shop_by_id["shop-sg-1"].id, data_domain="products", enabled=True),
-        ShopAccountCapability(shop_account_id=shop_by_id["shop-my-1"].id, data_domain="orders", enabled=True),
+        ShopAccountCapability(
+            shop_account_id=shop_by_id[shop_account_id].id,
+            data_domain=data_domain,
+            enabled=enabled,
+        )
+        for shop_account_id, domains in capability_specs.items()
+        for data_domain, enabled in domains.items()
     ]
     for row in capability_rows:
         session.add(row)
@@ -137,6 +174,7 @@ async def _seed_accounts(session):
         CollectionConfig(
             name="daily-shop-sg-1",
             platform="shopee",
+            main_account_id="main-a",
             account_ids=["shop-sg-1"],
             data_domains=["orders"],
             granularity="daily",
@@ -149,6 +187,7 @@ async def _seed_accounts(session):
         CollectionConfig(
             name="weekly-shop-sg-1",
             platform="shopee",
+            main_account_id="main-a",
             account_ids=["shop-sg-1"],
             data_domains=["orders"],
             granularity="weekly",
@@ -161,6 +200,7 @@ async def _seed_accounts(session):
         CollectionConfig(
             name="monthly-shop-my-1",
             platform="shopee",
+            main_account_id="main-a",
             account_ids=["shop-my-1"],
             data_domains=["orders"],
             granularity="monthly",
@@ -242,4 +282,11 @@ async def test_collection_config_coverage_reports_missing_granularities_per_shop
     assert ph["monthly_covered"] is False
     assert ph["missing_granularities"] == ["daily", "weekly", "monthly"]
     assert ph["is_partially_covered"] is False
-    assert ph["recommended_domains"] == ["analytics", "finance", "inventory", "orders", "products"]
+    assert ph["recommended_domains"] == [
+        "analytics",
+        "finance",
+        "inventory",
+        "orders",
+        "products",
+        "purchase",
+    ]

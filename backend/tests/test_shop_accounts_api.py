@@ -6,7 +6,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.models.database import get_async_db
 from backend.routers import main_accounts, shop_accounts
-from modules.core.db import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability
+from modules.core.db import (
+    CollectionConfig,
+    CollectionConfigShopScope,
+    MainAccount,
+    ShopAccount,
+    ShopAccountAlias,
+    ShopAccountCapability,
+)
 
 
 class _FakeBusinessOverviewCache:
@@ -38,6 +45,9 @@ async def shop_account_client(monkeypatch):
         await conn.run_sync(ShopAccount.__table__.create)
         await conn.run_sync(ShopAccountAlias.__table__.create)
         await conn.run_sync(ShopAccountCapability.__table__.create)
+        # 停用店铺会联动 core.collection_config_shop_scopes，需要这些表存在
+        await conn.run_sync(CollectionConfig.__table__.create)
+        await conn.run_sync(CollectionConfigShopScope.__table__.create)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     app = FastAPI()
@@ -67,7 +77,7 @@ async def shop_account_client(monkeypatch):
     from backend.dependencies.auth import get_current_user
     app.dependency_overrides[get_current_user] = override_current_user
     monkeypatch.setattr(
-        "backend.routers.main_accounts.get_encryption_service",
+        "backend.domains.collection.routers.main_accounts.get_encryption_service",
         lambda: type("Enc", (), {"encrypt_password": lambda self, value: f"enc:{value}"})(),
     )
 

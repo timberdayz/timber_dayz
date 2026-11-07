@@ -4,6 +4,15 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _parse_string_array(text: str, prefix: str, label: str) -> list:
+    assert prefix in text, f"{label} definition not found"
+    remainder = text.split(prefix, 1)[1]
+    start = remainder.index("[")
+    end = remainder.index("]", start)
+    body = remainder[start + 1 : end]
+    return [item.strip().strip("'\"") for item in body.split(",") if item.strip()]
+
+
 def test_collection_tasks_closes_verification_dialog_after_resume_submission_ack():
     text = (
         PROJECT_ROOT
@@ -36,7 +45,16 @@ def test_collection_tasks_closes_verification_dialog_when_task_reaches_terminal_
         / "frontend/src/domains/collection/views/collection/CollectionTasks.vue"
     ).read_text(encoding="utf-8")
 
-    assert "const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled', 'partial_success']" in text
+    terminal_statuses = _parse_string_array(
+        text, "const TERMINAL_STATUSES = ", "TERMINAL_STATUSES"
+    )
+    assert {
+        "completed",
+        "failed",
+        "cancelled",
+        "partial_success",
+        "interrupted",
+    } <= set(terminal_statuses)
     assert "if (TERMINAL_STATUSES.includes(currentTaskFromList.status))" in text
     assert "verificationDialogVisible.value = false" in text
     assert "verificationSubmitting.value = false" in text

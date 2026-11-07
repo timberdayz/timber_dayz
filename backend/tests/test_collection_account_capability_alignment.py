@@ -1,9 +1,38 @@
 from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, timezone
 
+import asyncio
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+
+
+class _AsyncioProxy:
+    """只拦指定 asyncio 成员，其余透传——避免直接改全局 asyncio 模块。"""
+
+    def __init__(self, real_module, **overrides):
+        self._real = real_module
+        self._overrides = overrides
+
+    def __getattr__(self, name):
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(self._real, name)
+
+
+def _make_fake_account_runtime(capabilities):
+    """账号运行时加载替身（真身消费点：collection_tasks 模块内已按名导入）。"""
+
+    async def _fake_load_collection_account_runtime(account_id, *, db):
+        return {
+            "account_id": account_id,
+            "shop_account_id": account_id,
+            "main_account_id": "main-1",
+            "enabled": True,
+            "capabilities": dict(capabilities),
+        }
+
+    return _fake_load_collection_account_runtime
 
 
 class _FakeResult:
@@ -46,17 +75,6 @@ async def test_create_task_filters_domains_before_runtime_manifest_resolution(mo
 
     fake_db.refresh = AsyncMock(side_effect=_refresh)
 
-    class _FakeLoader:
-        async def load_account_async(self, account_id, db):
-            return {
-                "account_id": account_id,
-                "enabled": True,
-                "capabilities": {
-                    "orders": True,
-                    "services": False,
-                },
-            }
-
     class _FakeResolver:
         @classmethod
         def from_async_session(cls, db):
@@ -71,16 +89,16 @@ async def test_create_task_filters_domains_before_runtime_manifest_resolution(mo
         return MagicMock()
 
     monkeypatch.setattr(
-        "backend.services.account_loader_service.get_account_loader_service",
-        lambda: _FakeLoader(),
+        "backend.domains.collection.routers.collection_tasks.load_collection_account_runtime",
+        _make_fake_account_runtime({"orders": True, "services": False}),
     )
     monkeypatch.setattr(
         "backend.services.component_runtime_resolver.ComponentRuntimeResolver",
         _FakeResolver,
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks.asyncio.create_task",
-        _discard_background_task,
+        "backend.domains.collection.routers.collection_tasks.asyncio",
+        _AsyncioProxy(asyncio, create_task=_discard_background_task),
     )
 
     from backend.models.database import get_async_db
@@ -139,16 +157,6 @@ async def test_create_task_preserves_config_origin(monkeypatch):
 
     fake_db.refresh = AsyncMock(side_effect=_refresh)
 
-    class _FakeLoader:
-        async def load_account_async(self, account_id, db):
-            return {
-                "account_id": account_id,
-                "enabled": True,
-                "capabilities": {
-                    "orders": True,
-                },
-            }
-
     class _FakeResolver:
         @classmethod
         def from_async_session(cls, db):
@@ -162,16 +170,16 @@ async def test_create_task_preserves_config_origin(monkeypatch):
         return MagicMock()
 
     monkeypatch.setattr(
-        "backend.services.account_loader_service.get_account_loader_service",
-        lambda: _FakeLoader(),
+        "backend.domains.collection.routers.collection_tasks.load_collection_account_runtime",
+        _make_fake_account_runtime({"orders": True}),
     )
     monkeypatch.setattr(
         "backend.services.component_runtime_resolver.ComponentRuntimeResolver",
         _FakeResolver,
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks.asyncio.create_task",
-        _discard_background_task,
+        "backend.domains.collection.routers.collection_tasks.asyncio",
+        _AsyncioProxy(asyncio, create_task=_discard_background_task),
     )
 
     from backend.models.database import get_async_db

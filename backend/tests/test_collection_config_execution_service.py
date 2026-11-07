@@ -91,6 +91,9 @@ async def _seed_config(session):
             ShopAccountCapability(shop_account_id=id_map["shop-sg-1"], data_domain="orders", enabled=True),
             ShopAccountCapability(shop_account_id=id_map["shop-sg-1"], data_domain="services", enabled=True),
             ShopAccountCapability(shop_account_id=id_map["shop-my-1"], data_domain="products", enabled=True),
+            # 未显式声明的域会按默认能力回填为启用（resolve_shop_capabilities），
+            # 这里显式关闭 services 以表达 shop-my-1 仅支持 products
+            ShopAccountCapability(shop_account_id=id_map["shop-my-1"], data_domain="services", enabled=False),
         ]
     )
 

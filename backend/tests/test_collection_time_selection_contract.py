@@ -235,6 +235,7 @@ def test_get_supported_config_data_domains_keeps_default_domains_for_miaoshou():
         "finance",
         "services",
         "inventory",
+        "purchase",
     ]
 
 
@@ -246,4 +247,5 @@ def test_get_supported_config_data_domains_keeps_default_domains_for_other_platf
         "finance",
         "services",
         "inventory",
+        "purchase",
     ]

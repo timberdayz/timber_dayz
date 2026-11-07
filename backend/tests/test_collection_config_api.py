@@ -254,7 +254,11 @@ async def test_create_config_persists_shop_scopes_and_time_selection(
     assert len(payload["shop_scopes"]) == 2
     assert payload["shop_scopes"][0]["shop_account_id"] == "shop-my-1"
     assert payload["shop_scopes"][1]["shop_account_id"] == "shop-sg-1"
-    assert payload["shop_scopes"][1]["sub_domains"] == {"services": ["agent"]}
+    # 允许子型的域（orders/services）未显式给出子型时，后端会补默认子型
+    assert payload["shop_scopes"][1]["sub_domains"] == {
+        "orders": ["shopee", "tiktok"],
+        "services": ["agent"],
+    }
 
 
 @pytest.mark.asyncio
@@ -370,4 +374,7 @@ async def test_update_config_replaces_shop_scopes_and_normalizes_custom_time_sel
     assert payload["shop_scopes"][0]["shop_account_id"] == "shop-my-1"
     assert payload["shop_scopes"][0]["data_domains"] == ["products"]
     assert payload["shop_scopes"][1]["shop_account_id"] == "shop-sg-1"
-    assert payload["shop_scopes"][1]["sub_domains"] == {"services": ["agent"]}
+    assert payload["shop_scopes"][1]["sub_domains"] == {
+        "orders": ["shopee", "tiktok"],
+        "services": ["agent"],
+    }

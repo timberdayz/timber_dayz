@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -8,6 +9,19 @@ import pytest
 
 from backend.routers.collection_tasks import cancel_or_delete_task, resume_task
 from backend.schemas.collection import ResumeTaskRequest
+
+
+class _AsyncioProxy:
+    """只拦指定 asyncio 成员，其余透传——避免直接改全局 asyncio 模块。"""
+
+    def __init__(self, real_module, **overrides):
+        self._real = real_module
+        self._overrides = overrides
+
+    def __getattr__(self, name):
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(self._real, name)
 
 
 def _make_task(**overrides):
@@ -43,6 +57,58 @@ def _make_task(**overrides):
     )
     base.update(overrides)
     return SimpleNamespace(**base)
+
+
+class _FakeQueryResult:
+    """按查询目标区分返回值：任务中心表无记录，采集任务返回假任务。"""
+
+    def __init__(self, task=None):
+        self._task = task
+
+    def scalar_one_or_none(self):
+        return self._task
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+
+def _make_fake_db_session(task):
+    """假 session：任务中心表查询返回空，采集任务/目录文件查询返回假任务。"""
+
+    class _FakeDbSession:
+        def __init__(self):
+            self.execute = AsyncMock(side_effect=self._execute)
+            self.commit = AsyncMock()
+            self.rollback = AsyncMock()
+            self.refresh = AsyncMock()
+            self.add = MagicMock()
+
+        async def _execute(self, stmt):
+            if "task_center_tasks" in str(stmt):
+                return _FakeQueryResult(None)
+            return _FakeQueryResult(task)
+
+    return _FakeDbSession()
+
+
+class _FakeTaskCenterService:
+    """路由层 TaskCenterService 替身：任务中心记录不在本次断言范围内。"""
+
+    def __init__(self, _db):
+        self.db = _db
+
+    async def get_task(self, _task_id):
+        return None
+
+    async def create_task(self, **_fields):
+        return {}
+
+    async def update_task(self, _task_id, **_updates):
+        return {}
+
 
 
 @pytest.mark.asyncio
@@ -145,8 +211,8 @@ async def test_cancel_task_allows_verification_required_status(monkeypatch):
     mirror_log = AsyncMock()
     delete_task_center = AsyncMock()
 
-    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task", mirror_task)
-    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task_log", mirror_log)
+    monkeypatch.setattr("backend.domains.collection.routers.collection_tasks._mirror_collection_task", mirror_task)
+    monkeypatch.setattr("backend.domains.collection.routers.collection_tasks._mirror_collection_task_log", mirror_log)
 
     class _TaskCenterService:
         def __init__(self, _db):
@@ -155,7 +221,7 @@ async def test_cancel_task_allows_verification_required_status(monkeypatch):
         async def delete_task(self, task_id):
             await delete_task_center(task_id)
 
-    monkeypatch.setattr("backend.routers.collection_tasks.TaskCenterService", _TaskCenterService)
+    monkeypatch.setattr("backend.domains.collection.routers.collection_tasks.TaskCenterService", _TaskCenterService)
 
     body = await cancel_or_delete_task(task_id="task-1", db=db)
 
@@ -193,7 +259,7 @@ async def test_on_verification_required_broadcasts_websocket_event(monkeypatch):
         lambda: _SessionManager(),
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks.connection_manager.send_verification_required",
+        "backend.domains.collection.routers.collection_tasks.connection_manager.send_verification_required",
         broadcast,
     )
 
@@ -239,7 +305,7 @@ async def test_on_verification_required_marks_manual_continue_types_as_manual_in
     broadcast = AsyncMock()
     monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _SessionManager())
     monkeypatch.setattr(
-        "backend.routers.collection_tasks.connection_manager.send_verification_required",
+        "backend.domains.collection.routers.collection_tasks.connection_manager.send_verification_required",
         broadcast,
     )
 
@@ -305,18 +371,21 @@ async def test_on_verification_required_stops_waiting_when_task_cancelled(monkey
     broadcast = AsyncMock()
 
     monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _SessionManager())
-    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task", mirror_task)
+    monkeypatch.setattr("backend.domains.collection.routers.collection_tasks._mirror_collection_task", mirror_task)
     monkeypatch.setattr(
-        "backend.routers.collection_tasks.connection_manager.send_verification_required",
+        "backend.domains.collection.routers.collection_tasks.connection_manager.send_verification_required",
         broadcast,
     )
-    monkeypatch.setattr("backend.routers.collection_tasks.asyncio.sleep", _fake_sleep)
     monkeypatch.setattr(
-        "backend.routers.collection_tasks.asyncio.get_running_loop",
-        lambda: fake_loop,
+        "backend.domains.collection.routers.collection_tasks.asyncio",
+        _AsyncioProxy(
+            asyncio,
+            sleep=_fake_sleep,
+            get_running_loop=lambda: fake_loop,
+        ),
     )
-    monkeypatch.setattr("backend.routers.collection_tasks.VERIFICATION_WAIT_TIMEOUT", 0.3)
-    monkeypatch.setattr("backend.routers.collection_tasks.VERIFICATION_POLL_INTERVAL", 0.1)
+    monkeypatch.setattr("backend.domains.collection.routers.collection_tasks.VERIFICATION_WAIT_TIMEOUT", 0.3)
+    monkeypatch.setattr("backend.domains.collection.routers.collection_tasks.VERIFICATION_POLL_INTERVAL", 0.1)
 
     app = SimpleNamespace(state=SimpleNamespace(redis=redis))
     value = await _on_verification_required(
@@ -362,7 +431,7 @@ async def test_get_task_screenshot_resolves_relative_path_from_project_root(tmp_
 
 
 @pytest.mark.asyncio
-async def test_persist_collection_task_result_clears_verification_fields_on_terminal_status():
+async def test_persist_collection_task_result_clears_verification_fields_on_terminal_status(monkeypatch):
     from backend.domains.collection.routers.collection_tasks import _persist_collection_task_result
 
     task = _make_task(
@@ -371,14 +440,7 @@ async def test_persist_collection_task_result_clears_verification_fields_on_term
         verification_screenshot="temp/task.png",
     )
 
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = task
-
-    db_session = MagicMock()
-    db_session.execute = AsyncMock(return_value=result)
-    db_session.commit = AsyncMock()
-    db_session.rollback = AsyncMock()
-    db_session.refresh = AsyncMock()
+    db_session = _make_fake_db_session(task)
 
     class _DbSessionManager:
         async def __aenter__(self):
@@ -386,6 +448,11 @@ async def test_persist_collection_task_result_clears_verification_fields_on_term
 
         async def __aexit__(self, exc_type, exc, tb):
             return False
+
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.collection_tasks.TaskCenterService",
+        _FakeTaskCenterService,
+    )
 
     from backend.models import database as database_module
 
@@ -411,7 +478,7 @@ async def test_persist_collection_task_result_clears_verification_fields_on_term
 
 
 @pytest.mark.asyncio
-async def test_persist_collection_task_result_preserves_cancelled_status():
+async def test_persist_collection_task_result_preserves_cancelled_status(monkeypatch):
     from backend.domains.collection.routers.collection_tasks import _persist_collection_task_result
     from modules.core.db import CollectionTask
     import backend.models.database as database_module
@@ -426,23 +493,19 @@ async def test_persist_collection_task_result_preserves_cancelled_status():
         files_collected=0,
     )
 
-    class _Result:
-        def scalar_one_or_none(self):
-            return stored_task
-
-    class _DbSession:
-        async def execute(self, _stmt):
-            return _Result()
-
-        async def commit(self):
-            return None
+    db_session = _make_fake_db_session(stored_task)
 
     class _DbSessionManager:
         async def __aenter__(self):
-            return _DbSession()
+            return db_session
 
         async def __aexit__(self, exc_type, exc, tb):
             return False
+
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.collection_tasks.TaskCenterService",
+        _FakeTaskCenterService,
+    )
 
     final_result = SimpleNamespace(
         status="completed",

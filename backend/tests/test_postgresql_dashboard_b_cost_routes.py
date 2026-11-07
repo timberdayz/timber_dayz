@@ -10,6 +10,15 @@ from backend.domains.business.routers.dashboard_api_postgresql import router
 from backend.services.postgresql_dashboard_service import PostgresqlDashboardService
 
 
+# ⚠️ 桩打在哪很关键
+# -------------------
+# ``backend/routers/dashboard_api_postgresql.py`` 现在只是 **legacy 兼容壳**
+# （只做 re-export，见该文件顶部注释）；路由真正用的是
+# ``backend.domains.business.routers.dashboard_api_postgresql``。
+# 桩打在壳上 ⇒ 路由模块拿到的仍是**真服务** ⇒ 路由会去连真库（表现为 503/500）。
+# 所以本文件的桩一律打在 **domain 模块**上。
+
+
 def _make_user(role_code: str = "admin") -> SimpleNamespace:
     return SimpleNamespace(
         is_superuser=False,
@@ -17,9 +26,31 @@ def _make_user(role_code: str = "admin") -> SimpleNamespace:
     )
 
 
+def _mark_dashboard_assets_ready(app: FastAPI) -> FastAPI:
+    """给测试 app 标一份「资产已就绪」。
+
+    资产就绪门禁：路由在真正干活前会检查看板资产是否 ready。
+    这里给一份「ready」的报告 —— 本文件测的是**路由与服务的接线**，
+    不是资产发布（资产发布由 bootstrap 脚本与守护测试负责）。
+    """
+    app.state.dashboard_assets_ready = True
+    app.state.dashboard_assets_report = {
+        "ready": True,
+        "modules": {
+            "business_overview": {
+                "status": "ready",
+                "ready": True,
+                "assets_drift": False,
+            }
+        },
+    }
+    return app
+
+
 def _build_app_with_auth_override(user: SimpleNamespace | None = None) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
+    _mark_dashboard_assets_ready(app)
 
     if user is not None:
         async def _override_current_user():
@@ -49,7 +80,7 @@ async def test_postgresql_b_cost_overview_route_returns_service_payload_and_pass
             return {"summary": "ok", "period_month": "2026-03-01"}
 
     monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _ServiceStub(),
     )
 
@@ -91,7 +122,7 @@ async def test_postgresql_b_cost_shop_month_route_returns_service_payload_and_pa
             return [{"shop_id": "shop-1", "gmv": 100}]
 
     monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _ServiceStub(),
     )
 
@@ -147,7 +178,7 @@ async def test_postgresql_b_cost_order_detail_route_returns_paginated_payload_an
             }
 
     monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _ServiceStub(),
     )
 
@@ -330,7 +361,7 @@ async def test_postgresql_b_cost_overview_route_normalizes_period_month_for_cach
             return await producer()
 
     monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _ServiceStub(),
     )
 
@@ -338,6 +369,7 @@ async def test_postgresql_b_cost_overview_route_normalizes_period_month_for_cach
     app.state.cache_service = _CacheServiceStub()
     app.include_router(router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("admin")
+    _mark_dashboard_assets_ready(app)
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -399,7 +431,7 @@ async def test_postgresql_b_cost_overview_route_allows_finance_role(monkeypatch)
             return {"summary": "ok"}
 
     monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _ServiceStub(),
     )
 
@@ -424,7 +456,7 @@ async def test_postgresql_b_cost_overview_route_masks_internal_exception_message
             raise RuntimeError("db exploded: super-secret")
 
     monkeypatch.setattr(
-        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        "backend.domains.business.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _ServiceStub(),
     )
 

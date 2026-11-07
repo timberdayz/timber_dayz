@@ -1,10 +1,35 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+
+class _AsyncioProxy:
+    """只拦指定 asyncio 成员，其余透传——避免直接改全局 asyncio 模块。"""
+
+    def __init__(self, real_module, **overrides):
+        self._real = real_module
+        self._overrides = overrides
+
+    def __getattr__(self, name):
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(self._real, name)
+
+
+async def _fake_load_collection_account_runtime(account_id, *, db):
+    """账号运行时加载替身（真身消费点：collection_tasks 模块内已按名导入）。"""
+    return {
+        "account_id": account_id,
+        "shop_account_id": account_id,
+        "main_account_id": "main-1",
+        "enabled": True,
+        "capabilities": {"orders": True},
+    }
 
 
 def _make_task(**overrides):
@@ -66,13 +91,13 @@ async def test_collection_step_status_callback_broadcasts_progress(monkeypatch):
         "backend.models.database.AsyncSessionLocal", lambda: _SessionManager()
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks._mirror_collection_task", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task", AsyncMock()
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks._mirror_collection_task_log", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task_log", AsyncMock()
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks.connection_manager.send_progress",
+        "backend.domains.collection.routers.collection_tasks.connection_manager.send_progress",
         send_progress,
     )
 
@@ -117,13 +142,13 @@ async def test_collection_step_status_callback_keeps_current_step_for_browser_di
         "backend.models.database.AsyncSessionLocal", lambda: _SessionManager()
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks._mirror_collection_task", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task", AsyncMock()
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks._mirror_collection_task_log", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task_log", AsyncMock()
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks.connection_manager.send_progress",
+        "backend.domains.collection.routers.collection_tasks.connection_manager.send_progress",
         send_progress,
     )
 
@@ -205,13 +230,16 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
         "backend.models.database.AsyncSessionLocal", lambda: _DbSessionManager()
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks._mirror_collection_task", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task", AsyncMock()
     )
     monkeypatch.setattr(
-        "backend.services.account_loader_service.get_account_loader_service",
-        lambda: SimpleNamespace(
-            load_account_async=AsyncMock(return_value={"account_id": "acc-1"})
-        ),
+        "backend.domains.collection.routers.collection_tasks.load_collection_account_runtime",
+        _fake_load_collection_account_runtime,
+    )
+    # 采集后入库入队是独立链路，与本用例断言的广播/会话行为无关
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.collection_tasks._enqueue_post_collection_ingest_tasks",
+        AsyncMock(),
     )
     monkeypatch.setattr(
         "modules.apps.collection_center.executor_v2.CollectionExecutorV2",
@@ -228,7 +256,7 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
         "playwright.async_api.async_playwright", lambda: _PlaywrightManager()
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks.connection_manager.send_complete",
+        "backend.domains.collection.routers.collection_tasks.connection_manager.send_complete",
         send_complete,
     )
 
@@ -285,12 +313,18 @@ async def test_execute_collection_task_background_retries_terminal_writeback_wit
     successful_finalize_session.execute = AsyncMock(return_value=result)
     successful_finalize_session.commit = AsyncMock()
 
+    # 采集后入库投影会另开一个会话（入队函数本身已被替换）
+    ingest_session = MagicMock(name="ingest_session")
+    ingest_session.execute = AsyncMock(return_value=result)
+    ingest_session.commit = AsyncMock()
+
     sessions = iter(
         [
             start_session,
             account_session,
             failed_finalize_session,
             successful_finalize_session,
+            ingest_session,
         ]
     )
 
@@ -336,14 +370,17 @@ async def test_execute_collection_task_background_retries_terminal_writeback_wit
         lambda: _DbSessionManager(next(sessions)),
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks._mirror_collection_task",
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task",
         mirror_task,
     )
     monkeypatch.setattr(
-        "backend.services.account_loader_service.get_account_loader_service",
-        lambda: SimpleNamespace(
-            load_account_async=AsyncMock(return_value={"account_id": "acc-1"})
-        ),
+        "backend.domains.collection.routers.collection_tasks.load_collection_account_runtime",
+        _fake_load_collection_account_runtime,
+    )
+    # 采集后入库入队是独立链路，与本用例断言的广播/会话行为无关
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.collection_tasks._enqueue_post_collection_ingest_tasks",
+        AsyncMock(),
     )
     monkeypatch.setattr(
         "modules.apps.collection_center.executor_v2.CollectionExecutorV2",
@@ -353,7 +390,7 @@ async def test_execute_collection_task_background_retries_terminal_writeback_wit
         "playwright.async_api.async_playwright", lambda: _PlaywrightManager()
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks.connection_manager.send_complete",
+        "backend.domains.collection.routers.collection_tasks.connection_manager.send_complete",
         send_complete,
     )
 
@@ -443,13 +480,16 @@ async def test_execute_collection_task_background_parallel_mode_still_launches_b
         "backend.models.database.AsyncSessionLocal", lambda: _DbSessionManager()
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks._mirror_collection_task", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task", AsyncMock()
     )
     monkeypatch.setattr(
-        "backend.services.account_loader_service.get_account_loader_service",
-        lambda: SimpleNamespace(
-            load_account_async=AsyncMock(return_value={"account_id": "acc-1"})
-        ),
+        "backend.domains.collection.routers.collection_tasks.load_collection_account_runtime",
+        _fake_load_collection_account_runtime,
+    )
+    # 采集后入库入队是独立链路，与本用例断言的广播/会话行为无关
+    monkeypatch.setattr(
+        "backend.domains.collection.routers.collection_tasks._enqueue_post_collection_ingest_tasks",
+        AsyncMock(),
     )
     monkeypatch.setattr(
         "modules.apps.collection_center.executor_v2.CollectionExecutorV2",
@@ -466,7 +506,7 @@ async def test_execute_collection_task_background_parallel_mode_still_launches_b
         "playwright.async_api.async_playwright", lambda: _PlaywrightManager()
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks.connection_manager.send_complete",
+        "backend.domains.collection.routers.collection_tasks.connection_manager.send_complete",
         AsyncMock(),
     )
 
@@ -541,14 +581,14 @@ async def test_retry_task_requeues_background_execution(monkeypatch):
         _FakeResolver,
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks.asyncio.create_task",
-        _capture_background_task,
+        "backend.domains.collection.routers.collection_tasks.asyncio",
+        _AsyncioProxy(asyncio, create_task=_capture_background_task),
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks._mirror_collection_task", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task", AsyncMock()
     )
     monkeypatch.setattr(
-        "backend.routers.collection_tasks._mirror_collection_task_log", AsyncMock()
+        "backend.domains.collection.routers.collection_tasks._mirror_collection_task_log", AsyncMock()
     )
 
     request = SimpleNamespace(app=SimpleNamespace())

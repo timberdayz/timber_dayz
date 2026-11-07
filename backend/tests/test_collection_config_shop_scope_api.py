@@ -3,7 +3,14 @@ import pytest_asyncio
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from modules.core.db import CollectionConfig, CollectionConfigShopScope, CollectionTask
+from modules.core.db import (
+    CollectionConfig,
+    CollectionConfigRun,
+    CollectionConfigShopScope,
+    CollectionTask,
+    MainAccount,
+    ShopAccount,
+)
 
 
 @pytest_asyncio.fixture
@@ -13,7 +20,10 @@ async def collection_shop_scope_engine():
     async with engine.begin() as conn:
         for schema_name in ("core", "a_class", "b_class", "c_class", "finance"):
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
+        await conn.run_sync(MainAccount.__table__.create)
+        await conn.run_sync(ShopAccount.__table__.create)
         await conn.run_sync(CollectionConfig.__table__.create)
+        await conn.run_sync(CollectionConfigRun.__table__.create)
         await conn.run_sync(CollectionConfigShopScope.__table__.create)
         await conn.run_sync(CollectionTask.__table__.create)
 
@@ -32,11 +42,56 @@ async def collection_shop_scope_session(collection_shop_scope_session_factory):
         yield session
 
 
+@pytest_asyncio.fixture
+async def collection_shop_scope_main_account(collection_shop_scope_session):
+    """collection_configs.main_account_id 为 NOT NULL 且外键指向 core.main_accounts。"""
+    session = collection_shop_scope_session
+    session.add(
+        MainAccount(
+            platform="shopee",
+            main_account_id="main-shopee",
+            main_account_name="Shopee Main",
+            username="shopee-main",
+            password_encrypted="enc",
+            enabled=True,
+        )
+    )
+    await session.flush()
+    session.add_all(
+        [
+            ShopAccount(
+                platform="shopee",
+                shop_account_id="shop-sg-1",
+                main_account_id="main-shopee",
+                store_name="Shop SG 1",
+                shop_region="SG",
+                shop_type="local",
+                enabled=True,
+            ),
+            ShopAccount(
+                platform="shopee",
+                shop_account_id="shop-my-1",
+                main_account_id="main-shopee",
+                store_name="Shop MY 1",
+                shop_region="MY",
+                shop_type="local",
+                enabled=True,
+            ),
+        ]
+    )
+    await session.commit()
+    return "main-shopee"
+
+
 @pytest.mark.asyncio
-async def test_collection_config_can_own_multiple_shop_scopes(collection_shop_scope_session):
+async def test_collection_config_can_own_multiple_shop_scopes(
+    collection_shop_scope_session,
+    collection_shop_scope_main_account,
+):
     config = CollectionConfig(
         name="shopee-daily-v1",
         platform="shopee",
+        main_account_id=collection_shop_scope_main_account,
         account_ids=[],
         data_domains=[],
         sub_domains=None,
@@ -81,10 +136,14 @@ async def test_collection_config_can_own_multiple_shop_scopes(collection_shop_sc
 
 
 @pytest.mark.asyncio
-async def test_deleting_collection_config_removes_shop_scopes(collection_shop_scope_session):
+async def test_deleting_collection_config_removes_shop_scopes(
+    collection_shop_scope_session,
+    collection_shop_scope_main_account,
+):
     config = CollectionConfig(
         name="shopee-weekly-v1",
         platform="shopee",
+        main_account_id=collection_shop_scope_main_account,
         account_ids=[],
         data_domains=[],
         sub_domains=None,
