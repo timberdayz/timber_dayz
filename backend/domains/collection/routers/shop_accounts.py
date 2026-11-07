@@ -15,6 +15,7 @@ from backend.schemas.shop_account import (
     ShopAccountUpdate,
 )
 from backend.services.cache_service import get_cache_service
+from backend.services.collection_contracts import summarize_shop_scopes
 from backend.services.data_pipeline.refresh_queue_service import RefreshQueueService
 from backend.services.shop_internal_code_service import (
     load_taken_internal_codes,
@@ -27,6 +28,8 @@ from backend.services.shop_rename_service import (
 from backend.services.shop_sync_service import sync_shop_account_to_dim_shop
 from backend.utils.text_normalization import normalize_alias_key, normalize_alias_text
 from modules.core.db import (
+    CollectionConfig,
+    CollectionConfigShopScope,
     MainAccount,
     ShopAccount,
     ShopAccountAlias,
@@ -593,6 +596,113 @@ async def batch_create_shop_accounts(
     return [await _serialize_shop_account(db, record) for record, _ in created]
 
 
+async def _disable_shop_in_collection_scopes(
+    db: AsyncSession, shop_account_id: str
+) -> int:
+    """店铺被停用时，把它从**所有采集配置**的 scope 里摘掉(置为不参与)。
+
+    为什么必须联动
+    --------------
+    店铺停用只改了 ``core.shop_accounts.enabled``, 而采集配置的
+    ``core.collection_config_shop_scopes`` 是**独立的一份引用** ⇒ 停用后
+    它会一直留在配置里, 在采集工作区里变成一行"点不动、也没人知道为什么"
+    的幽灵店铺(实测: ``shopee_sg_eternalbloom_local`` 残留在 2 条配置 +
+    2 个模板里, 而它在 11-05 13:23 被 ``manual:fix_shop_identity_alignment``
+    停用, 配置 scope 却建于同日 11:55 —— 差 1.5 小时, 没人回头清理)。
+
+    执行侧其实早就按 ``enabled == True`` 过滤了(``collection_config_execution``),
+    所以**不会**真的去采集一个停用店 ⇒ 数据不会错; 但界面会误导人,
+    而且配置摘要 ``account_ids`` 会一直带着这个死账号。
+
+    ⚠️ **覆盖边界**: 本函数只覆盖 **API 路径**(``update_shop_account`` /
+    ``delete_shop_account``)。一次性维护脚本**直接改库**停用店铺时会绕过它 ——
+    上一次残留就是这么来的(``updated_by = 'manual:fix_shop_identity_alignment'``,
+    而 API 写入的 ``updated_by`` 是 ``system``) ⇒ 迁移层才是兜底。
+
+    为什么是「置 enabled=false」而不是物理删除
+    ------------------------------------------
+    物理删除**不可逆** —— 删掉之后无法回答"这个店当初配了哪些数据域"。
+    置为不参与则:
+      * 采集不再调度它(执行侧只取 enabled 的 scope);
+      * 摘要重算时自然被排除(``summarize_shop_scopes`` 只算 enabled 的);
+      * 展示层按「账号已停用」过滤 ⇒ 它不会出现在工作区;
+      * **可回滚** —— 店铺重新启用后, 把它改回 enabled 即可。
+    (用户下次保存该配置时, 前端提交的 scope 不含停用店 ⇒ 残影会被自然删除。)
+
+    返回被摘掉的 scope 行数。
+    """
+    scopes = (
+        await db.execute(
+            select(CollectionConfigShopScope)
+            .where(
+                CollectionConfigShopScope.shop_account_id == shop_account_id,
+                # 只动**当前还参与**的 scope —— 早已 disabled 的不必再改一遍
+                # (改了也是空操作, 但会把 updated_at 搅乱、让计数失真)。
+                CollectionConfigShopScope.enabled.is_(True),
+            )
+            .order_by(CollectionConfigShopScope.shop_account_id)
+        )
+    ).scalars().all()
+    if not scopes:
+        return 0
+
+    config_ids = sorted({scope.config_id for scope in scopes})
+    now = datetime.now(timezone.utc)
+    for scope in scopes:
+        scope.enabled = False
+        scope.updated_at = now
+    await db.flush()
+
+    for config_id in config_ids:
+        config = (
+            await db.execute(
+                select(CollectionConfig).where(CollectionConfig.id == config_id)
+            )
+        ).scalar_one_or_none()
+        if config is None:
+            continue
+        remaining = (
+            await db.execute(
+                select(CollectionConfigShopScope)
+                .where(
+                    CollectionConfigShopScope.config_id == config_id,
+                    CollectionConfigShopScope.enabled.is_(True),
+                )
+                # ⚠️ 排序必须与迁移内联实现一致(按 shop_account_id) ——
+                # 否则「停用联动算出来的摘要」与「迁移算出来的摘要」顺序不同,
+                # 用户下次保存配置时摘要就会跳动。
+                .order_by(CollectionConfigShopScope.shop_account_id)
+            )
+        ).scalars().all()
+        # 用 dict 喂 summarize_shop_scopes —— 它对 ORM 对象走 dict(obj),
+        # 而 SQLAlchemy 实体不可 dict() ⇒ 必须显式转成 dict。
+        summary = summarize_shop_scopes(
+            [
+                {
+                    "shop_account_id": scope.shop_account_id,
+                    "data_domains": list(scope.data_domains or []),
+                    "sub_domains": scope.sub_domains or {},
+                    "enabled": bool(scope.enabled),
+                }
+                for scope in remaining
+            ]
+        )
+        config.account_ids = summary["account_ids"]
+        config.data_domains = summary["data_domains"]
+        config.sub_domains = summary["sub_domains"]
+
+    # ⚠️ 必须 flush —— 否则摘要的改动还挂在 session 里没落库,
+    # 同一事务内后续读到的还是旧值(顶部统计与实际配置对不上)。
+    await db.flush()
+
+    logger.info(
+        "Disabled shop %s in %d collection config scope(s)",
+        shop_account_id,
+        len(scopes),
+    )
+    return len(scopes)
+
+
 @router.put("/{shop_account_id}", response_model=ShopAccountResponse)
 async def update_shop_account(
     shop_account_id: str,
@@ -610,6 +720,7 @@ async def update_shop_account(
     original_internal_code = record.internal_code
     original_platform_shop_id = record.platform_shop_id
     original_platform_shop_id_status = record.platform_shop_id_status
+    original_enabled = bool(record.enabled)
     if "platform_shop_id" in update_data:
         await _assert_platform_shop_id_unique(
             db,
@@ -644,6 +755,11 @@ async def update_shop_account(
     # 1) 先按现有逻辑全量赋值（保留 platform_shop_id 唯一性校验与 capabilities 处理）
     for field, value in update_data.items():
         setattr(record, field, value)
+    # 1.1) 店铺被停用 ⇒ 把它从采集配置里摘掉。
+    #     不做这一步, 采集工作区会留下一行「点不动、也不说为什么」的幽灵店铺,
+    #     配置摘要 account_ids 也会一直带着这个死账号(实测已发生)。
+    if original_enabled and not bool(record.enabled):
+        await _disable_shop_in_collection_scopes(db, record.shop_account_id)
     # 1.5) 平台店铺ID状态由服务端派生（客户端传的值不作数）
     record.platform_shop_id_status = _derive_platform_shop_id_status(
         record.platform_shop_id,
@@ -717,6 +833,12 @@ async def delete_shop_account(
     db: AsyncSession = Depends(get_async_db),
 ):
     record = await _get_shop_account_or_404(db, shop_account_id)
+    # 店铺被删除 ⇒ 采集配置里的引用与摘要同样要清。
+    # ⚠️ scope 行本身会被数据库的 ON DELETE CASCADE 带走
+    #    (collection_config_shop_scopes.shop_account_id → shop_accounts.shop_account_id),
+    #    **但配置的摘要(account_ids / data_domains / sub_domains)没人管** ——
+    #    不重算的话, 顶部「店铺总览」会一直挂着一个已经不存在了的账号。
+    await _disable_shop_in_collection_scopes(db, shop_account_id)
     await db.delete(record)
     await db.commit()
     return {"message": f"shop_account_id '{shop_account_id}' deleted"}

@@ -863,6 +863,10 @@ const shopScopeRows = computed(() => {
         isException: isScopeOverridden(scope),
       }
     })
+    // 账号查不到 = 该店铺**已停用或已删除**。
+    // 停用店不会被采集(执行侧按 enabled 过滤), 也不该出现在工作区里 ——
+    // 否则就是一排点不动的复选框, 用户只会以为界面坏了。
+    .filter((row) => row.account)
     .filter((row) => {
       const search = shopSearch.value.trim().toLowerCase()
       const matchesSearch = !search
