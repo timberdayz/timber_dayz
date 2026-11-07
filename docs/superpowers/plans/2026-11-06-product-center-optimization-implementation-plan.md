@@ -2209,5 +2209,58 @@ main `7810b104` → `b4d4c978`（14 个提交，41 个文件，+7382 / −164）
    20261116 的前置检查要求 6 个 TikTok 账号存在，而空库里没有。
    **生产有这些账号（实测 6/6 满足）**，所以不影响生产采纳，只影响「从零建库」这条校验。
    建议由店铺身份那条线把该迁移改成「账号不存在时跳过而不是拒绝」。
+   （另见 **E.11**：该脚本**不在任何 CI 工作流里**，所以这条预存失败**不会阻断 tag 流水线**。）
+
+---
+
+### E.11 打 tag 前的发布门禁本地预跑
+
+发版真相是 **tag 驱动**：`.github/workflows/deploy-production.yml` 只在 `push tag v*` 时触发
+（`docker-build.yml` 只按 `main`/`develop` 分支触发；仓库里没有 `.cnb.yml`，
+CNB 镜像由 deploy 工作流自己推送）。所以「打 tag」等价于「跑一遍发布门禁 + 上生产」。
+
+`scripts/verify_release_local.py` 与 `scripts/validate_migrations_fresh_db.py`
+**不在任何工作流里**（只在 `docs/deployment/CLOUD_UPDATE_AND_LOCAL_VERIFICATION.md` 与
+`docs/guides/RELEASE_CHECKLIST.md` 里作为本地清单出现）⇒ E.10.4 那条「空库迁移校验在 main 上
+就已失败」**不会阻断 tag 流水线**，只影响本地发版前自查清单。
+
+因此在推 tag 之前，把 deploy 工作流 `validate` job 的 7 条 Release Gate 在本地**逐条**跑了一遍
+（数据库类门禁用与 CI 同版本的 `postgres:15` 临时容器，端口 15496）：
+
+| 门禁（deploy-production.yml `validate` job） | 本地结果 |
+|---|---|
+| Verify Critical Tables Foreign Keys | exit 0（`bridge_product_keys` / `fact_product_metrics` 复合外键定义正确） |
+| Validate Production Migration Contracts | **3 passed**，exit 0 |
+| Validate API Contracts（`--changed-files`） | exit 0 |
+| Validate Frontend API Methods（`--changed-files`） | 2 个前端文件 / 9 处调用，**缺失 0** |
+| Validate Database Fields | 0 错误 / 0 警告 |
+| Validate Inventory Age Pipeline | **31 passed** |
+| Validate Remote Deploy Contracts | exit 0 |
+
+外加 CI 在 `main` 分支 push 上会跑的一条：
+`python scripts/verify_release_tag_generation.py --release-tags v5.3 v5.3.1` → exit 0。
+
+`--changed-files` 用的是**上一个 tag → 新 tag** 的差异清单（`v7.15.4..HEAD` = **107 个文件**，
+其中后端/前端源码 96 个），与 deploy 工作流里的算法一致。
+
+#### E.11.1 两个门禁的覆盖盲区（记录，本次不改）
+
+这两条都「绿」，但**没真的验到东西** —— 不是我们的改动有问题，是脚本自身的扫描范围太窄：
+
+1. `validate_api_contracts.py` 只认 `backend/routers/` 下的文件。本次改的是
+   `backend/domains/business/routers/product_center.py`，落在它扫描范围外
+   ⇒ 报告显示「验证文件数: 0（改动文件中没有 router 文件，跳过验证）」。
+2. `validate_database_fields.py` 报告「已扫描表数: 0」⇒ 等于空跑。
+
+⇒ 阶段 4 新增的两个接口（`POST /skus/{id}/selling-price-preview`、
+`GET /skus/selling-price-check`）**没有**被这两条门禁覆盖。它们的正确性靠本轮自带的
+170 条定向测试 + 37 条阶段 4 测试 + 前端 72 条断言保证；这两条门禁的盲区建议后续单独立项修
+（属发版工具链域，不在本方案范围）。
+
+#### E.11.2 尚未本地预跑的两条构建期门禁
+
+`build-and-push` job 里的 `Verify backend image dependency pins` 与
+`Backend container startup smoke` 需要真实构建出的镜像，本地不预跑，
+由 CI 在 tag 触发的构建流程兜底。
 
 ---
