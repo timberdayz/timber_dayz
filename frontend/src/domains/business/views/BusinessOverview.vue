@@ -1328,8 +1328,17 @@ async function refreshDashboardAssetNotice() {
   try {
     const payload = await api.getDashboardAssetsStatus()
     const modules = payload?.report?.modules || {}
+    // 用后端给的 `ready` 判定「不可用」，而不是硬编码状态名 ——
+    // 新增状态时不会出现「后端说可用、前端却弹告警」的错位。
+    // `refreshing` 单独列出：它是**可用**状态，但值得提示一句
+    //（真有一趟刷新在跑，页面可能暂时是旧数据）。
     const blocked = [modules.business_overview, modules.inventory_backlog].filter(
-      (moduleReport) => moduleReport && moduleReport.status && moduleReport.status !== 'ready'
+      (moduleReport) =>
+        moduleReport &&
+        (moduleReport.ready === false ||
+          moduleReport.status === 'refreshing' ||
+          // 兼容没有 `ready` 字段的旧后端：按状态名兜底
+          (moduleReport.ready === undefined && moduleReport.status !== 'ready'))
     )
     if (!blocked.length) {
       clearDashboardAssetNotice()

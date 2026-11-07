@@ -97,6 +97,14 @@ DASHBOARD_REQUIRED_OBJECTS = [
 
 _DASHBOARD_BOOTSTRAP_LOCK_KEY = 918_240_113
 
+#: 模块**可用**的状态（除 ``drift`` 外一律放行，页面照常展示）。
+#:
+#: 运行期门禁（``dashboard_api_postgresql._require_dashboard_assets_ready``）与
+#: 刷新验收（``refresh_validation._module_status_is_ready``）**必须用同一份判定**。
+#: 两边口径不一致 ⇒ 修复方把自己制造的 ``refreshing`` 状态当成失败条件 ⇒
+#: 任务失败 ⇒ 退避重排 ⇒ 无限自锁（2026-11-07 事故链的一环）。
+DASHBOARD_ASSET_AVAILABLE_STATUSES: frozenset[str] = frozenset({"ready", "refreshing"})
+
 
 def _resolve_module_names(module: str = "all") -> list[str]:
     if module == "all":
@@ -414,18 +422,42 @@ def _build_module_report(
     stored_status = (module_state or {}).get("status")
     active_refreshing = active_refresh_run is not None
 
+    # 刷新（物化）资产的**定义漂移** = 资产文件变了、但库里这批对象没重建。
+    #
+    # 为什么它**不参与状态判定**
+    # ----------------------
+    # 物化资产文件是「存在则 REFRESH / 不存在则 CREATE」
+    # （见 ``sql/semantic/orders_atomic_mv.sql``）⇒ **对已存在的对象从不重建定义**。
+    # 于是「文件哈希 != 账本里的 applied」这个差值，**没有任何自愈路径能消掉**
+    # （安全网/刷新/重试全都只原地刷新或跳过）⇒ 拿它当状态判据 =
+    # 制造一个「没人能修、却一直被当成异常、还被安全网无限重试」的死区。
+    #
+    # 2026-11-07 的自锁循环就是这么来的：迁移
+    # ``20261112_realign_identity_candidates_anchor`` 重建了身份候选集视图与物化副本
+    # （事实已是新的），但**没有回写** ``ops.dashboard_asset_state`` 的记账 ⇒
+    # 记账停在旧文件哈希 ⇒ 模块被判 ``refreshing`` ⇒ 修复方把它当失败条件 ⇒
+    # 退避重排 ⇒ 每 2~5 分钟一轮，攒出 859 次 failed 任务。
+    #
+    # 现在它降级为**纯可见性字段**（``refresh_fingerprint_drift``）：
+    # 资产文件的定义对齐由**部署/迁移**负责（那是唯一能真正重建定义的地方），
+    # 运行期状态机不再对它做任何判定 ⇒ 自锁从根上断开。
+    refresh_fingerprint_drift = bool(
+        refresh_expected and refresh_applied != refresh_expected
+    )
+
     if (
         core_missing
+        # 刷新资产缺失同样是**硬伤**（看板直接读不到）⇒ 与 core 缺失同级阻断。
+        # 旧口径把它算成 ``refreshing`` ⇒ 页面照常展示（数据是空的），
+        # 而修复路径对「已存在的普通视图」是跳过的 ⇒ 同样修不掉 ⇒ 又一个死区。
+        or refresh_missing
         or (core_expected and core_applied != core_expected)
         or stored_status == "failed"
     ):
         status = "drift"
         ready = False
-    elif refresh_targets and (
-        refresh_missing
-        or (refresh_expected and refresh_applied != refresh_expected)
-        or active_refreshing
-    ):
+    elif active_refreshing:
+        # 真的有一趟刷新在跑 ⇒ 「正在刷新」（可用，页面附带提示）。
         status = "refreshing"
         ready = True
     else:
@@ -445,6 +477,8 @@ def _build_module_report(
         "asset_fingerprint_applied": core_applied,
         "refresh_fingerprint_expected": refresh_expected,
         "refresh_fingerprint_applied": refresh_applied,
+        # 可见性字段：资产文件自上次落库以来有改动（**不阻断、不驱动修复**）。
+        "refresh_fingerprint_drift": refresh_fingerprint_drift,
         "run_id": (module_state or {}).get("run_id"),
         "details": details,
         "active_refresh_run": active_refresh_run,
@@ -673,7 +707,7 @@ async def bootstrap_dashboard_assets_if_needed(
     report = await inspect_dashboard_assets(session)
     selected_modules = _resolve_module_names(module)
     if all(
-        report["modules"][module_name]["status"] in {"ready", "refreshing"}
+        report["modules"][module_name]["status"] in DASHBOARD_ASSET_AVAILABLE_STATUSES
         for module_name in selected_modules
     ):
         report["bootstrapped"] = False

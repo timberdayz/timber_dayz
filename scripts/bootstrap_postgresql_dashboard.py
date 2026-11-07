@@ -19,6 +19,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from backend.models.database import AsyncSessionLocal
 from backend.services.data_pipeline.dashboard_bootstrap import (
+    DASHBOARD_ASSET_AVAILABLE_STATUSES,
     DASHBOARD_MODULE_TARGETS,
     DASHBOARD_REQUIRED_OBJECTS,
     bootstrap_dashboard_assets,
@@ -89,7 +90,11 @@ async def _async_main(args: argparse.Namespace) -> int:
             if args.module == "all":
                 return 0 if report["ready"] else 1
             module_report = report["modules"].get(args.module, {})
-            return 0 if module_report.get("status") in {"ready", "refreshing"} else 1
+            return (
+                0
+                if module_report.get("status") in DASHBOARD_ASSET_AVAILABLE_STATUSES
+                else 1
+            )
 
         if args.refresh_materializations:
             if not args.json:
@@ -112,7 +117,11 @@ async def _async_main(args: argparse.Namespace) -> int:
         if args.module == "all":
             return 0 if report["ready"] else 1
         module_report = report["modules"].get(args.module, {})
-        return 0 if module_report.get("status") in {"ready", "refreshing"} else 1
+        return (
+            0
+            if module_report.get("status") in DASHBOARD_ASSET_AVAILABLE_STATUSES
+            else 1
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -7,11 +7,19 @@ from typing import Any, Iterable
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.services.data_pipeline.dashboard_bootstrap import inspect_dashboard_assets
+from backend.services.data_pipeline.dashboard_bootstrap import (
+    DASHBOARD_ASSET_AVAILABLE_STATUSES,
+    inspect_dashboard_assets,
+)
 from backend.services.data_pipeline.refresh_registry import LOGICAL_TARGET_OBJECTS
 
 
-__all__ = ["LOGICAL_TARGET_OBJECTS", "RefreshValidationReport", "find_missing_targets"]
+__all__ = [
+    "DASHBOARD_ASSET_AVAILABLE_STATUSES",
+    "LOGICAL_TARGET_OBJECTS",
+    "RefreshValidationReport",
+    "find_missing_targets",
+]
 
 
 @dataclass
@@ -171,9 +179,26 @@ async def _target_is_fresh_enough(
 
 
 def _module_status_is_ready(module_report: dict[str, Any] | None) -> bool:
+    """模块是否**可用**（口径与运行期门禁完全一致）。
+
+    ⚠️ 旧口径要求 ``status == 'ready'`` —— 等于让**修复方把自己制造的
+    ``refreshing`` 状态当成失败条件**：
+
+        安全网/刷新排了修复任务 → 修复任务跑起来 → 模块进入 ``refreshing``
+        → 验收方要求 ``ready`` → 验收失败 → 任务标记 failed → 退避重排
+        → 下一轮安全网又看到「不是 ready」→ 再排一次 → 无限自锁。
+
+    2026-11-07 事故链实测：``dashboard_safety_net_repair`` 攒出 **859 次 failed**。
+
+    现在只把 ``drift``（对象缺失 / 定义漂移 = 数据不可信）当失败，
+    ``refreshing`` 是**可用**状态 —— 与
+    ``dashboard_api_postgresql._require_dashboard_assets_ready`` 用同一份
+    ``DASHBOARD_ASSET_AVAILABLE_STATUSES``，两边口径不可能再分叉。
+    """
     if not isinstance(module_report, dict):
         return False
-    return str(module_report.get("status") or "").lower() == "ready"
+    status = str(module_report.get("status") or "").lower()
+    return status in DASHBOARD_ASSET_AVAILABLE_STATUSES
 
 
 async def validate_refresh_result(

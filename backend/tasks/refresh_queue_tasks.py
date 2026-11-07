@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from sqlalchemy import text
 
 from backend.celery_app import celery_app
 from backend.models.database import (
@@ -44,6 +47,30 @@ logger = get_logger(__name__)
 #: 就被另一个 worker 判成死的并重排队 ⇒ 同一条刷新被跑第二遍，还可能并发。
 #: 40 分钟 = 硬超时 30 分钟 + 10 分钟余量。
 REFRESH_QUEUE_RUNNING_TIMEOUT_SECONDS = 40 * 60
+
+#: 安全网**熔断阈值**：同一模块连续这么多次修复任务失败 ⇒ 暂停自动重试。
+#:
+#: 没有熔断 ⇒ 「修不好」的状态会被每 5 分钟重试一次，永不停歇。
+#: 2026-11-07 实测：``dashboard_safety_net_repair`` 攒出 **859 次 failed**
+#: （+193 次 skipped）—— 每一次都真的重跑了整条刷新计划（物化视图全量重算），
+#: 纯属浪费机器，而且把「到底哪一步失败」淹在噪声里。
+SAFETY_NET_CIRCUIT_BREAK_THRESHOLD = 3
+
+#: 熔断后的**冷却时间**（分钟）—— 过了这个时间放一次「半开」尝试，
+#: 避免「一次偶发失败就永久停摆」。
+SAFETY_NET_CIRCUIT_COOLDOWN_MINUTES = 30
+
+#: ``ops.pipeline_run_log`` 里一行 run 超过这么久还是 ``running`` ⇒ 判定为僵尸。
+#:
+#: 为什么要回收：``_load_active_dashboard_refresh_runs`` 只要看到 ``running``
+#: 的看板刷新 run，就把对应模块判成 ``refreshing``。进程被 kill / OOM /
+#: 机器重启 ⇒ run 永远停在 ``running`` ⇒ 模块永远「正在刷新」⇒ 页面永远挂提示。
+#: 2026-11-07 实测：``ops.pipeline_run_log`` 里有 3 行永久 ``running`` 的
+#: ``dashboard_safety_net_repair``，最老的停了 19 小时。
+#:
+#: 阈值必须**大于**刷新队列任务的硬超时（``time_limit=1800`` 秒 = 30 分钟）
+#: —— 否则还在正常跑的长任务会被误判成僵尸。
+STALE_DASHBOARD_REFRESH_RUN_MINUTES = 45
 
 #: 可以**自动重排队**的 SQLSTATE（环境类故障：重跑可能就好了）。
 #:
@@ -461,6 +488,122 @@ def process_refresh_queue_task(self):  # noqa: ANN201
     return asyncio.run(_async_process_refresh_queue_task())
 
 
+async def _reap_stale_dashboard_refresh_runs(
+    db,
+    *,
+    stale_minutes: int = STALE_DASHBOARD_REFRESH_RUN_MINUTES,
+) -> int:
+    """把永久 ``running`` 的看板刷新 run 标记为 ``failed``（僵尸回收）。
+
+    为什么必须回收
+    --------------
+    ``dashboard_bootstrap._load_active_dashboard_refresh_runs`` 只要看到
+    ``status='running'`` 的看板刷新 run，就把对应模块判成 ``refreshing``。
+    进程被 kill / OOM / 机器重启 ⇒ 那行 run 永远停在 ``running``
+    ⇒ 模块永远「正在刷新」⇒ 页面永远挂提示 ⇒ 安全网还会一直往队列里排修复。
+
+    2026-11-07 实测：``ops.pipeline_run_log`` 里 3 行永久 ``running`` 的
+    ``dashboard_safety_net_repair``（最老的停了 19 小时）。
+
+    匹配条件**包含** ``_load_active_dashboard_refresh_runs`` 的全部条件
+    （那部分直接决定状态判定，必须清），并额外覆盖安全网 / bootstrap 两族
+    （它们不影响状态判定，但会让监控表越积越多、盖住真正的失败）。
+    """
+    try:
+        result = await db.execute(
+            text(
+                """
+                UPDATE ops.pipeline_run_log
+                SET status = 'failed',
+                    completed_at = NOW(),
+                    error_message = COALESCE(
+                        error_message, 'stale_run_reaped_by_safety_net'
+                    )
+                WHERE status = 'running'
+                  AND started_at < NOW()
+                      - make_interval(mins => CAST(:stale_minutes AS integer))
+                  AND (
+                      pipeline_name LIKE 'dashboard_materialization_refresh.%'
+                      OR pipeline_name LIKE 'dashboard_materialization_rebuild_core.%'
+                      OR pipeline_name LIKE 'dashboard_safety_net_repair%'
+                      OR pipeline_name LIKE 'bootstrap_postgresql_dashboard%'
+                      OR (
+                          trigger_source = 'materialization_refresh'
+                          AND context ? 'module_name'
+                      )
+                  )
+                RETURNING id
+                """
+            ),
+            {"stale_minutes": int(stale_minutes)},
+        )
+        reaped = list(result.fetchall())
+        if reaped:
+            if hasattr(db, "commit"):
+                await db.commit()
+            logger.warning(
+                "[RefreshQueue] reaped %s stale dashboard refresh run(s)",
+                len(reaped),
+            )
+        return len(reaped)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[RefreshQueue] stale dashboard refresh run reaping skipped: %s",
+            exc,
+            exc_info=True,
+        )
+        return 0
+
+
+async def _safety_net_consecutive_repair_failures(
+    db,
+    *,
+    module_name: str,
+    limit: int = 20,
+) -> tuple[int, datetime | None]:
+    """返回 ``(连续失败次数, 最近一次失败的时间)``。
+
+    判据：把该模块的 ``dashboard_safety_net_repair`` 任务按时间倒序看，
+    从最新一条开始数连续的 ``failed``；碰到第一条不是 failed 的就停。
+
+    这样熔断是**自复位**的：一旦有一次成功（或被跳过），连续计数归零。
+    """
+    try:
+        result = await db.execute(
+            text(
+                """
+                SELECT status, created_at, last_error
+                FROM core.refresh_queue_tasks
+                WHERE pipeline_name = 'dashboard_safety_net_repair'
+                  AND context_json->>'module_name' = :module_name
+                ORDER BY id DESC
+                LIMIT :limit
+                """
+            ),
+            {"module_name": module_name, "limit": int(limit)},
+        )
+        rows = list(result.mappings())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[RefreshQueue] safety net circuit inspection failed: module=%s error=%s",
+            module_name,
+            exc,
+            exc_info=True,
+        )
+        return 0, None
+
+    consecutive_failures = 0
+    last_failure_at: datetime | None = None
+    for row in rows:
+        if str(row.get("status") or "") != "failed":
+            break
+        consecutive_failures += 1
+        created_at = row.get("created_at")
+        if isinstance(created_at, datetime) and last_failure_at is None:
+            last_failure_at = created_at
+    return consecutive_failures, last_failure_at
+
+
 async def _async_dashboard_refresh_safety_net() -> dict:
     db = AsyncSessionLocal()
     try:
@@ -468,14 +611,26 @@ async def _async_dashboard_refresh_safety_net() -> dict:
         recovered_count = await queue_service.recover_stale_running_tasks(
             timeout_seconds=REFRESH_QUEUE_RUNNING_TIMEOUT_SECONDS
         )
+        reaped_runs = await _reap_stale_dashboard_refresh_runs(db)
         report = await inspect_dashboard_assets(db)
         module_reports = report.get("modules") if isinstance(report, dict) else {}
         enqueued_repairs = 0
+        circuit_open_modules: list[str] = []
         if isinstance(module_reports, dict):
             for module_name, module_report in module_reports.items():
                 if not isinstance(module_report, dict):
                     continue
-                if module_report.get("status") == "ready":
+                status = str(module_report.get("status") or "")
+                # 只有 ``drift`` 是**可自愈**的状态：对象缺失（普通视图 / 物化视图
+                # 都没了）⇒ 修复任务跑起来会用资产文件把它们建回来
+                # （「不存在则 CREATE」）。
+                #
+                # ``refreshing`` 说明**正有一趟刷新在跑** —— 再排一次只会并发；
+                # 而「刷新资产的定义落后于文件」这种**没人能修**的状态
+                # （资产文件对已存在的物化视图只做原地 REFRESH，从不重建定义）
+                # 已经在状态机里不再作为判据（见 ``dashboard_bootstrap``），
+                # 所以这里也**不需要**再排修复任务。
+                if status != "drift":
                     continue
                 module_targets = DASHBOARD_MODULE_TARGETS.get(module_name, {})
                 targets = list(
@@ -488,6 +643,38 @@ async def _async_dashboard_refresh_safety_net() -> dict:
                 )
                 if not targets:
                     continue
+
+                consecutive_failures, last_failure_at = (
+                    await _safety_net_consecutive_repair_failures(
+                        db, module_name=module_name
+                    )
+                )
+                if consecutive_failures >= SAFETY_NET_CIRCUIT_BREAK_THRESHOLD:
+                    cooldown_deadline = None
+                    if last_failure_at is not None:
+                        if last_failure_at.tzinfo is None:
+                            last_failure_at = last_failure_at.replace(
+                                tzinfo=timezone.utc
+                            )
+                        cooldown_deadline = last_failure_at + timedelta(
+                            minutes=SAFETY_NET_CIRCUIT_COOLDOWN_MINUTES
+                        )
+                    now = datetime.now(timezone.utc)
+                    # 拿不到失败时间（理论上不会发生，``created_at`` NOT NULL）
+                    # ⇒ 保守按「仍在冷却」处理。
+                    if cooldown_deadline is None or now < cooldown_deadline:
+                        circuit_open_modules.append(module_name)
+                        logger.error(
+                            "[RefreshQueue] dashboard safety net circuit OPEN: "
+                            "module=%s consecutive_failures=%s last_failure_at=%s "
+                            "cooldown_until=%s —— 已暂停自动修复，需人工介入",
+                            module_name,
+                            consecutive_failures,
+                            last_failure_at,
+                            cooldown_deadline,
+                        )
+                        continue
+
                 await queue_service.enqueue_refresh(
                     trigger_type="safety_net",
                     pipeline_name="dashboard_safety_net_repair",
@@ -504,7 +691,9 @@ async def _async_dashboard_refresh_safety_net() -> dict:
         return {
             "status": "success",
             "recovered_stale_tasks": recovered_count,
+            "reaped_stale_refresh_runs": reaped_runs,
             "enqueued_repairs": enqueued_repairs,
+            "circuit_open_modules": circuit_open_modules,
         }
     finally:
         await db.close()

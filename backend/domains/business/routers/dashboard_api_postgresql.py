@@ -23,7 +23,10 @@ from fastapi.responses import JSONResponse
 
 from backend.dependencies.auth import get_current_user
 from backend.models.database import AsyncSessionLocal
-from backend.services.data_pipeline.dashboard_bootstrap import inspect_dashboard_assets
+from backend.services.data_pipeline.dashboard_bootstrap import (
+    DASHBOARD_ASSET_AVAILABLE_STATUSES,
+    inspect_dashboard_assets,
+)
 from backend.services.postgresql_dashboard_service import (
     _normalize_period_start,
     get_postgresql_dashboard_service,
@@ -147,7 +150,7 @@ async def _require_dashboard_assets_ready(request: Request) -> None:
     )
 
     if isinstance(module_report, dict):
-        if module_report.get("status") not in {"ready", "refreshing"}:
+        if module_report.get("status") not in DASHBOARD_ASSET_AVAILABLE_STATUSES:
             report = await _refresh_dashboard_assets_report(request) or report
             modules = report.get("modules")
             module_report = (
@@ -155,10 +158,9 @@ async def _require_dashboard_assets_ready(request: Request) -> None:
                 if isinstance(modules, dict) and module_name
                 else module_report
             )
-        if isinstance(module_report, dict) and module_report.get("status") in {
-            "ready",
-            "refreshing",
-        }:
+        if isinstance(module_report, dict) and (
+            module_report.get("status") in DASHBOARD_ASSET_AVAILABLE_STATUSES
+        ):
             return
         detail: dict[str, Any] = {
             "message": "PostgreSQL dashboard assets are not ready. Run deploy-time bootstrap and retry.",
