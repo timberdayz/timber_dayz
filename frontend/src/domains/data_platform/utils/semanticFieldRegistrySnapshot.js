@@ -15,13 +15,22 @@
  */
 export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
   "alias_index": {
+    "addtocartcount": "add_to_cart_count",
+    "addtocartrate": "add_to_cart_rate",
+    "addtocartusercount": "add_to_cart_user_count",
+    "aov": "aov",
+    "aovplaced": "aov_placed",
     "bouncerate": "bounce_rate",
+    "buyercount": "buyer_count",
+    "buyercountplaced": "buyer_count_placed",
     "buyerpaidamount": "paid_amount",
+    "channel": "channel",
     "click": "clicks",
     "clickrate": "click_rate",
     "clicks": "clicks",
     "commission": "platform_commission",
     "conversionrate": "conversion_rate",
+    "conversionrateplaced": "conversion_rate_placed",
     "ctr": "click_rate",
     "cvr": "conversion_rate",
     "datadate": "metric_date",
@@ -45,7 +54,10 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "livegmv": "live_gmv",
     "liveindirectgmv": "live_indirect_gmv",
     "metricdate": "metric_date",
+    "orderconversionrate": "order_conversion_rate",
+    "orderconversionrateplaced": "order_conversion_rate_placed",
     "ordercount": "order_count",
+    "ordercountplaced": "order_count_placed",
     "orderdate": "order_date",
     "orderid": "order_id",
     "orderlineid": "line_id",
@@ -67,9 +79,13 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "profit": "profit",
     "purchaseamount": "purchase_amount",
     "pv": "page_views",
+    "refundamount": "refund_amount",
+    "refundeditemcount": "refunded_item_count",
     "sales": "sales_amount",
     "salesamount": "sales_amount",
+    "salesamountplaced": "sales_amount_placed",
     "salesvolume": "sales_volume",
+    "salesvolumeplaced": "sales_volume_placed",
     "serviceid": "service_id",
     "shopid": "shop_id",
     "skuid": "sku_id",
@@ -80,6 +96,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "starttime": "period_start_time",
     "time": "period_start_time",
     "totaltransactionamount": "total_transaction_amount",
+    "uniqueclicks": "unique_clicks",
+    "uniqueimpressions": "unique_impressions",
     "unitssold": "sales_volume",
     "videoattributedgmv": "video_attributed_gmv",
     "videogmv": "video_gmv",
@@ -91,22 +109,46 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "warehousename": "warehouse_name",
     "下单日期": "order_date",
     "下单时间": "order_date",
+    "下单销售额": "sales_amount_placed",
+    "不重复的商品曝光量": "unique_impressions",
+    "不重复的商品点击量": "unique_clicks",
+    "买家数(已下单)": "buyer_count_placed",
+    "买家数(已下订单)": "buyer_count_placed",
+    "买家数(已付款订单)": "buyer_count",
+    "买家数(已确定订单)": "buyer_count_placed",
     "产品id": "product_id",
     "产品sku": "platform_sku",
     "产品名称": "product_name",
     "仓库": "warehouse_name",
     "仓库名称": "warehouse_name",
+    "件数(已下单)": "sales_volume_placed",
+    "件数(已下订单)": "sales_volume_placed",
+    "件数(已确定订单)": "sales_volume_placed",
     "利润": "profit",
+    "加购次数": "add_to_cart_count",
+    "加购次数(直播)": "add_to_cart_count",
+    "加购次数(视频)": "add_to_cart_count",
+    "加购率": "add_to_cart_rate",
+    "加购率(直播)": "add_to_cart_rate",
+    "加购率(视频)": "add_to_cart_rate",
+    "去重加购率": "add_to_cart_rate",
+    "去重商品曝光次数": "unique_impressions",
+    "去重商品曝光次数(视频)": "unique_impressions",
+    "去重点击次数": "unique_clicks",
+    "去重点击次数(视频)": "unique_clicks",
     "发品状态": "item_status",
     "周期开始日期": "period_start_date",
     "周期结束日期": "period_end_date",
     "商品": "product_name",
     "商品id": "product_id",
     "商品sku": "platform_sku",
+    "商品卡": "channel",
     "商品名": "product_name",
     "商品名称": "product_name",
+    "商品曝光次数": "unique_impressions",
     "商品状态": "item_status",
     "商品访客数": "product_visitor_count",
+    "商城页": "channel",
     "商家直播gmv": "live_gmv",
     "商家直播归因gmv": "live_attributed_gmv",
     "商家直播间接gmv": "live_indirect_gmv",
@@ -115,6 +157,13 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "商家视频间接gmv": "video_indirect_gmv",
     "实付金额": "paid_amount",
     "小时": "period_start_time",
+    "已下单": "order_count_placed",
+    "已下订单": "order_count_placed",
+    "已加购的用户数": "add_to_cart_user_count",
+    "已加购的用户数(直播)": "add_to_cart_user_count",
+    "已加购的用户数(视频)": "add_to_cart_user_count",
+    "已确定订单": "order_count_placed",
+    "已退款的商品件数": "refunded_item_count",
     "平台sku": "platform_sku",
     "平台佣金": "platform_commission",
     "店铺": "shop_id",
@@ -129,10 +178,18 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "曝光量": "impressions",
     "服务id": "service_id",
     "服务编号": "service_id",
+    "每笔订单销售额": "aov",
+    "每笔订单销售额(已下单)": "aov_placed",
+    "每笔订单销售额(已下订单)": "aov_placed",
+    "每笔订单销售额(已付款订单)": "aov",
+    "每笔订单销售额(已确定订单)": "aov_placed",
     "浏览量": "page_views",
+    "渠道": "channel",
     "点击次数": "clicks",
     "点击率": "click_rate",
     "点击量": "clicks",
+    "状态": "item_status",
+    "直播": "channel",
     "直播gmv": "live_gmv",
     "直播归因gmv": "live_attributed_gmv",
     "直播间接gmv": "live_indirect_gmv",
@@ -140,6 +197,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "结束日期": "period_end_date",
     "结束时间": "period_end_time",
     "统计日期": "metric_date",
+    "视频": "channel",
     "视频gmv": "video_gmv",
     "视频归因gmv": "video_attributed_gmv",
     "视频间接gmv": "video_indirect_gmv",
@@ -147,15 +205,31 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "订单数": "order_count",
     "订单日期": "order_date",
     "订单编号": "order_id",
+    "订单转化率": "order_conversion_rate",
+    "订单转化率(已下单)": "order_conversion_rate_placed",
+    "订单转化率(已下订单)": "order_conversion_rate_placed",
+    "订单转化率(已付款订单)": "order_conversion_rate",
+    "订单转化率(已确定订单)": "order_conversion_rate_placed",
     "订单量": "order_count",
+    "订单量(已下单)": "order_count_placed",
     "访客数": "visitor_count",
     "跳失率": "bounce_rate",
     "转化率": "conversion_rate",
+    "转化率(已下单)": "conversion_rate_placed",
+    "转化率(已下订单)": "conversion_rate_placed",
+    "转化率(已确定订单)": "conversion_rate_placed",
+    "退款商品件数": "refunded_item_count",
+    "退款金额": "refund_amount",
+    "退款额": "refund_amount",
     "采购金额": "purchase_amount",
     "销售数量": "sales_volume",
     "销售金额": "sales_amount",
     "销售额": "sales_amount",
-    "销量": "sales_volume"
+    "销售额(已下单)": "sales_amount_placed",
+    "销售额(已下订单)": "sales_amount_placed",
+    "销售额(已确定订单)": "sales_amount_placed",
+    "销量": "sales_volume",
+    "销量(已下单)": "sales_volume_placed"
   },
   "column_overrides": [
     {
@@ -274,6 +348,50 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "销售数量": "sales_volume",
       "销量": "sales_volume",
       "预估回款金额": "estimated_settlement_amount"
+    },
+    "products": {
+      "currentitemstatus": "item_status",
+      "id": "product_id",
+      "不重复的商品曝光量": "unique_impressions",
+      "不重复的商品点击量": "unique_clicks",
+      "买家数(已下单)": "buyer_count_placed",
+      "买家数(已下订单)": "buyer_count_placed",
+      "买家数(已付款订单)": "buyer_count",
+      "买家数(已确定订单)": "buyer_count_placed",
+      "件数(已下单)": "sales_volume_placed",
+      "件数(已下订单)": "sales_volume_placed",
+      "件数(已付款订单)": "sales_volume",
+      "件数(已确定订单)": "sales_volume_placed",
+      "发品状态": "item_status",
+      "商品": "product_name",
+      "商品id": "product_id",
+      "商品名": "product_name",
+      "商品展示量": "impressions",
+      "商品点击量": "clicks",
+      "商品编号": "product_id",
+      "商品访客数量": "product_visitor_count",
+      "商品跳出率": "bounce_rate",
+      "商品页面访问量": "page_views",
+      "已下订单": "order_count_placed",
+      "已付款订单": "order_count",
+      "每笔订单销售额(已下单)": "aov_placed",
+      "每笔订单销售额(已下订单)": "aov_placed",
+      "每笔订单销售额(已付款订单)": "aov",
+      "每笔订单销售额(已确定订单)": "aov_placed",
+      "状态": "item_status",
+      "规格编号": "sku_id",
+      "订单转化率(已下单)": "order_conversion_rate_placed",
+      "订单转化率(已下订单)": "order_conversion_rate_placed",
+      "订单转化率(已付款订单)": "order_conversion_rate",
+      "订单转化率(已确定订单)": "order_conversion_rate_placed",
+      "转化率(已下单)": "conversion_rate_placed",
+      "转化率(已下订单)": "conversion_rate_placed",
+      "转化率(已付款订单)": "conversion_rate",
+      "转化率(已确定订单)": "conversion_rate_placed",
+      "销售额(已下单)": "sales_amount_placed",
+      "销售额(已下订单)": "sales_amount_placed",
+      "销售额(已付款订单)": "sales_amount",
+      "销售额(已确定订单)": "sales_amount_placed"
     }
   },
   "domain_aliases": [
@@ -450,6 +568,193 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       ],
       "data_domain": "analytics",
       "semantic_key": "gmv"
+    },
+    {
+      "aliases": [
+        "商品编号",
+        "商品 ID",
+        "商品ID",
+        "ID"
+      ],
+      "data_domain": "products",
+      "semantic_key": "product_id"
+    },
+    {
+      "aliases": [
+        "商品",
+        "商品名"
+      ],
+      "data_domain": "products",
+      "semantic_key": "product_name"
+    },
+    {
+      "aliases": [
+        "Current Item Status",
+        "状态",
+        "发品状态"
+      ],
+      "data_domain": "products",
+      "semantic_key": "item_status"
+    },
+    {
+      "aliases": [
+        "规格编号"
+      ],
+      "data_domain": "products",
+      "semantic_key": "sku_id"
+    },
+    {
+      "aliases": [
+        "已付款订单"
+      ],
+      "data_domain": "products",
+      "semantic_key": "order_count"
+    },
+    {
+      "aliases": [
+        "销售额（已付款订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "sales_amount"
+    },
+    {
+      "aliases": [
+        "件数（已付款订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "sales_volume"
+    },
+    {
+      "aliases": [
+        "转化率（已付款订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "conversion_rate"
+    },
+    {
+      "aliases": [
+        "订单转化率（已付款订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "order_conversion_rate"
+    },
+    {
+      "aliases": [
+        "买家数（已付款订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "buyer_count"
+    },
+    {
+      "aliases": [
+        "每笔订单销售额（已付款订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "aov"
+    },
+    {
+      "aliases": [
+        "已下订单"
+      ],
+      "data_domain": "products",
+      "semantic_key": "order_count_placed"
+    },
+    {
+      "aliases": [
+        "销售额（已下订单）",
+        "销售额（已确定订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "sales_amount_placed"
+    },
+    {
+      "aliases": [
+        "件数（已下订单）",
+        "件数（已确定订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "sales_volume_placed"
+    },
+    {
+      "aliases": [
+        "转化率（已下订单）",
+        "转化率（已确定订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "conversion_rate_placed"
+    },
+    {
+      "aliases": [
+        "订单转化率（已下订单）",
+        "订单转化率（已确定订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "order_conversion_rate_placed"
+    },
+    {
+      "aliases": [
+        "买家数（已下订单）",
+        "买家数（已确定订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "buyer_count_placed"
+    },
+    {
+      "aliases": [
+        "每笔订单销售额（已下订单）",
+        "每笔订单销售额（已确定订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "aov_placed"
+    },
+    {
+      "aliases": [
+        "商品展示量"
+      ],
+      "data_domain": "products",
+      "semantic_key": "impressions"
+    },
+    {
+      "aliases": [
+        "不重复的商品曝光量"
+      ],
+      "data_domain": "products",
+      "semantic_key": "unique_impressions"
+    },
+    {
+      "aliases": [
+        "商品点击量"
+      ],
+      "data_domain": "products",
+      "semantic_key": "clicks"
+    },
+    {
+      "aliases": [
+        "不重复的商品点击量"
+      ],
+      "data_domain": "products",
+      "semantic_key": "unique_clicks"
+    },
+    {
+      "aliases": [
+        "商品访客数量"
+      ],
+      "data_domain": "products",
+      "semantic_key": "product_visitor_count"
+    },
+    {
+      "aliases": [
+        "商品页面访问量"
+      ],
+      "data_domain": "products",
+      "semantic_key": "page_views"
+    },
+    {
+      "aliases": [
+        "商品跳出率"
+      ],
+      "data_domain": "products",
+      "semantic_key": "bounce_rate"
     }
   ],
   "domain_column_index": {
@@ -1291,7 +1596,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "item status",
         "product status",
         "发品状态",
-        "商品状态"
+        "商品状态",
+        "状态"
       ],
       "default_hash": false,
       "description": "标准化属性字段，状态变化不应默认改变 Data Hash。",
@@ -1305,15 +1611,393 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "required": false,
       "semantic_key": "item_status",
       "system_scope": false
+    },
+    {
+      "aliases": [
+        "sales_amount_placed",
+        "销售额（已下单）",
+        "销售额（已下订单）",
+        "销售额（已确定订单）",
+        "下单销售额"
+      ],
+      "default_hash": false,
+      "description": "销售额（下单口径）。与「已付款口径」平均差 5.15%，不可混用。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "销售额（下单口径）",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "sales_amount_placed",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "sales_volume_placed",
+        "销量（已下单）",
+        "件数（已下单）",
+        "件数（已下订单）",
+        "件数（已确定订单）"
+      ],
+      "default_hash": false,
+      "description": "销量（下单口径）。与「已付款口径」不可混用。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "销量（下单口径）",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "sales_volume_placed",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "order_count_placed",
+        "订单量（已下单）",
+        "已下单",
+        "已下订单",
+        "已确定订单"
+      ],
+      "default_hash": false,
+      "description": "订单量（下单口径）。与「已付款口径」不可混用。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "订单量（下单口径）",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "order_count_placed",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "conversion_rate_placed",
+        "转化率（已下单）",
+        "转化率（已下订单）",
+        "转化率（已确定订单）"
+      ],
+      "default_hash": false,
+      "description": "转化率（下单口径）。与「已付款口径」不可混用。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "转化率（下单口径）",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "conversion_rate_placed",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "order_conversion_rate_placed",
+        "订单转化率（已下单）",
+        "订单转化率（已下订单）",
+        "订单转化率（已确定订单）"
+      ],
+      "default_hash": false,
+      "description": "订单转化率（下单口径）。与商品转化率是不同指标。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "订单转化率（下单口径）",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "order_conversion_rate_placed",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "buyer_count_placed",
+        "买家数（已下单）",
+        "买家数（已下订单）",
+        "买家数（已确定订单）"
+      ],
+      "default_hash": false,
+      "description": "买家数（下单口径）。与「已付款口径」不可混用。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "买家数（下单口径）",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "buyer_count_placed",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "aov_placed",
+        "每笔订单销售额（已下单）",
+        "每笔订单销售额（已下订单）",
+        "每笔订单销售额（已确定订单）"
+      ],
+      "default_hash": false,
+      "description": "每笔订单销售额（下单口径）。与「已付款口径」不可混用。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "每笔订单销售额（下单口径）",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "aov_placed",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "order_conversion_rate",
+        "订单转化率",
+        "订单转化率（已付款订单）",
+        "订单转化率（已下订单）"
+      ],
+      "default_hash": false,
+      "description": "订单转化率。与商品转化率是不同指标，不可混用。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "订单转化率",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "order_conversion_rate",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "unique_impressions",
+        "不重复的商品曝光量",
+        "去重商品曝光次数",
+        "去重商品曝光次数（视频）",
+        "商品曝光次数.1"
+      ],
+      "default_hash": false,
+      "description": "去重商品曝光量。与商品展示量（曝光次数）是不同指标。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "去重商品曝光量",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "unique_impressions",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "unique_clicks",
+        "不重复的商品点击量",
+        "去重点击次数",
+        "去重点击次数.1",
+        "去重点击次数（视频）"
+      ],
+      "default_hash": false,
+      "description": "去重点击量。与商品点击量（点击次数）是不同指标。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "去重点击量",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "unique_clicks",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "buyer_count",
+        "买家数（已付款订单）",
+        "买家数（已下订单）",
+        "买家数（已确定订单）"
+      ],
+      "default_hash": false,
+      "description": "买家数。已付款口径。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "买家数",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "buyer_count",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "aov",
+        "每笔订单销售额（已付款订单）",
+        "每笔订单销售额（已下订单）",
+        "每笔订单销售额"
+      ],
+      "default_hash": false,
+      "description": "每笔订单销售额。已付款口径。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "每笔订单销售额",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "aov",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "add_to_cart_count",
+        "加购次数",
+        "加购次数.1",
+        "加购次数（直播）",
+        "加购次数（视频）"
+      ],
+      "default_hash": false,
+      "description": "加购件数。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "加购件数",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "add_to_cart_count",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "add_to_cart_user_count",
+        "已加购的用户数",
+        "已加购的用户数.1",
+        "已加购的用户数（直播）",
+        "已加购的用户数（视频）"
+      ],
+      "default_hash": false,
+      "description": "加购用户数。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "加购用户数",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "add_to_cart_user_count",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "add_to_cart_rate",
+        "加购率",
+        "加购率.1",
+        "加购率（直播）",
+        "加购率（视频）",
+        "去重加购率"
+      ],
+      "default_hash": false,
+      "description": "加购率。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "加购率",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "add_to_cart_rate",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "refund_amount",
+        "退款金额",
+        "退款额"
+      ],
+      "default_hash": false,
+      "description": "退款金额。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "退款金额",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "refund_amount",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "refunded_item_count",
+        "已退款的商品件数",
+        "退款商品件数"
+      ],
+      "default_hash": false,
+      "description": "退款商品件数。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "退款商品件数",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "refunded_item_count",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "channel",
+        "渠道",
+        "商城页",
+        "直播",
+        "视频",
+        "商品卡"
+      ],
+      "default_hash": true,
+      "description": "渠道维度。tiktok 商品报表按商城/直播/视频/商品卡分块。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": null,
+      "identity_strength": null,
+      "kind": "dimension",
+      "label": "渠道",
+      "option_group": "identity",
+      "required": false,
+      "semantic_key": "channel",
+      "system_scope": false
     }
   ],
   "generated_at": "",
   "generated_by": "scripts/generate_semantic_field_snapshot.py",
   "hash_identity_keys": [
+    "add_to_cart_count",
+    "add_to_cart_rate",
+    "add_to_cart_user_count",
+    "aov",
+    "aov_placed",
     "bounce_rate",
+    "buyer_count",
+    "buyer_count_placed",
+    "channel",
     "click_rate",
     "clicks",
     "conversion_rate",
+    "conversion_rate_placed",
     "gmv",
     "gmv_band",
     "impressions",
@@ -1322,7 +2006,10 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "live_gmv",
     "live_indirect_gmv",
     "metric_date",
+    "order_conversion_rate",
+    "order_conversion_rate_placed",
     "order_count",
+    "order_count_placed",
     "order_date",
     "order_id",
     "page_views",
@@ -1338,13 +2025,19 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "product_visitor_count",
     "profit",
     "purchase_amount",
+    "refund_amount",
+    "refunded_item_count",
     "sales_amount",
+    "sales_amount_placed",
     "sales_volume",
+    "sales_volume_placed",
     "service_id",
     "shop_id",
     "sku_id",
     "sku_order_count",
     "total_transaction_amount",
+    "unique_clicks",
+    "unique_impressions",
     "video_attributed_gmv",
     "video_gmv",
     "video_indirect_gmv",
@@ -1677,6 +2370,27 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "label": "商品名称 (product_name)",
           "system_scope": false,
           "value": "product_name"
+        },
+        {
+          "aliases": [
+            "channel",
+            "渠道",
+            "商城页",
+            "直播",
+            "视频",
+            "商品卡"
+          ],
+          "default_hash": true,
+          "description": "渠道维度。tiktok 商品报表按商城/直播/视频/商品卡分块。",
+          "domain": "products",
+          "group": "identity",
+          "hash_eligible": true,
+          "hash_warning": null,
+          "identity_strength": null,
+          "kind": "dimension",
+          "label": "渠道 (channel)",
+          "system_scope": false,
+          "value": "channel"
         }
       ]
     },
@@ -2164,7 +2878,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "item status",
             "product status",
             "发品状态",
-            "商品状态"
+            "商品状态",
+            "状态"
           ],
           "default_hash": false,
           "description": "标准化属性字段，状态变化不应默认改变 Data Hash。",
@@ -2177,6 +2892,336 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "label": "商品状态 (item_status)",
           "system_scope": false,
           "value": "item_status"
+        },
+        {
+          "aliases": [
+            "sales_amount_placed",
+            "销售额（已下单）",
+            "销售额（已下订单）",
+            "销售额（已确定订单）",
+            "下单销售额"
+          ],
+          "default_hash": false,
+          "description": "销售额（下单口径）。与「已付款口径」平均差 5.15%，不可混用。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "销售额（下单口径） (sales_amount_placed)",
+          "system_scope": false,
+          "value": "sales_amount_placed"
+        },
+        {
+          "aliases": [
+            "sales_volume_placed",
+            "销量（已下单）",
+            "件数（已下单）",
+            "件数（已下订单）",
+            "件数（已确定订单）"
+          ],
+          "default_hash": false,
+          "description": "销量（下单口径）。与「已付款口径」不可混用。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "销量（下单口径） (sales_volume_placed)",
+          "system_scope": false,
+          "value": "sales_volume_placed"
+        },
+        {
+          "aliases": [
+            "order_count_placed",
+            "订单量（已下单）",
+            "已下单",
+            "已下订单",
+            "已确定订单"
+          ],
+          "default_hash": false,
+          "description": "订单量（下单口径）。与「已付款口径」不可混用。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "订单量（下单口径） (order_count_placed)",
+          "system_scope": false,
+          "value": "order_count_placed"
+        },
+        {
+          "aliases": [
+            "conversion_rate_placed",
+            "转化率（已下单）",
+            "转化率（已下订单）",
+            "转化率（已确定订单）"
+          ],
+          "default_hash": false,
+          "description": "转化率（下单口径）。与「已付款口径」不可混用。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "转化率（下单口径） (conversion_rate_placed)",
+          "system_scope": false,
+          "value": "conversion_rate_placed"
+        },
+        {
+          "aliases": [
+            "order_conversion_rate_placed",
+            "订单转化率（已下单）",
+            "订单转化率（已下订单）",
+            "订单转化率（已确定订单）"
+          ],
+          "default_hash": false,
+          "description": "订单转化率（下单口径）。与商品转化率是不同指标。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "订单转化率（下单口径） (order_conversion_rate_placed)",
+          "system_scope": false,
+          "value": "order_conversion_rate_placed"
+        },
+        {
+          "aliases": [
+            "buyer_count_placed",
+            "买家数（已下单）",
+            "买家数（已下订单）",
+            "买家数（已确定订单）"
+          ],
+          "default_hash": false,
+          "description": "买家数（下单口径）。与「已付款口径」不可混用。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "买家数（下单口径） (buyer_count_placed)",
+          "system_scope": false,
+          "value": "buyer_count_placed"
+        },
+        {
+          "aliases": [
+            "aov_placed",
+            "每笔订单销售额（已下单）",
+            "每笔订单销售额（已下订单）",
+            "每笔订单销售额（已确定订单）"
+          ],
+          "default_hash": false,
+          "description": "每笔订单销售额（下单口径）。与「已付款口径」不可混用。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "每笔订单销售额（下单口径） (aov_placed)",
+          "system_scope": false,
+          "value": "aov_placed"
+        },
+        {
+          "aliases": [
+            "order_conversion_rate",
+            "订单转化率",
+            "订单转化率（已付款订单）",
+            "订单转化率（已下订单）"
+          ],
+          "default_hash": false,
+          "description": "订单转化率。与商品转化率是不同指标，不可混用。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "订单转化率 (order_conversion_rate)",
+          "system_scope": false,
+          "value": "order_conversion_rate"
+        },
+        {
+          "aliases": [
+            "unique_impressions",
+            "不重复的商品曝光量",
+            "去重商品曝光次数",
+            "去重商品曝光次数（视频）",
+            "商品曝光次数.1"
+          ],
+          "default_hash": false,
+          "description": "去重商品曝光量。与商品展示量（曝光次数）是不同指标。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "去重商品曝光量 (unique_impressions)",
+          "system_scope": false,
+          "value": "unique_impressions"
+        },
+        {
+          "aliases": [
+            "unique_clicks",
+            "不重复的商品点击量",
+            "去重点击次数",
+            "去重点击次数.1",
+            "去重点击次数（视频）"
+          ],
+          "default_hash": false,
+          "description": "去重点击量。与商品点击量（点击次数）是不同指标。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "去重点击量 (unique_clicks)",
+          "system_scope": false,
+          "value": "unique_clicks"
+        },
+        {
+          "aliases": [
+            "buyer_count",
+            "买家数（已付款订单）",
+            "买家数（已下订单）",
+            "买家数（已确定订单）"
+          ],
+          "default_hash": false,
+          "description": "买家数。已付款口径。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "买家数 (buyer_count)",
+          "system_scope": false,
+          "value": "buyer_count"
+        },
+        {
+          "aliases": [
+            "aov",
+            "每笔订单销售额（已付款订单）",
+            "每笔订单销售额（已下订单）",
+            "每笔订单销售额"
+          ],
+          "default_hash": false,
+          "description": "每笔订单销售额。已付款口径。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "每笔订单销售额 (aov)",
+          "system_scope": false,
+          "value": "aov"
+        },
+        {
+          "aliases": [
+            "add_to_cart_count",
+            "加购次数",
+            "加购次数.1",
+            "加购次数（直播）",
+            "加购次数（视频）"
+          ],
+          "default_hash": false,
+          "description": "加购件数。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "加购件数 (add_to_cart_count)",
+          "system_scope": false,
+          "value": "add_to_cart_count"
+        },
+        {
+          "aliases": [
+            "add_to_cart_user_count",
+            "已加购的用户数",
+            "已加购的用户数.1",
+            "已加购的用户数（直播）",
+            "已加购的用户数（视频）"
+          ],
+          "default_hash": false,
+          "description": "加购用户数。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "加购用户数 (add_to_cart_user_count)",
+          "system_scope": false,
+          "value": "add_to_cart_user_count"
+        },
+        {
+          "aliases": [
+            "add_to_cart_rate",
+            "加购率",
+            "加购率.1",
+            "加购率（直播）",
+            "加购率（视频）",
+            "去重加购率"
+          ],
+          "default_hash": false,
+          "description": "加购率。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "加购率 (add_to_cart_rate)",
+          "system_scope": false,
+          "value": "add_to_cart_rate"
+        },
+        {
+          "aliases": [
+            "refund_amount",
+            "退款金额",
+            "退款额"
+          ],
+          "default_hash": false,
+          "description": "退款金额。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "退款金额 (refund_amount)",
+          "system_scope": false,
+          "value": "refund_amount"
+        },
+        {
+          "aliases": [
+            "refunded_item_count",
+            "已退款的商品件数",
+            "退款商品件数"
+          ],
+          "default_hash": false,
+          "description": "退款商品件数。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "退款商品件数 (refunded_item_count)",
+          "system_scope": false,
+          "value": "refunded_item_count"
         }
       ]
     },

@@ -6,6 +6,25 @@ from typing import Any, Dict, Iterable, Optional
 from backend.services.currency_extractor import get_currency_extractor
 
 
+# ── 口径（caliber）维度 ────────────────────────────────────────────────
+#
+# 平台报表里同一个指标常带**多套统计口径**, 它们不是措辞差异, 是不同的业务事实:
+#
+#   * ``placed`` —— 已下单(买家提交了订单, 未必付款)
+#   * ``paid``   —— 已付款(买家完成了支付)
+#
+# 2026-11-08 生产实测(shopee 商品月报, 7090 行可比): 两套口径的销售额
+# **平均差 5.15%, 最大差 175.89** ⇒ 绝不能归一化成同一个值, 也不能互相冒充。
+#
+# 平台还会**改词**(报表改版): shopee 的「已确定订单」是「已下订单」的旧叫法
+# (实测两者差 4.25%, 属同一口径的措辞迁移), 由 :data:`PLATFORM_CALIBER_HISTORY` 登记。
+#
+# 「已确认订单」在真实数据里**没有任何数值**(只作为旧报表遗留列存在),
+# 无从判断它对应哪个口径 ⇒ 刻意**不折算**, 宁可落 unknown, 也不猜。
+CALIBER_PLACED = "placed"
+CALIBER_PAID = "paid"
+
+
 SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
     "order_id": {
         "label": "订单号",
@@ -181,6 +200,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "label": "转化率",
         "kind": "metric",
         "domain": "analytics",
+        "caliber": CALIBER_PAID,
         "hash_eligible": False,
         "default_hash": False,
         "aliases": ["转化率", "conversion rate", "cvr"],
@@ -189,6 +209,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "label": "订单量",
         "kind": "metric",
         "domain": "analytics",
+        "caliber": CALIBER_PAID,
         "hash_eligible": False,
         "default_hash": False,
         "aliases": ["订单量", "订单数", "order count", "orders"],
@@ -229,6 +250,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "label": "销售额",
         "kind": "metric",
         "domain": "orders",
+        "caliber": CALIBER_PAID,
         "hash_eligible": False,
         "default_hash": False,
         "aliases": ["sales amount", "sales", "销售额", "销售金额"],
@@ -237,6 +259,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "label": "销量",
         "kind": "metric",
         "domain": "orders",
+        "caliber": CALIBER_PAID,
         "hash_eligible": False,
         "default_hash": False,
         "aliases": ["sales volume", "units sold", "销量", "销售数量"],
@@ -337,7 +360,175 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "products",
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["product_status", "listing_status", "item status", "product status", "发品状态", "商品状态"],
+        "aliases": ["product_status", "listing_status", "item status", "product status", "发品状态", "商品状态", "状态"],
+    },
+    # ── products 域的**口径变体**(2026-11-08 新增) ─────────────────────
+    #
+    # 平台报表对同一个指标给两套统计口径: 「已下单」与「已付款」。
+    # 实测两者销售额平均差 5.15% ⇒ 是不同的业务事实, 必须是两个标准字段,
+    # 不能靠别名混成一个。
+    #
+    # 主口径(``*_paid``)用无后缀的字段名承载(``sales_amount`` 等), 因为
+    # 已付款口径与利润/实付字段自洽; 下单口径单独成字段。
+    "sales_amount_placed": {
+        "label": "销售额（下单口径）",
+        "kind": "metric",
+        "domain": "products",
+        "caliber": CALIBER_PLACED,
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["销售额（已下单）", "销售额（已下订单）", "销售额（已确定订单）", "下单销售额"],
+    },
+    "sales_volume_placed": {
+        "label": "销量（下单口径）",
+        "kind": "metric",
+        "domain": "products",
+        "caliber": CALIBER_PLACED,
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["销量（已下单）", "件数（已下单）", "件数（已下订单）", "件数（已确定订单）"],
+    },
+    "order_count_placed": {
+        "label": "订单量（下单口径）",
+        "kind": "metric",
+        "domain": "products",
+        "caliber": CALIBER_PLACED,
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["订单量（已下单）", "已下单", "已下订单", "已确定订单"],
+    },
+    "conversion_rate_placed": {
+        "label": "转化率（下单口径）",
+        "kind": "metric",
+        "domain": "products",
+        "caliber": CALIBER_PLACED,
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["转化率（已下单）", "转化率（已下订单）", "转化率（已确定订单）"],
+    },
+    "order_conversion_rate_placed": {
+        "label": "订单转化率（下单口径）",
+        "kind": "metric",
+        "domain": "products",
+        "caliber": CALIBER_PLACED,
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["订单转化率（已下单）", "订单转化率（已下订单）", "订单转化率（已确定订单）"],
+    },
+    "buyer_count_placed": {
+        "label": "买家数（下单口径）",
+        "kind": "metric",
+        "domain": "products",
+        "caliber": CALIBER_PLACED,
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["买家数（已下单）", "买家数（已下订单）", "买家数（已确定订单）"],
+    },
+    "aov_placed": {
+        "label": "每笔订单销售额（下单口径）",
+        "kind": "metric",
+        "domain": "products",
+        "caliber": CALIBER_PLACED,
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["每笔订单销售额（已下单）", "每笔订单销售额（已下订单）", "每笔订单销售额（已确定订单）"],
+    },
+    # ── products 域此前**根本没有落点**的指标(2026-11-08 新增) ─────────
+    #
+    # 依据: shopee 商品月报 / tiktok 商品月报的真实表头。实测这些指标与
+    # 已有字段**数值不同**(例: 同商品同月「转化率」10.56% vs「订单转化率」-),
+    # 混用会造成口径错误 ⇒ 各自独立成字段。
+    "order_conversion_rate": {
+        "label": "订单转化率",
+        "kind": "metric",
+        "domain": "products",
+        "caliber": CALIBER_PAID,
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["订单转化率", "订单转化率（已付款订单）", "订单转化率（已下订单）"],
+    },
+    "unique_impressions": {
+        "label": "去重商品曝光量",
+        "kind": "metric",
+        "domain": "products",
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["不重复的商品曝光量", "去重商品曝光次数", "去重商品曝光次数（视频）", "商品曝光次数.1"],
+    },
+    "unique_clicks": {
+        "label": "去重点击量",
+        "kind": "metric",
+        "domain": "products",
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["不重复的商品点击量", "去重点击次数", "去重点击次数.1", "去重点击次数（视频）"],
+    },
+    "buyer_count": {
+        "label": "买家数",
+        "kind": "metric",
+        "domain": "products",
+        "caliber": CALIBER_PAID,
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["买家数（已付款订单）", "买家数（已下订单）", "买家数（已确定订单）"],
+    },
+    "aov": {
+        "label": "每笔订单销售额",
+        "kind": "metric",
+        "domain": "products",
+        "caliber": CALIBER_PAID,
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["每笔订单销售额（已付款订单）", "每笔订单销售额（已下订单）", "每笔订单销售额"],
+    },
+    "add_to_cart_count": {
+        "label": "加购件数",
+        "kind": "metric",
+        "domain": "products",
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["加购次数", "加购次数.1", "加购次数（直播）", "加购次数（视频）"],
+    },
+    "add_to_cart_user_count": {
+        "label": "加购用户数",
+        "kind": "metric",
+        "domain": "products",
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["已加购的用户数", "已加购的用户数.1", "已加购的用户数（直播）", "已加购的用户数（视频）"],
+    },
+    "add_to_cart_rate": {
+        "label": "加购率",
+        "kind": "metric",
+        "domain": "products",
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["加购率", "加购率.1", "加购率（直播）", "加购率（视频）", "去重加购率"],
+    },
+    "refund_amount": {
+        "label": "退款金额",
+        "kind": "metric",
+        "domain": "products",
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["退款金额", "退款额"],
+    },
+    "refunded_item_count": {
+        "label": "退款商品件数",
+        "kind": "metric",
+        "domain": "products",
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["已退款的商品件数", "退款商品件数"],
+    },
+    # ── 渠道维度(tiktok 商品报表按商城/直播/视频/商品卡分块) ──────────
+    "channel": {
+        "label": "渠道",
+        "kind": "dimension",
+        "domain": "products",
+        "hash_eligible": True,
+        "default_hash": True,
+        "aliases": ["渠道", "channel", "商城页", "直播", "视频", "商品卡"],
     },
 }
 
@@ -394,6 +585,25 @@ SEMANTIC_FIELD_DESCRIPTIONS: Dict[str, str] = {
     "order_date": "订单发生日期，通常作为分析维度。",
     "product_name": "弱身份字段。商品名可能重名或改名，优先使用商品 ID / SKU。",
     "item_status": "标准化属性字段，状态变化不应默认改变 Data Hash。",
+    # ── products 域的口径变体与新增指标(2026-11-08) ─────────────────
+    "sales_amount_placed": "销售额（下单口径）。与「已付款口径」平均差 5.15%，不可混用。",
+    "sales_volume_placed": "销量（下单口径）。与「已付款口径」不可混用。",
+    "order_count_placed": "订单量（下单口径）。与「已付款口径」不可混用。",
+    "conversion_rate_placed": "转化率（下单口径）。与「已付款口径」不可混用。",
+    "order_conversion_rate_placed": "订单转化率（下单口径）。与商品转化率是不同指标。",
+    "buyer_count_placed": "买家数（下单口径）。与「已付款口径」不可混用。",
+    "aov_placed": "每笔订单销售额（下单口径）。与「已付款口径」不可混用。",
+    "order_conversion_rate": "订单转化率。与商品转化率是不同指标，不可混用。",
+    "unique_impressions": "去重商品曝光量。与商品展示量（曝光次数）是不同指标。",
+    "unique_clicks": "去重点击量。与商品点击量（点击次数）是不同指标。",
+    "buyer_count": "买家数。已付款口径。",
+    "aov": "每笔订单销售额。已付款口径。",
+    "add_to_cart_count": "加购件数。",
+    "add_to_cart_user_count": "加购用户数。",
+    "add_to_cart_rate": "加购率。",
+    "refund_amount": "退款金额。",
+    "refunded_item_count": "退款商品件数。",
+    "channel": "渠道维度。tiktok 商品报表按商城/直播/视频/商品卡分块。",
     "gmv": "指标值，不参与 Data Hash。",
     "sales_amount": "指标值，不参与 Data Hash。",
     "sales_volume": "指标值，不参与 Data Hash。",
@@ -529,9 +739,57 @@ ANALYTICS_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
 }
 
 
+#: [*] products 域的业务别名 —— 2026-11-08 按**真实表头**登记。
+#:
+#: 依据: shopee / tiktok 商品报表的真实表头(``b_class.fact_*_products_*`` 的
+#: ``raw_data`` key 与结构化列)。此前 products 域**没有任何**域别名,
+#: 而全局别名表里只有「销售额」「曝光次数」这类**裸名**, 与真实表头
+#: (「销售额（已付款订单） (SGD)」/「商品曝光次数.1」)完全对不上
+#: ⇒ 语义层命中率 0/45。
+#:
+#: 口径列**成对登记**(:data:`CALIBER_PAID` / :data:`CALIBER_PLACED`),
+#: 绝不把两套口径登记到同一个标准字段 —— 实测两者销售额平均差 5.15%。
+#:
+#: 「已确认订单」在真实数据里没有任何数值, 无从判断它对应哪个口径
+#: ⇒ 这里**不登记**它(宁可缺, 也不猜); 只登记「已确定订单」到 placed
+#: (有实测支撑: 与「已下订单」差 4.25%, 属同一口径的措辞迁移)。
+PRODUCTS_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
+    # ── 身份维度 ──
+    "product_id": ("商品编号", "商品 ID", "商品ID", "ID"),
+    "product_name": ("商品", "商品名"),
+    "item_status": ("Current Item Status", "状态", "发品状态"),
+    "sku_id": ("规格编号",),
+    # ── 已付款口径(主口径) ──
+    "order_count": ("已付款订单",),
+    "sales_amount": ("销售额（已付款订单）",),
+    "sales_volume": ("件数（已付款订单）",),
+    "conversion_rate": ("转化率（已付款订单）",),
+    "order_conversion_rate": ("订单转化率（已付款订单）",),
+    "buyer_count": ("买家数（已付款订单）",),
+    "aov": ("每笔订单销售额（已付款订单）",),
+    # ── 已下单口径 ──
+    "order_count_placed": ("已下订单",),
+    "sales_amount_placed": ("销售额（已下订单）", "销售额（已确定订单）"),
+    "sales_volume_placed": ("件数（已下订单）", "件数（已确定订单）"),
+    "conversion_rate_placed": ("转化率（已下订单）", "转化率（已确定订单）"),
+    "order_conversion_rate_placed": ("订单转化率（已下订单）", "订单转化率（已确定订单）"),
+    "buyer_count_placed": ("买家数（已下订单）", "买家数（已确定订单）"),
+    "aov_placed": ("每笔订单销售额（已下订单）", "每笔订单销售额（已确定订单）"),
+    # ── 流量指标(无口径) ──
+    "impressions": ("商品展示量",),
+    "unique_impressions": ("不重复的商品曝光量",),
+    "clicks": ("商品点击量",),
+    "unique_clicks": ("不重复的商品点击量",),
+    "product_visitor_count": ("商品访客数量",),
+    "page_views": ("商品页面访问量",),
+    "bounce_rate": ("商品跳出率",),
+}
+
+
 DOMAIN_SEMANTIC_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
     "orders": ORDER_SEMANTIC_ALIASES,
     "analytics": ANALYTICS_SEMANTIC_ALIASES,
+    "products": PRODUCTS_SEMANTIC_ALIASES,
 }
 
 
@@ -584,7 +842,8 @@ def normalize_semantic_alias(value: Optional[str]) -> str:
     4. 去掉所有空白(含换行、全角空格);
     5. 去掉下划线;
     6. 去掉必填星号(``*``);
-    7. 大小写折叠。
+    7. 去掉末尾的 ``.N`` 序号后缀(Excel 多级表头展开后的重名列);
+    8. 大小写折叠。
 
     Returns:
         归一化后的字符串; 空值返回空字符串。
@@ -611,7 +870,52 @@ def normalize_semantic_alias(value: Optional[str]) -> str:
     text = text.replace("*", "")
     text = re.sub(r"\s+", "", text)
     text = text.replace("_", "")
+    # 末尾的 ".N" 序号后缀 —— Excel 多级表头展开后的重名列产物
+    # (例: tiktok 商品报表的 "商品曝光次数.1" / "GMV.2" / "CTOR(SKU 订单).3"),
+    # 与基础列是**同一个指标**, 只是多块表里各出现了一次。
+    text = re.sub(r"\.\d+$", "", text)
     return text.strip().lower()
+
+
+# ── 口径（caliber）维度 ────────────────────────────────────────────────
+#
+# 平台报表里同一个指标常带**多套统计口径**, 它们不是措辞差异, 是不同的业务事实:
+#
+#   * ``placed`` —— 已下单(买家提交了订单, 未必付款)
+#   * ``paid``   —— 已付款(买家完成了支付)
+#
+# 2026-11-08 生产实测(shopee 商品月报, 7090 行可比): 两套口径的销售额
+# **平均差 5.15%, 最大差 175.89** ⇒ 绝不能归一化成同一个值, 也不能互相冒充。
+#
+# 平台还会**改词**(报表改版): shopee 的「已确定订单」是「已下订单」的旧叫法
+# (实测两者差 4.25%, 属同一口径的措辞迁移), 由 :data:`PLATFORM_CALIBER_HISTORY` 登记。
+#
+# 「已确认订单」在真实数据里**没有任何数值**(只作为旧报表遗留列存在),
+# 无从判断它对应哪个口径 ⇒ 刻意**不折算**, 宁可落 unknown, 也不猜。
+
+#: 平台口径沿革: 平台 → {旧口径词: 当前口径词}
+PLATFORM_CALIBER_HISTORY: Dict[str, Dict[str, str]] = {
+    "shopee": {
+        "已确定订单": "已下单",
+    },
+}
+
+
+def apply_caliber_history(normalized: str, platform_code: Optional[str] = None) -> str:
+    """把归一化后的列名里的**旧口径词**换成当前口径词。
+
+    沿革表按平台登记 —— 同一个词在不同平台的沿革不一定一样。
+    没有登记沿革的平台, 原样返回(不做任何猜测)。
+    """
+    if not normalized:
+        return ""
+    history = PLATFORM_CALIBER_HISTORY.get(str(platform_code or "").strip().lower())
+    if not history:
+        return normalized
+    for legacy_word, current_word in history.items():
+        if legacy_word in normalized:
+            normalized = normalized.replace(legacy_word, current_word)
+    return normalized
 
 
 def _build_normalized_alias_index() -> Dict[str, str]:
@@ -630,16 +934,45 @@ def _build_normalized_alias_index() -> Dict[str, str]:
     return index
 
 
+def _caliber_variants(normalized: str) -> set[str]:
+    """返回归一化文本在**各平台口径沿革**下的等价形态集合。
+
+    平台报表改版会换口径词(shopee: 「已确定订单」→「已下单」)。同一个指标的
+    新词与旧词必须能互相命中, 否则平台一改版, 语义层就整体失配。
+
+    展开方向是**双向**的: 当前词 -> 旧词形态, 旧词 -> 当前词形态。
+
+    只在**域限定别名表**里展开 —— 全局别名表展开会造成跨域污染。
+    """
+    if not normalized:
+        return set()
+    variants = {normalized}
+    for history in PLATFORM_CALIBER_HISTORY.values():
+        for legacy_word, current_word in history.items():
+            if current_word in normalized:
+                variants.add(normalized.replace(current_word, legacy_word))
+            if legacy_word in normalized:
+                variants.add(normalized.replace(legacy_word, current_word))
+    return variants
+
+
 def _build_normalized_domain_alias_index() -> Dict[str, Dict[str, str]]:
-    """域限定别名的归一化索引。"""
+    """域限定别名的归一化索引。
+
+    别名除了自身形态, 还会登记**口径沿革**下的等价形态
+    (见 :func:`_caliber_variants`) —— 平台改口径词时不必再手工补别名。
+    """
     result: Dict[str, Dict[str, str]] = {}
     for domain, alias_map in DOMAIN_SEMANTIC_ALIASES.items():
         bucket: Dict[str, str] = {}
         for semantic_key, aliases in alias_map.items():
             for alias in aliases:
                 normalized = normalize_semantic_alias(alias)
-                if normalized and normalized not in bucket:
-                    bucket[normalized] = semantic_key
+                if not normalized:
+                    continue
+                for variant in _caliber_variants(normalized):
+                    if variant not in bucket:
+                        bucket[variant] = semantic_key
         result[domain] = bucket
     return result
 

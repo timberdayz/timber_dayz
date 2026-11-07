@@ -238,10 +238,16 @@ def test_domain_alias_resolves_currency_variant():
 
 
 def test_unknown_column_is_not_guessed():
-    """认不出来就返回 None —— 不猜。"""
+    """认不出来就返回 None —— 不猜。
+
+    注意: 「商品展示量」曾经是这条断言的样例, 但它是 shopee 商品报表的**真实表头**
+    (含义 = 曝光次数), 2026-11-08 已按真实表头登记为 ``impressions``。
+    这里改用另一个**确实没有语义落点**的真实列, 守住同一条原则。
+    """
     from backend.services.semantic_field_registry import infer_semantic_key_for_domain
 
-    assert infer_semantic_key_for_domain("products", "商品展示量") is None
+    # shopee 商品报表里的真实表头, 但语义层没有对应标准字段 ⇒ 不猜
+    assert infer_semantic_key_for_domain("products", "搜索点击人数") is None
     assert infer_semantic_key_for_domain("orders", "采购平台") is None
 
 
