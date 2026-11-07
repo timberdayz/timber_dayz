@@ -1114,6 +1114,8 @@ const getTemplateStatusTooltip = (row) => {
   }
   if (extraRawFields.length) {
     parts.push(`新增原始字段：${extraRawFields.join(', ')}`)
+    // [*] 批次 F-4/F-5(API-6): 告诉用户这些列可以「确认后忽略」
+    parts.push('可在模板工作台勾选「已确认的新列」忽略它们')
   }
   if (impacts.length) {
     parts.push(`影响：${impacts.join('；')}`)

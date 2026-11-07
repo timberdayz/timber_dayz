@@ -82,6 +82,31 @@
         :removed-fields="removedFields"
       />
 
+      <!-- [*] 批次 F-4(API-6): 「已确认的新列」忽略清单 -->
+      <div
+        v-if="ignorableExtraFields.length > 0"
+        class="template-update-workbench-drawer__section"
+      >
+        <div class="template-update-workbench-drawer__section-header">
+          <div>
+            <div class="template-update-workbench-drawer__section-title">新增列（确认过就忽略）</div>
+            <div class="template-update-workbench-drawer__muted">
+              勾选的列不再计入「新增原始字段」噪音。数据仍完整保留在 raw_data 里，不影响入库。
+            </div>
+          </div>
+        </div>
+        <div class="template-update-workbench-drawer__ignored-extra-fields">
+          <el-checkbox
+            v-for="column in ignorableExtraFields"
+            :key="column"
+            :model-value="ignoredExtraFieldSet.has(column)"
+            @update:model-value="(checked) => toggleIgnoredExtraField(column, checked)"
+          >
+            {{ column }}
+          </el-checkbox>
+        </div>
+      </div>
+
       <div class="template-update-workbench-drawer__section">
         <div class="template-update-workbench-drawer__section-header">
           <div>
@@ -498,6 +523,40 @@ const fullContextHeaderBindings = computed(
 const templateHeaderColumns = computed(() => workbenchContext.value?.template_header_columns ?? [])
 const addedFields = computed(() => workbenchContext.value?.added_fields ?? [])
 const removedFields = computed(() => workbenchContext.value?.removed_fields ?? [])
+
+// [*] 批次 F-4(API-6): 「已确认的新列」忽略清单。
+//     源文件比模板多出来的列, 用户确认「这列我知道了、忽略它」后写进模板
+//     ⇒ 治理面板上不再是一条**永久噪音**。
+const ignoredExtraFields = ref([])
+// 可忽略的候选 = 本次文件多出来的列(已忽略的即使这次没多出来也要保留)
+const ignorableExtraFields = computed(() => {
+  const candidates = new Set(addedFields.value.map((item) => String(item)))
+  ignoredExtraFields.value.forEach((item) => candidates.add(String(item)))
+  return Array.from(candidates)
+})
+const ignoredExtraFieldSet = computed(
+  () => new Set(ignoredExtraFields.value.map((item) => String(item))),
+)
+watch(
+  () => templateContext.value?.ignored_extra_fields,
+  (value) => {
+    if (Array.isArray(value)) {
+      ignoredExtraFields.value = value.map((item) => String(item)).filter(Boolean)
+    }
+  },
+  { immediate: true },
+)
+function toggleIgnoredExtraField(column, checked) {
+  const name = String(column || '')
+  if (!name) return
+  const next = new Set(ignoredExtraFieldSet.value)
+  if (checked) {
+    next.add(name)
+  } else {
+    next.delete(name)
+  }
+  ignoredExtraFields.value = Array.from(next)
+}
 const existingDeduplicationFieldsAvailable = computed(
   () => workbenchContext.value?.existing_deduplication_fields_available ?? [],
 )
@@ -1131,6 +1190,8 @@ async function handleSave() {
         ? workbenchContext.value.preview_data.map(row => ({ ...row }))
         : [],
       fieldParseRules: normalizeFieldParseRulesForSave(),
+      // [*] 批次 F-4(API-6): 「已确认的新列」忽略清单
+      ignoredExtraFields: [...ignoredExtraFields.value],
     }
     if (typeof props.onSave === 'function') {
       // 等待父级保存真正结束，loading 状态才能覆盖整个保存过程。
@@ -1263,6 +1324,16 @@ function handleClose() {
   flex-direction: column;
   gap: 10px;
   margin-top: 12px;
+}
+
+/* [*] 批次 F-4(API-6): 「已确认的新列」忽略清单 */
+.template-update-workbench-drawer__ignored-extra-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
 .template-update-workbench-drawer__date-rule {

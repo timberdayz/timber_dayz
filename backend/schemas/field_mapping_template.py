@@ -120,6 +120,12 @@ class TemplateSaveRequest(BaseModel):
         None,
         description="Version-level core field manifest",
     )
+    # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单。
+    #     用户在模板编辑里勾掉「这列我确认过、忽略它」⇒ 治理面板不再报永久噪音。
+    ignored_extra_fields: Optional[List[str]] = Field(
+        None,
+        description="Confirmed-but-ignored extra raw columns",
+    )
     mappings: Dict[str, Any] = Field(default_factory=dict, description="Legacy compatible mappings payload")
     save_mode: TemplateSaveMode = Field("create", description="Save mode")
     base_template_id: Optional[int] = Field(None, description="Base template id")
@@ -202,6 +208,8 @@ class TemplateContextSummary(BaseModel):
     field_parse_rules: List[TemplateFieldParseRule] = Field(default_factory=list)
     # [*] 批次 E: 核心字段清单(前端两级勾选的载体)
     core_fields: List[TemplateCoreField] = Field(default_factory=list)
+    # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单(读侧回显)
+    ignored_extra_fields: List[str] = Field(default_factory=list)
 
 
 class TemplateCurrentFileSummary(BaseModel):

@@ -19,6 +19,20 @@
       </template>
     </el-table-column>
     <el-table-column prop="sample_file_name" label="样本文件" min-width="220" show-overflow-tooltip />
+    <!-- [*] 批次 F-4/F-5(API-6): 可忽略的新增列 ——
+         勾选「已确认的新列」后, 这些列不再算成治理噪音。 -->
+    <el-table-column label="新增列（可忽略）" min-width="200">
+      <template #default="{ row }">
+        <el-tooltip
+          v-if="getExtraRawFields(row).length > 0"
+          content="这些列是源文件比模板多出来的。可在模板工作台勾选「已确认的新列」忽略它们。"
+          placement="top"
+        >
+          <span>{{ getExtraRawFields(row).join(', ') }}</span>
+        </el-tooltip>
+        <span v-else>-</span>
+      </template>
+    </el-table-column>
     <el-table-column label="治理状态" width="120">
       <template #default="{ row }">
         <!-- [*] 批次 B: 值形态漂移 —— 列名没变, 但日期值的形态变了 -->
@@ -107,6 +121,12 @@ function hasDriftDetail(row) {
 // [*] 批次 B: 值形态漂移的展示口径
 const UPDATE_REASON_LABELS = {
   format_drift: '日期格式与文件不匹配',
+}
+
+// [*] 批次 F-4/F-5(API-6): 可忽略的新增列
+function getExtraRawFields(row) {
+  const fields = row?.extra_raw_fields
+  return Array.isArray(fields) ? fields.map((item) => String(item)) : []
 }
 
 function formatUpdateReason(row) {

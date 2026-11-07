@@ -409,6 +409,16 @@ class FieldMappingTemplate(Base):
     #              "required": bool, "in_hash": bool}, ...]
     core_fields = Column(JSONB, nullable=True, comment="核心字段清单(JSONB数组): 落库列/指纹/阻断三处共用一份")
 
+    # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单。
+    #     源文件比模板多出来的列, 用户确认「这个我知道、忽略它」后写进这里
+    #     ⇒ 治理面板上不再是一条**永久噪音**。
+    #     结构: JSONB 字符串数组(列名)。
+    ignored_extra_fields = Column(
+        JSONB,
+        nullable=True,
+        comment="已确认的新列忽略清单(JSONB字符串数组): 用户确认过的新增原始列",
+    )
+
     # v4.22.1新增:模板列语义绑定(用于脏表头/空表头场景的稳定重连)
     header_bindings = Column(JSONB, nullable=True, comment="模板列语义绑定(JSONB数组)")
 

@@ -198,3 +198,118 @@ async def test_domain_floor_gap_does_not_block_but_is_visible():
     # 清单只勾了 order_id ⇒ 域级下限里其余的键都是缺口
     assert "shop_id" in result.below_domain_floor_keys
     assert "order_id" not in result.below_domain_floor_keys
+
+
+# ---------------------------------------------------------------------------
+# 4) 「已确认的新列」忽略清单(批次 F-4 / API-6)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ignored_extra_fields_are_excluded_from_noise():
+    """用户确认过的新列不再算成 ``extra_raw_fields`` 噪音。
+
+    没有这个表达方式时, 源文件多出来的列每次都被报出来 ⇒ 治理面板上是一条
+    **永久噪音**(不阻断, 但永远消不掉)。
+    """
+    from backend.services.semantic_field_contract_service import (
+        SemanticFieldContractService,
+    )
+
+    service = SemanticFieldContractService(db=None)
+    result = await service.evaluate(
+        platform="shopee",
+        data_domain="orders",
+        granularity="weekly",
+        sub_domain=None,
+        header_bindings=_confirmed_orders_bindings(),
+        current_columns=[
+            "order_no",
+            "shop_name",
+            "order_created_at",
+            "sold_qty",
+            "buyer_paid",
+            "profit_amount",
+            "platform_new_column",
+        ],
+        template_columns=[
+            "order_no",
+            "shop_name",
+            "order_created_at",
+            "sold_qty",
+            "buyer_paid",
+            "profit_amount",
+        ],
+    )
+
+    assert result.extra_raw_fields == ["platform_new_column"]
+    assert result.should_block is False
+
+
+@pytest.mark.asyncio
+async def test_ignored_extra_fields_remove_the_noise_entirely():
+    """勾选之后, 连 ``non_breaking_drift`` 都不再产生 ⇒ 治理面板回到干净状态。"""
+    from backend.services.semantic_field_contract_service import (
+        SemanticFieldContractService,
+    )
+
+    service = SemanticFieldContractService(db=None)
+    result = await service.evaluate(
+        platform="shopee",
+        data_domain="orders",
+        granularity="weekly",
+        sub_domain=None,
+        header_bindings=_confirmed_orders_bindings(),
+        current_columns=[
+            "order_no",
+            "shop_name",
+            "order_created_at",
+            "sold_qty",
+            "buyer_paid",
+            "profit_amount",
+            "platform_new_column",
+        ],
+        template_columns=[
+            "order_no",
+            "shop_name",
+            "order_created_at",
+            "sold_qty",
+            "buyer_paid",
+            "profit_amount",
+        ],
+        ignored_extra_fields=["platform_new_column"],
+    )
+
+    assert result.extra_raw_fields == []
+    assert result.status == "ready"
+    assert result.should_block is False
+
+
+def _confirmed_orders_bindings():
+    return [
+        {"raw_name": "order_no", "semantic_key": "order_id"},
+        {"raw_name": "shop_name", "semantic_key": "shop_id"},
+        {"raw_name": "order_created_at", "semantic_key": "order_date"},
+    ]
+
+
+def test_ignored_extra_fields_migration_adds_column():
+    """迁移给 legacy 模板加 ``ignored_extra_fields`` 列。"""
+    import importlib.util
+
+    migration_path = (
+        REPO_ROOT
+        / "current_migrations"
+        / "versions"
+        / "20261128_legacy_ignored_extra_fields.py"
+    )
+    spec = importlib.util.spec_from_file_location("_mig_20261128", migration_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    source = migration_path.read_text(encoding="utf-8")
+    assert "ignored_extra_fields" in source
+    assert "ADD COLUMN IF NOT EXISTS" in source
+    assert callable(module.apply_upgrade)
+    assert callable(module.apply_downgrade)

@@ -1511,6 +1511,17 @@ async def save_mapping_template(
                 ]
                 or None
             ),
+            # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单。
+            #     不给就由 service 继承被归档模板的清单。
+            ignored_extra_fields=(
+                [
+                    str(column).strip()
+                    for column in (request.ignored_extra_fields or [])
+                    if str(column).strip()
+                ]
+                if request.ignored_extra_fields is not None
+                else None
+            ),
             save_mode=request.save_mode,
             base_template_id=request.base_template_id,
         )
@@ -1714,6 +1725,8 @@ async def get_template_update_context(
                 field_parse_rules=template.field_parse_rules or [],
                 # [*] 批次 E: 核心字段清单(前端两级勾选读这个)
                 core_fields=list(template.core_fields or []),
+                # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单(前端勾选回显)
+                ignored_extra_fields=list(template.ignored_extra_fields or []),
             ).model_dump(),
             "template_header_columns": template_header_columns,
             "current_file": None,

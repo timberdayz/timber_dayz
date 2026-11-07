@@ -1006,6 +1006,9 @@ class TemplateMatcher:
                 template_columns=template_columns,
                 # [*] 批次 E(E-5): 模板级核心字段清单的 required 一并参与阻断判定。
                 core_fields=core_fields,
+                # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单 ——
+                #     用户勾过的列不再算成新增噪音。
+                ignored_extra_fields=getattr(template, "ignored_extra_fields", None) or [],
             )
             semantic_summary = semantic_contract.to_dict()
             if semantic_contract.has_contract:

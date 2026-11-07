@@ -883,6 +883,8 @@ const handleWorkbenchSave = async ({
   sampleData: selectedSampleData,
   previewData: selectedPreviewData,
   fieldParseRules: selectedFieldParseRules,
+  // [*] 批次 F-4(API-6): 「已确认的新列」忽略清单
+  ignoredExtraFields: selectedIgnoredExtraFields,
 }) => {
   const context = updateWorkbenchContext.value?.context
   const template = updateWorkbenchContext.value?.template
@@ -945,6 +947,10 @@ const handleWorkbenchSave = async ({
       headerBindings: nextHeaderBindings,
       sampleData: currentSampleData,
       fieldParseRules: nextFieldParseRules,
+      // [*] 批次 F-4(API-6): 「已确认的新列」忽略清单
+      ignoredExtraFields: Array.isArray(selectedIgnoredExtraFields)
+        ? selectedIgnoredExtraFields
+        : [],
     })
 
     if (!(result && (result.success || result.template_id))) {

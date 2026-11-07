@@ -152,6 +152,7 @@ class SemanticFieldContractService:
         template_columns: list[str] | None = None,
         consumer: str = "business_overview",
         core_fields: list[dict[str, Any]] | None = None,
+        ignored_extra_fields: list[str] | None = None,
     ) -> SemanticContractResult:
         """判定语义契约状态(漂移阻断链的第 ② 层)。
 
@@ -242,7 +243,20 @@ class SemanticFieldContractService:
 
         known_raw_columns = set(template_columns or [])
         known_raw_columns.update(raw_to_semantic.keys())
-        extra_raw_fields = [column for column in current_columns if str(column) not in known_raw_columns]
+        # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单 ——
+        #     用户在模板里勾了「这列我确认过、忽略它」⇒ 不再算成新增噪音。
+        #     (治理面板上它是一条**永久噪音**: 不阻断, 但每次都被报出来。)
+        ignored_columns = {
+            str(column).strip()
+            for column in (ignored_extra_fields or [])
+            if str(column).strip()
+        }
+        extra_raw_fields = [
+            column
+            for column in current_columns
+            if str(column) not in known_raw_columns
+            and str(column).strip() not in ignored_columns
+        ]
 
         # [*] 模板里绑定了 optional 语义键、但当前文件没有的原始列名。
         # 这类列的缺失不阻断入库(例如「预估回款金额」), 属于非阻断漂移。

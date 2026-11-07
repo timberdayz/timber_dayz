@@ -77,9 +77,13 @@ assert.equal(productNameMeta.identity_strength, 'weak')
 assert.equal(isHashEligibleSemanticKey('product_name'), true)
 assert.equal(getSemanticFieldMeta('item_status').kind, 'attribute')
 assert.equal(getSemanticFieldMeta('item_status').hash_eligible, false)
-assert.equal(isHashEligibleSemanticKey('page_views'), false)
-assert.equal(isHashEligibleSemanticKey('gmv'), false)
-assert.equal(isHashEligibleSemanticKey('live_attributed_gmv'), false)
+// [*] 批次 E(E-4 / D1): 指标类字段**不再硬性禁止**参与 hash ——
+// 能不能进由用户勾选决定, 但默认不参与, 且必须带后果提示。
+assert.equal(isHashEligibleSemanticKey('page_views'), true)
+assert.equal(isHashEligibleSemanticKey('gmv'), true)
+assert.equal(isHashEligibleSemanticKey('live_attributed_gmv'), true)
+assert.equal(getSemanticFieldMeta('page_views').default_hash, false)
+assert.equal(getSemanticFieldMeta('gmv').default_hash, false)
 
 // [*] 批次 D: required 必须来自后端定义, 前端不再自算(以前永远是 false)。
 assert.equal(getSemanticFieldMeta('order_id').required, true)

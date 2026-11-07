@@ -67,6 +67,10 @@ class FieldMappingTemplateService:
         #              "required": bool, "in_hash": bool}, ...]
         #     为空时按 ``deduplication_fields`` 现推一份, 保证清单不为空。
         core_fields: Optional[List[Dict[str, Any]]] = None,
+        # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单。
+        #     为 None 时**继承**被归档模板的清单 ——
+        #     用户在编辑面板只改了核心字段, 没动忽略清单时不该丢确认。
+        ignored_extra_fields: Optional[List[str]] = None,
         save_mode: str = "create",
         base_template_id: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -168,6 +172,22 @@ class FieldMappingTemplateService:
                     sub_domain=sub_domain,
                 )
 
+            # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单。
+            #     没给 ⇒ 继承被归档模板的(用户可能只改了核心字段)。
+            if ignored_extra_fields is None:
+                inherited_ignored: List[str] = []
+                for existing in existing_templates:
+                    if existing.ignored_extra_fields:
+                        inherited_ignored = list(existing.ignored_extra_fields)
+                        break
+                resolved_ignored_extra_fields = inherited_ignored
+            else:
+                resolved_ignored_extra_fields = [
+                    str(column).strip()
+                    for column in ignored_extra_fields
+                    if str(column).strip()
+                ]
+
             # [*] 结束读取阶段可能已经开启的隐式事务(只有读操作),
             #     让下面的 `db.begin()` 能开出一个**干净**的事务。
             #     get_async_db 会在请求结束时再 commit 一次 —— 这里不重复提交业务数据。
@@ -202,6 +222,8 @@ class FieldMappingTemplateService:
                         field_parse_rules=field_parse_rules,
                         # [*] 批次 E: 核心字段清单(编辑面; 版本级由投影写入)
                         core_fields=resolved_core_fields,
+                        # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单
+                        ignored_extra_fields=resolved_ignored_extra_fields,
                         template_name=resolved_template_name,
                         version=new_version,
                         status="published",

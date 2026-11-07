@@ -1004,7 +1004,10 @@ export default {
     fieldParseRules = [],
     // [*] 批次 E: 版本级核心字段清单(两级勾选的结果)。
     //     不传 ⇒ 后端继承旧清单(保留 raw_name, 不改 hash 口径)。
-    coreFields = null
+    coreFields = null,
+    // [*] 批次 F-4(API-6): 「已确认的新列」忽略清单。
+    //     不传 ⇒ 后端继承旧清单; 传空数组 ⇒ 明确清空。
+    ignoredExtraFields = null
   }) {
     // Support both domain and dataDomain parameter names
     const finalDomain = dataDomain || domain
@@ -1044,6 +1047,10 @@ export default {
               in_hash: item.in_hash !== false
             }))
           }
+        : {}),
+      // [*] 批次 F-4(API-6): 「已确认的新列」忽略清单
+      ...(Array.isArray(ignoredExtraFields)
+        ? { ignored_extra_fields: ignoredExtraFields.map((item) => String(item).trim()).filter(Boolean) }
         : {}),
       save_mode: saveMode || 'create',
       base_template_id: baseTemplateId || null,
