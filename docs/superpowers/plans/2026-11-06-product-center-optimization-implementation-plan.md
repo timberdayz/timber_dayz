@@ -2268,7 +2268,18 @@ CNB 镜像由 deploy 工作流自己推送）。所以「打 tag」等价于「�
 ### E.12 发版日补记：CI 格式门禁与「源文本断言」的冲突
 
 tag 推上 GitHub 后，main 分支的 CI（run 42333221723）红了。
-**红的两个点都不是这次改动引入的**，但其中一个必须当场修掉才能让后续 push 不再红。
+**红的点都不是这次改动引入的**，但其中两个必须当场修掉才能让后续 push 不再红。
+
+#### E.12.0 发布结果
+
+- tag `v7.15.5`（附注 tag，对象 `2e600b38`），指向 commit `c719b1b1`。
+- GitHub 与 CNB **两侧的 tag 对象与 main commit 完全一致**（`XIHONG_GIT_MIRROR_SYNCED=8b4ee171`）。
+- 生产部署流水线 run `42333465953`：**全部 job 成功**
+  （check-config / Validate Data Flow (Release Gate) / Build and Push Images /
+  Deploy to Production (Tag Release)）⇒ **v7.15.5 已上生产**。
+- ⚠️ 发版途中 **GitHub 链路不稳定**：git over HTTPS 到 github.com 间歇性 21s 连接超时
+  （TCP 探测能通、git 连不上），推送靠**重试**才过。
+  ⇒ 这是**网络问题，不是代码或流程问题**；`sync_main_mirrors.ps1` 本身没问题。
 
 #### E.12.1 红点一：`Code formatting check` 失败（仓库既有的 black 漂移）
 
@@ -2307,15 +2318,33 @@ CI 的 `test` job 没有起 PostgreSQL service，而这条用例要真库才能�
 遍历装饰器里的 `router.get/post/put` 调用，取第一个常量参数当路径，
 再看关键字参数里有没有 `response_model`。只看结构、不看排版，与 black 完全解耦。
 
-#### E.12.4 本次做了什么
+#### E.12.4 红点三：修完格式才暴露的 `Linting`（ruff 全量规则）
+
+`Code formatting check` 修好后，失败点前移到 `Linting`（`ruff check <改动的 py 文件>`）。
+本地 `scripts/run_lint.py` 报「All checks passed!」，CI 却报 **7 errors**
+—— 这是**第三处本地/CI 不一致**：`run_lint.py` 用的是**被削弱的规则集**
+（`ruff check backend modules scripts --select=E9,F7,F63`），
+CI 用的是仓库 `pyproject.toml` 里的**全量 `select = ["E", "F"]`**。
+
+7 条全部是**既有问题**，与本次发布无关：v7.15.4 时点就逐条存在，只是行号因改动而偏移。
+
+| 规则 | 文件 | 性质 | 修法 |
+|---|---|---|---|
+| F821 ×3 | `backend/services/component_test_service.py` | `ComponentTestResult` 只出现在**字符串注解**里，函数内有局部 import，运行期不报错 ⇒ 纯误报 | 补 `TYPE_CHECKING` 导入 |
+| F811 | `backend/services/component_test_service.py` | 函数内多余的局部 `from sqlalchemy.orm import Session`，函数体没用到 | 删掉该行 |
+| E712 ×2 | `backend/services/shop_account_loader_service.py` | `ShopAccount.enabled == True` / `MainAccount.enabled == True`。这是 **SQLAlchemy 查询过滤里的布尔列比较**，本身是正确写法；**ruff 给的修法（`if ShopAccount.enabled:`）反而会弄坏它**——SQLAlchemy 列不能直接做布尔判断 | 改用 `col.is_(True)`（列已确认为 `Boolean` 类型） |
+| F811 | `modules/apps/collection_center/executor_v2.py` | 函数内重复 `import time`，遮蔽模块级同名导入 | 删掉局部那行 |
+
+#### E.12.5 本次做了什么
 
 - 对本次改动的 91 个 py 文件跑 black（实际改动 69 个文件，纯排版，语义不变）。
 - 把那条源文本断言改成 AST 断言。
+- 修掉上表 7 条 ruff 报错（4 处小改，行为不变）。
 - 复验：CI 同款 pytest（41 个改动测试文件）**598 passed / 1 failed**，
   与格式化前**逐条一致**，唯一失败就是 E.12.2 那条既有看板失败；
-  `scripts/run_lint.py` 通过；91 个文件 `black --check` 全过。
+  改动文件 `ruff check` **0 错**、`black --check` **全过**、`scripts/run_lint.py` 通过。
 
-#### E.12.5 还没解决的（留给后续，本次没动）
+#### E.12.6 还没解决的（留给后续，本次没动）
 
 CI 仍会因为 E.12.2 那条看板用例红。需要单独决定怎么改，二选一：
 
@@ -2323,5 +2352,11 @@ CI 仍会因为 E.12.2 那条看板用例红。需要单独决定怎么改，二
 - 或把该用例在没有真库时标记为 skip（改测试本身）。
 
 ⚠️ 这属于**发版工具链 / 看板域**，不在本方案范围内。
+
+> 另有一条**工具链建议**（同样不在本方案范围，供后续决定）：
+> `scripts/run_lint.py` 的规则集（`--select=E9,F7,F63`）比 CI 弱很多，
+> 导致 black / ruff 这两类门禁**本地完全测不出来**。
+> 若把 `run_lint.py` 改成与 CI 同规则（`ruff check` 走仓库配置 + 加 black 检查），
+> 以后这类问题就能在本地第一时间发现。
 
 ---
