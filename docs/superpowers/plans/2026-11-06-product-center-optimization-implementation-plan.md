@@ -2124,6 +2124,8 @@ head 正确、`selling_price_source_cleaned_at` 在位、两条 CHECK 在位、4
 | 阶段 4 前端 | `0ae5e05e` | `node --test tests/productCenterUi.test.mjs` **72 passed**（基线 62 + 新增 10）；`npx vite build` ✓（12.14s）；禁用词表 0 命中；ProductCenter.vue 行尾风格未变（全 CRLF 3300 行） |
 | 阶段 5 | `db2fc9fc` | 5 个指标进字典 / 状态 / 矩阵 / 平台映射；两条关键澄清（不得用保本ROI/建议ROI 冒充 `roas`/`mer`；平台报告ROI 达标 ≠ 赚钱） |
 | 提交态复验 | — | 定向 6 个测试文件 **103 passed**；`scripts/run_lint.py` → **All checks passed!**；迁移三步可重复、单 head |
+| 阶段 4 SQL 修复 | `bf478b8b` | 真库跑出两处 PostgreSQL 致命错误（`IN :param` 语法错、CTE 叫 `window` 撞保留字）并修掉；补 2 条真 PostgreSQL 集成测试 |
+| 巡检接口测试 | `b4d4c978` | 补 1 条巡检接口计数口径测试（三类分开报，「算不出」≠「没问题」） |
 
 #### E.9.1 阶段 4 前端顺带对齐的一处口径不一致
 
@@ -2143,6 +2145,69 @@ head 正确、`selling_price_source_cleaned_at` 在位、两条 CHECK 在位、4
 
 ### E.10 合并回 main 与验收
 
-（合并、main 上复验、全量回归对比结果在合并完成后回写。）
+#### E.10.1 合并方式
+
+工作分支 `feature/product-center-stage0`。合并前确认 main 没有别人的新提交
+（其他会话自 02:32 起未动过 main；`feature/shop-identity-alias-remediation`、
+`feature/shop-identity-alignment`、`feature/inventory-aging-pipeline-recovery`、
+`feature/miaoshou-inventory-batch1` 与两个 `fix/miaoshou-*` 都在各自分支上），
+因此 `git merge --no-edit feature/product-center-stage0` 是**快进**：
+main `7810b104` → `b4d4c978`（14 个提交，41 个文件，+7382 / −164）。
+
+合并后 main 工作区干净。
+
+#### E.10.2 main 上的发布级复验（6/6 全过）
+
+| 项 | 结果 |
+|---|---|
+| `scripts/run_lint.py` | **All checks passed!** |
+| 迁移链单 head | `current_schema_20261121_selling_price_source_enum`（单 head） |
+| 迁移三步可重复 | upgrade head → downgrade −1 → upgrade head ✓ |
+| 阶段 4/5 定向测试（10 个文件） | **170 passed** |
+| 前端 `node --test tests/productCenterUi.test.mjs` | **72 passed** |
+| 前端 `npx vite build` | ✓（10.19s） |
+| from-scratch 迁移链（干净库） | head 正确、`selling_price_source_cleaned_at` 在位、两条 CHECK 在位、4 个 ROI 列在位 |
+
+#### E.10.3 全量回归对比（worktree vs main，同一份文件清单）
+
+逐文件 + 150s 超时守护，7 并发，两侧各跑一遍完整文件表。
+
+| 项 | main（`7810b104`） | worktree（分支） |
+|---|---|---|
+| 测试文件数 | 677 | 681（分支新增 4 个测试文件） |
+| 产出 xml 的文件数 | 674 | 673 |
+| 用例总数 | 4502 | 4483 |
+| 通过 | 4350 | 4331 |
+| 失败 + 错误（去重） | **145** | **145** |
+| **新增失败（相对 main）** | — | **1**（已定性，见下） |
+| 修好 | — | 1（已定性，见下） |
+
+**两条差异都做了定性，不是「看起来没问题」：**
+
+1. **新增失败 1 条** = `test_dim_shops_public_retirement_rehearsal::..._archives_public_copy_cleanly`。
+   之所以在对比里显得「新」，是因为 **main 侧这个文件在 7 并发下超时**（没产出 xml），
+   对比脚本看不到它。⇒ 单独**串行**复跑：**main 上同样失败**，worktree 上同样失败。
+   **既有失败，与本次改动无关**（该文件由 `7e29e6ef feat(db): archive public dim_shops` 引入，
+   本分支一个 `dim_shops` 相关文件都没碰）。
+2. **修好 1 条** = `test_data_sync_executor_integration::test_concurrent_data_sync_tasks`。
+   ⇒ 单独串行复跑：**两边都通过** ⇒ 是并发下的环境偶发，不是代码差异。
+
+**超时文件全部串行补跑**：main 侧 3 个 + worktree 侧 8 个，共 10 个不同文件，
+逐个在两边**串行**（无并发负载）复跑并按测试 ID 对比 ⇒ **每一个都是「新增失败 0」**。
+其中 worktree 侧超时的 `test_sku_platform_pricing.py`、`test_sku_selling_price_tools.py`
+正是本次改动直接相关的两个文件，串行复跑同样全绿。
+
+⇒ **结论：本次改动没有引入任何新的失败；两侧的既有失败集合完全一致（各 145 条）。**
+
+#### E.10.4 合并后仍然遗留的事
+
+1. **飞书表列改名**（阶段 3 的已知遗留）：生产飞书投影是启用的，代码侧字段名**必须**与
+   「飞书表列改名」同窗口上线，否则写入报 field validation failed。
+2. **`core.dim_shops` 被同步 TRUNCATE CASCADE 连带清空**（既有缺陷，属别的域）。
+3. **人工覆盖语义**（替换底线 vs 取更高者）：待业务决策。
+4. **空库迁移校验**（`scripts/validate_migrations_fresh_db.py`）在 main 上就失败 ——
+   20261116 的前置检查要求 6 个 TikTok 账号存在，而空库里没有。
+   **生产有这些账号（实测 6/6 满足）**，所以不影响生产采纳，只影响「从零建库」这条校验。
+   建议由店铺身份那条线把该迁移改成「账号不存在时跳过而不是拒绝」。
 
 ---
