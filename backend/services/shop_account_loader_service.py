@@ -122,7 +122,7 @@ class ShopAccountLoaderService:
         shop_result = await db.execute(
             select(ShopAccount).where(
                 ShopAccount.shop_account_id == shop_account_id,
-                ShopAccount.enabled == True,
+                ShopAccount.enabled.is_(True),
             )
         )
         shop_account = shop_result.scalar_one_or_none()
@@ -134,7 +134,7 @@ class ShopAccountLoaderService:
             select(MainAccount).where(
                 MainAccount.main_account_id == shop_account.main_account_id,
                 MainAccount.platform == shop_account.platform,
-                MainAccount.enabled == True,
+                MainAccount.enabled.is_(True),
             )
         )
         main_account = main_result.scalar_one_or_none()

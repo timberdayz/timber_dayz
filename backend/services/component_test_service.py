@@ -7,7 +7,7 @@ Created: 2025-12-21
 """
 
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 from sqlalchemy.orm import Session
 import subprocess
 import tempfile
@@ -25,6 +25,11 @@ from backend.services.shop_account_identity_service import (
     pick_master_platform_shop_id,
     resolve_master_identity_for_account,
 )
+
+if TYPE_CHECKING:
+    # 只在类型检查时需要：ComponentTestResult 只出现在字符串注解里，
+    # 运行期由下面的局部 import 提供，这里补上是为了让 F821 不再误报。
+    from tools.test_component import ComponentTestResult
 
 logger = get_logger(__name__)
 
@@ -404,7 +409,6 @@ class ComponentTestService:
             tested_by: 测试来源(recorder/version_manager/api)
         """
         from sqlalchemy.ext.asyncio import AsyncSession
-        from sqlalchemy.orm import Session
 
         try:
             # 计算成功率

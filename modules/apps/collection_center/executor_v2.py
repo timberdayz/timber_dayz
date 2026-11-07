@@ -4854,8 +4854,6 @@ class CollectionExecutorV2:
         Returns:
             Optional[str]: 最新文件的路径,如果未找到则返回None
         """
-        import time
-
         start_time = time.time()
 
         # 记录执行前的文件列表
