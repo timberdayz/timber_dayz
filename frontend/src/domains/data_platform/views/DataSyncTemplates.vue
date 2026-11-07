@@ -1004,8 +1004,11 @@ const handleSaveVariant = async () => {
   try {
     const family = context.family
     const activeVersion = context.active_version
+    // [*] 批次 G(G-3): 变体按**业务形态**建 —— 模板名也用形态标识,
+    //     不用「文件名关键词」那套(否则换个文件名就多出一个模板)。
+    const variantKind = context.recommended_variant_kind || context.recommended_variant_key
     const templateName =
-      `${family.platform}_${family.data_domain}_${family.sub_domain || 'default'}_${family.granularity}_${context.recommended_variant_key}`
+      `${family.platform}_${family.data_domain}_${family.sub_domain || 'default'}_${family.granularity}_${variantKind}`
     const nextHeaderBindings =
       headerBindings.value.length > 0
         ? headerBindings.value
