@@ -1,4 +1,4 @@
-import { companionFormatCandidatesForValueKind } from './templateFieldParseRules'
+import { companionFormatCandidatesForValueKind } from './templateFieldParseRules.js'
 
 const FILE_DATE_SOURCE_COLUMNS = new Set(['__file_date_from__', '__file_date_to__'])
 const RANGE_VALUE_KINDS = new Set(['date_range', 'datetime_range', 'time_range'])

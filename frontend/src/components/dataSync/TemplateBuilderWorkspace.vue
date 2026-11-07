@@ -348,7 +348,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Check, Document, Refresh, View, Warning } from '@element-plus/icons-vue'
 
 import DeduplicationFieldsSelector from '@/components/DeduplicationFieldsSelector.vue'
@@ -360,6 +360,8 @@ import {
   inferHeaderBindings,
   updateHeaderBindingSemantic,
 } from '@/domains/data_platform/utils/headerBindings'
+import { semanticFieldRegistry } from '@/domains/data_platform/utils/semanticFieldRegistry'
+import { loadSemanticFieldRegistry } from '@/domains/data_platform/utils/semanticFieldRegistryApi'
 import {
   DATE_ANCHOR_OPTIONS,
   DATE_TARGET_FIELD_OPTIONS,
@@ -463,6 +465,9 @@ watch(
     () => props.headerColumns,
     sampleDataLookup,
     () => props.fileFilters?.domain,
+    // [*] 批次 D: 标准字段定义改成「接口取」之后, 推断结果依赖注册表版本 ——
+    //     接口数据回来时要重新推断一次(否则用户看到的是快照口径的旧结果)。
+    () => semanticFieldRegistry.version,
   ],
   ([bindings, headerColumns, sampleLookup, dataDomain]) => {
     if (Array.isArray(bindings) && bindings.length > 0) {
@@ -477,6 +482,11 @@ watch(
   },
   { immediate: true, deep: true }
 )
+
+// [*] 批次 D: 进入工作台先拿权威的标准字段定义(含运行时别名索引)。
+onMounted(async () => {
+  await loadSemanticFieldRegistry()
+})
 
 watch(
   localHeaderBindings,

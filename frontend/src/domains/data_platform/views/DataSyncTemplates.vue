@@ -18,6 +18,9 @@
       @update:active-tab="activeTab = $event"
     />
 
+    <!-- [*] 批次 D(API-5): 同名列名撞不同含义时在这里当场裁决。 -->
+    <SemanticAliasArbitrationPanel />
+
     <el-card class="template-builder-card" style="margin-bottom: 20px;">
       <template #header>
         <div class="card-header-inline">
@@ -307,9 +310,11 @@ import api from '@/api'
 import TemplateBuilderWorkspace from '@/components/dataSync/TemplateBuilderWorkspace.vue'
 import TemplateCreateWorkbenchDrawer from '@/components/dataSync/TemplateCreateWorkbenchDrawer.vue'
 import TemplateGovernancePanel from '@/components/dataSync/TemplateGovernancePanel.vue'
+import SemanticAliasArbitrationPanel from '@/components/dataSync/SemanticAliasArbitrationPanel.vue'
 import TemplateUpdateWorkbenchDrawer from '@/components/dataSync/TemplateUpdateWorkbenchDrawer.vue'
 import VariantCreateWorkbenchDrawer from '@/components/dataSync/VariantCreateWorkbenchDrawer.vue'
 import { inferHeaderBindings } from '@/domains/data_platform/utils/headerBindings'
+import { loadSemanticFieldRegistry } from '@/domains/data_platform/utils/semanticFieldRegistryApi'
 import { buildTemplateUpdateFieldParseRulesPayload } from '@/domains/data_platform/utils/templateUpdateFieldParseRules'
 
 const loading = ref(false)
@@ -748,6 +753,9 @@ const handlePreview = async () => {
   }
   loadingPreview.value = true
   try {
+    // [*] 批次 D: 先拿权威的标准字段定义(含运行时别名索引)再推断,
+    //     否则用户看到的是快照口径的旧结果。
+    await loadSemanticFieldRegistry()
     const data = await api.previewFileWithHeaderRow(selectedFileId.value, headerRow.value)
     if (data) {
       previewData.value = data.preview_data || []

@@ -1223,6 +1223,36 @@ export default {
     return await this._get('/field-mapping/template-cache/stats')
   },
 
+  // ========== 标准字段定义 / 语义别名(批次 D · API-1) ==========
+  //
+  // 标准字段定义以前在前端抄了一份(headerBindings.js), 已经和后端漂了。
+  // 现在前端只认这个接口返回的那一份。
+
+  // 获取标准字段定义(字段 + 别名 + required + hash_eligible + 域适用范围)
+  async getSemanticFieldDefinitions() {
+    return await this._get('/field-mapping/semantic-fields/definitions')
+  },
+
+  // 获取语义别名表
+  async getSemanticFieldAliases(params = {}) {
+    return await this._get('/field-mapping/semantic-fields/aliases', { params })
+  },
+
+  // 获取待裁决的别名冲突
+  async getSemanticFieldAliasConflicts() {
+    return await this._get('/field-mapping/semantic-fields/aliases/conflicts')
+  },
+
+  // 裁决别名冲突(accept / disable / reject)
+  async resolveSemanticFieldAlias(payload) {
+    return await this._post('/field-mapping/semantic-fields/aliases/resolve', payload)
+  },
+
+  // 批量「列名 → 语义键」解析(前端与后端用同一套规则)
+  async resolveSemanticColumns(payload) {
+    return await this._post('/field-mapping/semantic-fields/resolve-columns', payload)
+  },
+
   // 清理过期模板
   async cleanupTemplateCache(days = 30) {
     return await this._post('/field-mapping/template-cache/cleanup', { days })

@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict'
 import {
   NON_SEMANTIC_FIELD_VALUE,
-  SEMANTIC_FIELD_META,
-  SEMANTIC_FIELD_OPTIONS,
-  SEMANTIC_FIELD_OPTION_GROUPS,
+  getSemanticFieldMeta,
   getSemanticFieldOptionGroupsForDomain,
   isHashEligibleSemanticKey,
   updateHeaderBindingSemantic,
 } from '../src/domains/data_platform/utils/headerBindings.js'
+import {
+  normalizeSemanticAlias,
+  semanticFieldRegistry,
+} from '../src/domains/data_platform/utils/semanticFieldRegistry.js'
+import { SEMANTIC_FIELD_REGISTRY_SNAPSHOT } from '../src/domains/data_platform/utils/semanticFieldRegistrySnapshot.js'
 import {
   DATE_FORMAT_OPTIONS,
   DATE_TARGET_FIELD_OPTIONS,
@@ -57,32 +60,39 @@ const requiredSemanticKeys = [
 ]
 
 for (const key of requiredSemanticKeys) {
-  assert.ok(SEMANTIC_FIELD_META[key], `${key} should be a canonical semantic key`)
+  assert.ok(getSemanticFieldMeta(key), `${key} should be a canonical semantic key`)
 }
 
-assert.equal(SEMANTIC_FIELD_META.period_start_time.kind, 'time')
-assert.equal(SEMANTIC_FIELD_META.period_start_time.hash_eligible, true)
-assert.equal(SEMANTIC_FIELD_META.period_start_time.default_hash, false)
+const periodStartTimeMeta = getSemanticFieldMeta('period_start_time')
+assert.equal(periodStartTimeMeta.kind, 'time')
+assert.equal(periodStartTimeMeta.hash_eligible, true)
+assert.equal(periodStartTimeMeta.default_hash, false)
 assert.equal(isHashEligibleSemanticKey('period_start_time'), true)
 assert.equal(isHashEligibleSemanticKey('period_end_time'), true)
-assert.equal(SEMANTIC_FIELD_META.product_name.kind, 'dimension')
-assert.equal(SEMANTIC_FIELD_META.product_name.hash_eligible, true)
-assert.equal(SEMANTIC_FIELD_META.product_name.default_hash, false)
-assert.equal(SEMANTIC_FIELD_META.product_name.identity_strength, 'weak')
+const productNameMeta = getSemanticFieldMeta('product_name')
+assert.equal(productNameMeta.kind, 'dimension')
+assert.equal(productNameMeta.hash_eligible, true)
+assert.equal(productNameMeta.default_hash, false)
+assert.equal(productNameMeta.identity_strength, 'weak')
 assert.equal(isHashEligibleSemanticKey('product_name'), true)
-assert.equal(SEMANTIC_FIELD_META.item_status.kind, 'attribute')
-assert.equal(SEMANTIC_FIELD_META.item_status.hash_eligible, false)
+assert.equal(getSemanticFieldMeta('item_status').kind, 'attribute')
+assert.equal(getSemanticFieldMeta('item_status').hash_eligible, false)
 assert.equal(isHashEligibleSemanticKey('page_views'), false)
 assert.equal(isHashEligibleSemanticKey('gmv'), false)
 assert.equal(isHashEligibleSemanticKey('live_attributed_gmv'), false)
 
-const optionValues = new Set(SEMANTIC_FIELD_OPTIONS.map(option => option.value))
-assert.ok(optionValues.has(NON_SEMANTIC_FIELD_VALUE))
+// [*] 批次 D: required 必须来自后端定义, 前端不再自算(以前永远是 false)。
+assert.equal(getSemanticFieldMeta('order_id').required, true)
+assert.equal(getSemanticFieldMeta('product_id').domain, 'common')
+assert.equal(getSemanticFieldMeta('product_name').domain, 'products')
+
+const allOptionGroups = getSemanticFieldOptionGroupsForDomain('')
+const optionValues = new Set(allOptionGroups.flatMap(group => group.options.map(option => option.value)))
 assert.ok(optionValues.has('live_attributed_gmv'))
 assert.equal(optionValues.has('商家直播归因 GMV'), false)
 
 const groupedOptions = Object.fromEntries(
-  SEMANTIC_FIELD_OPTION_GROUPS.map(group => [group.label, group.options.map(option => option.value)])
+  allOptionGroups.map(group => [group.label, group.options.map(option => option.value)])
 )
 assert.ok(groupedOptions['时间字段'].includes('period_start_time'))
 assert.ok(groupedOptions['身份字段'].includes('product_name'))
@@ -96,6 +106,22 @@ assert.equal(productDomainOptions.has('product_id'), true)
 assert.equal(productDomainOptions.has('product_name'), true)
 assert.equal(productDomainOptions.has('live_attributed_gmv'), false)
 assert.equal(productDomainOptions.has('page_views'), false)
+
+// [*] 批次 D: 前后端归一化口径必须一致 —— 快照里带后端生成的样本对。
+assert.ok(SEMANTIC_FIELD_REGISTRY_SNAPSHOT.normalization_samples.length > 0)
+for (const [raw, normalized] of SEMANTIC_FIELD_REGISTRY_SNAPSHOT.normalization_samples) {
+  assert.equal(
+    normalizeSemanticAlias(raw),
+    normalized,
+    `normalizeSemanticAlias(${JSON.stringify(raw)}) should equal backend result ${JSON.stringify(normalized)}`
+  )
+}
+
+// [*] 批次 D: 别名索引必须是归一化后的, 且能命中「币种后缀 / 全角 / 星号」等写法。
+// 「买家支付」是 orders 域的域限定别名 ⇒ 落在 domainAliasIndex 而不是全局索引。
+assert.equal(semanticFieldRegistry.domainAliasIndex.orders.买家支付, 'paid_amount')
+assert.equal(semanticFieldRegistry.domainColumnIndex.products.商品编号, 'product_id')
+assert.equal(semanticFieldRegistry.domainColumnIndex.inventory.商品sku, 'platform_sku')
 
 const updated = updateHeaderBindingSemantic(
   [

@@ -98,10 +98,33 @@ test('auto companion period format exposes candidates for save payload', () => {
     DATE_FORMAT_OPTIONS.some(option => option.value === 'auto_by_companion_period'),
     true,
   )
+  // [*] 批次 A: 候选集按 value_kind 收敛 —— 纯日期值不该试带时分秒的格式。
+  //     但**不能**按「日-月-年家族」收窄: 美式报表(m/d/y)仍然要能解,
+  //     真正的日/月歧义由文件伴生周期消解。
   assert.deepEqual(
-    buildAutoCompanionFormatPayload({ date_format: 'auto_by_companion_period' }),
+    buildAutoCompanionFormatPayload({
+      date_format: 'auto_by_companion_period',
+      value_kind: 'single_date',
+    }),
     {
-      format_candidates: COMPANION_AUTO_DATE_FORMAT_CANDIDATES,
+      format_candidates: COMPANION_AUTO_DATE_FORMAT_CANDIDATES.filter(
+        token => !token.includes('hh:')
+      ),
+      resolution_source: 'companion_period',
+    },
+  )
+  assert.deepEqual(
+    buildAutoCompanionFormatPayload({
+      date_format: 'auto_by_companion_period',
+      value_kind: 'date_range',
+    }),
+    {
+      format_candidates: [
+        'dd-mm-yyyy-dd-mm-yyyy',
+        'dd/mm/yyyy-dd/mm/yyyy',
+        'yyyy-mm-dd-yyyy-mm-dd',
+        'yyyy/mm/dd-yyyy/mm/dd',
+      ],
       resolution_source: 'companion_period',
     },
   )
