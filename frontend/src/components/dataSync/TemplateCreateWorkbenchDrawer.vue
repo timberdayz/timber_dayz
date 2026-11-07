@@ -40,6 +40,7 @@
         :loading-preview="loadingPreview"
         :saving-template="savingTemplate"
         :deduplication-fields="deduplicationFields"
+        :core-fields="coreFields"
         :field-parse-rules="fieldParseRules"
         @platform-change="$emit('platform-change')"
         @domain-change="$emit('domain-change')"
@@ -145,6 +146,7 @@ const emit = defineEmits([
   'repreview',
   'save-template',
   'deduplication-fields-change',
+  'core-fields-change',
   'field-parse-rules-change',
   'header-bindings-change',
   'validation-change',

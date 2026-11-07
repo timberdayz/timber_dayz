@@ -312,7 +312,8 @@ export function semanticRequirements(semanticKey) {
   const meta = getSemanticFieldMeta(semanticKey)
   return {
     required: Boolean(meta?.required),
-    hash_participates: false,
+    // 批次 E(D2): hash_participates 已下线 ——
+    // 「参与去重」由版本级核心字段清单(core_fields)的 in_hash 表达。
     hash_eligible: Boolean(meta?.hash_eligible),
     semantic_kind: meta?.kind || '',
     system_scope: Boolean(meta?.system_scope),

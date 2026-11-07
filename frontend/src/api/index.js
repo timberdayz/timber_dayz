@@ -1001,7 +1001,10 @@ export default {
     deduplicationFields,
     headerBindings = [],
     sampleData = {},
-    fieldParseRules = []
+    fieldParseRules = [],
+    // [*] 批次 E: 版本级核心字段清单(两级勾选的结果)。
+    //     不传 ⇒ 后端继承旧清单(保留 raw_name, 不改 hash 口径)。
+    coreFields = null
   }) {
     // Support both domain and dataDomain parameter names
     const finalDomain = dataDomain || domain
@@ -1032,6 +1035,16 @@ export default {
       header_bindings: headerBindings,
       sample_data: sampleData || {},
       field_parse_rules: fieldParseRules,
+      ...(Array.isArray(coreFields) && coreFields.length > 0
+        ? {
+            core_fields: coreFields.map((item) => ({
+              semantic_key: item.semantic_key ?? null,
+              raw_name: item.raw_name ?? null,
+              required: Boolean(item.required),
+              in_hash: item.in_hash !== false
+            }))
+          }
+        : {}),
       save_mode: saveMode || 'create',
       base_template_id: baseTemplateId || null,
       ...(resolvedTemplateName ? { template_name: resolvedTemplateName } : {}),

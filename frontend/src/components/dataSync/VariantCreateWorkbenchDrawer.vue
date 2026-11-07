@@ -39,6 +39,7 @@
         :loading-preview="loadingPreview"
         :saving-template="savingTemplate"
         :deduplication-fields="deduplicationFields"
+        :core-fields="coreFields"
         :field-parse-rules="fieldParseRules"
         @platform-change="$emit('platform-change')"
         @domain-change="$emit('domain-change')"
@@ -78,6 +79,8 @@ defineProps({
   loadingPreview: { type: Boolean, default: false },
   savingTemplate: { type: Boolean, default: false },
   deduplicationFields: { type: Array, default: () => [] },
+  // [*] 批次 E: 版本级核心字段清单
+  coreFields: { type: Array, default: () => [] },
   fieldParseRules: { type: Array, default: () => [] },
 })
 
@@ -90,6 +93,7 @@ const emit = defineEmits([
   'repreview',
   'save-template',
   'deduplication-fields-change',
+  'core-fields-change',
   'field-parse-rules-change',
   'header-bindings-change',
   'validation-change',

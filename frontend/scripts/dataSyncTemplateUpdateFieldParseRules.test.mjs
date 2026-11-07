@@ -21,7 +21,8 @@ test('inferHeaderBindings derives a date alias for unnamed date columns', () => 
   assert.equal(bindings[0].semantic_role, 'metric_date')
   assert.equal(bindings[0].semantic_review_status, 'confirmed_semantic')
   assert.equal(bindings[0].hash_eligible, true)
-  assert.equal(bindings[0].hash_participates, false)
+  // 批次 E(D2): hash_participates 已下线 —— 绑定上不再有这个投影字段。
+  assert.equal('hash_participates' in bindings[0], false)
   assert.equal(bindings[0].position, 0)
   assert.equal(bindings[0].sample_type, 'date')
   assert.equal(bindings[0].confidence, 0.98)

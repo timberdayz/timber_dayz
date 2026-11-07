@@ -136,8 +136,10 @@ const updated = updateHeaderBindingSemantic(
   'live_attributed_gmv'
 )
 assert.equal(updated[0].semantic_key, 'live_attributed_gmv')
-assert.equal(updated[0].hash_eligible, false)
-assert.equal(updated[0].hash_participates, false)
+// 批次 E(E-4 / D1): 指标类字段不再硬性禁止参与 hash, 但默认不参与。
+assert.equal(updated[0].hash_eligible, true)
+// 批次 E(D2): hash_participates 已下线。
+assert.equal('hash_participates' in updated[0], false)
 
 const productNameUpdated = updateHeaderBindingSemantic(
   [
@@ -153,7 +155,8 @@ const productNameUpdated = updateHeaderBindingSemantic(
 )
 assert.equal(productNameUpdated[0].semantic_key, 'product_name')
 assert.equal(productNameUpdated[0].hash_eligible, true)
-assert.equal(productNameUpdated[0].hash_participates, false)
+// 批次 E(D2): hash_participates 已下线。
+assert.equal('hash_participates' in productNameUpdated[0], false)
 
 const nonSemantic = updateHeaderBindingSemantic(updated, '商家直播归因 GMV', NON_SEMANTIC_FIELD_VALUE)
 assert.equal(nonSemantic[0].semantic_key, null)

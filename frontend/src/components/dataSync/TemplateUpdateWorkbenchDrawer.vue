@@ -813,7 +813,6 @@ const ordinaryPendingFieldCount = computed(() => {
       !reviewed.has(rawName) &&
       reviewStatus === 'pending' &&
       !binding?.required &&
-      !binding?.hash_participates &&
       !binding?.hash_eligible
     )
   }).length

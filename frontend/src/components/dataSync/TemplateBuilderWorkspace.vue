@@ -339,9 +339,11 @@
       :granularity="fileFilters.granularity"
       :sub-domain="fileFilters.sub_domain"
       :initial-fields="deduplicationFields"
+      :initial-core-fields="coreFields"
       :field-parse-rules="localFieldParseRules"
       :sample-rows="previewData"
       @update:selectedFields="$emit('deduplication-fields-change', $event)"
+      @update:coreFields="$emit('core-fields-change', $event)"
       @validation-change="handleDeduplicationValidationChange"
     />
   </div>
@@ -390,6 +392,8 @@ const props = defineProps({
   loadingPreview: { type: Boolean, default: false },
   savingTemplate: { type: Boolean, default: false },
   deduplicationFields: { type: Array, default: () => [] },
+  // [*] 批次 E: 版本级核心字段清单(已有清单优先, 避免重算 raw_name 改口径)
+  coreFields: { type: Array, default: () => [] },
   fieldParseRules: { type: Array, default: () => [] },
   headerBindings: { type: Array, default: () => [] },
 })
@@ -402,6 +406,8 @@ const emit = defineEmits([
   'repreview',
   'save-template',
   'deduplication-fields-change',
+  // [*] 批次 E: 核心字段清单(两级勾选的结果)
+  'core-fields-change',
   'field-parse-rules-change',
   'header-bindings-change',
   'validation-change',

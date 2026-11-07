@@ -50,6 +50,7 @@
       :loading-preview="loadingPreview"
       :saving-template="savingTemplate"
       :deduplication-fields="deduplicationFields"
+      :core-fields="coreFields"
       :field-parse-rules="fieldParseRules"
       @platform-change="handlePlatformChange"
       @domain-change="handleDomainChange"
@@ -58,6 +59,7 @@
       @repreview="handleRepreview"
       @save-template="handleSaveTemplate"
       @deduplication-fields-change="handleDeduplicationFieldsChange"
+      @core-fields-change="handleCoreFieldsChange"
       @field-parse-rules-change="handleFieldParseRulesChange"
       @header-bindings-change="handleHeaderBindingsChange"
       @validation-change="handleValidationChange"
@@ -247,6 +249,7 @@
       :loading-preview="loadingPreview"
       :saving-template="savingTemplate"
       :deduplication-fields="deduplicationFields"
+      :core-fields="coreFields"
       :field-parse-rules="fieldParseRules"
       @platform-change="handlePlatformChange"
       @domain-change="handleDomainChange"
@@ -255,6 +258,7 @@
       @repreview="handleRepreview"
       @save-template="handleSaveVariant"
       @deduplication-fields-change="handleDeduplicationFieldsChange"
+      @core-fields-change="handleCoreFieldsChange"
       @field-parse-rules-change="handleFieldParseRulesChange"
       @header-bindings-change="handleHeaderBindingsChange"
       @validation-change="handleValidationChange"
@@ -282,6 +286,7 @@
       :loading-preview="loadingPreview"
       :saving-template="savingTemplate"
       :deduplication-fields="deduplicationFields"
+      :core-fields="coreFields"
       :field-parse-rules="fieldParseRules"
       @platform-change="handlePlatformChange"
       @domain-change="handleDomainChange"
@@ -290,6 +295,7 @@
       @repreview="handleRepreview"
       @save-template="handleSaveTemplate"
       @deduplication-fields-change="handleDeduplicationFieldsChange"
+      @core-fields-change="handleCoreFieldsChange"
       @field-parse-rules-change="handleFieldParseRulesChange"
       @header-bindings-change="handleHeaderBindingsChange"
       @validation-change="handleValidationChange"
@@ -358,6 +364,8 @@ const headerColumns = ref([])
 const sampleData = ref({})
 const headerBindings = ref([])
 const deduplicationFields = ref([])
+// [*] 批次 E: 版本级核心字段清单(两级勾选的结果)
+const coreFields = ref([])
 const deduplicationFieldsValid = ref(false)
 const fieldParseRules = ref([])
 
@@ -1025,6 +1033,8 @@ const handleSaveVariant = async () => {
       headerBindings: nextHeaderBindings,
       sampleData: sampleData.value,
       fieldParseRules: fieldParseRules.value,
+      // [*] 批次 E: 核心字段清单(不传就由后端继承旧清单, 保留 raw_name)
+      coreFields: coreFields.value,
     })
 
     if (!(result && (result.success || result.template_id))) {
@@ -1097,6 +1107,8 @@ const handleSaveTemplate = async () => {
       headerBindings: nextHeaderBindings,
       sampleData: sampleData.value,
       fieldParseRules: fieldParseRules.value,
+      // [*] 批次 E: 核心字段清单(不传就由后端继承旧清单, 保留 raw_name)
+      coreFields: coreFields.value,
     })
     if (result && (result.success || result.template_id)) {
       showTemplateGovernanceSummary(result)
@@ -1118,6 +1130,11 @@ const handleSaveTemplate = async () => {
 
 const handleDeduplicationFieldsChange = (fields) => {
   deduplicationFields.value = fields
+}
+
+// [*] 批次 E: 核心字段清单变更
+const handleCoreFieldsChange = (fields) => {
+  coreFields.value = Array.isArray(fields) ? fields : []
 }
 
 const handleFieldParseRulesChange = (rules) => {
