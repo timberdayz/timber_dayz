@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional, Set
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy import desc, select
@@ -134,8 +134,69 @@ def _build_batch_remediation_name(
     return f"batch-remediate-{granularity}-{platform}-{shop_account_id}"
 
 
-def _build_config_response(config: CollectionConfig) -> CollectionConfigResponse:
+def _drop_disabled_shop_scopes(
+    response: CollectionConfigResponse,
+    disabled_shop_ids: Set[str],
+) -> None:
+    """把「账号已停用」的店铺从**响应**里剔除。
+
+    为什么在响应层做
+    ----------------
+    停用店**不应该**出现在采集工作区里 —— 它既不会被采集(执行侧同样按
+    ``enabled == True`` 过滤), 又会让人以为"这个店漏配了"。
+
+    为什么不动 ORM
+    ---------------
+    ``config.shop_scopes`` 是 relationship, 直接赋值会让 SQLAlchemy 把旧行
+    当成 orphan 删除 ⇒ **读接口会变成写操作**。所以只改 Pydantic 响应对象。
+
+    ⚠️ 这只是**展示层**的过滤, 不清库 —— 清库由「停用联动」与迁移负责。
+    """
+    if not disabled_shop_ids:
+        return
+    scopes = list(response.shop_scopes or [])
+    kept_scopes = [
+        scope
+        for scope in scopes
+        if str(scope.shop_account_id or "") not in disabled_shop_ids
+    ]
+    if len(kept_scopes) != len(scopes):
+        response.shop_scopes = kept_scopes
+    account_ids = list(response.account_ids or [])
+    kept_account_ids = [
+        account_id
+        for account_id in account_ids
+        if str(account_id or "") not in disabled_shop_ids
+    ]
+    if len(kept_account_ids) != len(account_ids):
+        response.account_ids = kept_account_ids
+
+
+async def _load_disabled_shop_ids(
+    db: AsyncSession,
+    shop_ids: Iterable[str],
+) -> Set[str]:
+    """查给定的店铺账号里, 哪些**已停用**。"""
+    ids = {str(item).strip() for item in shop_ids if str(item or "").strip()}
+    if not ids:
+        return set()
+    result = await db.execute(
+        select(ShopAccount.shop_account_id).where(
+            ShopAccount.shop_account_id.in_(ids),
+            ShopAccount.enabled == False,  # noqa: E712 —— SQLAlchemy 需要显式 False
+        )
+    )
+    return {str(row[0]) for row in result.all()}
+
+
+def _build_config_response(
+    config: CollectionConfig,
+    *,
+    disabled_shop_ids: Optional[Set[str]] = None,
+) -> CollectionConfigResponse:
     response = CollectionConfigResponse.model_validate(config)
+    if disabled_shop_ids:
+        _drop_disabled_shop_scopes(response, disabled_shop_ids)
     if response.time_selection:
         try:
             response.time_window_preview = build_time_window_preview(
@@ -342,6 +403,23 @@ def _build_template_summary(
     )
     active_shop_set = set(active_shop_ids)
     template_scope_set = set(template_scope_ids)
+    # ⚠️ 展示层过滤: 停用店的默认 scope **不能**出现在模板响应里。
+    #
+    # 为什么不只靠迁移把那一项置 enabled=false:
+    #   前端「用模板新建配置」会把模板的 default_shop_scopes 整份当 payload 提交
+    #   (CollectionConfig.vue:1353) ⇒ 后端 `_normalize_scope_rows_for_storage`
+    #   的 `extra_shop_ids` 校验只认「在营账号」⇒ 停用店哪怕 enabled=false
+    #   也会被判成"越权店铺" ⇒ **400, 新建配置直接失败**。
+    #
+    # ⇒ 停用店必须**从模板响应里彻底拿掉**, 而不是只置个 enabled=false。
+    # (模板的默认范围本来就是"当前在营店铺"的快照, 不该留死店。)
+    default_shop_scopes = list(template.default_shop_scopes or [])
+    if active_accounts is not None:
+        default_shop_scopes = [
+            scope
+            for scope in default_shop_scopes
+            if str(scope.get("shop_account_id") or "").strip() in active_shop_set
+        ]
     payload = {
         "id": template.id,
         "name": template.name,
@@ -353,7 +431,7 @@ def _build_template_summary(
         "default_schedule_enabled": template.default_schedule_enabled,
         "default_schedule_cron": template.default_schedule_cron,
         "default_retry_count": template.default_retry_count,
-        "default_shop_scopes": template.default_shop_scopes or [],
+        "default_shop_scopes": default_shop_scopes,
         "active_shop_count": len(active_shop_ids),
         "template_shop_count": len(template_scope_ids),
         "missing_shop_scope_ids": sorted(active_shop_set - template_scope_set),
@@ -742,7 +820,19 @@ async def list_configs(
 
     stmt = stmt.order_by(desc(CollectionConfig.created_at))
     result = await db.execute(stmt)
-    return [_build_config_response(config) for config in result.scalars().all()]
+    configs = list(result.scalars().all())
+    disabled_shop_ids = await _load_disabled_shop_ids(
+        db,
+        [
+            scope.shop_account_id
+            for config in configs
+            for scope in (config.shop_scopes or [])
+        ],
+    )
+    return [
+        _build_config_response(config, disabled_shop_ids=disabled_shop_ids)
+        for config in configs
+    ]
 
 
 @router.post("/configs", response_model=CollectionConfigResponse)
@@ -846,7 +936,10 @@ async def create_config(
         db_config.platform,
         len(db_config.data_domains),
     )
-    return _build_config_response(db_config)
+    disabled_shop_ids = await _load_disabled_shop_ids(
+        db, [scope.shop_account_id for scope in (db_config.shop_scopes or [])]
+    )
+    return _build_config_response(db_config, disabled_shop_ids=disabled_shop_ids)
 
 
 @router.post(
@@ -989,7 +1082,10 @@ async def get_config(
     config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(status_code=404, detail="config not found")
-    return _build_config_response(config)
+    disabled_shop_ids = await _load_disabled_shop_ids(
+        db, [scope.shop_account_id for scope in (config.shop_scopes or [])]
+    )
+    return _build_config_response(config, disabled_shop_ids=disabled_shop_ids)
 
 
 @router.put("/configs/{config_id}", response_model=CollectionConfigResponse)
@@ -1096,7 +1192,10 @@ async def update_config(
     config = result.scalar_one()
 
     logger.info("Updated collection config: %s", config.name)
-    return _build_config_response(config)
+    disabled_shop_ids = await _load_disabled_shop_ids(
+        db, [scope.shop_account_id for scope in (config.shop_scopes or [])]
+    )
+    return _build_config_response(config, disabled_shop_ids=disabled_shop_ids)
 
 
 @router.delete("/configs/{config_id}", response_model=SuccessResponse[None])
