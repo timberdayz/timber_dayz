@@ -2295,13 +2295,18 @@ CI 的做法是 `black --quiet <改动的 py 文件>` 之后 `git diff --exit-co
   另外 35 个是本次新增的文件（商品中心与店铺身份两条线都有）。
 - 旁证：v7.15.3 那次 main 推送的 CI 同样是红的 ⇒ 不是本轮引入。
 
-#### E.12.2 红点二：pytest 失败 1 条（看板域既有失败）
+#### E.12.2 红点二：pytest 失败 1 条（看板域既有失败，只在本地环境复现）
 
 `backend/tests/data_pipeline/test_dashboard_router_switch.py::test_switched_app_serves_real_postgresql_dashboard_routes`
 （`assert 500 == 200`）。
 这条在 **main 的既有回归基线里就是失败**（`pcreg3/main-26.xml` 有 FAIL 记录），
 属于**看板域的既有失败**，不是本次引入。
-CI 的 `test` job 没有起 PostgreSQL service，而这条用例要真库才能跑通。
+该用例带 `@pytest.mark.pg_only`，靠 testcontainers 起真库。
+
+**最终复核（重要更正）**：把 E.12.1 / E.12.3 / E.12.4 三处修完后，
+CI 的 pytest 步骤在 **CI 环境里这条用例是通过的** ⇒
+它**只是本地开发库环境下的失败**，不是 CI 阻塞项，也不需要改 CI workflow 或给用例加 skip。
+本机复现时仍会红（本地 PG 环境与 CI 容器环境不同），属**本地环境差异**。
 
 #### E.12.3 顺带暴露的第三个冲突：源文本断言 vs black
 
@@ -2340,20 +2345,22 @@ CI 用的是仓库 `pyproject.toml` 里的**全量 `select = ["E", "F"]`**。
 - 对本次改动的 91 个 py 文件跑 black（实际改动 69 个文件，纯排版，语义不变）。
 - 把那条源文本断言改成 AST 断言。
 - 修掉上表 7 条 ruff 报错（4 处小改，行为不变）。
-- 复验：CI 同款 pytest（41 个改动测试文件）**598 passed / 1 failed**，
-  与格式化前**逐条一致**，唯一失败就是 E.12.2 那条既有看板失败；
+- 本地复验：CI 同款 pytest（41 个改动测试文件）**598 passed / 1 failed**，
+  与格式化前**逐条一致**，唯一失败就是 E.12.2 那条看板用例（本地环境差异）；
   改动文件 `ruff check` **0 错**、`black --check` **全过**、`scripts/run_lint.py` 通过。
 
-#### E.12.6 还没解决的（留给后续，本次没动）
+#### E.12.6 最终结果：main 的 CI 已全绿
 
-CI 仍会因为 E.12.2 那条看板用例红。需要单独决定怎么改，二选一：
+修完后重跑 main 的 CI（run `42335142941`）→ **conclusion = success，6 个 job 全过**
+（release-tag-rules / test / security-scan / build-check / frontend-guard / notify）。
+⇒ 之前连续三次 main 推送的 CI 红（v7.15.3、v7.15.5 首推、v7.15.5 格式修复推送）
+**全部收口**，下次发版不会再卡在同一处。
 
-- 给 CI 的 `test` job 加 PostgreSQL service（改 `.github/workflows/ci.yml`），让这条用例能跑通；
-- 或把该用例在没有真库时标记为 skip（改测试本身）。
+⚠️ 仍然存在的**本地环境差异**（不是 CI 阻塞项）：
+本机跑 E.12.2 那条看板用例会红（500），CI 容器环境里是绿的。
+⇒ 排查看板域问题时别拿本地这个红当结论。
 
-⚠️ 这属于**发版工具链 / 看板域**，不在本方案范围内。
-
-> 另有一条**工具链建议**（同样不在本方案范围，供后续决定）：
+> 另有一条**工具链建议**（不在本方案范围，供后续决定）：
 > `scripts/run_lint.py` 的规则集（`--select=E9,F7,F63`）比 CI 弱很多，
 > 导致 black / ruff 这两类门禁**本地完全测不出来**。
 > 若把 `run_lint.py` 改成与 CI 同规则（`ruff check` 走仓库配置 + 加 black 检查），
