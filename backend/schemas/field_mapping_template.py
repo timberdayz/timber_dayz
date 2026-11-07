@@ -28,7 +28,9 @@ class TemplateHeaderBinding(BaseModel):
     semantic_role: Optional[str] = Field(None, description="Semantic role such as metric_date")
     aliases: List[str] = Field(default_factory=list, description="Alternative labels for matching")
     required: Optional[bool] = Field(None, description="Whether this semantic binding is required for sync")
-    hash_participates: Optional[bool] = Field(None, description="Whether this binding participates in data_hash")
+    # [*] 批次 E(D2): ``hash_participates`` 已下线 ——
+    # 「参与去重」由版本级核心字段清单(``core_fields``)的 ``in_hash`` 表达,
+    # 绑定级不再重复声明同一事实。
     semantic_review_status: Optional[TemplateSemanticReviewStatus] = Field(
         None,
         description="Manual review status for semantic identity governance",
@@ -73,6 +75,23 @@ class TemplateFieldParseRule(BaseModel):
     )
 
 
+class TemplateCoreField(BaseModel):
+    """核心字段清单里的一项(批次 E)。
+
+    一份清单管三件事: 落库建列 / ``data_hash`` 指纹 / 「缺失算不算阻断」。
+
+    * ``semantic_key`` —— 规范语义键(翻译不出来时为 ``None``);
+    * ``raw_name`` —— 物理列名(逐字兜底与 hash 键名都用它);
+    * ``required`` —— 缺失是否阻断;
+    * ``in_hash`` —— 是否参与 ``data_hash``。
+    """
+
+    semantic_key: Optional[str] = Field(None, description="Canonical semantic key")
+    raw_name: Optional[str] = Field(None, description="Physical source column name")
+    required: bool = Field(False, description="Whether a missing value blocks ingestion")
+    in_hash: bool = Field(True, description="Whether the field participates in data_hash")
+
+
 class TemplateSaveRequest(BaseModel):
     platform: str = Field(..., description="Platform code")
     data_domain: str = Field(..., description="Data domain")
@@ -94,6 +113,12 @@ class TemplateSaveRequest(BaseModel):
     field_parse_rules: Optional[List[TemplateFieldParseRule]] = Field(
         None,
         description="Field-level parsing rules",
+    )
+    # [*] 批次 E: 核心字段清单(两级勾选的结果)。
+    #     「我要哪些数据」= 清单全集; 「哪些参与去重」= 其中 in_hash=true 的。
+    core_fields: Optional[List[TemplateCoreField]] = Field(
+        None,
+        description="Version-level core field manifest",
     )
     mappings: Dict[str, Any] = Field(default_factory=dict, description="Legacy compatible mappings payload")
     save_mode: TemplateSaveMode = Field("create", description="Save mode")
@@ -175,6 +200,8 @@ class TemplateContextSummary(BaseModel):
     hash_participating_semantic_keys: List[str] = Field(default_factory=list)
     header_bindings: List[TemplateHeaderBinding] = Field(default_factory=list)
     field_parse_rules: List[TemplateFieldParseRule] = Field(default_factory=list)
+    # [*] 批次 E: 核心字段清单(前端两级勾选的载体)
+    core_fields: List[TemplateCoreField] = Field(default_factory=list)
 
 
 class TemplateCurrentFileSummary(BaseModel):

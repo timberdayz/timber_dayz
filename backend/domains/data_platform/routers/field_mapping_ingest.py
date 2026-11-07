@@ -109,17 +109,22 @@ def _template_identity_config(template: FieldMappingTemplate | dict[str, Any] | 
             "field_parse_rules": [],
             "deduplication_fields": [],
             "header_bindings": [],
+            # [*] 批次 E: 版本级核心字段清单(hash 口径切换用)
+            "core_fields": [],
         }
     if isinstance(template, dict):
         return {
             "field_parse_rules": list(template.get("field_parse_rules") or []),
             "deduplication_fields": list(template.get("deduplication_fields") or []),
             "header_bindings": list(template.get("header_bindings") or []),
+            "core_fields": list(template.get("core_fields") or []),
         }
     return {
         "field_parse_rules": list(template.field_parse_rules or []),
         "deduplication_fields": list(template.deduplication_fields or []),
         "header_bindings": list(template.header_bindings or []),
+        # legacy 模板行没有 core_fields 列(清单是版本级的)
+        "core_fields": list(getattr(template, "core_fields", None) or []),
     }
 
 
@@ -161,6 +166,15 @@ async def _load_template_identity_config_for_file(
         variant = resolve_result.get("variant") or {}
         variant_config = _template_identity_config(variant)
         if variant_config["field_parse_rules"]:
+            # [*] 批次 E: 核心字段清单在版本上, 变体不持有。
+            variant_config["core_fields"] = list(resolve_result.get("core_fields") or [])
+            return variant_config
+        # [*] 批次 E(E-8): 变体没有规则 ⇒ 用**版本级**的
+        #     (resolver 返回的 field_parse_rules 已经是「变体优先、版本兜底」的结果)。
+        version_rules = list(resolve_result.get("field_parse_rules") or [])
+        if version_rules:
+            variant_config["field_parse_rules"] = version_rules
+            variant_config["core_fields"] = list(resolve_result.get("core_fields") or [])
             return variant_config
     except Exception:
         pass
@@ -764,6 +778,8 @@ async def ingest_file(
                 field_parse_rules = list(template_identity_config.get("field_parse_rules") or [])
                 template_header_bindings = list(template_identity_config.get("header_bindings") or [])
                 template_deduplication_fields = list(template_identity_config.get("deduplication_fields") or [])
+                # [*] 批次 E: 核心字段清单(版本级) —— hash 口径切换用。
+                template_core_fields = list(template_identity_config.get("core_fields") or [])
                 raw_data_importer.field_parse_rules = field_parse_rules
 
                 from backend.services.deduplication_fields_config import (
@@ -806,12 +822,22 @@ async def ingest_file(
                     hash_identity_values,
                     orders_identity_values,
                 )
+                # [*] 批次 E: 口径切换是**显式开关**(规格 §6.1-4), 默认走旧口径。
+                effective_core_fields = None
+                if template_core_fields:
+                    from backend.services.core_fields_service import (
+                        core_fields_hash_enabled,
+                    )
+
+                    if core_fields_hash_enabled():
+                        effective_core_fields = list(template_core_fields)
                 data_hashes = deduplication_service.batch_calculate_data_hash(
                     valid_rows,
                     deduplication_fields=final_deduplication_fields,
                     header_bindings=template_header_bindings,
                     scope_values=hash_scope_values,
                     identity_values=hash_identity_values,
+                    core_fields=effective_core_fields,
                 )
                 
                 currency_extractor = get_currency_extractor()

@@ -122,24 +122,45 @@ class DeduplicationService:
         header_bindings: Optional[List[Dict[str, Any]]] = None,
         scope_values: Optional[Dict[str, Any]] = None,
         identity_values: Optional[Dict[str, Any]] = None,
+        core_fields: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """
         计算单行数据的哈希值
-        
+
         Args:
             row: 数据行字典
             exclude_fields: 排除的字段列表(元数据字段,如file_id、ingest_timestamp等)
             deduplication_fields: 核心去重字段列表(可选,如果提供则只使用这些字段计算hash)
-        
+            core_fields: [*] 批次 E: 版本级核心字段清单。
+                提供时**优先于** ``deduplication_fields``, 取值口径变成
+                「标准含义优先, 逐字兜底」(见
+                :func:`backend.services.core_fields_service.resolve_core_field_value`)。
+                这是规格 §6.1 要求的「显式开关」的新口径, 可一键回退。
+
         Returns:
             data_hash (SHA256, 64字符)
         """
         if exclude_fields is None:
             exclude_fields = ['file_id', 'ingest_timestamp', 'id', 'created_at', 'updated_at']
         scope_hash_data = self._build_scope_hash_data(scope_values)
-        
+
+        if core_fields:
+            business_data, missing_fields, missing_required_fields = self._build_core_field_hash_data(
+                row,
+                core_fields=core_fields,
+                deduplication_fields=deduplication_fields,
+                header_bindings=header_bindings,
+                identity_values=identity_values,
+                scope_hash_data=scope_hash_data,
+            )
+            self._log_core_field_hash_notes(
+                missing_fields=missing_fields,
+                missing_required_fields=missing_required_fields,
+                expected_count=len(core_fields),
+                business_data=business_data,
+            )
         # v4.14.0新增:如果提供了核心字段,只使用核心字段计算hash
-        if deduplication_fields:
+        elif deduplication_fields:
             business_data = dict(scope_hash_data)
             missing_fields = []
             # 只使用核心字段
@@ -156,40 +177,23 @@ class DeduplicationService:
                     if override_value is not None and str(override_value).strip() != "":
                         business_data[identity_key] = self._normalize_hash_value(override_value)
                         continue
-                if semantic_key:
-                    semantic_value, matched_key = resolve_semantic_value(
-                        row,
-                        semantic_key,
-                        header_bindings=header_bindings,
-                    )
-                    if semantic_value is not None:
-                        business_data[semantic_key] = self._normalize_hash_value(semantic_value)
-                        continue
-                # 支持中英文字段名匹配(模糊匹配)
-                matched = False
-                matched_key = None
-                for key in row.keys():
-                    # 精确匹配
-                    if key == field:
-                        business_data[key] = self._normalize_hash_value(row[key])
-                        matched = True
-                        matched_key = key
-                        break
-                    # 忽略大小写匹配
-                    if key.lower() == field.lower():
-                        business_data[key] = self._normalize_hash_value(row[key])
-                        matched = True
-                        matched_key = key
-                        break
-                
+                # [*] 批次 E: 取值逻辑收敛到 _resolve_hash_field_value(新旧两条分支同源)
+                value, business_key = self._resolve_hash_field_value(
+                    row,
+                    field,
+                    header_bindings=header_bindings,
+                )
+                if business_key is not None:
+                    business_data[business_key] = self._normalize_hash_value(value)
+                    continue
+
                 # 如果未找到匹配字段,记录警告(但不影响计算)
-                if not matched:
-                    missing_fields.append(field)
-                    if semantic_key and get_semantic_requirements(semantic_key).get("required"):
-                        missing_required_fields.append(field)
-                    logger.debug(
-                        f"[Dedup] 核心字段 {field} 在数据行中未找到,跳过(可用字段: {list(row.keys())[:5]}...)"
-                    )
+                missing_fields.append(field)
+                if semantic_key and get_semantic_requirements(semantic_key).get("required"):
+                    missing_required_fields.append(field)
+                logger.debug(
+                    f"[Dedup] 核心字段 {field} 在数据行中未找到,跳过(可用字段: {list(row.keys())[:5]}...)"
+                )
             
             # 如果所有核心字段都缺失,记录严重警告
             if len(missing_fields) == len(deduplication_fields):
@@ -238,6 +242,185 @@ class DeduplicationService:
             )
         
         return data_hash
+
+    @staticmethod
+    def _resolve_hash_field_value(
+        row: Dict[str, Any],
+        field: str,
+        *,
+        header_bindings: Optional[List[Dict[str, Any]]],
+    ) -> Tuple[Any, Optional[str]]:
+        """**hash 取值的 SSOT** —— 规范键走语义解析, 否则逐字匹配。
+
+        新旧两条分支都必须走这里, 否则「同一份数据两套 hash」。
+
+        Returns:
+            ``(value, business_key)``。
+
+            * ``business_key`` 是**写进 hash 载荷的键**(参与 hash)——
+              取不到时为 ``None``;
+            * 命中但值为 ``None`` 时, ``business_key`` **仍非 None**
+              (旧口径把它算「命中」, 这里必须一致)。
+        """
+        field_text = str(field or "").strip()
+        semantic_key = (
+            normalize_semantic_key(field_text)
+            if is_canonical_semantic_key(field_text)
+            else None
+        )
+        if semantic_key:
+            semantic_value, _matched = resolve_semantic_value(
+                row,
+                semantic_key,
+                header_bindings=header_bindings,
+            )
+            if semantic_value is not None:
+                return semantic_value, semantic_key
+
+        # 支持中英文字段名匹配(模糊匹配)
+        # 单次遍历: 精确匹配与「忽略大小写」按 row 的列顺序判断, 先命中先算。
+        # (不能改成「先扫精确、再扫大小写」—— 命中列不同 ⇒ 载荷键不同 ⇒ hash 不同)
+        for key in row.keys():
+            if key == field:
+                return row[key], key
+            if str(key).lower() == str(field).lower():
+                return row[key], key
+        return None, None
+
+    def _build_core_field_hash_data(
+        self,
+        row: Dict[str, Any],
+        *,
+        core_fields: List[Dict[str, Any]],
+        deduplication_fields: Optional[List[str]],
+        header_bindings: Optional[List[Dict[str, Any]]],
+        identity_values: Optional[Dict[str, Any]],
+        scope_hash_data: Dict[str, Any],
+    ) -> Tuple[Dict[str, Any], List[str], List[str]]:
+        """按版本级核心字段清单算 hash 载荷(批次 E 新口径)。
+
+        字段集合 vs 取值方式
+        --------------------
+        * **字段集合** = 调用方传进来的 ``deduplication_fields``
+          (旧口径算好的**完整**链: 模板字段 + ``platform_code``/``shop_id``/
+          ``sub_domain`` + orders 域扩展 + auto-date 身份字段)。
+          **绝不**在这里自己重建集合 —— 少一个系统身份字段,
+          hash 就与旧口径不同 ⇒ 已入库的行全部变成「没见过的数据」。
+        * **取值方式** = 清单驱动: 清单里的字段走「逐字优先, 语义兜底」;
+          集合里**不在清单中**的系统字段走旧口径通用取值。
+
+        与旧口径的**逐字等价性**
+        ------------------------
+        1. 载荷**键名**: 清单字段用 ``raw_name`` 优先(= 旧口径键名);
+           系统字段用旧口径通用取值(键名不变)。
+        2. 载荷**取值**: 清单字段先按旧口径逐字取 ⇒ 同值同键;
+           只有旧口径**取不到**(平台改了列名)时, 才按标准含义兜底
+           ⇒ 旧口径会丢字段的场景, 新口径把字段救回来。
+        """
+        from backend.services.core_fields_service import (
+            normalize_core_fields,
+            resolve_core_field_value,
+        )
+
+        business_data: Dict[str, Any] = dict(scope_hash_data)
+        missing_fields: List[str] = []
+        missing_required_fields: List[str] = []
+
+        entry_by_key: Dict[str, Dict[str, Any]] = {}
+        for entry in normalize_core_fields(core_fields):
+            if not entry.get("in_hash"):
+                continue
+            hash_key = entry.get("raw_name") or entry.get("semantic_key") or ""
+            if not hash_key or hash_key in entry_by_key:
+                continue
+            entry_by_key[hash_key] = entry
+
+        # 字段集合: 用旧口径算好的完整链; 没传就退回清单自身的身份。
+        fields = list(deduplication_fields or entry_by_key.keys())
+
+        for field in fields:
+            field_text = str(field or "").strip()
+            entry = entry_by_key.get(field_text)
+            semantic_key = (
+                normalize_semantic_key(field_text)
+                if is_canonical_semantic_key(field_text)
+                else None
+            )
+            identity_key = semantic_key or field_text
+
+            if identity_values and identity_key:
+                override_value = identity_values.get(identity_key)
+                if override_value is None and field_text != identity_key:
+                    override_value = identity_values.get(field_text)
+                if override_value is not None and str(override_value).strip() != "":
+                    business_data[identity_key] = self._normalize_hash_value(override_value)
+                    continue
+
+            if entry is not None:
+                # 清单字段 ⇒ 逐字优先, 语义兜底
+                value, business_key, degraded = resolve_core_field_value(
+                    row,
+                    entry,
+                    header_bindings=header_bindings,
+                )
+                if business_key is not None:
+                    business_data[business_key] = self._normalize_hash_value(value)
+                    if degraded:
+                        logger.debug(
+                            "[Dedup] 核心字段 %s 逐字未命中, 已按标准含义兜底取值(列=%s)",
+                            identity_key,
+                            business_key,
+                        )
+                    continue
+            else:
+                # 系统身份字段 ⇒ 旧口径通用取值
+                value, business_key = self._resolve_hash_field_value(
+                    row,
+                    field,
+                    header_bindings=header_bindings,
+                )
+                if business_key is not None:
+                    business_data[business_key] = self._normalize_hash_value(value)
+                    continue
+
+            missing_fields.append(field)
+            if entry is not None:
+                if entry.get("required"):
+                    missing_required_fields.append(identity_key)
+            elif semantic_key and get_semantic_requirements(semantic_key).get("required"):
+                missing_required_fields.append(field)
+            logger.debug(
+                "[Dedup] 核心字段 %s 在数据行中未找到,跳过(可用字段: %s)",
+                identity_key,
+                list(row.keys())[:5],
+            )
+
+        return business_data, missing_fields, missing_required_fields
+
+    @staticmethod
+    def _log_core_field_hash_notes(
+        *,
+        missing_fields: List[str],
+        missing_required_fields: List[str],
+        expected_count: int,
+        business_data: Dict[str, Any],
+    ) -> None:
+        """核心字段缺失的日志(与旧口径同结构, 便于对照排查)。"""
+        if len(missing_fields) == expected_count and expected_count:
+            logger.warning(
+                f"[Dedup] [WARN] 所有核心字段都未找到: {missing_fields},"
+                f"将使用空字典计算hash(可能导致所有行产生相同的hash)"
+            )
+        elif missing_required_fields:
+            logger.info(
+                f"[Dedup] 部分核心字段未找到: {missing_required_fields},"
+                f"已找到的字段: {list(business_data.keys())}"
+            )
+        elif missing_fields:
+            logger.debug(
+                f"[Dedup] 可选核心字段未找到: {missing_fields},"
+                f"已找到的字段: {list(business_data.keys())}"
+            )
 
     @staticmethod
     def _build_scope_hash_data(scope_values: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -313,27 +496,35 @@ class DeduplicationService:
         header_bindings: Optional[List[Dict[str, Any]]] = None,
         scope_values: Optional[Dict[str, Any]] = None,
         identity_values: Optional[List[Dict[str, Any]] | Dict[str, Any]] = None,
+        core_fields: Optional[List[Dict[str, Any]]] = None,
     ) -> List[str]:
         """
         批量计算数据哈希(使用pandas向量化)
-        
+
         Args:
             rows: 数据行列表
             exclude_fields: 排除的字段列表
             deduplication_fields: 核心去重字段列表(可选,如果提供则只使用这些字段计算hash)
-        
+            core_fields: [*] 批次 E: 版本级核心字段清单(优先于 deduplication_fields)
+
         Returns:
             data_hash列表(与rows长度相同)
         """
         if not rows:
             return []
-        
+
         # v4.14.0新增:如果提供了核心字段,使用逐行计算(确保字段匹配正确)
-        if deduplication_fields:
-            logger.info(
-                f"[Dedup] 使用核心字段计算hash: {deduplication_fields},"
-                f"逐行计算以确保字段匹配正确(共{len(rows)}行)"
-            )
+        if core_fields or deduplication_fields:
+            if core_fields:
+                logger.info(
+                    f"[Dedup] 使用核心字段清单计算hash: {len(core_fields)} 项,"
+                    f"逐行计算以确保字段匹配正确(共{len(rows)}行)"
+                )
+            else:
+                logger.info(
+                    f"[Dedup] 使用核心字段计算hash: {deduplication_fields},"
+                    f"逐行计算以确保字段匹配正确(共{len(rows)}行)"
+                )
             # 重置日志计数器
             self._hash_log_count = 0
             hashes = [
@@ -344,6 +535,7 @@ class DeduplicationService:
                     header_bindings,
                     scope_values,
                     self._identity_values_for_row(identity_values, index),
+                    core_fields,
                 )
                 for index, row in enumerate(rows)
             ]

@@ -94,6 +94,24 @@ ANALYTICS_SEMANTIC_ALIASES = _REGISTRY_ANALYTICS_SEMANTIC_ALIASES
 DOMAIN_SEMANTIC_ALIASES = _REGISTRY_DOMAIN_SEMANTIC_ALIASES
 
 
+def _core_field_required_keys(core_fields: list[dict[str, Any]] | None) -> list[str]:
+    """模板级核心字段清单里 ``required=true`` 的语义键(批次 E)。
+
+    只取**有语义键**的条目 —— 翻译不出来的物理列名没有语义键,
+    无法参与「按语义键判定缺失」, 只能靠逐字兜底。
+    """
+    from backend.services.core_fields_service import normalize_core_fields
+
+    keys: list[str] = []
+    for entry in normalize_core_fields(core_fields):
+        semantic_key = entry.get("semantic_key")
+        if not semantic_key or not entry.get("required"):
+            continue
+        if semantic_key not in keys:
+            keys.append(semantic_key)
+    return keys
+
+
 class SemanticFieldContractService:
     def __init__(self, db):
         self.db = db
@@ -109,7 +127,26 @@ class SemanticFieldContractService:
         current_columns: list[str],
         template_columns: list[str] | None = None,
         consumer: str = "business_overview",
+        core_fields: list[dict[str, Any]] | None = None,
     ) -> SemanticContractResult:
+        """判定语义契约状态(漂移阻断链的第 ② 层)。
+
+        [*] 批次 E(E-5): ``core_fields`` = **模板级核心字段清单**。
+        规格 §3.1「漂移阻断 = ``core_fields`` 中 ``required=true`` 的
+        **∪** 域级契约 required」。
+
+        为什么接进来**不会**让现有模板突然卡死
+        ----------------------------------------
+        清单的 ``required`` 由迁移回填, 回填口径是「域级契约 required
+        ∩ 清单条目」⇒ **是域级契约 required 的子集** ⇒ 并入后
+        ``missing_required_keys`` 不变。
+
+        真正让它变严的是**用户在模板里勾选**(前端两级勾选)⇒
+        那才是「用户勾一次, 阻断也跟着收紧一次」。
+
+        注: 本方法在「该域没有契约」时提前返回 ``not_configured``
+        ⇒ 清单的 required 在无契约域不参与阻断(与既有行为一致)。
+        """
         definitions = await self._load_contracts(
             platform=platform,
             data_domain=data_domain,
@@ -151,6 +188,13 @@ class SemanticFieldContractService:
             if column in {item.semantic_key for item in definitions}
         )
         required_keys = [item.semantic_key for item in definitions if item.importance == "required"]
+        # [*] 批次 E(E-5): 并入**模板级核心字段清单**里 required=true 的语义键。
+        #     规格 §3.1: 漂移阻断 = 清单 required ∪ 域级契约 required。
+        required_keys.extend(
+            key
+            for key in _core_field_required_keys(core_fields)
+            if key not in required_keys
+        )
         optional_keys = [
             item.semantic_key
             for item in definitions

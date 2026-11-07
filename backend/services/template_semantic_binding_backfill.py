@@ -88,5 +88,5 @@ def _new_binding(raw_name: str, semantic_key: str, position: int) -> dict[str, A
         "semantic_key": semantic_key,
         "position": position,
         "required": False,
-        "hash_participates": False,
+        # [*] 批次 E(D2): ``hash_participates`` 已下线, 不再写这个投影字段。
     }

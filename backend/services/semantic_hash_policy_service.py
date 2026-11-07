@@ -101,12 +101,24 @@ class SemanticHashPolicyService:
             )
 
         if kind == "metric":
+            # [*] 批次 E(E-4 / 规格 D1): 指标类字段**不再硬性拒绝**参与 data_hash。
+            #     业务概念是「日期 + 订单数 + 店铺 = 这一行是什么」的**复合业务键**,
+            #     不是实体身份 ⇒ 「度量所以不能进 hash」这个前提本身就不成立。
+            #
+            #     现在能不能进由用户勾选决定; 但**不推荐**, 并且带上后果提示:
+            #     指标值变化会被当成新行(而不是更新)。
             return SemanticHashOption(
                 semantic_key=normalized,
                 label=label,
                 kind=kind,
-                eligible=False,
-                blocked_reason="Metric fields are measures, not row identity fields.",
+                eligible=True,
+                recommended=False,
+                weak_identity=False,
+                legacy_compatible=False,
+                warning=(
+                    "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。"
+                    "确认「这一行的身份就包含这个指标」再勾选。"
+                ),
                 raw_name=raw_name,
             )
 

@@ -402,6 +402,13 @@ class FieldMappingTemplate(Base):
     # v4.14.0新增:核心去重字段列表(用于data_hash计算)
     deduplication_fields = Column(JSONB, nullable=True, comment="核心去重字段列表(JSONB数组),用于data_hash计算,不受表头变化影响")
 
+    # [*] 批次 E: 核心字段清单(编辑面载体)—— 「我要哪些数据」+「哪些参与去重」。
+    #     版本级 ``field_mapping_template_versions.core_fields`` 是权威副本,
+    #     本列是**编辑面**: 用户在工作台勾选后先落这里, 投影时写进版本。
+    #     结构: [{"semantic_key": str|null, "raw_name": str|null,
+    #              "required": bool, "in_hash": bool}, ...]
+    core_fields = Column(JSONB, nullable=True, comment="核心字段清单(JSONB数组): 落库列/指纹/阻断三处共用一份")
+
     # v4.22.1新增:模板列语义绑定(用于脏表头/空表头场景的稳定重连)
     header_bindings = Column(JSONB, nullable=True, comment="模板列语义绑定(JSONB数组)")
 
@@ -483,6 +490,14 @@ class FieldMappingTemplateVersion(Base):
     template_name = Column(String(256), nullable=True)
     deduplication_fields = Column(JSONB, nullable=True)
     header_bindings = Column(JSONB, nullable=True)
+    # [*] 批次 E: 核心字段清单(版本级)—— 一份清单管三件事:
+    #     落库建列 / data_hash 指纹 / 「缺失算不算阻断」。
+    #     结构: [{"semantic_key": str|null, "raw_name": str|null,
+    #              "required": bool, "in_hash": bool}, ...]
+    core_fields = Column(JSONB, nullable=True)
+    # [*] 批次 E(E-8): 解析规则上移到版本级 —— 审一次全变体生效。
+    #     变体上的同名列保留为「变体级覆盖」(为 NULL 时继承版本级)。
+    field_parse_rules = Column(JSONB, nullable=True)
     notes = Column(Text, nullable=True)
     legacy_template_ids = Column(JSONB, nullable=True)
     created_by = Column(String(64), default="system")

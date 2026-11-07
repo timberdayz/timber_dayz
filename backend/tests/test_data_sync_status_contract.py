@@ -412,7 +412,6 @@ async def test_sync_single_file_re_resolves_after_preview_and_uses_semantic_payl
             "display_name": "订单编号",
             "semantic_key": "order_id",
             "required": True,
-            "hash_participates": True,
         }
     ]
     resolver = _TwoPhaseTemplateResolverStub(

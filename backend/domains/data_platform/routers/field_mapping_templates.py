@@ -78,7 +78,6 @@ from backend.services.semantic_alias_registry import SemanticAliasRegistryServic
 from backend.services.template_save_readiness_service import (
     TemplateSaveReadinessService,
     normalize_deduplication_fields_for_template as service_normalize_deduplication_fields_for_template,
-    sync_hash_participation_from_deduplication_fields as service_sync_hash_participation_from_deduplication_fields,
     validate_deduplication_fields_against_bindings as service_validate_deduplication_fields_against_bindings,
 )
 from backend.services.template_semantic_coverage_checker import TemplateSemanticCoverageChecker
@@ -516,7 +515,6 @@ def _filter_bindings_for_manual_review(
         has_conflict = bool(semantic_key and semantic_counts.get(semantic_key, 0) > 1)
         is_key_review_candidate = bool(
             binding.get("required")
-            or binding.get("hash_participates")
             or binding.get("hash_eligible")
             or semantic_key
         )
@@ -790,7 +788,7 @@ def _normalize_header_bindings(
             inferred_semantic_key = None
             semantic_role = None
             aliases = []
-            semantic_requirements = {"required": False, "hash_participates": False}
+            semantic_requirements = {"required": False}
         if _looks_like_unnamed_header(raw_name) and sample_type == "date":
             if display_name == raw_name:
                 display_name = "日期"
@@ -828,13 +826,11 @@ def _normalize_header_bindings(
             inferred_semantic_key = None
             semantic_role = None
             aliases = []
-            semantic_requirements = {"required": False, "hash_participates": False}
+            semantic_requirements = {"required": False}
 
         required = bool(requested.get("required", semantic_requirements["required"]))
-        hash_participates = bool(requested.get("hash_participates", semantic_requirements["hash_participates"]))
         if semantic_review_status == "confirmed_non_semantic":
             required = False
-            hash_participates = False
 
         normalized.append(
             {
@@ -844,7 +840,8 @@ def _normalize_header_bindings(
                 "semantic_role": semantic_role,
                 "aliases": aliases,
                 "required": required,
-                "hash_participates": hash_participates,
+                # [*] 批次 E(D2): 不再写 ``hash_participates`` ——
+                # 「参与去重」由版本级核心字段清单的 ``in_hash`` 表达。
                 "semantic_review_status": semantic_review_status,
                 "semantic_review_source": semantic_review_source,
                 "position": requested.get("position", position),
@@ -891,9 +888,6 @@ def _apply_mapping_semantics_to_header_bindings(
                         )
                     ),
                     "required": bool(binding.get("required") or semantic_requirements["required"]),
-                    "hash_participates": bool(
-                        binding.get("hash_participates") or semantic_requirements["hash_participates"]
-                    ),
                     "semantic_review_status": "confirmed_semantic",
                 }
             )
@@ -914,16 +908,6 @@ def _validate_deduplication_fields_against_bindings(
         header_columns,
         header_bindings,
         field_parse_rules,
-    )
-
-
-def _sync_hash_participation_from_deduplication_fields(
-    header_bindings: list[dict[str, Any]],
-    deduplication_fields: list[str],
-) -> list[dict[str, Any]]:
-    return service_sync_hash_participation_from_deduplication_fields(
-        header_bindings,
-        deduplication_fields,
     )
 
 
@@ -951,9 +935,10 @@ def _extract_semantic_key_sets(
         if binding.get("required") and semantic_key not in seen_required:
             seen_required.add(semantic_key)
             required_keys.append(semantic_key)
-        if binding.get("hash_participates") and semantic_key not in seen_hash:
-            seen_hash.add(semantic_key)
-            hash_keys.append(semantic_key)
+        # [*] 批次 E(D2): 不再从绑定读 ``hash_participates`` ——
+        # 「参与去重」由版本级核心字段清单的 ``in_hash`` 表达。
+        # 旧分支在此处补充的键, 全部来自 ``deduplication_fields`` 里的规范语义键,
+        # 而上面那个循环已经把它们收齐了 ⇒ 删掉不改变结果。
 
     return required_keys, hash_keys
 
@@ -1512,6 +1497,20 @@ async def save_mapping_template(
             deduplication_fields=deduplication_fields,
             header_bindings=header_bindings,
             field_parse_rules=field_parse_rules,
+            # [*] 批次 E: 核心字段清单(两级勾选的结果)。
+            #     不给就由 service 继承被归档模板的清单(保留 raw_name)。
+            core_fields=(
+                [
+                    {
+                        "semantic_key": item.semantic_key,
+                        "raw_name": item.raw_name,
+                        "required": bool(item.required),
+                        "in_hash": bool(item.in_hash),
+                    }
+                    for item in (request.core_fields or [])
+                ]
+                or None
+            ),
             save_mode=request.save_mode,
             base_template_id=request.base_template_id,
         )
@@ -1713,6 +1712,8 @@ async def get_template_update_context(
                 hash_participating_semantic_keys=hash_participating_semantic_keys,
                 header_bindings=normalized_template_bindings,
                 field_parse_rules=template.field_parse_rules or [],
+                # [*] 批次 E: 核心字段清单(前端两级勾选读这个)
+                core_fields=list(template.core_fields or []),
             ).model_dump(),
             "template_header_columns": template_header_columns,
             "current_file": None,

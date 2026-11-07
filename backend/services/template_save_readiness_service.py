@@ -308,27 +308,6 @@ def validate_deduplication_fields_against_bindings(
     return invalid_fields
 
 
-def sync_hash_participation_from_deduplication_fields(
-    header_bindings: list[dict[str, Any]],
-    deduplication_fields: list[str],
-) -> list[dict[str, Any]]:
-    selected_hash_keys = {
-        normalize_semantic_key(field)
-        for field in deduplication_fields or []
-        if normalize_semantic_key(field)
-    }
-    synced: list[dict[str, Any]] = []
-    for binding in header_bindings or []:
-        next_binding = dict(binding)
-        semantic_key = normalize_semantic_key(next_binding.get("semantic_key"))
-        if not is_confirmed_semantic_binding(next_binding) or not semantic_key:
-            next_binding["hash_participates"] = False
-        else:
-            next_binding["hash_participates"] = semantic_key in selected_hash_keys
-        synced.append(next_binding)
-    return synced
-
-
 class TemplateSaveReadinessService:
     def __init__(self) -> None:
         self._hash_policy_service = TemplateHashPolicyService()
@@ -494,10 +473,11 @@ class TemplateSaveReadinessService:
                     item.strip() for item in unresolved_text.split(",") if item.strip()
                 ]
 
-        normalized_header_bindings = sync_hash_participation_from_deduplication_fields(
-            header_bindings,
-            normalized_deduplication_fields,
-        )
+        # [*] 批次 E(D2): 不再把「参与去重」投影回绑定 ——
+        # 「参与去重」由**版本级核心字段清单**的 ``in_hash`` 表达
+        # (:mod:`backend.services.core_fields_service`)。
+        # 绑定上不再重复声明同一事实(否则「同一事实两处真相」)。
+        normalized_header_bindings = [dict(binding) for binding in header_bindings or []]
         hash_options = self._semantic_hash_policy_service.build_options(
             data_domain=data_domain,
             granularity=granularity,

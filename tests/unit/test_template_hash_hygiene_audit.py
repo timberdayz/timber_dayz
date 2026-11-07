@@ -63,7 +63,6 @@ def _binding(
         "semantic_role": None,
         "aliases": [],
         "required": False,
-        "hash_participates": True,
         "semantic_review_status": status,
         "semantic_review_source": "user",
     }

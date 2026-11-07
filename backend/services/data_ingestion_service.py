@@ -360,6 +360,7 @@ class DataIngestionService:
         sub_domain: Optional[str] = None,  # [*] v4.14.0新增:子类型
         template_id: Optional[int] = None,
         field_parse_rules: Optional[List[Dict[str, Any]]] = None,
+        core_fields: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         数据入库主方法
@@ -751,12 +752,34 @@ class DataIngestionService:
                         hash_identity_values,
                         orders_identity_values,
                     )
+                    # [*] 批次 E: 核心字段清单(版本级)。
+                    #     口径切换是**显式开关**(规格 §6.1-4): 默认走旧口径,
+                    #     打开后才用清单算 hash ⇒ 一键可回退。
+                    effective_core_fields = None
+                    if core_fields:
+                        from backend.services.core_fields_service import (
+                            core_fields_hash_enabled,
+                        )
+
+                        if core_fields_hash_enabled():
+                            effective_core_fields = list(core_fields)
+                            logger.info(
+                                "[Ingest] [*] 批次E: 按核心字段清单计算data_hash "
+                                f"(核心字段数={len(effective_core_fields)})"
+                            )
+                        else:
+                            logger.info(
+                                "[Ingest] [*] 批次E: 核心字段清单已提供, 但口径开关未打开"
+                                f"({core_fields_hash_enabled.__module__} "
+                                "SYNC_CORE_FIELDS_HASH_ENABLED), 继续用旧口径"
+                            )
                     data_hashes = dedup_service.batch_calculate_data_hash(
                         valid_rows,
                         deduplication_fields=final_deduplication_fields,
                         header_bindings=getattr(raw_importer, "header_bindings", None),
                         scope_values=hash_scope_values,
                         identity_values=hash_identity_values,
+                        core_fields=effective_core_fields,
                     )
                     logger.info(
                         f"[Ingest] [DSS] data_hash计算完成: {len(data_hashes)}个哈希"

@@ -62,6 +62,11 @@ class FieldMappingTemplateService:
         deduplication_fields: Optional[List[str]] = None,
         header_bindings: Optional[List[Dict[str, Any]]] = None,
         field_parse_rules: Optional[List[Dict[str, Any]]] = None,
+        # [*] 批次 E: 核心字段清单(编辑面)。
+        #     结构: [{"semantic_key": str|null, "raw_name": str|null,
+        #              "required": bool, "in_hash": bool}, ...]
+        #     为空时按 ``deduplication_fields`` 现推一份, 保证清单不为空。
+        core_fields: Optional[List[Dict[str, Any]]] = None,
         save_mode: str = "create",
         base_template_id: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -125,6 +130,44 @@ class FieldMappingTemplateService:
                 version=new_version,
             )
 
+            # [*] 批次 E: 核心字段清单 —— 前端没给就**继承被归档模板的清单**,
+            #     继承优先于现推, 因为:
+            #
+            #     现推会用「规范化后的 deduplication_fields」(物理列名已被换成
+            #     规范语义键) ⇒ 清单的 hash 键名从物理列名变成语义键
+            #     ⇒ **重新保存一次模板, hash 口径就变了**
+            #     ⇒ 已入库的行被当成新数据(离线回放实测 81/488 行受影响)。
+            #
+            #     继承则保留清单里的 ``raw_name``(原始物理列名)
+            #     ⇒ 新旧两个口径的 hash 键名都与「存库口径」一致
+            #     ⇒ 重存不再改口径。
+            resolved_core_fields = list(core_fields or [])
+            if not resolved_core_fields:
+                inherited: List[Dict[str, Any]] = []
+                for existing in existing_templates:
+                    if existing.core_fields:
+                        inherited = list(existing.core_fields)
+                        break
+                if inherited:
+                    from backend.services.core_fields_service import merge_core_fields
+
+                    resolved_core_fields = merge_core_fields(
+                        inherited,
+                        deduplication_fields,
+                        header_bindings=header_bindings,
+                        data_domain=data_domain,
+                        sub_domain=sub_domain,
+                    )
+            if not resolved_core_fields and deduplication_fields:
+                from backend.services.core_fields_service import derive_core_fields
+
+                resolved_core_fields = derive_core_fields(
+                    deduplication_fields=deduplication_fields,
+                    header_bindings=header_bindings,
+                    data_domain=data_domain,
+                    sub_domain=sub_domain,
+                )
+
             # [*] 结束读取阶段可能已经开启的隐式事务(只有读操作),
             #     让下面的 `db.begin()` 能开出一个**干净**的事务。
             #     get_async_db 会在请求结束时再 commit 一次 —— 这里不重复提交业务数据。
@@ -157,6 +200,8 @@ class FieldMappingTemplateService:
                         deduplication_fields=deduplication_fields,
                         header_bindings=header_bindings,
                         field_parse_rules=field_parse_rules,
+                        # [*] 批次 E: 核心字段清单(编辑面; 版本级由投影写入)
+                        core_fields=resolved_core_fields,
                         template_name=resolved_template_name,
                         version=new_version,
                         status="published",

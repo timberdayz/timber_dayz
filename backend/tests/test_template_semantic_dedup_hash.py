@@ -12,7 +12,6 @@ def test_deduplication_hash_resolves_product_id_from_header_binding():
             "semantic_review_status": "confirmed_semantic",
             "aliases": ["商品 ID", "product_id"],
             "required": False,
-            "hash_participates": True,
         },
         {
             "raw_name": "商品名",
@@ -21,7 +20,6 @@ def test_deduplication_hash_resolves_product_id_from_header_binding():
             "semantic_review_status": "confirmed_non_semantic",
             "aliases": [],
             "required": False,
-            "hash_participates": False,
         },
     ]
 
@@ -51,7 +49,6 @@ def test_deduplication_hash_includes_file_scope_values():
             "semantic_review_status": "confirmed_semantic",
             "aliases": ["日期", "metric_date"],
             "required": False,
-            "hash_participates": True,
         }
     ]
 
@@ -92,7 +89,6 @@ def test_deduplication_hash_uses_semantic_key_across_header_aliases():
             "semantic_review_status": "confirmed_semantic",
             "aliases": ["订单号", "order_id"],
             "required": True,
-            "hash_participates": True,
         }
     ]
     second_bindings = [
@@ -103,7 +99,6 @@ def test_deduplication_hash_uses_semantic_key_across_header_aliases():
             "semantic_review_status": "confirmed_semantic",
             "aliases": ["订单编号", "order_id"],
             "required": True,
-            "hash_participates": True,
         }
     ]
 

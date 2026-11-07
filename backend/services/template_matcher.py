@@ -861,6 +861,7 @@ class TemplateMatcher:
         companion_date_from: Any = None,
         companion_date_to: Any = None,
         field_parse_rules: Optional[List[Dict[str, Any]]] = None,
+        core_fields: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         检测表头变化(v4.14.0安全版本,v4.18.2异步支持)
@@ -1003,6 +1004,8 @@ class TemplateMatcher:
                 header_bindings=template.header_bindings or [],
                 current_columns=current_columns,
                 template_columns=template_columns,
+                # [*] 批次 E(E-5): 模板级核心字段清单的 required 一并参与阻断判定。
+                core_fields=core_fields,
             )
             semantic_summary = semantic_contract.to_dict()
             if semantic_contract.has_contract:

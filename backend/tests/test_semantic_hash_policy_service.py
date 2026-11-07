@@ -20,7 +20,12 @@ def test_products_item_status_is_legacy_compatible_weak_hash_option():
     assert option.warning
 
 
-def test_metrics_remain_blocked_hash_options():
+def test_metrics_are_eligible_but_warned_in_hash_options():
+    """[*] 批次 E(E-4 / 规格 D1): 指标类**允许**进 data_hash, 但不推荐且必须带后果提示。
+
+    旧口径是「度量所以不能进 hash」硬拒; 新口径是「能不能进由用户勾选决定」——
+    指标值变化会被当成新行, 所以必须把这个后果明确告诉用户。
+    """
     service = SemanticHashPolicyService()
 
     options = [
@@ -33,8 +38,10 @@ def test_metrics_remain_blocked_hash_options():
         for semantic_key in ["gmv", "sales_amount", "page_views"]
     ]
 
-    assert [option.eligible for option in options] == [False, False, False]
-    assert all(option.blocked_reason for option in options)
+    assert [option.eligible for option in options] == [True, True, True]
+    assert [option.recommended for option in options] == [False, False, False]
+    assert all(option.blocked_reason is None for option in options)
+    assert all(option.warning for option in options)
 
 
 def test_build_options_uses_confirmed_semantic_bindings_only():
@@ -74,5 +81,8 @@ def test_build_options_uses_confirmed_semantic_bindings_only():
     assert by_key["item_status"]["eligible"] is True
     assert by_key["item_status"]["weak_identity"] is True
     assert by_key["item_status"]["legacy_compatible"] is True
-    assert by_key["gmv"]["eligible"] is False
+    assert by_key["gmv"]["eligible"] is True
+    assert by_key["gmv"]["recommended"] is False
+    assert by_key["gmv"]["blocked_reason"] is None
+    assert by_key["gmv"]["warning"]
     assert "Unknown Field" not in {option.get("raw_name") for option in options}

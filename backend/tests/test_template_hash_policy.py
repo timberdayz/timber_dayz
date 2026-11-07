@@ -61,11 +61,17 @@ def test_semantic_registry_contains_hour_identity_and_metric_contract_fields():
     assert end_time_meta["hash_eligible"] is True
     assert end_time_meta["default_hash"] is False
 
+    # [*] 批次 E(E-4 / 规格 D1): 指标类字段**不再禁止**参与 data_hash。
+    #     业务概念是「日期 + 订单数 + 店铺 = 这一行是什么」的复合业务键,
+    #     不是实体身份 ⇒ 「度量所以不能进 hash」这个前提本身不成立。
+    #     能不能进由用户在模板里勾选决定; 但**不默认参与**, 且必须带后果提示。
     for metric_key in ["page_views", "gmv", "live_attributed_gmv"]:
         meta = get_semantic_field_meta(metric_key)
         assert meta["kind"] == "metric"
-        assert meta["hash_eligible"] is False
-        assert is_hash_identity_semantic_key(metric_key) is False
+        assert meta["hash_eligible"] is True
+        assert meta["default_hash"] is False
+        assert is_hash_identity_semantic_key(metric_key) is True
+        assert meta.get("hash_warning")
 
 
 def test_product_name_is_weak_hash_identity():
@@ -260,7 +266,6 @@ def test_hash_policy_rejects_non_semantic_deduplication_field():
                 "source_header": "状态",
                 "semantic_key": None,
                 "semantic_review_status": "confirmed_non_semantic",
-                "hash_participates": False,
             }
         ],
         field_parse_rules=[],
@@ -282,7 +287,6 @@ def test_traffic_daily_requires_metric_date_identity():
                 "source_header": "店铺",
                 "semantic_key": "shop_id",
                 "semantic_review_status": "confirmed_semantic",
-                "hash_participates": True,
             }
         ],
         field_parse_rules=[],
@@ -463,7 +467,15 @@ def test_products_monthly_requires_both_period_boundaries():
     assert result.missing_required_groups[0]["missing_keys"] == ["period_end_date"]
 
 
-def test_metrics_are_invalid_but_products_item_status_is_legacy_hash_identity_field():
+def test_metrics_are_allowed_but_warned_and_products_item_status_is_legacy_hash_identity_field():
+    """[*] 批次 E(E-4 / 规格 D1): 指标类不再**硬性禁止**参与 data_hash。
+
+    业务概念是「日期 + 订单数 + 店铺 = 这一行是什么」的复合业务键, 不是实体身份
+    ⇒ 「度量所以不能进 hash」这个前提本身不成立。
+
+    现在: 能不能进由用户在模板里勾选决定; 但**不默认参与**, 且必须带后果提示
+    (指标值变化会被当成新行, 而不是更新)。
+    """
     service = TemplateHashPolicyService()
 
     result = service.validate(
@@ -518,13 +530,10 @@ def test_metrics_are_invalid_but_products_item_status_is_legacy_hash_identity_fi
         field_parse_rules=[],
     )
 
-    assert result.passed is False
-    assert result.invalid_keys == [
-        "gmv",
-        "live_attributed_gmv",
-        "page_views",
-        "sales_amount",
-    ]
+    # [*] D1: 指标类不再被判为 invalid, 而是「可用 + 带后果提示」。
+    assert result.passed is True
+    assert result.invalid_keys == []
+    assert any("指标类字段参与去重后" in warning for warning in result.warnings)
     assert any("item_status" in warning for warning in result.warnings)
     assert "item_status" in result.effective_components["user_identity_fields"]
 

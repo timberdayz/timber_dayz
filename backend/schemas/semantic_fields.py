@@ -4,8 +4,8 @@
 (``backend.services.semantic_field_registry``)的对外投影。
 
 以前前端在 ``headerBindings.js`` 里**自己抄了一份**标准字段定义
-(360 行), 抄漏了 ``required``、``domain``, ``hash_participates`` 恒为 ``false``,
-而且推断算法与后端各写各的 ⇒ 前端显示的「已自动识别」后端不一定认。
+(360 行), 抄漏了 ``required``、``domain``, 而且推断算法与后端各写各的
+⇒ 前端显示的「已自动识别」后端不一定认。
 
 现在前端从 :class:`SemanticFieldDefinitionsResponse` 取,
 契约与实现一一对应。

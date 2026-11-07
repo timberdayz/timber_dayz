@@ -53,8 +53,8 @@ async def test_backfill_updates_only_published_shopee_orders_daily_and_monthly(t
                 "结算时间",
             ],
             header_bindings=[
-                {"raw_name": "订单编号", "semantic_key": "order_id", "hash_participates": True},
-                {"raw_name": "销售数量", "semantic_key": None, "hash_participates": False},
+                {"raw_name": "订单编号", "semantic_key": "order_id"},
+                {"raw_name": "销售数量", "semantic_key": None},
             ],
             created_at=now,
             updated_at=now,
@@ -94,7 +94,8 @@ async def test_backfill_updates_only_published_shopee_orders_daily_and_monthly(t
     assert result == {"templates_checked": 1, "templates_updated": 1, "bindings_updated": 5}
     bindings = {item["raw_name"]: item for item in published_monthly.header_bindings}
     assert bindings["销售数量"]["semantic_key"] == "sales_volume"
-    assert bindings["销售数量"]["hash_participates"] is False
+    # [*] 批次 E(D2): ``hash_participates`` 已下线, 回填不再写这个投影字段。
+    assert "hash_participates" not in bindings["销售数量"]
     assert bindings["买家支付(RMB)"]["semantic_key"] == "paid_amount"
     assert bindings["利润(RMB)"]["semantic_key"] == "profit"
     assert bindings["预估回款金额"]["semantic_key"] == "estimated_settlement_amount"

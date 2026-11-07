@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, Optional
 from sqlalchemy import and_, event, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.core_fields_service import derive_core_fields
 from backend.services.semantic_field_registry import is_canonical_semantic_key, normalize_semantic_key
 from backend.services.template_matcher import resolve_template_for_file
 from backend.services.template_variant_takeover import (
@@ -231,9 +232,10 @@ def _extract_semantic_key_sets(
         if binding.get("required") and semantic_key not in seen_required:
             seen_required.add(semantic_key)
             required_keys.append(semantic_key)
-        if binding.get("hash_participates") and semantic_key not in seen_hash:
-            seen_hash.add(semantic_key)
-            hash_keys.append(semantic_key)
+        # [*] 批次 E(D2): 不再从绑定读 ``hash_participates`` ——
+        # 「参与去重」由版本级核心字段清单的 ``in_hash`` 表达。
+        # 旧分支补充的键全部来自 ``deduplication_fields`` 里的规范语义键,
+        # 上面的循环已经收齐 ⇒ 删掉不改变结果。
 
     return required_keys, hash_keys
 
@@ -659,6 +661,18 @@ class TemplateFamilyService:
             return False
         if list(version.header_bindings or []) != payload["header_bindings"]:
             return False
+        # [*] 批次 E(E-8): 解析规则**不**参与版本变化判定。
+        #     运行时是「变体优先、版本兜底」⇒ 变体级会随 legacy 行一起更新,
+        #     版本级只当兜底。若把版本级也纳入比较, 多变体场景会出现
+        #     「投影 → 判定变化 → 建版本 → 再投影」的版本号膨胀。
+        # [*] 批次 E: 核心字段清单。
+        #     legacy 行**没存**清单时(= 用户还没在工作台勾过)不比 ——
+        #     版本里的值来自迁移回填, 与「现推」的 required 口径不同,
+        #     直接比会误判成「版本变了」⇒ 每次投影都新建版本。
+        payload_core_fields = payload.get("core_fields")
+        if payload_core_fields is not None:
+            if list(version.core_fields or []) != list(payload_core_fields):
+                return False
         if list(version.legacy_template_ids or []) != payload["legacy_template_ids"]:
             return False
         return True
@@ -720,6 +734,14 @@ class TemplateFamilyService:
             "template_name": newest.template_name,
             "deduplication_fields": list(newest.deduplication_fields or []),
             "header_bindings": list(newest.header_bindings or []),
+            # [*] 批次 E: 核心字段清单(编辑面 → 版本面)。
+            #     legacy 行没存(= 用户还没在工作台勾过)时**保持 None**,
+            #     这样「版本内容是否变化」的判定不会因为
+            #     「迁移回填的 required」与「现推的 required」口径不同而误判
+            #     (误判 ⇒ 每次投影都新建版本 ⇒ 版本号无限增长)。
+            "core_fields": list(newest.core_fields) if newest.core_fields else None,
+            # [*] 批次 E(E-8): 解析规则上移到版本级 —— legacy 行是编辑面。
+            "field_parse_rules": list(newest.field_parse_rules or []),
             "notes": newest.notes,
             "legacy_template_ids": [
                 template.id for template in group if template.id is not None
@@ -824,6 +846,19 @@ class TemplateFamilyService:
             template_name=payload["template_name"],
             deduplication_fields=list(payload["deduplication_fields"]),
             header_bindings=list(payload["header_bindings"]),
+            # [*] 批次 E: 核心字段清单落版本级。
+            #     legacy 行没存清单 ⇒ 按 ``deduplication_fields`` 现推一份
+            #     (保证版本上永远有一份可用的清单, 不出现「有列没值」)。
+            core_fields=list(payload["core_fields"])
+            if payload.get("core_fields") is not None
+            else derive_core_fields(
+                deduplication_fields=list(payload["deduplication_fields"]),
+                header_bindings=list(payload["header_bindings"]),
+                data_domain=family.data_domain or "",
+                sub_domain=family.sub_domain,
+            ),
+            # [*] 批次 E(E-8): 解析规则上移到版本级。
+            field_parse_rules=list(payload.get("field_parse_rules") or []),
             notes=payload["notes"],
             legacy_template_ids=list(payload["legacy_template_ids"]),
             created_by=newest.created_by or "system",
@@ -1137,6 +1172,11 @@ class TemplateFamilyService:
                     "status": version.status,
                     "template_name": version.template_name,
                     "deduplication_fields": list(version.deduplication_fields or []),
+                    # [*] 批次 E: 版本级核心字段清单(一份清单管三件事)
+                    "core_fields": list(version.core_fields or []),
+                    # [*] 批次 E(E-8): 解析规则上移到版本级。
+                    #     变体上的同名列降级为「变体级覆盖」(NULL 时继承版本级)。
+                    "field_parse_rules": list(version.field_parse_rules or []),
                     "required_semantic_keys": required_semantic_keys,
                     "hash_participating_semantic_keys": hash_participating_semantic_keys,
                     "header_bindings": list(version.header_bindings or []),
@@ -1345,7 +1385,16 @@ class TemplateResolver:
         )
         semantic_bindings = list(active_version.get("header_bindings") or [])
         deduplication_fields = list(active_version.get("deduplication_fields") or [])
-        field_parse_rules = list(active_version.get("field_parse_rules") or [])
+        # [*] 批次 E(E-8): 解析规则的取值顺序 = **变体优先, 版本兜底**。
+        #     变体上的同名列降级为「变体级覆盖」; 版本级才是业务契约的主体
+        #     (审一次全变体生效)。
+        field_parse_rules = list((selected_variant or {}).get("field_parse_rules") or [])
+        if not field_parse_rules:
+            field_parse_rules = list(active_version.get("field_parse_rules") or [])
+        # [*] 批次 E: 版本级核心字段清单。
+        #     没有清单的版本(迁移前的老版本 / 变体接管的 legacy 模板)
+        #     ⇒ 用 ``deduplication_fields`` 现推一份, 保证行为不退化。
+        core_fields = list(active_version.get("core_fields") or [])
         if selected_variant and selected_variant.get("source_legacy_template_id"):
             legacy_template = await self.db.get(
                 FieldMappingTemplate,
@@ -1354,11 +1403,26 @@ class TemplateResolver:
             if legacy_template:
                 semantic_bindings = list(legacy_template.header_bindings or [])
                 deduplication_fields = list(legacy_template.deduplication_fields or [])
-                field_parse_rules = list(legacy_template.field_parse_rules or [])
+                # [*] legacy 模板行没有 core_fields 列(它只是版本级清单的投影源),
+                #     下面按 dedup fields 现推一份。
+                core_fields = []
+                # [*] E-8: legacy 模板的规则只在**有值**时覆盖 ——
+                #     否则会把版本级的规则清空(legacy 行可能压根没写规则)。
+                legacy_rules = list(legacy_template.field_parse_rules or [])
+                if legacy_rules:
+                    field_parse_rules = legacy_rules
         required_semantic_keys, hash_participating_semantic_keys = _extract_semantic_key_sets(
             deduplication_fields,
             semantic_bindings,
         )
+        if not core_fields and deduplication_fields:
+            core_fields = derive_core_fields(
+                deduplication_fields=deduplication_fields,
+                header_bindings=semantic_bindings,
+                data_domain=data_domain,
+                sub_domain=sub_domain,
+                required_semantic_keys=required_semantic_keys,
+            )
         return {
             "matched": selected_variant is not None,
             "governance_status": governance_status,
@@ -1368,6 +1432,7 @@ class TemplateResolver:
             "variant": selected_variant,
             "semantic_bindings": semantic_bindings,
             "deduplication_fields": deduplication_fields,
+            "core_fields": core_fields,
             "field_parse_rules": field_parse_rules,
             "required_semantic_keys": required_semantic_keys,
             "hash_participating_semantic_keys": hash_participating_semantic_keys,

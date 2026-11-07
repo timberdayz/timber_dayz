@@ -54,21 +54,18 @@ def test_confirmed_non_semantic_binding_is_not_returned_for_manual_review():
             "display_name": "商品名",
             "semantic_key": None,
             "semantic_review_status": "confirmed_non_semantic",
-            "hash_participates": False,
         },
         {
             "raw_name": "商品 ID",
             "display_name": "商品 ID",
             "semantic_key": "product_id",
             "semantic_review_status": "confirmed_semantic",
-            "hash_participates": True,
         },
         {
             "raw_name": "发品状态",
             "display_name": "发品状态",
             "semantic_key": None,
             "semantic_review_status": "pending",
-            "hash_participates": True,
             "hash_eligible": True,
         },
     ]
@@ -87,7 +84,6 @@ def test_manual_review_filter_excludes_ordinary_pending_raw_fields():
             "display_name": "ordinary_raw_column",
             "semantic_key": None,
             "semantic_review_status": "pending",
-            "hash_participates": False,
             "required": False,
             "hash_eligible": False,
         },
@@ -96,7 +92,6 @@ def test_manual_review_filter_excludes_ordinary_pending_raw_fields():
             "display_name": "identity_candidate",
             "semantic_key": None,
             "semantic_review_status": "pending",
-            "hash_participates": True,
             "required": False,
             "hash_eligible": True,
         },
@@ -253,7 +248,6 @@ async def test_template_update_context_returns_lightweight_summary_for_with_samp
                     "semantic_role": None,
                     "aliases": ["order_id"],
                     "required": True,
-                    "hash_participates": True,
                     "position": 0,
                     "sample_type": "string",
                     "confidence": 0.9,
@@ -265,7 +259,6 @@ async def test_template_update_context_returns_lightweight_summary_for_with_samp
                     "semantic_role": None,
                     "aliases": [],
                     "required": False,
-                    "hash_participates": False,
                     "position": 3,
                     "sample_type": "number",
                     "confidence": 0.7,
@@ -555,8 +548,11 @@ async def test_template_update_context_returns_backend_hash_options_for_item_sta
     assert by_key["item_status"]["eligible"] is True
     assert by_key["item_status"]["weak_identity"] is True
     assert by_key["item_status"]["legacy_compatible"] is True
-    assert by_key["gmv"]["eligible"] is False
-    assert by_key["gmv"]["blocked_reason"]
+    # [*] 批次 E(E-4 / 规格 D1): 指标类不再**硬性禁止**参与 data_hash ——
+    #     能不能进由用户勾选决定; 但不推荐, 且必须带后果提示。
+    assert by_key["gmv"]["eligible"] is True
+    assert by_key["gmv"]["recommended"] is False
+    assert by_key["gmv"]["warning"]
 
 
 @pytest.mark.asyncio
@@ -758,7 +754,6 @@ async def test_template_update_bindings_returns_full_bindings_payload(
                     "semantic_role": None,
                     "aliases": ["order_id"],
                     "required": True,
-                    "hash_participates": True,
                     "position": 0,
                     "sample_type": "string",
                     "confidence": 0.9,
@@ -770,7 +765,6 @@ async def test_template_update_bindings_returns_full_bindings_payload(
                     "semantic_role": "metric_date",
                     "aliases": ["日期", "统计日期"],
                     "required": False,
-                    "hash_participates": True,
                     "position": 1,
                     "sample_type": "date",
                     "confidence": 0.98,
@@ -1180,7 +1174,8 @@ async def test_save_mapping_template_persists_header_bindings_and_update_context
         assert persisted_header_bindings[0]["raw_name"] == "Unnamed: 0"
         assert persisted_header_bindings[0]["semantic_key"] == "metric_date"
         assert persisted_header_bindings[0]["required"] is False
-        assert persisted_header_bindings[0]["hash_participates"] is True
+        # [*] 批次 E(D2): ``hash_participates`` 已下线, 绑定上不再有这个投影字段。
+        assert "hash_participates" not in persisted_header_bindings[0]
         assert persisted_header_bindings[1]["raw_name"] == "GMV"
 
     context_response = await client.get(
@@ -1193,7 +1188,7 @@ async def test_save_mapping_template_persists_header_bindings_and_update_context
     assert context_payload["success"] is True
     returned_bindings = context_payload["data"]["template"]["header_bindings"]
     assert returned_bindings[0]["semantic_key"] == "metric_date"
-    assert returned_bindings[0]["hash_participates"] is True
+    assert "hash_participates" not in returned_bindings[0]
     assert context_payload["data"]["template"]["hash_participating_semantic_keys"] == ["metric_date"]
 
 
@@ -1928,14 +1923,12 @@ async def test_save_mapping_template_syncs_hash_participation_from_selected_sema
                     "display_name": "订单号",
                     "semantic_key": "order_id",
                     "semantic_review_status": "confirmed_semantic",
-                    "hash_participates": False,
                 },
                 {
                     "raw_name": "日期",
                     "display_name": "日期",
                     "semantic_key": "metric_date",
                     "semantic_review_status": "confirmed_semantic",
-                    "hash_participates": True,
                 },
             ],
             "created_by": "test",
@@ -1949,8 +1942,11 @@ async def test_save_mapping_template_syncs_hash_participation_from_selected_sema
 
     assert template.deduplication_fields == ["order_id"]
     bindings_by_key = {binding["semantic_key"]: binding for binding in template.header_bindings}
-    assert bindings_by_key["order_id"]["hash_participates"] is True
-    assert bindings_by_key["metric_date"]["hash_participates"] is False
+    assert bindings_by_key["order_id"]["semantic_key"] == "order_id"
+    # [*] 批次 E(D2): 「参与去重」不再声明在绑定上,
+    # 由版本级核心字段清单的 ``in_hash`` 表达。
+    assert "hash_participates" not in bindings_by_key["order_id"]
+    assert "hash_participates" not in bindings_by_key["metric_date"]
 
 
 @pytest.mark.asyncio
@@ -1974,14 +1970,12 @@ async def test_save_mapping_template_rejects_confirmed_non_semantic_dedup_field(
                     "display_name": "商品名",
                     "semantic_key": None,
                     "semantic_review_status": "confirmed_non_semantic",
-                    "hash_participates": False,
                 },
                 {
                     "raw_name": "商品 ID",
                     "display_name": "商品 ID",
                     "semantic_key": "product_id",
                     "semantic_review_status": "confirmed_semantic",
-                    "hash_participates": True,
                 },
             ],
             "created_by": "test",
@@ -2165,8 +2159,11 @@ async def test_hash_policy_preview_returns_dynamic_hash_options_for_edited_bindi
     assert by_key["item_status"]["eligible"] is True
     assert by_key["item_status"]["weak_identity"] is True
     assert by_key["item_status"]["legacy_compatible"] is True
-    assert by_key["gmv"]["eligible"] is False
-    assert by_key["gmv"]["blocked_reason"]
+    # [*] 批次 E(E-4 / 规格 D1): 指标类不再**硬性禁止**参与 data_hash ——
+    #     能不能进由用户勾选决定; 但不推荐, 且必须带后果提示。
+    assert by_key["gmv"]["eligible"] is True
+    assert by_key["gmv"]["recommended"] is False
+    assert by_key["gmv"]["warning"]
 
 
 @pytest.mark.asyncio

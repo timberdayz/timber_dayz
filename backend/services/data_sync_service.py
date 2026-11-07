@@ -1158,6 +1158,8 @@ class DataSyncService:
             resolved_field_parse_rules = list(
                 (resolve_result or {}).get("field_parse_rules") or []
             )
+            # [*] 批次 E: 版本级核心字段清单(hash 口径切换用)。
+            resolved_core_fields = list((resolve_result or {}).get("core_fields") or [])
             try:
                 preview_resolve_result = await self.template_resolver.resolve(
                     platform=catalog_file.platform_code,
@@ -1201,6 +1203,9 @@ class DataSyncService:
                 resolved_field_parse_rules = list(
                     (resolve_result or {}).get("field_parse_rules") or []
                 )
+                resolved_core_fields = list(
+                    (resolve_result or {}).get("core_fields") or []
+                )
 
             if (
                 template
@@ -1216,6 +1221,9 @@ class DataSyncService:
                     template_id=template.id,
                     current_columns=file_header_columns,
                     account=(getattr(catalog_file, "account", None) or None),
+                    # [*] 批次 E(E-5): 模板级核心字段清单 ⇒ 清单里 required 的字段
+                    #     缺失时也阻断(规格 §3.1)。
+                    core_fields=resolved_core_fields,
                 )
                 try:
                     readiness_status = (
@@ -1457,6 +1465,8 @@ class DataSyncService:
                     sub_domain=sub_domain_value,  # [*] v4.16.0修复:优先从catalog_file获取
                     template_id=getattr(template, "id", None),
                     field_parse_rules=resolved_field_parse_rules,
+                    # [*] 批次 E: 核心字段清单(口径开关在 ingest 内部判断)
+                    core_fields=resolved_core_fields,
                 )
 
                 # 更新状态

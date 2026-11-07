@@ -15,7 +15,6 @@ def test_resolve_semantic_value_supports_order_number_aliases():
             "semantic_key": "order_id",
             "aliases": ["订单号", "订单编号"],
             "required": True,
-            "hash_participates": True,
         }
     ]
 
@@ -34,7 +33,6 @@ def test_resolve_semantic_value_supports_normalized_currency_suffix_headers():
             "semantic_key": "platform_sku",
             "aliases": ["平台SKU", "platform_sku"],
             "required": False,
-            "hash_participates": True,
         }
     ]
 

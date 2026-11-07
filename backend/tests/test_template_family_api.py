@@ -312,7 +312,6 @@ async def test_template_resolve_uses_selected_variant_bindings_not_active_versio
                             "display_name": "slash_date",
                             "semantic_key": "metric_date",
                             "semantic_review_status": "confirmed_semantic",
-                            "hash_participates": True,
                         }
                     ],
                     field_parse_rules=[
@@ -345,7 +344,6 @@ async def test_template_resolve_uses_selected_variant_bindings_not_active_versio
                             "display_name": "dash_date",
                             "semantic_key": "order_id",
                             "semantic_review_status": "confirmed_semantic",
-                            "hash_participates": True,
                         }
                     ],
                     field_parse_rules=[

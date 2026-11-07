@@ -346,6 +346,27 @@ SEMANTIC_FIELD_ALIASES = {
     for key, definition in SEMANTIC_FIELD_DEFINITIONS.items()
 }
 
+#: [*] 批次 E(E-4 / 规格 D1): 指标类字段参与去重的后果提示。
+METRIC_HASH_WARNING = (
+    "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。"
+    "确认「这一行的身份就包含这个指标」再勾选。"
+)
+
+# [*] 批次 E(E-4 / 规格 D1): 指标类字段**不再禁止**参与 data_hash。
+#
+# 以前这里对 ``kind == "metric"`` 硬性拒绝, 理由是「度量不是行身份」。
+# 那与业务概念直接冲突: 业务上「日期 + 订单数 + 店铺 = 这一行是什么」
+# 是**复合业务键**, 不是实体身份。
+#
+# 现在统一放开:
+#   * ``hash_eligible`` —— 允许(能不能用由用户在模板里勾选决定);
+#   * ``default_hash`` —— 仍然是 False(不默认参与, 保持旧行为);
+#   * ``hash_warning`` —— 带上后果提示, 让用户知道「指标变了会被当成新行」。
+for _metric_key, _metric_meta in SEMANTIC_FIELD_DEFINITIONS.items():
+    if _metric_meta.get("kind") == "metric":
+        _metric_meta["hash_eligible"] = True
+        _metric_meta.setdefault("hash_warning", METRIC_HASH_WARNING)
+
 SEMANTIC_FIELD_META = {
     key: {meta_key: meta_value for meta_key, meta_value in definition.items() if meta_key != "aliases"}
     for key, definition in SEMANTIC_FIELD_DEFINITIONS.items()
@@ -932,13 +953,23 @@ def get_semantic_aliases(semantic_key: Optional[str]) -> list[str]:
 
 
 def get_semantic_requirements(semantic_key: Optional[str]) -> dict[str, Any]:
+    """语义键的要求(required / hash 参与资格)。
+
+    [*] 批次 E(E-3 / 规格 D2): **不再返回** ``hash_participates``。
+
+    以前这个字段挂在**绑定**上, 但它只是「模板级 ``deduplication_fields``」
+    的派生投影 —— 同一事实两处真相, 而且**声明了但没接线**
+    (真正喂 ``calculate_data_hash`` 的是模板级字段表)。
+
+    现在「参与去重」由**版本级核心字段清单**的 ``in_hash`` 表达
+    (:mod:`backend.services.core_fields_service`), 绑定级不再重复声明。
+    """
     normalized = normalize_semantic_key(semantic_key)
     if not normalized:
-        return {"required": False, "hash_participates": False}
+        return {"required": False}
     meta = SEMANTIC_FIELD_META.get(normalized, {})
     return {
         "required": bool(meta.get("required", False)),
-        "hash_participates": bool(meta.get("default_hash", False)),
         "hash_eligible": bool(meta.get("hash_eligible", False)),
         "semantic_kind": str(meta.get("kind", "")),
         "system_scope": bool(meta.get("system_scope", False)),
