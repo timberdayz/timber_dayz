@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Optional
+import json
+from typing import List, Optional
 
 from types import SimpleNamespace
 
@@ -13,7 +14,11 @@ from backend.schemas.inventory_overview import (
     InventoryOverviewPlatformBreakdownResponse,
     InventoryOverviewProductItemResponse,
     InventoryOverviewProductListResponse,
+    InventoryOverviewRestockTierResponse,
     InventoryOverviewSummaryResponse,
+)
+from backend.services.inventory.inventory_restock_service import (
+    normalize_policy_tier_buckets,
 )
 from backend.services.inventory.reconciliation_service import InventoryReconciliationService
 from modules.core.db import FactProductMetric
@@ -199,7 +204,8 @@ class InventoryOverviewService:
                         SELECT
                             COALESCE(deep_stagnant_sku_count, 0) AS deep_stagnant_sku_count,
                             COALESCE(mid_stagnant_sku_count, 0) AS mid_stagnant_sku_count,
-                            COALESCE(active_sku_count, 0) AS active_sku_count
+                            COALESCE(active_sku_count, 0) AS active_sku_count,
+                            restock_tiers
                         FROM api.inventory_backlog_summary_module
                         LIMIT 1
                         """
@@ -208,6 +214,26 @@ class InventoryOverviewService:
             ).mappings().first()
         except SQLAlchemyError:
             risk_summary_row = None
+
+        # 业务定价档位分组：门槛来自 finance.sku_pricing_policies，
+        # 与看板汇总卡、商品中心定价档**同一套**。
+        # 对不上唯一实现 ⇒ 抛错（不静默猜一个档位）。
+        restock_tiers: List[InventoryOverviewRestockTierResponse] = []
+        if risk_summary_row:
+            policy_tiers = risk_summary_row.get("restock_tiers") or []
+            if isinstance(policy_tiers, str):
+                policy_tiers = json.loads(policy_tiers)
+            for bucket in normalize_policy_tier_buckets(policy_tiers):
+                restock_tiers.append(
+                    InventoryOverviewRestockTierResponse(
+                        tier=bucket["tier"],
+                        label=bucket["label"],
+                        threshold_days=bucket["threshold_days"],
+                        value=float(bucket["value"]),
+                        row_count=int(bucket["row_count"]),
+                        sku_count=int(bucket["sku_count"]),
+                    )
+                )
 
         return InventoryOverviewSummaryResponse(
             total_products=int(summary_row["total_products"] or 0),
@@ -218,6 +244,7 @@ class InventoryOverviewService:
             deep_stagnant_sku_count=int(risk_summary_row.get("deep_stagnant_sku_count") or 0) if risk_summary_row else 0,
             mid_stagnant_sku_count=int(risk_summary_row.get("mid_stagnant_sku_count") or 0) if risk_summary_row else 0,
             active_sku_count=int(risk_summary_row.get("active_sku_count") or 0) if risk_summary_row else 0,
+            restock_tiers=restock_tiers,
             platform_breakdown=breakdown,
         )
 

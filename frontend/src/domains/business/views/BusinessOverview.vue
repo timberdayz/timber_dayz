@@ -986,6 +986,9 @@
         </template>
 
         <!-- 库存汇总 -->
+        <!-- 2026-11-29：分档改成**业务定价档位**（0/60/90/120），与商品中心定价档、
+             行级滞销状态、库存概览页完全一致；旧的 30/90/180 自造分档不再展示
+             （30~90 天整段无档 ⇒ 那段货值在卡上看不见）。 -->
         <div class="inventory-summary" v-loading="loadingInventory">
           <el-row :gutter="20">
             <el-col :span="6">
@@ -994,42 +997,29 @@
                 <div class="summary-value">
                   {{ formatCurrency(inventorySummary.total_value) }}
                 </div>
-              </div>
-            </el-col>
-            <el-col :span="6">
-              <div class="summary-item">
-                <div class="summary-label">重度积压（压180天以上）</div>
-                <div class="summary-value danger">
-                  {{ formatCurrency(inventorySummary.deep_stagnant_value) }}
-                </div>
                 <div class="summary-ratio">
-                  {{ inventorySummary.deep_stagnant_ratio }}%
+                  活跃 {{ formatCurrency(inventoryTiers[0]?.value || 0) }}
+                  （{{ inventoryTiers[0]?.ratio || 0 }}%）
                 </div>
               </div>
             </el-col>
-            <el-col :span="6">
+            <el-col :span="6" v-for="tier in inventoryRiskTiers" :key="tier.tier">
               <div class="summary-item">
-                <div class="summary-label">中度积压（压90-180天）</div>
-                <div class="summary-value warning">
-                  {{ formatCurrency(inventorySummary.mid_stagnant_value) }}
+                <div class="summary-label">{{ tier.label }}</div>
+                <div class="summary-value" :class="tier.valueClass">
+                  {{ formatCurrency(tier.value) }}
                 </div>
-                <div class="summary-ratio">
-                  {{ inventorySummary.mid_stagnant_ratio }}%
-                </div>
-              </div>
-            </el-col>
-            <el-col :span="6">
-              <div class="summary-item">
-                <div class="summary-label">滞销占比</div>
-                <div class="summary-value danger">
-                  {{ inventorySummary.backlog_ratio }}%
-                </div>
-                <div class="summary-ratio">
-                  滞销货值 {{ formatCurrency(inventorySummary.backlog_value) }}
-                </div>
+                <div class="summary-ratio">{{ tier.ratio }}%</div>
               </div>
             </el-col>
           </el-row>
+          <div class="summary-footnote">
+            共 {{ inventorySummary.total_row_count }} 行 ·
+            {{ inventorySummary.total_sku_count }} 个 SKU
+            <span v-if="inventorySummary.unknown_restock_row_count > 0">
+              （其中 {{ inventorySummary.unknown_restock_row_count }} 行库龄不可算，未计入任何档位）
+            </span>
+          </div>
         </div>
 
         <!-- 高积压风险产品Top20 -->
@@ -2230,9 +2220,19 @@ const sortedShopRacingData = computed(() => {
 // 库存滞销
 // 2026-10-24：口径换成「距上次进货时长」——DOS 的分母在增量模式下不新鲜，
 // 只作参考值展示；入选 / 汇总卡 / 排序全部用距上次进货时长。
+// 2026-11-29：汇总卡的分档改成**业务定价档位**（0/60/90/120）——
+// 与商品中心定价档、行级滞销状态、库存概览页**同一套**。
 const inventorySummary = ref({
   total_value: 0,
   total_quantity: 0,
+  // **全量**行数 / SKU 数：与 total_value 同口径
+  total_row_count: 0,
+  total_sku_count: 0,
+  unknown_restock_row_count: 0,
+  // 业务定价档位分组（互斥 4 档，后端给的是唯一权威口径）
+  restock_tiers: [],
+  // 旧标准指标（≥180 天 / 90~180 天）：口径**不变**，看板不再展示，
+  // 但仍随接口返回，供其它消费方与指标词典使用。
   deep_stagnant_value: 0,
   deep_stagnant_ratio: 0,
   mid_stagnant_value: 0,
@@ -2241,9 +2241,37 @@ const inventorySummary = ref({
   backlog_ratio: 0,
   deep_stagnant_row_count: 0,
   mid_stagnant_row_count: 0,
-  active_row_count: 0,
-  unknown_restock_row_count: 0
+  active_row_count: 0
 })
+
+// 展示层的兜底档位（后端没给 restock_tiers 时的空壳）。
+// 门槛与后端唯一实现一致：inventory_restock_service.RESTOCK_TIER_THRESHOLDS。
+const INVENTORY_TIER_FALLBACK = [
+  { tier: 'active', label: '活跃', threshold_days: 0, valueClass: '' },
+  { tier: 'light', label: '压60-90天', threshold_days: 60, valueClass: 'warning' },
+  { tier: 'mid', label: '压90-120天', threshold_days: 90, valueClass: 'warning' },
+  { tier: 'deep', label: '压120天以上', threshold_days: 120, valueClass: 'danger' }
+]
+
+const inventoryTiers = computed(() => {
+  const source = Array.isArray(inventorySummary.value.restock_tiers)
+    ? inventorySummary.value.restock_tiers
+    : []
+  const byTier = new Map(source.map((item) => [item.tier, item]))
+  return INVENTORY_TIER_FALLBACK.map((base) => {
+    const hit = byTier.get(base.tier) || {}
+    return {
+      ...base,
+      value: Number(hit.value || 0),
+      ratio: Number(hit.ratio || 0),
+      row_count: Number(hit.row_count || 0),
+      sku_count: Number(hit.sku_count || 0)
+    }
+  })
+})
+
+// 卡片上展示的三个风险档（压60-90 / 压90-120 / 压120以上）
+const inventoryRiskTiers = computed(() => inventoryTiers.value.slice(1))
 const inventoryBacklogProducts = ref([])
 
 // 流量排名数据（默认跟随全局：月）
@@ -2988,7 +3016,11 @@ const loadInventoryBacklog = async () => {
 
     // 响应拦截器已处理success字段，直接使用data
     if (response) {
-      inventorySummary.value = response.summary || inventorySummary.value
+      // 合并而不是整体替换：老后端没有 restock_tiers 时也要保留兜底结构
+      inventorySummary.value = {
+        ...inventorySummary.value,
+        ...(response.summary || {})
+      }
       inventoryBacklogProducts.value = response.top_products || []
     }
   } catch (error) {
@@ -3865,6 +3897,13 @@ watch(
 }
 
 .summary-ratio {
+  font-size: 12px;
+  color: #909399;
+}
+
+/* 汇总卡下方的口径说明：行数 / SKU 数 / 库龄不可算行数 */
+.summary-footnote {
+  margin-top: 10px;
   font-size: 12px;
   color: #909399;
 }

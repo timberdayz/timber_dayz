@@ -9,7 +9,12 @@ from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 
 from backend.models.database import AsyncSessionLocal, apply_statement_timeout
 from backend.services.inventory.inventory_dos_service import compute_dos
-from backend.services.inventory.inventory_restock_service import classify_restock_tier
+from backend.services.inventory.inventory_restock_service import (
+    DEEP_STAGNANT_MIN_DAYS,
+    MID_STAGNANT_MIN_DAYS,
+    build_restock_tier_buckets,
+    classify_restock_tier,
+)
 from backend.services.labor_cost_projection_service import (
     LABOR_COST_CALCULATION_VERSION,
 )
@@ -759,31 +764,64 @@ def _normalize_inventory_backlog_sold_units_30d(row: dict[str, Any]) -> int | No
 
 
 def summarize_inventory_backlog_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """滞销汇总（四张卡口径）：总库存价值 / 重度积压 / 中度积压 / 滞销占比。
+    """滞销汇总：总库存价值 + **业务定价档位**分组（0/60/90/120，SKU 级）。
 
-    2026-10-24：口径从「周转天数分档」换成「距上次进货时长分档」——
-    DOS 的分母（窗口销量）在增量模式下只会刷新 13.6% 的 SKU，不能当判定依据。
+    2026-11-29：口径从「看板自造的 <30 / 90~180 / >=180」改成
+    **业务定价档位**（``finance.sku_pricing_policies``：0/60/90/120）——
+    与商品中心定价档**同一套**，30~90 天不再无档。
+
+    为什么
+    ------
+    旧口径把 30~90 天整段**漏掉**（无档）：业务上 60 天起就要打折（滞销），
+    看板却显示「活跃」；而且行数 / SKU 数只覆盖 <30 的行，
+    与「货值是全量」自相矛盾。
+
+    分组实现
+    --------
+    ``build_restock_tier_buckets``（``inventory_restock_service``，**唯一实现**）——
+    SKU 级库龄取各仓最长，与商品中心定价档完全一致；
+    SQL 视图那份分组由守护测试逐档锁定一致。
+
+    旧标准指标（``deep_stagnant_value`` ≥180 天等）**保留原义**：
+    它们是「深度积压」这一**独立指标**（见指标词典），不是档位分组。
     """
-    total_value = sum(
-        _to_optional_float(row.get("inventory_value")) or 0.0 for row in rows
-    )
+    tier_summary = build_restock_tier_buckets(rows)
+    total_value = float(tier_summary["total_value"])
+
     deep_value = sum(
         (_to_optional_float(row.get("inventory_value")) or 0.0)
         for row in rows
-        if (_to_optional_float(row.get("days_since_restock")) or 0.0) >= 180
+        if (_to_optional_float(row.get("days_since_restock")) or 0.0)
+        >= DEEP_STAGNANT_MIN_DAYS
     )
     mid_value = sum(
         (_to_optional_float(row.get("inventory_value")) or 0.0)
         for row in rows
-        if 90 <= (_to_optional_float(row.get("days_since_restock")) or 0.0) < 180
+        if MID_STAGNANT_MIN_DAYS
+        <= (_to_optional_float(row.get("days_since_restock")) or 0.0)
+        < DEEP_STAGNANT_MIN_DAYS
     )
     backlog_value = deep_value + mid_value
 
+    buckets: list[dict[str, Any]] = []
+    for bucket in tier_summary["buckets"]:
+        item = dict(bucket)
+        item["ratio"] = (
+            round(float(item["value"]) * 100.0 / total_value, 2) if total_value else 0
+        )
+        buckets.append(item)
+
     return {
         "total_value": round(total_value, 2),
-        "total_quantity": int(
-            sum(_to_optional_float(row.get("available_stock")) or 0.0 for row in rows)
-        ),
+        "total_quantity": int(tier_summary["total_quantity"]),
+        # **全量**行数 / SKU 数：与 total_value 同口径
+        "total_row_count": int(tier_summary["total_row_count"]),
+        "total_sku_count": int(tier_summary["total_sku_count"]),
+        # 距上次进货时长取不到的行：单独暴露，不静默当成「活跃」
+        "unknown_restock_row_count": int(tier_summary["unknown_row_count"]),
+        # 业务定价档位分组（4 档互斥，货值与 SKU 数都能加起来）
+        "restock_tiers": buckets,
+        # 旧标准指标（口径不变）
         "deep_stagnant_value": round(deep_value, 2),
         "deep_stagnant_ratio": (
             round(deep_value * 100.0 / total_value, 2) if total_value else 0
@@ -795,14 +833,6 @@ def summarize_inventory_backlog_rows(rows: list[dict[str, Any]]) -> dict[str, An
         "backlog_value": round(backlog_value, 2),
         "backlog_ratio": (
             round(backlog_value * 100.0 / total_value, 2) if total_value else 0
-        ),
-        "active_row_count": sum(
-            1
-            for row in rows
-            if (_to_optional_float(row.get("days_since_restock")) or 0.0) < 30
-        ),
-        "unknown_restock_row_count": sum(
-            1 for row in rows if row.get("days_since_restock") is None
         ),
     }
 
@@ -1025,78 +1055,43 @@ class PostgresqlDashboardService:
         period_start: date_cls | None = None,
         period_end: date_cls | None = None,
     ) -> dict[str, Any]:
+        """滞销汇总：**取行 → Python 按业务定价档位分组**。
+
+        为什么改成「取行」
+        ------------------
+        旧实现有**两条 SQL 路径**（带期间走一段 CASE、不带期间读视图），
+        两份 CASE 各写一遍阈值 ⇒ 迟早漂移；而且阈值写死在 SQL 里，
+        与商品中心的档位表对不上。
+
+        现在两条路径**共用同一个 Python 汇总**（唯一实现
+        ``build_restock_tier_buckets``）⇒ 带不带期间、SQL 视图还是 Python，
+        口径都一模一样。
+        """
+        where_clauses: list[str] = []
+        params: dict[str, Any] = {}
         if period_start is not None and period_end is not None:
-            rows = await self._fetch_rows(
-                """
-                SELECT
-                    SUM(inventory_value) AS total_value,
-                    SUM(available_stock) AS total_quantity,
-                    SUM(CASE WHEN days_since_restock >= 180 THEN inventory_value ELSE 0 END) AS deep_stagnant_value,
-                    SUM(
-                        CASE
-                            WHEN days_since_restock >= 90 AND days_since_restock < 180 THEN inventory_value
-                            ELSE 0
-                        END
-                    ) AS mid_stagnant_value,
-                    COUNT(*) FILTER (WHERE days_since_restock >= 180) AS deep_stagnant_row_count,
-                    COUNT(*) FILTER (WHERE days_since_restock >= 90 AND days_since_restock < 180) AS mid_stagnant_row_count,
-                    COUNT(*) FILTER (WHERE days_since_restock < 30) AS active_row_count,
-                    COUNT(*) FILTER (WHERE days_since_restock IS NULL) AS unknown_restock_row_count
-                FROM api.business_overview_inventory_backlog_module
-                WHERE snapshot_date >= :period_start
-                  AND snapshot_date <= :period_end
-                """,
-                {"period_start": period_start, "period_end": period_end},
-            )
-        else:
-            rows = await self._fetch_rows(
-                """
-                SELECT
-                    total_value,
-                    total_quantity,
-                    deep_stagnant_value,
-                    mid_stagnant_value,
-                    deep_stagnant_row_count,
-                    mid_stagnant_row_count,
-                    active_row_count,
-                    unknown_restock_row_count
-                FROM api.inventory_backlog_summary_module
-                """,
-                {},
-            )
-        row = rows[0] if rows else {}
-        total_value = _to_optional_float(row.get("total_value")) or 0.0
-        deep_value = _to_optional_float(row.get("deep_stagnant_value")) or 0.0
-        mid_value = _to_optional_float(row.get("mid_stagnant_value")) or 0.0
-        backlog_value = deep_value + mid_value
-        return {
-            "total_value": round(total_value, 2),
-            "total_quantity": int(_to_optional_float(row.get("total_quantity")) or 0.0),
-            "deep_stagnant_value": round(deep_value, 2),
-            "deep_stagnant_ratio": (
-                round(deep_value * 100.0 / total_value, 2) if total_value else 0
+            where_clauses.append("snapshot_date >= :period_start")
+            where_clauses.append("snapshot_date <= :period_end")
+            params = {"period_start": period_start, "period_end": period_end}
+
+        rows = await self._fetch_rows(
+            """
+            SELECT
+                platform_code,
+                product_sku,
+                available_stock,
+                inventory_value,
+                days_since_restock
+            FROM api.business_overview_inventory_backlog_module
+            {where_clause}
+            """.format(
+                where_clause=("WHERE " + " AND ".join(where_clauses))
+                if where_clauses
+                else ""
             ),
-            "mid_stagnant_value": round(mid_value, 2),
-            "mid_stagnant_ratio": (
-                round(mid_value * 100.0 / total_value, 2) if total_value else 0
-            ),
-            "backlog_value": round(backlog_value, 2),
-            "backlog_ratio": (
-                round(backlog_value * 100.0 / total_value, 2) if total_value else 0
-            ),
-            "deep_stagnant_row_count": int(
-                _to_optional_float(row.get("deep_stagnant_row_count")) or 0.0
-            ),
-            "mid_stagnant_row_count": int(
-                _to_optional_float(row.get("mid_stagnant_row_count")) or 0.0
-            ),
-            "active_row_count": int(
-                _to_optional_float(row.get("active_row_count")) or 0.0
-            ),
-            "unknown_restock_row_count": int(
-                _to_optional_float(row.get("unknown_restock_row_count")) or 0.0
-            ),
-        }
+            params,
+        )
+        return summarize_inventory_backlog_rows(rows)
 
     async def _load_ranked_inventory_backlog_module_rows(
         self,

@@ -17,15 +17,12 @@
       </el-col>
     </el-row>
 
+    <!-- 2026-11-29：库龄分档改成**业务定价档位**（0/60/90/120），
+         与看板汇总卡、商品中心定价档同一套；旧的 30/90/180 自造分档不再展示
+         （30~90 天整段无档 ⇒ 那段 SKU 在这里看不见）。 -->
     <el-row :gutter="20" class="stats-row">
-      <el-col :span="8">
-        <el-card><el-statistic title="重度积压SKU" :value="stats.deep_stagnant_sku_count" /></el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card><el-statistic title="中度积压SKU" :value="stats.mid_stagnant_sku_count" /></el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card><el-statistic title="活跃SKU" :value="stats.active_sku_count" /></el-card>
+      <el-col :span="6" v-for="tier in restockTiers" :key="tier.tier">
+        <el-card><el-statistic :title="`${tier.label}SKU`" :value="tier.sku_count" /></el-card>
       </el-col>
     </el-row>
 
@@ -119,7 +116,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import inventoryOverviewApi from '@/api/inventoryOverview'
 import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
@@ -151,10 +148,34 @@ const stats = reactive({
   total_value: 0,
   low_stock_count: 0,
   out_of_stock_count: 0,
+  // 旧标准指标（≥180 天 / 90~180 天 / <30 天）：口径不变，页面不再展示
   deep_stagnant_sku_count: 0,
   mid_stagnant_sku_count: 0,
   active_sku_count: 0,
+  // 业务定价档位分组（互斥 4 档，后端给的是唯一权威口径）
+  restock_tiers: [],
   platform_breakdown: []
+})
+
+// 展示层兜底档位（后端没给 restock_tiers 时的空壳）
+const INVENTORY_TIER_FALLBACK = [
+  { tier: 'active', label: '活跃' },
+  { tier: 'light', label: '压60-90天' },
+  { tier: 'mid', label: '压90-120天' },
+  { tier: 'deep', label: '压120天以上' }
+]
+
+const restockTiers = computed(() => {
+  const source = Array.isArray(stats.restock_tiers) ? stats.restock_tiers : []
+  const byTier = new Map(source.map((item) => [item.tier, item]))
+  return INVENTORY_TIER_FALLBACK.map((base) => {
+    const hit = byTier.get(base.tier) || {}
+    return {
+      ...base,
+      sku_count: Number(hit.sku_count || 0),
+      value: Number(hit.value || 0)
+    }
+  })
 })
 
 const loadSummary = async () => {

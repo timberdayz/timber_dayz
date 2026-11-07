@@ -1970,19 +1970,8 @@ async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_mod
 
     async def fake_fetch_rows(query, params):
         captured.append((query, params))
-        if "FROM api.inventory_backlog_summary_module" in query:
-            return [
-                {
-                    "total_value": 400,
-                    "total_quantity": 110,
-                    "deep_stagnant_value": 100,
-                    "mid_stagnant_value": 0,
-                    "deep_stagnant_row_count": 1,
-                    "mid_stagnant_row_count": 0,
-                    "active_row_count": 0,
-                    "unknown_restock_row_count": 0,
-                }
-            ]
+        # 2026-11-29：汇总与明细都从**行视图**取（口径统一在 Python 侧算，
+        # 不再各写一份 SQL CASE ⇒ 两条路径不会漂移）。
         if "FROM api.business_overview_inventory_backlog_module" in query:
             return [
                 {
@@ -2025,12 +2014,12 @@ async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_mod
     summary_query, summary_params = next(
         (query, params)
         for query, params in captured
-        if "FROM api.inventory_backlog_summary_module" in query
+        if "ORDER BY days_since_restock DESC" not in query
     )
     rows_query, rows_params = next(
         (query, params)
         for query, params in captured
-        if "FROM api.business_overview_inventory_backlog_module" in query
+        if "ORDER BY days_since_restock DESC" in query
     )
     assert "FROM mart.inventory_snapshot_latest" not in summary_query
     assert "FROM mart.inventory_snapshot_change" not in summary_query
@@ -2044,17 +2033,62 @@ async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_mod
     assert result["summary"] == {
         "total_value": 400.0,
         "total_quantity": 110,
+        # 全量行数 / SKU 数：与 total_value 同口径
+        "total_row_count": 2,
+        "total_sku_count": 2,
+        "unknown_restock_row_count": 0,
+        # 业务定价档位分组（0/60/90/120，SKU 级）
+        "restock_tiers": [
+            {
+                "tier": "active",
+                "label": "活跃",
+                "threshold_days": 0,
+                "value": 300.0,
+                "row_count": 1,
+                "sku_count": 1,
+                "ratio": 75.0,
+            },
+            {
+                "tier": "light",
+                "label": "压60-90天",
+                "threshold_days": 60,
+                "value": 0.0,
+                "row_count": 0,
+                "sku_count": 0,
+                "ratio": 0,
+            },
+            {
+                "tier": "mid",
+                "label": "压90-120天",
+                "threshold_days": 90,
+                "value": 0.0,
+                "row_count": 0,
+                "sku_count": 0,
+                "ratio": 0,
+            },
+            {
+                "tier": "deep",
+                "label": "压120天以上",
+                "threshold_days": 120,
+                "value": 100.0,
+                "row_count": 1,
+                "sku_count": 1,
+                "ratio": 25.0,
+            },
+        ],
+        # 旧标准指标（口径不变）
         "deep_stagnant_value": 100.0,
         "deep_stagnant_ratio": 25.0,
         "mid_stagnant_value": 0.0,
         "mid_stagnant_ratio": 0.0,
         "backlog_value": 100.0,
         "backlog_ratio": 25.0,
-        "deep_stagnant_row_count": 1,
-        "mid_stagnant_row_count": 0,
-        "active_row_count": 0,
-        "unknown_restock_row_count": 0,
     }
+    # 各档加起来 == 总数（货值 / 行数 / SKU 数都能加）
+    tiers = result["summary"]["restock_tiers"]
+    assert sum(tier["value"] for tier in tiers) == pytest.approx(400.0)
+    assert sum(tier["row_count"] for tier in tiers) == 2
+    assert sum(tier["sku_count"] for tier in tiers) == 2
     assert [row["platform_sku"] for row in result["top_products"]] == ["SKU-2", "SKU-1"]
     assert result["top_products"][0]["rank"] == 1
     assert result["top_products"][0]["restock_tier"] == "deep"
@@ -3539,6 +3573,47 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypat
 
         async with session_factory() as session:
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS semantic"))
+            # 2026-11-29：库存汇总视图的分档门槛直接读**业务定价档位表**
+            # （finance.sku_pricing_policies）⇒ 这里必须先把它建出来。
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS finance"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS finance.sku_pricing_policies (
+                        policy_id SERIAL PRIMARY KEY,
+                        min_restock_days INTEGER NOT NULL,
+                        tier_label VARCHAR(32) NOT NULL,
+                        discount_rate NUMERIC(12, 8) NOT NULL,
+                        target_margin_rate NUMERIC(12, 8) NOT NULL,
+                        platform_basis VARCHAR(32) NOT NULL,
+                        effective_from DATE NOT NULL,
+                        effective_to DATE,
+                        status VARCHAR(16) NOT NULL DEFAULT 'active',
+                        source VARCHAR(128),
+                        version VARCHAR(64)
+                    )
+                    """
+                )
+            )
+            for min_days, tier_label in (
+                (0, "日常"),
+                (60, "库龄≥60天"),
+                (90, "库龄≥90天"),
+                (120, "库龄≥120天"),
+            ):
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO finance.sku_pricing_policies
+                            (min_restock_days, tier_label, discount_rate,
+                             target_margin_rate, platform_basis, effective_from,
+                             status, source, version)
+                        VALUES (:min_days, :tier_label, 0.1, 0.2, 'company',
+                                CURRENT_DATE, 'active', 'test', 'v1')
+                        """
+                    ),
+                    {"min_days": min_days, "tier_label": tier_label},
+                )
             await session.execute(
                 text(
                     """
