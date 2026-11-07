@@ -311,3 +311,67 @@ G-2（变体按业务形态）、G-3（前端按业务维度建）**，但**没�
 | `test_template_confirmed_bindings_collect_raw_name_aliases` | 断言旧的「按域沉淀」，批次 D 已改为**全局沉淀**（D-3） | 改为断言全局作用域，并补 `global_scope=False` 的按域沉淀用例 |
 | `test_template_confirmed_bindings_create_aliases_without_duplicates` | 同上 | 同上 |
 | `test_frontend_semantic_registry_keys_match_backend_contract` | 断言前端 `headerBindings.js` 里有一份手抄字典，批次 D 已**删副本** | 改为新口径三条守护：前端不得再有手抄副本、注册表必须走 API-1、兜底快照（生成物）字段键与后端一致 |
+
+---
+
+## 12. 执行记录（看板自锁根治 + 采集侧 404 假冲突，2026-11-29）
+
+> 详细根因分析见 `docs/superpowers/plans/2026-11-29-dashboard-self-lock-and-identity-probe-root-cause.md`。
+
+### 12.1 起因：两个常驻告警都不是「正常工作」的提示
+
+| 现象 | 真相 |
+|---|---|
+| 业务概览页常驻「数据刷新中 / Dashboard SQL 资产正在刷新」 | 状态机把**没人能修的状态**（刷新资产定义漂移）当成「正在刷新」，而修复方又把自己制造的「正在刷新」当成失败条件 ⇒ 退避重排 ⇒ **无限自锁**（实测攒出 **859 次 failed** 的修复任务） |
+| 业务概览页常驻「采集期探测到 1 次店铺身份异常」 | 采集器打开到平台的 **404 页**，把 URL 上残留的**上一家店编号**当成探测结果 ⇒ 判成「被别的账号占着」 ⇒ **假冲突** |
+
+### 12.2 看板侧根治（5 个断点）
+
+| 断点 | 改动 | 落点 |
+|---|---|---|
+| 1 状态机去死区 | 刷新资产指纹漂移**不再**⇒`refreshing`（降级为可见性字段 `refresh_fingerprint_drift`）；刷新资产缺失 ⇒ **`drift`**（可自愈） | `backend/services/data_pipeline/dashboard_bootstrap.py` |
+| 2 口径同源 | 新增 `DASHBOARD_ASSET_AVAILABLE_STATUSES = {ready, refreshing}`，验收方与运行期门禁**共用同一份定义**（守护测试用 `is` 比较锁定） | `dashboard_bootstrap.py` / `refresh_validation.py` / `dashboard_api_postgresql.py` |
+| 3 安全网熔断 | 只对 `drift` 排修复；连续 3 次失败 ⇒ 熔断（30 分钟冷却后放一次半开；成功一次即自动解除） | `backend/tasks/refresh_queue_tasks.py` |
+| 4 僵尸回收 | `ops.pipeline_run_log` 里超 30 分钟仍是 `running` 的看板刷新 run ⇒ 标记 `failed`（匹配条件与状态机读取口径逐字一致） | `backend/tasks/refresh_queue_tasks.py` |
+| 5 前端分级 | 改用后端 `ready` 字段判定「不可用」；`refreshing` 单独提示 | `frontend/src/domains/business/views/BusinessOverview.vue` |
+
+**效果（开发库实测，未改任何库数据）**：`python scripts/bootstrap_postgresql_dashboard.py --check --module business_overview --json`
+⇒ `business_overview.status` 由 `refreshing` 变 **`ready`**、`ready=true`、`assets_drift=false`；页面提示消失。
+
+### 12.3 采集侧根治（404 判探测失败）
+
+- `modules/apps/collection_center/executor_v2.py`：新增 `_is_platform_error_page()`（只看 path 最后一段，命中 `404 / 404error / error / notfound / signin / login`）；
+  `_extract_platform_shop_context()` 增 `is_error_page` 字段（证据仍留在 `current_url`）。
+- `backend/services/platform_shop_discovery_service.py`：新增状态 `failed`（**刻意不在** `PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES` 里 ⇒ **不计入身份异常告警**，与 2026-04 那 3 条登录页历史记录同口径）；
+  `record_runtime_discovery(..., probe_failed=True)` ⇒ 不做绑定判定、不写候选账号、**不把 URL 上的编号当探测值**（证据留在 `raw_payload`）。
+- 正常页面上的同一编号**仍然**判 `conflict_detected`（改动只作用于错误页路径）。
+
+### 12.4 守护测试与回归
+
+| 项 | 结果 |
+|---|---|
+| `backend/tests/data_pipeline/test_dashboard_asset_self_lock_guardrails.py` | 新增 15 个 —— 守住 5 个断点 |
+| `backend/tests/test_platform_shop_discovery_error_page.py` | 新增 14 个 —— 守住 404 判探测失败 |
+| `backend/tests/data_pipeline/test_dashboard_bootstrap_locking.py` | 修好 3 条陈旧桩（原报 `KeyError: 'modules'`，其中一条还会空转 240 秒等锁） |
+| 全量后端回归 | 见 §12.5 |
+| 前端守卫测试 | 失败名单与基线**逐条一致**（8 个历史遗留，均不在本模块内） |
+| 前端构建 | `npx vite build` ✓ |
+
+### 12.5 全量后端回归（junit 失败**集合** diff）
+
+| | 失败 | 通过 | 跳过 | 错误 | 收集到的用例 |
+|---|---|---|---|---|---|
+| before（批次 A~G 验收后，`da2a2a2a`） | 137 | 4655 | 7 | 22 | 4821 |
+| after（本次改动落地） | 134 | 4687 | 7 | 22 | 4850 |
+| **失败集合差** | — | — | — | — | **NEW = 0 ／ FIXED = 3 ／ COMMON = 156**（diff 脚本退出码 0） |
+
+- **FIXED = 3**：`test_dashboard_bootstrap_locking.py` 的 3 条用例（桩与现行代码脱节 ⇒ `KeyError: 'modules'`；
+  其中一条还会空转 240 秒等锁）。已按**现行行为**改正（其中一条随之改名为
+  `test_bootstrap_deploy_mode_zeroes_statement_timeout_before_locking` ⇒ REMOVED 1 / ADDED 1）。
+- **ADDED = 30**：本次新增的 29 个守护用例 + 1 条改名。
+
+### 12.6 仍未闭环的两件事
+
+1. **历史那条假冲突（id=72）保留原样**，不删历史。若要让运营侧告警归零，需要**人工确认**后把它改判为 `failed`（与 2026-04 的 3 条同口径）—— 这是改历史判定，必须由人拍板。
+2. **资产指纹账本仍可能落后于文件**（迁移重建了资产但没回写账本）。现在只作为可见性字段存在，**不再驱动判定与重试**；
+   要彻底消除需要「落库只有一个入口 + 由它回写账本」，列入 **V2**。
