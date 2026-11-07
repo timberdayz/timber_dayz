@@ -90,9 +90,7 @@ def build_standard_output_root(
         "data_collection", "path_options.include_shop_id", True
     )
     work_root = (
-        cfg.get("download_dir")
-        or cfg.get("downloads_path")
-        or get_downloads_dir()
+        cfg.get("download_dir") or cfg.get("downloads_path") or get_downloads_dir()
     )
 
     return build_output_path(
@@ -112,4 +110,6 @@ class ExportComponent(ComponentBase):
     """实现必须为 async，即 async def run(self, page, mode=...) -> ExportResult。"""
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
-        raise NotImplementedError("Implementations must be async: async def run(self, page, mode=...) -> ExportResult")
+        raise NotImplementedError(
+            "Implementations must be async: async def run(self, page, mode=...) -> ExportResult"
+        )

@@ -42,7 +42,8 @@ def _has_column(table: str, schema: str, name: str) -> bool:
 
 def _has_index(table: str, schema: str, name: str) -> bool:
     return _has_table(table, schema) and any(
-        index["name"] == name for index in _inspector().get_indexes(table, schema=schema)
+        index["name"] == name
+        for index in _inspector().get_indexes(table, schema=schema)
     )
 
 
@@ -172,7 +173,8 @@ def upgrade() -> None:
     pk_columns = _primary_key_columns("price_adjust_baselines", "ops")
     if pk_columns == ["sku_id"]:
         op.drop_constraint(
-            _primary_key_name("price_adjust_baselines", "ops") or "price_adjust_baselines_pkey",
+            _primary_key_name("price_adjust_baselines", "ops")
+            or "price_adjust_baselines_pkey",
             "price_adjust_baselines",
             schema="ops",
             type_="primary",
@@ -198,7 +200,8 @@ def downgrade() -> None:
                 )
             )
             op.drop_constraint(
-                _primary_key_name("price_adjust_baselines", "ops") or "price_adjust_baselines_pkey",
+                _primary_key_name("price_adjust_baselines", "ops")
+                or "price_adjust_baselines_pkey",
                 "price_adjust_baselines",
                 schema="ops",
                 type_="primary",
@@ -210,9 +213,7 @@ def downgrade() -> None:
                 schema="ops",
             )
         if _has_column("price_adjust_baselines", "ops", "platform_code"):
-            op.drop_column(
-                "price_adjust_baselines", "platform_code", schema="ops"
-            )
+            op.drop_column("price_adjust_baselines", "platform_code", schema="ops")
 
     if _has_table("sku_platform_pricing", "finance"):
         op.drop_table("sku_platform_pricing", schema="finance")

@@ -79,7 +79,9 @@ def upgrade() -> None:
         ):
             op.add_column(
                 "sku_profit_estimates",
-                sa.Column("expected_selling_price_source", sa.String(32), nullable=True),
+                sa.Column(
+                    "expected_selling_price_source", sa.String(32), nullable=True
+                ),
                 schema="finance",
             )
         for name, column_type in ROI_COLUMNS:
@@ -138,7 +140,9 @@ def downgrade() -> None:
             "sku_profit_estimates", "finance", "expected_selling_price_source"
         ):
             op.drop_column(
-                "sku_profit_estimates", "expected_selling_price_source", schema="finance"
+                "sku_profit_estimates",
+                "expected_selling_price_source",
+                schema="finance",
             )
 
     if _has_table("sku_operating_profiles", "finance") and _has_column(

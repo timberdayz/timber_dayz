@@ -342,10 +342,14 @@ class SkuClearanceService:
         if self.db is None:
             return {}, None
         rows = (
-            await self.db.execute(
-                select(DimPlatform).where(DimPlatform.platform_role == "sales")
+            (
+                await self.db.execute(
+                    select(DimPlatform).where(DimPlatform.platform_role == "sales")
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         platforms = {row.platform_code: row for row in rows}
         basis = policy_rows[0]["platform_basis"] if policy_rows else "tiktok"
         fallback = platforms.get(basis)
@@ -372,14 +376,18 @@ class SkuClearanceService:
         if not sales_codes:
             return {}
         rows = (
-            await self.db.execute(
-                select(SkuPlatformPricing).where(
-                    SkuPlatformPricing.sku_id.in_(sku_ids),
-                    SkuPlatformPricing.platform_code.in_(sales_codes),
-                    SkuPlatformPricing.min_selling_price_override.is_not(None),
+            (
+                await self.db.execute(
+                    select(SkuPlatformPricing).where(
+                        SkuPlatformPricing.sku_id.in_(sku_ids),
+                        SkuPlatformPricing.platform_code.in_(sales_codes),
+                        SkuPlatformPricing.min_selling_price_override.is_not(None),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return {
             (row.sku_id, row.platform_code): row.min_selling_price_override
             for row in rows
@@ -593,7 +601,9 @@ class SkuClearanceService:
         # 2) 行里是**库存来源平台**（生产上恒为 'miaoshou'）→ 回落到公司级费率。
         # ⚠️ 第 2 条不能省：省了就等于没有 other_cost_rate，
         #    成本线算不出来，底线只剩纪律线 —— 底线比口径不一致更危险。
-        platform = platforms.get(str(row.get("platform_code") or "")) or default_platform
+        platform = (
+            platforms.get(str(row.get("platform_code") or "")) or default_platform
+        )
 
         # 人工覆盖按**同一个平台**取（阶段 2.1b）：覆盖值是 SKU × 平台的量。
         override = None

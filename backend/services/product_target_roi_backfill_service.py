@@ -83,16 +83,20 @@ async def backfill_target_roi_from_legacy_ad_rate(
     dict 报告：``{"scanned", "updated", "skipped", "items"}``。
     """
     rows = (
-        await session.execute(
-            select(SkuOperatingProfile).where(
-                SkuOperatingProfile.target_roi.is_(None),
-                SkuOperatingProfile.expected_ad_rate.is_not(None),
-                SkuOperatingProfile.expected_ad_rate > 0,
-                SkuOperatingProfile.status == "active",
-                SkuOperatingProfile.effective_to.is_(None),
+        (
+            await session.execute(
+                select(SkuOperatingProfile).where(
+                    SkuOperatingProfile.target_roi.is_(None),
+                    SkuOperatingProfile.expected_ad_rate.is_not(None),
+                    SkuOperatingProfile.expected_ad_rate > 0,
+                    SkuOperatingProfile.status == "active",
+                    SkuOperatingProfile.effective_to.is_(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     report: dict[str, Any] = {
         "dry_run": dry_run,
@@ -124,7 +128,9 @@ async def backfill_target_roi_from_legacy_ad_rate(
             legacy = await finance.preview_platform_sku_profit(base_data)
         except ValueError as exc:
             # SKU / 平台 / 仓库不存在、物流方式没选 ⇒ 这行算不了，跳过（不改原样）。
-            report["skipped"].append({**identity, "reason": "preview_failed", "detail": str(exc)})
+            report["skipped"].append(
+                {**identity, "reason": "preview_failed", "detail": str(exc)}
+            )
             continue
 
         legacy_expected = legacy.get("expected") or {}
@@ -154,14 +160,18 @@ async def backfill_target_roi_from_legacy_ad_rate(
                 {**base_data, "target_roi": float(candidate)}
             )
         except ValueError as exc:  # pragma: no cover - 与上面同一份输入，不该发生
-            report["skipped"].append({**identity, "reason": "preview_failed", "detail": str(exc)})
+            report["skipped"].append(
+                {**identity, "reason": "preview_failed", "detail": str(exc)}
+            )
             continue
         check_expected = check.get("expected") or {}
         ad_cost_diff = abs(
-            _as_decimal(check_expected.get("ad_cost")) - _as_decimal(legacy_expected.get("ad_cost"))
+            _as_decimal(check_expected.get("ad_cost"))
+            - _as_decimal(legacy_expected.get("ad_cost"))
         )
         profit_diff = abs(
-            _as_decimal(check_expected.get("profit")) - _as_decimal(legacy_expected.get("profit"))
+            _as_decimal(check_expected.get("profit"))
+            - _as_decimal(legacy_expected.get("profit"))
         )
         if ad_cost_diff > MONEY_TOLERANCE or profit_diff > MONEY_TOLERANCE:
             report["skipped"].append(

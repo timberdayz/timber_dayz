@@ -30,13 +30,19 @@ def _bridge_compat_dashboard_service_patch(monkeypatch):
 
 
 def test_environment_examples_document_dashboard_router_flags():
-    for path_str in (".env.example", "env.development.example", "env.production.example"):
+    for path_str in (
+        ".env.example",
+        "env.development.example",
+        "env.production.example",
+    ):
         text = Path(path_str).read_text(encoding="utf-8")
         assert "USE_POSTGRESQL_DASHBOARD_ROUTER=" in text
 
 
 def test_rollout_doc_covers_enable_verify_and_rollback():
-    text = Path("docs/development/POSTGRESQL_DASHBOARD_ROLLOUT.md").read_text(encoding="utf-8")
+    text = Path("docs/development/POSTGRESQL_DASHBOARD_ROLLOUT.md").read_text(
+        encoding="utf-8"
+    )
     assert "USE_POSTGRESQL_DASHBOARD_ROUTER=true" in text
     assert "ops.pipeline_run_log" in text
     assert "回退" in text
@@ -75,10 +81,14 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
                 "labor_efficiency": 0,
             }
 
-        async def get_business_overview_shop_racing(self, granularity, target_date, group_by, platform=None):
+        async def get_business_overview_shop_racing(
+            self, granularity, target_date, group_by, platform=None
+        ):
             return [{"name": "shop-a", "gmv": 123, "rank": 1}]
 
-        async def get_business_overview_operational_metrics(self, month, platform, shop_id=None):
+        async def get_business_overview_operational_metrics(
+            self, month, platform, shop_id=None
+        ):
             return {
                 "monthly_target": 1000,
                 "monthly_total_achieved": 800,
@@ -110,7 +120,11 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
     ) as client:
         shop_racing = await client.get(
             "/api/dashboard/business-overview/shop-racing",
-            params={"granularity": "monthly", "period_key": "2026-03-01", "group_by": "shop"},
+            params={
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "group_by": "shop",
+            },
         )
         operational = await client.get(
             "/api/dashboard/business-overview/operational-metrics",
@@ -369,7 +383,7 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                     """
                 )
             )
-            await session.execute(text('DELETE FROM a_class.sales_targets_a'))
+            await session.execute(text("DELETE FROM a_class.sales_targets_a"))
             await session.execute(
                 text(
                     """
@@ -426,7 +440,11 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
             )
             shop_racing_response = await client.get(
                 "/api/dashboard/business-overview/shop-racing",
-                params={"granularity": "monthly", "period_key": "2026-03-01", "group_by": "shop"},
+                params={
+                    "granularity": "monthly",
+                    "period_key": "2026-03-01",
+                    "group_by": "shop",
+                },
             )
             operational_response = await client.get(
                 "/api/dashboard/business-overview/operational-metrics",

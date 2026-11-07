@@ -17,7 +17,10 @@ def test_migration_declares_pricing_policy_table_and_columns():
     source = MIGRATION.read_text(encoding="utf-8")
 
     assert 'revision = "current_schema_20261020_sku_pricing_guardrails"' in source
-    assert 'down_revision = "current_schema_20260921_warehouse_storage_label_fee"' in source
+    assert (
+        'down_revision = "current_schema_20260921_warehouse_storage_label_fee"'
+        in source
+    )
     assert "sku_pricing_policies" in source
     # 历史迁移不可动：它建表时用的就是旧列名，改名由后续的改名迁移负责
     assert "min_age_days" in source
@@ -44,12 +47,12 @@ def test_migration_seeds_four_age_tiers():
 
 def test_migration_calibrates_platform_fee_rates():
     source = MIGRATION.read_text(encoding="utf-8")
-    assert "0.0737" in source   # tiktok 平台佣金率
-    assert "0.1487" in source   # shopee 平台佣金率
-    assert "0.2727" in source   # tiktok 平台其他成本率
-    assert "0.4165" in source   # shopee 平台其他成本率
-    assert "0.0606" in source   # tiktok 默认达人佣金率
-    assert "0.0111" in source   # shopee 默认达人佣金率
+    assert "0.0737" in source  # tiktok 平台佣金率
+    assert "0.1487" in source  # shopee 平台佣金率
+    assert "0.2727" in source  # tiktok 平台其他成本率
+    assert "0.4165" in source  # shopee 平台其他成本率
+    assert "0.0606" in source  # tiktok 默认达人佣金率
+    assert "0.0111" in source  # shopee 默认达人佣金率
 
 
 def test_migration_is_idempotent_guarded():
@@ -69,7 +72,9 @@ def test_migration_module_imports_and_defines_its_constants():
     """
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("pricing_guardrails_migration", MIGRATION)
+    spec = importlib.util.spec_from_file_location(
+        "pricing_guardrails_migration", MIGRATION
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
@@ -82,12 +87,19 @@ def test_migration_module_imports_and_defines_its_constants():
     assert set(module.PLATFORM_COST_RATES) == {"tiktok", "shopee"}
     for values in module.PLATFORM_COST_RATES.values():
         assert set(values) == {
-            "default_fee_rate", "default_creator_commission_rate", "other_cost_rate",
+            "default_fee_rate",
+            "default_creator_commission_rate",
+            "other_cost_rate",
         }
 
 
 def test_orm_exposes_pricing_columns_and_policy_table():
-    from modules.core.db import DimErpSku, DimPlatform, SkuPlatformPricing, SkuPricingPolicy
+    from modules.core.db import (
+        DimErpSku,
+        DimPlatform,
+        SkuPlatformPricing,
+        SkuPricingPolicy,
+    )
 
     sku_columns = {c.name for c in DimErpSku.__table__.columns}
     # ⚠️ `min_selling_price_override` **不在** SKU 主数据上了（阶段 2.1b）：
@@ -97,9 +109,9 @@ def test_orm_exposes_pricing_columns_and_policy_table():
     #    住在这里的覆盖值每次同步都会被抹掉 ⇒ 覆盖值住在 `finance.sku_platform_pricing`
     #    （不参与同步，且刻意不带外键）。
     assert "creator_commission_rate" in sku_columns
-    assert "min_selling_price_override" not in sku_columns, (
-        "人工覆盖已下沉到平台级，SKU 主数据上不该再有公司级覆盖列"
-    )
+    assert (
+        "min_selling_price_override" not in sku_columns
+    ), "人工覆盖已下沉到平台级，SKU 主数据上不该再有公司级覆盖列"
 
     override_columns = {c.name for c in SkuPlatformPricing.__table__.columns}
     assert {"sku_id", "platform_code", "min_selling_price_override"} <= override_columns
@@ -109,9 +121,18 @@ def test_orm_exposes_pricing_columns_and_policy_table():
 
     policy_columns = {c.name for c in SkuPricingPolicy.__table__.columns}
     assert {
-        "policy_id", "min_restock_days", "tier_label", "discount_rate",
-        "target_margin_rate", "platform_basis", "effective_from", "effective_to",
-        "status", "source", "version", "notes",
+        "policy_id",
+        "min_restock_days",
+        "tier_label",
+        "discount_rate",
+        "target_margin_rate",
+        "platform_basis",
+        "effective_from",
+        "effective_to",
+        "status",
+        "source",
+        "version",
+        "notes",
     } <= policy_columns
 
     constraint_names = {c.name for c in SkuPricingPolicy.__table__.constraints}
@@ -153,7 +174,10 @@ def test_rename_migration_only_renames_the_column():
     source = RENAME_MIGRATION.read_text(encoding="utf-8")
 
     assert 'revision = "current_schema_20261025_sku_pricing_min_restock_days"' in source
-    assert 'down_revision = "current_schema_20261024_price_adjust_baseline_table"' in source
+    assert (
+        'down_revision = "current_schema_20261024_price_adjust_baseline_table"'
+        in source
+    )
     assert 'OLD_COLUMN = "min_age_days"' in source
     assert 'NEW_COLUMN = "min_restock_days"' in source
     assert "def downgrade" in source

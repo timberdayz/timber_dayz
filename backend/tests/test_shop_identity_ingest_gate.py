@@ -367,9 +367,11 @@ def test_data_sync_service_routes_identity_blocked_to_needs_shop():
     """门禁拒收必须落到 needs_shop 终态, 而不是 failed(否则会被当成可重试故障)。"""
     from pathlib import Path
 
-    sync_text = Path("backend/services/data_sync_service.py").read_text(encoding="utf-8")
+    sync_text = Path("backend/services/data_sync_service.py").read_text(
+        encoding="utf-8"
+    )
 
-    assert "elif result.get(\"identity_blocked\"):" in sync_text
+    assert 'elif result.get("identity_blocked"):' in sync_text
     assert "apply_identity_blocked_state(" in sync_text
 
 

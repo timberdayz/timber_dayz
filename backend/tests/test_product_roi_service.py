@@ -19,20 +19,14 @@ PRE_AD_PROFIT = Decimal("34.49")
 
 def test_break_even_roi_is_net_revenue_over_pre_ad_profit():
     """用例 1：保本 ROI 公式精确值。"""
-    metrics = compute_roi_metrics(
-        net_revenue=NET_REVENUE, pre_ad_profit=PRE_AD_PROFIT
-    )
+    metrics = compute_roi_metrics(net_revenue=NET_REVENUE, pre_ad_profit=PRE_AD_PROFIT)
     assert metrics["break_even_roi"] == NET_REVENUE / PRE_AD_PROFIT
-    assert metrics["break_even_roi"] == Decimal(
-        "1.971585966946941142360104378"
-    )
+    assert metrics["break_even_roi"] == Decimal("1.971585966946941142360104378")
 
 
 def test_break_even_roi_times_advertising_margin_rate_equals_one():
     """用例 2：break_even_roi × p == 1（p = 广告前贡献毛利率）。"""
-    metrics = compute_roi_metrics(
-        net_revenue=NET_REVENUE, pre_ad_profit=PRE_AD_PROFIT
-    )
+    metrics = compute_roi_metrics(net_revenue=NET_REVENUE, pre_ad_profit=PRE_AD_PROFIT)
     p = metrics["advertising_contribution_margin_rate"]
     assert p == PRE_AD_PROFIT / NET_REVENUE
     assert metrics["break_even_roi"] * p == 1
@@ -40,9 +34,7 @@ def test_break_even_roi_times_advertising_margin_rate_equals_one():
 
 def test_suggested_roi_is_break_even_roi_times_one_point_two():
     """用例 3：suggested_roi == break_even_roi × (1 + 安全边际)。"""
-    metrics = compute_roi_metrics(
-        net_revenue=NET_REVENUE, pre_ad_profit=PRE_AD_PROFIT
-    )
+    metrics = compute_roi_metrics(net_revenue=NET_REVENUE, pre_ad_profit=PRE_AD_PROFIT)
     assert metrics["suggested_roi"] == metrics["break_even_roi"] * Decimal("1.20")
 
 
@@ -61,9 +53,7 @@ def test_suggested_roi_is_clamped_at_platform_ceiling_but_raw_value_is_kept():
 
 def test_break_even_roi_below_one_is_flagged_instead_of_being_clamped():
     """用例 5：只封顶不封底。保本 ROI < 1 是「成本算错了」的异常信号，不该被藏起来。"""
-    metrics = compute_roi_metrics(
-        net_revenue=NET_REVENUE, pre_ad_profit=Decimal("80")
-    )
+    metrics = compute_roi_metrics(net_revenue=NET_REVENUE, pre_ad_profit=Decimal("80"))
     assert metrics["break_even_roi"] < 1
     assert "break_even_roi_below_one" in metrics["anomalies"]
     # 没有被抬到 1（更没有抬到 1.2）
@@ -72,9 +62,7 @@ def test_break_even_roi_below_one_is_flagged_instead_of_being_clamped():
 
 def test_non_positive_cost_denominator_returns_none_with_a_reason():
     """用例 6：分母 ≤ 0 一律返回 None + 缺输入原因，绝不返回乐观值。"""
-    metrics = compute_roi_metrics(
-        net_revenue=NET_REVENUE, pre_ad_profit=Decimal("0")
-    )
+    metrics = compute_roi_metrics(net_revenue=NET_REVENUE, pre_ad_profit=Decimal("0"))
     assert metrics["break_even_roi"] is None
     assert metrics["suggested_roi"] is None
     assert metrics["suggested_roi_clamped"] is None
@@ -141,9 +129,7 @@ def test_equivalent_money_follows_the_two_decimal_suggested_roi():
     保本 ROI 1.97（表上显示值）→ 建议 ROI 2.36 → 单均广告费 68 ÷ 2.36 = 28.81。
     数字之间必须能互相验算，否则表上会出现「建议ROI 2.36、等效广告费 28.74」这种对不上的数。
     """
-    metrics = compute_roi_metrics(
-        net_revenue=NET_REVENUE, pre_ad_profit=PRE_AD_PROFIT
-    )
+    metrics = compute_roi_metrics(net_revenue=NET_REVENUE, pre_ad_profit=PRE_AD_PROFIT)
     assert metrics["suggested_roi_clamped"] == Decimal("2.36")
     assert metrics["equivalent_ad_cost_per_order"] == Decimal("28.81")
     assert metrics["equivalent_net_profit_per_order"] == Decimal("5.68")
@@ -165,8 +151,6 @@ def test_zero_ad_rate_gives_no_equivalent_target_roi():
 
 
 def test_non_positive_revenue_returns_none_with_a_reason():
-    metrics = compute_roi_metrics(
-        net_revenue=Decimal("0"), pre_ad_profit=PRE_AD_PROFIT
-    )
+    metrics = compute_roi_metrics(net_revenue=Decimal("0"), pre_ad_profit=PRE_AD_PROFIT)
     assert metrics["break_even_roi"] is None
     assert metrics["missing_reasons"] == ["non_positive_revenue"]

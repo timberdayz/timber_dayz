@@ -131,7 +131,9 @@ def _conflict_rows_sql(table: str) -> str:
           AND target.enabled IS TRUE
           AND target.business_role = 'operating_store'
           AND owner.id <> target.id
-    """.format(table=table)
+    """.format(
+        table=table
+    )
 
 
 def _affected_rows_sql(table: str) -> str:
@@ -145,7 +147,9 @@ def _affected_rows_sql(table: str) -> str:
         FROM {table} r
         WHERE r.id IN ({conflict_rows})
         ORDER BY r.id
-    """.format(table=table, conflict_rows=_conflict_rows_sql(table))
+    """.format(
+        table=table, conflict_rows=_conflict_rows_sql(table)
+    )
 
 
 #: 订正语句。
@@ -188,7 +192,9 @@ _UPDATE_SQL = """
       AND target.enabled IS TRUE
       AND target.business_role = 'operating_store'
       AND owner.id <> target.id
-""".format(table="{table}", audit_key=_AUDIT_KEY)
+""".format(
+    table="{table}", audit_key=_AUDIT_KEY
+)
 
 
 #: 回滚语句: 从留痕还原 4 个身份字段, 并删掉留痕键。
@@ -215,7 +221,9 @@ _ROLLBACK_SQL = """
             || COALESCE(r.raw_data -> '{audit_key}', '{{}}'::jsonb)
         ) - '{audit_key}'
     WHERE r.raw_data ? '{audit_key}'
-""".format(table="{table}", audit_key=_AUDIT_KEY)
+""".format(
+    table="{table}", audit_key=_AUDIT_KEY
+)
 
 
 # ---------------------------------------------------------------------------
@@ -230,26 +238,26 @@ def upgrade() -> None:
             print("[WARN] 表不存在，跳过：{0}".format(table))
             continue
 
-        before_rows = _bind().execute(
-            sa.text(_affected_rows_sql(table))
-        ).all()
+        before_rows = _bind().execute(sa.text(_affected_rows_sql(table))).all()
         if not before_rows:
             print("[INFO] {0}: 无自相矛盾行，跳过".format(table))
             continue
 
-        result = _bind().execute(
-            sa.text(_UPDATE_SQL.replace("{table}", table))
-        )
+        result = _bind().execute(sa.text(_UPDATE_SQL.replace("{table}", table)))
         changed = int(result.rowcount or 0)
 
         # ① data_hash 必须一个字节都没变(按行 id 逐行比)
-        after_rows = _bind().execute(
-            sa.text(
-                "SELECT id::bigint, data_hash FROM {0} WHERE id = ANY(CAST(:ids AS bigint[])) "
-                "ORDER BY id".format(table)
-            ),
-            {"ids": [int(row[0]) for row in before_rows]},
-        ).all()
+        after_rows = (
+            _bind()
+            .execute(
+                sa.text(
+                    "SELECT id::bigint, data_hash FROM {0} WHERE id = ANY(CAST(:ids AS bigint[])) "
+                    "ORDER BY id".format(table)
+                ),
+                {"ids": [int(row[0]) for row in before_rows]},
+            )
+            .all()
+        )
         if len(after_rows) != len(before_rows):
             raise RuntimeError(
                 "订正后行数对不上，拒绝提交：{0} before={1} after={2}".format(
@@ -265,9 +273,7 @@ def upgrade() -> None:
                 )
 
         # ② 订正后不该再有自相矛盾行
-        remaining = _bind().execute(
-            sa.text(_conflict_rows_sql(table))
-        ).all()
+        remaining = _bind().execute(sa.text(_conflict_rows_sql(table))).all()
         if remaining:
             raise RuntimeError(
                 "订正后仍有自相矛盾行，拒绝提交：{0} 剩余 {1}".format(
@@ -280,9 +286,7 @@ def upgrade() -> None:
 
     print(
         "[OK] Shopee 行内身份订正完成：共 {0} 行；"
-        "请刷新这些物化视图：{1}".format(
-            total, ", ".join(_REQUIRED_REFRESH_TARGETS)
-        )
+        "请刷新这些物化视图：{1}".format(total, ", ".join(_REQUIRED_REFRESH_TARGETS))
     )
 
 
@@ -291,9 +295,7 @@ def downgrade() -> None:
     for table, _mv in _TARGETS:
         if not _table_exists(table):
             continue
-        result = _bind().execute(
-            sa.text(_ROLLBACK_SQL.replace("{table}", table))
-        )
+        result = _bind().execute(sa.text(_ROLLBACK_SQL.replace("{table}", table)))
         changed = int(result.rowcount or 0)
         total += changed
         print("[OK] {0}: 还原 {1} 行".format(table, changed))

@@ -21,9 +21,13 @@ def test_catalog_file_defaults_to_data_raw_source():
     assert source_column.default.arg == "data/raw"
 
 
-def test_file_path_resolver_rebuilds_standard_filename_into_data_raw_year_dir(tmp_path, monkeypatch):
+def test_file_path_resolver_rebuilds_standard_filename_into_data_raw_year_dir(
+    tmp_path, monkeypatch
+):
     raw_dir = tmp_path / "data" / "raw"
-    monkeypatch.setattr(resolver_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+    monkeypatch.setattr(
+        resolver_module, "get_data_raw_dir", lambda: raw_dir, raising=False
+    )
 
     filename = StandardFileName.generate(
         source_platform="shopee",
@@ -48,16 +52,26 @@ def test_standard_file_name_parse_supports_orders_sub_domain_variants():
     assert parsed["granularity"] == "weekly"
 
 
-def test_file_path_resolver_prefers_data_raw_before_legacy_temp_outputs(tmp_path, monkeypatch):
+def test_file_path_resolver_prefers_data_raw_before_legacy_temp_outputs(
+    tmp_path, monkeypatch
+):
     raw_dir = tmp_path / "data" / "raw"
     legacy_dir = tmp_path / "temp" / "outputs"
     downloads_dir = tmp_path / "downloads"
     input_dir = tmp_path / "data" / "input"
 
-    monkeypatch.setattr(resolver_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
-    monkeypatch.setattr(resolver_module, "get_downloads_dir", lambda: downloads_dir, raising=False)
-    monkeypatch.setattr(resolver_module, "get_data_input_dir", lambda: input_dir, raising=False)
-    monkeypatch.setattr(resolver_module, "get_output_dir", lambda: legacy_dir, raising=False)
+    monkeypatch.setattr(
+        resolver_module, "get_data_raw_dir", lambda: raw_dir, raising=False
+    )
+    monkeypatch.setattr(
+        resolver_module, "get_downloads_dir", lambda: downloads_dir, raising=False
+    )
+    monkeypatch.setattr(
+        resolver_module, "get_data_input_dir", lambda: input_dir, raising=False
+    )
+    monkeypatch.setattr(
+        resolver_module, "get_output_dir", lambda: legacy_dir, raising=False
+    )
 
     filename = StandardFileName.generate(
         source_platform="tiktok",
@@ -83,27 +97,37 @@ def test_file_path_resolver_prefers_data_raw_before_legacy_temp_outputs(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_executor_process_files_uses_configured_data_raw_dir(tmp_path, monkeypatch):
+async def test_executor_process_files_uses_configured_data_raw_dir(
+    tmp_path, monkeypatch
+):
     raw_dir = tmp_path / "custom-raw-root"
     download_file = tmp_path / "download.xlsx"
     download_file.write_text("demo", encoding="utf-8")
 
-    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+    monkeypatch.setattr(
+        executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False
+    )
 
     import modules.services.catalog_scanner as catalog_scanner_module
     from modules.services.metadata_manager import MetadataManager
 
-    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: 123)
+    monkeypatch.setattr(
+        catalog_scanner_module, "register_single_file", lambda file_path: 123
+    )
     monkeypatch.setattr(
         MetadataManager,
         "create_meta_file",
         staticmethod(
-            lambda file_path, business_metadata, collection_info: Path(str(file_path) + ".meta.json")
+            lambda file_path, business_metadata, collection_info: Path(
+                str(file_path) + ".meta.json"
+            )
         ),
     )
 
     executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
-    executor._infer_data_domain_from_path = lambda file_path, data_domains, idx: data_domains[idx]
+    executor._infer_data_domain_from_path = (
+        lambda file_path, data_domains, idx: data_domains[idx]
+    )
     executor._infer_sub_domain_from_path = lambda file_path, data_domain=None: ""
 
     processed = await CollectionExecutorV2._process_files(
@@ -119,27 +143,37 @@ async def test_executor_process_files_uses_configured_data_raw_dir(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_executor_process_files_only_counts_catalog_registered_files(tmp_path, monkeypatch):
+async def test_executor_process_files_only_counts_catalog_registered_files(
+    tmp_path, monkeypatch
+):
     raw_dir = tmp_path / "custom-raw-root"
     download_file = tmp_path / "download.xlsx"
     download_file.write_text("demo", encoding="utf-8")
 
-    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+    monkeypatch.setattr(
+        executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False
+    )
 
     import modules.services.catalog_scanner as catalog_scanner_module
     from modules.services.metadata_manager import MetadataManager
 
-    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: None)
+    monkeypatch.setattr(
+        catalog_scanner_module, "register_single_file", lambda file_path: None
+    )
     monkeypatch.setattr(
         MetadataManager,
         "create_meta_file",
         staticmethod(
-            lambda file_path, business_metadata, collection_info: Path(str(file_path) + ".meta.json")
+            lambda file_path, business_metadata, collection_info: Path(
+                str(file_path) + ".meta.json"
+            )
         ),
     )
 
     executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
-    executor._infer_data_domain_from_path = lambda file_path, data_domains, idx: data_domains[idx]
+    executor._infer_data_domain_from_path = (
+        lambda file_path, data_domains, idx: data_domains[idx]
+    )
     executor._infer_sub_domain_from_path = lambda file_path, data_domain=None: ""
 
     processed = await CollectionExecutorV2._process_files(
@@ -226,7 +260,9 @@ def _stub_master_shop_id(monkeypatch, shop_id: str) -> None:
     )
 
 
-def test_shopee_standard_output_root_uses_master_platform_shop_id(tmp_path, monkeypatch):
+def test_shopee_standard_output_root_uses_master_platform_shop_id(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(
         "modules.components.export.base.get_downloads_dir",
         lambda: tmp_path,
@@ -298,14 +334,20 @@ async def test_executor_rejects_shopee_raw_promotion_when_store_name_and_shop_id
     download_file.parent.mkdir(parents=True, exist_ok=True)
     download_file.write_text("demo", encoding="utf-8")
 
-    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+    monkeypatch.setattr(
+        executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False
+    )
 
     import modules.services.catalog_scanner as catalog_scanner_module
 
-    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: 123)
+    monkeypatch.setattr(
+        catalog_scanner_module, "register_single_file", lambda file_path: 123
+    )
 
     executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
-    executor._infer_data_domain_from_path = lambda file_path, data_domains, idx: "analytics"
+    executor._infer_data_domain_from_path = (
+        lambda file_path, data_domains, idx: "analytics"
+    )
     executor._infer_sub_domain_from_path = lambda file_path, data_domain=None: ""
     # 主数据登记的编号与路径里的编号不一致 ⇒ 拒收
     executor._load_master_platform_shop_id = AsyncMock(return_value="1407964586")
@@ -324,7 +366,9 @@ async def test_executor_rejects_shopee_raw_promotion_when_store_name_and_shop_id
         date_range={"start_date": "2026-04-01", "end_date": "2026-04-30"},
     )
 
-    rejected_files = list((download_file.parent / "_shop_identity_rejected").glob("*.xlsx"))
+    rejected_files = list(
+        (download_file.parent / "_shop_identity_rejected").glob("*.xlsx")
+    )
 
     assert processed == []
     assert rejected_files
@@ -353,14 +397,18 @@ async def test_executor_writes_consistent_shopee_store_name_and_resolved_shop_id
     download_file.parent.mkdir(parents=True, exist_ok=True)
     download_file.write_text("demo", encoding="utf-8")
 
-    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+    monkeypatch.setattr(
+        executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False
+    )
 
     captured = {}
 
     import modules.services.catalog_scanner as catalog_scanner_module
     from modules.services.metadata_manager import MetadataManager
 
-    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: 123)
+    monkeypatch.setattr(
+        catalog_scanner_module, "register_single_file", lambda file_path: 123
+    )
 
     def _capture_meta(file_path, business_metadata, collection_info):
         captured["business_metadata"] = business_metadata
@@ -405,7 +453,9 @@ async def test_executor_flushes_downloaded_files_before_verification_timeout():
     executor._update_status = AsyncMock()
     executor._last_file_processing_summary = {}
     executor._process_files = AsyncMock(
-        return_value=[r"F:\Vscode\python_programme\AI_code\xihong_erp\data\raw\2026\shopee_analytics_monthly_demo.xlsx"]
+        return_value=[
+            r"F:\Vscode\python_programme\AI_code\xihong_erp\data\raw\2026\shopee_analytics_monthly_demo.xlsx"
+        ]
     )
 
     context = TaskContext(
@@ -415,7 +465,9 @@ async def test_executor_flushes_downloaded_files_before_verification_timeout():
         data_domains=["analytics"],
         date_range={"start_date": "2026-04-01", "end_date": "2026-04-30"},
         granularity="monthly",
-        collected_files=[r"F:\Vscode\python_programme\AI_code\xihong_erp\downloads\temp.xlsx"],
+        collected_files=[
+            r"F:\Vscode\python_programme\AI_code\xihong_erp\downloads\temp.xlsx"
+        ],
         completed_domains=["analytics"],
         failed_domains=[{"domain": "products", "error": "验证码等待超时"}],
     )
@@ -452,28 +504,52 @@ def test_executor_does_not_infer_orders_sub_domain_from_platform_segment_for_non
 
 
 @pytest.mark.asyncio
-async def test_executor_process_files_rejects_invalid_services_platform_sub_domain(tmp_path, monkeypatch):
+async def test_executor_process_files_rejects_invalid_services_platform_sub_domain(
+    tmp_path, monkeypatch
+):
     raw_dir = tmp_path / "custom-raw-root"
-    download_root = tmp_path / "temp" / "downloads" / "task-1" / "tiktok" / "acc" / "shop" / "services" / "monthly"
+    download_root = (
+        tmp_path
+        / "temp"
+        / "downloads"
+        / "task-1"
+        / "tiktok"
+        / "acc"
+        / "shop"
+        / "services"
+        / "monthly"
+    )
     download_root.mkdir(parents=True, exist_ok=True)
     download_file = download_root / "service_export.xlsx"
     download_file.write_text("demo", encoding="utf-8")
 
-    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+    monkeypatch.setattr(
+        executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False
+    )
 
     import modules.services.catalog_scanner as catalog_scanner_module
     from modules.services.metadata_manager import MetadataManager
 
     registered = []
-    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: registered.append(file_path))
+    monkeypatch.setattr(
+        catalog_scanner_module,
+        "register_single_file",
+        lambda file_path: registered.append(file_path),
+    )
     monkeypatch.setattr(
         MetadataManager,
         "create_meta_file",
-        staticmethod(lambda file_path, business_metadata, collection_info: Path(str(file_path) + ".meta.json")),
+        staticmethod(
+            lambda file_path, business_metadata, collection_info: Path(
+                str(file_path) + ".meta.json"
+            )
+        ),
     )
 
     executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
-    executor._infer_data_domain_from_path = lambda file_path, data_domains, idx: "services"
+    executor._infer_data_domain_from_path = (
+        lambda file_path, data_domains, idx: "services"
+    )
     executor._infer_sub_domain_from_path = lambda file_path, data_domain=None: "tiktok"
 
     processed = await CollectionExecutorV2._process_files(
@@ -500,25 +576,33 @@ async def test_executor_process_files_rejects_invalid_services_platform_sub_doma
         (
             "shopee",
             "products",
-            Path("temp/downloads/task-1/shopee/acc/shop/products/daily/parentskudetail.20260412_20260412.xlsx"),
+            Path(
+                "temp/downloads/task-1/shopee/acc/shop/products/daily/parentskudetail.20260412_20260412.xlsx"
+            ),
             "shopee_products_daily_",
         ),
         (
             "shopee",
             "analytics",
-            Path("temp/downloads/task-1/shopee/acc/shop/analytics/daily/traffic_overview_20260412_20260412.xlsx"),
+            Path(
+                "temp/downloads/task-1/shopee/acc/shop/analytics/daily/traffic_overview_20260412_20260412.xlsx"
+            ),
             "shopee_analytics_daily_",
         ),
         (
             "tiktok",
             "products",
-            Path("temp/downloads/task-1/tiktok/acc/shop/products/daily/product_list.xlsx"),
+            Path(
+                "temp/downloads/task-1/tiktok/acc/shop/products/daily/product_list.xlsx"
+            ),
             "tiktok_products_daily_",
         ),
         (
             "tiktok",
             "analytics",
-            Path("temp/downloads/task-1/tiktok/acc/shop/analytics/daily/Overview_My Business Performance_20260413105132.xlsx"),
+            Path(
+                "temp/downloads/task-1/tiktok/acc/shop/analytics/daily/Overview_My Business Performance_20260413105132.xlsx"
+            ),
             "tiktok_analytics_daily_",
         ),
     ],
@@ -536,14 +620,18 @@ async def test_executor_process_files_does_not_add_platform_sub_domain_for_produ
     download_file.parent.mkdir(parents=True, exist_ok=True)
     download_file.write_text("demo", encoding="utf-8")
 
-    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+    monkeypatch.setattr(
+        executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False
+    )
 
     captured = {}
 
     import modules.services.catalog_scanner as catalog_scanner_module
     from modules.services.metadata_manager import MetadataManager
 
-    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: 123)
+    monkeypatch.setattr(
+        catalog_scanner_module, "register_single_file", lambda file_path: 123
+    )
 
     def _capture_meta(file_path, business_metadata, collection_info):
         captured["business_metadata"] = business_metadata
@@ -586,21 +674,38 @@ async def test_executor_process_files_does_not_add_platform_sub_domain_for_produ
 
 
 @pytest.mark.asyncio
-async def test_executor_process_files_normalizes_miaoshou_orders_into_business_platform_files(tmp_path, monkeypatch):
+async def test_executor_process_files_normalizes_miaoshou_orders_into_business_platform_files(
+    tmp_path, monkeypatch
+):
     raw_dir = tmp_path / "custom-raw-root"
-    download_root = tmp_path / "temp" / "downloads" / "task-1" / "miaoshou" / "acc" / "shop" / "orders" / "tiktok" / "manual"
+    download_root = (
+        tmp_path
+        / "temp"
+        / "downloads"
+        / "task-1"
+        / "miaoshou"
+        / "acc"
+        / "shop"
+        / "orders"
+        / "tiktok"
+        / "manual"
+    )
     download_root.mkdir(parents=True, exist_ok=True)
     download_file = download_root / "export.xls"
     download_file.write_text("demo", encoding="utf-8")
 
-    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+    monkeypatch.setattr(
+        executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False
+    )
 
     captured = {}
 
     import modules.services.catalog_scanner as catalog_scanner_module
     from modules.services.metadata_manager import MetadataManager
 
-    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: 123)
+    monkeypatch.setattr(
+        catalog_scanner_module, "register_single_file", lambda file_path: 123
+    )
 
     def _capture_meta(file_path, business_metadata, collection_info):
         captured["business_metadata"] = business_metadata
@@ -614,7 +719,9 @@ async def test_executor_process_files_normalizes_miaoshou_orders_into_business_p
     )
 
     executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
-    executor._infer_data_domain_from_path = lambda file_path, data_domains, idx: "orders"
+    executor._infer_data_domain_from_path = (
+        lambda file_path, data_domains, idx: "orders"
+    )
 
     processed = await CollectionExecutorV2._process_files(
         executor,
@@ -634,31 +741,49 @@ async def test_executor_process_files_normalizes_miaoshou_orders_into_business_p
 
 
 def test_inventory_domain_resolves_snapshot_even_when_task_granularity_is_monthly():
-    from modules.apps.collection_center.landing_semantics import resolve_business_granularity
+    from modules.apps.collection_center.landing_semantics import (
+        resolve_business_granularity,
+    )
 
-    assert resolve_business_granularity(data_domain="inventory", task_granularity="monthly") == "snapshot"
+    assert (
+        resolve_business_granularity(
+            data_domain="inventory", task_granularity="monthly"
+        )
+        == "snapshot"
+    )
 
 
 def test_orders_domain_keeps_task_granularity():
-    from modules.apps.collection_center.landing_semantics import resolve_business_granularity
+    from modules.apps.collection_center.landing_semantics import (
+        resolve_business_granularity,
+    )
 
-    assert resolve_business_granularity(data_domain="orders", task_granularity="monthly") == "monthly"
+    assert (
+        resolve_business_granularity(data_domain="orders", task_granularity="monthly")
+        == "monthly"
+    )
 
 
 @pytest.mark.asyncio
-async def test_executor_process_files_forces_inventory_snapshot_granularity(tmp_path, monkeypatch):
+async def test_executor_process_files_forces_inventory_snapshot_granularity(
+    tmp_path, monkeypatch
+):
     raw_dir = tmp_path / "custom-raw-root"
     download_file = tmp_path / "inventory_source.xlsx"
     download_file.write_text("demo", encoding="utf-8")
 
-    monkeypatch.setattr(executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False)
+    monkeypatch.setattr(
+        executor_module, "get_data_raw_dir", lambda: raw_dir, raising=False
+    )
 
     captured = {}
 
     import modules.services.catalog_scanner as catalog_scanner_module
     from modules.services.metadata_manager import MetadataManager
 
-    monkeypatch.setattr(catalog_scanner_module, "register_single_file", lambda file_path: 123)
+    monkeypatch.setattr(
+        catalog_scanner_module, "register_single_file", lambda file_path: 123
+    )
 
     def _capture_meta(file_path, business_metadata, collection_info):
         captured["file_path"] = file_path
@@ -673,7 +798,9 @@ async def test_executor_process_files_forces_inventory_snapshot_granularity(tmp_
     )
 
     executor = CollectionExecutorV2.__new__(CollectionExecutorV2)
-    executor._infer_data_domain_from_path = lambda file_path, data_domains, idx: "inventory"
+    executor._infer_data_domain_from_path = (
+        lambda file_path, data_domains, idx: "inventory"
+    )
     executor._infer_sub_domain_from_path = lambda file_path, data_domain=None: ""
 
     processed = await CollectionExecutorV2._process_files(

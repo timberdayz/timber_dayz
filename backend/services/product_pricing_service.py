@@ -62,7 +62,9 @@ def compute_cost_floor(
     return _money(cost / denominator)
 
 
-def compute_discount_guard(*, reference_selling_price, discount_rate) -> Optional[Decimal]:
+def compute_discount_guard(
+    *, reference_selling_price, discount_rate
+) -> Optional[Decimal]:
     """参考售价按当前档折扣率折算的纪律线。"""
     price = _decimal(reference_selling_price)
     if price is None:
@@ -71,7 +73,9 @@ def compute_discount_guard(*, reference_selling_price, discount_rate) -> Optiona
     return _money(price * (Decimal("1") - rate))
 
 
-def select_restock_tier(policies: Iterable[dict], days_since_restock: Optional[int]) -> Optional[dict]:
+def select_restock_tier(
+    policies: Iterable[dict], days_since_restock: Optional[int]
+) -> Optional[dict]:
     """按库龄命中档位；库龄缺失时回落 min_restock_days 最小的一行。"""
     rows = [p for p in policies if p is not None]
     if not rows:
@@ -206,12 +210,14 @@ def compute_sku_pricing(
     platform_creator_rate = _decimal(platform_creator_commission_rate)
     override = _decimal(min_selling_price_override)
     return {
-        "creator_commission_rate": float(sku_creator_rate) if sku_creator_rate is not None else None,
+        "creator_commission_rate": (
+            float(sku_creator_rate) if sku_creator_rate is not None else None
+        ),
         # 平台兜底值：前端要用它做「达人佣金率」输入框的 placeholder
         # （spec §5.4：留空 = 未单独设置 = 按平台默认计算，输入框要提示兜底值）。
         # 它**不是** SKU 的值，不参与任何计算，只用于展示；
         # 注意取的是**平台默认值本身**，不是解析后的 creator_rate
-        #（SKU 自己设了 15% 时，兜底值仍是平台的 6.06%）。
+        # （SKU 自己设了 15% 时，兜底值仍是平台的 6.06%）。
         "creator_commission_rate_fallback": (
             float(platform_creator_rate) if platform_creator_rate is not None else None
         ),
@@ -220,7 +226,9 @@ def compute_sku_pricing(
             float(deepest_policy["discount_rate"]) if deepest_policy else None
         ),
         "min_selling_price": (
-            float(pricing["min_selling_price"]) if pricing["min_selling_price"] is not None else None
+            float(pricing["min_selling_price"])
+            if pricing["min_selling_price"] is not None
+            else None
         ),
         "min_selling_price_source": pricing["source"],
         "min_selling_price_is_override": pricing["is_override"],
@@ -236,8 +244,10 @@ def compute_sku_pricing(
         "pricing_tier_min_restock_days": policy["min_restock_days"] if policy else None,
         "pricing_days_since_restock": days_since_restock,
         "pricing_tier_source": (
-        "restock_days" if days_since_restock is not None else "fallback_no_restock_days"
-    ),
+            "restock_days"
+            if days_since_restock is not None
+            else "fallback_no_restock_days"
+        ),
     }
 
 

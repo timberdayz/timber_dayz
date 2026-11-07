@@ -54,9 +54,9 @@ def test_pricing_policy_table_is_synced_before_dependent_tables():
     names = [table for _schema, table in module.PRODUCT_CENTER_TABLES]
     policy_at = names.index("sku_pricing_policies")
     profiles_at = names.index("sku_operating_profiles")
-    assert policy_at < profiles_at, (
-        "sku_pricing_policies 必须排在 sku_operating_profiles 之前"
-    )
+    assert (
+        policy_at < profiles_at
+    ), "sku_pricing_policies 必须排在 sku_operating_profiles 之前"
 
 
 def test_truncate_order_is_reversed_insert_order():

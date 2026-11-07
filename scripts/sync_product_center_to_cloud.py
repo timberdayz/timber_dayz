@@ -153,7 +153,10 @@ def _existing_tables(engine, schema: str) -> set[str]:
 
 def _count_rows(engine, schema: str, table: str) -> int:
     with engine.connect() as conn:
-        return int(conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."{table}"')).scalar() or 0)
+        return int(
+            conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."{table}"')).scalar()
+            or 0
+        )
 
 
 def _current_backup_dir() -> Path:
@@ -178,7 +181,9 @@ def cmd_plan(_args) -> int:
         )
 
     if missing:
-        print(f"\n[ABORT] {len(missing)} table(s) missing on cloud: {', '.join(missing)}")
+        print(
+            f"\n[ABORT] {len(missing)} table(s) missing on cloud: {', '.join(missing)}"
+        )
         return 1
 
     print(
@@ -198,7 +203,9 @@ def cmd_backup(_args) -> int:
     for schema, table in PRODUCT_CENTER_TABLES:
         target = backup_dir / f"{schema}.{table}.csv"
         if table not in _existing_tables(cloud_engine, schema):
-            print(f"[SKIP] {schema}.{table}: does not exist on cloud (creating empty marker)")
+            print(
+                f"[SKIP] {schema}.{table}: does not exist on cloud (creating empty marker)"
+            )
             target.touch()
             continue
         raw_conn = cloud_engine.raw_connection()
@@ -237,7 +244,10 @@ def cmd_overwrite(args) -> int:
         key=lambda p: p.name,
     )
     if not backup_dirs:
-        print("[REFUSED] no backup directory found under backups/. Run `backup` first.", file=sys.stderr)
+        print(
+            "[REFUSED] no backup directory found under backups/. Run `backup` first.",
+            file=sys.stderr,
+        )
         return 2
     latest = backup_dirs[-1]
     non_empty = [p for p in latest.glob("*.csv") if p.stat().st_size > 0]
@@ -247,12 +257,17 @@ def cmd_overwrite(args) -> int:
             file=sys.stderr,
         )
         return 2
-    print(f"[GATE] Fresh backup confirmed: {latest} ({len(non_empty)} non-empty CSV files)")
+    print(
+        f"[GATE] Fresh backup confirmed: {latest} ({len(non_empty)} non-empty CSV files)"
+    )
 
     # Verify schema first.
     for schema, table in PRODUCT_CENTER_TABLES:
         if table not in _existing_tables(cloud_engine, schema):
-            print(f"[ABORT] {schema}.{table} missing on cloud. Refusing to truncate.", file=sys.stderr)
+            print(
+                f"[ABORT] {schema}.{table} missing on cloud. Refusing to truncate.",
+                file=sys.stderr,
+            )
             return 1
 
     # 【破坏性操作之前的闸门】源表关键内容为空时拒绝清空云端。
@@ -279,7 +294,9 @@ def cmd_overwrite(args) -> int:
     print("\n[STEP 1] Truncate cloud tables (reverse order)")
     with cloud_engine.begin() as conn:
         for schema, table in TRUNCATE_ORDER:
-            conn.execute(text(f'TRUNCATE "{schema}"."{table}" RESTART IDENTITY CASCADE'))
+            conn.execute(
+                text(f'TRUNCATE "{schema}"."{table}" RESTART IDENTITY CASCADE')
+            )
             print(f"  truncated {schema}.{table}")
 
     # Copy in insert order.
@@ -304,7 +321,9 @@ def cmd_overwrite(args) -> int:
         with cloud_engine.begin() as cloud_conn:
             for i in range(0, len(rows), BATCH_SIZE):
                 batch = rows[i : i + BATCH_SIZE]
-                params = [dict(zip([f"p{j}" for j in range(len(cols))], row)) for row in batch]
+                params = [
+                    dict(zip([f"p{j}" for j in range(len(cols))], row)) for row in batch
+                ]
                 cloud_conn.execute(insert_sql, params)
                 written += len(batch)
         print(f"  {schema}.{table}: wrote {written} rows")
@@ -322,7 +341,9 @@ def cmd_overwrite(args) -> int:
         ok = cloud_n == local_n and cloud_n > 0
         if not ok:
             failed.append(f"{schema}.{table} (local={local_n}, cloud={cloud_n})")
-        print(f"  [CHECK] {schema}.{table}: cloud={cloud_n} local={local_n} {'OK' if ok else 'FAIL'}")
+        print(
+            f"  [CHECK] {schema}.{table}: cloud={cloud_n} local={local_n} {'OK' if ok else 'FAIL'}"
+        )
     if failed:
         print(
             "[FAIL] 关键表校验未通过："

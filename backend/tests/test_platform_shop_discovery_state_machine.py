@@ -89,7 +89,9 @@ def _account(**kwargs) -> ShopAccount:
 
 
 @pytest.mark.asyncio
-async def test_runtime_discovery_marks_unmatched_when_nothing_lines_up(discovery_session):
+async def test_runtime_discovery_marks_unmatched_when_nothing_lines_up(
+    discovery_session,
+):
     """账号自己还没有平台编号, 探测值又谁都不属于 ⇒ **什么都没对上**。
 
     这条以前会落成 ``detected_single_bound`` —— 看着像绑定成功,
@@ -272,7 +274,9 @@ async def discovery_client(discovery_session):
                 "is_active": True,
                 "status": "active",
                 "is_superuser": True,
-                "roles": [type("Role", (), {"role_code": "admin", "role_name": "admin"})()],
+                "roles": [
+                    type("Role", (), {"role_code": "admin", "role_name": "admin"})()
+                ],
             },
         )()
 
@@ -405,7 +409,9 @@ async def test_api_issues_summary_endpoint(discovery_client, discovery_session):
     )
     await discovery_session.commit()
 
-    response = await discovery_client.get("/api/platform-shop-discoveries/issues/summary")
+    response = await discovery_client.get(
+        "/api/platform-shop-discoveries/issues/summary"
+    )
     assert response.status_code == 200
     payload = response.json()
     assert payload["issue_count"] == 1

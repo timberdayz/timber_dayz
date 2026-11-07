@@ -111,7 +111,9 @@ async def load_master_identities(
 
     查不到的账号**不会**出现在结果里(调用方据此留空编号)。
     """
-    ids = [str(item or "").strip() for item in shop_account_ids if str(item or "").strip()]
+    ids = [
+        str(item or "").strip() for item in shop_account_ids if str(item or "").strip()
+    ]
     if not ids:
         return {}
 
@@ -210,7 +212,9 @@ def resolve_master_identity_for_account(account: Any) -> Optional[MasterShopIden
         session = SessionLocal()
         try:
             row = session.execute(
-                select(ShopAccount).where(ShopAccount.shop_account_id == shop_account_id)
+                select(ShopAccount).where(
+                    ShopAccount.shop_account_id == shop_account_id
+                )
             ).scalar_one_or_none()
         finally:
             session.close()

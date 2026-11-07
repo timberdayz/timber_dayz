@@ -8,6 +8,7 @@ from testcontainers.postgres import PostgresContainer
 
 from backend.services.data_pipeline.refresh_runner import execute_sql_target
 
+
 def _normalized_sql() -> str:
     sql_text = Path("sql/semantic/orders_atomic.sql").read_text(encoding="utf-8")
     return "".join(sql_text.lower().split())
@@ -47,7 +48,9 @@ def test_orders_atomic_appends_b_cost_fields_after_legacy_columns_for_replace_sa
     sql_text = Path("sql/semantic/orders_atomic.sql").read_text(encoding="utf-8")
 
     select_tail = sql_text.rsplit("SELECT", 1)[-1]
-    product_quantity_pos = select_tail.find("COALESCE(product_quantity, 0) AS product_quantity")
+    product_quantity_pos = select_tail.find(
+        "COALESCE(product_quantity, 0) AS product_quantity"
+    )
     purchase_amount_pos = select_tail.find("purchase_amount,")
 
     assert product_quantity_pos != -1
@@ -105,8 +108,7 @@ def test_orders_atomic_uses_required_platform_total_cost_formulas():
         "coalesce(platform_commission,0)+"
         "coalesce(platform_deduction_fee,0)+"
         "coalesce(platform_voucher,0)+"
-        "coalesce(platform_service_fee,0)"
-        in normalized
+        "coalesce(platform_service_fee,0)" in normalized
     )
 
     assert (
@@ -276,7 +278,9 @@ async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(
+                session, "semantic.shop_identity_resolution_candidates"
+            )
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             result = await session.execute(
@@ -393,7 +397,9 @@ async def test_orders_atomic_keeps_view_queryable_when_b_cost_amount_strings_are
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(
+                session, "semantic.shop_identity_resolution_candidates"
+            )
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             result = await session.execute(
@@ -478,13 +484,16 @@ async def test_orders_atomic_falls_back_when_b_cost_alias_value_is_empty_string(
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(
+                session, "semantic.shop_identity_resolution_candidates"
+            )
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT
                             order_id,
                             purchase_amount,
@@ -494,9 +503,12 @@ async def test_orders_atomic_falls_back_when_b_cost_alias_value_is_empty_string(
                         FROM semantic.fact_orders_atomic
                         WHERE order_id = 'TK-BCOST-FALLBACK-1'
                         """
+                        )
                     )
                 )
-            ).mappings().one()
+                .mappings()
+                .one()
+            )
 
         assert row["order_id"] == "TK-BCOST-FALLBACK-1"
         assert float(row["purchase_amount"]) == 88.0

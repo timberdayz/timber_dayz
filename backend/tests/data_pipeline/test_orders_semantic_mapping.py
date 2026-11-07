@@ -41,7 +41,9 @@ def test_orders_atomic_sql_exposes_core_standard_fields():
 
 
 def test_orders_atomic_sql_maps_current_orders_amount_and_store_fields():
-    sql_text = Path("sql/semantic/orders_atomic.sql").read_text(encoding="utf-8", errors="replace")
+    sql_text = Path("sql/semantic/orders_atomic.sql").read_text(
+        encoding="utf-8", errors="replace"
+    )
 
     assert "paid_amount_raw" in sql_text
     assert "buyer_payment_rmb" in sql_text
@@ -57,10 +59,12 @@ def test_orders_atomic_sql_resolves_shop_aliases_via_shop_accounts_and_aliases()
     改走 ``semantic.shop_identity_resolution_candidates``；别名表只在候选视图里被读。
     断言必须跟着这个事实走 —— 继续断言别名表出现在订单视图里，改造后必然失败。
     """
-    sql_text = Path("sql/semantic/orders_atomic.sql").read_text(encoding="utf-8", errors="replace")
-    candidates_text = Path("sql/semantic/shop_identity_resolution_candidates.sql").read_text(
+    sql_text = Path("sql/semantic/orders_atomic.sql").read_text(
         encoding="utf-8", errors="replace"
     )
+    candidates_text = Path(
+        "sql/semantic/shop_identity_resolution_candidates.sql"
+    ).read_text(encoding="utf-8", errors="replace")
 
     assert "core.shop_accounts" in sql_text
     assert "semantic.shop_identity_resolution_candidates" in sql_text
@@ -181,19 +185,25 @@ async def test_orders_monthly_atomic_metric_date_prefers_order_time_over_metric_
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(
+                session, "semantic.shop_identity_resolution_candidates"
+            )
             await execute_sql_target(session, "semantic.fact_orders_monthly_atomic_mv")
             await session.commit()
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT metric_date, order_id, paid_amount, profit
                         FROM semantic.fact_orders_monthly_atomic_mv
                         """
+                        )
                     )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
 
         assert row is not None
         assert row["metric_date"] == date(2026, 1, 1)
@@ -246,26 +256,34 @@ async def test_orders_monthly_atomic_prefers_rmb_paid_amount_over_local_paid_amo
                 ),
                 {
                     "raw_data": json.dumps(raw_data, ensure_ascii=False),
-                    "header_columns": json.dumps(list(raw_data.keys()), ensure_ascii=False),
+                    "header_columns": json.dumps(
+                        list(raw_data.keys()), ensure_ascii=False
+                    ),
                 },
             )
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(
+                session, "semantic.shop_identity_resolution_candidates"
+            )
             await execute_sql_target(session, "semantic.fact_orders_monthly_atomic_mv")
             await session.commit()
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT order_id, paid_amount, profit
                         FROM semantic.fact_orders_monthly_atomic_mv
                         WHERE order_id = 'SO-RMB-PAID-1'
                         """
+                        )
                     )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
 
         assert row is not None
         assert float(row["paid_amount"]) == 20.0
@@ -308,20 +326,26 @@ async def test_orders_atomic_prefers_rmb_profit_over_local_profit():
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(
+                session, "semantic.shop_identity_resolution_candidates"
+            )
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT order_id, paid_amount, profit
                         FROM semantic.fact_orders_atomic
                         WHERE order_id = 'SO-RMB-PROFIT-1'
                         """
+                        )
                     )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
 
         assert row is not None
         assert float(row["paid_amount"]) == 20.0
@@ -393,19 +417,25 @@ async def test_orders_atomic_resolves_shop_alias_via_shop_account_alias():
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(
+                session, "semantic.shop_identity_resolution_candidates"
+            )
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             rows = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT platform_code, shop_id, order_id, paid_amount
                         FROM semantic.fact_orders_atomic
                         """
+                        )
                     )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
 
         assert len(rows) == 1
         assert rows[0]["platform_code"] == "shopee"
@@ -472,19 +502,25 @@ async def test_orders_atomic_resolves_prefixed_store_label_via_normalized_alias(
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(
+                session, "semantic.shop_identity_resolution_candidates"
+            )
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             rows = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT platform_code, shop_id, order_id, paid_amount, profit
                         FROM semantic.fact_orders_atomic
                         """
+                        )
                     )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
 
         assert len(rows) == 1
         assert rows[0]["platform_code"] == "shopee"
@@ -530,19 +566,25 @@ async def test_orders_atomic_marks_account_level_shop_id_without_alias_as_unknow
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(
+                session, "semantic.shop_identity_resolution_candidates"
+            )
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             rows = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT platform_code, shop_id, order_id
                         FROM semantic.fact_orders_atomic
                         """
+                        )
                     )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
 
         assert len(rows) == 1
         assert rows[0]["platform_code"] == "shopee"
@@ -597,19 +639,25 @@ async def test_orders_atomic_resolves_shop_alias_via_shop_account_store_name_fal
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(
+                session, "semantic.shop_identity_resolution_candidates"
+            )
             await execute_sql_target(session, "semantic.fact_orders_atomic")
             await session.commit()
             rows = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT platform_code, shop_id, order_id, paid_amount
                         FROM semantic.fact_orders_atomic
                         """
+                        )
                     )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
 
         assert len(rows) == 1
         assert rows[0]["platform_code"] == "tiktok"
@@ -676,20 +724,26 @@ async def test_orders_monthly_atomic_resolves_tiktok_alias_to_canonical_shop_id(
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(
+                session, "semantic.shop_identity_resolution_candidates"
+            )
             await execute_sql_target(session, "semantic.fact_orders_monthly_atomic_mv")
             await execute_sql_target(session, "semantic.fact_orders_monthly_atomic")
             await session.commit()
             rows = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT platform_code, shop_id, order_id, paid_amount, profit
                         FROM semantic.fact_orders_monthly_atomic
                         """
+                        )
                     )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
 
         assert len(rows) == 1
         assert rows[0]["platform_code"] == "tiktok"
@@ -768,26 +822,34 @@ async def test_orders_monthly_atomic_uses_account_authority_over_generic_source_
                 ),
                 {
                     "raw_data": json.dumps(raw_data, ensure_ascii=False),
-                    "header_columns": json.dumps(list(raw_data.keys()), ensure_ascii=False),
+                    "header_columns": json.dumps(
+                        list(raw_data.keys()), ensure_ascii=False
+                    ),
                 },
             )
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.shop_identity_resolution_candidates")
+            await execute_sql_target(
+                session, "semantic.shop_identity_resolution_candidates"
+            )
             await execute_sql_target(session, "semantic.fact_orders_monthly_atomic_mv")
             await session.commit()
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT shop_id, resolved_shop_account_id, resolution_method, identity_source_value
                         FROM semantic.fact_orders_monthly_atomic_mv
                         WHERE order_id = 'SO-SG-3-1'
                         """
+                        )
                     )
                 )
-            ).mappings().one()
+                .mappings()
+                .one()
+            )
 
         assert row["shop_id"] == "1308200832"
         assert row["resolved_shop_account_id"] == "shopee_sg_xhkj33_local"
@@ -888,7 +950,9 @@ async def test_shop_month_kpi_aligns_orders_alias_and_traffic_platform_shop_id()
                 ),
                 {
                     "order_raw": json.dumps(order_raw, ensure_ascii=False),
-                    "order_headers": json.dumps(list(order_raw.keys()), ensure_ascii=False),
+                    "order_headers": json.dumps(
+                        list(order_raw.keys()), ensure_ascii=False
+                    ),
                 },
             )
             await session.execute(
@@ -919,18 +983,22 @@ async def test_shop_month_kpi_aligns_orders_alias_and_traffic_platform_shop_id()
                 await execute_sql_target(session, target)
             await session.commit()
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT shop_id, order_count, visitor_count, page_views, uv_conversion_rate, pv_conversion_rate
                         FROM mart.shop_month_kpi
                         WHERE period_month = DATE '2026-06-01'
                           AND platform_code = 'shopee'
                           AND shop_id = '1308200832'
                         """
+                        )
                     )
                 )
-            ).mappings().one()
+                .mappings()
+                .one()
+            )
 
         assert row["shop_id"] == "1308200832"
         assert float(row["order_count"]) == 1.0

@@ -61,9 +61,9 @@ def test_cost_completeness_is_written_from_expected_section_only():
         "cost_completeness 必须固定取 expected 段，"
         f"否则 actual_recost 版本的 estimated/mixed/actual 会写进这一列；当前：{line.strip()}"
     )
-    assert "section.get(" not in line, (
-        f"cost_completeness 不能随 calculation_basis 变；当前：{line.strip()}"
-    )
+    assert (
+        "section.get(" not in line
+    ), f"cost_completeness 不能随 calculation_basis 变；当前：{line.strip()}"
 
 
 def test_spu_response_carries_active_flag():

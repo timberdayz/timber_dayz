@@ -268,7 +268,9 @@ async def test_high_risk_admin_routes_reject_non_admin_users(
 
 
 @pytest.mark.asyncio
-async def test_inventory_view_routes_require_authenticated_user(auth_contract_client: AsyncClient):
+async def test_inventory_view_routes_require_authenticated_user(
+    auth_contract_client: AsyncClient,
+):
     balances = await auth_contract_client.get("/api/inventory/balances")
     overview = await auth_contract_client.get("/api/inventory-overview/summary")
 
@@ -333,7 +335,9 @@ async def test_inventory_write_routes_require_admin(
         ],
     }
 
-    unauthenticated = await auth_contract_client.post("/api/inventory/adjustments", json=payload)
+    unauthenticated = await auth_contract_client.post(
+        "/api/inventory/adjustments", json=payload
+    )
     assert unauthenticated.status_code == 401
 
     from backend.dependencies.auth import get_current_user
@@ -343,6 +347,8 @@ async def test_inventory_write_routes_require_admin(
         return _make_user("operator")
 
     app.dependency_overrides[get_current_user] = override_current_user
-    forbidden = await auth_contract_client.post("/api/inventory/adjustments", json=payload)
+    forbidden = await auth_contract_client.post(
+        "/api/inventory/adjustments", json=payload
+    )
 
     assert forbidden.status_code == 403

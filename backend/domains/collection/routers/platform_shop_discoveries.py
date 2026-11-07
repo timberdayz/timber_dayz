@@ -84,12 +84,16 @@ async def confirm_platform_shop_discovery(
 ):
     service = get_platform_shop_discovery_service()
     try:
-        return await service.confirm_discovery(db, discovery_id, payload.shop_account_id)
+        return await service.confirm_discovery(
+            db, discovery_id, payload.shop_account_id
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/{discovery_id}/create-shop-account", response_model=PlatformShopDiscoveryResponse)
+@router.post(
+    "/{discovery_id}/create-shop-account", response_model=PlatformShopDiscoveryResponse
+)
 async def create_shop_account_from_discovery(
     discovery_id: int,
     payload: PlatformShopDiscoveryCreateShopAccountRequest,
@@ -97,6 +101,8 @@ async def create_shop_account_from_discovery(
 ):
     service = get_platform_shop_discovery_service()
     try:
-        return await service.create_shop_account_from_discovery(db, discovery_id, payload)
+        return await service.create_shop_account_from_discovery(
+            db, discovery_id, payload
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

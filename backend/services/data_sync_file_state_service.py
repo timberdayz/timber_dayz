@@ -476,7 +476,10 @@ def resolve_file_disposition(
             error_code="MISSING_VARIANT",
             extras=extras,
         )
-    if template == TEMPLATE_STATUS_MISSING or governance == GOVERNANCE_STATUS_MISSING_FAMILY:
+    if (
+        template == TEMPLATE_STATUS_MISSING
+        or governance == GOVERNANCE_STATUS_MISSING_FAMILY
+    ):
         return _disposition(
             FILE_STATE_BLOCKED_MISSING_TEMPLATE,
             action=FILE_ACTION_MANUAL_MAPPING,
@@ -496,7 +499,10 @@ def resolve_file_disposition(
             error_code="SEMANTIC_INVALID",
             extras=extras,
         )
-    if governance == GOVERNANCE_STATUS_FILE_MISSING or status == CATALOG_FILE_STATUS_SOURCE_MISSING:
+    if (
+        governance == GOVERNANCE_STATUS_FILE_MISSING
+        or status == CATALOG_FILE_STATUS_SOURCE_MISSING
+    ):
         return _disposition(
             FILE_STATE_SOURCE_MISSING,
             action=FILE_ACTION_MANUAL_REPAIR,
@@ -552,7 +558,7 @@ def resolve_file_disposition(
                 ),
                 error_code="TEMPLATE_UPDATE_REQUIRED",
                 extras=extras,
-        )
+            )
         return _disposition(
             FILE_STATE_BLOCKED_TEMPLATE_UPDATE,
             action=FILE_ACTION_AWAIT_TEMPLATE_UPDATE,
@@ -631,9 +637,7 @@ def resolve_file_disposition(
         action=FILE_ACTION_AUTO_SYNC,
         owner=FILE_OWNER_SYSTEM,
         needs_manual=False,
-        reason=(
-            "由其他粒度的变体接管解释, 可直接入库" if takeover_hit else None
-        ),
+        reason=("由其他粒度的变体接管解释, 可直接入库" if takeover_hit else None),
         extras=extras,
     )
 

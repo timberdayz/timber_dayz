@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.account_proxy_config import extract_proxy_config
 from backend.services.encryption_service import get_encryption_service
-from backend.services.platform_login_entry_service import normalize_main_account_login_url
+from backend.services.platform_login_entry_service import (
+    normalize_main_account_login_url,
+)
 from backend.services.shop_account_identity_service import (
     identity_from_shop_account_row,
     pick_master_platform_shop_id,

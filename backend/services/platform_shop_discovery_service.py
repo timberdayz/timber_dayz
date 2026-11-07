@@ -157,9 +157,7 @@ class PlatformShopDiscoveryService:
             ShopAccount.platform_shop_id == detected,
         )
         if exclude_shop_account_id:
-            stmt = stmt.where(
-                ShopAccount.shop_account_id != exclude_shop_account_id
-            )
+            stmt = stmt.where(ShopAccount.shop_account_id != exclude_shop_account_id)
         result = await db.execute(stmt)
         owners = list(result.scalars().all())
         return owners[0] if owners else None
@@ -259,7 +257,9 @@ class PlatformShopDiscoveryService:
                 )
             )
         ).scalar_one_or_none()
-        current = str((shop_account.platform_shop_id if shop_account else "") or "").strip()
+        current = str(
+            (shop_account.platform_shop_id if shop_account else "") or ""
+        ).strip()
 
         decision, owner = await self._guard_platform_shop_id_binding(
             db,
@@ -288,9 +288,7 @@ class PlatformShopDiscoveryService:
             detected_store_name=detected_store_name,
             detected_platform_shop_id=detected_platform_shop_id,
             detected_region=detected_region,
-            candidate_shop_account_ids=(
-                [owner] if owner else [shop_account_id]
-            ),
+            candidate_shop_account_ids=([owner] if owner else [shop_account_id]),
             status=status,
             raw_payload=raw_payload or {},
         )
@@ -566,7 +564,9 @@ class PlatformShopDiscoveryService:
             only_issues: 只保留「需要人看一眼」的状态
                 (``PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES``)
         """
-        stmt = select(PlatformShopDiscovery).order_by(PlatformShopDiscovery.created_at.desc())
+        stmt = select(PlatformShopDiscovery).order_by(
+            PlatformShopDiscovery.created_at.desc()
+        )
 
         effective = {str(s).strip() for s in (statuses or []) if str(s).strip()}
         if only_issues:
@@ -610,7 +610,9 @@ class PlatformShopDiscoveryService:
             PlatformShopDiscovery.status,
             PlatformShopDiscovery.created_at,
         ).where(
-            PlatformShopDiscovery.status.in_(sorted(PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES))
+            PlatformShopDiscovery.status.in_(
+                sorted(PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES)
+            )
         )
 
         if platform:
@@ -635,7 +637,9 @@ class PlatformShopDiscoveryService:
         )
 
         issue_rows = (
-            await db.execute(issue_stmt.order_by(PlatformShopDiscovery.created_at.desc()))
+            await db.execute(
+                issue_stmt.order_by(PlatformShopDiscovery.created_at.desc())
+            )
         ).all()
         issues = [
             {

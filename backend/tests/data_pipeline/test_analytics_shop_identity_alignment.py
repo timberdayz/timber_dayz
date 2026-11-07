@@ -101,20 +101,28 @@ async def test_analytics_monthly_atomic_resolves_shop_account_identity_to_canoni
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.fact_analytics_monthly_atomic", resolve_dependencies=True)
+            await execute_sql_target(
+                session,
+                "semantic.fact_analytics_monthly_atomic",
+                resolve_dependencies=True,
+            )
             await session.commit()
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT shop_id, visitor_count, page_views
                         FROM semantic.fact_analytics_monthly_atomic
                         WHERE platform_code = 'tiktok'
                           AND metric_date = DATE '2026-03-01'
                         """
+                        )
                     )
                 )
-            ).mappings().one()
+                .mappings()
+                .one()
+            )
 
         assert row["shop_id"] == "1227491331"
         assert float(row["visitor_count"]) == 123.0
@@ -213,12 +221,17 @@ async def test_analytics_monthly_atomic_treats_dash_placeholders_as_null_metrics
             await session.commit()
 
         async with session_factory() as session:
-            await execute_sql_target(session, "semantic.fact_analytics_monthly_atomic", resolve_dependencies=True)
+            await execute_sql_target(
+                session,
+                "semantic.fact_analytics_monthly_atomic",
+                resolve_dependencies=True,
+            )
             await session.commit()
             row = (
-                await session.execute(
-                    text(
-                        """
+                (
+                    await session.execute(
+                        text(
+                            """
                         SELECT
                             visitor_count,
                             product_visitor_count,
@@ -231,9 +244,12 @@ async def test_analytics_monthly_atomic_treats_dash_placeholders_as_null_metrics
                         WHERE platform_code = 'shopee'
                           AND metric_date = DATE '2026-03-01'
                         """
+                        )
                     )
                 )
-            ).mappings().one()
+                .mappings()
+                .one()
+            )
 
         assert row["visitor_count"] is None
         assert row["product_visitor_count"] is None

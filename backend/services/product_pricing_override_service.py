@@ -48,13 +48,17 @@ async def get_platform_override(
 ) -> Optional[Decimal]:
     """取某 SKU 在某平台的人工覆盖值；没有则 None。"""
     row = (
-        await db.execute(
-            select(SkuPlatformPricing).where(
-                SkuPlatformPricing.sku_id == sku_id,
-                SkuPlatformPricing.platform_code == platform_code,
+        (
+            await db.execute(
+                select(SkuPlatformPricing).where(
+                    SkuPlatformPricing.sku_id == sku_id,
+                    SkuPlatformPricing.platform_code == platform_code,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if row is None:
         return None
     return _to_decimal(row.min_selling_price_override)
@@ -83,13 +87,17 @@ async def set_platform_override(
         raise ValueError("人工覆盖的最低售价必须大于 0")
 
     row = (
-        await db.execute(
-            select(SkuPlatformPricing).where(
-                SkuPlatformPricing.sku_id == sku_id,
-                SkuPlatformPricing.platform_code == platform_code,
+        (
+            await db.execute(
+                select(SkuPlatformPricing).where(
+                    SkuPlatformPricing.sku_id == sku_id,
+                    SkuPlatformPricing.platform_code == platform_code,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if row is None:
         row = SkuPlatformPricing(
             sku_id=sku_id,
@@ -120,13 +128,17 @@ async def clear_platform_override(
       不用再 INSERT 一次。
     """
     row = (
-        await db.execute(
-            select(SkuPlatformPricing).where(
-                SkuPlatformPricing.sku_id == sku_id,
-                SkuPlatformPricing.platform_code == platform_code,
+        (
+            await db.execute(
+                select(SkuPlatformPricing).where(
+                    SkuPlatformPricing.sku_id == sku_id,
+                    SkuPlatformPricing.platform_code == platform_code,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if row is None:
         return False
     row.min_selling_price_override = None

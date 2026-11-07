@@ -1188,7 +1188,8 @@ class ProductFinanceService:
             operating_profile_id=profile.profile_id,
             platform_code=profile.platform_code,
             warehouse_code=profile.warehouse_code,
-            assumption_version=data.get("assumption_version") or preview["assumption_version"],
+            assumption_version=data.get("assumption_version")
+            or preview["assumption_version"],
             scenario="base",
             selling_price=preview["net_revenue"]
             + Decimal(
@@ -1222,7 +1223,8 @@ class ProductFinanceService:
         preview = await self.preview_profit(data)
         row = SkuProfitEstimate(
             sku_id=preview["sku_id"],
-            assumption_version=data.get("assumption_version") or preview["assumption_version"],
+            assumption_version=data.get("assumption_version")
+            or preview["assumption_version"],
             scenario="base",
             selling_price=data["selling_price"],
             coupon_amount=data.get("coupon_amount", 0),

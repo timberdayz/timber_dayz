@@ -65,17 +65,29 @@ async def load_pricing_platforms(
     """
     codes: set[str] = set(platform_codes or ())
     rows = (
-        await db.execute(select(DimPlatform).where(DimPlatform.platform_role == "sales"))
-    ).scalars().all()
+        (
+            await db.execute(
+                select(DimPlatform).where(DimPlatform.platform_role == "sales")
+            )
+        )
+        .scalars()
+        .all()
+    )
     platforms = {row.platform_code: row for row in rows}
     if codes:
         missing = codes - set(platforms)
         if missing:
             extra = (
-                await db.execute(
-                    select(DimPlatform).where(DimPlatform.platform_code.in_(missing))
+                (
+                    await db.execute(
+                        select(DimPlatform).where(
+                            DimPlatform.platform_code.in_(missing)
+                        )
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             platforms.update({row.platform_code: row for row in extra})
     return platforms
 
@@ -126,8 +138,7 @@ async def load_pricing_context(
         )
         restock_rows = await load_current_inventory_ages(db, sku_ids)
         days_since_restock = {
-            sku_id: row.get("age_days")
-            for sku_id, row in restock_rows.items()
+            sku_id: row.get("age_days") for sku_id, row in restock_rows.items()
         }
         restock_source = "legacy_age_days"
 
@@ -168,14 +179,18 @@ async def load_platform_pricing_overrides(
     if not sku_ids or not platforms:
         return {}
     rows = (
-        await db.execute(
-            select(SkuPlatformPricing).where(
-                SkuPlatformPricing.sku_id.in_(sku_ids),
-                SkuPlatformPricing.platform_code.in_(list(platforms)),
-                SkuPlatformPricing.min_selling_price_override.is_not(None),
+        (
+            await db.execute(
+                select(SkuPlatformPricing).where(
+                    SkuPlatformPricing.sku_id.in_(sku_ids),
+                    SkuPlatformPricing.platform_code.in_(list(platforms)),
+                    SkuPlatformPricing.min_selling_price_override.is_not(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return {(row.sku_id, row.platform_code): row for row in rows}
 
 
@@ -189,7 +204,9 @@ def resolve_pricing_platform(context: dict, platform_code: Optional[str]):
     return context.get("platform")
 
 
-def resolve_pricing_platform_code(context: dict, platform_code: Optional[str]) -> Optional[str]:
+def resolve_pricing_platform_code(
+    context: dict, platform_code: Optional[str]
+) -> Optional[str]:
     """这次算底线的**实际**平台代码。
 
     不传平台时回落到历史 basis 平台 —— 前端要显示出来，

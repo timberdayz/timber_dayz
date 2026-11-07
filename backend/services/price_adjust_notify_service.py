@@ -106,9 +106,7 @@ def _numeric_changed(old: Any, new: Any) -> bool:
     return old_dec != new_dec
 
 
-def classify_direction(
-    old_price: Any, new_price: Any
-) -> Optional[str]:
+def classify_direction(old_price: Any, new_price: Any) -> Optional[str]:
     """这次变化的方向。
 
     返回 None 表示「底线数值没变」，不是一次需要通知的变更。
@@ -262,7 +260,9 @@ def build_context(
         "platform_code": platform_code,
         "min_selling_price": pricing.get("min_selling_price"),
         "min_selling_price_source": pricing.get("min_selling_price_source"),
-        "min_selling_price_is_override": bool(pricing.get("min_selling_price_is_override")),
+        "min_selling_price_is_override": bool(
+            pricing.get("min_selling_price_is_override")
+        ),
         "pricing_tier_source": pricing.get("pricing_tier_source"),
         "pricing_tier_label": pricing.get("pricing_tier_label"),
         # 档位的**身份**（库龄起点）：显示名可以改（阶段 3 就改过），
@@ -319,10 +319,14 @@ class PriceAdjustNotifyService:
             return {sku_id: None for sku_id in sku_ids}
 
         spu_rows = (
-            await self.db.execute(
-                select(DimSpu).where(DimSpu.spu.in_(set(spu_by_sku.values())))
+            (
+                await self.db.execute(
+                    select(DimSpu).where(DimSpu.spu.in_(set(spu_by_sku.values())))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         spu_map = {row.spu: row for row in spu_rows}
         return {sku_id: spu_map.get(spu_by_sku.get(sku_id)) for sku_id in sku_ids}
 
@@ -339,10 +343,14 @@ class PriceAdjustNotifyService:
         以前键只有 sku_id，于是 Shopee 的底线动了会被记成「TikTok 的底线也动了」。
         """
         sku_rows = (
-            await self.db.execute(
-                select(DimErpSku).where(DimErpSku.status == "active")
+            (
+                await self.db.execute(
+                    select(DimErpSku).where(DimErpSku.status == "active")
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if not sku_rows:
             return {}
 
@@ -379,8 +387,12 @@ class PriceAdjustNotifyService:
                     creator_commission_rate=resolve_effective_creator_rate(
                         context=context, sku_row=row, platform_code=platform_code
                     ),
-                    spu_return_loss_rate=linked_spu.return_loss_rate if linked_spu else None,
-                    spu_damage_rate=linked_spu.logistics_damage_rate if linked_spu else None,
+                    spu_return_loss_rate=(
+                        linked_spu.return_loss_rate if linked_spu else None
+                    ),
+                    spu_damage_rate=(
+                        linked_spu.logistics_damage_rate if linked_spu else None
+                    ),
                     reference_selling_price=row.reference_selling_price,
                     platform_code=platform_code,
                 )
@@ -395,8 +407,12 @@ class PriceAdjustNotifyService:
                     "min_selling_price": pricing.get("min_selling_price"),
                     "context": snapshot,
                     "age_days": days_since_restock,
-                    "current_qty": restock_row.get("current_qty") if restock_row else None,
-                    "inventory_value": restock_row.get("inventory_value") if restock_row else None,
+                    "current_qty": (
+                        restock_row.get("current_qty") if restock_row else None
+                    ),
+                    "inventory_value": (
+                        restock_row.get("inventory_value") if restock_row else None
+                    ),
                 }
         return states
 
@@ -479,7 +495,9 @@ class PriceAdjustNotifyService:
             cur_context = cur["context"]
             reason = classify_change_reason(prev_context, cur_context)
 
-            if direction == DIRECTION_UP and is_delisting_jump(prev_context, cur_context):
+            if direction == DIRECTION_UP and is_delisting_jump(
+                prev_context, cur_context
+            ):
                 # 下架造成的跳高：排除，但基线要跟上
                 silent.append(
                     {
@@ -541,7 +559,9 @@ class PriceAdjustNotifyService:
                         PriceAdjustBaseline.platform_code.in_(platform_codes),
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         }
 
         for entry in entries:

@@ -44,7 +44,12 @@ EXPECTED_ALIASES = (
     ("DAWIE Mall", "dawiemall", "tiktok_my_dawie_mall_local", "MY"),
     ("Explorers Mall", "explorersmall", "tiktok_ph_explorers_mall_local", "PH"),
     ("Malaysia(Flora Mall)", "malaysiafloramall", "tiktok_my_flora_mall_local", "MY"),
-    ("Philippines(DAJU Mall)", "philippinesdajumall", "tiktok_ph_daju_mall_local", "PH"),
+    (
+        "Philippines(DAJU Mall)",
+        "philippinesdajumall",
+        "tiktok_ph_daju_mall_local",
+        "PH",
+    ),
     ("Singapore(HX Home)", "singaporehxhome", "tiktok_sg_hx_home_local", "SG"),
 )
 
@@ -96,8 +101,12 @@ def _sql_regex_literals(sql_text: str) -> dict[str, str]:
         for literal in literals
         if "[" in literal and "+" in literal and not literal.startswith("^")
     ]
-    assert len(prefix) == 1, "迁移里应当有且只有一条平台前缀规则，实际：{0}".format(prefix)
-    assert len(separator) == 1, "迁移里应当有且只有一条分隔符规则，实际：{0}".format(separator)
+    assert len(prefix) == 1, "迁移里应当有且只有一条平台前缀规则，实际：{0}".format(
+        prefix
+    )
+    assert len(separator) == 1, "迁移里应当有且只有一条分隔符规则，实际：{0}".format(
+        separator
+    )
     return {"prefix": prefix[0], "separator": separator[0]}
 
 
@@ -297,5 +306,8 @@ def test_migration_is_chained_to_the_head():
     ``run_current_schema_migrations.py`` 的 ``walk_revisions(head="heads")`` 会出问题）。
     """
     module = _load_migration_module()
-    assert module.revision == "current_schema_20261116_add_tiktok_export_store_name_aliases"
+    assert (
+        module.revision
+        == "current_schema_20261116_add_tiktok_export_store_name_aliases"
+    )
     assert module.down_revision.startswith("current_schema_")

@@ -347,7 +347,9 @@ async def test_runtime_discovery_marks_conflict_when_id_owned_by_another(alias_s
 
 
 @pytest.mark.asyncio
-async def test_runtime_discovery_is_idempotent_when_detected_matches_current(alias_session):
+async def test_runtime_discovery_is_idempotent_when_detected_matches_current(
+    alias_session,
+):
     """探测值与账号当前编号一致 ⇒ 确认通过，且不产生别名。"""
     account = _account()
     alias_session.add(account)

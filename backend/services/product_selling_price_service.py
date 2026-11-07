@@ -153,7 +153,11 @@ def apply_selling_price_confirmation(
 
     old_price = _money(current_price)
     new_price_money = _money(new_price)
-    if old_price is not None and new_price_money is not None and old_price == new_price_money:
+    if (
+        old_price is not None
+        and new_price_money is not None
+        and old_price == new_price_money
+    ):
         # 价格没变 ⇒ 这不是一次新的确认，保留原确认日期
         values.pop("selling_price_confirmed_at", None)
         return values
@@ -227,7 +231,9 @@ def build_selling_price_preview(
         if current_value is not None and preview_value is not None:
             change = round(preview_value - current_value, 2)
             if current_value:
-                change_pct = round((preview_value - current_value) / current_value * 100, 1)
+                change_pct = round(
+                    (preview_value - current_value) / current_value * 100, 1
+                )
 
         override_locked = bool(current_pricing.get("min_selling_price_is_override"))
 
@@ -258,7 +264,9 @@ def build_selling_price_preview(
     return {
         "sku_id": getattr(sku_row, "sku_id", None),
         "sku_key": getattr(sku_row, "sku_key", None),
-        "reference_selling_price_current": _money(getattr(sku_row, "reference_selling_price", None)),
+        "reference_selling_price_current": _money(
+            getattr(sku_row, "reference_selling_price", None)
+        ),
         "reference_selling_price_preview": _money(reference_selling_price),
         "pricing_tier_label": tier_label,
         "pricing_tier_min_restock_days": tier_min_restock_days,

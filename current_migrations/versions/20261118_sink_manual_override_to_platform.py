@@ -159,13 +159,17 @@ def _clearance_view_exists() -> bool:
 
     用 ``pg_class`` 查而不是 ``has_table``：视图不是表，``has_table`` 对它不灵。
     """
-    row = op.get_bind().execute(
-        sa.text(
-            "SELECT 1 FROM pg_class t JOIN pg_namespace n ON n.oid = t.relnamespace "
-            "WHERE n.nspname = 'api' AND t.relname = 'sku_clearance_ranking_module' "
-            "AND t.relkind = 'v'"
+    row = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT 1 FROM pg_class t JOIN pg_namespace n ON n.oid = t.relnamespace "
+                "WHERE n.nspname = 'api' AND t.relname = 'sku_clearance_ranking_module' "
+                "AND t.relkind = 'v'"
+            )
         )
-    ).first()
+        .first()
+    )
     return row is not None
 
 
@@ -216,15 +220,19 @@ def _has_constraint(table: str, schema: str, name: str) -> bool:
     """约束是否存在（直接查 ``pg_constraint``，跨版本最稳）。"""
     if not _has_table(table, schema):
         return False
-    row = op.get_bind().execute(
-        sa.text(
-            "SELECT 1 FROM pg_constraint c "
-            "JOIN pg_class t ON t.oid = c.conrelid "
-            "JOIN pg_namespace n ON n.oid = t.relnamespace "
-            "WHERE n.nspname = :schema AND t.relname = :table AND c.conname = :name"
-        ),
-        {"schema": schema, "table": table, "name": name},
-    ).first()
+    row = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT 1 FROM pg_constraint c "
+                "JOIN pg_class t ON t.oid = c.conrelid "
+                "JOIN pg_namespace n ON n.oid = t.relnamespace "
+                "WHERE n.nspname = :schema AND t.relname = :table AND c.conname = :name"
+            ),
+            {"schema": schema, "table": table, "name": name},
+        )
+        .first()
+    )
     return row is not None
 
 
@@ -259,9 +267,8 @@ def upgrade() -> None:
     # ------------------------------------------------------------------
     # 2) SKU 级旧列的人工覆盖 → 平台级新表
     # ------------------------------------------------------------------
-    if (
-        _has_table("sku_platform_pricing", "finance")
-        and _has_column("dim_erp_sku", "core", "min_selling_price_override")
+    if _has_table("sku_platform_pricing", "finance") and _has_column(
+        "dim_erp_sku", "core", "min_selling_price_override"
     ):
         # 旧值是**公司级**的（对所有平台生效）⇒ 复制到**每一个可定价销售平台**。
         # 「可定价」= platform_role='sales' AND other_cost_rate IS NOT NULL
@@ -309,9 +316,7 @@ def upgrade() -> None:
                     "DROP CONSTRAINT IF EXISTS ck_dim_erp_sku_min_selling_price_override"
                 )
             )
-        op.drop_column(
-            "dim_erp_sku", "min_selling_price_override", schema="core"
-        )
+        op.drop_column("dim_erp_sku", "min_selling_price_override", schema="core")
 
 
 def downgrade() -> None:
@@ -344,9 +349,8 @@ def downgrade() -> None:
     #    这会**丢信息**：回滚后只剩一个平台的覆盖值。
     #    这是「公司级旧列」这个模型本身的容量上限，不是本次迁移引入的。
     # ------------------------------------------------------------------
-    if (
-        _has_table("sku_platform_pricing", "finance")
-        and _has_column("dim_erp_sku", "core", "min_selling_price_override")
+    if _has_table("sku_platform_pricing", "finance") and _has_column(
+        "dim_erp_sku", "core", "min_selling_price_override"
     ):
         op.execute(
             sa.text(
@@ -372,9 +376,7 @@ def downgrade() -> None:
         for _table, _schema, name in _FK_CONSTRAINTS:
             if not _has_constraint("sku_platform_pricing", "finance", name):
                 if name.endswith("_sku_id_fkey"):
-                    _create_fk(
-                        name, "sku_id", "core.dim_erp_sku(sku_id)"
-                    )
+                    _create_fk(name, "sku_id", "core.dim_erp_sku(sku_id)")
                 else:
                     _create_fk(
                         name,

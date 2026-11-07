@@ -74,7 +74,9 @@ class _UrlSwitchPage:
         self.goto_calls: list[str] = []
         self.wait_calls: list[int] = []
 
-    async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
+    async def goto(
+        self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000
+    ) -> None:
         self.goto_calls.append(url)
         self.url = url
 
@@ -95,7 +97,9 @@ class _DelayedUrlSwitchPage(_UrlSwitchPage):
         super().__init__(url)
         self._target_url = target_url
 
-    async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
+    async def goto(
+        self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000
+    ) -> None:
         self.goto_calls.append(url)
 
     async def wait_for_timeout(self, ms: int) -> None:
@@ -127,7 +131,9 @@ class _UiFallbackPage:
 
 
 @pytest.mark.asyncio
-async def test_shopee_shop_switch_noops_when_url_shop_id_already_matches(monkeypatch) -> None:
+async def test_shopee_shop_switch_noops_when_url_shop_id_already_matches(
+    monkeypatch,
+) -> None:
     _stub_master_shop_id(monkeypatch, "1227491331")
     ctx = _ctx(
         account={
@@ -151,7 +157,9 @@ async def test_shopee_shop_switch_noops_when_url_shop_id_already_matches(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_shopee_shop_switch_rewrites_cnsc_shop_id_and_preserves_path_and_query(monkeypatch) -> None:
+async def test_shopee_shop_switch_rewrites_cnsc_shop_id_and_preserves_path_and_query(
+    monkeypatch,
+) -> None:
     _stub_master_shop_id(monkeypatch, "1227491331")
     ctx = _ctx(
         account={
@@ -174,7 +182,9 @@ async def test_shopee_shop_switch_rewrites_cnsc_shop_id_and_preserves_path_and_q
 
 
 @pytest.mark.asyncio
-async def test_shopee_shop_switch_waits_for_delayed_url_shop_id_refresh(monkeypatch) -> None:
+async def test_shopee_shop_switch_waits_for_delayed_url_shop_id_refresh(
+    monkeypatch,
+) -> None:
     _stub_master_shop_id(monkeypatch, "1227491331")
     ctx = _ctx(
         account={"shop_account_id": "shopee_sg_demo_local"},
@@ -194,7 +204,9 @@ async def test_shopee_shop_switch_waits_for_delayed_url_shop_id_refresh(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_shopee_shop_switch_fails_when_url_shop_id_cannot_be_confirmed(monkeypatch) -> None:
+async def test_shopee_shop_switch_fails_when_url_shop_id_cannot_be_confirmed(
+    monkeypatch,
+) -> None:
     _stub_master_shop_id(monkeypatch, "1227491331")
     ctx = _ctx(
         account={"shop_account_id": "shopee_sg_demo_local"},
@@ -202,7 +214,9 @@ async def test_shopee_shop_switch_fails_when_url_shop_id_cannot_be_confirmed(mon
     )
     page = _UrlSwitchPage("https://seller.shopee.cn/datacenter/home?cnsc_shop_id=999")
 
-    async def _stubborn_goto(url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
+    async def _stubborn_goto(
+        url: str, wait_until: str = "domcontentloaded", timeout: int = 60000
+    ) -> None:
         page.goto_calls.append(url)
         page.url = "https://seller.shopee.cn/datacenter/home?cnsc_shop_id=999"
 
@@ -215,7 +229,9 @@ async def test_shopee_shop_switch_fails_when_url_shop_id_cannot_be_confirmed(mon
 
 
 @pytest.mark.asyncio
-async def test_shopee_shop_switch_uses_ui_fallback_when_target_shop_id_missing() -> None:
+async def test_shopee_shop_switch_uses_ui_fallback_when_target_shop_id_missing() -> (
+    None
+):
     ctx = _ctx(config={"shop_name": "Demo Shop", "shop_region": "SG"})
     page = _UiFallbackPage()
     switch = ShopeeShopSwitch(ctx)
@@ -231,7 +247,9 @@ async def test_shopee_shop_switch_uses_ui_fallback_when_target_shop_id_missing()
 
 
 @pytest.mark.asyncio
-async def test_shopee_shop_switch_ui_fallback_fails_when_selection_does_not_apply() -> None:
+async def test_shopee_shop_switch_ui_fallback_fails_when_selection_does_not_apply() -> (
+    None
+):
     ctx = _ctx(config={"shop_name": "Demo Shop", "shop_region": "SG"})
     page = _UiFallbackPage()
     switch = ShopeeShopSwitch(ctx)

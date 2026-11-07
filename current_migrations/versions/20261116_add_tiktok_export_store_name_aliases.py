@@ -109,7 +109,12 @@ _TIKTOK_EXPORT_ALIASES = (
     ("DAWIE Mall", "dawiemall", "tiktok_my_dawie_mall_local", "MY"),
     ("Explorers Mall", "explorersmall", "tiktok_ph_explorers_mall_local", "PH"),
     ("Malaysia(Flora Mall)", "malaysiafloramall", "tiktok_my_flora_mall_local", "MY"),
-    ("Philippines(DAJU Mall)", "philippinesdajumall", "tiktok_ph_daju_mall_local", "PH"),
+    (
+        "Philippines(DAJU Mall)",
+        "philippinesdajumall",
+        "tiktok_ph_daju_mall_local",
+        "PH",
+    ),
     ("Singapore(HX Home)", "singaporehxhome", "tiktok_sg_hx_home_local", "SG"),
 )
 
@@ -143,6 +148,7 @@ def _normalize_sql(value_expression: str) -> str:
     """把归一化模板套上「要归一化的表达式」。"""
     return _NORMALIZE_SQL.format(value=value_expression)
 
+
 #: 迁移落地后**必须**刷的物化视图(别名表是实时的, 这些是快照)。
 #:
 #: 顺序 = 依赖顺序(与 ``backend/services/data_pipeline/refresh_registry.py`` 的
@@ -172,28 +178,39 @@ def _assert_targets_resolvable() -> None:
     fail-closed —— 账号被停用/改区域时, **宁可迁移失败**, 也不要静默把别名
     挂到别处(那等于编数据)。
     """
-    rows = _bind().execute(
-        sa.text(
-            """
+    rows = (
+        _bind()
+        .execute(
+            sa.text(
+                """
             SELECT sa.shop_account_id, sa.shop_region, sa.enabled, sa.business_role
             FROM core.shop_accounts sa
             WHERE sa.platform = :platform
               AND sa.shop_account_id = ANY(CAST(:shop_account_ids AS text[]))
             """
-        ),
-        {
-            "platform": PLATFORM,
-            "shop_account_ids": [item[2] for item in _TIKTOK_EXPORT_ALIASES],
-        },
-    ).all()
+            ),
+            {
+                "platform": PLATFORM,
+                "shop_account_ids": [item[2] for item in _TIKTOK_EXPORT_ALIASES],
+            },
+        )
+        .all()
+    )
     found = {str(row[0]): row for row in rows}
 
     problems: list[str] = []
-    for alias_value, alias_normalized, shop_account_id, shop_region in _TIKTOK_EXPORT_ALIASES:
+    for (
+        alias_value,
+        alias_normalized,
+        shop_account_id,
+        shop_region,
+    ) in _TIKTOK_EXPORT_ALIASES:
         row = found.get(shop_account_id)
         if row is None:
             problems.append(
-                "账号不存在: {sid}（别名 {value}）".format(sid=shop_account_id, value=alias_value)
+                "账号不存在: {sid}（别名 {value}）".format(
+                    sid=shop_account_id, value=alias_value
+                )
             )
             continue
         actual_region = str(row[1] or "").strip()
@@ -237,9 +254,11 @@ def _alias_key_conflicts() -> list[str]:
     problems: list[str] = []
     keys = [item[1] for item in _TIKTOK_EXPORT_ALIASES]
 
-    claimed_rows = _bind().execute(
-        sa.text(
-            """
+    claimed_rows = (
+        _bind()
+        .execute(
+            sa.text(
+                """
             SELECT saa.alias_normalized, sa.shop_account_id, saa.shop_region
             FROM core.shop_account_aliases saa
             INNER JOIN core.shop_accounts sa ON sa.id = saa.shop_account_id
@@ -248,9 +267,11 @@ def _alias_key_conflicts() -> list[str]:
               AND saa.source IS DISTINCT FROM :source
               AND saa.alias_normalized = ANY(CAST(:keys AS text[]))
             """
-        ),
-        {"platform": PLATFORM, "source": ALIAS_SOURCE, "keys": keys},
-    ).all()
+            ),
+            {"platform": PLATFORM, "source": ALIAS_SOURCE, "keys": keys},
+        )
+        .all()
+    )
     for alias_normalized, shop_account_id, shop_region in claimed_rows:
         problems.append(
             "别名键已被账号 {sid} 认领（区域 {region}）：{key}".format(
@@ -260,18 +281,22 @@ def _alias_key_conflicts() -> list[str]:
             )
         )
 
-    collision_rows = _bind().execute(
-        sa.text(
-            """
+    collision_rows = (
+        _bind()
+        .execute(
+            sa.text(
+                """
             SELECT sa.platform_shop_id, sa.shop_account_id
             FROM core.shop_accounts sa
             WHERE sa.enabled IS TRUE
               AND sa.business_role = 'operating_store'
               AND LOWER(NULLIF(TRIM(COALESCE(sa.platform_shop_id, '')), '')) = ANY(CAST(:keys AS text[]))
             """
-        ),
-        {"keys": keys},
-    ).all()
+            ),
+            {"keys": keys},
+        )
+        .all()
+    )
     for platform_shop_id, shop_account_id in collision_rows:
         problems.append(
             "别名键撞上账号 {sid} 的平台店铺编号 {psid}".format(
@@ -322,7 +347,9 @@ def _insert_alias(
               AND sa.business_role = 'operating_store'
               AND {normalize} = :alias_normalized
             ON CONFLICT DO NOTHING
-            """.format(normalize=_normalize_sql(":alias_value"))
+            """.format(
+                normalize=_normalize_sql(":alias_value")
+            )
         ),
         {
             "platform": PLATFORM,
@@ -344,9 +371,11 @@ def _assert_aliases_present() -> None:
     2. **归一化规则漂移** —— 存好的 ``alias_normalized`` 与按当前规则现算的值
        不一致 ⇒ 候选集永远匹配不上(「认领了却匹配不上」)。
     """
-    rows = _bind().execute(
-        sa.text(
-            """
+    rows = (
+        _bind()
+        .execute(
+            sa.text(
+                """
             SELECT
                 sa.shop_account_id,
                 saa.alias_value,
@@ -358,24 +387,35 @@ def _assert_aliases_present() -> None:
             WHERE saa.platform = :platform
               AND saa.is_active IS TRUE
               AND saa.alias_normalized = ANY(CAST(:alias_normalized_keys AS text[]))
-            """.format(normalize=_normalize_sql("saa.alias_value"))
-        ),
-        {
-            "platform": PLATFORM,
-            "alias_normalized_keys": [item[1] for item in _TIKTOK_EXPORT_ALIASES],
-        },
-    ).all()
+            """.format(
+                    normalize=_normalize_sql("saa.alias_value")
+                )
+            ),
+            {
+                "platform": PLATFORM,
+                "alias_normalized_keys": [item[1] for item in _TIKTOK_EXPORT_ALIASES],
+            },
+        )
+        .all()
+    )
 
     found: dict[str, tuple] = {}
     for row in rows:
         found[str(row[0])] = row
 
     problems: list[str] = []
-    for alias_value, alias_normalized, shop_account_id, shop_region in _TIKTOK_EXPORT_ALIASES:
+    for (
+        alias_value,
+        alias_normalized,
+        shop_account_id,
+        shop_region,
+    ) in _TIKTOK_EXPORT_ALIASES:
         row = found.get(shop_account_id)
         if row is None:
             problems.append(
-                "别名未落库: {value} → {sid}".format(value=alias_value, sid=shop_account_id)
+                "别名未落库: {value} → {sid}".format(
+                    value=alias_value, sid=shop_account_id
+                )
             )
             continue
         stored = str(row[2] or "")
@@ -394,7 +434,9 @@ def _assert_aliases_present() -> None:
             )
 
     if problems:
-        raise RuntimeError("TikTok 别名补录的校验未通过，拒绝提交：" + "；".join(problems))
+        raise RuntimeError(
+            "TikTok 别名补录的校验未通过，拒绝提交：" + "；".join(problems)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -405,7 +447,12 @@ def _assert_aliases_present() -> None:
 def upgrade() -> None:
     _assert_targets_resolvable()
 
-    for alias_value, alias_normalized, shop_account_id, _region in _TIKTOK_EXPORT_ALIASES:
+    for (
+        alias_value,
+        alias_normalized,
+        shop_account_id,
+        _region,
+    ) in _TIKTOK_EXPORT_ALIASES:
         _insert_alias(alias_value, alias_normalized, shop_account_id)
 
     _assert_aliases_present()

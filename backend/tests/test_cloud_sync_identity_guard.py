@@ -67,7 +67,9 @@ def test_column_vs_raw_data_mismatch_is_conflicting():
 
 def test_platform_shop_id_vs_shop_id_mismatch_is_conflicting():
     """raw_data 内部两个编号互相矛盾 ⇒ 也是混合行。"""
-    rows = [_row("1308200825", raw_shop_id="1308200825", raw_platform_shop_id="1419169771")]
+    rows = [
+        _row("1308200825", raw_shop_id="1308200825", raw_platform_shop_id="1419169771")
+    ]
     consistent, conflicting = split_rows_by_identity_consistency(rows)
     assert consistent == []
     assert len(conflicting) == 1

@@ -335,7 +335,9 @@ async def test_pricing_context_exposes_both_platforms_rates(pricing_sqlite_sessi
 
 
 @pytest.mark.asyncio
-async def test_floor_no_longer_follows_the_policy_basis_platform(pricing_sqlite_session):
+async def test_floor_no_longer_follows_the_policy_basis_platform(
+    pricing_sqlite_session,
+):
     """规则表里的 ``platform_basis`` **不再**决定用哪个平台的费率算底线。
 
     这是本阶段最容易被"改回去"的一处：只要还有任何地方按 basis 平台取费率，
@@ -349,9 +351,7 @@ async def test_floor_no_longer_follows_the_policy_basis_platform(pricing_sqlite_
     before = await _floors_by_platform(session, sku_id)
 
     # 把规则表的 basis 平台从 tiktok 改成 shopee
-    policy = (
-        await session.execute(select(SkuPricingPolicy))
-    ).scalars().first()
+    policy = (await session.execute(select(SkuPricingPolicy))).scalars().first()
     policy.platform_basis = "shopee"
     await session.flush()
 
@@ -495,9 +495,7 @@ async def test_baselines_are_keyed_by_sku_and_platform(pricing_sqlite_session):
     assert baselines[(sku_id, "shopee")]["min_selling_price"] == SHOPEE_FLOOR
 
     # 库里也必须是两行（复合主键），不是一行
-    rows = (
-        await session.execute(select(PriceAdjustBaseline))
-    ).scalars().all()
+    rows = (await session.execute(select(PriceAdjustBaseline))).scalars().all()
     assert len(rows) == 2
     assert {(row.sku_id, row.platform_code) for row in rows} == {
         (sku_id, "tiktok"),
@@ -575,9 +573,7 @@ def _load_migration_module():
 
 def test_migration_is_chained_on_the_current_head():
     source = _read_migration()
-    assert (
-        'revision = "current_schema_20261115_add_sku_platform_pricing"' in source
-    )
+    assert 'revision = "current_schema_20261115_add_sku_platform_pricing"' in source
     assert 'down_revision = "current_schema_20261114_add_sku_roi_columns"' in source
 
 
@@ -592,7 +588,7 @@ def test_migration_guards_every_object():
     assert "def upgrade() -> None:" in source
     assert "def downgrade() -> None:" in source
     # 复合主键：upgrade 换主键、downgrade 换回去
-    assert 'op.create_primary_key(' in source
+    assert "op.create_primary_key(" in source
     assert '["sku_id", "platform_code"]' in source
     assert '["sku_id"],' in source
 

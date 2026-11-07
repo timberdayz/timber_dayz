@@ -177,7 +177,10 @@ def _assert_database_guard_active():
 
     from backend.models.database import ASYNC_DATABASE_URL, DATABASE_URL as engine_url
 
-    for label, url in (("同步 engine", engine_url), ("异步 engine", ASYNC_DATABASE_URL)):
+    for label, url in (
+        ("同步 engine", engine_url),
+        ("异步 engine", ASYNC_DATABASE_URL),
+    ):
         if _is_real_database_url(url):
             pytest.fail(
                 f"测试护栏未生效: {label} 指向真实业务库 ({url})。"
@@ -200,7 +203,14 @@ def _create_isolated_schema(database_url: str) -> None:
 
     async def _create():
         async with engine.begin() as conn:
-            for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "ops"):
+            for schema_name in (
+                "core",
+                "a_class",
+                "b_class",
+                "c_class",
+                "finance",
+                "ops",
+            ):
                 await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
             await conn.run_sync(Base.metadata.create_all)
         await engine.dispose()
@@ -252,7 +262,10 @@ def _restore_main_app_after_reload():
 
     original_app = getattr(main_module, "app", None)
     yield
-    if original_app is not None and getattr(main_module, "app", None) is not original_app:
+    if (
+        original_app is not None
+        and getattr(main_module, "app", None) is not original_app
+    ):
         main_module.app = original_app
 
 
@@ -298,7 +311,14 @@ async def pg_engine():
             # 创建项目使用的 schema, 避免 JSONB / schema 不存在等错误
             from sqlalchemy import text
 
-            for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "ops"):
+            for schema_name in (
+                "core",
+                "a_class",
+                "b_class",
+                "c_class",
+                "finance",
+                "ops",
+            ):
                 await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
 
             await conn.run_sync(Base.metadata.create_all)
@@ -453,55 +473,92 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
     from datetime import date, datetime, timezone
 
     from modules.core.db import (
-        BridgeSpuSku, DimErpSku, DimPlatform, DimSpu, DimUser, DimWarehouse,
-        LogisticsProviderRule, SkuPricingPolicy, WarehouseStorageRule,
+        BridgeSpuSku,
+        DimErpSku,
+        DimPlatform,
+        DimSpu,
+        DimUser,
+        DimWarehouse,
+        LogisticsProviderRule,
+        SkuPricingPolicy,
+        WarehouseStorageRule,
     )
 
     effective_from = date(2026, 1, 1)
 
-    pg_session.add(DimUser(
-        user_id=1, username="test_admin",
-        email="test_admin@example.com", password_hash="not-a-real-hash",
-    ))
+    pg_session.add(
+        DimUser(
+            user_id=1,
+            username="test_admin",
+            email="test_admin@example.com",
+            password_hash="not-a-real-hash",
+        )
+    )
     await pg_session.flush()
 
-    pg_session.add(DimPlatform(
-        platform_code="tiktok", name="TikTok", platform_role="sales", is_active=True,
-        default_fee_rate=0.0737,
-        default_creator_commission_rate=0.0606,
-        other_cost_rate=0.2727,
-        # 刻意给一个**非今日**的生效日期：用来验证「部分更新」不会把它刷成当天
-        fee_rate_effective_from=date(2026, 9, 1),
-        fee_rate_source="test_seed",
-        fee_rate_version="v0",
-    ))
+    pg_session.add(
+        DimPlatform(
+            platform_code="tiktok",
+            name="TikTok",
+            platform_role="sales",
+            is_active=True,
+            default_fee_rate=0.0737,
+            default_creator_commission_rate=0.0606,
+            other_cost_rate=0.2727,
+            # 刻意给一个**非今日**的生效日期：用来验证「部分更新」不会把它刷成当天
+            fee_rate_effective_from=date(2026, 9, 1),
+            fee_rate_source="test_seed",
+            fee_rate_version="v0",
+        )
+    )
     await pg_session.flush()
 
-    pg_session.add(DimWarehouse(
-        warehouse_code="MY-01", warehouse_name="主仓",
-        country_code="MY", country_name="马来西亚", status="active",
-    ))
+    pg_session.add(
+        DimWarehouse(
+            warehouse_code="MY-01",
+            warehouse_name="主仓",
+            country_code="MY",
+            country_name="马来西亚",
+            status="active",
+        )
+    )
     await pg_session.flush()
 
-    pg_session.add(DimSpu(
-        spu="TEST-SPU-1", spu_name="测试SPU",
-        return_loss_rate=0.0467, logistics_damage_rate=0.0158,
-    ))
+    pg_session.add(
+        DimSpu(
+            spu="TEST-SPU-1",
+            spu_name="测试SPU",
+            return_loss_rate=0.0467,
+            logistics_damage_rate=0.0158,
+        )
+    )
     await pg_session.flush()
 
-    pg_session.add(DimErpSku(
-        sku_id=9001, sku_key="TEST-SKU-1", sku_name="测试SKU",
-        status="active", default_purchase_cost=10, reference_selling_price=30,
-        # 阶段 4 工具 2：有基准售价就必须有确认日期（DB 约束 ck_dim_erp_sku_selling_price_confirmed）
-        selling_price_confirmed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        weight_kg=0.5, unit_volume_cbm=0.01, turnover_class="slow",
-    ))
+    pg_session.add(
+        DimErpSku(
+            sku_id=9001,
+            sku_key="TEST-SKU-1",
+            sku_name="测试SKU",
+            status="active",
+            default_purchase_cost=10,
+            reference_selling_price=30,
+            # 阶段 4 工具 2：有基准售价就必须有确认日期（DB 约束 ck_dim_erp_sku_selling_price_confirmed）
+            selling_price_confirmed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            weight_kg=0.5,
+            unit_volume_cbm=0.01,
+            turnover_class="slow",
+        )
+    )
     await pg_session.flush()
 
-    pg_session.add(BridgeSpuSku(
-        sku_id=9001, spu="TEST-SPU-1", binding_status="active",
-        effective_from=effective_from,
-    ))
+    pg_session.add(
+        BridgeSpuSku(
+            sku_id=9001,
+            spu="TEST-SPU-1",
+            binding_status="active",
+            effective_from=effective_from,
+        )
+    )
     await pg_session.flush()
 
     # 库龄档位规则：缺这 4 行 -> 最低售价算不出来 -> 护栏永不触发
@@ -511,12 +568,19 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
         (90, "滞销60天", 0.20, 0.18),
         (120, "滞销60天以上", 0.30, 0.10),
     ):
-        pg_session.add(SkuPricingPolicy(
-            min_restock_days=min_restock_days, tier_label=tier_label,
-            discount_rate=discount_rate, target_margin_rate=target_margin_rate,
-            platform_basis="tiktok", effective_from=effective_from,
-            status="active", source="test_seed", version="v1",
-        ))
+        pg_session.add(
+            SkuPricingPolicy(
+                min_restock_days=min_restock_days,
+                tier_label=tier_label,
+                discount_rate=discount_rate,
+                target_margin_rate=target_margin_rate,
+                platform_basis="tiktok",
+                effective_from=effective_from,
+                status="active",
+                source="test_seed",
+                version="v1",
+            )
+        )
     await pg_session.flush()
 
     if with_cost_rules:
@@ -524,17 +588,32 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
         #   WarehouseStorageRule -> 'CNY/CBM/month'（ck_warehouse_storage_rules_unit）
         #   LogisticsProviderRule -> 'CNY/CBM'（与仓库既有迁移口径一致）
         # 写成 'cbm' 会撞 CheckViolationError
-        pg_session.add(LogisticsProviderRule(
-            logistics_provider="TEST-LOG", warehouse_code="MY-01", transport_type="sea",
-            status="active", is_sensitive=False, is_default=True, currency="CNY",
-            billing_basis="volume", billing_unit="CNY/CBM", freight_unit_rate=5,
-            effective_from=effective_from,
-        ))
-        pg_session.add(WarehouseStorageRule(
-            warehouse_code="MY-01", billing_basis="volume", billing_unit="CNY/CBM/month",
-            unit_rate_cny=100, label_fee=0.5, status="active",
-            effective_from=effective_from,
-        ))
+        pg_session.add(
+            LogisticsProviderRule(
+                logistics_provider="TEST-LOG",
+                warehouse_code="MY-01",
+                transport_type="sea",
+                status="active",
+                is_sensitive=False,
+                is_default=True,
+                currency="CNY",
+                billing_basis="volume",
+                billing_unit="CNY/CBM",
+                freight_unit_rate=5,
+                effective_from=effective_from,
+            )
+        )
+        pg_session.add(
+            WarehouseStorageRule(
+                warehouse_code="MY-01",
+                billing_basis="volume",
+                billing_unit="CNY/CBM/month",
+                unit_rate_cny=100,
+                label_fee=0.5,
+                status="active",
+                effective_from=effective_from,
+            )
+        )
         await pg_session.flush()
 
 

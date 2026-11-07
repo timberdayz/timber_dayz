@@ -105,7 +105,11 @@ def upgrade() -> None:
     if not _has_column("selling_price_source_cleaned_at"):
         op.add_column(
             _TABLE,
-            sa.Column("selling_price_source_cleaned_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column(
+                "selling_price_source_cleaned_at",
+                sa.DateTime(timezone=True),
+                nullable=True,
+            ),
             schema=_SCHEMA,
         )
 
@@ -179,7 +183,10 @@ def downgrade() -> None:
 
     if _has_constraint("ck_dim_erp_sku_selling_price_confirmed"):
         op.drop_constraint(
-            "ck_dim_erp_sku_selling_price_confirmed", _TABLE, schema=_SCHEMA, type_="check"
+            "ck_dim_erp_sku_selling_price_confirmed",
+            _TABLE,
+            schema=_SCHEMA,
+            type_="check",
         )
     if _has_constraint("ck_dim_erp_sku_selling_price_source"):
         op.drop_constraint(

@@ -230,13 +230,17 @@ async def test_override_is_written_to_the_platform_table(pricing_sqlite_session)
     await session.commit()
 
     stored = (
-        await session.execute(
-            select(SkuPlatformPricing).where(
-                SkuPlatformPricing.sku_id == sku_id,
-                SkuPlatformPricing.platform_code == "shopee",
+        (
+            await session.execute(
+                select(SkuPlatformPricing).where(
+                    SkuPlatformPricing.sku_id == sku_id,
+                    SkuPlatformPricing.platform_code == "shopee",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(stored) == 1
     assert Decimal(str(stored[0].min_selling_price_override)) == Decimal("250.00")
 
@@ -258,13 +262,17 @@ async def test_setting_an_override_twice_updates_the_same_row(pricing_sqlite_ses
     await session.commit()
 
     rows = (
-        await session.execute(
-            select(SkuPlatformPricing).where(
-                SkuPlatformPricing.sku_id == sku_id,
-                SkuPlatformPricing.platform_code == "shopee",
+        (
+            await session.execute(
+                select(SkuPlatformPricing).where(
+                    SkuPlatformPricing.sku_id == sku_id,
+                    SkuPlatformPricing.platform_code == "shopee",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert Decimal(str(rows[0].min_selling_price_override)) == Decimal("260.00")
 
@@ -295,7 +303,9 @@ async def test_override_must_be_positive(pricing_sqlite_session):
 
 
 @pytest.mark.asyncio
-async def test_override_on_one_platform_does_not_touch_the_other(pricing_sqlite_session):
+async def test_override_on_one_platform_does_not_touch_the_other(
+    pricing_sqlite_session,
+):
     """TikTok 设了覆盖 ⇒ **只有** TikTok 的底线被抬起来，Shopee 不变。"""
     session = pricing_sqlite_session
     sku_id = await _seed_two_platforms(session)
@@ -310,8 +320,8 @@ async def test_override_on_one_platform_does_not_touch_the_other(pricing_sqlite_
     await session.commit()
 
     after = await _floors_by_platform(session, sku_id)
-    assert after["tiktok"] == Decimal("300.00")   # 被覆盖值抬起来
-    assert after["shopee"] == SHOPEE_FLOOR        # 一个字节都没变
+    assert after["tiktok"] == Decimal("300.00")  # 被覆盖值抬起来
+    assert after["shopee"] == SHOPEE_FLOOR  # 一个字节都没变
 
 
 @pytest.mark.asyncio
@@ -408,10 +418,7 @@ def test_platform_pricing_table_has_no_foreign_keys(isolated_engine):
     """
     from modules.core.db import SkuPlatformPricing
 
-    fks = [
-        fk
-        for fk in SkuPlatformPricing.__table__.foreign_keys
-    ]
+    fks = [fk for fk in SkuPlatformPricing.__table__.foreign_keys]
     assert fks == [], f"覆盖表不能带外键（否则被 TRUNCATE CASCADE 连带清空）：{fks}"
 
 
@@ -422,7 +429,9 @@ def test_truncate_cascade_only_reaches_tables_with_foreign_keys(isolated_engine)
     这条规则就是「覆盖表不能带外键」那条断言的依据。
     """
     with isolated_engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS _t_child_fk, _t_child_plain, _t_parent"))
+        conn.execute(
+            text("DROP TABLE IF EXISTS _t_child_fk, _t_child_plain, _t_parent")
+        )
         conn.execute(text("CREATE TABLE _t_parent (id integer PRIMARY KEY)"))
         conn.execute(
             text(
@@ -440,7 +449,9 @@ def test_truncate_cascade_only_reaches_tables_with_foreign_keys(isolated_engine)
         fk_rows = conn.execute(text("SELECT count(*) FROM _t_child_fk")).scalar()
         plain_rows = conn.execute(text("SELECT count(*) FROM _t_child_plain")).scalar()
 
-        conn.execute(text("DROP TABLE IF EXISTS _t_child_fk, _t_child_plain, _t_parent"))
+        conn.execute(
+            text("DROP TABLE IF EXISTS _t_child_fk, _t_child_plain, _t_parent")
+        )
 
     assert fk_rows == 0, "带外键的子表应被 TRUNCATE CASCADE 连带清空"
     assert plain_rows == 1, "不带外键的表必须活下来（覆盖表靠的就是这一点）"
@@ -497,33 +508,28 @@ def test_sink_migration_is_repeatable_and_rolls_back_cleanly(isolated_engine):
 
     inspector = inspect(isolated_engine)
     sku_columns = {
-        column["name"]
-        for column in inspector.get_columns("dim_erp_sku", schema="core")
+        column["name"] for column in inspector.get_columns("dim_erp_sku", schema="core")
     }
     assert "min_selling_price_override" not in sku_columns
 
-    assert _fk_constraint_names(isolated_engine) == [], (
-        "迁移必须把两个外键摘掉（否则同步会连带清空覆盖值）"
-    )
+    assert (
+        _fk_constraint_names(isolated_engine) == []
+    ), "迁移必须把两个外键摘掉（否则同步会连带清空覆盖值）"
 
     _run_migration(isolated_engine, module, "downgrade")
 
     inspector = inspect(isolated_engine)
     sku_columns = {
-        column["name"]
-        for column in inspector.get_columns("dim_erp_sku", schema="core")
+        column["name"] for column in inspector.get_columns("dim_erp_sku", schema="core")
     }
     assert "min_selling_price_override" in sku_columns
 
-    assert len(_fk_constraint_names(isolated_engine)) == 2, (
-        "downgrade 必须把外键加回去"
-    )
+    assert len(_fk_constraint_names(isolated_engine)) == 2, "downgrade 必须把外键加回去"
 
     _run_migration(isolated_engine, module, "upgrade")
     inspector = inspect(isolated_engine)
     sku_columns = {
-        column["name"]
-        for column in inspector.get_columns("dim_erp_sku", schema="core")
+        column["name"] for column in inspector.get_columns("dim_erp_sku", schema="core")
     }
     assert "min_selling_price_override" not in sku_columns
 

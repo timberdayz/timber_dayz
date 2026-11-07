@@ -29,8 +29,12 @@ SELLING_PRICE_DEVIATION_THRESHOLD = 0.30
 
 
 class ProductCategoryCreateRequest(BaseModel):
-    category_code: str = Field(min_length=1, max_length=64, pattern=_CATEGORY_CODE_PATTERN)
-    parent_category_code: Optional[str] = Field(default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN)
+    category_code: str = Field(
+        min_length=1, max_length=64, pattern=_CATEGORY_CODE_PATTERN
+    )
+    parent_category_code: Optional[str] = Field(
+        default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN
+    )
     level: int = Field(ge=1, le=2)
     name_zh: str = Field(min_length=1, max_length=128)
     name_en: Optional[str] = Field(default=None, max_length=128)
@@ -68,9 +72,15 @@ class ProductCategoryResponse(ProductCategoryCreateRequest):
 class SpuBulkItem(BaseModel):
     spu: str = Field(min_length=1, max_length=128, pattern=_CODE_PATTERN)
     spu_name: Optional[str] = Field(default=None, min_length=1, max_length=512)
-    category_l2: Optional[str] = Field(default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN)
-    category_l2_code: Optional[str] = Field(default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN)
-    biz_status: Optional[str] = Field(default=None, pattern=r"^(candidate|testing|promoted|retired)$")
+    category_l2: Optional[str] = Field(
+        default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN
+    )
+    category_l2_code: Optional[str] = Field(
+        default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN
+    )
+    biz_status: Optional[str] = Field(
+        default=None, pattern=r"^(candidate|testing|promoted|retired)$"
+    )
     owner_user_id: Optional[int] = None
     logistics_damage_rate: Optional[float] = Field(default=None, ge=0, le=1)
     return_loss_rate: Optional[float] = Field(default=None, ge=0, le=1)
@@ -91,9 +101,11 @@ class SpuBulkRequest(BaseModel):
         return {
             **value,
             "items": [
-                item.model_dump(exclude_unset=True)
-                if isinstance(item, BaseModel)
-                else item
+                (
+                    item.model_dump(exclude_unset=True)
+                    if isinstance(item, BaseModel)
+                    else item
+                )
                 for item in items
             ],
         }
@@ -114,14 +126,22 @@ class SkuBulkItem(BaseModel):
     unit_volume_cbm: Optional[float] = Field(default=None, ge=0)
     units_per_carton: Optional[int] = Field(default=None, ge=1)
     default_purchase_cost: Optional[float] = Field(default=None, ge=0)
-    purchase_cost_currency: Optional[str] = Field(default="CNY", min_length=3, max_length=8)
+    purchase_cost_currency: Optional[str] = Field(
+        default="CNY", min_length=3, max_length=8
+    )
     purchase_cost_source: Optional[str] = Field(default=None, max_length=64)
-    purchase_cost_confidence: Optional[str] = Field(default="low", pattern=r"^(low|medium|high)$")
+    purchase_cost_confidence: Optional[str] = Field(
+        default="low", pattern=r"^(low|medium|high)$"
+    )
     expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
     reference_selling_price: Optional[float] = Field(default=None, ge=0)
-    selling_price_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
-    selling_price_source: Optional[str] = Field(default=None, pattern=SELLING_PRICE_SOURCE_PATTERN)
+    selling_price_currency: Optional[str] = Field(
+        default=None, min_length=3, max_length=8
+    )
+    selling_price_source: Optional[str] = Field(
+        default=None, pattern=SELLING_PRICE_SOURCE_PATTERN
+    )
     selling_price_confirmed_at: Optional[datetime] = None
     turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
     creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
@@ -132,7 +152,10 @@ class SkuBulkItem(BaseModel):
 
     @model_validator(mode="after")
     def cny_only(self):
-        if self.purchase_cost_currency != "CNY" or self.selling_price_currency not in (None, "CNY"):
+        if self.purchase_cost_currency != "CNY" or self.selling_price_currency not in (
+            None,
+            "CNY",
+        ):
             raise ValueError("SKU product-center amounts must use CNY")
         return self
 
@@ -151,9 +174,11 @@ class SkuBulkRequest(BaseModel):
         return {
             **value,
             "items": [
-                item.model_dump(exclude_unset=True)
-                if isinstance(item, BaseModel)
-                else item
+                (
+                    item.model_dump(exclude_unset=True)
+                    if isinstance(item, BaseModel)
+                    else item
+                )
                 for item in items
             ],
         }
@@ -164,10 +189,16 @@ class SpuCreateRequest(BaseModel):
     spu_name: str = Field(min_length=1, max_length=512)
     category_l1: Optional[str] = None
     category_l2: Optional[str] = None
-    category_l1_code: Optional[str] = Field(default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN)
-    category_l2_code: Optional[str] = Field(default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN)
+    category_l1_code: Optional[str] = Field(
+        default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN
+    )
+    category_l2_code: Optional[str] = Field(
+        default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN
+    )
     main_image_url: Optional[str] = None
-    biz_status: str = Field(default="candidate", pattern=r"^(candidate|testing|promoted|retired)$")
+    biz_status: str = Field(
+        default="candidate", pattern=r"^(candidate|testing|promoted|retired)$"
+    )
     owner_user_id: Optional[int] = None
     logistics_damage_rate: Optional[float] = Field(default=None, ge=0, le=1)
     return_loss_rate: Optional[float] = Field(default=None, ge=0, le=1)
@@ -177,10 +208,16 @@ class SpuUpdateRequest(BaseModel):
     spu_name: Optional[str] = Field(default=None, min_length=1, max_length=512)
     category_l1: Optional[str] = None
     category_l2: Optional[str] = None
-    category_l1_code: Optional[str] = Field(default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN)
-    category_l2_code: Optional[str] = Field(default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN)
+    category_l1_code: Optional[str] = Field(
+        default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN
+    )
+    category_l2_code: Optional[str] = Field(
+        default=None, max_length=64, pattern=_CATEGORY_CODE_PATTERN
+    )
     main_image_url: Optional[str] = None
-    biz_status: Optional[str] = Field(default=None, pattern=r"^(candidate|testing|promoted|retired)$")
+    biz_status: Optional[str] = Field(
+        default=None, pattern=r"^(candidate|testing|promoted|retired)$"
+    )
     owner_user_id: Optional[int] = None
     logistics_damage_rate: Optional[float] = Field(default=None, ge=0, le=1)
     return_loss_rate: Optional[float] = Field(default=None, ge=0, le=1)
@@ -206,7 +243,9 @@ class SkuCreateRequest(BaseModel):
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
     reference_selling_price: Optional[float] = Field(default=None, ge=0)
     selling_price_currency: str = Field(default="CNY", min_length=3, max_length=8)
-    selling_price_source: Optional[str] = Field(default=None, pattern=SELLING_PRICE_SOURCE_PATTERN)
+    selling_price_source: Optional[str] = Field(
+        default=None, pattern=SELLING_PRICE_SOURCE_PATTERN
+    )
     selling_price_confirmed_at: Optional[datetime] = None
     turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
     creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
@@ -232,14 +271,22 @@ class SkuUpdateRequest(BaseModel):
     unit_volume_cbm: Optional[float] = Field(default=None, ge=0)
     units_per_carton: Optional[int] = Field(default=None, ge=1)
     default_purchase_cost: Optional[float] = Field(default=None, ge=0)
-    purchase_cost_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
+    purchase_cost_currency: Optional[str] = Field(
+        default=None, min_length=3, max_length=8
+    )
     purchase_cost_source: Optional[str] = Field(default=None, max_length=64)
-    purchase_cost_confidence: Optional[str] = Field(default=None, pattern=r"^(low|medium|high)$")
+    purchase_cost_confidence: Optional[str] = Field(
+        default=None, pattern=r"^(low|medium|high)$"
+    )
     expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
     reference_selling_price: Optional[float] = Field(default=None, ge=0)
-    selling_price_currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
-    selling_price_source: Optional[str] = Field(default=None, pattern=SELLING_PRICE_SOURCE_PATTERN)
+    selling_price_currency: Optional[str] = Field(
+        default=None, min_length=3, max_length=8
+    )
+    selling_price_source: Optional[str] = Field(
+        default=None, pattern=SELLING_PRICE_SOURCE_PATTERN
+    )
     selling_price_confirmed_at: Optional[datetime] = None
     turnover_class: Optional[str] = Field(default=None, pattern=r"^(fast|normal|slow)$")
     creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
@@ -250,9 +297,13 @@ class SkuUpdateRequest(BaseModel):
 
     @model_validator(mode="after")
     def cny_only(self):
-        if self.purchase_cost_currency not in (None, "CNY") or self.selling_price_currency not in (None, "CNY"):
+        if self.purchase_cost_currency not in (
+            None,
+            "CNY",
+        ) or self.selling_price_currency not in (None, "CNY"):
             raise ValueError("SKU product-center amounts must use CNY")
         return self
+
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
 
 
@@ -617,7 +668,9 @@ class CostAssumptionUpdateRequest(BaseModel):
     profile_name: Optional[str] = Field(default=None, min_length=1, max_length=128)
     destination: Optional[str] = None
     transport_type: Optional[str] = None
-    billing_basis: Optional[str] = Field(default=None, pattern=r"^(volume|weight|quantity)$")
+    billing_basis: Optional[str] = Field(
+        default=None, pattern=r"^(volume|weight|quantity)$"
+    )
     freight_unit_rate: Optional[float] = Field(default=None, ge=0)
     customs_rate: Optional[float] = Field(default=None, ge=0)
     storage_unit_rate: Optional[float] = Field(default=None, ge=0)
@@ -627,7 +680,9 @@ class CostAssumptionUpdateRequest(BaseModel):
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
     assumption_source: Optional[str] = None
-    confidence_level: Optional[str] = Field(default=None, pattern=r"^(low|medium|high)$")
+    confidence_level: Optional[str] = Field(
+        default=None, pattern=r"^(low|medium|high)$"
+    )
     active: Optional[bool] = None
 
 
@@ -708,7 +763,9 @@ class LogisticsBillLineRequest(BaseModel):
     shipped_qty: float = Field(default=0, ge=0)
     actual_total_weight_kg: Optional[float] = Field(default=None, ge=0)
     actual_total_volume_cbm: Optional[float] = Field(default=None, ge=0)
-    billing_basis: str = Field(default="volume", pattern=r"^(volume|weight|quantity|fixed)$")
+    billing_basis: str = Field(
+        default="volume", pattern=r"^(volume|weight|quantity|fixed)$"
+    )
     billing_unit: Optional[str] = Field(default=None, max_length=32)
     billing_unit_rate: Optional[float] = Field(default=None, ge=0)
     freight_unit_rate: Optional[float] = Field(default=None, ge=0)
@@ -730,7 +787,9 @@ class LogisticsBillLineRequest(BaseModel):
     def derive_cny_billing_unit(self):
         expected_unit = _LOGISTICS_BILLING_UNITS[self.billing_basis]
         if self.billing_unit is not None and self.billing_unit != expected_unit:
-            raise ValueError(f"billing_unit must be {expected_unit}; product-center logistics costs use CNY")
+            raise ValueError(
+                f"billing_unit must be {expected_unit}; product-center logistics costs use CNY"
+            )
         self.billing_unit = expected_unit
         return self
 
@@ -747,12 +806,18 @@ class LogisticsBillLineRequest(BaseModel):
 
 
 class LogisticsBillLinesReplaceRequest(BaseModel):
-    lines: list[LogisticsBillLineRequest | LogisticsBillSkuLineRequest] = Field(min_length=1)
+    lines: list[LogisticsBillLineRequest | LogisticsBillSkuLineRequest] = Field(
+        min_length=1
+    )
 
     @model_validator(mode="after")
     def reject_duplicate_skus(self):
         # Legacy one-SKU rows remain accepted; new rows may contain multiple SKUs.
-        legacy_ids = [line.sku_id for line in self.lines if isinstance(line, LogisticsBillSkuLineRequest)]
+        legacy_ids = [
+            line.sku_id
+            for line in self.lines
+            if isinstance(line, LogisticsBillSkuLineRequest)
+        ]
         if len(legacy_ids) != len(set(legacy_ids)):
             raise ValueError("a logistics bill can contain each SKU only once")
         return self
@@ -783,7 +848,9 @@ class LogisticsProviderRuleCreateRequest(BaseModel):
     cargo_class: Optional[str] = Field(default=None, max_length=64)
     is_sensitive: bool = False
     is_default: bool = False
-    billing_basis: str = Field(default="volume", pattern=r"^(volume|weight|quantity|fixed)$")
+    billing_basis: str = Field(
+        default="volume", pattern=r"^(volume|weight|quantity|fixed)$"
+    )
     billing_unit: Optional[str] = Field(default=None, max_length=32)
     freight_unit_rate: Optional[float] = Field(default=None, ge=0)
     sensitive_surcharge_mode: str = Field(default="manual", max_length=32)
@@ -799,7 +866,9 @@ class LogisticsProviderRuleCreateRequest(BaseModel):
     def derive_cny_billing_unit(self):
         expected_unit = _LOGISTICS_BILLING_UNITS[self.billing_basis]
         if self.billing_unit is not None and self.billing_unit != expected_unit:
-            raise ValueError(f"billing_unit must be {expected_unit}; product-center logistics costs use CNY")
+            raise ValueError(
+                f"billing_unit must be {expected_unit}; product-center logistics costs use CNY"
+            )
         self.billing_unit = expected_unit
         return self
 
@@ -807,13 +876,17 @@ class LogisticsProviderRuleCreateRequest(BaseModel):
 class LogisticsProviderRuleUpdateRequest(BaseModel):
     """Partial provider-rule update; never inherit create defaults into PATCHes."""
 
-    logistics_provider: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    logistics_provider: Optional[str] = Field(
+        default=None, min_length=1, max_length=128
+    )
     warehouse_code: Optional[str] = Field(default=None, max_length=128)
     transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     cargo_class: Optional[str] = Field(default=None, max_length=64)
     is_sensitive: Optional[bool] = None
     is_default: Optional[bool] = None
-    billing_basis: Optional[str] = Field(default=None, pattern=r"^(volume|weight|quantity|fixed)$")
+    billing_basis: Optional[str] = Field(
+        default=None, pattern=r"^(volume|weight|quantity|fixed)$"
+    )
     billing_unit: Optional[str] = Field(default=None, max_length=32)
     freight_unit_rate: Optional[float] = Field(default=None, ge=0)
     sensitive_surcharge_mode: Optional[str] = Field(default=None, max_length=32)
@@ -1091,11 +1164,17 @@ class ProfitEstimateSaveRequest(ProfitPreviewRequest):
 class FeishuProjectionInitializeRequest(BaseModel):
     spu_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
     sku_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
-    platform_sku_profit_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    platform_sku_profit_table_id: Optional[str] = Field(
+        default=None, min_length=1, max_length=64
+    )
     # 调价记录表：ERP 只往这里**新增**行，行归档由飞书机器人负责
-    price_adjust_table_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    price_adjust_table_id: Optional[str] = Field(
+        default=None, min_length=1, max_length=64
+    )
     # 调价记录表所在的**多维表格 token**。留空则回落到 FEISHU_PRODUCT_BASE_TOKEN。
-    price_adjust_base_token: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    price_adjust_base_token: Optional[str] = Field(
+        default=None, min_length=1, max_length=64
+    )
 
 
 class ProfitEstimateCreateRequest(BaseModel):
@@ -1110,14 +1189,18 @@ class ProfitEstimateCreateRequest(BaseModel):
     platform_fee: Optional[float] = Field(default=None, ge=0)
     expected_return_loss: Optional[float] = Field(default=None, ge=0)
     expected_damage_loss: Optional[float] = Field(default=None, ge=0)
-    cost_completeness: str = Field(default="incomplete", pattern=r"^(complete|partial|incomplete)$")
+    cost_completeness: str = Field(
+        default="incomplete", pattern=r"^(complete|partial|incomplete)$"
+    )
     confidence_level: str = Field(default="medium", pattern=r"^(low|medium|high)$")
 
 
 # ==================== SPU 删除向导 (M1: 软删最小可用) ====================
 
+
 class SpuDeletionCheck(BaseModel):
     """单条校验结果。status=pass 通过 / fail 阻塞 / warn 软提示。"""
+
     code: str
     label: str
     status: Literal["pass", "fail", "warn"]
@@ -1126,6 +1209,7 @@ class SpuDeletionCheck(BaseModel):
 
 class SpuDeletionPreviewResponse(BaseModel):
     """删除预览:返回 7 项校验明细 + 软删/硬删能力 + 影响预估。"""
+
     spu: str
     spu_name: Optional[str] = None
     can_soft_delete: bool
@@ -1138,6 +1222,7 @@ class SpuDeletionPreviewResponse(BaseModel):
 
 class SpuSoftDeleteRequest(BaseModel):
     """软删请求体。reason 可选(不强制),confirm 必须 true(防误触)。"""
+
     reason: Optional[str] = Field(default=None, max_length=500)
     confirm: bool = False
 
@@ -1150,6 +1235,7 @@ class SpuSoftDeleteRequest(BaseModel):
 
 class SpuSoftDeleteResponse(BaseModel):
     """软删返回:告知影响范围 + 时间戳。"""
+
     spu: str
     spu_name: Optional[str] = None
     soft_deleted_at: datetime
@@ -1160,6 +1246,7 @@ class SpuSoftDeleteResponse(BaseModel):
 
 class SpuRestoreRequest(BaseModel):
     """SPU 恢复请求体(revive 已软删的 SPU)。reason 可选。"""
+
     reason: Optional[str] = Field(default=None, max_length=500)
     confirm: bool = False
 
@@ -1172,6 +1259,7 @@ class SpuRestoreRequest(BaseModel):
 
 class SpuRestoreResponse(BaseModel):
     """SPU 恢复返回。"""
+
     spu: str
     spu_name: Optional[str] = None
     previous_biz_status: str  # 恢复前 biz_status(通常 'retired')
@@ -1183,11 +1271,13 @@ class SpuRestoreResponse(BaseModel):
 
 # ==================== 批量软删 (M2) ====================
 
+
 class BatchSpuSoftDeleteRequest(BaseModel):
     """批量软删请求:SPU 列表(1~100)+ 可选 reason + confirm。
 
     策略:任一 SPU fail 则整体回滚,保证事务原子性。
     """
+
     spus: list[str] = Field(min_length=1, max_length=100)
     reason: Optional[str] = Field(default=None, max_length=500)
     confirm: bool = False
@@ -1203,6 +1293,7 @@ class BatchSpuSoftDeleteRequest(BaseModel):
 
 class BatchSpuSoftDeleteItem(BaseModel):
     """批量处理中单个 SPU 的结果。"""
+
     spu: str
     spu_name: Optional[str] = None
     status: Literal["deleted", "blocked"]
@@ -1213,6 +1304,7 @@ class BatchSpuSoftDeleteItem(BaseModel):
 
 class BatchSpuSoftDeleteResponse(BaseModel):
     """批量软删响应:汇总 + 每个 SPU 状态。"""
+
     total: int
     deleted: int
     blocked: int
@@ -1222,8 +1314,10 @@ class BatchSpuSoftDeleteResponse(BaseModel):
 
 # ==================== SKU 停用/恢复 (M5.1) ====================
 
+
 class SkuDeletionCheck(BaseModel):
     """SKU 单条校验结果。复用 SPU 语义(fail=阻塞 / warn=软提示 / pass=无影响)。"""
+
     code: str
     label: str
     status: Literal["pass", "fail", "warn"]
@@ -1236,6 +1330,7 @@ class SkuDeletionPreviewResponse(BaseModel):
     can_soft_delete: 当前 status='active' 时 True;已 inactive 时 False(可走恢复路径)。
     can_hard_delete: 仅当业务引用表全 0 时 True(M5.2 才真正启用,本阶段仅作 hint)。
     """
+
     sku_id: int
     sku_key: str
     sku_name: Optional[str] = None
@@ -1250,6 +1345,7 @@ class SkuDeletionPreviewResponse(BaseModel):
 
 class SkuSoftDeleteRequest(BaseModel):
     """SKU 停用请求体。reason 可选(不强制),confirm 必须 true。"""
+
     reason: Optional[str] = Field(default=None, max_length=500)
     confirm: bool = False
 
@@ -1262,6 +1358,7 @@ class SkuSoftDeleteRequest(BaseModel):
 
 class SkuSoftDeleteResponse(BaseModel):
     """SKU 停用返回。"""
+
     sku_id: int
     sku_key: str
     sku_name: Optional[str] = None
@@ -1274,6 +1371,7 @@ class SkuSoftDeleteResponse(BaseModel):
 
 class SkuRestoreRequest(BaseModel):
     """SKU 恢复请求体。reason 可选。"""
+
     reason: Optional[str] = Field(default=None, max_length=500)
     confirm: bool = False
 
@@ -1286,6 +1384,7 @@ class SkuRestoreRequest(BaseModel):
 
 class SkuRestoreResponse(BaseModel):
     """SKU 恢复返回。"""
+
     sku_id: int
     sku_key: str
     sku_name: Optional[str] = None

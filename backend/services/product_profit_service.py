@@ -293,9 +293,7 @@ def build_platform_profit_preview(
         if revenue is None:
             return None
         components = _pre_ad_components(use_actual)
-        return revenue - sum(
-            (c if c is not None else Decimal("0")) for c in components
-        )
+        return revenue - sum((c if c is not None else Decimal("0")) for c in components)
 
     def _ad_cost_and_profit(
         use_actual: bool,

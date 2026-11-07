@@ -57,7 +57,9 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="跳过偏差校验（只做过期巡检，瞬时返回）",
     )
-    parser.add_argument("--json", dest="json_path", default=None, help="把结果另存为 JSON")
+    parser.add_argument(
+        "--json", dest="json_path", default=None, help="把结果另存为 JSON"
+    )
     return parser.parse_args()
 
 
@@ -65,14 +67,22 @@ async def main() -> int:
     args = parse_args()
 
     async with AsyncSessionLocal() as session:
-        statement = select(DimErpSku).where(DimErpSku.reference_selling_price.isnot(None))
+        statement = select(DimErpSku).where(
+            DimErpSku.reference_selling_price.isnot(None)
+        )
         if args.sku_id is not None:
             statement = statement.where(DimErpSku.sku_id == args.sku_id)
-        rows = (await session.execute(statement.order_by(DimErpSku.sku_key))).scalars().all()
+        rows = (
+            (await session.execute(statement.order_by(DimErpSku.sku_key)))
+            .scalars()
+            .all()
+        )
 
         bands = {}
         if not args.no_deviation and rows:
-            bands = await load_transaction_price_bands(session, [row.sku_id for row in rows])
+            bands = await load_transaction_price_bands(
+                session, [row.sku_id for row in rows]
+            )
 
         deviations: list[dict] = []
         stales: list[dict] = []
@@ -100,7 +110,9 @@ async def main() -> int:
                 "sku_key": row.sku_key,
                 "reference_selling_price": row.reference_selling_price,
                 "selling_price_source": row.selling_price_source,
-                "median_transaction_price": float(band["median_price"]) if band else None,
+                "median_transaction_price": (
+                    float(band["median_price"]) if band else None
+                ),
                 "sample_size": band.get("sample_size") if band else None,
                 "deviation_pct": verdict["deviation_pct"],
                 "exceeds_threshold": verdict["exceeds_threshold"],
@@ -122,7 +134,8 @@ async def main() -> int:
 
     if args.json_path:
         Path(args.json_path).write_text(
-            json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+            json.dumps(report, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
         )
         print(f"[写出] {args.json_path}")
     else:

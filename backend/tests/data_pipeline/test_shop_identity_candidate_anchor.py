@@ -221,9 +221,13 @@ def test_dim_shop_id_derivation_matches_the_semantic_layer():
 
 def test_realign_migration_exists_and_is_chained_to_the_head():
     text = _read(REALIGN_MIGRATION)
-    assert 'revision = "current_schema_20261112_realign_identity_candidates_anchor"' in text
     assert (
-        'down_revision = "current_schema_20261111_add_refresh_queue_domain_and_retry"' in text
+        'revision = "current_schema_20261112_realign_identity_candidates_anchor"'
+        in text
+    )
+    assert (
+        'down_revision = "current_schema_20261111_add_refresh_queue_domain_and_retry"'
+        in text
     )
 
 
@@ -291,7 +295,9 @@ def test_realign_migration_does_not_cascade_drop_the_atomic_views():
     """
     module = _load_migration_module()
     asset = _read(ANALYTICS_ATOMIC_ASSET)
-    assert "DROP VIEW" in asset.upper(), "资产里本来就没有 DROP VIEW —— 本用例的前提变了"
+    assert (
+        "DROP VIEW" in asset.upper()
+    ), "资产里本来就没有 DROP VIEW —— 本用例的前提变了"
 
     stripped = module._strip_cascade_drop(asset)
     assert "DROP VIEW" not in stripped.upper(), "DROP VIEW ... CASCADE 没被剥掉"

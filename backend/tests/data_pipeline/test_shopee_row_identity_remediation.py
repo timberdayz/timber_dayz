@@ -198,7 +198,9 @@ async def _fetch(pg_session):
                    raw_data ? '{audit}'             AS has_audit
             FROM {table}
             WHERE id = :id
-            """.format(table=ANALYTICS_TABLE, audit="__audit__")
+            """.format(
+                table=ANALYTICS_TABLE, audit="__audit__"
+            )
         ),
         {"id": FACT_ID},
     )

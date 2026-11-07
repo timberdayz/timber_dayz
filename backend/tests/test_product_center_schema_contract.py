@@ -15,10 +15,40 @@ from modules.core.db import (
 
 def test_product_center_models_have_expected_tables_and_columns():
     expected = {
-        DimSpu: {"spu", "spu_name", "category_l1", "category_l2", "main_image_url", "biz_status", "owner_user_id"},
-        DimErpSku: {"sku_id", "sku_key", "erp_record_id", "weight_kg", "package_length_cm", "package_width_cm", "package_height_cm", "units_per_carton"},
-        BridgeSpuSku: {"spu", "sku_id", "effective_from", "effective_to", "binding_status"},
-        BridgeErpSkuKey: {"source_system", "source_platform", "source_shop_id", "source_key_type", "source_key", "sku_id"},
+        DimSpu: {
+            "spu",
+            "spu_name",
+            "category_l1",
+            "category_l2",
+            "main_image_url",
+            "biz_status",
+            "owner_user_id",
+        },
+        DimErpSku: {
+            "sku_id",
+            "sku_key",
+            "erp_record_id",
+            "weight_kg",
+            "package_length_cm",
+            "package_width_cm",
+            "package_height_cm",
+            "units_per_carton",
+        },
+        BridgeSpuSku: {
+            "spu",
+            "sku_id",
+            "effective_from",
+            "effective_to",
+            "binding_status",
+        },
+        BridgeErpSkuKey: {
+            "source_system",
+            "source_platform",
+            "source_shop_id",
+            "source_key_type",
+            "source_key",
+            "sku_id",
+        },
     }
     for model, columns in expected.items():
         actual = {column.name for column in inspect(model).columns}
@@ -31,8 +61,14 @@ def test_product_center_models_use_core_schema_and_business_keys():
     assert BridgeSpuSku.__table__.schema == "core"
     assert BridgeErpSkuKey.__table__.schema == "core"
     assert any(const.name == "uq_dim_spu_spu" for const in DimSpu.__table__.constraints)
-    assert any(const.name == "uq_dim_erp_sku_sku_key" for const in DimErpSku.__table__.constraints)
-    assert any(index.name == "uq_bridge_spu_sku_current" for index in BridgeSpuSku.__table__.indexes)
+    assert any(
+        const.name == "uq_dim_erp_sku_sku_key"
+        for const in DimErpSku.__table__.constraints
+    )
+    assert any(
+        index.name == "uq_bridge_spu_sku_current"
+        for index in BridgeSpuSku.__table__.indexes
+    )
 
 
 def test_binding_response_accepts_sqlalchemy_orm_row():
@@ -42,8 +78,12 @@ def test_binding_response_accepts_sqlalchemy_orm_row():
     schema rejected raw BridgeSpuSku ORM objects.
     """
     row = BridgeSpuSku(
-        id=1, spu="XH-TEST", sku_id=42,
-        effective_from=date(2026, 1, 1), effective_to=None, binding_status="active",
+        id=1,
+        spu="XH-TEST",
+        sku_id=42,
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        binding_status="active",
     )
     payload = ProductCenterBindingResponse.model_validate(row)
     assert payload.spu == "XH-TEST"
@@ -75,7 +115,11 @@ def test_product_center_item_exposes_pricing_fields_as_optional():
 
 
 def test_sku_write_models_accept_pricing_overrides():
-    from backend.schemas.product_center import SkuBulkItem, SkuCreateRequest, SkuUpdateRequest
+    from backend.schemas.product_center import (
+        SkuBulkItem,
+        SkuCreateRequest,
+        SkuUpdateRequest,
+    )
 
     for model in (SkuUpdateRequest, SkuBulkItem, SkuCreateRequest):
         assert "creator_commission_rate" in model.model_fields
@@ -205,7 +249,11 @@ def test_orm_models_expose_roi_columns_and_completeness_constraints():
     from modules.core.db import DimPlatform, SkuOperatingProfile, SkuProfitEstimate
 
     platform_columns = {c.name for c in DimPlatform.__table__.columns}
-    assert {"roi_safety_margin", "target_roi_ceiling", "target_roi_floor"} <= platform_columns
+    assert {
+        "roi_safety_margin",
+        "target_roi_ceiling",
+        "target_roi_floor",
+    } <= platform_columns
 
     profile_columns = {c.name for c in SkuOperatingProfile.__table__.columns}
     assert "expected_selling_price_source" in profile_columns
@@ -249,9 +297,18 @@ def test_orm_models_expose_pricing_columns_and_policy_table():
 
     policy_columns = {c.name for c in SkuPricingPolicy.__table__.columns}
     assert {
-        "policy_id", "min_restock_days", "tier_label", "discount_rate",
-        "target_margin_rate", "platform_basis", "effective_from", "effective_to",
-        "status", "source", "version", "notes",
+        "policy_id",
+        "min_restock_days",
+        "tier_label",
+        "discount_rate",
+        "target_margin_rate",
+        "platform_basis",
+        "effective_from",
+        "effective_to",
+        "status",
+        "source",
+        "version",
+        "notes",
     } <= policy_columns
 
     constraint_names = {c.name for c in SkuPricingPolicy.__table__.constraints}

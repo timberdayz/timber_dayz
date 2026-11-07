@@ -19,8 +19,17 @@ def test_component_tester_get_account_info_supports_get_all_local_accounts(monke
     )
 
     monkeypatch.setattr("pathlib.Path.exists", lambda self: True)
-    monkeypatch.setattr("importlib.util.spec_from_file_location", lambda *args, **kwargs: types.SimpleNamespace(loader=types.SimpleNamespace(exec_module=lambda module: module.__dict__.update(fake_module.__dict__))))
-    monkeypatch.setattr("importlib.util.module_from_spec", lambda spec: types.SimpleNamespace())
+    monkeypatch.setattr(
+        "importlib.util.spec_from_file_location",
+        lambda *args, **kwargs: types.SimpleNamespace(
+            loader=types.SimpleNamespace(
+                exec_module=lambda module: module.__dict__.update(fake_module.__dict__)
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "importlib.util.module_from_spec", lambda spec: types.SimpleNamespace()
+    )
 
     account = tester.get_account_info()
 

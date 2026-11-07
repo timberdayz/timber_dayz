@@ -77,18 +77,16 @@ def split_rows_by_identity_consistency(
 
         mismatch = ""
         if column_shop_id and raw_shop_id and column_shop_id != raw_shop_id:
-            mismatch = (
-                "shop_id column=%s but raw_data.shop_id=%s"
-                % (column_shop_id, raw_shop_id)
+            mismatch = "shop_id column=%s but raw_data.shop_id=%s" % (
+                column_shop_id,
+                raw_shop_id,
             )
         elif (
-            raw_platform_shop_id
-            and raw_shop_id
-            and raw_platform_shop_id != raw_shop_id
+            raw_platform_shop_id and raw_shop_id and raw_platform_shop_id != raw_shop_id
         ):
-            mismatch = (
-                "raw_data.platform_shop_id=%s but raw_data.shop_id=%s"
-                % (raw_platform_shop_id, raw_shop_id)
+            mismatch = "raw_data.platform_shop_id=%s but raw_data.shop_id=%s" % (
+                raw_platform_shop_id,
+                raw_shop_id,
             )
 
         if mismatch:

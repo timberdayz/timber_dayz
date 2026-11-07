@@ -355,7 +355,9 @@ def _router_preview(*, break_even_roi=None, lower_bound=None):
 
 
 @pytest.mark.asyncio
-async def test_roi_guard_fires_before_missing_cost_check(monkeypatch, roi_sqlite_session):
+async def test_roi_guard_fires_before_missing_cost_check(
+    monkeypatch, roi_sqlite_session
+):
     """护栏顺序：目标 ROI 低于保本线 **且** 缺物流规则 ⇒ 报 ROI 错误，不是报缺资料。"""
     preview = _router_preview(break_even_roi=Decimal("2.5"))
     _install_router_stubs(
@@ -449,8 +451,8 @@ async def test_draft_is_not_blocked_by_roi_guard(monkeypatch, roi_sqlite_session
     from sqlalchemy import select
 
     rows = (
-        await roi_sqlite_session.execute(select(SkuOperatingProfile))
-    ).scalars().all()
+        (await roi_sqlite_session.execute(select(SkuOperatingProfile))).scalars().all()
+    )
     assert len(rows) == 1
     assert Decimal(str(rows[0].target_roi)) == Decimal("1.2")
     assert rows[0].target_roi_source == "user_input"
@@ -482,14 +484,14 @@ async def test_estimate_persists_target_roi_and_actual_roi_with_sources(
     assert result["estimate_ids"]
 
     profiles = (
-        await roi_sqlite_session.execute(select(SkuOperatingProfile))
-    ).scalars().all()
+        (await roi_sqlite_session.execute(select(SkuOperatingProfile))).scalars().all()
+    )
     assert Decimal(str(profiles[0].target_roi)) == Decimal("3.0")
     assert profiles[0].target_roi_source == "user_input"
 
     estimates = (
-        await roi_sqlite_session.execute(select(SkuProfitEstimate))
-    ).scalars().all()
+        (await roi_sqlite_session.execute(select(SkuProfitEstimate))).scalars().all()
+    )
     assert len(estimates) == 1
     assert Decimal(str(estimates[0].actual_roi)) == Decimal("1.1")
     assert estimates[0].actual_roi_source == "user_input"
@@ -518,8 +520,8 @@ async def test_actual_roi_below_break_even_is_still_saved(
         body, roi_sqlite_session, _FakeUser()
     )
     estimates = (
-        await roi_sqlite_session.execute(select(SkuProfitEstimate))
-    ).scalars().all()
+        (await roi_sqlite_session.execute(select(SkuProfitEstimate))).scalars().all()
+    )
     assert Decimal(str(estimates[0].actual_roi)) == Decimal("0.8")
 
 

@@ -100,7 +100,9 @@ def test_two_calibers_produce_the_same_ad_cost_and_profit():
     )
     assert switched["expected"]["ad_cost"] == legacy["expected"]["ad_cost"]
     assert switched["expected"]["profit"] == legacy["expected"]["profit"]
-    assert switched["expected"]["break_even_roi"] == legacy["expected"]["break_even_roi"]
+    assert (
+        switched["expected"]["break_even_roi"] == legacy["expected"]["break_even_roi"]
+    )
 
 
 def test_ad_cost_is_never_negative_for_a_loss_making_product():
@@ -110,7 +112,9 @@ def test_ad_cost_is_never_negative_for_a_loss_making_product():
     于是 profit = pre_ad_profit − 负数 ⇒ 亏损被缩小 ⇒ 乐观。
     """
     preview = build_platform_profit_preview(
-        **_inputs(expected_selling_price=Decimal("30"), expected_ad_rate=Decimal("0.15"))
+        **_inputs(
+            expected_selling_price=Decimal("30"), expected_ad_rate=Decimal("0.15")
+        )
     )
     expected = preview["expected"]
     # 收入 30，成本合计 78 ⇒ 广告前利润为负
@@ -136,7 +140,8 @@ async def backfill_sqlite_session():
         for schema in ("core", "finance", "ops"):
             await conn.exec_driver_sql(f"ATTACH DATABASE ':memory:' AS {schema}")
         await conn.run_sync(
-            Base.metadata.tables["finance.sku_operating_profiles"].create, checkfirst=True
+            Base.metadata.tables["finance.sku_operating_profiles"].create,
+            checkfirst=True,
         )
         async with AsyncSession(conn, expire_on_commit=False) as session:
             yield session
@@ -165,7 +170,9 @@ def _preview(*, break_even_roi=None, ad_cost=None, profit=None):
             "break_even_roi": break_even_roi,
             "ad_cost": ad_cost,
             "profit": profit,
-            "roi_missing_reasons": [] if break_even_roi is not None else ["non_positive_cost_denominator"],
+            "roi_missing_reasons": (
+                [] if break_even_roi is not None else ["non_positive_cost_denominator"]
+            ),
         }
     }
 
@@ -176,8 +183,16 @@ async def test_backfill_writes_target_roi_with_migrated_source(
 ):
     async def _preview_stub(_self, data):
         if data.get("target_roi") is not None:
-            return _preview(break_even_roi=Decimal("2.5"), ad_cost=Decimal("40.00"), profit=Decimal("-18.00"))
-        return _preview(break_even_roi=Decimal("2.5"), ad_cost=Decimal("40.00"), profit=Decimal("-18.00"))
+            return _preview(
+                break_even_roi=Decimal("2.5"),
+                ad_cost=Decimal("40.00"),
+                profit=Decimal("-18.00"),
+            )
+        return _preview(
+            break_even_roi=Decimal("2.5"),
+            ad_cost=Decimal("40.00"),
+            profit=Decimal("-18.00"),
+        )
 
     monkeypatch.setattr(
         "backend.services.product_target_roi_backfill_service.ProductFinanceService."
@@ -200,7 +215,11 @@ async def test_backfill_writes_target_roi_with_migrated_source(
 @pytest.mark.asyncio
 async def test_backfill_is_idempotent(monkeypatch, backfill_sqlite_session):
     async def _preview_stub(_self, _data):
-        return _preview(break_even_roi=Decimal("2.5"), ad_cost=Decimal("40.00"), profit=Decimal("-18.00"))
+        return _preview(
+            break_even_roi=Decimal("2.5"),
+            ad_cost=Decimal("40.00"),
+            profit=Decimal("-18.00"),
+        )
 
     monkeypatch.setattr(
         "backend.services.product_target_roi_backfill_service.ProductFinanceService."
@@ -210,7 +229,9 @@ async def test_backfill_is_idempotent(monkeypatch, backfill_sqlite_session):
     profile = _profile(backfill_sqlite_session)
     await backfill_sqlite_session.flush()
 
-    await backfill_target_roi_from_legacy_ad_rate(backfill_sqlite_session, dry_run=False)
+    await backfill_target_roi_from_legacy_ad_rate(
+        backfill_sqlite_session, dry_run=False
+    )
     first_value = profile.target_roi
     second = await backfill_target_roi_from_legacy_ad_rate(
         backfill_sqlite_session, dry_run=False
@@ -256,8 +277,16 @@ async def test_backfill_skips_rows_whose_calibers_do_not_match(
     async def _preview_stub(_self, data):
         if data.get("target_roi") is not None:
             # 目标 ROI 口径算出来的广告费与老口径差 5 元 ⇒ 不等价
-            return _preview(break_even_roi=Decimal("2.5"), ad_cost=Decimal("45.00"), profit=Decimal("-23.00"))
-        return _preview(break_even_roi=Decimal("2.5"), ad_cost=Decimal("40.00"), profit=Decimal("-18.00"))
+            return _preview(
+                break_even_roi=Decimal("2.5"),
+                ad_cost=Decimal("45.00"),
+                profit=Decimal("-23.00"),
+            )
+        return _preview(
+            break_even_roi=Decimal("2.5"),
+            ad_cost=Decimal("40.00"),
+            profit=Decimal("-18.00"),
+        )
 
     monkeypatch.setattr(
         "backend.services.product_target_roi_backfill_service.ProductFinanceService."
@@ -276,11 +305,13 @@ async def test_backfill_skips_rows_whose_calibers_do_not_match(
 
 
 @pytest.mark.asyncio
-async def test_backfill_dry_run_does_not_write(
-    monkeypatch, backfill_sqlite_session
-):
+async def test_backfill_dry_run_does_not_write(monkeypatch, backfill_sqlite_session):
     async def _preview_stub(_self, _data):
-        return _preview(break_even_roi=Decimal("2.5"), ad_cost=Decimal("40.00"), profit=Decimal("-18.00"))
+        return _preview(
+            break_even_roi=Decimal("2.5"),
+            ad_cost=Decimal("40.00"),
+            profit=Decimal("-18.00"),
+        )
 
     monkeypatch.setattr(
         "backend.services.product_target_roi_backfill_service.ProductFinanceService."
@@ -328,8 +359,16 @@ def test_renaming_a_tier_label_is_not_reported_as_a_tier_change():
         "discount_rate": "0.15",
         "reference_selling_price": None,
     }
-    prev = {**base, "pricing_tier_label": "滞销30天", "pricing_tier_min_restock_days": 60}
-    cur = {**base, "pricing_tier_label": "库龄≥60天", "pricing_tier_min_restock_days": 60}
+    prev = {
+        **base,
+        "pricing_tier_label": "滞销30天",
+        "pricing_tier_min_restock_days": 60,
+    }
+    cur = {
+        **base,
+        "pricing_tier_label": "库龄≥60天",
+        "pricing_tier_min_restock_days": 60,
+    }
     # 显示名变了但身份没变 ⇒ 不该报「库龄档位变化」
     assert classify_change_reason(prev, cur) != REASON_TIER_CHANGE
     assert classify_change_reason(prev, cur) == REASON_POLICY
@@ -358,4 +397,3 @@ def test_old_snapshots_without_identity_fall_back_to_the_label():
     prev = {**base, "pricing_tier_label": "日常"}
     cur = {**base, "pricing_tier_label": "库龄≥60天"}
     assert classify_change_reason(prev, cur) == REASON_TIER_CHANGE
-

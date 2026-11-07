@@ -60,7 +60,9 @@ def upgrade() -> None:
             continue
         if _has_column(table, schema, column):
             continue
-        op.add_column(table, sa.Column(column, column_type, nullable=True), schema=schema)
+        op.add_column(
+            table, sa.Column(column, column_type, nullable=True), schema=schema
+        )
 
 
 def downgrade() -> None:

@@ -550,8 +550,12 @@ class DataIngestionService:
                 # 文件级别确定稳定身份编号（spec D14）。
                 # 优先级：shop_account_id（永不变化；店铺账号层 20/20 覆盖） > platform_shop_id > shop_id。
                 # file_shop_id 会随改名变化，用它做 data_hash 作用域会导致同一份数据重复入库。
-                file_shop_account_id = getattr(file_record, "shop_account_id", None) or None
-                file_platform_shop_id = getattr(file_record, "platform_shop_id", None) or None
+                file_shop_account_id = (
+                    getattr(file_record, "shop_account_id", None) or None
+                )
+                file_platform_shop_id = (
+                    getattr(file_record, "platform_shop_id", None) or None
+                )
                 file_shop_id = resolve_file_identity(file_record)
                 file_main_account_id = getattr(file_record, "main_account_id", None)
                 file_store_name = getattr(file_record, "store_name", None)
@@ -694,8 +698,8 @@ class DataIngestionService:
                     )
                     orders_identity_values = []
                     if domain.lower() == "orders":
-                        valid_rows, orders_identity_values = prepare_orders_rows_for_b_class(
-                            valid_rows
+                        valid_rows, orders_identity_values = (
+                            prepare_orders_rows_for_b_class(valid_rows)
                         )
                         final_deduplication_fields = extend_orders_deduplication_fields(
                             domain,

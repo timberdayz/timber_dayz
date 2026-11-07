@@ -194,9 +194,7 @@ class DataSyncService:
             return False
         loop = asyncio.get_running_loop()
         try:
-            return await loop.run_in_executor(
-                None, lambda: Path(file_path).exists()
-            )
+            return await loop.run_in_executor(None, lambda: Path(file_path).exists())
         except Exception as exc:  # noqa: BLE001
             logger.warning("[DataSync] 检查源文件是否存在失败: %s (%s)", file_path, exc)
             return False
@@ -376,6 +374,7 @@ class DataSyncService:
             )
             return None
         return resolved
+
     async def _resolve_ingestion_baseline(
         self,
         catalog_file: CatalogFile,
@@ -395,6 +394,7 @@ class DataSyncService:
         判定说通过、入库写进去垃圾, 比判定不过更危险。
         """
         try:
+
             async def read_columns(row: int) -> List[str]:
                 header = await self._header_reader.read_columns(
                     file_path,
@@ -842,8 +842,16 @@ class DataSyncService:
                 }
 
             if catalog_file.status == "processing":
-                file_meta = catalog_file.file_metadata if isinstance(catalog_file.file_metadata, dict) else {}
-                auto_meta = file_meta.get("auto_ingest") if isinstance(file_meta.get("auto_ingest"), dict) else {}
+                file_meta = (
+                    catalog_file.file_metadata
+                    if isinstance(catalog_file.file_metadata, dict)
+                    else {}
+                )
+                auto_meta = (
+                    file_meta.get("auto_ingest")
+                    if isinstance(file_meta.get("auto_ingest"), dict)
+                    else {}
+                )
                 claimed_task_id = auto_meta.get("current_task_id")
                 if task_id and claimed_task_id == task_id:
                     logger.info(
@@ -1196,11 +1204,13 @@ class DataSyncService:
                     account=(getattr(catalog_file, "account", None) or None),
                 )
                 try:
-                    readiness_status = await self.template_status_service.evaluate_catalog_file(
-                        catalog_file,
-                        template=template,
-                        current_columns=file_header_columns,
-                        sample_rows=sample_rows,
+                    readiness_status = (
+                        await self.template_status_service.evaluate_catalog_file(
+                            catalog_file,
+                            template=template,
+                            current_columns=file_header_columns,
+                            sample_rows=sample_rows,
+                        )
                     )
                     readiness_status = self._normalize_governance_status(
                         dict(readiness_status or {})
@@ -1216,7 +1226,9 @@ class DataSyncService:
                         "governance_status",
                     ):
                         if readiness_key in readiness_status:
-                            header_changes[readiness_key] = readiness_status.get(readiness_key)
+                            header_changes[readiness_key] = readiness_status.get(
+                                readiness_key
+                            )
                 except Exception as exc:
                     logger.warning(
                         "[DataSync] template readiness check failed during header drift diagnostics: %s",
@@ -1495,7 +1507,9 @@ class DataSyncService:
                     # [*] P2-1 身份门禁拒收: 店铺数据缺稳定身份戳(shop_account_id)。
                     # 落 ``needs_shop`` 终态等人工补身份, **不落 failed** ——
                     # 「重试必然再失败」不是可重试故障, 落 failed 会误导运维反复重试。
-                    reason = result.get("message") or "缺少稳定店铺身份(shop_account_id)"
+                    reason = (
+                        result.get("message") or "缺少稳定店铺身份(shop_account_id)"
+                    )
                     final_status = apply_identity_blocked_state(
                         catalog_file,
                         reason=reason,
@@ -1508,7 +1522,9 @@ class DataSyncService:
                     )
                 else:
                     final_status = "failed"
-                    self._mark_file_failed(catalog_file, result.get("message", "未知错误"))
+                    self._mark_file_failed(
+                        catalog_file, result.get("message", "未知错误")
+                    )
                     self._record_status(
                         catalog_file, "failed", result.get("message", "未知错误")
                     )

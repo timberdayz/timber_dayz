@@ -81,10 +81,9 @@ from backend.utils.text_normalization import normalize_alias_key
 #: 收敛开关(可用环境变量关掉, 便于线上快速止血)。
 #:
 #: 默认**开**。关掉后行为与收敛前完全一致(只是多跑一次诊断)。
-RECONCILIATION_ENABLED = (
-    os.getenv("SHOP_IDENTITY_RECONCILIATION_ENABLED", "1").strip().lower()
-    not in ("0", "false", "off", "no")
-)
+RECONCILIATION_ENABLED = os.getenv(
+    "SHOP_IDENTITY_RECONCILIATION_ENABLED", "1"
+).strip().lower() not in ("0", "false", "off", "no")
 
 #: 信号优先级 —— **平台店铺编号最权威**。
 #:
@@ -111,7 +110,13 @@ _STORE_NAME_KEYS = ("店铺", "店铺名", "店铺名称", "store_name", "store_
 _PLATFORM_SHOP_ID_KEYS = ("platform_shop_id", "平台店铺ID", "店铺ID")
 
 #: ``raw_data`` 里承载「账号 ID」的键 —— 语义层的 ``source_shop_account_id`` 会读到它们。
-_SHOP_ACCOUNT_ID_KEYS = ("shop_account_id", "account_id", "店铺账号ID", "账号ID", "account")
+_SHOP_ACCOUNT_ID_KEYS = (
+    "shop_account_id",
+    "account_id",
+    "店铺账号ID",
+    "账号ID",
+    "account",
+)
 
 #: 行内 ``shop_id`` 键(语义层的 ``source_shop_id`` 会读到它)。
 _SHOP_ID_KEYS = ("shop_id",)
@@ -223,7 +228,9 @@ def _as_identity(row: Any) -> MasterIdentity:
     )
 
 
-def _push(index: dict[str, list[MasterIdentity]], key: str, value: MasterIdentity) -> None:
+def _push(
+    index: dict[str, list[MasterIdentity]], key: str, value: MasterIdentity
+) -> None:
     bucket = index.setdefault(key, [])
     if value not in bucket:
         bucket.append(value)
@@ -307,18 +314,26 @@ async def load_identity_index(db) -> IdentityIndex:
     from modules.core.db import ShopAccount, ShopAccountAlias
 
     account_rows = (
-        await db.execute(
-            select(ShopAccount).where(
-                ShopAccount.enabled.is_(True),
-                ShopAccount.business_role == "operating_store",
+        (
+            await db.execute(
+                select(ShopAccount).where(
+                    ShopAccount.enabled.is_(True),
+                    ShopAccount.business_role == "operating_store",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     alias_rows = (
-        await db.execute(
-            select(ShopAccountAlias).where(ShopAccountAlias.is_active.is_(True))
+        (
+            await db.execute(
+                select(ShopAccountAlias).where(ShopAccountAlias.is_active.is_(True))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return build_identity_index(account_rows, alias_rows)
 
 

@@ -135,7 +135,9 @@ async def test_load_master_identities_returns_registered_value_only(pg_session):
     )
 
     assert identities["identity-test-shop"].platform_shop_id == "1407964586"
-    assert pick_master_platform_shop_id(identities["identity-test-shop"]) == "1407964586"
+    assert (
+        pick_master_platform_shop_id(identities["identity-test-shop"]) == "1407964586"
+    )
     assert "identity-test-missing" not in identities
     assert pick_master_platform_shop_id(identities.get("identity-test-missing")) == ""
 

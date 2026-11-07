@@ -148,9 +148,19 @@ def _linked_spu():
 
 def test_selling_price_source_accepts_only_enum_values():
     for value in ("platform_listing", "erp", "manual"):
-        assert SkuCreateRequest(sku_key="X", selling_price_source=value).selling_price_source == value
-        assert SkuUpdateRequest(selling_price_source=value).selling_price_source == value
-        assert SkuBulkItem(sku_key="X", selling_price_source=value).selling_price_source == value
+        assert (
+            SkuCreateRequest(
+                sku_key="X", selling_price_source=value
+            ).selling_price_source
+            == value
+        )
+        assert (
+            SkuUpdateRequest(selling_price_source=value).selling_price_source == value
+        )
+        assert (
+            SkuBulkItem(sku_key="X", selling_price_source=value).selling_price_source
+            == value
+        )
 
 
 @pytest.mark.parametrize("value", ["manual ", "MANUAL", "人工填写", "", "unknown"])
@@ -184,7 +194,10 @@ def test_confirmation_date_is_untouched_when_price_is_unchanged():
     old = datetime(2026, 1, 1, tzinfo=timezone.utc)
     values = {"reference_selling_price": 20.0}
     apply_selling_price_confirmation(
-        values, current_price=20.0, current_confirmed_at=old, now=datetime.now(timezone.utc)
+        values,
+        current_price=20.0,
+        current_confirmed_at=old,
+        now=datetime.now(timezone.utc),
     )
     assert "selling_price_confirmed_at" not in values
 
@@ -364,9 +377,9 @@ def test_preview_matches_the_pricing_computed_after_saving():
         context=context, sku_row=sku_row, linked_spu=linked_spu, platform_code="tiktok"
     )["pricing"]
 
-    assert Decimal(str(preview["platforms"][0]["min_selling_price_preview"])) == Decimal(
-        str(after_save["min_selling_price"])
-    )
+    assert Decimal(
+        str(preview["platforms"][0]["min_selling_price_preview"])
+    ) == Decimal(str(after_save["min_selling_price"]))
 
 
 def test_preview_reports_that_a_manual_override_wins():
@@ -402,7 +415,12 @@ def test_preview_request_requires_the_price_field():
     """请求体必须显式带这个字段（没带 ≠ 预览清空）。"""
     with pytest.raises(ValidationError):
         SkuSellingPricePreviewRequest()
-    assert SkuSellingPricePreviewRequest(reference_selling_price=None).reference_selling_price is None
+    assert (
+        SkuSellingPricePreviewRequest(
+            reference_selling_price=None
+        ).reference_selling_price
+        is None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -576,7 +594,7 @@ async def test_update_sku_clearing_the_price_clears_the_confirmation_date(
 
 @pytest.mark.asyncio
 async def test_preview_endpoint_agrees_with_the_stored_floor(
-    selling_price_sqlite_session
+    selling_price_sqlite_session,
 ):
     """走**真实路由**的预览，与真实定价算出来的底线一致。"""
     from backend.domains.business.routers import product_center as pc_router
@@ -609,7 +627,7 @@ async def test_preview_endpoint_agrees_with_the_stored_floor(
 
 @pytest.mark.asyncio
 async def test_check_endpoint_separates_exceeded_stale_and_unverified(
-    selling_price_sqlite_session
+    selling_price_sqlite_session,
 ):
     """巡检接口把三类分开报：**算不出偏差 ≠ 没问题**。
 
@@ -703,7 +721,9 @@ def test_source_enum_migration_guards_every_object():
     )
     # 回填必须用 created_at（记录进入系统的时间）；updated_at 是同步时间，
     # 拿它回填会让所有历史价格看起来「刚确认过」，过期巡检就永远不会报警。
-    backfill = source.split("SET selling_price_confirmed_at = created_at")[1].split("WHERE")[0]
+    backfill = source.split("SET selling_price_confirmed_at = created_at")[1].split(
+        "WHERE"
+    )[0]
     assert "updated_at" not in backfill
 
 
@@ -718,8 +738,12 @@ def test_source_enum_migration_is_repeatable_and_rolls_back_cleanly(isolated_eng
         for column in inspect(isolated_engine).get_columns("dim_erp_sku", schema="core")
     }
     assert "selling_price_source_cleaned_at" in columns
-    assert "ck_dim_erp_sku_selling_price_source" in _check_constraint_names(isolated_engine)
-    assert "ck_dim_erp_sku_selling_price_confirmed" in _check_constraint_names(isolated_engine)
+    assert "ck_dim_erp_sku_selling_price_source" in _check_constraint_names(
+        isolated_engine
+    )
+    assert "ck_dim_erp_sku_selling_price_confirmed" in _check_constraint_names(
+        isolated_engine
+    )
 
     _run_migration(isolated_engine, module, "downgrade")
     # ⚠️ 必须重新 inspect：inspector 会缓存列信息，复用旧实例会看到降级前的列
@@ -728,7 +752,9 @@ def test_source_enum_migration_is_repeatable_and_rolls_back_cleanly(isolated_eng
         for column in inspect(isolated_engine).get_columns("dim_erp_sku", schema="core")
     }
     assert "selling_price_source_cleaned_at" not in columns
-    assert "ck_dim_erp_sku_selling_price_source" not in _check_constraint_names(isolated_engine)
+    assert "ck_dim_erp_sku_selling_price_source" not in _check_constraint_names(
+        isolated_engine
+    )
     assert "ck_dim_erp_sku_selling_price_confirmed" not in _check_constraint_names(
         isolated_engine
     )
@@ -736,7 +762,9 @@ def test_source_enum_migration_is_repeatable_and_rolls_back_cleanly(isolated_eng
     _run_migration(isolated_engine, module, "upgrade")
 
 
-def test_source_enum_migration_cleans_history_and_backfills_confirmation(isolated_engine):
+def test_source_enum_migration_cleans_history_and_backfills_confirmation(
+    isolated_engine,
+):
     """历史自由文本被归一到枚举；有价格没确认日期的补上确认日期。
 
     ⚠️ 确认日期用 ``created_at`` 回填 —— ``updated_at`` 是同步时间，会让所有历史价格

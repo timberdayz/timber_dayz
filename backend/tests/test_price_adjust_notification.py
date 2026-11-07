@@ -126,8 +126,12 @@ def test_compute_change_rate_none_when_old_price_missing_or_zero():
 
 
 def test_reason_tier_change_when_tier_label_moved():
-    prev = _context(pricing_tier_label="日常", target_margin_rate="0.25", discount_rate="0.10")
-    cur = _context(pricing_tier_label="滞销60天", target_margin_rate="0.18", discount_rate="0.20")
+    prev = _context(
+        pricing_tier_label="日常", target_margin_rate="0.25", discount_rate="0.10"
+    )
+    cur = _context(
+        pricing_tier_label="滞销60天", target_margin_rate="0.18", discount_rate="0.20"
+    )
     assert classify_change_reason(prev, cur) == REASON_TIER_CHANGE
 
 
@@ -344,7 +348,12 @@ async def test_first_run_only_builds_baseline_without_notifying():
 async def test_unchanged_floor_produces_no_change():
     service = _FakeService(
         {(1, "tiktok"): _state(1, 128.56, _context())},
-        {(1, "tiktok"): {"min_selling_price": Decimal("128.56"), "context": _context()}},
+        {
+            (1, "tiktok"): {
+                "min_selling_price": Decimal("128.56"),
+                "context": _context(),
+            }
+        },
     )
     notify, silent = await service.detect_changes()
 
@@ -355,7 +364,10 @@ async def test_unchanged_floor_produces_no_change():
 @pytest.mark.asyncio
 async def test_dropped_floor_produces_a_downward_notification():
     prev = _context(
-        pricing_tier_label="滞销60天", target_margin_rate="0.18", discount_rate="0.20", age_days=95
+        pricing_tier_label="滞销60天",
+        target_margin_rate="0.18",
+        discount_rate="0.20",
+        age_days=95,
     )
     cur = _context(
         pricing_tier_label="滞销60天以上",
@@ -510,7 +522,13 @@ async def _seed_pricing_fixture(session) -> int:
     """
     from datetime import date, datetime, timezone
 
-    from modules.core.db import BridgeSpuSku, DimErpSku, DimPlatform, DimSpu, SkuPricingPolicy
+    from modules.core.db import (
+        BridgeSpuSku,
+        DimErpSku,
+        DimPlatform,
+        DimSpu,
+        SkuPricingPolicy,
+    )
 
     session.add(
         DimPlatform(
@@ -587,7 +605,9 @@ async def _seed_pricing_fixture(session) -> int:
 
 
 @pytest.mark.asyncio
-async def test_router_and_detection_share_one_pricing_implementation(core_sqlite_session):
+async def test_router_and_detection_share_one_pricing_implementation(
+    core_sqlite_session,
+):
     """商品中心页面算出的最低售价 == 通知里说的最低售价（无需 PostgreSQL）。
 
     这是「口径一致」的**结构性保证**：两边调用的是同一个函数
@@ -649,7 +669,9 @@ async def test_router_and_detection_share_one_pricing_implementation(core_sqlite
 
 
 @pytest.mark.asyncio
-async def test_baseline_with_null_price_is_still_treated_as_processed(core_sqlite_session):
+async def test_baseline_with_null_price_is_still_treated_as_processed(
+    core_sqlite_session,
+):
     """算不出最低售价的 SKU（基线价格是 NULL）**也算处理过**，不能每次重建基线。
 
     判据必须是「有没有基线行」而不是「价格列非 NULL」。
@@ -693,15 +715,19 @@ async def test_baseline_lives_outside_the_synced_sku_table(core_sqlite_session):
     from modules.core.db import DimErpSku, PriceAdjustBaseline
 
     sku_columns = {c.name for c in DimErpSku.__table__.columns}
-    assert "last_notified_min_price" not in sku_columns, (
-        "基线不能挂在会被 TRUNCATE 的 SKU 表上"
-    )
+    assert (
+        "last_notified_min_price" not in sku_columns
+    ), "基线不能挂在会被 TRUNCATE 的 SKU 表上"
     assert "last_notified_context" not in sku_columns
 
     assert PriceAdjustBaseline.__tablename__ == "price_adjust_baselines"
     assert PriceAdjustBaseline.__table__.schema == "ops"
     baseline_columns = {c.name for c in PriceAdjustBaseline.__table__.columns}
-    assert {"sku_id", "last_notified_min_price", "last_notified_context"} <= baseline_columns
+    assert {
+        "sku_id",
+        "last_notified_min_price",
+        "last_notified_context",
+    } <= baseline_columns
 
 
 # ---------------------------------------------------------------------------
@@ -752,7 +778,9 @@ async def test_client_uses_base_v3_endpoint_and_create_records_key():
         captured["body"] = json.loads(request.content.decode("utf-8"))
         captured["has_auth"] = "authorization" in request.headers
         if "/auth/v3/tenant_access_token" in request.url.path:
-            return httpx.Response(200, json={"code": 0, "tenant_access_token": "t-fake"})
+            return httpx.Response(
+                200, json={"code": 0, "tenant_access_token": "t-fake"}
+            )
         return httpx.Response(
             200,
             json={"code": 0, "data": {"records": captured["body"]["create_records"]}},
@@ -767,7 +795,9 @@ async def test_client_uses_base_v3_endpoint_and_create_records_key():
     os.environ["FEISHU_PRODUCT_BASE_TOKEN"] = "bascn_default"
     try:
         client = mod.FeishuProjectionClient()
-        await client.batch_create_records("tblABC", [{"ERP SKU": "X"}], "bascn_override")
+        await client.batch_create_records(
+            "tblABC", [{"ERP SKU": "X"}], "bascn_override"
+        )
     finally:
         mod.httpx.AsyncClient = original
 
@@ -780,7 +810,9 @@ async def test_client_uses_base_v3_endpoint_and_create_records_key():
 
 
 @pytest.mark.asyncio
-async def test_price_adjust_uses_its_own_base_token_when_configured(outbox_sqlite_session):
+async def test_price_adjust_uses_its_own_base_token_when_configured(
+    outbox_sqlite_session,
+):
     """调价记录表可以配在**另一个**多维表格里（base token 独立配置）。"""
     from backend.services.feishu_projection_service import FeishuProjectionService
     from modules.core.db import FeishuProjectionConfig
@@ -866,7 +898,9 @@ async def _seed_outbox(session, count: int) -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_chunk_does_not_rollback_already_created_chunks(outbox_sqlite_session):
+async def test_failed_chunk_does_not_rollback_already_created_chunks(
+    outbox_sqlite_session,
+):
     """某一块写失败时，**已经写成功的那几块不能被一起标成失败**。
 
     调价记录表是只增不改的：如果第 2 块失败时把第 1 块也标成 failed，
@@ -914,17 +948,23 @@ async def test_failed_chunk_does_not_rollback_already_created_chunks(outbox_sqli
     assert len(by_status.get("failed", [])) == 10
     # 失败的那 10 条要排上重试时间，等下一轮再投
     failed_rows = (
-        await session.execute(
-            select(FeishuProjectionTask).where(
-                FeishuProjectionTask.status == "failed"
+        (
+            await session.execute(
+                select(FeishuProjectionTask).where(
+                    FeishuProjectionTask.status == "failed"
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert all(row.next_retry_at is not None for row in failed_rows)
 
 
 @pytest.mark.asyncio
-async def test_baseline_is_advanced_only_after_successful_delivery(outbox_sqlite_session):
+async def test_baseline_is_advanced_only_after_successful_delivery(
+    outbox_sqlite_session,
+):
     """基线必须在**投递成功之后**才回写。
 
     先推基线再投递，一旦飞书写失败，那次变化就永远不会再被检出——
@@ -949,9 +989,7 @@ async def test_baseline_is_advanced_only_after_successful_delivery(outbox_sqlite
     await session.flush()
     await _seed_outbox(session, 1)
     # 把任务指向刚建的 SKU
-    task = (
-        await session.execute(select(FeishuProjectionTask))
-    ).scalars().first()
+    task = (await session.execute(select(FeishuProjectionTask))).scalars().first()
     task.payload_json = {**task.payload_json, "sku_id": sku.sku_id}
     await session.flush()
 
@@ -974,9 +1012,7 @@ async def test_baseline_is_advanced_only_after_successful_delivery(outbox_sqlite
     # 投递失败 → 基线**不能**推进（新基线表里连行都不该有）
     baseline = (
         await session.execute(
-            select(PriceAdjustBaseline).where(
-                PriceAdjustBaseline.sku_id == sku.sku_id
-            )
+            select(PriceAdjustBaseline).where(PriceAdjustBaseline.sku_id == sku.sku_id)
         )
     ).scalar_one_or_none()
     assert baseline is None
@@ -991,9 +1027,7 @@ async def test_baseline_is_advanced_only_after_successful_delivery(outbox_sqlite
     assert completed == 1
     baseline = (
         await session.execute(
-            select(PriceAdjustBaseline).where(
-                PriceAdjustBaseline.sku_id == sku.sku_id
-            )
+            select(PriceAdjustBaseline).where(PriceAdjustBaseline.sku_id == sku.sku_id)
         )
     ).scalar_one()
     assert float(baseline.last_notified_min_price) == pytest.approx(110.0)
@@ -1043,14 +1077,18 @@ async def test_detection_and_product_center_agree_on_min_selling_price(
 
     sku_row = await pg_session.get(DimErpSku, sku_id)
     binding = (
-        await pg_session.execute(
-            select(BridgeSpuSku).where(
-                BridgeSpuSku.sku_id == sku_id,
-                BridgeSpuSku.binding_status == "active",
-                BridgeSpuSku.effective_to.is_(None),
+        (
+            await pg_session.execute(
+                select(BridgeSpuSku).where(
+                    BridgeSpuSku.sku_id == sku_id,
+                    BridgeSpuSku.binding_status == "active",
+                    BridgeSpuSku.effective_to.is_(None),
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     linked_spu = await pg_session.get(DimSpu, binding.spu) if binding else None
 
     context = await load_pricing_context(pg_session, [sku_id], [platform_code])
@@ -1071,4 +1109,3 @@ async def test_detection_and_product_center_agree_on_min_selling_price(
     assert shared_payload["min_selling_price"] == detected
     # 路由侧不得再自己长出一份计算（它应当只是共享实现的转发）
     assert router_payload["min_selling_price"] == detected
-

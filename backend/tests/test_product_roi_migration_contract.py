@@ -44,7 +44,8 @@ def test_roi_migrations_are_chained_on_the_current_head():
     sku_source = _read(SKU_MIGRATION)
 
     assert (
-        'revision = "current_schema_20261113_add_platform_roi_config"' in platform_source
+        'revision = "current_schema_20261113_add_platform_roi_config"'
+        in platform_source
     )
     assert (
         'down_revision = "current_schema_20261112_realign_identity_candidates_anchor"'
@@ -92,9 +93,9 @@ def test_sku_roi_migration_guards_columns_and_closes_completeness_domains():
     ):
         assert f'"{column}"' in source
     # C2：先清洗存量，再加 CHECK 约束（顺序反了约束加不上）
-    assert source.index("UPDATE finance.sku_profit_estimates SET cost_completeness") < source.index(
-        "create_check_constraint"
-    )
+    assert source.index(
+        "UPDATE finance.sku_profit_estimates SET cost_completeness"
+    ) < source.index("create_check_constraint")
     assert "ck_sku_profit_estimate_cost_completeness" in source
     assert "ck_sku_profit_estimate_actual_completeness" in source
     # downgrade 先删约束再删列
@@ -150,7 +151,11 @@ def test_roi_migrations_are_repeatable_and_rollback_cleanly(isolated_engine):
         column["name"]
         for column in inspector.get_columns("dim_platforms", schema="core")
     }
-    assert {"roi_safety_margin", "target_roi_ceiling", "target_roi_floor"} <= platform_columns
+    assert {
+        "roi_safety_margin",
+        "target_roi_ceiling",
+        "target_roi_floor",
+    } <= platform_columns
 
     estimate_columns = {
         column["name"]
@@ -191,7 +196,9 @@ def test_roi_migrations_are_repeatable_and_rollback_cleanly(isolated_engine):
     inspector = inspect(isolated_engine)
     platform_constraints = {
         constraint["name"]
-        for constraint in inspector.get_check_constraints("dim_platforms", schema="core")
+        for constraint in inspector.get_check_constraints(
+            "dim_platforms", schema="core"
+        )
     }
     assert {
         "ck_dim_platforms_roi_safety_margin_range",

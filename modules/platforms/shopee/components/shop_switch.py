@@ -62,7 +62,9 @@ class ShopeeShopSwitch:
         query = dict(parse_qsl(parts.query))
         query["cnsc_shop_id"] = str(target_shop_id)
         rewritten_query = urlencode(query)
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, rewritten_query, parts.fragment))
+        return urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, rewritten_query, parts.fragment)
+        )
 
     def _region_text_candidates(self, region_value: str | None) -> tuple[str, ...]:
         raw = str(region_value or "").strip()
@@ -97,12 +99,16 @@ class ShopeeShopSwitch:
         normalized_region = self._normalize_text(target_region)
         if normalized_region:
             region_candidates = self._region_text_candidates(target_region)
-            normalized_candidates = tuple(self._normalize_text(candidate) for candidate in region_candidates)
+            normalized_candidates = tuple(
+                self._normalize_text(candidate) for candidate in region_candidates
+            )
             if normalized_region not in normalized_candidates:
                 return False
         return target in current
 
-    async def _first_visible_locator(self, page: Any, selectors: tuple[str, ...]) -> Any | None:
+    async def _first_visible_locator(
+        self, page: Any, selectors: tuple[str, ...]
+    ) -> Any | None:
         for selector in selectors:
             try:
                 locator = page.locator(selector).first
@@ -112,7 +118,9 @@ class ShopeeShopSwitch:
                 continue
         return None
 
-    async def _visible_text_content(self, page: Any, selectors: tuple[str, ...]) -> str | None:
+    async def _visible_text_content(
+        self, page: Any, selectors: tuple[str, ...]
+    ) -> str | None:
         locator = await self._first_visible_locator(page, selectors)
         if locator is None:
             return None
@@ -132,8 +140,12 @@ class ShopeeShopSwitch:
     ) -> bool:
         waited = 0
         while waited <= timeout_ms:
-            current_shop_label = await self._visible_text_content(page, self.sel.shop_switch_triggers)
-            if self._shop_name_looks_selected(current_shop_label, target_shop, target_region):
+            current_shop_label = await self._visible_text_content(
+                page, self.sel.shop_switch_triggers
+            )
+            if self._shop_name_looks_selected(
+                current_shop_label, target_shop, target_region
+            ):
                 return True
             if hasattr(page, "wait_for_timeout"):
                 await page.wait_for_timeout(poll_ms)
@@ -150,7 +162,9 @@ class ShopeeShopSwitch:
     ) -> bool:
         waited = 0
         while waited <= timeout_ms:
-            current_shop_id = self._current_shop_id_from_url(str(getattr(page, "url", "") or ""))
+            current_shop_id = self._current_shop_id_from_url(
+                str(getattr(page, "url", "") or "")
+            )
             if current_shop_id == target_shop_id:
                 return True
             if hasattr(page, "wait_for_timeout"):
@@ -204,7 +218,12 @@ class ShopeeShopSwitch:
                 if target_region:
                     cfg["shop_region"] = target_region
                 self.ctx.config = cfg
-                return ShopSelectResult(success=True, shop_name=target_shop, region=target_region, message="ok")
+                return ShopSelectResult(
+                    success=True,
+                    shop_name=target_shop,
+                    region=target_region,
+                    message="ok",
+                )
 
             target_url = self._rewrite_cnsc_shop_id(current_url, target_shop_id)
             await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
@@ -213,7 +232,12 @@ class ShopeeShopSwitch:
 
             confirmed = await self._confirm_target_shop_id(page, target_shop_id)
             if not confirmed:
-                return ShopSelectResult(success=False, shop_name=target_shop, region=target_region, message="failed to confirm target shop id")
+                return ShopSelectResult(
+                    success=False,
+                    shop_name=target_shop,
+                    region=target_region,
+                    message="failed to confirm target shop id",
+                )
 
             cfg = dict(self.ctx.config or {})
             cfg["cnsc_shop_id"] = target_shop_id
@@ -222,15 +246,28 @@ class ShopeeShopSwitch:
             if target_region:
                 cfg["shop_region"] = target_region
             self.ctx.config = cfg
-            return ShopSelectResult(success=True, shop_name=target_shop, region=target_region, message="ok")
+            return ShopSelectResult(
+                success=True, shop_name=target_shop, region=target_region, message="ok"
+            )
 
-        current_shop_label = await self._visible_text_content(page, self.sel.shop_switch_triggers)
-        if self._shop_name_looks_selected(current_shop_label, target_shop, target_region):
-            return ShopSelectResult(success=True, shop_name=target_shop, region=target_region, message="ok")
+        current_shop_label = await self._visible_text_content(
+            page, self.sel.shop_switch_triggers
+        )
+        if self._shop_name_looks_selected(
+            current_shop_label, target_shop, target_region
+        ):
+            return ShopSelectResult(
+                success=True, shop_name=target_shop, region=target_region, message="ok"
+            )
 
         trigger = await self._first_visible_locator(page, self.sel.shop_switch_triggers)
         if trigger is None:
-            return ShopSelectResult(success=False, shop_name=target_shop, region=target_region, message="shop switch trigger not found")
+            return ShopSelectResult(
+                success=False,
+                shop_name=target_shop,
+                region=target_region,
+                message="shop switch trigger not found",
+            )
 
         await trigger.click(timeout=5000)
         if hasattr(page, "wait_for_timeout"):
@@ -253,11 +290,28 @@ class ShopeeShopSwitch:
             target = page.get_by_text(target_shop, exact=False).first
             if await target.is_visible(timeout=1500):
                 await target.click(timeout=5000)
-                applied = await self._wait_shop_selection_applied(page, target_shop, target_region)
+                applied = await self._wait_shop_selection_applied(
+                    page, target_shop, target_region
+                )
                 if not applied:
-                    return ShopSelectResult(success=False, shop_name=target_shop, region=target_region, message="shop switch did not apply")
-                return ShopSelectResult(success=True, shop_name=target_shop, region=target_region, message="ok")
+                    return ShopSelectResult(
+                        success=False,
+                        shop_name=target_shop,
+                        region=target_region,
+                        message="shop switch did not apply",
+                    )
+                return ShopSelectResult(
+                    success=True,
+                    shop_name=target_shop,
+                    region=target_region,
+                    message="ok",
+                )
         except Exception:
             pass
 
-        return ShopSelectResult(success=False, shop_name=target_shop, region=target_region, message="target shop not found")
+        return ShopSelectResult(
+            success=False,
+            shop_name=target_shop,
+            region=target_region,
+            message="target shop not found",
+        )

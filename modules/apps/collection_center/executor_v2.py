@@ -955,9 +955,7 @@ class CollectionExecutorV2:
             # [Task 8] profile 是登录态的**唯一载体** → 诊断字段收敛成
             # 「路径 / 是否复用 / 来源 / 出口代理」四项，不再有质量分与仲裁语义。
             "session_profile_path": getattr(runtime_bundle, "profile_path", None),
-            "session_reused": bool(
-                getattr(runtime_bundle, "reused_session", False)
-            ),
+            "session_reused": bool(getattr(runtime_bundle, "reused_session", False)),
             "selected_page_url": getattr(runtime_bundle, "selected_page_url", None),
             "available_page_urls": getattr(runtime_bundle, "available_page_urls", []),
             "runtime_context_summary": getattr(runtime_bundle, "context_summary", {}),
@@ -1077,7 +1075,7 @@ class CollectionExecutorV2:
                         fallback_outcome = "success" if login_success else "failed"
                     if login_success:
                         # F1 兜底：回退返回的页面若仍停在 about:blank，登录闸门必然失败
-                        #（LoginStatusDetector 对 about:blank 只给 UNKNOWN）。这里主动
+                        # （LoginStatusDetector 对 about:blank 只给 UNKNOWN）。这里主动
                         # 导航一次，防止以后再新增回退分支时重犯同一个坑。
                         await self._ensure_page_at_platform_entry(
                             page,
@@ -1923,9 +1921,7 @@ class CollectionExecutorV2:
                         proxy=proxy,
                         resolved_mode=resolved_runtime_mode,
                     )
-                    runtime_profile_path = getattr(
-                        runtime_bundle, "profile_path", None
-                    )
+                    runtime_profile_path = getattr(runtime_bundle, "profile_path", None)
                     params = _build_runtime_task_params(
                         task_id=task_id,
                         account=runtime_account,
@@ -2837,8 +2833,7 @@ class CollectionExecutorV2:
             )
         except Exception as exc:
             logger.warning(
-                "Task %s: 导航到平台入口失败(error=%s); "
-                "登录闸门检查会给出具体原因",
+                "Task %s: 导航到平台入口失败(error=%s); " "登录闸门检查会给出具体原因",
                 task_id,
                 exc,
             )
@@ -6201,9 +6196,11 @@ class CollectionExecutorV2:
         # （以 profile 原生环境为准）。顺序路径已经由
         # ``normalize_persistent_profile_context_options`` 剥离，这里复用**同一个**
         # 函数 → 两条路径不会各走各的。
-        domain_context_options = runtime_session.normalize_persistent_profile_context_options(
-            platform=platform,
-            context_options=domain_context_options,
+        domain_context_options = (
+            runtime_session.normalize_persistent_profile_context_options(
+                platform=platform,
+                context_options=domain_context_options,
+            )
         )
 
         semaphore = asyncio.Semaphore(max(1, int(max_parallel or 1)))

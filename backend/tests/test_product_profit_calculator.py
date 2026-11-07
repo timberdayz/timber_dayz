@@ -9,7 +9,10 @@ from backend.services.product_profit_service import (
     build_platform_profit_preview,
     validate_bill_total,
 )
-from backend.schemas.product_center import LogisticsBillLinesReplaceRequest, SkuCreateRequest
+from backend.schemas.product_center import (
+    LogisticsBillLinesReplaceRequest,
+    SkuCreateRequest,
+)
 
 
 def test_logistics_sku_line_uses_sku_defaults_and_calculates_three_unit_costs():
