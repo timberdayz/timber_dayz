@@ -81,6 +81,7 @@ from backend.services.template_save_readiness_service import (
     validate_deduplication_fields_against_bindings as service_validate_deduplication_fields_against_bindings,
 )
 from backend.services.template_semantic_coverage_checker import TemplateSemanticCoverageChecker
+from backend.services.template_parse_rules_service import validate_declared_date_formats
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import FieldMappingTemplate
@@ -1056,6 +1057,16 @@ def _validate_field_parse_rules(
             "field_parse_rules is required when mappings include date targets: "
             + ", ".join(sorted(date_targets))
         )
+
+    # [*] 日期格式白名单闸门。
+    #     以前这里只查「非空」, 于是任何字符串都能存进模板,
+    #     真正的解析失败发生在**入库时** —— 整份文件入不了库,
+    #     而且事前没有任何提示(漂移检测只看列名, 不看值形态)。
+    #     口径与实现分离在 backend/services/template_parse_rules_service.py,
+    #     便于独立测试。
+    format_problems = validate_declared_date_formats(field_parse_rules)
+    if format_problems:
+        raise ValueError("; ".join(format_problems))
 
     header_lookup = {str(column).lower(): str(column) for column in header_columns}
     rules_by_target = {

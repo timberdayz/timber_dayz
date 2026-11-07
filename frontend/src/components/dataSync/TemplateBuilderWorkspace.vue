@@ -290,7 +290,7 @@
             </el-select>
             <el-select v-model="rule.date_format" placeholder="日期格式" filterable @change="emitFieldParseRulesChange">
               <el-option
-                v-for="option in dateFormatOptions"
+                v-for="option in dateFormatOptionsForValueKind(rule.value_kind)"
                 :key="option.value"
                 :label="option.label"
                 :value="option.value"
@@ -362,12 +362,12 @@ import {
 } from '@/domains/data_platform/utils/headerBindings'
 import {
   DATE_ANCHOR_OPTIONS,
-  DATE_FORMAT_OPTIONS,
   DATE_TARGET_FIELD_OPTIONS,
   DATE_VALUE_KIND_OPTIONS,
   buildAutoCompanionFormatPayload,
   buildCompanionDateParseRules,
   buildFieldParseSourceOptions,
+  dateFormatOptionsForValueKind,
   fieldParseRuleNeedsDateAnchor,
   fieldParseRuleNeedsRangePick,
   mergeFieldParseRules,
@@ -427,7 +427,6 @@ const semanticFieldOptionGroups = computed(() =>
 )
 const dateTargetOptions = DATE_TARGET_FIELD_OPTIONS
 const dateValueKindOptions = DATE_VALUE_KIND_OPTIONS
-const dateFormatOptions = DATE_FORMAT_OPTIONS
 const dateAnchorOptions = DATE_ANCHOR_OPTIONS
 
 const sampleDataLookup = computed(() =>

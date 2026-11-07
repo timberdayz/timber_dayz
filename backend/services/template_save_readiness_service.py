@@ -18,11 +18,138 @@ from backend.services.template_hash_policy import (
     TemplateHashPolicyService,
 )
 from backend.services.semantic_hash_policy_service import SemanticHashPolicyService
+from modules.services.smart_date_parser import (
+    _DEFAULT_AUTO_SINGLE_FORMAT_CANDIDATES,
+    _AUTO_COMPANION_FORMAT,
+    parse_date_by_declared_format,
+)
 
 
 UNRESOLVED_DEDUPLICATION_FIELDS_PREFIX = (
     "deduplication_fields must resolve to confirmed semantic bindings or parse rules: "
 )
+
+# 特殊来源列: 取的是文件伴生日期, 不是文件里的某一列 ⇒ 没有样本值可试。
+FILE_DATE_SOURCE_COLUMNS = {"__file_date_from__", "__file_date_to__"}
+
+
+def _row_lookup(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {str(key).strip().lower(): value for key, value in (row or {}).items()}
+
+
+def _collect_sample_values(
+    field_parse_rule: Dict[str, Any],
+    sample_rows: Iterable[Dict[str, Any]],
+) -> List[Any]:
+    """取出该规则对应列在样本行里的所有非空值。"""
+    source_column = str(field_parse_rule.get("source_column") or "").strip()
+    if not source_column or source_column in FILE_DATE_SOURCE_COLUMNS:
+        return []
+    wanted = source_column.lower()
+    values: List[Any] = []
+    for row in sample_rows or []:
+        if not isinstance(row, dict):
+            continue
+        lookup = _row_lookup(row)
+        if wanted in lookup:
+            value = lookup[wanted]
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            values.append(value)
+    return values
+
+
+def validate_field_parse_rules_against_samples(
+    field_parse_rules: list[dict[str, Any]],
+    sample_rows: Iterable[Dict[str, Any]] | None,
+) -> list[str]:
+    """用样本行试解析每条日期规则, 返回**无法解析**的规则描述。
+
+    为什么需要这一步
+    ----------------
+    ``date_format`` 是运行期才会被消费的字符串。以前保存闸门只查「非空」,
+    于是「模板声明的格式和真实文件对不上」这件事**只能等入库时**才暴露:
+    解析器抛 ``failed to parse metric_date from source_column=日期: 01-10-2026``,
+    整份文件入不了库(Shopee analytics monthly 就是这样连续失败 4 次)。
+
+    这里在**保存时**用样本行先试一遍:
+    - 固定格式: 样本值必须能被该格式解析;
+    - auto 模式: 样本值至少能被候选集里的**某一个**格式解析。
+
+    ⇒ 坏模板在用户点保存时就被拒, 而不是等真实文件进来才炸。
+    """
+    problems: list[str] = []
+    rows = list(sample_rows or [])
+    if not rows:
+        return problems
+
+    for rule in field_parse_rules or []:
+        if not isinstance(rule, dict):
+            continue
+        target_field = str(rule.get("target_field") or "").strip()
+        if not target_field:
+            continue
+        date_format = str(rule.get("date_format") or "").strip()
+        if not date_format:
+            continue
+        value_kind = str(rule.get("value_kind") or "single_date").strip() or "single_date"
+        source_column = str(rule.get("source_column") or "").strip()
+
+        values = _collect_sample_values(rule, rows)
+        if not values:
+            # 没有样本证据(比如来源是文件伴生日期)⇒ 不做判断, 不误伤。
+            continue
+
+        if date_format.lower() == _AUTO_COMPANION_FORMAT:
+            candidates = [
+                str(candidate).strip()
+                for candidate in (rule.get("format_candidates") or [])
+                if str(candidate or "").strip()
+            ] or list(_DEFAULT_AUTO_SINGLE_FORMAT_CANDIDATES)
+            unparsed: list[str] = []
+            for value in values:
+                raw = str(value).strip()
+                matched = False
+                for candidate in candidates:
+                    try:
+                        parse_date_by_declared_format(
+                            raw,
+                            date_format=candidate,
+                            value_kind=value_kind,
+                        )
+                    except ValueError:
+                        continue
+                    matched = True
+                    break
+                if not matched:
+                    unparsed.append(raw)
+            if unparsed:
+                problems.append(
+                    f"field_parse_rules for {target_field} (source_column={source_column}) "
+                    f"cannot parse sample value {unparsed[0]!r} with any candidate in "
+                    f"{candidates}; check date_format/format_candidates against the file"
+                )
+            continue
+
+        unparsed = []
+        for value in values:
+            try:
+                parse_date_by_declared_format(
+                    value,
+                    date_format=date_format,
+                    value_kind=value_kind,
+                )
+            except ValueError:
+                unparsed.append(str(value).strip())
+        if unparsed:
+            problems.append(
+                f"field_parse_rules for {target_field} (source_column={source_column}) "
+                f"declares date_format={date_format!r} but sample value "
+                f"{unparsed[0]!r} cannot be parsed with it"
+            )
+    return problems
 
 
 @dataclass(frozen=True)
@@ -392,6 +519,17 @@ class TemplateSaveReadinessService:
             blocking_messages.append(
                 "去重字段无法解析到已确认的语义映射，请先确认映射："
                 + "、".join(unresolved_deduplication_fields)
+            )
+        # [*] 样本试解析: 模板声明的日期格式与真实文件对不上时,
+        #     在**保存时**就拦住, 而不是等入库时整份文件失败。
+        sample_parse_problems = validate_field_parse_rules_against_samples(
+            field_parse_rules,
+            sample_rows,
+        )
+        if sample_parse_problems:
+            blocking_errors.extend(sample_parse_problems)
+            blocking_messages.extend(
+                "日期解析规则与样本数据不匹配：" + problem for problem in sample_parse_problems
             )
         blocking_messages.extend(list(hash_policy.blocking_messages))
         warnings = list(hash_policy.warnings)

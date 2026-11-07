@@ -66,6 +66,76 @@ _DEFAULT_AUTO_SINGLE_FORMAT_CANDIDATES = tuple(_DECLARED_SINGLE_FORMATS.keys())
 _DEFAULT_AUTO_RANGE_FORMAT_CANDIDATES = tuple(_DECLARED_RANGE_BASE_FORMATS.keys())
 
 
+# ── 对外暴露的「合法声明格式」唯一口径 ───────────────────────────
+#
+# 为什么要有这一层:
+#   模板里写的 date_format 是**运行期**才会被解析器消费的字符串。
+#   解析器遇到不认识的 token 会在入库时抛
+#   "unsupported declared date format: xxx" —— 整份文件入不了库,
+#   而且事前没有任何提示(漂移检测只看列名, 不看值形态)。
+#   所以「合法格式」必须有一份**可被保存闸门引用**的白名单,
+#   让非法值在**保存时**就被拦住, 而不是等文件进来才炸。
+#
+# 使用方:
+#   - backend/domains/data_platform/routers/field_mapping_templates.py
+#     `_validate_field_parse_rules` —— 保存闸门
+#   - backend/services/template_save_readiness_service.py
+#     样本试解析体检
+#   - frontend/src/domains/data_platform/utils/templateFieldParseRules.js
+#     DATE_FORMAT_OPTIONS(前端选项表以此为准)
+SUPPORTED_DECLARED_DATE_FORMATS: frozenset[str] = frozenset(
+    set(_DECLARED_SINGLE_FORMATS.keys())
+    | set(_DECLARED_TIME_FORMATS.keys())
+    | set(_DECLARED_RANGE_BASE_FORMATS.keys())
+    | {_AUTO_COMPANION_FORMAT}
+)
+
+# value_kind 决定「这个值长什么样」, date_format 决定「怎么读」——
+# 两者必须自洽(例如 date_range 不能配 yyyy-mm-dd 这种单值格式)。
+_DECLARED_FORMATS_BY_VALUE_KIND: dict[str, frozenset[str]] = {
+    "single_date": frozenset(_DECLARED_SINGLE_FORMATS.keys()),
+    "single_datetime": frozenset(_DECLARED_SINGLE_FORMATS.keys()),
+    "datetime_range": frozenset(
+        token for token, (_fmt, has_time) in _DECLARED_SINGLE_FORMATS.items() if has_time
+    ),
+    "time_of_day": frozenset(_DECLARED_TIME_FORMATS.keys()),
+    "time_range": frozenset(_DECLARED_TIME_FORMATS.keys()),
+    "date_range": frozenset(_DECLARED_RANGE_BASE_FORMATS.keys()),
+}
+
+# auto_by_companion_period 只对「有候选集」的 value_kind 有效:
+# `_candidate_formats_for_auto` 对 time_of_day / time_range 直接抛。
+_AUTO_SUPPORTED_VALUE_KINDS: frozenset[str] = frozenset(
+    {"single_date", "single_datetime", "datetime_range", "date_range"}
+)
+
+
+def is_supported_declared_date_format(value: object) -> bool:
+    """date_format 是否是解析器认识的 token(大小写不敏感)。"""
+    return str(value or "").strip().lower() in SUPPORTED_DECLARED_DATE_FORMATS
+
+
+def declared_date_formats_for_value_kind(value_kind: object) -> frozenset[str]:
+    """某个 value_kind 下允许的 date_format 集合(小写 token)。
+
+    未知 value_kind 返回空集合 —— 调用方据此判定「不兼容」而不是「放行」。
+    """
+    kind = str(value_kind or "").strip().lower()
+    formats = set(_DECLARED_FORMATS_BY_VALUE_KIND.get(kind, frozenset()))
+    if kind in _AUTO_SUPPORTED_VALUE_KINDS:
+        formats.add(_AUTO_COMPANION_FORMAT)
+    return frozenset(formats)
+
+
+def is_declared_date_format_compatible(value_kind: object, date_format: object) -> bool:
+    """date_format 与 value_kind 是否自洽。"""
+    kind = str(value_kind or "").strip().lower()
+    token = str(date_format or "").strip().lower()
+    if not kind or not token:
+        return False
+    return token in declared_date_formats_for_value_kind(kind)
+
+
 def _from_excel_serial(value: float) -> Optional[date]:
     try:
         dt = pd.to_datetime(float(value), unit="D", origin="1899-12-30")
