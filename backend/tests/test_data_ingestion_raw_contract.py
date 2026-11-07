@@ -287,8 +287,14 @@ def test_data_ingestion_hash_uses_template_field_parse_rules():
 
     assert "field_parse_rules: Optional[List[Dict[str, Any]]] = None" in text
     assert "raw_importer.field_parse_rules = field_parse_rules" in text
-    assert "hash_identity_values = _build_hash_identity_values(" in text
-    assert "identity_values=hash_identity_values" in text
+    # [*] hash 计算已收敛到公共函数 compute_ingestion_data_hashes
+    #     (入库路径与离线回放共用同一条链 ⇒ 回放结论与实跑同源)。
+    #     身份值必须用**模板的 field_parse_rules** 算, 所以公共函数里
+    #     仍要把 field_parse_rules 透传给 _build_hash_identity_values。
+    assert "hash_result = compute_ingestion_data_hashes(" in text
+    assert "identity_values = _build_hash_identity_values(" in text
+    assert "identity_values=identity_values" in text
+    assert "field_parse_rules," in text
     assert "resolved_field_parse_rules" in sync_text
 
 

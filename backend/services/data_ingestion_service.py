@@ -21,6 +21,7 @@ v4.13.0 DSS架构重构:
 - 数据入库(RawDataImporter写入JSONB格式)
 """
 
+from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -269,6 +270,120 @@ def _build_hash_identity_values(
         }
         identity_values.append(row_values)
     return identity_values
+
+
+@dataclass
+class IngestionHashResult:
+    """一次入库的 hash 计算结果(实跑路径的唯一出口)。"""
+
+    rows: List[Dict[str, Any]]
+    data_hashes: List[str]
+    deduplication_fields: List[str]
+    identity_values: List[Dict[str, Any]]
+    core_fields_applied: bool
+
+
+def compute_ingestion_data_hashes(
+    *,
+    rows: List[Dict[str, Any]],
+    deduplication_fields: Optional[List[str]],
+    header_bindings: Optional[List[Dict[str, Any]]],
+    field_parse_rules: Optional[List[Dict[str, Any]]],
+    core_fields: Optional[List[Dict[str, Any]]],
+    domain: str,
+    sub_domain: Optional[str],
+    scope_values: Dict[str, Any],
+    raw_importer: Any,
+    dedup_service: Any,
+) -> IngestionHashResult:
+    """按**入库实跑路径**算一批数据的 ``data_hash``。
+
+    为什么要有这个函数
+    ----------------
+    「口径切换会不会改已入库行的 hash」这个问题, 只能用**和入库完全同一条链**来回答。
+    早期版本用回放脚本自己拼字段集合, 与入库路径有三处对不上:
+
+    1. 没传 ``identity_values``(auto-date 身份字段 + orders 身份值);
+    2. ``core_fields`` 用推导值, 而入库用的是**版本表里存的清单**;
+       ``field_parse_rules`` 也取错了表(variants 而非版本);
+    3. 漏了 orders 域的 ``prepare_orders_rows_for_b_class`` 行改写。
+
+    于是「回放结论」不能代表「切开关后的真实结果」⇒ 口径切换前必须重做回放。
+    现在入库路径与回放脚本**共用这一个函数**, 结论与实跑天然一致。
+
+    口径开关
+    --------
+    ``SYNC_CORE_FIELDS_HASH_ENABLED`` 关闭时按旧口径(``deduplication_fields``),
+    打开时改由**核心字段清单**驱动取值; 键名保持旧口径 ⇒ 已入库行的 hash 不变。
+    """
+    from backend.services.deduplication_fields_config import (
+        append_auto_date_identity_fields,
+        get_deduplication_fields,
+    )
+
+    effective_dedup_fields = get_deduplication_fields(
+        data_domain=domain,
+        template_fields=list(deduplication_fields or []),
+        sub_domain=sub_domain,
+        header_bindings=header_bindings,
+    )
+    effective_dedup_fields = append_auto_date_identity_fields(
+        effective_dedup_fields,
+        field_parse_rules,
+    )
+
+    orders_identity_values: List[Dict[str, Any]] = []
+    effective_rows = rows
+    if (domain or "").lower() == "orders":
+        effective_rows, orders_identity_values = prepare_orders_rows_for_b_class(rows)
+        effective_dedup_fields = extend_orders_deduplication_fields(
+            domain,
+            effective_dedup_fields,
+        )
+
+    identity_values = _build_hash_identity_values(
+        raw_importer,
+        effective_rows,
+        field_parse_rules,
+    )
+    identity_values = merge_hash_identity_values(
+        identity_values,
+        orders_identity_values,
+    )
+
+    # [*] 批次 E: 核心字段清单(版本级)。口径切换是**显式开关**(规格 §6.1-4):
+    #     默认走旧口径, 打开后才用清单算 hash ⇒ 一键可回退。
+    effective_core_fields: Optional[List[Dict[str, Any]]] = None
+    if core_fields:
+        from backend.services.core_fields_service import core_fields_hash_enabled
+
+        if core_fields_hash_enabled():
+            effective_core_fields = list(core_fields)
+            logger.info(
+                "[Ingest] [*] 批次E: 按核心字段清单计算data_hash "
+                f"(核心字段数={len(effective_core_fields)})"
+            )
+        else:
+            logger.info(
+                "[Ingest] [*] 批次E: 核心字段清单已提供, 但口径开关未打开"
+                "(SYNC_CORE_FIELDS_HASH_ENABLED), 继续用旧口径"
+            )
+
+    data_hashes = dedup_service.batch_calculate_data_hash(
+        effective_rows,
+        deduplication_fields=effective_dedup_fields,
+        header_bindings=header_bindings,
+        scope_values=scope_values,
+        identity_values=identity_values,
+        core_fields=effective_core_fields,
+    )
+    return IngestionHashResult(
+        rows=effective_rows,
+        data_hashes=list(data_hashes),
+        deduplication_fields=list(effective_dedup_fields),
+        identity_values=identity_values,
+        core_fields_applied=effective_core_fields is not None,
+    )
 
 
 class DataIngestionService:
@@ -681,44 +796,9 @@ class DataIngestionService:
                     # 获取granularity(从file_record或默认daily)
                     granularity = getattr(file_record, "granularity", None) or "daily"
 
-                    # [*] v4.14.0新增:获取核心去重字段(优先级:模板配置 > 默认配置 > 所有字段)
-                    from backend.services.deduplication_fields_config import (
-                        append_auto_date_identity_fields,
-                        get_deduplication_fields,
-                    )
-
-                    final_deduplication_fields = get_deduplication_fields(
-                        data_domain=domain,
-                        template_fields=deduplication_fields,
-                        sub_domain=sub_domain,
-                        header_bindings=getattr(raw_importer, "header_bindings", None),
-                    )
-                    final_deduplication_fields = append_auto_date_identity_fields(
-                        final_deduplication_fields,
-                        field_parse_rules,
-                    )
-                    orders_identity_values = []
-                    if domain.lower() == "orders":
-                        valid_rows, orders_identity_values = (
-                            prepare_orders_rows_for_b_class(valid_rows)
-                        )
-                        final_deduplication_fields = extend_orders_deduplication_fields(
-                            domain,
-                            final_deduplication_fields,
-                        )
-
-                    if final_deduplication_fields:
-                        logger.info(
-                            f"[Ingest] [v4.14.0] 使用核心字段计算data_hash: {final_deduplication_fields} "
-                            f"(数据行数={len(valid_rows)})"
-                        )
-                    else:
-                        logger.warning(
-                            f"[Ingest] [v4.14.0] [WARN] 未配置核心字段,使用所有业务字段计算data_hash "
-                            f"(数据行数={len(valid_rows)})"
-                        )
-
-                    # 计算data_hash(批量计算,支持核心字段)
+                    # [*] 计算data_hash: 走**实跑路径的公共函数**
+                    #     (口径字段集合 / identity_values / orders 行改写 / 批次E 开关
+                    #      全部在同一处, 回放脚本也调它 ⇒ 结论与实跑同源)
                     logger.info(
                         f"[Ingest] [DSS] 开始计算data_hash: {len(valid_rows)}行"
                     )
@@ -743,44 +823,32 @@ class DataIngestionService:
                         "granularity": granularity,
                         "sub_domain": sub_domain,
                     }
-                    hash_identity_values = _build_hash_identity_values(
-                        raw_importer,
-                        valid_rows,
-                        field_parse_rules,
-                    )
-                    hash_identity_values = merge_hash_identity_values(
-                        hash_identity_values,
-                        orders_identity_values,
-                    )
-                    # [*] 批次 E: 核心字段清单(版本级)。
-                    #     口径切换是**显式开关**(规格 §6.1-4): 默认走旧口径,
-                    #     打开后才用清单算 hash ⇒ 一键可回退。
-                    effective_core_fields = None
-                    if core_fields:
-                        from backend.services.core_fields_service import (
-                            core_fields_hash_enabled,
-                        )
-
-                        if core_fields_hash_enabled():
-                            effective_core_fields = list(core_fields)
-                            logger.info(
-                                "[Ingest] [*] 批次E: 按核心字段清单计算data_hash "
-                                f"(核心字段数={len(effective_core_fields)})"
-                            )
-                        else:
-                            logger.info(
-                                "[Ingest] [*] 批次E: 核心字段清单已提供, 但口径开关未打开"
-                                f"({core_fields_hash_enabled.__module__} "
-                                "SYNC_CORE_FIELDS_HASH_ENABLED), 继续用旧口径"
-                            )
-                    data_hashes = dedup_service.batch_calculate_data_hash(
-                        valid_rows,
-                        deduplication_fields=final_deduplication_fields,
+                    hash_result = compute_ingestion_data_hashes(
+                        rows=valid_rows,
+                        deduplication_fields=deduplication_fields,
                         header_bindings=getattr(raw_importer, "header_bindings", None),
+                        field_parse_rules=field_parse_rules,
+                        core_fields=core_fields,
+                        domain=domain,
+                        sub_domain=sub_domain,
                         scope_values=hash_scope_values,
-                        identity_values=hash_identity_values,
-                        core_fields=effective_core_fields,
+                        raw_importer=raw_importer,
+                        dedup_service=dedup_service,
                     )
+                    valid_rows = hash_result.rows
+                    final_deduplication_fields = hash_result.deduplication_fields
+                    hash_identity_values = hash_result.identity_values
+                    data_hashes = hash_result.data_hashes
+                    if final_deduplication_fields:
+                        logger.info(
+                            f"[Ingest] [v4.14.0] 使用核心字段计算data_hash: {final_deduplication_fields} "
+                            f"(数据行数={len(valid_rows)})"
+                        )
+                    else:
+                        logger.warning(
+                            f"[Ingest] [v4.14.0] [WARN] 未配置核心字段,使用所有业务字段计算data_hash "
+                            f"(数据行数={len(valid_rows)})"
+                        )
                     # [*] 批次 F-1/F-2: 落库列收窄。
                     #     只为**核心字段**建物理列, 其余字段只进 raw_data JSONB
                     #     (规格 §4 步骤 8: 「消除每个业务字段存两份」)。
