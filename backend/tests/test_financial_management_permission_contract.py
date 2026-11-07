@@ -1,12 +1,20 @@
 from pathlib import Path
 
 
-def test_user_store_uses_role_based_permission_resolution():
+def test_user_store_resolves_permission_from_backend_permission_list():
+    """权限判定口径：后端下发的 permissions 列表 + admin 兜底（不再是纯角色推导）。
+
+    佐证：commit b458b8a7 "feat:准备上线" 把
+    ``hasPermissionForRoles(roles.value, permission)`` 改成
+    「admin 直通 + ``permissions`` 列表包含」；后端登录响应已下发
+    ``permissions`` 载荷（见 backend/tests/test_rbac_auth_payload_contract.py）。
+    """
     text = Path("frontend/src/stores/user.js").read_text(encoding="utf-8")
 
-    assert "hasPermissionForRoles" in text
     assert "hasAnyRole" in text
-    assert "const hasPermission = (permission) => hasPermissionForRoles(roles.value, permission)" in text
+    assert "const hasPermission = (permission) => {" in text
+    assert "if (hasAnyRole(roles.value, ['admin'])) return true" in text
+    assert "return permissions.value.includes(permission)" in text
     assert "const hasRole = (requiredRoles) => hasAnyRole(roles.value, requiredRoles)" in text
 
 

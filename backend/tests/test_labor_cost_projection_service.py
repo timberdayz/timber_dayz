@@ -122,7 +122,13 @@ async def test_refresh_month_persists_projected_rows_for_each_active_shop():
         },
     )
 
-    assert result == {"year_month": "2026-09", "allocation_upserts": 2}
+    # 佐证：commit 42c97563「refresh_month 现在会清掉『这次算不出来但表里还在』的行」
+    # ⇒ 返回值多了 allocation_stale_deleted（本次没有陈旧行可删，为 0）。
+    assert result == {
+        "year_month": "2026-09",
+        "allocation_upserts": 2,
+        "allocation_stale_deleted": 0,
+    }
     assert len(added) == 2
     assert [record.pre_commission_amount for record in added] == [Decimal("2500.00"), Decimal("2500.00")]
     assert [record.performance_amount for record in added] == [Decimal("300.00"), Decimal("300.00")]

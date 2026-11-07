@@ -1,4 +1,5 @@
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -282,4 +283,9 @@ def test_profit_save_uses_the_preview_version_when_the_client_does_not_supply_on
         encoding="utf-8"
     )
 
-    assert 'assumption_version=data.get("assumption_version") or preview["assumption_version"]' in source
+    # 客户端没带 assumption_version 时必须回落到预览口径的版本号
+    # （black 会把这条表达式拆行，用正则匹配）。
+    assert re.search(
+        r'assumption_version=data\.get\("assumption_version"\)\s*or\s*preview\["assumption_version"\]',
+        source,
+    )

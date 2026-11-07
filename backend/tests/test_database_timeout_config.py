@@ -51,7 +51,9 @@ def test_statement_timeout_defaults_are_below_frontend_budgets():
     """默认 DB 预算必须严格小于前端 axios 超时。"""
     settings = get_settings()
 
-    # Dashboard 家族：前端 70s
+    # Dashboard 家族：前端 120s
+    # （2026-11-04 commit 3d80effc：前端 70s -> 120s，nginx 60s -> 300s，
+    #   DB 保持 60s 不砍 ⇒ DB 60s < 前端 120s < nginx 300s）
     assert settings.DB_STATEMENT_TIMEOUT_MS < _frontend_timeout_ms("dashboard")
     # 普通接口：前端默认 30s
     assert (
@@ -64,7 +66,7 @@ def test_statement_timeout_defaults_are_below_frontend_budgets():
         "/scan": ("scan", 120_000),
         "/preview": ("preview", 60_000),
         "/ingest": ("ingest", 180_000),
-        "/dashboard": ("dashboard", 70_000),
+        "/dashboard": ("dashboard", 120_000),
         "/collection": ("collection", 300_000),
         "/mapping": ("mapping", 90_000),
     }

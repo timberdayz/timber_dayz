@@ -4,7 +4,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
-from modules.core.db import Base, DimPlatform, DimShop, PlatformAccount
+from modules.core.db import DimPlatform, DimShop, PlatformAccount
 
 
 @pytest_asyncio.fixture
@@ -12,9 +12,24 @@ async def dim_shops_core_session():
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
 
     async with engine.begin() as conn:
-        for schema_name in ("core", "a_class", "b_class", "c_class", "finance"):
+        for schema_name in (
+            "core",
+            "a_class",
+            "b_class",
+            "c_class",
+            "finance",
+            "ops",
+            "semantic",
+        ):
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
-        await conn.run_sync(Base.metadata.create_all)
+        # 只建本用例需要的表：Base.metadata.create_all 会带上 PG 专有的
+        # jsonb 默认值（'[]'::jsonb），sqlite 无法解析。
+        for table in (
+            DimPlatform.__table__,
+            DimShop.__table__,
+            PlatformAccount.__table__,
+        ):
+            await conn.run_sync(table.create)
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     async with session_factory() as session:

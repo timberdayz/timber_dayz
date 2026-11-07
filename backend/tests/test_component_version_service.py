@@ -1,13 +1,23 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from backend.services.component_version_service import ComponentVersionService
 from modules.core.db import Base, ComponentVersion
 
 
 def _make_session():
-    engine = create_engine("sqlite:///:memory:")
-    ComponentVersion.__table__.create(bind=engine)
+    # ComponentVersion 归属 core schema，sqlite 必须先 ATTACH 出该库，
+    # 否则建表会报 "unknown database core"。
+    engine = create_engine(
+        "sqlite://",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        conn.exec_driver_sql("ATTACH DATABASE ':memory:' AS core")
+    ComponentVersion.__table__.create(bind=engine, checkfirst=True)
     SessionLocal = sessionmaker(bind=engine)
     return SessionLocal(), engine
 

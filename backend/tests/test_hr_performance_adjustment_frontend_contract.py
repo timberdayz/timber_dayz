@@ -62,9 +62,13 @@ def test_performance_views_expose_ranking_pool_and_alert_helpers():
 def test_person_target_page_marks_boundary_with_performance_inputs():
     text = Path("frontend/src/domains/business/views/target/TargetPersonManagement.vue").read_text(encoding="utf-8")
 
-    assert "前往人员绩效输入项" in text
+    # 人员绩效输入入口：按钮文案 + 跳转目标（commit a12d49bf 把这个入口搬到本页面）
+    assert "人员绩效输入" in text
     assert "goToPerformancePerson" in text
-    assert "createHrEmployeeTarget" in text
+    assert "/hr-performance-management/person" in text
+    # 员工目标已统一为「共同承接店铺目标」(commit 8c042d71)，本页面只读、不再创建员工目标
+    assert "getHrEmployeeTargetSummary" in text
+    assert "createHrEmployeeTarget" not in text
 
 
 def test_legacy_target_management_page_is_downgraded_to_split_entry():
@@ -74,7 +78,9 @@ def test_legacy_target_management_page_is_downgraded_to_split_entry():
     assert "/target-management/shop" in text
     assert "/target-management/person" in text
     assert "/target-management/operation" in text
-    assert "/hr-performance-management/person" in text
+    # 人员绩效输入项入口已随个人绩效工作台搬到个人目标页 (commit a12d49bf)，
+    # 历史页不再重复挂载；该入口仍由菜单组提供（见 frontend/scripts/targetRouteSplit.test.mjs）。
+    assert "/hr-performance-management/person" not in text
 
 
 def test_income_audit_route_and_view_exist():

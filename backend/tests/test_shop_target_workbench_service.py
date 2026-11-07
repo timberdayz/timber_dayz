@@ -21,6 +21,19 @@ class _ScalarsResult:
         return self._rows
 
 
+class _ScalarResult:
+    """模拟 ``select(exists())`` 的返回值：scalar_one() 给出布尔判定。
+
+    工资月锁检查（PayrollPeriodLockService）会先做一次存在性查询。
+    """
+
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one(self):
+        return self._value
+
+
 class _ScalarOneResult:
     def __init__(self, row):
         self._row = row
@@ -174,7 +187,15 @@ def test_shop_workbench_prefers_period_scoped_shop_rows_when_legacy_exists():
 
 def test_apply_shop_workbench_creates_zero_order_targets_for_a_new_month():
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[_ScalarsResult([]), None])
+    # 顺序：写入前工资月锁检查 -> 当月目标 -> 删除旧分解 -> 提交前再锁检查一次。
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarResult(False),
+            _ScalarsResult([]),
+            None,
+            _ScalarResult(False),
+        ]
+    )
     db.add = AsyncMock()
     db.flush = AsyncMock()
     db.commit = AsyncMock()
@@ -244,7 +265,15 @@ def test_apply_shop_workbench_creates_zero_order_targets_for_a_new_month():
 
 def test_apply_shop_workbench_persists_settlement_profit_targets():
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[_ScalarsResult([]), None])
+    # 顺序：写入前工资月锁检查 -> 当月目标 -> 删除旧分解 -> 提交前再锁检查一次。
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarResult(False),
+            _ScalarsResult([]),
+            None,
+            _ScalarResult(False),
+        ]
+    )
     db.add = AsyncMock()
     db.flush = AsyncMock()
     db.commit = AsyncMock()
@@ -336,9 +365,13 @@ def test_apply_shop_workbench_preserves_existing_order_targets():
     db = AsyncMock()
     db.execute = AsyncMock(
         side_effect=[
+            # 顺序：写入前工资月锁检查 -> 当月目标 -> 已有分解 -> 删除旧分解
+            #      -> 提交前再锁检查一次。
+            _ScalarResult(False),
             _ScalarsResult([target]),
             _ScalarsResult(existing_breakdowns),
             None,
+            _ScalarResult(False),
         ]
     )
     db.add = AsyncMock()

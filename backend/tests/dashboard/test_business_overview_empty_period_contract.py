@@ -166,6 +166,16 @@ def test_bo_list_modules_empty_period_returns_empty_list(monkeypatch, endpoint_f
         async def get_business_overview_operational_metrics(self, **kwargs):
             return []
 
+        async def get_business_overview_identity_health(self, **kwargs):
+            # 流量排行路由会把身份健康度挂到 meta 上，缺它整个路由会 500。
+            return {
+                "status": "ok",
+                "warning_count": 0,
+                "warnings": [],
+                "warning_breakdown": {},
+                "discovery_issues": {},
+            }
+
     _patch_dashboard_service(monkeypatch, _ServiceStub())
 
     response = asyncio.run(

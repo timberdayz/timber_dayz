@@ -1,5 +1,4 @@
 import pandas as pd
-from pathlib import Path
 
 from backend.services.excel_parser import ExcelParser
 
@@ -81,9 +80,62 @@ def test_orders_normalize_table_still_forward_fills_order_identity_fields():
     assert "店铺" in report["filled_columns"]
 
 
-def test_orders_normalize_table_restores_real_blank_profit_cells_from_merged_source_file():
-    path = Path(r"F:\Vscode\python_programme\AI_code\xihong_erp\data\raw\2026\shopee_orders_monthly_20260414_222241.xls")
-    df = ExcelParser.read_excel(path, header=1, nrows=1943)
+def test_orders_normalize_table_restores_real_blank_profit_cells_from_merged_source_file(tmp_path):
+    """真实「合并单元格」源文件：订单级利润/买家支付在明细行必须保持空白。
+
+    原始用例依赖本机 raw 目录下的 .xls 导出件（``data/**/*.xls`` 已被 .gitignore
+    忽略，仓库里并不存在），无法在 CI/他人机器上复现；这里用 openpyxl 现场造一份
+    带合并单元格等价形态的源文件，跑同一条 ``normalize_table`` 路径。
+    """
+    import openpyxl
+
+    path = tmp_path / "shopee_orders_monthly_merged.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.cell(1, 1, "导出时间: 2026-04-14 22:22:41")
+    headers = [
+        "订单编号",
+        "店铺",
+        "产品ID",
+        "平台SKU",
+        "SKU ID",
+        "销售数量",
+        "出库数量",
+        "下单时间",
+        "利润(RMB)",
+        "买家支付(RMB)",
+    ]
+    for col_idx, header in enumerate(headers, start=1):
+        sheet.cell(2, col_idx, header)
+
+    # Excel 第 3 行是订单头，第 4/5 行是合并出来的明细行。
+    sheet.cell(3, 1, "260306DRVKC6W4")
+    sheet.cell(3, 2, "Shopee菲律宾2店")
+    sheet.cell(3, 3, 27984946015)
+    sheet.cell(3, 4, "HKR-LRI9-Transparent-035")
+    sheet.cell(3, 5, 224169128209)
+    sheet.cell(3, 6, 2)
+    sheet.cell(3, 7, 2)
+    sheet.cell(3, 8, "2026-03-06 13:16:50")
+    sheet.cell(3, 9, "106.79")
+    sheet.cell(3, 10, "335.71")
+    # 明细行只带商品维度，订单级字段靠合并单元格继承。
+    sheet.cell(4, 3, 27984946015)
+    sheet.cell(4, 4, "HKR-LRI9-Transparent-035")
+    sheet.cell(4, 5, 224169128209)
+    sheet.cell(4, 6, 4)
+    sheet.cell(4, 7, 4)
+    sheet.cell(5, 3, 27984946016)
+    sheet.cell(5, 4, "HKR-LRI9-Transparent-036")
+    sheet.cell(5, 5, 224169128210)
+    sheet.cell(5, 6, 1)
+    sheet.cell(5, 7, 1)
+
+    for column_letter in ("A", "B", "H", "I", "J"):
+        sheet.merge_cells(f"{column_letter}3:{column_letter}5")
+    workbook.save(path)
+
+    df = ExcelParser.read_excel(path, header=1)
     df.columns = [str(c).strip() for c in df.columns]
 
     normalized, _ = ExcelParser.normalize_table(
@@ -94,8 +146,10 @@ def test_orders_normalize_table_restores_real_blank_profit_cells_from_merged_sou
         header_row=1,
     )
 
-    # Excel row 1936 is the order head; 1937-1943 are merged-detail rows that must keep order-level profit blank
-    assert normalized.iloc[1933]["订单编号"] == "260306DRVKC6W4"
-    assert float(normalized.iloc[1933]["利润(RMB)"]) == 106.79
-    assert normalized.iloc[1934]["订单编号"] == "260306DRVKC6W4"
-    assert normalized.iloc[1934]["利润(RMB)"] == ""
+    # 订单头行保留真实金额；合并出来的明细行必须保持空白（不得被前向填充）。
+    assert normalized.iloc[0]["订单编号"] == "260306DRVKC6W4"
+    assert float(normalized.iloc[0]["利润(RMB)"]) == 106.79
+    assert normalized.iloc[1]["订单编号"] == "260306DRVKC6W4"
+    assert normalized.iloc[1]["利润(RMB)"] == ""
+    assert normalized.iloc[2]["利润(RMB)"] == ""
+    assert normalized.iloc[1]["买家支付(RMB)"] == ""

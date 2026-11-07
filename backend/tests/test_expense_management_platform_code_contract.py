@@ -36,4 +36,11 @@ def test_expense_frontend_delete_copy_and_blank_save_guard_exist():
     assert "buildExpenseRowKey" in source
     assert "platform_code: shop.platform_code" in source or "row.platform_code = shop.platform_code" in source
     assert 'prop="labor_cost"' in source
-    assert "labor_cost: Number(row.labor_cost) || 0" in source
+    # 人力费用已改为「系统人力成本」（薪资链路投影），前端只读；
+    # 保存时系统口径的行必须回传 0，避免与投影行双算。
+    # 佐证：commit 2a5af9fd "feat: project labor costs from payroll"
+    assert "laborCostForPayload" in source
+    assert (
+        "row.labor_cost_source === 'system' ? 0 : (Number(row.labor_cost) || 0)"
+        in source
+    )

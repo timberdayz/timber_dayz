@@ -11,7 +11,10 @@ from modules.platforms.shopee.components.business_analysis_common import (
 
 
 def test_build_domain_path_returns_expected_products_route() -> None:
-    assert build_domain_path("products") == "/datacenter/product/overview"
+    # 商品业绩页在 Shopee 卖家后台是 /datacenter/product/performance
+    # （佐证：modules/platforms/shopee/components/business_analysis_common.py DOMAIN_PATHS，
+    #   以及 tests/unit/test_shopee_products_export_component.py 等仍在用的组件用例）。
+    assert build_domain_path("products") == "/datacenter/product/performance"
 
 
 def test_build_domain_path_returns_expected_services_route() -> None:

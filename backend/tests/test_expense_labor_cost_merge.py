@@ -90,6 +90,12 @@ async def test_projected_labor_cost_uses_fixed_v2_basis_for_all_months(monkeypat
 
 @pytest.mark.asyncio
 async def test_business_overview_expenses_merge_manual_cost_and_system_labor_for_shop(monkeypatch):
+    """看板费用口径：手工费用扣掉人力费用后 + V2 投影人力成本。
+
+    佐证：commit 42c97563「不再看 system_config.labor_cost_auto_effective_month，
+    改成看数据本身」—— 现在**先查 V2 投影行**，再决定手工「人力费用」扣不扣；
+    ``LaborCostPolicyService.get_effective_month`` 已不再参与该链路。
+    """
     from backend.services import postgresql_dashboard_service as module
 
     class _ScalarResult:
@@ -101,7 +107,8 @@ async def test_business_overview_expenses_merge_manual_cost_and_system_labor_for
 
     class _Session:
         def __init__(self):
-            self.execute = AsyncMock(side_effect=[_ScalarResult(800), _ScalarResult(350)])
+            # 顺序：先查人力成本投影(V2)，再查手工费用。
+            self.execute = AsyncMock(side_effect=[_ScalarResult(350), _ScalarResult(800)])
 
         async def __aenter__(self):
             return self
@@ -111,15 +118,7 @@ async def test_business_overview_expenses_merge_manual_cost_and_system_labor_for
 
     session = _Session()
 
-    async def get_effective_month(_self):
-        return "2026-08"
-
     monkeypatch.setattr(module, "AsyncSessionLocal", lambda: session)
-    monkeypatch.setattr(
-        module.LaborCostPolicyService,
-        "get_effective_month",
-        get_effective_month,
-    )
 
     total = await PostgresqlDashboardService()._load_operating_expenses_summary(
         date_cls(2026, 8, 1),
@@ -128,9 +127,9 @@ async def test_business_overview_expenses_merge_manual_cost_and_system_labor_for
     )
 
     assert total == 1150.0
-    manual_sql = str(session.execute.await_args_list[0].args[0])
-    labor_sql = str(session.execute.await_args_list[1].args[0])
+    labor_sql = str(session.execute.await_args_list[0].args[0])
+    manual_sql = str(session.execute.await_args_list[1].args[0])
     assert '"人力费用"' in manual_sql
     assert "allocation_scope = 'shop'" in labor_sql
-    assert session.execute.await_args_list[1].args[1]["platform_code"] == "shopee"
-    assert session.execute.await_args_list[1].args[1]["shop_id"] == "shop-1"
+    assert session.execute.await_args_list[0].args[1]["platform_code"] == "shopee"
+    assert session.execute.await_args_list[0].args[1]["shop_id"] == "shop-1"

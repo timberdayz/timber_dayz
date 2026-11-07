@@ -116,6 +116,8 @@ async def test_login_response_contains_backend_permissions_payload(monkeypatch):
             "access_token": "access-token",
             "refresh_token": "refresh-token",
             "token_type": "bearer",
+            # 登录流程会用 session_id 落一条 UserSession 记录
+            "session_id": "session-id",
         },
     )
     monkeypatch.setattr(auth_router.audit_service, "log_action", AsyncMock())

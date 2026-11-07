@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -104,7 +105,11 @@ def test_site_sku_projection_has_a_separate_table_and_idempotent_business_key():
 def test_feishu_projection_keeps_legacy_spu_sku_delivery_when_site_table_is_not_initialized():
     source = Path("backend/services/feishu_projection_service.py").read_text(encoding="utf-8")
 
-    assert "not config.spu_table_id or not config.sku_table_id" in source
+    # 镜像表 id 未配齐时整体不投递（black 会把这条守卫拆成多行，用正则匹配）
+    assert re.search(
+        r"not\s+config\.spu_table_id\s+or\s+not\s+config\.sku_table_id", source
+    )
+    # 平台SKU利润表没配时只让该类任务失败，不影响 SPU/SKU 投递
     assert "platform_sku_profit_table_id is not configured" in source
 
 
@@ -122,7 +127,10 @@ def test_site_operating_migration_and_projection_are_safe_for_transport_and_deci
     router = Path("backend/domains/business/routers/product_center.py").read_text(encoding="utf-8")
 
     assert 'sa.Column("transport_type", sa.String(64)' in migration
-    assert '"selling_price": float(row.selling_price)' in router
+    # Decimal -> float 的安全转换（允许 black 把三元表达式拆行/加括号）
+    assert re.search(
+        r'"selling_price":\s*\(?\s*float\(row\.selling_price\)', router
+    )
 
 
 def test_warehouse_contract_is_single_country_and_transport_is_fixed():

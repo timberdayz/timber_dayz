@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.models.database import get_async_db
 from modules.core.db import (
+    CollectionConfigShopScope,
     DimPlatform,
     DimShop,
     MainAccount,
@@ -137,6 +138,9 @@ async def rename_session_factory():
         await conn.run_sync(ShopAccountCapability.__table__.create)
         await conn.run_sync(DimPlatform.__table__.create)
         await conn.run_sync(DimShop.__table__.create)
+        # 停用店铺账号时会把店铺从采集配置作用域里摘掉
+        # （core.collection_config_shop_scopes），该表必须存在。
+        await conn.run_sync(CollectionConfigShopScope.__table__.create)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     yield factory
     await engine.dispose()

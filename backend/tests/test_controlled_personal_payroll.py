@@ -8,6 +8,7 @@ from modules.core.db import (
     Employee,
     EmployeeCommission,
     EmployeePerformance,
+    PayrollManualInput,
     PayrollRecord,
     PersonalPerformanceEmployeeScope,
     PersonalPerformancePlan,
@@ -69,6 +70,7 @@ def test_confirmed_controlled_scope_excludes_outside_employee_from_personal_payr
             EmployeeCommission: _Result(rows=[commission]),
             EmployeePerformance: _Result(rows=[stale_performance]),
             PayrollRecord: _Result(rows=[]),
+            PayrollManualInput: _Result(rows=[]),
             Employee: _Result(scalar=SimpleNamespace(status="active", employee_identity_type="employee")),
         }
         return rows_by_entity[entity]

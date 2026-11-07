@@ -179,8 +179,16 @@ async def test_resolve_runtime_component_returns_manifest_for_single_stable(comp
 
 @pytest.mark.asyncio
 async def test_preflight_create_task_rejects_when_export_component_has_no_stable(collection_app, monkeypatch):
+    from backend.dependencies.auth import require_admin
     from backend.models.database import get_async_db
     from backend.services.component_runtime_resolver import NoStableComponentVersionError
+
+    class _AdminUser:
+        user_id = 1
+        id = 1
+        username = "admin"
+        is_active = True
+        is_superuser = True
 
     class _FakeLoader:
         async def load_account_async(self, account_id, db):
@@ -188,6 +196,11 @@ async def test_preflight_create_task_rejects_when_export_component_has_no_stable
                 "account_id": account_id,
                 "capabilities": {"orders": True},
             }
+
+    class _FakeShopLoader:
+        async def load_shop_account_async(self, account_id, db):
+            # 店铺账号链路走不通 ⇒ 回落到通用账号加载器
+            return None
 
     class _RaisingResolver:
         @classmethod
@@ -207,8 +220,15 @@ async def test_preflight_create_task_rejects_when_export_component_has_no_stable
         session.add = MagicMock()
         yield session
 
+    # 账号运行时加载已经收敛到 collection_account_runtime_service（它自己按名导入
+    # 两个 loader），桩必须打在**消费方**模块上，否则对真身无效。
+    monkeypatch.setenv("ACCOUNT_ENCRYPTION_KEY", "test-encryption-key")
     monkeypatch.setattr(
-        "backend.services.account_loader_service.get_account_loader_service",
+        "backend.services.collection_account_runtime_service.get_shop_account_loader_service",
+        lambda: _FakeShopLoader(),
+    )
+    monkeypatch.setattr(
+        "backend.services.collection_account_runtime_service.get_account_loader_service",
         lambda: _FakeLoader(),
     )
     monkeypatch.setattr(
@@ -217,6 +237,8 @@ async def test_preflight_create_task_rejects_when_export_component_has_no_stable
     )
 
     collection_app.dependency_overrides[get_async_db] = _override_get_async_db
+    # 采集任务路由整体挂了 require_admin ⇒ 不覆盖鉴权的话请求会先被 401 拦掉。
+    collection_app.dependency_overrides[require_admin] = lambda: _AdminUser()
     try:
         transport = ASGITransport(app=collection_app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -237,6 +259,7 @@ async def test_preflight_create_task_rejects_when_export_component_has_no_stable
         assert "stable" in response.json()["detail"].lower()
     finally:
         collection_app.dependency_overrides.pop(get_async_db, None)
+        collection_app.dependency_overrides.pop(require_admin, None)
 
 
 @pytest.mark.asyncio

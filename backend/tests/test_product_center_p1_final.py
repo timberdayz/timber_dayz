@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -13,6 +14,44 @@ from backend.schemas.product_center import (
     LogisticsBillUpdateRequest,
     LogisticsProviderRuleUpdateRequest,
     WarehouseStorageRuleUpdateRequest,
+)
+
+
+def _compact(text: str) -> str:
+    """去掉全部空白。
+
+    契约断言关心的是代码结构，不是 black 的换行/缩进排版；压成单行后
+    纯格式化改动不会打断断言。
+    """
+    return re.sub(r"\s+", "", text)
+
+
+def _section(source: str, start_marker: str, end_marker: str) -> str:
+    """按标记切出源码片段。
+
+    标记在匹配时忽略空白，因此 `@router.post("/x")` 被 black 拆成多行后
+    依然能正确定位；同时返回的仍是原始文本，便于直接断言 `await db.commit()`
+    这类字面量。
+    """
+    chars: list[str] = []
+    offsets: list[int] = []
+    for index, char in enumerate(source):
+        if char.isspace():
+            continue
+        chars.append(char)
+        offsets.append(index)
+    compact = "".join(chars)
+    start = compact.index(_compact(start_marker))
+    end = compact.index(_compact(end_marker), start)
+    return source[offsets[start] : offsets[end]]
+
+
+# 采购成本回退语义：仅当外币折算缺失（None）时才回退到 SKU 默认成本，
+# 0 元采购成本必须原样保留。
+_PURCHASE_COST_FALLBACK = (
+    r'purchase_cost=\(?cost_inputs\["purchase_cost"\]'
+    r'ifcost_inputs\["purchase_cost"\]isnotNone'
+    r'elserow\.default_purchase_cost'
 )
 
 
@@ -229,10 +268,7 @@ def test_candidate_purchase_cost_falls_back_only_when_foreign_base_cost_is_missi
 
     # The prefetch map contains only valid CNY-derived costs. A missing foreign
     # conversion must therefore use the SKU default, or remain incomplete.
-    assert (
-        'purchase_cost = cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost'
-        in candidate_section
-    )
+    assert re.search(_PURCHASE_COST_FALLBACK, _compact(candidate_section))
     assert "purchase_cost=purchase_cost" in candidate_section
 
 
@@ -436,11 +472,11 @@ def test_compatibility_operating_profile_writes_and_preview_reject_non_sales_pla
     router_source = Path(
         "backend/domains/business/routers/product_center.py"
     ).read_text(encoding="utf-8")
-    dimensions = router_source[
-        router_source.index(
-            "async def _validate_operating_dimensions"
-        ) : router_source.index('@router.post("/api/sku-operating-profiles"')
-    ]
+    dimensions = _section(
+        router_source,
+        "async def _validate_operating_dimensions",
+        '@router.post("/api/sku-operating-profiles"',
+    )
     # ⚠️ 断言前先把源码压成单行再比对：black 会把这个守卫条件拆成多行，
     # 直接断言连续字面量会被纯格式化改动打断（守卫本身没变）。
     guard = 'platform is None or not platform.is_active or platform.platform_role != "sales"'
@@ -480,7 +516,7 @@ def test_compatibility_operating_profile_writes_are_audited_in_the_committing_tr
         ),
     ]
     for start, end in endpoint_bounds:
-        section = source[source.index(start) : source.index(end)]
+        section = _section(source, start, end)
         audit_index = section.index("await _write_product_center_audit(")
         assert audit_index < section.index("await db.commit()"), start
 
@@ -529,7 +565,7 @@ def test_product_category_writes_are_audited_atomically_with_category_identity_a
         ("async def update_product_category", "async def _apply_spu_category"),
     ]
     for start, end in endpoint_bounds:
-        section = source[source.index(start) : source.index(end)]
+        section = _section(source, start, end)
         audit_index = section.index("await _write_product_center_audit(")
         assert audit_index < section.index("await db.commit()"), start
         assert 'resource_type="product_category"' in section
@@ -597,7 +633,7 @@ def test_product_warehouse_writes_are_audited_in_the_committing_transaction():
         ),
     ]
     for start, end in endpoint_bounds:
-        section = source[source.index(start) : source.index(end)]
+        section = _section(source, start, end)
         audit_index = section.index("await _write_product_center_audit(")
         assert audit_index < section.index("await db.commit()"), start
 
@@ -735,10 +771,7 @@ def test_candidate_preserves_valid_zero_purchase_cost_before_sku_fallback():
             '@router.post("/api/platform-sku-profit/preview")'
         )
     ]
-    assert (
-        'cost_inputs["purchase_cost"] if cost_inputs["purchase_cost"] is not None else row.default_purchase_cost'
-        in candidates
-    )
+    assert re.search(_PURCHASE_COST_FALLBACK, _compact(candidates))
 
 
 def test_platform_profit_projection_prefers_immutable_estimate_reference_costs():

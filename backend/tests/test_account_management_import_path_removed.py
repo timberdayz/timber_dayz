@@ -5,7 +5,9 @@ from backend.main import app
 RUNTIME_FILES = [
     Path("frontend/src/api/accounts.js"),
     Path("frontend/src/stores/accounts.js"),
-    Path("frontend/src/views/AccountManagement.vue"),
+    # 账号管理页已随前端分层迁移到域目录
+    # （commit 5f6748e3 "refactor(frontend): repoint routes to domain-owned views"）。
+    Path("frontend/src/domains/platform/views/AccountManagement.vue"),
 ]
 
 

@@ -1,5 +1,6 @@
 import json
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +9,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from modules.core.db import (
-    Base,
     DimPlatform,
     DimShop,
     DimUser,
@@ -25,9 +25,29 @@ async def dim_shops_core_read_session():
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
 
     async with engine.begin() as conn:
-        for schema_name in ("core", "a_class", "b_class", "c_class", "finance"):
+        for schema_name in (
+            "core",
+            "a_class",
+            "b_class",
+            "c_class",
+            "finance",
+            "ops",
+            "semantic",
+        ):
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
-        await conn.run_sync(Base.metadata.create_all)
+        # 只建本用例需要的表：Base.metadata.create_all 会带上 PG 专有的
+        # jsonb 默认值（'[]'::jsonb），sqlite 无法解析。
+        for table in (
+            DimPlatform.__table__,
+            DimShop.__table__,
+            DimUser.__table__,
+            Employee.__table__,
+            EmployeeShopAssignment.__table__,
+            PerformanceScore.__table__,
+            SalesTarget.__table__,
+            TargetBreakdown.__table__,
+        ):
+            await conn.run_sync(table.create)
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     async with session_factory() as session:
@@ -122,12 +142,34 @@ async def test_shop_performance_reads_shop_name_from_core_dim_shops(dim_shops_co
 
 
 @pytest.mark.asyncio
-async def test_employee_assignment_list_reads_shop_name_from_core_dim_shops(dim_shops_core_read_session):
+async def test_employee_assignment_list_resolves_shop_name_from_core_shop_accounts(
+    dim_shops_core_read_session, monkeypatch
+):
+    """归属列表的店名来自权威主数据 core.shop_accounts，而不是派生表 core.dim_shops。
+
+    佐证：commit 42c97563「core.dim_shops 是派生展示维度表…权威主数据是 core.shop_accounts」，
+    旧用例的「读 dim_shops」前提已过期。店名解析用的是 PG 专有 SQL（``id::text``），
+    sqlite 无法执行，因此这里：
+    - 用源码契约钉死「读 core.shop_accounts、不读 core.dim_shops」；
+    - 再用替身 loader 验证接口把权威店名透传到响应（派生表里的旧名不得被采用）。
+    """
+    from backend.domains.business.routers import hr_commission
     from backend.domains.business.routers.hr_commission import list_employee_shop_assignments
+
+    source = Path("backend/domains/business/routers/hr_commission.py").read_text(
+        encoding="utf-8"
+    )
+    loader_source = source[
+        source.index("async def _load_shop_display_names") : source.index(
+            "def _validate_shop_assignment_ratio_limit"
+        )
+    ]
+    assert "FROM core.shop_accounts" in loader_source
+    assert "FROM core.dim_shops" not in loader_source
 
     dim_shops_core_read_session.add(DimPlatform(platform_code="shopee", name="Shopee", is_active=True))
     dim_shops_core_read_session.add(
-        DimShop(platform_code="shopee", shop_id="shop-3", shop_name="Commission Shop", shop_slug="commission-shop")
+        DimShop(platform_code="shopee", shop_id="shop-3", shop_name="Derived Shop", shop_slug="commission-shop")
     )
     dim_shops_core_read_session.add(
         Employee(id=1, employee_code="E001", name="Alice")
@@ -144,6 +186,11 @@ async def test_employee_assignment_list_reads_shop_name_from_core_dim_shops(dim_
     )
     await dim_shops_core_read_session.commit()
 
+    async def _fake_loader(_db):
+        return {("shopee", "shop-3"): "Authoritative Shop"}
+
+    monkeypatch.setattr(hr_commission, "_load_shop_display_names", _fake_loader)
+
     response = await list_employee_shop_assignments(
         year_month="2026-03",
         employee_code=None,
@@ -155,4 +202,4 @@ async def test_employee_assignment_list_reads_shop_name_from_core_dim_shops(dim_
         db=dim_shops_core_read_session,
     )
 
-    assert response["data"]["items"][0].shop_name == "Commission Shop"
+    assert response["data"]["items"][0].shop_name == "Authoritative Shop"

@@ -1,11 +1,20 @@
 import asyncio
-import json
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+from fastapi import HTTPException
+
 from backend.routers.target_management import create_target, generate_daily_breakdown, list_target_products, update_target
 from backend.schemas.target import GenerateDailyBreakdownRequest, TargetCreateRequest, TargetUpdateRequest
+
+# 运营目标（target_type=operation）已迁移到「运营绩效工作台」，
+# 旧 /targets 接口一律 409 拒绝。佐证：
+# - backend/domains/business/routers/target_management.py:925（create）/1092（update）
+# - backend/tests/test_operation_performance_workbench.py:301 仍断言该文案存在
+# - git log: 6d5423ca "feat: add monthly operation performance workbench"
+WORKBENCH_REDIRECT_DETAIL = "请使用运营绩效工作台"
 
 
 class _ScalarsResult:
@@ -35,7 +44,8 @@ class _RowsResult:
         return self._rows
 
 
-def test_create_target_accepts_profit_and_operation_fields():
+def test_create_target_accepts_profit_fields_for_non_operation_targets():
+    """非运营目标仍走旧接口创建，利润字段必须被完整接受。"""
     db = AsyncMock()
     db.commit = AsyncMock()
     db.add = MagicMock()
@@ -50,6 +60,36 @@ def test_create_target_accepts_profit_and_operation_fields():
 
     db.refresh = AsyncMock(side_effect=_refresh)
     db.execute = AsyncMock(return_value=_ScalarsResult([]))
+
+    request = TargetCreateRequest(
+        target_name="2026-04 店铺目标",
+        target_type="shop",
+        scope_type="shop",
+        period_start=date(2026, 4, 1),
+        period_end=date(2026, 4, 30),
+        target_amount=0.0,
+        target_quantity=0,
+        target_profit_amount=0.0,
+    )
+
+    result = asyncio.run(
+        create_target(
+            request=request,
+            db=db,
+            current_user=SimpleNamespace(username="admin"),
+        )
+    )
+
+    assert result["success"] is True
+    assert result["data"]["target_profit_amount"] == 0.0
+    assert result["data"]["scope_type"] == "shop"
+
+
+def test_create_operation_target_is_rejected_and_points_to_workbench():
+    """运营目标改由运营绩效工作台写入，旧接口必须 409 拒绝而不是静默创建。"""
+    db = AsyncMock()
+    db.commit = AsyncMock()
+    db.add = MagicMock()
 
     request = TargetCreateRequest(
         target_name="2026-04 运营目标",
@@ -70,25 +110,22 @@ def test_create_target_accepts_profit_and_operation_fields():
         manual_score_enabled=False,
     )
 
-    result = asyncio.run(
-        create_target(
-            request=request,
-            db=db,
-            current_user=SimpleNamespace(username="admin"),
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            create_target(
+                request=request,
+                db=db,
+                current_user=SimpleNamespace(username="admin"),
+            )
         )
-    )
 
-    assert result["success"] is True
-    assert result["data"]["target_profit_amount"] == 0.0
-    assert result["data"]["metric_code"] == "customer_satisfaction"
-    assert result["data"]["metric_direction"] == "higher_better"
-    assert result["data"]["scope_type"] == "shop"
-    assert result["data"]["target_value"] == 95.0
-    assert result["data"]["achieved_value"] == 88.0
-    assert result["data"]["max_score"] == 20.0
+    assert exc.value.status_code == 409
+    assert exc.value.detail == WORKBENCH_REDIRECT_DETAIL
+    db.add.assert_not_called()
 
 
 def test_create_operation_target_requires_achieved_value_when_not_manual():
+    """achieved_value 的必填校验已随工作台迁移，旧接口对运营目标一律 409。"""
     db = AsyncMock()
 
     request = TargetCreateRequest(
@@ -109,24 +146,25 @@ def test_create_operation_target_requires_achieved_value_when_not_manual():
         manual_score_enabled=False,
     )
 
-    resp = asyncio.run(
-        create_target(
-            request=request,
-            db=db,
-            current_user=SimpleNamespace(username="admin"),
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            create_target(
+                request=request,
+                db=db,
+                current_user=SimpleNamespace(username="admin"),
+            )
         )
-    )
 
-    body = json.loads(resp.body.decode("utf-8"))
-    assert body["success"] is False
-    assert resp.status_code == 400
+    assert exc.value.status_code == 409
+    assert exc.value.detail == WORKBENCH_REDIRECT_DETAIL
 
 
 def test_create_operation_target_rejects_employee_scope():
+    """个人运营口径改走个人绩效输入项(employee_performance_inputs)，旧接口一律 409。"""
     db = AsyncMock()
 
     request = TargetCreateRequest(
-        target_name="2026-04 杩愯惀鐩爣",
+        target_name="2026-04 运营目标",
         target_type="operation",
         scope_type="employee",
         period_start=date(2026, 4, 1),
@@ -135,7 +173,7 @@ def test_create_operation_target_rejects_employee_scope():
         target_quantity=0,
         target_profit_amount=0.0,
         metric_code="exam_score",
-        metric_name="鑰冭瘯",
+        metric_name="考试",
         metric_direction="higher_better",
         target_value=100.0,
         achieved_value=90.0,
@@ -144,17 +182,17 @@ def test_create_operation_target_rejects_employee_scope():
         manual_score_enabled=False,
     )
 
-    resp = asyncio.run(
-        create_target(
-            request=request,
-            db=db,
-            current_user=SimpleNamespace(username="admin"),
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            create_target(
+                request=request,
+                db=db,
+                current_user=SimpleNamespace(username="admin"),
+            )
         )
-    )
 
-    body = json.loads(resp.body.decode("utf-8"))
-    assert body["success"] is False
-    assert resp.status_code == 400
+    assert exc.value.status_code == 409
+    assert exc.value.detail == WORKBENCH_REDIRECT_DETAIL
 
 
 def test_update_target_accepts_profit_goal_fields():
@@ -216,6 +254,7 @@ def test_update_target_accepts_profit_goal_fields():
 
 
 def test_update_operation_target_accepts_achieved_value():
+    """运营目标的达成值改由工作台写入，旧更新接口必须 409 拒绝。"""
     db = AsyncMock()
     target = SimpleNamespace(
         id=7,
@@ -256,18 +295,19 @@ def test_update_operation_target_accepts_achieved_value():
 
     request = TargetUpdateRequest(achieved_value=86.0)
 
-    result = asyncio.run(
-        update_target(
-            target_id=7,
-            request=request,
-            db=db,
-            current_user=SimpleNamespace(username="admin"),
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            update_target(
+                target_id=7,
+                request=request,
+                db=db,
+                current_user=SimpleNamespace(username="admin"),
+            )
         )
-    )
 
-    assert result["success"] is True
-    assert result["data"]["achieved_value"] == 86.0
-    assert result["data"]["scope_type"] == "shop"
+    assert exc.value.status_code == 409
+    assert exc.value.detail == WORKBENCH_REDIRECT_DETAIL
+    db.commit.assert_not_awaited()
 
 
 def test_create_product_target_accepts_product_identity_fields():
@@ -321,6 +361,7 @@ def test_generate_daily_breakdown_prefers_period_scoped_shop_rows():
 
     target = SimpleNamespace(
         id=5,
+        target_type="shop",
         period_start=date(2026, 4, 1),
         period_end=date(2026, 4, 1),
         target_amount=100.0,
