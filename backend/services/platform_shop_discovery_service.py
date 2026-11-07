@@ -42,6 +42,9 @@ from modules.core.db import (
 # - ``conflict_detected``          探测值被**另一个**账号占着
 # - ``unmatched_platform_shop_id`` 探测值**对不上任何账号**, 且目标账号自己
 #                                  还没有平台编号(无从判断绑定关系)
+# - ``failed``                     **根本没探测成功** —— 采集时打开的是平台的
+#                                  登录页 / 错误页 / 404 页, 页面上没有任何
+#                                  店铺身份信息可读
 #
 # 最后这个状态是 H4 的正解: 以前「对不上任何账号」会被归进
 # ``detected_single_bound`` —— **看起来像成功**, 实际是彻底没绑上。
@@ -51,7 +54,16 @@ PLATFORM_SHOP_DISCOVERY_STATUS_STALE_URL = "stale_url"
 PLATFORM_SHOP_DISCOVERY_STATUS_CONFLICT_DETECTED = "conflict_detected"
 PLATFORM_SHOP_DISCOVERY_STATUS_UNMATCHED = "unmatched_platform_shop_id"
 
+#: 探测**失败**（没探测到任何东西）。
+#:
+#: ⚠️ **刻意不在** ``PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES`` 里 ——
+#: 「没探测到」不是「探测到且对不上」, 不该进身份异常告警。
+#: 2026-04 已有 3 条同口径的历史记录（当时命中的是登录页）。
+PLATFORM_SHOP_DISCOVERY_STATUS_FAILED = "failed"
+
 #: 需要人看一眼的状态 —— 这些不是「成功」, 是「采集期就发现身份对不上」。
+#:
+#: ⚠️ ``failed``（探测失败）**不在这里** —— 没探测到 ≠ 探测到且对不上。
 PLATFORM_SHOP_DISCOVERY_ISSUE_STATUSES: frozenset[str] = frozenset(
     {
         PLATFORM_SHOP_DISCOVERY_STATUS_STALE_URL,
@@ -217,6 +229,7 @@ class PlatformShopDiscoveryService:
         detected_platform_shop_id: str | None,
         detected_region: str | None,
         raw_payload: dict | None = None,
+        probe_failed: bool = False,
     ) -> PlatformShopDiscovery | None:
         """记录一次**采集运行时**的店铺身份探测。
 
@@ -245,7 +258,40 @@ class PlatformShopDiscoveryService:
         - ``conflict_detected``          ：探测值被**另一个**账号占着
         - ``unmatched_platform_shop_id`` ：探测值**对不上任何账号**，且目标账号
           自己还没有平台编号 ⇒ 无从判断绑定关系，**不算成功**
+        - ``failed``                     ：**压根没探测成**（``probe_failed=True``，
+          采集时打开的是平台的登录页 / 错误页 / 404 页）⇒ 页面上没有任何
+          身份信息可读 ⇒ 不做绑定判定、**不写候选账号**、
+          **不把 URL 上的编号当成探测值**
         """
+        if probe_failed:
+            # 错误页 / 404 页 / 登录页：URL 上的编号**不是探测结果**。
+            #
+            # 2026-11-07 实测事故：``https://seller.shopee.cn/404?cnsc_shop_id=1391124228``
+            # 被当成一次正常探测 ⇒ 那个编号被另一个账号占着 ⇒ 记成
+            # ``conflict_detected`` ⇒ 业务概览页弹出「采集期探测到 1 次店铺身份异常」。
+            #
+            # 那个编号是**上一家店**的（持久 profile 恢复出来的页面），
+            # 拿它做绑定判定 = **制造假冲突**。
+            # 现在判成「探测失败」：证据（URL）留在 ``raw_payload`` 里，
+            # 不参与绑定判定，也不进身份异常告警（``failed`` 不在 issue 状态里）。
+            discovery = PlatformShopDiscovery(
+                platform=platform,
+                main_account_id=main_account_id,
+                detected_store_name=None,
+                detected_platform_shop_id=None,
+                detected_region=None,
+                candidate_shop_account_ids=[],
+                status=PLATFORM_SHOP_DISCOVERY_STATUS_FAILED,
+                raw_payload={
+                    **(raw_payload or {}),
+                    "probe_failed": True,
+                },
+            )
+            db.add(discovery)
+            await db.commit()
+            await db.refresh(discovery)
+            return discovery
+
         if not detected_platform_shop_id:
             return None
 

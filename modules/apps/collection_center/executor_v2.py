@@ -154,6 +154,66 @@ def _resolve_session_scope(
         return "", "", False
 
 
+#: 平台「错误页 / 404 页」的 URL 路径特征。
+#:
+#: 为什么必须识别它
+#: --------------
+#: 采集器登录后打开的第一个页面**可能是错误页**（会话失效、店铺被封、
+#: 链接过期时平台会跳到 ``/404?cnsc_shop_id=...``）。
+#: 这个 URL **照样带着 ``cnsc_shop_id`` 参数** —— 而那个参数是**上一家店**的编号
+#: （持久 profile 会把上次会话停着的页面恢复出来）。
+#:
+#: 2026-11-07 实测事故：``https://seller.shopee.cn/404?cnsc_shop_id=1391124228``
+#: 被当成一次正常探测 ⇒ 那个编号被另一个账号占着 ⇒ 记成 ``conflict_detected``
+#: ⇒ 业务概览页弹出「采集期探测到 1 次店铺身份异常」。
+#:
+#: 错误页上的编号**不是探测结果** ⇒ 拿它做绑定判定 = **制造假冲突**。
+#: 正确做法：判成「探测失败」（status='failed'），不参与绑定判定、
+#: 也不计入身份异常告警。
+_ERROR_PAGE_PATH_SEGMENTS: frozenset[str] = frozenset(
+    {
+        "404",
+        "404.html",
+        "404.htm",
+        "404error",
+        "error",
+        "error.html",
+        "error.htm",
+        "errorpage",
+        "notfound",
+        "not-found",
+        "not_found",
+        "signin",
+        "login",
+    }
+)
+
+
+def _is_platform_error_page(current_url: str) -> bool:
+    """这个 URL 是不是平台的**错误页 / 404 页 / 登录页**。
+
+    只看 path 的**最后一段**（文件名）—— 避免把
+    ``/datacenter/error_report`` 这类正常业务路径误判成错误页。
+
+    登录页也算：页面上同样没有店铺身份信息，
+    2026-04 的 3 条历史 ``failed`` 记录命中的就是登录页。
+    """
+    parsed = urlparse(str(current_url or ""))
+    path = (parsed.path or "").strip().lower()
+    if not path:
+        return False
+    segments = [segment for segment in path.split("/") if segment]
+    if not segments:
+        return False
+    last_segment = segments[-1]
+    if last_segment in _ERROR_PAGE_PATH_SEGMENTS:
+        return True
+    normalized = last_segment.replace("-", "").replace("_", "").replace(".", "")
+    if normalized.startswith("404") or normalized.startswith("error"):
+        return True
+    return False
+
+
 def _extract_platform_shop_context(
     platform: str, current_url: str
 ) -> Dict[str, Optional[str]]:
@@ -176,6 +236,8 @@ def _extract_platform_shop_context(
         "detected_platform_shop_id": detected_platform_shop_id,
         "detected_region": detected_region,
         "current_url": str(current_url or "").strip() or None,
+        # 错误页 / 登录页 ⇒ 页面上没有可读的身份信息 ⇒ 探测失败，不做绑定判定。
+        "is_error_page": _is_platform_error_page(current_url),
     }
 
 
@@ -195,14 +257,17 @@ async def _record_platform_shop_discovery_async(
         platform, str(getattr(page, "url", "") or "")
     )
     detected_platform_shop_id = payload.get("detected_platform_shop_id")
-    if not detected_platform_shop_id:
+    is_error_page = bool(payload.get("is_error_page"))
+    if not detected_platform_shop_id and not is_error_page:
         return
     logger.info(
-        "[PlatformShopDiscovery] platform=%s main_account_id=%s shop_account_id=%s detected_cnsc_shop_id=%s current_url=%s",
+        "[PlatformShopDiscovery] platform=%s main_account_id=%s shop_account_id=%s "
+        "detected_cnsc_shop_id=%s is_error_page=%s current_url=%s",
         platform,
         main_account_id,
         shop_account_id,
         detected_platform_shop_id,
+        is_error_page,
         payload.get("current_url"),
     )
 
@@ -210,6 +275,10 @@ async def _record_platform_shop_discovery_async(
         str((account or {}).get("store_name") or params.get("shop_name") or "").strip()
         or None
     )
+    # 错误页 / 登录页：URL 上的编号不是探测结果 ⇒ 记「探测失败」，
+    # 不做绑定判定、不写候选账号、不进身份异常告警。
+    if is_error_page:
+        detected_store_name = None
 
     try:
         from backend.models.database import AsyncSessionLocal
@@ -228,6 +297,7 @@ async def _record_platform_shop_discovery_async(
                 detected_platform_shop_id=detected_platform_shop_id,
                 detected_region=payload.get("detected_region"),
                 raw_payload=payload,
+                probe_failed=is_error_page,
             )
     except Exception as e:
         logger.warning("Failed to record platform shop discovery: %s", e)
