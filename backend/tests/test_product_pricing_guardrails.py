@@ -1,3 +1,4 @@
+import ast
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -393,21 +394,53 @@ def test_sku_pricing_manual_override_wins_and_is_flagged():
     assert out["min_selling_price_override"] == pytest.approx(20.00, abs=0.01)
 
 
+def _router_routes(source: str) -> dict[tuple[str, str], bool]:
+    """从路由模块源码里抽出 router 装饰器：(HTTP 方法, 路径) -> 是否声明了 response_model。
+
+    这里用 AST 而不是字符串匹配：black 会把 `@router.get("...")` 这种装饰器按行宽拆成
+    多行，源码文本匹配会随排版漂移而误判（这正是 CI 的 Code formatting check 与
+    本用例曾经互相打架的原因）。AST 只看结构，与排版无关。
+    """
+    tree = ast.parse(source)
+    routes: dict[tuple[str, str], bool] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for dec in node.decorator_list:
+            if not isinstance(dec, ast.Call):
+                continue
+            func = dec.func
+            if not isinstance(func, ast.Attribute):
+                continue
+            if not isinstance(func.value, ast.Name) or func.value.id != "router":
+                continue
+            if not dec.args or not isinstance(dec.args[0], ast.Constant):
+                continue
+            path = dec.args[0].value
+            if not isinstance(path, str):
+                continue
+            has_response_model = any(kw.arg == "response_model" for kw in dec.keywords)
+            routes[(func.attr, path)] = has_response_model
+    return routes
+
+
 def test_router_exposes_pricing_policy_routes():
 
     source = Path("backend/domains/business/routers/product_center.py").read_text(
         encoding="utf-8"
     )
-    # 只匹配到路径为止的装饰器前缀：新路由必须声明 response_model（AGENTS.md 硬要求），
-    # 精确匹配整个装饰器会因为多了 ", response_model=..." 而失配
-    assert '@router.get("/api/sku-pricing-policies"' in source
-    assert '@router.get("/api/sku-pricing-policies/current"' in source
-    assert '@router.post("/api/sku-pricing-policies"' in source
-    assert '@router.put("/api/sku-pricing-policies/{min_restock_days}"' in source
-    # 四条端点都必须声明 response_model
-    for line in source.splitlines():
-        if "@router." in line and "sku-pricing-policies" in line:
-            assert "response_model" in line, line
+    routes = _router_routes(source)
+    # 四条端点都必须存在，且都必须声明 response_model（AGENTS.md 硬要求）
+    expected = {
+        ("get", "/api/sku-pricing-policies"),
+        ("get", "/api/sku-pricing-policies/current"),
+        ("post", "/api/sku-pricing-policies"),
+        ("put", "/api/sku-pricing-policies/{min_restock_days}"),
+    }
+    for method, path in sorted(expected):
+        key = (method, path)
+        assert key in routes, f"缺少路由 {method.upper()} {path}"
+        assert routes[key], f"{method.upper()} {path} 未声明 response_model"
     assert "_require_platform_fee_editor" in source
 
 
