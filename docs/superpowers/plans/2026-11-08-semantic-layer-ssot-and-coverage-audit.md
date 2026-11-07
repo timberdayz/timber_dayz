@@ -391,3 +391,155 @@ tiktok 现在的真实缺口是 **`conversion_rate`**：tiktok 报表里没有�
 
 ⇒ 这正是「歧义宁可落 unknown + 报警」要的效果：巡检把 tiktok 缺 `conversion_rate`
 这件事**点名**出来，而不是让它悄悄变成 0。
+
+
+---
+
+## 17. v7.16.0 发布与生产验收（2026-11-08）
+
+### 17.1 发布内容与版本号
+
+版本号取 **v7.16.0**（minor）：v7.15.5 之后累积 44 个提交（含语义层阶段 A~G、
+看板自锁修复、口径列等能力变更），加上本次发布收口批次 `b9b4857d`。
+
+| 批次 | 提交 | 内容 |
+| --- | --- | --- |
+| 阶段 A | `a251ae61` | 字典升级：口径维度 + products 域 30 组真实表头 + 别名派生 |
+| 阶段 B1 | `1da9819e` | PG 侧归一化解析能力 + 契约测试 |
+| 阶段 A~G 汇总 | `abf56542` | 语义层收口：视图重写 / 别名单一来源 / 覆盖率巡检 / 3 条迁移 |
+| 发布收口 | `b9b4857d` | black 格式化 141 文件 + 26 处 lint 修复 + 门禁 4 误报修复 + 契约测试 10 条 |
+
+### 17.2 发布门禁本地预跑（全部通过）
+
+| 门禁 | 脚本 | 结果 |
+| --- | --- | --- |
+| 1 关键表外键 | `scripts/test_migration_foreign_keys.py` | exit 0 |
+| 2 生产迁移契约 | `scripts/verify_production_migration_contracts.py` | exit 0（3 passed，本地 postgres:15 容器） |
+| 3 API 契约 | `scripts/validate_api_contracts.py` | exit 0（无 router 改动） |
+| 4 前端 API 方法 | `scripts/validate_frontend_api_methods.py` | exit 0（**修掉误报后**） |
+| 5 数据库字段 | `scripts/validate_database_fields.py` | exit 0 |
+| 6 库存账龄流水线 | 6 个测试文件 | 31 passed |
+| 7 远程部署契约 | `scripts/verify_remote_deploy_contracts.py` | exit 0 |
+
+**门禁 4 的误报根因与修法**（本轮唯一改动门禁脚本本身的地方）：
+`scripts/validate_frontend_api_methods.py` 用 `r'(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{'`
+提取方法定义，参数列表里出现括号（`api.saveTemplate` 的中文注释
+`// [*] 版本级核心字段清单(两级勾选的结果)。`）会让 `[^)]*` 提前截断 ⇒
+`api.saveTemplate` 被判「缺失」⇒ 门禁 exit 1 ⇒ 阻断 tag 流水线。
+
+修法三步：① 注释与字符串字面量做**等长掩码**；② 用**括号深度扫描**定位配对右括号；
+③ 过滤 JS 关键字（原来 `if`/`for`/`catch`/`delete` 被当成方法名）。
+
+修前 vs 修后（`temp/gate4_method_diff.txt`）：
+
+```
+old=277 new=274
+only_old=['catch', 'delete', 'for', 'if']   # 关键字误匹配，去掉是对的
+only_new=['saveTemplate']                   # 真实方法，补回来了
+```
+
+配套契约测试 `backend/tests/test_validate_frontend_api_methods_contract.py`（10 条），
+锁定「参数含括号仍能识别」「函数体调用不算方法定义」「字符串里的括号不干扰」
+「JS 关键字不计入」。
+
+### 17.3 门禁 4 修好后暴露的一个真 bug（本轮修掉）
+
+修完门禁 4 后全量回归出现 **8 个新增失败**，全部在
+`backend/tests/data_pipeline/test_semantic_coverage_audit.py`：
+
+```
+semantic_coverage_audit_service.py:376: AttributeError: 'function' object has no attribute 'standard_field'
+```
+
+根因：修 ruff F402 时把 `build_coverage_report` 里的循环变量 `field` 改名成 `field_spec`，
+**只改了循环头**，循环体里两处 `field.standard_field`（构造 entry 与拼 warning 文案）
+没同步 ⇒ 运行时 `field` 落到模块级同名函数上。
+
+已用 AST 定位函数边界后精确修复（`temp/fix_coverage_field_spec.py`），并补了一个
+**半应用重命名的通用扫描**（`temp/scan_half_rename.py`：比对 HEAD 与工作区的 AST，
+找「旧名被删但仍被 Load 引用」的函数）⇒ 142 个改动文件扫描结果
+`NO_HALF_RENAME_SUSPECTS`。
+
+> 教训：变量改名必须**函数级**核对，不能只改循环头；改名后必须跑目标测试，
+> 不能只看 lint 是否变绿。
+
+### 17.4 回归证据
+
+| 项 | 值 |
+| --- | --- |
+| 用例总数 | 4954 passed / 7 skipped / 0 failed（278.7s） |
+| junit 差分（基线 `temp/junit_final.xml` vs 本轮 `temp/junit_rel2.xml`） | NEW failures = **0**，FIXED = 0，COMMON = 0 |
+| 用例增减 | ADDED 91（新语义层测试 + 门禁契约测试），REMOVED 1（`test_resolved_chains_still_deduplicate_on_source_key` → 改名为 `..._on_declared_partition`） |
+| black --check / ruff check | 对本次推送范围 182 个 py 文件全部通过 |
+
+### 17.5 发布与部署链路
+
+```
+b9b4857d  →  sync_main_mirrors.ps1 -Sync  →  GitHub main + CNB main 同为 b9b4857d
+git tag -a v7.16.0  →  git push origin v7.16.0  →  GitHub + CNB 双远端均收到标签
+```
+
+GitHub Actions `Deploy to Production`（run **42407274803**）结论 **success**：
+
+| Job | 结论 |
+| --- | --- |
+| check-config | success |
+| Validate Data Flow (Release Gate) | **success**（7 条门禁全过，含修好的门禁 4） |
+| Build and Push Images (Release Tag) | success（backend / backend-full / frontend + CNB 推送） |
+| Deploy to Production (Tag Release) | success（`[OK] Deployment completed. Tags: Backend=v7.16.0, Frontend=v7.16.0`） |
+
+### 17.6 生产只读复核（SSH 隧道 + `SET default_transaction_read_only = on`，全程无写入）
+
+| 验收项 | 生产实测 | 结论 |
+| --- | --- | --- |
+| 容器健康 | backend-api / frontend / nginx / celery-worker / celery-beat / postgres / redis **全部 healthy** | ✅ |
+| 镜像 tag | backend 与 frontend 均为 `v7.16.0` | ✅ |
+| 后端就绪 | `/healthz/ready` → `{"status":"ready","version":"v7.16.0","checks":{"database":{"status":"connected"},"dashboard":{"status":"ready"}}}` | ✅ |
+| nginx `/health` | 同上，version v7.16.0 | ✅ |
+| celery 崩溃循环 | 日志无 `VersionMismatch` / Traceback；`celery@… ready` + `Connected to redis://…` | ✅ |
+| 迁移版本 | `public.current_schema_alembic_version` = **`current_schema_20261203_semantic_alias_normalized_refresh`** | ✅ |
+| 迁移状态 | 部署日志 `migration_status: up_to_date`、`all_tables_exist: true`、`missing_tables: []`、`missing_columns: []` | ✅ |
+| Phase 2.7 视图重建 | **成功 39 个，失败 0 个**，自愈重建物化视图 1 个（`semantic.fact_analytics_atomic_mv`），含本轮 `semantic.fact_products_atomic` | ✅ |
+| Phase 3a / 3a' 库存重建 | `[OK] Inventory age full rebuild completed` / `[OK] Inventory state full rebuild completed`；`mart.inventory_age_current` 522 行、`mart.inventory_state` **1232 行** | ✅ |
+| 别名表完整性 | `semantic.semantic_field_aliases` **182 条**，`normalized_alias` 缺失 **0** | ✅ |
+| products 视图 | 6150 行，`parse_status` 全 ok，`row_kind` 全 `product_summary`，`sales_amount_placed` 非空 5326 行 | ✅ |
+| 退役权限 | `core.dim_roles.permissions` 中 `finance-reports`/`fx-management`/`fiscal-periods`/`store-management`/`store-analytics` 引用数 = **0** | ✅ |
+| 监控存在性 | `ops.data_freshness_log` 51 条**全 success**；`ops.data_lineage_registry` 89 条边 | ✅ |
+
+### 17.7 生产侧巡检实跑（`SemanticCoverageAuditService`，只读）
+
+巡检服务在生产容器内直接跑通，产出解析率与告警：
+
+**products 域**（entries 36，空壳 0，解析失败 0）
+
+| 平台 × 粒度 | 行数 | 告警 |
+| --- | --- | --- |
+| shopee / daily | 213 | `order_count`/`sales_amount`/`sales_volume`/`conversion_rate` 解析率 36% |
+| shopee / monthly | 5113 | 无告警 |
+| tiktok / daily | 47 | `conversion_rate` 0% |
+| tiktok / monthly | 777 | `conversion_rate` 0% |
+
+**orders 域**（entries 96，空壳 0，解析失败 0）：34 条告警集中在
+`warehouse_operation_fee` / `shipping_fee` / `promotion_fee` / `platform_commission` /
+`platform_deduction_fee` / `platform_voucher` 的解析率 0%。
+
+口径并列的实测效果（products 视图，已付款 vs 已下单两套口径）：
+
+| 平台 × 粒度 | 总行数 | 已付款口径非空 | 已下单口径非空 |
+| --- | --- | --- | --- |
+| shopee / daily | 213 | 76 | 213 |
+| shopee / monthly | 5113 | 3622 | 5113 |
+| tiktok / daily | 47 | 47 | 0 |
+| tiktok / monthly | 777 | 777 | 0 |
+
+⇒ shopee 两套口径并存生效；tiktok 天然没有「已下单」口径（0 行），
+`conversion_rate` 缺失是 CTOR 族的**设计性缺口**，由巡检点名告警，
+符合「歧义宁可落 unknown + 报警，绝不静默猜」。
+
+### 17.8 本轮记入 V2 的遗留（不在本次发版内）
+
+| # | 事项 | 判定依据 |
+| --- | --- | --- |
+| V2-1 | `scripts/validate_migrations_fresh_db.py` 在**空库**上仍失败 | 20261116 迁移要求 6 个 TikTok 账号存在，空库没有；该脚本**不在任何 CI 工作流**里，不阻断 tag 流水线；生产 6/6 账号满足 ⇒ 按 V2 单独处理，且**已执行迁移不可改** |
+| V2-2 | `modules/services/ingestion_worker.py::_ingest_traffic_store_file` 的 `def emit` 定义在 for 循环外且仅自调用 ⇒ 其体内逐行写入是死代码 | `blame` 显示来自 2026-01-07 的 `634a90ef`，**早于 v7.15.5**，非本轮引入 ⇒ 本次仅做最小 lint 修复（`nonlocal succeeded_rows`），结构问题单独处理 |
+| V2-3 | 语义覆盖率巡检**尚未接入 HTTP 端点** | 本轮交付的是服务层能力（`SemanticCoverageAuditService`），已在生产容器内跑通；要变成常驻监控需要挂 `GET /api/data-pipeline/semantic-coverage` 之类的只读路由 + 前端面板，本轮不做 |
