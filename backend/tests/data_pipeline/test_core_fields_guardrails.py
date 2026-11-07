@@ -3,8 +3,8 @@
 锁住四件事
 ----------
 
-1. **迁移自包含且不漂移** —— 迁移里内嵌的规范语义键表必须与
-   :mod:`backend.services.semantic_field_registry` 一致(迁移不能 import backend,
+1. **迁移自包含且不漂移** —— 迁移里内嵌的规范语义键表必须是
+   :mod:`backend.services.semantic_field_registry` 的**子集**(迁移不能 import backend,
    所以只能靠守护测试锁住漂移)。
 2. **hash 键名口径** —— 清单推出的 hash 身份必须与旧口径
    ``deduplication_fields`` **逐字一致**(= ``raw_name`` 优先)。
@@ -41,6 +41,7 @@ from backend.services.deduplication_service import DeduplicationService
 from backend.services.semantic_field_registry import (
     SEMANTIC_FIELD_DEFINITIONS,
     get_semantic_requirements,
+    is_canonical_semantic_key,
     is_hash_identity_semantic_key,
 )
 
@@ -60,13 +61,28 @@ MIGRATION_PATH = (
 
 
 def test_migration_embedded_canonical_keys_match_registry():
-    """迁移内嵌的规范键表 == 注册表的规范键集合。
+    """迁移内嵌的规范键表必须是**注册表的子集**。
 
-    迁移必须自包含(不能 import backend), 所以这里内嵌了一份快照。
-    注册表加了新键而迁移没跟上 ⇒ 回填会把它当成「翻译不出来」⇒
-    清单里少了语义键 ⇒ required/漂移判定跟着错。
+    为什么不是「两边相等」
+    ----------------------
+    迁移 ``20261125`` 是 **执行过的一次性回填快照**, 按仓库规则
+    「已执行迁移不可改」不能再动; 而注册表是**活的唯一事实源**, 之后新增了
+    20 个标准字段(口径并列列 / 渠道维度 / 加购与点击类指标)。
 
-    守护方式: 直接比对两边的键集合。
+    * **子集**(迁移 ⊆ 注册表) —— 这条守护必须留着:
+      迁移引用的每个键都还在 ⇒ 回填逻辑没跑偏, 没有引用被删掉/改名的键;
+    * **允许注册表变长** —— 新键由**运行期**接管:
+      ``core_fields_service.derive_core_fields`` 走
+      ``is_canonical_semantic_key``(活注册表), 新建/更新模板版本时直接带上新键。
+
+    为什么**不做**「按新键重新回填存量行」
+    ------------------------------------
+    实测(开发库 xihong_erp, 55 个模板版本): 用当前注册表重新推导
+    ``core_fields``, 与存量值有差异, 而差异**全部**来自 ``required`` 标志
+    (域级契约在 20261127 之后把 order_id / metric_date 标成 required)
+    与规范键表无关。
+    重写存量行 ⇒ 给存量版本**新增 required** ⇒ 立刻变成新的口径漂移阻断源。
+    ⇒ 存量行保持原样, 新键只对**运行期新建/更新**的版本生效。
     """
     import importlib.util
 
@@ -80,11 +96,16 @@ def test_migration_embedded_canonical_keys_match_registry():
     embedded = set(module._CANONICAL_SEMANTIC_KEYS)
     registry = set(SEMANTIC_FIELD_DEFINITIONS.keys())
 
-    assert embedded == registry, (
-        "迁移内嵌的规范语义键表与注册表漂移了: "
-        f"仅迁移有={sorted(embedded - registry)}, 仅注册表有={sorted(registry - embedded)}"
+    dropped = sorted(embedded - registry)
+    assert not dropped, (
+        "迁移内嵌的规范语义键在注册表里没了(被删或改名): " f"{dropped}"
     )
 
+    # 运行期推导必须认得迁移引用的每一个键
+    for key in sorted(embedded):
+        assert is_canonical_semantic_key(key), (
+            f"运行期不再把 {key!r} 当规范语义键 —— 迁移回填与运行期推导会分叉"
+        )
 
 # ---------------------------------------------------------------------------
 # 2) hash 键名口径

@@ -108,15 +108,38 @@ def test_caliber_history_is_platform_scoped():
     [
         ("销售额（已付款订单） (SGD)", "sales_amount"),
         ("销售额（已付款订单） (USD)", "sales_amount"),
-        ("商品曝光次数.1", "unique_impressions"),
-        ("GMV.2", "gmv"),
+        ("销售额（已下订单） (MYR)", "sales_amount_placed"),
+        ("商品成交件数", "sales_volume"),
         ("Current Item Status", "item_status"),
         ("商品编号", "product_id"),
     ],
 )
 def test_normalized_headers_resolve(infer, header, expected):
-    """币种后缀 / Excel 重名序号 / 全角标点 都要能命中。"""
+    """币种后缀 / 全角标点 都要能命中。"""
     assert infer("products", header) == expected
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "商品曝光次数.1",
+        "商品曝光次数.2",
+        "GMV.2",
+        "去重点击次数.3",
+    ],
+)
+def test_report_block_columns_are_not_standard_fields(infer, header):
+    """报表**分块列**(末尾 .N)不落标准字段。
+
+    2026-11-08 实测(tiktok 商品月报 777 行):
+      * 基础列 ``商品曝光次数`` == ``.1 + .2 + .3 + .4`` 在 701 行成立;
+      * ``GMV`` == ``GMV.1 + GMV.2 + GMV.3`` 在 684 行成立。
+    ⇒ ``.N`` 是报表的**第 N 块**, 不是基础指标的另一个写法。
+
+    归一化会把 ``商品曝光次数.1`` 压成 ``商品曝光次数`` ⇒ 命中它就是
+    把"一块"当成"总量" ⇒ **静默失真**。宁可落 unknown, 也不猜。
+    """
+    assert infer("products", header) is None
 
 
 # ---------------------------------------------------------------------------

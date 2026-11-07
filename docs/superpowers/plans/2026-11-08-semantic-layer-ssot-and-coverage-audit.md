@@ -224,3 +224,170 @@ shopee/tiktok 的 `product_id` 解析率 > 0；MYR/PHP 的 `sales_amount` 仍为
 - `semantic.fact_orders_atomic` 等其它域的别名收敛（等 products 域验证通过再推）；
 - 渠道维度在 orders / analytics 域的推广；
 - 语义层"缺失 → unknown"在 api 层的呈现规范（当前只做到语义层 NULL + 巡检）。
+
+---
+
+## 15. 执行结果（2026-11-08 收口）
+
+本节记录**实测结论**与**落地结果** —— 前面阶段 A~F 的设计在执行中被实测数据
+修正过两处关键判断，这里写清楚最终按什么口径落地。
+
+### 15.1 两个被实测推翻的初始判断
+
+| 初始判断 | 实测结论 | 依据 |
+| --- | --- | --- |
+| `.N` 后缀是 Excel 重名序号，剥掉即可 | **`.N` 是报表「第 N 块」** | tiktok 商品月报 777 行：基础列 `商品曝光次数` == `.1+.2+.3+.4` 成立 **701 行**；`GMV` == `GMV.1+.2+.3` 成立 **684 行** ⇒ `.N` 是子块，不是重名列 |
+| 报表是「多区块拼接」，同一商品多行需按区块筛选 | **报表是「商品汇总行 + SKU 明细行」两级结构**；重复的真正来源是**同一份报表被反复采集** | 汇总行 11612 + 明细行 14197 = 25809；汇总行 `已下订单` 数字率 11612/11612，明细行 0/14197；文件内 (shop, period, product) **恰好 1 个汇总行**（4960/4960 组）；汇总行销售额 == 明细行之和（6258 组里 **6217 组 = 99.3%**） |
+
+⇒ 两条修正直接决定了落地口径：**分块列不落标准字段**（落 unknown）、
+**同商品按业务身份去重并让汇总行吸收明细行**。
+
+### 15.2 根因与修复对照
+
+| # | 根因 | 修复 | 实测效果 |
+| --- | --- | --- | --- |
+| 1 | 真实表头带币种后缀（`销售额（已付款订单） (SGD)`），别名表登的是无后缀写法 ⇒ 逐字取键命中 0 | 字典**逐字登记**真实表头（含币种变体） | shopee `sales_amount` 非零行 **0 → 6565**，金额合计 **0.00 → 570046.23**（旧口径，含翻倍） |
+| 2 | 视图 `COALESCE(x, 0)` 把「没解析出来」伪装成「业务上真的是 0」 | 去掉 `COALESCE`，解析不出 = NULL | shopee 月报 `sales_amount` **1187 行为 NULL**（MYR/PHP 店铺没有已付款口径）⇒ 不再显示为 0 |
+| 3 | 去重按 `data_hash` ⇒ 反复采集一行都去不掉（订单放大 ×2.67） | 改按**业务身份**（平台/店铺/粒度/周期/商品/规格）去重，取最新一份 | shopee 月报行数 **25809 → 3990** |
+| 4 | 汇总行与明细行同时计入 ⇒ 销售额翻倍（×5.33） | 汇总行**吸收**明细行（`summary_only` CTE） | 视图内明细行 5294 → 0；金额不再翻倍 |
+| 5 | 只保留已付款口径 ⇒ MYR/PHP 店铺（9208 行，36%）的销售额「没有数据」 | 已下单口径**并列**成独立列 | 新增 `sales_amount_placed` / `order_count_placed` 等 4 列，合计 **4063760.93** 可见 |
+| 6 | 口径沿革旧词（「已确定订单」）与当前措辞同置信度 ⇒ 同表两列并存时**选谁是随机的** | 旧词置信度降级 **0.900**（由 `PLATFORM_CALIBER_HISTORY` 派生） | 7 条沿革旧词别名自动降级 |
+
+### 15.3 落地形态
+
+* **唯一事实源**：`backend/services/semantic_field_registry.py` 的字典
+  （61 个标准字段 + products 域 30 组真实表头别名）。
+* **别名表**：`scripts/generate_semantic_alias_seed.py` 由字典派生
+  （182 条），`--check` 可比对 `sql/semantic/semantic_alias_registry.sql`。
+* **视图**：`sql/semantic/products_atomic.sql`
+  （真实表头解析 / NULL 化 / 两套口径并列 / 汇总行去重 / `row_kind` / `parse_status`）。
+* **迁移**：
+  * `current_schema_20261130_semantic_alias_normalized_resolution`（PG 侧归一化能力，34 条 fail-closed 自检）；
+  * `current_schema_20261201_semantic_products_row_kind_caliber`（别名资产 + 视图 + 物化视图 + mart 重建）；
+  * `current_schema_20261202_semantic_alias_prune`（别名表事实源收敛：重落资产 + 清理陈旧 builtin 行）。
+* **巡检**：`backend/services/semantic_coverage_audit_service.py`
+  —— 按「平台 × 粒度」统计每个标准字段的**解析率**，阈值告警；
+  空壳行与解析失败严格二分（空壳行不计入解析失败告警）。
+
+### 15.4 口径纪律（不可退让的三条）
+
+1. **口径成对**：已付款与已下单落到**不同**标准字段，实测两者销售额平均差 **5.15%**、最大差 **175.89**。
+2. **分块列不落字段**：`.N` 是子块，归一化会让它与基础列同名 ⇒ 命中即失真 ⇒ 落 unknown。
+3. **解析不出 ≠ 0**：视图不再 `COALESCE(...,0)`；解析失败落 NULL，`parse_status` 可见。
+
+### 15.5 剩余项（V2，不在本次范围）
+
+| 项 | 现状 | 建议 |
+| --- | --- | --- |
+| `mart.product_day_kpi` 只取 `daily` 粒度 | shopee 商品数据在 `monthly` ⇒ 看板看不到 shopee 商品 KPI（mart 仅 48 行） | mart 增补 monthly 口径或建商品月 KPI |
+| tiktok 渠道维度 | `.N` 分块是渠道子集，但**无法命名**（基础列≈分块之和，直播/视频是另一维度） | 先做列转行 + 显式渠道列（`（直播）`/`（视频）`），`.N` 分块保持 unknown |
+| tiktok 转化率 | CTOR 与去重点击成交转化率**分母不同**（615/777 同值，样例 8.57% vs 9.09%） | 已独立成 `click_to_order_rate` / `unique_click_to_order_rate` 两个字段，**不进** `conversion_rate` |
+| SKU 明细层 | 本次汇总行吸收了明细行 ⇒ SKU 粒度不进语义视图 | 若要看 SKU 级指标，另建 `fact_product_sku_atomic` |
+| 「已确认订单」 | 真实数据里无实测支撑 ⇒ 刻意不折算、不登记 | 保持 unknown |
+
+## 16. 收口（2026-11-08 最后一轮：回归清零 + 事实源收敛）
+
+本轮把**全量回归从 9 failed 收到 0 failed**；收口过程中又挖出一个**事实源漂移**
+（别名表认着一套字典里没有的映射），一并收敛。
+
+### 16.1 回归失败的 4 类处置
+
+| # | 失败用例 | 根因 | 处置 | 依据 |
+| --- | --- | --- | --- | --- |
+| 1 | `test_products_semantic_field_rules_sql` ×4 | 文档口径里的四个裸别名（`revenue` / `qty` / 「订单数量」/ `CVR`）只存在于**旧手写 seed**，字典里没有 ⇒ 派生结果认不出 | 补进字典的 `aliases`（字典是唯一事实源）⇒ seed 自动带上 | seed 由字典派生，`--check` 一致（182 条） |
+| 2 | `test_core_fields_guardrails::test_migration_embedded_canonical_keys_match_registry` | 迁移 `20261125` 内嵌的规范键表是**已执行的一次性快照**，注册表之后又加了 20 个标准字段 ⇒ 「两边相等」不再成立 | 守护改成**子集语义**（迁移 ⊆ 注册表）+ 运行期必须认得迁移引用的每个键 | 实测：用当前注册表重新推导存量 `core_fields`，差异**全部**来自 `required` 标志（20261127 之后域级契约把 `order_id` / `metric_date` 标成 required）⇒ 重写存量行等于**新增漂移阻断源** ⇒ 不做 |
+| 3 | `test_shop_identity_resolver` ×2 | 去重分区断言写死「按原始键去重」，而 products 已按实测改成**业务身份去重** | 断言改成**按链路声明**（products = 业务身份；services / inventory = 原始键），并显式禁止用解析后的 `shop_id` 去重 | 重复采集 3877/12122 组、订单放大 ×2.67（§15.2 根因 3） |
+| 4 | `test_semantic_numeric_guard` ×1 + `test_workbench_template_update_flow` ×1 | ① `leveled` CTE 的 `MAX(CASE…)` 用了 `ELSE 0`；② 阶段 A 给 `item_status` 登记了泛化别名「状态」 | ① 改 `ELSE NULL` 并同步过滤条件 `IS NULL`；② 从字典里删掉「状态」 | 状态类列名一旦被认成语义键就会污染身份推断 |
+
+### 16.2 又挖出的事实源漂移：别名表认着字典里没有的映射
+
+* 表里 195 条 `source='builtin'` 行，字典只认 182 条 ⇒ **13 条陈旧**；
+* 原因：seed 只会 INSERT / UPSERT，**不会删除** —— 字典里删掉的别名永远留在表里；
+* 后果之一：`item_status` 的「状态」/ `status` 还在表里 ⇒ 状态类列名会被认成语义键；
+* 后果之二：其余 11 条是历史手写 seed 留下的英文 / 中文别名，实测在 `raw_data` 里 **0 次出现**，
+  且大多与字典别名在归一化后等价（`Sales Amount` ≡ `sales amount`）⇒ 清理不丢能力。
+
+**处置**：
+
+1. 字典吸收两个**无歧义**的旧表头（「商品标题」→ `product_name`、「件数」→ `sales_volume`）；
+   有歧义的（`title` / `item_id`）**不吸收** —— 宁可落 unknown，也不猜；
+2. seed 段末尾追加**陈旧 builtin 行清理**（由 `scripts/generate_semantic_alias_seed.py` 生成，
+   `--check` 一并比对）：只删 `source='builtin'` 且不在当前 seed 里的行；
+   `template_confirmed` / `manual` / `conflict` 是**用户确认过的**，谁也不许动；
+3. 迁移 `current_schema_20261202_semantic_alias_prune` 落库并自检
+   （表里 builtin 行数必须与字典**完全一致**）。
+
+⇒ 迁移后：182 条 builtin（= 字典）+ 28 条 `template_confirmed` = 210 条，**陈旧 0 条**。
+
+### 16.3 本轮最终口径
+
+| 主题 | 口径 |
+| --- | --- |
+| 事实源 | `backend/services/semantic_field_registry.py`（61 个标准字段；products 域 30 组真实表头） |
+| 别名 | 字典派生（`build_domain_alias_records`）⇒ seed ⇒ DB；DB 的 builtin 行必须与字典**完全一致** |
+| 解析不出 | = NULL（unknown），不伪装成 0；`parse_status` 可见 |
+| 分块列 | `.N` 是报表子块 ⇒ 不落标准字段 |
+| 口径 | 已付款 / 已下单 落到不同标准字段；旧词置信度 0.900 |
+| 去重 | products 按业务身份（取最新一份）+ 汇总行吸收明细行；services / inventory 保持按原始键 |
+| 巡检 | 按「平台 × 粒度」算解析率；空壳行与解析失败严格二分 |
+
+### 16.4 第三层收敛：别名行缺 `normalized_alias`（PG 侧归一化解析看不见新别名）
+
+别名表有两列：`raw_alias`（人能读懂的写法）与 `normalized_alias`（**实际用于匹配**的形态）。
+`semantic.resolve_alias_normalized()` 是按 `normalized_alias` 匹配的
+（`alias.normalized_alias IS NOT NULL AND normalized_keys ? alias.normalized_alias`）。
+
+实测出的洞：别名 seed 的 INSERT 列清单里**没有** `normalized_alias`
+⇒ 字典新增的别名落库时该列是 NULL ⇒ **归一化解析看不见这些行**。
+受影响的 6 条：`revenue` / `qty` / `CVR` / 「订单数量」/「商品标题」/「件数」。
+
+**处置**：
+
+1. `scripts/generate_semantic_alias_seed.py`：seed 多带一列 `normalized_alias`，
+   `ON CONFLICT` 一并更新（与 B1 资产的 INSERT 列序一致）；
+2. B1 归一化资产**由字典重生成**（`scripts/generate_semantic_alias_normalize_asset.py`），
+   不再手改 ⇒ 资产里也不再有字典已撤回的「状态」；
+3. 迁移 `current_schema_20261203_semantic_alias_normalized_refresh` 落库并自检：
+   * products 域 builtin 行数 == 字典派生行数（不多不少）；
+   * products 域**没有** `normalized_alias IS NULL` 的行；
+   * 字典已撤回的别名（「状态」）确实不在表里。
+
+⇒ 迁移后：products 域 182 条 builtin，全部带归一形态，「状态」0 条。
+
+### 16.5 迁移链（本轮新增三条，单向 fail-closed）
+
+| 迁移 | 作用 |
+| --- | --- |
+| `current_schema_20261201_semantic_products_row_kind_caliber` | 别名资产 + 新视图 + 物化视图重建 + mart 重建 |
+| `current_schema_20261202_semantic_alias_prune` | 落别名资产 + **清理陈旧 builtin 行**（事实源收敛） |
+| `current_schema_20261203_semantic_alias_normalized_refresh` | 补齐 `normalized_alias` + 重落归一化资产（函数 + seed） |
+
+三条都不支持 downgrade（降级要么把漂移写回库，要么让表认不出真实表头 —— 两者都是造数）。
+
+### 16.6 巡检实跑结果（阶段 E 验收）
+
+在开发库上实跑 `SemanticCoverageAuditService.audit(domain="products")`：
+
+| 平台 × 粒度 | 行数 | 空壳行 | 解析失败行 | 结果 |
+| --- | --- | --- | --- | --- |
+| shopee / daily | 1 | 0 | 0 | 全字段 100% |
+| shopee / monthly | 3990 | 0 | 0 | 身份/流量字段 100%；已付款口径 4 个字段 **70.25%**（1187 行无已付款口径 = MYR/PHP 店铺） |
+| tiktok / daily | 47 | 0 | 0 | `conversion_rate` **0%** ⇒ 告警 |
+| tiktok / monthly | 771 | 0 | 0 | `conversion_rate` **0%** ⇒ 告警 |
+
+告警文案（实测）：
+
+```
+! tiktok/daily 的 conversion_rate 解析率 0%，疑似语义映射缺失
+! tiktok/monthly 的 conversion_rate 解析率 0%，疑似语义映射缺失
+```
+
+**与原计划的一处偏差（实测纠正）**：原计划预期「tiktok 的 `impressions` 有缺口」，
+实测 `impressions` 已 **100%** —— 字典按真实表头登记后这个缺口已经补上。
+tiktok 现在的真实缺口是 **`conversion_rate`**：tiktok 报表里没有「已付款口径转化率」，
+它的转化率是 **CTOR 族**（`去重点击成交转化率` / `转化率 (加入购物车率)` …），
+已在阶段 A 独立成 `click_to_order_rate` / `unique_click_to_order_rate`，
+**刻意不进** `conversion_rate`（两者分母不同，实测样例 8.57% vs 9.09%）。
+
+⇒ 这正是「歧义宁可落 unknown + 报警」要的效果：巡检把 tiktok 缺 `conversion_rate`
+这件事**点名**出来，而不是让它悄悄变成 0。

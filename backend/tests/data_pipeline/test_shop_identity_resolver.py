@@ -34,6 +34,27 @@ UNRESOLVED_CHAINS = (
 )
 
 
+#: 去重分区口径 —— 2026-11-08 实测后 products 链路改按**业务身份**去重,
+#: 其余两条链路保持按原始键去重。
+#: 口径依据(实测证据)见 ``sql/semantic/products_atomic.sql`` 的 deduplicated 段注释。
+SOURCE_KEY_DEDUP_PARTITION = "PARTITION BY platform_code, source_shop_id, data_hash"
+BUSINESS_IDENTITY_DEDUP_PARTITION = (
+    "PARTITION BY platform_code, source_shop_id, granularity, "
+    "COALESCE(period_start_date, metric_date),"
+)
+
+#: 每条链路的去重分区口径期望。
+EXPECTED_DEDUP_PARTITION = {
+    "semantic.fact_products_atomic": BUSINESS_IDENTITY_DEDUP_PARTITION,
+    "semantic.fact_inventory_snapshot": SOURCE_KEY_DEDUP_PARTITION,
+    "semantic.fact_services_atomic": SOURCE_KEY_DEDUP_PARTITION,
+}
+
+
+def _flat(body: str) -> str:
+    """把 SQL 里的换行/缩进压成单空格 —— 让分区字面量不必逐字对齐。"""
+    return " ".join(body.split())
+
 def _read_asset(target: str) -> str:
     path = REPO_ROOT / SQL_TARGET_PATHS[target]
     return path.read_text(encoding="utf-8")
@@ -50,13 +71,15 @@ def test_chain_calls_shared_identity_resolver(target: str) -> None:
 
 @pytest.mark.parametrize("target", UNRESOLVED_CHAINS)
 def test_chain_keeps_source_key_and_resolves_after_dedup(target: str) -> None:
-    """解析必须发生在去重之后，且去重分区仍用原始键（去重口径零变化）。"""
+    """解析必须发生在去重之后，且去重分区必须用**原始键**。"""
     body = _read_asset(target)
     assert "source_shop_id" in body, f"{target} 没有保留原始店铺标识"
+    flat = _flat(body)
+    expected = EXPECTED_DEDUP_PARTITION[target]
+    assert expected in flat, f"{target} 的去重分区口径变了(期望 {expected})"
     assert (
-        "PARTITION BY platform_code, source_shop_id, data_hash" in body
-    ), f"{target} 的去重分区不再用原始键 —— 去重口径被改动了"
-
+        "PARTITION BY platform_code, shop_id, data_hash" not in flat
+    ), f"{target} 用了解析后的店铺键去重 —— 解析必须发生在去重之后"
 
 @pytest.mark.parametrize("target", UNRESOLVED_CHAINS)
 def test_unmatched_rows_keep_source_key(target: str) -> None:
@@ -135,9 +158,11 @@ def test_resolver_dependency_order_is_correct() -> None:
     ] == ["semantic.shop_identity_resolution_candidates"]
 
 
-def test_resolved_chains_still_deduplicate_on_source_key() -> None:
-    """去重口径与改造前逐字一致（否则历史行数会变）。"""
+def test_resolved_chains_deduplicate_on_declared_partition() -> None:
+    """去重口径必须**显式声明**且与实测一致(不许静默改口径)。"""
     for target in UNRESOLVED_CHAINS:
-        body = _read_asset(target)
-        assert "PARTITION BY platform_code, source_shop_id, data_hash" in body
-        assert "PARTITION BY platform_code, shop_id, data_hash" not in body
+        flat = _flat(_read_asset(target))
+        assert EXPECTED_DEDUP_PARTITION[target] in flat, f"{target} 去重口径与声明不符"
+        assert (
+            "PARTITION BY platform_code, shop_id, data_hash" not in flat
+        ), f"{target} 用了解析后的店铺键去重"

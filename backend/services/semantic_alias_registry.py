@@ -4,12 +4,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from modules.core.logger import get_logger
+
+# 导入方向: registry -> field_registry。
+#
+# ``semantic_field_registry`` **不** import 本模块(它只在注释里提到过),
+# 所以这个方向不会形成环; 若将来它反过来 import 了这里, 就把下面的 import
+# 改成函数内延迟导入即可(语义不变)。
+from backend.services.semantic_field_registry import (
+    CALIBER_PAID,
+    CALIBER_PLACED,
+    DOMAIN_SEMANTIC_ALIASES,
+    LEGACY_CALIBER_ALIAS_CONFIDENCE,
+    PLATFORM_CALIBER_HISTORY,
+    SEMANTIC_FIELD_ALIASES,
+    SEMANTIC_FIELD_DEFINITIONS,
+    apply_caliber_history,
+    is_block_column_alias,
+    is_legacy_caliber_alias,
+    normalize_semantic_alias,
+)
 
 
 logger = get_logger(__name__)
@@ -18,57 +37,165 @@ logger = get_logger(__name__)
 AliasRecord = Dict[str, Any]
 
 
+#: 别名 seed 的默认来源/置信度/状态 —— 与
+#: ``sql/semantic/semantic_alias_registry.sql`` 的 INSERT 段保持一致。
+ALIAS_SEED_SOURCE = "builtin"
+ALIAS_SEED_CONFIDENCE = 1.000
+ALIAS_SEED_STATUS = "active"
+
+
+#: 别名里的**口径标记** —— 出现哪个口径词, 就说明这个别名说的是哪套口径。
+#:
+#: 「已确定订单」是 shopee 上「已下单」的旧叫法(实测两者差 4.25%,
+#: 属同一口径的措辞迁移), 所以它算 placed 口径。
+#: 「已确认订单」**刻意不在这里** —— 真实数据里它没有任何数值,
+#: 无从判断它对应哪个口径 ⇒ 宁可落 unknown, 也不猜。
+_CALIBER_MARKERS: Tuple[Tuple[str, str], ...] = (
+    ("已付款", CALIBER_PAID),
+    ("已确定订单", CALIBER_PLACED),
+    ("已下订单", CALIBER_PLACED),
+    ("已下单", CALIBER_PLACED),
+)
+
+
+def detect_alias_caliber(raw_alias: Optional[str]) -> Optional[str]:
+    """判断一个别名说的是哪套口径; 别名里没有口径词则返回 ``None``。"""
+    text_value = str(raw_alias or "")
+    for marker, caliber in _CALIBER_MARKERS:
+        if marker in text_value:
+            return caliber
+    return None
+
+
+def _products_relevant_standard_fields(data_domain: str) -> List[str]:
+    """该数据域用到的标准字段集合。
+
+    两个来源的并集:
+
+    1. ``DOMAIN_SEMANTIC_ALIASES[domain]`` 里出现过的标准字段
+       —— 域限定别名表已经声明「这个域要用这些字段」;
+    2. ``SEMANTIC_FIELD_DEFINITIONS`` 里 ``domain`` 等于该域的字段
+       —— 字段定义自己声明了归属。
+
+    其它域的字段**不进**这里 ⇒ 全局别名不会跨域污染。
+    """
+    fields = set(DOMAIN_SEMANTIC_ALIASES.get(data_domain, {}).keys())
+    for key, meta in SEMANTIC_FIELD_DEFINITIONS.items():
+        if str(meta.get("domain") or "") == data_domain:
+            fields.add(key)
+    return sorted(fields)
+
+
+def build_domain_alias_records(data_domain: str = "products") -> List[AliasRecord]:
+    """从 ``semantic_field_registry`` 的字典派生某个数据域的别名记录。
+
+    这份字典是**唯一事实源**: 别名不再手写, 所以 DB seed / Python 侧派生别名
+    / 推断索引三边不会再分叉。
+
+    合并规则(顺序即优先级):
+
+    1. **域限定别名表**(:data:`DOMAIN_SEMANTIC_ALIASES`) —— 权威。
+       它登记的才是**真实表头**(「商品编号」「销售额（已付款订单）」…)。
+    2. **全局别名表**(:data:`SEMANTIC_FIELD_ALIASES`) —— 只取该域用到的
+       标准字段, 补上「销售额」「订单数」这类**裸名**。
+
+    两条硬规则:
+
+    * **口径不许混**: 全局别名若带口径词、且与该标准字段声明的 ``caliber``
+      相反, 直接丢弃(实测两套口径的销售额平均差 5.15%, 混了就是错数);
+    * **一个列名只认一个标准字段**: 同一个别名被两个标准字段认领时,
+      域限定的赢, 其余丢弃(否则 PG 侧解析结果不确定)。
+
+    Returns:
+        记录列表, 每条含 ``data_domain`` / ``standard_field`` / ``raw_alias`` /
+        ``source`` / ``confidence`` / ``status`` / ``normalized_alias`` /
+        ``normalized_alias_history``。
+    """
+    domain_aliases = DOMAIN_SEMANTIC_ALIASES.get(data_domain, {})
+    relevant_fields = _products_relevant_standard_fields(data_domain)
+
+    claimed: Dict[str, str] = {}
+    ordered: List[Tuple[str, str]] = []
+
+    def _claim(standard_field: str, raw_alias: Any) -> None:
+        alias = str(raw_alias or "").strip()
+        if not alias:
+            return
+        # 报表分块列(末尾 .N)不是基础指标本身, 不落标准字段。
+        # 实测: tiktok 商品月报的基础列 == .1+.2+.3+.4(701/777 行成立),
+        # ⇒ .N 是第 N 块, 把它算成"去重版"就是静默失真。
+        if is_block_column_alias(alias):
+            return
+        owner = claimed.get(alias)
+        if owner is not None:
+            # 已被别的标准字段认领 ⇒ 不再重复认领(域限定优先)。
+            return
+        claimed[alias] = standard_field
+        ordered.append((standard_field, alias))
+
+    # 1) 域限定别名(权威口径)
+    for standard_field, aliases in domain_aliases.items():
+        for alias in aliases:
+            _claim(standard_field, alias)
+
+    # 2) 全局别名(补裸名), 只取该域用到的字段, 且不许与口径冲突
+    for standard_field in relevant_fields:
+        field_caliber = SEMANTIC_FIELD_DEFINITIONS.get(standard_field, {}).get("caliber")
+        for alias in SEMANTIC_FIELD_ALIASES.get(standard_field, []):
+            alias_caliber = detect_alias_caliber(alias)
+            if field_caliber and alias_caliber and field_caliber != alias_caliber:
+                continue
+            _claim(standard_field, alias)
+
+    records: List[AliasRecord] = []
+    for standard_field, alias in sorted(ordered):
+        normalized = normalize_semantic_alias(alias)
+        records.append(
+            {
+                "data_domain": data_domain,
+                "standard_field": standard_field,
+                "raw_alias": alias,
+                "source": ALIAS_SEED_SOURCE,
+                "confidence": (
+                    LEGACY_CALIBER_ALIAS_CONFIDENCE
+                    if is_legacy_caliber_alias(alias)
+                    else ALIAS_SEED_CONFIDENCE
+                ),
+                "status": ALIAS_SEED_STATUS,
+                "normalized_alias": normalized,
+                "normalized_alias_history": _apply_history_variants(normalized),
+            }
+        )
+    return records
+
+
+def _apply_history_variants(normalized: str) -> str:
+    """把归一化别名按各平台的口径沿革折算, 返回等价形态(分号分隔)。
+
+    沿革表按平台登记, 同一个词在不同平台的沿革不一定一样; 没有登记沿革的
+    平台原样保留。返回空串表示「折算后没有任何变化」。
+    """
+    if not normalized:
+        return ""
+    variants: List[str] = []
+    for platform_code in sorted(PLATFORM_CALIBER_HISTORY):
+        folded = apply_caliber_history(normalized, platform_code)
+        if folded and folded != normalized and folded not in variants:
+            variants.append(folded)
+    return ";".join(variants)
+
+
+#: 内置别名 —— **由字典派生**, 不再手写。
+#:
+#: 保持 ``list[dict]`` 形状与键名不变, ``SemanticAliasRegistryService`` 的
+#: 既有行为(按列名原文取值)也不变。
 BUILTIN_ALIASES: List[AliasRecord] = [
-    {"data_domain": "products", "standard_field": "product_id", "raw_alias": "商品ID"},
-    {"data_domain": "products", "standard_field": "product_id", "raw_alias": "产品ID"},
-    {"data_domain": "products", "standard_field": "product_id", "raw_alias": "商品 ID"},
-    {"data_domain": "products", "standard_field": "product_id", "raw_alias": "product_id"},
-    {"data_domain": "products", "standard_field": "product_id", "raw_alias": "Product ID"},
-    {"data_domain": "products", "standard_field": "product_id", "raw_alias": "item_id"},
-    {"data_domain": "products", "standard_field": "product_name", "raw_alias": "商品名称"},
-    {"data_domain": "products", "standard_field": "product_name", "raw_alias": "产品名称"},
-    {"data_domain": "products", "standard_field": "product_name", "raw_alias": "商品标题"},
-    {"data_domain": "products", "standard_field": "product_name", "raw_alias": "商品名"},
-    {"data_domain": "products", "standard_field": "product_name", "raw_alias": "product_name"},
-    {"data_domain": "products", "standard_field": "product_name", "raw_alias": "Product Name"},
-    {"data_domain": "products", "standard_field": "product_name", "raw_alias": "title"},
-    {"data_domain": "products", "standard_field": "item_status", "raw_alias": "商品状态"},
-    {"data_domain": "products", "standard_field": "item_status", "raw_alias": "状态"},
-    {"data_domain": "products", "standard_field": "item_status", "raw_alias": "发品状态"},
-    {"data_domain": "products", "standard_field": "item_status", "raw_alias": "item_status"},
-    {"data_domain": "products", "standard_field": "item_status", "raw_alias": "Item Status"},
-    {"data_domain": "products", "standard_field": "item_status", "raw_alias": "status"},
-    {"data_domain": "products", "standard_field": "order_count", "raw_alias": "已付款订单"},
-    {"data_domain": "products", "standard_field": "order_count", "raw_alias": "已确认订单"},
-    {"data_domain": "products", "standard_field": "order_count", "raw_alias": "已确定订单"},
-    {"data_domain": "products", "standard_field": "order_count", "raw_alias": "订单数"},
-    {"data_domain": "products", "standard_field": "order_count", "raw_alias": "订单数量"},
-    {"data_domain": "products", "standard_field": "order_count", "raw_alias": "order_count"},
-    {"data_domain": "products", "standard_field": "order_count", "raw_alias": "Order Count"},
-    {"data_domain": "products", "standard_field": "order_count", "raw_alias": "orders"},
-    {"data_domain": "products", "standard_field": "sales_amount", "raw_alias": "销售额"},
-    {"data_domain": "products", "standard_field": "sales_amount", "raw_alias": "销售金额"},
-    {"data_domain": "products", "standard_field": "sales_amount", "raw_alias": "GMV"},
-    {"data_domain": "products", "standard_field": "sales_amount", "raw_alias": "sales_amount"},
-    {"data_domain": "products", "standard_field": "sales_amount", "raw_alias": "Sales Amount"},
-    {"data_domain": "products", "standard_field": "sales_amount", "raw_alias": "revenue"},
-    {"data_domain": "products", "standard_field": "sales_volume", "raw_alias": "件数"},
-    {"data_domain": "products", "standard_field": "sales_volume", "raw_alias": "销量"},
-    {"data_domain": "products", "standard_field": "sales_volume", "raw_alias": "销售数量"},
-    {"data_domain": "products", "standard_field": "sales_volume", "raw_alias": "商品成交件数"},
-    {"data_domain": "products", "standard_field": "sales_volume", "raw_alias": "sales_volume"},
-    {"data_domain": "products", "standard_field": "sales_volume", "raw_alias": "Sales Volume"},
-    {"data_domain": "products", "standard_field": "sales_volume", "raw_alias": "qty"},
-    {"data_domain": "products", "standard_field": "impressions", "raw_alias": "曝光次数"},
-    {"data_domain": "products", "standard_field": "impressions", "raw_alias": "impressions"},
-    {"data_domain": "products", "standard_field": "impressions", "raw_alias": "Impressions"},
-    {"data_domain": "products", "standard_field": "clicks", "raw_alias": "点击次数"},
-    {"data_domain": "products", "standard_field": "clicks", "raw_alias": "clicks"},
-    {"data_domain": "products", "standard_field": "clicks", "raw_alias": "Clicks"},
-    {"data_domain": "products", "standard_field": "conversion_rate", "raw_alias": "转化率"},
-    {"data_domain": "products", "standard_field": "conversion_rate", "raw_alias": "conversion_rate"},
-    {"data_domain": "products", "standard_field": "conversion_rate", "raw_alias": "Conversion Rate"},
-    {"data_domain": "products", "standard_field": "conversion_rate", "raw_alias": "CVR"},
+    {
+        "data_domain": record["data_domain"],
+        "standard_field": record["standard_field"],
+        "raw_alias": record["raw_alias"],
+    }
+    for record in build_domain_alias_records("products")
 ]
 
 

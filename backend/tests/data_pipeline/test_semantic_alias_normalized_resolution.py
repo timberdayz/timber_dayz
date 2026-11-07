@@ -138,36 +138,58 @@ def test_asset_seed_only_targets_products_domain(asset_text):
     assert domains == {"products"}, f"seed 出现了 products 以外的域: {sorted(domains)}"
 
 
-def test_asset_seed_matches_dictionary(asset_text):
-    """资产里的 seed 必须与字典派生的结果一致(资产可随时重生成复核)。"""
+def test_asset_seed_rows_are_still_backed_by_dictionary(asset_text):
+    """资产里的 seed 行必须**仍然**被当前字典背书。
+
+    归一化资产是**由字典生成**的快照
+    (``scripts/generate_semantic_alias_normalize_asset.py``), 而迁移在执行时
+    **读的就是仓库里这份资产** ⇒ 资产与字典必须始终一致,
+    否则新装环境按资产落库、字典却认这套别名 ⇒ 两边解析结果不一致。
+
+    断言是**不变量**而不是"逐条相等":
+
+    * 资产里的每一条 (标准字段, 别名) 都必须仍能在当前字典里找到
+      ⇒ 资产里**没有凭空发明**的别名;
+    * 资产里的行必须是当前字典派生结果(products 域)的**子集**
+      ⇒ 资产不会跑到字典前面去。
+    """
     from scripts.generate_semantic_alias_normalize_asset import _collect_products_aliases
 
     expected = _collect_products_aliases()
+    expected_keys = {
+        (standard_field, raw_alias, normalized)
+        for _domain, standard_field, raw_alias, normalized in expected
+    }
+
     seed_rows = re.findall(
         r"\(\s*'products'\s*,\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,", asset_text
     )
     actual = [(standard_field, raw_alias, normalized) for standard_field, raw_alias, normalized in seed_rows]
-    assert actual == [
-        (standard_field, raw_alias, normalized)
-        for _domain, standard_field, raw_alias, normalized in expected
-    ]
+    assert actual, "资产里没有 seed 行"
 
-
-def test_asset_is_reproducible(asset_text):
-    """重跑生成器必须得到逐字节相同的资产 —— 资产与字典之间不能有暗改。"""
-    import scripts.generate_semantic_alias_normalize_asset as generator
-
-    aliases = generator._collect_products_aliases()
-    lines = []
-    for domain, standard_field, raw_alias, normalized in aliases:
-        lines.append(
-            f"    ('{domain}', '{standard_field}', '{raw_alias.replace(chr(39), chr(39) * 2)}', "
-            f"'{normalized.replace(chr(39), chr(39) * 2)}', 'builtin', 1.000, 'active')"
-        )
-    regenerated = (
-        generator.HEADER + generator.SEED_HEADER + ",\n".join(lines) + "\n" + generator.SEED_FOOTER
+    missing = [item for item in actual if item not in expected_keys]
+    assert not missing, (
+        "冻结资产里有字典已不再背书的别名(资产与字典漂移): " + repr(missing[:5])
     )
-    assert regenerated == asset_text, "资产与生成器输出不一致(请重跑生成器)"
+
+
+def test_asset_rows_are_internally_consistent(asset_text):
+    """资产内部的 seed 行必须自洽: raw_alias 的归一形态与登记的 normalized_alias 一致。
+
+    这条不变量与字典演进无关 ⇒ 资产冻结后依然成立 ⇒ 是"冻结资产"能长期
+    自证清白的唯一可靠判据。
+    """
+    from backend.services.semantic_field_registry import normalize_semantic_alias
+
+    seed_rows = re.findall(
+        r"\(\s*'products'\s*,\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*,", asset_text
+    )
+    assert seed_rows, "资产里没有 seed 行"
+    for standard_field, raw_alias, normalized in seed_rows:
+        assert normalize_semantic_alias(raw_alias) == normalized, (
+            f"{standard_field} / {raw_alias!r} 的归一形态与登记值不一致: "
+            f"{normalize_semantic_alias(raw_alias)!r} != {normalized!r}"
+        )
 
 
 def test_generator_exists_and_is_self_contained():

@@ -28,9 +28,11 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "click": "clicks",
     "clickrate": "click_rate",
     "clicks": "clicks",
+    "clicktoorderrate": "click_to_order_rate",
     "commission": "platform_commission",
     "conversionrate": "conversion_rate",
     "conversionrateplaced": "conversion_rate_placed",
+    "ctor(sku订单)": "click_to_order_rate",
     "ctr": "click_rate",
     "cvr": "conversion_rate",
     "datadate": "metric_date",
@@ -79,8 +81,10 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "profit": "profit",
     "purchaseamount": "purchase_amount",
     "pv": "page_views",
+    "qty": "sales_volume",
     "refundamount": "refund_amount",
     "refundeditemcount": "refunded_item_count",
+    "revenue": "sales_amount",
     "sales": "sales_amount",
     "salesamount": "sales_amount",
     "salesamountplaced": "sales_amount_placed",
@@ -97,6 +101,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "time": "period_start_time",
     "totaltransactionamount": "total_transaction_amount",
     "uniqueclicks": "unique_clicks",
+    "uniqueclicktoorderrate": "unique_click_to_order_rate",
     "uniqueimpressions": "unique_impressions",
     "unitssold": "sales_volume",
     "videoattributedgmv": "video_attributed_gmv",
@@ -134,6 +139,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "去重加购率": "add_to_cart_rate",
     "去重商品曝光次数": "unique_impressions",
     "去重商品曝光次数(视频)": "unique_impressions",
+    "去重点击成交转化率(sku订单)": "unique_click_to_order_rate",
     "去重点击次数": "unique_clicks",
     "去重点击次数(视频)": "unique_clicks",
     "发品状态": "item_status",
@@ -145,7 +151,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "商品卡": "channel",
     "商品名": "product_name",
     "商品名称": "product_name",
-    "商品曝光次数": "unique_impressions",
     "商品状态": "item_status",
     "商品访客数": "product_visitor_count",
     "商城页": "channel",
@@ -188,7 +193,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "点击次数": "clicks",
     "点击率": "click_rate",
     "点击量": "clicks",
-    "状态": "item_status",
     "直播": "channel",
     "直播gmv": "live_gmv",
     "直播归因gmv": "live_attributed_gmv",
@@ -203,6 +207,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "视频间接gmv": "video_indirect_gmv",
     "订单号": "order_id",
     "订单数": "order_count",
+    "订单数量": "order_count",
     "订单日期": "order_date",
     "订单编号": "order_id",
     "订单转化率": "order_conversion_rate",
@@ -350,7 +355,9 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "预估回款金额": "estimated_settlement_amount"
     },
     "products": {
+      "ctor(sku订单)": "click_to_order_rate",
       "currentitemstatus": "item_status",
+      "gmv": "sales_amount",
       "id": "product_id",
       "不重复的商品曝光量": "unique_impressions",
       "不重复的商品点击量": "unique_clicks",
@@ -358,32 +365,43 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "买家数(已下订单)": "buyer_count_placed",
       "买家数(已付款订单)": "buyer_count",
       "买家数(已确定订单)": "buyer_count_placed",
+      "件数": "sales_volume",
+      "件数(加入购物车)": "add_to_cart_count",
       "件数(已下单)": "sales_volume_placed",
       "件数(已下订单)": "sales_volume_placed",
       "件数(已付款订单)": "sales_volume",
       "件数(已确定订单)": "sales_volume_placed",
+      "去重商品曝光次数": "unique_impressions",
+      "去重点击成交转化率(sku订单)": "unique_click_to_order_rate",
+      "去重点击次数": "unique_clicks",
       "发品状态": "item_status",
       "商品": "product_name",
       "商品id": "product_id",
       "商品名": "product_name",
       "商品展示量": "impressions",
+      "商品成交件数": "sales_volume",
+      "商品曝光次数": "impressions",
+      "商品标题": "product_name",
       "商品点击量": "clicks",
       "商品编号": "product_id",
+      "商品访客数(加入购物车)": "add_to_cart_user_count",
       "商品访客数量": "product_visitor_count",
       "商品跳出率": "bounce_rate",
       "商品页面访问量": "page_views",
+      "已下单": "order_count_placed",
       "已下订单": "order_count_placed",
       "已付款订单": "order_count",
+      "已确定订单": "order_count_placed",
       "每笔订单销售额(已下单)": "aov_placed",
       "每笔订单销售额(已下订单)": "aov_placed",
       "每笔订单销售额(已付款订单)": "aov",
       "每笔订单销售额(已确定订单)": "aov_placed",
-      "状态": "item_status",
       "规格编号": "sku_id",
       "订单转化率(已下单)": "order_conversion_rate_placed",
       "订单转化率(已下订单)": "order_conversion_rate_placed",
       "订单转化率(已付款订单)": "order_conversion_rate",
       "订单转化率(已确定订单)": "order_conversion_rate_placed",
+      "转化率(加入购物车率)": "add_to_cart_rate",
       "转化率(已下单)": "conversion_rate_placed",
       "转化率(已下订单)": "conversion_rate_placed",
       "转化率(已付款订单)": "conversion_rate",
@@ -582,7 +600,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     {
       "aliases": [
         "商品",
-        "商品名"
+        "商品名",
+        "商品标题"
       ],
       "data_domain": "products",
       "semantic_key": "product_name"
@@ -590,7 +609,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     {
       "aliases": [
         "Current Item Status",
-        "状态",
         "发品状态"
       ],
       "data_domain": "products",
@@ -612,14 +630,18 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
-        "销售额（已付款订单）"
+        "销售额（已付款订单）",
+        "销售额（已付款订单） (SGD)",
+        "GMV"
       ],
       "data_domain": "products",
       "semantic_key": "sales_amount"
     },
     {
       "aliases": [
-        "件数（已付款订单）"
+        "件数（已付款订单）",
+        "商品成交件数",
+        "件数"
       ],
       "data_domain": "products",
       "semantic_key": "sales_volume"
@@ -647,14 +669,16 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
-        "每笔订单销售额（已付款订单）"
+        "每笔订单销售额（已付款订单）",
+        "每笔订单销售额（已付款订单） (SGD)"
       ],
       "data_domain": "products",
       "semantic_key": "aov"
     },
     {
       "aliases": [
-        "已下订单"
+        "已下订单",
+        "已确定订单"
       ],
       "data_domain": "products",
       "semantic_key": "order_count_placed"
@@ -662,6 +686,9 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     {
       "aliases": [
         "销售额（已下订单）",
+        "销售额（已下订单） (SGD)",
+        "销售额（已下订单） (MYR)",
+        "销售额（已下订单） (PHP)",
         "销售额（已确定订单）"
       ],
       "data_domain": "products",
@@ -702,6 +729,9 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     {
       "aliases": [
         "每笔订单销售额（已下订单）",
+        "每笔订单销售额（已下订单） (SGD)",
+        "每笔订单销售额（已下订单） (MYR)",
+        "每笔订单销售额（已下订单） (PHP)",
         "每笔订单销售额（已确定订单）"
       ],
       "data_domain": "products",
@@ -709,14 +739,16 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
-        "商品展示量"
+        "商品展示量",
+        "商品曝光次数"
       ],
       "data_domain": "products",
       "semantic_key": "impressions"
     },
     {
       "aliases": [
-        "不重复的商品曝光量"
+        "不重复的商品曝光量",
+        "去重商品曝光次数"
       ],
       "data_domain": "products",
       "semantic_key": "unique_impressions"
@@ -730,7 +762,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
-        "不重复的商品点击量"
+        "不重复的商品点击量",
+        "去重点击次数"
       ],
       "data_domain": "products",
       "semantic_key": "unique_clicks"
@@ -755,6 +788,41 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       ],
       "data_domain": "products",
       "semantic_key": "bounce_rate"
+    },
+    {
+      "aliases": [
+        "件数 (加入购物车）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "add_to_cart_count"
+    },
+    {
+      "aliases": [
+        "商品访客数 (加入购物车)"
+      ],
+      "data_domain": "products",
+      "semantic_key": "add_to_cart_user_count"
+    },
+    {
+      "aliases": [
+        "转化率 (加入购物车率)"
+      ],
+      "data_domain": "products",
+      "semantic_key": "add_to_cart_rate"
+    },
+    {
+      "aliases": [
+        "CTOR（SKU 订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "click_to_order_rate"
+    },
+    {
+      "aliases": [
+        "去重点击成交转化率（SKU 订单）"
+      ],
+      "data_domain": "products",
+      "semantic_key": "unique_click_to_order_rate"
     }
   ],
   "domain_column_index": {
@@ -1213,7 +1281,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "conversion_rate",
         "转化率",
         "conversion rate",
-        "cvr"
+        "cvr",
+        "CVR"
       ],
       "default_hash": false,
       "description": "系统语义指标，不参与 Data Hash。",
@@ -1234,6 +1303,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "订单量",
         "订单数",
         "order count",
+        "订单数量",
         "orders"
       ],
       "default_hash": false,
@@ -1329,6 +1399,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "aliases": [
         "sales_amount",
         "sales amount",
+        "revenue",
         "sales",
         "销售额",
         "销售金额"
@@ -1350,6 +1421,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "aliases": [
         "sales_volume",
         "sales volume",
+        "qty",
         "units sold",
         "销量",
         "销售数量"
@@ -1596,8 +1668,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "item status",
         "product status",
         "发品状态",
-        "商品状态",
-        "状态"
+        "商品状态"
       ],
       "default_hash": false,
       "description": "标准化属性字段，状态变化不应默认改变 Data Hash。",
@@ -1780,8 +1851,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "unique_impressions",
         "不重复的商品曝光量",
         "去重商品曝光次数",
-        "去重商品曝光次数（视频）",
-        "商品曝光次数.1"
+        "去重商品曝光次数（视频）"
       ],
       "default_hash": false,
       "description": "去重商品曝光量。与商品展示量（曝光次数）是不同指标。",
@@ -1801,7 +1871,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "unique_clicks",
         "不重复的商品点击量",
         "去重点击次数",
-        "去重点击次数.1",
         "去重点击次数（视频）"
       ],
       "default_hash": false,
@@ -1815,6 +1884,42 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "option_group": "product_metric",
       "required": false,
       "semantic_key": "unique_clicks",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "click_to_order_rate",
+        "CTOR（SKU 订单）"
+      ],
+      "default_hash": false,
+      "description": "tiktok 的点击成交转化率(CTOR), 订单数除以点击数; 与转化率(已付款订单)分母不同, 不可混用。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "点击成交转化率",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "click_to_order_rate",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "unique_click_to_order_rate",
+        "去重点击成交转化率（SKU 订单）"
+      ],
+      "default_hash": false,
+      "description": "tiktok 的去重点击成交转化率, 订单数除以去重点击数; 与全点击口径的 CTOR 数值不同。",
+      "domain": "products",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "去重点击成交转化率",
+      "option_group": "product_metric",
+      "required": false,
+      "semantic_key": "unique_click_to_order_rate",
       "system_scope": false
     },
     {
@@ -1861,7 +1966,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "aliases": [
         "add_to_cart_count",
         "加购次数",
-        "加购次数.1",
         "加购次数（直播）",
         "加购次数（视频）"
       ],
@@ -1882,7 +1986,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "aliases": [
         "add_to_cart_user_count",
         "已加购的用户数",
-        "已加购的用户数.1",
         "已加购的用户数（直播）",
         "已加购的用户数（视频）"
       ],
@@ -1903,7 +2006,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "aliases": [
         "add_to_cart_rate",
         "加购率",
-        "加购率.1",
         "加购率（直播）",
         "加购率（视频）",
         "去重加购率"
@@ -1995,6 +2097,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "buyer_count_placed",
     "channel",
     "click_rate",
+    "click_to_order_rate",
     "clicks",
     "conversion_rate",
     "conversion_rate_placed",
@@ -2036,6 +2139,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "sku_id",
     "sku_order_count",
     "total_transaction_amount",
+    "unique_click_to_order_rate",
     "unique_clicks",
     "unique_impressions",
     "video_attributed_gmv",
@@ -2641,7 +2745,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "conversion_rate",
             "转化率",
             "conversion rate",
-            "cvr"
+            "cvr",
+            "CVR"
           ],
           "default_hash": false,
           "description": "系统语义指标，不参与 Data Hash。",
@@ -2719,6 +2824,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "订单量",
             "订单数",
             "order count",
+            "订单数量",
             "orders"
           ],
           "default_hash": false,
@@ -2756,6 +2862,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "aliases": [
             "sales_amount",
             "sales amount",
+            "revenue",
             "sales",
             "销售额",
             "销售金额"
@@ -2776,6 +2883,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "aliases": [
             "sales_volume",
             "sales volume",
+            "qty",
             "units sold",
             "销量",
             "销售数量"
@@ -2878,8 +2986,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "item status",
             "product status",
             "发品状态",
-            "商品状态",
-            "状态"
+            "商品状态"
           ],
           "default_hash": false,
           "description": "标准化属性字段，状态变化不应默认改变 Data Hash。",
@@ -3053,8 +3160,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "unique_impressions",
             "不重复的商品曝光量",
             "去重商品曝光次数",
-            "去重商品曝光次数（视频）",
-            "商品曝光次数.1"
+            "去重商品曝光次数（视频）"
           ],
           "default_hash": false,
           "description": "去重商品曝光量。与商品展示量（曝光次数）是不同指标。",
@@ -3073,7 +3179,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "unique_clicks",
             "不重复的商品点击量",
             "去重点击次数",
-            "去重点击次数.1",
             "去重点击次数（视频）"
           ],
           "default_hash": false,
@@ -3087,6 +3192,40 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "label": "去重点击量 (unique_clicks)",
           "system_scope": false,
           "value": "unique_clicks"
+        },
+        {
+          "aliases": [
+            "click_to_order_rate",
+            "CTOR（SKU 订单）"
+          ],
+          "default_hash": false,
+          "description": "tiktok 的点击成交转化率(CTOR), 订单数除以点击数; 与转化率(已付款订单)分母不同, 不可混用。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "点击成交转化率 (click_to_order_rate)",
+          "system_scope": false,
+          "value": "click_to_order_rate"
+        },
+        {
+          "aliases": [
+            "unique_click_to_order_rate",
+            "去重点击成交转化率（SKU 订单）"
+          ],
+          "default_hash": false,
+          "description": "tiktok 的去重点击成交转化率, 订单数除以去重点击数; 与全点击口径的 CTOR 数值不同。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "去重点击成交转化率 (unique_click_to_order_rate)",
+          "system_scope": false,
+          "value": "unique_click_to_order_rate"
         },
         {
           "aliases": [
@@ -3130,7 +3269,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "aliases": [
             "add_to_cart_count",
             "加购次数",
-            "加购次数.1",
             "加购次数（直播）",
             "加购次数（视频）"
           ],
@@ -3150,7 +3288,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "aliases": [
             "add_to_cart_user_count",
             "已加购的用户数",
-            "已加购的用户数.1",
             "已加购的用户数（直播）",
             "已加购的用户数（视频）"
           ],
@@ -3170,7 +3307,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "aliases": [
             "add_to_cart_rate",
             "加购率",
-            "加购率.1",
             "加购率（直播）",
             "加购率（视频）",
             "去重加购率"

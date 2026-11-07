@@ -203,7 +203,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "caliber": CALIBER_PAID,
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["转化率", "conversion rate", "cvr"],
+        "aliases": ["转化率", "conversion rate", "cvr", "CVR"],
     },
     "order_count": {
         "label": "订单量",
@@ -212,7 +212,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "caliber": CALIBER_PAID,
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["订单量", "订单数", "order count", "orders"],
+        "aliases": ["订单量", "订单数", "order count", "订单数量", "orders"],
     },
     "sku_order_count": {
         "label": "SKU 订单量",
@@ -253,7 +253,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "caliber": CALIBER_PAID,
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["sales amount", "sales", "销售额", "销售金额"],
+        "aliases": ["sales amount", "revenue", "sales", "销售额", "销售金额"],
     },
     "sales_volume": {
         "label": "销量",
@@ -262,7 +262,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "caliber": CALIBER_PAID,
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["sales volume", "units sold", "销量", "销售数量"],
+        "aliases": ["sales volume", "qty", "units sold", "销量", "销售数量"],
     },
     "paid_amount": {
         "label": "实付金额",
@@ -360,7 +360,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "products",
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["product_status", "listing_status", "item status", "product status", "发品状态", "商品状态", "状态"],
+        "aliases": ["product_status", "listing_status", "item status", "product status", "发品状态", "商品状态"],
     },
     # ── products 域的**口径变体**(2026-11-08 新增) ─────────────────────
     #
@@ -453,7 +453,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "products",
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["不重复的商品曝光量", "去重商品曝光次数", "去重商品曝光次数（视频）", "商品曝光次数.1"],
+        "aliases": ["不重复的商品曝光量", "去重商品曝光次数", "去重商品曝光次数（视频）"],
     },
     "unique_clicks": {
         "label": "去重点击量",
@@ -461,8 +461,33 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "products",
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["不重复的商品点击量", "去重点击次数", "去重点击次数.1", "去重点击次数（视频）"],
+        "aliases": ["不重复的商品点击量", "去重点击次数", "去重点击次数（视频）"],
     },
+    # ── tiktok 点击成交转化率(CTOR)族 ────────────────────────────────
+    #
+    # 为什么单独成字段, 不并进 ``conversion_rate``:
+    #   ``conversion_rate`` 声明的口径是 **已付款订单**(shopee 的「转化率（已付款订单）」);
+    #   tiktok 的 CTOR 是**点击成交**口径 —— 分子是订单, 分母是点击(去重与否还分两套)。
+    #   实测 tiktok 777 行里「CTOR（SKU 订单）」与「去重点击成交转化率（SKU 订单）」
+    #   仅 615 行同值、样例值 8.57% vs 9.09% ⇒ **分母不同, 是两个指标**。
+    #   并进 conversion_rate 就是口径混用 ⇒ 各自独立成字段。
+    "click_to_order_rate": {
+        "label": "点击成交转化率",
+        "kind": "metric",
+        "domain": "products",
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["CTOR（SKU 订单）"],
+    },
+    "unique_click_to_order_rate": {
+        "label": "去重点击成交转化率",
+        "kind": "metric",
+        "domain": "products",
+        "hash_eligible": False,
+        "default_hash": False,
+        "aliases": ["去重点击成交转化率（SKU 订单）"],
+    },
+
     "buyer_count": {
         "label": "买家数",
         "kind": "metric",
@@ -487,7 +512,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "products",
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["加购次数", "加购次数.1", "加购次数（直播）", "加购次数（视频）"],
+        "aliases": ["加购次数", "加购次数（直播）", "加购次数（视频）"],
     },
     "add_to_cart_user_count": {
         "label": "加购用户数",
@@ -495,7 +520,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "products",
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["已加购的用户数", "已加购的用户数.1", "已加购的用户数（直播）", "已加购的用户数（视频）"],
+        "aliases": ["已加购的用户数", "已加购的用户数（直播）", "已加购的用户数（视频）"],
     },
     "add_to_cart_rate": {
         "label": "加购率",
@@ -503,7 +528,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "products",
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["加购率", "加购率.1", "加购率（直播）", "加购率（视频）", "去重加购率"],
+        "aliases": ["加购率", "加购率（直播）", "加购率（视频）", "去重加购率"],
     },
     "refund_amount": {
         "label": "退款金额",
@@ -570,6 +595,8 @@ SEMANTIC_FIELD_META = {
 #:     后端这边没有 ⇒ 后端接口返回的字段没有描述, 前端只能自己抄一份。
 #:     现在文案回到后端, 与字段定义放在一起, 一起作为唯一口径。
 SEMANTIC_FIELD_DESCRIPTIONS: Dict[str, str] = {
+    "click_to_order_rate": "tiktok 的点击成交转化率(CTOR), 订单数除以点击数; 与转化率(已付款订单)分母不同, 不可混用。",
+    "unique_click_to_order_rate": "tiktok 的去重点击成交转化率, 订单数除以去重点击数; 与全点击口径的 CTOR 数值不同。",
     "order_id": "识别同一笔订单的稳定身份字段。",
     "product_id": "平台或系统内识别同一商品的稳定身份字段。",
     "platform_sku": "平台侧商品规格编码，可作为商品身份字段。",
@@ -756,33 +783,59 @@ ANALYTICS_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
 PRODUCTS_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
     # ── 身份维度 ──
     "product_id": ("商品编号", "商品 ID", "商品ID", "ID"),
-    "product_name": ("商品", "商品名"),
-    "item_status": ("Current Item Status", "状态", "发品状态"),
+    "product_name": ("商品", "商品名", "商品标题"),
+    "item_status": ("Current Item Status", "发品状态"),
     "sku_id": ("规格编号",),
     # ── 已付款口径(主口径) ──
     "order_count": ("已付款订单",),
-    "sales_amount": ("销售额（已付款订单）",),
-    "sales_volume": ("件数（已付款订单）",),
+    # 「GMV」是 tiktok 的头条金额指标(实测与「含税 GMV」数值完全相同);
+    # 只登「GMV」不登「含税 GMV」—— 两者同值, 登两个会让 resolve_alias 在
+    # 两列都非空时随机挑一个(值虽相同, 但不该依赖这种巧合)。
+    "sales_amount": ("销售额（已付款订单）", "销售额（已付款订单） (SGD)", "GMV"),
+    "sales_volume": ("件数（已付款订单）", "商品成交件数", "件数"),
     "conversion_rate": ("转化率（已付款订单）",),
     "order_conversion_rate": ("订单转化率（已付款订单）",),
     "buyer_count": ("买家数（已付款订单）",),
-    "aov": ("每笔订单销售额（已付款订单）",),
+    "aov": ("每笔订单销售额（已付款订单）", "每笔订单销售额（已付款订单） (SGD)"),
     # ── 已下单口径 ──
-    "order_count_placed": ("已下订单",),
-    "sales_amount_placed": ("销售额（已下订单）", "销售额（已确定订单）"),
+    # 「已确定订单」是「已下订单」的旧叫法 —— 与「已下订单」列**在同一份报表里并存**
+    # (实测 MYR/PHP 店铺两个口径列同时存在, 数值差 4.25%)。两列都登记到同一个标准字段时,
+    # resolve_alias 只能挑一条 ⇒ 所以旧词别名的**置信度要低于当前措辞**
+    # (见 LEGACY_CALIBER_ALIAS_CONFIDENCE), 保证稳定选当前措辞那一列。
+    "order_count_placed": ("已下订单", "已确定订单"),
+    "sales_amount_placed": (
+        "销售额（已下订单）",
+        "销售额（已下订单） (SGD)",
+        "销售额（已下订单） (MYR)",
+        "销售额（已下订单） (PHP)",
+        "销售额（已确定订单）",
+    ),
     "sales_volume_placed": ("件数（已下订单）", "件数（已确定订单）"),
     "conversion_rate_placed": ("转化率（已下订单）", "转化率（已确定订单）"),
     "order_conversion_rate_placed": ("订单转化率（已下订单）", "订单转化率（已确定订单）"),
     "buyer_count_placed": ("买家数（已下订单）", "买家数（已确定订单）"),
-    "aov_placed": ("每笔订单销售额（已下订单）", "每笔订单销售额（已确定订单）"),
+    "aov_placed": (
+        "每笔订单销售额（已下订单）",
+        "每笔订单销售额（已下订单） (SGD)",
+        "每笔订单销售额（已下订单） (MYR)",
+        "每笔订单销售额（已下订单） (PHP)",
+        "每笔订单销售额（已确定订单）",
+    ),
     # ── 流量指标(无口径) ──
-    "impressions": ("商品展示量",),
-    "unique_impressions": ("不重复的商品曝光量",),
+    "impressions": ("商品展示量", "商品曝光次数"),
+    "unique_impressions": ("不重复的商品曝光量", "去重商品曝光次数"),
     "clicks": ("商品点击量",),
-    "unique_clicks": ("不重复的商品点击量",),
+    "unique_clicks": ("不重复的商品点击量", "去重点击次数"),
     "product_visitor_count": ("商品访客数量",),
     "page_views": ("商品页面访问量",),
     "bounce_rate": ("商品跳出率",),
+    # ── 加购族(shopee 写法带空格/半角括号, 必须逐字登记) ──
+    "add_to_cart_count": ("件数 (加入购物车）",),
+    "add_to_cart_user_count": ("商品访客数 (加入购物车)",),
+    "add_to_cart_rate": ("转化率 (加入购物车率)",),
+    # ── tiktok 点击成交转化率(CTOR)族 —— 与 conversion_rate 分母不同, 独立成字段 ──
+    "click_to_order_rate": ("CTOR（SKU 订单）",),
+    "unique_click_to_order_rate": ("去重点击成交转化率（SKU 订单）",),
 }
 
 
@@ -871,7 +924,7 @@ def normalize_semantic_alias(value: Optional[str]) -> str:
     text = re.sub(r"\s+", "", text)
     text = text.replace("_", "")
     # 末尾的 ".N" 序号后缀 —— Excel 多级表头展开后的重名列产物
-    # (例: tiktok 商品报表的 "商品曝光次数.1" / "GMV.2" / "CTOR(SKU 订单).3"),
+    # (例: tiktok 商品报表的  /  / ),
     # 与基础列是**同一个指标**, 只是多块表里各出现了一次。
     text = re.sub(r"\.\d+$", "", text)
     return text.strip().lower()
@@ -916,6 +969,63 @@ def apply_caliber_history(normalized: str, platform_code: Optional[str] = None) 
         if legacy_word in normalized:
             normalized = normalized.replace(legacy_word, current_word)
     return normalized
+
+
+
+#: 口径沿革**旧词**别名的置信度 —— 低于当前措辞的 1.000。
+#:
+#: 为什么需要: shopee 同一份报表里「已下订单」与「已确定订单」两列并存
+#: (实测 MYR/PHP 店铺同时存在, 数值差 4.25%)。两列都登记到同一个标准字段时,
+#: ``semantic.resolve_alias()`` 只能挑一条 —— 若置信度相同就退化成按 id 挑,
+#: 等于把两个数混着报。旧词降级 ⇒ **稳定选当前措辞**。
+LEGACY_CALIBER_ALIAS_CONFIDENCE = 0.900
+
+
+
+#: 报表**分块列**的判定 —— 列名末尾带 ``.N`` 序号。
+#:
+#: 为什么分块列**不落标准字段**
+#: --------------------------
+#: 2026-11-08 实测(tiktok 商品月报 777 行):
+#:
+#: * 基础列 ``商品曝光次数`` 与 ``商品曝光次数.1/.2/.3/.4`` **同时存在**;
+#: * 实测「基础列 = .1+.2+.3+.4」在 701/777 行成立(其余为块缺失的 NULL 行);
+#: * 同理 ``GMV`` = ``GMV.1+GMV.2+GMV.3`` 在 684/777 行成立。
+#:
+#: ⇒ ``.N`` 是**报表分块**(第 N 块), 不是 Excel 重名列 ⇒ 它**不是**基础列那个指标,
+#: 更不是"去重版"。把它归到 ``unique_impressions`` 之类是**静默失真**。
+#:
+#: ⇒ 分块列一律**不落标准字段**: 宁可 unknown, 也不猜。
+#: (它们各自的语义需要结合报表结构单独建模, 记为 V2。)
+#: 报表分块列的判定正则 —— 列名末尾带 ``.N`` 序号。
+BLOCK_COLUMN_ALIAS_PATTERN = re.compile(r"\.\d+$")
+
+def is_block_column_alias(raw_alias: Optional[str]) -> bool:
+    """这个列名是报表分块列(末尾带 ``.N``)吗?"""
+    text_value = str(raw_alias or "").strip()
+    if not text_value:
+        return False
+    return bool(BLOCK_COLUMN_ALIAS_PATTERN.search(text_value))
+
+
+def is_legacy_caliber_alias(raw_alias: Optional[str]) -> bool:
+    """这个别名用的是**沿革旧口径词**吗?
+
+    沿革词表来自 :data:`PLATFORM_CALIBER_HISTORY` —— 各平台登记自己的旧叫法,
+    这里把所有平台的旧词汇总成一个判定集(不带平台维度: 别名行本身不带平台字段,
+    降级只影响"同一字段多个别名同时非空时挑谁")。
+
+    「已确认订单」**不在**沿革表里(它没有任何实测数值支撑) ⇒ 不会被降级,
+    也就不会被登记成任何标准字段的别名 ⇒ 保持 unknown。
+    """
+    text_value = str(raw_alias or "")
+    if not text_value:
+        return False
+    for history in PLATFORM_CALIBER_HISTORY.values():
+        for legacy_word in history:
+            if legacy_word and legacy_word in text_value:
+                return True
+    return False
 
 
 def _build_normalized_alias_index() -> Dict[str, str]:
@@ -1230,6 +1340,15 @@ def infer_semantic_key_for_domain(
     又不会把「同名列不同含义」污染到别的数据域。
     """
     domain = str(data_domain or "").strip().lower()
+    # [*] 2026-11-08: 报表**分块列**(列名末尾带 .N)不落标准字段。
+    # 实测(tiktok 商品月报 777 行): 基础列 == .1+.2+.3+.4 在 701 行成立,
+    # 同理 GMV == GMV.1+GMV.2+GMV.3 在 684 行成立
+    # ⇒ .N 是报表的**第 N 块**, 不是基础指标的另一个写法。
+    # 归一化会把它们压到与基础列同名 ⇒ 命中它就是把"一块"当成"总量" ⇒ 静默失真。
+    # 宁可落 unknown, 也不猜。
+    for value in values:
+        if is_block_column_alias(value):
+            return None
     override_index = _NORMALIZED_COLUMN_OVERRIDE_INDEX.get(domain, {})
     if override_index:
         for value in values:
