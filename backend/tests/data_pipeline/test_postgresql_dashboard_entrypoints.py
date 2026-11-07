@@ -2,6 +2,12 @@ import importlib
 from pathlib import Path
 
 
+#: 2026-05-27(commit c1223b74)起, dashboard 路由的真实实现搬到了领域层,
+#: ``backend/routers/dashboard_api_postgresql.py`` 只剩兼容壳 ⇒ 端点的
+#: ``__module__`` 指向领域层实现。
+DASHBOARD_ROUTER_MODULE = "backend.domains.business.routers.dashboard_api_postgresql"
+
+
 def test_environment_examples_no_longer_emit_active_metabase_variables():
     for path_str in (
         ".env.example",
@@ -44,7 +50,7 @@ def test_main_never_exposes_metabase_proxy(monkeypatch):
         for route in reloaded.app.routes
         if getattr(route, "path", None) == "/api/dashboard/business-overview/kpi"
     )
-    assert dashboard_route.endpoint.__module__ == "backend.routers.dashboard_api_postgresql"
+    assert dashboard_route.endpoint.__module__ == DASHBOARD_ROUTER_MODULE
 
     importlib.reload(main_module)
 
@@ -74,6 +80,6 @@ def test_main_defaults_to_postgresql_dashboard_router(monkeypatch):
         if getattr(route, "path", None) == "/api/dashboard/business-overview/kpi"
     )
 
-    assert dashboard_route.endpoint.__module__ == "backend.routers.dashboard_api_postgresql"
+    assert dashboard_route.endpoint.__module__ == DASHBOARD_ROUTER_MODULE
 
     importlib.reload(main_module)

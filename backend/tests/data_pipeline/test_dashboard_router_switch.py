@@ -167,6 +167,7 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS mart"))
             await session.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS finance"))
             await session.execute(
                 text(
                     """
@@ -262,6 +263,28 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                 text(
                     """
                     CREATE OR REPLACE VIEW api.business_overview_shop_racing_module AS
+                    SELECT
+                        'monthly'::varchar AS granularity,
+                        DATE '2026-03-01' AS period_key,
+                        'shopee'::varchar AS platform_code,
+                        'shop-a'::varchar AS shop_id,
+                        321::numeric AS gmv,
+                        10::numeric AS order_count,
+                        32.1::numeric AS avg_order_value,
+                        1.5::numeric AS attach_rate,
+                        120::numeric AS profit,
+                        400::numeric AS target_amount,
+                        80::numeric AS achievement_rate
+                    """
+                )
+            )
+            # monthly 粒度走的是**物化视图**资产
+            # (sql/api_modules/business_overview_shop_racing_monthly_module.sql),
+            # 不是普通视图 ⇒ 夹具必须把它也建出来
+            await session.execute(
+                text(
+                    """
+                    CREATE MATERIALIZED VIEW api.business_overview_shop_racing_monthly_module AS
                     SELECT
                         'monthly'::varchar AS granularity,
                         DATE '2026-03-01' AS period_key,
@@ -389,6 +412,46 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                     """
                     INSERT INTO a_class.sales_targets_a ("年月", "目标销售额", "目标单量")
                     VALUES ('2026-01', 1000, 80)
+                    """
+                )
+            )
+            # 经营看板的成本摘要会读 a_class.operating_costs
+            # (backend/services/postgresql_dashboard_service.py::_load_operating_expenses_summary)
+            # —— 缺表会直接 500(不像 finance.employee_labor_cost_allocations 那样降级)
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS a_class.operating_costs (
+                        "年月" varchar(7),
+                        "店铺ID" varchar(256),
+                        platform_code varchar(32),
+                        "成本合计" numeric,
+                        "租金" numeric,
+                        "营销费用" numeric,
+                        "水电费" numeric,
+                        "AI Token费用" numeric,
+                        "人力费用" numeric,
+                        "其他成本" numeric,
+                        "删除时间" timestamptz,
+                        "删除人" bigint
+                    )
+                    """
+                )
+            )
+            # 人力成本分摊表(当前 schema 里有): 经营指标接口会直接查它
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS finance.employee_labor_cost_allocations (
+                        id bigserial PRIMARY KEY,
+                        period_month varchar(16) NOT NULL,
+                        employee_code varchar(64) NOT NULL,
+                        platform_code varchar(32),
+                        shop_id varchar(256),
+                        allocation_scope varchar(16) NOT NULL,
+                        total_amount numeric(15,2) NOT NULL DEFAULT 0,
+                        calculation_version varchar(64) NOT NULL DEFAULT 'LABOR_COST_V2'
+                    )
                     """
                 )
             )

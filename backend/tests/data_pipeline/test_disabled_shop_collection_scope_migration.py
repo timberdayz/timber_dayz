@@ -284,6 +284,12 @@ async def _seed(pg_session) -> None:
                     "enabled": True,
                 },
                 {
+                    "shop_account_id": ACTIVE_B_SAID,
+                    "data_domains": ["products", "analytics", "services"],
+                    "sub_domains": {"services": ["agent"]},
+                    "enabled": True,
+                },
+                {
                     "shop_account_id": DISABLED_SAID,
                     "data_domains": ["products", "analytics", "services"],
                     "sub_domains": {"services": ["agent"]},
@@ -428,8 +434,11 @@ async def test_template_summary_drops_disabled_shop_scope(migration, pg_session)
         ],
     )
 
+    # ``summary.default_shop_scopes`` 是 ``List[CollectionTemplateShopScopeResponse]``
+    # (Pydantic 对象, 不是 dict) ⇒ 用属性访问取 shop_account_id
     shop_ids = [
-        str(scope.get("shop_account_id") or "") for scope in summary.default_shop_scopes
+        str(getattr(scope, "shop_account_id", "") or "")
+        for scope in summary.default_shop_scopes
     ]
     assert DISABLED_SAID not in shop_ids, "停用店不能出现在模板响应的默认范围里"
     assert ACTIVE_A_SAID in shop_ids

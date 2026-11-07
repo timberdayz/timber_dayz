@@ -191,12 +191,27 @@ def test_business_overview_frontend_groups_kpis_and_allows_wrapping():
 
 
 def test_business_overview_frontend_expense_tooltip_includes_labor_cost():
+    """成本明细口径 = 其他经营成本 + 提成前人力 + 绩效 + 提成。
+
+    2026-08-05(commit ``2a5af9fd``「feat: project labor costs from payroll」)起,
+    看板不再显示单一的「人力费用」, 而是把薪资链路投影出来的成本拆成四段展示
+    (与 ``api.business_overview_operational_metrics_module`` 的输出列一一对应)。
+    """
     text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
         encoding="utf-8",
         errors="replace",
     )
 
-    assert "人力费用" in text
+    for breakdown in (
+        "<span>其他经营成本 {{ formatNumber(operationalMetrics.other_operating_cost) }}</span>",
+        "<span>提成前人力 {{ formatNumber(operationalMetrics.pre_commission_labor_cost) }}</span>",
+        "<span>绩效 {{ formatNumber(operationalMetrics.performance_labor_cost) }}</span>",
+        "<span>提成 {{ formatNumber(operationalMetrics.commission_labor_cost) }}</span>",
+    ):
+        assert breakdown in text
+
+    assert "其他经营成本+提成前人力+绩效+提成" in text
+    assert "人力费用" not in text
 
 
 def test_business_overview_frontend_renders_freshness_alert():

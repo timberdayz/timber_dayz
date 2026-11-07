@@ -11,7 +11,15 @@ SLICE_MODULE_NAMES = (
     "data_platform",
     "business",
 )
-NON_ORM_PUBLIC_EXPORTS = {"Base", "JSON_COMPAT", "user_roles"}
+NON_ORM_PUBLIC_EXPORTS = {
+    "Base",
+    "JSON_COMPAT",
+    "user_roles",
+    # 2026-08-03(commit 098ab2ef)新增的账号业务角色枚举:
+    # 不是 ORM 实体, 但已经是 schema / 包级公开导出面的一部分
+    # (backend/schemas/shop_account.py 与 collection 路由都在用)。
+    "ShopAccountBusinessRole",
+}
 HELPER_LEAK_NAMES = {
     "BigInteger",
     "Boolean",

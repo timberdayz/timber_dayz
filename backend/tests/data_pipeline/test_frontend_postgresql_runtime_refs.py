@@ -5,7 +5,8 @@ def test_active_frontend_dashboard_files_no_longer_reference_metabase_runtime():
     files = [
         "frontend/src/api/dashboard.js",
         "frontend/src/api/index.js",
-        "frontend/src/domains/business/views/AnnualSummary.vue",
+        # ⚠️ ``AnnualSummary.vue`` 已于 2026-05-25(commit 5d5101ec「feat:年度数据删除」)
+        # 被删除 ⇒ 不再是「在役前端文件」, 从本清单移除。
         "frontend/src/domains/business/views/BusinessOverview.vue",
         "frontend/src/domains/business/views/hr/PerformanceDisplay.vue",
         "frontend/src/domains/business/views/hr/PerformanceManagement.vue",
@@ -27,6 +28,11 @@ def test_active_frontend_dashboard_files_no_longer_reference_metabase_runtime():
         text = Path(path_str).read_text(encoding="utf-8", errors="replace")
         for term in forbidden_terms:
             assert term not in text, f"{path_str} still contains {term!r}"
+
+    # 已删除的年度汇总页不允许被重新引入(否则它会绕过 PostgreSQL 看板)
+    assert not Path(
+        "frontend/src/domains/business/views/AnnualSummary.vue"
+    ).exists()
 
 
 def test_frontend_metabase_embed_assets_are_archived():
