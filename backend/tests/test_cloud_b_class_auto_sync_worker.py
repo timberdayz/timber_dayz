@@ -4,12 +4,28 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.services.cloud_b_class_auto_sync_worker import CloudBClassAutoSyncWorker
 from modules.core.db import CloudBClassSyncTask, SystemConfig, TaskCenterTask
+
+
+@pytest.fixture(autouse=True)
+def _restore_auto_sync_env_flag():
+    """还原 ``CLOUD_SYNC_AUTO_SYNC_ENABLED`` 这个**进程级**环境变量。
+
+    本文件的 ``_build_session()`` 会把开关写进 ``os.environ``；不还原的话，同进程
+    后续用例会把残留值当成真实开关状态（``false`` ⇒ worker 不 claim 任务）。
+    """
+    original = os.environ.get("CLOUD_SYNC_AUTO_SYNC_ENABLED")
+    yield
+    if original is None:
+        os.environ.pop("CLOUD_SYNC_AUTO_SYNC_ENABLED", None)
+    else:
+        os.environ["CLOUD_SYNC_AUTO_SYNC_ENABLED"] = original
 
 
 class FakeSyncExecutor:

@@ -19,6 +19,23 @@ from modules.core.db import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _restore_auto_sync_env_flag():
+    """还原 ``CLOUD_SYNC_AUTO_SYNC_ENABLED`` 这个**进程级**环境变量。
+
+    ``CloudSyncAdminCommandService.update_settings()`` 会把自动同步开关直接写进
+    ``os.environ``。这属于进程级副作用：测试若不还原，同进程后续用例会把它当成
+    真实开关状态 —— 例如 task_center 的 cloud sync worker 读到 ``false`` 就直接
+    不 claim 任务，任务永远停在 ``pending``（与业务数据无关的假失败）。
+    """
+    original = os.environ.get("CLOUD_SYNC_AUTO_SYNC_ENABLED")
+    yield
+    if original is None:
+        os.environ.pop("CLOUD_SYNC_AUTO_SYNC_ENABLED", None)
+    else:
+        os.environ["CLOUD_SYNC_AUTO_SYNC_ENABLED"] = original
+
+
 @pytest_asyncio.fixture
 async def cloud_sync_sqlite_session():
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
