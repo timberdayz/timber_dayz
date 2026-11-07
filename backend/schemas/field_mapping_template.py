@@ -334,6 +334,27 @@ class TemplateUpdateBindingsResponse(BaseModel):
     message: str
 
 
+class TemplateVariantBusinessForm(BaseModel):
+    """变体的**业务形态**描述(批次 G-3)。
+
+    这是「按业务维度建变体」在前端要展示的东西:
+    业务维度(平台 / 数据域 / 子域 / 粒度) + 表头行 + 列集合规模
+    + 工作表名模式 + 解析方式(日期格式 / 值形态)。
+    """
+
+    platform: Optional[str] = None
+    data_domain: Optional[str] = None
+    sub_domain: Optional[str] = None
+    granularity: Optional[str] = None
+    header_row: int = 0
+    column_count: int = 0
+    sheet_name_pattern: Optional[str] = None
+    #: 业务形态标识(``form_<列集合签名>_<解析方式签名>[_h<表头行>][_s<工作表名>]``)
+    variant_kind: str = ""
+    date_formats: List[str] = Field(default_factory=list)
+    value_kinds: List[str] = Field(default_factory=list)
+
+
 class TemplateVariantCreateContextData(BaseModel):
     resolved_object_type: str = "variant_create"
     family: TemplateFamilyListItem
@@ -349,6 +370,11 @@ class TemplateVariantCreateContextData(BaseModel):
     hash_participating_semantic_keys: List[str] = Field(default_factory=list)
     recommended_variant_key: str = ""
     recommended_parse_profile: Dict[str, Any] = Field(default_factory=dict)
+    # [*] 批次 G(G-3): 推荐的变体按**业务形态**给, 不再按文件名给。
+    recommended_variant_kind: str = ""
+    recommended_business_form: TemplateVariantBusinessForm = Field(
+        default_factory=TemplateVariantBusinessForm
+    )
 
 
 class TemplateVariantCreateContextResponse(BaseModel):
@@ -459,6 +485,8 @@ class TemplateVariantListItem(BaseModel):
     id: int
     template_version_id: int
     variant_key: str
+    # [*] 批次 G(G-2): 业务形态标识 —— 变体身份的唯一口径。
+    variant_kind: Optional[str] = None
     match_priority: int = 100
     header_row: int = 0
     sheet_name_pattern: Optional[str] = None

@@ -170,18 +170,20 @@ def test_select_best_takeover_prefers_own_family_over_sibling():
     assert best["variant"]["variant_key"] == "monthly_dash"
 
 
-def test_account_dimension_treats_none_family_as_any_account():
-    """模板族几乎都是 account=None(与店铺无关), 文件的 account 是具体店铺。
+def test_account_dimension_is_always_applicable_after_batch_g():
+    """批次 G(G-1): **账号不再是模板族的维度** ⇒ 账号差异一律视为「适用」。
 
-    若按字面相等判断, 自家 family 永远匹配不上 -> 接管会抢走自家文件的解释权。
+    以前族里存着 account, 于是「族有账号 + 文件账号不同」要判成不适用;
+    现在族里根本不存账号(账号差异由**变体**承载),
+    所以任何账号组合都不该被判成「不适用」。
     """
     from backend.services.template_family_service import _account_dimension_matches
 
     assert _account_dimension_matches(None, "shop@163.com") is True
     assert _account_dimension_matches(None, None) is True
     assert _account_dimension_matches("shop@163.com", "shop@163.com") is True
-    assert _account_dimension_matches("shop@163.com", "other@163.com") is False
-    assert _account_dimension_matches("shop@163.com", None) is False
+    assert _account_dimension_matches("shop@163.com", "other@163.com") is True
+    assert _account_dimension_matches("shop@163.com", None) is True
 
 
 # ======================================================================

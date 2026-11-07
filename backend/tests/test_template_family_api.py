@@ -16,7 +16,31 @@ from modules.core.db import (
     FieldMappingTemplateVariant,
     FieldMappingTemplateVersion,
 )
-from backend.services.template_family_service import _variant_matches_sample_rows
+from backend.services.template_family_service import (
+    _variant_matches_sample_rows,
+    build_variant_kind,
+)
+
+#: 批次 G(G-2): 「同列 + 同表头行」但**解析方式不同**的两个模板 —— 它们是两种
+#: 业务形态, 必须是两个变体。key 由形态推导, 不再由文件名推导。
+_DASH_RULES = [
+    {
+        "target_field": "metric_date",
+        "source_column": "日期",
+        "value_kind": "single_date",
+        "date_format": "dd-mm-yyyy",
+        "strict": True,
+    }
+]
+_SLASH_RULES = [
+    {
+        "target_field": "metric_date",
+        "source_column": "日期",
+        "value_kind": "single_date",
+        "date_format": "dd/mm/yyyy",
+        "strict": True,
+    }
+]
 
 
 @compiles(JSONB, "sqlite")
@@ -189,7 +213,25 @@ async def test_template_family_endpoints_group_legacy_templates_into_variants(
     assert variant_payload["success"] is True
     assert len(variant_payload["data"]["variants"]) == 2
     variant_keys = {item["variant_key"] for item in variant_payload["data"]["variants"]}
-    assert {"monthly_dash", "monthly_slash"} == variant_keys
+    # [*] 批次 G(G-2): 变体按**业务形态**区分, 不再按文件名分隔符切分。
+    #     两个模板列集合相同、表头行相同, 但日期格式不同 ⇒ 解析方式不同
+    #     ⇒ 两个业务形态 ⇒ 两个变体。
+    assert variant_keys == {
+        build_variant_kind(
+            header_columns=["日期", "浏览量", "访客数"],
+            field_parse_rules=_DASH_RULES,
+            header_row=3,
+        ),
+        build_variant_kind(
+            header_columns=["日期", "浏览量", "访客数"],
+            field_parse_rules=_SLASH_RULES,
+            header_row=3,
+        ),
+    }
+    # 旧口径(按模板名里的 slash/dash 关键词)已经退役。
+    assert not {"monthly_dash", "monthly_slash"} & variant_keys
+    # 业务形态标识已落库, 与 key 一致。
+    assert {item["variant_kind"] for item in variant_payload["data"]["variants"]} == variant_keys
 
 
 @pytest.mark.asyncio
@@ -278,7 +320,13 @@ async def test_template_resolve_endpoint_matches_variant_and_reports_shadow_comp
     payload = response.json()
     assert payload["success"] is True
     assert payload["data"]["matched"] is True
-    assert payload["data"]["variant"]["variant_key"] == "monthly_slash"
+    # [*] 批次 G(G-2): 命中的变体 key 是**业务形态标识**, 不再是文件名关键词。
+    assert payload["data"]["variant"]["variant_key"] == build_variant_kind(
+        header_columns=["日期", "浏览量", "访客数"],
+        field_parse_rules=_SLASH_RULES,
+        header_row=3,
+    )
+    assert payload["data"]["variant"]["variant_key"] != "monthly_slash"
     assert payload["data"]["active_version"]["version_no"] == 3
     assert payload["data"]["shadow_compare"]["legacy_template_name"] == "shopee_analytics__monthly_slash_v3"
     assert payload["data"]["shadow_compare"]["is_consistent"] is True

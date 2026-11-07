@@ -47,12 +47,14 @@ from backend.schemas.field_mapping_template import (
     TemplateUpdatePreviewResponse,
     TemplateUpdateBindingsData,
     TemplateUpdateBindingsResponse,
+    TemplateVariantBusinessForm,
     TemplateVariantCreateContextData,
     TemplateVariantCreateContextResponse,
     TemplateVersionVariantsData,
     TemplateVersionVariantsResponse,
 )
 from backend.services.template_family_service import (
+    build_variant_kind,
     get_template_family_service,
     get_template_resolver,
 )
@@ -2079,15 +2081,51 @@ async def get_template_variant_create_context(
             sample_rows=file_preview.get("preview_data", [])[:3],
         )
         recommended_variant = resolve_data.get("variant")
+        # [*] 批次 G(G-3): 推荐的变体按**业务形态**给, 不再按文件名给。
+        #     形态 = 列集合 + 解析方式 + 表头行(+ 工作表名模式)。
+        #     解析规则沿用 E-8 的取值顺序: 变体优先、版本兜底。
+        current_parse_rules = list((recommended_variant or {}).get("field_parse_rules") or []) or list(
+            active_version.get("field_parse_rules") or []
+        )
+        recommended_variant_kind = build_variant_kind(
+            header_columns=current_header_columns,
+            field_parse_rules=current_parse_rules,
+            header_row=effective_header_row,
+            sheet_name=(recommended_variant or {}).get("sheet_name_pattern"),
+        )
         recommended_variant_key = (
             recommended_variant.get("variant_key")
             if recommended_variant
-            else f"{family['granularity'] or 'generic'}_custom"
+            else recommended_variant_kind
         )
         recommended_parse_profile = (
             dict(recommended_variant.get("parse_profile") or {})
             if recommended_variant
             else {}
+        )
+        recommended_business_form = TemplateVariantBusinessForm(
+            platform=family["platform"],
+            data_domain=family["data_domain"],
+            sub_domain=family["sub_domain"],
+            granularity=family["granularity"],
+            header_row=effective_header_row,
+            column_count=len(current_header_columns),
+            sheet_name_pattern=(recommended_variant or {}).get("sheet_name_pattern"),
+            variant_kind=recommended_variant_kind,
+            date_formats=sorted(
+                {
+                    str(rule.get("date_format", "")).strip()
+                    for rule in current_parse_rules
+                    if str(rule.get("date_format", "")).strip()
+                }
+            ),
+            value_kinds=sorted(
+                {
+                    str(rule.get("value_kind", "")).strip()
+                    for rule in current_parse_rules
+                    if str(rule.get("value_kind", "")).strip()
+                }
+            ),
         )
 
         return TemplateVariantCreateContextResponse(
@@ -2106,6 +2144,8 @@ async def get_template_variant_create_context(
                 hash_participating_semantic_keys=hash_participating_semantic_keys,
                 recommended_variant_key=recommended_variant_key,
                 recommended_parse_profile=recommended_parse_profile,
+                recommended_variant_kind=recommended_variant_kind,
+                recommended_business_form=recommended_business_form,
             ),
             message="获取变体创建上下文成功",
         )

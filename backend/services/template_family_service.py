@@ -256,35 +256,98 @@ def _dimension_key(
     granularity: Optional[str],
     account: Optional[str],
 ) -> tuple[str, str, Optional[str], Optional[str], Optional[str]]:
+    """模板族的维度键。
+
+    [*] 批次 G(G-1): **账号不再是族维度的一部分**。
+
+    之前 ``account`` 参与分组 ⇒ 同一个 (平台, 域, 子类型, 粒度) 下
+    「每账号一套模板」会分裂成多个族 ⇒ 账号数一涨, 模板目录就跟着膨胀。
+
+    ⇒ 账号维度在这里被**丢弃**(恒为 ``None``):
+    族 = (平台, 数据域, 子类型, 粒度); 账号差异由**变体**承载。
+
+    ⇒ **账号数变化不影响模板数**(G 的验收口径)。
+
+    参数 ``account`` 保留(调用方仍会传), 只是不再参与计算 ——
+    这样签名不用改, 调用点也不会漏改。
+    """
+    del account
     return (
         str(platform).strip(),
         str(data_domain).strip(),
         _normalize_dimension(sub_domain),
         _normalize_dimension(granularity),
-        _normalize_dimension(account),
+        None,
     )
 
 
 def infer_variant_key_from_legacy_template(template: FieldMappingTemplate) -> str:
-    template_name = str(getattr(template, "template_name", "") or "").lower()
-    if "slash" in template_name:
-        return f"{template.granularity or 'generic'}_slash"
-    if "dash" in template_name:
-        return f"{template.granularity or 'generic'}_dash"
+    """按**业务形态**生成变体标识。
 
-    rules = list(getattr(template, "field_parse_rules", None) or [])
-    for rule in rules:
-        date_format = str(rule.get("date_format", "")).strip().lower()
-        if "/" in date_format:
-            return f"{template.granularity or 'generic'}_slash"
-        if "-" in date_format:
-            return f"{template.granularity or 'generic'}_dash"
+    [*] 批次 G(G-2): 不再按「文件名分隔符」切分。
 
-    header_row = getattr(template, "header_row", None)
-    if header_row not in (None, 0):
-        signature = _header_signature(template.header_columns or [])
-        return f"{template.granularity or 'generic'}_header_{header_row}_{signature}"
-    return f"{template.granularity or 'generic'}_default"
+    以前是按模板名里的 ``slash`` / ``dash`` 关键词(以及日期格式里的分隔符)
+    推断出 ``daily_slash`` / ``monthly_dash`` 这类 key ——
+    那是**文件名的形状**, 不是业务形态; 换个文件名就变了。
+
+    ⇒ 现在按「**列集合 + 解析方式 + 表头行 + 工作表名模式**」这个
+    **业务形态**签名: 形态相同 ⇒ 同一个变体; 形态不同 ⇒ 不同变体。
+    """
+    return _variant_kind(template)
+
+
+def _variant_kind(template: FieldMappingTemplate) -> str:
+    """变体的**业务形态标识**(存量模板视角)。"""
+    return build_variant_kind(
+        header_columns=getattr(template, "header_columns", None),
+        field_parse_rules=getattr(template, "field_parse_rules", None),
+        header_row=getattr(template, "header_row", None),
+        sheet_name=getattr(template, "sheet_name", None),
+    )
+
+
+def build_variant_kind(
+    *,
+    header_columns: Optional[Iterable[str]] = None,
+    field_parse_rules: Optional[Iterable[dict[str, Any]]] = None,
+    header_row: Optional[int] = None,
+    sheet_name: Optional[str] = None,
+) -> str:
+    """**业务形态标识** —— 变体身份的唯一口径。
+
+    形态由四个维度决定(与规格「变体承载业务形态差异」一一对应):
+
+    ==========================  ==========================================
+    维度                        含义
+    ==========================  ==========================================
+    **列集合**                   文件有哪些列(表头)
+    **解析方式**                 同一列怎么解析(目标字段 / 值形态 / 日期格式)
+    **表头行**                   表头在第几行
+    **工作表名模式**              工作表的命名约定
+    ==========================  ==========================================
+
+    为什么必须把「解析方式」算进去
+    ------------------------------
+    列完全相同但日期格式不同(``dd/mm/yyyy`` vs ``dd-mm-yyyy``)的两个模板,
+    解析结果**必然不同** ⇒ 它们是两种业务形态 ⇒ 必须是两个变体。
+    旧口径用「日期格式里的分隔符」当代理, 那是在**猜**; 现在直接用规则本身。
+
+    为什么**不含**文件名 / 账号 / 平台
+    ---------------------------------
+    * 文件名是**来源**的形状, 不是业务的形状 ⇒ 换了文件名不该换变体;
+    * 账号 / 平台已经上移到「族」的维度 ⇒ 形态里再带一遍就重复了。
+    """
+    parts = [
+        f"form_{_header_signature(header_columns or [])}",
+        f"{_parse_signature(field_parse_rules or [])}",
+    ]
+    row = int(header_row or 0)
+    if row:
+        parts.append(f"h{row}")
+    sheet = str(sheet_name or "").strip().lower()
+    if sheet:
+        parts.append(f"s{hashlib.md5(sheet.encode('utf-8')).hexdigest()[:6]}")
+    return "_".join(parts)
 
 
 def _header_signature(columns: Iterable[str]) -> str:
@@ -295,32 +358,65 @@ def _header_signature(columns: Iterable[str]) -> str:
     return hashlib.md5(joined.encode("utf-8")).hexdigest()[:8]
 
 
+#: 解析规则里参与「解析方式签名」的字段(顺序固定 ⇒ 签名可复现)。
+_PARSE_SIGNATURE_FIELDS = ("target_field", "source_column", "value_kind", "date_format", "strict")
+
+
+def _parse_signature(rules: Iterable[dict[str, Any]]) -> str:
+    """解析方式签名。
+
+    规则内容排序后再算哈希 ⇒ **规则顺序不影响签名**(同一套规则的两种排列
+    是同一种解析方式)。
+    """
+    items: list[str] = []
+    for rule in rules or []:
+        if not isinstance(rule, dict):
+            continue
+        cells = []
+        for field in _PARSE_SIGNATURE_FIELDS:
+            value = rule.get(field)
+            text = "" if value is None else str(value)
+            cells.append(text.strip().lower())
+        items.append("|".join(cells))
+    if not items:
+        return "empty"
+    joined = ";".join(sorted(items))
+    return hashlib.md5(joined.encode("utf-8")).hexdigest()[:8]
+
+
 def build_projection_variant_key(
     template: FieldMappingTemplate,
     *,
     existing_keys: set[str],
+    existing_keys_by_template_id: Optional[dict[int, list[str]]] = None,
 ) -> str:
+    """生成变体 key。
+
+    [*] 批次 G(G-2): 优先**复用该模板已有的变体 key**。
+
+    为什么
+    ----
+    变体 key 的生成规则改成了「业务形态签名」, 而存量变体的 key 是历史值
+    (``daily_slash`` 这类)。若不复用, 下次投影会把存量变体删掉重建
+    ⇒ 变体 id 变化 ⇒ 引用它的前端状态全部失效。
+
+    ⇒ 同一个来源模板(``source_legacy_template_id``)沿用它原来的 key;
+    只有**全新**的模板才按业务形态生成新 key。
+
+    死代码清理: 之前这个函数在文件里定义了两次(后者覆盖前者)。
+    """
+    template_id = getattr(template, "id", None)
+    if existing_keys_by_template_id and template_id is not None:
+        for reused in existing_keys_by_template_id.get(template_id, []):
+            if reused and reused not in existing_keys:
+                return reused
+
     variant_key = infer_variant_key_from_legacy_template(template)
     if variant_key not in existing_keys:
         return variant_key
-    template_id = getattr(template, "id", None)
     if template_id is not None:
         return f"{variant_key}_{template_id}"
     return f"{variant_key}_{_header_signature(template.header_columns or [])}"
-
-
-def build_projection_variant_key(
-    template: FieldMappingTemplate,
-    *,
-    existing_keys: set[str],
-) -> str:
-    variant_key = infer_variant_key_from_legacy_template(template)
-    if variant_key not in existing_keys:
-        return variant_key
-    template_id = getattr(template, "id", None)
-    if template_id is not None:
-        return f"{variant_key}_{template_id}"
-    return f"{variant_key}_{abs(hash(template.template_name or 'variant')) % 100000}"
 
 
 def _build_parse_profile(template: FieldMappingTemplate) -> dict[str, Any]:
@@ -417,18 +513,16 @@ def _account_dimension_matches(
 ) -> bool:
     """模板族的账号维度是否适用于该文件。
 
-    模板族绝大多数是 **account=None**(与店铺无关的通用模板),
-    而 ``catalog_files.account`` 是具体店铺 —— 所以 ``None`` 一侧表示「适用任意账号」。
+    [*] 批次 G(G-1): **账号不再是族维度** ⇒ 恒为「适用」。
 
-    实测本地库 34 个 family 全部 ``account=None``, 而文件的 account 是
-    ``chenzeweinbnb@163.com`` 之类的具体值 —— 若按字面相等判断,
-    「自家 family」永远匹配不上, 接管就会抢走自家文件的解释权。
+    之前这里是「族有账号就要求文件账号相等, 族无账号就适用任意账号」。
+    现在族里根本不存账号 ⇒ 账号差异由**变体**承载
+    ⇒ 「账号数变化不影响模板数」(G 的验收口径)。
+
+    保留 ``file_account`` 参数是为了不改动调用点签名。
     """
-    if family_account is None:
-        return True
-    if file_account is None:
-        return False
-    return str(family_account) == str(file_account)
+    del family_account, file_account
+    return True
 
 
 def _variant_header_row_matches(
@@ -483,9 +577,10 @@ class TemplateFamilyService:
         cls,
         family: FieldMappingTemplateFamily,
     ) -> int:
+        # [*] 批次 G(G-1): 账号不再是族维度 ⇒ 不参与「规范度」排名。
         return sum(
             0 if cls._is_canonical_dimension_value(value) else 1
-            for value in (family.sub_domain, family.granularity, family.account)
+            for value in (family.sub_domain, family.granularity)
         )
 
     @staticmethod
@@ -772,6 +867,14 @@ class TemplateFamilyService:
         existing_variants = {
             variant.variant_key: variant for variant in existing_variants_result.scalars().all()
         }
+        # [*] 批次 G(G-2): 存量变体的 key 按「来源模板」建索引 ——
+        #     投影时优先复用, 避免「key 生成规则变了 ⇒ 存量变体被删重建」。
+        existing_keys_by_template_id: dict[int, list[str]] = defaultdict(list)
+        for variant in existing_variants.values():
+            if variant.source_legacy_template_id is not None:
+                existing_keys_by_template_id[variant.source_legacy_template_id].append(
+                    variant.variant_key
+                )
 
         sorted_group = sorted(group, key=lambda item: (item.version or 0, item.id or 0), reverse=True)
         desired_variant_keys: set[str] = set()
@@ -780,6 +883,7 @@ class TemplateFamilyService:
             variant_key = build_projection_variant_key(
                 template,
                 existing_keys=desired_variant_keys,
+                existing_keys_by_template_id=existing_keys_by_template_id,
             )
             desired_variant_keys.add(variant_key)
             desired_variants.append((variant_key, index, template))
@@ -800,6 +904,9 @@ class TemplateFamilyService:
             variant.match_priority = index + 1
             variant.header_row = template.header_row or 0
             variant.sheet_name_pattern = template.sheet_name
+            # [*] 批次 G(G-2): 落库「业务形态标识」——
+            #     变体的身份不再由文件名决定, 而是由这一列说清楚。
+            variant.variant_kind = _variant_kind(template)
             _assign_if_changed(variant, "required_headers", _required_headers(template))
             _assign_if_changed(variant, "parse_profile", _build_parse_profile(template))
             _assign_if_changed(
@@ -1215,6 +1322,8 @@ class TemplateFamilyService:
                 "id": variant.id,
                 "template_version_id": variant.template_version_id,
                 "variant_key": variant.variant_key,
+                # [*] 批次 G(G-2): 业务形态标识 —— 变体身份的唯一口径。
+                "variant_kind": variant.variant_kind,
                 "match_priority": variant.match_priority,
                 "header_row": variant.header_row or 0,
                 "sheet_name_pattern": variant.sheet_name_pattern,

@@ -528,6 +528,11 @@ class FieldMappingTemplateVariant(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     template_version_id = Column(Integer, nullable=False)
     variant_key = Column(String(128), nullable=False)
+    # [*] 批次 G(G-2): 业务形态标识 —— 变体身份的唯一口径。
+    #     形如 ``form_<列集合签名>_<解析方式签名>[_h<表头行>][_s<工作表名签名>]``。
+    #     ``variant_key`` 是历史标识(可能还是 ``daily_slash`` 这类按文件名切的),
+    #     ``variant_kind`` 才是「这个变体是什么业务形态」的答案。
+    variant_kind = Column(String(64), nullable=True)
     match_priority = Column(Integer, nullable=False, default=100)
     header_row = Column(Integer, default=0, nullable=False)
     sheet_name_pattern = Column(String(128), nullable=True)
