@@ -7,6 +7,8 @@ import datetime as dt
 import re
 from decimal import Decimal, InvalidOperation
 
+from modules.services.smart_date_parser import parse_date  # [*] 批次 C-4
+
 
 def _parse_int(v: Any) -> int | None:
     try:
@@ -82,59 +84,44 @@ def _validate_core_ownership_fields(row: Dict[str, Any], domain: str) -> List[Di
 
 def _parse_date(v: Any) -> str | None:
     """
-    解析日期字符串(v4.6.1增强 - 支持更多格式)
-    
-    支持的格式:
-    - YYYY-MM-DD
-    - YYYY/MM/DD
-    - YYYY-MM-DD HH:MM:SS
-    - YYYY/MM/DD HH:MM:SS
-    - YYYY-MM-DD HH:MM
-    - YYYY/MM/DD HH:MM
-    - YYYY-MM-DD-HH:MM(Shopee格式)
-    - YYYY-MM-DD 0(截断的时间格式,修复为完整格式)
+    解析日期字符串 —— [*] 批次 C-4: 委派给唯一实现。
+
+    原先这里自带一份格式列表 + ``dateutil`` 兜底。``dateutil`` 兜底是**猜**:
+    ``11/01/2026`` 会被它默默解成某一个日期(而且随版本/配置可能变)。
+
+    现在统一委派 :func:`modules.services.smart_date_parser.parse_date`:
+    * 年份在前的形态 —— 唯一, 直接解;
+    * 日-月-年 / 月-日-年 —— 能靠值本身消歧才解, 消不了 ⇒ 落 unknown(None);
+    * 截断的时间格式(如 ``2025-09-25 0``)先补全再交给唯一实现。
+
+    Returns:
+        ISO 字符串; 解析不出来(或存在歧义)返回 None。
     """
     if v is None:
         return None
-    
+
     s = str(v).strip()
     if not s or s.lower() in ['none', 'null', '暂无数据', '']:
         return None
-    
+
     # [*] v4.6.1修复:处理截断的时间格式(如"2025-09-25 0")
     # 如果格式是"YYYY-MM-DD 0"或"YYYY-MM-DD 0:0"等,补全为"YYYY-MM-DD 00:00:00"
     if re.match(r'^\d{4}-\d{2}-\d{2}\s+0(?::0)*$', s):
         s = s.split()[0] + ' 00:00:00'
     elif re.match(r'^\d{4}-\d{2}-\d{2}\s+0$', s):
         s = s.split()[0] + ' 00:00:00'
-    
-    # 支持的日期格式列表(按优先级排序)
-    formats = [
-        "%Y-%m-%d %H:%M:%S",      # 2025-09-25 10:23:08
-        "%Y-%m-%d %H:%M",          # 2025-09-25 10:23
-        "%Y-%m-%d",                # 2025-09-25
-        "%Y/%m/%d %H:%M:%S",       # 2025/09/25 10:23:08
-        "%Y/%m/%d %H:%M",          # 2025/09/25 10:23
-        "%Y/%m/%d",                # 2025/09/25
-        "%Y-%m-%d-%H:%M",          # 2025-09-25-10:23 (Shopee格式)
-    ]
-    
-    for fmt in formats:
-        try:
-            parsed = dt.datetime.strptime(s, fmt)
-            return parsed.isoformat()
-        except Exception:
-            continue
-    
-    # 如果所有格式都失败,尝试使用dateutil(如果可用)
-    try:
-        from dateutil import parser as date_parser
-        parsed = date_parser.parse(s)
-        return parsed.isoformat()
-    except Exception:
-        pass
-    
-    return None
+
+    # Shopee 形态: 日期与时间之间用 "-" 分隔(年份在前, 无歧义)
+    shopee_format = re.match(
+        r'^(\d{4}-\d{2}-\d{2})-(\d{1,2}:\d{2}(?::\d{2})?)$', s
+    )
+    if shopee_format:
+        s = f"{shopee_format.group(1)} {shopee_format.group(2)}"
+
+    parsed = parse_date(s)
+    if parsed is None:
+        return None
+    return parsed.isoformat()
 
 
 def _parse_decimal(v: Any) -> Decimal | None:

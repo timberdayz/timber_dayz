@@ -1490,8 +1490,25 @@ def _ingest_services_agent(
         import re
         m = re.match(r'(\d{2}[-/]\d{2}[-/]\d{4})\s*-\s*(\d{2}[-/]\d{2}[-/]\d{4})', date_range_str)
         if m:
-            period_start = parse_date(m.group(1), prefer_dayfirst=True)
-            period_end = parse_date(m.group(2), prefer_dayfirst=True)
+            # [*] 批次 C: 不再硬编码 dayfirst=True。
+            #
+            # 以前这里固定按日-月-年解 —— 而 "11/01/2025" 在两种口径下
+            # 是两个不同的日期(1 月 11 日 / 11 月 1 日), 固定一边就是替用户拍板。
+            # 现在用**列级**判定(采样 detect_dayfirst); 判定不出来 ⇒ 落 unknown,
+            # 走下面的文件名兜底。
+            range_prefer_dayfirst = None
+            if date_range_col:
+                try:
+                    range_samples = (
+                        df[date_range_col].head(10).dropna().astype(str).tolist()
+                    )
+                    range_prefer_dayfirst = detect_dayfirst(range_samples)
+                except Exception:
+                    range_prefer_dayfirst = None
+            period_start = parse_date(
+                m.group(1), prefer_dayfirst=range_prefer_dayfirst
+            )
+            period_end = parse_date(m.group(2), prefer_dayfirst=range_prefer_dayfirst)
             logger.info(f"[Services/Agent] 解析日期区间: {period_start} - {period_end}")
     
     # 兜底:使用文件名日期

@@ -341,19 +341,14 @@ def _build_aggregate_sql(table_names: list[str]) -> str:
 
 
 def _parse_date(value: Any) -> date | None:
-    if value is None:
-        return None
-    if isinstance(value, date) and not isinstance(value, datetime):
-        return value
-    if isinstance(value, datetime):
-        return value.date()
-    text_value = str(value).strip()
-    if not text_value:
-        return None
-    try:
-        return date.fromisoformat(text_value[:10])
-    except ValueError:
-        return None
+    """解析日期 —— [*] 批次 C-4: 委派给唯一实现。
+
+    这里取的是**数据库里的 metric_date**(本来就是 ISO), 没有日/月歧义,
+    所以走 :func:`modules.services.smart_date_parser.parse_iso_date`。
+    """
+    from modules.services.smart_date_parser import parse_iso_date
+
+    return parse_iso_date(value)
 
 
 def _parse_datetime(value: Any) -> datetime | None:

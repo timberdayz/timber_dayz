@@ -73,62 +73,27 @@ def detect_datetime_in_value(value: Any) -> bool:
 def detect_date_range_format(value: Any) -> Optional[tuple]:
     """
     检测是否为时间范围格式,返回(start_time_str, end_time_str)
-    
+
+    [*] 批次 C-4: 实现已收进唯一口径
+    (:func:`modules.services.smart_date_parser.split_date_range_value`),
+    这里只保留一个薄壳 —— 区间切分与日期解析必须是一套口径。
+
     支持的格式:
     - 2025-08-25 17:01~2025-08-26 11:02
     - 2025-08-25~2025-08-26
     - 25/08/2025 - 26/08/2025
     - 2025-08-25 17:01 至 2025-08-26 11:02
     - 2025-08-18-15:01~2025-08-25-15:01 (Shopee服务数据域周数据格式)
-    
+
     Args:
         value: 原始数据值
-    
+
     Returns:
         (start_time_str, end_time_str) 如果检测到时间范围,否则返回None
     """
-    if value is None:
-        return None
-    
-    s = str(value).strip()
-    if not s:
-        return None
-    
-    # 时间范围分隔符:~、-、至、to、～
-    separators = [r'~', r'—', r'—', r'至', r'to', r'To', r'TO', r'-', r'到']
-    
-    # [*] 修复:支持日期时间格式(包含时间)
-    # 格式1:2025-08-18-15:01~2025-08-25-15:01 (日期和时间用-分隔)
-    datetime_pattern_with_dash = r'(\d{4}[-/]\d{1,2}[-/]\d{1,2}[-]\d{1,2}:\d{2}(?::\d{2})?)'
-    # 格式2:2025-08-25 17:01 (日期和时间用空格分隔)
-    datetime_pattern_with_space = r'(\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?)'
-    # 格式3:2025-08-25-16:30 (日期和时间用-分隔,但日期部分也可能用-分隔)
-    datetime_pattern_combined = r'(\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[-]\d{1,2}:\d{2}(?::\d{2})?|\s+\d{1,2}:\d{2}(?::\d{2})?)?)'
-    
-    # 日期格式(不包含时间)
-    date_pattern = r'(\d{1,2}[-/]\d{1,2}[-/]\d{4}|\d{4}[-/]\d{1,2}[-/]\d{1,2})'
-    
-    # 尝试匹配日期时间范围格式(优先匹配带时间的格式)
-    for sep in separators:
-        # 匹配格式:2025-08-18-15:01~2025-08-25-15:01
-        # 使用更灵活的匹配:允许日期和时间之间用-或空格分隔
-        pattern = rf'(\d{{4}}[-/]\d{{1,2}}[-/]\d{{1,2}}(?:[-]\d{{1,2}}:\d{{2}}(?::\d{{2}})?|\s+\d{{1,2}}:\d{{2}}(?::\d{{2}})?)?)\s*{sep}\s*(\d{{4}}[-/]\d{{1,2}}[-/]\d{{1,2}}(?:[-]\d{{1,2}}:\d{{2}}(?::\d{{2}})?|\s+\d{{1,2}}:\d{{2}}(?::\d{{2}})?)?)'
-        match = re.search(pattern, s)
-        if match:
-            start_str = match.group(1).strip()
-            end_str = match.group(2).strip()
-            # 清理开始时间:将日期和时间之间的-替换为空格
-            start_str = re.sub(r'(\d{4}[-/]\d{1,2}[-/]\d{1,2})-(\d{1,2}:\d{2})', r'\1 \2', start_str)
-            end_str = re.sub(r'(\d{4}[-/]\d{1,2}[-/]\d{1,2})-(\d{1,2}:\d{2})', r'\1 \2', end_str)
-            return (start_str, end_str)
-        
-        # 匹配日期格式:2025-08-25~2025-08-26
-        pattern = f'{date_pattern}\\s*{sep}\\s*{date_pattern}'
-        match = re.search(pattern, s)
-        if match:
-            return (match.group(1).strip(), match.group(2).strip())
-    
-    return None
+    from modules.services.smart_date_parser import split_date_range_value
+
+    return split_date_range_value(value)
 
 
 def detect_field_type_from_samples(samples: List[Any], field_name: str = "") -> str:

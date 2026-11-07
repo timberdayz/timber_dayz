@@ -14,8 +14,9 @@
 """
 
 from typing import Dict, Any, List, Optional
+import re
 import pandas as pd
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from modules.services.smart_date_parser import parse_date, detect_dayfirst
 from backend.services.field_mapping.type_detector import detect_date_range_format
@@ -23,6 +24,29 @@ from modules.core.data_domains import normalize_data_domain
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+#: 时间部分提取正则(HH:MM / HH:MM:SS)
+_TIME_PART_PATTERN = re.compile(r"(\d{1,2}:\d{2}(?::\d{2})?)")
+
+
+def _extract_time_part(value: str) -> Optional[time]:
+    """从字符串里抽出时间部分; 没有就返回 None。
+
+    [*] 批次 C: 日期与时间分开取 —— 日期走唯一实现(不猜),
+    时间部分是「墙上时间」, 没有日/月歧义, 可以单独取。
+    """
+    if not value:
+        return None
+    match = _TIME_PART_PATTERN.search(str(value))
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%H:%M:%S").time()
+    except ValueError:
+        try:
+            return datetime.strptime(match.group(1), "%H:%M").time()
+        except ValueError:
+            return None
 
 # 日期字段列表(根据数据域不同)
 # 注意:DateTime字段保留时间部分,Date字段丢弃时间部分
@@ -125,48 +149,48 @@ def standardize_date_value(value: Any, prefer_dayfirst: Optional[bool] = None, k
     s = str(value).strip()
     if not s:
         return None
-    
-    # 先尝试解析为datetime(保留时间信息)
+
+    # [*] 批次 C-4: 年份在前的形态 —— 唯一, 没有日/月歧义, 可以直接按格式解。
+    #
+    # 日-月-年 / 月-日-年 的形态**不在这里硬编码** ——
+    # 那样等于替用户拍板「日/月都 ≤ 12 时按哪一边算」,
+    # 而 11/01/2026 在两种口径下是两个不同的日期。
+    # 那部分一律委派给唯一实现 :func:`modules.services.smart_date_parser.parse_date`
+    # (歧义 ⇒ 落 unknown, 不猜)。
     parsed_datetime = None
-    try:
-        # 尝试多种datetime格式
-        for fmt in [
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%d %H:%M",
-            "%Y-%m-%d-%H:%M:%S",
-            "%Y-%m-%d-%H:%M",
-            "%d/%m/%Y %H:%M:%S",
-            "%d/%m/%Y %H:%M",
-            "%d/%m/%Y-%H:%M",
-            "%Y/%m/%d %H:%M:%S",
-            "%Y/%m/%d %H:%M",
-        ]:
-            try:
-                parsed_datetime = datetime.strptime(s, fmt)
-                break
-            except ValueError:
-                continue
-    except Exception:
-        pass
-    
+    for fmt in [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d-%H:%M:%S",
+        "%Y-%m-%d-%H:%M",
+        "%Y/%m/%d %H:%M:%S",
+        "%Y/%m/%d %H:%M",
+    ]:
+        try:
+            parsed_datetime = datetime.strptime(s, fmt)
+            break
+        except ValueError:
+            continue
+
     # 如果解析出datetime,根据keep_time决定返回值
     if parsed_datetime:
         if keep_time:
             return parsed_datetime
         else:
             return parsed_datetime.date()
-    
-    # 如果没有时间部分,使用parse_date解析为date
+
+    # 其余形态: 委派唯一实现(不猜)
     parsed_date = parse_date(value, prefer_dayfirst=prefer_dayfirst)
-    
+
     if parsed_date is None:
         logger.warning(f"无法解析日期值: {value} (类型: {type(value)})")
         return None
-    
+
     # 如果需要时间,转换为datetime(00:00:00)
     if keep_time:
-        return datetime.combine(parsed_date, datetime.min.time())
-    
+        time_part = _extract_time_part(s)
+        return datetime.combine(parsed_date, time_part or datetime.min.time())
+
     return parsed_date
 
 
@@ -467,15 +491,18 @@ def standardize_rows(rows: List[Dict[str, Any]], domain: str,
                     range_result = detect_date_range_format(range_value)
                     if range_result:
                         start_str, end_str = range_result
-                        # [*] 修复:时间范围解析时优先使用dayfirst=True(因为原始数据可能是dd/mm/yyyy格式)
-                        start_time = standardize_date_value(start_str, prefer_dayfirst=True, keep_time=True)
-                        end_time = standardize_date_value(end_str, prefer_dayfirst=True, keep_time=True)
-                        
-                        # 如果解析失败,再尝试使用prefer_dayfirst参数
-                        if not start_time or not end_time:
-                            start_time = standardize_date_value(start_str, prefer_dayfirst=prefer_dayfirst, keep_time=True)
-                            end_time = standardize_date_value(end_str, prefer_dayfirst=prefer_dayfirst, keep_time=True)
-                        
+                        # [*] 批次 C-3: 不再硬编码 dayfirst=True。
+                        #
+                        # 以前这里先按 day-first 试一遍, 失败再按列级偏好试 ——
+                        # 等于「默认日-月-年」。而 11/01/2026 在两种口径下
+                        # 是两个不同的日期(1 月 11 日 / 11 月 1 日), 默认一边
+                        # 就是**替用户拍板**, 会静默写错数据。
+                        #
+                        # 现在只认**列级**判定(prefer_dayfirst):
+                        # 列级判定不出来 ⇒ 落 unknown(解析失败), 不猜。
+                        start_time = standardize_date_value(start_str, prefer_dayfirst=prefer_dayfirst, keep_time=True)
+                        end_time = standardize_date_value(end_str, prefer_dayfirst=prefer_dayfirst, keep_time=True)
+
                         if start_time and end_time:
                             processed_row["start_time"] = start_time
                             processed_row["end_time"] = end_time
@@ -541,15 +568,10 @@ def standardize_rows(rows: List[Dict[str, Any]], domain: str,
                     range_result = detect_date_range_format(range_value)
                     if range_result:
                         start_str, end_str = range_result
-                        # [*] 修复:时间范围解析时优先使用dayfirst=True
-                        start_time = standardize_date_value(start_str, prefer_dayfirst=True, keep_time=True)
-                        end_time = standardize_date_value(end_str, prefer_dayfirst=True, keep_time=True)
-                        
-                        # 如果解析失败,再尝试使用prefer_dayfirst参数
-                        if not start_time or not end_time:
-                            start_time = standardize_date_value(start_str, prefer_dayfirst=prefer_dayfirst, keep_time=True)
-                            end_time = standardize_date_value(end_str, prefer_dayfirst=prefer_dayfirst, keep_time=True)
-                        
+                        # [*] 批次 C-3: 不再硬编码 dayfirst=True(同上)
+                        start_time = standardize_date_value(start_str, prefer_dayfirst=prefer_dayfirst, keep_time=True)
+                        end_time = standardize_date_value(end_str, prefer_dayfirst=prefer_dayfirst, keep_time=True)
+
                         if start_time and end_time:
                             processed_row[split_info["start_time"]] = start_time
                             processed_row[split_info["end_time"]] = end_time

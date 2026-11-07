@@ -44,6 +44,7 @@ from backend.services.platform_table_manager import (
 from backend.services.template_parse_rules_service import (  # [*] 批次 B
     DATE_ERROR_FORMAT_MISMATCH,
     DATE_ERROR_OUT_OF_PERIOD,
+    DATE_ERROR_UNSUPPORTED_FORMAT,
     analyze_date_value_shape,
 )
 
@@ -226,29 +227,24 @@ class RawDataImporter:
             )
             return (metric_date, period_start_date, period_end_date, None, None)
 
-        period_start_date, period_end_date, period_start_time, period_end_time = (
-            self.extract_period_dates(row, header_columns or [])
-        )
-        if period_start_date:
-            metric_date = period_start_date
-            if period_end_date is None:
-                period_end_date = period_start_date
-            self._validate_business_dates_against_file_range(
-                metric_date,
-                period_start_date,
-                period_end_date,
-            )
-            return (
-                metric_date,
-                period_start_date,
-                period_end_date,
-                period_start_time,
-                period_end_time,
-            )
-
+        # [*] 批次 C-1: 入库路径**只允许**严格声明式。
+        #
+        # 到这里说明: 模板没有声明日期解析规则, 文件也没有日期期间。
+        # 以前这里会走宽松解析器(``extract_period_dates``)去猜 ——
+        # 而宽松解析器在「日/月都 ≤ 12」时只能猜一个(而且历史上猜的是 day-first),
+        # 于是会把 11 月 1 日写成 1 月 11 日, **静默写错数据**。
+        #
+        # 现在不猜: 直接失败并留痕。metric_date 是 NOT NULL, 猜错的代价远大于
+        # 失败一次 —— 失败会有人看见, 猜错不会。
+        #
+        # 实测(开发库 2026-11-07): 480/480 个文件都有 date_from ⇒ 这条分支**不可达**;
+        # 保留它是给「将来出现没有期间的采集源」兜底。
         raise ValueError(
-            "failed to resolve business date for raw import; "
-            f"granularity={granularity}, file_date_from={file_date_from}, file_date_to={file_date_to}"
+            f"[{DATE_ERROR_UNSUPPORTED_FORMAT}] failed to resolve business date for raw "
+            f"import; the template declares no field_parse_rules and the file carries no "
+            f"date range; refusing to guess a date format "
+            f"(granularity={granularity}, file_date_from={file_date_from}, "
+            f"file_date_to={file_date_to})"
         )
 
     def extract_metric_date(
@@ -525,13 +521,17 @@ class RawDataImporter:
         # 标准化:将反斜杠替换为斜杠
         s = s.replace("\\", "/")
 
-        # 尝试使用现有的smart_date_parser
+        # 尝试使用 smart_date_parser 的**唯一**实现。
+        #
+        # [*] 批次 C-3: 不再硬编码日-月-年偏好 ——
+        # 日-月-年 与 月-日-年 在「日/月都 ≤ 12」时是两个不同的日期,
+        # 硬编码等于替用户拍板。宽松解析器现在**不猜**: 歧义 ⇒ None。
         try:
             from modules.services.smart_date_parser import (
                 parse_date as smart_parse_date,
             )
 
-            parsed = smart_parse_date(s, prefer_dayfirst=True)
+            parsed = smart_parse_date(s)
             if parsed:
                 return parsed
         except Exception:

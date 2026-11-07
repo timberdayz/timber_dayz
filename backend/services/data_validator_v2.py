@@ -14,6 +14,8 @@ import datetime as dt
 import re
 from decimal import Decimal, InvalidOperation
 
+from modules.services.smart_date_parser import parse_date  # [*] 批次 C-4
+
 
 # ============== 辅助函数 ==============
 
@@ -38,20 +40,26 @@ def _parse_float(v: Any) -> Optional[float]:
 
 
 def _parse_date(v: Any) -> Optional[str]:
-    """解析日期"""
+    """解析日期 —— [*] 批次 C-4: 委派给唯一实现。
+
+    原先这里自带一份格式列表, 而且 ``%d/%m/%Y`` 排在 ``%m/%d/%Y`` 前面 ——
+    也就是**默认日-月-年**。而 ``11/01/2026`` 在两种口径下是两个不同的日期,
+    默认一边就是替用户拍板。
+
+    现在委派 :func:`modules.services.smart_date_parser.parse_date`:
+    能靠值本身消歧才解, 消不了 ⇒ 落 unknown(None)。
+    """
     if v is None:
         return None
-    
+
     s = str(v).strip()
     if not s:
         return None
-    
-    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M", "%d/%m/%Y", "%m/%d/%Y"):
-        try:
-            return dt.datetime.strptime(s, fmt).strftime("%Y-%m-%d")
-        except Exception:
-            continue
-    return None
+
+    parsed = parse_date(s)
+    if parsed is None:
+        return None
+    return parsed.strftime("%Y-%m-%d")
 
 
 def _parse_decimal(v: Any) -> Optional[Decimal]:
