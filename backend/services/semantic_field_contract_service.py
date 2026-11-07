@@ -11,6 +11,7 @@ from backend.services.semantic_field_registry import (  # [*] 批次 D: 唯一�
     ANALYTICS_SEMANTIC_ALIASES as _REGISTRY_ANALYTICS_SEMANTIC_ALIASES,
     DOMAIN_SEMANTIC_ALIASES as _REGISTRY_DOMAIN_SEMANTIC_ALIASES,
     ORDER_SEMANTIC_ALIASES as _REGISTRY_ORDER_SEMANTIC_ALIASES,
+    get_semantic_field_meta,
 )
 from backend.services.data_sync_status_semantics import (
     SEMANTIC_CONTRACT_STATUS_BREAKING_DRIFT,
@@ -42,6 +43,10 @@ class SemanticContractResult:
     # [*] 模板里绑定了 optional 语义键、但当前文件没有的原始列名。
     # 这类列的缺失不影响现有入库(例如「预估回款金额」), 属于非阻断漂移。
     optional_removed_raw_fields: list[str] = field(default_factory=list)
+    # [*] 批次 F-3: 域级下限缺口 —— 域级契约的 required 里, **模板清单还没覆盖**的键。
+    # 契约降级为「域级下限护栏」后, 这部分不再运行时阻断, 而是**引导用户去勾**
+    # (用户勾了 ⇒ 进模板级 required ⇒ 才阻断)。
+    below_domain_floor_keys: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -54,7 +59,26 @@ class SemanticContractResult:
             "impact_descriptions": self.impact_descriptions,
             "has_semantic_contract": self.has_contract,
             "optional_removed_raw_fields": self.optional_removed_raw_fields,
+            "below_domain_floor_keys": self.below_domain_floor_keys,
         }
+
+
+#: [*] 批次 F-3: 契约 required 里**不参与运行时阻断**的语义键类别。
+#:
+#: 背景(规格 §3.4「角色降为域级下限护栏」):
+#: 契约表的 required 里混着指标类(``page_views`` / ``visitor_count`` /
+#: ``paid_amount`` / ``sales_volume`` / ``profit``)。这些字段缺失就把整批文件
+#: 拦下来是**误伤** —— 指标缺失该由「模板级 required(用户勾的)」来管。
+#:
+#: ⇒ **身份/时间类**仍是硬要求(它们是「这一行是什么」的前提, 缺了整行无意义);
+#: **指标类**降为域级下限(缺口可见、可引导, 但不拦批次)。
+NON_BLOCKING_CONTRACT_KINDS: frozenset[str] = frozenset({"metric"})
+
+
+def _semantic_kind(semantic_key: str) -> str:
+    """语义键的类别(``identity`` / ``time`` / ``metric`` / ``dimension`` / ...)。"""
+    meta = get_semantic_field_meta(semantic_key)
+    return str(meta.get("kind") or "").strip().lower()
 
 
 DEFAULT_CONTRACTS: dict[str, tuple[SemanticContractDefinition, ...]] = {
@@ -187,7 +211,20 @@ class SemanticFieldContractService:
             for column in set(template_columns or [])
             if column in {item.semantic_key for item in definitions}
         )
-        required_keys = [item.semantic_key for item in definitions if item.importance == "required"]
+        # [*] 批次 F-3: 契约降为「域级下限护栏」(规格 §3.4)。
+        #     域级契约的 required 分两类:
+        #       * 身份/时间类 ⇒ 仍是硬要求(缺了整行就没有意义) ⇒ 阻断;
+        #       * 指标类     ⇒ 降为下限(缺口可见、可引导, 但不拦批次)。
+        #     模板级清单的 required 是**主来源**(用户勾的) ⇒ 照旧阻断。
+        contract_required_keys = [
+            item.semantic_key for item in definitions if item.importance == "required"
+        ]
+        domain_floor_keys = list(contract_required_keys)
+        required_keys = [
+            key
+            for key in contract_required_keys
+            if _semantic_kind(key) not in NON_BLOCKING_CONTRACT_KINDS
+        ]
         # [*] 批次 E(E-5): 并入**模板级核心字段清单**里 required=true 的语义键。
         #     规格 §3.1: 漂移阻断 = 清单 required ∪ 域级契约 required。
         required_keys.extend(
@@ -237,6 +274,27 @@ class SemanticFieldContractService:
             if key in impact_by_key
         ]
 
+        # [*] 批次 F-3: 域级下限缺口 —— 域级契约 required 里, **模板清单还没覆盖**的键。
+        #     缺口**不阻断**, 但要暴露出来(前端治理面板引导用户去勾):
+        #     用户勾了 ⇒ 进模板级 required ⇒ 那时才阻断。
+        #
+        #     只认**清单里用户勾过的**语义键 ——
+        #     批次 D 的硬约束:「只有用户确认过的绑定才允许被提升成语义身份」。
+        #     推断出来的键不算(那是猜测, 不是用户的选择)。
+        from backend.services.core_fields_service import normalize_core_fields
+
+        template_covered_keys = {
+            key
+            for key in (
+                entry.get("semantic_key")
+                for entry in normalize_core_fields(core_fields)
+            )
+            if key
+        }
+        below_domain_floor_keys = [
+            key for key in domain_floor_keys if key not in template_covered_keys
+        ]
+
         return SemanticContractResult(
             status=status,
             should_block=should_block,
@@ -248,6 +306,7 @@ class SemanticFieldContractService:
             impact_descriptions=impact_descriptions,
             has_contract=True,
             optional_removed_raw_fields=optional_removed_raw_fields,
+            below_domain_floor_keys=below_domain_floor_keys,
         )
 
     @classmethod
