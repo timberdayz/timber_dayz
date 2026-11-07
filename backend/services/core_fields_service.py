@@ -557,6 +557,83 @@ def core_field_legacy_column_names(core_fields: Any) -> List[str]:
     return names
 
 
+#: 落库列收窄开关(环境变量)—— 批次 F-1 / F-2。
+#:
+#: 规格 §4 步骤 8: 「落库：**只为 ``core_fields`` 全集建物理列**; 其余字段只进
+#: ``raw_data`` JSONB 存档」。
+#:
+#: 为什么**默认开启**
+#: ------------------
+#: 收窄的收益是「消除同一业务字段存两份」(物理列 + JSONB);
+#: 风险是「历史已建的列不再更新 ⇒ 新老数据在同一列上不一致」。
+#:
+#: 实测结论(2026-11-07):
+#:
+#: * 下游 ``semantic`` view(``sql/semantic/*.sql``)只选**系统列 + raw_data**,
+#:   **零引用业务动态列** ⇒ 收窄不会让语义层/看板取不到数;
+#: * 历史列**不物理删**(规格 §6.2)⇒ 存量数据仍可读;
+#: * 非核心字段的完整内容始终在 ``raw_data`` JSONB 里 ⇒ 可回溯。
+#:
+#: ⇒ 收窄是安全的, 且必须默认开启才能达成「消除双份存储」的目标。
+#: 保留开关是为了**一键回退**(出问题时不用发版)。
+CORE_FIELDS_COLUMNS_ENV_KEY = "SYNC_CORE_FIELDS_CORE_COLUMNS_ENABLED"
+
+#: 落库列收窄开关的**默认状态**。
+#:
+#: 环境变量未设置时用这个值; 显式设置成 ``0/false/no/off`` 才关闭。
+CORE_FIELDS_COLUMNS_DEFAULT_ENABLED = True
+
+
+def core_fields_columns_enabled() -> bool:
+    """是否启用「只为核心字段建物理列」(批次 F-1 / F-2)。
+
+    默认**开启**; 显式设成 ``0/false/no/off`` 可一键回退到旧行为
+    (所有表头列都建列)。
+    """
+    raw = str(os.getenv(CORE_FIELDS_COLUMNS_ENV_KEY, "")).strip().lower()
+    if not raw:
+        return CORE_FIELDS_COLUMNS_DEFAULT_ENABLED
+    if raw in _TRUTHY:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return CORE_FIELDS_COLUMNS_DEFAULT_ENABLED
+
+
+def core_field_storage_column_names(core_fields: Any) -> List[str]:
+    """清单里**真正要建物理列**的列名(批次 F-1 的唯一口径)。
+
+    为什么用「原始列名」而不是「标准字段键」
+    ----------------------------------------
+    规格 §3.1 写的是「列名 = 标准字段键」, 但同时 §6.2 要求「历史已建的列
+    **保留读兼容, 不物理删**」。两条放在一起只有一个自洽解:
+
+    * 若按**标准字段键**建列 ⇒ 表里会多出一批 ``product_id`` 之类的英文列,
+      而原有的 ``商品编号`` 列还在 ⇒ **同一业务字段存两份**,
+      正是 F 要消除的那个问题;
+    * 按**原始列名**建列 ⇒ 与历史已建的列**同名** ⇒ 同一字段一列,
+      存量数据与新数据在同一列上, 读兼容天然成立。
+
+    ⇒ 建列一律用**原始列名**。
+
+    只有 ``semantic_key``、没有 ``raw_name`` 的条目
+    --------------------------------------------
+    这类条目(目前只有 ``metric_date`` 这类系统字段)的**物理列名不确定** ——
+    语义键是「标准含义」, 不等于文件里的列名。
+    它们**不参与建列**: 系统字段(如 ``metric_date``)本来就有列,
+    业务语义键则等它有 ``raw_name`` 时再落列。
+    """
+    names: List[str] = []
+    seen: set[str] = set()
+    for entry in normalize_core_fields(core_fields):
+        raw_name = str(entry.get("raw_name") or "").strip()
+        if not raw_name or raw_name in seen:
+            continue
+        seen.add(raw_name)
+        names.append(raw_name)
+    return names
+
+
 def core_field_required_semantic_keys(core_fields: Any) -> List[str]:
     """清单里「缺失算阻断」的语义键。"""
     keys: List[str] = []

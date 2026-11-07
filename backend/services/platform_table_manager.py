@@ -151,7 +151,8 @@ class PlatformTableManager:
         self,
         table_name: str,
         header_columns: list,
-        template_id: Optional[int] = None
+        template_id: Optional[int] = None,
+        core_columns: Optional[list] = None
     ) -> list:
         """
         同步表列(根据模板header_columns添加列)
@@ -162,6 +163,8 @@ class PlatformTableManager:
             table_name: 表名
             header_columns: 表头字段列表(归一化后的,不含货币代码)
             template_id: 模板ID(可选,用于日志)
+            core_columns: 核心字段的原始列名清单(批次 F-1)。
+                非 None 时只为核心字段建物理列, 其余字段只进 raw_data JSONB。
         
         Returns:
             新增的列列表
@@ -169,7 +172,8 @@ class PlatformTableManager:
         try:
             added_columns = self.dynamic_column_manager.ensure_columns_exist(
                 table_name=table_name,
-                header_columns=header_columns
+                header_columns=header_columns,
+                core_columns=core_columns
             )
             
             if added_columns:

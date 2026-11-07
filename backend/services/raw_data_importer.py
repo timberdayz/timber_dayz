@@ -742,6 +742,7 @@ class RawDataImporter:
             List[str]
         ] = None,  # [*] v4.16.0新增:原始header_columns(包含货币代码,用于保存到数据库)
         template_id: Optional[int] = None,  # [*] v4.17.0新增:模板ID(用于动态列管理)
+        core_columns: Optional[List[str]] = None,  # [*] 批次F-1:只为核心字段建列
     ) -> Dict[str, int]:  # [*] v4.15.0修改:返回详细统计信息
         """
         批量插入B类数据(v4.17.0重构:按平台分表)
@@ -759,6 +760,9 @@ class RawDataImporter:
             sub_domain: 子类型(可选,services域必须提供:ai_assistant或agent)
             original_header_columns: 原始表头字段列表(包含货币代码,用于保存到数据库)
             template_id: 模板ID(可选,用于动态列管理)
+            core_columns: 核心字段的原始列名清单(批次 F-1/F-2)。
+                非 None 时: (1) 只为核心字段建物理列; (2) 只为核心字段写列值,
+                其余字段只进 raw_data JSONB 存档(规格 §4 步骤 8)。
 
         Returns:
             详细统计信息字典
@@ -782,6 +786,8 @@ class RawDataImporter:
                     table_name=table_name,
                     header_columns=header_columns,
                     template_id=template_id,
+                    # [*] 批次 F-1: 只为核心字段建物理列
+                    core_columns=core_columns,
                 )
 
             # 准备插入数据
@@ -847,8 +853,12 @@ class RawDataImporter:
                     # table_name已在前面从table_manager获取
 
                     # 确保列存在(动态添加列)
+                    # [*] 批次 F-1: 同样只为核心字段建列, 否则这条备用路径
+                    #     会把所有表头列都建出来 ⇒ 收窄失效。
                     added_columns = dynamic_column_manager.ensure_columns_exist(
-                        table_name=table_name, header_columns=header_columns
+                        table_name=table_name,
+                        header_columns=header_columns,
+                        core_columns=core_columns,
                     )
 
                     if added_columns:
@@ -1421,16 +1431,46 @@ class RawDataImporter:
                     )
 
                     # 构建列名映射(原始列名 -> 规范化列名),只映射存在的列
+                    # [*] 批次 F-2: 收窄后**只对核心列**做 UPDATE,
+                    #     非核心字段的完整内容留在 raw_data JSONB 存档里
+                    #     (规格 §4 步骤 8: 「其余字段只进 raw_data JSONB 存档」)。
+                    #
+                    #     列名解析与建列**共用同一套口径**
+                    #     (``resolve_target_column`` / ``matches_core_column``)
+                    #     ⇒ 不会出现「建了列却不写值」或「写了值却没建列」。
+                    core_column_set: Optional[set] = None
+                    if core_columns is not None:
+                        core_column_set = set()
+                        for raw_col in core_columns:
+                            raw_text = str(raw_col or "")
+                            if not raw_text.strip():
+                                continue
+                            core_column_set.add(raw_text)
+                            core_column_set.add(
+                                dynamic_column_manager.identifier_column_name(raw_text)
+                            )
+                            core_column_set.add(
+                                dynamic_column_manager.normalize_column_name(raw_text)
+                            )
                     column_mapping = {}
                     for original_col in header_columns:
-                        normalized_col = dynamic_column_manager.normalize_column_name(
-                            original_col
+                        normalized_col = dynamic_column_manager.resolve_target_column(
+                            original_col, existing_columns
                         )
                         # 只映射那些确实存在于表中的列(排除系统字段)
                         if (
                             normalized_col in existing_columns
                             and normalized_col not in system_fields
                         ):
+                            # [*] 批次 F-2: 非核心列不再 UPDATE
+                            if core_column_set is not None and (
+                                not dynamic_column_manager.matches_core_column(
+                                    original_col,
+                                    normalized_col,
+                                    core_column_set,
+                                )
+                            ):
+                                continue
                             column_mapping.setdefault(normalized_col, []).append(
                                 original_col
                             )
@@ -1668,6 +1708,7 @@ class RawDataImporter:
         file_date_to: Optional[date] = None,
         field_parse_rules: Optional[List[Dict[str, Any]]] = None,
         header_bindings: Optional[List[Dict[str, Any]]] = None,
+        core_columns: Optional[List[str]] = None,
     ) -> Dict[str, int]:
         """
         异步批量插入B类数据(v4.18.2新增)
@@ -1722,6 +1763,8 @@ class RawDataImporter:
                     sub_domain=sub_domain,
                     original_header_columns=original_header_columns,
                     template_id=template_id,
+                    # [*] 批次 F-1/F-2: 只为核心字段建列 + 只为核心列写值
+                    core_columns=core_columns,
                 )
                 sync_db.commit()
                 return result

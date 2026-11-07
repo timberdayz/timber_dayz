@@ -781,6 +781,38 @@ class DataIngestionService:
                         identity_values=hash_identity_values,
                         core_fields=effective_core_fields,
                     )
+                    # [*] 批次 F-1/F-2: 落库列收窄。
+                    #     只为**核心字段**建物理列, 其余字段只进 raw_data JSONB
+                    #     (规格 §4 步骤 8: 「消除每个业务字段存两份」)。
+                    #
+                    #     与批次 E 的 hash 开关**相互独立**: hash 管「指纹怎么算」,
+                    #     这里管「落哪些物理列」。
+                    #
+                    #     清单为空 ⇒ 不收窄(保持旧行为), 避免空配置把数据搞丢。
+                    effective_core_columns = None
+                    if core_fields:
+                        from backend.services.core_fields_service import (
+                            core_field_storage_column_names,
+                            core_fields_columns_enabled,
+                        )
+
+                        storage_columns = core_field_storage_column_names(core_fields)
+                        if not storage_columns:
+                            logger.warning(
+                                "[Ingest] [*] 批次F: 核心字段清单没有可落列的原始列名, "
+                                "保持旧行为(不收窄建列), 避免空配置丢数据"
+                            )
+                        elif core_fields_columns_enabled():
+                            effective_core_columns = storage_columns
+                            logger.info(
+                                "[Ingest] [*] 批次F: 只为核心字段建物理列 "
+                                f"(核心列数={len(effective_core_columns)})"
+                            )
+                        else:
+                            logger.info(
+                                "[Ingest] [*] 批次F: 落库列收窄开关未打开"
+                                "(SYNC_CORE_FIELDS_CORE_COLUMNS_ENABLED), 保持旧行为"
+                            )
                     logger.info(
                         f"[Ingest] [DSS] data_hash计算完成: {len(data_hashes)}个哈希"
                     )
@@ -1022,6 +1054,8 @@ class DataIngestionService:
                         ),
                         field_parse_rules=field_parse_rules,
                         header_bindings=header_bindings or [],
+                        # [*] 批次 F-1/F-2: 只为核心字段建列 + 只为核心列写值
+                        core_columns=effective_core_columns,
                     )
 
                     # [*] v4.15.0修改:处理新的返回值格式(字典)

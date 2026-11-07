@@ -130,6 +130,95 @@ class DynamicColumnManager:
         
         return normalized
     
+    @staticmethod
+    def identifier_column_name(column_name: str) -> str:
+        """列名的**标识符规范化** —— 只满足 PostgreSQL 标识符规则, **不剥货币代码**。
+
+        为什么需要它(批次 F-1 的实测教训)
+        ----------------------------------
+        :meth:`normalize_column_name` 会剥掉货币代码, 而 ``SKU`` 会被当成
+        ISO 三字母代码 ⇒ ``*商品SKU`` 被算成 ``商品``。
+
+        但**入库链路对 inventory 域是跳过货币归一**的
+        (见 ``data_ingestion_service.normalize_field_name_for_domain``) ⇒
+        同一列名在两处会归一化成不同结果。
+
+        实测(2026-11-07, ``b_class.fact_miaoshou_inventory_snapshot``)::
+
+            清单 raw_name      = '*商品SKU'
+            历史主列           = '商品SKU'      ← 原始口径
+            normalize 后       = '商品'         ← 剥货币口径(历史重复列)
+
+        若用剥货币口径做核心列匹配 ⇒ 核心列匹配不上 ⇒
+        **新建重复列 + 真正的核心列不再更新**。
+
+        ⇒ 列名匹配与「复用已有列」必须用**不剥货币**的口径。
+        """
+        if not column_name:
+            return column_name
+
+        normalized = str(column_name).replace(' ', '_').replace('-', '_').replace('.', '_')
+        normalized = ''.join(c if c.isalnum() or c == '_' else '_' for c in normalized)
+
+        while '__' in normalized:
+            normalized = normalized.replace('__', '_')
+
+        normalized = normalized.strip('_')
+
+        if not normalized:
+            normalized = 'col_' + str(hash(str(column_name)) % 10000)
+
+        if len(normalized) > MAX_COLUMN_NAME_LENGTH:
+            hash_suffix = str(abs(hash(str(column_name))) % 100000000)[:8]
+            normalized = normalized[:50] + '_' + hash_suffix
+
+        if normalized and normalized[0].isdigit():
+            normalized = 'col_' + normalized
+
+        return normalized
+
+    def resolve_target_column(self, header_column: str, existing_columns: Set[str]) -> str:
+        """这个表头列该落到哪个物理列。
+
+        规则(按优先级):
+
+        1. **标识符口径**(不剥货币)的列名已在表里 ⇒ 用它
+           ⇒ 复用历史主列, 不新建重复列;
+        2. **剥货币口径**的列名已在表里 ⇒ 用它
+           ⇒ 与既有表结构同构(例如 ``销售额（已下订单） (SGD)`` → ``销售额_已下订单``);
+        3. 都没有 ⇒ 用剥货币口径新建(与旧行为一致)。
+
+        为什么第 1 条优先
+        -----------------
+        历史表里同一个业务字段可能同时存在「原始口径」与「剥货币口径」两列
+        (inventory 的 ``商品SKU`` / ``商品`` 就是实例)。
+        收窄的目标是**消除同一业务字段存两份** ⇒ 必须落在**原始口径**那一列,
+        让剥货币口径的重复列自然停更。
+        """
+        identifier_name = self.identifier_column_name(header_column)
+        if identifier_name in existing_columns:
+            return identifier_name
+        return self.normalize_column_name(header_column)
+
+    def matches_core_column(
+        self,
+        header_column: str,
+        target_column: str,
+        core_column_set: Set[str],
+    ) -> bool:
+        """这个表头列是不是核心字段(批次 F-1 的判定口径)。
+
+        三个口径任一命中即算核心: 原始名 / 标识符口径 / 目标物理列名。
+        口径多而松是刻意的 —— 见 :meth:`ensure_columns_exist` 里的说明。
+        """
+        if not core_column_set:
+            return True
+        if header_column in core_column_set:
+            return True
+        if target_column in core_column_set:
+            return True
+        return self.identifier_column_name(header_column) in core_column_set
+
     def get_existing_columns(self, table_name: str) -> Set[str]:
         """
         查询表现有列
@@ -157,16 +246,20 @@ class DynamicColumnManager:
         self,
         table_name: str,
         header_columns: List[str],
-        max_new_columns: Optional[int] = None
+        max_new_columns: Optional[int] = None,
+        core_columns: Optional[List[str]] = None
     ) -> List[str]:
         """
         确保表中有指定的列(如果不存在则添加)
-        
+
         Args:
             table_name: 表名(如 'fact_raw_data_orders_daily')
             header_columns: 需要添加的列名列表(原始表头字段)
             max_new_columns: 最大新增列数(默认None,不限制)
-        
+            core_columns: 核心字段的**原始列名**清单(批次 F-1)。
+                非 None 时**只**为清单里的列建物理列, 其余字段只进 raw_data
+                JSONB(规格 §4 步骤 8)。None ⇒ 旧行为(所有表头列都建列)。
+
         Returns:
             成功添加的列名列表(规范化后的列名)
         """
@@ -179,20 +272,44 @@ class DynamicColumnManager:
             
             # 规范化列名并去重
             normalized_columns = {}
+            # [*] 批次 F-1: 只为核心字段建物理列。
+            #     core_columns 为 None ⇒ 旧行为(所有表头列都建列)。
+            #
+            #     核心列判定用**三键并集**(原始名 + 标识符口径 + 剥货币口径):
+            #     宁可多匹配, 不可漏匹配 ——
+            #     漏匹配 ⇒ 核心列不建列不写值(值只留在 raw_data, 物理列断档);
+            #     多匹配 ⇒ 最多多写一个历史重复列(代价小得多)。
+            core_column_set: Optional[set] = None
+            if core_columns is not None:
+                core_column_set = set()
+                for raw_col in core_columns:
+                    # [*] 局部变量**不能**叫 text —— 会遮蔽模块级的 sqlalchemy.text
+                    raw_text = str(raw_col or "")
+                    if not raw_text.strip():
+                        continue
+                    core_column_set.add(raw_text)
+                    core_column_set.add(self.identifier_column_name(raw_text))
+                    core_column_set.add(self.normalize_column_name(raw_text))
             for col in header_columns:
                 # 跳过系统字段
                 if col in SYSTEM_FIELDS:
                     continue
-                
-                normalized = self.normalize_column_name(col)
-                # 如果规范化后的列名已存在,跳过
+
+                # [*] 批次 F-1: 目标物理列 —— 优先复用历史主列(不剥货币口径)
+                normalized = self.resolve_target_column(col, existing_columns)
+                # [*] 批次 F-1: 非核心字段不建物理列(只进 raw_data JSONB 存档)
+                if core_column_set is not None and not self.matches_core_column(
+                    col, normalized, core_column_set
+                ):
+                    continue
+                # 如果目标列名已存在,跳过
                 if normalized in existing_columns:
                     continue
-                
-                # 如果原始列名已映射,跳过(避免重复映射)
-                if col in normalized_columns:
+
+                # 如果目标列名已映射,跳过(避免重复映射)
+                if normalized in normalized_columns.values():
                     continue
-                
+
                 normalized_columns[col] = normalized
             
             # 检查列数限制
