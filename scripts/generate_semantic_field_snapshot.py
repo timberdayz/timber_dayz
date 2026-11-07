@@ -92,15 +92,27 @@ def main() -> int:
         if not SNAPSHOT_PATH.exists():
             print(f"[FAIL] 快照不存在: {SNAPSHOT_PATH}")
             return 1
-        current = SNAPSHOT_PATH.read_text(encoding="utf-8")
-        if current != rendered:
-            print("[FAIL] 快照与后端定义已漂移, 请运行 python scripts/generate_semantic_field_snapshot.py")
+        # [*] 按**字节**比较, 不用 read_text ——
+        #     read_text 会把 CRLF 归一化成 LF, 于是「换行符漂移」这种问题
+        #     在 --check 里**看不见**。快照是生成物, 必须逐字节可复现。
+        current = SNAPSHOT_PATH.read_bytes()
+        expected = rendered.encode("utf-8")
+        if current != expected:
+            if current.replace(b"\r\n", b"\n") == expected:
+                print(
+                    "[FAIL] 快照内容一致, 但换行符是 CRLF(仓库约定 LF); "
+                    "请运行 python scripts/generate_semantic_field_snapshot.py 重写"
+                )
+            else:
+                print("[FAIL] 快照与后端定义已漂移, 请运行 python scripts/generate_semantic_field_snapshot.py")
             return 1
         print("[OK] 快照与后端定义一致")
         return 0
 
     SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SNAPSHOT_PATH.write_text(rendered, encoding="utf-8")
+    # [*] 显式 newline="\n": Windows 上 write_text 默认写 CRLF,
+    #     而仓库的 .gitattributes 规定 ``*.js text eol=lf`` ⇒ 必须写 LF。
+    SNAPSHOT_PATH.write_text(rendered, encoding="utf-8", newline="\n")
     print(f"[OK] 已写入快照: {SNAPSHOT_PATH}")
     return 0
 
