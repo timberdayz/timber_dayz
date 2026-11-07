@@ -23,7 +23,7 @@ class ShopeeDatePicker(DatePickerComponent):
     component_type = "date_picker"
     data_domain = None
 
-    def __init__(self, ctx: ExecutionContext) -> None:
+    def __init__(self, ctx: ExecutionContext, selectors: ProductsSelectors | None = None) -> None:
         super().__init__(ctx)
         cfg = self.ctx.config or {}
         domain = str(cfg.get("data_domain") or "products").strip().lower()
@@ -41,7 +41,8 @@ class ShopeeDatePicker(DatePickerComponent):
         elif domain == "services" and subtype in service_selectors.service_paths:
             overview_path = service_selectors.service_paths[subtype]
 
-        selectors = replace(ProductsSelectors(), overview_path=overview_path)
+        # 选择器与调用方同源，避免组件层与 helper 层出现两套文案/粒度口径
+        selectors = replace(selectors or ProductsSelectors(), overview_path=overview_path)
         self._delegate = ShopeeProductsExport(self.ctx, selectors=selectors)
         self.sel = self._delegate.sel
         self.service_sel = service_selectors
@@ -136,27 +137,6 @@ class ShopeeDatePicker(DatePickerComponent):
                     return locator
             except Exception:
                 continue
-        return None
-
-    async def _find_date_summary_container(self, page: Any) -> Any | None:
-        summary_selectors = (
-            '[class*="picker"]:has-text("缁熻鏃堕棿")',
-            '[class*="date"]:has-text("缁熻鏃堕棿")',
-            '[class*="time"]:has-text("缁熻鏃堕棿")',
-            'div:has-text("缁熻鏃堕棿")',
-            'button:has-text("缁熻鏃堕棿")',
-            '[role="button"]:has-text("缁熻鏃堕棿")',
-        )
-        locator = await self._first_visible_locator(page, summary_selectors)
-        if locator is not None:
-            return locator
-
-        try:
-            text_locator = page.get_by_text("缁熻鏃堕棿", exact=False).first
-            if await text_locator.is_visible(timeout=1000):
-                return text_locator
-        except Exception:
-            pass
         return None
 
     async def _find_date_summary_container(self, page: Any) -> Any | None:
@@ -586,7 +566,7 @@ class ShopeeDatePicker(DatePickerComponent):
                 summary_text = await summary_container.text_content()
             except Exception:
                 summary_text = None
-            if summary_text and "缁熻鏃堕棿" in str(summary_text):
+            if summary_text and "统计时间" in str(summary_text):
                 return summary_text
 
         trigger = await self._find_date_picker_trigger(page)

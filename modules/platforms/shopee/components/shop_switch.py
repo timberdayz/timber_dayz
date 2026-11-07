@@ -21,10 +21,38 @@ class ShopeeShopSwitch:
     component_type = "shop_switch"
     data_domain = None
 
-    def __init__(self, ctx: ExecutionContext) -> None:
+    # 店铺切换器上代表「全部店铺」的聚合标签：命中即代表当前没有落到具体某一家店铺
+    _AGGREGATE_SHOP_LABEL_TOKENS: tuple[str, ...] = (
+        "所有店铺",
+        "全部店铺",
+        "所有商店",
+        "全部商店",
+        "all shops",
+        "all store",
+        "allshop",
+    )
+
+    # 店铺切换器标签里可能出现的区域文案 -> 规范区域键
+    # 与 _region_text_candidates（用于点击目标区域）分开维护：这里只用于「读标签里的区域」
+    _LABEL_REGION_CANDIDATES: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("MY", ("malaysia", "my", "马来西亚")),
+        ("SG", ("singapore", "sg", "新加坡")),
+        ("PH", ("philippines", "ph", "菲律宾")),
+        ("TH", ("thailand", "th", "泰国")),
+        ("VN", ("vietnam", "vn", "越南")),
+        ("ID", ("indonesia", "id", "印度尼西亚")),
+        ("TW", ("taiwan", "tw", "台湾")),
+        ("BR", ("brazil", "br", "巴西")),
+        ("MX", ("mexico", "mx", "墨西哥")),
+        ("CL", ("chile", "cl", "智利")),
+        ("CO", ("colombia", "co", "哥伦比亚")),
+    )
+
+    def __init__(self, ctx: ExecutionContext, selectors: ProductsSelectors | None = None) -> None:
         self.ctx = ctx
         self.logger = getattr(ctx, "logger", None)
-        self.sel = ProductsSelectors()
+        # 选择器与调用方同源，避免店铺切换触发器出现两套口径
+        self.sel = selectors or ProductsSelectors()
 
     def _normalize_text(self, value: str | None) -> str:
         return " ".join(str(value or "").strip().lower().split())
@@ -84,6 +112,36 @@ class ShopeeShopSwitch:
             return (raw,)
         return ()
 
+    def _is_aggregate_shop_label(self, current_label: str) -> bool:
+        """标签是否代表「所有店铺」这类聚合视图（而非落到某一家具体店铺）。"""
+        for token in self._AGGREGATE_SHOP_LABEL_TOKENS:
+            if token and token in current_label:
+                return True
+        return False
+
+    def _extract_label_region(self, current_label: str) -> str | None:
+        """从「区域 / 店铺」形态的标签里读出区域规范键；读不出返回 None。"""
+        head = current_label.split(" / ", 1)[0].strip()
+        if not head or head == current_label.strip():
+            # 没有「区域 / 店铺」分隔结构 → 标签未显式带区域
+            return None
+        for region_key, candidates in self._LABEL_REGION_CANDIDATES:
+            for candidate in candidates:
+                if candidate and candidate == head:
+                    return region_key
+        return None
+
+    def _label_region_matches_target(
+        self, current_label: str, target_region: str | None
+    ) -> bool:
+        """标签里显式带出的区域必须与目标区域一致；标签没带区域时不据此否决。"""
+        if not target_region:
+            return True
+        label_region = self._extract_label_region(current_label)
+        if label_region is None:
+            return True
+        return label_region == self._normalize_text(target_region).upper()
+
     def _shop_name_looks_selected(
         self,
         current_label: str | None,
@@ -94,17 +152,14 @@ class ShopeeShopSwitch:
         target = self._normalize_text(target_shop)
         if not current or not target:
             return False
+        # 「所有店铺」聚合标签下即便出现了目标店名，也不代表已落到该店
+        if self._is_aggregate_shop_label(current):
+            return False
         if target not in current:
             return False
-        normalized_region = self._normalize_text(target_region)
-        if normalized_region:
-            region_candidates = self._region_text_candidates(target_region)
-            normalized_candidates = tuple(
-                self._normalize_text(candidate) for candidate in region_candidates
-            )
-            if normalized_region not in normalized_candidates:
-                return False
-        return target in current
+        if not self._label_region_matches_target(current, target_region):
+            return False
+        return True
 
     async def _first_visible_locator(
         self, page: Any, selectors: tuple[str, ...]

@@ -43,12 +43,13 @@ class ShopeeProductsExport(ExportComponent):
     def _date_picker_helper(self):
         from modules.platforms.shopee.components.date_picker import ShopeeDatePicker
 
-        return ShopeeDatePicker(self.ctx)
+        # 选择器必须与组件同源：否则日期文案/粒度口径会出现两套（组件一套、helper 一套）
+        return ShopeeDatePicker(self.ctx, self.sel)
 
     def _shop_switch_helper(self):
         from modules.platforms.shopee.components.shop_switch import ShopeeShopSwitch
 
-        return ShopeeShopSwitch(self.ctx)
+        return ShopeeShopSwitch(self.ctx, self.sel)
 
     def _navigation_helper(self):
         return ShopeeNavigation(self.ctx)
