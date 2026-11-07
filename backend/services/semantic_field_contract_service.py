@@ -7,6 +7,11 @@ from sqlalchemy import select, or_
 from sqlalchemy.exc import SQLAlchemyError
 
 from modules.core.db import SemanticFieldContract
+from backend.services.semantic_field_registry import (  # [*] 批次 D: 唯一口径
+    ANALYTICS_SEMANTIC_ALIASES as _REGISTRY_ANALYTICS_SEMANTIC_ALIASES,
+    DOMAIN_SEMANTIC_ALIASES as _REGISTRY_DOMAIN_SEMANTIC_ALIASES,
+    ORDER_SEMANTIC_ALIASES as _REGISTRY_ORDER_SEMANTIC_ALIASES,
+)
 from backend.services.data_sync_status_semantics import (
     SEMANTIC_CONTRACT_STATUS_BREAKING_DRIFT,
     SEMANTIC_CONTRACT_STATUS_NON_BREAKING_DRIFT,
@@ -79,54 +84,14 @@ DEFAULT_CONTRACTS: dict[str, tuple[SemanticContractDefinition, ...]] = {
 }
 
 
-ORDER_SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
-    "order_id": ("订单编号", "订单号", "order_id", "order no", "order_no", "order id"),
-    "shop_id": ("店铺", "店铺id", "shop_id", "shop id", "shop_name", "shop name"),
-    "order_date": ("下单时间", "下单日期", "订单日期", "订单时间", "order_date", "order time", "order_time"),
-    "sales_volume": ("销售数量", "出库数量", "销量", "sold_qty", "sales_volume", "quantity"),
-    "paid_amount": (
-        "买家支付",
-        "买家支付(rmb)",
-        "买家支付（rmb）",
-        "实付金额",
-        "buyer_paid",
-        "paid_amount",
-    ),
-    "profit": ("利润", "利润(rmb)", "利润（rmb）", "profit", "profit_amount", "profit_rmb"),
-    "estimated_settlement_amount": (
-        "预估回款金额",
-        "预估回款金额(rmb)",
-        "预估回款金额（rmb）",
-        "estimated_settlement",
-        "estimated_settlement_amount",
-    ),
-    "settlement_time": ("结算时间", "settlement_time", "settlement date"),
-    "cost_profit_rate": ("成本利润率", "cost_profit_rate"),
-}
-
-
-# [*] analytics(流量)域的中文表头别名。
-# 用途: 让语义契约能从**平台原始表头**推断出语义键, 而不是只依赖模板里
-# 人工填写的 header_bindings。
-# 背景: 已发布模板里 header_bindings 的 semantic_key 覆盖率极低
-# (tiktok/analytics 71 个绑定只有 12 个有 semantic_key), 导致 required 语义键
-# 根本解析不出来 -> 契约状态恒为 breaking_drift(哪怕文件与模板 100% 一致)。
-ANALYTICS_SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
-    "metric_date": ("日期", "统计日期", "交易日期", "日期时间", "date"),
-    "shop_id": ("店铺", "店铺id", "店铺名称", "shop_id", "shop id"),
-    "visitor_count": ("商品访客数", "访客数", "访客量", "访问用户数", "uv"),
-    "page_views": ("页面浏览次数", "页面浏览量", "页面浏览数", "商品浏览量", "浏览量", "pv"),
-    "conversion_rate": ("转化率", "conversion_rate"),
-    "order_count": ("订单数", "支付订单数", "成交订单数", "order_count"),
-    "gmv": ("gmv", "成交金额", "成交额", "交易额"),
-}
-
-
-# 按数据域组织的语义键别名表
-DOMAIN_SEMANTIC_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
-    "orders": ORDER_SEMANTIC_ALIASES,
-    "analytics": ANALYTICS_SEMANTIC_ALIASES,
-}
+# [*] 批次 D: 域限定别名表已搬到 ``semantic_field_registry``(唯一口径)。
+#
+# 以前它们只被**契约判定**用, 从没进过「列名 → 语义键」的推断链路 ——
+# 于是「页面浏览数」明明有别名(page_views), 推断时却认不出来, 命中率只有 3~6%。
+# 现在注册表是唯一出处, 契约判定与推断共用同一份。
+ORDER_SEMANTIC_ALIASES = _REGISTRY_ORDER_SEMANTIC_ALIASES
+ANALYTICS_SEMANTIC_ALIASES = _REGISTRY_ANALYTICS_SEMANTIC_ALIASES
+DOMAIN_SEMANTIC_ALIASES = _REGISTRY_DOMAIN_SEMANTIC_ALIASES
 
 
 class SemanticFieldContractService:

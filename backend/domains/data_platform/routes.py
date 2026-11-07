@@ -12,6 +12,7 @@ from backend.domains.data_platform.routers import (
     field_mapping_templates,
     management,
     refresh_queue,
+    semantic_fields,
 )
 
 
@@ -23,6 +24,11 @@ def register_data_platform_routes(app, logger) -> None:
     )
     app.include_router(
         field_mapping_templates.router, prefix="/api/field-mapping", tags=["字段映射模板"]
+    )
+    # [*] 批次 D(API-1): 标准字段定义 / 语义别名的只读接口。
+    #     前端不再自己抄一份标准字段定义 ⇒ 前后端口径不会漂。
+    app.include_router(
+        semantic_fields.router, prefix="/api/field-mapping", tags=["标准字段定义"]
     )
     app.include_router(data_sync.router, prefix="/api", tags=["数据同步"])
     app.include_router(data_sync_mapping_quality.router, prefix="/api", tags=["数据同步"])

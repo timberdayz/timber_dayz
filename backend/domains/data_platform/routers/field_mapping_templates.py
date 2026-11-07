@@ -64,6 +64,7 @@ from backend.services.semantic_field_registry import (
     REVIEW_SOURCE_INFERRED,
     REVIEW_SOURCE_USER,
     REVIEW_STATUS_CONFIRMED_SEMANTIC,
+    SYSTEM_HASH_SCOPE_KEYS as SYSTEM_HASH_SCOPE_KEYS_FROM_REGISTRY,
     get_semantic_aliases,
     get_semantic_requirements,
     infer_semantic_key_for_domain,
@@ -106,7 +107,10 @@ DATE_PARSE_VALUE_KINDS = {
     "time_range",
 }
 DATE_PARSE_RANGE_VALUE_KINDS = {"date_range", "datetime_range", "time_range"}
-SYSTEM_HASH_SCOPE_KEYS = {"platform_code", "shop_id", "data_domain", "granularity", "sub_domain"}
+# [*] 批次 D: hash 系统作用域字段的唯一口径在注册表里 ——
+#     前端以前还自己抄了第三份 ⇒ 现在只有一份。
+SYSTEM_HASH_SCOPE_KEYS = set(SYSTEM_HASH_SCOPE_KEYS_FROM_REGISTRY)
+
 # [*] 历史遗留的「列名 → 语义键」映射。
 #     它**不参与** hash 计算(calculate_data_hash 只认 canonical 语义键),
 #     因此家族 hash 校验也不再使用它 —— 用了就会重新制造「假一致」。

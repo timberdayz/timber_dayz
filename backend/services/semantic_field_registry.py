@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Iterable, Optional
 
 from backend.services.currency_extractor import get_currency_extractor
@@ -351,6 +352,66 @@ SEMANTIC_FIELD_META = {
 }
 
 
+#: 每个标准字段的说明文案(前端下拉框/tooltip 用)。
+#:
+#: [*] 批次 D: 以前这份文案住在前端 ``headerBindings.js`` 的副本里,
+#:     后端这边没有 ⇒ 后端接口返回的字段没有描述, 前端只能自己抄一份。
+#:     现在文案回到后端, 与字段定义放在一起, 一起作为唯一口径。
+SEMANTIC_FIELD_DESCRIPTIONS: Dict[str, str] = {
+    "order_id": "识别同一笔订单的稳定身份字段。",
+    "product_id": "平台或系统内识别同一商品的稳定身份字段。",
+    "platform_sku": "平台侧商品规格编码，可作为商品身份字段。",
+    "sku_id": "订单明细或商品规格粒度的身份字段。",
+    "line_id": "订单明细行粒度的稳定身份字段。",
+    "service_id": "服务类数据的稳定身份字段。",
+    "shop_id": "系统自动加入 Data Hash 的店铺作用域字段。",
+    "warehouse_name": "库存快照区分仓库粒度的维度字段。",
+    "gmv_band": "按 GMV 区间出报表时可作为行粒度维度。",
+    "metric_date": "日/周/月报表定位业务周期的时间字段。",
+    "period_start_date": "区间型报表的开始日期。",
+    "period_end_date": "区间型报表的结束日期。",
+    "order_date": "订单发生日期，通常作为分析维度。",
+    "product_name": "弱身份字段。商品名可能重名或改名，优先使用商品 ID / SKU。",
+    "item_status": "标准化属性字段，状态变化不应默认改变 Data Hash。",
+    "gmv": "指标值，不参与 Data Hash。",
+    "sales_amount": "指标值，不参与 Data Hash。",
+    "sales_volume": "指标值，不参与 Data Hash。",
+    "order_count": "指标值，不参与 Data Hash。",
+    "period_start_time": "小时级或更细粒度报表的开始时间，可由用户手动加入 Data Hash。",
+    "period_end_time": "小时级或更细粒度报表的结束时间，可由用户手动加入 Data Hash。",
+    "visitor_count": "系统语义指标，不参与 Data Hash。",
+    "product_visitor_count": "系统语义指标，不参与 Data Hash。",
+    "page_views": "系统语义指标，不参与 Data Hash。",
+    "impressions": "系统语义指标，不参与 Data Hash。",
+    "clicks": "系统语义指标，不参与 Data Hash。",
+    "click_rate": "系统语义指标，不参与 Data Hash。",
+    "conversion_rate": "系统语义指标，不参与 Data Hash。",
+    "sku_order_count": "系统语义指标，不参与 Data Hash。",
+    "total_transaction_amount": "系统语义指标，不参与 Data Hash。",
+    "bounce_rate": "系统语义指标，不参与 Data Hash。",
+    "paid_amount": "系统语义指标，不参与 Data Hash。",
+    "profit": "系统语义指标，不参与 Data Hash。",
+    "purchase_amount": "系统语义指标，不参与 Data Hash。",
+    "platform_commission": "系统语义指标，不参与 Data Hash。",
+    "live_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
+    "live_attributed_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
+    "live_indirect_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
+    "video_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
+    "video_attributed_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
+    "video_indirect_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
+}
+
+
+#: hash 的「系统作用域」字段 —— 它们来自采集上下文, 不是文件里的列。
+#:
+#: 前端以前自己抄了一份这个列表(``headerBindings.js``), 后端在
+#: ``field_mapping_templates.py`` 又抄了一份 ⇒ 三份口径。
+#: 现在统一到这里。
+SYSTEM_HASH_SCOPE_KEYS = frozenset(
+    {"platform_code", "shop_id", "data_domain", "granularity", "sub_domain"}
+)
+
+
 # 域限定的「列名 → 语义键」映射。
 #
 # 为什么不能写进全局别名表
@@ -397,6 +458,280 @@ DOMAIN_COLUMN_SEMANTIC_OVERRIDES: Dict[str, Dict[str, str]] = {
     },
 }
 
+
+# ── 域限定的「业务别名 → 语义键」映射 ──────────────────────────────
+#
+# [*] 批次 D: 这两张表以前住在 ``semantic_field_contract_service``,
+#     但那里的别名**只被契约判定用**, 从没进过「列名 → 语义键」的推断链路 ——
+#     于是「页面浏览数」明明有别名(page_views), 推断时却认不出来。
+#     现在统一搬到注册表(唯一口径), 推断与契约共用同一份。
+ORDER_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
+    "order_id": ("订单编号", "订单号", "order_id", "order no", "order_no", "order id"),
+    "shop_id": ("店铺", "店铺id", "shop_id", "shop id", "shop_name", "shop name"),
+    "order_date": ("下单时间", "下单日期", "订单日期", "订单时间", "order_date", "order time", "order_time"),
+    "sales_volume": ("销售数量", "出库数量", "销量", "sold_qty", "sales_volume", "quantity"),
+    "paid_amount": (
+        "买家支付",
+        "买家支付(rmb)",
+        "买家支付（rmb）",
+        "实付金额",
+        "buyer_paid",
+        "paid_amount",
+    ),
+    "profit": ("利润", "利润(rmb)", "利润（rmb）", "profit", "profit_amount", "profit_rmb"),
+    "estimated_settlement_amount": (
+        "预估回款金额",
+        "预估回款金额(rmb)",
+        "预估回款金额（rmb）",
+        "estimated_settlement",
+        "estimated_settlement_amount",
+    ),
+    "settlement_time": ("结算时间", "settlement_time", "settlement date"),
+    "cost_profit_rate": ("成本利润率", "cost_profit_rate"),
+}
+
+
+# [*] analytics(流量)域的中文表头别名。
+# 用途: 让语义契约能从**平台原始表头**推断出语义键, 而不是只依赖模板里
+# 人工填写的 header_bindings。
+# 背景: 已发布模板里 header_bindings 的 semantic_key 覆盖率极低
+# (tiktok/analytics 71 个绑定只有 12 个有 semantic_key), 导致 required 语义键
+# 根本解析不出来 -> 契约状态恒为 breaking_drift(哪怕文件与模板 100% 一致)。
+ANALYTICS_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
+    "metric_date": ("日期", "统计日期", "交易日期", "日期时间", "date"),
+    "shop_id": ("店铺", "店铺id", "店铺名称", "shop_id", "shop id"),
+    "visitor_count": ("商品访客数", "访客数", "访客量", "访问用户数", "uv"),
+    "page_views": ("页面浏览次数", "页面浏览量", "页面浏览数", "商品浏览量", "浏览量", "pv"),
+    "conversion_rate": ("转化率", "conversion_rate"),
+    "order_count": ("订单数", "支付订单数", "成交订单数", "order_count"),
+    "gmv": ("gmv", "成交金额", "成交额", "交易额"),
+}
+
+
+DOMAIN_SEMANTIC_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
+    "orders": ORDER_SEMANTIC_ALIASES,
+    "analytics": ANALYTICS_SEMANTIC_ALIASES,
+}
+
+
+# ── 语义归一化 ─────────────────────────────────────────────────────
+#
+# 为什么需要归一化
+# ----------------
+# 真实表头不是干净的标识符, 而是「业务名 + 修饰」:
+#
+#   "买家支付(RMB)"  vs  "买家支付"      ← 币种后缀, 同一个指标
+#   "利润（rmb）"    vs  "利润(RMB)"      ← 全角/半角括号
+#   "商品SKU"       vs  "商品 sku"      ← 空格
+#   "下单时间\n"     vs  "下单时间"      ← 换行(妙手导出)
+#   "*商品sku"      vs  "商品SKU"        ← 必填星号
+#
+# 以前匹配是**逐字相等**, 这些全都认不出来 ⇒ 命中率只有 3~6%。
+# 归一化之后, 同一个指标的各种写法会收敛到同一个键。
+#
+# 注意: 归一化**只用于匹配**, 原始列名一律保留在 raw_data 里 ——
+# 归一化不是为了改数据, 是为了让「同一个意思」能被认出来。
+_CURRENCY_SUFFIX_PATTERN = re.compile(
+    r"[（(]\s*[A-Za-z]{3}\s*[)）]\s*$"
+)
+_CURRENCY_NO_PAREN_PATTERN = re.compile(
+    r"[（(][^（()）]{0,12}[)）]\s*$"
+)
+_FULLWIDTH_PUNCTUATION = {
+    "（": "(",
+    "）": ")",
+    "：": ":",
+    "，": ",",
+    "、": ",",
+    "。": ".",
+    "％": "%",
+    "＋": "+",
+    "－": "-",
+    "／": "/",
+    "＿": "_",
+}
+
+
+def normalize_semantic_alias(value: Optional[str]) -> str:
+    """把列名/别名归一化成「可比较」的形态。
+
+    归一化步骤(顺序固定):
+
+    1. 去首尾空白;
+    2. 全角标点 → 半角;
+    3. 去掉末尾的币种/币种名称括号后缀(``(RMB)`` / ``（美元）``);
+    4. 去掉所有空白(含换行、全角空格);
+    5. 去掉下划线;
+    6. 去掉必填星号(``*``);
+    7. 大小写折叠。
+
+    Returns:
+        归一化后的字符串; 空值返回空字符串。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    for source, target in _FULLWIDTH_PUNCTUATION.items():
+        text = text.replace(source, target)
+    # 末尾括号内容如果是「币种/币种名称」, 视为同一个指标的币种变体
+    match = _CURRENCY_SUFFIX_PATTERN.search(text)
+    if not match:
+        match = _CURRENCY_NO_PAREN_PATTERN.search(text)
+        if match:
+            inner = match.group(0).strip("()").strip()
+            # 只有「像币种」的才剥: 3 个字母, 或含「元/币/美元/人民币」等
+            is_currency_like = bool(re.fullmatch(r"[A-Za-z]{3}", inner)) or bool(
+                re.search(r"(元|币|美元|人民币|美金|欧元|日元)", inner)
+            )
+            if not is_currency_like:
+                match = None
+    if match:
+        text = text[: match.start()].strip()
+    text = text.replace("*", "")
+    text = re.sub(r"\s+", "", text)
+    text = text.replace("_", "")
+    return text.strip().lower()
+
+
+def _build_normalized_alias_index() -> Dict[str, str]:
+    """全局别名表的归一化索引: 归一化别名 → 语义键。
+
+    冲突(同一个归一化别名指向两个语义键)时**保留先注册的那个**,
+    并且不静默 —— 冲突会被 :mod:`backend.services.semantic_alias_registry_service`
+    检出并落 ``conflict`` + 报警。
+    """
+    index: Dict[str, str] = {}
+    for semantic_key, aliases in SEMANTIC_FIELD_ALIASES.items():
+        for alias in aliases:
+            normalized = normalize_semantic_alias(alias)
+            if normalized and normalized not in index:
+                index[normalized] = semantic_key
+    return index
+
+
+def _build_normalized_domain_alias_index() -> Dict[str, Dict[str, str]]:
+    """域限定别名的归一化索引。"""
+    result: Dict[str, Dict[str, str]] = {}
+    for domain, alias_map in DOMAIN_SEMANTIC_ALIASES.items():
+        bucket: Dict[str, str] = {}
+        for semantic_key, aliases in alias_map.items():
+            for alias in aliases:
+                normalized = normalize_semantic_alias(alias)
+                if normalized and normalized not in bucket:
+                    bucket[normalized] = semantic_key
+        result[domain] = bucket
+    return result
+
+
+def _build_normalized_column_override_index() -> Dict[str, Dict[str, str]]:
+    """域限定列名表的归一化索引。"""
+    result: Dict[str, Dict[str, str]] = {}
+    for domain, mapping in DOMAIN_COLUMN_SEMANTIC_OVERRIDES.items():
+        bucket: Dict[str, str] = {}
+        for column, semantic_key in mapping.items():
+            normalized = normalize_semantic_alias(column)
+            if normalized and normalized not in bucket:
+                bucket[normalized] = semantic_key
+        result[domain] = bucket
+    return result
+
+
+_NORMALIZED_ALIAS_INDEX = _build_normalized_alias_index()
+_NORMALIZED_DOMAIN_ALIAS_INDEX = _build_normalized_domain_alias_index()
+_NORMALIZED_COLUMN_OVERRIDE_INDEX = _build_normalized_column_override_index()
+
+
+# ── 运行时别名(来自 semantic.semantic_field_aliases) ─────────────────
+#
+# [*] 批次 D: 表里本来就有 75 条别名(products 域的「销售额」「曝光次数」
+# 「点击次数」「转化率」「商品成交件数」…), 但 ORM 侧**没有模型**,
+# Python 侧压根看不见这张表 ⇒ 这些别名从来没进过推断链路。
+#
+# 现在把它们加载进来, 并且按来源分优先级:
+#   * 用户确认过(manual / template_confirmed) —— **最高**, 一处生效;
+#   * 内置(builtin) —— 次之, 不覆盖代码里的 curated 表。
+_RUNTIME_ALIAS_INDEX: Dict[str, Dict[str, str]] = {}
+_RUNTIME_CONFIRMED_ALIAS_INDEX: Dict[str, Dict[str, str]] = {}
+_RUNTIME_ALIAS_LOADED = False
+
+#: 全局别名用的域占位符
+GLOBAL_ALIAS_DOMAIN = "*"
+
+
+def _runtime_alias_bucket(index: Dict[str, Dict[str, str]], domain: str) -> Dict[str, str]:
+    """取「域内 + 全局」的合并视图(域内优先)。"""
+    merged: Dict[str, str] = {}
+    merged.update(index.get(GLOBAL_ALIAS_DOMAIN, {}))
+    merged.update(index.get(domain, {}))
+    return merged
+
+
+async def load_runtime_aliases(db) -> int:
+    """把 ``semantic.semantic_field_aliases`` 的有效别名加载进推断索引。
+
+    只加载 ``status='active'`` 的行 —— ``conflict`` 与 ``disabled``
+    的行**不进**推断(冲突必须先裁决, 否则等于替用户拍板)。
+
+    Returns:
+        加载进来的别名条数。
+    """
+    global _RUNTIME_ALIAS_INDEX, _RUNTIME_CONFIRMED_ALIAS_INDEX, _RUNTIME_ALIAS_LOADED
+
+    builtin_bucket: Dict[str, Dict[str, str]] = {}
+    confirmed_bucket: Dict[str, Dict[str, str]] = {}
+
+    try:
+        from modules.core.db import SemanticFieldAlias
+        from sqlalchemy import select
+
+        result = await db.execute(
+            select(SemanticFieldAlias).where(SemanticFieldAlias.status == "active")
+        )
+        rows = list(result.scalars().all())
+    except Exception:  # noqa: BLE001 - 表不存在/连不上时不阻断应用
+        _RUNTIME_ALIAS_LOADED = True
+        return 0
+
+    for row in rows:
+        domain = str(getattr(row, "data_domain", "") or "").strip().lower() or GLOBAL_ALIAS_DOMAIN
+        semantic_key = str(getattr(row, "standard_field", "") or "").strip()
+        raw_alias = str(getattr(row, "raw_alias", "") or "").strip()
+        source = str(getattr(row, "source", "") or "").strip()
+        if not semantic_key or not raw_alias:
+            continue
+        if not is_canonical_semantic_key(semantic_key):
+            continue
+        normalized = normalize_semantic_alias(raw_alias)
+        if not normalized:
+            continue
+        bucket = confirmed_bucket if source in {"manual", "template_confirmed"} else builtin_bucket
+        bucket.setdefault(domain, {}).setdefault(normalized, semantic_key)
+
+    _RUNTIME_ALIAS_INDEX = builtin_bucket
+    _RUNTIME_CONFIRMED_ALIAS_INDEX = confirmed_bucket
+    _RUNTIME_ALIAS_LOADED = True
+    total = sum(len(item) for item in builtin_bucket.values()) + sum(
+        len(item) for item in confirmed_bucket.values()
+    )
+    return total
+
+
+def runtime_alias_snapshot() -> Dict[str, Dict[str, str]]:
+    """当前生效的运行时别名快照(给接口与测试用)。"""
+    return {
+        "builtin": {domain: dict(items) for domain, items in _RUNTIME_ALIAS_INDEX.items()},
+        "confirmed": {
+            domain: dict(items) for domain, items in _RUNTIME_CONFIRMED_ALIAS_INDEX.items()
+        },
+        "loaded": _RUNTIME_ALIAS_LOADED,
+    }
+
+
+def runtime_alias_count() -> int:
+    return sum(len(item) for item in _RUNTIME_ALIAS_INDEX.values()) + sum(
+        len(item) for item in _RUNTIME_CONFIRMED_ALIAS_INDEX.values()
+    )
+
 SEMANTIC_HASH_IDENTITY_KEYS = {
     key for key, meta in SEMANTIC_FIELD_META.items() if meta.get("hash_eligible")
 }
@@ -418,6 +753,16 @@ REVIEW_SOURCE_INFERRED = "inferred"
 
 
 def normalize_semantic_key(value: Optional[str]) -> Optional[str]:
+    """把任意写法归一化成**规范语义键**。
+
+    [*] 批次 D: 两级匹配。
+
+    1. **逐字相等**(旧口径): 直接命中别名表 —— 保证老数据行为不变;
+    2. **归一化相等**(新口径): 去掉币种后缀/空格/下划线/星号/全角标点后再比 ——
+       这是命中率从 3~6% 提到 60%+ 的关键。
+
+    归一化后仍然认不出来 ⇒ 返回小写原文(不猜)。
+    """
     text = str(value or "").strip()
     if not text:
         return None
@@ -430,6 +775,14 @@ def normalize_semantic_key(value: Optional[str]) -> Optional[str]:
             return semantic_key
         if any(lowered == str(alias).strip().lower() for alias in aliases):
             return semantic_key
+
+    # [*] 批次 D: 归一化匹配
+    normalized = normalize_semantic_alias(text)
+    if normalized:
+        matched = _NORMALIZED_ALIAS_INDEX.get(normalized)
+        if matched:
+            return matched
+
     return lowered
 
 
@@ -511,22 +864,62 @@ def infer_semantic_key_for_domain(
 ) -> Optional[str]:
     """按数据域推断列名对应的语义键。
 
-    先查**域限定**的列名表（:data:`DOMAIN_COLUMN_SEMANTIC_OVERRIDES`），
-    域内没有命中时回落到全局别名表。
+    [*] 批次 D: 三级查找, 先具体后通用, 每一级都做**归一化**匹配。
 
-    这样既能让 ``商品编号`` / ``ID`` / ``客服ID`` 这类真实表头被认出来，
+    1. **域限定列名表**(:data:`DOMAIN_COLUMN_SEMANTIC_OVERRIDES`)
+       —— 同一个列名在不同域含义不同, 所以域内优先;
+    2. **域限定别名表**(:data:`DOMAIN_SEMANTIC_ALIASES`)
+       —— 域内业务别名(「买家支付」→ ``paid_amount``);
+    3. **全局别名表**(:data:`SEMANTIC_FIELD_ALIASES`)。
+
+    这样既能让 ``商品编号`` / ``ID`` / ``客服ID`` 这类真实表头被认出来,
     又不会把「同名列不同含义」污染到别的数据域。
     """
     domain = str(data_domain or "").strip().lower()
-    overrides = DOMAIN_COLUMN_SEMANTIC_OVERRIDES.get(domain, {})
-    if overrides:
+    override_index = _NORMALIZED_COLUMN_OVERRIDE_INDEX.get(domain, {})
+    if override_index:
         for value in values:
-            text = str(value or "").strip().lower()
-            if not text:
+            normalized = normalize_semantic_alias(value)
+            if not normalized:
                 continue
-            target = overrides.get(text)
+            target = override_index.get(normalized)
             if target and is_canonical_semantic_key(target):
                 return target
+
+    # [*] 批次 D: 用户确认过的全局别名 —— 优先级最高(一处生效)。
+    if _RUNTIME_CONFIRMED_ALIAS_INDEX:
+        confirmed = _runtime_alias_bucket(_RUNTIME_CONFIRMED_ALIAS_INDEX, domain)
+        if confirmed:
+            for value in values:
+                normalized = normalize_semantic_alias(value)
+                if not normalized:
+                    continue
+                target = confirmed.get(normalized)
+                if target and is_canonical_semantic_key(target):
+                    return target
+
+    domain_alias_index = _NORMALIZED_DOMAIN_ALIAS_INDEX.get(domain, {})
+    if domain_alias_index:
+        for value in values:
+            normalized = normalize_semantic_alias(value)
+            if not normalized:
+                continue
+            target = domain_alias_index.get(normalized)
+            if target and is_canonical_semantic_key(target):
+                return target
+
+    # [*] 批次 D: 表里的内置别名(semantic.semantic_field_aliases)。
+    if _RUNTIME_ALIAS_INDEX:
+        builtin = _runtime_alias_bucket(_RUNTIME_ALIAS_INDEX, domain)
+        if builtin:
+            for value in values:
+                normalized = normalize_semantic_alias(value)
+                if not normalized:
+                    continue
+                target = builtin.get(normalized)
+                if target and is_canonical_semantic_key(target):
+                    return target
+
     return infer_semantic_key(*values)
 
 
@@ -621,3 +1014,236 @@ def resolve_semantic_value(
             if any(candidate_variant in key_variants for candidate_variant in _normalize_key_variants(candidate)):
                 return value, key
     return None, None
+
+
+# ── 标准字段定义的对外投影(批次 D · API-1) ─────────────────────────
+#
+# 为什么要有这一层
+# --------------
+# 前端以前在 ``headerBindings.js`` 里**自己抄了一份**标准字段定义。
+# 实测两份已经漂了(2026-11-07):
+#
+#   * 41 个字段里, 前端**普遍缺** ``domain`` / ``required`` / ``system_scope``
+#     ⇒ 前端算出来的 ``required`` 永远是 false, 与后端的契约判定对不上;
+#   * ``product_name`` 前端叫「商品名」后端叫「商品名称」;
+#     ``item_status`` 前端叫「发品状态」后端叫「商品状态」;
+#   * 5 个字段的别名列表对不上(``platform_sku`` 大小写、``line_id`` 少一条 …)。
+#
+# ⇒ 用户在前端看到的选项 ≠ 后端实际认定(FE-1)。
+#
+# 这一层把「唯一一份定义」投影成前端能直接用的结构, 前端不再抄。
+
+#: 下拉框分组(键 → 中文标题, 顺序即展示顺序)。
+SEMANTIC_OPTION_GROUPS: tuple[tuple[str, str], ...] = (
+    ("identity", "身份字段"),
+    ("time", "时间字段"),
+    ("traffic_metric", "流量指标"),
+    ("order_metric", "订单指标"),
+    ("product_metric", "商品指标"),
+    ("attribution_metric", "渠道归因指标"),
+    ("attribute", "属性字段"),
+)
+
+_ORDER_METRIC_KEYS = frozenset(
+    {
+        "order_count",
+        "sku_order_count",
+        "sales_amount",
+        "sales_volume",
+        "paid_amount",
+        "profit",
+        "platform_commission",
+    }
+)
+_PRODUCT_METRIC_KEYS = frozenset({"purchase_amount"})
+_ATTRIBUTION_METRIC_KEYS = frozenset(
+    {
+        "live_gmv",
+        "live_attributed_gmv",
+        "live_indirect_gmv",
+        "video_gmv",
+        "video_attributed_gmv",
+        "video_indirect_gmv",
+    }
+)
+
+
+def semantic_option_group_key(semantic_key: Optional[str], meta: Optional[Dict[str, Any]] = None) -> str:
+    """判定一个语义键属于哪个下拉分组。
+
+    规则与前端旧实现逐条对应(前端旧实现是这段逻辑的**副本**,
+    现在前端直接用后端算好的 ``group``)。
+    """
+    meta = meta if meta is not None else SEMANTIC_FIELD_META.get(str(semantic_key or ""), {})
+    key = str(semantic_key or "")
+    kind = str(meta.get("kind") or "")
+    domain = str(meta.get("domain") or "common")
+    if kind == "time":
+        return "time"
+    if kind in ("identity", "dimension"):
+        return "identity"
+    if key in _ATTRIBUTION_METRIC_KEYS or domain == "attribution":
+        return "attribution_metric"
+    if key in _ORDER_METRIC_KEYS or domain == "orders":
+        return "order_metric"
+    if key in _PRODUCT_METRIC_KEYS or domain == "products":
+        return "product_metric"
+    if kind == "metric":
+        return "traffic_metric"
+    return "attribute"
+
+
+def build_semantic_field_definitions_payload() -> Dict[str, Any]:
+    """标准字段定义的只读投影(API-1 的返回体)。
+
+    这份载荷就是前端唯一的标准字段来源 ——
+    前端不再维护副本, 因此不会再出现「前端看到的 ≠ 后端认定的」。
+    """
+    fields: list[Dict[str, Any]] = []
+    options: list[Dict[str, Any]] = []
+    for key, meta in SEMANTIC_FIELD_META.items():
+        aliases = get_semantic_aliases(key)
+        group = semantic_option_group_key(key, meta)
+        description = SEMANTIC_FIELD_DESCRIPTIONS.get(key, "")
+        fields.append(
+            {
+                "semantic_key": key,
+                "label": str(meta.get("label") or key),
+                "description": description,
+                "kind": str(meta.get("kind") or "attribute"),
+                "domain": str(meta.get("domain") or "common"),
+                "required": bool(meta.get("required", False)),
+                "hash_eligible": bool(meta.get("hash_eligible", False)),
+                "default_hash": bool(meta.get("default_hash", False)),
+                "system_scope": bool(meta.get("system_scope", False)),
+                "identity_strength": meta.get("identity_strength"),
+                "hash_warning": meta.get("hash_warning"),
+                "aliases": aliases,
+                "option_group": group,
+            }
+        )
+        options.append(
+            {
+                "value": key,
+                "label": f"{meta.get('label') or key} ({key})",
+                "description": description,
+                "kind": str(meta.get("kind") or "attribute"),
+                "domain": str(meta.get("domain") or "common"),
+                "group": group,
+                "hash_eligible": bool(meta.get("hash_eligible", False)),
+                "default_hash": bool(meta.get("default_hash", False)),
+                "system_scope": bool(meta.get("system_scope", False)),
+                "identity_strength": meta.get("identity_strength"),
+                "hash_warning": meta.get("hash_warning"),
+                "aliases": aliases,
+            }
+        )
+
+    option_groups: list[Dict[str, Any]] = []
+    for group_key, group_label in SEMANTIC_OPTION_GROUPS:
+        grouped = [option for option in options if option["group"] == group_key]
+        if not grouped:
+            continue
+        option_groups.append({"label": group_label, "options": grouped})
+
+    domain_aliases = [
+        {
+            "data_domain": domain,
+            "semantic_key": semantic_key,
+            "aliases": list(aliases),
+        }
+        for domain, alias_map in DOMAIN_SEMANTIC_ALIASES.items()
+        for semantic_key, aliases in alias_map.items()
+    ]
+    column_overrides = [
+        {"data_domain": domain, "raw_name": raw_name, "semantic_key": semantic_key}
+        for domain, mapping in DOMAIN_COLUMN_SEMANTIC_OVERRIDES.items()
+        for raw_name, semantic_key in mapping.items()
+    ]
+
+    return {
+        "fields": fields,
+        "option_groups": option_groups,
+        "domain_aliases": domain_aliases,
+        "column_overrides": column_overrides,
+        "system_hash_scope_fields": sorted(SYSTEM_HASH_SCOPE_KEYS),
+        "hash_identity_keys": sorted(SEMANTIC_HASH_IDENTITY_KEYS),
+        "runtime_alias_count": runtime_alias_count(),
+        "runtime_alias_loaded": _RUNTIME_ALIAS_LOADED,
+        # [*] 运行时别名索引 —— 这两份是**活的**: 用户在模板里沉淀一次,
+        #     别名就多一条 ⇒ 前端必须每次从接口拿, 不能用快照。
+        "runtime_alias_index": {
+            domain: dict(items) for domain, items in _RUNTIME_CONFIRMED_ALIAS_INDEX.items()
+        },
+        "runtime_builtin_alias_index": {
+            domain: dict(items) for domain, items in _RUNTIME_ALIAS_INDEX.items()
+        },
+    }
+
+
+#: 归一化口径的「样本对」—— 用来锁住前后端两套归一化实现一致。
+#:
+#: 前端必须自己算一次归一化(它要在浏览器里查别名索引),
+#: 所以前端有一份 :func:`normalize_semantic_alias` 的镜像实现。
+#: 这份样本对由后端生成, 前端测试逐条断言 ⇒ 两边漂了就红。
+NORMALIZATION_SAMPLE_VALUES: tuple[str, ...] = (
+    "订单号",
+    "订单编号",
+    "买家支付(RMB)",
+    "买家支付（rmb）",
+    "利润（rmb）",
+    "利润(RMB)",
+    "商品SKU",
+    "商品 sku",
+    "下单时间\n",
+    "*商品sku",
+    "*商品名称",
+    "商品 id",
+    "商品ID",
+    "客服ID",
+    "日期期间",
+    "GMV",
+    "gmv",
+    "  销售额  ",
+    "销售_数量",
+    "支付订单数",
+    "商品成交件数",
+    "曝光次数",
+    "点击次数",
+    "转化率",
+    "date_from",
+    "date_to",
+    "order id",
+    "Order ID",
+    "line_id",
+    "订单明细行ID",
+)
+
+
+def build_semantic_field_snapshot_payload() -> Dict[str, Any]:
+    """前端快照载荷 —— 归一化索引 + 样本对 + 字段定义。
+
+    前端在**浏览器里**用这份快照当兜底(接口没回来时不至于整页空白),
+    同时用 ``normalization_samples`` 锁住前后端归一化口径一致。
+
+    这份快照是**生成物**, 不是人手维护的副本 ——
+    ``backend/tests/data_pipeline/test_semantic_translation_guardrails.py``
+    会重新生成一遍并比对, 漂了就红。
+    """
+    payload = build_semantic_field_definitions_payload()
+    # [*] 运行时别名索引是**活的**(用户在模板里沉淀一次就变一次) ⇒ 不能进快照。
+    #     快照只放「代码里定义的」那部分, 运行期数据一律走接口。
+    payload.pop("runtime_alias_index", None)
+    payload.pop("runtime_builtin_alias_index", None)
+    payload["alias_index"] = dict(_NORMALIZED_ALIAS_INDEX)
+    payload["domain_alias_index"] = {
+        domain: dict(items) for domain, items in _NORMALIZED_DOMAIN_ALIAS_INDEX.items()
+    }
+    payload["domain_column_index"] = {
+        domain: dict(items) for domain, items in _NORMALIZED_COLUMN_OVERRIDE_INDEX.items()
+    }
+    payload["normalization_samples"] = [
+        [raw, normalize_semantic_alias(raw)] for raw in NORMALIZATION_SAMPLE_VALUES
+    ]
+    return payload
+

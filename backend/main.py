@@ -479,6 +479,26 @@ async def lifespan(app: FastAPI):
             warm_up_pool(pool_size=warm_pool_target)
             startup_metrics["pool_warmup"] = time.time() - step_start
             logger.info(f"[OK] 连接池预热完成 ({startup_metrics['pool_warmup']:.2f}秒)")
+
+            # [*] 批次 D: 加载全局语义别名。
+            #
+            # 表 ``semantic.semantic_field_aliases`` 里已有 75 条别名
+            # (products 域的「销售额」「曝光次数」「点击次数」「转化率」…),
+            # 它们以前**只在 SQL 侧**被用, Python 侧看不见 ⇒ 翻译命中率只有 3~6%。
+            # 这里在启动时加载进推断索引。
+            try:
+                from backend.models.database import AsyncSessionLocal
+                from backend.services.semantic_field_registry import (
+                    load_runtime_aliases,
+                )
+
+                async with AsyncSessionLocal() as alias_db:
+                    alias_count = await load_runtime_aliases(alias_db)
+                logger.info(f"[OK] 全局语义别名已加载 ({alias_count} 条)")
+            except Exception as alias_err:
+                logger.warning(
+                    "[WARN] 全局语义别名加载失败, 翻译命中率会受影响: %s", alias_err
+                )
         except Exception as e:
             if not dashboard_bootstrap_completed:
                 startup_metrics["dashboard_bootstrap"] = time.time() - step_start

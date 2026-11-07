@@ -14,8 +14,12 @@ CREATE TABLE IF NOT EXISTS semantic.semantic_field_aliases (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT ck_semantic_field_aliases_source
         CHECK (source IN ('builtin', 'template_confirmed', 'manual')),
+    -- status 三态:
+    --   active   —— 生效
+    --   disabled —— 人已裁决「不要这条」
+    --   conflict —— 人**还没裁决**: 同一列名挂着两个候选语义键(批次 D)
     CONSTRAINT ck_semantic_field_aliases_status
-        CHECK (status IN ('active', 'disabled')),
+        CHECK (status IN ('active', 'disabled', 'conflict')),
     CONSTRAINT uq_semantic_field_aliases_identity
         UNIQUE (data_domain, standard_field, raw_alias, platform_code, granularity)
 );

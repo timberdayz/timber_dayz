@@ -210,6 +210,10 @@ def _create_isolated_schema(database_url: str) -> None:
                 "c_class",
                 "finance",
                 "ops",
+                # [*] 批次 D: 全局语义别名表(semantic.semantic_field_aliases)
+                #     以前这张表只有 SQL 定义、没有 ORM 模型, 所以测试库不需要
+                #     semantic schema; 现在补上 ORM 模型了 ⇒ 必须先建 schema。
+                "semantic",
             ):
                 await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
             await conn.run_sync(Base.metadata.create_all)
@@ -318,6 +322,8 @@ async def pg_engine():
                 "c_class",
                 "finance",
                 "ops",
+                # [*] 批次 D: 全局语义别名表在 semantic schema(见上方说明)。
+                "semantic",
             ):
                 await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
 

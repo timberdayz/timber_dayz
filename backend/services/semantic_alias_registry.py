@@ -75,6 +75,18 @@ BUILTIN_ALIASES: List[AliasRecord] = [
 @dataclass(frozen=True)
 class AliasUpsertSummary:
     aliases: List[AliasRecord]
+    #: [*] 批次 D: 冲突明细 —— 同一列名被对齐到**两个**语义键。
+    conflicts: List[AliasRecord]
+    created: int
+    unchanged: int
+
+
+#: [*] 批次 D: 全局别名的域占位符 —— 用户在任何一个域确认过的对齐, 其它域也生效
+#: (D-3 决策「全局沉淀, 一处生效」)。
+GLOBAL_ALIAS_DOMAIN = "*"
+
+#: 冲突记录的标准字段前缀 —— 让冲突行与正常行在唯一约束上不撞
+CONFLICT_FIELD_PREFIX = "__conflict__"
 
 
 class SemanticAliasRegistryService:
@@ -107,9 +119,22 @@ class SemanticAliasRegistryService:
         platform_code: Optional[str],
         granularity: Optional[str],
         header_bindings: Iterable[Dict[str, Any]],
+        global_scope: bool = True,
     ) -> List[AliasRecord]:
+        """收集「用户确认过」的绑定, 作为可沉淀的别名。
+
+        [*] 批次 D: ``global_scope=True``(默认)时沉淀成**全局**别名 ——
+        用户在一个域对齐一次, 其它域/其它模板自动命中(D-3 决策)。
+        """
         aliases: List[AliasRecord] = []
         seen = set()
+        scope_domain = GLOBAL_ALIAS_DOMAIN if global_scope else data_domain
+        # [*] 批次 D: 全局沉淀必须**三个维度都不限**才算「全局」。
+        #     只把 data_domain 放开、platform_code / granularity 还带着的话,
+        #     同一个列名在另一个平台再对齐一次会变成「另一条记录」——
+        #     冲突检测就漏了, 「一处生效」也名不副实。
+        scope_platform = None if global_scope else platform_code
+        scope_granularity = None if global_scope else granularity
         for binding in header_bindings or []:
             if binding.get("semantic_review_status") != "confirmed_semantic":
                 continue
@@ -117,17 +142,17 @@ class SemanticAliasRegistryService:
             raw_alias = binding.get("source_header") or binding.get("raw_name") or binding.get("display_name")
             if not standard_field or not raw_alias:
                 continue
-            key = (data_domain, standard_field, raw_alias, platform_code, granularity)
+            key = (scope_domain, standard_field, raw_alias, scope_platform, scope_granularity)
             if key in seen:
                 continue
             seen.add(key)
             aliases.append(
                 {
-                    "data_domain": data_domain,
+                    "data_domain": scope_domain,
                     "standard_field": standard_field,
                     "raw_alias": raw_alias,
-                    "platform_code": platform_code,
-                    "granularity": granularity,
+                    "platform_code": scope_platform,
+                    "granularity": scope_granularity,
                     "source": "template_confirmed",
                 }
             )
@@ -141,45 +166,172 @@ class SemanticAliasRegistryService:
         platform_code: Optional[str],
         granularity: Optional[str],
         header_bindings: Iterable[Dict[str, Any]],
+        global_scope: bool = True,
     ) -> AliasUpsertSummary:
+        """把用户确认过的对齐沉淀进全局别名表。
+
+        [*] 批次 D 的硬原则: **冲突不静默覆盖**。
+
+        同一个列名被对齐到**两个**语义键时:
+        * 原记录**保持不动**;
+        * 额外写一条 ``status='conflict'`` 的记录;
+        * 返回 ``conflicts`` 明细, 由上层报警 + 交人裁决。
+
+        以前这里是「存在就跳过」—— 冲突被**静默丢弃**, 人根本不知道
+        有两个模板对同一个列名有不同理解。
+        """
         aliases = self.collect_aliases_from_template_bindings(
             data_domain=data_domain,
             platform_code=platform_code,
             granularity=granularity,
             header_bindings=header_bindings,
+            global_scope=global_scope,
         )
         if not aliases:
-            return AliasUpsertSummary(aliases=[])
+            return AliasUpsertSummary(aliases=[], conflicts=[], created=0, unchanged=0)
 
         now = datetime.now(timezone.utc)
+        created = 0
+        unchanged = 0
+        conflicts: List[AliasRecord] = []
         try:
             for alias in aliases:
-                await db.execute(
-                    text(
-                        """
-                        INSERT INTO semantic.semantic_field_aliases (
-                            data_domain, standard_field, raw_alias, platform_code, granularity,
-                            source, confidence, status, created_at, updated_at
-                        )
-                        SELECT
-                            :data_domain, :standard_field, :raw_alias, :platform_code, :granularity,
-                            :source, 0.95, 'active', :now, :now
-                        WHERE NOT EXISTS (
-                            SELECT 1
-                            FROM semantic.semantic_field_aliases existing
-                            WHERE existing.data_domain = :data_domain
-                              AND existing.standard_field = :standard_field
-                              AND existing.raw_alias = :raw_alias
-                              AND COALESCE(existing.platform_code, '') = COALESCE(:platform_code, '')
-                              AND COALESCE(existing.granularity, '') = COALESCE(:granularity, '')
-                              AND existing.status = 'active'
-                        )
-                        """
-                    ),
-                    {**alias, "now": now},
+                conflict = await self._detect_conflict(
+                    db,
+                    data_domain=alias["data_domain"],
+                    raw_alias=alias["raw_alias"],
+                    standard_field=alias["standard_field"],
+                    platform_code=alias.get("platform_code"),
+                    granularity=alias.get("granularity"),
                 )
+                if conflict is not None:
+                    conflicts.append(conflict)
+                    await self._insert_conflict_row(db, conflict, now=now)
+                    continue
+                inserted = await self._insert_alias_row(db, alias, now=now)
+                if inserted:
+                    created += 1
+                else:
+                    unchanged += 1
             await db.commit()
         except SQLAlchemyError as exc:
             await db.rollback()
-            logger.warning("[SemanticAliasRegistry] alias registry upsert skipped: %s", exc)
-        return AliasUpsertSummary(aliases=aliases)
+            logger.warning("[SemanticAlias] 别名沉淀失败: %s", exc)
+            return AliasUpsertSummary(
+                aliases=aliases, conflicts=conflicts, created=created, unchanged=unchanged
+            )
+
+        if conflicts:
+            logger.warning(
+                "[SemanticAlias] 别名冲突 %s 条, 已落 conflict 等待裁决 (未覆盖原记录)",
+                len(conflicts),
+            )
+        return AliasUpsertSummary(
+            aliases=aliases, conflicts=conflicts, created=created, unchanged=unchanged
+        )
+
+    async def _detect_conflict(
+        self,
+        db: AsyncSession,
+        *,
+        data_domain: str,
+        raw_alias: str,
+        standard_field: str,
+        platform_code: Optional[str],
+        granularity: Optional[str],
+    ) -> Optional[AliasRecord]:
+        """同一列名已经指向**别的**语义键 ⇒ 冲突。"""
+        result = await db.execute(
+            text(
+                """
+                SELECT standard_field
+                FROM semantic.semantic_field_aliases
+                WHERE data_domain = :data_domain
+                  AND raw_alias = :raw_alias
+                  AND COALESCE(platform_code, '') = COALESCE(:platform_code, '')
+                  AND COALESCE(granularity, '') = COALESCE(:granularity, '')
+                  AND status = 'active'
+                  AND standard_field <> :standard_field
+                LIMIT 1
+                """
+            ),
+            {
+                "data_domain": data_domain,
+                "raw_alias": raw_alias,
+                "standard_field": standard_field,
+                "platform_code": platform_code,
+                "granularity": granularity,
+            },
+        )
+        existing = result.first()
+        if not existing:
+            return None
+        return {
+            "data_domain": data_domain,
+            "standard_field": standard_field,
+            "raw_alias": raw_alias,
+            "platform_code": platform_code,
+            "granularity": granularity,
+            "source": "template_confirmed",
+            "conflict_with": existing[0],
+        }
+
+    async def _insert_alias_row(
+        self, db: AsyncSession, alias: AliasRecord, *, now: datetime
+    ) -> bool:
+        """写入一条别名; 已存在同 (域, 语义键, 列名) 则幂等跳过。"""
+        result = await db.execute(
+            text(
+                """
+                INSERT INTO semantic.semantic_field_aliases (
+                    data_domain, standard_field, raw_alias, platform_code, granularity,
+                    source, confidence, status, created_at, updated_at
+                )
+                SELECT
+                    :data_domain, :standard_field, :raw_alias, :platform_code, :granularity,
+                    :source, 0.95, 'active', :now, :now
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM semantic.semantic_field_aliases existing
+                    WHERE existing.data_domain = :data_domain
+                      AND existing.standard_field = :standard_field
+                      AND existing.raw_alias = :raw_alias
+                      AND COALESCE(existing.platform_code, '') = COALESCE(:platform_code, '')
+                      AND COALESCE(existing.granularity, '') = COALESCE(:granularity, '')
+                      AND existing.status = 'active'
+                )
+                """
+            ),
+            {**alias, "now": now},
+        )
+        return bool(result.rowcount)
+
+    async def _insert_conflict_row(
+        self, db: AsyncSession, conflict: AliasRecord, *, now: datetime
+    ) -> None:
+        """写入一条 ``conflict`` 记录(不覆盖原记录)。"""
+        conflict_field = f"{CONFLICT_FIELD_PREFIX}{conflict['standard_field']}"
+        await db.execute(
+            text(
+                """
+                INSERT INTO semantic.semantic_field_aliases (
+                    data_domain, standard_field, raw_alias, platform_code, granularity,
+                    source, confidence, status, created_at, updated_at
+                )
+                SELECT
+                    :data_domain, :standard_field, :raw_alias, :platform_code, :granularity,
+                    'manual', 0.500, 'conflict', :now, :now
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM semantic.semantic_field_aliases existing
+                    WHERE existing.data_domain = :data_domain
+                      AND existing.standard_field = :standard_field
+                      AND existing.raw_alias = :raw_alias
+                      AND COALESCE(existing.platform_code, '') = COALESCE(:platform_code, '')
+                      AND COALESCE(existing.granularity, '') = COALESCE(:granularity, '')
+                      AND existing.status = 'conflict'
+                )
+                """
+            ),
+            {**conflict, "standard_field": conflict_field, "now": now},
+        )

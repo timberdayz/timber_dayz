@@ -557,6 +557,64 @@ class FieldMappingTemplateItem(Base):
     )
 
 
+class SemanticFieldAlias(Base):
+    """全局语义别名(用户对齐一次, 处处生效)。
+
+    [*] 批次 D: 这张表以前只被 SQL 侧使用(``semantic.resolve_alias``),
+    ORM 侧没有模型 ⇒ Python 侧完全看不见它 —— 于是「表里已有的 75 条别名」
+    (products 域的 销售额/曝光次数/点击次数/转化率 …)根本没进过推断链路。
+    现在补上模型, 让推断、沉淀、冲突裁决共用同一份数据。
+
+    口径:
+    * ``data_domain = '*'`` 表示**不限数据域**(全局沉淀);
+    * ``platform_code`` / ``granularity`` 为空表示不限;
+    * ``status='conflict'`` 表示「同一列名被对齐到两个语义键」——
+      **不静默覆盖**, 交人来裁决。
+    """
+
+    __tablename__ = "semantic_field_aliases"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    data_domain = Column(String(64), nullable=False)
+    standard_field = Column(String(128), nullable=False)
+    raw_alias = Column(Text, nullable=False)
+    platform_code = Column(String(32), nullable=True)
+    granularity = Column(String(32), nullable=True)
+    source = Column(String(32), nullable=False, server_default=text("'builtin'"))
+    confidence = Column(Numeric(4, 3), nullable=False, server_default=text("1.000"))
+    status = Column(String(32), nullable=False, server_default=text("'active'"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "source IN ('builtin', 'template_confirmed', 'manual')",
+            name="ck_semantic_field_aliases_source",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'disabled', 'conflict')",
+            name="ck_semantic_field_aliases_status",
+        ),
+        UniqueConstraint(
+            "data_domain",
+            "standard_field",
+            "raw_alias",
+            "platform_code",
+            "granularity",
+            name="uq_semantic_field_aliases_identity",
+        ),
+        Index(
+            "ix_semantic_field_aliases_lookup",
+            "data_domain",
+            "standard_field",
+            "status",
+        ),
+        {"schema": "semantic"},
+    )
+
+
 class SemanticFieldContract(Base):
     """Consumer-level semantic field requirements for safe auto-ingest."""
 
