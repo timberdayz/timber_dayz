@@ -469,14 +469,36 @@ async def test_audit_is_read_only_and_probes_relation_before_querying():
         assert "DELETE" not in sql.upper()
 
 
+def service_has_relation_resolver() -> bool:
+    """服务层是否提供了「优先读物化视图」的 relation 解析。"""
+    from backend.services.semantic_coverage_audit_service import (
+        SemanticCoverageAuditService,
+    )
+
+    return hasattr(SemanticCoverageAuditService, "_resolve_relation")
+
+
 # ── SQL 口径 ──────────────────────────────────────────────────────────
 
 
-def test_products_sql_uses_alias_resolution_not_coalesced_view_columns():
-    """商品域必须走 resolve_alias —— 否则视图的 COALESCE(...,0) 会把失败伪装成成功。"""
+def test_products_sql_resolves_through_alias_registry_not_coalesced_view_columns():
+    """商品域必须走**别名表** —— 否则视图的 COALESCE(...,0) 会把失败伪装成成功。
+
+    [*] 2026-11-08 性能改造: 判定不再逐行逐字段调 ``semantic.resolve_alias()``
+    (实测每次键访问约 23 微秒/行 => 整轮巡检 80~90 秒), 改成
+    「一次展开 raw_data + 别名表哈希连接 + 数组重叠」⇒ 判定口径不变,
+    耗时降一个数量级。
+
+    ⇒ 守护从「用了 resolve_alias」改成更强的一组:
+    (1) 走**别名表**(事实源仍然是同一张表);
+    (2) **不再**逐行逐字段调 PL/pgSQL 函数(那是最慢的一环);
+    (3) **一次展开** raw_data, 不逐键访问。
+    """
     sql = build_coverage_sql(_products_domain())
 
-    assert "semantic.resolve_alias(" in sql
+    assert "semantic.semantic_field_aliases" in sql
+    assert "semantic.resolve_alias(" not in sql
+    assert "jsonb_each(" in sql
     assert "semantic.fact_products_atomic" in sql
     for field in PRODUCTS_STANDARD_FIELDS:
         assert f"'{field.standard_field}'" in sql
@@ -485,21 +507,63 @@ def test_products_sql_uses_alias_resolution_not_coalesced_view_columns():
     assert "COALESCE(sales_amount" not in sql
 
 
-def test_orders_sql_uses_alias_resolution_not_coalesced_view_columns():
-    """订单域也必须走 resolve_alias —— 视图的 COALESCE(...,0) 会把失败伪装成成功。
+def test_orders_sql_resolves_through_alias_registry_not_coalesced_view_columns():
+    """订单域也必须走**别名表** —— 视图的 COALESCE(...,0) 会把失败伪装成成功。
 
     阶段 5.2 口径变更：订单域从「按视图列的 NULL 性判定」改成「按别名解析」，
     这样被 COALESCE 掩盖的数值列才能区分「解析失败」与「真的是 0」。
+
+    [*] 2026-11-08 性能改造: 判定实现换成集合式(见
+    ``test_products_sql_resolves_through_alias_registry_not_coalesced_view_columns``),
+    **口径不变** —— 仍然逐字按别名表匹配、仍然只把「值非空」算命中。
     """
     sql = build_coverage_sql(SEMANTIC_COVERAGE_DOMAINS["orders"])
 
     assert "semantic.fact_orders_atomic" in sql
-    assert "semantic.resolve_alias(" in sql
+    assert "semantic.semantic_field_aliases" in sql
+    assert "semantic.resolve_alias(" not in sql
+    assert "jsonb_each(" in sql
     for field in ORDERS_STANDARD_FIELDS:
         assert f"'{field.standard_field}'" in sql
         assert f"resolved_{field.standard_field}" in sql
     # 不能直接拿视图里被 COALESCE 掩盖的数值列当解析结果。
     assert "COALESCE(paid_amount" not in sql
+
+
+def test_alias_mode_sql_keeps_resolution_criteria_explicit():
+    """口径条件必须显式出现在 SQL 里(不能被优化掉)。
+
+    这三条是「与 ``semantic.resolve_alias()`` 等价」的根据:
+
+    1. 平台/粒度: 别名为空(通用)或与本行精确相同才是候选;
+    2. 值非空才算命中(JSON null / 空串都不算);
+    3. 只认 ``status = 'active'`` 的别名。
+    """
+    for domain in ("products", "orders"):
+        sql = build_coverage_sql(SEMANTIC_COVERAGE_DOMAINS[domain])
+
+        assert "status = 'active'" in sql
+        assert "ar.platform_code = '' OR ar.platform_code = c.platform_code" in sql
+        assert "ar.granularity = '' OR ar.granularity = c.granularity" in sql
+        assert "k.value <> 'null'::jsonb" in sql
+        assert "k.value <> '\"\"'::jsonb" in sql
+
+
+def test_coverage_domains_prefer_materialized_view_when_available():
+    """巡检**优先读物化视图**(MV 不存在时由服务层回退普通视图)。
+
+    为什么: ``semantic.fact_*_atomic`` 是普通视图, 每次查询都要把整张视图
+    重算一遍(订单域 3.6 万行 x 28 个标准字段的别名解析 + 数值清洗)
+    ⇒ 实测单次聚合 80~90 秒, 慢到没法在看板里用。
+    """
+    for domain_name, mv_name in (
+        ("orders", "semantic.fact_orders_atomic_mv"),
+        ("products", "semantic.fact_products_atomic_mv"),
+    ):
+        spec = SEMANTIC_COVERAGE_DOMAINS[domain_name]
+        assert spec.materialized_relation == mv_name
+        assert spec.relation.endswith("_atomic")
+        assert service_has_relation_resolver()
 
 
 def test_empty_shell_detection_is_present_in_both_domains():

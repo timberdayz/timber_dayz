@@ -74,7 +74,7 @@
 from __future__ import annotations
 
 import difflib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -140,12 +140,29 @@ class SemanticCoverageField:
 
 @dataclass(frozen=True)
 class SemanticCoverageDomain:
-    """一个被巡检的语义域(商品域 / 订单域)。"""
+    """一个被巡检的语义域(商品域 / 订单域)。
+
+    ``materialized_relation`` 是**可选的物化视图副本** —— 巡检**优先**读它。
+
+    为什么优先读物化视图
+    ------------------
+    ``semantic.fact_*_atomic`` 是**普通视图**: 每次查询都要把整张视图重算一遍
+    (订单域 3.6 万行 x 28 个标准字段的别名解析 + 数值清洗正则) ⇒ 实测单次聚合
+    **90 秒量级**, 慢到没法在看板里用。
+
+    物化视图 ``semantic.fact_*_atomic_mv`` 是同一份视图的**快照**:
+    * ``raw_data`` 原样带过来 ⇒ **别名解析的输入完全相同**;
+    * 别名表是**实时读的** ⇒ 字典刚改完就能立刻看出解析率变化;
+    * 读取是秒级。
+
+    ⇒ 读 MV 既快又不改变结论。MV 不存在(全新部署)时自动回退普通视图。
+    """
 
     name: str
     relation: str
     resolution_mode: str
     fields: Tuple[SemanticCoverageField, ...]
+    materialized_relation: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -318,10 +335,12 @@ SEMANTIC_COVERAGE_DOMAINS: Dict[str, SemanticCoverageDomain] = {
         relation="semantic.fact_products_atomic",
         resolution_mode=RESOLUTION_MODE_ALIAS,
         fields=PRODUCTS_STANDARD_FIELDS,
+        materialized_relation="semantic.fact_products_atomic_mv",
     ),
     "orders": SemanticCoverageDomain(
         name="orders",
         relation="semantic.fact_orders_atomic",
+        materialized_relation="semantic.fact_orders_atomic_mv",
         # 订单域也走别名解析: 视图里被 COALESCE(...,0) 掩盖的数值列
         # (paid_amount / profit / product_quantity / buyer_count)只有走
         # resolve_alias 才分得清「解析失败」与「真的是 0」;
@@ -583,55 +602,174 @@ def build_coverage_sql(domain: SemanticCoverageDomain) -> str:
 
 
 def _build_alias_coverage_sql(domain: SemanticCoverageDomain) -> str:
-    """alias 模式: 用 ``semantic.resolve_alias()`` 复算解析率。
+    """alias 模式: 一次展开 ``raw_data`` + 按「非空 key 集合签名」去重后判定。
 
-    这条路径与 ``semantic.fact_products_atomic`` 的取值路径一致 ⇒
-    视图侧的 ``COALESCE(..., 0)`` 不会把解析失败伪装成成功。
+    性能
+    ----
+    旧实现对**每一行 x 每一个标准字段**访问一次 ``raw_data->>'key'``。
+    开发库实测(2026-11-08, 物化视图 3.6 万行):
+    **每次键访问约 23 微秒/行**, 而 ``jsonb_each`` **一次展开全部键只要 1 秒**
+    ⇒ 28 个字段就是「每行 28 次键访问」⇒ 整轮巡检 80~90 秒。
+
+    现在:
+    1. ``scoped``: 每行用 ``jsonb_each`` **一次**展开, 取出「**已登记别名里、
+       值非空**的 key」(存成**别名序号**数组, 排序后即规范化表示);
+    2. ``sig_rows``: 按 (域, 平台, 粒度, 序号数组) 去重 —— 同一张报表模板的
+       行共享同一个 key 集合 => 重判定只发生在**几十个不同签名**上;
+    3. ``sig_hits``: 对每个签名算「每个标准字段命中了吗」(数组重叠),
+       再 join 回每一行。
+
+    口径(与 ``semantic.resolve_alias()`` 逐条等价)
+    -------------------------------------------
+    * 列名**逐字**匹配(``raw_alias`` = 原始表头, 不归一化);
+    * 值非空才算命中(``->>`` 对 JSON null 返回 SQL NULL、对空串返回 ``''``,
+      两者都算「没有值」⇒ 等价于 ``k.value <> 'null'::jsonb AND k.value <> '""'::jsonb``);
+    * 平台/粒度: 别名为空(通用)或与本行精确相同才是候选;
+    * 「取哪一条候选」只影响**返回值**, 不影响**是否命中** ——
+      巡检只关心是否命中, 所以候选集合可以直接求并集。
+
+    ⚠ **未登记的 key 一律剔除**: 它们不可能命中任何标准字段 => 不影响判定。
     """
-    lateral_columns = ",\n                ".join(
-        "semantic.resolve_alias(s.raw_data, s.data_domain, "
-        f"'{field.source}', s.platform_code, s.granularity) AS c_{field.standard_field}"
-        for field in domain.fields
+    field_names = [field.standard_field for field in domain.fields]
+
+    # 每个字段一列: 该字段在这个 (data_domain, platform, granularity) 下的候选序号数组。
+    pivot_columns = ",\n                ".join(
+        "array_agg(alias_seq) FILTER (WHERE standard_field = '{field}') "
+        "AS keys_{field}".format(field=field)
+        for field in field_names
+    )
+    # 签名级: 每个字段是否命中(数组重叠)。
+    sig_hit_columns = ",\n                ".join(
+        "(sr.row_keys && cp.keys_{field}) AS c_{field}".format(field=field)
+        for field in field_names
+    )
+    # 回连到每一行时取签名级的判定结果。
+    sh_hit_columns = ",\n                ".join(
+        "sh.c_{field}".format(field=field) for field in field_names
     )
     resolved_columns = ",\n        ".join(
-        f"SUM(CASE WHEN c_{field.standard_field} IS NOT NULL THEN 1 ELSE 0 END) "
-        f"AS {_resolved_column_name(field.standard_field)}"
-        for field in domain.fields
+        "SUM(CASE WHEN c_{field} THEN 1 ELSE 0 END) "
+        "AS {alias}".format(
+            field=field,
+            alias=_resolved_column_name(field),
+        )
+        for field in field_names
     )
-    any_resolved = " OR ".join(
-        f"c_{field.standard_field} IS NOT NULL" for field in domain.fields
-    )
-    carried_columns = ",\n                ".join(
-        f"r.c_{field.standard_field}" for field in domain.fields
-    )
+    any_hit = " OR ".join("c_{field}".format(field=field) for field in field_names)
+    if not any_hit:
+        # 没有字段可巡检时也要给出合法 SQL(总量/空壳行仍然有意义)。
+        any_hit = "FALSE"
+
     return f"""
-        WITH scoped AS (
+        WITH alias_rows AS (
             SELECT
+                COALESCE(data_domain, '') AS data_domain,
+                standard_field,
+                raw_alias,
+                COALESCE(platform_code, '') AS platform_code,
+                COALESCE(granularity, '') AS granularity
+            FROM semantic.semantic_field_aliases
+            WHERE status = 'active'
+        ),
+        registered_aliases AS (
+            SELECT
+                ra.raw_alias,
+                ROW_NUMBER() OVER (ORDER BY ra.raw_alias) AS alias_seq
+            FROM (SELECT DISTINCT raw_alias FROM alias_rows) ra
+        ),
+        scoped AS (
+            SELECT
+                ROW_NUMBER() OVER () AS row_id,
+                COALESCE(platform_code, '') AS platform_code,
+                COALESCE(granularity, '') AS granularity,
+                COALESCE(data_domain, '') AS data_domain,
+                CASE WHEN raw_data IS NULL OR raw_data = '{{}}'::jsonb THEN 1 ELSE 0 END AS is_empty_shell,
+                ARRAY(
+                    SELECT ra.alias_seq
+                    FROM jsonb_each(COALESCE(raw_data, '{{}}'::jsonb)) AS k(key, value)
+                    JOIN registered_aliases ra ON ra.raw_alias = k.key
+                    WHERE k.value <> 'null'::jsonb AND k.value <> '""'::jsonb
+                    ORDER BY ra.alias_seq
+                ) AS row_keys
+            FROM {domain.relation}
+        ),
+        sig_rows AS (
+            SELECT DISTINCT
+                data_domain,
                 platform_code,
                 granularity,
+                row_keys
+            FROM scoped
+        ),
+        combos AS (
+            SELECT DISTINCT data_domain, platform_code, granularity FROM sig_rows
+        ),
+        combo_keys AS (
+            SELECT
+                c.data_domain,
+                c.platform_code,
+                c.granularity,
+                ar.standard_field,
+                array_agg(DISTINCT ra.alias_seq) AS alias_keys
+            FROM combos c
+            JOIN alias_rows ar
+              ON ar.data_domain = c.data_domain
+             AND (ar.platform_code = '' OR ar.platform_code = c.platform_code)
+             AND (ar.granularity = '' OR ar.granularity = c.granularity)
+            JOIN registered_aliases ra ON ra.raw_alias = ar.raw_alias
+            GROUP BY c.data_domain, c.platform_code, c.granularity, ar.standard_field
+        ),
+        combo_flat AS (
+            SELECT
+                ck.data_domain,
+                ck.platform_code,
+                ck.granularity,
+                ck.standard_field,
+                u.alias_seq
+            FROM combo_keys ck
+            CROSS JOIN LATERAL unnest(ck.alias_keys) AS u(alias_seq)
+        ),
+        combo_pivot AS (
+            SELECT
                 data_domain,
-                raw_data,
-                CASE WHEN raw_data IS NULL OR raw_data = '{{}}'::jsonb THEN 1 ELSE 0 END AS is_empty_shell
-            FROM {domain.relation}
+                platform_code,
+                granularity,
+                {pivot_columns}
+            FROM combo_flat
+            GROUP BY data_domain, platform_code, granularity
+        ),
+        sig_hits AS (
+            SELECT
+                sr.data_domain,
+                sr.platform_code,
+                sr.granularity,
+                sr.row_keys,
+                {sig_hit_columns}
+            FROM sig_rows sr
+            JOIN combo_pivot cp
+              ON cp.data_domain = sr.data_domain
+             AND cp.platform_code = sr.platform_code
+             AND cp.granularity = sr.granularity
         ),
         resolved AS (
             SELECT
                 s.platform_code,
                 s.granularity,
                 s.is_empty_shell,
-                {carried_columns}
+                {sh_hit_columns}
             FROM scoped s
-            CROSS JOIN LATERAL (
-                SELECT
-                {lateral_columns}
-            ) r
+            JOIN sig_hits sh
+              ON sh.data_domain = s.data_domain
+             AND sh.platform_code = s.platform_code
+             AND sh.granularity = s.granularity
+             AND sh.row_keys = s.row_keys
         )
         SELECT
             platform_code,
             granularity,
             COUNT(*) AS total_rows,
             SUM(is_empty_shell) AS empty_shell_rows,
-            SUM(CASE WHEN ({any_resolved}) THEN 0 ELSE 1 END) AS all_unresolved_rows,
+            SUM(CASE WHEN ({any_hit}) THEN 0 ELSE 1 END) AS all_unresolved_rows,
             {resolved_columns}
         FROM resolved
         GROUP BY platform_code, granularity
@@ -933,6 +1071,8 @@ class SemanticCoverageAuditService:
             )
 
         effective_threshold = self._threshold if threshold is None else threshold
+        # 优先读物化视图(MV 不存在时回退普通视图)—— 见 SemanticCoverageDomain。
+        spec = await self._resolve_relation(db, spec)
         sql = build_coverage_sql(spec)
 
         # ⚠️ 必须容错: ``semantic.fact_*_atomic`` 是 raw SQL 层(sql/semantic/*.sql),
@@ -1018,6 +1158,36 @@ class SemanticCoverageAuditService:
             threshold=effective_threshold,
             column_candidates=column_names,
         )
+
+    async def _resolve_relation(
+        self,
+        db: AsyncSession,
+        spec: SemanticCoverageDomain,
+    ) -> SemanticCoverageDomain:
+        """挑一个实际可读的 relation: 物化视图优先, 不存在则回退普通视图。"""
+        if not spec.materialized_relation:
+            return spec
+        try:
+            probe = await db.execute(
+                text("SELECT to_regclass(:relation) AS oid"),
+                {"relation": spec.materialized_relation},
+            )
+            exists = probe.mappings().one()["oid"]
+        except SQLAlchemyError as exc:
+            logger.warning(
+                "[SemanticCoverage] 物化视图探测失败（%s），回退普通视图: %s",
+                spec.materialized_relation,
+                exc,
+            )
+            return spec
+        if exists is None:
+            logger.info(
+                "[SemanticCoverage] 物化视图 %s 不存在，回退普通视图 %s",
+                spec.materialized_relation,
+                spec.relation,
+            )
+            return spec
+        return replace(spec, relation=spec.materialized_relation)
 
     async def _fetch_column_names(
         self,
