@@ -425,6 +425,13 @@
             <el-option v-for="item in filteredOperatingSkus" :key="item.sku_id" :label="item.sku_key" :value="item.sku_id" />
           </el-select>
           <el-button v-if="canManagePlatformFee" plain @click="openPlatformFeeDrawer('platform')">定价设置</el-button>
+          <!--
+            阶段 7：「仅有库存」默认打开 —— 测算表是"给还在卖的货定价"的表，
+            先把**这个仓已经清空的货**藏起来，运营不用在一屏"已清仓"里找活干。
+            筛选在后端做（前端筛只筛当前页，总数对不上、翻页会漏行）。
+          -->
+          <el-checkbox v-model="operatingQuery.only_in_stock" @change="resetOperatingPage">仅有库存</el-checkbox>
+          <span class="pricing-tier-hint">只看当前仓还有可用库存的 SKU</span>
           <el-checkbox v-model="showAdRateEscape" class="ad-rate-escape-toggle">
             高级：按广告分成率口径（默认用目标ROI）
           </el-checkbox>
@@ -465,6 +472,13 @@
           >
           <el-table-column label="基准售价" width="105" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }">{{ money(row.reference_selling_price) }}</template></el-table-column>
           <el-table-column label="竞品价格" width="110" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }"><el-input-number v-model="row.competitor_price" :min="0" :controls="false" size="small" /></template></el-table-column>
+          <!--
+            当前仓库存（阶段 7）：**这个仓现在还剩多少货**。
+            ⚠️ 与「库龄（仓）」是两件事：库龄是"压了多久"（只算还有货的仓），
+            这里是"还有多少货"（**零也要列出来**）—— 零 = 这个仓清过这货，
+            是一条事实。所以显式标「已清仓」，不让运营把它误读成缺数据。
+          -->
+          <el-table-column label="当前仓库存" width="120" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }"><el-tag v-if="row.current_warehouse_stock_status === 'cleared'" size="small" type="info">已清仓</el-tag><span v-else :class="{ muted: row.current_warehouse_stock_status !== 'in_stock' }">{{ currentWarehouseStockLabel(row) }}</span></template></el-table-column>
           <!--
             库龄（仓）：阶段 6 —— 库龄不再是「这个 SKU 最老的那一仓」，
             而是**当前选中的这个仓自己**的库龄；下面再列其它仓的库龄，
@@ -1236,6 +1250,9 @@ const operatingQuery = reactive({
   sku_id: "",
   warehouse_code: "",
   transport_type: "",
+  // 阶段 7：「仅有库存」默认打开 —— 测算表先看**这个仓还有货**的 SKU。
+  // 筛选在后端做（前端筛只会筛当前页，总数对不上、翻页会漏行）。
+  only_in_stock: true,
   page: 1,
   page_size: 20,
 });
@@ -2131,6 +2148,9 @@ const loadOperatingProfiles = async () => {
       transport_type: operatingQuery.transport_type,
       spu: operatingQuery.spu || undefined,
       sku_id: operatingQuery.sku_id || undefined,
+      // 阶段 7：「仅有库存」是**后端**筛选 —— 前端筛只筛当前页，
+      // 总数会对不上、翻页还会漏行。
+      only_in_stock: operatingQuery.only_in_stock,
       page: operatingQuery.page,
       page_size: operatingQuery.page_size,
     });
@@ -2190,6 +2210,20 @@ const otherWarehouseRestocks = (row) => {
     .sort(
       (a, b) => (b.days_since_restock ?? -1) - (a.days_since_restock ?? -1),
     );
+};
+// --- 阶段 7 · 当前仓库存展示 -----------------------------------------------
+// 「这个仓现在还剩多少货」和「这批货压了多久」是两件事：
+//   在卖（in_stock） → 显示数量
+//   已清仓（cleared）→ 显式标出来：这是**事实**（这个仓清过这货），不是缺数据
+//   无记录（no_record）→ 这个仓压根没有它的货
+//   取不到（unavailable）→ 状态层不可用，显示 "-"（不能当成"没有货"）
+const currentWarehouseStockLabel = (row) => {
+  const status = row.current_warehouse_stock_status;
+  if (status === "in_stock") return String(row.current_warehouse_available_stock ?? 0);
+  if (status === "cleared") return "已清仓";
+  if (status === "no_record") return "无记录";
+  if (status === "unavailable") return "-";
+  return "-";
 };
 const resetOperatingPage = () => {
   operatingQuery.page = 1;

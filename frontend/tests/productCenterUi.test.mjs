@@ -952,3 +952,43 @@ test("测算表给出跨仓提示，且只提示不改价", () => {
   // 提示的方向是「调拨」，不是「降价」—— 系统不越权替运营做调拨决策
   assert.match(source, /调拨/);
 });
+
+// ---------------------------------------------------------------------------
+// 阶段 7 · 当前仓库存（2026-11-08）
+//
+// 「这个仓还剩多少货」和「这批货压了多久」是两件事：
+// 零库存 = 已清仓，是**事实**，必须显式标出来，不能让运营误读成缺数据。
+// ---------------------------------------------------------------------------
+
+test("测算表给出「当前仓库存」列，与「库龄（仓）」并列放在事实段", () => {
+  assert.match(operatingSection, /label="当前仓库存"/);
+  // 库存是事实段的一列，和库龄放在一起读
+  assert.match(
+    operatingSection,
+    /label="当前仓库存"[^>]*class-name="seg-fact"/,
+  );
+  const stockAt = operatingSection.indexOf('label="当前仓库存"');
+  const ageAt = operatingSection.indexOf('label="库龄（仓）"');
+  assert.ok(stockAt >= 0 && ageAt > stockAt, "当前仓库存必须在库龄列之前或紧邻其后");
+});
+
+test("当前仓库存把「已清仓」显式标出来，而不是当成缺数据", () => {
+  assert.match(source, /const currentWarehouseStockLabel = \(row\)/);
+  assert.match(source, /已清仓/);
+  // 四种状态分得开：在卖 / 已清仓 / 这个仓没这货 / 取不到
+  assert.match(source, /"in_stock"/);
+  assert.match(source, /"cleared"/);
+  assert.match(source, /"no_record"/);
+  assert.match(source, /"unavailable"/);
+});
+
+test("「仅有库存」筛选默认打开，且在后端做", () => {
+  // 默认打开：测算表是"给还在卖的货定价"的表
+  assert.match(source, /only_in_stock: true/);
+  assert.match(operatingSection, /v-model="operatingQuery\.only_in_stock"/);
+  // 筛选必须走后端 —— 前端筛只筛当前页，总数对不上、翻页会漏行
+  assert.match(
+    source,
+    /only_in_stock: operatingQuery\.only_in_stock/,
+  );
+});

@@ -43,6 +43,7 @@ from .inventory.inventory_age_query_service import load_current_inventory_ages
 from .inventory.inventory_restock_query_service import (
     load_current_restock_days,
     load_restock_days_by_warehouse,
+    probe_inventory_state_available,
 )
 from .product_pricing_service import compute_sku_pricing, select_restock_tier
 from .sku_pricing_policy_service import load_current_policies, to_policy_rows
@@ -150,9 +151,22 @@ async def load_pricing_context(
         #    生产环境必须有 mart.inventory_state 才走新判据。
         from modules.core.logger import get_logger
 
-        get_logger(__name__).warning(
-            "inventory_state unavailable, falling back to legacy age_days caliber"
-        )
+        logger = get_logger(__name__)
+        # ⚠️ **回落口径一个字都不改**（A4：不传仓的老调用方输出必须与改造前逐字一致）。
+        #    这里只把**告警措辞**改准：
+        #    「状态层不可用」（管道坏了，要人去修）
+        #    与「这批 SKU 在状态层里没有有库存的记录」（业务事实 —— 货清了或压根没这货）
+        #    是两件事。以前两者都被报成前者 —— 每次筛出一批清仓 SKU，
+        #    日志里就冒一条"系统不可用"，把真故障淹掉了。
+        if sku_ids and await probe_inventory_state_available(db):
+            logger.info(
+                "no stocked inventory rows for the requested SKUs, "
+                "falling back to legacy age_days caliber"
+            )
+        else:
+            logger.warning(
+                "inventory_state unavailable, falling back to legacy age_days caliber"
+            )
         restock_rows = await load_current_inventory_ages(db, sku_ids)
         days_since_restock = {
             sku_id: row.get("age_days") for sku_id, row in restock_rows.items()
