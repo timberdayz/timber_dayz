@@ -47,6 +47,11 @@ from backend.schemas.collection import (
     CollectionConfigUpdate,
     TimeSelectionPayload,
 )
+from backend.schemas.collection_order_source import (
+    CollectionOrderSourceAuditResponse,
+    CollectionOrderSourceSummary,
+    CollectionOrderSourceWarning,
+)
 from backend.schemas.common import SuccessResponse
 from backend.services.collection_contracts import (
     DEFAULT_GRANULARITY_DATE_RANGE_TYPE,
@@ -62,6 +67,9 @@ from backend.services.collection_contracts import (
     normalize_time_selection,
     resolve_shop_capabilities,
     summarize_shop_scopes,
+)
+from backend.services.data_pipeline.order_source_governance import (
+    collect_collection_order_source_audit,
 )
 from modules.core.db import (
     CollectionConfig,
@@ -2421,3 +2429,52 @@ async def get_config_coverage(
         raise HTTPException(
             status_code=500, detail="failed to build collection config coverage"
         )
+
+
+@router.get(
+    "/config-order-source",
+    response_model=CollectionOrderSourceAuditResponse,
+)
+async def get_collection_config_order_source(
+    platform: Optional[str] = Query(None, description="Filter by platform"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """采集侧「订单域来源」巡检（语义层 SSOT 阶段 6）。
+
+    实测（2026-11）：``b_class.fact_shopee_orders_*`` / ``b_class.fact_tiktok_orders_*``
+    里的数据**实际由 miaoshou 采集器写入**（行的 shop_account_id 全是
+    ``miaoshou_real_001``），而 shopee / tiktok 自己的采集配置里**没有** orders 域。
+
+    => **表名里的平台前缀不等于采集器**。这个接口在采集侧直接点名：
+    某个平台的采集配置不含 orders 域时，提示
+    「shopee 订单需由 miaoshou 采集器提供」（反过来若配置里声明了 orders 域，
+    则提示与 miaoshou 采集器重复采集）。
+
+    只读：不改采集配置、不改数据库。
+    """
+    try:
+        report = await collect_collection_order_source_audit(db, platform=platform)
+    except Exception:
+        logger.exception("Failed to build collection order source audit")
+        raise HTTPException(
+            status_code=500, detail="failed to build collection order source audit"
+        )
+
+    return CollectionOrderSourceAuditResponse(
+        summary=CollectionOrderSourceSummary(
+            checked_config_count=report.checked_config_count,
+            warning_count=report.warning_count,
+            source_notes=dict(report.notes),
+        ),
+        warnings=[
+            CollectionOrderSourceWarning(
+                platform=item.platform,
+                config_id=item.config_id,
+                config_name=item.config_name,
+                warning=item.warning,
+                reason=item.reason,
+                data_domains=list(item.data_domains),
+            )
+            for item in report.items
+        ],
+    )

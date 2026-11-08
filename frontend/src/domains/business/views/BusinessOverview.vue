@@ -44,6 +44,16 @@
     />
 
     <el-alert
+      v-if="businessOverviewSemanticReadinessAlert"
+      :title="businessOverviewSemanticReadinessAlert.title"
+      :description="businessOverviewSemanticReadinessAlert.description"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="dashboard-freshness-alert"
+    />
+
+    <el-alert
       v-if="businessOverviewIdentityHealthAlert"
       :title="businessOverviewIdentityHealthAlert.title"
       :description="businessOverviewIdentityHealthAlert.description"
@@ -1165,6 +1175,8 @@ import PageHeader from '@/components/common/PageHeader.vue'
 const loading = ref(false)
 const dashboardAssetNotice = ref(null)
 const businessOverviewDataFreshness = ref(null)
+// 后端「语义层就绪状态位」（meta.semantic_readiness）：fresh / updating / stale / unknown
+const businessOverviewSemanticReadiness = ref(null)
 // 后端「查询超时降级」标记（meta.data_status === 'degraded'）
 const businessOverviewDegradedMeta = ref(null)
 const trafficRankingIdentityHealth = ref(null)
@@ -1248,6 +1260,32 @@ const businessOverviewFreshnessAlert = computed(() => {
       `订单最新入库 ${formatFreshnessTime(orders.latest_ingest_timestamp)}，` +
       `流量最新入库 ${formatFreshnessTime(traffic.latest_ingest_timestamp)}。` +
       '请检查是否存在模板变更阻断或待确认文件。'
+  }
+})
+
+// 「语义层未就绪」提示：采集已经完成，但语义层（物化视图）还没追上，
+// 这段时间页面上的数字是**上一次**的结果 —— 必须说清楚，不能让人对着
+// 一个看起来正常的数字猜（2026-11-08 实测这个窗口约 70 秒）。
+const businessOverviewSemanticReadinessAlert = computed(() => {
+  const readiness = businessOverviewSemanticReadiness.value
+  if (!readiness) return null
+  const status = String(readiness.status || '')
+  if (status !== 'updating' && status !== 'stale') return null
+  const ingestAt = formatFreshnessTime(readiness.last_ingest_at)
+  const readyAt = formatFreshnessTime(readiness.last_semantic_ready_at)
+  if (status === 'updating') {
+    return {
+      title: '数据更新中（语义层尚未就绪）',
+      description:
+        `最新采集已于 ${ingestAt} 落库，语义层仍在刷新（上次就绪 ${readyAt}）。` +
+        '此刻页面上的数字是上一次的结果，请稍后刷新。'
+    }
+  }
+  return {
+    title: '数据已过期（语义层长时间未就绪）',
+    description:
+      `最新采集于 ${ingestAt} 落库，但语义层一直没有就绪（上次就绪 ${readyAt}）。` +
+      '请检查语义层刷新链路（semantic.fact_orders_* 物化视图）。'
   }
 })
 
@@ -2610,6 +2648,7 @@ const loadKPIData = async () => {
     if (response) {
       const data = response
       businessOverviewDataFreshness.value = data.meta?.data_freshness || null
+      businessOverviewSemanticReadiness.value = data.meta?.semantic_readiness || null
       businessOverviewDegradedMeta.value = extractDegradedMeta(data.meta)
       applyKpiCards(data)
     }
@@ -3106,6 +3145,7 @@ const loadCriticalTierBootstrap = async () => {
     applyComparisonPayload(payload?.comparison)
     applyOperationalPayload(payload?.operational_metrics)
     businessOverviewDataFreshness.value = payload?.meta?.data_freshness || null
+    businessOverviewSemanticReadiness.value = payload?.meta?.semantic_readiness || null
     businessOverviewDegradedMeta.value = extractDegradedMeta(payload?.meta)
   } catch (error) {
     console.error('[BusinessOverview] bootstrap 加载失败:', error)

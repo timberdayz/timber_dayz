@@ -41,6 +41,49 @@ DEFAULT_GRANULARITY_DATE_RANGE_TYPE: Dict[str, str] = {
 }
 
 
+# ── 订单域来源治理（语义层 SSOT 改造 · 阶段 6）───────────────────────
+#
+# 实测取证（2026-11）：``b_class.fact_shopee_orders_*`` / ``b_class.fact_tiktok_orders_*``
+# 里的数据**实际由 miaoshou 采集器写入**（这些行的 shop_account_id 全是
+# ``miaoshou_real_001``），而 shopee / tiktok 自己的采集配置里**没有** orders 域；
+# ``fact_miaoshou_orders_*`` 与 shopee/tiktok 的 manual 表在 2026-11 都是 0 行。
+#
+# => **表名里的平台前缀 != 采集器**。排查「订单数据没有 / 订单数据不对」时，
+#   要去 **miaoshou 采集侧**看，而不是去 shopee / tiktok 的采集配置里找 orders 域。
+#
+# 本轮（方案 §10 V2-4）**不重命名表**（改名涉及迁移与大量查询，收益仅可读性、
+# 风险中等）=> 只做「标注 + 提示」：
+# - 标注落点：本模块（采集配置的代码级契约）；
+# - 提示落点：``backend/services/data_pipeline/order_source_governance.py``（巡检）。
+ORDER_SOURCE_PROVIDER_BY_PLATFORM: Dict[str, str] = {
+    "shopee": "miaoshou",
+    "tiktok": "miaoshou",
+}
+
+
+def get_order_source_provider(platform: Optional[str]) -> Optional[str]:
+    """订单域数据的**实际采集器**；``None`` 表示该平台没有这条特殊约定。"""
+    return ORDER_SOURCE_PROVIDER_BY_PLATFORM.get(str(platform or "").strip().lower())
+
+
+def build_order_source_note(platform: Optional[str]) -> Optional[str]:
+    """来源标注文案，例如「shopee 订单由 miaoshou 采集器提供」。"""
+    provider = get_order_source_provider(platform)
+    if not provider:
+        return None
+    platform_key = str(platform or "").strip().lower()
+    return f"{platform_key} 订单由 {provider} 采集器提供"
+
+
+def build_missing_order_source_note(platform: Optional[str]) -> Optional[str]:
+    """缺 orders 域时的提示文案，例如「shopee 订单需由 miaoshou 采集器提供」。"""
+    provider = get_order_source_provider(platform)
+    if not provider:
+        return None
+    platform_key = str(platform or "").strip().lower()
+    return f"{platform_key} 订单需由 {provider} 采集器提供"
+
+
 def get_default_shop_capabilities(shop_type: str | None) -> Dict[str, bool]:
     defaults = {
         "orders": True,
@@ -133,7 +176,9 @@ def normalize_time_selection(
         return normalize_dynamic_time_selection(
             {
                 "mode": "dynamic",
-                "strategy": DYNAMIC_DATE_RANGE_TYPE_TO_STRATEGY[normalized_date_range_type],
+                "strategy": DYNAMIC_DATE_RANGE_TYPE_TO_STRATEGY[
+                    normalized_date_range_type
+                ],
                 "available_after_time": raw.get("available_after_time"),
             }
         )
@@ -147,7 +192,9 @@ def normalize_time_selection(
             }
         )
 
-    explicit_preset = str(raw.get("preset") or date_preset or date_range_type or "").strip().lower()
+    explicit_preset = (
+        str(raw.get("preset") or date_preset or date_range_type or "").strip().lower()
+    )
     explicit_start = (
         raw.get("start_date")
         or _normalize_date_like(start_date)
@@ -166,14 +213,18 @@ def normalize_time_selection(
     )
     has_custom_fields = bool(explicit_start or explicit_end)
 
-    mode = str(
-        raw.get("mode")
-        or time_mode
-        or ("preset" if explicit_preset and explicit_preset != "custom" else "")
-        or ("custom" if has_custom_fields else "")
-        or ("preset" if date_range_type and date_range_type != "custom" else "")
-        or ("custom" if date_range_type == "custom" else "")
-    ).strip().lower()
+    mode = (
+        str(
+            raw.get("mode")
+            or time_mode
+            or ("preset" if explicit_preset and explicit_preset != "custom" else "")
+            or ("custom" if has_custom_fields else "")
+            or ("preset" if date_range_type and date_range_type != "custom" else "")
+            or ("custom" if date_range_type == "custom" else "")
+        )
+        .strip()
+        .lower()
+    )
 
     if not mode:
         return {}
@@ -200,7 +251,9 @@ def normalize_time_selection(
             "mode": "custom",
             "start_date": start,
             "end_date": end,
-            "start_time": str(raw.get("start_time") or start_time or "00:00:00").strip(),
+            "start_time": str(
+                raw.get("start_time") or start_time or "00:00:00"
+            ).strip(),
             "end_time": str(raw.get("end_time") or end_time or "23:59:59").strip(),
         }
 
@@ -318,7 +371,9 @@ def build_legacy_collection_date_fields(
     normalized = normalize_time_selection(time_selection=time_selection)
     if normalized["mode"] == "dynamic":
         return {
-            "date_range_type": DYNAMIC_STRATEGY_TO_DATE_RANGE_TYPE[normalized["strategy"]],
+            "date_range_type": DYNAMIC_STRATEGY_TO_DATE_RANGE_TYPE[
+                normalized["strategy"]
+            ],
             "custom_date_start": None,
             "custom_date_end": None,
         }
@@ -398,14 +453,20 @@ def normalize_domain_subtypes(
     elif isinstance(sub_domains, dict):
         raw_mapping.update(sub_domains)
 
-    legacy_values = _as_string_list(sub_domains) if not isinstance(sub_domains, dict) else []
+    legacy_values = (
+        _as_string_list(sub_domains) if not isinstance(sub_domains, dict) else []
+    )
 
     for domain in data_domains or []:
         allowed_subtypes = _allowed_subtype_mapping().get(domain, [])
         if not allowed_subtypes:
             continue
 
-        requested = _as_string_list(raw_mapping.get(domain)) if domain in raw_mapping else legacy_values
+        requested = (
+            _as_string_list(raw_mapping.get(domain))
+            if domain in raw_mapping
+            else legacy_values
+        )
         filtered = [item for item in requested if item in allowed_subtypes]
         if filtered:
             normalized[domain] = filtered
@@ -470,15 +531,23 @@ def normalize_collection_date_range(
     source = dict(date_range or {})
     if source.get("time_selection"):
         normalized = build_date_range_from_time_selection(source["time_selection"])
-        normalized["time_selection"] = normalize_time_selection(time_selection=source["time_selection"])
+        normalized["time_selection"] = normalize_time_selection(
+            time_selection=source["time_selection"]
+        )
         if source.get(INCREMENTAL_RANGE_START_KEY):
-            normalized[INCREMENTAL_RANGE_START_KEY] = source[INCREMENTAL_RANGE_START_KEY]
+            normalized[INCREMENTAL_RANGE_START_KEY] = source[
+                INCREMENTAL_RANGE_START_KEY
+            ]
         if source.get(INCREMENTAL_RANGE_END_KEY):
             normalized[INCREMENTAL_RANGE_END_KEY] = source[INCREMENTAL_RANGE_END_KEY]
         return normalized
 
-    start_date = source.get("start_date") or source.get("start") or source.get("date_from") or ""
-    end_date = source.get("end_date") or source.get("end") or source.get("date_to") or ""
+    start_date = (
+        source.get("start_date") or source.get("start") or source.get("date_from") or ""
+    )
+    end_date = (
+        source.get("end_date") or source.get("end") or source.get("date_to") or ""
+    )
 
     normalized: Dict[str, str] = {}
     if start_date:

@@ -381,6 +381,7 @@ async def _try_attach_business_overview_freshness(
     *,
     platform_code: Optional[str],
     shop_id: Optional[str],
+    granularity: str = "monthly",
 ) -> dict[str, Any]:
     try:
         service = get_postgresql_dashboard_service()
@@ -410,6 +411,60 @@ async def _try_attach_business_overview_freshness(
         for warning in freshness.get("warnings") or []:
             if warning not in warnings:
                 warnings.append(warning)
+    await _try_attach_business_overview_semantic_readiness(
+        meta,
+        platform_code=platform_code,
+        shop_id=shop_id,
+        granularity=granularity,
+    )
+    return meta
+
+
+async def _try_attach_business_overview_semantic_readiness(
+    meta: dict[str, Any],
+    *,
+    platform_code: Optional[str],
+    shop_id: Optional[str],
+    granularity: str = "monthly",
+) -> dict[str, Any]:
+    """挂上**语义层就绪状态位**（``meta.semantic_readiness``）。
+
+    采集完成 -> 语义层就绪之间有约 70 秒窗口（2026-11-08 实测），
+    这段时间看板面对的是旧数据/空数据。这里把状态显式写出来，
+    前端据此提示「数据更新中」，而不是让人对着一个看起来正常的数字猜。
+
+    [注意] 这是**新增**字段：既有的 ``meta.data_status``（空周期 / 降级口径）
+    语义**不变**，两者互不干扰。
+    """
+    try:
+        service = get_postgresql_dashboard_service()
+        readiness = await service.get_business_overview_semantic_readiness(
+            granularity=granularity,
+            platform=platform_code,
+            shop_id=shop_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Business Overview semantic readiness query failed: %s",
+            exc,
+            exc_info=True,
+        )
+        return meta
+
+    if not isinstance(readiness, dict):
+        return meta
+
+    readiness = jsonable_encoder(readiness)
+    meta["semantic_readiness"] = readiness
+    status = str(readiness.get("status") or "")
+    if status in {"updating", "stale"}:
+        warnings = meta.get("warnings")
+        if not isinstance(warnings, list):
+            warnings = []
+            meta["warnings"] = warnings
+        marker = f"semantic_readiness_{status}"
+        if marker not in warnings:
+            warnings.append(marker)
     return meta
 
 
@@ -732,6 +787,7 @@ async def get_business_overview_kpi_postgresql(
                     payload["meta"],
                     platform_code=effective_platform_code,
                     shop_id=shop_id,
+                    granularity=effective_granularity,
                 )
                 if isinstance(payload.get("data"), dict):
                     payload["data"]["meta"] = payload["meta"]
@@ -1011,6 +1067,7 @@ async def get_business_overview_bootstrap_postgresql(
                     payload["meta"],
                     platform_code=effective_platform_code,
                     shop_id=shop_id,
+                    granularity=effective_granularity,
                 )
                 if isinstance(payload.get("data"), dict):
                     payload["data"]["meta"] = payload["meta"]

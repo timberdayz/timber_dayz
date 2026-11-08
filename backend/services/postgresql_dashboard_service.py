@@ -1773,6 +1773,33 @@ class PostgresqlDashboardService:
             "warnings": warnings,
         }
 
+    async def get_business_overview_semantic_readiness(
+        self,
+        *,
+        granularity: str = "monthly",
+        platform: str | None = None,
+        shop_id: str | None = None,
+    ) -> dict[str, Any]:
+        """看板用的**语义层就绪状态位**（新增字段，不改既有口径）。
+
+        回答的是「看板现在看到的数字，是不是最新采集的那一批」：
+        采集落盘 → 语义层就绪之间有约 70 秒窗口（2026-11-08 实测），
+        这段时间里看板面对的是旧数据/空数据，需要显式说明而不是让人猜。
+
+        状态位与判定规则见
+        ``backend/services/data_pipeline/semantic_readiness_service.py``：
+        ``fresh`` / ``updating`` / ``stale`` / ``unknown``。
+        """
+        from backend.services.data_pipeline.semantic_readiness_service import (
+            collect_semantic_readiness_standalone,
+        )
+
+        return await collect_semantic_readiness_standalone(
+            granularity=granularity,
+            platform=platform,
+            shop_id=shop_id,
+        )
+
     async def get_business_overview_kpi(
         self,
         month: str | None = None,

@@ -2,14 +2,17 @@
 Data pipeline observability routes.
 """
 
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.database import get_async_db
 from backend.services.data_pipeline.refresh_validation import find_missing_targets
+from backend.services.data_pipeline.semantic_readiness_service import (
+    collect_semantic_readiness,
+)
 from backend.services.data_pipeline.source_freshness_service import (
     collect_source_freshness,
 )
@@ -141,3 +144,31 @@ async def get_source_freshness(
             "chains": [row.to_dict() for row in report.rows],
         }
     )
+
+
+@router.get("/semantic-readiness")
+async def get_semantic_readiness(
+    granularity: str = Query("monthly", description="daily/weekly/monthly"),
+    platform_code: Optional[str] = Query(None, description="canonical platform code"),
+    shop_id: Optional[str] = Query(None, description="canonical shop id"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """语义层就绪状态位（阶段 6）。
+
+    回答「看板现在看到的数字，是不是最新采集的那一批」：
+    采集落盘 -> 语义层就绪之间有约 70 秒窗口（2026-11-08 实测），
+    这段时间里看板面对的是旧数据/空数据 => 显式给状态，而不是让人猜。
+
+    状态：``fresh``（就绪）/ ``updating``（采集中或刷新中）/ ``stale``（超阈值）/
+    ``unknown``（判不了）。
+
+    采集侧的订单域来源巡检在
+    ``GET /api/collection/config-order-source``（同一阶段的另一件事）。
+    """
+    readiness = await collect_semantic_readiness(
+        db,
+        granularity=granularity,
+        platform=platform_code,
+        shop_id=shop_id,
+    )
+    return success_response(data=readiness)

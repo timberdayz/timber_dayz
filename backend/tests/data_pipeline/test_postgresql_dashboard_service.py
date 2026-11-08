@@ -3021,6 +3021,7 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     CREATE TABLE IF NOT EXISTS semantic.fact_orders_atomic (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        data_domain VARCHAR(32),
                         granularity VARCHAR(32),
                         metric_date DATE,
                         platform_sku VARCHAR(128),
@@ -3042,6 +3043,7 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     CREATE TABLE IF NOT EXISTS semantic.fact_analytics_atomic (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        data_domain VARCHAR(32),
                         granularity VARCHAR(32),
                         metric_date DATE,
                         visitor_count NUMERIC,
@@ -3075,6 +3077,10 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     CREATE TABLE IF NOT EXISTS b_class.fact_shopee_orders_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        -- 语义层的月度物化视图正文直接从 b_class 源表读
+                        -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                        data_domain VARCHAR(32),
+                        granularity VARCHAR(32),
                         metric_date DATE,
                         raw_data JSONB,
                         data_hash VARCHAR(128),
@@ -3089,6 +3095,10 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     CREATE TABLE IF NOT EXISTS b_class.fact_tiktok_orders_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        -- 语义层的月度物化视图正文直接从 b_class 源表读
+                        -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                        data_domain VARCHAR(32),
+                        granularity VARCHAR(32),
                         metric_date DATE,
                         raw_data JSONB,
                         data_hash VARCHAR(128),
@@ -3103,6 +3113,10 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     CREATE TABLE IF NOT EXISTS b_class.fact_miaoshou_orders_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        -- 语义层的月度物化视图正文直接从 b_class 源表读
+                        -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                        data_domain VARCHAR(32),
+                        granularity VARCHAR(32),
                         metric_date DATE,
                         raw_data JSONB,
                         data_hash VARCHAR(128),
@@ -3117,6 +3131,10 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     CREATE TABLE IF NOT EXISTS b_class.fact_shopee_analytics_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        -- 语义层的月度物化视图正文直接从 b_class 源表读
+                        -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                        data_domain VARCHAR(32),
+                        granularity VARCHAR(32),
                         metric_date DATE,
                         raw_data JSONB,
                         data_hash VARCHAR(128),
@@ -3131,6 +3149,10 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     CREATE TABLE IF NOT EXISTS b_class.fact_tiktok_analytics_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        -- 语义层的月度物化视图正文直接从 b_class 源表读
+                        -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                        data_domain VARCHAR(32),
+                        granularity VARCHAR(32),
                         metric_date DATE,
                         raw_data JSONB,
                         data_hash VARCHAR(128),
@@ -3145,6 +3167,10 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     CREATE TABLE IF NOT EXISTS b_class.fact_miaoshou_analytics_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        -- 语义层的月度物化视图正文直接从 b_class 源表读
+                        -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                        data_domain VARCHAR(32),
+                        granularity VARCHAR(32),
                         metric_date DATE,
                         raw_data JSONB,
                         data_hash VARCHAR(128),
@@ -3157,11 +3183,16 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                 text(
                     """
                     INSERT INTO b_class.fact_shopee_orders_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, raw_data, data_hash, ingest_timestamp
                     )
                     VALUES (
-                        'shopee', 'shop-a', DATE '2026-03-01',
-                        '{"order_id":"o-1","paid_amount":"100","product_quantity":"12","profit":"30"}'::jsonb,
+                        'shopee', 'shop-a', 'orders', 'monthly', DATE '2026-03-01',
+                        -- [*] orders 域取数改走别名表(semantic.resolve_alias) ⇒
+                        -- raw_data 的键必须是**登记过的真实源表头**
+                        -- (买家支付(RMB)/利润(RMB)/销售数量/订单编号);
+                        -- 裸名(原币列)与英文列名都命不中 ⇒ 取不到就是 NULL。
+                        '{"订单编号":"o-1","买家支付(RMB)":"100","销售数量":"12","利润(RMB)":"30"}'::jsonb,
                         'month-order-1', TIMESTAMP '2026-03-01 10:00:00'
                     )
                     """
@@ -3171,10 +3202,11 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                 text(
                     """
                     INSERT INTO b_class.fact_shopee_analytics_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, raw_data, data_hash, ingest_timestamp
                     )
                     VALUES (
-                        'shopee', 'shop-a', DATE '2026-03-01',
+                        'shopee', 'shop-a', 'analytics', 'monthly', DATE '2026-03-01',
                         '{"visitor_count":"200","page_views":"300","impressions":"1000"}'::jsonb,
                         'month-analytics-1', TIMESTAMP '2026-03-01 10:00:00'
                     )
@@ -3187,6 +3219,10 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                 for target in (
                     "mart.shop_day_kpi",
                     "mart.shop_week_kpi",
+                    # [*] orders 域取数改走别名表 ⇒ 别名资产(表 + 函数
+                    # semantic.resolve_alias)必须**先**落地, 否则建月度 MV 时报
+                    # "function semantic.resolve_alias does not exist"。
+                    "semantic.alias_registry",
                     "semantic.shop_identity_resolution_candidates",
                     "semantic.fact_orders_monthly_atomic_mv",
                     "semantic.fact_orders_monthly_atomic",
@@ -3293,6 +3329,10 @@ async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate
                         CREATE TABLE IF NOT EXISTS {table_name} (
                             platform_code VARCHAR(32),
                             shop_id VARCHAR(256),
+                            -- 语义层的月度物化视图正文直接从 b_class 源表读
+                            -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                            data_domain VARCHAR(32),
+                            granularity VARCHAR(32),
                             metric_date DATE,
                             raw_data JSONB,
                             data_hash VARCHAR(128),
@@ -3306,11 +3346,14 @@ async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate
                 text(
                     """
                     INSERT INTO b_class.fact_shopee_orders_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, raw_data, data_hash, ingest_timestamp
                     )
                     VALUES (
-                        'shopee', 'shop-a', DATE '2026-03-01',
-                        '{"order_id":"shopee-order-1","paid_amount":"100","product_quantity":"1","profit":"20"}'::jsonb,
+                        'shopee', 'shop-a', 'orders', 'monthly', DATE '2026-03-01',
+                        -- [*] orders 域取数改走别名表 ⇒ raw_data 的键必须是
+                        -- **登记过的真实源表头**(shopee 的 (RMB) 变体)。
+                        '{"订单编号":"shopee-order-1","买家支付(RMB)":"100","销售数量":"1","利润(RMB)":"20"}'::jsonb,
                         'shopee-order-1', TIMESTAMP '2026-03-01 10:00:00'
                     )
                     """
@@ -3320,11 +3363,14 @@ async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate
                 text(
                     """
                     INSERT INTO b_class.fact_tiktok_orders_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, raw_data, data_hash, ingest_timestamp
                     )
                     VALUES (
-                        'tiktok', 'shop-b', DATE '2026-03-01',
-                        '{"order_id":"tiktok-order-1","paid_amount":"200","product_quantity":"2","profit":"50"}'::jsonb,
+                        'tiktok', 'shop-b', 'orders', 'monthly', DATE '2026-03-01',
+                        -- tiktok 的别名与 shopee 不同(买家实付金额(RMB) / 订单号)
+                        -- ⇒ 别名表按平台登记, 跨平台取不到就是 NULL。
+                        '{"订单号":"tiktok-order-1","买家实付金额(RMB)":"200","销售数量":"2","利润(RMB)":"50"}'::jsonb,
                         'tiktok-order-1', TIMESTAMP '2026-03-01 10:00:00'
                     )
                     """
@@ -3334,10 +3380,11 @@ async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate
                 text(
                     """
                     INSERT INTO b_class.fact_shopee_analytics_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, raw_data, data_hash, ingest_timestamp
                     )
                     VALUES (
-                        'shopee', 'shop-a', DATE '2026-03-01',
+                        'shopee', 'shop-a', 'analytics', 'monthly', DATE '2026-03-01',
                         '{"页面浏览数":"300"}'::jsonb,
                         'shopee-analytics-1', TIMESTAMP '2026-03-01 10:00:00'
                     )
@@ -3348,10 +3395,11 @@ async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate
                 text(
                     """
                     INSERT INTO b_class.fact_tiktok_analytics_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, raw_data, data_hash, ingest_timestamp
                     )
                     VALUES (
-                        'tiktok', 'shop-b', DATE '2026-03-01',
+                        'tiktok', 'shop-b', 'analytics', 'monthly', DATE '2026-03-01',
                         '{"页面浏览次数":"80"}'::jsonb,
                         'tiktok-analytics-1', TIMESTAMP '2026-03-01 10:00:00'
                     )
@@ -3362,6 +3410,9 @@ async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate
 
         async with session_factory() as session:
             for target in (
+                # [*] orders 域取数改走别名表 ⇒ 别名资产(表 + 函数
+                # semantic.resolve_alias)必须**先**落地。
+                "semantic.alias_registry",
                 "semantic.shop_identity_resolution_candidates",
                 "semantic.fact_orders_monthly_atomic_mv",
                 "semantic.fact_orders_monthly_atomic",
@@ -3480,6 +3531,10 @@ async def test_business_overview_kpi_module_exposes_pv_uv_conversion_rates():
                         CREATE TABLE IF NOT EXISTS {table_name} (
                             platform_code VARCHAR(32),
                             shop_id VARCHAR(256),
+                            -- 语义层的月度物化视图正文直接从 b_class 源表读
+                            -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                            data_domain VARCHAR(32),
+                            granularity VARCHAR(32),
                             metric_date DATE,
                             raw_data JSONB,
                             data_hash VARCHAR(128),
@@ -3493,10 +3548,13 @@ async def test_business_overview_kpi_module_exposes_pv_uv_conversion_rates():
                 text(
                     """
                     INSERT INTO b_class.fact_shopee_orders_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, raw_data, data_hash, ingest_timestamp
                     ) VALUES (
-                        'shopee', 'shop-a', DATE '2026-03-01',
-                        '{"order_id":"month-1","paid_amount":"500","product_quantity":"5","profit":"50"}'::jsonb,
+                        'shopee', 'shop-a', 'orders', 'monthly', DATE '2026-03-01',
+                        -- [*] orders 域取数改走别名表 ⇒ raw_data 的键必须是
+                        -- **登记过的真实源表头**(买家支付(RMB)/利润(RMB)/销售数量/订单编号)。
+                        '{"订单编号":"month-1","买家支付(RMB)":"500","销售数量":"5","利润(RMB)":"50"}'::jsonb,
                         'month-order-1', TIMESTAMP '2026-03-02 10:00:00'
                     )
                     """
@@ -3506,9 +3564,10 @@ async def test_business_overview_kpi_module_exposes_pv_uv_conversion_rates():
                 text(
                     """
                     INSERT INTO b_class.fact_shopee_analytics_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, raw_data, data_hash, ingest_timestamp
                     ) VALUES (
-                        'shopee', 'shop-a', DATE '2026-03-01',
+                        'shopee', 'shop-a', 'analytics', 'monthly', DATE '2026-03-01',
                         '{"visitor_count":"200","page_views":"300","impressions":"1000"}'::jsonb,
                         'month-traffic-1', TIMESTAMP '2026-03-02 10:00:00'
                     )
@@ -3519,6 +3578,9 @@ async def test_business_overview_kpi_module_exposes_pv_uv_conversion_rates():
 
         async with session_factory() as session:
             for target in (
+                # [*] orders 域取数改走别名表 ⇒ 别名资产(表 + 函数
+                # semantic.resolve_alias)必须**先**落地。
+                "semantic.alias_registry",
                 "semantic.shop_identity_resolution_candidates",
                 "semantic.fact_orders_monthly_atomic_mv",
                 "semantic.fact_orders_monthly_atomic",
