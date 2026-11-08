@@ -31,5 +31,18 @@ SELECT
     returning_visitor_count,
     new_follower_count,
     avg_session_duration_seconds,
-    avg_page_views_per_visitor
+    avg_page_views_per_visitor,
+    product_card_gmv,
+    live_gmv,
+    live_indirect_gmv,
+    video_gmv,
+    video_indirect_gmv,
+    bound_account_live_attributed_gmv,
+    bound_account_video_attributed_gmv,
+    affiliate_video_attributed_gmv,
+    creator_live_gmv,
+    creator_live_attributed_gmv,
+    creator_live_indirect_gmv,
+    creator_video_gmv,
+    creator_video_indirect_gmv
 FROM semantic.fact_analytics_monthly_atomic_mv;

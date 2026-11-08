@@ -188,27 +188,61 @@ def test_both_chains_output_shopee_traffic_columns():
             assert field in sql_text, "{0} 缺列 {1}".format(asset.name, field)
 
 
+def _final_select_columns(text: str, marker: str) -> list:
+    """取最终 SELECT 的输出列名(按出现顺序)。
+
+    ⚠ 不能用 ``rfind(field)`` 判断**连续性** —— 那是**字符偏移**不是列下标
+    ⇒ 表达式长短不同就会算出「不连续」的假象。列序必须按列下标判断。
+    """
+    block = text.rsplit(marker, 1)[0]
+    block = block.rsplit("SELECT", 1)[1]
+    columns = []
+    for raw_line in block.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("--"):
+            continue
+        line = line.rstrip(",")
+        if " AS " in line:
+            line = line.rsplit(" AS ", 1)[1]
+        columns.append(line.strip())
+    return columns
+
+
 def test_shopee_traffic_columns_are_appended_at_the_end():
-    """新列只能**追加在末尾** —— 既有列名列序一个都不能动。
+    """新列只能**追加** —— 既有列名列序一个都不能动。
 
     ``CREATE OR REPLACE VIEW`` 不能改列序 ⇒ 新列插在中间会让物化视图的
     列集/列序与既有下游不一致。
+
+    ⚠ 资产层(本用例)与迁移层(``_check_column_block``)口径**不同**, 且各有道理:
+      * 资产是**当前快照** ⇒ 新列必须就在**最后**, 后面不许再有别的列
+        ⇒ 这里保留**绝对末尾**断言(更强: 能发现「既有列被挪到新列后面」);
+      * 迁移自检跑在**链上的历史点** ⇒ 那时后面可能已经有后续迁移的列
+        ⇒ 那里只能断言「齐全 + 顺序 + 连续 + 追加在锚点之后」
+        (2026-11-09 实际踩过: 绝对末尾断言会打断空库迁移链)。
     """
-    daily_tail = _read(DAILY_VIEW_ASSET).rsplit("FROM deduplicated", 1)[0]
-    monthly_tail = _read(MONTHLY_MV_ASSET).rsplit(
-        "FROM deduplicated_monthly_traffic", 1
-    )[0]
-    for tail in (daily_tail, monthly_tail):
-        positions = []
-        for field in SHOPEE_TRAFFIC_FIELDS:
-            index = tail.rfind(field)
-            assert index > 0, "输出层缺列 {0}".format(field)
-            positions.append(index)
+    expected_tail = list(SHOPEE_TRAFFIC_FIELDS)
+    daily_columns = _final_select_columns(_read(DAILY_VIEW_ASSET), "FROM deduplicated")
+    monthly_columns = _final_select_columns(
+        _read(MONTHLY_MV_ASSET), "FROM deduplicated_monthly_traffic"
+    )
+    for columns in (daily_columns, monthly_columns):
+        # 1) 全部存在, 且相对顺序与登记顺序一致。
+        for field in expected_tail:
+            assert field in columns, "输出层缺列 {0}".format(field)
+        positions = [columns.index(field) for field in expected_tail]
         assert positions == sorted(positions), "新列的相对顺序变了"
-        # 新列必须在 identity_candidates 之后(即真正的末尾)。
-        assert min(positions) > tail.rfind(
+        # 2) 连续成块(中间插别的列 = 破坏列序契约)。
+        assert (
+            max(positions) - min(positions) == len(positions) - 1
+        ), "新列必须连续成块, 实际下标 {0}".format(positions)
+        # 3) 追加在锚点列之后(既有列一个都不许被挪到新列后面)。
+        assert "identity_candidates" in columns, "输出层缺锚点列 identity_candidates"
+        assert min(positions) > columns.index(
             "identity_candidates"
         ), "新列必须追加在 identity_candidates 之后"
+        # 既有列名列序一个都不能动: 新列之前的部分必须仍是原样。
+        assert columns.index("identity_candidates") < columns.index("new_visitor_count")
 
 
 def test_avg_session_duration_is_converted_from_hms_not_numeric_regex():

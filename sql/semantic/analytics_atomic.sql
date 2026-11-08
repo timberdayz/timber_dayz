@@ -113,6 +113,22 @@ mapped AS (
         semantic.resolve_alias(raw_data, data_domain, 'new_follower_count', platform_code, granularity) AS new_follower_count_raw,
         semantic.resolve_alias(raw_data, data_domain, 'avg_session_duration_seconds', platform_code, granularity) AS avg_session_duration_seconds_raw,
         semantic.resolve_alias(raw_data, data_domain, 'avg_page_views_per_visitor', platform_code, granularity) AS avg_page_views_per_visitor_raw,
+        -- ⚠⚠ [*] 2026-11-09 补登: tiktok 的 13 个 GMV 归因列。,
+        --   这批列**只能单列看占比, 绝不能相加** —— 实测 50.7% 的行归因和超过该行总额(同一笔成交被多个维度重复记账)。,
+        --   别名是**平台限定**的(platform_code='tiktok') ⇒ shopee 数据上不会命中。,
+        semantic.resolve_alias(raw_data, data_domain, 'product_card_gmv', platform_code, granularity) AS product_card_gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'live_gmv', platform_code, granularity) AS live_gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'live_indirect_gmv', platform_code, granularity) AS live_indirect_gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'video_gmv', platform_code, granularity) AS video_gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'video_indirect_gmv', platform_code, granularity) AS video_indirect_gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'bound_account_live_attributed_gmv', platform_code, granularity) AS bound_account_live_attributed_gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'bound_account_video_attributed_gmv', platform_code, granularity) AS bound_account_video_attributed_gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'affiliate_video_attributed_gmv', platform_code, granularity) AS affiliate_video_attributed_gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'creator_live_gmv', platform_code, granularity) AS creator_live_gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'creator_live_attributed_gmv', platform_code, granularity) AS creator_live_attributed_gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'creator_live_indirect_gmv', platform_code, granularity) AS creator_live_indirect_gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'creator_video_gmv', platform_code, granularity) AS creator_video_gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'creator_video_indirect_gmv', platform_code, granularity) AS creator_video_indirect_gmv_raw,
         raw_data,
         header_columns,
         data_hash,
@@ -179,6 +195,19 @@ resolved AS (
         m.new_follower_count_raw,
         m.avg_session_duration_seconds_raw,
         m.avg_page_views_per_visitor_raw,
+        m.product_card_gmv_raw,
+        m.live_gmv_raw,
+        m.live_indirect_gmv_raw,
+        m.video_gmv_raw,
+        m.video_indirect_gmv_raw,
+        m.bound_account_live_attributed_gmv_raw,
+        m.bound_account_video_attributed_gmv_raw,
+        m.affiliate_video_attributed_gmv_raw,
+        m.creator_live_gmv_raw,
+        m.creator_live_attributed_gmv_raw,
+        m.creator_live_indirect_gmv_raw,
+        m.creator_video_gmv_raw,
+        m.creator_video_indirect_gmv_raw,
         m.raw_data,
         m.header_columns,
         m.data_hash,
@@ -374,6 +403,71 @@ cleaned AS (
             WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(avg_page_views_per_visitor_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(avg_page_views_per_visitor_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
             ELSE NULL
         END AS avg_page_views_per_visitor,
+        CASE
+            WHEN product_card_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(product_card_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(product_card_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS product_card_gmv,
+        CASE
+            WHEN live_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(live_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(live_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS live_gmv,
+        CASE
+            WHEN live_indirect_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(live_indirect_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(live_indirect_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS live_indirect_gmv,
+        CASE
+            WHEN video_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(video_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(video_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS video_gmv,
+        CASE
+            WHEN video_indirect_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(video_indirect_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(video_indirect_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS video_indirect_gmv,
+        CASE
+            WHEN bound_account_live_attributed_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(bound_account_live_attributed_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(bound_account_live_attributed_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS bound_account_live_attributed_gmv,
+        CASE
+            WHEN bound_account_video_attributed_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(bound_account_video_attributed_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(bound_account_video_attributed_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS bound_account_video_attributed_gmv,
+        CASE
+            WHEN affiliate_video_attributed_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(affiliate_video_attributed_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(affiliate_video_attributed_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS affiliate_video_attributed_gmv,
+        CASE
+            WHEN creator_live_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(creator_live_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(creator_live_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS creator_live_gmv,
+        CASE
+            WHEN creator_live_attributed_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(creator_live_attributed_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(creator_live_attributed_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS creator_live_attributed_gmv,
+        CASE
+            WHEN creator_live_indirect_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(creator_live_indirect_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(creator_live_indirect_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS creator_live_indirect_gmv,
+        CASE
+            WHEN creator_video_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(creator_video_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(creator_video_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS creator_video_gmv,
+        CASE
+            WHEN creator_video_indirect_gmv_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(creator_video_indirect_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(creator_video_indirect_gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS creator_video_indirect_gmv,
         raw_data,
         header_columns,
         data_hash,
@@ -450,6 +544,19 @@ SELECT
     returning_visitor_count AS returning_visitor_count,
     new_follower_count AS new_follower_count,
     avg_session_duration_seconds AS avg_session_duration_seconds,
-    avg_page_views_per_visitor AS avg_page_views_per_visitor
+    avg_page_views_per_visitor AS avg_page_views_per_visitor,
+    product_card_gmv AS product_card_gmv,
+    live_gmv AS live_gmv,
+    live_indirect_gmv AS live_indirect_gmv,
+    video_gmv AS video_gmv,
+    video_indirect_gmv AS video_indirect_gmv,
+    bound_account_live_attributed_gmv AS bound_account_live_attributed_gmv,
+    bound_account_video_attributed_gmv AS bound_account_video_attributed_gmv,
+    affiliate_video_attributed_gmv AS affiliate_video_attributed_gmv,
+    creator_live_gmv AS creator_live_gmv,
+    creator_live_attributed_gmv AS creator_live_attributed_gmv,
+    creator_live_indirect_gmv AS creator_live_indirect_gmv,
+    creator_video_gmv AS creator_video_gmv,
+    creator_video_indirect_gmv AS creator_video_indirect_gmv
 FROM deduplicated
 WHERE rn = 1;

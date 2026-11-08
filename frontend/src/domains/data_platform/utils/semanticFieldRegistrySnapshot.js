@@ -19,6 +19,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "addtocartrate": "add_to_cart_rate",
     "addtocartusercount": "add_to_cart_user_count",
     "affiliatecommission": "affiliate_commission",
+    "affiliatevideoattributedgmv": "affiliate_video_attributed_gmv",
     "aov": "aov",
     "aovplaced": "aov_placed",
     "averagepageviewspervisitor": "avg_page_views_per_visitor",
@@ -27,6 +28,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "avgsessionduration": "avg_session_duration_seconds",
     "avgsessiondurationseconds": "avg_session_duration_seconds",
     "bouncerate": "bounce_rate",
+    "boundaccountliveattributedgmv": "bound_account_live_attributed_gmv",
+    "boundaccountvideoattributedgmv": "bound_account_video_attributed_gmv",
     "buyercount": "buyer_count",
     "buyercountplaced": "buyer_count_placed",
     "buyerpaidamount": "paid_amount",
@@ -40,6 +43,11 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "conversionrate": "conversion_rate",
     "conversionrateplaced": "conversion_rate_placed",
     "creatorcommission": "affiliate_commission",
+    "creatorliveattributedgmv": "creator_live_attributed_gmv",
+    "creatorlivegmv": "creator_live_gmv",
+    "creatorliveindirectgmv": "creator_live_indirect_gmv",
+    "creatorvideogmv": "creator_video_gmv",
+    "creatorvideoindirectgmv": "creator_video_indirect_gmv",
     "ctor(sku订单)": "click_to_order_rate",
     "ctr": "click_rate",
     "cvr": "conversion_rate",
@@ -94,6 +102,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "platformservicefee": "platform_service_fee",
     "platformsku": "platform_sku",
     "platformvoucher": "platform_voucher",
+    "productcardgmv": "product_card_gmv",
     "productid": "product_id",
     "productname": "product_name",
     "productsku": "platform_sku",
@@ -2062,13 +2071,13 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "live gmv"
       ],
       "default_hash": false,
-      "description": "渠道归因系统语义指标，不参与 Data Hash。",
+      "description": "商家直播 GMV：商家自己直播间带来的成交。实测 1374 行恒为 0，分不清「真的没成交」与「平台没回传」。",
       "domain": "attribution",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
       "identity_strength": null,
       "kind": "metric",
-      "label": "直播 GMV",
+      "label": "商家直播 GMV",
       "option_group": "attribution_metric",
       "required": false,
       "semantic_key": "live_gmv",
@@ -2082,7 +2091,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "live attributed gmv"
       ],
       "default_hash": false,
-      "description": "渠道归因系统语义指标，不参与 Data Hash。",
+      "description": "直播归因 GMV：平台判定该笔成交记在商家直播头上的金额。⚠ 源表里没有这一列（推测性别名），目前恒为空。",
       "domain": "attribution",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
@@ -2102,13 +2111,13 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "live indirect gmv"
       ],
       "default_hash": false,
-      "description": "渠道归因系统语义指标，不参与 Data Hash。",
+      "description": "商家直播间接 GMV：先被商家直播种草、之后从别的入口下单的成交。实测 1374 行恒为 0。",
       "domain": "attribution",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
       "identity_strength": null,
       "kind": "metric",
-      "label": "直播间接 GMV",
+      "label": "商家直播间接 GMV",
       "option_group": "attribution_metric",
       "required": false,
       "semantic_key": "live_indirect_gmv",
@@ -2122,13 +2131,13 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "video gmv"
       ],
       "default_hash": false,
-      "description": "渠道归因系统语义指标，不参与 Data Hash。",
+      "description": "商家视频 GMV：商家自己短视频带来的成交。实测 33 行非零。",
       "domain": "attribution",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
       "identity_strength": null,
       "kind": "metric",
-      "label": "视频 GMV",
+      "label": "商家视频 GMV",
       "option_group": "attribution_metric",
       "required": false,
       "semantic_key": "video_gmv",
@@ -2142,7 +2151,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "video attributed gmv"
       ],
       "default_hash": false,
-      "description": "渠道归因系统语义指标，不参与 Data Hash。",
+      "description": "视频归因 GMV：平台判定该笔成交记在商家视频头上的金额。⚠ 源表里没有这一列（推测性别名），目前恒为空。",
       "domain": "attribution",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
@@ -2162,16 +2171,178 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "video indirect gmv"
       ],
       "default_hash": false,
-      "description": "渠道归因系统语义指标，不参与 Data Hash。",
+      "description": "商家视频间接 GMV：先被商家视频种草、之后从别的入口下单的成交。实测 5 行非零。",
       "domain": "attribution",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
       "identity_strength": null,
       "kind": "metric",
-      "label": "视频间接 GMV",
+      "label": "商家视频间接 GMV",
       "option_group": "attribution_metric",
       "required": false,
       "semantic_key": "video_indirect_gmv",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "product_card_gmv",
+        "product card gmv"
+      ],
+      "default_hash": false,
+      "description": "商品卡 GMV：用户直接点商品小卡下单带来的成交。源表里只有 198/1374 行有值，是稀疏指标。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "商品卡 GMV",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "product_card_gmv",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "bound_account_live_attributed_gmv",
+        "bound account live attributed gmv"
+      ],
+      "default_hash": false,
+      "description": "绑定账号直播归因 GMV：商家自有品牌号（绑定账号）的直播带来的成交。实测 1374 行恒为 0。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "绑定账号直播归因 GMV",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "bound_account_live_attributed_gmv",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "bound_account_video_attributed_gmv",
+        "bound account video attributed gmv"
+      ],
+      "default_hash": false,
+      "description": "绑定账号视频归因 GMV：商家自有品牌号（绑定账号）的视频带来的成交。实测 38 行非零。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "绑定账号视频归因 GMV",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "bound_account_video_attributed_gmv",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "affiliate_video_attributed_gmv",
+        "affiliate video attributed gmv"
+      ],
+      "default_hash": false,
+      "description": "联盟视频归因 GMV：通过达人分销（联盟）带来的成交。实测 531 行非零，是这批里最大的一列（约占总额 41%）。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "联盟视频归因 GMV",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "affiliate_video_attributed_gmv",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "creator_live_gmv",
+        "creator live gmv"
+      ],
+      "default_hash": false,
+      "description": "达人直播 GMV：第三方达人直播间带来的成交。实测 37 行非零。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "达人直播 GMV",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "creator_live_gmv",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "creator_live_attributed_gmv",
+        "creator live attributed gmv"
+      ],
+      "default_hash": false,
+      "description": "达人直播归因 GMV：平台判定该笔成交记在达人直播头上的金额。实测 37 行非零。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "达人直播归因 GMV",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "creator_live_attributed_gmv",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "creator_live_indirect_gmv",
+        "creator live indirect gmv"
+      ],
+      "default_hash": false,
+      "description": "达人直播间接 GMV：先被达人直播种草、之后从别的入口下单的成交。实测 7 行非零。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "达人直播间接 GMV",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "creator_live_indirect_gmv",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "creator_video_gmv",
+        "creator video gmv"
+      ],
+      "default_hash": false,
+      "description": "达人视频 GMV：第三方达人短视频带来的成交。实测 481 行非零。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "达人视频 GMV",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "creator_video_gmv",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "creator_video_indirect_gmv",
+        "creator video indirect gmv"
+      ],
+      "default_hash": false,
+      "description": "达人视频间接 GMV：先被达人视频种草、之后从别的入口下单的成交。实测 210 行非零。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "达人视频间接 GMV",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "creator_video_indirect_gmv",
       "system_scope": false
     },
     {
@@ -2629,11 +2800,14 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "add_to_cart_rate",
     "add_to_cart_user_count",
     "affiliate_commission",
+    "affiliate_video_attributed_gmv",
     "aov",
     "aov_placed",
     "avg_page_views_per_visitor",
     "avg_session_duration_seconds",
     "bounce_rate",
+    "bound_account_live_attributed_gmv",
+    "bound_account_video_attributed_gmv",
     "buyer_count",
     "buyer_count_placed",
     "channel",
@@ -2642,6 +2816,11 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "clicks",
     "conversion_rate",
     "conversion_rate_placed",
+    "creator_live_attributed_gmv",
+    "creator_live_gmv",
+    "creator_live_indirect_gmv",
+    "creator_video_gmv",
+    "creator_video_indirect_gmv",
     "estimated_settlement_amount",
     "gmv",
     "gmv_band",
@@ -2671,6 +2850,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "platform_service_fee",
     "platform_sku",
     "platform_voucher",
+    "product_card_gmv",
     "product_id",
     "product_name",
     "product_visitor_count",
@@ -3494,6 +3674,159 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         },
         {
           "aliases": [
+            "product_card_gmv",
+            "product card gmv"
+          ],
+          "default_hash": false,
+          "description": "商品卡 GMV：用户直接点商品小卡下单带来的成交。源表里只有 198/1374 行有值，是稀疏指标。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "商品卡 GMV (product_card_gmv)",
+          "system_scope": false,
+          "value": "product_card_gmv"
+        },
+        {
+          "aliases": [
+            "bound_account_live_attributed_gmv",
+            "bound account live attributed gmv"
+          ],
+          "default_hash": false,
+          "description": "绑定账号直播归因 GMV：商家自有品牌号（绑定账号）的直播带来的成交。实测 1374 行恒为 0。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "绑定账号直播归因 GMV (bound_account_live_attributed_gmv)",
+          "system_scope": false,
+          "value": "bound_account_live_attributed_gmv"
+        },
+        {
+          "aliases": [
+            "bound_account_video_attributed_gmv",
+            "bound account video attributed gmv"
+          ],
+          "default_hash": false,
+          "description": "绑定账号视频归因 GMV：商家自有品牌号（绑定账号）的视频带来的成交。实测 38 行非零。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "绑定账号视频归因 GMV (bound_account_video_attributed_gmv)",
+          "system_scope": false,
+          "value": "bound_account_video_attributed_gmv"
+        },
+        {
+          "aliases": [
+            "affiliate_video_attributed_gmv",
+            "affiliate video attributed gmv"
+          ],
+          "default_hash": false,
+          "description": "联盟视频归因 GMV：通过达人分销（联盟）带来的成交。实测 531 行非零，是这批里最大的一列（约占总额 41%）。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "联盟视频归因 GMV (affiliate_video_attributed_gmv)",
+          "system_scope": false,
+          "value": "affiliate_video_attributed_gmv"
+        },
+        {
+          "aliases": [
+            "creator_live_gmv",
+            "creator live gmv"
+          ],
+          "default_hash": false,
+          "description": "达人直播 GMV：第三方达人直播间带来的成交。实测 37 行非零。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "达人直播 GMV (creator_live_gmv)",
+          "system_scope": false,
+          "value": "creator_live_gmv"
+        },
+        {
+          "aliases": [
+            "creator_live_attributed_gmv",
+            "creator live attributed gmv"
+          ],
+          "default_hash": false,
+          "description": "达人直播归因 GMV：平台判定该笔成交记在达人直播头上的金额。实测 37 行非零。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "达人直播归因 GMV (creator_live_attributed_gmv)",
+          "system_scope": false,
+          "value": "creator_live_attributed_gmv"
+        },
+        {
+          "aliases": [
+            "creator_live_indirect_gmv",
+            "creator live indirect gmv"
+          ],
+          "default_hash": false,
+          "description": "达人直播间接 GMV：先被达人直播种草、之后从别的入口下单的成交。实测 7 行非零。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "达人直播间接 GMV (creator_live_indirect_gmv)",
+          "system_scope": false,
+          "value": "creator_live_indirect_gmv"
+        },
+        {
+          "aliases": [
+            "creator_video_gmv",
+            "creator video gmv"
+          ],
+          "default_hash": false,
+          "description": "达人视频 GMV：第三方达人短视频带来的成交。实测 481 行非零。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "达人视频 GMV (creator_video_gmv)",
+          "system_scope": false,
+          "value": "creator_video_gmv"
+        },
+        {
+          "aliases": [
+            "creator_video_indirect_gmv",
+            "creator video indirect gmv"
+          ],
+          "default_hash": false,
+          "description": "达人视频间接 GMV：先被达人视频种草、之后从别的入口下单的成交。实测 210 行非零。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "达人视频间接 GMV (creator_video_indirect_gmv)",
+          "system_scope": false,
+          "value": "creator_video_indirect_gmv"
+        },
+        {
+          "aliases": [
             "refund_amount",
             "退款金额",
             "退款额"
@@ -4275,14 +4608,14 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "live gmv"
           ],
           "default_hash": false,
-          "description": "渠道归因系统语义指标，不参与 Data Hash。",
+          "description": "商家直播 GMV：商家自己直播间带来的成交。实测 1374 行恒为 0，分不清「真的没成交」与「平台没回传」。",
           "domain": "attribution",
           "group": "attribution_metric",
           "hash_eligible": true,
           "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
           "identity_strength": null,
           "kind": "metric",
-          "label": "直播 GMV (live_gmv)",
+          "label": "商家直播 GMV (live_gmv)",
           "system_scope": false,
           "value": "live_gmv"
         },
@@ -4294,7 +4627,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "live attributed gmv"
           ],
           "default_hash": false,
-          "description": "渠道归因系统语义指标，不参与 Data Hash。",
+          "description": "直播归因 GMV：平台判定该笔成交记在商家直播头上的金额。⚠ 源表里没有这一列（推测性别名），目前恒为空。",
           "domain": "attribution",
           "group": "attribution_metric",
           "hash_eligible": true,
@@ -4313,14 +4646,14 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "live indirect gmv"
           ],
           "default_hash": false,
-          "description": "渠道归因系统语义指标，不参与 Data Hash。",
+          "description": "商家直播间接 GMV：先被商家直播种草、之后从别的入口下单的成交。实测 1374 行恒为 0。",
           "domain": "attribution",
           "group": "attribution_metric",
           "hash_eligible": true,
           "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
           "identity_strength": null,
           "kind": "metric",
-          "label": "直播间接 GMV (live_indirect_gmv)",
+          "label": "商家直播间接 GMV (live_indirect_gmv)",
           "system_scope": false,
           "value": "live_indirect_gmv"
         },
@@ -4332,14 +4665,14 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "video gmv"
           ],
           "default_hash": false,
-          "description": "渠道归因系统语义指标，不参与 Data Hash。",
+          "description": "商家视频 GMV：商家自己短视频带来的成交。实测 33 行非零。",
           "domain": "attribution",
           "group": "attribution_metric",
           "hash_eligible": true,
           "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
           "identity_strength": null,
           "kind": "metric",
-          "label": "视频 GMV (video_gmv)",
+          "label": "商家视频 GMV (video_gmv)",
           "system_scope": false,
           "value": "video_gmv"
         },
@@ -4351,7 +4684,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "video attributed gmv"
           ],
           "default_hash": false,
-          "description": "渠道归因系统语义指标，不参与 Data Hash。",
+          "description": "视频归因 GMV：平台判定该笔成交记在商家视频头上的金额。⚠ 源表里没有这一列（推测性别名），目前恒为空。",
           "domain": "attribution",
           "group": "attribution_metric",
           "hash_eligible": true,
@@ -4370,14 +4703,14 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "video indirect gmv"
           ],
           "default_hash": false,
-          "description": "渠道归因系统语义指标，不参与 Data Hash。",
+          "description": "商家视频间接 GMV：先被商家视频种草、之后从别的入口下单的成交。实测 5 行非零。",
           "domain": "attribution",
           "group": "attribution_metric",
           "hash_eligible": true,
           "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
           "identity_strength": null,
           "kind": "metric",
-          "label": "视频间接 GMV (video_indirect_gmv)",
+          "label": "商家视频间接 GMV (video_indirect_gmv)",
           "system_scope": false,
           "value": "video_indirect_gmv"
         }

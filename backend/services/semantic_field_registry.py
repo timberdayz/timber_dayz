@@ -589,12 +589,31 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         # ⚠ 卖家自己发的券 ⇒ **不是平台成本**, 不进 platform_total_cost_itemized。
         "aliases": ["seller voucher", "seller coupon"],
     },
+    # ── [*] 2026-11-09: 下面 4 个字段被**复用**到 analytics(流量)域 ──
+    #
+    # 背景: tiktok 流量报表里有「商家直播 GMV」「商家直播间接 GMV」
+    # 「商家视频 GMV」「商家视频间接 GMV」四列 —— 它们的**逐字表头**与
+    # 这 4 个既有字段的中文别名**完全一致** ⇒ 复用既有字段, 不另造重复字段
+    # (SSOT: 一个业务事实只允许一个标准字段)。
+    #
+    # ⚠ 实测(开发库 2026-11-09, tiktok monthly 1374 行):
+    #   「商家直播 GMV」       **1374 行恒为 0**(0 行非零)
+    #   「商家直播间接 GMV」   **1374 行恒为 0**
+    #   「商家视频 GMV」       33 行非零
+    #   「商家视频间接 GMV」   5 行非零
+    #   ⇒ 前两列是「有列、但值恒 0」: 分不清「该渠道真的没成交」与
+    #     「平台没回传」⇒ 文档里如实标注, **不**当成「渠道无生意」的结论。
+    #
+    # ⚠ 标 ``platforms=("tiktok",)``: 这几列**只有 tiktok 有**
+    #   (shopee 流量报表 2354 行里一列都没有)⇒ 不标的话巡检会对 shopee
+    #   报「缺这几个指标」= 噪音。
     "live_gmv": {
-        "label": "直播 GMV",
+        "label": "商家直播 GMV",
         "kind": "metric",
         "domain": "attribution",
         "hash_eligible": False,
         "default_hash": False,
+        "platforms": ("tiktok",),
         "aliases": ["商家直播 GMV", "直播GMV", "live gmv"],
     },
     "live_attributed_gmv": {
@@ -603,22 +622,29 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "attribution",
         "hash_eligible": False,
         "default_hash": False,
+        # ⚠ 源表**没有**「商家直播归因 GMV」这一列(实测 1374 行的 key 里
+        #   没有)⇒ 这个字段的别名是**推测性**的, 命中不了 ⇒ 恒 NULL。
+        #   tiktok 真实的「直播归因」列是「达人直播归因 GMV」与
+        #   「绑定账号直播归因 GMV」⇒ 那两列**另立字段**(见
+        #   ``creator_live_attributed_gmv`` / ``bound_account_live_attributed_gmv``)。
         "aliases": ["商家直播归因 GMV", "直播归因GMV", "live attributed gmv"],
     },
     "live_indirect_gmv": {
-        "label": "直播间接 GMV",
+        "label": "商家直播间接 GMV",
         "kind": "metric",
         "domain": "attribution",
         "hash_eligible": False,
         "default_hash": False,
+        "platforms": ("tiktok",),
         "aliases": ["商家直播间接 GMV", "直播间接GMV", "live indirect gmv"],
     },
     "video_gmv": {
-        "label": "视频 GMV",
+        "label": "商家视频 GMV",
         "kind": "metric",
         "domain": "attribution",
         "hash_eligible": False,
         "default_hash": False,
+        "platforms": ("tiktok",),
         "aliases": ["商家视频 GMV", "视频GMV", "video gmv"],
     },
     "video_attributed_gmv": {
@@ -627,15 +653,116 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "attribution",
         "hash_eligible": False,
         "default_hash": False,
+        # ⚠ 同 ``live_attributed_gmv``: 源表**没有**「商家视频归因 GMV」这一列
+        #   ⇒ 推测性别名命中不了 ⇒ 恒 NULL。tiktok 真实的「视频归因」列是
+        #   「达人视频归因 GMV」与「绑定账号视频归因 GMV」⇒ 另立字段。
         "aliases": ["商家视频归因 GMV", "视频归因GMV", "video attributed gmv"],
     },
     "video_indirect_gmv": {
-        "label": "视频间接 GMV",
+        "label": "商家视频间接 GMV",
         "kind": "metric",
         "domain": "attribution",
         "hash_eligible": False,
         "default_hash": False,
+        "platforms": ("tiktok",),
         "aliases": ["商家视频间接 GMV", "视频间接GMV", "video indirect gmv"],
+    },
+    # ── [*] 2026-11-09 新建: tiktok 流量报表里**其余**的 GMV 归因列 ──
+    #
+    # 为什么这批列**一个一个**独立成字段、且**绝不聚合**:
+    # ────────────────────────────────────────────────────────────
+    # 实测(开发库 2026-11-09, tiktok monthly 1374 行):
+    #   13 个归因列合计 1,072,030.01, 总成交额 1,092,456.33(占 98.13%);
+    #   但**逐行**看: 741 个可比行里 **376 行(50.7%)归因和 > 该行总额**,
+    #   比值中位 **1.019**、最大 **2.000** ⇒ 同一笔成交被多个维度**重复记账**。
+    #
+    # ⇒ 业务上: 一笔单可能「在达人直播间看到 → 点商品卡下单 → 分享出去」,
+    #   平台会把这单同时记到达人直播、商品卡等多个口径上。
+    # ⇒ 所以这批列**只能单列看占比**, **绝不能相加**。
+    #   (用户 2026-11-09 决定: 每列一个标准字段, 只单列展示, 绝不聚合。)
+    "product_card_gmv": {
+        "label": "商品卡 GMV",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("tiktok",),
+        # ⚠ **稀疏指标**: 实测只有 198/1374 行有值(147 行非零)
+        #   ⇒ 巡检会报「解析率约 14%」, 那是**源表本身稀疏**, 不是缺口。
+        "aliases": ["product card gmv"],
+    },
+    "bound_account_live_attributed_gmv": {
+        "label": "绑定账号直播归因 GMV",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("tiktok",),
+        # ⚠ 实测 1374 行**恒为 0**(0 行非零)⇒ 有列无值, 不代表结论。
+        "aliases": ["bound account live attributed gmv"],
+    },
+    "bound_account_video_attributed_gmv": {
+        "label": "绑定账号视频归因 GMV",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("tiktok",),
+        "aliases": ["bound account video attributed gmv"],
+    },
+    "affiliate_video_attributed_gmv": {
+        "label": "联盟视频归因 GMV",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("tiktok",),
+        "aliases": ["affiliate video attributed gmv"],
+    },
+    "creator_live_gmv": {
+        "label": "达人直播 GMV",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("tiktok",),
+        "aliases": ["creator live gmv"],
+    },
+    "creator_live_attributed_gmv": {
+        "label": "达人直播归因 GMV",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("tiktok",),
+        "aliases": ["creator live attributed gmv"],
+    },
+    "creator_live_indirect_gmv": {
+        "label": "达人直播间接 GMV",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("tiktok",),
+        "aliases": ["creator live indirect gmv"],
+    },
+    "creator_video_gmv": {
+        "label": "达人视频 GMV",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("tiktok",),
+        "aliases": ["creator video gmv"],
+    },
+    "creator_video_indirect_gmv": {
+        "label": "达人视频间接 GMV",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("tiktok",),
+        "aliases": ["creator video indirect gmv"],
     },
     "product_name": {
         "label": "商品名称",
@@ -1013,12 +1140,28 @@ SEMANTIC_FIELD_DESCRIPTIONS: Dict[str, str] = {
     "profit": "系统语义指标，不参与 Data Hash。",
     "purchase_amount": "系统语义指标，不参与 Data Hash。",
     "platform_commission": "系统语义指标，不参与 Data Hash。",
-    "live_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
-    "live_attributed_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
-    "live_indirect_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
-    "video_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
-    "video_attributed_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
-    "video_indirect_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
+    # ── tiktok 的 13 个 GMV 归因列(2026-11-09) ──────────────────────
+    #
+    # ⚠⚠ 这批列**只能单列看占比, 绝不能相加** ——
+    # 实测(开发库 2026-11-09, tiktok monthly 1374 行): 13 列合计 1,072,030.01
+    # vs 总成交额 1,092,456.33(占 98.13%); **逐行**看, 741 个可比行里
+    # **376 行(50.7%)归因和 > 该行总额**(比值中位 1.019、最大 2.000)
+    # ⇒ 同一笔成交被多个维度**重复记账**。
+    "product_card_gmv": "商品卡 GMV：用户直接点商品小卡下单带来的成交。源表里只有 198/1374 行有值，是稀疏指标。",
+    "live_gmv": "商家直播 GMV：商家自己直播间带来的成交。实测 1374 行恒为 0，分不清「真的没成交」与「平台没回传」。",
+    "live_attributed_gmv": "直播归因 GMV：平台判定该笔成交记在商家直播头上的金额。⚠ 源表里没有这一列（推测性别名），目前恒为空。",
+    "live_indirect_gmv": "商家直播间接 GMV：先被商家直播种草、之后从别的入口下单的成交。实测 1374 行恒为 0。",
+    "video_gmv": "商家视频 GMV：商家自己短视频带来的成交。实测 33 行非零。",
+    "video_attributed_gmv": "视频归因 GMV：平台判定该笔成交记在商家视频头上的金额。⚠ 源表里没有这一列（推测性别名），目前恒为空。",
+    "video_indirect_gmv": "商家视频间接 GMV：先被商家视频种草、之后从别的入口下单的成交。实测 5 行非零。",
+    "bound_account_live_attributed_gmv": "绑定账号直播归因 GMV：商家自有品牌号（绑定账号）的直播带来的成交。实测 1374 行恒为 0。",
+    "bound_account_video_attributed_gmv": "绑定账号视频归因 GMV：商家自有品牌号（绑定账号）的视频带来的成交。实测 38 行非零。",
+    "affiliate_video_attributed_gmv": "联盟视频归因 GMV：通过达人分销（联盟）带来的成交。实测 531 行非零，是这批里最大的一列（约占总额 41%）。",
+    "creator_live_gmv": "达人直播 GMV：第三方达人直播间带来的成交。实测 37 行非零。",
+    "creator_live_attributed_gmv": "达人直播归因 GMV：平台判定该笔成交记在达人直播头上的金额。实测 37 行非零。",
+    "creator_live_indirect_gmv": "达人直播间接 GMV：先被达人直播种草、之后从别的入口下单的成交。实测 7 行非零。",
+    "creator_video_gmv": "达人视频 GMV：第三方达人短视频带来的成交。实测 481 行非零。",
+    "creator_video_indirect_gmv": "达人视频间接 GMV：先被达人视频种草、之后从别的入口下单的成交。实测 210 行非零。",
     # ── orders 域(2026-11-08) ───────────────────────────────────────
     "order_original_amount": "订单未减优惠前的金额(人民币口径)。",
     "warehouse_operation_fee": "仓库操作费(人民币口径)。",
@@ -1275,6 +1418,41 @@ ANALYTICS_PLATFORM_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
         "avg_session_duration_seconds": ("平均停留时长",),
         # 平均页面访问数 ≈ 页面浏览数 ÷ 访客数(实测 1814/1814 行 ±0.02 内)。
         "avg_page_views_per_visitor": ("平均页面访问数",),
+    },
+    # ── tiktok 的 13 个 GMV 归因列(2026-11-09 补登) ────────────────
+    #
+    # ⚠⚠ **这批列只能单列看, 绝不能相加** ——
+    # 实测(开发库 2026-11-09, tiktok monthly 1374 行):
+    #   13 列合计 1,072,030.01 vs 总成交额 1,092,456.33(占 98.13%);
+    #   **逐行**看: 741 个可比行里 **376 行(50.7%)归因和 > 该行总额**,
+    #   比值中位 **1.019**、最大 **2.000**
+    #   ⇒ 同一笔成交被多个维度**重复记账**(在直播间看到 → 点商品卡下单 →
+    #     分享出去 ⇒ 平台把这单记到达人直播、商品卡等多个口径上)。
+    # ⇒ 用户 2026-11-09 决定: **一列一个标准字段, 只单列展示, 绝不聚合**。
+    "tiktok": {
+        # 商品卡: 用户直接点商品小卡下单(不经直播/视频)。
+        # ⚠ 稀疏指标: 实测只有 198/1374 行有值(147 行非零)。
+        "product_card_gmv": ("商品卡 GMV",),
+        # 商家自播: 商家自己的直播间 / 商家自己的短视频带来的成交。
+        # ⚠ 「商家直播 GMV」「商家直播间接 GMV」实测 **1374 行恒为 0**。
+        "live_gmv": ("商家直播 GMV",),
+        "live_indirect_gmv": ("商家直播间接 GMV",),
+        "video_gmv": ("商家视频 GMV",),
+        "video_indirect_gmv": ("商家视频间接 GMV",),
+        # 绑定账号: 商家自有品牌号(绑定账号)的内容带来的成交。
+        # ⚠ 「绑定账号直播归因 GMV」实测 **1374 行恒为 0**。
+        "bound_account_live_attributed_gmv": ("绑定账号直播归因 GMV",),
+        "bound_account_video_attributed_gmv": ("绑定账号视频归因 GMV",),
+        # 联盟: 通过达人分销(联盟)带来的成交。
+        "affiliate_video_attributed_gmv": ("联盟视频归因 GMV",),
+        # 达人: 第三方主播的直播间 / 短视频带来的成交。
+        # 「达人直播 GMV」= 达人直播间直接成交; 「达人直播归因 GMV」= 平台判定
+        # 这笔单该记到达人直播头上; 「间接」= 先被种草、之后从别的入口下单。
+        "creator_live_gmv": ("达人直播 GMV",),
+        "creator_live_attributed_gmv": ("达人直播归因 GMV",),
+        "creator_live_indirect_gmv": ("达人直播间接 GMV",),
+        "creator_video_gmv": ("达人视频 GMV",),
+        "creator_video_indirect_gmv": ("达人视频间接 GMV",),
     },
 }
 

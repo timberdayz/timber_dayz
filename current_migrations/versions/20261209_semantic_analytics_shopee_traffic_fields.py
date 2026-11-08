@@ -40,8 +40,11 @@
 5. fail-closed 自检:
    * analytics 域里不允许「同一个列名同时指向两个标准字段」(SSOT 硬约束);
    * 新增 5 个标准字段的**平台限定别名行必须在库里**;
-   * 重建后的 4 个视图**必须输出这 5 列且在末尾** ——
-     否则就是「字典登记了、但没真正接进语义层」。
+   * 重建后的 4 个视图**必须输出这 5 列**, 且这 5 列必须是**追加**上去的
+     (齐全 + 相对顺序不变 + 连续成块 + 追加在锚点列 ``identity_candidates``
+     之后)—— 否则就是「字典登记了、但没真正接进语义层」。
+     ⚠ 断言**不是**「必须是最后 5 列」: 后续迁移继续在末尾追加列是正常的,
+       用绝对末尾会让本迁移的自检被后续迁移永久打断(空库链断裂)。
 
 ⚠ **不影响 orders 域与硬验收指标**(GMV 44,284.69 / 订单数 629)——
    本迁移只碰 analytics 域的视图与别名表, orders 链完全不动。
@@ -115,13 +118,16 @@ SHOPEE_TRAFFIC_FIELDS = (
     ("avg_page_views_per_visitor", "平均页面访问数"),
 )
 
-#: 必须输出上面 5 列的视图(且这 5 列是**最后 5 列**)。
+#: 必须输出上面 5 列的视图。
 TRAFFIC_COLUMN_VIEWS = (
     "semantic.fact_analytics_atomic",
     "semantic.fact_analytics_atomic_mv",
     "semantic.fact_analytics_monthly_atomic",
     "semantic.fact_analytics_monthly_atomic_mv",
 )
+
+#: 列序锚点 —— 新增列必须**追加在它之后**(它后面就是本次新增的列)。
+TRAFFIC_COLUMN_ANCHOR = "identity_candidates"
 
 
 def _driver_connection():
@@ -273,14 +279,74 @@ def _assert_shopee_traffic_aliases() -> None:
         )
 
 
-def _assert_traffic_columns() -> None:
-    """fail-closed: 4 个视图必须输出这 5 列, 且这 5 列是**最后 5 列**。
+def _check_column_block(
+    view_name: str,
+    columns: list,
+    expected: tuple,
+    anchor: str,
+) -> None:
+    """fail-closed: 期望列必须**全部存在**、**相对顺序正确**、**连续成块**,
+    且整块**追加在锚点列之后**。
 
-    为什么查列序: ``CREATE OR REPLACE VIEW`` 不能改列序 ⇒ 新列只能追加在
-    末尾。若将来有人把新列插在中间, 物化视图的列集/列序会与既有下游不一致
-    ⇒ 这里直接 fail-closed。
+    ⚠ 为什么**不是**「必须是最后 N 列」:
+      视图列只允许追加(``CREATE OR REPLACE VIEW`` 不能删列、不能改列序)⇒
+      后面再来一个迁移(比如 20261210)继续在末尾追加列是**正常且正确**的。
+      若这里断言「这 5 列必须是最后 5 列」, 那么 20261210 一落地, 20261209
+      的自检就永久失败 ⇒ **空库迁移链直接断掉**。
+      ⇒ 真正要守的不变量是「**新增列只能追加, 既有列一个都不能动**」,
+        它等价于: 期望列齐全 + 相对顺序不变 + 连续成块 + 追加在锚点之后。
+
+    :param view_name: 视图名(报错信息用)
+    :param columns: 视图当前的实际列序(按 attnum)
+    :param expected: 期望存在的列, 顺序即期望的相对顺序
+    :param anchor: 锚点列 —— 新增列必须追加在它**之后**
     """
-    expected = [field for field, _ in SHOPEE_TRAFFIC_FIELDS]
+    if not columns:
+        raise RuntimeError("视图不存在或没有可见列: {0}".format(view_name))
+    missing = [name for name in expected if name not in columns]
+    if missing:
+        raise RuntimeError(
+            "视图 {0} 缺少新登记的 shopee 流量指标列: {1}".format(
+                view_name, "、".join(missing)
+            )
+        )
+    positions = [columns.index(name) for name in expected]
+    if positions != sorted(positions):
+        raise RuntimeError(
+            "视图 {0} 的新登记列相对顺序变了(实际下标: {1})".format(
+                view_name, positions
+            )
+        )
+    if positions[-1] - positions[0] != len(expected) - 1:
+        raise RuntimeError(
+            "视图 {0} 的新登记列不是连续的一块(实际下标: {1})".format(
+                view_name, positions
+            )
+        )
+    if anchor not in columns:
+        raise RuntimeError(
+            "视图 {0} 缺少锚点列 {1}, 无法确认新列是追加的".format(view_name, anchor)
+        )
+    if columns.index(anchor) >= positions[0]:
+        raise RuntimeError(
+            "视图 {0} 的新登记列没有追加在锚点列 {1} 之后(锚点下标 {2}, 新列起始下标 {3})".format(
+                view_name, anchor, columns.index(anchor), positions[0]
+            )
+        )
+
+
+def _assert_traffic_columns() -> None:
+    """fail-closed: 4 个视图必须输出这 5 列, 且这 5 列是**追加**上去的。
+
+    为什么查列序: ``CREATE OR REPLACE VIEW`` 不能改列序 ⇒ 新列只能追加。
+    若将来有人把新列插在中间, 物化视图的列集/列序会与既有下游不一致
+    ⇒ 这里直接 fail-closed。
+
+    ⚠ 断言的是「齐全 + 相对顺序 + 连续 + 追加在锚点之后」,
+      **不是**「必须是最后 5 列」—— 后者会让后续迁移一追加列就把本迁移
+      的自检永久打断(空库链断裂)。详见 :func:`_check_column_block`。
+    """
+    expected = tuple(field for field, _ in SHOPEE_TRAFFIC_FIELDS)
     with _driver_connection().cursor() as cursor:
         for view_name in TRAFFIC_COLUMN_VIEWS:
             cursor.execute(
@@ -295,15 +361,7 @@ def _assert_traffic_columns() -> None:
                 (view_name,),
             )
             columns = [str(row[0]) for row in cursor.fetchall()]
-            if not columns:
-                raise RuntimeError("视图不存在或没有可见列: {0}".format(view_name))
-            tail = columns[-len(expected) :]
-            if tail != expected:
-                raise RuntimeError(
-                    "视图 {0} 的末尾 {1} 列不是新登记的 shopee 流量指标(实际: {2})".format(
-                        view_name, len(expected), tail
-                    )
-                )
+            _check_column_block(view_name, columns, expected, TRAFFIC_COLUMN_ANCHOR)
 
 
 def upgrade() -> None:
