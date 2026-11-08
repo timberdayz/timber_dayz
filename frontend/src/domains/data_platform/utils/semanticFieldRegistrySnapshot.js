@@ -18,6 +18,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "addtocartcount": "add_to_cart_count",
     "addtocartrate": "add_to_cart_rate",
     "addtocartusercount": "add_to_cart_user_count",
+    "affiliatecommission": "affiliate_commission",
     "aov": "aov",
     "aovplaced": "aov_placed",
     "bouncerate": "bounce_rate",
@@ -33,6 +34,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "commission": "platform_commission",
     "conversionrate": "conversion_rate",
     "conversionrateplaced": "conversion_rate_placed",
+    "creatorcommission": "affiliate_commission",
     "ctor(sku订单)": "click_to_order_rate",
     "ctr": "click_rate",
     "cvr": "conversion_rate",
@@ -103,6 +105,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "salesvolume": "sales_volume",
     "salesvolumeplaced": "sales_volume_placed",
     "sellercoupon": "seller_voucher",
+    "sellertotalincome": "total_income",
     "sellervoucher": "seller_voucher",
     "servicefee": "platform_service_fee",
     "serviceid": "service_id",
@@ -116,6 +119,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "sku订单量": "sku_order_count",
     "starttime": "period_start_time",
     "time": "period_start_time",
+    "totalincome": "total_income",
     "totaltransactionamount": "total_transaction_amount",
     "uniqueclicks": "unique_clicks",
     "uniqueclicktoorderrate": "unique_click_to_order_rate",
@@ -371,7 +375,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "商品id": "product_id",
       "商品sku": "product_sku",
       "商品名称": "product_name",
-      "已结算金额": "settled_amount",
       "平台sku": "platform_sku",
       "广告成本": "promotion_fee",
       "店铺": "shop_id",
@@ -577,13 +580,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       ],
       "data_domain": "orders",
       "semantic_key": "estimated_settlement_amount"
-    },
-    {
-      "aliases": [
-        "已结算金额(RMB)"
-      ],
-      "data_domain": "orders",
-      "semantic_key": "settled_amount"
     },
     {
       "aliases": [
@@ -1782,6 +1778,44 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
+        "affiliate_commission",
+        "affiliate commission",
+        "creator commission"
+      ],
+      "default_hash": false,
+      "description": "付给达人/联盟的佣金，与「平台佣金」是两笔钱，不并入平台成本口径。",
+      "domain": "orders",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "联盟/达人佣金",
+      "option_group": "order_metric",
+      "required": false,
+      "semantic_key": "affiliate_commission",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "total_income",
+        "total income",
+        "seller total income"
+      ],
+      "default_hash": false,
+      "description": "卖家侧商品成交总收入（不含运费），与「买家实付金额」不是同一个事实；目前只有 tiktok 有这一列。",
+      "domain": "orders",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "卖家总收入",
+      "option_group": "order_metric",
+      "required": false,
+      "semantic_key": "total_income",
+      "system_scope": false
+    },
+    {
+      "aliases": [
         "order_status",
         "order status"
       ],
@@ -2409,6 +2443,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "add_to_cart_count",
     "add_to_cart_rate",
     "add_to_cart_user_count",
+    "affiliate_commission",
     "aov",
     "aov_placed",
     "bounce_rate",
@@ -2466,6 +2501,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "shop_id",
     "sku_id",
     "sku_order_count",
+    "total_income",
     "total_transaction_amount",
     "unique_click_to_order_rate",
     "unique_clicks",
@@ -3505,6 +3541,42 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "label": "已结算金额 (settled_amount)",
           "system_scope": false,
           "value": "settled_amount"
+        },
+        {
+          "aliases": [
+            "affiliate_commission",
+            "affiliate commission",
+            "creator commission"
+          ],
+          "default_hash": false,
+          "description": "付给达人/联盟的佣金，与「平台佣金」是两笔钱，不并入平台成本口径。",
+          "domain": "orders",
+          "group": "order_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "联盟/达人佣金 (affiliate_commission)",
+          "system_scope": false,
+          "value": "affiliate_commission"
+        },
+        {
+          "aliases": [
+            "total_income",
+            "total income",
+            "seller total income"
+          ],
+          "default_hash": false,
+          "description": "卖家侧商品成交总收入（不含运费），与「买家实付金额」不是同一个事实；目前只有 tiktok 有这一列。",
+          "domain": "orders",
+          "group": "order_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "卖家总收入 (total_income)",
+          "system_scope": false,
+          "value": "total_income"
         },
         {
           "aliases": [

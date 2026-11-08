@@ -63,6 +63,11 @@ REAL_ORDER_LEVEL_AMOUNT_HEADERS = (
     "TikTok 平台佣金",
     "商家运费(RMB)",
     "商家运费",
+    # 2026-11-08 补登: 联盟/达人佣金、卖家总收入、卖家实际到手
+    "联盟佣金(RMB)",
+    "达人佣金(RMB)",
+    "总收入(RMB)",
+    "回款金额(RMB)",
 )
 
 #: 真实存在、粒度为**订单级**、但**字典尚未登记**的列。
@@ -71,10 +76,10 @@ REAL_ORDER_LEVEL_AMOUNT_HEADERS = (
 #: ⇒ 字典补登标准字段后会自动纳入(派生即单一事实源), 这条断言会失败,
 #:    提醒把对应列名补进上面的覆盖清单。
 UNREGISTERED_ORDER_LEVEL_HEADERS = (
-    "联盟佣金",
-    "联盟佣金(RMB)",
-    "总收入(RMB)",
-    "回款金额(RMB)",
+    # ⚠ 真实存在、订单级、但字典**完全未登记**且归一化后不同名的列
+    # (shopee 独有; 实测 shopee 周/月粒度每单一行 ⇒ 订单级)。
+    # ⇒ 它**不在**派生集合里 —— 派生只认字典已登记的列名。
+    "3pl运费折扣(RMB)",
 )
 
 
@@ -112,6 +117,13 @@ def test_derived_amount_fields_come_from_dictionary_markers():
     assert "TikTok 平台佣金(RMB)" in ORDER_LEVEL_AMOUNT_FIELDS
     assert "商家运费(RMB)" in ORDER_LEVEL_AMOUNT_FIELDS
 
+    # 2026-11-08 补登后自动纳入(派生即单一事实源):
+    # 「联盟/达人佣金」「卖家总收入」「卖家实际到手」三族。
+    assert "联盟佣金(RMB)" in ORDER_LEVEL_AMOUNT_FIELDS
+    assert "达人佣金(RMB)" in ORDER_LEVEL_AMOUNT_FIELDS
+    assert "总收入(RMB)" in ORDER_LEVEL_AMOUNT_FIELDS
+    assert "回款金额(RMB)" in ORDER_LEVEL_AMOUNT_FIELDS
+
 
 def test_unregistered_real_order_level_columns_are_a_documented_gap():
     """真实存在但**字典未登记**的订单级列 ⇒ 当前不在派生集合里。
@@ -120,6 +132,69 @@ def test_unregistered_real_order_level_columns_are_a_documented_gap():
     说明要把对应列名补进上面的覆盖清单。
     """
     assert set(UNREGISTERED_ORDER_LEVEL_HEADERS).isdisjoint(ORDER_LEVEL_AMOUNT_FIELDS)
+
+
+def test_derived_amount_fields_cover_every_registered_order_level_alias():
+    """字典里标了订单级标记的字段, 其**每个**登记别名都必须在派生集合里。
+
+    派生集合是从字典派生的 ⇒ 这条断言守的是「派生没有漏项」:
+    字典加了字段/别名却没进派生 ⇒ 多 SKU 订单的第 2+ 行不会被清空
+    ⇒ 整单金额被**重复计入** ⇒ 虚增。
+    """
+    from backend.services.semantic_field_registry import (
+        DOMAIN_PLATFORM_SEMANTIC_ALIASES,
+        DOMAIN_SEMANTIC_ALIASES,
+        ORDER_LEVEL_AMOUNT_PLATFORM_EXCEPTIONS,
+        SEMANTIC_FIELD_DEFINITIONS,
+    )
+
+    # 平台例外(如 tiktok 的「产品原价(RMB)」是**行级单价**)不在派生集合里 ——
+    # 这是**有意的**(见 test_tiktok_product_original_amount_is_excluded_as_row_level)。
+    exceptions = set(ORDER_LEVEL_AMOUNT_PLATFORM_EXCEPTIONS)
+
+    missing = []
+    for key, meta in SEMANTIC_FIELD_DEFINITIONS.items():
+        if meta.get("domain") != "orders" or not meta.get("order_level_amount"):
+            continue
+        names = [key]
+        names += list(meta.get("aliases") or [])
+        names += list(DOMAIN_SEMANTIC_ALIASES.get("orders", {}).get(key, ()))
+        for platform_code, per_platform in DOMAIN_PLATFORM_SEMANTIC_ALIASES.get(
+            "orders", {}
+        ).items():
+            if (platform_code, key) in exceptions:
+                continue
+            names += list(per_platform.get(key, ()))
+        for name in names:
+            if name not in ORDER_LEVEL_AMOUNT_FIELDS:
+                missing.append((key, name))
+
+    assert missing == [], missing
+
+
+def test_normalized_siblings_are_collected_together():
+    """归一化同族的**裸名**也跟着进派生集合。
+
+    ``normalize_semantic_alias("联盟佣金(RMB)") == "联盟佣金"``
+    ⇒ 同族裸名一起进来, 清空时同族一起清 ⇒ 不会同族重复计入。
+
+    ⚠ 裸名本身**不登记**进字典(orders 域是封闭域, 只登 ``(RMB)`` 变体,
+    裸名是原币列) ⇒ 登记它 = 混币种。
+    """
+    from backend.services.semantic_field_registry import (
+        ORDER_PLATFORM_ALIASES,
+        ORDER_SEMANTIC_ALIASES,
+        normalize_semantic_alias,
+    )
+
+    assert normalize_semantic_alias("联盟佣金(RMB)") == "联盟佣金"
+    assert "联盟佣金" in ORDER_LEVEL_AMOUNT_FIELDS
+
+    registered_names = set(ORDER_SEMANTIC_ALIASES.get("affiliate_commission", ()))
+    for per_platform in ORDER_PLATFORM_ALIASES.values():
+        registered_names.update(per_platform.get("affiliate_commission", ()))
+    assert "联盟佣金" not in registered_names
+    assert "联盟佣金(RMB)" in registered_names
 
 
 def test_derived_amount_fields_exclude_row_level_columns():

@@ -428,6 +428,56 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "order_level_amount": True,
         "aliases": ["已结算金额", "settled amount"],
     },
+    # ── 2026-11-08 补登: 「联盟/达人佣金」 ────────────────────────────
+    # 业务事实: **付给达人/联盟的佣金**, 与「平台佣金」是**两笔钱**。
+    #   (用户 2026-11-08 确认; 实测也印证两者量级完全不同)
+    # 实测(2026-11 开发库):
+    #   shopee `Shopee平台佣金(RMB)` 29629 行全有值, 均值 10.24, 合计 303398.64
+    #   shopee `联盟佣金(RMB)`       29629 行全有值, 均值  0.76, 合计  22519.01
+    #   tiktok `TikTok 平台佣金(RMB)` 4683 行有值,   均值 -5.54, 合计 -25966.22
+    #   tiktok `达人佣金(RMB)`        4589 行有值,   均值 -3.85, 合计 -17662.47
+    # ⇒ 独立字段, **不能**并进 ``platform_commission``。
+    # ⚠ 不并入 ``ORDER_PLATFORM_COST_COMPONENT_FIELDS`` —— 那 6 项是
+    #   「平台侧成本」, 联盟佣金是**付给达人**的, 混进去会与利润口径重复计算。
+    "affiliate_commission": {
+        "label": "联盟/达人佣金",
+        "kind": "metric",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        "order_level_amount": True,
+        # ⚠ **只留英文别名**: 中文「联盟佣金」「达人佣金」是 orders 域的真实表头,
+        #   由 ``ORDER_PLATFORM_ALIASES`` 逐字登记(orders 是封闭域, 只登 (RMB) 变体)。
+        "aliases": ["affiliate commission", "creator commission"],
+    },
+    # ── 2026-11-08 补登: 「卖家总收入」 ──────────────────────────────
+    # 业务事实: **卖家侧的商品成交总收入**(不含运费等), 与「买家实付金额」**不同**。
+    # 实测(2026-11 开发库, tiktok monthly 5254 行):
+    #   `总收入(RMB)`      有值 4054 行(77%), 均值 79.47
+    #   `买家实付金额(RMB)`          均值 78.66, 但与总收入**行级相等率仅 12.03%**
+    #   `产品折后价格(RMB)`          与总收入相等率 69.24%
+    #   `产品原价(RMB)`              与总收入相等率  0.06%
+    #   按订单商品行数分组后: 单商品订单相等率 69.73% / 双商品订单 72.40%
+    #   (多商品订单相等率**反而更高**) ⇒ 它**不是**单品价、也不是折后价之和
+    #   ⇒ 是**订单级**的商品成交总额 ⇒ 独立的标准字段。
+    "total_income": {
+        "label": "卖家总收入",
+        "kind": "metric",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        "order_level_amount": True,
+        # ⚠ **只有 tiktok 有这一列**: shopee 侧的对应概念是「预估回款金额」
+        #   /「已结算金额」, 那是**结算口径**(见 :func:`settled_amount`),
+        #   不是商品收入口径 ⇒ 不能混为一谈。
+        #   标 ``platforms`` ⇒ 巡检的平台诊断据此跳过 shopee
+        #   (否则会报「shopee 缺 total_income」= 噪音, 而非真实缺口)。
+        "platforms": ("tiktok",),
+        # ⚠ **只留英文别名**: 中文「总收入」在源表里**还有裸名(原币)版本**
+        #   (实测 tiktok 同时存在「总收入」与「总收入(RMB)」两列) ⇒ 中文裸名
+        #   **绝不**进全局别名表, 否则会认到原币列。
+        "aliases": ["total income", "seller total income"],
+    },
     # ── orders 域的量类与卖家侧字段(2026-11-08) ──────────────────
     # ── orders 域的维度字段(2026-11-08) ───────────────────────────
     # 以前 orders 域的维度列名只散落在视图的手写 COALESCE 链里,
@@ -827,6 +877,8 @@ SEMANTIC_FIELD_META = {
 SEMANTIC_FIELD_DESCRIPTIONS: Dict[str, str] = {
     "click_to_order_rate": "tiktok 的点击成交转化率(CTOR), 订单数除以点击数; 与转化率(已付款订单)分母不同, 不可混用。",
     "unique_click_to_order_rate": "tiktok 的去重点击成交转化率, 订单数除以去重点击数; 与全点击口径的 CTOR 数值不同。",
+    "affiliate_commission": "付给达人/联盟的佣金，与「平台佣金」是两笔钱，不并入平台成本口径。",
+    "total_income": "卖家侧商品成交总收入（不含运费），与「买家实付金额」不是同一个事实；目前只有 tiktok 有这一列。",
     "order_id": "识别同一笔订单的稳定身份字段。",
     "product_id": "平台或系统内识别同一商品的稳定身份字段。",
     "platform_sku": "平台侧商品规格编码，可作为商品身份字段。",
@@ -1036,9 +1088,11 @@ ORDER_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
         "estimated_settlement",
         "estimated_settlement_amount",
     ),
-    # 「已结算金额」只有 shopee 有(tiktok 侧是「结算时间」)⇒
-    # 通用登记即可(tiktok 行压根没这一列, 不会误命中)。
-    "settled_amount": ("已结算金额(RMB)",),
+    # ⚠ ``settled_amount`` **走平台维度**(见 ``ORDER_PLATFORM_ALIASES``):
+    #   shopee ``已结算金额(RMB)`` / tiktok ``回款金额(RMB)``。
+    #   两个平台都有这一列, 只是列名不同 ⇒ 必须在平台表里分平台登记。
+    #   (若把其中一个放通用表, 别名生成器会按「有平台别名 ⇒ 通用别名不登记」
+    #     把通用那条**挤掉** ⇒ 另一个平台的列就失联了。)
     # ── 费用类 ─────────────────────────────────────────────────────
     "warehouse_operation_fee": ("仓库操作费(RMB)",),
     "promotion_fee": ("广告成本(RMB)",),
@@ -1081,6 +1135,13 @@ ORDER_PLATFORM_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
         # 订单未减优惠前的金额。
         "order_original_amount": ("订单原始金额(RMB)",),
         "seller_voucher": ("卖家voucher(RMB)",),
+        # 付给**达人/联盟**的佣金(与平台佣金是两笔钱)。只有 shopee 叫「联盟佣金」。
+        "affiliate_commission": ("联盟佣金(RMB)",),
+        # 卖家**实际到手**的结算额。
+        #   实测(2026-11 开发库): 29629 行中 28063 行有值, 均值 34.50。
+        #   ⚠ 与「预估回款金额」行级相等率仅 34.37% ⇒ 预估与实收是**两个事实**,
+        #     分属 ``estimated_settlement_amount`` / ``settled_amount``, 不合并。
+        "settled_amount": ("已结算金额(RMB)",),
     },
     # ── tiktok ─────────────────────────────────────────────────────
     "tiktok": {
@@ -1092,6 +1153,18 @@ ORDER_PLATFORM_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
         #   「订单原始金额」= 未减优惠前的金额 ⇒ 对应「产品原价」。
         #   这里是有依据的判断, 不是猜测 —— 折后价已被证实是**折后**金额。
         "order_original_amount": ("产品原价(RMB)",),
+        # 付给**达人**的佣金(与平台佣金是两笔钱)。tiktok 叫「达人佣金」。
+        "affiliate_commission": ("达人佣金(RMB)",),
+        # 卖家侧商品成交总收入。**只有 tiktok 有这一列**(见字典 ``platforms`` 标注)。
+        "total_income": ("总收入(RMB)",),
+        # 卖家**实际到手**的结算额。
+        #   实测(2026-11 开发库, tiktok monthly 5254 行):
+        #     `回款金额(RMB)` 100% 有值, 均值 54.11;
+        #     与「总收入(RMB) + 总费用(RMB)」**行级相等率 59.17%**
+        #     ⇒ 回款金额 = 总收入 − 各项费用 = 卖家到手 ⇒ 归 ``settled_amount``。
+        #   ⚠ shopee 的「预估回款金额」是**预估**, 与「已结算金额」相等率仅 34.37%
+        #     ⇒ 两个是不同事实, 分属两个标准字段(预估 / 实收), 不合并。
+        "settled_amount": ("回款金额(RMB)",),
     },
 }
 
@@ -1163,6 +1236,57 @@ def _order_standard_fields() -> tuple[str, ...]:
 
 
 ORDER_STANDARD_FIELDS: tuple[str, ...] = _order_standard_fields()
+
+
+def semantic_field_applies_to_platform(
+    key: str,
+    platform_code: str,
+    domain: str = "orders",
+) -> bool:
+    """该标准字段**是否适用于**该平台。
+
+    为什么需要(2026-11-08)
+    ----------------------
+    有的标准字段**只有部分平台有对应源列** —— 例如 ``total_income``
+    (卖家总收入)只有 tiktok 有, shopee 侧的对应概念是「预估回款金额 /
+    已结算金额」(**结算口径**, 不是商品收入口径)。
+
+    不做这个区分 ⇒ 巡检的平台诊断会对 shopee 报「缺 total_income」
+    ⇒ **噪音**, 运维会以为有真实缺口, 反而掩盖真问题。
+
+    判定依据是字典里的 ``platforms`` 语义属性(SSOT, 与字段定义放在一起):
+    * 标了 ``platforms`` ⇒ 只适用于列出的平台;
+    * 没标 ⇒ **跨平台通用**, 一律纳入诊断
+      (例: ``platform_service_fee`` 语义是跨平台通用的, 只是 tiktok 把费用
+      拆成了多列 ⇒ 仍然要报 tiktok 解析不出来, 这是**真实缺口**)。
+    """
+    meta = SEMANTIC_FIELD_DEFINITIONS.get(str(key or "").strip().lower())
+    if meta is None:
+        return True
+    platforms = meta.get("platforms")
+    if not platforms:
+        return True
+    return str(platform_code or "") in tuple(platforms)
+
+
+def platform_applicable_fields(
+    domain: str = "orders",
+    platform_code: str = "",
+) -> frozenset:
+    """该平台**适用**的标准字段集合(按字典 ``platforms`` 标注过滤)。"""
+    if str(domain) == "orders":
+        candidates = ORDER_STANDARD_FIELDS
+    else:
+        candidates = tuple(
+            key
+            for key, meta in SEMANTIC_FIELD_DEFINITIONS.items()
+            if str(meta.get("domain") or "") == str(domain)
+        )
+    return frozenset(
+        key
+        for key in candidates
+        if semantic_field_applies_to_platform(key, platform_code, domain)
+    )
 
 
 # ── 订单级字段的派生(阶段 4 · 入库归一化) ─────────────────────────────

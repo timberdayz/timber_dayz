@@ -84,6 +84,8 @@ $$;
 INSERT INTO semantic.semantic_field_aliases
     (data_domain, standard_field, raw_alias, platform_code, normalized_alias, source, confidence, status)
 VALUES
+    ('orders', 'affiliate_commission', '联盟佣金(RMB)', 'shopee', '联盟佣金', 'builtin', 1.000, 'active'),
+    ('orders', 'affiliate_commission', '达人佣金(RMB)', 'tiktok', '达人佣金', 'builtin', 1.000, 'active'),
     ('orders', 'buyer_count', '买家数', NULL, '买家数', 'builtin', 1.000, 'active'),
     ('orders', 'estimated_settlement_amount', 'estimated_settlement', NULL, 'estimatedsettlement', 'builtin', 1.000, 'active'),
     ('orders', 'estimated_settlement_amount', 'estimated_settlement_amount', NULL, 'estimatedsettlementamount', 'builtin', 1.000, 'active'),
@@ -124,7 +126,8 @@ VALUES
     ('orders', 'sales_volume', 'sold_qty', NULL, 'soldqty', 'builtin', 1.000, 'active'),
     ('orders', 'sales_volume', '销售数量', NULL, '销售数量', 'builtin', 1.000, 'active'),
     ('orders', 'seller_voucher', '卖家voucher(RMB)', 'shopee', '卖家voucher', 'builtin', 1.000, 'active'),
-    ('orders', 'settled_amount', '已结算金额(RMB)', NULL, '已结算金额', 'builtin', 1.000, 'active'),
+    ('orders', 'settled_amount', '已结算金额(RMB)', 'shopee', '已结算金额', 'builtin', 1.000, 'active'),
+    ('orders', 'settled_amount', '回款金额(RMB)', 'tiktok', '回款金额', 'builtin', 1.000, 'active'),
     ('orders', 'shipping_fee', '卖家支付运费(RMB)', 'shopee', '卖家支付运费', 'builtin', 1.000, 'active'),
     ('orders', 'shipping_fee', '商家运费(RMB)', 'tiktok', '商家运费', 'builtin', 1.000, 'active'),
     ('orders', 'shop_id', 'shop id', NULL, 'shopid', 'builtin', 1.000, 'active'),
@@ -134,6 +137,7 @@ VALUES
     ('orders', 'shop_id', '店铺', NULL, '店铺', 'builtin', 1.000, 'active'),
     ('orders', 'shop_id', '店铺ID', NULL, '店铺id', 'builtin', 1.000, 'active'),
     ('orders', 'sku_id', 'SKU ID', NULL, 'skuid', 'builtin', 1.000, 'active'),
+    ('orders', 'total_income', '总收入(RMB)', 'tiktok', '总收入', 'builtin', 1.000, 'active'),
     ('orders', 'warehouse_operation_fee', '仓库操作费(RMB)', NULL, '仓库操作费', 'builtin', 1.000, 'active'),
     ('products', 'add_to_cart_count', 'add_to_cart_count', NULL, 'addtocartcount', 'builtin', 1.000, 'active'),
     ('products', 'add_to_cart_count', '件数 (加入购物车）', NULL, '件数(加入购物车)', 'builtin', 1.000, 'active'),
@@ -528,6 +532,8 @@ WHERE a.source = 'builtin'
 -- ⇒ 留着就是事实源漂移。只删 builtin 行(template_confirmed/manual 是用户确认过的)。
 WITH current_seed(data_domain, standard_field, raw_alias, platform_code) AS (
     VALUES
+        ('orders', 'affiliate_commission', '联盟佣金(RMB)', 'shopee'),
+        ('orders', 'affiliate_commission', '达人佣金(RMB)', 'tiktok'),
         ('orders', 'buyer_count', '买家数', NULL),
         ('orders', 'estimated_settlement_amount', 'estimated_settlement', NULL),
         ('orders', 'estimated_settlement_amount', 'estimated_settlement_amount', NULL),
@@ -568,7 +574,8 @@ WITH current_seed(data_domain, standard_field, raw_alias, platform_code) AS (
         ('orders', 'sales_volume', 'sold_qty', NULL),
         ('orders', 'sales_volume', '销售数量', NULL),
         ('orders', 'seller_voucher', '卖家voucher(RMB)', 'shopee'),
-        ('orders', 'settled_amount', '已结算金额(RMB)', NULL),
+        ('orders', 'settled_amount', '已结算金额(RMB)', 'shopee'),
+        ('orders', 'settled_amount', '回款金额(RMB)', 'tiktok'),
         ('orders', 'shipping_fee', '卖家支付运费(RMB)', 'shopee'),
         ('orders', 'shipping_fee', '商家运费(RMB)', 'tiktok'),
         ('orders', 'shop_id', 'shop id', NULL),
@@ -578,6 +585,7 @@ WITH current_seed(data_domain, standard_field, raw_alias, platform_code) AS (
         ('orders', 'shop_id', '店铺', NULL),
         ('orders', 'shop_id', '店铺ID', NULL),
         ('orders', 'sku_id', 'SKU ID', NULL),
+        ('orders', 'total_income', '总收入(RMB)', 'tiktok'),
         ('orders', 'warehouse_operation_fee', '仓库操作费(RMB)', NULL)
 )
 DELETE FROM semantic.semantic_field_aliases a

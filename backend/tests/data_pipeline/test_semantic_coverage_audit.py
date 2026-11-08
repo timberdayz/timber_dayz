@@ -40,6 +40,7 @@ from backend.services.semantic_field_registry import (
     DOMAIN_SEMANTIC_ALIASES,
     ORDER_RETIRED_FIELDS,
     ORDER_STANDARD_FIELDS as REGISTRY_ORDER_STANDARD_FIELDS,
+    platform_applicable_fields,
 )
 
 
@@ -583,6 +584,9 @@ SHOPEE_ORDER_COLUMNS: tuple[str, ...] = (
     "Shopee平台佣金(RMB)",
     "服务费(RMB)",
     "广告成本(RMB)",
+    # 真实存在于 shopee 源表、但**字典未登记**的列(实测 2026-11 开发库)⇒
+    # 它才是真正的「未登记候选」, 用来验证候选生成。
+    "海外免退服务费(RMB)",
 )
 
 
@@ -600,19 +604,46 @@ def test_zero_resolution_lists_real_source_column_candidates():
         column_candidates={("shopee", "monthly"): SHOPEE_ORDER_COLUMNS},
     )
 
-    commission_warnings = [w for w in report.warnings if "platform_commission" in w]
-    assert commission_warnings, "platform_commission 解析率 0% 必须被点名"
-    warning = commission_warnings[0]
+    fee_warnings = [w for w in report.warnings if "platform_service_fee" in w]
+    assert fee_warnings, "platform_service_fee 解析率 0% 必须被点名"
+    warning = fee_warnings[0]
     assert "解析率 0%" in warning
     assert "疑似语义映射缺失" in warning
     assert "疑似列名未登记" in warning
     assert "源表实际列名候选：" in warning
-    # 候选里必须有「联盟佣金」这一族 —— 且**保留原始列名**(RMB 后缀不被吃掉)。
-    assert "联盟佣金" in warning
+    # 候选里必须是**字典未登记**的真实列 —— 「海外免退服务费(RMB)」
+    # (实测源表确有此列, 字典未登记)。
+    assert "海外免退服务费(RMB)" in warning
     assert (
-        "联盟佣金(RMB)"
-        in report.column_candidates["shopee/monthly/platform_commission"]
+        "海外免退服务费(RMB)"
+        in report.column_candidates["shopee/monthly/platform_service_fee"]
     )
+
+
+def test_columns_registered_for_another_field_are_not_unregistered_candidates():
+    """「已登记给**别的**字段」的列, 不是「列名未登记」的候选。
+
+    「联盟佣金(RMB)」2026-11-08 起登记给 ``affiliate_commission``
+    (联盟/达人佣金, 与平台佣金是两笔钱)⇒ 它**不再**是 platform_commission 的
+    未登记候选 —— 否则巡检会把已经解决的问题继续报成缺口(噪音)。
+    """
+    rows = [_orders_row("shopee", "monthly", total_rows=100)]
+
+    report = build_coverage_report(
+        rows,
+        domain=_orders_domain(),
+        column_candidates={("shopee", "monthly"): SHOPEE_ORDER_COLUMNS},
+    )
+
+    commission_candidates = report.column_candidates.get(
+        "shopee/monthly/platform_commission", ()
+    )
+    assert "联盟佣金(RMB)" not in commission_candidates
+    assert "联盟佣金" not in commission_candidates
+    # 「联盟佣金」与「联盟佣金(RMB)」归一化后同名 ⇒ 两者都被排除
+    # (orders 域是封闭域: 裸名是原币列, 与 (RMB) 变体不可混谈)。
+    fee_candidates = report.column_candidates["shopee/monthly/platform_service_fee"]
+    assert "联盟佣金(RMB)" not in fee_candidates
 
 
 def test_column_candidates_preserve_original_column_names():
@@ -625,11 +656,9 @@ def test_column_candidates_preserve_original_column_names():
         column_candidates={("shopee", "monthly"): SHOPEE_ORDER_COLUMNS},
     )
 
-    candidates = report.column_candidates["shopee/monthly/platform_commission"]
-    assert "联盟佣金(RMB)" in candidates
-    # 归一化后同名但原文不同的两列, 都要出现(不能被归一化合并掉)。
-    assert "联盟佣金" in candidates
-    assert "联盟佣金(RMB)" in candidates
+    candidates = report.column_candidates["shopee/monthly/platform_service_fee"]
+    # 原始列名必须保留(RMB 后缀不被吃掉)。
+    assert "海外免退服务费(RMB)" in candidates
 
 
 def test_registered_columns_are_not_proposed_as_unregistered_candidates():
@@ -646,10 +675,12 @@ def test_registered_columns_are_not_proposed_as_unregistered_candidates():
         column_candidates={("shopee", "monthly"): SHOPEE_ORDER_COLUMNS},
     )
 
-    candidates = report.column_candidates["shopee/monthly/platform_commission"]
+    candidates = report.column_candidates["shopee/monthly/platform_service_fee"]
     assert "Shopee平台佣金(RMB)" not in candidates
     assert "平台SKU" not in candidates
     assert "订单编号" not in candidates
+    # 「服务费(RMB)」已登记给 platform_service_fee ⇒ 不是未登记候选。
+    assert "服务费(RMB)" not in candidates
 
 
 def test_column_candidate_ranking_is_deterministic():
@@ -662,7 +693,7 @@ def test_column_candidate_ranking_is_deterministic():
             domain=_orders_domain(),
             column_candidates={("shopee", "monthly"): SHOPEE_ORDER_COLUMNS},
         )
-        return report.column_candidates["shopee/monthly/platform_commission"]
+        return report.column_candidates["shopee/monthly/platform_service_fee"]
 
     assert _candidates() == _candidates()
 
@@ -736,7 +767,10 @@ def test_platform_summary_lists_fields_that_never_resolve():
     summaries = {summary.platform_code: summary for summary in report.platforms}
     assert set(summaries) == {"shopee", "tiktok"}
     shopee = summaries["shopee"]
-    assert shopee.total_fields == len(ORDERS_STANDARD_FIELDS)
+    # ⚠ 该平台**适用**的标准字段数(不是全集) —— 见下一条用例:
+    #   有的字段只适用部分平台(如 total_income 只有 tiktok 有)。
+    assert shopee.total_fields == len(platform_applicable_fields("orders", "shopee"))
+    assert shopee.total_fields <= len(ORDERS_STANDARD_FIELDS)
     # shopee 两个粒度全 0% ⇒ 这些字段一次都没解析出来。
     assert "platform_commission" in shopee.zero_standard_fields
     assert shopee.zero_fields == len(shopee.zero_standard_fields)
@@ -773,3 +807,55 @@ def test_healthy_platform_has_no_platform_warning():
 
     assert report.warnings == ()
     assert report.platforms[0].zero_fields == 0
+
+
+def test_platform_summary_skips_fields_not_applicable_to_platform():
+    """只在该平台有源列的字段, 不该让**别的**平台报缺(否则是噪音)。
+
+    ``total_income``(卖家总收入)只有 tiktok 有这一列; shopee 侧的对应概念是
+    「预估回款金额 / 已结算金额」—— 那是**结算口径**, 不是商品收入口径。
+    ⇒ shopee 的平台诊断里**不该**出现 ``total_income``。
+
+    ⚠ 反过来: 跨平台通用语义的字段(如 ``platform_service_fee``,
+      tiktok 把费用拆成了多列)仍然照常报 —— 那是**真实缺口**, 不能被过滤掉。
+    """
+    rows = [
+        _orders_row("shopee", "monthly", total_rows=100),
+        _orders_row(
+            "tiktok", "monthly", total_rows=100, resolved={"total_income": 100}
+        ),
+    ]
+
+    report = build_coverage_report(rows, domain=_orders_domain())
+
+    summaries = {summary.platform_code: summary for summary in report.platforms}
+    shopee = summaries["shopee"]
+    tiktok = summaries["tiktok"]
+
+    # shopee 不适用 total_income ⇒ 不计入字段总数, 也不进 zero 列表。
+    assert "total_income" not in shopee.zero_standard_fields
+    assert shopee.total_fields == len(platform_applicable_fields("orders", "shopee"))
+    # tiktok 适用 ⇒ 解析成功就不算缺。
+    assert "total_income" not in tiktok.zero_standard_fields
+    assert tiktok.total_fields == len(platform_applicable_fields("orders", "tiktok"))
+    # 跨平台通用语义的字段仍然纳入诊断(tiktok 解析不出来 ⇒ 真实缺口)。
+    assert "platform_service_fee" in tiktok.zero_standard_fields
+
+
+def test_platform_applicable_fields_follows_dictionary_platforms_marker():
+    """平台适用性是**字典里的一份事实**, 不是各处的硬编码。"""
+    from backend.services.semantic_field_registry import (
+        SEMANTIC_FIELD_DEFINITIONS,
+        semantic_field_applies_to_platform,
+    )
+
+    meta = SEMANTIC_FIELD_DEFINITIONS["total_income"]
+    assert tuple(meta["platforms"]) == ("tiktok",)
+    assert semantic_field_applies_to_platform("total_income", "tiktok") is True
+    assert semantic_field_applies_to_platform("total_income", "shopee") is False
+    # 没标 platforms 的字段 ⇒ 跨平台通用。
+    assert "platforms" not in SEMANTIC_FIELD_DEFINITIONS["platform_service_fee"]
+    assert semantic_field_applies_to_platform("platform_service_fee", "tiktok") is True
+    # 两平台都有的字段(联盟/达人佣金)⇒ 两平台都适用。
+    assert semantic_field_applies_to_platform("affiliate_commission", "shopee") is True
+    assert semantic_field_applies_to_platform("affiliate_commission", "tiktok") is True

@@ -113,6 +113,17 @@ mapped AS (
         semantic.resolve_alias(raw_data, data_domain, 'platform_deduction_fee', platform_code, granularity) AS platform_deduction_fee_raw,
         semantic.resolve_alias(raw_data, data_domain, 'platform_voucher', platform_code, granularity) AS platform_voucher_raw,
         semantic.resolve_alias(raw_data, data_domain, 'platform_service_fee', platform_code, granularity) AS platform_service_fee_raw,
+        -- 联盟/达人佣金(2026-11-08 补登): 付给**达人/联盟**的钱, 与「平台佣金」
+        -- 是**两笔钱**(shopee 叫「联盟佣金」/ tiktok 叫「达人佣金」; 用户 2026-11-08 确认)。
+        -- ⚠ **不并入** `platform_total_cost_itemized` —— 那 6 项是「平台侧成本」,
+        --   联盟佣金是付给达人的, 并进去会与利润口径重复计算。
+        semantic.resolve_alias(raw_data, data_domain, 'affiliate_commission', platform_code, granularity) AS affiliate_commission_raw,
+        -- 卖家总收入(2026-11-08 补登): 卖家侧商品成交总收入。
+        -- 实测(tiktok monthly 5254 行): 与「买家实付金额」行级相等率仅 12.03%
+        -- ⇒ 不是同一个事实; 与「产品折后价格」相等率 69.24% ⇒ 成交额口径。
+        -- ⚠ **只有 tiktok 有这一列**(shopee 侧对应概念是「预估回款金额 / 已结算金额」,
+        --   那是**结算口径**)⇒ shopee 侧恒 NULL(如实反映, 不猜值)。
+        semantic.resolve_alias(raw_data, data_domain, 'total_income', platform_code, granularity) AS total_income_raw,
         semantic.resolve_alias(raw_data, data_domain, 'paid_amount', platform_code, granularity) AS paid_amount_raw,
         -- ⚠ 列名是 ``product_quantity``, 但**语义键**是 ``sales_volume``:
         --   订单域的件数列「销售数量」归 ``sales_volume``(契约 + 模板确认 +
@@ -281,6 +292,18 @@ cleaned AS (
             ELSE NULL
         END AS platform_service_fee,
         CASE
+            WHEN affiliate_commission_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(affiliate_commission_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(affiliate_commission_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS affiliate_commission,
+        CASE
+            WHEN total_income_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(total_income_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(total_income_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS total_income,
+        CASE
             WHEN product_quantity_raw IS NULL THEN NULL
             ELSE NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(product_quantity_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
         END AS product_quantity,
@@ -371,6 +394,9 @@ alias_resolved AS (
         d.platform_deduction_fee,
         d.platform_voucher,
         d.platform_service_fee,
+        -- 2026-11-08 补登的两个标准字段(逐层透传: cleaned → deduplicated → 本层)
+        d.affiliate_commission,
+        d.total_income,
         d.product_quantity,
         d.buyer_count,
         d.product_id,
@@ -552,5 +578,11 @@ SELECT
         + CASE WHEN platform_deduction_fee IS NOT NULL THEN 1 ELSE 0 END
         + CASE WHEN platform_voucher IS NOT NULL THEN 1 ELSE 0 END
         + CASE WHEN platform_service_fee IS NOT NULL THEN 1 ELSE 0 END
-    ) AS platform_total_cost_known_items
+    ) AS platform_total_cost_known_items,
+    -- ── 2026-11-08 补登的两个标准字段 ──────────────────────────────
+    -- ⚠ 只能加在**末尾**: `CREATE OR REPLACE VIEW` 不能删列、不能改列序。
+    -- 「联盟/达人佣金」: 付给达人的钱(shopee「联盟佣金」/ tiktok「达人佣金」)。
+    -- 「卖家总收入」: 卖家侧商品成交总收入(目前只有 tiktok 有 ⇒ shopee 恒 NULL)。
+    affiliate_commission,
+    total_income
 FROM alias_resolved;

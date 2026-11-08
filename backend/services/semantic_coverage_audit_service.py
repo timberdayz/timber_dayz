@@ -88,6 +88,7 @@ from backend.services.semantic_field_registry import (
     ORDER_STANDARD_FIELDS as REGISTRY_ORDER_STANDARD_FIELDS,
     SEMANTIC_FIELD_DEFINITIONS,
     normalize_semantic_alias,
+    platform_applicable_fields,
 )
 from modules.core.logger import get_logger
 
@@ -795,7 +796,7 @@ def build_coverage_report(
                 "未解析出任何标准字段，疑似语义映射缺失"
             )
 
-    platforms = _build_platform_summaries(entries)
+    platforms = _build_platform_summaries(entries, domain.name)
     for summary in platforms:
         if summary.zero_fields <= 0:
             continue
@@ -820,12 +821,20 @@ def build_coverage_report(
 
 def _build_platform_summaries(
     entries: Sequence[SemanticCoverageEntry],
+    domain: str = "orders",
 ) -> List[SemanticCoveragePlatformSummary]:
     """按平台汇总(阶段 5.3: 平台维度诊断)。
 
-    * ``total_fields``: 该平台出现过的标准字段数(跨粒度去重);
+    * ``total_fields``: 该平台**适用**的标准字段数(跨粒度去重);
     * ``zero_fields``: 该平台下**所有粒度都**解析率为 0 的标准字段数 ——
       这种字段通常意味着「源表压根没有这一列 / 列名没登记」。
+
+    ⚠ **按平台适用性过滤**(2026-11-08): 有的标准字段**只有部分平台有对应源列**
+    (例: ``total_income`` 只有 tiktok 有, shopee 侧的对应概念是结算口径的
+    「预估回款金额 / 已结算金额」)。不过滤 ⇒ shopee 会被报「缺 total_income」
+    = **噪音**, 反而掩盖真实缺口。
+    判定依据是字典里的 ``platforms`` 语义属性 ⇒ 未标 ``platforms`` 的字段
+    (跨平台通用语义, 如 ``platform_service_fee``)仍然照常纳入诊断。
     """
     fields_by_platform: Dict[str, set[str]] = {}
     rates_by_platform: Dict[str, Dict[str, List[float]]] = {}
@@ -839,12 +848,13 @@ def _build_platform_summaries(
 
     summaries: List[SemanticCoveragePlatformSummary] = []
     for platform_code in sorted(fields_by_platform):
-        total_fields = len(fields_by_platform[platform_code])
+        applicable = platform_applicable_fields(domain, platform_code)
+        total_fields = len(fields_by_platform[platform_code] & applicable)
         # 「所有粒度都 0%」⇒ 该字段在这个平台上一次都没解析出来。
         always_zero = sorted(
             field
             for field, rates in rates_by_platform[platform_code].items()
-            if all(rate <= 0 for rate in rates)
+            if all(rate <= 0 for rate in rates) and field in applicable
         )
         summaries.append(
             SemanticCoveragePlatformSummary(
