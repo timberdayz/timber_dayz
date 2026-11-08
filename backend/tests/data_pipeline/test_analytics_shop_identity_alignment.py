@@ -97,7 +97,7 @@ async def test_analytics_monthly_atomic_resolves_shop_account_identity_to_canoni
                         raw_data, data_hash, ingest_timestamp
                     ) VALUES (
                         'analytics', 'tiktok', 'tiktok_sg_hx_home_local', DATE '2026-03-01',
-                        '{"page_views":"321","visitor_count":"123"}'::jsonb,
+                        '{"page_views":"321","商品访客数":"123"}'::jsonb,
                         'analytics-shop-identity-1', TIMESTAMP '2026-03-02 10:00:00'
                     )
                     """

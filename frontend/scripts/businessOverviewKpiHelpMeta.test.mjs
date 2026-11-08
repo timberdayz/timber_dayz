@@ -68,6 +68,33 @@ test('business overview kpi help meta covers all displayed cards with stable sta
   assert.equal(getKpiHelpMeta('missing_key'), null)
 })
 
+test('访客数(UV)必须标注两平台口径差异, 且分母用到访客数的指标标为观察口径', async () => {
+  const metaModule = await import(pathToFileURL(metaModulePath).href)
+  const { KPI_HELP_STATUS, getKpiHelpMeta } = metaModule
+
+  // [*] 2026-11-10: Shopee 的「访客数」是全店去重访客人数, TikTok 的
+  //   「商品访客数」是按商品统计的访客人次 —— 两者都叫 visitor_count,
+  //   但**不是同一个事实** ⇒ 看板必须显式标注, 否则会被当成可比数字。
+  const visitorMeta = getKpiHelpMeta('visitor_count')
+  assert.equal(visitorMeta?.status, KPI_HELP_STATUS.observe)
+  assert.match(visitorMeta?.caution ?? '', /Shopee/)
+  assert.match(visitorMeta?.caution ?? '', /TikTok/)
+  assert.match(visitorMeta?.caution ?? '', /不可直接比大小/)
+
+  // 分母/分子用到访客数的指标同样受口径差异影响 ⇒ 都要标「观察口径」。
+  for (const key of ['uv_conversion_rate', 'visit_rate', 'browse_depth']) {
+    const meta = getKpiHelpMeta(key)
+    assert.equal(meta?.status, KPI_HELP_STATUS.observe, `${key} 应标为观察口径`)
+    assert.match(meta?.caution ?? '', /访客数/, `${key} 的说明应点明访客数口径`)
+  }
+})
+
+test('流量排名表的访客数列必须带口径提示', () => {
+  assert.equal(viewSource.includes('访客数(UV)'), true)
+  assert.match(viewSource, /Shopee 为全店去重访客人数/)
+  assert.match(viewSource, /TikTok 为商品访客人次/)
+})
+
 test('BusinessOverview renders KPI help popovers and status-driven caution content', () => {
   assert.equal(viewSource.includes('businessOverviewKpiMeta'), true)
   assert.equal(viewSource.includes('getKpiHelpMeta'), true)

@@ -156,13 +156,25 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "default_hash": False,
         "aliases": ["访客数", "visitors", "visitor count"],
     },
+    # ⚠ 商品级访客数 —— 归属 **products 域**(2026-11-10 从 analytics 域迁出)。
+    #   理由: analytics 域的「商品访客数」是 **tiktok 流量报表的访客口径**
+    #   (商品访客人次), 架构契约已批准它映射到 ``visitor_count``
+    #   (见 ``docs/architecture/SEMANTIC_FIELD_RULES.md`` 的 Analytics Rules)
+    #   ⇒ 它不能再被登记成 analytics 域的 ``product_visitor_count``,
+    #   否则同一个列名会同时指向两个标准字段(SSOT 硬约束)。
+    #   本字段现在只服务 products 域的「商品访客数量」(实测 25809 行有值)。
     "product_visitor_count": {
         "label": "商品访客数",
         "kind": "metric",
-        "domain": "analytics",
+        "domain": "products",
         "hash_eligible": False,
         "default_hash": False,
-        "aliases": ["商品访客数", "product visitors", "product visitor count"],
+        # ⚠ 全局别名**不许**再放中文「商品访客数」—— 那个列名在 analytics 域
+        #   归 ``visitor_count``(tiktok 平台限定)。中文裸名留在全局表 = 任何域
+        #   的同名列都会被认领 ⇒ 一个列名指向两个标准字段。
+        #   products 域的真实表头「商品访客数量」登记在
+        #   :data:`PRODUCTS_SEMANTIC_ALIASES` 里(域限定)。
+        "aliases": ["product visitors", "product visitor count"],
     },
     "page_views": {
         "label": "浏览量",
@@ -1126,8 +1138,17 @@ SEMANTIC_FIELD_DESCRIPTIONS: Dict[str, str] = {
     "order_count": "指标值，不参与 Data Hash。",
     "period_start_time": "小时级或更细粒度报表的开始时间，可由用户手动加入 Data Hash。",
     "period_end_time": "小时级或更细粒度报表的结束时间，可由用户手动加入 Data Hash。",
-    "visitor_count": "系统语义指标，不参与 Data Hash。",
-    "product_visitor_count": "系统语义指标，不参与 Data Hash。",
+    "visitor_count": (
+        "访客数(UV)。⚠ 两平台口径不同：Shopee 的「访客数」是**全店去重访客人数**；"
+        "TikTok 的「商品访客数」是**按商品统计的访客人次**。"
+        "两者都是访客数，但**跨平台不可直接比大小**。"
+        "系统语义指标，不默认参与 Data Hash。"
+    ),
+    "product_visitor_count": (
+        "商品访客数（商品域的「商品访客数量」：按单个商品统计的访客数）。"
+        "注意：流量域的「商品访客数」已归 visitor_count，跨域同名不同义。"
+        "系统语义指标，不默认参与 Data Hash。"
+    ),
     "page_views": "系统语义指标，不参与 Data Hash。",
     "impressions": "系统语义指标，不参与 Data Hash。",
     "clicks": "系统语义指标，不参与 Data Hash。",
@@ -1405,8 +1426,37 @@ ORDER_PLATFORM_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
 #:   PG 侧 ``semantic.resolve_alias(..., platform_code)`` 只在 shopee 数据上命中。
 #:
 #: ⚠ **不登记成通用别名** —— 通用别名会让 tiktok 数据上出现同名列时**串口径**。
+#:
+#: [*] 2026-11-10: 访客数(``visitor_count``)也**成对**登记在这里 ——
+#:
+#:   shopee「访客数」     -> ``visitor_count`` (platform='shopee')
+#:   tiktok「商品访客数」 -> ``visitor_count`` (platform='tiktok')
+#:
+#: 实测两边的访客列名**互斥**(shopee 2354 行只有「访客数」, tiktok 1374 行
+#: 只有「商品访客数」)⇒ 只能分平台登记。
+#:
+#: ⚠⚠ **必须成对**: 别名合并规则里, 某个字段一旦登记了平台限定别名, 它的
+#:   **通用别名就整体不再登记** ⇒ 只登记一边会把另一边**一起挤掉**
+#:   (shopee 的 UV 会静默变 NULL)。这条规则是 ``build_domain_alias_records``
+#:   里的 ``platform_fields`` 排他逻辑, 已实测确认。
+#:
+#: ⚠ **两平台的 UV 不是同一个口径**:
+#:   shopee = 全店**去重访客人数**; tiktok = **商品访客人次**。
+#:   ⇒ 跨平台**不可直接比大小**, 看板必须标注(见 businessOverviewKpiMeta.js)。
 ANALYTICS_PLATFORM_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
     "shopee": {
+        # ── 访客数(UV) —— shopee 的真实表头 ─────────────────────────
+        # 「访客数」= shopee **全店去重访客人数**(实测 = 新访客 + 现有访客)。
+        #
+        # ⚠⚠ **必须与 tiktok 的「商品访客数」对称登记** ——
+        #   :func:`backend.services.semantic_alias_registry.build_domain_alias_records`
+        #   的合并规则里有一条**排他**规则: 某个标准字段一旦出现在
+        #   ``platform_fields``(即登记了平台限定别名), 它的**通用别名就整体
+        #   不再登记** —— 否则同一列名会被两个标准字段认领。
+        #   ⇒ 只登记 tiktok 的「商品访客数」会把 shopee 的「访客数」**一起挤掉**
+        #   ⇒ shopee 的 UV 全线变 NULL(实测会静默发生, 没有任何报错)。
+        #   ⇒ 两个平台**必须**都登记, 各自命中自己的表头。
+        "visitor_count": ("访客数",),
         # 新客: 访客数里「第一次来」的那部分(实测 访客数 == 新访客 + 现有访客)。
         "new_visitor_count": ("新访客",),
         # 老客: 访客数里「之前来过」的那部分。
@@ -1430,6 +1480,22 @@ ANALYTICS_PLATFORM_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
     #     分享出去 ⇒ 平台把这单记到达人直播、商品卡等多个口径上)。
     # ⇒ 用户 2026-11-09 决定: **一列一个标准字段, 只单列展示, 绝不聚合**。
     "tiktok": {
+        # ── 访客数(UV) —— tiktok 的真实表头 ─────────────────────────
+        # 「商品访客数」= tiktok 流量报表的**商品访客人次**, 是 tiktok 侧
+        # **唯一**的访客口径(实测 1374 行 raw_data key 里只有这一列,
+        # 店铺级访客数这一列压根不存在)。
+        #
+        # ⚠ **口径与 shopee 不同, 跨平台不可直接比大小**:
+        #   shopee「访客数」 = 全店**去重访客人数**(519,212 人)
+        #   tiktok「商品访客数」 = 按商品统计的**访客人次**(全量 175,914 人次)
+        #   ⇒ 两者都是 ``visitor_count``, 但**不是同一个事实**;
+        #     看板上必须标注口径差异(见 businessOverviewKpiMeta.js)。
+        #
+        # ✅ 架构契约早就批准过这件事(2026-05-26):
+        #   ``docs/architecture/SEMANTIC_FIELD_RULES.md`` 明写
+        #   「TikTok analytics explicitly maps 商品访客数 to canonical
+        #   visitor_count」—— 本条登记是把契约**落进实现**, 不是新增口径。
+        "visitor_count": ("商品访客数",),
         # 商品卡: 用户直接点商品小卡下单(不经直播/视频)。
         # ⚠ 稀疏指标: 实测只有 198/1374 行有值(147 行非零)。
         "product_card_gmv": ("商品卡 GMV",),
@@ -1765,12 +1831,33 @@ ANALYTICS_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
     "metric_date": ("日期", "统计日期", "交易日期", "日期时间", "date"),
     "shop_id": ("店铺", "店铺id", "店铺名称", "shop_id", "shop id"),
     # ── 访客 ──
-    # ⚠ 「商品访客数」只归 product_visitor_count —— 它**就是**商品级访客数。
-    #   tiktok 这份流量报表**没有**店铺级访客数 ⇒ visitor_count 在 tiktok 上
-    #   恒 NULL(如实反映, 不猜值); 以前视图里用 CASE 硬塞进去, 是**静默的
-    #   语义混淆**。
-    "visitor_count": ("访客数", "访客量", "访问用户数", "uv"),
-    "product_visitor_count": ("商品访客数",),
+    # ⚠⚠ **visitor_count 与 product_visitor_count 都不在**本表(通用别名)里 ——
+    #
+    # 2026-11-10 实测(开发库全仓扫描 raw_data key):
+    #   * shopee 流量月报 2354 行 —— 访客列**只有**「访客数」「新访客」「现有访客」;
+    #   * tiktok 流量月报 1374 行 —— 访客列**只有**「商品访客数」;
+    #   * 两边的访客列名**互斥** ⇒ 「访客数」与「商品访客数」是**平台专有**列名。
+    #
+    # ⇒ 两者都改走**平台限定**登记(见 :data:`ANALYTICS_PLATFORM_ALIASES`):
+    #   shopee「访客数」     -> visitor_count (platform='shopee')
+    #   tiktok「商品访客数」 -> visitor_count (platform='tiktok')
+    #
+    # ⚠ **通用别名会让两个平台串口径**: 「访客数」若登记成通用别名, tiktok 数据
+    #   上将来出现同名列时会被**当成 shopee 的口径**命中 —— 这正是
+    #   2026-11-08 edb7921a 修掉的病根(把 tiktok 的商品访客人次冒充成
+    #   全店去重访客人数), 不能再犯一次。
+    #
+    # ⚠ 同时, 因为 ``visitor_count`` 进了平台限定别名表, 它的**通用**别名
+    #   (「访客量」「访问用户数」「uv」等推测性裸名)会**一起退出**本域 ——
+    #   实测两个源表里这些列**一个都不存在**, 留着只是「登记了但命不中」的
+    #   假覆盖。**宁可落 unknown, 也不猜。**
+    #
+    # ⚠ ``product_visitor_count`` 也**退出** analytics 域 ——
+    #   analytics 域的「商品访客数」归 ``visitor_count``(见上), 若本域再登记
+    #   一条 ``product_visitor_count``, 同一个列名就会指向两个标准字段
+    #   (SSOT 硬约束: 一个列名只认一个标准字段)⇒ 迁移的 fail-closed 自检
+    #   会直接失败。
+    #   本字段现在只服务 **products 域**的「商品访客数量」(实测 25809 行有值)。
     # shopee「页面浏览数」/ tiktok「页面浏览次数」
     "page_views": (
         "页面浏览数",

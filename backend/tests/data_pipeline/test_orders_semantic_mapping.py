@@ -905,7 +905,10 @@ async def test_shop_month_kpi_aligns_orders_alias_and_traffic_platform_shop_id()
             "利润(RMB)": "10",
         }
         traffic_raw = {
-            "visitor_count": "200",
+            # ⚠ 用**真实表头**: shopee 的访客列叫「访客数」(不是英文字段名)——
+            #   访客别名是**平台限定**登记的(shopee「访客数」/ tiktok「商品访客数」),
+            #   拿字段名当列名写夹具 = 造一个生产里根本不存在的列。
+            "访客数": "200",
             "page_views": "400",
             "impressions": "1000",
         }

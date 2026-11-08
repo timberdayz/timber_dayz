@@ -267,7 +267,7 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                         'analytics',
                         'monthly',
                         DATE '2026-03-01',
-                        '{"visitor_count":"200","page_views":"300"}'::jsonb,
+                        '{"访客数":"200","page_views":"300"}'::jsonb,
                         'month-traffic-1',
                         TIMESTAMP '2026-03-02 10:00:00'
                     )

@@ -983,7 +983,6 @@ def test_analytics_domain_fields_are_derived_from_the_dictionary():
     # 「必须命中」的核心指标一个都不能少
     for field in (
         "visitor_count",
-        "product_visitor_count",
         "page_views",
         "impressions",
         "clicks",
@@ -995,6 +994,12 @@ def test_analytics_domain_fields_are_derived_from_the_dictionary():
         "bounce_rate",
     ):
         assert field in actual, "流量域巡检漏了 {0}".format(field)
+    # [*] 2026-11-10: ``product_visitor_count`` 已**退出** analytics 域 ——
+    #   本域的「商品访客数」归 ``visitor_count``(tiktok 平台限定)⇒ 留着它
+    #   只会报「源表没有这一列」的假缺口(噪音掩盖真问题)。
+    assert (
+        "product_visitor_count" not in actual
+    ), "product_visitor_count 已退出 analytics 域, 不该再被巡检"
 
 
 def test_click_rate_is_not_audited_because_no_platform_has_that_column():

@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 
 from backend.services.semantic_field_registry import (
+    ANALYTICS_PLATFORM_ALIASES,
     ANALYTICS_SEMANTIC_ALIASES,
     DOMAIN_SEMANTIC_ALIASES,
 )
@@ -84,8 +85,13 @@ REAL_TIKTOK_HEADERS = frozenset(
 
 #: 登记别名时必须**逐字**对上的真实表头(其余别名是英文/历史写法, 命不中也无害,
 #: 但下面那组必须命中, 否则对应指标会恒为 NULL)。
+#:
+#: [*] 2026-11-10: ``visitor_count`` 的真实表头**分平台**——
+#:   shopee「访客数」/ tiktok「商品访客数」(实测两边访客列名互斥)
+#:   ⇒ 它改走**平台限定**登记, 见 :data:`PLATFORM_MUST_HIT_HEADERS`。
+#:   (``product_visitor_count`` 已退出 analytics 域 —— 见
+#:   :data:`test_product_visitors_are_registered_as_tiktok_visitor_count`。)
 MUST_HIT_HEADERS = {
-    "visitor_count": ("访客数",),
     "page_views": ("页面浏览数", "页面浏览次数"),
     "impressions": ("商品曝光次数",),
     "clicks": ("商品点击量",),
@@ -94,8 +100,16 @@ MUST_HIT_HEADERS = {
     "sku_order_count": ("SKU 订单数",),
     "gmv": ("GMV",),
     "total_transaction_amount": ("总成交额",),
-    "product_visitor_count": ("商品访客数",),
     "bounce_rate": ("跳出率",),
+}
+
+#: [*] 2026-11-10: **平台限定**的「必须命中」表头: 平台 -> 标准字段 -> 表头。
+#:
+#: 访客数必须成对登记 —— 别名合并规则里「某字段一旦登记了平台限定别名, 它的
+#: 通用别名就整体不再登记」⇒ 只登记一边会把另一边**静默挤掉**(UV 变 NULL)。
+PLATFORM_MUST_HIT_HEADERS = {
+    "shopee": {"visitor_count": ("访客数",)},
+    "tiktok": {"visitor_count": ("商品访客数",)},
 }
 
 
@@ -112,6 +126,41 @@ def test_must_hit_aliases_are_registered_for_analytics_domain():
         aliases = set(ANALYTICS_SEMANTIC_ALIASES.get(field, ()))
         for header in headers:
             assert header in aliases, "{0} 没登记真实表头 {1!r}".format(field, header)
+
+
+def test_must_hit_platform_aliases_are_registered_for_analytics_domain():
+    """[*] 2026-11-10: 访客数的真实表头**分平台** ⇒ 必须登记在**平台限定**别名表。
+
+    ⚠ 两个平台**都要**登记: 别名合并规则里, 某字段一旦登记了平台限定别名,
+    它的通用别名就整体不再登记 ⇒ 只登记一边会把另一边**静默挤掉**。
+    """
+    for platform, per_field in PLATFORM_MUST_HIT_HEADERS.items():
+        registered = ANALYTICS_PLATFORM_ALIASES.get(platform) or {}
+        for field, headers in per_field.items():
+            aliases = set(registered.get(field) or ())
+            for header in headers:
+                assert header in aliases, "{0} 的 {1} 没登记真实表头 {2!r}".format(
+                    platform, field, header
+                )
+
+
+def test_registered_platform_chinese_headers_all_exist_in_real_source_tables():
+    """平台限定别名表里登记的中文表头也必须是**真实存在**的列名(逐字)。
+
+    [*] 2026-11-10: 平台限定别名表是「真实表头」的第二来源 ⇒ 同样要受
+    「不许登记不存在的列名」这条约束(登记了但命不中 = 永远恒 NULL 且无人察觉)。
+    """
+    real_headers = REAL_SHOPEE_HEADERS | REAL_TIKTOK_HEADERS
+    for per_platform in ANALYTICS_PLATFORM_ALIASES.values():
+        for aliases in per_platform.values():
+            for alias in aliases:
+                if not re.search(r"[一-鿿]", alias):
+                    continue
+                if alias in real_headers:
+                    continue
+                assert (
+                    alias in KNOWN_UNMATCHED_CHINESE_ALIASES
+                ), "平台限定别名登记了不存在的列名 {0!r}".format(alias)
 
 
 def test_registered_chinese_headers_all_exist_in_real_source_tables():
@@ -184,14 +233,37 @@ def test_one_column_name_maps_to_exactly_one_standard_field():
             )
 
 
-def test_product_visitor_count_is_not_mixed_into_visitor_count():
-    """「商品访客数」只归 product_visitor_count, 不进 visitor_count。
+def test_product_visitors_are_registered_as_tiktok_visitor_count():
+    """「商品访客数」归 **tiktok 的 visitor_count**, 不再归 product_visitor_count。
 
-    tiktok 这份流量报表**没有**店铺级访客数 ⇒ visitor_count 在 tiktok 上
-    恒 NULL(如实反映)。以前视图里用 CASE 硬塞进去, 是**静默的语义混淆**。
+    [*] 2026-11-10(实测): tiktok 流量报表**没有**店铺级访客数, 唯一的访客
+    列就是「商品访客数」⇒ 它**就是** tiktok 侧的 UV。
+    架构契约(2026-05-26)早已批准这件事:
+    「TikTok analytics explicitly maps 商品访客数 to canonical visitor_count」。
+
+    ⚠ 但两平台**口径不同**: shopee「访客数」= 全店去重访客人数,
+    tiktok「商品访客数」= 按商品统计的访客人次 ⇒ 必须**平台限定**登记,
+    不许进通用别名表(通用别名会让 tiktok 的数据被当成 shopee 口径命中)。
     """
-    assert "商品访客数" in ANALYTICS_SEMANTIC_ALIASES["product_visitor_count"]
-    assert "商品访客数" not in ANALYTICS_SEMANTIC_ALIASES["visitor_count"]
+    tiktok_aliases = ANALYTICS_PLATFORM_ALIASES.get("tiktok") or {}
+    shopee_aliases = ANALYTICS_PLATFORM_ALIASES.get("shopee") or {}
+
+    assert "商品访客数" in (
+        tiktok_aliases.get("visitor_count") or ()
+    ), "tiktok 的「商品访客数」必须登记到 visitor_count"
+    assert "访客数" in (
+        shopee_aliases.get("visitor_count") or ()
+    ), "shopee 的「访客数」必须登记到 visitor_count(两边必须对称)"
+
+    generic = set()
+    for aliases in ANALYTICS_SEMANTIC_ALIASES.values():
+        generic.update(aliases)
+    assert "商品访客数" not in generic, "「商品访客数」不该留在通用别名表里"
+    assert "访客数" not in generic, "「访客数」不该留在通用别名表里"
+
+    assert (
+        "product_visitor_count" not in ANALYTICS_SEMANTIC_ALIASES
+    ), "product_visitor_count 已退出 analytics 域"
 
 
 def test_click_rate_is_not_registered_because_no_platform_has_that_column():
@@ -222,6 +294,10 @@ def test_analytics_view_reads_through_alias_registry():
     assert "semantic.resolve_alias(" in sql_text
     for field in MUST_HIT_HEADERS:
         assert "'{field}'".format(field=field) in sql_text
+    # [*] 2026-11-10: visitor_count 改走平台限定登记, 但视图**照样**要取它
+    #   (取数路径没变, 变的是「由哪一列取」) ⇒ 这条断言不许被顺手删掉。
+    assert "'visitor_count'" in sql_text
+    assert "'product_visitor_count'" in sql_text
 
 
 def test_analytics_view_output_has_no_fake_zero_coalesce():
@@ -278,7 +354,10 @@ def test_analytics_view_does_not_read_raw_currency_or_literal_headers():
 
 def test_analytics_fields_are_registered_in_dictionary():
     """被巡检的 analytics 标准字段必须在字典里有定义。"""
-    for field in MUST_HIT_HEADERS:
+    fields = set(MUST_HIT_HEADERS)
+    for per_field in PLATFORM_MUST_HIT_HEADERS.values():
+        fields |= set(per_field)
+    for field in fields:
         assert field in SEMANTIC_FIELD_DEFINITIONS, "标准字段 {0} 不在字典里".format(
             field
         )

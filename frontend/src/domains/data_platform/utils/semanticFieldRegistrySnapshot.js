@@ -197,7 +197,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "商品名": "product_name",
     "商品名称": "product_name",
     "商品状态": "item_status",
-    "商品访客数": "product_visitor_count",
     "商城页": "channel",
     "商家直播gmv": "live_gmv",
     "商家直播归因gmv": "live_attributed_gmv",
@@ -354,13 +353,11 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "sku订单数": "sku_order_count",
       "sku订单量": "sku_order_count",
       "totaltransactionamount": "total_transaction_amount",
-      "uv": "visitor_count",
       "交易日期": "metric_date",
       "交易额": "gmv",
       "商品曝光次数": "impressions",
       "商品浏览量": "page_views",
       "商品点击量": "clicks",
-      "商品访客数": "product_visitor_count",
       "店铺": "shop_id",
       "店铺id": "shop_id",
       "店铺名称": "shop_id",
@@ -380,9 +377,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "订单数": "order_count",
       "订单数量": "order_count",
       "订单量": "order_count",
-      "访客数": "visitor_count",
-      "访客量": "visitor_count",
-      "访问用户数": "visitor_count",
       "跳出率": "bounce_rate",
       "跳失率": "bounce_rate",
       "转化率": "conversion_rate",
@@ -657,23 +651,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       ],
       "data_domain": "analytics",
       "semantic_key": "shop_id"
-    },
-    {
-      "aliases": [
-        "访客数",
-        "访客量",
-        "访问用户数",
-        "uv"
-      ],
-      "data_domain": "analytics",
-      "semantic_key": "visitor_count"
-    },
-    {
-      "aliases": [
-        "商品访客数"
-      ],
-      "data_domain": "analytics",
-      "semantic_key": "product_visitor_count"
     },
     {
       "aliases": [
@@ -1343,7 +1320,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "visitor count"
       ],
       "default_hash": false,
-      "description": "系统语义指标，不参与 Data Hash。",
+      "description": "访客数(UV)。⚠ 两平台口径不同：Shopee 的「访客数」是**全店去重访客人数**；TikTok 的「商品访客数」是**按商品统计的访客人次**。两者都是访客数，但**跨平台不可直接比大小**。系统语义指标，不默认参与 Data Hash。",
       "domain": "analytics",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
@@ -1358,19 +1335,18 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     {
       "aliases": [
         "product_visitor_count",
-        "商品访客数",
         "product visitors",
         "product visitor count"
       ],
       "default_hash": false,
-      "description": "系统语义指标，不参与 Data Hash。",
-      "domain": "analytics",
+      "description": "商品访客数（商品域的「商品访客数量」：按单个商品统计的访客数）。注意：流量域的「商品访客数」已归 visitor_count，跨域同名不同义。系统语义指标，不默认参与 Data Hash。",
+      "domain": "products",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
       "identity_strength": null,
       "kind": "metric",
       "label": "商品访客数",
-      "option_group": "traffic_metric",
+      "option_group": "product_metric",
       "required": false,
       "semantic_key": "product_visitor_count",
       "system_scope": false
@@ -3402,7 +3378,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "visitor count"
           ],
           "default_hash": false,
-          "description": "系统语义指标，不参与 Data Hash。",
+          "description": "访客数(UV)。⚠ 两平台口径不同：Shopee 的「访客数」是**全店去重访客人数**；TikTok 的「商品访客数」是**按商品统计的访客人次**。两者都是访客数，但**跨平台不可直接比大小**。系统语义指标，不默认参与 Data Hash。",
           "domain": "analytics",
           "group": "traffic_metric",
           "hash_eligible": true,
@@ -3412,25 +3388,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "label": "访客数 (visitor_count)",
           "system_scope": false,
           "value": "visitor_count"
-        },
-        {
-          "aliases": [
-            "product_visitor_count",
-            "商品访客数",
-            "product visitors",
-            "product visitor count"
-          ],
-          "default_hash": false,
-          "description": "系统语义指标，不参与 Data Hash。",
-          "domain": "analytics",
-          "group": "traffic_metric",
-          "hash_eligible": true,
-          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
-          "identity_strength": null,
-          "kind": "metric",
-          "label": "商品访客数 (product_visitor_count)",
-          "system_scope": false,
-          "value": "product_visitor_count"
         },
         {
           "aliases": [
@@ -4214,6 +4171,24 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     {
       "label": "商品指标",
       "options": [
+        {
+          "aliases": [
+            "product_visitor_count",
+            "product visitors",
+            "product visitor count"
+          ],
+          "default_hash": false,
+          "description": "商品访客数（商品域的「商品访客数量」：按单个商品统计的访客数）。注意：流量域的「商品访客数」已归 visitor_count，跨域同名不同义。系统语义指标，不默认参与 Data Hash。",
+          "domain": "products",
+          "group": "product_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "商品访客数 (product_visitor_count)",
+          "system_scope": false,
+          "value": "product_visitor_count"
+        },
         {
           "aliases": [
             "purchase_amount",

@@ -33,8 +33,9 @@ export const businessOverviewKpiMeta = [
     definition: '衡量访客最终下单的效率，是流量转订单的核心转化指标。',
     formulaText: '订单数 / 访客数 × 100%',
     businessValue: '适合判断流量质量、页面承接和商品吸引力是否足以促成下单。',
-    status: KPI_HELP_STATUS.stable,
-    caution: '当前口径稳定，可直接用于经营复盘。',
+    status: KPI_HELP_STATUS.observe,
+    caution:
+      '分母是访客数：Shopee 为全店去重访客人数，TikTok 为商品访客人次，两平台数值不可直接横向比较。',
     sourceRefs: ['metrics-dictionary', 'shop-month-kpi-runtime'],
     interactionNote: '桌面端悬停查看，移动端点击信息图标查看。'
   },
@@ -74,11 +75,15 @@ export const businessOverviewKpiMeta = [
   {
     key: 'visitor_count',
     title: '访客数(UV)',
-    definition: '统计进入店铺或页面的访客人数，用来判断真实访问规模。',
-    formulaText: '所选周期内的访客数汇总。',
-    businessValue: '适合与曝光量、订单数联动看，判断流量入口质量和访问转化情况。',
-    status: KPI_HELP_STATUS.stable,
-    caution: '当前口径稳定，可直接用于经营复盘。',
+    definition:
+      '统计访问规模，用来判断真实流量体量。⚠ 两平台口径不同：Shopee 是全店去重访客人数，TikTok 是按商品统计的访客人次。',
+    formulaText:
+      '所选周期内的访客数汇总（Shopee 取「访客数」，TikTok 取「商品访客数」）。',
+    businessValue:
+      '适合与曝光量、订单数联动看，判断流量入口质量和访问转化情况；跨平台对比请分平台看。',
+    status: KPI_HELP_STATUS.observe,
+    caution:
+      '⚠ 跨平台不可直接比大小：Shopee 是全店去重访客人数，TikTok 是商品访客人次。横向比较请按平台拆开看。',
     sourceRefs: ['metrics-dictionary', 'shop-month-kpi-runtime'],
     interactionNote: '桌面端悬停查看，移动端点击信息图标查看。'
   },
@@ -88,8 +93,9 @@ export const businessOverviewKpiMeta = [
     definition: '衡量曝光最终转成访问的效率，用来观察流量入口质量。',
     formulaText: '访客数 / 曝光量 × 100%',
     businessValue: '适合判断主图、标题、价格带或投放入口是否能吸引用户点进来。',
-    status: KPI_HELP_STATUS.stable,
-    caution: '当前口径稳定，可直接用于经营复盘。',
+    status: KPI_HELP_STATUS.observe,
+    caution:
+      '分子是访客数：Shopee 为全店去重访客人数，TikTok 为商品访客人次，两平台数值不可直接横向比较。',
     sourceRefs: ['postgresql-dashboard-runtime', 'shop-month-kpi-runtime'],
     interactionNote: '桌面端悬停查看，移动端点击信息图标查看。'
   },
@@ -99,8 +105,9 @@ export const businessOverviewKpiMeta = [
     definition: '衡量单个访客平均浏览了多少次页面，用来观察浏览意愿。',
     formulaText: '浏览量 / 访客数',
     businessValue: '适合判断详情页承接、关联推荐和内容组织是否让用户继续浏览。',
-    status: KPI_HELP_STATUS.stable,
-    caution: '当前口径稳定，可直接用于经营复盘。',
+    status: KPI_HELP_STATUS.observe,
+    caution:
+      '分母是访客数：Shopee 为全店去重访客人数，TikTok 为商品访客人次，两平台数值不可直接横向比较。',
     sourceRefs: ['postgresql-dashboard-runtime', 'shop-month-kpi-runtime'],
     interactionNote: '桌面端悬停查看，移动端点击信息图标查看。'
   },

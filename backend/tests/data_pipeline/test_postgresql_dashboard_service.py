@@ -3207,7 +3207,7 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
                     )
                     VALUES (
                         'shopee', 'shop-a', 'analytics', 'monthly', DATE '2026-03-01',
-                        '{"visitor_count":"200","page_views":"300","impressions":"1000"}'::jsonb,
+                        '{"访客数":"200","page_views":"300","impressions":"1000"}'::jsonb,
                         'month-analytics-1', TIMESTAMP '2026-03-01 10:00:00'
                     )
                     """
@@ -3568,7 +3568,7 @@ async def test_business_overview_kpi_module_exposes_pv_uv_conversion_rates():
                         metric_date, raw_data, data_hash, ingest_timestamp
                     ) VALUES (
                         'shopee', 'shop-a', 'analytics', 'monthly', DATE '2026-03-01',
-                        '{"visitor_count":"200","page_views":"300","impressions":"1000"}'::jsonb,
+                        '{"访客数":"200","page_views":"300","impressions":"1000"}'::jsonb,
                         'month-traffic-1', TIMESTAMP '2026-03-02 10:00:00'
                     )
                     """

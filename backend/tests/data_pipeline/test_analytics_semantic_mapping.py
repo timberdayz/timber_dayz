@@ -84,9 +84,18 @@ def test_analytics_sql_does_not_register_unmeasured_store_page_visit_column():
     assert tiktok_store_page_visit not in registered
 
 
-def test_analytics_sql_resolves_product_visitors_as_product_visitor_count():
-    """「商品访客数」归 ``product_visitor_count``(商品级), 不进 visitor_count。"""
-    from backend.services.semantic_field_registry import ANALYTICS_SEMANTIC_ALIASES
+def test_analytics_sql_resolves_product_visitors_as_tiktok_visitor_count():
+    """「商品访客数」归 **tiktok 的 ``visitor_count``**(平台限定)。
+
+    [*] 2026-11-10(实测): tiktok 流量报表**没有**店铺级访客数, 唯一的访客
+    列就是「商品访客数」⇒ 它就是 tiktok 侧的 UV(架构契约 2026-05-26 已批准)。
+    ⚠ 但两平台口径不同(shopee 全店去重访客人数 / tiktok 商品访客人次)
+    ⇒ 必须**平台限定**, 不许进通用别名表。
+    """
+    from backend.services.semantic_field_registry import (
+        ANALYTICS_PLATFORM_ALIASES,
+        ANALYTICS_SEMANTIC_ALIASES,
+    )
 
     daily_sql = Path("sql/semantic/analytics_atomic.sql").read_text(encoding="utf-8")
     monthly_mv_sql = Path("sql/semantic/analytics_monthly_atomic_mv.sql").read_text(
@@ -96,11 +105,23 @@ def test_analytics_sql_resolves_product_visitors_as_product_visitor_count():
     tiktok_product_visitors = "".join(
         chr(c) for c in [21830, 21697, 35775, 23458, 25968]
     )
+    tiktok_aliases = ANALYTICS_PLATFORM_ALIASES.get("tiktok") or {}
+    assert tiktok_product_visitors in (
+        tiktok_aliases.get("visitor_count") or ()
+    ), "tiktok 的「商品访客数」必须登记到 visitor_count"
+
+    generic = set()
+    for aliases in ANALYTICS_SEMANTIC_ALIASES.values():
+        generic.update(aliases)
     assert (
-        tiktok_product_visitors in ANALYTICS_SEMANTIC_ALIASES["product_visitor_count"]
-    )
-    assert tiktok_product_visitors not in ANALYTICS_SEMANTIC_ALIASES["visitor_count"]
+        tiktok_product_visitors not in generic
+    ), "「商品访客数」不该留在通用别名表里(会串口径)"
+    assert (
+        "product_visitor_count" not in ANALYTICS_SEMANTIC_ALIASES
+    ), "product_visitor_count 已退出 analytics 域"
 
     for sql_text in (daily_sql, monthly_mv_sql):
         assert "semantic.resolve_alias(" in sql_text
-        assert "'product_visitor_count'" in sql_text
+        assert "'visitor_count'" in sql_text
+        # 取数一律走别名表 ⇒ SQL 里不许再内联这个表头。
+        assert "raw_data->>'{0}'".format(tiktok_product_visitors) not in sql_text

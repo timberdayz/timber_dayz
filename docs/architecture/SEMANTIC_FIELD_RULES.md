@@ -64,7 +64,7 @@ Status: Implemented in `sql/semantic/analytics_atomic.sql` and `sql/semantic/ana
 | Cross-Platform Semantic | Canonical Field | Accepted Raw Source Fields |
 |-------------------------|-----------------|----------------------------|
 | 交易总额 / GMV | `gmv` | TikTok `GMV`; Shopee analytics sales-like field explicitly confirmed as same semantic |
-| 访客数 | `visitor_count` | `访客数`, `独立访客`, `uv`, `visitor_count`; TikTok analytics explicitly maps `商品访客数` to canonical `visitor_count` |
+| 访客数 | `visitor_count` | Shopee `访客数`; TikTok `商品访客数` (both registered as **platform-scoped** aliases; the two calibers are **not** interchangeable) |
 | 页面浏览量 | `page_views` | `浏览量`, `页面浏览数`, `页面浏览次数`, `page_views`, `views` |
 | 订单数 | `order_count` | `订单数`, `订单数量`, `order_count`, `Order Count` excluding any field explicitly split such as `SKU 订单数` |
 
@@ -75,7 +75,19 @@ Status: Implemented in `sql/semantic/analytics_atomic.sql` and `sql/semantic/ana
 - Approved TikTok analytics rule: `页面浏览次数` is the canonical TikTok `page_views` source.
 - Approved TikTok analytics rule: `商品访客数` is the canonical TikTok `visitor_count` source for dashboard PV/UV semantics.
 - TikTok dashboard PV/UV semantics must prioritize `页面浏览次数` and `商品访客数` even when other visitor-like aliases coexist in the same export.
-- `product_visitor_count` remains available as a compatibility field, but TikTok dashboard consumers reading canonical `visitor_count` must receive `商品访客数`.
+- **Implemented on 2026-11-10**: `商品访客数` now resolves to canonical `visitor_count` for TikTok.
+  The registration is **platform-scoped** (`platform_code='tiktok'`), and Shopee's `访客数`
+  is registered symmetrically as `platform_code='shopee'` — both platforms must be
+  registered, otherwise the alias merge rule drops the un-registered platform's
+  generic aliases and its UV silently turns NULL.
+- **Caliber warning (2026-11-10)**: the two `visitor_count` sources are **different
+  business facts** and their values are **not comparable across platforms**:
+  Shopee `访客数` is a de-duplicated store-level visitor count; TikTok `商品访客数`
+  is a product-level visit count. Dashboard consumers must label the difference
+  instead of comparing the numbers directly.
+- `product_visitor_count` now belongs to the **products** domain only (Shopee
+  `商品访客数量`). It is **no longer** an analytics compatibility field: the
+  analytics-domain column name `商品访客数` resolves to `visitor_count`.
 - Approved Shopee analytics rule: `页面浏览数` maps to canonical `page_views`, and `访客数` maps to canonical `visitor_count`.
 
 ## Orders Rules

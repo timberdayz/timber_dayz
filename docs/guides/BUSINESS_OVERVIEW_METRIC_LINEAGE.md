@@ -191,7 +191,7 @@ These semantic fields exist and are valuable, but are not currently direct core 
 - `platform_service_fee`
 - `analytics.total_transaction_amount`
 - `analytics.sku_order_count`
-- `analytics.product_visitor_count`
+- `products.product_visitor_count` (商品域的「商品访客数量」；2026-11-10 起不再属于 analytics 域)
 - `services.buyer_count`
 
 They may still affect:

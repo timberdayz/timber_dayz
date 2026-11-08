@@ -876,6 +876,17 @@
             align="right"
             sortable
           >
+            <template #header>
+              <div class="metric-header-with-tip">
+                <span>访客数(UV)</span>
+                <el-tooltip
+                  content="Shopee 为全店去重访客人数，TikTok 为商品访客人次；两平台口径不同，不可直接比大小"
+                  placement="top"
+                >
+                  <el-icon class="metric-header-tip"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
+            </template>
             <template #default="{ row }">
               <div class="metric-stack">
                 <span>{{ formatNumber(row.visitor_count) }}</span>
