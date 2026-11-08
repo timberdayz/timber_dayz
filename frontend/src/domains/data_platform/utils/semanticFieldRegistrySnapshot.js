@@ -24,6 +24,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "buyercount": "buyer_count",
     "buyercountplaced": "buyer_count_placed",
     "buyerpaidamount": "paid_amount",
+    "campaignfee": "promotion_fee",
     "channel": "channel",
     "click": "clicks",
     "clickrate": "click_rate",
@@ -39,8 +40,11 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "date": "metric_date",
     "datefrom": "period_start_date",
     "dateto": "period_end_date",
+    "deductionfee": "platform_deduction_fee",
     "endhour": "period_end_time",
     "endtime": "period_end_time",
+    "estimatedsettlement": "estimated_settlement_amount",
+    "estimatedsettlementamount": "estimated_settlement_amount",
     "gmv": "gmv",
     "gmvband": "gmv_band",
     "gmvrange": "gmv_band",
@@ -55,6 +59,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "liveattributedgmv": "live_attributed_gmv",
     "livegmv": "live_gmv",
     "liveindirectgmv": "live_indirect_gmv",
+    "logisticsfee": "shipping_fee",
     "metricdate": "metric_date",
     "orderconversionrate": "order_conversion_rate",
     "orderconversionrateplaced": "order_conversion_rate_placed",
@@ -63,7 +68,10 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "orderdate": "order_date",
     "orderid": "order_id",
     "orderlineid": "line_id",
+    "orderoriginalamount": "order_original_amount",
     "orders": "order_count",
+    "orderstatus": "order_status",
+    "originalamount": "order_original_amount",
     "pageviews": "page_views",
     "paidamount": "paid_amount",
     "periodenddate": "period_end_date",
@@ -71,7 +79,10 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "periodstartdate": "period_start_date",
     "periodstarttime": "period_start_time",
     "platformcommission": "platform_commission",
+    "platformdeductionfee": "platform_deduction_fee",
+    "platformservicefee": "platform_service_fee",
     "platformsku": "platform_sku",
+    "platformvoucher": "platform_voucher",
     "productid": "product_id",
     "productname": "product_name",
     "productsku": "platform_sku",
@@ -79,6 +90,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "productvisitorcount": "product_visitor_count",
     "productvisitors": "product_visitor_count",
     "profit": "profit",
+    "promotionfee": "promotion_fee",
     "purchaseamount": "purchase_amount",
     "pv": "page_views",
     "qty": "sales_volume",
@@ -90,7 +102,12 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "salesamountplaced": "sales_amount_placed",
     "salesvolume": "sales_volume",
     "salesvolumeplaced": "sales_volume_placed",
+    "sellercoupon": "seller_voucher",
+    "sellervoucher": "seller_voucher",
+    "servicefee": "platform_service_fee",
     "serviceid": "service_id",
+    "settledamount": "settled_amount",
+    "shippingfee": "shipping_fee",
     "shopid": "shop_id",
     "skuid": "sku_id",
     "skuordercount": "sku_order_count",
@@ -110,8 +127,11 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "views": "page_views",
     "visitorcount": "visitor_count",
     "visitors": "visitor_count",
+    "voucheramount": "platform_voucher",
     "warehouse": "warehouse_name",
+    "warehousefee": "warehouse_operation_fee",
     "warehousename": "warehouse_name",
+    "warehouseoperationfee": "warehouse_operation_fee",
     "下单日期": "order_date",
     "下单时间": "order_date",
     "下单销售额": "sales_amount_placed",
@@ -126,6 +146,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "产品名称": "product_name",
     "仓库": "warehouse_name",
     "仓库名称": "warehouse_name",
+    "仓库操作费": "warehouse_operation_fee",
     "件数(已下单)": "sales_volume_placed",
     "件数(已下订单)": "sales_volume_placed",
     "件数(已确定订单)": "sales_volume_placed",
@@ -168,14 +189,19 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "已加购的用户数(直播)": "add_to_cart_user_count",
     "已加购的用户数(视频)": "add_to_cart_user_count",
     "已确定订单": "order_count_placed",
+    "已结算金额": "settled_amount",
     "已退款的商品件数": "refunded_item_count",
     "平台sku": "platform_sku",
+    "平台代金券": "platform_voucher",
     "平台佣金": "platform_commission",
+    "平台扣费": "platform_deduction_fee",
+    "平台服务费": "platform_service_fee",
     "店铺": "shop_id",
     "店铺id": "shop_id",
     "开始日期": "period_start_date",
     "开始时间": "period_start_time",
     "总交易金额": "total_transaction_amount",
+    "推广费": "promotion_fee",
     "日期": "metric_date",
     "时段": "period_start_time",
     "明细行id": "line_id",
@@ -205,6 +231,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "视频gmv": "video_gmv",
     "视频归因gmv": "video_attributed_gmv",
     "视频间接gmv": "video_indirect_gmv",
+    "订单原始金额": "order_original_amount",
     "订单号": "order_id",
     "订单数": "order_count",
     "订单数量": "order_count",
@@ -223,6 +250,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "转化率(已下单)": "conversion_rate_placed",
     "转化率(已下订单)": "conversion_rate_placed",
     "转化率(已确定订单)": "conversion_rate_placed",
+    "运费": "shipping_fee",
     "退款商品件数": "refunded_item_count",
     "退款金额": "refund_amount",
     "退款额": "refund_amount",
@@ -234,7 +262,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "销售额(已下订单)": "sales_amount_placed",
     "销售额(已确定订单)": "sales_amount_placed",
     "销量": "sales_volume",
-    "销量(已下单)": "sales_volume_placed"
+    "销量(已下单)": "sales_volume_placed",
+    "预估回款金额": "estimated_settlement_amount"
   },
   "column_overrides": [
     {
@@ -318,7 +347,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     "orders": {
       "buyerpaid": "paid_amount",
-      "costprofitrate": "cost_profit_rate",
       "estimatedsettlement": "estimated_settlement_amount",
       "estimatedsettlementamount": "estimated_settlement_amount",
       "orderdate": "order_date",
@@ -331,27 +359,29 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "profitrmb": "profit",
       "quantity": "sales_volume",
       "salesvolume": "sales_volume",
-      "settlementdate": "settlement_time",
-      "settlementtime": "settlement_time",
       "shopid": "shop_id",
       "shopname": "shop_id",
+      "skuid": "sku_id",
       "soldqty": "sales_volume",
-      "下单日期": "order_date",
       "下单时间": "order_date",
-      "买家支付": "paid_amount",
-      "出库数量": "sales_volume",
+      "买家数": "buyer_count",
+      "产品id": "product_id",
+      "仓库操作费": "warehouse_operation_fee",
       "利润": "profit",
-      "实付金额": "paid_amount",
+      "商品id": "product_id",
+      "商品sku": "product_sku",
+      "商品名称": "product_name",
+      "已结算金额": "settled_amount",
+      "平台sku": "platform_sku",
+      "广告成本": "promotion_fee",
       "店铺": "shop_id",
       "店铺id": "shop_id",
-      "成本利润率": "cost_profit_rate",
-      "结算时间": "settlement_time",
       "订单号": "order_id",
-      "订单日期": "order_date",
-      "订单时间": "order_date",
+      "订单状态": "order_status",
       "订单编号": "order_id",
+      "退款金额": "refund_amount",
+      "采购成本": "purchase_amount",
       "销售数量": "sales_volume",
-      "销量": "sales_volume",
       "预估回款金额": "estimated_settlement_amount"
     },
     "products": {
@@ -418,8 +448,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "订单编号",
         "订单号",
         "order_id",
-        "order no",
         "order_no",
+        "order no",
         "order id"
       ],
       "data_domain": "orders",
@@ -428,7 +458,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     {
       "aliases": [
         "店铺",
-        "店铺id",
+        "店铺ID",
         "shop_id",
         "shop id",
         "shop_name",
@@ -439,10 +469,14 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
+        "订单状态"
+      ],
+      "data_domain": "orders",
+      "semantic_key": "order_status"
+    },
+    {
+      "aliases": [
         "下单时间",
-        "下单日期",
-        "订单日期",
-        "订单时间",
         "order_date",
         "order time",
         "order_time"
@@ -452,9 +486,43 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
+        "产品ID",
+        "商品ID"
+      ],
+      "data_domain": "orders",
+      "semantic_key": "product_id"
+    },
+    {
+      "aliases": [
+        "商品名称"
+      ],
+      "data_domain": "orders",
+      "semantic_key": "product_name"
+    },
+    {
+      "aliases": [
+        "商品SKU"
+      ],
+      "data_domain": "orders",
+      "semantic_key": "product_sku"
+    },
+    {
+      "aliases": [
+        "平台SKU"
+      ],
+      "data_domain": "orders",
+      "semantic_key": "platform_sku"
+    },
+    {
+      "aliases": [
+        "SKU ID"
+      ],
+      "data_domain": "orders",
+      "semantic_key": "sku_id"
+    },
+    {
+      "aliases": [
         "销售数量",
-        "出库数量",
-        "销量",
         "sold_qty",
         "sales_volume",
         "quantity"
@@ -464,21 +532,22 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
-        "买家支付",
-        "买家支付(rmb)",
-        "买家支付（rmb）",
-        "实付金额",
-        "buyer_paid",
-        "paid_amount"
+        "买家数"
+      ],
+      "data_domain": "orders",
+      "semantic_key": "buyer_count"
+    },
+    {
+      "aliases": [
+        "paid_amount",
+        "buyer_paid"
       ],
       "data_domain": "orders",
       "semantic_key": "paid_amount"
     },
     {
       "aliases": [
-        "利润",
-        "利润(rmb)",
-        "利润（rmb）",
+        "利润(RMB)",
         "profit",
         "profit_amount",
         "profit_rmb"
@@ -488,9 +557,21 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
-        "预估回款金额",
-        "预估回款金额(rmb)",
-        "预估回款金额（rmb）",
+        "采购成本(RMB)"
+      ],
+      "data_domain": "orders",
+      "semantic_key": "purchase_amount"
+    },
+    {
+      "aliases": [
+        "退款金额(RMB)"
+      ],
+      "data_domain": "orders",
+      "semantic_key": "refund_amount"
+    },
+    {
+      "aliases": [
+        "预估回款金额(RMB)",
         "estimated_settlement",
         "estimated_settlement_amount"
       ],
@@ -499,20 +580,24 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
-        "结算时间",
-        "settlement_time",
-        "settlement date"
+        "已结算金额(RMB)"
       ],
       "data_domain": "orders",
-      "semantic_key": "settlement_time"
+      "semantic_key": "settled_amount"
     },
     {
       "aliases": [
-        "成本利润率",
-        "cost_profit_rate"
+        "仓库操作费(RMB)"
       ],
       "data_domain": "orders",
-      "semantic_key": "cost_profit_rate"
+      "semantic_key": "warehouse_operation_fee"
+    },
+    {
+      "aliases": [
+        "广告成本(RMB)"
+      ],
+      "data_domain": "orders",
+      "semantic_key": "promotion_fee"
     },
     {
       "aliases": [
@@ -1411,7 +1496,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
       "identity_strength": null,
       "kind": "metric",
-      "label": "销售额",
+      "label": "销售额(已废止)",
       "option_group": "order_metric",
       "required": false,
       "semantic_key": "sales_amount",
@@ -1514,6 +1599,240 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       "option_group": "order_metric",
       "required": false,
       "semantic_key": "platform_commission",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "order_original_amount",
+        "订单原始金额",
+        "order original amount",
+        "original amount"
+      ],
+      "default_hash": false,
+      "description": "订单未减优惠前的金额(人民币口径)。",
+      "domain": "orders",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "订单原始金额",
+      "option_group": "order_metric",
+      "required": false,
+      "semantic_key": "order_original_amount",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "warehouse_operation_fee",
+        "仓库操作费",
+        "warehouse operation fee",
+        "warehouse fee"
+      ],
+      "default_hash": false,
+      "description": "仓库操作费(人民币口径)。",
+      "domain": "orders",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "仓库操作费",
+      "option_group": "order_metric",
+      "required": false,
+      "semantic_key": "warehouse_operation_fee",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "shipping_fee",
+        "运费",
+        "shipping fee",
+        "logistics fee"
+      ],
+      "default_hash": false,
+      "description": "卖家承担的运费(人民币口径)。平台间列名不同。",
+      "domain": "orders",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "运费",
+      "option_group": "order_metric",
+      "required": false,
+      "semantic_key": "shipping_fee",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "promotion_fee",
+        "推广费",
+        "promotion fee",
+        "campaign fee"
+      ],
+      "default_hash": false,
+      "description": "广告/推广成本(人民币口径)。",
+      "domain": "orders",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "推广费",
+      "option_group": "order_metric",
+      "required": false,
+      "semantic_key": "promotion_fee",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "platform_deduction_fee",
+        "平台扣费",
+        "platform deduction fee",
+        "deduction fee"
+      ],
+      "default_hash": false,
+      "description": "平台扣费(人民币口径)。目前源表无对应列。",
+      "domain": "orders",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "平台扣费",
+      "option_group": "order_metric",
+      "required": false,
+      "semantic_key": "platform_deduction_fee",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "platform_voucher",
+        "平台代金券",
+        "platform voucher",
+        "voucher amount"
+      ],
+      "default_hash": false,
+      "description": "平台发放的代金券(人民币口径)。",
+      "domain": "orders",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "平台代金券",
+      "option_group": "order_metric",
+      "required": false,
+      "semantic_key": "platform_voucher",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "platform_service_fee",
+        "平台服务费",
+        "platform service fee",
+        "service fee"
+      ],
+      "default_hash": false,
+      "description": "平台服务费(人民币口径)。",
+      "domain": "orders",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "平台服务费",
+      "option_group": "order_metric",
+      "required": false,
+      "semantic_key": "platform_service_fee",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "estimated_settlement_amount",
+        "预估回款金额",
+        "estimated settlement amount",
+        "estimated settlement"
+      ],
+      "default_hash": false,
+      "description": "预估回款金额(人民币口径)。",
+      "domain": "orders",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "预估回款金额",
+      "option_group": "order_metric",
+      "required": false,
+      "semantic_key": "estimated_settlement_amount",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "settled_amount",
+        "已结算金额",
+        "settled amount"
+      ],
+      "default_hash": false,
+      "description": "已结算金额(人民币口径)。",
+      "domain": "orders",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "已结算金额",
+      "option_group": "order_metric",
+      "required": false,
+      "semantic_key": "settled_amount",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "order_status",
+        "order status"
+      ],
+      "default_hash": false,
+      "description": "订单状态维度。",
+      "domain": "orders",
+      "hash_eligible": false,
+      "hash_warning": null,
+      "identity_strength": null,
+      "kind": "dimension",
+      "label": "订单状态",
+      "option_group": "identity",
+      "required": false,
+      "semantic_key": "order_status",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "product_sku",
+        "product sku"
+      ],
+      "default_hash": false,
+      "description": "卖家侧商品 SKU(与平台 SKU 不同)。",
+      "domain": "orders",
+      "hash_eligible": false,
+      "hash_warning": null,
+      "identity_strength": null,
+      "kind": "dimension",
+      "label": "商品 SKU",
+      "option_group": "identity",
+      "required": false,
+      "semantic_key": "product_sku",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "seller_voucher",
+        "seller voucher",
+        "seller coupon"
+      ],
+      "default_hash": false,
+      "description": "卖家自己发放的代金券(人民币口径)。不是平台成本。",
+      "domain": "orders",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "卖家代金券",
+      "option_group": "order_metric",
+      "required": false,
+      "semantic_key": "seller_voucher",
       "system_scope": false
     },
     {
@@ -2031,13 +2350,13 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
       ],
       "default_hash": false,
       "description": "退款金额。",
-      "domain": "products",
+      "domain": "common",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
       "identity_strength": null,
       "kind": "metric",
       "label": "退款金额",
-      "option_group": "product_metric",
+      "option_group": "traffic_metric",
       "required": false,
       "semantic_key": "refund_amount",
       "system_scope": false
@@ -2101,6 +2420,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "clicks",
     "conversion_rate",
     "conversion_rate_placed",
+    "estimated_settlement_amount",
     "gmv",
     "gmv_band",
     "impressions",
@@ -2115,6 +2435,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "order_count_placed",
     "order_date",
     "order_id",
+    "order_original_amount",
     "page_views",
     "paid_amount",
     "period_end_date",
@@ -2122,11 +2443,15 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "period_start_date",
     "period_start_time",
     "platform_commission",
+    "platform_deduction_fee",
+    "platform_service_fee",
     "platform_sku",
+    "platform_voucher",
     "product_id",
     "product_name",
     "product_visitor_count",
     "profit",
+    "promotion_fee",
     "purchase_amount",
     "refund_amount",
     "refunded_item_count",
@@ -2134,7 +2459,10 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "sales_amount_placed",
     "sales_volume",
     "sales_volume_placed",
+    "seller_voucher",
     "service_id",
+    "settled_amount",
+    "shipping_fee",
     "shop_id",
     "sku_id",
     "sku_order_count",
@@ -2146,7 +2474,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "video_gmv",
     "video_indirect_gmv",
     "visitor_count",
-    "warehouse_name"
+    "warehouse_name",
+    "warehouse_operation_fee"
   ],
   "normalization_samples": [
     [
@@ -2451,6 +2780,40 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "label": "GMV 区间 (gmv_band)",
           "system_scope": false,
           "value": "gmv_band"
+        },
+        {
+          "aliases": [
+            "order_status",
+            "order status"
+          ],
+          "default_hash": false,
+          "description": "订单状态维度。",
+          "domain": "orders",
+          "group": "identity",
+          "hash_eligible": false,
+          "hash_warning": null,
+          "identity_strength": null,
+          "kind": "dimension",
+          "label": "订单状态 (order_status)",
+          "system_scope": false,
+          "value": "order_status"
+        },
+        {
+          "aliases": [
+            "product_sku",
+            "product sku"
+          ],
+          "default_hash": false,
+          "description": "卖家侧商品 SKU(与平台 SKU 不同)。",
+          "domain": "orders",
+          "group": "identity",
+          "hash_eligible": false,
+          "hash_warning": null,
+          "identity_strength": null,
+          "kind": "dimension",
+          "label": "商品 SKU (product_sku)",
+          "system_scope": false,
+          "value": "product_sku"
         },
         {
           "aliases": [
@@ -2812,6 +3175,24 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "label": "跳失率 (bounce_rate)",
           "system_scope": false,
           "value": "bounce_rate"
+        },
+        {
+          "aliases": [
+            "refund_amount",
+            "退款金额",
+            "退款额"
+          ],
+          "default_hash": false,
+          "description": "退款金额。",
+          "domain": "common",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "退款金额 (refund_amount)",
+          "system_scope": false,
+          "value": "refund_amount"
         }
       ]
     },
@@ -2875,7 +3256,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
           "identity_strength": null,
           "kind": "metric",
-          "label": "销售额 (sales_amount)",
+          "label": "销售额(已废止) (sales_amount)",
           "system_scope": false,
           "value": "sales_amount"
         },
@@ -2954,6 +3335,194 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "label": "平台佣金 (platform_commission)",
           "system_scope": false,
           "value": "platform_commission"
+        },
+        {
+          "aliases": [
+            "order_original_amount",
+            "订单原始金额",
+            "order original amount",
+            "original amount"
+          ],
+          "default_hash": false,
+          "description": "订单未减优惠前的金额(人民币口径)。",
+          "domain": "orders",
+          "group": "order_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "订单原始金额 (order_original_amount)",
+          "system_scope": false,
+          "value": "order_original_amount"
+        },
+        {
+          "aliases": [
+            "warehouse_operation_fee",
+            "仓库操作费",
+            "warehouse operation fee",
+            "warehouse fee"
+          ],
+          "default_hash": false,
+          "description": "仓库操作费(人民币口径)。",
+          "domain": "orders",
+          "group": "order_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "仓库操作费 (warehouse_operation_fee)",
+          "system_scope": false,
+          "value": "warehouse_operation_fee"
+        },
+        {
+          "aliases": [
+            "shipping_fee",
+            "运费",
+            "shipping fee",
+            "logistics fee"
+          ],
+          "default_hash": false,
+          "description": "卖家承担的运费(人民币口径)。平台间列名不同。",
+          "domain": "orders",
+          "group": "order_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "运费 (shipping_fee)",
+          "system_scope": false,
+          "value": "shipping_fee"
+        },
+        {
+          "aliases": [
+            "promotion_fee",
+            "推广费",
+            "promotion fee",
+            "campaign fee"
+          ],
+          "default_hash": false,
+          "description": "广告/推广成本(人民币口径)。",
+          "domain": "orders",
+          "group": "order_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "推广费 (promotion_fee)",
+          "system_scope": false,
+          "value": "promotion_fee"
+        },
+        {
+          "aliases": [
+            "platform_deduction_fee",
+            "平台扣费",
+            "platform deduction fee",
+            "deduction fee"
+          ],
+          "default_hash": false,
+          "description": "平台扣费(人民币口径)。目前源表无对应列。",
+          "domain": "orders",
+          "group": "order_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "平台扣费 (platform_deduction_fee)",
+          "system_scope": false,
+          "value": "platform_deduction_fee"
+        },
+        {
+          "aliases": [
+            "platform_voucher",
+            "平台代金券",
+            "platform voucher",
+            "voucher amount"
+          ],
+          "default_hash": false,
+          "description": "平台发放的代金券(人民币口径)。",
+          "domain": "orders",
+          "group": "order_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "平台代金券 (platform_voucher)",
+          "system_scope": false,
+          "value": "platform_voucher"
+        },
+        {
+          "aliases": [
+            "platform_service_fee",
+            "平台服务费",
+            "platform service fee",
+            "service fee"
+          ],
+          "default_hash": false,
+          "description": "平台服务费(人民币口径)。",
+          "domain": "orders",
+          "group": "order_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "平台服务费 (platform_service_fee)",
+          "system_scope": false,
+          "value": "platform_service_fee"
+        },
+        {
+          "aliases": [
+            "estimated_settlement_amount",
+            "预估回款金额",
+            "estimated settlement amount",
+            "estimated settlement"
+          ],
+          "default_hash": false,
+          "description": "预估回款金额(人民币口径)。",
+          "domain": "orders",
+          "group": "order_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "预估回款金额 (estimated_settlement_amount)",
+          "system_scope": false,
+          "value": "estimated_settlement_amount"
+        },
+        {
+          "aliases": [
+            "settled_amount",
+            "已结算金额",
+            "settled amount"
+          ],
+          "default_hash": false,
+          "description": "已结算金额(人民币口径)。",
+          "domain": "orders",
+          "group": "order_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "已结算金额 (settled_amount)",
+          "system_scope": false,
+          "value": "settled_amount"
+        },
+        {
+          "aliases": [
+            "seller_voucher",
+            "seller voucher",
+            "seller coupon"
+          ],
+          "default_hash": false,
+          "description": "卖家自己发放的代金券(人民币口径)。不是平台成本。",
+          "domain": "orders",
+          "group": "order_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "卖家代金券 (seller_voucher)",
+          "system_scope": false,
+          "value": "seller_voucher"
         }
       ]
     },
@@ -3322,24 +3891,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "label": "加购率 (add_to_cart_rate)",
           "system_scope": false,
           "value": "add_to_cart_rate"
-        },
-        {
-          "aliases": [
-            "refund_amount",
-            "退款金额",
-            "退款额"
-          ],
-          "default_hash": false,
-          "description": "退款金额。",
-          "domain": "products",
-          "group": "product_metric",
-          "hash_eligible": true,
-          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
-          "identity_strength": null,
-          "kind": "metric",
-          "label": "退款金额 (refund_amount)",
-          "system_scope": false,
-          "value": "refund_amount"
         },
         {
           "aliases": [

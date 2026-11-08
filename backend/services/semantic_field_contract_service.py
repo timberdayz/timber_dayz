@@ -93,7 +93,13 @@ DEFAULT_CONTRACTS: dict[str, tuple[SemanticContractDefinition, ...]] = {
             "order_date", "required", impact_description="业务概览无法按期间归集订单"
         ),
         SemanticContractDefinition(
-            "sales_volume", "required", impact_description="业务概览销售数量无法计算"
+            # [*] 2026-11-08: 订单域的件数列「销售数量」归 ``sales_volume``。
+            # (视图的**物理列名**叫 ``product_quantity``, 但**语义键**是
+            #  ``sales_volume`` —— 语义键与物理列名不必同名, 语义键才是口径。)
+            # 契约 / 模板确认 / 历史别名表三处一致 ⇒ 不可为了与列名对齐改语义键。
+            "sales_volume",
+            "required",
+            impact_description="业务概览销售数量无法计算",
         ),
         SemanticContractDefinition(
             "paid_amount",

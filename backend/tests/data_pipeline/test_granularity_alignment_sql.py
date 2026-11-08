@@ -127,6 +127,10 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                     CREATE TABLE b_class.fact_shopee_orders_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        -- 语义层的月度物化视图正文要从 b_class 源表直读
+                        -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                        data_domain VARCHAR(32),
+                        granularity VARCHAR(32),
                         metric_date DATE,
                         raw_data JSONB,
                         data_hash VARCHAR(128),
@@ -141,6 +145,10 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                     CREATE TABLE b_class.fact_tiktok_orders_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        -- 语义层的月度物化视图正文要从 b_class 源表直读
+                        -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                        data_domain VARCHAR(32),
+                        granularity VARCHAR(32),
                         metric_date DATE,
                         raw_data JSONB,
                         data_hash VARCHAR(128),
@@ -155,6 +163,10 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                     CREATE TABLE b_class.fact_miaoshou_orders_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        -- 语义层的月度物化视图正文要从 b_class 源表直读
+                        -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                        data_domain VARCHAR(32),
+                        granularity VARCHAR(32),
                         metric_date DATE,
                         raw_data JSONB,
                         data_hash VARCHAR(128),
@@ -169,6 +181,10 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                     CREATE TABLE b_class.fact_shopee_analytics_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        -- 语义层的月度物化视图正文要从 b_class 源表直读
+                        -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                        data_domain VARCHAR(32),
+                        granularity VARCHAR(32),
                         metric_date DATE,
                         raw_data JSONB,
                         data_hash VARCHAR(128),
@@ -183,6 +199,10 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                     CREATE TABLE b_class.fact_tiktok_analytics_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        -- 语义层的月度物化视图正文要从 b_class 源表直读
+                        -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                        data_domain VARCHAR(32),
+                        granularity VARCHAR(32),
                         metric_date DATE,
                         raw_data JSONB,
                         data_hash VARCHAR(128),
@@ -197,6 +217,10 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                     CREATE TABLE b_class.fact_miaoshou_analytics_monthly (
                         platform_code VARCHAR(32),
                         shop_id VARCHAR(256),
+                        -- 语义层的月度物化视图正文要从 b_class 源表直读
+                        -- data_domain / granularity ⇒ mock 表缺列建视图就报错。
+                        data_domain VARCHAR(32),
+                        granularity VARCHAR(32),
                         metric_date DATE,
                         raw_data JSONB,
                         data_hash VARCHAR(128),
@@ -209,12 +233,22 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                 text(
                     """
                     INSERT INTO b_class.fact_shopee_orders_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, raw_data, data_hash, ingest_timestamp
                     ) VALUES (
                         'shopee',
                         'shop-a',
+                        'orders',
+                        'monthly',
                         DATE '2026-03-01',
-                        '{"order_id":"month-1","paid_amount":"500","product_quantity":"5","profit":"50"}'::jsonb,
+                        -- [*] orders 域取数改走别名表(semantic.resolve_alias) ⇒
+                        -- raw_data 的键必须是**登记过的真实源表头**:
+                        --   买家支付(RMB) → paid_amount (shopee 的 (RMB) 变体)
+                        --   利润(RMB)     → profit
+                        --   销售数量      → 视图列 product_quantity(语义键 sales_volume)
+                        --   订单编号      → order_id
+                        -- 裸名(原币列)/英文列名都命不中 ⇒ 取不到就是 NULL。
+                        '{"订单编号":"month-1","买家支付(RMB)":"500","销售数量":"5","利润(RMB)":"50"}'::jsonb,
                         'month-order-1',
                         TIMESTAMP '2026-03-02 10:00:00'
                     )
@@ -225,10 +259,13 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                 text(
                     """
                     INSERT INTO b_class.fact_shopee_analytics_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        platform_code, shop_id, data_domain, granularity,
+                        metric_date, raw_data, data_hash, ingest_timestamp
                     ) VALUES (
                         'shopee',
                         'shop-a',
+                        'analytics',
+                        'monthly',
                         DATE '2026-03-01',
                         '{"visitor_count":"200","page_views":"300"}'::jsonb,
                         'month-traffic-1',
@@ -237,6 +274,10 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
                     """
                 )
             )
+            # [*] resolve_dependencies=True 会把别名资产(semantic.alias_registry:
+            #     表 semantic.semantic_field_aliases + 函数 semantic.resolve_alias)
+            #     与店铺身份候选集一起排在前面执行 —— orders 域取数已经改走别名表,
+            #     别名资产不在 ⇒ 建视图报 "function semantic.resolve_alias does not exist"。
             await execute_sql_target(
                 session,
                 "semantic.fact_orders_monthly_atomic",

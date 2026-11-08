@@ -232,11 +232,21 @@ def test_domain_column_override_wins():
 
 
 def test_domain_alias_resolves_currency_variant():
-    """域限定别名 + 币种后缀 ⇒ 能解出 paid_amount。"""
+    """域限定别名 + 币种后缀 ⇒ 能解出 paid_amount; **裸名(原币)解不出**。
+
+    [*] 2026-11-08 实测: 源表里「买家支付」(原币) 与「买家支付(RMB)」(人民币)
+    同时存在, 均值差约 3 倍 ⇒ 归一化会把两者压成同一个 key
+    (``normalize_alias("买家支付(RMB)") == normalize_alias("买家支付")``)
+    ⇒ orders 域是**封闭域**, 推断走**逐字**匹配:
+    裸名(原币列)落 ``None``(认不出就是认不出), 不许猜。
+    """
     from backend.services.semantic_field_registry import infer_semantic_key_for_domain
 
     assert infer_semantic_key_for_domain("orders", "买家支付(RMB)") == "paid_amount"
-    assert infer_semantic_key_for_domain("orders", "买家支付") == "paid_amount"
+    assert infer_semantic_key_for_domain("orders", "利润(RMB)") == "profit"
+    # 原币列: 不接任何标准字段 ⇒ 落 None
+    assert infer_semantic_key_for_domain("orders", "买家支付") is None
+    assert infer_semantic_key_for_domain("orders", "利润") is None
 
 
 def test_unknown_column_is_not_guessed():

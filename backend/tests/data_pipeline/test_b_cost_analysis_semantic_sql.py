@@ -33,7 +33,9 @@ def test_orders_atomic_exposes_b_cost_fields_in_semantic_view():
     for field_name in required_fields:
         assert field_name in sql_text
 
-    assert "cogs" in sql_text
+    # [*] 2026-11-08: 取数改走别名表 ⇒ SQL 里不再有手写的别名清单
+    #   (旧链里有 "cogs" / "采购价" / "贴单费" 这类兜底列名)。
+    assert "semantic.resolve_alias" in sql_text
 
 
 def test_orders_atomic_keeps_core_amount_fields_while_adding_b_cost_fields():
@@ -48,9 +50,7 @@ def test_orders_atomic_appends_b_cost_fields_after_legacy_columns_for_replace_sa
     sql_text = Path("sql/semantic/orders_atomic.sql").read_text(encoding="utf-8")
 
     select_tail = sql_text.rsplit("SELECT", 1)[-1]
-    product_quantity_pos = select_tail.find(
-        "COALESCE(product_quantity, 0) AS product_quantity"
-    )
+    product_quantity_pos = select_tail.find("product_quantity AS product_quantity")
     purchase_amount_pos = select_tail.find("purchase_amount,")
 
     assert product_quantity_pos != -1
@@ -58,45 +58,82 @@ def test_orders_atomic_appends_b_cost_fields_after_legacy_columns_for_replace_sa
     assert purchase_amount_pos > product_quantity_pos
 
 
-def test_orders_atomic_covers_required_b_cost_chinese_aliases():
+def test_orders_atomic_registers_only_rmb_variants_in_the_dictionary():
+    """列名清单在**字典**里, 且**只登 (RMB) 变体**。
+
+    [*] 2026-11-08 实测: 源表每个金额列都成对出现 —— ``X``(原币) 与
+    ``X(RMB)``(人民币), 两者均值差约 3 倍(shopee monthly 29629 行):
+    买家支付 240.11 / 72.03, 利润 27.98 / 11.06, 仓库操作费 11.56 / 4.99。
+    ⇒ 裸名列是**另一个业务事实**(原币), 登记它 = 混币种。
+    ⇒ 别名清单必须只登 ``(RMB)`` 变体, 且取数改走别名表。
+    """
+    from backend.services.semantic_field_registry import (
+        ORDER_PLATFORM_ALIASES,
+        ORDER_SEMANTIC_ALIASES,
+    )
+
+    registered = set()
+    for aliases in ORDER_SEMANTIC_ALIASES.values():
+        registered.update(aliases)
+    for per_platform in ORDER_PLATFORM_ALIASES.values():
+        for aliases in per_platform.values():
+            registered.update(aliases)
+
+    # 人民币口径的真实列名必须在字典里
+    required_rmb_aliases = (
+        "买家支付(RMB)",
+        "买家实付金额(RMB)",
+        "利润(RMB)",
+        "采购成本(RMB)",
+        "仓库操作费(RMB)",
+        "广告成本(RMB)",
+        "卖家支付运费(RMB)",
+        "商家运费(RMB)",
+        "Shopee平台佣金(RMB)",
+        "TikTok 平台佣金(RMB)",
+        "Shopee voucher(RMB)",
+        "卖家voucher(RMB)",
+        "服务费(RMB)",
+        "订单原始金额(RMB)",
+        "产品原价(RMB)",
+        "退款金额(RMB)",
+        "预估回款金额(RMB)",
+        "已结算金额(RMB)",
+    )
+    for alias in required_rmb_aliases:
+        assert alias in registered, f"字典里没登记真实人民币列名 {alias!r}"
+
+    # ⚠ 裸名(原币列)**不许**出现在别名清单里
+    bare_aliases = (
+        "利润",
+        "订单原始金额",
+        "仓库操作费",
+        "运费",
+        "商家运费",
+        "服务费",
+        "买家支付",
+        "买家实付金额",
+        "卖家支付运费",
+        "退款金额",
+        "预估回款金额",
+        "已结算金额",
+        "采购金额",
+        "采购成本",
+        "广告成本",
+        "卖家voucher",
+        "Shopee voucher",
+    )
+    for alias in bare_aliases:
+        assert alias not in registered, f"别名清单里混进了原币列 {alias!r}"
+
+    # 取数 SQL 里也不许再手写这些裸名(只看**取数表达式**, 注释里提到列名是允许的)
     sql_text = Path("sql/semantic/orders_atomic.sql").read_text(
         encoding="utf-8", errors="replace"
     )
-
-    required_aliases = (
-        "采购金额",
-        "采购价",
-        "产品成本",
-        "订单原始金额",
-        "产品折后价格",
-        "产品折后金额",
-        "产品原价",
-        "仓库操作费",
-        "贴单费",
-        "运费",
-        "商家运费",
-        "推广费",
-        "平台推广费",
-        "平台收取推广费",
-        "营销推广费",
-        "平台佣金",
-        "佣金",
-        "总佣金",
-        "TikTok Shop平台佣金",
-        "平台扣费",
-        "平台扣款",
-        "TikTok Shop平台扣费",
-        "代金券",
-        "平台代金券",
-        "平台优惠券",
-        "服务费",
-        "平台服务费",
-        "平台收取服务费",
-        "TikTok Shop平台服务费",
-    )
-
-    for alias in required_aliases:
-        assert alias in sql_text
+    for alias in bare_aliases:
+        assert (
+            "raw_data->>'%s'" % alias not in sql_text
+        ), f"SQL 里又手写了原币列名 {alias!r}"
 
 
 def test_orders_atomic_uses_required_platform_total_cost_formulas():
@@ -220,17 +257,17 @@ async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
                         DATE '2026-04-01', DATE '2026-04-01', DATE '2026-04-01',
                         TIMESTAMP '2026-04-01 00:00:00', TIMESTAMP '2026-04-01 23:59:59',
                         '{
-                            "order_id":"TK-BCOST-1",
-                            "利润":"50",
-                            "采购价":"100",
-                            "产品折后价格":"300",
-                            "贴单费":"5",
-                            "商家运费":"10",
-                            "平台收取推广费":"20",
-                            "TikTok Shop平台佣金":"15",
-                            "平台扣款":"3",
-                            "平台优惠券":"7",
-                            "平台收取服务费":"2"
+                            "订单号":"TK-BCOST-1",
+                            "利润(RMB)":"50",
+                            "采购成本(RMB)":"100",
+                            "产品原价(RMB)":"300",
+                            "仓库操作费(RMB)":"5",
+                            "商家运费(RMB)":"10",
+                            "广告成本(RMB)":"20",
+                            "TikTok 平台佣金(RMB)":"15",
+                            "平台扣费(RMB)":"3",
+                            "平台代金券(RMB)":"7",
+                            "服务费(RMB)":"2"
                         }'::jsonb,
                         '[]'::jsonb,
                         'hash-b-cost-cn-1', TIMESTAMP '2026-04-02 09:00:00', 'USD'
@@ -240,14 +277,14 @@ async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
                         DATE '2026-04-01', DATE '2026-04-01', DATE '2026-04-01',
                         TIMESTAMP '2026-04-01 00:00:00', TIMESTAMP '2026-04-01 23:59:59',
                         '{
-                            "order_id":"TK-BCOST-2",
-                            "利润":"20",
-                            "产品成本":"80",
-                            "营销推广费":"12",
-                            "佣金":"6",
-                            "TikTok Shop平台扣费":"2",
-                            "代金券":"4",
-                            "服务费":"1"
+                            "订单号":"TK-BCOST-2",
+                            "利润(RMB)":"20",
+                            "采购成本(RMB)":"80",
+                            "广告成本(RMB)":"12",
+                            "TikTok 平台佣金(RMB)":"6",
+                            "平台扣费(RMB)":"2",
+                            "平台代金券(RMB)":"4",
+                            "服务费(RMB)":"1"
                         }'::jsonb,
                         '[]'::jsonb,
                         'hash-b-cost-cn-2', TIMESTAMP '2026-04-02 09:05:00', 'USD'
@@ -257,17 +294,17 @@ async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
                         DATE '2026-04-01', DATE '2026-04-01', DATE '2026-04-01',
                         TIMESTAMP '2026-04-01 00:00:00', TIMESTAMP '2026-04-01 23:59:59',
                         '{
-                            "order_id":"TK-BCOST-3",
-                            "profit":"30",
-                            "cogs":"81",
-                            "order_original_amount":"180",
-                            "warehouse_operation_fee":"9",
-                            "shipping_fee":"8",
-                            "promotion_fee":"5",
-                            "platform_commission":"4",
-                            "platform_deduction_fee":"3",
-                            "platform_voucher":"2",
-                            "platform_service_fee":"1"
+                            "订单号":"TK-BCOST-3",
+                            "利润(RMB)":"30",
+                            "采购成本(RMB)":"81",
+                            "产品原价(RMB)":"180",
+                            "仓库操作费(RMB)":"9",
+                            "商家运费(RMB)":"8",
+                            "广告成本(RMB)":"5",
+                            "TikTok 平台佣金(RMB)":"4",
+                            "平台扣费(RMB)":"3",
+                            "平台代金券(RMB)":"2",
+                            "服务费(RMB)":"1"
                         }'::jsonb,
                         '[]'::jsonb,
                         'hash-b-cost-cogs-3', TIMESTAMP '2026-04-02 09:10:00', 'USD'
@@ -278,6 +315,7 @@ async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.alias_registry")
             await execute_sql_target(
                 session, "semantic.shop_identity_resolution_candidates"
             )
@@ -298,6 +336,7 @@ async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
                         platform_voucher,
                         platform_service_fee,
                         platform_total_cost_itemized,
+                        platform_total_cost_known_items,
                         platform_total_cost_derived
                     FROM semantic.fact_orders_atomic
                     WHERE order_id IN ('TK-BCOST-1', 'TK-BCOST-2', 'TK-BCOST-3')
@@ -309,6 +348,8 @@ async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
 
         assert len(rows) == 3
 
+        # tiktok 侧只有「运费 / 推广费 / 平台佣金」三项有真实人民币列
+        # (无平台代金券、无平台服务费、无平台扣费) ⇒ 已知项数就是 3。
         assert rows[0]["order_id"] == "TK-BCOST-1"
         assert float(rows[0]["purchase_amount"]) == 100.0
         assert float(rows[0]["order_original_amount"]) == 300.0
@@ -316,11 +357,13 @@ async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
         assert float(rows[0]["shipping_fee"]) == 10.0
         assert float(rows[0]["promotion_fee"]) == 20.0
         assert float(rows[0]["platform_commission"]) == 15.0
-        assert float(rows[0]["platform_deduction_fee"]) == 3.0
-        assert float(rows[0]["platform_voucher"]) == 7.0
-        assert float(rows[0]["platform_service_fee"]) == 2.0
-        assert float(rows[0]["platform_total_cost_itemized"]) == 57.0
+        # 平台扣费 / 平台代金券 / 平台服务费 在 tiktok 侧没有对应源列
+        assert rows[0]["platform_deduction_fee"] is None
+        assert rows[0]["platform_voucher"] is None
+        assert rows[0]["platform_service_fee"] is None
+        assert float(rows[0]["platform_total_cost_itemized"]) == 45.0
         assert float(rows[0]["platform_total_cost_derived"]) == 145.0
+        assert int(rows[0]["platform_total_cost_known_items"]) == 3
 
         assert rows[1]["order_id"] == "TK-BCOST-2"
         assert float(rows[1]["purchase_amount"]) == 80.0
@@ -329,11 +372,12 @@ async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
         assert rows[1]["shipping_fee"] is None
         assert float(rows[1]["promotion_fee"]) == 12.0
         assert float(rows[1]["platform_commission"]) == 6.0
-        assert float(rows[1]["platform_deduction_fee"]) == 2.0
-        assert float(rows[1]["platform_voucher"]) == 4.0
-        assert float(rows[1]["platform_service_fee"]) == 1.0
-        assert float(rows[1]["platform_total_cost_itemized"]) == 25.0
+        assert rows[1]["platform_deduction_fee"] is None
+        assert rows[1]["platform_voucher"] is None
+        assert rows[1]["platform_service_fee"] is None
+        assert float(rows[1]["platform_total_cost_itemized"]) == 18.0
         assert rows[1]["platform_total_cost_derived"] is None
+        assert int(rows[1]["platform_total_cost_known_items"]) == 2
 
         assert rows[2]["order_id"] == "TK-BCOST-3"
         assert float(rows[2]["purchase_amount"]) == 81.0
@@ -342,11 +386,12 @@ async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
         assert float(rows[2]["shipping_fee"]) == 8.0
         assert float(rows[2]["promotion_fee"]) == 5.0
         assert float(rows[2]["platform_commission"]) == 4.0
-        assert float(rows[2]["platform_deduction_fee"]) == 3.0
-        assert float(rows[2]["platform_voucher"]) == 2.0
-        assert float(rows[2]["platform_service_fee"]) == 1.0
-        assert float(rows[2]["platform_total_cost_itemized"]) == 23.0
+        assert rows[2]["platform_deduction_fee"] is None
+        assert rows[2]["platform_voucher"] is None
+        assert rows[2]["platform_service_fee"] is None
+        assert float(rows[2]["platform_total_cost_itemized"]) == 17.0
         assert float(rows[2]["platform_total_cost_derived"]) == 60.0
+        assert int(rows[2]["platform_total_cost_known_items"]) == 3
 
         await engine.dispose()
 
@@ -376,17 +421,17 @@ async def test_orders_atomic_keeps_view_queryable_when_b_cost_amount_strings_are
                         DATE '2026-04-03', DATE '2026-04-03', DATE '2026-04-03',
                         TIMESTAMP '2026-04-03 00:00:00', TIMESTAMP '2026-04-03 23:59:59',
                         '{
-                            "order_id":"TK-BCOST-BAD-1",
-                            "profit":"18",
-                                "purchase_amount":"12-3",
-                                "order_original_amount":"ABC",
-                                "warehouse_operation_fee":"--5",
-                                "shipping_fee":"1.2.3",
-                                "promotion_fee":"promo",
-                                "platform_commission":"9-9",
-                                "platform_deduction_fee":"-",
-                                "platform_voucher":"7..1",
-                                "platform_service_fee":"--"
+                            "订单号":"TK-BCOST-BAD-1",
+                            "利润(RMB)":"18",
+                                "采购成本(RMB)":"12-3",
+                                "产品原价(RMB)":"ABC",
+                                "仓库操作费(RMB)":"--5",
+                                "商家运费(RMB)":"1.2.3",
+                                "广告成本(RMB)":"promo",
+                                "TikTok 平台佣金(RMB)":"9-9",
+                                "平台扣费(RMB)":"-",
+                                "平台代金券(RMB)":"7..1",
+                                "服务费(RMB)":"--"
                             }'::jsonb,
                         '[]'::jsonb,
                         'hash-b-cost-bad-1', TIMESTAMP '2026-04-04 09:00:00', 'USD'
@@ -397,6 +442,7 @@ async def test_orders_atomic_keeps_view_queryable_when_b_cost_amount_strings_are
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.alias_registry")
             await execute_sql_target(
                 session, "semantic.shop_identity_resolution_candidates"
             )
@@ -417,6 +463,7 @@ async def test_orders_atomic_keeps_view_queryable_when_b_cost_amount_strings_are
                         platform_voucher,
                         platform_service_fee,
                         platform_total_cost_itemized,
+                        platform_total_cost_known_items,
                         platform_total_cost_derived
                     FROM semantic.fact_orders_atomic
                     WHERE order_id = 'TK-BCOST-BAD-1'
@@ -436,6 +483,8 @@ async def test_orders_atomic_keeps_view_queryable_when_b_cost_amount_strings_are
         assert row["platform_voucher"] is None
         assert row["platform_service_fee"] is None
         assert float(row["platform_total_cost_itemized"]) == 0.0
+        # ⚠ 0 只是「已知项之和」; 已知项数 = 0 ⇒ 这一行的平台成本**完全不可知**。
+        assert int(row["platform_total_cost_known_items"]) == 0
         assert row["platform_total_cost_derived"] is None
 
         await engine.dispose()
@@ -443,7 +492,7 @@ async def test_orders_atomic_keeps_view_queryable_when_b_cost_amount_strings_are
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_atomic_falls_back_when_b_cost_alias_value_is_empty_string():
+async def test_orders_atomic_treats_blank_alias_value_as_missing_not_fallback():
     with PostgresContainer("postgres:15") as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
@@ -466,14 +515,12 @@ async def test_orders_atomic_falls_back_when_b_cost_alias_value_is_empty_string(
                         DATE '2026-04-05', DATE '2026-04-05', DATE '2026-04-05',
                         TIMESTAMP '2026-04-05 00:00:00', TIMESTAMP '2026-04-05 23:59:59',
                         '{
-                            "order_id":"TK-BCOST-FALLBACK-1",
-                            "profit":"22",
-                            "cogs":"",
-                            "purchase_amount":"88",
-                            "order_original_amount":"150",
-                            "warehouse_operation_fee":"10",
-                            "platform_service_fee":"   ",
-                            "service_fee":"6"
+                            "订单号":"TK-BCOST-FALLBACK-1",
+                            "利润(RMB)":"22",
+                            "采购成本(RMB)":"",
+                            "产品原价(RMB)":"150",
+                            "仓库操作费(RMB)":"10",
+                            "服务费(RMB)":"   "
                         }'::jsonb,
                         '[]'::jsonb,
                         'hash-b-cost-fallback-1', TIMESTAMP '2026-04-05 09:00:00', 'USD'
@@ -484,6 +531,7 @@ async def test_orders_atomic_falls_back_when_b_cost_alias_value_is_empty_string(
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.alias_registry")
             await execute_sql_target(
                 session, "semantic.shop_identity_resolution_candidates"
             )
@@ -499,6 +547,7 @@ async def test_orders_atomic_falls_back_when_b_cost_alias_value_is_empty_string(
                             purchase_amount,
                             platform_service_fee,
                             platform_total_cost_itemized,
+                            platform_total_cost_known_items,
                             platform_total_cost_derived
                         FROM semantic.fact_orders_atomic
                         WHERE order_id = 'TK-BCOST-FALLBACK-1'
@@ -510,10 +559,15 @@ async def test_orders_atomic_falls_back_when_b_cost_alias_value_is_empty_string(
                 .one()
             )
 
+        # [*] 2026-11-08: 旧链会在「当前列取不到数」时**回退到下一个别名**
+        #   (采购金额 → 采购价 → 产品成本 …)。新口径是「别名表穷举 + 取不到
+        #   就是取不到」⇒ 空串 / 纯空白都算**缺失**, 绝不悄悄换列。
         assert row["order_id"] == "TK-BCOST-FALLBACK-1"
-        assert float(row["purchase_amount"]) == 88.0
-        assert float(row["platform_service_fee"]) == 6.0
-        assert float(row["platform_total_cost_itemized"]) == 6.0
-        assert float(row["platform_total_cost_derived"]) == 30.0
+        assert row["purchase_amount"] is None
+        # 「服务费(RMB)」是**纯空白** ⇒ 数值清洗后为 NULL。
+        assert row["platform_service_fee"] is None
+        assert float(row["platform_total_cost_itemized"]) == 0.0
+        assert int(row["platform_total_cost_known_items"]) == 0
+        assert row["platform_total_cost_derived"] is None
 
         await engine.dispose()

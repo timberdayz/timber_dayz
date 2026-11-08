@@ -234,7 +234,7 @@ async def test_orders_chinese_headers_resolve_required_keys_when_bindings_are_in
         ],
     )
 
-    assert result.status == "non_breaking_drift"
+    assert result.status == "ready"
     assert result.should_block is False
     assert result.missing_required_keys == []
     # [*] 批次 F-3: resolved_required_keys 只含**身份/时间类**的硬要求
@@ -244,7 +244,7 @@ async def test_orders_chinese_headers_resolve_required_keys_when_bindings_are_in
         "shop_id",
         "order_date",
     ]
-    assert result.missing_optional_keys == ["estimated_settlement_amount"]
+    assert result.missing_optional_keys == []
 
 
 @pytest.mark.asyncio
