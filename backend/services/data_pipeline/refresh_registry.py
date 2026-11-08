@@ -51,8 +51,13 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
         "semantic.shop_identity_resolution_candidates",
         "semantic.alias_registry",
     ],
+    # [*] 2026-11-08: analytics(流量)域取数也改走 ``semantic.resolve_alias()``
+    #   (别名表是取数的单一事实源) => 物化视图建起来之前**别名资产必须先落地**
+    #   (表 + 函数), 否则报 "function semantic.resolve_alias does not exist"。
+    #   orders 域早已登记, analytics 域本轮补齐(两条链同源, 口径必须一致)。
     "semantic.fact_analytics_monthly_atomic_mv": [
-        "semantic.shop_identity_resolution_candidates"
+        "semantic.shop_identity_resolution_candidates",
+        "semantic.alias_registry",
     ],
     # 原子层的两个**普通视图**改读物化副本（口径等价：副本正文 = 正本正文）
     # [*] 2026-11-08: orders 域取数改走 ``semantic.resolve_alias()``
@@ -64,8 +69,11 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
         "semantic.shop_identity_resolution_candidates_v2_mv",
         "semantic.alias_registry",
     ],
+    # analytics(流量)域取数也改走 ``semantic.resolve_alias()``
+    # => 别名资产（表 + 函数）必须先落地, 否则建视图报 "function does not exist"。
     "semantic.fact_analytics_atomic": [
-        "semantic.shop_identity_resolution_candidates_v2_mv"
+        "semantic.shop_identity_resolution_candidates_v2_mv",
+        "semantic.alias_registry",
     ],
     # 原子层的物化副本：正文与普通视图完全一致（SELECT *），只把「每行跑一次
     # 店铺别名解析」从请求路径搬到刷新路径。口径零变化。
@@ -276,8 +284,14 @@ ASSET_PREREQUISITES: dict[str, list[str]] = {
         "semantic.alias_registry",
     ],
     "semantic.fact_analytics_atomic": [
-        "semantic.shop_identity_resolution_candidates_v2_mv"
+        "semantic.shop_identity_resolution_candidates_v2_mv",
+        "semantic.alias_registry",
     ],
+    # analytics 域的物化视图/普通视图正文都调 ``semantic.resolve_alias()``
+    # => 别名资产（表 + 函数）是**建对象前置**, 不存在时直接建不出来。
+    "semantic.fact_analytics_atomic_mv": ["semantic.alias_registry"],
+    "semantic.fact_analytics_monthly_atomic_mv": ["semantic.alias_registry"],
+    "semantic.fact_analytics_monthly_atomic": ["semantic.alias_registry"],
 }
 
 

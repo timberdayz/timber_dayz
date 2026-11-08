@@ -91,8 +91,12 @@ def test_refresh_registry_exposes_dependency_order():
         "semantic.shop_identity_resolution_candidates_v2_mv",
         "semantic.alias_registry",
     ]
+    # 2026-11-08: analytics(流量)域取数也改走 ``semantic.resolve_alias()``
+    # ⇒ 别名资产（表 + 函数）必须**先落地**，否则建视图报 "function does not exist"。
+    # 断言比 orders 域那条更严：两个依赖**都要在**。
     assert PIPELINE_DEPENDENCIES["semantic.fact_analytics_atomic"] == [
-        "semantic.shop_identity_resolution_candidates_v2_mv"
+        "semantic.shop_identity_resolution_candidates_v2_mv",
+        "semantic.alias_registry",
     ]
     assert (
         SQL_TARGET_PATHS["semantic.fact_orders_atomic"]
@@ -129,7 +133,8 @@ def test_refresh_registry_exposes_dependency_order():
         == "sql/semantic/orders_monthly_atomic_mv.sql"
     )
     assert PIPELINE_DEPENDENCIES["semantic.fact_analytics_monthly_atomic_mv"] == [
-        "semantic.shop_identity_resolution_candidates"
+        "semantic.shop_identity_resolution_candidates",
+        "semantic.alias_registry",
     ]
     assert (
         SQL_TARGET_PATHS["semantic.fact_analytics_monthly_atomic_mv"]
