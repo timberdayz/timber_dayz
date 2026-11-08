@@ -24,6 +24,10 @@ SKU 级聚合：**各仓取最长**（只算还有库存的仓）——
 已经清空的仓不压资金，不参与天数统计。两者一旦分叉，
 商品中心会给出两个答案 —— 这是口径纪律最忌讳的事。
 
+（阶段 7 起另有一个 ``inventory_warehouse_stock_query_service`` 专门取**库存数量**，
+它**刻意不继承** ``available_stock > 0`` —— 零库存行正是"已清仓"这条事实本身。
+那条路只出数量、不参与档位与底线，两条口径互不干扰。）
+
 容错（照 ``inventory_age_query_service`` 的纪律）
 ------------------------------------------------
 1. ``to_regclass`` 探测表是否存在 —— 不存在就**根本不发出会失败的查询**，事务毫发无损；
@@ -77,7 +81,7 @@ async def load_current_restock_days(
     if not sku_ids:
         return {}
 
-    key_to_sku = await _load_sku_key_map(db, sku_ids)
+    key_to_sku = await load_sku_key_map(db, sku_ids)
     if not key_to_sku:
         return {}
 
@@ -140,7 +144,7 @@ async def load_restock_days_by_warehouse(
     if not sku_ids:
         return {}
 
-    key_to_sku = await _load_sku_key_map(db, sku_ids)
+    key_to_sku = await load_sku_key_map(db, sku_ids)
     if not key_to_sku:
         return {}
 
@@ -190,11 +194,13 @@ async def load_restock_days_by_warehouse(
     return result
 
 
-async def _load_sku_key_map(db: AsyncSession, sku_ids: list[int]) -> dict[str, int]:
+async def load_sku_key_map(db: AsyncSession, sku_ids: list[int]) -> dict[str, int]:
     """``{sku_key: sku_id}`` —— ERP 主数据里的商品键到内部 id 的映射。
 
     ⚠️ **用 sku_key 查，不是 sku_id**：ERP 编号（用户口中的"商品号"）是
     ``sku_key``（字符串），``sku_id`` 是内部整数主键。拿整数去查字符串列会静默返回空。
+
+    （库存快照那条路也要这个映射，所以它是**公开**的。）
     """
     rows = (
         await db.execute(
@@ -204,3 +210,27 @@ async def _load_sku_key_map(db: AsyncSession, sku_ids: list[int]) -> dict[str, i
         )
     ).all()
     return {row.sku_key: row.sku_id for row in rows}
+
+
+async def probe_inventory_state_available(db: AsyncSession) -> bool:
+    """状态层（``mart.inventory_state``）在不在、查不查得动。
+
+    为什么要单独探一次
+    ------------------
+    ``load_current_restock_days`` 返回空，只有两种可能：
+    (a) 状态层表不存在 / 查询失败 —— **管道坏了**；
+    (b) 表在，但**这批 SKU 在状态层里没有有库存的记录** —— 业务事实，不是故障。
+
+    这两件事以前只能靠一句 ``inventory_state unavailable`` 混着报，
+    于是"这批货都清空了"每次都被报成"系统不可用"—— **误报告警**。
+    有了这个探测，调用方才能把两者分开说。
+
+    实现：用一句最轻的查询探活，**不**用 ``to_regclass``（那是 PostgreSQL 专有，
+    SQLite 测试环境下会直接抛异常，反而把"表在"说成"不在"）。
+    """
+    try:
+        async with db.begin_nested():
+            await db.execute(text("SELECT 1 FROM mart.inventory_state LIMIT 1"))
+        return True
+    except Exception:  # noqa: BLE001
+        return False

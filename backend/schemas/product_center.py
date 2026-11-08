@@ -1154,6 +1154,14 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     # 跨仓差异：同一 SKU 在别的仓滞销、这个仓不滞销 ⇒ 建议「优先调拨而非降价」。
     # None = 没有差异。**只提示，不改价**。
     warehouse_divergence: Optional[dict] = None
+    # --- 当前仓库存（阶段 7）---
+    # 当前选中仓的**可用库存数量**。
+    # ⚠️ **含零库存行** —— 零 = 这个仓已经清空这货，是事实，不是缺数据。
+    # None = 状态层取不到（不是"没有货"，是"查不到"）。
+    current_warehouse_available_stock: Optional[int] = None
+    # 库存状态：'in_stock'（在卖）/ 'cleared'（已清仓）/ 'no_record'（这个仓没有它的货）
+    # / 'unavailable'（状态层不可用，取不到）。
+    current_warehouse_stock_status: Optional[str] = None
 
 
 class PlatformSkuProfitCandidatePageResponse(BaseModel):

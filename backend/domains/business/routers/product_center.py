@@ -133,6 +133,11 @@ from backend.services.product_pricing_query_service import (
 from backend.services.inventory.warehouse_divergence_service import (
     detect_warehouse_divergence,
 )
+from backend.services.inventory.inventory_warehouse_stock_query_service import (
+    load_warehouse_stock_snapshot,
+    resolve_stock_status,
+    select_sku_ids_by_stock,
+)
 from backend.services.product_pricing_override_service import (
     clear_platform_override,
     set_platform_override,
@@ -4064,6 +4069,10 @@ async def list_platform_sku_profit_candidates(
     spu: str | None = Query(None),
     sku_id: int | None = Query(None, gt=0),
     keyword: str | None = Query(None),
+    only_in_stock: bool = Query(
+        True,
+        description="只看当前仓有可用库存的 SKU（默认打开）",
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
@@ -4094,27 +4103,58 @@ async def list_platform_sku_profit_candidates(
                 )
             )
         )
-    total = int(
+    # ⚠️ **库存筛选必须在分页之前做**（阶段 7）：
+    #    「仅有库存」是**后端**筛选 —— 前端筛只会筛当前这一页，
+    #    总数对不上、翻页还会漏行。所以顺序是：
+    #    候选全集（只取 id + sku_key，两列很窄）→ 按当前仓库存过滤与排序 → 再分页。
+    candidate_rows = (
         (
             await db.execute(
-                select(func.count()).select_from(DimErpSku).where(*filters)
-            )
-        ).scalar()
-        or 0
-    )
-    sku_rows = (
-        (
-            await db.execute(
-                select(DimErpSku)
-                .where(*filters)
-                .order_by(DimErpSku.sku_key)
-                .offset((page - 1) * page_size)
-                .limit(page_size)
+                select(DimErpSku.sku_id, DimErpSku.sku_key).where(*filters)
             )
         )
-        .scalars()
         .all()
     )
+    candidate_ids = [row.sku_id for row in candidate_rows]
+    sku_key_by_id = {row.sku_id: (row.sku_key or "") for row in candidate_rows}
+    # 当前仓的库存数量 —— **含零库存行**（零 = 已清仓，是事实）。
+    # ⚠️ 这条口径与库龄**分家**：只出数量，不参与档位与底线计算。
+    stock_snapshot = await load_warehouse_stock_snapshot(
+        db, candidate_ids, warehouse_code
+    )
+    state_available = bool(stock_snapshot.get("available"))
+    stock_by_sku = stock_snapshot.get("by_sku") or {}
+    if only_in_stock and not state_available:
+        # 状态层不可用 ⇒ 库存筛选没法生效。此时**不筛**（而不是把整张表筛空）：
+        # 整表空掉会被运营读成"这个仓没货"，比不筛更坏。
+        from modules.core.logger import get_logger
+
+        get_logger(__name__).warning(
+            "only_in_stock filter skipped: inventory state unavailable"
+        )
+        only_in_stock = False
+
+    # 有货优先 + （默认）只看有库存的 —— 纯函数，顺序规则见 select_sku_ids_by_stock
+    ordered_ids = select_sku_ids_by_stock(
+        candidate_ids, sku_key_by_id, stock_by_sku, only_in_stock
+    )
+    total = len(ordered_ids)
+    page_ids = ordered_ids[
+        (page - 1) * page_size : (page - 1) * page_size + page_size
+    ]
+    sku_rows = []
+    if page_ids:
+        fetched_rows = (
+            (
+                await db.execute(
+                    select(DimErpSku).where(DimErpSku.sku_id.in_(page_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        row_by_id = {row.sku_id: row for row in fetched_rows}
+        sku_rows = [row_by_id[sku_id] for sku_id in page_ids if sku_id in row_by_id]
     ids = [row.sku_id for row in sku_rows]
     bindings = (
         (
@@ -4360,6 +4400,16 @@ async def list_platform_sku_profit_candidates(
                 (pricing_context.get("warehouse_restocks") or {}).get(row.sku_id) or {}
             ).values()
         ]
+        # 当前仓库存（阶段 7）：**含零库存行** ——
+        # 「已清仓」是一条事实（这个仓清过这货），不是缺数据；
+        # 与库龄分家，只出数量，不参与档位与底线。
+        stock_entry = stock_by_sku.get(row.sku_id) or None
+        pricing_payload["current_warehouse_available_stock"] = (
+            int(stock_entry.get("available_stock") or 0) if stock_entry else None
+        )
+        pricing_payload["current_warehouse_stock_status"] = resolve_stock_status(
+            stock_entry, state_available
+        )
         items[-1] = {**items[-1], **pricing_payload}
     return {
         "data": items,
