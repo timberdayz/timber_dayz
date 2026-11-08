@@ -390,6 +390,13 @@ services:
     # - scheduled: 定时任务（由 Celery Beat 调度）
     # - data_processing: 数据处理任务（可选，如果不需要可以移除）
     command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing,refresh_queue --concurrency=4
+    # 双保险：既读服务器上的 .env 文件，又用 environment 插值覆盖。
+    # env_file 兜住「.env.cleaned 没生成/变量被清掉」的情况，
+    # environment 兜住「.env 文件里有 CRLF 或引号导致值不干净」的情况。
+    # ⚠️ environment 优先级高于 env_file，所以 DATABASE_URL 等仍走插值（容器网络地址），
+    #    不会退回 env_file 里的 localhost 值。
+    env_file:
+      - .env
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -407,17 +414,18 @@ services:
       #    （base 的 docker-compose.yml 没有这个 service），所以它拿不到
       #    base 里 backend-api 用的 env_file: .env。
       #    compose 的 env_file / environment 都不会自动把 .env 灌进容器，
-      #    不显式列出来 ⇒ 跑飞书投影任务的 celery 容器没有凭据 ⇒
+      #    不显式给 ⇒ 跑飞书投影任务的 celery 容器没有凭据 ⇒
       #    任务直接失败（"Feishu app credentials are not configured"）。
       #    现象：最后一次成功投影停在 2026-11-01，之后的 price_adjust 任务全失败。
       #
-      # 这里用 environment 插值而不是 env_file：部署脚本会把 .env 清理成
-      # .env.cleaned 再用 --env-file 传给 compose，插值拿到的是**已去 CRLF、
-      # 已去引号**的干净值；直接 env_file 读原始 .env 反而可能带上脏字符。
-      FEISHU_PRODUCT_APP_ID: ${FEISHU_PRODUCT_APP_ID:-}
-      FEISHU_PRODUCT_APP_SECRET: ${FEISHU_PRODUCT_APP_SECRET:-}
-      FEISHU_PRODUCT_BASE_TOKEN: ${FEISHU_PRODUCT_BASE_TOKEN:-}
-      FEISHU_OPEN_BASE_URL: ${FEISHU_OPEN_BASE_URL:-https://open.feishu.cn}
+      # ⚠️ 这里**只加 env_file、不在 environment 里重复声明** FEISHU_*：
+      #    environment 的优先级**高于** env_file，一旦在 environment 里写
+      #    `FEISHU_PRODUCT_APP_ID: ${FEISHU_PRODUCT_APP_ID:-}`，插不出值时
+      #    会用**空串覆盖** env_file 里的真值 ⇒ 白修一场。
+      #    下面的 DATABASE_URL 等仍然留在 environment（容器网络地址），
+      #    env_file 里的 localhost 值被正确压住，互不打架。
+      #
+      # 上面的 env_file 段负责这批凭据。
       DB_POOL_SIZE: 2
       DB_MAX_OVERFLOW: 2
       CPU_EXECUTOR_WORKERS: 1
