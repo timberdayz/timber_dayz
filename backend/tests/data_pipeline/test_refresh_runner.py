@@ -80,6 +80,7 @@ def test_split_sql_statements_ignores_semicolons_inside_comments():
 
 def test_refresh_registry_exposes_dependency_order():
     from backend.services.data_pipeline.refresh_registry import (
+        ASSET_PREREQUISITES,
         PIPELINE_DEPENDENCIES,
         SQL_TARGET_PATHS,
         topologically_sort_targets,
@@ -87,7 +88,8 @@ def test_refresh_registry_exposes_dependency_order():
 
     # 原子层的两个普通视图改读物化候选集副本（口径等价：副本正文 = 正本正文）
     assert PIPELINE_DEPENDENCIES["semantic.fact_orders_atomic"] == [
-        "semantic.shop_identity_resolution_candidates_v2_mv"
+        "semantic.shop_identity_resolution_candidates_v2_mv",
+        "semantic.alias_registry",
     ]
     assert PIPELINE_DEPENDENCIES["semantic.fact_analytics_atomic"] == [
         "semantic.shop_identity_resolution_candidates_v2_mv"
@@ -109,8 +111,19 @@ def test_refresh_registry_exposes_dependency_order():
         == "sql/semantic/shop_identity_resolution_candidates_v2_mv.sql"
     )
     assert PIPELINE_DEPENDENCIES["semantic.fact_orders_monthly_atomic_mv"] == [
-        "semantic.shop_identity_resolution_candidates"
+        "semantic.shop_identity_resolution_candidates",
+        "semantic.alias_registry",
     ]
+    # 2026-11-08: orders 域取数改走 ``semantic.resolve_alias()`` ⇒ 别名资产
+    # （表 + 函数）必须**先落地**，否则建视图报 "function does not exist"。
+    # 两处都要声明：刷新顺序（PIPELINE_DEPENDENCIES）+ 建对象前置（ASSET_PREREQUISITES）。
+    assert (
+        "semantic.alias_registry" in ASSET_PREREQUISITES["semantic.fact_orders_atomic"]
+    )
+    assert (
+        "semantic.alias_registry"
+        in ASSET_PREREQUISITES["semantic.fact_orders_monthly_atomic_mv"]
+    )
     assert (
         SQL_TARGET_PATHS["semantic.fact_orders_monthly_atomic_mv"]
         == "sql/semantic/orders_monthly_atomic_mv.sql"
@@ -189,6 +202,11 @@ def test_refresh_registry_exposes_dependency_order():
         "api.business_overview_kpi_module"
     )
 
+    # 别名资产必须排在 orders 域视图/物化视图**之前**（否则建视图直接失败）
+    assert ordered.index("semantic.alias_registry") < ordered.index(
+        "semantic.fact_orders_monthly_atomic_mv"
+    )
+
     products_ordered = topologically_sort_targets(["mart.product_day_kpi"])
     assert products_ordered.index("semantic.alias_registry") < products_ordered.index(
         "semantic.fact_products_atomic"
@@ -201,6 +219,8 @@ def test_refresh_runner_builds_step_plan():
     plan = build_refresh_plan(["api.business_overview_kpi_module"])
     assert plan == [
         "semantic.shop_identity_resolution_candidates",
+        # 2026-11-08: orders 域取数改走 semantic.resolve_alias() ⇒ 别名资产必须先落地
+        "semantic.alias_registry",
         "semantic.fact_orders_monthly_atomic_mv",
         "semantic.fact_orders_monthly_atomic",
         "semantic.fact_analytics_monthly_atomic_mv",

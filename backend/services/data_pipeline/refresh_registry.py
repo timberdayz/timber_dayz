@@ -42,15 +42,27 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.shop_identity_resolution_candidates_v2_mv": [
         "semantic.shop_identity_resolution_candidates"
     ],
+    # [*] 2026-11-08: orders 域取数改走 ``semantic.resolve_alias()``
+    #   (别名表是取数的单一事实源) => 视图/物化视图建起来之前
+    #   **别名资产必须先落地**(表 + 函数), 否则建视图报
+    #   "function semantic.resolve_alias does not exist"。
+    #   products 域早已登记了这个依赖, orders 域本轮补齐。
     "semantic.fact_orders_monthly_atomic_mv": [
-        "semantic.shop_identity_resolution_candidates"
+        "semantic.shop_identity_resolution_candidates",
+        "semantic.alias_registry",
     ],
     "semantic.fact_analytics_monthly_atomic_mv": [
         "semantic.shop_identity_resolution_candidates"
     ],
     # 原子层的两个**普通视图**改读物化副本（口径等价：副本正文 = 正本正文）
+    # [*] 2026-11-08: orders 域取数改走 ``semantic.resolve_alias()``
+    #   (别名表是取数的单一事实源) => 视图/物化视图建起来之前
+    #   **别名资产必须先落地**(表 + 函数), 否则建视图报
+    #   "function semantic.resolve_alias does not exist"。
+    #   products 域早已登记了这个依赖, orders 域本轮补齐。
     "semantic.fact_orders_atomic": [
-        "semantic.shop_identity_resolution_candidates_v2_mv"
+        "semantic.shop_identity_resolution_candidates_v2_mv",
+        "semantic.alias_registry",
     ],
     "semantic.fact_analytics_atomic": [
         "semantic.shop_identity_resolution_candidates_v2_mv"
@@ -252,7 +264,16 @@ SEMANTIC_ATOMIC_VIEW_TARGETS: list[str] = sorted(
 #: 前置对象已存在时会被跳过/刷新，代价可忽略（副本只有 136 行，刷新毫秒级）。
 ASSET_PREREQUISITES: dict[str, list[str]] = {
     "semantic.fact_orders_atomic": [
-        "semantic.shop_identity_resolution_candidates_v2_mv"
+        "semantic.shop_identity_resolution_candidates_v2_mv",
+        "semantic.alias_registry",
+    ],
+    # [*] 2026-11-08: orders 域取数改走 ``semantic.resolve_alias()``
+    #   (别名表是取数的单一事实源) => 视图/物化视图建起来之前
+    #   **别名资产必须先落地**(表 + 函数), 否则建视图报
+    #   "function semantic.resolve_alias does not exist"。
+    #   products 域早已登记了这个依赖, orders 域本轮补齐。
+    "semantic.fact_orders_monthly_atomic_mv": [
+        "semantic.alias_registry",
     ],
     "semantic.fact_analytics_atomic": [
         "semantic.shop_identity_resolution_candidates_v2_mv"

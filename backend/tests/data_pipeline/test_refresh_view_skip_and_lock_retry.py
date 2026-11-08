@@ -146,7 +146,14 @@ async def test_matview_detection_handles_asyncpg_bytes(monkeypatch):
         run_id="run-test",
     )
 
-    assert executed_files == [], "bytes 形式的 relkind 也必须识别成物化视图并原地刷新"
+    # 2026-11-08: orders 域物化视图的**建对象前置**是别名资产
+    # （正文调用 semantic.resolve_alias）⇒ 刷新时允许（且必须）先跑一次
+    # 幂等的别名资产；但物化视图**本身绝不能重建**
+    # （资产文件带 DROP ... CASCADE，会连带删掉全部下游）。
+    assert executed_files == [
+        "sql/semantic/semantic_alias_registry.sql"
+    ], executed_files
+    assert not any("orders_monthly_atomic_mv" in path for path in executed_files)
     assert any(
         "REFRESH MATERIALIZED VIEW semantic.fact_orders_monthly_atomic_mv" in text
         for text in session.executed
@@ -180,9 +187,11 @@ async def test_data_refresh_refreshes_materialized_view_in_place(monkeypatch):
         run_id="run-test",
     )
 
-    assert (
-        executed_files == []
-    ), "数据刷新不该重建物化视图（资产文件带 DROP ... CASCADE）"
+    # 同上：只允许跑幂等的别名资产，物化视图仍然**原地 REFRESH、不重建**。
+    assert executed_files == [
+        "sql/semantic/semantic_alias_registry.sql"
+    ], executed_files
+    assert not any("orders_monthly_atomic_mv" in path for path in executed_files)
     assert any(
         "REFRESH MATERIALIZED VIEW semantic.fact_orders_monthly_atomic_mv" in text
         for text in session.executed
