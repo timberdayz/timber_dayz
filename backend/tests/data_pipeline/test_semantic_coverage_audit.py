@@ -38,6 +38,7 @@ from backend.services.semantic_coverage_audit_service import (
     build_coverage_sql,
 )
 from backend.services.semantic_field_registry import (
+    DOMAIN_PLATFORM_SEMANTIC_ALIASES,
     DOMAIN_SEMANTIC_ALIASES,
     ORDER_RETIRED_FIELDS,
     ORDER_STANDARD_FIELDS as REGISTRY_ORDER_STANDARD_FIELDS,
@@ -948,15 +949,37 @@ def test_analytics_domain_is_registered_for_coverage_audit():
 
 
 def test_analytics_domain_fields_are_derived_from_the_dictionary():
-    """流量域巡检字段集合 == 字典的域限定别名清单的 key。
+    """流量域巡检字段集合 == 字典里**登记了别名**的标准字段全集。
 
     ⇒ 不在本文件/服务里维护第 4 份手写清单: 字典增删字段, 巡检自动跟随。
+
+    [*] 2026-11-09: 来源是**两份**字典别名清单的并集 ——
+    * :data:`DOMAIN_SEMANTIC_ALIASES`("analytics") —— 域限定别名(通用);
+    * :data:`DOMAIN_PLATFORM_SEMANTIC_ALIASES`("analytics") —— 平台限定别名。
+
+    第二份是必需的: shopee 独有的 5 个流量指标(新访客 / 现有访客 /
+    新关注者 / 平均停留时长 / 平均页面访问数)走**平台限定**登记
+    (tiktok 压根没有这几列)⇒ 只看域限定表会漏掉它们 ⇒ 巡检看不见
+    「shopee 解析不出来」这种真实缺口。
     """
-    expected = set(DOMAIN_SEMANTIC_ALIASES["analytics"].keys())
+    domain_alias_fields = set(DOMAIN_SEMANTIC_ALIASES["analytics"].keys())
+    platform_alias_fields = set()
+    for per_platform in DOMAIN_PLATFORM_SEMANTIC_ALIASES.get("analytics", {}).values():
+        platform_alias_fields |= set(per_platform.keys())
+    expected = domain_alias_fields | platform_alias_fields
     actual = {field.standard_field for field in ANALYTICS_STANDARD_FIELDS}
 
     assert actual == expected
     assert SEMANTIC_COVERAGE_DOMAINS["analytics"].fields == ANALYTICS_STANDARD_FIELDS
+    # 平台限定的那 5 个必须真的在巡检集合里(不然 shopee 的缺口看不见)。
+    for field in (
+        "new_visitor_count",
+        "returning_visitor_count",
+        "new_follower_count",
+        "avg_session_duration_seconds",
+        "avg_page_views_per_visitor",
+    ):
+        assert field in actual, "流量域巡检漏了 {0}".format(field)
     # 「必须命中」的核心指标一个都不能少
     for field in (
         "visitor_count",
@@ -1008,3 +1031,92 @@ def test_analytics_domain_sql_resolves_through_alias_registry():
     assert "jsonb_each(" in sql
     for field in ANALYTICS_STANDARD_FIELDS:
         assert "'{0}'".format(field.standard_field) in sql
+
+
+# ── 平台适用性: 明细与汇总必须一致 ──────────────────────────────────────
+
+
+def test_entries_exclude_fields_that_do_not_apply_to_the_platform():
+    """平台**不适用**的标准字段不进明细(也不再产生 0% 告警)。
+
+    有的标准字段只有部分平台有对应源列 —— 例如 ``total_income``
+    (卖家总收入)只有 tiktok 有。平台诊断早就按 ``platform_applicable_fields``
+    过滤了, 明细却还列着 ⇒ 「汇总说 13 个字段、明细列了 18 个」= 自相矛盾,
+    而且会给运维报一堆「疑似列名未登记」的**假警报**。
+    """
+    rows = [
+        _orders_row("shopee", "monthly", total_rows=100, resolved={"total_income": 0}),
+        _orders_row(
+            "tiktok", "monthly", total_rows=100, resolved={"total_income": 100}
+        ),
+    ]
+
+    report = build_coverage_report(rows, domain=SEMANTIC_COVERAGE_DOMAINS["orders"])
+
+    shopee_fields = {
+        entry.standard_field
+        for entry in report.entries
+        if entry.platform_code == "shopee"
+    }
+    tiktok_fields = {
+        entry.standard_field
+        for entry in report.entries
+        if entry.platform_code == "tiktok"
+    }
+    assert "total_income" not in shopee_fields
+    assert "total_income" in tiktok_fields
+    # 假警报也必须没有(否则噪音会掩盖真问题)。
+    assert not [
+        warning
+        for warning in report.warnings
+        if "total_income" in warning and "shopee" in warning
+    ]
+
+
+def test_analytics_entries_exclude_shopee_only_fields_for_tiktok():
+    """shopee 独有的 5 个流量指标不该出现在 tiktok 的明细里。
+
+    tiktok 的流量报表**压根没有**这几列(实测 1,374 行的 raw_data key 里
+    一个都没有)⇒ 报「tiktok 解析率 0%」是**噪音**。
+    """
+    rows = [
+        _row(
+            "shopee",
+            "monthly",
+            total_rows=100,
+            resolved={field.standard_field: 100 for field in ANALYTICS_STANDARD_FIELDS},
+            fields=ANALYTICS_STANDARD_FIELDS,
+        ),
+        _row(
+            "tiktok",
+            "monthly",
+            total_rows=100,
+            resolved={field.standard_field: 0 for field in ANALYTICS_STANDARD_FIELDS},
+            fields=ANALYTICS_STANDARD_FIELDS,
+        ),
+    ]
+
+    report = build_coverage_report(rows, domain=SEMANTIC_COVERAGE_DOMAINS["analytics"])
+
+    shopee_fields = {
+        entry.standard_field
+        for entry in report.entries
+        if entry.platform_code == "shopee"
+    }
+    tiktok_fields = {
+        entry.standard_field
+        for entry in report.entries
+        if entry.platform_code == "tiktok"
+    }
+    for field in (
+        "new_visitor_count",
+        "returning_visitor_count",
+        "new_follower_count",
+        "avg_session_duration_seconds",
+        "avg_page_views_per_visitor",
+    ):
+        assert field in shopee_fields, "shopee 明细漏了 {0}".format(field)
+        assert field not in tiktok_fields, "tiktok 明细不该有 {0}".format(field)
+    assert not [
+        warning for warning in report.warnings if "new_visitor_count" in warning
+    ]

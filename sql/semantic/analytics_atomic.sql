@@ -105,6 +105,14 @@ mapped AS (
         semantic.resolve_alias(raw_data, data_domain, 'total_transaction_amount', platform_code, granularity) AS total_transaction_amount_raw,
         semantic.resolve_alias(raw_data, data_domain, 'product_visitor_count', platform_code, granularity) AS product_visitor_count_raw,
         semantic.resolve_alias(raw_data, data_domain, 'bounce_rate', platform_code, granularity) AS bounce_rate_raw,
+        -- [*] 2026-11-09 补登: shopee 独有的 5 个流量指标。
+        --   这 5 个别名是**平台限定**的(platform_code='shopee') ⇒ tiktok 数据上
+        --   不会命中 ⇒ 不会把 tiktok 的同名/近名列认成这些指标。
+        semantic.resolve_alias(raw_data, data_domain, 'new_visitor_count', platform_code, granularity) AS new_visitor_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'returning_visitor_count', platform_code, granularity) AS returning_visitor_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'new_follower_count', platform_code, granularity) AS new_follower_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'avg_session_duration_seconds', platform_code, granularity) AS avg_session_duration_seconds_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'avg_page_views_per_visitor', platform_code, granularity) AS avg_page_views_per_visitor_raw,
         raw_data,
         header_columns,
         data_hash,
@@ -166,6 +174,11 @@ resolved AS (
         m.total_transaction_amount_raw,
         m.product_visitor_count_raw,
         m.bounce_rate_raw,
+        m.new_visitor_count_raw,
+        m.returning_visitor_count_raw,
+        m.new_follower_count_raw,
+        m.avg_session_duration_seconds_raw,
+        m.avg_page_views_per_visitor_raw,
         m.raw_data,
         m.header_columns,
         m.data_hash,
@@ -324,6 +337,43 @@ cleaned AS (
             WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(bounce_rate_raw, '%', ''), ',', '.'), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(bounce_rate_raw, '%', ''), ',', '.'), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric / 100.0
             ELSE NULL
         END AS bounce_rate,
+        -- ── [*] 2026-11-09 补登: shopee 独有的 5 个流量指标 ──────────
+        --
+        -- ⚠ 清洗链与既有列**完全一致**(去千分位逗号 / 空格 / 破折号 → 正则校验
+        --   → numeric) ⇒ 解析不出就是 NULL(「不知道」), 不伪装成 0。
+        --   实测这 5 列带千分位逗号(形如 `1,004`)⇒ 必须去逗号。
+        CASE
+            WHEN new_visitor_count_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(new_visitor_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(new_visitor_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS new_visitor_count,
+        CASE
+            WHEN returning_visitor_count_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(returning_visitor_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(returning_visitor_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS returning_visitor_count,
+        CASE
+            WHEN new_follower_count_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(new_follower_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(new_follower_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS new_follower_count,
+        -- ⚠ 「平均停留时长」是 **HH:MM:SS 字符串**(实测形如 `00:00:42`)——
+        --   套普通数值清洗会把 `01:30:00` 变成 `13000`(小时当成了数字)。
+        --   ⇒ 这里**专门**换算成秒; 格式不认得 ⇒ NULL(不猜)。
+        CASE
+            WHEN avg_session_duration_seconds_raw IS NULL THEN NULL
+            WHEN TRIM(avg_session_duration_seconds_raw) ~ '^(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$' THEN
+                split_part(TRIM(avg_session_duration_seconds_raw), ':', 1)::numeric * 3600
+                + split_part(TRIM(avg_session_duration_seconds_raw), ':', 2)::numeric * 60
+                + split_part(TRIM(avg_session_duration_seconds_raw), ':', 3)::numeric
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(avg_session_duration_seconds_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(avg_session_duration_seconds_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS avg_session_duration_seconds,
+        CASE
+            WHEN avg_page_views_per_visitor_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(avg_page_views_per_visitor_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(avg_page_views_per_visitor_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS avg_page_views_per_visitor,
         raw_data,
         header_columns,
         data_hash,
@@ -389,6 +439,17 @@ SELECT
     currency_code,
     identity_warning_code,
     identity_candidate_count,
-    identity_candidates
+    identity_candidates,
+    -- [*] 2026-11-09 补登: shopee 独有的 5 个流量指标。
+    --   ⚠ 只能**追加在末尾** —— ``CREATE OR REPLACE VIEW`` 不能删列、
+    --   不能改列序(既有列名列序一个都不能动)。
+    --   ⚠ 缺项就是 NULL(「不知道」), 与既有列同一口径 ——
+    --   不套 ``COALESCE(x, 0)``(tiktok 没有这几列, 填 0 等于说
+    --   「tiktok 的新访客是 0 人」= **假的**)。
+    new_visitor_count AS new_visitor_count,
+    returning_visitor_count AS returning_visitor_count,
+    new_follower_count AS new_follower_count,
+    avg_session_duration_seconds AS avg_session_duration_seconds,
+    avg_page_views_per_visitor AS avg_page_views_per_visitor
 FROM deduplicated
 WHERE rn = 1;

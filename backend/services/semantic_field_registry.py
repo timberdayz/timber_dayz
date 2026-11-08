@@ -246,6 +246,75 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "default_hash": False,
         "aliases": ["跳失率", "bounce rate"],
     },
+    # ── shopee 专属流量字段(2026-11-09 补登) ───────────────────────
+    #
+    # 实测(开发库 2026-11-09, `b_class.fact_shopee_analytics_monthly` 2354 行):
+    #   * 「新访客」「现有访客」「新关注者」「平均停留时长」「平均页面访问数」
+    #     **2354/2354 行全部有值**; 按既有清洗链(去千分位逗号 / 空格 / 破折号)
+    #     **2354/2354 全部可解析成数值**(实测存在 `1,004` 这种带千分位的值)。
+    #   * 「访客数」== 「新访客」+「现有访客」—— **2354/2354 行精确相等**
+    #     ⇒ 三者说的是**同一个「访客」事实的三个切面**(总量 / 新客 / 老客),
+    #     但**粒度不同**(访客数是总量, 新老是拆分)⇒ 各自独立成标准字段,
+    #     **不合并**(合并会让人以为访客数 == 新访客)。
+    #   * 「新关注者」≤「访客数」—— **0 行违反**(关注者是访客的子集)。
+    #   * 「平均页面访问数」≈「页面浏览数」÷「访客数」—— 1814 行可用行里
+    #     **全部**落在 ±0.02 内 ⇒ 它是**派生均值**, 与 page_views / visitor_count
+    #     **不是同一个事实** ⇒ 独立成字段(不登记成 page_views 的别名)。
+    #   * 「平均停留时长」是 **HH:MM:SS 字符串**(实测 2354/2354 行, 形如
+    #     `00:00:42`, 区间 0~215 秒, 均值 36.5 秒)
+    #     ⇒ **不能**套用普通数值清洗(否则 `01:30:00` 会被当成 `13000`)
+    #     ⇒ 字段口径是**秒数**, 由视图专门换算(见 `analytics_atomic.sql`)。
+    #   * tiktok 侧**没有**这 5 列(实测 tiktok monthly 1374 行的 raw_data
+    #     key 里一个都没有)⇒ 标 ``platforms=("shopee",)``,
+    #     巡检的平台诊断据此跳过 tiktok(否则报「tiktok 缺这 5 个指标」= 噪音)。
+    "new_visitor_count": {
+        "label": "新访客数",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("shopee",),
+        # ⚠ **只留英文别名**: 中文「新访客」是 shopee 流量报表的**真实表头**,
+        #   由 ``ANALYTICS_PLATFORM_ALIASES`` 逐字登记(平台限定)。
+        #   放进全局别名表 = 任何域的「新访客」列都会被认领。
+        "aliases": ["new visitors", "new visitor count"],
+    },
+    "returning_visitor_count": {
+        "label": "现有访客数",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("shopee",),
+        "aliases": ["returning visitors", "returning visitor count"],
+    },
+    "new_follower_count": {
+        "label": "新关注者数",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("shopee",),
+        "aliases": ["new followers", "new follower count"],
+    },
+    "avg_session_duration_seconds": {
+        "label": "平均停留时长(秒)",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("shopee",),
+        "aliases": ["average session duration seconds", "avg session duration"],
+    },
+    "avg_page_views_per_visitor": {
+        "label": "平均页面访问数",
+        "kind": "metric",
+        "domain": "analytics",
+        "hash_eligible": False,
+        "default_hash": False,
+        "platforms": ("shopee",),
+        "aliases": ["average page views per visitor", "avg page views per visitor"],
+    },
     "sales_amount": {
         "label": "销售额(已废止)",
         "kind": "metric",
@@ -875,6 +944,17 @@ SEMANTIC_FIELD_META = {
 #:     后端这边没有 ⇒ 后端接口返回的字段没有描述, 前端只能自己抄一份。
 #:     现在文案回到后端, 与字段定义放在一起, 一起作为唯一口径。
 SEMANTIC_FIELD_DESCRIPTIONS: Dict[str, str] = {
+    # ── shopee 独有的 5 个流量指标(2026-11-09 补登) ────────────────
+    "new_visitor_count": "新访客数：本期第一次到店的访客。实测「访客数」= 新访客 + 现有访客，"
+    "两者相加才是总访客数；目前只有 shopee 的流量报表有这一列。",
+    "returning_visitor_count": "现有访客数：本期之前来过、本期又到店的访客。与「新访客数」相加等于「访客数」；"
+    "目前只有 shopee 的流量报表有这一列。",
+    "new_follower_count": "新关注者数：本期新增关注店铺的人数。实测恒小于等于访客数（关注者是访客的子集）；"
+    "目前只有 shopee 的流量报表有这一列。",
+    "avg_session_duration_seconds": "平均停留时长（秒）：一次访问的平均停留秒数。源表里是「时:分:秒」文本，"
+    "系统已换算成秒数存放；目前只有 shopee 的流量报表有这一列。",
+    "avg_page_views_per_visitor": "平均页面访问数：一个访客平均浏览的页面数，"
+    "实测约等于「页面浏览数」除以「访客数」；目前只有 shopee 的流量报表有这一列。",
     "click_to_order_rate": "tiktok 的点击成交转化率(CTOR), 订单数除以点击数; 与转化率(已付款订单)分母不同, 不可混用。",
     "unique_click_to_order_rate": "tiktok 的去重点击成交转化率, 订单数除以去重点击数; 与全点击口径的 CTOR 数值不同。",
     "affiliate_commission": "付给达人/联盟的佣金，与「平台佣金」是两笔钱，不并入平台成本口径。",
@@ -1168,6 +1248,37 @@ ORDER_PLATFORM_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
     },
 }
 
+#: [*] analytics(流量)域的**平台限定**别名 —— 2026-11-09 补登。
+#:
+#: 为什么必须分平台
+#: ------------------
+#: 实测(开发库 2026-11-09):
+#: * shopee ``b_class.fact_shopee_analytics_monthly`` 2354 行 —— 这 5 列
+#:   **全部有值**;
+#: * tiktok ``b_class.fact_tiktok_analytics_monthly`` 1374 行 —— 这 5 列
+#:   **一个都没有**(raw_data 的 key 里查不到)。
+#:
+#: ⇒ 它们是 **shopee 独有**的指标 ⇒ 登记成平台限定别名(``platform_code``),
+#:   PG 侧 ``semantic.resolve_alias(..., platform_code)`` 只在 shopee 数据上命中。
+#:
+#: ⚠ **不登记成通用别名** —— 通用别名会让 tiktok 数据上出现同名列时**串口径**。
+ANALYTICS_PLATFORM_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
+    "shopee": {
+        # 新客: 访客数里「第一次来」的那部分(实测 访客数 == 新访客 + 现有访客)。
+        "new_visitor_count": ("新访客",),
+        # 老客: 访客数里「之前来过」的那部分。
+        "returning_visitor_count": ("现有访客",),
+        # 新关注者: 本期**新增关注**的人数(实测 ≤ 访客数, 0 行违反)。
+        "new_follower_count": ("新关注者",),
+        # ⚠ 平均停留时长是 **HH:MM:SS 字符串**(形如 `00:00:42`)——
+        #   字段口径是**秒数**, 由视图专门换算(不能套普通数值清洗)。
+        "avg_session_duration_seconds": ("平均停留时长",),
+        # 平均页面访问数 ≈ 页面浏览数 ÷ 访客数(实测 1814/1814 行 ±0.02 内)。
+        "avg_page_views_per_visitor": ("平均页面访问数",),
+    },
+}
+
+
 #: [*] orders 域的**平台分别列名**。
 #:
 #: 源表的两个平台**同业务、不同列名**:
@@ -1183,6 +1294,7 @@ ORDER_PLATFORM_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
 #:   的排序命中: 平台精确匹配的行排在通用行前面。
 DOMAIN_PLATFORM_SEMANTIC_ALIASES: Dict[str, Dict[str, Dict[str, tuple[str, ...]]]] = {
     "orders": ORDER_PLATFORM_ALIASES,
+    "analytics": ANALYTICS_PLATFORM_ALIASES,
 }
 
 
@@ -1281,7 +1393,26 @@ def platform_applicable_fields(
         # —— 它们在字典里 domain 是 common, 按「字典 domain == 本域」取会漏掉
         # ⇒ 平台诊断的口径会失真(这三个字段解析不出来时不会被报)。
         # ⇒ 这里以**该域的别名清单**为准, 与巡检实际巡检的字段集合同源。
-        candidates = tuple(DOMAIN_SEMANTIC_ALIASES.get("analytics", {}).keys())
+        #
+        # [*] 2026-11-09: 还要并入**平台限定**别名表里的字段 ——
+        #   shopee 独有的「新访客 / 现有访客 / 新关注者 / 平均停留时长 /
+        #   平均页面访问数」不在域限定表里(它们走平台限定登记),
+        #   但**确实**要巡检: shopee 有这几列, 能不能解析出来是真实问题。
+        #   平台过滤交给 :func:`semantic_field_applies_to_platform` ——
+        #   这 5 个字段在字典里标了 ``platforms=("shopee",)``
+        #   ⇒ tiktok 侧自动排除(否则报「tiktok 缺这 5 个指标」= 噪音)。
+        candidates = tuple(
+            dict.fromkeys(
+                list(DOMAIN_SEMANTIC_ALIASES.get("analytics", {}).keys())
+                + [
+                    field
+                    for per_platform in DOMAIN_PLATFORM_SEMANTIC_ALIASES.get(
+                        "analytics", {}
+                    ).values()
+                    for field in per_platform
+                ]
+            )
+        )
     else:
         candidates = tuple(
             key
@@ -1503,13 +1634,16 @@ ANALYTICS_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
     #
     # ⚠ 下面这些真实列**还没有对应的标准字段**, 本轮不登记
     #   (登记前必须先定义标准字段, 否则就是「有列名、无语义」):
-    #   shopee: 新访客 / 现有访客 / 新关注者 / 平均停留时长 / 平均页面访问数
     #   tiktok: 商品成交件数 / 已退款的商品件数 / 客户数 / 平均订单金额 /
     #           去重商品曝光次数 / 去重点击次数 / 退款金额 / 商品卡 GMV /
     #           商家直播 GMV / 商家直播间接 GMV / 商家视频 GMV /
     #           商家视频间接 GMV / 达人直播 GMV / 达人直播归因 GMV /
     #           达人直播间接 GMV / 达人视频 GMV / 达人视频间接 GMV /
     #           绑定账号直播归因 GMV / 绑定账号视频归因 GMV / 联盟视频归因 GMV
+    #
+    # ⚠ shopee 的「新访客 / 现有访客 / 新关注者 / 平均停留时长 / 平均页面访问数」
+    #   已于 2026-11-09 补登 ⇒ 见 :data:`ANALYTICS_PLATFORM_ALIASES`
+    #   (它们**只有 shopee 有**, 所以走**平台限定**别名, 不进本表)。
 }
 
 

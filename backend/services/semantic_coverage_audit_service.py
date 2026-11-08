@@ -89,6 +89,7 @@ from backend.services.semantic_field_registry import (
     SEMANTIC_FIELD_DEFINITIONS,
     normalize_semantic_alias,
     platform_applicable_fields,
+    semantic_field_applies_to_platform,
 )
 from modules.core.logger import get_logger
 
@@ -333,8 +334,17 @@ def _derive_analytics_fields() -> Tuple[SemanticCoverageField, ...]:
        报出来只会是噪音。
 
     ⇒ 不在本文件里维护第 4 份手写清单: 字典增删字段, 巡检自动跟随。
+
+    [*] 2026-11-09: 并入**平台限定**别名表(:data:`DOMAIN_PLATFORM_SEMANTIC_ALIASES`)
+      里的字段 —— shopee 独有的「新访客 / 现有访客 / 新关注者 / 平均停留时长 /
+      平均页面访问数」走平台限定登记, 不在域限定表里, 但**确实**要巡检
+      (shopee 有这几列, 解析不出来是真实问题)。
+      平台侧差异由 :func:`platform_applicable_fields` 按字典 ``platforms`` 过滤
+      ⇒ tiktok 不会报「缺这 5 个指标」(tiktok 压根没有这几列)。
     """
     keys = set(DOMAIN_SEMANTIC_ALIASES.get("analytics", {}).keys())
+    for per_platform in DOMAIN_PLATFORM_SEMANTIC_ALIASES.get("analytics", {}).values():
+        keys |= set(per_platform.keys())
     return tuple(
         SemanticCoverageField(key, key, _field_kind(key)) for key in sorted(keys)
     )
@@ -910,7 +920,25 @@ def build_coverage_report(
             continue
 
         group_columns = candidates_by_group.get((platform_code, granularity), ())
+        # [*] 2026-11-09: 该平台**不适用**的标准字段不进 entries。
+        #   有的标准字段**只有部分平台有对应源列** —— 例如 shopee 独有的
+        #   5 个流量指标(新访客 / 现有访客 / 新关注者 / 平均停留时长 /
+        #   平均页面访问数)、tiktok 独有的卖家总收入(total_income)。
+        #   对**压根没有这一列**的平台报「解析率 0%」是**噪音**
+        #   (会掩盖真问题), 而平台诊断(:func:`_build_platform_summaries`)
+        #   早就按 :func:`platform_applicable_fields` 过滤了
+        #   ⇒ 这里必须**同样过滤**, 否则会出现
+        #   「汇总说 13 个字段、明细却列了 18 个」= 自相矛盾。
+        #
+        #   ⚠ 判据用 :func:`semantic_field_applies_to_platform`(只看字典里的
+        #   ``platforms`` 标注), **不**用 :func:`platform_applicable_fields`
+        #   (它是「该域该有哪些字段」的候选集, 与本域的巡检字段集口径不同 ——
+        #   例如 products 域的巡检字段集要减掉 ``PRODUCTS_EXCLUDED_FIELDS``)。
         for field_spec in domain.fields:
+            if not semantic_field_applies_to_platform(
+                field_spec.standard_field, platform_code, domain.name
+            ):
+                continue
             resolved_rows = _to_int(
                 row.get(_resolved_column_name(field_spec.standard_field))
             )

@@ -84,6 +84,8 @@ $$;
 INSERT INTO semantic.semantic_field_aliases
     (data_domain, standard_field, raw_alias, platform_code, normalized_alias, source, confidence, status)
 VALUES
+    ('analytics', 'avg_page_views_per_visitor', '平均页面访问数', 'shopee', '平均页面访问数', 'builtin', 1.000, 'active'),
+    ('analytics', 'avg_session_duration_seconds', '平均停留时长', 'shopee', '平均停留时长', 'builtin', 1.000, 'active'),
     ('analytics', 'bounce_rate', 'bounce rate', NULL, 'bouncerate', 'builtin', 1.000, 'active'),
     ('analytics', 'bounce_rate', 'bounce_rate', NULL, 'bouncerate', 'builtin', 1.000, 'active'),
     ('analytics', 'bounce_rate', '跳出率', NULL, '跳出率', 'builtin', 1.000, 'active'),
@@ -118,6 +120,8 @@ VALUES
     ('analytics', 'metric_date', '日期', NULL, '日期', 'builtin', 1.000, 'active'),
     ('analytics', 'metric_date', '日期时间', NULL, '日期时间', 'builtin', 1.000, 'active'),
     ('analytics', 'metric_date', '统计日期', NULL, '统计日期', 'builtin', 1.000, 'active'),
+    ('analytics', 'new_follower_count', '新关注者', 'shopee', '新关注者', 'builtin', 1.000, 'active'),
+    ('analytics', 'new_visitor_count', '新访客', 'shopee', '新访客', 'builtin', 1.000, 'active'),
     ('analytics', 'order_count', 'order count', NULL, 'ordercount', 'builtin', 1.000, 'active'),
     ('analytics', 'order_count', 'order_count', NULL, 'ordercount', 'builtin', 1.000, 'active'),
     ('analytics', 'order_count', 'orders', NULL, 'orders', 'builtin', 1.000, 'active'),
@@ -139,6 +143,7 @@ VALUES
     ('analytics', 'product_visitor_count', 'product visitors', NULL, 'productvisitors', 'builtin', 1.000, 'active'),
     ('analytics', 'product_visitor_count', 'product_visitor_count', NULL, 'productvisitorcount', 'builtin', 1.000, 'active'),
     ('analytics', 'product_visitor_count', '商品访客数', NULL, '商品访客数', 'builtin', 1.000, 'active'),
+    ('analytics', 'returning_visitor_count', '现有访客', 'shopee', '现有访客', 'builtin', 1.000, 'active'),
     ('analytics', 'shop_id', 'shop id', NULL, 'shopid', 'builtin', 1.000, 'active'),
     ('analytics', 'shop_id', 'shop_id', NULL, 'shopid', 'builtin', 1.000, 'active'),
     ('analytics', 'shop_id', '店铺', NULL, '店铺', 'builtin', 1.000, 'active'),
@@ -609,6 +614,8 @@ WHERE a.source = 'builtin'
 -- ⇒ 留着就是事实源漂移。只删 builtin 行(template_confirmed/manual 是用户确认过的)。
 WITH current_seed(data_domain, standard_field, raw_alias, platform_code) AS (
     VALUES
+        ('analytics', 'avg_page_views_per_visitor', '平均页面访问数', 'shopee'),
+        ('analytics', 'avg_session_duration_seconds', '平均停留时长', 'shopee'),
         ('analytics', 'bounce_rate', 'bounce rate', NULL),
         ('analytics', 'bounce_rate', 'bounce_rate', NULL),
         ('analytics', 'bounce_rate', '跳出率', NULL),
@@ -643,6 +650,8 @@ WITH current_seed(data_domain, standard_field, raw_alias, platform_code) AS (
         ('analytics', 'metric_date', '日期', NULL),
         ('analytics', 'metric_date', '日期时间', NULL),
         ('analytics', 'metric_date', '统计日期', NULL),
+        ('analytics', 'new_follower_count', '新关注者', 'shopee'),
+        ('analytics', 'new_visitor_count', '新访客', 'shopee'),
         ('analytics', 'order_count', 'order count', NULL),
         ('analytics', 'order_count', 'order_count', NULL),
         ('analytics', 'order_count', 'orders', NULL),
@@ -664,6 +673,7 @@ WITH current_seed(data_domain, standard_field, raw_alias, platform_code) AS (
         ('analytics', 'product_visitor_count', 'product visitors', NULL),
         ('analytics', 'product_visitor_count', 'product_visitor_count', NULL),
         ('analytics', 'product_visitor_count', '商品访客数', NULL),
+        ('analytics', 'returning_visitor_count', '现有访客', 'shopee'),
         ('analytics', 'shop_id', 'shop id', NULL),
         ('analytics', 'shop_id', 'shop_id', NULL),
         ('analytics', 'shop_id', '店铺', NULL),

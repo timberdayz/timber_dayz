@@ -72,6 +72,15 @@ mapped_monthly_traffic AS MATERIALIZED (
         semantic.resolve_alias(raw_data, data_domain, 'sku_order_count', platform_code, 'monthly') AS sku_order_count_raw,
         semantic.resolve_alias(raw_data, data_domain, 'gmv', platform_code, 'monthly') AS gmv_raw,
         semantic.resolve_alias(raw_data, data_domain, 'total_transaction_amount', platform_code, 'monthly') AS total_transaction_amount_raw,
+        -- [*] 2026-11-09 补登: shopee 独有的 5 个流量指标。
+        --   平台限定别名(platform_code='shopee') ⇒ tiktok 数据上不会命中。
+        --   ⚠ 与日/周链(`sql/semantic/analytics_atomic.sql`)**同源同口径** ——
+        --   同一个指标在两条链上必须取到同一个列、同一套清洗规则。
+        semantic.resolve_alias(raw_data, data_domain, 'new_visitor_count', platform_code, 'monthly') AS new_visitor_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'returning_visitor_count', platform_code, 'monthly') AS returning_visitor_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'new_follower_count', platform_code, 'monthly') AS new_follower_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'avg_session_duration_seconds', platform_code, 'monthly') AS avg_session_duration_seconds_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'avg_page_views_per_visitor', platform_code, 'monthly') AS avg_page_views_per_visitor_raw,
         data_hash,
         ingest_timestamp
     FROM raw_monthly_traffic
@@ -268,6 +277,43 @@ normalized_monthly_traffic AS MATERIALIZED (
                 )::numeric
             END
         END AS total_transaction_amount,
+        -- ── [*] 2026-11-09 补登: shopee 独有的 5 个流量指标 ──────────
+        --
+        -- ⚠ 清洗链与**日/周链完全一致**(去千分位逗号 / 空格 / 破折号 →
+        --   正则校验 → numeric) ⇒ 两条链解析不出时都是 NULL(「不知道」),
+        --   绝不伪装成 0。实测这 5 列带千分位逗号(形如 `1,004`)⇒ 必须去逗号。
+        CASE
+            WHEN new_visitor_count_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(new_visitor_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(new_visitor_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS new_visitor_count,
+        CASE
+            WHEN returning_visitor_count_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(returning_visitor_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(returning_visitor_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS returning_visitor_count,
+        CASE
+            WHEN new_follower_count_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(new_follower_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(new_follower_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS new_follower_count,
+        -- ⚠ 「平均停留时长」是 **HH:MM:SS 字符串**(形如 `00:00:42`)——
+        --   套普通数值清洗会把 `01:30:00` 变成 `13000` ⇒ 这里**专门**换算成秒;
+        --   格式不认得 ⇒ NULL(不猜)。
+        CASE
+            WHEN avg_session_duration_seconds_raw IS NULL THEN NULL
+            WHEN TRIM(avg_session_duration_seconds_raw) ~ '^(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$' THEN
+                split_part(TRIM(avg_session_duration_seconds_raw), ':', 1)::numeric * 3600
+                + split_part(TRIM(avg_session_duration_seconds_raw), ':', 2)::numeric * 60
+                + split_part(TRIM(avg_session_duration_seconds_raw), ':', 3)::numeric
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(avg_session_duration_seconds_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(avg_session_duration_seconds_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS avg_session_duration_seconds,
+        CASE
+            WHEN avg_page_views_per_visitor_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(avg_page_views_per_visitor_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$' THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(avg_page_views_per_visitor_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS avg_page_views_per_visitor,
         ARRAY_REMOVE(
             ARRAY[
                 LOWER(COALESCE(source_platform_shop_id, '')),
@@ -360,6 +406,11 @@ resolved_monthly_traffic AS MATERIALIZED (
         m.sku_order_count,
         m.gmv,
         m.total_transaction_amount,
+        m.new_visitor_count,
+        m.returning_visitor_count,
+        m.new_follower_count,
+        m.avg_session_duration_seconds,
+        m.avg_page_views_per_visitor,
         m.data_hash,
         m.ingest_timestamp
     FROM normalized_monthly_traffic m
@@ -432,7 +483,15 @@ SELECT
     data_hash,
     ingest_timestamp,
     identity_candidate_count,
-    identity_candidates
+    identity_candidates,
+    -- [*] 2026-11-09 补登: shopee 独有的 5 个流量指标。
+    --   ⚠ 只能**追加在末尾** —— 物化视图的列集变了必须 DROP + 重建。
+    --   ⚠ 缺项就是 NULL(「不知道」), 与既有列同一口径。
+    new_visitor_count,
+    returning_visitor_count,
+    new_follower_count,
+    avg_session_duration_seconds,
+    avg_page_views_per_visitor
 FROM deduplicated_monthly_traffic
 WHERE rn = 1;
 

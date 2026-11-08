@@ -21,6 +21,11 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "affiliatecommission": "affiliate_commission",
     "aov": "aov",
     "aovplaced": "aov_placed",
+    "averagepageviewspervisitor": "avg_page_views_per_visitor",
+    "averagesessiondurationseconds": "avg_session_duration_seconds",
+    "avgpageviewspervisitor": "avg_page_views_per_visitor",
+    "avgsessionduration": "avg_session_duration_seconds",
+    "avgsessiondurationseconds": "avg_session_duration_seconds",
     "bouncerate": "bounce_rate",
     "buyercount": "buyer_count",
     "buyercountplaced": "buyer_count_placed",
@@ -63,6 +68,10 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "liveindirectgmv": "live_indirect_gmv",
     "logisticsfee": "shipping_fee",
     "metricdate": "metric_date",
+    "newfollowercount": "new_follower_count",
+    "newfollowers": "new_follower_count",
+    "newvisitorcount": "new_visitor_count",
+    "newvisitors": "new_visitor_count",
     "orderconversionrate": "order_conversion_rate",
     "orderconversionrateplaced": "order_conversion_rate_placed",
     "ordercount": "order_count",
@@ -98,6 +107,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "qty": "sales_volume",
     "refundamount": "refund_amount",
     "refundeditemcount": "refunded_item_count",
+    "returningvisitorcount": "returning_visitor_count",
+    "returningvisitors": "returning_visitor_count",
     "revenue": "sales_amount",
     "sales": "sales_amount",
     "salesamount": "sales_amount",
@@ -1557,6 +1568,101 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
+        "new_visitor_count",
+        "new visitors",
+        "new visitor count"
+      ],
+      "default_hash": false,
+      "description": "新访客数：本期第一次到店的访客。实测「访客数」= 新访客 + 现有访客，两者相加才是总访客数；目前只有 shopee 的流量报表有这一列。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "新访客数",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "new_visitor_count",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "returning_visitor_count",
+        "returning visitors",
+        "returning visitor count"
+      ],
+      "default_hash": false,
+      "description": "现有访客数：本期之前来过、本期又到店的访客。与「新访客数」相加等于「访客数」；目前只有 shopee 的流量报表有这一列。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "现有访客数",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "returning_visitor_count",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "new_follower_count",
+        "new followers",
+        "new follower count"
+      ],
+      "default_hash": false,
+      "description": "新关注者数：本期新增关注店铺的人数。实测恒小于等于访客数（关注者是访客的子集）；目前只有 shopee 的流量报表有这一列。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "新关注者数",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "new_follower_count",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "avg_session_duration_seconds",
+        "average session duration seconds",
+        "avg session duration"
+      ],
+      "default_hash": false,
+      "description": "平均停留时长（秒）：一次访问的平均停留秒数。源表里是「时:分:秒」文本，系统已换算成秒数存放；目前只有 shopee 的流量报表有这一列。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "平均停留时长(秒)",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "avg_session_duration_seconds",
+      "system_scope": false
+    },
+    {
+      "aliases": [
+        "avg_page_views_per_visitor",
+        "average page views per visitor",
+        "avg page views per visitor"
+      ],
+      "default_hash": false,
+      "description": "平均页面访问数：一个访客平均浏览的页面数，实测约等于「页面浏览数」除以「访客数」；目前只有 shopee 的流量报表有这一列。",
+      "domain": "analytics",
+      "hash_eligible": true,
+      "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+      "identity_strength": null,
+      "kind": "metric",
+      "label": "平均页面访问数",
+      "option_group": "traffic_metric",
+      "required": false,
+      "semantic_key": "avg_page_views_per_visitor",
+      "system_scope": false
+    },
+    {
+      "aliases": [
         "sales_amount",
         "sales amount",
         "revenue",
@@ -2525,6 +2631,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "affiliate_commission",
     "aov",
     "aov_placed",
+    "avg_page_views_per_visitor",
+    "avg_session_duration_seconds",
     "bounce_rate",
     "buyer_count",
     "buyer_count_placed",
@@ -2543,6 +2651,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "live_gmv",
     "live_indirect_gmv",
     "metric_date",
+    "new_follower_count",
+    "new_visitor_count",
     "order_conversion_rate",
     "order_conversion_rate_placed",
     "order_count",
@@ -2569,6 +2679,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     "purchase_amount",
     "refund_amount",
     "refunded_item_count",
+    "returning_visitor_count",
     "sales_amount",
     "sales_amount_placed",
     "sales_volume",
@@ -3290,6 +3401,96 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
           "label": "跳失率 (bounce_rate)",
           "system_scope": false,
           "value": "bounce_rate"
+        },
+        {
+          "aliases": [
+            "new_visitor_count",
+            "new visitors",
+            "new visitor count"
+          ],
+          "default_hash": false,
+          "description": "新访客数：本期第一次到店的访客。实测「访客数」= 新访客 + 现有访客，两者相加才是总访客数；目前只有 shopee 的流量报表有这一列。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "新访客数 (new_visitor_count)",
+          "system_scope": false,
+          "value": "new_visitor_count"
+        },
+        {
+          "aliases": [
+            "returning_visitor_count",
+            "returning visitors",
+            "returning visitor count"
+          ],
+          "default_hash": false,
+          "description": "现有访客数：本期之前来过、本期又到店的访客。与「新访客数」相加等于「访客数」；目前只有 shopee 的流量报表有这一列。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "现有访客数 (returning_visitor_count)",
+          "system_scope": false,
+          "value": "returning_visitor_count"
+        },
+        {
+          "aliases": [
+            "new_follower_count",
+            "new followers",
+            "new follower count"
+          ],
+          "default_hash": false,
+          "description": "新关注者数：本期新增关注店铺的人数。实测恒小于等于访客数（关注者是访客的子集）；目前只有 shopee 的流量报表有这一列。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "新关注者数 (new_follower_count)",
+          "system_scope": false,
+          "value": "new_follower_count"
+        },
+        {
+          "aliases": [
+            "avg_session_duration_seconds",
+            "average session duration seconds",
+            "avg session duration"
+          ],
+          "default_hash": false,
+          "description": "平均停留时长（秒）：一次访问的平均停留秒数。源表里是「时:分:秒」文本，系统已换算成秒数存放；目前只有 shopee 的流量报表有这一列。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "平均停留时长(秒) (avg_session_duration_seconds)",
+          "system_scope": false,
+          "value": "avg_session_duration_seconds"
+        },
+        {
+          "aliases": [
+            "avg_page_views_per_visitor",
+            "average page views per visitor",
+            "avg page views per visitor"
+          ],
+          "default_hash": false,
+          "description": "平均页面访问数：一个访客平均浏览的页面数，实测约等于「页面浏览数」除以「访客数」；目前只有 shopee 的流量报表有这一列。",
+          "domain": "analytics",
+          "group": "traffic_metric",
+          "hash_eligible": true,
+          "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
+          "identity_strength": null,
+          "kind": "metric",
+          "label": "平均页面访问数 (avg_page_views_per_visitor)",
+          "system_scope": false,
+          "value": "avg_page_views_per_visitor"
         },
         {
           "aliases": [

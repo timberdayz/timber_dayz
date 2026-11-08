@@ -25,5 +25,11 @@ SELECT
     data_hash,
     ingest_timestamp,
     identity_candidate_count,
-    identity_candidates
+    identity_candidates,
+    -- [*] 2026-11-09 补登: shopee 独有的 5 个流量指标(与日/周链同源同口径)。
+    new_visitor_count,
+    returning_visitor_count,
+    new_follower_count,
+    avg_session_duration_seconds,
+    avg_page_views_per_visitor
 FROM semantic.fact_analytics_monthly_atomic_mv;
