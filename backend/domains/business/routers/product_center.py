@@ -4108,13 +4108,8 @@ async def list_platform_sku_profit_candidates(
     #    总数对不上、翻页还会漏行。所以顺序是：
     #    候选全集（只取 id + sku_key，两列很窄）→ 按当前仓库存过滤与排序 → 再分页。
     candidate_rows = (
-        (
-            await db.execute(
-                select(DimErpSku.sku_id, DimErpSku.sku_key).where(*filters)
-            )
-        )
-        .all()
-    )
+        await db.execute(select(DimErpSku.sku_id, DimErpSku.sku_key).where(*filters))
+    ).all()
     candidate_ids = [row.sku_id for row in candidate_rows]
     sku_key_by_id = {row.sku_id: (row.sku_key or "") for row in candidate_rows}
     # 当前仓的库存数量 —— **含零库存行**（零 = 已清仓，是事实）。
@@ -4139,17 +4134,11 @@ async def list_platform_sku_profit_candidates(
         candidate_ids, sku_key_by_id, stock_by_sku, only_in_stock
     )
     total = len(ordered_ids)
-    page_ids = ordered_ids[
-        (page - 1) * page_size : (page - 1) * page_size + page_size
-    ]
+    page_ids = ordered_ids[(page - 1) * page_size : (page - 1) * page_size + page_size]
     sku_rows = []
     if page_ids:
         fetched_rows = (
-            (
-                await db.execute(
-                    select(DimErpSku).where(DimErpSku.sku_id.in_(page_ids))
-                )
-            )
+            (await db.execute(select(DimErpSku).where(DimErpSku.sku_id.in_(page_ids))))
             .scalars()
             .all()
         )

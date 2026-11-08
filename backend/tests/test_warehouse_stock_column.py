@@ -183,19 +183,21 @@ def test_stock_filter_is_skipped_when_state_layer_unavailable():
 
 def test_fallback_warning_distinguishes_unavailable_from_empty():
     """误报告警修正：状态层不可用 ≠ 这批 SKU 没有有库存的记录。"""
-    source = Path(
-        "backend/services/product_pricing_query_service.py"
-    ).read_text(encoding="utf-8")
+    source = Path("backend/services/product_pricing_query_service.py").read_text(
+        encoding="utf-8"
+    )
     assert "probe_inventory_state_available" in source
     assert "no stocked inventory rows for the requested SKUs" in source
     # 状态层真的不可用时，仍然要留 warning（管道坏了要有人去修）
-    assert "inventory_state unavailable, falling back to legacy age_days caliber" in source
+    assert (
+        "inventory_state unavailable, falling back to legacy age_days caliber" in source
+    )
 
 
 def test_fallback_caliber_itself_is_unchanged():
     """回落口径一个字都不改（A4：不传仓的老调用方输出必须与改造前逐字一致）。"""
-    source = Path(
-        "backend/services/product_pricing_query_service.py"
-    ).read_text(encoding="utf-8")
+    source = Path("backend/services/product_pricing_query_service.py").read_text(
+        encoding="utf-8"
+    )
     assert 'restock_source = "legacy_age_days"' in source
     assert "load_current_inventory_ages(db, sku_ids)" in source

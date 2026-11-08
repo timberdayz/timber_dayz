@@ -153,9 +153,7 @@ async def load_warehouse_stock_snapshot(
     return result
 
 
-def resolve_stock_status(
-    stock: dict | None, state_available: bool = True
-) -> str:
+def resolve_stock_status(stock: dict | None, state_available: bool = True) -> str:
     """把一条库存快照翻译成**页面能直接用**的状态词。
 
     - 有可用库存 ⇒ ``in_stock``（在卖）
