@@ -81,15 +81,26 @@ DEFAULT_SQL_ASSET = ROOT / "sql" / "semantic" / "semantic_alias_registry.sql"
 
 #: seed 行的列 —— 与 ``semantic.semantic_field_aliases`` 表和现有
 #: INSERT 段完全一致。
+#:
+#: ⚠ ``platform_code`` 是**平台维度**的别名隔离: 同一个业务事实, 不同平台
+#:   叫不同的列名(买家实付: shopee「买家支付(RMB)」/ tiktok「买家实付金额(RMB)」)。
+#:   不带平台维度就会在取数时抢张。
 SEED_COLUMNS: Tuple[str, ...] = (
     "data_domain",
     "standard_field",
     "raw_alias",
+    "platform_code",
     "normalized_alias",
     "source",
     "confidence",
     "status",
 )
+
+#: seed 覆盖的数据域 —— 与 ``semantic.semantic_field_aliases`` 的既有内容对齐。
+#:
+#: * ``products`` —— 商品报表(口径分「已付款 / 已下单」两套)
+#: * ``orders``   —— 订单报表(金额列成对出现: 原币 + ``(RMB)``)
+SEED_DOMAINS: Tuple[str, ...] = ("products", "orders")
 
 #: 与现有 INSERT 段一致的 ON CONFLICT 处理。
 ON_CONFLICT_CLAUSE = """ON CONFLICT (
@@ -105,9 +116,13 @@ DO UPDATE SET updated_at = NOW(),
               status = EXCLUDED.status;"""
 
 #: 现有 SQL 资产 INSERT 段里一行的形态。
+#:
+#: ``platform_code`` 允许是 ``NULL``(通用别名)或 ``'shopee'`` 这种字符串。
 _SEED_ROW_PATTERN = re.compile(
     r"\(\s*'(?P<data_domain>[^']*)'\s*,\s*'(?P<standard_field>[^']*)'\s*,"
-    r"\s*'(?P<raw_alias>[^']*)'\s*,\s*'(?P<normalized_alias>[^']*)'\s*,"
+    r"\s*'(?P<raw_alias>[^']*)'\s*,"
+    r"\s*(?:'(?P<platform_code>[^']*)'|NULL)\s*,"
+    r"\s*'(?P<normalized_alias>[^']*)'\s*,"
     r"\s*'(?P<source>[^']*)'\s*,"
     r"\s*(?P<confidence>[0-9.]+)\s*,\s*'(?P<status>[^']*)'\s*\)"
 )
@@ -127,37 +142,76 @@ def _escape(value: object) -> str:
     return str(value).replace("'", "''")
 
 
+def _render_platform_code(value: object) -> str:
+    """把平台码渲染成 SQL 字面量(``NULL`` 或 ``'shopee'``)。"""
+    text = str(value or "").strip()
+    if not text:
+        return "NULL"
+    return "'{}'".format(_escape(text))
+
+
 #: 陈旧 builtin 行清理段的标记(用于定位资产里的这一段)。
 PRUNE_MARKER = "-- 陈旧 builtin 行清理"
 
+#: 「其它域(含平台维度)」的清理段标记。
+#:
+#: ⚠ **为什么清理要拆成两段**:
+#: 已执行迁移 20261202 / 20261203 的 fail-closed 自检把
+#: 「``PRUNE_MARKER`` 段里 **3 元组**的个数」当作「字典派生的
+#: **products 域** builtin 行数」, 与表里 ``data_domain='products'``
+#: 的 builtin 行数比对。**已执行迁移不可改** ⇒ 资产必须保持那个形状:
+#:
+#:   * 第一段(``PRUNE_MARKER``)= **products 域**、**3 元组**
+#:     (domain, standard_field, raw_alias) —— products 域没有平台维度行,
+#:     3 元组足以唯一定位;
+#:   * 其它域(当前是 orders, 带平台维度)另起一段, **4 元组**
+#:     (domain, standard_field, raw_alias, platform_code) —— 平台限定行是
+#:     **另一条**记录, 少了 platform_code 会误删。
+#:
+#: 两段都在资产里 ⇒ 迁移整份执行资产 ⇒ 其它域的陈旧 builtin 行照样被清。
+PRUNE_OTHER_DOMAINS_MARKER = "-- 陈旧 builtin 行清理(其它域, 含平台维度)"
 
-def render_prune_sql(rows: Sequence[dict]) -> str:
-    """渲染「陈旧 builtin 行清理」语句。
 
-    字典是唯一事实源 —— ``source='builtin'`` 的行是**字典派生**的,
-        它若不在当前 seed 里, 说明字典已经删掉/改写了这条映射。
-        留着它 = DB 认着一套字典里没有的映射 ⇒ 事实源漂移。
+def _render_prune_segment(
+    marker: str,
+    rows: Sequence[dict],
+    *,
+    with_platform: bool,
+) -> str:
+    """渲染一段「陈旧 builtin 行清理」语句。
 
-        只删 ``builtin`` 行: ``template_confirmed`` / ``manual`` / ``conflict``
-        是**用户确认过**的, 不归字典管, 谁也不许动。
+    ``with_platform=True`` 时键里带 ``platform_code``(平台限定行是**另一条**
+    记录, 少了它会被当成同一条而误删); 否则是 3 元组(products 域没有平台
+    维度行, 且已执行迁移的自检按 3 元组计数)。
     """
     if not rows:
         raise ValueError("没有可生成的 seed 行")
     domains = sorted({str(row["data_domain"]) for row in rows})
+    if with_platform:
+        columns = "current_seed(data_domain, standard_field, raw_alias, platform_code)"
+        row_template = "        ('{data_domain}', '{standard_field}', '{raw_alias}', {platform_code})"
+        extra_match = (
+            "        AND COALESCE(s.platform_code, '') = COALESCE(a.platform_code, '')"
+        )
+    else:
+        columns = "current_seed(data_domain, standard_field, raw_alias)"
+        row_template = "        ('{data_domain}', '{standard_field}', '{raw_alias}')"
+        extra_match = ""
     values = ",\n".join(
-        "        ('{data_domain}', '{standard_field}', '{raw_alias}')".format(
+        row_template.format(
             data_domain=_escape(row["data_domain"]),
             standard_field=_escape(row["standard_field"]),
             raw_alias=_escape(row["raw_alias"]),
+            platform_code=_render_platform_code(row.get("platform_code")),
         )
         for row in rows
     )
     lines = [
-        PRUNE_MARKER,
+        marker,
         "-- 事实源: backend/services/semantic_field_registry.py",
         "-- 字典是唯一事实源: builtin 行不在当前 seed 里 ⇒ 已被字典删掉/改名",
         "-- ⇒ 留着就是事实源漂移。只删 builtin 行(template_confirmed/manual 是用户确认过的)。",
-        "WITH current_seed(data_domain, standard_field, raw_alias) AS (",
+        "WITH {columns} AS (".format(columns=columns),
         "    VALUES",
         values,
         ")",
@@ -171,20 +225,54 @@ def render_prune_sql(rows: Sequence[dict]) -> str:
         "      WHERE s.data_domain = a.data_domain",
         "        AND s.standard_field = a.standard_field",
         "        AND s.raw_alias = a.raw_alias",
-        "  );",
     ]
+    if extra_match:
+        lines.append(extra_match)
+    lines.append("  );")
     return "\n".join(lines) + "\n"
 
 
+def render_prune_sql(rows: Sequence[dict]) -> str:
+    """渲染「陈旧 builtin 行清理」语句(两段: products 域 + 其它域)。
+
+    第一段(``PRUNE_MARKER``)只含 **products 域**、**3 元组** ——
+    已执行迁移 20261202 / 20261203 的自检按这个形状数「字典派生的
+    products 域 builtin 行数」(见 :data:`PRUNE_OTHER_DOMAINS_MARKER` 的说明)。
+
+    第二段含**其它域**(当前是 orders)、**4 元组**(带 platform_code) ——
+    平台限定行是另一条记录, 少了 platform_code 会误删。
+    """
+    if not rows:
+        raise ValueError("没有可生成的 seed 行")
+    products_rows = [row for row in rows if str(row["data_domain"]) == "products"]
+    other_rows = [row for row in rows if str(row["data_domain"]) != "products"]
+    if not products_rows:
+        raise ValueError("products 域没有可生成的 seed 行")
+    segments = [
+        _render_prune_segment(PRUNE_MARKER, products_rows, with_platform=False),
+    ]
+    if other_rows:
+        segments.append(
+            _render_prune_segment(
+                PRUNE_OTHER_DOMAINS_MARKER,
+                other_rows,
+                with_platform=True,
+            )
+        )
+    return "\n".join(segments)
+
+
 def extract_prune_sql(sql_text: str) -> str:
-    """从 SQL 资产里取出「陈旧 builtin 行清理」段(标记到本段结束的 ``;``)。"""
+    """从 SQL 资产里取出「陈旧 builtin 行清理」段(两段一起)。
+
+    两段在资产里**相邻且都在最后**, 所以从标记取到文本末尾即可。
+    ⚠ 注意: 已执行迁移 20261202 / 20261203 只数**第一段**(到第一个 ``;``),
+    所以第一段的形状不能变(见 :data:`PRUNE_OTHER_DOMAINS_MARKER`)。
+    """
     start = sql_text.find(PRUNE_MARKER)
     if start < 0:
         return ""
-    end = sql_text.find(";", start)
-    if end < 0:
-        return sql_text[start:]
-    return sql_text[start : end + 1]
+    return sql_text[start:].rstrip()
 
 
 def render_seed_sql(rows: Sequence[dict]) -> str:
@@ -195,15 +283,17 @@ def render_seed_sql(rows: Sequence[dict]) -> str:
         "-- 本段由 scripts/generate_semantic_alias_seed.py 生成, 请勿手工编辑。",
         "-- 事实源: backend/services/semantic_field_registry.py",
         "INSERT INTO semantic.semantic_field_aliases",
-        "    (data_domain, standard_field, raw_alias, normalized_alias, source, confidence, status)",
+        "    (data_domain, standard_field, raw_alias, platform_code, normalized_alias, "
+        "source, confidence, status)",
         "VALUES",
     ]
     body = [
-        "    ('{data_domain}', '{standard_field}', '{raw_alias}', '{normalized_alias}', "
-        "'{source}', {confidence:.3f}, '{status}')".format(
+        "    ('{data_domain}', '{standard_field}', '{raw_alias}', {platform_code}, "
+        "'{normalized_alias}', '{source}', {confidence:.3f}, '{status}')".format(
             data_domain=_escape(row["data_domain"]),
             standard_field=_escape(row["standard_field"]),
             raw_alias=_escape(row["raw_alias"]),
+            platform_code=_render_platform_code(row.get("platform_code")),
             normalized_alias=_escape(row.get("normalized_alias") or ""),
             source=_escape(row["source"]),
             confidence=float(row["confidence"]),
@@ -226,6 +316,7 @@ def render_normalized_tsv(rows: Sequence[dict]) -> str:
                 "data_domain",
                 "standard_field",
                 "raw_alias",
+                "platform_code",
                 "normalized_alias",
                 "normalized_alias_history",
             )
@@ -238,6 +329,7 @@ def render_normalized_tsv(rows: Sequence[dict]) -> str:
                     str(row["data_domain"]),
                     str(row["standard_field"]),
                     str(row["raw_alias"]),
+                    str(row.get("platform_code") or ""),
                     str(row["normalized_alias"]),
                     str(row.get("normalized_alias_history") or ""),
                 )
@@ -256,20 +348,24 @@ def build_normalized_seed_rows(rows: Sequence[dict]) -> List[dict]:
     这里只做**归一化形态的登记**, 供阶段 C 的 PG 侧归一化匹配按
     (标准字段, 归一化形态) 二元组使用。
     """
-    claimed = {str(row["raw_alias"]) for row in rows}
+    claimed = {
+        (str(row["raw_alias"]), str(row.get("platform_code") or "")) for row in rows
+    }
     extra: List[dict] = []
     for row in rows:
         normalized = str(row["normalized_alias"] or "")
         if not normalized or normalized == str(row["raw_alias"]):
             continue
-        if normalized in claimed:
+        key = (normalized, str(row.get("platform_code") or ""))
+        if key in claimed:
             continue
-        claimed.add(normalized)
+        claimed.add(key)
         extra.append(
             {
                 "data_domain": row["data_domain"],
                 "standard_field": row["standard_field"],
                 "raw_alias": normalized,
+                "platform_code": row.get("platform_code"),
                 "source": row["source"],
                 "confidence": row["confidence"],
                 "status": row["status"],
@@ -280,24 +376,29 @@ def build_normalized_seed_rows(rows: Sequence[dict]) -> List[dict]:
     return extra
 
 
-def parse_seed_rows(sql_text: str) -> List[Tuple[str, str, str, str, str, str]]:
+def parse_seed_rows(sql_text: str) -> List[Tuple[str, str, str, str, str, str, str]]:
     """解析 SQL 资产 INSERT 段里的 seed 行。
 
     只看 ``INSERT INTO semantic.semantic_field_aliases`` 到 ``ON CONFLICT``
     之间, 避免把建表语句里的其它括号当成 seed 行。
+
+    Returns:
+        ``(data_domain, standard_field, raw_alias, platform_code, source,
+        confidence, status)`` 七元组; ``platform_code`` 为空串表示通用别名。
     """
     start = sql_text.find(_INSERT_HEAD)
     if start < 0:
         return []
     end = sql_text.find("ON CONFLICT", start)
     segment = sql_text[start:end] if end > 0 else sql_text[start:]
-    rows: List[Tuple[str, str, str, str, str, str]] = []
+    rows: List[Tuple[str, str, str, str, str, str, str]] = []
     for match in _SEED_ROW_PATTERN.finditer(segment):
         rows.append(
             (
                 match.group("data_domain"),
                 match.group("standard_field"),
                 match.group("raw_alias"),
+                match.group("platform_code") or "",
                 match.group("source"),
                 match.group("confidence"),
                 match.group("status"),
@@ -306,8 +407,8 @@ def parse_seed_rows(sql_text: str) -> List[Tuple[str, str, str, str, str, str]]:
     return rows
 
 
-def _row_key(row: object) -> Tuple[str, str, str]:
-    """取一行的 (data_domain, standard_field, raw_alias) 三元组。
+def _row_key(row: object) -> Tuple[str, str, str, str]:
+    """取一行的 (data_domain, standard_field, raw_alias, platform_code) 四元组。
 
     同时支持生成侧的 dict 与解析侧的 tuple。
     """
@@ -316,15 +417,21 @@ def _row_key(row: object) -> Tuple[str, str, str]:
             str(row.get("data_domain") or ""),
             str(row.get("standard_field") or ""),
             str(row.get("raw_alias") or ""),
+            str(row.get("platform_code") or ""),
         )
-    data_domain, standard_field, raw_alias = list(row)[:3]
-    return (str(data_domain), str(standard_field), str(raw_alias))
+    data_domain, standard_field, raw_alias, platform_code = list(row)[:4]
+    return (
+        str(data_domain),
+        str(standard_field),
+        str(raw_alias),
+        str(platform_code or ""),
+    )
 
 
 def diff_seed_rows(
     generated: Sequence[dict],
-    existing: Sequence[Tuple[str, str, str, str, str, str]],
-) -> Tuple[List[Tuple[str, str, str]], List[Tuple[str, str, str]]]:
+    existing: Sequence[Tuple[str, ...]],
+) -> Tuple[List[Tuple[str, str, str, str]], List[Tuple[str, str, str, str]]]:
     """比较生成结果与现有 seed 行。
 
     Returns:
@@ -374,7 +481,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    rows = build_domain_alias_records("products")
+    rows: List[dict] = []
+    for domain in SEED_DOMAINS:
+        rows.extend(build_domain_alias_records(domain))
+    rows.sort(
+        key=lambda row: (
+            str(row.get("data_domain") or ""),
+            str(row.get("standard_field") or ""),
+            str(row.get("platform_code") or ""),
+            str(row.get("raw_alias") or ""),
+        )
+    )
 
     if args.check:
         asset_path = Path(args.sql_asset)
@@ -397,9 +514,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         print(f"[语义别名 seed] 差异: 缺失 {len(missing)} 条, 多余 {len(extra)} 条")
         for key in missing:
-            print(f"  - 缺失: ('{key[0]}', '{key[1]}', '{key[2]}')")
+            print(
+                "  - 缺失: ('{0}', '{1}', '{2}', platform={3})".format(
+                    key[0], key[1], key[2], key[3] or "NULL"
+                )
+            )
         for key in extra:
-            print(f"  - 多余: ('{key[0]}', '{key[1]}', '{key[2]}')")
+            print(
+                "  - 多余: ('{0}', '{1}', '{2}', platform={3})".format(
+                    key[0], key[1], key[2], key[3] or "NULL"
+                )
+            )
         return 1
 
     if args.normalized_stdout:

@@ -334,8 +334,8 @@ def test_generator_stdout_is_compatible_with_sql_asset_shape(generator):
 
     assert "INSERT INTO semantic.semantic_field_aliases" in sql_text
     assert (
-        "    (data_domain, standard_field, raw_alias, normalized_alias, "
-        "source, confidence, status)" in sql_text
+        "    (data_domain, standard_field, raw_alias, platform_code, "
+        "normalized_alias, source, confidence, status)" in sql_text
     )
     assert "ON CONFLICT (" in sql_text
     assert "COALESCE(platform_code, '')" in sql_text

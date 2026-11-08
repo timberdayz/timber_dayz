@@ -19,6 +19,8 @@ from modules.core.logger import get_logger
 from backend.services.semantic_field_registry import (
     CALIBER_PAID,
     CALIBER_PLACED,
+    DOMAIN_CLOSED_ALIAS_DOMAINS,
+    DOMAIN_PLATFORM_SEMANTIC_ALIASES,
     DOMAIN_SEMANTIC_ALIASES,
     LEGACY_CALIBER_ALIAS_CONFIDENCE,
     PLATFORM_CALIBER_HISTORY,
@@ -67,7 +69,7 @@ def detect_alias_caliber(raw_alias: Optional[str]) -> Optional[str]:
     return None
 
 
-def _products_relevant_standard_fields(data_domain: str) -> List[str]:
+def _relevant_standard_fields(data_domain: str) -> List[str]:
     """该数据域用到的标准字段集合。
 
     两个来源的并集:
@@ -96,28 +98,50 @@ def build_domain_alias_records(data_domain: str = "products") -> List[AliasRecor
 
     1. **域限定别名表**(:data:`DOMAIN_SEMANTIC_ALIASES`) —— 权威。
        它登记的才是**真实表头**(「商品编号」「销售额（已付款订单）」…)。
-    2. **全局别名表**(:data:`SEMANTIC_FIELD_ALIASES`) —— 只取该域用到的
+    2. **平台限定别名表**(:data:`DOMAIN_PLATFORM_SEMANTIC_ALIASES`) ——
+       同业务、不同平台不同列名的场景(orders 域: 买家实付在 shopee 叫
+       「买家支付(RMB)」、在 tiktok 叫「买家实付金额(RMB)」)。
+       这些行带 ``platform_code`` ⇒ PG 侧 ``semantic.resolve_alias``
+       会把**平台精确匹配**的行排在通用行前面。
+    3. **全局别名表**(:data:`SEMANTIC_FIELD_ALIASES`) —— 只取该域用到的
        标准字段, 补上「销售额」「订单数」这类**裸名**。
 
-    两条硬规则:
+    三条硬规则:
 
     * **口径不许混**: 全局别名若带口径词、且与该标准字段声明的 ``caliber``
       相反, 直接丢弃(实测两套口径的销售额平均差 5.15%, 混了就是错数);
     * **一个列名只认一个标准字段**: 同一个别名被两个标准字段认领时,
       域限定的赢, 其余丢弃(否则 PG 侧解析结果不确定)。
+      平台限定的行按 ``(platform_code, 别名)`` 单独判重 ——
+      同一个列名在 shopee 与 tiktok 认领不同字段是**合法的**;
+    * **封闭域不补裸名**(:data:`DOMAIN_CLOSED_ALIAS_DOMAINS`):
+      orders 域的每个金额列都有「原币 + (RMB)」两列, 裸名指的是**原币列**
+      ⇒ 把全局裸名补进来 = 让取数命中原币 = 混币种。
+      orders 域的列名由域限定表 + 平台限定表**穷举**。
 
     Returns:
         记录列表, 每条含 ``data_domain`` / ``standard_field`` / ``raw_alias`` /
-        ``source`` / ``confidence`` / ``status`` / ``normalized_alias`` /
-        ``normalized_alias_history``。
+        ``platform_code`` / ``source`` / ``confidence`` / ``status`` /
+        ``normalized_alias`` / ``normalized_alias_history``。
     """
     domain_aliases = DOMAIN_SEMANTIC_ALIASES.get(data_domain, {})
-    relevant_fields = _products_relevant_standard_fields(data_domain)
+    platform_aliases = DOMAIN_PLATFORM_SEMANTIC_ALIASES.get(data_domain, {})
+    relevant_fields = _relevant_standard_fields(data_domain)
+    closed_domain = data_domain in DOMAIN_CLOSED_ALIAS_DOMAINS
+
+    #: 登记了平台限定别名的标准字段 —— 这些字段**不再**登记通用别名,
+    #: 否则同一个列名会被两个标准字段认领(取数结果不确定)。
+    platform_fields: set = set()
+    for per_platform in platform_aliases.values():
+        platform_fields |= set(per_platform.keys())
 
     claimed: Dict[str, str] = {}
-    ordered: List[Tuple[str, str]] = []
+    claimed_by_platform: Dict[Tuple[str, str], str] = {}
+    ordered: List[Tuple[str, str, Optional[str]]] = []
 
-    def _claim(standard_field: str, raw_alias: Any) -> None:
+    def _claim(
+        standard_field: str, raw_alias: Any, platform_code: Optional[str] = None
+    ) -> None:
         alias = str(raw_alias or "").strip()
         if not alias:
             return
@@ -126,37 +150,61 @@ def build_domain_alias_records(data_domain: str = "products") -> List[AliasRecor
         # ⇒ .N 是第 N 块, 把它算成"去重版"就是静默失真。
         if is_block_column_alias(alias):
             return
-        owner = claimed.get(alias)
-        if owner is not None:
-            # 已被别的标准字段认领 ⇒ 不再重复认领(域限定优先)。
-            return
-        claimed[alias] = standard_field
-        ordered.append((standard_field, alias))
+        if platform_code is None:
+            owner = claimed.get(alias)
+            if owner is not None:
+                # 已被别的标准字段认领 ⇒ 不再重复认领(域限定优先)。
+                return
+            claimed[alias] = standard_field
+        else:
+            key = (platform_code, alias)
+            owner = claimed_by_platform.get(key)
+            if owner is not None:
+                return
+            claimed_by_platform[key] = standard_field
+        ordered.append((standard_field, alias, platform_code))
 
     # 1) 域限定别名(权威口径)
     for standard_field, aliases in domain_aliases.items():
+        # 有平台限定别名的字段 ⇒ 通用别名**不登记**(否则同一列名会被两个
+        # 标准字段认领, 取数结果不确定)。
+        if standard_field in platform_fields:
+            continue
         for alias in aliases:
             _claim(standard_field, alias)
 
-    # 2) 全局别名(补裸名), 只取该域用到的字段, 且不许与口径冲突
-    for standard_field in relevant_fields:
-        field_caliber = SEMANTIC_FIELD_DEFINITIONS.get(standard_field, {}).get(
-            "caliber"
-        )
-        for alias in SEMANTIC_FIELD_ALIASES.get(standard_field, []):
-            alias_caliber = detect_alias_caliber(alias)
-            if field_caliber and alias_caliber and field_caliber != alias_caliber:
+    # 2) 平台限定别名(同业务、不同平台不同列名)
+    #    ⚠ 结构是「平台 → {标准字段: 别名}」——
+    #      平台名是**外层**键, 标准字段在里面。
+    for platform_code, per_platform in platform_aliases.items():
+        for standard_field, aliases in per_platform.items():
+            for alias in aliases:
+                _claim(standard_field, alias, platform_code=platform_code)
+
+    # 3) 全局别名(补裸名), 只取该域用到的字段, 且不许与口径冲突。
+    #    封闭域(orders)**不补** —— 裸名指的是原币列, 补进来就是混币种。
+    if not closed_domain:
+        for standard_field in relevant_fields:
+            if standard_field in platform_fields:
                 continue
-            _claim(standard_field, alias)
+            field_caliber = SEMANTIC_FIELD_DEFINITIONS.get(standard_field, {}).get(
+                "caliber"
+            )
+            for alias in SEMANTIC_FIELD_ALIASES.get(standard_field, []):
+                alias_caliber = detect_alias_caliber(alias)
+                if field_caliber and alias_caliber and field_caliber != alias_caliber:
+                    continue
+                _claim(standard_field, alias)
 
     records: List[AliasRecord] = []
-    for standard_field, alias in sorted(ordered):
+    for standard_field, alias, platform_code in sorted(ordered):
         normalized = normalize_semantic_alias(alias)
         records.append(
             {
                 "data_domain": data_domain,
                 "standard_field": standard_field,
                 "raw_alias": alias,
+                "platform_code": platform_code,
                 "source": ALIAS_SEED_SOURCE,
                 "confidence": (
                     LEGACY_CALIBER_ALIAS_CONFIDENCE

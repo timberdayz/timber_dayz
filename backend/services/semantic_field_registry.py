@@ -247,21 +247,39 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "aliases": ["跳失率", "bounce rate"],
     },
     "sales_amount": {
-        "label": "销售额",
+        "label": "销售额(已废止)",
         "kind": "metric",
         "domain": "orders",
         "caliber": CALIBER_PAID,
         "hash_eligible": False,
         "default_hash": False,
+        # [*] 2026-11-08 废止: 源表已无「销售额/成交金额」这类列
+        # ⇒ 该字段永远是 0 且与 `paid_amount` 抢同一个业务含义
+        # ⇒ 保留字段但不再取数(见 semantic_field_registry 里的
+        # `ORDER_RETIRED_FIELDS`)。
+        "retired": True,
         "aliases": ["sales amount", "revenue", "sales", "销售额", "销售金额"],
     },
     "sales_volume": {
         "label": "销量",
         "kind": "metric",
+        # [*] 2026-11-08: 订单域的件数列「销售数量」归 ``sales_volume``。
+        # 理由: 契约(``DEFAULT_CONTRACTS["orders"]``)、模板确认、历史别名表
+        # 三处口径一致 ⇒ 语义键不能为了与视图**物理列名**(``product_quantity``)
+        # 对齐就改掉 —— 语义键是口径, 列名只是历史遗留。
+        # (products 域的「件数(已付款订单)」仍登记在 ``DOMAIN_SEMANTIC_ALIASES``,
+        #  两个域各管各的别名, 不存在跨域污染。)
         "domain": "orders",
         "caliber": CALIBER_PAID,
         "hash_eligible": False,
         "default_hash": False,
+        # ⚠ 「销售数量」实测是**行级件数**(同一订单内取值不同)⇒ 只做登记,
+        # 不参与「第 2+ 行清空」(见 ``ORDER_LEVEL_QUANTITY_FIELDS``)。
+        "order_level_quantity": True,
+        # ⚠「销售数量」是**真实表头**(products 域的商品报表里也有这一列)
+        # ⇒ 必须留在全局裸名里, 否则 products 域认领不到它。
+        # orders 域是**封闭域** ⇒ 不会把全局裸名补进去(裸名在 orders 域
+        # 指的是原币列), orders 域靠 ``ORDER_SEMANTIC_ALIASES`` 逐字登记。
         "aliases": ["sales volume", "qty", "units sold", "销量", "销售数量"],
     },
     "paid_amount": {
@@ -270,6 +288,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "orders",
         "hash_eligible": False,
         "default_hash": False,
+        "order_level_amount": True,
         "aliases": ["实付金额", "paid amount", "buyer paid amount"],
     },
     "profit": {
@@ -278,6 +297,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "orders",
         "hash_eligible": False,
         "default_hash": False,
+        "order_level_amount": True,
         "aliases": ["利润", "profit"],
     },
     "purchase_amount": {
@@ -286,6 +306,7 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "products",
         "hash_eligible": False,
         "default_hash": False,
+        "order_level_amount": True,
         "aliases": ["采购金额", "purchase amount"],
     },
     "platform_commission": {
@@ -294,7 +315,160 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
         "domain": "orders",
         "hash_eligible": False,
         "default_hash": False,
+        "order_level_amount": True,
         "aliases": ["平台佣金", "platform commission", "commission"],
+    },
+    # ── orders 域的费用/金额字段(2026-11-08) ─────────────
+    #
+    # 为什么这里新增一批字段定义
+    # --------------------
+    # 原先 orders 域的取数写在 `sql/semantic/orders_atomic.sql`
+    # 的手写 COALESCE 链里, 而字典里只有 `platform_commission`
+    # 一个费用字段 ⇒ 字典不能完整描述 orders 域
+    # 到底有哪些列, 费用类字段全部落空。
+    #
+    # 每个字段的 `aliases` 只登记**真实源表列名**。
+    #
+    # ⚠ 关键口径: 源表里每个金额列都有**两列**:
+    #   `买家支付`(原币, 平均 240.11) 与 `买家支付(RMB)`(人民币, 平均 72.03)
+    # 实测(2026-11 开发库): 两列**均非零且值相差约 3 倍** ⇒
+    # 它们是**两个不同的业务事实**(原币值 vs 折算人民币值)。
+    # 本字段的取数口径统一为**人民币口径**⇒ 只登记 `(RMB)` 变体。
+    # (原币列不接任何标准字段 ⇒ 避免混币种)。
+    "order_original_amount": {
+        "label": "订单原始金额",
+        "kind": "metric",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        "order_level_amount": True,
+        "aliases": [
+            "订单原始金额",
+            "order original amount",
+            "original amount",
+        ],
+    },
+    "warehouse_operation_fee": {
+        "label": "仓库操作费",
+        "kind": "metric",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        "order_level_amount": True,
+        "aliases": [
+            "仓库操作费",
+            "warehouse operation fee",
+            "warehouse fee",
+        ],
+    },
+    "shipping_fee": {
+        "label": "运费",
+        "kind": "metric",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        "order_level_amount": True,
+        "aliases": ["运费", "shipping fee", "logistics fee"],
+    },
+    "promotion_fee": {
+        "label": "推广费",
+        "kind": "metric",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        "order_level_amount": True,
+        "aliases": ["推广费", "promotion fee", "campaign fee"],
+    },
+    "platform_deduction_fee": {
+        "label": "平台扣费",
+        "kind": "metric",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        "order_level_amount": True,
+        "aliases": ["平台扣费", "platform deduction fee", "deduction fee"],
+    },
+    "platform_voucher": {
+        "label": "平台代金券",
+        "kind": "metric",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        "order_level_amount": True,
+        "aliases": ["平台代金券", "platform voucher", "voucher amount"],
+    },
+    "platform_service_fee": {
+        "label": "平台服务费",
+        "kind": "metric",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        "order_level_amount": True,
+        "aliases": ["平台服务费", "platform service fee", "service fee"],
+    },
+    "estimated_settlement_amount": {
+        "label": "预估回款金额",
+        "kind": "metric",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        "order_level_amount": True,
+        "aliases": [
+            "预估回款金额",
+            "estimated settlement amount",
+            "estimated settlement",
+        ],
+    },
+    "settled_amount": {
+        "label": "已结算金额",
+        "kind": "metric",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        "order_level_amount": True,
+        "aliases": ["已结算金额", "settled amount"],
+    },
+    # ── orders 域的量类与卖家侧字段(2026-11-08) ──────────────────
+    # ── orders 域的维度字段(2026-11-08) ───────────────────────────
+    # 以前 orders 域的维度列名只散落在视图的手写 COALESCE 链里,
+    # 字典里没有对应标准字段 ⇒ 巡检与模板推断都看不见它们。
+    "order_status": {
+        "label": "订单状态",
+        "kind": "dimension",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        # ⚠ **只留英文别名**: 中文「订单状态」是 orders 域的**真实表头**,
+        # 由 ``ORDER_SEMANTIC_ALIASES`` 逐字登记(orders 是封闭域)。
+        # 放进全局别名表 = 任何域的「订单状态」列都会被认成身份键
+        # (实测: products 域的「订单状态」被误认 ⇒ 污染身份推断)。
+        # ⚠ **状态类字段不参与语义推断**(:func:`is_inferable_semantic_key`):
+        #   状态类列名(「状态」「订单状态」…)一旦被认成语义键, 就会进
+        #   身份/去重字段 ⇒ 状态一变就算新行 ⇒ 污染身份推断。
+        #   既有守护: backend/tests/test_workbench_template_update_flow.py
+        #   ⇒ 但它**仍然**登记在 orders 域别名表里(视图要能取到订单状态)。
+        "inferable": False,
+        "aliases": ["order status"],
+    },
+    "product_sku": {
+        "label": "商品 SKU",
+        "kind": "dimension",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        # ⚠ 同 ``order_status``: 中文「商品SKU」只登记在 orders 域限定表里,
+        # 放全局会让别的域的「商品SKU」列被误认成身份键。
+        "aliases": ["product sku"],
+    },
+    "seller_voucher": {
+        "label": "卖家代金券",
+        "kind": "metric",
+        "domain": "orders",
+        "hash_eligible": False,
+        "default_hash": False,
+        "order_level_amount": True,
+        # ⚠ 卖家自己发的券 ⇒ **不是平台成本**, 不进 platform_total_cost_itemized。
+        "aliases": ["seller voucher", "seller coupon"],
     },
     "live_gmv": {
         "label": "直播 GMV",
@@ -581,9 +755,13 @@ SEMANTIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
     "refund_amount": {
         "label": "退款金额",
         "kind": "metric",
-        "domain": "products",
+        # [*] 2026-11-08: products 与 orders **两个域**都有「退款金额」⇒
+        # 归属改成 common(域限定别名表各自登记真实列名)。
+        # 以前写成 products ⇒ orders 域的「退款金额(RMB)」无处安放。
+        "domain": "common",
         "hash_eligible": False,
         "default_hash": False,
+        "order_level_amount": True,
         "aliases": ["退款金额", "退款额"],
     },
     "refunded_item_count": {
@@ -709,6 +887,19 @@ SEMANTIC_FIELD_DESCRIPTIONS: Dict[str, str] = {
     "video_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
     "video_attributed_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
     "video_indirect_gmv": "渠道归因系统语义指标，不参与 Data Hash。",
+    # ── orders 域(2026-11-08) ───────────────────────────────────────
+    "order_original_amount": "订单未减优惠前的金额(人民币口径)。",
+    "warehouse_operation_fee": "仓库操作费(人民币口径)。",
+    "shipping_fee": "卖家承担的运费(人民币口径)。平台间列名不同。",
+    "promotion_fee": "广告/推广成本(人民币口径)。",
+    "platform_deduction_fee": "平台扣费(人民币口径)。目前源表无对应列。",
+    "platform_voucher": "平台发放的代金券(人民币口径)。",
+    "platform_service_fee": "平台服务费(人民币口径)。",
+    "seller_voucher": "卖家自己发放的代金券(人民币口径)。不是平台成本。",
+    "estimated_settlement_amount": "预估回款金额(人民币口径)。",
+    "settled_amount": "已结算金额(人民币口径)。",
+    "order_status": "订单状态维度。",
+    "product_sku": "卖家侧商品 SKU(与平台 SKU 不同)。",
 }
 
 
@@ -776,51 +967,352 @@ DOMAIN_COLUMN_SEMANTIC_OVERRIDES: Dict[str, Dict[str, str]] = {
 #     于是「页面浏览数」明明有别名(page_views), 推断时却认不出来。
 #     现在统一搬到注册表(唯一口径), 推断与契约共用同一份。
 ORDER_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
-    "order_id": ("订单编号", "订单号", "order_id", "order no", "order_no", "order id"),
-    "shop_id": ("店铺", "店铺id", "shop_id", "shop id", "shop_name", "shop name"),
-    "order_date": (
-        "下单时间",
-        "下单日期",
-        "订单日期",
-        "订单时间",
-        "order_date",
-        "order time",
-        "order_time",
+    # ── 身份与维度 ────────────────────────────────────────────────────
+    # 这些列名在两个平台**同名**, 所以按通用别名登记即可(逐字匹配)。
+    "order_id": (
+        "订单编号",
+        "订单号",
+        "order_id",
+        "order_no",
+        "order no",
+        "order id",
     ),
-    "sales_volume": (
-        "销售数量",
-        "出库数量",
-        "销量",
-        "sold_qty",
-        "sales_volume",
-        "quantity",
+    # 「店铺」是源表里的**店铺身份列**(存的是店铺名, 由身份解析层再归一);
+    # 模板里用户也确认过「店铺 → shop_id」⇒ 与 orders 域契约的 required 一致。
+    "shop_id": (
+        "店铺",
+        "店铺ID",
+        "shop_id",
+        "shop id",
+        "shop_name",
+        "shop name",
     ),
-    "paid_amount": (
-        "买家支付",
-        "买家支付(rmb)",
-        "买家支付（rmb）",
-        "实付金额",
-        "buyer_paid",
-        "paid_amount",
-    ),
-    "profit": (
-        "利润",
-        "利润(rmb)",
-        "利润（rmb）",
-        "profit",
-        "profit_amount",
-        "profit_rmb",
-    ),
+    "order_status": ("订单状态",),
+    "order_date": ("下单时间", "order_date", "order time", "order_time"),
+    "product_id": ("产品ID", "商品ID"),
+    "product_name": ("商品名称",),
+    "product_sku": ("商品SKU",),
+    "platform_sku": ("平台SKU",),
+    "sku_id": ("SKU ID",),
+    # ── 量类 ────────────────────────────────────────────────────────
+    # 「销售数量」= 订单里的商品件数(两个平台都叫这个名字)。
+    # ⚠ 归 ``sales_volume`` 而不是另起一个字段 ——
+    #   orders 域的**契约**(``DEFAULT_CONTRACTS["orders"]``)要求的就是
+    #   ``sales_volume``, 用户在 weekly 模板里也确认过「销售数量 → sales_volume」
+    #   ⇒ 三处口径必须一致, 不能为了与视图列名(``product_quantity``)对齐
+    #   就把语义键改掉。
+    # 「出库数量」是**另一个事实**(已出库件数) ⇒ 不并进来, 落巡检候选。
+    "sales_volume": ("销售数量", "sold_qty", "sales_volume", "quantity"),
+    "buyer_count": ("买家数",),
+    # ── 金额(只登 (RMB) 变体!) ──────────────────────────────────────
+    #
+    # ⚠ 重要: 源表金额列**成对出现**:
+    #   `买家支付`(原币) 与 `买家支付(RMB)`(人民币)
+    # 实测(2026-11 开发库, shopee monthly 29629 行):
+    #   买家支付: 原币均值 240.11 / (RMB) 均值 72.03(非零行 27672, 相等仅 391)
+    #   利润:     原币均值  27.98 / (RMB) 均值  11.06
+    #   仓库操作费: 原币均值 11.56 / (RMB) 均值  4.99
+    #   订单原始金额: 原币均值 269.53 / (RMB) 均值 78.72
+    #   卖家支付运费: 原币均值 -40.36 / (RMB) 均值 -14.13
+    #   广告成本:   原币均值  20.51 / (RMB) 均值   6.71
+    # ⇒ 裸名列与 (RMB) 列是**两个不同的业务事实** ⇒ 裸名列(原币)
+    #   **不接任何标准字段**, 只登 (RMB) 变体 ⇒ 杜绝混币种。
+    #
+    # ⚠ 因此 orders 域不能用「剔币种后缀」的归一化匹配:
+    #   `normalize_alias("X(RMB)")` == `normalize_alias("X")` == "x"
+    #   ⇒ 两列被压成同一个 key ⇒ resolve_alias_normalized 会在两个
+    #     **不同业务事实**之间随机取一个
+    # ⇒ orders 域取数**必须逐字**匹配(``semantic.resolve_alias``),
+    #   且平台间同业务不同列名的场景用 ``platform_code`` 维度区分。
+    # ⚠ 英文别名也登记在这里(不是平台维度): 两个平台的**中文/RMB**
+    #   列名不同 ⇒ 走 ``ORDER_PLATFORM_ALIASES``; 而**英文**别名
+    #   两平台一致 ⇒ 走通用行即可。
+    "paid_amount": ("paid_amount", "buyer_paid"),
+    "profit": ("利润(RMB)", "profit", "profit_amount", "profit_rmb"),
+    "purchase_amount": ("采购成本(RMB)",),
+    "refund_amount": ("退款金额(RMB)",),
     "estimated_settlement_amount": (
-        "预估回款金额",
-        "预估回款金额(rmb)",
-        "预估回款金额（rmb）",
+        "预估回款金额(RMB)",
         "estimated_settlement",
         "estimated_settlement_amount",
     ),
-    "settlement_time": ("结算时间", "settlement_time", "settlement date"),
-    "cost_profit_rate": ("成本利润率", "cost_profit_rate"),
+    # 「已结算金额」只有 shopee 有(tiktok 侧是「结算时间」)⇒
+    # 通用登记即可(tiktok 行压根没这一列, 不会误命中)。
+    "settled_amount": ("已结算金额(RMB)",),
+    # ── 费用类 ─────────────────────────────────────────────────────
+    "warehouse_operation_fee": ("仓库操作费(RMB)",),
+    "promotion_fee": ("广告成本(RMB)",),
+    # ── 平台间同业务不同列名的字段一律走 ORDER_PLATFORM_ALIASES ─────
 }
+
+#: [*] 2026-11-08 废止的 orders 域标准字段。
+#:
+#: `sales_amount`(销售额)在源表已**无对应列**(源表金额列是
+#: 「买家支付(RMB)」「订单原始金额(RMB)」, 没有「销售额/成交金额」)
+#: ⇒ 它恒为 0 且与 `paid_amount` 抢同一个业务含义 ⇒ 废止。
+#:
+#: 废止的字段**从视图的取数链里拉掉**, 不再输出 0 伪值。
+ORDER_RETIRED_FIELDS: frozenset = frozenset({"sales_amount"})
+
+
+#: [*] orders 域的**平台分别列名**。
+#:
+#: 源表的两个平台**同业务、不同列名**:
+#:
+#: * 平台佣金 —— shopee `Shopee平台佣金(RMB)` / tiktok `TikTok 平台佣金(RMB)`
+#: * 运费     —— shopee `卖家支付运费(RMB)` / tiktok `商家运费(RMB)`
+#:
+#: 它们必须分平台登记 ⇒ 否则取数时会抢张(两个别名都非空,
+#: 而它们是不同业务事实)。
+ORDER_PLATFORM_ALIASES: Dict[str, Dict[str, tuple[str, ...]]] = {
+    # ── shopee ─────────────────────────────────────────────────────
+    "shopee": {
+        # 买家实付(RMB)。shopee 叫「买家支付」, tiktok 叫「买家实付金额」。
+        "paid_amount": ("买家支付(RMB)",),
+        # 平台自己收的佣金。shopee 叫「Shopee平台佣金」, tiktok 叫「TikTok 平台佣金」。
+        "platform_commission": ("Shopee平台佣金(RMB)",),
+        # 卖家承担的运费。shopee 叫「卖家支付运费」, tiktok 叫「商家运费」。
+        "shipping_fee": ("卖家支付运费(RMB)",),
+        # 平台发的券。shopee 的「Shopee voucher」是平台侧券,
+        # 「卖家voucher」是卖家侧券 ⇒ 后者不进平台成本(见 seller_voucher)。
+        "platform_voucher": ("Shopee voucher(RMB)",),
+        # 平台服务费。只有 shopee 有这一列。
+        "platform_service_fee": ("服务费(RMB)",),
+        # 订单未减优惠前的金额。
+        "order_original_amount": ("订单原始金额(RMB)",),
+        "seller_voucher": ("卖家voucher(RMB)",),
+    },
+    # ── tiktok ─────────────────────────────────────────────────────
+    "tiktok": {
+        "paid_amount": ("买家实付金额(RMB)",),
+        "platform_commission": ("TikTok 平台佣金(RMB)",),
+        "shipping_fee": ("商家运费(RMB)",),
+        # ⚠ tiktok 侧**没有**「订单原始金额」这一列, 只有「产品原价」与
+        #   「产品折后价格」。二者是**不同的事实**(折后价是打过折的金额)。
+        #   「订单原始金额」= 未减优惠前的金额 ⇒ 对应「产品原价」。
+        #   这里是有依据的判断, 不是猜测 —— 折后价已被证实是**折后**金额。
+        "order_original_amount": ("产品原价(RMB)",),
+    },
+}
+
+#: [*] orders 域的**平台分别列名**。
+#:
+#: 源表的两个平台**同业务、不同列名**:
+#:
+#: * 买家实付 —— shopee `买家支付(RMB)` / tiktok `买家实付金额(RMB)`
+#: * 平台佣金 —— shopee `Shopee平台佣金(RMB)` / tiktok `TikTok 平台佣金(RMB)`
+#: * 运费     —— shopee `卖家支付运费(RMB)` / tiktok `商家运费(RMB)`
+#:
+#: 它们必须**分平台**登记 ⇒ 否则取数时会抢张(两个别名都非空,
+#: 而它们是不同业务事实)。
+#:
+#: ⚠ 平台维度的别名在 PG 侧靠 ``semantic.resolve_alias(..., platform_code)``
+#:   的排序命中: 平台精确匹配的行排在通用行前面。
+DOMAIN_PLATFORM_SEMANTIC_ALIASES: Dict[str, Dict[str, Dict[str, tuple[str, ...]]]] = {
+    "orders": ORDER_PLATFORM_ALIASES,
+}
+
+
+#: [*] **别名已穷举**的域 —— 不再补全局裸名别名。
+#:
+#: 为什么 orders 域必须「封闭」:
+#: ----------------------
+#: 全局别名表是给 products 域补裸名用的(「销售额（已付款订单）」↔「销售额」)。
+#: 但 orders 域的每个金额列都有**原币 + (RMB)** 两列, 裸名指的是**原币列**
+#: ⇒ 把全局裸名补进 orders 域 = 让取数命中原币列 = 混币种。
+#:
+#: ⇒ orders 域的列名清单由 :data:`ORDER_SEMANTIC_ALIASES` 与
+#:   :data:`ORDER_PLATFORM_ALIASES` **穷举**, 不再从全局表补。
+DOMAIN_CLOSED_ALIAS_DOMAINS: frozenset = frozenset({"orders"})
+
+
+#: [*] 平台成本(platform_total_cost_itemized)的组成项。
+#:
+#: 口径(与 ``sql/semantic/orders_atomic.sql`` 的出口表达式一一对应):
+#: 运费 + 推广费 + 平台佣金 + 平台扣费 + 平台代金券 + 平台服务费。
+#:
+#: ⚠ 「仓库操作费」**不在**这里 —— 它由下游
+#:   (``mart.b_cost_shop_month.total_cost_b``)单独相加, 放进来会重复计。
+#:
+#: ⚠ 「平台扣费」目前**没有对应源列**(见巡检告警) ⇒ 已知项数恒 ≤ 5。
+#:   这不是 bug, 是**如实反映**: 平台成本口径里有一项取不到数。
+ORDER_PLATFORM_COST_COMPONENT_FIELDS: tuple[str, ...] = (
+    "shipping_fee",
+    "promotion_fee",
+    "platform_commission",
+    "platform_deduction_fee",
+    "platform_voucher",
+    "platform_service_fee",
+)
+
+
+#: [*] orders 域的标准字段全集 —— 巡检与视图的共用清单。
+#:
+#: 从字典**派生**(不手写) ⇒ 字典增删字段, 这里自动跟随。
+#: 源表实测(2026-11): orders 域取数字段覆盖 12 个。
+def _order_standard_fields() -> tuple[str, ...]:
+    """orders 域的标准字段全集(从字典派生)。"""
+    fields = set(ORDER_SEMANTIC_ALIASES.keys())
+    for per_platform in ORDER_PLATFORM_ALIASES.values():
+        fields |= set(per_platform.keys())
+    for key, meta in SEMANTIC_FIELD_DEFINITIONS.items():
+        if str(meta.get("domain") or "") == "orders":
+            fields.add(key)
+    fields -= set(ORDER_RETIRED_FIELDS)
+    return tuple(sorted(fields))
+
+
+ORDER_STANDARD_FIELDS: tuple[str, ...] = _order_standard_fields()
+
+
+# ── 订单级字段的派生(阶段 4 · 入库归一化) ─────────────────────────────
+#
+# 为什么放在字典里
+# ----------------
+# ``backend/services/orders_ingestion_normalizer.py`` 以前手写了一份 40+ 条的
+# 「订单级金额表头」清单, 与字典各写各的 ⇒
+#   * 字典加字段 ⇒ 清单不会跟着变, 漏掉的列会被**重复计入**
+#     (多 SKU 订单的订单级金额按行累加 ⇒ 虚增);
+#   * 清单里还混着一批**已经写错的表头**(如「预计回款金额(RMB)」, 真实列名是
+#     「预估回款金额(RMB)」) ⇒ 真实列一直没被清空。
+#
+# ⇒ 这里从字典**派生**, normalizer 只 import(单向依赖, 不构成循环 import)。
+#
+# 派生规则
+# --------
+# 1. **候选标准字段** = ``SEMANTIC_FIELD_DEFINITIONS`` 里带订单级标记
+#    (``order_level_amount`` / ``order_level_quantity``)的字段, 且口径**属于
+#    orders 域**(或 common 域且在 orders 别名表登记过)。
+#    其它域的字段不纳入 —— 例: ``purchase_amount``(采购成本)的 domain 是
+#    products, 实测(2026-11 开发库)它在同一订单内**逐行不同**(vary=655/5372
+#    个多行订单)⇒ 是**行级**成本, 清空第 2+ 行会少算。
+# 2. **源表列名** = 字段的语义键 + 字段别名 + ``ORDER_SEMANTIC_ALIASES`` /
+#    ``ORDER_PLATFORM_ALIASES`` 里登记的真实列名(含各平台列名)。
+# 3. **列名变体** = 裸表头 + ``(RMB)`` 变体 + 语义键/英文别名的 snake_case
+#    变体 —— 源表金额列**成对出现**「X」(原币) 与「X(RMB)」(人民币)。
+#
+# ⚠ 粒度实测(2026-11 开发库, 判定方法: 多行订单里该列的取值形态)
+#    * ``head_only``(只有首行有值)= 源表**合并单元格** ⇒ **订单级**
+#    * ``repeat_same``(每行同值)/ ``vary``(每行不同)= **行级**
+#    ⇒ 只有订单级的列才能按订单去重(清空第 2+ 行)。
+
+#: 源表金额列的**币种后缀**(人民币口径)。
+ORDER_LEVEL_CURRENCY_SUFFIX = "(RMB)"
+
+#: [*] 订单级金额列的**平台级例外**: ``(平台, 语义键)`` —— 该平台该字段的
+#: 源列是**行级**取值, 不能按订单去重(清空第 2+ 行会少算)。
+#:
+#: 目前只有一处:
+#:
+#: * ``tiktok`` 的「产品原价(RMB)」—— 字典把它登记为 ``order_original_amount``
+#:   的 tiktok 平台别名(见 :data:`ORDER_PLATFORM_ALIASES`), 但**粒度**与
+#:   shopee 的「订单原始金额(RMB)」不同: 实测(2026-11 开发库, 1012 个多行
+#:   订单)「产品原价(RMB)」repeat_same=899 / vary=113 / **head_only=0** /
+#:   blank=0 —— 从不出现「只有首行有值」的合并单元格形态, 且同一订单内不同
+#:   SKU 取值不同 ⇒ 它是**行级单价**(该平台「销售数量」恒为 1)⇒ 清空第 2+
+#:   行会让订单原始金额**少算约 23%**。
+ORDER_LEVEL_AMOUNT_PLATFORM_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("tiktok", "order_original_amount"),
+    }
+)
+
+
+def _order_level_field_keys(marker: str) -> tuple[str, ...]:
+    """挑出带指定订单级标记、且口径属于 orders 域的标准字段。"""
+    orders_registered_keys = set(ORDER_SEMANTIC_ALIASES)
+    for per_platform in ORDER_PLATFORM_ALIASES.values():
+        orders_registered_keys |= set(per_platform)
+
+    keys: list[str] = []
+    for key, meta in SEMANTIC_FIELD_DEFINITIONS.items():
+        if not meta.get(marker):
+            continue
+        if key in ORDER_RETIRED_FIELDS:
+            continue
+        domain = str(meta.get("domain") or "")
+        if domain == "orders" or (domain == "common" and key in orders_registered_keys):
+            keys.append(key)
+    return tuple(sorted(keys))
+
+
+def _order_level_header_variants(
+    headers: Iterable[str],
+    *,
+    with_currency_suffix: bool = True,
+) -> set[str]:
+    """展开订单级字段的源表列名变体(裸表头 + (RMB) 变体 + snake_case)。
+
+    ``with_currency_suffix=False`` 用于**数量**列 —— 数量没有币种维度,
+    不该派生「销售数量(RMB)」这种不存在的列名。
+    """
+    variants: set[str] = set()
+    for header in headers:
+        name = str(header or "").strip()
+        if not name:
+            continue
+        variants.add(name)
+
+        bare = name
+        if with_currency_suffix:
+            if bare.endswith(ORDER_LEVEL_CURRENCY_SUFFIX):
+                bare = bare[: -len(ORDER_LEVEL_CURRENCY_SUFFIX)].strip()
+            variants.add(bare)
+            variants.add(f"{bare}{ORDER_LEVEL_CURRENCY_SUFFIX}")
+
+        # snake_case 变体(语义键 / 英文别名 / 历史 hash 字段名)。
+        # 中文表头不做 snake 化 —— 否则「TikTok 平台佣金」会退化成「tiktok」。
+        if not re.search(r"[\u4e00-\u9fff]", bare):
+            snake = re.sub(r"[^0-9a-zA-Z]+", "_", bare).strip("_").lower()
+            if snake:
+                variants.add(snake)
+                if with_currency_suffix:
+                    variants.add(f"{snake}_rmb")
+    return variants
+
+
+def _derive_order_level_fields(
+    marker: str,
+    exceptions: frozenset[tuple[str, str]] = frozenset(),
+    *,
+    with_currency_suffix: bool = True,
+) -> frozenset[str]:
+    """从字典派生 orders 域的订单级字段源表列名集合。"""
+    headers: set[str] = set()
+    for key in _order_level_field_keys(marker):
+        meta = SEMANTIC_FIELD_DEFINITIONS[key]
+        headers.add(key)
+        headers.update(meta.get("aliases") or [])
+        headers.update(ORDER_SEMANTIC_ALIASES.get(key, ()))
+        for platform, per_platform in ORDER_PLATFORM_ALIASES.items():
+            if (platform, key) in exceptions:
+                continue
+            headers.update(per_platform.get(key, ()))
+    return frozenset(
+        _order_level_header_variants(headers, with_currency_suffix=with_currency_suffix)
+    )
+
+
+#: [*] orders 域的**订单级金额列名**集合(从字典派生)。
+#:
+#: 用途: 多 SKU 订单里, 订单级金额只保留在**第 1 行**, 第 2+ 行清空
+#: (否则按行 SUM 会把整单金额**重复计入** ⇒ 虚增)。
+ORDER_LEVEL_AMOUNT_FIELDS: frozenset[str] = _derive_order_level_fields(
+    "order_level_amount",
+    ORDER_LEVEL_AMOUNT_PLATFORM_EXCEPTIONS,
+)
+
+#: [*] orders 域的**订单级数量列名**集合(从字典派生)。
+#:
+#: ⚠ **不参与**「第 2+ 行清空」—— 实测(2026-11 开发库):
+#:    「销售数量」在同一订单内**取值不同**(例: 订单 2606131JJFE29C 的 8 行是
+#:    1/2/1/4/4/2/3/3)且从不出现 head_only 形态 ⇒ 它是**行级件数**
+#:    (整单件数 = 各行之和)⇒ 清空第 2+ 行会让**件数少算约 20%**。
+#:    这里只做**登记**, 让字典口径与实测口径的差异可见, 不改变入库行为。
+ORDER_LEVEL_QUANTITY_FIELDS: frozenset[str] = _derive_order_level_fields(
+    "order_level_quantity",
+    with_currency_suffix=False,
+)
 
 
 # [*] analytics(流量)域的中文表头别名。
@@ -1179,9 +1671,65 @@ def _build_normalized_column_override_index() -> Dict[str, Dict[str, str]]:
     return result
 
 
+def is_inferable_semantic_key(value: Optional[str]) -> bool:
+    """该语义键**允许**被列名推断认领。
+
+    状态类字段(字典里 ``inferable=False``)不参与推断 —— 状态列名一旦被
+    认成语义键, 就会进身份/去重字段 ⇒ 状态一变就算新行 ⇒ 污染身份推断。
+
+    ⚠ 它们**仍然**登记在域别名表里 —— 别名表是**取数**的事实源(视图要能
+    取到该列的值), 推断只是「这列是不是语义键」的判断, 两者口径不同。
+
+    ⚠ 这里**不能**调用 :func:`normalize_semantic_key` —— 它定义在本函数
+    之后, 而本函数会在模块加载期被调用(构建封闭域逐字索引)。
+    """
+    key = str(value or "").strip().lower()
+    meta = SEMANTIC_FIELD_DEFINITIONS.get(key)
+    if meta is None:
+        return True
+    return meta.get("inferable", True) is not False
+
+
+def _build_exact_closed_domain_alias_index() -> Dict[str, Dict[str, str]]:
+    """封闭域的**逐字**别名索引。
+
+    为什么封闭域要另建一份「逐字」索引
+    ----------------------------------
+    归一化会把 ``X`` 与 ``X(RMB)`` 压成同一个 key(``normalize_alias("利润(RMB)")
+    == normalize_alias("利润") == "利润"``)。orders 域的每个金额列都有
+    「原币 + (RMB)」两列 ⇒ 归一化索引会把**原币列**也认领成标准字段
+    ⇒ 静默混币种。
+
+    ⇒ 封闭域(:data:`DOMAIN_CLOSED_ALIAS_DOMAINS`)一律**逐字**匹配:
+      字典登记的列名一个字符都不差才算命中。
+    """
+    result: Dict[str, Dict[str, str]] = {}
+    for domain in DOMAIN_CLOSED_ALIAS_DOMAINS:
+        bucket: Dict[str, str] = {}
+        for semantic_key, aliases in DOMAIN_SEMANTIC_ALIASES.get(domain, {}).items():
+            if not is_inferable_semantic_key(semantic_key):
+                continue
+            for alias in aliases:
+                text = str(alias or "").strip()
+                if text and text not in bucket:
+                    bucket[text] = semantic_key
+        for per_platform in DOMAIN_PLATFORM_SEMANTIC_ALIASES.get(domain, {}).values():
+            for semantic_key, aliases in per_platform.items():
+                if not is_inferable_semantic_key(semantic_key):
+                    continue
+                for alias in aliases:
+                    text = str(alias or "").strip()
+                    if text and text not in bucket:
+                        bucket[text] = semantic_key
+        result[domain] = bucket
+    return result
+
+
 _NORMALIZED_ALIAS_INDEX = _build_normalized_alias_index()
 _NORMALIZED_DOMAIN_ALIAS_INDEX = _build_normalized_domain_alias_index()
 _NORMALIZED_COLUMN_OVERRIDE_INDEX = _build_normalized_column_override_index()
+#: 封闭域的**逐字**别名索引(字典侧)
+_EXACT_CLOSED_DOMAIN_ALIAS_INDEX = _build_exact_closed_domain_alias_index()
 
 
 # ── 运行时别名(来自 semantic.semantic_field_aliases) ─────────────────
@@ -1195,6 +1743,11 @@ _NORMALIZED_COLUMN_OVERRIDE_INDEX = _build_normalized_column_override_index()
 #   * 内置(builtin) —— 次之, 不覆盖代码里的 curated 表。
 _RUNTIME_ALIAS_INDEX: Dict[str, Dict[str, str]] = {}
 _RUNTIME_CONFIRMED_ALIAS_INDEX: Dict[str, Dict[str, str]] = {}
+#: 封闭域的**逐字**运行时别名索引 —— 域 → {原始列名: 标准字段}。
+#:
+#: 归一化索引对 orders 域是**危险的**(会把原币列与 (RMB) 列压成同一个 key),
+#: 所以封闭域另存一份逐字索引, 推断时只用它。
+_RUNTIME_EXACT_ALIAS_INDEX: Dict[str, Dict[str, str]] = {}
 _RUNTIME_ALIAS_LOADED = False
 
 #: 全局别名用的域占位符
@@ -1221,9 +1774,11 @@ async def load_runtime_aliases(db) -> int:
         加载进来的别名条数。
     """
     global _RUNTIME_ALIAS_INDEX, _RUNTIME_CONFIRMED_ALIAS_INDEX, _RUNTIME_ALIAS_LOADED
+    global _RUNTIME_EXACT_ALIAS_INDEX
 
     builtin_bucket: Dict[str, Dict[str, str]] = {}
     confirmed_bucket: Dict[str, Dict[str, str]] = {}
+    exact_bucket: Dict[str, Dict[str, str]] = {}
 
     try:
         from modules.core.db import SemanticFieldAlias
@@ -1252,13 +1807,23 @@ async def load_runtime_aliases(db) -> int:
         normalized = normalize_semantic_alias(raw_alias)
         if not normalized:
             continue
-        bucket = (
-            confirmed_bucket
-            if source in {"manual", "template_confirmed"}
-            else builtin_bucket
-        )
+        is_confirmed = source in {"manual", "template_confirmed"}
+        bucket = confirmed_bucket if is_confirmed else builtin_bucket
         bucket.setdefault(domain, {}).setdefault(normalized, semantic_key)
+        if domain in DOMAIN_CLOSED_ALIAS_DOMAINS and is_inferable_semantic_key(
+            semantic_key
+        ):
+            # 封闭域另存**逐字**形态 —— 归一化会混币种。
+            exact_bucket.setdefault(domain, {}).setdefault(raw_alias, semantic_key)
+        if is_confirmed and domain == GLOBAL_ALIAS_DOMAIN:
+            # [*] 人工确认过的**全局**别名也要能被封闭域逐字命中
+            # (「一处生效」的产品承诺)。只存确认过的 —— builtin 的全局裸名
+            # 在 orders 域指的是原币列, 放进来 = 静默混币种。
+            exact_bucket.setdefault(GLOBAL_ALIAS_DOMAIN, {}).setdefault(
+                raw_alias, semantic_key
+            )
 
+    _RUNTIME_EXACT_ALIAS_INDEX = exact_bucket
     _RUNTIME_ALIAS_INDEX = builtin_bucket
     _RUNTIME_CONFIRMED_ALIAS_INDEX = confirmed_bucket
     _RUNTIME_ALIAS_LOADED = True
@@ -1340,6 +1905,63 @@ def normalize_semantic_key(value: Optional[str]) -> Optional[str]:
             return matched
 
     return lowered
+
+
+#: 封闭域的「纯 ASCII 别名」归一化索引(懒构建)。
+#:
+#: 为什么需要它: 封闭域必须**逐字**匹配 —— 否则「利润」会被认成
+#: 「利润(RMB)」(原币列)⇒ 静默混币种。但**英文/数字别名**
+#: (``order_no`` / ``profit_amount`` / ``buyer_paid``)没有币种歧义,
+#: 它们本来就该被识别(否则模板里的英文列名全部失联)。
+#:
+#: ⇒ 这份索引只收**不含中文**的别名 ⇒ 中文裸名永远进不来;
+#: 且只收**该域用到的字段** ⇒ 不跨域污染。
+_CLOSED_DOMAIN_ASCII_ALIAS_INDEX: Dict[str, Dict[str, str]] = {}
+_CLOSED_DOMAIN_ASCII_ALIAS_INDEX_BUILT = False
+
+#: 中日韩文字符(用于「这个别名是不是中文」的判定)。
+_CJK_ALIAS_PATTERN = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _build_closed_domain_ascii_alias_index() -> Dict[str, Dict[str, str]]:
+    """按域构建「纯 ASCII 别名」的归一化索引(封闭域专用)。"""
+    result: Dict[str, Dict[str, str]] = {}
+    for domain in DOMAIN_CLOSED_ALIAS_DOMAINS:
+        bucket: Dict[str, str] = {}
+        keys = set(DOMAIN_SEMANTIC_ALIASES.get(domain, {}).keys())
+        for key, meta in SEMANTIC_FIELD_DEFINITIONS.items():
+            if str(meta.get("domain") or "") == domain:
+                keys.add(key)
+        for key in sorted(keys):
+            if not is_inferable_semantic_key(key):
+                continue
+            meta = SEMANTIC_FIELD_DEFINITIONS.get(key, {})
+            names = [key, *(meta.get("aliases") or [])]
+            names += list(DOMAIN_SEMANTIC_ALIASES.get(domain, {}).get(key, ()))
+            for per_platform in DOMAIN_PLATFORM_SEMANTIC_ALIASES.get(
+                domain, {}
+            ).values():
+                names += list(per_platform.get(key, ()))
+            for name in names:
+                text = str(name or "").strip()
+                if not text or _CJK_ALIAS_PATTERN.search(text):
+                    continue
+                normalized = normalize_semantic_alias(text)
+                if normalized and normalized not in bucket:
+                    bucket[normalized] = key
+        result[domain] = bucket
+    return result
+
+
+def closed_domain_ascii_alias_index() -> Dict[str, Dict[str, str]]:
+    """取封闭域的 ASCII 别名索引(首次调用时构建)。"""
+    global _CLOSED_DOMAIN_ASCII_ALIAS_INDEX_BUILT
+    if not _CLOSED_DOMAIN_ASCII_ALIAS_INDEX_BUILT:
+        _CLOSED_DOMAIN_ASCII_ALIAS_INDEX.update(
+            _build_closed_domain_ascii_alias_index()
+        )
+        _CLOSED_DOMAIN_ASCII_ALIAS_INDEX_BUILT = True
+    return _CLOSED_DOMAIN_ASCII_ALIAS_INDEX
 
 
 def is_canonical_semantic_key(value: Optional[str]) -> bool:
@@ -1450,6 +2072,40 @@ def infer_semantic_key_for_domain(
             target = override_index.get(normalized)
             if target and is_canonical_semantic_key(target):
                 return target
+
+    # [*] 2026-11-08: 封闭域(orders)走**逐字**匹配。
+    #
+    # 归一化索引对 orders 域是危险的: ``normalize_alias("利润(RMB)") ==
+    # normalize_alias("利润")`` ⇒ 原币列会被一起认领 ⇒ 静默混币种。
+    # ⇒ 封闭域只认「一个字符都不差」的列名; 认不出就是认不出(返回 None)。
+    if domain in DOMAIN_CLOSED_ALIAS_DOMAINS:
+        exact_runtime = _RUNTIME_EXACT_ALIAS_INDEX.get(domain, {})
+        exact_dict = _EXACT_CLOSED_DOMAIN_ALIAS_INDEX.get(domain, {})
+        # [*] 用户**人工确认过**的全局别名(域 ``*``)也要能在封闭域命中 ——
+        # 「一处生效」是产品承诺。但只取**确认过的**那部分: builtin 的全局
+        # 裸名(如「利润」)在 orders 域指的是**原币列**, 放进来 = 静默混币种。
+        exact_confirmed_global = _RUNTIME_EXACT_ALIAS_INDEX.get(GLOBAL_ALIAS_DOMAIN, {})
+        ascii_index = closed_domain_ascii_alias_index().get(domain, {})
+        for value in values:
+            text = str(value or "").strip()
+            if not text:
+                continue
+            target = (
+                exact_runtime.get(text)
+                or exact_dict.get(text)
+                or exact_confirmed_global.get(text)
+            )
+            if target and is_canonical_semantic_key(target):
+                return target
+            # **纯 ASCII 列名**(order_no / profit_amount / buyer_paid)
+            # 没有币种歧义 ⇒ 允许走归一化匹配(该索引里只有不含中文的
+            # 别名, 中文裸名进不来 ⇒ 不会认到原币列)。
+            if not _CJK_ALIAS_PATTERN.search(text):
+                normalized = normalize_semantic_alias(text)
+                target = ascii_index.get(normalized) if normalized else None
+                if target and is_canonical_semantic_key(target):
+                    return target
+        return None
 
     # [*] 批次 D: 用户确认过的全局别名 —— 优先级最高(一处生效)。
     if _RUNTIME_CONFIRMED_ALIAS_INDEX:
