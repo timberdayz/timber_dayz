@@ -181,10 +181,67 @@ ROI 四列**拆开**：保本/建议属结果，目标/平台报告属输入。
 
 ## 五、本轮不做（明确留到后续，需 Walter 决策）
 
-1. **飞书投影凭据缺失修复**（生产可见缺陷，疑似 v7.15.5 部署引入）——需生产发布窗口。
+1. ~~**飞书投影凭据缺失修复**（生产可见缺陷，疑似 v7.15.5 部署引入）——需生产发布窗口。~~
+   **→ 已在 v7.17.0 一并修复并随发布上线**，详见 §六。其余四项仍留到后续。
 2. **飞书「调价记录表」加仓库列**——需「加列→切代码→删旧列」同窗口操作。
 3. **调价基线 / 人工覆盖下沉到仓**（`ops.price_adjust_baselines`、`finance.sku_platform_pricing` 的 PK 加仓）
    —— Walter Q1 答「各站可分别定价」指向这条，但工作量大且涉及存量迁移，建议下一轮单独做。
 4. **「平台店铺 ↔ 平台商品 ↔ ERP SKU」映射数据链**（生产 `core.bridge_erp_sku_keys` 1118 行 `source_shop_id` 全 NULL）
    —— 站点级定价的真实地基；本轮用「仓 ↔ 国家 ↔ 站」桥替代。
 5. **清货排名改仓级**（`api.sku_clearance_ranking_module`）——本轮保持 SKU 级，避免与口径纪律冲突。
+
+---
+
+## 六、落地结果留档（v7.17.0，2026-11-08）
+
+### 6.1 提交
+
+| 提交 | 内容 |
+|---|---|
+| `7c946c13` | 后端 6.1–6.4：仓名归一 / 仓级库龄取数 / 按仓定价 / 跨仓差异提示 |
+| `4069c355` | 本方案文档 |
+| `6c0600fa` | 前端 6.5–6.6：列重排 + 固定左侧三列 + 四段分区 + 库龄（仓）列 + 跨仓提示列 |
+| `051d0695` → `1e8db144` | 生产缺陷修复：飞书投影凭据缺失（celery-worker 补 `env_file`） |
+
+发布：`main` = `1e8db144`（GitHub + CNB 双镜像同 commit），tag `v7.17.0`。
+
+### 6.2 验收口径逐条结论
+
+| 验收项 | 结论 | 证据 |
+|---|---|---|
+| A1 仓名归一 | ✅ | 生产 5 个妙手仓名全部映射到唯一 `warehouse_code`；未登记仓名留空 + 记日志 |
+| A2 仓级库龄 | ✅ | 实测 `HKR-2260-white-035`：SG-01=55 天 / PH-REPAIR=68 天，各仓独立；`available_stock=0` 的仓不参与 |
+| A3 档位按仓 | ✅ | 传 SG-01 后 `days_since_restock` 从 68 → 55，SG 站回到「日常」档，不受 MY 影响 |
+| A4 口径不回归 | ✅ | 不传仓时输出与改造前逐字一致；清货排名与基线通知仍走 SKU 级跨仓 MAX |
+| A5 跨仓提示 | ✅ | 跨档位给出调拨建议；同档位不提示 |
+| A6 前端列重排 | ✅ | 左侧三列 `fixed="left"`；四段表头着色 + 图例；结果段内 ROI 相对序保持 |
+| A7 迁移 | ✅ | Docker 临时库 up→down→up 三步全过；commit 内单 head（`20261203` → `20261205`） |
+
+### 6.3 验证记录
+
+- 后端：新增 `backend/tests/test_warehouse_dimension.py` 16 条；定价与商品中心回归 195 passed；库存采集链路 38 passed。
+- 前端：UI 断言 77 passed；`vite build` 通过；CI 前端哑测试门禁通过。
+- 迁移隔离：版本表预置为 `down_revision` 模拟真实生产路径，up → down → up 三步全过。
+- 真库端到端：接口响应确认 `warehouse_restocks` / `warehouse_divergence` / `pricing_days_since_restock` 三个字段确实存在且取值正确。
+
+### 6.4 附带修复：飞书投影凭据缺失
+
+- **现象**：最后一次成功投影停在 2026-11-01；2026-11-07 部署后 7 条 `price_adjust` 任务全部失败于
+  `Feishu app credentials are not configured`。
+- **根因**：`celery-worker` 只定义在 `docker-compose.prod.yml`（base 的 `docker-compose.yml` 没有这个
+  service），因此拿不到 base 里 `backend-api` 用的 `env_file: .env` ⇒ 跑投影任务的 celery 容器没有 app 凭据。
+  API 容器有凭据（投影配置 `status=ready`、`initialized_at=2026-10-23`），所以坏的只有 celery 这条路径。
+- **修复**：`celery-worker` 补 `env_file: .env`。刻意**不**在 `environment` 里重复声明 `FEISHU_*` ——
+  `environment` 优先级高于 `env_file`，插不出值时会用空串覆盖 `env_file` 里的真值，比不修还糟。
+
+### 6.5 本轮发现但未处理的既有问题
+
+1. **`validate_migrations_fresh_db.py`（全新空库跑全链）失败**：卡在
+   `20261116_add_tiktok_export_store_name_aliases` 的前置检查（要求库里已有 TikTok 店铺账号，空库没有）。
+   **在 `origin/main` 基线上同样失败，是既有缺陷，不是本轮引入**；生产走「已有库增量升级」，不受影响。
+   建议下一轮修（让该迁移在没有店铺数据时跳过或降级），否则这个门禁对「空库全链」永远没有信号。
+2. **本地 `alembic upgrade head` 在开发库不可用**：开发库版本号指向语义层会话尚未提交的
+   `20261204_semantic_orders_alias_resolve` ⇒ 仓库里找不到该 revision。本轮迁移因此保持
+   `down_revision = current_schema_20261203_semantic_alias_normalized_refresh`（分支自洽、单 head）；
+   **待对方提交后，需要把本轮迁移的 `down_revision` 改到对方的 revision 之后**，否则会出现双 head。
+
