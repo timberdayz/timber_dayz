@@ -38,6 +38,15 @@
           </div>
         </el-card>
       </el-col>
+      <el-col :xs="24" :sm="8">
+        <el-card shadow="hover" class="function-card" @click="activeTab = 'semantic-coverage'">
+          <div class="card-content">
+            <el-icon :size="40" color="#909399"><DataAnalysis /></el-icon>
+            <h3>语义覆盖率巡检</h3>
+            <p>查看标准字段在源表里解析得出来吗、解析率多少</p>
+          </div>
+        </el-card>
+      </el-col>
     </el-row>
 
     <!-- 标签页内容 -->
@@ -338,6 +347,26 @@
           <el-empty v-if="!loadingAnomalyDetection && !anomalyDetectionResult" description="请填写参数后点击开始检测" />
         </el-card>
       </el-tab-pane>
+
+      <!-- 语义覆盖率巡检（只读） -->
+      <el-tab-pane label="语义覆盖率巡检" name="semantic-coverage">
+        <el-card shadow="hover">
+          <template #header>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>语义覆盖率巡检</span>
+              <span style="font-size: 12px; color: #909399;">只读视图，不会修改任何数据</span>
+            </div>
+          </template>
+
+          <p style="margin: 0 0 16px 0; font-size: 13px; color: #606266; line-height: 1.6;">
+            语义层对数值型标准字段做了 <code>COALESCE(x, 0)</code>，解析失败会被伪装成 0 ——
+            这个面板把「解析失败」变成可见信号：每个域的整体健康度、按平台的解析率、
+            解析率为 0 的字段及其源表真实列名候选，以及告警列表。
+          </p>
+
+          <SemanticCoveragePanel />
+        </el-card>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -345,8 +374,9 @@
 <script setup>
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, DocumentChecked, Warning, Search } from '@element-plus/icons-vue'
- import api from '@/api'
+import { Connection, DocumentChecked, Warning, Search, DataAnalysis } from '@element-plus/icons-vue'
+import api from '@/api'
+import SemanticCoveragePanel from '../components/SemanticCoveragePanel.vue'
 
 // 标签页
 const activeTab = ref('cross-platform')
