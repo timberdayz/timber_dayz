@@ -64,7 +64,7 @@ Status: Implemented in `sql/semantic/analytics_atomic.sql` and `sql/semantic/ana
 | Cross-Platform Semantic | Canonical Field | Accepted Raw Source Fields |
 |-------------------------|-----------------|----------------------------|
 | 交易总额 / GMV | `gmv` | TikTok `GMV`; Shopee analytics sales-like field explicitly confirmed as same semantic |
-| 访客数 | `visitor_count` | Shopee `访客数`; TikTok `商品访客数` (both registered as **platform-scoped** aliases; the two calibers are **not** interchangeable) |
+| 访客数 | `visitor_count` | Shopee `访客数`; TikTok `商品访客数` (both registered as **platform-scoped** aliases; measured 2026-11-10 — both are the store's **same-day visitor count** on a one-store-one-day grain, so the values are **broadly comparable across platforms**) |
 | 页面浏览量 | `page_views` | `浏览量`, `页面浏览数`, `页面浏览次数`, `page_views`, `views` |
 | 订单数 | `order_count` | `订单数`, `订单数量`, `order_count`, `Order Count` excluding any field explicitly split such as `SKU 订单数` |
 
@@ -80,11 +80,21 @@ Status: Implemented in `sql/semantic/analytics_atomic.sql` and `sql/semantic/ana
   is registered symmetrically as `platform_code='shopee'` — both platforms must be
   registered, otherwise the alias merge rule drops the un-registered platform's
   generic aliases and its UV silently turns NULL.
-- **Caliber warning (2026-11-10)**: the two `visitor_count` sources are **different
-  business facts** and their values are **not comparable across platforms**:
-  Shopee `访客数` is a de-duplicated store-level visitor count; TikTok `商品访客数`
-  is a product-level visit count. Dashboard consumers must label the difference
-  instead of comparing the numbers directly.
+- **Caliber statement (2026-11-10, re-verified)**: the two `visitor_count` sources share
+  one caliber — the store's **same-day visitor count** — so the values **are comparable
+  across platforms**. Measured evidence: both monthly reports are **one store × one day
+  per row** (Shopee 2354 rows = 2354 store-day pairs; TikTok 1374 rows = 45 store-month
+  buckets of 28~31 days each, with `metric_date` normalized to the 1st of the month);
+  Shopee `访客数` equals `新访客 + 现有访客` in **2354/2354 rows** (de-duplicated
+  visitors); TikTok `商品访客数` is `<=` the row's `去重商品曝光次数` in **0/1374
+  violating rows** and `<=` the row's `页面浏览次数` in **1362/1374 rows** (the other
+  12 rows are the platform reporting `页面浏览次数` as 0).
+  The one point still **unconfirmed**: the TikTok column is *defined* as "visitors who
+  visited a product that day", and whether that equals the store's *total* visitors
+  cannot be decided from the data (the source export has no second visitor column to
+  reconcile against). Dashboard copy must therefore say **"口径基本一致 / 可横向比较"**
+  and keep the "待确认" note — it must **not** claim "完全等价", and it must **not**
+  claim "不可比" either (that was a speculative conclusion retracted on 2026-11-10).
 - `product_visitor_count` now belongs to the **products** domain only (Shopee
   `商品访客数量`). It is **no longer** an analytics compatibility field: the
   analytics-domain column name `商品访客数` resolves to `visitor_count`.

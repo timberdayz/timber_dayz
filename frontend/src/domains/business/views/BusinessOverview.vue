@@ -880,7 +880,7 @@
               <div class="metric-header-with-tip">
                 <span>访客数(UV)</span>
                 <el-tooltip
-                  content="Shopee 为全店去重访客人数，TikTok 为商品访客人次；两平台口径不同，不可直接比大小"
+                  content="两平台都是「店铺当天的访客数」，口径基本一致、可横向比较；TikTok 那一列的定义是「当天访问过商品的访客」，是否覆盖店铺全部访客待确认"
                   placement="top"
                 >
                   <el-icon class="metric-header-tip"><QuestionFilled /></el-icon>

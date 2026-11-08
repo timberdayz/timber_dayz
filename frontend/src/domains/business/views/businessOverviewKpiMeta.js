@@ -35,7 +35,7 @@ export const businessOverviewKpiMeta = [
     businessValue: '适合判断流量质量、页面承接和商品吸引力是否足以促成下单。',
     status: KPI_HELP_STATUS.observe,
     caution:
-      '分母是访客数：Shopee 为全店去重访客人数，TikTok 为商品访客人次，两平台数值不可直接横向比较。',
+      '分母是访客数：两平台都是「店铺当天的访客数」，口径基本一致，可横向比较（TikTok 的「商品访客数」是否覆盖店铺全部访客待确认）。',
     sourceRefs: ['metrics-dictionary', 'shop-month-kpi-runtime'],
     interactionNote: '桌面端悬停查看，移动端点击信息图标查看。'
   },
@@ -76,14 +76,14 @@ export const businessOverviewKpiMeta = [
     key: 'visitor_count',
     title: '访客数(UV)',
     definition:
-      '统计访问规模，用来判断真实流量体量。⚠ 两平台口径不同：Shopee 是全店去重访客人数，TikTok 是按商品统计的访客人次。',
+      '统计访问规模，用来判断真实流量体量。两平台都是「店铺当天的访客数」，口径基本一致，可横向比较。',
     formulaText:
       '所选周期内的访客数汇总（Shopee 取「访客数」，TikTok 取「商品访客数」）。',
     businessValue:
-      '适合与曝光量、订单数联动看，判断流量入口质量和访问转化情况；跨平台对比请分平台看。',
+      '适合与曝光量、订单数联动看，判断流量入口质量和访问转化情况。',
     status: KPI_HELP_STATUS.observe,
     caution:
-      '⚠ 跨平台不可直接比大小：Shopee 是全店去重访客人数，TikTok 是商品访客人次。横向比较请按平台拆开看。',
+      '两平台口径基本一致，可横向比较。⚠ 待确认项：TikTok 那一列的定义是「当天访问过商品的访客」，是否覆盖店铺全部访客待确认。',
     sourceRefs: ['metrics-dictionary', 'shop-month-kpi-runtime'],
     interactionNote: '桌面端悬停查看，移动端点击信息图标查看。'
   },
@@ -95,7 +95,7 @@ export const businessOverviewKpiMeta = [
     businessValue: '适合判断主图、标题、价格带或投放入口是否能吸引用户点进来。',
     status: KPI_HELP_STATUS.observe,
     caution:
-      '分子是访客数：Shopee 为全店去重访客人数，TikTok 为商品访客人次，两平台数值不可直接横向比较。',
+      '分子是访客数：两平台都是「店铺当天的访客数」，口径基本一致，可横向比较（TikTok 的「商品访客数」是否覆盖店铺全部访客待确认）。',
     sourceRefs: ['postgresql-dashboard-runtime', 'shop-month-kpi-runtime'],
     interactionNote: '桌面端悬停查看，移动端点击信息图标查看。'
   },
@@ -107,7 +107,7 @@ export const businessOverviewKpiMeta = [
     businessValue: '适合判断详情页承接、关联推荐和内容组织是否让用户继续浏览。',
     status: KPI_HELP_STATUS.observe,
     caution:
-      '分母是访客数：Shopee 为全店去重访客人数，TikTok 为商品访客人次，两平台数值不可直接横向比较。',
+      '分母是访客数：两平台都是「店铺当天的访客数」，口径基本一致，可横向比较（TikTok 的「商品访客数」是否覆盖店铺全部访客待确认）。',
     sourceRefs: ['postgresql-dashboard-runtime', 'shop-month-kpi-runtime'],
     interactionNote: '桌面端悬停查看，移动端点击信息图标查看。'
   },

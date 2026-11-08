@@ -1320,7 +1320,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "visitor count"
       ],
       "default_hash": false,
-      "description": "访客数(UV)。⚠ 两平台口径不同：Shopee 的「访客数」是**全店去重访客人数**；TikTok 的「商品访客数」是**按商品统计的访客人次**。两者都是访客数，但**跨平台不可直接比大小**。系统语义指标，不默认参与 Data Hash。",
+      "description": "访客数(UV)：店铺当天的访客数。Shopee 实测「新访客 + 现有访客」精确相加，即去重访客人数。两平台都是「一店一天一行」，口径基本一致，可横向比较。⚠ 待确认：TikTok 的列名叫「商品访客数」，平台定义为「当天访问过商品的访客」，它是否等于店铺当天的全部访客，当前数据判定不了。系统语义指标，不默认参与 Data Hash。",
       "domain": "analytics",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
@@ -3378,7 +3378,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "visitor count"
           ],
           "default_hash": false,
-          "description": "访客数(UV)。⚠ 两平台口径不同：Shopee 的「访客数」是**全店去重访客人数**；TikTok 的「商品访客数」是**按商品统计的访客人次**。两者都是访客数，但**跨平台不可直接比大小**。系统语义指标，不默认参与 Data Hash。",
+          "description": "访客数(UV)：店铺当天的访客数。Shopee 实测「新访客 + 现有访客」精确相加，即去重访客人数。两平台都是「一店一天一行」，口径基本一致，可横向比较。⚠ 待确认：TikTok 的列名叫「商品访客数」，平台定义为「当天访问过商品的访客」，它是否等于店铺当天的全部访客，当前数据判定不了。系统语义指标，不默认参与 Data Hash。",
           "domain": "analytics",
           "group": "traffic_metric",
           "hash_eligible": true,

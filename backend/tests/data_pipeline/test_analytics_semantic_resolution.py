@@ -241,9 +241,11 @@ def test_product_visitors_are_registered_as_tiktok_visitor_count():
     架构契约(2026-05-26)早已批准这件事:
     「TikTok analytics explicitly maps 商品访客数 to canonical visitor_count」。
 
-    ⚠ 但两平台**口径不同**: shopee「访客数」= 全店去重访客人数,
-    tiktok「商品访客数」= 按商品统计的访客人次 ⇒ 必须**平台限定**登记,
+    ⚠ 但两平台的访客列名是**平台专有**的: shopee「访客数」、
+    tiktok「商品访客数」⇒ 必须**平台限定**登记,
     不许进通用别名表(通用别名会让 tiktok 的数据被当成 shopee 口径命中)。
+    ⇒ 口径本身经 2026-11-10 复核: 两平台都是「一店一天一行」的店铺当天访客量,
+    **基本一致、可横向比较**。
     """
     tiktok_aliases = ANALYTICS_PLATFORM_ALIASES.get("tiktok") or {}
     shopee_aliases = ANALYTICS_PLATFORM_ALIASES.get("shopee") or {}

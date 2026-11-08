@@ -33,7 +33,7 @@ def test_analytics_atomic_sql_does_not_mix_product_visitor_count_into_visitor_co
     [*] 2026-11-10: 落点改由**别名表**决定 —— tiktok 的「商品访客数」登记到
     ``visitor_count``(平台限定), 因为它**就是** tiktok 侧唯一的访客列
     (实测 1374 行 raw_data key 里没有店铺级访客数这一列)。
-    ⚠ 但两平台口径不同(shopee 全店去重访客人数 / tiktok 商品访客人次)
+    ⚠ 但两平台的访客列名**平台专有**(shopee「访客数」/ tiktok「商品访客数」)
     ⇒ 落点由别名表的**平台维度**保证, SQL 里不许硬编码。
 
     ⇒ 断言: SQL 里既不许内联这个表头, 也不许内联另一个表头;
@@ -100,8 +100,8 @@ def test_analytics_monthly_atomic_mv_does_not_mix_product_visitor_count_into_vis
     """月度链与日/周链**同口径**: 访客列同样不许在 SQL 里内联。
 
     [*] 2026-11-10: 月度链的落点与日/周链**完全一致** —— tiktok 的
-    「商品访客数」归 ``visitor_count``(平台限定), 且两平台口径不同
-    (shopee 全店去重访客人数 / tiktok 商品访客人次)⇒ 不许内联硬塞。
+    「商品访客数」归 ``visitor_count``(平台限定), 且两平台访客列名**平台专有**
+    ⇒ 不许内联硬塞。
     """
     from backend.services.semantic_field_registry import ANALYTICS_PLATFORM_ALIASES
 

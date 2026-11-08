@@ -89,8 +89,9 @@ def test_analytics_sql_resolves_product_visitors_as_tiktok_visitor_count():
 
     [*] 2026-11-10(实测): tiktok 流量报表**没有**店铺级访客数, 唯一的访客
     列就是「商品访客数」⇒ 它就是 tiktok 侧的 UV(架构契约 2026-05-26 已批准)。
-    ⚠ 但两平台口径不同(shopee 全店去重访客人数 / tiktok 商品访客人次)
+    ⚠ 但两平台的访客列名**平台专有**(shopee「访客数」/ tiktok「商品访客数」)
     ⇒ 必须**平台限定**, 不许进通用别名表。
+    (口径本身经 2026-11-10 复核: 两平台都是店铺当天的访客量, 基本一致、可横向比较。)
     """
     from backend.services.semantic_field_registry import (
         ANALYTICS_PLATFORM_ALIASES,

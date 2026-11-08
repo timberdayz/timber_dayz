@@ -68,31 +68,50 @@ test('business overview kpi help meta covers all displayed cards with stable sta
   assert.equal(getKpiHelpMeta('missing_key'), null)
 })
 
-test('访客数(UV)必须标注两平台口径差异, 且分母用到访客数的指标标为观察口径', async () => {
+test('访客数(UV)必须写明两平台口径基本一致可横向比较, 且用到访客数的指标标为观察口径', async () => {
   const metaModule = await import(pathToFileURL(metaModulePath).href)
   const { KPI_HELP_STATUS, getKpiHelpMeta } = metaModule
 
-  // [*] 2026-11-10: Shopee 的「访客数」是全店去重访客人数, TikTok 的
-  //   「商品访客数」是按商品统计的访客人次 —— 两者都叫 visitor_count,
-  //   但**不是同一个事实** ⇒ 看板必须显式标注, 否则会被当成可比数字。
+  // [*] 2026-11-10 复核后回正(实测, 开发库):
+  //   * 两平台月报都是「一店一天一行」(shopee 2354 行 = 2354 个店×日;
+  //     tiktok 1374 行 = 45 个店×月 桶, 每桶整月 28~31 天);
+  //   * shopee「访客数」= 新访客 + 现有访客, 2354/2354 行**精确相等**
+  //     ⇒ 可证明是去重访客人数;
+  //   * tiktok「商品访客数」≤ 该行「去重商品曝光次数」0/1374 行违反
+  //     ⇒ 同样是访客量(不是人次, 也不是曝光)。
+  //   ⇒ 两边都是「店铺当天的访客数」, 口径基本一致, **可以横向比较**。
+  //   之前写的「跨平台不可直接比大小」是**基于推测的错结论**, 已回正。
+  //   仍未定的一点点: tiktok 列名定义为「当天访问过商品的访客」,
+  //   是否等于店铺全部访客 ⇒ 待确认(所以也不能写成「完全等价」)。
   const visitorMeta = getKpiHelpMeta('visitor_count')
   assert.equal(visitorMeta?.status, KPI_HELP_STATUS.observe)
-  assert.match(visitorMeta?.caution ?? '', /Shopee/)
-  assert.match(visitorMeta?.caution ?? '', /TikTok/)
-  assert.match(visitorMeta?.caution ?? '', /不可直接比大小/)
+  assert.match(visitorMeta?.caution ?? '', /口径基本一致/)
+  assert.match(visitorMeta?.caution ?? '', /可横向比较/)
+  assert.match(visitorMeta?.caution ?? '', /待确认/)
+  // 错结论不得复活
+  assert.doesNotMatch(visitorMeta?.caution ?? '', /不可直接比大小/)
+  assert.doesNotMatch(visitorMeta?.caution ?? '', /口径不同/)
+  assert.doesNotMatch(visitorMeta?.definition ?? '', /访客人次/)
 
-  // 分母/分子用到访客数的指标同样受口径差异影响 ⇒ 都要标「观察口径」。
+  // 分母/分子用到访客数的指标同样受「待确认项」影响 ⇒ 都要标「观察口径」。
   for (const key of ['uv_conversion_rate', 'visit_rate', 'browse_depth']) {
     const meta = getKpiHelpMeta(key)
     assert.equal(meta?.status, KPI_HELP_STATUS.observe, `${key} 应标为观察口径`)
     assert.match(meta?.caution ?? '', /访客数/, `${key} 的说明应点明访客数口径`)
+    assert.match(meta?.caution ?? '', /口径基本一致/, `${key} 应写明口径基本一致`)
+    assert.doesNotMatch(
+      meta?.caution ?? '',
+      /不可直接横向比较/,
+      `${key} 不得保留已回正的错结论`
+    )
   }
 })
 
 test('流量排名表的访客数列必须带口径提示', () => {
   assert.equal(viewSource.includes('访客数(UV)'), true)
-  assert.match(viewSource, /Shopee 为全店去重访客人数/)
-  assert.match(viewSource, /TikTok 为商品访客人次/)
+  assert.match(viewSource, /两平台都是「店铺当天的访客数」/)
+  assert.match(viewSource, /口径基本一致/)
+  assert.doesNotMatch(viewSource, /不可直接比大小/)
 })
 
 test('BusinessOverview renders KPI help popovers and status-driven caution content', () => {

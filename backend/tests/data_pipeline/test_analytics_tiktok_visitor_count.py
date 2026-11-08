@@ -13,19 +13,28 @@
 的架构契约(``docs/architecture/SEMANTIC_FIELD_RULES.md``:「TikTok analytics
 explicitly maps ``商品访客数`` to canonical ``visitor_count``」)落进实现。
 
-⚠⚠ **两平台的 UV 不是同一个口径**:
+✅ **两平台的 UV 口径基本一致, 可以横向比较**(2026-11-10 复核后回正):
 
-* shopee「访客数」     = 全店**去重访客人数**(实测 519,212 人)
-* tiktok「商品访客数」 = 按商品统计的**访客人次**(实测 175,914 人次)
+* 两平台月报都是**「一店一天一行」** —— shopee 2354 行 = 2354 个(店, 日)组合;
+  tiktok 1374 行 = 45 个(店, 月)桶, 每桶装着整月 28~31 天;
+* shopee「访客数」= 新访客 + 现有访客, **2354/2354 行精确相等**
+  ⇒ 可证明是**去重访客人数**;
+* tiktok「商品访客数」≤ 该行「去重商品曝光次数」**0/1374 行违反**,
+  且 ≤ 该行「页面浏览次数」**1362/1374 行**(剩下 12 行是平台把
+  「页面浏览次数」回传成 0)⇒ 同样是**访客量**, 不是人次, 也不是曝光。
 
-⇒ 跨平台**不可直接比大小** ⇒ 看板必须标注(前端 ``businessOverviewKpiMeta.js``)。
+⇒ 跨平台**可以横向比较** ⇒ 看板按「口径基本一致」标注
+(前端 ``businessOverviewKpiMeta.js``)。
+⚠ 唯一未定: tiktok 列名定义为「当天访问过商品的访客」, 是否等于店铺全部访客
+**数据判定不了** ⇒ 待确认(不得写成「完全等价」, 也不得写成「不可比」)。
 
 本文件把最容易做错的四件事钉死:
 
 1. 两个平台**必须对称登记** —— 只登记一边会把另一边**静默挤掉**;
 2. 「商品访客数」在 analytics 域**只**归 ``visitor_count``;
 3. ``product_visitor_count`` **退出** analytics 域, 但**留在** products 域;
-4. 口径差异必须在看板上**显式标注**(不许悄悄比大小)。
+4. 看板文案必须是**当前实测口径** —— 既不许悄悄比大小, 也不许把
+   「基本一致」写成「完全等价」。
 """
 
 import re
@@ -40,6 +49,7 @@ from backend.services.semantic_field_registry import (
     DOMAIN_SEMANTIC_ALIASES,
     PRODUCTS_SEMANTIC_ALIASES,
     SEMANTIC_FIELD_DEFINITIONS,
+    SEMANTIC_FIELD_DESCRIPTIONS,
     platform_applicable_fields,
 )
 
@@ -373,3 +383,120 @@ def test_migration_refreshes_both_chains():
     assert "REFRESH MATERIALIZED VIEW" in migration_text
     assert "semantic.fact_analytics_atomic_mv" in migration_text
     assert "semantic.fact_analytics_monthly_atomic_mv" in migration_text
+
+
+# ── 五、口径文案(钉住"当前实测口径", 防已回正的结论复活) ──────────────
+
+#: 2026-11-10 复核**之前**写在代码/文档里的推测口径 —— 已回正, 不许再出现。
+#:
+#: 背景: 当时的结论是「shopee = 全店去重访客人数 / tiktok = 商品访客人次 ⇒
+#: 跨平台不可直接比大小」。复核后的实测结论是「两平台都是『一店一天一行』的
+#: 店铺当天访客量, 口径基本一致, **可以横向比较**」⇒ 旧结论必须从代码与
+#: 文档里**彻底删干净**, 否则看板会继续误导运营。
+RETRACTED_CALIBER_CLAIMS = ("不可直接比大小", "访客人次", "不可直接横向比较")
+
+#: 必须出现「当前实测口径」的说法。
+CURRENT_CALIBER_CLAIMS = ("口径基本一致", "可横向比较")
+
+#: 需要检查口径文案的资产。
+CALIBER_TEXT_ASSETS = (
+    (
+        "看板 KPI 元数据",
+        REPO_ROOT
+        / "frontend"
+        / "src"
+        / "domains"
+        / "business"
+        / "views"
+        / "businessOverviewKpiMeta.js",
+    ),
+    (
+        "看板流量排名表",
+        REPO_ROOT
+        / "frontend"
+        / "src"
+        / "domains"
+        / "business"
+        / "views"
+        / "BusinessOverview.vue",
+    ),
+    (
+        "架构契约",
+        REPO_ROOT / "docs" / "architecture" / "SEMANTIC_FIELD_RULES.md",
+    ),
+    (
+        "迁移 docstring",
+        MIGRATION_ASSET,
+    ),
+)
+
+
+def test_visitor_count_description_states_the_measured_caliber():
+    """字典说明必须写**实测口径**, 而不是已被回正的推测口径。"""
+    description = SEMANTIC_FIELD_DESCRIPTIONS[VISITOR_FIELD]
+    for claim in CURRENT_CALIBER_CLAIMS:
+        assert claim in description, "字典说明里应写明「{0}」".format(claim)
+    assert "待确认" in description, "字典说明里应保留唯一未定的待确认项"
+    for wrong in RETRACTED_CALIBER_CLAIMS:
+        assert wrong not in description, "字典说明里不该再出现已回正的结论: {0}".format(
+            wrong
+        )
+
+
+def test_registry_source_does_not_assert_the_retracted_conclusion():
+    """字典源码里的注释同样不许断言已回正的结论。"""
+    registry_text = _read(
+        Path(__file__).resolve().parents[2] / "services" / "semantic_field_registry.py"
+    )
+    for wrong in RETRACTED_CALIBER_CLAIMS:
+        assert (
+            wrong not in registry_text
+        ), "字典源码里不该再出现已回正的结论: {0}".format(wrong)
+
+
+def test_caliber_text_assets_state_the_current_caliber():
+    """看板/文档必须写「口径基本一致、可横向比较」, 且不留旧结论。"""
+    for label, asset in CALIBER_TEXT_ASSETS:
+        text = _read(asset)
+        for wrong in RETRACTED_CALIBER_CLAIMS:
+            assert wrong not in text, "{0} 里不该再出现已回正的结论: {1}".format(
+                label, wrong
+            )
+    for label, asset in CALIBER_TEXT_ASSETS:
+        text = _read(asset)
+        assert any(
+            claim in text for claim in CURRENT_CALIBER_CLAIMS
+        ), "{0} 里应写明当前实测口径".format(label)
+
+
+def test_migration_docstring_records_the_measured_evidence():
+    """迁移 docstring 必须留下**实测依据**, 便于日后复核。
+
+    这几条数字是 2026-11-10 在开发库实测出来的:
+    * shopee「访客数」= 新访客 + 现有访客, 2354/2354 行精确相等;
+    * tiktok「商品访客数」≤ 去重商品曝光次数, 0/1374 行违反;
+    * tiktok「商品访客数」≤ 页面浏览次数, 1362/1374 行
+      (剩下 12 行是平台把「页面浏览次数」回传成 0)。
+    """
+    migration_text = _read(MIGRATION_ASSET)
+    for evidence in ("2354/2354", "0/1374", "1362/1374"):
+        assert evidence in migration_text, "迁移 docstring 缺实测依据: {0}".format(
+            evidence
+        )
+
+
+def test_business_impact_doc_states_the_current_caliber_with_a_correction_note():
+    """业务影响文档必须写**当前实测口径**, 并留下「回正说明」。
+
+    为什么留回正说明: 这一节此前写的是「跨平台不可直接比大小」——
+    那是**基于推测、没有硬证据**的结论。直接删掉会让后来人以为口径从没变过,
+    所以保留一句「此前是什么、现在为什么改、依据是什么」。
+    """
+    doc_text = _read(
+        REPO_ROOT / "docs" / "guides" / "semantic_layer_business_impact.md"
+    )
+    for claim in CURRENT_CALIBER_CLAIMS:
+        assert claim in doc_text, "业务影响文档里应写明「{0}」".format(claim)
+    assert "回正说明" in doc_text, "业务影响文档应留下「回正说明」, 说明结论改过"
+    assert "1362/1374" in doc_text, "业务影响文档应写明实测依据 1362/1374"
+    assert "1350/1374" not in doc_text, "业务影响文档里的旧算错数字必须改掉"
