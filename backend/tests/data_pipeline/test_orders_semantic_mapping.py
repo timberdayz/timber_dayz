@@ -41,15 +41,31 @@ def test_orders_atomic_sql_exposes_core_standard_fields():
 
 
 def test_orders_atomic_sql_maps_current_orders_amount_and_store_fields():
+    """取数必须走别名表(单一事实源), 不许再手写 COALESCE 链。
+
+    [*] 2026-11-08: orders 域的取数从手写 COALESCE 链切到
+    ``semantic.resolve_alias()``。原因见
+    ``backend/services/semantic_field_registry.py`` 里
+    ``ORDER_SEMANTIC_ALIASES`` 的注释: 源表每个金额列都成对出现
+    (``X`` 原币 / ``X(RMB)`` 人民币), 手写链的兜底会落到**裸名列**
+    ⇒ 混币种(实测两者均值差约 3 倍)。
+    """
     sql_text = Path("sql/semantic/orders_atomic.sql").read_text(
         encoding="utf-8", errors="replace"
     )
 
     assert "paid_amount_raw" in sql_text
-    assert "buyer_payment_rmb" in sql_text
-    assert "original_amount_rmb" in sql_text
-    assert "purchase_cost_rmb" in sql_text
     assert "store_label_raw" in sql_text
+    # 取数一律走别名表
+    assert "semantic.resolve_alias(raw_data, data_domain, 'paid_amount'" in sql_text
+    assert "semantic.resolve_alias(raw_data, data_domain, 'profit'" in sql_text
+    assert (
+        "semantic.resolve_alias(raw_data, data_domain, 'warehouse_operation_fee'"
+        in sql_text
+    )
+    # ⚠ 绝不许使用「归一化后剥币种后缀」的解析 —— 那会把原币列与 (RMB) 列
+    #   压成同一个 key, 在两个**不同业务事实**之间随机取一个。
+    assert "semantic.resolve_alias_normalized(" not in sql_text
 
 
 def test_orders_atomic_sql_resolves_shop_aliases_via_shop_accounts_and_aliases():
@@ -175,8 +191,8 @@ async def test_orders_monthly_atomic_metric_date_prefers_order_time_over_metric_
                         'shopee', 'xihong', 'orders', 'monthly',
                         DATE '2026-05-01', DATE '2026-05-01', DATE '2026-05-01',
                         TIMESTAMP '2026-05-01 00:00:00', TIMESTAMP '2026-05-01 00:00:00',
-                        '{"下单时间":"2026-01-05 23:37:01","order_id":"SO-METRIC-DATE-1","buyer_payment_rmb":"100","product_quantity":"2","profit_rmb":"30"}'::jsonb,
-                        '["下单时间","order_id","buyer_payment_rmb","product_quantity","profit_rmb"]'::jsonb,
+                        '{"下单时间":"2026-01-05 23:37:01","订单编号":"SO-METRIC-DATE-1","买家支付(RMB)":"100","销售数量":"2","利润(RMB)":"30"}'::jsonb,
+                        '["下单时间","订单编号","买家支付(RMB)","销售数量","利润(RMB)"]'::jsonb,
                         'hash-metric-date-prefers-order-time-1', TIMESTAMP '2026-05-02 10:00:00', 'SGD'
                     )
                     """
@@ -185,6 +201,7 @@ async def test_orders_monthly_atomic_metric_date_prefers_order_time_over_metric_
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.alias_registry")
             await execute_sql_target(
                 session, "semantic.shop_identity_resolution_candidates"
             )
@@ -228,9 +245,9 @@ async def test_orders_monthly_atomic_prefers_rmb_paid_amount_over_local_paid_amo
             "下单时间": "2026-03-08 12:00:00",
             "订单号": "SO-RMB-PAID-1",
             "店铺": "Shopee菲律宾2店",
-            "实付金额(RMB)": "20",
-            "实付金额": "200",
-            "产品数量": "1",
+            "买家支付(RMB)": "20",
+            "买家支付": "200",
+            "销售数量": "1",
             "利润(RMB)": "5",
         }
 
@@ -264,6 +281,7 @@ async def test_orders_monthly_atomic_prefers_rmb_paid_amount_over_local_paid_amo
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.alias_registry")
             await execute_sql_target(
                 session, "semantic.shop_identity_resolution_candidates"
             )
@@ -316,8 +334,8 @@ async def test_orders_atomic_prefers_rmb_profit_over_local_profit():
                         'shopee', 'xihong', 'orders', 'daily',
                         DATE '2026-03-08', DATE '2026-03-08', DATE '2026-03-08',
                         TIMESTAMP '2026-03-08 00:00:00', TIMESTAMP '2026-03-08 23:59:59',
-                        '{"store_name":"Shopee菲律宾2店","order_id":"SO-RMB-PROFIT-1","buyer_payment_rmb":"20","buyer_payment":"200","profit_rmb":"5","profit":"50","product_quantity":"1"}'::jsonb,
-                        '["store_name","order_id","buyer_payment_rmb","buyer_payment","profit_rmb","profit","product_quantity"]'::jsonb,
+                        '{"store_name":"Shopee菲律宾2店","订单编号":"SO-RMB-PROFIT-1","买家支付(RMB)":"20","买家支付":"200","利润(RMB)":"5","利润":"50","销售数量":"1"}'::jsonb,
+                        '["store_name","订单编号","买家支付(RMB)","买家支付","利润(RMB)","利润","销售数量"]'::jsonb,
                         'hash-rmb-profit-priority-1', TIMESTAMP '2026-06-01 10:00:00', 'PHP'
                     )
                     """
@@ -326,6 +344,7 @@ async def test_orders_atomic_prefers_rmb_profit_over_local_profit():
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.alias_registry")
             await execute_sql_target(
                 session, "semantic.shop_identity_resolution_candidates"
             )
@@ -407,8 +426,8 @@ async def test_orders_atomic_resolves_shop_alias_via_shop_account_alias():
                         'shopee', 'xihong', 'orders', 'monthly',
                         DATE '2025-09-25', DATE '2025-09-01', DATE '2025-09-30',
                         TIMESTAMP '2025-09-01 00:00:00', TIMESTAMP '2025-09-30 23:59:59',
-                        '{"store_name":"3C Shop","order_id":"SO-1","buyer_payment_rmb":"100","product_quantity":"2"}'::jsonb,
-                        '["store_name","order_id","buyer_payment_rmb","product_quantity"]'::jsonb,
+                        '{"store_name":"3C Shop","订单编号":"SO-1","买家支付(RMB)":"100","销售数量":"2"}'::jsonb,
+                        '["store_name","订单编号","买家支付(RMB)","销售数量"]'::jsonb,
                         'hash-shop-alias-1', TIMESTAMP '2025-09-26 10:00:00', 'SGD'
                     )
                     """
@@ -417,6 +436,7 @@ async def test_orders_atomic_resolves_shop_alias_via_shop_account_alias():
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.alias_registry")
             await execute_sql_target(
                 session, "semantic.shop_identity_resolution_candidates"
             )
@@ -492,8 +512,8 @@ async def test_orders_atomic_resolves_prefixed_store_label_via_normalized_alias(
                         'shopee', 'xihong', 'orders', 'monthly',
                         DATE '2026-03-31', DATE '2026-03-01', DATE '2026-03-31',
                         TIMESTAMP '2026-03-01 00:00:00', TIMESTAMP '2026-03-31 23:59:59',
-                        '{"店铺":"Shopee新加坡1店","order_id":"SO-PREFIX-1","buyer_payment_rmb":"120","profit_rmb":"30"}'::jsonb,
-                        '["店铺","order_id","buyer_payment_rmb","profit_rmb"]'::jsonb,
+                        '{"店铺":"Shopee新加坡1店","订单编号":"SO-PREFIX-1","买家支付(RMB)":"120","利润(RMB)":"30"}'::jsonb,
+                        '["店铺","订单编号","买家支付(RMB)","利润(RMB)"]'::jsonb,
                         'hash-shop-prefix-1', TIMESTAMP '2026-04-01 10:00:00', 'SGD'
                     )
                     """
@@ -502,6 +522,7 @@ async def test_orders_atomic_resolves_prefixed_store_label_via_normalized_alias(
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.alias_registry")
             await execute_sql_target(
                 session, "semantic.shop_identity_resolution_candidates"
             )
@@ -556,8 +577,8 @@ async def test_orders_atomic_marks_account_level_shop_id_without_alias_as_unknow
                         'shopee', 'xihong', 'orders', 'monthly',
                         DATE '2026-03-31', DATE '2026-03-01', DATE '2026-03-31',
                         TIMESTAMP '2026-03-01 00:00:00', TIMESTAMP '2026-03-31 23:59:59',
-                        '{"店铺":"Shopee未认领店铺","order_id":"SO-UNKNOWN-1","buyer_payment_rmb":"120","profit_rmb":"30"}'::jsonb,
-                        '["店铺","order_id","buyer_payment_rmb","profit_rmb"]'::jsonb,
+                        '{"店铺":"Shopee未认领店铺","订单编号":"SO-UNKNOWN-1","买家支付(RMB)":"120","利润(RMB)":"30"}'::jsonb,
+                        '["店铺","订单编号","买家支付(RMB)","利润(RMB)"]'::jsonb,
                         'hash-shop-unknown-1', TIMESTAMP '2026-04-01 10:00:00', 'SGD'
                     )
                     """
@@ -566,6 +587,7 @@ async def test_orders_atomic_marks_account_level_shop_id_without_alias_as_unknow
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.alias_registry")
             await execute_sql_target(
                 session, "semantic.shop_identity_resolution_candidates"
             )
@@ -629,8 +651,8 @@ async def test_orders_atomic_resolves_shop_alias_via_shop_account_store_name_fal
                         'tiktok', 'xihong', 'orders', 'monthly',
                         DATE '2025-09-24', DATE '2025-09-01', DATE '2025-09-30',
                         TIMESTAMP '2025-09-01 00:00:00', TIMESTAMP '2025-09-30 23:59:59',
-                        '{"store_name":"Philippines Shop 1","order_id":"TK-1","buyer_payment":"88","product_quantity":"1"}'::jsonb,
-                        '["store_name","order_id","buyer_payment","product_quantity"]'::jsonb,
+                        '{"store_name":"Philippines Shop 1","订单号":"TK-1","买家实付金额(RMB)":"88","销售数量":"1"}'::jsonb,
+                        '["store_name","订单号","买家实付金额(RMB)","销售数量"]'::jsonb,
                         'hash-account-alias-1', TIMESTAMP '2025-09-25 10:00:00', 'PHP'
                     )
                     """
@@ -639,6 +661,7 @@ async def test_orders_atomic_resolves_shop_alias_via_shop_account_store_name_fal
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.alias_registry")
             await execute_sql_target(
                 session, "semantic.shop_identity_resolution_candidates"
             )
@@ -714,8 +737,8 @@ async def test_orders_monthly_atomic_resolves_tiktok_alias_to_canonical_shop_id(
                         'tiktok', 'xihong', 'orders', 'monthly',
                         DATE '2026-03-31', DATE '2026-03-01', DATE '2026-03-31',
                         TIMESTAMP '2026-03-01 00:00:00', TIMESTAMP '2026-03-31 23:59:59',
-                        '{"店铺":"TK新加坡2店","订单号":"TK-MONTH-1","买家支付(RMB)":"188.23","出库数量":"1","利润(RMB)":"18"}'::jsonb,
-                        '["店铺","订单号","买家支付(RMB)","出库数量","利润(RMB)"]'::jsonb,
+                        '{"店铺":"TK新加坡2店","订单号":"TK-MONTH-1","买家实付金额(RMB)":"188.23","出库数量":"1","利润(RMB)":"18"}'::jsonb,
+                        '["店铺","订单号","买家实付金额(RMB)","出库数量","利润(RMB)"]'::jsonb,
                         'hash-tiktok-monthly-alias-1', TIMESTAMP '2026-04-01 10:00:00', 'SGD'
                     )
                     """
@@ -724,6 +747,7 @@ async def test_orders_monthly_atomic_resolves_tiktok_alias_to_canonical_shop_id(
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.alias_registry")
             await execute_sql_target(
                 session, "semantic.shop_identity_resolution_candidates"
             )
@@ -771,10 +795,10 @@ async def test_orders_monthly_atomic_uses_account_authority_over_generic_source_
         raw_data = {
             store_key: store_label,
             "shop_id": "xihong",
-            "order_id": "SO-SG-3-1",
-            "buyer_payment_rmb": "100",
-            "product_quantity": "1",
-            "profit_rmb": "10",
+            "订单编号": "SO-SG-3-1",
+            "买家支付(RMB)": "100",
+            "销售数量": "1",
+            "利润(RMB)": "10",
         }
 
         async with session_factory() as session:
@@ -830,6 +854,7 @@ async def test_orders_monthly_atomic_uses_account_authority_over_generic_source_
             await session.commit()
 
         async with session_factory() as session:
+            await execute_sql_target(session, "semantic.alias_registry")
             await execute_sql_target(
                 session, "semantic.shop_identity_resolution_candidates"
             )
@@ -874,10 +899,10 @@ async def test_shop_month_kpi_aligns_orders_alias_and_traffic_platform_shop_id()
         order_raw = {
             store_key: f"Shopee{alias_value}",
             "shop_id": "xihong",
-            "order_id": "SO-SG-3-1",
-            "buyer_payment_rmb": "100",
-            "product_quantity": "1",
-            "profit_rmb": "10",
+            "订单编号": "SO-SG-3-1",
+            "买家支付(RMB)": "100",
+            "销售数量": "1",
+            "利润(RMB)": "10",
         }
         traffic_raw = {
             "visitor_count": "200",
@@ -973,6 +998,7 @@ async def test_shop_month_kpi_aligns_orders_alias_and_traffic_platform_shop_id()
 
         async with session_factory() as session:
             for target in (
+                "semantic.alias_registry",
                 "semantic.shop_identity_resolution_candidates",
                 "semantic.fact_orders_monthly_atomic_mv",
                 "semantic.fact_orders_monthly_atomic",

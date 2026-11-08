@@ -7,19 +7,27 @@ DROP MATERIALIZED VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv CASCADE;
 
 CREATE MATERIALIZED VIEW semantic.fact_orders_monthly_atomic_mv AS
 WITH raw_monthly_orders AS MATERIALIZED (
-    SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+    SELECT
+        platform_code, shop_id, data_domain, granularity,
+        metric_date, raw_data, data_hash, ingest_timestamp
     FROM b_class.fact_shopee_orders_monthly
     UNION ALL
-    SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+    SELECT
+        platform_code, shop_id, data_domain, granularity,
+        metric_date, raw_data, data_hash, ingest_timestamp
     FROM b_class.fact_tiktok_orders_monthly
     UNION ALL
-    SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+    SELECT
+        platform_code, shop_id, data_domain, granularity,
+        metric_date, raw_data, data_hash, ingest_timestamp
     FROM b_class.fact_miaoshou_orders_monthly
 ),
 mapped_monthly_orders AS MATERIALIZED (
     SELECT
         metric_date,
         platform_code,
+        data_domain,
+        granularity,
         NULLIF(TRIM(COALESCE(shop_id, '')), '') AS source_shop_id,
         NULLIF(
             TRIM(
@@ -72,42 +80,21 @@ mapped_monthly_orders AS MATERIALIZED (
             NULLIF(TRIM(raw_data->>'order_create_time'), ''),
             NULLIF(TRIM(raw_data->>'order_time'), '')
         ) AS order_time_raw,
-        COALESCE(
-            raw_data->>'buyer_payment_rmb',
-            raw_data->>'买家支付(RMB)',
-            raw_data->>'买家实付金额_rmb',
-            raw_data->>'买家实付金额(RMB)',
-            raw_data->>'paid_amount_rmb',
-            raw_data->>'实付金额_rmb',
-            raw_data->>'实付金额(RMB)',
-            raw_data->>'buyer_payment',
-            raw_data->>'买家支付',
-            raw_data->>'实付金额',
-            raw_data->>'买家实付金额',
-            raw_data->>'总收入',
-            raw_data->>'paid_amount',
-            raw_data->>'Paid Amount'
-        ) AS paid_amount_raw,
-        COALESCE(
-            raw_data->>'利润(RMB)',
-            raw_data->>'profit_rmb',
-            raw_data->>'利润',
-            raw_data->>'profit',
-            raw_data->>'毛利',
-            raw_data->>'Profit'
-        ) AS profit_raw,
-        COALESCE(
-            raw_data->>'产品数量',
-            raw_data->>'商品数量',
-            raw_data->>'数量',
-            raw_data->>'件数',
-            raw_data->>'销售数量',
-            raw_data->>'出库数量',
-            raw_data->>'product_quantity',
-            raw_data->>'quantity',
-            raw_data->>'qty',
-            raw_data->>'item_quantity'
-        ) AS product_quantity_raw,
+        -- ── 取数一律走别名表(单一事实源) ──────────────────────────
+        --
+        -- 以前这里是手写 COALESCE 链, **兜底会落到裸名列**:
+        -- `买家实付金额(RMB)` 缺 → 落到 `买家实付金额`(原币)
+        -- `利润(RMB)`       缺 → 落到 `利润`(原币)
+        -- 源表里每个金额列都有「原币 + (RMB)」两列, 实测两者均值差约 3 倍
+        -- ⇒ 兜底到裸名 = 混币种。
+        --
+        -- ⇒ 改成走别名表: 别名表**只登 (RMB) 变体** ⇒ 取不到就是 NULL,
+        -- 绝不悄悄换成原币。
+        semantic.resolve_alias(raw_data, data_domain, 'paid_amount', platform_code, granularity) AS paid_amount_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'profit', platform_code, granularity) AS profit_raw,
+        -- 列名 ``product_quantity`` / 语义键 ``sales_volume`` —— 同上(见
+        -- ``sql/semantic/orders_atomic.sql`` 的同名注释)。
+        semantic.resolve_alias(raw_data, data_domain, 'sales_volume', platform_code, granularity) AS product_quantity_raw,
         data_hash,
         ingest_timestamp
     FROM raw_monthly_orders
@@ -128,6 +115,8 @@ normalized_monthly_orders AS MATERIALIZED (
             date_trunc('month', metric_date)::date
         ) AS metric_date,
         platform_code,
+        data_domain,
+        granularity,
         source_shop_id,
         store_label_raw,
         source_platform_shop_id,
@@ -239,6 +228,8 @@ resolved_monthly_orders AS MATERIALIZED (
     SELECT
         m.metric_date,
         m.platform_code,
+        m.data_domain,
+        m.granularity,
         CASE
             WHEN resolved.candidate_count = 1
             THEN COALESCE(NULLIF(TRIM(canonical.platform_shop_id), ''), resolved.resolved_shop_id)
