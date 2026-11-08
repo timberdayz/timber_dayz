@@ -402,6 +402,22 @@ services:
       APP_ENV: production
       RUN_MIGRATIONS: "0"
       APP_VERSION: ${IMAGE_TAG}
+      # ── 飞书投影凭据（2026-11-22 补）────────────────────────────
+      # ⚠️ 为什么必须显式注入：celery-worker **只定义在本 overlay 里**
+      #    （base 的 docker-compose.yml 没有这个 service），所以它拿不到
+      #    base 里 backend-api 用的 env_file: .env。
+      #    compose 的 env_file / environment 都不会自动把 .env 灌进容器，
+      #    不显式列出来 ⇒ 跑飞书投影任务的 celery 容器没有凭据 ⇒
+      #    任务直接失败（"Feishu app credentials are not configured"）。
+      #    现象：最后一次成功投影停在 2026-11-01，之后的 price_adjust 任务全失败。
+      #
+      # 这里用 environment 插值而不是 env_file：部署脚本会把 .env 清理成
+      # .env.cleaned 再用 --env-file 传给 compose，插值拿到的是**已去 CRLF、
+      # 已去引号**的干净值；直接 env_file 读原始 .env 反而可能带上脏字符。
+      FEISHU_PRODUCT_APP_ID: ${FEISHU_PRODUCT_APP_ID:-}
+      FEISHU_PRODUCT_APP_SECRET: ${FEISHU_PRODUCT_APP_SECRET:-}
+      FEISHU_PRODUCT_BASE_TOKEN: ${FEISHU_PRODUCT_BASE_TOKEN:-}
+      FEISHU_OPEN_BASE_URL: ${FEISHU_OPEN_BASE_URL:-https://open.feishu.cn}
       DB_POOL_SIZE: 2
       DB_MAX_OVERFLOW: 2
       CPU_EXECUTOR_WORKERS: 1
