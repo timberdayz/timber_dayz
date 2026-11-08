@@ -17,6 +17,18 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, inspect
 
+# 门禁脚本既可能被当成 `python scripts/validate_migrations_fresh_db.py` 运行
+# (此时 sys.path[0] 是 scripts/), 也可能被 `python -m scripts.validate_...` 运行
+# (此时 sys.path[0] 是仓库根) ⇒ 两种都要能 import 到同目录模块。
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from scripts.migration_gate_seed_data import (  # noqa: E402
+    seed_migration_gate_accounts,
+    verify_seed_accounts,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PORT = 5433
 DEFAULT_DOCKER_RUN_TIMEOUT_SECONDS = 180
@@ -28,6 +40,27 @@ IMAGE = "postgres:15"
 # Docker 随机名），下一次运行启动前先清一次，既不会撞 name conflict，
 # 也不会让孤儿容器长期占着磁盘。
 TEMP_CONTAINER_NAME = "xihong_freshdb_migration_gate"
+
+#: 第一段迁移的目标节点 —— 20261116 的**前一个**节点。
+#:
+#: 为什么要在中间停一次
+#: ----------------------
+#: ``20261116_add_tiktok_export_store_name_aliases`` 是**数据修复型**迁移:
+#: 它给 6 个已存在的 TikTok 店铺账号补「导出店名」别名, 动手前做 fail-closed
+#: 前置检查(账号存在 / 区域相符 / 已启用 / 是经营店 / 别名键没被别人认领)。
+#:
+#: 全新空库上 ``core.shop_accounts`` 里没有这些账号 ⇒ 前置检查必然失败
+#: ⇒ 整条链在 20261116 中止 ⇒ 本门禁永远跑不通。
+#:
+#: 所以门禁在跑到 20261116 之前先停一下, 注入**最小前置数据**
+#: (见 ``scripts/migration_gate_seed_data.py``), 让那个前置检查**有意义**,
+#: 然后继续跑到 head。
+#:
+#: ⚠ **不采用**「改 20261116 让它在空库上 no-op」这条路:
+#: 已执行过的迁移不可改; 而且那样会把「全新部署的环境里 TikTok 导出别名不存在」
+#: 这个**真实部署缺陷**悄悄掩掉。
+PRECHECK_TARGET_REVISION = "current_schema_20261115_add_sku_platform_pricing"
+
 DATA_SYNC_CRITICAL_COLUMNS: dict[str, set[str]] = {
     "core.data_quarantine": {"catalog_file_id"},
     "core.staging_orders": {"file_id"},
@@ -250,7 +283,47 @@ def main() -> int:
         safe_print("[OK] Postgres 就绪")
 
         database_url = f"postgresql://{PG_USER}:{PG_PASSWORD}@127.0.0.1:{port}/{PG_DB}"
-        safe_print("[INFO] 执行 fail-closed current-schema migration...")
+        # ── 第一段: 跑到 20261116 的前一个节点 ────────────────────────
+        safe_print(
+            "[INFO] 第一段迁移(跑到 {rev})...".format(rev=PRECHECK_TARGET_REVISION)
+        )
+        code, out = run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "alembic-current.ini",
+                "upgrade",
+                PRECHECK_TARGET_REVISION,
+            ],
+            cwd=PROJECT_ROOT,
+            env={"DATABASE_URL": database_url},
+            timeout=300,
+        )
+        if code != 0:
+            safe_print("[FAIL] 第一段迁移失败")
+            safe_print(out[-3000:] if len(out) > 3000 else out)
+            return 1
+        safe_print("[OK] 第一段迁移成功")
+
+        # ── 注入最小前置数据(让 20261116 的 fail-closed 检查有意义)──────
+        safe_print("[INFO] 注入迁移门禁用的最小前置账号数据...")
+        try:
+            inserted = seed_migration_gate_accounts(database_url)
+        except Exception as exc:  # noqa: BLE001 —— 失败必须说清楚是哪一步
+            safe_print("[FAIL] 注入前置账号数据失败: {exc}".format(exc=exc))
+            return 1
+        seed_problems = verify_seed_accounts(database_url)
+        if seed_problems:
+            safe_print("[FAIL] 前置账号数据校验未通过")
+            for problem in seed_problems:
+                safe_print("  - {problem}".format(problem=problem))
+            return 1
+        safe_print("[OK] 前置账号数据就位(本次新增 {n} 行)".format(n=inserted))
+
+        # ── 第二段: 跑到 head ─────────────────────────────────────────
+        safe_print("[INFO] 第二段迁移(跑到 head)...")
         code, out = run(
             [
                 sys.executable,
