@@ -165,7 +165,7 @@
     `semantic.resolve_alias_normalized(raw_data, 'orders', '<standard_field>', platform_code, granularity)`
   - **保留** `raw_data->>'...'` 的精确匹配作为第一优先级（函数内部已按 confidence/source 排序）
 - **不改**：`products_atomic.sql`（已是这套）
-- **迁移**：`current_schema_20261204_semantic_orders_alias_resolve`
+- **迁移**：`current_schema_20261206_semantic_orders_alias_resolve`
   - 落别名资产 + 重建 `semantic.fact_orders_atomic` 及其物化视图
 - **验收**：
   - 费用类字段解析率 **从 0% → >0%**（shopee monthly 6 个费用字段）
@@ -218,8 +218,16 @@
 
 | 迁移 | 内容 |
 |---|---|
-| `current_schema_20261204_semantic_orders_alias_resolve` | 别名资产（orders 域扩充）+ `semantic.fact_orders_atomic` 重建 + 物化视图重建 + mart 重建 |
-| `current_schema_20261205_semantic_orders_nullable_costs` | 出口去 COALESCE + `platform_total_cost_known_items` 新列 |
+| `current_schema_20261206_semantic_orders_alias_resolve` | 别名资产（orders 域扩充）+ `semantic.fact_orders_atomic` 重建 + 物化视图重建 + mart 重建 + 出口去 COALESCE + `platform_total_cost_known_items` 新列 |
+
+> 阶段 2 与阶段 3 最终**合并成一条迁移**（20261206）：改的是同一个视图，
+> 阶段 3 还新增了列 ⇒ 物化视图必须 drop + 重建，拆开会出现「已切别名但出口
+> 仍是假 0」的**半截状态**，而且要重建两次（生产实测单次全量重算 114.6 秒）。
+>
+> revision id 从 20261204 顺延到 20261206：并行分支先落地了
+> `current_schema_20261205_warehouse_name_aliases` ⇒ 本迁移必须接在新 head 之后，
+> 否则 `alembic get_heads()` 会返回**两个 head**（部署脚本 fail-closed 拒绝执行）。
+> **已执行的迁移不可改** ⇒ 走「新增一条」而不是「改历史」。
 
 > 迁移**自包含**（不 import backend），资产从 `sql/` 读；revision id ≤ 64 字符。
 

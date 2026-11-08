@@ -543,3 +543,399 @@ GitHub Actions `Deploy to Production`（run **42407274803**）结论 **success**
 | V2-1 | `scripts/validate_migrations_fresh_db.py` 在**空库**上仍失败 | 20261116 迁移要求 6 个 TikTok 账号存在，空库没有；该脚本**不在任何 CI 工作流**里，不阻断 tag 流水线；生产 6/6 账号满足 ⇒ 按 V2 单独处理，且**已执行迁移不可改** |
 | V2-2 | `modules/services/ingestion_worker.py::_ingest_traffic_store_file` 的 `def emit` 定义在 for 循环外且仅自调用 ⇒ 其体内逐行写入是死代码 | `blame` 显示来自 2026-01-07 的 `634a90ef`，**早于 v7.15.5**，非本轮引入 ⇒ 本次仅做最小 lint 修复（`nonlocal succeeded_rows`），结构问题单独处理 |
 | V2-3 | 语义覆盖率巡检**尚未接入 HTTP 端点** | 本轮交付的是服务层能力（`SemanticCoverageAuditService`），已在生产容器内跑通；要变成常驻监控需要挂 `GET /api/data-pipeline/semantic-coverage` 之类的只读路由 + 前端面板，本轮不做 |
+
+---
+
+## 18. 阶段 6：来源治理 + 看板状态位（2026-11-08）
+
+> 阶段归属：`docs/superpowers/plans/2026-11-08-semantic-column-map-ssot-plan.md` §5 阶段 6
+> （来源治理与可观测，方案 §10 明确「本轮**不重命名表**」⇒ 只做标注 + 提示）。
+> 本阶段**没有数据库迁移**、没有改视图、没有改既有接口字段语义。
+
+### 18.1 事实：shopee / tiktok 的订单由 **miaoshou 采集器**提供
+
+| 证据 | 结论 |
+| --- | --- |
+| 2026-11 数据里 `b_class.fact_shopee_orders_*` / `fact_tiktok_orders_*` 的 `shop_account_id` **全为 `miaoshou_real_001`** | 这些表的数据由 miaoshou 采集器写入 |
+| `fact_miaoshou_orders_*` 与 shopee/tiktok 的 manual 表在 2026-11 都是 **0 行** | 「按平台各采各的」这个心智模型是错的 |
+| 采集落盘 12:24:57 → `semantic.fact_orders_atomic_mv` 12:29:00 → `semantic.fact_orders_monthly_atomic_mv` 12:31:03 | 采集完成 → 语义层就绪之间约 **70 秒**（月粒度约 6 分钟） |
+
+⇒ **表名里的平台前缀 ≠ 采集器**。排查「订单数据没有 / 不对」时要去 **miaoshou 采集侧**看，
+而不是去 shopee / tiktok 的采集配置里找 orders 域。
+
+### 18.2 来源标注落点（任务 6.1）
+
+| 落点 | 内容 |
+| --- | --- |
+| `backend/services/collection_contracts.py` | **代码级 SSOT**：`ORDER_SOURCE_PROVIDER_BY_PLATFORM = {"shopee": "miaoshou", "tiktok": "miaoshou"}` + `get_order_source_provider()` / `build_order_source_note()` / `build_missing_order_source_note()` |
+| `backend/services/data_pipeline/order_source_governance.py` | 巡检：`audit_collection_config_order_sources()`（纯函数）+ `collect_collection_order_source_audit()`（读 `core.collection_configs`） |
+| `GET /api/collection/config-order-source` | **采集侧**巡检接口（新增，只读）：shopee / tiktok 的采集配置**不含 orders 域**时直接提示「shopee 订单需由 miaoshou 采集器提供」；反过来若配置里**声明了** orders 域，则提示与 miaoshou 采集器**重复采集** |
+| `backend/schemas/collection_order_source.py` | 上述接口的响应契约（独立模块 ⇒ 不去动 `backend/schemas/collection.py` 的历史排版债务） |
+
+⚠️ 采集配置是**数据库表**（`core.collection_configs`）⇒ 按方案要求**不改迁移、不改表数据**，
+只在代码里登记来源约定并做校验 + 提示。
+
+### 18.3 看板状态位（任务 6.2）
+
+新增**只读**服务 `backend/services/data_pipeline/semantic_readiness_service.py`，
+状态位挂在看板 `meta.semantic_readiness`（**新增字段**，既有 `meta.data_status`
+的空周期 / 降级语义**完全不变**）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `status` | `fresh`（语义层已包含最新采集）/ `updating`（采集已完成、语义层未就绪）/ `stale`（超阈值）/ `unknown`（既无采集入库记录也无语义层刷新记录，判不了） |
+| `last_ingest_at` | 最新一次采集入库时间（源表 `max(ingest_timestamp)`） |
+| `last_semantic_ready_at` | 语义层最近一次**刷新成功**时间 |
+| `pending_seconds` / `updating_window_seconds` / `max_age_days` / `business_age_days` / `source_status` | 判定过程的中间量，便于排查 |
+
+判定顺序（先判源数据新旧，再判语义层是否跟上）：
+
+1. 源数据超出新鲜度阈值 ⇒ `stale`（`source_data_exceeds_freshness_threshold`）
+2. 既无采集入库记录、又无语义层刷新记录 ⇒ `unknown`
+3. 有语义层刷新记录但无采集入库记录 ⇒ `fresh`（没有待处理的采集）
+4. `last_semantic_ready_at ≥ last_ingest_at` ⇒ `fresh`
+5. 语义层未跟上且等待时长 ≤ 宽容窗口（默认 30 分钟，可用
+   `SEMANTIC_READINESS_UPDATING_WINDOW_SECONDS` 覆盖）⇒ `updating`
+6. 语义层未跟上且已超窗口 ⇒ `stale`
+
+**复用既有机制（不另起一套并行状态）**：
+
+- 「语义层什么时候就绪」→ `ops.data_freshness_log.last_succeeded_at`
+  （与 `refresh_validation._target_is_fresh_enough` 同一份口径）；
+- 「源数据有多旧」→ `source_freshness_service.classify_source_freshness()` +
+  `max_age_days_for()`（阈值、链级例外、环境变量覆盖全部继承）；
+- 「哪些源表在用」→ 与看板 freshness 侧同一份订单源表清单（9 张）。
+
+暴露面：
+
+- 看板：`meta.semantic_readiness`（`business-overview/kpi` 与 `business-overview/bootstrap`）；
+- 巡检：`GET /api/data-pipeline/semantic-readiness`；
+- 前端：`BusinessOverview.vue` 在 `updating` / `stale` 时显示「数据更新中（语义层尚未就绪）」告警
+  （**新增**告警，既有 freshness / degraded / identity 三类告警不变）。
+
+### 18.4 本阶段明确不做
+
+| # | 事项 | 理由 |
+| --- | --- | --- |
+| V2-4（沿用） | 重命名 `fact_*_orders_*` 表 | 方案 §10 已决定：改名涉及迁移与大量查询，收益仅可读性、风险中等 ⇒ 本轮只标注 + 提示 |
+| — | 改 `sql/semantic/orders_atomic.sql` 的 UNION 表清单 | 由主会话处理（避免与主会话冲突） |
+| — | 改 `backend/services/semantic_coverage_audit_service.py` | 阶段 5 由另一位同事负责；本阶段的采集侧提示落在自己的文件里 |
+| — | 数据库迁移 | 采集配置在 `core.collection_configs`（数据库表）⇒ 只做代码标注 + 校验，不改表数据 |
+
+## 19. 阶段 1~5 实施记录（2026-11-08）
+
+本节记录 orders 域「语义层单一事实源（SSOT）+ 覆盖率巡检」六个阶段的**实际落地
+结果与验收证据**。方案见 `docs/superpowers/plans/2026-11-08-semantic-column-map-ssot-plan.md`
+（提交 `004e1a62`），本节只记「做成了什么 / 怎么证明 / 什么没做」。
+
+### 19.1 实施顺序与两处合并决策
+
+| 阶段 | 交付物 | 状态 |
+| --- | --- | --- |
+| 1 字典扩充 | `backend/services/semantic_field_registry.py` | 完成 |
+| 2 视图取数切别名表 | `sql/semantic/orders_atomic.sql`、`sql/semantic/orders_monthly_atomic_mv.sql`、`scripts/generate_semantic_alias_seed.py` | 完成 |
+| 3 出口去假 0 | 同上两个 SQL 资产 | 完成 |
+| 4 入库归一化派生 | `backend/services/orders_ingestion_normalizer.py` | 完成 |
+| 5 巡检输出真实列名候选 | `backend/services/semantic_coverage_audit_service.py` | 完成 |
+| 6 来源治理 + 看板状态位 | 见 §18 | 完成 |
+
+**合并决策 1：阶段 2 + 阶段 3 合并成一条迁移（20261206）。**
+两条改的是**同一个视图**，阶段 3 还新增了列 ⇒ 物化视图必须 drop + 重建（REFRESH
+会因列集变化报错）。拆开 = 物化视图重建两次（生产实测单次全量重算 114.6 秒），
+中间还会出现「已切别名但出口仍是假 0」的**半截状态**。
+
+**合并决策 2：迁移 20261206 同时承担「别名资产落地 + 视图/MV/下游重建」。**
+迁移路径唯一：`python scripts/run_current_schema_migrations.py`（fail-closed、无
+downgrade）。迁移里 `DROP MATERIALIZED VIEW` **刻意不带 CASCADE**，避免误伤不在
+刷新登记表里的对象。
+
+### 19.2 阶段 1 · 字典扩充（SSOT）
+
+`backend/services/semantic_field_registry.py` 是**唯一事实源**，别名表 / 视图 SQL /
+入库归一化 / 巡检全部由它派生。
+
+**实测得来的三条硬事实（决定了下面所有设计）**：
+
+1. 源表每个金额列**成对出现**：`X`（原币）与 `X(RMB)`（人民币），均值差 2~3 倍
+   （买家支付 240.11 vs 72.03；利润 27.98 vs 11.06；仓库操作费 11.56 vs 4.99；
+   订单原始金额 269.53 vs 78.72；卖家支付运费 -40.36 vs -14.13；广告成本 20.51 vs 6.71）
+   ⇒ 裸名与 `(RMB)` 是**两个不同的业务事实**，不是同一个字段的两种写法。
+2. `normalize_alias("X(RMB)") == normalize_alias("X")` ⇒ orders 域**必须逐字匹配**
+   （`semantic.resolve_alias`），禁用 `resolve_alias_normalized`。
+3. 平台间同业务不同列名：shopee `买家支付(RMB)` / tiktok `买家实付金额(RMB)`；
+   `Shopee平台佣金(RMB)` / `TikTok 平台佣金(RMB)`；`卖家支付运费(RMB)` / `商家运费(RMB)`；
+   `订单原始金额(RMB)` / `产品原价(RMB)`。
+
+**落点**：
+
+- `ORDER_SEMANTIC_ALIASES` 重写为真实源表头（**只登 `(RMB)` 变体** + 身份/维度列）；
+- 新增 `ORDER_PLATFORM_ALIASES`（结构：平台 → {字段: 别名}），解决「同业务不同列名」；
+- 新增 `DOMAIN_PLATFORM_SEMANTIC_ALIASES`、`DOMAIN_CLOSED_ALIAS_DOMAINS`、
+  `ORDER_PLATFORM_COST_COMPONENT_FIELDS`、`ORDER_RETIRED_FIELDS`；
+- `ORDER_STANDARD_FIELDS` 改为从字典派生（不再手写清单）；
+- 新增字段定义：`order_original_amount` / `warehouse_operation_fee` / `shipping_fee` /
+  `promotion_fee` / `platform_deduction_fee` / `platform_voucher` / `platform_service_fee` /
+  `refund_amount` / `estimated_settlement_amount` / `settled_amount` / `seller_voucher` /
+  `order_status` / `product_sku`；`paid_amount` / `profit` / `purchase_amount` /
+  `platform_commission` 带 `order_level_amount: True`；`sales_amount` 标记 `retired: True`；
+- 新增封闭域逐字索引 `_build_exact_closed_domain_alias_index()`：
+  `infer_semantic_key_for_domain` 对 orders 域**只做逐字匹配**，认不出返回 `None`
+  （实测 `买家支付(RMB)`→`paid_amount`、`买家支付`→`None`、`利润(RMB)`→`profit`、
+  `利润`→`None`）；
+- 封闭域分支额外命中**用户人工确认过的全局别名**（域 `*`）—— 「一处生效」是产品
+  承诺；但**只取确认过的**部分，builtin 的全局裸名在 orders 域指的是原币列，
+  放进来等于静默混币种。
+
+### 19.3 阶段 2 · 视图取数切别名表
+
+- `sql/semantic/orders_atomic.sql`：`mapped` CTE 的取数链**全部**换成
+  `semantic.resolve_alias(raw_data, data_domain, '<field>', platform_code, granularity)`
+  （22 处）；`sales_amount_raw` 改为 `NULL::text`。
+- `sql/semantic/orders_monthly_atomic_mv.sql`：`paid_amount` / `profit` /
+  `product_quantity` 三条链换成 `resolve_alias`；raw/mapped/normalized/resolved CTE
+  补齐 `data_domain` / `granularity`。
+- `backend/services/semantic_alias_registry.py`：`build_domain_alias_records` 支持
+  **平台维度**（`platform_code` 入记录）、封闭域不补全局裸名、平台字段不登记通用别名。
+- `scripts/generate_semantic_alias_seed.py`：`SEED_COLUMNS` 增 `platform_code`；
+  `SEED_DOMAINS = ("products", "orders")`；正则/解析/比对/剪枝全部带平台维度。
+- `sql/semantic/semantic_alias_registry.sql` 由生成器产出（**212 条** seed：
+  orders 域通用行 + 11 行平台行），并修掉一个潜在缺陷：建表语句原本漏
+  `normalized_alias` 列（该列由迁移 20261130 单独 ALTER 出来 ⇒ 空库执行资产会炸），
+  现已补进 `CREATE TABLE`。
+- 排序规则：`semantic.resolve_alias` 按「平台精确匹配 → 粒度精确匹配 → 置信度 →
+  来源 → id」⇒ 平台精确匹配优先于通用行。
+
+### 19.4 阶段 3 · 出口去假 0
+
+硬原则：**歧义宁可落 unknown + 报警，绝不静默猜**。
+
+- `sales_amount` **废止**（保留列、恒 NULL）：源表没有「销售额/成交金额」这一列，
+  以前命中的是 tiktok 的「总收入」（原币）⇒ 与 `paid_amount` 抢同一个业务含义、
+  币种还不对。
+- `paid_amount` / `profit` / `product_quantity` / `buyer_count` 去掉 `COALESCE(..., 0)`
+  —— 缺项就是 NULL（「不知道」），由下游判断完整度。
+- 新增末尾列 `platform_total_cost_known_items`（0..6，统计 6 个成本项里非空个数）；
+  `platform_total_cost_itemized` 保持「**已知项之和**」。
+
+> 为什么不把 `platform_total_cost_itemized` 改成「6 项全齐才给值」：那样所有行恒
+> NULL ⇒ 指标作废。方案 §4.2 的选项 B（已知项之和 + 完整度列）既能算、又不撒谎。
+
+### 19.5 阶段 4 · 入库归一化派生
+
+- `ORDER_LEVEL_AMOUNT_FIELDS` 改为**从字典派生**（159 项），不再手工维护 40+ 个
+  表头 —— 字典加字段时清单自动跟随（这正是 SSOT 的价值）。
+- 订单号缺失的行**不再继承上一行**：改为该行独立成行，占位符
+  `__missing_order_id__:<行号>`。继承会同时造成「跨单错配」与「少算」两个错误；
+  现在是**宁可多算也不错配/不少算**。
+- 派生口径由**实测裁决**（多行订单内取值形态：`head_only` = 源表合并单元格 =
+  订单级；`repeat_same` / `vary` = 行级）：
+  `买家支付(RMB)` / `订单原始金额(RMB)` / `服务费(RMB)` / `Shopee平台佣金(RMB)` 等
+  为**订单级**；`销售数量` / `采购成本(RMB)` / tiktok `产品原价(RMB)` 为**行级**
+  ⇒ 刻意**不清空**。
+- 量化影响（**仅对新入库数据生效**，存量需重跑入库）：
+  `Shopee平台佣金(RMB)` 303,398.64 → 229,672.83（-24.3%）；
+  `服务费(RMB)` 73,781.88 → 54,495.81（-26.1%）；
+  `Shopee voucher(RMB)` 152,459.34 → 114,895.89（-24.6%）；
+  `卖家voucher(RMB)` 49,740.41 → 35,600.47（-28.4%）；
+  `预估回款金额(RMB)` 445,793.41 → 423,098.87（-5.1%，旧清单误写成「预计回款金额」
+  = 错字，从未生效）。
+
+### 19.6 阶段 5 · 巡检输出真实列名候选
+
+- orders 域解析率改走 `semantic.resolve_alias`（**与视图同路径**，不再另算一套）；
+- 解析率 0% 时输出**源表真实列名候选**（保留原始列名，含 `(RMB)` 后缀、全角括号、
+  `.1` 分块后缀），排序确定性（相似度 + 原始列名）；
+- orders 域字段集合从字典 `ORDER_STANDARD_FIELDS` 派生，products 域从
+  `DOMAIN_SEMANTIC_ALIASES["products"]` 派生（排除项逐条注明原因）；
+- 新增**平台维度诊断**（`SemanticCoverageReport.platforms`），例如
+  「shopee 平台有 2/26 个标准字段在所有粒度下都解析不出来」。
+
+### 19.7 开发库实跑与口径复核（硬验收）
+
+迁移 `current_schema_20261206_semantic_orders_alias_resolve` 在开发库**实跑成功**
+（`[OK] Current-schema migration action completed: upgrade`）。物化视图重建耗时：
+订单 MV + 索引 + 月度 MV **55.7 秒**（本机；生产实测单次 114.6 秒）⇒ 迁移全程临时
+把 `statement_timeout` 抬到 30 分钟。
+
+**口径复核（迁移后，一字未变）**：
+
+| 口径 | shopee | tiktok |
+| --- | --- | --- |
+| `mart.platform_month_kpi` 2026-11 GMV | **44,284.69** | 9,811.54 |
+| `mart.platform_month_kpi` 2026-11 订单数 | **629** | 138 |
+| `mart.platform_month_kpi` 2026-11 利润 | 11,520.99 | 3,699.21 |
+| `semantic.fact_orders_atomic` monthly SUM(paid_amount) | 1,993,149.50（29,629 行） | 402,284.04（5,254 行） |
+| `semantic.fact_orders_atomic` monthly SUM(profit) | 285,493.11 | 63,322.64 |
+
+**按预期变化（口径修正，非回归）**：
+
+| 口径 | 迁移前 | 迁移后 | 说明 |
+| --- | --- | --- | --- |
+| shopee `platform_total_cost_itemized` | 631,035.08 | **219,325.13** | 旧链命中的是**原币**服务费；按 `(RMB)` 重算才是人民币口径 |
+| tiktok `platform_total_cost_itemized` | -19,810.77 | **-6,479.59** | 同上 |
+| shopee 已知成本项数 | — | 4.36 / 6（均值） | 新列 `platform_total_cost_known_items` |
+| tiktok 已知成本项数 | — | 2.40 / 6（均值） | tiktok 无平台代金券/平台服务费/平台扣费列 |
+
+别名资产一致性：`python scripts/generate_semantic_alias_seed.py --check` → **212 条一致**。
+开发库别名落地：orders builtin 行 + 模板确认行 active；与人民币口径冲突的模板确认行
+（`profit←利润`、`platform_sku←商品SKU`）置为 `disabled`（**保留记录、可审计**）。
+
+### 19.8 数量语义键回退（product_quantity → sales_volume）
+
+实施中发现「订单域的件数列到底叫哪个语义键」在三处口径不一致：
+
+| 位置 | 原值 | 现值 |
+| --- | --- | --- |
+| `DEFAULT_CONTRACTS["orders"]` | `product_quantity` | **`sales_volume`** |
+| 模板确认（weekly） | `销售数量 → sales_volume` | 不变 |
+| 历史别名表 | `销售数量 → sales_volume` | 不变 |
+
+⇒ 以**契约 + 模板确认 + 历史别名表**三处一致的 `sales_volume` 为准；视图的**物理
+列名** `product_quantity` 保留（视图不能删列），但改从 `sales_volume` 语义键取数 ——
+**语义键与物理列名不必同名，语义键才是口径**。字典里 `sales_volume` 的 `domain`
+改为 `orders`，并带 `order_level_quantity: True`（只做登记，不参与「第 2+ 行清空」，
+因为实测「销售数量」是行级件数）。
+
+### 19.9 本轮补齐的刷新链路依赖（否则部署会炸）
+
+orders 域视图正文改走 `semantic.resolve_alias()` ⇒ **别名资产必须先落地**，否则
+建视图报 `function semantic.resolve_alias does not exist`。已在
+`backend/services/data_pipeline/refresh_registry.py` 补齐：
+
+- `PIPELINE_DEPENDENCIES`：`semantic.fact_orders_atomic`、
+  `semantic.fact_orders_monthly_atomic_mv` 增加 `semantic.alias_registry` 依赖；
+- `ASSET_PREREQUISITES`：同两个目标增加 `semantic.alias_registry` 前置。
+
+### 19.10 本轮明确不做（V2 清单）
+
+| # | 事项 | 理由 |
+| --- | --- | --- |
+| V2-a | `sql/semantic/analytics_atomic.sql` 的同类「假 0」问题 | **不在 orders 域范围**。analytics 域取数仍是手写 COALESCE 链，其 0 多为「确实无流量」的真 0；直接去掉 COALESCE 而不先补 analytics 别名，会让整个流量看板变 NULL 态。⇒ 先补 analytics 域别名，再做出口清理 |
+| V2-b | 字典登记缺口：`联盟佣金(RMB)` / `总收入(RMB)` / `回款金额(RMB)` | 实测存在且多为订单级，但字典未登记 ⇒ 不在派生集合。补登属字典语义变更 + 需重生成别名 seed |
+| V2-c | `platform_deduction_fee` | 两平台源表都无对应列 ⇒ 该字段恒缺，由巡检点名（不猜值） |
+| V2-d | `sql/metabase_models/orders_model.sql` | 仍是手写 COALESCE 链（本轮只守护了它的字段优先级，未改造） |
+| V2-e | 巡检 alias 模式性能 | orders 域 alias 模式聚合 26 字段约 92 秒（`resolve_alias` 逐行调用所致）；属口径切换的固有成本，未做 SQL 层优化 |
+| V2-f | 重命名 `fact_*_orders_*` 表 | 沿用方案 §10 决策：收益仅可读性、风险中等 |
+
+### 19.11 回归
+
+- 语义子集：`backend/tests/data_pipeline -k "semantic or alias or coverage or atomic_materialized"`
+  全绿；新增测试 `test_semantic_orders_column_resolution.py`（54 条）、
+  `test_orders_multi_sku_amount.py`（11 条）、`test_semantic_readiness_status.py`（23 条）。
+- 既有守护测试同步更新（口径变了，断言必须跟着变，而不是把断言改松）：
+  `test_orders_rmb_field_priority_sql.py`（改为守护「只走别名表 + 只登 `(RMB)` 变体」）、
+  `test_semantic_coverage_audit.py`（按 alias 模式重写）、`test_semantic_alias_single_source.py`
+  （别名表 8 列）、`test_semantic_translation_guardrails.py`（封闭域逐字路径）、
+  `test_b_cost_analysis_semantic_sql.py`（新成本口径 + 完整度列）、
+  `test_orders_semantic_mapping.py`（真实源表头样本）。
+- 全量回归 + junit 失败用例集合差 = **零新增失败**（结论见本次提交记录）。
+- `black --check` / `ruff check` 全绿。
+
+### 19.12 实施过程中踩到并修掉的五个坑（都是「口径变了 ⇒ 连带效应」）
+
+这一节记录实施期真实踩到的坑 —— 它们的共同点是：**改一处口径，会在别处
+冒出「看起来莫名其妙的回归」**。每一条都给出了根因与修法。
+
+#### 坑 1 · 别名资产的清理段必须拆成两段（否则空库演练炸）
+
+- **现象**：`backend/tests/test_schema_cleanup_rehearsal.py` 与
+  `test_dim_shops_public_retirement_rehearsal.py` 报
+  `RuntimeError: 别名表与字典不一致: 表里 builtin 行 179 条, 字典派生 0 条`。
+- **根因**：迁移 20261202 / 20261203（**已执行**）的 fail-closed 自检把
+  「``-- 陈旧 builtin 行清理`` 段里 **3 元组**的个数」当作「字典派生的
+  **products 域** builtin 行数」，与表里 `data_domain='products'` 的行数比对。
+  而本轮别名资产为了支持**平台维度**，清理段的键从 3 元组
+  `(domain, field, alias)` 变成了 4 元组 `(domain, field, alias, platform_code)`
+  ⇒ 旧正则数到 0 条。
+- **修法（不动已执行迁移）**：清理段拆成两段 ——
+  第一段（`-- 陈旧 builtin 行清理`）**只含 products 域、仍是 3 元组**
+  （保持已执行迁移依赖的形状）；第二段（`-- 陈旧 builtin 行清理(其它域, 含平台维度)`）
+  含 orders 域、**4 元组**（平台限定行是另一条记录，少了 `platform_code` 会误删）。
+  两段都在资产里 ⇒ 迁移整份执行资产 ⇒ 其它域的陈旧行照样被清。
+  生成器 `scripts/generate_semantic_alias_seed.py` 的 `render_prune_sql()`
+  现在按这个口径出两段，`extract_prune_sql()` 一起提取两段做 `--check`。
+
+#### 坑 2 · 封闭域要补「纯 ASCII 别名」通道
+
+- **现象**：模板里的英文列名（`order_no` / `sold_qty` / `buyer_paid` /
+  `profit_amount` / `shop_name`）在 orders 域**认不出来**了 ⇒ 契约用例报
+  `missing_required_keys` 多出 `order_id`。
+- **根因**：封闭域只做**逐字**匹配（这是必须的 —— 否则「利润」会认成
+  「利润(RMB)」的原币列），而英文别名在字典里写的是 `order id`（带空格），
+  逐字匹配不到 `order_no`。
+- **修法**：按域补一份**只收不含中文的别名**的归一化索引
+  （`closed_domain_ascii_alias_index()`）：
+  - 只收**该域用到的字段** ⇒ 不跨域污染；
+  - 只收**不含中文**的别名 ⇒ 中文裸名永远进不来 ⇒ 不会认到原币列。
+
+#### 坑 3 · orders 域的**英文别名**不能丢
+
+- **现象**：同上（英文列名失联）。
+- **根因**：阶段 1 重写 `ORDER_SEMANTIC_ALIASES` 时按「只登真实源表头」
+  的原则，把**英文别名**一起删了 ⇒ 既有能力回归。
+- **修法**：把英文/数字别名补回（`order_id` / `order_no` / `order no` /
+  `shop_name` / `sold_qty` / `buyer_paid` / `profit_amount` / `quantity` …）。
+  **英文别名没有币种歧义** ⇒ 逐字匹配也安全；
+  **中文裸名仍然不登**（那是原币列）。别名 seed 由 212 条变成 230 条。
+
+#### 坑 4 · 状态类字段不能进语义推断（但仍要留在别名表里）
+
+- **现象**：`backend/tests/test_workbench_template_update_flow.py` 报
+  `products.订单状态 不该被认成身份键` / `orders.订单状态 不该被认成身份键`。
+- **根因**：`order_status` 是阶段 1 新增的 orders 域维度字段，它的别名
+  「订单状态」进了**全局**别名表 ⇒ 任何域的「订单状态」列都会被认成语义键
+  ⇒ 状态一变就算新行 ⇒ 污染身份推断与去重。
+- **修法**：字典里给状态类字段加 `inferable: False`
+  （`is_inferable_semantic_key()`）——
+  推断侧跳过它（字典索引 + 运行时别名索引都跳），
+  但**别名表照旧登记** ⇒ 视图照样能取到订单状态的值。
+  两件事口径不同：**别名表是「取数」的事实源，推断是「这列是不是语义键」的判断**。
+
+#### 坑 5 · 别名资产与视图的依赖，**必须写进刷新链路**
+
+- **一度**：怕「每次刷新 orders 域都重跑别名资产」（230 行 upsert + prune），
+  于是把 `backend/services/data_pipeline/refresh_registry.py` 改成**零改动**，
+  只靠部署时的 fail-closed 迁移（`run_current_schema_migrations.py`）先落
+  别名资产 ⇒ 结果在**测试库**里报
+  `function semantic.resolve_alias(jsonb, character varying, unknown, ...) does not exist`
+  （测试库并没有先跑那条迁移）。
+  只靠「部署时先落迁移」⇒ **单刷一个 orders 视图**时别名函数不在库里 ⇒ 建视图失败。
+- **最终**：依赖**入链**，两处都声明（缺一不可）：
+  - `PIPELINE_DEPENDENCIES`（**刷新顺序**：谁先刷）——
+    `semantic.fact_orders_atomic` 与 `semantic.fact_orders_monthly_atomic_mv`
+    的依赖里都加上 `semantic.alias_registry`；
+  - `ASSET_PREREQUISITES`（**建对象前置**：资产文件必须先跑）—— 同上两个目标，
+    保证单独刷新任何一个 orders 视图时，别名表 + `semantic.resolve_alias()`
+    一定已经在库里。
+- **代价**（已知且接受）：数据刷新时多跑一次**幂等**的别名资产（230 行 upsert
+  + prune）。⇒ 两个守护用例的断言从「一个文件都不许执行」改成
+  「**只允许**执行别名资产 + **不许**执行物化视图的资产文件」——
+  守护强度**不降反升**（多了一条「物化视图绝不重建」的白名单）。
+
+### 19.13 本轮同步到开发库的最终状态
+
+| 对象 | 状态 |
+| --- | --- |
+| 别名资产 | 230 条（orders 域通用 + 平台行 + 英文别名行）；`generate_semantic_alias_seed.py --check` 一致 |
+| 订单视图 / 物化视图 | 已重建并刷新（月度 MV 重建 58.4 秒） |
+| `mart.platform_month_kpi` 2026-11 shopee | GMV **44,284.69** / 订单数 **629** / 利润 11,520.99 —— 与改造前**一字未变** |
+| `mart.platform_month_kpi` 2026-11 tiktok | GMV 9,811.54 / 138 / 3,699.21 —— 不变 |
+| `semantic.fact_orders_atomic` monthly shopee | SUM(paid_amount) 1,993,149.50 / SUM(profit) 285,493.11 / 29,629 行 / 件数 32,415 |
+| `semantic.fact_orders_atomic` monthly tiktok | 402,284.04 / 63,322.64 / 5,254 行 / 件数 5,351 |
+| 平台成本 | shopee 219,325.13（已知项 4.36/6）；tiktok -6,479.59（2.40/6） |
+
+### 19.14 收尾：别名资产依赖入链 + 守护用例加强式更新 + 迁移接新 head
+
+| 事项 | 处理 |
+| --- | --- |
+| `refresh_registry.py` 恢复 `semantic.alias_registry` 依赖 | `PIPELINE_DEPENDENCIES` 2 处 + `ASSET_PREREQUISITES` 2 处（含**新增**月度 MV 条目） |
+| `test_refresh_runner.py` | 依赖表断言改为**精确列表**（含 `semantic.alias_registry`）；新增「别名资产必须排在 orders 视图**之前**」的顺序断言；新增 `ASSET_PREREQUISITES` 断言；步骤计划期望值更新 |
+| `test_refresh_view_skip_and_lock_retry.py` | 物化视图两条用例：断言从 `executed_files == []` 改为「**只允许** `sql/semantic/semantic_alias_registry.sql`」+「**不许**出现月度 MV 的资产文件」 |
+| `test_orders_semantic_field_rules_sql.py` | `profit` 别名断言从「只能等于 `("利润(RMB)",)`」改为「**含** `利润(RMB)` + **不含**中文裸名 `利润` + **含** `profit_amount`」 |
+| 迁移 revision id | `current_schema_20261204_...` → **`current_schema_20261206_...`**（`down_revision` = `current_schema_20261205_warehouse_name_aliases`）⇒ `alembic get_heads()` **单 head** |
+
+> **迁移为什么改名**：并行分支先把 `current_schema_20261205_warehouse_name_aliases`
+> 落地到 main ⇒ 本迁移若仍用 20261204，`alembic get_heads()` 会返回**两个 head**，
+> 部署脚本的 fail-closed 校验直接拒绝执行 ⇒ 顺延到 20261206 并把
+> `down_revision` 指向新 head。**已执行的迁移不可改**，所以只能「新增一条」
+> 而不是「改历史」。
