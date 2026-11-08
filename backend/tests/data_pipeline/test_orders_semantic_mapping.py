@@ -922,6 +922,9 @@ async def test_shop_month_kpi_aligns_orders_alias_and_traffic_platform_shop_id()
                     text(
                         f"""
                         CREATE TABLE b_class.{table_name} (
+                            -- data_domain 是真实源表结构的一部分(实测值 'analytics'),
+                            -- 月度链按它选别名 ⇒ 必须建出来。
+                            data_domain VARCHAR(32),
                             platform_code VARCHAR(32),
                             shop_id VARCHAR(256),
                             metric_date DATE,
@@ -984,9 +987,10 @@ async def test_shop_month_kpi_aligns_orders_alias_and_traffic_platform_shop_id()
                 text(
                     """
                     INSERT INTO b_class.fact_shopee_analytics_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        data_domain, platform_code, shop_id, metric_date,
+                        raw_data, data_hash, ingest_timestamp
                     ) VALUES (
-                        'shopee', '1308200832', DATE '2026-06-01',
+                        'analytics', 'shopee', '1308200832', DATE '2026-06-01',
                         CAST(:traffic_raw AS jsonb),
                         'hash-sg-3-traffic-1', TIMESTAMP '2026-06-18 10:05:00'
                     )

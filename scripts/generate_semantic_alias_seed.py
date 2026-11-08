@@ -100,7 +100,17 @@ SEED_COLUMNS: Tuple[str, ...] = (
 #:
 #: * ``products`` —— 商品报表(口径分「已付款 / 已下单」两套)
 #: * ``orders``   —— 订单报表(金额列成对出现: 原币 + ``(RMB)``)
-SEED_DOMAINS: Tuple[str, ...] = ("products", "orders")
+#: * ``analytics`` —— 流量报表(shopee 店铺流量 / tiktok 商品流量)
+#:
+#: ⚠ 2026-11-08 加入 ``analytics``: 此前该域**从来没有** builtin 别名行,
+#:   ``semantic.resolve_alias()`` 只能命中 9 条「模板确认行」
+#:   ⇒ 域限定别名清单形同虚设。加入后 ``semantic.fact_analytics_atomic``
+#:   的取数才能走别名表。
+#:
+#: ⚠ 非 products 域的行统一落在**第二段**清理语句(4 元组)里 ⇒
+#:   已执行迁移 20261202 / 20261203 的自检(只数第一段 products 的 3 元组
+#:   条数)**不受影响**。
+SEED_DOMAINS: Tuple[str, ...] = ("products", "orders", "analytics")
 
 #: 与现有 INSERT 段一致的 ON CONFLICT 处理。
 ON_CONFLICT_CLAUSE = """ON CONFLICT (

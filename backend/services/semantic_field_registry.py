@@ -1446,20 +1446,64 @@ ORDER_LEVEL_QUANTITY_FIELDS: frozenset[str] = _derive_order_level_fields(
 # (tiktok/analytics 71 个绑定只有 12 个有 semantic_key), 导致 required 语义键
 # 根本解析不出来 -> 契约状态恒为 breaking_drift(哪怕文件与模板 100% 一致)。
 ANALYTICS_SEMANTIC_ALIASES: Dict[str, tuple[str, ...]] = {
+    # ── 维度 ──
     "metric_date": ("日期", "统计日期", "交易日期", "日期时间", "date"),
     "shop_id": ("店铺", "店铺id", "店铺名称", "shop_id", "shop id"),
-    "visitor_count": ("商品访客数", "访客数", "访客量", "访问用户数", "uv"),
+    # ── 访客 ──
+    # ⚠ 「商品访客数」只归 product_visitor_count —— 它**就是**商品级访客数。
+    #   tiktok 这份流量报表**没有**店铺级访客数 ⇒ visitor_count 在 tiktok 上
+    #   恒 NULL(如实反映, 不猜值); 以前视图里用 CASE 硬塞进去, 是**静默的
+    #   语义混淆**。
+    "visitor_count": ("访客数", "访客量", "访问用户数", "uv"),
+    "product_visitor_count": ("商品访客数",),
+    # shopee「页面浏览数」/ tiktok「页面浏览次数」
     "page_views": (
+        "页面浏览数",
         "页面浏览次数",
         "页面浏览量",
-        "页面浏览数",
         "商品浏览量",
         "浏览量",
         "pv",
     ),
+    # ── 曝光 / 点击 / 跳出 ──
+    # tiktok「商品曝光次数」/「商品点击量」; shopee 侧没有 ⇒ 恒 NULL。
+    "impressions": ("商品曝光次数", "曝光量", "曝光次数", "impression", "impressions"),
+    "clicks": ("商品点击量", "点击量", "点击次数", "click", "clicks"),
+    # shopee「跳出率」(⚠ 全局别名是「跳失率」, 对不上真实表头 ⇒ 这里补登记)
+    "bounce_rate": ("跳出率", "跳失率", "bounce rate"),
+    # ── 成交 ──
     "conversion_rate": ("转化率", "conversion_rate"),
-    "order_count": ("订单数", "支付订单数", "成交订单数", "order_count"),
-    "gmv": ("gmv", "成交金额", "成交额", "交易额"),
+    "order_count": (
+        "订单数",
+        "订单量",
+        "订单数量",
+        "支付订单数",
+        "成交订单数",
+        "order_count",
+    ),
+    # ⚠ 真实表头带空格(「SKU 订单数」), 全局别名是「SKU订单量」⇒ 这里补登记
+    "sku_order_count": ("SKU 订单数", "SKU订单量", "sku orders", "sku order count"),
+    # ⚠ gmv 的字典 domain 是 common ⇒ 全局别名**不会**自动进 analytics 域
+    #   ⇒ 这里必须显式登记「GMV」。
+    "gmv": ("GMV", "gmv", "成交额", "交易额"),
+    # tiktok「总成交额」(全局别名是「总交易金额」⇒ 这里补登记)
+    "total_transaction_amount": (
+        "总成交额",
+        "总交易金额",
+        "total transaction amount",
+    ),
+    # ⚠ ``click_rate`` **两个平台都没有这一列** ⇒ 别名清单里**不登记**它
+    #   ⇒ 它恒为 NULL(「不知道」), 而不是 0。
+    #
+    # ⚠ 下面这些真实列**还没有对应的标准字段**, 本轮不登记
+    #   (登记前必须先定义标准字段, 否则就是「有列名、无语义」):
+    #   shopee: 新访客 / 现有访客 / 新关注者 / 平均停留时长 / 平均页面访问数
+    #   tiktok: 商品成交件数 / 已退款的商品件数 / 客户数 / 平均订单金额 /
+    #           去重商品曝光次数 / 去重点击次数 / 退款金额 / 商品卡 GMV /
+    #           商家直播 GMV / 商家直播间接 GMV / 商家视频 GMV /
+    #           商家视频间接 GMV / 达人直播 GMV / 达人直播归因 GMV /
+    #           达人直播间接 GMV / 达人视频 GMV / 达人视频间接 GMV /
+    #           绑定账号直播归因 GMV / 绑定账号视频归因 GMV / 联盟视频归因 GMV
 }
 
 

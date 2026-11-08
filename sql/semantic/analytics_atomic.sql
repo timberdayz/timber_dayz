@@ -77,39 +77,34 @@ mapped AS (
         period_end_date::date AS period_end_date,
         period_start_time,
         period_end_time,
-        COALESCE(
-            CASE
-                WHEN LOWER(COALESCE(platform_code, '')) = 'tiktok' THEN raw_data->>'商品访客数'
-                ELSE NULL
-            END,
-            raw_data->>'访客数',
-            raw_data->>'独立访客',
-            raw_data->>'去重页面浏览次数',
-            raw_data->>'店铺页面访问量',
-            raw_data->>'unique_visitors',
-            raw_data->>'Unique Visitors',
-            raw_data->>'uv',
-            raw_data->>'visitor_count'
-        ) AS visitor_count_raw,
-        COALESCE(
-            raw_data->>'浏览量',
-            raw_data->>'页面浏览数',
-            raw_data->>'页面浏览次数',
-            raw_data->>'page_views',
-            raw_data->>'Page Views',
-            raw_data->>'views',
-            raw_data->>'page_view'
-        ) AS page_views_raw,
-        COALESCE(raw_data->>'曝光次数', raw_data->>'impressions', raw_data->>'Impressions') AS impressions_raw,
-        COALESCE(raw_data->>'点击次数', raw_data->>'clicks', raw_data->>'Clicks') AS clicks_raw,
-        COALESCE(raw_data->>'点击率', raw_data->>'click_rate', raw_data->>'Click Rate', raw_data->>'CTR') AS click_rate_raw,
-        COALESCE(raw_data->>'转化率', raw_data->>'conversion_rate', raw_data->>'Conversion Rate', raw_data->>'CVR') AS conversion_rate_raw,
-        COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
-        COALESCE(raw_data->>'SKU 订单数', raw_data->>'sku_order_count', raw_data->>'SKU Order Count') AS sku_order_count_raw,
-        COALESCE(raw_data->>'GMV', raw_data->>'gmv') AS gmv_raw,
-        COALESCE(raw_data->>'总成交额', raw_data->>'成交金额', raw_data->>'sales_amount') AS total_transaction_amount_raw,
-        COALESCE(raw_data->>'商品访客数', raw_data->>'product_visitor_count', raw_data->>'Product Visitor Count') AS product_visitor_count_raw,
-        COALESCE(raw_data->>'跳出率', raw_data->>'bounce_rate', raw_data->>'Bounce Rate') AS bounce_rate_raw,
+        -- ── 取数一律走别名表(单一事实源) ──────────────────────────
+        --
+        -- 以前这里是 12 段手写 `COALESCE(raw_data->>'...')` 链, 与真实表头
+        -- **对不上**的地方全靠「找不到就填 0」掩盖:
+        --   * 「曝光次数」「点击次数」—— tiktok 真实列名是「商品曝光次数」
+        --     「商品点击量」⇒ 这两个指标**恒 0**;
+        --   * 「点击率」—— 两个平台**都没有**这一列 ⇒ 恒 0;
+        --   * 「跳出率」—— 全局别名是「跳失率」⇒ shopee 的跳出率取不到。
+        --
+        -- ⇒ 现在交给 `semantic.resolve_alias()`: 它按「平台精确 → 粒度精确 →
+        --   置信度 → 来源 → id」从别名表里挑, 别名表是**唯一事实源**。
+        --   取不到就是 NULL(「不知道」), 由输出层如实透出。
+        --
+        -- ⚠ 这里用 `resolve_alias`(逐字)而不是 `resolve_alias_normalized`:
+        --   归一化会把「X」与「X(RMB)」压成同一个 key ⇒ 在两个**不同的
+        --   业务事实**之间随机取一个。
+        semantic.resolve_alias(raw_data, data_domain, 'visitor_count', platform_code, granularity) AS visitor_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'page_views', platform_code, granularity) AS page_views_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'impressions', platform_code, granularity) AS impressions_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'clicks', platform_code, granularity) AS clicks_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'click_rate', platform_code, granularity) AS click_rate_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'conversion_rate', platform_code, granularity) AS conversion_rate_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'order_count', platform_code, granularity) AS order_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'sku_order_count', platform_code, granularity) AS sku_order_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'gmv', platform_code, granularity) AS gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'total_transaction_amount', platform_code, granularity) AS total_transaction_amount_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'product_visitor_count', platform_code, granularity) AS product_visitor_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'bounce_rate', platform_code, granularity) AS bounce_rate_raw,
         raw_data,
         header_columns,
         data_hash,
@@ -367,18 +362,26 @@ SELECT
     period_end_date,
     period_start_time,
     period_end_time,
-    COALESCE(visitor_count, 0) AS visitor_count,
-    COALESCE(page_views, 0) AS page_views,
-    COALESCE(impressions, 0) AS impressions,
-    COALESCE(clicks, 0) AS clicks,
-    COALESCE(click_rate, 0) AS click_rate,
-    COALESCE(conversion_rate, 0) AS conversion_rate,
-    COALESCE(order_count, 0) AS order_count,
-    COALESCE(sku_order_count, 0) AS sku_order_count,
-    COALESCE(gmv, 0) AS gmv,
-    COALESCE(total_transaction_amount, 0) AS total_transaction_amount,
-    COALESCE(product_visitor_count, 0) AS product_visitor_count,
-    COALESCE(bounce_rate, 0) AS bounce_rate,
+    -- ⚠ 以前这里一律 `COALESCE(x, 0)`: 源表缺列 / 解析不出 ⇒ 输出 0,
+    -- 0 与「真的是 0」在下游**分不开** ⇒ 缺项被当成"没有流量"。
+    -- 实测(2026-11 开发库, 改造前): shopee 2355 行、tiktok 1446 行的
+    -- impressions / clicks / gmv / order_count **全是 0**, 其中绝大多数是
+    -- **取不到值**而不是真的没有。
+    --
+    -- ⇒ 现在缺项就是 NULL(「不知道」)。下游要按「空 = 没数据」处理,
+    --   不要把它当 0 参与求和。
+    visitor_count AS visitor_count,
+    page_views AS page_views,
+    impressions AS impressions,
+    clicks AS clicks,
+    click_rate AS click_rate,
+    conversion_rate AS conversion_rate,
+    order_count AS order_count,
+    sku_order_count AS sku_order_count,
+    gmv AS gmv,
+    total_transaction_amount AS total_transaction_amount,
+    product_visitor_count AS product_visitor_count,
+    bounce_rate AS bounce_rate,
     raw_data,
     header_columns,
     data_hash,

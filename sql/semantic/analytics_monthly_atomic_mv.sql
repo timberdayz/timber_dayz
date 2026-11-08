@@ -4,19 +4,20 @@ DROP MATERIALIZED VIEW IF EXISTS semantic.fact_analytics_monthly_atomic_mv CASCA
 
 CREATE MATERIALIZED VIEW semantic.fact_analytics_monthly_atomic_mv AS
 WITH raw_monthly_traffic AS MATERIALIZED (
-    SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+    SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp, data_domain
     FROM b_class.fact_shopee_analytics_monthly
     UNION ALL
-    SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+    SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp, data_domain
     FROM b_class.fact_tiktok_analytics_monthly
     UNION ALL
-    SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+    SELECT platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp, data_domain
     FROM b_class.fact_miaoshou_analytics_monthly
 ),
 mapped_monthly_traffic AS MATERIALIZED (
     SELECT
         metric_date::date AS metric_date,
         platform_code,
+        data_domain,
         NULLIF(TRIM(COALESCE(shop_id, '')), '') AS source_shop_id,
         NULLIF(
             TRIM(
@@ -52,54 +53,25 @@ mapped_monthly_traffic AS MATERIALIZED (
             ),
             ''
         ) AS source_shop_account_id,
-        COALESCE(
-            CASE
-                WHEN LOWER(COALESCE(platform_code, '')) = 'tiktok' THEN raw_data->>'商品访客数'
-                ELSE NULL
-            END,
-            raw_data->>'访客数',
-            raw_data->>'独立访客',
-            raw_data->>'店铺页面访问量',
-            raw_data->>'unique_visitors',
-            raw_data->>'Unique Visitors',
-            raw_data->>'uv',
-            raw_data->>'visitor_count'
-        ) AS visitor_count_raw,
-        COALESCE(
-            raw_data->>'商品访客数',
-            raw_data->>'product_visitor_count',
-            raw_data->>'Product Visitor Count'
-        ) AS product_visitor_count_raw,
-        COALESCE(
-            raw_data->>'浏览量',
-            raw_data->>'页面浏览数',
-            raw_data->>'页面浏览次数',
-            raw_data->>'page_views',
-            raw_data->>'Page Views',
-            raw_data->>'views',
-            raw_data->>'page_view'
-        ) AS page_views_raw,
-        COALESCE(raw_data->>'曝光次数', raw_data->>'鏇濆厜娆℃暟', raw_data->>'impressions', raw_data->>'Impressions') AS impressions_raw,
-        COALESCE(
-            raw_data->>'订单数',
-            raw_data->>'订单数量',
-            raw_data->>'order_count',
-            raw_data->>'Order Count'
-        ) AS order_count_raw,
-        COALESCE(
-            raw_data->>'SKU 订单数',
-            raw_data->>'sku_order_count',
-            raw_data->>'SKU Order Count'
-        ) AS sku_order_count_raw,
-        COALESCE(
-            raw_data->>'GMV',
-            raw_data->>'gmv'
-        ) AS gmv_raw,
-        COALESCE(
-            raw_data->>'总成交额',
-            raw_data->>'成交金额',
-            raw_data->>'sales_amount'
-        ) AS total_transaction_amount_raw,
+        -- ── 取数一律走别名表(单一事实源) ──────────────────────────
+        --
+        -- 以前这里是手写 `COALESCE(raw_data->>'...')` 链, 与真实表头对不上的
+        -- 地方全靠「找不到就填 0」掩盖 ⇒ **「不知道」被伪装成「0」**。
+        --
+        -- ⇒ 现在交给 `semantic.resolve_alias()`(别名表是唯一事实源):
+        --   取不到就是 NULL(「不知道」), 由输出层如实透出。
+        --
+        -- ⚠ 与日/周链(`sql/semantic/analytics_atomic.sql`)口径一致 ——
+        --   两条链同源(b_class 的 analytics 月度/日周源表), 不允许一个指标
+        --   在两条链上取到不同的列。
+        semantic.resolve_alias(raw_data, data_domain, 'visitor_count', platform_code, 'monthly') AS visitor_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'product_visitor_count', platform_code, 'monthly') AS product_visitor_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'page_views', platform_code, 'monthly') AS page_views_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'impressions', platform_code, 'monthly') AS impressions_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'order_count', platform_code, 'monthly') AS order_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'sku_order_count', platform_code, 'monthly') AS sku_order_count_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'gmv', platform_code, 'monthly') AS gmv_raw,
+        semantic.resolve_alias(raw_data, data_domain, 'total_transaction_amount', platform_code, 'monthly') AS total_transaction_amount_raw,
         data_hash,
         ingest_timestamp
     FROM raw_monthly_traffic

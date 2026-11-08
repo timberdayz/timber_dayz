@@ -63,6 +63,10 @@ async def test_analytics_monthly_atomic_resolves_shop_account_identity_to_canoni
                     text(
                         f"""
                         CREATE TABLE {table_name} (
+                            -- data_domain 是真实源表结构的一部分
+                            -- (实测 b_class.fact_*_analytics_monthly.data_domain
+                            --  = 'analytics'), 且月度链的取数按它选别名 ⇒ 必须建出来。
+                            data_domain VARCHAR(32),
                             platform_code VARCHAR(32),
                             shop_id VARCHAR(256),
                             metric_date DATE,
@@ -89,9 +93,10 @@ async def test_analytics_monthly_atomic_resolves_shop_account_identity_to_canoni
                 text(
                     """
                     INSERT INTO b_class.fact_tiktok_analytics_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        data_domain, platform_code, shop_id, metric_date,
+                        raw_data, data_hash, ingest_timestamp
                     ) VALUES (
-                        'tiktok', 'tiktok_sg_hx_home_local', DATE '2026-03-01',
+                        'analytics', 'tiktok', 'tiktok_sg_hx_home_local', DATE '2026-03-01',
                         '{"page_views":"321","visitor_count":"123"}'::jsonb,
                         'analytics-shop-identity-1', TIMESTAMP '2026-03-02 10:00:00'
                     )
@@ -186,6 +191,10 @@ async def test_analytics_monthly_atomic_treats_dash_placeholders_as_null_metrics
                     text(
                         f"""
                         CREATE TABLE {table_name} (
+                            -- data_domain 是真实源表结构的一部分
+                            -- (实测 b_class.fact_*_analytics_monthly.data_domain
+                            --  = 'analytics'), 且月度链的取数按它选别名 ⇒ 必须建出来。
+                            data_domain VARCHAR(32),
                             platform_code VARCHAR(32),
                             shop_id VARCHAR(256),
                             metric_date DATE,
@@ -201,9 +210,10 @@ async def test_analytics_monthly_atomic_treats_dash_placeholders_as_null_metrics
                 text(
                     """
                     INSERT INTO b_class.fact_shopee_analytics_monthly (
-                        platform_code, shop_id, metric_date, raw_data, data_hash, ingest_timestamp
+                        data_domain, platform_code, shop_id, metric_date,
+                        raw_data, data_hash, ingest_timestamp
                     ) VALUES (
-                        'shopee', 'shop-a', DATE '2026-03-01',
+                        'analytics', 'shopee', 'shop-a', DATE '2026-03-01',
                         '{
                           "visitor_count":"-",
                           "product_visitor_count":"-",

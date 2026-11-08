@@ -1,7 +1,10 @@
+import re
 from pathlib import Path
 
 
-def _assert_sql_asset(path_str: str, expected_prefix: str, required_terms: tuple[str, ...]) -> None:
+def _assert_sql_asset(
+    path_str: str, expected_prefix: str, required_terms: tuple[str, ...]
+) -> None:
     sql_path = Path(path_str)
     assert sql_path.exists()
     sql_text = sql_path.read_text(encoding="utf-8")
@@ -74,7 +77,9 @@ def test_orders_monthly_atomic_sql_asset():
             "profit",
         ),
     )
-    sql_text = Path("sql/semantic/orders_monthly_atomic.sql").read_text(encoding="utf-8")
+    sql_text = Path("sql/semantic/orders_monthly_atomic.sql").read_text(
+        encoding="utf-8"
+    )
     assert "DROP VIEW IF EXISTS semantic.fact_orders_monthly_atomic" not in sql_text
 
 
@@ -106,9 +111,14 @@ def test_orders_monthly_atomic_mv_sql_asset():
             "ix_fact_orders_monthly_atomic_mv_period_platform_shop",
         ),
     )
-    sql_text = Path("sql/semantic/orders_monthly_atomic_mv.sql").read_text(encoding="utf-8")
+    sql_text = Path("sql/semantic/orders_monthly_atomic_mv.sql").read_text(
+        encoding="utf-8"
+    )
     assert "DROP VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv" not in sql_text
-    assert "DROP MATERIALIZED VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv CASCADE" in sql_text
+    assert (
+        "DROP MATERIALIZED VIEW IF EXISTS semantic.fact_orders_monthly_atomic_mv CASCADE"
+        in sql_text
+    )
     assert "REGEXP_REPLACE(LOWER(TRIM(COALESCE(m.source_shop_id, '')))" not in sql_text
     assert "REGEXP_REPLACE(LOWER(TRIM(COALESCE(m.store_label_raw, '')))" not in sql_text
 
@@ -154,8 +164,39 @@ def test_analytics_monthly_atomic_mv_sql_asset():
             "ix_fact_analytics_monthly_atomic_mv_period_platform_shop",
         ),
     )
-    sql_text = Path("sql/semantic/analytics_monthly_atomic_mv.sql").read_text(encoding="utf-8")
-    assert "raw_data->>'曝光次数'" in sql_text
+    sql_text = Path("sql/semantic/analytics_monthly_atomic_mv.sql").read_text(
+        encoding="utf-8"
+    )
+    # 2026-11-08: 月度链取数改走别名表 ⇒ 资产里**不许**再内联字面量表头
+    # （内联表头对不上真实表头时, 出口的 COALESCE(x, 0) 会把「取不到」伪装成 0）。
+    # 旧断言盯的是「出现 raw_data->>'曝光次数'」, 新断言盯的是它的反面 + 别名表取数,
+    # 后者严格更强。
+    for literal in (
+        "raw_data->>'曝光次数'",
+        "raw_data->>'访客数'",
+        "raw_data->>'商品访客数'",
+        "raw_data->>'页面浏览次数'",
+        "raw_data->>'订单数'",
+        "raw_data->>'SKU 订单数'",
+        "raw_data->>'GMV'",
+        "raw_data->>'总成交额'",
+    ):
+        assert literal not in sql_text, "月度链仍在内联取 {0}".format(literal)
+    # 取数必须走别名表(单一事实源)
+    assert "semantic.resolve_alias(" in sql_text
+    for field in (
+        "visitor_count",
+        "product_visitor_count",
+        "page_views",
+        "impressions",
+        "order_count",
+        "sku_order_count",
+        "gmv",
+        "total_transaction_amount",
+    ):
+        assert "'{field}'".format(field=field) in sql_text
+    # 出口不许再把「取不到」伪装成 0
+    assert not re.search(r"COALESCE\(\s*\w+\s*,\s*0\s*\)\s+AS", sql_text)
 
 
 def test_platform_month_kpi_sql_asset():

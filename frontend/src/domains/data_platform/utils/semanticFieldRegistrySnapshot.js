@@ -318,32 +318,53 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
   ],
   "domain_alias_index": {
     "analytics": {
+      "bouncerate": "bounce_rate",
+      "click": "clicks",
+      "clicks": "clicks",
       "conversionrate": "conversion_rate",
       "date": "metric_date",
       "gmv": "gmv",
+      "impression": "impressions",
+      "impressions": "impressions",
       "ordercount": "order_count",
       "pv": "page_views",
       "shopid": "shop_id",
+      "skuordercount": "sku_order_count",
+      "skuorders": "sku_order_count",
+      "sku订单数": "sku_order_count",
+      "sku订单量": "sku_order_count",
+      "totaltransactionamount": "total_transaction_amount",
       "uv": "visitor_count",
       "交易日期": "metric_date",
       "交易额": "gmv",
+      "商品曝光次数": "impressions",
       "商品浏览量": "page_views",
-      "商品访客数": "visitor_count",
+      "商品点击量": "clicks",
+      "商品访客数": "product_visitor_count",
       "店铺": "shop_id",
       "店铺id": "shop_id",
       "店铺名称": "shop_id",
+      "总交易金额": "total_transaction_amount",
+      "总成交额": "total_transaction_amount",
       "成交订单数": "order_count",
-      "成交金额": "gmv",
       "成交额": "gmv",
       "支付订单数": "order_count",
       "日期": "metric_date",
       "日期时间": "metric_date",
+      "曝光次数": "impressions",
+      "曝光量": "impressions",
       "浏览量": "page_views",
+      "点击次数": "clicks",
+      "点击量": "clicks",
       "统计日期": "metric_date",
       "订单数": "order_count",
+      "订单数量": "order_count",
+      "订单量": "order_count",
       "访客数": "visitor_count",
       "访客量": "visitor_count",
       "访问用户数": "visitor_count",
+      "跳出率": "bounce_rate",
+      "跳失率": "bounce_rate",
       "转化率": "conversion_rate",
       "页面浏览数": "page_views",
       "页面浏览次数": "page_views",
@@ -619,7 +640,6 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
-        "商品访客数",
         "访客数",
         "访客量",
         "访问用户数",
@@ -630,15 +650,53 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
+        "商品访客数"
+      ],
+      "data_domain": "analytics",
+      "semantic_key": "product_visitor_count"
+    },
+    {
+      "aliases": [
+        "页面浏览数",
         "页面浏览次数",
         "页面浏览量",
-        "页面浏览数",
         "商品浏览量",
         "浏览量",
         "pv"
       ],
       "data_domain": "analytics",
       "semantic_key": "page_views"
+    },
+    {
+      "aliases": [
+        "商品曝光次数",
+        "曝光量",
+        "曝光次数",
+        "impression",
+        "impressions"
+      ],
+      "data_domain": "analytics",
+      "semantic_key": "impressions"
+    },
+    {
+      "aliases": [
+        "商品点击量",
+        "点击量",
+        "点击次数",
+        "click",
+        "clicks"
+      ],
+      "data_domain": "analytics",
+      "semantic_key": "clicks"
+    },
+    {
+      "aliases": [
+        "跳出率",
+        "跳失率",
+        "bounce rate"
+      ],
+      "data_domain": "analytics",
+      "semantic_key": "bounce_rate"
     },
     {
       "aliases": [
@@ -651,6 +709,8 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     {
       "aliases": [
         "订单数",
+        "订单量",
+        "订单数量",
         "支付订单数",
         "成交订单数",
         "order_count"
@@ -660,13 +720,32 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
     },
     {
       "aliases": [
+        "SKU 订单数",
+        "SKU订单量",
+        "sku orders",
+        "sku order count"
+      ],
+      "data_domain": "analytics",
+      "semantic_key": "sku_order_count"
+    },
+    {
+      "aliases": [
+        "GMV",
         "gmv",
-        "成交金额",
         "成交额",
         "交易额"
       ],
       "data_domain": "analytics",
       "semantic_key": "gmv"
+    },
+    {
+      "aliases": [
+        "总成交额",
+        "总交易金额",
+        "total transaction amount"
+      ],
+      "data_domain": "analytics",
+      "semantic_key": "total_transaction_amount"
     },
     {
       "aliases": [
