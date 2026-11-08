@@ -408,17 +408,34 @@ test("利润测算页给出广告前贡献毛利率 / 保本ROI / 建议ROI 三�
   assert.match(operatingSection, /row\.preview\?\.expected\?\.suggested_roi_clamped/);
 });
 
-test("三个 ROI 列排在最低售价右侧、测算售价之前", () => {
+test("ROI 四列拆开：目标/平台报告属决策输入，保本/建议属定价结果", () => {
+  // 阶段 6 之前：三列结果（毛利率/保本/建议）必须排在「测算售价」之前。
+  // 阶段 6 起列重排，四段式把 ROI 拆成两段：
+  //   决策输入段 = 测算售价 → 优惠券 → 目标ROI → 平台报告ROI（运营要填的）
+  //   定价结果段 = 当前让利上限 → 清货让利上限 → 最低售价 → 广告前贡献毛利率
+  //                 → 保本ROI → 建议ROI（系统算出来的）
+  // ⚠️ 两段之间的相对序是业务约束，不能因为重排弄丢：
+  //   运营先填输入、再读结果；结果段内部的 ROI 相对序也不变。
+  const price = operatingSection.indexOf('label="测算售价"');
+  const coupon = operatingSection.indexOf('label="优惠券（商家承担）"');
+  const target = operatingSection.indexOf('label="目标ROI"');
+  const reported = operatingSection.indexOf('label="平台报告ROI"');
+  const discount = operatingSection.indexOf('label="当前让利上限"');
   const floor = operatingSection.indexOf('label="最低售价"');
   const margin = operatingSection.indexOf('label="广告前贡献毛利率"');
   const breakEven = operatingSection.indexOf('label="保本ROI"');
   const suggested = operatingSection.indexOf('label="建议ROI"');
-  // 阶段 3：「预计售价」改名「测算售价」
-  const price = operatingSection.indexOf('label="测算售价"');
-  assert.ok(floor >= 0 && margin > floor, "广告前贡献毛利率必须紧跟最低售价");
+  // 决策输入段
+  assert.ok(price >= 0 && coupon > price, "优惠券必须紧跟测算售价");
+  assert.ok(target > coupon, "目标ROI 必须在优惠券之后");
+  assert.ok(reported > target, "平台报告ROI 必须在目标ROI 之后");
+  // 输入段整体在结果段之前
+  assert.ok(discount > reported, "决策输入段必须排在定价结果段之前");
+  assert.ok(floor > discount, "最低售价必须在当前让利上限之后");
+  // 结果段内部的 ROI 相对序（阶段 1 起就有，不能丢）
+  assert.ok(margin > floor, "广告前贡献毛利率必须紧跟最低售价");
   assert.ok(breakEven > margin, "保本ROI 必须在广告前贡献毛利率之后");
   assert.ok(suggested > breakEven, "建议ROI 必须在保本ROI 之后");
-  assert.ok(price > suggested, "三个 ROI 列必须在测算售价之前");
 });
 
 test("成本不全时 ROI 一律置灰并提示保本ROI 偏乐观", () => {
@@ -865,4 +882,73 @@ test("服务端算出来的基准售价字段不回提交", () => {
   assert.match(section, /delete payload\.selling_price_stale/);
   assert.match(section, /delete payload\.selling_price_source_cleaned_at/);
   assert.match(section, /delete payload\.selling_price_confirmed_at/);
+});
+
+// ---------------------------------------------------------------------------
+// 阶段 6 · 仓维度落地与前端列重排（2026-11-22）
+// 方案：docs/superpowers/plans/2026-11-22-product-center-warehouse-dimension-implementation-plan.md
+// ---------------------------------------------------------------------------
+
+test("测算表左侧固定三列：SPU / ERP SKU / 商品名称", () => {
+  const fixedLeft = [...operatingSection.matchAll(/<el-table-column[^>]*fixed="left"[^>]*>/g)].map(
+    (m) => m[0],
+  );
+  assert.equal(fixedLeft.length, 3, "左侧固定列必须正好三列");
+  assert.match(fixedLeft[0], /label="SPU"/);
+  assert.match(fixedLeft[1], /label="ERP SKU"/);
+  assert.match(fixedLeft[2], /label="商品名称"/);
+  // 固定列必须真的在最左边：第一段（非固定的采购成本）排在它们之后
+  const lastFixed = operatingSection.lastIndexOf('fixed="left"');
+  const firstFact = operatingSection.indexOf('class-name="seg-fact"');
+  assert.ok(lastFixed < firstFact, "固定三列必须排在所有非固定列之前");
+});
+
+test("测算表按「事实 → 输入 → 结果 → 成本」四段分区", () => {
+  const segAt = (cls) => operatingSection.indexOf(`class-name="${cls}"`);
+  const fact = segAt("seg-fact");
+  const input = segAt("seg-input");
+  const result = segAt("seg-result");
+  const cost = segAt("seg-cost");
+  assert.ok(fact >= 0, "必须有事实段");
+  assert.ok(input > fact, "决策输入段必须在事实段之后");
+  assert.ok(result > input, "定价结果段必须在决策输入段之后");
+  assert.ok(cost > result, "成本明细段必须在定价结果段之后");
+  // 表头也要上色 —— 只在数据行着色，运营扫一眼表头认不出分段
+  assert.match(operatingSection, /label-class-name="seg-fact"/);
+  assert.match(operatingSection, /label-class-name="seg-input"/);
+  assert.match(operatingSection, /label-class-name="seg-result"/);
+  assert.match(operatingSection, /label-class-name="seg-cost"/);
+  // 图例：告诉运营这四段分别是什么
+  assert.match(source, /segment-legend/);
+  assert.match(source, /标识与事实/);
+  assert.match(source, /决策输入/);
+  assert.match(source, /定价结果/);
+  assert.match(source, /成本明细与利润/);
+});
+
+test("事实段的顺序是采购成本 → 基准售价 → 竞品价格（用户从左到右的工作顺序）", () => {
+  const cost = operatingSection.indexOf('label="采购成本"');
+  const base = operatingSection.indexOf('label="基准售价"');
+  const competitor = operatingSection.indexOf('label="竞品价格"');
+  assert.ok(cost >= 0 && base > cost, "采购成本必须在基准售价之前");
+  assert.ok(competitor > base, "竞品价格必须在基准售价之后");
+});
+
+test("测算表给出仓级库龄列：当前所选仓的库龄 + 其它仓的库龄", () => {
+  assert.match(operatingSection, /label="库龄（仓）"/);
+  assert.match(source, /const currentWarehouseRestockDays = \(row\)/);
+  assert.match(source, /const currentWarehouseLabel = \(row\)/);
+  assert.match(source, /const otherWarehouseRestocks = \(row\)/);
+  // 页面显示的库龄必须与底线依据的库龄同源 —— 数字对不上运营会以为系统坏了
+  assert.match(source, /pricing_days_since_restock/);
+  // 其它仓按库龄倒序：老的排前面，先看到最该处理的
+  assert.match(source, /\(b\.days_since_restock \?\? -1\) - \(a\.days_since_restock \?\? -1\)/);
+});
+
+test("测算表给出跨仓提示，且只提示不改价", () => {
+  assert.match(operatingSection, /label="跨仓提示"/);
+  assert.match(operatingSection, /row\.warehouse_divergence/);
+  assert.match(source, /warehouse_divergence\.suggestion/);
+  // 提示的方向是「调拨」，不是「降价」—— 系统不越权替运营做调拨决策
+  assert.match(source, /调拨/);
 });

@@ -434,6 +434,16 @@
           <div>① 本表不预测销量：提价会不会掉量看不到（缺历史投放数据，做不了销量预测）。</div>
           <div>② 平台报告 ROI 含自然流量/达人归因，达标 ≠ 赚钱；投多少不亏以本表「保本ROI」为准。</div>
         </div>
+        <!--
+          四段分区说明（阶段 6）：表头按段着色，运营从左到右按「看事实 → 填输入 →
+          看结果 → 查成本」的工作顺序读表，不用在一堆列里找下一步该动哪个。
+        -->
+        <div class="segment-legend">
+          <span class="segment-legend-item"><i class="seg-fact"></i>标识与事实：是什么、成本多少</span>
+          <span class="segment-legend-item"><i class="seg-input"></i>决策输入：要卖多少、要投多少</span>
+          <span class="segment-legend-item"><i class="seg-result"></i>定价结果：底线多少、能不能投</span>
+          <span class="segment-legend-item"><i class="seg-cost"></i>成本明细与利润：钱花在哪</span>
+        </div>
         <el-table
           :data="operatingProfiles"
           v-loading="loadingOperating"
@@ -441,62 +451,52 @@
           border
           class="flat-table operating-table"
         >
-          <el-table-column prop="spu" label="SPU" width="160" />
-          <el-table-column prop="sku_key" label="ERP SKU" width="155" />
-          <el-table-column prop="sku_name" label="商品名称" min-width="200" show-overflow-tooltip />
-          <el-table-column label="基准售价" width="105"><template #default="{ row }">{{ money(row.reference_selling_price) }}</template></el-table-column>
-          <el-table-column label="竞品价格" width="110"><template #default="{ row }"><el-input-number v-model="row.competitor_price" :min="0" :controls="false" size="small" /></template></el-table-column>
-          <el-table-column label="当前让利上限" width="100"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column>
-          <el-table-column label="清货让利上限" width="100"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column>
-          <el-table-column label="最低售价" width="120"
+          <!--
+            左侧固定三列（阶段 6）：标识与事实。
+            运营横向滚动看后面的成本与利润时，「这是哪个 SKU」必须一直在眼前。
+          -->
+          <el-table-column prop="spu" label="SPU" width="160" fixed="left" />
+          <el-table-column prop="sku_key" label="ERP SKU" width="155" fixed="left" />
+          <el-table-column prop="sku_name" label="商品名称" min-width="200" show-overflow-tooltip fixed="left" />
+          <!-- 段一 · 标识与事实 -->
+          <el-table-column label="采购成本" width="110" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }">{{
+            money(row.purchase_cost)
+          }}</template></el-table-column
+          >
+          <el-table-column label="基准售价" width="105" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }">{{ money(row.reference_selling_price) }}</template></el-table-column>
+          <el-table-column label="竞品价格" width="110" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }"><el-input-number v-model="row.competitor_price" :min="0" :controls="false" size="small" /></template></el-table-column>
+          <!--
+            库龄（仓）：阶段 6 —— 库龄不再是「这个 SKU 最老的那一仓」，
+            而是**当前选中的这个仓自己**的库龄；下面再列其它仓的库龄，
+            运营一眼能看出「我这仓新鲜、别的仓压着」。
+          -->
+          <el-table-column label="库龄（仓）" width="230" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }"><div><span class="readonly-cell">{{ currentWarehouseRestockDays(row) ?? "-" }}</span> 天<span class="pricing-tier-hint">（{{ currentWarehouseLabel(row) }}）</span></div><div v-for="item in otherWarehouseRestocks(row)" :key="item.warehouse_code" class="pricing-tier-hint">{{ item.warehouse_name }}：{{ item.days_since_restock ?? "-" }} 天</div></template></el-table-column>
+          <!-- 段二 · 决策输入 -->
+          <el-table-column label="测算售价" width="110" class-name="seg-input" label-class-name="seg-input"
             ><template #default="{ row }"
-              ><span class="readonly-cell">{{ money(row.min_selling_price) }}</span>
-              <div class="pricing-tier-hint">
-                {{ row.pricing_tier_label || "-" }}
-                <el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag>
-              </div>
-              <div class="pricing-tier-hint">按 {{ row.platform_code }} 平台成本率计算，不同平台底线不同</div></template
-          ></el-table-column>
-          <el-table-column label="广告前贡献毛利率" width="140"
-            ><template #default="{ row }"
-              ><span :class="{ 'roi-guarded': roiGuarded(row) }">{{
-                percent(row.preview?.expected?.advertising_contribution_margin_rate)
-              }}</span>
-              <el-tooltip
-                placement="top"
-                content="扣掉采购、物流、仓储、贴单、平台佣金、达人佣金、货损、退货后的占比。分母是商家实收（售价−优惠券），与平台 GMV 同一口径"
-              >
-                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
-              </el-tooltip></template
-          ></el-table-column>
-          <el-table-column label="保本ROI" width="150"
-            ><template #default="{ row }"
-              ><span :class="{ 'roi-guarded': roiGuarded(row) }">{{
-                roiDisplay(row.preview?.expected?.break_even_roi)
-              }}</span>
-              <el-tooltip placement="top" :content="roiGuardTooltip(row)">
-                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
-              </el-tooltip>
-              <div v-if="roiGuarded(row)" class="roi-guard-hint">
-                成本不全，保本ROI 偏乐观
-              </div></template
-          ></el-table-column>
-          <el-table-column label="建议ROI" width="150"
-            ><template #default="{ row }"
-              ><span :class="{ 'roi-guarded': roiGuarded(row) }">{{
-                roiDisplay(row.preview?.expected?.suggested_roi_clamped)
-              }}</span>
-              <el-tag
-                v-if="row.preview?.expected?.suggestion_note === 'above_platform_ceiling'"
+              ><el-input-number
+                v-model="row.expected_selling_price"
+                :class="{ 'price-below-floor': isBelowFloor(row) }"
+                :min="0"
+                :controls="false"
                 size="small"
-                type="warning"
-                >广告空间不足</el-tag
-              >
-              <el-tooltip placement="top" :content="roiSuggestionTooltip(row)">
-                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
-              </el-tooltip></template
-          ></el-table-column>
-          <el-table-column label="目标ROI" width="135"
+                @input="scheduleOperatingPreview(row)" />
+              <div v-if="isBelowFloor(row)" class="price-floor-hint">
+                低于最低售价 {{ money(row.min_selling_price) }}
+              </div></template
+          ></el-table-column
+          >
+          <el-table-column label="优惠券（商家承担）" width="110" class-name="seg-input" label-class-name="seg-input"
+            ><template #default="{ row }"
+              ><el-input-number
+                v-model="row.seller_coupon_amount"
+                :min="0"
+                :controls="false"
+                size="small"
+                @input="scheduleOperatingPreview(row)" /></template
+          ></el-table-column
+          >
+          <el-table-column label="目标ROI" width="135" class-name="seg-input" label-class-name="seg-input"
             ><template #default="{ row }"
               ><div class="rate-cell"
                 ><el-input-number
@@ -513,8 +513,9 @@
               <el-tooltip placement="top" :content="targetRoiTooltip(row)">
                 <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
               </el-tooltip></template
-          ></el-table-column>
-          <el-table-column label="平台报告ROI" width="175"
+          ></el-table-column
+          >
+          <el-table-column label="平台报告ROI" width="175" class-name="seg-input" label-class-name="seg-input"
             ><template #default="{ row }"
               ><div class="rate-cell"
                 ><el-input-number
@@ -530,38 +531,70 @@
               <el-tooltip placement="top" :content="roiVerdictTooltip(row)">
                 <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
               </el-tooltip></template
-          ></el-table-column>
-          <el-table-column label="测算售价" width="110"
+          ></el-table-column
+          >
+          <!-- 段三 · 定价结果 -->
+          <el-table-column label="当前让利上限" width="100" class-name="seg-result" label-class-name="seg-result"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column>
+          <el-table-column label="清货让利上限" width="100" class-name="seg-result" label-class-name="seg-result"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column>
+          <el-table-column label="最低售价" width="120" class-name="seg-result" label-class-name="seg-result"
             ><template #default="{ row }"
-              ><el-input-number
-                v-model="row.expected_selling_price"
-                :class="{ 'price-below-floor': isBelowFloor(row) }"
-                :min="0"
-                :controls="false"
-                size="small"
-                @input="scheduleOperatingPreview(row)" />
-              <div v-if="isBelowFloor(row)" class="price-floor-hint">
-                低于最低售价 {{ money(row.min_selling_price) }}
+              ><span class="readonly-cell">{{ money(row.min_selling_price) }}</span>
+              <div class="pricing-tier-hint">
+                {{ row.pricing_tier_label || "-" }}
+                <el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag>
+              </div>
+              <div class="pricing-tier-hint">按 {{ row.platform_code }} 平台成本率计算，不同平台底线不同</div></template
+          ></el-table-column>
+          <el-table-column label="广告前贡献毛利率" width="140" class-name="seg-result" label-class-name="seg-result"
+            ><template #default="{ row }"
+              ><span :class="{ 'roi-guarded': roiGuarded(row) }">{{
+                percent(row.preview?.expected?.advertising_contribution_margin_rate)
+              }}</span>
+              <el-tooltip
+                placement="top"
+                content="扣掉采购、物流、仓储、贴单、平台佣金、达人佣金、货损、退货后的占比。分母是商家实收（售价−优惠券），与平台 GMV 同一口径"
+              >
+                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
+              </el-tooltip></template
+          ></el-table-column>
+          <el-table-column label="保本ROI" width="150" class-name="seg-result" label-class-name="seg-result"
+            ><template #default="{ row }"
+              ><span :class="{ 'roi-guarded': roiGuarded(row) }">{{
+                roiDisplay(row.preview?.expected?.break_even_roi)
+              }}</span>
+              <el-tooltip placement="top" :content="roiGuardTooltip(row)">
+                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
+              </el-tooltip>
+              <div v-if="roiGuarded(row)" class="roi-guard-hint">
+                成本不全，保本ROI 偏乐观
               </div></template
           ></el-table-column>
-          <el-table-column label="优惠券（商家承担）" width="110"
+          <el-table-column label="建议ROI" width="150" class-name="seg-result" label-class-name="seg-result"
             ><template #default="{ row }"
-              ><el-input-number
-                v-model="row.seller_coupon_amount"
-                :min="0"
-                :controls="false"
+              ><span :class="{ 'roi-guarded': roiGuarded(row) }">{{
+                roiDisplay(row.preview?.expected?.suggested_roi_clamped)
+              }}</span>
+              <el-tag
+                v-if="row.preview?.expected?.suggestion_note === 'above_platform_ceiling'"
                 size="small"
-                @input="scheduleOperatingPreview(row)" /></template
+                type="warning"
+                >广告空间不足</el-tag
+              >
+              <el-tooltip placement="top" :content="roiSuggestionTooltip(row)">
+                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
+              </el-tooltip></template
           ></el-table-column>
-          <el-table-column label="采购成本" width="110"
-            ><template #default="{ row }">{{
-              money(row.purchase_cost)
-            }}</template></el-table-column
-          >
-          <el-table-column label="预估物流成本" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
-          <el-table-column label="预估仓储成本" width="150"><template #default="{ row }">{{ referenceCostDisplay(row, "storage") }}</template></el-table-column>
-          <el-table-column label="贴单费" width="115"><template #default="{ row }">{{ referenceLabelFeeDisplay(row) }}</template></el-table-column>
-          <el-table-column label="广告分成率" width="225"
+          <!--
+            跨仓提示（阶段 6）：同一个 ERP SKU 在别的仓滞销、这个仓不滞销时，
+            提示「优先调拨，而不是压低全站点底线」。
+            **只提示，不改价** —— 调拨是运营决策，系统不越权。
+          -->
+          <el-table-column label="跨仓提示" width="280" class-name="seg-result" label-class-name="seg-result"><template #default="{ row }"><template v-if="row.warehouse_divergence"><el-tag size="small" type="warning">跨仓库龄差异</el-tag><div class="warehouse-divergence-hint">{{ row.warehouse_divergence.suggestion }}</div></template><span v-else class="muted">-</span></template></el-table-column>
+          <!-- 段四 · 成本明细与利润 -->
+          <el-table-column label="预估物流成本" width="150" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
+          <el-table-column label="预估仓储成本" width="150" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceCostDisplay(row, "storage") }}</template></el-table-column>
+          <el-table-column label="贴单费" width="115" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceLabelFeeDisplay(row) }}</template></el-table-column>
+          <el-table-column label="广告分成率" width="225" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }"
               ><!--
                 广告分成率是**高级逃生口**（阶段 3）：主输入是「目标 ROI」
@@ -592,23 +625,23 @@
                 已改用广告分成率口径（目标ROI 已清空）
               </div></template
           ></el-table-column>
-          <el-table-column label="平台佣金率" width="100"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
-          <el-table-column label="平台佣金" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
-          <el-table-column label="达人佣金" width="120"><template #default="{ row }"><div class="rate-cell"><span>{{ percent(row.preview?.expected?.creator_commission_rate) }}</span></div>{{ money(row.preview?.expected?.creator_commission) }}</template></el-table-column>
-          <el-table-column label="预计广告费用" width="105"><template #default="{ row }">{{ money(row.preview?.expected?.ad_cost) }}</template></el-table-column>
-          <el-table-column label="物流货损率（SPU）" width="110"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
-          <el-table-column label="退货损失率（SPU）" width="130"><template #default="{ row }">{{ percent(row.return_loss_rate) }}</template></el-table-column>
-          <el-table-column label="参考成本利润" width="120"
+          <el-table-column label="平台佣金率" width="100" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
+          <el-table-column label="平台佣金" width="105" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
+          <el-table-column label="达人佣金" width="120" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }"><div class="rate-cell"><span>{{ percent(row.preview?.expected?.creator_commission_rate) }}</span></div>{{ money(row.preview?.expected?.creator_commission) }}</template></el-table-column>
+          <el-table-column label="预计广告费用" width="105" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ money(row.preview?.expected?.ad_cost) }}</template></el-table-column>
+          <el-table-column label="物流货损率（SPU）" width="110" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
+          <el-table-column label="退货损失率（SPU）" width="130" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.return_loss_rate) }}</template></el-table-column>
+          <el-table-column label="参考成本利润" width="120" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }">{{
               money(row.preview?.expected?.profit)
             }}</template></el-table-column
           >
-          <el-table-column label="利润率" width="100"
+          <el-table-column label="利润率" width="100" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }">{{
               percent(row.preview?.expected?.margin_rate)
             }}</template></el-table-column
           >
-          <el-table-column label="混合成本利润" width="120"
+          <el-table-column label="混合成本利润" width="120" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }"
               >{{ money(row.preview?.actual_recost?.profit) }}
               <el-tooltip
@@ -619,7 +652,7 @@
               </el-tooltip></template
             ></el-table-column
           >
-          <el-table-column label="混合成本完整度" width="120"
+          <el-table-column label="混合成本完整度" width="120" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }"
               >{{ row.preview?.actual_recost?.completeness || "-" }}
               <el-tooltip
@@ -2123,6 +2156,41 @@ const loadOperatingProfiles = async () => {
     loadingOperating.value = false;
   }
 };
+// --- 阶段 6 · 仓维度展示辅助 -----------------------------------------------
+// 当前选中的仓自己有多少天库龄。**这个数就是底线用的那个数** ——
+// 页面显示的库龄和底线依据的库龄必须是同一个，否则运营会看到两个打架的数字。
+// 取不到时回落到 pricing_days_since_restock（页面不传仓时它是 SKU 级跨仓 MAX）。
+const currentWarehouseRestock = (row) => {
+  const items = row.warehouse_restocks || [];
+  return (
+    items.find((item) => item.warehouse_code === operatingQuery.warehouse_code) || null
+  );
+};
+const currentWarehouseRestockDays = (row) => {
+  const current = currentWarehouseRestock(row);
+  if (current) return current.days_since_restock ?? null;
+  return row.pricing_days_since_restock ?? null;
+};
+const currentWarehouseLabel = (row) => {
+  const current = currentWarehouseRestock(row);
+  if (current) return current.warehouse_name || current.warehouse_code || "";
+  const known = (operatingDimensions.warehouses || []).find(
+    (item) => item.warehouse_code === operatingQuery.warehouse_code,
+  );
+  return (
+    known?.warehouse_name || known?.warehouse_code || operatingQuery.warehouse_code || "当前仓"
+  );
+};
+// 其它仓的库龄：**老的排前面** —— 先看到最该处理的。
+const otherWarehouseRestocks = (row) => {
+  const items = row.warehouse_restocks || [];
+  return items
+    .filter((item) => item.warehouse_code !== operatingQuery.warehouse_code)
+    .slice()
+    .sort(
+      (a, b) => (b.days_since_restock ?? -1) - (a.days_since_restock ?? -1),
+    );
+};
 const resetOperatingPage = () => {
   operatingQuery.page = 1;
   loadOperatingProfiles();
@@ -3246,6 +3314,65 @@ onMounted(async () => {
   color: var(--el-text-color-secondary);
   background: var(--el-fill-color-lighter);
   border-radius: 4px;
+}
+/* 阶段 6：测算表四段分区 —— 事实 / 输入 / 结果 / 成本。
+   表头用「顶部色条 + 浅底色」区分四段：运营从左到右按
+   「看事实 → 填输入 → 看结果 → 查成本」的顺序读表，
+   不用在一堆列里找下一步该动哪个。 */
+.operating-table :deep(.el-table__header th.seg-fact) {
+  background-color: #f4f5f7;
+  box-shadow: inset 0 3px 0 #909399;
+}
+.operating-table :deep(.el-table__header th.seg-input) {
+  background-color: #ecf5ff;
+  box-shadow: inset 0 3px 0 #409eff;
+}
+.operating-table :deep(.el-table__header th.seg-result) {
+  background-color: #f0f9eb;
+  box-shadow: inset 0 3px 0 #67c23a;
+}
+.operating-table :deep(.el-table__header th.seg-cost) {
+  background-color: #fdf6ec;
+  box-shadow: inset 0 3px 0 #e6a23c;
+}
+/* 分段图例：表头颜色对应的文字说明 */
+.segment-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.segment-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.segment-legend-item i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+.segment-legend-item i.seg-fact {
+  background: #909399;
+}
+.segment-legend-item i.seg-input {
+  background: #409eff;
+}
+.segment-legend-item i.seg-result {
+  background: #67c23a;
+}
+.segment-legend-item i.seg-cost {
+  background: #e6a23c;
+}
+/* 跨仓提示（阶段 6）：同一 SKU 在别的仓滞销 ⇒ 提示调拨，而不是压低全站点底线 */
+.warehouse-divergence-hint {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--el-color-warning);
 }
 /* 利润测算页：测算售价低于最低售价时标红 */
 .price-below-floor :deep(.el-input__inner) {
