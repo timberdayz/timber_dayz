@@ -9,8 +9,9 @@
 2. 字典侧 orders 域**只登记 (RMB) 变体** —— 裸名(原币列)不在别名里
    ⇒ ``resolve_alias`` 逐字匹配时永远命中不到原币列。
 
-metabase 模型(``sql/metabase_models/orders_model.sql``)仍是手写链 ⇒
-那条用例保持原样(它守的是 metabase 侧的字段优先级)。
+metabase 模型(``sql/metabase_models/orders_model.sql``)也在 B1 里切到了
+``semantic.resolve_alias`` ⇒ 那条盯「手写链里 (RMB) 排在裸名前」的用例
+失去对象 ⇒ 改成盯**等价且更强**的事实: metabase 取数也只走别名表。
 """
 
 from pathlib import Path
@@ -72,11 +73,14 @@ def test_orders_monthly_atomic_sql_resolves_amounts_through_alias_registry():
         assert _resolve_alias_call(field) in sql_text, f"{field} 没走别名表"
 
 
-def test_orders_model_sql_prefers_rmb_profit_and_amount_fields():
+def test_orders_model_sql_resolves_amounts_through_alias_registry():
+    """metabase 模型取数**只**走别名表, 不再内联字面量金额。"""
     sql_text = _read("sql/metabase_models/orders_model.sql")
 
-    before = sql_text.split("AS profit_raw", 1)[0]
-    block = before.rsplit("COALESCE(", 1)[-1]
-    assert "raw_data->>'profit_rmb'" in block
-    assert "raw_data->>'profit'" in block
-    assert block.index("raw_data->>'profit_rmb'") < block.index("raw_data->>'profit'")
+    for field in ("paid_amount", "profit", "platform_commission"):
+        assert _resolve_alias_call(field) in sql_text, f"{field} 没走别名表"
+
+    for raw_header in ("profit_rmb", "profit", "买家支付"):
+        assert (
+            f"raw_data->>'{raw_header}'" not in sql_text
+        ), f"metabase 取数仍在直读字面量列 {raw_header!r}"
