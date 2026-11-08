@@ -33,6 +33,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.data_pipeline.inventory_restock_timeline import (
     replay_restock_timeline,
 )
+from backend.services.inventory.inventory_state_warehouse_map_service import (
+    load_warehouse_name_resolver,
+)
 
 from backend.services.data_pipeline.refresh_runner import (
     execute_refresh_plan,
@@ -342,7 +345,7 @@ class InventoryStateRefreshService:
             text(
                 """
                 INSERT INTO mart.inventory_state (
-                    platform_code, sku_key, warehouse_name,
+                    platform_code, sku_key, warehouse_name, warehouse_code,
                     platform_sku, product_sku, sku_id, product_id, product_name,
                     available_stock, on_hand_stock, reserved_stock,
                     inventory_value, unit_cost,
@@ -351,7 +354,7 @@ class InventoryStateRefreshService:
                     stock_added_at, created_at, row_seen_at, row_written_at,
                     last_metric_date, source_file_id, updated_at
                 ) VALUES (
-                    :platform_code, :sku_key, :warehouse_name,
+                    :platform_code, :sku_key, :warehouse_name, :warehouse_code,
                     :platform_sku, :product_sku, :sku_id, :product_id, :product_name,
                     :available_stock, :on_hand_stock, :reserved_stock,
                     :inventory_value, :unit_cost,
@@ -362,6 +365,7 @@ class InventoryStateRefreshService:
                 )
                 ON CONFLICT (platform_code, sku_key, warehouse_name)
                 DO UPDATE SET
+                    warehouse_code = EXCLUDED.warehouse_code,
                     platform_sku = EXCLUDED.platform_sku,
                     product_sku = EXCLUDED.product_sku,
                     sku_id = EXCLUDED.sku_id,
@@ -438,6 +442,10 @@ class InventoryStateRefreshService:
 
         state_rows: list[dict] = []
         changed_count = 0
+        # 仓名 → 规范仓代码：整轮只载一次，写进去的每一行用同一份映射快照。
+        # 解析不出来的仓名让 warehouse_code 留空（而不是猜一个仓）——
+        # 仓错 ⇒ 库龄错 ⇒ 底线错 ⇒ 定价错，而且这种错在页面上看不出来。
+        warehouse_resolver = await load_warehouse_name_resolver(self.db)
         for key, incoming in latest.items():
             transition = resolve_state_transition(
                 previous=existing.get(key), incoming=incoming
@@ -447,7 +455,13 @@ class InventoryStateRefreshService:
             sku_key = str(incoming.get("sku_key") or "")
             warehouse_name = str(incoming.get("warehouse_name") or "")
             anchor = restock_anchors.get((sku_key, warehouse_name))
-            state_rows.append(self.build_state_row(incoming, transition, anchor))
+            state_row = self.build_state_row(incoming, transition, anchor)
+            state_row["warehouse_code"] = warehouse_resolver.resolve(warehouse_name)
+            state_rows.append(state_row)
+
+        warehouse_resolver.annotate_unresolved(
+            [str(row.get("warehouse_name") or "") for row in state_rows]
+        )
 
         await self.persist_rows(state_rows)
         return {

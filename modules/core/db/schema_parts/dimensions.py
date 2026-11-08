@@ -133,6 +133,56 @@ class DimWarehouse(Base):
     )
 
 
+class DimWarehouseNameAlias(Base):
+    """妙手原始仓名 → 规范仓代码 的对照表。
+
+    为什么需要这张表
+    ----------------
+    库存采集侧写进 ``mart.inventory_state`` 的仓名是**妙手导出的原始字符串**
+    （生产实测：``新加坡``、``马来仓``、``菲律宾1店-儿童书包``、``菲律宾仓库（维修工具）``、
+    ``菲律宾3店-时尚箱包``），而经营域用的规范仓代码来自 ``core.dim_warehouses``
+    （``SG-01``/``MY-01``/``PH-01-CHILD``/``PH-REPAIR``/``PH-03-FASHION``）。
+    两边的**字符串本身就不一样**（规范仓名带「仓」字后缀，原始仓名不带），
+    所以不能靠字符串拼接去猜 —— 猜错的后果是**把货算到别的仓**，
+    而仓错 ⇒ 库龄错 ⇒ 底线错 ⇒ 定价错。
+
+    所以这里把「原始仓名 → 规范仓代码」做成**显式登记**的一行行记录：
+    采集侧查这张表归一，查不到就**留空并记日志**，绝不静默归到一个仓。
+
+    为什么放 ``core`` 而不是 ``mart``
+    --------------------------------
+    这张表是**主数据性质的对照关系**（仓的名字与代码），不是聚合层的事实。
+    ``mart`` 层只放「由采集算出来的事实」，``core`` 层放「人工/主数据维护的对照」。
+    """
+
+    __tablename__ = "dim_warehouse_name_aliases"
+
+    #: 妙手原始仓名（``mart.inventory_state.warehouse_name`` 的取值）
+    source_warehouse_name = Column(String(255), primary_key=True)
+    #: 规范仓代码（对应 ``core.dim_warehouses.warehouse_code``）
+    warehouse_code = Column(
+        String(128),
+        ForeignKey("core.dim_warehouses.warehouse_code", ondelete="CASCADE"),
+        nullable=False,
+    )
+    #: 归一说明：这一行是人登记的，还是种子播种的（便于日后核对）
+    source = Column(String(128), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_dim_warehouse_name_aliases_code", "warehouse_code"),
+        {"schema": "core"},
+    )
+
+
 class DimShop(Base):
     __tablename__ = "dim_shops"
 

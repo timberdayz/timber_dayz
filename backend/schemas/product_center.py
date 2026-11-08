@@ -1147,6 +1147,13 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     pricing_days_since_restock: Optional[int] = None
     pricing_tier_source: Optional[str] = None
     min_selling_price_below: Optional[bool] = None
+    # --- 仓维度（阶段 6）---
+    # 各仓自己的库龄：这个 SKU 在哪几个仓、各自多老。
+    # 空列表 = 状态层里没有这个 SKU 的库存行。
+    warehouse_restocks: list[dict] = Field(default_factory=list)
+    # 跨仓差异：同一 SKU 在别的仓滞销、这个仓不滞销 ⇒ 建议「优先调拨而非降价」。
+    # None = 没有差异。**只提示，不改价**。
+    warehouse_divergence: Optional[dict] = None
 
 
 class PlatformSkuProfitCandidatePageResponse(BaseModel):

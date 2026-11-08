@@ -130,6 +130,9 @@ from backend.services.product_pricing_query_service import (
     load_pricing_context as _pricing_context,
     resolve_pricing_platform_code as _pricing_platform_code,
 )
+from backend.services.inventory.warehouse_divergence_service import (
+    detect_warehouse_divergence,
+)
 from backend.services.product_pricing_override_service import (
     clear_platform_override,
     set_platform_override,
@@ -4166,8 +4169,11 @@ async def list_platform_sku_profit_candidates(
     # 定价底线：一次取齐，循环内只做纯计算（候选一次最多 100 行，不要逐行 await）
     # ⚠️ 平台费率按**本次所选平台**取 —— 底线是「SKU × 平台」的量，
     #    拿 TikTok 的费率算 Shopee 的底线会偏低三到七成。
+    # ⚠️ 库龄按**本次所选仓**取（阶段 6）—— 底线是「SKU × 平台 × 当前仓」的量：
+    #    马来仓滞销 120 天，不该把新加坡仓的底线也压到滞销档。
+    #    不传仓的老调用方仍走「各仓取最长」，行为与改造前逐字一致。
     pricing_context = await _pricing_context(
-        db, [row.sku_id for row in sku_rows], [platform_code]
+        db, [row.sku_id for row in sku_rows], [platform_code], warehouse_code
     )
     items = []
     for row in sku_rows:
@@ -4333,6 +4339,27 @@ async def list_platform_sku_profit_candidates(
             and expected_selling_price is not None
             and Decimal(str(expected_selling_price)) < Decimal(str(floor))
         )
+        # 跨仓差异（阶段 6）：同一 SKU 在别的仓滞销、这个仓不滞销 ⇒
+        # 提示「优先调拨而非降价」。**只提示，不改价** ——
+        # 调拨是运营决策，系统不越权。
+        divergence = detect_warehouse_divergence(
+            (pricing_context.get("warehouse_restocks") or {}).get(row.sku_id) or {},
+            pricing_context.get("policies") or [],
+        )
+        pricing_payload["warehouse_divergence"] = divergence
+        # 各仓自己的库龄：让运营能直接看到「这个 SKU 在哪几个仓、各自多老」
+        pricing_payload["warehouse_restocks"] = [
+            {
+                "warehouse_code": entry.get("warehouse_code"),
+                "warehouse_name": entry.get("warehouse_name") or "",
+                "days_since_restock": entry.get("days_since_restock"),
+                "current_qty": entry.get("current_qty"),
+                "inventory_value": entry.get("inventory_value"),
+            }
+            for entry in (
+                (pricing_context.get("warehouse_restocks") or {}).get(row.sku_id) or {}
+            ).values()
+        ]
         items[-1] = {**items[-1], **pricing_payload}
     return {
         "data": items,

@@ -40,7 +40,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from modules.core.db import DimPlatform, SkuPlatformPricing
 
 from .inventory.inventory_age_query_service import load_current_inventory_ages
-from .inventory.inventory_restock_query_service import load_current_restock_days
+from .inventory.inventory_restock_query_service import (
+    load_current_restock_days,
+    load_restock_days_by_warehouse,
+)
 from .product_pricing_service import compute_sku_pricing, select_restock_tier
 from .sku_pricing_policy_service import load_current_policies, to_policy_rows
 
@@ -96,6 +99,7 @@ async def load_pricing_context(
     db: AsyncSession,
     sku_ids: list[int],
     platform_codes: Iterable[str] | None = None,
+    warehouse_code: Optional[str] = None,
 ) -> dict:
     """一次性把规则表、平台成本率、库龄、平台级人工覆盖读出来，供批量计算。
 
@@ -109,9 +113,20 @@ async def load_pricing_context(
     - ``days_since_restock``：``{sku_id: 距上次进货天数}``，缺失的 SKU **不在字典里**
     - ``restock_rows``：``{sku_id: {"days_since_restock", "current_qty", "inventory_value"}}``，
       通知侧要写库存数量/库存金额时用这一份
+    - ``warehouse_restocks``（阶段 6）：``{sku_id: {warehouse_key: {...}}}`` —— **每个仓各自**的库龄，
+      用于「这个 SKU 在 A 仓滞销、B 仓不滞销」的判断
 
     ⚠️ **「距上次进货天数」才是业务上的库龄**（西虹卖完不补货，货进来才重新开始计时）。
     档位表的门槛（0/60/90/120）与折扣率**不动**，只是喂进去的量换了。
+
+    仓维度（阶段 6）
+    ----------------
+    ``warehouse_code`` 传了 ⇒ ``days_since_restock`` 用**那个仓自己的**库龄；
+    不传 ⇒ 保持「各仓取最长」的 SKU 级聚合语义，**与改造前逐字一致**。
+
+    ⚠️ 为什么要分仓：「马来仓滞销 120 天」不该把「新加坡仓」的底线也压到滞销档。
+    同一个 SKU 在不同仓的库龄不同，档位就不同，底线就不同 ——
+    这正是「MY 滞销不拖累 SG」在系统里的落点。
     """
     policy_rows = to_policy_rows(await load_current_policies(db))
     basis = policy_rows[0]["platform_basis"] if policy_rows else "tiktok"
@@ -120,6 +135,8 @@ async def load_pricing_context(
     if basis_platform is None:
         basis_platform = await db.get(DimPlatform, basis)
     restock_rows = await load_current_restock_days(db, sku_ids)
+    # 仓级明细：始终取（供跨仓差异判定用），但**不传仓时不影响上面的 SKU 级口径**。
+    warehouse_restocks = await load_restock_days_by_warehouse(db, sku_ids)
     if restock_rows:
         days_since_restock = {
             sku_id: row.get("days_since_restock")
@@ -142,6 +159,18 @@ async def load_pricing_context(
         }
         restock_source = "legacy_age_days"
 
+    # 传了仓 ⇒ 用该仓库龄覆盖 SKU 级聚合值。
+    # ⚠️ **该仓没有这个 SKU 的库存行** ⇒ 库龄缺失 ⇒ 档位回落「最小门槛」那一档
+    #    （``select_restock_tier`` 对 None 的既定行为），而不是偷偷沿用别的仓的库龄。
+    #    「这个仓没这个货」是事实，不是缺失数据。
+    if warehouse_code:
+        days_since_restock = {
+            sku_id: _days_for_warehouse(
+                warehouse_restocks.get(sku_id) or {}, warehouse_code
+            )
+            for sku_id in days_since_restock
+        }
+
     overrides = await load_platform_pricing_overrides(db, sku_ids, platforms)
     # 「可定价平台」= 有平台其他成本率的销售平台。
     # 没有 other_cost_rate 的平台算不出底线（成本线分母里缺这一项），
@@ -160,10 +189,28 @@ async def load_pricing_context(
         "days_since_restock": days_since_restock,
         "restock_rows": restock_rows,
         "restock_source": restock_source,
+        "warehouse_code": warehouse_code,
+        "warehouse_restocks": warehouse_restocks,
         # 向后兼容别名：老下游按 age_days / age_rows 取值，指向的是同一份新数据
         "age_days": days_since_restock,
         "age_rows": restock_rows,
     }
+
+
+def _days_for_warehouse(
+    warehouse_rows: dict[str, dict], warehouse_code: str
+) -> Optional[int]:
+    """某个仓自己的库龄；该仓没有库存行时返回 ``None``。
+
+    ⚠️ 查不到就返回 ``None``（= 库龄缺失），**不回落到别的仓**。
+    「新加坡仓没有这个 SKU」和「新加坡仓的数据丢了」是两件事，
+    两者都不该用马来仓的库龄来顶替 —— 否则马来仓滞销照样会压低新加坡仓的底线，
+    而这正是本轮要修的 bug。
+    """
+    row = warehouse_rows.get(warehouse_code)
+    if row is None:
+        return None
+    return row.get("days_since_restock")
 
 
 async def load_platform_pricing_overrides(

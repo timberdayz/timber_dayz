@@ -15,6 +15,15 @@
 SKU 级聚合：**各仓取最长**（只算还有库存的仓）——
 一个仓压着没补货，这货整体就压着；已经清空的仓不压资金，不参与。
 
+仓级取数（阶段 6）
+------------------
+``load_restock_days_by_warehouse`` 给出**每个仓各自**的库龄，
+供「这个 SKU 在新加坡仓滞销、在马来仓不滞销」这类判断使用。
+
+⚠️ **两个函数的过滤条件必须逐字对齐**（都是 ``available_stock > 0``）：
+已经清空的仓不压资金，不参与天数统计。两者一旦分叉，
+商品中心会给出两个答案 —— 这是口径纪律最忌讳的事。
+
 容错（照 ``inventory_age_query_service`` 的纪律）
 ------------------------------------------------
 1. ``to_regclass`` 探测表是否存在 —— 不存在就**根本不发出会失败的查询**，事务毫发无损；
@@ -43,6 +52,20 @@ _RESTOCK_LOOKUP_STMT = text(
 ).bindparams(bindparam("keys", expanding=True))
 
 
+# 仓级：每仓各自算（同样只算有库存的仓）
+_RESTOCK_BY_WAREHOUSE_STMT = text(
+    "SELECT sku_key, "
+    "warehouse_name, "
+    "warehouse_code, "
+    "MAX(CURRENT_DATE - stock_added_at::date) AS days_since_restock, "
+    "SUM(available_stock) AS current_qty, "
+    "SUM(inventory_value) AS inventory_value "
+    "FROM mart.inventory_state "
+    "WHERE sku_key IN :keys AND available_stock > 0 "
+    "GROUP BY sku_key, warehouse_name, warehouse_code"
+).bindparams(bindparam("keys", expanding=True))
+
+
 async def load_current_restock_days(
     db: AsyncSession, sku_ids: list[int]
 ) -> dict[int, dict]:
@@ -54,23 +77,14 @@ async def load_current_restock_days(
     if not sku_ids:
         return {}
 
-    rows = (
-        await db.execute(
-            select(DimErpSku.sku_id, DimErpSku.sku_key).where(
-                DimErpSku.sku_id.in_(sku_ids)
-            )
-        )
-    ).all()
-    key_to_sku = {row.sku_key: row.sku_id for row in rows}
+    key_to_sku = await _load_sku_key_map(db, sku_ids)
     if not key_to_sku:
         return {}
 
     try:
         async with db.begin_nested():
             exists = (
-                await db.execute(
-                    text("SELECT to_regclass('mart.inventory_state')")
-                )
+                await db.execute(text("SELECT to_regclass('mart.inventory_state')"))
             ).scalar()
             if not exists:
                 # mart 层不存在：不发出会失败的查询，事务保持健康
@@ -105,3 +119,88 @@ async def load_current_restock_days(
             "inventory_value": float(row.inventory_value or 0.0),
         }
     return result
+
+
+async def load_restock_days_by_warehouse(
+    db: AsyncSession, sku_ids: list[int]
+) -> dict[int, dict[str, dict]]:
+    """按仓取「距上次进货天数」—— **每个仓各自算**。
+
+    返回 ``{sku_id: {warehouse_key: {...}}}``，其中 ``warehouse_key`` 优先用
+    规范仓代码 ``warehouse_code``；**归一不出来的仓**（``warehouse_code`` 为空）
+    用原始仓名兜底当键 —— 这样这类仓既不会混进别的仓，也不会凭空消失。
+
+    每项内容与 SKU 级那一份**同名字段**：
+    ``days_since_restock`` / ``current_qty`` / ``inventory_value``，
+    外加 ``warehouse_name``（原始仓名，页面要显示）与 ``warehouse_code``。
+
+    ⚠️ 过滤条件与 ``load_current_restock_days`` **逐字对齐**
+    （``available_stock > 0``）：已清空的仓不压资金，不参与。
+    """
+    if not sku_ids:
+        return {}
+
+    key_to_sku = await _load_sku_key_map(db, sku_ids)
+    if not key_to_sku:
+        return {}
+
+    try:
+        async with db.begin_nested():
+            exists = (
+                await db.execute(text("SELECT to_regclass('mart.inventory_state')"))
+            ).scalar()
+            if not exists:
+                return {}
+            rows = (
+                await db.execute(
+                    _RESTOCK_BY_WAREHOUSE_STMT,
+                    {"keys": list(key_to_sku)},
+                )
+            ).all()
+    except Exception as exc:  # noqa: BLE001
+        from modules.core.logger import get_logger
+
+        get_logger(__name__).warning(
+            "inventory restock days by warehouse lookup failed: %s", exc
+        )
+        return {}
+
+    result: dict[int, dict[str, dict]] = {}
+    for row in rows:
+        sku_id = key_to_sku.get(row.sku_key)
+        if sku_id is None:
+            continue
+        warehouse_name = row.warehouse_name or ""
+        warehouse_code = row.warehouse_code
+        # 归一不出来的仓用原始仓名兜底当键：不混进别的仓，也不凭空消失
+        warehouse_key = warehouse_code or warehouse_name
+        if not warehouse_key:
+            continue
+        result.setdefault(sku_id, {})[warehouse_key] = {
+            "warehouse_code": warehouse_code,
+            "warehouse_name": warehouse_name,
+            "days_since_restock": (
+                int(row.days_since_restock)
+                if row.days_since_restock is not None
+                else None
+            ),
+            "current_qty": int(row.current_qty or 0),
+            "inventory_value": float(row.inventory_value or 0.0),
+        }
+    return result
+
+
+async def _load_sku_key_map(db: AsyncSession, sku_ids: list[int]) -> dict[str, int]:
+    """``{sku_key: sku_id}`` —— ERP 主数据里的商品键到内部 id 的映射。
+
+    ⚠️ **用 sku_key 查，不是 sku_id**：ERP 编号（用户口中的"商品号"）是
+    ``sku_key``（字符串），``sku_id`` 是内部整数主键。拿整数去查字符串列会静默返回空。
+    """
+    rows = (
+        await db.execute(
+            select(DimErpSku.sku_id, DimErpSku.sku_key).where(
+                DimErpSku.sku_id.in_(sku_ids)
+            )
+        )
+    ).all()
+    return {row.sku_key: row.sku_id for row in rows}
