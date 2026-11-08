@@ -322,11 +322,34 @@ def _derive_orders_fields() -> Tuple[SemanticCoverageField, ...]:
     )
 
 
+def _derive_analytics_fields() -> Tuple[SemanticCoverageField, ...]:
+    """流量(analytics)域巡检字段(从字典派生)。
+
+    来源 = ``DOMAIN_SEMANTIC_ALIASES["analytics"]`` 的 key ——
+    即该域**登记了别名**的标准字段 ⇒ 别名表认得、才可能解析得出来。
+
+    ⚠ ``click_rate`` **不在**这份清单里(两个平台都没有这一列, 刻意不登记)⇒
+       不会被巡检。它不是「列名未登记」的缺口, 而是**平台压根没这个指标**,
+       报出来只会是噪音。
+
+    ⇒ 不在本文件里维护第 4 份手写清单: 字典增删字段, 巡检自动跟随。
+    """
+    keys = set(DOMAIN_SEMANTIC_ALIASES.get("analytics", {}).keys())
+    return tuple(
+        SemanticCoverageField(key, key, _field_kind(key)) for key in sorted(keys)
+    )
+
+
 #: 商品域巡检字段(字典派生)。
 PRODUCTS_STANDARD_FIELDS: Tuple[SemanticCoverageField, ...] = _derive_products_fields()
 
 #: 订单域巡检字段(字典派生)。
 ORDERS_STANDARD_FIELDS: Tuple[SemanticCoverageField, ...] = _derive_orders_fields()
+
+#: 流量域巡检字段(字典派生)。
+ANALYTICS_STANDARD_FIELDS: Tuple[SemanticCoverageField, ...] = (
+    _derive_analytics_fields()
+)
 
 
 SEMANTIC_COVERAGE_DOMAINS: Dict[str, SemanticCoverageDomain] = {
@@ -347,6 +370,17 @@ SEMANTIC_COVERAGE_DOMAINS: Dict[str, SemanticCoverageDomain] = {
         # 字典登记了、视图还没输出的字段(settled_amount 等)也能被巡检到。
         resolution_mode=RESOLUTION_MODE_ALIAS,
         fields=ORDERS_STANDARD_FIELDS,
+    ),
+    # [*] 2026-11-08: 流量域取数也切到 ``semantic.resolve_alias()`` ⇒
+    #   巡检同样走别名解析, 与视图**同一个取值路径**。
+    #   没有它的话, 流量域那些「假 0」(impressions / clicks / gmv / order_count)
+    #   正是本轮被治理的对象, 却**看不到解析率**。
+    "analytics": SemanticCoverageDomain(
+        name="analytics",
+        relation="semantic.fact_analytics_atomic",
+        materialized_relation="semantic.fact_analytics_atomic_mv",
+        resolution_mode=RESOLUTION_MODE_ALIAS,
+        fields=ANALYTICS_STANDARD_FIELDS,
     ),
 }
 

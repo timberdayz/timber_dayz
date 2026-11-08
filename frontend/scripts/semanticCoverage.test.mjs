@@ -16,6 +16,7 @@ import assert from 'node:assert/strict'
 
 import {
   SEMANTIC_COVERAGE_DEFAULT_THRESHOLD,
+  SEMANTIC_COVERAGE_DOMAIN_OPTIONS,
   buildPlatformRows,
   buildZeroRateRows,
   classifyResolutionRate,
@@ -193,4 +194,24 @@ test('normalizeSemanticCoverage falls back to unknown on empty payload', () => {
   assert.deepEqual(normalized.reports, [])
   assert.deepEqual(normalized.warnings, [])
   assert.equal(normalized.health, 'unknown')
+})
+
+// ── 域选项必须与后端白名单一致(2026-11-08) ─────────────────────────────
+//
+// 后端对未登记的域返回 400 ⇒ 前端多给一个选项 = 给用户一个必然报错的入口。
+// 流量域在 B3 切到 resolve_alias 之后**必须**能被巡检。
+
+test('domain options cover orders / products / analytics and all', () => {
+  const values = SEMANTIC_COVERAGE_DOMAIN_OPTIONS.map((option) => option.value)
+
+  assert.ok(values.includes('all'))
+  assert.ok(values.includes('orders'))
+  assert.ok(values.includes('products'))
+  assert.ok(values.includes('analytics'))
+  // 全部域排在最前(默认选项)
+  assert.equal(SEMANTIC_COVERAGE_DOMAIN_OPTIONS[0].value, 'all')
+  // 每个选项都要有中文标签
+  for (const option of SEMANTIC_COVERAGE_DOMAIN_OPTIONS) {
+    assert.ok(option.label && option.label.length > 0)
+  }
 })

@@ -23,6 +23,7 @@ import pytest
 from sqlalchemy.exc import ProgrammingError
 
 from backend.services.semantic_coverage_audit_service import (
+    ANALYTICS_STANDARD_FIELDS,
     DEFAULT_CANDIDATE_LIMIT,
     DEFAULT_RESOLUTION_THRESHOLD,
     ORDERS_STANDARD_FIELDS,
@@ -286,7 +287,8 @@ async def test_service_reads_threshold_from_constructor_and_call_site():
     ]
     service = SemanticCoverageAuditService(threshold=0.9)
     assert service.threshold == 0.9
-    assert service.available_domains() == ("orders", "products")
+    # 2026-11-08: 流量域也切到 resolve_alias ⇒ 也可被巡检 ⇒ 域清单是三个。
+    assert service.available_domains() == ("analytics", "orders", "products")
 
     # 调用点覆盖成 0.5 ⇒ sales_amount(80%)不再告警。
     report = await service.audit(
@@ -923,3 +925,86 @@ def test_platform_applicable_fields_follows_dictionary_platforms_marker():
     # 两平台都有的字段(联盟/达人佣金)⇒ 两平台都适用。
     assert semantic_field_applies_to_platform("affiliate_commission", "shopee") is True
     assert semantic_field_applies_to_platform("affiliate_commission", "tiktok") is True
+
+
+# ── 流量(analytics)域也能被巡检(2026-11-08) ───────────────────────────
+#
+# 背景: B3 把流量域取数切到 ``semantic.resolve_alias()`` 之后,
+# 巡检的域白名单里**没有** analytics ⇒ ``?domain=analytics`` 直接 400。
+# 而流量域恰恰是本轮变化最大的域(假 0 → 真实值 / 空白), 最需要看到解析率
+# 与「源表真实列名候选」—— 那是「重新采集后新表头认不认得出来」的唯一判据。
+
+
+def test_analytics_domain_is_registered_for_coverage_audit():
+    """流量域必须能被巡检。"""
+    assert "analytics" in SEMANTIC_COVERAGE_DOMAINS
+
+    spec = SEMANTIC_COVERAGE_DOMAINS["analytics"]
+    assert spec.relation == "semantic.fact_analytics_atomic"
+    # 优先读物化副本(与另外两个域同一口径)
+    assert spec.materialized_relation == "semantic.fact_analytics_atomic_mv"
+    # 走别名解析, 与视图同一个取值路径
+    assert spec.resolution_mode == "alias"
+
+
+def test_analytics_domain_fields_are_derived_from_the_dictionary():
+    """流量域巡检字段集合 == 字典的域限定别名清单的 key。
+
+    ⇒ 不在本文件/服务里维护第 4 份手写清单: 字典增删字段, 巡检自动跟随。
+    """
+    expected = set(DOMAIN_SEMANTIC_ALIASES["analytics"].keys())
+    actual = {field.standard_field for field in ANALYTICS_STANDARD_FIELDS}
+
+    assert actual == expected
+    assert SEMANTIC_COVERAGE_DOMAINS["analytics"].fields == ANALYTICS_STANDARD_FIELDS
+    # 「必须命中」的核心指标一个都不能少
+    for field in (
+        "visitor_count",
+        "product_visitor_count",
+        "page_views",
+        "impressions",
+        "clicks",
+        "conversion_rate",
+        "order_count",
+        "sku_order_count",
+        "gmv",
+        "total_transaction_amount",
+        "bounce_rate",
+    ):
+        assert field in actual, "流量域巡检漏了 {0}".format(field)
+
+
+def test_click_rate_is_not_audited_because_no_platform_has_that_column():
+    """``click_rate`` 两个平台都没有这一列 ⇒ 刻意不登记 ⇒ 不该被巡检。
+
+    报它 0% 只是噪音(平台压根没这个指标), 会掩盖真问题。
+    """
+    actual = {field.standard_field for field in ANALYTICS_STANDARD_FIELDS}
+
+    assert "click_rate" not in actual
+
+
+def test_analytics_platform_applicable_fields_include_common_domain_fields():
+    """流量域的「平台适用字段」必须含 common 域的字段。
+
+    ``gmv`` / ``metric_date`` / ``shop_id`` 在字典里 domain 是 common ⇒
+    若按「字典 domain == 本域」取, 它们会被漏掉 ⇒ 平台诊断口径失真
+    (这三个字段解析不出来时不会被报)。
+    """
+    applicable = platform_applicable_fields("analytics", "shopee")
+
+    assert "gmv" in applicable
+    assert "metric_date" in applicable
+    assert "shop_id" in applicable
+    assert "visitor_count" in applicable
+
+
+def test_analytics_domain_sql_resolves_through_alias_registry():
+    """流量域的巡检 SQL 必须走别名表(与视图同一取值路径)。"""
+    sql = build_coverage_sql(SEMANTIC_COVERAGE_DOMAINS["analytics"])
+
+    assert "semantic.fact_analytics_atomic" in sql
+    assert "semantic.semantic_field_aliases" in sql
+    assert "jsonb_each(" in sql
+    for field in ANALYTICS_STANDARD_FIELDS:
+        assert "'{0}'".format(field.standard_field) in sql

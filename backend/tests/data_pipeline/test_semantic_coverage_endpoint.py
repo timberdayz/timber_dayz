@@ -289,7 +289,12 @@ async def test_endpoint_defaults_to_all_domains():
 
     data = body["data"]
     assert data["domain"] == "all"
-    assert {report["domain"] for report in data["reports"]} == {"orders", "products"}
+    # 2026-11-08: 流量域也进入巡检范围 ⇒ all 覆盖三个域。
+    assert {report["domain"] for report in data["reports"]} == {
+        "analytics",
+        "orders",
+        "products",
+    }
 
 
 @pytest.mark.asyncio
@@ -507,6 +512,53 @@ def test_http_endpoint_rejects_unknown_domain_with_400():
 
     session = _FakeSession(rows=[])
     client = TestClient(_build_test_app(session))
+
+    response = client.get("/api/data-pipeline/semantic-coverage?domain=nope")
+
+    assert response.status_code == 400
+
+
+# ── 流量域可巡检(2026-11-08) ────────────────────────────────────────────
+#
+# 之前 ``?domain=analytics`` 会被白名单挡下来返回 400 ——
+# 而流量域是本轮变化最大的域, 巡检不到就等于「改完看不见」。
+
+
+def test_endpoint_accepts_analytics_domain():
+    """``domain=analytics`` 必须返回 200(不是 400)。"""
+    from fastapi.testclient import TestClient
+
+    client = TestClient(_build_test_app(_FakeSession(rows=[])))
+
+    response = client.get("/api/data-pipeline/semantic-coverage?domain=analytics")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    report = body["data"]["reports"][0]
+    assert report["domain"] == "analytics"
+    assert report["relation"] == "semantic.fact_analytics_atomic"
+
+
+def test_endpoint_all_domain_covers_three_domains():
+    """不传 domain ⇒ 三个域都出(订单 / 商品 / 流量)。"""
+    from fastapi.testclient import TestClient
+
+    client = TestClient(_build_test_app(_FakeSession(rows=[])))
+
+    response = client.get("/api/data-pipeline/semantic-coverage")
+
+    assert response.status_code == 200
+    body = response.json()
+    domains = {report["domain"] for report in body["data"]["reports"]}
+    assert domains == {"orders", "products", "analytics"}
+
+
+def test_endpoint_unknown_domain_still_rejected():
+    """未登记的域仍然 400(不能因为放开 analytics 就把白名单拆了)。"""
+    from fastapi.testclient import TestClient
+
+    client = TestClient(_build_test_app(_FakeSession(rows=[])))
 
     response = client.get("/api/data-pipeline/semantic-coverage?domain=nope")
 

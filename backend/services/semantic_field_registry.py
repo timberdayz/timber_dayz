@@ -1276,6 +1276,12 @@ def platform_applicable_fields(
     """该平台**适用**的标准字段集合(按字典 ``platforms`` 标注过滤)。"""
     if str(domain) == "orders":
         candidates = ORDER_STANDARD_FIELDS
+    elif str(domain) == "analytics":
+        # 流量域的别名清单里含三个 **common** 字段(gmv / metric_date / shop_id)
+        # —— 它们在字典里 domain 是 common, 按「字典 domain == 本域」取会漏掉
+        # ⇒ 平台诊断的口径会失真(这三个字段解析不出来时不会被报)。
+        # ⇒ 这里以**该域的别名清单**为准, 与巡检实际巡检的字段集合同源。
+        candidates = tuple(DOMAIN_SEMANTIC_ALIASES.get("analytics", {}).keys())
     else:
         candidates = tuple(
             key

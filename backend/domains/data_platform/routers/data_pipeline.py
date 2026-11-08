@@ -396,7 +396,7 @@ async def _audit_coverage_domain(
 async def get_semantic_coverage(
     domain: Optional[str] = Query(
         None,
-        description="orders / products / all；不传则两个域都出（默认 all）",
+        description="orders / products / analytics / all；不传则三个域都出（默认 all）",
     ),
     threshold: Optional[float] = Query(
         None,
@@ -411,7 +411,8 @@ async def get_semantic_coverage(
     回答「某个标准字段（如 ``profit`` / ``platform_service_fee``）在源表里到底
     解析得出来吗、解析率多少、源表里真实列名叫啥」。
 
-    * ``domain``: ``orders`` / ``products`` / ``all``；**不传默认两个域都出**。
+    * ``domain``: ``orders`` / ``products`` / ``analytics`` / ``all``；
+      **不传默认三个域都出**。
     * ``threshold``: 解析率告警阈值（0~1）；不传沿用服务层默认 0.5。
     * **只读**：只发 SELECT, 不写库、不改视图。
     * **容错**：DB 不可用 / ``semantic`` 视图不存在时返回 **200 + 空报告 + warning**,

@@ -15,7 +15,7 @@ import { normalizeSemanticCoverage } from './semanticCoverage.js'
  * 巡检接口的 axios 超时(毫秒)。
  *
  * 为什么不用默认的 30s: 巡检要对 ``semantic.fact_*_atomic`` 做全量聚合
- * (两个域各一条聚合 SQL, 命中 0% 字段时再加一条真实列名采集 SQL),
+ * (三个域各一条聚合 SQL, 命中 0% 字段时再加一条真实列名采集 SQL),
  * 耗时与 Dashboard 家族同量级 ⇒ 按 ``TIMEOUTS.dashboard`` 的 120s 对齐。
  *
  * ⚠ 超时预算顺序: DB statement_timeout(默认 25s/条) < 前端 120s ⇒
@@ -30,7 +30,7 @@ const SEMANTIC_COVERAGE_TIMEOUT_MS = 120000
  * 而不是把整个页面打挂。调用方通过返回值的 ``ok`` 字段区分。
  *
  * @param {Object} [options]
- * @param {string} [options.domain] orders / products / all(默认 all)
+ * @param {string} [options.domain] orders / products / analytics / all(默认 all)
  * @param {number} [options.threshold] 解析率告警阈值(0~1)
  * @returns {Promise<Object>} { ok, data, error }
  */

@@ -22,11 +22,17 @@ export const SEMANTIC_COVERAGE_HEALTH = {
 /** 解析率低于该值即视为「不健康」（与后端默认阈值一致）。 */
 export const SEMANTIC_COVERAGE_DEFAULT_THRESHOLD = 0.5
 
-/** 面板可选的语义域（``all`` = 两个域都看）。 */
+/**
+ * 面板可选的语义域（``all`` = 三个域都看）。
+ *
+ * ⚠ 域清单**必须**与后端 ``SEMANTIC_COVERAGE_DOMAINS`` 一致 ——
+ *   后端对未登记的域返回 400, 前端多给一个选项就是给用户一个必然报错的入口。
+ */
 export const SEMANTIC_COVERAGE_DOMAIN_OPTIONS = [
   { label: '全部域', value: 'all' },
   { label: '订单域', value: 'orders' },
-  { label: '商品域', value: 'products' }
+  { label: '商品域', value: 'products' },
+  { label: '流量域', value: 'analytics' }
 ]
 
 /**
