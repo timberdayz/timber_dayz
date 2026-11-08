@@ -1,11 +1,13 @@
 """语义层覆盖率巡检服务的测试。
 
-覆盖四件事（对应任务验收口径）：
+覆盖六件事（对应任务验收口径）：
 1. 解析率正常的域 **不** 产生 warning；
 2. 解析率 0% 产生 warning（平台, 粒度, 标准字段 三元组 + 中文描述）；
 3. **空壳行**（raw_data 为空对象）被单独计数，且 **不** 产生"解析缺失"告警
    —— 空壳行是"入库没拿到数据"，与"有 raw_data 但解析不出来"必须分开处置；
-4. 表/视图不存在时安全返回**空报告 + 一条 warning**，不把调用方带崩。
+4. 表/视图不存在时安全返回**空报告 + 一条 warning**，不把调用方带崩；
+5. 解析率 0% 时给出**源表真实列名候选**（阶段 5.1）；
+6. 字段清单**从字典派生**（阶段 5.2）+ 平台维度诊断（阶段 5.3）。
 
 测试用两种方式：
 * 纯函数层（``build_coverage_report``）：用假数据精确验证口径，不碰数据库；
@@ -21,15 +23,23 @@ import pytest
 from sqlalchemy.exc import ProgrammingError
 
 from backend.services.semantic_coverage_audit_service import (
+    DEFAULT_CANDIDATE_LIMIT,
     DEFAULT_RESOLUTION_THRESHOLD,
     ORDERS_STANDARD_FIELDS,
+    PRODUCTS_EXCLUDED_FIELDS,
     PRODUCTS_STANDARD_FIELDS,
     SEMANTIC_COVERAGE_DOMAINS,
     SemanticCoverageAuditService,
     SemanticCoverageDomain,
     SemanticCoverageField,
+    build_column_names_sql,
     build_coverage_report,
     build_coverage_sql,
+)
+from backend.services.semantic_field_registry import (
+    DOMAIN_SEMANTIC_ALIASES,
+    ORDER_RETIRED_FIELDS,
+    ORDER_STANDARD_FIELDS as REGISTRY_ORDER_STANDARD_FIELDS,
 )
 
 
@@ -101,6 +111,7 @@ def _row(
     empty_shell_rows: int = 0,
     all_unresolved_rows: int = 0,
     resolved: Optional[Dict[str, int]] = None,
+    fields: Optional[Iterable[SemanticCoverageField]] = None,
 ) -> Dict[str, Any]:
     """造一行聚合结果（``resolved`` 省略的字段按 0 处理）。"""
     row: Dict[str, Any] = {
@@ -110,18 +121,38 @@ def _row(
         "empty_shell_rows": empty_shell_rows,
         "all_unresolved_rows": all_unresolved_rows,
     }
-    for field in PRODUCTS_STANDARD_FIELDS:
+    for field in fields if fields is not None else PRODUCTS_STANDARD_FIELDS:
         row[f"resolved_{field.standard_field}"] = int(
             (resolved or {}).get(field.standard_field, 0)
         )
     return row
 
 
-def _all_resolved(total_rows: int, **overrides: int) -> Dict[str, int]:
+def _all_resolved(
+    total_rows: int,
+    **overrides: int,
+) -> Dict[str, int]:
     """默认"所有标准字段都解析成功"，再按需覆盖个别字段。"""
     resolved = {field.standard_field: total_rows for field in PRODUCTS_STANDARD_FIELDS}
     resolved.update(overrides)
     return resolved
+
+
+def _orders_row(
+    platform_code: str,
+    granularity: str,
+    *,
+    total_rows: int,
+    resolved: Optional[Dict[str, int]] = None,
+) -> Dict[str, Any]:
+    """造一行**订单域**的聚合结果。"""
+    return _row(
+        platform_code,
+        granularity,
+        total_rows=total_rows,
+        resolved=resolved,
+        fields=ORDERS_STANDARD_FIELDS,
+    )
 
 
 def _products_domain() -> SemanticCoverageDomain:
@@ -453,15 +484,21 @@ def test_products_sql_uses_alias_resolution_not_coalesced_view_columns():
     assert "COALESCE(sales_amount" not in sql
 
 
-def test_orders_sql_uses_null_preserving_view_columns():
-    """订单域(对照域)按视图列的 NULL 性判定，不调用 resolve_alias。"""
+def test_orders_sql_uses_alias_resolution_not_coalesced_view_columns():
+    """订单域也必须走 resolve_alias —— 视图的 COALESCE(...,0) 会把失败伪装成成功。
+
+    阶段 5.2 口径变更：订单域从「按视图列的 NULL 性判定」改成「按别名解析」，
+    这样被 COALESCE 掩盖的数值列才能区分「解析失败」与「真的是 0」。
+    """
     sql = build_coverage_sql(SEMANTIC_COVERAGE_DOMAINS["orders"])
 
     assert "semantic.fact_orders_atomic" in sql
-    assert "semantic.resolve_alias(" not in sql
-    # 被 COALESCE(...,0) 掩盖的数值列不纳入订单域巡检。
-    assert "sales_amount" not in sql
-    assert "resolved_order_id" in sql
+    assert "semantic.resolve_alias(" in sql
+    for field in ORDERS_STANDARD_FIELDS:
+        assert f"'{field.standard_field}'" in sql
+        assert f"resolved_{field.standard_field}" in sql
+    # 不能直接拿视图里被 COALESCE 掩盖的数值列当解析结果。
+    assert "COALESCE(paid_amount" not in sql
 
 
 def test_empty_shell_detection_is_present_in_both_domains():
@@ -472,20 +509,47 @@ def test_empty_shell_detection_is_present_in_both_domains():
         assert "'{}'::jsonb" in sql
 
 
-def test_orders_domain_excludes_coalesce_masked_numeric_columns():
-    """订单域不得包含被 COALESCE(...,0) 掩盖、无法判定解析失败的列。"""
-    masked = {
-        "sales_amount",
-        "paid_amount",
-        "profit",
-        "product_quantity",
-        "buyer_count",
-    }
+def test_orders_domain_field_set_is_derived_from_the_field_registry():
+    """订单域巡检字段集合 == 字典的 ``ORDER_STANDARD_FIELDS``（阶段 5.2）。
+
+    不再在本文件/服务里维护第 4 份手写清单 ⇒ 字典增删字段, 巡检自动跟随。
+    """
     audited = {field.standard_field for field in ORDERS_STANDARD_FIELDS}
 
-    assert not (audited & masked)
-    # 保留 NULL 的列必须纳入。
-    assert {"order_id", "product_id", "product_name", "purchase_amount"} <= audited
+    assert audited == set(REGISTRY_ORDER_STANDARD_FIELDS)
+    # 字典已废止的字段(sales_amount)不得回到巡检范围。
+    assert not (audited & set(ORDER_RETIRED_FIELDS))
+    # 被视图 COALESCE(...,0) 掩盖的数值列现在**要**纳入(走别名解析才能判定)。
+    assert {"paid_amount", "profit", "buyer_count"} <= audited
+    # 字典登记了、视图还没输出的字段也要能巡检。
+    assert {"settled_amount", "seller_voucher", "refund_amount"} <= audited
+
+
+def test_products_domain_field_set_is_derived_from_the_field_registry():
+    """商品域巡检字段集合也来自字典（``DOMAIN_SEMANTIC_ALIASES["products"]``）。
+
+    只减掉 :data:`PRODUCTS_EXCLUDED_FIELDS`（视图内计算列 / 下单口径字段）——
+    视图内计算列在源表里压根没有这一列, 巡检它们永远是 0%, 只会刷屏假告警。
+    """
+    audited = {field.standard_field for field in PRODUCTS_STANDARD_FIELDS}
+    registry_keys = set(DOMAIN_SEMANTIC_ALIASES["products"].keys())
+
+    assert audited == registry_keys - set(PRODUCTS_EXCLUDED_FIELDS)
+    # 视图内计算列不在范围内。
+    assert "aov" not in audited
+    assert "buyer_count" not in audited
+    # 走 resolve_alias 的主干字段都在。
+    assert {
+        "product_id",
+        "product_name",
+        "item_status",
+        "order_count",
+        "sales_amount",
+        "sales_volume",
+        "impressions",
+        "clicks",
+        "conversion_rate",
+    } <= audited
 
 
 def test_custom_domain_can_be_injected():
@@ -502,3 +566,210 @@ def test_custom_domain_can_be_injected():
     sql = build_coverage_sql(custom)
     assert "semantic.fact_custom_atomic" in sql
     assert "resolved_foo" in sql
+
+
+# ── 5. 解析率 0% ⇒ 给出源表真实列名候选（阶段 5.1） ─────────────────
+#
+# 场景取自开发库实测(2026-11): shopee 订单源表里有「联盟佣金(RMB)」,
+# 但字典只登记了「Shopee平台佣金(RMB)」⇒ platform_commission 解析不出来。
+# 巡检必须直接把「联盟佣金(RMB)」指出来, 而不是只说一句「解析率 0%」。
+
+#: shopee 订单源表的真实列名(节选, 含已登记与未登记两类)。
+SHOPEE_ORDER_COLUMNS: tuple[str, ...] = (
+    "订单编号",
+    "平台SKU",
+    "联盟佣金(RMB)",
+    "联盟佣金",
+    "Shopee平台佣金(RMB)",
+    "服务费(RMB)",
+    "广告成本(RMB)",
+)
+
+
+def _orders_domain() -> SemanticCoverageDomain:
+    return SEMANTIC_COVERAGE_DOMAINS["orders"]
+
+
+def test_zero_resolution_lists_real_source_column_candidates():
+    """解析率 0% ⇒ 告警里必须出现**源表真实列名**候选。"""
+    rows = [_orders_row("shopee", "monthly", total_rows=100)]
+
+    report = build_coverage_report(
+        rows,
+        domain=_orders_domain(),
+        column_candidates={("shopee", "monthly"): SHOPEE_ORDER_COLUMNS},
+    )
+
+    commission_warnings = [w for w in report.warnings if "platform_commission" in w]
+    assert commission_warnings, "platform_commission 解析率 0% 必须被点名"
+    warning = commission_warnings[0]
+    assert "解析率 0%" in warning
+    assert "疑似语义映射缺失" in warning
+    assert "疑似列名未登记" in warning
+    assert "源表实际列名候选：" in warning
+    # 候选里必须有「联盟佣金」这一族 —— 且**保留原始列名**(RMB 后缀不被吃掉)。
+    assert "联盟佣金" in warning
+    assert (
+        "联盟佣金(RMB)"
+        in report.column_candidates["shopee/monthly/platform_commission"]
+    )
+
+
+def test_column_candidates_preserve_original_column_names():
+    """候选必须保留原始列名 —— 归一化只用于比较, 不能改输出。"""
+    rows = [_orders_row("shopee", "monthly", total_rows=100)]
+
+    report = build_coverage_report(
+        rows,
+        domain=_orders_domain(),
+        column_candidates={("shopee", "monthly"): SHOPEE_ORDER_COLUMNS},
+    )
+
+    candidates = report.column_candidates["shopee/monthly/platform_commission"]
+    assert "联盟佣金(RMB)" in candidates
+    # 归一化后同名但原文不同的两列, 都要出现(不能被归一化合并掉)。
+    assert "联盟佣金" in candidates
+    assert "联盟佣金(RMB)" in candidates
+
+
+def test_registered_columns_are_not_proposed_as_unregistered_candidates():
+    """字典里**已登记**的列名不该被当成「列名未登记」的候选。
+
+    「Shopee平台佣金(RMB)」已登记给 platform_commission、「平台SKU」已登记给
+    platform_sku ⇒ 它们不是「没登记的列名」。
+    """
+    rows = [_orders_row("shopee", "monthly", total_rows=100)]
+
+    report = build_coverage_report(
+        rows,
+        domain=_orders_domain(),
+        column_candidates={("shopee", "monthly"): SHOPEE_ORDER_COLUMNS},
+    )
+
+    candidates = report.column_candidates["shopee/monthly/platform_commission"]
+    assert "Shopee平台佣金(RMB)" not in candidates
+    assert "平台SKU" not in candidates
+    assert "订单编号" not in candidates
+
+
+def test_column_candidate_ranking_is_deterministic():
+    """同样的输入 ⇒ 同样的候选与顺序(相似度算法必须确定性)。"""
+    rows = [_orders_row("shopee", "monthly", total_rows=100)]
+
+    def _candidates() -> tuple[str, ...]:
+        report = build_coverage_report(
+            rows,
+            domain=_orders_domain(),
+            column_candidates={("shopee", "monthly"): SHOPEE_ORDER_COLUMNS},
+        )
+        return report.column_candidates["shopee/monthly/platform_commission"]
+
+    assert _candidates() == _candidates()
+
+
+def test_column_candidate_limit_is_respected():
+    """候选数量上限可配(默认 5 个)。"""
+    rows = [_orders_row("shopee", "monthly", total_rows=100)]
+    many_columns = tuple(f"平台佣金备选{index}" for index in range(20))
+
+    report = build_coverage_report(
+        rows,
+        domain=_orders_domain(),
+        column_candidates={("shopee", "monthly"): many_columns},
+        candidate_limit=3,
+    )
+
+    candidates = report.column_candidates["shopee/monthly/platform_commission"]
+    assert len(candidates) == 3
+    assert DEFAULT_CANDIDATE_LIMIT == 5
+
+
+def test_zero_resolution_without_column_names_still_warns():
+    """拿不到真实列名时, 告警照发 —— 只是没有候选那一段。"""
+    rows = [_orders_row("shopee", "monthly", total_rows=100)]
+
+    report = build_coverage_report(rows, domain=_orders_domain())
+
+    commission_warnings = [w for w in report.warnings if "platform_commission" in w]
+    assert commission_warnings
+    assert "解析率 0%" in commission_warnings[0]
+    assert "疑似列名未登记" in commission_warnings[0]
+    assert "源表实际列名候选：" not in commission_warnings[0]
+    assert report.column_candidates == {}
+
+
+def test_column_names_sql_reads_raw_data_keys_and_is_read_only():
+    """真实列名的采集 SQL 必须走 raw_data 的 key, 且只读。"""
+    sql = build_column_names_sql(_orders_domain())
+
+    assert "jsonb_object_keys" in sql
+    assert "semantic.fact_orders_atomic" in sql
+    assert "column_names" in sql
+    for keyword in ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER"):
+        assert keyword not in sql.upper()
+
+
+def test_column_names_sql_can_filter_groups():
+    """可以只采指定 (平台, 粒度) 组 —— 避免无谓的全表扫描。"""
+    sql = build_column_names_sql(
+        _orders_domain(),
+        groups=[("shopee", "monthly")],
+    )
+
+    assert "('shopee', 'monthly')" in sql
+    assert "WHERE (s.platform_code, s.granularity) IN" in sql
+
+
+# ── 6. 平台维度诊断（阶段 5.3） ─────────────────────────────────────
+
+
+def test_platform_summary_lists_fields_that_never_resolve():
+    """平台维度诊断: 汇总「所有粒度都解析不出来」的字段。"""
+    rows = [
+        _orders_row("shopee", "monthly", total_rows=100),
+        _orders_row("shopee", "daily", total_rows=100),
+        _orders_row("tiktok", "monthly", total_rows=100, resolved={"order_id": 100}),
+    ]
+
+    report = build_coverage_report(rows, domain=_orders_domain())
+
+    summaries = {summary.platform_code: summary for summary in report.platforms}
+    assert set(summaries) == {"shopee", "tiktok"}
+    shopee = summaries["shopee"]
+    assert shopee.total_fields == len(ORDERS_STANDARD_FIELDS)
+    # shopee 两个粒度全 0% ⇒ 这些字段一次都没解析出来。
+    assert "platform_commission" in shopee.zero_standard_fields
+    assert shopee.zero_fields == len(shopee.zero_standard_fields)
+    assert shopee.zero_rate > 0
+    # tiktok 的 order_id 解析成功 ⇒ 不算「一次都没解析出来」。
+    tiktok = summaries["tiktok"]
+    assert "order_id" not in tiktok.zero_standard_fields
+
+
+def test_platform_summary_produces_warning_without_field_names():
+    """平台级告警存在, 但**不罗列字段名** —— 避免与字段级告警重复刷屏。"""
+    rows = [_orders_row("shopee", "monthly", total_rows=100)]
+
+    report = build_coverage_report(rows, domain=_orders_domain())
+
+    platform_warnings = [w for w in report.warnings if "平台" in w]
+    assert platform_warnings
+    assert "shopee" in platform_warnings[0]
+    assert "platform_commission" not in platform_warnings[0]
+
+
+def test_healthy_platform_has_no_platform_warning():
+    """所有字段都解析成功 ⇒ 没有平台级告警。"""
+    rows = [
+        _orders_row(
+            "shopee",
+            "monthly",
+            total_rows=100,
+            resolved={field.standard_field: 100 for field in ORDERS_STANDARD_FIELDS},
+        )
+    ]
+
+    report = build_coverage_report(rows, domain=_orders_domain())
+
+    assert report.warnings == ()
+    assert report.platforms[0].zero_fields == 0
