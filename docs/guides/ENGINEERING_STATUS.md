@@ -103,6 +103,25 @@ Key files:
   - 影响: 只影响**单独调试**该文件; CI 与本地全量回归都绿。
   - 修法: 需要让 conftest 的隔离库也跑迁移链 —— 中等侵入, 且可能与
     `create_all` 冲突 ⇒ 同样留作 V2 处理。
+- **同步模板的同步只覆盖了 6 张表里的 1 张 (2026-11-09 实测)**
+  - 模板是**运行时数据**(6 张表), 不在 git ⇒ 开发改了模板,
+    生产/采集环境**不会自动跟上**; 数据侧另有自动通道
+    (`cloud sync` worker, 5 秒轮询), 但它只推**业务数据**, 不推模板。
+  - `scripts/sync_templates_to_cloud.ps1` 只 `pg_dump -t field_mapping_templates`
+    **一张表**, 而:
+    - 254 个模板里只有 66 个带 `header_bindings`、119 个带 `header_columns`;
+    - **4748 条**「原始列 → 标准字段」映射在 `field_mapping_template_items` 里 ⇒ 未同步;
+    - `families` / `versions` / `variants` / `collection_config_templates` 也都未同步。
+  - 同步脚本末尾只校验 `COUNT(*)`, 行数对得上就算成功 ⇒ **漏掉的映射没人知道**。
+  - 已补 `scripts/diff_templates.py`(只读): 按**业务键 + 内容指纹**逐条比对 6 张表,
+    有差异退出码非 0 ⇒ 可直接当门禁用。已用临时库验证能检出
+    「内容不同 / 仅源有 / items 缺失」三类差异, 并配 8 条契约用例锁住
+    (只读保证 / 键与指纹不含 id 与时间戳 / 6 张表都在比对范围内)。
+  - 待办(**需连生产验证, 尚未动手**): 把 `sync_templates_to_cloud.ps1` 的 dump 范围
+    补齐到 6 张表, 并把校验从 `COUNT(*)` 升级为内容级比对。
+  - 附带发现: `field_mapping_template_items` 里有 **740 条孤儿**
+    (`template_id` 指向已删除的模板); 主表 254 行只有 199 个不同 `template_name`
+    (模板族按版本并存) ⇒ 任何按 id 或按模板名做的跨库比对都会失真, **必须用业务键**。
 
 ## Practical Guidance
 
