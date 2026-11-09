@@ -22,12 +22,19 @@ def test_load_python_component_login():
 
 
 def test_build_component_dict_from_python():
-    """build_component_dict_from_python 返回带元数据的 dict。"""
+    """build_component_dict_from_python 返回带元数据的 dict。
+
+    ⚠️ 用 ``shopee/products_export`` 而不是 ``shopee/orders_export``：
+    订单导出已随「各平台订单统一走妙手采集」改造迁到
+    ``miaoshou/orders_shopee_export``，``shopee/orders_export.py`` 已被删除（``448d0a62``）。
+    """
     loader = ComponentLoader(hot_reload=True)
-    params = {"params": {"data_domain": "orders"}}
-    comp = loader.build_component_dict_from_python("shopee", "orders_export", params)
+    params = {"params": {"data_domain": "products"}}
+    comp = loader.build_component_dict_from_python("shopee", "products_export", params)
     assert comp is not None
     assert comp["platform"] == "shopee"
+    assert comp["type"] == "export"
+    assert comp["data_domain"] == "products"
     assert comp["_params"] == params
 
 
@@ -93,4 +100,3 @@ def test_replace_variables_for_non_python_component():
     params = {"account": {"username": "user1"}}
     replaced = loader._replace_variables(component, params)
     assert replaced["steps"][0]["value"] == "user1"
-

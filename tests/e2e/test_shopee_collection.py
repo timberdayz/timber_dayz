@@ -6,10 +6,10 @@ Shopee 采集端到端测试
 使用方法：
     # 运行所有端到端测试
     pytest tests/e2e/test_shopee_collection.py -v
-    
+
     # 运行单个测试（带账号参数）
     pytest tests/e2e/test_shopee_collection.py::TestShopeeE2E::test_single_component -v --account MyStore_SG
-    
+
     # 跳过需要真实浏览器的测试
     pytest tests/e2e/test_shopee_collection.py -v -m "not requires_browser"
 """
@@ -31,63 +31,77 @@ from modules.apps.collection_center.popup_handler import UniversalPopupHandler
 
 class TestShopeeComponentLoading:
     """测试Shopee组件加载"""
-    
+
     @pytest.fixture
     def loader(self):
         return ComponentLoader()
-    
+
     def test_load_login_component(self, loader):
         """测试加载登录组件（仅 Python 组件）"""
         component = loader.load("shopee/login")
-        
+
         assert component is not None
         assert component["platform"] == "shopee"
         assert component["type"] == "login"
         assert "_python_component_class" in component
-    
+
     def test_load_navigation_component(self, loader):
         """测试加载导航组件（仅 Python 组件）"""
         component = loader.load("shopee/navigation")
-        
+
         assert component is not None
         assert component["platform"] == "shopee"
         assert component["type"] == "navigation"
         assert "_python_component_class" in component
-    
+
     def test_load_date_picker_component(self, loader):
         """测试加载日期选择组件"""
         component = loader.load("shopee/date_picker")
-        
+
         assert component is not None
         assert component["type"] == "date_picker"
-    
+
     def test_load_orders_export_component(self, loader):
-        """测试加载订单导出组件（仅 Python 组件）"""
-        component = loader.load("shopee/orders_export")
-        
+        """测试加载订单导出组件（仅 Python 组件）
+
+        ⚠️ 订单导出**不在 shopee 平台**，而在**妙手（miaoshou）平台**：
+        ``modules/platforms/shopee/components/orders_export.py`` 已随
+        「各平台订单统一走妙手采集」改造删除（``448d0a62``），
+        现行组件是 ``miaoshou/orders_shopee_export``（TikTok 订单是 ``orders_tiktok_export``）。
+        别把这个用例改回 ``shopee/orders_export`` —— 那个文件已经不存在了。
+        """
+        component = loader.load("miaoshou/orders_shopee_export")
+
         assert component is not None
+        assert component["platform"] == "miaoshou"
         assert component["data_domain"] == "orders"
         assert component["type"] == "export"
         assert "_python_component_class" in component
-    
+
     def test_load_all_export_components(self, loader):
-        """测试加载所有导出组件"""
+        """测试加载所有导出组件
+
+        清单按**仓库里真实存在的导出组件**列（组件文件入库才有意义）：
+        shopee 侧 products / analytics / services，miaoshou 侧 shopee / tiktok 订单。
+        """
         export_components = [
-            "shopee/orders_export",
             "shopee/products_export",
             "shopee/analytics_export",
+            "shopee/services_export",
+            "miaoshou/orders_shopee_export",
+            "miaoshou/orders_tiktok_export",
         ]
-        
+
         for comp_name in export_components:
             component = loader.load(comp_name)
-            assert component is not None
-            assert component["type"] == "export"
-    
+            assert component is not None, comp_name
+            assert component["type"] == "export", comp_name
+
     def test_component_variable_rendering(self, loader):
         """测试组件参数传递（Python 组件使用 _params）"""
         params = {"account": {"username": "u", "password": "p"}}
         component = loader.load("shopee/login", params=params)
-        
+
         assert component is not None
         assert "_python_component_class" in component
         assert component.get("_params") == params
@@ -95,11 +109,11 @@ class TestShopeeComponentLoading:
 
 class TestShopeePopupConfig:
     """测试Shopee弹窗配置"""
-    
+
     @pytest.fixture
     def loader(self):
         return ComponentLoader()
-    
+
     def test_load_popup_config(self, loader):
         """测试加载弹窗配置（Python 模块，不再读 YAML）"""
         from modules.platforms.shopee.popup_config import (
@@ -107,19 +121,19 @@ class TestShopeePopupConfig:
             get_overlay_selectors,
             get_poll_strategy,
         )
-        
+
         close = get_close_selectors()
         overlay = get_overlay_selectors()
         poll = get_poll_strategy()
-        
+
         assert isinstance(close, list)
         assert isinstance(overlay, list)
         assert isinstance(poll, dict)
-    
+
     def test_popup_handler_initialization(self):
         """测试弹窗处理器初始化"""
         handler = UniversalPopupHandler()
-        
+
         # 验证处理器已初始化
         assert handler.platform_config_dir is not None
         assert len(handler.UNIVERSAL_CLOSE_SELECTORS) > 0
@@ -128,7 +142,7 @@ class TestShopeePopupConfig:
 
 class TestCollectionAPIIntegration:
     """测试采集API集成"""
-    
+
     @pytest.fixture
     def mock_db(self):
         """模拟数据库会话"""
@@ -136,22 +150,22 @@ class TestCollectionAPIIntegration:
         db.query.return_value.filter.return_value.count.return_value = 0
         db.execute.return_value.rowcount = 1
         return db
-    
+
     def test_task_service_creation(self, mock_db):
         """测试任务服务创建"""
         from backend.services.task_service import TaskService
-        
+
         service = TaskService(mock_db)
-        
+
         assert service.db == mock_db
         assert service.MAX_CONCURRENT_TASKS >= 1
-    
+
     def test_cleanup_service_creation(self):
         """测试清理服务创建"""
         from backend.services.cleanup_service import CleanupService
-        
+
         service = CleanupService()
-        
+
         assert service.downloads_dir is not None
         assert service.screenshots_dir is not None
 
@@ -159,63 +173,63 @@ class TestCollectionAPIIntegration:
 class TestShopeeE2E:
     """
     Shopee端到端测试
-    
+
     注意：这些测试需要真实的浏览器和账号
     在CI环境中会被跳过
     """
-    
+
     @pytest.fixture
     def account_id(self, request):
         """获取账号ID（从命令行参数或环境变量）"""
         # 尝试从命令行参数获取
         account = request.config.getoption("--account", default=None)
-        
+
         if not account:
             # 尝试从环境变量获取
             account = os.getenv("TEST_SHOPEE_ACCOUNT")
-        
+
         return account
-    
+
     @pytest.mark.requires_browser
     @pytest.mark.asyncio
     async def test_single_component_execution(self, account_id):
         """
         测试单个组件执行
-        
+
         需要真实浏览器环境
         """
         if not account_id:
-            pytest.skip("No account specified. Use --account or TEST_SHOPEE_ACCOUNT env var.")
-        
+            pytest.skip(
+                "No account specified. Use --account or TEST_SHOPEE_ACCOUNT env var."
+            )
+
         from tools.test_component import ComponentTester
-        
+
         tester = ComponentTester(
-            platform="shopee",
-            account_id=account_id,
-            headless=False
+            platform="shopee", account_id=account_id, headless=False
         )
-        
+
         # 测试登录组件结构验证
         components = tester.list_components()
         assert "login" in components
-        
+
         # 注意：实际浏览器执行需要在本地环境手动验证
         # result = await tester.test_component("login")
         # assert result.status == TestStatus.PASSED
-    
+
     @pytest.mark.requires_browser
     @pytest.mark.asyncio
     async def test_full_collection_flow(self, account_id):
         """
         测试完整采集流程
-        
+
         登录 → 导航 → 日期选择 → 导出 → 文件处理
-        
+
         注意：此测试需要真实环境手动执行
         """
         if not account_id:
             pytest.skip("No account specified")
-        
+
         # 这是一个框架性测试，实际执行需要手动验证
         # 完整流程测试步骤：
         #
@@ -227,8 +241,9 @@ class TestShopeeE2E:
         # 6. 执行订单导出组件
         # 7. 验证文件下载
         # 8. 验证文件命名和注册
-        
-        print(f"""
+
+        print(
+            f"""
 =============================================================
  Shopee 完整采集流程手动测试指南
 =============================================================
@@ -251,22 +266,21 @@ class TestShopeeE2E:
    检查 catalog_files 表
 
 =============================================================
-        """)
-        
+        """
+        )
+
         # 标记为跳过，因为需要手动验证
         pytest.skip("Manual verification required")
 
 
 class TestFileNamingAndRegistration:
     """测试文件命名和注册"""
-    
+
     def test_standard_filename_generation(self):
         """测试标准文件名生成"""
         # 这需要StandardFileName工具类
         # 验证文件名格式：{platform}_{domain}_{granularity}_{date}_{timestamp}.xlsx
-        
-        expected_pattern = r"shopee_orders_daily_\d{8}_\d{6}\.xlsx"
-        
+
         # 实际实现后取消注释
         # from modules.utils.file_naming import StandardFileName
         # generator = StandardFileName(
@@ -277,17 +291,14 @@ class TestFileNamingAndRegistration:
         # )
         # filename = generator.generate_filename(".xlsx")
         # assert re.match(expected_pattern, filename)
-        
+
         pass  # 占位
 
 
 def pytest_addoption(parser):
     """添加命令行参数"""
     parser.addoption(
-        "--account",
-        action="store",
-        default=None,
-        help="Test account ID for E2E tests"
+        "--account", action="store", default=None, help="Test account ID for E2E tests"
     )
 
 
@@ -301,4 +312,3 @@ def pytest_configure(config):
 # 运行测试
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-m", "not requires_browser"])
-

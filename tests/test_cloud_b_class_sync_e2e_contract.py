@@ -30,9 +30,18 @@ def test_sync_contract_uses_raw_data_and_header_columns():
 
     assert "raw_data" in result
     assert "header_columns" in result
-    assert result["raw_data"] == {"订单号": "A-1", "金额": "100"}
+    # 原始业务列**原样保留**；另外会**有意**注入同步溯源元数据
+    # （见 backend/services/cloud_b_class_sync_service.py::build_sync_payload）：
+    #   _cloud_sync_source_file_id —— 这行来自哪个本地文件
+    #   _cloud_sync_original_raw_data —— 原始 raw_data 不是 dict 时的兜底
+    assert result["raw_data"]["订单号"] == "A-1"
+    assert result["raw_data"]["金额"] == "100"
+    assert result["raw_data"]["_cloud_sync_source_file_id"] == 1
     assert result["header_columns"] == ["订单号", "金额"]
     assert "dynamic_text_field" not in result
+    # 云端不承载本地文件/模板维度 ⇒ 这两个字段在载荷里必须置空
+    assert result["file_id"] is None
+    assert result["template_id"] is None
 
 
 def test_sync_payload_normalizes_non_services_shop_id():

@@ -18,8 +18,11 @@ def test_git_mirror_sync_script_enforces_cnb_upstream_and_two_remote_mirror_chec
     assert "cnb/main" in source
     assert "origin/main" in source
     assert 'Invoke-Git @("merge", "--ff-only", "cnb/main")' in source
-    assert "git push $GitHubUrl HEAD:refs/heads/main" in source
-    assert "git push $CnbUrl HEAD:refs/heads/main" in source
+    # ⚠️ 推送改走 ``Invoke-GitPush`` 包装：git 的 push 进度写在 stderr，
+    # Windows PowerShell 5 下被捕获的原生 stderr 会变成终止性错误，
+    # 曾导致「GitHub 推成功、CNB 没推」的双端分叉 ⇒ 封装里显式收 stderr 再回传退出码。
+    assert 'Invoke-GitPush @("push", $GitHubUrl, "HEAD:refs/heads/main")' in source
+    assert 'Invoke-GitPush @("push", $CnbUrl, "HEAD:refs/heads/main")' in source
     assert "Mirror divergence detected" in source
 
 
