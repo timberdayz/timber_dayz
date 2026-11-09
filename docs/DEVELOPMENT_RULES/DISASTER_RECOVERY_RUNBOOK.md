@@ -165,6 +165,35 @@ gunzip -c backups/SELECTED_BACKUP.sql.gz | \
 alembic upgrade head
 ```
 
+### C6b: Re-execute the Candidate-Pool Asset Before Rebuilding Views
+
+> ⚠️ **Rollback to below `current_schema_20261223` requires this step.**
+>
+> `semantic.is_collection_source_identifier` (the "is this a collection-source
+> identifier, not a shop" predicate) is **a SQL-asset object, not a migration
+> object**. It is inlined at the top of
+> `sql/semantic/shop_identity_resolution_candidates.sql`, so:
+>
+> - Alembic rollback **never drops it** — but an environment where that asset
+>   was never executed simply **does not have it**;
+> - `semantic.fact_inventory_snapshot` **really calls** this function
+>   (unlike `semantic.fact_orders_atomic`, which only reads the candidate pool),
+>   so rebuilding it fails with
+>   `function semantic.is_collection_source_identifier does not exist`.
+>
+> Normal deploy order is safe (migrations → Phase 2.7 view rebuild, and
+> `ASSET_PREREQUISITES` unconditionally builds the candidate-pool asset before
+> `fact_inventory_snapshot`). **Rollback is the only path that can break it.**
+
+```bash
+# After a rollback to <= 20261221, execute the candidate-pool asset FIRST,
+# then rebuild views. Both steps are idempotent.
+docker compose run --rm backend-api python3 /app/scripts/rebuild_views.py \
+  --target semantic.shop_identity_resolution_candidates
+docker compose run --rm backend-api python3 /app/scripts/rebuild_views.py \
+  --all-plain-views
+```
+
 ### C7: Verify and Restart
 
 ```bash
