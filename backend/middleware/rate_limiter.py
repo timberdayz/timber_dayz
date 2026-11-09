@@ -85,20 +85,24 @@ def get_rate_limit_key(request: Request) -> str:
         if user_id:
             return f"user:{user_id}"
     
-    # 尝试从 Authorization header 解析用户 ID
+    # 尝试从访问令牌解析用户 ID
     # 这是一个备用方案,用于在认证中间件未设置 request.state.user 时
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        try:
-            from backend.services.auth_service import auth_service
-            token = auth_header.replace("Bearer ", "")
+    # [*] 2026-12 收敛:令牌提取统一委托 backend.dependencies.auth.extract_access_token
+    #     (此前只读 Authorization header,登录优化后 token 已在 httpOnly cookie 里,
+    #      导致已登录用户反而被降级成 IP 限流)
+    try:
+        from backend.dependencies.auth import extract_access_token
+        from backend.services.auth_service import auth_service
+
+        token = extract_access_token(request=request)
+        if token:
             payload = auth_service.verify_token(token)
             user_id = payload.get("user_id")
             if user_id:
                 return f"user:{user_id}"
-        except Exception:
-            # Token 验证失败,降级到 IP 限流
-            pass
+    except Exception:
+        # Token 验证失败,降级到 IP 限流
+        pass
     
     # 未认证用户,使用 IP 地址
     ip = get_remote_address(request)

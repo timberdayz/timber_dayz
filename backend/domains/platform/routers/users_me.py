@@ -41,12 +41,14 @@ logger = get_logger(__name__)
 
 
 def _extract_bearer_token(request: Request) -> Optional[str]:
-    if "access_token" in request.cookies:
-        return request.cookies.get("access_token")
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        return auth_header.replace("Bearer ", "")
-    return None
+    """访问令牌提取：委托唯一真相点 backend.dependencies.auth.extract_access_token。
+
+    [*] 2026-12 收敛：此前这里自己读 cookie/header，与 dependencies/auth.py
+    各写一份，来源优先级容易漂移。现统一委托，避免出现第 N 份副本。
+    """
+    from backend.dependencies.auth import extract_access_token
+
+    return extract_access_token(request=request)
 
 
 def _resolve_current_session_id(request: Request) -> Optional[str]:

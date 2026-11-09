@@ -649,11 +649,9 @@ async def refresh_token(
         # [*] v4.19.0 P0安全要求:检查会话是否已被撤销
         import hashlib
         # v6.1: 优先使用 refresh token 中的稳定 sid；旧 token 回退到当前 access token hash
-        current_token = None
-        if "access_token" in http_request.cookies:
-            current_token = http_request.cookies.get("access_token")
-        elif http_request.headers.get("Authorization", "").startswith("Bearer "):
-            current_token = http_request.headers.get("Authorization", "").replace("Bearer ", "")
+        # [*] 2026-12 收敛:令牌提取委托唯一真相点 backend.dependencies.auth.extract_access_token
+        from backend.dependencies.auth import extract_access_token
+        current_token = extract_access_token(request=http_request)
 
         current_session_id = payload.get("sid")
         if not current_session_id and current_token:

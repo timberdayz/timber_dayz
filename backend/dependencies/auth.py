@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import WebSocket
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -62,11 +63,52 @@ def is_admin_or_manager_user(current_user: DimUser) -> bool:
     return has_any_role_code(current_user, {"admin", "manager"})
 
 
-def extract_access_token(request: Request, credentials: HTTPAuthorizationCredentials | None) -> str | None:
-    if "access_token" in request.cookies:
+def extract_access_token(
+    request: Request | None = None,
+    credentials: HTTPAuthorizationCredentials | None = None,
+    websocket: WebSocket | None = None,
+    query_token: str | None = None,
+) -> str | None:
+    """访问令牌的**唯一提取点**(SSOT)。
+
+    历史背景
+    --------
+    登录优化把 access_token 搬进了 httpOnly cookie，前端不再持有 token。
+    但令牌提取逻辑当时散落成 5 份副本(dependencies/auth.py、users_me.py、
+    platform/routers/auth.py、通知 WS、采集 WS)，各自的来源优先级还不一样：
+
+    - HTTP 三份:cookie → Authorization header
+    - WebSocket 两份:query 参数 → cookie
+
+    后果是同一套登录态在不同通道表现不一致(例如采集任务实时通道因为
+    只认 query 参数而必然 close("Token required"))。
+
+    现在统一到本函数，来源优先级：
+
+    1. ``query_token``(WebSocket 握手 query 参数)
+    2. httpOnly cookie ``access_token``
+    3. ``Authorization: Bearer <token>`` header
+
+    新增通道时**必须**调用本函数，不要再自己读 cookie/header。
+    门禁: scripts/verify_access_token_extraction.py
+    """
+    if query_token:
+        return query_token
+
+    if request is not None and "access_token" in request.cookies:
         return request.cookies.get("access_token")
+
+    if websocket is not None and "access_token" in websocket.cookies:
+        return websocket.cookies.get("access_token")
+
     if credentials and credentials.credentials:
         return credentials.credentials
+
+    if request is not None:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            return auth_header[len("Bearer "):]
+
     return None
 
 

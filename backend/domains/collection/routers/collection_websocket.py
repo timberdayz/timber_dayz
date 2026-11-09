@@ -11,6 +11,8 @@ from typing import Dict, Set
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel
 
+from backend.dependencies.auth import extract_access_token
+
 from backend.schemas.websocket import (
     CollectionWebSocketMessage as WebSocketMessage,
 )
@@ -71,7 +73,13 @@ async def websocket_task_status(
     
     连接时需要通过query参数传递JWT token进行认证:
     ws://host/ws/collection/{task_id}?token=xxx
-    
+
+    [*] 认证令牌来源:优先使用 query 参数 token,其次读取 httpOnly cookie
+    ``access_token``。登录优化后前端已不再持有 access_token(改由 cookie 承载),
+    仅认 query 参数会导致采集任务实时通道必然被拒(close "Token required")。
+    该行为与通知 WebSocket(backend/domains/platform/routers/notification_websocket.py)
+    保持一致。
+
     消息格式:
     - 进度更新: {"type": "progress", "task_id": "...", "progress": 50, ...}
     - 日志消息: {"type": "log", "task_id": "...", "level": "info", ...}
@@ -81,11 +89,14 @@ async def websocket_task_status(
     # 验证JWT Token
     try:
         if os.getenv('WEBSOCKET_AUTH_ENABLED', 'true').lower() == 'true':
-            if not token:
+            resolved_token = extract_access_token(
+                websocket=websocket, query_token=token
+            )
+            if not resolved_token:
                 await websocket.close(code=WS_ERROR_INVALID_TOKEN, reason="Token required")
                 return
-            
-            validate_jwt_token(token)
+
+            validate_jwt_token(resolved_token)
     
     except ValueError as e:
         logger.warning(f"WebSocket auth failed: {e}")

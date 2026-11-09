@@ -19,6 +19,7 @@ from backend.services.auth_service import auth_service
 from backend.models.database import get_async_db
 from backend.dependencies.auth import get_current_user
 from backend.dependencies.auth import require_admin
+from backend.dependencies.auth import extract_access_token
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from backend.schemas.websocket import (
@@ -405,7 +406,7 @@ async def verify_websocket_token(websocket: WebSocket, token: Optional[str]) -> 
     Returns:
         tuple: (user_id, error_message)
     """
-    resolved_token = token or websocket.cookies.get("access_token")
+    resolved_token = extract_access_token(websocket=websocket, query_token=token)
     if not resolved_token:
         return None, "Token required"
     
