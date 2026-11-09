@@ -194,6 +194,48 @@ docker compose run --rm backend-api python3 /app/scripts/rebuild_views.py \
   --all-plain-views
 ```
 
+### C6c: Pre-upgrade check for legacy operation targets (upgrade of an OLD database)
+
+> ⚠️ **Upgrading a database that predates `current_schema_20261215` can stop at that
+> revision.** Not a code defect — a contract conflict, and the expected semantics
+> are still undecided.
+>
+> - `current_schema_20260810_operation_contract_isolation` installs a trigger that
+>   makes `a_class.target_breakdown` **read-only** when the parent target is
+>   `target_type = 'operation'` with `metric_catalog_version IS NULL`
+>   (`historical operation breakdowns are read-only`);
+> - `current_schema_20261215_migrate_sales_targets_a` then wants to UPDATE those
+>   rows to normalise `period_label` / `period_start` / `period_end`.
+> - The trigger is created **75 revisions earlier** in the chain, so the upgrade
+>   aborts *at* 20261215. A forward migration cannot help: it would never be reached.
+>
+> **Production was measured: 0 affected rows** (all 241 breakdown rows hang under
+> `shop` parents; 0 rows under an `operation` parent). Check your own environment
+> before starting an upgrade:
+
+```bash
+# 1) rows the trigger would make read-only (0 = unaffected)
+docker exec xihong_erp_postgres psql -U erp_user -d xihong_erp -c "
+select count(*) as blocked_rows
+from a_class.target_breakdown tb
+join a_class.sales_targets st on st.id = tb.target_id
+where st.target_type = 'operation' and st.metric_catalog_version is null;"
+
+# 2) rows 20261215 wants to normalise (0 = nothing to do)
+docker exec xihong_erp_postgres psql -U erp_user -d xihong_erp -c "
+select count(*) as dirty_rows
+from a_class.target_breakdown
+where breakdown_type = 'shop' and period_label is null;"
+```
+
+> Both counts are 0 ⇒ the upgrade proceeds normally.
+> If either is > 0 ⇒ **stop and read**
+> `docs/reports/2026-11-10-老库升级路径-只读触发器冲突口径决策材料.md`
+> before touching the database. Do **not** work around it by editing an
+> already-applied migration or by dropping the trigger: applied migrations are
+> immutable (`current_migrations/versions/20260914_warehouse_platform_profit.py:3`)
+> and the trigger is the guard that keeps historical operation targets read-only.
+
 ### C7: Verify and Restart
 
 ```bash
