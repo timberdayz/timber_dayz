@@ -47,7 +47,8 @@ export function normalizeDeduplicationSelection(
   )
 
   // 资格判定以**后端 hash_options 返回的 eligible 列表**为权威
-  // （后端 evaluate_option 已排除 metric / system_scope 字段）。
+  // （后端 evaluate_option 已排除 system_scope 字段；
+  //  ⚠️ 度量字段按规格 D1 是 eligible 的 —— 允许参与 hash，只是不推荐 + 带后果提示）。
   // 只有在后端未给出列表时才回落到绑定自身的 hash_eligible 标记。
   const isHashEligible = (semanticKey, binding) => {
     if (policyEligibleKeys.size > 0) {

@@ -239,6 +239,19 @@ jobs:
             echo "No changed test files found, skipping pytest"
           fi
 
+      - name: Run unit guard tests (tests/unit)
+        run: |
+          # ⚠️ tests/unit **不在** backend/tests 的全量回归范围内。
+          # 以前 CI 只跑「本次改动到的测试文件」⇒ 这一目录里的用例会长期不跑，
+          # 口径漂移（例如规格 D1 改了度量字段能不能进 hash）导致的红用例
+          # 能潜伏好几天才被人发现（2026-11-10 实测就是如此）。
+          #
+          # 这里**每次 CI 都跑**（约 2 秒，不碰数据库），把这一类红挡住。
+          #
+          # 用 python -m 而不是裸 pytest：仓库根必须在 sys.path 上，
+          # 否则这些用例 import backend.* 会直接 collection error。
+          python -m pytest tests/unit -q --no-header
+
       - name: Run performance regression entry
         if: matrix.python-version == '3.11'
         run: |

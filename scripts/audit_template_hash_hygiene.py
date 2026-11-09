@@ -17,6 +17,8 @@
 2. **度量字段混进身份键**（``metric_in_identity``）
    把 ``订单状态`` / ``访客数`` 这类"描述行"的字段写进去重字段
    ⇒ 行身份会随业务状态变化而漂移。
+   ⚠️ 按规格 D1，度量字段**可以**参与 hash（用户勾选即可），只是**不推荐**；
+   所以这一项是**告警**（提醒人复核），不是违规。
 3. **存不下来**（``needs_manual_mapping``）
    走一遍工作台提交口径后**仍然过不了保存闸门**
    ⇒ 源文件一变动，用户在工作台更新模板时会被卡住。
@@ -28,7 +30,8 @@
 "过不了保存闸门"必须按**工作台提交口径**判断，而不是拿库里的存量字段直接评估：
 
 - 工作台会把**未确认的表头列**剔除；
-- 工作台会剔除**解析规则派生**的字段和**不可参与 hash** 的度量字段；
+- 工作台会剔除**解析规则派生**的字段和**不可参与 hash** 的字段；
+- 工作台**保留**度量字段（规格 D1：允许参与，只是不推荐）；
 - 工作台会自动**补齐**该数据域必需的身份键。
 
 否则体检结论会和用户在工作台里看到的**对不上**。
@@ -101,7 +104,7 @@ ISSUE_NON_CANONICAL = "non_canonical_identity"
 """去重字段仍是表头名而不是语义键（口径不统一 ⇒ 同一笔业务算不同 hash）。"""
 
 ISSUE_METRIC_IN_IDENTITY = "metric_in_identity"
-"""度量字段混进了去重字段（行身份会随状态漂移）。"""
+"""度量字段参与了去重（规格 D1：允许，但不推荐 —— 指标值变化会被当成新行）。"""
 
 ISSUE_NEEDS_RENORMALIZE = "needs_renormalize"
 """已有安全改写方案（跑 normalize 脚本即可归一）。"""
@@ -117,7 +120,7 @@ ISSUE_NO_DEDUP_FIELDS = "no_dedup_fields"
 
 ISSUE_LABELS = {
     ISSUE_NON_CANONICAL: "去重字段仍是表头名（口径不统一 ⇒ 同一笔业务算不同 hash）",
-    ISSUE_METRIC_IN_IDENTITY: "度量字段混进了去重字段（行身份会随状态漂移）",
+    ISSUE_METRIC_IN_IDENTITY: "度量字段参与了去重（允许但不推荐：指标值变化会被当成新行）",
     ISSUE_NEEDS_RENORMALIZE: "已有安全改写方案（跑 normalize 脚本即可归一）",
     ISSUE_NEEDS_MANUAL_MAPPING: "过不了保存闸门（源文件一变动就无法在工作台更新）",
     ISSUE_MISSING_IDENTITY_KEY: "缺该域必需的身份键（hash 口径不全）",
@@ -250,8 +253,8 @@ def classify_template(
     # 工作台的完整链路（后端侧可复用的三段）：
     #   1) ``_split_existing_deduplication_fields`` → 存量去重字段里还认得出的部分；
     #   2) ``_recommended_deduplication_fields`` → 认不出时用域默认字段兜底；
-    #   3) ``build_workbench_effective_deduplication_fields`` → 剔除未确认/派生/度量字段，
-    #      并自动补齐域必需身份键。
+    #   3) ``build_workbench_effective_deduplication_fields`` → 剔除未确认/派生/不可参与 hash 的字段，
+    #      并自动补齐域必需身份键（度量字段按规格 D1 保留）。
     columns = _resolve_columns(header_columns, header_bindings)
     effective_bindings = _normalize_header_bindings(
         list(header_bindings or []),

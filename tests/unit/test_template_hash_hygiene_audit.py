@@ -4,11 +4,26 @@
 
 **体检脚本自己最怕变成一个永远绿的摆设** —— 所以这里覆盖三件事：
 
-1. 「工作台提交口径」的计算是否与前端规则一致（剔除未确认列 / 派生列 / 度量列，
+1. 「工作台提交口径」的计算是否与前端规则一致（剔除未确认列 / 派生列 / 不可参与 hash 的键，
    自动补齐域必需身份键）；
+   ⚠️ 度量列**不在剔除名单**里：按规格 D1（见下）度量字段可以参与 hash，
+   只是不推荐 + 带后果提示 ⇒ 这里断言的是「保留且被标记」，不是「被剔除」；
 2. 前后端的**域必需身份键**是否一致（前端 ``DOMAIN_REQUIRED_IDENTITY_KEYS``
    与后端 ``required_identity_keys`` 漂移 ⇒ 工作台补的字段和闸门要的字段对不上）；
 3. 报告与基线对比（增量检测）是否可靠。
+
+**度量字段能不能进 hash（口径来源，别凭印象改）**
+--------------------------------------------------
+``docs/superpowers/plans/2026-11-07-semantic-core-field-spec.md`` §0 决策记录 **D1**
+（2026-11-07 业务拍板）：指标类字段**能**参与 ``data_hash``，放开为自由勾选。
+理由：业务概念是「日期 + 订单数 + 店铺 = 这一行是什么」的**复合业务键**，不是实体身份。
+
+⇒ 度量字段**合法但不被推荐**（指标值变化会被当成新行，而不是更新），
+所以：工作台**不剔除**它、闸门**不拦**它，只会**带提示**。
+
+⚠️ 这两条口径是在「批次 E / 规格 D1」落地的（``a2dd3e93``），
+本文件里度量相关的两条用例当时**没有跟着更新**，一直红到今天才被发现 ——
+它们断言的还是 D1 之前的旧口径（「度量字段一律被剔除」）。
 
 不依赖数据库。
 """
@@ -109,21 +124,64 @@ def test_confirmed_raw_column_maps_to_semantic_key():
     assert result == ["product_id"]
 
 
-def test_metric_field_is_dropped_when_an_eligible_option_exists():
-    """有合格身份键时，度量字段会被工作台剔除（与前端 isHashEligible 一致）。"""
-    result = _effective(
-        fields=["商品编号", "访客数"],
-        bindings=[
-            _binding("商品编号", "product_id"),
-            _binding("访客数", "visitor_count"),
-        ],
+def test_metric_field_is_kept_but_flagged_as_not_recommended():
+    """度量字段**不被工作台剔除**（规格 D1），但必须被标记成「不推荐 + 带后果提示」。
+
+    为什么要盯这一条
+    --------------
+    前端 ``deduplicationSelection.js`` 的 ``isHashEligible`` **不自己判**，
+    它直接读后端返回的 ``hash_options[].eligible`` 列表
+    ⇒ 「度量字段到底会不会被前端剔除」这件事，**唯一的权威口径在后端策略层**。
+
+    D1 之前后端对 ``kind == "metric"`` 硬性拒绝（eligible=False）⇒ 前端会剔除它。
+    D1 之后放开成 eligible=True（但 recommended=False + warning）⇒ 前端保留它。
+
+    所以这条用例锁的是**策略层判定**，不是某个实现的偶然行为。
+    """
+    service = TemplateSaveReadinessService()
+    bindings = [
+        _binding("商品编号", "product_id"),
+        _binding("访客数", "visitor_count"),
+    ]
+    result = service.build_workbench_effective_deduplication_fields(
+        data_domain="products",
+        granularity="daily",
+        deduplication_fields=["商品编号", "访客数"],
+        header_bindings=bindings,
+        field_parse_rules=[],
     )
-    assert "visitor_count" not in result
     assert "product_id" in result
+    assert "visitor_count" in result, "D1 之后度量字段应保留在工作台提交口径里"
+
+    readiness = service.assess(
+        data_domain="products",
+        granularity="daily",
+        sub_domain=None,
+        deduplication_fields=result,
+        header_columns=["商品编号", "访客数"],
+        header_bindings=bindings,
+        field_parse_rules=[],
+    )
+    option = next(
+        item
+        for item in readiness.hash_options
+        if item["semantic_key"] == "visitor_count"
+    )
+    assert option["eligible"] is True, "前端按 eligible 列表判定 ⇒ 不该剔除度量字段"
+    assert option["recommended"] is False, "允许 ≠ 推荐"
+    assert option["warning"], "允许参与 hash 必须带上后果提示"
 
 
 def test_metric_only_template_is_blocked_by_the_gate():
-    """只剩度量字段时：前端会保留（兜底逻辑），但后端闸门会拦住 ⇒ 必须在工作台确认映射。"""
+    """只剩度量字段时闸门仍然拦 —— 但拦截理由是「缺域必需身份键」，不是「度量不能进 hash」。
+
+    D1 之后度量字段本身合法 ⇒ 唯一能拦它的理由是
+    products daily 必须能定位到 ``product_id``（以及 ``metric_date``）。
+    这条用例同时钉住两件事：
+
+    1. 拦得住（``can_save is False``），且说清**缺的是什么**（点名 ``product_id``）；
+    2. 度量字段**不是**拦截理由 —— 它只是「不推荐」的告警。
+    """
     service = TemplateSaveReadinessService()
     effective = service.build_workbench_effective_deduplication_fields(
         data_domain="products",
@@ -143,7 +201,15 @@ def test_metric_only_template_is_blocked_by_the_gate():
         field_parse_rules=[],
     )
     assert readiness.can_save is False
-    assert any("visitor_count" in error for error in readiness.blocking_errors)
+    assert any("product_id" in error for error in readiness.blocking_errors), (
+        "拦截必须点名缺的是哪个身份键：" f"{readiness.blocking_errors}"
+    )
+    assert not any("visitor_count" in error for error in readiness.blocking_errors), (
+        "度量字段按 D1 合法，不该出现在拦截理由里：" f"{readiness.blocking_errors}"
+    )
+    assert any(
+        "指标" in warning for warning in readiness.warnings
+    ), f"度量字段参与 hash 必须有后果提示：{readiness.warnings}"
 
 
 def test_parse_rule_derived_field_is_dropped():

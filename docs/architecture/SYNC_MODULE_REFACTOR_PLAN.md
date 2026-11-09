@@ -565,6 +565,10 @@ deduplication_fields 写法不一（订单号 vs order_id）
 
 **F3｜度量字段仍由前端自动剔除、后端兜底**
 
+> ⚠️ **本条已被规格 D1 覆盖（2026-11-07 业务拍板）**：度量字段**不再被自动剔除**，
+> 改为「允许参与 hash + 不推荐 + 带后果提示」，由用户在模板里勾选决定。
+> 下面的描述是 D1 之前的实现口径，保留作历史对照。
+
 工作台保存时会把「绑定未确认 / 非语义 / 不可参与 hash」的列从去重字段里剔掉并给出原因
 （`订单状态` / `状态` / `规格名称` / `全球商品货号` 等共 13~21 个模板受益），
 后端闸门同时独立拦截（双保险）。
@@ -744,7 +748,7 @@ test('build output does not create a circular import between ...', { skip: skipR
 |---|---|
 | 剔除**未确认**的表头列（用户没点过确认 ⇒ 不进 hash） | `build_workbench_effective_deduplication_fields` |
 | 剔除**解析规则派生**的字段（如文件伴生日期派生的 `metric_date`） | 同上 |
-| 剔除**不可参与 hash** 的度量字段 | 同上 |
+| 剔除**不可参与 hash** 的字段（system_scope 等）<br>⚠️ **度量字段不在此列** —— 按规格 D1（`docs/superpowers/plans/2026-11-07-semantic-core-field-spec.md` §0 D1，2026-11-07 业务拍板）度量字段**可以**参与 hash，只是不推荐 + 带后果提示 | 同上 |
 | 自动**补齐**该数据域必需的身份键（前提是文件里认得出这一列） | `TemplateHashPolicyService.required_identity_keys` |
 
 后端等价实现落在
@@ -779,7 +783,7 @@ test('build output does not create a circular import between ...', { skip: skipR
 | 分类 | 含义 | 级别 |
 |---|---|---|
 | `non_canonical_identity` | 去重字段还是表头名（`商品编号`），不是语义键 | 告警 |
-| `metric_in_identity` | 度量字段混进了去重字段（行身份会随状态漂移） | 告警 |
+| `metric_in_identity` | 度量字段参与了去重（**允许但不推荐**：指标值变化会被当成新行） | 告警 |
 | `missing_identity_key` | 缺该域必需的身份键（hash 口径不全） | 告警 |
 | `needs_renormalize` | 已有安全改写方案（跑归一脚本即可解） | 告警 |
 | `needs_manual_mapping` | 走工作台口径后仍过不了保存闸门 | **阻塞** |
