@@ -169,12 +169,14 @@ def test_refresh_registry_exposes_dependency_order():
     ]
     # 建对象前置：两个函数资产都必须先落地，否则建视图报
     # "function does not exist"。
-    assert "semantic.warehouse_resolver" in ASSET_PREREQUISITES[
-        "semantic.fact_inventory_snapshot"
-    ]
-    assert "semantic.shop_identity_resolution_candidates" in ASSET_PREREQUISITES[
-        "semantic.fact_inventory_snapshot"
-    ]
+    assert (
+        "semantic.warehouse_resolver"
+        in ASSET_PREREQUISITES["semantic.fact_inventory_snapshot"]
+    )
+    assert (
+        "semantic.shop_identity_resolution_candidates"
+        in ASSET_PREREQUISITES["semantic.fact_inventory_snapshot"]
+    )
     assert PIPELINE_DEPENDENCIES["semantic.fact_services_atomic"] == [
         "semantic.shop_identity_resolver"
     ]

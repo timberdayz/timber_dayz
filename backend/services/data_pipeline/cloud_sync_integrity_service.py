@@ -188,9 +188,7 @@ class CloudFreshnessRow:
 
     @property
     def chain_label(self) -> str:
-        return _chain_label(
-            parse_source_table_name(self.table_name)
-        )
+        return _chain_label(parse_source_table_name(self.table_name))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -292,7 +290,9 @@ class CloudSyncIntegrityReport:
     def is_success(self) -> bool:
         """三项检查全过 ⇒ 巡检通过。"""
         return not (
-            self.stale_rows or self.degraded_convergence_rows or self.missing_platform_rows
+            self.stale_rows
+            or self.degraded_convergence_rows
+            or self.missing_platform_rows
         )
 
     def to_error_message(self) -> str | None:
@@ -313,9 +313,7 @@ class CloudSyncIntegrityReport:
             )
             parts.append(f"low_identity_convergence:{detail}")
         if self.missing_platform_rows:
-            detail = ",".join(
-                row.platform_code for row in self.missing_platform_rows
-            )
+            detail = ",".join(row.platform_code for row in self.missing_platform_rows)
             parts.append(f"missing_candidate_platforms:{detail}")
         return ";".join(parts)
 
@@ -395,7 +393,7 @@ async def collect_cloud_freshness(
     for table_name in table_names:
         result = await db.execute(
             text(
-                'SELECT count(*)::bigint, max(ingest_timestamp) '
+                "SELECT count(*)::bigint, max(ingest_timestamp) "
                 f'FROM b_class."{table_name}"'
             )
         )
@@ -473,7 +471,7 @@ async def collect_identity_convergence(
     for table_name in table_names:
         result = await db.execute(
             text(
-                'SELECT raw_data, platform_code '
+                "SELECT raw_data, platform_code "
                 f'FROM b_class."{table_name}" '
                 "ORDER BY ingest_timestamp DESC "
                 f"LIMIT {int(sample_size)}"

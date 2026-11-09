@@ -98,7 +98,9 @@ async def test_build_profit_basis_v2_adds_only_pre_commission_labor_cost(monkeyp
         "backend.services.profit_basis_service.load_shop_monthly_metrics",
         fake_load_shop_metrics,
     )
-    monkeypatch.setattr(service, "_load_other_a_class_cost_amount", fake_load_other_cost)
+    monkeypatch.setattr(
+        service, "_load_other_a_class_cost_amount", fake_load_other_cost
+    )
     monkeypatch.setattr(
         service,
         "_load_pre_commission_labor_amount",
@@ -121,7 +123,9 @@ async def test_build_profit_basis_v2_adds_only_pre_commission_labor_cost(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_build_profit_basis_v2_marks_missing_labor_allocation_without_reading_v1_rows(monkeypatch):
+async def test_build_profit_basis_v2_marks_missing_labor_allocation_without_reading_v1_rows(
+    monkeypatch,
+):
     db = AsyncMock()
     service = ProfitBasisService(db)
 
@@ -138,7 +142,9 @@ async def test_build_profit_basis_v2_marks_missing_labor_allocation_without_read
         "backend.services.profit_basis_service.load_shop_monthly_metrics",
         fake_load_shop_metrics,
     )
-    monkeypatch.setattr(service, "_load_other_a_class_cost_amount", fake_load_other_cost)
+    monkeypatch.setattr(
+        service, "_load_other_a_class_cost_amount", fake_load_other_cost
+    )
     monkeypatch.setattr(service, "_load_pre_commission_labor_amount", fake_load_labor)
 
     basis = await service.build_profit_basis(
@@ -170,7 +176,9 @@ async def test_v2_other_a_cost_excludes_legacy_manual_labor_cost(monkeypatch):
         "backend.services.profit_basis_service.load_shop_monthly_metrics",
         fake_load_shop_metrics,
     )
-    monkeypatch.setattr(service, "_load_pre_commission_labor_amount", AsyncMock(return_value=500.0))
+    monkeypatch.setattr(
+        service, "_load_pre_commission_labor_amount", AsyncMock(return_value=500.0)
+    )
     db.execute = AsyncMock(side_effect=fake_execute)
 
     basis = await service.build_profit_basis(
@@ -185,7 +193,9 @@ async def test_v2_other_a_cost_excludes_legacy_manual_labor_cost(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_build_profit_basis_uses_effective_month_policy_when_version_not_explicit(monkeypatch):
+async def test_build_profit_basis_uses_effective_month_policy_when_version_not_explicit(
+    monkeypatch,
+):
     db = AsyncMock()
     service = ProfitBasisService(db)
 
@@ -205,8 +215,12 @@ async def test_build_profit_basis_uses_effective_month_policy_when_version_not_e
         "backend.services.profit_basis_service.load_shop_monthly_metrics",
         fake_load_shop_metrics,
     )
-    monkeypatch.setattr(service, "_load_other_a_class_cost_amount", fake_load_other_cost)
-    monkeypatch.setattr(service, "_load_pre_commission_labor_amount", fake_load_pre_commission_labor)
+    monkeypatch.setattr(
+        service, "_load_other_a_class_cost_amount", fake_load_other_cost
+    )
+    monkeypatch.setattr(
+        service, "_load_pre_commission_labor_amount", fake_load_pre_commission_labor
+    )
     monkeypatch.setattr(
         "backend.services.labor_cost_policy_service.LaborCostPolicyService.get_profit_basis_version",
         fake_version,
@@ -223,7 +237,9 @@ async def test_build_profit_basis_uses_effective_month_policy_when_version_not_e
 
 
 @pytest.mark.asyncio
-async def test_rebuild_month_v2_builds_one_unlocked_snapshot_per_assigned_shop(monkeypatch):
+async def test_rebuild_month_v2_builds_one_unlocked_snapshot_per_assigned_shop(
+    monkeypatch,
+):
     from backend.services.profit_basis_service import ProfitBasisService
 
     class _RowsResult:
@@ -285,6 +301,7 @@ async def test_lock_v2_profit_basis_does_not_lock_labor_allocations():
 
     以前两者绑在一起，导致「锁了基数就再也改不了分摊」，重算成本极高。
     """
+
     class _ScalarRows:
         def __init__(self, rows):
             self._rows = rows
@@ -311,7 +328,9 @@ async def test_lock_v2_profit_basis_does_not_lock_labor_allocations():
     )
     allocation = SimpleNamespace(pre_commission_locked_at=None)
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[_ScalarRows([basis]), _ScalarRows([allocation])])
+    db.execute = AsyncMock(
+        side_effect=[_ScalarRows([basis]), _ScalarRows([allocation])]
+    )
     service = ProfitBasisService(db)
 
     await service.lock_profit_basis_snapshot(
@@ -326,7 +345,9 @@ async def test_lock_v2_profit_basis_does_not_lock_labor_allocations():
 
 
 @pytest.mark.asyncio
-async def test_lock_profit_basis_snapshots_for_assignments_builds_then_locks_each_shop_once(monkeypatch):
+async def test_lock_profit_basis_snapshots_for_assignments_builds_then_locks_each_shop_once(
+    monkeypatch,
+):
     service = ProfitBasisService(AsyncMock())
     built = []
     upserted = []
@@ -345,7 +366,9 @@ async def test_lock_profit_basis_snapshots_for_assignments_builds_then_locks_eac
         upserted.append((payload, commit))
         return payload
 
-    async def fake_lock(*, year_month, platform_code, shop_id, basis_version=None, commit=True):
+    async def fake_lock(
+        *, year_month, platform_code, shop_id, basis_version=None, commit=True
+    ):
         locked.append((year_month, platform_code, shop_id, basis_version, commit))
         return {"shop_id": shop_id, "is_locked": True}
 
@@ -396,14 +419,18 @@ async def test_build_profit_basis_prefers_allocated_costs_when_rows_exist(monkey
     async def fake_execute(stmt, params=None):
         sql = str(stmt)
         if "fact_expenses_allocated_day_shop_sku" in sql:
-            return _MockMappingsResult([
-                {
-                    "allocated_row_count": 2,
-                    "a_class_cost_amount": Decimal("1500"),
-                }
-            ])
+            return _MockMappingsResult(
+                [
+                    {
+                        "allocated_row_count": 2,
+                        "a_class_cost_amount": Decimal("1500"),
+                    }
+                ]
+            )
         if "a_class.operating_costs" in sql:
-            raise AssertionError("operating_costs fallback should not run when allocated rows exist")
+            raise AssertionError(
+                "operating_costs fallback should not run when allocated rows exist"
+            )
         raise AssertionError(f"unexpected SQL: {sql}")
 
     monkeypatch.setattr(
@@ -423,7 +450,9 @@ async def test_build_profit_basis_prefers_allocated_costs_when_rows_exist(monkey
 
 
 @pytest.mark.asyncio
-async def test_build_profit_basis_falls_back_to_operating_costs_when_allocated_rows_missing(monkeypatch):
+async def test_build_profit_basis_falls_back_to_operating_costs_when_allocated_rows_missing(
+    monkeypatch,
+):
     db = AsyncMock()
     service = ProfitBasisService(db)
 
@@ -439,12 +468,14 @@ async def test_build_profit_basis_falls_back_to_operating_costs_when_allocated_r
     async def fake_execute(stmt, params=None):
         sql = str(stmt)
         if "fact_expenses_allocated_day_shop_sku" in sql:
-            return _MockMappingsResult([
-                {
-                    "allocated_row_count": 0,
-                    "a_class_cost_amount": Decimal("0"),
-                }
-            ])
+            return _MockMappingsResult(
+                [
+                    {
+                        "allocated_row_count": 0,
+                        "a_class_cost_amount": Decimal("0"),
+                    }
+                ]
+            )
         if "a_class.operating_costs" in sql:
             assert "total_amount" in sql
             assert "deleted_at IS NULL" in sql
@@ -472,7 +503,9 @@ async def test_build_profit_basis_falls_back_to_operating_costs_when_allocated_r
 
 
 @pytest.mark.asyncio
-async def test_build_profit_basis_operating_cost_fallback_excludes_soft_deleted_rows(monkeypatch):
+async def test_build_profit_basis_operating_cost_fallback_excludes_soft_deleted_rows(
+    monkeypatch,
+):
     db = AsyncMock()
     service = ProfitBasisService(db)
 
@@ -488,12 +521,14 @@ async def test_build_profit_basis_operating_cost_fallback_excludes_soft_deleted_
     async def fake_execute(stmt, params=None):
         sql = str(stmt)
         if "fact_expenses_allocated_day_shop_sku" in sql:
-            return _MockMappingsResult([
-                {
-                    "allocated_row_count": 0,
-                    "a_class_cost_amount": Decimal("0"),
-                }
-            ])
+            return _MockMappingsResult(
+                [
+                    {
+                        "allocated_row_count": 0,
+                        "a_class_cost_amount": Decimal("0"),
+                    }
+                ]
+            )
         if "a_class.operating_costs" in sql:
             assert "deleted_at IS NULL" in sql
             return _MockMappingsResult([{"a_class_cost_amount": Decimal("800")}])
@@ -516,7 +551,9 @@ async def test_build_profit_basis_operating_cost_fallback_excludes_soft_deleted_
 
 
 @pytest.mark.asyncio
-async def test_build_profit_basis_clamps_negative_basis_to_zero_distributable(monkeypatch):
+async def test_build_profit_basis_clamps_negative_basis_to_zero_distributable(
+    monkeypatch,
+):
     db = AsyncMock()
     service = ProfitBasisService(db)
 
@@ -580,7 +617,9 @@ async def test_build_profit_basis_returns_zero_when_shop_metrics_missing(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_build_profit_basis_passes_date_objects_to_a_class_cost_query(monkeypatch):
+async def test_build_profit_basis_passes_date_objects_to_a_class_cost_query(
+    monkeypatch,
+):
     db = AsyncMock()
     service = ProfitBasisService(db)
 

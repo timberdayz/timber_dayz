@@ -2,9 +2,9 @@ from pathlib import Path
 
 
 def test_business_overview_frontend_consumes_operational_meta():
-    source = Path(
-        "frontend/src/domains/business/views/BusinessOverview.vue"
-    ).read_text(encoding="utf-8")
+    source = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8"
+    )
 
     assert "operationalMeta" in source
     assert "expenses_source" in source
@@ -35,14 +35,16 @@ def test_operational_metrics_target_join_uses_platform_shop_month_identity():
     ).read_text(encoding="utf-8")
 
     assert "LOWER(TRIM(COALESCE(tb.platform_code, '')))" in source
-    assert "LOWER(COALESCE(m.platform_code, '')) = COALESCE(t.platform_code, '')" in source
+    assert (
+        "LOWER(COALESCE(m.platform_code, '')) = COALESCE(t.platform_code, '')" in source
+    )
     assert "COALESCE(m.shop_id, '') = COALESCE(t.shop_id, '')" in source
 
 
 def test_business_overview_expenses_use_expense_management_columns_and_system_labor():
-    source = Path(
-        "backend/services/postgresql_dashboard_service.py"
-    ).read_text(encoding="utf-8")
+    source = Path("backend/services/postgresql_dashboard_service.py").read_text(
+        encoding="utf-8"
+    )
 
     # 第三批-B：operating_costs 的物理列名已统一为英文
     assert "total_amount" in source

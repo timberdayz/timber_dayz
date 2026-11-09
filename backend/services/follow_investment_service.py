@@ -7,7 +7,14 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from modules.core.db import ApprovalLog, DimUser, FollowInvestment, FollowInvestmentDetail, FollowInvestmentSettlement, ShopProfitBasis
+from modules.core.db import (
+    ApprovalLog,
+    DimUser,
+    FollowInvestment,
+    FollowInvestmentDetail,
+    FollowInvestmentSettlement,
+    ShopProfitBasis,
+)
 
 
 class FollowInvestmentService:
@@ -25,7 +32,11 @@ class FollowInvestmentService:
         withdraw_date: date | None,
     ) -> int:
         month_start = self._to_month_start(year_month)
-        month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
+        month_end = date(
+            month_start.year,
+            month_start.month,
+            monthrange(month_start.year, month_start.month)[1],
+        )
         effective_start = max(month_start, contribution_date)
         effective_end = min(month_end, withdraw_date or month_end)
         if effective_end < effective_start:
@@ -60,7 +71,11 @@ class FollowInvestmentService:
             total_weighted_capital += weighted_capital
 
         for detail in details:
-            share_ratio = (detail["weighted_capital"] / total_weighted_capital) if total_weighted_capital > 0 else 0.0
+            share_ratio = (
+                (detail["weighted_capital"] / total_weighted_capital)
+                if total_weighted_capital > 0
+                else 0.0
+            )
             detail["share_ratio"] = share_ratio
             detail["estimated_income"] = round(distributable_amount * share_ratio, 2)
 
@@ -70,7 +85,9 @@ class FollowInvestmentService:
         if self.db is None or not user_ids:
             return {}
         result = await self.db.execute(
-            select(DimUser.user_id, DimUser.full_name, DimUser.username).where(DimUser.user_id.in_(user_ids))
+            select(DimUser.user_id, DimUser.full_name, DimUser.username).where(
+                DimUser.user_id.in_(user_ids)
+            )
         )
         mapping: dict[int, str] = {}
         for user_id, full_name, username in result.all():
@@ -130,10 +147,18 @@ class FollowInvestmentService:
             "period_month": getattr(row, "period_month", year_month),
             "platform_code": getattr(row, "platform_code", platform_code.lower()),
             "shop_id": getattr(row, "shop_id", shop_id),
-            "orders_profit_amount": float(getattr(row, "orders_profit_amount", 0.0) or 0.0),
-            "a_class_cost_amount": float(getattr(row, "a_class_cost_amount", 0.0) or 0.0),
-            "b_class_cost_amount": float(getattr(row, "b_class_cost_amount", 0.0) or 0.0),
-            "profit_basis_amount": float(getattr(row, "profit_basis_amount", 0.0) or 0.0),
+            "orders_profit_amount": float(
+                getattr(row, "orders_profit_amount", 0.0) or 0.0
+            ),
+            "a_class_cost_amount": float(
+                getattr(row, "a_class_cost_amount", 0.0) or 0.0
+            ),
+            "b_class_cost_amount": float(
+                getattr(row, "b_class_cost_amount", 0.0) or 0.0
+            ),
+            "profit_basis_amount": float(
+                getattr(row, "profit_basis_amount", 0.0) or 0.0
+            ),
             "basis_version": getattr(row, "basis_version", basis_version),
             "id": getattr(row, "id", None),
         }
@@ -156,23 +181,40 @@ class FollowInvestmentService:
             stmt = stmt.where(FollowInvestment.status == status)
         if period_month:
             month_start = self._to_month_start(period_month)
-            month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
+            month_end = date(
+                month_start.year,
+                month_start.month,
+                monthrange(month_start.year, month_start.month)[1],
+            )
             stmt = stmt.where(
                 FollowInvestment.contribution_date <= month_end,
-                (FollowInvestment.withdraw_date.is_(None) | (FollowInvestment.withdraw_date >= month_start)),
+                (
+                    FollowInvestment.withdraw_date.is_(None)
+                    | (FollowInvestment.withdraw_date >= month_start)
+                ),
             )
-        rows = (await self.db.execute(stmt.order_by(FollowInvestment.id.desc()))).scalars().all()
-        user_names = await self._load_user_names({int(row.investor_user_id) for row in rows})
+        rows = (
+            (await self.db.execute(stmt.order_by(FollowInvestment.id.desc())))
+            .scalars()
+            .all()
+        )
+        user_names = await self._load_user_names(
+            {int(row.investor_user_id) for row in rows}
+        )
         return [
             {
                 "id": row.id,
                 "investor_user_id": row.investor_user_id,
-                "investor_name": user_names.get(int(row.investor_user_id), str(row.investor_user_id)),
+                "investor_name": user_names.get(
+                    int(row.investor_user_id), str(row.investor_user_id)
+                ),
                 "platform_code": row.platform_code,
                 "shop_id": row.shop_id,
                 "contribution_amount": row.contribution_amount,
                 "contribution_date": row.contribution_date.isoformat(),
-                "withdraw_date": row.withdraw_date.isoformat() if row.withdraw_date else None,
+                "withdraw_date": (
+                    row.withdraw_date.isoformat() if row.withdraw_date else None
+                ),
                 "capital_type": row.capital_type,
                 "status": row.status,
                 "remark": row.remark,
@@ -189,7 +231,11 @@ class FollowInvestmentService:
             shop_id=payload["shop_id"],
             contribution_amount=payload["contribution_amount"],
             contribution_date=date.fromisoformat(payload["contribution_date"]),
-            withdraw_date=date.fromisoformat(payload["withdraw_date"]) if payload.get("withdraw_date") else None,
+            withdraw_date=(
+                date.fromisoformat(payload["withdraw_date"])
+                if payload.get("withdraw_date")
+                else None
+            ),
             capital_type=payload.get("capital_type") or "working_capital",
             status=payload.get("status") or "active",
             remark=payload.get("remark"),
@@ -206,24 +252,39 @@ class FollowInvestmentService:
             "shop_id": record.shop_id,
             "contribution_amount": record.contribution_amount,
             "contribution_date": record.contribution_date.isoformat(),
-            "withdraw_date": record.withdraw_date.isoformat() if record.withdraw_date else None,
+            "withdraw_date": (
+                record.withdraw_date.isoformat() if record.withdraw_date else None
+            ),
             "capital_type": record.capital_type,
             "status": record.status,
             "remark": record.remark,
         }
 
-    async def update_investment(self, investment_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    async def update_investment(
+        self, investment_id: int, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         if self.db is None:
             raise ValueError("database unavailable")
-        row = (await self.db.execute(select(FollowInvestment).where(FollowInvestment.id == investment_id))).scalar_one_or_none()
+        row = (
+            await self.db.execute(
+                select(FollowInvestment).where(FollowInvestment.id == investment_id)
+            )
+        ).scalar_one_or_none()
         if not row:
             raise ValueError("investment not found")
-        if "contribution_amount" in payload and payload["contribution_amount"] is not None:
+        if (
+            "contribution_amount" in payload
+            and payload["contribution_amount"] is not None
+        ):
             row.contribution_amount = payload["contribution_amount"]
         if "contribution_date" in payload and payload["contribution_date"]:
             row.contribution_date = date.fromisoformat(payload["contribution_date"])
         if "withdraw_date" in payload:
-            row.withdraw_date = date.fromisoformat(payload["withdraw_date"]) if payload["withdraw_date"] else None
+            row.withdraw_date = (
+                date.fromisoformat(payload["withdraw_date"])
+                if payload["withdraw_date"]
+                else None
+            )
         if "status" in payload and payload["status"]:
             row.status = payload["status"]
         if "capital_type" in payload and payload["capital_type"]:
@@ -240,7 +301,9 @@ class FollowInvestmentService:
             "shop_id": row.shop_id,
             "contribution_amount": row.contribution_amount,
             "contribution_date": row.contribution_date.isoformat(),
-            "withdraw_date": row.withdraw_date.isoformat() if row.withdraw_date else None,
+            "withdraw_date": (
+                row.withdraw_date.isoformat() if row.withdraw_date else None
+            ),
             "capital_type": row.capital_type,
             "status": row.status,
             "remark": row.remark,
@@ -249,7 +312,11 @@ class FollowInvestmentService:
     async def archive_investment(self, investment_id: int) -> dict[str, Any]:
         if self.db is None:
             raise ValueError("database unavailable")
-        row = (await self.db.execute(select(FollowInvestment).where(FollowInvestment.id == investment_id))).scalar_one_or_none()
+        row = (
+            await self.db.execute(
+                select(FollowInvestment).where(FollowInvestment.id == investment_id)
+            )
+        ).scalar_one_or_none()
         if not row:
             raise ValueError("investment not found")
         row.status = "inactive"
@@ -277,7 +344,9 @@ class FollowInvestmentService:
 
         distributable_amount = 0.0
         if basis["profit_basis_amount"] > 0:
-            distributable_amount = round(basis["profit_basis_amount"] * distribution_ratio, 2)
+            distributable_amount = round(
+                basis["profit_basis_amount"] * distribution_ratio, 2
+            )
         investments = await self._load_active_investments(platform_code, shop_id)
         details = self.build_settlement_details(
             year_month=year_month,
@@ -297,13 +366,16 @@ class FollowInvestmentService:
                 await self.db.execute(
                     select(FollowInvestmentSettlement).where(
                         FollowInvestmentSettlement.period_month == year_month,
-                        FollowInvestmentSettlement.platform_code == platform_code.lower(),
+                        FollowInvestmentSettlement.platform_code
+                        == platform_code.lower(),
                         FollowInvestmentSettlement.shop_id == shop_id,
                     )
                 )
             ).scalar_one_or_none()
             if existing and existing.status == "approved":
-                raise ValueError("settlement already approved; reopen before recalculation")
+                raise ValueError(
+                    "settlement already approved; reopen before recalculation"
+                )
 
             if existing is None:
                 existing = FollowInvestmentSettlement(
@@ -322,7 +394,9 @@ class FollowInvestmentService:
             existing.status = "calculated"
 
             await self.db.execute(
-                delete(FollowInvestmentDetail).where(FollowInvestmentDetail.settlement_id == existing.id)
+                delete(FollowInvestmentDetail).where(
+                    FollowInvestmentDetail.settlement_id == existing.id
+                )
             )
             await self.db.flush()
 
@@ -331,7 +405,9 @@ class FollowInvestmentService:
                     FollowInvestmentDetail(
                         settlement_id=existing.id,
                         investor_user_id=detail["investor_user_id"],
-                        contribution_amount_snapshot=detail["contribution_amount_snapshot"],
+                        contribution_amount_snapshot=detail[
+                            "contribution_amount_snapshot"
+                        ],
                         occupied_days=detail["occupied_days"],
                         weighted_capital=detail["weighted_capital"],
                         share_ratio=detail["share_ratio"],
@@ -345,13 +421,17 @@ class FollowInvestmentService:
             settlement["status"] = existing.status
         return {"settlement": settlement, "details": details}
 
-    async def approve_settlement(self, settlement_id: int, approver: str) -> dict[str, Any]:
+    async def approve_settlement(
+        self, settlement_id: int, approver: str
+    ) -> dict[str, Any]:
         if self.db is None:
             raise ValueError("database unavailable")
         settlement = (
             await self.db.execute(
-                select(FollowInvestmentSettlement).where(FollowInvestmentSettlement.id == settlement_id)
-        )
+                select(FollowInvestmentSettlement).where(
+                    FollowInvestmentSettlement.id == settlement_id
+                )
+            )
         ).scalar_one_or_none()
         if not settlement:
             raise ValueError("settlement not found")
@@ -363,10 +443,16 @@ class FollowInvestmentService:
         settlement.approved_by = approver
         settlement.approved_at = datetime.now(timezone.utc)
         details = (
-            await self.db.execute(
-                select(FollowInvestmentDetail).where(FollowInvestmentDetail.settlement_id == settlement_id)
+            (
+                await self.db.execute(
+                    select(FollowInvestmentDetail).where(
+                        FollowInvestmentDetail.settlement_id == settlement_id
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for detail in details:
             detail.approved_income = detail.estimated_income
         self.db.add(
@@ -391,8 +477,10 @@ class FollowInvestmentService:
             raise ValueError("database unavailable")
         settlement = (
             await self.db.execute(
-                select(FollowInvestmentSettlement).where(FollowInvestmentSettlement.id == settlement_id)
-        )
+                select(FollowInvestmentSettlement).where(
+                    FollowInvestmentSettlement.id == settlement_id
+                )
+            )
         ).scalar_one_or_none()
         if not settlement:
             raise ValueError("settlement not found")
@@ -402,10 +490,16 @@ class FollowInvestmentService:
         settlement.approved_by = None
         settlement.approved_at = None
         details = (
-            await self.db.execute(
-                select(FollowInvestmentDetail).where(FollowInvestmentDetail.settlement_id == settlement_id)
+            (
+                await self.db.execute(
+                    select(FollowInvestmentDetail).where(
+                        FollowInvestmentDetail.settlement_id == settlement_id
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for detail in details:
             detail.approved_income = 0.0
         await self.db.commit()
@@ -427,13 +521,23 @@ class FollowInvestmentService:
         if period_month:
             stmt = stmt.where(FollowInvestmentSettlement.period_month == period_month)
         if platform_code:
-            stmt = stmt.where(FollowInvestmentSettlement.platform_code == platform_code.lower())
+            stmt = stmt.where(
+                FollowInvestmentSettlement.platform_code == platform_code.lower()
+            )
         if shop_id:
             stmt = stmt.where(FollowInvestmentSettlement.shop_id == shop_id)
         if status:
             stmt = stmt.where(FollowInvestmentSettlement.status == status)
-        rows = (await self.db.execute(stmt.order_by(FollowInvestmentSettlement.id.desc()))).scalars().all()
-        approver_ids = {int(row.approved_by) for row in rows if row.approved_by and str(row.approved_by).isdigit()}
+        rows = (
+            (await self.db.execute(stmt.order_by(FollowInvestmentSettlement.id.desc())))
+            .scalars()
+            .all()
+        )
+        approver_ids = {
+            int(row.approved_by)
+            for row in rows
+            if row.approved_by and str(row.approved_by).isdigit()
+        }
         approver_names = await self._load_user_names(approver_ids)
         return [
             {
@@ -446,7 +550,11 @@ class FollowInvestmentService:
                 "distributable_amount": row.distributable_amount,
                 "status": row.status,
                 "approved_by": row.approved_by,
-                "approved_by_name": approver_names.get(int(row.approved_by), row.approved_by) if row.approved_by and str(row.approved_by).isdigit() else row.approved_by,
+                "approved_by_name": (
+                    approver_names.get(int(row.approved_by), row.approved_by)
+                    if row.approved_by and str(row.approved_by).isdigit()
+                    else row.approved_by
+                ),
                 "approved_at": row.approved_at.isoformat() if row.approved_at else None,
             }
             for row in rows
@@ -456,15 +564,25 @@ class FollowInvestmentService:
         if self.db is None:
             return []
         rows = (
-            await self.db.execute(
-                select(FollowInvestmentDetail).where(FollowInvestmentDetail.settlement_id == settlement_id)
+            (
+                await self.db.execute(
+                    select(FollowInvestmentDetail).where(
+                        FollowInvestmentDetail.settlement_id == settlement_id
+                    )
+                )
             )
-        ).scalars().all()
-        user_names = await self._load_user_names({int(row.investor_user_id) for row in rows})
+            .scalars()
+            .all()
+        )
+        user_names = await self._load_user_names(
+            {int(row.investor_user_id) for row in rows}
+        )
         return [
             {
                 "investor_user_id": row.investor_user_id,
-                "investor_name": user_names.get(int(row.investor_user_id), str(row.investor_user_id)),
+                "investor_name": user_names.get(
+                    int(row.investor_user_id), str(row.investor_user_id)
+                ),
                 "contribution_amount_snapshot": row.contribution_amount_snapshot,
                 "occupied_days": row.occupied_days,
                 "weighted_capital": row.weighted_capital,
@@ -525,13 +643,19 @@ class FollowInvestmentService:
                     "estimated_income": detail.estimated_income,
                     "approved_income": detail.approved_income,
                     "paid_income": detail.paid_income,
-                    "approved_at": settlement.approved_at.isoformat() if settlement.approved_at else None,
+                    "approved_at": (
+                        settlement.approved_at.isoformat()
+                        if settlement.approved_at
+                        else None
+                    ),
                     "status": settlement.status,
                 }
             )
             summary["estimated_income"] += float(detail.estimated_income or 0.0)
             summary["approved_income"] += float(detail.approved_income or 0.0)
             summary["paid_income"] += float(detail.paid_income or 0.0)
-            summary["current_contribution_amount"] += float(detail.contribution_amount_snapshot or 0.0)
+            summary["current_contribution_amount"] += float(
+                detail.contribution_amount_snapshot or 0.0
+            )
 
         return {"summary": summary, "items": items}

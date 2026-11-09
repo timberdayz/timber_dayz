@@ -30,7 +30,9 @@ def _make_user(role_code: str = "finance", user_id: int = 1) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_expense_create_accepts_missing_platform_code_when_lookup_succeeds(monkeypatch):
+async def test_expense_create_accepts_missing_platform_code_when_lookup_succeeds(
+    monkeypatch,
+):
     from backend.domains.business.routers import expense_management as module
 
     executed = {}
@@ -45,7 +47,7 @@ async def test_expense_create_accepts_missing_platform_code_when_lookup_succeeds
     class _DB:
         async def execute(self, query, params=None):
             sql = str(query)
-            if 'SELECT COALESCE(is_locked, false)' in sql:
+            if "SELECT COALESCE(is_locked, false)" in sql:
                 return _Result(None)
             if "INSERT INTO a_class.operating_costs" in sql:
                 executed["params"] = params
@@ -89,9 +91,15 @@ async def test_expense_create_accepts_missing_platform_code_when_lookup_succeeds
         "_resolve_shop_platform_code",
         lambda db, shop_id: __import__("asyncio").sleep(0, result="shopee"),
     )
-    monkeypatch.setattr(module, "sync_monthly_cost_entry_task", lambda *args, **kwargs: __import__("asyncio").sleep(0))
+    monkeypatch.setattr(
+        module,
+        "sync_monthly_cost_entry_task",
+        lambda *args, **kwargs: __import__("asyncio").sleep(0),
+    )
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
         response = await client.post(
             "/api/expenses",
             json={
@@ -118,7 +126,9 @@ async def test_expense_create_accepts_missing_platform_code_when_lookup_succeeds
 
 
 @pytest.mark.asyncio
-async def test_expense_create_rejects_missing_platform_code_when_lookup_fails(monkeypatch):
+async def test_expense_create_rejects_missing_platform_code_when_lookup_fails(
+    monkeypatch,
+):
     from backend.domains.business.routers import expense_management as module
 
     class _Result:
@@ -128,7 +138,7 @@ async def test_expense_create_rejects_missing_platform_code_when_lookup_fails(mo
     class _DB:
         async def execute(self, query, params=None):
             sql = str(query)
-            if 'SELECT COALESCE(is_locked, false)' in sql:
+            if "SELECT COALESCE(is_locked, false)" in sql:
                 return _Result()
             raise AssertionError(sql)
 
@@ -151,7 +161,9 @@ async def test_expense_create_rejects_missing_platform_code_when_lookup_fails(mo
         lambda db, shop_id: __import__("asyncio").sleep(0, result=None),
     )
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
         response = await client.post(
             "/api/expenses",
             json={
@@ -202,7 +214,9 @@ async def test_expense_create_rejects_manual_labor_cost_in_effective_month(monke
         disallow_manual_labor,
     )
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
         response = await client.post(
             "/api/expenses",
             json={
@@ -280,7 +294,9 @@ async def test_expense_list_applies_projected_labor_cost(monkeypatch):
     app.dependency_overrides[get_async_db] = _override_db
     monkeypatch.setattr(module, "_apply_projected_labor_costs", apply_projected_labor)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
         response = await client.get("/api/expenses?year_month=2026-08")
 
     body = json.loads(response.content.decode("utf-8"))
@@ -306,13 +322,19 @@ async def test_expense_delete_uses_soft_delete_and_restore_endpoint(monkeypatch)
         async def execute(self, query, params=None):
             sql = str(query)
             calls.append((sql, params))
-            if 'SELECT id FROM a_class.operating_costs WHERE id = :expense_id AND deleted_at IS NULL' in sql:
+            if (
+                "SELECT id FROM a_class.operating_costs WHERE id = :expense_id AND deleted_at IS NULL"
+                in sql
+            ):
                 return _Result(SimpleNamespace(id=5))
-            if 'SET deleted_at = NOW()' in sql:
+            if "SET deleted_at = NOW()" in sql:
                 return _Result(None)
-            if 'SELECT id\n            FROM a_class.operating_costs\n            WHERE id = :expense_id\n              AND deleted_at IS NOT NULL' in sql:
+            if (
+                "SELECT id\n            FROM a_class.operating_costs\n            WHERE id = :expense_id\n              AND deleted_at IS NOT NULL"
+                in sql
+            ):
                 return _Result(SimpleNamespace(id=5))
-            if 'SET deleted_at = NULL' in sql:
+            if "SET deleted_at = NULL" in sql:
                 return _Result(None)
             raise AssertionError(sql)
 
@@ -330,7 +352,9 @@ async def test_expense_delete_uses_soft_delete_and_restore_endpoint(monkeypatch)
     app.dependency_overrides[get_current_user] = lambda: _make_user()
     app.dependency_overrides[get_async_db] = _override_db
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
         delete_response = await client.delete("/api/expenses/5")
         restore_response = await client.post("/api/expenses/5/restore")
 
@@ -343,5 +367,5 @@ async def test_expense_delete_uses_soft_delete_and_restore_endpoint(monkeypatch)
     assert restore_response.status_code == 200
     assert restore_body["success"] is True
     assert "恢复" in restore_body["message"]
-    assert any('SET deleted_at = NOW()' in sql for sql, _ in calls)
-    assert any('SET deleted_at = NULL' in sql for sql, _ in calls)
+    assert any("SET deleted_at = NOW()" in sql for sql, _ in calls)
+    assert any("SET deleted_at = NULL" in sql for sql, _ in calls)

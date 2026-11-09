@@ -241,7 +241,12 @@ class OperationPerformanceWorkbenchService:
         if not isinstance(snapshot, dict):
             raise ValueError("运营指标缺少受控规则快照")
         input_kind = str(snapshot.get("input_kind") or "")
-        if input_kind not in {"percentage", "count", "training_counts", "special_check"}:
+        if input_kind not in {
+            "percentage",
+            "count",
+            "training_counts",
+            "special_check",
+        }:
             raise ValueError("运营指标规则快照的录入类型无效")
         required_fields = {
             "metric_code",
@@ -383,11 +388,16 @@ class OperationPerformanceWorkbenchService:
 
     async def _assert_scope_rule_ready(self, year_month: str) -> None:
         config = await self._config(year_month)
-        if config is None or float(getattr(config, "operation_max_score", 0) or 0) != 20:
+        if (
+            config is None
+            or float(getattr(config, "operation_max_score", 0) or 0) != 20
+        ):
             raise ValueError("自动整数计分要求绩效配置的运营满分为 20")
 
         targets = await self._targets(year_month, auto_integer_only=True)
-        enabled_targets = [target for target in targets if bool(getattr(target, "is_enabled", False))]
+        enabled_targets = [
+            target for target in targets if bool(getattr(target, "is_enabled", False))
+        ]
         if not enabled_targets:
             raise ValueError("请先保存至少一项启用的运营评分规则")
 
@@ -400,11 +410,8 @@ class OperationPerformanceWorkbenchService:
         await self._assert_scope_rule_ready(request.year_month)
         expected_rule_updated_at = getattr(request, "expected_rule_updated_at", None)
         current_rule_updated_at = await self._scope_rule_updated_at(request.year_month)
-        if (
-            expected_rule_updated_at is not None
-            and not self._same_timestamp(
-                expected_rule_updated_at, current_rule_updated_at
-            )
+        if expected_rule_updated_at is not None and not self._same_timestamp(
+            expected_rule_updated_at, current_rule_updated_at
         ):
             raise OperationPerformanceWorkbenchConflictError(
                 "运营评分规则已被其他用户更新，请刷新后重新确认店铺范围"
@@ -425,9 +432,7 @@ class OperationPerformanceWorkbenchService:
         if unknown_keys:
             raise ValueError("店铺必须来自当前启用店铺主数据")
 
-        requested_scope = {
-            key: requested_by_key.get(key) for key in active_by_key
-        }
+        requested_scope = {key: requested_by_key.get(key) for key in active_by_key}
         included_keys = {
             key
             for key, item in requested_scope.items()
@@ -436,14 +441,19 @@ class OperationPerformanceWorkbenchService:
         target_keys = await self._sales_target_shop_keys(request.year_month)
         missing_target_keys = sorted(included_keys - target_keys)
         if missing_target_keys:
-            rendered = ", ".join(f"{platform}/{shop}" for platform, shop in missing_target_keys)
+            rendered = ", ".join(
+                f"{platform}/{shop}" for platform, shop in missing_target_keys
+            )
             raise ValueError(f"参与运营绩效的店铺缺少当月销售目标: {rendered}")
 
         existing_by_key = {
             self._shop_key(row.platform_code, row.shop_id): row
             for row in await self._scope_rows(request.year_month)
         }
-        if any(getattr(row, "snapshot_version", None) == 1 for row in existing_by_key.values()):
+        if any(
+            getattr(row, "snapshot_version", None) == 1
+            for row in existing_by_key.values()
+        ):
             raise ValueError("本月店铺范围已确认，请先撤销范围")
         if existing_by_key:
             await self.db.execute(
@@ -483,7 +493,9 @@ class OperationPerformanceWorkbenchService:
 
     async def revoke_scope(self, year_month: str):
         await self._lock_month_mutation(year_month)
-        target_ids = [target.id for target in await self._targets(year_month) if target.id]
+        target_ids = [
+            target.id for target in await self._targets(year_month) if target.id
+        ]
         if target_ids:
             await self.db.execute(
                 delete(TargetBreakdown).where(TargetBreakdown.target_id.in_(target_ids))
@@ -659,9 +671,7 @@ class OperationPerformanceWorkbenchService:
         targets_by_code = {}
         rules_by_code = {}
         configuration_errors = []
-        for target in await self._targets(
-            request.year_month, auto_integer_only=True
-        ):
+        for target in await self._targets(request.year_month, auto_integer_only=True):
             if not target.is_enabled:
                 continue
             if getattr(target, "scoring_model_version", None) != "auto_integer_v1":
@@ -757,11 +767,7 @@ class OperationPerformanceWorkbenchService:
             for target in targets
             if getattr(target, "scoring_model_version", None) != "auto_integer_v1"
         ]
-        scoring_model_version = (
-            "legacy"
-            if legacy_targets
-            else "auto_integer_v1"
-        )
+        scoring_model_version = "legacy" if legacy_targets else "auto_integer_v1"
         by_code = {str(row.metric_code): row for row in targets if row.metric_code}
         rows = []
         for item in catalog:
@@ -913,7 +919,10 @@ class OperationPerformanceWorkbenchService:
             raise ValueError("自动整数计分要求运营满分为 20")
         allocations = OperationPerformanceScoringService.allocate_integer_budget(
             [
-                {"metric_code": item.metric_code, "sort_key": catalog_by_code[item.metric_code].sort_key}
+                {
+                    "metric_code": item.metric_code,
+                    "sort_key": catalog_by_code[item.metric_code].sort_key,
+                }
                 for item in active_metrics
             ]
         )
@@ -1127,7 +1136,10 @@ class OperationPerformanceWorkbenchService:
                 raise ValueError("本月已有店铺运营录入，不能迁移旧模式")
 
         config = await self._config(year_month)
-        if config is None or float(getattr(config, "operation_max_score", 0) or 0) != 20:
+        if (
+            config is None
+            or float(getattr(config, "operation_max_score", 0) or 0) != 20
+        ):
             raise ValueError("自动整数计分要求绩效配置的运营满分为 20")
         catalog = await self._catalog()
         catalog_by_code = {item.metric_code: item for item in catalog}

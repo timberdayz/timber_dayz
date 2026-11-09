@@ -57,9 +57,7 @@ class PayrollConfirmationService:
             str(shop_id or "").strip(),
         )
 
-    async def _load_assignments(
-        self, year_month: str, employee_code: str
-    ) -> List[Any]:
+    async def _load_assignments(self, year_month: str, employee_code: str) -> List[Any]:
         rows = (
             (
                 await self.db.execute(
@@ -75,9 +73,7 @@ class PayrollConfirmationService:
         )
         return list(rows)
 
-    async def _load_allocations(
-        self, year_month: str, employee_code: str
-    ) -> List[Any]:
+    async def _load_allocations(self, year_month: str, employee_code: str) -> List[Any]:
         rows = (
             (
                 await self.db.execute(
@@ -92,9 +88,7 @@ class PayrollConfirmationService:
         )
         return list(rows)
 
-    async def _check_ratio_limit(
-        self, year_month: str, assignments: List[Any]
-    ) -> None:
+    async def _check_ratio_limit(self, year_month: str, assignments: List[Any]) -> None:
         """同店同月 Σ提成比例 ≤ 100%（按该员工负责的店，统计全月归属）。"""
         assigned_shop_keys = {
             self._shop_key(a.platform_code, a.shop_id) for a in assignments
@@ -115,9 +109,7 @@ class PayrollConfirmationService:
         )
         ratio_by_shop: Dict[tuple[str, str], float] = {}
         for assignment in month_assignments:
-            shop_key = self._shop_key(
-                assignment.platform_code, assignment.shop_id
-            )
+            shop_key = self._shop_key(assignment.platform_code, assignment.shop_id)
             if shop_key not in assigned_shop_keys:
                 continue
             ratio_by_shop[shop_key] = ratio_by_shop.get(shop_key, 0.0) + float(
@@ -192,7 +184,9 @@ class PayrollConfirmationService:
             commit=False,
         )
         if (
-            getattr(getattr(getattr(self.db, "bind", None), "dialect", None), "name", None)
+            getattr(
+                getattr(getattr(self.db, "bind", None), "dialect", None), "name", None
+            )
             == "postgresql"
         ):
             await period_lock.assert_month_mutable(year_month=record.year_month)
@@ -254,11 +248,9 @@ class PayrollConfirmationService:
         confirmed: List[Dict[str, Any]] = []
         for record in records:
             assignments, allocations = prepared[record.id]
-            basis_version = (
-                await LaborCostPolicyService(self.db).get_profit_basis_version(
-                    record.year_month
-                )
-            )
+            basis_version = await LaborCostPolicyService(
+                self.db
+            ).get_profit_basis_version(record.year_month)
             await ProfitBasisService(
                 self.db
             ).lock_profit_basis_snapshots_for_assignments(

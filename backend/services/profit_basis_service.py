@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
-from backend.services.labor_cost_projection_service import LABOR_COST_CALCULATION_VERSION
+from backend.services.labor_cost_projection_service import (
+    LABOR_COST_CALCULATION_VERSION,
+)
 from modules.core.db import (
     DimFiscalCalendar,
     EmployeeLaborCostAllocation,
@@ -37,10 +39,14 @@ class ProfitBasisService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def ensure_fiscal_period_exists(self, year_month: str, *, commit: bool = True) -> None:
+    async def ensure_fiscal_period_exists(
+        self, year_month: str, *, commit: bool = True
+    ) -> None:
         existing_period = (
             await self.db.execute(
-                select(DimFiscalCalendar).where(DimFiscalCalendar.period_code == year_month)
+                select(DimFiscalCalendar).where(
+                    DimFiscalCalendar.period_code == year_month
+                )
             )
         ).scalar_one_or_none()
         if existing_period is not None:
@@ -123,7 +129,9 @@ class ProfitBasisService:
             },
         )
         fallback_row = fallback_result.mappings().first()
-        return _to_float(fallback_row.get("a_class_cost_amount") if fallback_row else 0.0)
+        return _to_float(
+            fallback_row.get("a_class_cost_amount") if fallback_row else 0.0
+        )
 
     async def _load_other_a_class_cost_amount(
         self,
@@ -264,7 +272,9 @@ class ProfitBasisService:
         uses_legacy_a_only = LaborCostPolicyService.is_legacy_a_only_basis_version(
             basis_version
         )
-        orders_profit_amount = await self._load_orders_profit_amount(year_month, platform_code, shop_id)
+        orders_profit_amount = await self._load_orders_profit_amount(
+            year_month, platform_code, shop_id
+        )
         if uses_legacy_a_only:
             other_a_class_cost_amount = await self._load_a_class_cost_amount(
                 year_month, platform_code, shop_id
@@ -280,12 +290,18 @@ class ProfitBasisService:
                 year_month, platform_code, shop_id
             )
             if isinstance(labor_cost_result, tuple):
-                pre_commission_labor_cost_amount, has_labor_allocation = labor_cost_result
+                pre_commission_labor_cost_amount, has_labor_allocation = (
+                    labor_cost_result
+                )
             else:
                 pre_commission_labor_cost_amount = _to_float(labor_cost_result)
                 has_labor_allocation = True
-            cost_status = "projected" if has_labor_allocation else "missing_labor_allocation"
-        a_class_cost_amount = other_a_class_cost_amount + pre_commission_labor_cost_amount
+            cost_status = (
+                "projected" if has_labor_allocation else "missing_labor_allocation"
+            )
+        a_class_cost_amount = (
+            other_a_class_cost_amount + pre_commission_labor_cost_amount
+        )
         b_class_cost_amount = 0.0
         profit_basis_amount = orders_profit_amount - a_class_cost_amount
 
@@ -316,16 +332,20 @@ class ProfitBasisService:
         # 同一个事实存了两份 —— 读的时候靠「挑一条」来糊弄，正是 SSOT 要消灭的。
         # 版本是这条快照的**属性**，重算时更新，不用来区分行。
         record = (
-            await self.db.execute(
-                select(ShopProfitBasis)
-                .where(
-                    ShopProfitBasis.period_month == payload["period_month"],
-                    ShopProfitBasis.platform_code == payload["platform_code"],
-                    ShopProfitBasis.shop_id == payload["shop_id"],
+            (
+                await self.db.execute(
+                    select(ShopProfitBasis)
+                    .where(
+                        ShopProfitBasis.period_month == payload["period_month"],
+                        ShopProfitBasis.platform_code == payload["platform_code"],
+                        ShopProfitBasis.shop_id == payload["shop_id"],
+                    )
+                    .order_by(ShopProfitBasis.id.desc())
                 )
-                .order_by(ShopProfitBasis.id.desc())
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
         if record is None:
             record = ShopProfitBasis(**payload)
@@ -352,7 +372,9 @@ class ProfitBasisService:
                     round(_to_float(locked), 2) != round(_to_float(requested), 2)
                     for locked, requested in zip(locked_values, requested_values)
                 ):
-                    raise ValueError("profit basis is locked; reopen settlement before rebuild")
+                    raise ValueError(
+                        "profit basis is locked; reopen settlement before rebuild"
+                    )
                 return payload
             record.orders_profit_amount = payload["orders_profit_amount"]
             record.a_class_cost_amount = payload["a_class_cost_amount"]
@@ -379,13 +401,17 @@ class ProfitBasisService:
     ) -> dict[str, Any]:
         """Rebuild one V2 snapshot for every active assigned shop in a month."""
         assignments = (
-            await self.db.execute(
-                select(EmployeeShopAssignment).where(
-                    EmployeeShopAssignment.year_month == year_month,
-                    EmployeeShopAssignment.status == "active",
+            (
+                await self.db.execute(
+                    select(EmployeeShopAssignment).where(
+                        EmployeeShopAssignment.year_month == year_month,
+                        EmployeeShopAssignment.status == "active",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         shops = sorted(
             {
                 (
@@ -422,16 +448,20 @@ class ProfitBasisService:
             self.db
         ).get_profit_basis_version(year_month)
         record = (
-            await self.db.execute(
-                select(ShopProfitBasis)
-                .where(
-                    ShopProfitBasis.period_month == year_month,
-                    ShopProfitBasis.platform_code == (platform_code or "").lower(),
-                    ShopProfitBasis.shop_id == shop_id,
+            (
+                await self.db.execute(
+                    select(ShopProfitBasis)
+                    .where(
+                        ShopProfitBasis.period_month == year_month,
+                        ShopProfitBasis.platform_code == (platform_code or "").lower(),
+                        ShopProfitBasis.shop_id == shop_id,
+                    )
+                    .order_by(ShopProfitBasis.id.desc())
                 )
-                .order_by(ShopProfitBasis.id.desc())
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if record is None:
             raise ValueError("profit basis snapshot not found; rebuild before locking")
         if not LaborCostPolicyService.is_settlement_basis_version(

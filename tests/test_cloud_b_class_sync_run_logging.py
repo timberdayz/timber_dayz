@@ -21,7 +21,9 @@ class FakeRunRecorder:
         failed_tables: int,
         error_summary: str | None = None,
     ):
-        self.finished.append((run_id, status, succeeded_tables, failed_tables, error_summary))
+        self.finished.append(
+            (run_id, status, succeeded_tables, failed_tables, error_summary)
+        )
 
 
 def test_sync_all_tables_records_run_summary():
@@ -31,7 +33,10 @@ def test_sync_all_tables_records_run_summary():
         mirror_manager=None,
         source_batch_reader=lambda *args, **kwargs: [],
         remote_writer=lambda *args, **kwargs: {"success": True},
-        table_inspector=lambda: ["fact_shopee_orders_daily", "fact_tiktok_orders_daily"],
+        table_inspector=lambda: [
+            "fact_shopee_orders_daily",
+            "fact_tiktok_orders_daily",
+        ],
         run_recorder=recorder,
         sync_table_handler=lambda table_name, batch_size=1000: {
             "status": "completed",
@@ -60,7 +65,10 @@ def test_sync_all_tables_records_partial_success_summary():
         mirror_manager=None,
         source_batch_reader=lambda *args, **kwargs: [],
         remote_writer=lambda *args, **kwargs: {"success": True},
-        table_inspector=lambda: ["fact_shopee_orders_daily", "fact_tiktok_orders_daily"],
+        table_inspector=lambda: [
+            "fact_shopee_orders_daily",
+            "fact_tiktok_orders_daily",
+        ],
         run_recorder=recorder,
         sync_table_handler=handler,
     )

@@ -43,7 +43,9 @@ class CloudBClassAutoSyncWorker:
         if explicit_flag is not None:
             return str(explicit_flag).lower() in {"1", "true", "yes", "on"}
         try:
-            stmt = select(SystemConfig).where(SystemConfig.config_key == "cloud_sync_auto_sync_enabled")
+            stmt = select(SystemConfig).where(
+                SystemConfig.config_key == "cloud_sync_auto_sync_enabled"
+            )
             record = self.db.execute(stmt).scalars().one_or_none()
             if record is not None:
                 return str(record.config_value).lower() in {"1", "true", "yes", "on"}
@@ -62,23 +64,15 @@ class CloudBClassAutoSyncWorker:
             .where(
                 or_(
                     CloudBClassSyncTask.status == "pending",
-                    (
-                        CloudBClassSyncTask.status == "retry_waiting"
-                    )
-                    & (
-                        CloudBClassSyncTask.next_retry_at.is_(None)
-                    )
+                    (CloudBClassSyncTask.status == "retry_waiting")
+                    & (CloudBClassSyncTask.next_retry_at.is_(None))
                     | (
                         (CloudBClassSyncTask.status == "retry_waiting")
                         & (CloudBClassSyncTask.next_retry_at.is_not(None))
                         & (CloudBClassSyncTask.next_retry_at <= now)
                     ),
-                    (
-                        CloudBClassSyncTask.status == "running"
-                    )
-                    & (
-                        CloudBClassSyncTask.lease_expires_at.is_not(None)
-                    )
+                    (CloudBClassSyncTask.status == "running")
+                    & (CloudBClassSyncTask.lease_expires_at.is_not(None))
                     & (CloudBClassSyncTask.lease_expires_at < now),
                 )
             )
@@ -159,7 +153,9 @@ class CloudBClassAutoSyncWorker:
                 pass
         return max(float(self.lease_seconds) / 2.0, 0.05)
 
-    async def _run_with_lease_heartbeat(self, task_id: int, worker_id: str, operation_factory):
+    async def _run_with_lease_heartbeat(
+        self, task_id: int, worker_id: str, operation_factory
+    ):
         stop_event = threading.Event()
 
         def _heartbeat_loop() -> None:
@@ -198,9 +194,16 @@ class CloudBClassAutoSyncWorker:
     def _normalize_error_code(raw_error: object) -> str:
         message = str(raw_error or "sync_failed")
         lowered = message.lower()
-        if "server closed the connection unexpectedly" in lowered or "could not receive data from server" in lowered:
+        if (
+            "server closed the connection unexpectedly" in lowered
+            or "could not receive data from server" in lowered
+        ):
             return "cloud_db_connection_closed"
-        if "connection refused" in lowered or "timed out" in lowered or "timeout" in lowered:
+        if (
+            "connection refused" in lowered
+            or "timed out" in lowered
+            or "timeout" in lowered
+        ):
             return "cloud_db_unavailable"
         if "software caused connection abort" in lowered:
             return "local_db_connection_aborted"
@@ -230,7 +233,9 @@ class CloudBClassAutoSyncWorker:
             result = await self._run_with_lease_heartbeat(
                 task_id,
                 worker_id,
-                lambda: self.sync_executor.sync_table(source_table_name, batch_size=self.batch_size),
+                lambda: self.sync_executor.sync_table(
+                    source_table_name, batch_size=self.batch_size
+                ),
             )
             task = self.db.get(CloudBClassSyncTask, task_id)
             if task is None:
@@ -254,29 +259,45 @@ class CloudBClassAutoSyncWorker:
                 task.next_retry_at = None
             elif sync_status != "completed":
                 task.projection_status = projection_status
-                task.last_error = result.get("error") or result.get("detail") or "sync_failed"
+                task.last_error = (
+                    result.get("error") or result.get("detail") or "sync_failed"
+                )
                 task.error_code = self._result_error_code(result)
                 if (
                     self._is_retryable_error(task.error_code)
                     and int(task.attempt_count or 0) <= self.MAX_RETRY_ATTEMPTS
                 ):
                     task.status = "retry_waiting"
-                    task.next_retry_at = self._compute_next_retry_at(task.attempt_count, task.error_code)
+                    task.next_retry_at = self._compute_next_retry_at(
+                        task.attempt_count, task.error_code
+                    )
                 else:
                     task.status = "failed"
                     task.next_retry_at = None
             else:
                 projection_terminal_success = {"completed", "queued", "not_required"}
-                final_status = "completed" if projection_status in projection_terminal_success else "partial_success"
+                final_status = (
+                    "completed"
+                    if projection_status in projection_terminal_success
+                    else "partial_success"
+                )
                 task.status = final_status
                 task.projection_status = projection_status
-                task.last_error = None if final_status == "completed" else (
-                    result.get("projection_error")
-                    or result.get("error")
-                    or result.get("detail")
-                    or "projection_failed"
+                task.last_error = (
+                    None
+                    if final_status == "completed"
+                    else (
+                        result.get("projection_error")
+                        or result.get("error")
+                        or result.get("detail")
+                        or "projection_failed"
+                    )
                 )
-                task.error_code = None if final_status == "completed" else self._result_error_code(result)
+                task.error_code = (
+                    None
+                    if final_status == "completed"
+                    else self._result_error_code(result)
+                )
                 task.next_retry_at = None
         except Exception as exc:
             task = self.db.get(CloudBClassSyncTask, task_id)
@@ -290,7 +311,9 @@ class CloudBClassAutoSyncWorker:
                 and int(task.attempt_count or 0) <= self.MAX_RETRY_ATTEMPTS
             ):
                 task.status = "retry_waiting"
-                task.next_retry_at = self._compute_next_retry_at(task.attempt_count, error_code)
+                task.next_retry_at = self._compute_next_retry_at(
+                    task.attempt_count, error_code
+                )
             else:
                 task.status = "failed"
                 task.next_retry_at = None
@@ -346,7 +369,9 @@ class CloudBClassAutoSyncWorker:
         failed_statuses = {"failed", "partial_success"}
         succeeded_count = sum(1 for item in run_tasks if item.status == "completed")
         failed_count = sum(1 for item in run_tasks if item.status in failed_statuses)
-        active_count = sum(1 for item in run_tasks if item.status not in terminal_statuses)
+        active_count = sum(
+            1 for item in run_tasks if item.status not in terminal_statuses
+        )
 
         run.succeeded_tables = succeeded_count
         run.failed_tables = failed_count
@@ -360,7 +385,9 @@ class CloudBClassAutoSyncWorker:
                 run.error_summary = None
             elif succeeded_count:
                 run.status = "partial_success"
-                run.error_summary = f"{failed_count} tables failed or partially succeeded"
+                run.error_summary = (
+                    f"{failed_count} tables failed or partially succeeded"
+                )
             else:
                 run.status = "failed"
                 run.error_summary = f"{failed_count} tables failed"

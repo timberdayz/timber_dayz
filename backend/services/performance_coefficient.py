@@ -80,7 +80,9 @@ def calculate_performance_coefficient(score: Any) -> float:
     return calculate_score_coefficient(score)
 
 
-def calculate_ranked_performance_coefficient(score: Any, rank: int, total: int) -> float:
+def calculate_ranked_performance_coefficient(
+    score: Any, rank: int, total: int
+) -> float:
     """店铺结算系数 = min(排名档位系数, 分数档位系数)。"""
     return min(
         calculate_rank_band_coefficient(rank, total),
@@ -109,9 +111,7 @@ def describe_settlement_coefficient(
     final = calculate_settlement_coefficient(shop_value, score_value)
     if shop_value is None and score_value is None:
         limited_by = None
-    elif score_value is not None and (
-        shop_value is None or score_value < shop_value
-    ):
+    elif score_value is not None and (shop_value is None or score_value < shop_value):
         limited_by = "personal_score"
     else:
         limited_by = "shop_ranking"

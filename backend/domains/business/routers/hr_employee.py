@@ -539,16 +539,20 @@ async def _build_employee_income_audit(
             )
         ).scalar_one_or_none()
         profit_basis_rows = (
-            await db.execute(
-                select(ShopProfitBasis)
-                .where(
-                    ShopProfitBasis.period_month == year_month,
-                    ShopProfitBasis.platform_code == platform_code,
-                    ShopProfitBasis.shop_id == shop_id,
+            (
+                await db.execute(
+                    select(ShopProfitBasis)
+                    .where(
+                        ShopProfitBasis.period_month == year_month,
+                        ShopProfitBasis.platform_code == platform_code,
+                        ShopProfitBasis.shop_id == shop_id,
+                    )
+                    .order_by(ShopProfitBasis.id.desc())
                 )
-                .order_by(ShopProfitBasis.id.desc())
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         # 口径已收敛成一套，这里按「结算基数口径优先」取那一条，
         # 不能再按具体版本字符串硬查（历史快照可能留的是旧版本号）。
         profit_basis = next(

@@ -59,7 +59,9 @@ def _serialize_alias(record: DimWarehouseNameAlias) -> WarehouseNameAliasRespons
     )
 
 
-async def _assert_warehouse_exists(db: AsyncSession, warehouse_code: str) -> DimWarehouse:
+async def _assert_warehouse_exists(
+    db: AsyncSession, warehouse_code: str
+) -> DimWarehouse:
     """仓码必须已登记在 ``core.dim_warehouses``（友好预检，FK 是最后一道兜底）。"""
     warehouse = (
         await db.execute(
@@ -134,7 +136,9 @@ async def _load_unmapped_warehouse_names(db: AsyncSession) -> List[str]:
 async def list_warehouse_name_aliases(db: AsyncSession = Depends(get_async_db)):
     """列出全部仓名登记 + 库存里未登记的仓名。"""
     result = await db.execute(
-        select(DimWarehouseNameAlias).order_by(DimWarehouseNameAlias.source_warehouse_name)
+        select(DimWarehouseNameAlias).order_by(
+            DimWarehouseNameAlias.source_warehouse_name
+        )
     )
     records = result.scalars().all()
 

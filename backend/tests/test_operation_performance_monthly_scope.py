@@ -25,7 +25,10 @@ def test_auto_integer_migration_adds_scope_identity_snapshot_columns():
         / "20260817_operation_performance_auto_integer_v1.py"
     ).read_text(encoding="utf-8")
 
-    assert 'down_revision = "current_schema_20260817_operation_performance_monthly_scope"' in source
+    assert (
+        'down_revision = "current_schema_20260817_operation_performance_monthly_scope"'
+        in source
+    )
     assert "source_shop_account_id" in source
     assert "standard_name_snapshot" in source
     assert "alias_snapshots" in source
@@ -199,11 +202,15 @@ async def test_scope_confirmation_rejects_a_stale_rule_version(monkeypatch):
         AsyncMock(),
     )
 
-    with pytest.raises(module.OperationPerformanceWorkbenchConflictError, match="运营评分规则"):
+    with pytest.raises(
+        module.OperationPerformanceWorkbenchConflictError, match="运营评分规则"
+    ):
         await service.apply_scope(
             OperationWorkbenchScopeApplyRequest(
                 year_month="2026-08",
-                expected_rule_updated_at=datetime(2026, 8, 17, 8, 0, tzinfo=timezone.utc),
+                expected_rule_updated_at=datetime(
+                    2026, 8, 17, 8, 0, tzinfo=timezone.utc
+                ),
                 shops=[],
             ),
             username="admin",
@@ -331,7 +338,17 @@ async def test_entries_block_completion_for_invalid_v1_rules_and_ignore_legacy_v
         metric_direction="higher_better",
         target_value=100,
         max_score=20,
-        operation_rule_snapshot={"metric_code": "customer_satisfaction", "sort_key": 10, "input_kind": "percentage", "direction": "higher_better", "target_value": 100, "max_score": 20, "unit": "%", "guidance": "", "scoring_rule_version": "auto_integer_v1"},
+        operation_rule_snapshot={
+            "metric_code": "customer_satisfaction",
+            "sort_key": 10,
+            "input_kind": "percentage",
+            "direction": "higher_better",
+            "target_value": 100,
+            "max_score": 20,
+            "unit": "%",
+            "guidance": "",
+            "scoring_rule_version": "auto_integer_v1",
+        },
     )
     special_check_target = SimpleNamespace(
         id=102,
@@ -342,7 +359,17 @@ async def test_entries_block_completion_for_invalid_v1_rules_and_ignore_legacy_v
         metric_direction="manual_score",
         target_value=None,
         max_score=10,
-        operation_rule_snapshot={"metric_code": "operation_special_check", "sort_key": 50, "input_kind": "special_check", "direction": "manual_score", "target_value": None, "max_score": 10, "unit": "", "guidance": "", "scoring_rule_version": "auto_integer_v1"},
+        operation_rule_snapshot={
+            "metric_code": "operation_special_check",
+            "sort_key": 50,
+            "input_kind": "special_check",
+            "direction": "manual_score",
+            "target_value": None,
+            "max_score": 10,
+            "unit": "",
+            "guidance": "",
+            "scoring_rule_version": "auto_integer_v1",
+        },
     )
     old_target = SimpleNamespace(
         id=103,
@@ -441,7 +468,17 @@ async def test_entry_save_rejects_failed_special_check_without_note(monkeypatch)
         metric_direction="manual_score",
         target_value=None,
         max_score=10,
-        operation_rule_snapshot={"metric_code": "operation_special_check", "sort_key": 50, "input_kind": "special_check", "direction": "manual_score", "target_value": None, "max_score": 10, "unit": "", "guidance": "", "scoring_rule_version": "auto_integer_v1"},
+        operation_rule_snapshot={
+            "metric_code": "operation_special_check",
+            "sort_key": 50,
+            "input_kind": "special_check",
+            "direction": "manual_score",
+            "target_value": None,
+            "max_score": 10,
+            "unit": "",
+            "guidance": "",
+            "scoring_rule_version": "auto_integer_v1",
+        },
     )
     service._scope_rows = AsyncMock(return_value=[scope])
     service._targets = AsyncMock(return_value=[target])
@@ -513,9 +550,17 @@ def test_auto_integer_rule_rejects_old_targets_missing_snapshots_and_unknown_inp
     )
 
     invalid_targets = [
-        SimpleNamespace(scoring_model_version="legacy", operation_rule_snapshot={"input_kind": "percentage"}),
-        SimpleNamespace(scoring_model_version="auto_integer_v1", operation_rule_snapshot=None),
-        SimpleNamespace(scoring_model_version="auto_integer_v1", operation_rule_snapshot={"input_kind": "manual_score"}),
+        SimpleNamespace(
+            scoring_model_version="legacy",
+            operation_rule_snapshot={"input_kind": "percentage"},
+        ),
+        SimpleNamespace(
+            scoring_model_version="auto_integer_v1", operation_rule_snapshot=None
+        ),
+        SimpleNamespace(
+            scoring_model_version="auto_integer_v1",
+            operation_rule_snapshot={"input_kind": "manual_score"},
+        ),
     ]
 
     for target in invalid_targets:
@@ -568,7 +613,9 @@ async def test_scope_confirmation_requires_an_enabled_auto_integer_rule(monkeypa
     service._sales_target_shop_keys = AsyncMock(return_value=set())
     service._scope_rows = AsyncMock(return_value=[])
     service._config = AsyncMock(return_value=SimpleNamespace(operation_max_score=20))
-    monkeypatch.setattr(module.PayrollPeriodLockService, "assert_month_mutable", AsyncMock())
+    monkeypatch.setattr(
+        module.PayrollPeriodLockService, "assert_month_mutable", AsyncMock()
+    )
 
     with pytest.raises(ValueError, match="运营评分规则"):
         await service.apply_scope(
@@ -578,7 +625,9 @@ async def test_scope_confirmation_requires_an_enabled_auto_integer_rule(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_scope_confirmation_rejects_non_twenty_point_auto_integer_rule(monkeypatch):
+async def test_scope_confirmation_rejects_non_twenty_point_auto_integer_rule(
+    monkeypatch,
+):
     from backend.schemas.target import OperationWorkbenchScopeApplyRequest
     from backend.services import operation_performance_workbench_service as module
 
@@ -607,7 +656,9 @@ async def test_scope_confirmation_rejects_non_twenty_point_auto_integer_rule(mon
             )
         ]
     )
-    monkeypatch.setattr(module.PayrollPeriodLockService, "assert_month_mutable", AsyncMock())
+    monkeypatch.setattr(
+        module.PayrollPeriodLockService, "assert_month_mutable", AsyncMock()
+    )
 
     with pytest.raises(ValueError, match="20"):
         await service.apply_scope(
@@ -706,7 +757,17 @@ async def test_entry_save_rejects_payload_that_does_not_match_metric_input_kind(
                 metric_catalog_version=2,
                 is_enabled=True,
                 scoring_model_version="auto_integer_v1",
-                operation_rule_snapshot={"metric_code": "operation_special_check", "sort_key": 50, "input_kind": "special_check", "direction": "manual_score", "target_value": None, "max_score": 20, "unit": "", "guidance": "", "scoring_rule_version": "auto_integer_v1"},
+                operation_rule_snapshot={
+                    "metric_code": "operation_special_check",
+                    "sort_key": 50,
+                    "input_kind": "special_check",
+                    "direction": "manual_score",
+                    "target_value": None,
+                    "max_score": 20,
+                    "unit": "",
+                    "guidance": "",
+                    "scoring_rule_version": "auto_integer_v1",
+                },
             )
         ]
     )
@@ -766,7 +827,17 @@ async def test_entry_save_accepts_catalog_percentage_as_numeric_input(monkeypatc
                 metric_catalog_version=2,
                 is_enabled=True,
                 scoring_model_version="auto_integer_v1",
-                operation_rule_snapshot={"metric_code": "customer_satisfaction", "sort_key": 10, "input_kind": "percentage", "direction": "higher_better", "target_value": 100, "max_score": 20, "unit": "%", "guidance": "", "scoring_rule_version": "auto_integer_v1"},
+                operation_rule_snapshot={
+                    "metric_code": "customer_satisfaction",
+                    "sort_key": 10,
+                    "input_kind": "percentage",
+                    "direction": "higher_better",
+                    "target_value": 100,
+                    "max_score": 20,
+                    "unit": "%",
+                    "guidance": "",
+                    "scoring_rule_version": "auto_integer_v1",
+                },
             )
         ]
     )
@@ -836,9 +907,9 @@ def test_settlement_filters_out_excluded_operation_scope_shops():
         "shopee|S002": {"shop_id": "S002"},
     }
 
-    assert _filter_source_rows_by_operation_scope(
-        source_rows, {"shopee|S002"}
-    ) == {"shopee|S002": {"shop_id": "S002"}}
+    assert _filter_source_rows_by_operation_scope(source_rows, {"shopee|S002"}) == {
+        "shopee|S002": {"shop_id": "S002"}
+    }
 
 
 @pytest.mark.asyncio
@@ -882,13 +953,17 @@ async def test_legacy_migration_preserves_the_old_rule_in_the_v1_snapshot(monkey
         is_enabled=True,
     )
     db = SimpleNamespace(
-        execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None)),
+        execute=AsyncMock(
+            return_value=SimpleNamespace(scalar_one_or_none=lambda: None)
+        ),
         commit=AsyncMock(),
     )
     service = module.OperationPerformanceWorkbenchService(db=db)
     service._scope_rows = AsyncMock(return_value=[])
     service._targets = AsyncMock(return_value=[legacy_target])
-    service._config = AsyncMock(return_value=SimpleNamespace(id=7, operation_max_score=20, updated_at=None))
+    service._config = AsyncMock(
+        return_value=SimpleNamespace(id=7, operation_max_score=20, updated_at=None)
+    )
     service._catalog = AsyncMock(
         return_value=[
             SimpleNamespace(
@@ -905,7 +980,9 @@ async def test_legacy_migration_preserves_the_old_rule_in_the_v1_snapshot(monkey
             )
         ]
     )
-    service.get_workbench = AsyncMock(return_value={"scoring_model_version": "auto_integer_v1"})
+    service.get_workbench = AsyncMock(
+        return_value={"scoring_model_version": "auto_integer_v1"}
+    )
     monkeypatch.setattr(
         module.PayrollPeriodLockService,
         "assert_month_mutable",

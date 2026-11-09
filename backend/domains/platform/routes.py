@@ -31,7 +31,9 @@ def register_platform_routes(app) -> None:
     app.include_router(reference.router, prefix="/api", tags=["参考目录"])
     app.include_router(main_accounts.router, prefix="/api", tags=["主账号管理"])
     app.include_router(shop_accounts.router, prefix="/api", tags=["店铺账号管理"])
-    app.include_router(shop_account_aliases.router, prefix="/api", tags=["店铺别名管理"])
+    app.include_router(
+        shop_account_aliases.router, prefix="/api", tags=["店铺别名管理"]
+    )
     app.include_router(
         platform_shop_discoveries.router, prefix="/api", tags=["平台店铺ID发现"]
     )

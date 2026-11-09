@@ -473,7 +473,7 @@ async def get_yearly_expense_summary(
 
 @router.get("/by-shop", response_model=Dict[str, Any])
 async def list_expenses_by_shop(
-    shop_id: str = Query(..., description='店铺ID'),
+    shop_id: str = Query(..., description="店铺ID"),
     year: Optional[str] = Query(None, description="年份(YYYY)，不传则返回所有数据"),
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(get_current_user),
@@ -485,11 +485,11 @@ async def list_expenses_by_shop(
     """
     try:
         # 构建WHERE条件
-        where_clause = 'shop_id = :shop_id'
+        where_clause = "shop_id = :shop_id"
         params = {"shop_id": shop_id}
 
         if year:
-            where_clause += ' AND year_month LIKE :year_pattern'
+            where_clause += " AND year_month LIKE :year_pattern"
             params["year_pattern"] = f"{year}-%"
 
         # 查询该店铺的费用数据
@@ -621,10 +621,10 @@ async def list_expenses(
         params = {}
 
         if shop_id:
-            where_conditions.append('shop_id = :shop_id')
+            where_conditions.append("shop_id = :shop_id")
             params["shop_id"] = shop_id
         if year_month:
-            where_conditions.append('year_month = :year_month')
+            where_conditions.append("year_month = :year_month")
             params["year_month"] = year_month
 
         where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
@@ -748,16 +748,16 @@ async def list_deleted_expenses(
 ):
     """查询已删除费用记录（软删除记录）"""
     try:
-        where_conditions = ['deleted_at IS NOT NULL']
+        where_conditions = ["deleted_at IS NOT NULL"]
         params = {}
         if shop_id:
-            where_conditions.append('shop_id = :shop_id')
+            where_conditions.append("shop_id = :shop_id")
             params["shop_id"] = shop_id
         if year_month:
-            where_conditions.append('year_month = :year_month')
+            where_conditions.append("year_month = :year_month")
             params["year_month"] = year_month
         if year:
-            where_conditions.append('year_month LIKE :year_pattern')
+            where_conditions.append("year_month LIKE :year_pattern")
             params["year_pattern"] = f"{year}-%"
 
         query = text(
@@ -1218,49 +1218,49 @@ async def update_expense(
         update_fields.append('"platform_code" = :platform_code')
         params["platform_code"] = platform_code
         if "rent" in update_data:
-            update_fields.append('rent_amount = :rent')
+            update_fields.append("rent_amount = :rent")
             params["rent"] = update_data["rent"]
         else:
             params["rent"] = float(row.rent or 0)
 
         if "marketing_fee" in update_data:
-            update_fields.append('marketing_amount = :marketing_fee')
+            update_fields.append("marketing_amount = :marketing_fee")
             params["marketing_fee"] = update_data["marketing_fee"]
         else:
             params["marketing_fee"] = float(row.marketing_fee or 0)
 
         if "utilities" in update_data:
-            update_fields.append('utility_amount = :utilities')
+            update_fields.append("utility_amount = :utilities")
             params["utilities"] = update_data["utilities"]
         else:
             params["utilities"] = float(row.utilities or 0)
 
         if "ai_token_cost" in update_data:
-            update_fields.append('ai_token_amount = :ai_token_cost')
+            update_fields.append("ai_token_amount = :ai_token_cost")
             params["ai_token_cost"] = update_data["ai_token_cost"]
         else:
             params["ai_token_cost"] = float(getattr(row, "ai_token_cost", 0) or 0)
 
         if "labor_cost" in update_data:
-            update_fields.append('labor_amount = :labor_cost')
+            update_fields.append("labor_amount = :labor_cost")
             params["labor_cost"] = update_data["labor_cost"]
         else:
             params["labor_cost"] = float(getattr(row, "labor_cost", 0) or 0)
 
         if "other_costs" in update_data:
-            update_fields.append('other_amount = :other_costs')
+            update_fields.append("other_amount = :other_costs")
             params["other_costs"] = update_data["other_costs"]
         else:
             params["other_costs"] = float(row.other_costs or 0)
 
         if "note" in update_data:
-            update_fields.append('remark = :note')
+            update_fields.append("remark = :note")
             params["note"] = update_data["note"]
         else:
             params["note"] = getattr(row, "note", None)
 
         if "attachments" in update_data:
-            update_fields.append('attachments = CAST(:attachments AS jsonb)')
+            update_fields.append("attachments = CAST(:attachments AS jsonb)")
             params["attachments"] = json.dumps(
                 update_data["attachments"] or [], ensure_ascii=False
             )
@@ -1278,7 +1278,7 @@ async def update_expense(
             params["labor_cost"],
             params["other_costs"],
         )
-        update_fields.append('total_amount = :total_cost')
+        update_fields.append("total_amount = :total_cost")
         params["total_cost"] = total_cost
 
         if not update_fields:

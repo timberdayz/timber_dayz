@@ -18,9 +18,7 @@ async def test_profit_basis_version_is_always_v2_regardless_of_configured_month(
 
     db = AsyncMock()
     db.execute = AsyncMock(
-        return_value=_ScalarResult(
-            SimpleNamespace(config_value="2026-08")
-        )
+        return_value=_ScalarResult(SimpleNamespace(config_value="2026-08"))
     )
     service = LaborCostPolicyService(db)
 

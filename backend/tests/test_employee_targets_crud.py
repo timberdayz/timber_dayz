@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock
 
 from sqlalchemy import select
 
-from backend.domains.business.routers.hr_salary import delete_employee_target, list_employee_targets, update_employee_target
+from backend.domains.business.routers.hr_salary import (
+    delete_employee_target,
+    list_employee_targets,
+    update_employee_target,
+)
 from backend.schemas.hr import EmployeeTargetUpdate
 from modules.core.db import EmployeeTarget
 
@@ -35,7 +39,11 @@ def test_update_employee_target_changes_planning_value():
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
 
-    result = asyncio.run(update_employee_target(8, EmployeeTargetUpdate(target_value=Decimal("200")), db=db))
+    result = asyncio.run(
+        update_employee_target(
+            8, EmployeeTargetUpdate(target_value=Decimal("200")), db=db
+        )
+    )
 
     assert result.target_value == Decimal("200")
     assert db.commit.await_count == 1
@@ -56,7 +64,9 @@ def test_delete_employee_target_removes_planning_record():
 
 def test_list_employee_targets_supports_batch_page_size_used_by_frontend():
     page_size_default = signature(list_employee_targets).parameters["page_size"].default
-    page_size_limit = next(item.le for item in page_size_default.metadata if hasattr(item, "le"))
+    page_size_limit = next(
+        item.le for item in page_size_default.metadata if hasattr(item, "le")
+    )
 
     assert page_size_limit == 500
 

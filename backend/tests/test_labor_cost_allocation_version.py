@@ -52,8 +52,7 @@ _SCAN_DIRS = (
 _SCAN_SUFFIXES = {".py", ".sql", ".js", ".vue", ".mjs", ".ts", ".json"}
 
 _MIGRATION_REL = (
-    "current_migrations/versions/"
-    "20261217_rename_labor_cost_allocation_version.py"
+    "current_migrations/versions/" "20261217_rename_labor_cost_allocation_version.py"
 )
 
 

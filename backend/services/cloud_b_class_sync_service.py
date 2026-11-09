@@ -198,9 +198,12 @@ def split_rows_by_identity_consistency(
                 if value and value.isdigit()
             }
             if len(numeric_ids) > 1:
-                mismatch = "raw_data.platform_shop_id=%s disagrees with raw_data.shop_id=%s" % (
-                    platform_shop_id,
-                    raw_shop_id,
+                mismatch = (
+                    "raw_data.platform_shop_id=%s disagrees with raw_data.shop_id=%s"
+                    % (
+                        platform_shop_id,
+                        raw_shop_id,
+                    )
                 )
 
             store_label = tokens.get("store_label")
@@ -1123,9 +1126,7 @@ class CloudBClassSyncService:
                     table_name=table_name,
                     ingest_timestamp=last_row["ingest_timestamp"],
                     source_id=last_row["id"],
-                    status=(
-                        "partial_success" if batch_conflict_rows else "completed"
-                    ),
+                    status=("partial_success" if batch_conflict_rows else "completed"),
                     table_schema=self.checkpoint_scope,
                 )
 

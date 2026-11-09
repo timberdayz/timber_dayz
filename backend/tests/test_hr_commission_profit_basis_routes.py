@@ -61,7 +61,9 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
         account_id="s1",
         enabled=True,
     )
-    config_row = SimpleNamespace(platform_code="shopee", shop_id="s1", allocatable_profit_rate=0.8)
+    config_row = SimpleNamespace(
+        platform_code="shopee", shop_id="s1", allocatable_profit_rate=0.8
+    )
     assign_row = SimpleNamespace(
         employee_code="E001",
         platform_code="shopee",
@@ -96,7 +98,9 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
         def __init__(self, db):
             self.db = db
 
-        async def build_profit_basis(self, year_month, platform_code, shop_id, basis_version="A_ONLY_V1"):
+        async def build_profit_basis(
+            self, year_month, platform_code, shop_id, basis_version="A_ONLY_V1"
+        ):
             return {
                 "period_month": year_month,
                 "platform_code": platform_code,
@@ -175,7 +179,9 @@ def test_shop_profit_statistics_floors_negative_profit_basis_for_estimated_commi
         account_id="s_neg",
         enabled=True,
     )
-    config_row = SimpleNamespace(platform_code="shopee", shop_id="s_neg", allocatable_profit_rate=0.25)
+    config_row = SimpleNamespace(
+        platform_code="shopee", shop_id="s_neg", allocatable_profit_rate=0.25
+    )
     assign_row = SimpleNamespace(
         employee_code="E_NEG",
         platform_code="shopee",
@@ -210,7 +216,9 @@ def test_shop_profit_statistics_floors_negative_profit_basis_for_estimated_commi
         def __init__(self, db):
             self.db = db
 
-        async def build_profit_basis(self, year_month, platform_code, shop_id, basis_version="A_ONLY_V1"):
+        async def build_profit_basis(
+            self, year_month, platform_code, shop_id, basis_version="A_ONLY_V1"
+        ):
             return {
                 "period_month": year_month,
                 "platform_code": platform_code,
@@ -268,7 +276,9 @@ def test_load_profit_basis_map_rebuilds_unlocked_snapshot_for_statistics():
         def __init__(self, db):
             self.db = db
 
-        async def build_profit_basis(self, year_month, platform_code, shop_id, basis_version="A_ONLY_V1"):
+        async def build_profit_basis(
+            self, year_month, platform_code, shop_id, basis_version="A_ONLY_V1"
+        ):
             return {
                 "period_month": year_month,
                 "platform_code": platform_code,

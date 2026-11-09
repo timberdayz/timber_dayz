@@ -130,11 +130,15 @@ def test_identity_index_is_not_empty_when_rows_carry_enum_members():
 
     这正是事故现场: 索引为空 ⇒ 收敛恒失效 ⇒ 同步侧误杀 3,714 行。
     """
-    from backend.services.shop_identity_reconciliation_service import build_identity_index
+    from backend.services.shop_identity_reconciliation_service import (
+        build_identity_index,
+    )
 
     accounts = [
         _orm_row("shopee_sg_hx_home_local", platform_shop_id="1391124228"),
-        _orm_row("shopee_my_xhkj1_local", platform="shopee", platform_shop_id="1540271739"),
+        _orm_row(
+            "shopee_my_xhkj1_local", platform="shopee", platform_shop_id="1540271739"
+        ),
         _orm_row(
             "tiktok_my_dawie_mall_local",
             platform="tiktok",
@@ -159,7 +163,9 @@ def test_enum_rows_and_string_rows_build_identical_indexes():
     这条把「生产路径」与「既有测试路径」钉在一起 ——
     以后任何人改坏归一化, 都会在这里露出来。
     """
-    from backend.services.shop_identity_reconciliation_service import build_identity_index
+    from backend.services.shop_identity_reconciliation_service import (
+        build_identity_index,
+    )
 
     base = {
         "id": 1,
@@ -177,15 +183,15 @@ def test_enum_rows_and_string_rows_build_identical_indexes():
     string_index = build_identity_index(string_rows, [])
 
     assert set(enum_index.by_shop_account_id) == set(string_index.by_shop_account_id)
-    assert set(enum_index.by_platform_shop_id) == set(
-        string_index.by_platform_shop_id
-    )
+    assert set(enum_index.by_platform_shop_id) == set(string_index.by_platform_shop_id)
     assert set(enum_index.by_store_name) == set(string_index.by_store_name)
 
 
 def test_disabled_or_non_operating_accounts_still_excluded():
     """归一化修复**不能**放宽候选池口径: 停用店 / 非经营店仍不进索引。"""
-    from backend.services.shop_identity_reconciliation_service import build_identity_index
+    from backend.services.shop_identity_reconciliation_service import (
+        build_identity_index,
+    )
 
     accounts = [
         _orm_row("shopee_sg_enabled_local"),
@@ -256,14 +262,11 @@ def test_both_services_use_the_shared_single_source_of_truth():
     )
 
     assert (
-        shop_account_identity_service._enum_value
-        is not None
+        shop_account_identity_service._enum_value is not None
     ), "shop_account_identity_service._enum_value 应保留为薄封装"
 
     # 收敛服务不再自带实现 —— 必须走共用函数
-    source = (
-        shop_identity_reconciliation_service.__file__
-    )
+    source = shop_identity_reconciliation_service.__file__
     with open(source, "r", encoding="utf-8") as handle:
         text = handle.read()
 

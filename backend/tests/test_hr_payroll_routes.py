@@ -155,8 +155,11 @@ def test_create_salary_structure_allows_new_version_for_same_employee(monkeypatc
         status="active",
     )
 
-    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
+    monkeypatch.setattr(
+        module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService
+    )
     db.execute = AsyncMock(side_effect=[_ResultOne(employee), _ResultOne(None)])
+
     def _add(obj):
         obj.id = 32
         obj.created_at = datetime.now(timezone.utc)
@@ -175,7 +178,9 @@ def test_create_salary_structure_allows_new_version_for_same_employee(monkeypatc
 def test_create_salary_structure_rejects_non_employee_identity():
     module = _load_hr_salary_module()
     db = AsyncMock()
-    employee = SimpleNamespace(employee_code="EMP102", status="active", employee_identity_type="visitor")
+    employee = SimpleNamespace(
+        employee_code="EMP102", status="active", employee_identity_type="visitor"
+    )
     structure = module.SalaryStructureCreate(
         employee_code="EMP102",
         base_salary=1200,
@@ -231,7 +236,9 @@ def test_update_salary_structure_updates_selected_version(monkeypatch):
         }
     )
     db.execute = AsyncMock(return_value=_ResultRows([record]))
-    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
+    monkeypatch.setattr(
+        module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService
+    )
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
 
@@ -244,8 +251,12 @@ def test_update_salary_structure_updates_selected_version(monkeypatch):
 def test_update_salary_structure_rejects_non_employee_identity():
     module = _load_hr_salary_module()
     db = AsyncMock()
-    employee = SimpleNamespace(employee_code="EMP103", status="active", employee_identity_type="investor")
-    body = SimpleNamespace(model_dump=lambda exclude_unset=True: {"base_salary": 1550.0})
+    employee = SimpleNamespace(
+        employee_code="EMP103", status="active", employee_identity_type="investor"
+    )
+    body = SimpleNamespace(
+        model_dump=lambda exclude_unset=True: {"base_salary": 1550.0}
+    )
     db.execute = AsyncMock(side_effect=[_ResultOne(employee)])
 
     resp = asyncio.run(module.update_salary_structure("EMP103", body=body, db=db))
@@ -257,7 +268,9 @@ def test_update_salary_structure_rejects_non_employee_identity():
 def test_refresh_payroll_record_rejects_non_employee_identity():
     module = _load_hr_salary_module()
     db = AsyncMock()
-    employee = SimpleNamespace(employee_code="EMP201", status="active", employee_identity_type="visitor")
+    employee = SimpleNamespace(
+        employee_code="EMP201", status="active", employee_identity_type="visitor"
+    )
     db.execute = AsyncMock(return_value=_ResultOne(employee))
 
     resp = asyncio.run(module.refresh_payroll_record("EMP201", "2025-04", db=db))
@@ -266,7 +279,9 @@ def test_refresh_payroll_record_rejects_non_employee_identity():
     assert _json_body(resp)["success"] is False
 
 
-def test_confirm_payroll_record_marks_draft_as_confirmed_and_locks_shop_profit_basis(monkeypatch):
+def test_confirm_payroll_record_marks_draft_as_confirmed_and_locks_shop_profit_basis(
+    monkeypatch,
+):
     module = _load_hr_salary_module()
     db = AsyncMock()
     record = SimpleNamespace(
@@ -329,9 +344,8 @@ def test_confirm_payroll_record_marks_draft_as_confirmed_and_locks_shop_profit_b
     confirmation_module = importlib.import_module(
         "backend.services.payroll_confirmation_service"
     )
-    monkeypatch.setattr(
-        confirmation_module, "ProfitBasisService", _ProfitBasisService
-    )
+    monkeypatch.setattr(confirmation_module, "ProfitBasisService", _ProfitBasisService)
+
     class _ReadyPerformance:
         def __init__(self, _db):
             pass
@@ -354,12 +368,14 @@ def test_confirm_payroll_record_marks_draft_as_confirmed_and_locks_shop_profit_b
     assert allocation.source_payroll_status == "confirmed"
     assert allocation.calculation_status == "confirmed"
     assert allocation.pre_commission_locked_at is not None
-    assert locked == [{
-        "year_month": "2025-01",
-        "assignments": [assignment],
-        "basis_version": "SETTLEMENT_BASIS_V1",
-        "commit": False,
-    }]
+    assert locked == [
+        {
+            "year_month": "2025-01",
+            "assignments": [assignment],
+            "basis_version": "SETTLEMENT_BASIS_V1",
+            "commit": False,
+        }
+    ]
     assert db.commit.await_count == 1
     assert resp["success"] is True
 
@@ -367,7 +383,9 @@ def test_confirm_payroll_record_marks_draft_as_confirmed_and_locks_shop_profit_b
 def test_confirm_payroll_record_requires_labor_cost_projection():
     module = _load_hr_salary_module()
     db = AsyncMock()
-    record = SimpleNamespace(id=9, employee_code="EMP009", year_month="2025-01", status="draft")
+    record = SimpleNamespace(
+        id=9, employee_code="EMP009", year_month="2025-01", status="draft"
+    )
     db.execute = AsyncMock(side_effect=[_ResultOne(record), _ResultRows([])])
     db.commit = AsyncMock()
 
@@ -381,7 +399,9 @@ def test_confirm_payroll_record_requires_labor_cost_projection():
 def test_confirm_payroll_record_rejects_pending_performance(monkeypatch):
     module = _load_hr_salary_module()
     db = AsyncMock()
-    record = SimpleNamespace(id=8, employee_code="EMP008", year_month="2025-01", status="draft")
+    record = SimpleNamespace(
+        id=8, employee_code="EMP008", year_month="2025-01", status="draft"
+    )
     allocation = SimpleNamespace()
     db.execute = AsyncMock(side_effect=[_ResultOne(record), _ResultRows([allocation])])
     db.rollback = AsyncMock()
@@ -411,7 +431,9 @@ def test_confirm_payroll_record_rejects_pending_performance(monkeypatch):
 def test_confirm_payroll_record_rejects_shop_commission_ratios_above_one():
     module = _load_hr_salary_module()
     db = AsyncMock()
-    record = SimpleNamespace(id=10, employee_code="EMP010", year_month="2025-01", status="draft")
+    record = SimpleNamespace(
+        id=10, employee_code="EMP010", year_month="2025-01", status="draft"
+    )
     allocation = SimpleNamespace()
     assignment = SimpleNamespace(platform_code="shopee", shop_id="shop-1")
     db.execute = AsyncMock(
@@ -419,10 +441,16 @@ def test_confirm_payroll_record_rejects_shop_commission_ratios_above_one():
             _ResultOne(record),
             _ResultRows([allocation]),
             _ResultRows([assignment]),
-            _ResultRows([
-                SimpleNamespace(platform_code="shopee", shop_id="shop-1", commission_ratio=0.7),
-                SimpleNamespace(platform_code="shopee", shop_id="shop-1", commission_ratio=0.4),
-            ]),
+            _ResultRows(
+                [
+                    SimpleNamespace(
+                        platform_code="shopee", shop_id="shop-1", commission_ratio=0.7
+                    ),
+                    SimpleNamespace(
+                        platform_code="shopee", shop_id="shop-1", commission_ratio=0.4
+                    ),
+                ]
+            ),
         ]
     )
     db.rollback = AsyncMock()
@@ -452,9 +480,7 @@ def test_update_payroll_record_rejects_confirmed_record():
     db = AsyncMock()
     record = SimpleNamespace(id=2, status="confirmed")
     db.execute = AsyncMock(return_value=_ResultOne(record))
-    body = SimpleNamespace(
-        model_dump=lambda exclude_unset=True: {"bonus": 200.0}
-    )
+    body = SimpleNamespace(model_dump=lambda exclude_unset=True: {"bonus": 200.0})
 
     resp = asyncio.run(
         module.update_payroll_record(
@@ -584,7 +610,9 @@ def test_mark_payroll_record_paid_requires_confirmed_and_sets_pay_date():
 
     module.audit_service.log_action = _fake_log_action
 
-    resp = asyncio.run(module.mark_payroll_record_paid(4, db=db, current_user=admin_user))
+    resp = asyncio.run(
+        module.mark_payroll_record_paid(4, db=db, current_user=admin_user)
+    )
 
     assert record.status == "paid"
     assert record.pay_date is not None
@@ -609,7 +637,9 @@ def test_mark_payroll_record_paid_rejects_non_admin_user():
     db.execute = AsyncMock(return_value=_ResultOne(record))
     db.commit = AsyncMock()
 
-    resp = asyncio.run(module.mark_payroll_record_paid(5, db=db, current_user=current_user))
+    resp = asyncio.run(
+        module.mark_payroll_record_paid(5, db=db, current_user=current_user)
+    )
 
     assert resp.status_code == 403
     assert _json_body(resp)["success"] is False
@@ -676,10 +706,18 @@ def test_refresh_payroll_record_returns_latest_payload(monkeypatch):
             }
 
     module.PayrollGenerationService = _FakeService
-    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
+    monkeypatch.setattr(
+        module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService
+    )
     db.execute = AsyncMock(
         side_effect=[
-            _ResultOne(SimpleNamespace(employee_code="EMP200", status="active", employee_identity_type="employee")),
+            _ResultOne(
+                SimpleNamespace(
+                    employee_code="EMP200",
+                    status="active",
+                    employee_identity_type="employee",
+                )
+            ),
             _ResultOne(record),
         ]
     )
@@ -724,7 +762,9 @@ def test_refresh_payroll_record_does_not_recalculate_month_income(monkeypatch):
 
     module.HRIncomeCalculationService = _MustNotCalculate
     module.PayrollGenerationService = _PayrollService
-    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
+    monkeypatch.setattr(
+        module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService
+    )
 
     response = asyncio.run(module.refresh_payroll_record("EMP200", "2026-08", db=db))
 
@@ -743,10 +783,14 @@ def test_refresh_payroll_record_requires_month_payroll_to_be_initialized(monkeyp
 
     class _PayrollService:
         def __init__(self, _db):
-            raise AssertionError("uninitialized month must not generate a single employee payroll")
+            raise AssertionError(
+                "uninitialized month must not generate a single employee payroll"
+            )
 
     module.PayrollGenerationService = _PayrollService
-    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
+    monkeypatch.setattr(
+        module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService
+    )
 
     response = asyncio.run(module.refresh_payroll_record("EMP203", "2026-08", db=db))
 
@@ -773,11 +817,23 @@ def test_refresh_payroll_record_returns_locked_conflicts(monkeypatch):
             }
 
     module.PayrollGenerationService = _FakeService
-    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
+    monkeypatch.setattr(
+        module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService
+    )
     db.execute = AsyncMock(
         side_effect=[
-            _ResultOne(SimpleNamespace(employee_code="EMP201", status="active", employee_identity_type="employee")),
-            _ResultOne(SimpleNamespace(employee_code="EMP201", year_month="2025-04", status="draft")),
+            _ResultOne(
+                SimpleNamespace(
+                    employee_code="EMP201",
+                    status="active",
+                    employee_identity_type="employee",
+                )
+            ),
+            _ResultOne(
+                SimpleNamespace(
+                    employee_code="EMP201", year_month="2025-04", status="draft"
+                )
+            ),
         ]
     )
 
@@ -788,7 +844,9 @@ def test_refresh_payroll_record_returns_locked_conflicts(monkeypatch):
     assert resp["locked_conflict_details"] == [{"employee_code": "EMP201"}]
 
 
-def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_payrolls(monkeypatch):
+def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_payrolls(
+    monkeypatch,
+):
     module = _load_hr_salary_module()
     db = AsyncMock()
     calls = []
@@ -824,14 +882,18 @@ def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_pa
                 "employee_count": 4,
                 "payroll_upserts": 3,
                 "locked_conflicts": 1,
-                "locked_conflict_details": [{"employee_code": "EMP900", "payroll_status": "confirmed"}],
+                "locked_conflict_details": [
+                    {"employee_code": "EMP900", "payroll_status": "confirmed"}
+                ],
             }
 
     class _FakeLaborCostService:
         def __init__(self, db):
             self.db = db
 
-        async def refresh_month(self, year_month, *, commission_by_employee_shop=None, commit=True):
+        async def refresh_month(
+            self, year_month, *, commission_by_employee_shop=None, commit=True
+        ):
             calls.append(("labor", year_month, commission_by_employee_shop, commit))
             return {"year_month": year_month, "allocation_upserts": 4}
 
@@ -880,7 +942,9 @@ def test_refresh_payroll_records_for_month_recalculates_income_then_refreshes_pa
     assert resp["labor_cost_allocation_upserts"] == 4
     assert resp["profit_basis_shop_count"] == 2
     assert resp["calculation_passes"] == 2
-    assert resp["locked_conflict_details"] == [{"employee_code": "EMP900", "payroll_status": "confirmed"}]
+    assert resp["locked_conflict_details"] == [
+        {"employee_code": "EMP900", "payroll_status": "confirmed"}
+    ]
     assert calls == [("v2_refresh", "2025-04")]
 
 
@@ -935,10 +999,18 @@ def test_refresh_payroll_record_persists_new_record_before_serializing(monkeypat
         obj.updated_at = datetime.now(timezone.utc)
 
     module.PayrollGenerationService = _FakeService
-    monkeypatch.setattr(module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService)
+    monkeypatch.setattr(
+        module, "PayrollPeriodLockService", _MutablePayrollPeriodLockService
+    )
     db.execute = AsyncMock(
         side_effect=[
-            _ResultOne(SimpleNamespace(employee_code="EMP202", status="active", employee_identity_type="employee")),
+            _ResultOne(
+                SimpleNamespace(
+                    employee_code="EMP202",
+                    status="active",
+                    employee_identity_type="employee",
+                )
+            ),
             _ResultOne(record),
         ]
     )

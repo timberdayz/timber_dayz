@@ -58,11 +58,21 @@ def test_health_check_includes_data_sync_critical_columns():
                     "created_at",
                     "updated_at",
                 ],
-                ("a_class", "sales_targets"): ["id", "target_name", "target_type", "period_start", "period_end"],
+                ("a_class", "sales_targets"): [
+                    "id",
+                    "target_name",
+                    "target_type",
+                    "period_start",
+                    "period_end",
+                ],
                 ("a_class", "target_breakdown"): ["id", "target_id", "breakdown_type"],
                 ("core", "platform_accounts"): ["id", "platform", "account_alias"],
                 ("a_class", "employees"): ["id", "employee_code", "name"],
-                ("a_class", "departments"): ["id", "department_code", "department_name"],
+                ("a_class", "departments"): [
+                    "id",
+                    "department_code",
+                    "department_name",
+                ],
                 ("core", "data_quarantine"): ["id", "source_file"],
                 ("core", "staging_orders"): ["id"],
                 ("core", "staging_product_metrics"): ["id"],
@@ -74,8 +84,18 @@ def test_health_check_includes_data_sync_critical_columns():
 
     issues, _recommendations = check_critical_tables(_FakeConnection())
 
-    assert any("core.data_quarantine" in issue and "catalog_file_id" in issue for issue in issues)
-    assert any("core.staging_orders" in issue and "file_id" in issue for issue in issues)
-    assert any("core.staging_product_metrics" in issue and "file_id" in issue for issue in issues)
-    assert any("core.staging_inventory" in issue and "file_id" in issue for issue in issues)
+    assert any(
+        "core.data_quarantine" in issue and "catalog_file_id" in issue
+        for issue in issues
+    )
+    assert any(
+        "core.staging_orders" in issue and "file_id" in issue for issue in issues
+    )
+    assert any(
+        "core.staging_product_metrics" in issue and "file_id" in issue
+        for issue in issues
+    )
+    assert any(
+        "core.staging_inventory" in issue and "file_id" in issue for issue in issues
+    )
     assert not any("a_class.operating_costs" in issue for issue in issues)

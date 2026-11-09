@@ -1282,12 +1282,12 @@ class PostgresqlDashboardService:
         year_month = period_month.strftime("%Y-%m")
         async with AsyncSessionLocal() as session:
             params: dict[str, Any] = {"year_month": year_month}
-            filters = ['year_month = :year_month', 'deleted_at IS NULL']
+            filters = ["year_month = :year_month", "deleted_at IS NULL"]
             if platform:
                 filters.append("LOWER(COALESCE(platform_code, '')) = :platform_code")
                 params["platform_code"] = platform.lower()
             if shop_id:
-                filters.append('shop_id = :shop_id')
+                filters.append("shop_id = :shop_id")
                 params["shop_id"] = shop_id
 
             # ── 先查人力成本投影，再决定手工「人力费用」要不要被扣掉 ──

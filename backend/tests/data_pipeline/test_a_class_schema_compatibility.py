@@ -135,7 +135,7 @@ def test_sales_targets_a_contract_migrated_into_target_breakdown():
     assert "period_label = Column(" in schema_text
 
     # 3) 活跃迁移链里负责「迁事实 + 校验 + 删表」
-    assert 'DROP TABLE IF EXISTS a_class.sales_targets_a' in migration_text
+    assert "DROP TABLE IF EXISTS a_class.sales_targets_a" in migration_text
     assert "a_class.target_breakdown" in migration_text
     assert "breakdown_type = 'shop'" in migration_text
     assert "to_char(" in migration_text  # period_label 归一为 'YYYY-MM'
@@ -195,7 +195,10 @@ def test_operating_costs_columns_are_unified_english_names():
     ):
         assert f'("{old}", "{new}")' in migration_text
 
-    assert 'revision = "current_schema_20261214_unify_operating_costs_columns"' in migration_text
+    assert (
+        'revision = "current_schema_20261214_unify_operating_costs_columns"'
+        in migration_text
+    )
     assert (
         'down_revision = "current_schema_20261213_employee_performance_coefficient"'
         in migration_text

@@ -70,17 +70,21 @@ def _month_range(year_month: str) -> tuple[date, date]:
 async def _resolve_platform_code(db: AsyncSession, shop_id: str) -> Optional[str]:
     """从 core.dim_shops 反查店铺所属平台（target_breakdown 的外键需要它）。"""
     rows = (
-        await db.execute(
-            text(
-                """
+        (
+            await db.execute(
+                text(
+                    """
                 SELECT DISTINCT platform_code
                 FROM core.dim_shops
                 WHERE shop_id = :shop_id
                 """
-            ),
-            {"shop_id": shop_id},
+                ),
+                {"shop_id": shop_id},
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if not rows:
         return None
     if len(rows) > 1:
@@ -220,9 +224,7 @@ async def _refresh_parent_totals(db: AsyncSession, target_id: int) -> None:
     )
 
 
-async def _load_shop_target_row(
-    db: AsyncSession, breakdown_id: int
-) -> Optional[tuple]:
+async def _load_shop_target_row(db: AsyncSession, breakdown_id: int) -> Optional[tuple]:
     """按档位行 id 读出响应所需的字段。"""
     return (
         await db.execute(
@@ -249,7 +251,7 @@ async def _load_shop_target_row(
 async def list_sales_targets(
     shop_id: Optional[str] = Query(None, description="店铺ID筛选"),
     year_month: Optional[str] = Query(None, description="月份筛选(YYYY-MM)"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取销售目标列表（a_class.target_breakdown 店铺 × 月档位）"""
     try:
@@ -294,8 +296,7 @@ async def list_sales_targets(
 
 @router.post("/sales-targets", response_model=SalesTargetResponse, status_code=201)
 async def create_sales_target(
-    target: SalesTargetCreate,
-    db: AsyncSession = Depends(get_async_db)
+    target: SalesTargetCreate, db: AsyncSession = Depends(get_async_db)
 ):
     """创建销售目标（a_class.target_breakdown 店铺 × 月档位，upsert）"""
     try:
@@ -415,9 +416,7 @@ async def create_sales_target(
 
 @router.put("/sales-targets/{target_id}", response_model=SalesTargetResponse)
 async def update_sales_target(
-    target_id: int,
-    target: SalesTargetUpdate,
-    db: AsyncSession = Depends(get_async_db)
+    target_id: int, target: SalesTargetUpdate, db: AsyncSession = Depends(get_async_db)
 ):
     """更新销售目标（a_class.target_breakdown 店铺 × 月档位）"""
     try:
@@ -472,10 +471,7 @@ async def update_sales_target(
 
 
 @router.delete("/sales-targets/{target_id}", status_code=204)
-async def delete_sales_target(
-    target_id: int,
-    db: AsyncSession = Depends(get_async_db)
-):
+async def delete_sales_target(target_id: int, db: AsyncSession = Depends(get_async_db)):
     """删除销售目标（a_class.target_breakdown 店铺 × 月档位）"""
     try:
         result = await db.execute(
@@ -504,8 +500,10 @@ async def delete_sales_target(
 
 @router.post("/sales-targets/copy-last-month")
 async def copy_last_month_targets(
-    target_month: str = Query(..., description="目标月份(YYYY-MM)", pattern=r"^\d{4}-\d{2}$"),
-    db: AsyncSession = Depends(get_async_db)
+    target_month: str = Query(
+        ..., description="目标月份(YYYY-MM)", pattern=r"^\d{4}-\d{2}$"
+    ),
+    db: AsyncSession = Depends(get_async_db),
 ):
     """复制上月目标到指定月份（a_class.target_breakdown 店铺 × 月档位）"""
     try:
@@ -629,11 +627,12 @@ async def copy_last_month_targets(
 # 战役目标API (campaign_targets - 保留原实现)
 # ============================================================================
 
+
 @router.get("/campaign-targets", response_model=List[CampaignTargetResponse])
 async def list_campaign_targets(
     platform: Optional[str] = Query(None, description="平台筛选"),
     year_month: Optional[str] = Query(None, description="月份筛选"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取战役目标列表"""
     try:
@@ -645,21 +644,33 @@ async def list_campaign_targets(
         if year_month:
             where_conditions.append("TO_CHAR(start_date, 'YYYY-MM') = :year_month")
             params["year_month"] = year_month
-        result = await db.execute(text(f"""
+        result = await db.execute(
+            text(
+                f"""
             SELECT id, platform_code, campaign_name, campaign_type,
                    start_date, end_date, target_gmv, target_roi,
                    budget_amount, created_at, created_by
             FROM campaign_targets
             WHERE {" AND ".join(where_conditions)}
             ORDER BY start_date DESC
-        """), params)
+        """
+            ),
+            params,
+        )
         rows = result.fetchall()
         return [
             CampaignTargetResponse(
-                id=row[0], platform_code=row[1], campaign_name=row[2],
-                campaign_type=row[3], start_date=row[4], end_date=row[5],
-                target_gmv=row[6], target_roi=row[7], budget_amount=row[8],
-                created_at=row[9], created_by=row[10]
+                id=row[0],
+                platform_code=row[1],
+                campaign_name=row[2],
+                campaign_type=row[3],
+                start_date=row[4],
+                end_date=row[5],
+                target_gmv=row[6],
+                target_roi=row[7],
+                budget_amount=row[8],
+                created_at=row[9],
+                created_by=row[10],
             )
             for row in rows
         ]
@@ -668,43 +679,65 @@ async def list_campaign_targets(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/campaign-targets", response_model=CampaignTargetResponse, status_code=201)
+@router.post(
+    "/campaign-targets", response_model=CampaignTargetResponse, status_code=201
+)
 async def create_campaign_target(
-    target: CampaignTargetCreate,
-    db: AsyncSession = Depends(get_async_db)
+    target: CampaignTargetCreate, db: AsyncSession = Depends(get_async_db)
 ):
     """创建战役目标"""
     try:
         if target.end_date < target.start_date:
             raise HTTPException(status_code=400, detail="结束日期不能早于开始日期")
         target_id = uuid4()
-        await db.execute(text("""
+        await db.execute(
+            text(
+                """
             INSERT INTO campaign_targets
             (id, platform_code, campaign_name, campaign_type,
              start_date, end_date, target_gmv, target_roi, budget_amount, created_at, created_by)
             VALUES (:id, :platform_code, :campaign_name, :campaign_type,
                     :start_date, :end_date, :target_gmv, :target_roi, :budget_amount, NOW(), 'system')
-        """), {
-            "id": str(target_id), "platform_code": target.platform_code,
-            "campaign_name": target.campaign_name, "campaign_type": target.campaign_type or "",
-            "start_date": target.start_date, "end_date": target.end_date,
-            "target_gmv": target.target_gmv, "target_roi": target.target_roi or 0,
-            "budget_amount": target.budget_amount or 0
-        })
+        """
+            ),
+            {
+                "id": str(target_id),
+                "platform_code": target.platform_code,
+                "campaign_name": target.campaign_name,
+                "campaign_type": target.campaign_type or "",
+                "start_date": target.start_date,
+                "end_date": target.end_date,
+                "target_gmv": target.target_gmv,
+                "target_roi": target.target_roi or 0,
+                "budget_amount": target.budget_amount or 0,
+            },
+        )
         await db.commit()
-        r = await db.execute(text("""
+        r = await db.execute(
+            text(
+                """
             SELECT id, platform_code, campaign_name, campaign_type,
                    start_date, end_date, target_gmv, target_roi, budget_amount, created_at, created_by
             FROM campaign_targets WHERE id = :id
-        """), {"id": str(target_id)})
+        """
+            ),
+            {"id": str(target_id)},
+        )
         row = r.fetchone()
         if not row:
             raise HTTPException(status_code=500, detail="创建成功但查询失败")
         return CampaignTargetResponse(
-            id=row[0], platform_code=row[1], campaign_name=row[2],
-            campaign_type=row[3], start_date=row[4], end_date=row[5],
-            target_gmv=row[6], target_roi=row[7], budget_amount=row[8],
-            created_at=row[9], created_by=row[10]
+            id=row[0],
+            platform_code=row[1],
+            campaign_name=row[2],
+            campaign_type=row[3],
+            start_date=row[4],
+            end_date=row[5],
+            target_gmv=row[6],
+            target_roi=row[7],
+            budget_amount=row[8],
+            created_at=row[9],
+            created_by=row[10],
         )
     except HTTPException:
         raise
@@ -712,4 +745,3 @@ async def create_campaign_target(
         await db.rollback()
         logger.error(f"创建战役目标失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-

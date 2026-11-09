@@ -13,7 +13,9 @@ SCRIPT_PATH = Path(__file__).parents[2] / "scripts" / "migrate_profit_basis_to_v
 
 
 def load_script():
-    spec = importlib.util.spec_from_file_location("migrate_profit_basis_to_v2", SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "migrate_profit_basis_to_v2", SCRIPT_PATH
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -25,7 +27,9 @@ def test_batch_fingerprint_is_stable_and_changes_with_payload():
     payload = {"2026-07": {"basis_rows": 2, "impact": "10.00"}}
 
     first = script.compute_batch_fingerprint(payload)
-    second = script.compute_batch_fingerprint({"2026-07": {"impact": "10.00", "basis_rows": 2}})
+    second = script.compute_batch_fingerprint(
+        {"2026-07": {"impact": "10.00", "basis_rows": 2}}
+    )
 
     assert first == second
     assert len(first) == 64
@@ -36,7 +40,7 @@ def test_batch_fingerprint_supports_database_decimal_amounts():
     script = load_script()
 
     fingerprint = script.compute_batch_fingerprint(
-        {"months": [{"period_month": "2026-07", "profit": Decimal("12.34")}]} 
+        {"months": [{"period_month": "2026-07", "profit": Decimal("12.34")}]}
     )
 
     assert len(fingerprint) == 64
@@ -167,8 +171,12 @@ def test_apply_fails_closed_when_profit_basis_snapshot_is_locked():
 def test_dry_run_does_not_call_write_or_backup(monkeypatch, tmp_path):
     script = load_script()
     calls = []
-    monkeypatch.setattr(script, "export_backup", lambda *args, **kwargs: calls.append("backup"))
-    monkeypatch.setattr(script, "apply_migration", lambda *args, **kwargs: calls.append("apply"))
+    monkeypatch.setattr(
+        script, "export_backup", lambda *args, **kwargs: calls.append("backup")
+    )
+    monkeypatch.setattr(
+        script, "apply_migration", lambda *args, **kwargs: calls.append("apply")
+    )
 
     report = {"months": [], "batch_fingerprint": "abc"}
     result = script.run(report=report, apply=False, backup_dir=tmp_path)

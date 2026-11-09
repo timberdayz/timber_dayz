@@ -1,4 +1,8 @@
-from backend.domains.collection.routers import account_alignment, collection, component_recorder
+from backend.domains.collection.routers import (
+    account_alignment,
+    collection,
+    component_recorder,
+)
 
 
 def register_collection_routes(app, logger) -> None:
@@ -19,7 +23,9 @@ def register_collection_routes(app, logger) -> None:
         )
 
         app.include_router(
-            collection_websocket.router, prefix="/api/collection", tags=["采集WebSocket"]
+            collection_websocket.router,
+            prefix="/api/collection",
+            tags=["采集WebSocket"],
         )
         app.include_router(main_accounts.router, prefix="/api", tags=["主账号管理"])
         app.include_router(shop_accounts.router, prefix="/api", tags=["店铺账号管理"])
@@ -29,7 +35,9 @@ def register_collection_routes(app, logger) -> None:
         app.include_router(
             platform_shop_discoveries.router, prefix="/api", tags=["平台店铺ID发现"]
         )
-        app.include_router(component_versions.router, prefix="/api", tags=["组件版本管理"])
+        app.include_router(
+            component_versions.router, prefix="/api", tags=["组件版本管理"]
+        )
         app.include_router(
             warehouse_name_aliases.router, prefix="/api", tags=["仓名别名管理"]
         )

@@ -4,7 +4,10 @@ from collections.abc import Sequence
 
 from sqlalchemy import inspect, text
 
-from backend.services.cloud_b_class_sync_utils import quote_ident, validate_b_class_table_name
+from backend.services.cloud_b_class_sync_utils import (
+    quote_ident,
+    validate_b_class_table_name,
+)
 from modules.core.fact_identity_columns import FACT_SHOP_ID_COLUMN_SEMANTICS
 from modules.core.logger import get_logger
 
@@ -53,7 +56,11 @@ def build_canonical_columns() -> tuple[str, ...]:
 
 
 def get_conflict_key_columns(data_domain: str) -> tuple[str, ...]:
-    return SERVICES_CONFLICT_KEY if data_domain == "services" else NON_SERVICES_CONFLICT_KEY
+    return (
+        SERVICES_CONFLICT_KEY
+        if data_domain == "services"
+        else NON_SERVICES_CONFLICT_KEY
+    )
 
 
 class CloudBClassMirrorManager:
@@ -65,7 +72,9 @@ class CloudBClassMirrorManager:
 
     def ensure_cloud_schema_exists(self) -> None:
         with self.engine.begin() as conn:
-            conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {quote_ident(self.schema_name)}"))
+            conn.execute(
+                text(f"CREATE SCHEMA IF NOT EXISTS {quote_ident(self.schema_name)}")
+            )
 
     def ensure_cloud_mirror_table(self, table_name: str, data_domain: str) -> None:
         validate_b_class_table_name(table_name)
@@ -80,7 +89,9 @@ class CloudBClassMirrorManager:
 
         columns_sql = ",\n".join(self._column_definitions())
         full_table_name = f"{quote_ident(self.schema_name)}.{quote_ident(table_name)}"
-        create_table_sql = f"CREATE TABLE IF NOT EXISTS {full_table_name} (\n{columns_sql}\n)"
+        create_table_sql = (
+            f"CREATE TABLE IF NOT EXISTS {full_table_name} (\n{columns_sql}\n)"
+        )
 
         with self.engine.begin() as conn:
             conn.execute(text(create_table_sql))
@@ -101,9 +112,7 @@ class CloudBClassMirrorManager:
         不该让整条同步链挂掉(比如老表上这一列被人工删过)。
         """
         full_table_name = f"{quote_ident(self.schema_name)}.{quote_ident(table_name)}"
-        comment_sql = (
-            f'COMMENT ON COLUMN {full_table_name}."shop_id" IS :comment'
-        )
+        comment_sql = f'COMMENT ON COLUMN {full_table_name}."shop_id" IS :comment'
         try:
             with self.engine.begin() as conn:
                 conn.execute(
@@ -165,8 +174,7 @@ class CloudBClassMirrorManager:
             for column in inspector.get_columns(table_name, schema=self.schema_name)
         }
         expected_columns = {
-            definition.split('"')[1]
-            for definition in self._column_definitions()
+            definition.split('"')[1] for definition in self._column_definitions()
         }
         missing_columns = sorted(expected_columns - actual_columns)
         if missing_columns:

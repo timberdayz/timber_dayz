@@ -171,8 +171,6 @@ def _shop_key(platform_code: str | None, shop_id: str | None) -> str:
     return f"{(platform_code or '').lower()}|{str(shop_id or '').lower()}"
 
 
-
-
 async def _load_shop_display_names(db: AsyncSession) -> Dict[tuple[str, str], str]:
     """加载「(平台, 店铺键) → 店名」的映射。
 
@@ -1121,9 +1119,7 @@ async def _load_profit_basis_map(
             "pre_commission_labor_cost_amount": float(
                 basis.get("pre_commission_labor_cost_amount") or 0
             ),
-            "basis_version": str(
-                basis.get("basis_version") or "SETTLEMENT_BASIS_V1"
-            ),
+            "basis_version": str(basis.get("basis_version") or "SETTLEMENT_BASIS_V1"),
             "cost_status": str(basis.get("cost_status") or "missing_labor_allocation"),
         }
     return basis_by_shop
@@ -1453,9 +1449,7 @@ async def get_commission_settlement_preview(
                 .all()
             )
             name_by_code = {
-                str(code): str(name)
-                for code, name in name_rows
-                if code and name
+                str(code): str(name) for code, name in name_rows if code and name
             }
         for item in employees:
             item["employee_name"] = name_by_code.get(
@@ -1951,9 +1945,7 @@ async def get_shop_commission_config(
         )
         config_rows = (await db.execute(config_query)).scalars().all()
         config_by_key = {
-            _shop_key(c.platform_code, c.shop_id): float(
-                c.allocatable_profit_rate or 0
-            )
+            _shop_key(c.platform_code, c.shop_id): float(c.allocatable_profit_rate or 0)
             for c in config_rows
         }
         items = []
@@ -2284,9 +2276,7 @@ async def get_shop_profit_statistics(
             preview = {"employees": []}
         for employee in preview.get("employees") or []:
             for shop in employee.get("shops") or []:
-                shop_key = _shop_key(
-                    shop.get("platform_code"), shop.get("shop_id")
-                )
+                shop_key = _shop_key(shop.get("platform_code"), shop.get("shop_id"))
                 settlement_commission_by_shop[shop_key] = round(
                     settlement_commission_by_shop.get(shop_key, 0.0)
                     + float(shop.get("estimated_commission", 0) or 0),
@@ -2306,9 +2296,7 @@ async def get_shop_profit_statistics(
         shop_status_by_key: Dict[str, Dict[str, Any]] = {}
         for score_row in shop_score_rows:
             details = getattr(score_row, "score_details", None) or {}
-            summary = (
-                details.get("summary", {}) if isinstance(details, dict) else {}
-            )
+            summary = details.get("summary", {}) if isinstance(details, dict) else {}
             profit_detail = (
                 details.get("profit", {}) if isinstance(details, dict) else {}
             )

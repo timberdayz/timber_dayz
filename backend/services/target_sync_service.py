@@ -68,7 +68,9 @@ class TargetSyncService:
         """初始化服务（仅支持异步）"""
         self.db = db
 
-    async def sync_target_to_a_class(self, target_id: int, commit: bool = True) -> Dict[str, Any]:
+    async def sync_target_to_a_class(
+        self, target_id: int, commit: bool = True
+    ) -> Dict[str, Any]:
         """
         回报目标当前生效的「店铺 × 月」档位行数。
 
@@ -89,20 +91,28 @@ class TargetSyncService:
         }
 
         try:
-            target = (await self.db.execute(
-                select(SalesTarget).where(SalesTarget.id == target_id)
-            )).scalar_one_or_none()
+            target = (
+                await self.db.execute(
+                    select(SalesTarget).where(SalesTarget.id == target_id)
+                )
+            ).scalar_one_or_none()
 
             if not target:
                 result["errors"].append(f"Target {target_id} not found")
                 return result
 
-            breakdown_rows = (await self.db.execute(
-                select(TargetBreakdown).where(
-                    TargetBreakdown.target_id == target_id,
-                    TargetBreakdown.breakdown_type == "shop",
+            breakdown_rows = (
+                (
+                    await self.db.execute(
+                        select(TargetBreakdown).where(
+                            TargetBreakdown.target_id == target_id,
+                            TargetBreakdown.breakdown_type == "shop",
+                        )
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
             breakdowns = select_effective_shop_breakdowns(
                 breakdown_rows,
                 target.period_start,
@@ -110,7 +120,9 @@ class TargetSyncService:
             )
 
             if not breakdowns:
-                logger.info(f"[TargetSync] Target {target_id} has no shop breakdowns, skipping")
+                logger.info(
+                    f"[TargetSync] Target {target_id} has no shop breakdowns, skipping"
+                )
                 result["skipped"] = 1
                 return result
 
@@ -126,7 +138,9 @@ class TargetSyncService:
             if commit:
                 await self.db.rollback()
             result["errors"].append(str(e))
-            logger.error(f"[TargetSync] sync_target_to_a_class failed: {e}", exc_info=True)
+            logger.error(
+                f"[TargetSync] sync_target_to_a_class failed: {e}", exc_info=True
+            )
 
         return result
 
@@ -142,9 +156,15 @@ class TargetSyncService:
         }
 
         try:
-            targets = (await self.db.execute(
-                select(SalesTarget).where(SalesTarget.status == "active")
-            )).scalars().all()
+            targets = (
+                (
+                    await self.db.execute(
+                        select(SalesTarget).where(SalesTarget.status == "active")
+                    )
+                )
+                .scalars()
+                .all()
+            )
 
             result["total_targets"] = len(targets)
 
@@ -164,11 +184,15 @@ class TargetSyncService:
         except Exception as e:
             await self.db.rollback()
             result["errors"].append(str(e))
-            logger.error(f"[TargetSync] sync_all_active_targets failed: {e}", exc_info=True)
+            logger.error(
+                f"[TargetSync] sync_all_active_targets failed: {e}", exc_info=True
+            )
 
         return result
 
-    async def delete_target_from_a_class(self, target_id: int, commit: bool = True) -> Dict[str, Any]:
+    async def delete_target_from_a_class(
+        self, target_id: int, commit: bool = True
+    ) -> Dict[str, Any]:
         """
         第三批-C 起**不需要**清理投影行。
 
@@ -192,11 +216,17 @@ class TargetSyncService:
         }
 
         try:
-            remaining = (await self.db.execute(
-                select(TargetBreakdown.id).where(
-                    TargetBreakdown.target_id == target_id,
+            remaining = (
+                (
+                    await self.db.execute(
+                        select(TargetBreakdown.id).where(
+                            TargetBreakdown.target_id == target_id,
+                        )
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
 
             if remaining:
                 logger.info(
@@ -211,7 +241,9 @@ class TargetSyncService:
             if commit:
                 await self.db.rollback()
             result["errors"].append(str(e))
-            logger.error(f"[TargetSync] delete_target_from_a_class failed: {e}", exc_info=True)
+            logger.error(
+                f"[TargetSync] delete_target_from_a_class failed: {e}", exc_info=True
+            )
 
         return result
 
@@ -222,8 +254,8 @@ class TargetSyncService:
         规则：取 period_start 的年月
         """
         if period_start:
-            return period_start.strftime('%Y-%m')
-        return datetime.now(timezone.utc).strftime('%Y-%m')
+            return period_start.strftime("%Y-%m")
+        return datetime.now(timezone.utc).strftime("%Y-%m")
 
     @staticmethod
     def _normalize_platform_code(platform_code: Optional[str]) -> str:

@@ -229,9 +229,7 @@ class MonthlySettlementService:
                     getattr(basis, "profit_basis_amount", 0), 0.0
                 )
                 cfg = cfg_by_shop.get(key)
-                alloc_rate = _to_float(
-                    getattr(cfg, "allocatable_profit_rate", 0), 0.0
-                )
+                alloc_rate = _to_float(getattr(cfg, "allocatable_profit_rate", 0), 0.0)
                 score = score_by_shop.get(key)
                 shop_coefficient = _to_float(
                     getattr(score, "performance_coefficient", None), 1.0
@@ -240,7 +238,11 @@ class MonthlySettlementService:
                     shop_coefficient = 1.0
                 settlement_coefficient = min(
                     shop_coefficient,
-                    score_coefficient if score_coefficient is not None else shop_coefficient,
+                    (
+                        score_coefficient
+                        if score_coefficient is not None
+                        else shop_coefficient
+                    ),
                 )
                 ratio = _to_float(getattr(row, "commission_ratio", 0), 0.0)
                 ratio_sum_by_shop[key] = ratio_sum_by_shop.get(key, 0.0) + ratio
@@ -279,11 +281,11 @@ class MonthlySettlementService:
                     "shop_id": score.shop_id,
                     "total_score": _to_float(getattr(score, "total_score", None), 0.0),
                     "rank": getattr(score, "rank", None),
-                    "shop_coefficient": _to_float(
-                        getattr(score, "performance_coefficient", None), 1.0
-                    )
-                    if getattr(score, "performance_coefficient", None) is not None
-                    else None,
+                    "shop_coefficient": (
+                        _to_float(getattr(score, "performance_coefficient", None), 1.0)
+                        if getattr(score, "performance_coefficient", None) is not None
+                        else None
+                    ),
                     "calculation_status": calculation_status or "pending",
                     "profit_status": profit_status or "pending_target",
                     "ranking_pool": str(summary.get("ranking_pool") or ""),
@@ -316,9 +318,7 @@ class MonthlySettlementService:
             set(assignments_by_employee) | set(payroll_by_employee),
             performance_by_employee,
         )
-        issue_by_employee = {
-            issue["employee_code"]: issue for issue in blocking_issues
-        }
+        issue_by_employee = {issue["employee_code"]: issue for issue in blocking_issues}
         # 阻断项带上姓名，前端不用再反查 employees[]（避免隐式耦合）。
         for issue in blocking_issues:
             issue["employee_name"] = name_by_code.get(
@@ -338,9 +338,11 @@ class MonthlySettlementService:
                 getattr(payroll, "performance_salary", 0), 0.0
             )
             commission_amount = _to_float(
-                getattr(payroll, "commission", None)
-                if payroll is not None
-                else getattr(commission, "commission_amount", 0),
+                (
+                    getattr(payroll, "commission", None)
+                    if payroll is not None
+                    else getattr(commission, "commission_amount", 0)
+                ),
                 0.0,
             )
             commission_source = (
@@ -363,9 +365,7 @@ class MonthlySettlementService:
             issue = issue_by_employee.get(employee_code)
             # 提成拆解直接读**已落库**的 ``employee_commissions.calculation_details``，
             # 这里不做任何二次计算 —— 页面上看到的每一分钱都能对上账。
-            commission_details = (
-                getattr(commission, "calculation_details", None) or {}
-            )
+            commission_details = getattr(commission, "calculation_details", None) or {}
             if not isinstance(commission_details, dict):
                 commission_details = {}
             score_coefficient = commission_details.get("score_coefficient")
@@ -408,15 +408,17 @@ class MonthlySettlementService:
                     "performance_score": getattr(perf, "performance_score", None),
                     # 「月度结算系数」= 绩效工资口径的月度系数（按销售额×提成比加权）。
                     # 它**只用于绩效工资**，不代表提成的算法 —— 提成是逐店各算各的。
-                    "performance_salary_coefficient": _to_float(
-                        getattr(perf, "performance_coefficient", None), 0.0
-                    )
-                    if getattr(perf, "performance_coefficient", None) is not None
-                    else None,
+                    "performance_salary_coefficient": (
+                        _to_float(getattr(perf, "performance_coefficient", None), 0.0)
+                        if getattr(perf, "performance_coefficient", None) is not None
+                        else None
+                    ),
                     # 个人分数档位系数：提成和绩效工资共同的约束项之一
-                    "score_coefficient": _to_float(score_coefficient, 0.0)
-                    if score_coefficient is not None
-                    else None,
+                    "score_coefficient": (
+                        _to_float(score_coefficient, 0.0)
+                        if score_coefficient is not None
+                        else None
+                    ),
                     # 逐店提成拆解：能自己把「240.69」加出来
                     "shop_breaks": shop_breaks,
                     "calculation_status": status or "missing",
@@ -438,14 +440,10 @@ class MonthlySettlementService:
             )
 
         formal_count = sum(
-            1
-            for item in employees
-            if item["calculation_status"] == "complete"
+            1 for item in employees if item["calculation_status"] == "complete"
         )
         not_participating_count = sum(
-            1
-            for item in employees
-            if item["calculation_status"] == "not_participating"
+            1 for item in employees if item["calculation_status"] == "not_participating"
         )
 
         return {
@@ -466,9 +464,7 @@ class MonthlySettlementService:
                 "is_settlement_ready": not blocking_issues,
                 # 「绩效数据齐了」和「工资单都确认了」是两件事，
                 # 分开给，避免把「可以确认」误读成「已经确认」。
-                "is_payroll_confirmed": (
-                    draft_count == 0 and confirmed_count > 0
-                ),
+                "is_payroll_confirmed": (draft_count == 0 and confirmed_count > 0),
             },
             "employees": employees,
             "shops": shops,

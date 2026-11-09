@@ -937,10 +937,9 @@ class HRIncomeCalculationService:
                 performance_score = input_score_by_employee[employee_code]
                 performance_source_type = "personal_inputs"
             elif self._to_float(agg.get("weighted_score_den"), 0.0) > 0:
-                performance_score = (
-                    self._to_float(agg.get("weighted_score_num"), 0.0)
-                    / self._to_float(agg.get("weighted_score_den"), 0.0)
-                )
+                performance_score = self._to_float(
+                    agg.get("weighted_score_num"), 0.0
+                ) / self._to_float(agg.get("weighted_score_den"), 0.0)
             elif employee_code in pending_input_employee_codes:
                 performance_score = None
                 calculation_status = "pending_personal_input"
@@ -1095,9 +1094,7 @@ class HRIncomeCalculationService:
             .all()
         ):
             details = getattr(score_row, "score_details", None) or {}
-            summary = (
-                details.get("summary", {}) if isinstance(details, dict) else {}
-            )
+            summary = details.get("summary", {}) if isinstance(details, dict) else {}
             profit_detail = (
                 details.get("profit", {}) if isinstance(details, dict) else {}
             )
@@ -1258,9 +1255,7 @@ class HRIncomeCalculationService:
             # 每家店都 round 一次再累加，会和工资单差 1 分钱。
             entry["expected_commission_raw"] = (
                 self._to_float(entry.get("expected_commission_raw"), 0.0)
-                + allocatable_profit_exact
-                * ratio
-                * settlement_coefficient
+                + allocatable_profit_exact * ratio * settlement_coefficient
             )
 
         employees = sorted(by_employee.values(), key=lambda item: item["employee_code"])
@@ -1882,8 +1877,8 @@ class HRIncomeCalculationService:
                     result.get("calculation_status") == "complete"
                     and result.get("performance_score") is not None
                 ):
-                    controlled_settlement_coefficient = employee_settlement_coefficient.get(
-                        employee_code
+                    controlled_settlement_coefficient = (
+                        employee_settlement_coefficient.get(employee_code)
                     )
                     if controlled_settlement_coefficient is None:
                         controlled_settlement_coefficient = (

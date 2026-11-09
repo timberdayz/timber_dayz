@@ -80,19 +80,23 @@ def _load_migration_module():
 def test_warehouse_resolver_is_a_registered_refresh_target() -> None:
     """仓码归一函数必须登记为刷新目标，否则 bootstrap 不会建它。"""
     assert WAREHOUSE_RESOLVER_TARGET in SQL_TARGET_PATHS
-    assert LOGICAL_TARGET_OBJECTS[WAREHOUSE_RESOLVER_TARGET] == WAREHOUSE_RESOLVER_FUNCTION
+    assert (
+        LOGICAL_TARGET_OBJECTS[WAREHOUSE_RESOLVER_TARGET] == WAREHOUSE_RESOLVER_FUNCTION
+    )
     # 函数不是关系（pg_class 里没有）⇒ 必须登记逻辑对象名，否则存在性核对误报 missing
     assert "semantic.resolve_warehouse_code" in LOGICAL_TARGET_OBJECTS.values()
 
 
 def test_inventory_chain_depends_on_warehouse_resolver() -> None:
     """库存原子层的正文调用该函数 ⇒ 它必须排在前面，且是建对象前置。"""
-    assert WAREHOUSE_RESOLVER_TARGET in PIPELINE_DEPENDENCIES[
-        "semantic.fact_inventory_snapshot"
-    ]
-    assert WAREHOUSE_RESOLVER_TARGET in ASSET_PREREQUISITES[
-        "semantic.fact_inventory_snapshot"
-    ]
+    assert (
+        WAREHOUSE_RESOLVER_TARGET
+        in PIPELINE_DEPENDENCIES["semantic.fact_inventory_snapshot"]
+    )
+    assert (
+        WAREHOUSE_RESOLVER_TARGET
+        in ASSET_PREREQUISITES["semantic.fact_inventory_snapshot"]
+    )
 
 
 def test_warehouse_resolver_asset_uses_the_alias_table_as_truth() -> None:
@@ -182,7 +186,9 @@ def test_collection_source_filter_is_defined_inside_candidate_pool_asset() -> No
     assert f"CREATE OR REPLACE FUNCTION {COLLECTION_ID_FILTER_FUNCTION}" in body
     # 函数定义必须在视图定义**之前**
     assert body.index(f"CREATE OR REPLACE FUNCTION {COLLECTION_ID_FILTER_FUNCTION}") < (
-        body.index("CREATE OR REPLACE VIEW semantic.shop_identity_resolution_candidates")
+        body.index(
+            "CREATE OR REPLACE VIEW semantic.shop_identity_resolution_candidates"
+        )
     )
 
 
@@ -210,25 +216,22 @@ def test_candidate_pool_excludes_collection_source_ids() -> None:
     所以这里只断言正本，副本的一致性由迁移 20261105 的**内容指纹**守护。
     """
     body = _read_asset("semantic.shop_identity_resolution_candidates")
-    assert f"{COLLECTION_ID_FILTER_FUNCTION}(" in body, (
-        "候选池正本没有剔除采集方代号"
-    )
+    assert f"{COLLECTION_ID_FILTER_FUNCTION}(" in body, "候选池正本没有剔除采集方代号"
 
 
 def test_orders_chain_no_longer_carries_local_exclusion_literal() -> None:
     """orders 链路的本地字面量排除必须删掉（收敛到候选池）。"""
     body = _read_asset("semantic.fact_orders_atomic")
-    assert "'xihong', 'unknown', 'none'" not in body, (
-        "orders 链路又抄了一份采集方代号黑名单 —— 排除规则应该只有候选池一处"
-    )
+    assert (
+        "'xihong', 'unknown', 'none'" not in body
+    ), "orders 链路又抄了一份采集方代号黑名单 —— 排除规则应该只有候选池一处"
 
 
 def test_inventory_chain_marks_collection_source_as_unresolved() -> None:
     """库存链路的原始店铺键必须把采集方代号如实表达成「未归属」。"""
     body = _read_asset("semantic.fact_inventory_snapshot")
     assert f"{COLLECTION_ID_FILTER_FUNCTION}(" in body, (
-        "库存链路没有用登记载体剔除采集方代号 —— "
-        "4,111 行会继续挂在伪店 'xihong' 上"
+        "库存链路没有用登记载体剔除采集方代号 —— " "4,111 行会继续挂在伪店 'xihong' 上"
     )
 
 

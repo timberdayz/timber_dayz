@@ -158,14 +158,20 @@ async def test_empty_operation_month_uses_the_latest_v3_catalog():
 async def test_apply_rejects_mixed_existing_controlled_catalog_versions_before_write():
     from backend.schemas.target import OperationWorkbenchApplyRequest
 
-    first_target = SimpleNamespace(metric_catalog_version=2, metric_code="customer_satisfaction")
-    second_target = SimpleNamespace(metric_catalog_version=3, metric_code="reply_timeliness")
+    first_target = SimpleNamespace(
+        metric_catalog_version=2, metric_code="customer_satisfaction"
+    )
+    second_target = SimpleNamespace(
+        metric_catalog_version=3, metric_code="reply_timeliness"
+    )
     db = SimpleNamespace(add=Mock(), commit=AsyncMock())
     service = OperationPerformanceWorkbenchService(db=db)
     service._lock_month_mutation = AsyncMock()
     service._targets = AsyncMock(return_value=[first_target, second_target])
     service._catalog = AsyncMock(return_value=[])
-    service._config = AsyncMock(return_value=SimpleNamespace(id=1, operation_max_score=20))
+    service._config = AsyncMock(
+        return_value=SimpleNamespace(id=1, operation_max_score=20)
+    )
     service._scope_rows = AsyncMock(return_value=[])
 
     with pytest.raises(ValueError, match="controlled operation targets"):
@@ -187,7 +193,9 @@ async def test_apply_rejects_mixed_existing_controlled_catalog_versions_before_w
 async def test_apply_rejects_v3_request_for_existing_v2_controlled_rules_before_write():
     from backend.schemas.target import OperationWorkbenchApplyRequest
 
-    target = SimpleNamespace(metric_catalog_version=2, metric_code="customer_satisfaction")
+    target = SimpleNamespace(
+        metric_catalog_version=2, metric_code="customer_satisfaction"
+    )
     db = SimpleNamespace(add=Mock(), commit=AsyncMock())
     service = OperationPerformanceWorkbenchService(db=db)
     service._lock_month_mutation = AsyncMock()

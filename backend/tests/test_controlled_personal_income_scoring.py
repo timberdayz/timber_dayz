@@ -45,8 +45,16 @@ def test_controlled_personal_score_uses_frozen_target_weight_and_twenty_point_pe
         scopes=[{"employee_code": "EMP001", "is_included": True}],
         assignments_by_employee={
             "EMP001": [
-                {"platform_code": "shopee", "shop_id": "A", "sales_target_amount_snapshot": 100},
-                {"platform_code": "shopee", "shop_id": "B", "sales_target_amount_snapshot": 50},
+                {
+                    "platform_code": "shopee",
+                    "shop_id": "A",
+                    "sales_target_amount_snapshot": 100,
+                },
+                {
+                    "platform_code": "shopee",
+                    "shop_id": "B",
+                    "sales_target_amount_snapshot": 50,
+                },
             ]
         },
         metrics=[{"metric_code": "attendance"}, {"metric_code": "training"}],
@@ -67,7 +75,13 @@ def test_controlled_personal_score_marks_missing_entry_partial_and_excluded_not_
             {"employee_code": "OUT", "is_included": False},
         ],
         assignments_by_employee={
-            "PARTIAL": [{"platform_code": "shopee", "shop_id": "A", "sales_target_amount_snapshot": 100}],
+            "PARTIAL": [
+                {
+                    "platform_code": "shopee",
+                    "shop_id": "A",
+                    "sales_target_amount_snapshot": 100,
+                }
+            ],
         },
         metrics=[{"metric_code": "attendance"}, {"metric_code": "training"}],
         entry_scores_by_employee={"PARTIAL": {"attendance": 10}},
@@ -84,7 +98,13 @@ def test_controlled_personal_result_snapshots_auditable_personal_entries():
     results = HRIncomeCalculationService.build_controlled_personal_results(
         scopes=[{"employee_code": "EMP001", "is_included": True}],
         assignments_by_employee={
-            "EMP001": [{"platform_code": "shopee", "shop_id": "A", "sales_target_amount_snapshot": 100}]
+            "EMP001": [
+                {
+                    "platform_code": "shopee",
+                    "shop_id": "A",
+                    "sales_target_amount_snapshot": 100,
+                }
+            ]
         },
         metrics=[
             {
@@ -141,11 +161,21 @@ def test_calculate_month_persists_controlled_final_score_for_confirmed_scope():
         platform_code="shopee",
         shop_id="A",
         total_score=80,
-        score_details={"summary": {"calculation_status": "complete", "formal_ready": True, "ranking_pool": "official"}},
+        score_details={
+            "summary": {
+                "calculation_status": "complete",
+                "formal_ready": True,
+                "ranking_pool": "official",
+            }
+        },
     )
 
     async def execute(statement, _params=None):
-        entity = statement.column_descriptions[0].get("entity") if hasattr(statement, "column_descriptions") else None
+        entity = (
+            statement.column_descriptions[0].get("entity")
+            if hasattr(statement, "column_descriptions")
+            else None
+        )
         rows_by_entity = {
             PersonalPerformancePlan: _Result(scalar=plan),
             PersonalPerformanceEmployeeScope: _Result(rows=[scope]),
@@ -159,10 +189,19 @@ def test_calculate_month_persists_controlled_final_score_for_confirmed_scope():
         }
         return rows_by_entity.get(entity, _Result(rows=[]))
 
-    db = SimpleNamespace(execute=AsyncMock(side_effect=execute), add=lambda row: added.append(row), commit=AsyncMock())
+    db = SimpleNamespace(
+        execute=AsyncMock(side_effect=execute),
+        add=lambda row: added.append(row),
+        commit=AsyncMock(),
+    )
     result = asyncio.run(HRIncomeCalculationService(db).calculate_month("2026-08"))
 
-    controlled = next(row for row in added if isinstance(row, EmployeePerformance) and row.performance_source_type == "controlled_targets_v1")
+    controlled = next(
+        row
+        for row in added
+        if isinstance(row, EmployeePerformance)
+        and row.performance_source_type == "controlled_targets_v1"
+    )
     assert controlled.performance_score == 82.0
     assert controlled.calculation_status == "complete"
     assert result["formal_employee_codes"] == ["EMP001"]
@@ -186,7 +225,11 @@ def test_controlled_plan_without_confirmed_scope_clears_commission_and_stays_pen
     )
 
     async def execute(statement, _params=None):
-        entity = statement.column_descriptions[0].get("entity") if hasattr(statement, "column_descriptions") else None
+        entity = (
+            statement.column_descriptions[0].get("entity")
+            if hasattr(statement, "column_descriptions")
+            else None
+        )
         rows_by_entity = {
             PersonalPerformancePlan: _Result(scalar=plan),
             PersonalPerformanceEmployeeScope: _Result(rows=[]),
@@ -200,10 +243,19 @@ def test_controlled_plan_without_confirmed_scope_clears_commission_and_stays_pen
         }
         return rows_by_entity.get(entity, _Result(rows=[]))
 
-    db = SimpleNamespace(execute=AsyncMock(side_effect=execute), add=lambda row: added.append(row), commit=AsyncMock())
+    db = SimpleNamespace(
+        execute=AsyncMock(side_effect=execute),
+        add=lambda row: added.append(row),
+        commit=AsyncMock(),
+    )
     result = asyncio.run(HRIncomeCalculationService(db).calculate_month("2026-08"))
 
-    pending = next(row for row in added if isinstance(row, EmployeePerformance) and row.performance_source_type == "controlled_targets_v1")
+    pending = next(
+        row
+        for row in added
+        if isinstance(row, EmployeePerformance)
+        and row.performance_source_type == "controlled_targets_v1"
+    )
     assert pending.calculation_status == "pending_scope"
     assert pending.performance_score is None
     assert not any(row.__class__.__name__ == "EmployeeCommission" for row in added)
@@ -230,19 +282,43 @@ def test_controlled_partial_result_clears_draft_payroll_variable_income():
         platform_code="shopee",
         shop_id="A",
         total_score=80,
-        score_details={"summary": {"calculation_status": "complete", "formal_ready": True, "ranking_pool": "official"}},
+        score_details={
+            "summary": {
+                "calculation_status": "complete",
+                "formal_ready": True,
+                "ranking_pool": "official",
+            }
+        },
     )
     payroll = SimpleNamespace(
-        employee_code="EMP001", year_month="2026-08", status="draft",
-        base_salary=1000, position_salary=200, performance_salary=300, commission=400,
-        overtime_pay=0, allowances=0, bonus=0, social_insurance_personal=0,
-        housing_fund_personal=0, income_tax=0, other_deductions=0,
-        social_insurance_company=0, housing_fund_company=0,
-        gross_salary=1900, total_deductions=0, net_salary=1900, total_cost=1900,
+        employee_code="EMP001",
+        year_month="2026-08",
+        status="draft",
+        base_salary=1000,
+        position_salary=200,
+        performance_salary=300,
+        commission=400,
+        overtime_pay=0,
+        allowances=0,
+        bonus=0,
+        social_insurance_personal=0,
+        housing_fund_personal=0,
+        income_tax=0,
+        other_deductions=0,
+        social_insurance_company=0,
+        housing_fund_company=0,
+        gross_salary=1900,
+        total_deductions=0,
+        net_salary=1900,
+        total_cost=1900,
     )
 
     async def execute(statement, _params=None):
-        entity = statement.column_descriptions[0].get("entity") if hasattr(statement, "column_descriptions") else None
+        entity = (
+            statement.column_descriptions[0].get("entity")
+            if hasattr(statement, "column_descriptions")
+            else None
+        )
         rows_by_entity = {
             PersonalPerformancePlan: _Result(scalar=plan),
             PersonalPerformanceEmployeeScope: _Result(rows=[scope]),
@@ -257,7 +333,11 @@ def test_controlled_partial_result_clears_draft_payroll_variable_income():
         }
         return rows_by_entity.get(entity, _Result(rows=[]))
 
-    db = SimpleNamespace(execute=AsyncMock(side_effect=execute), add=lambda row: added.append(row), commit=AsyncMock())
+    db = SimpleNamespace(
+        execute=AsyncMock(side_effect=execute),
+        add=lambda row: added.append(row),
+        commit=AsyncMock(),
+    )
     asyncio.run(HRIncomeCalculationService(db).calculate_month("2026-08"))
 
     assert payroll.base_salary == 1000
@@ -288,15 +368,29 @@ def test_confirmed_controlled_scope_never_falls_back_to_post_confirmation_assign
         platform_code="shopee",
         shop_id="A",
         total_score=80,
-        score_details={"summary": {"calculation_status": "complete", "formal_ready": True, "ranking_pool": "official"}},
+        score_details={
+            "summary": {
+                "calculation_status": "complete",
+                "formal_ready": True,
+                "ranking_pool": "official",
+            }
+        },
     )
     post_confirmation_assignment = SimpleNamespace(
-        employee_code="OUT_SCOPE", platform_code="shopee", shop_id="A",
-        commission_ratio=0, status="active", year_month="2026-08",
+        employee_code="OUT_SCOPE",
+        platform_code="shopee",
+        shop_id="A",
+        commission_ratio=0,
+        status="active",
+        year_month="2026-08",
     )
 
     async def execute(statement, _params=None):
-        entity = statement.column_descriptions[0].get("entity") if hasattr(statement, "column_descriptions") else None
+        entity = (
+            statement.column_descriptions[0].get("entity")
+            if hasattr(statement, "column_descriptions")
+            else None
+        )
         rows_by_entity = {
             PersonalPerformancePlan: _Result(scalar=plan),
             PersonalPerformanceEmployeeScope: _Result(rows=[scope]),
@@ -310,7 +404,11 @@ def test_confirmed_controlled_scope_never_falls_back_to_post_confirmation_assign
         }
         return rows_by_entity.get(entity, _Result(rows=[]))
 
-    db = SimpleNamespace(execute=AsyncMock(side_effect=execute), add=lambda row: added.append(row), commit=AsyncMock())
+    db = SimpleNamespace(
+        execute=AsyncMock(side_effect=execute),
+        add=lambda row: added.append(row),
+        commit=AsyncMock(),
+    )
     result = asyncio.run(HRIncomeCalculationService(db).calculate_month("2026-08"))
 
     scores = [row for row in added if isinstance(row, EmployeePerformance)]
@@ -328,25 +426,55 @@ def test_not_participating_employee_keeps_recalculated_independent_commission_in
     )
     scope = SimpleNamespace(id=2, employee_code="OUT", is_included=False)
     assignment = SimpleNamespace(
-        employee_code="OUT", platform_code="shopee", shop_id="A",
-        commission_ratio=0.5, status="active", year_month="2026-08",
+        employee_code="OUT",
+        platform_code="shopee",
+        shop_id="A",
+        commission_ratio=0.5,
+        status="active",
+        year_month="2026-08",
     )
     score = SimpleNamespace(
-        platform_code="shopee", shop_id="A", total_score=80,
+        platform_code="shopee",
+        shop_id="A",
+        total_score=80,
         performance_coefficient=1,
-        score_details={"summary": {"calculation_status": "complete", "formal_ready": True, "ranking_pool": "official"}},
+        score_details={
+            "summary": {
+                "calculation_status": "complete",
+                "formal_ready": True,
+                "ranking_pool": "official",
+            }
+        },
     )
     payroll = SimpleNamespace(
-        employee_code="OUT", year_month="2026-08", status="draft",
-        base_salary=1000, position_salary=0, performance_salary=300, commission=400,
-        overtime_pay=0, allowances=0, bonus=0, social_insurance_personal=0,
-        housing_fund_personal=0, income_tax=0, other_deductions=0,
-        social_insurance_company=0, housing_fund_company=0,
-        gross_salary=1700, total_deductions=0, net_salary=1700, total_cost=1700,
+        employee_code="OUT",
+        year_month="2026-08",
+        status="draft",
+        base_salary=1000,
+        position_salary=0,
+        performance_salary=300,
+        commission=400,
+        overtime_pay=0,
+        allowances=0,
+        bonus=0,
+        social_insurance_personal=0,
+        housing_fund_personal=0,
+        income_tax=0,
+        other_deductions=0,
+        social_insurance_company=0,
+        housing_fund_company=0,
+        gross_salary=1700,
+        total_deductions=0,
+        net_salary=1700,
+        total_cost=1700,
     )
 
     async def execute(statement, _params=None):
-        entity = statement.column_descriptions[0].get("entity") if hasattr(statement, "column_descriptions") else None
+        entity = (
+            statement.column_descriptions[0].get("entity")
+            if hasattr(statement, "column_descriptions")
+            else None
+        )
         rows_by_entity = {
             PersonalPerformancePlan: _Result(scalar=plan),
             PersonalPerformanceEmployeeScope: _Result(rows=[scope]),
@@ -373,11 +501,27 @@ def test_not_participating_employee_keeps_recalculated_independent_commission_in
         }
         return rows_by_entity.get(entity, _Result(rows=[]))
 
-    db = SimpleNamespace(execute=AsyncMock(side_effect=execute), add=lambda row: added.append(row), commit=AsyncMock())
+    db = SimpleNamespace(
+        execute=AsyncMock(side_effect=execute),
+        add=lambda row: added.append(row),
+        commit=AsyncMock(),
+    )
     service = HRIncomeCalculationService(db)
-    service._load_shop_metrics = AsyncMock(return_value={"shopee|a": {"monthly_sales": 100, "achievement_rate": 1}})
-    service._load_profit_basis_by_shop = AsyncMock(return_value={"shopee|a": {"profit_basis_amount": 100}})
-    service._load_store_performance_by_shop = AsyncMock(return_value={"shopee|a": {"performance_coefficient": 1, "total_score": 80, "sales_target": 100}})
+    service._load_shop_metrics = AsyncMock(
+        return_value={"shopee|a": {"monthly_sales": 100, "achievement_rate": 1}}
+    )
+    service._load_profit_basis_by_shop = AsyncMock(
+        return_value={"shopee|a": {"profit_basis_amount": 100}}
+    )
+    service._load_store_performance_by_shop = AsyncMock(
+        return_value={
+            "shopee|a": {
+                "performance_coefficient": 1,
+                "total_score": 80,
+                "sales_target": 100,
+            }
+        }
+    )
 
     asyncio.run(service.calculate_month("2026-08"))
 
@@ -396,20 +540,49 @@ def test_confirmed_scope_keeps_in_scope_sales_aggregate_without_writing_outside_
     )
     scope = SimpleNamespace(id=2, employee_code="IN_SCOPE", is_included=True)
     snapshot = SimpleNamespace(
-        scope_id=2, platform_code="shopee", shop_id="A", sales_target_amount_snapshot=100
+        scope_id=2,
+        platform_code="shopee",
+        shop_id="A",
+        sales_target_amount_snapshot=100,
     )
     entry = SimpleNamespace(scope_id=2, metric_code="attendance", auto_score=20)
     score = SimpleNamespace(
-        platform_code="shopee", shop_id="A", total_score=80,
-        score_details={"summary": {"calculation_status": "complete", "formal_ready": True, "ranking_pool": "official"}},
+        platform_code="shopee",
+        shop_id="A",
+        total_score=80,
+        score_details={
+            "summary": {
+                "calculation_status": "complete",
+                "formal_ready": True,
+                "ranking_pool": "official",
+            }
+        },
     )
     assignments = [
-        SimpleNamespace(employee_code="IN_SCOPE", platform_code="shopee", shop_id="A", commission_ratio=0, status="active", year_month="2026-08"),
-        SimpleNamespace(employee_code="OUT_SCOPE", platform_code="shopee", shop_id="A", commission_ratio=0, status="active", year_month="2026-08"),
+        SimpleNamespace(
+            employee_code="IN_SCOPE",
+            platform_code="shopee",
+            shop_id="A",
+            commission_ratio=0,
+            status="active",
+            year_month="2026-08",
+        ),
+        SimpleNamespace(
+            employee_code="OUT_SCOPE",
+            platform_code="shopee",
+            shop_id="A",
+            commission_ratio=0,
+            status="active",
+            year_month="2026-08",
+        ),
     ]
 
     async def execute(statement, _params=None):
-        entity = statement.column_descriptions[0].get("entity") if hasattr(statement, "column_descriptions") else None
+        entity = (
+            statement.column_descriptions[0].get("entity")
+            if hasattr(statement, "column_descriptions")
+            else None
+        )
         rows_by_entity = {
             PersonalPerformancePlan: _Result(scalar=plan),
             PersonalPerformanceEmployeeScope: _Result(rows=[scope]),
@@ -423,11 +596,25 @@ def test_confirmed_scope_keeps_in_scope_sales_aggregate_without_writing_outside_
         }
         return rows_by_entity.get(entity, _Result(rows=[]))
 
-    db = SimpleNamespace(execute=AsyncMock(side_effect=execute), add=lambda row: added.append(row), commit=AsyncMock())
+    db = SimpleNamespace(
+        execute=AsyncMock(side_effect=execute),
+        add=lambda row: added.append(row),
+        commit=AsyncMock(),
+    )
     service = HRIncomeCalculationService(db)
-    service._load_shop_metrics = AsyncMock(return_value={"shopee|a": {"monthly_sales": 120, "achievement_rate": 0.75}})
+    service._load_shop_metrics = AsyncMock(
+        return_value={"shopee|a": {"monthly_sales": 120, "achievement_rate": 0.75}}
+    )
     service._load_profit_basis_by_shop = AsyncMock(return_value={})
-    service._load_store_performance_by_shop = AsyncMock(return_value={"shopee|a": {"performance_coefficient": 1, "total_score": 80, "sales_target": 100}})
+    service._load_store_performance_by_shop = AsyncMock(
+        return_value={
+            "shopee|a": {
+                "performance_coefficient": 1,
+                "total_score": 80,
+                "sales_target": 100,
+            }
+        }
+    )
 
     asyncio.run(service.calculate_month("2026-08"))
 

@@ -184,9 +184,7 @@ def test_collect_identity_convergence_counts_resolvable_rows():
         # 没有身份线索(采集方代号)⇒ 不进分母
         ({"shop_id": "xihong"}, "shopee"),
     ]
-    db = _FakeAsyncSession(
-        [("SELECT raw_data, platform_code", rows)]
-    )
+    db = _FakeAsyncSession([("SELECT raw_data, platform_code", rows)])
 
     result = asyncio.run(
         collect_identity_convergence(

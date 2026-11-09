@@ -23,7 +23,10 @@ def test_performance_salary_is_not_part_of_pre_commission_labor_cost():
 
 def test_cost_basis_includes_other_operating_cost_and_pre_commission_labor_cost():
     assert "other_a_class_cost_amount" in LaborCostPolicyService.INCLUDED_COST_FIELDS
-    assert "pre_commission_labor_cost_amount" in LaborCostPolicyService.INCLUDED_COST_FIELDS
+    assert (
+        "pre_commission_labor_cost_amount"
+        in LaborCostPolicyService.INCLUDED_COST_FIELDS
+    )
 
 
 def test_shared_labor_cost_is_allocated_to_shops():

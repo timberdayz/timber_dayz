@@ -76,9 +76,7 @@ class LaborCostProjectionService:
         return values
 
     @classmethod
-    def _split_by_weight(
-        cls, amount: Decimal, weights: list[float]
-    ) -> list[Decimal]:
+    def _split_by_weight(cls, amount: Decimal, weights: list[float]) -> list[Decimal]:
         """按权重把一笔钱拆开，最后一笔吃掉舍入误差。
 
         权重 = 责任比例（``employee_shop_assignments.commission_ratio``）：
@@ -98,9 +96,9 @@ class LaborCostProjectionService:
             if index == len(weights) - 1:
                 values.append(remaining)
                 break
-            share = (
-                amount * Decimal(str(weight)) / Decimal(str(total))
-            ).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+            share = (amount * Decimal(str(weight)) / Decimal(str(total))).quantize(
+                MONEY_QUANT, rounding=ROUND_HALF_UP
+            )
             values.append(share)
             remaining -= share
         return values
@@ -189,8 +187,9 @@ class LaborCostProjectionService:
                     "shop_id": shop_id,
                     "allocation_scope": "shop",
                     "allocation_ratio": (
-                        (Decimal(str(weights[index])) / Decimal(str(weight_total)))
-                        .quantize(RATIO_QUANT, rounding=ROUND_HALF_UP)
+                        (
+                            Decimal(str(weights[index])) / Decimal(str(weight_total))
+                        ).quantize(RATIO_QUANT, rounding=ROUND_HALF_UP)
                         if weight_total > 0
                         else Decimal("0").quantize(RATIO_QUANT)
                     ),

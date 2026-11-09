@@ -2586,7 +2586,10 @@ async def calculate_performance_scores(
                     current_shop_id,
                 )
                 continue
-            if monthly_source_shop_keys is not None and key not in monthly_source_shop_keys:
+            if (
+                monthly_source_shop_keys is not None
+                and key not in monthly_source_shop_keys
+            ):
                 # 该店已建档、当月却没有任何经营数据：明确标记「不参与考核」，
                 # 写入一条 not_applicable 绩效记录，而不是静默跳过。
                 # 这样绩效表就是唯一事实源，结算门禁可以直接读到结论，

@@ -213,21 +213,32 @@ class PerformanceReadinessService:
                 )
             )
         ).scalar_one_or_none()
-        if plan is not None and getattr(plan, "calculation_mode", None) == "controlled_targets_v1":
+        if (
+            plan is not None
+            and getattr(plan, "calculation_mode", None) == "controlled_targets_v1"
+        ):
             scopes = (
-                await self.db.execute(
-                    select(PersonalPerformanceEmployeeScope).where(
-                        PersonalPerformanceEmployeeScope.plan_id == plan.id
+                (
+                    await self.db.execute(
+                        select(PersonalPerformanceEmployeeScope).where(
+                            PersonalPerformanceEmployeeScope.plan_id == plan.id
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if getattr(plan, "scope_confirmed_at", None) is None:
-                raise PerformanceReadinessError("personal performance scope is not confirmed")
+                raise PerformanceReadinessError(
+                    "personal performance scope is not confirmed"
+                )
             if employee_codes is not None:
                 requested_codes = {
                     str(code).strip() for code in employee_codes if str(code).strip()
                 }
-                scopes = [scope for scope in scopes if scope.employee_code in requested_codes]
+                scopes = [
+                    scope for scope in scopes if scope.employee_code in requested_codes
+                ]
             included_codes = {
                 str(scope.employee_code).strip()
                 for scope in scopes
@@ -236,13 +247,17 @@ class PerformanceReadinessService:
             if not included_codes:
                 return
             performance_rows = (
-                await self.db.execute(
-                    select(EmployeePerformance).where(
-                        EmployeePerformance.year_month == year_month,
-                        EmployeePerformance.employee_code.in_(included_codes),
+                (
+                    await self.db.execute(
+                        select(EmployeePerformance).where(
+                            EmployeePerformance.year_month == year_month,
+                            EmployeePerformance.employee_code.in_(included_codes),
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             self.assert_controlled_employee_rows_ready(
                 scopes,
                 {str(row.employee_code).strip(): row for row in performance_rows},
@@ -330,8 +345,7 @@ class PerformanceReadinessService:
                     performance_rows = [legacy_row]
         rows_by_employee = {
             str(
-                getattr(row, "employee_code", None)
-                or next(iter(month_employee_codes))
+                getattr(row, "employee_code", None) or next(iter(month_employee_codes))
             ): row
             for row in performance_rows
         }

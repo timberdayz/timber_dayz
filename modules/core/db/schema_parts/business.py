@@ -1782,7 +1782,9 @@ class EmployeeLaborCostAllocation(Base):
     # 默认值与 backend/services/labor_cost_projection_service.py 的
     # LABOR_COST_CALCULATION_VERSION 保持一致（中性名，取代旧的 LABOR_COST_V2）。
     # 两者一致性由 backend/tests/test_labor_cost_allocation_version.py 守护。
-    calculation_version = Column(String(64), nullable=False, default="LABOR_COST_ALLOC_V1")
+    calculation_version = Column(
+        String(64), nullable=False, default="LABOR_COST_ALLOC_V1"
+    )
     pre_commission_locked_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(
@@ -3769,9 +3771,7 @@ class OperatingCost(Base):
     other_amount = Column(Numeric(15, 2), nullable=False, default=0.0)
     total_amount = Column(Numeric(15, 2), nullable=False, default=0.0)
     remark = Column(Text, nullable=True)
-    attachments = Column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
-    )
+    attachments = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     is_locked = Column(Boolean, nullable=False, server_default=text("false"))
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     deleted_by = Column(BigInteger, nullable=True)

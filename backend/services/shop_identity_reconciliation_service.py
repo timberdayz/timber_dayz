@@ -244,9 +244,7 @@ class IdentityIndex:
         if not platform_code:
             return hits
         platform = _platform_key(platform_code)
-        filtered = tuple(
-            identity for identity in hits if identity.platform == platform
-        )
+        filtered = tuple(identity for identity in hits if identity.platform == platform)
         return filtered or hits
 
 

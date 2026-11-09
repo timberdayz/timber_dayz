@@ -1,7 +1,9 @@
 from pathlib import Path
 
 
-def _assert_sql_asset(path_str: str, expected_prefix: str, required_terms: tuple[str, ...]) -> None:
+def _assert_sql_asset(
+    path_str: str, expected_prefix: str, required_terms: tuple[str, ...]
+) -> None:
     sql_path = Path(path_str)
     assert sql_path.exists()
     sql_text = sql_path.read_text(encoding="utf-8")
@@ -46,8 +48,13 @@ def test_business_overview_shop_racing_monthly_module_sql_asset():
             "ix_business_overview_shop_racing_monthly_period",
         ),
     )
-    sql_text = Path("sql/api_modules/business_overview_shop_racing_monthly_module.sql").read_text(encoding="utf-8")
-    assert "DROP VIEW IF EXISTS api.business_overview_shop_racing_monthly_module" not in sql_text
+    sql_text = Path(
+        "sql/api_modules/business_overview_shop_racing_monthly_module.sql"
+    ).read_text(encoding="utf-8")
+    assert (
+        "DROP VIEW IF EXISTS api.business_overview_shop_racing_monthly_module"
+        not in sql_text
+    )
 
 
 def test_business_overview_traffic_ranking_module_sql_asset():
@@ -66,12 +73,16 @@ def test_business_overview_traffic_ranking_module_sql_asset():
             "pv_conversion_rate",
         ),
     )
-    sql_text = Path("sql/api_modules/business_overview_traffic_ranking_module.sql").read_text(encoding="utf-8")
+    sql_text = Path(
+        "sql/api_modules/business_overview_traffic_ranking_module.sql"
+    ).read_text(encoding="utf-8")
     assert "0::numeric AS page_views" not in sql_text
 
 
 def test_business_overview_frontend_traffic_ranking_uses_date_query_param():
-    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(encoding="utf-8")
+    text = Path("frontend/src/domains/business/views/BusinessOverview.vue").read_text(
+        encoding="utf-8"
+    )
     assert "date_value:" not in text
     assert "date: dateStr" not in text
     assert "period_key: dateStr" in text
@@ -91,7 +102,9 @@ def test_business_overview_operational_metrics_module_sql_asset():
             "estimated_expenses",
         ),
     )
-    sql_text = Path("sql/api_modules/business_overview_operational_metrics_module.sql").read_text(encoding="utf-8")
+    sql_text = Path(
+        "sql/api_modules/business_overview_operational_metrics_module.sql"
+    ).read_text(encoding="utf-8")
     assert "m.gmv AS today_sales" not in sql_text
     assert "m.order_count AS today_order_count" not in sql_text
     assert "0::numeric AS time_gap" not in sql_text
