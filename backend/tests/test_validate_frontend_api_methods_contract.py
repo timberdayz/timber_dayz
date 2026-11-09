@@ -135,3 +135,72 @@ def test_js_keywords_are_not_collected_as_methods(tmp_path, keyword):
     methods = FrontendAPIMethodValidator().extract_api_methods(api_file)
 
     assert keyword not in methods
+
+
+def test_delete_as_object_method_is_collected(tmp_path):
+    """`delete` 作为对象方法名定义时必须被识别为已定义方法。
+
+    `delete` 既是 JS 一元运算符, 也是合法的对象属性名。真实 API 封装层里
+    存在 `async delete(path, config = {}) {}`, 若它被当成关键字跳过, 前端所有
+    `api.delete(...)` 调用都会被误报成"缺失方法调用"。
+    """
+    api_file = _write_api(
+        tmp_path,
+        """
+        export default {
+          async delete(path, config = {}) {
+            return request.delete(path, config)
+          }
+        }
+        """,
+    )
+
+    methods = FrontendAPIMethodValidator().extract_api_methods(api_file)
+
+    assert "delete" in methods
+
+
+def test_delete_operator_usage_is_not_collected_as_method(tmp_path):
+    """`delete` 作一元运算符使用时不得被识别成方法名。"""
+    api_file = _write_api(
+        tmp_path,
+        """
+        export default {
+          async run(obj, cache) {
+            delete obj.prop
+            delete (obj.prop)
+            const gone = delete cache['k']
+            return gone
+          }
+        }
+        """,
+    )
+
+    methods = FrontendAPIMethodValidator().extract_api_methods(api_file)
+
+    assert "delete" not in methods
+    assert "run" in methods
+
+
+def test_real_api_file_defines_delete_method():
+    """真实 API 封装层里 ``delete`` 必须被识别为已定义方法（历史误报点）。"""
+    validator = FrontendAPIMethodValidator()
+    methods = validator.extract_api_methods(
+        Path(__file__).resolve().parents[2] / "frontend" / "src" / "api" / "index.js"
+    )
+
+    assert "delete" in methods
+
+
+def test_real_frontend_delete_call_is_not_reported_as_missing():
+    """前端真实的 `api.delete(...)` 调用不得被报成"缺失方法调用"。
+
+    该误报会让 main 分支全量数据流检查变红, 并在下个发布周期的变更集里
+    触发部署门禁误拦。
+    """
+    validator = FrontendAPIMethodValidator()
+    results = validator.validate_all()
+
+    missing = {item["method"] for item in results.get("missing_methods", [])}
+    assert "delete" not in missing
+    assert results["stats"]["missing_calls"] == 0

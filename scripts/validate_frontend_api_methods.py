@@ -179,7 +179,13 @@ class FrontendAPIMethodValidator:
             for match in re.finditer(r"(?:async\s+)?(\w+)\s*\(", masked):
                 method_name = match.group(1)
                 if method_name in _JS_KEYWORDS:
-                    continue
+                    # [FIX] 'delete' 既是一元运算符, 也是合法的对象方法名(如 api.delete)。
+                    #       仅当它紧跟 'async' 时才按方法定义处理; 其余情形一律按关键字
+                    #       语句跳过, 避免 `delete obj.prop` / `delete (expr)` 被误判成方法。
+                    #       其它关键字保持原样直接跳过。
+                    head = masked[match.start() :]
+                    if method_name != "delete" or not head.startswith("async"):
+                        continue
                 close_idx = self._match_closing_paren(masked, match.end() - 1)
                 if close_idx is None:
                     continue
