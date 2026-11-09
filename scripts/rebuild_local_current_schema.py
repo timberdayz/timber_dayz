@@ -122,7 +122,9 @@ def _assert_local_docker_daemon() -> None:
         raise RebuildSafetyError("local rebuild requires the local Docker daemon")
 
 
-def _local_collection_backend_running(process_iterator: Callable[[], Iterable[Any]]) -> bool:
+def _local_collection_backend_running(
+    process_iterator: Callable[[], Iterable[Any]],
+) -> bool:
     for process in process_iterator():
         try:
             command = " ".join(str(part) for part in process.cmdline()).lower()
@@ -170,9 +172,13 @@ def _assert_no_active_connections(
     try:
         active_connections = int(str(result.stdout).strip() or "0")
     except ValueError as exc:
-        raise RebuildSafetyError("local rebuild connection inspection returned invalid data") from exc
+        raise RebuildSafetyError(
+            "local rebuild connection inspection returned invalid data"
+        ) from exc
     if active_connections:
-        raise RebuildSafetyError("local rebuild refused because the database has active connections")
+        raise RebuildSafetyError(
+            "local rebuild refused because the database has active connections"
+        )
 
 
 def _assert_target_container_port_mapping(docker_runner: Callable[..., Any]) -> None:
@@ -191,10 +197,11 @@ def _assert_target_container_port_mapping(docker_runner: Callable[..., Any]) -> 
         mappings = json.loads(result.stdout)
         postgres_mappings = mappings["5432/tcp"]
     except (TypeError, ValueError, KeyError) as exc:
-        raise RebuildSafetyError("local rebuild target container port mapping is invalid") from exc
+        raise RebuildSafetyError(
+            "local rebuild target container port mapping is invalid"
+        ) from exc
     if not isinstance(postgres_mappings, list) or not any(
-        isinstance(mapping, dict)
-        and mapping.get("HostPort") == str(EXPECTED_PORT)
+        isinstance(mapping, dict) and mapping.get("HostPort") == str(EXPECTED_PORT)
         for mapping in postgres_mappings
     ):
         raise RebuildSafetyError(
@@ -301,7 +308,9 @@ def rebuild_local_current_schema(
     database_url = _normalized_local_database_url(database_url)
     _assert_local_docker_daemon()
     if _local_collection_backend_running(process_iterator):
-        raise RebuildSafetyError("local rebuild refused while the collection backend is running")
+        raise RebuildSafetyError(
+            "local rebuild refused while the collection backend is running"
+        )
     _assert_target_container_port_mapping(docker_runner)
     _assert_no_active_connections(database, username, docker_runner)
 
@@ -386,7 +395,12 @@ def rebuild_local_current_schema(
         message="local rebuild fresh-environment bootstrap failed",
     )
     _run_checked_command(
-        [sys.executable, "scripts/bootstrap_postgresql_dashboard.py", "--module", "business_overview"],
+        [
+            sys.executable,
+            "scripts/bootstrap_postgresql_dashboard.py",
+            "--module",
+            "business_overview",
+        ],
         command_runner,
         environment=environment,
         message="local rebuild dashboard bootstrap failed",
@@ -407,7 +421,9 @@ def rebuild_local_current_schema(
     try:
         dashboard_check = json.loads(dashboard_result.stdout)
     except (TypeError, ValueError) as exc:
-        raise RebuildSafetyError("local rebuild dashboard check returned invalid data") from exc
+        raise RebuildSafetyError(
+            "local rebuild dashboard check returned invalid data"
+        ) from exc
     module_check = dashboard_check.get("modules", {}).get("business_overview")
     if not isinstance(module_check, dict) or not module_check.get("ready"):
         raise RebuildSafetyError("local rebuild dashboard assets are not ready")
@@ -417,7 +433,9 @@ def rebuild_local_current_schema(
         not rebuilt_state.current_revision
         or rebuilt_state.current_revision not in get_supported_current_revisions()
     ):
-        raise RebuildSafetyError("local rebuild did not produce a current-schema revision")
+        raise RebuildSafetyError(
+            "local rebuild did not produce a current-schema revision"
+        )
     receipt_path = _write_receipt(
         receipt_directory,
         database=database,

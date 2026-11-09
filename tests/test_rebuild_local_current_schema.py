@@ -64,7 +64,9 @@ def test_rebuild_cli_shows_read_only_plan_without_confirmation(capsys):
         "postgresql://erp_user:password@127.0.0.1:15432/xihong_erp?host=example.com",
     ],
 )
-def test_rebuild_rejects_non_local_or_unexpected_database_before_backup(database_url: str):
+def test_rebuild_rejects_non_local_or_unexpected_database_before_backup(
+    database_url: str,
+):
     with pytest.raises(rebuild.RebuildSafetyError):
         rebuild.rebuild_local_current_schema(
             database_url,
@@ -83,8 +85,12 @@ def test_rebuild_rejects_unparseable_database_url_before_docker_commands():
 
 
 def test_rebuild_rejects_remote_docker_daemon_before_backup_or_drop(monkeypatch):
-    monkeypatch.setattr(rebuild, "_local_collection_backend_running", lambda _iterator: False)
-    monkeypatch.setattr(rebuild, "_docker_context_endpoint", lambda: "tcp://remote:2376")
+    monkeypatch.setattr(
+        rebuild, "_local_collection_backend_running", lambda _iterator: False
+    )
+    monkeypatch.setattr(
+        rebuild, "_docker_context_endpoint", lambda: "tcp://remote:2376"
+    )
 
     with pytest.raises(rebuild.RebuildSafetyError, match="local Docker daemon"):
         rebuild.rebuild_local_current_schema(
@@ -95,7 +101,9 @@ def test_rebuild_rejects_remote_docker_daemon_before_backup_or_drop(monkeypatch)
 
 
 def test_rebuild_rejects_container_without_expected_database_port_mapping(monkeypatch):
-    monkeypatch.setattr(rebuild, "_local_collection_backend_running", lambda _iterator: False)
+    monkeypatch.setattr(
+        rebuild, "_local_collection_backend_running", lambda _iterator: False
+    )
     calls: list[list[str]] = []
 
     def runner(command, **_kwargs):
@@ -168,8 +176,8 @@ def test_direct_rebuild_script_adds_project_root_before_loading_environment():
         encoding="utf-8"
     )
 
-    assert 'sys.path.insert(0, str(ROOT))' in source
-    assert source.index('sys.path.insert(0, str(ROOT))') < source.index(
+    assert "sys.path.insert(0, str(ROOT))" in source
+    assert source.index("sys.path.insert(0, str(ROOT))") < source.index(
         "from backend.utils.project_env import load_project_env"
     )
 
@@ -189,14 +197,20 @@ def test_rebuild_rejects_an_active_local_collection_backend_before_backup(monkey
         )
 
 
-def test_rebuild_rejects_active_database_connections_before_drop(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(rebuild, "_local_collection_backend_running", lambda _iterator: False)
+def test_rebuild_rejects_active_database_connections_before_drop(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(
+        rebuild, "_local_collection_backend_running", lambda _iterator: False
+    )
     calls: list[list[str]] = []
 
     def runner(command, **_kwargs):
         calls.append(command)
         if command[1:3] == ["inspect", "--format"]:
-            return SimpleNamespace(returncode=0, stdout=_docker_port_mapping(), stderr="")
+            return SimpleNamespace(
+                returncode=0, stdout=_docker_port_mapping(), stderr=""
+            )
         if "pg_stat_activity" in " ".join(command):
             return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -206,7 +220,9 @@ def test_rebuild_rejects_active_database_connections_before_drop(monkeypatch, tm
             DATABASE_URL,
             confirmation=rebuild.CONFIRMATION_PHRASE,
             docker_runner=runner,
-            backup_creator=lambda *_args, **_kwargs: {"metadata_path": str(tmp_path / "backup.json")},
+            backup_creator=lambda *_args, **_kwargs: {
+                "metadata_path": str(tmp_path / "backup.json")
+            },
             backup_verifier=lambda *_args, **_kwargs: {},
         )
 
@@ -214,7 +230,9 @@ def test_rebuild_rejects_active_database_connections_before_drop(monkeypatch, tm
 
 
 def test_rebuild_stops_when_backup_validation_fails_before_drop(monkeypatch):
-    monkeypatch.setattr(rebuild, "_local_collection_backend_running", lambda _iterator: False)
+    monkeypatch.setattr(
+        rebuild, "_local_collection_backend_running", lambda _iterator: False
+    )
     calls: list[list[str]] = []
     state = SimpleNamespace(
         database_empty=False,
@@ -235,8 +253,7 @@ def test_rebuild_stops_when_backup_validation_fails_before_drop(monkeypatch):
             DATABASE_URL,
             confirmation=rebuild.CONFIRMATION_PHRASE,
             docker_runner=lambda command, **_kwargs: (
-                calls.append(command)
-                or _successful_docker_runner(command)
+                calls.append(command) or _successful_docker_runner(command)
             ),
             backup_creator=lambda *_args, **_kwargs: (_ for _ in ()).throw(
                 rebuild.BackupValidationError("backup unreadable")
@@ -247,8 +264,12 @@ def test_rebuild_stops_when_backup_validation_fails_before_drop(monkeypatch):
     assert not any("dropdb" in command for command in calls)
 
 
-def test_rebuild_rejects_backup_from_another_database_before_drop(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(rebuild, "_local_collection_backend_running", lambda _iterator: False)
+def test_rebuild_rejects_backup_from_another_database_before_drop(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(
+        rebuild, "_local_collection_backend_running", lambda _iterator: False
+    )
     calls: list[list[str]] = []
     state = SimpleNamespace(
         database_empty=False,
@@ -262,8 +283,7 @@ def test_rebuild_rejects_backup_from_another_database_before_drop(monkeypatch, t
             DATABASE_URL,
             confirmation=rebuild.CONFIRMATION_PHRASE,
             docker_runner=lambda command, **_kwargs: (
-                calls.append(command)
-                or _successful_docker_runner(command)
+                calls.append(command) or _successful_docker_runner(command)
             ),
             migration_state_probe=lambda _url: state,
             backup_creator=lambda *_args, **_kwargs: {
@@ -277,8 +297,12 @@ def test_rebuild_rejects_backup_from_another_database_before_drop(monkeypatch, t
     assert not any("dropdb" in command for command in calls)
 
 
-def test_rebuild_runs_only_fixed_local_drop_create_then_bootstraps(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(rebuild, "_local_collection_backend_running", lambda _iterator: False)
+def test_rebuild_runs_only_fixed_local_drop_create_then_bootstraps(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(
+        rebuild, "_local_collection_backend_running", lambda _iterator: False
+    )
     calls: list[list[str]] = []
     receipts = tmp_path / "receipts"
     state = SimpleNamespace(
@@ -298,7 +322,9 @@ def test_rebuild_runs_only_fixed_local_drop_create_then_bootstraps(monkeypatch, 
     def runner(command, **_kwargs):
         calls.append(command)
         if command[1:3] == ["inspect", "--format"]:
-            return SimpleNamespace(returncode=0, stdout=_docker_port_mapping(), stderr="")
+            return SimpleNamespace(
+                returncode=0, stdout=_docker_port_mapping(), stderr=""
+            )
         if "pg_stat_activity" in " ".join(command):
             return SimpleNamespace(returncode=0, stdout="0\n", stderr="")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -334,8 +360,12 @@ def test_rebuild_runs_only_fixed_local_drop_create_then_bootstraps(monkeypatch, 
     assert Path(result["receipt_path"]).is_file()
 
 
-def test_rebuild_reenables_connections_when_a_competing_connection_appears(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(rebuild, "_local_collection_backend_running", lambda _iterator: False)
+def test_rebuild_reenables_connections_when_a_competing_connection_appears(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(
+        rebuild, "_local_collection_backend_running", lambda _iterator: False
+    )
     calls: list[list[str]] = []
     state = SimpleNamespace(
         database_empty=False,
@@ -348,9 +378,15 @@ def test_rebuild_reenables_connections_when_a_competing_connection_appears(monke
         calls.append(command)
         command_text = " ".join(command)
         if command[1:3] == ["inspect", "--format"]:
-            return SimpleNamespace(returncode=0, stdout=_docker_port_mapping(), stderr="")
+            return SimpleNamespace(
+                returncode=0, stdout=_docker_port_mapping(), stderr=""
+            )
         if "pg_stat_activity" in command_text:
-            count = "0\n" if sum("pg_stat_activity" in " ".join(item) for item in calls) == 1 else "1\n"
+            count = (
+                "0\n"
+                if sum("pg_stat_activity" in " ".join(item) for item in calls) == 1
+                else "1\n"
+            )
             return SimpleNamespace(returncode=0, stdout=count, stderr="")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 

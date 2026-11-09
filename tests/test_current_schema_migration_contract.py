@@ -218,11 +218,15 @@ def test_schema_drift_has_a_stable_failure_code_and_actionable_diagnosis(monkeyp
     assert diagnosis.recommended_action == "manual_schema_review"
     assert diagnosis.actual_fingerprint == "unexpected-fingerprint"
     assert diagnosis.approved_fingerprint == APPROVED_LEGACY_FINGERPRINT
-    assert diagnosis.object_summary["tables"] == [{"schema": "public", "name": "orders"}]
+    assert diagnosis.object_summary["tables"] == [
+        {"schema": "public", "name": "orders"}
+    ]
     assert "postgresql" not in diagnosis.to_dict().__repr__()
 
 
-def test_schema_object_summary_reports_column_defaults_without_business_rows(monkeypatch):
+def test_schema_object_summary_reports_column_defaults_without_business_rows(
+    monkeypatch,
+):
     class Inspector:
         def get_schema_names(self):
             return ["public"]
@@ -231,7 +235,14 @@ def test_schema_object_summary_reports_column_defaults_without_business_rows(mon
             return ["orders"]
 
         def get_columns(self, table, schema):
-            return [{"name": "id", "type": "integer", "nullable": False, "default": "nextval('orders_id_seq')"}]
+            return [
+                {
+                    "name": "id",
+                    "type": "integer",
+                    "nullable": False,
+                    "default": "nextval('orders_id_seq')",
+                }
+            ]
 
         def get_pk_constraint(self, table, schema):
             return {"constrained_columns": ["id"]}
@@ -279,22 +290,27 @@ def test_schema_object_summary_reports_column_defaults_without_business_rows(mon
             "schema": "public",
             "table": "orders",
             "columns": [
-                {"name": "id", "type": "integer", "nullable": False, "default": "nextval('orders_id_seq')"}
+                {
+                    "name": "id",
+                    "type": "integer",
+                    "nullable": False,
+                    "default": "nextval('orders_id_seq')",
+                }
             ],
         }
     ]
 
 
 def test_migration_failure_code_classifies_unapproved_sources_and_backup_failures():
-    assert failure_code_for(MigrationSafetyError("database revision is not an approved legacy source")) == (
-        "migration_unapproved_source"
-    )
-    assert failure_code_for(MigrationSafetyError("database schema fingerprint is not approved")) == (
-        "migration_schema_drift"
-    )
-    assert failure_code_for(MigrationSafetyError("migration backup validation failed")) == (
-        "migration_backup_failed"
-    )
+    assert failure_code_for(
+        MigrationSafetyError("database revision is not an approved legacy source")
+    ) == ("migration_unapproved_source")
+    assert failure_code_for(
+        MigrationSafetyError("database schema fingerprint is not approved")
+    ) == ("migration_schema_drift")
+    assert failure_code_for(
+        MigrationSafetyError("migration backup validation failed")
+    ) == ("migration_backup_failed")
 
 
 def test_migration_cli_emits_backup_failure_protocol_without_connection_details(
@@ -304,13 +320,19 @@ def test_migration_cli_emits_backup_failure_protocol_without_connection_details(
         migration_runner,
         "run_current_schema_migrations",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            MigrationSafetyError("migration backup validation failed: pg_restore --list failed")
+            MigrationSafetyError(
+                "migration backup validation failed: pg_restore --list failed"
+            )
         ),
     )
     monkeypatch.setattr(
         migration_runner.sys,
         "argv",
-        ["run_current_schema_migrations.py", "--database-url", "postgresql://user:secret@example/db"],
+        [
+            "run_current_schema_migrations.py",
+            "--database-url",
+            "postgresql://user:secret@example/db",
+        ],
     )
 
     assert migration_runner.main() == 2
@@ -322,7 +344,9 @@ def test_migration_cli_emits_backup_failure_protocol_without_connection_details(
 
 def test_support_policy_requires_a_versioned_manifest_with_integrity_metadata():
     policy = json.loads(
-        (ROOT / "current_migrations" / "support_policy.json").read_text(encoding="utf-8")
+        (ROOT / "current_migrations" / "support_policy.json").read_text(
+            encoding="utf-8"
+        )
     )
     source = policy["approved_legacy_sources"][0]
 
@@ -572,7 +596,9 @@ def test_legacy_adoption_stamps_the_baseline_then_runs_current_increments(monkey
     ]
 
 
-def test_nonempty_migration_creates_verified_backup_and_rechecks_under_lock(monkeypatch):
+def test_nonempty_migration_creates_verified_backup_and_rechecks_under_lock(
+    monkeypatch,
+):
     state = MigrationState(
         database_empty=False,
         current_revision=None,
@@ -590,7 +616,8 @@ def test_nonempty_migration_creates_verified_backup_and_rechecks_under_lock(monk
     monkeypatch.setattr(
         migration_runner,
         "create_and_verify_backup",
-        lambda *_args, **_kwargs: events.append("backup") or {"metadata_path": "backup.json"},
+        lambda *_args, **_kwargs: events.append("backup")
+        or {"metadata_path": "backup.json"},
     )
     monkeypatch.setattr(
         migration_runner,
@@ -606,15 +633,33 @@ def test_nonempty_migration_creates_verified_backup_and_rechecks_under_lock(monk
             events.append("unlock")
 
     monkeypatch.setattr(migration_runner, "migration_advisory_lock", lambda _: Lock())
-    monkeypatch.setattr(migration_runner, "get_current_schema_baseline_revision", lambda: "current_schema_20260805")
+    monkeypatch.setattr(
+        migration_runner,
+        "get_current_schema_baseline_revision",
+        lambda: "current_schema_20260805",
+    )
     monkeypatch.setattr(
         migration_runner.subprocess,
         "run",
         lambda *_args, **_kwargs: type("Result", (), {"returncode": 0})(),
     )
 
-    assert run_current_schema_migrations("postgresql://example", expected_source_revision=None, expected_source_fingerprint=None) == "stamp"
-    assert events == ["preflight", "backup", "lock", "preflight", "verify-backup", "unlock"]
+    assert (
+        run_current_schema_migrations(
+            "postgresql://example",
+            expected_source_revision=None,
+            expected_source_fingerprint=None,
+        )
+        == "stamp"
+    )
+    assert events == [
+        "preflight",
+        "backup",
+        "lock",
+        "preflight",
+        "verify-backup",
+        "unlock",
+    ]
 
 
 def test_empty_database_does_not_attempt_backup_before_migration(monkeypatch):
@@ -627,7 +672,11 @@ def test_empty_database_does_not_attempt_backup_before_migration(monkeypatch):
     """
     state = MigrationState(True, None, None, None)
     monkeypatch.setattr(migration_runner, "probe_migration_state", lambda _: state)
-    monkeypatch.setattr(migration_runner, "preflight_current_schema_migrations", lambda *_args, **_kwargs: "upgrade")
+    monkeypatch.setattr(
+        migration_runner,
+        "preflight_current_schema_migrations",
+        lambda *_args, **_kwargs: "upgrade",
+    )
     monkeypatch.setattr(
         migration_runner,
         "create_and_verify_backup",
@@ -699,14 +748,25 @@ def test_schema_fingerprint_ignores_only_exact_current_and_historical_version_ta
             return ["core", "public", "archive"]
 
         def get_table_names(self, schema):
-            return ["alembic_version"] if schema in {"core", "archive"} else [
-                "alembic_version",
-                "alembic_version__archive_retired",
-                "current_schema_alembic_version",
-            ]
+            return (
+                ["alembic_version"]
+                if schema in {"core", "archive"}
+                else [
+                    "alembic_version",
+                    "alembic_version__archive_retired",
+                    "current_schema_alembic_version",
+                ]
+            )
 
         def get_columns(self, table, schema):
-            return [{"name": "version_num", "nullable": False, "type": "varchar", "default": None}]
+            return [
+                {
+                    "name": "version_num",
+                    "nullable": False,
+                    "type": "varchar",
+                    "default": None,
+                }
+            ]
 
         def get_foreign_keys(self, table, schema):
             return []
@@ -725,7 +785,11 @@ def test_schema_fingerprint_ignores_only_exact_current_and_historical_version_ta
     class WithoutArchiveVersionInspector(VersionTableInspector):
         def get_table_names(self, schema):
             tables = super().get_table_names(schema)
-            return [table for table in tables if not (schema == "archive" and table == "alembic_version")]
+            return [
+                table
+                for table in tables
+                if not (schema == "archive" and table == "alembic_version")
+            ]
 
     assert exact != schema_fingerprint(None, WithoutArchiveVersionInspector())
 
