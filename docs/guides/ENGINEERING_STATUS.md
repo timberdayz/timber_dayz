@@ -70,6 +70,39 @@ Key files:
   - 效果: 已定义方法数 274 → 275, 缺失方法调用 2 → 0, 校验器退出码 0。
   - 原触发条件(已消除): 下次发布若变更集里包含 `api.delete(...)` 的调用方,
     部署门禁也会误报 ⇒ 现已修复, 该风险不再存在。
+- **前端测试套件存在一批失败用例 (2026-11-09 实测 11 个)**
+  - 范围: `node --test` 跑 `frontend/scripts/*.test.mjs`(102 个文件 / 331 个用例)
+    ⇒ 320 通过 / 11 失败。
+  - ⚠ 计数是**快照值**, 会随并行开发流变化 —— 记录时工作区正有 HR/结算域的
+    改造在推进, 若干失败属于那些改造的中间态。**性质与修法**才是本条的重点。
+  - 分布: `domainBridgeInventory` / `employeeTargetAllocation` / `bCostAnalysisUi` /
+    `collectionApiContract` / `employeeTaskRoutes` / `collectionEntryPointsContract` /
+    `collectionTaskVerificationRecoveryUi` / `myFollowInvestmentIncomeView` /
+    `shopAssignmentRules`(文件级崩溃)。
+  - 性质: **测试与当前源码不同步**, 不是本轮引入:
+    - `shopAssignmentRules.test.mjs`: `src/domains/business/views/hr/shopAssignmentRules.js`
+      已不再导出 `calculateAllocatableProfit` ⇒ 源码重构后测试没跟上;
+    - `myFollowInvestmentIncomeView.test.mjs`: 断言页面含「店铺ID」, 而页面文案已演进;
+    - 其余为断言值与当前实现不一致。
+  - 为什么**不阻塞发布**: CI 的 `frontend-guard` job 只跑
+    `scripts/ci_frontend_test_silence_gate.py`(只报警"压根没跑起来"的哑测试),
+    **不执行前端测试本身** ⇒ 这 11 个失败不会让流水线变红。
+  - 修法: 逐个核对源码现状后更新断言 —— 必须区分「断言过时」与「真实功能缺失」,
+    改错就会把真 bug 变成绿灯 ⇒ 属宽泛重构, 按 `AGENTS.md` 的
+    「非阻塞技术债记录而不顺手修」留到 V2 重建时处理。
+  - 同批已修: `frontend/scripts/dataSyncSemanticRegistry.test.mjs` 原本也在失败
+    (断言 `domainAliasIndex.orders.买家支付` 与字典口径冲突), 已于 2026-11-09 修复。
+- **`backend/tests/data_pipeline/test_postgresql_dashboard_service.py` 单跑会失败 (2 个用例)**
+  - 现象: 单独跑该文件 ⇒ 2 failed; 放进全量 `backend/tests` 跑 ⇒ 通过
+    (实测 `temp/junit_b10.xml` 里该文件失败数 = 0)。
+  - 根因: 测试隔离库由 `backend/tests/conftest.py` 用 `Base.metadata.create_all` 建出,
+    **不跑 `current_migrations`** ⇒ 迁移产物缺失:
+    `finance.employee_labor_cost_allocations` 表不存在、
+    `a_class.operating_costs.total_amount` 列不存在。
+    全量跑时另一个用例先在同一 session 库执行了迁移, 才把这两处补上。
+  - 影响: 只影响**单独调试**该文件; CI 与本地全量回归都绿。
+  - 修法: 需要让 conftest 的隔离库也跑迁移链 —— 中等侵入, 且可能与
+    `create_all` 冲突 ⇒ 同样留作 V2 处理。
 
 ## Practical Guidance
 

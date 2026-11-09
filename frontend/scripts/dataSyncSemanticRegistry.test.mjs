@@ -122,8 +122,49 @@ for (const [raw, normalized] of SEMANTIC_FIELD_REGISTRY_SNAPSHOT.normalization_s
 }
 
 // [*] 批次 D: 别名索引必须是归一化后的, 且能命中「币种后缀 / 全角 / 星号」等写法。
-// 「买家支付」是 orders 域的域限定别名 ⇒ 落在 domainAliasIndex 而不是全局索引。
-assert.equal(semanticFieldRegistry.domainAliasIndex.orders.买家支付, 'paid_amount')
+//
+// ⚠ 关于「买家支付」—— 它**不在** domainAliasIndex.orders 里, 这是刻意设计, 不是遗漏:
+//   源表金额列成对出现(原币列 + (RMB) 列), 实测两列均非零且相差约 3 倍
+//   ⇒ 是两个不同的业务事实。字典只登记 (RMB) 变体, 裸名列(原币)不接任何标准字段,
+//   否则就是把原币当成人民币(混币种)。
+//   中文「买家支付(RMB)」走 orders 域的**逐字**索引(封闭域), 那份索引不下发快照。
+//   所以「买家支付」一旦出现在归一化桶里, 就说明原币列被认领成了人民币金额 ⇒ 必须红。
+assert.equal('买家支付' in semanticFieldRegistry.domainAliasIndex.orders, false)
+assert.equal('买家支付' in semanticFieldRegistry.aliasIndex, false)
+// 英文别名(两平台列名一致, 不走平台维度)才进 orders 通用别名桶。
+assert.equal(semanticFieldRegistry.domainAliasIndex.orders.paidamount, 'paid_amount')
+assert.equal(semanticFieldRegistry.domainAliasIndex.orders.buyerpaid, 'paid_amount')
+// 归一化会剥掉币种后缀 —— 锁住这一事实(它是上面那条「不能登记原币列」的前提)。
+assert.equal(normalizeSemanticAlias('买家支付(RMB)'), '买家支付')
+assert.equal(normalizeSemanticAlias('买家支付（rmb）'), '买家支付')
+
+// 全量守护: 三个别名索引里的**每一个** key 都必须已经是归一化形式,
+// **每一个** value 都必须解析得到合法标准字段。
+// (原来是 1 条点状断言, 覆盖面只有这一条的零头)
+const collectAliasEntries = (index) => {
+  const entries = []
+  for (const [key, value] of Object.entries(index || {})) {
+    if (typeof value === 'string') {
+      entries.push([key, value])
+    } else {
+      for (const [innerKey, innerValue] of Object.entries(value || {})) {
+        if (typeof innerValue === 'string') entries.push([innerKey, innerValue])
+      }
+    }
+  }
+  return entries
+}
+const allAliasEntries = [
+  ...collectAliasEntries(semanticFieldRegistry.aliasIndex),
+  ...collectAliasEntries(semanticFieldRegistry.domainAliasIndex),
+  ...collectAliasEntries(semanticFieldRegistry.domainColumnIndex),
+]
+assert.ok(allAliasEntries.length >= 400, `别名索引条目数偏少: ${allAliasEntries.length}`)
+for (const [key, field] of allAliasEntries) {
+  assert.equal(normalizeSemanticAlias(key), key, `别名索引的 key 必须已归一化: ${key}`)
+  assert.ok(getSemanticFieldMeta(field), `别名必须指向合法标准字段: ${key} -> ${field}`)
+}
+
 assert.equal(semanticFieldRegistry.domainColumnIndex.products.商品编号, 'product_id')
 assert.equal(semanticFieldRegistry.domainColumnIndex.inventory.商品sku, 'platform_sku')
 
