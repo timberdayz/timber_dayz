@@ -14,10 +14,10 @@ async def test_get_labor_cost_policy_returns_fixed_v2():
 
     payload = response
     assert payload["success"] is True
-    assert payload["data"]["basis_version"] == "A_PRE_COMMISSION_LABOR_V2"
+    assert payload["data"]["basis_version"] == "SETTLEMENT_BASIS_V1"
     assert payload["data"]["policy_mode"] == "single_runtime_basis"
     assert payload["data"]["effective_month"] is None
-    assert payload["data"]["v2_basis_version"] == "A_PRE_COMMISSION_LABOR_V2"
+    assert payload["data"]["v2_basis_version"] == "SETTLEMENT_BASIS_V1"
 
 
 async def test_put_labor_cost_policy_is_compatibility_noop(monkeypatch):
@@ -35,7 +35,7 @@ async def test_put_labor_cost_policy_is_compatibility_noop(monkeypatch):
 
     payload = response
     assert payload["success"] is True
-    assert payload["data"]["basis_version"] == "A_PRE_COMMISSION_LABOR_V2"
+    assert payload["data"]["basis_version"] == "SETTLEMENT_BASIS_V1"
     assert payload["data"]["policy_mode"] == "single_runtime_basis"
     assert payload["data"]["effective_month"] is None
     db.commit.assert_not_awaited()

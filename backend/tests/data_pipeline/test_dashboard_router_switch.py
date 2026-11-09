@@ -6,6 +6,10 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from backend.services.labor_cost_projection_service import (
+    LABOR_COST_CALCULATION_VERSION,
+)
+
 
 def _ready_dashboard_assets_report():
     return {
@@ -398,20 +402,60 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
             await session.execute(
                 text(
                     """
-                    CREATE TABLE IF NOT EXISTS a_class.sales_targets_a (
-                        "年月" varchar(7),
-                        "目标销售额" numeric,
-                        "目标单量" numeric
+                    CREATE TABLE IF NOT EXISTS a_class.sales_targets (
+                        id integer PRIMARY KEY,
+                        target_name varchar(255),
+                        target_type varchar(64),
+                        period_start date,
+                        period_end date,
+                        target_amount numeric,
+                        target_quantity integer,
+                        status varchar(32)
                     )
                     """
                 )
             )
-            await session.execute(text("DELETE FROM a_class.sales_targets_a"))
             await session.execute(
                 text(
                     """
-                    INSERT INTO a_class.sales_targets_a ("年月", "目标销售额", "目标单量")
-                    VALUES ('2026-01', 1000, 80)
+                    CREATE TABLE IF NOT EXISTS a_class.target_breakdown (
+                        id integer PRIMARY KEY,
+                        target_id integer,
+                        breakdown_type varchar(32),
+                        platform_code varchar(32),
+                        shop_id varchar(256),
+                        period_start date,
+                        period_end date,
+                        period_label varchar(64),
+                        target_amount numeric,
+                        target_quantity integer
+                    )
+                    """
+                )
+            )
+            await session.execute(text("DELETE FROM a_class.sales_targets"))
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.sales_targets
+                        (id, target_name, target_type, period_start, period_end,
+                         target_amount, target_quantity, status)
+                    VALUES (1, '2026-01 店铺销售目标', 'shop', DATE '2026-01-01',
+                            DATE '2026-01-31', 1000, 80, 'active')
+                    """
+                )
+            )
+            await session.execute(text("DELETE FROM a_class.target_breakdown"))
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.target_breakdown
+                        (id, target_id, breakdown_type, platform_code, shop_id,
+                         period_start, period_end, period_label,
+                         target_amount, target_quantity)
+                    VALUES (1, 1, 'shop', 'shopee', 'shop-1',
+                            DATE '2026-01-01', DATE '2026-01-31', '2026-01',
+                            1000, 80)
                     """
                 )
             )
@@ -422,18 +466,18 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                 text(
                     """
                     CREATE TABLE IF NOT EXISTS a_class.operating_costs (
-                        "年月" varchar(7),
-                        "店铺ID" varchar(256),
+                        year_month varchar(7),
+                        shop_id varchar(256),
                         platform_code varchar(32),
-                        "成本合计" numeric,
-                        "租金" numeric,
-                        "营销费用" numeric,
-                        "水电费" numeric,
-                        "AI Token费用" numeric,
-                        "人力费用" numeric,
-                        "其他成本" numeric,
-                        "删除时间" timestamptz,
-                        "删除人" bigint
+                        total_amount numeric,
+                        rent_amount numeric,
+                        marketing_amount numeric,
+                        utility_amount numeric,
+                        ai_token_amount numeric,
+                        labor_amount numeric,
+                        other_amount numeric,
+                        deleted_at timestamptz,
+                        deleted_by bigint
                     )
                     """
                 )
@@ -441,7 +485,7 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
             # 人力成本分摊表(当前 schema 里有): 经营指标接口会直接查它
             await session.execute(
                 text(
-                    """
+                    f"""
                     CREATE TABLE IF NOT EXISTS finance.employee_labor_cost_allocations (
                         id bigserial PRIMARY KEY,
                         period_month varchar(16) NOT NULL,
@@ -450,10 +494,10 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                         shop_id varchar(256),
                         allocation_scope varchar(16) NOT NULL,
                         total_amount numeric(15,2) NOT NULL DEFAULT 0,
-                        calculation_version varchar(64) NOT NULL DEFAULT 'LABOR_COST_V2'
+                        calculation_version varchar(64) NOT NULL DEFAULT '{LABOR_COST_CALCULATION_VERSION}'
                     )
                     """
-                )
+                ),
             )
             await session.commit()
 

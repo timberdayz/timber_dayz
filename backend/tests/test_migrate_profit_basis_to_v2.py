@@ -210,4 +210,4 @@ def test_sql_contract_contains_expected_sources_and_v2_marker():
     assert "--allow-protected" in source
     assert "--reopen-protected" in source
     assert "fact_audit_logs" in source
-    assert "'LABOR_COST_V1', 'LABOR_COST_V2'" in source
+    assert "'LABOR_COST_V1', 'LABOR_COST_ALLOC_V1'" in source

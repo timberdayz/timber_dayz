@@ -24,8 +24,8 @@ async def test_profit_basis_version_is_always_v2_regardless_of_configured_month(
     )
     service = LaborCostPolicyService(db)
 
-    assert await service.get_profit_basis_version("2026-07") == "A_PRE_COMMISSION_LABOR_V2"
-    assert await service.get_profit_basis_version("2026-08") == "A_PRE_COMMISSION_LABOR_V2"
+    assert await service.get_profit_basis_version("2026-07") == "SETTLEMENT_BASIS_V1"
+    assert await service.get_profit_basis_version("2026-08") == "SETTLEMENT_BASIS_V1"
     assert await service.is_manual_labor_cost_allowed("2026-07") is False
     assert await service.is_manual_labor_cost_allowed("2026-08") is False
 
@@ -38,7 +38,7 @@ async def test_missing_effective_month_still_uses_v2():
     db.execute = AsyncMock(return_value=_ScalarResult(None))
     service = LaborCostPolicyService(db)
 
-    assert await service.get_profit_basis_version("2026-08") == "A_PRE_COMMISSION_LABOR_V2"
+    assert await service.get_profit_basis_version("2026-08") == "SETTLEMENT_BASIS_V1"
     assert await service.is_manual_labor_cost_allowed("2026-08") is False
 
 

@@ -24,7 +24,10 @@ from sqlalchemy.engine import URL, make_url
 
 
 V2_VERSION = "A_PRE_COMMISSION_LABOR_V2"
-LABOR_V2_CALCULATION_VERSION = "LABOR_COST_V2"
+# 人力成本分摊口径的当前标识（中性名，取代旧的 LABOR_COST_V2）。
+# 必须与 backend/services/labor_cost_projection_service.py 的
+# LABOR_COST_CALCULATION_VERSION 一致。
+LABOR_V2_CALCULATION_VERSION = "LABOR_COST_ALLOC_V1"
 # ⚠️ 这份「受保护工资单状态」必须与
 #    ``backend/services/payroll_period_lock_service.py`` 的
 #    ``PAYROLL_LOCKED_STATUSES`` 保持一致（approved / confirmed / paid）。
@@ -192,7 +195,7 @@ def _query_month_report(connection: Any) -> dict[str, Any]:
                        COALESCE(SUM(pre_commission_amount), 0) AS pre_commission_amount
                 FROM finance.employee_labor_cost_allocations
                 WHERE allocation_scope = 'shop'
-                  AND calculation_version IN ('LABOR_COST_V1', 'LABOR_COST_V2')
+                  AND calculation_version IN ('LABOR_COST_V1', 'LABOR_COST_ALLOC_V1')
                 GROUP BY period_month
             ), missing_labor_shops AS (
                 SELECT basis_shops.period_month,
@@ -205,16 +208,16 @@ def _query_month_report(connection: Any) -> dict[str, Any]:
                  AND LOWER(COALESCE(allocation.platform_code, '')) = basis_shops.platform_code
                  AND allocation.shop_id = basis_shops.shop_id
                  AND allocation.allocation_scope = 'shop'
-                 AND allocation.calculation_version IN ('LABOR_COST_V1', 'LABOR_COST_V2')
+                 AND allocation.calculation_version IN ('LABOR_COST_V1', 'LABOR_COST_ALLOC_V1')
                 WHERE allocation.id IS NULL
                 GROUP BY basis_shops.period_month
             ), costs AS (
-                SELECT "年月" AS period_month,
-                       COALESCE(SUM(COALESCE("成本合计", 0) - COALESCE("人力费用", 0)), 0)
+                SELECT year_month AS period_month,
+                       COALESCE(SUM(COALESCE(total_amount, 0) - COALESCE(labor_amount, 0)), 0)
                            AS other_a_class_cost_amount
                 FROM a_class.operating_costs
-                WHERE "删除时间" IS NULL
-                GROUP BY "年月"
+                WHERE deleted_at IS NULL
+                GROUP BY year_month
             ), settlements AS (
                 SELECT period_month, status AS settlement_status
                 FROM finance.monthly_profit_settlements
@@ -413,12 +416,12 @@ def _apply_sql(connection: Any, report: Mapping[str, Any]) -> int:
                    updated_at = CURRENT_TIMESTAMP
               FROM (
                     SELECT source.id AS basis_id,
-                           COALESCE((SELECT SUM(COALESCE("成本合计", 0) - COALESCE("人力费用", 0))
+                           COALESCE((SELECT SUM(COALESCE(total_amount, 0) - COALESCE(labor_amount, 0))
                                       FROM a_class.operating_costs op
-                                     WHERE op."年月" = source.period_month
-                                       AND op."店铺ID" = source.shop_id
+                                     WHERE op.year_month = source.period_month
+                                       AND op.shop_id = source.shop_id
                                        AND LOWER(COALESCE(op.platform_code, '')) = LOWER(source.platform_code)
-                                       AND op."删除时间" IS NULL), 0) AS other_cost,
+                                       AND op.deleted_at IS NULL), 0) AS other_cost,
                            COALESCE((SELECT SUM(pre_commission_amount)
                                       FROM finance.employee_labor_cost_allocations alloc
                                      WHERE alloc.period_month = source.period_month
