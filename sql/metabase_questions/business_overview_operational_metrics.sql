@@ -4,7 +4,7 @@
 -- =====================================================
 -- 用途：单行汇总的月目标、当月达成、今日销售、达成率、时间GAP、费用、毛利、经营结果
 -- 数据源：
---   - A类：a_class.sales_targets_a（月目标）、a_class.operating_costs（预估费用）
+--   - A类：a_class.target_breakdown（月目标，店铺×月档位）、a_class.operating_costs（预估费用）
 --   - B类：{{MODEL:Orders Model}}（当月总达成、今日销售额、订单数、毛利）
 -- 参数（与核心KPI一致）：
 --   {{month}} - 月份（必填，格式 YYYY-MM-DD 月初）
@@ -52,32 +52,35 @@ b_today AS (
       [[AND o.platform_code = {{platform}}]]
 ),
 
--- A类数据：月目标（使用中文字段名）
--- 注意：目标应该独立于订单数据存在，直接按年月汇总所有目标
--- 如果提供了平台参数，通过 dim_shops 表关联平台筛选
+-- A类数据：月目标
+-- 真 SSOT = a_class.target_breakdown（店铺 × 月档位，breakdown_type='shop'）
+-- 第三批-C 起 a_class.sales_targets_a（派生副本）已下线并 DROP，这里不再引用它。
 a_targets AS (
-    SELECT COALESCE(SUM(t."目标销售额"), 0) AS monthly_target
-    FROM a_class.sales_targets_a t
+    SELECT COALESCE(SUM(t.target_amount), 0) AS monthly_target
+    FROM a_class.target_breakdown t
     CROSS JOIN scope s
-    WHERE t."年月" = to_char(s.month_start, 'YYYY-MM')
+    WHERE t.breakdown_type = 'shop'
+      AND t.period_label = to_char(s.month_start, 'YYYY-MM')
       -- 如果提供了平台参数，通过 dim_shops 关联筛选
       [[AND EXISTS (
           SELECT 1 FROM core.dim_shops ds 
-          WHERE ds.shop_id = t."店铺ID" 
+          WHERE ds.shop_id = t.shop_id 
             AND LOWER(ds.platform_code) = LOWER({{platform}})
       )]]
 ),
 
--- A类数据：预估费用（使用中文字段名）
+-- A类数据：预估费用
+-- 第三批-B 起 a_class.operating_costs 列名统一为英文
 a_costs AS (
-    SELECT COALESCE(SUM(c."租金" + c."营销费用" + c."水电费" + c."其他成本"), 0) AS estimated_expenses
+    SELECT COALESCE(SUM(c.rent_amount + c.marketing_amount + c.utility_amount + c.other_amount), 0) AS estimated_expenses
     FROM a_class.operating_costs c
     CROSS JOIN scope s
-    WHERE c."年月" = to_char(s.month_start, 'YYYY-MM')
+    WHERE c.year_month = to_char(s.month_start, 'YYYY-MM')
+      AND c.deleted_at IS NULL
       -- 如果提供了平台参数，通过 dim_shops 关联筛选
       [[AND EXISTS (
           SELECT 1 FROM core.dim_shops ds 
-          WHERE ds.shop_id = c."店铺ID" 
+          WHERE ds.shop_id = c.shop_id 
             AND LOWER(ds.platform_code) = LOWER({{platform}})
       )]]
 ),

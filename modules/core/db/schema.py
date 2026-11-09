@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """
@@ -204,7 +204,6 @@ from .schema_parts.business import (
     UserSession,
     UserApprovalLog,
     FactAuditLog,
-    SalesTargetA,
     SalesCampaignA,
     OperatingCost,
     Department,
@@ -224,10 +223,8 @@ from .schema_parts.business import (
     PayrollRecord,
     PayrollManualInput,
     SocialInsuranceConfig,
-    PerformanceConfigA,
     EmployeePerformance,
     EmployeeCommission,
-    ShopCommission,
     Notification,
     UserNotificationPreference,
     DimRateLimitConfig,
@@ -412,7 +409,6 @@ _BUSINESS_EXPORTS = (
     "UserSession",
     "UserApprovalLog",
     "FactAuditLog",
-    "SalesTargetA",
     "SalesCampaignA",
     "OperatingCost",
     "Department",
@@ -432,10 +428,8 @@ _BUSINESS_EXPORTS = (
     "PayrollRecord",
     "PayrollManualInput",
     "SocialInsuranceConfig",
-    "PerformanceConfigA",
     "EmployeePerformance",
     "EmployeeCommission",
-    "ShopCommission",
     "Notification",
     "UserNotificationPreference",
     "DimRateLimitConfig",

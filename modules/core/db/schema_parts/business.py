@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Optional
@@ -1726,7 +1726,7 @@ class ShopProfitBasis(Base):
     b_class_cost_amount = Column(Float, default=0.0, nullable=False)
     profit_basis_amount = Column(Float, default=0.0, nullable=False)
 
-    basis_version = Column(String(64), default="A_ONLY_V1", nullable=False)
+    basis_version = Column(String(64), default="SETTLEMENT_BASIS_V1", nullable=False)
     cost_status = Column(String(32), default="projected", nullable=False)
     is_locked = Column(Boolean, default=False, nullable=False)
 
@@ -1746,7 +1746,6 @@ class ShopProfitBasis(Base):
             "period_month",
             "platform_code",
             "shop_id",
-            "basis_version",
             name="uq_shop_profit_basis",
         ),
         Index("ix_shop_profit_basis_period", "period_month"),
@@ -1780,7 +1779,10 @@ class EmployeeLaborCostAllocation(Base):
     source_payroll_record_id = Column(BigInteger, nullable=True)
     source_payroll_status = Column(String(32), nullable=False, default="draft")
     calculation_status = Column(String(32), nullable=False, default="projected")
-    calculation_version = Column(String(64), nullable=False, default="LABOR_COST_V1")
+    # 默认值与 backend/services/labor_cost_projection_service.py 的
+    # LABOR_COST_CALCULATION_VERSION 保持一致（中性名，取代旧的 LABOR_COST_V2）。
+    # 两者一致性由 backend/tests/test_labor_cost_allocation_version.py 守护。
+    calculation_version = Column(String(64), nullable=False, default="LABOR_COST_ALLOC_V1")
     pre_commission_locked_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(
@@ -2489,11 +2491,21 @@ class SalesTarget(Base):
     target_quantity = Column(
         Integer, nullable=False, default=0, comment="目标订单数/销量"
     )
+    # ⚠️ 下面两列「目标利润」业务含义不同，**不可合并**：
+    #   target_profit_amount       —— 目标毛利，管理员直接配置，不扣成本，只作参考
+    #   target_profit_basis_amount —— 目标结算利润基数，与结算口径对齐，
+    #                                 绩效利润维度用它跟实际利润基数比达成率
     target_profit_amount = Column(
-        Float, nullable=False, default=0.0, comment="目标毛利(CNY)"
+        Float,
+        nullable=False,
+        default=0.0,
+        comment="目标毛利(CNY)：管理员直接配置的目标毛利，不扣其他经营成本、不扣提成前人力成本；只作业务参考，不参与绩效利润维度计算",
     )
     target_profit_basis_amount = Column(
-        Float, nullable=False, default=0.0, comment="目标结算利润基数(CNY)"
+        Float,
+        nullable=False,
+        default=0.0,
+        comment="目标结算利润基数(CNY)：与结算口径对齐的目标值（已扣其他经营成本与提成前人力成本），绩效利润维度用它与实际利润基数 finance.shop_profit_basis.profit_basis_amount 对比算达成率；由店铺目标工作台按公司目标按店铺比例与时间权重拆分而来",
     )
     product_id = Column(Integer, nullable=True, comment="产品ID")
     platform_sku = Column(String(128), nullable=True, comment="平台SKU")
@@ -2638,11 +2650,21 @@ class TargetBreakdown(Base):
     target_quantity = Column(
         Integer, nullable=False, default=0, comment="目标订单数/销量"
     )
+    # ⚠️ 下面两列「目标利润」业务含义不同，**不可合并**：
+    #   target_profit_amount       —— 目标毛利，管理员直接配置，不扣成本，只作参考
+    #   target_profit_basis_amount —— 目标结算利润基数，与结算口径对齐，
+    #                                 绩效利润维度用它跟实际利润基数比达成率
     target_profit_amount = Column(
-        Float, nullable=False, default=0.0, comment="目标毛利(CNY)"
+        Float,
+        nullable=False,
+        default=0.0,
+        comment="目标毛利(CNY)：管理员直接配置的目标毛利，不扣其他经营成本、不扣提成前人力成本；只作业务参考，不参与绩效利润维度计算",
     )
     target_profit_basis_amount = Column(
-        Float, nullable=False, default=0.0, comment="目标结算利润基数(CNY)"
+        Float,
+        nullable=False,
+        default=0.0,
+        comment="目标结算利润基数(CNY)：与结算口径对齐的目标值（已扣其他经营成本与提成前人力成本），绩效利润维度用它与实际利润基数 finance.shop_profit_basis.profit_basis_amount 对比算达成率；由店铺目标工作台按公司目标按店铺比例与时间权重拆分而来",
     )
     product_id = Column(Integer, nullable=True, comment="产品ID")
     platform_sku = Column(String(128), nullable=True, comment="平台SKU")
@@ -3665,51 +3687,6 @@ class FactAuditLog(Base):
     user = relationship("DimUser", back_populates="audit_logs")
 
 
-class SalesTargetA(Base):
-    """
-    A类数据表:销售目标(中文字段名)
-
-    注意:字段名在Alembic迁移脚本中将使用中文(如"店铺ID", "年月"等)
-    注意:此表将替代旧的SalesTarget表(v4.11.0),使用中文字段名
-    """
-
-    __tablename__ = "sales_targets_a"
-
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    platform_code = Column(String(32), nullable=False, server_default="unknown")
-    shop_id = Column(String(256), nullable=False)  # 迁移时将重命名为"店铺ID"
-    year_month = Column(
-        String(7), nullable=False
-    )  # 迁移时将重命名为"年月",格式:'2025-01'
-    target_sales_amount = Column(
-        Numeric(15, 2), nullable=False
-    )  # 迁移时将重命名为"目标销售额"
-    target_quantity = Column(Integer, nullable=False)  # 迁移时将重命名为"目标订单数"
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )  # 迁移时将重命名为"创建时间"
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )  # 迁移时将重命名为"更新时间"
-
-    __table_args__ = (
-        UniqueConstraint(
-            "platform_code",
-            "shop_id",
-            "year_month",
-            name="uq_sales_targets_a_platform_shop_month",
-        ),
-        Index("ix_sales_targets_a_platform_shop", "platform_code", "shop_id"),
-        Index("ix_sales_targets_a_platform_month", "platform_code", "year_month"),
-        Index("ix_sales_targets_a_shop", "shop_id"),
-        Index("ix_sales_targets_a_month", "year_month"),
-        {"schema": "a_class"},
-    )
-
-
 class SalesCampaignA(Base):
     """
     A类数据表:销售战役(中文字段名)
@@ -3757,52 +3734,51 @@ class OperatingCost(Base):
     """
     A类数据表:运营成本
 
-    注意:数据库表使用中文字段名,ORM 通过 name 参数映射
-    表结构(a_class.operating_costs):
+    物理列名已统一为英文（第三批-B, 迁移 current_schema_20261214_unify_operating_costs_columns）：
     - id: bigint (PK)
-    - 店铺ID: character varying(256)
+    - shop_id: character varying(256)
     - platform_code: character varying(32)
-    - 年月: character varying(7)
-    - 租金: numeric(15,2)
-    - 营销费用: numeric(15,2)
-    - 水电费: numeric(15,2)
-    - AI Token费用: numeric(15,2)
-    - 人力费用: numeric(15,2)
-    - 其他成本: numeric(15,2)
-    - 成本合计: numeric(15,2)
-    - 备注: text
-    - 附件: jsonb
-    - 是否锁定: boolean
-    - 创建时间: timestamp
-    - 更新时间: timestamp
+    - year_month: character varying(7)
+    - rent_amount: numeric(15,2)
+    - marketing_amount: numeric(15,2)
+    - utility_amount: numeric(15,2)
+    - ai_token_amount: numeric(15,2)
+    - labor_amount: numeric(15,2)
+    - other_amount: numeric(15,2)
+    - total_amount: numeric(15,2)
+    - remark: text
+    - attachments: jsonb
+    - is_locked: boolean
+    - created_at / updated_at / deleted_at / deleted_by
+
+    属性名与物理列名**一一同名**（不再有 ``Column("中文名", ...)`` 的映射层），
+    避免出现"ORM 声明的字段与库里实际列对不上"的历史问题。
     """
 
     __tablename__ = "operating_costs"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    # 使用 name 参数映射到数据库中的中文列名
-    shop_id = Column("店铺ID", String(256), nullable=False)
+    shop_id = Column(String(256), nullable=False)
     platform_code = Column(String(32), nullable=True)
-    year_month = Column("年月", String(7), nullable=False)
-    rent = Column("租金", Numeric(15, 2), nullable=False, default=0.0)
-    marketing_fee = Column("营销费用", Numeric(15, 2), nullable=False, default=0.0)
-    utilities = Column("水电费", Numeric(15, 2), nullable=False, default=0.0)
-    ai_token_cost = Column("AI Token费用", Numeric(15, 2), nullable=False, default=0.0)
-    labor_cost = Column("人力费用", Numeric(15, 2), nullable=False, default=0.0)
-    other_costs = Column("其他成本", Numeric(15, 2), nullable=False, default=0.0)
-    total_cost = Column("成本合计", Numeric(15, 2), nullable=False, default=0.0)
-    note = Column("备注", Text, nullable=True)
+    year_month = Column(String(7), nullable=False)
+    rent_amount = Column(Numeric(15, 2), nullable=False, default=0.0)
+    marketing_amount = Column(Numeric(15, 2), nullable=False, default=0.0)
+    utility_amount = Column(Numeric(15, 2), nullable=False, default=0.0)
+    ai_token_amount = Column(Numeric(15, 2), nullable=False, default=0.0)
+    labor_amount = Column(Numeric(15, 2), nullable=False, default=0.0)
+    other_amount = Column(Numeric(15, 2), nullable=False, default=0.0)
+    total_amount = Column(Numeric(15, 2), nullable=False, default=0.0)
+    remark = Column(Text, nullable=True)
     attachments = Column(
-        "附件", JSONB, nullable=False, server_default=text("'[]'::jsonb")
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
-    locked = Column("是否锁定", Boolean, nullable=False, server_default=text("false"))
-    deleted_at = Column("删除时间", DateTime(timezone=True), nullable=True)
-    deleted_by = Column("删除人", BigInteger, nullable=True)
+    is_locked = Column(Boolean, nullable=False, server_default=text("false"))
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by = Column(BigInteger, nullable=True)
     created_at = Column(
-        "创建时间", DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at = Column(
-        "更新时间",
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
@@ -3812,15 +3788,15 @@ class OperatingCost(Base):
     __table_args__ = (
         UniqueConstraint(
             "platform_code",
-            "店铺ID",
-            "年月",
+            "shop_id",
+            "year_month",
             name="uq_operating_costs_a_platform_shop_month",
         ),
-        Index("ix_operating_costs_a_shop", "店铺ID"),
-        Index("ix_operating_costs_a_platform_shop", "platform_code", "店铺ID"),
-        Index("ix_operating_costs_a_month", "年月"),
-        Index("ix_operating_costs_locked", "是否锁定"),
-        Index("ix_operating_costs_deleted_at", "删除时间"),
+        Index("ix_operating_costs_a_shop", "shop_id"),
+        Index("ix_operating_costs_a_platform_shop", "platform_code", "shop_id"),
+        Index("ix_operating_costs_a_month", "year_month"),
+        Index("ix_operating_costs_locked", "is_locked"),
+        Index("ix_operating_costs_deleted_at", "deleted_at"),
         {"schema": "a_class"},
     )
 
@@ -3997,20 +3973,22 @@ class Employee(Base):
 
 
 class EmployeeTarget(Base):
-    """A类数据表:员工目标(中文字段名)"""
+    """A类数据表:员工目标。
+
+    列名已统一为英文（迁移 20261212 完成重命名），与本仓库其余 a_class 表一致。
+    """
 
     __tablename__ = "employee_targets"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    employee_code = Column("员工编号", String(64), nullable=False)
-    year_month = Column("年月", String(7), nullable=False)
-    target_type = Column("目标类型", String(32), nullable=False)
-    target_value = Column("目标值", Numeric(15, 2), nullable=False)
+    employee_code = Column(String(64), nullable=False)
+    year_month = Column(String(7), nullable=False)
+    target_type = Column(String(32), nullable=False)
+    target_value = Column(Numeric(15, 2), nullable=False)
     created_at = Column(
-        "创建时间", DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at = Column(
-        "更新时间",
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
@@ -4018,9 +3996,11 @@ class EmployeeTarget(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("员工编号", "年月", "目标类型", name="uq_employee_targets_a"),
-        Index("ix_employee_targets_a_employee", "员工编号"),
-        Index("ix_employee_targets_a_month", "年月"),
+        UniqueConstraint(
+            "employee_code", "year_month", "target_type", name="uq_employee_targets_a"
+        ),
+        Index("ix_employee_targets_a_employee", "employee_code"),
+        Index("ix_employee_targets_a_month", "year_month"),
         {"schema": "a_class"},
     )
 
@@ -4710,42 +4690,8 @@ class SocialInsuranceConfig(Base):
     )
 
 
-class PerformanceConfigA(Base):
-    """
-    A类数据表:绩效权重配置(中文字段名)
-
-    注意:此表将替代旧的PerformanceConfig表(v4.11.0),使用中文字段名
-    """
-
-    __tablename__ = "performance_config_a"
-
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    config_name = Column(String(128), nullable=False)  # 迁移时将重命名为"配置名称"
-    sales_weight = Column(
-        Float, nullable=False, default=0.0
-    )  # 迁移时将重命名为"销售额权重"
-    quantity_weight = Column(
-        Float, nullable=False, default=0.0
-    )  # 迁移时将重命名为"订单数权重"
-    quality_weight = Column(
-        Float, nullable=False, default=0.0
-    )  # 迁移时将重命名为"质量权重"
-    active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
-
-    __table_args__ = (
-        UniqueConstraint("config_name", name="uq_performance_config_a_name"),
-        Index("ix_performance_config_a_active", "active"),
-        {"schema": "a_class"},
-    )
+# [REMOVED] PerformanceConfigA: 中文字段的绩效配置影子表，
+# 运行时一律走 a_class.performance_config（英文列），该表已由迁移 20261212 删除。
 
 
 # C类数据表(使用中文字段名,由Metabase定时计算更新)
@@ -4766,6 +4712,11 @@ class EmployeePerformance(Base):
         Float, nullable=False, default=0.0
     )  # 迁移时将重命名为"达成率"
     performance_score = Column(Float, nullable=True)  # 迁移时将重命名为"绩效得分"
+    performance_coefficient = Column(
+        Float,
+        nullable=True,
+        comment="Unified settlement coefficient = min(rank band, score band)",
+    )
     calculation_status = Column(
         String(32), nullable=False, default="historical_unknown"
     )
@@ -4824,33 +4775,11 @@ class EmployeeCommission(Base):
     )
 
 
-class ShopCommission(Base):
-    """C类数据表:店铺提成(中文字段名,Metabase每20分钟更新)"""
-
-    __tablename__ = "shop_commissions"
-
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    shop_id = Column(String(256), nullable=False)  # 迁移时将重命名为"店铺ID"
-    year_month = Column(String(7), nullable=False)  # 迁移时将重命名为"年月"
-    sales_amount = Column(
-        Numeric(15, 2), nullable=False, default=0.0
-    )  # 迁移时将重命名为"销售额"
-    commission_amount = Column(
-        Numeric(15, 2), nullable=False, default=0.0
-    )  # 迁移时将重命名为"提成金额"
-    commission_rate = Column(
-        Float, nullable=False, default=0.0
-    )  # 迁移时将重命名为"提成比例"
-    calculated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )  # 迁移时将重命名为"计算时间"
-
-    __table_args__ = (
-        UniqueConstraint("shop_id", "year_month", name="uq_shop_commissions_c"),
-        Index("ix_shop_commissions_c_shop", "shop_id"),
-        Index("ix_shop_commissions_c_month", "year_month"),
-        {"schema": "c_class"},
-    )
+# [REMOVED] ShopCommission: 中文字段的店铺提成影子表。
+# 它的 ORM 声明与库内实际列名不一致（英文字段 vs 中文字段），唯一读者
+# GET /api/hr/commissions/shop 在当前库上本来就会抛 UndefinedColumn；
+# 真 SSOT 是 c_class.employee_commissions + a_class.employee_shop_assignments。
+# 该表已由迁移 20261212 删除。
 
 
 # [REMOVED] PerformanceScoreC: 表已由迁移 20260131 合并入 c_class.performance_scores 并删除，不再定义 ORM

@@ -142,10 +142,10 @@ def check_critical_tables(conn) -> tuple:
         (
             "operating_costs",
             "a_class",
-            ["id", "店铺ID", "年月", "租金", "营销费用", "水电费", "AI Token费用", "人力费用", "其他成本", "成本合计", "创建时间", "更新时间"],
+            ["id", "shop_id", "year_month", "rent_amount", "marketing_amount", "utility_amount", "ai_token_amount", "labor_amount", "other_amount", "total_amount", "created_at", "updated_at"],
         ),
         ("sales_targets", "a_class", ["id", "target_name", "target_type", "period_start", "period_end"]),
-        ("sales_targets_a", "a_class", []),  # A 类数据表
+        # 第三批-C：a_class.sales_targets_a 已下线（事实已迁进 a_class.target_breakdown）
         ("target_breakdown", "a_class", ["id", "target_id", "breakdown_type"]),
         ("platform_accounts", "core", ["id", "platform", "account_alias"]),
         ("employees", "a_class", ["id", "employee_code", "name"]),

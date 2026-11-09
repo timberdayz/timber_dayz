@@ -84,8 +84,8 @@ def test_business_overview_operational_metrics_module_sql_asset():
         (
             "mart.shop_month_kpi",
             "mart.shop_day_kpi",
-            "a_class.sales_targets_a",
-            "a_class.operating_costs",
+            "a_class.target_breakdown",
+            "semantic.shop_month_other_operating_cost",
             "monthly_target",
             "monthly_total_achieved",
             "estimated_expenses",

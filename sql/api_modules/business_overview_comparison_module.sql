@@ -1,8 +1,10 @@
 CREATE SCHEMA IF NOT EXISTS api;
 
 -- Current launch contract:
--- - a_class.sales_targets_a columns: "年月", "店铺ID", "目标销售额", "目标订单数"
--- Pre-launch: align SQL asset with current production-style table shape directly.
+-- - 店铺月度目标的真 SSOT 是 a_class.target_breakdown（breakdown_type='shop'）
+--   + 其父目标 a_class.sales_targets；
+-- - a_class.sales_targets_a 已于第三批-C 迁移中下线（表已 DROP）。
+-- - 月份键：target_breakdown.period_label（'YYYY-MM'，仓库既有「店铺月度档位」约定）。
 
 CREATE OR REPLACE VIEW api.business_overview_comparison_module AS
 WITH daily AS (
@@ -45,16 +47,21 @@ weekly AS (
 ),
 monthly_target AS (
     SELECT
-        to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
-        LOWER(TRIM(COALESCE(platform_code, ''))) AS platform_code,
-        "店铺ID" AS shop_id,
-        COALESCE(SUM("目标销售额"), 0) AS target_sales_amount,
-        COALESCE(SUM("目标订单数"), 0) AS target_sales_quantity
-    FROM a_class.sales_targets_a
+        to_date(tb.period_label || '-01', 'YYYY-MM-DD') AS period_month,
+        LOWER(TRIM(COALESCE(tb.platform_code, ''))) AS platform_code,
+        tb.shop_id,
+        ROUND(COALESCE(SUM(tb.target_amount), 0)::numeric, 2) AS target_sales_amount,
+        COALESCE(SUM(tb.target_quantity), 0)::bigint AS target_sales_quantity
+    FROM a_class.target_breakdown tb
+    JOIN a_class.sales_targets st ON st.id = tb.target_id
+    WHERE tb.breakdown_type = 'shop'
+      AND st.target_type = 'shop'
+      AND st.status = 'active'
+      AND tb.period_label ~ '^\d{4}-\d{2}$'
     GROUP BY
-        to_date("年月" || '-01', 'YYYY-MM-DD'),
-        LOWER(TRIM(COALESCE(platform_code, ''))),
-        "店铺ID"
+        to_date(tb.period_label || '-01', 'YYYY-MM-DD'),
+        LOWER(TRIM(COALESCE(tb.platform_code, ''))),
+        tb.shop_id
 ),
 monthly AS (
     SELECT

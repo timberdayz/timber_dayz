@@ -61,8 +61,12 @@ def test_list_employee_targets_supports_batch_page_size_used_by_frontend():
     assert page_size_limit == 500
 
 
-def test_employee_target_orm_maps_to_existing_chinese_columns():
+def test_employee_target_orm_maps_to_english_columns():
+    """员工目标表已由中文列统一为英文列（迁移 20261212）。
+
+    运行时、ORM、前端都用英文列名，中文列只在历史库里存在过。
+    """
     compiled = str(select(EmployeeTarget).where(EmployeeTarget.employee_code == "E1"))
 
-    assert "员工编号" in compiled
-    assert "employee_targets.employee_code" not in compiled
+    assert "employee_targets.employee_code" in compiled
+    assert "员工编号" not in compiled
