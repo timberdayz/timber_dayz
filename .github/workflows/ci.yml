@@ -81,6 +81,22 @@ jobs:
         run: |
           python scripts/verify_sql_asset_hygiene.py
 
+      - name: Guard against async/sync session mismatch
+        run: |
+          # async 上下文不得使用同步 ORM Query API(db.query)。
+          # 该错配的典型现场错误是：
+          #   'AsyncSession' object has no attribute 'query'
+          # 历史上它在「字段映射入库」「隔离区摘要」「统一层统计」等链路上
+          # 直接表现为 500，且因为调用方分散、无人排查而长期存在。
+          python scripts/verify_sync_query_usage.py --root . --target backend
+
+      - name: Guard against duplicated access-token extraction
+        run: |
+          # 访问令牌提取必须只有一个真相点(backend/dependencies/auth.py)。
+          # 登录优化后 token 在 httpOnly cookie 里,此前散落的 5 份副本
+          # 各自来源优先级不同,导致采集实时通道必然被拒。
+          python scripts/verify_access_token_extraction.py --root . --target backend
+
       - name: Install Playwright browsers
         run: |
           # [FIX v7.12.9] 钉死版本，与 requirements.lock.txt 保持一致，
