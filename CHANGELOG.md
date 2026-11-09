@@ -1,5 +1,72 @@
 # Changelog - 西虹 ERP 系统
 
+## [v7.19.3] - 2026-11-10 - 仓码与采集方代号各收敛成单一真相点 + 迁移失败可诊断
+
+### 一、用户能感知到的修复
+
+1. **库存语义层不再把「采集方代号」当成店铺身份**（4,111 行）
+   - 现象：`semantic.fact_inventory_snapshot` 的 4,111 行全部挂在伪店 `xihong` 上，
+     `resolved_shop_account_id` 全为 NULL —— 采集机（妙手账号 `miaoshou_real_001`）
+     被当成一家店注册进了 `core.dim_shops`。
+   - 现在：未归属的行如实表达 `shop_id = 'unknown'`（不再冒充一家店），
+     `resolved_shop_account_id` 保持 NULL。**b_class 事实表的 `shop_id` 列保持
+     `xihong` 不动** —— 它是 upsert 冲突键，改值会插重复行。
+2. **同步侧不再把采集方代号混进店铺身份候选集**
+   - 以前这条规则写在 `orders_atomic.sql` 的**字面量**里，漏抄的链路（库存链）
+     就会把代号当成店铺身份。现在规则收敛到候选池正本一处，
+     所有链路（含未来新增的）自动继承。
+3. **仓码归一只有一个实现**
+   - 新建 `semantic.resolve_warehouse_code(仓名)`，建在 `core.dim_warehouse_name_aliases`
+     之上；语义层、状态层、Metabase 模型与 Python 归一器共用同一函数
+     （以前 Python 侧自己维护了一份字典逻辑）。
+   - 实跑口径：语义层 4,111/4,111、`mart.inventory_state` 1,232/1,232、
+     `mart.inventory_backlog_base` 512/512 仓码全部有值。
+   - 顺带修了 bootstrap 漂移：`mart.inventory_state` 补回 `warehouse_code` 列与索引
+     （该列原先只有迁移加过、SQL 资产没同步）。
+
+### 二、机制上的变化
+
+4. **采集方代号有了登记载体**（`core.collection_source_identifiers`）
+   - 唯一执行点 = 候选池正本构建时剔除；判定函数
+     `semantic.is_collection_source_identifier()` 内联在候选池资产开头
+     （迁移 `20261112` 会直接执行该资产，函数必须与它同生共死）。
+   - 登记表不存在时函数返回 FALSE（不剔除任何值）⇒ 老库 / 半迁移库照常建视图。
+5. **仓名别名可以维护了**
+   - 新增 `GET/POST/PUT/DELETE /api/warehouse-name-aliases`（`require_admin`），
+     仓码须存在于 `core.dim_warehouses`，改动后自动重算 `mart.inventory_state.warehouse_code`。
+6. **迁移失败不再是「一句没信息的话」**
+   - `scripts/run_current_schema_migrations.py` 以前不捕获 alembic 子进程输出，
+     失败只报 `upgrade head failed (1)`，真实原因（PG 报错 / 前置检查失败）
+     只留在子进程 stderr 里。现在失败原因会带进异常消息（部署日志不丢）。
+
+### 三、清理
+
+7. 删除 `postgresql_dashboard_service.py` 里两个**全仓零调用**的 join 键函数
+   （顺带确认了「库存↔销售按店 join 不上」的担忧并不成立）。
+
+### 四、验证
+
+- 采集链路指纹对比：orders / analytics / products / services 与候选池正本及副本
+  **完全一致**（口径不回归）；inventory 的变化符合预期（`shop_id` 恒 `unknown`）。
+- 同范围失败集 diff（`tests/` 全目录，两侧同样 634 个用例）：**NEW failures = 0**。
+- 新增守护测试 57 项全绿（仓码 SSOT 18 + 仓名别名 API 8 + 云同步完整性 10 +
+  接收日志诚实化 9 + 枚举归一 9 + 身份索引注入 3）。
+- 迁移契约测试：补上 `20261116` 要求的数据前置后，该文件 4 passed / 6 failed →
+  **9 passed / 1 failed**；同时修掉了「Windows GBK 解码把中文报错吞成
+  `AssertionError: None`」这个让排查无从下手的诊断问题。
+
+### 五、已知剩余（不粉饰）
+
+- **1 个失败保留真红**（不加 xfail 掩盖）：触发器
+  `20260810_operation_contract_isolation.py:188`（父目标 `metric_catalog_version IS NULL`
+  ⇒ `target_breakdown` 只读）与迁移 `20261215_migrate_sales_targets_a.py:365-374`
+  （正要去 UPDATE 这批历史行补 `period_label`）直接冲突，迁移里没有
+  `DISABLE TRIGGER` 处理。**生产影子库演练与本地 dev 库都没有这类行**，
+  风险不落在生产；这是测试故意造了生产没有的脏数据才暴露出来的健壮性缺口，
+  留作发版后的独立立项。
+- 仓库既有 `tests/unit/test_template_hash_hygiene_audit.py` 2 个失败
+  （度量列未从去重字段里剔除）是另一个独立缺口，本批未动。
+
 ## [未发布] - 连接泄漏根治 + 慢查询根治 + 发版链加固
 
 > 本节来自一次**生产只读调查**（2026-11-09）。调查结论是：生产库 80 个连接槽位
