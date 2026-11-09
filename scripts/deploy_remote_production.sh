@@ -854,6 +854,59 @@ if ! "${compose_cmd_base[@]}" config >/dev/null 2>&1; then
 fi
 echo "[OK] docker-compose config validated"
 
+# Phase 0.9: 清理「上一次部署中断」留下的残骸容器
+#
+# 为什么需要这一步
+# ----------------
+# docker compose v2 在 recreate 时会把旧容器改名成 ``<12位哈希>_原名``
+# （保留旧版本以便回滚），然后再创建新容器。如果部署在「改名 → 创建新容器」
+# 这中间断了（例如 Phase 2 失败后没有回滚干净），残骸就留在磁盘上；
+# **下一次部署必然在 Phase 1 撞上**
+# ``Error response from daemon: Conflict. The container name
+# "/c4d00738453d_xihong_erp_postgres" is already in use by container ...``
+# ⇒ 部署 100% 失败，而且会一直失败（v7.19.2 就是这样挂的）。
+#
+# 安全边界（刻意保守）
+# --------------------
+# * 只处理名字形如 ``<12位哈希>_xihong_erp_<本项目服务>`` 的容器 —— 那是
+#   compose 自己留下的残骸，不会误伤别的项目；
+# * **只删已经停止的**（Exited / Created / Dead）。正在运行的容器一律不动
+#   ⇒ 生产数据库不存在被误删的可能；
+# * 无论删不删，都先把现场打印出来，事后可查。
+echo "[INFO] Phase 0.9: checking for leftover containers from an interrupted recreate..."
+leftover_containers="$(
+  docker ps -a --format '{{.ID}}|{{.Names}}|{{.Status}}' 2>/dev/null \
+    | grep -E '\|[0-9a-f]{12}_xihong_erp_(postgres|redis|backend-api|frontend|nginx)\|' \
+    || true
+)"
+
+if [ -n "${leftover_containers}" ]; then
+  echo "[INFO] Leftover containers found (compose v2 interrupted recreate):"
+  echo "${leftover_containers}"
+  stopped_leftovers="$(
+    echo "${leftover_containers}" \
+      | grep -E '\|(Exited|Created|Dead|exited|created|dead)' \
+      | cut -d'|' -f1 \
+      || true
+  )"
+  if [ -n "${stopped_leftovers}" ]; then
+    echo "${stopped_leftovers}" | while read -r leftover_id; do
+      if [ -z "${leftover_id}" ]; then
+        continue
+      fi
+      echo "[INFO] Removing stopped leftover container ${leftover_id} ..."
+      if ! docker rm -f "${leftover_id}" >/dev/null 2>&1; then
+        echo "[WARN] Failed to remove leftover container ${leftover_id}"
+      fi
+    done
+    echo "[OK] Stopped leftover containers removed"
+  else
+    echo "[INFO] Leftovers are still running - left untouched on purpose"
+  fi
+else
+  echo "[OK] No leftover containers from an interrupted recreate"
+fi
+
 echo "[INFO] Phase 1: starting infrastructure (PostgreSQL, Redis)..."
 "${infra_compose_cmd[@]}" up -d --no-build postgres redis
 
