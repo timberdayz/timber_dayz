@@ -17,7 +17,6 @@
 没配这个环境变量时**跳过**(不报错)—— 云端不可达不该把定时任务打挂。
 """
 
-import asyncio
 import logging
 import os
 from typing import Any, Dict
@@ -29,6 +28,7 @@ from backend.models.database import get_async_database_url
 from backend.services.data_pipeline.cloud_sync_integrity_service import (
     run_cloud_sync_integrity_check,
 )
+from backend.utils.async_task_runner import run_async_task
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,10 @@ async def _run_check() -> Dict[str, Any]:
 def check_cloud_sync_integrity() -> Dict[str, Any]:
     """巡检云端同步链路的完整性(陈旧 / 收敛率 / 候选池平台)。"""
     try:
-        summary = asyncio.run(_run_check())
+        # 用全仓唯一的异步出口: 它保证在本事件循环**存活期间**真正关闭连接池。
+        # 直接 asyncio.run(...) 会让 asyncpg 的连接绑定到一个随即死掉的循环上,
+        # 之后连 close 都关不掉 —— 生产实测 80/80 连接槽位就是这样被打满的。
+        summary = run_async_task(_run_check)
     except Exception as exc:  # noqa: BLE001
         logger.error("[CloudSyncIntegrity] 巡检执行失败: %s", exc, exc_info=True)
         raise
