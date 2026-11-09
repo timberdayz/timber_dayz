@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import scripts.run_current_schema_migrations as migration_runner
@@ -74,6 +75,52 @@ def test_backend_image_includes_current_schema_migration_helper_module():
     )
     assert (
         "COPY scripts/local_migration_backup.py /app/scripts/local_migration_backup.py"
+        in dockerfile
+    )
+
+
+def test_backend_image_includes_every_scripts_module_the_migration_runner_imports():
+    """迁移器 import 的每个 ``scripts.*`` 模块都必须在镜像里。
+
+    为什么要有这条
+    --------------
+    后端镜像对 ``scripts/`` 是**逐个 COPY**（避免镜像膨胀），所以「仓库里新增了
+    一个模块」不会自动进镜像。迁移器在**import 时**就要用到这些模块 ——
+    少一个 ⇒ 容器里的迁移器直接 ImportError ⇒ 生产 Phase 2 迁移必挂。
+
+    这条用例把「迁移器的 scripts 依赖」与「镜像内容」绑在一起，
+    以后再加模块忘了 COPY 会**在这里**变红，而不是等下一次发版炸在生产。
+    """
+    dockerfile = BACKEND_DOCKERFILE.read_text(encoding="utf-8")
+    runner_source = (ROOT / "scripts" / "run_current_schema_migrations.py").read_text(
+        encoding="utf-8"
+    )
+
+    imported = set(re.findall(r"from\s+scripts\.([a-z0-9_]+)\s+import", runner_source))
+    assert imported, "迁移器应当有 scripts.* 依赖；若结构变了请同步更新本用例"
+
+    missing = [
+        module
+        for module in sorted(imported)
+        if f"COPY scripts/{module}.py /app/scripts/{module}.py" not in dockerfile
+    ]
+    assert (
+        not missing
+    ), "镜像缺少迁移器依赖的 scripts 模块: {missing} —— " "容器里的迁移器会 ImportError".format(
+        missing=", ".join(missing)
+    )
+
+
+def test_backend_image_includes_the_fresh_environment_bootstrap_entrypoint():
+    """空库引导入口必须进镜像 —— 运维要能在容器里跑它来初始化新环境。"""
+    dockerfile = BACKEND_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert (
+        "COPY scripts/bootstrap_fresh_environment.py /app/scripts/bootstrap_fresh_environment.py"
+        in dockerfile
+    )
+    assert (
+        "COPY scripts/bootstrap_seed_manifest.py /app/scripts/bootstrap_seed_manifest.py"
         in dockerfile
     )
 

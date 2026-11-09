@@ -60,6 +60,10 @@ COPY scripts/verify_schema_consistency.py /app/scripts/verify_schema_consistency
 COPY scripts/sync_schema_columns.py /app/scripts/sync_schema_columns.py
 COPY scripts/run_current_schema_migrations.py /app/scripts/run_current_schema_migrations.py
 COPY scripts/local_migration_backup.py /app/scripts/local_migration_backup.py
+# 空库引导（scripts/bootstrap_fresh_environment.py）依赖的清单模块 ——
+# run_current_schema_migrations.py 在 import 时就要用到它，缺了镜像里的迁移器会直接崩。
+COPY scripts/bootstrap_seed_manifest.py /app/scripts/bootstrap_seed_manifest.py
+COPY scripts/bootstrap_fresh_environment.py /app/scripts/bootstrap_fresh_environment.py
 COPY scripts/migrate_profit_basis_to_v2.py /app/scripts/migrate_profit_basis_to_v2.py
 COPY sql/api_modules /app/sql/api_modules
 COPY sql/mart /app/sql/mart
