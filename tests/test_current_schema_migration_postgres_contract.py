@@ -20,8 +20,44 @@ import scripts.run_current_schema_migrations as migration_runner
 
 ROOT = Path(__file__).resolve().parents[1]
 CURRENT_BASELINE_REVISION = "current_schema_20260805"
-CURRENT_HEAD_REVISION = "current_schema_20260920_sku_direct_volume_and_profit_drafts"
 LEGACY_REVISION = "20260805_payroll_backfill_audit"
+
+#: ``current_schema_20261116_add_tiktok_export_store_name_aliases`` 的前置检查
+#: 要求这 6 个 TikTok 出口账号**已经存在**且是在营经营店，否则迁移拒绝继续。
+#: 生产库之所以能过，是因为这些账号来自真实运营数据。
+#: ⇒ 「从零建库的测试」必须自己补上这份**数据前置**，否则迁移链会在 20261116
+#: 断掉，后面所有 revision（包含新加的 20261222 / 20261223）都跑不到。
+#: 内容必须与迁移里的 ``_TIKTOK_EXPORT_ALIASES`` 逐条一致（账号 ID / 区域）。
+TIKTOK_EXPORT_ACCOUNT_SEED = (
+    ("tiktok_sg_daone_mall_local", "SG", "DAONE Mall"),
+    ("tiktok_my_dawie_mall_local", "MY", "DAWIE Mall"),
+    ("tiktok_ph_explorers_mall_local", "PH", "Explorers Mall"),
+    ("tiktok_my_flora_mall_local", "MY", "Malaysia(Flora Mall)"),
+    ("tiktok_ph_daju_mall_local", "PH", "Philippines(DAJU Mall)"),
+    ("tiktok_sg_hx_home_local", "SG", "Singapore(HX Home)"),
+)
+
+
+def _current_head_revisions() -> set[str]:
+    """当前 schema 迁移链的 head 集合（**动态取**，不写死）。
+
+    为什么不能写死
+    --------------
+    这个文件以前把 head 写死成 ``current_schema_20260920_...``，而链上 head
+    早就前移了 ⇒ 「升级后 version_num == HEAD」这条断言必然失败，且报错
+    （断言不等的两个 revision 名）与真实原因（迁移链在 20261116 中断）完全无关，
+    把排查方向带偏。
+
+    ⇒ head 每加一个迁移就会变，**只有动态取**才不会周期性假红。
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    config = Config(str(ROOT / "alembic-current.ini"))
+    return set(ScriptDirectory.from_config(config).get_heads())
+
+
+CURRENT_HEAD_REVISIONS = _current_head_revisions()
 
 
 def _docker_available() -> bool:
@@ -45,6 +81,8 @@ def _wait_for_postgres(container_id: str) -> None:
             ["docker", "exec", container_id, "pg_isready", "-U", "current_test"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         if result.returncode == 0:
@@ -74,7 +112,9 @@ def _write_approved_policy(tmp_path: Path, fingerprint: str) -> Path:
                         "baseline_revision": CURRENT_BASELINE_REVISION,
                         "manifest_version": 1,
                         "manifest_path": str(manifest_path),
-                        "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+                        "manifest_sha256": hashlib.sha256(
+                            manifest_path.read_bytes()
+                        ).hexdigest(),
                         "approval_note": "temporary PostgreSQL integration fixture",
                     }
                 ]
@@ -83,6 +123,87 @@ def _write_approved_policy(tmp_path: Path, fingerprint: str) -> Path:
         encoding="utf-8",
     )
     return policy_path
+
+
+def _alembic_upgrade(database_url: str, revision: str) -> subprocess.CompletedProcess:
+    """把临时库迁到指定 revision（直接用 alembic，不走 runner 的 fail-closed 入口）。
+
+    迁移链里有若干「数据前置检查」（fail-closed）：目标数据不存在就拒绝升级。
+    要在两个 revision 之间补数据，就必须能停在中间 —— 这就是本 helper 的用途。
+    """
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            "alembic-current.ini",
+            "upgrade",
+            revision,
+        ],
+        cwd=ROOT,
+        env={**os.environ, "DATABASE_URL": database_url},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+
+def _seed_tiktok_export_accounts(engine) -> None:
+    """预置 20261116 迁移要求存在的 6 个 TikTok 出口账号。
+
+    字段取自 ``core.shop_accounts`` 的实际结构：
+    ``platform='tiktok'`` / ``enabled=true`` / ``business_role='operating_store'``
+    / ``shop_region`` 与迁移期望一致。
+
+    ⚠️ ``platform_shop_id`` 刻意留空：迁移的前置检查会拒绝「别名键撞上某个
+    账号的 platform_shop_id」，而我们不希望引入这种歧义。
+
+    ⚠️ ``core.shop_accounts.main_account_id`` 有外键指向 ``core.main_accounts``
+    ⇒ 必须先落主账号行。这 6 个出口账号共用同一个主账号（与生产口径一致：
+    同一批 TikTok 店铺挂在同一个采集主账号下）。
+    """
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO core.main_accounts "
+                "(id, platform, main_account_id, username, password_encrypted, "
+                "enabled, main_account_name) "
+                "VALUES (:id, 'tiktok', :main_account_id, :username, "
+                ":password_encrypted, true, :main_account_name)"
+            ),
+            {
+                "id": 900_001,
+                "main_account_id": "main_tiktok_export_local",
+                "username": "tiktok-export-operator",
+                # 测试夹具占位值，**不是**任何真实凭据。
+                "password_encrypted": "test-fixture-not-a-real-secret",
+                "main_account_name": "TikTok Export Operator",
+            },
+        )
+        for index, (shop_account_id, shop_region, store_name) in enumerate(
+            TIKTOK_EXPORT_ACCOUNT_SEED, start=2
+        ):
+            connection.execute(
+                text(
+                    "INSERT INTO core.shop_accounts "
+                    "(id, platform, shop_account_id, main_account_id, store_name, "
+                    "shop_region, shop_type, enabled, business_role, "
+                    "platform_shop_id_status) "
+                    "VALUES (:id, 'tiktok', :shop_account_id, :main_account_id, "
+                    ":store_name, :shop_region, 'online_shop', true, 'operating_store', "
+                    "'missing')"
+                ),
+                {
+                    "id": 900_001 + index,
+                    "shop_account_id": shop_account_id,
+                    "main_account_id": "main_tiktok_export_local",
+                    "store_name": store_name,
+                    "shop_region": shop_region,
+                },
+            )
 
 
 def test_migration_advisory_lock_rejects_a_second_writer_without_ddl():
@@ -108,14 +229,20 @@ def test_migration_advisory_lock_rejects_a_second_writer_without_ddl():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     container_id = started.stdout.strip()
-    database_url = f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    database_url = (
+        f"postgresql://current_test:current_test@127.0.0.1:{port}/current_test"
+    )
     try:
         _wait_for_postgres(container_id)
         with migration_runner.migration_advisory_lock(database_url):
-            with pytest.raises(migration_runner.MigrationSafetyError, match="lock is already held"):
+            with pytest.raises(
+                migration_runner.MigrationSafetyError, match="lock is already held"
+            ):
                 with migration_runner.migration_advisory_lock(database_url):
                     pass
         engine = create_engine(database_url)
@@ -147,6 +274,8 @@ def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstr
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     container_id = started.stdout.strip()
@@ -167,6 +296,8 @@ def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstr
             env={**os.environ, "DATABASE_URL": database_url},
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         assert rejected.returncode == 2
@@ -196,6 +327,8 @@ def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstr
             env={**os.environ, "DATABASE_URL": database_url},
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         assert unknown_revision.returncode == 2
@@ -220,6 +353,8 @@ def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstr
             env={**os.environ, "DATABASE_URL": database_url},
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         assert mismatched_fingerprint.returncode == 2
@@ -234,12 +369,22 @@ def test_current_wrapper_rejects_nonempty_database_without_mutation_then_bootstr
             connection.execute(text("DROP SCHEMA core"))
             connection.execute(text("DROP TABLE public.legacy_probe"))
 
+        # 空库 → 先把 schema **真正建到基线**（不是 stamp），再补上 20261116
+        # 要求的数据前置，最后由 runner 续跑到 head。
+        # 为什么不能一口气 upgrade head：迁移链里有 fail-closed 的数据前置检查
+        # （见 _seed_tiktok_export_accounts），缺数据就会在半路拒绝升级。
+        baseline = _alembic_upgrade(database_url, CURRENT_BASELINE_REVISION)
+        assert baseline.returncode == 0, baseline.stderr
+        _seed_tiktok_export_accounts(engine)
+
         bootstrapped = subprocess.run(
             [sys.executable, "scripts/run_current_schema_migrations.py"],
             cwd=ROOT,
             env={**os.environ, "DATABASE_URL": database_url},
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         assert bootstrapped.returncode == 0, bootstrapped.stderr
@@ -280,6 +425,8 @@ def test_approved_legacy_adoption_preserves_business_data_and_runs_current_incre
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     container_id = started.stdout.strip()
@@ -302,11 +449,14 @@ def test_approved_legacy_adoption_preserves_business_data_and_runs_current_incre
             env={**os.environ, "DATABASE_URL": database_url},
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         assert baseline.returncode == 0, baseline.stderr
 
         engine = create_engine(database_url)
+        _seed_tiktok_export_accounts(engine)
         with engine.begin() as connection:
             connection.execute(
                 text(
@@ -363,7 +513,7 @@ def test_approved_legacy_adoption_preserves_business_data_and_runs_current_incre
                         "SELECT version_num FROM public.current_schema_alembic_version"
                     )
                 ).scalar_one()
-                == CURRENT_HEAD_REVISION
+                in CURRENT_HEAD_REVISIONS
             )
             assert (
                 connection.execute(
@@ -371,7 +521,6 @@ def test_approved_legacy_adoption_preserves_business_data_and_runs_current_incre
                 ).scalar_one()
                 == LEGACY_REVISION
             )
-
         assert (
             migration_runner.run_current_schema_migrations(
                 database_url,
@@ -419,6 +568,8 @@ def test_legacy_adoption_preserves_duplicate_operation_shop_overrides_and_audits
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     container_id = started.stdout.strip()
@@ -441,11 +592,14 @@ def test_legacy_adoption_preserves_duplicate_operation_shop_overrides_and_audits
             env={**os.environ, "DATABASE_URL": database_url},
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         assert baseline.returncode == 0, baseline.stderr
 
         engine = create_engine(database_url)
+        _seed_tiktok_export_accounts(engine)
         with engine.begin() as connection:
             connection.execute(
                 text(
@@ -573,6 +727,8 @@ def test_legacy_adoption_preserves_duplicate_operation_shop_overrides_and_audits
             cwd=ROOT,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         assert cli_audit.returncode == 0, cli_audit.stderr
@@ -604,6 +760,8 @@ def test_current_operation_contract_rejects_invalid_targets_and_matching_duplica
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     container_id = started.stdout.strip()
@@ -612,25 +770,17 @@ def test_current_operation_contract_rejects_invalid_targets_and_matching_duplica
     )
     try:
         _wait_for_postgres(container_id)
-        migrated = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "alembic",
-                "-c",
-                "alembic-current.ini",
-                "upgrade",
-                "head",
-            ],
-            cwd=ROOT,
-            env={**os.environ, "DATABASE_URL": database_url},
-            capture_output=True,
-            text=True,
-            check=False,
+        # 先迁到 20261116 的**前一个** revision：迁移链里有 fail-closed 的数据
+        # 前置检查（TikTok 出口账号必须存在），必须停下来补数据才能继续往 head 走。
+        staged = _alembic_upgrade(
+            database_url, "current_schema_20261115_add_sku_platform_pricing"
         )
+        assert staged.returncode == 0, staged.stderr
+        engine = create_engine(database_url)
+        _seed_tiktok_export_accounts(engine)
+        migrated = _alembic_upgrade(database_url, "head")
         assert migrated.returncode == 0, migrated.stderr
 
-        engine = create_engine(database_url)
         with engine.begin() as connection:
             invalid_target_savepoint = connection.begin_nested()
             with pytest.raises(Exception, match="scope_type=shop"):
@@ -774,6 +924,8 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     container_id = started.stdout.strip()
@@ -796,11 +948,16 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
             env={**os.environ, "DATABASE_URL": database_url},
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         assert old_upgrade.returncode == 0, old_upgrade.stderr
 
         engine = create_engine(database_url)
+        # 20261116 的前置检查要求这 6 个 TikTok 出口账号存在
+        # （详见 _seed_tiktok_export_accounts 的说明）。
+        _seed_tiktok_export_accounts(engine)
         with engine.connect() as connection:
             assert (
                 connection.execute(
@@ -846,7 +1003,7 @@ def test_old_20260808_database_upgrades_to_enforce_operation_breakdown_versions(
                         "SELECT version_num FROM public.current_schema_alembic_version"
                     )
                 ).scalar_one()
-                == CURRENT_HEAD_REVISION
+                in CURRENT_HEAD_REVISIONS
             )
             connection.execute(
                 text(
@@ -1024,6 +1181,8 @@ def test_old_20260808_current_operation_overrides_are_backfilled_without_touchin
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     container_id = started.stdout.strip()
@@ -1046,11 +1205,16 @@ def test_old_20260808_current_operation_overrides_are_backfilled_without_touchin
             env={**os.environ, "DATABASE_URL": database_url},
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         assert old_upgrade.returncode == 0, old_upgrade.stderr
 
         engine = create_engine(database_url)
+        # 20261116 的前置检查要求这 6 个 TikTok 出口账号存在
+        # （详见 _seed_tiktok_export_accounts 的说明）。
+        _seed_tiktok_export_accounts(engine)
         with engine.begin() as connection:
             connection.execute(
                 text(
@@ -1184,6 +1348,8 @@ def test_20260808_preflight_rejects_invalid_current_override_when_contract_colum
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     container_id = started.stdout.strip()
@@ -1206,6 +1372,8 @@ def test_20260808_preflight_rejects_invalid_current_override_when_contract_colum
             env={**os.environ, "DATABASE_URL": database_url},
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         assert old_upgrade.returncode == 0, old_upgrade.stderr
@@ -1251,6 +1419,8 @@ def test_20260808_preflight_rejects_invalid_current_override_when_contract_colum
             cwd=ROOT,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         assert preflight.returncode == 2
@@ -1310,6 +1480,8 @@ def test_personal_performance_target_migration_round_trips_from_the_previous_hea
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     container_id = started.stdout.strip()
@@ -1325,6 +1497,8 @@ def test_personal_performance_target_migration_round_trips_from_the_previous_hea
             env=alembic_env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
 
@@ -1337,7 +1511,9 @@ def test_personal_performance_target_migration_round_trips_from_the_previous_hea
         with engine.connect() as connection:
             assert (
                 connection.execute(
-                    text("SELECT version_num FROM public.current_schema_alembic_version")
+                    text(
+                        "SELECT version_num FROM public.current_schema_alembic_version"
+                    )
                 ).scalar_one()
                 == previous_revision
             )
@@ -1402,12 +1578,17 @@ def test_personal_performance_target_migration_round_trips_from_the_previous_hea
 
         blocked_personal_downgrade = run_alembic("downgrade", previous_revision)
         assert blocked_personal_downgrade.returncode != 0
-        assert "cannot downgrade personal performance target workbench" in blocked_personal_downgrade.stderr
+        assert (
+            "cannot downgrade personal performance target workbench"
+            in blocked_personal_downgrade.stderr
+        )
 
         with engine.connect() as connection:
             assert (
                 connection.execute(
-                    text("SELECT version_num FROM public.current_schema_alembic_version")
+                    text(
+                        "SELECT version_num FROM public.current_schema_alembic_version"
+                    )
                 ).scalar_one()
                 == personal_revision
             )
@@ -1438,7 +1619,9 @@ def test_personal_performance_target_migration_round_trips_from_the_previous_hea
         with engine.connect() as connection:
             assert (
                 connection.execute(
-                    text("SELECT version_num FROM public.current_schema_alembic_version")
+                    text(
+                        "SELECT version_num FROM public.current_schema_alembic_version"
+                    )
                 ).scalar_one()
                 == personal_revision
             )
@@ -1473,7 +1656,9 @@ def test_personal_performance_target_migration_round_trips_from_the_previous_hea
         with engine.connect() as connection:
             assert (
                 connection.execute(
-                    text("SELECT version_num FROM public.current_schema_alembic_version")
+                    text(
+                        "SELECT version_num FROM public.current_schema_alembic_version"
+                    )
                 ).scalar_one()
                 == personal_revision
             )
@@ -1541,6 +1726,8 @@ def test_operation_metric_catalog_v3_round_trips_without_changing_v2_catalog():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     container_id = started.stdout.strip()
@@ -1556,6 +1743,8 @@ def test_operation_metric_catalog_v3_round_trips_without_changing_v2_catalog():
             env=alembic_env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
 
@@ -1569,43 +1758,56 @@ def test_operation_metric_catalog_v3_round_trips_without_changing_v2_catalog():
         assert v3_upgrade.returncode == 0, v3_upgrade.stderr
 
         with engine.connect() as connection:
-            v3_codes = connection.execute(
-                text(
-                    "SELECT metric_code FROM a_class.operation_metric_catalog "
-                    "WHERE catalog_version = 3 ORDER BY sort_key"
+            v3_codes = (
+                connection.execute(
+                    text(
+                        "SELECT metric_code FROM a_class.operation_metric_catalog "
+                        "WHERE catalog_version = 3 ORDER BY sort_key"
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             assert v3_codes == [
                 "customer_satisfaction",
                 "complaint_count",
                 "reply_timeliness",
                 "operation_special_check",
             ]
-            assert connection.execute(
-                text(
-                    "SELECT count(*) FROM a_class.operation_metric_catalog "
-                    "WHERE catalog_version = 2 "
-                    "AND metric_code = 'training_completion_rate'"
-                )
-            ).scalar_one() == 1
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM a_class.operation_metric_catalog "
+                        "WHERE catalog_version = 2 "
+                        "AND metric_code = 'training_completion_rate'"
+                    )
+                ).scalar_one()
+                == 1
+            )
 
         v3_downgrade = run_alembic("downgrade", personal_revision)
         assert v3_downgrade.returncode == 0, v3_downgrade.stderr
 
         with engine.connect() as connection:
-            assert connection.execute(
-                text(
-                    "SELECT count(*) FROM a_class.operation_metric_catalog "
-                    "WHERE catalog_version = 3"
-                )
-            ).scalar_one() == 0
-            assert connection.execute(
-                text(
-                    "SELECT count(*) FROM a_class.operation_metric_catalog "
-                    "WHERE catalog_version = 2 "
-                    "AND metric_code = 'training_completion_rate'"
-                )
-            ).scalar_one() == 1
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM a_class.operation_metric_catalog "
+                        "WHERE catalog_version = 3"
+                    )
+                ).scalar_one()
+                == 0
+            )
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM a_class.operation_metric_catalog "
+                        "WHERE catalog_version = 2 "
+                        "AND metric_code = 'training_completion_rate'"
+                    )
+                ).scalar_one()
+                == 1
+            )
 
         v3_reupgrade = run_alembic("upgrade", v3_revision)
         assert v3_reupgrade.returncode == 0, v3_reupgrade.stderr
@@ -1667,11 +1869,15 @@ def test_operation_metric_catalog_v3_round_trips_without_changing_v2_catalog():
 
         blocked_downgrade = run_alembic("downgrade", personal_revision)
         assert blocked_downgrade.returncode != 0
-        assert "cannot downgrade operation metric catalog V3" in blocked_downgrade.stderr
+        assert (
+            "cannot downgrade operation metric catalog V3" in blocked_downgrade.stderr
+        )
         with engine.connect() as connection:
             assert (
                 connection.execute(
-                    text("SELECT version_num FROM public.current_schema_alembic_version")
+                    text(
+                        "SELECT version_num FROM public.current_schema_alembic_version"
+                    )
                 ).scalar_one()
                 == v3_revision
             )
