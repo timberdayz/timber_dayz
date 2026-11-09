@@ -82,7 +82,11 @@ WITH raw_candidates AS (
             0
         ) AS paid_amount
     FROM semantic.fact_orders_atomic
-    WHERE COALESCE(shop_id, '') IN ('', 'none', 'unknown')
+    -- [*] 2026-12 性能修正：语义与 COALESCE(shop_id,'') IN ('', 'none', 'unknown') 等价，
+    -- 但写成 COALESCE(...) 会让底层事实表已有的 shop_id 索引（ix_fact_*_shop）失效，
+    -- 视图 UNION ALL 多张事实表后全表扫描 + JSONB 提取，接口直接被 statement_timeout 打断。
+    -- 改成 IS NULL OR IN (...) 后可走索引，扫描量从全量降到「缺店铺的少量行」。
+    WHERE shop_id IS NULL OR shop_id IN ('', 'none', 'unknown')
 ),
 grouped AS (
     SELECT

@@ -91,7 +91,10 @@ async def get_data_records(db: AsyncSession = Depends(get_async_db)):
             "data_type": record.data_type,
             "record_count": record.record_count,
             "quality": record.quality_score,
-            "last_updated": record.last_updated.isoformat() if record.last_updated else None,
+            # [*] 2026-12 结构对齐：core.data_records 没有 last_updated 列，
+        # 库里对应的是 created_at（记录写入时间）。此前这里访问了一个
+        # ORM 里根本不存在的属性，接口直接 500。
+        "last_updated": record.created_at.isoformat() if record.created_at else None,
             "status": record.status
         } for record in records]
     except Exception as e:

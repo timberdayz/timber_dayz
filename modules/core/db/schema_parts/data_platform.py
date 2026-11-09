@@ -86,7 +86,16 @@ class DataQuarantine(Base):
 
 
 class DataFile(Base):
-    """数据文件表(旧版API兼容)"""
+    """数据文件表(旧版API兼容)
+
+    [*] 2026-12 结构对齐：本表以**数据库实际结构**为准 ——
+    库里是 ``file_type``/``file_size``/``processed``/``created_at``，
+    而原 ORM 声明 ``data_type``/``status``/``discovery_time``，
+    两套字段表达的是同一件事（文件类型 / 处理状态 / 发现时间），
+    属于「同一事实两份副本」。
+    代码只用到 ``DataFile.id``（core.field_mappings 的外键目标），
+    因此这里直接对齐到库的结构，冗余列由迁移回填后删除。
+    """
 
     __tablename__ = "data_files"
 
@@ -94,35 +103,45 @@ class DataFile(Base):
     file_name = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
     platform = Column(String(50), nullable=False)
-    data_type = Column(String(50), nullable=False)
-    status = Column(String(50), default="pending", nullable=False)
-    discovery_time = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+    file_type = Column(String(50), nullable=True)
+    file_size = Column(BigInteger, nullable=True)
+    processed = Column(Boolean, default=False, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
     )
 
     __table_args__ = (
         Index("ix_data_files_platform", "platform"),
-        Index("ix_data_files_status", "status"),
         {"schema": "core"},
     )
 
 
 class DataRecord(Base):
-    """通用数据记录表"""
+    """通用数据记录表
+
+    [*] 2026-12 结构对齐：本表以**数据库实际结构**为准。
+    代码（backend/domains/data_platform/routers/management.py）正在使用
+    ``quality_score``，而原 ORM 声明的是 ``record_type``/``data``——
+    两者在库里都不存在，接口直接 500。
+    库里的结构是完整的（docker/postgres/init-tables.py 也按它写的），
+    因此这里把 ORM 补齐到与库一致，而不是往库里加两套同义列。
+    """
 
     __tablename__ = "data_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     platform = Column(String(50), nullable=False)
-    record_type = Column(String(50), nullable=False)
-    data = Column(JSON, nullable=True)
+    data_type = Column(String(50), nullable=False)
+    record_count = Column(Integer, nullable=True, server_default="0")
+    quality_score = Column(Float, nullable=True, server_default="0")
+    status = Column(String(50), nullable=True, server_default="active")
     created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), nullable=True
     )
 
     __table_args__ = (
         Index("ix_data_records_platform", "platform"),
-        Index("ix_data_records_type", "record_type"),
+        Index("ix_data_records_type", "data_type"),
         {"schema": "core"},
     )
 

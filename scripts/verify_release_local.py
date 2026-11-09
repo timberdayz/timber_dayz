@@ -67,6 +67,17 @@ def run_release_verification(*, skip_build: bool, table: str) -> bool:
     _run_command([sys.executable, "scripts/pre_deployment_check.py"])
     _run_command([sys.executable, "scripts/validate_migrations_fresh_db.py"])
 
+    # [*] ORM ↔ 数据库 结构漂移体检（fail-closed）
+    # ORM 声明的列必须真实存在于库里，否则代码一用到就抛
+    # UndefinedColumnError，现场表现为接口 500
+    # （历史现场：/api/hr/attendance 报 attendance_records.employee_code 不存在）。
+    # 没有 DATABASE_URL 时体检脚本退出码为 2，不静默跳过 —— 发版必须先体检通过。
+    drift_env = dict(os.environ)
+    verify_database_url = _build_verify_database_url_from_env(PROJECT_ROOT / ".env")
+    if verify_database_url:
+        drift_env["DATABASE_URL"] = verify_database_url
+    _run_command([sys.executable, "scripts/verify_orm_schema_drift.py"], env=drift_env)
+
     compose_env = dict(os.environ)
     compose_env["COMPOSE_PROFILES"] = "production"
     _run_command(

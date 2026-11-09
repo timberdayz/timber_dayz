@@ -37,19 +37,30 @@ class ShopAccountBusinessRole(str, Enum):
     collection_source = "collection_source"
 
 class Account(Base):
-    """账号管理表"""
+    """账号管理表
+
+    [*] 2026-12 结构对齐：本表以**数据库实际结构**为准。
+    原 ORM 声明 ``account_name``/``account_id``，而库里是
+    ``username``/``password``/``login_url``/``health_score``/``notes``
+    —— 两套字段**同名不同义**（account_name 与 username 不是一回事），
+    ORM 还带着一条建在 account_id 上的唯一约束，而库里根本没有这一列。
+    docker/postgres/init-tables.py 也是按库里那套写的，
+    所以这里把 ORM 补齐到与库一致，而不是往库里塞两套账号字段。
+    """
     __tablename__ = "accounts"
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     platform = Column(String(50), nullable=False)
-    account_name = Column(String(100), nullable=False)
-    account_id = Column(String(100), nullable=False)
-    status = Column(String(20), default="active", nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    
+    username = Column(String(100), nullable=False)
+    password = Column(String(100), nullable=True)
+    login_url = Column(String(200), nullable=True)
+    status = Column(String(20), default="offline", nullable=True)
+    health_score = Column(Float, default=0.0, nullable=True)
+    notes = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True)
+
     __table_args__ = (
-        UniqueConstraint("account_id", name="uq_accounts_account_id"),
         Index("ix_accounts_platform", "platform"),
         Index("ix_accounts_status", "status"),
         {"schema": "core"},
