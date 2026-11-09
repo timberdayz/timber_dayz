@@ -143,12 +143,19 @@ def test_speculative_attribution_aliases_are_not_registered():
 def test_always_zero_columns_are_documented_as_zero():
     """实测恒为 0 的列, 说明文字里必须点出来。
 
-    「有列、值恒 0」分不清「该渠道真的没成交」与「平台没回传」⇒
-    必须在文案里如实标注, 不能让读数的人误以为这是结论。
+    2026-11-09 业务方确认: **我们没有做直播** ⇒ 这几列的 0 是**真实值**
+    (没这个渠道), 不是「平台没回传」⇒ 文案里要写明这件事, 既不能让人
+    误以为「直播卖不动」, 也不能让人以为是取数坏了。
     """
     for field in ALWAYS_ZERO_FIELDS:
         description = SEMANTIC_FIELD_DESCRIPTIONS.get(field, "")
         assert "恒为 0" in description, "{0} 的说明没标注「恒为 0」".format(field)
+        assert (
+            "没有做直播" in description
+        ), "{0} 的说明没写明「我们没有做直播」这个业务事实".format(field)
+        assert (
+            "分不清" not in description
+        ), "{0} 的说明还在留「分不清」的悬案 —— 业务方已确认过了".format(field)
 
 
 # ── 二、别名登记 ────────────────────────────────────────────────────────

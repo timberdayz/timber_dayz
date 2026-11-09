@@ -2047,7 +2047,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "live gmv"
       ],
       "default_hash": false,
-      "description": "商家直播 GMV：商家自己直播间带来的成交。实测 1374 行恒为 0，分不清「真的没成交」与「平台没回传」。",
+      "description": "商家直播 GMV：商家自己直播间带来的成交。实测 1374 行恒为 0 —— 业务方 2026-11-09 确认：我们没有做直播，所以这个 0 是真实值（没这个渠道），不是平台漏回传。",
       "domain": "attribution",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
@@ -2087,7 +2087,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "live indirect gmv"
       ],
       "default_hash": false,
-      "description": "商家直播间接 GMV：先被商家直播种草、之后从别的入口下单的成交。实测 1374 行恒为 0。",
+      "description": "商家直播间接 GMV：先被商家直播种草、之后从别的入口下单的成交。实测 1374 行恒为 0 —— 我们没有做直播（业务方 2026-11-09 确认），所以这个 0 是真实值。",
       "domain": "attribution",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
@@ -2183,7 +2183,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
         "bound account live attributed gmv"
       ],
       "default_hash": false,
-      "description": "绑定账号直播归因 GMV：商家自有品牌号（绑定账号）的直播带来的成交。实测 1374 行恒为 0。",
+      "description": "绑定账号直播归因 GMV：商家自有品牌号（绑定账号）的直播带来的成交。实测 1374 行恒为 0 —— 我们没有做直播（业务方 2026-11-09 确认），所以这个 0 是真实值。",
       "domain": "analytics",
       "hash_eligible": true,
       "hash_warning": "指标类字段参与去重后, 指标值变化会被当成新行(而不是更新)。确认「这一行的身份就包含这个指标」再勾选。",
@@ -3652,7 +3652,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "bound account live attributed gmv"
           ],
           "default_hash": false,
-          "description": "绑定账号直播归因 GMV：商家自有品牌号（绑定账号）的直播带来的成交。实测 1374 行恒为 0。",
+          "description": "绑定账号直播归因 GMV：商家自有品牌号（绑定账号）的直播带来的成交。实测 1374 行恒为 0 —— 我们没有做直播（业务方 2026-11-09 确认），所以这个 0 是真实值。",
           "domain": "analytics",
           "group": "traffic_metric",
           "hash_eligible": true,
@@ -4583,7 +4583,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "live gmv"
           ],
           "default_hash": false,
-          "description": "商家直播 GMV：商家自己直播间带来的成交。实测 1374 行恒为 0，分不清「真的没成交」与「平台没回传」。",
+          "description": "商家直播 GMV：商家自己直播间带来的成交。实测 1374 行恒为 0 —— 业务方 2026-11-09 确认：我们没有做直播，所以这个 0 是真实值（没这个渠道），不是平台漏回传。",
           "domain": "attribution",
           "group": "attribution_metric",
           "hash_eligible": true,
@@ -4621,7 +4621,7 @@ export const SEMANTIC_FIELD_REGISTRY_SNAPSHOT = {
             "live indirect gmv"
           ],
           "default_hash": false,
-          "description": "商家直播间接 GMV：先被商家直播种草、之后从别的入口下单的成交。实测 1374 行恒为 0。",
+          "description": "商家直播间接 GMV：先被商家直播种草、之后从别的入口下单的成交。实测 1374 行恒为 0 —— 我们没有做直播（业务方 2026-11-09 确认），所以这个 0 是真实值。",
           "domain": "attribution",
           "group": "attribution_metric",
           "hash_eligible": true,
