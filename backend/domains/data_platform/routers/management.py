@@ -161,7 +161,7 @@ async def generate_quality_report(db: AsyncSession = Depends(get_async_db)):
 async def rebuild_unified_data(db: AsyncSession = Depends(get_async_db)):
     """重建统一事实层(占位返回统计)"""
     try:
-        stats = rebuild_unified(db)
+        stats = await rebuild_unified(db)
         return {"success": True, **stats}
     except Exception as e:
         logger.error(f"重建统一事实失败: {e}", exc_info=True)

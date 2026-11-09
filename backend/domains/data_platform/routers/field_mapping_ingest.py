@@ -1014,26 +1014,26 @@ async def ingest_file(
                 raise
 
             if domain == "orders":
-                staged = stage_orders(
+                staged = await stage_orders(
                     db, valid_rows, ingest_task_id=task_id, file_id=file_id
                 )
-                imported = upsert_orders(db, valid_rows, file_record=file_record)
+                imported = await upsert_orders(db, valid_rows, file_record=file_record)
             elif domain == "inventory":
-                staged = stage_inventory(
+                staged = await stage_inventory(
                     db, valid_rows, ingest_task_id=task_id, file_id=file_id
                 )
                 for row in valid_rows:
                     row["data_domain"] = "inventory"
                     if not row.get("granularity"):
                         row["granularity"] = "snapshot"
-                imported = upsert_product_metrics(
+                imported = await upsert_product_metrics(
                     db, valid_rows, file_record=file_record, data_domain="inventory"
                 )
             else:
-                staged = stage_product_metrics(
+                staged = await stage_product_metrics(
                     db, valid_rows, ingest_task_id=task_id, file_id=file_id
                 )
-                imported = upsert_product_metrics(
+                imported = await upsert_product_metrics(
                     db, valid_rows, file_record=file_record
                 )
 
@@ -1127,7 +1127,7 @@ async def ingest_file(
                     else False
                 ),
                 "quarantine_summary": (
-                    get_quarantine_summary(db, file_record.id)
+                    await get_quarantine_summary(db, file_record.id)
                     if quarantined_count > 0
                     else None
                 ),

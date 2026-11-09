@@ -243,7 +243,7 @@ async def bulk_ingest(payload: dict, db: AsyncSession = Depends(get_async_db)):
                     header_row = 0
                 
                 if validation_result.get("errors") and target_file_id:
-                    quarantined_count = quarantine_failed_data(db, target_file_id, validation_result, header_row=header_row)
+                    quarantined_count = await quarantine_failed_data(db, target_file_id, validation_result, header_row=header_row)
                     await db.commit()
                 
                 valid_rows = []
@@ -263,11 +263,11 @@ async def bulk_ingest(payload: dict, db: AsyncSession = Depends(get_async_db)):
                         file_record = file_record_result.scalar_one_or_none()
                     
                     if domain == "orders":
-                        staged = stage_orders(db, valid_rows, ingest_task_id=task_id, file_id=target_file_id)
-                        imported = upsert_orders(db, valid_rows, file_record=file_record)
+                        staged = await stage_orders(db, valid_rows, ingest_task_id=task_id, file_id=target_file_id)
+                        imported = await upsert_orders(db, valid_rows, file_record=file_record)
                     else:
-                        staged = stage_product_metrics(db, valid_rows, ingest_task_id=task_id, file_id=target_file_id)
-                        imported = upsert_product_metrics(db, valid_rows, file_record=file_record)
+                        staged = await stage_product_metrics(db, valid_rows, ingest_task_id=task_id, file_id=target_file_id)
+                        imported = await upsert_product_metrics(db, valid_rows, file_record=file_record)
                 
                 total_staged += staged
                 total_imported += imported

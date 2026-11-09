@@ -12,6 +12,7 @@
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func, text
 
 from modules.core.db import AccountAlias
@@ -32,14 +33,65 @@ class AlignmentStats:
     missing_mappings: List[str] = None  # 缺失的映射(待补充)
 
 
+def build_alias_cache(aliases) -> Dict[Tuple, str]:
+    """把别名记录转换成内存缓存(同步/异步加载共用同一份语义)。
+
+    Args:
+        aliases: AccountAlias 记录序列(同步或异步查询结果一致)
+
+    Returns:
+        {(account, site, store_label_raw): target_id}
+    """
+    cache: Dict[Tuple, str] = {}
+    for alias in aliases:
+        # 缓存key:(account, site, store_label_raw)
+        # site可选(None时仅按account+label匹配)
+        key = (
+            alias.account or '',
+            alias.site or '',
+            alias.store_label_raw
+        )
+        cache[key] = alias.target_id
+    return cache
+
+
 class AccountAlignmentService:
     """账号对齐服务(仅针对miaoshou/orders)"""
-    
+
     def __init__(self, db: Session):
         self.db = db
         self._alias_cache: Dict[Tuple, str] = {}
         self._load_alias_cache()
-    
+
+    @classmethod
+    async def create_async(cls, db: AsyncSession) -> "AccountAlignmentService":
+        """异步构造(供 AsyncSession 调用方使用)。
+
+        [*] 背景:同步构造在 AsyncSession 下会走到 `db.execute(stmt).scalars()`,
+        而 AsyncSession.execute 返回协程 —— 异常被吞掉后别名缓存静默为空,
+        账号对齐随之失效(典型的「兜底即伪装」)。此入口显式 await 查询,
+        语义与同步构造完全一致。
+        """
+        self = cls.__new__(cls)
+        self.db = db
+        self._alias_cache: Dict[Tuple, str] = {}
+        await self._load_alias_cache_async()
+        return self
+
+    async def _load_alias_cache_async(self):
+        """异步加载别名映射到内存缓存(与 _load_alias_cache 语义一致)"""
+        try:
+            stmt = select(AccountAlias).where(
+                AccountAlias.active == True,
+                AccountAlias.platform == 'miaoshou',
+                AccountAlias.data_domain == 'orders'
+            )
+            aliases = (await self.db.execute(stmt)).scalars().all()
+            self._alias_cache = build_alias_cache(aliases)
+            logger.info(f"[AccountAlignment] 加载{len(self._alias_cache)}条别名映射")
+        except Exception as e:
+            logger.warning(f"[AccountAlignment] 加载别名失败: {e}")
+
     def _load_alias_cache(self):
         """加载别名映射到内存缓存"""
         try:
@@ -49,17 +101,8 @@ class AccountAlignmentService:
                 AccountAlias.data_domain == 'orders'
             )
             aliases = self.db.execute(stmt).scalars().all()
-            
-            for alias in aliases:
-                # 缓存key:(account, site, store_label_raw)
-                # site可选(None时仅按account+label匹配)
-                key = (
-                    alias.account or '',
-                    alias.site or '',
-                    alias.store_label_raw
-                )
-                self._alias_cache[key] = alias.target_id
-            
+            self._alias_cache = build_alias_cache(aliases)
+
             logger.info(f"[AccountAlignment] 加载{len(self._alias_cache)}条别名映射")
             
         except Exception as e:

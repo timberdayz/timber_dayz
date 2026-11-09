@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import insert
+from sqlalchemy import insert, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 from fastapi import HTTPException
 
@@ -83,7 +84,7 @@ def _sanitize_attributes(attrs: Dict[str, Any]) -> Dict[str, Any]:
     return cleaned
 
 
-def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Optional[str] = None, file_id: Optional[int] = None) -> int:
+async def stage_orders(db: AsyncSession, rows: List[Dict[str, Any]], ingest_task_id: Optional[str] = None, file_id: Optional[int] = None) -> int:
     """
     暂存订单数据(v4.6.1修复 - 使用order_data JSON字段)
     
@@ -107,7 +108,7 @@ def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Option
     # [WARN] 注意:外键约束已修复为指向catalog_files表
     if file_id is not None:
         # 检查catalog_files表(正确的表)
-        file_record = db.query(CatalogFile).filter(CatalogFile.id == file_id).first()
+        file_record = (await db.execute(select(CatalogFile).where(CatalogFile.id == file_id))).scalar_one_or_none()
         if not file_record:
             logger.warning(f"[StageOrders] file_id={file_id} 不存在于catalog_files表中,将file_id设置为None")
             file_id = None  # 设置为None,避免外键约束错误
@@ -228,26 +229,26 @@ def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Option
     
     try:
         db.add_all(objs)
-        db.commit()
+        await db.commit()
         successful_count = len(objs)
     except Exception as staging_error:
         # staging失败时,尝试逐条处理,隔离失败的行
-        db.rollback()
+        await db.rollback()
         logger.error(f"[StageOrders] 批量staging失败,尝试逐条处理: {staging_error}", exc_info=True)
         
         # 获取文件信息用于隔离
         file_record = None
         if file_id:
-            file_record = db.query(CatalogFile).filter(CatalogFile.id == file_id).first()
+            file_record = (await db.execute(select(CatalogFile).where(CatalogFile.id == file_id))).scalar_one_or_none()
         
         # 逐条处理,隔离失败的行
         for idx, obj in enumerate(objs):
             try:
                 db.add(obj)
-                db.commit()
+                await db.commit()
                 successful_count += 1
             except Exception as row_error:
-                db.rollback()
+                await db.rollback()
                 logger.error(f"[StageOrders] 行{idx} staging失败: {row_error}", exc_info=True)
                 failed_rows.append((idx, rows[idx], row_error))
                 
@@ -269,12 +270,12 @@ def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Option
                             data_domain="orders"
                         )
                         db.add(quarantine_record)
-                        db.commit()
+                        await db.commit()
                         logger.info(f"[StageOrders] 已隔离staging失败的行{idx}")
                 except Exception as quarantine_error:
                     logger.warning(f"[StageOrders] 隔离staging失败行时出错: {quarantine_error}", exc_info=True)
                     try:
-                        db.rollback()
+                        await db.rollback()
                     except Exception:
                         pass
         
@@ -284,7 +285,7 @@ def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Option
     return successful_count
 
 
-def stage_product_metrics(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Optional[str] = None, file_id: Optional[int] = None) -> int:
+async def stage_product_metrics(db: AsyncSession, rows: List[Dict[str, Any]], ingest_task_id: Optional[str] = None, file_id: Optional[int] = None) -> int:
     """
     暂存产品指标数据
     
@@ -302,7 +303,7 @@ def stage_product_metrics(db: Session, rows: List[Dict[str, Any]], ingest_task_i
     
     # [*] v4.12.1修复:验证file_id是否存在,避免外键约束错误
     if file_id is not None:
-        file_record = db.query(CatalogFile).filter(CatalogFile.id == file_id).first()
+        file_record = (await db.execute(select(CatalogFile).where(CatalogFile.id == file_id))).scalar_one_or_none()
         if not file_record:
             logger.warning(f"[StageProductMetrics] file_id={file_id} 不存在于catalog_files表中,将file_id设置为None")
             file_id = None  # 设置为None,避免外键约束错误
@@ -369,26 +370,26 @@ def stage_product_metrics(db: Session, rows: List[Dict[str, Any]], ingest_task_i
     if objs:
         try:
             db.add_all(objs)
-            db.commit()
+            await db.commit()
             successful_count = len(objs)
         except Exception as staging_error:
             # staging失败时,尝试逐条处理,隔离失败的行
-            db.rollback()
+            await db.rollback()
             logger.error(f"[StageProductMetrics] 批量staging失败,尝试逐条处理: {staging_error}", exc_info=True)
             
             # 获取文件信息用于隔离
             file_record = None
             if file_id:
-                file_record = db.query(CatalogFile).filter(CatalogFile.id == file_id).first()
+                file_record = (await db.execute(select(CatalogFile).where(CatalogFile.id == file_id))).scalar_one_or_none()
             
             # 逐条处理,隔离失败的行
             for idx, obj in enumerate(objs):
                 try:
                     db.add(obj)
-                    db.commit()
+                    await db.commit()
                     successful_count += 1
                 except Exception as row_error:
-                    db.rollback()
+                    await db.rollback()
                     logger.error(f"[StageProductMetrics] 行{idx} staging失败: {row_error}", exc_info=True)
                     failed_rows.append((idx, rows[idx], row_error))
                     
@@ -410,12 +411,12 @@ def stage_product_metrics(db: Session, rows: List[Dict[str, Any]], ingest_task_i
                                 data_domain="products"
                             )
                             db.add(quarantine_record)
-                            db.commit()
+                            await db.commit()
                             logger.info(f"[StageProductMetrics] 已隔离staging失败的行{idx}")
                     except Exception as quarantine_error:
                         logger.warning(f"[StageProductMetrics] 隔离staging失败行时出错: {quarantine_error}", exc_info=True)
                         try:
-                            db.rollback()
+                            await db.rollback()
                         except Exception:
                             pass
             
@@ -425,7 +426,7 @@ def stage_product_metrics(db: Session, rows: List[Dict[str, Any]], ingest_task_i
     return successful_count
 
 
-def stage_inventory(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Optional[str] = None, file_id: Optional[int] = None) -> int:
+async def stage_inventory(db: AsyncSession, rows: List[Dict[str, Any]], ingest_task_id: Optional[str] = None, file_id: Optional[int] = None) -> int:
     """
     暂存库存数据
     
@@ -444,7 +445,7 @@ def stage_inventory(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Opt
     
     # [*] v4.12.1修复:验证file_id是否存在,避免外键约束错误
     if file_id is not None:
-        file_record = db.query(CatalogFile).filter(CatalogFile.id == file_id).first()
+        file_record = (await db.execute(select(CatalogFile).where(CatalogFile.id == file_id))).scalar_one_or_none()
         if not file_record:
             logger.warning(f"[StageInventory] file_id={file_id} 不存在于catalog_files表中,将file_id设置为None")
             file_id = None  # 设置为None,避免外键约束错误
@@ -513,7 +514,7 @@ def stage_inventory(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Opt
     
     if objs:
         db.add_all(objs)
-        db.commit()
+        await db.commit()
     return len(objs)
 
 
@@ -527,7 +528,7 @@ def _resolve_product_surrogate(db: Session, platform_code: str, product_id: str 
     return platform_sku or "unknown"
 
 
-def upsert_orders(db: Session, rows: List[Dict[str, Any]], file_record: Optional[Any] = None) -> int:
+async def upsert_orders(db: AsyncSession, rows: List[Dict[str, Any]], file_record: Optional[Any] = None) -> int:
     """
     批量UPSERT订单数据(v4.6.1修复 - 使用正确的字段)
     
@@ -581,7 +582,7 @@ _FACT_ORDER_CORE_FIELDS = {
 }
 
 
-def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optional[Any] = None) -> int:
+async def upsert_orders_v2(db: AsyncSession, rows: List[Dict[str, Any]], file_record: Optional[Any] = None) -> int:
     """新版UPSERT:核心字段直落列,其他列写入attributes。
 
     要求:rows中的字典使用事实表字段名;额外来源列将自动进入attributes。
@@ -607,7 +608,10 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
     alignment_service = None
     try:
         from modules.services.account_alignment import AccountAlignmentService
-        alignment_service = AccountAlignmentService(db)
+        if isinstance(db, AsyncSession):
+            alignment_service = await AccountAlignmentService.create_async(db)
+        else:
+            alignment_service = AccountAlignmentService(db)
     except Exception as e:
         logger.warning(f"[UpsertOrders] 初始化账号对齐服务失败: {e}")
 
@@ -874,12 +878,12 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                     index_elements=["platform_code", "shop_id", "order_id"],
                     set_=update_dict,
                 )
-                db.execute(stmt)
+                await db.execute(stmt)
                 # [*] v4.10.0修复:每个订单入库成功后立即提交,避免事务失败影响其他订单
-                db.commit()
+                await db.commit()
             except Exception as order_error:
                 # [*] v4.10.0修复:订单入库失败时回滚并记录错误,但不影响其他订单
-                db.rollback()
+                await db.rollback()
                 logger.error(f"[UpsertOrders] 订单入库失败: order_id={core.get('order_id')}, platform_code={core.get('platform_code')}, error={order_error}", exc_info=True)
                 
                 # [*] v4.12.1新增:自动隔离失败的订单(用于数据丢失追踪)
@@ -900,13 +904,13 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                             data_domain="orders"
                         )
                         db.add(quarantine_record)
-                        db.commit()
+                        await db.commit()
                         logger.info(f"[UpsertOrders] 已隔离失败订单: order_id={core.get('order_id')}")
                 except Exception as quarantine_error:
                     # 隔离失败不影响主流程,只记录日志
                     logger.warning(f"[UpsertOrders] 隔离失败订单时出错: {quarantine_error}", exc_info=True)
                     try:
-                        db.rollback()
+                        await db.rollback()
                     except Exception:
                         pass
                 
@@ -916,15 +920,15 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
             # 简易兼容:尝试插入,失败则更新
             try:
                 db.add(FactOrder(**core))
-                db.commit()
+                await db.commit()
             except Exception:
-                db.rollback()
+                await db.rollback()
                 db.query(FactOrder).filter(
                     FactOrder.platform_code == core.get("platform_code"),
                     FactOrder.shop_id == core.get("shop_id"),
                     FactOrder.order_id == core.get("order_id"),
                 ).update(core)
-                db.commit()
+                await db.commit()
 
         # [DELETED] v4.19.0: FactOrderItem 表已删除,订单明细数据应导入到 b_class.fact_{platform}_orders_{granularity}
         # 以下订单明细导入逻辑已注释,待实现新的导入逻辑后删除
@@ -1048,12 +1052,12 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
     # [*] v4.10.0修复:PostgreSQL使用逐条提交,不需要批量提交
     # 每个订单入库成功后已经立即提交,这里不需要再次提交
     # if is_postgresql:
-    #     db.commit()
+    #     await db.commit()
 
     return total
 
 
-def quarantine_failed_data(db: Session, file_id: int, validation_result: Dict[str, Any], header_row: int = 1) -> int:
+async def quarantine_failed_data(db: AsyncSession, file_id: int, validation_result: Dict[str, Any], header_row: int = 1) -> int:
     """
     将验证失败的数据写入隔离区
     
@@ -1074,7 +1078,7 @@ def quarantine_failed_data(db: Session, file_id: int, validation_result: Dict[st
     quarantined_count = 0
     
     # 获取文件信息(用于填充必填字段)
-    catalog_file = db.query(CatalogFile).filter(CatalogFile.id == file_id).first()
+    catalog_file = (await db.execute(select(CatalogFile).where(CatalogFile.id == file_id))).scalar_one_or_none()
     source_file_name = catalog_file.file_name if catalog_file else f"file_id_{file_id}"
     platform_code = catalog_file.platform_code if catalog_file else None
     shop_id = catalog_file.shop_id if catalog_file else None
@@ -1156,30 +1160,35 @@ def quarantine_failed_data(db: Session, file_id: int, validation_result: Dict[st
     return quarantined_count
 
 
-def get_quarantine_summary(db: Session, file_id: int = None) -> Dict[str, Any]:
-    """获取隔离区数据摘要(v4.4.1修复字段名)"""
-    query = db.query(DataQuarantine)
+async def get_quarantine_summary(db: AsyncSession, file_id: int = None) -> Dict[str, Any]:
+    """获取隔离区数据摘要(v4.4.1修复字段名)
+
+    [*] 异步化:原实现使用同步 ORM Query API(db.query)却被 async 路由调用,
+    会抛出 'AsyncSession' object has no attribute 'query'。
+    """
+    stmt = select(DataQuarantine)
     if file_id:
-        query = query.filter(DataQuarantine.catalog_file_id == file_id)  # [OK] 修复字段名
-    
-    total_quarantined = query.count()
-    
+        stmt = stmt.where(DataQuarantine.catalog_file_id == file_id)  # [OK] 修复字段名
+
+    records = (await db.execute(stmt)).scalars().all()
+    total_quarantined = len(records)
+
     # 按问题类型分组
     issue_types = {}
-    for record in query.all():
+    for record in records:
         issue_type = record.error_type  # [OK] 修复字段名
         if issue_type not in issue_types:
             issue_types[issue_type] = 0
         issue_types[issue_type] += 1
-    
+
     return {
         "total_quarantined": total_quarantined,
         "issue_types": issue_types,
-        "files_affected": len(set(r.catalog_file_id for r in query.all() if r.catalog_file_id))  # [OK] 修复字段名
+        "files_affected": len(set(r.catalog_file_id for r in records if r.catalog_file_id))  # [OK] 修复字段名
     }
 
 
-def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record: Optional[Any] = None, data_domain: Optional[str] = None) -> int:
+async def upsert_product_metrics(db: AsyncSession, rows: List[Dict[str, Any]], file_record: Optional[Any] = None, data_domain: Optional[str] = None) -> int:
     """
     批量UPSERT产品指标数据(优化版)
     性能:1万行从60秒优化到10秒
@@ -1410,19 +1419,19 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                         "metric_date_utc": stmt.excluded.metric_date_utc,
                     }
                 )
-                db.execute(stmt)
+                await db.execute(stmt)
                 count += 1
             
             # 批量提交
-            db.commit()
+            await db.commit()
             if skipped_count > 0:
                 logger.warning(f"[upsert_product_metrics] 跳过了 {skipped_count} 行数据(metric_date无法解析)")
         except IntegrityError as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"[upsert_product_metrics] 数据完整性错误: {e}", exc_info=True)
             raise HTTPException(status_code=400, detail=f"数据冲突: {str(e)}")
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             logger.error(f"[upsert_product_metrics] 数据入库失败: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"入库失败: {str(e)}")
         
@@ -1562,20 +1571,21 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
             )
             try:
                 db.add(obj)
-                db.commit()
+                await db.commit()
                 count += 1
             except Exception:
-                db.rollback()
+                await db.rollback()
                 # UPDATE已存在记录(包含sku_scope字段)
-                db.query(FactProductMetric).filter(
-                    FactProductMetric.platform_code == obj.platform_code,
-                    FactProductMetric.shop_id == obj.shop_id,
-                    FactProductMetric.platform_sku == obj.platform_sku,
-                    FactProductMetric.metric_date == obj.metric_date,
-                    FactProductMetric.granularity == obj.granularity,
-                    FactProductMetric.sku_scope == obj.sku_scope,  # 新增:sku_scope条件
-                    FactProductMetric.data_domain == obj.data_domain,  # [*] v4.10.0新增:data_domain条件
-                ).update({
+                await db.execute(
+                    update(FactProductMetric).where(
+                        FactProductMetric.platform_code == obj.platform_code,
+                        FactProductMetric.shop_id == obj.shop_id,
+                        FactProductMetric.platform_sku == obj.platform_sku,
+                        FactProductMetric.metric_date == obj.metric_date,
+                        FactProductMetric.granularity == obj.granularity,
+                        FactProductMetric.sku_scope == obj.sku_scope,  # 新增:sku_scope条件
+                        FactProductMetric.data_domain == obj.data_domain,  # [*] v4.10.0新增:data_domain条件
+                    ).values({
                     # 商品基础信息
                     "product_name": obj.product_name,
                     "category": obj.category,
@@ -1621,37 +1631,11 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                     # 时间和区间
                     "period_start": obj.period_start,
                     "metric_date_utc": obj.metric_date_utc,
-                })
-                db.commit()
+                    })
+                )
+                await db.commit()
                 count += 1
     
     return count
-
-
-# [OK] v4.4.1修复:删除重复定义,这是第二个定义(保留第一个)
-# 第一个定义在行292,已修复字段名匹配问题
-
-
-def get_quarantine_summary(db: Session, file_id: int = None) -> Dict[str, Any]:
-    """获取隔离区数据摘要(v4.4.1修复字段名)"""
-    query = db.query(DataQuarantine)
-    if file_id:
-        query = query.filter(DataQuarantine.catalog_file_id == file_id)  # [OK] 修复字段名
-    
-    total_quarantined = query.count()
-    
-    # 按问题类型分组
-    issue_types = {}
-    for record in query.all():
-        issue_type = record.error_type  # [OK] 修复字段名
-        if issue_type not in issue_types:
-            issue_types[issue_type] = 0
-        issue_types[issue_type] += 1
-    
-    return {
-        "total_quarantined": total_quarantined,
-        "issue_types": issue_types,
-        "files_affected": len(set(r.catalog_file_id for r in query.all() if r.catalog_file_id))  # [OK] 修复字段名
-    }
 
 

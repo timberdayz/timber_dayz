@@ -96,7 +96,7 @@ async def get_quarantine_summary_api(
 ):
     """获取隔离区数据摘要"""
     try:
-        summary = get_quarantine_summary(db, file_id)
+        summary = await get_quarantine_summary(db, file_id)
         return success_response(data={"summary": summary})
     except Exception as e:
         logger.error(f"获取隔离区摘要失败: {e}")
