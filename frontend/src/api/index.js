@@ -2184,6 +2184,11 @@ export default {
   async confirmHrPayrollRecord(recordId) {
     return await this._post(`/hr/payroll-records/${recordId}/confirm`)
   },
+  // 整月批量确认工资单：全部校验通过才整体提交。
+  // 失败时后端返回 data.issues 清单（谁、缺什么），前端逐条展示给运营。
+  async confirmHrPayrollRecordsBatch(data) {
+    return await this._post('/hr/payroll-records/confirm-batch', data)
+  },
   async reopenHrPayrollRecord(recordId) {
     return await this._post(`/hr/payroll-records/${recordId}/reopen`)
   },
@@ -2198,6 +2203,10 @@ export default {
   },
   async getHrIncomeAudit(employeeCode, yearMonth) {
     return await this._get(`/hr/income-audit/${employeeCode}/${yearMonth}`)
+  },
+  // 月度结算单：把一个月的结算事实聚成一页（只读）
+  async getHrMonthlySettlement(params = {}) {
+    return await this._get('/hr/monthly-settlement', { params })
   },
 
   // === 员工目标 ===
@@ -2340,6 +2349,9 @@ export default {
   },
   async getHrShopCommissionConfig(params = {}) {
     return await this._get('/hr/shop-commission-config', { params })
+  },
+  async getHrCommissionSettlementPreview(params = {}) {
+    return await this._get('/hr/commissions/settlement-preview', { params })
   },
   async putHrShopCommissionConfig(platformCode, shopId, data) {
     return await this._put(

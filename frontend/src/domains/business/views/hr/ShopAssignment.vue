@@ -1,7 +1,7 @@
 <template>
   <div class="shop-assignment-page erp-page-container">
     <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">人员店铺归属和提成比</h1>
-    <p style="color: #909399; margin-bottom: 20px;">配置员工负责的店铺及提成比例，用于后续提成计算。本模块仅管理员可见。提成计算基数为订单利润扣除其他经营成本和提成前人力成本，不包含当月绩效与提成。配置保存至数据库表 <code>a_class.employee_shop_assignments</code>。</p>
+    <p style="color: #909399; margin-bottom: 20px;">配置员工负责的店铺及提成比例，用于后续提成计算。本模块仅管理员可见。<strong>预计提成直接取自后端结算预览</strong>（利润基数 × 可分配率 × 归属提成比 × 结算系数），前端不再自己算钱；只有「改了还没保存」的临时编辑才在本地试算。配置保存至数据库表 <code>a_class.employee_shop_assignments</code>。</p>
 
     <!-- Tab 切换 -->
     <el-tabs v-model="activeTab" style="margin-bottom: 20px;">
@@ -45,13 +45,20 @@
         </el-button>
       </div>
       <div v-if="employeeCommissionSummary.length > 0" class="commission-summary-strip">
-        <div class="commission-summary-title">员工月度预计提成</div>
+        <div class="commission-summary-title">员工月度预计提成（后端结算口径）</div>
         <div class="commission-summary-items">
           <div v-for="item in employeeCommissionSummary" :key="item.employee_code" class="commission-summary-item">
             <span class="commission-summary-name">{{ item.employee_name || item.employee_code }}</span>
             <span class="commission-summary-role">{{ item.role === 'supervisor' ? '主管' : '操作员' }}</span>
+            <el-tag
+              v-if="employeeStatusTag(item.calculation_status)"
+              size="small"
+              :type="employeeStatusTag(item.calculation_status).type"
+            >
+              {{ employeeStatusTag(item.calculation_status).label }}
+            </el-tag>
             <span class="commission-summary-amount">¥{{ formatNumber(item.estimated_commission) }}</span>
-            <span class="commission-summary-shops">{{ item.shop_count }}店</span>
+            <span class="commission-summary-shops">{{ item.shop_count }}店 · 结算系数 {{ formatCoefficient(item.settlement_coefficient) }}</span>
           </div>
         </div>
       </div>
@@ -87,18 +94,23 @@
               <span v-if="row._isFirst">¥{{ formatNumber(row.monthly_profit) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="提成计算基数" width="130" align="right">
+          <el-table-column width="150" align="right">
+            <template #header>
+              <el-tooltip :content="PROFIT_BASIS_REFERENCE_HINT" placement="top">
+                <span>结算基数（参考）</span>
+              </el-tooltip>
+            </template>
             <template #default="{ row }">
               <span v-if="row._isFirst">¥{{ formatNumber(row.profit_basis_amount) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="V2成本明细" width="220" align="right">
+          <el-table-column label="成本明细" width="220" align="right">
             <template #default="{ row }">
               <div v-if="row._isFirst" class="v2-cost-breakdown">
                 <div>其他经营成本 ¥{{ formatNumber(row.other_a_class_cost_amount) }}</div>
                 <div>提成前人力成本 ¥{{ formatNumber(row.pre_commission_labor_cost_amount) }}</div>
                 <div>A类成本 ¥{{ formatNumber(row.a_class_cost_amount) }}</div>
-                <el-tag size="small" type="info">{{ row.basis_version || 'A_PRE_COMMISSION_LABOR_V2' }}</el-tag>
+                <el-tag size="small" type="info">{{ formatBasisVersion(row.basis_version) }}</el-tag>
                 <el-tag v-if="isLaborAllocationMissing(row)" size="small" type="danger">缺少人力成本分摊</el-tag>
               </div>
             </template>
@@ -108,7 +120,7 @@
               <span v-if="row._isFirst">{{ row.achievement_rate != null ? Number(row.achievement_rate).toFixed(1) + '%' : '—' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="可分配净利润率" width="140" align="right">
+          <el-table-column label="可分配净利润率" width="180" align="right">
             <template #default="{ row }">
               <span v-if="row._isFirst" class="allocatable-rate-wrap">
                 <el-input-number
@@ -125,11 +137,18 @@
                 />
                 <span class="allocatable-rate-suffix">%</span>
               </span>
+              <div v-if="row._isFirst" class="rate-status-cell">
+                <el-tag size="small" :type="allocatableRateTag(row).type">{{ allocatableRateTag(row).label }}</el-tag>
+                <el-tag v-if="isShopRateDirty(row)" size="small" type="warning">待保存</el-tag>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column label="可分配利润" width="130" align="right">
+          <el-table-column label="可分配利润" width="140" align="right">
             <template #default="{ row }">
-              <span v-if="row._isFirst">¥{{ formatNumber(getRowAllocatableProfit(row)) }}</span>
+              <span v-if="row._isFirst">
+                <span v-if="getRowAllocatableProfit(row) != null">¥{{ formatNumber(getRowAllocatableProfit(row)) }}</span>
+                <span v-else class="fallback-text">—</span>
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="人员" width="180" min-width="160">
@@ -170,16 +189,36 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="预计提成" width="130" align="right">
+          <el-table-column label="结算系数" width="100" align="right">
             <template #default="{ row }">
-              <span v-if="row._person">¥{{ formatNumber(getRowEstimatedCommission(row)) }}</span>
+              <span v-if="row._person">{{ formatCoefficient(settlementCoefficientOf(row)) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="80" align="center">
+          <el-table-column label="预计提成" width="190" align="right">
             <template #default="{ row }">
-              <el-tag v-if="row._isFirst && hasConfig(row)" type="success" size="small">已配置</el-tag>
-              <el-tag v-else-if="row._isFirst" type="info" size="small">未配置</el-tag>
-              <span v-else></span>
+              <span v-if="row._person">
+                <el-tooltip v-if="zeroReasonOf(row)" :content="zeroReasonOf(row)" placement="top">
+                  <span class="commission-amount">¥{{ formatNumber(getRowEstimatedCommission(row)) }}</span>
+                </el-tooltip>
+                <span v-else class="commission-amount">¥{{ formatNumber(getRowEstimatedCommission(row)) }}</span>
+                <el-tag v-if="isRowDirty(row)" size="small" type="warning" style="margin-left: 4px;">试算</el-tag>
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="220" align="center">
+            <template #default="{ row }">
+              <div class="status-cell">
+                <template v-if="row._isFirst">
+                  <el-tag v-if="hasConfig(row)" type="success" size="small">已配置</el-tag>
+                  <el-tag v-else type="info" size="small">未配置</el-tag>
+                  <el-tooltip v-if="shopProfitTag(row)" :content="shopProfitTag(row).text" placement="top">
+                    <el-tag size="small" :type="shopProfitTag(row).type">{{ shopProfitTag(row).label }}</el-tag>
+                  </el-tooltip>
+                </template>
+                <el-tag v-if="row._person && employeeStatusTagOf(row)" size="small" :type="employeeStatusTagOf(row).type">
+                  {{ employeeStatusTagOf(row).label }}
+                </el-tag>
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
@@ -230,28 +269,66 @@
           <el-table-column prop="monthly_profit" label="当月利润" width="120" align="right">
             <template #default="{ row }">¥{{ formatNumber(row.monthly_profit) }}</template>
           </el-table-column>
-          <el-table-column prop="profit_basis_amount" label="提成计算基数" width="130" align="right">
+          <el-table-column width="150" align="right">
+            <template #header>
+              <el-tooltip :content="PROFIT_BASIS_REFERENCE_HINT" placement="top">
+                <span>结算基数（参考）</span>
+              </el-tooltip>
+            </template>
             <template #default="{ row }">¥{{ formatNumber(row.profit_basis_amount) }}</template>
           </el-table-column>
-          <el-table-column label="V2成本明细" width="220" align="right">
+          <el-table-column label="成本明细" width="220" align="right">
             <template #default="{ row }">
               <div class="v2-cost-breakdown">
                 <div>其他经营成本 ¥{{ formatNumber(row.other_a_class_cost_amount) }}</div>
                 <div>提成前人力成本 ¥{{ formatNumber(row.pre_commission_labor_cost_amount) }}</div>
                 <div>A类成本 ¥{{ formatNumber(row.a_class_cost_amount) }}</div>
-                <el-tag size="small" type="info">{{ row.basis_version || 'A_PRE_COMMISSION_LABOR_V2' }}</el-tag>
+                <el-tag size="small" type="info">{{ formatBasisVersion(row.basis_version) }}</el-tag>
                 <el-tag v-if="isLaborAllocationMissing(row)" size="small" type="danger">缺少人力成本分摊</el-tag>
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="achievement_rate" label="当月目标达成率" width="140" align="right">
+          <el-table-column label="当月目标达成率" width="140" align="right">
             <template #default="{ row }">{{ row.achievement_rate != null ? Number(row.achievement_rate).toFixed(1) + '%' : '—' }}</template>
           </el-table-column>
-          <el-table-column prop="supervisor_profit" label="主管提成" width="130" align="right">
-            <template #default="{ row }">¥{{ formatNumber(row.supervisor_profit) }}</template>
+          <el-table-column label="可分配率" width="120" align="right">
+            <template #default="{ row }">
+              <el-tooltip :content="allocatableRateTag(row).text" placement="top">
+                <el-tag size="small" :type="allocatableRateTag(row).type">{{ allocatableRateTag(row).label }}</el-tag>
+              </el-tooltip>
+            </template>
           </el-table-column>
-          <el-table-column prop="operator_profit" label="操作员提成" width="140" align="right">
-            <template #default="{ row }">¥{{ formatNumber(row.operator_profit) }}</template>
+          <el-table-column label="主管提成（未含结算系数）" width="180" align="right">
+            <template #default="{ row }">
+              <el-tooltip content="可分配利润按归属比例分摊的金额，未含结算系数；实发口径请看「预计提成（结算口径）」" placement="top">
+                <span>¥{{ formatNumber(row.supervisor_profit) }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作员提成（未含结算系数）" width="190" align="right">
+            <template #default="{ row }">
+              <el-tooltip content="可分配利润按归属比例分摊的金额，未含结算系数；实发口径请看「预计提成（结算口径）」" placement="top">
+                <span>¥{{ formatNumber(row.operator_profit) }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+          <el-table-column label="预计提成（结算口径）" width="170" align="right">
+            <template #default="{ row }">
+              <span v-if="row.settlement_commission_total != null">¥{{ formatNumber(row.settlement_commission_total) }}</span>
+              <span v-else class="fallback-text">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="200" align="center">
+            <template #default="{ row }">
+              <div class="status-cell">
+                <el-tooltip v-if="shopProfitTag(row)" :content="shopProfitTag(row).text" placement="top">
+                  <el-tag size="small" :type="shopProfitTag(row).type">{{ shopProfitTag(row).label }}</el-tag>
+                </el-tooltip>
+                <el-tooltip v-if="formatCommissionZeroReason(row.commission_zero_reason)" :content="formatCommissionZeroReason(row.commission_zero_reason)" placement="top">
+                  <el-tag size="small" type="warning">提成为 0</el-tag>
+                </el-tooltip>
+              </div>
+            </template>
           </el-table-column>
         </el-table>
         <div v-if="statsRows.length === 0 && !statsLoading" style="padding: 40px; text-align: center; color: #909399;">
@@ -406,14 +483,24 @@ import { Setting, DataAnalysis, Calendar } from '@element-plus/icons-vue'
 import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  calculateAllocatableProfit,
-  calculateAssignmentCommission,
   exceedsCommissionRatioLimit,
   inferAssignmentRole,
+  isAssignmentDirty,
+  readBackendAllocatableProfit,
+  resolveEstimatedCommission,
   setShopAllocatableProfitRate,
   summarizeEmployeeCommissions,
   sumCommissionRatio
 } from './shopAssignmentRules'
+import {
+  describeAllocatableRate,
+  describeShopProfitTag,
+  employeeCalculationStatusTag as employeeStatusTag,
+  formatBasisVersion,
+  formatCommissionZeroReason,
+  formatCoefficient,
+  PROFIT_BASIS_REFERENCE_HINT
+} from './settlementDisplayRules'
 import { buildShopAccountLookup, decorateShopEntity } from '@/utils/shopDisplay'
 
 const activeTab = ref('config')
@@ -426,6 +513,8 @@ const shopRows = ref([])
 const configLoading = ref(false)
 const statsRows = ref([])
 const statsLoading = ref(false)
+// 后端结算预览（GET /hr/commissions/settlement-preview）：页面上的钱以它为准。
+const settlementPreviewEmployees = ref([])
 
 const annualYear = ref(new Date().getFullYear().toString())
 const annualGroupBy = ref('employee')
@@ -457,7 +546,24 @@ const shopsFiltered = computed(() => {
   if (!pc) return shops.value
   return shops.value.filter((s) => (s.platform_code || '').toLowerCase() === (pc || '').toLowerCase())
 })
-const employeeCommissionSummary = computed(() => summarizeEmployeeCommissions(shopRows.value))
+// 员工角色来自归属配置（后端结算预览不返回角色）。
+const roleByEmployee = computed(() => {
+  const map = {}
+  for (const shop of shopRows.value) {
+    for (const assignment of shop.assignments || []) {
+      if (!assignment?.employee_code) continue
+      if (assignment.role === 'supervisor') {
+        map[assignment.employee_code] = 'supervisor'
+      } else if (!map[assignment.employee_code]) {
+        map[assignment.employee_code] = 'operator'
+      }
+    }
+  }
+  return map
+})
+
+// 员工月度预计提成：金额直接读后端 expected_commission，前端不再自己累加。
+const employeeCommissionSummary = computed(() => summarizeEmployeeCommissions(settlementPreviewEmployees.value, roleByEmployee.value))
 
 // 配置表 flattened 行：一店多人，每行一个人员或“添加”占位
 const configTableRows = computed(() => {
@@ -507,24 +613,79 @@ function isLaborAllocationMissing(row) {
   ].includes(String(row?.cost_status || '').toLowerCase())
 }
 
+// 口径 / 成本状态一律用后端返回的值，前端不再补默认值：
+// 前端拼一个 basis_version 或 cost_status 只会让页面显示出一个后端并不认可的口径。
 function normalizeProfitBasisFields(row = {}) {
   return {
     ...row,
     other_a_class_cost_amount: row.other_a_class_cost_amount ?? 0,
     pre_commission_labor_cost_amount: row.pre_commission_labor_cost_amount ?? 0,
     a_class_cost_amount: row.a_class_cost_amount ?? 0,
-    basis_version: row.basis_version || 'A_PRE_COMMISSION_LABOR_V2',
-    cost_status: row.cost_status || 'missing_labor_allocation'
+    basis_version: row.basis_version ?? '',
+    cost_status: row.cost_status ?? ''
   }
 }
 
+// 可分配利润：后端已经算好（max(利润基数, 0) × 可分配率，并按 2 位小数舍入）。
 function getRowAllocatableProfit(row) {
-  return calculateAllocatableProfit(row?._shop || row)
+  return readBackendAllocatableProfit(row?._shop || row)
 }
 
+// 预计提成：没改过就显示后端值；改了还没保存才用前端唯一允许的乘法链试算。
 function getRowEstimatedCommission(row) {
   if (!row?._person) return 0
-  return calculateAssignmentCommission(row?._shop || row, row._person)
+  const shop = row?._shop || row
+  const preview = row._person._preview || null
+  return resolveEstimatedCommission({
+    backendEstimatedCommission: preview?.estimated_commission ?? null,
+    dirty: isRowDirty(row),
+    trial: {
+      profit_basis_amount: preview?.profit_basis_amount ?? shop?.profit_basis_amount ?? 0,
+      allocatable_profit_rate: shop?.allocatable_profit_rate ?? 0,
+      commission_ratio: row._person.commission_ratio ?? 0,
+      settlement_coefficient: preview?.settlement_coefficient ?? 1
+    }
+  })
+}
+
+// 可分配率是否被改过（还没保存）。
+function isShopRateDirty(row) {
+  const shop = row?._shop || row
+  const current = Number(shop?.allocatable_profit_rate ?? 0)
+  const backend = Number(shop?._backend_allocatable_profit_rate ?? current)
+  return Math.abs(current - backend) > 1e-9
+}
+
+// 整行是否被改过（可分配率或归属提成比）。
+function isRowDirty(row) {
+  if (!row) return false
+  return isShopRateDirty(row) || isAssignmentDirty(row?._shop || row, row?._person)
+}
+
+// 结算系数（后端下发，缺失显示「—」而不是 0）。
+function settlementCoefficientOf(row) {
+  return row?._person?._preview?.settlement_coefficient ?? null
+}
+
+// 提成为 0 的业务原因（后端下发），让「0」变成一句能行动的话。
+function zeroReasonOf(row) {
+  return formatCommissionZeroReason(row?._person?._preview?.commission_zero_reason)
+}
+
+// 员工考核状态徽标。
+function employeeStatusTagOf(row) {
+  return employeeStatusTag(row?._person?._employee_status)
+}
+
+// 可分配率三态（未配置 / 配成 0 / 正常）。
+function allocatableRateTag(row) {
+  const shop = row?._shop || row
+  return describeAllocatableRate(shop?.is_allocatable_rate_configured, shop?.allocatable_profit_rate)
+}
+
+// 店铺亏损徽标。
+function shopProfitTag(row) {
+  return describeShopProfitTag(row?._shop || row)
 }
 
 function onPlatformChange() {
@@ -726,15 +887,35 @@ async function loadShops() {
   }
 }
 
+// 从后端结算预览响应里取出 employees 数组。
+// 响应拦截器已经把 { success, data } 拆成 data，这里兼容两种形态。
+function extractPreviewEmployees(response) {
+  const payload = response?.data ?? response ?? {}
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload?.employees)) return payload.employees
+  return []
+}
+
+// 员工 + 店铺 的预览索引键。
+function previewShopKey(employeeCode, platformCode, shopId) {
+  return `${employeeCode}|${String(platformCode || '').toLowerCase()}|${shopId}`
+}
+
+function toRateNumber(value) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
 async function loadConfigData() {
   if (!configMonth.value) return
   configLoading.value = true
   try {
-    const [assignmentsRes, shopsRes, statsRes, configRes] = await Promise.all([
+    const [assignmentsRes, shopsRes, statsRes, configRes, previewRes] = await Promise.all([
       api.getHrEmployeeShopAssignments({ year_month: configMonth.value, page: 1, page_size: 1000 }),
       api.getTargetShops(),
       api.getHrShopProfitStatistics({ month: configMonth.value }).catch(() => ({ data: [] })),
-      api.getHrShopCommissionConfig({ year_month: configMonth.value }).catch(() => ({ data: [] }))
+      api.getHrShopCommissionConfig({ year_month: configMonth.value }).catch(() => ({ data: [] })),
+      api.getHrCommissionSettlementPreview({ year_month: configMonth.value }).catch(() => ({ data: [] }))
     ])
     const shopData = shopsRes?.data ?? shopsRes ?? []
     const shopList = (Array.isArray(shopData) ? shopData : (shopData?.data ?? shopData ?? [])).map((row) => decorateShopEntity(row, shopAccountLookup))
@@ -744,27 +925,33 @@ async function loadConfigData() {
     const statsList = Array.isArray(statsData) ? statsData : (statsData?.data ?? statsData ?? [])
     const configData = configRes?.data ?? configRes ?? []
     const configList = Array.isArray(configData) ? configData : (configData?.data ?? configData ?? [])
+    const previewEmployees = extractPreviewEmployees(previewRes)
+    settlementPreviewEmployees.value = previewEmployees
 
     const byShop = {}
     for (const s of shopList) {
       const key = `${(s.platform_code || '').toLowerCase()}|${s.shop_id}`
-        byShop[key] = {
-          platform_code: (s.platform_code || '').toLowerCase(),
-          shop_id: s.shop_id,
-          shop_name: s.shop_name || s.shop_id,
-          secondary_name: s.secondary_name || '',
-          canonical_shop_name: s.canonical_shop_name || '',
-          allocatable_profit_rate: 0,
-          assignments: [],
+      byShop[key] = {
+        platform_code: (s.platform_code || '').toLowerCase(),
+        shop_id: s.shop_id,
+        shop_name: s.shop_name || s.shop_id,
+        secondary_name: s.secondary_name || '',
+        canonical_shop_name: s.canonical_shop_name || '',
+        allocatable_profit_rate: 0,
+        // 「有没有配可分配率」和「配成 0」业务含义不同，必须分开存。
+        is_allocatable_rate_configured: false,
+        assignments: [],
         saving: false,
         monthly_sales: 0,
         monthly_profit: 0,
         profit_basis_amount: 0,
+        allocatable_profit_amount: null,
         other_a_class_cost_amount: 0,
         pre_commission_labor_cost_amount: 0,
         a_class_cost_amount: 0,
-        basis_version: 'A_PRE_COMMISSION_LABOR_V2',
-        cost_status: 'missing_labor_allocation',
+        // 口径 / 成本状态一律来自后端，前端不补默认值。
+        basis_version: '',
+        cost_status: '',
         achievement_rate: null
       }
     }
@@ -774,18 +961,41 @@ async function loadConfigData() {
         byShop[key].monthly_sales = st.monthly_sales ?? 0
         byShop[key].monthly_profit = st.monthly_profit ?? 0
         byShop[key].profit_basis_amount = st.profit_basis_amount ?? 0
+        byShop[key].allocatable_profit_amount = st.allocatable_profit_amount ?? null
         byShop[key].other_a_class_cost_amount = st.other_a_class_cost_amount ?? 0
         byShop[key].pre_commission_labor_cost_amount = st.pre_commission_labor_cost_amount ?? 0
         byShop[key].a_class_cost_amount = st.a_class_cost_amount ?? 0
-        byShop[key].basis_version = st.basis_version || 'A_PRE_COMMISSION_LABOR_V2'
-        byShop[key].cost_status = st.cost_status || 'missing_labor_allocation'
+        byShop[key].basis_version = st.basis_version ?? ''
+        byShop[key].cost_status = st.cost_status ?? ''
         byShop[key].achievement_rate = st.achievement_rate
+        if (st.is_allocatable_rate_configured !== undefined && st.is_allocatable_rate_configured !== null) {
+          byShop[key].is_allocatable_rate_configured = Boolean(st.is_allocatable_rate_configured)
+          byShop[key].allocatable_profit_rate = toRateNumber(st.allocatable_profit_rate)
+        }
       }
     }
     for (const c of configList) {
       const key = `${(c.platform_code || '').toLowerCase()}|${c.shop_id}`
       if (byShop[key]) {
-        byShop[key].allocatable_profit_rate = Number(c.allocatable_profit_rate) ?? 0
+        byShop[key].allocatable_profit_rate = toRateNumber(c.allocatable_profit_rate)
+        byShop[key].is_allocatable_rate_configured =
+          c.is_allocatable_rate_configured === undefined || c.is_allocatable_rate_configured === null
+            ? true
+            : Boolean(c.is_allocatable_rate_configured)
+      }
+    }
+    // 记住加载时的原始值：用户改了之后用来判断「还没保存」，试算只改展示不改原始值。
+    for (const shop of Object.values(byShop)) {
+      shop._backend_allocatable_profit_rate = shop.allocatable_profit_rate
+    }
+    // 结算预览索引：谁在哪家店、后端算出来的提成 / 系数 / 零提成原因。
+    const previewShopIndex = new Map()
+    for (const employee of previewEmployees) {
+      for (const previewShop of employee?.shops || []) {
+        previewShopIndex.set(
+          previewShopKey(employee.employee_code, previewShop.platform_code, previewShop.shop_id),
+          { employee, shop: previewShop }
+        )
       }
     }
     for (const a of items) {
@@ -796,18 +1006,21 @@ async function loadConfigData() {
           shop_id: a.shop_id,
           ...decorateShopEntity(a, shopAccountLookup),
           allocatable_profit_rate: 0,
+          is_allocatable_rate_configured: false,
           assignments: [],
           saving: false,
           monthly_sales: 0,
           monthly_profit: 0,
           profit_basis_amount: 0,
+          allocatable_profit_amount: null,
           other_a_class_cost_amount: 0,
           pre_commission_labor_cost_amount: 0,
           a_class_cost_amount: 0,
-          basis_version: 'A_PRE_COMMISSION_LABOR_V2',
-          cost_status: 'missing_labor_allocation',
+          basis_version: '',
+          cost_status: '',
           achievement_rate: null
         }
+        byShop[key]._backend_allocatable_profit_rate = 0
       }
       const p = {
         id: a.id,
@@ -816,12 +1029,26 @@ async function loadConfigData() {
         role: a.role === 'supervisor' ? 'supervisor' : 'operator',
         commission_ratio: a.commission_ratio ?? 0
       }
+      const matched = previewShopIndex.get(previewShopKey(a.employee_code, a.platform_code, a.shop_id))
+      p._preview = matched?.shop || null
+      p._employee_status = matched?.employee?.calculation_status ?? ''
+      // 后端下发的原始提成比：用来判断用户是否改了还没保存。
+      p._backend_commission_ratio = matched?.shop?.commission_ratio ?? p.commission_ratio
       byShop[key].assignments.push(p)
+    }
+    // 店铺级可分配利润：优先用结算预览里后端算好的值。
+    for (const [key, entry] of previewShopIndex.entries()) {
+      const shopKey = key.split('|').slice(1).join('|')
+      const shop = byShop[shopKey]
+      if (shop && shop.allocatable_profit_amount == null) {
+        shop.allocatable_profit_amount = entry.shop?.allocatable_profit_amount ?? null
+      }
     }
     shopRows.value = Object.values(byShop).sort((a, b) => (a.platform_code + a.shop_id).localeCompare(b.platform_code + b.shop_id))
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '加载失败')
     shopRows.value = []
+    settlementPreviewEmployees.value = []
   } finally {
     configLoading.value = false
   }
@@ -831,10 +1058,32 @@ async function loadStatsData() {
   if (!statsMonth.value) return
   statsLoading.value = true
   try {
-    const res = await api.getHrShopProfitStatistics({ month: statsMonth.value })
+    const [res, previewRes] = await Promise.all([
+      api.getHrShopProfitStatistics({ month: statsMonth.value }),
+      api.getHrCommissionSettlementPreview({ year_month: statsMonth.value }).catch(() => ({ data: [] }))
+    ])
     const data = res?.data ?? res ?? []
     const items = Array.isArray(data) ? data : (data?.data ?? data ?? [])
-    statsRows.value = items.map((row) => decorateShopEntity(normalizeProfitBasisFields(row), shopAccountLookup))
+    // 店铺维度的「结算口径预计提成」来自后端结算预览（含结算系数），
+    // 不用统计接口里未含结算系数的分摊额，避免页面上的钱和实发对不上。
+    const settlementTotalByShop = new Map()
+    for (const employee of extractPreviewEmployees(previewRes)) {
+      for (const previewShop of employee?.shops || []) {
+        const key = `${String(previewShop.platform_code || '').toLowerCase()}|${previewShop.shop_id}`
+        const next = (settlementTotalByShop.get(key) || 0) + toRateNumber(previewShop.estimated_commission)
+        settlementTotalByShop.set(key, Math.round(next * 100) / 100)
+      }
+    }
+    statsRows.value = items.map((row) => {
+      const decorated = decorateShopEntity(normalizeProfitBasisFields(row), shopAccountLookup)
+      const key = `${String(decorated.platform_code || '').toLowerCase()}|${decorated.shop_id}`
+      return {
+        ...decorated,
+        settlement_commission_total: settlementTotalByShop.has(key)
+          ? settlementTotalByShop.get(key)
+          : null
+      }
+    })
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '加载失败')
     statsRows.value = []
@@ -1024,5 +1273,27 @@ onMounted(async () => {
 }
 .dialog-shop-secondary {
   margin-top: 4px;
+}
+.fallback-text {
+  color: #909399;
+}
+.status-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+}
+.rate-status-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+.commission-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 </style>

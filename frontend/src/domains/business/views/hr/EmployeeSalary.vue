@@ -13,7 +13,7 @@
     <el-alert
       v-if="laborCostPolicy"
       class="labor-cost-policy-alert"
-      :title="`当前系统利润基数口径：${laborCostPolicy.basis_version}`"
+      :title="`当前系统利润基数口径：${formatBasisVersion(laborCostPolicy.basis_version)}`"
       :description="laborCostPolicyDescription"
       type="info"
       :closable="false"
@@ -369,6 +369,16 @@
                   <el-button size="small" type="success" @click="confirmPayroll" :disabled="!payrollRecord || payrollRecord.status !== 'draft'">
                     确认工资单
                   </el-button>
+                  <el-button
+                    size="small"
+                    type="success"
+                    plain
+                    @click="confirmPayrollBatch"
+                    :loading="batchConfirmingPayroll"
+                    :disabled="!selectedMonth"
+                  >
+                    整月批量确认
+                  </el-button>
                   <el-button size="small" type="warning" @click="reopenPayroll" :disabled="!payrollRecord || payrollRecord.status !== 'confirmed'">
                     退回草稿
                   </el-button>
@@ -401,6 +411,24 @@
               :closable="false"
               style="margin-top: 16px;"
             />
+
+            <!-- 整月批量确认的待办清单：谁、缺什么，逐条列清楚 -->
+            <el-card v-if="batchConfirmIssues.length > 0" class="batch-confirm-issues" shadow="never">
+              <template #header>
+                <div class="section-header">
+                  <span>{{ selectedMonth }} 整月批量确认待办（{{ batchConfirmIssues.length }} 项）</span>
+                  <el-button size="small" @click="clearBatchConfirmIssues">关闭</el-button>
+                </div>
+              </template>
+              <el-table :data="batchConfirmIssues" size="small" border>
+                <el-table-column prop="employee_code" label="员工工号" width="140" />
+                <el-table-column prop="record_id" label="工资单ID" width="110" />
+                <el-table-column prop="reason" label="缺少什么 / 为什么没通过" min-width="260" />
+              </el-table>
+              <div class="batch-confirm-hint">
+                全部待办处理完成后，再点一次「整月批量确认」即可整批提交；不会出现「确认了一个人、其他人全被锁死」。
+              </div>
+            </el-card>
           </el-card>
 
           <el-card class="section-card" shadow="hover">
@@ -444,6 +472,12 @@ import { useAuthStore } from '@/stores/auth'
 import api from '@/api'
 import { formatPayrollLockedConflictSummary } from '@/utils/payrollConflict'
 import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
+import { formatBasisVersion } from './settlementDisplayRules'
+import {
+  extractBatchConfirmIssues,
+  extractBatchConfirmSuccessCount,
+  formatBatchConfirmIssueHtml
+} from './payrollBatchConfirm'
 
 const authStore = useAuthStore()
 
@@ -453,6 +487,9 @@ const savingSalaryStructure = ref(false)
 const savingPayroll = ref(false)
 const refreshingPayroll = ref(false)
 const batchRefreshingPayroll = ref(false)
+const batchConfirmingPayroll = ref(false)
+// 整月批量确认的待办清单（谁、缺什么），失败时逐条展示给运营。
+const batchConfirmIssues = ref([])
 
 const employees = ref([])
 const departments = ref([])
@@ -468,15 +505,17 @@ const payrollRecord = ref(null)
 const lockedConflicts = ref([])
 const laborAllocations = ref([])
 const laborCostPolicy = ref({
-  basis_version: 'A_PRE_COMMISSION_LABOR_V2',
+  // 口径由后端下发，前端不补默认值（历史口径 A_ONLY_V1 / A_PRE_COMMISSION_LABOR_V2
+  // 只用于识别旧快照，不会被前端重新选中）。
+  basis_version: '',
   policy_mode: 'single_runtime_basis',
   loading: true,
   error: false
 })
 const laborCostPolicyDescription = computed(() => {
-  if (laborCostPolicy.value.error) return '固定 V2 口径状态暂时无法从服务器刷新，当前页面仅显示默认提示。'
+  if (laborCostPolicy.value.error) return '固定口径状态暂时无法从服务器刷新，当前页面仅显示默认提示。'
   if (laborCostPolicy.value.loading) return '正在读取统一口径状态...'
-  return '所有月份自动使用 V2：订单利润 - 其他经营成本 - 提成前人力成本。普通流程无需手工选择版本。'
+  return '所有月份自动使用统一结算口径：订单利润 - 其他经营成本 - 提成前人力成本。普通流程无需手工选择版本。'
 })
 
 const salaryForm = reactive({
@@ -697,7 +736,7 @@ const loadLaborCostPolicy = async () => {
     const response = await api.getHrLaborCostPolicy()
     const data = response?.data ?? response ?? {}
     laborCostPolicy.value = {
-      basis_version: data.basis_version || data.v2_basis_version || 'A_PRE_COMMISSION_LABOR_V2',
+      basis_version: data.basis_version || data.v2_basis_version || '',
       policy_mode: data.policy_mode || 'single_runtime_basis',
       loading: false,
       error: false
@@ -981,6 +1020,58 @@ const confirmPayroll = async () => {
   }
 }
 
+const clearBatchConfirmIssues = () => {
+  batchConfirmIssues.value = []
+}
+
+/**
+ * 整月批量确认工资单。
+ *
+ * 后端会先做全量校验：全部通过才整体提交；
+ * 不通过时返回 data.issues（谁、缺什么），这里逐条列出来，
+ * 让运营知道要先去补什么，而不是只看到一个「确认失败」。
+ */
+const confirmPayrollBatch = async () => {
+  if (!selectedMonth.value) {
+    ElMessage.warning('请先选择月份')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将确认 ${selectedMonth.value} 全部待确认工资单，全部校验通过后才会整体提交。是否继续？`,
+      '整月批量确认工资单',
+      { type: 'warning' }
+    )
+  } catch (error) {
+    if (error === 'cancel') return
+  }
+
+  batchConfirmingPayroll.value = true
+  try {
+    const response = await api.confirmHrPayrollRecordsBatch({ year_month: selectedMonth.value })
+    const confirmedCount = extractBatchConfirmSuccessCount(response)
+    batchConfirmIssues.value = []
+    ElMessage.success(`已确认 ${confirmedCount} 张工资单`)
+    await loadPayrollRecord()
+    await loadLaborAllocations()
+  } catch (error) {
+    if (error === 'cancel') return
+    const issues = extractBatchConfirmIssues(error)
+    batchConfirmIssues.value = issues
+    if (issues.length > 0) {
+      await ElMessageBox.alert(
+        formatBatchConfirmIssueHtml(issues),
+        `批量确认未通过：${issues.length} 项待补`,
+        { type: 'warning', dangerouslyUseHTMLString: true, confirmButtonText: '知道了' }
+      )
+    } else {
+      ElMessage.error(error?.response?.data?.detail || error?.message || '批量确认工资单失败')
+    }
+  } finally {
+    batchConfirmingPayroll.value = false
+  }
+}
+
 const reopenPayroll = async () => {
   if (!payrollRecord.value?.id) return
   try {
@@ -1118,6 +1209,17 @@ onMounted(async () => {
 
 .result-grid {
   row-gap: 12px;
+}
+
+.batch-confirm-issues {
+  margin-top: 16px;
+}
+
+.batch-confirm-hint {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
 }
 
 .result-item {

@@ -3,10 +3,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import {
-  calculateAllocatableProfit,
-  calculateAssignmentCommission,
+  calculateTrialCommission,
   exceedsCommissionRatioLimit,
   inferAssignmentRole,
+  isAssignmentDirty,
+  readBackendAllocatableProfit,
+  resolveEstimatedCommission,
   setShopAllocatableProfitRate,
   summarizeEmployeeCommissions,
   sumCommissionRatio
@@ -67,99 +69,87 @@ test('inferAssignmentRole maps supervisor-like positions and defaults to operato
   assert.equal(inferAssignmentRole(null), 'operator')
 })
 
-test('calculateAllocatableProfit uses net profit times allocatable rate', () => {
+test('calculateTrialCommission uses backend profit basis, rate, ratio and settlement coefficient', () => {
   assert.equal(
-    calculateAllocatableProfit({ profit_basis_amount: 10000, allocatable_profit_rate: 0.3 }),
-    3000
+    calculateTrialCommission({
+      profit_basis_amount: 480,
+      allocatable_profit_rate: 0.25,
+      commission_ratio: 0.5,
+      settlement_coefficient: 1
+    }),
+    60
   )
 })
 
-test('calculateAllocatableProfit floors negative net profit at zero', () => {
+test('calculateTrialCommission floors negative profit basis at zero', () => {
   assert.equal(
-    calculateAllocatableProfit({ profit_basis_amount: -1000, allocatable_profit_rate: 0.25 }),
+    calculateTrialCommission({
+      profit_basis_amount: -480,
+      allocatable_profit_rate: 0.25,
+      commission_ratio: 0.5,
+      settlement_coefficient: 1
+    }),
     0
   )
 })
 
-test('calculateAssignmentCommission uses net profit, allocatable rate, and person ratio', () => {
-  assert.equal(
-    calculateAssignmentCommission(
-      { profit_basis_amount: 10000, allocatable_profit_rate: 0.3 },
-      { commission_ratio: 0.05 }
-    ),
-    150
-  )
-})
-
-test('summarizeEmployeeCommissions does not let negative net profit reduce employee total', () => {
-  const rows = [
+test('summarizeEmployeeCommissions reads backend expected_commission instead of recomputing', () => {
+  const previewEmployees = [
     {
-      profit_basis_amount: 1000,
-      allocatable_profit_rate: 0.25,
-      assignments: [
-        { employee_code: 'E001', employee_name: 'Alice', role: 'supervisor', commission_ratio: 0.25 }
-      ]
-    },
-    {
-      profit_basis_amount: -1000,
-      allocatable_profit_rate: 0.25,
-      assignments: [
-        { employee_code: 'E001', employee_name: 'Alice', role: 'supervisor', commission_ratio: 0.25 }
+      employee_code: 'E001',
+      employee_name: 'Alice',
+      calculation_status: 'complete',
+      score_coefficient: 1,
+      settlement_coefficient: 1,
+      expected_commission: 279.15,
+      shops: [
+        { platform_code: 'shopee', shop_id: 'S1', estimated_commission: 60 },
+        { platform_code: 'tiktok', shop_id: 'S2', estimated_commission: 219.15 }
       ]
     }
   ]
 
-  assert.deepEqual(summarizeEmployeeCommissions(rows), [
+  assert.deepEqual(summarizeEmployeeCommissions(previewEmployees, { E001: 'supervisor' }), [
     {
       employee_code: 'E001',
       employee_name: 'Alice',
       role: 'supervisor',
       shop_count: 2,
-      estimated_commission: 62.5
+      estimated_commission: 279.15,
+      calculation_status: 'complete',
+      performance_score: null,
+      score_coefficient: 1,
+      settlement_coefficient: 1
     }
   ])
 })
 
-test('summarizeEmployeeCommissions totals estimated monthly commission by employee', () => {
-  const rows = [
-    {
-      profit_basis_amount: 10000,
-      allocatable_profit_rate: 0.3,
-      assignments: [
-        { employee_code: 'E001', employee_name: 'Alice', role: 'supervisor', commission_ratio: 0.05 },
-        { employee_code: 'E002', employee_name: 'Bob', role: 'operator', commission_ratio: 0.03 }
-      ]
-    },
-    {
-      profit_basis_amount: 5000,
-      allocatable_profit_rate: 0.4,
-      assignments: [
-        { employee_code: 'E001', employee_name: 'Alice', role: 'supervisor', commission_ratio: 0.05 }
-      ]
-    },
-    {
-      profit_basis_amount: 9000,
-      allocatable_profit_rate: 0.2,
-      assignments: []
-    }
-  ]
-
-  assert.deepEqual(summarizeEmployeeCommissions(rows), [
+test('summarizeEmployeeCommissions sorts employees by backend expected_commission', () => {
+  const previewEmployees = [
     {
       employee_code: 'E001',
       employee_name: 'Alice',
-      role: 'supervisor',
-      shop_count: 2,
-      estimated_commission: 250
+      expected_commission: 250,
+      shops: [{ platform_code: 'shopee', shop_id: 'S1' }, { platform_code: 'shopee', shop_id: 'S2' }]
     },
     {
       employee_code: 'E002',
       employee_name: 'Bob',
-      role: 'operator',
-      shop_count: 1,
-      estimated_commission: 90
+      expected_commission: 90,
+      shops: [{ platform_code: 'shopee', shop_id: 'S1' }]
+    },
+    {
+      employee_code: 'E003',
+      employee_name: 'Carol',
+      expected_commission: 0,
+      shops: []
     }
-  ])
+  ]
+
+  const summary = summarizeEmployeeCommissions(previewEmployees, { E001: 'supervisor', E002: 'operator' })
+  assert.deepEqual(summary.map((item) => item.employee_code), ['E001', 'E002', 'E003'])
+  assert.deepEqual(summary.map((item) => item.estimated_commission), [250, 90, 0])
+  assert.deepEqual(summary.map((item) => item.shop_count), [2, 1, 0])
 })
 
 test('shop assignment page does not expose a fake add-all-shops action', () => {

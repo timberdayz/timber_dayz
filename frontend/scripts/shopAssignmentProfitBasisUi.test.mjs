@@ -10,10 +10,14 @@ const source = fs.readFileSync(
   'utf8'
 )
 
-test('ShopAssignment page shows order profit and commission calculation basis', () => {
+test('ShopAssignment page shows order profit and settlement basis as a reference value', () => {
   assert.equal(source.includes('当月利润'), true)
-  assert.equal(source.includes('提成计算基数'), true)
+  // 列标题必须是「结算基数（参考）」：这一列对不参与考核的店是现场估算参考值，
+  // 叫「提成计算基数」会让人以为它就是提成实际用的数。
+  assert.equal(source.includes('结算基数（参考）'), true)
+  assert.equal(source.includes('提成计算基数'), false)
   assert.equal(source.includes('profit_basis_amount'), true)
+  assert.equal(source.includes('PROFIT_BASIS_REFERENCE_HINT'), true)
 })
 
 test('ShopAssignment page uses net-profit wording for allocation and payout labels', () => {

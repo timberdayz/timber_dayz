@@ -703,6 +703,17 @@ const routes = [
       roles: ['admin']  // 仅管理员可见
     }
   },
+  {
+    path: '/hr-monthly-settlement',
+    name: 'HRMonthlySettlement',
+    component: () => import('@/domains/business/views/hr/MonthlySettlement.vue'),
+    meta: {
+      title: '月度结算单',
+      icon: 'Money',
+      permission: 'human-resources',
+      roles: ['admin']  // 仅管理员可见
+    }
+  },
   
   // ==================== 审批中心 ====================
   {

@@ -139,6 +139,28 @@
             <el-tag :type="calculationModeType(row)" size="small">{{ calculationModeText(row) }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column v-if="filters.groupBy === 'shop'" label="考核状态" width="190" align="center">
+          <template #default="{ row }">
+            <el-tooltip
+              :content="settlementStatusMessage(row)"
+              placement="top"
+              :disabled="!settlementStatusMessage(row)"
+            >
+              <div class="perf-status-cell">
+                <el-tag v-if="shopCalculationStatusTag(shopCalculationStatus(row))" size="small" :type="shopCalculationStatusTag(shopCalculationStatus(row)).type">
+                  {{ shopCalculationStatusTag(shopCalculationStatus(row)).label }}
+                </el-tag>
+                <el-tag v-if="profitStatusTag(shopProfitStatus(row))" size="small" :type="profitStatusTag(shopProfitStatus(row)).type">
+                  {{ profitStatusTag(shopProfitStatus(row)).label }}
+                </el-tag>
+                <span
+                  v-if="!shopCalculationStatusTag(shopCalculationStatus(row)) && !profitStatusTag(shopProfitStatus(row))"
+                  class="fallback-text"
+                >—</span>
+              </div>
+            </el-tooltip>
+          </template>
+        </el-table-column>
         <el-table-column v-if="filters.groupBy === 'shop'" prop="operation_score" label="店铺运营得分" width="120" align="right" sortable>
           <template #default="{ row }">{{ row.operation_score != null ? Number(row.operation_score).toFixed(1) : '—' }}</template>
         </el-table-column>
@@ -528,6 +550,7 @@ import {
   extractPerformanceConfigRow,
   savePerformanceConfig
 } from './performanceConfigSubmit'
+import { profitStatusTag, shopCalculationStatusTag } from './settlementDisplayRules'
 
 const props = defineProps({
   forcedGroupBy: {
@@ -799,6 +822,21 @@ function rankingPoolText(row) {
   if (status === 'official') return '正式池'
   if (status === 'observation') return '非正式（历史兼容）'
   return '—'
+}
+
+// 店铺考核状态：complete 正常参与考核 / partial 待补数据 / not_applicable 本月不参与考核。
+function shopCalculationStatus(row) {
+  return row?.score_details?.summary?.calculation_status || ''
+}
+
+// 店铺利润维度状态：calculated 正常 / loss 亏损 / pending_target 待补数据。
+function shopProfitStatus(row) {
+  return row?.score_details?.profit?.status || ''
+}
+
+// 后端给的可读原因，作为徽标的悬浮说明。
+function settlementStatusMessage(row) {
+  return row?.score_details?.summary?.message || ''
 }
 
 function dataCoverageText(row) {
@@ -1503,6 +1541,19 @@ onMounted(async () => {
 
 .shop-display-cell {
   line-height: 1.4;
+}
+
+.perf-status-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+}
+
+.fallback-text {
+  font-size: 12px;
+  color: var(--perf-text-secondary);
 }
 
 .shop-display-secondary {

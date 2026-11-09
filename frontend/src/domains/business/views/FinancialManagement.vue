@@ -376,7 +376,8 @@ const loadProfitBasis = async () => {
 const rebuildProfitBasis = async () => {
   if (!selectedShop.value) return
   try {
-    await settlementStore.rebuildProfitBasis({ period_month: profitBasisForm.value.period_month, platform_code: profitBasisForm.value.platform_code, shop_id: profitBasisForm.value.shop_id, basis_version: 'A_ONLY_V1' })
+    // 利润基数口径由后端统一决定：前端不再指定 basis_version，避免重建历史口径。
+    await settlementStore.rebuildProfitBasis({ period_month: profitBasisForm.value.period_month, platform_code: profitBasisForm.value.platform_code, shop_id: profitBasisForm.value.shop_id })
     ElMessage.success('利润分配基准已重算')
   } catch (error) {
     ElMessage.error('重算利润基准失败: ' + error.message)
