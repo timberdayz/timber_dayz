@@ -266,28 +266,38 @@ def _validate_approved_manifest(source: dict[str, Any]) -> None:
         "approval_note",
     }
     if not required_keys.issubset(source):
-        raise MigrationSafetyError("approved legacy source manifest metadata is incomplete")
+        raise MigrationSafetyError(
+            "approved legacy source manifest metadata is incomplete"
+        )
     manifest_path = Path(str(source["manifest_path"]))
     if not manifest_path.is_absolute():
         manifest_path = ROOT / manifest_path
     try:
         content = manifest_path.read_bytes()
     except OSError as exc:
-        raise MigrationSafetyError("approved legacy source manifest is unavailable") from exc
+        raise MigrationSafetyError(
+            "approved legacy source manifest is unavailable"
+        ) from exc
     actual_hash = hashlib.sha256(content).hexdigest()
     if actual_hash != source["manifest_sha256"]:
-        raise MigrationSafetyError("approved legacy source manifest integrity check failed")
+        raise MigrationSafetyError(
+            "approved legacy source manifest integrity check failed"
+        )
     try:
         manifest = json.loads(content.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise MigrationSafetyError("approved legacy source manifest is invalid") from exc
+        raise MigrationSafetyError(
+            "approved legacy source manifest is invalid"
+        ) from exc
     if (
         manifest.get("manifest_version") != source["manifest_version"]
         or manifest.get("legacy_revision") != source["legacy_revision"]
         or manifest.get("schema_fingerprint") != source["schema_fingerprint"]
         or manifest.get("baseline_revision") != source["baseline_revision"]
     ):
-        raise MigrationSafetyError("approved legacy source manifest does not match policy")
+        raise MigrationSafetyError(
+            "approved legacy source manifest does not match policy"
+        )
 
 
 def failure_code_for(exc: BaseException) -> str:
@@ -300,7 +310,10 @@ def failure_code_for(exc: BaseException) -> str:
     while cur is not None and id(cur) not in seen:
         seen.add(id(cur))
         chain_message = str(cur).lower()
-        if "too many clients" in chain_message or "remaining connection slots" in chain_message:
+        if (
+            "too many clients" in chain_message
+            or "remaining connection slots" in chain_message
+        ):
             return MIGRATION_FAILURE_CODES["pg_max_connections_exhausted"]
         if (
             "could not connect" in chain_message
@@ -308,7 +321,8 @@ def failure_code_for(exc: BaseException) -> str:
             or "server closed the connection unexpectedly" in chain_message
             or "could not translate host" in chain_message
             or "network is unreachable" in chain_message
-            or "connection to server" in chain_message and "failed:" in chain_message
+            or "connection to server" in chain_message
+            and "failed:" in chain_message
         ):
             return MIGRATION_FAILURE_CODES["pg_unavailable"]
         cur = cur.__cause__ or cur.__context__
@@ -340,7 +354,9 @@ def migration_advisory_lock(database_url: str):
             ).scalar_one()
         )
         if not acquired:
-            raise MigrationSafetyError("migration lock is already held by another process")
+            raise MigrationSafetyError(
+                "migration lock is already held by another process"
+            )
         yield
     finally:
         try:
@@ -397,30 +413,56 @@ def schema_object_summary(database_url: str) -> dict[str, Any]:
                                     "nullable": bool(column.get("nullable")),
                                     "default": _normalize(column.get("default")),
                                 }
-                                for column in inspector.get_columns(table, schema=schema)
+                                for column in inspector.get_columns(
+                                    table, schema=schema
+                                )
                             ],
                         }
                     )
                     primary_key = inspector.get_pk_constraint(table, schema=schema)
                     if primary_key.get("constrained_columns"):
                         summary["primary_keys"].append(
-                            {"schema": schema, "table": table, "columns": primary_key["constrained_columns"]}
+                            {
+                                "schema": schema,
+                                "table": table,
+                                "columns": primary_key["constrained_columns"],
+                            }
                         )
-                    for constraint in inspector.get_unique_constraints(table, schema=schema):
+                    for constraint in inspector.get_unique_constraints(
+                        table, schema=schema
+                    ):
                         summary["unique_constraints"].append(
-                            {"schema": schema, "table": table, "columns": constraint.get("column_names") or []}
+                            {
+                                "schema": schema,
+                                "table": table,
+                                "columns": constraint.get("column_names") or [],
+                            }
                         )
                     for foreign_key in inspector.get_foreign_keys(table, schema=schema):
                         summary["foreign_keys"].append(
-                            {"schema": schema, "table": table, "columns": foreign_key.get("constrained_columns") or []}
+                            {
+                                "schema": schema,
+                                "table": table,
+                                "columns": foreign_key.get("constrained_columns") or [],
+                            }
                         )
-                    for constraint in inspector.get_check_constraints(table, schema=schema):
+                    for constraint in inspector.get_check_constraints(
+                        table, schema=schema
+                    ):
                         summary["check_constraints"].append(
-                            {"schema": schema, "table": table, "name": constraint.get("name")}
+                            {
+                                "schema": schema,
+                                "table": table,
+                                "name": constraint.get("name"),
+                            }
                         )
                     for index in inspector.get_indexes(table, schema=schema):
                         summary["indexes"].append(
-                            {"schema": schema, "table": table, "name": index.get("name")}
+                            {
+                                "schema": schema,
+                                "table": table,
+                                "name": index.get("name"),
+                            }
                         )
                 summary["views"].extend(
                     {"schema": schema, "name": name}
@@ -821,7 +863,9 @@ def run_current_schema_migrations(
         try:
             backup_metadata = create_and_verify_backup(database_url, state)
         except BackupValidationError as exc:
-            raise MigrationSafetyError(f"migration backup validation failed: {exc}") from exc
+            raise MigrationSafetyError(
+                f"migration backup validation failed: {exc}"
+            ) from exc
 
     with migration_advisory_lock(database_url):
         # A waiting writer may observe a different state after acquiring the lock.
@@ -856,11 +900,29 @@ def run_current_schema_migrations(
                 ],
                 cwd=ROOT,
                 env={**os.environ, "DATABASE_URL": database_url},
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=False,
             )
+            # 迁移的进度输出仍然转发出去（部署日志不能因为改成捕获而丢失）。
+            # 用 getattr 取值：测试会 monkeypatch subprocess.run，替身对象
+            # 不一定带 stdout / stderr。
+            stdout_text = getattr(result, "stdout", "") or ""
+            stderr_text = getattr(result, "stderr", "") or ""
+            if stdout_text:
+                sys.stdout.write(stdout_text)
+            if stderr_text:
+                sys.stderr.write(stderr_text)
             if result.returncode != 0:
+                # 把失败原因**带进异常消息**。
+                # 以前这里只报 "failed (1)"，真实原因（PG 报错 / 迁移的前置检查）
+                # 只留在子进程的 stderr 里 —— 部署现场看到的就是一句无信息的话。
+                detail = (stderr_text or stdout_text).strip()[-4000:]
                 raise RuntimeError(
-                    f"current-schema alembic {command} {revision} failed ({result.returncode})"
+                    f"current-schema alembic {command} {revision} failed "
+                    f"({result.returncode})" + (f":\n{detail}" if detail else "")
                 )
     return action
 
