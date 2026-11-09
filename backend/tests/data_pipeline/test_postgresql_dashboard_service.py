@@ -2119,12 +2119,17 @@ async def test_postgresql_dashboard_service_comparison_loads_total_month_target_
             await session.execute(
                 text(
                     """
-                    CREATE TABLE a_class.sales_targets_a (
-                        "年月" VARCHAR(7),
-                        "店铺ID" VARCHAR(255),
-                        "目标销售额" NUMERIC,
-                        "目标订单数" NUMERIC,
-                        "目标单量" NUMERIC
+                    CREATE TABLE a_class.target_breakdown (
+                        id INTEGER PRIMARY KEY,
+                        target_id INTEGER,
+                        breakdown_type VARCHAR(32),
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(255),
+                        period_start DATE,
+                        period_end DATE,
+                        period_label VARCHAR(64),
+                        target_amount NUMERIC,
+                        target_quantity INTEGER
                     )
                     """
                 )
@@ -2240,17 +2245,17 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
                 text(
                     """
                     CREATE TABLE a_class.operating_costs (
-                        "platform_code" VARCHAR(32),
-                        "店铺ID" VARCHAR(255),
-                        "年月" VARCHAR(7),
-                        "租金" NUMERIC,
-                        "营销费用" NUMERIC,
-                        "水电费" NUMERIC,
-                        "AI Token费用" NUMERIC,
-                        "人力费用" NUMERIC,
-                        "其他成本" NUMERIC,
-                        "成本合计" NUMERIC,
-                        "删除时间" TIMESTAMP
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(255),
+                        year_month VARCHAR(7),
+                        rent_amount NUMERIC,
+                        marketing_amount NUMERIC,
+                        utility_amount NUMERIC,
+                        ai_token_amount NUMERIC,
+                        labor_amount NUMERIC,
+                        other_amount NUMERIC,
+                        total_amount NUMERIC,
+                        deleted_at TIMESTAMP
                     )
                     """
                 )
@@ -2271,7 +2276,7 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
             await session.execute(
                 text(
                     """
-                    INSERT INTO a_class.operating_costs ("platform_code", "店铺ID", "年月", "租金", "营销费用", "水电费", "AI Token费用", "其他成本", "成本合计")
+                    INSERT INTO a_class.operating_costs (platform_code, shop_id, year_month, rent_amount, marketing_amount, utility_amount, ai_token_amount, other_amount, total_amount)
                     VALUES
                         ('shopee', 'shopee新加坡3C店', '2025-09', 100, 200, 300, 0, 400, 1000),
                         ('tiktok', 'Tiktok 2店', '2025-09', 100, 200, 200, 0, 300, 800)
@@ -2292,11 +2297,11 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
                     await session.execute(
                         text(
                             """
-                            SELECT "成本合计" AS total_cost, "删除时间" AS deleted_at
+                            SELECT total_amount AS total_cost, deleted_at AS deleted_at
                             FROM a_class.operating_costs
-                            WHERE "platform_code" = 'tiktok'
-                              AND "店铺ID" = 'shop-1'
-                              AND "年月" = '2026-03'
+                            WHERE platform_code = 'tiktok'
+                              AND shop_id = 'shop-1'
+                              AND year_month = '2026-03'
                             """
                         )
                     )
@@ -2354,12 +2359,33 @@ async def test_postgresql_dashboard_service_operational_metrics_respects_soft_de
             await session.execute(
                 text(
                     """
-                    CREATE TABLE a_class.sales_targets_a (
-                        "年月" VARCHAR(7),
-                        "店铺ID" VARCHAR(255),
-                        "目标销售额" NUMERIC,
-                        "目标订单数" NUMERIC,
-                        "目标单量" NUMERIC
+                    CREATE TABLE a_class.sales_targets (
+                        id INTEGER PRIMARY KEY,
+                        target_name VARCHAR(255),
+                        target_type VARCHAR(64),
+                        period_start DATE,
+                        period_end DATE,
+                        target_amount NUMERIC,
+                        target_quantity INTEGER,
+                        status VARCHAR(32)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.target_breakdown (
+                        id INTEGER PRIMARY KEY,
+                        target_id INTEGER,
+                        breakdown_type VARCHAR(32),
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(255),
+                        period_start DATE,
+                        period_end DATE,
+                        period_label VARCHAR(64),
+                        target_amount NUMERIC,
+                        target_quantity INTEGER
                     )
                     """
                 )
@@ -2368,18 +2394,18 @@ async def test_postgresql_dashboard_service_operational_metrics_respects_soft_de
                 text(
                     """
                     CREATE TABLE a_class.operating_costs (
-                        "platform_code" VARCHAR(32),
-                        "店铺ID" VARCHAR(255),
-                        "年月" VARCHAR(7),
-                        "租金" NUMERIC,
-                        "营销费用" NUMERIC,
-                        "水电费" NUMERIC,
-                        "AI Token费用" NUMERIC,
-                        "人力费用" NUMERIC,
-                        "其他成本" NUMERIC,
-                        "成本合计" NUMERIC,
-                        "删除时间" TIMESTAMPTZ,
-                        "删除人" BIGINT
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(255),
+                        year_month VARCHAR(7),
+                        rent_amount NUMERIC,
+                        marketing_amount NUMERIC,
+                        utility_amount NUMERIC,
+                        ai_token_amount NUMERIC,
+                        labor_amount NUMERIC,
+                        other_amount NUMERIC,
+                        total_amount NUMERIC,
+                        deleted_at TIMESTAMPTZ,
+                        deleted_by BIGINT
                     )
                     """
                 )
@@ -2398,11 +2424,11 @@ async def test_postgresql_dashboard_service_operational_metrics_respects_soft_de
                     await session.execute(
                         text(
                             """
-                            SELECT "成本合计" AS total_cost, "删除时间" AS deleted_at
+                            SELECT total_amount AS total_cost, deleted_at AS deleted_at
                             FROM a_class.operating_costs
-                            WHERE "platform_code" = 'tiktok'
-                              AND "店铺ID" = 'shop-1'
-                              AND "年月" = '2026-03'
+                            WHERE platform_code = 'tiktok'
+                              AND shop_id = 'shop-1'
+                              AND year_month = '2026-03'
                             """
                         )
                     )
@@ -2432,7 +2458,7 @@ async def test_postgresql_dashboard_service_operational_metrics_respects_soft_de
                 text(
                     """
                     INSERT INTO a_class.operating_costs
-                        ("platform_code", "店铺ID", "年月", "租金", "营销费用", "水电费", "AI Token费用", "其他成本", "成本合计", "删除时间", "删除人")
+                        (platform_code, shop_id, year_month, rent_amount, marketing_amount, utility_amount, ai_token_amount, other_amount, total_amount, deleted_at, deleted_by)
                     VALUES
                         ('tiktok', 'shop-1', '2026-03', 10, 60, 5, 6, 30, 111, NULL, NULL)
                     """
@@ -2451,11 +2477,11 @@ async def test_postgresql_dashboard_service_operational_metrics_respects_soft_de
                 text(
                     """
                     UPDATE a_class.operating_costs
-                    SET "删除时间" = :deleted_at,
-                        "删除人" = 1
-                    WHERE "platform_code" = 'tiktok'
-                      AND "店铺ID" = 'shop-1'
-                      AND "年月" = '2026-03'
+                    SET deleted_at = :deleted_at,
+                        deleted_by = 1
+                    WHERE platform_code = 'tiktok'
+                      AND shop_id = 'shop-1'
+                      AND year_month = '2026-03'
                     """
                 ),
                 {"deleted_at": datetime.now(timezone.utc)},
@@ -2473,11 +2499,11 @@ async def test_postgresql_dashboard_service_operational_metrics_respects_soft_de
                 text(
                     """
                     UPDATE a_class.operating_costs
-                    SET "删除时间" = NULL,
-                        "删除人" = NULL
-                    WHERE "platform_code" = 'tiktok'
-                      AND "店铺ID" = 'shop-1'
-                      AND "年月" = '2026-03'
+                    SET deleted_at = NULL,
+                        deleted_by = NULL
+                    WHERE platform_code = 'tiktok'
+                      AND shop_id = 'shop-1'
+                      AND year_month = '2026-03'
                     """
                 )
             )

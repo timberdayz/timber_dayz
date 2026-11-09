@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """
 HR - 薪资与目标管理
@@ -23,6 +23,7 @@ from backend.schemas.hr import (
     LaborCostPolicyEnvelopeResponse,
     LaborCostPolicyResponse,
     LaborCostPolicyUpdateRequest,
+    PayrollBatchConfirmRequest,
     PayrollRecordManualUpdate,
     PayrollManualInputUpdate,
     PayrollManualInputResponse,
@@ -39,6 +40,10 @@ from backend.services.employee_target_allocation_service import (
 )
 from backend.services.payroll_generation_service import PayrollGenerationService
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
+from backend.services.payroll_confirmation_service import (
+    PayrollConfirmationError,
+    PayrollConfirmationService,
+)
 from backend.services.payroll_period_lock_service import (
     PAYROLL_LOCKED_STATUSES,
     PayrollPeriodLockedError,
@@ -47,6 +52,7 @@ from backend.services.payroll_period_lock_service import (
 from backend.services.profit_basis_service import ProfitBasisService
 from backend.services.v2_monthly_refresh_service import V2MonthlyRefreshService
 from backend.services.performance_readiness_service import PerformanceReadinessService
+from backend.services.monthly_settlement_service import MonthlySettlementService
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.db import (
@@ -111,7 +117,7 @@ async def update_labor_cost_policy(
         user_agent="hr_salary_router",
         details={
             "requested_effective_month": body.effective_month,
-            "basis_version": LaborCostPolicyService.V2,
+            "basis_version": LaborCostPolicyService.CURRENT_BASIS_VERSION,
             "policy_mode": "single_runtime_basis",
         },
         db=db,
@@ -897,144 +903,77 @@ async def confirm_payroll_record(
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
-        result = await db.execute(
-            select(PayrollRecord).where(PayrollRecord.id == record_id)
-        )
-        record = result.scalar_one_or_none()
-        if not record:
-            return error_response(
-                ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404
-            )
-        if record.status == "paid":
-            return error_response(
-                ErrorCode.PARAMETER_INVALID, "已发放工资单不可再次确认", status_code=409
-            )
-        if record.status != "draft":
-            return error_response(
-                ErrorCode.PARAMETER_INVALID, "仅草稿工资单可以确认", status_code=409
-            )
-        period_lock = PayrollPeriodLockService(db)
-        await period_lock.acquire_month_transaction_lock(year_month=record.year_month)
-        await db.refresh(record)
-        if record.status != "draft":
-            return error_response(
-                ErrorCode.PARAMETER_INVALID,
-                "工资单状态已变更，请刷新后重试",
-                status_code=409,
-            )
-        allocations = (
-            (
-                await db.execute(
-                    select(EmployeeLaborCostAllocation).where(
-                        EmployeeLaborCostAllocation.period_month == record.year_month,
-                        EmployeeLaborCostAllocation.employee_code
-                        == record.employee_code,
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if not allocations:
-            return error_response(
-                ErrorCode.PARAMETER_INVALID,
-                "请先刷新当月工资和人力成本分摊，再确认工资单",
-                status_code=409,
-            )
-        await PerformanceReadinessService(db).assert_month_performance_ready(
-            record.year_month,
-            employee_codes={record.employee_code},
-        )
-        assignments = (
-            (
-                await db.execute(
-                    select(EmployeeShopAssignment).where(
-                        EmployeeShopAssignment.year_month == record.year_month,
-                        EmployeeShopAssignment.employee_code == record.employee_code,
-                        EmployeeShopAssignment.status == "active",
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assigned_shop_keys = {
-            (
-                str(assignment.platform_code or "").lower(),
-                str(assignment.shop_id or ""),
-            )
-            for assignment in assignments
-        }
-        if assigned_shop_keys:
-            month_assignments = (
-                (
-                    await db.execute(
-                        select(EmployeeShopAssignment).where(
-                            EmployeeShopAssignment.year_month == record.year_month,
-                            EmployeeShopAssignment.status == "active",
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            ratio_by_shop: Dict[tuple[str, str], float] = {}
-            for assignment in month_assignments:
-                shop_key = (
-                    str(assignment.platform_code or "").lower(),
-                    str(assignment.shop_id or ""),
-                )
-                if shop_key not in assigned_shop_keys:
-                    continue
-                ratio_by_shop[shop_key] = ratio_by_shop.get(shop_key, 0.0) + float(
-                    getattr(assignment, "commission_ratio", 0) or 0
-                )
-            over_allocated_shop = next(
-                (
-                    shop_key
-                    for shop_key, total_ratio in ratio_by_shop.items()
-                    if total_ratio > 1.000001
-                ),
-                None,
-            )
-            if over_allocated_shop is not None:
-                return error_response(
-                    ErrorCode.PARAMETER_INVALID,
-                    f"店铺 {over_allocated_shop[1]} 的员工提成比例总和不能超过 100%",
-                    status_code=409,
-                )
-        basis_version = await LaborCostPolicyService(db).get_profit_basis_version(
-            record.year_month
-        )
-        await ProfitBasisService(db).lock_profit_basis_snapshots_for_assignments(
-            year_month=record.year_month,
-            assignments=assignments,
-            basis_version=basis_version,
-            commit=False,
-        )
-        if (
-            getattr(getattr(getattr(db, "bind", None), "dialect", None), "name", None)
-            == "postgresql"
-        ):
-            await period_lock.assert_month_mutable(year_month=record.year_month)
-        record.status = "confirmed"
-        locked_at = datetime.now(timezone.utc)
-        for allocation in allocations:
-            allocation.source_payroll_status = "confirmed"
-            allocation.calculation_status = "confirmed"
-            allocation.pre_commission_locked_at = locked_at
-        await db.commit()
-        await db.refresh(record)
+        record = await PayrollConfirmationService(db).confirm_record(record_id)
         return _payroll_success(record)
-    except (PayrollPeriodLockedError, ValueError) as exc:
+    except (PayrollPeriodLockedError, PayrollConfirmationError, ValueError) as exc:
         await db.rollback()
         return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         await db.rollback()
-        logger.error("确认工资单失败: %s", e, exc_info=True)
+        logger.error(f"确认工资单失败: {e}", exc_info=True)
         return error_response(
             ErrorCode.INTERNAL_SERVER_ERROR,
             f"确认工资单失败: {str(e)}",
+            status_code=500,
+        )
+
+
+@router.post("/payroll-records/confirm-batch")
+async def confirm_payroll_records_batch(
+    body: PayrollBatchConfirmRequest,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """整月批量确认工资单：全部校验通过才整体提交。
+
+    失败时返回 ``data.issues``，逐条说明「哪个人、缺什么」，便于前端直接渲染待办。
+    """
+    try:
+        result = await PayrollConfirmationService(db).confirm_month(body.year_month)
+        return {"success": True, "data": result}
+    except (PayrollPeriodLockedError, PayrollConfirmationError, ValueError) as exc:
+        await db.rollback()
+        issues = list(getattr(exc, "issues", []) or [])
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(exc),
+            status_code=409,
+            data={"issues": issues},
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"批量确认工资单失败: {e}", exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"批量确认工资单失败: {str(e)}",
+            status_code=500,
+        )
+
+
+@router.get("/monthly-settlement")
+async def get_monthly_settlement(
+    year_month: str = Query(
+        ..., pattern=r"^\d{4}-\d{2}$", description="目标月份 YYYY-MM"
+    ),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """月度结算单：把一个月的结算事实聚成一页（只读）。
+
+    回答三个问题：
+    * 这个月发了多少钱、每个人拿了多少？
+    * 哪些店不参与考核、哪些店亏了？
+    * 谁卡住了、缺什么、去哪补？
+
+    这里**不做二次计算**：金额直接取已落库的绩效/提成/工资单，
+    所以这一页看到的，就是工资单实发的。
+    """
+    try:
+        result = await MonthlySettlementService(db).build(year_month)
+        return {"success": True, "data": result}
+    except Exception as e:
+        logger.error(f"获取月度结算单失败: {e}", exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取月度结算单失败: {str(e)}",
             status_code=500,
         )
 

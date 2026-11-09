@@ -91,3 +91,27 @@ async def lock_profit_basis(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return success_response(data=payload)
+
+
+@router.post("/profit-basis/reopen")
+async def reopen_profit_basis(
+    body: ProfitBasisRebuildRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _current_user=Depends(_require_finance_role),
+):
+    """重开（解锁）已锁定的利润基数。
+
+    锁定不再连带锁死人力成本分摊；发现归属或成本填错时，显式重开后重算，
+    不会把整月卡在「无法修改」的状态。
+    """
+    service = ProfitBasisService(db)
+    try:
+        payload = await service.reopen_profit_basis_snapshot(
+            year_month=body.period_month,
+            platform_code=body.platform_code,
+            shop_id=body.shop_id,
+            basis_version=body.basis_version,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return success_response(data=payload)

@@ -27,6 +27,7 @@ from backend.schemas.hr import (
 )
 from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from backend.services.base_service import provide_service
+from backend.services.labor_cost_policy_service import LaborCostPolicyService
 from backend.services.payroll_period_lock_service import PAYROLL_LOCKED_STATUSES
 from backend.utils.year_month_utils import year_month_to_first_day
 from modules.core.db import (
@@ -537,16 +538,29 @@ async def _build_employee_income_audit(
                 )
             )
         ).scalar_one_or_none()
-        profit_basis = (
+        profit_basis_rows = (
             await db.execute(
-                select(ShopProfitBasis).where(
+                select(ShopProfitBasis)
+                .where(
                     ShopProfitBasis.period_month == year_month,
                     ShopProfitBasis.platform_code == platform_code,
                     ShopProfitBasis.shop_id == shop_id,
-                    ShopProfitBasis.basis_version == "A_ONLY_V1",
                 )
+                .order_by(ShopProfitBasis.id.desc())
             )
-        ).scalar_one_or_none()
+        ).scalars().all()
+        # 口径已收敛成一套，这里按「结算基数口径优先」取那一条，
+        # 不能再按具体版本字符串硬查（历史快照可能留的是旧版本号）。
+        profit_basis = next(
+            (
+                row
+                for row in profit_basis_rows
+                if not LaborCostPolicyService.is_legacy_a_only_basis_version(
+                    getattr(row, "basis_version", "")
+                )
+            ),
+            profit_basis_rows[0] if profit_basis_rows else None,
+        )
         shop_rows.append(
             {
                 "platform_code": platform_code,

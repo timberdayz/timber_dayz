@@ -19,9 +19,11 @@
 - GET /api/expenses/summary - 按月汇总统计
 
 注意:
-- 使用 a_class.operating_costs 表(中文字段名)
-- 底层物理列已迁移为 "营销费用"
-- 字段: 店铺ID, 年月, 租金, 营销费用, 水电费, AI Token费用, 人力费用, 其他成本
+- 使用 a_class.operating_costs 表(物理列名已统一为英文，第三批-B)
+- 字段: shop_id, year_month, rent_amount, marketing_amount, utility_amount,
+  ai_token_amount, labor_amount, other_amount, total_amount, remark,
+  attachments, is_locked, platform_code, created_at, updated_at,
+  deleted_at, deleted_by
 """
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
@@ -309,20 +311,20 @@ async def get_expense_summary(
             query = text(
                 """
                 SELECT 
-                    "年月",
-                    COUNT(DISTINCT "店铺ID") as shop_count,
-                    COALESCE(SUM("租金"), 0) as total_rent,
-                    COALESCE(SUM("营销费用"), 0) as total_marketing_fee,
-                    COALESCE(SUM("水电费"), 0) as total_utilities,
-                    COALESCE(SUM("AI Token费用"), 0) as total_ai_token_cost,
-                    COALESCE(SUM("人力费用"), 0) as total_labor_cost,
-                    COALESCE(SUM("其他成本"), 0) as total_other_costs,
-                    COALESCE(SUM("成本合计"), 0) as total_amount
+                    year_month,
+                    COUNT(DISTINCT shop_id) as shop_count,
+                    COALESCE(SUM(rent_amount), 0) as total_rent,
+                    COALESCE(SUM(marketing_amount), 0) as total_marketing_fee,
+                    COALESCE(SUM(utility_amount), 0) as total_utilities,
+                    COALESCE(SUM(ai_token_amount), 0) as total_ai_token_cost,
+                    COALESCE(SUM(labor_amount), 0) as total_labor_cost,
+                    COALESCE(SUM(other_amount), 0) as total_other_costs,
+                    COALESCE(SUM(total_amount), 0) as total_amount
                 FROM a_class.operating_costs
-                WHERE "年月" = :year_month
-                  AND "删除时间" IS NULL
-                GROUP BY "年月"
-                ORDER BY "年月" DESC
+                WHERE year_month = :year_month
+                  AND deleted_at IS NULL
+                GROUP BY year_month
+                ORDER BY year_month DESC
             """
             )
             result = await db.execute(query, {"year_month": year_month})
@@ -330,19 +332,19 @@ async def get_expense_summary(
             query = text(
                 """
                 SELECT 
-                    "年月",
-                    COUNT(DISTINCT "店铺ID") as shop_count,
-                    COALESCE(SUM("租金"), 0) as total_rent,
-                    COALESCE(SUM("营销费用"), 0) as total_marketing_fee,
-                    COALESCE(SUM("水电费"), 0) as total_utilities,
-                    COALESCE(SUM("AI Token费用"), 0) as total_ai_token_cost,
-                    COALESCE(SUM("人力费用"), 0) as total_labor_cost,
-                    COALESCE(SUM("其他成本"), 0) as total_other_costs,
-                    COALESCE(SUM("成本合计"), 0) as total_amount
+                    year_month,
+                    COUNT(DISTINCT shop_id) as shop_count,
+                    COALESCE(SUM(rent_amount), 0) as total_rent,
+                    COALESCE(SUM(marketing_amount), 0) as total_marketing_fee,
+                    COALESCE(SUM(utility_amount), 0) as total_utilities,
+                    COALESCE(SUM(ai_token_amount), 0) as total_ai_token_cost,
+                    COALESCE(SUM(labor_amount), 0) as total_labor_cost,
+                    COALESCE(SUM(other_amount), 0) as total_other_costs,
+                    COALESCE(SUM(total_amount), 0) as total_amount
                 FROM a_class.operating_costs
-                WHERE "删除时间" IS NULL
-                GROUP BY "年月"
-                ORDER BY "年月" DESC
+                WHERE deleted_at IS NULL
+                GROUP BY year_month
+                ORDER BY year_month DESC
             """
             )
             result = await db.execute(query)
@@ -405,18 +407,18 @@ async def get_yearly_expense_summary(
         query = text(
             """
             SELECT 
-                COALESCE(SUM("租金"), 0) as total_rent,
-                COALESCE(SUM("营销费用"), 0) as total_marketing_fee,
-                COALESCE(SUM("水电费"), 0) as total_utilities,
-                COALESCE(SUM("AI Token费用"), 0) as total_ai_token_cost,
-                COALESCE(SUM("人力费用"), 0) as total_labor_cost,
-                COALESCE(SUM("其他成本"), 0) as total_other_costs,
-                COALESCE(SUM("成本合计"), 0) as total_amount,
-                COUNT(DISTINCT "店铺ID") as shop_count,
-                COUNT(DISTINCT "年月") as month_count
+                COALESCE(SUM(rent_amount), 0) as total_rent,
+                COALESCE(SUM(marketing_amount), 0) as total_marketing_fee,
+                COALESCE(SUM(utility_amount), 0) as total_utilities,
+                COALESCE(SUM(ai_token_amount), 0) as total_ai_token_cost,
+                COALESCE(SUM(labor_amount), 0) as total_labor_cost,
+                COALESCE(SUM(other_amount), 0) as total_other_costs,
+                COALESCE(SUM(total_amount), 0) as total_amount,
+                COUNT(DISTINCT shop_id) as shop_count,
+                COUNT(DISTINCT year_month) as month_count
             FROM a_class.operating_costs
-            WHERE "年月" LIKE :year_pattern
-              AND "删除时间" IS NULL
+            WHERE year_month LIKE :year_pattern
+              AND deleted_at IS NULL
         """
         )
         db_result = await db.execute(query, {"year_pattern": f"{year}-%"})
@@ -471,7 +473,7 @@ async def get_yearly_expense_summary(
 
 @router.get("/by-shop", response_model=Dict[str, Any])
 async def list_expenses_by_shop(
-    shop_id: str = Query(..., description="店铺ID"),
+    shop_id: str = Query(..., description='店铺ID'),
     year: Optional[str] = Query(None, description="年份(YYYY)，不传则返回所有数据"),
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(get_current_user),
@@ -483,11 +485,11 @@ async def list_expenses_by_shop(
     """
     try:
         # 构建WHERE条件
-        where_clause = '"店铺ID" = :shop_id'
+        where_clause = 'shop_id = :shop_id'
         params = {"shop_id": shop_id}
 
         if year:
-            where_clause += ' AND "年月" LIKE :year_pattern'
+            where_clause += ' AND year_month LIKE :year_pattern'
             params["year_pattern"] = f"{year}-%"
 
         # 查询该店铺的费用数据
@@ -495,25 +497,25 @@ async def list_expenses_by_shop(
             f"""
             SELECT 
                 id,
-                "店铺ID" as shop_id,
+                shop_id,
                 "platform_code" as platform_code,
-                "年月" as year_month,
-                "租金" as rent,
-                "营销费用" as marketing_fee,
-                "水电费" as utilities,
-                "AI Token费用" as ai_token_cost,
-                "人力费用" as labor_cost,
-                "其他成本" as other_costs,
-                "成本合计" as total_cost,
-                "备注" as note,
-                "附件" as attachments,
-                "是否锁定" as locked,
-                "创建时间" as created_at,
-                "更新时间" as updated_at
+                year_month,
+                rent_amount as rent,
+                marketing_amount as marketing_fee,
+                utility_amount as utilities,
+                ai_token_amount as ai_token_cost,
+                labor_amount as labor_cost,
+                other_amount as other_costs,
+                total_amount as total_cost,
+                remark as note,
+                attachments,
+                is_locked as locked,
+                created_at,
+                updated_at
             FROM a_class.operating_costs
             WHERE {where_clause}
-              AND "删除时间" IS NULL
-            ORDER BY "年月" ASC
+              AND deleted_at IS NULL
+            ORDER BY year_month ASC
         """
         )
 
@@ -611,7 +613,7 @@ async def list_expenses(
     """
     查询费用列表(支持分页和筛选)
 
-    注意:使用原始SQL查询，因为数据库表使用中文字段名
+    注意:使用原始SQL查询（物理列名已统一为英文，第三批-B）
     """
     try:
         # 构建WHERE条件
@@ -619,10 +621,10 @@ async def list_expenses(
         params = {}
 
         if shop_id:
-            where_conditions.append('"店铺ID" = :shop_id')
+            where_conditions.append('shop_id = :shop_id')
             params["shop_id"] = shop_id
         if year_month:
-            where_conditions.append('"年月" = :year_month')
+            where_conditions.append('year_month = :year_month')
             params["year_month"] = year_month
 
         where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
@@ -633,36 +635,36 @@ async def list_expenses(
             SELECT COUNT(*) 
             FROM a_class.operating_costs 
             WHERE {where_clause}
-              AND "删除时间" IS NULL
+              AND deleted_at IS NULL
         """
         )
         total = (await db.execute(count_query, params)).scalar() or 0
 
-        # 分页查询(使用中文字段名)
+        # 分页查询（物理列名已统一为英文，第三批-B）
         offset = (page - 1) * page_size
         data_query = text(
             f"""
             SELECT 
                 id,
-                "店铺ID" as shop_id,
+                shop_id,
                 "platform_code" as platform_code,
-                "年月" as year_month,
-                "租金" as rent,
-                "营销费用" as marketing_fee,
-                "水电费" as utilities,
-                "AI Token费用" as ai_token_cost,
-                "人力费用" as labor_cost,
-                "其他成本" as other_costs,
-                "成本合计" as total_cost,
-                "备注" as note,
-                "附件" as attachments,
-                "是否锁定" as locked,
-                "创建时间" as created_at,
-                "更新时间" as updated_at
+                year_month,
+                rent_amount as rent,
+                marketing_amount as marketing_fee,
+                utility_amount as utilities,
+                ai_token_amount as ai_token_cost,
+                labor_amount as labor_cost,
+                other_amount as other_costs,
+                total_amount as total_cost,
+                remark as note,
+                attachments,
+                is_locked as locked,
+                created_at,
+                updated_at
             FROM a_class.operating_costs
             WHERE {where_clause}
-              AND "删除时间" IS NULL
-            ORDER BY "年月" DESC, "店铺ID"
+              AND deleted_at IS NULL
+            ORDER BY year_month DESC, shop_id
             LIMIT :limit OFFSET :offset
         """
         )
@@ -746,42 +748,42 @@ async def list_deleted_expenses(
 ):
     """查询已删除费用记录（软删除记录）"""
     try:
-        where_conditions = ['"删除时间" IS NOT NULL']
+        where_conditions = ['deleted_at IS NOT NULL']
         params = {}
         if shop_id:
-            where_conditions.append('"店铺ID" = :shop_id')
+            where_conditions.append('shop_id = :shop_id')
             params["shop_id"] = shop_id
         if year_month:
-            where_conditions.append('"年月" = :year_month')
+            where_conditions.append('year_month = :year_month')
             params["year_month"] = year_month
         if year:
-            where_conditions.append('"年月" LIKE :year_pattern')
+            where_conditions.append('year_month LIKE :year_pattern')
             params["year_pattern"] = f"{year}-%"
 
         query = text(
             f"""
             SELECT
                 id,
-                "店铺ID" as shop_id,
+                shop_id,
                 "platform_code" as platform_code,
-                "年月" as year_month,
-                "租金" as rent,
-                "营销费用" as marketing_fee,
-                "水电费" as utilities,
-                "AI Token费用" as ai_token_cost,
-                "人力费用" as labor_cost,
-                "其他成本" as other_costs,
-                "成本合计" as total_cost,
-                "备注" as note,
-                "附件" as attachments,
-                "是否锁定" as locked,
-                "删除时间" as deleted_at,
-                "删除人" as deleted_by,
-                "创建时间" as created_at,
-                "更新时间" as updated_at
+                year_month,
+                rent_amount as rent,
+                marketing_amount as marketing_fee,
+                utility_amount as utilities,
+                ai_token_amount as ai_token_cost,
+                labor_amount as labor_cost,
+                other_amount as other_costs,
+                total_amount as total_cost,
+                remark as note,
+                attachments,
+                is_locked as locked,
+                deleted_at,
+                deleted_by,
+                created_at,
+                updated_at
             FROM a_class.operating_costs
             WHERE {' AND '.join(where_conditions)}
-            ORDER BY "删除时间" DESC, "更新时间" DESC
+            ORDER BY deleted_at DESC, updated_at DESC
         """
         )
         result = await db.execute(query, params)
@@ -849,31 +851,31 @@ async def get_expense(
     """
     查询费用详情
 
-    注意:使用原始SQL查询，因为数据库表使用中文字段名
+    注意:使用原始SQL查询（物理列名已统一为英文，第三批-B）
     """
     try:
         query = text(
             """
             SELECT 
                 id,
-                "店铺ID" as shop_id,
+                shop_id,
                 "platform_code" as platform_code,
-                "年月" as year_month,
-                "租金" as rent,
-                "营销费用" as marketing_fee,
-                "水电费" as utilities,
-                "AI Token费用" as ai_token_cost,
-                "人力费用" as labor_cost,
-                "其他成本" as other_costs,
-                "成本合计" as total_cost,
-                "备注" as note,
-                "附件" as attachments,
-                "是否锁定" as locked,
-                "创建时间" as created_at,
-                "更新时间" as updated_at
+                year_month,
+                rent_amount as rent,
+                marketing_amount as marketing_fee,
+                utility_amount as utilities,
+                ai_token_amount as ai_token_cost,
+                labor_amount as labor_cost,
+                other_amount as other_costs,
+                total_amount as total_cost,
+                remark as note,
+                attachments,
+                is_locked as locked,
+                created_at,
+                updated_at
             FROM a_class.operating_costs
             WHERE id = :expense_id
-              AND "删除时间" IS NULL
+              AND deleted_at IS NULL
         """
         )
 
@@ -946,7 +948,7 @@ async def create_or_update_expense(
 
     如果该店铺该月份已有费用记录，则更新；否则创建新记录
 
-    注意:使用原始SQL执行upsert，因为数据库表使用中文字段名
+    注意:使用原始SQL执行upsert（物理列名已统一为英文，第三批-B）
     """
     try:
         if request.labor_cost > 0 and not await LaborCostPolicyService(
@@ -961,12 +963,12 @@ async def create_or_update_expense(
             )
         lock_check = text(
             """
-            SELECT COALESCE("是否锁定", false) AS locked
+            SELECT COALESCE(is_locked, false) AS locked
             FROM a_class.operating_costs
             WHERE COALESCE("platform_code", '') = :platform_code
-              AND "店铺ID" = :shop_id
-              AND "年月" = :year_month
-              AND "删除时间" IS NULL
+              AND shop_id = :shop_id
+              AND year_month = :year_month
+              AND deleted_at IS NULL
             """
         )
         requested_platform_code = await _ensure_platform_code(
@@ -1018,39 +1020,39 @@ async def create_or_update_expense(
         upsert_query = text(
             """
             INSERT INTO a_class.operating_costs 
-                ("店铺ID", "platform_code", "年月", "租金", "营销费用", "水电费", "AI Token费用", "人力费用", "其他成本", "成本合计", "备注", "附件", "创建时间", "更新时间")
+                (shop_id, "platform_code", year_month, rent_amount, marketing_amount, utility_amount, ai_token_amount, labor_amount, other_amount, total_amount, remark, attachments, created_at, updated_at)
             VALUES 
                 (:shop_id, :platform_code, :year_month, :rent, :marketing_fee, :utilities, :ai_token_cost, :labor_cost, :other_costs, :total_cost, :note, CAST(:attachments AS jsonb), NOW(), NOW())
-            ON CONFLICT ("platform_code", "店铺ID", "年月") 
+            ON CONFLICT ("platform_code", shop_id, year_month) 
             DO UPDATE SET 
                 "platform_code" = EXCLUDED."platform_code",
-                "租金" = EXCLUDED."租金",
-                "营销费用" = EXCLUDED."营销费用",
-                "水电费" = EXCLUDED."水电费",
-                "AI Token费用" = EXCLUDED."AI Token费用",
-                "人力费用" = EXCLUDED."人力费用",
-                "其他成本" = EXCLUDED."其他成本",
-                "成本合计" = EXCLUDED."成本合计",
-                "备注" = EXCLUDED."备注",
-                "附件" = EXCLUDED."附件",
-                "更新时间" = NOW()
+                rent_amount = EXCLUDED.rent_amount,
+                marketing_amount = EXCLUDED.marketing_amount,
+                utility_amount = EXCLUDED.utility_amount,
+                ai_token_amount = EXCLUDED.ai_token_amount,
+                labor_amount = EXCLUDED.labor_amount,
+                other_amount = EXCLUDED.other_amount,
+                total_amount = EXCLUDED.total_amount,
+                remark = EXCLUDED.remark,
+                attachments = EXCLUDED.attachments,
+                updated_at = NOW()
             RETURNING 
                 id,
-                "店铺ID" as shop_id,
+                shop_id,
                 "platform_code" as platform_code,
-                "年月" as year_month,
-                "租金" as rent,
-                "营销费用" as marketing_fee,
-                "水电费" as utilities,
-                "AI Token费用" as ai_token_cost,
-                "人力费用" as labor_cost,
-                "其他成本" as other_costs,
-                "成本合计" as total_cost,
-                "备注" as note,
-                "附件" as attachments,
-                "是否锁定" as locked,
-                "创建时间" as created_at,
-                "更新时间" as updated_at
+                year_month,
+                rent_amount as rent,
+                marketing_amount as marketing_fee,
+                utility_amount as utilities,
+                ai_token_amount as ai_token_cost,
+                labor_amount as labor_cost,
+                other_amount as other_costs,
+                total_amount as total_cost,
+                remark as note,
+                attachments,
+                is_locked as locked,
+                created_at,
+                updated_at
         """
         )
 
@@ -1148,7 +1150,7 @@ async def update_expense(
     """
     更新费用
 
-    注意:使用原始SQL查询和更新，因为数据库表使用中文字段名
+    注意:使用原始SQL查询和更新（物理列名已统一为英文，第三批-B）
     """
     try:
         # 先查询现有记录
@@ -1156,21 +1158,21 @@ async def update_expense(
             """
             SELECT 
                 id,
-                "店铺ID" as shop_id,
+                shop_id,
                 "platform_code" as platform_code,
-                "年月" as year_month,
-                "租金" as rent,
-                "营销费用" as marketing_fee,
-                "水电费" as utilities,
-                "AI Token费用" as ai_token_cost,
-                "人力费用" as labor_cost,
-                "其他成本" as other_costs,
-                "备注" as note,
-                "附件" as attachments,
-                "是否锁定" as locked
+                year_month,
+                rent_amount as rent,
+                marketing_amount as marketing_fee,
+                utility_amount as utilities,
+                ai_token_amount as ai_token_cost,
+                labor_amount as labor_cost,
+                other_amount as other_costs,
+                remark as note,
+                attachments,
+                is_locked as locked
             FROM a_class.operating_costs
             WHERE id = :expense_id
-              AND "删除时间" IS NULL
+              AND deleted_at IS NULL
         """
         )
 
@@ -1216,49 +1218,49 @@ async def update_expense(
         update_fields.append('"platform_code" = :platform_code')
         params["platform_code"] = platform_code
         if "rent" in update_data:
-            update_fields.append('"租金" = :rent')
+            update_fields.append('rent_amount = :rent')
             params["rent"] = update_data["rent"]
         else:
             params["rent"] = float(row.rent or 0)
 
         if "marketing_fee" in update_data:
-            update_fields.append('"营销费用" = :marketing_fee')
+            update_fields.append('marketing_amount = :marketing_fee')
             params["marketing_fee"] = update_data["marketing_fee"]
         else:
             params["marketing_fee"] = float(row.marketing_fee or 0)
 
         if "utilities" in update_data:
-            update_fields.append('"水电费" = :utilities')
+            update_fields.append('utility_amount = :utilities')
             params["utilities"] = update_data["utilities"]
         else:
             params["utilities"] = float(row.utilities or 0)
 
         if "ai_token_cost" in update_data:
-            update_fields.append('"AI Token费用" = :ai_token_cost')
+            update_fields.append('ai_token_amount = :ai_token_cost')
             params["ai_token_cost"] = update_data["ai_token_cost"]
         else:
             params["ai_token_cost"] = float(getattr(row, "ai_token_cost", 0) or 0)
 
         if "labor_cost" in update_data:
-            update_fields.append('"人力费用" = :labor_cost')
+            update_fields.append('labor_amount = :labor_cost')
             params["labor_cost"] = update_data["labor_cost"]
         else:
             params["labor_cost"] = float(getattr(row, "labor_cost", 0) or 0)
 
         if "other_costs" in update_data:
-            update_fields.append('"其他成本" = :other_costs')
+            update_fields.append('other_amount = :other_costs')
             params["other_costs"] = update_data["other_costs"]
         else:
             params["other_costs"] = float(row.other_costs or 0)
 
         if "note" in update_data:
-            update_fields.append('"备注" = :note')
+            update_fields.append('remark = :note')
             params["note"] = update_data["note"]
         else:
             params["note"] = getattr(row, "note", None)
 
         if "attachments" in update_data:
-            update_fields.append('"附件" = CAST(:attachments AS jsonb)')
+            update_fields.append('attachments = CAST(:attachments AS jsonb)')
             params["attachments"] = json.dumps(
                 update_data["attachments"] or [], ensure_ascii=False
             )
@@ -1276,7 +1278,7 @@ async def update_expense(
             params["labor_cost"],
             params["other_costs"],
         )
-        update_fields.append('"成本合计" = :total_cost')
+        update_fields.append('total_amount = :total_cost')
         params["total_cost"] = total_cost
 
         if not update_fields:
@@ -1292,25 +1294,25 @@ async def update_expense(
         update_query = text(
             f"""
             UPDATE a_class.operating_costs
-            SET {', '.join(update_fields)}, "更新时间" = NOW()
+            SET {', '.join(update_fields)}, updated_at = NOW()
             WHERE id = :expense_id
             RETURNING 
                 id,
-                "店铺ID" as shop_id,
+                shop_id,
                 "platform_code" as platform_code,
-                "年月" as year_month,
-                "租金" as rent,
-                "营销费用" as marketing_fee,
-                "水电费" as utilities,
-                "AI Token费用" as ai_token_cost,
-                "人力费用" as labor_cost,
-                "其他成本" as other_costs,
-                "成本合计" as total_cost,
-                "备注" as note,
-                "附件" as attachments,
-                "是否锁定" as locked,
-                "创建时间" as created_at,
-                "更新时间" as updated_at
+                year_month,
+                rent_amount as rent,
+                marketing_amount as marketing_fee,
+                utility_amount as utilities,
+                ai_token_amount as ai_token_cost,
+                labor_amount as labor_cost,
+                other_amount as other_costs,
+                total_amount as total_cost,
+                remark as note,
+                attachments,
+                is_locked as locked,
+                created_at,
+                updated_at
         """
         )
 
@@ -1378,13 +1380,13 @@ async def delete_expense(
     """
     删除费用（软删除）
 
-    注意:使用原始SQL删除，因为数据库表使用中文字段名
+    注意:使用原始SQL删除（物理列名已统一为英文，第三批-B）
     """
     try:
         # 先检查记录是否存在
         check_query = text(
             """
-            SELECT id FROM a_class.operating_costs WHERE id = :expense_id AND "删除时间" IS NULL
+            SELECT id FROM a_class.operating_costs WHERE id = :expense_id AND deleted_at IS NULL
         """
         )
         result = await db.execute(check_query, {"expense_id": expense_id})
@@ -1400,9 +1402,9 @@ async def delete_expense(
         delete_query = text(
             """
             UPDATE a_class.operating_costs
-            SET "删除时间" = NOW(),
-                "删除人" = :deleted_by,
-                "更新时间" = NOW()
+            SET deleted_at = NOW(),
+                deleted_by = :deleted_by,
+                updated_at = NOW()
             WHERE id = :expense_id
         """
         )
@@ -1440,7 +1442,7 @@ async def restore_expense(
             SELECT id
             FROM a_class.operating_costs
             WHERE id = :expense_id
-              AND "删除时间" IS NOT NULL
+              AND deleted_at IS NOT NULL
         """
         )
         result = await db.execute(check_query, {"expense_id": expense_id})
@@ -1456,9 +1458,9 @@ async def restore_expense(
         restore_query = text(
             """
             UPDATE a_class.operating_costs
-            SET "删除时间" = NULL,
-                "删除人" = NULL,
-                "更新时间" = NOW()
+            SET deleted_at = NULL,
+                deleted_by = NULL,
+                updated_at = NOW()
             WHERE id = :expense_id
         """
         )

@@ -111,7 +111,7 @@ class FollowInvestmentService:
         year_month: str,
         platform_code: str,
         shop_id: str,
-        basis_version: str = "A_ONLY_V1",
+        basis_version: str = "SETTLEMENT_BASIS_V1",
     ) -> dict[str, Any] | None:
         if self.db is None:
             return None

@@ -487,7 +487,7 @@ async def list_targets(
                 message="数据库表结构不完整",
                 error_type="DatabaseSchemaError",
                 detail=f"数据库表缺少必要的列，请执行迁移: alembic upgrade head",
-                recovery_suggestion="请运行诊断脚本: python scripts/diagnose_targets_db.py",
+                recovery_suggestion="请先执行迁移: alembic upgrade head，再重试该接口",
                 status_code=500,
             )
         elif "relation" in error_str.lower() and "does not exist" in error_str:
@@ -496,7 +496,7 @@ async def list_targets(
                 message="数据库表不存在",
                 error_type="DatabaseSchemaError",
                 detail=f"a_class.sales_targets 表不存在，请执行迁移: alembic upgrade head",
-                recovery_suggestion="请运行诊断脚本: python scripts/diagnose_targets_db.py",
+                recovery_suggestion="请先执行迁移: alembic upgrade head，再重试该接口",
                 status_code=500,
             )
 
@@ -560,7 +560,7 @@ async def list_target_shops(
                 message="店铺数据表不完整",
                 error_type="DatabaseSchemaError",
                 detail="platform_accounts 表可能不存在或缺少必要字段",
-                recovery_suggestion="请运行诊断脚本: python scripts/diagnose_targets_db.py",
+                recovery_suggestion="请先执行迁移: alembic upgrade head，再重试该接口",
                 status_code=500,
             )
 

@@ -43,8 +43,45 @@ from backend.services.postgresql_shop_metrics_service import load_shop_monthly_m
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
 from backend.services.payroll_period_lock_service import PayrollPeriodLockService
 from backend.services.payroll_generation_service import PayrollGenerationService
+from backend.services.commission_reason_service import commission_zero_reason
+from backend.services.performance_coefficient import (
+    calculate_score_coefficient,
+    calculate_settlement_coefficient,
+    describe_settlement_coefficient,
+)
 
 logger = get_logger(__name__)
+
+
+def _absorb_commission_rounding_residue(
+    shop_coefficients: list[dict[str, Any]],
+    total_amount: float,
+) -> None:
+    """把逐店舍入产生的尾差并到金额最大的那家店。
+
+    提成总额的口径是「各店未舍入金额累加后统一舍入一次」，
+    而逐店明细各自舍入后再相加可能差 1 分。这笔尾差必须有归属，
+    否则运营在页面上按店加起来永远对不上工资单。
+
+    这里**只调整逐店明细的展示值**，不碰总额、不碰工资单。
+    """
+    if not shop_coefficients:
+        return
+    total_rounded = round(float(total_amount or 0.0), 2)
+    displayed_sum = round(
+        sum(float(item.get("commission_amount") or 0.0) for item in shop_coefficients),
+        2,
+    )
+    residue = round(total_rounded - displayed_sum, 2)
+    if abs(residue) < 0.005:
+        return
+    target = max(
+        shop_coefficients,
+        key=lambda item: float(item.get("commission_amount") or 0.0),
+    )
+    target["commission_amount"] = round(
+        float(target.get("commission_amount") or 0.0) + residue, 2
+    )
 
 
 class HRIncomeCalculationService:
@@ -480,7 +517,9 @@ class HRIncomeCalculationService:
                 await self.db.execute(
                     select(ShopProfitBasis).where(
                         ShopProfitBasis.period_month == year_month,
-                        ShopProfitBasis.basis_version == LaborCostPolicyService.V2,
+                        ShopProfitBasis.basis_version.in_(
+                            LaborCostPolicyService.KNOWN_BASIS_VERSIONS
+                        ),
                     )
                 )
             )
@@ -488,7 +527,11 @@ class HRIncomeCalculationService:
             .all()
         )
         for row in snapshot_rows:
-            if getattr(row, "basis_version", None) != LaborCostPolicyService.V2:
+            # 只认「结算基数口径」的快照（当前口径 + 历史同口径版本）；
+            # 「仅 A 类成本」的历史快照不参与工资与提成计算。
+            if LaborCostPolicyService.is_legacy_a_only_basis_version(
+                getattr(row, "basis_version", None)
+            ):
                 continue
             key = self._shop_key(
                 getattr(row, "platform_code", None),
@@ -840,6 +883,393 @@ class HRIncomeCalculationService:
             return fallback, "salary_structure_fallback"
         return 0.0, "missing"
 
+    def _resolve_employee_performance_profile(
+        self,
+        employee_code: str,
+        *,
+        agg: Dict[str, Any],
+        input_score_by_employee: Mapping[str, float],
+        pending_input_employee_codes: set[str],
+        assigned_codes: set[str],
+        controlled_mode: bool,
+        controlled_result: Optional[Dict[str, Any]] = None,
+        attendance_adjustment_by_employee: Optional[Mapping[str, float]] = None,
+        manual_adjustment_by_employee: Optional[Mapping[str, float]] = None,
+    ) -> Dict[str, Any]:
+        """解析一个人当月的绩效画像：分数 / 状态 / 来源 / 分数档位系数。
+
+        提成和绩效工资必须用**同一个**分数档位系数，所以这里只解析一次，
+        两个口子共用同一份画像 —— 否则就会出现「提成按 A 系数、绩效工资按 B 系数」。
+
+        返回::
+
+            {
+                "performance_score": float | None,
+                "calculation_status": str,
+                "performance_source_type": str,
+                "score_coefficient": float | None,   # 个人分数档位系数
+            }
+        """
+        attendance_adjustment_by_employee = attendance_adjustment_by_employee or {}
+        manual_adjustment_by_employee = manual_adjustment_by_employee or {}
+
+        performance_score: Optional[float]
+        if controlled_mode:
+            if controlled_result is None:
+                # 受控月份里不在个人考核范围内的人：不参与考核，
+                # 没有个人分数，也就没有「个人分数档位系数」这一层约束。
+                performance_score = None
+                calculation_status = "not_participating"
+                performance_source_type = "controlled_targets_v1"
+            else:
+                performance_score = controlled_result.get("performance_score")
+                calculation_status = str(
+                    controlled_result.get("calculation_status") or "pending_scope"
+                )
+                performance_source_type = str(
+                    controlled_result.get("performance_source_type")
+                    or "controlled_targets_v1"
+                )
+        else:
+            calculation_status = "complete"
+            performance_source_type = "shop_inherited"
+            if employee_code in input_score_by_employee:
+                performance_score = input_score_by_employee[employee_code]
+                performance_source_type = "personal_inputs"
+            elif self._to_float(agg.get("weighted_score_den"), 0.0) > 0:
+                performance_score = (
+                    self._to_float(agg.get("weighted_score_num"), 0.0)
+                    / self._to_float(agg.get("weighted_score_den"), 0.0)
+                )
+            elif employee_code in pending_input_employee_codes:
+                performance_score = None
+                calculation_status = "pending_personal_input"
+            else:
+                performance_score = None
+                if employee_code in assigned_codes:
+                    calculation_status = "pending_store_performance"
+                    performance_source_type = "pending"
+                else:
+                    # 既没有店铺归属，也没有个人绩效录入：明确记为「不参与考核」。
+                    # 这类人（如总部、仓库、客服）不阻断整月结算，工资照常确认。
+                    calculation_status = "not_participating"
+                    performance_source_type = "not_participating"
+
+        if performance_score is not None:
+            performance_score += self._to_float(
+                attendance_adjustment_by_employee.get(employee_code), 0.0
+            )
+            performance_score += self._to_float(
+                manual_adjustment_by_employee.get(employee_code), 0.0
+            )
+            performance_score = min(max(performance_score, 0.0), 100.0)
+
+        score_coefficient = (
+            calculate_score_coefficient(performance_score)
+            if performance_score is not None
+            else None
+        )
+        return {
+            "performance_score": performance_score,
+            "calculation_status": calculation_status,
+            "performance_source_type": performance_source_type,
+            "score_coefficient": score_coefficient,
+        }
+
+    async def build_settlement_preview(self, year_month: str) -> Dict[str, Any]:
+        """结算预览：谁在哪家店、系数多少、预计拿到多少钱。
+
+        **只读，不写库。** 页面上的钱一律以这里为准 ——
+        前端不再自己算「可分配利润 × 提成比例 × 系数」。
+
+        数据来源与 :meth:`calculate_month` 完全一致：
+
+        * 已算好的个人绩效（``c_class.employee_performance``）→ 个人分数档位系数
+        * 已算好的店铺绩效（``c_class.performance_scores``）→ 店铺结算系数
+        * 利润基数（``finance.shop_profit_basis``）+ 可分配率配置 → 可分配利润
+        * 归属关系（``a_class.employee_shop_assignments``）→ 归属提成比
+
+        返回结构::
+
+            {
+              "year_month": "2026-10",
+              "employees": [
+                {
+                  "employee_code": "EMP260001",
+                  "performance_score": 85.0,
+                  "score_coefficient": 1.0,
+                  "settlement_coefficient": 1.0,
+                  "calculation_status": "complete",
+                  "expected_commission": 279.15,
+                  "shops": [
+                    {
+                      "platform_code": "shopee",
+                      "shop_id": "1407964586",
+                      "commission_ratio": 0.5,
+                      "allocatable_profit_rate": 0.25,
+                      "allocatable_profit_amount": 120.0,
+                      "profit_basis_amount": 480.0,
+                      "shop_coefficient": 1.0,
+                      "settlement_coefficient": 1.0,
+                      "estimated_commission": 60.0,
+                      "commission_zero_reason": null
+                    }
+                  ]
+                }
+              ]
+            }
+        """
+        assignment_rows = (
+            (
+                await self.db.execute(
+                    select(EmployeeShopAssignment)
+                    .join(
+                        ShopAccount,
+                        and_(
+                            func.lower(ShopAccount.platform)
+                            == func.lower(EmployeeShopAssignment.platform_code),
+                            ShopAccount.enabled.is_(True),
+                            ShopAccount.business_role == "operating_store",
+                            or_(
+                                ShopAccount.platform_shop_id
+                                == EmployeeShopAssignment.shop_id,
+                                ShopAccount.shop_account_id
+                                == EmployeeShopAssignment.shop_id,
+                            ),
+                        ),
+                    )
+                    .where(EmployeeShopAssignment.status == "active")
+                    .where(EmployeeShopAssignment.year_month == year_month)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assignments = [
+            SimpleNamespace(
+                employee_code=getattr(row, "employee_code", None),
+                platform_code=getattr(row, "platform_code", None),
+                shop_id=getattr(row, "shop_id", None),
+                commission_ratio=getattr(row, "commission_ratio", None),
+            )
+            for row in assignment_rows
+        ]
+        if not assignments:
+            return {"year_month": year_month, "employees": []}
+
+        cfg_rows = (
+            (
+                await self.db.execute(
+                    select(ShopCommissionConfig).where(
+                        ShopCommissionConfig.year_month == year_month
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        allocatable_by_shop = {
+            self._shop_key(row.platform_code, row.shop_id): self._to_float(
+                row.allocatable_profit_rate, 0.0
+            )
+            for row in cfg_rows
+        }
+        profit_basis_by_shop = await self._load_profit_basis_by_shop(
+            year_month, assignments
+        )
+        performance_by_shop = await self._load_store_performance_by_shop(
+            year_month, assignments
+        )
+        # 店铺级考核状态（「本月不参与考核」「亏损」「待补数据」）——
+        # 前端要靠它区分「这家店没参与考核」和「这家店参与考核但没分钱」。
+        shop_status_by_key: Dict[str, Dict[str, Any]] = {}
+        for score_row in (
+            (
+                await self.db.execute(
+                    select(PerformanceScore).where(
+                        PerformanceScore.period == year_month
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        ):
+            details = getattr(score_row, "score_details", None) or {}
+            summary = (
+                details.get("summary", {}) if isinstance(details, dict) else {}
+            )
+            profit_detail = (
+                details.get("profit", {}) if isinstance(details, dict) else {}
+            )
+            shop_status_by_key[
+                self._shop_key(score_row.platform_code, score_row.shop_id)
+            ] = {
+                "calculation_status": str(summary.get("calculation_status") or ""),
+                "profit_status": str((profit_detail or {}).get("status") or ""),
+                "ranking_pool": str(summary.get("ranking_pool") or ""),
+                "message": str(summary.get("message") or ""),
+                "total_score": self._to_float(
+                    getattr(score_row, "total_score", None), 0.0
+                ),
+                "rank": getattr(score_row, "rank", None),
+                "shop_coefficient": (
+                    self._to_float(
+                        getattr(score_row, "performance_coefficient", None), 1.0
+                    )
+                    if getattr(score_row, "performance_coefficient", None) is not None
+                    else None
+                ),
+            }
+        default_commission_ratio_by_employee = (
+            await self._load_default_commission_ratio_by_employee(
+                year_month, assignments
+            )
+        )
+
+        employee_codes = sorted(
+            {
+                str(row.employee_code or "").strip()
+                for row in assignments
+                if str(row.employee_code or "").strip()
+            }
+        )
+        performance_rows = (
+            (
+                await self.db.execute(
+                    select(EmployeePerformance).where(
+                        EmployeePerformance.year_month == year_month,
+                        EmployeePerformance.employee_code.in_(employee_codes),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        performance_by_employee = {
+            str(row.employee_code or "").strip(): row for row in performance_rows
+        }
+
+        by_employee: Dict[str, Dict[str, Any]] = {}
+        for row in assignments:
+            employee_code = str(row.employee_code or "").strip()
+            if not employee_code:
+                continue
+            ratio, ratio_source = self._resolve_commission_ratio(
+                row,
+                employee_code=employee_code,
+                default_commission_ratio_by_employee=default_commission_ratio_by_employee,
+            )
+            shop_key = self._shop_key(row.platform_code, row.shop_id)
+            profit_basis_amount = self._to_float(
+                profit_basis_by_shop.get(shop_key, {}).get("profit_basis_amount"),
+                0.0,
+            )
+            alloc_rate = self._to_float(allocatable_by_shop.get(shop_key, 0.0), 0.0)
+            # 「可分配利润」展示值保留 2 位小数，但**计算提成用未舍入的值** ——
+            # 后端算提成时中间步骤不舍入，只在最后对合计舍入。
+            # 中间多舍一次，页面就会比工资单多 1 分钱。
+            allocatable_profit_exact = max(profit_basis_amount, 0.0) * alloc_rate
+            allocatable_profit_amount = round(allocatable_profit_exact, 2)
+            shop_coefficient = self._to_float(
+                performance_by_shop.get(shop_key, {}).get("performance_coefficient"),
+                1.0,
+            )
+
+            employee_perf = performance_by_employee.get(employee_code)
+            performance_score = getattr(employee_perf, "performance_score", None)
+            score_coefficient = (
+                calculate_score_coefficient(performance_score)
+                if performance_score is not None
+                else None
+            )
+            settlement = describe_settlement_coefficient(
+                shop_coefficient=shop_coefficient,
+                score_coefficient=score_coefficient,
+            )
+            settlement_coefficient = settlement["settlement_coefficient"]
+            estimated_commission = round(
+                allocatable_profit_exact * ratio * settlement_coefficient, 2
+            )
+
+            entry = by_employee.setdefault(
+                employee_code,
+                {
+                    "employee_code": employee_code,
+                    "performance_score": performance_score,
+                    "score_coefficient": score_coefficient,
+                    "settlement_coefficient": settlement_coefficient,
+                    "calculation_status": str(
+                        getattr(employee_perf, "calculation_status", "") or ""
+                    ),
+                    "performance_source_type": str(
+                        getattr(employee_perf, "performance_source_type", "") or ""
+                    ),
+                    "expected_commission": 0.0,
+                    "shops": [],
+                },
+            )
+            entry["shops"].append(
+                {
+                    "platform_code": str(row.platform_code or "").lower(),
+                    "shop_id": row.shop_id,
+                    "commission_ratio": round(ratio, 6),
+                    "commission_ratio_source": ratio_source,
+                    "allocatable_profit_rate": round(alloc_rate, 6),
+                    "allocatable_profit_amount": allocatable_profit_amount,
+                    "profit_basis_amount": round(profit_basis_amount, 2),
+                    "shop_coefficient": shop_coefficient,
+                    "settlement_coefficient": settlement_coefficient,
+                    "estimated_commission": estimated_commission,
+                    "calculation_status": (
+                        shop_status_by_key.get(shop_key, {}).get("calculation_status")
+                        or ""
+                    ),
+                    "profit_status": (
+                        shop_status_by_key.get(shop_key, {}).get("profit_status") or ""
+                    ),
+                    "ranking_pool": (
+                        shop_status_by_key.get(shop_key, {}).get("ranking_pool") or ""
+                    ),
+                    "shop_total_score": shop_status_by_key.get(shop_key, {}).get(
+                        "total_score"
+                    ),
+                    "shop_rank": shop_status_by_key.get(shop_key, {}).get("rank"),
+                    "commission_zero_reason": commission_zero_reason(
+                        is_rate_configured=shop_key in allocatable_by_shop,
+                        allocatable_rate=alloc_rate,
+                        profit_basis_amount=profit_basis_amount,
+                        # 必须把实际算出来的预计提成传进去：有提成时不能报「提成为 0」
+                        estimated_total_commission=estimated_commission,
+                        has_assignment=True,
+                        cost_status=profit_basis_by_shop.get(shop_key, {}).get(
+                            "cost_status"
+                        )
+                        or "missing_labor_allocation",
+                        commission_ratio=ratio,
+                    )
+                    or (
+                        "本店本月结算利润为 0，暂不产生提成"
+                        if estimated_commission <= 0
+                        else None
+                    ),
+                }
+            )
+            # 合计要「先累加未舍入值、最后舍入一次」，与后端一致。
+            # 每家店都 round 一次再累加，会和工资单差 1 分钱。
+            entry["expected_commission_raw"] = (
+                self._to_float(entry.get("expected_commission_raw"), 0.0)
+                + allocatable_profit_exact
+                * ratio
+                * settlement_coefficient
+            )
+
+        employees = sorted(by_employee.values(), key=lambda item: item["employee_code"])
+        for entry in employees:
+            entry["expected_commission"] = round(
+                self._to_float(entry.pop("expected_commission_raw", 0.0), 0.0), 2
+            )
+        return {"year_month": year_month, "employees": employees}
+
     async def calculate_month(
         self,
         year_month: str,
@@ -979,9 +1409,12 @@ class HRIncomeCalculationService:
             .scalars()
             .all()
         )
+        # 可分配率缺省口径：某店当月**没有配置行** = 该店本月不参与提成分配（0）。
+        # 必须与前端「店铺归属与提成比」页面、统计接口的缺省值保持一致，
+        # 否则会出现「页面显示 0、实发却按 100% 给」的钱差。
         allocatable_by_shop = {
             self._shop_key(row.platform_code, row.shop_id): self._to_float(
-                row.allocatable_profit_rate, 1.0
+                row.allocatable_profit_rate, 0.0
             )
             for row in cfg_rows
         }
@@ -1030,7 +1463,7 @@ class HRIncomeCalculationService:
                 metric.get("achievement_rate")
             )
             profit_basis_amount = self._to_float(basis.get("profit_basis_amount"), 0.0)
-            alloc_rate = self._to_float(allocatable_by_shop.get(shop_key, 1.0), 1.0)
+            alloc_rate = self._to_float(allocatable_by_shop.get(shop_key, 0.0), 0.0)
             alloc_profit = max(profit_basis_amount, 0.0) * alloc_rate
 
             # Performance aggregation: assignment means full responsibility for the shop.
@@ -1153,17 +1586,41 @@ class HRIncomeCalculationService:
                     )
                 )
 
+        # ------------------------------------------------------------------
+        # 绩效画像：先解析每个人当月的分数与分数档位系数，
+        # 提成和绩效工资共用这一份，避免同一个人出现两套系数。
+        # ------------------------------------------------------------------
+        controlled_mode = controlled_context is not None
+        employee_profiles: Dict[str, Dict[str, Any]] = {}
+        for employee_code in population_codes:
+            employee_profiles[employee_code] = (
+                self._resolve_employee_performance_profile(
+                    employee_code,
+                    agg=performance_agg.get(employee_code, {}),
+                    input_score_by_employee=input_score_by_employee,
+                    pending_input_employee_codes=pending_input_employee_codes,
+                    assigned_codes=assigned_codes,
+                    controlled_mode=controlled_mode,
+                    controlled_result=controlled_results.get(employee_code),
+                    attendance_adjustment_by_employee=attendance_adjustment_by_employee,
+                    manual_adjustment_by_employee=manual_adjustment_by_employee,
+                )
+            )
+
+        # 员工结算系数（按店铺销售额加权）+ 每店系数拆解，供审计与页面复用。
+        employee_settlement_coefficient: Dict[str, float] = {}
+        employee_settlement_details: Dict[str, Dict[str, Any]] = {}
+
         for employee_code, rec in commission_agg.items():
             if employee_code in blocked_commission_codes:
                 continue
             sales_amount = rec["sales_amount"]
-            raw_commission_amount = rec["commission_amount"]
-            if sales_amount > 0:
-                commission_rate = raw_commission_amount / sales_amount
-            else:
-                commission_rate = 0.0
+            profile = employee_profiles.get(employee_code, {})
+            employee_score_coefficient = profile.get("score_coefficient")
+            commission_amount = 0.0
             coefficient_num = 0.0
             coefficient_den = 0.0
+            shop_coefficients: list[Dict[str, Any]] = []
             for row in assignments:
                 if (row.employee_code or "").strip() != employee_code:
                     continue
@@ -1178,56 +1635,88 @@ class HRIncomeCalculationService:
                 metric = metrics_by_shop.get(shop_key, {})
                 monthly_sales = self._to_float(metric.get("monthly_sales"), 0.0)
                 sales_share = monthly_sales * ratio
-                coefficient = self._to_float(
+
+                # 结算系数 = min(店铺结算系数, 个人分数档位系数)
+                # 店铺结算系数 = min(该店排名档位, 该店分数档位)，由店铺绩效模块写入。
+                shop_coefficient = self._to_float(
                     performance_by_shop.get(shop_key, {}).get(
                         "performance_coefficient"
                     ),
                     1.0,
                 )
-                coefficient_num += coefficient * sales_share
-                coefficient_den += sales_share
-            inherited_coefficient = (
-                coefficient_num / coefficient_den if coefficient_den > 0 else 1.0
-            )
-            commission_amount = raw_commission_amount * inherited_coefficient
-            if sales_amount > 0:
-                commission_rate = commission_amount / sales_amount
-
-            refreshed_payroll = refreshed_draft_payrolls.get(employee_code)
-            if refreshed_payroll is not None:
-                refreshed_payroll.commission = commission_amount
-                PayrollGenerationService.recalculate_record_totals(refreshed_payroll)
-
-            for row in assignments:
-                if (row.employee_code or "").strip() != employee_code:
-                    continue
-                ratio, _ratio_source = self._resolve_commission_ratio(
-                    row,
-                    employee_code=employee_code,
-                    default_commission_ratio_by_employee=default_commission_ratio_by_employee,
+                settlement = describe_settlement_coefficient(
+                    shop_coefficient=shop_coefficient,
+                    score_coefficient=employee_score_coefficient,
                 )
-                if ratio <= 0:
-                    continue
-                shop_key = self._shop_key(row.platform_code, row.shop_id)
+                settlement_coefficient = settlement["settlement_coefficient"]
+
                 profit_basis_amount = self._to_float(
                     profit_basis_by_shop.get(shop_key, {}).get("profit_basis_amount"),
                     0.0,
                 )
+                # 可分配率缺省口径必须与聚合段、统计接口、前端一致：未配置 = 0。
                 alloc_rate = self._to_float(
-                    allocatable_by_shop.get(shop_key, 1.0),
-                    1.0,
+                    allocatable_by_shop.get(shop_key, 0.0),
+                    0.0,
+                )
+                allocation_amount = (
+                    max(profit_basis_amount, 0.0)
+                    * alloc_rate
+                    * ratio
+                    * settlement_coefficient
+                )
+                commission_amount += allocation_amount
+                coefficient_num += settlement_coefficient * sales_share
+                coefficient_den += sales_share
+                shop_coefficients.append(
+                    {
+                        "shop_key": shop_key,
+                        "commission_ratio": round(ratio, 6),
+                        "allocatable_profit_rate": round(alloc_rate, 6),
+                        "profit_basis_amount": round(profit_basis_amount, 2),
+                        "commission_amount": round(allocation_amount, 2),
+                        **settlement,
+                    }
                 )
                 commission_allocations.append(
                     {
                         "employee_code": employee_code,
                         "platform_code": str(row.platform_code or "").lower(),
                         "shop_id": row.shop_id,
-                        "commission_amount": max(profit_basis_amount, 0.0)
-                        * alloc_rate
-                        * ratio
-                        * inherited_coefficient,
+                        "commission_amount": allocation_amount,
+                        "settlement_coefficient": round(settlement_coefficient, 6),
                     }
                 )
+
+            if sales_amount > 0:
+                commission_rate = commission_amount / sales_amount
+            else:
+                commission_rate = 0.0
+
+            # 尾差吸收：提成**总额**是「各店未舍入金额累加后统一舍入一次」，
+            # 而逐店明细各自舍入后再相加，可能差 1 分
+            # （例：黄嘉矩 9.22 + 144.67 = 153.89，但实发总额是 153.88）。
+            # 把这笔尾差并到金额最大的那家店，保证
+            # 「页面上的逐店明细加起来 == 页面上的提成总额 == 工资单实发」。
+            _absorb_commission_rounding_residue(shop_coefficients, commission_amount)
+
+            employee_settlement_coefficient[employee_code] = (
+                coefficient_num / coefficient_den
+                if coefficient_den > 0
+                else calculate_settlement_coefficient(employee_score_coefficient)
+            )
+            employee_settlement_details[employee_code] = {
+                "settlement_coefficient": round(
+                    employee_settlement_coefficient[employee_code], 6
+                ),
+                "score_coefficient": employee_score_coefficient,
+                "shops": shop_coefficients,
+            }
+
+            refreshed_payroll = refreshed_draft_payrolls.get(employee_code)
+            if refreshed_payroll is not None:
+                refreshed_payroll.commission = commission_amount
+                PayrollGenerationService.recalculate_record_totals(refreshed_payroll)
 
             ratio_sources = sorted(
                 str(item) for item in (rec.get("ratio_sources") or ())
@@ -1238,8 +1727,15 @@ class HRIncomeCalculationService:
                 "ratio_sources": ratio_sources,
                 "commission_rate": round(commission_rate, 6),
                 "sales_amount": round(sales_amount, 2),
-                "inherited_coefficient": round(inherited_coefficient, 6),
-                "allocation_count": len(commission_allocations),
+                "inherited_coefficient": round(
+                    employee_settlement_coefficient[employee_code], 6
+                ),
+                "settlement_coefficient": round(
+                    employee_settlement_coefficient[employee_code], 6
+                ),
+                "score_coefficient": employee_score_coefficient,
+                "shop_coefficients": shop_coefficients,
+                "allocation_count": len(shop_coefficients),
             }
             if not has_ratio:
                 # 以前这里会直接跳过 ⇒ 连一行记录都不留，
@@ -1303,38 +1799,28 @@ class HRIncomeCalculationService:
                 achievement_rate = rec["weighted_rate_num"] / rec["weighted_rate_den"]
             else:
                 achievement_rate = 0.0
-            calculation_status = "complete"
-            performance_source_type = "shop_inherited"
-            if employee_code in input_score_by_employee:
-                performance_score = input_score_by_employee[employee_code]
-                performance_source_type = "personal_inputs"
-            elif rec["weighted_score_den"] > 0:
-                performance_score = (
-                    rec["weighted_score_num"] / rec["weighted_score_den"]
+            # 绩效画像已经在提成循环之前解析好了，这里直接复用，
+            # 保证「绩效工资」和「提成」用的是同一个系数口径。
+            profile = employee_profiles.get(employee_code, {})
+            performance_score = profile.get("performance_score")
+            calculation_status = str(
+                profile.get("calculation_status") or "pending_store_performance"
+            )
+            performance_source_type = str(
+                profile.get("performance_source_type") or "shop_inherited"
+            )
+            if performance_score is not None and calculation_status == "complete":
+                formal_employee_codes.add(employee_code)
+
+            settlement_coefficient = None
+            if calculation_status == "complete" and performance_score is not None:
+                settlement_coefficient = employee_settlement_coefficient.get(
+                    employee_code
                 )
-            elif employee_code in pending_input_employee_codes:
-                performance_score = None
-                calculation_status = "pending_personal_input"
-            else:
-                performance_score = None
-                calculation_status = (
-                    "pending_store_performance"
-                    if employee_code in assigned_codes
-                    else "pending_personal_input"
-                )
-                performance_source_type = "pending"
-            if performance_score is not None:
-                performance_score += self._to_float(
-                    attendance_adjustment_by_employee.get(employee_code),
-                    0.0,
-                )
-                performance_score += self._to_float(
-                    manual_adjustment_by_employee.get(employee_code),
-                    0.0,
-                )
-                performance_score = min(max(performance_score, 0.0), 100.0)
-                if calculation_status == "complete":
-                    formal_employee_codes.add(employee_code)
+                if settlement_coefficient is None:
+                    settlement_coefficient = calculate_settlement_coefficient(
+                        profile.get("score_coefficient")
+                    )
 
             perf = (
                 await self.db.execute(
@@ -1348,6 +1834,7 @@ class HRIncomeCalculationService:
                 perf.actual_sales = sales_amount
                 perf.achievement_rate = achievement_rate
                 perf.performance_score = performance_score
+                perf.performance_coefficient = settlement_coefficient
                 perf.calculation_status = calculation_status
                 perf.performance_source_type = performance_source_type
                 perf.calculated_at = datetime.now(timezone.utc)
@@ -1359,6 +1846,7 @@ class HRIncomeCalculationService:
                         actual_sales=sales_amount,
                         achievement_rate=achievement_rate,
                         performance_score=performance_score,
+                        performance_coefficient=settlement_coefficient,
                         calculation_status=calculation_status,
                         performance_source_type=performance_source_type,
                         calculated_at=datetime.now(timezone.utc),
@@ -1389,6 +1877,22 @@ class HRIncomeCalculationService:
                     if rate_den > 0
                     else 0.0
                 )
+                controlled_settlement_coefficient = None
+                if (
+                    result.get("calculation_status") == "complete"
+                    and result.get("performance_score") is not None
+                ):
+                    controlled_settlement_coefficient = employee_settlement_coefficient.get(
+                        employee_code
+                    )
+                    if controlled_settlement_coefficient is None:
+                        controlled_settlement_coefficient = (
+                            calculate_settlement_coefficient(
+                                (employee_profiles.get(employee_code) or {}).get(
+                                    "score_coefficient"
+                                )
+                            )
+                        )
                 perf = (
                     await self.db.execute(
                         select(EmployeePerformance).where(
@@ -1404,6 +1908,7 @@ class HRIncomeCalculationService:
                         actual_sales=sales_amount,
                         achievement_rate=achievement_rate,
                         performance_score=result["performance_score"],
+                        performance_coefficient=controlled_settlement_coefficient,
                         calculation_status=result["calculation_status"],
                         performance_source_type=result["performance_source_type"],
                         calculation_details=result["calculation_details"],
@@ -1414,6 +1919,7 @@ class HRIncomeCalculationService:
                     perf.actual_sales = sales_amount
                     perf.achievement_rate = achievement_rate
                     perf.performance_score = result["performance_score"]
+                    perf.performance_coefficient = controlled_settlement_coefficient
                     perf.calculation_status = result["calculation_status"]
                     perf.performance_source_type = result["performance_source_type"]
                     perf.calculation_details = result["calculation_details"]
@@ -1440,6 +1946,7 @@ class HRIncomeCalculationService:
                 }
             ),
             "commission_allocations": commission_allocations,
+            "settlement_coefficients": employee_settlement_details,
             "source": (
                 "controlled_targets_v1"
                 if controlled_context is not None

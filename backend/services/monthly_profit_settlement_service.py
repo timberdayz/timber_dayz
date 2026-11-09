@@ -24,6 +24,7 @@ from modules.core.db import (
     PerformanceScore,
     ShopProfitBasis,
 )
+from backend.services.labor_cost_policy_service import LaborCostPolicyService
 from backend.services.labor_cost_projection_service import (
     LABOR_COST_CALCULATION_VERSION,
 )
@@ -153,8 +154,12 @@ class MonthlyProfitSettlementService:
             )
             current = basis_by_shop.get(key)
             if current is None or (
-                getattr(row, "basis_version", "") == "A_PRE_COMMISSION_LABOR_V2"
-                and getattr(current, "basis_version", "") != "A_PRE_COMMISSION_LABOR_V2"
+                not LaborCostPolicyService.is_legacy_a_only_basis_version(
+                    getattr(row, "basis_version", "")
+                )
+                and LaborCostPolicyService.is_legacy_a_only_basis_version(
+                    getattr(current, "basis_version", "")
+                )
             ):
                 basis_by_shop[key] = row
         shop_profit_amount = sum(

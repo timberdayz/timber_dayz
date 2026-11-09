@@ -15,6 +15,7 @@ from modules.core.db import (
     PersonalPerformancePlan,
     PerformanceScore,
     SalaryStructure,
+    ShopCommissionConfig,
 )
 
 
@@ -358,6 +359,17 @@ def test_not_participating_employee_keeps_recalculated_independent_commission_in
             PayrollRecord: _Result(rows=[payroll]),
             EmployeePerformance: _Result(scalar=None),
             EmployeeCommission: _Result(scalar=None),
+            # 可分配率必须显式配置（缺省 = 0，不参与分配）。
+            ShopCommissionConfig: _Result(
+                rows=[
+                    SimpleNamespace(
+                        platform_code="shopee",
+                        shop_id="A",
+                        year_month="2026-08",
+                        allocatable_profit_rate=1.0,
+                    )
+                ]
+            ),
         }
         return rows_by_entity.get(entity, _Result(rows=[]))
 

@@ -27,6 +27,9 @@ class _MockMappingsResult:
     def mappings(self):
         return self
 
+    def scalars(self):
+        return self
+
     def all(self):
         return self._rows
 
@@ -107,7 +110,7 @@ async def test_build_profit_basis_v2_adds_only_pre_commission_labor_cost(monkeyp
         year_month="2026-09",
         platform_code="Shopee",
         shop_id="shop-1",
-        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        basis_version="SETTLEMENT_BASIS_V1",
     )
 
     assert basis["other_a_class_cost_amount"] == pytest.approx(1500)
@@ -142,7 +145,7 @@ async def test_build_profit_basis_v2_marks_missing_labor_allocation_without_read
         year_month="2026-08",
         platform_code="Shopee",
         shop_id="shop-1",
-        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        basis_version="SETTLEMENT_BASIS_V1",
     )
 
     assert basis["pre_commission_labor_cost_amount"] == 0.0
@@ -160,7 +163,7 @@ async def test_v2_other_a_cost_excludes_legacy_manual_labor_cost(monkeypatch):
     async def fake_execute(stmt, params=None):
         sql = str(stmt)
         assert "fact_expenses_allocated_day_shop_sku" not in sql
-        assert '"人力费用"' in sql
+        assert "labor_amount" in sql
         return _MockMappingsResult([{"a_class_cost_amount": Decimal("1500")}])
 
     monkeypatch.setattr(
@@ -174,7 +177,7 @@ async def test_v2_other_a_cost_excludes_legacy_manual_labor_cost(monkeypatch):
         year_month="2026-08",
         platform_code="Shopee",
         shop_id="shop-1",
-        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        basis_version="SETTLEMENT_BASIS_V1",
     )
 
     assert basis["other_a_class_cost_amount"] == pytest.approx(1500)
@@ -196,7 +199,7 @@ async def test_build_profit_basis_uses_effective_month_policy_when_version_not_e
         return 500.0
 
     async def fake_version(*_args, **_kwargs):
-        return "A_PRE_COMMISSION_LABOR_V2"
+        return "SETTLEMENT_BASIS_V1"
 
     monkeypatch.setattr(
         "backend.services.profit_basis_service.load_shop_monthly_metrics",
@@ -215,7 +218,7 @@ async def test_build_profit_basis_uses_effective_month_policy_when_version_not_e
         shop_id="shop-1",
     )
 
-    assert basis["basis_version"] == "A_PRE_COMMISSION_LABOR_V2"
+    assert basis["basis_version"] == "SETTLEMENT_BASIS_V1"
     assert basis["profit_basis_amount"] == pytest.approx(2000)
 
 
@@ -265,14 +268,23 @@ async def test_rebuild_month_v2_builds_one_unlocked_snapshot_per_assigned_shop(m
 
     assert result == {"year_month": "2026-08", "shop_count": 2}
     assert calls == [
-        ("2026-08", "shopee", "shop-1", "A_PRE_COMMISSION_LABOR_V2"),
-        ("2026-08", "shopee", "shop-2", "A_PRE_COMMISSION_LABOR_V2"),
+        ("2026-08", "shopee", "shop-1", "SETTLEMENT_BASIS_V1"),
+        ("2026-08", "shopee", "shop-2", "SETTLEMENT_BASIS_V1"),
     ]
     assert all(commit is False for _, commit in upserts)
 
 
 @pytest.mark.asyncio
-async def test_lock_v2_profit_basis_locks_pre_commission_labor_allocations():
+async def test_lock_v2_profit_basis_does_not_lock_labor_allocations():
+    """锁定利润基数不再连带锁死人力成本分摊。
+
+    锁定边界已收敛：
+    - 锁利润基数 = 冻结「这个月这家店赚多少钱」；
+    - 锁人力成本分摊 = 冻结「这个月这些人的钱怎么分」，
+      统一由「工资单确认」负责（PayrollConfirmationService）。
+
+    以前两者绑在一起，导致「锁了基数就再也改不了分摊」，重算成本极高。
+    """
     class _ScalarRows:
         def __init__(self, rows):
             self._rows = rows
@@ -286,11 +298,14 @@ async def test_lock_v2_profit_basis_locks_pre_commission_labor_allocations():
         def all(self):
             return self._rows
 
+        def first(self):
+            return self._rows[0] if self._rows else None
+
     basis = SimpleNamespace(
         period_month="2026-08",
         platform_code="shopee",
         shop_id="shop-1",
-        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        basis_version="SETTLEMENT_BASIS_V1",
         profit_basis_amount=500,
         is_locked=False,
     )
@@ -303,11 +318,11 @@ async def test_lock_v2_profit_basis_locks_pre_commission_labor_allocations():
         year_month="2026-08",
         platform_code="shopee",
         shop_id="shop-1",
-        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        basis_version="SETTLEMENT_BASIS_V1",
     )
 
     assert basis.is_locked is True
-    assert allocation.pre_commission_locked_at is not None
+    assert allocation.pre_commission_locked_at is None
 
 
 @pytest.mark.asyncio
@@ -323,7 +338,7 @@ async def test_lock_profit_basis_snapshots_for_assignments_builds_then_locks_eac
             "period_month": year_month,
             "platform_code": platform_code.lower(),
             "shop_id": shop_id,
-            "basis_version": basis_version or "A_PRE_COMMISSION_LABOR_V2",
+            "basis_version": basis_version or "SETTLEMENT_BASIS_V1",
         }
 
     async def fake_upsert(payload, *, commit=True):
@@ -345,18 +360,18 @@ async def test_lock_profit_basis_snapshots_for_assignments_builds_then_locks_eac
             SimpleNamespace(platform_code="shopee", shop_id="shop-1"),
             SimpleNamespace(platform_code="TikTok", shop_id="shop-2"),
         ],
-        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        basis_version="SETTLEMENT_BASIS_V1",
         commit=False,
     )
 
     assert built == [
-        ("2025-07", "shopee", "shop-1", "A_PRE_COMMISSION_LABOR_V2"),
-        ("2025-07", "tiktok", "shop-2", "A_PRE_COMMISSION_LABOR_V2"),
+        ("2025-07", "shopee", "shop-1", "SETTLEMENT_BASIS_V1"),
+        ("2025-07", "tiktok", "shop-2", "SETTLEMENT_BASIS_V1"),
     ]
     assert [item[1] for item in upserted] == [False, False]
     assert locked == [
-        ("2025-07", "shopee", "shop-1", "A_PRE_COMMISSION_LABOR_V2", False),
-        ("2025-07", "tiktok", "shop-2", "A_PRE_COMMISSION_LABOR_V2", False),
+        ("2025-07", "shopee", "shop-1", "SETTLEMENT_BASIS_V1", False),
+        ("2025-07", "tiktok", "shop-2", "SETTLEMENT_BASIS_V1", False),
     ]
     assert result == [
         {"shop_id": "shop-1", "is_locked": True},
@@ -431,8 +446,8 @@ async def test_build_profit_basis_falls_back_to_operating_costs_when_allocated_r
                 }
             ])
         if "a_class.operating_costs" in sql:
-            assert '"成本合计"' in sql
-            assert '"删除时间" IS NULL' in sql
+            assert "total_amount" in sql
+            assert "deleted_at IS NULL" in sql
             assert params["year_month"] == "2026-04"
             assert params["platform_code"] == "Shopee"
             assert params["shop_id"] == "shop-1"
@@ -480,7 +495,7 @@ async def test_build_profit_basis_operating_cost_fallback_excludes_soft_deleted_
                 }
             ])
         if "a_class.operating_costs" in sql:
-            assert '"删除时间" IS NULL' in sql
+            assert "deleted_at IS NULL" in sql
             return _MockMappingsResult([{"a_class_cost_amount": Decimal("800")}])
         raise AssertionError(f"unexpected SQL: {sql}")
 
@@ -718,7 +733,7 @@ async def test_upsert_locked_profit_basis_accepts_equivalent_decimal_money_value
         a_class_cost_amount=Decimal("1500.20"),
         b_class_cost_amount=Decimal("0.00"),
         profit_basis_amount=Decimal("2499.90"),
-        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        basis_version="SETTLEMENT_BASIS_V1",
         is_locked=True,
     )
     db.execute = AsyncMock(return_value=_MockMappingsResult([existing]))
@@ -731,7 +746,7 @@ async def test_upsert_locked_profit_basis_accepts_equivalent_decimal_money_value
         "a_class_cost_amount": 1500.20,
         "b_class_cost_amount": 0.0,
         "profit_basis_amount": 2499.90,
-        "basis_version": "A_PRE_COMMISSION_LABOR_V2",
+        "basis_version": "SETTLEMENT_BASIS_V1",
     }
 
     result = await service.upsert_profit_basis_snapshot(payload)

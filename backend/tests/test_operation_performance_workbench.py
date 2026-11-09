@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+﻿from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from datetime import date
 
@@ -410,6 +410,7 @@ async def test_copy_previous_month_does_not_copy_store_scope_or_entries(
     db = _Db()
     service = OperationPerformanceWorkbenchService(db)
     service._targets = AsyncMock(side_effect=[[], [previous]])
+    service._find_latest_configurable_month = AsyncMock(return_value="2026-07")
     service._catalog = AsyncMock(return_value=[catalog_item])
     service.apply = AsyncMock(return_value={})
     monkeypatch.setattr(workbench_module, "PayrollPeriodLockService", _LockService)

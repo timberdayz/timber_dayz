@@ -954,6 +954,7 @@ async def test_copy_previous_month_copies_only_enabled_metric_codes(monkeypatch)
         ]
     )
     service.apply = AsyncMock(return_value={"metrics": []})
+    service._find_latest_configurable_month = AsyncMock(return_value="2026-07")
     monkeypatch.setattr(
         module.PayrollPeriodLockService,
         "assert_month_mutable",

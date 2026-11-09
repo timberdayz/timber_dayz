@@ -1,4 +1,4 @@
-"""
+﻿"""
 HRIncomeCalculationService 基础单测
 """
 
@@ -176,8 +176,9 @@ def test_calculate_month_marks_salary_only_employee_pending_without_shop_assignm
     assert result["commission_upserts"] == 0
     performance = next(item for item in added if isinstance(item, EmployeePerformance))
     assert performance.performance_score is None
-    assert performance.calculation_status == "pending_personal_input"
-    assert performance.performance_source_type == "pending"
+    # 没有店铺归属、也没有个人绩效录入 => 明确「不参与考核」，不阻断整月结算
+    assert performance.calculation_status == "not_participating"
+    assert performance.performance_source_type == "not_participating"
 
 
 def test_default_commission_ratio_ignores_future_salary_structure():
@@ -268,6 +269,7 @@ def test_calculate_month_upsert_writes():
             "platform_code": "shopee",
             "shop_id": "S1",
             "commission_amount": 120.0,
+            "settlement_coefficient": 1.0,
         }
     ]
 
@@ -906,13 +908,20 @@ def test_calculate_month_employee_performance_uses_store_total_score():
     assert result["employee_count"] == 1
     commission = next(x for x in added if isinstance(x, EmployeeCommission))
     perf = next(x for x in added if isinstance(x, EmployeePerformance))
-    assert commission.commission_amount == pytest.approx(172.5)
-    assert commission.commission_rate == pytest.approx(1.4375)
+    # 结算系数 = min(店铺结算系数, 个人分数档位系数)
+    #   S1: min(1.2, 分数档位(90.8)=1.2) = 1.2 → 1000 × 1.0 × 0.1 × 1.2 = 120
+    #   S2: min(0.9, 1.2)                    = 0.9 →  500 × 1.0 × 0.1 × 0.9 =  45
+    # 改造前是把两店的系数加权平均（1.15）后统一乘上去（172.5），
+    # 等于让低排名的 S2 拿到了 S1 的高系数 —— 现在各店各算各的。
+    assert commission.commission_amount == pytest.approx(165.0)
+    assert commission.commission_rate == pytest.approx(1.375)
     assert perf.actual_sales == pytest.approx(1200.0)
     assert perf.achievement_rate == pytest.approx(
         (60.0 * 1000.0 + 50.0 * 200.0) / 1200.0 / 100.0
     )
     assert perf.performance_score == pytest.approx(90.8)
+    # 员工结算系数 = 各店结算系数按销售额加权（绩效工资与提成共用同一口径）
+    assert perf.performance_coefficient == pytest.approx(1.15)
 
 
 def test_load_store_performance_requires_canonical_formal_ready_state():

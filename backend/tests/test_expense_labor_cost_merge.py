@@ -135,7 +135,7 @@ async def test_business_overview_expenses_merge_manual_cost_and_system_labor_for
     assert total == 1150.0
     labor_sql = str(session.execute.await_args_list[0].args[0])
     manual_sql = str(session.execute.await_args_list[1].args[0])
-    assert '"人力费用"' in manual_sql
+    assert "labor_amount" in manual_sql
     assert "allocation_scope = 'shop'" in labor_sql
     assert session.execute.await_args_list[0].args[1]["platform_code"] == "shopee"
     assert session.execute.await_args_list[0].args[1]["shop_id"] == "shop-1"

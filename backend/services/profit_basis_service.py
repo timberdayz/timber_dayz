@@ -108,12 +108,12 @@ class ProfitBasisService:
         fallback_result = await self.db.execute(
             text(
                 """
-                SELECT COALESCE(SUM("成本合计"), 0) AS a_class_cost_amount
+                SELECT COALESCE(SUM(total_amount), 0) AS a_class_cost_amount
                 FROM a_class.operating_costs
-                WHERE "年月" = :year_month
-                  AND "删除时间" IS NULL
+                WHERE year_month = :year_month
+                  AND deleted_at IS NULL
                   AND LOWER(COALESCE(platform_code, '')) = LOWER(:platform_code)
-                  AND "店铺ID" = :shop_id
+                  AND shop_id = :shop_id
                 """
             ),
             {
@@ -137,20 +137,20 @@ class ProfitBasisService:
                 """
                 SELECT COALESCE(SUM(
                     COALESCE(
-                        "成本合计",
-                        COALESCE("租金", 0)
-                        + COALESCE("营销费用", 0)
-                        + COALESCE("水电费", 0)
-                        + COALESCE("AI Token费用", 0)
-                        + COALESCE("人力费用", 0)
-                        + COALESCE("其他成本", 0)
-                    ) - COALESCE("人力费用", 0)
+                        total_amount,
+                        COALESCE(rent_amount, 0)
+                        + COALESCE(marketing_amount, 0)
+                        + COALESCE(utility_amount, 0)
+                        + COALESCE(ai_token_amount, 0)
+                        + COALESCE(labor_amount, 0)
+                        + COALESCE(other_amount, 0)
+                    ) - COALESCE(labor_amount, 0)
                 ), 0) AS a_class_cost_amount
                 FROM a_class.operating_costs
-                WHERE "年月" = :year_month
-                  AND "删除时间" IS NULL
+                WHERE year_month = :year_month
+                  AND deleted_at IS NULL
                   AND LOWER(COALESCE(platform_code, '')) = LOWER(:platform_code)
-                  AND "店铺ID" = :shop_id
+                  AND shop_id = :shop_id
                 """
             ),
             {
@@ -168,17 +168,57 @@ class ProfitBasisService:
         platform_code: str,
         shop_id: str,
     ) -> tuple[float, bool]:
+        """取这家店当月承担的人力成本。
+
+        两部分：
+
+        1. **直接分摊**：该店自己的 ``allocation_scope='shop'`` 分摊行。
+        2. **无归属成本二次分摊**：没有店铺归属的员工（总部、仓库、客服…）
+           产生的公司级人力成本，以前**从来没有进过任何一家店的成本** ——
+           钱既没消失也没落到谁头上，等于让所有店的利润虚高、提成虚高。
+           现在按「各店直接人力成本占比」把它二次分摊到各店。
+
+        分摊比例用「直接人力成本占比」而不是销售额：
+        直接人力成本就在这张表里，一次查询算完，不引入额外依赖，
+        也不会因为某个月销售额缺失而整月分摊不出来。
+        """
         result = await self.db.execute(
             text(
                 """
-                SELECT COUNT(*) AS allocation_row_count,
-                       COALESCE(SUM(pre_commission_amount), 0) AS labor_cost_amount
-                FROM finance.employee_labor_cost_allocations
-                WHERE period_month = :year_month
-                  AND allocation_scope = 'shop'
-                  AND calculation_version = :calculation_version
-                  AND LOWER(COALESCE(platform_code, '')) = LOWER(:platform_code)
-                  AND shop_id = :shop_id
+                WITH shop_rows AS (
+                    SELECT LOWER(COALESCE(platform_code, '')) AS platform_code,
+                           shop_id,
+                           SUM(COALESCE(pre_commission_amount, 0)) AS direct_amount
+                    FROM finance.employee_labor_cost_allocations
+                    WHERE period_month = :year_month
+                      AND allocation_scope = 'shop'
+                      AND calculation_version = :calculation_version
+                    GROUP BY 1, 2
+                ),
+                company_pool AS (
+                    SELECT COALESCE(SUM(COALESCE(pre_commission_amount, 0)), 0) AS pool
+                    FROM finance.employee_labor_cost_allocations
+                    WHERE period_month = :year_month
+                      AND allocation_scope = 'company'
+                      AND calculation_version = :calculation_version
+                ),
+                totals AS (
+                    SELECT COALESCE(SUM(direct_amount), 0) AS direct_total,
+                           COUNT(*) AS shop_count
+                    FROM shop_rows
+                )
+                SELECT
+                    COALESCE((
+                        SELECT SUM(direct_amount) FROM shop_rows
+                        WHERE platform_code = LOWER(:platform_code)
+                          AND shop_id = :shop_id
+                    ), 0) AS direct_labor_cost,
+                    (SELECT COUNT(*) FROM shop_rows
+                      WHERE platform_code = LOWER(:platform_code)
+                        AND shop_id = :shop_id) AS allocation_row_count,
+                    (SELECT pool FROM company_pool) AS company_pool,
+                    (SELECT direct_total FROM totals) AS direct_total,
+                    (SELECT shop_count FROM totals) AS shop_count
                 """
             ),
             {
@@ -189,9 +229,24 @@ class ProfitBasisService:
             },
         )
         row = result.mappings().first()
+        if not row:
+            return 0.0, False
+        direct_labor_cost = _to_float(row.get("direct_labor_cost"))
+        company_pool = _to_float(row.get("company_pool"))
+        direct_total = _to_float(row.get("direct_total"))
+        shop_count = int(row.get("shop_count") or 0)
+        if company_pool > 0:
+            if direct_total > 0:
+                shared = company_pool * (direct_labor_cost / direct_total)
+            elif shop_count > 0:
+                shared = company_pool / shop_count
+            else:
+                shared = 0.0
+        else:
+            shared = 0.0
         return (
-            _to_float(row.get("labor_cost_amount") if row else 0.0),
-            bool(int(row.get("allocation_row_count") or 0)) if row else False,
+            direct_labor_cost + shared,
+            bool(int(row.get("allocation_row_count") or 0)),
         )
 
     async def build_profit_basis(
@@ -204,17 +259,23 @@ class ProfitBasisService:
         basis_version = basis_version or await LaborCostPolicyService(
             self.db
         ).get_profit_basis_version(year_month)
+        # 「仅 A 类成本」是历史口径，只为复现历史快照保留；
+        # 新写入的一律走当前口径（A 类成本 + 提成前人力成本）。
+        uses_legacy_a_only = LaborCostPolicyService.is_legacy_a_only_basis_version(
+            basis_version
+        )
         orders_profit_amount = await self._load_orders_profit_amount(year_month, platform_code, shop_id)
-        other_a_class_cost_amount = await (
-            self._load_other_a_class_cost_amount(
+        if uses_legacy_a_only:
+            other_a_class_cost_amount = await self._load_a_class_cost_amount(
                 year_month, platform_code, shop_id
             )
-            if basis_version == "A_PRE_COMMISSION_LABOR_V2"
-            else self._load_a_class_cost_amount(year_month, platform_code, shop_id)
-        )
+        else:
+            other_a_class_cost_amount = await self._load_other_a_class_cost_amount(
+                year_month, platform_code, shop_id
+            )
         pre_commission_labor_cost_amount = 0.0
         cost_status = "legacy"
-        if basis_version == "A_PRE_COMMISSION_LABOR_V2":
+        if not uses_legacy_a_only:
             labor_cost_result = await self._load_pre_commission_labor_amount(
                 year_month, platform_code, shop_id
             )
@@ -250,16 +311,21 @@ class ProfitBasisService:
     ) -> dict[str, Any]:
         await self.ensure_fiscal_period_exists(payload["period_month"], commit=commit)
 
+        # 一个「月份 + 店铺」只有**一条**利润基数快照。
+        # 以前唯一键是 (月份, 店, 版本)，口径切换后同一家店会多出一条行，
+        # 同一个事实存了两份 —— 读的时候靠「挑一条」来糊弄，正是 SSOT 要消灭的。
+        # 版本是这条快照的**属性**，重算时更新，不用来区分行。
         record = (
             await self.db.execute(
-                select(ShopProfitBasis).where(
+                select(ShopProfitBasis)
+                .where(
                     ShopProfitBasis.period_month == payload["period_month"],
                     ShopProfitBasis.platform_code == payload["platform_code"],
                     ShopProfitBasis.shop_id == payload["shop_id"],
-                    ShopProfitBasis.basis_version == payload["basis_version"],
                 )
+                .order_by(ShopProfitBasis.id.desc())
             )
-        ).scalar_one_or_none()
+        ).scalars().first()
 
         if record is None:
             record = ShopProfitBasis(**payload)
@@ -299,6 +365,7 @@ class ProfitBasisService:
             record.b_class_cost_amount = payload["b_class_cost_amount"]
             record.profit_basis_amount = payload["profit_basis_amount"]
             record.cost_status = payload.get("cost_status", "projected")
+            record.basis_version = payload["basis_version"]
 
         if commit:
             await self.db.commit()
@@ -335,7 +402,7 @@ class ProfitBasisService:
                 year_month,
                 platform_code,
                 shop_id,
-                basis_version=LaborCostPolicyService.V2,
+                basis_version=LaborCostPolicyService.CURRENT_BASIS_VERSION,
             )
             await self.upsert_profit_basis_snapshot(payload, commit=False)
         if commit:
@@ -356,31 +423,30 @@ class ProfitBasisService:
         ).get_profit_basis_version(year_month)
         record = (
             await self.db.execute(
-                select(ShopProfitBasis).where(
+                select(ShopProfitBasis)
+                .where(
                     ShopProfitBasis.period_month == year_month,
                     ShopProfitBasis.platform_code == (platform_code or "").lower(),
                     ShopProfitBasis.shop_id == shop_id,
-                    ShopProfitBasis.basis_version == basis_version,
                 )
+                .order_by(ShopProfitBasis.id.desc())
             )
-        ).scalar_one_or_none()
+        ).scalars().first()
         if record is None:
             raise ValueError("profit basis snapshot not found; rebuild before locking")
+        if not LaborCostPolicyService.is_settlement_basis_version(
+            getattr(record, "basis_version", "")
+        ):
+            raise ValueError(
+                "profit basis snapshot uses an unknown basis version; rebuild before locking"
+            )
         record.is_locked = True
-        if basis_version == "A_PRE_COMMISSION_LABOR_V2":
-            allocations = (
-                await self.db.execute(
-                    select(EmployeeLaborCostAllocation).where(
-                        EmployeeLaborCostAllocation.period_month == year_month,
-                        EmployeeLaborCostAllocation.allocation_scope == "shop",
-                        EmployeeLaborCostAllocation.platform_code == (platform_code or "").lower(),
-                        EmployeeLaborCostAllocation.shop_id == shop_id,
-                    )
-                )
-            ).scalars().all()
-            locked_at = datetime.now(timezone.utc)
-            for allocation in allocations:
-                allocation.pre_commission_locked_at = locked_at
+        # 注意：这里**不再**连带把人力成本分摊标记为 locked。
+        # 锁定基数时，人力成本金额已经快照进 ``pre_commission_labor_cost_amount``，
+        # 基数自带成本快照，不依赖分摊行的锁状态。
+        # 旧实现会让「财务锁一次基数」变成「整月人力成本不可再改」，
+        # 归属填错或薪资调整后没有任何干净的修正路径。
+        # 人力成本分摊的锁定时机统一由「工资单确认」负责。
         if commit:
             await self.db.commit()
         return {
@@ -390,6 +456,47 @@ class ProfitBasisService:
             "basis_version": record.basis_version,
             "profit_basis_amount": _to_float(record.profit_basis_amount),
             "is_locked": True,
+        }
+
+    async def reopen_profit_basis_snapshot(
+        self,
+        *,
+        year_month: str,
+        platform_code: str,
+        shop_id: str,
+        basis_version: str | None = None,
+        commit: bool = True,
+    ) -> dict[str, Any]:
+        """重开（解锁）已锁定的利润基数，允许修正后重算。
+
+        这是「锁定有明确边界和撤回路径」的落点：发现归属或成本填错时，
+        显式重开，而不是被隐式锁死。
+        """
+        basis_version = basis_version or await LaborCostPolicyService(
+            self.db
+        ).get_profit_basis_version(year_month)
+        record = (
+            await self.db.execute(
+                select(ShopProfitBasis).where(
+                    ShopProfitBasis.period_month == year_month,
+                    ShopProfitBasis.platform_code == (platform_code or "").lower(),
+                    ShopProfitBasis.shop_id == shop_id,
+                    ShopProfitBasis.basis_version == basis_version,
+                )
+            )
+        ).scalar_one_or_none()
+        if record is None:
+            raise ValueError("profit basis snapshot not found")
+        record.is_locked = False
+        if commit:
+            await self.db.commit()
+        return {
+            "period_month": record.period_month,
+            "platform_code": record.platform_code,
+            "shop_id": record.shop_id,
+            "basis_version": record.basis_version,
+            "profit_basis_amount": _to_float(record.profit_basis_amount),
+            "is_locked": False,
         }
 
     async def lock_profit_basis_snapshots_for_assignments(

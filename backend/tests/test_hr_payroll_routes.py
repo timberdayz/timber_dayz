@@ -1,4 +1,4 @@
-"""
+﻿"""
 HR payroll route tests
 """
 
@@ -324,9 +324,14 @@ def test_confirm_payroll_record_marks_draft_as_confirmed_and_locks_shop_profit_b
             return [{"shop_id": "shop-1", "is_locked": True}]
 
     async def _get_profit_basis_version(_self, _year_month):
-        return "A_PRE_COMMISSION_LABOR_V2"
+        return "SETTLEMENT_BASIS_V1"
 
-    monkeypatch.setattr(module, "ProfitBasisService", _ProfitBasisService)
+    confirmation_module = importlib.import_module(
+        "backend.services.payroll_confirmation_service"
+    )
+    monkeypatch.setattr(
+        confirmation_module, "ProfitBasisService", _ProfitBasisService
+    )
     class _ReadyPerformance:
         def __init__(self, _db):
             pass
@@ -334,7 +339,9 @@ def test_confirm_payroll_record_marks_draft_as_confirmed_and_locks_shop_profit_b
         async def assert_month_performance_ready(self, *_args, **_kwargs):
             return None
 
-    monkeypatch.setattr(module, "PerformanceReadinessService", _ReadyPerformance)
+    monkeypatch.setattr(
+        confirmation_module, "PerformanceReadinessService", _ReadyPerformance
+    )
     monkeypatch.setattr(
         module.LaborCostPolicyService,
         "get_profit_basis_version",
@@ -350,7 +357,7 @@ def test_confirm_payroll_record_marks_draft_as_confirmed_and_locks_shop_profit_b
     assert locked == [{
         "year_month": "2025-01",
         "assignments": [assignment],
-        "basis_version": "A_PRE_COMMISSION_LABOR_V2",
+        "basis_version": "SETTLEMENT_BASIS_V1",
         "commit": False,
     }]
     assert db.commit.await_count == 1
@@ -386,7 +393,12 @@ def test_confirm_payroll_record_rejects_pending_performance(monkeypatch):
         async def assert_month_performance_ready(self, *_args, **_kwargs):
             raise ValueError("绩效尚未完成，无法结算：EMP008:pending_personal_input")
 
-    monkeypatch.setattr(module, "PerformanceReadinessService", _PendingPerformance)
+    confirmation_module = importlib.import_module(
+        "backend.services.payroll_confirmation_service"
+    )
+    monkeypatch.setattr(
+        confirmation_module, "PerformanceReadinessService", _PendingPerformance
+    )
 
     response = asyncio.run(module.confirm_payroll_record(8, db=db))
 
@@ -423,6 +435,10 @@ def test_confirm_payroll_record_rejects_shop_commission_ratios_above_one():
             return None
 
     module.PerformanceReadinessService = _ReadyPerformance
+    confirmation_module = importlib.import_module(
+        "backend.services.payroll_confirmation_service"
+    )
+    confirmation_module.PerformanceReadinessService = _ReadyPerformance
 
     response = asyncio.run(module.confirm_payroll_record(10, db=db))
 

@@ -45,7 +45,7 @@ async def test_expense_create_accepts_missing_platform_code_when_lookup_succeeds
     class _DB:
         async def execute(self, query, params=None):
             sql = str(query)
-            if 'SELECT COALESCE("是否锁定", false)' in sql:
+            if 'SELECT COALESCE(is_locked, false)' in sql:
                 return _Result(None)
             if "INSERT INTO a_class.operating_costs" in sql:
                 executed["params"] = params
@@ -128,7 +128,7 @@ async def test_expense_create_rejects_missing_platform_code_when_lookup_fails(mo
     class _DB:
         async def execute(self, query, params=None):
             sql = str(query)
-            if 'SELECT COALESCE("是否锁定", false)' in sql:
+            if 'SELECT COALESCE(is_locked, false)' in sql:
                 return _Result()
             raise AssertionError(sql)
 
@@ -306,13 +306,13 @@ async def test_expense_delete_uses_soft_delete_and_restore_endpoint(monkeypatch)
         async def execute(self, query, params=None):
             sql = str(query)
             calls.append((sql, params))
-            if 'SELECT id FROM a_class.operating_costs WHERE id = :expense_id AND "删除时间" IS NULL' in sql:
+            if 'SELECT id FROM a_class.operating_costs WHERE id = :expense_id AND deleted_at IS NULL' in sql:
                 return _Result(SimpleNamespace(id=5))
-            if 'SET "删除时间" = NOW()' in sql:
+            if 'SET deleted_at = NOW()' in sql:
                 return _Result(None)
-            if 'SELECT id\n            FROM a_class.operating_costs\n            WHERE id = :expense_id\n              AND "删除时间" IS NOT NULL' in sql:
+            if 'SELECT id\n            FROM a_class.operating_costs\n            WHERE id = :expense_id\n              AND deleted_at IS NOT NULL' in sql:
                 return _Result(SimpleNamespace(id=5))
-            if 'SET "删除时间" = NULL' in sql:
+            if 'SET deleted_at = NULL' in sql:
                 return _Result(None)
             raise AssertionError(sql)
 
@@ -343,5 +343,5 @@ async def test_expense_delete_uses_soft_delete_and_restore_endpoint(monkeypatch)
     assert restore_response.status_code == 200
     assert restore_body["success"] is True
     assert "恢复" in restore_body["message"]
-    assert any('SET "删除时间" = NOW()' in sql for sql, _ in calls)
-    assert any('SET "删除时间" = NULL' in sql for sql, _ in calls)
+    assert any('SET deleted_at = NOW()' in sql for sql, _ in calls)
+    assert any('SET deleted_at = NULL' in sql for sql, _ in calls)

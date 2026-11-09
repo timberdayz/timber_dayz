@@ -10,7 +10,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def use_v2_profit_basis_policy(monkeypatch):
     async def resolve_v2_version(*_args, **_kwargs):
-        return "A_PRE_COMMISSION_LABOR_V2"
+        return "SETTLEMENT_BASIS_V1"
 
     monkeypatch.setattr(
         "backend.services.labor_cost_policy_service.LaborCostPolicyService.get_profit_basis_version",
@@ -78,6 +78,8 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
             _ScalarResult([config_row]),
             _ScalarResult([assign_row]),
             _ScalarResult([]),
+            # 店铺级考核状态（PerformanceScore）
+            _ScalarResult([]),
         ]
     )
     domain_module.load_shop_monthly_metrics = AsyncMock(
@@ -110,6 +112,15 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
 
     domain_module.ProfitBasisService = _FakeProfitBasisService
 
+    class _FakeIncomeCalculationService:
+        def __init__(self, db):
+            self.db = db
+
+        async def build_settlement_preview(self, year_month):
+            return {"year_month": year_month, "employees": []}
+
+    domain_module.HRIncomeCalculationService = _FakeIncomeCalculationService
+
     resp = asyncio.run(
         domain_module.get_shop_profit_statistics(
             request=request,
@@ -126,7 +137,7 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
     assert row["a_class_cost_amount"] == 500.0
     assert row["other_a_class_cost_amount"] == 350.0
     assert row["pre_commission_labor_cost_amount"] == 150.0
-    assert row["basis_version"] == "A_PRE_COMMISSION_LABOR_V2"
+    assert row["basis_version"] == "SETTLEMENT_BASIS_V1"
     assert row["cost_status"] == "projected"
     assert row["allocatable_profit_amount"] == 1200.0
     assert row["estimated_total_commission"] == 120.0
@@ -181,6 +192,8 @@ def test_shop_profit_statistics_floors_negative_profit_basis_for_estimated_commi
             _ScalarResult([config_row]),
             _ScalarResult([assign_row]),
             _ScalarResult([]),
+            # 店铺级考核状态（PerformanceScore）
+            _ScalarResult([]),
         ]
     )
     domain_module.load_shop_monthly_metrics = AsyncMock(
@@ -209,6 +222,15 @@ def test_shop_profit_statistics_floors_negative_profit_basis_for_estimated_commi
             }
 
     domain_module.ProfitBasisService = _FakeProfitBasisService
+
+    class _FakeIncomeCalculationService:
+        def __init__(self, db):
+            self.db = db
+
+        async def build_settlement_preview(self, year_month):
+            return {"year_month": year_month, "employees": []}
+
+    domain_module.HRIncomeCalculationService = _FakeIncomeCalculationService
 
     resp = asyncio.run(
         domain_module.get_shop_profit_statistics(
@@ -261,6 +283,15 @@ def test_load_profit_basis_map_rebuilds_unlocked_snapshot_for_statistics():
             }
 
     domain_module.ProfitBasisService = _FakeProfitBasisService
+
+    class _FakeIncomeCalculationService:
+        def __init__(self, db):
+            self.db = db
+
+        async def build_settlement_preview(self, year_month):
+            return {"year_month": year_month, "employees": []}
+
+    domain_module.HRIncomeCalculationService = _FakeIncomeCalculationService
 
     result = asyncio.run(
         domain_module._load_profit_basis_map(

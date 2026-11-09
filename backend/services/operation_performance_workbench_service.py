@@ -991,22 +991,55 @@ class OperationPerformanceWorkbenchService:
         await self.db.commit()
         return await self.get_workbench(request.year_month)
 
+    async def _find_latest_configurable_month(self, year_month: str) -> str | None:
+        """找出早于 ``year_month`` 的、最近一个存在受控运营配置的月份。
+
+        复制配置时不该被「上一个自然月没配」卡住：运营指标目录是按月维护的，
+        中间月份空着很常见（新月份上线、上月没做运营考核等）。
+        """
+        month_start, _ = self.month_range(year_month)
+        rows = (
+            (
+                await self.db.execute(
+                    select(SalesTarget.period_start)
+                    .where(
+                        SalesTarget.target_type == "operation",
+                        SalesTarget.period_start < month_start,
+                        SalesTarget.metric_catalog_version.is_not(None),
+                        SalesTarget.scoring_model_version == "auto_integer_v1",
+                        SalesTarget.status != "cancelled",
+                    )
+                    .distinct()
+                    .order_by(SalesTarget.period_start.desc())
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not rows:
+            return None
+        period_start = rows[0]
+        return f"{period_start.year:04d}-{period_start.month:02d}"
+
     async def copy_prev_month(
         self, year_month: str, username: str | None = None
     ) -> dict[str, Any]:
         await self._lock_month_mutation(year_month)
         month_start, _ = self.month_range(year_month)
-        previous_month = (
-            f"{month_start.year - 1:04d}-12"
-            if month_start.month == 1
-            else f"{month_start.year:04d}-{month_start.month - 1:02d}"
-        )
         current = await self._targets(year_month)
         if current:
             raise ValueError("目标月份已有运营配置，请清空后再复制")
-        previous = await self._targets(previous_month, auto_integer_only=True)
+
+        # 复制源：最近一个**有受控运营配置**的历史月份。
+        # 旧实现只看上一个自然月，遇到「上月没配」就直接失败，
+        # 导致新月份必须从零手工重建（10 月实测：9 月无配置 → 复制直接 400）。
+        source_month = await self._find_latest_configurable_month(year_month)
+        if source_month is None:
+            raise ValueError("没有找到可复制的历史运营配置，请先手工配置本月运营指标")
+        previous = await self._targets(source_month, auto_integer_only=True)
         if not previous:
-            raise ValueError("上月没有可复制的运营配置")
+            raise ValueError("没有找到可复制的历史运营配置，请先手工配置本月运营指标")
         active_catalog = {item.metric_code: item for item in await self._catalog()}
         if not active_catalog:
             raise ValueError("当前没有可用的运营指标目录")
@@ -1025,7 +1058,7 @@ class OperationPerformanceWorkbenchService:
                 }
             )
         if not metrics:
-            raise ValueError("上月没有启用且可复制的运营指标")
+            raise ValueError("没有找到启用且可复制的运营指标")
         result = await self.apply(
             OperationWorkbenchApplyRequest(
                 year_month=year_month,
@@ -1037,6 +1070,7 @@ class OperationPerformanceWorkbenchService:
             username=username,
         )
         result["skipped"] = skipped
+        result["source_month"] = source_month
         return result
 
     @staticmethod

@@ -92,10 +92,10 @@ class LaborCostPolicyUpdateRequest(BaseModel):
 class LaborCostPolicyResponse(BaseModel):
     """Fixed profit-basis policy returned to HR administration clients."""
 
-    basis_version: str = Field("A_PRE_COMMISSION_LABOR_V2")
+    basis_version: str = Field("SETTLEMENT_BASIS_V1")
     policy_mode: str = Field("single_runtime_basis")
     effective_month: Optional[str] = Field(None)
-    v2_basis_version: str = Field("A_PRE_COMMISSION_LABOR_V2")
+    v2_basis_version: str = Field("SETTLEMENT_BASIS_V1")
 
 
 LaborCostPolicyEnvelopeResponse = SuccessResponse[LaborCostPolicyResponse]
@@ -668,6 +668,19 @@ class PayrollRecordManualUpdate(BaseModel):
     backfill_note: Optional[str] = Field(None, max_length=512)
 
 
+class PayrollBatchConfirmRequest(BaseModel):
+    """整月批量确认工资单。
+
+    工资期是月份级原子的：任意一张确认后，整月禁止重算绩效与提成。
+    批量确认把「先确认了一个人、剩下人全被锁死」变成「一次性校验全月，
+    全部通过才整体提交」。
+    """
+
+    year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    backfill_source_month: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}$")
+    backfill_note: Optional[str] = Field(None, max_length=512)
+
+
 class PayrollManualInputUpdate(BaseModel):
     overtime_pay: Decimal = Field(0, ge=0)
     bonus: Decimal = Field(0, ge=0)
@@ -805,7 +818,14 @@ class EmployeeCommissionResponse(BaseModel):
 
 
 class ShopCommissionResponse(BaseModel):
-    id: int
+    """店铺维度提成。
+
+    数据源已从影子表 ``c_class.shop_commissions``（已由迁移 20261212 删除）
+    切换到真 SSOT：销售额来自月度店铺赛马模块，
+    提成金额 = 结算利润基数 × 可分配率 × 该店归属提成比合计。
+    """
+
+    platform_code: str
     shop_id: str
     year_month: str
     sales_amount: Decimal

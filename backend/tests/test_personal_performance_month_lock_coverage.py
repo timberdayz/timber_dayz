@@ -2,12 +2,32 @@ from pathlib import Path
 
 
 def test_payroll_confirmation_acquires_same_month_transaction_lock_before_confirming():
-    source = Path("backend/domains/business/routers/hr_salary.py").read_text(encoding="utf-8")
-    body = source[source.index("async def confirm_payroll_record"):source.index("async def reopen_payroll_record")]
+    """确认逻辑已下沉到 PayrollConfirmationService，路由只做委托。
+
+    锁顺序契约不变：先拿月份事务锁 + 校验可变更，再落 confirmed 状态。
+    """
+    source = Path("backend/services/payroll_confirmation_service.py").read_text(
+        encoding="utf-8"
+    )
+    body = source[source.index("async def confirm_record"):source.index("async def confirm_month")]
 
     assert "acquire_month_transaction_lock" in body
-    assert body.index("acquire_month_transaction_lock") < body.index('record.status = "confirmed"')
-    assert body.index("assert_month_mutable") < body.index('record.status = "confirmed"')
+    assert body.index("acquire_month_transaction_lock") < body.index(
+        'record.status = "confirmed"'
+    )
+    assert body.index("assert_month_mutable") < body.index(
+        'record.status = "confirmed"'
+    )
+
+    route_source = Path("backend/domains/business/routers/hr_salary.py").read_text(
+        encoding="utf-8"
+    )
+    route_body = route_source[
+        route_source.index("async def confirm_payroll_record"):route_source.index(
+            "async def reopen_payroll_record"
+        )
+    ]
+    assert "PayrollConfirmationService" in route_body
 
 
 def test_legacy_employee_month_lock_uses_explicit_period_argument():

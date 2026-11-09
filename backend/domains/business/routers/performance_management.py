@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """
@@ -285,7 +285,7 @@ async def _load_profit_basis_for_performance(
             "profit_basis_amount": float(
                 getattr(row, "profit_basis_amount", 0.0) or 0.0
             ),
-            "basis_version": getattr(row, "basis_version", "A_ONLY_V1"),
+            "basis_version": getattr(row, "basis_version", "SETTLEMENT_BASIS_V1"),
             "calculation_mode": "formal",
             "source": "finance.shop_profit_basis",
         }
@@ -302,7 +302,7 @@ async def _load_profit_basis_for_performance(
         )
         basis_by_shop[key] = {
             "profit_basis_amount": float(forecast.get("profit_basis_amount") or 0.0),
-            "basis_version": forecast.get("basis_version", "A_ONLY_V1"),
+            "basis_version": forecast.get("basis_version", "SETTLEMENT_BASIS_V1"),
             "calculation_mode": "forecast",
             "source": "forecast.profit_basis",
         }
@@ -864,6 +864,64 @@ def _public_coefficient(
     coefficient: Optional[float], details: Dict[str, Any]
 ) -> Optional[float]:
     return coefficient if _summary_is_formal_ready(details) else None
+
+
+def _not_applicable_score_details(reason: str) -> Dict[str, Any]:
+    """当月不参与考核的店铺（例如没有任何经营数据）明确留痕，不阻断整月结算。"""
+    return {
+        "sales": {
+            "status": "not_applicable",
+            "source": None,
+            "target": None,
+            "achieved": None,
+            "rate": None,
+            "calculation": None,
+            "message": reason,
+        },
+        "profit": {
+            "status": "not_applicable",
+            "source": None,
+            "target": None,
+            "achieved": None,
+            "rate": None,
+            "calculation": None,
+            "message": reason,
+        },
+        "key_product": {
+            "status": "not_in_scope",
+            "source": None,
+            "target": None,
+            "achieved": None,
+            "rate": None,
+            "calculation": None,
+            "message": "Key product is not in current formal scope.",
+        },
+        "operation": {
+            "status": "not_applicable",
+            "source": None,
+            "target": None,
+            "achieved": None,
+            "rate": None,
+            "calculation": None,
+            "message": reason,
+            "items": [],
+            "score": 0.0,
+        },
+        "summary": {
+            "calculation_status": "not_applicable",
+            "calculation_mode": "not_applicable",
+            "formula_version": "SETTLEMENT_PROFIT_V1",
+            "profit_basis_version": None,
+            "ready_dimensions": [],
+            "pending_dimensions": [],
+            "message": reason,
+            "ranking_pool": "excluded",
+            "formal_ready": False,
+            "data_coverage_warning": False,
+            "performance_alert_level": None,
+            "performance_alert_types": [],
+        },
+    }
 
 
 def _apply_ranking_policy(
@@ -2506,10 +2564,8 @@ async def calculate_performance_scores(
                 period=period,
                 included_scope_keys=included_scope_keys,
             )
-        valid_shop_keys = await _load_valid_performance_shop_keys(db, source_rows)
+        registered_shop_keys = await _load_valid_performance_shop_keys(db, source_rows)
         monthly_source_shop_keys = await _load_monthly_source_shop_keys(db, period)
-        if valid_shop_keys is not None and monthly_source_shop_keys is not None:
-            valid_shop_keys &= monthly_source_shop_keys
         calc_list = []
         for rec in source_rows.values():
             platform_code = rec["platform_code"]
@@ -2522,11 +2578,39 @@ async def calculate_performance_scores(
                 )
                 continue
             key = f"{platform_code}|{current_shop_id}"
-            if valid_shop_keys is not None and key not in valid_shop_keys:
+            if registered_shop_keys is not None and key not in registered_shop_keys:
+                # 未建档的脏数据：直接跳过，不留痕。
                 logger.warning(
                     "绩效计算跳过未建档店铺数据: platform_code=%s shop_id=%s",
                     platform_code,
                     current_shop_id,
+                )
+                continue
+            if monthly_source_shop_keys is not None and key not in monthly_source_shop_keys:
+                # 该店已建档、当月却没有任何经营数据：明确标记「不参与考核」，
+                # 写入一条 not_applicable 绩效记录，而不是静默跳过。
+                # 这样绩效表就是唯一事实源，结算门禁可以直接读到结论，
+                # 不会因为一家空店把整月工资卡死。
+                logger.warning(
+                    "绩效计算标记为不参与考核: platform_code=%s shop_id=%s",
+                    platform_code,
+                    current_shop_id,
+                )
+                calc_list.append(
+                    {
+                        "platform_code": platform_code,
+                        "shop_id": current_shop_id,
+                        "sales_score": 0.0,
+                        "profit_score": 0.0,
+                        "key_product_score": 0.0,
+                        "operation_score": 0.0,
+                        "total_score": 0.0,
+                        "rank": None,
+                        "performance_coefficient": None,
+                        "score_details": _not_applicable_score_details(
+                            "本店当月没有经营数据，不参与本月绩效考核，也不计提成。"
+                        ),
+                    }
                 )
                 continue
             target = float(rec["target"] or 0)
@@ -2548,15 +2632,26 @@ async def calculate_performance_scores(
             profit_basis = profit_basis_by_shop.get(key, {})
             profit_achieved = float(profit_basis.get("profit_basis_amount") or 0.0)
             profit_mode = profit_basis.get("calculation_mode", "forecast")
-            profit_rate_fraction = (
-                (profit_achieved / target_profit) if target_profit > 0 else None
-            )
-            profit_rate = _normalize_rate_percent(profit_rate_fraction)
-            profit_score = (
-                _score_by_rate(config.profit_max_score, profit_rate_fraction)
-                if target_profit > 0
-                else 0.0
-            )
+            is_loss = profit_achieved < 0
+            if is_loss:
+                # 亏损是业务状态，不是异常：利润维度记 0 分，提成不计提，
+                # 但绩效照常完成，不阻断整月结算。
+                profit_rate_fraction = 0.0
+                profit_rate = 0.0
+                profit_score = 0.0
+                profit_status = "loss"
+            elif target_profit > 0:
+                profit_rate_fraction = profit_achieved / target_profit
+                profit_rate = _normalize_rate_percent(profit_rate_fraction)
+                profit_score = _score_by_rate(
+                    config.profit_max_score, profit_rate_fraction
+                )
+                profit_status = "calculated"
+            else:
+                profit_rate_fraction = None
+                profit_rate = 0.0
+                profit_score = 0.0
+                profit_status = "pending_target"
             key_product_score = 0.0
             operation_score, operation_details = (
                 _calculate_operation_metrics_for_shop(
@@ -2580,7 +2675,7 @@ async def calculate_performance_scores(
                 )
             )
             is_formal = (
-                target_profit > 0
+                profit_status in ("calculated", "loss")
                 and profit_mode == "formal"
                 and operation_details["status"] == "calculated"
             )
@@ -2617,8 +2712,8 @@ async def calculate_performance_scores(
                         },
                         "profit": {
                             "status": (
-                                "calculated"
-                                if is_formal
+                                profit_status
+                                if is_formal or profit_status == "loss"
                                 else (
                                     "forecast"
                                     if target_profit > 0
@@ -2627,7 +2722,7 @@ async def calculate_performance_scores(
                             ),
                             "source": (
                                 profit_basis.get("source")
-                                if target_profit > 0
+                                if target_profit > 0 or is_loss
                                 else None
                             ),
                             "target": target_profit if target_profit > 0 else None,
@@ -2639,7 +2734,11 @@ async def calculate_performance_scores(
                                 else None
                             ),
                             "message": (
-                                None
+                                (
+                                    "本店本月结算利润为负（亏损），利润维度记 0 分，不计提成。"
+                                    if is_loss
+                                    else None
+                                )
                                 if is_formal
                                 else (
                                     "Settlement profit basis is not locked yet; this result is forecast only."
@@ -2679,7 +2778,10 @@ async def calculate_performance_scores(
                                 dimension
                                 for dimension, ready in [
                                     ("sales", True),
-                                    ("profit", is_formal),
+                                    (
+                                        "profit",
+                                        profit_status in ("calculated", "loss"),
+                                    ),
                                     (
                                         "operation",
                                         operation_details["status"] == "calculated",
@@ -2690,7 +2792,10 @@ async def calculate_performance_scores(
                             "pending_dimensions": [
                                 dimension
                                 for dimension, ready in [
-                                    ("profit", is_formal),
+                                    (
+                                        "profit",
+                                        profit_status in ("calculated", "loss"),
+                                    ),
                                     (
                                         "operation",
                                         operation_details["status"] == "calculated",
@@ -2699,7 +2804,11 @@ async def calculate_performance_scores(
                                 if not ready
                             ],
                             "message": (
-                                "Sales, settlement profit, and operation dimensions are formally calculated."
+                                (
+                                    "本店本月结算利润为负（亏损），利润维度记 0 分，不计提成。"
+                                    if is_loss
+                                    else "Sales, settlement profit, and operation dimensions are formally calculated."
+                                )
                                 if is_formal
                                 else "Current result is forecast only and cannot create ranking, coefficient, income, or payroll."
                             ),

@@ -18,7 +18,9 @@ from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
 from backend.services.profit_basis_service import ProfitBasisService
+from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
+from backend.services.commission_reason_service import commission_zero_reason
 from backend.services.payroll_period_lock_service import (
     PayrollPeriodLockedError,
     PayrollPeriodLockService,
@@ -53,13 +55,13 @@ from modules.core.db import (
     Position,
     EmployeePerformance,
     EmployeeCommission,
-    ShopCommission,
     EmployeePerformanceAdjustment,
     EmployeePerformanceInput,
     EmployeeShopAssignment,
     ShopCommissionConfig,
     EmployeeTarget,
     ShopProfitBasis,
+    PerformanceScore,
     PersonalPerformancePlan,
 )
 
@@ -167,6 +169,8 @@ def year_month_to_first_day(year_month: str) -> date:
 
 def _shop_key(platform_code: str | None, shop_id: str | None) -> str:
     return f"{(platform_code or '').lower()}|{str(shop_id or '').lower()}"
+
+
 
 
 async def _load_shop_display_names(db: AsyncSession) -> Dict[tuple[str, str], str]:
@@ -1091,7 +1095,7 @@ async def _load_profit_basis_map(
                 getattr(row, "pre_commission_labor_cost_amount", 0) or 0
             ),
             "basis_version": str(
-                getattr(row, "basis_version", "") or "A_PRE_COMMISSION_LABOR_V2"
+                getattr(row, "basis_version", "") or "SETTLEMENT_BASIS_V1"
             ),
             "cost_status": str(getattr(row, "cost_status", "") or "locked"),
         }
@@ -1118,7 +1122,7 @@ async def _load_profit_basis_map(
                 basis.get("pre_commission_labor_cost_amount") or 0
             ),
             "basis_version": str(
-                basis.get("basis_version") or "A_PRE_COMMISSION_LABOR_V2"
+                basis.get("basis_version") or "SETTLEMENT_BASIS_V1"
             ),
             "cost_status": str(basis.get("cost_status") or "missing_labor_allocation"),
         }
@@ -1406,6 +1410,67 @@ async def list_employee_commissions(
         )
 
 
+@router.get("/commissions/settlement-preview")
+async def get_commission_settlement_preview(
+    year_month: str = Query(
+        ..., pattern=r"^\d{4}-\d{2}$", description="目标月份(YYYY-MM)"
+    ),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """结算预览：谁在哪家店、系数多少、预计拿到多少钱。
+
+    **页面的钱一律以这里为准。**
+    以前前端自己算「可分配利润 × 提成比例 × 系数」，
+    和后端的算法（含结算系数）并不同源，导致「页面看到 ≠ 工资单拿到」。
+    现在系数、可分配利润、预计提成全部由后端给出。
+
+    只读，不写库。
+    """
+    try:
+        try:
+            year_month_to_first_day(year_month)
+        except (ValueError, IndexError):
+            return error_response(
+                ErrorCode.PARAMETER_INVALID, "月份格式应为 YYYY-MM", status_code=400
+            )
+
+        preview = await HRIncomeCalculationService(db).build_settlement_preview(
+            year_month
+        )
+        employees = preview.get("employees") or []
+        employee_codes = [item["employee_code"] for item in employees]
+        name_by_code: Dict[str, str] = {}
+        if employee_codes:
+            name_rows = (
+                (
+                    await db.execute(
+                        select(Employee.employee_code, Employee.name).where(
+                            Employee.employee_code.in_(employee_codes)
+                        )
+                    )
+                )
+                .tuples()
+                .all()
+            )
+            name_by_code = {
+                str(code): str(name)
+                for code, name in name_rows
+                if code and name
+            }
+        for item in employees:
+            item["employee_name"] = name_by_code.get(
+                item["employee_code"], item["employee_code"]
+            )
+        return {"success": True, "data": preview}
+    except Exception as e:
+        logger.error(f"获取结算预览失败: {e}", exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"获取结算预览失败: {str(e)}",
+            status_code=500,
+        )
+
+
 @router.get("/commissions/shop", response_model=List[ShopCommissionResponse])
 async def list_shop_commissions(
     shop_id: Optional[str] = Query(None, description="店铺ID筛选"),
@@ -1414,30 +1479,127 @@ async def list_shop_commissions(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """获取店铺提成列表(从 shop_commissions 表读取)"""
+    """获取店铺提成列表。
+
+    数据源已从影子表 ``c_class.shop_commissions``（迁移 20261212 已删除，
+    且它的 ORM 声明与库内中文字段名对不上、原本就会 500）切换到真 SSOT：
+
+    - 销售额：月度店铺赛马模块
+    - 提成金额：结算利润基数 × 可分配率 × 该店当月归属提成比合计
+    """
     try:
-        query = select(ShopCommission)
-        conditions = []
+        if not year_month:
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "请指定目标月份(YYYY-MM)",
+                status_code=400,
+            )
+        try:
+            year_month_to_first_day(year_month)
+        except (ValueError, IndexError):
+            return error_response(
+                ErrorCode.PARAMETER_INVALID, "月份格式应为 YYYY-MM", status_code=400
+            )
 
-        if shop_id:
-            conditions.append(ShopCommission.shop_id == shop_id)
-        if year_month:
-            conditions.append(ShopCommission.year_month == year_month)
-
-        if conditions:
-            query = query.where(and_(*conditions))
-
-        offset = (page - 1) * page_size
-        query = (
-            query.order_by(ShopCommission.year_month.desc(), ShopCommission.shop_id)
-            .offset(offset)
-            .limit(page_size)
+        shop_rows = (
+            (
+                await db.execute(
+                    select(ShopAccount)
+                    .where(
+                        ShopAccount.enabled.is_(True),
+                        ShopAccount.business_role == "operating_store",
+                    )
+                    .order_by(ShopAccount.platform, ShopAccount.store_name)
+                )
+            )
+            .scalars()
+            .all()
         )
+        shop_list = [
+            {
+                "platform_code": (r.platform or "").lower(),
+                "shop_id": getattr(r, "platform_shop_id", None)
+                or getattr(r, "shop_account_id", None)
+                or getattr(r, "shop_id", None)
+                or getattr(r, "account_id", None)
+                or str(r.id),
+            }
+            for r in shop_rows
+        ]
+        if shop_id:
+            shop_list = [
+                item for item in shop_list if str(item["shop_id"]) == str(shop_id)
+            ]
 
-        result = await db.execute(query)
-        commissions = result.scalars().all()
+        metrics_by_shop = await load_shop_monthly_metrics(db, year_month)
+        basis_by_shop = await _load_profit_basis_map(db, year_month, shop_list)
 
-        return [ShopCommissionResponse.model_validate(comm) for comm in commissions]
+        config_rows = (
+            (
+                await db.execute(
+                    select(ShopCommissionConfig).where(
+                        ShopCommissionConfig.year_month == year_month
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        allocatable_by_shop = {
+            _shop_key(c.platform_code, c.shop_id): float(c.allocatable_profit_rate or 0)
+            for c in config_rows
+        }
+
+        assignment_rows = (
+            (
+                await db.execute(
+                    select(EmployeeShopAssignment).where(
+                        EmployeeShopAssignment.year_month == year_month,
+                        EmployeeShopAssignment.status == "active",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        ratio_by_shop: Dict[str, float] = {}
+        for assignment in assignment_rows:
+            key = _shop_key(assignment.platform_code, assignment.shop_id)
+            ratio_by_shop[key] = ratio_by_shop.get(key, 0.0) + float(
+                getattr(assignment, "commission_ratio", 0) or 0
+            )
+
+        now = datetime.now(timezone.utc)
+        rows: List[ShopCommissionResponse] = []
+        for item in shop_list:
+            key = _shop_key(item["platform_code"], item["shop_id"])
+            metric = metrics_by_shop.get(key) or {}
+            basis = basis_by_shop.get(key, {})
+            sales_amount = float(metric.get("monthly_sales", 0) or 0)
+            profit_basis_amount = float(basis.get("profit_basis_amount", 0) or 0)
+            allocatable_rate = allocatable_by_shop.get(key, 0.0)
+            total_ratio = ratio_by_shop.get(key, 0.0)
+            commission_amount = (
+                max(profit_basis_amount, 0.0) * allocatable_rate * total_ratio
+            )
+            commission_rate = (
+                commission_amount / sales_amount if sales_amount > 0 else 0.0
+            )
+            rows.append(
+                ShopCommissionResponse(
+                    platform_code=item["platform_code"],
+                    shop_id=str(item["shop_id"]),
+                    year_month=year_month,
+                    sales_amount=Decimal(str(round(sales_amount, 2))),
+                    commission_amount=Decimal(str(round(commission_amount, 2))),
+                    commission_rate=round(commission_rate, 6),
+                    calculated_at=now,
+                )
+            )
+
+        rows.sort(key=lambda row: (row.year_month, row.shop_id))
+        offset = (page - 1) * page_size
+        return rows[offset : offset + page_size]
     except Exception as e:
         logger.error(f"获取店铺提成列表失败: {e}", exc_info=True)
         return error_response(
@@ -1789,7 +1951,7 @@ async def get_shop_commission_config(
         )
         config_rows = (await db.execute(config_query)).scalars().all()
         config_by_key = {
-            f"{(c.platform_code or '').lower()}|{c.shop_id}": float(
+            _shop_key(c.platform_code, c.shop_id): float(
                 c.allocatable_profit_rate or 0
             )
             for c in config_rows
@@ -1804,12 +1966,15 @@ async def get_shop_commission_config(
                 or getattr(r, "account_id", None)
                 or str(r.id)
             )
-            key = f"{pc}|{sid}"
+            key = _shop_key(pc, sid)
             items.append(
                 {
                     "platform_code": pc,
                     "shop_id": sid,
                     "allocatable_profit_rate": config_by_key.get(key, 0),
+                    # 区分「没配」与「配成 0」：两者在提成金额上都是 0，
+                    # 但业务含义完全不同，页面必须能分开显示。
+                    "is_allocatable_rate_configured": key in config_by_key,
                 }
             )
         return {"success": True, "data": items}
@@ -2107,6 +2272,55 @@ async def get_shop_profit_statistics(
                 active_shop_keys.add(key)
         basis_by_shop = await _load_profit_basis_map(db, month, shop_list)
 
+        # 结算口径（含结算系数）的店铺提成合计。
+        # 上面那两个「主管/操作员提成」是**不含结算系数**的分摊额，
+        # 和工资单实发对不上 —— 页面必须同时能看到两个口径，别让运营去猜。
+        settlement_commission_by_shop: Dict[str, float] = {}
+        try:
+            preview = await HRIncomeCalculationService(db).build_settlement_preview(
+                month
+            )
+        except Exception:  # noqa: BLE001
+            preview = {"employees": []}
+        for employee in preview.get("employees") or []:
+            for shop in employee.get("shops") or []:
+                shop_key = _shop_key(
+                    shop.get("platform_code"), shop.get("shop_id")
+                )
+                settlement_commission_by_shop[shop_key] = round(
+                    settlement_commission_by_shop.get(shop_key, 0.0)
+                    + float(shop.get("estimated_commission", 0) or 0),
+                    2,
+                )
+
+        # 店铺级考核状态（本月不参与考核 / 亏损 / 待补数据）
+        shop_score_rows = (
+            (
+                await db.execute(
+                    select(PerformanceScore).where(PerformanceScore.period == month)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        shop_status_by_key: Dict[str, Dict[str, Any]] = {}
+        for score_row in shop_score_rows:
+            details = getattr(score_row, "score_details", None) or {}
+            summary = (
+                details.get("summary", {}) if isinstance(details, dict) else {}
+            )
+            profit_detail = (
+                details.get("profit", {}) if isinstance(details, dict) else {}
+            )
+            shop_status_by_key[
+                _shop_key(score_row.platform_code, score_row.shop_id)
+            ] = {
+                "calculation_status": str(summary.get("calculation_status") or ""),
+                "profit_status": str((profit_detail or {}).get("status") or ""),
+                "ranking_pool": str(summary.get("ranking_pool") or ""),
+                "message": str(summary.get("message") or ""),
+            }
+
         # 按店铺分组：supervisors 和 operators，各自 commission_ratio 列表
         assign_by_shop: Dict[str, Dict] = {}
         for a in assign_rows:
@@ -2122,7 +2336,7 @@ async def get_shop_profit_statistics(
         # 5. 合并：店铺列表 + 销售/利润 + 主管/操作员利润
         items = []
         for s in shop_list:
-            key = f"{s['platform_code']}|{str(s['shop_id']).lower()}"
+            key = _shop_key(s["platform_code"], s["shop_id"])
             m = (
                 metrics_by_shop.get(key)
                 or metrics_by_shop.get(f"{s['platform_code']}|{s['shop_id']}")
@@ -2141,9 +2355,10 @@ async def get_shop_profit_statistics(
                 basis.get("pre_commission_labor_cost_amount", 0)
             )
             achievement_rate = m.get("achievement_rate")
-            allocatable_rate = allocatable_by_shop.get(
-                key, 1.0
-            )  # 无配置时默认 100% 可分配
+            # 可分配率缺省口径：没有配置行 = 该店本月不参与提成分配（0）。
+            # 必须与实发提成（HRIncomeCalculationService）和前端页面完全一致。
+            is_rate_configured = key in allocatable_by_shop
+            allocatable_rate = allocatable_by_shop.get(key, 0.0)
             allocatable_profit = max(profit_basis_amount, 0.0) * allocatable_rate
             ass = assign_by_shop.get(key, {})
             sup_ratios = ass.get("supervisors", [])
@@ -2165,15 +2380,48 @@ async def get_shop_profit_statistics(
                     "other_a_class_cost_amount": other_a_class_cost_amount,
                     "pre_commission_labor_cost_amount": pre_commission_labor_cost_amount,
                     "basis_version": basis.get("basis_version")
-                    or "A_PRE_COMMISSION_LABOR_V2",
+                    or "SETTLEMENT_BASIS_V1",
                     "cost_status": basis.get("cost_status")
                     or "missing_labor_allocation",
                     "profit_basis_amount": profit_basis_amount,
+                    "allocatable_profit_rate": allocatable_rate,
+                    "is_allocatable_rate_configured": is_rate_configured,
                     "allocatable_profit_amount": allocatable_profit,
                     "achievement_rate": achievement_rate,
                     "supervisor_profit": supervisor_profit,
                     "operator_profit": operator_profit,
                     "estimated_total_commission": estimated_total_commission,
+                    "settlement_commission_amount": settlement_commission_by_shop.get(
+                        key, 0.0
+                    ),
+                    "settlement_commission_note": (
+                        "含结算系数（= min(店铺结算系数, 个人分数档位系数)），"
+                        "与工资单实发同口径；上面两个分摊额不含结算系数"
+                    ),
+                    "shop_calculation_status": shop_status_by_key.get(key, {}).get(
+                        "calculation_status", ""
+                    ),
+                    "shop_profit_status": shop_status_by_key.get(key, {}).get(
+                        "profit_status", ""
+                    ),
+                    "shop_ranking_pool": shop_status_by_key.get(key, {}).get(
+                        "ranking_pool", ""
+                    ),
+                    "shop_status_message": shop_status_by_key.get(key, {}).get(
+                        "message", ""
+                    ),
+                    "commission_zero_reason": commission_zero_reason(
+                        is_rate_configured=is_rate_configured,
+                        allocatable_rate=allocatable_rate,
+                        profit_basis_amount=profit_basis_amount,
+                        # 有提成就不报「提成为 0」：传实际算出来的金额，
+                        # 并用「归属提成比合计」区分「没配比例」和「利润为 0」。
+                        estimated_total_commission=estimated_total_commission,
+                        has_assignment=bool(sup_ratios or op_ratios),
+                        commission_ratio_sum=sum(sup_ratios) + sum(op_ratios),
+                        cost_status=basis.get("cost_status")
+                        or "missing_labor_allocation",
+                    ),
                 }
             )
         result = {"success": True, "data": items}
@@ -2273,7 +2521,7 @@ async def get_annual_profit_statistics(
                 .all()
             )
             allocatable_by_shop: Dict[str, float] = {
-                f"{(c.platform_code or '').lower()}|{c.shop_id}": float(
+                _shop_key(c.platform_code, c.shop_id): float(
                     c.allocatable_profit_rate or 0
                 )
                 for c in config_rows
@@ -2319,7 +2567,7 @@ async def get_annual_profit_statistics(
             month_key = f"{month_num:02d}"
 
             for s in shop_list:
-                key = f"{s['platform_code']}|{str(s['shop_id']).lower()}"
+                key = _shop_key(s["platform_code"], s["shop_id"])
                 m = (
                     metrics_by_shop.get(key)
                     or metrics_by_shop.get(f"{s['platform_code']}|{s['shop_id']}")
@@ -2331,7 +2579,7 @@ async def get_annual_profit_statistics(
                     basis_by_shop.get(key, {}).get("profit_basis_amount", 0)
                 )
                 achievement_rate = m.get("achievement_rate")
-                allocatable_rate = allocatable_by_shop.get(key, 1.0)
+                allocatable_rate = allocatable_by_shop.get(key, 0.0)
                 allocatable_profit = max(profit_basis_amount, 0.0) * allocatable_rate
                 ass = assign_by_shop.get(key, {})
                 sup_list = ass.get("supervisors", [])

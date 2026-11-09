@@ -1208,56 +1208,23 @@ class PostgresqlDashboardService:
                         result = await session.execute(text(query), params)
                     except Exception:
                         await session.rollback()
-                        columns = await self._get_table_columns(
-                            "a_class", "sales_targets_a"
+                        # ⚠️ a_class.sales_targets_a 已于第三批-C 下线（表已 DROP）。
+                        # 这里**不再**回落到那张已删表；降级到父目标口径
+                        # （公司级合计），保证看板接口不 500。
+                        result = await session.execute(
+                            text(
+                                """
+                                SELECT
+                                    SUM(target_amount) AS target_amount,
+                                    SUM(target_quantity) AS target_quantity
+                                FROM a_class.sales_targets
+                                WHERE status = 'active'
+                                  AND period_start <= :period_start
+                                  AND period_end >= :period_end
+                                """
+                            ),
+                            {"period_start": period_start, "period_end": period_end},
                         )
-                        year_month_value = period_start.strftime("%Y-%m")
-                        if {"year_month", "target_sales_amount"}.issubset(columns):
-                            target_filters = ""
-                            target_params: dict[str, Any] = {
-                                "year_month": year_month_value
-                            }
-                            if platform and "platform_code" in columns:
-                                target_filters += " AND LOWER(COALESCE(platform_code, '')) = LOWER(:platform)"
-                                target_params["platform"] = platform
-                            if shop_id and "shop_id" in columns:
-                                target_filters += " AND shop_id = :shop_id"
-                                target_params["shop_id"] = shop_id
-                            result = await session.execute(
-                                text(
-                                    f"""
-                                    SELECT
-                                        SUM(target_sales_amount) AS target_amount,
-                                        SUM(target_quantity) AS target_quantity
-                                    FROM a_class.sales_targets_a
-                                    WHERE year_month = :year_month
-                                    {target_filters}
-                                    """
-                                ),
-                                target_params,
-                            )
-                        else:
-                            target_filters = ""
-                            target_params = {"year_month": year_month_value}
-                            if platform and "platform_code" in columns:
-                                target_filters += " AND LOWER(COALESCE(platform_code, '')) = LOWER(:platform)"
-                                target_params["platform"] = platform
-                            if shop_id:
-                                target_filters += ' AND "店铺ID" = :shop_id'
-                                target_params["shop_id"] = shop_id
-                            result = await session.execute(
-                                text(
-                                    f"""
-                                    SELECT
-                                        COALESCE(SUM("目标销售额"), 0) AS target_amount,
-                                        COALESCE(SUM("目标订单数"), 0) AS target_quantity
-                                    FROM a_class.sales_targets_a
-                                    WHERE "年月" = :year_month
-                                    {target_filters}
-                                    """
-                                ),
-                                target_params,
-                            )
                 else:
                     try:
                         result = await session.execute(
@@ -1276,66 +1243,24 @@ class PostgresqlDashboardService:
                         )
                     except Exception:
                         await session.rollback()
-                        try:
-                            columns = await self._get_table_columns(
-                                "a_class", "sales_targets_a"
-                            )
-                            year_month_value = period_start.strftime("%Y-%m")
-                            if {"year_month", "target_sales_amount"}.issubset(columns):
-                                result = await session.execute(
-                                    text(
-                                        """
-                                        SELECT
-                                            SUM(target_sales_amount) AS target_amount,
-                                            SUM(target_quantity) AS target_quantity
-                                        FROM a_class.sales_targets_a
-                                        WHERE year_month = :year_month
-                                        """
-                                    ),
-                                    {"year_month": year_month_value},
-                                )
-                            else:
-                                result = await session.execute(
-                                    text(
-                                        """
-                                        SELECT
-                                            COALESCE(SUM("目标销售额"), 0) AS target_amount,
-                                            COALESCE(SUM("目标订单数"), 0) AS target_quantity
-                                        FROM a_class.sales_targets_a
-                                        WHERE "年月" = :year_month
-                                        """
-                                    ),
-                                    {"year_month": year_month_value},
-                                )
-                        except Exception:
-                            await session.rollback()
-                            try:
-                                result = await session.execute(
-                                    text(
-                                        """
-                                        SELECT
-                                            COALESCE(SUM("目标销售额"), 0) AS target_amount,
-                                            COALESCE(SUM("目标订单数"), 0) AS target_quantity
-                                        FROM a_class.sales_targets_a
-                                        WHERE "年月" = :year_month
-                                        """
-                                    ),
-                                    {"year_month": period_start.strftime("%Y-%m")},
-                                )
-                            except Exception:
-                                await session.rollback()
-                                result = await session.execute(
-                                    text(
-                                        """
-                                        SELECT
-                                            COALESCE(SUM("目标销售额"), 0) AS target_amount,
-                                            COALESCE(SUM("目标单量"), 0) AS target_quantity
-                                        FROM a_class.sales_targets_a
-                                        WHERE "年月" = :year_month
-                                        """
-                                    ),
-                                    {"year_month": period_start.strftime("%Y-%m")},
-                                )
+                        # ⚠️ a_class.sales_targets_a 已于第三批-C 下线（表已 DROP）。
+                        # 降级到真 SSOT 的「店铺 × 月」档位口径。
+                        result = await session.execute(
+                            text(
+                                """
+                                SELECT
+                                    SUM(tb.target_amount) AS target_amount,
+                                    SUM(tb.target_quantity) AS target_quantity
+                                FROM a_class.target_breakdown tb
+                                JOIN a_class.sales_targets st ON st.id = tb.target_id
+                                WHERE tb.breakdown_type = 'shop'
+                                  AND st.target_type = 'shop'
+                                  AND st.status = 'active'
+                                  AND tb.period_label = :year_month
+                                """
+                            ),
+                            {"year_month": period_start.strftime("%Y-%m")},
+                        )
             else:
                 query = """
                     SELECT
@@ -1380,12 +1305,12 @@ class PostgresqlDashboardService:
         year_month = period_month.strftime("%Y-%m")
         async with AsyncSessionLocal() as session:
             params: dict[str, Any] = {"year_month": year_month}
-            filters = ['"年月" = :year_month', '"删除时间" IS NULL']
+            filters = ['year_month = :year_month', 'deleted_at IS NULL']
             if platform:
                 filters.append("LOWER(COALESCE(platform_code, '')) = :platform_code")
                 params["platform_code"] = platform.lower()
             if shop_id:
-                filters.append('"店铺ID" = :shop_id')
+                filters.append('shop_id = :shop_id')
                 params["shop_id"] = shop_id
 
             # ── 先查人力成本投影，再决定手工「人力费用」要不要被扣掉 ──
@@ -1442,16 +1367,16 @@ class PostgresqlDashboardService:
                 text(
                     f"""
                     SELECT SUM(
-                        CASE WHEN COALESCE("成本合计", 0) <> 0
-                            THEN "成本合计"
-                            ELSE COALESCE("租金", 0)
-                                + COALESCE("营销费用", 0)
-                                + COALESCE("水电费", 0)
-                                + COALESCE("AI Token费用", 0)
-                                + COALESCE("人力费用", 0)
-                                + COALESCE("其他成本", 0)
+                        CASE WHEN COALESCE(total_amount, 0) <> 0
+                            THEN total_amount
+                            ELSE COALESCE(rent_amount, 0)
+                                + COALESCE(marketing_amount, 0)
+                                + COALESCE(utility_amount, 0)
+                                + COALESCE(ai_token_amount, 0)
+                                + COALESCE(labor_amount, 0)
+                                + COALESCE(other_amount, 0)
                         END
-                        - CASE WHEN :use_projected_labor THEN COALESCE("人力费用", 0) ELSE 0 END
+                        - CASE WHEN :use_projected_labor THEN COALESCE(labor_amount, 0) ELSE 0 END
                     )
                     FROM a_class.operating_costs
                     WHERE {' AND '.join(filters)}
