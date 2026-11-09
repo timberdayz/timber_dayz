@@ -72,10 +72,13 @@ TikTok 的主数据没有 ``platform_shop_id``(TikTok 侧只有别名表是锚�
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from backend.utils.text_normalization import normalize_alias_key
+from modules.core.fact_identity_columns import COLLECTION_SOURCE_IDS
+from modules.core.validators import normalize_enum_value
 
 
 #: 收敛开关(可用环境变量关掉, 便于线上快速止血)。
@@ -121,6 +124,23 @@ _SHOP_ACCOUNT_ID_KEYS = (
 #: 行内 ``shop_id`` 键(语义层的 ``source_shop_id`` 会读到它)。
 _SHOP_ID_KEYS = ("shop_id",)
 
+#: 行内「店铺身份」候选键 —— **行内自带**的那几路身份表示。
+#:
+#: ⚠️ 事实表的 **列** ``shop_id`` **不在这里** —— 它是采集层写进来的原始标识
+#: (shopee 上是平台编号 / tiktok 上是导出店名 / miaoshou 采集链上是采集方代号
+#: ``xihong``), **不是身份列**。权威定性见
+#: ``modules/core/fact_identity_columns.py``。
+#:
+#: 这里取的是 ``raw_data`` **内部**的键 —— 与事实表那一列是两回事。
+_ROW_IDENTITY_KEYS = ("platform_shop_id", "shop_account_id", "shop_id")
+
+#: 「采集方标识」—— 是**数据来源**, 不是店铺身份。
+#:
+#: ⚠️ 必须排除: ``xihong`` / ``miaoshou_real_001`` 出现在行内 ``shop_id`` 时
+#: 表示「这批数据来自哪个采集器」, 拿它当店铺身份比对会得出错误结论。
+#:
+#: SSOT: ``modules/core/fact_identity_columns.py``
+
 #: 收敛结果的三种状态
 STATUS_CONVERGED = "converged"
 STATUS_CONFLICT = "conflict"
@@ -144,6 +164,12 @@ class MasterIdentity:
 
     @property
     def is_operating_store(self) -> bool:
+        """是否是在营经营店。
+
+        ⚠️ ``business_role`` 必须已经过 :func:`modules.core.validators.normalize_enum_value`
+        解包 —— 见 :func:`_as_identity`。直接拿 SAEnum 成员做等值比较会**恒为 False**
+        且**完全静默**, 曾导致本模块的反查索引恒为空、收敛 100% 失效。
+        """
         return self.enabled and self.business_role == "operating_store"
 
 
@@ -175,29 +201,53 @@ class IdentityIndex:
     by_store_name: Mapping[str, tuple[MasterIdentity, ...]]
     by_alias_normalized: Mapping[str, tuple[MasterIdentity, ...]]
 
-    def lookup(self, signal: str, value: str) -> tuple[MasterIdentity, ...]:
-        """按信号类型反查账号列表(已按平台过滤)。
+    def lookup(
+        self,
+        signal: str,
+        value: str,
+        platform_code: str | None = None,
+    ) -> tuple[MasterIdentity, ...]:
+        """按信号类型反查账号列表(**按平台过滤**)。
 
         一个信号可能落在**两种**语义上:
         ``shop_id`` 对 Shopee 是「平台店铺编号」, 对 TikTok 是「店名」⇒
         编号索引查不到就退回别名索引(反之亦然)。
+
+        ⚠️ **平台过滤是必须的**, 不是可选的优化
+        --------------------------------------
+        别名表里同一个店名可能同时挂在**不同平台**的账号上
+        (实测: 中文名「菲律宾1店」既指向 ``shopee_ph_xhkj11_local``
+        也指向 ``tiktok_ph_explorers_mall_local``)。
+        不按平台过滤 ⇒ 同一行会解析出**两个**账号 ⇒ 被误判成「身份矛盾」⇒
+        正常数据被丢弃。
+
+        语义层候选池(``sql/semantic/shop_identity_resolution_candidates.sql``)
+        是靠 SQL 里的 ``platform_code`` 过滤实现的; 本方法是它的等价物,
+        **必须**显式传 ``platform_code`` 才能得到同样的结果。
         """
         text = str(value or "").strip()
         if not text:
             return ()
         if signal == "shop_account_id":
-            return self.by_shop_account_id.get(text.lower(), ())
-        if signal in ("platform_shop_id", "shop_id"):
+            hits = self.by_shop_account_id.get(text.lower(), ())
+        elif signal in ("platform_shop_id", "shop_id"):
             hits = self.by_platform_shop_id.get(text.lower(), ())
-            if hits:
-                return hits
-            return self.by_alias_normalized.get(normalize_alias_key(text), ())
-        if signal == "store_name":
+            if not hits:
+                hits = self.by_alias_normalized.get(normalize_alias_key(text), ())
+        elif signal == "store_name":
             hits = self.by_store_name.get(text.lower(), ())
-            if hits:
-                return hits
-            return self.by_alias_normalized.get(normalize_alias_key(text), ())
-        return ()
+            if not hits:
+                hits = self.by_alias_normalized.get(normalize_alias_key(text), ())
+        else:
+            return ()
+
+        if not platform_code:
+            return hits
+        platform = _platform_key(platform_code)
+        filtered = tuple(
+            identity for identity in hits if identity.platform == platform
+        )
+        return filtered or hits
 
 
 def _identity_text(value: Any) -> str:
@@ -215,6 +265,113 @@ def _platform_key(value: Any) -> str:
     return _identity_text(value).lower()
 
 
+# ---------------------------------------------------------------------------
+# 行内身份解析(SSOT: 同步侧拦截与云端巡检共用同一份实现)
+# ---------------------------------------------------------------------------
+
+
+def normalize_identity_token(value: Any) -> str:
+    """归一化一个行内身份值, 供「同层互证」比较。
+
+    去掉平台前缀(``Shopee`` / ``TK`` / ``TikTok Shop`` / ``Miaoshou`` …)与
+    分隔符(空格/下划线/括号/斜杠/连字符), 让 ``Shopee3C店`` 与 ``3c店``
+    归一到同一个 token —— 与语义层 ``shop_identity_resolution_candidates.sql``
+    的归一化口径保持一致。
+    """
+    text = _identity_text(value).lower()
+    if not text:
+        return ""
+    text = re.sub(
+        r"^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*",
+        "",
+        text,
+    )
+    text = re.sub(r"[\s_()/\-]+", "", text)
+    return text
+
+
+def row_identity_tokens(row: Mapping[str, Any]) -> dict[str, str]:
+    """取出行内身份键的归一化 token 集合(同层, 不含事实表的列)。
+
+    只读 ``raw_data`` **内部**的键 —— 事实表那一列 ``shop_id`` 不是身份列,
+    拿它判身份会把正常数据全误杀(实测 3,781 行)。
+    """
+    raw_data = _get(row, "raw_data")
+    raw = raw_data if isinstance(raw_data, dict) else {}
+
+    tokens: dict[str, str] = {}
+    for key in _ROW_IDENTITY_KEYS:
+        value = _identity_text(raw.get(key))
+        if not value or value.lower() in COLLECTION_SOURCE_IDS:
+            continue
+        tokens[key] = normalize_identity_token(value)
+
+    for key in _STORE_NAME_KEYS:
+        value = _identity_text(raw.get(key))
+        if not value or value.lower() in COLLECTION_SOURCE_IDS:
+            continue
+        tokens.setdefault("store_label", normalize_identity_token(value))
+
+    return {k: v for k, v in tokens.items() if v}
+
+
+def row_identity_accounts(
+    row: Mapping[str, Any],
+    identity_index: IdentityIndex,
+    platform_code: str = "",
+) -> set[str]:
+    """用主数据反查出行内身份键能归属到的**账号集合**。
+
+    ``identity_index`` 为 :class:`IdentityIndex`。
+
+    ⚠️ 归一化口径: 账号 ID 与平台编号是**不同形态**(``shopee_sg_xxx_local`` vs
+    ``1407964586``), 归一化后并不能互相匹配 ⇒ **必须查主数据**, 不能靠字符串比较。
+    中文店名需用 ``normalize_alias_key`` 归一(与语义层候选池同口径)。
+
+    ⚠️ **必须按平台过滤**: 同一个中文店名可能同时挂在不同平台的账号上
+    (实测「菲律宾1店」既指向 shopee 也指向 tiktok 的账号)。
+    不按平台过滤 ⇒ 同一行解析出两个账号 ⇒ 正常数据被误判成矛盾丢弃。
+
+    采集方标识(``xihong`` / ``miaoshou_real_001``)已在取 token 时排除 ——
+    它们表示「数据来自哪个采集器」, 不是店铺身份。
+    """
+    if identity_index is None:
+        return set()
+
+    raw_data = _get(row, "raw_data")
+    raw = raw_data if isinstance(raw_data, dict) else {}
+
+    accounts: set[str] = set()
+
+    def _collect(signal: str, value: str) -> None:
+        if not value:
+            return
+        for identity in identity_index.lookup(signal, value, platform_code):
+            accounts.add(identity.shop_account_id)
+
+    # 强身份键
+    for key in ("platform_shop_id", "shop_account_id", "shop_id"):
+        value = _identity_text(raw.get(key))
+        if not value or value.lower() in COLLECTION_SOURCE_IDS:
+            continue
+        signal = (
+            "shop_account_id"
+            if key == "shop_account_id"
+            else ("platform_shop_id" if key == "platform_shop_id" else "shop_id")
+        )
+        _collect(signal, value)
+
+    # 店铺标签(中文列 / store_name)
+    for key in _STORE_NAME_KEYS:
+        value = _identity_text(raw.get(key))
+        if not value or value.lower() in COLLECTION_SOURCE_IDS:
+            continue
+        _collect("store_name", value)
+        _collect("store_name", normalize_alias_key(value))
+
+    return accounts
+
+
 def _as_identity(row: Any) -> MasterIdentity:
     return MasterIdentity(
         shop_account_id=_identity_text(_get(row, "shop_account_id")),
@@ -223,7 +380,7 @@ def _as_identity(row: Any) -> MasterIdentity:
         store_name=_identity_text(_get(row, "store_name")),
         shop_region=_identity_text(_get(row, "shop_region")),
         enabled=bool(_get(row, "enabled")),
-        business_role=_identity_text(_get(row, "business_role")),
+        business_role=normalize_enum_value(_get(row, "business_role")),
         pk=_identity_text(_get(row, "id")),
     )
 

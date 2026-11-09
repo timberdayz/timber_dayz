@@ -20,6 +20,7 @@ from backend.domains.collection.routers import (
     platform_shop_discoveries,
     shop_account_aliases,
     shop_accounts,
+    warehouse_name_aliases,
 )
 
 
@@ -33,6 +34,9 @@ def register_platform_routes(app) -> None:
     app.include_router(shop_account_aliases.router, prefix="/api", tags=["店铺别名管理"])
     app.include_router(
         platform_shop_discoveries.router, prefix="/api", tags=["平台店铺ID发现"]
+    )
+    app.include_router(
+        warehouse_name_aliases.router, prefix="/api", tags=["仓名别名管理"]
     )
     app.include_router(rbac_admin.router, tags=["RBAC 管理"])
     app.include_router(notifications.router, prefix="/api", tags=["通知管理"])

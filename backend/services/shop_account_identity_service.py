@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import ShopAccount
 from modules.core.logger import get_logger
+from modules.core.validators import normalize_enum_value
 
 logger = get_logger(__name__)
 
@@ -55,9 +56,14 @@ class MasterShopIdentity:
 
 
 def _enum_value(value: object) -> str:
-    """把枚举 / 字符串统一成字符串(``business_role`` 可能是 SAEnum 成员)。"""
-    raw = getattr(value, "value", value)
-    return str(raw or "").strip()
+    """把枚举 / 字符串统一成字符串(``business_role`` 可能是 SAEnum 成员)。
+
+    ⚠️ SSOT: 实现已上提到 ``modules/core/validators.normalize_enum_value``。
+    本函数保留为薄封装, 供本模块内既有调用方使用; **不要在这里另写一份实现**
+    —— 2026-11-07 的采集同步丢数事故, 根因就是同一个归一化逻辑在两个服务里
+    写成了两个版本(其中一份漏了枚举解包), 导致收敛 100% 静默失效。
+    """
+    return normalize_enum_value(value)
 
 
 def normalize_master_platform_shop_id(value: object) -> str:

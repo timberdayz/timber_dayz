@@ -16,6 +16,13 @@ CREATE TABLE IF NOT EXISTS mart.inventory_state (
     platform_code VARCHAR(64) NOT NULL,
     sku_key VARCHAR(255) NOT NULL,
     warehouse_name VARCHAR(255) NOT NULL,
+    -- 规范仓代码（妙手原始仓名经 core.dim_warehouse_name_aliases 归一后的结果）。
+    -- ⚠️ 本列由迁移 current_schema_20261205_warehouse_name_aliases 添加 ——
+    --    但那份 bootstrap SQL 资产当时没同步 ⇒ 用本文件建表的新环境会**缺这一列**，
+    --    状态层刷新服务写不进去。这里补齐，与迁移逐字一致
+    --    （VARCHAR(128) NULL + 同名索引）。
+    -- 归一不出来就是 NULL（不静默归到一个仓）。
+    warehouse_code VARCHAR(128),
     platform_sku VARCHAR(255),
     product_sku VARCHAR(255),
     sku_id VARCHAR(255),
@@ -50,3 +57,6 @@ CREATE INDEX IF NOT EXISTS ix_inventory_state_stock_added_at
 
 CREATE INDEX IF NOT EXISTS ix_inventory_state_sales_90d
     ON mart.inventory_state (checklist_sales_90d);
+
+CREATE INDEX IF NOT EXISTS ix_inventory_state_warehouse_code
+    ON mart.inventory_state (warehouse_code);

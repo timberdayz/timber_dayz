@@ -15,6 +15,7 @@ def register_collection_routes(app, logger) -> None:
             platform_shop_discoveries,
             shop_account_aliases,
             shop_accounts,
+            warehouse_name_aliases,
         )
 
         app.include_router(
@@ -29,6 +30,9 @@ def register_collection_routes(app, logger) -> None:
             platform_shop_discoveries.router, prefix="/api", tags=["平台店铺ID发现"]
         )
         app.include_router(component_versions.router, prefix="/api", tags=["组件版本管理"])
+        app.include_router(
+            warehouse_name_aliases.router, prefix="/api", tags=["仓名别名管理"]
+        )
     except ImportError as exc:
         logger.warning(f"Collection WebSocket router not loaded: {exc}")
 

@@ -1,5 +1,54 @@
 CREATE SCHEMA IF NOT EXISTS semantic;
 
+-- ---------------------------------------------------------------------------
+-- 采集方代号判定函数（本文件自带的**前置**，迁移链执行本文件时自举）
+--
+-- 「采集方代号」= 表示「这批数据来自哪个采集器」的标识（``xihong`` /
+-- ``miaoshou_real_001`` / ``unknown`` / ``none`` / 空串）——
+-- **不是**店铺身份。权威清单:
+-- ``modules/core/fact_identity_columns.py::COLLECTION_SOURCE_IDS``;
+-- 登记载体: ``core.collection_source_identifiers``
+-- （迁移 ``current_schema_20261223_collection_source_identifiers`` 播种）。
+--
+-- 为什么函数定义**内联在本文件**里（而不是单独一个资产）
+-- ----------------------------------------------------------
+-- 候选池正本资产会被迁移 ``current_schema_20261112_realign_identity_candidates_anchor``
+-- **直接执行**（重建候选池）。若把函数放在另一个独立资产里，
+-- 那个资产不在迁移链上 ⇒ 全新库跑迁移链时函数还不存在 ⇒
+-- 建视图报 "function semantic.is_collection_source_identifier does not exist"。
+-- 内联在文件开头 ⇒ **谁执行本文件, 函数先落地**（``CREATE OR REPLACE`` 幂等）。
+--
+-- 为什么用函数、而不是在视图里直接 JOIN 那张表
+-- --------------------------------------------------
+-- 直接 JOIN 会让候选池视图**硬依赖** ``core.collection_source_identifiers``：
+--   迁移没跑的环境（老库 / 半迁移库 / 只建表的全新库）建视图会直接失败。
+-- 这里用 ``to_regclass`` 保护：表不存在 ⇒ **返回 FALSE**（什么都不剔除）
+-- ⇒ 行为与改造前完全一致，视图照常建得起来。
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION semantic.is_collection_source_identifier(p_value TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+AS $$
+BEGIN
+    IF p_value IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
+    -- 登记载体还没建（迁移未跑）⇒ 不剔除任何值（与改造前一致），而不是让建视图失败。
+    IF to_regclass('core.collection_source_identifiers') IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
+    RETURN EXISTS (
+        SELECT 1
+          FROM core.collection_source_identifiers csi
+         WHERE csi.is_active
+           AND csi.identifier = p_value
+    );
+END;
+$$;
+
 -- Best practice note:
 -- Avoid DO/EXECUTE dynamic SQL inside SQL assets. If performance requires materialization,
 -- implement it in the Python bootstrap runner, not inside the SQL file.
@@ -150,7 +199,19 @@ SELECT
     resolution_priority,
     identity_shop_region
 FROM identity_rows
-WHERE NULLIF(TRIM(COALESCE(identity_value_normalized, '')), '') IS NOT NULL;
+WHERE NULLIF(TRIM(COALESCE(identity_value_normalized, '')), '') IS NOT NULL
+  -- [*] 采集方代号**不是店铺身份** ⇒ 不进候选池。
+  --     权威清单: modules/core/fact_identity_columns.py::COLLECTION_SOURCE_IDS
+  --     判定函数: semantic.is_collection_source_identifier
+  --               (登记载体 core.collection_source_identifiers;
+  --                表不存在时该函数返回 FALSE ⇒ 本视图照常建得起来)
+  --     这条规则以前写在 orders_atomic.sql 的**字面量**里 —— 每条链路各抄一份,
+  --     漏抄的那条链路会把采集方代号当成店铺身份(库存链就是如此:
+  --     4,111 行全部挂在伪店 'xihong' 上)。
+  --     收敛到候选池这一层 ⇒ 所有链路(含未来新增的)自动继承, 不必各写一遍。
+  AND NOT semantic.is_collection_source_identifier(
+        identity_rows.identity_value_normalized
+  );
 
 CREATE INDEX IF NOT EXISTS ix_shop_accounts_platform_shop_id_lookup
 ON core.shop_accounts (

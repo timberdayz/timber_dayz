@@ -180,28 +180,34 @@ cleaned AS (
         source_platform_shop_id,
         source_shop_account_id,
         -- 候选值集合：就地引用 mapped 的真实输入列（同层不能引用输出别名）
+        --
+        -- ⚠️ 事实表的「列」shop_id **不是身份列** —— 它装的是采集层写进来的
+        -- 原始标识(shopee 平台编号 / tiktok 导出店名 / miaoshou 采集方代号)。
+        -- 「xihong」「unknown」「none」「miaoshou_real_001」是**采集方标识**, 不是店铺身份。
+        --
+        -- 这条排除**不在这里写**：候选池
+        -- (``semantic.shop_identity_resolution_candidates``)构建时就已把采集方代号
+        -- 剔掉 ⇒ 本处原样带上也不会命中任何账号。
+        -- 而该规则**只有一处定义** —— 权威清单
+        -- ``modules/core/fact_identity_columns.py::COLLECTION_SOURCE_IDS``、
+        -- 登记载体 ``core.collection_source_identifiers`` ——
+        -- ⇒ 新增链路自动继承, 不会像以前那样「每条链路各抄一份、漏一条就出事」。
         ARRAY_REMOVE(
             ARRAY[
                 LOWER(COALESCE(source_platform_shop_id, '')),
                 LOWER(COALESCE(source_shop_account_id, '')),
-                CASE
-                    WHEN LOWER(COALESCE(source_shop_id, '')) NOT IN ('xihong', 'unknown', 'none')
-                    THEN LOWER(COALESCE(source_shop_id, ''))
-                END,
-                CASE
-                    WHEN LOWER(COALESCE(source_shop_id, '')) NOT IN ('xihong', 'unknown', 'none')
-                    THEN REGEXP_REPLACE(
-                        REGEXP_REPLACE(
-                            LOWER(TRIM(COALESCE(source_shop_id, ''))),
-                            '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
-                            '',
-                            'i'
-                        ),
-                        '[[:space:]_()/-]+',
+                LOWER(COALESCE(source_shop_id, '')),
+                REGEXP_REPLACE(
+                    REGEXP_REPLACE(
+                        LOWER(TRIM(COALESCE(source_shop_id, ''))),
+                        '^(shopee|tiktok\s*shop|tiktok|tk|miaoshou|amazon|lazada)\s*',
                         '',
-                        'g'
-                    )
-                END,
+                        'i'
+                    ),
+                    '[[:space:]_()/-]+',
+                    '',
+                    'g'
+                ),
                 REGEXP_REPLACE(
                     REGEXP_REPLACE(
                         LOWER(TRIM(COALESCE(store_label_raw, ''))),

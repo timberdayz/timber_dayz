@@ -5,6 +5,11 @@ from collections.abc import Sequence
 from sqlalchemy import inspect, text
 
 from backend.services.cloud_b_class_sync_utils import quote_ident, validate_b_class_table_name
+from modules.core.fact_identity_columns import FACT_SHOP_ID_COLUMN_SEMANTICS
+from modules.core.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 CANONICAL_COLUMNS: tuple[str, ...] = (
@@ -70,6 +75,7 @@ class CloudBClassMirrorManager:
         if inspector.has_table(table_name, schema=self.schema_name):
             self._validate_existing_table_contract(inspector, table_name)
             self._ensure_conflict_index(table_name, data_domain)
+            self._ensure_shop_id_column_comment(table_name)
             return
 
         columns_sql = ",\n".join(self._column_definitions())
@@ -79,10 +85,46 @@ class CloudBClassMirrorManager:
         with self.engine.begin() as conn:
             conn.execute(text(create_table_sql))
         self._ensure_conflict_index(table_name, data_domain)
+        self._ensure_shop_id_column_comment(table_name)
+
+    def _ensure_shop_id_column_comment(self, table_name: str) -> None:
+        """给 ``shop_id`` 列挂上语义注释(幂等)。
+
+        ⚠️ 这一列**不是身份列** —— 它装的是采集层写进来的原始标识
+        (shopee 上是平台店铺编号 / tiktok 上是导出店名 /
+        miaoshou 采集链上是采集方代号 ``xihong``)。
+
+        2026-11-07 上线的同步侧拦截器把它当身份列用, 误杀 3,714 行正常数据。
+        权威定义见 ``modules/core/fact_identity_columns.py``。
+
+        ⚠️ 注释**只是文档**, 失败不该阻断同步 —— 挂不上注释只是少了句说明,
+        不该让整条同步链挂掉(比如老表上这一列被人工删过)。
+        """
+        full_table_name = f"{quote_ident(self.schema_name)}.{quote_ident(table_name)}"
+        comment_sql = (
+            f'COMMENT ON COLUMN {full_table_name}."shop_id" IS :comment'
+        )
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(comment_sql),
+                    {"comment": FACT_SHOP_ID_COLUMN_SEMANTICS},
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[CloudMirror] %s.shop_id 语义注释挂载失败(不影响同步): %s",
+                table_name,
+                exc,
+            )
 
     def _column_definitions(self) -> Sequence[str]:
         return (
             '"platform_code" VARCHAR(32)',
+            # ⚠️ 这一列**不是身份列** —— 见 modules/core/fact_identity_columns.py
+            # (SSOT 权威定义)。它装的是采集层写进来的原始标识:
+            # shopee 上是平台店铺编号、tiktok 上是导出店名、
+            # miaoshou 采集链上是采集方代号 xihong。
+            # 身份由 raw_data 内的稳定锚点决定, 规范键由语义层输出。
             '"shop_id" VARCHAR(100)',
             '"data_domain" VARCHAR(100) NOT NULL',
             '"granularity" VARCHAR(50) NOT NULL',

@@ -237,7 +237,22 @@ class CloudBClassAutoSyncWorker:
                 return None
             sync_status = result.get("status", "completed")
             projection_status = result.get("projection_status", "completed")
-            if sync_status != "completed":
+            if sync_status == "partial_success":
+                # ⚠️ **部分成功是终态, 不是可重试的失败。**
+                # 有一部分行因「行内身份自相矛盾」**没有**落进云端 ——
+                # 重试不会让这些行变好(它们的身份本身就是矛盾的),
+                # 只能由人工确认归属。所以既不重试, 也不记 failed,
+                # 而是落 ``partial_success`` 让人看得见。
+                task.status = "partial_success"
+                task.projection_status = projection_status
+                task.last_error = (
+                    result.get("error")
+                    or result.get("detail")
+                    or "部分行因行内身份矛盾未落库, 需人工确认店铺归属"
+                )
+                task.error_code = self._result_error_code(result)
+                task.next_retry_at = None
+            elif sync_status != "completed":
                 task.projection_status = projection_status
                 task.last_error = result.get("error") or result.get("detail") or "sync_failed"
                 task.error_code = self._result_error_code(result)

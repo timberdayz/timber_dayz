@@ -699,29 +699,6 @@ def rank_inventory_backlog_rows(
     return filtered
 
 
-def _normalize_join_key(value: Any) -> str:
-    return "" if value is None else str(value)
-
-
-def _inventory_snapshot_join_key(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
-    return (
-        _normalize_join_key(row.get("platform_code")),
-        _normalize_join_key(row.get("shop_id")),
-        _normalize_join_key(row.get("platform_sku")),
-        _normalize_join_key(row.get("product_sku")),
-        _normalize_join_key(row.get("warehouse_name")),
-    )
-
-
-def _inventory_sales_join_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
-    return (
-        _normalize_join_key(row.get("platform_code")),
-        _normalize_join_key(row.get("shop_id")),
-        _normalize_join_key(row.get("platform_sku")),
-        _normalize_join_key(row.get("product_sku")),
-    )
-
-
 def _classify_inventory_backlog_restock_tier(row: dict[str, Any]) -> str:
     """滞销档位：**走 inventory_restock_service 的唯一实现**，不在这里重写阈值。"""
     days_since_restock = _to_optional_float(row.get("days_since_restock"))

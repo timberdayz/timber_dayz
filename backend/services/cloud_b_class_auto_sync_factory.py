@@ -294,6 +294,55 @@ def run_cloud_sync_startup_checks_from_env() -> dict:
     return {"status": status, "checks": checks}
 
 
+def _load_identity_index(local_engine):
+    """从**本地**主数据加载店铺账号反查索引。
+
+    为什么需要它
+    ------------
+    同步侧的身份自洽判定要回答「行内身份键能否唯一归属到一个店铺账号」。
+    账号 ID(``shopee_my_xhkj1_local``)与平台编号(``1540271739``)是**不同形态**,
+    纯字符串比较会把同一个店判成矛盾 ⇒ **必须查主数据**。
+
+    取不到索引时返回 None —— 判定会退化为「只比同形态的键」,
+    宁可少拦也不误杀(拦错会静默丢数, 不拦最多留下一批待人工处理)。
+
+    ⚠️ 索引只收**在营经营店**(``enabled IS TRUE`` 且
+    ``business_role='operating_store'``)—— 与语义层候选池口径一致。
+    """
+    from sqlalchemy.orm import Session
+
+    from backend.services.shop_identity_reconciliation_service import (
+        build_identity_index,
+    )
+    from modules.core.db import ShopAccount, ShopAccountAlias
+
+    try:
+        with Session(local_engine) as session:
+            accounts = (
+                session.execute(
+                    select(ShopAccount).where(
+                        ShopAccount.enabled.is_(True),
+                        ShopAccount.business_role == "operating_store",
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            aliases = (
+                session.execute(
+                    select(ShopAccountAlias).where(ShopAccountAlias.is_active.is_(True))
+                )
+                .scalars()
+                .all()
+            )
+        return build_identity_index(accounts, aliases)
+    except Exception as exc:  # pragma: no cover - 主数据不可用时兜底
+        logger.warning(
+            "[CloudSync] 主数据身份索引加载失败, 身份判定降级为同形态比较: %s", exc
+        )
+        return None
+
+
 def _build_cloud_sync_service(
     *,
     local_engine,
@@ -309,7 +358,11 @@ def _build_cloud_sync_service(
         else CloudBClassMirrorManager(cloud_engine)
     )
     source_reader = SQLAlchemyBClassSourceReader(local_engine)
-    cloud_writer = SQLAlchemyCloudWriter(cloud_engine, dry_run=dry_run)
+    cloud_writer = SQLAlchemyCloudWriter(
+        cloud_engine,
+        dry_run=dry_run,
+        identity_index=_load_identity_index(local_engine),
+    )
 
     def inspect_tables():
         inspector = sa_inspect(local_engine)

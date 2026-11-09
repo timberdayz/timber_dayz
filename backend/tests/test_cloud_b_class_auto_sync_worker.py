@@ -35,22 +35,28 @@ class FakeSyncExecutor:
         error_code: str | None = None,
         sync_ok: bool = True,
         projection_ok: bool = True,
+        sync_status: str | None = None,
+        extra_result: dict | None = None,
     ):
         self.should_fail = should_fail
         self.error_code = error_code
         self.sync_ok = sync_ok
         self.projection_ok = projection_ok
+        self.sync_status = sync_status
+        self.extra_result = extra_result
         self.batch_sizes = []
 
     def sync_table(self, source_table_name: str, batch_size: int = 1000):
         self.batch_sizes.append(batch_size)
         if self.should_fail:
             raise RuntimeError(self.error_code or "sync_failed")
-        return {
-            "status": "completed" if self.sync_ok else "failed",
+        result = {
+            "status": self.sync_status or ("completed" if self.sync_ok else "failed"),
             "projection_status": "completed" if self.projection_ok else "failed",
             "source_table_name": source_table_name,
         }
+        result.update(self.extra_result or {})
+        return result
 
 
 def _build_session():
@@ -215,6 +221,42 @@ def test_worker_marks_failed_when_sync_executor_returns_failed_status():
 
         assert refreshed.status == "failed"
         assert refreshed.next_retry_at is None
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()
+
+
+def test_worker_marks_partial_success_and_does_not_retry():
+    """★ 有行因「行内身份矛盾」没落库 ⇒ 作业落 ``partial_success``, 且**不重试**。
+
+    重试不会让矛盾行变好(它们的身份本身就是矛盾的), 只能人工确认归属;
+    所以这既不是"可重试的失败", 也不该被记成 ``failed`` ——
+    必须是看得见的终态 ``partial_success``。
+    """
+    db = _build_session()
+    try:
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        pending_task = _create_task(db)
+
+        executor = FakeSyncExecutor(
+            sync_status="partial_success",
+            extra_result={
+                "error_code": "identity_conflict_rows_present",
+                "error": "2 行行内身份自相矛盾, 未落库",
+                "identity_conflict_rows": 2,
+            },
+        )
+        worker = CloudBClassAutoSyncWorker(db, sync_executor=executor)
+        asyncio.run(worker.run_one(worker_id="worker-1"))
+        refreshed = db.get(type(pending_task), pending_task.id)
+
+        assert refreshed.status == "partial_success"
+        assert refreshed.next_retry_at is None, "矛盾行不该被自动重试"
+        assert refreshed.finished_at is not None
+        assert refreshed.error_code == "identity_conflict_rows_present"
     finally:
         db.rollback()
         db.query(CloudBClassSyncTask).delete()

@@ -984,7 +984,7 @@ sys.exit(asyncio.run(main()))
 # 这份清单必须覆盖 backend/services/data_pipeline/refresh_registry.py 里的
 # SEMANTIC_ATOMIC_VIEW_TARGETS，由 tests/test_verify_remote_deploy_contracts.py 守护
 # （新增语义层链路时忘了加进来，测试会直接失败）。
-DEFAULT_REBUILD_VIEW_TARGETS="semantic.fact_analytics_atomic semantic.fact_analytics_monthly_atomic semantic.fact_inventory_snapshot semantic.fact_orders_atomic semantic.fact_orders_monthly_atomic semantic.fact_products_atomic semantic.fact_services_atomic api.business_overview_inventory_backlog_module"
+DEFAULT_REBUILD_VIEW_TARGETS="semantic.fact_analytics_atomic semantic.fact_analytics_monthly_atomic semantic.fact_inventory_snapshot semantic.fact_orders_atomic semantic.fact_orders_monthly_atomic semantic.fact_products_atomic semantic.fact_services_atomic semantic.shop_identity_resolution_candidates api.business_overview_inventory_backlog_module"
 
 if ! rebuild_dashboard_view_definitions "${DEPLOY_REBUILD_VIEW_TARGETS:-${DEFAULT_REBUILD_VIEW_TARGETS}}"; then
   echo "[INFO] Deployment blocked before application startup"

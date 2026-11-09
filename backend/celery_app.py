@@ -37,6 +37,7 @@ celery_app = Celery(
         "backend.tasks.price_adjust_notify_tasks",  # 最低售价变更检测与飞书通知
         "backend.tasks.image_extraction",  # [*] 图片提取任务模块
         "backend.tasks.source_freshness_tasks",  # 源数据新鲜度巡检（断流告警）
+        "backend.tasks.cloud_sync_integrity_tasks",  # 云端同步链路完整性巡检（陈旧/收敛率/候选池）
         # [WARN] v4.6.0 DSS架构重构:已删除mv_refresh(Metabase直接查询原始表,无需物化视图)
         # [WARN] v4.6.0 DSS架构重构:已删除c_class_calculation(C类数据由Metabase定时计算)
     ],
@@ -68,6 +69,10 @@ celery_app.conf.update(
         # 源数据新鲜度巡检：轻量只读巡检，放定时任务队列即可。
         # 断流时它会把结论写进 ops.pipeline_run_log（状态 partial_failed）。
         "backend.tasks.source_freshness_tasks.*": {"queue": "scheduled"},
+        # 云端同步链路完整性巡检：同样是轻量只读巡检，放定时任务队列即可。
+        # 它盯的是**云端**那一侧（连接哪就巡检哪个）——
+        # 采集机侧用它回答「云端还有没有在收数据」。
+        "backend.tasks.cloud_sync_integrity_tasks.*": {"queue": "scheduled"},
         "extract_product_images": {
             "queue": "data_processing"
         },  # [*] 图片提取任务路由到 data_processing 队列
@@ -169,6 +174,17 @@ celery_app.conf.beat_schedule = {
     "source-freshness-check-hourly": {
         "task": "backend.tasks.source_freshness_tasks.check_source_data_freshness",
         "schedule": crontab(minute=13),
+    },
+    # 云端同步链路完整性巡检（每小时一次，整点后 37 分跑，与源数据巡检错开）。
+    #
+    # 为什么必须有它：源数据巡检盯的是**采集链**（我采到的数据有多旧），
+    # 回答不了「云端还有没有在收数据」。
+    # 2026-11-07 事故里采集机一切正常，是云端停在 11-06 再也没动过，
+    # 而且账本还记着 completed —— 三个信号同时存在，却一个都没人看见。
+    # 这个任务盯云端那一侧的三件事：数据新鲜度、身份收敛率、候选池平台覆盖。
+    "cloud-sync-integrity-check-hourly": {
+        "task": "backend.tasks.cloud_sync_integrity_tasks.check_cloud_sync_integrity",
+        "schedule": crontab(minute=37),
     },
 }
 

@@ -155,8 +155,25 @@ def test_refresh_registry_exposes_dependency_order():
         "semantic.shop_identity_resolver",
     ]
     # 三条以前没做身份解析的链路，现在统一走共享解析函数。
+    # 库存链在刷新/数据依赖上只多依赖一项：
+    #   * ``semantic.warehouse_resolver`` —— 仓码归一函数（仓名 → 规范仓码）。
+    # 注意：候选池正本 ``semantic.shop_identity_resolution_candidates`` **不**
+    # 出现在刷新依赖里 —— 库存视图引用的是函数
+    # ``semantic.is_collection_source_identifier``，而该函数读的是登记表
+    # ``core.collection_source_identifiers``（不是候选池视图的内容）⇒ 刷新顺序
+    # 无要求。它只作为**建对象前置**登记（函数定义内联在候选池正本资产开头，
+    # 见下面的 ASSET_PREREQUISITES 断言）。
     assert PIPELINE_DEPENDENCIES["semantic.fact_inventory_snapshot"] == [
-        "semantic.shop_identity_resolver"
+        "semantic.shop_identity_resolver",
+        "semantic.warehouse_resolver",
+    ]
+    # 建对象前置：两个函数资产都必须先落地，否则建视图报
+    # "function does not exist"。
+    assert "semantic.warehouse_resolver" in ASSET_PREREQUISITES[
+        "semantic.fact_inventory_snapshot"
+    ]
+    assert "semantic.shop_identity_resolution_candidates" in ASSET_PREREQUISITES[
+        "semantic.fact_inventory_snapshot"
     ]
     assert PIPELINE_DEPENDENCIES["semantic.fact_services_atomic"] == [
         "semantic.shop_identity_resolver"

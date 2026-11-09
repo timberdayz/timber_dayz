@@ -183,6 +183,52 @@ class DimWarehouseNameAlias(Base):
     )
 
 
+class CollectionSourceIdentifier(Base):
+    """采集方标识 —— 「这批数据来自哪个采集器」，**不是**店铺身份。
+
+    权威定义
+    --------
+    ``modules/core/fact_identity_columns.py::COLLECTION_SOURCE_IDS`` 是**唯一定义处**。
+    本表的行由迁移 ``current_schema_20261223_collection_source_identifiers`` 从那份定义播种，
+    再由 ``backend/tests/test_inventory_warehouse_identity_ssot.py`` 守护
+    （表内容 == Python 常量 ⇒ 防漂移）。
+
+    为什么要有这张表
+    ----------------
+    语义层的身份解析入口 ``semantic.resolve_shop_identity`` 读这张表，
+    把采集方代号从候选集里**统一剔除**。
+
+    以前这条规则写在**每条链路各自的 SQL** 里：
+    ``orders_atomic.sql`` 有一份字面量、``inventory_snapshot.sql`` 干脆没有 ——
+    属于**多处复制**的 SSOT 违规：新加一条链路就会漏掉一次，
+    而且漏掉的表现是「采集方代号被当成店铺」。
+
+    采集方代号一旦混进候选集, 就会被主数据候选池反查成一个**伪店铺**
+    （``core.dim_shops`` 里确实注册了 ``miaoshou / miaoshou_real_001 / xihong`` 这一行）
+    ⇒ 库存的 4,111 行全部挂在一个不存在的店上。
+    """
+
+    __tablename__ = "collection_source_identifiers"
+
+    #: 采集方标识（小写形式，与语义层候选集的归一形态一致）
+    identifier = Column(String(64), primary_key=True)
+    #: 这个标识是什么（给人看的，避免再写一份解释散落在各处）
+    description = Column(String(255), nullable=True)
+    #: 停用后语义层不再剔除它（留作历史口径追溯）
+    is_active = Column(Boolean, nullable=False, server_default=text("TRUE"))
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = ({"schema": "core"},)
+
+
 class DimShop(Base):
     __tablename__ = "dim_shops"
 

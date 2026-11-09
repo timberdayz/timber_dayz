@@ -50,6 +50,9 @@ state AS (
         platform_code,
         sku_key,
         warehouse_name,
+        -- 状态层的 warehouse_code 是**已归一**的权威值（写入时经
+        -- semantic.resolve_warehouse_code 归一过）⇒ 取出来兜底给快照侧的仓码。
+        warehouse_code,
         stock_added_at,
         row_seen_at,
         row_written_at,
@@ -69,7 +72,9 @@ joined_backlog AS (
         l.platform_sku,
         l.product_sku,
         l.warehouse_name,
-        l.warehouse_code,
+        -- 仓码优先取状态层的已归一值，回落到快照侧的 ⇒ 两个来源同一套映射表，
+        -- 快照侧尚未补齐时也能拿到正确的仓码。
+        COALESCE(s.warehouse_code, l.warehouse_code) AS warehouse_code,
         l.available_stock,
         l.on_hand_stock,
         l.inventory_value,

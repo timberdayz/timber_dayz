@@ -67,15 +67,47 @@ mapped AS (
         --   库存采集文件把店铺归属放在 raw_data 里，表列只落了一个占位值 'xihong'
         --   （实测 4,111 行里 2,726 行 raw_data->>'shop_id'='xihong'、
         --     1,385 行='miaoshou_real_001'，而表列 shop_id 全是 'xihong'）。
-        --   ⇒ 库存看板按店拆不开的根因就在这里。
-        -- 现在保留原值（去重分区口径不变），最后再解析成规范键。
-        COALESCE(
-            NULLIF(TRIM(COALESCE(shop_id, '')), ''),
-            NULLIF(TRIM(COALESCE(raw_data->>'shop_id', '')), ''),
-            'unknown'
-        ) AS source_shop_id,
+        --   ⇒ 「库存按店拆不开」的根因就在这里：**那一列从来不是店铺身份**。
+        --
+        -- 「xihong」是**妙手采集账号 miaoshou_real_001 的 store_name**，
+        -- 而 core.dim_shops 里确实注册了 miaoshou/miaoshou_real_001/xihong 这一行
+        -- ⇒ 原样透传出去会被看板**JOIN 成一个不存在的店**并显示成店名。
+        --
+        -- 所以这里把它**如实表达成「未归属」**（'unknown'），而不是装成某个店。
+        -- 权威定义: modules/core/fact_identity_columns.py::COLLECTION_SOURCE_IDS
+        -- 登记载体: core.collection_source_identifiers
+        --
+        -- ⚠️ **库存的仓维度不走这一列** —— 仓码由 ``warehouse_name`` 经
+        --    ``semantic.resolve_warehouse_code`` 归一（见下方 warehouse_code 列）。
+        --    仓维度才是库存能拆开的那个维度（仓 × SKU）；
+        --    店铺维度对库存链**天然不成立**（妙手清单里没有销售平台这一层）。
+        --
+        -- ⚠️ **事实表 b_class.fact_miaoshou_inventory_snapshot 的列 shop_id 保持 'xihong' 不动**
+        --    —— 它参与 upsert 冲突键, 改值会插重复行(v7.12.6 踩过)。
+        --    这里改的只是**语义层输出的键**。
+        CASE
+            WHEN semantic.is_collection_source_identifier(
+                LOWER(COALESCE(
+                    NULLIF(TRIM(COALESCE(shop_id, '')), ''),
+                    NULLIF(TRIM(COALESCE(raw_data->>'shop_id', '')), ''),
+                    ''
+                ))
+            )
+            THEN 'unknown'
+            ELSE COALESCE(
+                NULLIF(TRIM(COALESCE(shop_id, '')), ''),
+                NULLIF(TRIM(COALESCE(raw_data->>'shop_id', '')), ''),
+                'unknown'
+            )
+        END AS source_shop_id,
         -- 身份候选值：与 orders_atomic 的 normalized_identity_candidates 同构。
         -- raw_data 里的 shop_account_id 是采集文件自带的店铺账号ID —— 最可靠的一路。
+        --
+        -- ⚠️ 本链路（miaoshou 采集）的候选值**全是采集方标识**
+        --    ('miaoshou_real_001' / 'xihong')，它们**不是**店铺身份。
+        --    这条排除**不在这里写** —— 候选池构建时就已剔除采集方代号
+        --    (semantic.shop_identity_resolution_candidates)⇒ 本处原样带上
+        --    也不会命中任何账号, 而排除规则**只有一处定义**。
         ARRAY_REMOVE(
             ARRAY[
                 LOWER(COALESCE(NULLIF(TRIM(COALESCE(raw_data->>'shop_account_id', '')), ''), '')),
@@ -249,7 +281,18 @@ cleaned AS (
         sku_id,
         product_sku,
         warehouse_name,
-        warehouse_code,
+        -- 仓码归一（SSOT: semantic.resolve_warehouse_code → core.dim_warehouse_name_aliases）
+        --
+        -- ⚠️ 上游 raw_data 里的「仓库编码 / warehouse_code / Warehouse Code」三个键
+        --    在妙手导出里**根本不存在**（实测 33 个原始键里没有）⇒ 那一路恒为 NULL。
+        --    妙手给的是**仓名**（raw_data->>'仓库'）⇒ 用解析出来的仓名去对照表归一。
+        --
+        -- 归一不出来就是 NULL（不静默归到一个仓）—— 与状态层刷新服务
+        -- （inventory_state_warehouse_map_service）同一口径。
+        COALESCE(
+            warehouse_code,
+            semantic.resolve_warehouse_code(warehouse_name)
+        ) AS warehouse_code,
         CASE
             WHEN available_stock_raw IS NULL THEN NULL
             WHEN NULLIF(

@@ -22,6 +22,8 @@ LOGICAL_TARGET_OBJECTS: dict[str, str] = {
     "semantic.alias_registry": "semantic.semantic_field_aliases",
     # 共享的店铺身份解析函数：SQL 建的是**函数**，不是关系（pg_class 里没有）
     "semantic.shop_identity_resolver": "semantic.resolve_shop_identity",
+    # 共享的仓名归一函数：同上，建的是**函数** semantic.resolve_warehouse_code
+    "semantic.warehouse_resolver": "semantic.resolve_warehouse_code",
 }
 
 
@@ -38,6 +40,10 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "semantic.alias_registry": [],
     # 身份解析候选集的**正本**仍是普通视图（从 core 表现算）；物化副本是它的
     # 快照，原子层两个普通视图改读物化副本。顺序不能反，否则建 MV 时正本还不存在。
+    #
+    # ⚠️ 采集方代号判定函数 ``semantic.is_collection_source_identifier``
+    #    **内联在正本资产的开头**（谁执行正本, 函数先落地）⇒ 不需要单独登记
+    #    刷新目标 —— 见 ``sql/semantic/shop_identity_resolution_candidates.sql``。
     "semantic.shop_identity_resolution_candidates": [],
     "semantic.shop_identity_resolution_candidates_v2_mv": [
         "semantic.shop_identity_resolution_candidates"
@@ -99,7 +105,13 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
         "semantic.alias_registry",
         "semantic.shop_identity_resolver",
     ],
-    "semantic.fact_inventory_snapshot": ["semantic.shop_identity_resolver"],
+    # 库存原子层：仓码归一走 ``semantic.resolve_warehouse_code``（唯一归一实现）。
+    # 该函数建在 ``core.dim_warehouse_name_aliases`` 对照表之上 ⇒ 函数资产必须
+    # 先落地，否则建视图报 "function semantic.resolve_warehouse_code does not exist"。
+    "semantic.fact_inventory_snapshot": [
+        "semantic.shop_identity_resolver",
+        "semantic.warehouse_resolver",
+    ],
     "semantic.fact_services_atomic": ["semantic.shop_identity_resolver"],
     "semantic.shop_month_other_operating_cost": [],
     "mart.shop_day_kpi": [
@@ -194,6 +206,7 @@ SQL_TARGET_PATHS: dict[str, str] = {
     ),
     "semantic.shop_identity_resolution_candidates": "sql/semantic/shop_identity_resolution_candidates.sql",
     "semantic.shop_identity_resolver": "sql/semantic/shop_identity_resolver.sql",
+    "semantic.warehouse_resolver": "sql/semantic/warehouse_resolver.sql",
     "semantic.fact_orders_monthly_atomic_mv": "sql/semantic/orders_monthly_atomic_mv.sql",
     "semantic.fact_analytics_monthly_atomic_mv": "sql/semantic/analytics_monthly_atomic_mv.sql",
     "semantic.fact_orders_atomic": "sql/semantic/orders_atomic.sql",
@@ -292,6 +305,17 @@ ASSET_PREREQUISITES: dict[str, list[str]] = {
     "semantic.fact_analytics_atomic_mv": ["semantic.alias_registry"],
     "semantic.fact_analytics_monthly_atomic_mv": ["semantic.alias_registry"],
     "semantic.fact_analytics_monthly_atomic": ["semantic.alias_registry"],
+    # 库存原子层的正文调用三个**共享函数**：
+    #   ``semantic.resolve_shop_identity``          （店铺身份解析，LEFT JOIN LATERAL）
+    #   ``semantic.resolve_warehouse_code``         （仓名 → 规范仓码）
+    #   ``semantic.is_collection_source_identifier`` （采集方代号判定，
+    #     **内联在候选池正本资产的开头** ⇒ 候选池正本是它的建对象前置)
+    # 函数不存在时视图**直接建不出来** ⇒ 三个函数都是建对象前置。
+    "semantic.fact_inventory_snapshot": [
+        "semantic.shop_identity_resolver",
+        "semantic.warehouse_resolver",
+        "semantic.shop_identity_resolution_candidates",
+    ],
 }
 
 

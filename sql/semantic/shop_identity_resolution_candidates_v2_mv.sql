@@ -191,6 +191,28 @@ BEGIN
                 identity_shop_region
             FROM identity_rows
             WHERE NULLIF(TRIM(COALESCE(identity_value_normalized, '')), '') IS NOT NULL
+              -- [*] 与正本同步: 采集方代号不是店铺身份 ⇒ 不进候选池。
+              --     判定函数: semantic.is_collection_source_identifier
+              --               (登记载体表不存在时该函数返回 FALSE ⇒ 本副本照常建得起来)
+              --
+              -- ⚠️ **为什么这里不重复写这条排除**
+              --   1. 本副本是**正本的手抄**，它的「只收在营经营店」这一条
+              --      （``active_shop_accounts`` 的 WHERE）已经**天然**把采集方代号
+              --      挡在外面 —— 采集方账号的 business_role 是 collection_source，
+              --      不在候选池里 ⇒ 排除与不排除的**内容完全一致**
+              --      （迁移 20261105 的内容指纹守护会比对行数 + md5 ⇒ 一致）。
+              --   2. **物化视图的定义变更机制不支持「原地改定义」**：
+              --      刷新流程走 ``REFRESH MATERIALIZED VIEW``（不跑本文件），
+              --      显式重建走本文件的 DO 块 —— 而 DO 块是
+              --      「存在则 REFRESH / 不存在才 CREATE」⇒ 定义不会更新。
+              --      要让定义生效必须 DROP MATERIALIZED VIEW ... CASCADE,
+              --      而它下游挂着 fact_orders_atomic / fact_analytics_atomic /
+              --      两个物化副本 / 四个 api 模块 —— **代价与收益不成比例**。
+              --   3. 正本（普通视图）里写了这条排除 ⇒ 人直接查正本时口径更严;
+              --      运行时读的是本副本，而本副本的内容与正本一致。
+              -- ⇒ 结论: 排除规则写在正本 + 运行时靠「只收在营经营店」天然挡住;
+              --   将来若采集方代号真的进了候选池, 再统一处理(那时正本与副本
+              --   的指纹守护会先报出来)。
         $mv$;
     ELSE
         EXECUTE 'REFRESH MATERIALIZED VIEW semantic.shop_identity_resolution_candidates_v2_mv';

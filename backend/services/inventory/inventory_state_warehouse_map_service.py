@@ -14,6 +14,16 @@
 所以归一走**显式登记**的对照表 ``core.dim_warehouse_name_aliases``：
 查得到就归一，查不到就**留空并记日志**，绝不静默归到一个仓。
 
+SSOT 归属（2026-11 改造）
+------------------------
+* **登记载体** = ``core.dim_warehouse_name_aliases``（源仓名 → 仓码）
+* **归一实现** = ``semantic.resolve_warehouse_code``（SQL 函数，
+  ``sql/semantic/warehouse_resolver.sql``）—— **全站唯一**。
+  语义层（``semantic.fact_inventory_snapshot``）、状态层（本模块）、
+  Metabase 模型都走它,不再各写一份查表 / 拼接逻辑。
+* 本模块**只负责「批量载入 + 一轮内缓存」**,不定义「怎么算仓码」。
+  归一规则要改,改 SQL 函数一处即可,两侧自动同步。
+
 为什么不能靠「去掉仓字后缀」这类规则
 ----------------------------------
 「新加坡」去掉后缀是「新加坡」，而规范仓名是「新加坡仓」 —— 规则得写成
@@ -26,10 +36,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from modules.core.db import DimWarehouseNameAlias
 from modules.core.logger import get_logger
 
 
@@ -49,17 +58,24 @@ class WarehouseNameResolver:
 
     @classmethod
     async def load(cls, db: AsyncSession) -> "WarehouseNameResolver":
-        """从对照表载入映射。
+        """从对照表载入映射 —— **归一规则由 SQL 函数提供**。
 
-        表不存在（迁移未跑）时返回**空映射**：此时所有仓名都归一不出来，
+        查的是 ``core.dim_warehouse_name_aliases``，但「源仓名 → 仓码」的换算
+        交给 ``semantic.resolve_warehouse_code``（唯一归一实现）⇒ 本模块与
+        语义层 / Metabase 模型**口径必然一致**。
+
+        表或函数不存在（迁移未跑）时返回**空映射**：此时所有仓名都归一不出来，
         ``warehouse_code`` 留空 —— 这比"猜一个仓"安全得多。
         """
         try:
             rows = (
                 await db.execute(
-                    select(
-                        DimWarehouseNameAlias.source_warehouse_name,
-                        DimWarehouseNameAlias.warehouse_code,
+                    text(
+                        """
+                        SELECT a.source_warehouse_name,
+                               semantic.resolve_warehouse_code(a.source_warehouse_name)
+                        FROM core.dim_warehouse_name_aliases a
+                        """
                     )
                 )
             ).all()

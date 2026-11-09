@@ -4,6 +4,7 @@ import inspect
 import json
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -25,6 +26,10 @@ from backend.services.data_pipeline.refresh_queue_service import (
     RefreshQueueService,
     resolve_refresh_lane,
 )
+from backend.services.shop_identity_reconciliation_service import (
+    row_identity_accounts,
+    row_identity_tokens,
+)
 from modules.core.db import CloudSyncReceiveLog, RefreshQueueTask
 from modules.core.logger import get_logger
 
@@ -36,10 +41,80 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
+#: 行内「店铺身份」候选键(优先级从高到低)。
+#:
+#: ⚠️ 事实表的 **列** ``shop_id`` **不在这里** —— 它是「采集层写进来的原始标识」,
+#: 不是身份列(shopee 上是平台编号 / tiktok 上是导出店名 / miaoshou 采集链上是
+#: 采集方代号 ``xihong``),拿它当身份列判会误杀正常数据。
+#: 仓库对该列的成文定性见 ``sql/semantic/orders_atomic.sql`` 与
+#: ``sql/semantic/inventory_snapshot.sql`` 的注释。
+#:
+#: ⚠️ 行内身份的**解析实现**住在身份真相点
+#: ``shop_identity_reconciliation_service``(SSOT)——
+#: 同步侧拦截与云端巡检共用同一份, 这里不再另写一份。
+
+
+@dataclass(frozen=True)
+class IdentitySplitResult:
+    """行内身份判定的**三分**结果(SSOT: 同步侧唯一的身份裁决出口)。
+
+    三类行
+    ------
+    * ``consistent`` —— **会落云端**的行。既包含"唯一归属到主数据账号"的自洽行,
+      也包含"行内无身份线索"或"归属不到任何账号"的行。
+    * ``unresolved`` —— ``consistent`` 的**子集**: 行内带了身份线索, 但在主数据里
+      **归属不到任何账号**(停用店 / 历史数据缺戳 / 别名未覆盖)。
+      这些行**照常落库**(不能当成坏数据丢掉), 但会被计数并告警。
+    * ``conflicting`` —— **真矛盾**: 行内的多个身份键指向了**不同的**主数据账号。
+      这些行**不写云端**(宁可少同步一行, 也不要在云端造出"内容与身份不符"的混合行)。
+
+    为什么要分成三类
+    ----------------
+    2026-11-07 的事故把「无法归属」和「自相矛盾」混为一谈:
+    前者(其实是**好数据**)被当成后者**静默丢弃** 3,714 行, 账本却记 "completed"。
+    拆开之后, 账本能分别记「落库行数 / 未归属行数 / 被拒行数」,
+    作业状态也能只在**真丢数据**时才是 ``partial_success``。
+    """
+
+    #: 会落云端的行(unresolved 是它的子集)
+    consistent: list[dict[str, Any]] = field(default_factory=list)
+    #: 真矛盾、不写云端的行
+    conflicting: list[dict[str, Any]] = field(default_factory=list)
+    #: 落库但归属不到主数据账号的行(consistent 的子集)
+    unresolved: list[dict[str, Any]] = field(default_factory=list)
+    #: ``consistent`` 各行在**入参列表**中的下标(供检查点定位最后一行落库数据)
+    written_indexes: tuple[int, ...] = ()
+
+    @property
+    def written_rows(self) -> int:
+        """真正写进云端的行数。"""
+        return len(self.consistent)
+
+    @property
+    def conflict_rows(self) -> int:
+        """因身份矛盾被拒、**没有**写进云端的行数。"""
+        return len(self.conflicting)
+
+    @property
+    def unresolved_rows(self) -> int:
+        """落库但归属不到主数据账号的行数。"""
+        return len(self.unresolved)
+
+    @property
+    def last_written_index(self) -> int:
+        """最后一行落库数据在入参列表中的下标; 一行都没落库时为 ``-1``。
+
+        ⚠️ 检查点**只能**推进到这个位置 —— 推进到 ``rows[-1]`` 就等于
+        把"被拒的行"也一并跳过, 那正是 2026-11-07 丢数的机制。
+        """
+        return self.written_indexes[-1] if self.written_indexes else -1
+
+
 def split_rows_by_identity_consistency(
     rows: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """把待同步的行分成「身份自洽」与「身份矛盾」两组。
+    identity_index: Any = None,
+) -> IdentitySplitResult:
+    """把待同步的行按「行内身份」分成三类(自洽 / 未归属 / 真矛盾)。
 
     为什么需要这一步
     ----------------
@@ -47,54 +122,113 @@ def split_rows_by_identity_consistency(
     data_hash)``, 而 ``data_hash`` **不含 raw_data** ⇒ 两行只要核心业务字段相同,
     就会撞到同一个冲突键上。
 
-    于是: 本地第一行(列 ``shop_id``=A、raw_data 身份=A) 写进去之后,
-    第二行(列 ``shop_id``=A、raw_data 身份=**B**) 会命中冲突键,
-    ``DO UPDATE`` 把 raw_data 改成 B 的 ⇒ 云端留下一行
-    「列是 A、内容是 B」的**混合行**。这正是同步侧的**放大器**。
+    于是: 本地第一行(行内身份=A) 写进去之后, 第二行(行内身份=**B**) 会命中冲突键,
+    ``DO UPDATE`` 把 raw_data 改成 B 的 ⇒ 云端留下一行「内容与身份不符」的
+    **混合行**。这正是同步侧的**放大器**。
 
-    判据(纯本地, 不需要连主数据)
-    --------------------------
-    1. 事实表的 ``shop_id`` **列** vs ``raw_data['shop_id']``;
-    2. ``raw_data['platform_shop_id']`` vs ``raw_data['shop_id']``。
+    判据:行内身份**能否唯一归属到一个主数据账号**
+    -------------------------------------------
+    取行内 ``raw_data`` 的身份键(平台编号 / 账号 ID / 中文店铺列 / ``store_name``),
+    逐个到**主数据账号索引**反查, 汇总它们指向的账号集合:
 
-    两者任一不一致 ⇒ 这一行的「列」与「内容」不同源 ⇒ **不写云端**。
+    * 恰好 **1 个账号** ⇒ **自洽**, 落库;
+    * **0 个账号** ⇒ **未归属**(停用店 / 历史数据缺戳 / 别名未覆盖)⇒ **照常落库**,
+      但计入「未归属」计数并告警 —— 这不是「矛盾」, 不该当成坏数据丢弃;
+    * **>1 个账号** ⇒ **真矛盾**(行内两个身份键指向不同的店)⇒ **不写云端**。
+
     宁可少同步一行, 也不要把混合行搬进云端 ——
     云端那一份是看板与对比分析的数据源, 污染它比缺它更难发现。
 
+    ⚠️ **为什么不再拿事实表的 ``shop_id`` 列来比**
+    ------------------------------------------
+    2026-11-07 上线的旧判据是「列 ``shop_id`` vs ``raw_data['shop_id']``」。
+    但那一列**不是身份列** —— 它装的是采集层写进来的原始标识:
+    shopee 上是平台店铺编号、tiktok 上是导出店名、miaoshou 采集链上是
+    采集方代号 ``xihong``。拿它当身份列, 等于拿「平台编号」去比「账号 ID」,
+    **同源的两层也永远不相等**。
+
+    实测(本地 dev 库 65,197 行):旧判据误杀 **3,781 行正常数据**,
+    且这些行在语义层能正常归属到唯一店铺 —— 数据本来是好的, 是在同步侧被扔掉的。
+
+    ⚠️ **为什么不能只靠字符串比较行内的两个键**
+    ------------------------------------------
+    账号 ID(``shopee_my_xhkj1_local``)与平台编号(``1540271739``)是**不同形态**,
+    归一化后也互不包含 ⇒ 纯字符串比较会把「同一个店」判成矛盾
+    (实测误判 15,884 行 products 数据)。**必须查主数据**才能判定归属。
+
+    ``identity_index`` 为 None(拿不到主数据)时, 退化为「只比同形态的键」,
+    宁可少拦也不误杀 —— 拦错会静默丢数, 不拦最多留下待人工处理的一批。
+    降级模式下没有「归属」概念, 因此不产生 ``unresolved`` 计数。
+
     返回:
-        ``(自洽行, 矛盾行)``
+        :class:`IdentitySplitResult`
     """
     consistent: list[dict[str, Any]] = []
     conflicting: list[dict[str, Any]] = []
+    unresolved: list[dict[str, Any]] = []
+    written_indexes: list[int] = []
 
-    for row in rows or []:
-        column_shop_id = _text(row.get("shop_id"))
-        raw_data = row.get("raw_data")
-        raw = raw_data if isinstance(raw_data, dict) else {}
-
-        raw_shop_id = _text(raw.get("shop_id"))
-        raw_platform_shop_id = _text(raw.get("platform_shop_id"))
+    for index, row in enumerate(rows or []):
+        tokens = row_identity_tokens(row)
 
         mismatch = ""
-        if column_shop_id and raw_shop_id and column_shop_id != raw_shop_id:
-            mismatch = "shop_id column=%s but raw_data.shop_id=%s" % (
-                column_shop_id,
-                raw_shop_id,
+        is_unresolved = False
+
+        if identity_index is not None:
+            accounts = row_identity_accounts(
+                row, identity_index, _text(row.get("platform_code"))
             )
-        elif (
-            raw_platform_shop_id and raw_shop_id and raw_platform_shop_id != raw_shop_id
-        ):
-            mismatch = "raw_data.platform_shop_id=%s but raw_data.shop_id=%s" % (
-                raw_platform_shop_id,
-                raw_shop_id,
-            )
+            if len(accounts) > 1:
+                mismatch = "row identity resolves to %d accounts: %s" % (
+                    len(accounts),
+                    sorted(accounts),
+                )
+            elif not accounts and tokens:
+                # 行内带了身份线索, 但主数据里认不到 ⇒ 未归属(不是矛盾)
+                is_unresolved = True
+        else:
+            # 无主数据时的降级判据: 只在**同形态**的键之间比较。
+            # (编号 vs 账号 ID 属不同形态, 不可直接比 —— 见上文说明)
+            platform_shop_id = tokens.get("platform_shop_id")
+            raw_shop_id = tokens.get("shop_id")
+
+            numeric_ids = {
+                value
+                for value in (platform_shop_id, raw_shop_id)
+                if value and value.isdigit()
+            }
+            if len(numeric_ids) > 1:
+                mismatch = "raw_data.platform_shop_id=%s disagrees with raw_data.shop_id=%s" % (
+                    platform_shop_id,
+                    raw_shop_id,
+                )
+
+            store_label = tokens.get("store_label")
+            if not mismatch and store_label and platform_shop_id:
+                if (
+                    store_label != platform_shop_id
+                    and store_label not in platform_shop_id
+                    and platform_shop_id not in store_label
+                ):
+                    mismatch = (
+                        "raw_data.store_label=%s disagrees with "
+                        "raw_data.platform_shop_id=%s" % (store_label, platform_shop_id)
+                    )
 
         if mismatch:
             conflicting.append(row)
         else:
             consistent.append(row)
+            written_indexes.append(index)
+            if is_unresolved:
+                unresolved.append(row)
 
-    return consistent, conflicting
+    return IdentitySplitResult(
+        consistent=consistent,
+        conflicting=conflicting,
+        unresolved=unresolved,
+        written_indexes=tuple(written_indexes),
+    )
 
 
 def build_sync_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -171,9 +305,12 @@ class SQLAlchemyCloudWriter:
 
     TARGET_SCHEMA = "b_class"
 
-    def __init__(self, engine, dry_run: bool = False):
+    def __init__(self, engine, dry_run: bool = False, identity_index: Any = None):
         self.engine = engine
         self.dry_run = dry_run
+        #: 主数据账号索引 —— 供身份自洽判定使用(见
+        #: :func:`split_rows_by_identity_consistency`)。None ⇒ 降级判据。
+        self.identity_index = identity_index
 
     @staticmethod
     def _build_upsert_sql(table_name: str, data_domain: str) -> str:
@@ -212,25 +349,32 @@ class SQLAlchemyCloudWriter:
 
     def __call__(self, table_name: str, rows: list[dict[str, Any]], data_domain: str):
         if self.dry_run:
-            return {"success": True, "written_rows": len(rows), "dry_run": True}
+            return {
+                "success": True,
+                "written_rows": len(rows),
+                "dry_run": True,
+                "last_written_index": len(rows) - 1,
+            }
 
-        consistent, conflicting = split_rows_by_identity_consistency(rows)
-        if conflicting:
+        split = split_rows_by_identity_consistency(rows, self.identity_index)
+        if split.conflict_rows:
             logger.error(
-                "[CloudSync] [%s] %d 行身份不自洽(列与 raw_data 不同源), 已跳过不写云端",
+                "[CloudSync] [%s] %d 行行内身份自相矛盾, 已跳过不写云端",
                 table_name,
-                len(conflicting),
+                split.conflict_rows,
             )
 
         sql = self._build_upsert_sql(table_name, data_domain)
-        prepared_rows = self._prepare_rows_for_insert(consistent)
+        prepared_rows = self._prepare_rows_for_insert(split.consistent)
         with self.engine.begin() as conn:
             if prepared_rows:
                 conn.execute(text(sql), prepared_rows)
         return {
             "success": True,
-            "written_rows": len(consistent),
-            "identity_conflict_rows": len(conflicting),
+            "written_rows": split.written_rows,
+            "identity_conflict_rows": split.conflict_rows,
+            "identity_unresolved_rows": split.unresolved_rows,
+            "last_written_index": split.last_written_index,
         }
 
     def write_rows_with_receive_log(
@@ -243,29 +387,51 @@ class SQLAlchemyCloudWriter:
         receive_log_context: dict[str, Any],
     ) -> dict[str, Any]:
         if self.dry_run:
-            return {"success": True, "written_rows": len(rows), "dry_run": True}
+            return {
+                "success": True,
+                "written_rows": len(rows),
+                "dry_run": True,
+                "last_written_index": len(rows) - 1,
+            }
 
-        consistent, conflicting = split_rows_by_identity_consistency(rows)
-        if conflicting:
+        split = split_rows_by_identity_consistency(rows, self.identity_index)
+        if split.conflict_rows:
             logger.error(
-                "[CloudSync] [%s] %d 行身份不自洽(列与 raw_data 不同源), 已跳过不写云端",
+                "[CloudSync] [%s] %d 行行内身份自相矛盾, 已跳过不写云端",
                 table_name,
-                len(conflicting),
+                split.conflict_rows,
+            )
+        if split.unresolved_rows:
+            logger.warning(
+                "[CloudSync] [%s] %d 行行内身份归属不到主数据账号, 已照常落库并计数",
+                table_name,
+                split.unresolved_rows,
             )
 
         sql = self._build_upsert_sql(table_name, data_domain)
-        prepared_rows = self._prepare_rows_for_insert(consistent)
+        prepared_rows = self._prepare_rows_for_insert(split.consistent)
+        # ⚠️ 账本必须记**真正落库**的行数, 不是"送进来"的行数 ——
+        # 2026-11-07 事故里账本记 72 行 / 实际落库 0 行, 就是记了送进去的行数。
+        receive_context = dict(receive_log_context)
+        receive_context["written_rows"] = split.written_rows
+        receive_context["identity_conflict_rows"] = split.conflict_rows
+        receive_context["identity_unresolved_rows"] = split.unresolved_rows
+        receive_context["status"] = (
+            "partial_success" if split.conflict_rows else "completed"
+        )
         with self.engine.begin() as conn:
             if prepared_rows:
                 conn.execute(text(sql), prepared_rows)
             receive_result = receive_log_recorder.record_success_on_connection(
                 conn,
-                **receive_log_context,
+                **receive_context,
             )
         return {
             "success": True,
-            "written_rows": len(consistent),
-            "identity_conflict_rows": len(conflicting),
+            "written_rows": split.written_rows,
+            "identity_conflict_rows": split.conflict_rows,
+            "identity_unresolved_rows": split.unresolved_rows,
+            "last_written_index": split.last_written_index,
             "receive_log": receive_result,
             "receive_id": receive_result.get("receive_id"),
         }
@@ -348,6 +514,9 @@ class CloudSyncReceiveLogRecorder:
         source_latest_ingest_timestamp: Any | None = None,
         written_rows: int = 0,
         rows: list[dict[str, Any]] | None = None,
+        identity_conflict_rows: int = 0,
+        identity_unresolved_rows: int = 0,
+        status: str = "completed",
     ) -> dict[str, Any]:
         payload = self._build_success_payload(
             source_table_name=source_table_name,
@@ -360,13 +529,18 @@ class CloudSyncReceiveLogRecorder:
             source_latest_ingest_timestamp=source_latest_ingest_timestamp,
             written_rows=written_rows,
             rows=rows,
+            identity_conflict_rows=identity_conflict_rows,
+            identity_unresolved_rows=identity_unresolved_rows,
+            status=status,
         )
         with self.engine.begin() as conn:
             conn.execute(insert(CloudSyncReceiveLog.__table__).values(**payload))
         return {
-            "status": "completed",
+            "status": payload["status"],
             "receive_id": payload["receive_id"],
             "written_rows": written_rows,
+            "identity_conflict_rows": identity_conflict_rows,
+            "identity_unresolved_rows": identity_unresolved_rows,
         }
 
     def record_success_on_connection(
@@ -383,6 +557,9 @@ class CloudSyncReceiveLogRecorder:
         source_latest_ingest_timestamp: Any | None = None,
         written_rows: int = 0,
         rows: list[dict[str, Any]] | None = None,
+        identity_conflict_rows: int = 0,
+        identity_unresolved_rows: int = 0,
+        status: str = "completed",
     ) -> dict[str, Any]:
         payload = self._build_success_payload(
             source_table_name=source_table_name,
@@ -395,12 +572,17 @@ class CloudSyncReceiveLogRecorder:
             source_latest_ingest_timestamp=source_latest_ingest_timestamp,
             written_rows=written_rows,
             rows=rows,
+            identity_conflict_rows=identity_conflict_rows,
+            identity_unresolved_rows=identity_unresolved_rows,
+            status=status,
         )
         conn.execute(insert(CloudSyncReceiveLog.__table__).values(**payload))
         return {
-            "status": "completed",
+            "status": payload["status"],
             "receive_id": payload["receive_id"],
             "written_rows": written_rows,
+            "identity_conflict_rows": identity_conflict_rows,
+            "identity_unresolved_rows": identity_unresolved_rows,
         }
 
     def _build_success_payload(
@@ -416,6 +598,9 @@ class CloudSyncReceiveLogRecorder:
         source_latest_ingest_timestamp: Any | None = None,
         written_rows: int = 0,
         rows: list[dict[str, Any]] | None = None,
+        identity_conflict_rows: int = 0,
+        identity_unresolved_rows: int = 0,
+        status: str = "completed",
     ) -> dict[str, Any]:
         rows = list(rows or [])
         business_date_min, business_date_max = self._business_date_range(rows)
@@ -437,8 +622,13 @@ class CloudSyncReceiveLogRecorder:
             "business_date_min": business_date_min,
             "business_date_max": business_date_max,
             "source_latest_ingest_timestamp": source_latest_ingest_timestamp,
+            # ⚠️ ``written_rows`` = **真正写进云端**的行数。
+            # 2026-11-07 事故里这里记的是"送进去"的行数, 于是账本写 72 行、
+            # 实际落库 0 行, 看上去一切正常。绝不能再回退成"送进去的行数"。
             "written_rows": written_rows,
-            "status": "completed",
+            "identity_conflict_rows": identity_conflict_rows,
+            "identity_unresolved_rows": identity_unresolved_rows,
+            "status": status,
         }
 
 
@@ -653,6 +843,7 @@ class CloudBClassSyncService:
 
         results = []
         succeeded = 0
+        partial = 0
         failed = 0
         for table_name in tables:
             if self.sync_table_handler is not None:
@@ -662,15 +853,22 @@ class CloudBClassSyncService:
             else:
                 result = await self.sync_table(table_name, batch_size=batch_size)
             results.append(result)
-            if result["status"] == "completed":
+            table_status = result.get("status")
+            if table_status == "completed":
                 succeeded += 1
+            elif table_status == "partial_success":
+                # 部分成功(有行因身份矛盾没落库)—— 不是失败, 但也不是全好
+                partial += 1
             else:
                 failed += 1
 
         summary = {
-            "status": "completed" if failed == 0 else "partial_success",
+            "status": (
+                "completed" if (failed == 0 and partial == 0) else "partial_success"
+            ),
             "total_tables": len(tables),
             "succeeded_tables": succeeded,
+            "partial_tables": partial,
             "failed_tables": failed,
             "results": results,
         }
@@ -679,8 +877,12 @@ class CloudBClassSyncService:
                 run_id=run_id,
                 status=summary["status"],
                 succeeded_tables=succeeded,
-                failed_tables=failed,
-                error_summary=None if failed == 0 else f"{failed} tables failed",
+                failed_tables=failed + partial,
+                error_summary=(
+                    None
+                    if failed == 0 and partial == 0
+                    else f"{failed} tables failed, {partial} tables partially succeeded"
+                ),
             )
             summary["run_id"] = run_id
         return summary
@@ -707,6 +909,8 @@ class CloudBClassSyncService:
             data_domain = self._infer_data_domain(table_name)
             self.mirror_manager.ensure_cloud_mirror_table(table_name, data_domain)
             total_written_rows = 0
+            total_conflict_rows = 0
+            total_unresolved_rows = 0
             dry_run_seen = False
             latest_ingest_timestamp = None
 
@@ -753,9 +957,18 @@ class CloudBClassSyncService:
 
                 if not rows:
                     return {
-                        "status": "completed",
+                        "status": (
+                            "partial_success" if total_conflict_rows else "completed"
+                        ),
                         "table_name": table_name,
                         "written_rows": total_written_rows,
+                        "identity_conflict_rows": total_conflict_rows,
+                        "identity_unresolved_rows": total_unresolved_rows,
+                        "error_code": (
+                            "identity_conflict_rows_present"
+                            if total_conflict_rows
+                            else None
+                        ),
                         **_projection_result(),
                     }
 
@@ -823,47 +1036,113 @@ class CloudBClassSyncService:
                         "status": "failed",
                         "table_name": table_name,
                         "written_rows": total_written_rows,
+                        "identity_conflict_rows": total_conflict_rows,
+                        "identity_unresolved_rows": total_unresolved_rows,
                         "error": write_result.get("error")
                         or write_result.get("detail")
                         or "sync_failed",
                         "error_code": write_result.get("error_code") or "sync_failed",
                     }
 
-                total_written_rows += int(write_result.get("written_rows", len(rows)))
+                batch_written_rows = int(write_result.get("written_rows", len(rows)))
+                batch_conflict_rows = int(write_result.get("identity_conflict_rows", 0))
+                batch_unresolved_rows = int(
+                    write_result.get("identity_unresolved_rows", 0)
+                )
+                total_written_rows += batch_written_rows
+                total_conflict_rows += batch_conflict_rows
+                total_unresolved_rows += batch_unresolved_rows
+
                 if (
                     self.receive_log_recorder is not None
                     and not bool(write_result.get("dry_run"))
                     and not write_result.get("receive_log")
                 ):
+                    # 账本必须记**真正落库**的行数, 不能记"送进去"的行数。
+                    fallback_context = dict(receive_log_context)
+                    fallback_context["written_rows"] = batch_written_rows
+                    fallback_context["identity_conflict_rows"] = batch_conflict_rows
+                    fallback_context["identity_unresolved_rows"] = batch_unresolved_rows
+                    fallback_context["status"] = (
+                        "partial_success" if batch_conflict_rows else "completed"
+                    )
                     await self._maybe_await(
-                        self.receive_log_recorder.record_success(**receive_log_context)
+                        self.receive_log_recorder.record_success(**fallback_context)
                     )
                 dry_run_seen = dry_run_seen or bool(write_result.get("dry_run"))
-                if self._should_advance_checkpoint(
+
+                if not self._should_advance_checkpoint(
                     write_succeeded, dry_run=bool(write_result.get("dry_run"))
                 ):
-                    last_row = rows[-1]
-                    latest_ingest_timestamp = last_row["ingest_timestamp"]
-                    self.checkpoint_service.advance_checkpoint(
-                        table_name=table_name,
-                        ingest_timestamp=last_row["ingest_timestamp"],
-                        source_id=last_row["id"],
-                        status="completed",
-                        table_schema=self.checkpoint_scope,
-                    )
-                else:
+                    # dry_run: 不推进检查点, 本表到此结束
                     return {
                         "status": "completed",
                         "table_name": table_name,
                         "written_rows": total_written_rows,
+                        "identity_conflict_rows": total_conflict_rows,
+                        "identity_unresolved_rows": total_unresolved_rows,
                         **_projection_result(),
                     }
 
-                if len(rows) < batch_size:
+                # ⚠️ 检查点**只能**推进到最后一行**真正落库**的数据。
+                # 推进到 ``rows[-1]`` 等于把"被判矛盾、根本没写进去"的行
+                # 一并跳过 —— 那正是 2026-11-07 丢数的机制。
+                last_written_index = write_result.get("last_written_index")
+                if last_written_index is None:
+                    # 兼容不认识新契约的自定义 writer: 保守假定本批全部落库
+                    last_written_index = len(rows) - 1
+                last_written_index = int(last_written_index)
+
+                if last_written_index < 0:
+                    # 本批**一行都没落库**(全部被判矛盾)⇒ 检查点不能推进,
+                    # 停在当前水位并明确报告 —— 绝不能"跳过"这些行。
+                    logger.error(
+                        "[CloudSync] [%s] 本批 %d 行行内身份自相矛盾, 无一行落库; "
+                        "检查点停在当前水位, 需人工确认归属后再同步",
+                        table_name,
+                        batch_conflict_rows,
+                    )
                     return {
-                        "status": "completed",
+                        "status": "partial_success",
                         "table_name": table_name,
                         "written_rows": total_written_rows,
+                        "identity_conflict_rows": total_conflict_rows,
+                        "identity_unresolved_rows": total_unresolved_rows,
+                        "error": (
+                            "%d 行行内身份自相矛盾, 本批无一落库; "
+                            "检查点已停在当前水位, 需人工确认这些行的店铺归属"
+                            % batch_conflict_rows
+                        ),
+                        "error_code": "identity_conflict_rows_present",
+                        **_projection_result(),
+                    }
+
+                last_row = rows[last_written_index]
+                latest_ingest_timestamp = last_row["ingest_timestamp"]
+                self.checkpoint_service.advance_checkpoint(
+                    table_name=table_name,
+                    ingest_timestamp=last_row["ingest_timestamp"],
+                    source_id=last_row["id"],
+                    status=(
+                        "partial_success" if batch_conflict_rows else "completed"
+                    ),
+                    table_schema=self.checkpoint_scope,
+                )
+
+                if len(rows) < batch_size:
+                    return {
+                        "status": (
+                            "partial_success" if total_conflict_rows else "completed"
+                        ),
+                        "table_name": table_name,
+                        "written_rows": total_written_rows,
+                        "identity_conflict_rows": total_conflict_rows,
+                        "identity_unresolved_rows": total_unresolved_rows,
+                        "error_code": (
+                            "identity_conflict_rows_present"
+                            if total_conflict_rows
+                            else None
+                        ),
                         **_projection_result(),
                     }
         except Exception as exc:

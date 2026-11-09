@@ -1176,7 +1176,22 @@ class CloudSyncReceiveLog(Base):
     business_date_min = Column(Date, nullable=True)
     business_date_max = Column(Date, nullable=True)
     source_latest_ingest_timestamp = Column(DateTime(timezone=True), nullable=True)
-    written_rows = Column(Integer, nullable=False, default=0)
+    #: **真正写进云端**的行数。
+    #:
+    #: ⚠️ 2026-11-07 之前这个字段记的是"送进 writer 的行数" ——
+    #: 身份矛盾的行被丢弃后, 账本照样记满数(记 72 行 / 实际落库 0 行)。
+    #: 语义已修正为"实际落库行数"; 更早的历史行无法回填, 保持原值。
+    written_rows = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    #: 因「行内身份自相矛盾」被拒、**没有**写进云端的行数。
+    #: 只要它 > 0, 本次接收的状态就是 ``partial_success`` 而不是 ``completed``。
+    identity_conflict_rows = Column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    #: 落库但**归属不到任何主数据账号**的行数(停用店 / 历史数据缺戳)。
+    #: 这些行照常落库, 只是提醒人工补主数据 —— 不是丢数。
+    identity_unresolved_rows = Column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
     status = Column(String(32), nullable=False, default="completed")
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

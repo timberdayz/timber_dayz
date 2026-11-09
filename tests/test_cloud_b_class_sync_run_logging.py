@@ -68,4 +68,13 @@ def test_sync_all_tables_records_partial_success_summary():
     result = asyncio.run(service.sync_all_tables(batch_size=100))
 
     assert result["status"] == "partial_success"
-    assert recorder.finished == [("run-1", "partial_success", 1, 1, "1 tables failed")]
+    # error_summary 里带「部分成功」的表数（0 张）—— 三态统计落地后的口径。
+    assert recorder.finished == [
+        (
+            "run-1",
+            "partial_success",
+            1,
+            1,
+            "1 tables failed, 0 tables partially succeeded",
+        )
+    ]

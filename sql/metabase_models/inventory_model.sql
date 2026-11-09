@@ -104,7 +104,11 @@ cleaned AS (
     sku_id_raw AS sku_id,
     product_sku_raw AS product_sku,
     warehouse_name_raw AS warehouse_name,
-    warehouse_code_raw AS warehouse_code,
+    -- 仓码归一（SSOT: semantic.resolve_warehouse_code → core.dim_warehouse_name_aliases）
+    -- 妙手导出的「仓库编码 / warehouse_code / Warehouse Code」三个键**不存在**
+    -- （实测 33 个原始键里没有）⇒ 那一路恒为 NULL；这里用仓名去对照表归一。
+    -- 与语义层 semantic.fact_inventory_snapshot 同一口径。
+    COALESCE(warehouse_code_raw, semantic.resolve_warehouse_code(warehouse_name_raw)) AS warehouse_code,
     -- 安全数值转换：仅合法数值才 ::NUMERIC，畸形数据兜底为 NULL
     (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(available_stock_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS available_stock,
     (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(on_hand_stock_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS on_hand_stock,
