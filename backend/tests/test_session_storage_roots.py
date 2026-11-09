@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -51,9 +52,9 @@ def test_session_manager_no_longer_exposes_session_file_apis() -> None:
     from modules.utils.sessions.session_manager import SessionManager
 
     for name in _REMOVED_SESSION_APIS:
-        assert not hasattr(SessionManager, name), (
-            f"SessionManager 仍暴露会话文件接口 {name}（会话文件已废除）"
-        )
+        assert not hasattr(
+            SessionManager, name
+        ), f"SessionManager 仍暴露会话文件接口 {name}（会话文件已废除）"
 
 
 def test_session_manager_no_longer_exposes_session_file_helpers() -> None:
@@ -61,9 +62,9 @@ def test_session_manager_no_longer_exposes_session_file_helpers() -> None:
     from modules.utils.sessions import session_manager as session_manager_module
 
     for name in _REMOVED_MODULE_HELPERS:
-        assert not hasattr(session_manager_module, name), (
-            f"session_manager 仍暴露 {name}（会话文件已废除）"
-        )
+        assert not hasattr(
+            session_manager_module, name
+        ), f"session_manager 仍暴露 {name}（会话文件已废除）"
 
 
 def test_session_manager_initialization_does_not_create_data_sessions(
@@ -135,7 +136,9 @@ def test_get_persistent_profile_path_is_the_single_naming_rule(
     manager = session_manager_module.SessionManager()
 
     assert manager.get_persistent_profile_path("shopee", "shopee KR").name == "shopeeKR"
-    assert manager.get_persistent_profile_path("tiktok", "Tiktok 1店").name == "Tiktok1店"
+    assert (
+        manager.get_persistent_profile_path("tiktok", "Tiktok 1店").name == "Tiktok1店"
+    )
 
 
 def test_legacy_session_profiles_api_is_gone(
@@ -156,12 +159,12 @@ def test_legacy_session_profiles_api_is_gone(
 
     manager = session_manager_module.SessionManager()
 
-    assert not hasattr(manager, "get_profile_path"), (
-        "legacy get_profile_path 必须随 data/session_profiles 一并下线"
-    )
-    assert not hasattr(manager, "profiles_path"), (
-        "legacy profiles_path 属性必须随 data/session_profiles 一并下线"
-    )
+    assert not hasattr(
+        manager, "get_profile_path"
+    ), "legacy get_profile_path 必须随 data/session_profiles 一并下线"
+    assert not hasattr(
+        manager, "profiles_path"
+    ), "legacy profiles_path 属性必须随 data/session_profiles 一并下线"
 
 
 def test_miaoshou_login_uses_the_single_profile_rule() -> None:
@@ -183,14 +186,16 @@ def test_miaoshou_login_uses_the_single_profile_rule() -> None:
         / "miaoshou_smart_login.py"
     ).read_text(encoding="utf-8")
     code_lines = [
-        line for line in login_src.splitlines()
-        if not line.lstrip().startswith("#")
+        line for line in login_src.splitlines() if not line.lstrip().startswith("#")
     ]
     code = "\n".join(code_lines)
     assert "get_profile_path" not in code, "妙手登录不得再调用 legacy get_profile_path"
-    assert 'get_persistent_profile_path("miaoshou"' in code, (
-        "妙手登录必须走 get_persistent_profile_path('miaoshou', ...)"
-    )
+    # 用正则而不是字面子串: 排版工具(black)可能把这个调用拆成多行
+    # (get_persistent_profile_path(\n    "miaoshou", account_id\n)),
+    # 断言的**意图**是「平台名必须是 miaoshou」, 与排版无关。
+    assert re.search(
+        r'get_persistent_profile_path\(\s*"miaoshou"', code
+    ), "妙手登录必须走 get_persistent_profile_path('miaoshou', ...)"
 
 
 def test_persistent_browser_manager_downloads_root_is_repo_root_anchored(
