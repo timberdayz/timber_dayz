@@ -34,7 +34,9 @@ async def grading_session_factory():
 async def test_template_status_service_allows_optional_field_drop_for_shopee_orders_monthly(
     grading_session_factory, tmp_path
 ):
-    from backend.services.data_sync_template_status_service import DataSyncTemplateStatusService
+    from backend.services.data_sync_template_status_service import (
+        DataSyncTemplateStatusService,
+    )
 
     now = datetime.now(timezone.utc)
     file_path = tmp_path / "shopee_orders_monthly_20260617_104634.xls"
@@ -175,7 +177,15 @@ async def test_template_matcher_uses_semantic_contract_for_orders_weekly_optiona
             version=1,
             status="published",
             header_row=0,
-            header_columns=["订单编号", "店铺", "下单时间", "销售数量", "买家支付", "利润", "预估回款金额"],
+            header_columns=[
+                "订单编号",
+                "店铺",
+                "下单时间",
+                "销售数量",
+                "买家支付",
+                "利润",
+                "预估回款金额",
+            ],
             header_bindings=[
                 {"raw_name": "订单编号", "semantic_key": "order_id"},
                 {"raw_name": "店铺", "semantic_key": "shop_id"},
@@ -183,7 +193,10 @@ async def test_template_matcher_uses_semantic_contract_for_orders_weekly_optiona
                 {"raw_name": "销售数量", "semantic_key": "sales_volume"},
                 {"raw_name": "买家支付", "semantic_key": "paid_amount"},
                 {"raw_name": "利润", "semantic_key": "profit"},
-                {"raw_name": "预估回款金额", "semantic_key": "estimated_settlement_amount"},
+                {
+                    "raw_name": "预估回款金额",
+                    "semantic_key": "estimated_settlement_amount",
+                },
             ],
             created_at=now,
             updated_at=now,
@@ -209,13 +222,19 @@ def test_auto_ingest_marks_template_update_required_when_readiness_blocks(
     monkeypatch,
 ):
     from backend.tasks import scheduled_tasks as scheduled_module
+
     original_asyncio_run = __import__("asyncio").run
 
     records = {}
     file_record = type(
         "CatalogFile",
         (),
-        {"id": 2849, "status": "processing", "file_metadata": {}, "error_message": None},
+        {
+            "id": 2849,
+            "status": "processing",
+            "file_metadata": {},
+            "error_message": None,
+        },
     )()
 
     class _FakeScalarResult:
@@ -280,11 +299,25 @@ def test_auto_ingest_marks_template_update_required_when_readiness_blocks(
         async def sync_single_file(self, *args, **kwargs):
             raise AssertionError("sync_single_file should not run for update_required")
 
-    monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
-    monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _FakeAsyncSession())
-    monkeypatch.setattr("backend.services.data_sync_service.DataSyncService", _FakeDataSyncService)
-    monkeypatch.setattr("backend.services.task_center_sync_service.TaskCenterSyncService", _FakeTaskCenterSyncService)
-    monkeypatch.setattr(scheduled_module, "run_async_task", lambda factory: original_asyncio_run(factory()), raising=False)
+    monkeypatch.setattr(
+        scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False
+    )
+    monkeypatch.setattr(
+        "backend.models.database.AsyncSessionLocal", lambda: _FakeAsyncSession()
+    )
+    monkeypatch.setattr(
+        "backend.services.data_sync_service.DataSyncService", _FakeDataSyncService
+    )
+    monkeypatch.setattr(
+        "backend.services.task_center_sync_service.TaskCenterSyncService",
+        _FakeTaskCenterSyncService,
+    )
+    monkeypatch.setattr(
+        scheduled_module,
+        "run_async_task",
+        lambda factory: original_asyncio_run(factory()),
+        raising=False,
+    )
 
     result = scheduled_module.auto_ingest_pending_files(max_files=1)
 
@@ -294,8 +327,17 @@ def test_auto_ingest_marks_template_update_required_when_readiness_blocks(
     assert result["summary"]["skipped"] == 0
     assert records["updated"]["status"] == "partial_success"
     assert records["updated"]["details_json"]["task_details"]["blocked_files"] == 1
-    assert records["updated"]["details_json"]["task_details"]["blocked_template_update"] == 1
-    assert records["updated"]["details_json"]["task_details"]["files"][0]["status"] == "blocked_template_update"
+    assert (
+        records["updated"]["details_json"]["task_details"]["blocked_template_update"]
+        == 1
+    )
+    assert (
+        records["updated"]["details_json"]["task_details"]["files"][0]["status"]
+        == "blocked_template_update"
+    )
     assert file_record.status == "template_update_required"
     assert file_record.error_message == "新增0个字段, 删除1个字段 (匹配率: 98.5%)"
-    assert file_record.file_metadata["auto_ingest"]["last_status"] == "template_update_required"
+    assert (
+        file_record.file_metadata["auto_ingest"]["last_status"]
+        == "template_update_required"
+    )

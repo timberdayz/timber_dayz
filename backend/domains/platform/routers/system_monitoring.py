@@ -17,6 +17,7 @@ def _describe_pool(pool: Any) -> Dict[str, Any]:
     [*] 2026-11-09：async 引擎改为**按事件循环分发**，每个事件循环有自己的
     连接池；这里要看的是**当前请求所在循环**的池，而不是全局那个。
     """
+
     def _num(method_name: str) -> int:
         getter = getattr(pool, method_name, None)
         if not callable(getter):

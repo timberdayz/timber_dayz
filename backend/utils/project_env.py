@@ -121,9 +121,7 @@ def load_project_env(
     protected: dict[str, str] = {}
     if is_test_env_guarded():
         protected = {
-            key: os.environ[key]
-            for key in GUARDED_ENV_KEYS
-            if key in os.environ
+            key: os.environ[key] for key in GUARDED_ENV_KEYS if key in os.environ
         }
 
     for env_file in resolve_project_env_files(project_root, profile=profile):

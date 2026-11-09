@@ -40,6 +40,7 @@ from backend.services.spreadsheet_header_reader import (
 from backend.services.executor_manager import (
     get_executor_manager,
 )  # v4.19.0新增:使用统一执行器管理器
+
 # [*] 2026-12 清理:data_importer 的入库函数(stage_*/upsert_*)已统一为 async 实现,
 # 本模块不再持有这些导入(此前只 import 未使用,却让读者以为这里能同步调用它们)。
 # [*] 2026-12 清理:operational_data_importer 模块无生产调用方,已归档删除。

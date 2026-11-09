@@ -82,7 +82,9 @@ def test_celery_transport_options_declare_socket_connect_timeout():
         assert isinstance(options, dict), f"{label} 必须显式配置"
         timeout = options.get("socket_connect_timeout")
         assert timeout is not None, f"{label} 缺少 socket_connect_timeout"
-        assert 0 < float(timeout) <= 10, f"{label} 的 socket_connect_timeout 过大: {timeout}"
+        assert (
+            0 < float(timeout) <= 10
+        ), f"{label} 的 socket_connect_timeout 过大: {timeout}"
 
 
 def test_celery_result_backend_retry_policy_is_bounded():
@@ -92,9 +94,7 @@ def test_celery_result_backend_retry_policy_is_bounded():
     options = celery_app.conf.result_backend_transport_options or {}
     policy = options.get("retry_policy") or {}
     assert policy.get("max_retries") is not None, "结果后端重试次数必须显式有上限"
-    assert policy["max_retries"] <= 3, (
-        f"结果后端重试次数过多(={policy['max_retries']})"
-    )
+    assert policy["max_retries"] <= 3, f"结果后端重试次数过多(={policy['max_retries']})"
 
 
 # ---------------------------------------------------------------------------
@@ -148,9 +148,7 @@ def test_no_dead_except_branch_after_broad_exception():
                 if exc is None:
                     names = ["BaseException"]
                 elif isinstance(exc, ast.Tuple):
-                    names = [
-                        e.id for e in exc.elts if isinstance(e, ast.Name)
-                    ]
+                    names = [e.id for e in exc.elts if isinstance(e, ast.Name)]
                 elif isinstance(exc, ast.Name):
                     names = [exc.id]
                 else:
@@ -161,9 +159,7 @@ def test_no_dead_except_branch_after_broad_exception():
             # Exception 出现在元组里 = 广捕获, 后面再跟任何 except 都是死代码
             if "Exception" in names and len(names) > 1:
                 nxt_lineno, nxt_names = handlers[idx + 1]
-                assert not any(
-                    "Exception" in n for n in nxt_names
-                ), (
+                assert not any("Exception" in n for n in nxt_names), (
                     f"{path.name}:{lineno} 的 `except ({', '.join(names)})` "
                     f"会吃掉所有异常, 使 line {nxt_lineno} 的 except 成为死代码"
                 )
@@ -183,12 +179,12 @@ def test_conftest_pins_celery_to_memory_transport():
     conftest = Path(__file__).resolve().parent / "conftest.py"
     source = conftest.read_text(encoding="utf-8-sig")
 
-    assert 'os.environ["CELERY_BROKER_URL"] = "memory://"' in source, (
-        "conftest 必须把 CELERY_BROKER_URL 钉成 memory://"
-    )
-    assert 'os.environ["CELERY_RESULT_BACKEND"] = "cache+memory://"' in source, (
-        "conftest 必须把 CELERY_RESULT_BACKEND 钉成 cache+memory://"
-    )
+    assert (
+        'os.environ["CELERY_BROKER_URL"] = "memory://"' in source
+    ), "conftest 必须把 CELERY_BROKER_URL 钉成 memory://"
+    assert (
+        'os.environ["CELERY_RESULT_BACKEND"] = "cache+memory://"' in source
+    ), "conftest 必须把 CELERY_RESULT_BACKEND 钉成 cache+memory://"
 
 
 def test_test_env_guard_protects_celery_urls_from_dotenv_override():
@@ -198,12 +194,12 @@ def test_test_env_guard_protects_celery_urls_from_dotenv_override():
     """
     from backend.utils.project_env import GUARDED_ENV_KEYS
 
-    assert "CELERY_BROKER_URL" in GUARDED_ENV_KEYS, (
-        "CELERY_BROKER_URL 必须在护栏保护名单里, 否则 .env 会覆盖掉测试护栏"
-    )
-    assert "CELERY_RESULT_BACKEND" in GUARDED_ENV_KEYS, (
-        "CELERY_RESULT_BACKEND 必须在护栏保护名单里, 否则 .env 会覆盖掉测试护栏"
-    )
+    assert (
+        "CELERY_BROKER_URL" in GUARDED_ENV_KEYS
+    ), "CELERY_BROKER_URL 必须在护栏保护名单里, 否则 .env 会覆盖掉测试护栏"
+    assert (
+        "CELERY_RESULT_BACKEND" in GUARDED_ENV_KEYS
+    ), "CELERY_RESULT_BACKEND 必须在护栏保护名单里, 否则 .env 会覆盖掉测试护栏"
 
 
 # ---------------------------------------------------------------------------

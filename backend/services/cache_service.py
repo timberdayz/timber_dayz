@@ -34,6 +34,7 @@ logger = get_logger(__name__)
 # 尝试导入Redis(异步版本)
 try:
     from redis import asyncio as aioredis
+
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False

@@ -143,9 +143,7 @@ def run_release_verification(*, skip_build: bool, table: str) -> bool:
     # Set PROD_SNAPSHOT_DATABASE_URL to enable.
     # 本地链允许"没有快照库"= 跳过（--allow-skip）；生产/发版链**不得**传这个开关，
     # 那里"没演练"必须是非零退出，不能伪装成演练通过。
-    _run_command(
-        [sys.executable, "scripts/rehearsal_prod_snapshot.py", "--allow-skip"]
-    )
+    _run_command([sys.executable, "scripts/rehearsal_prod_snapshot.py", "--allow-skip"])
 
     return True
 

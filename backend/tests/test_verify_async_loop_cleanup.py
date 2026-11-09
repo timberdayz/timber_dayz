@@ -8,6 +8,7 @@
 
 这个门禁把「异步任务必须走统一出口、必须真正关闭连接池」变成机器可判定的规则。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -56,10 +57,7 @@ def test_detects_bare_asyncio_run(gate, tmp_path):
     _write(
         tmp_path,
         "backend/tasks/bad.py",
-        "import asyncio\n"
-        "\n"
-        "def task():\n"
-        "    return asyncio.run(_work())\n",
+        "import asyncio\n" "\n" "def task():\n" "    return asyncio.run(_work())\n",
     )
     violations, _ = gate.scan(tmp_path, ["backend"])
     assert any(v.startswith("R1") for v in violations), violations
@@ -70,8 +68,7 @@ def test_detects_soft_dispose(gate, tmp_path):
     _write(
         tmp_path,
         "backend/services/bad.py",
-        "def drop(engine):\n"
-        "    engine.sync_engine.dispose(close=False)\n",
+        "def drop(engine):\n" "    engine.sync_engine.dispose(close=False)\n",
     )
     violations, _ = gate.scan(tmp_path, ["backend"])
     assert any(v.startswith("R2") for v in violations), violations

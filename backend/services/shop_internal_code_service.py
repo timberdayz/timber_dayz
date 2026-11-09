@@ -41,8 +41,28 @@ logger = get_logger(__name__)
 
 # 已知的地区后缀（小写），从店铺名尾部剥离，避免重复拼接区域码
 _KNOWN_REGION_SUFFIXES = (
-    "my", "sg", "ph", "vn", "th", "tw", "id", "br", "mx", "cl", "co", "ar",
-    "uk", "de", "fr", "it", "es", "jp", "kr", "us", "ca", "au",
+    "my",
+    "sg",
+    "ph",
+    "vn",
+    "th",
+    "tw",
+    "id",
+    "br",
+    "mx",
+    "cl",
+    "co",
+    "ar",
+    "uk",
+    "de",
+    "fr",
+    "it",
+    "es",
+    "jp",
+    "kr",
+    "us",
+    "ca",
+    "au",
 )
 
 _NON_ALNUM_RE = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff]+")
@@ -112,7 +132,9 @@ def _main_account_short_id(main_account_id: Optional[str]) -> str:
     if not text:
         return ""
     if "@" in text:
-        return "".join(ch for ch in text.split("@")[0].upper() if ch.isalnum())[:2] or "M1"
+        return (
+            "".join(ch for ch in text.split("@")[0].upper() if ch.isalnum())[:2] or "M1"
+        )
     digits = "".join(ch for ch in text if ch.isdigit())
     if digits:
         return f"T{digits}"
@@ -204,15 +226,19 @@ async def backfill_internal_codes(
         统计信息 + 逐条的分配方案 ``assignments``。
     """
     records = (
-        await db.execute(
-            select(ShopAccount).order_by(
-                ShopAccount.platform,
-                ShopAccount.shop_region,
-                ShopAccount.main_account_id,
-                ShopAccount.shop_account_id,
+        (
+            await db.execute(
+                select(ShopAccount).order_by(
+                    ShopAccount.platform,
+                    ShopAccount.shop_region,
+                    ShopAccount.main_account_id,
+                    ShopAccount.shop_account_id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     taken_by_platform: dict[str, set[str]] = {}
     for record in records:

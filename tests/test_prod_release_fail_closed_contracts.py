@@ -110,9 +110,9 @@ class _RecordingClientRunner:
             "Result",
             (),
             {
-                "returncode": self.restore_exit_code
-                if command[0] == "pg_restore"
-                else 0,
+                "returncode": (
+                    self.restore_exit_code if command[0] == "pg_restore" else 0
+                ),
                 "stderr": "",
             },
         )()
@@ -282,9 +282,7 @@ def _service_block(text: str, service: str) -> str:
     """Return the raw compose block of one service (2-space indented keys)."""
     lines = text.splitlines()
     start = next(
-        index
-        for index, line in enumerate(lines)
-        if line.startswith(f"  {service}:")
+        index for index, line in enumerate(lines) if line.startswith(f"  {service}:")
     )
     block = [lines[start]]
     for line in lines[start + 1 :]:

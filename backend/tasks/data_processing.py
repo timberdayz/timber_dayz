@@ -13,6 +13,7 @@ sys.path.insert(0, str(root_dir))
 from backend.celery_app import celery_app
 from backend.models.database import AsyncSessionLocal
 from backend.utils.async_task_runner import run_async_task
+
 # [WARN] v4.19.1:preview 函数已重构,使用 ExcelParser.read_excel 替代
 from backend.services.excel_parser import ExcelParser
 from backend.services.field_mapping.mapper import suggest_mappings
@@ -21,7 +22,7 @@ from backend.services.data_importer import (
     stage_orders,
     stage_product_metrics,
     upsert_orders,
-    upsert_product_metrics
+    upsert_product_metrics,
 )
 import logging
 
@@ -46,7 +47,7 @@ async def _process_excel_file(
     logger.info("  Step 1: Reading Excel...")
     # [WARN] v4.19.1:使用 ExcelParser 替代旧的 preview_service
     df = ExcelParser.read_excel(file_path)
-    rows = df.to_dict('records') if df is not None else []
+    rows = df.to_dict("records") if df is not None else []
 
     logger.info(f"  Found {len(rows)} rows")
 
@@ -115,7 +116,7 @@ async def _process_excel_file(
         "imported": imported,
         "orders_fact_imported": orders_fact_imported,
         "orders_fact_note": orders_fact_note,
-        "validation": validation_result
+        "validation": validation_result,
     }
 
 
@@ -150,11 +151,7 @@ def process_excel_file(file_path: str, platform: str, data_domain: str, mappings
         return run_async_task(_run)
     except Exception as e:
         logger.error(f"[ERROR] Task failed: {e}")
-        return {
-            "status": "failed",
-            "file_path": file_path,
-            "error": str(e)
-        }
+        return {"status": "failed", "file_path": file_path, "error": str(e)}
 
 
 @celery_app.task(name="backend.tasks.data_processing.batch_process_files")
@@ -177,13 +174,6 @@ def batch_process_files(file_list: list, platform: str, data_domain: str):
     for file_path in file_list:
         # 每个文件作为独立任务
         task = process_excel_file.delay(file_path, platform, data_domain, {})
-        results.append({
-            "file_path": file_path,
-            "task_id": task.id
-        })
+        results.append({"file_path": file_path, "task_id": task.id})
 
-    return {
-        "status": "queued",
-        "total_files": len(file_list),
-        "tasks": results
-    }
+    return {"status": "queued", "total_files": len(file_list), "tasks": results}

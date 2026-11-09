@@ -1,4 +1,5 @@
 """契约测试：访问令牌提取单点门禁(scripts/verify_access_token_extraction.py)。"""
+
 from __future__ import annotations
 
 import importlib.util
@@ -12,7 +13,9 @@ SCRIPT = ROOT / "scripts" / "verify_access_token_extraction.py"
 
 
 def _load_gate():
-    spec = importlib.util.spec_from_file_location("verify_access_token_extraction", SCRIPT)
+    spec = importlib.util.spec_from_file_location(
+        "verify_access_token_extraction", SCRIPT
+    )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     sys.modules[spec.name] = module
@@ -38,8 +41,7 @@ def test_detects_manual_cookie_read(gate, tmp_path):
     target = tmp_path / "backend" / "svc" / "thing.py"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
-        "def read(request):\n"
-        "    return request.cookies.get('access_token')\n",
+        "def read(request):\n" "    return request.cookies.get('access_token')\n",
         encoding="utf-8",
     )
     violations = gate.scan(tmp_path, ["backend"])
@@ -50,8 +52,7 @@ def test_detects_manual_header_read(gate, tmp_path):
     target = tmp_path / "backend" / "svc" / "thing.py"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
-        "def read(request):\n"
-        "    return request.headers.get('Authorization', '')\n",
+        "def read(request):\n" "    return request.headers.get('Authorization', '')\n",
         encoding="utf-8",
     )
     violations = gate.scan(tmp_path, ["backend"])
@@ -124,9 +125,7 @@ def test_ssot_function_handles_all_sources():
     )
     # header 兜底
     assert (
-        extract_access_token(
-            request=_Request(headers={"Authorization": "Bearer h"})
-        )
+        extract_access_token(request=_Request(headers={"Authorization": "Bearer h"}))
         == "h"
     )
     # credentials 兜底

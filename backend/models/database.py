@@ -512,9 +512,7 @@ class _PerLoopAsyncEngineRegistry:
             )
         maker = self._makers.get(loop)
         if maker is None:
-            maker = async_sessionmaker(
-                bind=self.engine(), expire_on_commit=False
-            )
+            maker = async_sessionmaker(bind=self.engine(), expire_on_commit=False)
             self._makers[loop] = maker
         return maker
 
@@ -1108,6 +1106,7 @@ def emit_schema_failure_protocol(result: dict) -> dict[str, str]:
     print(f"XIHONG_RECOVERY_HINT={protocol['hint']}", flush=True)
     print("XIHONG_SOURCE_EXIT_CODE=1", flush=True)
     return protocol
+
 
 # 导出给backend/routers使用
 # 注意:所有模型都来自 modules/core/db/schema.py,此处只是重新导出

@@ -14,9 +14,10 @@ from modules.core.db import FactAuditLog  # v4.12.0 SSOT迁移
 from typing import Optional, Dict, Any, Union
 from datetime import datetime, timezone
 
+
 class AuditService:
     """审计服务类"""
-    
+
     async def log_action(
         self,
         user_id: int,
@@ -26,12 +27,13 @@ class AuditService:
         user_agent: str,
         resource_id: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None,
-        db: AsyncSession = None
+        db: AsyncSession = None,
     ):
         """记录操作日志(异步模式)"""
         owns_session = False
         if db is None:
             from backend.models.database import AsyncSessionLocal
+
             db = AsyncSessionLocal()
             # [*] 2026-11-09 连接泄漏根治：自建的会话必须由自己负责关闭，
             # 否则会话对象和它持有的连接会一直留着（生产连接只增不减）。
@@ -40,12 +42,11 @@ class AuditService:
         try:
             # 获取用户名
             from modules.core.db import DimUser  # v4.12.0 SSOT迁移
-            result = await db.execute(
-                select(DimUser).where(DimUser.user_id == user_id)
-            )
+
+            result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))
             user = result.scalar_one_or_none()
             username = user.username if user else "unknown"
-            
+
             # 创建审计日志记录
             changes_json = None
             if details:
@@ -71,12 +72,12 @@ class AuditService:
                 ip_address=ip_address,
                 user_agent=user_agent,
                 is_success=True,
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
-            
+
             db.add(audit_log)
             await db.commit()
-            
+
         except Exception as e:
             # 审计日志记录失败不应该影响主业务
             print(f"Audit log failed: {e}")
@@ -96,11 +97,11 @@ class AuditService:
         task_id: Optional[str],
         operation: str,
         details: Dict[str, Any],
-        db: AsyncSession = None
+        db: AsyncSession = None,
     ) -> None:
         """
         记录数据同步操作日志(复用FactAuditLog表,异步模式)
-        
+
         Args:
             user_id: 用户ID(可选,系统操作时为None)
             file_id: 文件ID
@@ -112,13 +113,14 @@ class AuditService:
         owns_session = False
         if db is None:
             from backend.models.database import AsyncSessionLocal
+
             db = AsyncSessionLocal()
             # [*] 2026-11-09：自建会话由自己负责关闭（见 log_action 同名注释）
             owns_session = True
 
         try:
             from modules.core.db import DimUser
-            
+
             # 获取用户名
             username = "system"
             if user_id:
@@ -127,14 +129,7 @@ class AuditService:
                 )
                 user = result.scalar_one_or_none()
                 username = user.username if user else "unknown"
-            
-            # 构建操作详情
-            operation_details = {
-                **details,
-                "task_id": task_id,
-                "file_id": file_id,
-            }
-            
+
             # 创建审计日志记录
             audit_log = FactAuditLog(
                 user_id=user_id or 0,  # 系统操作时使用0
@@ -147,13 +142,17 @@ class AuditService:
                 ip_address="system",
                 user_agent="data_sync_service",
                 is_success=operation not in ("sync_failed", "sync_error"),
-                error_message=details.get("error") if operation in ("sync_failed", "sync_error") else None,
-                created_at=datetime.now(timezone.utc)
+                error_message=(
+                    details.get("error")
+                    if operation in ("sync_failed", "sync_error")
+                    else None
+                ),
+                created_at=datetime.now(timezone.utc),
             )
-            
+
             db.add(audit_log)
             await db.commit()
-            
+
         except Exception as e:
             # 审计日志记录失败不应该影响主业务
             print(f"Audit log failed: {e}")
@@ -174,11 +173,11 @@ class AuditService:
         action: str,
         before: Optional[Dict[str, Any]] = None,
         after: Optional[Dict[str, Any]] = None,
-        db: AsyncSession = None
+        db: AsyncSession = None,
     ) -> None:
         """
         记录数据变更历史(使用changes_json字段,异步模式)
-        
+
         Args:
             user_id: 用户ID(可选)
             resource_type: 资源类型(order/product/inventory等)
@@ -191,6 +190,7 @@ class AuditService:
         owns_session = False
         if db is None:
             from backend.models.database import AsyncSessionLocal
+
             db = AsyncSessionLocal()
             # [*] 2026-11-09：自建会话由自己负责关闭（见 log_action 同名注释）
             owns_session = True
@@ -198,7 +198,7 @@ class AuditService:
         try:
             import json
             from modules.core.db import DimUser
-            
+
             # 获取用户名
             username = "system"
             if user_id:
@@ -207,7 +207,7 @@ class AuditService:
                 )
                 user = result.scalar_one_or_none()
                 username = user.username if user else "unknown"
-            
+
             # 构建变更详情(JSON格式)
             changes_data = {
                 "before": before,
@@ -215,7 +215,7 @@ class AuditService:
                 "action": action,
             }
             changes_json = json.dumps(changes_data, ensure_ascii=False, default=str)
-            
+
             # 创建审计日志记录
             audit_log = FactAuditLog(
                 user_id=user_id or 0,
@@ -228,12 +228,12 @@ class AuditService:
                 ip_address="system",
                 user_agent="data_sync_service",
                 is_success=True,
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
-            
+
             db.add(audit_log)
             await db.commit()
-            
+
         except Exception as e:
             # 审计日志记录失败不应该影响主业务
             print(f"Audit log failed: {e}")
@@ -246,5 +246,7 @@ class AuditService:
                     pass  # 收尾失败不影响主业务
 
     # v4.12.0新增:获取数据同步审计追溯
+
+
 # 全局审计服务实例
 audit_service = AuditService()

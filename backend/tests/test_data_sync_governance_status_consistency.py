@@ -125,7 +125,9 @@ async def data_sync_client(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "backend.services.excel_parser.ExcelParser.read_excel",
-        staticmethod(lambda *_args, **_kwargs: pd.DataFrame(columns=["订单编号", "金额"])),
+        staticmethod(
+            lambda *_args, **_kwargs: pd.DataFrame(columns=["订单编号", "金额"])
+        ),
     )
     monkeypatch.setattr(
         "backend.services.data_sync_template_status_service.DataSyncTemplateStatusService.evaluate_catalog_file",
@@ -143,7 +145,9 @@ async def data_sync_client(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_file_list_and_governance_share_alias_only_and_update_required_status(data_sync_client):
+async def test_file_list_and_governance_share_alias_only_and_update_required_status(
+    data_sync_client,
+):
     client, session_factory, tmp_path = data_sync_client
     now = datetime.now(timezone.utc)
 
@@ -211,12 +215,16 @@ async def test_file_list_and_governance_share_alias_only_and_update_required_sta
         )
         await session.commit()
 
-    file_response = await client.get("/api/data-sync/files", params={"status": "pending"})
+    file_response = await client.get(
+        "/api/data-sync/files", params={"status": "pending"}
+    )
     assert file_response.status_code == 200
     file_payload = file_response.json()["data"]["files"]
     by_name = {row["file_name"]: row for row in file_payload}
     assert by_name["tiktok_orders_alias.xlsx"]["template_status"] == "alias_only"
-    assert by_name["tiktok_orders_alias.xlsx"]["governance_status"] == "non_breaking_drift"
+    assert (
+        by_name["tiktok_orders_alias.xlsx"]["governance_status"] == "non_breaking_drift"
+    )
     assert by_name["tiktok_orders_alias.xlsx"]["template_update_required"] is False
     assert by_name["tiktok_orders_drift.xlsx"]["template_status"] == "update_required"
     assert by_name["tiktok_orders_drift.xlsx"]["governance_status"] == "breaking_drift"
@@ -230,9 +238,17 @@ async def test_file_list_and_governance_share_alias_only_and_update_required_sta
     assert coverage["summary"]["breaking_drift_count"] == 1
     assert coverage["summary"]["non_breaking_drift_count"] == 1
     assert len(coverage["current_needs_update"]) == 1
-    assert coverage["current_needs_update"][0]["sample_file_name"] == "tiktok_orders_drift.xlsx"
-    assert all(item["governance_status"] != "breaking_drift" for item in coverage["current_covered"])
-    assert {item["sample_file_name"] for item in coverage["current_covered"]} == {"tiktok_orders_alias.xlsx"}
+    assert (
+        coverage["current_needs_update"][0]["sample_file_name"]
+        == "tiktok_orders_drift.xlsx"
+    )
+    assert all(
+        item["governance_status"] != "breaking_drift"
+        for item in coverage["current_covered"]
+    )
+    assert {item["sample_file_name"] for item in coverage["current_covered"]} == {
+        "tiktok_orders_alias.xlsx"
+    }
 
 
 @pytest.mark.asyncio
@@ -281,7 +297,10 @@ async def test_governance_detailed_coverage_includes_failed_header_changed_files
     assert response.status_code == 200
     coverage = response.json()["data"]
     assert coverage["summary"]["needs_update_count"] == 1
-    assert coverage["needs_update"][0]["sample_file_name"] == "tiktok_orders_drift_failed.xlsx"
+    assert (
+        coverage["needs_update"][0]["sample_file_name"]
+        == "tiktok_orders_drift_failed.xlsx"
+    )
 
 
 @pytest.mark.asyncio
@@ -355,4 +374,6 @@ async def test_governance_detailed_coverage_skips_temp_development_sample_files(
 
     assert response.status_code == 200
     coverage = response.json()["data"]
-    assert coverage["covered"][0]["sample_file_name"] == "shopee_products_daily_real.xlsx"
+    assert (
+        coverage["covered"][0]["sample_file_name"] == "shopee_products_daily_real.xlsx"
+    )

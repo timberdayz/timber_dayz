@@ -44,7 +44,15 @@ TOKEN_READ_PATTERNS = [
     (re.compile(r"""headers\[\s*["']Authorization["']"""), "Authorization header"),
 ]
 
-SKIP_DIR_NAMES = {"__pycache__", ".git", "node_modules", ".venv", "venv", "dist", "build"}
+SKIP_DIR_NAMES = {
+    "__pycache__",
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+}
 TEST_DIR_NAMES = {"tests", "test"}
 
 

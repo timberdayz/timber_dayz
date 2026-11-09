@@ -1109,9 +1109,7 @@ async def ingest_file(
 
         # [*] 2026-11-09: 订单正式账本未落库时，消息必须说清楚，不能只说「入库成功」
         if not orders_fact_imported:
-            message = (
-                f"暂存完成({staged}条),但订单正式账本未落库。{orders_fact_note}"
-            )
+            message = f"暂存完成({staged}条),但订单正式账本未落库。{orders_fact_note}"
 
         mapped_rows = all_rows
 

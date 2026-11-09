@@ -135,7 +135,9 @@ class AnalyticsSmokeProbe(ShopeeAnalyticsExport):
         return diagnostics
 
 
-async def wait_for_environment_ready(page: Any, *, timeout_ms: int = 30000, poll_ms: int = 1000) -> dict[str, Any]:
+async def wait_for_environment_ready(
+    page: Any, *, timeout_ms: int = 30000, poll_ms: int = 1000
+) -> dict[str, Any]:
     elapsed = 0
     samples: list[dict[str, Any]] = []
 
@@ -150,7 +152,9 @@ async def wait_for_environment_ready(page: Any, *, timeout_ms: int = 30000, poll
         except Exception:
             body_text = ""
 
-        state = classify_environment_state(url=url, title=title, body_text=body_text or "")
+        state = classify_environment_state(
+            url=url, title=title, body_text=body_text or ""
+        )
         samples.append(
             {
                 "elapsed_ms": elapsed,
@@ -185,7 +189,9 @@ async def wait_for_environment_ready(page: Any, *, timeout_ms: int = 30000, poll
     except Exception:
         body_text = ""
 
-    final_state = classify_environment_state(url=url, title=title, body_text=body_text or "")
+    final_state = classify_environment_state(
+        url=url, title=title, body_text=body_text or ""
+    )
     if final_state == "unknown":
         final_state = "loading_blocked"
 
@@ -200,7 +206,9 @@ async def wait_for_environment_ready(page: Any, *, timeout_ms: int = 30000, poll
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run Shopee analytics date picker smoke probe")
+    parser = argparse.ArgumentParser(
+        description="Run Shopee analytics date picker smoke probe"
+    )
     parser.add_argument(
         "--profile-dir",
         default=str(Path("output/playwright/profiles/shopee")),
@@ -229,7 +237,9 @@ async def _run(args: argparse.Namespace) -> int:
     profile_dir = Path(args.profile_dir).resolve()
     work_dir = Path(args.work_dir).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
-    storage_state_path = Path(args.storage_state).resolve() if args.storage_state else None
+    storage_state_path = (
+        Path(args.storage_state).resolve() if args.storage_state else None
+    )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     screenshot_before = work_dir / f"{timestamp}-before-open.png"
@@ -245,7 +255,9 @@ async def _run(args: argparse.Namespace) -> int:
             "ok": False,
             "error": f"profile dir not found: {profile_dir}",
         }
-        result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        result_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         logger.error(payload["error"])
         return 2
 
@@ -286,7 +298,11 @@ async def _run(args: argparse.Namespace) -> int:
                 payload["session_mode"] = "persistent_profile"
 
             page = context.pages[0] if context.pages else await context.new_page()
-            await page.goto("https://seller.shopee.cn/datacenter/traffic/overview", wait_until="domcontentloaded", timeout=60000)
+            await page.goto(
+                "https://seller.shopee.cn/datacenter/traffic/overview",
+                wait_until="domcontentloaded",
+                timeout=60000,
+            )
             environment = await wait_for_environment_ready(page)
             payload["environment"] = environment
             await page.screenshot(path=str(screenshot_before), full_page=False)
@@ -296,8 +312,13 @@ async def _run(args: argparse.Namespace) -> int:
                 payload["environment_failure"] = True
                 payload["failure_kind"] = environment["final_state"]
                 await page.screenshot(path=str(screenshot_after), full_page=False)
-                result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-                logger.warning("analytics smoke stopped before component probe: %s", environment["final_state"])
+                result_path.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                logger.warning(
+                    "analytics smoke stopped before component probe: %s",
+                    environment["final_state"],
+                )
                 logger.info("result_path=%s", result_path)
                 return 1
 
@@ -315,15 +336,21 @@ async def _run(args: argparse.Namespace) -> int:
 
             await page.screenshot(path=str(screenshot_after), full_page=False)
 
-            payload["ok"] = bool(diagnostics.get("trigger_found") and diagnostics.get("panel_found"))
-            result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            payload["ok"] = bool(
+                diagnostics.get("trigger_found") and diagnostics.get("panel_found")
+            )
+            result_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             logger.info("analytics smoke completed ok=%s", payload["ok"])
             logger.info("result_path=%s", result_path)
             return 0 if payload["ok"] else 1
         except Exception as exc:  # noqa: BLE001
             payload["ok"] = False
             payload["error"] = str(exc)
-            result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            result_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             logger.error("analytics smoke failed: %s", exc)
             logger.info("result_path=%s", result_path)
             return 2

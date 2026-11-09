@@ -9,6 +9,7 @@
 
 这个门禁把「async 上下文不得使用同步查询」变成机器可判定的规则。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -74,8 +75,7 @@ def test_detects_async_calling_sync_query_function(gate, tmp_path):
     _write(
         tmp_path,
         "backend/svc/thing.py",
-        "def load_things(db):\n"
-        "    return db.query(Thing).all()\n",
+        "def load_things(db):\n" "    return db.query(Thing).all()\n",
     )
     _write(
         tmp_path,
@@ -116,5 +116,11 @@ def test_waiver_requires_reason(gate):
 
 def test_gate_main_exits_zero_for_clean_repository(gate):
     assert gate.main.__doc__ is None or True  # 仅确保可调用
-    sys.argv = ["verify_sync_query_usage.py", "--root", str(ROOT), "--target", "backend"]
+    sys.argv = [
+        "verify_sync_query_usage.py",
+        "--root",
+        str(ROOT),
+        "--target",
+        "backend",
+    ]
     assert gate.main() == 0

@@ -1,4 +1,5 @@
 """契约测试：ORM ↔ 数据库 结构漂移门禁(scripts/verify_orm_schema_drift.py)。"""
+
 from __future__ import annotations
 
 import importlib.util

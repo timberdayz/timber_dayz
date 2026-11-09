@@ -244,9 +244,7 @@ class EventListener:
                 # asyncpg 连接池。否则连接会滞留在数据库服务端白占槽位
                 # (生产实测 80/80 打满,业务随机 500)。
                 # 仓库里所有「同步上下文 + 异步任务」的入口都走这个出口。
-                run_async_task(
-                    lambda: enqueue_refresh_for_data_ingested_event(event)
-                )
+                run_async_task(lambda: enqueue_refresh_for_data_ingested_event(event))
             else:
                 # 有事件循环时只能尽力而为:调用方若是 asyncio.run(...),
                 # 收尾时未完成的 task 会被取消。生产路径请走 handle_data_ingested_async。

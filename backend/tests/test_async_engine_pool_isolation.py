@@ -16,6 +16,7 @@
 
 * **自建会话必须自己关闭** —— 漏关一条会话就是漏一条数据库连接。
 """
+
 from __future__ import annotations
 
 import asyncio

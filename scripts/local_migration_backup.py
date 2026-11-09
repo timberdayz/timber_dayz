@@ -429,7 +429,9 @@ def _load_state_file(path: Path) -> BackupState:
         # utf-8-sig：带 BOM 的状态文件也能读（Windows 上重定向写出的文件常常带 BOM）。
         data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, TypeError, ValueError) as exc:
-        raise BackupValidationError("migration backup state file is unreadable") from exc
+        raise BackupValidationError(
+            "migration backup state file is unreadable"
+        ) from exc
     if not isinstance(data, dict):
         raise BackupValidationError("migration backup state file is invalid")
     return BackupState(
@@ -581,9 +583,7 @@ def main(argv: list[str] | None = None) -> int:
         return _create_backup(args)
 
     if args.verify_metadata is None:
-        parser.error(
-            "one of --create, --print-state or --verify-metadata is required"
-        )
+        parser.error("one of --create, --print-state or --verify-metadata is required")
     try:
         metadata = json.loads(args.verify_metadata.read_text(encoding="utf-8"))
         archive = Path(metadata["backup_path"])

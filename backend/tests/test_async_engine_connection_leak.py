@@ -23,6 +23,7 @@ celery 每个 task 新建循环）。循环 A 建立的连接被循环 B checkou
 配套的 ``test_leak_detector_can_see_the_old_behaviour`` 会把旧实现原样搬进
 独立子进程跑一遍，确认这个探测器**确实有牙齿**。
 """
+
 from __future__ import annotations
 
 import asyncio

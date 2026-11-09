@@ -12,6 +12,7 @@
 本测试直接驱动迁移代码（用假的 ``op`` 绑到真实连接上），
 在独立临时库里跑一遍「降级 → 升级」往返，确保这条路径真的可逆。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -179,10 +180,7 @@ def test_merge_refuses_mismatched_column_types(replica_db):
 
         # 人为制造类型不一致：把来源列建成 TEXT
         conn.execute(
-            text(
-                'ALTER TABLE a_class.attendance_records '
-                'ADD COLUMN "工作时长" TEXT'
-            )
+            text("ALTER TABLE a_class.attendance_records " 'ADD COLUMN "工作时长" TEXT')
         )
 
         with pytest.raises(RuntimeError, match="类型不一致"):
@@ -197,12 +195,15 @@ def test_restore_column_ddl_matches_original_types():
         migration.RESTORE_COLUMN_DDL[("a_class.attendance_records", "工作时长")]
         == "double precision"
     )
-    assert "character varying(32)" in migration.RESTORE_COLUMN_DDL[
-        ("a_class.attendance_records", "状态")
-    ]
-    assert "timestamp with time zone" in migration.RESTORE_COLUMN_DDL[
-        ("core.data_files", "discovery_time")
-    ]
-    assert "character varying(50)" in migration.RESTORE_DROP_ONLY_DDL[
-        ("core.data_files", "status")
-    ]
+    assert (
+        "character varying(32)"
+        in migration.RESTORE_COLUMN_DDL[("a_class.attendance_records", "状态")]
+    )
+    assert (
+        "timestamp with time zone"
+        in migration.RESTORE_COLUMN_DDL[("core.data_files", "discovery_time")]
+    )
+    assert (
+        "character varying(50)"
+        in migration.RESTORE_DROP_ONLY_DDL[("core.data_files", "status")]
+    )

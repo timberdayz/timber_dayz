@@ -16,6 +16,7 @@
 1. ``upsert_orders`` **绝不返回 None**（不能再让调用方炸 TypeError）；
 2. 未落正式账本时，结果里必须带着 ``fact_imported=False`` 和原因说明。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -54,7 +55,9 @@ def test_upsert_orders_never_returns_none():
 
     result = _upsert_orders(rows)
 
-    assert result is not None, "upsert_orders 绝不能返回 None（旧实现会让调用方 TypeError）"
+    assert (
+        result is not None
+    ), "upsert_orders 绝不能返回 None（旧实现会让调用方 TypeError）"
     assert isinstance(result, int)
 
 
@@ -115,6 +118,6 @@ def test_callers_surface_the_status():
     ]
     for rel in targets:
         source = (ROOT / rel).read_text(encoding="utf-8-sig")
-        assert "orders_fact_imported" in source, (
-            f"{rel} 必须把 orders_fact_imported 透出到响应/结果里"
-        )
+        assert (
+            "orders_fact_imported" in source
+        ), f"{rel} 必须把 orders_fact_imported 透出到响应/结果里"

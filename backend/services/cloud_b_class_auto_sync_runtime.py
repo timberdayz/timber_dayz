@@ -105,7 +105,11 @@ class CloudBClassAutoSyncRuntime:
             return
         result = recover(self.worker_id)
         if isinstance(result, dict):
-            recovered_count = int(result.get("recovered_current_scope_count") or result.get("recovered_count") or 0)
+            recovered_count = int(
+                result.get("recovered_current_scope_count")
+                or result.get("recovered_count")
+                or 0
+            )
             if recovered_count > 0:
                 self._status = "degraded"
                 self._last_recovered_count = recovered_count

@@ -4,12 +4,27 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_ROOT = PROJECT_ROOT / "frontend"
-COLLECTION_CONFIG_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/collection/CollectionConfig.vue"
-COLLECTION_TASKS_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/collection/CollectionTasks.vue"
-COLLECTION_HISTORY_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/collection/CollectionHistory.vue"
-COMPONENT_RECORDER_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/ComponentRecorder.vue"
-COMPONENT_VERSIONS_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/ComponentVersions.vue"
-ACCOUNT_MANAGEMENT_VIEW = PROJECT_ROOT / "frontend/src/domains/platform/views/AccountManagement.vue"
+COLLECTION_CONFIG_VIEW = (
+    PROJECT_ROOT
+    / "frontend/src/domains/collection/views/collection/CollectionConfig.vue"
+)
+COLLECTION_TASKS_VIEW = (
+    PROJECT_ROOT
+    / "frontend/src/domains/collection/views/collection/CollectionTasks.vue"
+)
+COLLECTION_HISTORY_VIEW = (
+    PROJECT_ROOT
+    / "frontend/src/domains/collection/views/collection/CollectionHistory.vue"
+)
+COMPONENT_RECORDER_VIEW = (
+    PROJECT_ROOT / "frontend/src/domains/collection/views/ComponentRecorder.vue"
+)
+COMPONENT_VERSIONS_VIEW = (
+    PROJECT_ROOT / "frontend/src/domains/collection/views/ComponentVersions.vue"
+)
+ACCOUNT_MANAGEMENT_VIEW = (
+    PROJECT_ROOT / "frontend/src/domains/platform/views/AccountManagement.vue"
+)
 VSCODE_SETTINGS = PROJECT_ROOT / ".vscode/settings.json"
 EDITOR_CONFIG = PROJECT_ROOT / ".editorconfig"
 
@@ -58,13 +73,17 @@ def test_component_versions_page_states_stable_only_for_formal_collection():
 
 
 def test_frontend_lint_script_uses_existing_gitignore():
-    package_json = json.loads((FRONTEND_ROOT / "package.json").read_text(encoding="utf-8"))
+    package_json = json.loads(
+        (FRONTEND_ROOT / "package.json").read_text(encoding="utf-8")
+    )
 
     assert "--ignore-path ../.gitignore" in package_json["scripts"]["lint"]
 
 
 def test_frontend_eslint_patch_dependency_is_declared():
-    package_json = json.loads((FRONTEND_ROOT / "package.json").read_text(encoding="utf-8"))
+    package_json = json.loads(
+        (FRONTEND_ROOT / "package.json").read_text(encoding="utf-8")
+    )
 
     assert "@rushstack/eslint-patch" in package_json["devDependencies"]
 
@@ -155,7 +174,9 @@ def test_collection_config_run_uses_queue_run_feedback_not_task_id_redirect():
 
 def test_collection_config_exposes_cancel_action_for_active_runs():
     text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
-    api_text = (PROJECT_ROOT / "frontend/src/api/collection.js").read_text(encoding="utf-8")
+    api_text = (PROJECT_ROOT / "frontend/src/api/collection.js").read_text(
+        encoding="utf-8"
+    )
 
     assert "collectionApi.cancelConfigRun(run.run_id)" in text
     assert "run.can_cancel" in text
@@ -305,4 +326,4 @@ def test_account_management_does_not_offer_free_form_login_url_editing():
     text = ACCOUNT_MANAGEMENT_VIEW.read_text(encoding="utf-8")
 
     assert '<el-form-item label="登录URL">' not in text
-    assert 'v-model="accountForm.login_url"' not in text or 'disabled' in text
+    assert 'v-model="accountForm.login_url"' not in text or "disabled" in text

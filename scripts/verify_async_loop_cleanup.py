@@ -49,7 +49,15 @@ from typing import Iterable
 
 # 测试目录：不参与门禁
 TEST_DIR_NAMES = {"tests", "test", "testing"}
-SKIP_DIR_NAMES = {"__pycache__", ".git", "node_modules", ".venv", "venv", "dist", "build"}
+SKIP_DIR_NAMES = {
+    "__pycache__",
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+}
 
 #: 唯一允许出现裸 asyncio.run( 的文件（统一出口本身）
 RUNNER_FILE = "backend/utils/async_task_runner.py"
@@ -185,7 +193,9 @@ def _unclosed_session_hits(tree: ast.AST, rel: str) -> list[str]:
     return hits
 
 
-def _scan_file(path: Path, rel: str) -> tuple[list[str], list[str], list[str], list[str]]:
+def _scan_file(
+    path: Path, rel: str
+) -> tuple[list[str], list[str], list[str], list[str]]:
     """返回 (裸 asyncio.run 命中, dispose(close=False) 命中, reset 函数调用命中, 会话未关闭命中)。"""
     try:
         tree = ast.parse(path.read_text(encoding="utf-8-sig"))
@@ -215,7 +225,11 @@ def _scan_file(path: Path, rel: str) -> tuple[list[str], list[str], list[str], l
         # dispose(close=False)
         if _call_name(node) == "dispose":
             for kw in node.keywords:
-                if kw.arg == "close" and isinstance(kw.value, ast.Constant) and kw.value.value is False:
+                if (
+                    kw.arg == "close"
+                    and isinstance(kw.value, ast.Constant)
+                    and kw.value.value is False
+                ):
                     soft_dispose_hits.append(f"{rel}:{node.lineno}")
                     break
 

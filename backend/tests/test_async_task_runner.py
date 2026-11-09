@@ -13,6 +13,7 @@
 本模块把收尾收敛成唯一出口：``run_async_task`` 在**循环仍存活时**真正关闭
 连接池（``await async_engine.dispose()``，等价于 close=True）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -47,7 +48,9 @@ def test_closes_engine_after_task(monkeypatch):
     async def _fake_dispose():
         closed["count"] += 1
 
-    monkeypatch.setattr(database_module, "dispose_async_engine", _fake_dispose, raising=False)
+    monkeypatch.setattr(
+        database_module, "dispose_async_engine", _fake_dispose, raising=False
+    )
 
     async def _task():
         return "done"
@@ -65,7 +68,9 @@ def test_closes_engine_even_when_task_raises(monkeypatch):
     async def _fake_dispose():
         closed["count"] += 1
 
-    monkeypatch.setattr(database_module, "dispose_async_engine", _fake_dispose, raising=False)
+    monkeypatch.setattr(
+        database_module, "dispose_async_engine", _fake_dispose, raising=False
+    )
 
     async def _task():
         raise RuntimeError("boom")
@@ -83,7 +88,9 @@ def test_dispose_failure_is_surfaced(monkeypatch):
     async def _fake_dispose():
         raise RuntimeError("dispose failed")
 
-    monkeypatch.setattr(database_module, "dispose_async_engine", _fake_dispose, raising=False)
+    monkeypatch.setattr(
+        database_module, "dispose_async_engine", _fake_dispose, raising=False
+    )
 
     async def _task():
         return "done"
@@ -99,7 +106,9 @@ def test_dispose_failure_does_not_mask_task_error(monkeypatch):
     async def _fake_dispose():
         raise RuntimeError("dispose failed")
 
-    monkeypatch.setattr(database_module, "dispose_async_engine", _fake_dispose, raising=False)
+    monkeypatch.setattr(
+        database_module, "dispose_async_engine", _fake_dispose, raising=False
+    )
 
     async def _task():
         raise ValueError("original failure")
