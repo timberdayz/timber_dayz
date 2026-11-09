@@ -456,7 +456,6 @@ def test_operational_migration_entrypoints_delegate_to_the_fail_closed_wrapper()
     paths = [
         ROOT / "scripts" / "deploy_remote_production.sh",
         ROOT / "scripts" / "start_collection_formal.ps1",
-        ROOT / "scripts" / "validate_migrations_fresh_db.py",
         ROOT / "scripts" / "rehearsal_prod_snapshot.py",
         ROOT / "docker-compose.prod.yml",
         ROOT / "docker" / "scripts" / "backend-entrypoint.sh",
@@ -465,6 +464,19 @@ def test_operational_migration_entrypoints_delegate_to_the_fail_closed_wrapper()
     for path in paths:
         source = path.read_text(encoding="utf-8")
         assert "run_current_schema_migrations.py" in source, path
+
+    # ⚠ 2026-11-10: 临时库门禁的两段式流程被上提到共享实现
+    # (scripts/bootstrap_fresh_environment.py), 门禁脚本改为**调用**它。
+    # ⇒ 门禁不再自己出现 wrapper 的名字, 但必须仍然指向那条 fail-closed 链:
+    #   门禁 -> 共享两段式实现 -> run_current_schema_migrations.py
+    gate_source = (ROOT / "scripts" / "validate_migrations_fresh_db.py").read_text(
+        encoding="utf-8"
+    )
+    assert "bootstrap_fresh_environment" in gate_source
+    shared_source = (ROOT / "scripts" / "bootstrap_fresh_environment.py").read_text(
+        encoding="utf-8"
+    )
+    assert "run_current_schema_migrations.py" in shared_source
 
     deploy_source = paths[0].read_text(encoding="utf-8")
     assert "CURRENT_SCHEMA_SOURCE_REVISION" in deploy_source
@@ -606,6 +618,13 @@ def test_nonempty_migration_creates_verified_backup_and_rechecks_under_lock(monk
 
 
 def test_empty_database_does_not_attempt_backup_before_migration(monkeypatch):
+    """空库上: 不备份, 且**拒绝硬跑**迁移链(必须先做两段式引导)。
+
+    ⚠ 2026-11-10 起空库的写路径多了一道 fail-closed 守卫：
+    迁移 ``current_schema_20261116_add_tiktok_export_store_name_aliases``
+    要求 6 个 TikTok 出口账号已存在, 空库上必然失败 ⇒ 空库**不能**直接跑链。
+    原来的约定(空库不备份)依然成立, 并且现在还多了一条: 给出可执行的引导指引。
+    """
     state = MigrationState(True, None, None, None)
     monkeypatch.setattr(migration_runner, "probe_migration_state", lambda _: state)
     monkeypatch.setattr(migration_runner, "preflight_current_schema_migrations", lambda *_args, **_kwargs: "upgrade")
@@ -626,10 +645,18 @@ def test_empty_database_does_not_attempt_backup_before_migration(monkeypatch):
     monkeypatch.setattr(
         migration_runner.subprocess,
         "run",
-        lambda *_args, **_kwargs: type("Result", (), {"returncode": 0})(),
+        lambda *_args, **_kwargs: pytest.fail(
+            "empty database must not run the migration chain directly"
+        ),
     )
 
-    assert run_current_schema_migrations("postgresql://example", expected_source_revision=None, expected_source_fingerprint=None) == "upgrade"
+    with pytest.raises(migration_runner.MigrationSafetyError) as excinfo:
+        run_current_schema_migrations(
+            "postgresql://example",
+            expected_source_revision=None,
+            expected_source_fingerprint=None,
+        )
+    assert "bootstrap_fresh_environment.py" in str(excinfo.value)
 
 
 def test_schema_fingerprint_supports_postgresql_expression_indexes():

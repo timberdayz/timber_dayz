@@ -236,6 +236,11 @@ where breakdown_type = 'shop' and period_label is null;"
 > immutable (`current_migrations/versions/20260914_warehouse_platform_profit.py:3`)
 > and the trigger is the guard that keeps historical operation targets read-only.
 
+> **Not the same failure**: an upgrade that stops with `账号不存在: tiktok_*` (six
+> of them) is not this contract conflict — it means the database is **empty** and the
+> chain needs the bootstrap accounts before it can reach 20261116. See
+> `docs/guides/FRESH_ENVIRONMENT_BOOTSTRAP.md`.
+
 ### C7: Verify and Restart
 
 ```bash

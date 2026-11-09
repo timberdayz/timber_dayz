@@ -288,8 +288,13 @@ def rebuild_local_current_schema(
     backup_creator: Callable[..., dict[str, Any]] = create_and_verify_backup,
     backup_verifier: Callable[..., dict[str, Any]] = verify_backup_metadata,
     receipt_directory: Path = DEFAULT_RECEIPT_DIRECTORY,
+    bootstrap_manifest: str | None = None,
 ) -> dict[str, str]:
-    """Back up, rebuild, migrate, bootstrap, and receipt the fixed local target."""
+    """Back up, rebuild, migrate, bootstrap, and receipt the fixed local target.
+
+    ``bootstrap_manifest`` 给定时用运维清单里的**真实**账号值完成两段式引导；
+    不给则用占位值 profile（本地库本来就被清空，占位值只为让迁移链跑通）。
+    """
     if confirmation != CONFIRMATION_PHRASE:
         raise RebuildSafetyError("local rebuild requires the exact confirmation phrase")
     database, username = _validate_local_target(database_url)
@@ -357,11 +362,28 @@ def rebuild_local_current_schema(
     )
 
     environment = {**os.environ, "DATABASE_URL": database_url}
+    # ⚠ 空库上**不能**直接跑 current-schema 链：迁移 20261116 的 fail-closed 前置检查
+    # 要求 6 个 TikTok 出口账号已存在，空库上必然失败（实测：报 6 条「账号不存在」）。
+    # ⇒ 这里走**共享的两段式引导**（scripts/bootstrap_fresh_environment.py）：
+    #    先升到 20261116 的前一个节点 → 注入引导账号 → 再升到 head。
+    #
+    # 默认用**占位值** profile：本地重建本来就把库清空了，这里只是为了让链能跑通。
+    # 要用真实值就传 --bootstrap-manifest（推荐给长期使用的本地环境）。
+    bootstrap_command = [
+        sys.executable,
+        "scripts/bootstrap_fresh_environment.py",
+        "--database-url",
+        database_url,
+    ]
+    if bootstrap_manifest:
+        bootstrap_command += ["--manifest", bootstrap_manifest]
+    else:
+        bootstrap_command += ["--allow-gate-profile"]
     _run_checked_command(
-        [sys.executable, "scripts/run_current_schema_migrations.py"],
+        bootstrap_command,
         command_runner,
         environment=environment,
-        message="local rebuild current-schema migration failed",
+        message="local rebuild fresh-environment bootstrap failed",
     )
     _run_checked_command(
         [sys.executable, "scripts/bootstrap_postgresql_dashboard.py", "--module", "business_overview"],
@@ -414,6 +436,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url")
     parser.add_argument("--confirm", default="")
+    parser.add_argument(
+        "--bootstrap-manifest",
+        default="",
+        help=(
+            "两段式引导用的运维清单（JSON）；不给则用占位值 profile。"
+            "模板：python scripts/bootstrap_fresh_environment.py --print-template"
+        ),
+    )
     args = parser.parse_args(argv)
     if load_project_env is not None:
         load_project_env(ROOT, profile="collection", override=True)
@@ -422,7 +452,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(READ_ONLY_PLAN, ensure_ascii=True, sort_keys=True))
     try:
         result = rebuild_local_current_schema(
-            (database_url or "").strip(), confirmation=args.confirm
+            (database_url or "").strip(),
+            confirmation=args.confirm,
+            bootstrap_manifest=(args.bootstrap_manifest or "").strip() or None,
         )
     except (RebuildSafetyError, BackupValidationError) as exc:
         print(f"[FAIL] local rebuild refused: {exc}", file=sys.stderr)

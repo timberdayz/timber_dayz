@@ -149,7 +149,7 @@ def test_rebuild_cli_loads_collection_environment_before_resolving_database_url(
     monkeypatch.setattr(
         rebuild,
         "rebuild_local_current_schema",
-        lambda database_url, *, confirmation: captured.update(
+        lambda database_url, *, confirmation, **_kwargs: captured.update(
             database_url=database_url, confirmation=confirmation
         )
         or {"database": "xihong_erp"},

@@ -88,15 +88,31 @@ def test_gate_precheck_target_is_the_revision_right_before_the_data_migration():
 
 
 def test_gate_script_runs_seed_injection_between_the_two_migration_phases():
-    """门禁脚本必须**先跑第一段 → 再注入种子 → 再跑第二段**。"""
-    script_text = (REPO_ROOT / "scripts" / "validate_migrations_fresh_db.py").read_text(
+    """门禁必须**先跑第一段 → 再注入种子 → 再跑第二段**。
+
+    ⚠ 2026-11-10 起, 这段两段式流程被**上提**到共享实现
+    ``scripts/bootstrap_fresh_environment.py::run_two_phase_bootstrap``
+    （真实新环境入口、临时库门禁、本地重建三处共用同一份实现）。
+    ⇒ 顺序的守护点也从门禁脚本迁到共享实现上, 门禁脚本只负责**调用**它 ——
+    避免「三处各写一份两段式流程」再次漂移。
+    """
+    gate_text = (REPO_ROOT / "scripts" / "validate_migrations_fresh_db.py").read_text(
         encoding="utf-8"
     )
+    assert (
+        "run_two_phase_bootstrap(" in gate_text
+    ), "门禁脚本必须调用共享的两段式引导实现, 不能自己再写一份"
 
-    first_run = script_text.index("PRECHECK_TARGET_REVISION,")
-    seed_call = script_text.index("seed_migration_gate_accounts(database_url)")
-    second_run = script_text.index("run_current_schema_migrations.py")
+    shared_text = (REPO_ROOT / "scripts" / "bootstrap_fresh_environment.py").read_text(
+        encoding="utf-8"
+    )
+    # 只在实现函数体内定位 —— 文件顶部的 import 行不算步骤。
+    body = shared_text[shared_text.index("def run_two_phase_bootstrap(") :]
+
+    first_run = body.index("PRECHECK_TARGET_REVISION,")
+    seed_call = body.index("apply_bootstrap_accounts(")
+    second_run = body.index("run_current_schema_migrations.py")
 
     assert (
         first_run < seed_call < second_run
-    ), "门禁脚本的顺序必须是: 第一段迁移 -> 注入种子 -> 第二段迁移"
+    ), "两段式引导的顺序必须是: 第一段迁移 -> 注入种子 -> 第二段迁移"

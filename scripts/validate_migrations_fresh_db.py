@@ -24,9 +24,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from scripts.migration_gate_seed_data import (  # noqa: E402
-    seed_migration_gate_accounts,
-    verify_seed_accounts,
+from scripts.bootstrap_fresh_environment import (  # noqa: E402
+    PRECHECK_TARGET_REVISION,
+    run_two_phase_bootstrap,
+)
+from scripts.bootstrap_seed_manifest import (  # noqa: E402
+    build_gate_rows,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -42,6 +45,11 @@ IMAGE = "postgres:15"
 TEMP_CONTAINER_NAME = "xihong_freshdb_migration_gate"
 
 #: 第一段迁移的目标节点 —— 20261116 的**前一个**节点。
+#:
+#: ⚠ 取值来自 ``scripts/bootstrap_fresh_environment.py``（那里是**唯一实现**，
+#: 真实新环境的引导入口与本门禁共用同一段两段式流程）；本模块通过上面的 import
+#: **再导出**它，保持 ``validate_migrations_fresh_db.PRECHECK_TARGET_REVISION``
+#: 这个既有入口不变（守护用例直接读这个名字）。
 #:
 #: 为什么要在中间停一次
 #: ----------------------
@@ -59,7 +67,6 @@ TEMP_CONTAINER_NAME = "xihong_freshdb_migration_gate"
 #: ⚠ **不采用**「改 20261116 让它在空库上 no-op」这条路:
 #: 已执行过的迁移不可改; 而且那样会把「全新部署的环境里 TikTok 导出别名不存在」
 #: 这个**真实部署缺陷**悄悄掩掉。
-PRECHECK_TARGET_REVISION = "current_schema_20261115_add_sku_platform_pricing"
 
 DATA_SYNC_CRITICAL_COLUMNS: dict[str, set[str]] = {
     "core.data_quarantine": {"catalog_file_id"},
@@ -283,61 +290,28 @@ def main() -> int:
         safe_print("[OK] Postgres 就绪")
 
         database_url = f"postgresql://{PG_USER}:{PG_PASSWORD}@127.0.0.1:{port}/{PG_DB}"
-        # ── 第一段: 跑到 20261116 的前一个节点 ────────────────────────
-        safe_print(
-            "[INFO] 第一段迁移(跑到 {rev})...".format(rev=PRECHECK_TARGET_REVISION)
-        )
-        code, out = run(
-            [
-                sys.executable,
-                "-m",
-                "alembic",
-                "-c",
-                "alembic-current.ini",
-                "upgrade",
-                PRECHECK_TARGET_REVISION,
-            ],
-            cwd=PROJECT_ROOT,
-            env={"DATABASE_URL": database_url},
-            timeout=300,
-        )
-        if code != 0:
-            safe_print("[FAIL] 第一段迁移失败")
-            safe_print(out[-3000:] if len(out) > 3000 else out)
-            return 1
-        safe_print("[OK] 第一段迁移成功")
-
-        # ── 注入最小前置数据(让 20261116 的 fail-closed 检查有意义)──────
-        safe_print("[INFO] 注入迁移门禁用的最小前置账号数据...")
+        # ── 两段式引导（共享实现，见 scripts/bootstrap_fresh_environment.py）──
+        # 第一段: 跑到 20261116 的前一个节点 → 注入最小前置数据 → 第二段: 跑到 head
+        # ⚠ 本门禁用**占位值** profile；真实新环境必须走
+        #   scripts/bootstrap_fresh_environment.py --manifest <清单.json>
+        main_row, shop_rows = build_gate_rows()
         try:
-            inserted = seed_migration_gate_accounts(database_url)
+            summary = run_two_phase_bootstrap(
+                database_url,
+                main_row=main_row,
+                shop_rows=shop_rows,
+                project_root=PROJECT_ROOT,
+                log=safe_print,
+            )
         except Exception as exc:  # noqa: BLE001 —— 失败必须说清楚是哪一步
-            safe_print("[FAIL] 注入前置账号数据失败: {exc}".format(exc=exc))
+            safe_print("[FAIL] 两段式迁移失败")
+            safe_print(str(exc))
             return 1
-        seed_problems = verify_seed_accounts(database_url)
-        if seed_problems:
-            safe_print("[FAIL] 前置账号数据校验未通过")
-            for problem in seed_problems:
-                safe_print("  - {problem}".format(problem=problem))
-            return 1
-        safe_print("[OK] 前置账号数据就位(本次新增 {n} 行)".format(n=inserted))
-
-        # ── 第二段: 跑到 head ─────────────────────────────────────────
-        safe_print("[INFO] 第二段迁移(跑到 head)...")
-        code, out = run(
-            [
-                sys.executable,
-                str(PROJECT_ROOT / "scripts" / "run_current_schema_migrations.py"),
-            ],
-            cwd=PROJECT_ROOT,
-            env={"DATABASE_URL": database_url},
-            timeout=300,
+        safe_print(
+            "[OK] 两段式迁移完成（引导账号 {n} 个，本次新增 {inserted} 行）".format(
+                n=summary["shop_accounts"], inserted=summary["inserted"]
+            )
         )
-        if code != 0:
-            safe_print("[FAIL] 迁移失败")
-            safe_print(out[-3000:] if len(out) > 3000 else out)
-            return 1
-        safe_print("[OK] 迁移成功")
         missing_columns = verify_data_sync_critical_columns(database_url)
         if missing_columns:
             safe_print("[FAIL] 迁移后数据同步关键列缺失")

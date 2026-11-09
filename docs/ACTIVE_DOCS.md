@@ -24,6 +24,7 @@ Do not use full-repository search as the first step when one of these files cove
 - `docs/guides/COLLECTION_AUTHORING_RULES.md`: clean active collection authoring rules
 - `docs/guides/PWCLI_COMMAND_REFERENCE.md`: `pwcli`, `pwcap`, and evidence helper command reference
 - `docs/guides/PRE_LAUNCH_RULES.md`: launch-period change constraints
+- `docs/guides/FRESH_ENVIRONMENT_BOOTSTRAP.md`: fresh-environment bootstrap (empty database to head) path and account manifest
 - `docs/guides/RELEASE_CHECKLIST.md`: tag-driven production release checklist
 - `docs/guides/ENGINEERING_STATUS.md`: current engineering status and CI model
 - `docs/guides/BUSINESS_OVERVIEW_METRIC_LINEAGE.md`: Business Overview key-metric lineage and verification path

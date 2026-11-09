@@ -31,6 +31,13 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution on Windows.
         verify_backup_metadata,
     )
 
+try:
+    from scripts.bootstrap_seed_manifest import fresh_environment_bootstrap_message
+except ModuleNotFoundError:  # Direct `python scripts/...` execution on Windows.
+    from bootstrap_seed_manifest import (  # type: ignore[no-redef]
+        fresh_environment_bootstrap_message,
+    )
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CURRENT_VERSION_TABLE = "current_schema_alembic_version"
@@ -845,6 +852,30 @@ def preflight_current_schema_migrations(
     return action
 
 
+def _assert_not_fresh_empty_database(state: MigrationState) -> None:
+    """空库不能直接跑 current-schema 链 —— 必须先做两段式引导。
+
+    为什么要有这个守卫
+    ------------------
+    空库上 ``core.shop_accounts`` 是空的 ⇒ 迁移
+    ``current_schema_20261116_add_tiktok_export_store_name_aliases`` 的
+    fail-closed 前置检查必然失败 ⇒ 链在该步中止（实测报错是 6 条「账号不存在」）。
+    与其让操作员在 alembic 的报错里猜，不如在动库之前把**可执行的指引**给出来。
+
+    为什么不动 ``choose_migration_action``
+    ------------------------------------
+    空库 ⇒ ``upgrade`` 是**读路径**的既有契约（``tests/test_current_schema_migration_contract.py``
+    的 ``test_empty_database_uses_only_the_current_upgrade_path`` 守着它）。
+    本守卫只拦**写路径**：读路径继续如实报告「可以 upgrade」，写路径才拒绝硬跑。
+
+    ⚠ 已应用迁移不可变 ⇒ 唯一解是「先升到 20261116 的前一个节点 → 注入引导账号
+    → 再升到 head」，不是改迁移让它在空库上 no-op。
+    """
+    if not state.database_empty:
+        return
+    raise MigrationSafetyError(fresh_environment_bootstrap_message())
+
+
 def run_current_schema_migrations(
     database_url: str,
     *,
@@ -858,6 +889,7 @@ def run_current_schema_migrations(
         expected_source_fingerprint=expected_source_fingerprint,
     )
     state = probe_migration_state(database_url)
+    _assert_not_fresh_empty_database(state)
     backup_metadata: dict[str, Any] | None = None
     if not state.database_empty and os.getenv(LOCAL_BACKUP_GUARD_ENV) == "1":
         try:
@@ -875,6 +907,8 @@ def run_current_schema_migrations(
             expected_source_fingerprint=expected_source_fingerprint,
         )
         state = probe_migration_state(database_url)
+        # 拿到写锁后重新判定一次：写锁期间观察到的状态才是真正要写下去的状态。
+        _assert_not_fresh_empty_database(state)
         if backup_metadata is not None:
             try:
                 verify_backup_metadata(Path(backup_metadata["metadata_path"]), state)
