@@ -32,21 +32,17 @@ def test_process_refresh_queue_task_returns_skipped_when_queue_empty(monkeypatch
     )
     monkeypatch.setattr(
         task_module,
-        "reset_async_engine_pool_for_new_loop",
-        lambda: calls.append("reset"),
+        "run_async_task",
+        lambda factory: (calls.append("run"), original_asyncio_run(factory()))[1],
         raising=False,
-    )
-    monkeypatch.setattr(
-        task_module.asyncio,
-        "run",
-        lambda coro: (calls.append("run"), original_asyncio_run(coro))[1],
     )
 
     result = task_module.process_refresh_queue_task.run()
 
     assert result["status"] == "skipped"
     assert result["reason"] == "no_pending_refresh_queue_task"
-    assert calls[:2] == ["reset", "run"]
+    assert "run" in calls, "必须通过统一异步出口执行"
+    assert "reset" not in calls, "不再允许调用只软丢弃连接池的兜底函数"
 
 
 @pytest.mark.asyncio

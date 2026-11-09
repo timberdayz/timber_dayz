@@ -9,8 +9,8 @@ from sqlalchemy import text
 from backend.celery_app import celery_app
 from backend.models.database import (
     AsyncSessionLocal,
-    reset_async_engine_pool_for_new_loop,
 )
+from backend.utils.async_task_runner import run_async_task
 from backend.services.data_pipeline.inventory_age_refresh_service import (
     InventoryAgeRefreshService,
 )
@@ -484,8 +484,7 @@ async def _async_process_refresh_queue_task() -> dict:
     soft_time_limit=1500,
 )
 def process_refresh_queue_task(self):  # noqa: ANN201
-    reset_async_engine_pool_for_new_loop()
-    return asyncio.run(_async_process_refresh_queue_task())
+    return run_async_task(_async_process_refresh_queue_task)
 
 
 async def _reap_stale_dashboard_refresh_runs(
@@ -708,5 +707,4 @@ async def _async_dashboard_refresh_safety_net() -> dict:
     soft_time_limit=780,
 )
 def dashboard_refresh_safety_net(self):  # noqa: ANN201
-    reset_async_engine_pool_for_new_loop()
-    return asyncio.run(_async_dashboard_refresh_safety_net())
+    return run_async_task(_async_dashboard_refresh_safety_net)

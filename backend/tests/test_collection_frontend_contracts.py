@@ -193,14 +193,32 @@ def test_collection_config_source_has_no_known_mojibake_tokens():
 
 
 def test_utf8_editor_guardrails_are_declared():
-    editor_text = EDITOR_CONFIG.read_text(encoding="utf-8")
-    vscode_settings = json.loads(VSCODE_SETTINGS.read_text(encoding="utf-8"))
+    """UTF-8 护栏必须在**受版本管理**的文件里声明。
 
+    [*] 2026-11-09: 这个断言原先要求 ``.vscode/settings.json`` 存在, 但那个文件
+    被 ``.gitignore`` 排除(``.gitignore:109``), **从未进过版本库**
+    (基线 commit ``419b4436`` 里也没有) —— 于是任何干净 checkout 跑这个测试
+    都必然红, CI 也不例外。断言一个「本地才有的文件」等于断言「我本机装过
+    什么」, 不是仓库契约。
+
+    现在的口径:
+    * ``.editorconfig``(受版本管理) —— **必须**声明 charset / end_of_line /
+      insert_final_newline, 这是真正的仓库级护栏;
+    * ``.vscode/settings.json``(本地可选) —— **存在时**才校验它的
+      files.encoding / files.autoGuessEncoding, 缺失不算失败。
+    """
+    editor_text = EDITOR_CONFIG.read_text(encoding="utf-8")
+
+    # 仓库级护栏: .editorconfig 受版本管理, 必须齐备
     assert "charset = utf-8" in editor_text
     assert "end_of_line = lf" in editor_text
     assert "insert_final_newline = true" in editor_text
-    assert vscode_settings["files.encoding"] == "utf8"
-    assert vscode_settings["files.autoGuessEncoding"] is False
+
+    # 本地可选护栏: 存在才校验, 缺失(干净 checkout / CI)不算失败
+    if VSCODE_SETTINGS.exists():
+        vscode_settings = json.loads(VSCODE_SETTINGS.read_text(encoding="utf-8"))
+        assert vscode_settings["files.encoding"] == "utf8"
+        assert vscode_settings["files.autoGuessEncoding"] is False
 
 
 def test_collection_config_exposes_main_account_scoping_hooks():

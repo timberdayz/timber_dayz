@@ -16,6 +16,8 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 from loguru import logger
 from core.smart_proxy_router import get_smart_proxy_for_url
 
+from backend.utils.async_task_runner import run_async_task
+
 from ..utils.web_elements import SmartElementFinder, ElementType, ElementAction
 from ..utils.web_elements.element_strategies import get_strategy
 from ..utils.otp.verification_service import VerificationCodeService
@@ -565,7 +567,7 @@ def login_miaoshou_account(
             await login_manager.close()
     
     try:
-        return asyncio.run(_login())
+        return run_async_task(_login)
     except Exception as e:
         logger.error(f"同步登录接口失败: {e}")
         return False

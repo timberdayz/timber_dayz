@@ -16,7 +16,7 @@ from backend.celery_app import celery_app
 from typing import List
 import asyncio
 from modules.core.logger import get_logger
-from backend.models.database import reset_async_engine_pool_for_new_loop
+from backend.utils.async_task_runner import run_async_task
 
 logger = get_logger(__name__)
 
@@ -144,10 +144,9 @@ def sync_single_file_task(
             except Exception:
                 pass
     
-    # 在同步函数中运行异步代码
+    # 在同步函数中运行异步代码（统一异步出口：循环结束后真正关闭连接池）
     try:
-        reset_async_engine_pool_for_new_loop()
-        result = asyncio.run(_async_task())
+        result = run_async_task(_async_task)
         return result
     except Exception as exc:
         # [*] Phase 4.2: 任务异常时也要减少用户任务计数
@@ -155,8 +154,8 @@ def sync_single_file_task(
             try:
                 from backend.services.user_task_quota import get_user_task_quota_service
                 quota_service = get_user_task_quota_service()
-                # [*] 修复:在同步函数中使用 asyncio.run() 执行异步代码
-                asyncio.run(quota_service.decrement_user_task_count(user_id))
+                # [*] 修复:在同步函数中使用统一异步出口执行异步代码
+                run_async_task(lambda: quota_service.decrement_user_task_count(user_id))
             except Exception as quota_error:
                 logger.warning(f"[CeleryTask] 减少用户 {user_id} 任务计数失败: {quota_error}")
         
@@ -485,10 +484,9 @@ def sync_batch_task(
             except Exception:
                 pass
     
-    # 在同步函数中运行异步代码
+    # 在同步函数中运行异步代码（统一异步出口：循环结束后真正关闭连接池）
     try:
-        reset_async_engine_pool_for_new_loop()
-        result = asyncio.run(_async_task())
+        result = run_async_task(_async_task)
         return result
     except Exception as exc:
         # [*] Phase 4.2: 任务异常时也要减少用户任务计数
@@ -496,8 +494,8 @@ def sync_batch_task(
             try:
                 from backend.services.user_task_quota import get_user_task_quota_service
                 quota_service = get_user_task_quota_service()
-                # [*] 修复:在同步函数中使用 asyncio.run() 执行异步代码
-                asyncio.run(quota_service.decrement_user_task_count(user_id))
+                # [*] 修复:在同步函数中使用统一异步出口执行异步代码
+                run_async_task(lambda: quota_service.decrement_user_task_count(user_id))
             except Exception as quota_error:
                 logger.warning(f"[CeleryTask] 减少用户 {user_id} 任务计数失败: {quota_error}")
         # 记录错误

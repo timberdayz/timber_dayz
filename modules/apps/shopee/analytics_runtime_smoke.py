@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import os
 import sys
@@ -19,6 +18,7 @@ if _REPO_ROOT not in sys.path:
 
 from playwright.async_api import async_playwright
 
+from backend.utils.async_task_runner import run_async_task
 from modules.core.logger import get_logger
 from tools.test_component import ComponentTester
 from modules.apps.collection_center.python_component_adapter import create_adapter
@@ -181,7 +181,7 @@ async def _run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     args = _build_parser().parse_args()
-    return asyncio.run(_run(args))
+    return run_async_task(lambda: _run(args))
 
 
 if __name__ == "__main__":

@@ -16,6 +16,8 @@ from pathlib import Path
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 from loguru import logger
 
+from backend.utils.async_task_runner import run_async_task
+
 
 class BrowserEmailOTPClient:
     """浏览器邮箱OTP客户端"""
@@ -779,7 +781,7 @@ def run_browser_email_otp(config: Dict[str, Any], timeout_seconds: int = 120) ->
     
     # 运行异步函数
     try:
-        return asyncio.run(_run())
+        return run_async_task(_run)
     except Exception as e:
         logger.error(f"运行浏览器邮箱OTP失败: {e}")
         return None

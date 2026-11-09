@@ -848,6 +848,10 @@ async def ingest_file(
         staged = 0
         imported = 0
         amount_imported = 0
+        # [*] 2026-11-09: 订单正式账本是否真的落库（如实上报，不让「暂存成功、
+        # 正式账本为空」被当成整体成功）
+        orders_fact_imported = True
+        orders_fact_note = ""
 
         if valid_rows:
             try:
@@ -1018,6 +1022,9 @@ async def ingest_file(
                     db, valid_rows, ingest_task_id=task_id, file_id=file_id
                 )
                 imported = await upsert_orders(db, valid_rows, file_record=file_record)
+                orders_fact_imported = bool(getattr(imported, "fact_imported", True))
+                if not orders_fact_imported:
+                    orders_fact_note = getattr(imported, "note", "")
             elif domain == "inventory":
                 staged = await stage_inventory(
                     db, valid_rows, ingest_task_id=task_id, file_id=file_id
@@ -1058,26 +1065,22 @@ async def ingest_file(
                     platform_code=platform,
                     shop_id=file_record.shop_id or "unknown",
                 )
-            except (ImportError, Exception) as e:
-                error_type = type(e).__name__
-                if "OperationalError" in error_type or "ConnectionError" in error_type:
-                    logger.warning(
-                        f"[字段映射] Redis/Celery连接失败({error_type}),跳过图片提取任务"
-                    )
-                else:
-                    logger.warning(
-                        f"[字段映射] 图片提取任务调用失败({error_type}),跳过"
-                    )
-
+                # 只有派发成功才标记为「已启动」(失败时对外如实显示 skipped)
                 image_extraction_started = True
                 logger.info(f"[Ingest] 图片提取任务已提交: file_id={file_id}")
-
             except ImportError:
                 logger.warning(
                     "[Ingest] Celery未配置,图片提取任务跳过(同步模式下可手动调用)"
                 )
             except Exception as img_error:
-                logger.warning(f"[Ingest] 图片提取任务提交失败(继续): {img_error}")
+                # 捕获所有异常(包括Redis连接错误),不影响主流程
+                error_type = type(img_error).__name__
+                if "OperationalError" in error_type or "ConnectionError" in error_type:
+                    logger.warning(
+                        f"[字段映射] Redis/Celery连接失败({error_type}),跳过图片提取任务"
+                    )
+                else:
+                    logger.warning(f"[Ingest] 图片提取任务提交失败(继续): {img_error}")
 
         if imported == 0:
             all_zero = check_if_all_zero_data(valid_rows, domain, processed_mappings)
@@ -1104,12 +1107,21 @@ async def ingest_file(
         else:
             message = f"入库完成,成功导入{imported}条记录"
 
+        # [*] 2026-11-09: 订单正式账本未落库时，消息必须说清楚，不能只说「入库成功」
+        if not orders_fact_imported:
+            message = (
+                f"暂存完成({staged}条),但订单正式账本未落库。{orders_fact_note}"
+            )
+
         mapped_rows = all_rows
 
         data = {
             "message": message,
             "staged": staged,
             "imported": imported,
+            # [*] 2026-11-09: 如实上报「订单正式账本是否真的落库」
+            "orders_fact_imported": orders_fact_imported,
+            "orders_fact_note": orders_fact_note,
             "amount_imported": amount_imported,
             "quarantined": quarantined_count,
             "image_extraction": "processing" if image_extraction_started else "skipped",

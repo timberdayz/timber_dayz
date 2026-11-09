@@ -531,19 +531,68 @@ def _resolve_product_surrogate(db: Session, platform_code: str, product_id: str 
 async def upsert_orders(db: AsyncSession, rows: List[Dict[str, Any]], file_record: Optional[Any] = None) -> int:
     """
     批量UPSERT订单数据(v4.6.1修复 - 使用正确的字段)
-    
+
     修复说明:
     - FactOrder表只包含订单级别的字段,不包含product_id, sku, status等
     - 使用upsert_orders_v2函数,它使用_FACT_ORDER_CORE_FIELDS筛选字段
     - 其他字段(如product_id, sku等)会自动进入attributes JSON字段
-    
+
     [*] v4.6.1修复:传递file_record参数,用于获取platform_code
+
+    [*] 2026-11-09: 返回值是 :class:`OrdersImportResult`(int 子类)，
+    除「入库条数」外还显式携带 ``fact_imported``，调用方可据此如实上报
+    「正式账本是否真的落库」。
     """
     # [*] v4.6.1修复:使用v2版本,它使用正确的字段筛选逻辑
-    return upsert_orders_v2(db, rows, file_record=file_record)
+    # [*] 2026-11-09 修复:这里过去**没有 await**,于是 async 函数返回的是一个
+    # 「协程对象」而不是入库结果。调用方拿到后执行 `total_imported += imported`
+    # 会抛 TypeError('coroutine')，订单入库整条链路因此失败。
+    return await upsert_orders_v2(db, rows, file_record=file_record)
 
 
 # ========================= 新版入库(关键列+attributes兜底) =========================
+
+#: [*] 2026-11-09 订单正式账本导入尚未实现时的统一说明。
+#: 旧实现依赖的 FactOrder / FactOrderItem 表已在 v4.19.0 删除，
+#: 订单正式账本改为 b_class.fact_{platform}_orders_{granularity}，但那条写入路径
+#: 至今没有实现。历史上这里「打一行 warning 就跳过」，于是：
+#:   * 接口回「成功」，而正式账本一行都没有；
+#:   * 更糟的是那个跳过用的是 `return`，直接把整个函数变成返回 None，
+#:     调用方 `total_imported += imported` 抛 TypeError，最终被当成「文件处理失败」，
+#:     真相（一行都没进正式账本）被彻底掩盖。
+ORDERS_FACT_IMPORT_NOTE = (
+    "订单正式账本(b_class.fact_{platform}_orders_{granularity})导入尚未实现："
+    "旧实现依赖的 FactOrder 表已删除，本次仅完成暂存(staging)。"
+)
+
+
+class OrdersImportResult(int):
+    """订单入库结果。
+
+    它是 ``int`` 的子类，所以既保留原有「入库条数」的用法（可直接参与加减、
+    与数字比较），又额外携带两个**显式状态**：
+
+    * ``fact_imported``：本次是否真的把行写进了正式账本。
+    * ``note``：未落正式账本时的原因说明。
+
+    为什么需要它：整数 0 无法区分「没有可入库的行」和「有行但没落进正式账本」，
+    调用方只能把空账本当成成功——这正是「兜底即伪装」。
+    """
+
+    fact_imported: bool
+    note: str
+
+    def __new__(
+        cls,
+        value: int,
+        *,
+        fact_imported: bool,
+        note: str = "",
+    ) -> "OrdersImportResult":
+        obj = super().__new__(cls, value)
+        obj.fact_imported = fact_imported
+        obj.note = note
+        return obj
 
 _FACT_ORDER_CORE_FIELDS = {
     "platform_code",
@@ -599,10 +648,12 @@ async def upsert_orders_v2(db: AsyncSession, rows: List[Dict[str, Any]], file_re
     from datetime import datetime  # [*] v4.6.1修复:导入datetime
 
     if not rows:
-        return 0
+        # 没有可入库的行 ⇒ 没有欠账，fact_imported 为真
+        return OrdersImportResult(0, fact_imported=True)
 
     is_postgresql = 'postgresql' in str(db.bind.url)
     total = 0
+    fact_imported = True
     
     # [*] v4.6.1新增:初始化账号对齐服务(如果需要)
     alignment_service = None
@@ -857,9 +908,17 @@ async def upsert_orders_v2(db: AsyncSession, rows: List[Dict[str, Any]], file_re
 
         # [TODO] v4.19.0: 订单数据导入需要改为导入到 b_class.fact_{platform}_orders_{granularity}
         # 当前使用 FactOrder 表(已废弃),需要实现新的导入逻辑
-        # 暂时跳过订单导入,避免报错
-        logger.warning(f"[UpsertOrders] FactOrder 表已删除,订单数据应导入到 b_class.fact_{core.get('platform_code', 'unknown')}_orders_daily,当前跳过导入: order_id={core.get('order_id')}")
-        return
+        # [*] 2026-11-09 修复:旧代码在这里 `return`，等于**结束整个函数**并返回 None，
+        # 调用方 `total_imported += imported` 会抛 TypeError 并被当成「文件处理失败」，
+        # 而「一行都没进正式账本」这个真相被彻底掩盖(典型的「兜底即伪装」)。
+        # 现在改为:如实标记「未落正式账本」并跳出循环,由调用方显式上报。
+        fact_imported = False
+        logger.warning(
+            "[UpsertOrders] %s (order_id=%s)",
+            ORDERS_FACT_IMPORT_NOTE,
+            core.get("order_id"),
+        )
+        break
         
         # [DEPRECATED] 以下代码已注释,待实现新的导入逻辑后删除
         """
@@ -1054,7 +1113,12 @@ async def upsert_orders_v2(db: AsyncSession, rows: List[Dict[str, Any]], file_re
     # if is_postgresql:
     #     await db.commit()
 
-    return total
+    # [*] 2026-11-09: 如实返回「正式账本是否真的落库」，不再用 None 冒充失败
+    if not fact_imported:
+        return OrdersImportResult(
+            0, fact_imported=False, note=ORDERS_FACT_IMPORT_NOTE
+        )
+    return OrdersImportResult(total, fact_imported=True)
 
 
 async def quarantine_failed_data(db: AsyncSession, file_id: int, validation_result: Dict[str, Any], header_row: int = 1) -> int:

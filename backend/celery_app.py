@@ -24,6 +24,59 @@ _redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 _celery_broker_url = os.getenv("CELERY_BROKER_URL", _redis_url)
 _celery_result_backend = os.getenv("CELERY_RESULT_BACKEND", _redis_url)
 
+# ---------------------------------------------------------------------------
+# [*] Redis 不可达时的「快速失败」配置(2026-11-09)
+# ---------------------------------------------------------------------------
+#
+# 事故现场
+# --------
+# ``task.delay()`` 并不只是「把消息发到 broker」—— Celery 在 ``send_task()``
+# 末尾会回调 ``backend.on_task_call(producer, task_id)``; Redis 结果后端在这里
+# 会**订阅该任务的 pubsub 通道**。也就是说**每次派发任务都要连一次 Redis**,
+# 而且是**同步阻塞**地连(``kombu`` 的 ``retry_over_time``)。
+#
+# Redis 不可达(宕机/网络分区/密码错)时, 这里的重试是**嵌套**的:
+#   外层 ``ResultConsumer.reconnect_on_error`` -> 内层 ``ensure()`` 的
+#   ``retry_over_time``(默认 max_retries=20, 间隔 1 秒) -> 每次失败又走一遍
+#   redis-py 自身的 ``connect_check_health`` 重试。
+# 实测(本机 Redis 不可达): 单次 ``delay()`` **阻塞 16~17 秒**才抛
+# ``OperationalError``; 在 async 上下文里, 这等于**整个事件循环被冻住**,
+# 所有并发请求一起挂起 —— 表现就是「Redis 一抖, 整个 API 500」。
+#
+# 为什么不能只靠「捕获异常」
+# --------------------------
+# 调用点(如 ``backend/services/data_ingestion_service.py`` 的图片提取派发)
+# 确实写了 ``except`` 兜底, 但那是在**卡了十几秒之后**才轮得到它。
+# 故障时最需要的是「立刻失败、立刻让位」, 而不是「慢慢失败」。
+#
+# 这里的取舍
+# ----------
+# * ``socket_connect_timeout``: 建连最多等 3 秒。Redis 是**同机房**服务,
+#   正常建连是毫秒级, 3 秒足够容忍一次网络抖动; 再久就是「它已经不在了」。
+# * ``retry_policy.max_retries``: 发布重试 2 次、结果后端 1 次。
+#   原生默认值(20 次 × 1 秒)对「派发一个图片提取任务」这种**可有可无**的
+#   后台任务是灾难性的 —— 宁可失败, 也不要占住事件循环十几秒。
+# * ``broker_connection_max_retries``: broker 建连重试上限。Celery 默认
+#   **100 次**, 这是「连不上就永远重试」的元凶之一。
+#
+# 注意: 这些**只影响「连不上」时的行为**。Redis 正常时, 派发任务的耗时与
+# 之前完全一样(实测 0.036 秒), 不会因为限了重试而丢任务。
+_REDIS_SOCKET_CONNECT_TIMEOUT = int(
+    os.getenv("CELERY_REDIS_SOCKET_CONNECT_TIMEOUT", "3") or 3
+)
+_CELERY_PUBLISH_RETRY_POLICY = {
+    "max_retries": int(os.getenv("CELERY_PUBLISH_MAX_RETRIES", "2") or 2),
+    "interval_start": 0,
+    "interval_step": 0.5,
+    "interval_max": 2,
+}
+_CELERY_RESULT_RETRY_POLICY = {
+    "max_retries": int(os.getenv("CELERY_RESULT_MAX_RETRIES", "1") or 1),
+    "interval_start": 0,
+    "interval_step": 0.5,
+    "interval_max": 2,
+}
+
 # Celery应用配置
 celery_app = Celery(
     "xihong_erp",
@@ -85,6 +138,19 @@ celery_app.conf.update(
     # [*] v4.19.1 新增:任务超时
     task_time_limit=1800,  # 30分钟硬超时(强制终止)
     task_soft_time_limit=1500,  # 25分钟软超时(发送 SoftTimeLimitExceeded 异常)
+    # [*] Redis 不可达时**快速失败**(2026-11-09)—— 理由见本文件上方长注释。
+    # 派发后台任务是「可有可无」的操作, 绝不该为了它把事件循环冻住十几秒。
+    broker_connection_max_retries=2,
+    broker_transport_options={
+        "socket_connect_timeout": _REDIS_SOCKET_CONNECT_TIMEOUT,
+        "retry_policy": dict(_CELERY_PUBLISH_RETRY_POLICY),
+    },
+    result_backend_transport_options={
+        "socket_connect_timeout": _REDIS_SOCKET_CONNECT_TIMEOUT,
+        "retry_policy": dict(_CELERY_RESULT_RETRY_POLICY),
+    },
+    task_publish_retry_policy=dict(_CELERY_PUBLISH_RETRY_POLICY),
+    redis_socket_connect_timeout=_REDIS_SOCKET_CONNECT_TIMEOUT,
 )
 
 # 定时任务配置

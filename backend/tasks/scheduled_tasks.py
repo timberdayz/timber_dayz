@@ -17,7 +17,8 @@ root_dir = get_project_root()
 sys.path.insert(0, str(root_dir))
 
 from backend.celery_app import celery_app
-from backend.models.database import SessionLocal, reset_async_engine_pool_for_new_loop
+from backend.models.database import SessionLocal
+from backend.utils.async_task_runner import run_async_task
 from modules.core.db import CatalogFile, FieldMappingTemplate
 from backend.services.template_contract_service import (
     CONTRACT_SOURCE_PROMOTION,
@@ -505,8 +506,7 @@ def _recover_template_update_required_files(
     if not file_ids:
         return {"checked": 0, "recovered": 0, "still_blocked": 0}
 
-    reset_async_engine_pool_for_new_loop()
-    readiness_by_id = asyncio.run(_load_readiness(file_ids))
+    readiness_by_id = run_async_task(lambda: _load_readiness(file_ids))
     now = datetime.now(timezone.utc)
     recovered = 0
     still_blocked = 0
@@ -1630,8 +1630,7 @@ def auto_ingest_pending_files(max_files: int | None = None):
             max_concurrent
         )
         
-        reset_async_engine_pool_for_new_loop()
-        results = asyncio.run(_process_ids_concurrent(pending_ids))
+        results = run_async_task(lambda: _process_ids_concurrent(pending_ids))
 
         if not progress_results:
             for idx in range(len(results)):

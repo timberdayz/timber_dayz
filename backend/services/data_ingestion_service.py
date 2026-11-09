@@ -1284,6 +1284,13 @@ class DataIngestionService:
                     await self.db.rollback()
 
             # 13. 异步提取图片(可选)
+            #
+            # [*] 2026-11-09: 这里原先有两个真实缺陷, 一并修掉:
+            #   1) ``except (ImportError, Exception)`` 会吃掉**所有**异常, 使紧随其后的
+            #      ``except Exception`` 永远不会执行 —— 那是死代码, 两种日志分支其实只有一条生效。
+            #   2) 派发**失败**时却把 ``image_extraction_started`` 置 True, 语义正好相反:
+            #      调用方据此对外回「图片提取 processing」, 但实际上任务根本没派出去。
+            #      现在只有**真的派发成功**才置 True, 失败即保持 False(对外显示 skipped)。
             image_extraction_started = False
             if extract_images and imported > 0:
                 try:
@@ -1297,30 +1304,24 @@ class DataIngestionService:
                         platform_code=platform,
                         shop_id=file_record.shop_id or "unknown",
                     )
-                except (ImportError, Exception) as e:
-                    # 捕获Redis连接错误,不影响主流程
-                    error_type = type(e).__name__
-                    if (
-                        "OperationalError" in error_type
-                        or "ConnectionError" in error_type
-                    ):
-                        logger.warning(
-                            f"[数据入库] Redis/Celery连接失败({error_type}),跳过图片提取任务"
-                        )
-                    else:
-                        logger.warning(
-                            f"[数据入库] 图片提取任务调用失败({error_type}),跳过"
-                        )
+                    # 只有派发成功才标记为「已启动」
                     image_extraction_started = True
+                except ImportError:
+                    # Celery 未安装/任务模块缺失 —— 不影响主流程
+                    logger.warning(
+                        "[Ingest] Celery未配置,图片提取任务跳过(同步模式下可手动调用)"
+                    )
                 except Exception as img_err:
-                    # 捕获所有异常(包括Redis连接错误),不影响主流程
+                    # 捕获所有异常(包括Redis连接错误),不影响主流程。
+                    # 注意: 这里不能把 image_extraction_started 置 True ——
+                    # 任务没派出去, 对外必须如实显示「未启动」。
                     error_type = type(img_err).__name__
                     if (
                         "OperationalError" in error_type
                         or "ConnectionError" in error_type
                     ):
                         logger.warning(
-                            f"[Ingest] Redis/Celery连接失败({error_type}),跳过图片提取任务"
+                            f"[数据入库] Redis/Celery连接失败({error_type}),跳过图片提取任务"
                         )
                     else:
                         logger.warning(f"[Ingest] 图片提取任务提交失败: {img_err}")

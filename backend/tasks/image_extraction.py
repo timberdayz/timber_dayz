@@ -29,7 +29,21 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 
-@celery_app.task(name="extract_product_images")
+# [*] ignore_result=True(2026-11-09)
+#
+# 为什么要它: ``ignore_result=False`` 时, Celery 在 ``send_task()`` 末尾会回调
+# ``backend.on_task_call()``, Redis 结果后端在这里**同步订阅**该任务的 pubsub
+# 通道 —— 于是**每次派发任务都要额外连一次 Redis**。
+# Redis 不可达时, kombu 的重试是嵌套的(外层 reconnect 套内层 ensure, 默认各
+# 20 次 × 1 秒), 实测单次 ``delay()`` 要**阻塞 16~17 秒**才抛错 —— 在 async
+# 上下文里等于**把整个事件循环冻住**, 表现就是「Redis 一抖, 整个 API 挂起」。
+#
+# 本任务的返回值**没有任何调用方读取**(调用方只关心「有没有派发出去」),
+# 所以直接声明「不关心结果」, 从根上跳过那次多余的 Redis 订阅。
+#
+# 代价: worker 执行完后不再往 Redis 写任务结果(省一次写, 也少占一个 key)。
+# 若将来真要读这个任务的结果, 需同时去掉这里的 ``ignore_result=True``。
+@celery_app.task(name="extract_product_images", ignore_result=True)
 def extract_product_images_task(
     file_id: int,
     file_path: str,

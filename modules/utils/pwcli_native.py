@@ -30,6 +30,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# 必须在仓库根进 sys.path **之后**才导入：直接以脚本方式启动时，
+# 顶层导入 backend.* 会因为仓库根尚不在 sys.path 而抛 ModuleNotFoundError
+# （backend/tests/test_pwcli_native_sys_path_bootstrap.py 守这条）。
+from backend.utils.async_task_runner import run_async_task  # noqa: E402
+
 PWCLI_ROOT = REPO_ROOT / "output" / "playwright" / ".pwcli_native"
 SESSIONS_DIR = PWCLI_ROOT / "sessions"
 DETACHED_PROCESS = 0x00000008
@@ -721,7 +726,7 @@ def _proxy_auth_keeper(port: int, username: str, password: str, ready: threading
                 ready.set()
 
     try:
-        asyncio.run(_run())
+        run_async_task(_run)
     except Exception as exc:  # pragma: no cover - 兜底：认证助手挂了也不能拖垮 open
         print(f"Warning: proxy authentication helper stopped: {exc}", file=sys.stderr)
         ready.set()

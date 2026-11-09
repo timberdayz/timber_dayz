@@ -1,5 +1,189 @@
 # Changelog - 西虹 ERP 系统
 
+## [未发布] - 连接泄漏根治 + 慢查询根治 + 发版链加固
+
+> 本节来自一次**生产只读调查**（2026-11-09）。调查结论是：生产库 80 个连接槽位
+> 全部被占满且只增不减，业务随机 500。根因在代码里——「异步任务怎么收尾」
+> 这件事没有唯一做法，有人只把连接池「标记作废」而不真正关闭连接。
+> 本节把这件事彻底改掉，并顺手修掉沿路查出来的两个真 bug。
+
+### 一、用户能感知到的修复
+
+1. **生产数据库连接被"漏光"，接口随机 500**（本节最严重的一项）
+   - 现象：生产库 80 个连接槽位全部占满，且**只增不减**（实测约 0.75 条/分钟）；
+     最早一条连接已存活 8 小时 27 分钟；这些连接的最后一条 SQL 是 `COMMIT;`
+     ——事务已提交，**连接本身没关**。
+   - 原因（比「忘记关连接」更深一层）：asyncpg 的连接绑定在**创建它的事件循环**上，
+     而同一个全局 async 引擎被三个**不同的**事件循环共用
+     ——FastAPI 主循环、后台线程自建的循环、Celery 每个 task 新建的循环。
+     循环 A 建的连接被循环 B 取出时 pre_ping 必然失败
+     （`Event loop is closed` / `'NoneType' object has no attribute 'send'`），
+     连接被丢弃；但因为原循环已结束，**close 同样失败** ⇒
+     TCP 连接滞留在数据库服务端白占槽位。旧写法 `dispose(close=False)`
+     只是把连接池「标记作废」，既不关连接，也堵不住这个跨循环复用。
+   - 现在：**异步引擎按事件循环分发**——每个事件循环有自己的引擎和连接池，
+     连接**永不跨循环复用**；短命循环（Celery task / 后台线程）在任务结束时
+     由全仓库**唯一**的异步出口
+     `backend/utils/async_task_runner.py::run_async_task()`
+     在事件循环**还活着**的时候真正关闭它（`await engine.dispose()`），
+     并把它从注册表摘掉——连接跟着循环一起走。
+     9 处 Celery 调用点、云同步轮询、缓存失效入口全部改走这个出口。
+   - 为什么不图省事改成 `NullPool`（它也能消除跨循环复用）：
+     `NullPool` 没有连接池，每次会话都要重新握手 ——
+     **生产容器实测 14.21 ms/次，而池化只要 1.79 ms/次（8 倍差距）**。
+     按事件循环分发既根治泄漏，又保住连接复用，接口延迟不受影响。
+   - 证据：
+     - 新增**泄漏回归测试**（`backend/tests/test_async_engine_connection_leak.py`）：
+       连跑 8 轮任务，断言 `pg_stat_activity` 连接数不增长；
+       配套的「证伪自检」把旧写法原样搬进独立子进程跑，确认探测器确实有牙齿
+       （旧写法实测：4 轮任务后连接数 0 → 4，只增不减，与生产症状一致）；
+     - 新增门禁 `scripts/verify_async_loop_cleanup.py`：禁止裸 `asyncio.run(`、
+       禁止 `dispose(close=False)`、禁止业务代码再调用只软丢弃的兜底函数、
+       **并禁止「自建会话不关闭」**（R5，漏关一条会话就是漏一条连接）；
+     - 顺带修掉两个把 workaround **固化成契约**的测试断言
+       （`assert called["close"] is False`）——它们让谁都不敢改真正的根因；
+     - 顺带堵掉 `backend/services/audit_service.py` 三处「自建会话从不关闭」
+       （全仓 30 个调用点不传 `db=`，每次审计都漏一条会话）。
+
+2. **两条迁移的「回滚之后再升级升不回去」被修掉**
+   - `current_migrations/versions/20261221_collapse_duplicate_columns.py`
+     - 现象：降级重建的列一律用 `TEXT`，而原列是 `double precision` / `varchar(32)`；
+       再升级时 `UPDATE ... SET "work_hours" = "工作时长"` 类型不匹配直接报错 ——
+       **回滚之后再也升不回去**（生产影子库实测复现）。
+     - 现在：按**原始类型**重建，并新增「来源列与目标列类型不一致就拒绝执行」
+       的 fail-closed 检查（`text → varchar` 会静默截断，必须挡在门外）。
+   - `current_migrations/versions/20261215_migrate_sales_targets_a.py`
+     - 现象：降级把隔离区里被跳过的 9 行放回业务表，却**没删隔离区里的副本**；
+       来回跑一次隔离区就从 9 行涨到 18 行。
+     - 现在：放回后清理隔离区副本；升级前也先清理同源旧记录 ⇒ 幂等。
+   - 验证：在**生产备份还原出的影子库**上跑完整往返
+     `20261211 → head → 20261214 → head`：
+     `a_class.target_breakdown` 稳定 241 行、隔离区 18 → 0 → **9** 行、
+     被隔离的 3 个店铺金额合计 990429.2 与跳过前完全一致。
+
+3. **「未匹配店铺别名」接口慢到超时 → 改读物化视图**
+   - 实测（本地同一段查询）：普通视图 **23.53 秒** → 物化视图 **0.30 秒**，
+     两者结果**完全一致**。生产更严重：物化视图的创建脚本里记录过
+     `SELECT count(*) FROM semantic.fact_orders_atomic` 要 **114.6 秒**。
+   - 口径不变：物化视图正文就是普通视图正文（全字段透传），只改「什么时候算」，
+     不改「算什么」。
+   - 附带：别名改动后的刷新目标补上 `semantic.fact_orders_atomic_mv`
+     ——否则用户刚认领完别名，列表里还挂着它。
+   - ⚠ 这里推翻了一个此前的方案：原计划给 9 张事实表建「空店铺」部分索引。
+     实测证明**它救不了这条查询**（过滤的是视图出口的裁决结果，是表达式，
+     谓词下推不到事实表；而改用源表原始 `shop_id` 过滤又是**另一批数据**，
+     口径会变）。因此该索引方案已撤销，改为上面这条真正有效的修法。
+
+4. **订单入库「回成功」但正式账本一行都没有**
+   - 现象：订单文件入库后，接口给不出可信结论，正式账本始终为空。
+   - 原因（两层）：
+     - 旧实现在循环里 `return`，等于**结束整个函数**并返回 `None`；
+       调用方 `total_imported += imported` 抛 `TypeError`，被上层当成「文件处理失败」，
+       真相被彻底掩盖；
+     - 更深一层：`upsert_orders` 是 `async def` 却**没有 await** 内部的
+       `upsert_orders_v2`，返回的是**协程对象**——这才是这条链路失败的真正根因。
+   - 现在：返回 `OrdersImportResult`（int 子类），显式携带 `fact_imported`
+     与原因说明；两个路由与 Celery 任务的响应里都有
+     `orders_fact_imported` / `orders_fact_note`。
+     **不抛错**——抛错会回滚暂存数据，运营连文件都传不进去。
+
+5. **前端 10 个红项逐条定性并清零**
+   - `frontend/scripts` 340 个用例 → **0 失败**（`frontend/tests` 184 个仍全绿）。
+   - 其中 1 条是本轮令牌收敛带来的**有意的行为变更**（WebSocket 不再从
+     localStorage 取令牌），断言随之更新，**不回退代码**。
+   - 门禁升级：`scripts/ci_frontend_test_silence_gate.py` 从「只拦哑测试」
+     升级为「**有失败即拦**」——红灯一旦成为常态就等于没有红灯。
+
+6. **Redis 一抖，整个 API 一起挂起（16~17 秒）**
+   - 现象：派发一个 Celery 后台任务时，接口**卡住十几秒**才返回；
+     在 async 上下文里，这等于**整个事件循环被冻住**，所有并发请求一起挂起。
+   - 根因（比「Redis 连不上」深一层）：`task.delay()` 并不只是「把消息发到
+     broker」——Celery 在 `send_task()` 末尾会回调 `backend.on_task_call()`，
+     Redis 结果后端在这里**同步订阅**该任务的 pubsub 通道。
+     也就是说**每次派发任务都要额外连一次 Redis**，而且是**阻塞式**连接。
+     Redis 不可达时，kombu 的重试还是**嵌套**的（外层 `reconnect_on_error`
+     套内层 `ensure()`，各 20 次 × 1 秒）⇒ 实测单次 `delay()` **阻塞 16~17 秒**。
+   - 现在做了三层：
+     - **不需要结果的任务声明 `ignore_result=True`**（图片提取任务就是这种——
+       它的返回值无人读取），从根上**跳过那次多余的 pubsub 订阅**：
+       实测 **12.7 秒 → 4.1 秒**；
+     - **派发侧的连接超时与重试次数全部设上限**（`backend/celery_app.py`）：
+       建连最多 3 秒、发布重试最多 2 次。Celery 原生默认是
+       `broker_connection_max_retries=100`、结果后端重试 20 次 × 1 秒。
+       **Redis 正常时派发耗时完全不变**（实测 0.036 秒），只是「连不上」时
+       立刻失败、立刻让位，而不是慢慢失败；
+     - **测试护栏把 Celery 钉成内存 transport**（`memory://` /
+       `cache+memory://`）⇒ 测试**永不连真实 Redis**，也永不再出现
+       「跑到 44% 静默挂死、CPU 零增量」的现象。
+   - 顺带修掉派发点的两个真 bug：`except (ImportError, Exception)` 让紧随其后
+     的 `except Exception` 成了**死代码**；且派发**失败**时却把
+     `image_extraction_started` 置 `True`，导致接口对外回「图片提取 processing」
+     而任务其实根本没派出去。现在只有**真的派发成功**才置 `True`。
+   - 顺带修掉一个**在干净环境必然失败**的测试：
+     `test_utf8_editor_guardrails_are_declared` 要求 `.vscode/settings.json`
+     存在，而那个文件被 `.gitignore` 排除、**从未进过版本库**（基线 commit
+     `419b4436` 里也没有）⇒ 任何干净 checkout 跑它都必红。现在改为断言
+     **受版本管理**的 `.editorconfig`（真正的仓库级护栏），
+     VSCode 本地设置改为「存在时才校验」——并已做证伪自检：
+     故意写错时测试确实会红，不是把断言放水。
+
+### 二、机制上的变化：这些坑不会再悄悄坏回去
+
+| 门禁 | 拦什么 | 触发时机 |
+|---|---|---|
+| `verify_sync_query_usage.py` | 异步上下文里的同步 `db.query()` | CI |
+| `verify_access_token_extraction.py` | 绕过唯一令牌提取点 | CI |
+| `verify_orm_schema_drift.py` | ORM 有、库里没有的列 | 发版前 + CI |
+| `verify_async_loop_cleanup.py`（新） | 裸 `asyncio.run` / `dispose(close=False)` / 自建会话不关闭 | CI |
+| `ci_frontend_test_silence_gate.py`（升级） | 前端测试静音或失败 | CI |
+| `test_unmatched_alias_reads_materialized_view.py`（新） | 慢查询退回普通视图 | CI |
+| `test_orders_import_status_honesty.py`（新） | 入库接口再返回 `None` 冒充成功 | CI |
+| `test_async_engine_connection_leak.py`（新） | 连接数增长 | CI |
+| `test_async_engine_pool_isolation.py`（新） | 引擎不再按事件循环分发 / 丢掉连接池 | CI |
+| `test_migration_collapse_duplicate_columns.py`（新） | 迁移回滚后再升级升不回去 | CI |
+| `test_celery_dispatch_resilience.py`（新） | 派发任务又把事件循环冻住 / 测试又连上真实 Redis | CI |
+
+### 三、已知剩余
+
+1. **生产库连接上限偏小**（`max_connections=80`）与**日志无轮转**
+   （容器内 access.log 51MB / error.log 106MB）已在本节随仓库文件一并加固，
+   但**上限调大只是给根治争取时间，不是修复本身**——真正的修复是上面第 1 条，
+   而**修复要随发版才生效**：生产当前跑的还是旧代码，连接仍在泄漏。
+2. **发版前无数据备份**：今天 12:49 的备份目录只有 compose 快照 + 容器清单，
+   没有 pg_dump。已把备份接进发版链并要求 `pg_restore --list` 校验可恢复。
+3. **生产演练脚本曾经 fail-open**：缺 env 时打印 `[SKIP]` 然后返回 0，
+   等于「演练根本没跑也算通过」。本节改为缺 env 即非零退出。
+4. **采购/报表两类页面仍在源码里，但已不在路由表**（提交 `42f6bfa6` 移除，
+   早于本节）。本节未改动，也不擅自改路由——需要产品侧确认它们是
+   「已下线」还是「误删」。
+5. **订单正式账本（`b_class.fact_{platform}_orders_{granularity}`）的写入路径
+   至今没有实现**，本节只做到「让状态可见」。补实现前，订单数据只进暂存区。
+6. **3 个店铺的 9 行「月度目标」在本次迁移里无法落库**，已写入隔离区
+   `core.data_quarantine`（`error_type='ORPHAN_SHOP_NOT_IN_DIM_SHOPS'`），
+   原始值完整可查：
+   - `Tiktok 2店` 3 行 / 目标金额合计 321589.6
+   - `shopee新加坡3C店` 3 行 / 目标金额合计 329270.0
+   - `虾皮巴西（东朗照明主体）` 3 行 / 目标金额合计 339569.6
+   - 合计 990429.2
+   原因：这 3 个店铺**从未登记在 `core.dim_shops` 维度表里**，
+   外键 `fk_breakdown_shop` 不允许落库。已核实它们在
+   `mart.shop_month_kpi`（19 店 / 193 行）里**一行都没有**，
+   旧视图从业务表 LEFT JOIN 出去 ⇒ 这些目标从未出现在任何报表里，
+   所以跳过**不丢任何可见数据**。
+   迁移对这条边界是 fail-closed 的：**只要这些店铺有真实业务数据，就中止交人工**，
+   绝不自动跳过。
+7. **`scripts/run_current_schema_migrations.py:820` 的备份守卫默认仍关闭**
+   （守卫走 docker 传输，而生产迁移在无 docker CLI 的容器内跑，默认打开会打挂
+   生产迁移）。本节改由**发版脚本的必经备份步骤**覆盖生产路径，
+   守卫本身留作后续项。
+8. **Celery 派发仍是同步阻塞调用**：本节已把「Redis 不可达时」的阻塞从
+   16~17 秒压到 4.1 秒（建连 + 2 次重试），并让图片提取这类**不需要结果**的
+   任务完全跳过 pubsub 订阅；但**派发动作本身仍是同步的**——在 async 上下文里
+   它会占住调用线程直到 broker 应答。彻底的做法是把派发改成「丢线程池」或
+   「写本地队列再转投」，属于架构级改动，**本节不做**（风险大于收益）。
+   需要结果的任务（如 `sync_single_file_task`，任务中心要读它的状态）
+   仍必须保留结果后端，那条路就注定要连 Redis。
+
 ## [未发布] - 登录态与入库链路修复 + 结构门禁 + 死代码清理
 
 > 承接上一节「全链路口径收敛」，本节处理**登录优化之后暴露出来的连锁问题**：

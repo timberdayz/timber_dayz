@@ -29,10 +29,14 @@ class AuditService:
         db: AsyncSession = None
     ):
         """记录操作日志(异步模式)"""
+        owns_session = False
         if db is None:
             from backend.models.database import AsyncSessionLocal
             db = AsyncSessionLocal()
-        
+            # [*] 2026-11-09 连接泄漏根治：自建的会话必须由自己负责关闭，
+            # 否则会话对象和它持有的连接会一直留着（生产连接只增不减）。
+            owns_session = True
+
         try:
             # 获取用户名
             from modules.core.db import DimUser  # v4.12.0 SSOT迁移
@@ -77,7 +81,13 @@ class AuditService:
             # 审计日志记录失败不应该影响主业务
             print(f"Audit log failed: {e}")
             await db.rollback()
-    
+        finally:
+            if owns_session:
+                try:
+                    await db.close()
+                except Exception:
+                    pass  # 收尾失败不影响主业务
+
     # v4.12.0新增:数据同步操作日志
     async def log_sync_operation(
         self,
@@ -99,10 +109,13 @@ class AuditService:
             details: 操作详情
             db: 数据库会话(可选)
         """
+        owns_session = False
         if db is None:
             from backend.models.database import AsyncSessionLocal
             db = AsyncSessionLocal()
-        
+            # [*] 2026-11-09：自建会话由自己负责关闭（见 log_action 同名注释）
+            owns_session = True
+
         try:
             from modules.core.db import DimUser
             
@@ -145,7 +158,13 @@ class AuditService:
             # 审计日志记录失败不应该影响主业务
             print(f"Audit log failed: {e}")
             await db.rollback()
-    
+        finally:
+            if owns_session:
+                try:
+                    await db.close()
+                except Exception:
+                    pass  # 收尾失败不影响主业务
+
     # v4.12.0新增:数据变更历史(使用changes_json字段)
     async def log_data_change(
         self,
@@ -169,10 +188,13 @@ class AuditService:
             after: 变更后的数据(可选)
             db: 数据库会话(可选)
         """
+        owns_session = False
         if db is None:
             from backend.models.database import AsyncSessionLocal
             db = AsyncSessionLocal()
-        
+            # [*] 2026-11-09：自建会话由自己负责关闭（见 log_action 同名注释）
+            owns_session = True
+
         try:
             import json
             from modules.core.db import DimUser
@@ -216,7 +238,13 @@ class AuditService:
             # 审计日志记录失败不应该影响主业务
             print(f"Audit log failed: {e}")
             await db.rollback()
-    
+        finally:
+            if owns_session:
+                try:
+                    await db.close()
+                except Exception:
+                    pass  # 收尾失败不影响主业务
+
     # v4.12.0新增:获取数据同步审计追溯
 # 全局审计服务实例
 audit_service = AuditService()

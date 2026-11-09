@@ -23,7 +23,6 @@ internal_code 内部标准名（同平台内唯一、带地区标识）        �
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import re
 import sys
@@ -33,6 +32,7 @@ from typing import Any, Iterable, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.utils.async_task_runner import run_async_task
 from modules.core.db import ShopAccount
 from modules.core.logger import get_logger
 
@@ -313,7 +313,7 @@ async def _run_backfill(database_url: Optional[str], apply: bool) -> dict[str, A
 
 def main() -> int:
     args = _build_arg_parser().parse_args()
-    result = asyncio.run(_run_backfill(args.database_url, args.apply))
+    result = run_async_task(lambda: _run_backfill(args.database_url, args.apply))
     # stdout 只输出 JSON（机器可解析），提示信息走 stderr
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if result["dry_run"]:

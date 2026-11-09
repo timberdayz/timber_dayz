@@ -286,7 +286,7 @@ test('order-detail drawer consumes order-level cost fields exposed by the API', 
   const requiredLabels = [
     '下单时间',
     '平台',
-    '店铺ID',
+    '店铺',
     '订单原始金额',
     '实付金额',
     '运费',
@@ -309,7 +309,6 @@ test('order-detail drawer consumes order-level cost fields exposed by the API', 
   const requiredFields = [
     'order_time',
     'platform_code',
-    'shop_id',
     'order_original_amount',
     'gmv',
     'shipping_fee',
@@ -328,6 +327,18 @@ test('order-detail drawer consumes order-level cost fields exposed by the API', 
       `order-detail drawer should consume row.${field}`
     )
   }
+
+  assert.equal(
+    viewSource.includes('prop="shop_id"'),
+    true,
+    'order-detail drawer should bind the shop column to shop_id'
+  )
+
+  assert.equal(
+    viewSource.includes('<ShopDisplayText :row="row" />'),
+    true,
+    'order-detail drawer should render the shop column through the unified shop display component'
+  )
 })
 
 test('order-detail pagination preserves backend page metadata and can request another page', () => {

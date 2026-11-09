@@ -241,13 +241,17 @@ def test_production_postgres_memory_budget_is_bounded():
     （连接被重置 → nginx 记 502 → 页面打不开）。
 
     2026-11-05 收口后：8MB × 80 = 640 MiB，实测 PG 常驻 716 MiB → 356 MiB。
+
+    2026-11-09 调整：max_connections 80→200（生产实测 80/80 打满），
+    同时把 work_mem 8MB→4MB，让理论峰值仍然是 4MB × 200 = 800 MiB，
+    留在 1.5 GiB 容器上限以内（否则只提连接数就会把 OOMKill 再请回来）。
     """
     params = _postgres_c_params()
 
-    assert params.get("work_mem") == "8MB"
+    assert params.get("work_mem") == "4MB"
     assert params.get("shared_buffers") == "256MB"
     assert params.get("effective_cache_size") == "2GB"
-    assert params.get("max_connections") == "80"
+    assert params.get("max_connections") == "200"
     # 长查询超时不能被顺带关掉
     assert params.get("statement_timeout") == "120s"
 

@@ -53,6 +53,33 @@ DROP_ONLY_COLUMNS = {
     "core.data_files": ["status"],
 }
 
+#: 回滚时重建被删列用的**原始类型**（来源：静态基线 20260805 与 20261220 的列定义）。
+#:
+#: [*] 2026-11-09 修复：这里原先一律用 ``TEXT`` 重建，于是
+#: ``a_class.attendance_records."工作时长"`` 被建成 TEXT，
+#: 而目标列 ``work_hours`` 是 double precision。
+#: 「回滚之后再升级」时 ``20261221.upgrade`` 会执行
+#: ``UPDATE ... SET "work_hours" = "工作时长"`` ⇒ 类型不匹配直接报错，
+#: 也就是**回滚之后再也升不回去**（生产演练实测复现）。
+#: 回滚重建列必须用原始类型，回滚才真正可逆。
+RESTORE_COLUMN_DDL = {
+    ("a_class.attendance_records", "工作时长"): "double precision",
+    (
+        "a_class.attendance_records",
+        "状态",
+    ): "character varying(32) DEFAULT 'normal' NOT NULL",
+    ("core.data_files", "data_type"): "character varying(50) NOT NULL DEFAULT ''",
+    (
+        "core.data_files",
+        "discovery_time",
+    ): "timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP",
+}
+
+#: 只删除不回填的列，回滚时按原类型重建
+RESTORE_DROP_ONLY_DDL = {
+    ("core.data_files", "status"): "character varying(50) NOT NULL DEFAULT 'registered'",
+}
+
 
 def _column_exists(table: str, column: str) -> bool:
     row = (
@@ -87,6 +114,36 @@ def _table_exists(table: str) -> bool:
     return row is not None
 
 
+def _column_type(table: str, column: str) -> str:
+    """取列的**基础类型**（不比较长度/精度）。
+
+    PostgreSQL 在 ``SET target = source`` 时会做**赋值转换**：
+    ``text -> varchar`` 能静默成功（可能截断），``text -> double precision``
+    则直接报错。两类都是隐患，所以这里显式比对类型。
+    """
+    row = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                """
+                SELECT data_type
+                  FROM information_schema.columns
+                 WHERE table_schema = :schema
+                   AND table_name = :table
+                   AND column_name = :column
+                """
+            ),
+            {
+                "schema": table.split(".", 1)[0],
+                "table": table.split(".", 1)[1],
+                "column": column,
+            },
+        )
+        .fetchone()
+    )
+    return str(row[0]) if row is not None else ""
+
+
 def _merge_columns() -> None:
     for table, pairs in MERGE_COLUMNS.items():
         if not _table_exists(table):
@@ -99,6 +156,16 @@ def _merge_columns() -> None:
             if not _column_exists(table, target):
                 print(f"[WARN] 目标列不存在，保留来源列：{table}.{source}")
                 continue
+            source_type = _column_type(table, source)
+            target_type = _column_type(table, target)
+            if source_type != target_type:
+                # [*] 2026-11-09：类型不一致必须**拒绝执行**，不能让它
+                # 变成一句看不懂的 PG 报错（text->varchar 还会静默截断）。
+                raise RuntimeError(
+                    f"[FAIL] 合并列类型不一致，拒绝回填："
+                    f"{table}.{source}({source_type}) -> {table}.{target}({target_type})。"
+                    f"请先把 downgrade 重建的列类型改回原始类型。"
+                )
             op.execute(
                 f'UPDATE "{schema}"."{name}" '
                 f'SET "{target}" = "{source}" '
@@ -130,7 +197,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """回滚：把被删的列加回来（数据无法还原，只还原结构）。"""
+    """回滚：把被删的列加回来（数据无法还原，只还原结构）。
+
+    [*] 2026-11-09：重建列必须用**原始类型**（见 ``RESTORE_COLUMN_DDL``）。
+    用错类型（例如把 double precision 建成 TEXT）会让「回滚之后再升级」
+    这一步的 ``UPDATE ... SET "work_hours" = "工作时长"`` 因类型不匹配报错，
+    也就是回滚之后再也升不回去。
+    """
     for table, pairs in MERGE_COLUMNS.items():
         if not _table_exists(table):
             continue
@@ -138,8 +211,9 @@ def downgrade() -> None:
         for source, _target in pairs:
             if _column_exists(table, source):
                 continue
+            ddl = RESTORE_COLUMN_DDL.get((table, source), "TEXT")
             op.execute(
-                f'ALTER TABLE "{schema}"."{name}" ADD COLUMN "{source}" TEXT'
+                f'ALTER TABLE "{schema}"."{name}" ADD COLUMN "{source}" {ddl}'
             )
     for table, columns in DROP_ONLY_COLUMNS.items():
         if not _table_exists(table):
@@ -148,6 +222,7 @@ def downgrade() -> None:
         for column in columns:
             if _column_exists(table, column):
                 continue
+            ddl = RESTORE_DROP_ONLY_DDL.get((table, column), "TEXT")
             op.execute(
-                f'ALTER TABLE "{schema}"."{name}" ADD COLUMN "{column}" TEXT'
+                f'ALTER TABLE "{schema}"."{name}" ADD COLUMN "{column}" {ddl}'
             )

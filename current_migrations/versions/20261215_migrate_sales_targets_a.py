@@ -52,14 +52,36 @@
 ``target_type='shop'`` 且 ``status='active'`` 的那个；找不到父目标 ⇒
 该行无法落库 ⇒ 第 3 步校验会中止迁移，不会静默丢数据）。
 
+「店铺不在维度表里」的行怎么办（2026-11-09 生产演练新增）
+----------------------------------------------------------
+生产快照库演练发现：源表里有 9 行引用的 3 个店铺**从未登记在
+``core.dim_shops``**（``shopee新加坡3C店`` / ``虾皮巴西（东朗照明主体）`` /
+``Tiktok 2店``，均为 2025-07~09）。而 ``target_breakdown`` 有外键
+``fk_breakdown_shop`` ⇒ 这些行**根本插不进去**，迁移会直接失败
+（本地库因维度表完整而从未暴露这个问题）。
+
+处理方式（既不丢数据，也不假装成功）：
+
+1. **只跳过「本来就不可见」的行**：旧视图是从 ``mart.shop_month_kpi``
+   出发 LEFT JOIN 目标数据的，而这几个店铺在真实业务表里**一行都没有**
+   ⇒ 它们的目标从来就没出现在任何报表里。若某店铺**有**业务数据却不在
+   维度表里，那是数据缺口 ⇒ **中止迁移**，交人工确认，绝不自动跳过。
+2. **跳过的行进隔离区**：写入 ``core.data_quarantine``
+   （``error_type='ORPHAN_SHOP_NOT_IN_DIM_SHOPS'``），不是悄悄丢掉；
+   ``downgrade`` 会把它们原样放回源表。
+3. **迁移日志显形**：打印被跳过的行数、店铺与金额。
+
 数据安全性
 ----------
 - 第 3 步校验不通过 ⇒ 迁移中止 ⇒ **表不会被删**、数据不会被丢；
+- 被跳过的行进隔离区（可查、可回滚），且只在「无业务数据」时才允许跳；
 - 视图先重建、再删表 ⇒ 删表后视图仍然可查（视图已不再依赖该表）；
 - ``downgrade`` 会把表、序列、约束、索引按基线 DDL 重建，并从
-  ``target_breakdown`` 反向回填（事实没有丢），同时把两个视图改回旧口径。
+  ``target_breakdown`` **与隔离区**反向回填（事实没有丢），同时把两个视图
+  改回旧口径。
 """
 
+import json
 from pathlib import Path
 
 from alembic import op
@@ -120,20 +142,208 @@ def _table_exists(table: str, schema: str = "a_class") -> bool:
     return sa.inspect(op.get_bind()).has_table(table, schema=schema)
 
 
+def _table_exists_qualified(full_name: str) -> bool:
+    """``schema.table`` 形式的表存在性判断。"""
+    schema, _, table = full_name.partition(".")
+    return sa.inspect(op.get_bind()).has_table(table, schema=schema)
+
+
+#: 店铺维度 SSOT（``target_breakdown`` 的外键指向它）
+_SHOP_DIMENSION = "core.dim_shops"
+
+#: 被跳过的行在隔离区里的标记（downgrade 靠它原样放回）
+_ORPHAN_ERROR_TYPE = "ORPHAN_SHOP_NOT_IN_DIM_SHOPS"
+_ORPHAN_SOURCE_FILE = "a_class.sales_targets_a"
+
+
+def _migratable_source_filter(alias: str = "s") -> str:
+    """源表里「店铺在维度表中存在」的条件（可直接嵌进 WHERE）。
+
+    ``a_class.target_breakdown`` 对 ``(platform_code, shop_id)`` 有外键
+    ``fk_breakdown_shop`` ⇒ 维度表里没有的店铺**根本无法落库**。
+    这里用**完全相等**判断，与外键的判定口径保持一致（不做 lower/trim，
+    否则会出现「谓词认为可落库、外键却拒绝」的错位）。
+    """
+    return (
+        """
+        EXISTS (
+            SELECT 1
+            FROM core.dim_shops d
+            WHERE d.platform_code = {alias}.platform_code
+              AND d.shop_id = {alias}."店铺ID"
+        )
+        """.format(alias=alias)
+    )
+
+
+def _orphan_source_rows() -> list:
+    """返回「店铺不在维度表里」的源行（这些行无法落库）。"""
+    rows = op.get_bind().execute(
+        sa.text(
+            """
+            SELECT s.platform_code,
+                   s."店铺ID" AS shop_id,
+                   s."年月" AS period_label,
+                   s."目标销售额" AS target_amount,
+                   s."目标订单数" AS target_quantity
+            FROM a_class.sales_targets_a s
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM core.dim_shops d
+                WHERE d.platform_code = s.platform_code
+                  AND d.shop_id = s."店铺ID"
+            )
+            ORDER BY s.platform_code, s."店铺ID", s."年月"
+            """
+        )
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def _verify_orphans_are_invisible(orphans: list) -> None:
+    """被跳过的店铺必须**没有任何真实业务数据**，否则中止迁移。
+
+    旧视图是从 ``mart.shop_month_kpi`` 出发 LEFT JOIN 目标数据的 ⇒
+    「没有业务数据的店铺」的目标从来就没在任何报表里出现过，跳过不丢可见数据。
+
+    反过来：某店铺**有**业务数据却不在维度表里 ⇒ 这是数据缺口（多半是
+    维度表漏登记），必须人工确认 ⇒ fail-closed 中止，绝不自动跳过。
+    """
+    shop_ids = sorted({row["shop_id"] for row in orphans})
+    if not shop_ids:
+        return
+
+    id_list = ", ".join("'{}'".format(sid.replace("'", "''")) for sid in shop_ids)
+    for table in ("mart.shop_month_kpi", "mart.shop_day_kpi"):
+        if not _table_exists_qualified(table):
+            continue
+        count = int(
+            _scalar(
+                "SELECT COUNT(*) FROM {t} m WHERE m.shop_id IN ({ids})".format(
+                    t=table, ids=id_list
+                )
+            )
+            or 0
+        )
+        if count:
+            raise RuntimeError(
+                "以下店铺不在 {dim} 里（无法落库），但它们**有真实业务数据**（{t} 命中 "
+                "{n} 行），属于数据缺口而非历史残留，拒绝自动跳过；"
+                "请先补齐维度表登记或人工确认这些目标的去向，再重跑迁移。"
+                "店铺：{shops}".format(
+                    dim=_SHOP_DIMENSION,
+                    t=table,
+                    n=count,
+                    shops=", ".join(shop_ids),
+                )
+            )
+
+
+def _quarantine_orphan_rows(orphans: list) -> int:
+    """把被跳过的行写进隔离区（不悄悄丢，可查可回滚）。"""
+    if not orphans:
+        return 0
+    if not _table_exists_qualified("core.data_quarantine"):
+        print(
+            "[WARN] core.data_quarantine 不存在，被跳过的 {n} 行无法落隔离区".format(
+                n=len(orphans)
+            )
+        )
+        return 0
+
+    error_msg = "店铺未登记在 {dim}（外键 fk_breakdown_shop 不允许落库）".format(
+        dim=_SHOP_DIMENSION
+    )
+    # [*] 2026-11-09 幂等性修复：先把**同源同类型**的旧隔离记录清掉。
+    # 否则「降级 → 再升级」会把同一批行再写一遍，隔离区越滚越大
+    # （生产演练实测：9 行 → 18 行）。
+    op.get_bind().execute(
+        sa.text(
+            """
+            DELETE FROM core.data_quarantine
+             WHERE source_file = :source_file
+               AND error_type = :error_type
+            """
+        ),
+        {
+            "source_file": _ORPHAN_SOURCE_FILE,
+            "error_type": _ORPHAN_ERROR_TYPE,
+        },
+    )
+    for row in orphans:
+        payload = {
+            "店铺ID": row["shop_id"],
+            "年月": row["period_label"],
+            "目标销售额": row["target_amount"],
+            "目标订单数": row["target_quantity"],
+        }
+        payload_text = json.dumps(payload, ensure_ascii=False, default=str)
+        op.get_bind().execute(
+            sa.text(
+                """
+                INSERT INTO core.data_quarantine (
+                    source_file,
+                    catalog_file_id,
+                    row_number,
+                    row_data,
+                    error_type,
+                    error_msg,
+                    platform_code,
+                    shop_id,
+                    data_domain,
+                    platform,
+                    is_resolved,
+                    raw_data
+                )
+                VALUES (
+                    :source_file,
+                    NULL,
+                    NULL,
+                    :row_data,
+                    :error_type,
+                    :error_msg,
+                    :platform_code,
+                    :shop_id,
+                    'targets',
+                    :platform,
+                    false,
+                    CAST(:raw_data AS jsonb)
+                )
+                """
+            ),
+            {
+                "source_file": _ORPHAN_SOURCE_FILE,
+                "row_data": payload_text,
+                "error_type": _ORPHAN_ERROR_TYPE,
+                "error_msg": error_msg,
+                "platform_code": row["platform_code"],
+                "shop_id": row["shop_id"],
+                "platform": row["platform_code"],
+                "raw_data": payload_text,
+            },
+        )
+    return len(orphans)
+
+
 def _scalar(sql: str):
     return op.get_bind().execute(sa.text(sql)).scalar_one()
 
 
 def _rebuild_view(view_name: str, asset_rel_path: str) -> bool:
-    """用 ``sql/`` 下的资产文件重建视图；资产缺失 → 跳过并告警。"""
+    """用 ``sql/`` 下的资产文件重建视图。
+
+    资产缺失 ⇒ **中止**（fail-closed）。不能只告警：视图没切到新口径，
+    ``sales_targets_a`` 就还被人依赖着，后面 ``DROP TABLE`` 会以
+    「other objects depend on it」这种看不懂的报错收场。
+    """
     asset_path = REPO_ROOT / asset_rel_path
     if not asset_path.is_file():
-        print(
-            "[WARN] 资产文件缺失，跳过视图重建：{view} ← {path}".format(
-                view=view_name, path=asset_rel_path
+        raise RuntimeError(
+            "视图资产文件缺失，拒绝继续迁移（否则删表时才会以"
+            "「other objects depend on it」报错）：{path}（仓库根 {root}）".format(
+                path=asset_rel_path, root=REPO_ROOT
             )
         )
-        return False
     _exec_sql_text(asset_path.read_text(encoding="utf-8-sig"))
     return True
 
@@ -241,13 +451,14 @@ def _migrate_facts() -> dict:
             FROM a_class.sales_targets_a s
             JOIN parent p
               ON p.month = to_date(s."年月" || '-01', 'YYYY-MM-DD')
-            WHERE NOT EXISTS (
+            WHERE {migratable}
+              AND NOT EXISTS (
                 SELECT 1
                 FROM a_class.target_breakdown tb
                 JOIN a_class.sales_targets st ON st.id = tb.target_id
                 WHERE {match}
             )
-            """.format(match=_MATCH_CONDITION)
+            """.format(match=_MATCH_CONDITION, migratable=_migratable_source_filter())
         )
     ).rowcount
 
@@ -258,12 +469,17 @@ def _migrate_facts() -> dict:
 # 3) fail-closed 校验
 # --------------------------------------------------------------------------
 def _verify_fact_coverage() -> None:
-    """源表每一行都必须在目标表里有"值相等"的对应行，否则中止迁移。"""
+    """**可落库的**源行必须在目标表里有"值相等"的对应行，否则中止迁移。
+
+    「可落库」= 店铺在 ``core.dim_shops`` 里（外键 ``fk_breakdown_shop`` 的要求）。
+    不满足的源行走隔离区（见 :func:`_quarantine_orphan_rows`），不算丢数据。
+    """
     missing = _scalar(
         """
         SELECT COUNT(*)
         FROM a_class.sales_targets_a s
-        WHERE NOT EXISTS (
+        WHERE {migratable}
+          AND NOT EXISTS (
             SELECT 1
             FROM a_class.target_breakdown tb
             JOIN a_class.sales_targets st ON st.id = tb.target_id
@@ -271,7 +487,7 @@ def _verify_fact_coverage() -> None:
               AND tb.target_amount = s."目标销售额"
               AND tb.target_quantity = s."目标订单数"
         )
-        """.format(match=_MATCH_CONDITION)
+        """.format(match=_MATCH_CONDITION, migratable=_migratable_source_filter())
     )
     if missing:
         raise RuntimeError(
@@ -281,8 +497,8 @@ def _verify_fact_coverage() -> None:
         )
 
 
-def _verify_view_keys(source_rows: int) -> None:
-    """两个 API 视图读到的「店铺 × 月」键数必须与源表行数一致。"""
+def _verify_view_keys(expected_keys: int) -> None:
+    """两个 API 视图读到的「店铺 × 月」键数必须与**可落库**的源行数一致。"""
     view_rows = _scalar(
         """
         SELECT COUNT(*)
@@ -300,22 +516,24 @@ def _verify_view_keys(source_rows: int) -> None:
         ) t
         """
     )
-    if int(view_rows) != int(source_rows):
+    if int(view_rows) != int(expected_keys):
         raise RuntimeError(
-            "迁移后的「店铺 × 月」键数({view}) 与源表行数({src}) 不一致, "
-            "拒绝删表; 请先人工确认口径差异。".format(view=view_rows, src=source_rows)
+            "迁移后的「店铺 × 月」键数({view}) 与可落库的源行数({src}) 不一致, "
+            "拒绝删表; 请先人工确认口径差异。".format(view=view_rows, src=expected_keys)
         )
 
 
 def _verify_monthly_totals() -> None:
-    """按月的金额/数量合计必须与源表逐月一致（防止重复行导致的翻倍）。"""
-    diff = _scalar(
-        """
+    """按月的金额/数量合计必须与**可落库**的源表逐月一致（防止重复行导致的翻倍）。"""
+    # 注意：这里用 __TOKEN__ 替换而不是 str.format —— SQL 里的正则
+    # ``'^\\d{4}-\\d{2}$'`` 含大括号，format 会把它当成占位符而报错。
+    sql_text = """
         WITH src AS (
             SELECT "年月" AS ym,
                    SUM("目标销售额") AS amt,
                    SUM("目标订单数") AS qty
-            FROM a_class.sales_targets_a
+            FROM a_class.sales_targets_a s
+            WHERE __MIGRATABLE__
             GROUP BY 1
         ),
         tgt AS (
@@ -338,8 +556,8 @@ def _verify_monthly_totals() -> None:
             WHERE src.amt IS DISTINCT FROM tgt.amt
                OR src.qty IS DISTINCT FROM tgt.qty
         ) d
-        """
-    )
+        """.replace("__MIGRATABLE__", _migratable_source_filter())
+    diff = _scalar(sql_text)
     if int(diff):
         raise RuntimeError(
             "迁移后按月合计与源表有 {months} 个月不一致, 拒绝删表; "
@@ -659,6 +877,66 @@ def _restore_legacy_table() -> None:
         """
     )
 
+    # 被 upgrade 跳过的行（店铺不在维度表里）从隔离区原样放回 ⇒ 事实不丢。
+    if _table_exists_qualified("core.data_quarantine"):
+        restored = op.get_bind().execute(
+            sa.text(
+                """
+                INSERT INTO a_class.sales_targets_a (
+                    platform_code,
+                    "店铺ID",
+                    "年月",
+                    "目标销售额",
+                    "目标订单数",
+                    "创建时间",
+                    "更新时间"
+                )
+                SELECT q.platform_code,
+                       q.row_data::json ->> '店铺ID',
+                       q.row_data::json ->> '年月',
+                       (q.row_data::json ->> '目标销售额')::numeric,
+                       (q.row_data::json ->> '目标订单数')::integer,
+                       COALESCE(q.created_at, NOW()),
+                       NOW()
+                FROM core.data_quarantine q
+                WHERE q.source_file = :source_file
+                  AND q.error_type = :error_type
+                ON CONFLICT (platform_code, "店铺ID", "年月") DO NOTHING
+                """
+            ),
+            {
+                "source_file": _ORPHAN_SOURCE_FILE,
+                "error_type": _ORPHAN_ERROR_TYPE,
+            },
+        ).rowcount
+        print(
+            "[20261215] 从隔离区放回被跳过的行：{rows}".format(
+                rows=int(restored or 0)
+            )
+        )
+
+        # [*] 2026-11-09 幂等性修复：行已经回到它该在的表里了，隔离区的副本
+        # 必须删掉 —— 否则「降级 → 再升级」会把同一批行写两遍，
+        # 隔离区从 9 行涨到 18 行（生产演练实测）。
+        cleared = op.get_bind().execute(
+            sa.text(
+                """
+                DELETE FROM core.data_quarantine
+                 WHERE source_file = :source_file
+                   AND error_type = :error_type
+                """
+            ),
+            {
+                "source_file": _ORPHAN_SOURCE_FILE,
+                "error_type": _ORPHAN_ERROR_TYPE,
+            },
+        ).rowcount
+        print(
+            "[20261215] 清理隔离区中已放回的副本：{rows}".format(
+                rows=int(cleared or 0)
+            )
+        )
+
 
 def upgrade() -> None:
     if not _table_exists("sales_targets_a"):
@@ -670,6 +948,41 @@ def upgrade() -> None:
     print(
         "[20261215] a_class.sales_targets_a 源行数：{rows}".format(rows=source_rows)
     )
+
+    # 店铺不在维度表里的源行：外键不允许落库 ⇒ 只能跳过，但必须显形。
+    orphans = _orphan_source_rows()
+    migratable_rows = source_rows - len(orphans)
+    if orphans:
+        # 只允许跳过「本来就不可见」的行（有业务数据 ⇒ 数据缺口 ⇒ 中止）。
+        _verify_orphans_are_invisible(orphans)
+        quarantined = _quarantine_orphan_rows(orphans)
+        print(
+            "[20261215] [WARN] {n} 行引用的店铺未登记在 {dim}，无法落库"
+            "（外键 fk_breakdown_shop），已写入隔离区 core.data_quarantine"
+            "（error_type={err}）".format(
+                n=len(orphans),
+                dim=_SHOP_DIMENSION,
+                err=_ORPHAN_ERROR_TYPE,
+            )
+        )
+        for shop in sorted({row["shop_id"] for row in orphans}):
+            amount = sum(
+                float(row["target_amount"] or 0)
+                for row in orphans
+                if row["shop_id"] == shop
+            )
+            print(
+                "[20261215] [WARN]   店铺 {shop}：{rows} 行 / 目标金额合计 {amt}".format(
+                    shop=shop,
+                    rows=sum(1 for row in orphans if row["shop_id"] == shop),
+                    amt=amount,
+                )
+            )
+        print(
+            "[20261215] 可落库源行数：{rows}（隔离 {q} 行）".format(
+                rows=migratable_rows, q=quarantined
+            )
+        )
 
     normalized = _normalize_shop_breakdown_periods()
     print(
@@ -687,7 +1000,7 @@ def upgrade() -> None:
 
     # fail-closed：校验不过就中止，表不会被删。
     _verify_fact_coverage()
-    _verify_view_keys(source_rows)
+    _verify_view_keys(migratable_rows)
     _verify_monthly_totals()
 
     # 视图先切到新口径（不再依赖待删表），再删表。

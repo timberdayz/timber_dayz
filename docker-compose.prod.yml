@@ -17,21 +17,41 @@ services:
     #   收口后理论峰值 8MB×80 = 640 MiB，实测 PG 常驻从 716 MiB 降到 356 MiB。
     #   effective_cache_size 4GB 与宿主机实际 buff/cache（2.1 GiB）严重不符，
     #   会误导优化器选「能全放内存」的激进计划；改成 2GB 后计划更贴近现实。
+    #
+    # 2026-11-09：max_connections 80→200，work_mem 8MB→4MB。
+    #   原因：生产实测连接数打满 80/80，应用拿不到连接 ⇒ 请求直接失败（502）。
+    #         连接数上限本身是事故的直接诱因，80 太小。
+    #   为什么必须同时降 work_mem：PG 容器的**生效**上限是 1.5 GiB
+    #   （来自 docker-compose.cloud.yml，它叠在 prod overlay 之后 ⇒ 覆盖这里的 4G），
+    #   而 work_mem × max_connections 的理论峰值必须留在 1024 MB 安全线内
+    #   （tests/test_verify_remote_deploy_contracts.py 有门禁）：
+    #     8MB × 200 = 1600 MB > 1536 MB 上限 ⇒ 又会被 OOMKill；
+    #     4MB × 200 = 800 MB ✓（叠加 shared_buffers 256MB 仍在 1.5 GiB 内）。
+    #   代价：单次排序/哈希可用内存减半 ⇒ 大聚合查询更容易溢写磁盘（变慢，不报错）。
+    #   ⚠️ 这只是**争取时间**：连接泄漏不修，200 一样会被打满，
+    #      根治必须落在代码侧（连接归还 + 池回收）。
     command:
       - postgres
       - -c
       - statement_timeout=120s
       - -c
-      - work_mem=8MB
+      - work_mem=4MB
       - -c
       - shared_buffers=256MB
       - -c
       - effective_cache_size=2GB
       - -c
-      - max_connections=80
+      - max_connections=200
       - -c
       - max_parallel_workers_per_gather=4
     restart: always
+    # [LOG ROTATION] 容器日志必须有上限：json-file 默认不轮转，
+    #   一次连接风暴就能把宿主机磁盘写满（生产 access.log 51MB / error.log 106MB 已出现过）。
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-xihong_erp}
       POSTGRES_USER: ${POSTGRES_USER:-erp_user}
@@ -78,6 +98,12 @@ services:
     image: redis:7-alpine
     container_name: xihong_erp_redis
     restart: always
+    # [LOG ROTATION] 见 postgres 段说明：json-file 必须带上限，否则日志撑爆磁盘。
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
@@ -112,6 +138,12 @@ services:
         - ENVIRONMENT=production
     container_name: xihong_erp_backend_api
     restart: always
+    # [LOG ROTATION] 见 postgres 段说明：json-file 必须带上限，否则日志撑爆磁盘。
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
     environment:
       # 数据库配置
       DATABASE_URL: ${DATABASE_URL}
@@ -304,6 +336,12 @@ services:
         - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000}
     container_name: xihong_erp_frontend
     restart: always
+    # [LOG ROTATION] 见 postgres 段说明：json-file 必须带上限，否则日志撑爆磁盘。
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
     # 生产最小端口暴露：frontend 不映射宿主机端口（通过 nginx 反向代理访问 /）
     # 明确清空端口映射，确保生产环境不暴露端口
     ports: [] # 清空端口映射，服务仍可通过 frontend:80 在容器网络内访问
@@ -333,6 +371,15 @@ services:
     image: nginx:alpine
     container_name: xihong_erp_nginx
     restart: always
+    # [LOG ROTATION] 见 postgres 段说明：json-file 必须带上限，否则日志撑爆磁盘。
+    # ⚠️ 注意：nginx 自己的 access/error log 写的是文件（/var/log/nginx/*.log，挂了宿主机 ./logs），
+    #    不走容器 stdout ⇒ 这里的 json-file 轮转**管不到那两个文件**，
+    #    文件日志还需要 logrotate 之类单独处理。
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
@@ -384,6 +431,12 @@ services:
         - ENVIRONMENT=production
     container_name: xihong_erp_celery_worker
     restart: always
+    # [LOG ROTATION] 见 postgres 段说明：json-file 必须带上限，否则日志撑爆磁盘。
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
     # ⚠️ 重要：必须指定队列和并发数，与 backend/celery_app.py 中的配置一致
     # 队列说明：
     # - data_sync: 数据同步任务（主要业务任务）
@@ -483,6 +536,12 @@ services:
         - ENVIRONMENT=production
     container_name: xihong_erp_celery_beat
     restart: always
+    # [LOG ROTATION] 见 postgres 段说明：json-file 必须带上限，否则日志撑爆磁盘。
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
     command: celery -A backend.celery_app beat --loglevel=info
     environment:
       DATABASE_URL: ${DATABASE_URL}

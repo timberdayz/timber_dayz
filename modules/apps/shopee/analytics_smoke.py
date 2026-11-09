@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import os
 import sys
@@ -23,6 +22,7 @@ from modules.apps.collection_center.browser_config_helper import (
     get_browser_context_args,
     get_browser_launch_args,
 )
+from backend.utils.async_task_runner import run_async_task
 from modules.components.base import ExecutionContext
 from modules.core.logger import get_logger
 from modules.platforms.shopee.components.analytics_export import ShopeeAnalyticsExport
@@ -337,7 +337,7 @@ async def _run(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
-    return asyncio.run(_run(args))
+    return run_async_task(lambda: _run(args))
 
 
 if __name__ == "__main__":

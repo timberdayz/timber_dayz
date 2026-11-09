@@ -836,7 +836,10 @@ class ShopeePlaywrightExporter:
                     pass
 
             # 构造导出脚本
-            script_export = """
+            # [*] 用 raw 字符串：脚本里有正则 ``filename\*=UTF-8''``，
+            # 非 raw 字符串会让 Python 报 ``invalid escape sequence '\*'``
+            # 的 SyntaxWarning（CI 噪音，内容本身不变）。
+            script_export = r"""
             async ({export_url, download_api, shop_id, start_ts, end_ts}) => {
               const p = new URL(export_url);
               p.searchParams.set('start_ts', String(start_ts));

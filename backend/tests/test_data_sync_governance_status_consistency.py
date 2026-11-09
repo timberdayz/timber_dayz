@@ -294,6 +294,19 @@ async def test_governance_detailed_coverage_skips_temp_development_sample_files(
     real_sample_path = tmp_path / "shopee_products_daily_real.xlsx"
     real_sample_path.write_text("demo", encoding="utf-8")
 
+    # 「临时开发样本文件」必须**真实存在于磁盘上**, 否则它会被
+    # ``to_absolute_path(...).exists()`` 提前过滤掉, 组合就没有任何待办文件,
+    # 于是整条组合被归档到 ``archived_covered_list`` —— 断言的
+    # ``coverage["covered"]`` 就会是空列表。
+    #
+    # ⚠️ 这里的路径必须是**绝对路径**(tmp_path 下), 不能写仓库相对路径:
+    # 仓库相对路径依赖开发者本机恰好留有 ``temp/development/`` 下的历史文件,
+    # 干净 checkout / CI 上必然不存在 ⇒ 这个测试会变红(已实测)。
+    dev_sample_dir = tmp_path / "temp" / "development"
+    dev_sample_dir.mkdir(parents=True, exist_ok=True)
+    dev_sample_path = dev_sample_dir / "shopee_products_daily_20250128_case3.xlsx"
+    dev_sample_path.write_text("demo", encoding="utf-8")
+
     async with session_factory() as session:
         session.add(
             FieldMappingTemplate(
@@ -313,8 +326,8 @@ async def test_governance_detailed_coverage_skips_temp_development_sample_files(
         session.add_all(
             [
                 CatalogFile(
-                    file_path="temp/development/shopee_products_daily_20250128_case3.xlsx",
-                    file_name="shopee_products_daily_20250128_case3.xlsx",
+                    file_path=str(dev_sample_path),
+                    file_name=dev_sample_path.name,
                     source="data/raw",
                     platform_code="shopee",
                     source_platform="shopee",

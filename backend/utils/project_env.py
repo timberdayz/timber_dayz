@@ -41,7 +41,19 @@ TEST_DATABASE_URL_VAR = "XIHONG_TEST_DATABASE_URL"
 #: (``.env`` 覆盖 ``.env.local``, 后者再覆盖既有环境变量) ——
 #: 否则等于悄悄改了 ``load_project_env`` 的契约,
 #: ``backend/tests/test_project_env.py`` 里直接校验覆盖顺序的用例就会失败。
-GUARDED_ENV_KEYS = ("DATABASE_URL", TEST_DATABASE_URL_VAR)
+#:
+#: ``CELERY_BROKER_URL`` / ``CELERY_RESULT_BACKEND`` 在这里的原因:
+#: 测试护栏把它们钉成了 Celery 的**内存实现**(``memory://`` /
+#: ``cache+memory://``), 目的是让测试**永不连真实 Redis**、也永不因
+#: 「连不上 Redis -> kombu 无限重试」把整个测试会话拖死
+#: (2026-11-09 实测: 单次 ``task.delay()`` 阻塞 16~17 秒)。
+#: 若允许 ``.env`` 覆盖, 仓库根 ``.env`` 里的真实 Redis 地址会把护栏冲掉。
+GUARDED_ENV_KEYS = (
+    "DATABASE_URL",
+    TEST_DATABASE_URL_VAR,
+    "CELERY_BROKER_URL",
+    "CELERY_RESULT_BACKEND",
+)
 
 
 def isolated_database_url() -> str:

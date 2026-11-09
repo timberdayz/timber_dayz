@@ -15,9 +15,11 @@ test('router exposes my tasks and task detail routes', () => {
 })
 
 test('my tasks route is no longer admin only', () => {
+  const myTasksStart = routerSource.indexOf("path: '/my-tasks'")
+  // 只截取「我的待办」这一条路由对象，避免把后面 admin 专属的路由也算进来
   const myTasksBlock = routerSource.slice(
-    routerSource.indexOf("path: '/my-tasks'"),
-    routerSource.indexOf("path: '/my-requests'")
+    myTasksStart,
+    routerSource.indexOf("path: '", myTasksStart + 1)
   )
   assert.equal(myTasksBlock.includes("roles: ['admin']"), false)
   assert.equal(myTasksBlock.includes("'manager'"), true)

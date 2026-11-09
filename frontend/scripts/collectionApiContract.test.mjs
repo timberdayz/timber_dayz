@@ -134,7 +134,13 @@ test('resolveAccountIdsForConfigRun preserves explicit account ids', () => {
 test('getAvailableDomainOptions keeps full domain list for miaoshou config setup', () => {
   assert.deepEqual(
     getAvailableDomainOptions('miaoshou').map((item) => item.value),
-    ['orders', 'products', 'analytics', 'finance', 'services', 'inventory']
+    ['orders', 'products', 'analytics', 'finance', 'services', 'inventory', 'purchase']
+  )
+
+  assert.equal(
+    getAvailableDomainOptions('miaoshou').some((item) => item.label === '采购'),
+    true,
+    'purchase domain should be exposed with a readable Chinese label'
   )
 })
 

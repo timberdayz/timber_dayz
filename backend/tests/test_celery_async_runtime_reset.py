@@ -3,7 +3,40 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 
-def test_reset_async_engine_pool_for_new_loop_disposes_engine(monkeypatch):
+def test_dispose_async_engine_truly_closes_pool(monkeypatch):
+    """统一收尾必须**真正关闭**连接（close=True 语义），不能只是软丢弃。
+
+    历史实现是 ``dispose(close=False)``：只把连接池标记作废，底层 TCP 连接
+    仍然开着 ⇒ 生产 80 个连接槽位被泄漏占满，业务随机 500。
+
+    [*] 2026-11-09：async 引擎改为**按事件循环分发**，收尾要先把当前循环的
+    引擎从注册表摘掉再真正关闭它 —— 连接必须跟着循环一起走。
+    """
+    from backend.models import database as database_module
+
+    called = {"dispose": 0, "pop": 0}
+
+    class _FakeAsyncEngine:
+        async def dispose(self):
+            called["dispose"] += 1
+
+    class _FakeRegistry:
+        def pop_current_loop_engine(self):
+            called["pop"] += 1
+            return _FakeAsyncEngine()
+
+    monkeypatch.setattr(
+        database_module, "_ASYNC_ENGINE_REGISTRY", _FakeRegistry(), raising=False
+    )
+
+    asyncio.run(database_module.dispose_async_engine())
+
+    assert called["pop"] == 1, "收尾必须把当前循环的引擎从注册表摘掉"
+    assert called["dispose"] == 1
+
+
+def test_reset_async_engine_pool_for_new_loop_is_soft_fallback(monkeypatch, caplog):
+    """兜底函数只做软丢弃，并且必须显形（warning），不能装作已解决。"""
     from backend.models import database as database_module
 
     called = {"dispose": 0}
@@ -18,13 +51,15 @@ def test_reset_async_engine_pool_for_new_loop_disposes_engine(monkeypatch):
 
     monkeypatch.setattr(database_module, "async_engine", _FakeAsyncEngine(), raising=False)
 
-    database_module.reset_async_engine_pool_for_new_loop()
+    with caplog.at_level("WARNING"):
+        database_module.reset_async_engine_pool_for_new_loop()
 
     assert called["dispose"] == 1
     assert called["close"] is False
+    assert any("run_async_task" in record.message for record in caplog.records)
 
 
-def test_auto_ingest_pending_files_resets_async_engine_before_asyncio_run(monkeypatch):
+def test_auto_ingest_pending_files_uses_unified_async_runner(monkeypatch):
     from backend.tasks import scheduled_tasks as scheduled_module
 
     calls = []
@@ -46,20 +81,15 @@ def test_auto_ingest_pending_files_resets_async_engine_before_asyncio_run(monkey
     monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
     monkeypatch.setattr(
         scheduled_module,
-        "reset_async_engine_pool_for_new_loop",
-        lambda: calls.append("reset"),
+        "run_async_task",
+        lambda factory: (calls.append("run"), [{"status": "skipped", "message": "no_template"}])[1],
         raising=False,
-    )
-    monkeypatch.setattr(
-        scheduled_module.asyncio,
-        "run",
-        lambda coro: (calls.append("run"), coro.close(), [{"status": "skipped", "message": "no_template"}])[2],
     )
 
     result = scheduled_module.auto_ingest_pending_files(max_files=1)
 
     assert result["status"] == "success"
-    assert calls[:2] == ["reset", "run"]
+    assert calls == ["run"]
 
 
 def test_auto_ingest_pending_files_uses_env_default_batch_size(monkeypatch):
@@ -108,12 +138,12 @@ def test_auto_ingest_pending_files_uses_env_default_batch_size(monkeypatch):
 
     monkeypatch.setenv("AUTO_INGEST_MAX_FILES_PER_RUN", "20")
     monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
-    monkeypatch.setattr(scheduled_module, "reset_async_engine_pool_for_new_loop", lambda: None, raising=False)
     monkeypatch.setattr("backend.services.task_center_sync_service.TaskCenterSyncService", _FakeTaskCenterSyncService)
     monkeypatch.setattr(
-        scheduled_module.asyncio,
-        "run",
-        lambda coro: (coro.close(), [{"status": "success", "file_id": i} for i in range(1, 21)])[1],
+        scheduled_module,
+        "run_async_task",
+        lambda factory: [{"status": "success", "file_id": i} for i in range(1, 21)],
+        raising=False,
     )
 
     result = scheduled_module.auto_ingest_pending_files()
@@ -147,7 +177,7 @@ def test_auto_ingest_pending_files_skips_when_advisory_lock_not_acquired(monkeyp
 
     monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
     monkeypatch.setattr("backend.services.task_center_sync_service.TaskCenterSyncService", _UnexpectedTaskCenterSyncService)
-    monkeypatch.setattr(scheduled_module.asyncio, "run", lambda coro: calls.__setitem__("run", calls["run"] + 1))
+    monkeypatch.setattr(scheduled_module, "run_async_task", lambda factory: calls.__setitem__("run", calls["run"] + 1), raising=False)
 
     result = scheduled_module.auto_ingest_pending_files(max_files=20)
 
@@ -273,19 +303,14 @@ def test_auto_ingest_pending_files_creates_auto_ingest_task_record(monkeypatch):
 
     monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
     monkeypatch.setattr(
-        scheduled_module,
-        "reset_async_engine_pool_for_new_loop",
-        lambda: None,
-        raising=False,
-    )
-    monkeypatch.setattr(
         "backend.services.task_center_sync_service.TaskCenterSyncService",
         _FakeTaskCenterSyncService,
     )
     monkeypatch.setattr(
-        scheduled_module.asyncio,
-        "run",
-        lambda coro: (coro.close(), results)[1],
+        scheduled_module,
+        "run_async_task",
+        lambda factory: results,
+        raising=False,
     )
 
     result = scheduled_module.auto_ingest_pending_files(max_files=3)
@@ -550,7 +575,7 @@ def test_recover_template_update_required_files_returns_ready_files_to_pending(m
 
     monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _FakeAsyncSession())
     monkeypatch.setattr("backend.services.data_sync_service.DataSyncService", _FakeDataSyncService)
-    monkeypatch.setattr(scheduled_module.asyncio, "run", lambda coro: original_asyncio_run(coro))
+    monkeypatch.setattr(scheduled_module, "run_async_task", lambda factory: original_asyncio_run(factory()), raising=False)
 
     db = _FakeSession()
     recovered = scheduled_module._recover_template_update_required_files(db, limit=20)
@@ -655,19 +680,14 @@ def test_auto_ingest_pending_files_records_quarantined_success_result(monkeypatc
 
     monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
     monkeypatch.setattr(
-        scheduled_module,
-        "reset_async_engine_pool_for_new_loop",
-        lambda: None,
-        raising=False,
-    )
-    monkeypatch.setattr(
         "backend.services.task_center_sync_service.TaskCenterSyncService",
         _FakeTaskCenterSyncService,
     )
     monkeypatch.setattr(
-        scheduled_module.asyncio,
-        "run",
-        lambda coro: (coro.close(), results)[1],
+        scheduled_module,
+        "run_async_task",
+        lambda factory: results,
+        raising=False,
     )
 
     result = scheduled_module.auto_ingest_pending_files(max_files=1)
@@ -713,27 +733,22 @@ def test_auto_ingest_pending_files_does_not_create_task_when_no_pending_files(mo
     assert result == {"status": "success", "processed": 0, "details": []}
 
 
-def test_sync_single_file_task_resets_async_engine_before_asyncio_run(monkeypatch):
+def test_sync_single_file_task_uses_unified_async_runner(monkeypatch):
     from backend.tasks import data_sync_tasks as task_module
 
     calls = []
 
     monkeypatch.setattr(
         task_module,
-        "reset_async_engine_pool_for_new_loop",
-        lambda: calls.append("reset"),
+        "run_async_task",
+        lambda factory: (calls.append("run"), {"success": True})[1],
         raising=False,
-    )
-    monkeypatch.setattr(
-        task_module.asyncio,
-        "run",
-        lambda coro: (calls.append("run"), coro.close(), {"success": True})[2],
     )
 
     result = task_module.sync_single_file_task.run(file_id=1, task_id="task-1")
 
     assert result["success"] is True
-    assert calls[:2] == ["reset", "run"]
+    assert calls == ["run"]
 
 
 def test_auto_ingest_pending_files_blocks_template_update_required(monkeypatch):
@@ -798,12 +813,6 @@ def test_auto_ingest_pending_files_blocks_template_update_required(monkeypatch):
             raise AssertionError("sync_single_file should not run when template update is required")
 
     monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
-    monkeypatch.setattr(
-        scheduled_module,
-        "reset_async_engine_pool_for_new_loop",
-        lambda: None,
-        raising=False,
-    )
     monkeypatch.setattr("backend.services.data_sync_service.DataSyncService", _FakeDataSyncService)
     monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _FakeAsyncSession())
     monkeypatch.setattr(
@@ -811,10 +820,10 @@ def test_auto_ingest_pending_files_blocks_template_update_required(monkeypatch):
         _FakeTaskCenterSyncService,
     )
 
-    def _fake_async_run(coro):
-        return original_asyncio_run(coro)
+    def _fake_async_run(factory):
+        return original_asyncio_run(factory())
 
-    monkeypatch.setattr(scheduled_module.asyncio, "run", _fake_async_run)
+    monkeypatch.setattr(scheduled_module, "run_async_task", _fake_async_run, raising=False)
 
     result = scheduled_module.auto_ingest_pending_files(max_files=1)
 
@@ -867,22 +876,15 @@ def test_auto_ingest_pending_files_marks_task_failed_on_top_level_exception(monk
         def add_link(self, *args, **kwargs):
             return None
 
-    def _raise_from_asyncio_run(coro):
-        coro.close()
+    def _raise_from_asyncio_run(factory):
         raise RuntimeError("auto ingest crashed")
 
     monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
     monkeypatch.setattr(
-        scheduled_module,
-        "reset_async_engine_pool_for_new_loop",
-        lambda: None,
-        raising=False,
-    )
-    monkeypatch.setattr(
         "backend.services.task_center_sync_service.TaskCenterSyncService",
         _FakeTaskCenterSyncService,
     )
-    monkeypatch.setattr(scheduled_module.asyncio, "run", _raise_from_asyncio_run)
+    monkeypatch.setattr(scheduled_module, "run_async_task", _raise_from_asyncio_run, raising=False)
 
     result = scheduled_module.auto_ingest_pending_files(max_files=1)
 
@@ -939,15 +941,9 @@ def test_auto_ingest_pending_files_respects_global_concurrency_cap(monkeypatch):
 
     monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
     monkeypatch.setattr(scheduled_module, "AUTO_INGEST_MAX_CONCURRENT", 2, raising=False)
-    monkeypatch.setattr(
-        scheduled_module,
-        "reset_async_engine_pool_for_new_loop",
-        lambda: None,
-        raising=False,
-    )
     monkeypatch.setattr("backend.services.data_sync_service.DataSyncService", _FakeDataSyncService)
     monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _FakeAsyncSession())
-    monkeypatch.setattr(scheduled_module.asyncio, "run", lambda coro: original_asyncio_run(coro))
+    monkeypatch.setattr(scheduled_module, "run_async_task", lambda factory: original_asyncio_run(factory()), raising=False)
 
     result = scheduled_module.auto_ingest_pending_files(max_files=10)
 

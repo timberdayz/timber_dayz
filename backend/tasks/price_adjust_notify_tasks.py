@@ -15,14 +15,12 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from sqlalchemy import select
 
 from backend.celery_app import celery_app
+from backend.utils.async_task_runner import run_async_task
 from backend.models.database import (
     AsyncSessionLocal,
-    reset_async_engine_pool_for_new_loop,
 )
 from backend.services.feishu_projection_service import FeishuProjectionService
 from backend.services.price_adjust_notify_service import PriceAdjustNotifyService
@@ -166,5 +164,4 @@ async def _async_detect_and_enqueue_price_adjustments() -> dict:
     soft_time_limit=1500,
 )
 def detect_and_notify_price_adjustments(self):  # noqa: ANN201
-    reset_async_engine_pool_for_new_loop()
-    return asyncio.run(_async_detect_and_enqueue_price_adjustments())
+    return run_async_task(_async_detect_and_enqueue_price_adjustments)

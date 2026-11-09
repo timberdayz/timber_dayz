@@ -281,11 +281,10 @@ def test_auto_ingest_marks_template_update_required_when_readiness_blocks(
             raise AssertionError("sync_single_file should not run for update_required")
 
     monkeypatch.setattr(scheduled_module, "SessionLocal", lambda: _FakeSession(), raising=False)
-    monkeypatch.setattr(scheduled_module, "reset_async_engine_pool_for_new_loop", lambda: None, raising=False)
     monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _FakeAsyncSession())
     monkeypatch.setattr("backend.services.data_sync_service.DataSyncService", _FakeDataSyncService)
     monkeypatch.setattr("backend.services.task_center_sync_service.TaskCenterSyncService", _FakeTaskCenterSyncService)
-    monkeypatch.setattr(scheduled_module.asyncio, "run", lambda coro: original_asyncio_run(coro))
+    monkeypatch.setattr(scheduled_module, "run_async_task", lambda factory: original_asyncio_run(factory()), raising=False)
 
     result = scheduled_module.auto_ingest_pending_files(max_files=1)
 

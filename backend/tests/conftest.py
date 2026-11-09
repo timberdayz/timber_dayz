@@ -119,6 +119,42 @@ os.environ["ACCOUNT_SESSION_LOCK_BACKEND"] = "local"
 # 而不是干等 30 分钟把整个测试会话拖死。
 os.environ["ACCOUNT_SESSION_LOCK_WAIT_TIMEOUT"] = "10"
 
+# ---------------------------------------------------------------------------
+# 护栏: 测试绝不能派发 Celery 任务到真实 Redis
+# ---------------------------------------------------------------------------
+#
+# 事故现场(2026-11-09)
+# ------------------
+# ``task.delay()`` 不只是「把消息发到 broker」: Celery 在 ``send_task()`` 末尾
+# 会回调 ``backend.on_task_call()``, Redis 结果后端在这里**同步订阅**该任务的
+# pubsub 通道 —— 于是**每次派发任务都要连一次 Redis**, 且是阻塞式连接。
+#
+# Redis 不可达时, kombu 的 ``retry_over_time`` 是**嵌套**的(外层 reconnect 套
+# 内层 ensure, 默认各 20 次 × 1 秒), 实测单次 ``delay()`` 要**阻塞 16~17 秒**
+# 才抛错。放进 pytest 里就是: 跑到某个用例时整个测试会话**静默挂死**,
+# CPU 零增量, 看起来像「跑到 44% 卡住了」。
+#
+# 为什么本地会触发
+# ----------------
+# 本机 Redis 实际在 **16379**(带密码), 而 ``backend/celery_app.py`` 在
+# 环境变量缺失时回落到 ``redis://localhost:6379/0`` —— 那个端口**没人监听**。
+# 于是测试进程「连不上 Redis」-> 走进上面那条无限重试路径。
+#
+# 这里**无条件**把 broker / result backend 钉成 Celery 的**内存实现**:
+# * ``memory://``          —— 进程内队列, 派发立刻返回(实测 0.036 秒)
+# * ``cache+memory://``    —— 进程内结果缓存, 不落盘不联网
+#
+# 效果:
+# 1. 测试永远不连真实 Redis(与上面「账号会话锁用假后端」同一原则);
+# 2. 任何用例派发 Celery 任务都是**毫秒级**返回, 不会再拖死整个会话;
+# 3. 需要验证真实 Redis 语义的用例自己注入假后端
+#    (见 ``backend/tests/test_main_account_session_lock.py``)。
+#
+# 注意: 必须在**任何 backend 模块被 import 之前**设置 ——
+# ``backend/celery_app.py`` 在 import 期就读取这两个环境变量。
+os.environ["CELERY_BROKER_URL"] = "memory://"
+os.environ["CELERY_RESULT_BACKEND"] = "cache+memory://"
+
 from modules.core.db import Base  # noqa: E402  (必须晚于上面的护栏设置)
 
 

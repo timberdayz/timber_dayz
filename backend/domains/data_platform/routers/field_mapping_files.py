@@ -201,6 +201,10 @@ async def bulk_ingest(payload: dict, db: AsyncSession = Depends(get_async_db)):
         total_staged, total_imported, total_quarantined = 0, 0, 0
         total_valid, total_error = 0, 0
         results = []
+        # [*] 2026-11-09: 订单正式账本是否真的落库（false 时响应会如实标注，
+        # 不再让「暂存成功、正式账本为空」被当成整体成功）
+        orders_fact_imported = True
+        orders_fact_note = ""
         
         for idx, b in enumerate(batches):
             file_name = b.get("file_name", f"batch_{idx}")
@@ -256,6 +260,7 @@ async def bulk_ingest(payload: dict, db: AsyncSession = Depends(get_async_db)):
                         valid_rows.append(row)
                 
                 staged, imported = 0, 0
+                file_orders_fact_imported = None
                 if valid_rows:
                     file_record = None
                     if target_file_id:
@@ -265,6 +270,12 @@ async def bulk_ingest(payload: dict, db: AsyncSession = Depends(get_async_db)):
                     if domain == "orders":
                         staged = await stage_orders(db, valid_rows, ingest_task_id=task_id, file_id=target_file_id)
                         imported = await upsert_orders(db, valid_rows, file_record=file_record)
+                        file_orders_fact_imported = bool(
+                            getattr(imported, "fact_imported", True)
+                        )
+                        if not file_orders_fact_imported:
+                            orders_fact_imported = False
+                            orders_fact_note = getattr(imported, "note", "")
                     else:
                         staged = await stage_product_metrics(db, valid_rows, ingest_task_id=task_id, file_id=target_file_id)
                         imported = await upsert_product_metrics(db, valid_rows, file_record=file_record)
@@ -291,6 +302,7 @@ async def bulk_ingest(payload: dict, db: AsyncSession = Depends(get_async_db)):
                     "error_rows": len(error_rows),
                     "staged": staged,
                     "imported": imported,
+                    "orders_fact_imported": file_orders_fact_imported,
                     "quarantined": quarantined_count
                 })
                 
@@ -307,6 +319,9 @@ async def bulk_ingest(payload: dict, db: AsyncSession = Depends(get_async_db)):
             "task_id": task_id,
             "staged": total_staged,
             "imported": total_imported,
+            # [*] 2026-11-09: 如实上报「订单正式账本是否真的落库」
+            "orders_fact_imported": orders_fact_imported,
+            "orders_fact_note": orders_fact_note,
             "quarantined": total_quarantined,
             "validation": {
                 "total_files": len(batches),
