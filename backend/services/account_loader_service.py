@@ -112,16 +112,6 @@ class AccountLoaderService:
         )
         return {row.data_domain: bool(row.enabled) for row in result.scalars().all()}
 
-    def _load_capabilities_sync(
-        self, shop_account_id: int, db: Session
-    ) -> Dict[str, bool]:
-        rows = (
-            db.query(ShopAccountCapability)
-            .filter(ShopAccountCapability.shop_account_id == shop_account_id)
-            .all()
-        )
-        return {row.data_domain: bool(row.enabled) for row in rows}
-
     async def load_account_async(self, account_id: str, db: AsyncSession) -> Optional[Dict]:
         result = await db.execute(
             select(ShopAccount).where(
@@ -182,74 +172,6 @@ class AccountLoaderService:
                 out.append(account_dict)
         logger.info(f"从主/店铺账号表加载了 {len(out)} 个活跃账号" + (f" (平台: {platform})" if platform else ""))
         return out
-
-    def load_account(self, account_id: str, db: Union[Session, AsyncSession]) -> Optional[Dict]:
-        if isinstance(db, AsyncSession):
-            raise ValueError("异步 Session 请使用 load_account_async() 方法")
-
-        shop_account = (
-            db.query(ShopAccount)
-            .filter(
-                ShopAccount.shop_account_id == account_id,
-                ShopAccount.enabled == True,
-            )
-            .first()
-        )
-        if not shop_account:
-            logger.warning(f"账号 {account_id} 未找到或未启用")
-            return None
-
-        main_account = (
-            db.query(MainAccount)
-            .filter(
-                MainAccount.main_account_id == shop_account.main_account_id,
-                MainAccount.platform == shop_account.platform,
-                MainAccount.enabled == True,
-            )
-            .first()
-        )
-        if not main_account:
-            logger.warning(f"主账号 {shop_account.main_account_id} 未找到或未启用")
-            return None
-
-        capabilities = self._load_capabilities_sync(shop_account.id, db)
-        account_dict = self._build_account_dict(main_account, shop_account, capabilities)
-        if account_dict:
-            logger.debug(f"从主/店铺账号表加载账号: {account_id} ({shop_account.store_name})")
-        return account_dict
-
-    def load_all_accounts(self, db: Session, platform: Optional[str] = None) -> List[Dict]:
-        query = db.query(ShopAccount).filter(ShopAccount.enabled == True)
-        if platform:
-            query = query.filter(ShopAccount.platform.ilike(platform))
-
-        shop_accounts = query.order_by(ShopAccount.platform, ShopAccount.store_name).all()
-        result: List[Dict] = []
-        for shop_account in shop_accounts:
-            account_dict = self.load_account(shop_account.shop_account_id, db)
-            if account_dict:
-                result.append(account_dict)
-
-        logger.info(
-            f"从主/店铺账号表加载了 {len(result)} 个活跃账号"
-            + (f"(平台: {platform})" if platform else "")
-        )
-        return result
-
-    def get_accounts_by_capability(
-        self,
-        db: Session,
-        platform: str,
-        data_domain: str,
-    ) -> List[Dict]:
-        accounts = self.load_all_accounts(db, platform=platform)
-        filtered = [
-            acc for acc in accounts
-            if acc.get("capabilities", {}).get(data_domain, False)
-        ]
-        logger.info(f"平台 {platform} 支持 {data_domain} 的账号数: {len(filtered)}/{len(accounts)}")
-        return filtered
-
 
 _account_loader_service = None
 

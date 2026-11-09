@@ -307,14 +307,6 @@ def main():
             'details': '提取+处理+缩略图'
         }
     
-    def test_bulk_importer():
-        from backend.services.bulk_importer import BulkImporter
-        return {
-            'success': True,
-            'message': 'COPY批量导入服务可用',
-            'details': 'PostgreSQL Phase 2'
-        }
-    
     def test_data_importer():
         from backend.services.data_importer import (
             stage_product_metrics,
@@ -328,7 +320,7 @@ def main():
     
     validator.test("4.1 ExcelParser服务", test_excel_parser)
     validator.test("4.2 图片提取/处理服务", test_image_services)
-    validator.test("4.3 COPY批量导入服务", test_bulk_importer)
+    # [*] 2026-12 清理:COPY批量导入服务(bulk_importer)无生产调用方,已归档删除
     validator.test("4.4 数据导入服务", test_data_importer)
     
     # ============ 测试5：PostgreSQL优化验证 ============

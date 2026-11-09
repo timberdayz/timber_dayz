@@ -78,66 +78,6 @@ class AuditService:
             print(f"Audit log failed: {e}")
             await db.rollback()
     
-    def get_user_actions(
-        self,
-        user_id: int,
-        page: int = 1,
-        page_size: int = 20,
-        db: Session = None
-    ) -> list:
-        """获取用户操作日志"""
-        if db is None:
-            db = next(get_db())
-        
-        offset = (page - 1) * page_size
-        logs = db.query(FactAuditLog).filter(
-            FactAuditLog.user_id == user_id
-        ).order_by(FactAuditLog.created_at.desc()).offset(offset).limit(page_size).all()
-        
-        return logs
-    
-    def get_resource_actions(
-        self,
-        resource: str,
-        resource_id: Optional[str] = None,
-        page: int = 1,
-        page_size: int = 20,
-        db: Session = None
-    ) -> list:
-        """获取资源操作日志"""
-        if db is None:
-            db = next(get_db())
-        
-        offset = (page - 1) * page_size
-        query = db.query(FactAuditLog).filter(FactAuditLog.resource_type == resource)  # v4.12.0修复:使用resource_type字段
-        
-        if resource_id:
-            query = query.filter(FactAuditLog.resource_id == resource_id)
-        
-        logs = query.order_by(FactAuditLog.created_at.desc()).offset(offset).limit(page_size).all()
-        return logs
-    
-    def get_recent_actions(
-        self,
-        hours: int = 24,
-        page: int = 1,
-        page_size: int = 20,
-        db: Session = None
-    ) -> list:
-        """获取最近的操作日志"""
-        if db is None:
-            db = next(get_db())
-        
-        from datetime import datetime, timedelta
-        since = datetime.now(timezone.utc) - timedelta(hours=hours)
-        
-        offset = (page - 1) * page_size
-        logs = db.query(FactAuditLog).filter(
-            FactAuditLog.created_at >= since
-        ).order_by(FactAuditLog.created_at.desc()).offset(offset).limit(page_size).all()
-        
-        return logs
-    
     # v4.12.0新增:数据同步操作日志
     async def log_sync_operation(
         self,
@@ -278,47 +218,5 @@ class AuditService:
             await db.rollback()
     
     # v4.12.0新增:获取数据同步审计追溯
-    def get_sync_audit_trail(
-        self,
-        file_id: Optional[int] = None,
-        task_id: Optional[str] = None,
-        page: int = 1,
-        page_size: int = 20,
-        db: Session = None
-    ) -> list:
-        """
-        获取数据同步审计追溯
-        
-        Args:
-            file_id: 文件ID(可选)
-            task_id: 任务ID(可选)
-            page: 页码
-            page_size: 每页数量
-            db: 数据库会话(可选)
-            
-        Returns:
-            审计日志列表
-        """
-        if db is None:
-            db = next(get_db())
-        
-        offset = (page - 1) * page_size
-        query = db.query(FactAuditLog).filter(
-            FactAuditLog.resource_type == "data_sync"
-        )
-        
-        if file_id:
-            query = query.filter(FactAuditLog.resource_id == str(file_id))
-        
-        if task_id:
-            # 通过changes_json或action_description查找task_id
-            # 注意:这里简化处理,实际应该从task_details中查询
-            query = query.filter(
-                FactAuditLog.action_description.like(f"%{task_id}%")
-            )
-        
-        logs = query.order_by(FactAuditLog.created_at.desc()).offset(offset).limit(page_size).all()
-        return logs
-
 # 全局审计服务实例
 audit_service = AuditService()

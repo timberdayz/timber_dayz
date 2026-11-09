@@ -55,12 +55,27 @@ def test_active_historical_docs_and_scripts_are_marked_historical():
         Path("README.md"),
         Path("scripts/check_b_class_tables.py"),
         Path("scripts/migrate_tables_to_b_class_schema.py"),
-        Path("scripts/test_data_sync_pipeline.py"),
     ]
 
     for path in paths:
         text = path.read_text(encoding="utf-8", errors="replace").lower()
         assert "historical" in text or "历史" in text
+
+
+def test_archived_manual_sync_scripts_are_removed():
+    """手工同步测试脚本已归档删除（异步函数里用同步查询，跑起来必崩）。
+
+    删除后不再需要「标注 historical」，但必须保证不会被重新放回仓库 ——
+    副本脚本是漂移的温床，门禁 scripts/verify_sync_query_usage.py 会拦下
+    新增的同类错配。
+    """
+    removed = [
+        Path("scripts/test_data_sync_pipeline.py"),
+        Path("scripts/test_data_sync_automated.py"),
+        Path("scripts/test_auto_sync_complete.py"),
+    ]
+    for path in removed:
+        assert not path.exists(), f"{path} 应保持归档删除状态"
 
 
 def test_quick_start_no_longer_recommends_metabase_runtime_steps():

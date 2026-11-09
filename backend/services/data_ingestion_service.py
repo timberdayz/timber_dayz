@@ -40,18 +40,9 @@ from backend.services.spreadsheet_header_reader import (
 from backend.services.executor_manager import (
     get_executor_manager,
 )  # v4.19.0新增:使用统一执行器管理器
-from backend.services.data_importer import (
-    stage_orders,
-    stage_product_metrics,
-    stage_inventory,
-    upsert_orders,
-    upsert_product_metrics,
-)
-from backend.services.operational_data_importer import (
-    upsert_traffic,
-    upsert_service,
-    upsert_analytics,
-)
+# [*] 2026-12 清理:data_importer 的入库函数(stage_*/upsert_*)已统一为 async 实现,
+# 本模块不再持有这些导入(此前只 import 未使用,却让读者以为这里能同步调用它们)。
+# [*] 2026-12 清理:operational_data_importer 模块无生产调用方,已归档删除。
 
 # [*] v4.6.0 DSS架构:使用RawDataImporter写入JSONB格式
 from backend.services.raw_data_importer import get_raw_data_importer
