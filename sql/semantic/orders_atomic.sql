@@ -1,5 +1,20 @@
 CREATE SCHEMA IF NOT EXISTS semantic;
 
+-- ── 消费方须知（不要在这里直查本视图） ────────────────────────────────
+--   本视图是**普通视图**：每行都要跑一次店铺别名解析
+--   （LEFT JOIN LATERAL → semantic.shop_identity_resolution_candidates），
+--   9 张 B 类事实表全量扫描 + 逐行 JSON 解析 + 逐行身份解析。
+--   实测（本地，同一段查询）：本视图 23.53 秒；物化视图 0.30 秒（结果一致）。
+--   生产更严重：物化视图的创建脚本记录过 count(*) 要 114.6 秒。
+--
+--   ⇒ **消费方一律读 semantic.fact_orders_atomic_mv**（见 orders_atomic_mv.sql）。
+--   口径不变：物化视图正文就是本视图正文（全字段透传），只改「什么时候算」。
+--
+--   ⚠ 别再试图给「空店铺」谓词建部分索引来提速：
+--     出口的 shop_id 是**身份裁决结果**（表达式），谓词无法下推到事实表；
+--     改用源表原始 shop_id 过滤虽能走索引，但那是**另一批数据**
+--     （源表原始空店铺 vs 裁决后 unknown，集合不相同），口径会变。
+
 CREATE OR REPLACE VIEW semantic.fact_orders_atomic AS
 WITH raw_orders AS (
     SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code

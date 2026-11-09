@@ -30,6 +30,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# 必须在仓库根进 sys.path **之后**才导入：直接以脚本方式启动时，
+# 顶层导入 backend.* 会因为仓库根尚不在 sys.path 而抛 ModuleNotFoundError
+# （backend/tests/test_pwcli_native_sys_path_bootstrap.py 守这条）。
+from backend.utils.async_task_runner import run_async_task  # noqa: E402
+
 PWCLI_ROOT = REPO_ROOT / "output" / "playwright" / ".pwcli_native"
 SESSIONS_DIR = PWCLI_ROOT / "sessions"
 DETACHED_PROCESS = 0x00000008
@@ -145,7 +150,10 @@ def ensure_dirs() -> None:
 
 
 def sanitize_token(value: str) -> str:
-    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in str(value or "").strip())
+    cleaned = "".join(
+        ch if ch.isalnum() or ch in ("-", "_") else "-"
+        for ch in str(value or "").strip()
+    )
     return cleaned.strip("-_") or "default"
 
 
@@ -177,7 +185,12 @@ def platform_state_path(platform: str) -> Path:
 
 
 def runtime_account_profile_dir(platform: str, account_id: str) -> Path:
-    return REPO_ROOT / "profiles" / session_manager_safe_token(platform.lower()) / session_manager_safe_token(account_id)
+    return (
+        REPO_ROOT
+        / "profiles"
+        / session_manager_safe_token(platform.lower())
+        / session_manager_safe_token(account_id)
+    )
 
 
 def resolve_default_profile_dir(session: str, account_id: str | None) -> Path | None:
@@ -189,7 +202,9 @@ def resolve_default_profile_dir(session: str, account_id: str | None) -> Path | 
     return platform_profile_root(platform).resolve()
 
 
-def resolve_default_state_config(session: str, account_id: str | None) -> dict[str, Any]:
+def resolve_default_state_config(
+    session: str, account_id: str | None
+) -> dict[str, Any]:
     """账号级巡店**没有**会话文件：登录态只由浏览器 profile 承载。
 
     账号级不再返回 ``default_state_path`` / ``default_state_mode``：
@@ -224,10 +239,14 @@ def load_storage_state_payload(path: Path) -> dict[str, Any]:
 
 def _write_raw_storage_state(path: Path, storage_state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(storage_state, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(
+        json.dumps(storage_state, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
-def read_storage_state_for_pwcli(metadata: dict[str, Any], context, *, path: Path | None = None) -> dict[str, Any]:
+def read_storage_state_for_pwcli(
+    metadata: dict[str, Any], context, *, path: Path | None = None
+) -> dict[str, Any]:
     platform = str(metadata.get("platform") or "").strip().lower()
     kwargs: dict[str, Any] = {}
     if platform == "tiktok":
@@ -270,7 +289,9 @@ def _capture_page_storage(page) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _supplement_tiktok_storage_state_from_pages(context, storage_state: dict[str, Any]) -> dict[str, Any]:
+def _supplement_tiktok_storage_state_from_pages(
+    context, storage_state: dict[str, Any]
+) -> dict[str, Any]:
     if not isinstance(storage_state, dict):
         storage_state = {}
     merged = dict(storage_state)
@@ -335,11 +356,15 @@ def save_default_storage_state_from_context(metadata: dict[str, Any], context) -
 
     storage_state = read_storage_state_for_pwcli(metadata, context)
     if str(metadata.get("platform") or "").strip().lower() == "tiktok":
-        storage_state = _supplement_tiktok_storage_state_from_pages(context, storage_state)
+        storage_state = _supplement_tiktok_storage_state_from_pages(
+            context, storage_state
+        )
     _write_raw_storage_state(Path(state_path), storage_state)
 
 
-def _apply_storage_state_payload(context, metadata: dict[str, Any], payload: dict[str, Any]) -> None:
+def _apply_storage_state_payload(
+    context, metadata: dict[str, Any], payload: dict[str, Any]
+) -> None:
     cookies = payload.get("cookies", [])
     if cookies:
         context.add_cookies(cookies)
@@ -349,7 +374,9 @@ def _apply_storage_state_payload(context, metadata: dict[str, Any], payload: dic
             continue
         temp_page = context.new_page()
         try:
-            temp_page.goto(origin["origin"], wait_until="domcontentloaded", timeout=60000)
+            temp_page.goto(
+                origin["origin"], wait_until="domcontentloaded", timeout=60000
+            )
             try:
                 temp_page.evaluate(
                     "(entries) => { for (const item of entries) { localStorage.setItem(item.name, item.value); } }",
@@ -358,7 +385,9 @@ def _apply_storage_state_payload(context, metadata: dict[str, Any], payload: dic
             except Exception as exc:
                 if not _is_navigation_context_error(exc):
                     raise
-                temp_page.goto(origin["origin"], wait_until="domcontentloaded", timeout=60000)
+                temp_page.goto(
+                    origin["origin"], wait_until="domcontentloaded", timeout=60000
+                )
                 temp_page.evaluate(
                     "(entries) => { for (const item of entries) { localStorage.setItem(item.name, item.value); } }",
                     local_storage,
@@ -436,7 +465,9 @@ def load_session(session: str) -> dict[str, Any] | None:
 def save_session(session: str, metadata: dict[str, Any]) -> None:
     directory = session_dir(session)
     directory.mkdir(parents=True, exist_ok=True)
-    session_meta_path(session).write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    session_meta_path(session).write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def remove_session(session: str) -> None:
@@ -449,15 +480,27 @@ def bundled_chromium_path() -> str:
 
 
 def is_process_alive(pid: int) -> bool:
-    result = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        ["tasklist", "/FI", f"PID eq {pid}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     return str(pid) in result.stdout
 
 
 def kill_process(pid: int) -> None:
-    subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"], capture_output=True, text=True, check=False)
+    subprocess.run(
+        ["taskkill", "/PID", str(pid), "/F", "/T"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
-def wait_for_process_exit(pid: int, timeout_seconds: float = GRACEFUL_CLOSE_TIMEOUT_SECONDS) -> bool:
+def wait_for_process_exit(
+    pid: int, timeout_seconds: float = GRACEFUL_CLOSE_TIMEOUT_SECONDS
+) -> bool:
     """等进程自然退出；超时才回落强杀。
 
     强杀（taskkill /F）会让 Chromium 来不及把 cookie 写进 profile，
@@ -536,7 +579,9 @@ def wait_for_debug_port(port: int, timeout_seconds: float = 20.0) -> None:
 
 def connect_browser(metadata: dict[str, Any]):
     playwright = sync_playwright().start()
-    browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{metadata['port']}")
+    browser = playwright.chromium.connect_over_cdp(
+        f"http://127.0.0.1:{metadata['port']}"
+    )
     return playwright, browser
 
 
@@ -625,7 +670,9 @@ def format_snapshot(page, session: str) -> str:
     for index, entry in enumerate(entries, start=1):
         refs[f"e{index}"] = entry
     session_snapshot_path(session).write_text(
-        json.dumps({"refs": refs, "generated_at": timestamp()}, ensure_ascii=False, indent=2),
+        json.dumps(
+            {"refs": refs, "generated_at": timestamp()}, ensure_ascii=False, indent=2
+        ),
         encoding="utf-8",
     )
     lines = [page_summary(page), "### Snapshot"]
@@ -655,7 +702,9 @@ def locator_for_ref(page, session: str, ref: str):
     return page.locator(f"xpath={entry['xpath']}").first
 
 
-def _proxy_auth_keeper(port: int, username: str, password: str, ready: threading.Event) -> None:
+def _proxy_auth_keeper(
+    port: int, username: str, password: str, ready: threading.Event
+) -> None:
     """常驻 CDP 会话：代理要求认证时用 ``Fetch.continueWithAuth`` 应答。
 
     Chromium 的 ``--proxy-server`` **不支持** user:pass，只能靠 CDP 应答 407 挑战。
@@ -721,7 +770,7 @@ def _proxy_auth_keeper(port: int, username: str, password: str, ready: threading
                 ready.set()
 
     try:
-        asyncio.run(_run())
+        run_async_task(_run)
     except Exception as exc:  # pragma: no cover - 兜底：认证助手挂了也不能拖垮 open
         print(f"Warning: proxy authentication helper stopped: {exc}", file=sys.stderr)
         ready.set()
@@ -841,7 +890,9 @@ def require_session(session: str) -> dict[str, Any]:
     return metadata
 
 
-def parse_open_args(args: list[str]) -> tuple[str | None, bool, Path | None, str | None, str | None]:
+def parse_open_args(
+    args: list[str],
+) -> tuple[str | None, bool, Path | None, str | None, str | None]:
     url = None
     headed = True
     profile_dir = None
@@ -1015,7 +1066,9 @@ def command_snapshot(session: str, filename: str | None = None) -> int:
     return 0
 
 
-def command_click(session: str, ref: str, button: str = "left", double: bool = False) -> int:
+def command_click(
+    session: str, ref: str, button: str = "left", double: bool = False
+) -> int:
     metadata = require_session(session)
     playwright, browser = connect_browser(metadata)
     try:
@@ -1138,10 +1191,19 @@ def main(argv: list[str] | None = None) -> int:
     if command == "reload":
         return command_reload(session)
     if command == "snapshot":
-        filename = command_args[1] if command_args[:1] == ["--filename"] and len(command_args) > 1 else None
+        filename = (
+            command_args[1]
+            if command_args[:1] == ["--filename"] and len(command_args) > 1
+            else None
+        )
         return command_snapshot(session, filename)
     if command == "click":
-        return command_click(session, command_args[0], command_args[1] if len(command_args) > 1 else "left", False)
+        return command_click(
+            session,
+            command_args[0],
+            command_args[1] if len(command_args) > 1 else "left",
+            False,
+        )
     if command == "fill":
         return command_fill(session, command_args[0], command_args[1])
     if command == "press":

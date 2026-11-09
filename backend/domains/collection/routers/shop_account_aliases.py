@@ -39,6 +39,9 @@ _SHOP_IDENTITY_REFRESH_TARGETS = [
     # ⇒ 新别名不生效、这家店的历史仍然落进 unknown。
     # 副本只有 136 行，刷新是毫秒级。
     "semantic.shop_identity_resolution_candidates_v2_mv",
+    # 本路由的「未匹配别名」查询读的就是 fact_orders_atomic_mv ⇒ 别名改动后
+    # 必须同步刷新它，否则列表仍是旧快照（用户会看到刚认领完的别名还在列表里）。
+    "semantic.fact_orders_atomic_mv",
     "semantic.fact_orders_monthly_atomic_mv",
     "semantic.fact_analytics_monthly_atomic_mv",
 ]
@@ -81,11 +84,21 @@ WITH raw_candidates AS (
             NULLIF(raw_data->>:cn_tiktok_paid, '')::numeric,
             0
         ) AS paid_amount
-    FROM semantic.fact_orders_atomic
-    -- [*] 2026-12 性能修正：语义与 COALESCE(shop_id,'') IN ('', 'none', 'unknown') 等价，
-    -- 但写成 COALESCE(...) 会让底层事实表已有的 shop_id 索引（ix_fact_*_shop）失效，
-    -- 视图 UNION ALL 多张事实表后全表扫描 + JSONB 提取，接口直接被 statement_timeout 打断。
-    -- 改成 IS NULL OR IN (...) 后可走索引，扫描量从全量降到「缺店铺的少量行」。
+    FROM semantic.fact_orders_atomic_mv
+    -- [*] 2026-12 性能修正（接上一条）：这里读的是**物化视图**，不是普通视图。
+    --   普通视图 semantic.fact_orders_atomic 每行都要跑一次店铺别名解析
+    --   （LEFT JOIN LATERAL → semantic.shop_identity_resolution_candidates），
+    --   9 张 B 类事实表全量扫描 + 逐行 JSON 解析 + 逐行身份解析。
+    --   实测（本地，EXPLAIN ANALYZE 同一段查询）：
+    --     普通视图   23.53 秒
+    --     物化视图    0.30 秒   （结果完全一致）
+    --   生产更严重：物化视图的创建脚本里记录过
+    --   `SELECT count(*) FROM semantic.fact_orders_atomic` 要 114.6 秒。
+    --   仓库里 mart / api_module 的消费方**早已**统一读物化视图
+    --   （见 sql/semantic/orders_atomic_mv.sql 的「消费方」清单），
+    --   本路由是最后一个漏网的普通视图消费方。
+    --   ⚠ 口径不变：物化视图正文就是普通视图正文（SELECT *），只改「什么时候算」，
+    --     不改「算什么」；代价是数据以最后一次刷新为准（别名改动会同步刷新本副本）。
     WHERE shop_id IS NULL OR shop_id IN ('', 'none', 'unknown')
 ),
 grouped AS (

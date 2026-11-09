@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CI gate：禁止「哑测试」（silent tests）。
+"""CI gate：前端测试「哑测试」+「断言失败」双拦截。
 
 什么是哑测试
 ------------
@@ -14,7 +14,7 @@
 那 4 个在 ``readFileSync`` 处 ENOENT 崩溃、断言从未执行，长期伪装成失败。
 更糟的是：**CI 里根本没有前端测试步骤**，所以没人发现。
 
-本门禁做两件事
+本门禁做三件事
 --------------
 1. **静态检查**（便宜，先跑）：扫描测试文件里**字面量路径**的
    ``readFileSync`` / ``existsSync`` / 动态 ``import()``，
@@ -23,14 +23,17 @@
 2. **运行时检查**：跑一次 ``node --test``，扫描输出里的「根本没跑起来」信号
    （``ENOENT`` / ``ERR_MODULE_NOT_FOUND`` / ``Cannot find module`` …），
    把它们**单独**列出来报警。
-
-**普通断言失败不归本门禁管**（仓库当前有已知失败基线），
-门禁只对「哑测试」亮红灯，避免把已知红灯和真问题混在一起。
+3. **普通断言失败也拦**（2026-11-09 起）：
+   此前本门禁只管「哑测试」，普通断言失败仅作统计——理由是「仓库当前有已知失败基线」。
+   那个基线已经在本轮被清干净（``frontend/scripts`` 340 用例 0 失败），
+   继续放行等于把「红灯」变成常态，而红灯一旦成为常态就等于没有红灯。
+   ⇒ 现在**任何**断言失败都会让门禁变红；确实需要临时放行时用
+   ``--allow-ordinary-failures``（并说明理由），但不要把它写进 CI 默认路径。
 
 退出码
 ------
-* ``0`` 通过（可能附带普通断言失败的统计）
-* ``1`` 发现哑测试
+* ``0`` 通过
+* ``1`` 发现哑测试**或**普通断言失败
 * ``2`` 门禁自身出错（例如 node 不可用）
 """
 
@@ -90,6 +93,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--frontend-dir",
         help="Frontend directory to scan (default: <repo>/frontend).",
+    )
+    parser.add_argument(
+        "--allow-ordinary-failures",
+        action="store_true",
+        help=(
+            "Allow ordinary assertion failures (only 'silent' tests still block). "
+            "Use only when there is a known, documented red baseline."
+        ),
     )
     parser.add_argument(
         "--max-print",
@@ -194,8 +205,8 @@ def find_silent_runtime_failures(output: str) -> List[str]:
     return list(dict.fromkeys(problems))
 
 
-def summarize_ordinary_failures(output: str) -> Dict[str, int]:
-    """统计普通断言失败（只做汇报，不作为门禁依据）。
+def summarize_ordinary_failures(output: str) -> Dict[str, object]:
+    """统计普通断言失败，并给出失败用例名。
 
     node --test 的输出里失败用例有两种写法：
       * TAP 明细：``not ok 1 - 用例名``
@@ -212,12 +223,14 @@ def summarize_ordinary_failures(output: str) -> Dict[str, int]:
         output,
         re.M,
     )
-    names = {
-        name.strip()
-        for name in [*tap_failures, *summary_failures]
-        if name.strip() and not name.strip().endswith(":")
-    }
-    return {"ordinary_failures": len(names)}
+    names = sorted(
+        {
+            name.strip()
+            for name in [*tap_failures, *summary_failures]
+            if name.strip() and not name.strip().endswith(":")
+        }
+    )
+    return {"ordinary_failures": len(names), "names": names}
 
 
 def main() -> int:
@@ -251,14 +264,13 @@ def main() -> int:
         runtime_problems = find_silent_runtime_failures(output)
 
     total = len(static_problems) + len(runtime_problems)
+    ordinary_names = list(stats.get("names") or []) if stats else []
+    ordinary_count = int(stats.get("ordinary_failures") or 0)
 
-    print("[INFO] 哑测试门禁结果：")
+    print("[INFO] 前端测试门禁结果：")
     print(f"  静态路径检查问题数: {len(static_problems)}")
     print(f"  运行时「没跑起来」问题数: {len(runtime_problems)}")
-    if stats:
-        print(
-            f"  普通断言失败数（不作为门禁依据）: {stats.get('ordinary_failures', 0)}"
-        )
+    print(f"  普通断言失败数: {ordinary_count}")
 
     if total:
         print("\n[ERROR] 发现哑测试：下列测试在断言执行前就崩掉了，结论不可信：")
@@ -275,7 +287,20 @@ def main() -> int:
         )
         return 1
 
-    print("[OK] 未发现哑测试。")
+    if ordinary_count and not args.allow_ordinary_failures:
+        print("\n[ERROR] 前端测试存在断言失败，门禁不放行：")
+        limit = max(args.max_print, 0)
+        for name in ordinary_names[:limit]:
+            print(f"  - {name}")
+        if ordinary_count > limit:
+            print(f"  ... 还有 {ordinary_count - limit} 条未打印")
+        print(
+            "[ERROR] 请修掉这些用例。确属已知红灯基线时，用 "
+            "--allow-ordinary-failures 临时放行并写清理由，但不要写进 CI 默认路径。"
+        )
+        return 1
+
+    print("[OK] 未发现哑测试，前端测试全部通过。")
     return 0
 
 

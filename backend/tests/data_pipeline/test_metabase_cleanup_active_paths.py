@@ -18,7 +18,9 @@ def test_backend_schemas_no_longer_export_metabase_contracts():
 
 
 def test_legacy_mv_router_describes_postgresql_primary_architecture():
-    text = Path("backend/domains/business/routers/mv.py").read_text(encoding="utf-8", errors="replace")
+    text = Path("backend/domains/business/routers/mv.py").read_text(
+        encoding="utf-8", errors="replace"
+    )
 
     assert "DSS/Metabase" not in text
     assert "PostgreSQL semantic/mart/api" in text
@@ -105,10 +107,14 @@ def test_local_collection_docs_do_not_treat_metabase_overlay_as_current_path():
 
 
 def test_environment_reference_marks_metabase_variables_historical_only():
-    text = Path("docs/deployment/ENVIRONMENT_VARIABLES_REFERENCE.md").read_text(
-        encoding="utf-8",
-        errors="replace",
-    ).lower()
+    text = (
+        Path("docs/deployment/ENVIRONMENT_VARIABLES_REFERENCE.md")
+        .read_text(
+            encoding="utf-8",
+            errors="replace",
+        )
+        .lower()
+    )
 
     assert "metabase" in text
     assert "historical" in text or "历史" in text

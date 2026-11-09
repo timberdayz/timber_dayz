@@ -5,57 +5,52 @@ import { readFileSync } from 'node:fs'
 import * as targetUtils from '../src/domains/business/views/target/personTargetUtils.js'
 import * as assignmentRules from '../src/domains/business/views/hr/shopAssignmentRules.js'
 
-test('personal target summary exposes allocated shop targets, actuals, and achievement rates', () => {
-  assert.equal(typeof targetUtils.buildEmployeeTargetSummary, 'function')
+test('personal target summary renders backend allocated shop targets, actuals, and achievement rates', () => {
+  const source = readFileSync(
+    new URL('../src/domains/business/views/target/TargetPersonManagement.vue', import.meta.url),
+    'utf8'
+  )
 
-  const summary = targetUtils.buildEmployeeTargetSummary({
-    employee_code: 'E1',
-    assignments: [
-      {
-        platform_code: 'shopee',
-        shop_id: 'S1',
-        shop_name: '店铺一',
-        target_allocation_ratio: 0.5,
-        sales_target: 1000,
-        sales_actual: 400,
-        gross_profit_target: 200,
-        gross_profit_actual: 100
-      }
-    ]
-  })
+  // 目标分配口径由后端统一给出，前端不再自己算一遍（否则就是第二份真相）
+  assert.equal(
+    targetUtils.buildEmployeeTargetSummary,
+    undefined,
+    'frontend must not re-compute the target allocation summary: the backend summary is the single source of truth'
+  )
 
-  assert.deepEqual(summary.shops[0], {
-    shop_name: '店铺一',
-    target_allocation_ratio: 0.5,
-    sales_target: 500,
-    sales_actual: 200,
-    sales_achievement_rate: 0.4,
-    gross_profit_target: 100,
-    gross_profit_actual: 50,
-    gross_profit_achievement_rate: 0.5
-  })
-  assert.equal(summary.sales_target, 500)
-  assert.equal(summary.sales_actual, 200)
-  assert.equal(summary.sales_achievement_rate, 0.4)
+  assert.equal(source.includes('shop_summaries: summary.shops || []'), true)
+
+  for (const field of [
+    'sales_target',
+    'sales_actual',
+    'sales_achievement_rate',
+    'gross_profit_target',
+    'gross_profit_actual',
+    'gross_profit_achievement_rate'
+  ]) {
+    assert.equal(
+      source.includes(`shop.${field}`),
+      true,
+      `page should render the backend provided shop.${field}`
+    )
+  }
 })
 
 test('personal target summary keeps API values that are already allocated', () => {
-  const summary = targetUtils.buildEmployeeTargetSummary({
-    valuesAlreadyAllocated: true,
-    assignments: [{
-      shop_name: '店铺一',
-      target_allocation_ratio: 0.5,
-      sales_target: 500,
-      sales_actual: 200,
-      gross_profit_target: 100,
-      gross_profit_actual: 50
-    }]
-  })
+  const source = readFileSync(
+    new URL('../src/domains/business/views/target/TargetPersonManagement.vue', import.meta.url),
+    'utf8'
+  )
 
-  assert.equal(summary.sales_target, 500)
-  assert.equal(summary.sales_actual, 200)
-  assert.equal(summary.gross_profit_target, 100)
-  assert.equal(summary.gross_profit_actual, 50)
+  assert.equal(
+    source.includes('target_allocation_ratio'),
+    false,
+    'allocated target values must be shown as delivered by the backend, without a frontend allocation ratio'
+  )
+
+  assert.equal(source.includes('formatNumber(row.sales_target)'), true)
+  assert.equal(source.includes('formatNumber(row.sales_actual)'), true)
+  assert.equal(source.includes('formatPercent(row.sales_achievement_rate)'), true)
 })
 
 test('target allocation risk is visible without reusing commission ratio rules', () => {
@@ -79,13 +74,27 @@ test('personal target page requests allocated target summaries and renders sourc
   assert.equal(source.includes('shop_summaries'), true)
 })
 
-test('shop assignment preserves target allocation ratio source through load and mutations', () => {
+test('shop assignment delegates target allocation to the backend', () => {
   const source = readFileSync(
     new URL('../src/domains/business/views/hr/ShopAssignment.vue', import.meta.url),
     'utf8'
   )
 
-  assert.equal(source.includes('target_allocation_ratio_source'), true)
-  assert.equal(source.includes('target_allocation_ratio_source: p.target_allocation_ratio_source'), true)
-  assert.equal(source.includes('target_allocation_ratio_source: form.value.target_allocation_ratio_source'), true)
+  assert.equal(
+    source.includes('target_allocation_ratio'),
+    false,
+    'shop assignment must not own the target allocation ratio: shared shop responsibility is decided by the backend'
+  )
+
+  assert.equal(
+    source.includes('共同承接店铺目标'),
+    true,
+    'shop assignment should tell the user that the shop target is shared'
+  )
+
+  assert.equal(
+    source.includes('commission_ratio: p.commission_ratio'),
+    true,
+    'shop assignment should still own the commission ratio'
+  )
 })

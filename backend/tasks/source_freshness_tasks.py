@@ -8,18 +8,15 @@
 在数据平台的运行列表里直接可见，不再出现「刷新全绿但业务数据早已过期」的情况。
 """
 
-import asyncio
 import logging
 from typing import Any, Dict
 
 from backend.celery_app import celery_app
-from backend.models.database import (
-    AsyncSessionLocal,
-    reset_async_engine_pool_for_new_loop,
-)
+from backend.models.database import AsyncSessionLocal
 from backend.services.data_pipeline.source_freshness_service import (
     run_source_freshness_check,
 )
+from backend.utils.async_task_runner import run_async_task
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +38,8 @@ def check_source_data_freshness() -> Dict[str, Any]:
 
     返回摘要：巡检了多少条链、多少条新鲜、多少条断流、断流的是哪些链。
     """
-    reset_async_engine_pool_for_new_loop()
     try:
-        summary = asyncio.run(_run_check())
+        summary = run_async_task(_run_check)
     except Exception as exc:  # noqa: BLE001
         logger.error("[SourceFreshness] 巡检执行失败: %s", exc, exc_info=True)
         raise

@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import ast
-import asyncio
 import io
 import re
 import tokenize
@@ -28,6 +27,7 @@ from backend.services.active_collection_components import is_missing_component_f
 from backend.services.collection_component_topology import (
     is_canonical_component_filename,
 )
+from backend.utils.async_task_runner import run_async_task
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -1036,8 +1036,8 @@ def load_stable_component_records() -> list[StableComponentRecord]:
         raise StableRecordUnavailable(f"数据库模块导入失败：{exc}") from exc
 
     try:
-        rows = asyncio.run(
-            _fetch_stable_rows(AsyncSessionLocal, ComponentVersion, select)
+        rows = run_async_task(
+            lambda: _fetch_stable_rows(AsyncSessionLocal, ComponentVersion, select)
         )
     except Exception as exc:
         raise StableRecordUnavailable(f"数据库查询失败：{exc}") from exc

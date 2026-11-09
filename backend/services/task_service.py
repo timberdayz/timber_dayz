@@ -183,5 +183,3 @@ class TaskService:
                 )
 
         return supported, unsupported
-
-

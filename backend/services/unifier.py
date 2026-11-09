@@ -26,4 +26,8 @@ async def rebuild_unified(db: AsyncSession) -> Dict[str, Any]:
     sales = 0  # 暂时返回0,待实现新的查询逻辑
     metrics = (await db.execute(select(FactProductMetrics))).scalars().all()
     products = (await db.execute(select(DimProduct))).scalars().all()
-    return {"sales_rows": sales, "metrics_rows": len(metrics), "products": len(products)}
+    return {
+        "sales_rows": sales,
+        "metrics_rows": len(metrics),
+        "products": len(products),
+    }

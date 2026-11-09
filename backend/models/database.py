@@ -25,7 +25,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from fastapi import Request
-from typing import Generator, AsyncGenerator
+from typing import Any, Generator, AsyncGenerator
 from urllib.parse import urlparse, urlunparse
 import asyncio
 import logging
@@ -344,6 +344,9 @@ else:
         "pool_recycle": settings.DB_POOL_RECYCLE,
         "pool_pre_ping": True,  # 连接前测试可用性
     }
+    # [*] 2026-11-09：上面这组池参数**只作用于同步引擎**。
+    # 异步引擎改用 NullPool（原因见下方 async 引擎创建处），
+    # 不再有常驻连接池，也不再接受 pool_size / max_overflow 等参数。
 
 # 创建数据库引擎
 engine = create_engine(
@@ -361,82 +364,269 @@ logger.info(
 
 ASYNC_DATABASE_URL = get_async_database_url(DATABASE_URL)
 
-# SQLite 不支持连接池,使用简化配置
-if ASYNC_DATABASE_URL.startswith("sqlite"):
-    async_engine = create_async_engine(
-        ASYNC_DATABASE_URL,
-        echo=settings.DATABASE_ECHO,
-        # SQLite 不需要连接池配置
-    )
-else:
-    # PostgreSQL 支持连接池,使用完整配置
-    # [*] v4.19.0更新:使用环境感知的配置(与同步引擎保持一致)
-    async_engine = create_async_engine(
-        ASYNC_DATABASE_URL,
-        pool_size=settings.DB_POOL_SIZE,
-        max_overflow=settings.DB_MAX_OVERFLOW,
-        pool_timeout=settings.DB_POOL_TIMEOUT,
-        pool_recycle=settings.DB_POOL_RECYCLE,
-        pool_pre_ping=True,  # 连接有效性检测
-        echo=settings.DATABASE_ECHO,
-    )
-
 # [*] v4.18.2修复:asyncpg 需要通过事件监听器设置 search_path
 # asyncpg 不支持通过 connect_args 传递 options
 from sqlalchemy import event
 
 
-@event.listens_for(async_engine.sync_engine, "connect")
-def set_search_path_on_connect(dbapi_connection, connection_record):
-    """每次连接建立时设置 search_path 和事务超时保护。
+def _attach_connect_listener(engine) -> None:
+    """给引擎挂上「连接建立时设置 search_path 与超时」的监听器。
 
-    [*] 这些语句是 **PostgreSQL 专有** 的, SQLite 不认
-    (``SET search_path TO ...`` 在 SQLite 上直接报
-    ``sqlite3.OperationalError: near "SET": syntax error``)。
-    所以必须按方言判断后再执行 —— 否则只要数据库地址不是 PostgreSQL,
-    每一次异步连接都会失败。
+    [*] 2026-11-09：监听器必须**逐个引擎**挂载 —— 引擎改成「按事件循环分发」
+    之后不再只有一个全局引擎，少挂一个就会让那条连接既没有 search_path
+    也没有 statement_timeout。
     """
-    dialect_name = getattr(async_engine.sync_engine.dialect, "name", "")
-    if dialect_name != "postgresql":
-        return
 
-    cursor = dbapi_connection.cursor()
-    cursor.execute(
-        "SET search_path TO public, b_class, a_class, c_class, core, finance"
-    )
-    # [*] 2026-10-30: 连接池级默认仍是 120s(批量采集/导入等后台长任务直接用
-    # AsyncSessionLocal(),不经过请求级预算)。请求内的收紧用 SET LOCAL,
-    # 见文件末尾「超时预算」小节。
-    cursor.execute(
-        f"SET statement_timeout TO {int(settings.DB_POOL_STATEMENT_TIMEOUT_MS)}"
-    )
-    cursor.execute(
-        "SET idle_in_transaction_session_timeout TO "
-        f"{int(settings.DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS)}"
-    )
-    cursor.close()
+    dialect_name = getattr(engine.sync_engine.dialect, "name", "")
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def set_search_path_on_connect(dbapi_connection, connection_record):
+        """每次连接建立时设置 search_path 和事务超时保护。
+
+        [*] 这些语句是 **PostgreSQL 专有** 的, SQLite 不认
+        (``SET search_path TO ...`` 在 SQLite 上直接报
+        ``sqlite3.OperationalError: near "SET": syntax error``)。
+        所以必须按方言判断后再执行 —— 否则只要数据库地址不是 PostgreSQL,
+        每一次异步连接都会失败。
+        """
+        if dialect_name != "postgresql":
+            return
+
+        cursor = dbapi_connection.cursor()
+        cursor.execute(
+            "SET search_path TO public, b_class, a_class, c_class, core, finance"
+        )
+        # [*] 2026-10-30: 连接池级默认仍是 120s(批量采集/导入等后台长任务直接用
+        # AsyncSessionLocal(),不经过请求级预算)。请求内的收紧用 SET LOCAL,
+        # 见文件末尾「超时预算」小节。
+        cursor.execute(
+            f"SET statement_timeout TO {int(settings.DB_POOL_STATEMENT_TIMEOUT_MS)}"
+        )
+        cursor.execute(
+            "SET idle_in_transaction_session_timeout TO "
+            f"{int(settings.DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS)}"
+        )
+        cursor.close()
 
 
-logger.info("[async] 已配置 asyncpg search_path 事件监听器")
+def _create_async_engine(url: str):
+    """创建一个 async 引擎（PostgreSQL 走完整池配置，SQLite 走简化配置）。"""
+    if url.startswith("sqlite"):
+        # SQLite 不支持连接池,使用简化配置
+        engine = create_async_engine(
+            url,
+            echo=settings.DATABASE_ECHO,
+        )
+    else:
+        engine = create_async_engine(
+            url,
+            pool_size=settings.DB_POOL_SIZE,
+            max_overflow=settings.DB_MAX_OVERFLOW,
+            pool_timeout=settings.DB_POOL_TIMEOUT,
+            pool_recycle=settings.DB_POOL_RECYCLE,
+            pool_pre_ping=True,  # 连接有效性检测
+            echo=settings.DATABASE_ECHO,
+        )
+    _attach_connect_listener(engine)
+    return engine
+
+
+#: 同时存活的事件循环引擎数量上限（超过只告警，见 ``_PerLoopAsyncEngineRegistry.engine``）
+_MAX_LIVE_ASYNC_LOOPS = 32
+
+
+class _PerLoopAsyncEngineRegistry:
+    """按事件循环分发 async 引擎与 Session 工厂。
+
+    [*] 2026-11-09 连接泄漏根治（第二版）
+
+    根因（生产只读调查 + 本地复现）：asyncpg 的连接绑定在**创建它的事件循环**上，
+    而同一个全局 async 引擎被三个**不同的**事件循环共用：
+
+    ① FastAPI 主循环；
+    ② 后台线程自建的循环；
+    ③ celery 每个 task 新建的循环。
+
+    循环 A 建立的连接被循环 B checkout 时，pre_ping 必然失败
+    （``RuntimeError: Event loop is closed`` /
+    ``AttributeError: 'NoneType' object has no attribute 'send'``），
+    连接被丢弃；但因为原循环已经结束，**close 同样失败** ⇒
+    TCP 连接滞留在数据库服务端白占槽位。
+    生产实测：80/80 槽位全部打满、只增不减、最早一条连接存活 8 小时 27 分、
+    最后一条 SQL 是 ``COMMIT;``（事务已提交，连接本身没关）。
+
+    正确做法：**每个事件循环拥有自己的引擎（和连接池）**，连接永不跨循环复用。
+
+    * FastAPI 主循环 → 长驻池化引擎，连接照常复用，接口延迟不变；
+    * celery / 后台线程的短命循环 → 自己的池化引擎，任务结束由
+      ``run_async_task`` 在**循环存活期间** dispose 掉，连接真正关闭。
+
+    为什么不用 NullPool（现役备选）：NullPool 也能消除跨循环复用，
+    但它**没有连接池**，每次会话都要重新握手 ——
+    生产容器实测 14.21 ms/次，而池化只要 1.79 ms/次（8 倍差距）。
+    按循环分发既根治泄漏，又保住连接复用。
+    """
+
+    def __init__(self, fallback_engine) -> None:
+        self._fallback_engine = fallback_engine
+        self._engines: dict[Any, Any] = {}
+        self._makers: dict[Any, Any] = {}
+
+    @staticmethod
+    def _current_loop():
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            # 同步上下文（没有运行中的循环）
+            return None
+
+    def engine(self):
+        """取「当前事件循环」的引擎；没有运行中的循环时用回退引擎。"""
+        loop = self._current_loop()
+        if loop is None:
+            return self._fallback_engine
+        engine = self._engines.get(loop)
+        if engine is None:
+            engine = _create_async_engine(ASYNC_DATABASE_URL)
+            self._engines[loop] = engine
+            if len(self._engines) > _MAX_LIVE_ASYNC_LOOPS:
+                # [*] 安全阀：正常情况下短命循环都会被 ``run_async_task`` 收尾摘掉，
+                # 只剩 FastAPI 主循环等少数长驻循环。条目异常增多 ⇒ 有人绕过了
+                # 统一出口自己建了事件循环 —— 这里只告警，不自动清理
+                # （跨循环关闭别人的连接会关不掉，反而制造孤儿）。
+                logger.warning(
+                    "[async] 同时存活的事件循环引擎已超过 %d 个（当前 %d 个）——"
+                    "请检查是否有代码绕过了 backend.utils.async_task_runner.run_async_task "
+                    "自己新建事件循环",
+                    _MAX_LIVE_ASYNC_LOOPS,
+                    len(self._engines),
+                )
+        return engine
+
+    def maker(self):
+        """取「当前事件循环」的 Session 工厂。"""
+        loop = self._current_loop()
+        if loop is None:
+            return async_sessionmaker(
+                bind=self._fallback_engine, expire_on_commit=False
+            )
+        maker = self._makers.get(loop)
+        if maker is None:
+            maker = async_sessionmaker(bind=self.engine(), expire_on_commit=False)
+            self._makers[loop] = maker
+        return maker
+
+    def session(self, **kwargs):
+        """建一个绑定「当前事件循环」引擎的 Session。"""
+        return self.maker()(**kwargs)
+
+    def pop_current_loop_engine(self):
+        """把当前循环的引擎从注册表摘掉（收尾时用）。
+
+        摘掉之后，这个循环再要用数据库会重新建一个引擎 ——
+        这正是我们要的：**连接跟着循环一起走**，循环结束就该彻底清干净。
+        """
+        loop = self._current_loop()
+        if loop is None:
+            return None
+        self._makers.pop(loop, None)
+        return self._engines.pop(loop, None)
+
+
+#: 回退引擎：只在「没有运行中的事件循环」时使用。
+#: 运行时代码请用 ``get_async_engine()`` 取当前循环的引擎。
+async_engine = _create_async_engine(ASYNC_DATABASE_URL)
+
+_ASYNC_ENGINE_REGISTRY = _PerLoopAsyncEngineRegistry(async_engine)
+
+
+def get_async_engine():
+    """取**当前事件循环**的 async 引擎。
+
+    [*] 2026-11-09：async 引擎按事件循环分发（连接不跨循环复用），
+    所以需要直接拿引擎的代码必须走这里，而不是用全局 ``async_engine``。
+    """
+    return _ASYNC_ENGINE_REGISTRY.engine()
+
+
+class _PerLoopSessionFactory:
+    """``AsyncSessionLocal``：按当前事件循环选择引擎的 Session 工厂。
+
+    用法与 ``async_sessionmaker`` 完全一致（``AsyncSessionLocal()`` /
+    ``async with AsyncSessionLocal() as db``），差别只在底层引擎是
+    「当前事件循环自己的那个」。
+    """
+
+    def __init__(self, registry: _PerLoopAsyncEngineRegistry) -> None:
+        self._registry = registry
+
+    def __call__(self, **kwargs):
+        return self._registry.session(**kwargs)
+
+    @property
+    def kw(self) -> dict[str, Any]:
+        """兼容 ``async_sessionmaker.kw`` 的只读属性。"""
+        return {"expire_on_commit": False}
+
 
 # 创建异步Session工厂
-AsyncSessionLocal = async_sessionmaker(bind=async_engine, expire_on_commit=False)
+AsyncSessionLocal = _PerLoopSessionFactory(_ASYNC_ENGINE_REGISTRY)
+
+logger.info("[async] 已配置 asyncpg search_path 事件监听器")
 
 logger.info(
     f"[async] 异步数据库连接已配置: {ASYNC_DATABASE_URL.split('@')[-1] if '@' in ASYNC_DATABASE_URL else 'SQLite'}"
 )
 
 
-def reset_async_engine_pool_for_new_loop() -> None:
-    """
-    Drop pooled async connections before entering a fresh asyncio.run() loop.
+async def dispose_async_engine() -> None:
+    """在**当前事件循环内**关闭异步引擎的连接，并把它从注册表摘掉。
 
-    Celery sync tasks create a new event loop per invocation. asyncpg
-    connections retained in the global pool can still be attached to the
-    previous loop and raise cross-loop runtime errors when reused.
+    [*] 2026-11-09 连接泄漏根治（第二版）：
+    async 引擎按事件循环分发（见 ``_PerLoopAsyncEngineRegistry``），
+    每个循环的连接池只属于这个循环。因此收尾要做两件事：
+
+    1. 在**循环还活着的时候**真正关闭这个循环的连接
+       （``dispose()`` 等价于 ``close=True``）——
+       循环一旦结束，asyncpg 的连接就再也关不掉了，只能滞留在数据库服务端
+       白占槽位（生产实测 80/80 打满、只增不减，最早一条存活 8 小时 27 分）；
+    2. 把引擎从注册表摘掉，让这个循环的连接**随循环一起消失**，
+       不会在注册表里越堆越多。
+
+    统一入口见 ``backend/utils/async_task_runner.py::run_async_task``。
+    """
+    engine = _ASYNC_ENGINE_REGISTRY.pop_current_loop_engine()
+    if engine is None:
+        logger.info("[async] 当前事件循环没有需要关闭的 async engine")
+        return
+    await engine.dispose()
+    logger.info("[async] 已在当前事件循环内关闭 async engine 连接池")
+
+
+def reset_async_engine_pool_for_new_loop() -> None:
+    """[兜底] 进入新事件循环前「软丢弃」旧连接池。
+
+    .. warning::
+        本函数**不会**真正关闭连接。``dispose(close=False)`` 只是把连接池
+        标记为作废并另建一个池子，底层 TCP 连接仍然开着；又因为这些连接
+        绑定在已经结束的事件循环上，之后想补关都关不掉——这正是生产连接
+        泄漏的根因。
+
+        [*] 2026-11-09 起 async 引擎已改为**按事件循环分发**，连接天然
+        不跨循环复用，本函数已经**没有实际作用**，仅作为历史兜底保留。
+        业务代码不得再调用。
+
+    正确做法：任何「在同步上下文里跑异步代码」的场景一律走
+    ``backend/utils/async_task_runner.py::run_async_task``，它会在循环存活
+    期间真正关闭当前循环的连接池。
+
+    ``scripts/verify_async_loop_cleanup.py`` 门禁禁止业务代码再调用它。
     """
     async_engine.sync_engine.dispose(close=False)
-    logger.info("[async] dropped async engine pool before creating a new event loop")
+    logger.warning(
+        "[async] 已软丢弃 async engine 连接池（未真正关闭连接）；"
+        "请改用 backend.utils.async_task_runner.run_async_task"
+    )
 
 
 # ==================== 超时预算(2026-10-30) ====================
@@ -834,7 +1024,7 @@ def warm_up_pool(pool_size: int = 10):
 
 async def warm_up_async_pool(pool_size: int = 10):
     """
-    预热异步数据库连接池(v4.18.2新增)
+    预热异步数据库连接(v4.18.2新增)
 
     通过并发创建和测试连接,避免首次请求时的冷启动延迟。
 
@@ -845,11 +1035,14 @@ async def warm_up_async_pool(pool_size: int = 10):
         None
 
     Raises:
-        Exception: 连接池预热失败时抛出异常
+        Exception: 连接预热失败时抛出异常
 
     Note:
-        必须并发创建多个连接,才能真正预热连接池。
+        必须并发创建多个连接,才能真正并发建立连接。
         单个 session 循环执行只会复用同一连接。
+
+        [*] 2026-11-09：async 引擎改为**按事件循环分发**，每个循环有自己的
+        连接池。这里预热的是「当前循环的连接池」。
     """
 
     async def test_single_connection(i: int):
@@ -914,6 +1107,7 @@ def emit_schema_failure_protocol(result: dict) -> dict[str, str]:
     print("XIHONG_SOURCE_EXIT_CODE=1", flush=True)
     return protocol
 
+
 # 导出给backend/routers使用
 # 注意:所有模型都来自 modules/core/db/schema.py,此处只是重新导出
 __all__ = [
@@ -926,6 +1120,8 @@ __all__ = [
     "warm_up_pool",  # v4.1.0新增
     # 数据库配置(异步,v4.18.2新增)
     "async_engine",
+    # [*] 2026-11-09：async 引擎按事件循环分发，需要直接拿引擎的代码请用它
+    "get_async_engine",
     "AsyncSessionLocal",
     "get_async_db",
     "warm_up_async_pool",

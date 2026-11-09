@@ -4,12 +4,27 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_ROOT = PROJECT_ROOT / "frontend"
-COLLECTION_CONFIG_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/collection/CollectionConfig.vue"
-COLLECTION_TASKS_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/collection/CollectionTasks.vue"
-COLLECTION_HISTORY_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/collection/CollectionHistory.vue"
-COMPONENT_RECORDER_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/ComponentRecorder.vue"
-COMPONENT_VERSIONS_VIEW = PROJECT_ROOT / "frontend/src/domains/collection/views/ComponentVersions.vue"
-ACCOUNT_MANAGEMENT_VIEW = PROJECT_ROOT / "frontend/src/domains/platform/views/AccountManagement.vue"
+COLLECTION_CONFIG_VIEW = (
+    PROJECT_ROOT
+    / "frontend/src/domains/collection/views/collection/CollectionConfig.vue"
+)
+COLLECTION_TASKS_VIEW = (
+    PROJECT_ROOT
+    / "frontend/src/domains/collection/views/collection/CollectionTasks.vue"
+)
+COLLECTION_HISTORY_VIEW = (
+    PROJECT_ROOT
+    / "frontend/src/domains/collection/views/collection/CollectionHistory.vue"
+)
+COMPONENT_RECORDER_VIEW = (
+    PROJECT_ROOT / "frontend/src/domains/collection/views/ComponentRecorder.vue"
+)
+COMPONENT_VERSIONS_VIEW = (
+    PROJECT_ROOT / "frontend/src/domains/collection/views/ComponentVersions.vue"
+)
+ACCOUNT_MANAGEMENT_VIEW = (
+    PROJECT_ROOT / "frontend/src/domains/platform/views/AccountManagement.vue"
+)
 VSCODE_SETTINGS = PROJECT_ROOT / ".vscode/settings.json"
 EDITOR_CONFIG = PROJECT_ROOT / ".editorconfig"
 
@@ -58,13 +73,17 @@ def test_component_versions_page_states_stable_only_for_formal_collection():
 
 
 def test_frontend_lint_script_uses_existing_gitignore():
-    package_json = json.loads((FRONTEND_ROOT / "package.json").read_text(encoding="utf-8"))
+    package_json = json.loads(
+        (FRONTEND_ROOT / "package.json").read_text(encoding="utf-8")
+    )
 
     assert "--ignore-path ../.gitignore" in package_json["scripts"]["lint"]
 
 
 def test_frontend_eslint_patch_dependency_is_declared():
-    package_json = json.loads((FRONTEND_ROOT / "package.json").read_text(encoding="utf-8"))
+    package_json = json.loads(
+        (FRONTEND_ROOT / "package.json").read_text(encoding="utf-8")
+    )
 
     assert "@rushstack/eslint-patch" in package_json["devDependencies"]
 
@@ -155,7 +174,9 @@ def test_collection_config_run_uses_queue_run_feedback_not_task_id_redirect():
 
 def test_collection_config_exposes_cancel_action_for_active_runs():
     text = COLLECTION_CONFIG_VIEW.read_text(encoding="utf-8")
-    api_text = (PROJECT_ROOT / "frontend/src/api/collection.js").read_text(encoding="utf-8")
+    api_text = (PROJECT_ROOT / "frontend/src/api/collection.js").read_text(
+        encoding="utf-8"
+    )
 
     assert "collectionApi.cancelConfigRun(run.run_id)" in text
     assert "run.can_cancel" in text
@@ -193,14 +214,32 @@ def test_collection_config_source_has_no_known_mojibake_tokens():
 
 
 def test_utf8_editor_guardrails_are_declared():
-    editor_text = EDITOR_CONFIG.read_text(encoding="utf-8")
-    vscode_settings = json.loads(VSCODE_SETTINGS.read_text(encoding="utf-8"))
+    """UTF-8 护栏必须在**受版本管理**的文件里声明。
 
+    [*] 2026-11-09: 这个断言原先要求 ``.vscode/settings.json`` 存在, 但那个文件
+    被 ``.gitignore`` 排除(``.gitignore:109``), **从未进过版本库**
+    (基线 commit ``419b4436`` 里也没有) —— 于是任何干净 checkout 跑这个测试
+    都必然红, CI 也不例外。断言一个「本地才有的文件」等于断言「我本机装过
+    什么」, 不是仓库契约。
+
+    现在的口径:
+    * ``.editorconfig``(受版本管理) —— **必须**声明 charset / end_of_line /
+      insert_final_newline, 这是真正的仓库级护栏;
+    * ``.vscode/settings.json``(本地可选) —— **存在时**才校验它的
+      files.encoding / files.autoGuessEncoding, 缺失不算失败。
+    """
+    editor_text = EDITOR_CONFIG.read_text(encoding="utf-8")
+
+    # 仓库级护栏: .editorconfig 受版本管理, 必须齐备
     assert "charset = utf-8" in editor_text
     assert "end_of_line = lf" in editor_text
     assert "insert_final_newline = true" in editor_text
-    assert vscode_settings["files.encoding"] == "utf8"
-    assert vscode_settings["files.autoGuessEncoding"] is False
+
+    # 本地可选护栏: 存在才校验, 缺失(干净 checkout / CI)不算失败
+    if VSCODE_SETTINGS.exists():
+        vscode_settings = json.loads(VSCODE_SETTINGS.read_text(encoding="utf-8"))
+        assert vscode_settings["files.encoding"] == "utf8"
+        assert vscode_settings["files.autoGuessEncoding"] is False
 
 
 def test_collection_config_exposes_main_account_scoping_hooks():
@@ -287,4 +326,4 @@ def test_account_management_does_not_offer_free_form_login_url_editing():
     text = ACCOUNT_MANAGEMENT_VIEW.read_text(encoding="utf-8")
 
     assert '<el-form-item label="登录URL">' not in text
-    assert 'v-model="accountForm.login_url"' not in text or 'disabled' in text
+    assert 'v-model="accountForm.login_url"' not in text or "disabled" in text

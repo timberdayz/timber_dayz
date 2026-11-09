@@ -97,6 +97,15 @@ jobs:
           # 各自来源优先级不同,导致采集实时通道必然被拒。
           python scripts/verify_access_token_extraction.py --root . --target backend
 
+      - name: Guard against async loop cleanup regressions
+        run: |
+          # 异步任务必须走统一出口(backend/utils/async_task_runner.py),
+          # 并且在事件循环存活期间真正关闭连接池。
+          # 历史实现用 dispose(close=False) 只软丢弃连接池、不关底层连接,
+          # 而连接绑定在已结束的循环上再也关不掉 —— 生产实测 80/80 连接
+          # 槽位被打满且只增不减,业务随机 500。
+          python scripts/verify_async_loop_cleanup.py --root . --target backend --target modules
+
       - name: Install Playwright browsers
         run: |
           # [FIX v7.12.9] 钉死版本，与 requirements.lock.txt 保持一致，

@@ -4,6 +4,8 @@ import asyncio
 import inspect
 from datetime import datetime, timezone
 
+from backend.utils.async_task_runner import run_async_task
+
 
 def should_enable_cloud_sync_worker(
     enabled_flag: str | None,
@@ -91,7 +93,9 @@ class CloudBClassAutoSyncRuntime:
     def _run_worker_once(self, worker) -> None:
         result = worker.run_one(self.worker_id)
         if inspect.isawaitable(result):
-            asyncio.run(result)
+            # [*] 统一异步出口：在新事件循环内真正关闭 asyncpg 连接池，
+            # 否则这个轮询循环每转一圈就在数据库服务端留下一批关不掉的连接。
+            run_async_task(result)
 
     def _recover_stale_running_tasks(self) -> None:
         if self.worker_factory is None:
@@ -101,7 +105,11 @@ class CloudBClassAutoSyncRuntime:
             return
         result = recover(self.worker_id)
         if isinstance(result, dict):
-            recovered_count = int(result.get("recovered_current_scope_count") or result.get("recovered_count") or 0)
+            recovered_count = int(
+                result.get("recovered_current_scope_count")
+                or result.get("recovered_count")
+                or 0
+            )
             if recovered_count > 0:
                 self._status = "degraded"
                 self._last_recovered_count = recovered_count

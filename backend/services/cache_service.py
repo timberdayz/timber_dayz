@@ -27,6 +27,7 @@ from functools import wraps
 import os
 
 from modules.core.logger import get_logger
+from backend.utils.async_task_runner import run_async_task
 
 logger = get_logger(__name__)
 
@@ -517,6 +518,6 @@ def invalidate_dashboard_cache_sync() -> int:
     写时失效 Dashboard 缓存的同步入口（供 Celery 等同步上下文调用）。
     仅在无事件循环的线程中调用；异步上下文中请直接 await cache.invalidate_dashboard_business_overview()。
     """
-    import asyncio
-
-    return asyncio.run(get_cache_service().invalidate_dashboard_business_overview())
+    return run_async_task(
+        lambda: get_cache_service().invalidate_dashboard_business_overview()
+    )

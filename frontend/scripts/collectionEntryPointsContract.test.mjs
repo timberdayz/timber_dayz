@@ -58,9 +58,21 @@ test('CollectionTasks sends unified time_selection payload for quick tasks', () 
 
 test('CollectionConfig resolves effective account ids before creating tasks', () => {
   assert.equal(
-    configSource.includes('shop_scopes: normalizeShopScopesForPayload()'),
+    /shop_scopes:\s*\(form\.shop_scopes \|\| \[\]\)\.map\(/.test(configSource),
     true,
     'config execution should serialize canonical shop_scopes instead of relying on legacy account_ids loops'
+  )
+
+  assert.equal(
+    configSource.includes('shop_account_id: scope.shop_account_id'),
+    true,
+    'config execution should serialize every shop scope by its shop_account_id'
+  )
+
+  assert.equal(
+    configSource.includes('account_id: row.scope.shop_account_id'),
+    true,
+    'task creation should resolve one account id per canonical shop scope'
   )
 
   assert.equal(

@@ -19,6 +19,41 @@ set -euo pipefail
 # - docker-compose.metabase.yml (legacy fallback/debug only; not part of PostgreSQL-first prod deploy)
 # - .env (recommended)
 
+usage() {
+  cat <<'USAGE'
+Usage: deploy_remote_production.sh [--skip-frontend]
+
+Options:
+  --skip-frontend  Skip the frontend build and the frontend container rollout.
+                   By default the frontend IS part of the release.
+  -h, --help       Show this help text.
+USAGE
+}
+
+# [FRONTEND] 前端默认参与发版（构建 + 部署）。
+# "只发后端"必须显式传 --skip-frontend —— 没有隐式跳过，
+# 否则"发版总链没带前端"会被藏起来（线上的前端还是旧的，没人知道）。
+SKIP_FRONTEND=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --skip-frontend)
+      SKIP_FRONTEND=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "[FAIL] Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 require_env() {
   local name="$1"
   if [ -z "${!name:-}" ]; then
@@ -37,7 +72,6 @@ require_env "IMAGE_TAG"
 
 # Keep the running application containers recoverable until the new cutover is healthy.
 APP_CONTAINER_NAMES=(
-  xihong_erp_frontend
   xihong_erp_nginx
   xihong_erp_backend_api
   xihong_erp_backend
@@ -45,6 +79,11 @@ APP_CONTAINER_NAMES=(
   xihong_erp_celery_worker
   xihong_erp_celery_beat
 )
+if [ "${SKIP_FRONTEND}" != "1" ]; then
+  # --skip-frontend 时前端**不动**：老容器继续服务，新版本不替换它。
+  # 把前端放进暂存名单等于先把老前端停掉 —— 那会让线上前端直接消失。
+  APP_CONTAINER_NAMES+=(xihong_erp_frontend)
+fi
 declare -A PREVIOUS_APP_CONTAINER_IDS=()
 declare -A PREVIOUS_APP_CONTAINER_BACKUPS=()
 DEPLOYMENT_ROLLBACK_ARMED=0
@@ -138,6 +177,168 @@ discard_staged_application_containers() {
   done
 }
 
+# [FRONTEND BUILD] 前端构建是发版总链的一部分（默认执行）。
+# 缺 node_modules 必须**明确失败**并给出安装指引：
+# 静默跳过 = 把旧前端发上线，而日志看起来一切正常。
+FRONTEND_BUILD_TIMEOUT_SECONDS="${FRONTEND_BUILD_TIMEOUT_SECONDS:-900}"
+
+resolve_frontend_source_dir() {
+  local candidate
+  for candidate in \
+    "${PRODUCTION_PATH:-$(pwd)}/frontend" \
+    "${SCRIPT_DIR}/../frontend" \
+    "${SCRIPT_DIR}/frontend"; do
+    if [ -f "${candidate}/package.json" ]; then
+      printf '%s' "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+build_frontend_artifact() {
+  local frontend_dir
+  local -a build_command
+
+  if [ "${SKIP_FRONTEND}" = "1" ]; then
+    echo "[INFO] --skip-frontend: the frontend build is skipped by explicit request"
+    return 0
+  fi
+
+  if ! frontend_dir="$(resolve_frontend_source_dir)"; then
+    # 服务器上只有镜像、没有前端源码 ⇒ 前端产物来自 CI 构建好的镜像。
+    # 这里必须**显式说明**，不能看起来像"前端构建过了"。
+    echo "[INFO] Frontend source tree not found on this host; the frontend artifact is delivered as the prebuilt image ${IMAGE_NAME_FRONTEND}:${IMAGE_TAG}"
+    return 0
+  fi
+
+  if [ ! -d "${frontend_dir}/node_modules" ]; then
+    echo "[FAIL] Frontend dependencies are missing: ${frontend_dir}/node_modules does not exist" >&2
+    echo "[INFO] Install the frontend dependencies before deploying, for example:" >&2
+    echo "[INFO]   cd frontend && npm ci" >&2
+    echo "[FAIL] Deployment blocked: the frontend build cannot run without installed dependencies" >&2
+    exit 1
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "[FAIL] npm was not found on this host; install Node.js/npm or pass --skip-frontend" >&2
+    exit 1
+  fi
+
+  echo "[INFO] Building the frontend in ${frontend_dir}..."
+  if command -v timeout >/dev/null 2>&1; then
+    build_command=(timeout "${FRONTEND_BUILD_TIMEOUT_SECONDS}" npm run build)
+  else
+    echo "[WARN] The timeout command is not available; the frontend build is not time-bounded"
+    build_command=(npm run build)
+  fi
+  if ! ( cd "${frontend_dir}" && "${build_command[@]}" ); then
+    echo "[FAIL] Frontend build failed" >&2
+    exit 1
+  fi
+  echo "[OK] Frontend build completed"
+}
+
+# [BACKUP] 跑迁移前必须先备份，并且必须证明备份可恢复（pg_restore --list 退出码 0）。
+# 历史事故：pre_deploy_* 目录里只有 compose 快照 + 容器清单，没有 pg_dump
+# ⇒ 迁移一旦出问题，线上**没有任何可回滚的数据库状态**。
+resolve_backup_tool() {
+  local candidate
+  for candidate in \
+    "${PRODUCTION_PATH:-$(pwd)}/scripts/local_migration_backup.py" \
+    "${SCRIPT_DIR}/local_migration_backup.py" \
+    "${SCRIPT_DIR}/scripts/local_migration_backup.py"; do
+    if [ -f "${candidate}" ]; then
+      printf '%s' "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+perform_pre_migration_backup() {
+  local backup_ts backup_dir_host backup_tool container_name
+  local state_file_host state_file_container dump_found
+  local -a state_args
+
+  backup_ts="$(date +%Y%m%d_%H%M%S)"
+  backup_dir_host="${PRODUCTION_PATH}/backups/pre_deploy_${backup_ts}"
+  container_name="${POSTGRES_CONTAINER_NAME:-xihong_erp_postgres}"
+
+  if ! mkdir -p "${backup_dir_host}"; then
+    echo "[FAIL] Could not create the backup directory ${backup_dir_host}"
+    return 1
+  fi
+  echo "[INFO] Pre-migration backup directory: ${backup_dir_host}"
+
+  if ! backup_tool="$(resolve_backup_tool)"; then
+    echo "[FAIL] scripts/local_migration_backup.py was not found on this host"
+    echo "[INFO] The migration is blocked: no backup tool means no verified backup"
+    return 1
+  fi
+
+  # 迁移状态（legacy_revision / schema_fingerprint）必须来自**当前数据库**，
+  # 否则备份与被迁移的库对不上号。宿主机连不上库（5432 不对外暴露），
+  # 所以状态在 backend 容器里读（那里能连上 postgres）。
+  state_file_host="${backup_dir_host}/migration_state.json"
+  state_file_container="/backups/migration_state.json"
+  if "${compose_cmd_base[@]}" run --rm --no-deps backend-api \
+      python3 /app/scripts/local_migration_backup.py --print-state \
+      > "${state_file_host}.raw" 2>/dev/null; then
+    # compose run 会把 entrypoint 的提示行也写进 stdout ⇒ 取 JSON 那一行。
+    grep -E '^\{' "${state_file_host}.raw" | tail -n 1 > "${state_file_host}" || true
+  fi
+  rm -f "${state_file_host}.raw"
+  if [ -s "${state_file_host}" ]; then
+    echo "[OK] Current migration state captured for the backup metadata"
+  else
+    rm -f "${state_file_host}"
+    echo "[WARN] Could not read the current migration state; the backup is still verified with pg_restore --list"
+  fi
+
+  # pg_dump 必须在**服务器内的容器里**执行：
+  #   宿主机上跑 ⇒ 5432 不可达；容器内跑 ⇒ 走容器网络，不对外暴露端口。
+  if command -v python3 >/dev/null 2>&1; then
+    # 宿主机有 python3：docker exec 模式（pg_dump 直接跑在 postgres 容器里）。
+    state_args=()
+    if [ -s "${state_file_host}" ]; then
+      state_args=(--state-file "${state_file_host}")
+    fi
+    if ! python3 "${backup_tool}" --create --dump-mode docker \
+        --docker-container "${container_name}" \
+        --database-url "${DATABASE_URL:-}" \
+        --backup-directory "${backup_dir_host}" \
+        ${state_args[@]+"${state_args[@]}"}; then
+      echo "[FAIL] Pre-migration backup failed; the migration is blocked"
+      return 1
+    fi
+  else
+    # 宿主机没有 python3：改在 backend 容器里跑（镜像内自带 python3 + postgresql-client），
+    # pg_dump 仍然发生在服务器内的容器里（direct 传输，走容器网络）。
+    state_args=()
+    if [ -s "${state_file_host}" ]; then
+      state_args=(--state-file "${state_file_container}")
+    fi
+    if ! "${compose_cmd_base[@]}" run --rm --no-deps \
+        -v "${backup_dir_host}:/backups" \
+        backend-api python3 /app/scripts/local_migration_backup.py --create \
+        --dump-mode direct --backup-directory /backups \
+        ${state_args[@]+"${state_args[@]}"}; then
+      echo "[FAIL] Pre-migration backup failed; the migration is blocked"
+      return 1
+    fi
+  fi
+
+  # 产物必须真的落在宿主机上（容器内成功但没落盘 ⇒ 等于没备份）。
+  # 不用 `find | grep -q`：grep 提前退出会给 find 发 SIGPIPE，pipefail 下会误判成失败。
+  dump_found="$(find "${backup_dir_host}" -type f -name '*.dump' -size +0 -print -quit 2>/dev/null || true)"
+  if [ -z "${dump_found}" ]; then
+    echo "[FAIL] The backup archive was not written to ${backup_dir_host}"
+    return 1
+  fi
+  echo "[OK] Pre-migration backup created and verified in ${backup_dir_host}"
+}
+
 # Prefer CNB when fully configured, and only fall back to GHCR if CNB pull fails.
 CNB_FULLY_CONFIGURED=0
 if [ -n "${CNB_REGISTRY:-}" ] && [ -n "${CNB_TOKEN:-}" ] && [ -n "${CNB_IMAGE_NAME_BACKEND:-}" ] && [ -n "${CNB_IMAGE_NAME_FRONTEND:-}" ]; then
@@ -180,6 +381,9 @@ REDIS_PASSWORD_VAL="${REDIS_PASSWORD:-redis_pass_2025}"
 POSTGRES_USER_VAL="$(echo "${POSTGRES_USER_VAL}" | tr -d '\r' | tr -d '\n' | xargs)"
 POSTGRES_DB_VAL="$(echo "${POSTGRES_DB_VAL}" | tr -d '\r' | tr -d '\n' | xargs)"
 REDIS_PASSWORD_VAL="$(echo "${REDIS_PASSWORD_VAL}" | tr -d '\r' | tr -d '\n')"
+
+# [FRONTEND] 前端构建：默认执行，缺依赖即失败（不静默跳过）。
+build_frontend_artifact
 
 # Delay GHCR login until fallback is actually needed.
 if [ "${CNB_FULLY_CONFIGURED}" -eq 1 ]; then
@@ -483,21 +687,27 @@ if [ -z "${BACKEND_TAG}" ]; then
   exit 1
 fi
 
-echo "[INFO] Pulling frontend image..."
-TEMP_OUTPUT_FILE=$(mktemp)
-TEMP_STDERR_FILE=$(mktemp)
-if ! pull_image_with_fallback "${IMAGE_NAME_FRONTEND}" "${IMAGE_TAG}" > "${TEMP_OUTPUT_FILE}" 2> "${TEMP_STDERR_FILE}"; then
+if [ "${SKIP_FRONTEND}" = "1" ]; then
+  # 显式跳过前端时**不拉**前端镜像（老前端容器继续服务，新镜像这次不发）。
+  FRONTEND_TAG="${IMAGE_TAG}"
+  echo "[INFO] --skip-frontend: skipping the frontend image pull"
+else
+  echo "[INFO] Pulling frontend image..."
+  TEMP_OUTPUT_FILE=$(mktemp)
+  TEMP_STDERR_FILE=$(mktemp)
+  if ! pull_image_with_fallback "${IMAGE_NAME_FRONTEND}" "${IMAGE_TAG}" > "${TEMP_OUTPUT_FILE}" 2> "${TEMP_STDERR_FILE}"; then
+    cat "${TEMP_STDERR_FILE}" >&2
+    echo "[FAIL] Failed to pull frontend image" >&2
+    rm -f "${TEMP_OUTPUT_FILE}" "${TEMP_STDERR_FILE}"
+    exit 1
+  fi
   cat "${TEMP_STDERR_FILE}" >&2
-  echo "[FAIL] Failed to pull frontend image" >&2
+  FRONTEND_TAG="$(grep -v '^\[.*\]' "${TEMP_OUTPUT_FILE}" | tail -n 1 | tr -d '\r\n' | xargs)"
   rm -f "${TEMP_OUTPUT_FILE}" "${TEMP_STDERR_FILE}"
-  exit 1
-fi
-cat "${TEMP_STDERR_FILE}" >&2
-FRONTEND_TAG="$(grep -v '^\[.*\]' "${TEMP_OUTPUT_FILE}" | tail -n 1 | tr -d '\r\n' | xargs)"
-rm -f "${TEMP_OUTPUT_FILE}" "${TEMP_STDERR_FILE}"
-if [ -z "${FRONTEND_TAG}" ]; then
-  echo "[FAIL] Frontend tag is empty after pull (tag extraction failed)" >&2
-  exit 1
+  if [ -z "${FRONTEND_TAG}" ]; then
+    echo "[FAIL] Frontend tag is empty after pull (tag extraction failed)" >&2
+    exit 1
+  fi
 fi
 
 echo "[OK] Resolved tags: Backend=${BACKEND_TAG}, Frontend=${FRONTEND_TAG}"
@@ -785,6 +995,17 @@ if [ -n "${PORT_80_CONTAINER}" ] && [ "${PORT_80_CONTAINER}" != "xihong_erp_ngin
   docker stop "${PORT_80_CONTAINER}" 2>/dev/null || true
 fi
 
+echo "[INFO] Phase 1.9: Creating a verified pre-migration backup..."
+# 备份是**跑迁移前的必经步骤**：校验失败（pg_restore --list 非 0）必须中断发版。
+# 放在暂存之后 ⇒ 应用容器已停 ⇒ 库上活动连接与锁最少，dump 最不容易被拖死；
+# 失败时 rollback trap 会把老容器恢复回去。
+if ! perform_pre_migration_backup; then
+  echo "[FAIL] Pre-migration backup did not succeed; the migration is not started"
+  echo "[INFO] Deployment blocked: a migration without a verified backup is not allowed"
+  exit 1
+fi
+echo "[OK] Verified pre-migration backup is ready"
+
 echo "[INFO] Phase 2: Running smart database migration..."
 if ! smart_database_migrate; then
   echo "[FAIL] Smart database migration failed"
@@ -1047,8 +1268,13 @@ else
   exit 1
 fi
 
-echo "[INFO] Phase 3b: starting frontend..."
-"${compose_cmd_base[@]}" up -d --no-build --no-deps frontend
+if [ "${SKIP_FRONTEND}" = "1" ]; then
+  # 显式跳过前端：老前端容器**继续服务**（它没有被暂存/停止），这次不发新前端。
+  echo "[INFO] --skip-frontend: keeping the currently running frontend container (no new frontend is deployed)"
+else
+  echo "[INFO] Phase 3b: starting frontend..."
+  "${compose_cmd_base[@]}" up -d --no-build --no-deps frontend
+fi
 
 echo "[INFO] Waiting for frontend health..."
 frontend_healthy=0
@@ -1061,7 +1287,11 @@ for i in $(seq 1 30); do
   sleep 2
 done
 if [ "${frontend_healthy}" -ne 1 ]; then
-  echo "[FAIL] Frontend health check failed"
+  if [ "${SKIP_FRONTEND}" = "1" ]; then
+    echo "[FAIL] Frontend health check failed (--skip-frontend: the retained frontend container is not serving)"
+  else
+    echo "[FAIL] Frontend health check failed"
+  fi
   exit 1
 fi
 

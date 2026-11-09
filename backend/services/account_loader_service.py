@@ -66,7 +66,9 @@ class AccountLoaderService:
         return {
             "account_id": shop_account.shop_account_id,
             "main_account_id": main_account.main_account_id,
-            "platform": (shop_account.platform or main_account.platform or "unknown").lower(),
+            "platform": (
+                shop_account.platform or main_account.platform or "unknown"
+            ).lower(),
             "store_name": shop_account.store_name,
             "username": main_account.username,
             "password": password,
@@ -112,11 +114,13 @@ class AccountLoaderService:
         )
         return {row.data_domain: bool(row.enabled) for row in result.scalars().all()}
 
-    async def load_account_async(self, account_id: str, db: AsyncSession) -> Optional[Dict]:
+    async def load_account_async(
+        self, account_id: str, db: AsyncSession
+    ) -> Optional[Dict]:
         result = await db.execute(
             select(ShopAccount).where(
                 ShopAccount.shop_account_id == account_id,
-                ShopAccount.enabled == True,
+                ShopAccount.enabled.is_(True),
             )
         )
         shop_account = result.scalar_one_or_none()
@@ -128,7 +132,7 @@ class AccountLoaderService:
             select(MainAccount).where(
                 MainAccount.main_account_id == shop_account.main_account_id,
                 MainAccount.platform == shop_account.platform,
-                MainAccount.enabled == True,
+                MainAccount.enabled.is_(True),
             )
         )
         main_account = result.scalar_one_or_none()
@@ -137,9 +141,13 @@ class AccountLoaderService:
             return None
 
         capabilities = await self._load_capabilities_async(shop_account.id, db)
-        account_dict = self._build_account_dict(main_account, shop_account, capabilities)
+        account_dict = self._build_account_dict(
+            main_account, shop_account, capabilities
+        )
         if account_dict:
-            logger.debug(f"从主/店铺账号表加载账号: {account_id} ({shop_account.store_name})")
+            logger.debug(
+                f"从主/店铺账号表加载账号: {account_id} ({shop_account.store_name})"
+            )
         return account_dict
 
     async def load_all_accounts_async(
@@ -147,7 +155,7 @@ class AccountLoaderService:
     ) -> List[Dict]:
         stmt = (
             select(ShopAccount)
-            .where(ShopAccount.enabled == True)
+            .where(ShopAccount.enabled.is_(True))
             .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         if platform:
@@ -160,18 +168,24 @@ class AccountLoaderService:
                 select(MainAccount).where(
                     MainAccount.main_account_id == shop_account.main_account_id,
                     MainAccount.platform == shop_account.platform,
-                    MainAccount.enabled == True,
+                    MainAccount.enabled.is_(True),
                 )
             )
             main_account = result.scalar_one_or_none()
             if not main_account:
                 continue
             capabilities = await self._load_capabilities_async(shop_account.id, db)
-            account_dict = self._build_account_dict(main_account, shop_account, capabilities)
+            account_dict = self._build_account_dict(
+                main_account, shop_account, capabilities
+            )
             if account_dict:
                 out.append(account_dict)
-        logger.info(f"从主/店铺账号表加载了 {len(out)} 个活跃账号" + (f" (平台: {platform})" if platform else ""))
+        logger.info(
+            f"从主/店铺账号表加载了 {len(out)} 个活跃账号"
+            + (f" (平台: {platform})" if platform else "")
+        )
         return out
+
 
 _account_loader_service = None
 

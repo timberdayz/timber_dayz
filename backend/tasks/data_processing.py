@@ -11,7 +11,9 @@ root_dir = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(root_dir))
 
 from backend.celery_app import celery_app
-from backend.models.database import AsyncSessionLocal, reset_async_engine_pool_for_new_loop
+from backend.models.database import AsyncSessionLocal
+from backend.utils.async_task_runner import run_async_task
+
 # [WARN] v4.19.1:preview 函数已重构,使用 ExcelParser.read_excel 替代
 from backend.services.excel_parser import ExcelParser
 from backend.services.field_mapping.mapper import suggest_mappings
@@ -20,7 +22,7 @@ from backend.services.data_importer import (
     stage_orders,
     stage_product_metrics,
     upsert_orders,
-    upsert_product_metrics
+    upsert_product_metrics,
 )
 import logging
 
@@ -45,7 +47,7 @@ async def _process_excel_file(
     logger.info("  Step 1: Reading Excel...")
     # [WARN] v4.19.1:使用 ExcelParser 替代旧的 preview_service
     df = ExcelParser.read_excel(file_path)
-    rows = df.to_dict('records') if df is not None else []
+    rows = df.to_dict("records") if df is not None else []
 
     logger.info(f"  Found {len(rows)} rows")
 
@@ -87,11 +89,17 @@ async def _process_excel_file(
     logger.info("  Step 4: Inserting to database...")
     staged = 0
     imported = 0
+    # [*] 2026-11-09: 订单正式账本是否真的落库（如实上报）
+    orders_fact_imported = True
+    orders_fact_note = ""
 
     if valid_rows:
         if data_domain == "orders":
             staged = await stage_orders(db, valid_rows)
             imported = await upsert_orders(db, valid_rows)
+            orders_fact_imported = bool(getattr(imported, "fact_imported", True))
+            if not orders_fact_imported:
+                orders_fact_note = getattr(imported, "note", "")
         else:
             staged = await stage_product_metrics(db, valid_rows)
             imported = await upsert_product_metrics(db, valid_rows)
@@ -106,7 +114,9 @@ async def _process_excel_file(
         "error_rows": len(error_rows),
         "staged": staged,
         "imported": imported,
-        "validation": validation_result
+        "orders_fact_imported": orders_fact_imported,
+        "orders_fact_note": orders_fact_note,
+        "validation": validation_result,
     }
 
 
@@ -124,8 +134,9 @@ def process_excel_file(file_path: str, platform: str, data_domain: str, mappings
     Returns:
         处理结果
     """
-    # Celery sync task 每次调用都会新建事件循环,必须先丢弃上一轮绑定旧 loop 的连接池
-    reset_async_engine_pool_for_new_loop()
+    # Celery sync task 每次调用都会新建事件循环,
+    # 必须走统一异步出口,在循环存活期间真正关闭 asyncpg 连接池
+    # (否则连接会滞留在数据库服务端白占槽位)。
 
     async def _run() -> dict:
         db = AsyncSessionLocal()
@@ -137,14 +148,10 @@ def process_excel_file(file_path: str, platform: str, data_domain: str, mappings
             await db.close()
 
     try:
-        return asyncio.run(_run())
+        return run_async_task(_run)
     except Exception as e:
         logger.error(f"[ERROR] Task failed: {e}")
-        return {
-            "status": "failed",
-            "file_path": file_path,
-            "error": str(e)
-        }
+        return {"status": "failed", "file_path": file_path, "error": str(e)}
 
 
 @celery_app.task(name="backend.tasks.data_processing.batch_process_files")
@@ -167,13 +174,6 @@ def batch_process_files(file_list: list, platform: str, data_domain: str):
     for file_path in file_list:
         # 每个文件作为独立任务
         task = process_excel_file.delay(file_path, platform, data_domain, {})
-        results.append({
-            "file_path": file_path,
-            "task_id": task.id
-        })
+        results.append({"file_path": file_path, "task_id": task.id})
 
-    return {
-        "status": "queued",
-        "total_files": len(file_list),
-        "tasks": results
-    }
+    return {"status": "queued", "total_files": len(file_list), "tasks": results}

@@ -208,7 +208,7 @@ if not should_init_db_on_startup(settings.ENVIRONMENT):
 async def lifespan(app: FastAPI):
     """应用生命周期管理(v4.1.0优化版 - 完整启动)"""
     import time
-    from backend.models.database import engine, async_engine, warm_up_pool
+    from backend.models.database import engine, get_async_engine, warm_up_pool
     from sqlalchemy import text
 
     # 启动性能监控
@@ -1005,7 +1005,9 @@ async def lifespan(app: FastAPI):
                 f"[DBEngine] Startup-fail sync dispose error (non-blocking): {dispose_err}"
             )
         try:
-            await async_engine.dispose()
+            # [*] 2026-11-09：async 引擎按事件循环分发，要关的是**当前循环**
+            # 那个（应用真正在用的），不是全局回退引擎。
+            await get_async_engine().dispose()
             logger.info("[DBEngine] Async engine disposed (startup-fail fallback)")
         except Exception as dispose_err:
             logger.warning(
@@ -1082,7 +1084,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[DBEngine] Sync engine dispose failed (non-blocking): {e}")
     try:
-        await async_engine.dispose()
+        # [*] 2026-11-09：async 引擎按事件循环分发，关停时关的是**当前循环**
+        # 那个（应用真正在用的），否则关停后连接会留在数据库服务端。
+        await get_async_engine().dispose()
         logger.info("[DBEngine] Async engine disposed")
     except Exception as e:
         logger.warning(f"[DBEngine] Async engine dispose failed (non-blocking): {e}")

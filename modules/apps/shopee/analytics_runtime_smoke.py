@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import os
 import sys
@@ -19,6 +18,7 @@ if _REPO_ROOT not in sys.path:
 
 from playwright.async_api import async_playwright
 
+from backend.utils.async_task_runner import run_async_task
 from modules.core.logger import get_logger
 from tools.test_component import ComponentTester
 from modules.apps.collection_center.python_component_adapter import create_adapter
@@ -26,10 +26,20 @@ from modules.platforms.shopee.components.analytics_export import ShopeeAnalytics
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run Shopee analytics export in runtime-aligned component test mode")
-    parser.add_argument("--account-id", default="shopee-smoke", help="Logical account id used for session/fingerprint scope")
-    parser.add_argument("--storage-state", default="", help="Optional storage_state json path")
-    parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
+    parser = argparse.ArgumentParser(
+        description="Run Shopee analytics export in runtime-aligned component test mode"
+    )
+    parser.add_argument(
+        "--account-id",
+        default="shopee-smoke",
+        help="Logical account id used for session/fingerprint scope",
+    )
+    parser.add_argument(
+        "--storage-state", default="", help="Optional storage_state json path"
+    )
+    parser.add_argument(
+        "--headless", action="store_true", help="Run browser in headless mode"
+    )
     parser.add_argument(
         "--work-dir",
         default=str(Path("output/playwright/work/shopee/analytics-runtime-smoke")),
@@ -47,7 +57,9 @@ async def _run(args: argparse.Namespace) -> int:
     logger = get_logger("shopee.analytics_runtime_smoke")
     work_dir = Path(args.work_dir).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
-    storage_state_path = Path(args.storage_state).resolve() if args.storage_state else None
+    storage_state_path = (
+        Path(args.storage_state).resolve() if args.storage_state else None
+    )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     result_path = work_dir / f"{timestamp}-result.json"
@@ -143,7 +155,9 @@ async def _run(args: argparse.Namespace) -> int:
             payload["login_gate_error"] = gate_result.error
             if not login_gate_ready:
                 await page.screenshot(path=str(screenshot_after), full_page=False)
-                result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                result_path.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
                 return 1
 
             adapter = create_adapter(
@@ -162,13 +176,17 @@ async def _run(args: argparse.Namespace) -> int:
 
             await page.screenshot(path=str(screenshot_after), full_page=False)
             payload["ok"] = bool(payload["export_result"]["success"])
-            result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            result_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             logger.info("analytics runtime smoke completed ok=%s", payload["ok"])
             logger.info("result_path=%s", result_path)
             return 0 if payload["ok"] else 1
         except Exception as exc:  # noqa: BLE001
             payload["error"] = str(exc)
-            result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            result_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             logger.error("analytics runtime smoke failed: %s", exc)
             logger.info("result_path=%s", result_path)
             return 2
@@ -181,7 +199,7 @@ async def _run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     args = _build_parser().parse_args()
-    return asyncio.run(_run(args))
+    return run_async_task(lambda: _run(args))
 
 
 if __name__ == "__main__":

@@ -34,7 +34,15 @@ from typing import Iterable
 
 # 测试目录：不参与门禁
 TEST_DIR_NAMES = {"tests", "test", "testing"}
-SKIP_DIR_NAMES = {"__pycache__", ".git", "node_modules", ".venv", "venv", "dist", "build"}
+SKIP_DIR_NAMES = {
+    "__pycache__",
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+}
 
 # 显式豁免登记：{相对路径: {函数名: 理由}}
 # 新增豁免必须写清理由；空理由视为无效豁免（门禁会报错）。
@@ -76,7 +84,9 @@ def _iter_source_files(root: Path, targets: Iterable[str]) -> list[Path]:
     return sorted(set(files))
 
 
-def _collect_funcs(path: Path, rel: str) -> tuple[list[FuncDef], list[tuple[FuncDef, int]]]:
+def _collect_funcs(
+    path: Path, rel: str
+) -> tuple[list[FuncDef], list[tuple[FuncDef, int]]]:
     """返回 (函数列表, [(函数, .query( 行号)])。"""
     try:
         src = path.read_text(encoding="utf-8-sig")

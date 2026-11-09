@@ -23,9 +23,21 @@ test('MyFollowInvestmentIncome page is a read-only view', () => {
 })
 
 test('MyFollowInvestmentIncome page shows key table fields', () => {
-  for (const label of ['月份', '投资人', '平台', '店铺ID', '结算基准利润', '分配占比']) {
+  for (const label of ['月份', '投资人', '平台', '店铺', '结算基准利润', '分配占比']) {
     assert.equal(source.includes(label), true, `page should contain ${label}`)
   }
+
+  assert.equal(
+    source.includes('prop="shop_id"'),
+    true,
+    'page should bind the shop column to shop_id'
+  )
+
+  assert.equal(
+    source.includes('<ShopDisplayText :row="row" />'),
+    true,
+    'page should render the shop column through the unified shop display component'
+  )
 })
 
 test('MyFollowInvestmentIncome page explains the four settlement narratives', () => {

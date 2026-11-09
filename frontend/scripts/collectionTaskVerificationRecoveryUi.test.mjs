@@ -11,11 +11,25 @@ const tasksViewPath = path.resolve(__dirname, '../src/domains/collection/views/c
 const apiSource = fs.readFileSync(apiPath, 'utf8')
 const tasksSource = fs.readFileSync(tasksViewPath, 'utf8')
 
-test('collection task websocket falls back to persisted access token', () => {
+test('collection task websocket relies on the session cookie instead of a persisted access token', () => {
+  // 登录优化后 access_token 已搬进 httpOnly cookie，浏览器不再持有令牌，
+  // 前端如果再去 localStorage 取一次，就等于又造了一份令牌真相点。
   assert.equal(
-    apiSource.includes("const effectiveToken = token || localStorage.getItem('access_token') || ''"),
+    apiSource.includes("const effectiveToken = token || ''"),
     true,
-    'task websocket should reuse persisted access token when caller does not pass one'
+    'task websocket should only use the token explicitly passed by the caller'
+  )
+
+  assert.equal(
+    apiSource.includes("localStorage.getItem('access_token')"),
+    false,
+    'task websocket must not read a persisted access token: the session now lives in an httpOnly cookie'
+  )
+
+  assert.equal(
+    apiSource.includes('if (effectiveToken) {'),
+    true,
+    'task websocket should only append the token query parameter when a token is actually available'
   )
 })
 
