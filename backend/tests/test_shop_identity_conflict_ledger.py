@@ -38,6 +38,7 @@ from backend.services import cloud_sync_identity_guard_service as guard_service
 from backend.services import shop_identity_conflict_ledger_service as ledger_service
 from backend.services.cloud_b_class_sync_service import (
     SQLAlchemyCloudWriter,
+    build_sync_payload,
     split_rows_by_dual_baseline,
 )
 from backend.services.cloud_sync_identity_guard_service import (
@@ -1057,3 +1058,169 @@ def test_asyncio_is_available_for_the_notify_helper():
     """★ 通知出口是异步的(挂在同步链路的异步层)。"""
     message = "通知出口必须是异步的"
     assert asyncio.iscoroutinefunction(ledger_service.notify_new_conflict_rows), message
+
+
+# ---------------------------------------------------------------------------
+# ⑧ 源行主键必须一路带到底（v7.20.1 热修）
+# ---------------------------------------------------------------------------
+#
+# ⚠️ 这一节的坑是**真库实测**出来的, 假引擎测不出来：
+#   - 同步的**生产路径**是「源行 → build_sync_payload → 写入器」,
+#     而 build_sync_payload 原来只留 canonical 列 ⇒ **主键被丢掉**
+#     ⇒ 守卫/台账拿到的行没有 id ⇒ source_row_id 恒为空
+#     ⇒ 手工重发入口定位不到源行;
+#   - 重发脚本读源行时只 SELECT canonical 列 ⇒ 真库不返回 id
+#     ⇒ mapping.get("id") 恒为 None ⇒ 映射键全变成 "None"
+#     ⇒ 每一行都被误判成「源行已不存在」。
+#
+# ⇒ 假引擎**不校验 SELECT 列**、也不校验负载的键集 ⇒ 这两条必须用
+#    「忠实形状」的替身来盯。
+
+
+class _FaithfulRow:
+    """忠实模拟 SQLAlchemy 的 Row：**只有被 SELECT 的列**。"""
+
+    def __init__(self, mapping: dict[str, Any]) -> None:
+        self._mapping = mapping
+
+    def __getitem__(self, key: str) -> Any:
+        return self._mapping[key]
+
+
+class _FaithfulResult:
+    def __init__(self, rows: list[_FaithfulRow]) -> None:
+        self._rows = rows
+
+    def fetchall(self) -> list[_FaithfulRow]:
+        return list(self._rows)
+
+
+class _FaithfulConn:
+    """按 SQL 里**实际 SELECT 的列**造行 —— 与真库行为一致。"""
+
+    def __init__(self, engine: "_FaithfulEngine") -> None:
+        self._engine = engine
+
+    def __enter__(self) -> "_FaithfulConn":
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        return None
+
+    def execute(self, statement: Any, params: Any = None) -> _FaithfulResult:
+        sql = str(statement)
+        self._engine.sql = sql
+        select_part = sql.split("FROM", 1)[0].replace("SELECT", "", 1)
+        columns = [
+            part.strip().strip('"') for part in select_part.split(",") if part.strip()
+        ]
+        self._engine.selected_columns = columns
+        rows = []
+        for row_id in list((params or {}).values()):
+            mapping = {column: f"{column}-of-{row_id}" for column in columns}
+            # 主键列的值就是行主键本身(与真库一致)。
+            if "id" in mapping:
+                mapping["id"] = row_id
+            rows.append(_FaithfulRow(mapping))
+        return _FaithfulResult(rows)
+
+
+class _FaithfulEngine:
+    """只记录 SQL 与被 SELECT 的列(不替你补列)。"""
+
+    def __init__(self) -> None:
+        self.sql = ""
+        self.selected_columns: list[str] = []
+
+    def connect(self) -> _FaithfulConn:
+        return _FaithfulConn(self)
+
+    def dispose(self) -> None:
+        return None
+
+
+def test_the_replay_loader_selects_the_primary_key():
+    """★ 重发脚本读源行时**必须把主键一起 SELECT 出来**。"""
+    engine = _FaithfulEngine()
+
+    source_rows = replay_script._load_source_rows(
+        engine,
+        source_table_name="fact_shopee_analytics_monthly",
+        source_row_ids=["1", "2"],
+    )
+
+    message = "SELECT 里必须带上主键, 否则真库不会返回它"
+    assert "id" in engine.selected_columns, message
+
+    message = "映射键必须是源行主键, 不能全是 None"
+    assert set(source_rows.keys()) == {"1", "2"}, message
+
+
+def test_the_sync_payload_keeps_the_source_row_primary_key():
+    """★ 同步负载**必须带上源行主键** —— 守卫与台账靠它定位「这一行」。"""
+    payload = build_sync_payload(
+        {
+            "id": 101,
+            "platform_code": "shopee",
+            "data_domain": "analytics",
+            "data_hash": "hash-101",
+        }
+    )
+
+    message = "负载必须带源行主键"
+    assert payload.get("id") == 101, message
+
+
+def test_the_production_path_records_the_source_row_id():
+    """★ 生产路径(源行 → 负载 → 闸门)必须把 ``source_row_id`` 记下来。
+
+    这正是「台账写进去的行却定位不到源行」的根因所在。
+    """
+    rows = [
+        _row(
+            {"platform_shop_id": "1391124228", "shop_id": "1419169771"},
+            id=77,
+            data_hash="hash-77",
+        )
+    ]
+    payload_rows = [build_sync_payload(row) for row in rows]
+
+    split = split_rows_by_dual_baseline(payload_rows, LOCAL_INDEX, None)
+
+    message = "必须产出矛盾行事件"
+    assert split.conflict_events, message
+
+    message = "矛盾行事件必须带源行主键, 否则重发入口定位不到行"
+    assert split.conflict_events[0].get("source_row_id") == "77", message
+
+    message = "行内定位必须由源行主键 + 摘要拼成"
+    assert split.conflict_events[0].get("row_locator") == "77|hash-77", message
+
+
+def test_the_replay_payload_keeps_the_same_dedup_key_as_the_original():
+    """★ 重发时算出的去重键必须与原始那一行**一致**（否则台账会多出一行）。"""
+    original = build_dedup_key(
+        source_table_name="fact_shopee_analytics_monthly",
+        business_date="2026-11-05",
+        row_locator=build_row_locator(source_row_id="77", data_hash="hash-77"),
+        reason_code=REASON_LOCAL_REGISTRY_AMBIGUOUS,
+    )
+
+    row = _row(
+        {"platform_shop_id": "1391124228", "shop_id": "1419169771"},
+        id=77,
+        data_hash="hash-77",
+    )
+    payload = build_sync_payload(row)
+    replayed = build_dedup_key(
+        source_table_name="fact_shopee_analytics_monthly",
+        business_date="2026-11-05",
+        row_locator=build_row_locator(
+            source_row_id=payload.get("id"),
+            data_hash=payload.get("data_hash"),
+        ),
+        reason_code=REASON_LOCAL_REGISTRY_AMBIGUOUS,
+    )
+
+    message = "重发算出的去重键必须与原始那一行相同"
+    assert replayed == original, message

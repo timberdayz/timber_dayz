@@ -119,12 +119,20 @@ def _load_source_rows(
 
     ⚠️ 表名来自台账, 仍然走 :func:`validate_b_class_table_name` 校验 ⇒
     拼进 SQL 之前先挡住非法表名。
+
+    ⚠️ **必须把主键一起 SELECT 出来** —— 下面的映射键靠它。
+    只取 canonical 列的话, 真库只会返回那些列(``id`` 不在其中)⇒
+    ``mapping.get("id")`` 恒为 ``None`` ⇒ 映射键全变成 ``"None"``
+    ⇒ 每一行都会被误判成「源行已不存在」, 重发**一行都发不出去**。
+    (假引擎不校验 SELECT 列 ⇒ 单测全绿也测不出来 —— 真库实测才发现。)
     """
     validate_b_class_table_name(source_table_name)
     if not source_row_ids:
         return {}
 
-    columns = ", ".join(quote_ident(column) for column in build_canonical_columns())
+    columns = ", ".join(
+        quote_ident(column) for column in ("id",) + build_canonical_columns()
+    )
     placeholders = ", ".join(
         ":row_id_%d" % index for index in range(len(source_row_ids))
     )
