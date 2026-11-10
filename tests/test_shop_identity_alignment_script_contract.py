@@ -181,3 +181,75 @@ def test_safe_identifier_rejects_injection(script_module) -> None:
         script_module._safe_identifier('fact_x"; DROP TABLE core.shop_accounts; --')
     with pytest.raises(ValueError):
         script_module._safe_identifier("")
+
+
+# --------------------------------------------------------------------------- #
+# 候选池刷新脚本（批次 2 步骤 2.4）
+# --------------------------------------------------------------------------- #
+REFRESH_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "refresh_shop_identity_candidates.py"
+
+
+@pytest.fixture(scope="module")
+def refresh_source() -> str:
+    assert REFRESH_SCRIPT_PATH.exists(), f"候选池刷新脚本缺失: {REFRESH_SCRIPT_PATH}"
+    return REFRESH_SCRIPT_PATH.read_text(encoding="utf-8")
+
+
+def _code_strings(source: str) -> list[str]:
+    """源码里**真正会执行的**字符串字面量（排除各类 docstring）。
+
+    注释里解释「为什么不做 DROP CASCADE」是安全的，不能因此判红；
+    但代码里真的写了 DROP 就是问题。
+    """
+    tree = ast.parse(source)
+    docstrings: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
+            doc = ast.get_docstring(node, clean=False)
+            if doc:
+                docstrings.add(doc)
+    return [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value not in docstrings
+    ]
+
+
+def test_refresh_script_never_drops_cascade(refresh_source: str) -> None:
+    """批次 2 只改**数据** ⇒ 只 REFRESH，绝不 DROP ... CASCADE。
+
+    副本资产自己的注释（`sql/semantic/shop_identity_resolution_candidates_v2_mv.sql:69-73`）
+    与守护测试
+    `backend/tests/data_pipeline/test_identity_candidates_materialization.py::test_materialized_view_asset_never_drops_cascade`
+    都在守这条：DROP + CASCADE 会连带删掉下游对象。
+    """
+    for literal in _code_strings(refresh_source):
+        upper = literal.upper()
+        assert "DROP MATERIALIZED VIEW" not in upper
+        assert "CASCADE" not in upper
+
+
+def test_refresh_script_uses_migration_fingerprint_semantics(
+    refresh_source: str,
+) -> None:
+    """指纹口径必须与迁移 ``20261105_create_identity_candidates_mv.py`` 一致。"""
+    assert "md5(" in refresh_source
+    assert "string_agg" in refresh_source
+    assert "row_to_json" in refresh_source
+    assert "ORDER BY row_json" in refresh_source
+
+
+def test_refresh_script_can_check_without_refreshing(refresh_source: str) -> None:
+    assert '"--check-only"' in refresh_source
+    body = _main_function_body(refresh_source)
+    assert "if not args.check_only:" in body
+
+
+def test_refresh_script_fails_on_fingerprint_mismatch(refresh_source: str) -> None:
+    body = _main_function_body(refresh_source)
+    assert "return 1" in body
+    assert "return 2" in body
