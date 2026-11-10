@@ -90,6 +90,17 @@ DEPLOYMENT_ROLLBACK_ARMED=0
 DEPLOYMENT_CUTOVER_COMPLETE=0
 DEPLOYMENT_ROLLBACK_SUFFIX="$$_$(date +%s)"
 DEPLOYMENT_COMPOSE_PROJECT="xihong_erp_release_${DEPLOYMENT_ROLLBACK_SUFFIX}"
+# [ARTIFACT_RETENTION] 本次发版的起始时刻（epoch 秒）。
+# 用途：保留策略要保护「本次发版刚创建的备份」，不能把它当旧备份删掉。
+# 注意：流水线在跑本脚本**之前**还会自己建一个 backups/pre_deploy_* 目录
+# （deploy-production.yml 的 "Backup current deployment" 步骤），
+# 它的时间戳比这个变量略早 ⇒ 保留策略另有一个 ±5 分钟的窗口去兜住它。
+DEPLOYMENT_STARTED_AT_EPOCH="$(date +%s)"
+# perform_pre_migration_backup 会把本次发版创建的备份目录记在这里，保留策略无条件跳过它。
+CURRENT_DEPLOY_BACKUP_DIR=""
+# [ARTIFACT_RETENTION] 保留策略的累计结果（由 remove_deployment_artifact 更新）。
+REMOVED_ARTIFACT_COUNT=0
+REMOVED_ARTIFACT_MB=0
 
 capture_running_application_containers() {
   local container container_id is_running
@@ -263,6 +274,8 @@ perform_pre_migration_backup() {
 
   backup_ts="$(date +%Y%m%d_%H%M%S)"
   backup_dir_host="${PRODUCTION_PATH}/backups/pre_deploy_${backup_ts}"
+  # [ARTIFACT_RETENTION] 记下本次发版创建的备份目录 —— 保留策略绝不会删它。
+  CURRENT_DEPLOY_BACKUP_DIR="${backup_dir_host}"
   container_name="${POSTGRES_CONTAINER_NAME:-xihong_erp_postgres}"
 
   if ! mkdir -p "${backup_dir_host}"; then
@@ -532,6 +545,370 @@ cleanup_old_images() {
   echo "[OK] Dangling images cleaned (freed: ${pruned_size})"
   
   echo "[OK] Image cleanup completed"
+}
+
+# [LOGROTATE] 安装 nginx 文件日志轮转配置（磁盘有界化）。
+#
+# 背景：生产的 nginx access.log / error.log 落在**宿主机 bind mount** 上
+# （/opt/xihong_erp/logs/nginx -> 容器 /var/log/nginx），容器重建不丢 ⇒ 不轮转就无上限地涨。
+# docker 的 json-file 轮转管不到这两个文件（docker-compose.prod.yml 里有注释写明）。
+#
+# 硬约束：**任何一步失败都只 WARN，绝不让发版失败** —— 轮转是收尾工作，不是发版前提。
+install_logrotate_config() {
+  local source_config="${PRODUCTION_PATH}/nginx/logrotate-xihong.conf"
+  local target_config="/etc/logrotate.d/xihong-nginx"
+  local logrotate_bin validate_state check_output
+
+  # 1) 宿主机没有 logrotate ⇒ 只 WARN 跳过
+  if ! command -v logrotate >/dev/null 2>&1; then
+    echo "[WARN] logrotate is not installed on this host; nginx log rotation was NOT configured"
+    echo "[WARN]   nginx access.log / error.log keep growing without rotation"
+    return 0
+  fi
+  logrotate_bin="$(command -v logrotate)"
+
+  # 2) 源文件缺失 ⇒ 只 WARN 跳过
+  if [ ! -f "${source_config}" ]; then
+    echo "[WARN] ${source_config} is missing; nginx log rotation was NOT configured"
+    return 0
+  fi
+
+  # 3) 语法校验：logrotate -d 只检查、不执行。
+  #    注意：**退出码不足以判定成功**。实测 logrotate 对「对 group/other 可写」的配置文件
+  #    会打印 "error: Ignoring <conf> because it is writable by group or others."，
+  #    但退出码仍然是 0 ⇒ 必须同时看输出里有没有被忽略 / 出错的痕迹，
+  #    以及有没有真的 "reading config file"（= 这份配置确实被采用了）。
+  validate_state="${PRODUCTION_PATH}/logrotate.validate.state"
+  check_output="$("${logrotate_bin}" -d --state "${validate_state}" "${source_config}" 2>&1 || true)"
+  if printf '%s' "${check_output}" | grep -qE 'error:|Ignoring '; then
+    echo "[WARN] logrotate rejected ${source_config}; nginx log rotation was NOT configured"
+    printf '%s\n' "${check_output}" | sed 's/^/[WARN]   /'
+    return 0
+  fi
+  if ! printf '%s' "${check_output}" | grep -q 'reading config file'; then
+    echo "[WARN] logrotate did not report reading ${source_config}; nginx log rotation was NOT configured"
+    printf '%s\n' "${check_output}" | sed 's/^/[WARN]   /'
+    return 0
+  fi
+  echo "[OK] logrotate configuration validated: ${source_config}"
+
+  # 4) 装到系统目录（标准位置：系统 cron 跑的 logrotate 会 include /etc/logrotate.d）
+  if ! cp "${source_config}" "${target_config}" 2>/dev/null; then
+    echo "[WARN] Cannot write ${target_config} (needs root); using the user-level fallback instead"
+    install_logrotate_user_cron
+    return 0
+  fi
+  # logrotate 会**忽略**对 group/other 可写的配置文件 ⇒ 权限必须收紧，否则装了等于没装
+  chmod 0644 "${target_config}" 2>/dev/null || true
+
+  check_output="$("${logrotate_bin}" -d --state "${validate_state}" "${target_config}" 2>&1 || true)"
+  if printf '%s' "${check_output}" | grep -qE 'error:|Ignoring ' \
+    || ! printf '%s' "${check_output}" | grep -q 'reading config file'; then
+    echo "[WARN] The installed ${target_config} was rejected by logrotate; removing it and using the fallback"
+    printf '%s\n' "${check_output}" | sed 's/^/[WARN]   /'
+    rm -f "${target_config}" 2>/dev/null || true
+    install_logrotate_user_cron
+    return 0
+  fi
+  echo "[OK] nginx log rotation configured: ${target_config}"
+  echo "[INFO] The system cron job rotates the logs automatically"
+  # 早先发版可能留过兜底 cron ⇒ 撤掉，避免同一份配置被两个 cron 各跑一次
+  remove_logrotate_user_cron
+}
+
+# [LOGROTATE_FALLBACK] /etc/logrotate.d 写不进去时的兜底：装一条**用户级** cron。
+#
+# 为什么必须有兜底：生产上流水线是以 `deploy` 用户跑的（实测 /opt/xihong_erp 下所有
+# 流水线产物属主都是 deploy:deploy），而 /etc/logrotate.d 是 root:root —— 写不进去；
+# sudo 在非交互会话里要密码，用不了。
+# 但 deploy 自己的 crontab 不需要 root，logrotate 对**属主可写**的日志文件
+# （生产 access.log / error.log 的属主就是 deploy）完全能跑 copytruncate。
+#
+# 安全约束：**只追加自己的标记块**，绝不破坏用户已有的 crontab
+# （生产上有 acme.sh 的证书续签任务 —— 弄丢了会证书过期）：
+#   写回前先备份 → 写回后逐行校验「原有条目一条都不能少 + 新条目在」→ 不满足就还原。
+install_logrotate_user_cron() {
+  local source_config="${PRODUCTION_PATH}/nginx/logrotate-xihong.conf"
+  local logrotate_bin state_file cron_line crontab_backup
+  local current_crontab filtered_crontab new_crontab after_crontab original_line
+  local marker_begin="# >>> xihong nginx logrotate >>>"
+  local marker_end="# <<< xihong nginx logrotate <<<"
+
+  if ! command -v logrotate >/dev/null 2>&1; then
+    echo "[WARN] logrotate is not installed; the fallback cron job was NOT installed"
+    return 0
+  fi
+  logrotate_bin="$(command -v logrotate)"
+
+  if [ ! -f "${source_config}" ]; then
+    echo "[WARN] ${source_config} is missing; the fallback cron job was NOT installed"
+    return 0
+  fi
+
+  if ! command -v crontab >/dev/null 2>&1; then
+    echo "[WARN] crontab is not available; the fallback cron job was NOT installed"
+    echo "[WARN]   manual step: install logrotate, then copy ${source_config} to /etc/logrotate.d/xihong-nginx"
+    return 0
+  fi
+
+  state_file="${PRODUCTION_PATH}/logrotate.state"
+  cron_line="17 3 * * * ${logrotate_bin} -s ${state_file} ${source_config}"
+
+  # 备份现有 crontab（用户还没有 crontab 时 crontab -l 返回非 0）
+  crontab_backup="$(mktemp "${TMPDIR:-/tmp}/xihong-crontab-backup.XXXXXX" 2>/dev/null || true)"
+  if [ -n "${crontab_backup}" ]; then
+    crontab -l > "${crontab_backup}" 2>/dev/null || true
+  fi
+  current_crontab="$(cat "${crontab_backup}" 2>/dev/null || true)"
+
+  # 去掉自己上次写的**整个块**（幂等：重复发版不能堆出多条 cron）。
+  # 用 awk 按块删 —— 只 grep 掉两行标记的话，块里那条 cron 命令会留下来，
+  # 每发一次版就多一条重复任务（沙盒实测过）。
+  # 块不完整（只有头没有尾）时**不动它**：宁可多一条，也不能误删用户的其它任务。
+  if printf '%s\n' "${current_crontab}" | grep -q -F -e "${marker_end}"; then
+    filtered_crontab="$(printf '%s\n' "${current_crontab}" | awk -v begin="${marker_begin}" -v end="${marker_end}" '
+      $0 == begin { inblock = 1; next }
+      inblock == 1 { if ($0 == end) { inblock = 0 }; next }
+      { print }
+    ' || true)"
+  else
+    filtered_crontab="${current_crontab}"
+  fi
+  new_crontab="$(printf '%s\n%s\n%s\n%s\n' "${filtered_crontab}" "${marker_begin}" "${cron_line}" "${marker_end}")"
+
+  if ! printf '%s\n' "${new_crontab}" | crontab - 2>/dev/null; then
+    echo "[WARN] Could not install the fallback cron job; restoring the previous crontab"
+    if [ -n "${crontab_backup}" ]; then
+      crontab "${crontab_backup}" 2>/dev/null || true
+    fi
+    return 0
+  fi
+
+  after_crontab="$(crontab -l 2>/dev/null || true)"
+  # 校验 1：新条目必须在
+  if ! printf '%s\n' "${after_crontab}" | grep -q -F -e "${cron_line}"; then
+    echo "[WARN] Fallback cron job verification failed (the new entry is missing); restoring the previous crontab"
+    if [ -n "${crontab_backup}" ]; then
+      crontab "${crontab_backup}" 2>/dev/null || true
+    fi
+    return 0
+  fi
+  # 校验 2：原有条目**一条都不能少**（生产上有 acme.sh 的证书续签任务）
+  while IFS= read -r original_line; do
+    if [ -n "${original_line}" ]; then
+      if ! printf '%s\n' "${after_crontab}" | grep -q -F -e "${original_line}"; then
+        echo "[WARN] Fallback cron job would drop an existing crontab entry; restoring the previous crontab"
+        echo "[WARN]   entry at risk: ${original_line}"
+        if [ -n "${crontab_backup}" ]; then
+          crontab "${crontab_backup}" 2>/dev/null || true
+        fi
+        return 0
+      fi
+    fi
+  done <<< "${current_crontab}"
+
+  echo "[OK] nginx log rotation configured via the user-level cron fallback"
+  echo "[INFO] cron entry: ${cron_line}"
+}
+
+# [LOGROTATE_FALLBACK] 移除之前用兜底方式装上的用户级 cron 块。
+#
+# 场景：早先发版时 /etc/logrotate.d 写不进去，走了兜底 cron；后来部署改成以 root 跑
+# （或给了免密 sudo），标准路径生效 ⇒ 兜底那条要撤掉，否则同一份配置会被两个 cron 各跑一次。
+remove_logrotate_user_cron() {
+  local current_crontab filtered_crontab crontab_backup
+  local marker_begin="# >>> xihong nginx logrotate >>>"
+  local marker_end="# <<< xihong nginx logrotate <<<"
+
+  if ! command -v crontab >/dev/null 2>&1; then
+    return 0
+  fi
+  current_crontab="$(crontab -l 2>/dev/null || true)"
+  if ! printf '%s\n' "${current_crontab}" | grep -q -F -e "${marker_begin}"; then
+    return 0
+  fi
+  if ! printf '%s\n' "${current_crontab}" | grep -q -F -e "${marker_end}"; then
+    echo "[WARN] The fallback cron block looks incomplete; leaving the crontab untouched"
+    return 0
+  fi
+  filtered_crontab="$(printf '%s\n' "${current_crontab}" | awk -v begin="${marker_begin}" -v end="${marker_end}" '
+    $0 == begin { inblock = 1; next }
+    inblock == 1 { if ($0 == end) { inblock = 0 }; next }
+    { print }
+  ' || true)"
+  crontab_backup="$(mktemp "${TMPDIR:-/tmp}/xihong-crontab-backup.XXXXXX" 2>/dev/null || true)"
+  if [ -n "${crontab_backup}" ]; then
+    crontab -l > "${crontab_backup}" 2>/dev/null || true
+  fi
+  if ! printf '%s\n' "${filtered_crontab}" | crontab - 2>/dev/null; then
+    echo "[WARN] Could not remove the fallback cron job; restoring the previous crontab"
+    if [ -n "${crontab_backup}" ]; then
+      crontab "${crontab_backup}" 2>/dev/null || true
+    fi
+    return 0
+  fi
+  echo "[OK] The fallback nginx log rotation cron job was removed (the system one is in place)"
+}
+
+# [ARTIFACT_RETENTION] 删除一个部署残留目录。
+# 顶层函数（不是嵌套函数）：bash 局部变量是动态作用域，嵌套函数改写调用方计数器极易出错。
+# 成功后更新 REMOVED_ARTIFACT_COUNT / REMOVED_ARTIFACT_MB。
+remove_deployment_artifact() {
+  local target="$1"
+  local size_mb
+
+  REMOVED_ARTIFACT_MB=0
+
+  # 硬约束 2：**只删目录**。独立 .dump 文件（来源不明，可能留着手工排查的现场）必须留下。
+  if [ ! -d "${target}" ]; then
+    return 0
+  fi
+  case "${target}" in
+    *.dump)
+      echo "[INFO] Keeping the standalone dump file: ${target}"
+      return 0
+      ;;
+  esac
+
+  size_mb="$(du -sm "${target}" 2>/dev/null | cut -f1 || true)"
+  if [ -z "${size_mb}" ]; then
+    size_mb=0
+  fi
+  echo "[INFO] Removing old backup: ${target} (${size_mb}M)"
+  # 硬约束 4：删除失败也不能拖垮发版
+  rm -rf -- "${target}" 2>/dev/null || true
+  if [ -d "${target}" ]; then
+    echo "[WARN] Could not remove ${target}; keeping it"
+    return 0
+  fi
+  REMOVED_ARTIFACT_COUNT=$((REMOVED_ARTIFACT_COUNT + 1))
+  REMOVED_ARTIFACT_MB=$((REMOVED_ARTIFACT_MB + size_mb))
+  return 0
+}
+
+# [ARTIFACT_RETENTION] 判断一个备份目录是不是「本次发版刚创建的」⇒ 是就绝对不能删。
+#
+# 两条保护：
+#   1. perform_pre_migration_backup 记下的那个目录（脚本内本次发版创建的）—— 精确匹配；
+#   2. 时间戳落在本次发版窗口（±5 分钟）内的 —— 兜住流水线在跑本脚本**之前**
+#      自己创建的 backups/pre_deploy_* 目录（deploy-production.yml 的 "Backup current deployment" 步骤）。
+is_current_deployment_backup() {
+  local candidate="$1"
+  local raw_ts formatted_ts epoch offset
+
+  if [ -n "${CURRENT_DEPLOY_BACKUP_DIR:-}" ] && [ "${candidate}" = "${CURRENT_DEPLOY_BACKUP_DIR}" ]; then
+    return 0
+  fi
+
+  # 取目录名结尾的时间戳（YYYYMMDD_HHMMSS），前缀无关
+  raw_ts="$(printf '%s' "$(basename "${candidate}")" | grep -oE '[0-9]{8}_[0-9]{6}$' || true)"
+  if [ -z "${raw_ts}" ]; then
+    # 名字里没有可解析的时间戳 ⇒ 不认识的东西一律不删
+    return 0
+  fi
+  formatted_ts="$(printf '%s' "${raw_ts}" | sed -E 's/^([0-9]{4})([0-9]{2})([0-9]{2})_([0-9]{2})([0-9]{2})([0-9]{2})$/\1-\2-\3 \4:\5:\6/')"
+  epoch="$(date -d "${formatted_ts}" +%s 2>/dev/null || echo 0)"
+  if [ "${epoch}" -eq 0 ]; then
+    # 时间戳解析不出来 ⇒ 保守起见不删
+    return 0
+  fi
+  offset=$((epoch - DEPLOYMENT_STARTED_AT_EPOCH))
+  if [ "${offset}" -ge -300 ] && [ "${offset}" -le 300 ]; then
+    return 0
+  fi
+  return 1
+}
+
+# [ARTIFACT_RETENTION] 按前缀分组清理备份目录：保留最近 N 个，其余删除。
+# 目录名里的时间戳是 YYYYMMDD_HHMMSS ⇒ 字典序 == 时间序（倒序 = 新的在前）。
+prune_backup_group() {
+  local backups_dir="$1"
+  local pattern="$2"
+  local keep="$3"
+  local -a sorted=()
+  local entry index
+
+  # 只收目录：.dump 是独立文件，绝不在候选集里
+  while IFS= read -r entry; do
+    if [ -n "${entry}" ]; then
+      sorted+=("${entry}")
+    fi
+  done < <(find "${backups_dir}" -maxdepth 1 -mindepth 1 -type d -name "${pattern}" 2>/dev/null | sort -r || true)
+
+  if [ "${#sorted[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  index=0
+  for entry in "${sorted[@]}"; do
+    index=$((index + 1))
+    if [ "${index}" -le "${keep}" ]; then
+      continue
+    fi
+    if is_current_deployment_backup "${entry}"; then
+      echo "[INFO] Keeping the backup created by this deployment: ${entry}"
+      continue
+    fi
+    remove_deployment_artifact "${entry}"
+  done
+}
+
+# [ARTIFACT_RETENTION] 回滚/暂存资产保留策略（磁盘有界化）。
+#
+# 背景：生产 /opt/xihong_erp/backups 里堆着 85 个 pre_deploy_* 备份目录，
+# 根目录还留着 frontend_stale_* 陈旧前端源码树（313M）⇒ 磁盘占用只增不减。
+#
+# 保留规则：
+#   pre_deploy_*                              保留最近 KEEP_BACKUPS_COUNT 个（默认 3），其余删
+#   pre_manual_deploy_* / pre_maxconn_* / manual_*  各保留最近 KEEP_OTHER_BACKUPS_COUNT 个（默认 1）
+#   backups/ 下的独立 .dump 文件              **一律不删**（来源不明，可能是手工排查留下的现场）
+#   frontend_stale_*                          全删（回滚靠镜像，不靠源码树）
+#
+# 安全硬约束：
+#   1. PRODUCTION_PATH 为空或 "/" ⇒ 拒绝执行
+#   2. **只删目录**，文件一律不删（.dump 就是文件）
+#   3. 本次发版刚创建的备份绝不能删（规则 1 天然包含它，这里再加显式保护）
+#   4. 每条删除都 || true ⇒ 删除失败不能拖垮发版
+#   5. 只在成功发版后调用（DEPLOYMENT_CUTOVER_COMPLETE=1 之后）
+prune_deployment_artifacts() {
+  local production_path="${PRODUCTION_PATH:-}"
+  local backups_dir stale_dir
+  local keep_backups="${KEEP_BACKUPS_COUNT:-3}"
+  local keep_others="${KEEP_OTHER_BACKUPS_COUNT:-1}"
+
+  # 硬约束 1：路径必须明确，且不是根目录
+  if [ -z "${production_path}" ] || [ "${production_path}" = "/" ]; then
+    echo "[WARN] PRODUCTION_PATH is empty or '/'; artifact retention was skipped"
+    return 0
+  fi
+
+  backups_dir="${production_path}/backups"
+  if [ ! -d "${backups_dir}" ]; then
+    echo "[INFO] ${backups_dir} does not exist; nothing to prune"
+    return 0
+  fi
+
+  REMOVED_ARTIFACT_COUNT=0
+  REMOVED_ARTIFACT_MB=0
+
+  echo "[INFO] Applying artifact retention (keep ${keep_backups} pre_deploy backup(s), keep ${keep_others} per other prefix)..."
+
+  prune_backup_group "${backups_dir}" "pre_deploy_*" "${keep_backups}"
+  prune_backup_group "${backups_dir}" "pre_manual_deploy_*" "${keep_others}"
+  prune_backup_group "${backups_dir}" "pre_maxconn_*" "${keep_others}"
+  prune_backup_group "${backups_dir}" "manual_*" "${keep_others}"
+
+  # .dump 是**独立文件**，上面的 find -type d 天然不会选中它们；
+  # remove_deployment_artifact 里还有一道 *.dump 显式保护（双保险）。
+
+  # 陈旧前端源码树：回滚靠镜像，不靠源码树 ⇒ 全删
+  while IFS= read -r stale_dir; do
+    if [ -n "${stale_dir}" ]; then
+      remove_deployment_artifact "${stale_dir}"
+    fi
+  done < <(find "${production_path}" -maxdepth 1 -mindepth 1 -type d -name 'frontend_stale_*' 2>/dev/null || true)
+
+  echo "[OK] Artifact retention applied: removed ${REMOVED_ARTIFACT_COUNT} items, reclaimed ${REMOVED_ARTIFACT_MB}M"
 }
 
 pull_image_with_fallback() {
@@ -1376,6 +1753,9 @@ if docker ps --format '{{.Names}}' | grep -q 'xihong_erp_nginx'; then
   fi
 fi
 
+# [LOGROTATE] 装 nginx 文件日志轮转配置（nginx 已经起来了，装配置不影响本次发版）
+install_logrotate_config
+
 # The new backend, frontend, and gateway are up. Old containers are no longer
 # needed, so subsequent non-critical cleanup must not roll the application back.
 DEPLOYMENT_CUTOVER_COMPLETE=1
@@ -1402,6 +1782,10 @@ fi
 # [IMAGE_CLEANUP] Clean up old Docker images (keep latest N versions)
 # 在部署成功后执行清理，释放磁盘空间
 cleanup_old_images
+
+# [ARTIFACT_RETENTION] 回滚/暂存资产保留策略：发版成功后裁掉旧备份与陈旧前端源码树
+# （放在 DEPLOYMENT_CUTOVER_COMPLETE=1 之后 ⇒ 失败回滚路径上不会删任何东西）
+prune_deployment_artifacts
 
 echo "[INFO] Cleaning up temporary files..."
 rm -f docker-compose.deploy.yml || true

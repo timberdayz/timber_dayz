@@ -55,6 +55,9 @@ done
 
 copy_if_exists "nginx/nginx.prod.conf" "${BUNDLE_DIR}/nginx/nginx.prod.conf"
 copy_if_exists "nginx/ssl/https.conf" "${BUNDLE_DIR}/nginx/ssl/https.conf"
+# nginx 文件日志轮转配置：随包上生产机，装进 /etc/logrotate.d/。
+# 少了它，生产 access.log / error.log 没有任何轮转 ⇒ 磁盘增长无上限。
+copy_if_exists "nginx/logrotate-xihong.conf" "${BUNDLE_DIR}/nginx/logrotate-xihong.conf"
 
 tar -czf "${OUTPUT_PATH}" -C "${BUNDLE_DIR}" .
 
