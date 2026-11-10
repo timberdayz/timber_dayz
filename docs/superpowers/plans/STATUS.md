@@ -285,6 +285,18 @@ Live deployment verified:
 - ⇒ 本 PR 已统一成**两侧都接受**的新写法（`1c3f6a76`，纯排版，断言语义与消息文本一字未动）。
 - ⇒ 后续改动：提交前按 3.11 侧排版写（消息折到条件后面），别只信本地 `--check`。
 
+**已知坑（CI rerun 挂 `security-scan`，仓库既有问题、非本 PR 引入）**：
+`security-scan` job 靠 `scripts/ci_changed_python_files.py` 算「本次改动到的文件」，
+该脚本先 `git fetch origin <base> --depth=1` 再 `git merge-base HEAD origin/<base>`
+（`scripts/ci_changed_python_files.py:43-44`）。**rerun 时仓库已是 shallow**，
+`merge-base` 直接非零退出 ⇒ 脚本报 `CalledProcessError` ⇒ 整个 job 挂掉。
+**push 触发的全新 run 不受影响**（`1c3f6a76` 那轮就是全绿）。
+
+- ⇒ 看到这个报错（`Command '['/usr/bin/git', 'merge-base', 'HEAD', 'origin/main']' returned
+  non-zero exit status 1`）时，**推一个新 commit 触发全新 run**，不要用 rerun。
+- ⇒ 同一 job 另有一类抖动：`Failed to FinalizeArtifact: ... ECONNRESET`（上传 artifact 时
+  撞上 runner 与 GitHub 存储的瞬断），同样是重跑即恢复。
+
 批次 0（只读对账，采集机执行）、批次 2（主数据对齐）、批次 3（巡检与告警）、批次 4（清理与文档）**未开始**。
 
 ## Notes
