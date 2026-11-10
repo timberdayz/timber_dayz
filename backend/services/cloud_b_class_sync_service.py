@@ -30,6 +30,16 @@ from backend.services.cloud_sync_identity_guard_service import (
     LOAD_STATUS_DISABLED,
     collect_registry_mismatch_events,
 )
+from backend.services.shop_identity_conflict_ledger_service import (
+    REASON_LOCAL_REGISTRY_AMBIGUOUS,
+    REASON_LOCAL_TOKEN_MISMATCH,
+    ConflictRowRecord,
+    build_row_locator,
+    conflict_record_from_mismatch_event,
+    extract_business_date,
+    notify_new_conflict_rows,
+    pick_identity_value,
+)
 from backend.services.data_pipeline.refresh_queue_service import (
     RefreshQueueService,
     resolve_refresh_lane,
@@ -119,6 +129,13 @@ class IdentitySplitResult:
     degraded_indexes: tuple[int, ...] = ()
     #: 双基准状态: ``not_applied`` / ``consistent`` / ``mismatch`` / ``unavailable``
     dual_baseline_status: str = DUAL_BASELINE_NOT_APPLIED
+    #: **矛盾行台账**的行级负载(批次 4.3)。
+    #:
+    #: 每条对应一个「被跳过 / 被降级」的行, 带原因码与定位信息(不含行体)。
+    #: ⇒ 记进 ``ops.shop_identity_conflict_rows``(**只记不阻塞**)。
+    #: ⚠️ 这些行**不写云端**, 但**不改变**检查点推进算法
+    #: (推进到最后一个落库行 —— 不改成「停在第一个矛盾行」, 那会永久卡死)。
+    conflict_events: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def written_rows(self) -> int:
@@ -207,18 +224,23 @@ def split_rows_by_identity_consistency(
     conflicting: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
     written_indexes: list[int] = []
+    conflict_events: list[dict[str, Any]] = []
 
     for index, row in enumerate(rows or []):
         tokens = row_identity_tokens(row)
 
         mismatch = ""
         is_unresolved = False
+        reason_code = ""
+        resolved_accounts: list[str] = []
 
         if identity_index is not None:
             accounts = row_identity_accounts(
                 row, identity_index, _text(row.get("platform_code"))
             )
             if len(accounts) > 1:
+                reason_code = REASON_LOCAL_REGISTRY_AMBIGUOUS
+                resolved_accounts = sorted(accounts)
                 mismatch = "row identity resolves to %d accounts: %s" % (
                     len(accounts),
                     sorted(accounts),
@@ -238,6 +260,7 @@ def split_rows_by_identity_consistency(
                 if value and value.isdigit()
             }
             if len(numeric_ids) > 1:
+                reason_code = REASON_LOCAL_TOKEN_MISMATCH
                 mismatch = (
                     "raw_data.platform_shop_id=%s disagrees with raw_data.shop_id=%s"
                     % (
@@ -253,6 +276,7 @@ def split_rows_by_identity_consistency(
                     and store_label not in platform_shop_id
                     and platform_shop_id not in store_label
                 ):
+                    reason_code = REASON_LOCAL_TOKEN_MISMATCH
                     mismatch = (
                         "raw_data.store_label=%s disagrees with "
                         "raw_data.platform_shop_id=%s" % (store_label, platform_shop_id)
@@ -260,6 +284,15 @@ def split_rows_by_identity_consistency(
 
         if mismatch:
             conflicting.append(row)
+            conflict_events.append(
+                _build_conflict_event(
+                    row,
+                    index=index,
+                    reason_code=reason_code,
+                    identity_tokens=tokens,
+                    resolved_accounts=resolved_accounts,
+                )
+            )
         else:
             consistent.append(row)
             written_indexes.append(index)
@@ -271,7 +304,44 @@ def split_rows_by_identity_consistency(
         conflicting=conflicting,
         unresolved=unresolved,
         written_indexes=tuple(written_indexes),
+        conflict_events=conflict_events,
     )
+
+
+def _build_conflict_event(
+    row: dict[str, Any],
+    *,
+    index: int,
+    reason_code: str,
+    identity_tokens: dict[str, str],
+    resolved_accounts: list[str],
+) -> dict[str, Any]:
+    """构造一条**矛盾行台账**负载(批次 4.3)。
+
+    只放**定位**信息(表 / 日期 / 行内那列的值 / 认出的账号 / 原因码),
+    **不放行体** —— 行体可能很大, 而且台账会被运维看到。
+    """
+    business_date = extract_business_date(row)
+    source_row_id = row.get("id")
+    data_hash = str(row.get("data_hash") or "")
+    return {
+        "reason_code": reason_code,
+        "row_locator": build_row_locator(
+            source_row_id=source_row_id,
+            data_hash=data_hash,
+        ),
+        "source_row_id": "" if source_row_id is None else str(source_row_id),
+        "platform_code": _text(row.get("platform_code")),
+        "business_date": business_date,
+        "identity_value": pick_identity_value(identity_tokens),
+        "identity_tokens": dict(identity_tokens),
+        "resolved_account_id": (
+            resolved_accounts[0] if len(resolved_accounts) == 1 else ""
+        ),
+        "resolved_accounts": list(resolved_accounts),
+        "cloud_accounts": [],
+        "row_index": index,
+    }
 
 
 def split_rows_by_dual_baseline(
@@ -330,6 +400,7 @@ def split_rows_by_dual_baseline(
             unresolved=base.unresolved,
             written_indexes=base.written_indexes,
             dual_baseline_status=DUAL_BASELINE_NOT_APPLIED,
+            conflict_events=list(base.conflict_events),
         )
     if (
         identity_index is None
@@ -344,6 +415,7 @@ def split_rows_by_dual_baseline(
             unresolved=base.unresolved,
             written_indexes=base.written_indexes,
             dual_baseline_status=DUAL_BASELINE_UNAVAILABLE,
+            conflict_events=list(base.conflict_events),
         )
 
     cloud_index = registry.index
@@ -361,6 +433,7 @@ def split_rows_by_dual_baseline(
             unresolved=base.unresolved,
             written_indexes=base.written_indexes,
             dual_baseline_status=DUAL_BASELINE_CONSISTENT,
+            conflict_events=list(base.conflict_events),
         )
 
     degraded_indexes = {event.row_index for event in events}
@@ -374,14 +447,38 @@ def split_rows_by_dual_baseline(
 
     # ⚠️ ``unresolved`` **不用**摘: 降级只发生在「本地唯一认出」的行上,
     # 而 ``unresolved`` 是「本地认不出」的行 —— 两者互斥。
+    #
+    # ⚠️ **检查点推进算法不变** —— 降级行同样不参与 ``written_indexes``,
+    # 检查点照样推进到「最后一个落库行」。**绝不**改成「停在第一个矛盾行」
+    # (那会让 ``fact_shopee_products_daily`` 永久卡死 —— 历史不修 ⇒
+    # 那些行的归属永远不会被修)。
+    degraded_payloads = [event.to_payload() for event in events]
+    conflict_events = list(base.conflict_events)
+    for payload in degraded_payloads:
+        record = conflict_record_from_mismatch_event(payload)
+        conflict_events.append(
+            {
+                "reason_code": record.reason_code,
+                "row_locator": record.row_locator,
+                "source_row_id": record.source_row_id,
+                "platform_code": record.platform_code,
+                "business_date": record.business_date,
+                "identity_value": record.identity_value,
+                "identity_tokens": record.identity_tokens,
+                "resolved_account_id": record.resolved_account_id,
+                "resolved_accounts": record.resolved_accounts,
+                "cloud_accounts": record.cloud_accounts,
+            }
+        )
     return IdentitySplitResult(
         consistent=kept_rows,
         conflicting=base.conflicting,
         unresolved=base.unresolved,
         written_indexes=tuple(kept_indexes),
-        degraded=[event.to_payload() for event in events],
+        degraded=degraded_payloads,
         degraded_indexes=tuple(sorted(degraded_indexes)),
         dual_baseline_status=DUAL_BASELINE_MISMATCH,
+        conflict_events=conflict_events,
     )
 
 
@@ -466,6 +563,7 @@ class SQLAlchemyCloudWriter:
         identity_index: Any = None,
         cloud_registry: Any = None,
         guard_event_recorder: Any = None,
+        conflict_ledger_recorder: Any = None,
     ):
         self.engine = engine
         self.dry_run = dry_run
@@ -477,8 +575,68 @@ class SQLAlchemyCloudWriter:
         self.cloud_registry = cloud_registry
         #: 双基准守卫的可观测事件台账(None ⇒ 不记事件)。
         self.guard_event_recorder = guard_event_recorder
+        #: **矛盾行台账**(批次 4.3, ``ops.shop_identity_conflict_rows``)。
+        #: None ⇒ 不记台账。
+        self.conflict_ledger_recorder = conflict_ledger_recorder
         #: 「双基准不可用」事件**每轮只记一次**(避免每批次刷一条)。
         self._guard_unavailable_reported = False
+
+    def _record_conflict_ledger(
+        self,
+        split: IdentitySplitResult,
+        *,
+        table_name: str,
+        data_domain: str,
+    ) -> dict[str, Any]:
+        """把被跳过 / 被降级的行记进**矛盾行台账**(批次 4.3)。
+
+        ⚠️ **只记不阻塞** —— 台账写失败(表不存在 / 连不上 / 约束冲突)只记 warning,
+        **同步照跑, 写入结果不变**。
+        ⚠️ 台账写入走**独立**的事务 ⇒ **不参与**同步的写入事务。
+
+        Returns:
+            摘要字典(``new_rows`` / ``seen_rows`` / ``status`` …);
+            没有配台账时返回 ``{"status": "not_configured", ...}``。
+        """
+        recorder = self.conflict_ledger_recorder
+        if recorder is None:
+            return {
+                "status": "not_configured",
+                "new_rows": 0,
+                "seen_rows": 0,
+                "total_rows": 0,
+            }
+        if not split.conflict_events:
+            return {
+                "status": "skipped",
+                "reason": "no_conflict_rows",
+                "new_rows": 0,
+                "seen_rows": 0,
+                "total_rows": 0,
+            }
+        try:
+            summary = recorder.record_conflicts(
+                source_table_name=table_name,
+                data_domain=data_domain,
+                records=split.conflict_events,
+            )
+        except Exception as exc:  # noqa: BLE001 - 台账写失败绝不阻塞同步
+            logger.warning(
+                "[CloudSync] [%s] 矛盾行台账写入失败(不影响同步): %s", table_name, exc
+            )
+            return {"status": "failed", "error": str(exc), "new_rows": 0}
+        if not isinstance(summary, dict):
+            return {"status": "skipped", "new_rows": 0}
+        summary.setdefault("source_table_name", table_name)
+        summary.setdefault("data_domain", data_domain)
+        summary["reason_codes"] = sorted(
+            {
+                str(event.get("reason_code") or "")
+                for event in split.conflict_events
+                if event.get("reason_code")
+            }
+        )
+        return summary
 
     def _report_guard_events(
         self,
@@ -486,16 +644,43 @@ class SQLAlchemyCloudWriter:
         *,
         table_name: str,
         data_domain: str,
+        ledger_summary: dict[str, Any] | None = None,
     ) -> None:
         """把双基准守卫的可观测事件记进台账。
 
         ⚠️ **记事件失败绝不阻塞同步** ⇒ 这里兜住所有异常。
+
+        ⚠️ **批次 4.3: 事件不再重复写**
+        --------------------------------
+        批次 3.7 留下的已知问题: 整批被降级时检查点停在当前水位 ⇒ 下一轮会读到
+        同一批 ⇒ **同样的事件被重复记一条**。
+
+        ⇒ 现在「双基准不一致」事件**只在本批出现了台账里没有的新行时才记**
+        (``ledger_summary['new_rows'] > 0``)。去重口径与矛盾行台账**完全同一套**
+        (同一「源表 + 业务日期 + 行内定位 + 原因码」)⇒ **不写第二套**。
+
+        ⚠️ 台账**没配**或**写失败**时 ⇒ 事件照记(宁可多记一条, 也不丢可观测性)。
         """
         recorder = self.guard_event_recorder
         if recorder is None:
             return
         try:
             if split.degraded_rows:
+                # ⚠️ **只有台账「成功写入」且「本批没有新行」时**才跳过事件。
+                # 台账没配 / 写失败 ⇒ 事件照记(宁可多记一条, 也不丢可观测性)。
+                already_seen = (
+                    isinstance(ledger_summary, dict)
+                    and ledger_summary.get("status") == "recorded"
+                    and int(ledger_summary.get("new_rows") or 0) <= 0
+                )
+                if already_seen:
+                    logger.info(
+                        "[CloudSyncGuard] [%s] %d 行本地/云端登记信息不一致, "
+                        "台账里已全部见过 ⇒ 不重复记事件",
+                        table_name,
+                        split.degraded_rows,
+                    )
+                    return
                 recorder.record_mismatch(
                     source_table_name=table_name,
                     data_domain=data_domain,
@@ -584,10 +769,16 @@ class SQLAlchemyCloudWriter:
             self.identity_index,
             self.cloud_registry,
         )
+        ledger_summary = self._record_conflict_ledger(
+            split,
+            table_name=table_name,
+            data_domain=data_domain,
+        )
         self._report_guard_events(
             split,
             table_name=table_name,
             data_domain=data_domain,
+            ledger_summary=ledger_summary,
         )
         if split.conflict_rows:
             logger.error(
@@ -609,6 +800,7 @@ class SQLAlchemyCloudWriter:
             "identity_registry_mismatch_rows": split.degraded_rows,
             "dual_baseline_status": split.dual_baseline_status,
             "last_written_index": split.last_written_index,
+            "conflict_ledger": ledger_summary,
         }
 
     def write_rows_with_receive_log(
@@ -633,10 +825,16 @@ class SQLAlchemyCloudWriter:
             self.identity_index,
             self.cloud_registry,
         )
+        ledger_summary = self._record_conflict_ledger(
+            split,
+            table_name=table_name,
+            data_domain=data_domain,
+        )
         self._report_guard_events(
             split,
             table_name=table_name,
             data_domain=data_domain,
+            ledger_summary=ledger_summary,
         )
         if split.conflict_rows:
             logger.error(
@@ -683,6 +881,7 @@ class SQLAlchemyCloudWriter:
             "last_written_index": split.last_written_index,
             "receive_log": receive_result,
             "receive_id": receive_result.get("receive_id"),
+            "conflict_ledger": ledger_summary,
         }
 
     @staticmethod
@@ -1074,6 +1273,32 @@ class CloudBClassSyncService:
             return await value
         return value
 
+    async def _maybe_notify_conflict_ledger(
+        self,
+        write_result: Any,
+        *,
+        table_name: str,
+    ) -> None:
+        """矛盾行台账新增了行 ⇒ 走**通知出口**(批次 4.3, 默认关)。
+
+        ⚠️ 通知**绝不**影响同步成败 —— 任何异常都吞掉。
+        ⚠️ 开关是环境变量 :envvar:`SHOP_IDENTITY_CONFLICT_NOTIFY_ENABLED`,
+        **默认关** ⇒ 上线后行为与本批次之前完全一致。
+        """
+        if not isinstance(write_result, dict):
+            return
+        summary = write_result.get("conflict_ledger")
+        if not isinstance(summary, dict):
+            return
+        if int(summary.get("new_rows") or 0) <= 0:
+            return
+        try:
+            await notify_new_conflict_rows(summary)
+        except Exception as exc:  # noqa: BLE001 —— 通知失败不能拖垮同步
+            logger.warning(
+                "[CloudSync] [%s] 矛盾行通知失败(不影响同步): %s", table_name, exc
+            )
+
     async def sync_all_tables(self, batch_size: int = 1000) -> dict[str, Any]:
         if self.table_inspector is None:
             return {
@@ -1278,6 +1503,12 @@ class CloudBClassSyncService:
                             data_domain=data_domain,
                         )
                     )
+
+                # ⚠️ 通知在**写入之后**发 —— 通知失败绝不影响同步成败,
+                # 且**默认关**(环境变量开关)。
+                await self._maybe_notify_conflict_ledger(
+                    write_result, table_name=table_name
+                )
 
                 write_succeeded = bool(write_result.get("success"))
                 if not write_succeeded:

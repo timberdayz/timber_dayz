@@ -82,6 +82,18 @@ from typing import Any, Iterable, Mapping
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 
+from backend.services.shop_identity_conflict_ledger_service import (
+    REASON_CLOUD_AMBIGUOUS as _REASON_CLOUD_AMBIGUOUS,
+)
+from backend.services.shop_identity_conflict_ledger_service import (
+    REASON_CLOUD_DIFFERENT_ACCOUNT as _REASON_CLOUD_DIFFERENT_ACCOUNT,
+)
+from backend.services.shop_identity_conflict_ledger_service import (
+    REASON_CLOUD_UNRESOLVED as _REASON_CLOUD_UNRESOLVED,
+)
+from backend.services.shop_identity_conflict_ledger_service import (
+    extract_business_date,
+)
 from backend.services.shop_identity_reconciliation_service import (
     IdentityIndex,
     build_identity_index,
@@ -124,9 +136,14 @@ DUAL_BASELINE_MISMATCH = "mismatch"
 DUAL_BASELINE_UNAVAILABLE = "unavailable"
 
 #: 降级原因码(机器可读, 便于按原因分组统计)。
-REASON_CLOUD_UNRESOLVED = "cloud_registry_unresolved"
-REASON_CLOUD_AMBIGUOUS = "cloud_registry_ambiguous"
-REASON_CLOUD_DIFFERENT_ACCOUNT = "cloud_registry_different_account"
+#:
+#: ⚠️ **唯一定义处在** ``shop_identity_conflict_ledger_service``
+#: (批次 4.3 的矛盾行台账)—— 这里只做**转出**, 别再写第二份。
+#: 之所以住在台账那边: 批次 4.3 要用**同一套**原因码给台账行分类,
+#: 而台账的去重口径同时也是「事件不重复写」的修复口径 ⇒ 两边必须同源。
+REASON_CLOUD_UNRESOLVED = _REASON_CLOUD_UNRESOLVED
+REASON_CLOUD_AMBIGUOUS = _REASON_CLOUD_AMBIGUOUS
+REASON_CLOUD_DIFFERENT_ACCOUNT = _REASON_CLOUD_DIFFERENT_ACCOUNT
 
 #: 台账里最多保留多少条事件**样本**。
 #:
@@ -460,12 +477,7 @@ def build_registry_mismatch_event(
     platform_code: str,
 ) -> RegistryMismatchEvent:
     """构造一条降级事件(只放定位信息, 不放行体)。"""
-    business_date = ""
-    for key in ("business_date", "metric_date", "period_end_date", "analytics_date"):
-        value = row.get(key)
-        if value:
-            business_date = str(value)
-            break
+    business_date = extract_business_date(row)
     return RegistryMismatchEvent(
         reason=reason,
         local_accounts=tuple(sorted(local_accounts)),

@@ -31,6 +31,9 @@ from backend.services.cloud_sync_identity_guard_service import (
     CloudSyncIdentityGuardEventRecorder,
     load_cloud_identity_registry,
 )
+from backend.services.shop_identity_conflict_ledger_service import (
+    ShopIdentityConflictLedgerRecorder,
+)
 from modules.core.db import CloudBClassSyncTask
 
 
@@ -401,6 +404,10 @@ def _build_cloud_sync_service(
         cloud_registry=_load_cloud_identity_registry(dry_run),
         # 可观测事件落**本地** ``ops.pipeline_run_log``(云端连不上时也写得下)。
         guard_event_recorder=CloudSyncIdentityGuardEventRecorder(local_engine),
+        # 矛盾行台账(批次 4.3): 被跳过 / 被降级的行记进
+        # ``ops.shop_identity_conflict_rows``。**只记不阻塞** ——
+        # 写失败只记 warning, 同步照跑。
+        conflict_ledger_recorder=ShopIdentityConflictLedgerRecorder(local_engine),
     )
 
     def inspect_tables():
