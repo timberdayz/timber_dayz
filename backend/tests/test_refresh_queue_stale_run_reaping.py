@@ -141,3 +141,67 @@ def _active_row_sql(source: str) -> str:
 def test_reaper_module_has_no_syntax_error() -> None:
     """改完的模块至少要能被 Python 解析（挡掉低级语法错）。"""
     ast.parse(REAPER_FILE.read_text(encoding="utf-8"))
+
+
+@pytest.mark.asyncio
+async def test_reaper_runtime_reads_reaped_rows_via_sqlalchemy_contract() -> None:
+    """回收器的**运行路径**必须真能把回收行读出来（不能只扫源码）。
+
+    为什么源码扫描不够 —— 2026-11-11 实测：
+    批次 3.5 把回收器从 ``result.fetchall()`` 改成 ``result.mappings().all()``
+    （SQLAlchemy 2.0 的标准用法），而
+    ``backend/tests/data_pipeline/test_dashboard_asset_self_lock_guardrails.py``
+    里的 fake 仍返回 list ⇒ ``AttributeError: 'list' object has no attribute
+    'all'`` ⇒ 那条守护测试直接红掉；又因为 CI 的 ``test (3.11)``
+    **只跑本次改动到的测试文件**，这个文件没被跑到 ⇒ 红了好几天没人看见。
+
+    ⇒ 这里补一条**真跑**的用例：fake 按 SQLAlchemy 2.0 的
+    ``mappings().all()`` 契约给行。只要生产代码再改一次结果消费方式，
+    这条用例会立刻红。
+    """
+    from backend.tasks import refresh_queue_tasks as task_module
+
+    class _MappingRows:
+        """``MappingResult`` 的最小替身：既有 ``.all()`` 也能迭代。"""
+
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return list(self._rows)
+
+        def __iter__(self):
+            return iter(self._rows)
+
+    class _Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def mappings(self):
+            return _MappingRows(self._rows)
+
+    class _Session:
+        def __init__(self):
+            self.committed = 0
+            self.statements: list[str] = []
+
+        async def execute(self, stmt, params=None):
+            self.statements.append(str(stmt))
+            return _Result(
+                [
+                    {"id": 1, "run_id": "run-1", "pipeline_name": "any_family"},
+                    {"id": 2, "run_id": "run-2", "pipeline_name": "another_family"},
+                ]
+            )
+
+        async def commit(self):
+            self.committed += 1
+
+    session = _Session()
+    reaped = await task_module._reap_stale_pipeline_runs(session)
+
+    assert reaped == 2, "回收器没把回收行读出来 —— 结果消费方式与 fake 的契约对不上"
+    assert session.committed == 1
+    assert any(
+        "UPDATE ops.pipeline_run_log" in sql for sql in session.statements
+    ), "回收器没有发那条 UPDATE"
