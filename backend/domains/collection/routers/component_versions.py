@@ -69,15 +69,20 @@ router = APIRouter(
 
 
 # canonical 组件文件清单：仅这些文件允许作为默认逻辑组件入口进入批量注册主路径
+#
+# ⚠ 清单里的每个文件都必须**真实存在于**
+#    ``modules/platforms/<platform>/components/`` —— 组件目录会随重构增删文件，
+#    清单若留下已删除的文件，就会出现「名单说有、磁盘上没有」的幽灵条目：
+#    既误导人（以为某平台还有订单导出入口），也可能让 fallback 去加载不存在的文件。
+#    守护用例 ``backend/tests/test_collection_component_topology.py::
+#    test_canonical_component_files_all_exist_on_disk`` 会把这种漂移挡住。
 CANONICAL_COMPONENT_FILES = {
     "shopee": {
         "login.py",
         "navigation.py",
         "date_picker.py",
-        "orders_export.py",
         "products_export.py",
         "analytics_export.py",
-        "finance_export.py",
         "services_export.py",
     },
     "tiktok": {
@@ -91,7 +96,8 @@ CANONICAL_COMPONENT_FILES = {
         "login.py",
         "navigation.py",
         "date_picker.py",
-        "export.py",
+        # 各平台订单统一走妙手采集 ⇒ 订单导出组件在 miaoshou 侧按平台分文件，
+        # 不再有 shopee/orders_export.py 这种「按平台各写一份」的旧结构。
         "orders_shopee_export.py",
         "orders_tiktok_export.py",
     },
@@ -222,9 +228,11 @@ def _build_component_test_runtime_config(
             runtime_config["services_subtype"] = effective_sub_domain
 
     time_selection = normalize_time_selection(
-        time_selection=request.time_selection.model_dump(exclude_none=True)
-        if request.time_selection
-        else None,
+        time_selection=(
+            request.time_selection.model_dump(exclude_none=True)
+            if request.time_selection
+            else None
+        ),
         time_mode=request.time_mode,
         date_preset=request.date_preset,
         start_date=request.start_date,
@@ -419,7 +427,9 @@ async def list_versions(
         conditions = []
         active_component_names = list_active_component_names()
         if active_component_names:
-            conditions.append(ComponentVersion.component_name.in_(active_component_names))
+            conditions.append(
+                ComponentVersion.component_name.in_(active_component_names)
+            )
 
         # 平台筛选
         if platform:
@@ -804,7 +814,9 @@ async def promote_to_stable(
         stable_result = await db.execute(
             select(ComponentVersion).where(
                 ComponentVersion.component_name == version.component_name,
-                ComponentVersion.is_stable == True,
+                # `IS true` 与 `= true` 的**筛选结果完全一致**（两者都排除 NULL 行），
+                # 但前者不触发 ruff 的 E712（避免对布尔列做相等比较）。
+                ComponentVersion.is_stable.is_(True),
                 ComponentVersion.id != version.id,
             )
         )
@@ -816,7 +828,8 @@ async def promote_to_stable(
             same_path_result = await db.execute(
                 select(ComponentVersion).where(
                     ComponentVersion.file_path == version.file_path,
-                    ComponentVersion.is_stable == True,
+                    # 同上：`IS true` 与 `= true` 筛选结果一致，且不触发 ruff E712。
+                    ComponentVersion.is_stable.is_(True),
                     ComponentVersion.id != version.id,
                 )
             )
@@ -1122,7 +1135,9 @@ async def batch_register_python_components(
                     results.append(
                         BatchRegisterResult(
                             component_name=component_name,
-                            file_path=str(py_file.relative_to(project_root)).replace("\\", "/"),
+                            file_path=str(py_file.relative_to(project_root)).replace(
+                                "\\", "/"
+                            ),
                             version="",
                             status="skipped",
                             error="inactive component",
@@ -1380,16 +1395,22 @@ async def test_component_version(
             )
 
         # 2. 验证测试目标（优先店铺账号，兼容旧账号）
-        effective_shop_account_id = (request.shop_account_id or request.account_id or "").strip()
+        effective_shop_account_id = (
+            request.shop_account_id or request.account_id or ""
+        ).strip()
         account = None
         account_platform = None
         account_info = None
 
         try:
-            from backend.services.shop_account_loader_service import get_shop_account_loader_service
+            from backend.services.shop_account_loader_service import (
+                get_shop_account_loader_service,
+            )
 
             shop_loader = get_shop_account_loader_service()
-            shop_payload = await shop_loader.load_shop_account_async(effective_shop_account_id, db)
+            shop_payload = await shop_loader.load_shop_account_async(
+                effective_shop_account_id, db
+            )
             if shop_payload:
                 account = shop_payload["shop_context"]
                 account_platform = shop_payload["main_account"]["platform"]
@@ -1480,14 +1501,20 @@ async def test_component_version(
         fixed_sub_domain = runtime_config.get("sub_domain")
 
         if logical_type == "export":
-            if "granularity" not in runtime_config or "time_selection" not in runtime_config:
+            if (
+                "granularity" not in runtime_config
+                or "time_selection" not in runtime_config
+            ):
                 return error_response(
                     ErrorCode.PARAMETER_INVALID,
                     "导出组件测试需要提供快捷时间或自定义时间范围",
                     status_code=400,
                     recovery_suggestion="请选择快捷时间，或选择自定义时间范围并提供粒度",
                 )
-            if str(fixed_data_domain or "").lower() == "services" and not fixed_sub_domain:
+            if (
+                str(fixed_data_domain or "").lower() == "services"
+                and not fixed_sub_domain
+            ):
                 return error_response(
                     ErrorCode.PARAMETER_INVALID,
                     "服务数据域导出测试需要选择子数据域",
