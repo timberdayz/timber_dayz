@@ -299,6 +299,16 @@ Live deployment verified:
 
 批次 0（只读对账，采集机执行）、批次 2（主数据对齐）、批次 3（巡检与告警）、批次 4（清理与文档）**未开始**。
 
+### 业务语言决策版（2026-11-11）
+
+- Plan: `docs/superpowers/plans/2026-11-11-shop-identity-business-plan.md`
+- 定位：同一方案的**决策人视角**（业务语言，零代码术语）。技术口径仍以
+  `2026-11-10-shop-identity-future-proofing-and-observability.md` 为准。
+- 内容：10 项问题单逐项业务结论 + **4 个复核新发现**（含「身份唯一台账从未被成文声明」
+  与「输出键口径仍是平台编号优先」两处裂缝）、「历史不修」边界判定、
+  三步走（堵口子 → 对齐台账 → 装雷达）、两条硬性时序、风险与回滚、
+  **两项待业务拍板**（采集范围口径 / 告警通道）、业务口径验收清单。
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
