@@ -1,4 +1,4 @@
-"""云端同步链路的**完整性**巡检 —— 陈旧 / 收敛率 / 候选池平台覆盖。
+"""云端同步链路的**完整性**巡检 —— 陈旧 / 收敛率 / 候选池平台覆盖 / 语义层可解析性。
 
 背景
 ----
@@ -10,7 +10,8 @@
 3. **候选池缺平台** —— ``miaoshou`` 的采集源账号(``business_role='collection_source'``)
    不在候选池里, 那条链的身份从一开始就解析不出来。
 
-本模块把这三个信号变成**会自己响的巡检**。
+本模块把这三个信号变成**会自己响的巡检**, 并在 2026-11-10 追加第四项
+(**语义层可解析性**, 见下面「四个检查」)。
 
 它盯的是**云端那一侧**(: 哪个连接就巡检哪个)。
 采集机侧用**云端 engine** 跑它, 就能回答「云端的数据还新鲜吗」——
@@ -27,6 +28,9 @@
    (:func:`backend.services.shop_identity_reconciliation_service.row_identity_accounts`),
    不另写一份。
 ③ **候选池平台覆盖** —— 主数据里每个「在营经营店」的平台, 候选池里都必须有候选。
+④ **语义层可解析性** —— 语义层里 ``shop_id`` 落成 ``unknown`` 的行, **按月分档**:
+   对齐生效日之前的月份算「已知历史遗留」(不报警), 之后的月份占比超阈值才报警
+   (批次 3.2; 这是「历史数据不修」策略的必要配套)。
 
 落库
 ----
@@ -38,10 +42,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
@@ -58,19 +63,30 @@ from backend.services.shop_identity_reconciliation_service import (
 )
 
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
+    "ALIGNMENT_EFFECTIVE_DATE_ENV",
     "CLOUD_SYNC_INTEGRITY_PIPELINE_NAME",
     "CLOUD_SYNC_INTEGRITY_STEP_NAME",
     "CandidatePoolRow",
     "CloudFreshnessRow",
     "CloudSyncIntegrityReport",
     "IdentityConvergenceRow",
+    "SEMANTIC_RESOLUTION_TABLE",
+    "SEMANTIC_UNKNOWN_RATE_THRESHOLD",
+    "SEMANTIC_UNKNOWN_RATE_THRESHOLD_ENV",
+    "SemanticResolutionRow",
     "SYNC_FRESHNESS_MAX_AGE_DAYS",
+    "classify_semantic_resolution",
     "classify_sync_freshness",
     "collect_candidate_pool_coverage",
     "collect_cloud_freshness",
     "collect_identity_convergence",
+    "collect_semantic_resolution",
     "record_cloud_sync_integrity_run",
+    "resolve_alignment_effective_date",
+    "resolve_semantic_unknown_rate_threshold",
     "run_cloud_sync_integrity_check",
 ]
 
@@ -96,6 +112,43 @@ MIN_CONVERGENCE_RATE = 0.8
 
 #: 每张表抽样多少行来算收敛率(只看最新的一批, 避免全表扫描)。
 CONVERGENCE_SAMPLE_SIZE = 200
+
+# --------------------------------------------------------------------------- #
+# ④ 语义层可解析性(批次 3.2)
+# --------------------------------------------------------------------------- #
+#: 环境变量: 店铺身份登记信息**对齐生效日** (``YYYY-MM-DD``)。
+#:
+#: 为什么必须有它
+#: --------------
+#: 2026-11 的事故里, 云端有一批行的归属塌成了 ``unknown``。
+#: 按业务决定(2026-11-06 / 2026-11-10)「**历史数据不修**」, 这批行永远留在那里。
+#: ⇒ 如果巡检只看「整体 unknown 占比」, 它会**永远红** ⇒ 告警就废了。
+#:
+#: ⇒ 必须按月份分档:
+#:   * 对齐生效日**之前**的月份 ⇒ 「已知历史遗留」, 不报警;
+#:   * 对齐生效日**之后**的月份 ⇒ 本该全部认得出, unknown 占比超阈值就报警。
+#:
+#: ⚠ **未配置时**全部归「已知历史遗留」(宁可不报, 也不误报),
+#: 同时在报告里标注 ``alignment_effective_date = null`` ⇒ 需要人工补配置。
+ALIGNMENT_EFFECTIVE_DATE_ENV = "SHOP_IDENTITY_ALIGNMENT_EFFECTIVE_DATE"
+
+#: 环境变量: 语义层 unknown 占比阈值(``0`` ~ ``1``)。
+SEMANTIC_UNKNOWN_RATE_THRESHOLD_ENV = "SHOP_IDENTITY_SEMANTIC_UNKNOWN_RATE_THRESHOLD"
+
+#: 语义层 unknown 占比默认阈值 —— 超过它就报警。
+SEMANTIC_UNKNOWN_RATE_THRESHOLD = 0.05
+
+#: 巡检的语义层表 —— 月度流量原子层(``shop_id`` 落 ``unknown`` 的地方)。
+SEMANTIC_RESOLUTION_TABLE = "semantic.fact_analytics_monthly_atomic"
+
+_SEMANTIC_RESOLUTION_SQL = """
+SELECT date_trunc('month', metric_date)::date AS month_start,
+       count(*)::int AS total_rows,
+       count(*) FILTER (WHERE shop_id = 'unknown')::int AS unknown_rows
+FROM semantic.fact_analytics_monthly_atomic
+GROUP BY date_trunc('month', metric_date)::date
+ORDER BY month_start
+"""
 
 _SOURCE_TABLE_DISCOVERY_SQL = """
 SELECT c.relname
@@ -264,6 +317,28 @@ class CandidatePoolRow:
 
 
 @dataclass
+class SemanticResolutionRow:
+    """语义层某一月的可解析性(``shop_id`` 有没有落成 ``unknown``)。"""
+
+    month_start: date
+    total_rows: int
+    unknown_rows: int
+    unknown_rate: float
+    bucket: str
+    status: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "month_start": self.month_start.isoformat(),
+            "total_rows": self.total_rows,
+            "unknown_rows": self.unknown_rows,
+            "unknown_rate": self.unknown_rate,
+            "bucket": self.bucket,
+            "status": self.status,
+        }
+
+
+@dataclass
 class CloudSyncIntegrityReport:
     """一次巡检的完整结论。"""
 
@@ -273,6 +348,8 @@ class CloudSyncIntegrityReport:
     freshness_rows: list[CloudFreshnessRow] = field(default_factory=list)
     convergence_rows: list[IdentityConvergenceRow] = field(default_factory=list)
     candidate_pool_rows: list[CandidatePoolRow] = field(default_factory=list)
+    semantic_rows: list[SemanticResolutionRow] = field(default_factory=list)
+    alignment_effective_date: date | None = None
 
     @property
     def stale_rows(self) -> list[CloudFreshnessRow]:
@@ -287,12 +364,23 @@ class CloudSyncIntegrityReport:
         return [row for row in self.candidate_pool_rows if row.status == "missing"]
 
     @property
+    def degraded_semantic_rows(self) -> list[SemanticResolutionRow]:
+        """对齐生效日**之后**、unknown 占比超阈值的月份 —— 这些才是真问题。"""
+        return [row for row in self.semantic_rows if row.status == "degraded"]
+
+    @property
+    def known_legacy_semantic_rows(self) -> list[SemanticResolutionRow]:
+        """对齐生效日之前的月份 —— 已知历史遗留, **不报警**。"""
+        return [row for row in self.semantic_rows if row.bucket == "known_legacy"]
+
+    @property
     def is_success(self) -> bool:
-        """三项检查全过 ⇒ 巡检通过。"""
+        """四项检查全过 ⇒ 巡检通过。"""
         return not (
             self.stale_rows
             or self.degraded_convergence_rows
             or self.missing_platform_rows
+            or self.degraded_semantic_rows
         )
 
     def to_error_message(self) -> str | None:
@@ -315,6 +403,12 @@ class CloudSyncIntegrityReport:
         if self.missing_platform_rows:
             detail = ",".join(row.platform_code for row in self.missing_platform_rows)
             parts.append(f"missing_candidate_platforms:{detail}")
+        if self.degraded_semantic_rows:
+            detail = ",".join(
+                f"{row.month_start.isoformat()}({row.unknown_rate:.1%})"
+                for row in self.degraded_semantic_rows
+            )
+            parts.append(f"semantic_unknown_after_alignment:{detail}")
         return ";".join(parts)
 
     def to_summary(self) -> dict[str, Any]:
@@ -324,6 +418,14 @@ class CloudSyncIntegrityReport:
             "stale_chains": len(self.stale_rows),
             "low_convergence_chains": len(self.degraded_convergence_rows),
             "missing_candidate_platforms": len(self.missing_platform_rows),
+            "semantic_months_checked": len(self.semantic_rows),
+            "semantic_known_legacy_months": len(self.known_legacy_semantic_rows),
+            "degraded_semantic_months": len(self.degraded_semantic_rows),
+            "alignment_effective_date": (
+                self.alignment_effective_date.isoformat()
+                if self.alignment_effective_date
+                else None
+            ),
             "started_at": self.started_at.isoformat(),
             "finished_at": self.finished_at.isoformat(),
         }
@@ -568,6 +670,124 @@ async def collect_candidate_pool_coverage(
     return rows
 
 
+def resolve_alignment_effective_date() -> date | None:
+    """读「店铺身份登记信息对齐生效日」(环境变量)。
+
+    解析不出来(没配 / 格式不对)⇒ 返回 ``None`` ⇒
+    语义层可解析性巡检会把所有月份归入「已知历史遗留」(**不报警**),
+    同时在报告里留下 ``alignment_effective_date = null`` ⇒ 需要人工补配置。
+    """
+    raw = (os.getenv(ALIGNMENT_EFFECTIVE_DATE_ENV) or "").strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        logger.warning(
+            "[CloudSyncIntegrity] %s 格式非法(应为 YYYY-MM-DD): %r",
+            ALIGNMENT_EFFECTIVE_DATE_ENV,
+            raw,
+        )
+        return None
+
+
+def resolve_semantic_unknown_rate_threshold() -> float:
+    """读语义层 unknown 占比阈值(环境变量可覆盖)。"""
+    raw = (os.getenv(SEMANTIC_UNKNOWN_RATE_THRESHOLD_ENV) or "").strip()
+    if not raw:
+        return SEMANTIC_UNKNOWN_RATE_THRESHOLD
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning(
+            "[CloudSyncIntegrity] %s 格式非法: %r，沿用默认值 %s",
+            SEMANTIC_UNKNOWN_RATE_THRESHOLD_ENV,
+            raw,
+            SEMANTIC_UNKNOWN_RATE_THRESHOLD,
+        )
+        return SEMANTIC_UNKNOWN_RATE_THRESHOLD
+    if not 0.0 <= value <= 1.0:
+        logger.warning(
+            "[CloudSyncIntegrity] %s 超出 0~1 范围: %r，沿用默认值 %s",
+            SEMANTIC_UNKNOWN_RATE_THRESHOLD_ENV,
+            raw,
+            SEMANTIC_UNKNOWN_RATE_THRESHOLD,
+        )
+        return SEMANTIC_UNKNOWN_RATE_THRESHOLD
+    return value
+
+
+def classify_semantic_resolution(
+    *,
+    month_start: date,
+    total_rows: int,
+    unknown_rows: int,
+    alignment_effective_date: date | None,
+    threshold: float,
+) -> tuple[str, str, float]:
+    """返回 ``(分档, 状态, unknown 占比)``。
+
+    分档规则
+    --------
+    * 对齐生效日**之前**的月份 ⇒ ``known_legacy``(已知历史遗留)—— **不报警**。
+      这是「历史不修」策略的必然结果: 那些行永远留在那里, 报警就永远红 ⇒ 告警废了。
+    * 对齐生效日**之后**的月份 ⇒ ``post_alignment``;
+      unknown 占比 > 阈值 ⇒ ``degraded``(报警)。
+    * **未配置对齐生效日** ⇒ 全部归 ``known_legacy``(宁可不报, 也不误报)。
+    """
+    unknown_rate = (unknown_rows / total_rows) if total_rows else 0.0
+    if alignment_effective_date is None:
+        return "known_legacy", "ok", unknown_rate
+    boundary = alignment_effective_date.replace(day=1)
+    if month_start < boundary:
+        return "known_legacy", "ok", unknown_rate
+    if unknown_rate > threshold:
+        return "post_alignment", "degraded", unknown_rate
+    return "post_alignment", "ok", unknown_rate
+
+
+async def collect_semantic_resolution(
+    db: AsyncSession,
+    *,
+    alignment_effective_date: date | None = None,
+    threshold: float = SEMANTIC_UNKNOWN_RATE_THRESHOLD,
+) -> list[SemanticResolutionRow]:
+    """按月统计语义层的可解析性(``shop_id`` 落 ``unknown`` 的行数 / 占比)。
+
+    语义层表不存在(不同环境)⇒ 返回空列表, 不让巡检失败。
+    """
+    exists = await db.execute(
+        text("SELECT to_regclass(:name)"), {"name": SEMANTIC_RESOLUTION_TABLE}
+    )
+    if exists.scalar_one_or_none() is None:
+        return []
+
+    result = await db.execute(text(_SEMANTIC_RESOLUTION_SQL))
+    rows: list[SemanticResolutionRow] = []
+    for record in result.fetchall():
+        month_start = record[0]
+        total_rows = int(record[1] or 0)
+        unknown_rows = int(record[2] or 0)
+        bucket, status, unknown_rate = classify_semantic_resolution(
+            month_start=month_start,
+            total_rows=total_rows,
+            unknown_rows=unknown_rows,
+            alignment_effective_date=alignment_effective_date,
+            threshold=threshold,
+        )
+        rows.append(
+            SemanticResolutionRow(
+                month_start=month_start,
+                total_rows=total_rows,
+                unknown_rows=unknown_rows,
+                unknown_rate=unknown_rate,
+                bucket=bucket,
+                status=status,
+            )
+        )
+    return rows
+
+
 async def record_cloud_sync_integrity_run(
     db: AsyncSession,
     report: CloudSyncIntegrityReport,
@@ -722,6 +942,8 @@ async def run_cloud_sync_integrity_check(
     *,
     trigger_source: str = "scheduler",
     record: bool = True,
+    alignment_effective_date: date | None = None,
+    semantic_unknown_rate_threshold: float | None = None,
 ) -> CloudSyncIntegrityReport:
     """巡检 + 落库, 返回结论。"""
     started_at = datetime.now(timezone.utc)
@@ -736,6 +958,17 @@ async def run_cloud_sync_integrity_check(
         table_names=[row.table_name for row in report.freshness_rows],
     )
     report.candidate_pool_rows = await collect_candidate_pool_coverage(db)
+    # ④ 语义层可解析性 —— 分界日之前的月份算「已知历史遗留」, 不报警。
+    if alignment_effective_date is None:
+        alignment_effective_date = resolve_alignment_effective_date()
+    if semantic_unknown_rate_threshold is None:
+        semantic_unknown_rate_threshold = resolve_semantic_unknown_rate_threshold()
+    report.alignment_effective_date = alignment_effective_date
+    report.semantic_rows = await collect_semantic_resolution(
+        db,
+        alignment_effective_date=alignment_effective_date,
+        threshold=semantic_unknown_rate_threshold,
+    )
     report.finished_at = datetime.now(timezone.utc)
     if record:
         await record_cloud_sync_integrity_run(db, report, trigger_source=trigger_source)
