@@ -290,6 +290,9 @@ jobs:
             tests/test_rebuild_local_current_schema.py \
             backend/tests/test_bootstrap_seed_manifest.py \
             backend/tests/test_remote_deploy_migration_contract.py \
+            backend/tests/test_celery_dispatch_event_loop_isolation.py \
+            backend/tests/test_celery_dispatch_resilience.py \
+            backend/tests/test_deploy_artifact_retention_contract.py \
             tests/test_4c8g_follow_up_acceptance.py \
             tests/test_alembic_version_table_contract.py \
             tests/test_cache_service.py \
