@@ -259,16 +259,19 @@ Live deployment verified:
 - 触发：采集机交来的 10 项问题单（`docs/` 外的采集机本地报告）→ 本地主干逐项复核
 - 业务决策（2026-11-10）：**沿用 2026-11-06 决定 —— 只保未来，历史数据不修**
 
-批次 1（代码加固，走 PR）已完成：
+批次 1（代码加固，走 PR）已完成，5 笔提交，PR **#3**：
+`https://github.com/timberdayz/timber_dayz/pull/3`
+（分支 `feature/2026-11-10-shop-identity-future-proofing`，base `main` @ `eece117a`，5 commits / 13 files）
 
-| 项 | 内容 | 状态 |
-|---|---|---|
-| 1.1 | 入库收敛信号优先级 → `shop_account_id` 优先（与 SSOT / 语义层候选池对齐） | ✅ |
-| 1.2 | 采集导出路径的**反向**守护（主数据取不到编号 ⇒ 绝不回退 `cnsc_shop_id`） | ✅ |
-| 1.3 | `--check --json` 序列化加固（datetime/date/Decimal 归一化收敛到一个入口） | ✅ |
-| 1.4 | celery 注入 `CLOUD_DATABASE_URL` + 容器内回环地址重写（**只在容器里**重写） | ✅ |
+| 项 | 提交 | 内容 | 状态 |
+|---|---|---|---|
+| 1.1 | `4aa5d8ad` | 入库收敛信号优先级 → `shop_account_id` 优先（与 SSOT / 语义层候选池对齐） | ✅ |
+| 1.2 | `bccdb889` | 采集导出路径的**反向**守护（主数据取不到编号 ⇒ 绝不回退 `cnsc_shop_id`） | ✅ |
+| 1.3 | `88504f70` | `--check --json` 序列化加固（datetime/date/Decimal 归一化收敛到一个入口） | ✅ |
+| 1.4 | `570bbc43` | celery 注入 `CLOUD_DATABASE_URL` + 容器内回环地址重写（**只在容器里**重写） | ✅ |
+| — | `07c56053` | 方案文档 + 本索引条目 | ✅ |
 
-验证：目标测试集 194 passed；`scripts/diff_pytest_junit.py` 判定 **NEW failures = 0**（ADDED 45 条，1 条改名）。
+验证：目标测试集 **197 passed**；`scripts/diff_pytest_junit.py` 判定 **NEW failures = 0**（ADDED 45 条，1 条改名 `test_numbering_wins_over_label` → `test_account_id_wins_over_platform_number`）。
 
 批次 0（只读对账，采集机执行）、批次 2（主数据对齐）、批次 3（巡检与告警）、批次 4（清理与文档）**未开始**。
 
