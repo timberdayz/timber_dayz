@@ -1209,6 +1209,106 @@ class CloudSyncReceiveLog(Base):
     )
 
 
+class ShopIdentityConflictRow(Base):
+    """同步侧「矛盾行台账」—— 被跳过 / 被降级的行的**行级登记载体**。
+
+    为什么要有这张表
+    ----------------
+    批次 3.7 的「双基准守卫」把**本地/云端登记信息不一致**的行降级为可观测事件,
+    事件落在 ``ops.pipeline_run_log`` 的 ``context->'events'`` 里。那是**整批**的
+    jsonb 样本(最多 50 条) ⇒ 看不出「这一行被跳过几次、第一次什么时候被跳过」,
+    也无法逐行重发。
+
+    ⇒ 本表**一行 = 一个矛盾行**, 记清:
+    哪张表 / 哪个平台与域 / 哪个业务日期 / 行内那列的值 / 本地认出的账号 /
+    为什么判为矛盾(原因码) / 是「已知历史遗留」还是「待人工处理」/
+    第一次与最近一次见到的时间 / 累计出现次数 / 人工处理状态与处理人。
+
+    ⚠️ **只记不修**: 本表只登记被跳过的行, **不回填、不改写**任何历史事实行
+    (``b_class.fact_*``) —— 「只保未来, 历史不修」是既定决策。
+
+    去重口径
+    --------
+    同一「(源表, 业务日期, 行内定位, 原因码)」再遇到时**更新**累计次数与最近见到
+    时间, **不**插新行 ⇒ 靠 ``dedup_key`` 上的唯一约束兜底
+    (``dedup_key`` 就是那四项拼出来的稳定串)。
+    """
+
+    __tablename__ = "shop_identity_conflict_rows"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    #: 「(源表, 业务日期, 行内定位, 原因码)」的稳定拼接串 —— 唯一约束建在它上面。
+    dedup_key = Column(String(512), nullable=False)
+    # ── 定位 ──
+    source_table_name = Column(String(255), nullable=False)
+    platform_code = Column(String(32), nullable=True)
+    data_domain = Column(String(64), nullable=True)
+    business_date = Column(Date, nullable=True)
+    #: 行内定位(源行主键 + 冲突键摘要)—— 人工定位这一行用。
+    row_locator = Column(String(255), nullable=False)
+    source_row_id = Column(String(128), nullable=True)
+    # ── 身份线索 ──
+    #: 行内那列的值(归一化后, 与语义层候选池同口径)。
+    identity_value = Column(String(255), nullable=True)
+    #: 行内各身份键的归一化 token 全貌。
+    identity_tokens = Column(JSON_COMPAT, nullable=True)
+    #: 本地认出的账号(恰好一个时); 多账号矛盾时为空, 账号集合见 ``resolved_accounts``。
+    resolved_account_id = Column(String(128), nullable=True)
+    #: 本地解析出的账号集合。
+    resolved_accounts = Column(JSON_COMPAT, nullable=True)
+    #: 云端解析出的账号集合(双基准降级时才有)。
+    cloud_accounts = Column(JSON_COMPAT, nullable=True)
+    # ── 判定 ──
+    #: 原因码(机器可读)—— 见 ``backend/services/shop_identity_conflict_ledger_service.py``。
+    reason_code = Column(String(64), nullable=False)
+    #: ``known_legacy``(已知历史遗留, 不修) / ``pending_manual``(待人工处理)。
+    status = Column(String(32), nullable=False, server_default=text("'pending_manual'"))
+    #: 累计出现次数(同一矛盾行被再次遇到 ⇒ +1, 不插新行)。
+    occurrence_count = Column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    first_seen_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_seen_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    # ── 人工处理 ──
+    #: ``open`` / ``in_progress`` / ``resolved`` / ``ignored``。
+    resolution_status = Column(
+        String(32), nullable=False, server_default=text("'open'")
+    )
+    resolved_by = Column(String(128), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolution_note = Column(Text, nullable=True)
+    # ── 审计 ──
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_shop_identity_conflict_rows_dedup_key",
+            "dedup_key",
+            unique=True,
+        ),
+        Index("ix_shop_identity_conflict_rows_status", "status"),
+        Index(
+            "ix_shop_identity_conflict_rows_table_date",
+            "source_table_name",
+            "business_date",
+        ),
+        Index("ix_shop_identity_conflict_rows_last_seen", "last_seen_at"),
+        {"schema": "ops"},
+    )
+
+
 class PriceAdjustBaseline(Base):
     """最低售价变更通知的**基线**：上一次已处理的最低售价与定价输入快照。
 
