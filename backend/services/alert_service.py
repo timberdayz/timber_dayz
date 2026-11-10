@@ -4,6 +4,7 @@
 - 配置仅从环境变量读取，禁止硬编码敏感信息
 - 告警冷却：同一类型在 N 分钟内只发一次
 - 发送失败时重试上限 3 次并记录错误日志
+- ``send_resource_alert`` 返回是否**真的送达**外部通道，供调用方判断要不要重试
 """
 
 import os
@@ -21,7 +22,9 @@ _cooldown: Dict[str, float] = {}
 _cooldown_lock = asyncio.Lock()
 
 # 从环境变量读取，禁止提交真实密钥
-RESOURCE_ALERT_COOLDOWN_MINUTES = int(os.getenv("RESOURCE_MONITOR_ALERT_COOLDOWN_MINUTES", "5"))
+RESOURCE_ALERT_COOLDOWN_MINUTES = int(
+    os.getenv("RESOURCE_MONITOR_ALERT_COOLDOWN_MINUTES", "5")
+)
 ALERT_RETRY_MAX = 3
 ALERT_HTTP_TIMEOUT = 10.0
 
@@ -47,7 +50,9 @@ async def _send_webhook(url: str, body: Dict[str, Any]) -> bool:
                 r.raise_for_status()
                 return True
         except Exception as e:
-            logger.warning(f"[Alert] Webhook 发送失败 (attempt {attempt}/{ALERT_RETRY_MAX}): {e}")
+            logger.warning(
+                f"[Alert] Webhook 发送失败 (attempt {attempt}/{ALERT_RETRY_MAX}): {e}"
+            )
             if attempt < ALERT_RETRY_MAX:
                 await asyncio.sleep(1.0 * attempt)
     logger.error(f"[Alert] Webhook 发送最终失败: {url}")
@@ -58,8 +63,14 @@ async def _send_dingtalk(webhook_url: str, token: str, body: Dict[str, Any]) -> 
     """钉钉机器人：优先 webhook_url，否则用 token 拼接 URL"""
     url = (webhook_url or "").strip()
     if not url and (token or "").strip():
-        url = f"https://oapi.dingtalk.com/robot/send?access_token={(token or '').strip()}"
-    if not url or url.startswith("YOUR_") or (token or "").strip() == "YOUR_DINGTALK_TOKEN":
+        url = (
+            f"https://oapi.dingtalk.com/robot/send?access_token={(token or '').strip()}"
+        )
+    if (
+        not url
+        or url.startswith("YOUR_")
+        or (token or "").strip() == "YOUR_DINGTALK_TOKEN"
+    ):
         return False
     ding_body = {
         "msgtype": "text",
@@ -73,14 +84,18 @@ async def send_resource_alert(
     message: str,
     cpu_usage: Optional[float] = None,
     memory_usage: Optional[float] = None,
-) -> None:
+) -> bool:
     """
     发送资源告警（带冷却与重试）。
     alert_type 建议: resource_cpu / resource_memory / resource_both
+
+    返回值：是否**真的送达**了外部通道（webhook / 钉钉）。
+    调用方（如批次 3.4 的采集失败告警）需要据此判断「通知有没有落地」，
+    才能决定要不要把它记进「已通知」集合 —— 否则没配 webhook 时会误判成已送达。
     """
     if await _in_cooldown(alert_type):
         logger.debug(f"[Alert] 告警冷却中，跳过: {alert_type}")
-        return
+        return False
 
     body = {
         "source": "xihong_erp_resource_monitor",
@@ -110,3 +125,4 @@ async def send_resource_alert(
 
     if sent:
         await _mark_sent(alert_type)
+    return sent

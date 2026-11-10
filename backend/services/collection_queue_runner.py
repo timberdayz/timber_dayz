@@ -116,7 +116,9 @@ class CollectionQueueRunner:
         async with self.session_factory() as session:
             status = (
                 await session.execute(
-                    select(CollectionConfigRun.status).where(CollectionConfigRun.id == run_id)
+                    select(CollectionConfigRun.status).where(
+                        CollectionConfigRun.id == run_id
+                    )
                 )
             ).scalar_one_or_none()
             return status == "cancelled"
@@ -127,7 +129,9 @@ class CollectionQueueRunner:
         async with self.session_factory() as session:
             status = (
                 await session.execute(
-                    select(CollectionTask.status).where(CollectionTask.task_id == task_id)
+                    select(CollectionTask.status).where(
+                        CollectionTask.task_id == task_id
+                    )
                 )
             ).scalar_one_or_none()
             return status == "cancelled"
@@ -170,7 +174,9 @@ class CollectionQueueRunner:
             date_range=task.date_range or {},
             granularity=task.granularity or "daily",
             debug_mode=bool(getattr(task, "debug_mode", False)),
-            execution_mode="headed" if getattr(task, "debug_mode", False) else "headless",
+            execution_mode=(
+                "headed" if getattr(task, "debug_mode", False) else "headless"
+            ),
             parallel_mode=False,
             max_parallel=1,
             runtime_manifests=runtime_manifests,
@@ -181,3 +187,24 @@ class CollectionQueueRunner:
         async with self.session_factory() as session:
             service = CollectionConfigRunService(session)
             await service.finalize_run_from_tasks(run.id)
+            # [批次 3.4 / P2-5] 采集失败**主动告警**：轮次收尾时统一聚合。
+            # 同一轮里 7 个店挂在同一个错误上 ⇒ 按归一化错误指纹聚成 **1 条**通知。
+            # 告警失败**绝不影响**采集主流程（服务内部已吞掉全部异常，这里再兜一层）。
+            await self._alert_run_failures(session, run.id)
+
+    async def _alert_run_failures(
+        self, session: AsyncSession, config_run_id: int
+    ) -> None:
+        """本轮失败任务的主动告警（批次 3.4）。**任何异常都不许冒泡**。"""
+        try:
+            from backend.services.collection_failure_alert_service import (
+                alert_collection_run_failures,
+            )
+
+            await alert_collection_run_failures(session, config_run_id=config_run_id)
+        except Exception as exc:  # noqa: BLE001 —— 告警失败不影响采集落库
+            logger.warning(
+                "采集失败告警派发失败（不影响采集）: config_run_id=%s error=%s",
+                config_run_id,
+                exc,
+            )
