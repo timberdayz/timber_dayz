@@ -70,7 +70,10 @@ SAFETY_NET_CIRCUIT_COOLDOWN_MINUTES = 30
 #:
 #: 阈值必须**大于**刷新队列任务的硬超时（``time_limit=1800`` 秒 = 30 分钟）
 #: —— 否则还在正常跑的长任务会被误判成僵尸。
-STALE_DASHBOARD_REFRESH_RUN_MINUTES = 45
+#:
+#: 2026-11-10（P2-2）：回收范围从「看板四族封闭白名单」扩到**全族**
+#: ⇒ 常量名随之从「看板刷新」改成「流水线 run」。
+STALE_PIPELINE_RUN_MINUTES = 45
 
 #: 可以**自动重排队**的 SQLSTATE（环境类故障：重跑可能就好了）。
 #:
@@ -487,26 +490,41 @@ def process_refresh_queue_task(self):  # noqa: ANN201
     return run_async_task(_async_process_refresh_queue_task)
 
 
-async def _reap_stale_dashboard_refresh_runs(
+async def _reap_stale_pipeline_runs(
     db,
     *,
-    stale_minutes: int = STALE_DASHBOARD_REFRESH_RUN_MINUTES,
+    stale_minutes: int = STALE_PIPELINE_RUN_MINUTES,
 ) -> int:
-    """把永久 ``running`` 的看板刷新 run 标记为 ``failed``（僵尸回收）。
+    """把永久 ``running`` 的 run 标记为 ``failed``（僵尸回收，**全族**）。
 
-    为什么必须回收
-    --------------
-    ``dashboard_bootstrap._load_active_dashboard_refresh_runs`` 只要看到
-    ``status='running'`` 的看板刷新 run，就把对应模块判成 ``refreshing``。
-    进程被 kill / OOM / 机器重启 ⇒ 那行 run 永远停在 ``running``
-    ⇒ 模块永远「正在刷新」⇒ 页面永远挂提示 ⇒ 安全网还会一直往队列里排修复。
+    2026-11-10 扩面（P2-2）
+    ----------------------
+    原来只回收看板四族（封闭白名单：``dashboard_materialization_refresh.%`` /
+    ``dashboard_materialization_rebuild_core.%`` / ``dashboard_safety_net_repair%`` /
+    ``bootstrap_postgresql_dashboard%`` + ``trigger_source='materialization_refresh'``）。
+    封闭白名单有两个问题：
 
-    2026-11-07 实测：``ops.pipeline_run_log`` 里 3 行永久 ``running`` 的
-    ``dashboard_safety_net_repair``（最老的停了 19 小时）。
+    1. **漏**：任何**新增**的 run 族都不在白名单里 ⇒ 它的僵尸行永远停在
+       ``running``，监控表越积越多、盖住真正的失败；
+    2. **与状态判定不同步**：``dashboard_bootstrap._load_active_dashboard_refresh_runs``
+       的白名单**更窄**（只认看板两族 + ``trigger_source``），
+       任何「把 ``status='running'`` 当作正在跑」的判断都会被僵尸行骗。
 
-    匹配条件**包含** ``_load_active_dashboard_refresh_runs`` 的全部条件
-    （那部分直接决定状态判定，必须清），并额外覆盖安全网 / bootstrap 两族
-    （它们不影响状态判定，但会让监控表越积越多、盖住真正的失败）。
+    ⇒ 改为**全族**：``status='running'`` 且超过阈值 ⇒ 一律回收。
+
+    安全边界
+    --------
+    * 阈值 **45 分钟 > 所有刷新队列任务的硬超时**（``time_limit=1800`` 秒 = 30 分钟）
+      ⇒ 正常任务跑不到阈值，不会被误杀；
+    * 只改 ``status`` / ``completed_at`` / ``error_message``，**不删行**；
+    * **留痕**：``error_message`` 追加 ``run_id`` / ``pipeline_name`` / 滞留分钟数，
+      让「这条为什么变成 failed」在表里就能读出来，不必回放日志；
+    * 原来用 ``COALESCE(error_message, 'stale_run_reaped_by_safety_net')``
+      —— 已有错误信息时**原样保留**，回收痕迹**追加**在后面。
+
+    ⚠ 与「活跃行判定」的关系：``dashboard_bootstrap`` 那边**故意保持窄白名单**
+    （它只回答「这个看板模块是不是正在刷新」）—— 扩面回收只会让那边的僵尸行
+    变成 ``failed``、不再被当成「正在刷新」，两边**不需要**同步放宽。
     """
     try:
         result = await db.execute(
@@ -515,39 +533,39 @@ async def _reap_stale_dashboard_refresh_runs(
                 UPDATE ops.pipeline_run_log
                 SET status = 'failed',
                     completed_at = NOW(),
-                    error_message = COALESCE(
-                        error_message, 'stale_run_reaped_by_safety_net'
+                    error_message = CONCAT_WS(
+                        ' | ',
+                        NULLIF(TRIM(COALESCE(error_message, '')), ''),
+                        'stale_run_reaped_by_safety_net: run_id=' || run_id
+                            || ' pipeline=' || pipeline_name
+                            || ' stale_minutes='
+                            || ROUND(
+                                EXTRACT(EPOCH FROM (NOW() - started_at)) / 60.0
+                            )::int
                     )
                 WHERE status = 'running'
                   AND started_at < NOW()
                       - make_interval(mins => CAST(:stale_minutes AS integer))
-                  AND (
-                      pipeline_name LIKE 'dashboard_materialization_refresh.%'
-                      OR pipeline_name LIKE 'dashboard_materialization_rebuild_core.%'
-                      OR pipeline_name LIKE 'dashboard_safety_net_repair%'
-                      OR pipeline_name LIKE 'bootstrap_postgresql_dashboard%'
-                      OR (
-                          trigger_source = 'materialization_refresh'
-                          AND context ? 'module_name'
-                      )
-                  )
-                RETURNING id
+                RETURNING id, run_id, pipeline_name
                 """
             ),
             {"stale_minutes": int(stale_minutes)},
         )
-        reaped = list(result.fetchall())
+        reaped = [dict(row) for row in result.mappings().all()]
         if reaped:
             if hasattr(db, "commit"):
                 await db.commit()
             logger.warning(
-                "[RefreshQueue] reaped %s stale dashboard refresh run(s)",
+                "[RefreshQueue] reaped %s stale pipeline run(s): %s",
                 len(reaped),
+                ", ".join(
+                    f"{row.get('run_id')}/{row.get('pipeline_name')}" for row in reaped
+                ),
             )
         return len(reaped)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "[RefreshQueue] stale dashboard refresh run reaping skipped: %s",
+            "[RefreshQueue] stale pipeline run reaping skipped: %s",
             exc,
             exc_info=True,
         )
@@ -610,7 +628,7 @@ async def _async_dashboard_refresh_safety_net() -> dict:
         recovered_count = await queue_service.recover_stale_running_tasks(
             timeout_seconds=REFRESH_QUEUE_RUNNING_TIMEOUT_SECONDS
         )
-        reaped_runs = await _reap_stale_dashboard_refresh_runs(db)
+        reaped_runs = await _reap_stale_pipeline_runs(db)
         report = await inspect_dashboard_assets(db)
         module_reports = report.get("modules") if isinstance(report, dict) else {}
         enqueued_repairs = 0
