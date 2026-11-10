@@ -157,6 +157,10 @@ output/probe_*.json
 temp/screenshots/
 temp/media/
 
+# 店铺身份只读对账的运行时产物（批次 0/2，含店铺名与编号等运营数据，不入库）
+output/reconciliation-*.json
+output/snapshots/
+
 # 配置文件中的敏感部分
 config/**/accounts_config.yaml
 config/**/proxy_config.yaml
