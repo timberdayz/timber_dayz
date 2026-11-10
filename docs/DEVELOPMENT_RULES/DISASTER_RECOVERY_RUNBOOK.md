@@ -196,25 +196,31 @@ docker compose run --rm backend-api python3 /app/scripts/rebuild_views.py \
 
 ### C6c: Pre-upgrade check for legacy operation targets (upgrade of an OLD database)
 
-> ⚠️ **Upgrading a database that predates `current_schema_20261215` can stop at that
-> revision.** Not a code defect — a contract conflict, and the expected semantics
-> are still undecided.
->
-> - `current_schema_20260810_operation_contract_isolation` installs a trigger that
->   makes `a_class.target_breakdown` **read-only** when the parent target is
->   `target_type = 'operation'` with `metric_catalog_version IS NULL`
->   (`historical operation breakdowns are read-only`);
-> - `current_schema_20261215_migrate_sales_targets_a` then wants to UPDATE those
->   rows to normalise `period_label` / `period_start` / `period_end`.
-> - The trigger is created **75 revisions earlier** in the chain, so the upgrade
->   aborts *at* 20261215. A forward migration cannot help: it would never be reached.
->
-> **Production was measured: 0 affected rows** (all 241 breakdown rows hang under
-> `shop` parents; 0 rows under an `operation` parent). Check your own environment
-> before starting an upgrade:
+> ⚠️ **Upgrading a database that predates `current_schema_20261215` used to stop at that
+> revision.** Not a code defect — a contract conflict. **The semantics are now decided
+> (product, 2026-11-10) and implemented**, so the upgrade **proceeds**:
+> the migration **skips** the affected rows and **logs** how many it skipped.
+
+- `current_schema_20260810_operation_contract_isolation` installs a trigger that
+  makes `a_class.target_breakdown` **read-only** when the parent target is
+  `target_type = 'operation'` with `metric_catalog_version IS NULL`
+  (`historical operation breakdowns are read-only`);
+- `current_schema_20261215_migrate_sales_targets_a` then wants to UPDATE those
+  rows to normalise `period_label` / `period_start` / `period_end`.
+- The trigger is created **75 revisions earlier** in the chain, so the upgrade
+  aborted *at* 20261215. A forward migration cannot help: it would never be reached.
+- **Decision (2026-11-10)**: those rows **must not be normalised** (they are
+  read-only historical snapshots) ⇒ the back-fill scope of 20261215 was narrowed to
+  the rows it may touch, and the skipped count is written into the migration log:
+  `[20261215] 跳过（业务口径：历史 operation 型档位行不改）N 行 …`.
+
+**Production was measured: 0 affected rows** (all 241 breakdown rows hang under
+`shop` parents; 0 rows under an `operation` parent). Check your own environment
+before starting an upgrade — the counts tell you **how many rows will be skipped**,
+not whether the upgrade will fail:
 
 ```bash
-# 1) rows the trigger would make read-only (0 = unaffected)
+# 1) rows the trigger would make read-only (= rows 20261215 now skips)
 docker exec xihong_erp_postgres psql -U erp_user -d xihong_erp -c "
 select count(*) as blocked_rows
 from a_class.target_breakdown tb
@@ -229,12 +235,17 @@ where breakdown_type = 'shop' and period_label is null;"
 ```
 
 > Both counts are 0 ⇒ the upgrade proceeds normally.
-> If either is > 0 ⇒ **stop and read**
-> `docs/reports/2026-11-10-老库升级路径-只读触发器冲突口径决策材料.md`
-> before touching the database. Do **not** work around it by editing an
-> already-applied migration or by dropping the trigger: applied migrations are
-> immutable (`current_migrations/versions/20260914_warehouse_platform_profit.py:3`)
-> and the trigger is the guard that keeps historical operation targets read-only.
+> If count 1 is > 0 ⇒ the upgrade still proceeds, but the migration log will report
+> that many rows were **skipped on purpose**; check that number against what you
+> expect (the decision record is
+> `docs/reports/2026-11-10-老库升级路径-只读触发器冲突口径决策材料.md` §9).
+> If count 2 is > 0 **and** count 1 is 0 ⇒ the ordinary normalisation applies.
+>
+> ⚠️ Do **not** work around this by dropping the trigger or by editing an
+> already-applied migration to unlock the rows: the trigger is the guard that keeps
+> historical operation targets read-only, and the applied-migration immutability rule
+> (`current_migrations/versions/20260914_warehouse_platform_profit.py:3`) only has a
+> single, documented exception — the narrowed back-fill scope above.
 
 > **Not the same failure**: an upgrade that stops with `账号不存在: tiktok_*` (six
 > of them) is not this contract conflict — it means the database is **empty** and the

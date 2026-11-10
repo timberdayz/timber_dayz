@@ -544,8 +544,20 @@ def test_approved_legacy_adoption_preserves_business_data_and_runs_current_incre
 
 
 def test_legacy_adoption_preserves_duplicate_operation_shop_overrides_and_audits_them(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, capsys
 ):
+    """老库采纳（legacy adoption）必须**走得通**，且历史 operation 型档位行**原样保留**。
+
+    [*] 2026-11-10 业务拍板（口径材料：
+    ``docs/reports/2026-11-10-老库升级路径-只读触发器冲突口径决策材料.md``）：
+    没有 ``metric_catalog_version`` 的 operation 型父目标下的历史档位行
+    **本来就不该被补** ``period_label`` ⇒ 迁移必须**显式跳过并记日志**。
+
+    ⇒ 这条用例从「缺陷探测器」变成「新口径的守护」：
+    - 采纳路径不再抛 'historical operation breakdowns are read-only'；
+    - 历史行的 ``period_label`` 保持 NULL（没被改）；
+    - 跳过的行数出现在迁移日志里（不静默漏改）。
+    """
     if not _docker_available():
         pytest.skip("requires a reachable Docker daemon and PostgreSQL 15 image")
 
@@ -705,6 +717,24 @@ def test_legacy_adoption_preserves_duplicate_operation_shop_overrides_and_audits
                     {"target_id": target_id},
                 ).scalar_one()
                 == 2
+            )
+            # [*] 2026-11-10 业务拍板：历史 operation 型（无 metric_catalog_version）
+            # 父目标下的档位行**不该被回填** ⇒ 迁移必须**跳过并记日志**，
+            # 而不是去改它们（改了会撞只读触发器 'historical operation breakdowns are read-only'）。
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM a_class.target_breakdown "
+                        "WHERE target_id = :target_id AND period_label IS NULL"
+                    ),
+                    {"target_id": target_id},
+                ).scalar_one()
+                == 2
+            )
+            # 被跳过的行数必须出现在迁移日志里（不静默漏改，避免被误读成「数据漏改」）
+            assert (
+                "跳过（业务口径：历史 operation 型档位行不改）"
+                in capsys.readouterr().out
             )
 
         audit = migration_runner.audit_legacy_operation_data(database_url)

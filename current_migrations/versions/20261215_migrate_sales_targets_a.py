@@ -35,6 +35,9 @@
    ``period_end``（值取自其父目标 ``a_class.sales_targets.period_start``），
    让整张表都能按 ``platform_code | shop_id | period_label(年-月)`` 定位。
    **只补 NULL，不改已有值。**
+   ⚠️ 2026-11-10 起**排除**「父目标 ``target_type='operation'`` 且
+   ``metric_catalog_version IS NULL``」的历史行（只读快照，业务口径为「不该被改」），
+   跳过的行数写进迁移日志 —— 详见 ``_normalize_shop_breakdown_periods`` 的说明。
 2. **迁移事实**：把 ``a_class.sales_targets_a`` 的每一行
    （``目标销售额`` → ``target_amount``、``目标订单数`` → ``target_quantity``）
    upsert 进 ``a_class.target_breakdown`` 的「店铺月度档位」行。
@@ -164,23 +167,25 @@ def _migratable_source_filter(alias: str = "s") -> str:
     这里用**完全相等**判断，与外键的判定口径保持一致（不做 lower/trim，
     否则会出现「谓词认为可落库、外键却拒绝」的错位）。
     """
-    return (
-        """
+    return """
         EXISTS (
             SELECT 1
             FROM core.dim_shops d
             WHERE d.platform_code = {alias}.platform_code
               AND d.shop_id = {alias}."店铺ID"
         )
-        """.format(alias=alias)
+        """.format(
+        alias=alias
     )
 
 
 def _orphan_source_rows() -> list:
     """返回「店铺不在维度表里」的源行（这些行无法落库）。"""
-    rows = op.get_bind().execute(
-        sa.text(
-            """
+    rows = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                """
             SELECT s.platform_code,
                    s."店铺ID" AS shop_id,
                    s."年月" AS period_label,
@@ -195,8 +200,11 @@ def _orphan_source_rows() -> list:
             )
             ORDER BY s.platform_code, s."店铺ID", s."年月"
             """
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return [dict(row) for row in rows]
 
 
@@ -357,7 +365,65 @@ def _rebuild_views() -> None:
 # 1) 规范化「店铺月度档位」的 period_label / period_start / period_end
 # --------------------------------------------------------------------------
 def _normalize_shop_breakdown_periods() -> int:
-    """给 period_label 为空的店铺档位行补上月份标签（只补 NULL，不改已有值）。"""
+    """给 period_label 为空的店铺档位行补上月份标签（只补 NULL，不改已有值）。
+
+    [*] 2026-11-10（业务拍板）：**历史 operation 型档位行不该被改**。
+
+    为什么
+    ------
+    父目标 ``target_type='operation'`` 且 ``metric_catalog_version IS NULL``
+    的档位行，是只读触发器 ``a_class.enforce_operation_breakdown_contract``
+    保护的历史快照（``20260808``/``20260810`` 建，链上第 3 个执行）：
+
+    .. code-block:: sql
+
+        IF FOUND AND parent_target.target_type = 'operation' THEN
+            IF parent_target.metric_catalog_version IS NULL THEN
+                RAISE EXCEPTION 'historical operation breakdowns are read-only';
+
+    原先的回填谓词只按 ``breakdown_type='shop' AND period_label IS NULL`` 过滤，
+    **没有 target_type 过滤** ⇒ 会去改这些行 ⇒ 老库升级时在这一步抛错、链断
+    （实测报错就是 'historical operation breakdowns are read-only'）。
+
+    口径决策（产品，2026-11-10）
+    --------------------------
+    这些历史行**本来就不该被补** ``period_label`` / ``period_start`` / ``period_end``
+    ⇒ 正确做法是**显式跳过并记日志**（而不是去解锁触发器、或把行改掉）。
+    口径材料：``docs/reports/2026-11-10-老库升级路径-只读触发器冲突口径决策材料.md``。
+
+    ⇒ 本函数只回填「父目标不是无版本的 operation 型」的档位行，
+    跳过的行数写进迁移日志（不静默漏改，避免被误读成"数据漏改"）。
+
+    ⚠️ 已应用迁移不可变条款
+    ----------------------
+    ``20260914_warehouse_platform_profit.py:3`` 写明「Previous migration files
+    remain immutable」。本次**显式豁免**并记录理由：
+
+    - 豁免范围：仅本函数（``_normalize_shop_breakdown_periods``）的**回填范围与日志**；
+    - 理由：老库升级路径在该迁移处**必然失败**（触发器与回填相交），
+      而业务口径已拍板为「这些行不该被改」⇒ 唯一能同时满足
+      「升级能走通」与「不改历史数据」的做法就是把回填范围收窄到可改的行；
+    - 影响面：**只影响尚未应用本迁移的库**（老库升级路径）；已应用本迁移的库
+      （含生产）alembic 不会重跑 ⇒ 行为完全不变；
+    - 数据影响：operation 型无版本父目标下的档位行**保持原样**（不被回填）。
+    """
+    # ① 先算「原谓词会命中多少行」⇒ 与实际回填数的差值就是被跳过的行数
+    candidate_result = op.get_bind().execute(
+        sa.text(
+            """
+            SELECT count(*)
+            FROM a_class.target_breakdown tb
+            JOIN a_class.sales_targets st ON tb.target_id = st.id
+            WHERE tb.breakdown_type = 'shop'
+              AND tb.period_label IS NULL
+              AND st.period_start IS NOT NULL
+            """
+        )
+    )
+    candidates = int(candidate_result.scalar_one() or 0)
+
+    # ② 只回填「可改」的行：父目标不是「无版本的 operation 型」
+    #    （IS DISTINCT FROM 处理 target_type 为 NULL 的情况）
     result = op.get_bind().execute(
         sa.text(
             """
@@ -370,11 +436,23 @@ def _normalize_shop_breakdown_periods() -> int:
               AND tb.breakdown_type = 'shop'
               AND tb.period_label IS NULL
               AND st.period_start IS NOT NULL
+              AND (
+                    st.target_type IS DISTINCT FROM 'operation'
+                    OR st.metric_catalog_version IS NOT NULL
+              )
             RETURNING tb.id
             """
         )
     )
-    return len(result.fetchall())
+    updated = len(result.fetchall())
+    skipped = max(0, candidates - updated)
+    if skipped:
+        print(
+            "[20261215] 跳过（业务口径：历史 operation 型档位行不改）{n} 行 —— "
+            "父目标 target_type='operation' 且 metric_catalog_version IS NULL"
+            "（只读历史快照；本次回填范围已收窄）".format(n=skipped)
+        )
+    return updated
 
 
 # --------------------------------------------------------------------------
@@ -382,9 +460,11 @@ def _normalize_shop_breakdown_periods() -> int:
 # --------------------------------------------------------------------------
 def _migrate_facts() -> dict:
     """把源表的事实 upsert 进 ``a_class.target_breakdown``。"""
-    updated = op.get_bind().execute(
-        sa.text(
-            """
+    updated = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                """
             UPDATE a_class.target_breakdown tb
             SET target_amount = s."目标销售额",
                 target_quantity = s."目标订单数",
@@ -401,12 +481,16 @@ def _migrate_facts() -> dict:
               AND (tb.target_amount IS DISTINCT FROM s."目标销售额"
                    OR tb.target_quantity IS DISTINCT FROM s."目标订单数")
             """
+            )
         )
-    ).rowcount
+        .rowcount
+    )
 
-    inserted = op.get_bind().execute(
-        sa.text(
-            """
+    inserted = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                """
             WITH parent AS (
                 SELECT DISTINCT ON (date_trunc('month', st.period_start))
                        st.id,
@@ -458,9 +542,13 @@ def _migrate_facts() -> dict:
                 JOIN a_class.sales_targets st ON st.id = tb.target_id
                 WHERE {match}
             )
-            """.format(match=_MATCH_CONDITION, migratable=_migratable_source_filter())
+            """.format(
+                    match=_MATCH_CONDITION, migratable=_migratable_source_filter()
+                )
+            )
         )
-    ).rowcount
+        .rowcount
+    )
 
     return {"updated": int(updated or 0), "inserted": int(inserted or 0)}
 
@@ -487,7 +575,9 @@ def _verify_fact_coverage() -> None:
               AND tb.target_amount = s."目标销售额"
               AND tb.target_quantity = s."目标订单数"
         )
-        """.format(match=_MATCH_CONDITION, migratable=_migratable_source_filter())
+        """.format(
+            match=_MATCH_CONDITION, migratable=_migratable_source_filter()
+        )
     )
     if missing:
         raise RuntimeError(
@@ -556,7 +646,9 @@ def _verify_monthly_totals() -> None:
             WHERE src.amt IS DISTINCT FROM tgt.amt
                OR src.qty IS DISTINCT FROM tgt.qty
         ) d
-        """.replace("__MIGRATABLE__", _migratable_source_filter())
+        """.replace(
+        "__MIGRATABLE__", _migratable_source_filter()
+    )
     diff = _scalar(sql_text)
     if int(diff):
         raise RuntimeError(
@@ -879,9 +971,11 @@ def _restore_legacy_table() -> None:
 
     # 被 upgrade 跳过的行（店铺不在维度表里）从隔离区原样放回 ⇒ 事实不丢。
     if _table_exists_qualified("core.data_quarantine"):
-        restored = op.get_bind().execute(
-            sa.text(
-                """
+        restored = (
+            op.get_bind()
+            .execute(
+                sa.text(
+                    """
                 INSERT INTO a_class.sales_targets_a (
                     platform_code,
                     "店铺ID",
@@ -903,38 +997,40 @@ def _restore_legacy_table() -> None:
                   AND q.error_type = :error_type
                 ON CONFLICT (platform_code, "店铺ID", "年月") DO NOTHING
                 """
-            ),
-            {
-                "source_file": _ORPHAN_SOURCE_FILE,
-                "error_type": _ORPHAN_ERROR_TYPE,
-            },
-        ).rowcount
-        print(
-            "[20261215] 从隔离区放回被跳过的行：{rows}".format(
-                rows=int(restored or 0)
+                ),
+                {
+                    "source_file": _ORPHAN_SOURCE_FILE,
+                    "error_type": _ORPHAN_ERROR_TYPE,
+                },
             )
+            .rowcount
+        )
+        print(
+            "[20261215] 从隔离区放回被跳过的行：{rows}".format(rows=int(restored or 0))
         )
 
         # [*] 2026-11-09 幂等性修复：行已经回到它该在的表里了，隔离区的副本
         # 必须删掉 —— 否则「降级 → 再升级」会把同一批行写两遍，
         # 隔离区从 9 行涨到 18 行（生产演练实测）。
-        cleared = op.get_bind().execute(
-            sa.text(
-                """
+        cleared = (
+            op.get_bind()
+            .execute(
+                sa.text(
+                    """
                 DELETE FROM core.data_quarantine
                  WHERE source_file = :source_file
                    AND error_type = :error_type
                 """
-            ),
-            {
-                "source_file": _ORPHAN_SOURCE_FILE,
-                "error_type": _ORPHAN_ERROR_TYPE,
-            },
-        ).rowcount
-        print(
-            "[20261215] 清理隔离区中已放回的副本：{rows}".format(
-                rows=int(cleared or 0)
+                ),
+                {
+                    "source_file": _ORPHAN_SOURCE_FILE,
+                    "error_type": _ORPHAN_ERROR_TYPE,
+                },
             )
+            .rowcount
+        )
+        print(
+            "[20261215] 清理隔离区中已放回的副本：{rows}".format(rows=int(cleared or 0))
         )
 
 
@@ -945,9 +1041,7 @@ def upgrade() -> None:
         return
 
     source_rows = int(_scalar("SELECT COUNT(*) FROM a_class.sales_targets_a"))
-    print(
-        "[20261215] a_class.sales_targets_a 源行数：{rows}".format(rows=source_rows)
-    )
+    print("[20261215] a_class.sales_targets_a 源行数：{rows}".format(rows=source_rows))
 
     # 店铺不在维度表里的源行：外键不允许落库 ⇒ 只能跳过，但必须显形。
     orphans = _orphan_source_rows()

@@ -273,7 +273,11 @@ jobs:
             tests/test_git_mirror_sync_script.py \
             tests/test_cloud_b_class_sync_e2e_contract.py \
             tests/test_collection_resume_api.py \
-            tests/e2e/test_shopee_collection.py
+            tests/e2e/test_shopee_collection.py \
+            tests/test_current_schema_migration_contract.py \
+            tests/test_rebuild_local_current_schema.py \
+            backend/tests/test_bootstrap_seed_manifest.py \
+            backend/tests/test_remote_deploy_migration_contract.py
 
       - name: Run performance regression entry
         if: matrix.python-version == '3.11'
@@ -495,14 +499,50 @@ jobs:
   #   if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
   #   uses: ./.github/workflows/docker-build.yml
 
+  fresh-db-drill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.lock.txt ]; then pip install -r requirements.lock.txt; fi
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run fresh-database bootstrap drill (Docker)
+        run: |
+          # 「空库从零建库」全链演练（甲）：临时 Postgres 容器 → 两段式引导 → 到 head
+          # → 数据同步关键列校验 → ORM Schema 一致性校验。
+          #
+          # 为什么单独开一个 job：这条要 Docker + 约 7 分钟，
+          # 放在 test job 里会拖慢每次提交的反馈；单开 job 可以与其他 job 并行。
+          #
+          # 为什么必须常态化：20261116 的 fail-closed 前置检查会让**空库**直接跑链必然失败
+          # （实测报 6 条「账号不存在」）—— 这类问题在真机上要等到部署当天才暴露。
+          python scripts/validate_migrations_fresh_db.py
+
   notify:
     runs-on: ubuntu-latest
-    needs: [release-tag-rules, test, security-scan, build-check, frontend-guard]
+    needs:
+      [
+        release-tag-rules,
+        test,
+        security-scan,
+        build-check,
+        frontend-guard,
+        fresh-db-drill,
+      ]
     if: always()
     steps:
       - name: Notify results
         run: |
-          if [ "${{ needs.release-tag-rules.result }}" == "success" ] && [ "${{ needs.test.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ] && [ "${{ needs.build-check.result }}" == "success" ] && [ "${{ needs.frontend-guard.result }}" == "success" ]; then
+          if [ "${{ needs.release-tag-rules.result }}" == "success" ] && [ "${{ needs.test.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ] && [ "${{ needs.build-check.result }}" == "success" ] && [ "${{ needs.frontend-guard.result }}" == "success" ] && [ "${{ needs.fresh-db-drill.result }}" == "success" ]; then
             echo "[OK] All CI checks passed!"
           else
             echo "[FAIL] Some CI checks failed"
@@ -511,4 +551,5 @@ jobs:
             echo "Security: ${{ needs.security-scan.result }}"
             echo "Build: ${{ needs.build-check.result }}"
             echo "Frontend guard: ${{ needs.frontend-guard.result }}"
+            echo "Fresh DB drill: ${{ needs.fresh-db-drill.result }}"
           fi
