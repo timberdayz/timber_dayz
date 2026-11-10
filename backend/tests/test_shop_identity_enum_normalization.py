@@ -152,7 +152,7 @@ def test_identity_index_is_not_empty_when_rows_carry_enum_members():
 
     assert index.by_shop_account_id, "索引为空 ⇒ 收敛必然失效(事故根因)"
     assert len(index.by_shop_account_id) == 3
-    assert index.by_platform_shop_id, "平台编号索引为空 ⇒ 编号权威失效"
+    assert index.by_platform_shop_id, "平台编号索引为空 ⇒ 编号兜底失效"
     assert len(index.by_platform_shop_id) == 2  # tiktok 无编号
     assert index.by_store_name, "店名索引为空 ⇒ 店名兜底失效"
 

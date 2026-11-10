@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -188,10 +190,55 @@ def _compute_targets_fingerprint(targets: list[str]) -> str | None:
     return hasher.hexdigest()
 
 
-def _normalize_json_value(value: Any) -> dict[str, Any]:
+def _json_safe_value(value: Any) -> Any:
+    """把任意值**递归**收敛成 JSON 原生类型。
+
+    为什么要有这个函数
+    ------------------
+    看板资产报告是**机器可读**产物（``--check --json``）⇒ 必须能直接
+    ``json.dumps``。而报告里的值有一半是**从库里直接搬过来**的
+    （``ops.pipeline_run_log.started_at`` / ``ops.dashboard_asset_state.updated_at``
+    都是 ``timestamptz`` ⇒ 驱动返回 ``datetime``）⇒ 只要有一趟合法的刷新
+    正在跑，``json.dumps`` 就抛 ``TypeError: Object of type datetime is not
+    JSON serializable``。
+
+    ⇒ 运维最需要机器可读结论的时刻，恰恰是这条命令不可用的时刻。
+
+    规则
+    ----
+    * ``datetime`` / ``date`` → ISO 字符串（机器可读、且不丢时区信息）
+    * ``Decimal`` → ``float``（jsonb 数值没有十进制语义）
+    * ``dict`` / ``list`` / ``tuple`` → 逐层递归
+    * ``str`` / ``int`` / ``float`` / ``bool`` / ``None`` → 原样保留
+    * 其它对象 → ``str()`` 兜底（宁可给个可读字符串，也不要让序列化崩掉）
+    """
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
     if isinstance(value, dict):
+        return {str(key): _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_value(item) for item in value]
+    if value is None or isinstance(value, (str, bool, int, float)):
         return value
-    return {}
+    return str(value)
+
+
+def _normalize_json_value(value: Any) -> dict[str, Any]:
+    """把 jsonb 载荷归一化成 **JSON 安全的** dict。
+
+    顶层契约**保持不变**：非 dict 一律返回 ``{}``
+    （``context`` / ``details_json`` 两个 jsonb 列 + 既有 4 个调用点都依赖它）。
+
+    与旧版的差别只有一处：dict **内部**会被递归 JSON 化
+    （嵌套的 ``datetime`` / ``date`` / ``Decimal`` 不再漏到 ``json.dumps``）。
+    """
+    if not isinstance(value, dict):
+        return {}
+    return _json_safe_value(value)
 
 
 async def _load_active_dashboard_refresh_runs(
@@ -233,8 +280,11 @@ async def _load_active_dashboard_refresh_runs(
                 module_name = pipeline_name.rsplit(".", 1)[-1]
             if not module_name:
                 continue
-            runs[module_name] = dict(row)
-            runs[module_name]["context"] = context
+            # 整行先归一化再进 report ⇒ ``started_at`` / ``completed_at``
+            # 这两个 ``datetime`` 不会漏到 ``json.dumps``（见 ``_json_safe_value``）。
+            normalized_row = _json_safe_value(dict(row))
+            normalized_row["context"] = context
+            runs[module_name] = normalized_row
         return runs
     except Exception:
         return {}
@@ -283,7 +333,9 @@ async def _load_dashboard_asset_state(
         )
         rows = {}
         for row in result.mappings():
-            rows[row["module_name"]] = dict(row)
+            # ``updated_at`` 是 ``timestamptz`` ⇒ 驱动返回 ``datetime``
+            # ⇒ 整行归一化，别让它顺着 report 流到 ``json.dumps``。
+            rows[row["module_name"]] = _json_safe_value(dict(row))
         return rows
     except Exception:
         return {}
@@ -481,7 +533,7 @@ def _build_module_report(
         "refresh_fingerprint_drift": refresh_fingerprint_drift,
         "run_id": (module_state or {}).get("run_id"),
         "details": details,
-        "active_refresh_run": active_refresh_run,
+        "active_refresh_run": _json_safe_value(active_refresh_run),
     }
 
 
@@ -510,14 +562,16 @@ async def inspect_dashboard_assets(session: AsyncSession) -> dict[str, Any]:
     ready = all(report["ready"] for report in modules.values())
     assets_drift = any(report["status"] == "drift" for report in modules.values())
 
-    return {
-        "ready": ready,
-        "existing_schemas": sorted(existing_schemas),
-        "missing_schemas": missing_schemas,
-        "missing_objects": missing_objects,
-        "assets_drift": assets_drift,
-        "modules": modules,
-    }
+    return _json_safe_value(
+        {
+            "ready": ready,
+            "existing_schemas": sorted(existing_schemas),
+            "missing_schemas": missing_schemas,
+            "missing_objects": missing_objects,
+            "assets_drift": assets_drift,
+            "modules": modules,
+        }
+    )
 
 
 async def bootstrap_dashboard_assets(

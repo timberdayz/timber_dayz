@@ -234,6 +234,16 @@ services:
       DATA_RAW_DIR: /app/data/raw
       # 版本号：与生产同口径（生产由流水线注入 IMAGE_TAG）；留空则回落到 VERSION 文件。
       APP_VERSION: ${APP_VERSION:-}
+      # 云端巡检连接（2026-11-07 事故后补齐）。
+      # compose 只负责把变量**传进容器**；主机名重写由代码负责
+      # （backend/tasks/cloud_sync_integrity_tasks.py 的 normalize_cloud_database_url）。
+      # 原因：采集机的 CLOUD_DATABASE_URL 指向宿主上的 SSH 隧道(127.0.0.1:15433)，
+      # 而容器里的 127.0.0.1 是**容器自己**，原样透传必然 Connection refused。
+      # 留空是有意的：没配 CLOUD_DATABASE_URL 时巡检照旧跳过。
+      CLOUD_DATABASE_URL: ${CLOUD_DATABASE_URL:-}
+      CLOUD_SYNC_TUNNEL_ENABLED: ${CLOUD_SYNC_TUNNEL_ENABLED:-true}
+      CLOUD_SYNC_TUNNEL_HOST: ${CLOUD_SYNC_TUNNEL_HOST:-host.docker.internal}
+      CLOUD_SYNC_TUNNEL_PORT: ${CLOUD_SYNC_TUNNEL_PORT:-15433}
     volumes:
       - ./backend:/app/backend
       - ./modules:/app/modules
@@ -289,6 +299,16 @@ services:
       DATA_RAW_DIR: /app/data/raw
       # 版本号：与生产同口径（生产由流水线注入 IMAGE_TAG）；留空则回落到 VERSION 文件。
       APP_VERSION: ${APP_VERSION:-}
+      # 云端巡检连接（2026-11-07 事故后补齐）。
+      # compose 只负责把变量**传进容器**；主机名重写由代码负责
+      # （backend/tasks/cloud_sync_integrity_tasks.py 的 normalize_cloud_database_url）。
+      # 原因：采集机的 CLOUD_DATABASE_URL 指向宿主上的 SSH 隧道(127.0.0.1:15433)，
+      # 而容器里的 127.0.0.1 是**容器自己**，原样透传必然 Connection refused。
+      # 留空是有意的：没配 CLOUD_DATABASE_URL 时巡检照旧跳过。
+      CLOUD_DATABASE_URL: ${CLOUD_DATABASE_URL:-}
+      CLOUD_SYNC_TUNNEL_ENABLED: ${CLOUD_SYNC_TUNNEL_ENABLED:-true}
+      CLOUD_SYNC_TUNNEL_HOST: ${CLOUD_SYNC_TUNNEL_HOST:-host.docker.internal}
+      CLOUD_SYNC_TUNNEL_PORT: ${CLOUD_SYNC_TUNNEL_PORT:-15433}
     volumes:
       - ./backend:/app/backend
       - ./modules:/app/modules

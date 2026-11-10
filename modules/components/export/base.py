@@ -69,6 +69,15 @@ def build_standard_output_root(
     # 平台特例:Shopee 的平台店铺编号只认主数据 core.shop_accounts.platform_shop_id。
     # 主数据没登记就留空 —— 不回退到账号上下文里的 platform_shop_id / shop_id,
     # 也不回退到 account_id(那不是店铺编号, 会把账号标签写进目录名)。
+    #
+    # ⚠️ SSOT 出处: backend/services/shop_account_identity_service.py 模块 docstring
+    #    「**绝不**回退到账号上下文里的来路不明编号(platform_shop_id / shop_id /
+    #    cnsc_shop_id), **绝不**按店名猜测, **绝不**保留任何硬编码覆盖表」。
+    #
+    # ⚠️ 反向守护: backend/tests/test_collection_output_path_unification.py
+    #    ::test_shopee_output_root_never_falls_back_to_account_context_shop_id
+    #    —— 回退到 cnsc_shop_id 是 2026-11 店铺身份整体错位一位的污染机制
+    #    (那个编号来自切店组件跑之前读的 page.url, 是上一个店的编号)。
     platform_name = str(getattr(ctx, "platform", "")).lower()
     if platform_name == "shopee":
         from backend.services.shop_account_identity_service import (

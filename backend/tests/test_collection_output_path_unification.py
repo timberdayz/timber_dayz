@@ -282,6 +282,56 @@ def test_shopee_standard_output_root_uses_master_platform_shop_id(
     root = build_standard_output_root(ctx, data_type="analytics", granularity="monthly")
 
     assert "zewei_toys.sg__1407964586" in str(root).replace("\\", "/")
+
+
+def test_shopee_output_root_never_falls_back_to_account_context_shop_id(
+    tmp_path, monkeypatch
+):
+    """主数据取不到编号 ⇒ 编号必须**留空**，绝不能回退到账号上下文里的编号。
+
+    权威依据（SSOT）：
+    ``backend/services/shop_account_identity_service.py`` 模块 docstring ——
+    「运行时**只**从这里取编号 …… 取不到(未登记 / 账号查无 / 数据库不可用)
+    → **编号留空**；**绝不**回退到账号上下文里的来路不明编号
+    (``platform_shop_id`` / ``shop_id`` / ``cnsc_shop_id``)」。
+
+    ⚠️ 这条是**反向**守护。已有的正向用例只证明「主数据有编号时它会被用上」，
+    证明不了「主数据没编号时不会去捡来路不明的编号」——
+    而**回退到 ``cnsc_shop_id`` 正是 2026-11 店铺身份整体错位一位的污染机制**：
+    那个编号来自切店组件跑之前读的 ``page.url``，是上一个店的编号。
+    """
+    monkeypatch.setattr(
+        "modules.components.export.base.get_downloads_dir",
+        lambda: tmp_path,
+        raising=False,
+    )
+    # 主数据里这个账号**没有登记**平台店铺编号 ⇒ 取不到
+    _stub_master_shop_id(monkeypatch, "")
+
+    ctx = ExecutionContext(
+        platform="shopee",
+        account={
+            "account_id": "shopee_sg_zewei_toys_local",
+            "store_name": "zewei_toys.sg",
+            # 账号上下文里带着**来路不明**的编号 —— 必须被无视
+            "cnsc_shop_id": "1407964586",
+            "platform_shop_id": "1407964586",
+            "shop_id": "1407964586",
+        },
+        config={
+            "shop_name": "zewei_toys.sg",
+            "granularity": "monthly",
+            "cnsc_shop_id": "1407964586",
+            "shop_id": "1407964586",
+        },
+    )
+
+    root = build_standard_output_root(ctx, data_type="analytics", granularity="monthly")
+
+    normalized = str(root).replace("\\", "/")
+    assert "1407964586" not in normalized, "回退到了账号上下文里的来路不明编号"
+    # 店铺目录不得带 "__<shop_id>" 后缀（编号为空 ⇒ 不追加）
+    assert root.parent.parent.name == "zewei_toys.sg"
     assert "zewei_toys.sg__1227491331" not in str(root).replace("\\", "/")
 
 

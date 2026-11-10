@@ -10,7 +10,7 @@
 
 本文件盯住三件事
 ----------------
-1. **归属判定正确** —— 编号权威(UV 量级与语义层候选池优先级都指向它);
+1. **归属判定正确** —— 账号章权威(与 SSOT / 语义层候选池优先级一致);
 2. **歧义不猜** —— 一串值被多个账号认领时该信号不可用, 绝不静默挑一个;
 3. **只改身份键** —— 业务字段一个都不动。
 """
@@ -107,18 +107,21 @@ def index():
 
 
 # ---------------------------------------------------------------------------
-# ① 归属判定 —— 编号权威
+# ① 归属判定 —— 账号章优先
 # ---------------------------------------------------------------------------
 
 
-def test_numbering_wins_over_label(index):
-    """错配行(编号指向 B、标签指向 A)必须归到 **B** —— 数据是 B 的。
+def test_account_id_wins_over_platform_number(index):
+    """行内编号指向**别的**账号、账号章指向**正确的**账号 ⇒ 归到**账号章**那个账号。
 
-    UV 量级证据: 错配行 avg 786.9 吻合 xhkj11.ph(896.4) 而非 xhkj11.sg(314.7)。
+    SSOT(``modules/core/fact_identity_columns.py``)与语义层候选池
+    (``sql/semantic/shop_identity_resolution_candidates.sql``)都是账号章 priority 1:
+    账号章**改名不变、跨平台一致、采集器写不坏**;
+    平台编号**会被采集器污染、平台换 ID 就失效** ⇒ 只能次之。
     """
     row = {
-        "shop_id": "1419169771",  # xhkj11.ph 的编号
-        "shop_account_id": "shopee_sg_xhkj11_local",  # 标签指向 A
+        "platform_shop_id": "1419169771",  # xhkj11.**ph** 的编号(别的账号)
+        "shop_account_id": "shopee_sg_xhkj11_local",  # 账号章 —— 正确的账号
         "store_name": "xhkj11.sg",
         "访客数": "807",
     }
@@ -126,10 +129,55 @@ def test_numbering_wins_over_label(index):
         index, platform_code="shopee", signals=collect_row_signals(row)
     )
     assert result.status == STATUS_CONVERGED
+    assert result.identity.shop_account_id == "shopee_sg_xhkj11_local"
+    # 编号信号与归属不一致 ⇒ 记为冲突, 但**不推翻**账号章权威
+    assert "platform_shop_id" in result.conflict_signals
+    assert "shop_account_id" in result.matched_signals
+
+
+def test_account_id_wins_over_number_in_shop_id_column(index):
+    """事实列 ``shop_id`` 里存的是平台编号 ⇒ 它指向别的账号时也不该盖过账号章。"""
+    row = {
+        "shop_id": "1419169771",  # xhkj11.**ph** 的编号(别的账号)
+        "shop_account_id": "shopee_sg_xhkj11_local",  # 账号章 —— 正确的账号
+        "store_name": "xhkj11.sg",
+    }
+    result = reconcile_identity(
+        index, platform_code="shopee", signals=collect_row_signals(row)
+    )
+    assert result.status == STATUS_CONVERGED
+    assert result.identity.shop_account_id == "shopee_sg_xhkj11_local"
+    assert "shop_id" in result.conflict_signals
+
+
+def test_missing_account_id_falls_back_to_next_signal(index):
+    """账号章**查不到**(空)⇒ 自动落到下一个信号(编号), 不得变成冲突/未归属。"""
+    row = {"shop_id": "1419169771", "shop_account_id": "", "store_name": ""}
+    result = reconcile_identity(
+        index, platform_code="shopee", signals=collect_row_signals(row)
+    )
+    assert result.status == STATUS_CONVERGED
     assert result.identity.shop_account_id == "shopee_ph_xhkj11_local"
-    # 标签信号与归属不一致 ⇒ 记为冲突, 但**不推翻**编号权威
-    assert "shop_account_id" in result.conflict_signals
-    assert "store_name" in result.conflict_signals
+    assert result.matched_signals == ("shop_id",)
+
+
+def test_account_id_pointing_to_disabled_store_falls_back_to_next_signal(index):
+    """账号章指向**不在索引里**的账号(停用店)⇒ 跳过它, 落到下一个信号。
+
+    停用店不进候选池(见 ``build_identity_index``), 所以它的账号章查不到任何账号
+    ⇒ 不能因此把整行判成「冲突」或「未归属」。
+    """
+    row = {
+        "shop_id": "1419169771",
+        "shop_account_id": "shopee_my_off_local",  # 停用店 ⇒ 不在索引里
+        "store_name": "xhkj11.sg",
+    }
+    result = reconcile_identity(
+        index, platform_code="shopee", signals=collect_row_signals(row)
+    )
+    # ⇒ 退到下一个信号即可, 不是 conflict, 也不是 unresolved
+    assert result.status == STATUS_CONVERGED
+    assert result.identity.shop_account_id == "shopee_ph_xhkj11_local"
 
 
 def test_self_consistent_row_resolves_to_itself(index):
@@ -214,6 +262,47 @@ def test_ambiguous_signal_is_skipped_not_guessed():
     assert "shop_id" in result.ambiguous_signals
 
 
+def test_ambiguous_account_id_is_skipped_and_next_signal_used():
+    """账号章被**两个**账号认领 ⇒ 该信号**不可用**, 换下一个信号(编号)。"""
+    accounts = [
+        dict(SHOPEE_SG),
+        # 同一个账号编码被重复登记 ⇒ 账号章这一路成了歧义
+        dict(
+            SHOPEE_SG, id=111, platform_shop_id="1308200826", store_name="xhkj11.sg#2"
+        ),
+    ]
+    idx = build_identity_index(accounts, [])
+    row = {
+        "shop_account_id": "shopee_sg_xhkj11_local",  # 歧义信号
+        "shop_id": "1308200825",  # 唯一命中
+    }
+    result = reconcile_identity(
+        idx, platform_code="shopee", signals=collect_row_signals(row)
+    )
+    assert result.status == STATUS_CONVERGED
+    assert result.identity.shop_account_id == "shopee_sg_xhkj11_local"
+    assert "shop_account_id" in result.ambiguous_signals
+    assert result.matched_signals == ("shop_id",)
+
+
+def test_ambiguous_account_id_alone_leaves_row_untouched():
+    """只有账号章这一路、且它歧义 ⇒ 所有信号都不可用 ⇒ **不收敛**(conflict)。"""
+    accounts = [
+        dict(SHOPEE_SG),
+        dict(
+            SHOPEE_SG, id=111, platform_shop_id="1308200826", store_name="xhkj11.sg#2"
+        ),
+    ]
+    idx = build_identity_index(accounts, [])
+    row = {"shop_account_id": "shopee_sg_xhkj11_local", "访客数": "807"}
+    result = reconcile_identity(
+        idx, platform_code="shopee", signals=collect_row_signals(row)
+    )
+    assert result.status == STATUS_CONFLICT
+    assert result.identity is None
+    assert apply_reconciliation(row, result) == row
+
+
 def test_all_signals_ambiguous_leaves_row_untouched():
     """所有信号都歧义 ⇒ **不收敛**(保持原样), 绝不挑一个。"""
     accounts = [
@@ -259,14 +348,16 @@ def test_apply_only_touches_identity_keys(index):
         index, platform_code="shopee", signals=collect_row_signals(row)
     )
     updated = apply_reconciliation(row, result)
-    assert result.identity.shop_account_id == "shopee_ph_xhkj11_local"
-    assert updated["shop_id"] == "1419169771"
-    assert updated["shop_account_id"] == "shopee_ph_xhkj11_local"
-    assert updated["store_name"] == "xhkj11.ph"
+    # 账号章权威 ⇒ 归属 xhkj11.sg, 行内身份键一律改写成它的登记值
+    assert result.identity.shop_account_id == "shopee_sg_xhkj11_local"
+    assert updated["shop_id"] == "1308200825"
+    assert updated["shop_account_id"] == "shopee_sg_xhkj11_local"
+    assert updated["store_name"] == "xhkj11.sg"
     for key in ("访客数", "页面浏览数", "日期"):
         assert updated[key] == row[key]
     # 原行不被就地修改
     assert row["shop_account_id"] == "shopee_sg_xhkj11_local"
+    assert row["shop_id"] == "1419169771"
 
 
 def test_apply_rewrites_chinese_identity_keys(index):
@@ -315,6 +406,9 @@ def test_converged_row_matches_migrated_row_shape(index):
     迁移写回的是 4 个身份键: ``shop_id`` / ``shop_account_id`` / ``store_name`` /
     ``platform_shop_id``; 收敛必须产出同一组键 ⇒ 新采的行与订正过的历史行
     在语义层看来完全一样(否则重采会覆盖不干净)。
+
+    ⚠️ 键的**形态**相同, 但归属方向已改: 现在按**账号章**归属
+    (与 SSOT / 语义层一致), 迁移当年是按**编号**归属。
     """
     row = {
         "shop_id": "1419169771",
@@ -328,9 +422,9 @@ def test_converged_row_matches_migrated_row_shape(index):
     updated = apply_reconciliation(row, result)
     for key in ("shop_id", "shop_account_id", "store_name", "platform_shop_id"):
         assert key in updated, "收敛后必须带 %s 键" % key
-    assert updated["platform_shop_id"] == "1419169771"
-    assert updated["shop_account_id"] == "shopee_ph_xhkj11_local"
-    assert updated["store_name"] == "xhkj11.ph"
+    assert updated["platform_shop_id"] == "1308200825"
+    assert updated["shop_account_id"] == "shopee_sg_xhkj11_local"
+    assert updated["store_name"] == "xhkj11.sg"
 
 
 def test_tiktok_converged_row_has_no_platform_shop_id(index):

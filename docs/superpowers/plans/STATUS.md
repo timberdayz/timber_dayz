@@ -253,6 +253,62 @@ Live deployment verified:
 - Plan: `docs/superpowers/plans/2026-11-02-collection-profile-only-architecture.md`
 - Spec: `docs/guides/COLLECTION_SESSION_LIFECYCLE.md` (v3.1)
 
+## Shop Identity Future-Proofing & Observability (2026-11)
+
+- Plan: `docs/superpowers/plans/2026-11-10-shop-identity-future-proofing-and-observability.md`
+- 触发：采集机交来的 10 项问题单（`docs/` 外的采集机本地报告）→ 本地主干逐项复核
+- 业务决策（2026-11-10）：**沿用 2026-11-06 决定 —— 只保未来，历史数据不修**
+
+批次 1（代码加固，走 PR）已完成，7 笔提交，PR **#3**：
+`https://github.com/timberdayz/timber_dayz/pull/3`
+（分支 `feature/2026-11-10-shop-identity-future-proofing`，base `main` @ `eece117a`，7 commits / 13 files）
+
+| 项 | 提交 | 内容 | 状态 |
+|---|---|---|---|
+| 1.1 | `4aa5d8ad` | 入库收敛信号优先级 → `shop_account_id` 优先（与 SSOT / 语义层候选池对齐） | ✅ |
+| 1.2 | `bccdb889` | 采集导出路径的**反向**守护（主数据取不到编号 ⇒ 绝不回退 `cnsc_shop_id`） | ✅ |
+| 1.3 | `88504f70` | `--check --json` 序列化加固（datetime/date/Decimal 归一化收敛到一个入口） | ✅ |
+| 1.4 | `570bbc43` | celery 注入 `CLOUD_DATABASE_URL` + 容器内回环地址重写（**只在容器里**重写） | ✅ |
+| — | `07c56053` | 方案文档 + 本索引条目 | ✅ |
+| — | `6d356743` | STATUS 补 PR 链接、订正验证数字 | ✅ |
+| — | `1c3f6a76` | 纯排版：compose 守护用例按 CI 侧 black 换行（见下方「已知坑」） | ✅ |
+
+验证：目标测试集 **197 passed**；`scripts/diff_pytest_junit.py` 判定 **NEW failures = 0**（ADDED 45 条，1 条改名 `test_numbering_wins_over_label` → `test_account_id_wins_over_platform_number`）。
+
+**已知坑（CI 格式门禁）**：CI 的 `test` job 跑在 **Python 3.11**（`ubuntu-latest` + `setup-python`），
+本地是 **Python 3.13**。两端是**同一个** `black==25.1.0`（`requirements-dev.txt` 钉死，CI 装的是
+`black-25.1.0-cp311` wheel），但对 `assert 条件, (消息)` 这种**括号换行写法**给出不同排版：
+3.11 侧要求折成 `assert (\n    条件\n), 消息`，3.13 侧接受原写法。
+
+- ⇒ 本地 `black --check` 绿灯 **不等于** CI「Code formatting check」绿灯
+  （PR #3 前两次 CI run `42837783313` / `42838611430` 都红在这一步）。
+- ⇒ 本 PR 已统一成**两侧都接受**的新写法（`1c3f6a76`，纯排版，断言语义与消息文本一字未动）。
+- ⇒ 后续改动：提交前按 3.11 侧排版写（消息折到条件后面），别只信本地 `--check`。
+
+**已知坑（CI rerun 挂 `security-scan`，仓库既有问题、非本 PR 引入）**：
+`security-scan` job 靠 `scripts/ci_changed_python_files.py` 算「本次改动到的文件」，
+该脚本先 `git fetch origin <base> --depth=1` 再 `git merge-base HEAD origin/<base>`
+（`scripts/ci_changed_python_files.py:43-44`）。**rerun 时仓库已是 shallow**，
+`merge-base` 直接非零退出 ⇒ 脚本报 `CalledProcessError` ⇒ 整个 job 挂掉。
+**push 触发的全新 run 不受影响**（`1c3f6a76` 那轮就是全绿）。
+
+- ⇒ 看到这个报错（`Command '['/usr/bin/git', 'merge-base', 'HEAD', 'origin/main']' returned
+  non-zero exit status 1`）时，**推一个新 commit 触发全新 run**，不要用 rerun。
+- ⇒ 同一 job 另有一类抖动：`Failed to FinalizeArtifact: ... ECONNRESET`（上传 artifact 时
+  撞上 runner 与 GitHub 存储的瞬断），同样是重跑即恢复。
+
+批次 0（只读对账，采集机执行）、批次 2（主数据对齐）、批次 3（巡检与告警）、批次 4（清理与文档）**未开始**。
+
+### 业务语言决策版（2026-11-11）
+
+- Plan: `docs/superpowers/plans/2026-11-11-shop-identity-business-plan.md`
+- 定位：同一方案的**决策人视角**（业务语言，零代码术语）。技术口径仍以
+  `2026-11-10-shop-identity-future-proofing-and-observability.md` 为准。
+- 内容：10 项问题单逐项业务结论 + **4 个复核新发现**（含「身份唯一台账从未被成文声明」
+  与「输出键口径仍是平台编号优先」两处裂缝）、「历史不修」边界判定、
+  三步走（堵口子 → 对齐台账 → 装雷达）、两条硬性时序、风险与回滚、
+  **两项待业务拍板**（采集范围口径 / 告警通道）、业务口径验收清单。
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
