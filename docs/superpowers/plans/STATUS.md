@@ -309,6 +309,59 @@ Live deployment verified:
   三步走（堵口子 → 对齐台账 → 装雷达）、两条硬性时序、风险与回滚、
   **两项待业务拍板**（采集范围口径 / 告警通道）、业务口径验收清单。
 
+---
+
+## Batch 0 Reconciliation (2026-11)
+
+- Plan: `docs/superpowers/plans/2026-11-10-shop-identity-future-proofing-and-observability.md`（批次 0 章节）
+- PR: `https://github.com/timberdayz/timber_dayz/pull/4`
+- 分支：`feature/2026-11-10-shop-identity-batch0-reconciliation`
+
+### 交付物
+
+| 文件 | 内容 |
+|---|---|
+| `scripts/verify_shop_identity_reconciliation.py` | 只读对账脚本：同时连本地库与云端库，输出 T1~T4 四张表 |
+| `tests/test_shop_identity_reconciliation_script_contract.py` | 契约守护测试（13 条，纯源码 / 纯函数，不连库） |
+
+### 四张表
+
+| 表 | 内容 | 喂给谁 |
+|---|---|---|
+| T1 | `core.shop_accounts` 两边按 `shop_account_id`（业务键，跨库唯一）对齐，逐条比对 6 个登记字段 | 批次 2 的「改哪些」 |
+| T2 | `alias_type='former_platform_shop_id'` 别名全量，标注自别名 / 跨账号认领 / 无人认领 | 批次 2 的「删哪些」 |
+| T3 | 同一 `(platform, identity_value)` 指向 >1 个账号 | unknown 成因 |
+| T4 | 探测记录近 N 天分布 **+ 近 N 天新增别名数** | 污染是否绝迹 |
+
+### 只读保证（由契约测试强制）
+
+- 全部 SQL 为 `SELECT` / `WITH` —— 测试用 **AST 逐条**校验每个 `_fetch_all(...)` 的 SQL 首词；
+- 连接串只从环境变量读，源码内无 `postgresql://` 字面量；
+- `.env` 用 `setdefault` 语义加载（先到先得、不覆盖）——
+  本机 `.env.local` 的 `CLOUD_DATABASE_URL=` 是**空值**，覆盖会把云端连接串清空；
+- 输出里的连接串摘要脱敏（口令用 `make_url()` 解析，百分号编码自动解码）。
+
+### 实测（本地库 vs 本地库，验证 SQL 与幂等性）
+
+- 两次运行输出**完全一致**（除 `generated_at`）⇒ 满足「纯只读、无副作用」；
+- schema 自检：三张表与关键列**全部齐全**；
+- T2 查出 **1 条自别名** —— `shopee_sg_hx_home_local` 的别名值 `1391124228`
+  **等于它自己当前的 `platform_shop_id`**（自别名 ⇒ 同一串身份值既被账号认领、又被存成别名）；
+- T4：近 30 天新增 `former_platform_shop_id` 别名 **2 条**，
+  集中在 **2026-11-05 12:07:42 ~ 12:08:39**（57 秒内 2 条）—— 污染写入确实发生过。
+
+> ⚠ 以上在**本地开发库**上跑的；采集机的真实对账结果以采集机执行为准。
+
+### 采集机执行
+
+```powershell
+# 前提：到云端的 SSH 隧道 15433 在线
+python scripts/verify_shop_identity_reconciliation.py --output output/reconciliation-20261110.json
+```
+
+可选项：`--days 30`（T4 窗口）、`--sections T1,T2`（只跑部分段落）。
+退出码：`0` 正常产出 / `2` 执行失败（连不上库、缺表缺列）。
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
