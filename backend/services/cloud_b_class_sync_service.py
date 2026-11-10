@@ -22,6 +22,14 @@ from backend.services.cloud_b_class_sync_utils import (
     quote_ident,
     validate_b_class_table_name,
 )
+from backend.services.cloud_sync_identity_guard_service import (
+    DUAL_BASELINE_CONSISTENT,
+    DUAL_BASELINE_MISMATCH,
+    DUAL_BASELINE_NOT_APPLIED,
+    DUAL_BASELINE_UNAVAILABLE,
+    LOAD_STATUS_DISABLED,
+    collect_registry_mismatch_events,
+)
 from backend.services.data_pipeline.refresh_queue_service import (
     RefreshQueueService,
     resolve_refresh_lane,
@@ -39,6 +47,23 @@ logger = get_logger(__name__)
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _sync_batch_status(conflict_rows: int, degraded_rows: int) -> str:
+    """同步状态: 有行**没落库**(真矛盾 / 被双基准降级)⇒ ``partial_success``。
+
+    ⚠️ 降级行同样没写进云端 ⇒ 状态不能记 ``completed``(否则账本虚报)。
+    """
+    return "partial_success" if (conflict_rows or degraded_rows) else "completed"
+
+
+def _sync_identity_error_code(conflict_rows: int, degraded_rows: int) -> str | None:
+    """身份相关的错误码(矛盾优先于降级)。"""
+    if conflict_rows:
+        return "identity_conflict_rows_present"
+    if degraded_rows:
+        return "identity_registry_mismatch_rows_present"
+    return None
 
 
 #: 行内「店铺身份」候选键(优先级从高到低)。
@@ -84,6 +109,16 @@ class IdentitySplitResult:
     unresolved: list[dict[str, Any]] = field(default_factory=list)
     #: ``consistent`` 各行在**入参列表**中的下标(供检查点定位最后一行落库数据)
     written_indexes: tuple[int, ...] = ()
+    #: 被「**双基准不一致**」降级的行(可观测事件负载, 不含行体)
+    #:
+    #: 这些行**不写云端** —— 写上去云端会用**云端**的登记去解释, 可能指向别的店
+    #: ⇒ 归属塌陷。它们被记成可观测事件(见
+    #: :mod:`backend.services.cloud_sync_identity_guard_service`)。
+    degraded: list[dict[str, Any]] = field(default_factory=list)
+    #: 被降级行在**入参列表**中的下标
+    degraded_indexes: tuple[int, ...] = ()
+    #: 双基准状态: ``not_applied`` / ``consistent`` / ``mismatch`` / ``unavailable``
+    dual_baseline_status: str = DUAL_BASELINE_NOT_APPLIED
 
     @property
     def written_rows(self) -> int:
@@ -99,6 +134,11 @@ class IdentitySplitResult:
     def unresolved_rows(self) -> int:
         """落库但归属不到主数据账号的行数。"""
         return len(self.unresolved)
+
+    @property
+    def degraded_rows(self) -> int:
+        """因「本地/云端登记信息不一致」被降级、**没有**写进云端的行数。"""
+        return len(self.degraded)
 
     @property
     def last_written_index(self) -> int:
@@ -234,6 +274,117 @@ def split_rows_by_identity_consistency(
     )
 
 
+def split_rows_by_dual_baseline(
+    rows: list[dict[str, Any]],
+    identity_index: Any = None,
+    cloud_registry: Any = None,
+) -> IdentitySplitResult:
+    """在本地单基准判定之上, **再与云端登记信息比一次**(批次 3.7)。
+
+    为什么需要这一步
+    ----------------
+    本地单基准只看**本地**那份登记信息(``core.shop_accounts`` /
+    ``core.shop_account_aliases``)。但**云端也有一份登记信息** ——
+    两边不同步时(采集机本地台账与云端台账不一致), 本地判「自洽」的行推到云端后,
+    云端会用**云端**的登记去解释它 ⇒ 可能指向别的店 ⇒ **归属塌陷**(语义层落
+    ``unknown``)。
+
+    ⇒ 所以推送前比一次: 两边解释不一致 ⇒ 该行**降级为可观测事件**,
+    **不再当自洽行直接放行**(不写云端), 但**不阻塞同步**。
+
+    「两边不一致」的判定口径
+    ----------------------
+    设 ``L`` = 本地解析出的账号集合, ``C`` = 云端解析出的账号集合
+    (两边用**同一份**解析实现 ``row_identity_accounts``, 口径不会分叉):
+
+    * ``len(L) == 1`` 且 ``C == L`` ⇒ **一致** ⇒ 行为与改造前**完全相同**;
+    * ``C`` 为空 ⇒ 本地认出的账号, 云端**认不出** ⇒ **不一致**;
+    * ``C`` 与 ``L`` 不同 ⇒ 云端把它**指向另一个账号** ⇒ **不一致**;
+    * ``len(C) > 1`` ⇒ 云端自己都认不唯一 ⇒ **不一致**。
+
+    ⚠️ **未归属行不做跨端比较** —— 本地没唯一认出来时没有可比对的基准,
+    行为保持不变(照常落库 + 计数 + 告警)。
+
+    云端不可达 ⇒ 优雅降级
+    ---------------------
+    ``cloud_registry`` 为 None / 不可用 ⇒ **退回本地单基准判定**
+    (行为与改造前一致), 并由调用方记一条「双基准不可用」事件。
+    **绝不能因为云端连不上就把同步搞挂。**
+
+    Args:
+        rows: 待同步的行。
+        identity_index: 本地主数据反查索引(None ⇒ 本地降级判据)。
+        cloud_registry: :class:`backend.services.cloud_sync_identity_guard_service.
+            CloudIdentityRegistry`; None / 不可用 ⇒ 不做跨端比较。
+    """
+    base = split_rows_by_identity_consistency(rows, identity_index)
+
+    registry = cloud_registry
+    if registry is not None and getattr(registry, "status", "") == (
+        LOAD_STATUS_DISABLED
+    ):
+        # 守卫被人工关掉 ⇒ 行为与本批次上线前**完全一致**。
+        return IdentitySplitResult(
+            consistent=base.consistent,
+            conflicting=base.conflicting,
+            unresolved=base.unresolved,
+            written_indexes=base.written_indexes,
+            dual_baseline_status=DUAL_BASELINE_NOT_APPLIED,
+        )
+    if (
+        identity_index is None
+        or registry is None
+        or not getattr(registry, "available", False)
+    ):
+        # 双基准不可用(本地台账拿不到 / 云端台账拿不到)⇒ 退回本地单基准
+        # (行为与改造前一致)。
+        return IdentitySplitResult(
+            consistent=base.consistent,
+            conflicting=base.conflicting,
+            unresolved=base.unresolved,
+            written_indexes=base.written_indexes,
+            dual_baseline_status=DUAL_BASELINE_UNAVAILABLE,
+        )
+
+    cloud_index = registry.index
+    events = collect_registry_mismatch_events(
+        rows,
+        consistent_indexes=base.written_indexes,
+        local_index=identity_index,
+        cloud_index=cloud_index,
+    )
+    if not events:
+        # 两边一致 ⇒ 行为与改造前**完全相同**。
+        return IdentitySplitResult(
+            consistent=base.consistent,
+            conflicting=base.conflicting,
+            unresolved=base.unresolved,
+            written_indexes=base.written_indexes,
+            dual_baseline_status=DUAL_BASELINE_CONSISTENT,
+        )
+
+    degraded_indexes = {event.row_index for event in events}
+    kept_rows: list[dict[str, Any]] = []
+    kept_indexes: list[int] = []
+    for row, index in zip(base.consistent, base.written_indexes):
+        if index in degraded_indexes:
+            continue
+        kept_rows.append(row)
+        kept_indexes.append(index)
+
+    # ⚠️ ``unresolved`` **不用**摘: 降级只发生在「本地唯一认出」的行上,
+    # 而 ``unresolved`` 是「本地认不出」的行 —— 两者互斥。
+    return IdentitySplitResult(
+        consistent=kept_rows,
+        conflicting=base.conflicting,
+        unresolved=base.unresolved,
+        written_indexes=tuple(kept_indexes),
+        degraded=[event.to_payload() for event in events],
+        degraded_indexes=tuple(sorted(degraded_indexes)),
+        dual_baseline_status=DUAL_BASELINE_MISMATCH,
+    )
+
+
 def build_sync_payload(row: dict[str, Any]) -> dict[str, Any]:
     """Build canonical sync payload from one local B-class row."""
     payload = {column: row.get(column) for column in build_canonical_columns()}
@@ -308,12 +459,81 @@ class SQLAlchemyCloudWriter:
 
     TARGET_SCHEMA = "b_class"
 
-    def __init__(self, engine, dry_run: bool = False, identity_index: Any = None):
+    def __init__(
+        self,
+        engine,
+        dry_run: bool = False,
+        identity_index: Any = None,
+        cloud_registry: Any = None,
+        guard_event_recorder: Any = None,
+    ):
         self.engine = engine
         self.dry_run = dry_run
         #: 主数据账号索引 —— 供身份自洽判定使用(见
         #: :func:`split_rows_by_identity_consistency`)。None ⇒ 降级判据。
         self.identity_index = identity_index
+        #: **云端**登记信息快照(批次 3.7 双基准守卫)。None / 不可用 ⇒
+        #: 退回本地单基准判定(行为与改造前一致)。
+        self.cloud_registry = cloud_registry
+        #: 双基准守卫的可观测事件台账(None ⇒ 不记事件)。
+        self.guard_event_recorder = guard_event_recorder
+        #: 「双基准不可用」事件**每轮只记一次**(避免每批次刷一条)。
+        self._guard_unavailable_reported = False
+
+    def _report_guard_events(
+        self,
+        split: IdentitySplitResult,
+        *,
+        table_name: str,
+        data_domain: str,
+    ) -> None:
+        """把双基准守卫的可观测事件记进台账。
+
+        ⚠️ **记事件失败绝不阻塞同步** ⇒ 这里兜住所有异常。
+        """
+        recorder = self.guard_event_recorder
+        if recorder is None:
+            return
+        try:
+            if split.degraded_rows:
+                recorder.record_mismatch(
+                    source_table_name=table_name,
+                    data_domain=data_domain,
+                    events=split.degraded,
+                    registry=self.cloud_registry,
+                )
+                logger.error(
+                    "[CloudSyncGuard] [%s] %d 行本地/云端登记信息不一致, "
+                    "已降级为可观测事件(不写云端)",
+                    table_name,
+                    split.degraded_rows,
+                )
+                return
+            if (
+                split.dual_baseline_status == DUAL_BASELINE_UNAVAILABLE
+                and not self._guard_unavailable_reported
+            ):
+                # 「双基准不可用」每轮只记一次(否则每批次刷一条)。
+                self._guard_unavailable_reported = True
+                reason = str(getattr(self.cloud_registry, "reason", "") or "")
+                if self.identity_index is None:
+                    reason = (
+                        "%s;local_registry_unavailable" % reason
+                        if reason
+                        else "local_registry_unavailable"
+                    )
+                recorder.record_unavailable(
+                    source_table_name=table_name,
+                    reason=reason,
+                    registry=self.cloud_registry,
+                )
+                logger.warning(
+                    "[CloudSyncGuard] [%s] 双基准不可用(%s), 已退回本地单基准判定",
+                    table_name,
+                    reason,
+                )
+        except Exception as exc:  # noqa: BLE001 - 记事件绝不阻塞同步
+            logger.warning("[CloudSyncGuard] 可观测事件记录失败(不影响同步): %s", exc)
 
     @staticmethod
     def _build_upsert_sql(table_name: str, data_domain: str) -> str:
@@ -359,7 +579,16 @@ class SQLAlchemyCloudWriter:
                 "last_written_index": len(rows) - 1,
             }
 
-        split = split_rows_by_identity_consistency(rows, self.identity_index)
+        split = split_rows_by_dual_baseline(
+            rows,
+            self.identity_index,
+            self.cloud_registry,
+        )
+        self._report_guard_events(
+            split,
+            table_name=table_name,
+            data_domain=data_domain,
+        )
         if split.conflict_rows:
             logger.error(
                 "[CloudSync] [%s] %d 行行内身份自相矛盾, 已跳过不写云端",
@@ -377,6 +606,8 @@ class SQLAlchemyCloudWriter:
             "written_rows": split.written_rows,
             "identity_conflict_rows": split.conflict_rows,
             "identity_unresolved_rows": split.unresolved_rows,
+            "identity_registry_mismatch_rows": split.degraded_rows,
+            "dual_baseline_status": split.dual_baseline_status,
             "last_written_index": split.last_written_index,
         }
 
@@ -397,7 +628,16 @@ class SQLAlchemyCloudWriter:
                 "last_written_index": len(rows) - 1,
             }
 
-        split = split_rows_by_identity_consistency(rows, self.identity_index)
+        split = split_rows_by_dual_baseline(
+            rows,
+            self.identity_index,
+            self.cloud_registry,
+        )
+        self._report_guard_events(
+            split,
+            table_name=table_name,
+            data_domain=data_domain,
+        )
         if split.conflict_rows:
             logger.error(
                 "[CloudSync] [%s] %d 行行内身份自相矛盾, 已跳过不写云端",
@@ -419,8 +659,12 @@ class SQLAlchemyCloudWriter:
         receive_context["written_rows"] = split.written_rows
         receive_context["identity_conflict_rows"] = split.conflict_rows
         receive_context["identity_unresolved_rows"] = split.unresolved_rows
+        # ⚠️ 被降级(不写云端)的行也算「没落库」⇒ 状态不能记 completed,
+        # 否则账本又会虚报(2026-11-07 的形态)。
         receive_context["status"] = (
-            "partial_success" if split.conflict_rows else "completed"
+            "partial_success"
+            if (split.conflict_rows or split.degraded_rows)
+            else "completed"
         )
         with self.engine.begin() as conn:
             if prepared_rows:
@@ -434,6 +678,8 @@ class SQLAlchemyCloudWriter:
             "written_rows": split.written_rows,
             "identity_conflict_rows": split.conflict_rows,
             "identity_unresolved_rows": split.unresolved_rows,
+            "identity_registry_mismatch_rows": split.degraded_rows,
+            "dual_baseline_status": split.dual_baseline_status,
             "last_written_index": split.last_written_index,
             "receive_log": receive_result,
             "receive_id": receive_result.get("receive_id"),
@@ -914,6 +1160,7 @@ class CloudBClassSyncService:
             total_written_rows = 0
             total_conflict_rows = 0
             total_unresolved_rows = 0
+            total_degraded_rows = 0
             dry_run_seen = False
             latest_ingest_timestamp = None
 
@@ -960,17 +1207,16 @@ class CloudBClassSyncService:
 
                 if not rows:
                     return {
-                        "status": (
-                            "partial_success" if total_conflict_rows else "completed"
+                        "status": _sync_batch_status(
+                            total_conflict_rows, total_degraded_rows
                         ),
                         "table_name": table_name,
                         "written_rows": total_written_rows,
                         "identity_conflict_rows": total_conflict_rows,
                         "identity_unresolved_rows": total_unresolved_rows,
-                        "error_code": (
-                            "identity_conflict_rows_present"
-                            if total_conflict_rows
-                            else None
+                        "identity_registry_mismatch_rows": total_degraded_rows,
+                        "error_code": _sync_identity_error_code(
+                            total_conflict_rows, total_degraded_rows
                         ),
                         **_projection_result(),
                     }
@@ -1041,6 +1287,7 @@ class CloudBClassSyncService:
                         "written_rows": total_written_rows,
                         "identity_conflict_rows": total_conflict_rows,
                         "identity_unresolved_rows": total_unresolved_rows,
+                        "identity_registry_mismatch_rows": total_degraded_rows,
                         "error": write_result.get("error")
                         or write_result.get("detail")
                         or "sync_failed",
@@ -1052,9 +1299,13 @@ class CloudBClassSyncService:
                 batch_unresolved_rows = int(
                     write_result.get("identity_unresolved_rows", 0)
                 )
+                batch_degraded_rows = int(
+                    write_result.get("identity_registry_mismatch_rows", 0)
+                )
                 total_written_rows += batch_written_rows
                 total_conflict_rows += batch_conflict_rows
                 total_unresolved_rows += batch_unresolved_rows
+                total_degraded_rows += batch_degraded_rows
 
                 if (
                     self.receive_log_recorder is not None
@@ -1066,8 +1317,8 @@ class CloudBClassSyncService:
                     fallback_context["written_rows"] = batch_written_rows
                     fallback_context["identity_conflict_rows"] = batch_conflict_rows
                     fallback_context["identity_unresolved_rows"] = batch_unresolved_rows
-                    fallback_context["status"] = (
-                        "partial_success" if batch_conflict_rows else "completed"
+                    fallback_context["status"] = _sync_batch_status(
+                        batch_conflict_rows, batch_degraded_rows
                     )
                     await self._maybe_await(
                         self.receive_log_recorder.record_success(**fallback_context)
@@ -1097,13 +1348,15 @@ class CloudBClassSyncService:
                 last_written_index = int(last_written_index)
 
                 if last_written_index < 0:
-                    # 本批**一行都没落库**(全部被判矛盾)⇒ 检查点不能推进,
-                    # 停在当前水位并明确报告 —— 绝不能"跳过"这些行。
+                    # 本批**一行都没落库**(全部被判矛盾 / 全部被双基准降级)
+                    # ⇒ 检查点不能推进, 停在当前水位并明确报告 ——
+                    # 绝不能"跳过"这些行。
                     logger.error(
-                        "[CloudSync] [%s] 本批 %d 行行内身份自相矛盾, 无一行落库; "
-                        "检查点停在当前水位, 需人工确认归属后再同步",
+                        "[CloudSync] [%s] 本批 %d 行行内身份自相矛盾 / %d 行被双基准降级, "
+                        "无一行落库; 检查点停在当前水位, 需人工确认归属后再同步",
                         table_name,
                         batch_conflict_rows,
+                        batch_degraded_rows,
                     )
                     return {
                         "status": "partial_success",
@@ -1111,12 +1364,15 @@ class CloudBClassSyncService:
                         "written_rows": total_written_rows,
                         "identity_conflict_rows": total_conflict_rows,
                         "identity_unresolved_rows": total_unresolved_rows,
+                        "identity_registry_mismatch_rows": total_degraded_rows,
                         "error": (
-                            "%d 行行内身份自相矛盾, 本批无一落库; "
+                            "%d 行行内身份自相矛盾 / %d 行被双基准降级, 本批无一落库; "
                             "检查点已停在当前水位, 需人工确认这些行的店铺归属"
-                            % batch_conflict_rows
+                            % (batch_conflict_rows, batch_degraded_rows)
                         ),
-                        "error_code": "identity_conflict_rows_present",
+                        "error_code": _sync_identity_error_code(
+                            batch_conflict_rows, batch_degraded_rows
+                        ),
                         **_projection_result(),
                     }
 
@@ -1126,23 +1382,22 @@ class CloudBClassSyncService:
                     table_name=table_name,
                     ingest_timestamp=last_row["ingest_timestamp"],
                     source_id=last_row["id"],
-                    status=("partial_success" if batch_conflict_rows else "completed"),
+                    status=_sync_batch_status(batch_conflict_rows, batch_degraded_rows),
                     table_schema=self.checkpoint_scope,
                 )
 
                 if len(rows) < batch_size:
                     return {
-                        "status": (
-                            "partial_success" if total_conflict_rows else "completed"
+                        "status": _sync_batch_status(
+                            total_conflict_rows, total_degraded_rows
                         ),
                         "table_name": table_name,
                         "written_rows": total_written_rows,
                         "identity_conflict_rows": total_conflict_rows,
                         "identity_unresolved_rows": total_unresolved_rows,
-                        "error_code": (
-                            "identity_conflict_rows_present"
-                            if total_conflict_rows
-                            else None
+                        "identity_registry_mismatch_rows": total_degraded_rows,
+                        "error_code": _sync_identity_error_code(
+                            total_conflict_rows, total_degraded_rows
                         ),
                         **_projection_result(),
                     }
