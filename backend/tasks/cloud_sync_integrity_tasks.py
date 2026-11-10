@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from backend.celery_app import celery_app
 from backend.models.database import get_async_database_url
 from backend.services.data_pipeline.cloud_sync_integrity_service import (
+    ALIGNMENT_EFFECTIVE_DATE_ENV,
     run_cloud_sync_integrity_check,
 )
 from backend.utils.async_task_runner import run_async_task
@@ -76,14 +77,27 @@ def check_cloud_sync_integrity() -> Dict[str, Any]:
     if summary.get("status") == "partial_failed":
         logger.warning(
             "[CloudSyncIntegrity] 云端同步链路异常: 陈旧链 %s 条, 收敛率异常 %s 条, "
-            "候选池缺平台 %s 个",
+            "候选池缺平台 %s 个, 语义层可解析性异常 %s 个月",
             summary.get("stale_chains"),
             summary.get("low_convergence_chains"),
             summary.get("missing_candidate_platforms"),
+            summary.get("degraded_semantic_months"),
         )
     else:
         logger.info(
-            "[CloudSyncIntegrity] 巡检通过: %s 条链全部新鲜, 收敛率正常, 候选池平台齐全",
+            "[CloudSyncIntegrity] 巡检通过: %s 条链全部新鲜, 收敛率正常, 候选池平台齐全, "
+            "语义层 %s 个月份可解析(其中 %s 个月属已知历史遗留)",
             summary.get("checked_chains"),
+            summary.get("semantic_months_checked"),
+            summary.get("semantic_known_legacy_months"),
+        )
+
+    if summary.get("semantic_months_checked") and not summary.get(
+        "alignment_effective_date"
+    ):
+        logger.warning(
+            "[CloudSyncIntegrity] 未配置 %s —— 语义层 unknown 全部按「已知历史遗留」处理, "
+            "不会报警；请在批次 2 登记信息对齐生效后配置该环境变量",
+            ALIGNMENT_EFFECTIVE_DATE_ENV,
         )
     return summary
