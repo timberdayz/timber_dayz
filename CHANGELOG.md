@@ -27,6 +27,13 @@
    - 实测佐证：把环境 `DATABASE_URL` 指向一个**不可达地址**后本地跑该文件，仍是 **10 passed / 196.5 s**
      ⇒ 它不依赖环境连接串，也不依赖现成数据库。
 
+3. **第二轮扩：连现成 PG 的那两个契约用例也进了 CI**
+   - 给 `migration-pg-contract` job 加一个 `postgres:15` service 容器，并用
+     `TEST_DB_HOST/PORT/USER/PASSWORD/ADMIN_DB` 指过去。
+   - **不需要改任何代码**：`tests/db_test_config.py` 本来就支持这组环境变量覆盖、缺省仍是 15432
+     ⇒ 本地行为完全不变。
+   - 至此，根 `tests/` 里**依赖真实 PostgreSQL 的三个文件全部进入 CI 常态门禁**。
+
 ### 三、为什么必须常态化
 
 这里守着 20261215 回填「**跳过并记日志**」的语义。口径一旦漂移（例如有人把回填谓词放宽），
