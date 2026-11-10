@@ -20,28 +20,36 @@
 2026-11 的实测: Shopee 有 **1,946 行**的「行内编号」与「行内标签」互相矛盾
 (采集侧算错编号 ⇒ 标签被换到别的店上), 造成 8,409 UV 从看板消失。
 
-为什么「编号优先」
-----------------
-这一行到底属于哪个店, 有两组硬证据:
+为什么「账号章优先」
+--------------------
+这一行到底属于哪个店, 权威定义写在仓库的 SSOT 里
+(``modules/core/fact_identity_columns.py`` 「身份到底由谁决定」):
 
-* **UV 量级**(决定性)::
+* 行内 ``raw_data['shop_account_id']`` —— **最可靠的一路**(改名不变、跨平台一致);
+* 行内 ``raw_data['platform_shop_id']`` —— 平台编号(会被采集器污染, 次之);
+* 行内中文 ``店铺`` 列 / ``store_name`` —— 兜底。
 
-      标签店 shopee_sg_xhkj11_local   正常行 UV avg 314.7   错配行 UV avg 786.9
-      编号店 shopee_ph_xhkj11_local   正常行 UV avg 896.4
+语义层候选池(``sql/semantic/shop_identity_resolution_candidates.sql``)
+早在 2026-11-06 就照这个口径把 ``shop_account_id`` 提到 priority 1、
+``platform_shop_id`` 降到 priority 2 —— 与 SSOT 一致。
 
-      标签店 shopee_ph_xh_home_local  正常行 UV avg 362.6   错配行 UV avg 147.4
-      编号店 shopee_my_xhkj1_local    正常行 UV avg 141.2
+⚠️ 入库侧此前是**反的**(``platform_shop_id`` 排第 1、``shop_account_id`` 排第 3),
+与 SSOT / 语义层互相矛盾。采集机那台库的 ``core.shop_accounts.platform_shop_id``
+登记信息**整体错位了一位** ⇒ 按编号归属 = 每一批新数据都被焊上**错的**
+``shop_account_id``, 且行内四路身份被改写成一致的错误值 ⇒ 本地看板零告警 ⇒
+推到云端后候选数 = 2 ⇒ 落 ``unknown``。
 
-  错配行的 UV 吻合**编号所属**的店, 不吻合**标签所属**的店 ⇒ **数据是编号那个店的**,
-  标签被贴错了。
+⚠️ 此前用来支持「编号优先」的那组 UV 量级证据, 是在**登记信息已错位**的库上量的
+⇒ 基准本身是错的 ⇒ 不能再拿来当依据。
 
-* **语义层候选池的既有优先级**: ``shop_identity_resolution_candidates`` 早在
-  2026-11-06 就把 ``shop_account_id`` 提到 priority 1, 理由写得很清楚 ——
-  「``platform_shop_id`` 会被采集器污染」。本次事故正是这条警告的兑现。
+⇒ 结论: **账号章最权威** —— 改名不变、跨平台一致、采集器写不坏;
+``platform_shop_id`` 会被采集器污染(把 URL 读到的编号当成主数据)、
+平台换 ID 就失效 ⇒ 只能次之。
 
-⇒ 结论: **平台店铺编号是权威的**, 标签(店名/账号 ID)可能整组贴错。
-本模块与历史订正迁移(``20261117_remediate_shopee_row_identity_conflicts``)
-**同构** —— 都以「行内编号反查到的账号」为归属。
+⇒ 与历史订正迁移(``20261117_remediate_shopee_row_identity_conflicts``)
+**不再同构**: 那个迁移是**一次性批量**按编号反查改写身份, 而它执行的库
+登记信息已错位 ⇒ 把 957 行搬到了错的店。按既定决策「历史不修」, 该迁移**不动**;
+本模块只负责**后续每批新数据**的归属。
 
 三条硬规则
 ----------
@@ -88,21 +96,26 @@ RECONCILIATION_ENABLED = os.getenv(
     "SHOP_IDENTITY_RECONCILIATION_ENABLED", "1"
 ).strip().lower() not in ("0", "false", "off", "no")
 
-#: 信号优先级 —— **平台店铺编号最权威**。
+#: 信号优先级 —— **账号章最权威**。
 #:
 #: 顺序即「同一串值同时命中多个信号时先听谁的」:
 #:
-#: 1. ``platform_shop_id`` —— 主数据登记的平台编号
-#: 2. ``shop_id``           —— 行内那列(Shopee 是编号 / TikTok 是导出店名)
-#: 3. ``shop_account_id``   —— 账号 ID
+#: 1. ``shop_account_id``   —— 账号章(改名不变、跨平台一致、采集器写不坏)
+#: 2. ``platform_shop_id`` —— 主数据登记的平台编号(会被采集器污染、平台换 ID 就失效)
+#: 3. ``shop_id``           —— 行内那列(Shopee 是编号 / TikTok 是导出店名)
 #: 4. ``store_name``        —— 店名
+#:
+#: ⚠️ 必须与 SSOT(``modules/core/fact_identity_columns.py``)和语义层候选池
+#: (``sql/semantic/shop_identity_resolution_candidates.sql``, 2026-11-06 起
+#: ``shop_account_id`` 就是 priority 1、``platform_shop_id`` 是 priority 2)保持一致 ——
+#: 三处口径必须一样, 否则同一行在入库侧与语义层会解析到**不同的账号**。
 #:
 #: ``store_name`` 命中不到主数据店名时会自动退回别名索引(见 :meth:`IdentityIndex.lookup`),
 #: 所以 TikTok 的导出店名(``DAONE Mall`` 之类)也能认到账号。
 SIGNAL_PRIORITY = (
+    "shop_account_id",
     "platform_shop_id",
     "shop_id",
-    "shop_account_id",
     "store_name",
 )
 
@@ -507,7 +520,7 @@ def reconcile_identity(
     * 一个都没命中 ⇒ 跳过。
 
     归属确定后, 其余信号若指向**别的**账号 ⇒ 记为冲突信号(仍然收敛 ——
-    编号权威), 由看板的 ``platform_shop_id_conflict`` 告警暴露。
+    账号章权威), 由看板的 ``platform_shop_id_conflict`` 告警暴露。
 
     Args:
         index: :func:`build_identity_index` 的产物。
@@ -548,7 +561,7 @@ def reconcile_identity(
             matched.append(signal)
             continue
         if identity.shop_account_id != primary.shop_account_id:
-            # 低优先级信号指向别的账号 ⇒ 记冲突, 但**不推翻**编号权威
+            # 低优先级信号指向别的账号 ⇒ 记冲突, 但**不推翻**账号章权威
             conflicts.append(signal)
         else:
             matched.append(signal)
