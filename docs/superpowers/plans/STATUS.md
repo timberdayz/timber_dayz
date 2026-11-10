@@ -297,7 +297,44 @@ Live deployment verified:
 - ⇒ 同一 job 另有一类抖动：`Failed to FinalizeArtifact: ... ECONNRESET`（上传 artifact 时
   撞上 runner 与 GitHub 存储的瞬断），同样是重跑即恢复。
 
-批次 0（只读对账，采集机执行）、批次 2（主数据对齐）、批次 3（巡检与告警）、批次 4（清理与文档）**未开始**。
+### 批次落地台账（2026-11-11 收口）
+
+| 批次 | 内容 | PR | 状态 |
+|---|---|---|---|
+| 批次 1 | 入库收敛按账号章 / 采集导出堵回退 / 巡检连接补齐 | #3 | ✅ 已合并 |
+| 批次 0 | 只读对账脚本（T1~T4） | #4 | ✅ 已合并 —— **待采集机执行** |
+| 批次 2 | 主数据对齐执行器（默认 dry-run） | #5 | ✅ 已合并 —— **待采集机执行** |
+| 批次 3.5 | 僵尸 run 回收扩到全族并留痕 | #6 | ✅ 已合并 |
+| 批次 3.2 | 语义层可解析性巡检（按月分档） | #7 | ✅ 已合并 |
+| 批次 3.6 | 看板指纹收敛 + 顺序链 | #8 | ✅ 已合并 |
+| SSOT-1 | 店铺身份唯一台账声明 + 认人优先级收敛到一处 | #9 | ✅ 已合并 |
+| 批次 3.3 | 数据新鲜度分档 + 补通知出口 | #10 | ✅ 已合并 |
+| 律 3 | 派生层口径收回（物化副本改为从正本取数） | #11 | ✅ 已合并 |
+| 批次 4.1 / 4.2 | 孤儿记账行清理 + 「云端为历史基准」口径 | #12 | ✅ 已合并 |
+| 批次 3.4 | 采集失败主动告警（三通道 + 同轮错误聚类） | #13 | 🔄 进行中 |
+| 批次 3.7 / 4.3 | 同步侧双基准守卫 + 矛盾行台账 | #14 | 🔄 进行中 |
+
+⚠️ **代码全部合并 ≠ 事情做完了**：批次 0 与批次 2 的**实际执行**必须在采集机上做
+（前提：到云端的 SSH 隧道 15433 在线），且批次 2 必须赶在**下一轮采集之前**完成 ——
+否则下一轮仍会用旧（错位）登记写编号。配套还要配置 `SHOP_IDENTITY_ALIGNMENT_EFFECTIVE_DATE`
+（分档巡检的报警分界线；不配则一律不报警，宁可漏报不误报）。
+
+**新增两个 CI 坑（2026-11-11 踩到，均非本方案引入）**：
+
+1. **`Detect changed Python files` 在「run 期间 base 分支前进」时会失败。**
+   `actions/checkout` 给 PR 检出的 `refs/pull/N/merge` 是用**事件发生时的 base tip** 生成的；
+   而 `scripts/ci_changed_python_files.py:43-44` 会再 `git fetch origin <base> --depth=1` 拿**当前**的 base tip。
+   两者不是同一个 commit ⇒ shallow 仓库里 `merge-base` 算不出来 ⇒ 脚本报 `CalledProcessError` ⇒ 整个 job 挂。
+   实测：PR #3 合并进 main 的**第 19 秒**启动的 run 就撞上了这个坑。
+   ⇒ **对策**：把 PR 分支 rebase 到**最新** main 再推（让 merge ref 与 fetch 的 base 一致），
+   或至少在 base 前进后推一个新 commit 触发全新 run。
+2. **`Safety diff gate` 可能报「PR 引入了新漏洞」而实际是抖动。**
+   该门禁用 base 与 head 两份 `safety check` 报告做差集；PR 未改任何 requirements 文件时，
+   两份报告本应完全一致。实测 PR #8 出现 `head=81 base=77 new=4`（black / pyjwt / starlette），
+   而 `git diff <head> <base> -- requirements*.txt` **为空** ⇒ 是 safety 解析依赖时的非确定性抖动。
+   ⇒ **对策**：同样靠 rebase 到最新 main + 推新 commit 重新触发；不要 rerun。
+
+---
 
 ### 业务语言决策版（2026-11-11）
 
