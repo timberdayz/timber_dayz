@@ -224,11 +224,33 @@ await retain_previous_platform_shop_id_as_alias(db, shop_account, previous_platf
 
 | 步骤 | 动作 | 说明 |
 |---|---|---|
-| 2.1 | 按 T1 对齐 `core.shop_accounts.platform_shop_id`（9 个 shopee 店） | 目标：与云端**逐条相等** |
-| 2.2 | `platform_shop_id_status` 回 `confirmed` / `manual_confirmed`；`updated_by` 记为**人工修复**（不是 `system`） | 避免再被自动流程覆盖 |
-| 2.3 | 按 T2 删除错 `former_platform_shop_id` 别名 | ⚠️ 删除前确认没有历史行依赖这些别名（20261112 之后别名路已不认领平台编号 ⇒ 预期是**低风险清理**，但仍需先验） |
-| 2.4 | 重建 `semantic.shop_identity_resolution_candidates_v2_mv`（DROP + 重建，不带 CASCADE） | 登记信息变了 ⇒ 候选池内容变了 ⇒ 必须重建副本；重建后跑正本/副本内容指纹比对 |
-| 2.5 | 连带刷新下游 | 原子层 → 物化副本 → 看板 |
+| 2.1 | 按 T1 对齐 `core.shop_accounts.platform_shop_id`（9 个 shopee 店） | 目标：与云端**逐条相等**。默认**只动这一个字段** —— T1 另外 5 个字段只报告不改（改名是业务决定、停用是运营开关） |
+| 2.2 | `platform_shop_id_status` 回 `confirmed` / `manual_confirmed`；`updated_by` 记为**人工修复**（不是 `system`） | 避免再被自动流程覆盖。`updated_by` 由工具统一写，**不接受**来自云端的对齐值 |
+| 2.3 | 按 T2 删除错 `former_platform_shop_id` 别名 | ⚠️ 阻断条件是「该别名值是某账号**唯一**的身份来源」；事实行里出现同值**不阻断**（历史行归属早已固化、语义层别名路不认领平台编号，删别名不改变其解析结果），只作提示 |
+| 2.4 | **REFRESH**（不是 DROP 重建）`semantic.shop_identity_resolution_candidates_v2_mv`，随后跑正本/副本内容指纹比对 | **本步骤已按仓库既有事实修正**（见下方「2.4 的修正」） |
+| 2.5 | 连带刷新下游 | 原子层 → 物化副本 → 看板（走既有 `refresh_registry` 依赖链 + `bootstrap_postgresql_dashboard.py --refresh-materializations`） |
+
+#### 2.4 的修正（2026-11-10，实施时按仓库既有事实纠正）
+
+方案初稿写的是「DROP + 重建（不带 CASCADE）」，**这是错的**，按仓库自己的既有事实应改为**只 REFRESH**：
+
+- 副本资产 `sql/semantic/shop_identity_resolution_candidates_v2_mv.sql` 的刷新语义是
+  「存在则 REFRESH / 不存在则 CREATE」，**绝不 DROP ... CASCADE** ——
+  资产自己的注释（`:69-73`）与守护测试
+  `backend/tests/data_pipeline/test_identity_candidates_materialization.py::test_materialized_view_asset_never_drops_cascade`
+  都在守这条。
+- DROP 重建只在**口径变更**时需要：迁移
+  `current_migrations/versions/20261112_realign_identity_candidates_anchor.py:41-60` 写明
+  「REFRESH 只重算**数据**, 不换**定义**；口径改了之后, 光 REFRESH 刷出来的还是旧口径 ⇒ 必须 DROP 重建」。
+  批次 2 只改 `core.shop_accounts` 的**数据**、口径一个字不动 ⇒ REFRESH 即可。
+- 而且**不带 CASCADE 的 DROP 会直接失败**：副本下游挂着
+  `semantic.fact_orders_atomic` / `fact_analytics_atomic` / `semantic.shop_identity_resolver`
+  （都是 `LANGUAGE sql`，依赖被跟踪），要 DROP 得先把这些对象的正文临时换成正本 ——
+  那是口径变更才需要的手术，批次 2 不该做。
+
+⇒ 落地工具：`scripts/refresh_shop_identity_candidates.py`（REFRESH + 指纹比对，
+指纹口径与迁移 `20261105_create_identity_candidates_mv.py` 的 `_fingerprint` 一致：
+行数 + 全量内容 md5）。
 
 **明确不做**：不回滚 957 行、不逐行订正 11 月、不重推 11 月。
 
