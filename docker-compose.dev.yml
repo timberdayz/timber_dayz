@@ -41,6 +41,10 @@ services:
       ACCOUNT_ENCRYPTION_KEY: ${ACCOUNT_ENCRYPTION_KEY}
       RUN_MIGRATIONS: "0"
       DEPLOYMENT_ROLE: "api"
+      # 版本号：与生产同口径（生产由流水线注入 IMAGE_TAG）。
+      # 留空则回落到挂载进来的 VERSION 文件 —— 否则容器会一直显示**镜像构建时**的版本号，
+      # 而本地代码已经是新版本，排查问题时极易误判成"跑的是旧版本"。
+      APP_VERSION: ${APP_VERSION:-}
       DATABASE_ECHO: "true"
       DEBUG: "true"
       APP_ENV: development
@@ -65,6 +69,9 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./temp:/app/temp
+      # 版本号文件必须挂宿主机目录：镜像里的 VERSION 是构建时的快照，
+      # 不挂的话容器会一直显示构建时的旧版本号，而本地代码其实已经是新版本。
+      - ./VERSION:/app/VERSION:ro
     ports:
       - "8001:8000"
     depends_on:
@@ -99,6 +106,8 @@ services:
       ACCOUNT_ENCRYPTION_KEY: ${ACCOUNT_ENCRYPTION_KEY}
       RUN_MIGRATIONS: "0"
       DEPLOYMENT_ROLE: "collector"
+      # 版本号：与生产同口径（生产由流水线注入 IMAGE_TAG）；留空则回落到 VERSION 文件。
+      APP_VERSION: ${APP_VERSION:-}
       APP_RUNTIME_MODE: "collector"
       ENABLE_COLLECTION: "true"
       DATABASE_ECHO: "true"
@@ -223,6 +232,8 @@ services:
       PROJECT_ROOT: /app
       DATA_DIR: /app/data
       DATA_RAW_DIR: /app/data/raw
+      # 版本号：与生产同口径（生产由流水线注入 IMAGE_TAG）；留空则回落到 VERSION 文件。
+      APP_VERSION: ${APP_VERSION:-}
     volumes:
       - ./backend:/app/backend
       - ./modules:/app/modules
@@ -232,6 +243,9 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./temp:/app/temp
+      # 版本号文件必须挂宿主机目录：镜像里的 VERSION 是构建时的快照，
+      # 不挂的话容器会一直显示构建时的旧版本号，而本地代码其实已经是新版本。
+      - ./VERSION:/app/VERSION:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -273,6 +287,8 @@ services:
       PROJECT_ROOT: /app
       DATA_DIR: /app/data
       DATA_RAW_DIR: /app/data/raw
+      # 版本号：与生产同口径（生产由流水线注入 IMAGE_TAG）；留空则回落到 VERSION 文件。
+      APP_VERSION: ${APP_VERSION:-}
     volumes:
       - ./backend:/app/backend
       - ./modules:/app/modules
@@ -282,6 +298,9 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./temp:/app/temp
+      # 版本号文件必须挂宿主机目录：镜像里的 VERSION 是构建时的快照，
+      # 不挂的话容器会一直显示构建时的旧版本号，而本地代码其实已经是新版本。
+      - ./VERSION:/app/VERSION:ro
     depends_on:
       postgres:
         condition: service_healthy
