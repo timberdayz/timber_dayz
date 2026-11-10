@@ -185,14 +185,40 @@ def test_validation_and_runtime_gate_share_one_status_source():
 
 
 class _FakeResult:
+    """SQLAlchemy ``Result.mappings()`` 的最小替身。
+
+    ⚠ ``mappings()`` 必须返回**带 ``.all()`` 的对象**（像 SQLAlchemy 的
+    ``MappingResult``），不能直接返回 list —— 生产代码读结果用的是
+    ``result.mappings().all()``（SQLAlchemy 2.0 的标准用法，仓库里 50+ 处同款）。
+
+    2026-11-11 实测踩坑：批次 3.5 把回收器从 ``result.fetchall()`` 改成
+    ``result.mappings().all()``，这里的 fake 仍返回 list ⇒
+    ``AttributeError: 'list' object has no attribute 'all'`` ⇒ 守护测试从绿变红。
+    而 CI 的 ``test (3.11)`` **只跑本次改动到的测试文件** ⇒ 这个文件没被跑到，
+    红了好几天没人看见。
+    ⇒ fake 必须忠实于被测代码依赖的那份 API 契约。
+    """
+
     def __init__(self, rows):
         self._rows = rows
 
     def fetchall(self):
-        return self._rows
+        return list(self._rows)
 
     def mappings(self):
-        return self._rows
+        return self
+
+    def all(self):
+        return list(self._rows)
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
+    def __iter__(self):
+        return iter(self._rows)
+
+    def __len__(self):
+        return len(self._rows)
 
 
 class _FakeSession:
@@ -208,7 +234,18 @@ class _FakeSession:
         sql = str(stmt)
         self.executed.append(sql)
         if "UPDATE ops.pipeline_run_log" in sql:
-            return _FakeResult([(row_id,) for row_id in self._reaped_ids])
+            # 行形状必须对齐 SQL 的 ``RETURNING id, run_id, pipeline_name``
+            # —— 生产代码要 ``dict(row)`` 再取 ``row.get("run_id")``。
+            return _FakeResult(
+                [
+                    {
+                        "id": row_id,
+                        "run_id": f"run-{row_id}",
+                        "pipeline_name": "dashboard_materialization_refresh.test",
+                    }
+                    for row_id in self._reaped_ids
+                ]
+            )
         if "FROM core.refresh_queue_tasks" in sql:
             return _FakeResult(list(self._repair_rows))
         return _FakeResult([])
