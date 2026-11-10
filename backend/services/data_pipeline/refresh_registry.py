@@ -41,6 +41,10 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     # 身份解析候选集的**正本**仍是普通视图（从 core 表现算）；物化副本是它的
     # 快照，原子层两个普通视图改读物化副本。顺序不能反，否则建 MV 时正本还不存在。
     #
+    # [*] 2026-11-11: 副本的正文改成「从正本取数」（派生层口径收回）——
+    #   口径**只有正本一处定义**，副本不再手抄计算逻辑 ⇒ 正本既是
+    #   「刷新顺序」上的前置，也是「建对象」上的前置。
+    #
     # ⚠️ 采集方代号判定函数 ``semantic.is_collection_source_identifier``
     #    **内联在正本资产的开头**（谁执行正本, 函数先落地）⇒ 不需要单独登记
     #    刷新目标 —— 见 ``sql/semantic/shop_identity_resolution_candidates.sql``。
@@ -284,6 +288,13 @@ SEMANTIC_ATOMIC_VIEW_TARGETS: list[str] = sorted(
 #:
 #: 前置对象已存在时会被跳过/刷新，代价可忽略（副本只有 136 行，刷新毫秒级）。
 ASSET_PREREQUISITES: dict[str, list[str]] = {
+    # [*] 2026-11-11: 候选池**物化副本**的正文改成「从正本取数」
+    #   (派生层口径收回 —— 口径只有正本一处定义, 副本不再手抄计算逻辑)
+    #   => 正本不存在时建副本直接报 "relation does not exist"。
+    #   正本已存在时会被跳过(普通视图不参与数据刷新重建) ⇒ 代价可忽略。
+    "semantic.shop_identity_resolution_candidates_v2_mv": [
+        "semantic.shop_identity_resolution_candidates",
+    ],
     "semantic.fact_orders_atomic": [
         "semantic.shop_identity_resolution_candidates_v2_mv",
         "semantic.alias_registry",

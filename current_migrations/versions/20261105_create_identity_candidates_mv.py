@@ -24,8 +24,10 @@
 
 做法
 ----
-1. 新建物化视图 ``semantic.shop_identity_resolution_candidates_v2_mv``，
-   正文 = ``SELECT * FROM semantic.shop_identity_resolution_candidates``
+1. **先把正本对齐到当前资产**（执行
+   ``sql/semantic/shop_identity_resolution_candidates.sql``），
+   再新建物化视图 ``semantic.shop_identity_resolution_candidates_v2_mv``，
+   正文 = ``SELECT <显式列清单> FROM semantic.shop_identity_resolution_candidates``
    （**正本仍是普通视图**，从 core 表现算）⇒ 口径零变化。
 2. 原子层的两个**普通视图**（``semantic.fact_orders_atomic`` /
    ``semantic.fact_analytics_atomic``）改读物化副本（由迁移 20261106 重建）。
@@ -33,6 +35,26 @@
 **不动** ``orders_monthly_atomic_mv`` / ``analytics_monthly_atomic_mv`` ——
 那是既有物化视图的完整定义（``DROP ... CASCADE`` + ``CREATE``），改了要在生产
 重建它们 ⇒ 有风险。它们继续读普通视图，既有行为不变。
+
+为什么必须**先执行正本资产**
+--------------------------
+物化副本的正文现在**从正本取数**（2026-11-11「派生层口径收回」：口径只有
+正本一处定义，副本不再手抄计算逻辑）。于是副本的**列集合 = 正本的列集合**。
+
+而 ``20260805`` 的静态基线建的候选池正本是 **7 列旧版**（缺
+``identity_shop_region`` —— 区域消歧那套逻辑是 ``20261101`` 才加的），
+``20261112`` 迁移才把正本换成 8 列的当前版本。
+
+如果本迁移直接建副本 ⇒ 副本会拿到 7 列 ⇒ 下一条迁移 ``20261106``
+重建原子层视图时引用 ``c.identity_shop_region`` ⇒ 直接报
+``column c.identity_shop_region does not exist`` ⇒ **全新库跑迁移链就断了**。
+
+所以本迁移**先执行正本资产**（``CREATE OR REPLACE VIEW`` 保持 OID ⇒ 下游
+不用重建；它还会顺带把 ``semantic.is_collection_source_identifier`` 函数
+落地 —— 函数内联在正本资产开头，见该文件的说明），**再建副本**。
+
+⚠️ 本迁移在生产**早已执行过** ⇒ 改它只影响**全新库**的迁移链重放；
+    生产/开发库的既有对象不受影响。
 
 口径守护
 --------
@@ -68,6 +90,9 @@ CANDIDATES_MV = "semantic.shop_identity_resolution_candidates_v2_mv"
 #: 20260805 schema baseline 建的旧版候选集物化视图（7 列，缺 identity_shop_region）
 LEGACY_MV = "semantic.shop_identity_resolution_candidates_mv"
 
+#: 候选集正本**资产**（普通视图，从 core 表现算）—— 必须**先**执行，
+#: 副本的正文从正本取数 ⇒ 正本没对齐到当前版本，副本就建不对。
+CANDIDATES_VIEW_ASSET = "sql/semantic/shop_identity_resolution_candidates.sql"
 CANDIDATES_MV_ASSET = "sql/semantic/shop_identity_resolution_candidates_v2_mv.sql"
 
 
@@ -224,18 +249,24 @@ def _rebuild_source_views() -> None:
 
 
 def upgrade() -> None:
-    # 1) 建副本。副本正文**自包含**（从 core 表现算），不引用正本 ——
-    #    正本在不同环境里列数可能不同（生产是 8 列；全新库 baseline 建的是
-    #    7 列旧版，因为 ``shop_region`` 列是 20261101 才加的），自包含才能
-    #    在两边都建得起来。
+    # 1) **先把正本对齐到当前资产**。
+    #    副本的正文从正本取数 ⇒ 正本的列集合决定副本的列集合。
+    #    ``20260805`` 基线建的正本是 7 列旧版（缺 identity_shop_region），
+    #    不先对齐，副本就建不出 ``20261106`` 原子层视图要引用的那一列。
+    #    ``CREATE OR REPLACE VIEW`` 保持正本 OID ⇒ 下游对象不用重建。
+    if not _execute_asset(CANDIDATES_VIEW_ASSET):
+        raise RuntimeError("候选集正本资产缺失，拒绝继续")
+
+    # 2) 建副本。副本正文**从正本取数**（口径只有正本一处定义），
+    #    不再手抄计算逻辑 ⇒ 副本与正本永远同构。
     if not _execute_asset(CANDIDATES_MV_ASSET):
         print("[WARN] 物化副本资产缺失，保持原有候选集形态（慢但口径正确）")
         return
 
-    # 2) 口径守护：副本内容必须与**正本**逐字节一致。
-    #    仅在两者列数相同时比对 —— 正本列数与副本不一致（例如全新库的 7 列
-    #    旧版正本）时，正本与副本本就不是同一个东西，比内容没有意义。
-    #    生产上正本已是 8 列 ⇒ 走严格比对（136 行逐字节一致）。
+    # 3) 口径守护：副本内容必须与**正本**逐字节一致。
+    #    仅在两者列数相同时比对 —— 正本列数与副本不一致时，正本与副本
+    #    本就不是同一个东西，比内容没有意义。
+    #    生产上正本已是 8 列 ⇒ 走严格比对（逐字节一致）。
     view_columns = _column_count(CANDIDATES_VIEW)
     mv_columns = _column_count(CANDIDATES_MV)
     if view_columns == mv_columns:
@@ -254,7 +285,7 @@ def upgrade() -> None:
             )
         )
 
-    # 3) 删掉 20260805 baseline 建的旧版候选集物化视图（7 列、缺
+    # 4) 删掉 20260805 baseline 建的旧版候选集物化视图（7 列、缺
     #    identity_shop_region、没有任何对象引用它）。
     #    **不带 CASCADE**：有依赖就让迁移失败（fail-closed），不静默删下游。
     if _exists(LEGACY_MV):
@@ -267,8 +298,14 @@ def downgrade() -> None:
     顺序：先把原子层两个普通视图的正文改回读**正本**，再删副本 ——
     副本被删后视图引用会断。
 
-    正本（普通视图）一个字都没动过，天然还在；旧版 v1 不重建 ——
+    正本（普通视图）天然还在；旧版 v1 不重建 ——
     它由 20260805 schema baseline 建立，属于基线资产。
+
+    ⚠️ 升级时本迁移**执行了一次正本资产**（把基线那份 7 列旧版正本换成
+    当前 8 列版本）—— 回滚**不**在这里把正本换回去：
+    正本的历史口径由**更晚的** ``20261112_realign_identity_candidates_anchor``
+    的 downgrade 负责恢复（它内嵌了旧口径正文），而 alembic 要求**倒序**回滚 ⇒
+    到这里时正本已经是旧口径了。
     """
     _rebuild_source_views()
     if _exists(CANDIDATES_MV):

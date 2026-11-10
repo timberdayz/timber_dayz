@@ -14,7 +14,8 @@
 
 这些用例守的是**五条**不变量:
 
-A. 优先级确实倒过来了, 且正本与物化副本**两份都改了**（内容指纹守护）;
+A. 优先级确实倒过来了 —— 口径的**唯一定义处**是正本
+   （2026-11-11「派生层口径收回」后, 物化副本**从正本取数**, 不再手抄计算逻辑）;
 B. 候选池的过滤补上了（补的是系统其它环节都有的过滤, 不是新口径）;
 C. 别名路不再认领平台店铺编号;
 D. ⚠️ ``resolved_shop_id`` 的派生口径**没有被**倒置 ——
@@ -43,8 +44,13 @@ REALIGN_MIGRATION = (
     "current_migrations/versions/20261112_realign_identity_candidates_anchor.py"
 )
 
-#: 正本 + 物化副本 —— 两份都必须同步改（内容指纹守护会因此失败）
+#: 正本 + 物化副本 —— 副本现在**从正本取数**（2026-11-11 派生层口径收回），
+#: 口径的**唯一定义处**是正本 ⇒ 口径类断言只对正本生效；副本另有一条
+#: 「必须从正本取数」的断言（见 ``test_copy_asset_derives_from_the_canonical_view``）。
 BOTH_CANDIDATE_ASSETS = (CANDIDATES_VIEW_ASSET, CANDIDATES_MV_ASSET)
+
+#: 候选池口径的**唯一定义处**（普通视图，从台账现算）
+CANONICAL_ASSET = CANDIDATES_VIEW_ASSET
 
 #: 四条语义路径（候选计数写在这里, 不在候选集里）
 SEMANTIC_PATHS = (
@@ -101,26 +107,35 @@ def _branch_priority(sql_text: str, method: str) -> int:
 # ---------------------------------------------------------------------------
 
 
-def test_shop_account_id_is_the_top_priority_anchor_in_both_assets():
+def test_shop_account_id_is_the_top_priority_anchor_in_the_canonical_asset():
     """``shop_account_id`` 必须是 priority 1 —— 最稳的锚点说了算。"""
-    for rel in BOTH_CANDIDATE_ASSETS:
-        text = _strip_sql_comments(_read(rel))
-        assert _branch_priority(text, "shop_account_id") == 1, rel
+    text = _strip_sql_comments(_read(CANONICAL_ASSET))
+    assert _branch_priority(text, "shop_account_id") == 1, CANONICAL_ASSET
 
 
-def test_platform_shop_id_is_demoted_to_second_priority_in_both_assets():
+def test_platform_shop_id_is_demoted_to_second_priority_in_the_canonical_asset():
     """``platform_shop_id`` 降到 priority 2 —— 它会被污染, 不能排第一。"""
-    for rel in BOTH_CANDIDATE_ASSETS:
-        text = _strip_sql_comments(_read(rel))
-        assert _branch_priority(text, "platform_shop_id") == 2, rel
+    text = _strip_sql_comments(_read(CANONICAL_ASSET))
+    assert _branch_priority(text, "platform_shop_id") == 2, CANONICAL_ASSET
 
 
 def test_alias_and_store_name_priorities_are_unchanged():
     """别名路 / 店名路仍是垫底的 3、4 —— 别名是订单「店铺」中文列的唯一救命路。"""
-    for rel in BOTH_CANDIDATE_ASSETS:
-        text = _strip_sql_comments(_read(rel))
-        assert _branch_priority(text, "alias_match") == 3, rel
-        assert _branch_priority(text, "store_name_match") == 4, rel
+    text = _strip_sql_comments(_read(CANONICAL_ASSET))
+    assert _branch_priority(text, "alias_match") == 3, CANONICAL_ASSET
+    assert _branch_priority(text, "store_name_match") == 4, CANONICAL_ASSET
+
+
+def test_copy_asset_derives_from_the_canonical_view():
+    """物化副本**必须**从正本取数 —— 它不再复写口径。
+
+    以前副本手抄了一份正本的完整计算逻辑 ⇒ 两边漂移是**静默**的
+    (看板只表现为「某个店没人了」, 不报任何错)。
+    """
+    text = _strip_sql_comments(_read(CANDIDATES_MV_ASSET))
+    assert "FROM semantic.shop_identity_resolution_candidates" in text
+    assert "core.shop_accounts" not in text
+    assert "UNION ALL" not in text
 
 
 def test_candidate_count_formula_is_not_touched():
@@ -152,10 +167,9 @@ def test_candidate_pool_only_contains_enabled_operating_stores():
     探测匹配 / 数据同步清理）都已经过滤了 enabled 与 business_role,
     只有语义层候选池漏了。
     """
-    for rel in BOTH_CANDIDATE_ASSETS:
-        text = _strip_sql_comments(_read(rel))
-        assert "sa.enabled IS TRUE" in text, rel
-        assert "sa.business_role = 'operating_store'" in text, rel
+    text = _strip_sql_comments(_read(CANONICAL_ASSET))
+    assert "sa.enabled IS TRUE" in text, CANONICAL_ASSET
+    assert "sa.business_role = 'operating_store'" in text, CANONICAL_ASSET
 
 
 # ---------------------------------------------------------------------------
@@ -165,11 +179,10 @@ def test_candidate_pool_only_contains_enabled_operating_stores():
 
 def test_alias_branch_refuses_to_claim_a_platform_shop_id():
     """自别名 / 跨账号认领会让同一串身份值指向两个账号 ⇒ 整行落 unknown。"""
-    for rel in BOTH_CANDIDATE_ASSETS:
-        text = _strip_sql_comments(_read(rel))
-        assert "NOT EXISTS" in text, rel
-        assert "alias_owner.platform_shop_id" in text, rel
-        assert "alias_owner.enabled IS TRUE" in text, rel
+    text = _strip_sql_comments(_read(CANONICAL_ASSET))
+    assert "NOT EXISTS" in text, CANONICAL_ASSET
+    assert "alias_owner.platform_shop_id" in text, CANONICAL_ASSET
+    assert "alias_owner.enabled IS TRUE" in text, CANONICAL_ASSET
 
 
 # ---------------------------------------------------------------------------
@@ -184,16 +197,15 @@ def test_resolved_shop_id_derivation_stays_platform_first():
     看板显示名的 JOIN 拿它跟 ``core.dim_shops.shop_id`` 对齐。
     一旦把这里的 COALESCE 顺序也倒过来, dim_shops 的键与事实表的键就对不上。
     """
-    for rel in BOTH_CANDIDATE_ASSETS:
-        text = _strip_sql_comments(_read(rel))
-        derived = re.search(
-            r"COALESCE\(\s*NULLIF\(TRIM\(COALESCE\(sa\.platform_shop_id, ''\)\), ''\),\s*"
-            r"NULLIF\(TRIM\(COALESCE\(sa\.shop_account_id, ''\)\), ''\),\s*"
-            r"sa\.id::text\s*\) AS resolved_shop_id",
-            text,
-            re.S,
-        )
-        assert derived is not None, rel
+    text = _strip_sql_comments(_read(CANONICAL_ASSET))
+    derived = re.search(
+        r"COALESCE\(\s*NULLIF\(TRIM\(COALESCE\(sa\.platform_shop_id, ''\)\), ''\),\s*"
+        r"NULLIF\(TRIM\(COALESCE\(sa\.shop_account_id, ''\)\), ''\),\s*"
+        r"sa\.id::text\s*\) AS resolved_shop_id",
+        text,
+        re.S,
+    )
+    assert derived is not None, CANONICAL_ASSET
 
 
 def test_dim_shop_id_derivation_matches_the_semantic_layer():
