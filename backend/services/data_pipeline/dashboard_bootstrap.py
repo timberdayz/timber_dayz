@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.data_pipeline.refresh_registry import (
@@ -410,6 +410,139 @@ async def _upsert_dashboard_asset_state(
     )
 
 
+# ── 孤儿记账行清理（P3-1 / 批次 4.1）────────────────────────────────────
+#
+# ``ops.dashboard_asset_state`` 是**运维台账**：每个看板模块一行，记录该模块
+# 资产的「期望指纹 / 已应用指纹 / 状态」。它**不是**业务事实数据。
+#
+# **孤儿记账行** = ``module_name`` 不在 ``DASHBOARD_MODULE_TARGETS`` 里的行
+# —— 模块定义已经下线（或被并进别的模块），台账行还挂着。典型现场两种：
+# * 模块被并进别的模块：``clearance_ranking`` → ``inventory_backlog``
+#   （``api.sku_clearance_ranking_module`` 现在是 inventory_backlog 的 core target）；
+# * 模块直接下线：台账里残留的 ``annual_summary``（2026-11-11 实测开发库可见）。
+#
+# ⚠️ 处置边界（硬约束，动这段代码前先读完）
+# ----------------------------------------
+# * **只删记账行**：物化视图 / 视图 / 表 / 模块定义**一律不碰**
+#   ⇒ 允许出现的写语句只有 ``DELETE FROM ops.dashboard_asset_state``；
+# * **默认不自动删**：必须显式开启（CLI ``--prune-orphan-asset-state``），
+#   预览用 ``--dry-run``；
+# * **删除前写日志**（module_name / 删除时间 / 行数）；
+# * **与写记账同事务**（同一个 ``AsyncSession``、中间不 commit）
+#   ⇒ 不会出现「新的写了、旧的还挂着」的中间态。
+
+
+def _known_asset_state_module_names() -> list[str]:
+    """``ops.dashboard_asset_state`` 里合法的模块名（= ``DASHBOARD_MODULE_TARGETS`` 的键）。"""
+    return sorted(DASHBOARD_MODULE_TARGETS)
+
+
+#: 删除孤儿记账行的**唯一**写语句 —— 只碰 ``ops.dashboard_asset_state`` 一张表，
+#: 不带 CASCADE、不带任何 DDL ⇒ 物化视图 / 视图 / 表 / 模块定义一律不受影响。
+_ORPHAN_ASSET_STATE_DELETE_SQL = text(
+    "DELETE FROM ops.dashboard_asset_state WHERE module_name IN :module_names"
+).bindparams(bindparam("module_names", expanding=True))
+
+
+async def find_orphan_dashboard_asset_state_rows(
+    session: AsyncSession,
+) -> list[dict[str, Any]]:
+    """列出孤儿记账行（**只读**，一条写语句都不发）。
+
+    孤儿 = ``module_name`` 不在 ``DASHBOARD_MODULE_TARGETS`` 里。
+    返回行已做 JSON 归一化（``updated_at`` 是 ``timestamptz`` ⇒ 驱动返回
+    ``datetime`` ⇒ 直接进 ``json.dumps`` 会炸）。
+    """
+    reg = await session.execute(text("SELECT to_regclass('ops.dashboard_asset_state')"))
+    if reg.scalar_one_or_none() is None:
+        # 台账表都还没有 ⇒ 没有孤儿行（不是错误：新库的第一步）。
+        return []
+    result = await session.execute(
+        text(
+            """
+            SELECT module_name,
+                   status,
+                   run_id,
+                   updated_at,
+                   asset_fingerprint_expected,
+                   asset_fingerprint_applied
+            FROM ops.dashboard_asset_state
+            ORDER BY module_name
+            """
+        )
+    )
+    known = set(DASHBOARD_MODULE_TARGETS)
+    orphans: list[dict[str, Any]] = []
+    for row in result.mappings():
+        module_name = str(row.get("module_name") or "")
+        if module_name in known:
+            continue
+        orphans.append(_json_safe_value(dict(row)))
+    return orphans
+
+
+async def prune_orphan_dashboard_asset_state(
+    session: AsyncSession,
+    *,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """清理孤儿记账行 —— **只删** ``ops.dashboard_asset_state`` 的行。
+
+    ⚠️ 边界（改这段代码前先读上面的说明）：
+    * 物化视图 / 视图 / 表 / 模块定义**一律不碰**；
+    * ``dry_run=True`` 时**一个字节都不写**（只发 SELECT）；
+    * 真删时**先写日志再删**；
+    * 本函数**自己不 commit** —— 由调用方在同一个事务里提交
+      ⇒ 与记账写入要么一起落库、要么一起回滚。
+    """
+    orphan_rows = await find_orphan_dashboard_asset_state_rows(session)
+    module_names = sorted(
+        {str(row.get("module_name") or "") for row in orphan_rows} - {""}
+    )
+    report: dict[str, Any] = {
+        "dry_run": dry_run,
+        "pruned": False,
+        "deleted_count": 0,
+        "deleted_module_names": [],
+        "orphan_rows": orphan_rows,
+        "known_module_names": _known_asset_state_module_names(),
+    }
+    if not module_names:
+        return report
+
+    if dry_run:
+        report["would_delete_count"] = len(module_names)
+        report["would_delete_module_names"] = module_names
+        logger.info(
+            "[DashboardBootstrap] 孤儿记账行预览（不写入）：module_name=%s 行数=%d",
+            ",".join(module_names),
+            len(module_names),
+        )
+        return report
+
+    # ── 删除前写日志（硬约束）──
+    deleted_at = datetime.now(timezone.utc).isoformat()
+    logger.warning(
+        "[DashboardBootstrap] 清理孤儿记账行：module_name=%s 行数=%d 删除时间=%s",
+        ",".join(module_names),
+        len(module_names),
+        deleted_at,
+    )
+    await session.execute(
+        _ORPHAN_ASSET_STATE_DELETE_SQL,
+        {"module_names": module_names},
+    )
+    report.update(
+        {
+            "pruned": True,
+            "deleted_count": len(module_names),
+            "deleted_module_names": module_names,
+            "deleted_at": deleted_at,
+        }
+    )
+    return report
+
+
 async def _collect_existing_assets(session: AsyncSession) -> tuple[set[str], set[str]]:
     schema_result = await session.execute(
         text(
@@ -597,6 +730,7 @@ async def bootstrap_dashboard_assets(
     session: AsyncSession,
     *,
     module: str = "all",
+    prune_orphan_asset_state: bool = False,
 ) -> dict[str, Any]:
     await session.execute(text("SET LOCAL statement_timeout = 0"))
     await execute_sql_file(session, "sql/ops/create_pipeline_tables.sql")
@@ -691,9 +825,18 @@ async def bootstrap_dashboard_assets(
             },
         )
 
+    # ⚠️ 孤儿记账行清理与上面的记账写入**在同一个事务里**
+    # （同一个 session、中间不 commit）⇒ 要么「新记账 + 删旧孤儿」一起落库，
+    # 要么一起回滚 —— 不会出现「新的写了、旧的还挂着」的中间态。
+    prune_report: dict[str, Any] | None = None
+    if prune_orphan_asset_state:
+        prune_report = await prune_orphan_dashboard_asset_state(session)
+
     report = await inspect_dashboard_assets(session)
     report["run_ids"] = module_run_ids
     report["module"] = module
+    if prune_report is not None:
+        report["orphan_asset_state_prune"] = prune_report
     return report
 
 
@@ -701,6 +844,7 @@ async def refresh_dashboard_materialization_assets(
     session: AsyncSession,
     *,
     module: str = "all",
+    prune_orphan_asset_state: bool = False,
 ) -> dict[str, Any]:
     await session.execute(text("SET LOCAL statement_timeout = 0"))
     selected_modules = _resolve_module_names(module)
@@ -773,9 +917,17 @@ async def refresh_dashboard_materialization_assets(
             },
         )
 
+    # ⚠️ 与上面那次记账写入**同一个事务**（中间不 commit）——
+    # 删旧孤儿与写新记账要么一起落库、要么一起回滚。
+    prune_report: dict[str, Any] | None = None
+    if prune_orphan_asset_state:
+        prune_report = await prune_orphan_dashboard_asset_state(session)
+
     report = await inspect_dashboard_assets(session)
     report["run_ids"] = module_run_ids
     report["module"] = module
+    if prune_report is not None:
+        report["orphan_asset_state_prune"] = prune_report
     return report
 
 
@@ -783,6 +935,7 @@ async def converge_dashboard_assets(
     session: AsyncSession,
     *,
     module: str = "all",
+    prune_orphan_asset_state: bool = False,
 ) -> dict[str, Any]:
     """核心 bootstrap → 刷新物化资产 → 回写指纹 ⇒「跑一次就一定收敛」。
 
@@ -798,10 +951,16 @@ async def converge_dashboard_assets(
     ``refresh_dashboard_materialization_assets`` 用**本次实算**的指纹回写 ⇒
     跑一次就一定收敛。
     """
-    core_report = await bootstrap_dashboard_assets(session, module=module)
+    core_report = await bootstrap_dashboard_assets(
+        session,
+        module=module,
+        prune_orphan_asset_state=prune_orphan_asset_state,
+    )
     await session.commit()
     refresh_report = await refresh_dashboard_materialization_assets(
-        session, module=module
+        session,
+        module=module,
+        prune_orphan_asset_state=prune_orphan_asset_state,
     )
     await session.commit()
     report = dict(refresh_report)
