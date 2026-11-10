@@ -190,9 +190,9 @@
 
 | 检查 | 结果 |
 |---|---|
-| `CI Pipeline` | **success**，8 个 job 全绿 |
+| `CI Pipeline` | **success**，8 个 job 全绿（run `42792117622`） |
 | `migration-pg-contract` | **12 passed、零 skip**（真跑，不是「连不上就跳过」的假绿） |
-| `test (3.11)`（no-DB 门禁 **45** 个文件） | 基线 run（**42** 个文件）为 **349 passed / 10 skipped**；10 个 skip 来自**平台门控**（PowerShell 专有文件在 Ubuntu 跳过 + 需要真实账号的 e2e），不是环境性红。本版把 **3 个**派发/部署守护文件并入常驻清单（42 → 45） |
+| `test (3.11)`（no-DB 门禁 **45** 个文件） | **380 passed / 10 skipped**；10 个 skip 来自**平台门控**（PowerShell 专有文件在 Ubuntu 跳过 + 需要真实账号的 e2e），不是环境性红。本版把 **3 个**派发/部署守护文件并入常驻清单（42 → 45，**+31 例**） |
 | `Docker Build and Push` / `Validate Data Flow` | success |
 | 本轮新增守护用例（本地全量） | **31 passed** —— Celery 派发隔离 5 + 既有派发韧性 10 + 部署资产契约 16 |
 | `black --check` / `ruff check`（本次改动到的 8 个 .py） | **零差异** / `All checks passed!` |
@@ -215,8 +215,9 @@
 > 「按行匹配赋值/调用」而不是「按字面量首次出现」，但那属于改既有 fail-closed
 > 守卫，按发版期规则不在本版夹带 ⇒ 已单独记录为技术债。
 
-> 上表 CI 行是**发版前 `main` 的基线 run**；本次发版 run 的真实数字在**发版后回填**
-> （见 `docs/reports/2026-11-10-v7.19.5-生产发版记录.md`）。
+> 上表 CI 行取自**发版代码本身**的那次 run（run `42792117622`，commit `0451943d`）；
+> tag `v7.19.5` 所在的提交与它**只差本 CHANGELOG 的文字**，代码完全一致 ⇒ 数字可直接继承。
+> **生产侧**的验收结论见 `docs/reports/2026-11-10-v7.19.5-生产发版记录.md`。
 
 - 白名单清理只影响采集组件清单的**准确性**；`IS true` 与 `= true` 筛选结果一致
   ⇒ **运行期行为不变**。
