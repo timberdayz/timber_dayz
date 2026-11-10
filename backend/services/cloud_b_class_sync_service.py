@@ -483,8 +483,26 @@ def split_rows_by_dual_baseline(
 
 
 def build_sync_payload(row: dict[str, Any]) -> dict[str, Any]:
-    """Build canonical sync payload from one local B-class row."""
+    """Build canonical sync payload from one local B-class row.
+
+    ⚠️ **保留源行主键** (``id``) —— 身份闸门(批次 3.7)与矛盾行台账(批次 4.3)
+    靠它定位「这一行」。
+
+    为什么必须留
+    ------------
+    同步的**生产路径**是「源行 → ``build_sync_payload`` → 写入器」;
+    而写入器吃到的就是 payload 行。丢了主键 ⇒ 守卫/台账拿到的行没有 ``id``
+    ⇒ 台账的「行内定位」退化成只剩 ``data_hash``
+    ⇒ **手工重发入口定位不到源行**(批次 4.3 的重发入口实测过这个坑)。
+
+    ⚠️ ``id`` **不是** canonical 列 ⇒ 写云端时 SQL 不会绑它
+    (写入器只绑 canonical 列), 多出来的键会被 SQLAlchemy 忽略 ——
+    与「直接拿源行写库」那条路径的行为完全一致。
+    """
     payload = {column: row.get(column) for column in build_canonical_columns()}
+    source_row_id = row.get("id")
+    if source_row_id is not None:
+        payload["id"] = source_row_id
     if payload.get("data_domain") != "services" and payload.get("shop_id") is None:
         payload["shop_id"] = ""
     raw_data = payload.get("raw_data")

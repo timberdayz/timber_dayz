@@ -289,10 +289,15 @@ def _redact(text: str, raw_url: str) -> str:
             secrets.add(decoded)
     except Exception:  # pragma: no cover - 畸形连接串
         pass
-    userinfo = raw_url.split("://", 1)[-1].split("@", 1)[0]
+    # ⚠️ 口令里可能带**未编码的 ``@``**(形如 ``<scheme>://u:p@ss@host/db``) ⇒
+    #    ``make_url`` 只取到第一个 ``@`` 之前的那一段 ⇒ 必须再按**最后一个**
+    #    ``@`` 切一次 netloc, 把**完整**口令收进来。
+    userinfo = raw_url.split("://", 1)[-1].rsplit("@", 1)[0]
     if ":" in userinfo:
         secrets.add(userinfo.split(":", 1)[1])
-    for secret in secrets:
+    # ⚠️ **长的先抹** —— 否则短口令会把长口令的前缀抹掉, 剩下尾巴露出来
+    #    (``p@ss`` 被当成 ``p`` 抹掉 ⇒ 变成 ``***@ss``)。
+    for secret in sorted(secrets, key=len, reverse=True):
         if secret:
             text = text.replace(secret, "***")
     return text
@@ -420,8 +425,23 @@ def load_cloud_identity_registry(
         if engine is not None:
             engine.dispose()
 
-    accounts, aliases = _split_registry_rows(records)
-    index = build_identity_index(accounts, aliases)
+    # ⚠️ **拆行与建索引也必须吞掉异常** —— 守卫的契约是「云端这一侧读不了 / 建不了索引
+    #    就退回本地单基准」, **绝不**因为云端的问题把整个同步任务打挂。
+    #    (这两步原本在 try 之外 ⇒ 异常会一路冒到 worker ⇒ 整批数据不落云端。)
+    try:
+        accounts, aliases = _split_registry_rows(records)
+        index = build_identity_index(accounts, aliases)
+    except Exception as exc:  # noqa: BLE001 - 云端侧的异常绝不能打挂同步
+        logger.warning(
+            "[CloudSyncGuard] 云端登记信息建索引失败(%s), 双基准降级为本地单基准: %s",
+            target,
+            type(exc).__name__,
+        )
+        return CloudIdentityRegistry(
+            status=LOAD_STATUS_UNAVAILABLE,
+            reason="cloud_registry_index_build_failed:%s" % type(exc).__name__,
+            target=target,
+        )
     logger.info(
         "[CloudSyncGuard] 云端登记信息已读取: %s (账号 %d / 别名 %d)",
         target,

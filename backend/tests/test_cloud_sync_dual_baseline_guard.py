@@ -491,21 +491,71 @@ def test_guard_event_context_carries_countable_numbers():
 
 
 def test_event_recording_failure_does_not_block_the_sync():
-    """★ 记事件失败**绝不阻塞同步**(数据照写)。"""
-    recorder = CloudSyncIdentityGuardEventRecorder(_BrokenEngine())
+    """★ 记事件失败**绝不阻塞同步**(数据照写)。
+
+    ⚠️ 这条用例以前是**空转**的: 行内的身份 token 用的是 ``shop_account_id``
+    (本地与云端的账号编码本来就一样) ⇒ 两边解释一致 ⇒ 压根不进
+    ``record_mismatch`` 分支 ⇒ 事件记录器**从未被调用**
+    ⇒ 「记事件失败不阻塞同步」这条契约其实一直没有测试保护。
+    ⇒ 现在行内必须带**平台编号**(两端认成不同的店)⇒ 真的降级、真的去记事件,
+    并断言记录器**确实被调用过**。
+    """
+    broken_engine = _BrokenEngine()
+    recorder = CloudSyncIdentityGuardEventRecorder(broken_engine)
     writer = SQLAlchemyCloudWriter(
         engine=_FakeEngine(),
         identity_index=LOCAL_INDEX,
         cloud_registry=_cloud_registry(),
         guard_event_recorder=recorder,
     )
-    rows = [_row({"shop_account_id": "shopee_sg_hx_home_local"})]
+    rows = [
+        # ⚠️ 平台编号在两端认成不同的店 ⇒ 降级 ⇒ 真的去记事件。
+        _row({"platform_shop_id": "1391124228"}),
+        # 账号编码两端一致 ⇒ 自洽 ⇒ 照常落云端。
+        _row({"shop_account_id": "shopee_sg_hx_home_local"}),
+    ]
 
     result = writer("fact_shopee_analytics_monthly", rows, "analytics")
 
     message = "记事件失败不该把同步搞挂"
     assert result["success"] is True, message
+    message = "自洽的那一行必须照常落库"
     assert result["written_rows"] == 1, message
+    message = "必须真的走到「记事件」这一步(否则这条用例就是空转)"
+    assert broken_engine.begin_calls > 0, message
+    message = "降级行数必须被如实上报"
+    assert result["identity_registry_mismatch_rows"] == 1, message
+
+
+def test_a_raising_event_recorder_does_not_block_the_sync():
+    """★ 事件记录器**自己**炸了(不只是它内部的写库失败)也绝不阻塞同步。
+
+    ⚠️ 这是**另一层**的兜底: 记录器内部的写库失败由记录器自己吞掉;
+    记录器**整个**抛出来时, 由 ``_report_guard_events`` 的兜底吞掉。
+    两层都要在, 同步才不会被可观测性拖挂。
+    """
+
+    class _RaisingRecorder:
+        def record_mismatch(self, **_kwargs):
+            raise RuntimeError("recorder exploded")
+
+        def record_unavailable(self, **_kwargs):
+            raise RuntimeError("recorder exploded")
+
+    writer = SQLAlchemyCloudWriter(
+        engine=_FakeEngine(),
+        identity_index=LOCAL_INDEX,
+        cloud_registry=_cloud_registry(),
+        guard_event_recorder=_RaisingRecorder(),
+    )
+    rows = [_row({"platform_shop_id": "1391124228"})]
+
+    result = writer("fact_shopee_analytics_monthly", rows, "analytics")
+
+    message = "记录器自己炸了也不该把同步搞挂"
+    assert result["success"] is True, message
+    message = "降级行数必须仍然被如实上报"
+    assert result["identity_registry_mismatch_rows"] == 1, message
 
 
 def test_sync_table_reports_registry_mismatch_rows():
@@ -604,6 +654,49 @@ def test_redacted_error_message_never_contains_the_password():
     assert "***" in redacted, message
 
 
+def test_redaction_handles_a_password_with_a_bare_at_sign():
+    """★ 口令里带**未编码的 ``@``** ⇒ 必须整个抹掉, 不能只剩尾巴。
+
+    ``make_url`` 只取到第一个 ``@`` 之前的那一段 ⇒ 口令 ``p@ss`` 会被当成
+    ``p`` 抹掉, 剩下 ``***@ss`` —— 尾巴 ``ss`` 露在外面。
+    """
+    raw_url = "postgresql://erp_user:p@ss@127.0.0.1:15433/db"
+
+    redacted = guard_service._redact("boom p@ss", raw_url)
+
+    message = "带裸 @ 的口令必须被整个抹掉"
+    assert "p@ss" not in redacted, message
+    assert "ss" not in redacted, message
+    assert "***" in redacted, message
+
+
+def test_the_cloud_registry_index_build_failure_does_not_escape(monkeypatch):
+    """★ 云端建索引炸了 ⇒ **绝不能**把整个同步任务打挂。
+
+    守卫的契约是「云端这一侧读不了 / 建不了索引就退回本地单基准」。
+    拆行与建索引原本在 try 之外 ⇒ 异常会一路冒到 worker ⇒ 整批数据不落云端。
+    """
+    engine = _FakeRegistryEngine(rows=_registry_records())
+    monkeypatch.setattr(guard_service, "create_engine", lambda url: engine)
+
+    def _boom(*_args, **_kwargs):
+        raise ValueError("bad registry row")
+
+    monkeypatch.setattr(guard_service, "build_identity_index", _boom)
+
+    registry = guard_service.load_cloud_identity_registry(
+        "postgresql://u:p@127.0.0.1:15433/db"
+    )
+
+    message = "建索引失败必须降级成「不可用」, 而不是抛异常"
+    assert registry.available is False, message
+    assert registry.status == "unavailable", message
+    message = "降级原因必须写清楚"
+    assert registry.reason, message
+    message = "连接仍必须被 dispose"
+    assert engine.disposed == 1, message
+
+
 # ---------------------------------------------------------------------------
 # 判定口径(纯函数)
 # ---------------------------------------------------------------------------
@@ -656,7 +749,12 @@ class _FakeEngine:
 class _BrokenEngine:
     """写入必炸的引擎(用来验证「记事件失败不阻塞同步」)。"""
 
+    def __init__(self) -> None:
+        #: 被调用了几次 —— 用它证明「事件记录器确实被调用过」(防空转)。
+        self.begin_calls = 0
+
     def begin(self):
+        self.begin_calls += 1
         raise RuntimeError("local database unavailable")
 
 

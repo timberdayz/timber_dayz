@@ -253,7 +253,7 @@ class CloudBClassAutoSyncWorker:
                 task.last_error = (
                     result.get("error")
                     or result.get("detail")
-                    or "部分行因行内身份矛盾未落库, 需人工确认店铺归属"
+                    or "部分行因行内身份矛盾或被双基准降级未落库, 需人工确认店铺归属"
                 )
                 task.error_code = self._result_error_code(result)
                 task.next_retry_at = None
