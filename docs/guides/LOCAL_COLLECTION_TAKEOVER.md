@@ -156,6 +156,50 @@ skip the preflight/backup guard. The structured local audit trail is written to
 `logs/local-console/startup-audit.jsonl` and contains only redacted protocol
 fields for failure trend analysis.
 
+## Cloud Baseline And Local Increment Scope
+
+Read this before you compare any number between the collection laptop and the
+cloud, and before you treat a difference between the two as a bug.
+
+Three rules define how data is split between the two environments:
+
+1. **The cloud database is the historical baseline.** Every historical figure
+   the business reports on is defined by the cloud database. The collection
+   laptop never becomes a second, competing source of history.
+2. **The local database on the collection laptop only handles increments.** It
+   is a working buffer for what the laptop collects and hands over to the
+   cloud, not an archive of business history.
+3. **Cross-environment reconciliation is only comparable after 2026-07.**
+   Before that date, the local `b_class` history does not line up with the
+   cloud baseline.
+
+### Why 2026-07 Is The Cut-off
+
+The local `b_class` history on the collection laptop only starts to follow the
+cloud baseline from 2026-07 onward. Everything the laptop recorded before that
+date was collected under an earlier baseline, so the two environments were
+counting from **different starting points**.
+
+That means a difference between the laptop and the cloud for a period **before
+2026-07 is not a data error**. It is two environments measuring from
+different baselines. Do not "fix" it by re-collecting the period, by
+backfilling it, or by editing history on either side.
+
+From 2026-07 onward both environments follow the same baseline, so the two
+sides can be compared normally. If a cross-environment difference shows up for
+a period **after** 2026-07, that is a real synchronization problem and should
+be investigated as one.
+
+### What This Means In Practice
+
+- Comparing totals across the two environments: only do it for 2026-07 and
+  later. Before that date, expect a gap and do not treat it as a defect.
+- Reporting history: take it from the cloud, not from the laptop.
+- A rebuild of the local database (see the next section) is only ever about
+  restoring the laptop to the **current** schema and current baseline. It
+  never changes the cloud's history and never backfills the laptop's earlier
+  history.
+
 ## Controlled Local Database Rebuild
 
 When cloud data is the authority and the Local Console reports
