@@ -32,15 +32,25 @@ miaoshou 采集 采集方代号(数据来源, 不是店铺)                  ``x
 ----------------
 **由行内 ``raw_data`` 里的稳定锚点决定, 由语义层归一。**
 
-* 行内 ``raw_data['shop_account_id']`` —— 最可靠的一路(改名不变、跨平台一致);
-* 行内 ``raw_data['platform_shop_id']`` —— 平台编号(会被采集器污染, 次之);
-* 行内中文 ``店铺`` 列 / ``store_name`` —— 兜底。
+「哪个身份信号最可信」的**权威定义**在仓库的唯一台账声明里
+(``modules/core/shop_identity_ssot.py::IDENTITY_SIGNAL_PRIORITY``) ——
+账号章(``shop_account_id``)最可靠、``platform_shop_id`` 次之、
+行内中文 ``店铺`` 列 / ``store_name`` 兜底。
+
+⚠️ **本文件不再抄第二份** —— 认人优先级只有那一份定义, Python 代码与两份
+SQL 资产都从那里导出, 守护测试
+(``backend/tests/test_shop_identity_ssot_declaration.py``)强制三者一致。
 
 语义层把它们当作**并列候选**,去主数据候选池
 (``sql/semantic/shop_identity_resolution_candidates.sql``)里反查,
 候选数恰好为 1 ⇒ 归属唯一; 否则落 ``unknown`` 并由看板告警。
 
 ⇒ **规范店铺键由语义层输出**, 不是这一列。
+
+⚠️ 语义层输出的**规范键**当前是「平台编号优先」
+(``COALESCE(platform_shop_id, shop_account_id, id)``), 与上面「归属判定」的
+账号章优先**方向相反** —— 这是一处**已知例外**, 被看板显示名映射表的键依赖
+锁死, 本轮不动; 口径与解除条件见 ``modules/core/shop_identity_ssot.py``。
 
 这一列的正当职责
 ----------------

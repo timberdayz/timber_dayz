@@ -935,7 +935,7 @@ class DataIngestionService:
                     # core.shop_accounts 里的登记值 ⇒ 行内只剩一套身份。
                     #
                     # ⚠️ 权威口径的 SSOT:
-                    #    modules/core/fact_identity_columns.py「身份到底由谁决定」
+                    #    modules/core/shop_identity_ssot.py(《店铺身份唯一台账声明》)
                     #    ⇒ 收敛顺序必须与它、与语义层候选池**三处一致**,
                     #      否则同一行在入库侧与语义层会解析到不同的账号。
                     #

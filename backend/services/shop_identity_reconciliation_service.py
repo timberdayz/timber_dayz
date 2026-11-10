@@ -22,16 +22,20 @@
 
 为什么「账号章优先」
 --------------------
-这一行到底属于哪个店, 权威定义写在仓库的 SSOT 里
-(``modules/core/fact_identity_columns.py`` 「身份到底由谁决定」):
+这一行到底属于哪个店, 权威定义写在仓库的**唯一台账声明**里
+(``modules/core/shop_identity_ssot.py`` —— 认人优先级只在那里定义一次):
 
 * 行内 ``raw_data['shop_account_id']`` —— **最可靠的一路**(改名不变、跨平台一致);
 * 行内 ``raw_data['platform_shop_id']`` —— 平台编号(会被采集器污染, 次之);
 * 行内中文 ``店铺`` 列 / ``store_name`` —— 兜底。
 
+⇒ 本模块**不自己写第二份**优先级: :data:`SIGNAL_PRIORITY` 直接引用那份声明里的
+:data:`modules.core.shop_identity_ssot.IDENTITY_SIGNAL_PRIORITY`。
+
 语义层候选池(``sql/semantic/shop_identity_resolution_candidates.sql``)
 早在 2026-11-06 就照这个口径把 ``shop_account_id`` 提到 priority 1、
-``platform_shop_id`` 降到 priority 2 —— 与 SSOT 一致。
+``platform_shop_id`` 降到 priority 2 —— 与 SSOT 一致; 两侧数字由
+``backend/tests/test_shop_identity_ssot_declaration.py`` 守护不漂移。
 
 ⚠️ 入库侧此前是**反的**(``platform_shop_id`` 排第 1、``shop_account_id`` 排第 3),
 与 SSOT / 语义层互相矛盾。采集机那台库的 ``core.shop_accounts.platform_shop_id``
@@ -86,6 +90,7 @@ from typing import Any, Iterable, Mapping
 
 from backend.utils.text_normalization import normalize_alias_key
 from modules.core.fact_identity_columns import COLLECTION_SOURCE_IDS
+from modules.core.shop_identity_ssot import IDENTITY_SIGNAL_PRIORITY
 from modules.core.validators import normalize_enum_value
 
 
@@ -98,26 +103,27 @@ RECONCILIATION_ENABLED = os.getenv(
 
 #: 信号优先级 —— **账号章最权威**。
 #:
-#: 顺序即「同一串值同时命中多个信号时先听谁的」:
+#: ⚠️ **本模块不定义优先级**, 只引用仓库的唯一台账声明
+#: (:data:`modules.core.shop_identity_ssot.IDENTITY_SIGNAL_PRIORITY`):
 #:
 #: 1. ``shop_account_id``   —— 账号章(改名不变、跨平台一致、采集器写不坏)
 #: 2. ``platform_shop_id`` —— 主数据登记的平台编号(会被采集器污染、平台换 ID 就失效)
 #: 3. ``shop_id``           —— 行内那列(Shopee 是编号 / TikTok 是导出店名)
 #: 4. ``store_name``        —— 店名
 #:
-#: ⚠️ 必须与 SSOT(``modules/core/fact_identity_columns.py``)和语义层候选池
+#: 顺序即「同一串值同时命中多个信号时先听谁的」。
+#:
+#: ⚠️ 必须与语义层候选池
 #: (``sql/semantic/shop_identity_resolution_candidates.sql``, 2026-11-06 起
 #: ``shop_account_id`` 就是 priority 1、``platform_shop_id`` 是 priority 2)保持一致 ——
 #: 三处口径必须一样, 否则同一行在入库侧与语义层会解析到**不同的账号**。
+#: 守护测试: ``backend/tests/test_shop_identity_ssot_declaration.py``。
+#:
+#: 对外名字保持不变(其它调用方按 ``SIGNAL_PRIORITY`` 引用), 但**值**来自 SSOT。
 #:
 #: ``store_name`` 命中不到主数据店名时会自动退回别名索引(见 :meth:`IdentityIndex.lookup`),
 #: 所以 TikTok 的导出店名(``DAONE Mall`` 之类)也能认到账号。
-SIGNAL_PRIORITY = (
-    "shop_account_id",
-    "platform_shop_id",
-    "shop_id",
-    "store_name",
-)
+SIGNAL_PRIORITY = IDENTITY_SIGNAL_PRIORITY
 
 #: ``raw_data`` 里承载「店铺标签」的键 —— 语义层的 ``store_label_raw`` 会读到它们。
 _STORE_NAME_KEYS = ("店铺", "店铺名", "店铺名称", "store_name", "store_label_raw")
@@ -513,7 +519,9 @@ def reconcile_identity(
 ) -> ReconciliationResult:
     """把一组身份信号解析成「唯一归属账号」。
 
-    按 :data:`SIGNAL_PRIORITY` 的顺序逐个信号反查:
+    按 :data:`SIGNAL_PRIORITY`(即仓库唯一台账声明里的认人优先级
+    :data:`modules.core.shop_identity_ssot.IDENTITY_SIGNAL_PRIORITY`)的顺序
+    逐个信号反查:
 
     * 命中**唯一**账号 ⇒ 该账号即归属(第一个命中的说了算);
     * 命中**多个**账号 ⇒ 该信号**歧义** ⇒ 不可用, 换下一个信号;
