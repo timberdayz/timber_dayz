@@ -259,9 +259,9 @@ Live deployment verified:
 - 触发：采集机交来的 10 项问题单（`docs/` 外的采集机本地报告）→ 本地主干逐项复核
 - 业务决策（2026-11-10）：**沿用 2026-11-06 决定 —— 只保未来，历史数据不修**
 
-批次 1（代码加固，走 PR）已完成，5 笔提交，PR **#3**：
+批次 1（代码加固，走 PR）已完成，7 笔提交，PR **#3**：
 `https://github.com/timberdayz/timber_dayz/pull/3`
-（分支 `feature/2026-11-10-shop-identity-future-proofing`，base `main` @ `eece117a`，5 commits / 13 files）
+（分支 `feature/2026-11-10-shop-identity-future-proofing`，base `main` @ `eece117a`，7 commits / 13 files）
 
 | 项 | 提交 | 内容 | 状态 |
 |---|---|---|---|
@@ -270,8 +270,20 @@ Live deployment verified:
 | 1.3 | `88504f70` | `--check --json` 序列化加固（datetime/date/Decimal 归一化收敛到一个入口） | ✅ |
 | 1.4 | `570bbc43` | celery 注入 `CLOUD_DATABASE_URL` + 容器内回环地址重写（**只在容器里**重写） | ✅ |
 | — | `07c56053` | 方案文档 + 本索引条目 | ✅ |
+| — | `6d356743` | STATUS 补 PR 链接、订正验证数字 | ✅ |
+| — | `1c3f6a76` | 纯排版：compose 守护用例按 CI 侧 black 换行（见下方「已知坑」） | ✅ |
 
 验证：目标测试集 **197 passed**；`scripts/diff_pytest_junit.py` 判定 **NEW failures = 0**（ADDED 45 条，1 条改名 `test_numbering_wins_over_label` → `test_account_id_wins_over_platform_number`）。
+
+**已知坑（CI 格式门禁）**：CI 的 `test` job 跑在 **Python 3.11**（`ubuntu-latest` + `setup-python`），
+本地是 **Python 3.13**。两端是**同一个** `black==25.1.0`（`requirements-dev.txt` 钉死，CI 装的是
+`black-25.1.0-cp311` wheel），但对 `assert 条件, (消息)` 这种**括号换行写法**给出不同排版：
+3.11 侧要求折成 `assert (\n    条件\n), 消息`，3.13 侧接受原写法。
+
+- ⇒ 本地 `black --check` 绿灯 **不等于** CI「Code formatting check」绿灯
+  （PR #3 前两次 CI run `42837783313` / `42838611430` 都红在这一步）。
+- ⇒ 本 PR 已统一成**两侧都接受**的新写法（`1c3f6a76`，纯排版，断言语义与消息文本一字未动）。
+- ⇒ 后续改动：提交前按 3.11 侧排版写（消息折到条件后面），别只信本地 `--check`。
 
 批次 0（只读对账，采集机执行）、批次 2（主数据对齐）、批次 3（巡检与告警）、批次 4（清理与文档）**未开始**。
 
