@@ -27,6 +27,10 @@ from backend.services.cloud_b_class_sync_service import (
     SQLAlchemyBClassSourceReader,
     SQLAlchemyCloudWriter,
 )
+from backend.services.cloud_sync_identity_guard_service import (
+    CloudSyncIdentityGuardEventRecorder,
+    load_cloud_identity_registry,
+)
 from modules.core.db import CloudBClassSyncTask
 
 
@@ -343,6 +347,37 @@ def _load_identity_index(local_engine):
         return None
 
 
+def _load_cloud_identity_registry(dry_run: bool):
+    """从 **云端** 读店铺账号登记信息(批次 3.7 双基准守卫)。
+
+    为什么推送前还要读一次云端
+    --------------------------
+    同步侧的身份判定只看**本地**那份登记信息。两边不同步时(采集机本地台账
+    与云端台账不一致), 本地判「自洽」的行推到云端后, 云端会用**云端**的
+    登记去解释 ⇒ 可能指向别的店 ⇒ **归属塌陷**(语义层落 ``unknown``)。
+
+    ⇒ 推送前再比一次: 两边不一致 ⇒ 该行降级为可观测事件(不写云端)。
+
+    连接怎么建怎么关
+    ----------------
+    * 连接串**只从环境变量读**(:envvar:`CLOUD_DATABASE_URL`)—— 源码里没有任何
+      连接串字面量;
+    * 引擎**只读**、**短命**: 建 → 查两张表 → ``finally`` 里 ``dispose()``;
+    * ⚠️ **不做主机名重写**: 采集机的云端同步 worker 跑在**宿主进程**
+      (``scripts\\start_collection_formal.ps1``), 那里 ``127.0.0.1`` 就是宿主
+      自己 ⇒ 换成 ``host.docker.internal`` 反而连不上。现有同步链路也是原样
+      使用 ``CLOUD_DATABASE_URL`` ⇒ 这里与它保持一致。
+
+    读不到时返回 ``status='unavailable'`` 的登记信息 ⇒ 调用方**退回本地
+    单基准判定**(行为与改造前一致), 并记一条「双基准不可用」事件 ——
+    **绝不能因为云端连不上就把同步搞挂。**
+    """
+    if dry_run:
+        # dry_run 不写任何东西 ⇒ 不必去连云端。
+        return None
+    return load_cloud_identity_registry()
+
+
 def _build_cloud_sync_service(
     *,
     local_engine,
@@ -362,6 +397,10 @@ def _build_cloud_sync_service(
         cloud_engine,
         dry_run=dry_run,
         identity_index=_load_identity_index(local_engine),
+        # 双基准守卫: 本地登记信息 vs **云端**登记信息(批次 3.7)。
+        cloud_registry=_load_cloud_identity_registry(dry_run),
+        # 可观测事件落**本地** ``ops.pipeline_run_log``(云端连不上时也写得下)。
+        guard_event_recorder=CloudSyncIdentityGuardEventRecorder(local_engine),
     )
 
     def inspect_tables():
