@@ -55,6 +55,27 @@ powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Sync `
 git remote set-url origin "https://github.com/timberdayz/timber_dayz.git"
 ```
 
+> ⚠️ **`git remote set-url origin <ssh-url>` does NOT change the URL that `git push`
+> actually uses.** This repo keeps `remote.origin.pushurl` with several entries
+> (GitHub over HTTPS + CNB over HTTPS), and `set-url` only rewrites the *fetch*
+> URL. A push still goes to the stale `github.com:443` entry and times out.
+> Measured 2026-11-10.
+>
+> **Always push GitHub by URL**, never through the remote name:
+>
+> ```powershell
+> $env:GIT_SSH_COMMAND = 'ssh -i C:/Users/18689/.ssh/github_actions_deploy -o IdentitiesOnly=yes'
+> git push "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git" HEAD:refs/heads/main
+> ```
+>
+> `scripts/sync_main_mirrors.ps1 -Sync` already does the right thing: it pushes
+> by explicit URL (`$GitHubUrl` / `$CnbUrl`) rather than by remote name, so it
+> works even while `origin` still points at the unreachable HTTPS form. The
+> `set-url` dance above is only needed to let the script's **fetch** step
+> (`git fetch --prune origin`) resolve `origin/main`; the script then restores
+> nothing by itself, so **restore the HTTPS form yourself afterwards** and
+> verify with `git remote -v`.
+
 The two-mirror contract is unchanged (both remotes still receive the same commit);
 only the transport to GitHub differs. Verified 2026-11-03: both mirrors ended at the
 same SHA.
