@@ -80,6 +80,51 @@ The two-mirror contract is unchanged (both remotes still receive the same commit
 only the transport to GitHub differs. Verified 2026-11-03: both mirrors ended at the
 same SHA.
 
+### Release Tag Parity Across Mirrors (CNB Git is a mirror, not a deploy trigger)
+
+Every release tag must exist on **both** mirrors with the **same tag object**:
+
+```powershell
+git ls-remote --tags cnb refs/tags/vX.Y.Z
+git ls-remote --tags "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git" refs/tags/vX.Y.Z
+```
+
+Both lines must print the same object id (annotated tags also peel with `^{}`).
+
+**Pushing a tag to CNB Git is inert** (verified 2026-11-10, before backfilling `v7.19.3`):
+
+- The repo has **no `.cnb.yml`**, and never had one on any branch
+  (`git log --all --diff-filter=A --name-only -- '.cnb.yml'`) ⇒ CNB has no in-repo pipeline definition.
+- The CNB remote exposes only `HEAD`, `refs/heads/main` and `refs/tags/*` — **no pipeline refs**.
+- CNB Git's documented role is **code mirror only**; the CNB **image registry** is fed by the GitHub
+  deploy workflow itself (`deploy-production.yml` logs in to `docker.cnb.cool` with `CNB_TOKEN` and
+  pushes the `vX.Y.Z` images there).
+- Empirically: the `v7.19.4` tag **was** pushed to CNB Git, and the production host recorded
+  **exactly one** deploy batch afterwards (`/opt/xihong_erp/deploy-logs`, batch `20261110_123449`),
+  with container `StartedAt` unchanged at `04:38–04:42Z`. A CNB-side tag trigger would have produced
+  a second batch.
+
+> ⚠️ The **GitHub** side is different: `deploy-production.yml` triggers on `push tag v*`, so pushing a
+> **new** tag to GitHub **deploys to production**. Never backfill a tag on the GitHub side — backfill
+> the mirror (CNB) only, and only with a tag object that already exists locally.
+
+**Procedure when a mirror is missing a tag** (measured 2026-11-10, `v7.19.3` missing on CNB):
+
+```powershell
+# 1. confirm object identity before writing anything
+git rev-parse v7.19.3
+git ls-remote --tags "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git" refs/tags/v7.19.3
+
+# 2. push the SAME existing object to the mirror only (never re-create it)
+git push cnb 'refs/tags/v7.19.3:refs/tags/v7.19.3'
+
+# 3. re-verify parity
+git ls-remote --tags cnb refs/tags/v7.19.3
+```
+
+After the push, confirm **no deployment was triggered**: `gh run list --workflow deploy-production.yml`
+must still show the previous release, and the production `deploy-logs` directory must show no new batch.
+
 ### Redis Authentication
 
 - **Production** (`docker-compose.prod.yml`):
