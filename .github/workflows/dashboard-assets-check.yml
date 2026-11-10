@@ -64,6 +64,23 @@ jobs:
         run: |
           python scripts/verify_sql_asset_hygiene.py
 
+      - name: Provision schema (空库两段式引导)
+        # CI 的 postgres service 是**空库**：没有 core / ops / mart / semantic 等 schema，
+        # 脚本 import 时 CREATE TABLE core.field_alias_rules 直接失败
+        # （ERROR: schema "core" does not exist）。
+        #
+        # 仓库已有现成的两段式引导入口 scripts/bootstrap_fresh_environment.py：
+        #   第一段升到 20261116 前一个节点 → 注入引导账号 → 第二段升到 head。
+        # --allow-gate-profile 是**占位值** profile，脚本自己会打 WARN，
+        # 仅允许用于一次性临时库 —— CI 的 service PG 正是这种（真实环境必须走 --manifest）。
+        #
+        # 实测（本地一次性 postgres:16-alpine，空库）：
+        #   两段式引导 exit 0 / 24.7s ⇒ 随后的看板资产引导 exit 0、ready: True。
+        env:
+          DATABASE_URL: postgresql://erp_user:erp_pass@127.0.0.1:5432/xihong_erp_ci
+        run: |
+          python scripts/bootstrap_fresh_environment.py --allow-gate-profile
+
       - name: Bootstrap dashboard assets
         # DATABASE_URL 必须走**环境变量**，不能只写进 .env：
         #
