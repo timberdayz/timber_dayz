@@ -1,10 +1,24 @@
 # Changelog - 西虹 ERP 系统
 
-## [未发布] - 迁移链 PG 契约用例常态化进 CI
+## [v7.19.5] - 2026-11-10 - 采集组件白名单对齐实际资产 + 迁移链 PG 契约用例全量进 CI 门禁
 
 ### 一、用户能感知到的修复
 
-**没有用户可感知的修复。** 本次只动 CI 门禁与文档，**不改变任何运行时行为、不碰生产**。
+1. **采集组件白名单不再声称「仓库里并不存在的组件入口」**
+   - 之前：canonical 组件白名单（`backend/domains/collection/routers/component_versions.py`）里列着
+     **3 个仓库里根本不存在**的文件：`shopee/orders_export.py`、`shopee/finance_export.py`、
+     `miaoshou/export.py` —— 订单导出早已随「各平台订单统一走妙手采集」迁到妙手侧按平台分文件。
+   - 现在：幽灵条目已删除，并加了守护用例
+     `backend/tests/test_collection_component_topology.py::test_canonical_component_files_all_exist_on_disk`
+     ⇒ 白名单里每个文件都必须真实存在于 `modules/platforms/<platform>/components/`，
+     组件目录再变而清单没跟，随时变红。
+   - 影响面（实测，非推测）：这份清单目前只被 `tools/test_component.py` 当**磁盘文件过滤器**用；
+     `_is_canonical_component_file()` 走的是文件名**规则**、不看这份按平台的清单
+     ⇒ **不造成运行时故障**，此前只是误导人（以为 shopee 还有订单导出入口）。
+
+2. **根 `tests/` 里依赖真实 PostgreSQL 的契约用例，全部进入 CI 常态门禁**
+   - 这是 v7.19.4 发版记录第七节遗留项 ① 的收口：此前这批用例**只能在本地跑**
+     （CI runner 没有 15432 端口的 PG），口径漂移会潜伏好几天才被发现。
 
 ### 二、场景变化
 
@@ -33,12 +47,31 @@
    - **不需要改任何代码**：`tests/db_test_config.py` 本来就支持这组环境变量覆盖、缺省仍是 15432
      ⇒ 本地行为完全不变。
    - 至此，根 `tests/` 里**依赖真实 PostgreSQL 的三个文件全部进入 CI 常态门禁**。
+   - 实测（Ubuntu runner）：**12 passed / 134.70s**，**零 skip、零环境性红**
+     ⇒ 是真跑，不是「连不上就跳过」的假绿。
+
+4. **两处 `ComponentVersion.is_stable == True` 改为 `.is_(True)`**
+   - PostgreSQL 下 `IS true` 与 `= true` 的**筛选结果完全一致**（两者都排除 NULL 行）
+     ⇒ 语义不变，同时不再触发 ruff E712。
 
 ### 三、为什么必须常态化
 
 这里守着 20261215 回填「**跳过并记日志**」的语义。口径一旦漂移（例如有人把回填谓词放宽），
 老库升级会重新卡在只读触发器上——而这类问题**只有跑在真 PG 上才暴露**
 （2026-11-10 的那一次就是靠它抓出来的，而不是等发版炸生产）。
+
+### 四、验证与生产影响
+
+| 检查 | 结果 |
+|---|---|
+| `CI Pipeline` | **success**，9 个 job 全绿 |
+| `migration-pg-contract` | **12 passed / 134.70s**（真跑、零 skip） |
+| `Docker Build and Push` / `Validate Data Flow` | success |
+| 生产数据影响 | **零迁移、零数据改动**（本次不含任何迁移改动） |
+
+- 白名单清理只影响采集组件清单的**准确性**；`IS true` 与 `= true` 筛选结果一致
+  ⇒ **运行期行为不变**。
+- CI 门禁与文档改动**不影响生产运行时**。
 
 ## [v7.19.4] - 2026-11-10 - 空库能从零建起来 + 老库升级不再卡在触发器 + 测试目录不再静默腐烂
 
