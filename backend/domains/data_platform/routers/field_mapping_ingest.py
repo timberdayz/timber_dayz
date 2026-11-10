@@ -17,6 +17,9 @@ import re
 from backend.models.database import get_async_db, FieldMapping, CatalogFile
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
+
+# [*] 2026-11-10: 派发 Celery 任务时把发布动作移出 asyncio 事件循环。
+from backend.utils.celery_dispatch import dispatch_task
 from backend.services.field_mapping.mapper import suggest_mappings
 from backend.services.data_validator import (
     validate_orders,
@@ -1059,11 +1062,15 @@ async def ingest_file(
             try:
                 from backend.tasks.image_extraction import extract_product_images_task
 
-                extract_product_images_task.delay(
-                    file_id=file_id,
-                    file_path=file_record.file_path,
-                    platform_code=platform,
-                    shop_id=file_record.shop_id or "unknown",
+                # [*] 2026-11-10: 走 dispatch_task 发布, 不阻塞事件循环
+                await dispatch_task(
+                    extract_product_images_task,
+                    kwargs={
+                        "file_id": file_id,
+                        "file_path": file_record.file_path,
+                        "platform_code": platform,
+                        "shop_id": file_record.shop_id or "unknown",
+                    },
                 )
                 # 只有派发成功才标记为「已启动」(失败时对外如实显示 skipped)
                 image_extraction_started = True

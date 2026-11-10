@@ -33,6 +33,9 @@ import asyncio
 
 from modules.core.db import CatalogFile
 from modules.core.logger import get_logger
+
+# [*] 2026-11-10: 派发 Celery 任务时把发布动作移出 asyncio 事件循环。
+from backend.utils.celery_dispatch import dispatch_task
 from backend.services.excel_parser import ExcelParser
 from backend.services.spreadsheet_header_reader import (
     get_spreadsheet_header_reader,
@@ -1299,11 +1302,15 @@ class DataIngestionService:
                         extract_product_images_task,
                     )
 
-                    extract_product_images_task.delay(
-                        file_id=file_id,
-                        file_path=file_record.file_path,
-                        platform_code=platform,
-                        shop_id=file_record.shop_id or "unknown",
+                    # [*] 2026-11-10: 走 dispatch_task 发布, 不阻塞事件循环
+                    await dispatch_task(
+                        extract_product_images_task,
+                        kwargs={
+                            "file_id": file_id,
+                            "file_path": file_record.file_path,
+                            "platform_code": platform,
+                            "shop_id": file_record.shop_id or "unknown",
+                        },
                     )
                     # 只有派发成功才标记为「已启动」
                     image_extraction_started = True

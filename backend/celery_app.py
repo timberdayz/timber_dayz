@@ -61,11 +61,30 @@ _celery_result_backend = os.getenv("CELERY_RESULT_BACKEND", _redis_url)
 #
 # 注意: 这些**只影响「连不上」时的行为**。Redis 正常时, 派发任务的耗时与
 # 之前完全一样(实测 0.036 秒), 不会因为限了重试而丢任务。
+#
+# [*] 2026-11-10 再收紧一次(生产实测后调整)
+# ------------------------------------------------
+# 生产实测(Redis **健康**,在 backend_api 容器内实测, 与生产代码同一条路径):
+#   Redis PING 中位数 **0.07 ms** / broker 建连 **1.31 ms** /
+#   完整派发 ``send_task(..., ignore_result=True)`` 中位数 **0.52 ms**
+#   ⇒ **正常状态下派发根本不是瓶颈**, 台账里那个「4.1 秒」是
+#   **Redis 不可达时的退化阻塞**, 和 16~17 秒同源, 不是日常耗时。
+#
+# 真正的剩余风险: 退化路径的**同步阻塞**发生在 API 的 asyncio 事件循环里
+# ⇒ Redis 一抖, 全站请求一起挂起。两条对策:
+#   1) 把退化路径的阻塞上限再压一半(本文件): 建连超时 3 -> **1 秒**、
+#      发布重试 2 -> **1 次** ⇒ 阻塞从约 4.1 秒降到约 2 秒量级;
+#   2) 把派发动作**移出事件循环**(``backend/utils/celery_dispatch.py``):
+#      即便 Redis 不可达, 也只有这一个请求在等, **其它请求照常服务**。
+#      2026-11-10 已把 async 上下文里的 7 个派发点全部接上。
+#
+# 建连超时降到 1 秒的依据: Redis 是**同机房**服务, 正常建连是毫秒级
+# (实测 0.07 ms), 1 秒已经足够容忍一次网络抖动; 再久就是「它已经不在了」。
 _REDIS_SOCKET_CONNECT_TIMEOUT = int(
-    os.getenv("CELERY_REDIS_SOCKET_CONNECT_TIMEOUT", "3") or 3
+    os.getenv("CELERY_REDIS_SOCKET_CONNECT_TIMEOUT", "1") or 1
 )
 _CELERY_PUBLISH_RETRY_POLICY = {
-    "max_retries": int(os.getenv("CELERY_PUBLISH_MAX_RETRIES", "2") or 2),
+    "max_retries": int(os.getenv("CELERY_PUBLISH_MAX_RETRIES", "1") or 1),
     "interval_start": 0,
     "interval_step": 0.5,
     "interval_max": 2,

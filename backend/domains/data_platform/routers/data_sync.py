@@ -112,6 +112,10 @@ from backend.services.field_mapping_validator import (
 )
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
+
+# [*] 2026-11-10: 派发 Celery 任务时把发布动作移出 asyncio 事件循环。
+# Redis 不可达时, 原本会在事件循环里同步阻塞数秒 ⇒ 全站请求一起挂起。
+from backend.utils.celery_dispatch import dispatch_task
 from modules.core.db import CatalogFile, CollectionTask
 from modules.core.file_naming import StandardFileName
 from modules.core.logger import get_logger
@@ -695,7 +699,11 @@ async def preview_file(
                 df,
                 data_domain=catalog_record.data_domain or "products",
                 file_size_mb=file_size_mb,
-                source_path=runtime_file_path,
+                # [*] 2026-11-10 修复: 原来这里传的是**从未定义**的 runtime_file_path,
+                # 于是每次预览都会抛 NameError、被下面的 except 吞掉 ->
+                # 表格规范化(合并单元格还原)**静默失效**。正确来源是上面解析好的
+                # 绝对路径 file_path。
+                source_path=file_path,
                 header_row=request.header_row,
             )
         except Exception as norm_error:
@@ -1561,7 +1569,8 @@ async def sync_single_file(
             await quota_service.increment_user_task_count(user_id)
 
             # [*] Phase 4: 使用 apply_async 支持优先级参数
-            celery_task = sync_single_file_task.apply_async(
+            celery_task = await dispatch_task(
+                sync_single_file_task,
                 args=(body.file_id, task_id),
                 kwargs={
                     "only_with_template": body.only_with_template,
@@ -2451,7 +2460,8 @@ async def sync_batch(
             max_concurrent = min(20, max(5, len(file_ids) // 10 + 1))
 
             # [*] Phase 4: 使用 apply_async 支持优先级参数
-            celery_task = sync_batch_task.apply_async(
+            celery_task = await dispatch_task(
+                sync_batch_task,
                 args=(file_ids, task_id),
                 kwargs={
                     "only_with_template": body.only_with_template,
@@ -2644,7 +2654,8 @@ async def sync_batch_by_file_ids(
             max_concurrent = min(20, max(5, len(file_ids) // 10 + 1))
 
             # [*] Phase 4: 使用 apply_async 支持优先级参数
-            celery_task = sync_batch_task.apply_async(
+            celery_task = await dispatch_task(
+                sync_batch_task,
                 args=(file_ids, task_id),
                 kwargs={
                     "only_with_template": body.only_with_template,
@@ -3245,7 +3256,12 @@ async def get_detailed_template_coverage(
             if combo_file_candidates and not valid_combo_file_candidates:
                 # [*] 文件在库里但磁盘上没有 —— 组合仍然计入总体(它属于"要覆盖"的集合),
                 #     只是这轮没法拿样本文件评估。
-                if (platform, domain, sub_domain or None, granularity) in template_combinations:
+                if (
+                    platform,
+                    domain,
+                    sub_domain or None,
+                    granularity,
+                ) in template_combinations:
                     covered_combination_count += 1
                 else:
                     missing_combination_count += 1
@@ -3386,10 +3402,12 @@ async def get_detailed_template_coverage(
 
                         async def _sample_read_at(row: int):
                             if row not in sample_header_cache:
-                                sample_header_cache[row] = await sample_reader.read_header(
-                                    str(sample_file.file_path),
-                                    header_row=row,
-                                    nrows=5,
+                                sample_header_cache[row] = (
+                                    await sample_reader.read_header(
+                                        str(sample_file.file_path),
+                                        header_row=row,
+                                        nrows=5,
+                                    )
                                 )
                             return sample_header_cache[row]
 
@@ -3542,13 +3560,11 @@ async def get_detailed_template_coverage(
                             "update_reason": update_reason,
                             "shadow_compare": shadow_compare,
                             # [*] 漂移快照: 供前端展示「漂移发生时」的模板版本与表头差异
-                            "drift_snapshot": (
-                                drift_group or {}
-                            ).get("drift_snapshot"),
-                            "drift_file_count": (drift_group or {}).get("file_count", 0),
-                            "drift_detected_at": (drift_group or {}).get(
-                                "detected_at"
+                            "drift_snapshot": (drift_group or {}).get("drift_snapshot"),
+                            "drift_file_count": (drift_group or {}).get(
+                                "file_count", 0
                             ),
+                            "drift_detected_at": (drift_group or {}).get("detected_at"),
                         }
                     )
             else:
@@ -4298,7 +4314,8 @@ async def sync_all_with_template(
             await quota_service.increment_user_task_count(user_id)
 
             # [*] Phase 4: 使用 apply_async 支持优先级参数(batch-all 使用默认优先级 5)
-            celery_task = sync_batch_task.apply_async(
+            celery_task = await dispatch_task(
+                sync_batch_task,
                 args=(files_with_template, task_id),
                 kwargs={
                     "only_with_template": True,

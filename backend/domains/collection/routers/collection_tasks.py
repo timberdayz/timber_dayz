@@ -58,8 +58,15 @@ from backend.services.collection_account_runtime_service import (
     load_collection_account_runtime,
 )
 from backend.services.account_proxy_config import resolve_account_proxy
+
+# [*] 2026-11-10: 派发 Celery 任务时把发布动作移出 asyncio 事件循环。
+from backend.utils.celery_dispatch import dispatch_task
 from backend.services.websocket_manager import connection_manager
-from backend.services.collection_task_status import STATUS as TASK_STATUS, TERMINAL_STATUSES, ACTIVE_STATUSES
+from backend.services.collection_task_status import (
+    STATUS as TASK_STATUS,
+    TERMINAL_STATUSES,
+    ACTIVE_STATUSES,
+)
 
 logger = get_logger(__name__)
 
@@ -117,12 +124,14 @@ async def run_config_tasks(
     ),
     db: AsyncSession = Depends(get_async_db),
 ):
-    from backend.services.collection_config_run_service import CollectionConfigRunService
+    from backend.services.collection_config_run_service import (
+        CollectionConfigRunService,
+    )
 
     result = await db.execute(
         select(CollectionConfig).where(
             CollectionConfig.id == config_id,
-            CollectionConfig.is_active == True,
+            CollectionConfig.is_active.is_(True),
         )
     )
     config = result.scalar_one_or_none()
@@ -133,7 +142,10 @@ async def run_config_tasks(
         if isinstance(expected_granularity, str) and str(expected_granularity).strip()
         else None
     )
-    if expected_granularity_value and str(config.granularity or "").strip().lower() != expected_granularity_value:
+    if (
+        expected_granularity_value
+        and str(config.granularity or "").strip().lower() != expected_granularity_value
+    ):
         raise HTTPException(
             status_code=409,
             detail=(
@@ -204,9 +216,17 @@ async def _find_post_collection_catalog_files(
             stmt = stmt.where(CatalogFile.data_domain.in_(data_domains))
         if getattr(task, "granularity", None):
             stmt = stmt.where(CatalogFile.granularity == task.granularity)
-        rows = await db.execute(stmt.order_by(CatalogFile.id.asc()).limit(max(getattr(task, "files_collected", 0) or 1, 1) * 5))
+        rows = await db.execute(
+            stmt.order_by(CatalogFile.id.asc()).limit(
+                max(getattr(task, "files_collected", 0) or 1, 1) * 5
+            )
+        )
         for file_row in rows.scalars().all():
-            metadata = file_row.file_metadata if isinstance(file_row.file_metadata, dict) else {}
+            metadata = (
+                file_row.file_metadata
+                if isinstance(file_row.file_metadata, dict)
+                else {}
+            )
             if (
                 metadata.get("collection_task_id") == task.task_id
                 or metadata.get("task_id") == task.task_id
@@ -229,7 +249,9 @@ async def _enqueue_post_collection_ingest_tasks(
     result: Any | None = None,
 ) -> dict[str, Any]:
     task_row = (
-        await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+        await db.execute(
+            select(CollectionTask).where(CollectionTask.task_id == task_id)
+        )
     ).scalar_one_or_none()
     if task_row is None:
         return {"ingest_status": "skipped", "reason": "collection_task_not_found"}
@@ -249,22 +271,32 @@ async def _enqueue_post_collection_ingest_tasks(
     try:
         task_module = globals().get("sync_single_file_task")
         if task_module is None:
-            from backend.tasks.data_sync_tasks import sync_single_file_task as task_module
+            from backend.tasks.data_sync_tasks import (
+                sync_single_file_task as task_module,
+            )
 
         task_center = TaskCenterService(db)
         for file_row in files:
             existing = (
-                await db.execute(
-                    select(TaskCenterTask)
-                    .where(
-                        TaskCenterTask.task_type == "single_file",
-                        TaskCenterTask.source_file_id == file_row.id,
-                        TaskCenterTask.status.in_(["pending", "queued", "running"]),
+                (
+                    await db.execute(
+                        select(TaskCenterTask)
+                        .where(
+                            TaskCenterTask.task_type == "single_file",
+                            TaskCenterTask.source_file_id == file_row.id,
+                            TaskCenterTask.status.in_(["pending", "queued", "running"]),
+                        )
+                        .order_by(TaskCenterTask.id.desc())
                     )
-                    .order_by(TaskCenterTask.id.desc())
                 )
-            ).scalars().first()
-            single_task_id = existing.task_id if existing else f"single_file_{file_row.id}_{uuid.uuid4().hex[:8]}"
+                .scalars()
+                .first()
+            )
+            single_task_id = (
+                existing.task_id
+                if existing
+                else f"single_file_{file_row.id}_{uuid.uuid4().hex[:8]}"
+            )
             if existing is None:
                 await task_center.create_task(
                     task_id=single_task_id,
@@ -289,14 +321,16 @@ async def _enqueue_post_collection_ingest_tasks(
                     subject_type="catalog_file",
                     subject_id=str(file_row.id),
                 )
-            task_module.apply_async(
+            # [*] 2026-11-10: 走 dispatch_task 发布, 不阻塞事件循环
+            await dispatch_task(
+                task_module,
                 kwargs={
                     "file_id": file_row.id,
                     "task_id": single_task_id,
                     "only_with_template": True,
                     "allow_quarantine": True,
                     "use_template_header_row": True,
-                }
+                },
             )
             ingest_task_ids.append(single_task_id)
 
@@ -325,7 +359,9 @@ async def _enqueue_post_collection_ingest_tasks(
                 details=status_payload,
             )
         except Exception:
-            logger.warning("Failed to mirror post collection ingest warning", exc_info=True)
+            logger.warning(
+                "Failed to mirror post collection ingest warning", exc_info=True
+            )
         return {"ingest_status": "enqueue_failed", **status_payload}
 
 
@@ -425,13 +461,16 @@ async def _mirror_collection_task_log(
     except Exception as exc:
         logger.debug("Collection task log mirror skipped for %s: %s", task_id, exc)
 
+
 # ============================================================
 # 任务 API
 # ============================================================
 
 
 def _build_task_response_payload(task: CollectionTask) -> dict:
-    return _build_task_response_payload_with_runtime_metadata(task, runtime_metadata=None)
+    return _build_task_response_payload_with_runtime_metadata(
+        task, runtime_metadata=None
+    )
 
 
 def _extract_runtime_metadata_from_logs(logs: List[Any]) -> Optional[dict]:
@@ -439,7 +478,11 @@ def _extract_runtime_metadata_from_logs(logs: List[Any]) -> Optional[dict]:
         details = getattr(log, "details", None) or {}
         if not isinstance(details, dict):
             continue
-        if "actual_execution_mode" not in details and "runtime_session_mode" not in details and "login_gate_ready" not in details:
+        if (
+            "actual_execution_mode" not in details
+            and "runtime_session_mode" not in details
+            and "login_gate_ready" not in details
+        ):
             continue
         return {
             "actual_execution_mode": details.get("actual_execution_mode"),
@@ -526,18 +569,40 @@ def _build_task_response_payload_with_runtime_metadata(
         "verification_input_mode": (
             verification_input_mode(verification_type) if verification_type else None
         ),
-        "actual_execution_mode": runtime_metadata.get("actual_execution_mode") if runtime_metadata else None,
-        "runtime_session_mode": runtime_metadata.get("runtime_session_mode") if runtime_metadata else None,
-        "login_gate_ready": runtime_metadata.get("login_gate_ready") if runtime_metadata else None,
-        "login_gate_reason": runtime_metadata.get("login_gate_reason") if runtime_metadata else None,
-        "login_gate_url": runtime_metadata.get("login_gate_url") if runtime_metadata else None,
-        "runtime_strategy_reason": runtime_metadata.get("runtime_strategy_reason") if runtime_metadata else None,
-        "session_source": runtime_metadata.get("session_source") if runtime_metadata else None,
+        "actual_execution_mode": (
+            runtime_metadata.get("actual_execution_mode") if runtime_metadata else None
+        ),
+        "runtime_session_mode": (
+            runtime_metadata.get("runtime_session_mode") if runtime_metadata else None
+        ),
+        "login_gate_ready": (
+            runtime_metadata.get("login_gate_ready") if runtime_metadata else None
+        ),
+        "login_gate_reason": (
+            runtime_metadata.get("login_gate_reason") if runtime_metadata else None
+        ),
+        "login_gate_url": (
+            runtime_metadata.get("login_gate_url") if runtime_metadata else None
+        ),
+        "runtime_strategy_reason": (
+            runtime_metadata.get("runtime_strategy_reason")
+            if runtime_metadata
+            else None
+        ),
+        "session_source": (
+            runtime_metadata.get("session_source") if runtime_metadata else None
+        ),
         # [Task 8] 新字段必须提升到**顶层** —— 前端读的是顶层字段，
         # 只留在 runtime_metadata 嵌套里等于没做。
-        "session_profile_path": runtime_metadata.get("session_profile_path") if runtime_metadata else None,
-        "session_reused": runtime_metadata.get("session_reused") if runtime_metadata else None,
-        "session_proxy": runtime_metadata.get("session_proxy") if runtime_metadata else None,
+        "session_profile_path": (
+            runtime_metadata.get("session_profile_path") if runtime_metadata else None
+        ),
+        "session_reused": (
+            runtime_metadata.get("session_reused") if runtime_metadata else None
+        ),
+        "session_proxy": (
+            runtime_metadata.get("session_proxy") if runtime_metadata else None
+        ),
         "runtime_metadata": runtime_metadata,
     }
 
@@ -801,7 +866,9 @@ async def list_verification_items(
     platform: Optional[str] = Query(None, description="按平台筛选"),
     verification_type: Optional[str] = Query(None, description="按验证码类型筛选"),
     account_id: Optional[str] = Query(None, description="按账号筛选"),
-    status: Optional[str] = Query(TASK_STATUS.VERIFICATION_REQUIRED, description="按状态筛选"),
+    status: Optional[str] = Query(
+        TASK_STATUS.VERIFICATION_REQUIRED, description="按状态筛选"
+    ),
     db: AsyncSession = Depends(get_async_db),
 ):
     stmt = select(CollectionTask)
@@ -1253,13 +1320,9 @@ async def get_history_stats(
     status_result = await db.execute(status_stmt)
     status_stats = status_result.all()
 
-    platform_stmt = (
-        select(CollectionTask.platform, func.count(CollectionTask.id).label("count"))
-        .where(CollectionTask.created_at >= start_date)
-        .group_by(CollectionTask.platform)
-    )
-    platform_result = await db.execute(platform_stmt)
-    platform_stats = platform_result.all()
+    # [*] 2026-11-10 清理: 下面这段「按平台分组」的查询算完之后**从未被使用**
+    # (TaskStatsResponse 里没有 platform 字段), 属于每次请求多打一次库的残留。
+    # 确认过响应结构没有平台维度 => 整段移除, 不改变任何对外行为。
 
     status_dict = {s[0]: s[1] for s in status_stats}
     total = sum(status_dict.values()) or 1
@@ -1552,7 +1615,9 @@ async def _mark_collection_task_running(task_id: str) -> CollectionTask | None:
         task.status = TASK_STATUS.RUNNING
         task.started_at = now
 
-    return await _persist_collection_task_state(task_id, mutate=_mutate, retry_attempts=0)
+    return await _persist_collection_task_state(
+        task_id, mutate=_mutate, retry_attempts=0
+    )
 
 
 async def _mark_collection_task_failed(
@@ -1567,7 +1632,9 @@ async def _mark_collection_task_failed(
         task.error_message = error_message
         task.completed_at = now
 
-    return await _persist_collection_task_state(task_id, mutate=_mutate, retry_attempts=1)
+    return await _persist_collection_task_state(
+        task_id, mutate=_mutate, retry_attempts=1
+    )
 
 
 async def _persist_collection_task_result(
@@ -1576,12 +1643,14 @@ async def _persist_collection_task_result(
 ) -> CollectionTask | None:
     completed_at = (
         None
-        if result.status in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]
+        if result.status
+        in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]
         else datetime.now(timezone.utc)
     )
     duration_seconds = (
         None
-        if result.status in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]
+        if result.status
+        in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]
         else result.duration_seconds
     )
 
@@ -1591,7 +1660,10 @@ async def _persist_collection_task_result(
         task.status = result.status
         if result.status in [TASK_STATUS.COMPLETED, TASK_STATUS.PARTIAL_SUCCESS]:
             task.progress = 100
-        elif result.status in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]:
+        elif result.status in [
+            TASK_STATUS.PAUSED,
+            TASK_STATUS.MANUAL_INTERVENTION_REQUIRED,
+        ]:
             task.progress = max(getattr(task, "progress", 0) or 0, 1)
         else:
             task.progress = 0
@@ -1601,11 +1673,16 @@ async def _persist_collection_task_result(
         task.duration_seconds = duration_seconds
         task.completed_domains = result.completed_domains
         task.failed_domains = result.failed_domains
-        if result.status not in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]:
+        if result.status not in [
+            TASK_STATUS.PAUSED,
+            TASK_STATUS.MANUAL_INTERVENTION_REQUIRED,
+        ]:
             task.verification_type = None
             task.verification_screenshot = None
 
-    task = await _persist_collection_task_state(task_id, mutate=_mutate, retry_attempts=1)
+    task = await _persist_collection_task_state(
+        task_id, mutate=_mutate, retry_attempts=1
+    )
     if result.status in [TASK_STATUS.COMPLETED, TASK_STATUS.PARTIAL_SUCCESS]:
         from backend.models.database import AsyncSessionLocal
 
@@ -1672,7 +1749,9 @@ async def _execute_collection_task_background_v2(
             )
             return
         except Exception as e:
-            logger.exception("Unexpected account runtime failure for %s: %s", account_id, e)
+            logger.exception(
+                "Unexpected account runtime failure for %s: %s", account_id, e
+            )
             failed_task = await _mark_collection_task_failed(
                 task_id,
                 error_message=f"账号运行时预检失败: {str(e)}",
@@ -1949,15 +2028,24 @@ async def _execute_collection_task_background(
                         )
 
                     task.status = result.status
-                    if result.status in [TASK_STATUS.COMPLETED, TASK_STATUS.PARTIAL_SUCCESS]:
+                    if result.status in [
+                        TASK_STATUS.COMPLETED,
+                        TASK_STATUS.PARTIAL_SUCCESS,
+                    ]:
                         task.progress = 100
-                    elif result.status in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]:
+                    elif result.status in [
+                        TASK_STATUS.PAUSED,
+                        TASK_STATUS.MANUAL_INTERVENTION_REQUIRED,
+                    ]:
                         task.progress = max(getattr(task, "progress", 0) or 0, 1)
                     else:
                         task.progress = 0
                     task.files_collected = result.files_collected
                     task.error_message = result.error_message
-                    if result.status in [TASK_STATUS.PAUSED, TASK_STATUS.MANUAL_INTERVENTION_REQUIRED]:
+                    if result.status in [
+                        TASK_STATUS.PAUSED,
+                        TASK_STATUS.MANUAL_INTERVENTION_REQUIRED,
+                    ]:
                         task.completed_at = None
                         task.duration_seconds = None
                     else:
