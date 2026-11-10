@@ -190,7 +190,7 @@
 
 | 检查 | 结果 |
 |---|---|
-| `CI Pipeline` | **success**，8 个 job 全绿（run `42792117622`） |
+| `CI Pipeline` | **success**，8 个 job 全绿（run `42792941298`，head `34d73a32`） |
 | `migration-pg-contract` | **12 passed、零 skip**（真跑，不是「连不上就跳过」的假绿） |
 | `test (3.11)`（no-DB 门禁 **45** 个文件） | **380 passed / 10 skipped**；10 个 skip 来自**平台门控**（PowerShell 专有文件在 Ubuntu 跳过 + 需要真实账号的 e2e），不是环境性红。本版把 **3 个**派发/部署守护文件并入常驻清单（42 → 45，**+31 例**） |
 | `Docker Build and Push` / `Validate Data Flow` | success |
@@ -198,6 +198,27 @@
 | `black --check` / `ruff check`（本次改动到的 8 个 .py） | **零差异** / `All checks passed!` |
 | 部署脚本 `bash -n` 语法检查 | 通过（最终改动后重跑） |
 | 生产数据影响 | **零迁移、零数据改动**（本次不含任何迁移改动） |
+
+**生产侧验收（独立 SSH 只读实测，2026-11-10T10:05–10:10Z）**
+
+| 检查 | 结果 |
+|---|---|
+| `Deploy to Production (Tag Release)` | **success**，10 m 8 s，全部步骤 ✓ |
+| 容器 | **7/7 healthy**，镜像全为 **v7.19.5** |
+| `/api/health` | `healthy`、`version=v7.19.5`、`database=connected`、`dashboard=ready`、路由 630、连接池 `size=30 / checked_out=1` |
+| 库版本 | `current_schema_20261223_collection_source_identifiers` —— **未变** |
+| 数据库连接 | **18 条恒定**、`idle in transaction` **0**；最老连接龄每次采样 **+20 s = 采样间隔** ⇒ 无泄漏 |
+| 报错 | 切流后 backend / worker / beat / nginx / frontend **零 traceback** |
+| 派发耗时 | 切流后 `send_task` 中位数 **0.477 ms**（发版前 0.52 ms）⇒ **无回归**；Redis `PING` 中位数 0.682 ms |
+| 派发点 | 容器内 **7 个生产派发点**已全部 `await dispatch_task`，async 上下文无裸 `.delay()` / `.apply_async()` |
+| 服务器资产 | `backups/` **91 → 9 条**、回收 **352 MB**（313 MB 陈旧前端树 + 39 MB 空备份壳）；`pre_deploy_*` 恰好留 3 个（含 v7.19.4 的带 dump 备份）；其它前缀各留 1；**2 个独立 `.dump` 字节数不变**；无关目录未误删 |
+| 网关日志轮转 | 主路径 `/etc/logrotate.d` 因**部署身份无写权限**装不上（预期内）⇒ **用户级 cron 兜底已生效**，且**用户原有 acme.sh 证书续签任务完好**；配置文件已上机；首次轮转在当晚 03:17 |
+
+> 完整验收明细见 `docs/reports/2026-11-10-v7.19.5-生产发版记录.md`。
+>
+> **已知剩余（1 条）**：部署镜像里 `celery_app.py` 的**文件头注释**仍写着旧的「3 秒 / 2 次」
+> （本版只改了代码、漏改那段说明）—— **运行期行为完全正确**（容器内实测就是 1 秒 / 1 次），
+> 已在 tag 之后于 `main` 修正；因 **tag 不可变**，v7.19.5 镜像中的注释保持原样，随下一版本带上。
 
 > **首次发版 CI 抓到的真问题（已修）**：第一轮 CI 里 `test (3.11)` **红在两个既有
 > fail-closed 守护用例**上 —— `backend/tests/test_remote_deploy_migration_contract.py`
