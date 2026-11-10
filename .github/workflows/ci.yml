@@ -271,6 +271,12 @@ jobs:
           # 这里的清单是 2026-11-10 逐条定性后挑出来的**纯源码/契约**用例，
           # 覆盖：组件加载器、执行器容错机制、ORM SSOT 分段、发版可观测性、
           #       镜像同步脚本、云同步载荷契约、采集恢复接口。
+          #
+          # 2026-11-10 第三轮扩：又补进 30 个文件。怎么确认它们不碰数据库的 ——
+          # 把 TEST_DB_PORT 指向不可达端口 1、同时把 DATABASE_URL 指向不可达地址
+          # （db_test_config 走前者、迁移器走后者）⇒ 任何真连库的行为都会立刻失败。
+          # 这样的「无 PG 可达」环境下本地跑 = 225 passed / 37.2s、零 skip、零失败
+          # ⇒ 它们在 CI runner 上不会变成环境性红。
           python -m pytest -q --no-header \
             tests/test_component_loader.py \
             tests/test_robustness.py \
@@ -283,7 +289,37 @@ jobs:
             tests/test_current_schema_migration_contract.py \
             tests/test_rebuild_local_current_schema.py \
             backend/tests/test_bootstrap_seed_manifest.py \
-            backend/tests/test_remote_deploy_migration_contract.py
+            backend/tests/test_remote_deploy_migration_contract.py \
+            tests/test_4c8g_follow_up_acceptance.py \
+            tests/test_alembic_version_table_contract.py \
+            tests/test_cache_service.py \
+            tests/test_capability_filter.py \
+            tests/test_catalog_scanner.py \
+            tests/test_cloud_b_class_mirror_manager.py \
+            tests/test_cloud_b_class_sync_cli.py \
+            tests/test_cloud_b_class_sync_run_logging.py \
+            tests/test_cloud_b_class_sync_schema.py \
+            tests/test_data_query_service.py \
+            tests/test_deploy_production_workflow_tags.py \
+            tests/test_ensure_local_dev_admin.py \
+            tests/test_fallback.py \
+            tests/test_field_mapping_contract.py \
+            tests/test_formal_collection_powershell.py \
+            tests/test_local_migration_backup.py \
+            tests/test_login_success_criteria_injection.py \
+            tests/test_migrate_service_env_contract.py \
+            tests/test_prod_release_fail_closed_contracts.py \
+            tests/test_rebuild_views_materialized_self_heal.py \
+            tests/test_reliability_services.py \
+            tests/test_run_local_port_selection.py \
+            tests/test_smart_wait.py \
+            tests/test_smart_wait_simple.py \
+            tests/test_target_management_api.py \
+            tests/test_unified_health_check.py \
+            tests/test_verify_cloud_sync_local.py \
+            tests/test_verify_release_local.py \
+            tests/test_verify_release_tag_generation.py \
+            tests/test_verify_remote_deploy_contracts.py
 
       - name: Run performance regression entry
         if: matrix.python-version == '3.11'
