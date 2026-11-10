@@ -96,7 +96,7 @@ DEPLOYMENT_COMPOSE_PROJECT="xihong_erp_release_${DEPLOYMENT_ROLLBACK_SUFFIX}"
 # （deploy-production.yml 的 "Backup current deployment" 步骤），
 # 它的时间戳比这个变量略早 ⇒ 保留策略另有一个 ±5 分钟的窗口去兜住它。
 DEPLOYMENT_STARTED_AT_EPOCH="$(date +%s)"
-# perform_pre_migration_backup 会把本次发版创建的备份目录记在这里，保留策略无条件跳过它。
+# 备份步骤会把本次发版创建的备份目录记在这个变量里，保留策略无条件跳过它。
 CURRENT_DEPLOY_BACKUP_DIR=""
 # [ARTIFACT_RETENTION] 保留策略的累计结果（由 remove_deployment_artifact 更新）。
 REMOVED_ARTIFACT_COUNT=0
@@ -869,7 +869,7 @@ prune_backup_group() {
 #   2. **只删目录**，文件一律不删（.dump 就是文件）
 #   3. 本次发版刚创建的备份绝不能删（规则 1 天然包含它，这里再加显式保护）
 #   4. 每条删除都 || true ⇒ 删除失败不能拖垮发版
-#   5. 只在成功发版后调用（DEPLOYMENT_CUTOVER_COMPLETE=1 之后）
+#   5. 只在成功切流（切流标记置位）之后调用
 prune_deployment_artifacts() {
   local production_path="${PRODUCTION_PATH:-}"
   local backups_dir stale_dir
@@ -1784,7 +1784,7 @@ fi
 cleanup_old_images
 
 # [ARTIFACT_RETENTION] 回滚/暂存资产保留策略：发版成功后裁掉旧备份与陈旧前端源码树
-# （放在 DEPLOYMENT_CUTOVER_COMPLETE=1 之后 ⇒ 失败回滚路径上不会删任何东西）
+# （放在切流标记置位之后 ⇒ 失败回滚路径上不会删任何东西）
 prune_deployment_artifacts
 
 echo "[INFO] Cleaning up temporary files..."
