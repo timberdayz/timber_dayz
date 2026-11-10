@@ -79,6 +79,23 @@ _RESOLUTION_PAIR_PATTERN = re.compile(
     r"'([a-z_]+)'::varchar AS resolution_method,\s*(\d+) AS resolution_priority"
 )
 
+#: 「资产是否**真的**从正本视图取数」的精确判定。
+#:
+#: ⚠️ **不能用** ``CANDIDATE_POOL_VIEW in body`` —— 正本名是副本名的**前缀**
+#: (``semantic.shop_identity_resolution_candidates`` 是
+#: ``semantic.shop_identity_resolution_candidates_v2_mv`` 的前缀), 副本文件
+#: 提到**自己的全名**就会被误判成「引用了正本」⇒ 守护形同虚设。
+#: 这里匹配到**标识符边界**为止。
+_CANONICAL_FROM_PATTERN = re.compile(
+    r"FROM\s+semantic\.shop_identity_resolution_candidates(?![_a-zA-Z0-9])"
+)
+
+
+def _derives_from_canonical_view(asset_text: str) -> bool:
+    """资产是否**真的**从正本视图取数(精确到标识符边界)。"""
+    return _CANONICAL_FROM_PATTERN.search(asset_text) is not None
+
+
 #: 语义层「规范店铺键」的派生写法(平台编号优先 —— 已知例外, 见 SSOT 模块)。
 _CANONICAL_KEY_PATTERN = re.compile(
     r"COALESCE\(\s*"
@@ -121,7 +138,11 @@ def test_declaration_matches_candidate_pool_assets() -> None:
         if parsed:
             assert parsed == expected, f"{asset.name} 的优先级与 SSOT 声明不一致"
         else:
-            assert CANDIDATE_POOL_VIEW in body, f"{asset.name} 没优先级也没引用正本"
+            # ⚠️ 断言消息提到变量里(而不是折行)—— 见文件头「格式约定」:
+            #    CI(Python 3.11) 与本地(3.13) 的 black 对 ``assert 条件, (消息)``
+            #    的括号换行判定不同, 只有「消息不折行」这种写法两端才都绿。
+            message = f"{asset.name} 没优先级也没从正本取数 —— 它成了第三份口径"
+            assert _derives_from_canonical_view(body), message
 
 
 def test_candidate_pool_source_asset_declares_the_priority_itself() -> None:
@@ -219,11 +240,28 @@ def test_derived_layer_objects_match_the_candidate_pool_assets() -> None:
 
 
 def test_candidate_pool_assets_derive_from_the_ledger() -> None:
-    """候选池必须**从台账算出来** —— 两份资产都要引用台账两张表。"""
-    for asset in CANDIDATE_POOL_ASSETS:
-        body = _read(asset)
-        assert SHOP_ACCOUNT_TABLE in body
-        assert SHOP_ALIAS_TABLE in body
+    """候选池必须**最终源于台账**, 且**不许出现第三份口径**。
+
+    正本(口径的正本)必须自己引用台账两张表。
+
+    副本允许两种形态 —— 区别只是「口径定义有几份」:
+    * **仍自台账派生**(当前形态)⇒ 必须引用台账两张表;
+    * **改为从正本取数**(律 3 的根治形态)⇒ 必须引用正本视图。
+
+    两种形态下, 候选池的内容都只由台账决定; 但**既不从台账、也不从正本**
+    ⇒ 那就是第三份独立口径, 必须红。
+    """
+    source_body = _read(CANDIDATE_POOL_SOURCE_ASSET)
+    assert SHOP_ACCOUNT_TABLE in source_body
+    assert SHOP_ALIAS_TABLE in source_body
+
+    copy_body = _read(CANDIDATE_POOL_COPY_ASSET)
+    derives_from_ledger = (
+        SHOP_ACCOUNT_TABLE in copy_body and SHOP_ALIAS_TABLE in copy_body
+    )
+    derives_from_source = _derives_from_canonical_view(copy_body)
+    message = "副本既不从台账派生、也不从正本取数 —— 它成了第三份口径"
+    assert derives_from_ledger or derives_from_source, message
 
 
 def test_known_exception_canonical_key_is_declared_and_untouched() -> None:
