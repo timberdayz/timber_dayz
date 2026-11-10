@@ -70,7 +70,7 @@
 
 | 检查 | 结果 |
 |---|---|
-| `CI Pipeline` | **success**，9 个 job 全绿 |
+| `CI Pipeline` | **success**，8 个 job 全绿 |
 | `migration-pg-contract` | **12 passed / 134.70s**（真跑、零 skip） |
 | `Docker Build and Push` / `Validate Data Flow` | success |
 | 生产数据影响 | **零迁移、零数据改动**（本次不含任何迁移改动） |
