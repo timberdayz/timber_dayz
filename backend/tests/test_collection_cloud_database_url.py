@@ -324,9 +324,9 @@ def test_celery_services_receive_cloud_database_url(service_name):
 
     assert service_name in services, f"{service_name} 必须存在于 compose"
     environment = services[service_name]["environment"]
-    assert "CLOUD_DATABASE_URL" in environment, (
-        f"{service_name} 缺 CLOUD_DATABASE_URL, 云端巡检会一直 skipped"
-    )
+    assert (
+        "CLOUD_DATABASE_URL" in environment
+    ), f"{service_name} 缺 CLOUD_DATABASE_URL, 云端巡检会一直 skipped"
 
 
 @pytest.mark.parametrize("service_name", ["celery-worker", "celery-beat"])
@@ -341,9 +341,9 @@ def test_celery_tunnel_host_default_is_not_loopback(service_name):
     raw_host = environment.get("CLOUD_SYNC_TUNNEL_HOST")
     assert raw_host, f"{service_name} 缺 CLOUD_SYNC_TUNNEL_HOST"
     default_host = _compose_default(raw_host)
-    assert default_host.lower() not in LOOPBACK_HOSTS, (
-        f"{service_name} 的 CLOUD_SYNC_TUNNEL_HOST 默认值不能是回环地址: {default_host}"
-    )
+    assert (
+        default_host.lower() not in LOOPBACK_HOSTS
+    ), f"{service_name} 的 CLOUD_SYNC_TUNNEL_HOST 默认值不能是回环地址: {default_host}"
 
 
 def test_celery_worker_and_beat_cloud_settings_are_identical():
@@ -374,9 +374,9 @@ def test_compose_cloud_database_url_default_is_empty():
 
     for service_name in ("celery-worker", "celery-beat"):
         environment = services[service_name]["environment"]
-        assert _compose_default(environment["CLOUD_DATABASE_URL"]) == "", (
-            f"{service_name} 的 CLOUD_DATABASE_URL 默认值应为空"
-        )
+        assert (
+            _compose_default(environment["CLOUD_DATABASE_URL"]) == ""
+        ), f"{service_name} 的 CLOUD_DATABASE_URL 默认值应为空"
 
 
 def test_resolution_is_idempotent():
