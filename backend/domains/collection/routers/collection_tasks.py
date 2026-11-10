@@ -1620,6 +1620,39 @@ async def _mark_collection_task_running(task_id: str) -> CollectionTask | None:
     )
 
 
+async def _alert_standalone_collection_failure(task: CollectionTask | None) -> None:
+    """采集失败**主动告警**（批次 3.4 / 任务单 P2-5）。
+
+    只处理「**不属于配置轮次**」的失败任务（快速采集走这条）：
+    属于配置轮次的任务由轮次收尾时统一聚合告警
+    （``collection_queue_runner.CollectionQueueRunner._finalize_run``）——
+    否则同一轮 7 个店会被拆成 7 条通知。
+
+    告警失败**绝不影响**采集主流程 ⇒ 这里把异常全部吞掉。
+    """
+    if task is None:
+        return
+    if str(getattr(task, "status", "") or "") != TASK_STATUS.FAILED:
+        return
+    if getattr(task, "config_run_id", None) is not None:
+        return
+
+    from backend.models.database import AsyncSessionLocal
+    from backend.services.collection_failure_alert_service import (
+        alert_collection_task_failure,
+    )
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await alert_collection_task_failure(db, task_id=task.task_id)
+    except Exception as exc:  # noqa: BLE001 —— 告警失败不影响采集落库
+        logger.error(
+            "采集失败告警派发失败（不影响采集）: task_id=%s error=%s",
+            getattr(task, "task_id", ""),
+            exc,
+        )
+
+
 async def _mark_collection_task_failed(
     task_id: str,
     *,
@@ -1632,9 +1665,11 @@ async def _mark_collection_task_failed(
         task.error_message = error_message
         task.completed_at = now
 
-    return await _persist_collection_task_state(
+    task = await _persist_collection_task_state(
         task_id, mutate=_mutate, retry_attempts=1
     )
+    await _alert_standalone_collection_failure(task)
+    return task
 
 
 async def _persist_collection_task_result(
@@ -1688,6 +1723,8 @@ async def _persist_collection_task_result(
 
         async with AsyncSessionLocal() as db:
             await _enqueue_post_collection_ingest_tasks(db, task_id, result=result)
+    # [批次 3.4] 只有真正的失败终态才主动告警；``partial_success`` 不算失败。
+    await _alert_standalone_collection_failure(task)
     return task
 
 
