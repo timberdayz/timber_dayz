@@ -71,8 +71,8 @@
 | 检查 | 结果 |
 |---|---|
 | `CI Pipeline` | **success**，8 个 job 全绿 |
-| `migration-pg-contract` | **12 passed / 127.97s**（真跑、零 skip） |
-| `test (3.11)`（no-DB 门禁 42 个文件） | **349 passed / 10 skipped / 16.03s**；10 个 skip 来自**平台门控**（PowerShell 专有文件在 Ubuntu 跳过 + 需要真实账号的 e2e），不是环境性红 |
+| `migration-pg-contract` | **12 passed、零 skip**（真跑，不是「连不上就跳过」的假绿） |
+| `test (3.11)`（no-DB 门禁 42 个文件） | **349 passed / 10 skipped**；10 个 skip 来自**平台门控**（PowerShell 专有文件在 Ubuntu 跳过 + 需要真实账号的 e2e），不是环境性红 |
 | `Docker Build and Push` / `Validate Data Flow` | success |
 | 生产数据影响 | **零迁移、零数据改动**（本次不含任何迁移改动） |
 
