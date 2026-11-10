@@ -1,5 +1,38 @@
 # Changelog - 西虹 ERP 系统
 
+## [未发布] - 迁移链 PG 契约用例常态化进 CI
+
+### 一、用户能感知到的修复
+
+**没有用户可感知的修复。** 本次只动 CI 门禁与文档，**不改变任何运行时行为、不碰生产**。
+
+### 二、场景变化
+
+1. **「迁移链在真实 PostgreSQL 上的契约守护」成为 CI 常态门禁**
+   - 新增独立 job `migration-pg-contract`：跑
+     `tests/test_current_schema_migration_postgres_contract.py`（10 例）。
+   - **不需要 postgres service container**：这个文件的每个用例**自起**临时 `postgres:15` 容器
+     （随机空闲端口），并把连接串通过 `env={**os.environ, "DATABASE_URL": <临时库>}` 传给迁移子进程
+     ⇒ 只要 runner 有 Docker 即可。
+   - 单独开 job（与 `fresh-db-drill` 并行）而不是塞进 `test` job：这条要 Docker + 约 4 分钟，
+     放进 `test` job 会拖慢每次提交的反馈。
+
+2. **纠正一处长期存在的错误判断**（此前把 CI 门禁挡在了门外）
+   - 此前 `ci.yml` 与技术债台账都写「`test_current_schema_migration_postgres_contract.py`
+     需要 `127.0.0.1:15432` 上的本地 PG」—— **这个判断是错的**：它不 import `tests/db_test_config`，
+     全文也不出现 15432。
+   - 真正依赖 15432 的只有两个文件：
+     `tests/test_collection_config_core_schema_migration_contract.py` 与
+     `tests/test_follow_investment_finance_schema_contract.py`（它们才 import `db_test_config`）。
+   - 实测佐证：把环境 `DATABASE_URL` 指向一个**不可达地址**后本地跑该文件，仍是 **10 passed / 196.5 s**
+     ⇒ 它不依赖环境连接串，也不依赖现成数据库。
+
+### 三、为什么必须常态化
+
+这里守着 20261215 回填「**跳过并记日志**」的语义。口径一旦漂移（例如有人把回填谓词放宽），
+老库升级会重新卡在只读触发器上——而这类问题**只有跑在真 PG 上才暴露**
+（2026-11-10 的那一次就是靠它抓出来的，而不是等发版炸生产）。
+
 ## [v7.19.4] - 2026-11-10 - 空库能从零建起来 + 老库升级不再卡在触发器 + 测试目录不再静默腐烂
 
 ### 一、用户能感知到的修复
