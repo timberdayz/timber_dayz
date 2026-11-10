@@ -22,7 +22,7 @@ from backend.services.data_pipeline.dashboard_bootstrap import (
     DASHBOARD_ASSET_AVAILABLE_STATUSES,
     DASHBOARD_MODULE_TARGETS,
     DASHBOARD_REQUIRED_OBJECTS,
-    bootstrap_dashboard_assets,
+    converge_dashboard_assets,
     inspect_dashboard_assets,
     refresh_dashboard_materialization_assets,
 )
@@ -47,7 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--refresh-materializations",
         action="store_true",
-        help="Refresh heavy dashboard materialization targets for the selected module(s)",
+        help=(
+            "Only refresh the heavy dashboard materialization targets "
+            "(skips rebuilding core definitions; does NOT guarantee convergence — "
+            "use the default path for that)"
+        ),
     )
     return parser
 
@@ -123,8 +127,11 @@ async def _async_main(args: argparse.Namespace) -> int:
             return 0 if module_report.get("status") == "ready" else 1
 
         if not args.json:
-            print(f"[bootstrap] module={args.module} phase=core+refresh")
-        report = await bootstrap_dashboard_assets(session, module=args.module)
+            print(
+                f"[bootstrap] module={args.module} phase=core+refresh "
+                "(顺序链：核心重建 → 刷新物化 → 回写指纹 ⇒ 跑一次就收敛)"
+            )
+        report = await converge_dashboard_assets(session, module=args.module)
         await session.commit()
         report["module"] = args.module
         _print_report(report, args.json)

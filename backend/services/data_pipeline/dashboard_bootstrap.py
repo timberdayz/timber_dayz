@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -19,6 +20,9 @@ from backend.services.data_pipeline.refresh_runner import (
     execute_sql_file,
     extract_run_id,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 # ── 积压资产组 ──────────────────────────────────────────────────────────
@@ -351,6 +355,21 @@ async def _upsert_dashboard_asset_state(
     run_id: str | None,
     details_json: dict[str, Any] | None = None,
 ) -> None:
+    # 指纹回写入口的**唯一**一致性闸门（批次 3.6）：
+    # 写入的 applied 必须等于本次算出的 expected —— 否则「跑一次就一定收敛」是假的
+    # （库里是旧定义，表里却写着"已应用新指纹"）。
+    if (
+        asset_fingerprint_applied is not None
+        and asset_fingerprint_expected is not None
+        and asset_fingerprint_applied != asset_fingerprint_expected
+    ):
+        logger.warning(
+            "[DashboardBootstrap] %s 写入的 applied 指纹与本次算出的 expected 不一致: "
+            "applied=%s expected=%s",
+            module_name,
+            asset_fingerprint_applied,
+            asset_fingerprint_expected,
+        )
     await session.execute(
         text(
             """
@@ -696,6 +715,11 @@ async def refresh_dashboard_materialization_assets(
         state = (await _load_dashboard_asset_state(session)).get(module_name, {})
         details = _normalize_json_value(state.get("details_json"))
         refresh_expected = _compute_targets_fingerprint(refresh_targets)
+        # ⚠ 指纹口径必须与 ``bootstrap_dashboard_assets`` **完全一致**
+        # (那边用的是 ``_module_core_plan(module_name)``) —— 否则两条路径写进
+        # ``ops.dashboard_asset_state`` 的 expected/applied 互相打架,
+        # 「跑一次就一定收敛」就成了假话(批次 3.6)。
+        core_expected = _compute_targets_fingerprint(_module_core_plan(module_name))
 
         refresh_run_result = await execute_refresh_plan(
             session,
@@ -732,8 +756,10 @@ async def refresh_dashboard_materialization_assets(
         await _upsert_dashboard_asset_state(
             session,
             module_name=module_name,
-            asset_fingerprint_expected=state.get("asset_fingerprint_expected"),
-            asset_fingerprint_applied=state.get("asset_fingerprint_applied"),
+            # 回写**本次实算**的 core 指纹 —— 上面刚 ``recreate_views=True`` 真的
+            # 重建了 core 定义, 沿用旧 state 的值等于让指纹撒谎(批次 3.6)。
+            asset_fingerprint_expected=core_expected,
+            asset_fingerprint_applied=core_expected,
             status="ready",
             run_id=run_id,
             details_json={
@@ -743,12 +769,44 @@ async def refresh_dashboard_materialization_assets(
                 "refresh_run_id": refresh_run_id,
                 "refresh_targets": refresh_targets,
                 "core_targets": core_targets,
+                "core_fingerprint": core_expected,
             },
         )
 
     report = await inspect_dashboard_assets(session)
     report["run_ids"] = module_run_ids
     report["module"] = module
+    return report
+
+
+async def converge_dashboard_assets(
+    session: AsyncSession,
+    *,
+    module: str = "all",
+) -> dict[str, Any]:
+    """核心 bootstrap → 刷新物化资产 → 回写指纹 ⇒「跑一次就一定收敛」。
+
+    为什么要有这条顺序链（批次 3.6）
+    -------------------------------
+    原来 CLI 的默认路径只做 ``bootstrap_dashboard_assets``（重建 core 定义 + 算指纹回写），
+    而 ``--refresh-materializations`` 是**早返回**的另一条路径（只刷物化、不重建 core）。于是：
+
+    * 只跑 bootstrap ⇒ 物化资产可能还是旧内容，指纹却已写成「已应用」⇒ **撒谎**；
+    * 只跑 ``--refresh-materializations`` ⇒ core 定义没重建，回写的指纹还沿用旧值 ⇒ **不收敛**。
+
+    ⇒ 合并成一条顺序链：先重建 core 并算出指纹，再刷物化，最后由
+    ``refresh_dashboard_materialization_assets`` 用**本次实算**的指纹回写 ⇒
+    跑一次就一定收敛。
+    """
+    core_report = await bootstrap_dashboard_assets(session, module=module)
+    await session.commit()
+    refresh_report = await refresh_dashboard_materialization_assets(
+        session, module=module
+    )
+    await session.commit()
+    report = dict(refresh_report)
+    report["converged"] = True
+    report["core_status"] = core_report.get("status")
     return report
 
 
