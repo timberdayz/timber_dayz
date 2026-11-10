@@ -56,13 +56,29 @@ jobs:
           fi
           echo "ENVIRONMENT=development" >> .env
           echo "USE_POSTGRESQL_DASHBOARD_ROUTER=true" >> .env
-          echo "DATABASE_URL=postgresql+asyncpg://erp_user:erp_pass@127.0.0.1:5432/xihong_erp_ci" >> .env
+          # scheme 用 postgresql://（不是 +asyncpg）：同步引擎直接拿这个串建
+          # create_engine，asyncpg 驱动会让它抛 InvalidRequestError。
+          echo "DATABASE_URL=postgresql://erp_user:erp_pass@127.0.0.1:5432/xihong_erp_ci" >> .env
 
       - name: SQL hygiene
         run: |
           python scripts/verify_sql_asset_hygiene.py
 
       - name: Bootstrap dashboard assets
+        # DATABASE_URL 必须走**环境变量**，不能只写进 .env：
+        #
+        # scripts/bootstrap_postgresql_dashboard.py 直接 import
+        # backend.models.database，而全仓**只有 backend/main.py** 会调
+        # load_project_env(project_root) ⇒ .env 里的 DATABASE_URL 从来没被读过
+        # ⇒ 回落到 backend/utils/config.py 的默认值 localhost:15432
+        # ⇒ Connection refused（本工作流 11-04 才加入、只在 pull_request 触发，
+        #   2026-11-10 之前从未运行过 ⇒ 这条链路是第一次被真正跑到）。
+        #
+        # scheme 用 postgresql://（不是 +asyncpg）：同步引擎直接拿这个串建
+        # create_engine，asyncpg 驱动会让它抛 InvalidRequestError；
+        # 异步引擎由 get_async_database_url 自动换成 postgresql+asyncpg://。
+        env:
+          DATABASE_URL: postgresql://erp_user:erp_pass@127.0.0.1:5432/xihong_erp_ci
         run: |
           python scripts/bootstrap_postgresql_dashboard.py
 
