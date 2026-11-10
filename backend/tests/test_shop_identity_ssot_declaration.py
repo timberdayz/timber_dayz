@@ -66,10 +66,13 @@ RECONCILIATION_SERVICE_PATH = (
 )
 FACT_IDENTITY_COLUMNS_PATH = REPO_ROOT / "modules" / "core" / "fact_identity_columns.py"
 
-CANDIDATE_POOL_ASSETS = (
-    REPO_ROOT / "sql" / "semantic" / "shop_identity_resolution_candidates.sql",
-    REPO_ROOT / "sql" / "semantic" / "shop_identity_resolution_candidates_v2_mv.sql",
+CANDIDATE_POOL_SOURCE_ASSET = (
+    REPO_ROOT / "sql" / "semantic" / "shop_identity_resolution_candidates.sql"
 )
+CANDIDATE_POOL_COPY_ASSET = (
+    REPO_ROOT / "sql" / "semantic" / "shop_identity_resolution_candidates_v2_mv.sql"
+)
+CANDIDATE_POOL_ASSETS = (CANDIDATE_POOL_SOURCE_ASSET, CANDIDATE_POOL_COPY_ASSET)
 
 #: 候选池资产里「候选方法 + 优先级数字」的写法。
 _RESOLUTION_PAIR_PATTERN = re.compile(
@@ -104,14 +107,27 @@ def _parse_resolution_priority(asset_text: str) -> dict[str, int]:
 
 
 def test_declaration_matches_candidate_pool_assets() -> None:
-    """SSOT 声明的优先级必须**逐条等于**两份 SQL 资产里的 ``resolution_priority``。
+    """SSOT 声明的优先级必须**逐条等于**候选池资产里的 ``resolution_priority``。
 
     改了 SQL 不改声明 ⇒ 这里变红。
+
+    ⚠️ 副本若改成「从正本取数」(律 3 的改造), 就不再自带优先级数字 ——
+    此时优先级随正本继承, 但**必须确实引用正本**, 否则就是丢了口径。
     """
     expected = dict(RESOLUTION_METHOD_PRIORITY)
     for asset in CANDIDATE_POOL_ASSETS:
-        parsed = _parse_resolution_priority(_read(asset))
-        assert parsed == expected, f"{asset.name} 的优先级与 SSOT 声明不一致"
+        body = _read(asset)
+        parsed = _parse_resolution_priority(body)
+        if parsed:
+            assert parsed == expected, f"{asset.name} 的优先级与 SSOT 声明不一致"
+        else:
+            assert CANDIDATE_POOL_VIEW in body, f"{asset.name} 没优先级也没引用正本"
+
+
+def test_candidate_pool_source_asset_declares_the_priority_itself() -> None:
+    """候选池**正本**必须自己带着四路优先级数字 —— 它是口径的正本。"""
+    parsed = _parse_resolution_priority(_read(CANDIDATE_POOL_SOURCE_ASSET))
+    assert parsed == dict(RESOLUTION_METHOD_PRIORITY)
 
 
 def test_declaration_covers_exactly_the_four_signals() -> None:
@@ -219,7 +235,7 @@ def test_known_exception_canonical_key_is_declared_and_untouched() -> None:
     assert CANONICAL_SHOP_KEY_EXPRESSION == (
         "COALESCE(platform_shop_id, shop_account_id, id)"
     )
-    body = _read(CANDIDATE_POOL_ASSETS[0])
+    body = _read(CANDIDATE_POOL_SOURCE_ASSET)
     assert _CANONICAL_KEY_PATTERN.search(body), "规范店铺键的派生写法与声明不一致"
 
 
