@@ -339,7 +339,11 @@ $conflictContainers = @(
     "xihong_erp_backend_api",
     "xihong_erp_backend_collector",
     "xihong_erp_celery_worker",
-    "xihong_erp_celery_beat"
+    "xihong_erp_celery_beat",
+    # 前端容器也要停：它的宿主端口由 FRONTEND_PORT 决定（本机 .env 就是 5173），
+    # 而采集模式的前端 Vite 用 strictPort=true 固定 5173
+    # ⇒ 端口被占时 Vite 直接起不来（run.py 的端口回退只对后端端口生效，对 Vite 无效）。
+    "xihong_erp_frontend"
 )
 try {
     Write-StageResult -Stage "stop_conflicting_backend" -Status "started"
