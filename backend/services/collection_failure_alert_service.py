@@ -197,7 +197,10 @@ class CollectionFailureCluster:
 
     @property
     def short_id(self) -> str:
-        return hashlib.sha1(self.fingerprint.encode("utf-8")).hexdigest()[:8]
+        # 仅作告警标题里的短摘要标识（同一轮聚类的人工可读编号），不用于签名/口令/去重安全边界
+        return hashlib.sha1(
+            self.fingerprint.encode("utf-8"), usedforsecurity=False
+        ).hexdigest()[:8]
 
     @property
     def platforms(self) -> list[str]:
