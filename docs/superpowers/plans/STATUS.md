@@ -253,6 +253,25 @@ Live deployment verified:
 - Plan: `docs/superpowers/plans/2026-11-02-collection-profile-only-architecture.md`
 - Spec: `docs/guides/COLLECTION_SESSION_LIFECYCLE.md` (v3.1)
 
+## Shop Identity Future-Proofing & Observability (2026-11)
+
+- Plan: `docs/superpowers/plans/2026-11-10-shop-identity-future-proofing-and-observability.md`
+- 触发：采集机交来的 10 项问题单（`docs/` 外的采集机本地报告）→ 本地主干逐项复核
+- 业务决策（2026-11-10）：**沿用 2026-11-06 决定 —— 只保未来，历史数据不修**
+
+批次 1（代码加固，走 PR）已完成：
+
+| 项 | 内容 | 状态 |
+|---|---|---|
+| 1.1 | 入库收敛信号优先级 → `shop_account_id` 优先（与 SSOT / 语义层候选池对齐） | ✅ |
+| 1.2 | 采集导出路径的**反向**守护（主数据取不到编号 ⇒ 绝不回退 `cnsc_shop_id`） | ✅ |
+| 1.3 | `--check --json` 序列化加固（datetime/date/Decimal 归一化收敛到一个入口） | ✅ |
+| 1.4 | celery 注入 `CLOUD_DATABASE_URL` + 容器内回环地址重写（**只在容器里**重写） | ✅ |
+
+验证：目标测试集 194 passed；`scripts/diff_pytest_junit.py` 判定 **NEW failures = 0**（ADDED 45 条，1 条改名）。
+
+批次 0（只读对账，采集机执行）、批次 2（主数据对齐）、批次 3（巡检与告警）、批次 4（清理与文档）**未开始**。
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
