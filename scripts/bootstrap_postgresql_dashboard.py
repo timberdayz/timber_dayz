@@ -54,7 +54,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _print_report(report: dict, as_json: bool) -> None:
     if as_json:
-        print(json.dumps(report, ensure_ascii=False))
+        # `default=str` 是**最后一道兜底**：
+        # 正常路径上 report 已被 `dashboard_bootstrap` 归一化成 JSON 原生类型
+        # ⇒ 这里不该触发；一旦触发 = 上游还有漏网之鱼。
+        # 但运维不能因为「打印报告」而崩 —— 拿不到结论比拿到一个降级结论更糟。
+        print(json.dumps(report, ensure_ascii=False, default=str))
         return
 
     print("=== PostgreSQL Dashboard Assets ===")
