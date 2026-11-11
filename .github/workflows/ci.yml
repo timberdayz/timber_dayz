@@ -570,7 +570,16 @@ jobs:
           #
           # 为什么必须常态化：20261116 的 fail-closed 前置检查会让**空库**直接跑链必然失败
           # （实测报 6 条「账号不存在」）—— 这类问题在真机上要等到部署当天才暴露。
-          python scripts/validate_migrations_fresh_db.py
+          #
+          # [FIX 2026-11-11] 失败自动重试一次。
+          # 竞态根因已在脚本内修掉（就绪判据从「容器内 socket 版 pg_isready」改成
+          # 「按脚本真正要用的方式真连一次」：TCP + 目标库 + 目标账号）；
+          # 这里再叠一层重试兜住剩余抖动 —— **真失败仍然失败**（步骤退出码取最后一次），
+          # 所以不削弱门禁，只是把「随机红、重跑即绿」收敛掉。
+          python scripts/validate_migrations_fresh_db.py || {
+            echo "[WARN] 首次执行失败，自动重试一次（根因说明见脚本内 probe_postgres_ready）"
+            python scripts/validate_migrations_fresh_db.py
+          }
 
   migration-pg-contract:
     runs-on: ubuntu-latest
@@ -585,11 +594,16 @@ jobs:
           POSTGRES_DB: postgres
         ports:
           - 5432:5432
+        # [FIX 2026-11-11] 就绪探针走 **TCP**（-h 127.0.0.1），不是容器内默认的 unix socket：
+        # 官方 postgres 镜像首次启动会先起一个**只监听 socket** 的临时 server 跑 initdb
+        # ⇒ socket 版 pg_isready 会在 initdb 期间就报「就绪」⇒ 后续按 TCP 连库的用例
+        # 随机撞上 "the database system is starting up"（表现为随机红、重跑即绿）。
+        # health-retries 同步上调（5 → 20），给真启动留足时间。
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -h 127.0.0.1 -U migration_test_user -d postgres"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 20
     env:
       PYTHONPATH: ${{ github.workspace }}
       # 这两个文件通过 tests/db_test_config.py 连 PG。该模块**本来就**支持

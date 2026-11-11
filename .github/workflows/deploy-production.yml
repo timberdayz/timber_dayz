@@ -62,11 +62,15 @@ jobs:
           POSTGRES_DB: migration_test_db
         ports:
           - 5432:5432
+        # [FIX 2026-11-11] 就绪探针走 **TCP**（-h 127.0.0.1），不是容器内默认的 unix socket：
+        # 官方 postgres 镜像首次启动会先起一个**只监听 socket** 的临时 server 跑 initdb
+        # ⇒ socket 版 pg_isready 会在 initdb 期间就报「就绪」⇒ 后续按 TCP 连库的用例
+        # 随机撞上 "the database system is starting up"。health-retries 上调（5 → 20）。
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -h 127.0.0.1 -U migration_test_user -d migration_test_db"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 20
     steps:
       - name: Checkout code (tag)
         uses: actions/checkout@v5
@@ -332,12 +336,24 @@ jobs:
             --network "${NETWORK_NAME}" \
             redis:7-alpine redis-server --requirepass redis_pass_2025
 
+          # [FIX 2026-11-11] 就绪判据改成 **TCP**（pg_isready -h 127.0.0.1）。
+          # 官方 postgres 镜像首次启动会先起一个**只监听 unix socket** 的临时 server
+          # 跑 initdb ⇒ 容器内默认（socket）的 pg_isready 会在 initdb 期间就返回
+          # "accepting connections" ⇒ 这里提前放行 ⇒ 随后**按 TCP 连库**的后端容器
+          # 撞上 "the database system is starting up"。探针改 TCP 后，判据与
+          # 后端容器真正要用的连法一致；并补上 fail-closed（超时即失败，不静默继续）。
+          PG_READY=0
           for i in $(seq 1 60); do
-            if docker exec xihong_erp_backend_smoke_postgres pg_isready -U erp_user -d xihong_erp >/dev/null 2>&1; then
+            if docker exec xihong_erp_backend_smoke_postgres pg_isready -h 127.0.0.1 -U erp_user -d xihong_erp >/dev/null 2>&1; then
+              PG_READY=1
               break
             fi
             sleep 1
           done
+          if [ "${PG_READY}" != "1" ]; then
+            echo "::error::临时 Postgres 60 秒内未就绪（TCP 探针）"
+            exit 1
+          fi
 
           docker run --rm --network "${NETWORK_NAME}" \
             -e DATABASE_URL=postgresql://erp_user:smoke_pg_pass@xihong_erp_backend_smoke_postgres:5432/xihong_erp \

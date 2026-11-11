@@ -66,11 +66,15 @@ jobs:
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: test_db
+        # [FIX 2026-11-11] 就绪探针走 **TCP**（-h 127.0.0.1），不是容器内默认的 unix socket：
+        # 官方 postgres 镜像首次启动会先起一个**只监听 socket** 的临时 server 跑 initdb
+        # ⇒ socket 版 pg_isready 会在 initdb 期间就报「就绪」⇒ 后续按 TCP 连库的用例
+        # 随机撞上 "the database system is starting up"。health-retries 上调（5 → 20）。
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d test_db"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 20
         ports:
           - 5432:5432
 

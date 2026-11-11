@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 # 门禁脚本既可能被当成 `python scripts/validate_migrations_fresh_db.py` 运行
 # (此时 sys.path[0] 是 scripts/), 也可能被 `python -m scripts.validate_...` 运行
@@ -184,6 +184,73 @@ def remove_leftover_temp_container(run_command=run) -> bool:
     return code == 0
 
 
+def _connect_once(database_url: str) -> Exception | None:
+    """按脚本真正要用的方式连一次目标库。
+
+    成功返回 ``None``，失败返回**异常对象**（调用方用它说明失败根因）。
+    """
+    engine = None
+    try:
+        engine = create_engine(database_url)
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return None
+    except Exception as exc:  # noqa: BLE001 —— 连不上就是没就绪，异常类型不重要
+        return exc
+    finally:
+        if engine is not None:
+            engine.dispose()
+
+
+def probe_postgres_ready(database_url: str) -> bool:
+    """按**脚本真正要用的方式**探一次：TCP 连上目标库并执行 ``SELECT 1``。
+
+    为什么不能用容器内的 ``pg_isready``
+    ------------------------------------
+    postgres 镜像首次启动时，entrypoint 会先起一个**只监听 unix socket** 的临时
+    server 跑 initdb 与初始化脚本；这个临时 server 期间**根本不监听 TCP**。
+    而容器内的 ``pg_isready`` 默认走 socket ⇒ 它会对临时 server 返回
+    "accepting connections" ⇒ 门禁以为就绪 ⇒ 随后脚本按 TCP 连上**真** server 时，
+    它还在启动过程中 ⇒ ``FATAL: the database system is starting up``。
+
+    实测（2026-11-10）：CI run ``42842488697`` 的 ``fresh-db-drill`` 就这样随机红，
+    重跑即绿 ⇒ 是**就绪判据的竞态**，不是迁移链本身的问题。
+
+    实测（2026-11-11，本机 postgres:15-alpine 全新容器、同钟口径高频轮询 4 次）：
+    socket 探针报「accepting connections」的时刻分别比 TCP 探针早
+    **0.51 / 0.49 / 0.50 / 0.52 秒** ⇒ 存在一个**稳定复现的假就绪窗口**：
+    这半秒里 socket 探针说「好了」，而真实 TCP 连接尚未可用
+    （此时连上去只会拿到 ``FATAL: the database system is starting up``）。
+    CI runner 上磁盘更慢、竞争更重 ⇒ 窗口更宽 ⇒ 表现为「随机红、重跑即绿」。
+
+    改成直接按业务要用的方式连一次：临时 server 根本不监听 TCP ⇒ 判据与真实
+    可用性一致，不存在"探针说好了、其实没好"的窗口。
+    """
+    return _connect_once(database_url) is None
+
+
+def wait_for_postgres_ready(
+    database_url: str,
+    *,
+    attempts: int = 60,
+    delay: float = 1.0,
+) -> tuple[bool, str]:
+    """等临时 Postgres **真正可用**（见 :func:`probe_postgres_ready`）。
+
+    返回 ``(是否就绪, 最后一次失败原因)`` —— 失败原因会原样打进日志，
+    便于区分「还没起来」「驱动缺失」「账号密码不对」三类根因。
+    """
+    last_error = "unknown error"
+    for index in range(attempts):
+        error = _connect_once(database_url)
+        if error is None:
+            return True, ""
+        last_error = f"{type(error).__name__}: {error}".strip()
+        if index + 1 < attempts:
+            time.sleep(delay)
+    return False, last_error
+
+
 def start_temp_postgres_container(
     port: int,
     *,
@@ -246,7 +313,9 @@ def main() -> int:
     if not remove_leftover_temp_container():
         safe_print("[WARN] 清理同名残留容器失败（可能不存在），继续启动")
     try:
-        container_id = start_temp_postgres_container(port)
+        # 容器 id 不再需要：就绪判据改成「按脚本真正要用的方式连一次」（TCP），
+        # 不再往容器里 exec pg_isready；收尾清理按固定容器名做。
+        start_temp_postgres_container(port)
     except RuntimeError as exc:
         if is_docker_bind_error(str(exc)):
             fallback_port = choose_temp_postgres_port(0)
@@ -255,7 +324,7 @@ def main() -> int:
             )
             port = fallback_port
             try:
-                container_id = start_temp_postgres_container(port)
+                start_temp_postgres_container(port)
             except RuntimeError as retry_exc:
                 safe_print("[FAIL] 启动临时 Postgres 失败")
                 safe_print(str(retry_exc))
@@ -266,30 +335,19 @@ def main() -> int:
             return 1
 
     try:
+        database_url = f"postgresql://{PG_USER}:{PG_PASSWORD}@127.0.0.1:{port}/{PG_DB}"
         safe_print("[INFO] 等待 Postgres 就绪...")
-        for i in range(60):
-            code, _ = run(
-                [
-                    "docker",
-                    "exec",
-                    container_id,
-                    "pg_isready",
-                    "-U",
-                    PG_USER,
-                    "-d",
-                    PG_DB,
-                ],
-                timeout=5,
-            )
-            if code == 0:
-                break
-            time.sleep(1)
-        else:
-            safe_print("[FAIL] Postgres 就绪超时")
+        # 就绪判据 = **按脚本真正要用的方式连一次**（TCP + 目标库 + 目标账号），
+        # 不是容器内 pg_isready（它走 socket，会命中 initdb 期间的临时 server
+        # ⇒ 提前放行 ⇒ 随后 TCP 连接撞上 "the database system is starting up"）。
+        # 见 probe_postgres_ready() 的说明。
+        ready, last_error = wait_for_postgres_ready(database_url)
+        if not ready:
+            safe_print("[FAIL] Postgres 就绪超时（TCP 连不上目标库）")
+            safe_print(f"[FAIL] 最后一次失败原因: {last_error}")
             return 1
         safe_print("[OK] Postgres 就绪")
 
-        database_url = f"postgresql://{PG_USER}:{PG_PASSWORD}@127.0.0.1:{port}/{PG_DB}"
         # ── 两段式引导（共享实现，见 scripts/bootstrap_fresh_environment.py）──
         # 第一段: 跑到 20261116 的前一个节点 → 注入最小前置数据 → 第二段: 跑到 head
         # ⚠ 本门禁用**占位值** profile；真实新环境必须走

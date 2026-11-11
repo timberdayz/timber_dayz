@@ -20,8 +20,12 @@ jobs:
           POSTGRES_DB: xihong_erp_ci
         ports:
           - 5432:5432
+        # [FIX 2026-11-11] 就绪探针走 **TCP**（-h 127.0.0.1），不是容器内默认的 unix socket：
+        # 官方 postgres 镜像首次启动会先起一个**只监听 socket** 的临时 server 跑 initdb
+        # ⇒ socket 版 pg_isready 会在 initdb 期间就报「就绪」⇒ 后续按 TCP 连库的步骤
+        # 随机撞上 "the database system is starting up"。
         options: >-
-          --health-cmd "pg_isready -U erp_user -d xihong_erp_ci"
+          --health-cmd "pg_isready -h 127.0.0.1 -U erp_user -d xihong_erp_ci"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
