@@ -27,6 +27,7 @@ from backend.schemas.collection import (
     ScheduleUpdateRequest,
 )
 from backend.schemas.common import SuccessResponse
+from backend.services.collection_task_status import ACTIVE_STATUSES
 from modules.core.db import CollectionConfig, CollectionConfigRun, CollectionTask
 from modules.core.logger import get_logger
 
@@ -34,15 +35,13 @@ logger = get_logger(__name__)
 
 router = APIRouter(tags=["collection-schedule"], dependencies=[Depends(require_admin)])
 ACTIVE_CONFIG_RUN_STATUSES = {"queued", "running"}
-ACTIVE_COLLECTION_TASK_STATUSES = {
-    "pending",
-    "queued",
-    "running",
-    "paused",
-    "verification_required",
-    "verification_submitted",
-    "manual_intervention_required",
-}
+
+# [*] 2026-11-11: 状态清单**从真源派生**, 不再手抄。
+#
+# 原先这里是手抄的 7 个状态 ⇒ 与真源 ``backend.services.collection_task_status``
+# 漂移过一次 (DB 约束漏了三个状态, 直接把采集的真实失败原因盖掉)。
+# ⇒ 现在引用真源, 守护测试断言「派生点 == 真源」。
+ACTIVE_COLLECTION_TASK_STATUSES = set(ACTIVE_STATUSES)
 
 GRANULARITY_SCHEDULE_PRESETS = {
     "daily": {
@@ -63,15 +62,27 @@ GRANULARITY_SCHEDULE_PRESETS = {
 def _select_current_configs(configs: list[CollectionConfig]) -> list[CollectionConfig]:
     grouped: dict[tuple[str, str, str], list[CollectionConfig]] = {}
     for config in configs:
-        key = (str(config.platform or ""), str(config.main_account_id or ""), str(config.granularity or ""))
+        key = (
+            str(config.platform or ""),
+            str(config.main_account_id or ""),
+            str(config.granularity or ""),
+        )
         grouped.setdefault(key, []).append(config)
 
     selected: list[CollectionConfig] = []
     for bucket in grouped.values():
         bucket.sort(
             key=lambda item: (
-                0 if str(getattr(item, "batch_status", "") or "").lower() == "active" else 1,
-                -(getattr(item, "updated_at", None).timestamp() if getattr(item, "updated_at", None) else 0),
+                (
+                    0
+                    if str(getattr(item, "batch_status", "") or "").lower() == "active"
+                    else 1
+                ),
+                -(
+                    getattr(item, "updated_at", None).timestamp()
+                    if getattr(item, "updated_at", None)
+                    else 0
+                ),
                 -(getattr(item, "id", 0) or 0),
             )
         )
@@ -115,10 +126,14 @@ async def _build_config_run_response_payload(
     run: CollectionConfigRun,
 ) -> dict:
     task_rows = (
-        await db.execute(
-            select(CollectionTask).where(CollectionTask.config_run_id == run.id)
+        (
+            await db.execute(
+                select(CollectionTask).where(CollectionTask.config_run_id == run.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     task_statuses = [str(task.status or "") for task in task_rows]
     active_task_count = sum(
         1 for status in task_statuses if status in ACTIVE_COLLECTION_TASK_STATUSES
@@ -182,7 +197,9 @@ async def _resolve_collection_runtime_health(request: Request) -> dict:
                 "checks": payload.get("checks") or {},
             }
     except Exception as exc:
-        logger.warning("Collection runtime bridge health fallback to local state: %s", exc)
+        logger.warning(
+            "Collection runtime bridge health fallback to local state: %s", exc
+        )
 
     return local_health
 
@@ -224,7 +241,9 @@ async def cancel_config_run(
     run_id: str,
     db: AsyncSession = Depends(get_async_db),
 ):
-    from backend.services.collection_config_run_service import CollectionConfigRunService
+    from backend.services.collection_config_run_service import (
+        CollectionConfigRunService,
+    )
 
     service = CollectionConfigRunService(db)
     try:
@@ -239,9 +258,7 @@ async def cancel_config_run(
                 message="本次配置执行已结束，无需取消",
                 data=None,
             )
-        if detail.startswith(
-            "config run status cannot be cancelled:"
-        ):
+        if detail.startswith("config run status cannot be cancelled:"):
             raise HTTPException(status_code=409, detail=detail) from exc
         raise HTTPException(status_code=400, detail=detail) from exc
     return SuccessResponse(success=True, message="config run cancelled", data=None)
@@ -258,7 +275,12 @@ async def get_granularity_schedule(
     result = await db.execute(
         select(CollectionConfig).where(
             CollectionConfig.granularity == granularity,
-            CollectionConfig.is_active == True,
+            # ⚠️ `is_(True)` 而不是 `== True`：
+            #    `== True` 渲染成 SQL `= true`，`is_(True)` 渲染成 `IS true` ——
+            #    本列是 `nullable=False` 的 Boolean（见 schema_parts/collection.py），
+            #    ⇒ 两种写法对**每一行**都完全等价，取值集合不变。
+            #    改写原因：ruff E712（`== True`）会让 CI 的 `ruff check <changed files>` 判红。
+            CollectionConfig.is_active.is_(True),
         )
     )
     configs = _select_current_configs(list(result.scalars().all()))
@@ -280,13 +302,16 @@ async def update_granularity_schedule(
     )
 
     if not APSCHEDULER_AVAILABLE:
-        raise HTTPException(status_code=503, detail="scheduled collection service unavailable")
+        raise HTTPException(
+            status_code=503, detail="scheduled collection service unavailable"
+        )
 
     preset = GRANULARITY_SCHEDULE_PRESETS[granularity]
     result = await db.execute(
         select(CollectionConfig).where(
             CollectionConfig.granularity == granularity,
-            CollectionConfig.is_active == True,
+            # 同上：`is_(True)` 取代 `== True`（ruff E712），语义等价。
+            CollectionConfig.is_active.is_(True),
         )
     )
     configs = _select_current_configs(list(result.scalars().all()))
@@ -312,12 +337,19 @@ async def update_config_schedule(
     request: ScheduleUpdateRequest,
     db: AsyncSession = Depends(get_async_db),
 ):
-    from backend.services.collection_scheduler import APSCHEDULER_AVAILABLE, CollectionScheduler
+    from backend.services.collection_scheduler import (
+        APSCHEDULER_AVAILABLE,
+        CollectionScheduler,
+    )
 
     if not APSCHEDULER_AVAILABLE:
-        raise HTTPException(status_code=503, detail="scheduled collection service unavailable")
+        raise HTTPException(
+            status_code=503, detail="scheduled collection service unavailable"
+        )
 
-    result = await db.execute(select(CollectionConfig).where(CollectionConfig.id == config_id))
+    result = await db.execute(
+        select(CollectionConfig).where(CollectionConfig.id == config_id)
+    )
     config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(status_code=404, detail="config not found")
@@ -350,9 +382,14 @@ async def get_config_schedule(
     config_id: int,
     db: AsyncSession = Depends(get_async_db),
 ):
-    from backend.services.collection_scheduler import APSCHEDULER_AVAILABLE, CollectionScheduler
+    from backend.services.collection_scheduler import (
+        APSCHEDULER_AVAILABLE,
+        CollectionScheduler,
+    )
 
-    result = await db.execute(select(CollectionConfig).where(CollectionConfig.id == config_id))
+    result = await db.execute(
+        select(CollectionConfig).where(CollectionConfig.id == config_id)
+    )
     config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(status_code=404, detail="config not found")
@@ -379,7 +416,10 @@ async def get_config_schedule(
 
 @router.post("/schedule/validate", response_model=CronValidationResponse)
 async def validate_cron_expression(request: CronValidateRequest):
-    from backend.services.collection_scheduler import APSCHEDULER_AVAILABLE, CollectionScheduler
+    from backend.services.collection_scheduler import (
+        APSCHEDULER_AVAILABLE,
+        CollectionScheduler,
+    )
 
     if not APSCHEDULER_AVAILABLE:
         return CronValidationResponse(valid=False, error="APScheduler not installed")
@@ -388,7 +428,11 @@ async def validate_cron_expression(request: CronValidateRequest):
     return CronValidationResponse(
         valid=is_valid,
         error=None if is_valid else "invalid cron expression",
-        description=CollectionScheduler.get_cron_description(request.cron_expression) if is_valid else None,
+        description=(
+            CollectionScheduler.get_cron_description(request.cron_expression)
+            if is_valid
+            else None
+        ),
     )
 
 
@@ -409,7 +453,10 @@ async def get_cron_presets():
 
 @router.get("/schedule/jobs", response_model=ScheduledJobsResponse)
 async def list_scheduled_jobs():
-    from backend.services.collection_scheduler import APSCHEDULER_AVAILABLE, CollectionScheduler
+    from backend.services.collection_scheduler import (
+        APSCHEDULER_AVAILABLE,
+        CollectionScheduler,
+    )
 
     if not APSCHEDULER_AVAILABLE:
         return ScheduledJobsResponse(jobs=[], total=0, error="scheduler unavailable")
@@ -466,12 +513,16 @@ async def health_check(
 
     try:
         config_run_rows = (
-            await db.execute(
-                select(CollectionConfigRun).where(
-                    CollectionConfigRun.status.in_(["running", "queued"])
+            (
+                await db.execute(
+                    select(CollectionConfigRun).where(
+                        CollectionConfigRun.status.in_(["running", "queued"])
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for row in config_run_rows:
             if row.status == "running":
                 running_config_runs += 1
@@ -499,9 +550,15 @@ async def health_check(
     runtime_health = await _resolve_collection_runtime_health(request)
     checks = runtime_health.get("checks") or {}
     scheduler_status = str((checks.get("scheduler") or {}).get("status") or "error")
-    queue_runner_status = str((checks.get("queue_runner") or {}).get("status") or "error")
-    leader_lock_status = str((checks.get("leader_lock") or {}).get("status") or "unknown")
-    can_consume_queue = queue_runner_status == "running" and leader_lock_status != "standby"
+    queue_runner_status = str(
+        (checks.get("queue_runner") or {}).get("status") or "error"
+    )
+    leader_lock_status = str(
+        (checks.get("leader_lock") or {}).get("status") or "unknown"
+    )
+    can_consume_queue = (
+        queue_runner_status == "running" and leader_lock_status != "standby"
+    )
 
     return HealthCheckResponse(
         status="healthy",

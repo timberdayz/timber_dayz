@@ -66,6 +66,7 @@ from backend.services.collection_task_status import (
     STATUS as TASK_STATUS,
     TERMINAL_STATUSES,
     ACTIVE_STATUSES,
+    to_task_center_status,
 )
 
 logger = get_logger(__name__)
@@ -388,12 +389,16 @@ async def _update_collection_ingest_projection(
 
 
 def _collection_status_to_task_center(status: Optional[str]) -> Optional[str]:
-    if status is None:
-        return None
-    return {
-        TASK_STATUS.VERIFICATION_REQUIRED: TASK_STATUS.PAUSED,
-        TASK_STATUS.VERIFICATION_SUBMITTED: TASK_STATUS.RUNNING,
-    }.get(status, status)
+    """采集状态 → 任务中心状态。
+
+    [*] 2026-11-11: 映射规则**从真源派生**, 不再在这里手抄。
+
+    原先这里是手抄的 dict ⇒ 与真源
+    ``backend.services.collection_task_status`` 漂移过一次
+    (DB 约束漏了三个状态, 把采集的真实失败原因盖成了事务回滚噪音)。
+    ⇒ 现在引用真源的 :func:`to_task_center_status`。
+    """
+    return to_task_center_status(status)
 
 
 async def _mirror_collection_task(

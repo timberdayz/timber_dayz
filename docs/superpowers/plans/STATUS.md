@@ -669,6 +669,184 @@ compose 插值**优先取进程环境变量**，而采集机启动脚本会把
 | 云端巡检 `stale_chains` | 10 → **7**（成功采集的 3 条 shopee 链已刷新到云端） |
 | 云端台账 | 巡检结论正常落在云端 `ops.pipeline_run_log`（`cloud_sync_integrity_check`） |
 
+## 采集任务状态 SSOT 收敛 + 文件系统护栏 + 日/周粒度废弃重采（2026-11-11）
+
+- Plan: `docs/superpowers/plans/2026-11-11-task-status-ssot-and-data-dir-guard.md`
+- 主题：把「采集任务有哪些状态、哪些能写进任务中心」收成**一处**定义（律 1），
+  并补上**文件系统**护栏（数据库/Redis/Celery 早就护了，磁盘漏了）
+
+### 现象一：任务中心的真实失败原因被数据库报错盖掉
+
+9 家 shopee 采集失败后，失败原因显示成
+`This Session's transaction has been rolled back due to a previous exception during flush...`
+而不是「平台要求滑块验证码，等人工处理」。
+
+### 根因
+
+`public.task_center_tasks` 的 `CHECK` 约束 `chk_task_center_tasks_status` 里
+**手抄**了一份状态清单，**漏掉了** `verification_required` /
+`verification_submitted` / `manual_intervention_required`。
+
+⇒ 采集走到「等人工处理」时写任务中心被 PostgreSQL 拒（`CheckViolationError`）
+⇒ session 事务回滚 ⇒ 上层兜底捕获到的变成事务回滚噪音 ⇒ **真实原因被覆盖**
+⇒ 且任务中心里状态是 `failed` 而不是「等待人工处理」
+⇒ **前端的人工处理入口拿不到正确状态**。
+
+不是「选错了真源」，是**真源被复制成 6 份、其中一份漂了**：
+真源 `collection_task_status.py` 只定义了状态分组，**没定义「任务中心能写哪些状态」**。
+
+### 修法
+
+真源补 `ALL_STATUSES` / `TASK_CENTER_WRITABLE_STATUSES` /
+`render_task_center_status_constraint()` / `to_task_center_status()`；
+ORM 约束、两个服务、状态映射**全部从真源派生**；
+迁移 `20261226_task_center_status_constraint` **从真源渲染**目标表达式（不写死清单）。
+
+顺带补上真源的第三个缺口：`interrupted` 是采集侧真实写入的终态
+（服务重启回收），原先真源里**没有**。
+
+### 现象二：测试把假文件写进正式数据目录
+
+`data/raw/2026/` 里混着 **176 个** 11 字节、内容为 `fake-export` 的假文件
+（真实采集文件是 89 KB 的有效 .xls）⇒ 排查时差点误判成「订单采了没入库」。
+
+### 根因
+
+`executor_v2._process_collected_files` 用 `get_data_raw_dir()` 决定落盘目录，
+而它读**环境变量 `DATA_DIR`**。`backend/tests/conftest.py` 已给
+**数据库 / Redis / Celery** 都加了护栏，**唯独漏了文件系统**。
+
+### 修法
+
+根 `tests/conftest.py` 在**模块顶层**（早于任何 import，`get_data_raw_dir` 带
+`lru_cache`）把 `DATA_DIR` 指向临时目录；会话结束自检告警。
+
+实测：主工作树跑 `tests/test_executor_v2.py`
+修复前每次必写 **8 个文件** ⇒ 修复后 **new = 0**。
+
+清理按「无入库记录 + <64 字节 + 内容含 `fake-export`」**三条同时**满足才删
+⇒ 删 176 个；「孤儿但大小正常」663 个 + 已登记 487 个**全部保留**。
+
+### 交付物
+
+| 文件 | 作用 |
+|---|---|
+| `backend/services/collection_task_status.py` | 状态真源扩展（全集 / 可写集合 / 渲染 / 映射）+ 补 `interrupted` |
+| `modules/core/db/schema_parts/collection.py` | ORM 约束改为从真源渲染 |
+| `backend/services/collection_config_run_service.py` | 状态集合从真源派生 |
+| `backend/domains/collection/routers/collection_schedule.py` | 同上 |
+| `backend/domains/collection/routers/collection_tasks.py` | 状态映射调用真源函数 |
+| `current_migrations/versions/20261226_task_center_status_constraint.py` | 约束对齐迁移（从真源渲染） |
+| `modules/core/shop_identity_ssot.py` | 快照层加「日/周整体废弃重采」例外 |
+| `tests/conftest.py` | 文件系统护栏（`DATA_DIR` 隔离 + 会话自检） |
+| `backend/tests/test_collection_task_status_ssot_contract.py` | 状态 SSOT 守卫（24 条） |
+| `tests/test_collection_data_dir_guard_contract.py` | 文件系统护栏守卫（7 条） |
+
+### 实测
+
+| 项 | 结果 |
+|---|---|
+| 迁移演练（本地真库） | 升级前写 `manual_intervention_required` **被拒**（复现 bug）；升级后 13 状态全可写、`bogus_status` 仍被拒；降级后约束**逐字恢复** |
+| 护栏实测 | 修复前每次写 8 个文件 ⇒ 修复后 **0 个** |
+| 污染清理 | 删 176 个；清理后 `data/raw` 里 <64 字节文件 **0 个** |
+| 基线（改动前） | 根 `tests/` 738 passed / 5 skipped / 0 failed；`backend/tests/` 5664 passed / 8 skipped / 0 failed |
+
+### 日/周粒度数据处置（用户 2026-11-11 决策）
+
+「日、周粒度的数据都存在大量问题，本地和云端的日、周粒度数据都可以先进行清理了」
+
+⇒ **先改声明再执行**：`modules/core/shop_identity_ssot.py` §③ 快照层原写
+「既定决策不修（只保未来）」⇒ 新增明确例外 `DISPOSABLE_GRANULARITIES = ('daily','weekly')`
+⇒ **整体废弃重采**（不是逐行订正 —— 删干净了就不会撞 upsert 冲突键）。
+
+⚠️ 月粒度 / 快照粒度**仍不修**（经营口径基准，错了要人工判断）。
+
+| 项 | 本地 | 云端 |
+|---|---|---|
+| 日/周行合计（已删） | **2211** | **2641** |
+| 月/快照行 | 不动 | 不动 |
+| 备份 | `%TEMP%\mcode_granularity_backup_20261111\LOCAL_*.jsonl`（完整行数据，可逐行恢复） | `CLOUD_*.jsonl` |
+
+⚠️ **连带**：3 个 semantic 物化视图读日/周事实表 ⇒ 删了不重刷 = 白删。
+第一次直接 `REFRESH MATERIALIZED VIEW` **全部超时失败**
+（连接池默认 `statement_timeout=120s`，而 `fact_orders_atomic_mv` 生产实测就要 **115 秒**）
+⇒ 改走仓库正主路径 `refresh_runner.execute_sql_target()`
+（已封装临时抬高超时、MV 锁、索引补齐、MV 不存在时自愈）。
+
+⇒ **但走正主路径第一次仍然「报成功、数据没变」** ⇒ 根因见下 ①。
+
+### 本轮实测出来的三个「真问题」（都不是本批引入的，是暴露出来的）
+
+#### ① `execute_sql_target()` 不提交 ⇒ `REFRESH MATERIALIZED VIEW` 被回滚
+
+`backend/services/data_pipeline/refresh_runner.py::execute_sql_target()`
+**自己不提交事务** —— 提交是上层 `execute_refresh_plan()` 的活
+（它每个目标后调 `await _commit_if_possible(db)`）。
+
+而 PostgreSQL 的 `REFRESH MATERIALIZED VIEW` 是**事务性**的：
+没提交就关会话 ⇒ 整个事务回滚 ⇒ 物化视图内容**原样保留**。
+
+⇒ 症状极具迷惑性：**6 个目标全报 ok，MV 里的 daily/weekly 行一行没少**。
+⇒ 不是仓库的 bug，是调用方（探针脚本）漏了 `commit`。
+⇒ 补上 `await db.commit()` 后重刷，**两端 3 个 MV 的 daily/weekly 残留全部归零**：
+
+| | `fact_orders_atomic_mv` | `fact_analytics_atomic_mv` | `fact_products_atomic_mv` | 正本 `semantic.fact_orders_atomic` |
+|---|---|---|---|---|
+| 本地 | 34883（daily/weekly **0**） | 3728（**0**） | 4761（**0**） | 只剩 monthly 34883 |
+| 云端 | 37516（daily/weekly **0**） | 5418（**0**） | 5890（**0**） | 只剩 monthly 37516 |
+
+⚠️ **教训**：凡是走 `execute_sql_target()` 的调用方，**必须自己 commit**
+（`execute_refresh_plan()` 内部已经代劳了；绕过它直接调就要自己补）。
+
+#### ② 护栏「设了环境变量」≠「护住了」：`.env` 在 import 期覆盖 + lru_cache 冻住
+
+护栏第一版只在 `tests/conftest.py` 顶层设 `DATA_DIR` ⇒ 主工作树实测 `new = 0`，
+看着是好的；**但在 worktree 里跑，又往正式目录写了 8 个文件**。
+
+根因三条叠加：
+1. 仓库根 `.env` 里有 **`DATA_DIR=./data`**（相对路径 ⇒ 相对 cwd ⇒ 就是正式目录）；
+2. `backend/main.py` / `run.py` 在 **import 时**就调 `load_project_env(project_root)`，
+   它的 `load_dotenv(..., override=True)` 把 `DATA_DIR` **覆盖回** `./data`
+   （仓库自己的方案文档 `2026-11-07-consolidated-execution-plan.md` 就记着这条：
+   「import 时 `load_project_env(override=True)` ⇒ 用例变成顺序依赖」）；
+3. `modules/core/path_manager.py::get_data_dir()` 是 `@lru_cache(maxsize=1)`
+   ⇒ 第一次调用就把 `./data` **冻住**，之后改环境变量也无效。
+
+⇒ 护栏必须**每个用例前**（`pytest_runtest_setup`）重新写回 `DATA_DIR`
+（因为 `.env` 是在**收集期**被加载的，`pytest_configure` 跑在收集**之前**），
+并同时 `cache_clear()` 掉 `get_data_dir` / `get_data_raw_dir` /
+`get_data_processed_dir` / `get_data_input_dir` 的缓存。
+
+⚠️ **没有**采用仓库的 `XIHONG_TEST_ENV_GUARD` 全局护栏：
+那个开关会让 `backend/utils/config.py` 把 `Settings.DATABASE_URL` 强制切到隔离库，
+而**根 `tests/` 本来就是要连真实本地库**的 ⇒ 开了反而全红，爆炸半径太大。
+
+#### ③ CI 的 `ruff check <changed files>` 会把**既有**的 E712 也判红
+
+`backend/domains/collection/routers/collection_schedule.py` 里两处
+`CollectionConfig.is_active == True` 是**基线就有的**（`main` 的 261/289 行），
+但 CI 只对**本 PR 改到的文件**跑 ruff ⇒ 碰了这个文件就会被判红。
+
+⇒ 改成 `CollectionConfig.is_active.is_(True)`：
+该列是 `nullable=False` 的 Boolean ⇒ `= true` 与 `IS true` 对**每一行**都等价，
+取值集合不变（不是口径改动）。
+
+### 本批回归（worktree，`.env` 已还原成基线条件）
+
+| 范围 | 基线 | 本批 |
+|---|---|---|
+| 根 `tests/` | 738 passed / 5 skipped / 0 failed | 见下方「失败集 diff」 |
+| `backend/tests/` | 5664 passed / 8 skipped / 0 failed | **5688 passed / 8 skipped / 0 failed**（+24 条新守卫） |
+| `black==25.1.0` | — | 10 个改动文件全部 clean |
+| `ruff 0.17.3` | — | 全部通过 |
+
+⚠️ **根 `tests/` 必须在有 `.env` 的条件下跑**：worktree 默认没有 `.env`
+（gitignored）⇒ `tests/test_rebuild_local_current_schema.py` 写的临时
+`.env.collection.local`（假口令 `erp_user:password`）会留在进程环境里，
+让后面的 `tests/test_v4_3_2_complete_system.py::test_product_hierarchy_ingestion`
+去连 15432 ⇒ 报 `password authentication failed`。
+⇒ **这是 worktree 环境差异，不是代码回归**（主工作树同一批用例通过）。
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
