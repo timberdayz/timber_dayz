@@ -483,6 +483,22 @@ services:
       DB_MAX_OVERFLOW: 2
       CPU_EXECUTOR_WORKERS: 1
       IO_EXECUTOR_WORKERS: 4
+      # ── 云端巡检连接（2026-11-11 补）──────────────────────────────────
+      # 巡检要看的「云端」在生产上就是**自己** ⇒ CLOUD_DATABASE_URL 应当指向
+      # 生产库(容器网络地址)。不配 ⇒ 巡检永远 skipped ⇒
+      # 「云端停更没人知道」会重演(2026-11-07 事故的直接成因)。
+      # ⚠️ 主机名重写由代码负责(backend/tasks/cloud_sync_integrity_tasks.py 的
+      #    normalize_cloud_database_url)，compose 只负责把变量传进容器。
+      CLOUD_DATABASE_URL: ${CLOUD_DATABASE_URL:-}
+      # ── 店铺身份「保未来」三件套（2026-11-11）─────────────────────────
+      # 全部留空默认 = 未启用：生效日没配 ⇒ 语义层 unknown 全归「已知历史遗留」
+      # ⇒ 巡检安静但**不会误报**。三项含义:
+      #   SHOP_IDENTITY_ALIGNMENT_EFFECTIVE_DATE      对齐生效日(按月分档)
+      #   SHOP_IDENTITY_SEMANTIC_UNKNOWN_RATE_THRESHOLD 认不出占比阈值(0=有一行就报)
+      #   SHOP_IDENTITY_CONFLICT_NOTIFY_ENABLED        矛盾行通知开关(同步侧用)
+      SHOP_IDENTITY_ALIGNMENT_EFFECTIVE_DATE: ${SHOP_IDENTITY_ALIGNMENT_EFFECTIVE_DATE:-}
+      SHOP_IDENTITY_SEMANTIC_UNKNOWN_RATE_THRESHOLD: ${SHOP_IDENTITY_SEMANTIC_UNKNOWN_RATE_THRESHOLD:-}
+      SHOP_IDENTITY_CONFLICT_NOTIFY_ENABLED: ${SHOP_IDENTITY_CONFLICT_NOTIFY_ENABLED:-}
       # ⭐ 路径配置（与后端服务保持一致）
       PROJECT_ROOT: /app
       DATA_DIR: /app/data
@@ -554,6 +570,14 @@ services:
       APP_VERSION: ${IMAGE_TAG}
       USE_POSTGRESQL_DASHBOARD_ROUTER: ${USE_POSTGRESQL_DASHBOARD_ROUTER:-false}
       RUN_MIGRATIONS: "0"
+      # ── 云端巡检连接（2026-11-11 补）──────────────────────────────────
+      # 与 celery-worker 保持**完全一致**的云端配置:
+      # worker 与 beat 必须拿到同一份, 否则会出现「beat 调度了、worker 却跳过」。
+      CLOUD_DATABASE_URL: ${CLOUD_DATABASE_URL:-}
+      # 店铺身份「保未来」三件套(空默认 = 未启用, 不会误报)
+      SHOP_IDENTITY_ALIGNMENT_EFFECTIVE_DATE: ${SHOP_IDENTITY_ALIGNMENT_EFFECTIVE_DATE:-}
+      SHOP_IDENTITY_SEMANTIC_UNKNOWN_RATE_THRESHOLD: ${SHOP_IDENTITY_SEMANTIC_UNKNOWN_RATE_THRESHOLD:-}
+      SHOP_IDENTITY_CONFLICT_NOTIFY_ENABLED: ${SHOP_IDENTITY_CONFLICT_NOTIFY_ENABLED:-}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

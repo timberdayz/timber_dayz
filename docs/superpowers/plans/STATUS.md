@@ -483,6 +483,41 @@ python scripts/verify_shop_identity_reconciliation.py --output output/reconcilia
 可选项：`--days 30`（T4 窗口）、`--sections T1,T2`（只跑部分段落）。
 退出码：`0` 正常产出 / `2` 执行失败（连不上库、缺表缺列）。
 
+## 店铺身份「保未来」守护落地（2026-11-11）
+
+- Plan: `docs/superpowers/plans/2026-11-11-shop-identity-guard-activation.md`
+- 主题：把「工具」变成**真的在跑的守卫**
+
+### 三个参数（决定性数据 ⇒ 决定性取值）
+
+| 参数 | 取值 | 依据 |
+|---|---|---|
+| `SHOP_IDENTITY_ALIGNMENT_EFFECTIVE_DATE` | `2026-12-01` | 云端 2026-11 的 unknown 占比 **56.69%**（事故现场）；分档按月 ⇒ 配 11-12 会让 11 月整月进「新问题」档、巡检每小时都红、告警当场作废。配 12-01 ⇒ 2026-02~11 全归 `known_legacy` 不报警，12 月起进守护区间 |
+| `SHOP_IDENTITY_SEMANTIC_UNKNOWN_RATE_THRESHOLD` | `0` | 默认 0.05 会放过「新增月份只剩 1~2 行认不出」；设 0 后只要有 1 行就报（该月 0 行时比率 0 不报） |
+| `SHOP_IDENTITY_CONFLICT_NOTIFY_ENABLED` | `1`（开） | 复用批次 3.4 的站内信 / webhook / 钉钉三条通道；通知失败不影响同步 |
+
+### 交付物
+
+| 文件 | 作用 |
+|---|---|
+| `backend/tasks/cloud_sync_integrity_tasks.py` | 公开入口 `resolve_cloud_database_url_from_env()`（私有名保留为委托别名）+ 巡检**探活**与**本地留痕** |
+| `scripts/verify_semantic_unknown_by_month.py` | 只读逐月看云端「认不出店」占比（口径直接复用巡检，不另写一份） |
+| `scripts/watch_cloud_sync_tunnel.ps1` | 隧道**看门狗**：探测 → 自愈（先清僵死 ssh 进程）→ 留痕；`-InstallScheduledTask` 注册计划任务 |
+| `docker-compose.prod.yml` / `.dev.yml` / `.collection-cloud-sync.yml` | 把三个开关与 `CLOUD_DATABASE_URL` 显式传进 celery worker / beat / collector |
+| `env.*.example` × 6 | 三个开关的语义与取值约束（留空 = 未启用 = 不误报） |
+| `tests/` × 4 新文件 | 43 条契约守护（口径不分叉 / 只读 / 脱敏 / 参数不漂移 / 幂等 / 不碰容器 / 留痕不掩盖原异常） |
+
+### 已落地位置
+
+- 本机 `.env.collection.local`（采集机）：三件套全配；
+- 生产 `/opt/xihong_erp/.env`：四键就位（备份 `.env.bak.20261111_114118`）⇒ **容器重建后生效**（随 v7.21.0 部署）；
+- 本机计划任务 `XihongCloudSyncTunnelWatchdog`：每 2 分钟自愈隧道（实测：杀掉 ssh ⇒ 1 秒内恢复；端口已通 ⇒ 不起第二条隧道）。
+
+### 遗留
+
+- 用户侧：下一轮采集后核「新增月份认不出 = 0」—— ⚠️ **只能从 2026-12 起算**（11 月是事故现场）。
+- v7.21.0：律 3 的候选名单副本物化视图仍是旧定义 ⇒ 部署流水线需先 `DROP` 再按资产重建，并加副本定义守护。
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
