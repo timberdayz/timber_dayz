@@ -29,6 +29,25 @@ from sqlalchemy.sql import func
 
 from .base import Base, JSON_COMPAT
 
+# [*] 2026-11-11: 任务中心的状态约束**从真源渲染**, 不再手抄。
+#
+# 事故背景: ``chk_task_center_tasks_status`` 原先是手抄的 10 个状态,
+# 漏了 ``verification_required`` / ``verification_submitted`` /
+# ``manual_intervention_required`` ⇒ 采集走到「等人工处理」时写任务中心
+# 被 PostgreSQL 拒绝 ⇒ 真实失败原因被 SQLAlchemy 事务回滚噪音覆盖。
+#
+# ⇒ 现在约束的表达式由 ``backend.services.collection_task_status`` 渲染,
+#   状态全集只在那一处定义 (律 1「真源只能有一个」)。
+#   守护测试 ``backend/tests/test_collection_task_status_ssot_contract.py``
+#   断言「ORM 约束 == 真源集合」。
+#
+# ⚠️ 依赖方向说明: ``modules/core`` 引用 ``backend.services`` 在本仓库有先例
+#    (``modules/core/file_naming.py`` → ``backend.services.component_name_utils``),
+#    且 ``collection_task_status`` 只依赖 dataclasses ⇒ 无循环导入风险。
+from backend.services.collection_task_status import (  # noqa: E402
+    render_task_center_status_constraint,
+)
+
 
 class CollectionConfigTemplate(Base):
     """主账号 + 粒度级模板。"""
@@ -579,7 +598,7 @@ class TaskCenterTask(Base):
         Index("ix_task_center_tasks_source_file", "source_file_id"),
         Index("ix_task_center_tasks_source_table", "source_table_name"),
         CheckConstraint(
-            "status IN ('pending', 'queued', 'running', 'paused', 'retry_waiting', 'partial_success', 'completed', 'failed', 'cancelled', 'interrupted')",
+            render_task_center_status_constraint(),
             name="chk_task_center_tasks_status",
         ),
     )
