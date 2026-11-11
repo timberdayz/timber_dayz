@@ -72,7 +72,11 @@ __all__ = [
     "CandidatePoolRow",
     "CloudFreshnessRow",
     "CloudSyncIntegrityReport",
+    "IDENTITY_CANDIDATES_MV",
+    "IDENTITY_CANDIDATES_VIEW",
+    "IdentityCandidatesCopyRow",
     "IdentityConvergenceRow",
+    "LEGACY_COPY_DEFINITION_MARKERS",
     "SEMANTIC_RESOLUTION_TABLE",
     "SEMANTIC_UNKNOWN_RATE_THRESHOLD",
     "SEMANTIC_UNKNOWN_RATE_THRESHOLD_ENV",
@@ -82,6 +86,7 @@ __all__ = [
     "classify_sync_freshness",
     "collect_candidate_pool_coverage",
     "collect_cloud_freshness",
+    "collect_identity_candidates_copy",
     "collect_identity_convergence",
     "collect_semantic_resolution",
     "record_cloud_sync_integrity_run",
@@ -137,6 +142,23 @@ SEMANTIC_UNKNOWN_RATE_THRESHOLD_ENV = "SHOP_IDENTITY_SEMANTIC_UNKNOWN_RATE_THRES
 
 #: 语义层 unknown 占比默认阈值 —— 超过它就报警。
 SEMANTIC_UNKNOWN_RATE_THRESHOLD = 0.05
+
+# --------------------------------------------------------------------------- #
+# ⑤ 候选集物化副本的口径健康(派生层口径收回的守护)
+# --------------------------------------------------------------------------- #
+#: 候选集**正本**(普通视图) —— 口径的唯一定义处。
+IDENTITY_CANDIDATES_VIEW = "semantic.shop_identity_resolution_candidates"
+#: 候选集**物化副本** —— 只允许「从正本取数」。
+IDENTITY_CANDIDATES_MV = "semantic.shop_identity_resolution_candidates_v2_mv"
+
+#: 副本定义里**出现即说明它在自算**的痕迹。
+#: 副本一旦自算, 它与正本就会**静默**分叉: 不报错、只会表现为「某个店没人了」。
+LEGACY_COPY_DEFINITION_MARKERS = (
+    "core.shop_accounts",
+    "core.shop_account_aliases",
+    "active_shop_accounts",
+    "regexp_replace",
+)
 
 #: 巡检的语义层表 —— 月度流量原子层(``shop_id`` 落 ``unknown`` 的地方)。
 SEMANTIC_RESOLUTION_TABLE = "semantic.fact_analytics_monthly_atomic"
@@ -339,6 +361,44 @@ class SemanticResolutionRow:
 
 
 @dataclass
+class IdentityCandidatesCopyRow:
+    """候选集物化副本的口径健康(副本是否还在「从正本取数」)。
+
+    为什么要有这一项
+    ----------------
+    副本**曾经**手抄了一份正本的计算逻辑, 两边靠人工保持一致 ——
+    一旦漂移, 漂移是**静默**的: 看板只会表现为「某个店没人了」, 不报任何错。
+
+    ⇒ 副本必须**只从正本取数**, 而且这件事要**每小时**被确认一次,
+    而不是靠「改口径的人记得重建副本」。
+    """
+
+    status: str
+    copy_rows: int = 0
+    source_rows: int = 0
+    view_only_rows: int = 0
+    copy_only_rows: int = 0
+    reads_source: bool = False
+    detail: str = ""
+
+    @property
+    def is_degraded(self) -> bool:
+        """非 ``ok`` 都是问题(缺副本 / 自算 / 内容分叉 / 看不出来)。"""
+        return self.status != "ok"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "copy_rows": self.copy_rows,
+            "source_rows": self.source_rows,
+            "view_only_rows": self.view_only_rows,
+            "copy_only_rows": self.copy_only_rows,
+            "reads_source": self.reads_source,
+            "detail": self.detail,
+        }
+
+
+@dataclass
 class CloudSyncIntegrityReport:
     """一次巡检的完整结论。"""
 
@@ -349,6 +409,7 @@ class CloudSyncIntegrityReport:
     convergence_rows: list[IdentityConvergenceRow] = field(default_factory=list)
     candidate_pool_rows: list[CandidatePoolRow] = field(default_factory=list)
     semantic_rows: list[SemanticResolutionRow] = field(default_factory=list)
+    identity_candidates_copy: IdentityCandidatesCopyRow | None = None
     alignment_effective_date: date | None = None
 
     @property
@@ -375,12 +436,16 @@ class CloudSyncIntegrityReport:
 
     @property
     def is_success(self) -> bool:
-        """四项检查全过 ⇒ 巡检通过。"""
+        """五项检查全过 ⇒ 巡检通过。"""
         return not (
             self.stale_rows
             or self.degraded_convergence_rows
             or self.missing_platform_rows
             or self.degraded_semantic_rows
+            or (
+                self.identity_candidates_copy is not None
+                and self.identity_candidates_copy.is_degraded
+            )
         )
 
     def to_error_message(self) -> str | None:
@@ -409,6 +474,14 @@ class CloudSyncIntegrityReport:
                 for row in self.degraded_semantic_rows
             )
             parts.append(f"semantic_unknown_after_alignment:{detail}")
+        if (
+            self.identity_candidates_copy is not None
+            and self.identity_candidates_copy.is_degraded
+        ):
+            copy_row = self.identity_candidates_copy
+            parts.append(
+                f"identity_candidates_copy:{copy_row.status}:{copy_row.detail}"
+            )
         return ";".join(parts)
 
     def to_summary(self) -> dict[str, Any]:
@@ -421,6 +494,16 @@ class CloudSyncIntegrityReport:
             "semantic_months_checked": len(self.semantic_rows),
             "semantic_known_legacy_months": len(self.known_legacy_semantic_rows),
             "degraded_semantic_months": len(self.degraded_semantic_rows),
+            "identity_candidates_copy_status": (
+                self.identity_candidates_copy.status
+                if self.identity_candidates_copy is not None
+                else None
+            ),
+            "identity_candidates_copy_rows": (
+                self.identity_candidates_copy.copy_rows
+                if self.identity_candidates_copy is not None
+                else None
+            ),
             "alignment_effective_date": (
                 self.alignment_effective_date.isoformat()
                 if self.alignment_effective_date
@@ -788,6 +871,134 @@ async def collect_semantic_resolution(
     return rows
 
 
+async def collect_identity_candidates_copy(
+    db: AsyncSession,
+) -> IdentityCandidatesCopyRow | None:
+    """检查候选集物化副本是不是还在「从正本取数」。
+
+    返回 ``None`` 表示这个环境**没有候选池**(不适用), 不算问题。
+
+    判据(按优先级)
+    --------------
+    1. ``missing``  —— 有正本却没有副本;
+    2. ``drifted``  —— 副本的**定义**不是「从正本取数」(它在自算) ⇒ 会静默分叉;
+    3. ``diverged`` —— 定义对, 但副本与正本的**内容**已经不一致;
+    4. ``ok``       —— 定义与内容都对。
+    """
+    view_exists = await db.execute(
+        text("SELECT to_regclass(:name)"), {"name": IDENTITY_CANDIDATES_VIEW}
+    )
+    if view_exists.scalar_one_or_none() is None:
+        return None
+
+    copy_exists = await db.execute(
+        text("SELECT to_regclass(:name)"), {"name": IDENTITY_CANDIDATES_MV}
+    )
+    if copy_exists.scalar_one_or_none() is None:
+        return IdentityCandidatesCopyRow(
+            status="missing",
+            detail="候选集物化副本不存在(正本在、副本不在)",
+        )
+
+    definition_row = await db.execute(
+        text("SELECT pg_get_viewdef(to_regclass(:name), true)"),
+        {"name": IDENTITY_CANDIDATES_MV},
+    )
+    definition = str(definition_row.scalar_one_or_none() or "")
+    reads_source = IDENTITY_CANDIDATES_VIEW in definition
+    legacy_markers = [
+        marker
+        for marker in LEGACY_COPY_DEFINITION_MARKERS
+        if marker.lower() in definition.lower()
+    ]
+
+    copy_rows = 0
+    source_rows = 0
+    view_only_rows = 0
+    copy_only_rows = 0
+    try:
+        counts = await db.execute(
+            text(
+                "SELECT (SELECT count(*)::int FROM {view}), "
+                "(SELECT count(*)::int FROM {copy})".format(
+                    view=IDENTITY_CANDIDATES_VIEW, copy=IDENTITY_CANDIDATES_MV
+                )
+            )
+        )
+        # ⚠️ result 只能取一次 —— 第二次 ``one()`` 会抛 "This result object is closed"。
+        counts_row = counts.one()
+        source_rows = int(counts_row[0] or 0)
+        copy_rows = int(counts_row[1] or 0)
+
+        diff = await db.execute(
+            text(
+                """
+                SELECT
+                    (SELECT count(*)::int FROM (
+                        SELECT * FROM {view} EXCEPT ALL SELECT * FROM {copy}
+                    ) a) AS view_only,
+                    (SELECT count(*)::int FROM (
+                        SELECT * FROM {copy} EXCEPT ALL SELECT * FROM {view}
+                    ) b) AS copy_only
+                """.format(
+                    view=IDENTITY_CANDIDATES_VIEW, copy=IDENTITY_CANDIDATES_MV
+                )
+            )
+        )
+        diff_row = diff.one()
+        view_only_rows = int(diff_row[0] or 0)
+        copy_only_rows = int(diff_row[1] or 0)
+    except Exception as exc:  # noqa: BLE001 - 看不出来也要报出来, 不能当没事发生
+        logger.warning(
+            "[CloudSyncIntegrity] 候选集副本内容比对失败: %s", exc, exc_info=True
+        )
+        return IdentityCandidatesCopyRow(
+            status="unknown",
+            reads_source=reads_source,
+            detail="候选集副本内容比对失败: {exc}".format(exc=exc),
+        )
+
+    if legacy_markers or not reads_source:
+        detail = "候选集副本仍在自算逻辑(未从正本取数): {markers}".format(
+            markers=",".join(legacy_markers) or "definition_does_not_reference_source"
+        )
+        return IdentityCandidatesCopyRow(
+            status="drifted",
+            copy_rows=copy_rows,
+            source_rows=source_rows,
+            view_only_rows=view_only_rows,
+            copy_only_rows=copy_only_rows,
+            reads_source=reads_source,
+            detail=detail,
+        )
+
+    if view_only_rows or copy_only_rows:
+        return IdentityCandidatesCopyRow(
+            status="diverged",
+            copy_rows=copy_rows,
+            source_rows=source_rows,
+            view_only_rows=view_only_rows,
+            copy_only_rows=copy_only_rows,
+            reads_source=True,
+            detail=(
+                "候选集副本与正本内容不一致: "
+                "正本多 {a} 行、副本多 {b} 行".format(
+                    a=view_only_rows, b=copy_only_rows
+                )
+            ),
+        )
+
+    return IdentityCandidatesCopyRow(
+        status="ok",
+        copy_rows=copy_rows,
+        source_rows=source_rows,
+        view_only_rows=0,
+        copy_only_rows=0,
+        reads_source=True,
+        detail="候选集副本从正本取数, 内容一致({n} 行)".format(n=copy_rows),
+    )
+
+
 async def record_cloud_sync_integrity_run(
     db: AsyncSession,
     report: CloudSyncIntegrityReport,
@@ -934,6 +1145,34 @@ async def record_cloud_sync_integrity_run(
             },
         )
 
+    if report.identity_candidates_copy is not None:
+        copy_row = report.identity_candidates_copy
+        await db.execute(
+            text(
+                """
+                INSERT INTO ops.pipeline_step_log (
+                    run_id, step_name, target_name, status,
+                    started_at, completed_at, affected_rows, error_message, details
+                ) VALUES (
+                    :run_id, :step_name, :target_name, :status,
+                    :started_at, :completed_at, :affected_rows, :error_message,
+                    CAST(:details AS jsonb)
+                )
+                """
+            ),
+            {
+                "run_id": report.run_id,
+                "step_name": "check_identity_candidates_copy",
+                "target_name": IDENTITY_CANDIDATES_MV,
+                "status": "failed" if copy_row.is_degraded else "success",
+                "started_at": report.started_at,
+                "completed_at": report.finished_at,
+                "affected_rows": copy_row.copy_rows,
+                "error_message": copy_row.detail if copy_row.is_degraded else None,
+                "details": json.dumps(copy_row.to_dict(), ensure_ascii=False),
+            },
+        )
+
     await db.commit()
 
 
@@ -969,6 +1208,8 @@ async def run_cloud_sync_integrity_check(
         alignment_effective_date=alignment_effective_date,
         threshold=semantic_unknown_rate_threshold,
     )
+    # ⑤ 候选集副本口径健康 —— 副本必须在「从正本取数」, 否则会静默分叉。
+    report.identity_candidates_copy = await collect_identity_candidates_copy(db)
     report.finished_at = datetime.now(timezone.utc)
     if record:
         await record_cloud_sync_integrity_run(db, report, trigger_source=trigger_source)

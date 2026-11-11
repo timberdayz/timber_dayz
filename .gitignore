@@ -161,6 +161,9 @@ temp/media/
 output/reconciliation-*.json
 output/snapshots/
 
+# 发版后验收快照的运行时产物（scripts/verify_release_snapshot.py 产出，不入库）
+output/release-snapshot-*.json
+
 # 配置文件中的敏感部分
 config/**/accounts_config.yaml
 config/**/proxy_config.yaml
