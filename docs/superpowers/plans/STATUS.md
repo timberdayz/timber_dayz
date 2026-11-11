@@ -626,6 +626,49 @@ compose 插值**优先取进程环境变量**，而采集机启动脚本会把
 | `env.collection.local.example` | 写明 `127.0.0.1` 是**宿主语义**，容器侧由 compose 钉死 |
 | `tests/test_container_cloud_tunnel_host_contract.py` | 10 条契约守护 |
 
+## PowerShell env 文件读取的编码修正（2026-11-11）
+
+- Plan: `docs/superpowers/plans/2026-11-11-ps-env-file-encoding-fix.md`
+- 主题：让 PowerShell **真的把 env 文件读完**（容器侧隧道地址修正时暴露）
+
+### 现象
+
+重建采集机 celery 容器时，`SHOP_IDENTITY_*` 三个变量在容器里是**空的**，
+而它们明明白白写在 `.env.collection.local` 里。
+
+### 根因
+
+`scripts/start_collection_formal.ps1` / `scripts/watch_cloud_sync_tunnel.ps1` 的
+`Import-EnvFile` 用 `Get-Content $Path`（**没指定编码**）⇒ PS 5.1 按**系统 ANSI(GBK)**
+解码无 BOM 文件 ⇒ `.env` 里的**中文注释块**被解坏 ⇒ 解析中断 ⇒
+**中文注释之后的每一个变量被静默丢弃**（无任何报错）。
+
+实测：同一份文件，只差编码 —— 不带 `-Encoding` 导入 12 个变量（三件套全丢），
+带 `-Encoding UTF8` 全部导入。
+
+⇒ 后果是 compose 插值拿到空值 ⇒ **看起来配了、其实没生效**，且没有任何声音。
+
+### 修法
+
+两处 `Import-EnvFile` 改成 `Get-Content -LiteralPath $Path -Encoding UTF8`。
+
+### 交付物
+
+| 文件 | 作用 |
+|---|---|
+| `scripts/start_collection_formal.ps1` | `Import-EnvFile` 显式 UTF-8 |
+| `scripts/watch_cloud_sync_tunnel.ps1` | 同上 |
+| `tests/test_ps_env_file_encoding_contract.py` | 12 条契约守护（显式 UTF8 / `-LiteralPath` / 无 BOM UTF-8 / 两处同步） |
+
+### 部署后实测（采集机）
+
+| 项 | 结果 |
+|---|---|
+| 容器环境重建后 diff | **仅** `CLOUD_SYNC_TUNNEL_HOST` 变化；三件套恢复 `2026-12-01` / `0` / `1` |
+| 容器内云端巡检 | 成功连上云端（`rewritten: True` → `host.docker.internal:15433`），**不再** unreachable |
+| 云端巡检 `stale_chains` | 10 → **7**（成功采集的 3 条 shopee 链已刷新到云端） |
+| 云端台账 | 巡检结论正常落在云端 `ops.pipeline_run_log`（`cloud_sync_integrity_check`） |
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).

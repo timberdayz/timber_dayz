@@ -89,7 +89,13 @@ function Import-EnvFile {
         return
     }
 
-    Get-Content $Path | ForEach-Object {
+    # NOTE (2026-11-11): -Encoding UTF8 is REQUIRED, not cosmetic.
+    # Windows PowerShell 5.1 decodes a BOM-less file with the system ANSI code
+    # page (GBK on a zh-CN machine). The .env files carry Chinese comment
+    # blocks; decoding them as GBK corrupts those lines and the parser stops
+    # early, so EVERY variable below the first Chinese comment is dropped
+    # silently. Kept in sync with scripts/start_collection_formal.ps1.
+    Get-Content -LiteralPath $Path -Encoding UTF8 | ForEach-Object {
         $line = $_.Trim()
         if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) {
             return
