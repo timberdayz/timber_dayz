@@ -5,7 +5,7 @@
 - Production release is triggered by `git push origin vX.Y.Z`
 - Deployment truth comes from the release tag, not `origin/main`
 - Push `main` to `origin` only when you intentionally want GitHub branch history to match local history
-- Local `origin` has two push URLs: GitHub and CNB Git. `main` keeps the existing GitHub `origin/main` upstream so normal Cursor/VS Code pull behavior remains unchanged. Use `powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Sync` before publishing a completed `main` change; it checks the CNB mirror before writing either remote.
+- Local `origin` has two push URLs: GitHub **over SSH-443** and CNB Git over HTTPS. `main` keeps the existing GitHub `origin/main` upstream so normal Cursor/VS Code pull behavior remains unchanged. This is the **permanent** state since 2026-11-11 — GitHub's HTTPS endpoint is unreachable from this network, so `git push origin main` now goes to GitHub over `ssh://git@ssh.github.com:443/...` and needs **no per-push environment variables**. Use `powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Sync` before publishing a completed `main` change; it checks the CNB mirror before writing either remote.
 - CNB registry is used as the preferred production image pull source in China; CNB Git is only a code mirror.
 
 ## Production Compose Combination (Source Of Truth)
@@ -38,43 +38,47 @@ docker-compose -f docker-compose.yml \
 
 ### Mirroring `main` When GitHub HTTPS Is Unreachable
 
-`sync_main_mirrors.ps1 -Sync` fetches `origin` and pushes **GitHub first**, then CNB,
-and refuses to run when the two mirrors disagree. On networks where
-`https://github.com` is unreachable (DNS resolves, TCP/443 times out), the sync
-fails at its very first `git fetch --prune origin`.
-
-GitHub's SSH endpoint on **port 443** usually stays reachable in that case:
+`https://github.com` is unreachable from this network (DNS resolves, TCP/443
+times out); GitHub's **SSH endpoint on port 443** stays reachable. The
+repository's push URLs were therefore configured **once, permanently** — there is
+no per-release dance left:
 
 ```powershell
-$env:GIT_SSH_COMMAND = 'ssh -i C:/Users/18689/.ssh/github_actions_deploy -o IdentitiesOnly=yes'
-# Temporarily route origin's fetch channel over SSH-443 ...
-git remote set-url origin "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git"
-powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Sync `
-    -GitHubUrl "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git"
-# ... then restore the documented HTTPS form
-git remote set-url origin "https://github.com/timberdayz/timber_dayz.git"
+git config --unset-all remote.origin.pushurl          # clear first — see the trap below
+git remote set-url --add --push origin "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git"
+git remote set-url --add --push origin "https://cnb.cool/timberdayz/xihong_erp"
+git config core.sshCommand "ssh -i C:/Users/18689/.ssh/github_actions_deploy -o IdentitiesOnly=yes"
 ```
 
-> ⚠️ **`git remote set-url origin <ssh-url>` does NOT change the URL that `git push`
-> actually uses.** This repo keeps `remote.origin.pushurl` with several entries
-> (GitHub over HTTPS + CNB over HTTPS), and `set-url` only rewrites the *fetch*
-> URL. A push still goes to the stale `github.com:443` entry and times out.
-> Measured 2026-11-10.
->
-> **Always push GitHub by URL**, never through the remote name:
->
-> ```powershell
-> $env:GIT_SSH_COMMAND = 'ssh -i C:/Users/18689/.ssh/github_actions_deploy -o IdentitiesOnly=yes'
-> git push "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git" HEAD:refs/heads/main
-> ```
->
-> `scripts/sync_main_mirrors.ps1 -Sync` already does the right thing: it pushes
-> by explicit URL (`$GitHubUrl` / `$CnbUrl`) rather than by remote name, so it
-> works even while `origin` still points at the unreachable HTTPS form. The
-> `set-url` dance above is only needed to let the script's **fetch** step
-> (`git fetch --prune origin`) resolve `origin/main`; the script then restores
-> nothing by itself, so **restore the HTTPS form yourself afterwards** and
-> verify with `git remote -v`.
+End-to-end proof (2026-11-11): `git push origin main` with **no environment
+variables** reached both mirrors and reported `Everything up-to-date`.
+
+> ⚠️ **Trap A — `git remote set-url --push origin <url>` does NOT replace a push
+> URL when several push URLs are configured.** It fails with `multiple values`
+> and exits fatally, and `--add` only *appends* (a repeated `--add` leaves
+> duplicate entries behind). Always `git config --unset-all remote.origin.pushurl`
+> first, then re-add **in order**. Verify with
+> `git config --get-all remote.origin.pushurl`. Measured 2026-11-11.
+
+> ⚠️ **Trap B — `git remote set-url origin <ssh-url>` only rewrites the *fetch*
+> URL.** It does not change what `git push origin` uses, so switching the fetch
+> URL alone never fixes a push.
+
+> ⚠️ **Trap C — `git fetch <url>` does NOT update the remote-tracking refs**
+> (e.g. `origin/main`). After fetching by URL, `origin/main` can still show the
+> old SHA ⇒ a later "is it already pushed?" check reads stale data. Use
+> `git ls-remote <url> refs/heads/main` as the authoritative remote state.
+
+`scripts/sync_main_mirrors.ps1 -Sync` pushes **by explicit URL** (`$GitHubUrl` /
+`$CnbUrl`) rather than by remote name, so it works with the SSH-443 form.
+**But** `-Configure` rebuilds the push list from its parameters, and its default
+`$GitHubUrl` is the **unreachable HTTPS URL** ⇒ running `-Configure` without
+`-GitHubUrl` silently reverts this permanent fix. Always pass it explicitly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Configure `
+    -GitHubUrl "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git"
+```
 
 The two-mirror contract is unchanged (both remotes still receive the same commit);
 only the transport to GitHub differs. Verified 2026-11-03: both mirrors ended at the
@@ -425,19 +429,34 @@ git push origin vX.Y.Z
 
 ## Local Git Mirror Setup
 
-Configure once per workstation:
+Configure once per workstation. **GitHub's HTTPS endpoint is unreachable from this
+network**, so the GitHub push URL must be the SSH-443 form:
 
 ```bash
-git remote set-url --push origin https://github.com/timberdayz/timber_dayz.git
-git remote set-url --add --push origin https://cnb.cool/timberdayz/xihong_erp
+git config --unset-all remote.origin.pushurl
+git remote set-url --add --push origin "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git"
+git remote set-url --add --push origin "https://cnb.cool/timberdayz/xihong_erp"
+git config core.sshCommand "ssh -i C:/Users/18689/.ssh/github_actions_deploy -o IdentitiesOnly=yes"
 git remote -v
 ```
+
+> ⚠️ Do **not** use the old `git remote set-url --push origin https://github.com/...`
+> form: it points the GitHub push channel at the unreachable HTTPS endpoint and
+> every `git push origin` fails at the first hop. And `git remote set-url --push`
+> **refuses to replace** an existing multi-entry push list (`multiple values`),
+> so `--unset-all` must come first and `--add` must follow in order.
+> See "Mirroring `main` When GitHub HTTPS Is Unreachable" above.
 
 Then initialize the current computer and verify both mirrors before its first push:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Configure
+powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Configure `
+    -GitHubUrl "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git"
 ```
+
+> ⚠️ `-Configure` **rebuilds** `remote.origin.pushurl` from its parameters, and
+> the script's default `$GitHubUrl` is the unreachable HTTPS URL ⇒ omitting
+> `-GitHubUrl` silently reverts the SSH-443 push URL. Always pass it explicitly.
 
 Expected result: `origin` has two push URLs while `main` tracks `origin/main`; `cnb/main` is checked as the required mirror reference. The script refuses dirty worktrees, non-main branches, in-progress merges/rebases, remote divergence, and non-fast-forward local history.
 
@@ -549,3 +568,109 @@ Expected order:
    - `GET /api/permissions` no longer lists `finance-reports`, `fx-management`,
      `fiscal-periods`, `store-management`, `store-analytics`
    - the retired pages are absent from the menu and their routes no longer resolve
+
+## Field-Measured Release Rules (2026-11-10 / 2026-11-11)
+
+Six rules that each cost real time during the v7.19.5 / v7.20.1 releases. Every
+number below was **measured** on this machine or on the production host.
+
+### 1. The version number lives in **two** places — `VERSION` and the tag
+
+`backend/main.py::_load_app_version()` resolves the reported version in this order:
+`APP_VERSION` → `IMAGE_TAG` → `RELEASE_VERSION` → the repository-root `VERSION`
+file → `"dev"`. A stale `VERSION` therefore makes `/healthz/ready` report an **old**
+version even though the image itself is new — measured: production served `v7.2.1`
+while `v7.19.5` was live.
+
+- Bump `VERSION` **in the same commit** that creates the tag.
+- The dev compose must expose it too: `APP_VERSION` on backend-api / collector /
+  celery-worker / celery-beat, plus `./VERSION:/app/VERSION:ro` so the file
+  fallback resolves inside the container.
+- After deploying, the version reported by `/healthz/ready` **and** by
+  `docker compose ps` must equal the tag.
+
+### 2. Verify the mirrors with `ls-remote`, not with a fetched tracking ref
+
+`git fetch <url>` does **not** update `origin/main` (or `cnb/main`), so the local
+tracking refs can silently keep an old SHA. The authoritative remote state is:
+
+```powershell
+git ls-remote "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git" refs/heads/main
+git ls-remote cnb refs/heads/main
+git ls-remote "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git" 'refs/tags/vX.Y.Z*'
+git ls-remote cnb 'refs/tags/vX.Y.Z*'
+```
+
+Both mirror lines must print the same object id (annotated tags also peel with `^{}`).
+
+### 3. A cron/rotation-style mechanism needs a **second** cycle to be accepted
+
+The logrotate config landed on 2026-11-10 and the first real rotation happened on
+**2026-11-11 03:17** — but only `access.log` rotated, because it was
+316,827,303 B (`maxsize 100M` forces a rotation). `error.log` (22,316,693 B) did
+**not** rotate on that first cycle: logrotate only *records* the state for files
+modified inside the interval and defers them to the next cycle.
+
+- Acceptance rule: verify such a mechanism **once per cycle**, then re-check on the
+  next cycle before declaring it done.
+- Concrete indicators: the rotation counter in `logrotate.state` (`error.log` was
+  `0` while `access.log` was `1`) and the existence of `error.log.1`.
+
+### 4. "The pipeline says success" is **not** acceptance — verify over SSH yourself
+
+After the deploy, log in independently (read-only) and check:
+
+- all 7 containers `healthy`, and the application containers report the **intended
+  tag** (measured: backend-api / celery-worker / celery-beat / frontend all on the
+  released tag);
+- the database version is **unchanged** (no migration ran);
+- the connection count stays constant (measured: 18 before and after);
+- the disk usage and the reclaimed space (measured: 352 MB reclaimed);
+- `deploy-logs` contains **exactly one** new batch — a second batch would mean the
+  mirror triggered a deploy as well.
+
+A green pipeline only proves the pipeline's own steps ran.
+
+### 5. A readiness probe must connect **the way the workload will connect**
+
+The official `postgres` image first starts a **socket-only** temporary server for
+`initdb`. A container-local `pg_isready` (default = unix socket) reports
+"accepting connections" during that window ⇒ the job continues while the real
+server is still starting ⇒ the next step fails with
+`FATAL: the database system is starting up` (measured: CI run `42842488697` red,
+re-run green).
+
+- Measured 2026-11-11 on this machine (fresh `postgres:15-alpine` container, both
+  probes polled at 20 ms in the same clock): the socket probe reported "accepting
+  connections" **0.51 / 0.49 / 0.50 / 0.52 s before** the TCP probe did, across
+  4 runs ⇒ a **reproducible false-ready window**. A CI runner (slower disk, more
+  contention) widens it, which is exactly the "randomly red, green on re-run"
+  symptom.
+- The readiness criterion is "**actually connect once**", using the same path the
+  workload uses: TCP + target database + target account.
+- For container-local probes, `pg_isready -h 127.0.0.1` switches the probe from the
+  socket to TCP (the temporary server does not listen on TCP). Verified exit codes:
+  a wrong user/database still exits `0` (pg_isready does not authenticate), and a
+  port with no listener exits `2` ⇒ the health check fails exactly while the
+  server is not yet serving.
+- Where a real failure is possible, retry once — but the **last** exit code must
+  remain the step's exit code, so a genuine failure still fails the gate.
+
+### 6. In a shared worktree, commit through an **isolated index**
+
+When several sessions share one worktree, a normal `git add -A` / commit can sweep
+another session's in-flight changes into the commit. Commit through an isolated
+index instead — it touches neither the working tree nor the other session's files:
+
+```powershell
+$env:GIT_INDEX_FILE = "$env:TEMP\xihong_index"
+git read-tree <base>
+git update-index --add --cacheinfo 100644,<blob>,<path>
+$tree = git write-tree
+$commit = git commit-tree $tree -p <parent> -m "<message>"
+git update-ref refs/heads/main $commit <old-head>
+```
+
+- Never `git stash` — it would move another session's work.
+- Never switch branches inside a shared worktree; use a dedicated
+  `git worktree add` for the branch you own.
