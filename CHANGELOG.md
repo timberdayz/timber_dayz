@@ -1,5 +1,100 @@
 # Changelog - 西虹 ERP 系统
 
+## [v7.22.0] - 2026-11-11 - 采集失败的真实原因不再被盖掉 + 状态清单收敛到真源
+
+> **本版本含一次数据库迁移**（`current_schema_20261226_task_center_status_constraint`，
+> **只放宽**任务中心的状态 `CHECK` 约束 ⇒ **不改任何一行的业务归属**）。
+>
+> - 历史数据依旧**一行未改**（不回填、不重推）；
+> - 语义层计数口径**未动**（`count(DISTINCT c.resolved_shop_id)`）；
+> - ⚠️ 另按用户 2026-11-11 决策**清理**了日/周粒度事实行（整体废弃重采，不是逐行订正）。
+
+### 一、采集失败的真实原因不再被「事务回滚」噪音盖掉
+
+**现象**：9 家 shopee 采集失败，后台显示的失败原因是
+
+```
+This Session's transaction has been rolled back due to a previous exception during flush
+```
+
+而不是「平台要求滑块验证码，等人工处理」。
+
+**根因**：`task_center_tasks` 表的状态 `CHECK` 约束里是**手抄**的一份状态清单，
+漏了 `verification_required` / `verification_submitted` / `manual_intervention_required`
+⇒ 采集走到「等人工处理」时写任务中心被 PostgreSQL 直接拒绝（`CheckViolationError`）
+⇒ SQLAlchemy 事务回滚 ⇒ 上层兜底捕获到的异常变成「事务回滚」噪音
+⇒ **真实原因丢失**，前端的人工处理入口也拿不到正确状态。
+
+实测证据：任务 691 / 692 的 `error_message` 全文里含
+`CheckViolationError ... violates check constraint "chk_task_center_tasks_status"`
+与 `DETAIL: Failing row contains (2103, ..., manual_intervention_required, ...)`。
+
+**修法不是「再补一次手抄」**：根因是「状态清单被复制成 6 份，其中一份漂了」
+⇒ 真源 `backend/services/collection_task_status.py` 本就自称 SSOT，
+但它只定义了状态**分组**，**没定义「任务中心能写哪些状态」**
+⇒ 这次让**所有派生点都从真源派生**（ORM 约束 / 配置运行服务 / 调度路由 / 任务映射 /
+前端两个视图由守卫测试断言一致）。
+
+顺带补上真源**自己**缺的一个状态：`interrupted`
+（服务重启回收时真实写进 `core.collection_tasks` 的终态，原先真源里根本没有）。
+
+### 二、测试不再往正式数据目录写假文件
+
+**现象**：`data/raw/2026/` 里混着 **176 个假文件**（内容 `fake-export`，**11 字节**，
+全部没有入库记录）⇒ 排查数据问题时差点误判成「订单采了没入库」。
+
+**根因**：采集执行器用 `get_data_raw_dir()` 决定落盘目录，而它读环境变量 `DATA_DIR`。
+`backend/tests/conftest.py` 已给**数据库 / Redis / Celery** 加了护栏，**唯独漏了文件系统**。
+
+⇒ 本版本补上根 `tests/conftest.py` 的文件系统护栏。⚠️ **护栏本身踩了两个坑**，
+都已在代码注释与方案文档里写明：
+
+1. 仓库根 `.env` 的 `DATA_DIR=./data` 会在 **import 期**被
+   `load_project_env(override=True)` 覆盖回正式目录
+   ⇒ 只在 conftest 顶层设一次环境变量**护不住**；
+2. `get_data_dir()` 带 `@lru_cache` ⇒ 第一次调用就把旧值**冻住**。
+
+⇒ 护栏改为**每个用例前**重新钉一次环境变量 + `cache_clear()` 掉目录缓存。
+
+### 三、日/周粒度：整体废弃重采（用户 2026-11-11 决策）
+
+⇒ **先改声明再执行**：`modules/core/shop_identity_ssot.py` 新增
+`DISPOSABLE_GRANULARITIES = ('daily', 'weekly')` 例外声明。
+月粒度 / 快照粒度**完全不动**（经营口径基准，错了要人工判断）。
+
+| | 本地 | 云端 |
+|---|---|---|
+| 日/周行（已删） | **2211** | **2641** |
+| 备份 | `%TEMP%\mcode_granularity_backup_20261111\LOCAL_*.jsonl`（完整行数据，可逐行恢复） | `CLOUD_*.jsonl` |
+
+⚠️ 连带：3 个 semantic 物化视图读日/周事实表 ⇒ 删了不重刷 = 白删。
+重刷后**两端** `fact_orders_atomic_mv` / `fact_analytics_atomic_mv` /
+`fact_products_atomic_mv` 的 daily/weekly 残留**归零**，正本只剩 monthly。
+
+### 四、顺带修掉的既有 lint
+
+`collection_schedule.py` 两处 `CollectionConfig.is_active == True` 是基线就有的 E712
+⇒ CI 会对本 PR 改到的文件跑 ruff ⇒ 改成 `is_(True)`
+（该列 `nullable=False` 的 Boolean ⇒ `= true` 与 `IS true` 对每一行都完全等价）。
+
+### 五、验证口径
+
+| 项 | 结果 |
+|---|---|
+| 根 `tests/` | 745 passed / 5 skipped / **0 failed**（基线 738 ⇒ +7 条守卫） |
+| `backend/tests/` | 5688 passed / 8 skipped / **0 failed**（基线 5664 ⇒ +24 条守卫） |
+| 失败集 diff | 两端均 `NEW failures = 0` / `FIXED failures = 0` |
+| `black==25.1.0` | 10 个改动文件全部 clean（用 CI 同环境 Python 3.11 容器复验过） |
+| `ruff 0.17.3` | 全部通过 |
+| 迁移真库演练 | 升级前写 `manual_intervention_required` **被拒**（复现 bug）⇒ 升级后 13 状态全可写、`bogus_status` 仍被拒 ⇒ 降级后约束**逐字恢复** |
+| 护栏实测 | 修复前每次写 8 个文件 ⇒ 修复后 **0 个**（两端工作区均 0 新增） |
+
+### 六、遗留（需人工，不在代码范围）
+
+- 9 家 shopee 的**平台侧拦截登录**、tiktok 6 个账号的登录状态确认、妙手账号验证码回填
+  —— 属风控范畴，**不自动重试**；
+- 14 个采集配置 `schedule_enabled=false` ⇒ 调度器在跑但没注册采集任务（配置/运维决策）。
+
 ## [v7.21.0] - 2026-11-11 - 店铺身份「保未来」守护真的立起来 + 律 3 在存量库落地
 
 > **本版本含一次数据库迁移**（`current_schema_20261225_rebuild_identity_candidates_copy`，

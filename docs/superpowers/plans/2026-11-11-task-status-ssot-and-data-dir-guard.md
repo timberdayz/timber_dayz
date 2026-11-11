@@ -211,6 +211,20 @@
 | `backend/tests/test_collection_task_status_ssot_contract.py` | 24 | 全绿 |
 | `tests/test_collection_data_dir_guard_contract.py` | 7 | 全绿 |
 
+### 5.2.1 改动后全量回归（worktree）
+
+| 范围 | 基线 | 改动后 | 失败集 diff |
+|---|---|---|---|
+| 根 `tests/` | 738 passed / 5 skipped / 0 failed | **745 passed / 5 skipped / 0 failed** | `NEW=0` / `FIXED=0` / `COMMON=0`（+7 条守卫） |
+| `backend/tests/` | 5664 passed / 8 skipped / 0 failed | **5688 passed / 8 skipped / 0 failed** | `NEW=0` / `FIXED=0` / `COMMON=0`（+24 条守卫） |
+
+⚠️ **根 `tests/` 必须在有 `.env` 的条件下跑**：worktree 默认没有 `.env`
+（gitignored）⇒ `tests/test_rebuild_local_current_schema.py` 写的临时
+`.env.collection.local`（假口令 `erp_user:password`）会留在进程环境里，
+让后面的 `tests/test_v4_3_2_complete_system.py::test_product_hierarchy_ingestion`
+去连 15432 ⇒ 报 `password authentication failed`。
+⇒ **这是 worktree 环境差异，不是代码回归**（主工作树同一批用例通过）。
+
 ### 5.3 真库演练（迁移）
 
 `20261226_task_center_status_constraint` 在**本地开发库**上实跑 `upgrade` → `downgrade`：
@@ -233,8 +247,41 @@
 
 ### 5.6 格式
 
-`black==25.1.0` 侧校验通过（本地 3.13 + CI 侧 3.11 复验）。
-断言消息按 **3.11 侧**排版（不用 `assert 条件, (消息)` 的括号换行写法）。
+`black==25.1.0` 侧校验通过。⚠️ **本地是 Python 3.13、CI 是 Python 3.11**，
+black 在两端对 `assert 条件, (消息)` 的括号换行判定**不同**
+⇒ 断言消息一律**提到变量里**（本批已改 2 处）。
+
+⇒ 另用 Docker 起 `python:3.11-slim` + `black==25.1.0`（**CI 的确切组合**）
+复验：10 个改动文件 **全部 "would be left unchanged"** ⇒ 与 CI 逐字一致。
+
+> 顺带查明：基线里 `collection_schedule.py` / `collection_config_run_service.py`
+> 本来就不是 black-25.1.0 的格式 —— 因为 `black==25.1.0` 是 2026-11-04 才钉进
+> `requirements-dev.txt` 的，在此之前 CI 装的是随时间漂移的旧版 black
+> ⇒ 本批提交里带上的重排**正是 CI 现在要的格式**，不是多余改动。
+
+`ruff 0.17.3` 全绿（顺带修掉 `collection_schedule.py` 里两处**基线就有**的 E712 ——
+CI 会对本 PR 改到的文件跑 ruff，不修必判红）。
+
+### 5.7 本地库迁移版本戳（一个会「让采机起不来」的坑）
+
+本地库在真库演练时**手工**应用过约束变更，但 alembic 版本表没跟着走
+⇒ 采集启动脚本 `start_collection_formal.ps1` 的
+`Invoke-LocalCurrentSchemaMigration` 会在**下次启动时**因
+「迁移前现状与预期不符」而 fail-closed ⇒ **采机起不来**。
+
+⇒ 已补版本戳（**先核对约束状态集合与真源渲染逐字一致**，再改版本表）：
+`current_schema_alembic_version` = `current_schema_20261226_task_center_status_constraint`。
+
+### 5.8 采集机现状（本批实测）
+
+| 项 | 值 |
+|---|---|
+| 后端进程 | `python run.py --local` → uvicorn `backend.app.main:app` @ 127.0.0.1:8001 |
+| ⚠️ 热重载 | **没有**（`run.py --local` 走 `enable_reload=False`）⇒ **改完代码必须重启才生效** |
+| 启动时 | 会先跑一遍 fail-closed 迁移链（见 §5.7） |
+| `/healthz/ready` | 200，`database/redis/scheduler/queue_runner/leader_lock` 全 ok |
+| 采集在跑 / 排队 | **0 / 0**（无 running / queued / pending 的采集任务） |
+| 采集配置 | 14 个全部 `schedule_enabled=false` ⇒ 调度器在跑但**不注册**采集任务 |
 
 ---
 
