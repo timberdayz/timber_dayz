@@ -246,7 +246,14 @@ services:
       # 留空是有意的：没配 CLOUD_DATABASE_URL 时巡检照旧跳过。
       CLOUD_DATABASE_URL: ${CLOUD_DATABASE_URL:-}
       CLOUD_SYNC_TUNNEL_ENABLED: ${CLOUD_SYNC_TUNNEL_ENABLED:-true}
-      CLOUD_SYNC_TUNNEL_HOST: ${CLOUD_SYNC_TUNNEL_HOST:-host.docker.internal}
+      # ⚠️ **刻意不插值**（2026-11-11 修复）：容器里的隧道宿主**恒为** host.docker.internal。
+      # 之前写成 ${CLOUD_SYNC_TUNNEL_HOST:-host.docker.internal} 会被**宿主进程的环境变量**
+      # 覆盖 —— 采集机的宿主进程与容器**共用同一个变量名**，而两者语义**相反**：
+      #   · 宿主进程：127.0.0.1 就是宿主自己 ⇒ 隧道地址就该是 127.0.0.1
+      #   · 容器内  ：127.0.0.1 是**容器自己** ⇒ 隧道地址必须是 host.docker.internal
+      # compose 插值**优先取进程环境变量** ⇒ 宿主进程把 127.0.0.1 带进容器
+      # ⇒ 容器里的云端巡检恒为「云端不可达」⇒ 假警报把真信号淹掉。
+      CLOUD_SYNC_TUNNEL_HOST: host.docker.internal
       CLOUD_SYNC_TUNNEL_PORT: ${CLOUD_SYNC_TUNNEL_PORT:-15433}
       # 店铺身份「保未来」三件套(空默认 = 未启用, 不会误报)
       SHOP_IDENTITY_ALIGNMENT_EFFECTIVE_DATE: ${SHOP_IDENTITY_ALIGNMENT_EFFECTIVE_DATE:-}
@@ -315,7 +322,14 @@ services:
       # 留空是有意的：没配 CLOUD_DATABASE_URL 时巡检照旧跳过。
       CLOUD_DATABASE_URL: ${CLOUD_DATABASE_URL:-}
       CLOUD_SYNC_TUNNEL_ENABLED: ${CLOUD_SYNC_TUNNEL_ENABLED:-true}
-      CLOUD_SYNC_TUNNEL_HOST: ${CLOUD_SYNC_TUNNEL_HOST:-host.docker.internal}
+      # ⚠️ **刻意不插值**（2026-11-11 修复）：容器里的隧道宿主**恒为** host.docker.internal。
+      # 之前写成 ${CLOUD_SYNC_TUNNEL_HOST:-host.docker.internal} 会被**宿主进程的环境变量**
+      # 覆盖 —— 采集机的宿主进程与容器**共用同一个变量名**，而两者语义**相反**：
+      #   · 宿主进程：127.0.0.1 就是宿主自己 ⇒ 隧道地址就该是 127.0.0.1
+      #   · 容器内  ：127.0.0.1 是**容器自己** ⇒ 隧道地址必须是 host.docker.internal
+      # compose 插值**优先取进程环境变量** ⇒ 宿主进程把 127.0.0.1 带进容器
+      # ⇒ 容器里的云端巡检恒为「云端不可达」⇒ 假警报把真信号淹掉。
+      CLOUD_SYNC_TUNNEL_HOST: host.docker.internal
       CLOUD_SYNC_TUNNEL_PORT: ${CLOUD_SYNC_TUNNEL_PORT:-15433}
       # 店铺身份「保未来」三件套(空默认 = 未启用, 不会误报)
       SHOP_IDENTITY_ALIGNMENT_EFFECTIVE_DATE: ${SHOP_IDENTITY_ALIGNMENT_EFFECTIVE_DATE:-}

@@ -560,6 +560,72 @@ python scripts/verify_shop_identity_reconciliation.py --output output/reconcilia
 | 守护脚本（本地） | `ok`，退出码 0 |
 | 守护脚本（云端基线） | **`drifted`**，退出码 1 —— 部署前的真实状态，部署后应转 `ok` |
 
+## v7.21.0 发布与部署后实测（2026-11-11）
+
+- PR #21（发版收口，只改 `VERSION`/`CHANGELOG`）CI 13/13 全绿后合并，merge commit `4d4c6e0e`
+- tag `v7.21.0` 两端对象一致（GitHub / CNB 均为 `3c55da0f`）
+- 部署流水线 `42960141282` **success**，生产容器全部切到 v7.21.0 且 healthy
+
+### 部署后验收快照（只读，口径复用巡检）
+
+| 项 | 部署前 | 部署后 |
+|---|---|---|
+| 迁移版本 | `current_schema_20261224_shop_identity_conflict_rows` | `current_schema_20261225_rebuild_identity_candidates_copy`（head） |
+| 候选集副本 | **`drifted`**（自算） | **`ok`**（从正本取数，72/72，差集 0/0） |
+| 逐月 unknown | — | 10 个月全 `known_legacy`，`degraded=0` |
+
+### 生产巡检第一次真跑（不再 skipped）
+
+`CLOUD_DATABASE_URL` 在生产 compose 里接上了 ⇒ 巡检从「永远 skipped」变成真跑：
+
+| 字段 | 值 |
+|---|---|
+| `identity_candidates_copy_status` | `ok`（72 行） |
+| `degraded_semantic_months` | `0`（10 个月全 `known_legacy`） |
+| `cloud_database_url_resolution` | `rewritten=false`、`reason=not_loopback_host`（生产「云端」= 自己，主机名 `postgres` 非回环 ⇒ 不改写） |
+| `status` | `partial_failed` —— **唯一**失败项是 `stale_cloud_chains`（10 条采集链陈旧） |
+
+⇒ 失败项是**采集停更**的真实信号，正是这次守护要暴露的东西，不是新问题。
+
+## 容器侧云端隧道地址修正（2026-11-11）
+
+- Plan: `docs/superpowers/plans/2026-11-11-container-cloud-tunnel-host-fix.md`
+- 主题：让**采集机侧**的云端巡检真的连得上云端（v7.21.0 部署后实测发现）
+
+### 现象
+
+采集机本地库出现 `cloud_sync_integrity_check_unreachable` / `failed`：
+`ConnectionRefusedError: [Errno 111] Connect call failed ('127.0.0.1', 15433)`。
+同一时刻隧道看门狗报 `OK`、`ssh` 进程没断 ⇒ **不是隧道掉了，是地址填错了**。
+
+### 根因
+
+`CLOUD_SYNC_TUNNEL_HOST` 一个变量名被**语义相反**的两个环境共用：
+
+- 宿主进程（隧道在本机）⇒ 该填 `127.0.0.1`；
+- 容器内（隧道在 Docker 宿主）⇒ 该填 `host.docker.internal`。
+
+compose 插值**优先取进程环境变量**，而采集机启动脚本会把
+`.env.collection.local`（正是 `127.0.0.1`）导入进程环境 ⇒ 容器拿到 `127.0.0.1`
+⇒ 连到容器自己 ⇒ 必然拒连。容器内实测：`host.docker.internal:15433` 通、`127.0.0.1:15433` 拒。
+
+⇒ 后果是巡检**恒定**报「云端不可达」⇒ 假警报把真信号淹掉 ⇒ 守卫等于没有。
+
+### 修法
+
+容器侧 `CLOUD_SYNC_TUNNEL_HOST` **钉死为字面量** `host.docker.internal`（不再插值）。
+宿主侧保持 `127.0.0.1`（`env.collection.local`）—— 代码在「非容器内」时原样保留主机名，不受影响。
+**生产 compose 不动**（生产「云端」= 自己，主机名非回环，压根不走隧道改写）。
+
+### 交付物
+
+| 文件 | 作用 |
+|---|---|
+| `docker-compose.dev.yml`（celery-worker / celery-beat） | 容器侧隧道宿主钉死为字面量 |
+| `docker-compose.collection-cloud-sync.yml`（backend-collector） | 同上 |
+| `env.collection.local.example` | 写明 `127.0.0.1` 是**宿主语义**，容器侧由 compose 钉死 |
+| `tests/test_container_cloud_tunnel_host_contract.py` | 10 条契约守护 |
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
