@@ -897,8 +897,60 @@ ORM 约束、两个服务、状态映射**全部从真源派生**；
   - 2 家「transaction has been rolled back」= 本批已修（约束放宽 + 真源派生）。
   - 2 家「浏览器被关闭」= 同轮任务崩溃的连带，修复后重跑即可。
 - tiktok 6 个账号登录状态需人工确认；妙手账号验证码需人工回填。
-- **14 个采集配置 `schedule_enabled=false`** ⇒ 调度器在跑但不注册采集任务；
-  打开 daily 档有风控陷阱（= 每天同一时刻全店登录），须按配置单独设 cron。
+- **14 个采集配置 `schedule_enabled=false`** ⇒ 调度器在跑但不注册采集任务。
+
+### 定时（cron）到底怎么运作（2026-11-11 复核）
+
+定时本来就是**用户自己在界面上开关的**，不需要谁来代设。两层：
+
+| 层 | 接口 | 作用范围 |
+|---|---|---|
+| 按粒度统一开关 | `GET/POST /api/collection/schedule/granularity/{daily\|weekly\|monthly}` | 该粒度下每个「当前配置」 |
+| 单条配置开关 | `GET/POST /api/collection/configs/{id}/schedule` | 指定的那一条 |
+
+- 粒度预设 cron（`backend/domains/collection/routers/collection_schedule.py:46`）：
+  `daily = 0 7 * * *`（每天 07:00 采昨天）、
+  `weekly = 0 9 * * 1`（每周一 09:00 采上周）、
+  **`monthly = 0 9 * * *`（每天 09:00 采「本月累计到最近可采集日」）**。
+- 「当前配置」= 按 `(platform, main_account_id, granularity)` 分组，每组取一条：
+  优先 `batch_status='active'`，否则取 `updated_at` 最新的
+  ⇒ 14 条里实际只有 **12 条**当前配置（config 26 与 40 同组，40 是当前的）。
+- APScheduler 的 jobstore 就是**同一个 PG 库的 `apscheduler_jobs` 表**（持久化 ⇒ 重启不丢）；
+  实测该表当前**只有 1 条 `daily_cleanup`**（每天 03:00 清理临时文件，与采集无关），
+  **一条采集作业都没有** —— 因为 14 条配置全是 `schedule_enabled=false`。
+- ⚠️ **风控陷阱在 `monthly` 而不在 `daily`**：`monthly` 预设是 `0 9 * * *` = **每天**跑
+  （不是每月一次），而月档范围是 `auto_month_to_date` ⇒ 每天 09:00 会把**全店重登一遍**、
+  月档数据整个重采一遍（UPSERT 不膨胀，但**登录次数 = 每天一次全店**）。
+  ⇒ 要开定时就开 **daily**；monthly 若也要自动，**别用粒度一键开关**，
+  改成逐条 `POST /api/collection/configs/{id}/schedule` 给它 `0 9 1 * *` 这种自定义 cron。
+- 定时采集 09:00 触发 → 文件落库 → 自动入库（celery beat `*/15`）在 **09:00 或 09:15**
+  那拍拾走 ⇒ **数据进语义层最多滞后 15 分钟**（实测：10:08 落库 → 10:15:00 那拍入库）。
+
+### 每平台单账号冒烟（2026-11-11 20:19 ~ 20:30，用户要求「每平台只登一个账号测」）
+
+用 `POST /api/collection/tasks`（**单账号**，不走整条配置），
+`granularity=monthly` + `time_selection={mode: dynamic, strategy: current_month_to_available_day,
+available_after_time: "06:00"}` ⇒ 实际时间窗 **2026-11-01 ~ 2026-11-10**
+（当天 11-11，平台数据 06:00 后可采 ⇒ 最近可采集日 11-10）。
+
+| 平台 | 账号 | 结果 |
+|---|---|---|
+| tiktok | `tiktok_my_dawie_mall_local`（上次成功 11-07） | **completed**，1 个文件；登录 → 切店 → 采集 → 落盘 → 自动入库 → 语义层全通 |
+| shopee | `shopee_ph_xhkj11_local`（当初被本批 bug 弄挂的那家） | **failed**：`登录组件执行失败` = **平台侧拦截**（会话已过期），非代码问题 |
+
+- tiktok 文件 `tiktok_analytics_monthly_20261111_202228.xlsx`：
+  自动入库在 **12:30:00 UTC** 那拍处理（12:15 那拍早于文件落库，是空的）：
+  `processed=1, success=1, quarantined=0, failed=0, skipped=0`；
+  `public.catalog_files` id `3056` → `status=ingested`；
+  语义层 `semantic.fact_analytics_atomic` 月档 3734 → **3738**，`max(metric_date)=2026-11-10`。
+- shopee 那次虽失败，但**带回了本批修复的直接证据**：任务中心镜像行
+  `status=failed / progress=5% / step=正在登录... / error=登录组件执行失败`
+  ⇒ **真实失败原因被原样记录，不再被 `This Session's transaction has been rolled back` 盖掉**。
+- 粒度纯度不变：语义层仍是**只有 monthly**，daily/weekly 残留 0；
+  历史行归属未动、身份戳未回填。
+
+⇒ **两个平台的采集组件在 v7.22.0 上都跑通了**；剩下的 shopee 失败全部是
+**平台侧拦截登录**（会话过期 / 滑块验证码）⇒ 只能人工重登。
 
 ## Notes
 
