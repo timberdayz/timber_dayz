@@ -518,6 +518,48 @@ python scripts/verify_shop_identity_reconciliation.py --output output/reconcilia
 - 用户侧：下一轮采集后核「新增月份认不出 = 0」—— ⚠️ **只能从 2026-12 起算**（11 月是事故现场）。
 - v7.21.0：律 3 的候选名单副本物化视图仍是旧定义 ⇒ 部署流水线需先 `DROP` 再按资产重建，并加副本定义守护。
 
+## 律 3 落地：候选集副本改为「从正本取数」（2026-11-11）
+
+- Plan: `docs/superpowers/plans/2026-11-11-identity-candidates-copy-rebuild.md`
+- 主题：把「派生层口径收回」从**仓库资产**变成**存量库里的事实**
+
+### 生产实测（2026-11-11，云端库只读探测）
+
+| 项 | 结果 |
+|---|---|
+| 副本定义 | 仍是**手抄版**（`core.shop_accounts` / `regexp_replace` / `active_shop_accounts` 都在）⇒ **在自算**，没读正本 |
+| 副本行数 / 正本行数 | 72 / 72，双向差集 **0 / 0** ⇒ *当前* 无功能影响 |
+| 定义落后 | 副本比正本**少一条**口径（采集方代号不进候选池）⇒ 随时可能静默分叉 |
+
+### 为什么走迁移而不是改部署流水线
+
+* 部署期跑 `rebuild_views.py --all-plain-views` ⇒ **只重建普通视图**，副本不在清单里；
+* 「在流水线里 DROP 副本」会打断 `LANGUAGE sql` 的解析函数（依赖被跟踪），
+  而让开/换回必须与两个原子层普通视图**同步**做 ⇒ 天然是原子操作，不是流水线步骤。
+
+### 交付物
+
+| 文件 | 作用 |
+|---|---|
+| `current_migrations/versions/20261225_rebuild_identity_candidates_copy.py` | 让开 → `DROP`（**不带 CASCADE**）→ 按资产重建 → 换回 → 内容逐行比对 + 定义校验 |
+| `backend/services/data_pipeline/cloud_sync_integrity_service.py` | 巡检**第五项**「候选集副本口径健康」（`missing`/`drifted`/`diverged`/`ok`/`unknown`） |
+| `scripts/verify_identity_candidates_copy.py` | 只读探针，**复用**巡检同一个判定函数 |
+| `tests/` × 2 新文件 | 25 条契约守护 |
+
+### 顺带修掉的两个真问题
+
+1. 巡检第五项 `counts.one()` 被调用两次 ⇒ 真库实跑恒为 `unknown`（已修 + 单测假 Result 改成「取一次就关闭」）；
+2. 两个守护脚本原来只读进程环境变量 ⇒ 开箱跑报「DATABASE_URL 未配置」（改为 import 前 `load_project_env`）。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| 本地库真跑迁移 | 成功，版本 → `current_schema_20261225_rebuild_identity_candidates_copy` |
+| 迁移后本地副本定义 | `FROM semantic.shop_identity_resolution_candidates`；`legacy_tokens=(none)`；72/72 差集 0/0 |
+| 守护脚本（本地） | `ok`，退出码 0 |
+| 守护脚本（云端基线） | **`drifted`**，退出码 1 —— 部署前的真实状态，部署后应转 `ok` |
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).

@@ -77,6 +77,13 @@ if str(_PROJECT_ROOT) not in sys.path:
 from sqlalchemy.engine import make_url  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
+from backend.utils.project_env import load_project_env  # noqa: E402
+
+# ⚠️ **必须先加载 .env 再 import backend 模块** ——
+# ``backend.models.database`` 在 import 时就会按 ``DATABASE_URL`` 建引擎,
+# 环境变量还没加载 ⇒ 引擎会指向错误的目标(或者建不出来)。
+load_project_env(_PROJECT_ROOT, profile="collection")
+
 from backend.models.database import get_async_database_url  # noqa: E402
 from backend.services.data_pipeline.cloud_sync_integrity_service import (  # noqa: E402
     collect_semantic_resolution,
