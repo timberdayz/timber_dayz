@@ -847,6 +847,59 @@ ORM 约束、两个服务、状态映射**全部从真源派生**；
 去连 15432 ⇒ 报 `password authentication failed`。
 ⇒ **这是 worktree 环境差异，不是代码回归**（主工作树同一批用例通过）。
 
+## v7.22.0 上线 + 采集机真实采集实跑验收（2026-11-11）
+
+本节只记录**实测结论**，不再改代码。
+
+### 生产部署（决定性）
+
+| 项 | 结果 |
+|---|---|
+| 流水线 run `42997345617`（Deploy to Production，tag 触发） | `conclusion=success` |
+| 容器镜像 | `backend:v7.22.0` × 3（api / celery_worker / celery_beat）+ `frontend:v7.22.0` + postgres / redis / nginx |
+| 容器健康 | 7 个全部 `healthy` |
+| 容器内 `VERSION` | `v7.22.0` |
+| 公网健康端点 | `https://www.xihong.site/api/healthz/ready` → HTTP 200，`version=v7.22.0` |
+| Phase 2.7 视图重建 | 39 个目标全部成功，失败 0（`rebuild_views_20261111_175152.log`） |
+| 生产库任务中心约束 | 13 个状态，与真源渲染逐字一致 |
+| 生产库迁移 head | `current_schema_20261226_task_center_status_constraint` |
+| 生产库日/周粒度残留 | `fact_orders_atomic` / `fact_analytics_atomic` / `fact_products_atomic` 三张表 daily 与 weekly 均为 **0**；正本 `semantic.fact_orders_atomic` 只剩 `monthly=37516` |
+
+### 采集机真实采集实跑（决定性证据）
+
+- 采集机重启到 `v7.22.0`：`/healthz/ready` = 200，database / redis / scheduler /
+  queue_runner / leader_lock / playwright 全 ok。
+- 触发方式：`POST /api/collection/configs/31/run`（配置 31 = `shopee KR` 月档，
+  账号只有 `shopee_sg_hx_home_local` + `shopee_sg_strawberries_store_local`
+  两个**当天 05:00 刚采集成功、会话仍有效**的店 ⇒ 不触发新登录、不碰验证码）。
+- 结果：config run `264` 状态 `completed`（18:07:19 → 18:09:47）：
+  - task `699` `shopee_sg_hx_home_local`：`completed`，71s，1 个文件；
+  - task `700` `shopee_sg_strawberries_store_local`：`completed`，68s，1 个文件；
+  - 两个任务 `error_message` 均为空，`verification_type` 为空（**没进验证码分支**）。
+- 落盘：`data/raw/2026/shopee_analytics_monthly_20261111_180831.xlsx`（10895 B）
+  与 `..._180944.xlsx`（10834 B）+ 各自 `meta.json` ⇒ 是真实数据，不是测试残留。
+- 任务中心镜像：`public.task_center_tasks` id `2128` / `2129`，
+  `status=completed`、`progress_percent=100` ⇒ **本批修的那条写入路径在真实采集里跑通了**。
+- 自动入库：celery beat 的 `auto-ingest-pending-files-every-15min` 在 **10:15:00 UTC**
+  那拍拾起这 2 个文件（10:00 那拍早于文件落库，所以是空的）：
+  `processed=2, success=2, quarantined=0, failed=0, blocked=0, skipped=0`；
+  两个文件均 `status=ingested`，同步结果为「**新插入 3 行, 更新 7 行（UPSERT）**」。
+- 语义层：`semantic.fact_analytics_atomic` 月档 3728 → **3734**，`max(metric_date)`
+  推进到 2026-11-10；粒度仍**只有 monthly**（日/周清理成果没被这次实跑破坏）。
+
+⇒ 采集 → 落盘 → 登记 → 自动入库 → 数据同步（UPSERT）→ 语义层，**全链路实跑通过**。
+
+### 遗留（非代码，需人工）
+
+- **9 家 shopee 的失败与本次代码修复无关**：
+  - 5 家「登录组件执行失败」= 平台侧拦截（滑块验证码）⇒ **需人工重登**；
+    按用户风控要求，**不得自动重试**。
+  - 2 家「transaction has been rolled back」= 本批已修（约束放宽 + 真源派生）。
+  - 2 家「浏览器被关闭」= 同轮任务崩溃的连带，修复后重跑即可。
+- tiktok 6 个账号登录状态需人工确认；妙手账号验证码需人工回填。
+- **14 个采集配置 `schedule_enabled=false`** ⇒ 调度器在跑但不注册采集任务；
+  打开 daily 档有风控陷阱（= 每天同一时刻全店登录），须按配置单独设 cron。
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
