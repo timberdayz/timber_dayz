@@ -18,6 +18,15 @@ from backend.domains.business.routers.product_center import (
     soft_delete_spu,
 )
 from backend.schemas.product_center import SpuRestoreRequest, SpuSoftDeleteRequest
+# SPU 状态与归属状态的字面量只从真源取（律 1）。
+from backend.services.product_spu_binding import (
+    CURRENT_BINDING_STATUS,
+    INACTIVE_BINDING_STATUS,
+)
+from backend.services.product_spu_lifecycle import (
+    SPU_BIZ_STATUS_PROMOTED,
+    SPU_BIZ_STATUS_RETIRED,
+)
 from modules.core.db import DimSpu, BridgeSpuSku
 
 
@@ -40,9 +49,9 @@ def reset_spu_sync(spu: str):
             WHERE s.spu = b.spu AND s.spu = :spu
         """), {"spu": spu})
         conn.execute(text("""
-            UPDATE core.bridge_spu_sku SET binding_status='active', effective_to=NULL
+            UPDATE core.bridge_spu_sku SET binding_status=:status, effective_to=NULL
             WHERE spu = :spu
-        """), {"spu": spu})
+        """), {"spu": spu, "status": CURRENT_BINDING_STATUS})
         conn.execute(text("DELETE FROM public.fact_audit_logs WHERE resource_id = :spu"), {"spu": spu})
 
 
@@ -98,10 +107,15 @@ async def main():
         await db.execute(
             text("""
                 UPDATE core.bridge_spu_sku
-                SET binding_status='inactive', effective_to=:d
-                WHERE spu = :spu AND binding_status='active' AND effective_to IS NULL
+                SET binding_status=:inactive, effective_to=:d
+                WHERE spu = :spu AND binding_status=:active AND effective_to IS NULL
             """),
-            {"d": date.today(), "spu": TEST_SPU},
+            {
+                "d": date.today(),
+                "spu": TEST_SPU,
+                "active": CURRENT_BINDING_STATUS,
+                "inactive": INACTIVE_BINDING_STATUS,
+            },
         )
         await db.commit()
         print("  3a. Inactivated all active bindings")
@@ -117,7 +131,7 @@ async def main():
 
         # 3c. 校验软删状态
         spu_row = await db.get(DimSpu, TEST_SPU)
-        assert spu_row.active is False and spu_row.biz_status == "retired"
+        assert spu_row.active is False and spu_row.biz_status == SPU_BIZ_STATUS_RETIRED
         print(f"  3c. dim_spu after soft-delete: active={spu_row.active} biz_status={spu_row.biz_status}")
 
         # 3d. 记录最早的 inactive binding id(预期会被复活)
@@ -125,7 +139,7 @@ async def main():
             select(BridgeSpuSku.id)
             .where(
                 BridgeSpuSku.spu == TEST_SPU,
-                BridgeSpuSku.binding_status == "inactive",
+                BridgeSpuSku.binding_status == INACTIVE_BINDING_STATUS,
             )
             .order_by(BridgeSpuSku.effective_to.asc())
             .limit(1)
@@ -139,19 +153,19 @@ async def main():
             db=db, _user=FakeUser(),
         )
         assert resp.audit_recorded is True
-        assert resp.previous_biz_status == "retired"
-        assert resp.new_biz_status == "promoted"
+        assert resp.previous_biz_status == SPU_BIZ_STATUS_RETIRED
+        assert resp.new_biz_status == SPU_BIZ_STATUS_PROMOTED
         assert resp.restored_bindings == 1
         print(f"  3e. restore response: {resp.previous_biz_status} → {resp.new_biz_status} restored_bindings={resp.restored_bindings}")
 
         # 3f. 校验 dim_spu 状态
         spu_row = await db.get(DimSpu, TEST_SPU)
-        assert spu_row.active is True and spu_row.biz_status == "promoted"
+        assert spu_row.active is True and spu_row.biz_status == SPU_BIZ_STATUS_PROMOTED
         print(f"  3f. dim_spu after restore: active={spu_row.active} biz_status={spu_row.biz_status}")
 
         # 3g. 校验最早的 binding 已复活
         earliest = await db.get(BridgeSpuSku, earliest_id)
-        assert earliest.binding_status == "active" and earliest.effective_to is None
+        assert earliest.binding_status == CURRENT_BINDING_STATUS and earliest.effective_to is None
         print(f"  3g. earliest binding复活: binding_status={earliest.binding_status} effective_to={earliest.effective_to}")
 
         # 3h. 校验 audit 有 spu_restore

@@ -42,6 +42,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import BridgeSpuSku, DimErpSku, DimSpu, PriceAdjustBaseline
 
+# SKU ↔ SPU 归属关系的「当前有效」判定只从真源取（律 1）。
+from backend.services.product_spu_binding import current_binding_condition
+
 from .product_pricing_query_service import (
     compute_pricing_state,
     load_pricing_context,
@@ -309,8 +312,7 @@ class PriceAdjustNotifyService:
             await self.db.execute(
                 select(BridgeSpuSku.sku_id, BridgeSpuSku.spu).where(
                     BridgeSpuSku.sku_id.in_(sku_ids),
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         ).all()

@@ -13,6 +13,15 @@ from backend.domains.business.routers.product_center import (
     soft_delete_spu,
 )
 from backend.schemas.product_center import SpuSoftDeleteRequest
+# SPU 状态与归属状态的字面量只从真源取（律 1）。
+from backend.services.product_spu_binding import (
+    CURRENT_BINDING_STATUS,
+    INACTIVE_BINDING_STATUS,
+)
+from backend.services.product_spu_lifecycle import (
+    SPU_BIZ_STATUS_CANDIDATE,
+    SPU_BIZ_STATUS_RETIRED,
+)
 from modules.core.db import DimSpu, BridgeSpuSku
 
 
@@ -39,9 +48,9 @@ async def main():
         """), {"spu": TEST_SPU}).first()
         print(f"  dim_spu: active={r[0]} biz_status={r[1]}")
         conn.execute(text("""
-            UPDATE core.bridge_spu_sku SET binding_status='active', effective_to=NULL
+            UPDATE core.bridge_spu_sku SET binding_status=:status, effective_to=NULL
             WHERE spu = :spu
-        """), {"spu": TEST_SPU})
+        """), {"spu": TEST_SPU, "status": CURRENT_BINDING_STATUS})
         conn.execute(text("DELETE FROM public.fact_audit_logs WHERE resource_id = :spu"), {"spu": TEST_SPU})
     print()
 
@@ -84,8 +93,8 @@ async def main():
 
         await db.execute(
             update(BridgeSpuSku)
-            .where(BridgeSpuSku.spu == TEST_SPU, BridgeSpuSku.binding_status == "active")
-            .values(binding_status="inactive", effective_to=date.today())
+            .where(BridgeSpuSku.spu == TEST_SPU, BridgeSpuSku.binding_status == CURRENT_BINDING_STATUS)
+            .values(binding_status=INACTIVE_BINDING_STATUS, effective_to=date.today())
         )
         await db.commit()
         print(f"  3b. Inactivated all active bindings")
@@ -103,7 +112,7 @@ async def main():
             print(f"  3d. soft_delete_spu response: spu={sd_resp.spu} biz_status={sd_resp.biz_status} audit_recorded={sd_resp.audit_recorded}")
 
             spu_row = await db.get(DimSpu, TEST_SPU)
-            assert spu_row.active is False and spu_row.biz_status == "retired"
+            assert spu_row.active is False and spu_row.biz_status == SPU_BIZ_STATUS_RETIRED
             print(f"  3e. dim_spu: active={spu_row.active} biz_status={spu_row.biz_status}")
 
             audit = (await db.execute(text(
@@ -122,7 +131,7 @@ async def main():
                     )
                 )
             await db.execute(
-                update(DimSpu).where(DimSpu.spu == TEST_SPU).values(active=True, biz_status="candidate")
+                update(DimSpu).where(DimSpu.spu == TEST_SPU).values(active=True, biz_status=SPU_BIZ_STATUS_CANDIDATE)
             )
             await db.commit()
             with sync_engine.begin() as c:

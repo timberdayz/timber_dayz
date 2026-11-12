@@ -24,6 +24,34 @@ from sqlalchemy.sql import func
 
 from .base import Base
 
+# SPU 经营状态与生命周期不变量的约束**从真源渲染**，不在这里手抄状态清单
+# （律 1「真源只能一个，而且必须写在纸上」）。
+#
+# 真源：``backend/services/product_spu_lifecycle.py``
+# ⇒ 状态全集、「能不能挂货」的口径、``active=false ⟹ biz_status='retired'``
+#    的不变量，全部只在那一处定义。
+# 守护测试：``backend/tests/test_product_spu_lifecycle_ssot_contract.py``
+#
+# ⚠️ 依赖方向说明: ``modules/core`` 引用 ``backend.services`` 在本仓库有先例
+#    （``modules/core/db/schema_parts/collection.py`` → ``backend.services.collection_task_status``），
+#    且本模块只依赖纯常量与渲染函数 ⇒ 无循环导入风险。
+from backend.services.product_spu_lifecycle import (  # noqa: E402
+    render_spu_biz_status_constraint,
+    render_spu_lifecycle_constraint,
+)
+
+# SKU ↔ SPU **归属关系**的状态取值域**从真源渲染**，不在这里手抄状态清单。
+#
+# 真源：``backend/services/product_spu_binding.py``
+# ⇒ active（当前有效）/ inactive（软删封存，可复活）/ historical（换款归档，历史证据）
+#    三个值语义各不相同，任何一个都不能被悄悄替换成第四个。
+# 守护测试：``backend/tests/test_product_center_binding_write_path_contract.py``
+from backend.services.product_spu_binding import (  # noqa: E402
+    CURRENT_BINDING_STATUS,
+    render_binding_status_constraint,
+    render_current_binding_index_predicate,
+)
+
 
 class DimPlatform(Base):
     __tablename__ = "dim_platforms"
@@ -381,6 +409,17 @@ class DimSpu(Base):
     __table_args__ = (
         UniqueConstraint("spu", name="uq_dim_spu_spu"),
         Index("ix_dim_spu_status_owner", "biz_status", "owner_user_id"),
+        # 经营状态取值域 —— 表达式从真源渲染，不手抄清单。
+        CheckConstraint(
+            render_spu_biz_status_constraint(),
+            name="chk_dim_spu_biz_status",
+        ),
+        # 建模 A 的不变量：active=false 必然是 retired
+        # （淘汰不等于删除：active=true + retired 是合法的「逻辑淘汰」）。
+        CheckConstraint(
+            render_spu_lifecycle_constraint(),
+            name="chk_dim_spu_lifecycle",
+        ),
         {"schema": "core"},
     )
 
@@ -498,7 +537,9 @@ class BridgeSpuSku(Base):
     )
     effective_from = Column(Date, nullable=False)
     effective_to = Column(Date, nullable=True)
-    binding_status = Column(String(32), nullable=False, default="active")
+    binding_status = Column(
+        String(32), nullable=False, default=CURRENT_BINDING_STATUS
+    )
     created_by = Column(Integer, nullable=True)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -515,9 +556,19 @@ class BridgeSpuSku(Base):
             "uq_bridge_spu_sku_current",
             "sku_id",
             unique=True,
-            postgresql_where=text("effective_to IS NULL AND binding_status = 'active'"),
+            # ⚠️ 部分索引谓词也**从真源渲染** ——
+            #    「一个 SKU 只有一条当前归属」这条规则不该在 ORM 里再抄一遍。
+            postgresql_where=text(render_current_binding_index_predicate()),
         ),
         Index("ix_bridge_spu_sku_spu", "spu", "effective_to"),
+        # ⚠️ 归属状态的取值域兜底 —— 从真源渲染，不手抄。
+        #    没有它，第四个状态值会**静默**写进库：
+        #    三个值的语义各不相同（当前有效 / 软删封存可复活 / 换款归档不可复活），
+        #    一旦漂移，恢复端点就会复活一条本该留作历史的关系。
+        CheckConstraint(
+            render_binding_status_constraint(),
+            name="chk_bridge_spu_sku_binding_status",
+        ),
         {"schema": "core"},
     )
 

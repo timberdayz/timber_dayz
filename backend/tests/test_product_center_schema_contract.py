@@ -5,6 +5,8 @@ from pydantic import ValidationError
 from sqlalchemy import inspect
 
 from backend.schemas.product_center import ProductCenterBindingResponse
+# 归属状态值只从真源取（律 1）。
+from backend.services.product_spu_binding import CURRENT_BINDING_STATUS
 from modules.core.db import (
     BridgeErpSkuKey,
     BridgeSpuSku,
@@ -83,19 +85,19 @@ def test_binding_response_accepts_sqlalchemy_orm_row():
         sku_id=42,
         effective_from=date(2026, 1, 1),
         effective_to=None,
-        binding_status="active",
+        binding_status=CURRENT_BINDING_STATUS,
     )
     payload = ProductCenterBindingResponse.model_validate(row)
     assert payload.spu == "XH-TEST"
     assert payload.sku_id == 42
     assert payload.effective_to is None
-    assert payload.binding_status == "active"
+    assert payload.binding_status == CURRENT_BINDING_STATUS
 
 
-def test_product_center_item_exposes_pricing_fields_as_optional():
-    from backend.schemas.product_center import ProductCenterItem
+def test_sku_item_exposes_pricing_fields_as_optional():
+    from backend.schemas.product_center import SkuItem
 
-    fields = ProductCenterItem.model_fields
+    fields = SkuItem.model_fields
     for name in (
         "creator_commission_rate",
         "creator_commission_rate_fallback",
@@ -333,13 +335,13 @@ def test_orm_models_expose_pricing_columns_and_policy_table():
         assert index.table.schema == "finance"
 
 
-def test_product_center_item_validates_bare_orm_row():
-    """回归护栏：ProductCenterItem 被用于校验裸 ORM 行，新增字段必填会直接打断既有流程。"""
-    from backend.schemas.product_center import ProductCenterItem
+def test_sku_item_validates_bare_orm_row():
+    """回归护栏：SkuItem 被用于校验裸 ORM 行，新增字段必填会直接打断既有流程。"""
+    from backend.schemas.product_center import SkuItem
     from modules.core.db import DimErpSku
 
     row = DimErpSku(sku_id=9001, sku_key="TEST-SKU-1", sku_name="测试SKU")
-    item = ProductCenterItem.model_validate(row)
+    item = SkuItem.model_validate(row)
     assert item.min_selling_price is None
     assert item.pricing_tier_source is None
     assert item.min_selling_price_missing_reasons == []

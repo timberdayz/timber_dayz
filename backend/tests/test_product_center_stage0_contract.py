@@ -68,28 +68,34 @@ def test_cost_completeness_is_written_from_expected_section_only():
 
 def test_spu_response_carries_active_flag():
     """SPU 响应必须带 active —— 否则前端判不出软删，「恢复」按钮永远不出现。"""
-    from backend.schemas.product_center import ProductCenterItem
+    from backend.schemas.product_center import SpuItem
     from modules.core.db import DimSpu
 
-    deleted = ProductCenterItem.model_validate(DimSpu(spu="SPU-DELETED", active=False))
+    deleted = SpuItem.model_validate(DimSpu(spu="SPU-DELETED", active=False))
     assert deleted.active is False, (
         "已软删的 SPU 必须能通过响应识别出 active=false，"
         "否则前端不灰显、也不显示「恢复」按钮 —— 软删就成了不可逆操作"
     )
 
-    alive = ProductCenterItem.model_validate(DimSpu(spu="SPU-ALIVE", active=True))
+    alive = SpuItem.model_validate(DimSpu(spu="SPU-ALIVE", active=True))
     assert alive.active is True
 
 
-def test_sku_response_active_stays_none():
-    """SKU 没有 active 列（用 status），响应里 active 必须是 None 而不是报错。"""
-    from backend.schemas.product_center import ProductCenterItem
+def test_sku_response_has_no_active_field():
+    """SKU 没有 active 列（用 status）⇒ 响应模型里**根本不该有** active。
+
+    ⚠️ 以前是「有 active 但恒为 None」—— 那正是「同一个模型两套语义」的残留：
+       调用方拿到行也分不清这个 active 是不是有意义。
+       现在款用 ``SpuItem.active``、货用 ``SkuItem.status``，泾渭分明。
+    """
+    from backend.schemas.product_center import SkuItem
     from modules.core.db import DimErpSku
 
-    item = ProductCenterItem.model_validate(
+    assert "active" not in SkuItem.model_fields
+
+    item = SkuItem.model_validate(
         DimErpSku(sku_id=9101, sku_key="TEST-SKU-NO-ACTIVE", status="active")
     )
-    assert item.active is None
     assert item.status == "active"
 
 

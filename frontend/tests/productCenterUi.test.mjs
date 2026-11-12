@@ -340,7 +340,9 @@ test("物流批次体积换算有实现，且体积缺失会被显式提示而�
 });
 
 test("SPU 列表带出已软删的行，软删可恢复", () => {
-  assert.match(source, /include_inactive: true/);
+  // ⚠️ 参数名必须是 include_soft_deleted（不是 include_inactive）——
+  //    「已删除」与「停用」在这个域里是两件事，同名会让人以为口径一致。
+  assert.match(source, /include_soft_deleted: true/);
   assert.match(source, /spuRowClass/);
   assert.match(source, /spu-inactive-row/);
   // 「恢复」按钮 / 「删除」禁用 / 选中过滤 / 整行灰显 **全部**依赖 row.active。
@@ -349,6 +351,44 @@ test("SPU 列表带出已软删的行，软删可恢复", () => {
   assert.match(source, /row\.active === false \? "spu-inactive-row" : ""/);
   assert.match(api, /listSpus\(params = \{\}\)/);
   assert.match(api, /listSkus\(params = \{\}\)/);
+});
+
+test("SKU 行展示归属生效日 —— 归属是一段有时效的关联，不是一个字段", () => {
+  // 「SKU 属于哪个 SPU」不是 SKU 身上的一个字段，而是**一段归属关系在今天的落点**。
+  // 只显示编码 ⇒ 运营看不到「这个货是什么时候挂到这个款上的」「换过几次款」。
+  assert.match(source, /spu_effective_from/);
+  assert.match(source, /spu-binding-since/);
+  // 生效日必须挂在 **SKU 表**的 SPU 单元格里（跟着编码走，不是散落在别处）
+  const skuTableAt = source.indexOf('class="flat-table sku-table"');
+  assert.notEqual(skuTableAt, -1);
+  assert.match(
+    source.slice(skuTableAt, skuTableAt + 4000),
+    /spu_effective_from/,
+  );
+});
+
+test("SKU 存量行的 SPU 单元格可编辑 —— 归属关系双向可达", () => {
+  const skuTableAt = source.indexOf('class="flat-table sku-table"');
+  assert.notEqual(skuTableAt, -1);
+  const seg = source.slice(skuTableAt, skuTableAt + 6000);
+
+  // ⚠️ 以前存量行的 SPU 单元格是**只读**的（v-else readonly-cell），
+  //    改归属只能从「SPU 管理」tab 的抽屉单向进入 ⇒ 归属关系单向可达。
+  assert.doesNotMatch(
+    seg,
+    /v-else class="readonly-cell"[^>]*>\s*\{\{ row\.spu/,
+    "存量行的 SPU 单元格仍是只读 —— 归属关系还是单向可达",
+  );
+
+  // 换款必须走已有的批量保存通道（bulk_save_skus），不许另开一条写入路径。
+  assert.match(source, /const onSkuSpuChange = \(row\) =>/);
+  assert.match(source, /@change="onSkuSpuChange\(row\)"/);
+  assert.match(source, /markDirty\("sku", row\)/);
+
+  // 候选集必须用**可绑定口径**（assignable）—— 赋值是外键，不能造出挂不上的款。
+  assert.match(seg, /spuAssignable/);
+  // 存量行当前挂着的款要补进候选里，否则运营打开下拉看不到自己那一行的值。
+  assert.match(source, /spuAssignableOptions/);
 });
 
 test("仓储规则写入口按权限隐藏，operator 不会点了报 403", () => {

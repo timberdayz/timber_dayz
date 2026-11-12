@@ -68,7 +68,7 @@
                   v-for="cat in l1Categories"
                   :key="categoryCode(cat)"
                   :label="cat.name_zh"
-                  :disabled="cat.status !== 'active' || !cat.is_selectable || legacyUnselectableCodes.has(categoryCode(cat))"
+                  :disabled="cat.status !== 'active' || !cat.is_selectable"
                   :value="
                     categoryCode(cat)
                   " /></el-select></template></el-table-column
@@ -83,7 +83,7 @@
                   v-for="cat in childCategories(row.category_l1_code)"
                   :key="categoryCode(cat)"
                   :label="cat.name_zh"
-                  :disabled="cat.status !== 'active' || !cat.is_selectable || legacyUnselectableCodes.has(categoryCode(cat))"
+                  :disabled="cat.status !== 'active' || !cat.is_selectable"
                   :value="
                     categoryCode(cat)
                   " /></el-select></template></el-table-column
@@ -167,13 +167,21 @@
             v-model="skuSpuFilter"
             clearable
             filterable
-            placeholder="所属 SPU"
+            remote
+            allow-create
+            remote-show-suffix
+            :remote-method="spuBrowse.remoteMethod"
+            :loading="spuBrowse.loading"
+            placeholder="所属 SPU（可直接输入编码）"
             @change="loadSkus"
             ><el-option
-              v-for="spu in spus"
-              :key="spu.spu"
-              :label="`${spu.spu} ${spu.spu_name || ''}`"
-              :value="spu.spu" /></el-select
+              v-for="item in spuBrowse.options"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+              ><span class="spu-option-code">{{ item.value }}</span
+              ><span class="spu-option-name">{{ item.name }}</span></el-option
+            ></el-select
           ><el-select
             v-model="skuQuery.status"
             clearable
@@ -220,21 +228,45 @@
           border
           class="flat-table sku-table"
           :header-cell-style="skuHeaderCellStyle"
-          ><el-table-column label="SPU" width="155"
+          ><el-table-column label="SPU" width="190"
             ><template #default="{ row }"
-              ><el-select
-                v-if="row.__new"
-                v-model="row.spu"
-                filterable
-                clearable
-                size="small"
-                placeholder="选择 SPU"
-                ><el-option
-                  v-for="spu in spus"
-                  :key="spu.spu"
-                  :label="spu.spu"
-                  :value="spu.spu" /></el-select
-              ><span v-else class="readonly-cell">{{ row.spu || "-" }}</span></template></el-table-column
+              ><!--
+                存量行的 SPU 单元格**可编辑** —— 归属关系必须双向可达：
+                以前只能从「SPU 管理」tab 的「SKU 归属」抽屉单向改，
+                运营要改一个货的归属，得先知道它挂在哪个款下、再跨 tab 找过去。
+                ⚠️ 候选集用**可绑定口径**（assignable）：赋值是外键，不能造出挂不上的款；
+                ⚠️ 存量行**不给 clearable**：后端不支持解绑（清空只会静默无效）。
+              -->
+              <div class="spu-cell">
+                <el-select
+                  v-model="row.spu"
+                  filterable
+                  :clearable="row.__new"
+                  remote
+                  remote-show-suffix
+                  :remote-method="spuAssignable.remoteMethod"
+                  :loading="spuAssignable.loading"
+                  size="small"
+                  :placeholder="row.__new ? '选择 SPU' : '换款'"
+                  @change="onSkuSpuChange(row)"
+                  ><el-option
+                    v-for="item in spuAssignableOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                    ><span class="spu-option-code">{{ item.value }}</span
+                    ><span class="spu-option-name">{{ item.name }}</span></el-option
+                  ></el-select
+                >
+                <!--
+                  归属生效日：这个货是**从哪天起**挂到这个款上的。
+                  SPU 归属是一段有时效的关联，不是一个字段 ——
+                  只显示编码，运营就看不到「什么时候挂上来的」「换过几次款」。
+                -->
+                <small v-if="!row.__new && row.spu_effective_from" class="spu-binding-since"
+                  >自 {{ row.spu_effective_from }}</small
+                >
+              </div></template></el-table-column
           ><el-table-column label="SKU" width="160"
             ><template #default="{ row }"
               ><el-input
@@ -1202,6 +1234,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Check, Plus, QuestionFilled } from "@element-plus/icons-vue";
 import productCenterApi from "@/api/productCenter";
+import { createSpuSearch } from "./productCenterSpuOptions";
 import { useUserStore } from "@/stores/user";
 
 const userStore = useUserStore();
@@ -1225,7 +1258,37 @@ const skuHeaderCellStyle = ({ column }) => {
   return {};
 };
 const spus = ref([]);
+// SPU 值域 —— 两个口径的候选集都由**后端**给出，前端不再从「SPU 管理」tab
+// 的分页表格数据里顺带拿（那只有当前页 20 条，第 36 个款永远选不到）。
+//   * spuBrowse    —— 浏览口径：在售的款。用于工具栏「所属 SPU」**筛选**
+//                     （筛选是查询条件，敲什么编码都能查）。
+//   * spuAssignable —— 可绑定口径：还能挂新 SKU 的款。用于 SKU 行的**赋值 / 换款**
+//                     （赋值是外键，款必须真实存在且现在还允许挂）。
+const spuBrowse = createSpuSearch((params) => productCenterApi.listSpuOptions(params));
+const spuAssignable = createSpuSearch((params) =>
+  productCenterApi.listSpuAssignableOptions(params),
+);
 const skus = ref([]);
+// SKU 表的候选集 = 可绑定候选 **∪** 存量行当前挂着的款。
+// ⚠️ 为什么要并上后者：可绑定口径**不含**已淘汰/已删除的款，
+//    而存量行当前挂着的款未必还在可绑定范围里 ——
+//    不并进来的话，运营打开下拉会看不到自己那一行的当前值，
+//    看起来像「这货挂错了款」。
+// ⚠️ 搜索结果**仍然**只给可绑定的款（赋值是外键，不能造出挂不上的款）。
+const spuAssignableOptions = computed(() => {
+  const merged = new Map();
+  for (const item of spuAssignable.options.value) merged.set(item.value, item);
+  for (const row of skus.value) {
+    if (row.spu && !merged.has(row.spu)) {
+      merged.set(row.spu, {
+        value: row.spu,
+        label: row.spu,
+        name: row.spu_name || "",
+      });
+    }
+  }
+  return Array.from(merged.values());
+});
 const categories = ref([]);
 const rules = ref([]);
 const storageRules = ref([]);
@@ -1321,7 +1384,8 @@ const batchDrawer = reactive({
 const bindingDrawer = reactive({ visible: false, spu: "", rows: [] });
 const categoryCode = (item) => item.category_code || item.code;
 const parentCode = (item) => item.parent_category_code || item.parent_code;
-const legacyUnselectableCodes = new Set(["PET_DAILY"]);
+// ⚠️ 「不可选品类」只以数据库的 `is_selectable` 为准 ——
+//    这里曾硬编码过一份 PET_DAILY 清单，与数据库重复定义 ⇒ 改库不会改前端。
 const l1Categories = computed(() =>
   categories.value.filter((item) => item.level === 1 || !parentCode(item)),
 );
@@ -1371,6 +1435,15 @@ const markDirty = (kind, row) =>
 const onSpuL1CategoryChange = (row) => {
   row.category_l2_code = "";
   markDirty("spu", row);
+};
+// 换款（SKU 行的 SPU 单元格改动）—— 走**已有的批量保存通道**（bulk_save_skus），
+// 不另开一条写入路径：归属关系有生效区间、有归档、有审计，
+// 另写一条必然漏掉其中一半。
+// ⚠️ 换款后旧的生效日不再适用 —— 新归属从**保存那天**起算，
+//    所以先把它清掉，别让运营看到「自 2026-09-14」配着一个刚换的款。
+const onSkuSpuChange = (row) => {
+  row.spu_effective_from = null;
+  markDirty("sku", row);
 };
 // 已软删的 SPU 灰显 —— 让运营一眼看出这行「已删除但可恢复」，避免误当成在售品编辑
 const spuRowClass = ({ row }) => (row.active === false ? "spu-inactive-row" : "");
@@ -1762,8 +1835,9 @@ const loadSpus = async () => {
     const res = await productCenterApi.listSpus({
       ...spuQuery,
       // 已软删的 SPU 必须列出来，否则「恢复」按钮永远不可达（软删就变成不可逆了）。
-      // 后端 list_spus 的 include_inactive 默认 False。
-      include_inactive: true,
+      // ⚠️ 参数叫 include_soft_deleted（不是 include_inactive）——
+      //    「已删除」与「停用」在这个域里是两件事。
+      include_soft_deleted: true,
     });
     spus.value = (res.data || []).map((row) => ({
       ...row,
@@ -1827,7 +1901,10 @@ const refreshSkuPricingRow = async (row) => {
 const loadCategories = async () => {
   try {
     categories.value = await productCenterApi.listCategories({
+      // 停用的与不可选的都要拿到：存量 SPU 上可能还挂着它们（要能读出来），
+      // 但新分配时前端会按 is_selectable 置灰。
       include_inactive: true,
+      include_unselectable: true,
     });
   } catch {
     categories.value = [];
@@ -3127,6 +3204,9 @@ onMounted(async () => {
     loadBatches(),
     loadOperatingDimensions(),
     loadOperatingProfiles(),
+    // 预热**可绑定**候选集：存量行的 SPU 单元格现在也是下拉框，
+    // 运营一点开就该看到内容，而不是一个空列表（空列表看着像功能坏了）。
+    spuAssignable.search(""),
   ]);
 });
 </script>
@@ -3193,6 +3273,33 @@ onMounted(async () => {
 }
 .sku-table :deep(.el-table__cell) {
   padding: 6px 4px;
+}
+/* SPU 值域下拉：编码 + 名称一行展示。
+   ⚠️ option 的 label 仍然只放编码（allow-create 要靠它判断「是否已存在」），
+      名称只在这里渲染 —— 看得见，但不参与匹配判定。 */
+.spu-option-code {
+  margin-right: 8px;
+  font-family: Consolas, Monaco, monospace;
+}
+.spu-option-name {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+/* 归属生效日：跟着 SPU 编码走的一行小字。
+   ⚠️ 它回答的是「这个货是什么时候挂到这个款上的」——
+      归属是**一段有时效的关联**，不是 SKU 身上的一个字段。 */
+.spu-binding-since {
+  display: block;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  line-height: 14px;
+}
+/* SKU 行的 SPU 单元格：下拉框 + 生效日小字，竖着排。 */
+.spu-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
 }
 .readonly-cell {
   display: inline-block;

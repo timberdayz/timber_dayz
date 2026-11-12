@@ -177,7 +177,7 @@ async def _seed_two_platforms(session) -> int:
                 spu_name="测试 SPU",
                 logistics_damage_rate=SPU_DAMAGE_RATE,
                 return_loss_rate=SPU_RETURN_LOSS_RATE,
-                biz_status="active",
+                biz_status="candidate",
                 active=True,
             ),
         ]

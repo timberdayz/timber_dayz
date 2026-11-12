@@ -23,6 +23,9 @@ from modules.core.db import (
     SkuOperatingProfile,
 )
 
+# SKU ↔ SPU 归属关系的「当前有效」判定只从真源取（律 1）。
+from backend.services.product_spu_binding import current_binding_condition
+
 from .feishu_projection_client import (
     FEISHU_BATCH_CREATE_LIMIT,
     FEISHU_BATCH_WRITE_INTERVAL_SECONDS,
@@ -263,8 +266,7 @@ class FeishuProjectionService:
                 await self.db.execute(
                     select(BridgeSpuSku).where(
                         BridgeSpuSku.sku_id == sku_id,
-                        BridgeSpuSku.binding_status == "active",
-                        BridgeSpuSku.effective_to.is_(None),
+                        *current_binding_condition(),
                     )
                 )
             )
@@ -445,8 +447,7 @@ class FeishuProjectionService:
                         .select_from(BridgeSpuSku)
                         .where(
                             BridgeSpuSku.spu == spu,
-                            BridgeSpuSku.binding_status == "active",
-                            BridgeSpuSku.effective_to.is_(None),
+                            *current_binding_condition(),
                         )
                     )
                 ).scalar()
@@ -507,8 +508,7 @@ class FeishuProjectionService:
                 await self.db.execute(
                     select(BridgeSpuSku).where(
                         BridgeSpuSku.sku_id == profile.sku_id,
-                        BridgeSpuSku.binding_status == "active",
-                        BridgeSpuSku.effective_to.is_(None),
+                        *current_binding_condition(),
                     )
                 )
             )

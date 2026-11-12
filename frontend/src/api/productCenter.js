@@ -13,6 +13,14 @@ export default {
   listSpus(params = {}) {
     return api._get("/spus", { params });
   },
+  // SPU 值域 —— 「可选的款有哪些」是**独立的业务口径**，不是 /spus 的分页切片。
+  // browse：在售（可被筛选）；assignable：还能挂新 SKU（可被赋值）。
+  listSpuOptions(params = {}) {
+    return api._get("/spus/options", { params });
+  },
+  listSpuAssignableOptions(params = {}) {
+    return api._get("/spus/assignable-options", { params });
+  },
   bulkSaveSpus(payload) {
     return api._post("/spus/bulk", payload);
   },

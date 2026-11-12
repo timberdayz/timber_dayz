@@ -84,7 +84,21 @@ class SpuBulkItem(BaseModel):
     owner_user_id: Optional[int] = None
     logistics_damage_rate: Optional[float] = Field(default=None, ge=0, le=1)
     return_loss_rate: Optional[float] = Field(default=None, ge=0, le=1)
-    active: Optional[bool] = None
+    # ⚠️ **刻意没有 `active`**（2026-11-12 建模 A）。
+    #
+    # `active`（是否已删除）只能由**删除 / 恢复**这两个专用动作写：
+    #   * `POST /api/spus/{spu}/soft-delete`
+    #   * `POST /api/spus/{spu}/restore`
+    #   * `POST /api/spus/batch-soft-delete`
+    #
+    # 原因：它与 `biz_status` 表达的是**同一个**业务事实的两面
+    #（删掉的款必然是淘汰的），两者若能各自独立写，就能造出
+    # `active=false + biz_status='candidate'` 这种自相矛盾的行 ⇒
+    # 「这个款还在不在」就没有唯一答案了。
+    #
+    # 前端 `payloadSpu` 整行回写会带上 `active` ⇒ Pydantic 默认
+    # `extra='ignore'` 会**忽略**它 ⇒ 运营在表格里改名称/状态不会顺手
+    # 把 SPU 删掉。
 
 
 class SpuBulkRequest(BaseModel):
@@ -221,7 +235,8 @@ class SpuUpdateRequest(BaseModel):
     owner_user_id: Optional[int] = None
     logistics_damage_rate: Optional[float] = Field(default=None, ge=0, le=1)
     return_loss_rate: Optional[float] = Field(default=None, ge=0, le=1)
-    active: Optional[bool] = None
+    # ⚠️ **刻意没有 `active`** —— 理由同 `SpuBulkItem`：
+    # `active` 只能由删除 / 恢复这两个专用动作写（建模 A）。
 
 
 class SkuCreateRequest(BaseModel):
@@ -446,30 +461,87 @@ class SkuSellingPriceCheckResponse(BaseModel):
     unverified_count: int = 0
 
 
-class ProductCenterItem(BaseModel):
+class SpuItem(BaseModel):
+    """**款**（SPU）行 —— ``spu`` 在这里是**标识**（主键）。
+
+    ⚠️ 这里**刻意**不包含任何 SKU 的列：
+       款是头、货是脚，二者不是同一张表，也不是同一行。
+       （旧的 ``ProductCenterItem`` 两边都装 ⇒ ``spu`` 一会儿是标识、
+       一会儿是引用，调用方分不清自己拿的是哪一种。）
+    """
+
     model_config = {"from_attributes": True}
 
-    spu: Optional[str] = None
+    # --- 标识 ---
+    spu: str
     spu_name: Optional[str] = None
-    sku_id: Optional[int] = None
-    sku_key: Optional[str] = None
-    sku_name: Optional[str] = None
+    # --- 品类 ---
     category_l1: Optional[str] = None
     category_l2: Optional[str] = None
     category_l1_code: Optional[str] = None
     category_l2_code: Optional[str] = None
+    # --- 款级风控（会下发给挂在它下面的货）---
+    logistics_damage_rate: Optional[float] = None
+    return_loss_rate: Optional[float] = None
+    main_image_url: Optional[str] = None
+    # --- 经营状态 ---
     biz_status: Optional[str] = None
     owner_user_id: Optional[int] = None
-    effective_from: Optional[date] = None
-    effective_to: Optional[date] = None
-    binding_status: Optional[str] = None
+    #: 软删标记（``dim_spu.active``）。
+    #:
+    #: ⚠️ 这个字段以前根本不在响应里，而前端多处依赖它：
+    #:   ``row.active === false`` 决定「恢复」按钮是否出现、「删除」按钮是否禁用、
+    #:   批量软删选中项过滤、以及整行灰显。
+    #:   字段缺失 ⇒ 这些判断全部恒为 false ⇒
+    #:     * 已软删的 SPU 在 UI 上**看不出自己被删了**（不灰显）；
+    #:     * 「恢复」按钮**永远不出现** ⇒ 软删成了不可逆操作；
+    #:     * 已软删的 SPU 仍能被选中、仍能被再次软删。
+    #:
+    #: ⚠️ **只有款有** ``active`` —— 货用 ``status``（见 :class:`SkuItem`）。
+    active: Optional[bool] = None
+    updated_at: Optional[datetime] = None
+
+
+class SkuItem(BaseModel):
+    """**货**（SKU）行 —— ``spu`` 在这里是**引用**，不是标识。
+
+    ⚠️ 「这个货挂在哪个款上」**不是货身上的一个字段**，
+       而是「一段归属关系在今天的落点」⇒ 引用与生效日必须成对出现
+       （见 ``spu`` / ``spu_effective_from``）。
+
+    ⚠️ 这里**刻意没有** ``active`` —— 货的软删用 ``status``。
+       （旧的 ``ProductCenterItem`` 把它放在两边，SKU 行上恒为 None。）
+    """
+
+    model_config = {"from_attributes": True}
+
+    # --- 标识 ---
+    sku_id: Optional[int] = None
+    sku_key: Optional[str] = None
+    sku_name: Optional[str] = None
+    specification: Optional[str] = None
+    status: Optional[str] = None
+    # --- 当前归属（引用 + 时态）---
+    #: 当前归属的款编码。**引用**，不是标识 —— 没挂到任何款上时为 None。
+    spu: Optional[str] = None
+    #: 当前归属的款名称（从款表投影下来）。
+    spu_name: Optional[str] = None
+    #: 当前归属**从哪天起生效**（``core.bridge_spu_sku.effective_from``）。
+    #:
+    #: ⚠️ 归属是**一段有时效的关联**，不是货身上的一个字段 ——
+    #:    只给编码，就等于把关联压扁成了字段，
+    #:    运营看不到「这个货是什么时候挂到这个款上的」「换过几次款」。
+    #:
+    #: 没有当前归属 ⇒ None（**不是**今天）。
+    spu_effective_from: Optional[date] = None
+    # --- 物理与包装 ---
     weight_kg: Optional[float] = None
     package_length_cm: Optional[float] = None
     package_width_cm: Optional[float] = None
     package_height_cm: Optional[float] = None
     unit_volume_cbm: Optional[float] = None
     units_per_carton: Optional[int] = None
-    status: Optional[str] = None
+    # --- 成本 ---
     default_purchase_cost: Optional[float] = None
     purchase_cost_currency: Optional[str] = None
     purchase_cost_source: Optional[str] = None
@@ -477,6 +549,9 @@ class ProductCenterItem(BaseModel):
     purchase_cost_confirmed_at: Optional[datetime] = None
     expected_logistics_cost: Optional[float] = None
     expected_storage_cost: Optional[float] = None
+    actual_logistics_cost: Optional[float] = None
+    actual_storage_cost: Optional[float] = None
+    # --- 基准售价 ---
     reference_selling_price: Optional[float] = None
     selling_price_currency: Optional[str] = None
     selling_price_source: Optional[str] = None
@@ -489,22 +564,13 @@ class ProductCenterItem(BaseModel):
     #: 确认日期是否已超过阈值（默认 90 天）⇒ 页面标黄「纪律线可能失真」。
     selling_price_stale: bool = False
     turnover_class: Optional[str] = None
+    # --- 款级风控（从当前归属的款投影下来）---
     logistics_damage_rate: Optional[float] = None
     return_loss_rate: Optional[float] = None
-    actual_logistics_cost: Optional[float] = None
-    actual_storage_cost: Optional[float] = None
+    # --- 完整度 ---
     data_completeness: Optional[str] = None
     updated_at: Optional[datetime] = None
-    # ⚠️ SPU 软删标记（dim_spu.active）。**这个字段以前根本不在响应里**，
-    # 而前端多处依赖它：`row.active === false` 决定「恢复」按钮是否出现、
-    # 「删除」按钮是否禁用、批量软删选中项过滤、以及整行灰显。
-    # 字段缺失 ⇒ 这些判断全部恒为 false ⇒
-    #   * 已软删的 SPU 在 UI 上**看不出自己被删了**（不灰显）；
-    #   * 「恢复」按钮**永远不出现** ⇒ 软删成了不可逆操作；
-    #   * 已软删的 SPU 仍能被选中、仍能被再次软删。
-    # 只对 SPU 有值；SKU 行没有 active 列（SKU 用 status），恒为 None。
-    active: Optional[bool] = None
-    # --- SKU 定价底线（全部 Optional：ProductCenterItem 会被用于校验裸 ORM 行）---
+    # --- SKU 定价底线（全部 Optional：SkuItem 会被用于校验裸 ORM 行）---
     creator_commission_rate: Optional[float] = None
     creator_commission_rate_fallback: Optional[float] = None
     current_discount_rate: Optional[float] = None
@@ -532,18 +598,40 @@ class ProductCenterItem(BaseModel):
     min_selling_price_by_platform: Optional[dict[str, dict]] = None
 
 
-class ProductCenterListResponse(BaseModel):
-    data: list[ProductCenterItem]
+class SpuListResponse(BaseModel):
+    """款列表的响应。"""
+
+    data: list[SpuItem]
     page: int
     page_size: int
     total: int
     total_pages: int
 
 
-class BulkMutationResponse(BaseModel):
+class SkuListResponse(BaseModel):
+    """货列表的响应。"""
+
+    data: list[SkuItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+class SpuBulkMutationResponse(BaseModel):
+    """批量保存**款**的结果。"""
+
     created: int
     updated: int
-    items: list[ProductCenterItem]
+    items: list[SpuItem]
+
+
+class SkuBulkMutationResponse(BaseModel):
+    """批量保存**货**的结果。"""
+
+    created: int
+    updated: int
+    items: list[SkuItem]
 
 
 class ProductCenterBindingResponse(BaseModel):
@@ -555,6 +643,27 @@ class ProductCenterBindingResponse(BaseModel):
     effective_from: date
     effective_to: Optional[date]
     binding_status: str
+
+
+class SpuOption(BaseModel):
+    """值的域里一个 SPU 选项的形状。
+
+    ⚠️ **只给编码与名称**，不给整个 SPU 管理行 ——
+    值域是「可选的款有哪些」，不是「这个款的全部资料」。
+    """
+
+    spu: str
+    spu_name: Optional[str] = None
+
+
+class SpuOptionListResponse(BaseModel):
+    """值的域查询的响应。
+
+    ⚠️ 刻意**不带分页字段** —— 值域是候选集，不是管理列表。
+    分页是「SPU 管理」tab 的概念，不该渗进值域。
+    """
+
+    data: list[SpuOption] = Field(default_factory=list)
 
 
 class ProductWarehouseCreateRequest(BaseModel):

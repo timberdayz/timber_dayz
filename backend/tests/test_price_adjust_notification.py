@@ -22,6 +22,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+# 归属关系的「当前有效」判定只从真源取（律 1）。
+from backend.services.product_spu_binding import current_binding_condition
 from backend.services.price_adjust_notify_service import (
     DIRECTION_DOWN,
     DIRECTION_PROTECTION_LOST,
@@ -572,7 +574,7 @@ async def _seed_pricing_fixture(session) -> int:
             spu_name="测试 SPU",
             logistics_damage_rate=0.0158,
             return_loss_rate=0.0467,
-            biz_status="active",
+            biz_status="candidate",
             active=True,
         )
     )
@@ -1081,8 +1083,7 @@ async def test_detection_and_product_center_agree_on_min_selling_price(
             await pg_session.execute(
                 select(BridgeSpuSku).where(
                     BridgeSpuSku.sku_id == sku_id,
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         )

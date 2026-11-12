@@ -21,6 +21,11 @@ from openpyxl import load_workbook
 from sqlalchemy import select
 
 from backend.models.database import AsyncSessionLocal
+# SKU ↔ SPU 归属关系的口径只从真源取（律 1）。
+from backend.services.product_spu_binding import (
+    CURRENT_BINDING_STATUS,
+    current_binding_condition,
+)
 from modules.core.db import BridgeErpSkuKey, BridgeSpuSku, DimErpSku, DimSpu, DimWarehouse
 
 
@@ -133,9 +138,9 @@ async def apply_rows(rows: list[dict]) -> tuple[int, int, int]:
                 source_key = (await db.execute(select(BridgeErpSkuKey).where(BridgeErpSkuKey.source_system == "product-catalog", BridgeErpSkuKey.source_key_type == "sku", BridgeErpSkuKey.source_key == row["sku_key"]))).scalar_one_or_none()
                 if source_key is None:
                     db.add(BridgeErpSkuKey(source_system="product-catalog", source_platform="erp", source_key_type="sku", source_key=row["sku_key"], sku_id=sku.sku_id, effective_from=date.today(), active=True))
-                binding = (await db.execute(select(BridgeSpuSku).where(BridgeSpuSku.sku_id == sku.sku_id, BridgeSpuSku.effective_to.is_(None), BridgeSpuSku.binding_status == "active"))).scalar_one_or_none()
+                binding = (await db.execute(select(BridgeSpuSku).where(BridgeSpuSku.sku_id == sku.sku_id, *current_binding_condition()))).scalar_one_or_none()
                 if binding is None:
-                    db.add(BridgeSpuSku(spu=spu_code, sku_id=sku.sku_id, effective_from=date.today(), binding_status="active"))
+                    db.add(BridgeSpuSku(spu=spu_code, sku_id=sku.sku_id, effective_from=date.today(), binding_status=CURRENT_BINDING_STATUS))
                     created_bindings += 1
         await db.commit()
     return created_spu, created_sku, created_bindings

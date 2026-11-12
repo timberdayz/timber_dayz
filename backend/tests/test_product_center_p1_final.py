@@ -15,6 +15,8 @@ from backend.schemas.product_center import (
     LogisticsProviderRuleUpdateRequest,
     WarehouseStorageRuleUpdateRequest,
 )
+# 归属状态值只从真源取（律 1）。
+from backend.services.product_spu_binding import HISTORICAL_BINDING_STATUS
 
 
 def _compact(text: str) -> str:
@@ -608,7 +610,10 @@ def test_spu_sku_binding_audits_both_historical_and_new_effective_bindings_befor
     assert 'resource_id=f"{row.spu}:{row.sku_id}"' in section
     assert '"effective_from": current_binding.effective_from' in section
     assert '"effective_to": body.effective_from' in section
-    assert '"binding_status": "historical"' in section
+    # ⚠️ 归档状态只从真源取（律 1），不手抄字面量 ——
+    #    但**值**必须仍是 "historical"（换款归档 = 历史证据）。
+    assert '"binding_status": HISTORICAL_BINDING_STATUS' in section
+    assert HISTORICAL_BINDING_STATUS == "historical"
     assert '"effective_from": row.effective_from' in section
     assert '"effective_to": row.effective_to' in section
     assert '"binding_status": row.binding_status' in section

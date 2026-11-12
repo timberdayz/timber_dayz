@@ -27,12 +27,15 @@ from backend.schemas.product_center import (
     LogisticsBillUpdateRequest,
     LogisticsBillVoidRequest,
     ProductCenterBindingResponse,
-    BulkMutationResponse,
+    SpuBulkMutationResponse,
+    SkuBulkMutationResponse,
     ProductCategoryCreateRequest,
     ProductCategoryResponse,
     ProductCategoryUpdateRequest,
-    ProductCenterItem,
-    ProductCenterListResponse,
+    SpuItem,
+    SkuItem,
+    SpuListResponse,
+    SkuListResponse,
     SkuPricingOverrideRequest,
     SkuPricingOverrideResponse,
     SkuSellingPricePreviewRequest,
@@ -69,6 +72,8 @@ from backend.schemas.product_center import (
     SpuCreateRequest,
     SpuSkuBindingRequest,
     SpuUpdateRequest,
+    SpuOption,
+    SpuOptionListResponse,
     SpuDeletionPreviewResponse,
     SpuDeletionCheck,
     SpuSoftDeleteRequest,
@@ -154,6 +159,24 @@ from backend.services.product_transaction_price_service import (
 from backend.services.sku_pricing_policy_service import (
     load_current_policies,
     policy_current_predicate,
+)
+# SPU 经营状态与「能不能挂货」的口径**只从真源取**（律 1）。
+# 候选集查询与写入校验引用同一份判定 ⇒ 不会出现「下拉里能选、保存时被拒」。
+from backend.services.product_spu_lifecycle import (
+    SPU_BIZ_STATUS_PROMOTED,
+    SPU_BIZ_STATUS_RETIRED,
+    is_spu_assignable,
+    spu_assignable_condition,
+)
+# SKU ↔ SPU **归属关系**的口径只从真源取（律 1）：
+# 「当前有效」的判定条件、投影字段（spu + 生效日）都只有这一处定义。
+from backend.services.product_spu_binding import (
+    CURRENT_BINDING_STATUS,
+    HISTORICAL_BINDING_STATUS,
+    INACTIVE_BINDING_STATUS,
+    archived_binding_condition,
+    current_binding_condition,
+    project_current_binding,
 )
 from backend.utils.exceptions import BusinessValidationError, ConflictError
 from modules.core.logger import get_logger
@@ -258,7 +281,19 @@ def _require_platform_fee_editor(current_user=Depends(get_current_user)):
 async def list_product_categories(
     level: int | None = Query(None, ge=1, le=2),
     parent_category_code: str | None = Query(None),
-    include_inactive: bool = Query(False),
+    include_inactive: bool = Query(
+        False, description="是否包含已停用（status != 'active'）的品类"
+    ),
+    include_unselectable: bool = Query(
+        False,
+        description=(
+            "是否包含不可选（is_selectable = false）的品类。"
+            "⚠️ 与「停用」是**两件不同的事**：停用=这个品类不再使用；"
+            "不可选=历史上出过问题、不能再分配给新的 SPU。"
+            "原先两者被挤在同一个 include_inactive 开关里，"
+            "调用方无法只要其中一样。"
+        ),
+    ),
     db: AsyncSession = Depends(get_async_db),
 ):
     filters = []
@@ -268,6 +303,7 @@ async def list_product_categories(
         filters.append(DimProductCategory.parent_category_code == parent_category_code)
     if not include_inactive:
         filters.append(DimProductCategory.status == "active")
+    if not include_unselectable:
         filters.append(DimProductCategory.is_selectable.is_(True))
     rows = (
         (
@@ -544,19 +580,24 @@ async def _enqueue_platform_sku_profit_projection(
     )
 
 
-@router.get("/api/spus", response_model=ProductCenterListResponse)
+@router.get("/api/spus", response_model=SpuListResponse)
 async def list_spus(
     keyword: str | None = Query(None),
     biz_status: str | None = Query(None),
-    include_inactive: bool = Query(
-        False, description="是否包含已软删的 SPU(active=false)"
+    include_soft_deleted: bool = Query(
+        False,
+        description=(
+            "是否包含已删除（软删 active=false）的 SPU。"
+            "⚠️ 刻意不叫 include_inactive —— 「停用」在这个域里是 biz_status，"
+            "与「已删除」是两件事；同名会让人以为三处端点的同一参数是同一口径。"
+        ),
     ),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
 ):
     filters = []
-    if not include_inactive:
+    if not include_soft_deleted:
         filters.append(DimSpu.active.is_(True))
     if keyword:
         pattern = f"%{keyword}%"
@@ -582,8 +623,8 @@ async def list_spus(
         .scalars()
         .all()
     )
-    items = [ProductCenterItem.model_validate(row) for row in rows]
-    return ProductCenterListResponse(
+    items = [SpuItem.model_validate(row) for row in rows]
+    return SpuListResponse(
         data=items,
         page=page,
         page_size=page_size,
@@ -592,7 +633,99 @@ async def list_spus(
     )
 
 
-@router.post("/api/spus", response_model=ProductCenterItem, status_code=201)
+# ---------------------------------------------------------------------------
+# 值的域（Value Domain）
+# ---------------------------------------------------------------------------
+#
+# 「可选的款有哪些」是一个**业务问题**，答案由业务口径算出 —— 不是
+# 「某个页面刚好加载了哪一页」的副产品。
+#
+# 事故背景（2026-11-12）：工具栏「所属 SPU」筛选器与新增 SKU 行的选款框，
+# 候选集直接绑定了「SPU 管理」tab 的**分页表格数据**（``/api/spus`` 默认
+# page=1、page_size=20）。dim_spu 实测 286 条 ⇒ 第 36 个 SPU
+# （XH-FASHION-001）永远不在候选集里：运营输入后看到「无匹配数据」，
+# 回车不生效，筛选根本没发生。
+#
+# ⇒ 这里给两个口径**各自独立**的端点：
+#   * ``/api/spus/options``            —— 浏览口径：在售（可被筛到）
+#   * ``/api/spus/assignable-options``  —— 可绑定口径：在售且未淘汰（可被挂货）
+#
+# ⚠️ 口径**固化在端点里**，不暴露给调用方自由拼装 —— 否则前端能组合出
+#    自相矛盾的候选集（例如「已删除但状态还是候选」）。
+# ⚠️ 与 ``/api/spus`` 的关系：``/api/spus`` 是**管理列表**（分页、可编辑行、
+#    含软删行）；这里是**值的域**（轻量、可搜索、无分页）。两者职责不同，
+#    不是重复实现。
+
+
+def _spu_option_filters(
+    keyword: str | None,
+    extra_conditions: list | None = None,
+) -> list:
+    """值的域的公共过滤条件：关键词（编码或名称，模糊匹配）。"""
+    filters = list(extra_conditions or [])
+    if keyword:
+        pattern = f"%{keyword}%"
+        filters.append((DimSpu.spu.ilike(pattern)) | (DimSpu.spu_name.ilike(pattern)))
+    return filters
+
+
+@router.get("/api/spus/options", response_model=SpuOptionListResponse)
+async def list_spu_options(
+    keyword: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """值的域 · **浏览口径**：在售的款。
+
+    含「逻辑淘汰但未删除」的款（``active=true`` + ``biz_status='retired'``）——
+    业务上不再经营，但历史还在，运营可能仍需要筛它。
+
+    ⚠️ 与「可绑定口径」分开：可挂货的范围更窄，见
+       ``/api/spus/assignable-options``。
+    """
+    filters = _spu_option_filters(keyword, [DimSpu.active.is_(True)])
+    rows = (
+        (
+            await db.execute(
+                select(DimSpu).where(*filters).order_by(DimSpu.spu).limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return SpuOptionListResponse(
+        data=[SpuOption(spu=row.spu, spu_name=row.spu_name) for row in rows]
+    )
+
+
+@router.get("/api/spus/assignable-options", response_model=SpuOptionListResponse)
+async def list_spu_assignable_options(
+    keyword: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """值的域 · **可绑定口径**：现在还允许挂新 SKU 的款。
+
+    口径来自真源 :func:`spu_assignable_condition` —— 与写入时的校验
+    ``_assert_spu_assignable`` **引用同一份判定** ⇒ 不会出现
+    「下拉里能选、保存时被拒」。
+    """
+    filters = _spu_option_filters(keyword, [spu_assignable_condition()])
+    rows = (
+        (
+            await db.execute(
+                select(DimSpu).where(*filters).order_by(DimSpu.spu).limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return SpuOptionListResponse(
+        data=[SpuOption(spu=row.spu, spu_name=row.spu_name) for row in rows]
+    )
+
+
+@router.post("/api/spus", response_model=SpuItem, status_code=201)
 async def create_spu(
     body: SpuCreateRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -622,10 +755,10 @@ async def create_spu(
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail="SPU already exists") from exc
-    return ProductCenterItem.model_validate(row)
+    return SpuItem.model_validate(row)
 
 
-@router.patch("/api/spus/{spu}", response_model=ProductCenterItem)
+@router.patch("/api/spus/{spu}", response_model=SpuItem)
 async def update_spu(
     spu: str,
     body: SpuUpdateRequest,
@@ -654,7 +787,7 @@ async def update_spu(
     await db.commit()
     await db.refresh(row)
     asyncio.create_task(trigger_pending_projection_delivery())
-    return ProductCenterItem.model_validate(row)
+    return SpuItem.model_validate(row)
 
 
 # ==================== SPU 删除向导 (M1: 软删最小可用 / M2: 批量软删) ====================
@@ -686,7 +819,7 @@ async def _check_spu_deletion_blockers(
     checks.append(SpuDeletionCheck(code="spu_exists", label="SPU 存在", status="pass"))
 
     # 2. biz_status 提示(非 fail,鼓励改 retired 再删)
-    if spu_row.biz_status == "retired":
+    if spu_row.biz_status == SPU_BIZ_STATUS_RETIRED:
         checks.append(
             SpuDeletionCheck(
                 code="biz_status_not_retired",
@@ -709,8 +842,7 @@ async def _check_spu_deletion_blockers(
         await db.execute(
             select(func.count(BridgeSpuSku.id)).where(
                 BridgeSpuSku.spu == spu_code,
-                BridgeSpuSku.binding_status == "active",
-                BridgeSpuSku.effective_to.is_(None),
+                *current_binding_condition(),
             )
         )
     ).scalar() or 0
@@ -786,8 +918,7 @@ async def preview_spu_deletion(
             await db.execute(
                 select(func.count(BridgeSpuSku.id)).where(
                     BridgeSpuSku.spu == spu,
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         ).scalar() or 0
@@ -832,17 +963,18 @@ async def soft_delete_spu(
         raise HTTPException(status_code=404, detail=f"SPU '{spu}' not found")
 
     spu_row.active = False
-    if spu_row.biz_status != "retired":
-        spu_row.biz_status = "retired"
+    if spu_row.biz_status != SPU_BIZ_STATUS_RETIRED:
+        spu_row.biz_status = SPU_BIZ_STATUS_RETIRED
 
     binding_result = await db.execute(
         update(BridgeSpuSku)
         .where(
             BridgeSpuSku.spu == spu,
-            BridgeSpuSku.binding_status == "active",
-            BridgeSpuSku.effective_to.is_(None),
+            *current_binding_condition(),
         )
-        .values(binding_status="inactive", effective_to=date.today())
+        .values(
+            binding_status=INACTIVE_BINDING_STATUS, effective_to=date.today()
+        )
     )
     affected_bindings = binding_result.rowcount or 0
 
@@ -896,15 +1028,15 @@ async def restore_spu(
     previous_biz_status = spu_row.biz_status
     spu_row.active = True
     # biz_status 复位:从 retired 回到 promoted(用户恢复意图=重新启用)
-    if spu_row.biz_status == "retired":
-        spu_row.biz_status = "promoted"
+    if spu_row.biz_status == SPU_BIZ_STATUS_RETIRED:
+        spu_row.biz_status = SPU_BIZ_STATUS_PROMOTED
 
     earliest_inactive = (
         await db.execute(
             select(BridgeSpuSku)
             .where(
                 BridgeSpuSku.spu == spu,
-                BridgeSpuSku.binding_status == "inactive",
+                *archived_binding_condition(),
             )
             .order_by(BridgeSpuSku.effective_to.asc())
             .limit(1)
@@ -913,7 +1045,7 @@ async def restore_spu(
 
     restored_bindings = 0
     if earliest_inactive is not None:
-        earliest_inactive.binding_status = "active"
+        earliest_inactive.binding_status = CURRENT_BINDING_STATUS
         earliest_inactive.effective_to = None
         restored_bindings = 1
 
@@ -1009,16 +1141,17 @@ async def batch_soft_delete_spus(
             if spu_row is None:
                 continue
             spu_row.active = False
-            if spu_row.biz_status != "retired":
-                spu_row.biz_status = "retired"
+            if spu_row.biz_status != SPU_BIZ_STATUS_RETIRED:
+                spu_row.biz_status = SPU_BIZ_STATUS_RETIRED
             binding_result = await db.execute(
                 update(BridgeSpuSku)
                 .where(
                     BridgeSpuSku.spu == spu,
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
-                .values(binding_status="inactive", effective_to=date.today())
+                .values(
+            binding_status=INACTIVE_BINDING_STATUS, effective_to=date.today()
+        )
             )
             affected_bindings = binding_result.rowcount or 0
             for item in items:
@@ -1159,8 +1292,7 @@ async def _check_sku_deletion_blockers(
         await db.execute(
             select(func.count(BridgeSpuSku.id)).where(
                 BridgeSpuSku.sku_id == sku_id,
-                BridgeSpuSku.binding_status == "active",
-                BridgeSpuSku.effective_to.is_(None),
+                *current_binding_condition(),
             )
         )
     ).scalar() or 0
@@ -1252,8 +1384,7 @@ async def preview_sku_deletion(
             await db.execute(
                 select(func.count(BridgeSpuSku.id)).where(
                     BridgeSpuSku.sku_id == sku_id,
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         ).scalar() or 0
@@ -1312,10 +1443,11 @@ async def soft_delete_sku(
         update(BridgeSpuSku)
         .where(
             BridgeSpuSku.sku_id == sku_id,
-            BridgeSpuSku.binding_status == "active",
-            BridgeSpuSku.effective_to.is_(None),
+            *current_binding_condition(),
         )
-        .values(binding_status="inactive", effective_to=date.today())
+        .values(
+            binding_status=INACTIVE_BINDING_STATUS, effective_to=date.today()
+        )
     )
     affected_bindings = binding_result.rowcount or 0
 
@@ -1377,7 +1509,7 @@ async def restore_sku(
             select(BridgeSpuSku)
             .where(
                 BridgeSpuSku.sku_id == sku_id,
-                BridgeSpuSku.binding_status == "inactive",
+                *archived_binding_condition(),
             )
             .order_by(BridgeSpuSku.effective_to.asc())
             .limit(1)
@@ -1386,7 +1518,7 @@ async def restore_sku(
 
     restored_bindings = 0
     if earliest_inactive is not None:
-        earliest_inactive.binding_status = "active"
+        earliest_inactive.binding_status = CURRENT_BINDING_STATUS
         earliest_inactive.effective_to = None
         restored_bindings = 1
 
@@ -1419,7 +1551,7 @@ async def restore_sku(
     )
 
 
-@router.post("/api/spus/bulk", response_model=BulkMutationResponse)
+@router.post("/api/spus/bulk", response_model=SpuBulkMutationResponse)
 async def bulk_save_spus(
     body: SpuBulkRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -1491,10 +1623,10 @@ async def bulk_save_spus(
             status_code=409, detail="bulk SPU save conflicts with existing data"
         ) from exc
     asyncio.create_task(trigger_pending_projection_delivery())
-    return BulkMutationResponse(
+    return SpuBulkMutationResponse(
         created=created,
         updated=updated,
-        items=[ProductCenterItem.model_validate(row) for row in rows],
+        items=[SpuItem.model_validate(row) for row in rows],
     )
 
 
@@ -1558,8 +1690,7 @@ async def _compute_sku_min_selling_price(
             await db.execute(
                 select(BridgeSpuSku).where(
                     BridgeSpuSku.sku_id == sku_id,
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         )
@@ -1580,7 +1711,7 @@ async def _compute_sku_min_selling_price(
     return Decimal(str(value)) if value is not None else None
 
 
-@router.get("/api/skus", response_model=ProductCenterListResponse)
+@router.get("/api/skus", response_model=SkuListResponse)
 async def list_skus(
     keyword: str | None = Query(None),
     spu: str | None = Query(None),
@@ -1606,8 +1737,7 @@ async def list_skus(
             DimErpSku.sku_id.in_(
                 select(BridgeSpuSku.sku_id).where(
                     BridgeSpuSku.spu == spu,
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         )
@@ -1642,8 +1772,7 @@ async def list_skus(
             await db.execute(
                 select(BridgeSpuSku).where(
                     BridgeSpuSku.sku_id.in_(sku_ids),
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         )
@@ -1696,12 +1825,23 @@ async def list_skus(
     )
     items = []
     for row in rows:
-        payload = ProductCenterItem.model_validate(row).model_dump()
+        payload = SkuItem.model_validate(row).model_dump()
         binding = binding_by_sku.get(row.sku_id)
-        linked_spu = spu_by_code.get(binding.spu) if binding else None
+        # 归属投影只从真源取（律 1）：spu + 归属生效日一起给出。
+        # ⚠️ 少了「生效日」就等于把一段有时效的关联压扁成了一个字段 ——
+        #    运营看不到这个货是什么时候挂到这个款上的。
+        binding_projection = project_current_binding(binding)
+        linked_spu = (
+            spu_by_code.get(binding_projection["spu"])
+            if binding_projection["spu"]
+            else None
+        )
         payload.update(
             {
-                "spu": binding.spu if binding else None,
+                **binding_projection,
+                # 归属款的名称：数据已经查出来了（linked_spu）⇒ 顺手给上，
+                # 免得前端只看到一个编码，还得再查一次才知道挂的是哪个款。
+                "spu_name": linked_spu.spu_name if linked_spu else None,
                 "logistics_damage_rate": (
                     linked_spu.logistics_damage_rate if linked_spu else None
                 ),
@@ -1747,8 +1887,8 @@ async def list_skus(
             age_days, stale = compute_selling_price_age(row.selling_price_confirmed_at)
             payload["selling_price_age_days"] = age_days
             payload["selling_price_stale"] = stale
-        items.append(ProductCenterItem(**payload))
-    return ProductCenterListResponse(
+        items.append(SkuItem(**payload))
+    return SkuListResponse(
         data=items,
         page=page,
         page_size=page_size,
@@ -1757,7 +1897,7 @@ async def list_skus(
     )
 
 
-@router.post("/api/skus", response_model=ProductCenterItem, status_code=201)
+@router.post("/api/skus", response_model=SkuItem, status_code=201)
 async def create_sku(
     body: SkuCreateRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -1793,10 +1933,10 @@ async def create_sku(
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail="SKU already exists") from exc
-    return ProductCenterItem.model_validate(row)
+    return SkuItem.model_validate(row)
 
 
-@router.patch("/api/skus/{sku_id}", response_model=ProductCenterItem)
+@router.patch("/api/skus/{sku_id}", response_model=SkuItem)
 async def update_sku(
     sku_id: int,
     body: SkuUpdateRequest,
@@ -1829,7 +1969,7 @@ async def update_sku(
     await db.commit()
     await db.refresh(row)
     asyncio.create_task(trigger_pending_projection_delivery())
-    return ProductCenterItem.model_validate(row)
+    return SkuItem.model_validate(row)
 
 
 @router.post(
@@ -1857,8 +1997,7 @@ async def preview_sku_selling_price(
             await db.execute(
                 select(BridgeSpuSku).where(
                     BridgeSpuSku.sku_id == sku_id,
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         )
@@ -2047,21 +2186,47 @@ async def set_sku_pricing_override(
     )
 
 
+def _assert_spu_assignable(spu_row: DimSpu) -> None:
+    """「这个 SPU 现在还能不能挂新 SKU」—— 口径来自真源，不在这里重写一遍。
+
+    ⚠️ 判定**只有一个来源**（``backend/services/product_spu_lifecycle.py``）——
+       值域端点的候选集与本处校验引用的是同一份口径 ⇒ 不会出现
+       「下拉里能选、保存时被拒」。
+
+    ⚠️ 依赖建模 A 的不变量（``active=false ⟹ biz_status='retired'``）：
+       已删除的款必然是 ``retired`` ⇒ 只看 ``biz_status`` 就够排除它们。
+       该不变量由 ``dim_spu`` 的 ``CHECK`` 约束在数据库层兜底。
+    """
+    if not is_spu_assignable(spu_row):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"SPU {spu_row.spu} 已淘汰或已删除，不能绑定新 SKU"
+                "（如需使用，请先在 SPU 管理里恢复或改回在营状态）"
+            ),
+        )
+
+
 async def _apply_bulk_sku_spu_binding(
     db: AsyncSession, sku: DimErpSku, spu: str | None, effective_from: date | None
 ) -> None:
+    """把「这个货挂到这个款上」写下去。
+
+    ⚠️ **只有真的换款时才校验新款能不能挂货** ——
+       否则一个挂在**已淘汰款**下的 SKU，运营只想改个重量，
+       保存时却收到 422「SPU X 已淘汰或已删除，不能绑定新 SKU」：
+       报错与他做的事毫无关系，而且无从绕过。
+       ⇒ 先看归属有没有变，没变就原样返回。
+    """
     if not spu:
         return
-    if await db.get(DimSpu, spu) is None:
-        raise HTTPException(status_code=422, detail=f"SPU {spu} does not exist")
 
     binding = (
         (
             await db.execute(
                 select(BridgeSpuSku).where(
                     BridgeSpuSku.sku_id == sku.sku_id,
-                    BridgeSpuSku.effective_to.is_(None),
-                    BridgeSpuSku.binding_status == "active",
+                    *current_binding_condition(),
                 )
             )
         )
@@ -2069,21 +2234,32 @@ async def _apply_bulk_sku_spu_binding(
         .first()
     )
     if binding is not None and binding.spu == spu:
+        # 归属没变 ⇒ 什么都不用写（也不该因为「这个款现在不能挂货」而拦下这次保存）
         return
+
+    spu_row = await db.get(DimSpu, spu)
+    if spu_row is None:
+        raise HTTPException(status_code=422, detail=f"SPU {spu} does not exist")
+    _assert_spu_assignable(spu_row)
 
     starts_on = effective_from or date.today()
     if binding is not None:
-        if starts_on <= binding.effective_from:
+        # ⚠️ 只能改到**当前绑定生效日之后或当天**：
+        #    改到过去 = 篡改历史。
+        #    同一天是允许的 —— 那是「今天的挂错了，当天纠正」，
+        #    不是改历史（否则运营改不了今天刚建的绑定，且没有任何补救路径）。
+        if starts_on < binding.effective_from:
             raise HTTPException(
                 status_code=422,
                 detail="effective_from must be later than the current SPU binding",
             )
         binding.effective_to = starts_on
-        binding.binding_status = "historical"
+        # 换款归档 = **历史证据**（不可复活）⇒ 与「软删封存（可复活）」分开。
+        binding.binding_status = HISTORICAL_BINDING_STATUS
     db.add(BridgeSpuSku(spu=spu, sku_id=sku.sku_id, effective_from=starts_on))
 
 
-@router.post("/api/skus/bulk", response_model=BulkMutationResponse)
+@router.post("/api/skus/bulk", response_model=SkuBulkMutationResponse)
 async def bulk_save_skus(
     body: SkuBulkRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -2170,10 +2346,10 @@ async def bulk_save_skus(
             status_code=409, detail="bulk SKU save conflicts with existing data"
         ) from exc
     asyncio.create_task(trigger_pending_projection_delivery())
-    return BulkMutationResponse(
+    return SkuBulkMutationResponse(
         created=created,
         updated=updated,
-        items=[ProductCenterItem.model_validate(row) for row in rows],
+        items=[SkuItem.model_validate(row) for row in rows],
     )
 
 
@@ -2202,8 +2378,12 @@ async def bind_spu_sku(
     db: AsyncSession = Depends(get_async_db),
     current_user=Depends(_require_editor),
 ):
-    if await db.get(DimSpu, spu) is None:
+    spu_row = await db.get(DimSpu, spu)
+    if spu_row is None:
         raise HTTPException(status_code=404, detail="SPU not found")
+    # 「SKU 归属」抽屉里的绑定入口与批量保存**守同一条规则**：
+    # 已淘汰 / 已删除的款不能接新 SKU。
+    _assert_spu_assignable(spu_row)
     if await db.get(DimErpSku, body.sku_id) is None:
         raise HTTPException(status_code=404, detail="SKU not found")
     current_binding = (
@@ -2211,8 +2391,7 @@ async def bind_spu_sku(
             await db.execute(
                 select(BridgeSpuSku).where(
                     BridgeSpuSku.sku_id == body.sku_id,
-                    BridgeSpuSku.effective_to.is_(None),
-                    BridgeSpuSku.binding_status == "active",
+                    *current_binding_condition(),
                 )
             )
         )
@@ -2221,8 +2400,10 @@ async def bind_spu_sku(
     )
     if (
         current_binding is not None
-        and body.effective_from <= current_binding.effective_from
+        and body.effective_from < current_binding.effective_from
     ):
+        # ⚠️ 改到**过去**才拒绝（篡改历史）；
+        #    同一天允许 —— 那是「今天挂错了，当天纠正」。
         raise HTTPException(
             status_code=422,
             detail="effective_from must be later than the current binding",
@@ -2231,10 +2412,12 @@ async def bind_spu_sku(
         update(BridgeSpuSku)
         .where(
             BridgeSpuSku.sku_id == body.sku_id,
-            BridgeSpuSku.effective_to.is_(None),
-            BridgeSpuSku.binding_status == "active",
+            *current_binding_condition(),
         )
-        .values(effective_to=body.effective_from, binding_status="historical")
+        .values(
+            effective_to=body.effective_from,
+            binding_status=HISTORICAL_BINDING_STATUS,
+        )
     )
     row = BridgeSpuSku(
         spu=spu,
@@ -2256,7 +2439,7 @@ async def bind_spu_sku(
                 changes={
                     "effective_from": current_binding.effective_from,
                     "effective_to": body.effective_from,
-                    "binding_status": "historical",
+                    "binding_status": HISTORICAL_BINDING_STATUS,
                 },
             )
         await _write_product_center_audit(
@@ -4012,8 +4195,7 @@ async def list_sku_operating_dimensions(db: AsyncSession = Depends(get_async_db)
             await db.execute(
                 select(BridgeSpuSku.sku_id, BridgeSpuSku.spu).where(
                     BridgeSpuSku.sku_id.in_(sku_ids),
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         ).all()
@@ -4098,8 +4280,7 @@ async def list_platform_sku_profit_candidates(
             DimErpSku.sku_id.in_(
                 select(BridgeSpuSku.sku_id).where(
                     BridgeSpuSku.spu == spu,
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         )
@@ -4150,8 +4331,7 @@ async def list_platform_sku_profit_candidates(
             await db.execute(
                 select(BridgeSpuSku).where(
                     BridgeSpuSku.sku_id.in_(ids),
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         )
@@ -4477,8 +4657,7 @@ async def _platform_profit_missing_fields(
             await db.execute(
                 select(BridgeSpuSku).where(
                     BridgeSpuSku.sku_id == sku.sku_id,
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         )
@@ -4567,14 +4746,16 @@ def _evaluate_roi_guard(values: dict, preview: dict, missing_fields: list[str]) 
         # ⚠️ 用 ROI 服务算好的 ``suggestion_note``，因为它用的是**生效**上限
         #    （平台没配上限时用模块默认值 50），不要在这里自己比一个可能为 None 的上限。
         if expected.get("suggestion_note") == "above_platform_ceiling":
+            # ⚠️ 先取出来再判空 —— ``preview.get(...)`` 调两次时 mypy 无法缩窄类型。
+            target_roi_ceiling = preview.get("target_roi_ceiling")
             warnings.append(
                 {
                     "code": "roi_out_of_platform_range",
                     "message": "建议 ROI 超过平台可填上限，广告空间不足",
                     "suggested_roi": float(expected.get("suggested_roi") or 0),
                     "target_roi_ceiling": (
-                        float(preview.get("target_roi_ceiling"))
-                        if preview.get("target_roi_ceiling") is not None
+                        float(target_roi_ceiling)
+                        if target_roi_ceiling is not None
                         else None
                     ),
                 }
@@ -5038,8 +5219,7 @@ async def list_sku_operating_profiles(
             await db.execute(
                 select(BridgeSpuSku).where(
                     BridgeSpuSku.sku_id.in_(sku_ids),
-                    BridgeSpuSku.binding_status == "active",
-                    BridgeSpuSku.effective_to.is_(None),
+                    *current_binding_condition(),
                 )
             )
         )
@@ -5071,7 +5251,7 @@ async def list_sku_operating_profiles(
         if profile_ids
         else []
     )
-    estimate_by_profile = {}
+    estimate_by_profile: dict[int, object] = {}
     for estimate in estimates:
         estimate_by_profile.setdefault(estimate.operating_profile_id, estimate)
     payloads = []
@@ -5125,8 +5305,7 @@ async def list_sku_operating_profiles(
                 await db.execute(
                     select(BridgeSpuSku).where(
                         BridgeSpuSku.sku_id.in_(sku_ids_for_bindings),
-                        BridgeSpuSku.binding_status == "active",
-                        BridgeSpuSku.effective_to.is_(None),
+                        *current_binding_condition(),
                     )
                 )
             )
@@ -5164,7 +5343,7 @@ async def list_sku_operating_profiles(
             if sku_ids_for_bindings
             else []
         )
-        mapped_platforms = {}
+        mapped_platforms: dict[int, set[str]] = {}
         for mapped_sku_id, mapped_platform in mapped_platform_rows:
             mapped_platforms.setdefault(mapped_sku_id, set()).add(mapped_platform)
         existing_keys = {
