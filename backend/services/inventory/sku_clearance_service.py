@@ -37,6 +37,7 @@ from backend.services.sku_pricing_policy_service import (
     load_current_policies,
     to_policy_rows,
 )
+
 # SKU ↔ SPU 归属关系的「当前有效」判定只从真源取（律 1）。
 from backend.services.product_spu_binding import current_binding_condition
 from modules.core.db import (

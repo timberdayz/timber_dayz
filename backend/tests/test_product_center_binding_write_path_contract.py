@@ -72,7 +72,9 @@ def test_three_binding_statuses_are_the_whole_domain():
     """归属状态**恰好三个**，且语义各不相同。"""
     assert set(BINDING_STATUSES) == {"active", "inactive", "historical"}
     assert (
-        len({CURRENT_BINDING_STATUS, INACTIVE_BINDING_STATUS, HISTORICAL_BINDING_STATUS})
+        len(
+            {CURRENT_BINDING_STATUS, INACTIVE_BINDING_STATUS, HISTORICAL_BINDING_STATUS}
+        )
         == 3
     )
 
@@ -378,7 +380,8 @@ def test_migration_exists_and_chains_from_the_previous_head():
         in source
     )
     assert (
-        'down_revision = "current_schema_20261227_dim_spu_lifecycle_constraints"' in source
+        'down_revision = "current_schema_20261227_dim_spu_lifecycle_constraints"'
+        in source
     ), "迁移必须接在 20261227 之后"
 
 

@@ -156,14 +156,15 @@ def test_watchdog_task_action_never_flashes_a_window(watchdog_source: str) -> No
     不是 PowerShell 创建的, 加了它照样闪。
     """
     install_body = watchdog_source[
-        watchdog_source.find("function Install-WatchdogScheduledTask") :
-        watchdog_source.find("function Remove-WatchdogScheduledTask")
+        watchdog_source.find(
+            "function Install-WatchdogScheduledTask"
+        ) : watchdog_source.find("function Remove-WatchdogScheduledTask")
     ]
     assert install_body, "找不到 Install-WatchdogScheduledTask 函数"
 
-    assert "conhost.exe" in install_body, (
-        "计划任务动作必须走 conhost.exe --headless, 否则每 2 分钟弹一次窗口"
-    )
+    assert (
+        "conhost.exe" in install_body
+    ), "计划任务动作必须走 conhost.exe --headless, 否则每 2 分钟弹一次窗口"
     assert "--headless" in install_body, "conhost 必须带 --headless 才是无窗口运行"
 
     # 反向守护: 任务命令**本身**不许退回直接跑 powershell.exe 的旧式动作。
@@ -178,11 +179,10 @@ def test_watchdog_task_action_never_flashes_a_window(watchdog_source: str) -> No
         stripped = line.strip()
         if stripped.startswith("#"):
             continue
-        assert "--headless" in stripped, (
-            "taskCommand 必须带 --headless: %s" % stripped
-        )
+        assert "--headless" in stripped, "taskCommand 必须带 --headless: %s" % stripped
         assert "-WindowStyle" not in stripped, (
-            "-WindowStyle Hidden 挡不住终端宿主弹窗, 别用它冒充无窗口方案: %s" % stripped
+            "-WindowStyle Hidden 挡不住终端宿主弹窗, 别用它冒充无窗口方案: %s"
+            % stripped
         )
 
 

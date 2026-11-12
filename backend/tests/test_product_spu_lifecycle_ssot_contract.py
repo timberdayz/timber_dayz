@@ -74,7 +74,9 @@ def test_biz_status_set_covers_the_four_business_states():
 
 def test_retired_is_the_only_non_assignable_state():
     """可绑定状态集合 = 全集去掉 ``retired`` —— 这是「可绑定」的唯一口径。"""
-    assert set(SPU_ASSIGNABLE_STATUSES) == set(SPU_BIZ_STATUSES) - {SPU_BIZ_STATUS_RETIRED}
+    assert set(SPU_ASSIGNABLE_STATUSES) == set(SPU_BIZ_STATUSES) - {
+        SPU_BIZ_STATUS_RETIRED
+    }
 
 
 def test_assignable_states_are_a_subset_of_all_states():
@@ -177,7 +179,7 @@ def test_orm_schema_source_calls_the_ssot_renderers():
     ), "ORM 必须调用真源的 biz_status 渲染函数"
     assert (
         "render_spu_lifecycle_constraint()" in source
-    ), "ORM 必须调用真源的��命周期不变量渲染函数"
+    ), "ORM 必须调用真源的生命周期不变量渲染函数"
     # 手抄的 biz_status 清单必须消失
     assert "biz_status IN ('candidate'" not in source, "ORM 里仍存在手抄的状态清单"
 
@@ -203,7 +205,7 @@ def test_router_does_not_hand_copy_the_retired_literal():
     """路由里不得再手抄 ``biz_status != 'retired'`` 这类条件。"""
     source = PRODUCT_CENTER_ROUTER.read_text(encoding="utf-8")
 
-    assert "biz_status != \"retired\"" not in source
+    assert 'biz_status != "retired"' not in source
     assert "biz_status != 'retired'" not in source
 
 
@@ -264,7 +266,5 @@ def test_migration_renders_the_same_expressions_as_orm():
     """迁移渲染出的表达式必须与 ORM 用的**完全一致** ⇒ 两边不会漂移。"""
     constraints = _orm_check_constraints()
 
-    assert (
-        constraints["chk_dim_spu_biz_status"] == render_spu_biz_status_constraint()
-    )
+    assert constraints["chk_dim_spu_biz_status"] == render_spu_biz_status_constraint()
     assert constraints["chk_dim_spu_lifecycle"] == render_spu_lifecycle_constraint()

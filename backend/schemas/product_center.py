@@ -92,7 +92,7 @@ class SpuBulkItem(BaseModel):
     #   * `POST /api/spus/batch-soft-delete`
     #
     # 原因：它与 `biz_status` 表达的是**同一个**业务事实的两面
-    #（删掉的款必然是淘汰的），两者若能各自独立写，就能造出
+    # （删掉的款必然是淘汰的），两者若能各自独立写，就能造出
     # `active=false + biz_status='candidate'` 这种自相矛盾的行 ⇒
     # 「这个款还在不在」就没有唯一答案了。
     #

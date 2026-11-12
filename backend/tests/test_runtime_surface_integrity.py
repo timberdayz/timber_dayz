@@ -25,9 +25,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TYPECHECK_SCRIPT = PROJECT_ROOT / "scripts/run_typecheck.py"
-ROUTER_PATH = (
-    PROJECT_ROOT / "backend/domains/business/routers/product_center.py"
-)
+ROUTER_PATH = PROJECT_ROOT / "backend/domains/business/routers/product_center.py"
 
 
 # ---------------------------------------------------------------------------

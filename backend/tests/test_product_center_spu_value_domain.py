@@ -157,7 +157,9 @@ def stub_side_effects(monkeypatch):
 
     monkeypatch.setattr(pc_module, "FeishuProjectionService", _NoopProjection)
     monkeypatch.setattr(pc_module, "_write_product_center_audit", _noop_audit)
-    monkeypatch.setattr(pc_module, "trigger_pending_projection_delivery", _noop_delivery)
+    monkeypatch.setattr(
+        pc_module, "trigger_pending_projection_delivery", _noop_delivery
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +281,9 @@ async def test_bulk_sku_save_still_binds_an_active_spu():
 
 
 @pytest.mark.asyncio
-async def test_sku_ownership_binding_endpoint_cannot_bind_a_retired_spu(stub_side_effects):
+async def test_sku_ownership_binding_endpoint_cannot_bind_a_retired_spu(
+    stub_side_effects,
+):
     """「SKU 归属」抽屉里的绑定入口同样要守规则 —— 两处入口必须一致。"""
     db = _BindingDb(spu_row=_spu(active=True, biz_status="retired"), sku_row=_sku())
     body = SpuSkuBindingRequest(sku_id=7, effective_from=date(2026, 11, 12))

@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from sqlalchemy import inspect
 
 from backend.schemas.product_center import ProductCenterBindingResponse
+
 # 归属状态值只从真源取（律 1）。
 from backend.services.product_spu_binding import CURRENT_BINDING_STATUS
 from modules.core.db import (

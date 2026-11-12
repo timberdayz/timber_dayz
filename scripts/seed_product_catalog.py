@@ -21,12 +21,19 @@ from openpyxl import load_workbook
 from sqlalchemy import select
 
 from backend.models.database import AsyncSessionLocal
+
 # SKU ↔ SPU 归属关系的口径只从真源取（律 1）。
 from backend.services.product_spu_binding import (
     CURRENT_BINDING_STATUS,
     current_binding_condition,
 )
-from modules.core.db import BridgeErpSkuKey, BridgeSpuSku, DimErpSku, DimSpu, DimWarehouse
+from modules.core.db import (
+    BridgeErpSkuKey,
+    BridgeSpuSku,
+    DimErpSku,
+    DimSpu,
+    DimWarehouse,
+)
 
 
 EXPECTED_HEADERS = {
@@ -40,11 +47,41 @@ EXPECTED_HEADERS = {
 }
 TBD_CATEGORY = "待评估"
 WAREHOUSE_SEED = (
-    {"warehouse_code": "SG-01", "warehouse_name": "新加坡仓", "country_code": "SG", "country_name": "新加坡", "region": "东南亚"},
-    {"warehouse_code": "MY-01", "warehouse_name": "马来仓", "country_code": "MY", "country_name": "马来西亚", "region": "东南亚"},
-    {"warehouse_code": "PH-01-CHILD", "warehouse_name": "菲律宾1店-儿童书包仓", "country_code": "PH", "country_name": "菲律宾", "region": "东南亚"},
-    {"warehouse_code": "PH-REPAIR", "warehouse_name": "菲律宾仓（维修工具）", "country_code": "PH", "country_name": "菲律宾", "region": "东南亚"},
-    {"warehouse_code": "PH-03-FASHION", "warehouse_name": "菲律宾3店-时尚箱包仓", "country_code": "PH", "country_name": "菲律宾", "region": "东南亚"},
+    {
+        "warehouse_code": "SG-01",
+        "warehouse_name": "新加坡仓",
+        "country_code": "SG",
+        "country_name": "新加坡",
+        "region": "东南亚",
+    },
+    {
+        "warehouse_code": "MY-01",
+        "warehouse_name": "马来仓",
+        "country_code": "MY",
+        "country_name": "马来西亚",
+        "region": "东南亚",
+    },
+    {
+        "warehouse_code": "PH-01-CHILD",
+        "warehouse_name": "菲律宾1店-儿童书包仓",
+        "country_code": "PH",
+        "country_name": "菲律宾",
+        "region": "东南亚",
+    },
+    {
+        "warehouse_code": "PH-REPAIR",
+        "warehouse_name": "菲律宾仓（维修工具）",
+        "country_code": "PH",
+        "country_name": "菲律宾",
+        "region": "东南亚",
+    },
+    {
+        "warehouse_code": "PH-03-FASHION",
+        "warehouse_name": "菲律宾3店-时尚箱包仓",
+        "country_code": "PH",
+        "country_name": "菲律宾",
+        "region": "东南亚",
+    },
 )
 
 
@@ -95,7 +132,11 @@ def rows_ready_for_apply(rows: list[dict]) -> tuple[list[dict], list[str]]:
     ready = []
     deferred = []
     for row in rows:
-        if row["category_l1_code"] == TBD_CATEGORY or row["category_l2_code"] == TBD_CATEGORY or row["spu"].startswith("XH-TBD-"):
+        if (
+            row["category_l1_code"] == TBD_CATEGORY
+            or row["category_l2_code"] == TBD_CATEGORY
+            or row["spu"].startswith("XH-TBD-")
+        ):
             deferred.append(row["sku_key"])
         else:
             ready.append(row)
@@ -111,7 +152,14 @@ async def apply_rows(rows: list[dict]) -> tuple[int, int, int]:
         for values in WAREHOUSE_SEED:
             warehouse = await db.get(DimWarehouse, values["warehouse_code"])
             if warehouse is None:
-                db.add(DimWarehouse(**values, status="active", source="导出仓库清单-20260907205055.xls", effective_from=date.today()))
+                db.add(
+                    DimWarehouse(
+                        **values,
+                        status="active",
+                        source="导出仓库清单-20260907205055.xls",
+                        effective_from=date.today(),
+                    )
+                )
             else:
                 for key, value in values.items():
                     setattr(warehouse, key, value)
@@ -129,18 +177,59 @@ async def apply_rows(rows: list[dict]) -> tuple[int, int, int]:
                 db.add(spu)
                 created_spu += 1
             for row in (item for item in rows if item["spu"] == spu_code):
-                sku = (await db.execute(select(DimErpSku).where(DimErpSku.sku_key == row["sku_key"]))).scalar_one_or_none()
+                sku = (
+                    await db.execute(
+                        select(DimErpSku).where(DimErpSku.sku_key == row["sku_key"])
+                    )
+                ).scalar_one_or_none()
                 if sku is None:
-                    sku = DimErpSku(sku_key=row["sku_key"], sku_name=row["spu_name"], status="active", last_seen_at=None)
+                    sku = DimErpSku(
+                        sku_key=row["sku_key"],
+                        sku_name=row["spu_name"],
+                        status="active",
+                        last_seen_at=None,
+                    )
                     db.add(sku)
                     await db.flush()
                     created_sku += 1
-                source_key = (await db.execute(select(BridgeErpSkuKey).where(BridgeErpSkuKey.source_system == "product-catalog", BridgeErpSkuKey.source_key_type == "sku", BridgeErpSkuKey.source_key == row["sku_key"]))).scalar_one_or_none()
+                source_key = (
+                    await db.execute(
+                        select(BridgeErpSkuKey).where(
+                            BridgeErpSkuKey.source_system == "product-catalog",
+                            BridgeErpSkuKey.source_key_type == "sku",
+                            BridgeErpSkuKey.source_key == row["sku_key"],
+                        )
+                    )
+                ).scalar_one_or_none()
                 if source_key is None:
-                    db.add(BridgeErpSkuKey(source_system="product-catalog", source_platform="erp", source_key_type="sku", source_key=row["sku_key"], sku_id=sku.sku_id, effective_from=date.today(), active=True))
-                binding = (await db.execute(select(BridgeSpuSku).where(BridgeSpuSku.sku_id == sku.sku_id, *current_binding_condition()))).scalar_one_or_none()
+                    db.add(
+                        BridgeErpSkuKey(
+                            source_system="product-catalog",
+                            source_platform="erp",
+                            source_key_type="sku",
+                            source_key=row["sku_key"],
+                            sku_id=sku.sku_id,
+                            effective_from=date.today(),
+                            active=True,
+                        )
+                    )
+                binding = (
+                    await db.execute(
+                        select(BridgeSpuSku).where(
+                            BridgeSpuSku.sku_id == sku.sku_id,
+                            *current_binding_condition(),
+                        )
+                    )
+                ).scalar_one_or_none()
                 if binding is None:
-                    db.add(BridgeSpuSku(spu=spu_code, sku_id=sku.sku_id, effective_from=date.today(), binding_status=CURRENT_BINDING_STATUS))
+                    db.add(
+                        BridgeSpuSku(
+                            spu=spu_code,
+                            sku_id=sku.sku_id,
+                            effective_from=date.today(),
+                            binding_status=CURRENT_BINDING_STATUS,
+                        )
+                    )
                     created_bindings += 1
         await db.commit()
     return created_spu, created_sku, created_bindings
@@ -154,7 +243,9 @@ def main() -> int:
     rows, duplicates = load_lookup(args.lookup)
     errors = validate_rows(rows)
     ready_rows, deferred = rows_ready_for_apply(rows)
-    print(f"validated rows={len(rows)} ready_rows={len(ready_rows)} duplicate_rows={len(duplicates)} deferred_tbd={len(deferred)} errors={len(errors)}")
+    print(
+        f"validated rows={len(rows)} ready_rows={len(ready_rows)} duplicate_rows={len(duplicates)} deferred_tbd={len(deferred)} errors={len(errors)}"
+    )
     if duplicates:
         print(f"duplicate SKU examples: {', '.join(duplicates[:10])}")
     if errors:

@@ -35,9 +35,7 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-ROUTER_PATH = (
-    PROJECT_ROOT / "backend/domains/business/routers/product_center.py"
-)
+ROUTER_PATH = PROJECT_ROOT / "backend/domains/business/routers/product_center.py"
 
 
 def _router_source() -> str:
@@ -60,8 +58,7 @@ def test_ambiguous_product_center_item_is_gone():
     module = _schema_module()
 
     assert not hasattr(module, "ProductCenterItem"), (
-        "ProductCenterItem 仍在 —— 它同时表示款与货，"
-        "调用方分不清 spu 是标识还是引用"
+        "ProductCenterItem 仍在 —— 它同时表示款与货，" "调用方分不清 spu 是标识还是引用"
     )
 
 
@@ -303,7 +300,11 @@ def test_router_no_longer_references_the_ambiguous_models():
     #    ``BulkMutationResponse`` 的子串匹配误伤。
     import re
 
-    for name in ("ProductCenterItem", "ProductCenterListResponse", "BulkMutationResponse"):
+    for name in (
+        "ProductCenterItem",
+        "ProductCenterListResponse",
+        "BulkMutationResponse",
+    ):
         pattern = r"\b%s\b" % name
         assert not re.search(pattern, source), f"路由仍在引用已拆除的 {name}"
 

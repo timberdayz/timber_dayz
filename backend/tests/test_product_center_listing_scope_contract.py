@@ -90,7 +90,9 @@ def test_spu_listing_uses_include_soft_deleted_not_include_inactive():
     params = inspect.signature(list_spus).parameters
 
     assert "include_soft_deleted" in params
-    assert "include_inactive" not in params, "SPU 端点不该再用 include_inactive（与「停用」同名不同义）"
+    assert (
+        "include_inactive" not in params
+    ), "SPU 端点不该再用 include_inactive（与「停用」同名不同义）"
 
 
 @pytest.mark.asyncio

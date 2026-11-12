@@ -32,11 +32,7 @@ def main() -> int:
         "modules/core/db/schema_parts/dimensions.py",
     ]
 
-    missing = [
-        target
-        for target in targets
-        if not (repo_root / target).exists()
-    ]
+    missing = [target for target in targets if not (repo_root / target).exists()]
     if missing:
         print(
             "typecheck 目标不存在（门禁会静默失效）: %s" % ", ".join(missing),

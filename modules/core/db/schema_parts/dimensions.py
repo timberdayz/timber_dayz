@@ -537,9 +537,7 @@ class BridgeSpuSku(Base):
     )
     effective_from = Column(Date, nullable=False)
     effective_to = Column(Date, nullable=True)
-    binding_status = Column(
-        String(32), nullable=False, default=CURRENT_BINDING_STATUS
-    )
+    binding_status = Column(String(32), nullable=False, default=CURRENT_BINDING_STATUS)
     created_by = Column(Integer, nullable=True)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

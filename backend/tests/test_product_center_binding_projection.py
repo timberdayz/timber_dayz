@@ -123,11 +123,7 @@ def _compiled_sql() -> str:
 
     dialect = postgresql.dialect()
     parts = [
-        str(
-            clause.compile(
-                dialect=dialect, compile_kwargs={"literal_binds": True}
-            )
-        )
+        str(clause.compile(dialect=dialect, compile_kwargs={"literal_binds": True}))
         for clause in current_binding_condition()
     ]
     return " ".join(parts)
@@ -259,7 +255,13 @@ def _has_hardcoded_binding_status(source: str) -> bool:
     except (tokenize.TokenError, IndentationError):
         return False
 
-    skip = (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.COMMENT)
+    skip = (
+        tokenize.NL,
+        tokenize.NEWLINE,
+        tokenize.INDENT,
+        tokenize.DEDENT,
+        tokenize.COMMENT,
+    )
     for index, token in enumerate(tokens):
         if token.type != tokenize.NAME or token.string != "binding_status":
             continue
@@ -316,8 +318,7 @@ def test_no_runtime_module_hand_copies_the_binding_status():
 
     assert hits == [], (
         "以下生产文件把归属状态写死成了字面量，请改用 "
-        "backend.services.product_spu_binding 里的常量与判定函数："
-        + ", ".join(hits)
+        "backend.services.product_spu_binding 里的常量与判定函数：" + ", ".join(hits)
     )
 
 

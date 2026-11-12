@@ -15,6 +15,7 @@ from backend.schemas.product_center import (
     LogisticsProviderRuleUpdateRequest,
     WarehouseStorageRuleUpdateRequest,
 )
+
 # 归属状态值只从真源取（律 1）。
 from backend.services.product_spu_binding import HISTORICAL_BINDING_STATUS
 

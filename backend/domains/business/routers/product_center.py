@@ -160,6 +160,7 @@ from backend.services.sku_pricing_policy_service import (
     load_current_policies,
     policy_current_predicate,
 )
+
 # SPU 经营状态与「能不能挂货」的口径**只从真源取**（律 1）。
 # 候选集查询与写入校验引用同一份判定 ⇒ 不会出现「下拉里能选、保存时被拒」。
 from backend.services.product_spu_lifecycle import (
@@ -168,6 +169,7 @@ from backend.services.product_spu_lifecycle import (
     is_spu_assignable,
     spu_assignable_condition,
 )
+
 # SKU ↔ SPU **归属关系**的口径只从真源取（律 1）：
 # 「当前有效」的判定条件、投影字段（spu + 生效日）都只有这一处定义。
 from backend.services.product_spu_binding import (
@@ -972,9 +974,7 @@ async def soft_delete_spu(
             BridgeSpuSku.spu == spu,
             *current_binding_condition(),
         )
-        .values(
-            binding_status=INACTIVE_BINDING_STATUS, effective_to=date.today()
-        )
+        .values(binding_status=INACTIVE_BINDING_STATUS, effective_to=date.today())
     )
     affected_bindings = binding_result.rowcount or 0
 
@@ -1150,8 +1150,8 @@ async def batch_soft_delete_spus(
                     *current_binding_condition(),
                 )
                 .values(
-            binding_status=INACTIVE_BINDING_STATUS, effective_to=date.today()
-        )
+                    binding_status=INACTIVE_BINDING_STATUS, effective_to=date.today()
+                )
             )
             affected_bindings = binding_result.rowcount or 0
             for item in items:
@@ -1445,9 +1445,7 @@ async def soft_delete_sku(
             BridgeSpuSku.sku_id == sku_id,
             *current_binding_condition(),
         )
-        .values(
-            binding_status=INACTIVE_BINDING_STATUS, effective_to=date.today()
-        )
+        .values(binding_status=INACTIVE_BINDING_STATUS, effective_to=date.today())
     )
     affected_bindings = binding_result.rowcount or 0
 
