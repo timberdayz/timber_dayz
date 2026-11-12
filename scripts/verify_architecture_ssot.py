@@ -18,10 +18,27 @@ EXCLUDED_DIRS = {
     "node_modules",
     "temp",
     "venv",
+    # 别的分支的检出目录（2026-11-11 一次发版留下 7 个）。
+    # 它们**不是当前代码** —— 扫进去等于把同一棵树扫两遍：
+    # Base 定义被判成 DUPLICATE、587 条「X AND .worktrees/…」全是自己的副本。
+    # 2026-11-12 实测：不排除的话本门禁长期停在 25% 合规率，红的原因又不是
+    # 当前代码 ⇒ 门禁变成「狼来了」，真正出事时没人看。
+    ".worktrees",
 }
 
 ALLOWED_LEGACY_FILES = {
     PROJECT_ROOT / "modules" / "utils" / "sessions" / "legacy_shop_artifact_cleanup.py",
+    # 下面两个的 ``backup`` 指的是「它负责做备份」，**不是**「它是一份遗留的
+    # 备份副本」—— 它们是在产的发版链关键件，把它们归档等于把生产迁移变成
+    # 无备份迁移：
+    #   · scripts/local_migration_backup.py —— 发版脚本 Phase 1.9 的可校验备份
+    #     工具；找不到它，发版脚本直接阻断迁移（fail-closed）。
+    #   · tests/test_local_migration_backup.py —— 上者的契约测试，已进 CI
+    #     的 root contract 用例清单。
+    # 豁免不是白给的：backend/tests/test_architecture_ssot_gate_scope.py 会断言
+    # 它们确实仍被部署链引用，防止这份名单腐化成「谁都不看的空头豁免」。
+    PROJECT_ROOT / "scripts" / "local_migration_backup.py",
+    PROJECT_ROOT / "tests" / "test_local_migration_backup.py",
 }
 
 
@@ -36,6 +53,44 @@ def is_excluded(path: Path) -> bool:
     return any(part in EXCLUDED_DIRS for part in path.parts)
 
 
+def _declarative_base_call_lines(content: str) -> list[int]:
+    """行号：代码里**真的调用了** ``declarative_base()`` 的地方。
+
+    早先是纯文本扫描，于是任何在**文档字符串 / 断言文案**里提到
+    ``declarative_base()`` 的文件都会被报成「重复的 Base 定义」——
+    这个误报在 2026-11-12 就打到过我们自己的新测试文件头上。
+    走 AST 就能把「代码」和「散文」分开。
+
+    顺带修掉一个漏报：文本扫描找的是字面量 ``declarative_base()``，
+    写成 ``declarative_base(metadata=...)`` 的定义会被漏掉；AST 看的是调用本身。
+
+    解析不了的文件（语法坏掉）退回旧的文本判定 —— 宁可误报也不漏。
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return [
+            line_number
+            for line_number, line in enumerate(content.splitlines(), 1)
+            if "declarative_base()" in line and not line.strip().startswith("#")
+        ]
+
+    call_lines: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name):
+            name = func.id
+        elif isinstance(func, ast.Attribute):
+            name = func.attr
+        else:
+            continue
+        if name == "declarative_base":
+            call_lines.append(node.lineno)
+    return sorted(call_lines)
+
+
 def find_base_definitions() -> list[tuple[Path, int]]:
     base_definitions: list[tuple[Path, int]] = []
 
@@ -48,12 +103,11 @@ def find_base_definitions() -> list[tuple[Path, int]]:
         except UnicodeDecodeError:
             continue
 
-        if "declarative_base()" not in content:
+        if "declarative_base" not in content:
             continue
 
-        for line_number, line in enumerate(content.splitlines(), 1):
-            if "declarative_base()" in line and not line.strip().startswith("#"):
-                base_definitions.append((py_file, line_number))
+        for line_number in _declarative_base_call_lines(content):
+            base_definitions.append((py_file, line_number))
 
     return base_definitions
 
