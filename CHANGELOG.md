@@ -1,5 +1,120 @@
 # Changelog - 西虹 ERP 系统
 
+## [v7.23.0] - 2026-11-12 - 商品中心「款 / 货 / 归属」概念收敛 · V2 债全部结清
+
+> **本版本含一次数据库迁移**
+> （`current_schema_20261228_bridge_spu_sku_binding_status_constraint`，
+> **只加约束**、**一行存量数据未改**）。
+>
+> - 存量行全部满足新约束（实测 1118 行 `active` + 3 行 `inactive`，0 行越界）；
+> - 迁移前 **fail-closed** 校验存量行 ⇒ 有脏数据就报错回滚，不悄悄放过；
+> - 另有一条同批次的迁移 `current_schema_20261227_dim_spu_lifecycle_constraints`
+>   （`core.dim_spu` 两条 CHECK，20261227）。
+
+### 一、运营报的「输入编码却查不到」从来不是分页问题
+
+**现象**：SKU 资料页的「所属 SPU」筛选框输入编码后只显示「无匹配数据」，回车不生效。
+
+**根因不是「翻页」，是概念问题**：「可选的款」被做成了「SPU 管理 tab 那一页」的**分页表格数据**
+（`/api/spus` 默认 page=1、page_size=20），而 `dim_spu` 实测 **286 条**
+⇒ 第 36 个 SPU（`XH-FASHION-001`）**永远不在候选集里**。
+
+**修法不是「把分页调大」，是把「值的域」从「实体列表」里拆出来**：
+
+| 端点 | 口径 | 用途 |
+|---|---|---|
+| `GET /api/spus/options` | 浏览口径：在售（`active IS TRUE`） | 工具栏「所属 SPU」**筛选**（查询条件，敲什么都能查） |
+| `GET /api/spus/assignable-options` | 可绑定口径：`biz_status ∈ {candidate, testing, promoted}` | SKU 行**赋值 / 换款**（外键，不许造出挂不上的款） |
+
+口径**固化在后端**，不暴露给调用方自由拼装 ⇒ 前端无法组合出「已删除但状态还是候选」。
+
+### 二、「这个款还在不在」曾有两个真相来源，现在只有一个
+
+`dim_spu.active`（布尔）与 `dim_spu.biz_status`（经营成熟度）编码的是同一件事，
+而两者的**写入约定不一致** ⇒ 能造出 `active=false + biz_status='candidate'` 这种自相矛盾的行，
+且 `dim_spu` 上**当时没有任何 CHECK 约束**。
+
+**建模 A**（Walter 拍板）：`active=false` 必然是 `biz_status='retired'`；
+但 `retired` 可以不删（逻辑淘汰，历史仍要留）。
+⇒ 不变量 `active=false ⟹ biz_status='retired'`
+⇒ 「可绑定」= `biz_status` 不是 `retired` ⇒ **判定只需一个条件**。
+
+配套：`SpuBulkItem` / `SpuUpdateRequest` **不再接受 `active`** ——
+`active` 只能由删除 / 恢复三个专用端点写（前端整行回写带来的 `active` 被 Pydantic 忽略）。
+
+### 三、归属关系不再是「一个字段」
+
+`core.bridge_spu_sku` 是**带生效区间**的关联（`effective_from` / `effective_to` / `binding_status`），
+但列表只投影了「今天的落点」一个字符串 ⇒ 运营看不到「这个货是什么时候挂到这个款上的」。
+
+⇒ SKU 行给出「当前归属（自 YYYY-MM-DD）」；
+⇒ **款 / 货的响应模型拆开**：`ProductCenterItem` → `SpuItem`（`spu` 是标识，必填）
+  / `SkuItem`（`spu` 是引用，可空，无 `active`），
+  `ProductCenterListResponse` / `BulkMutationResponse` 同样一分为二，
+  **旧的三个模型一律删除**（留着就是留后门）。
+
+### 四、归属关系现在**双向可达**
+
+SKU 资料页里存量行的 SPU 列以前是**只读**的，改归属只能从「SPU 管理」tab 的抽屉**单向**进入。
+⇒ 存量行的 SPU 单元格改为可编辑，改动走**已有的** `bulk_save_skus` 通道
+（不另开写入路径 —— 归属有生效区间、有归档、有审计，另写一条必然漏掉一半）。
+
+**顺带修掉两个真实缺陷**：
+
+* 写入路径曾在**归属没换**时也校验「这个款还能不能挂货」
+  ⇒ 一个挂在**已淘汰款**下的 SKU，运营只想改个重量，保存却收到 422「不能绑定新 SKU」
+  （与他做的事毫无关系，且无从绕过）⇒ 改成**只有真的换款**才校验；
+* 同日换款曾被硬拒（`starts_on <= binding.effective_from`）⇒ 改成**只有改到过去**才拒绝。
+
+### 五、两个真源 + 全仓不再手抄（律 1）
+
+| 真源 | 管什么 |
+|---|---|
+| `backend/services/product_spu_lifecycle.py` | SPU **自身**的状态与「能不能挂货」 |
+| `backend/services/product_spu_binding.py` | SKU ↔ SPU **归属关系**的状态与投影 |
+
+「什么关系算当前有效」这个判定原本被**手抄在 13 个文件**里
+（路由 20 处 + 4 个业务服务 + 种子脚本 + 测试与冒烟脚本）
+⇒ 全部改为引用真源，并加**全仓扫描**守护测试：再手抄一份，测试立刻变红。
+
+归属状态的三个语义各自独立：`active`（当前有效）/ `inactive`（软删封存，**可**复活）/
+`historical`（换款归档，**不可**复活）⇒ 真源补齐三值 + DB CHECK 约束兜底，
+杜绝第四个值静默写进库。
+ORM 的 `uq_bridge_spu_sku_current` **部分索引谓词**也一并改为从真源渲染 ——
+「一个 SKU 只有一条当前归属」这条规则同样不该在 ORM 里再抄一遍。
+守护测试用 `tokenize` 精确扫**生产代码**里写死的状态（注释 / 文档字符串 / raw SQL 片段不误报）。
+
+### 六、typecheck 门禁**从来没有真正跑过**
+
+`scripts/run_typecheck.py`（`make typecheck` 走它）的目标里写着
+`backend/routers/dashboard_api.py`，而那个文件**早已不存在**
+⇒ mypy 每次都报错 ⇒ 这道门禁形同虚设。
+
+**代价**：本轮实测踩过一次 —— 漏导入 `archived_binding_condition`
+⇒ `restore_spu` / `restore_sku` 运行到那行才 `NameError`，
+而**全量后端测试照样全绿**（那两条路径没有执行用例）。
+
+⇒ 指向改成 `dashboard_api_postgresql.py`，并把商品中心的运行时面纳入门禁；
+   新增 `backend/tests/test_runtime_surface_integrity.py`：
+   守着**门禁目标必须存在**，并**静态**断言路由不引用未定义的全局名。
+
+### 七、验证口径
+
+| 项 | 结果 |
+|---|---|
+| 后端全量 | **4554 passed / 7 skipped / 0 failed** |
+| 前端全量 | **195 passed** |
+| lint / mypy / 前端构建 | 全部通过（顺带修掉路由里 3 处既有 mypy 告警） |
+| 迁移 | `20261227` + `20261228` 均 upgrade → 验证 → downgrade → upgrade 往返通过 |
+| DB 行为 | 非法 `binding_status` 被 CHECK 拒绝；三条 CHECK 均生效 |
+| 真实换款 | 旧关系归档为 `historical` + 新关系生效 + 当前归属唯一 + 生效日正确投影（已还原现场） |
+
+### 八、仍未做（**产品演进**，不是技术债）
+
+「款 → 货」的**页面层级重排**（以款为聚合根的层级视图）——
+触及面远超一个功能缺陷，按 pre-launch 约束不该混进 launch 期改动。
+**这是一件产品决策，需要先定 IA，再动手。**
+
 ## [v7.22.0] - 2026-11-11 - 采集失败的真实原因不再被盖掉 + 状态清单收敛到真源
 
 > **本版本含一次数据库迁移**（`current_schema_20261226_task_center_status_constraint`，
@@ -147,6 +262,10 @@ This Session's transaction has been rolled back due to a previous exception duri
 2. **隧道有看门狗了**：新增 `scripts/watch_cloud_sync_tunnel.ps1` ——
    探测 → 自愈（先清掉占着端口的僵死 ssh 进程，否则新进程会被 `ExitOnForwardFailure` 顶掉）
    → 留痕；并已注册成**每 2 分钟**跑一次的计划任务。它**只管隧道，不碰容器**。
+   - **2026-11-12 修正**：计划任务动作改为 `conhost.exe --headless powershell.exe ...`。
+     原写法在本机（默认终端宿主 = Windows Terminal）**每 2 分钟弹一次可见终端窗口**，
+     用户无法区分「自家看门狗」与「被入侵」；`-WindowStyle Hidden` 挡不住（窗口由终端宿主创建）。
+     改后实测 **0 个可见窗口**，隧道自愈与留痕行为完全不变。
 
 3. **巡检的「看不见」变成留痕**：2026-11-07 事故的直接成因是**巡检永远 skipped**、
    而**没有任何一条记录**说明「我看不见」。现在云端不可达时会把结论写进
