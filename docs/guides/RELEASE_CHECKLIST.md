@@ -53,6 +53,34 @@ git config core.sshCommand "ssh -i C:/Users/18689/.ssh/github_actions_deploy -o 
 End-to-end proof (2026-11-11): `git push origin main` with **no environment
 variables** reached both mirrors and reported `Everything up-to-date`.
 
+#### The **fetch** URL must be SSH-443 too (measured 2026-11-12)
+
+GitHub HTTPS is not merely "unreachable" — on 2026-11-12 an `ls-remote` over
+`https://github.com` **succeeded**, and a few minutes later `git fetch` over the
+same URL died with `Recv failure: Connection was reset`. So HTTPS from this
+network is **flaky**, and flaky is worse than hard-down: it fails *mid-flow*.
+
+That matters because `scripts/sync_main_mirrors.ps1` starts with
+`git fetch --prune origin` and **aborts the whole sync** if that fetch fails —
+so the release stops *before* pushing anything. Measured 2026-11-12: the sync
+aborted with `git fetch --prune origin failed: ... Connection was reset` and
+**neither mirror was touched** (fail-closed, no half-push).
+
+⇒ `origin`'s **fetch** URL was switched to the same SSH-443 form:
+
+```powershell
+git remote set-url origin "ssh://git@ssh.github.com:443/timberdayz/timber_dayz.git"
+```
+
+This is **Trap B** in action: `git remote set-url origin <url>` (no `--push`)
+rewrites only the *fetch* URL; the two push URLs stay as they are. Verify both
+sides after changing it:
+
+```powershell
+git config --get remote.origin.url            # fetch  -> ssh://…:443
+git config --get-all remote.origin.pushurl    # push   -> 2 entries, order preserved
+```
+
 > ⚠️ **Trap A — `git remote set-url --push origin <url>` does NOT replace a push
 > URL when several push URLs are configured.** It fails with `multiple values`
 > and exits fatally, and `--add` only *appends* (a repeated `--add` leaves
