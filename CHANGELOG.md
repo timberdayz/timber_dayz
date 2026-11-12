@@ -115,6 +115,33 @@ ORM 的 `uq_bridge_spu_sku_current` **部分索引谓词**也一并改为从真�
 触及面远超一个功能缺陷，按 pre-launch 约束不该混进 launch 期改动。
 **这是一件产品决策，需要先定 IA，再动手。**
 
+### 九、发版实测与部署后验收（v7.23.0，2026-11-12 23:51 → 次日 00:16 CST）
+
+| 项 | 结果 |
+|---|---|
+| tag | `v7.23.0`，注解 tag 对象 `97b7731d`，**GitHub 与 CNB 双端同一对象** |
+| main | `2685ffd8`，双镜像同一 SHA（`ls-remote` 复核） |
+| 发版流水线 | `deploy-production.yml` run `43252281527` 全绿：check-config → 发布门禁 → 镜像构建推送 → 远端部署 |
+| 远端迁移 | `current_revision = head = current_schema_20261228_bridge_spu_sku_binding_status_constraint`；`missing_tables: []`、`missing_columns: []`；schema 门禁通过 |
+| 镜像 | `Backend=v7.23.0` / `Frontend=v7.23.0`（CNB 主源拉取成功） |
+| 部署后健康端点 | `https://www.xihong.site/api/healthz/ready` → HTTP 200，`version=v7.23.0`，`database=connected`，`dashboard=ready` |
+| 新端点已上线 | 生产 OpenAPI 含 `/api/spus/options` 与 `/api/spus/assignable-options`；线上前端 chunk 含 `listSpuOptions` / `listSpuAssignableOptions` |
+| 库存层重建 | `[OK] Inventory age full rebuild completed` + `[OK] Inventory state full rebuild completed`；`mart.inventory_state.last_succeeded_at = 2026-11-12T16:16:01Z`（晚于部署开始） |
+| 监控存在性 | `missing_targets` 为空，无 `object_exists=false` 的目标 |
+| 批次数 | `deploy-production.yml` **只新增 1 个 run** —— CNB 侧推 tag 是惰性的，没有触发第二次部署 |
+| 容器 | backend-api / celery-worker / celery-beat / frontend / nginx 全部 Started，日志中无 `Restarting` / `VersionMismatch` / 回溯 |
+
+**发版前被门禁拦下的三处**（都不是业务缺陷，但都会真实伤害线上）：
+
+1. **black 格式门禁**（`CI Pipeline` → `Code formatting check`）：CI 只对**本次变更过**的 Python 文件跑 black，
+   本批 26 个文件里有 16 个没过 ⇒ 已按仓库标准（`line-length=88`）格式化，+165/-68，纯格式无语义变更。
+2. **`VERSION` 被写成双 BOM**（`Run root contract tests` 步）：`backend/main.py::_load_app_version()` 用
+   `encoding="utf-8"` 读它（不是 `utf-8-sig`），`strip()` 也去不掉 `U+FEFF`
+   ⇒ 线上 `/healthz/ready` 会报出 `'\ufeff\ufeffv7.23.0'` 这种坏版本号。
+   已恢复成仓库规范形态（纯 7 字节 `vX.Y.Z`，与 v7.22.0 的 git blob 一致）。
+3. **一个 `U+FFFD` 坏字节**：我自己在 `test_product_spu_lifecycle_ssot_contract.py` 的提示文案里打错了一个「生」字。
+   `verify_utf8_source_hygiene.py` 抓得到，但 **CI 不跑这个脚本** ⇒ 靠本地门禁拦住。
+
 ## [v7.22.0] - 2026-11-11 - 采集失败的真实原因不再被盖掉 + 状态清单收敛到真源
 
 > **本版本含一次数据库迁移**（`current_schema_20261226_task_center_status_constraint`，
