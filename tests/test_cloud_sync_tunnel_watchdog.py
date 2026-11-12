@@ -142,6 +142,50 @@ def test_watchdog_supports_scheduled_task(watchdog_source: str) -> None:
     assert "schtasks" in watchdog_source, "计划任务用 schtasks 注册(不需管理员改组策略)"
 
 
+def test_watchdog_task_action_never_flashes_a_window(watchdog_source: str) -> None:
+    """看门狗每 2 分钟跑一次 —— 它**绝不能**往用户脸上弹控制台窗口。
+
+    2026-11-12 事故：任务是 ``powershell.exe -NoProfile ...`` 直接跑的,
+    Windows Terminal 是本机默认终端宿主 ⇒ 每次触发都弹一个可见终端窗口,
+    每 2 分钟闪一次, 用户完全无法判断这是自家任务还是被入侵。
+
+    修法是让任务动作走 ``conhost.exe --headless``, 它跑完全相同的命令行
+    但不创建任何窗口(实测 0 个可见窗口)。
+
+    注意: ``-WindowStyle Hidden`` **不够** —— 窗口是终端宿主创建的,
+    不是 PowerShell 创建的, 加了它照样闪。
+    """
+    install_body = watchdog_source[
+        watchdog_source.find("function Install-WatchdogScheduledTask") :
+        watchdog_source.find("function Remove-WatchdogScheduledTask")
+    ]
+    assert install_body, "找不到 Install-WatchdogScheduledTask 函数"
+
+    assert "conhost.exe" in install_body, (
+        "计划任务动作必须走 conhost.exe --headless, 否则每 2 分钟弹一次窗口"
+    )
+    assert "--headless" in install_body, "conhost 必须带 --headless 才是无窗口运行"
+
+    # 反向守护: 任务命令**本身**不许退回直接跑 powershell.exe 的旧式动作。
+    # 只看真正拼出来的命令行, 不看注释(注释里可以解释为什么不用它)。
+    command_lines = [
+        line
+        for line in install_body.splitlines()
+        if "taskCommand" in line and "=" in line
+    ]
+    assert command_lines, "找不到 taskCommand 的构造"
+    for line in command_lines:
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        assert "--headless" in stripped, (
+            "taskCommand 必须带 --headless: %s" % stripped
+        )
+        assert "-WindowStyle" not in stripped, (
+            "-WindowStyle Hidden 挡不住终端宿主弹窗, 别用它冒充无窗口方案: %s" % stripped
+        )
+
+
 def test_watchdog_loads_env_files(watchdog_source: str) -> None:
     """配置必须来自 env 文件, 与正式采集脚本同样的加载顺序。"""
     for env_file in (".env", ".env.local", ".env.collection.local"):

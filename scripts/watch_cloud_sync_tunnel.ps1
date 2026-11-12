@@ -54,6 +54,9 @@
 
 .EXAMPLE
     # Register a scheduled task (every 2 minutes) so the tunnel really persists
+    # NOTE: the task action is "conhost.exe --headless powershell.exe ..." so the
+    #       task never flashes a console window at the user (see the comment in
+    #       Install-WatchdogScheduledTask).
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts/watch_cloud_sync_tunnel.ps1 -InstallScheduledTask
 
 .EXAMPLE
@@ -289,7 +292,20 @@ function Install-WatchdogScheduledTask {
     )
 
     $scriptPath = Join-Path $PSScriptRoot "watch_cloud_sync_tunnel.ps1"
-    $taskCommand = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $scriptPath + '"'
+
+    # NOTE (2026-11-12): the task action MUST go through "conhost.exe --headless".
+    #   A plain "powershell.exe" action gives the task an interactive console.
+    #   Windows Terminal is the default console host on this machine, so every
+    #   fire pops a VISIBLE terminal window in front of the user. At a 2-minute
+    #   interval that is a black window flashing in and out forever - and the
+    #   user cannot tell it apart from a hijack.
+    #   "conhost.exe --headless" runs the identical command line with NO window
+    #   at all (verified: 0 visible console windows, same exit code, same
+    #   watchdog log line written).
+    #   NOTE: "-WindowStyle Hidden" is NOT enough here - it still flashes,
+    #   because the window is created by the terminal host, not by PowerShell.
+    $conhost = Join-Path $env:SystemRoot "System32\conhost.exe"
+    $taskCommand = '"' + $conhost + '" --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $scriptPath + '"'
 
     & schtasks /Create /TN $Name /TR $taskCommand /SC MINUTE /MO $Minutes /F | Out-Null
     if ($LASTEXITCODE -ne 0) {

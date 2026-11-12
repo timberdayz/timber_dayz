@@ -512,6 +512,11 @@ python scripts/verify_shop_identity_reconciliation.py --output output/reconcilia
 - 本机 `.env.collection.local`（采集机）：三件套全配；
 - 生产 `/opt/xihong_erp/.env`：四键就位（备份 `.env.bak.20261111_114118`）⇒ **容器重建后生效**（随 v7.21.0 部署）；
 - 本机计划任务 `XihongCloudSyncTunnelWatchdog`：每 2 分钟自愈隧道（实测：杀掉 ssh ⇒ 1 秒内恢复；端口已通 ⇒ 不起第二条隧道）。
+  - **2026-11-12 修正**：任务动作原本是 `powershell.exe -NoProfile ...` 直接跑，而本机默认终端宿主是
+    Windows Terminal ⇒ **每 2 分钟弹一次可见终端窗口**（用户报告「突然闪一个黑框」，无法判断是否被入侵）。
+    改为 `conhost.exe --headless powershell.exe ...` 后实测 **0 个可见窗口**，隧道自愈逻辑与留痕完全不变。
+    源码 `Install-WatchdogScheduledTask` 已同步修正（防复发），并加契约守护
+    `test_watchdog_task_action_never_flashes_a_window`。
 
 ### 遗留
 
