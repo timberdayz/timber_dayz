@@ -172,6 +172,7 @@
             remote-show-suffix
             :remote-method="spuBrowse.remoteMethod"
             :loading="spuBrowse.loading"
+            :no-data-text="SPU_OPTION_EMPTY_TEXT.browse"
             placeholder="所属 SPU（可直接输入编码）"
             @change="loadSkus"
             ><el-option
@@ -227,6 +228,7 @@
           stripe
           border
           class="flat-table sku-table"
+          :empty-text="skuEmptyText"
           :header-cell-style="skuHeaderCellStyle"
           ><el-table-column label="SPU" width="190"
             ><template #default="{ row }"
@@ -246,6 +248,7 @@
                   remote-show-suffix
                   :remote-method="spuAssignable.remoteMethod"
                   :loading="spuAssignable.loading"
+                  :no-data-text="SPU_OPTION_EMPTY_TEXT.assignable"
                   size="small"
                   :placeholder="row.__new ? '选择 SPU' : '换款'"
                   @change="onSkuSpuChange(row)"
@@ -1234,7 +1237,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Check, Plus, QuestionFilled } from "@element-plus/icons-vue";
 import productCenterApi from "@/api/productCenter";
-import { createSpuSearch } from "./productCenterSpuOptions";
+import { createSpuSearch, SPU_OPTION_EMPTY_TEXT, buildSkuEmptyText } from "./productCenterSpuOptions";
 import { useUserStore } from "@/stores/user";
 
 const userStore = useUserStore();
@@ -1307,6 +1310,9 @@ const spuTotal = ref(0);
 const skuTotal = ref(0);
 const operatingTotal = ref(0);
 const skuSpuFilter = ref("");
+// 空结果文案：按款筛选时点名「哪个款没有挂货」，
+// 而不是笼统的「暂无数据」—— 后者会让运营以为系统坏了。
+const skuEmptyText = computed(() => buildSkuEmptyText(skuSpuFilter.value));
 const operatingQuery = reactive({
   platform_code: "",
   spu: "",
