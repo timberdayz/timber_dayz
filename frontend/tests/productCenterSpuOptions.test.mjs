@@ -51,8 +51,8 @@ test("值域搜索按关键词请求后端，并把结果转成选项", async ()
   assert.equal(calls.length, 1);
   assert.equal(calls[0].keyword, "FASHION");
   assert.ok(calls[0].limit > 0, "必须带 limit，避免一次拉回全部 SPU");
-  assert.equal(search.options.value.length, 1);
-  assert.equal(search.options.value[0].value, "XH-FASHION-001");
+  assert.equal(search.options.length, 1);
+  assert.equal(search.options[0].value, "XH-FASHION-001");
 });
 
 test("值域搜索失败时清空候选，不把上一次的结果留在框里", async () => {
@@ -62,8 +62,8 @@ test("值域搜索失败时清空候选，不把上一次的结果留在框里",
 
   await search.search("X");
 
-  assert.deepEqual(search.options.value, []);
-  assert.equal(search.loading.value, false);
+  assert.deepEqual(search.options, []);
+  assert.equal(search.loading, false);
 });
 
 test("值域搜索结束一定会解除 loading", async () => {
@@ -71,7 +71,7 @@ test("值域搜索结束一定会解除 loading", async () => {
 
   await search.search("X");
 
-  assert.equal(search.loading.value, false);
+  assert.equal(search.loading, false);
 });
 
 // ---------------------------------------------------------------------------

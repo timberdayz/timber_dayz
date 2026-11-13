@@ -1,4 +1,4 @@
-import { ref } from "vue";
+import { reactive } from "vue";
 
 /**
  * SPU 值域 —— 前端只**消费**，不定义口径。
@@ -42,37 +42,56 @@ export function buildSpuOptions(rows) {
 /**
  * 造一个远程搜索的 SPU 值域。
  *
+ * ⚠️ 返回的**必须是 reactive 对象**，且 `options` / `loading` 是**普通值**。
+ * 原因（2026-11-13 事故）：Vue 模板**只自动拆包「最外层」的 ref** ——
+ * 若把 ref 藏在一个**普通对象**里（`{ options: ref([]) }`），模板拿到的
+ * 是 **ref 本身**而不是名单：
+ *   * `:loading="spu.loading"` 拿到的是 ref 对象（**恒为真**）
+ *     ⇒ Element Plus 的规则 `选项列表 vShow = options.size > 0 && !loading`
+ *     ⇒ 选项列表**永不渲染** ⇒ 下拉框是空的；
+ *   * `v-for="item in spu.options"` 迭代的是 ref 的 5 个内部属性
+ *     （`dep` / `__v_isRef` / `__v_isShallow` / `_rawValue` / `_value`）
+ *     ⇒ 渲染出 5 个 value=undefined 的**空白项** ⇒ 一个款也选不中
+ *     ⇒ 筛选条件永远是空 ⇒ 请求**从不带 `spu=`** ⇒ 表格不按款筛选。
+ * ⇒ 完整分析见 `docs/superpowers/plans/2026-11-13-product-center-sku-spu-ui-defect-fix.md`；
+ *   守护用例见 `frontend/tests/productCenterSpuOptionsRender.test.mjs`。
+ *
  * @param {(params: {keyword: string, limit: number}) => Promise<{data?: Array}>} loadOptions
  *        值域查询函数（一般直接传 api 的方法）。
  * @param {{pageSize?: number, debounceMs?: number}} [options]
  */
 export function createSpuSearch(loadOptions, { pageSize = 50, debounceMs = 300 } = {}) {
-  const options = ref([]);
-  const loading = ref(false);
   let timer = null;
 
-  async function search(query = "") {
-    loading.value = true;
-    try {
-      const res = await loadOptions({ keyword: query, limit: pageSize });
-      options.value = buildSpuOptions(res && res.data);
-    } catch {
-      // 失败时**清空**候选：留着上一次的候选会让运营以为「这些款都搜不到」，
-      // 而真正的原因是查询挂了。
-      options.value = [];
-    } finally {
-      loading.value = false;
-    }
-  }
+  // ⚠️ 状态直接挂在 reactive 对象上 ⇒ 模板与脚本拿到的都是**普通值**。
+  const api = reactive({
+    /** @type {Array<{value: string, label: string, name: string}>} */
+    options: [],
+    loading: false,
 
-  function remoteMethod(query) {
-    // ⚠️ el-select 2.11.5 没有 debounce prop ⇒ remote-method 每次击键都会触发
-    //    ⇒ 自己防抖，否则一次输入会打十几次后端。
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      void search(query);
-    }, debounceMs);
-  }
+    async search(query = "") {
+      api.loading = true;
+      try {
+        const res = await loadOptions({ keyword: query, limit: pageSize });
+        api.options = buildSpuOptions(res && res.data);
+      } catch {
+        // 失败时**清空**候选：留着上一次的候选会让运营以为「这些款都搜不到」，
+        // 而真正的原因是查询挂了。
+        api.options = [];
+      } finally {
+        api.loading = false;
+      }
+    },
 
-  return { options, loading, search, remoteMethod };
+    remoteMethod(query) {
+      // ⚠️ el-select 2.11.5 没有 debounce prop ⇒ remote-method 每次击键都会触发
+      //    ⇒ 自己防抖，否则一次输入会打十几次后端。
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void api.search(query);
+      }, debounceMs);
+    },
+  });
+
+  return api;
 }

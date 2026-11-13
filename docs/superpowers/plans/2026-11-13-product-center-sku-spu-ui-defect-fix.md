@@ -1,6 +1,6 @@
 # 商品中心 · SKU 资料页 SPU 缺陷：完整优化方案
 
-> **状态**：待拍板（本文是方案，不是实施记录）
+> **状态**：批次 A / B / C 全部实施中（2026-11-13 Walter 拍板"本会话做完，不留给其他会话"）
 > **日期**：2026-11-13
 > **发现者**：Walter 在实际使用「商品中心 → SKU 资料」页时发现
 > **性质**：前端消费后端真源的方式错了；**后端口径、数据、接口全部正确**
@@ -193,3 +193,21 @@ B) reactive 对照组                   => <li>[XH-FASHION-005|XH-FASHION-005]</
 1. **批次 A 是否随下一版发版**（建议：是 —— 它是"运营能不能用"的阻塞项）。
 2. **批次 B 是否要做**（建议：做 B1 + B2；B3 可后置）。
 3. **批次 C 的两条**（建议：先做 C2 轮换 + 取消跟踪，C1 另排）。
+
+> **2026-11-13 更新**：Walter 拍板 —— **三个批次全部在本会话实施完，不留给其他会话**。
+
+---
+
+## 7. 实施记录
+
+### 批次 A（前端：让界面真的能用）
+
+| 项 | 内容 |
+|---|---|
+| **A1** | `frontend/src/domains/business/views/productCenterSpuOptions.js`：`createSpuSearch` 改为返回 **`reactive` 对象**，`options` / `loading` 是**普通值**（不再是藏在普通对象里的 ref）。注释里写明了"为什么必须这样"与事故机制 |
+| **A2** | `ProductCenter.vue` L1280：`spuAssignable.options.value` → `spuAssignable.options`（1 处） |
+| **A3** | `frontend/tests/productCenterSpuOptions.test.mjs`：5 处 `.value` 断言跟随修改（L54/55/65/66/74），**断言内容不变** |
+| **A4** | 新增 `frontend/tests/productCenterSpuOptionsRender.test.mjs`（5 例）：<br>① 模板可见路径拿到的是**名单**（`Array.isArray(options)`）且 `loading` 是**布尔**（不是恒真的 ref）；<br>② **真渲染一次**（`vue/server-renderer` + render function），断言款编码出现在 HTML 里、且没有空白项；<br>③ 搜索失败清空候选且解除 loading；<br>④ 工厂必须 `reactive` 且不许再 import `ref`；<br>⑤ 组件不许再对值域对象取 `.value` |
+| **A5** | 结构性门禁即 A4 的 ④⑤ 两条（同一文件，不另起炉灶） |
+| **TDD 红侧** | 用**旧写法**在临时目录实跑守护断言：<br>`Array.isArray(options)` = **false**、`typeof loading === 'boolean'` = **false** ⇒ 两条断言都会红；<br>渲染直接崩在 `this.spu.options.map is not a function` ⇒ **守护确实抓得住这个 bug**（不是"写完就绿"的假测试） |
+| **验证** | 前端测试 **200 passed / 0 failed**（原 195 + 新增 5）；`npm run build` **✓ built in 13.65s**；eslint 在本仓库**不是门禁**（未改动文件同样 135 个同类 error，CI 无 eslint 步骤）⇒ 不做风格重写 |

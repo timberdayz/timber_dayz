@@ -1277,7 +1277,7 @@ const skus = ref([]);
 // ⚠️ 搜索结果**仍然**只给可绑定的款（赋值是外键，不能造出挂不上的款）。
 const spuAssignableOptions = computed(() => {
   const merged = new Map();
-  for (const item of spuAssignable.options.value) merged.set(item.value, item);
+  for (const item of spuAssignable.options) merged.set(item.value, item);
   for (const row of skus.value) {
     if (row.spu && !merged.has(row.spu)) {
       merged.set(row.spu, {
