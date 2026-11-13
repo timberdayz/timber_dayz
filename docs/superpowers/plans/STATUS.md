@@ -982,6 +982,8 @@ available_after_time: "06:00"}` ⇒ 实际时间窗 **2026-11-01 ~ 2026-11-10**
 | 第一批 | `795cc6d7` | 扫描范围修到真源 + AST 六桶口径 + 聚合报告 + 守护测试 17 例 + 流水线/规范文档/发布清单 |
 | 第二批 | `cc51a1c7` | 3 个守卫失效 except 块补失败原因日志（**零行为变更**） |
 | 文档 | `de0659c9` | 方案文档状态更新为已验收 |
+| 索引 | `ad69df02` | 本索引补记 v7.23.0 与本批两批（此前停在 v7.22.0） |
+| 发版 | `0e6ec9c8` | `VERSION` + `CHANGELOG` 同提交，打 tag `v7.24.0` |
 
 ### 问题：这道门禁**从未看过一行真实路由代码**
 
@@ -1016,11 +1018,37 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
 ⇒ **数字与口径都写进守护测试**（含 2 条语义锚点 + 2 条守卫锚点），
 这正是律 1「真源只能一个，而且必须写在纸上」的由来。
 
+## v7.24.0 上线：门禁第一次真的看了路由代码（2026-11-13）
+
+- tag `v7.24.0`（tag 对象 `802a08ab`）**双端同一对象**，提交 `0e6ec9c8`；
+  部署流水线 run `43372513282` 成功，`VERSION` 为纯 7 字节 `v7.24.0`（与 tag 同提交）。
+- 部署日志核对：`migration_status=up_to_date`；
+  `current_revision == head_revision == current_schema_20261228_bridge_spu_sku_binding_status_constraint`；
+  `missing_tables=[]`、`missing_columns=[]`；Phase 2.7 视图重建 40+ 定义全部就位；
+  Phase 3a / 3a' 库存重建均 `[OK]`；`Resolved tags: Backend=v7.24.0, Frontend=v7.24.0`。
+- 生产独立验收（HTTP 直观测）：`/api/healthz/ready` → 200、`version=v7.24.0`、
+  `database=connected`、`dashboard=ready`；首页 200。
+- **决定性证据在发布流水线日志里**（不是本地推断）：
+
+  ```
+  [INFO] Changed router files: 2
+  本次验证: 2 个文件（其中定义路由的: 2 个）
+  F 真静默: 0
+  ```
+
+  改动前同一位置是「Changed router files: 0」+「跳过验证」**绿灯放行**；
+  现在真去验了那 2 个域内路由文件，且真静默 0
+  ⇒ **第二批补的日志已被门禁确认生效**。
+- 发版提交 CI 三线全绿（CI Pipeline / Validate Data Flow / Docker Build and Push）；
+  本地 `scripts/verify_release_local.py --skip-build` exit=0。
+- 业务概念**零变化**：商品/款/货/归属/各域概念、对外接口、数据库结构全部原样；
+  只变「谁来体检」与「新代码写哪条路径」。
+
 ### 本会话遗留（已拍板，另排批次）
 
 | 项 | 说明 |
 |---|---|
-| **发版窗口** | 第二批的日志增强**尚未上生产**（两批都没打 tag） |
+| ~~**发版窗口**~~ | **已完成**：v7.24.0 已上生产并独立验收（run `43372513282`、tag 对象 `802a08ab`、双端一致） |
 | 47 处真静默 | 分批清理（跨 4 域 27 文件，pre-launch 要求拆） |
 | 74 个带 BOM 的路由文件 | 单独一批清理（本批已用 `utf-8-sig` 兜住，不阻塞） |
 | fail-closed（计数失败即拒删） | 需先定义「引用数未知」状态，**建议随 M5.2 硬删一起做** |

@@ -102,7 +102,35 @@
 
 两处**行为一字未改**：仍回滚事务、仍报 0、仍设 `db_status=error`。
 
-### 七、已知未落地项（已排期，不在本版）
+### 七、发布与部署后验收（2026-11-13）
+
+- tag `v7.24.0`（tag 对象 `802a08ab`）**双端同一对象**，均指向发版提交 `0e6ec9c8`；
+  推送顺序：先 CNB（惰性、建立 parity）→ 再 GitHub（触发部署），**未在 GitHub 侧回填**。
+- 发版提交 CI 三线全绿（CI Pipeline / Validate Data Flow / Docker Build and Push）；
+  本地 `scripts/verify_release_local.py --skip-build` **exit=0**；
+  `VERSION` 为纯 7 字节 `v7.24.0`（无 BOM、无换行），与 tag 同一提交。
+- 部署流水线 run `43372513282` **success**，且 v7.24.0 **恰好 1 个 run**。
+- **迁移**：本版无新迁移 ⇒ `migration_status=up_to_date`，
+  `current_revision == head_revision == current_schema_20261228_bridge_spu_sku_binding_status_constraint`，
+  `missing_tables=[]`、`missing_columns=[]`，**schema 门禁通过**。
+- 部署期 Phase 2.7 视图重建 40+ 个定义全部就位；Phase 3a / 3a' 库存层重建均 `[OK]`。
+- **生产验收（HTTP 直观测）**：`/api/healthz/ready` → 200、`version=v7.24.0`、
+  `database=connected`、`dashboard=ready`；首页 200。
+- **★ 门禁在真实发布里第一次真的验到了东西**（本次发布的决定性证据）：
+
+  ```
+  [INFO] Changed router files: 2
+  开始验证API契约（仅验证 13 个改动文件）...
+  扫描候选: 158 个文件（仓库内可能的路由位置）
+  本次验证: 2 个文件（其中定义路由的: 2 个）
+  F 真静默（不记、不抛、不返回、不跳过）: 0
+  ```
+
+  改动前同一位置会打印「Changed router files: 0」+「跳过验证」并绿灯放行；
+  现在打印 **2**，并**真的去验了那 2 个域内路由文件**。
+  而真静默显示 **0** ⇒ 第二批给这 2 个文件补的失败原因日志**已被门禁确认生效**。
+
+### 八、已知未落地项（已排期，不在本版）
 
 | 项 | 说明 |
 |---|---|
