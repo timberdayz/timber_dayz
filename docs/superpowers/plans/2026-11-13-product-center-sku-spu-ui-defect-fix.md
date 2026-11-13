@@ -1,9 +1,10 @@
 # 商品中心 · SKU 资料页 SPU 缺陷：完整优化方案
 
-> **状态**：批次 A / B / C 全部实施中（2026-11-13 Walter 拍板"本会话做完，不留给其他会话"）
+> **状态**：批次 A / B / C **全部实施完成**（2026-11-13，本会话做完，不留给其他会话）
 > **日期**：2026-11-13
 > **发现者**：Walter 在实际使用「商品中心 → SKU 资料」页时发现
 > **性质**：前端消费后端真源的方式错了；**后端口径、数据、接口全部正确**
+> **实施记录**：见文末 §7（含批次 B1/B2、C1/C2 的取舍与红侧验证）
 
 ---
 
@@ -211,3 +212,60 @@ B) reactive 对照组                   => <li>[XH-FASHION-005|XH-FASHION-005]</
 | **A5** | 结构性门禁即 A4 的 ④⑤ 两条（同一文件，不另起炉灶） |
 | **TDD 红侧** | 用**旧写法**在临时目录实跑守护断言：<br>`Array.isArray(options)` = **false**、`typeof loading === 'boolean'` = **false** ⇒ 两条断言都会红；<br>渲染直接崩在 `this.spu.options.map is not a function` ⇒ **守护确实抓得住这个 bug**（不是"写完就绿"的假测试） |
 | **验证** | 前端测试 **200 passed / 0 failed**（原 195 + 新增 5）；`npm run build` **✓ built in 13.65s**；eslint 在本仓库**不是门禁**（未改动文件同样 135 个同类 error，CI 无 eslint 步骤）⇒ 不做风格重写 |
+
+### 批次 A 回归修复（提交 `1f7cb413`）
+
+| 项 | 内容 |
+|---|---|
+| **事故** | 批次 A 把值域工厂的局部状态容器命名成了 `api` ⇒ `api.search(query)` 被前端 API 契约门禁（`scripts/validate_frontend_api_methods.py`，正则 `(?:this\.)?api\.(\w+)\s*\(`）判成「调用了不存在的后端方法 search」⇒ **Validate Data Flow 流水线红**（run `43387187814`） |
+| **修法** | 局部容器改名 `valueDomain`，并在注释里写明**为什么不能叫 `api`** ⇒ **不弱化门禁、不改门禁正则** |
+| **教训** | 门禁**本来就存在**（`backend/tests/test_validate_frontend_api_methods_contract.py` 断言全量扫描 `missing_calls == 0`）—— 是推送前没跑后端全量才漏出去 ⇒ **推 main 前必须跑完根 `tests/` + 后端全量** |
+
+### 批次 B1：值域默认候选按「当前挂货数」排序（提交 `f8c44012`）
+
+| 项 | 内容 |
+|---|---|
+| **问题（生产实测）** | 284 个在售款按编码排序时前 50 个是 `XH-BABY-MC` ~ `XH-FASHION-695`，`XH-TOYS-MYTK` 排**第 277 位** ⇒ 玩具类几乎永远不在默认候选里 |
+| **修法** | 新增 `_spu_option_order()`（当前挂货数 desc + 编码 asc）；浏览口径与可绑定口径**共用同一份**排序 ⇒ 不会一个按编码、一个按挂货数 |
+| **口径纪律** | 排序**不是口径**（哪些款可选仍由各自端点的过滤条件决定）；挂货数判定引用真源 `current_binding_condition()`；用相关子查询而非 join+group_by（不改 SELECT 形状，也不引入「非聚合列」分组问题） |
+| **TDD 红侧** | 把 `_spu_option_order` 临时改回「按编码排」⇒ **4 条新用例全红**（3 条行为 + 1 条口径来源）；恢复后 14 passed |
+| **测试基建** | 新增本地 fixture：SQLite `ATTACH ':memory:' AS core` 后只建 `dim_spu` / `bridge_spu_sku` —— 生产表挂在 PostgreSQL 的 `core` schema 下，仓库既有 `sqlite_session` fixture 会报 `unknown database core`；沿用仓库里 `backend/tests/data_pipeline/test_refresh_queue_service.py` 的成熟做法 |
+
+### 批次 B2：空结果说清原因与下一步（提交 `c121c3f3`）
+
+| 项 | 内容 |
+|---|---|
+| **问题** | 选中一个当前挂货 0 条的款（生产实测 `XH-FASHION-005`），表格只显示笼统的「暂无数据」⇒ 运营以为系统坏了；下拉搜不到也只显示「无数据」 |
+| **修法** | SKU 表格接 `:empty-text="skuEmptyText"`（按款筛时显示「款 X 当前没有挂货」）；两个下拉各接一套 `no-data-text`（浏览口径「换个关键词」/ 可绑定口径「先去建款」—— 下一步动作不一样） |
+| **TDD 红侧** | 临时拆掉表格 `empty-text` 接线、并把浏览口径的 `no-data-text` 换成 assignable ⇒ **2 条接线用例红**；恢复后 7 passed |
+| **B3 取消** | 实测浏览口径与可绑定口径**集合完全相同**（生产 284 = 284，差集 0）⇒ 无适用对象，不为不存在的情况写界面；且加 `biz_status` 会破坏既有契约 `set(payload) == {"spu","spu_name"}` |
+
+### 批次 C1：同一组接口被挂载两次（提交 `db57034d`）
+
+| 项 | 内容 |
+|---|---|
+| **实测（改前）** | development / collector 各 **24 条 (路径, 方法) 重复注册、涉及 17 条路径**；production **0 条**（**production 根本不注册 collection 域**）；FastAPI 生成 OpenAPI 时为每条重复路由打 `UserWarning: Duplicate Operation ID` |
+| **修法** | 账号类 router（主账号 / 店铺账号 / 店铺别名 / 平台店铺ID发现 / 仓名别名）的**唯一挂载点**定在 **platform 域**，删掉 collection 侧那 5 条 include。⚠️ **不能反过来删 platform 侧的** —— production 不注册 collection 域 ⇒ 账号类接口在生产上只由 platform 提供 |
+| **改后实测** | 四种模式（development / collector / collector+local / production）重复条目**全部归零**（759 → 735、409 → 385） |
+| **守护** | 新建 `backend/tests/test_router_unique_mount_points.py`：① 四种模式都不许有重复 (路径, 方法)；② production/dev 下账号类接口依然存在（防「去重复」变「删接口」）；③ 这 5 组端点函数各自只注册一次；④ 生成 OpenAPI 时不许出现 `Duplicate Operation ID` 警告（**这才是重复挂载唯一可观测的信号** —— schema 里 operation_id 反而唯一，只断言 schema 会得到一条「写完就绿」的假测试） |
+| **TDD 红侧** | 把 5 条 include 临时放回 collection 侧 ⇒ **6 条守护用例红**；恢复后 19 passed |
+
+### 批次 C2：公开仓库的密钥与店铺账号密文（提交 `c31f77e3`）
+
+| 项 | 内容 |
+|---|---|
+| **取证** | 只读、全程 SHA-256 比对、不打印任何值。**现役密钥未泄露**（生产 `.env` 与 4 个容器的 5 个敏感值与仓库旧值逐项全不同；旧密钥解不开生产库里的账号密码）。**但公开的是已废弃的旧密钥**，且 —— ⚠️ **密文与解密密钥同时公开**：仓库同时跟踪 `accounts.enc`（Fernet 密文）与 `.env.cleaned`（带 `ACCOUNT_ENCRYPTION_KEY`）⇒ 实测**可用公开仓库里的密钥直接解开** `accounts.enc`，解出 **15 个店铺账号**（Amazon / Shopee / Tiktok / 妙手ERP / miaoshou），**每个都有非空密码**，还带邮箱密码与手机号 |
+| **处置** | ① 取消跟踪 4 个文件（`git rm --cached`，本地保留）；② `.gitignore` 补 `.env.*`（含 `.env.limiter` 例外）/ `*.passwords.txt` / `*.enc`；③ `is_blocked()` 从「逐个文件名」改成**按规则**拦（`.env` 家族 / 疑似敏感名 + 数据类扩展名 / 加密与密钥后缀），敏感名规则**不误伤**文档与脚本；④ 新建 `tests/test_secret_files_not_tracked.py` 并进 CI 根契约清单；⑤ `docs/guides/ENV_FILE_CONTRACT.md` 增「Repository Tracking Policy」 |
+| **TDD 红侧** | 旧版 `is_blocked()` 对 6 个泄露文件**漏放行 5 个**；取消跟踪前 HEAD 里 4 个文件仍在跟踪 ⇒ 新守护在旧状态下必红 |
+| **历史不可撤回** | `git filter-repo` 会作废全部已发布 tag（含 `v7.24.0`）⇒ **本会话明确不做** |
+| **仍需拍板** | 轮换那 15 个店铺账号密码、删除生产机上的旧密钥副本、确认旧密钥在已下线环境是否还活着 —— 已写进 `docs/superpowers/plans/STATUS.md` |
+
+### 回归结果（批次 A/B/C 全部落地后）
+
+| 范围 | 结果 |
+|---|---|
+| 后端全量 `backend/tests` | **4593 passed / 7 skipped / 0 failed**（基线 4579 + 14） |
+| 前端 `frontend/tests` | **207 passed / 0 failed** |
+| 根 `tests/` | 758（基线）+ 本批新增 35 例密钥守护 |
+| API 契约门禁 / 前端 API 方法门禁 | 0 错、0 缺失（基线一致） |
+
