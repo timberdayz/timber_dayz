@@ -596,6 +596,18 @@ Expected order:
    - `GET /api/permissions` no longer lists `finance-reports`, `fx-management`,
      `fiscal-periods`, `store-management`, `store-analytics`
    - the retired pages are absent from the menu and their routes no longer resolve
+10. Confirm the API contract gate actually looked at something (2026-11-13+):
+   - in the `Validate API Contracts (Release Gate)` step, the report must show
+     `本次验证: N 个文件` with **N > 0** whenever the release touched a router
+     file (`backend/domains/<domain>/routers/*.py` or `backend/routers/*.py`)
+   - `本次验证: 0 个文件（…跳过验证）` means the gate matched **nothing**. That is
+     not a pass — it is a no-op, and it is exactly what the gate used to report on
+     every release (its scan scope stopped at the legacy `backend/routers/`
+     shim layer, so real router changes never matched). Treat it as a red flag.
+   - the full detail is archived as the CI artifact
+     `temp/validation_api_contracts.txt`
+   - the gate only blocks the release on **errors**; the `F 真静默` count is a
+     warning, so a non-zero silent count does not block a release
 
 ## Field-Measured Release Rules (2026-11-10 / 2026-11-11)
 

@@ -137,7 +137,10 @@ jobs:
               head -10 temp/changed_files.txt | sed 's/^/  - /'
               
               # 鏄剧ず鏀瑰姩鐨?router 鏂囦欢鏁伴噺
-              ROUTER_COUNT=$(grep -c "^backend/routers/.*\.py$" temp/changed_files.txt || echo "0")
+              # [FIX 2026-11-13] 旧前缀只认 backend/routers/（旧门牌号层），
+              # 而真正定义路由的文件在 backend/domains/<域>/routers/ 下 —— 
+              # 计数永远打印 0，与实际体检范围不符。改为覆盖两处目录。
+              ROUTER_COUNT=$(grep -cE "^backend/(domains/[^/]+/routers|routers)/.*\.py$" temp/changed_files.txt || echo "0")
               echo "[INFO] Changed router files: ${ROUTER_COUNT}"
             else
               echo "[INFO] No changed files detected; the tag may point to an existing commit."

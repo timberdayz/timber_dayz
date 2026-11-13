@@ -387,7 +387,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.database import get_async_db
-from backend.routers.auth import get_current_user
+from backend.dependencies.auth import get_current_user
 from backend.schemas.my_feature import (
     ItemCreate,
     ItemListResponse,
@@ -714,7 +714,7 @@ async def async_client(sqlite_session: AsyncSession) -> AsyncGenerator[AsyncClie
 @pytest.fixture
 def auth_headers() -> dict[str, str]:
     """Mock JWT auth headers for testing (skip real token validation)"""
-    from backend.routers.auth import get_current_user
+    from backend.dependencies.auth import get_current_user
 
     from backend.main import app
 
@@ -1074,7 +1074,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from backend.main import app
-from backend.routers import hr_employee
+from backend.domains.business.routers import hr_employee
 
 
 class FakeHRIncomeService:
