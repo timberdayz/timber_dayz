@@ -70,12 +70,16 @@ Live deployment verified:
   补建候选视图；`test_granularity_alignment_sql.py` 补一条可唯一归属 `shop-a` 的
   `shop_accounts` 行（计划口径「候选唯一才归属」，候选 0 → `unknown`）。
 - 结论：这三个文件由 8 failed 转为全绿。
-- ⚠ `test_granularity_alignment_sql.py` 仍有 **2 条失败**（与本分支无关）：
-  `test_shop_month_kpi_does_not_fallback_to_daily`（断言月度薄封装里含
-  `fact_shopee_orders_monthly`，但薄封装早已改为只读 MV）与
-  `test_annual_summary_shop_month_does_not_force_missing_costs_to_zero`
-  （`sql/mart/annual_summary_shop_month.sql` 已不存在）。
-  已在 main 基线 worktree（`25aeba29`）逐条对照：**main 上同样失败**，属既有失败。
+- ✅ **那条「仍有 2 条失败」的记录已过期（2026-11-13 复核）**：
+  本地实测 `backend/tests/data_pipeline/test_granularity_alignment_sql.py` → **7 passed / 0 failed**。
+  两条各有各的归宿，不是被忽略：
+  `test_shop_month_kpi_does_not_fallback_to_daily` 的断言随薄封装改读 MV 而**修复**；
+  `test_annual_summary_shop_month_does_not_force_missing_costs_to_zero` 随
+  `sql/mart/annual_summary_shop_month.sql` 退役而**用例被删**（提交 `f34eee24` 退役清理时一并处理）。
+- ⚠ **但新的覆盖缺口由此暴露**：`backend/tests/data_pipeline/`（130 个文件）**不在 CI 覆盖范围内**
+  ——CI 只跑「改动文件 + `tests/unit` + 根 `tests/` 无 DB 子集」，
+  `deploy-production.yml` 只额外跑 3 个库存文件做发布门禁。
+  ⇒ 上面这 7 条绿是**本地跑出来的，不是 CI 守住的**。
 
 ### 发布（v7.12.6，2026-11-02）—— 已上线
 
@@ -1041,6 +1045,13 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
   ⇒ **第二批补的日志已被门禁确认生效**。
 - 发版提交 CI 三线全绿（CI Pipeline / Validate Data Flow / Docker Build and Push）；
   本地 `scripts/verify_release_local.py --skip-build` exit=0。
+- **回归补跑**（本会话前两批只跑了 `backend/tests`，这两个目录当轮没跑）：
+  - 根 `tests/` → **746 passed / 5 skipped / 0 failed**（265s）；
+    上一版基线 738 passed / 5 skipped / 0 failed，**+8** 是后续批次新增的守护用例。
+  - `backend/tests/data_pipeline/test_granularity_alignment_sql.py` → **7 passed / 0 failed**
+    ⇒ 早先记的「仍有 2 条既有失败」**已过期**，两条各有归宿：
+    一条随薄封装改读 MV 而**修复**，一条随 `sql/mart/annual_summary_shop_month.sql`
+    退役而**用例被删**（提交 `f34eee24` 退役清理时一并处理）。
 - 业务概念**零变化**：商品/款/货/归属/各域概念、对外接口、数据库结构全部原样；
   只变「谁来体检」与「新代码写哪条路径」。
 
@@ -1051,6 +1062,7 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
 | ~~**发版窗口**~~ | **已完成**：v7.24.0 已上生产并独立验收（run `43372513282`、tag 对象 `802a08ab`、双端一致） |
 | 47 处真静默 | 分批清理（跨 4 域 27 文件，pre-launch 要求拆） |
 | 74 个带 BOM 的路由文件 | 单独一批清理（本批已用 `utf-8-sig` 兜住，不阻塞） |
+| **`backend/tests/data_pipeline/` 不在 CI 覆盖内** | 130 个文件只在「本次改动到它们」时才跑 ⇒ 口径漂移可能长期潜伏（同 `tests/unit` 曾经的情况，2026-11-10 实测）。本地抽查 `test_granularity_alignment_sql.py` 全绿（7 passed），但**CI 守不住** |
 | fail-closed（计数失败即拒删） | 需先定义「引用数未知」状态，**建议随 M5.2 硬删一起做** |
 | 款 → 货的层级视图（IA） | **产品演进**，需先定 IA 再动手（见 V2 债文档 §4） |
 
