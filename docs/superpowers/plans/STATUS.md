@@ -1048,12 +1048,33 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
 - **回归补跑**（本会话前两批只跑了 `backend/tests`，这两个目录当轮没跑）：
   - 根 `tests/` → **746 passed / 5 skipped / 0 failed**（265s）；
     上一版基线 738 passed / 5 skipped / 0 failed，**+8** 是后续批次新增的守护用例。
-  - `backend/tests/data_pipeline/test_granularity_alignment_sql.py` → **7 passed / 0 failed**
-    ⇒ 早先记的「仍有 2 条既有失败」**已过期**，两条各有归宿：
+  - `backend/tests/data_pipeline/`（130 个文件）→ **1235 passed / 1 skipped / 0 failed**（129.6s）
+    ⇒ 早先记的「仍有 2 条既有失败」**已过期**，
+    `test_granularity_alignment_sql.py` 现为 **7 passed / 0 failed**，两条各有归宿：
     一条随薄封装改读 MV 而**修复**，一条随 `sql/mart/annual_summary_shop_month.sql`
     退役而**用例被删**（提交 `f34eee24` 退役清理时一并处理）。
 - 业务概念**零变化**：商品/款/货/归属/各域概念、对外接口、数据库结构全部原样；
   只变「谁来体检」与「新代码写哪条路径」。
+
+### 补跑时顺带挖出来的一个真问题：同一组接口被挂载了两次
+
+- **现象**：`backend/tests/data_pipeline/` 全量补跑（**1235 passed / 1 skipped / 0 failed**）
+  时，FastAPI 打出成片 `Duplicate Operation ID` 警告。
+- **根因**：`backend/domains/collection/routes.py` 与 `backend/domains/platform/routes.py`
+  **各自都 include 了同一批 5 个 router 对象**
+  （`main_accounts` / `shop_accounts` / `shop_account_aliases` /
+  `platform_shop_discoveries` / `warehouse_name_aliases`），
+  且 prefix（`/api`）与 tags 完全相同 ⇒ 同一份实现挂了两遍。
+- **实测**（直接数 `app.routes`）：共 **735** 个「方法+路径」条目，
+  其中 **24 条被注册两次，涉及 17 个路径**
+  （如 `/api/shop-accounts`、`/api/shop-account-aliases`、`/api/warehouse-name-aliases`、
+  `/api/main-accounts`、`/api/platform-shop-discoveries`）。
+- **影响**：**今天没有功能故障** —— 挂的是同一个 handler 对象，请求命中先注册的那份，行为一致。
+  但 ① OpenAPI 里出现重复 `operation_id`（客户端生成器可能重复出方法）；
+  ② 违反律 1：同一组接口有**两个挂载点**，将来一处改了 prefix/tags 就会裂成两条不同的路由。
+- **为什么门禁没抓到**：API 契约门禁查的是「路由文件里有没有按规范写 except 块」，
+  **不查「同一个 router 被挂了几次」** ⇒ 这是门禁的下一个盲区。
+  （旧垫片 `backend/routers/*` 已确认**不参与挂载**，只是 import 兼容层，不是本问题的来源。）
 
 ### 本会话遗留（已拍板，另排批次）
 
@@ -1062,7 +1083,8 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
 | ~~**发版窗口**~~ | **已完成**：v7.24.0 已上生产并独立验收（run `43372513282`、tag 对象 `802a08ab`、双端一致） |
 | 47 处真静默 | 分批清理（跨 4 域 27 文件，pre-launch 要求拆） |
 | 74 个带 BOM 的路由文件 | 单独一批清理（本批已用 `utf-8-sig` 兜住，不阻塞） |
-| **`backend/tests/data_pipeline/` 不在 CI 覆盖内** | 130 个文件只在「本次改动到它们」时才跑 ⇒ 口径漂移可能长期潜伏（同 `tests/unit` 曾经的情况，2026-11-10 实测）。本地抽查 `test_granularity_alignment_sql.py` 全绿（7 passed），但**CI 守不住** |
+| **`backend/tests/data_pipeline/` 不在 CI 覆盖内** | 130 个文件只在「本次改动到它们」时才跑 ⇒ 口径漂移可能长期潜伏（同 `tests/unit` 曾经的情况，2026-11-10 实测）。本地实测 **1235 passed / 1 skipped / 0 failed**（130 文件全量），但**CI 守不住** |
+| **同一组接口被挂载两次** | `collection/routes.py` 与 `platform/routes.py` 都 include 同一批 5 个 router ⇒ **17 个路径 / 24 个条目双注册**。今天无功能故障，但 OpenAPI 重复 `operation_id`，且门禁查不出来 ⇒ 建议加「router 唯一挂载点」守护用例 |
 | fail-closed（计数失败即拒删） | 需先定义「引用数未知」状态，**建议随 M5.2 硬删一起做** |
 | 款 → 货的层级视图（IA） | **产品演进**，需先定 IA 再动手（见 V2 债文档 §4） |
 
