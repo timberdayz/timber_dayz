@@ -133,19 +133,35 @@
 
 | 范围 | 命令 | 结果 |
 |---|---|---|
-| 设备隔离契约 | `python -m pytest tests/test_account_device_isolation_contract.py -q --no-header` | **23 passed** |
+| 设备隔离契约 | `python -m pytest tests/test_account_device_isolation_contract.py -q --no-header` | **25 passed** |
 | 就绪契约 | `python -m pytest tests/test_account_readiness_contract.py -q --no-header` | **11 passed** |
+| 代理来源契约 | `python -m pytest tests/test_account_proxy_source_contract.py -q --no-header` | **4 passed** |
 | 采集相关回归 | `backend/tests/test_collection_runtime_session.py` + `test_collection_executor_session_alignment.py` + `test_collection_executor_reused_session_scope.py` + `test_account_proxy_config.py` + `test_collection_session_reuse_contract.py` | **174 passed** |
 | 面板与运行时回归 | `tests/test_pwcli_inspection_panel.py` + `tests/test_pwcli_daily_inspection.py` + `backend/tests/test_pwcli_inspection_panel_reporting.py` + 上述契约文件 | **76 passed** |
+| 后端全量 | `python -m pytest backend/tests -q --no-header` | **5974 passed / 8 skipped** |
+| 根 tests 全量 | `python -m pytest tests -q --no-header` | **837 passed / 5 skipped** |
+| 前端 | `frontend/scripts` 100 个 + `frontend/tests` 20 个 `.test.mjs` | 全绿 |
 
-**CI 根契约清单**：`ci.yml` 的 "Run root contract tests (no DB)" 步骤新增两条
+**CI 根契约清单**：`ci.yml` 的 "Run root contract tests (no DB)" 步骤新增三条
 
 ```
 tests/test_account_device_isolation_contract.py \
 tests/test_account_readiness_contract.py \
+tests/test_account_proxy_source_contract.py \
 ```
 
-⇒ 根契约清单条目 57 → **59**；`scripts/audit_guard_tests.py` 分类确认两条均为 **A 类（CI 硬门禁）**。
+⇒ 根契约清单条目 57 → **60**；`scripts/audit_guard_tests.py` 分类确认三条均为 **A 类（CI 硬门禁）**。
+
+> ⚠️ **代理契约为什么是纯同步的独立文件**（2026-11-14 实测，CI run 43485663421）：
+> `backend/tests/test_account_proxy_config.py` 含 9 个 **async** 用例。CI 钉
+> `pytest==7.4.3` / `pytest-asyncio==0.21.1`，而 `backend/tests/conftest.py` 用
+> `@pytest.fixture(scope="session")` 覆盖了 `event_loop`（pytest-asyncio 1.x 会忽略它）。
+> 把它放进根契约清单 ⇒ 它排在 `backend/tests/test_celery_dispatch_event_loop_isolation.py`
+> 之后 ⇒ 拿到**已关闭**的 session 事件循环 ⇒ 9 个用例报
+> `RuntimeError: Event loop is closed`。
+> ⇒ 断言移进纯同步的新文件；异步用例留在原文件，由**全量回归**覆盖（CI 的
+> "Run pytest (if test files exist)" 步骤单独跑它是绿的）。
+> **根因未修** ⇒ 已并入 `STATUS.md`「当前未结」#8 记账到 V2。
 
 ---
 

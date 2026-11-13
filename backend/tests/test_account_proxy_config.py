@@ -119,64 +119,6 @@ def test_account_loader_exposes_proxy_config():
     assert account["proxy_region"] == "sg"
 
 
-def test_main_account_level_proxy_is_used():
-    """R8.4：代理权威位在**主账号**级 —— 出口绑在登录身份上。"""
-    service = _make_service()
-
-    account = service._build_account_dict(
-        _make_main_account(
-            {
-                "proxy": {
-                    "enabled": True,
-                    "server": "http://10.0.0.1:8080",
-                    "region": "sg",
-                }
-            }
-        ),
-        _make_shop_account(None),
-        {"orders": True},
-    )
-
-    assert account is not None
-    assert account["proxy_enabled"] is True
-    assert account["proxy_server"] == "http://10.0.0.1:8080"
-    assert account["proxy_region"] == "sg"
-
-
-def test_main_account_level_proxy_takes_priority_over_shop_level():
-    """两级都配了 ⇒ **主账号级赢**（一个登录身份只能有一个出口）。"""
-    service = _make_service()
-
-    account = service._build_account_dict(
-        _make_main_account(
-            {"proxy": {"enabled": True, "server": "http://10.0.0.1:8080"}}
-        ),
-        _make_shop_account(
-            {"proxy": {"enabled": True, "server": "http://10.0.0.9:8080"}}
-        ),
-        {"orders": True},
-    )
-
-    assert account is not None
-    assert account["proxy_server"] == "http://10.0.0.1:8080"
-
-
-def test_shop_level_proxy_is_used_as_fallback():
-    """主账号级没配 ⇒ 回退到店铺级（历史数据仍在店铺侧）。"""
-    service = _make_service()
-
-    account = service._build_account_dict(
-        _make_main_account(None),
-        _make_shop_account(
-            {"proxy": {"enabled": True, "server": "http://10.0.0.9:8080"}}
-        ),
-        {"orders": True},
-    )
-
-    assert account is not None
-    assert account["proxy_server"] == "http://10.0.0.9:8080"
-
-
 def test_account_loader_tolerates_missing_proxy_config():
     """代理配置缺失（extra_config 为 None / 没有 proxy 子字典）时安全兜底。"""
     service = _make_service()
@@ -209,7 +151,9 @@ def test_account_loader_keeps_legacy_proxy_required_flag():
 
     enabled_account = service._build_account_dict(
         _make_main_account(),
-        _make_shop_account({"proxy": {"enabled": True, "server": "http://10.0.0.9:8080"}}),
+        _make_shop_account(
+            {"proxy": {"enabled": True, "server": "http://10.0.0.9:8080"}}
+        ),
         {"orders": True},
     )
     assert enabled_account is not None
@@ -228,10 +172,19 @@ def test_account_loader_keeps_legacy_proxy_required_flag():
         ({"proxy": ["a"]}, (False, "", "")),
         ({"proxy": {"enabled": True, "server": None}}, (True, "", "")),
         ({"proxy": {"enabled": True, "region": "   "}}, (True, "", "")),
-        ({"proxy": {"enabled": True, "server": " http://h:1 "}}, (True, "http://h:1", "")),
-        ({"proxy": {"enabled": "false", "server": "http://h:1"}}, (False, "http://h:1", "")),
+        (
+            {"proxy": {"enabled": True, "server": " http://h:1 "}},
+            (True, "http://h:1", ""),
+        ),
+        (
+            {"proxy": {"enabled": "false", "server": "http://h:1"}},
+            (False, "http://h:1", ""),
+        ),
         ({"proxy": {"enabled": "true"}}, (True, "", "")),
-        ({"proxy": {"enabled": False, "server": "http://h:1"}}, (False, "http://h:1", "")),
+        (
+            {"proxy": {"enabled": False, "server": "http://h:1"}},
+            (False, "http://h:1", ""),
+        ),
         ({"proxy": {"server": {"host": "h"}}}, (False, "", "")),  # 非标量 server
         # extra_config 本身类型不对：本函数必须安全兜底、不抛异常
         ("not-a-dict", (False, "", "")),
@@ -447,7 +400,6 @@ def test_legacy_proxy_chain_guard_detects_import_from_module_path():
     assert "get_playwright_proxy_config" in _collect_referenced_names(
         "manager.get_playwright_proxy_config(account)\n"
     )
-
 
 
 @pytest.mark.parametrize(
@@ -938,9 +890,7 @@ def test_strip_account_proxy_credentials_removes_all_credentials():
     strip_account_proxy_credentials(source)
     assert source["proxy_username"] == "u"
     # 没有代理配置的账号：原样返回
-    assert strip_account_proxy_credentials({"account_id": "x"}) == {
-        "account_id": "x"
-    }
+    assert strip_account_proxy_credentials({"account_id": "x"}) == {"account_id": "x"}
     # 拆不出 server 的畸形串：不得把凭据留在 proxy_server 里
     malformed = strip_account_proxy_credentials({"proxy_server": "user:pass"})
     assert "proxy_server" not in malformed
@@ -961,12 +911,16 @@ def test_strip_account_proxy_credentials_drops_proxy_server_without_host():
         {"proxy_server": "user:pass"}
     )
     # 主机还在的串：保留剥掉凭据后的地址
-    assert strip_account_proxy_credentials(
-        {"proxy_server": "http://embedded:embeddedpass@h:8080"}
-    )["proxy_server"] == "http://h:8080"
-    assert strip_account_proxy_credentials(
-        {"proxy_server": "http://h:"}
-    )["proxy_server"] == "http://h:"
+    assert (
+        strip_account_proxy_credentials(
+            {"proxy_server": "http://embedded:embeddedpass@h:8080"}
+        )["proxy_server"]
+        == "http://h:8080"
+    )
+    assert (
+        strip_account_proxy_credentials({"proxy_server": "http://h:"})["proxy_server"]
+        == "http://h:"
+    )
 
 
 def test_runtime_account_drops_proxy_credentials():
@@ -1036,9 +990,7 @@ async def test_account_proxy_reaches_browser_context_in_storage_state_path(monke
     monkeypatch.setattr(
         "modules.utils.sessions.device_fingerprint.DeviceFingerprintManager."
         "get_or_create_fingerprint",
-        lambda self, platform, account_id, account_config=None: dict(
-            _FAKE_FINGERPRINT
-        ),
+        lambda self, platform, account_id, account_config=None: dict(_FAKE_FINGERPRINT),
     )
 
     await runtime_session.open_storage_state_runtime_bundle(
@@ -1129,7 +1081,9 @@ async def test_runtime_context_options_fingerprint_failure_fallback_keeps_accoun
     assert context_options["proxy"] == proxy
 
 
-async def test_account_proxy_reaches_browser_context_in_parallel_fanout(monkeypatch, tmp_path):
+async def test_account_proxy_reaches_browser_context_in_parallel_fanout(
+    monkeypatch, tmp_path
+):
     """P1-3：并行扇出的每个 context 都必须带账号代理。
 
     这条同时钉住 executor 侧的兜底解析（``proxy = proxy or resolve_account_proxy(account)``）：
@@ -1205,13 +1159,13 @@ async def test_account_proxy_reaches_browser_context_in_parallel_fanout(monkeypa
     monkeypatch.setattr(
         "modules.utils.sessions.device_fingerprint.DeviceFingerprintManager."
         "get_or_create_fingerprint",
-        lambda self, platform, account_id, account_config=None: dict(
-            _FAKE_FINGERPRINT
-        ),
+        lambda self, platform, account_id, account_config=None: dict(_FAKE_FINGERPRINT),
     )
     monkeypatch.setattr(executor, "_open_runtime_bundle", _fake_open_runtime_bundle)
     manifest_component = AsyncMock(
-        return_value=type("R", (), {"success": True, "file_path": None, "message": ""})()
+        return_value=type(
+            "R", (), {"success": True, "file_path": None, "message": ""}
+        )()
     )
     monkeypatch.setattr(
         executor,
@@ -1445,4 +1399,3 @@ async def test_headful_login_fallback_receives_resolved_proxy_from_caller(monkey
 
     fallback.assert_awaited_once()
     assert fallback.await_args.kwargs["proxy"] == proxy
-

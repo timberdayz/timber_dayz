@@ -23,7 +23,7 @@
 | 5 | `modules/apps/web_interface_manager` 健康检查持续失败（依赖的 `frontend_streamlit` 目录不存在） | 真实缺陷 | 批次 F-1 揭露；待修（本批未擅自改业务代码） | 本文件「批次 F」节 |
 | 6 | `mypy` 目前**没有任何门禁**（440 条动态 ORM 基类误报需先分层/豁免才可能升门禁） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
 | 7 | 采集组件 lint 仍是告警模式（范围已收窄，强度未提升） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
-| 8 | legacy `modules/apps/{account_manager,collection_center}/contract_tests.py` 不再由 CI 执行 | 覆盖缺口 | 待决定是否把断言迁进 pytest | 本文件「批次 F」节 |
+| 8 | 覆盖缺口两项：① legacy `modules/apps/{account_manager,collection_center}/contract_tests.py` 不再由 CI 执行；② **`backend/tests/` 下的 async 用例不能混进 CI 根契约清单**（CI 钉 `pytest==7.4.3` / `pytest-asyncio==0.21.1`，而 `backend/tests/conftest.py` 覆盖了 session 级 `event_loop`（1.x 忽略它）⇒ 混跑时排在 `test_celery_dispatch_event_loop_isolation.py` 之后的 async 用例拿到**已关闭**的循环，报 `RuntimeError: Event loop is closed`） | 覆盖缺口 | ①待决定是否把断言迁进 pytest；②本轮**已规避**（契约断言放进纯同步的 `tests/test_account_proxy_source_contract.py`），**根因未修** ⇒ 记账到 V2（统一事件循环策略，或 CI 升 pytest-asyncio 1.x 并同步改 conftest） | 本文件「批次 F」节 + `tests/test_account_proxy_source_contract.py` 文件头 |
 | 9 | **221 个守护从不主动执行**（C 类：不在任何 CI 清单、也没有被别的文件引用 ⇒ 只在有人恰好改了该文件时才跑） | 覆盖缺口 | 待拍板是否分批提升进 CI 清单（会拉长流水线，属加固方向） | 本文件「批次 F」节 |
 | 10 | `CHANGELOG.md:952` 写「新增三个 CI 坑」，原标题写「两个」（内容确实是 3 条） | 文档不一致 | 已在本文件修正标题；**已发布的 CHANGELOG 不改** | 本文件「新增三个 CI 坑」节 |
 
@@ -144,8 +144,14 @@ Walter 澄清后的业务目标是：
 | 采集相关 5 个测试文件 | **174 passed** |
 | 面板与运行时回归 | **76 passed** |
 
-两条新守护**已进 CI 根契约清单**（`ci.yml` 根契约条目 57 → **59**），
+三份新守护**已进 CI 根契约清单**（`ci.yml` 根契约条目 57 → **60**），
 `scripts/audit_guard_tests.py` 分类确认均为 **A 类（CI 硬门禁）**。
+
+⚠️ 代理契约**刻意做成纯同步文件**（`tests/test_account_proxy_source_contract.py`）：
+`backend/tests/test_account_proxy_config.py` 含 9 个 async 用例，在 CI 钉的
+`pytest==7.4.3` / `pytest-asyncio==0.21.1` 下混进根契约清单会拿到**已关闭**的 session
+事件循环（`RuntimeError: Event loop is closed`，2026-11-14 实测 CI run 43485663421）。
+根因未修，已并入「当前未结」#8 记账到 V2。
 
 ### 已知缺口（**未结，必须留档**）
 

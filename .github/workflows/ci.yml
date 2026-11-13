@@ -308,12 +308,21 @@ jobs:
           #   **零提示** —— 运维只能靠猜。加了提示就得保证提示不会骗人：
           #   三处判定必须是同一份实现，否则会出现「面板说已首登、采集说没登录」。
           #
-          # 2026-11-13 第九轮扩：补 1 个账号级代理契约文件（纯源码，不碰数据库）：
-          #   test_account_proxy_config.py —— 代理**权威位在主账号级**、店铺级仅回退
+          # 2026-11-13 第九轮扩：补 1 个代理**来源位**契约文件（纯源码、纯同步、不碰数据库）：
+          #   test_account_proxy_source_contract.py —— 代理权威位在**主账号级**、店铺级仅回退
           #     （出口绑在登录身份上 ⇒ 一个登录身份只有一个出口 ⇒ 平台无法把账号
           #       关联成「同一个出口的账号矩阵」；巡店与采集必须用同一个来源）
           # 为什么要补：代理权威位刚上移到主账号级（v7.27.0），**此前没有任何用例
           #   覆盖这个优先级** ⇒ 有人把它改回店铺级，流水线照样全绿。
+          #
+          #   ⚠️ 为什么**不**把 backend/tests/test_account_proxy_config.py 放进本清单：
+          #   那个文件有 9 个 **async** 用例，而 backend/tests/conftest.py 用
+          #   `@pytest.fixture(scope="session")` 覆盖了 event_loop —— 在 CI 钉的
+          #   pytest==7.4.3 / pytest-asyncio==0.21.1 下这个覆盖**会生效**
+          #   （1.x 忽略它）⇒ 混跑时它会拿到**已关闭**的 session 事件循环，
+          #   9 个用例报 `RuntimeError: Event loop is closed`
+          #   （2026-11-14 实测，CI run 43485663421）。
+          #   ⇒ 契约断言放进**纯同步**的新文件，异步用例留在原文件由全量回归覆盖。
           #
           # 2026-11-10 第三轮扩：又补进 30 个文件。怎么确认它们不碰数据库的 ——
           # 把 TEST_DB_PORT 指向不可达端口 1、同时把 DATABASE_URL 指向不可达地址
@@ -380,7 +389,7 @@ jobs:
             tests/test_verify_remote_deploy_contracts.py \
             tests/test_account_device_isolation_contract.py \
             tests/test_account_readiness_contract.py \
-            backend/tests/test_account_proxy_config.py
+            tests/test_account_proxy_source_contract.py
 
       - name: Run performance regression entry
         if: matrix.python-version == '3.11'

@@ -25,7 +25,7 @@
 | 3 | `machine_id` | 6 个 profile **全部相同** `11608241`（机器级共享） | 按 account_id 确定性改写，**每账号独立** |
 | 4 | 出口 IP | 权威位在店铺级；巡店与采集各自读 | 权威位上移到**主账号级**，巡店与采集同源（**资源未到位**） |
 | 5 | 新增账号接入 | 无前置校验、不知是否已首登、白名单外账号**静默消失** | 有**前置体检 + 面板就绪徽标 + 白名单跳过原因** |
-| 6 | 这条底线会不会被改坏 | 无守护 | 34 条契约测试，**已进 CI 根契约清单** |
+| 6 | 这条底线会不会被改坏 | 无守护 | 40 条契约测试，**已进 CI 根契约清单** |
 
 ---
 
@@ -130,8 +130,14 @@
 
 守护入口：
 
-- `tests/test_account_device_isolation_contract.py`（23 条）—— 画像与隔离
+- `tests/test_account_device_isolation_contract.py`（25 条）—— 画像与隔离
 - `tests/test_account_readiness_contract.py`（11 条）—— 就绪判据同源与可见性
+- `tests/test_account_proxy_source_contract.py`（4 条）—— 代理权威位在主账号级
 
-两者**已进 CI 根契约清单**（`ci.yml` 的 "Run root contract tests (no DB)" 步骤）。
+三者**已进 CI 根契约清单**（`ci.yml` 的 "Run root contract tests (no DB)" 步骤，57 → 60 条）。
 不进清单的守护 = 没人主动执行的守护（仓库历史上有 221 个这种）。
+
+> ⚠️ 代理契约**刻意做成纯同步文件**：`backend/tests/test_account_proxy_config.py` 含 9 个 async 用例，
+> 在 CI 钉的 `pytest==7.4.3` / `pytest-asyncio==0.21.1` 下混进根契约清单会拿到**已关闭**的
+> session 事件循环（`RuntimeError: Event loop is closed`）⇒ 断言移进纯同步新文件，
+> 异步用例留在原文件由全量回归覆盖；根因记账到 V2（见 `STATUS.md`「当前未结」#8）。

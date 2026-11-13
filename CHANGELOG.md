@@ -83,9 +83,13 @@
 
 - 新增 `modules/utils/sessions/account_readiness.py`（判据唯一真源）
 - 新增 `modules/utils/sessions/account_device_profile.py`（画像与 machine_id 唯一真源）
-- 新增守护 **34 条**：`test_account_device_isolation_contract.py`（23）+ `test_account_readiness_contract.py`（11），
-  **已进 CI 根契约清单**（根契约条目 57 → **59**）
+- 新增守护 **38 条**：`test_account_device_isolation_contract.py`（25）+ `test_account_readiness_contract.py`（11）
+  + `test_account_proxy_source_contract.py`（4，其中 3 条是本轮补的「主账号级代理优先」断言）；
+- 三份新守护**全部进 CI 根契约清单**（根契约条目 57 → **60**）
   ⇒ 这条底线不会被一次改动悄悄改坏（仓库历史上有 **221 个守护从不主动执行**）
+- ⚠️ 代理契约**刻意做成纯同步文件**：`backend/tests/test_account_proxy_config.py` 含 9 个 async 用例，
+  在 CI 钉的 `pytest==7.4.3` / `pytest-asyncio==0.21.1` 下混进根契约清单会拿到**已关闭**的 session
+  事件循环（`RuntimeError: Event loop is closed`）⇒ 断言放新文件，异步用例留在原文件由全量回归覆盖
 
 规范同步：`COLLECTION_SESSION_LIFECYCLE.md` 的 **R8** 整节改写为
 「账号设备画像（账号间不可关联）」含 R8.0–R8.4，验收项 H 改写；
