@@ -40,7 +40,9 @@ def _rows() -> list[MainAccountRow]:
     ]
 
 
-def _write_profile(profiles_root: Path, platform: str, account_id: str, *, logged_in: bool) -> Path:
+def _write_profile(
+    profiles_root: Path, platform: str, account_id: str, *, logged_in: bool
+) -> Path:
     """按系统唯一命名规则（规则 B）造一个 profile 目录。"""
     safe_platform = "".join(c for c in platform.lower() if c.isalnum() or c in "_-")
     safe_account = "".join(c for c in account_id if c.isalnum() or c in "_-")
@@ -88,7 +90,9 @@ def test_build_profile_state_detects_machine_id_isolation(tmp_path: Path) -> Non
     assert shared["expected_machine_id"] == derive_machine_id("shopee", "acc")
 
     (profile_dir / "Local State").write_text(
-        json.dumps({"user_experience_metrics": {"machine_id": shared["expected_machine_id"]}}),
+        json.dumps(
+            {"user_experience_metrics": {"machine_id": shared["expected_machine_id"]}}
+        ),
         encoding="utf-8",
     )
     isolated = build_profile_state(profile_dir, platform="shopee", account_id="acc")
@@ -96,7 +100,9 @@ def test_build_profile_state_detects_machine_id_isolation(tmp_path: Path) -> Non
     assert isolated["machine_id"] == shared["expected_machine_id"]
 
 
-def test_build_account_readiness_uses_session_manager_naming_rule(tmp_path: Path) -> None:
+def test_build_account_readiness_uses_session_manager_naming_rule(
+    tmp_path: Path,
+) -> None:
     """只换根目录，**不换命名规则** —— 规则仍由 SessionManager 提供。"""
     profiles_root = tmp_path / "profiles"
     _write_profile(profiles_root, "shopee", "hongxikeji:main", logged_in=True)
@@ -120,14 +126,13 @@ def test_build_account_readiness_uses_session_manager_naming_rule(tmp_path: Path
 def test_collection_side_delegates_to_shared_readiness_module() -> None:
     """采集侧的登录态判据必须**委托**共享模块，不得各写一份。"""
     source = (
-        REPO_ROOT
-        / "modules"
-        / "apps"
-        / "collection_center"
-        / "runtime_session.py"
+        REPO_ROOT / "modules" / "apps" / "collection_center" / "runtime_session.py"
     ).read_text(encoding="utf-8")
 
-    assert "from modules.utils.sessions.account_readiness import profile_contains_state" in source
+    assert (
+        "from modules.utils.sessions.account_readiness import profile_contains_state"
+        in source
+    )
 
 
 def test_cli_readiness_script_and_panel_share_the_same_snapshot_builder() -> None:
@@ -139,8 +144,14 @@ def test_cli_readiness_script_and_panel_share_the_same_snapshot_builder() -> Non
         encoding="utf-8"
     )
 
-    assert "from modules.utils.sessions.account_readiness import build_profile_state" in cli_source
-    assert "from modules.utils.sessions.account_readiness import build_account_readiness" in panel_source
+    assert (
+        "from modules.utils.sessions.account_readiness import build_profile_state"
+        in cli_source
+    )
+    assert (
+        "from modules.utils.sessions.account_readiness import build_account_readiness"
+        in panel_source
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -149,13 +160,17 @@ def test_cli_readiness_script_and_panel_share_the_same_snapshot_builder() -> Non
 
 
 def test_readiness_endpoint_requires_token() -> None:
-    client = TestClient(build_app(PanelState(token="secret", account_rows_loader=_rows)))
+    client = TestClient(
+        build_app(PanelState(token="secret", account_rows_loader=_rows))
+    )
 
     assert client.get("/api/accounts/readiness").status_code == 401
     assert client.get("/api/accounts/readiness?token=secret").status_code == 200
 
 
-def test_readiness_endpoint_reports_account_state_and_skipped_accounts(tmp_path: Path) -> None:
+def test_readiness_endpoint_reports_account_state_and_skipped_accounts(
+    tmp_path: Path,
+) -> None:
     """被白名单排除的账号必须**显式列出并带原因**，不能静默消失。"""
     client = TestClient(
         build_app(

@@ -46,6 +46,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # 1. 画像生成
 # ---------------------------------------------------------------------------
 
+
 def test_device_profile_is_deterministic_for_same_account():
     """同一账号 ⇒ 同一套画像（设备人格稳定，不随代码版本/调用次数变）。"""
     first = build_device_profile("hongxikeji:main", platform="shopee")
@@ -68,7 +69,9 @@ def test_device_profile_differs_between_accounts():
         "accept_main_1775126941575",
     ]
     signatures = {
-        json.dumps(build_device_profile(acc, platform="shopee")["device"], sort_keys=True)
+        json.dumps(
+            build_device_profile(acc, platform="shopee")["device"], sort_keys=True
+        )
         for acc in accounts
     }
 
@@ -154,6 +157,7 @@ def test_device_profile_uids_do_not_contain_empty_fields():
 # 2. 画像读写与分配
 # ---------------------------------------------------------------------------
 
+
 def test_device_profile_roundtrip(tmp_path):
     profile_dir = tmp_path / "shopee" / "acc1"
     payload = build_device_profile("acc1", platform="shopee")
@@ -222,6 +226,7 @@ def test_assign_device_profile_avoids_collision_with_existing_account(tmp_path):
 # ---------------------------------------------------------------------------
 # 3. 机器标识隔离
 # ---------------------------------------------------------------------------
+
 
 def test_derive_machine_id_is_deterministic_and_unique():
     a = derive_machine_id("shopee", "acc-1")
@@ -294,6 +299,7 @@ def test_ensure_profile_machine_id_tolerates_missing_local_state(tmp_path):
 # 4. 注入
 # ---------------------------------------------------------------------------
 
+
 def test_device_context_options_only_contains_whitelisted_keys():
     payload = build_device_profile("acc-1", platform="shopee")
     options = device_context_options(payload)
@@ -332,6 +338,7 @@ def test_device_cdp_overrides_carry_user_agent_platform_and_locale():
 # ---------------------------------------------------------------------------
 # 5. 三条路径必须用同一套设备（口径不分裂）
 # ---------------------------------------------------------------------------
+
 
 def test_collector_and_inspection_share_one_device_profile():
     """巡店与采集读的是**同一个**画像文件 ⇒ 同一台设备。"""
@@ -388,8 +395,10 @@ def test_inspection_window_injects_device_profile_before_navigation():
     assert "Emulation.setLocaleOverride" in source
     assert "Emulation.setDeviceMetricsOverride" in source
 
-    inject_at = source.index("apply_device_profile_to_context(context, page, device_payload)")
-    goto_at = source.index("page.goto(url, wait_until=\"domcontentloaded\"")
+    inject_at = source.index(
+        "apply_device_profile_to_context(context, page, device_payload)"
+    )
+    goto_at = source.index('page.goto(url, wait_until="domcontentloaded"')
     assert inject_at < goto_at, "设备画像必须在首次导航之前注入"
 
 
@@ -408,6 +417,7 @@ def test_inspection_window_isolates_machine_id_before_launch():
 # ---------------------------------------------------------------------------
 # 6. 出口同源（主账号级代理）
 # ---------------------------------------------------------------------------
+
 
 def test_proxy_source_is_main_account_first():
     """代理权威位在**主账号**（一个登录身份 = 一个出口），店铺级仅回退。"""
@@ -429,6 +439,7 @@ def test_proxy_source_is_main_account_first():
 # ---------------------------------------------------------------------------
 # 7. 文档口径（SSOT：只有一处定义）
 # ---------------------------------------------------------------------------
+
 
 def test_device_identity_has_single_authoritative_definition():
     """「账号设备身份」的语义真源只能有一处（规范 R8 及其设备画像小节）。"""

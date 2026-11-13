@@ -98,11 +98,16 @@ def slugify(value: str) -> str:
 
     if not ascii_part:
         # 纯中文账号名：用稳定短哈希区分，避免全部塌成 "account"
-        digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+        # SHA1 只做 slug 区分（不用于口令/签名/完整性）⇒ usedforsecurity=False
+        digest = hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()[
+            :8
+        ]
         return f"cn-{digest}"
 
     if non_ascii:
-        digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+        digest = hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()[
+            :8
+        ]
         return f"{ascii_part}-{digest}"
 
     return ascii_part
@@ -184,7 +189,9 @@ def load_accounts() -> list[MainAccountRow]:
     return accounts
 
 
-def build_inspection_accounts(rows: list[MainAccountRow]) -> tuple[list[dict[str, Any]], list[str]]:
+def build_inspection_accounts(
+    rows: list[MainAccountRow],
+) -> tuple[list[dict[str, Any]], list[str]]:
     """公开账号清单。
 
     **不含代理凭据** —— 这份清单会进 HTTP 响应（面板接口），凭据不能外泄。
@@ -230,9 +237,7 @@ def build_inspection_accounts_with_proxy(
 INSPECTION_PLATFORMS: tuple[str, ...] = tuple(sorted(PLATFORM_HELPERS))
 
 #: 不在白名单时的跳过原因（写给人看）。
-SKIP_REASON_UNSUPPORTED_PLATFORM = (
-    "平台不在巡店白名单（本地巡店只支持 {supported}）"
-)
+SKIP_REASON_UNSUPPORTED_PLATFORM = "平台不在巡店白名单（本地巡店只支持 {supported}）"
 
 
 def build_skipped_account_details(

@@ -161,17 +161,35 @@ _OS_PROFILES: Dict[str, Dict[str, Any]] = {
     "windows": {
         "platform_id": "Win32",
         "device_scale_factor": 1.0,
-        "viewports": [(1920, 1080), (1536, 864), (1440, 900), (1660, 1050), (1366, 768)],
+        "viewports": [
+            (1920, 1080),
+            (1536, 864),
+            (1440, 900),
+            (1660, 1050),
+            (1366, 768),
+        ],
     },
     "macos": {
         "platform_id": "MacIntel",
         "device_scale_factor": 2.0,
-        "viewports": [(1440, 900), (1512, 982), (1728, 1080), (1280, 800), (1680, 1050)],
+        "viewports": [
+            (1440, 900),
+            (1512, 982),
+            (1728, 1080),
+            (1280, 800),
+            (1680, 1050),
+        ],
     },
     "linux": {
         "platform_id": "Linux x86_64",
         "device_scale_factor": 1.0,
-        "viewports": [(1920, 1080), (1600, 900), (1366, 768), (1440, 900), (1280, 1024)],
+        "viewports": [
+            (1920, 1080),
+            (1600, 900),
+            (1366, 768),
+            (1440, 900),
+            (1280, 1024),
+        ],
     },
 }
 
@@ -301,13 +319,20 @@ def _utc_now_iso() -> str:
 
 
 def _seed_for(account_id: str, salt: str = "") -> int:
+    """由账号 ID 派生确定性种子。
+
+    MD5 在这里**只做确定性派生**，不涉及任何安全语义
+    （不用于口令、不用于签名、不用于完整性校验）⇒ 显式标注
+    ``usedforsecurity=False``，既表达真实意图，也过掉 bandit B324。
+    """
     payload = f"{salt}|{str(account_id or '').strip()}".encode("utf-8")
-    return int(hashlib.md5(payload).hexdigest()[:8], 16)
+    return int(hashlib.md5(payload, usedforsecurity=False).hexdigest()[:8], 16)
 
 
 # ---------------------------------------------------------------------------
 # 画像生成
 # ---------------------------------------------------------------------------
+
 
 def build_device_profile(
     account_id: str,
@@ -338,7 +363,9 @@ def build_device_profile(
 
     # Safari 只存在于 macOS —— 组合时必须过滤，否则会出现不自洽的画像。
     os_key = os_keys[seed % len(os_keys)]
-    candidates = [key for key in browser_keys if "safari" not in key or os_key == "macos"]
+    candidates = [
+        key for key in browser_keys if "safari" not in key or os_key == "macos"
+    ]
     browser_key = candidates[(seed // len(os_keys)) % len(candidates)]
 
     os_profile = _OS_PROFILES[os_key]
@@ -404,6 +431,7 @@ def build_device_profile(
 # ---------------------------------------------------------------------------
 # 画像读写
 # ---------------------------------------------------------------------------
+
 
 def device_profile_path(profile_dir: Path | str) -> Path:
     """画像路径：``<profile_dir>/.device_profile.json``。"""
@@ -527,6 +555,7 @@ def _profile_signature(payload: Dict[str, Any]) -> str:
 # 注入
 # ---------------------------------------------------------------------------
 
+
 def device_context_options(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """画像 ⇒ Playwright context options。
 
@@ -618,15 +647,14 @@ def device_cdp_overrides(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 # 机器标识隔离
 # ---------------------------------------------------------------------------
 
+
 def derive_machine_id(platform: str, account_id: str) -> str:
     """按 (平台, 账号) **确定性**派生一个 machine_id。
 
     确定性 ⇒ 同一账号永远同一个值（不会每次启动都变），
     不同账号 ⇒ 不同值（uuid5 碰撞概率可忽略）。
     """
-    return str(
-        uuid.uuid5(MACHINE_ID_NAMESPACE, f"{platform}|{account_id}")
-    )
+    return str(uuid.uuid5(MACHINE_ID_NAMESPACE, f"{platform}|{account_id}"))
 
 
 def ensure_profile_machine_id(

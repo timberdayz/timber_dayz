@@ -219,7 +219,9 @@ class PanelState:
                 return account_proxy_config(row)
         return None
 
-    def record(self, action: str, account: dict[str, Any], status: str, message: str = "") -> None:
+    def record(
+        self, action: str, account: dict[str, Any], status: str, message: str = ""
+    ) -> None:
         self.logs.append(
             {
                 "action": action,
@@ -234,7 +236,9 @@ class PanelState:
 
     # -- 账号会话锁 -------------------------------------------------------
 
-    async def acquire_account_lock(self, platform: str, main_account_id: str) -> _AccountLockHandle:
+    async def acquire_account_lock(
+        self, platform: str, main_account_id: str
+    ) -> _AccountLockHandle:
         """拿账号会话锁（与采集同一把）；被占用时抛 409。
 
         巡店开的是**采集同一个 profile 目录** -> 采集持锁期间再开就是 Chromium
@@ -364,7 +368,14 @@ def build_pwcli_action_command(
     )
     if proxy_server:
         command += f" -ProxyServer '{quote_ps(str(proxy_server))}'"
-    return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command]
+    return [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        command,
+    ]
 
 
 def find_available_port(start: int = 8765, end: int = 8780) -> int:
@@ -442,7 +453,9 @@ def build_app(state: PanelState) -> FastAPI:
         ).strip()
         if result.exit_code != 0 or not combined_output:
             state.statuses[key] = "error"
-            message = combined_output or f"Command failed with exit code {result.exit_code}"
+            message = (
+                combined_output or f"Command failed with exit code {result.exit_code}"
+            )
             state.record(action, account, "error", message)
             await state.release_account_lock(key)
             raise HTTPException(status_code=500, detail=message)
@@ -475,7 +488,9 @@ def build_app(state: PanelState) -> FastAPI:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Start the local PWCLI inspection panel")
+    parser = argparse.ArgumentParser(
+        description="Start the local PWCLI inspection panel"
+    )
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args(argv)

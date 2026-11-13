@@ -888,7 +888,10 @@ def apply_device_profile_to_context(
     try:
         cdp = context.new_cdp_session(page)
     except Exception as exc:
-        print(f"Warning: CDP session unavailable for device profile: {exc}", file=sys.stderr)
+        print(
+            f"Warning: CDP session unavailable for device profile: {exc}",
+            file=sys.stderr,
+        )
         return
 
     try:

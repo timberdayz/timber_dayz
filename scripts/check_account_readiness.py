@@ -101,11 +101,7 @@ def check_id_format(account_id: str, *, existing: bool) -> Check:
     if not text:
         return Check(FAIL, "主账号 ID 规范", "ID 为空")
     if not ID_ALLOWED_RE.match(text):
-        hints = [
-            f"{ch!r}：{why}"
-            for ch, why in ID_FORBIDDEN_HINTS
-            if ch in text
-        ]
+        hints = [f"{ch!r}：{why}" for ch, why in ID_FORBIDDEN_HINTS if ch in text]
         detail = "只允许小写字母 / 数字 / 下划线"
         if hints:
             detail += "；" + "；".join(hints)
@@ -188,7 +184,9 @@ def _profile_state(platform: str, account_id: str) -> dict:
     """
     from modules.utils.sessions.account_readiness import build_profile_state
 
-    return build_profile_state(_profile_dir(platform, account_id), platform=platform, account_id=account_id)
+    return build_profile_state(
+        _profile_dir(platform, account_id), platform=platform, account_id=account_id
+    )
 
 
 def check_device_profile(platform: str, account_id: str) -> Check:

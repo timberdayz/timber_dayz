@@ -63,7 +63,9 @@ def profile_contains_state(profile_path: Path | str) -> bool:
     """
     root = Path(profile_path)
     try:
-        return any((root / relative).exists() for relative in PROFILE_COOKIE_RELATIVE_PATHS)
+        return any(
+            (root / relative).exists() for relative in PROFILE_COOKIE_RELATIVE_PATHS
+        )
     except OSError:
         return False
 
@@ -179,7 +181,9 @@ def readiness_summary(payload: Dict[str, Any]) -> str:
     bits.append("已首登" if payload.get("logged_in") else "未首登")
     bits.append("画像已分配" if payload.get("has_device_profile") else "画像未分配")
     bits.append(
-        "machine_id 已隔离" if payload.get("machine_id_isolated") else "machine_id 未隔离"
+        "machine_id 已隔离"
+        if payload.get("machine_id_isolated")
+        else "machine_id 未隔离"
     )
     bits.append("已配出口" if payload.get("proxy_enabled") else "未配出口")
     return " · ".join(bits)
