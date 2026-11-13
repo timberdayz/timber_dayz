@@ -185,6 +185,57 @@ def test_per_test_database_fixture_is_function_scoped():
     )
 
 
+def _testcontainers_import_offenders(tree: ast.AST, filename: str) -> List[str]:
+    """真的 import 了 testcontainers 的地方。
+
+    ⚠️ 只认**真实的 import** —— 文档字符串里提一句"隔离库是 testcontainers
+    起的"是说明文字, 不是依赖（仓库里有 3 个文件是这种写法）。
+    """
+    offenders = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] == "testcontainers":
+                    offenders.append(
+                        "{0}:{1} import testcontainers".format(filename, node.lineno)
+                    )
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".")[0]
+            if root == "testcontainers":
+                offenders.append(
+                    "{0}:{1} from testcontainers import ...".format(
+                        filename, node.lineno
+                    )
+                )
+    return offenders
+
+
+def _pg_context_offenders(tree: ast.AST, filename: str) -> List[str]:
+    """``as pg`` 的上下文不是 ``pg_database()`` 的地方。"""
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.With, ast.AsyncWith)):
+            continue
+        for item in node.items:
+            if not isinstance(item.optional_vars, ast.Name):
+                continue
+            if item.optional_vars.id != "pg":
+                continue
+            call = item.context_expr
+            shared = (
+                isinstance(node, ast.AsyncWith)
+                and isinstance(call, ast.Call)
+                and getattr(call.func, "id", "") == PER_TEST_DATABASE_FIXTURE
+            )
+            if not shared:
+                offenders.append(
+                    "{0}:{1} `as pg` 的上下文不是 {2}()".format(
+                        filename, node.lineno, PER_TEST_DATABASE_FIXTURE
+                    )
+                )
+    return offenders
+
+
 def test_data_pipeline_never_builds_its_own_container():
     """data_pipeline 里不许再出现"自己拉容器"的迹象。
 
@@ -204,48 +255,8 @@ def test_data_pipeline_never_builds_its_own_container():
     for path in sorted(DATA_PIPELINE.glob("*.py")):
         text = path.read_text(encoding="utf-8", errors="replace")
         tree = ast.parse(text)
-
-        # (1) 真的 import 了 testcontainers 才算违规 —— 文档字符串里提一句
-        #     "隔离库是 testcontainers 起的" 是说明文字, 不是依赖。
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name.split(".")[0] == "testcontainers":
-                        offenders.append(
-                            "{0}:{1} import testcontainers".format(
-                                path.name, node.lineno
-                            )
-                        )
-            elif isinstance(node, ast.ImportFrom):
-                root = (node.module or "").split(".")[0]
-                if root == "testcontainers":
-                    offenders.append(
-                        "{0}:{1} from testcontainers import ...".format(
-                            path.name, node.lineno
-                        )
-                    )
-
-        # (2) 每个 ``as pg`` 的上下文必须是 ``pg_database()``
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.With, ast.AsyncWith)):
-                continue
-            for item in node.items:
-                if not isinstance(item.optional_vars, ast.Name):
-                    continue
-                if item.optional_vars.id != "pg":
-                    continue
-                call = item.context_expr
-                shared = (
-                    isinstance(node, ast.AsyncWith)
-                    and isinstance(call, ast.Call)
-                    and getattr(call.func, "id", "") == PER_TEST_DATABASE_FIXTURE
-                )
-                if not shared:
-                    offenders.append(
-                        "{0}:{1} `as pg` 的上下文不是 {2}()".format(
-                            path.name, node.lineno, PER_TEST_DATABASE_FIXTURE
-                        )
-                    )
+        offenders.extend(_testcontainers_import_offenders(tree, path.name))
+        offenders.extend(_pg_context_offenders(tree, path.name))
     assert not offenders, "data_pipeline 里还在自己拉容器: {0}".format(offenders)
 
 
