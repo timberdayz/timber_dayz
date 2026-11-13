@@ -1151,6 +1151,32 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
   `deploy@` 实测可登机（VM-0-15-ubuntu，7 个容器全 healthy），
   生产只读核查（容器状态 / nginx 日志 / 只读 SQL）能力是有的。
 
+## 商品中心 SKU 资料页 SPU 缺陷：方案已出，待拍板（2026-11-13）
+
+> 完整方案：`docs/superpowers/plans/2026-11-13-product-center-sku-spu-ui-defect-fix.md`
+
+- **现象（Walter 实际使用中发现）**：筛选框写着 `XH-FASHION-005`，表格却是
+  `XH-TOYS-MYTK` 的货；下拉框是空的；行内换款下拉也打不开。
+- **根因**：值域工厂 `createSpuSearch` 返回的是**普通对象 + 嵌套 ref**，
+  而 Vue **只拆包最外层 ref** ⇒ 模板拿到的不是名单、而是"装着名单的盒子"
+  ⇒ ① 下拉恒处于 loading（Element Plus 规则 `options.size > 0 && !loading`）
+  ⇒ 选项列表不渲染；② `v-for` 迭代到 ref 的 5 个内部属性 ⇒ 5 个空白项、选不中；
+  ③ 选不中 ⇒ 请求**从不带 `spu=`** ⇒ **表格永远不按款筛选**。
+- **最小复现**（仓库自带 vue 3.5.22 实跑）：当前写法渲染 **5 个空白项**；
+  `reactive` 对照组渲染 **1 个正常项**。
+- **证据链**：生产日志 `/api/spus/options?keyword=XH-FASHION-005` → 200 有数据
+  （后端没问题）；`/api/skus` 请求**从不带 `spu=`**；
+  生产库 `XH-FASHION-005` 当前挂货 **0**（若筛效应为空表，实际 20 行 ⇒ 没筛）；
+  1119 条当前归属**无一货挂两款**（数据层干净）⇒ **后端零改动**。
+- **为什么利润测算页没事**：那一页的候选来自 `operatingDimensions`（**reactive 数组**）
+  ⇒ 正常拆包、参数真发出（日志实证 `...&spu=XH-FASHION-006`）。
+  且两者是**两个业务问题**（主数据筛选 vs 定价测算），**不该合并**。
+- **方案分三批**：A 修工厂 + 运行时守护测试 + 结构性门禁（必做）；
+  B 值域默认候选排序 + 空结果文案（另排，改的是后端口径）；
+  C 本会话新发现的两条（接口双挂载、公开仓库密码文件）。
+- **SSOT 判定**：**符合** —— 不新增口径、不合并口径，只是把"前端怎么读后端真源"
+  从两种写法收敛成一种，并把"界面真的能用"钉进运行时测试。
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
