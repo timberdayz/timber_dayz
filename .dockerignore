@@ -54,6 +54,20 @@ yarn-error.log*
 .env.development
 .env.production
 *.env
+# ⚠️ .env 家族一律不进镜像（2026-11-13 批次 C2）：
+#    .env.cleaned 带着能解开账号密文的 ACCOUNT_ENCRYPTION_KEY，
+#    .env.production.passwords.txt 带着生产密钥备份
+#    ⇒ 进了镜像就等于把密钥发布到镜像仓库（镜像层可被 pull 下来解开）。
+#    ⚠️ 根层与子目录两套写法都要写：Docker 的忽略规则按「相对上下文的完整路径」匹配，
+#       `.env.*` 只挡根层，`**/.env.*` 才挡得住 frontend/ 之类子目录里的。
+.env.*
+**/.env.*
+!.env.example
+!.env.template
+**/.env.example
+**/.env.template
+*.passwords.txt
+**/*.passwords.txt
 
 # ==================== 数据和日志 ====================
 data/

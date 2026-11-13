@@ -190,3 +190,83 @@ def test_gitignore_still_allows_env_limiter() -> None:
     assert (
         result.returncode != 0
     ), ".env.limiter 被 .gitignore 挡住了 —— 限流器会读不到它"
+
+
+# ---------------------------------------------------------------------------
+# 5. 镜像构建上下文也不许带这些文件
+# ---------------------------------------------------------------------------
+
+
+def _dockerignore_excludes(relative_path: str) -> bool:
+    """按 ``.dockerignore`` 的规则判断这个文件**会不会进镜像**。
+
+    ⚠️ 自己实现匹配，而不是断言文本 —— 断言"文件里有某一行"
+       只锁住了写法，锁不住**行为**。
+
+    支持的规则形态（Docker 语义）：
+    * ``*``  —— 任意字符（不跨 ``/``）；
+    * ``**`` —— 跨目录；
+    * ``?``  —— 单个字符；
+    * 末尾 ``/`` —— 只匹配目录；
+    * ``!`` 前缀 —— 否定（后出现的规则覆盖先出现的）。
+    """
+    import re
+
+    lines = [
+        line.strip()
+        for line in (PROJECT_ROOT / ".dockerignore")
+        .read_text(encoding="utf-8", errors="ignore")
+        .splitlines()
+    ]
+
+    excluded = False
+    for raw in lines:
+        if not raw or raw.startswith("#"):
+            continue
+        negated = raw.startswith("!")
+        pattern = raw[1:] if negated else raw
+        directory_only = pattern.endswith("/")
+        pattern = pattern.rstrip("/")
+        if not pattern:
+            continue
+
+        regex = ""
+        index = 0
+        while index < len(pattern):
+            char = pattern[index]
+            if char == "*":
+                if pattern[index : index + 2] == "**":
+                    regex += ".*"
+                    index += 2
+                    continue
+                regex += "[^/]*"
+            elif char == "?":
+                regex += "[^/]"
+            else:
+                regex += re.escape(char)
+            index += 1
+
+        if re.fullmatch(regex, relative_path):
+            excluded = not negated
+
+    return excluded
+
+
+@pytest.mark.parametrize("relative_path", MUST_NOT_BE_TRACKED)
+def test_dockerignore_blocks_the_secret_files(relative_path: str) -> None:
+    """镜像构建上下文也不许带这些文件。
+
+    ⚠️ 镜像层是**可被 pull 下来解开**的 —— 密钥进了镜像等于发布到了镜像仓库。
+    Dockerfile.backend 用的是 ``COPY . .`` ⇒ 只靠 ``.dockerignore`` 挡。
+    """
+    assert (
+        _dockerignore_excludes(relative_path) is True
+    ), f"{relative_path} 会被打进镜像 —— 密钥进了镜像层就等于公开了"
+
+
+def test_dockerignore_excludes_env_family_but_keeps_templates() -> None:
+    """``.env`` 家族进镜像，但**模板**要留（模板是给人看的，不是密钥）。"""
+    assert _dockerignore_excludes(".env.cleaned") is True
+    assert _dockerignore_excludes(".env.production.passwords.txt") is True
+    assert _dockerignore_excludes(".env.example") is False
+    assert _dockerignore_excludes(".env.template") is False
