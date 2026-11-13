@@ -203,7 +203,7 @@ R8 要求 profile 模式「**不注入**，沿用 profile 原生环境」；③ 
 - legacy `modules/apps/{account_manager,collection_center}/contract_tests.py` 不再由 CI 执行
   （其断言与 pytest 套件部分重叠）；若要保留这层覆盖，需把断言迁进 pytest。
 
-### F-2：台账瘦身（已落地）
+### F-2：台账瘦身（已落地，提交 `8d2d75d5`）
 
 本文件由 **1,659 行 / 27 个章节** 瘦身到 **约 250 行**，历史整体归档到
 `docs/superpowers/plans/archive/STATUS-2026-11-13-full-history.md`（逐字节保留，零删改）。
@@ -216,7 +216,7 @@ R8 要求 profile 模式「**不注入**，沿用 profile 原生环境」；③ 
   锁住行数上限（≤400）、未结表行数上限（≤10）、归档完整性（逐条含 23 个章节标题 +
   保留原文首尾）、**同一段历史只能有一处真源**（归档过的标题不许再回到本文件）。
 
-### F-3：守护分类 + 重复簇聚类 + 合并最大一簇（已落地）
+### F-3：守护分类 + 重复簇聚类 + 合并最大一簇（已落地，提交 `974901d9`）
 
 **为什么做**：259 个守护里，没有一份清单说明「哪些每次 CI 都跑、哪些只在被改动时才跑」。
 
@@ -257,6 +257,46 @@ R8 要求 profile 模式「**不注入**，沿用 profile 原生环境」；③ 
 
 **本批不做（待拍板）**：221 个 C 类守护要不要分批提升进 CI 清单。提升会直接拉长流水线
 （当前 test job 约 188 秒），属**加固方向**，不在本批「只做减法」的范围内。
+
+### F-4：验收（CI 三线全绿 + 双镜像一致 + 生产未受影响）
+
+**本地全量回归**
+
+| 范围 | 结果 |
+|---|---|
+| 后端（排除 data_pipeline / archive） | **4697 passed / 7 skipped**（247.60s） |
+| `backend/tests/data_pipeline` | **1274 passed / 1 skipped**（53.91s） |
+| 根 `tests/` | **801 passed / 5 skipped** |
+| 前端 `node --test` | **207 passed** |
+| 5 个新守护文件合计 | **119 passed** |
+| ruff / black / UTF-8 卫生 / 规则完整性 / 架构 SSOT | 全绿 |
+
+**CI 三线全绿**（`974901d9`）：CI Pipeline `43467986461`（**8 个 job 全 success**）/
+Validate Data Flow `43467986640` / Docker Build and Push `43467986403`。
+
+**CI 上的决定性证据**
+
+- 根契约清单：**593 passed / 11 skipped**（上一批是 481 passed ⇒ **+112**，
+  正好等于本次新增的 4 个守护文件：23 + 57 + 7 + 25）
+- 「Run pytest (if test files exist)」：**119 passed**（本次改动的 5 个测试文件）
+- 采集组件 lint：**「扫描范围: platforms（范围外文件 7 个已过滤）」+ error 0 / warning 0**
+  ⇒ 收窄真实生效，且**没有把任何真问题过滤掉**
+- `test (3.11)` 的步骤列表里**已看不到**被移除的 6 个步骤 ⇒ 移除确实落地
+
+**双镜像**：`git ls-remote` 权威核对 —— GitHub(SSH-443) / CNB(HTTPS) / 本地
+**三处同为 `974901d9`**；`v7.26.0` tag 两端仍是同一对象 `009a2867` → commit `05a359a1`，
+**未被回填**。
+
+**生产未受影响**：本批是测试/工具层改动，**不打 tag、不发版** ⇒ 不触发部署。
+`/api/healthz/ready` → HTTP 200、`version=v7.26.0`、`database=connected`、
+`dashboard=ready`、`runtime_mode=production`（与部署前一致）。
+
+**一处如实说明**：`scripts/sync_main_mirrors.ps1` 的「工作树必须干净」守卫**跑不起来** ——
+工作树里有**另一条工作流**的未跟踪文件
+（`docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md`，
+不是本批产物，**未动**）。已手工复核该脚本要检查的每一项，全部通过：
+分支 = `main`；无 `MERGE_HEAD`；**无任何已跟踪文件改动**（唯一脏项是那个未跟踪文件）；
+本地 `main` 与两端同 SHA、无分叉。
 
 ---
 
