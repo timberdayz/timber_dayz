@@ -19,12 +19,12 @@
 | 1 | 生产机 `/opt/xihong_erp/.env.production.passwords.txt` 旧密钥副本待删 | 生产写操作 | 待拍板：须走发版流程或人工执行 | 归档文件「安全发现」节 |
 | 2 | 旧 `SECRET_KEY` / `JWT_SECRET_KEY` / `METABASE_API_KEY` 在**已下线旧环境**是否还活着 | 需业务确认 | 待确认（本次只比对了生产与本机） | 归档文件「安全发现」节 |
 | 3 | 5 项业务口径待拍板：`3c店` 冲突取舍 / 两个 disabled 主账号是否启用 / TikTok 三店改名归属（含疑似历史误录 `TK新加坡1店`）/ `platform='验证码测试账号'` 脏行处理 / 10 个文件命中已停用账号 `shopee_sg_chenewei666_local` 是否回填 | 业务口径 | 待拍板 | 归档文件「批次 A / B / C」节 |
-| 4 | 账号设备身份 SSOT 收口：决策点 A（并行采集的「分身」，推荐 A1）与 B（代理/IP 隔离，推荐 B1） | 业务口径 | 待拍板 | `docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md` |
+| 4 | 账号设备身份 SSOT 收口：决策点 A（并行采集的「分身」，推荐 A1）与 B（代理/IP 隔离，推荐 B1） | 业务口径 | 待拍板（该计划文件目前**仍是未跟踪文件**，归属待确认） | `docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md` |
 | 5 | `modules/apps/web_interface_manager` 健康检查持续失败（依赖的 `frontend_streamlit` 目录不存在） | 真实缺陷 | 批次 F-1 揭露；待修（本批未擅自改业务代码） | 本文件「批次 F」节 |
 | 6 | `mypy` 目前**没有任何门禁**（440 条动态 ORM 基类误报需先分层/豁免才可能升门禁） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
 | 7 | 采集组件 lint 仍是告警模式（范围已收窄，强度未提升） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
 | 8 | legacy `modules/apps/{account_manager,collection_center}/contract_tests.py` 不再由 CI 执行 | 覆盖缺口 | 待决定是否把断言迁进 pytest | 本文件「批次 F」节 |
-| 9 | 仓库里未跟踪文件 `docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md` 归属 | 文档归属 | 待确认（未动） | — |
+| 9 | **221 个守护从不主动执行**（C 类：不在任何 CI 清单、也没有被别的文件引用 ⇒ 只在有人恰好改了该文件时才跑） | 覆盖缺口 | 待拍板是否分批提升进 CI 清单（会拉长流水线，属加固方向） | 本文件「批次 F」节 |
 | 10 | `CHANGELOG.md:952` 写「新增三个 CI 坑」，原标题写「两个」（内容确实是 3 条） | 文档不一致 | 已在本文件修正标题；**已发布的 CHANGELOG 不改** | 本文件「新增三个 CI 坑」节 |
 
 **已关闭、不再是未结项**（留一行指针，避免又被当成待办）：
@@ -215,6 +215,48 @@ R8 要求 profile 模式「**不注入**，沿用 profile 原生环境」；③ 
 - **守护**：`backend/tests/test_status_index_slim_contract.py`（进 CI 根契约清单）——
   锁住行数上限（≤400）、未结表行数上限（≤10）、归档完整性（逐条含 23 个章节标题 +
   保留原文首尾）、**同一段历史只能有一处真源**（归档过的标题不许再回到本文件）。
+
+### F-3：守护分类 + 重复簇聚类 + 合并最大一簇（已落地）
+
+**为什么做**：259 个守护里，没有一份清单说明「哪些每次 CI 都跑、哪些只在被改动时才跑」。
+
+**可复跑的审计脚本**：`scripts/audit_guard_tests.py`（1.5 秒，口径真源在脚本里）
+
+- 判定口径：文件名含 `_contract` / `_guard` / `_guardrails` / `_invariant` / `_policy` /
+  `_hygiene` / `_rule` / `_ssot` / `_gate` 任一标记
+- 实测：全部测试文件 **839**、守护/契约类 **259（30.9%）**
+- **A 类（CI 会主动跑）：24**
+- **B 类（被其它文件引用，会连带跑）：14**
+- **C 类（无引用，只在被改动时跑）：221（85%）**
+
+⇒ **C 类的 221 个是最该记住的数字**：它们「守着一条规则，但从不被主动执行」——
+与 2026-11-13 清理脚本事故**同款形状**（东西在仓库里、守护也在，但没人调用它）。
+
+**重复簇**：按 AST 形状（函数角色 + 断言/glob/read 的存在性）聚类，≥5 个成员的簇有 **9 个**
+（最大一簇 22 个文件，最小的 5 个）。完整清单跑 `python scripts/audit_guard_tests.py` 即可复现。
+
+**已合并一簇（零争议、可验证）**：11 个同构 `timestamp_defaults` 守护 → 1 个参数化文件。
+
+| 项 | 合并前 | 合并后 |
+|---|---|---|
+| 文件数 | 11 | 1 |
+| 用例数 | 23 | 23（等价） |
+| 断言组数 | 97 | 97（等价） |
+
+- **逐条等价核对**：用 AST 解析原 11 个文件，逐个比对 glob / 断言组 / **顺序** / extra 用例 ⇒
+  全部一致（`must` + `any_of` 两种形态，`public_system` 的「created_at 或 updated_at」
+  保持原位置）。
+- **红侧两轮验证**：① 临时改名 `migrations/versions/20260415_c_class_timestamp_defaults.py`
+  ⇒ 3 条变红；② 临时抽掉迁移里的 `SET DEFAULT now()` ⇒ 1 条变红、报错精确点名。
+- 旧 11 个文件已删；**合并锁**在 `backend/tests/test_guard_test_classification_contract.py` 里
+  （旧文件复活 = 同一份规则维护两遍）。
+- 形态不同的 `test_field_mapping_template_timestamp_defaults_migration_contract.py`
+  （220 行 / 5 用例，要连真库）**原样保留**。
+- **净增覆盖**：合并后的文件**加进了 CI 根契约清单** —— 原先那 11 个旧守护**都不在**任何
+  CI 清单里（只在被改动时才跑）⇒ 这次是覆盖变多，不是变少。
+
+**本批不做（待拍板）**：221 个 C 类守护要不要分批提升进 CI 清单。提升会直接拉长流水线
+（当前 test job 约 188 秒），属**加固方向**，不在本批「只做减法」的范围内。
 
 ---
 

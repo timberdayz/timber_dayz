@@ -70,23 +70,31 @@ SELF = Path(__file__).resolve()
 
 
 def _tracked_python_files() -> List[Path]:
-    out = subprocess.run(
-        ["git", "ls-files", "backend/tests", "tests"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        cwd=str(PROJECT_ROOT),
-    )
+    """要扫描的测试文件（**工作树全量**，不只看 git 已跟踪的）。
+
+    ⚠️ 2026-11-13 实测踩到的坑：原先这里用 ``git ls-files`` ⇒ **新加的、还没
+    提交**的测试文件根本不在扫描范围内 ⇒ 一个新文件里自己起 postgres 容器，
+    守护照样绿。（当时是用「往新合并文件里塞一行 ``PostgresContainer(``」做红侧
+    复验才发现的。）⇒ 守护要盯的是「工作树里现在有什么」，不是「git 记了什么」。
+
+    另外：文件已从工作树删除但还没登记进索引的窗口期，直接跳过（而不是崩在
+    FileNotFoundError 上）。
+    """
+    roots = (BACKEND_TESTS, PROJECT_ROOT / "tests")
     files = []
-    for line in out.stdout.splitlines():
-        if not line.strip().endswith(".py"):
+    for root in roots:
+        if not root.exists():
             continue
-        path = (PROJECT_ROOT / line.strip()).resolve()
-        if path == SELF:
-            # 守护文件本身必然写着被禁的样板（那是它要举证的证据）
-            continue
-        files.append(path)
+        for path in root.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            resolved = path.resolve()
+            if resolved == SELF:
+                # 守护文件本身必然写着被禁的样板（那是它要举证的证据）
+                continue
+            if not resolved.exists():
+                continue
+            files.append(resolved)
     return files
 
 
