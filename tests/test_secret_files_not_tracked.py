@@ -225,7 +225,6 @@ def _dockerignore_excludes(relative_path: str) -> bool:
             continue
         negated = raw.startswith("!")
         pattern = raw[1:] if negated else raw
-        directory_only = pattern.endswith("/")
         pattern = pattern.rstrip("/")
         if not pattern:
             continue
