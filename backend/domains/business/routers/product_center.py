@@ -671,6 +671,33 @@ def _spu_option_filters(
     return filters
 
 
+def _spu_option_order() -> tuple:
+    """值的域的**默认排序**：当前挂货数降序，再按编码升序。
+
+    ⚠️ **排序不是口径** —— 口径（"哪些款可选"）仍由各自端点的过滤条件决定；
+       这里只决定"候选集里谁排在前面"。两个端点用**同一份**排序 ⇒ 不会漂移。
+
+    为什么按挂货数（2026-11-13 实测，生产）：运营找款是为了找货。
+    ``dim_spu`` 实测 284 个在售款；按编码排序时前 50 个是
+    ``XH-BABY-MC`` ~ ``XH-FASHION-695`` ⇒ **玩具类几乎永远不在默认候选里**
+    （``XH-TOYS-MYTK`` 排第 277 位，运营不输入关键词就选不到）。
+    按挂货数排序后，前 50 个就是**真正在经营的款**
+    （实测头部：``XH-ELEC-GF`` 38、``XH-TOYS-YSC`` 37、``XH-ELEC-DM`` 28…）。
+
+    用**相关子查询**而不是 join + group_by ⇒ 不改 SELECT 形状，
+    也不会因为 group_by 引入「非聚合列」的分组问题。
+    """
+    sku_count = (
+        select(func.count(BridgeSpuSku.sku_id))
+        .where(
+            BridgeSpuSku.spu == DimSpu.spu,
+            *current_binding_condition(),
+        )
+        .scalar_subquery()
+    )
+    return (sku_count.desc(), DimSpu.spu)
+
+
 @router.get("/api/spus/options", response_model=SpuOptionListResponse)
 async def list_spu_options(
     keyword: str | None = Query(None),
@@ -689,7 +716,10 @@ async def list_spu_options(
     rows = (
         (
             await db.execute(
-                select(DimSpu).where(*filters).order_by(DimSpu.spu).limit(limit)
+                select(DimSpu)
+                .where(*filters)
+                .order_by(*_spu_option_order())
+                .limit(limit)
             )
         )
         .scalars()
@@ -716,7 +746,10 @@ async def list_spu_assignable_options(
     rows = (
         (
             await db.execute(
-                select(DimSpu).where(*filters).order_by(DimSpu.spu).limit(limit)
+                select(DimSpu)
+                .where(*filters)
+                .order_by(*_spu_option_order())
+                .limit(limit)
             )
         )
         .scalars()

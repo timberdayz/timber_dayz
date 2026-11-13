@@ -26,6 +26,7 @@ from datetime import date
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 from fastapi import HTTPException
 
 from backend.domains.business.routers.product_center import (
@@ -223,6 +224,169 @@ async def test_options_endpoints_do_not_depend_on_pagination():
         params = inspect.signature(handler).parameters
         assert "page" not in params, f"{handler.__name__} 不该有分页参数"
         assert "page_size" not in params, f"{handler.__name__} 不该有分页参数"
+
+
+# ---------------------------------------------------------------------------
+# 默认排序（2026-11-13 新增，批次 B）
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def spu_value_domain_session():
+    """值域排序用的内存 SQLite 会话（挂 ``core`` schema）。
+
+    ⚠️ 为什么不用 ``sqlite_session`` fixture：它跑 ``Base.metadata.create_all``，
+    而生产表挂在 PostgreSQL 的 ``core`` schema 下 ⇒ SQLite 直接报
+    ``unknown database core``。仓库里已有 ``ATTACH DATABASE ':memory:' AS core``
+    的成熟做法（``backend/tests/data_pipeline/test_refresh_queue_service.py``），
+    这里沿用同一招 ⇒ 这组用例不必依赖 PostgreSQL 容器，任何环境都能跑。
+    """
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from modules.core.db import Base, BridgeSpuSku, DimSpu
+
+    engine = create_async_engine("sqlite+aiosqlite://", echo=False)
+    async with engine.begin() as conn:
+        await conn.execute(text("ATTACH DATABASE ':memory:' AS core"))
+        await conn.run_sync(
+            lambda sync_conn: Base.metadata.create_all(
+                bind=sync_conn,
+                tables=[DimSpu.__table__, BridgeSpuSku.__table__],
+            )
+        )
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as session:
+        yield session
+    await engine.dispose()
+
+
+async def _seed_spus_and_bindings(session, spus, bindings):
+    """种下若干款与它们的归属关系。
+
+    :param spus: 款编码列表（**没有**归属的款也要列进来 —— 它就是「空款」）。
+    :param bindings: ``[(spu, sku_id, binding_status)]``，``binding_status``
+        取 ``active`` / ``inactive`` / ``historical``。
+    """
+    from modules.core.db import BridgeSpuSku, DimSpu
+
+    for spu in spus:
+        session.add(
+            DimSpu(spu=spu, spu_name=spu, biz_status="candidate", active=True)
+        )
+    await session.flush()
+    for spu, sku_id, binding_status in bindings:
+        session.add(
+            BridgeSpuSku(
+                spu=spu,
+                sku_id=sku_id,
+                effective_from=date(2026, 11, 13),
+                effective_to=None,
+                binding_status=binding_status,
+            )
+        )
+    await session.flush()
+
+
+@pytest.mark.asyncio
+async def test_value_domain_default_order_lists_busiest_spus_first(
+    spu_value_domain_session,
+):
+    """默认候选必须按「当前挂货数」排 —— 否则运营看不到真正在经营的款。
+
+    背景（2026-11-13 实测，生产）：284 个在售款按编码排序时，前 50 个是
+    ``XH-BABY-MC`` ~ ``XH-FASHION-695`` ⇒ **玩具类几乎永远不在默认候选里**
+    （``XH-TOYS-MYTK`` 排第 277 位）⇒ 运营不输入关键词就选不到那些款。
+
+    ⚠️ 种子数据刻意让「编码升序」与「挂货数降序」**结论相反**
+    （ALPHA < MID < ZULU，但挂货数是 0 < 1 < 2）⇒ 旧实现（按编码排）
+       必定红 ⇒ 这条断言不是"写完就绿"的假测试。
+    """
+    await _seed_spus_and_bindings(
+        spu_value_domain_session,
+        ["XH-ALPHA", "XH-MID", "XH-ZULU"],
+        [
+            ("XH-MID", 501, "active"),
+            ("XH-ZULU", 502, "active"),
+            ("XH-ZULU", 503, "active"),
+        ],
+    )
+
+    result = await list_spu_options(db=spu_value_domain_session, keyword=None, limit=50)
+
+    assert [item.spu for item in result.data] == ["XH-ZULU", "XH-MID", "XH-ALPHA"]
+
+
+@pytest.mark.asyncio
+async def test_value_domain_default_order_ignores_closed_bindings(
+    spu_value_domain_session,
+):
+    """只有**当前有效**的归属算数 —— 已封存/已归档的不能把款顶到前面。"""
+    await _seed_spus_and_bindings(
+        spu_value_domain_session,
+        ["XH-ALPHA", "XH-ZULU"],
+        [
+            ("XH-ZULU", 601, "active"),
+            # 已换款归档（historical）与软删封存（inactive）都**不算**挂货
+            ("XH-ALPHA", 602, "historical"),
+            ("XH-ALPHA", 603, "inactive"),
+        ],
+    )
+
+    result = await list_spu_options(db=spu_value_domain_session, keyword=None, limit=50)
+
+    assert [item.spu for item in result.data] == ["XH-ZULU", "XH-ALPHA"]
+
+
+@pytest.mark.asyncio
+async def test_both_value_domain_endpoints_share_the_same_order(
+    spu_value_domain_session,
+):
+    """两个口径端点必须用**同一份**排序 ⇒ 不会一个按编码、一个按挂货数。"""
+    await _seed_spus_and_bindings(
+        spu_value_domain_session,
+        ["XH-ALPHA", "XH-ZULU"],
+        [
+            ("XH-ZULU", 701, "active"),
+            ("XH-ZULU", 702, "active"),
+        ],
+    )
+
+    browse = await list_spu_options(db=spu_value_domain_session, keyword=None, limit=50)
+    assignable = await list_spu_assignable_options(
+        db=spu_value_domain_session, keyword=None, limit=50
+    )
+
+    assert [item.spu for item in browse.data] == [item.spu for item in assignable.data]
+    assert [item.spu for item in browse.data] == ["XH-ZULU", "XH-ALPHA"]
+
+
+def test_spu_option_order_counts_only_current_bindings():
+    """挂货数的口径必须来自真源 ``current_binding_condition()`` —— 不许手抄。
+
+    ⚠️ 律 1「真源只能一个」：如果这里手写 ``effective_to IS NULL``，
+       一旦归属状态定义变了，排序就会和别的口径**悄悄漂移**
+       （下拉顺序与「这个款现在挂几个货」显示不一致）。
+    """
+    from sqlalchemy import select
+
+    from modules.core.db import DimSpu
+    from backend.domains.business.routers.product_center import _spu_option_order
+
+    sql = str(
+        select(DimSpu.spu)
+        .order_by(*_spu_option_order())
+        .compile(compile_kwargs={"literal_binds": True})
+    )
+    order_by_sql = sql.split("ORDER BY", 1)[1]
+
+    assert "count(core.bridge_spu_sku.sku_id)" in order_by_sql
+    assert "core.bridge_spu_sku.binding_status = 'active'" in order_by_sql
+    assert "core.bridge_spu_sku.effective_to IS NULL" in order_by_sql
+    # 同分时按编码升序 ⇒ 顺序稳定，运营不会看到「每次刷都不一样」
+    #    （SQLAlchemy 不渲染默认的 ``ASC`` ⇒ 这里只断言它排在最后）
+    assert order_by_sql.rstrip().endswith("core.dim_spu.spu")
 
 
 # ---------------------------------------------------------------------------
