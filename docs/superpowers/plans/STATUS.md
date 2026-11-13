@@ -1297,16 +1297,67 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
   4. 确认 `.env.cleaned` 里的旧 `SECRET_KEY` / `JWT_SECRET_KEY` / `METABASE_API_KEY`
      在**任何**环境都还活着 —— 本次只比对了生产与本机，**未覆盖**已下线的旧环境。
 
-### 本会话的仓库级回归结果
+## v7.25.0 上线：商品中心 SPU 缺陷收口 + 接口去重挂载 + 密钥门禁补强（2026-11-13）
+
+> 方案与实施记录：`docs/superpowers/plans/2026-11-13-product-center-sku-spu-ui-defect-fix.md` §7
+
+| 项 | 值 |
+|---|---|
+| tag 对象（双端同一对象） | `20ffd319`（annotated） |
+| tag 指向的提交 | `707d9826`（**VERSION 与 tag 同提交**，纯 7 字节 `v7.25.0`） |
+| 双镜像 main | GitHub SSH-443 与 CNB HTTPS **同为 `707d9826`**（`git ls-remote` 核对） |
+| 发布流水线 | **run `43392504235` = success**（4 个 job 全 success） |
+| CI 三线 | Validate Data Flow ✓ / CI Pipeline ✓ / Docker Build and Push ✓ |
+| 数据库迁移 | **无**（日志确认 `Skipping database migrations (RUN_MIGRATIONS=0)`） |
+
+**部署后独立验收（agent 自己打的接口，不采信流水线自述）**
+
+| 项 | 结果 |
+|---|---|
+| `/api/healthz/ready` | HTTP 200 / `version=**v7.25.0**` / `database=connected` / `dashboard=ready` / `runtime_mode=production` |
+| 首页 | HTTP 200 |
+| 生产容器 | 7 个全 healthy；后端三件套 = `backend:v7.25.0`，前端 = `frontend:v7.25.0` |
+| 部署批次 | `bootstrap_postgresql_dashboard_20261113_163211.log` + `rebuild_views_20261113_163211.log` |
+| **路由无损**（C1 生产侧证据） | 生产 `/api/openapi.json` 部署前后**完全一致**：510 路径 / 625 操作 / 625 个 operation_id 全唯一 / 0 重复 ⇒ 去重复挂载**没丢接口** |
+| **新排序已上线** | 部署后容器内 `_spu_option_order` 出现 3 处；生产库按「当前挂货数 desc、编码 asc」实测头部：`XH-ELEC-GF` 38、`XH-TOYS-YSC` 37、`XH-ELEC-DM` 28、`XH-TOYS-GMGD` 26、`XH-TOYS-ZD` 26、`XH-TOYS-GD` 24、`XH-TOYS-MYTK` 20、`XH-FASHION-006` 18、`XH-FASHION-KLM002` 16、`XH-TOYS-DK` 16 |
+| 门禁真的在验 | API 契约门禁 `Changed router files: 1` → `本次验证: 1 个文件` → **`F 真静默: 0`**；前端 API 方法门禁 `缺失方法调用数: 0` |
+
+**批次总表（A / B / C 三批全部落地并随本版上线）**
+
+| 批次 | 提交 | 状态 |
+|---|---|---|
+| A 前端值域修 reactive | `f0f95721` | ✅ 上线 |
+| A 回归（改名避开 API 门禁误报） | `1f7cb413` | ✅ 上线 |
+| B1 值域默认排序（挂货数优先） | `f8c44012` | ✅ 上线 |
+| B2 空结果文案 | `c121c3f3` | ✅ 上线 |
+| C1 接口去重复挂载 | `db57034d` | ✅ 上线 |
+| black 格式修复 | `07789728` | ✅ 上线 |
+| C2 密钥与账号密文取消跟踪 + 门禁补强 | `c31f77e3` | ✅ 上线（**轮换仍待拍板**） |
+| `.dockerignore` 补挡 `.env` 家族 | `d99a8f83` | ✅ 上线 |
+| ruff F841 修复 | `707d9826` | ✅ 上线（= tag 指向的提交） |
+
+**⚠️ 仍需 Walter 拍板的两件事**（代码侧已做完止血，历史不可撤回）：
+
+1. **轮换那 15 个店铺账号的密码** —— 公开仓库里 `accounts.enc`（密文）与 `.env.cleaned`
+   （解密密钥）同时存在，实测可解出账号密码 ⇒ 公开历史不可撤回 ⇒ 必须视为已泄露。
+   轮换后要同步生产库 `core.shop_accounts` 与采集机账号库。
+2. **删除生产机上的 `/opt/xihong_erp/.env.production.passwords.txt`**（旧密钥副本，
+   与仓库里那份同源）—— 属生产写操作，须走发版流程或人工执行。
+
+（`git filter-repo` 历史清理**不做**：会作废全部已发布 tag，含 `v7.24.0`。）
+
+### 本会话的仓库级回归结果（v7.25.0 发版提交上实测）
 
 | 范围 | 结果 |
 |---|---|
-| 根 `tests/` | **758 passed / 5 skipped / 0 failed**（本批新增 35 例密钥守护 ⇒ 793） |
+| 根 `tests/` | **798 passed / 5 skipped / 0 failed**（基线 758 + 批次 C2 新增 40 例密钥守护） |
 | 后端全量 `backend/tests` | **4593 passed / 7 skipped / 0 failed**（基线 4579 + 14） |
 | 前端 `frontend/tests` | **207 passed / 0 failed**（原 195 + 批次 A 5 + 批次 B2 7） |
-| API 契约门禁 | 0 错 / 65 警告（真静默 47，与基线一致） |
+| API 契约门禁 | 0 错 / 65 警告（真静默 47，与基线一致）；发版时 `本次验证: 1 个文件`、`F 真静默: 0` |
 | 前端 API 方法门禁 | **0 缺失**（批次 A 回归后恢复） |
+| ruff / black（CI 同口径，对全部改动 Python 文件） | 全绿 |
 | UTF-8 卫生 / 规则完整性 / 架构 SSOT | 全绿（SSOT 100%） |
+| `verify_release_local.py --skip-build` | **exit 0**（"所有检查通过，可以开始部署！"） |
 
 
 

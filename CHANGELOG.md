@@ -142,8 +142,40 @@ FastAPI 生成 OpenAPI 时为每条重复路由打 `UserWarning: Duplicate Opera
 
 ### 七、发布与部署后验收
 
-（发布后补：流水线 run 号、`/api/healthz/ready` 报出的版本与数据库状态、
-本次发布实际验证到的路由文件数。）
+**发布物料**
+
+| 项 | 值 |
+|---|---|
+| 版本 | **v7.25.0** |
+| tag 对象（双端同一对象） | `20ffd319`（annotated tag） |
+| tag 指向的提交 | `707d9826`（**VERSION 与 tag 同提交** —— `VERSION` 纯 7 字节 `v7.25.0`） |
+| 双镜像 main | GitHub SSH-443 与 CNB HTTPS **同为 `707d9826`**（`git ls-remote` 核对） |
+| 发布流水线 | **run `43392504235` = success**（check-config / Validate Data Flow / Build and Push Images / Deploy to Production 全 success） |
+| 本次改动 | 无数据库迁移、无接口契约变更、无依赖变更 |
+
+**流水线上的门禁（这次真的在验）**
+
+| 门禁 | 结果 |
+|---|---|
+| API 契约门禁 | `Changed router files: 1` → `本次验证: 1 个文件` → **`F 真静默: 0`**（不是空转：本次改了 `product_center.py`） |
+| 前端 API 方法门禁 | `已定义API方法数: 278` / `缺失方法调用数: 0` / `[OK] 所有API方法调用都存在！` |
+| 其他发布门禁 | 生产迁移契约 / 数据库字段 / 库存账龄流水线 / 镜像依赖 pin / 容器启动 smoke —— 全 success |
+| CI 三线（main） | Validate Data Flow ✓ / CI Pipeline ✓ / Docker Build and Push ✓ |
+
+**部署后独立验收**（不依赖流水线自述，agent 自己打的接口）
+
+| 项 | 结果 |
+|---|---|
+| `/api/healthz/ready` | **HTTP 200**，`version=**v7.25.0**`，`database=connected`（PostgreSQL），`dashboard=ready`，`runtime_mode=production` |
+| 首页 | **HTTP 200** |
+| 生产容器 | 7 个全 **healthy**；`backend_api` / `celery_worker` / `celery_beat` = `backend:v7.25.0`，`frontend` = `frontend:v7.25.0` |
+| 部署批次 | `bootstrap_postgresql_dashboard_20261113_163211.log` + `rebuild_views_20261113_163211.log`；日志确认 `Skipping database migrations (RUN_MIGRATIONS=0)`（与"本版无迁移"一致） |
+| **路由无损**（C1 的生产侧证据） | 生产 `/api/openapi.json` 部署前后**完全一致**：**510 路径 / 625 操作 / 625 个 operation_id 全唯一 / 0 重复** ⇒ 去掉重复挂载**没有丢任何接口** |
+| **新排序真的在线上** | 部署后的后端容器里 `_spu_option_order` 出现 **3** 处 ⇒ 新代码已生效；生产库按「当前挂货数 desc、编码 asc」实测的头部：`XH-ELEC-GF` 38、`XH-TOYS-YSC` 37、`XH-ELEC-DM` 28、`XH-TOYS-GMGD` 26、`XH-TOYS-ZD` 26、`XH-TOYS-GD` 24、`XH-TOYS-MYTK` 20、`XH-FASHION-006` 18、`XH-FASHION-KLM002` 16、`XH-TOYS-DK` 16 |
+
+⚠️ **本次发布仍留了两件事给 Walter 拍板**（代码侧已做完止血，见 §五）：
+轮换那 15 个店铺账号的密码、删除生产机上的旧密钥副本。
+`git filter-repo` 历史清理**不做**（会作废全部已发布 tag）。
 
 ## [v7.24.0] - 2026-11-13 - API 契约门禁：它至今没看过一行真实路由代码
 
