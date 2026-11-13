@@ -10,6 +10,9 @@
 import asyncio
 import atexit
 import os
+import subprocess
+import sys
+from pathlib import Path
 from typing import AsyncGenerator, Generator
 
 import pytest
@@ -183,6 +186,50 @@ def pytest_configure(config: pytest.Config) -> None:
             "\n[测试护栏] DATABASE_URL 已重定向到隔离库(一次性 PostgreSQL 容器)"
             "\n         真实业务库不会被测试读写；需要连库请用 pg_session fixture。\n"
         )
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """会话收尾: 清理测试期遗留的 testcontainers 容器与匿名卷。
+
+    为什么需要这个钩子
+    ------------------
+    集成测试用 ``testcontainers`` 起一次性 PostgreSQL 容器。正常退出时
+    ``atexit`` 会停掉它们; 但进程被**强杀**(Ctrl-C / CI 超时 / 后台任务被回收)
+    时 ``atexit`` 不会执行 ⇒ 容器与它的匿名卷留在 Docker 里。
+
+    2026-11-13 实测: 本机 4 天里攒了 **11 个匿名卷(736 MB)**, 其中 6 个在
+    72 秒内连发(一次被强杀的批量运行)。根因不是 testcontainers 泄漏 ——
+    实测正常退出与 ``os._exit`` 硬杀都由 Ryuk 正确回收 —— 而是**事后没人跑
+    清理脚本**: ``scripts/cleanup_test_containers.py`` 早就存在, 却只有它自己
+    的契约测试引用它, 没有任何流程调用。
+
+    ⇒ 这个钩子把清理接进**每一次**后端测试会话, 不再依赖"记得跑"。
+
+    ⚠️ **best-effort**: 清理失败**绝不能**让测试会话变红 ——
+    真正的测试失败必须原样暴露, 不能被清理步骤掩盖。
+    """
+    if os.environ.get("XIHONG_SKIP_TESTCONTAINER_CLEANUP") == "1":
+        return
+
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "cleanup_test_containers.py"
+    )
+    if not script.exists():
+        return
+
+    try:
+        subprocess.run(
+            [sys.executable, str(script), "--apply"],
+            cwd=str(script.parent.parent),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+            check=False,
+        )
+    except Exception as exc:  # noqa: BLE001 —— 清理失败不得影响测试结论
+        print("[测试收尾] 清理 testcontainers 残留失败(已忽略): {0}".format(exc))
 
 
 @pytest.fixture(scope="session", autouse=True)

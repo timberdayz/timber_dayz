@@ -296,6 +296,15 @@ jobs:
           #   约定，而 CI 三线全绿 —— 典型的「流水线绿 ≠ 验收」。
           #   ⇒ 约定必须有守护，守护必须进 CI，否则等于没写。
           #
+          # 2026-11-13 第五轮扩：再补 2 个 testcontainers 清理契约文件（纯源码，不碰数据库）：
+          #   test_cleanup_test_containers_contract.py     —— 清理脚本的安全边界
+          #     （只碰 testcontainers 容器 + 匿名卷；命名卷永不触碰；绝不用 prune）
+          #   test_cleanup_test_containers_wired_contract.py —— **清理脚本必须被调用**
+          #     为什么要补：2026-11-13 实测，本机 4 天里攒了 11 个匿名卷（736 MB），
+          #     根因不是 testcontainers 泄漏（实测 Ryuk 正常回收），而是
+          #     「进程被强杀 + 事后没人跑清理脚本」—— 脚本早就存在，却只有它自己的
+          #     契约测试引用它。⇒ **没人调用的守护不是守护**：守护本身也要进 CI。
+          #
           # 2026-11-10 第三轮扩：又补进 30 个文件。怎么确认它们不碰数据库的 ——
           # 把 TEST_DB_PORT 指向不可达端口 1、同时把 DATABASE_URL 指向不可达地址
           # （db_test_config 走前者、迁移器走后者）⇒ 任何真连库的行为都会立刻失败。
@@ -341,6 +350,8 @@ jobs:
             tests/test_migrate_service_env_contract.py \
             tests/test_prod_release_fail_closed_contracts.py \
             tests/test_ps_env_file_encoding_contract.py \
+            backend/tests/test_cleanup_test_containers_wired_contract.py \
+            backend/tests/test_cleanup_test_containers_contract.py \
             tests/test_rebuild_views_materialized_self_heal.py \
             tests/test_reliability_services.py \
             tests/test_run_local_port_selection.py \
@@ -357,6 +368,20 @@ jobs:
         if: matrix.python-version == '3.11'
         run: |
           python scripts/verify_performance_regression.py --mode ci
+
+      - name: Clean up leftover test containers
+        # 收尾: 清理测试期遗留的 testcontainers 容器与匿名卷。
+        #
+        # 为什么必须有这一步(2026-11-13 实测):
+        #   本机 4 天里攒了 11 个匿名 postgres 卷(736 MB), 其中 6 个在 72 秒内连发
+        #   —— 那是进程被强杀、atexit 没跑、事后又没人清理造成的。
+        #   scripts/cleanup_test_containers.py 早就存在, 却只有它自己的契约测试
+        #   引用它 ⇒ "脚本在仓库里"不等于"会被执行"。
+        #
+        # 本步是 **best-effort**: 清理失败不得让流水线变红(那会掩盖真实失败),
+        # 所以用 `|| true` 兜住; 幂等 —— 没有残留时退出码 0。
+        run: |
+          python scripts/cleanup_test_containers.py --apply || true
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.11'
