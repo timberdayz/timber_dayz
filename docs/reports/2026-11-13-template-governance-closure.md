@@ -113,7 +113,7 @@
 | 迁移链 | `alembic heads` | 单 head: `current_schema_20261229_template_format_signature` |
 | 采集机本地库 | `python output/run_current_migrations_local.py --with-backup` | 已升级到新 head; 唯一键无重复 |
 | 全量失败集 diff | `scripts/diff_pytest_junit.py output/junit_before.xml output/junit_after.xml` | **NEW failures = 0**；COMMON = 3（与基线同 3 条既有失败）；ADDED cases = 41；exit 0 |
-| 全量(rebase 后) | `pytest backend/tests tests` | 6664 passed / **3 failed** / 13 skipped（与基线同 3 条既有失败；第 4 条 `.ps1` 编码失败已由本次补 BOM 修复） |
+| 全量(rebase 后) | `pytest backend/tests tests` | 6664 passed / **3 failed** / 13 skipped（与基线同 3 条既有失败；第 4 条 `.ps1` 编码失败已在后续批次按「形态分」修正守护后消解） |
 
 ---
 
@@ -186,7 +186,7 @@
 |---|---|---|
 | CI 格式检查（`black` 比对 `git diff`） | 7 个改动文件未格式化 | 已格式化并入发布提交 |
 | CI Linting（`ruff check`） | `backend/tasks/scheduled_tasks.py` 残留未使用赋值 `now = datetime.now(timezone.utc)`（F841，旧实现遗留） | 删除该行（行为不变） |
-| `.ps1` 编码约定（BOM 或纯 ASCII） | `scripts/watch_cloud_sync_tunnel.ps1` 被远端 v7.25.0 那批加了一个 ⚠️ 却没加 BOM，而采集机是 GBK 代码页 | 补 UTF-8 BOM（内容一字未改；仓库既有用例全带 BOM） |
+| `.ps1` 编码约定 | v7.26.0 给 `watch_cloud_sync_tunnel.ps1` 补了 UTF-8 BOM 并**写进了仓库** —— 那是把**采集机专属形态泄漏进仓库**（仓库 HEAD 里 27 个 `.ps1` 全部无 BOM；采集机形态的 BOM 属 30 项本地适配，不入库） | 远端 v7.26.0 之后已把看门狗改回**纯 ASCII + 无 BOM**；本批把守护改成**按形态分**：仓库形态无 BOM、采集机形态含非 ASCII 必须带 BOM（本地 25 个适配 `.ps1` 的 BOM 形态原样保留、未入库） |
 
 另本地逐条跑过流水线上的 **7 道 Release Gate**：API 契约（0 错误 / 65 警告，与既有基线同）、
 前端 API 方法（0 缺失）、数据库字段、迁移契约（3 passed）、关键表外键、远程部署契约、

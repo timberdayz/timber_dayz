@@ -689,9 +689,28 @@ test that enforces that convention is simply **absent from the CI list**.
 
 Measured case: `scripts/watch_cloud_sync_tunnel.ps1` was given a UTF-8 BOM in
 the v7.26.0 release commit (`05a359a1`), with the stated reason "the repo's
-existing cases all carry a BOM" — the opposite of the fact (26 of 27 tracked
-`.ps1` have no BOM). The real source was v7.25.0 (`e2103f46`) adding one `⚠️`
-to a script that the 2026-11-11 plan requires to stay **pure ASCII**.
+existing cases all carry a BOM" — the opposite of the fact: **all 27 tracked
+`.ps1` in HEAD carry no BOM**. (A first draft of this paragraph claimed the
+inverse, "26 of 27 have no BOM"; measured on this host, that is wrong, and
+the mistake would have pushed someone into stripping the BOM off the
+Chinese-comment scripts.)
+
+The real source was v7.25.0 (`e2103f46`) adding one `⚠️` to a script that the
+2026-11-11 plan requires to stay **pure ASCII**.
+
+**The two forms are not the same thing** — and mixing them up is what caused
+the incident:
+
+| form | where | BOM | why |
+|---|---|---|---|
+| repo form | developer machine / CI / GitHub | **no BOM** | one canonical encoding for the repository |
+| collector form | this host, the 30 files managed by `output/local_adaptations.py` | **UTF-8 BOM** | PS 5.1 decodes a BOM-less `.ps1` with the ANSI code page (936/GBK here); CP936 then swallows the newline after some multi-byte sequences, a comment merges with the next line, a statement gets commented out, and the script dies in the parser |
+
+⇒ A BOM in the repo is the **collector form leaking into the repo**; a missing
+BOM on this host is the **collector form being lost**. The guards in
+`tests/test_ps_env_file_encoding_contract.py` therefore assert **per form**
+(repo form: no BOM; collector form with non-ASCII: BOM required), not one rule
+for both.
 
 ⇒ Why CI stayed green: `tests/test_ps_env_file_encoding_contract.py` was
 **not in the CI root-contract list**, so that guard never ran on CI.
