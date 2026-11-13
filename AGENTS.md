@@ -88,6 +88,15 @@ Detailed rules: `docs/architecture/DASHBOARD.md`.
 - Collection runtime baseline: `docs/guides/DEVELOPMENT_ENVIRONMENT.md` and `docs/guides/ENVIRONMENT_MODEL.md`.
 - Collection failure debugging: `docs/guides/PWCLI_AGENT_DEBUGGING_SOP.md`.
 
+## SSH Access
+
+- SSH accounts, key ownership, tunnel defaults, and read-only production verification are defined in `docs/guides/SSH_ACCESS.md`.
+- The only interactive production identity available from a workstation is `deploy@` with the local `github_actions_deploy` key. `root@` belongs to the deployment pipeline only; its private key lives in GitHub Actions Secrets and is intentionally absent locally.
+- Never treat a `root@` authentication failure as "this machine has no production key". Read `docs/guides/SSH_ACCESS.md` first.
+- Use key-based login only. Do not retry `root@` repeatedly, and prefer read-only commands for production verification.
+
+Detailed rules: `docs/guides/SSH_ACCESS.md`.
+
 ## Release Model
 
 - GitHub deployment is tag-driven, not `origin/main` driven.
@@ -104,6 +113,7 @@ Detailed workflow: `docs/guides/RELEASE_CHECKLIST.md`.
 - `docs/guides/ENVIRONMENT_MODEL.md`: local, Docker, production, and collection environment boundaries
 - `docs/guides/DEVELOPMENT_ENVIRONMENT.md`: local machine, runtime, and application setup baseline
 - `docs/guides/ENV_FILE_CONTRACT.md`: `.env*` and `env*.example` ownership, edit, and secrecy rules
+- `docs/guides/SSH_ACCESS.md`: SSH accounts, key ownership, tunnel defaults, and read-only production verification
 - `docs/guides/DEVELOPMENT_WORKFLOW.md`: startup, validation, testing, and release commands
 - `docs/guides/COLLECTION_AUTHORING_RULES.md`: clean active collection authoring rules
 - `docs/guides/PWCLI_COMMAND_REFERENCE.md`: `pwcli`, `pwcap`, and evidence helper command reference

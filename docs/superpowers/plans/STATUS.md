@@ -1124,6 +1124,33 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
      「以 `.env` 开头」/「文件名含 `password` / `secret` / `credential`」，
      并加守护测试钉死（律 1：门禁的判定口径必须写在测试里）。
 
+## SSH 访问真源文档 + 守护测试（2026-11-13）
+
+- **起因是一次真实的误判**：agent 用 `root@134.175.222.171` 试连，两次
+  `Permission denied` ⇒ 判定「本机没有生产 SSH 私钥」，并据此写下
+  「部署类核验无法登机」—— 后续多轮判断都建立在这个错误前提上。
+- **真相**：隧道与生产运维都用 **`deploy@`** + **`~/.ssh/github_actions_deploy`**，
+  这把钥匙**一直在本机**、隧道**一直在跑**（实测 PID 30036、`15433 → 15435`）；
+  `root@` 属于**部署流水线**（私钥只在 GitHub Actions Secret `PRODUCTION_SSH_PRIVATE_KEY`），
+  **本机刻意不持有** ⇒ 那是设计，不是缺失。
+- **新增真源**：`docs/guides/SSH_ACCESS.md` —— 四条通道（GitHub 代码 / 生产运维 /
+  云端隧道 / 生产部署）的**账号 ↔ 钥匙 ↔ 用途**表、机器可读配置口径、
+  自检清单、常见误判→真相、红线、变更纪律。
+- **新增守护**：`tests/test_ssh_access_contract.py`（12 例）——
+  钉死「文档 ↔ 脚本」一致（账号、端口、隧道默认值不许漂移）、
+  脚本不许把 `root@` 当登录目标、不许口令登录、本机必须持有隧道私钥、
+  入口文档必须指向这份真源。
+- **CI 覆盖补齐**：`test_ssh_access_contract.py` + `test_cloud_sync_tunnel_watchdog.py`
+  + `test_container_cloud_tunnel_host_contract.py` 三份守护**此前根本不在 CI 里跑**
+  ⇒ 已进 `ci.yml` 的根契约清单（纯源码，不碰数据库）⇒ **漂移会让 CI 直接变红**。
+- **入口已铺好**：`AGENTS.md`（新增 SSH Access 小节 + 文档地图）、
+  `docs/ACTIVE_DOCS.md`、`docs/guides/ENVIRONMENT_MODEL.md`、
+  `docs/guides/RELEASE_CHECKLIST.md`（"流水线绿 ≠ 验收" 那节给出正确账号与命令）、
+  `scripts/watch_cloud_sync_tunnel.ps1` 头部。
+- **两处更正作废**：上一轮口头结论「本机无生产 SSH 私钥」「无法登机核验」**均不成立**；
+  `deploy@` 实测可登机（VM-0-15-ubuntu，7 个容器全 healthy），
+  生产只读核查（容器状态 / nginx 日志 / 只读 SQL）能力是有的。
+
 ## Notes
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).

@@ -10,6 +10,12 @@
 
         ssh -N -L 15433:127.0.0.1:15435 -i <key> deploy@<host>
 
+    The account, the key, the defaults, and the read-only production
+    verification commands are defined in docs/guides/SSH_ACCESS.md (SSOT).
+    ⚠️ `deploy@` is the ONLY interactive production identity; `root@` belongs
+       to the deployment pipeline and its key is intentionally absent locally.
+       A `root@` failure is NOT evidence that this machine has no key.
+
     Two properties of that tunnel matter:
       * the ssh process dies on its own after ~90s of upstream silence
         (ServerAliveInterval=30 / ServerAliveCountMax=3);

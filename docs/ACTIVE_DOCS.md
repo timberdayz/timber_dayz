@@ -16,6 +16,7 @@ Do not use full-repository search as the first step when one of these files cove
 - `docs/guides/VERIFICATION_MATRIX.md`: verification checks by changed surface
 - `docs/guides/DOCUMENT_LIFECYCLE.md`: active, reference, runbook, and archive document policy
 - `docs/guides/PERMISSION_MODEL.md`: active frontend/backend permission model and maintenance rules
+- `docs/guides/SSH_ACCESS.md`: SSH accounts, key ownership, tunnel defaults, and read-only production verification
 
 ## Development And Release
 

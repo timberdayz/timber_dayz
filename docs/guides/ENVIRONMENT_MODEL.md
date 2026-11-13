@@ -20,6 +20,7 @@ This file is a repository adapter for `superpowers`. It defines environment boun
 
 - Production changes must follow the tag-driven release model.
 - Production deployment truth is the release tag, not `origin/main`.
+- Production read-only verification uses the interactive `deploy@` identity; `root@` belongs to the deployment pipeline. Accounts and keys: `docs/guides/SSH_ACCESS.md`.
 - Do not change production runtime behavior as part of cleanup unless it is required for the task.
 
 ## Production Collection Runtime

@@ -658,6 +658,17 @@ modified inside the interval and defers them to the next cycle.
 
 ### 4. "The pipeline says success" is **not** acceptance — verify over SSH yourself
 
+Use the **interactive** production identity — `deploy@134.175.222.171` with the local
+`~/.ssh/github_actions_deploy` key. `root@` belongs to the deployment pipeline
+(its private key lives in GitHub Actions Secrets and is intentionally absent locally),
+so a `root@` authentication failure is **not** evidence that this machine lacks a
+production key. Accounts, keys, and the read-only command set: `docs/guides/SSH_ACCESS.md`.
+
+```powershell
+ssh -i "$env:USERPROFILE\.ssh\github_actions_deploy" -o BatchMode=yes `
+  deploy@134.175.222.171 "docker ps --format '{{.Names}}\t{{.Status}}'"
+```
+
 After the deploy, log in independently (read-only) and check:
 
 - all 7 containers `healthy`, and the application containers report the **intended
