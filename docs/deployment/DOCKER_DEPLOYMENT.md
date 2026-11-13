@@ -1,5 +1,10 @@
 # 西虹ERP系统 - Docker部署完整指南
 
+> ⚠️ **本文是 v4.0.0（2025-10）的旧文档**，命令与账号多半已经过时。
+> **SSH 账号、钥匙、隧道端口一律以 `docs/guides/SSH_ACCESS.md` 为准**
+> （交互式生产账号是 `deploy@`，`root@` 只属于部署流水线 —— 本机没有它的私钥，
+> 这是设计，不是"缺私钥"）。当前部署流程见 `docs/guides/RELEASE_CHECKLIST.md`。
+
 [![Docker](https://img.shields.io/badge/Docker-20.10+-blue.svg)](https://www.docker.com/)
 [![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2.0+-blue.svg)](https://docs.docker.com/compose/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue.svg)](https://www.postgresql.org/)
