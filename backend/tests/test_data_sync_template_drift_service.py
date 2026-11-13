@@ -8,7 +8,22 @@
    「需要更新」列表里, 而不是因为「当前模板重算结果为 ready」而消失。
 3. **语义契约不再产生假阳性** —— analytics 域 100% 精确匹配时,
    契约状态不应是 breaking_drift。
-4. **语义契约修复后新增列不能漏报** —— 「源文件新增一列」必须仍然是结构漂移。
+4. **漂移判定只有一份口径** —— 「什么算阻断」由 L3
+   (``data_sync_status_semantics.classify_drift``)唯一决定:
+   * **多一列** ⇒ 阻断(模板落后于源文件 ⇒ 不跟进就会**静默丢数据**);
+   * **用户确认过的新列** ⇒ 不阻断(用户明说不要);
+   * **列被替换**(少一列 + 多一列) ⇒ 阻断(口径真的变了);
+   * **少一列且无法证明它可缺** ⇒ 阻断(保守)。
+
+   > 2026-11-13 口径调整: 原第 4 条写的是「源文件新增一列必须仍然是结构漂移」,
+   > 本次**保留**了它的结论, 但把**理由**换了 —— 并且补上了一条此前没人写下来的
+   > 不变量: 「多一列若放行, 新列的数据会被静默丢弃」
+   > (模板没声明的列不会写进事实表, 且已入库的行不会回头重算)。
+   > ⇒ 「多一列」必须先拦一道, 把「模板落后」变成一个待办;
+   >   等运营更新模板(新版本纳入该列)⇒ 契约晋升 ⇒ 文件按新模板解释
+   >   ⇒ **新列的数据这才真正落库**。
+   > 唯一例外: 用户在「已确认的新列」里勾掉的列 ⇒ 不阻断。
+   > 详见 ``docs/adr/2026-11-13-template-drift-classification-ssot.md``。
 """
 
 from datetime import datetime, timezone
@@ -291,8 +306,17 @@ async def test_analytics_contract_is_ready_on_exact_header_match(drift_session_f
 
 
 @pytest.mark.asyncio
-async def test_analytics_new_column_is_still_structural_drift(drift_session_factory):
-    """R4: 契约修好之后, 「源文件新增一列」必须仍然触发模板更新。"""
+async def test_analytics_pure_added_column_is_still_blocking(drift_session_factory):
+    """纯新增一列 ⇒ 仍然阻断(2026-11-13 口径澄清)。
+
+    理由(此前没人写下来): 模板没声明的列**不会写进事实表**。
+    放行 ⇒ 新列的数据被静默丢弃, 且没有任何提示(面板不提示、已入库的行不重算)。
+    ⇒ 「多一列」必须先拦一道, 把「模板落后于源文件」变成一个待办;
+      等运营更新模板(新版本纳入该列)⇒ 契约晋升 ⇒ 文件按新模板解释
+      ⇒ **新列的数据这才真正落库**。
+
+    与下一个用例配套: 列**被替换**时同样阻断。
+    """
     from backend.services.data_sync_template_status_service import (
         DataSyncTemplateStatusService,
     )
@@ -337,7 +361,64 @@ async def test_analytics_new_column_is_still_structural_drift(drift_session_fact
 
     assert status["template_status"] == "update_required"
     assert status["template_update_required"] is True
+    assert status["governance_status"] == "breaking_drift"
     assert "新增指标列" in status["header_changes"]["added_fields"]
+
+
+@pytest.mark.asyncio
+async def test_analytics_replaced_column_is_still_blocking(drift_session_factory):
+    """列**被替换**(少一列 + 多一列)⇒ 仍然阻断。
+
+    这正是 tiktok/analytics 2026-10-29 的真实漂移:
+    「已退款的商品件数」换成「退款金额」(单位从件变元) + 新增「商品卡 GMV」。
+    ⇒ 指标口径真的变了, 必须让人重新确认模板。
+    """
+    from backend.services.data_sync_template_status_service import (
+        DataSyncTemplateStatusService,
+    )
+
+    now = _now()
+    async with drift_session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="tiktok",
+            data_domain="analytics",
+            granularity="monthly",
+            sub_domain=None,
+            template_name="tiktok_analytics__monthly_v1",
+            version=1,
+            status="published",
+            header_row=8,
+            header_columns=["日期", "商品访客数", "页面浏览次数", "已退款的商品件数"],
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(template)
+        await session.commit()
+        await session.refresh(template)
+
+        catalog_file = CatalogFile(
+            file_path="data/raw/analytics.xlsx",
+            file_name="analytics.xlsx",
+            source="data/raw",
+            platform_code="tiktok",
+            data_domain="analytics",
+            granularity="monthly",
+            status="pending",
+            first_seen_at=now,
+        )
+        session.add(catalog_file)
+        await session.commit()
+
+        status = await DataSyncTemplateStatusService(session).evaluate_catalog_file(
+            catalog_file,
+            template=template,
+            current_columns=["日期", "商品访客数", "页面浏览次数", "退款金额", "商品卡 GMV"],
+        )
+
+    assert status["template_status"] == "update_required"
+    assert status["template_update_required"] is True
+    assert status["governance_status"] == "breaking_drift"
+    assert "已退款的商品件数" in status["header_changes"]["removed_fields"]
 
 
 # ----------------------------------------------------------------------

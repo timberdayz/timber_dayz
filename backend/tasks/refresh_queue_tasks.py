@@ -445,12 +445,24 @@ async def _async_process_refresh_queue_task() -> dict:
                     "stale_targets": validation_report.stale_targets,
                 }
             await _invalidate_refresh_target_caches(targets)
-            await queue_service.mark_completed(task.id)
+            completed_task = await queue_service.mark_completed(task.id)
+            # [*] 批次 H(H-2): 跑的过程中又有文件入库 ⇒ 这条被重新排回 pending,
+            #     下一次轮询会再刷一轮收口。这里如实上报, 便于观测。
+            rerun_scheduled = (
+                getattr(completed_task, "status", None) == "pending"
+            )
+            if rerun_scheduled:
+                logger.info(
+                    "[RefreshQueue] 刷新期间有新数据入库, 已排入收口轮: job_id=%s domain=%s",
+                    task.job_id,
+                    lane,
+                )
             return {
                 "status": "success",
                 "job_id": task.job_id,
                 "run_id": run_id,
                 "domain": lane,
+                "rerun_scheduled": rerun_scheduled,
             }
         except Exception as exc:  # noqa: BLE001
             if hasattr(db, "rollback"):

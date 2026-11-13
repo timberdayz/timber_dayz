@@ -20,12 +20,7 @@ sys.path.insert(0, str(root_dir))
 from backend.celery_app import celery_app
 from backend.models.database import SessionLocal
 from backend.utils.async_task_runner import run_async_task
-from modules.core.db import CatalogFile, FieldMappingTemplate
-from backend.services.template_contract_service import (
-    CONTRACT_SOURCE_PROMOTION,
-    build_template_contract,
-    write_template_contract,
-)
+from modules.core.db import CatalogFile
 from backend.services.data_sync_status_semantics import (
     GOVERNANCE_STATUS_MISSING_FAMILY,
     GOVERNANCE_STATUS_MISSING_VARIANT,
@@ -61,19 +56,17 @@ AUTO_INGEST_STALE_WARNING_MINUTES = max(
 AUTO_INGEST_WATCHDOG_INTERVAL_MINUTES = max(
     1, int(os.getenv("AUTO_INGEST_WATCHDOG_INTERVAL_MINUTES", "5"))
 )
-AUTO_INGEST_TEMPLATE_RECHECK_MAX_FILES = max(
-    1, int(os.getenv("AUTO_INGEST_TEMPLATE_RECHECK_MAX_FILES", "20"))
+# [*] 重检的**旋钮口径**在 ``TemplateRecheckService``(SSOT)里 ——
+#     定时巡检与「模板发布即重检」必须用同一份, 否则两边的行为会漂。
+from backend.services.template_recheck_service import (  # noqa: E402
+    TEMPLATE_RECHECK_MAX_BLOCKED_ROUNDS,
+    TEMPLATE_RECHECK_MAX_FILES,
+    TEMPLATE_RECHECK_SCAN_FACTOR,
 )
-# [*] 重检扫描窗口倍数: 队列按「最近一次重检时间」轮转,
-# 扫描窗口必须大于单次处理上限, 否则永久阻塞的文件会一直占满前面的名额,
-# 把后面的文件饿死(实测: 27 个待更新文件里, analytics 的 2 个排在第 24/27 位, 永远不被重检)。
-AUTO_INGEST_TEMPLATE_RECHECK_SCAN_FACTOR = max(
-    1, int(os.getenv("AUTO_INGEST_TEMPLATE_RECHECK_SCAN_FACTOR", "5"))
-)
-# [*] 连续重检仍阻塞多少轮后, 降级为「需要人工处理模板」
-AUTO_INGEST_TEMPLATE_RECHECK_MAX_ROUNDS = max(
-    1, int(os.getenv("AUTO_INGEST_TEMPLATE_RECHECK_MAX_ROUNDS", "3"))
-)
+
+AUTO_INGEST_TEMPLATE_RECHECK_MAX_FILES = TEMPLATE_RECHECK_MAX_FILES
+AUTO_INGEST_TEMPLATE_RECHECK_SCAN_FACTOR = TEMPLATE_RECHECK_SCAN_FACTOR
+AUTO_INGEST_TEMPLATE_RECHECK_MAX_ROUNDS = TEMPLATE_RECHECK_MAX_BLOCKED_ROUNDS
 AUTO_INGEST_LOCK_KEY = int(os.getenv("AUTO_INGEST_LOCK_KEY", "928451203"))
 AUTO_INGEST_WATCHDOG_LOCK_KEY = int(
     os.getenv("AUTO_INGEST_WATCHDOG_LOCK_KEY", "928451204")
@@ -385,44 +378,8 @@ def _recover_stale_auto_ingest_records(
     return {"tasks": recovered_tasks, "files": recovered_files}
 
 
-async def _build_promoted_contract(db_local, readiness: Dict[str, Any]):
-    """按判定链路的 ``contract_promotion`` 信号算出新契约(**不落库**)。
-
-    为什么单独一步
-    --------------
-    判定链路发现「契约指向的模板已经解释不了这个文件, 而当前已发布模板可以」时,
-    会给出 ``contract_promotion`` 信号。这里把新契约**算出来**交给外层同步会话
-    写入 —— 两个会话同时改同一行 ``file_metadata`` 会互相覆盖(后写的赢),
-    契约晋升会被外层的旧快照冲掉。
-
-    落库后契约就指向了「当前能解释这个文件的那一版模板」, 基准重新稳定;
-    否则契约会一直把文件钉在旧模板上, 下一轮重检又被打回。
-    """
-    promotion = (readiness or {}).get("contract_promotion")
-    if not isinstance(promotion, dict):
-        return None
-    to_template_id = promotion.get("to_template_id")
-    if to_template_id is None:
-        return None
-    try:
-        template = await db_local.get(FieldMappingTemplate, int(to_template_id))
-    except (TypeError, ValueError):
-        return None
-    if template is None:
-        return None
-    contract = build_template_contract(
-        template,
-        source=CONTRACT_SOURCE_PROMOTION,
-    )
-    if not contract:
-        return None
-    logger.info(
-        "[AutoIngest] 契约晋升: 模板 v%s -> v%s (%s)",
-        promotion.get("from_template_version"),
-        promotion.get("to_template_version"),
-        getattr(template, "template_name", None),
-    )
-    return contract
+# [*] 契约晋升的算子已搬到 ``backend/services/template_recheck_service.py``
+#     (与「发布即重检」共用同一份) —— 本模块不再持有第二份定义。
 
 
 def _recover_template_update_required_files(
@@ -470,45 +427,13 @@ def _recover_template_update_required_files(
 
     blocked_files = sorted(blocked_files, key=_recheck_sort_key)[:max_files]
 
+    # [*] 判定与放行口径复用 ``TemplateRecheckService``(SSOT)——
+    #     定时巡检与「模板发布即重检」走**同一份**逻辑,
+    #     不会出现「定时任务放行、发布后重检不放行」这种两套尺子。
     async def _load_readiness(file_ids: List[int]) -> Dict[int, Dict[str, Any]]:
-        from backend.models.database import AsyncSessionLocal
-        from backend.services.data_sync_service import DataSyncService
+        from backend.services.template_recheck_service import TemplateRecheckService
 
-        results: Dict[int, Dict[str, Any]] = {}
-        for file_id in file_ids:
-            db_local = AsyncSessionLocal()
-            try:
-                readiness = await DataSyncService(db_local).get_file_sync_readiness(
-                    file_id,
-                    use_template_header_row=True,
-                )
-                results[file_id] = readiness if isinstance(readiness, dict) else {}
-                # [*] 契约晋升: 判定链路发现「契约基准已解释不了这个文件,
-                #     当前已发布模板可以」时, 会给出 contract_promotion 信号。
-                #     这里把新契约**算出来**(不落库) —— 落库由外层同步会话统一做,
-                #     否则两个会话同时改同一行 file_metadata 会互相覆盖。
-                results[file_id]["promoted_contract"] = await _build_promoted_contract(
-                    db_local,
-                    readiness,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "[AutoIngest] template readiness recheck failed for file_id=%s: %s",
-                    file_id,
-                    exc,
-                    exc_info=True,
-                )
-                results[file_id] = {
-                    "should_auto_sync": False,
-                    "update_reason": str(exc),
-                    "promoted_contract": None,
-                }
-            finally:
-                try:
-                    await db_local.close()
-                except Exception:
-                    pass
-        return results
+        return await TemplateRecheckService.evaluate_files(file_ids)
 
     file_ids = [
         int(file_record.id)
@@ -523,90 +448,13 @@ def _recover_template_update_required_files(
     recovered = 0
     still_blocked = 0
 
+    from backend.services.template_recheck_service import TemplateRecheckService
+
     for file_record in blocked_files:
         readiness = readiness_by_id.get(int(file_record.id), {})
-        meta = dict(file_record.file_metadata or {})
-        auto_meta = dict(meta.get("auto_ingest") or {})
-        if readiness.get("should_auto_sync") is True:
-            auto_meta["last_status"] = "readiness_recovered"
-            auto_meta["last_recovered_at"] = now.isoformat()
-            auto_meta["last_recovered_from"] = "template_update_required"
-            auto_meta["current_task_id"] = None
-            auto_meta["last_template_status"] = readiness.get("template_status")
-            auto_meta["last_governance_status"] = readiness.get("governance_status")
-            # [*] 漂移已解决: 快照移入历史, 不再占用当前漂移位。
-            # 历史文件可能本来就没有快照(快照功能上线前被标记的),
-            # 这时也要把「本次重检确认已放行」的信息留痕, 便于追溯。
-            previous_snapshot = meta.pop("template_drift", None)
-            resolved_snapshot = previous_snapshot or {
-                "detected_at": now.isoformat(),
-                "template_status": readiness.get("template_status"),
-                "governance_status": readiness.get("governance_status"),
-                "reason": "模板已更新，重检确认可正常入库",
-                "source_file_id": getattr(file_record, "id", None),
-                "source_file_name": getattr(file_record, "file_name", None),
-            }
-            auto_meta["last_resolved_drift"] = resolved_snapshot
-            auto_meta.pop("blocked_rounds", None)
-            auto_meta.pop("needs_manual_template_update", None)
-            meta["auto_ingest"] = auto_meta
-            file_record.file_metadata = meta
-            # [*] 契约晋升落库: 契约基准已解释不了这个文件, 当前已发布模板可以 ——
-            #     把契约改写成当前版本, 否则契约会继续把文件钉在旧模板上,
-            #     下一轮重检又被打回(而且入库会按旧模板解析, 丢掉新增字段)。
-            promoted_contract = readiness.get("promoted_contract")
-            if promoted_contract:
-                write_template_contract(file_record, promoted_contract)
-            file_record.status = "pending"
-            file_record.error_message = None
+        if TemplateRecheckService.apply_recheck(file_record, readiness):
             recovered += 1
         else:
-            reason = (
-                readiness.get("update_reason")
-                or readiness.get("message")
-                or readiness.get("error_code")
-                # [*] 已有更具体的报错就沿用它(比如「无模板(platform=…, domain=…)」),
-                #     别把信息降级成一句 error_code。
-                or getattr(file_record, "error_message", None)
-                or "template update required before ingest"
-            )
-            auto_meta["last_status"] = "template_update_required"
-            auto_meta["last_reason"] = str(reason)
-            auto_meta["last_rechecked_at"] = now.isoformat()
-            auto_meta["current_task_id"] = None
-            auto_meta["last_template_status"] = readiness.get("template_status")
-            auto_meta["last_governance_status"] = readiness.get("governance_status")
-            # [*] 连续重检仍阻塞 -> 降级为「需要人工处理模板」, 避免永久静默占用队列
-            blocked_rounds = int(auto_meta.get("blocked_rounds") or 0) + 1
-            auto_meta["blocked_rounds"] = blocked_rounds
-            if blocked_rounds >= AUTO_INGEST_TEMPLATE_RECHECK_MAX_ROUNDS:
-                auto_meta["needs_manual_template_update"] = True
-                auto_meta["last_status"] = "needs_manual_template_update"
-                logger.warning(
-                    "[AutoIngest] 文件连续%d轮重检仍被模板阻塞, 降级为需人工处理模板: %s (%s)",
-                    blocked_rounds,
-                    getattr(file_record, "file_name", None),
-                    reason,
-                )
-            meta["auto_ingest"] = auto_meta
-            file_record.file_metadata = meta
-            # [*] 回填/刷新漂移快照: 让治理面板能展示「漂移发生时」的模板版本与表头差异
-            try:
-                from backend.services.data_sync_template_drift_service import (
-                    DataSyncTemplateDriftService,
-                )
-
-                DataSyncTemplateDriftService.persist_snapshot(
-                    file_record,
-                    readiness,
-                    message=str(reason),
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(
-                    "[AutoIngest] persist drift snapshot skipped for %s: %s",
-                    getattr(file_record, "file_name", None),
-                    exc,
-                )
             still_blocked += 1
 
     if recovered or still_blocked:

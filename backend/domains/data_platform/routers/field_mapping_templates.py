@@ -1390,6 +1390,48 @@ async def preview_template_hash_policy(
     )
 
 
+async def _recheck_after_template_publish(
+    db: AsyncSession,
+    *,
+    platform: str,
+    data_domain: str,
+    granularity: Optional[str],
+    sub_domain: Optional[str],
+    account: Optional[str],
+) -> Dict[str, Any]:
+    """模板发布后重检受影响文件(变更即闭环)。
+
+    判定与放行口径在 ``backend/services/template_recheck_service.py``(SSOT),
+    与定时巡检共用同一份 —— 不会出现「定时任务放行、发布后不放行」。
+
+    本函数**不抛异常**: 重检失败只是让文件留在待办里等下一轮巡检,
+    不应该让「模板已保存」这件事变成失败。
+    """
+    try:
+        from backend.services.template_recheck_service import TemplateRecheckService
+
+        summary = await TemplateRecheckService.recheck_dimension(
+            db,
+            platform=platform,
+            data_domain=data_domain,
+            granularity=granularity,
+            sub_domain=sub_domain,
+            account=account,
+        )
+        # [*] 缓存无需显式失效: 缓存键含「文件状态 + 修改时间 + 模板 id/版本」
+        #     (见 ``backend/services/data_sync_cache_key.py``) ⇒
+        #     文件放行(状态变化)与模板发布(版本变化)都会让旧缓存自然失效。
+        return summary
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[Template] 发布后重检跳过 platform=%s domain=%s: %s",
+            platform,
+            data_domain,
+            exc,
+        )
+        return {"checked": 0, "released": 0, "still_blocked": 0, "file_ids": []}
+
+
 @router.post("/templates/save", response_model=TemplateSaveResponse)
 async def save_mapping_template(
     request: TemplateSaveRequest,
@@ -1651,6 +1693,24 @@ async def save_mapping_template(
             f"projection_status={save_result['projection_status']}, "
             f"family_id={save_result['family_id']}"
         )
+
+        # [*] 变更即闭环: 模板发布后**立刻**重检受影响的文件。
+        #
+        # 业务上, 一次模板变更的完成标准不是「新模板已保存」, 而是
+        # 「受它影响的文件已经重新评估过」。历史上这一步只能等 15 分钟一次的
+        # 定时巡检 ⇒ 运营保存完仍然看到「仍未通过治理复核」, 做对了却看不到效果。
+        #
+        # 重检判定复用入库前置校验同一条链路(``TemplateRecheckService``),
+        # 能过的当场放行(顺带完成契约晋升与漂移快照搬移), 不能过的原样留在待办里。
+        recheck_summary = await _recheck_after_template_publish(
+            db,
+            platform=request.platform,
+            data_domain=request.data_domain,
+            granularity=request.granularity,
+            sub_domain=request.sub_domain,
+            account=request.account,
+        )
+        save_result["recheck"] = recheck_summary
 
         return TemplateSaveResponse(
             success=True,

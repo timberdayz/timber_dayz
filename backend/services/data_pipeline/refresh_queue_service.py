@@ -20,6 +20,19 @@ REFRESH_LANES = frozenset({"orders", "analytics", "products", "inventory", "serv
 #: 共享道：没有明确业务域的任务都进这里（生产实测 614 条里只有 7 条）。
 DEFAULT_LANE = "default"
 
+#: 「这条刷新跑的时候, 又有新文件入库了」的标记(存在 ``context_json`` 里)。
+#:
+#: [*] 批次 H(H-2): 入库批量刷新。
+#:
+#:     以前只合并「pending」的任务 ⇒ 一条刷新**正在跑**的时候新到的文件
+#:     会另起一条新任务 ⇒ 一轮入库(54 个积压文件)会刷出好几轮完整刷新
+#:     (实测每轮 25 个物化视图、单次 170 秒以上)。
+#:
+#:     现在: 新事件被**正在跑**的那条吸收(打上这个标记),
+#:     它跑完后发现标记 ⇒ 把自己重新排回 pending ⇒ 再刷一次收口。
+#:     ⇒ 一轮入库至多「跑中的那一轮 + 收口的那一轮」。
+RERUN_REQUESTED_FLAG = "rerun_requested"
+
 #: 同时最多跑几道刷新。
 #:
 #: 为什么是 2：生产 PG 容器内存实限 **1.5GiB**，``work_mem=8MB × max_connections=80``
@@ -119,12 +132,27 @@ class RefreshQueueService:
         targets: list[str],
         context: dict[str, Any] | None = None,
     ) -> RefreshQueueTask:
+        """把一次刷新意图入队(同目标的可重复入队会**合并**成一条)。
+
+        [*] 批次 H(H-2): 合并范围从「pending」扩到「pending + running」。
+
+            一条刷新**正在跑**的时候到的新事件, 以前会另起一条新任务
+            ⇒ 一轮入库刷出好几轮完整刷新。
+            现在它被正在跑的那条吸收(打 ``rerun_requested`` 标记),
+            跑完再补一轮收口。
+        """
         dedupe_key = self.build_dedupe_key(pipeline_name, targets)
-        existing = await self._get_pending_by_dedupe_key(dedupe_key)
+        existing = await self._get_task_by_dedupe_key(
+            dedupe_key, statuses=("pending", "running")
+        )
         if existing:
-            existing.context_json = self._merge_context(
+            merged_context = self._merge_context(
                 existing.context_json or {}, context or {}
             )
+            if existing.status == "running":
+                # [*] 正在跑的那条 ⇒ 记下「跑完还要再来一轮」。
+                merged_context[RERUN_REQUESTED_FLAG] = True
+            existing.context_json = merged_context
             # 域跟着上下文走：合并进来的事件可能带了更明确的 data_domain。
             existing.domain = resolve_refresh_lane(existing.context_json or {})
             await self.db.commit()
@@ -284,9 +312,30 @@ class RefreshQueueService:
         return len(rows)
 
     async def mark_completed(self, task_id: int) -> RefreshQueueTask:
+        """标记完成。
+
+        [*] 批次 H(H-2): 如果**跑的过程中**又有新文件入库
+        (上下文里带 ``rerun_requested`` 标记), 不落「completed」,
+        而是**重新排回 pending** —— 再刷一轮, 把这期间到的数据收口。
+
+        没有标记 ⇒ 与从前一致(直接完成)。
+        """
         task = await self.db.get(RefreshQueueTask, task_id)
         if task is None:
             raise ValueError(f"refresh queue task {task_id} not found")
+        context = dict(task.context_json or {})
+        if context.pop(RERUN_REQUESTED_FLAG, False):
+            task.context_json = context
+            task.status = "pending"
+            task.next_retry_at = None
+            task.started_at = None
+            task.finished_at = None
+            task.last_error = None
+            # 收口轮是**新的一轮**工作, 不是「失败重试」⇒ 失败预算重新算。
+            task.attempt_count = 0
+            await self.db.commit()
+            await self.db.refresh(task)
+            return task
         task.status = "completed"
         task.next_retry_at = None
         task.finished_at = datetime.now(timezone.utc)
@@ -379,16 +428,29 @@ class RefreshQueueService:
         await self.db.refresh(task)
         return task
 
-    async def _get_pending_by_dedupe_key(
-        self, dedupe_key: str
+    async def _get_task_by_dedupe_key(
+        self,
+        dedupe_key: str,
+        *,
+        statuses: tuple[str, ...] = ("pending",),
     ) -> RefreshQueueTask | None:
+        """按去重键取一条**未终结**的任务。
+
+        [*] 批次 H(H-2): 状态范围可扩展 —— 「running」也要能命中,
+            否则正在跑的刷新吸收不到新到的事件。
+        """
         result = await self.db.execute(
             select(RefreshQueueTask)
             .where(
                 RefreshQueueTask.dedupe_key == dedupe_key,
-                RefreshQueueTask.status == "pending",
+                RefreshQueueTask.status.in_(statuses),
             )
             .order_by(RefreshQueueTask.id.asc())
             .limit(1)
         )
         return result.scalar_one_or_none()
+
+    async def _get_pending_by_dedupe_key(
+        self, dedupe_key: str
+    ) -> RefreshQueueTask | None:
+        return await self._get_task_by_dedupe_key(dedupe_key, statuses=("pending",))

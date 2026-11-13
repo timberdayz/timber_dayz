@@ -32,6 +32,8 @@ from backend.services.data_sync_status_semantics import (
     TEMPLATE_STATUS_MISSING_VARIANT,
     TEMPLATE_STATUS_READY,
     TEMPLATE_STATUS_UPDATE_REQUIRED,
+    classify_drift,
+    governance_status_for,
 )
 
 
@@ -146,6 +148,52 @@ class DataSyncTemplateStatusService:
             "contract_fallback": contract_fallback,
         }
 
+    async def _resolve_same_format_published(
+        self,
+        *,
+        catalog_file: CatalogFile,
+        reference: Optional[FieldMappingTemplate],
+        fallback: Optional[FieldMappingTemplate],
+        normalized_sub_domain: Optional[str],
+        normalized_account: Optional[str],
+    ) -> Optional[FieldMappingTemplate]:
+        """把「当前已发布模板」收敛到**与基准同格式**的那一版。
+
+        [*] 批次 H(H-1): 同维度多格式并存后, 「当前已发布模板」不再等于
+        「版本号最高的那个」—— 那可能是另一种格式。
+
+        两种情形要分清
+        --------------
+        * **基准那一版仍然 published**(两种格式并存)⇒ 同格式的已发布模板
+          就是它自己 ⇒ 「我们升级过模板」这个信号应当**不成立**
+          (不是升级, 是并存);
+        * **基准那一版已被归档**(新版把它顶掉了)⇒ 同格式**没有**已发布版本
+          ⇒ 这一格式确实被取代了 ⇒ 仍用「当前已发布模板」做对照,
+          「我们升级过模板」的信号照常成立。
+
+        ⇒ 找不到同格式的已发布模板时, 退回 **fallback(当前已发布模板)**,
+        而不是退回基准模板本身。
+        """
+        if fallback is None or reference is None:
+            return fallback
+
+        from backend.services.template_family_service import resolve_format_signature
+
+        reference_signature = resolve_format_signature(reference)
+        fallback_signature = resolve_format_signature(fallback)
+        if not reference_signature or reference_signature == fallback_signature:
+            return fallback
+
+        same_format = await self.template_matcher.find_published_template_by_format(
+            platform=catalog_file.platform_code,
+            data_domain=catalog_file.data_domain,
+            granularity=catalog_file.granularity,
+            sub_domain=normalized_sub_domain,
+            account=normalized_account,
+            format_signature=reference_signature,
+        )
+        return same_format or fallback
+
     async def evaluate_catalog_file(
         self,
         catalog_file: CatalogFile,
@@ -249,6 +297,20 @@ class DataSyncTemplateStatusService:
                         sub_domain=normalized_sub_domain,
                         account=normalized_account,
                     )
+                # [*] 批次 H(H-1): 「当前模板」必须限定在**同格式**内。
+                #
+                #     同维度多格式并存之后, 维度里最新的已发布模板可能是
+                #     **另一种格式**(平台改过导出格式)。
+                #     拿它跟契约比, 会把「另一种格式并存」误报成
+                #     「我们升级过模板」—— 治理面板上就会出现
+                #     「文件按 v3 采集, 当前已发布模板为 v12」这种看不懂的话。
+                published_template = await self._resolve_same_format_published(
+                    catalog_file=catalog_file,
+                    reference=baseline_template,
+                    fallback=published_template,
+                    normalized_sub_domain=normalized_sub_domain,
+                    normalized_account=normalized_account,
+                )
                 if published_template is not None:
                     current_template = published_template
         elif contract:
@@ -263,6 +325,14 @@ class DataSyncTemplateStatusService:
                     granularity=catalog_file.granularity,
                     sub_domain=normalized_sub_domain,
                     account=normalized_account,
+                )
+                # [*] 批次 H(H-1): 同格式(与上面那条分支同一把尺子)。
+                published_template = await self._resolve_same_format_published(
+                    catalog_file=catalog_file,
+                    reference=candidate,
+                    fallback=published_template,
+                    normalized_sub_domain=normalized_sub_domain,
+                    normalized_account=normalized_account,
                 )
                 current_template = published_template or candidate
             # [*] 契约失效(invalid)⇒ **不再无声回退**:
@@ -406,35 +476,49 @@ class DataSyncTemplateStatusService:
 
         # [*] 批次 B: 值形态漂移优先于「精确匹配」。
         #
-        # 表头一个字段都没变, 但日期值从 ``01/10/2026`` 变成了 ``01-10-2026`` ——
+        # 表头一个字段都没变, 但日期值从 ``01/10/2026`` 变成了 ``01-10/2026`` ——
         # 这时候 ``is_exact_match`` 是 True, 但这份文件入库**必然**整份失败。
         # 所以先判 format_drift, 不要被「精确匹配」盖过去。
         format_drift = bool(header_changes.get("format_drift", False))
 
-        if format_drift:
-            status = TEMPLATE_STATUS_FORMAT_DRIFT
-            governance_status = GOVERNANCE_STATUS_FORMAT_DRIFT
-            should_auto_sync = False
-            update_required = True
-        elif header_changes.get("is_exact_match", False):
-            status = TEMPLATE_STATUS_READY
-            governance_status = GOVERNANCE_STATUS_READY
-            should_auto_sync = True
-            update_required = False
-        elif header_changes.get("is_semantic_match", False) or (
-            header_changes.get("detected", False)
-            and not blocking_changes
-            and bool(non_blocking_changes)
-        ):
-            status = TEMPLATE_STATUS_ALIAS_ONLY
-            governance_status = GOVERNANCE_STATUS_NON_BREAKING_DRIFT
-            should_auto_sync = True
-            update_required = False
-        else:
-            status = TEMPLATE_STATUS_UPDATE_REQUIRED
-            governance_status = GOVERNANCE_STATUS_BREAKING_DRIFT
-            should_auto_sync = False
-            update_required = True
+        # [*] 判定结论一律来自 L3 唯一入口(``classify_drift``)——
+        #     本服务只做「选基准 → 跑 L1/L2 → 取结论」, **不再自己拼状态**。
+        #
+        # 历史: 这里曾有一份自己的分支树(ready / alias_only / update_required),
+        # 与 ``template_matcher._classify_header_changes``、语义契约层各算一套
+        # ⇒ 同一事实三份定义 ⇒ Shopee 订单月报只能靠平台特判打补丁,
+        #    TikTok 订单多一列照样被卡住(2026-11-13 实测)。
+        decision = header_changes.get("drift_decision")
+        if not isinstance(decision, dict) or not decision.get("template_status"):
+            # 兜底: 异常路径没有结论 ⇒ 用已有事实重算一次, 不猜。
+            decision = classify_drift(
+                added_fields=header_changes.get("added_fields") or [],
+                removed_fields=header_changes.get("removed_fields") or [],
+                is_exact_match=bool(header_changes.get("is_exact_match", False)),
+                is_semantic_match=bool(header_changes.get("is_semantic_match", False)),
+                has_semantic_contract=bool(
+                    header_changes.get("has_semantic_contract", False)
+                ),
+                missing_required_keys=(
+                    header_changes.get("missing_required_keys") or []
+                ),
+                missing_optional_keys=(
+                    header_changes.get("missing_optional_keys") or []
+                ),
+                confirmed_extra_fields=(
+                    header_changes.get("confirmed_extra_fields") or []
+                ),
+            ).to_dict()
+
+        status = str(decision.get("template_status") or TEMPLATE_STATUS_READY)
+        governance_status = str(
+            decision.get("governance_status") or governance_status_for(status)
+        )
+        should_auto_sync = not bool(decision.get("is_blocking", False))
+        update_required = bool(decision.get("is_blocking", False))
+        blocking_changes = list(decision.get("blocking_changes") or [])
+        non_blocking_changes = list(decision.get("non_blocking_changes") or [])
+        format_drift = status == TEMPLATE_STATUS_FORMAT_DRIFT
 
         # [*] 漂移来源: 回答「为什么对不上」
         if update_required:

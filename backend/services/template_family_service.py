@@ -361,6 +361,65 @@ def build_variant_kind(
     return "_".join(parts)
 
 
+def compute_format_signature(
+    *,
+    header_columns: Optional[Iterable[str]] = None,
+    field_parse_rules: Optional[Iterable[dict[str, Any]]] = None,
+    header_row: Optional[int] = None,
+    sheet_name: Optional[str] = None,
+) -> str:
+    """**格式签名** —— 「一个模板服务的是哪一种文件格式」的唯一口径。
+
+    [*] 批次 H(H-1): 与 :func:`build_variant_kind` **同一个口径**、**同一份实现**。
+
+    为什么复用「业务形态标识」而不是另立一套
+    -----------------------------------------
+    「格式」与「业务形态」在本题上是**同一件事**:
+    平台把导出格式改了(加列 / 改日期分隔符)⇒ 文件的业务形态变了 ⇒
+    这是**另一种格式**。若另立一套签名, 就会出现
+    「模板 A 说自己是格式 1、变体说自己是形态 2」这种自相矛盾的状态,
+    而矛盾的两份定义迟早会漂移。
+
+    ⇒ 一份签名、两个用途:
+      * 模板级: ``core.field_mapping_templates.format_signature``
+        —— 决定「同维度能否并存多个 published 模板」「保存时归档谁」;
+      * 变体级: ``core.field_mapping_template_variants.variant_kind``
+        —— 决定「哪个变体解释这个文件」。
+
+    两处取值相同 ⇒ 模板与变体**永远**能对上。
+    """
+    return build_variant_kind(
+        header_columns=header_columns,
+        field_parse_rules=field_parse_rules,
+        header_row=header_row,
+        sheet_name=sheet_name,
+    )
+
+
+def resolve_format_signature(template: Any) -> str:
+    """取一个模板行的**格式签名**(批次 H(H-1))。
+
+    以**已落库的** ``format_signature`` 为准 —— 它就是唯一索引用的那个值,
+    判定链路必须跟数据库用同一个值, 否则会出现
+    「应用层认为同格式、数据库认为不同格式」的对不上。
+
+    存量行(迁移回填之前写的 / 测试夹具直接 new 出来的)没有这一列时,
+    按内容现算一遍 —— 两种口径是**同一份实现**
+    (:func:`compute_format_signature`), 算出来必然一致。
+    """
+    if template is None:
+        return ""
+    stored = getattr(template, "format_signature", None)
+    if stored:
+        return str(stored)
+    return compute_format_signature(
+        header_columns=getattr(template, "header_columns", None),
+        field_parse_rules=getattr(template, "field_parse_rules", None),
+        header_row=getattr(template, "header_row", None),
+        sheet_name=getattr(template, "sheet_name", None),
+    )
+
+
 def _header_signature(columns: Iterable[str]) -> str:
     normalized = [
         str(column).strip().lower() for column in columns if str(column).strip()

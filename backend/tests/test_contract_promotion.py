@@ -399,7 +399,10 @@ def test_parse_contract_captured_at_handles_missing_and_iso():
 @pytest.mark.asyncio
 async def test_build_promoted_contract_returns_contract_from_signal():
     """重检路径: 有晋升信号 -> 算出新契约(不含旧契约)。"""
-    from backend.tasks.scheduled_tasks import _build_promoted_contract
+    # [*] 批次 H 之前的重检批次: 这段逻辑已从 ``backend.tasks.scheduled_tasks``
+    #     迁到 ``backend.services.template_recheck_service``(定时任务与
+    #     「模板发布即重检」共用同一份实现, 免得两处口径漂移)。
+    from backend.services.template_recheck_service import TemplateRecheckService
 
     template = _template(372, 8, columns=["日期", "GMV", "商品卡 GMV"])
 
@@ -407,7 +410,7 @@ async def test_build_promoted_contract_returns_contract_from_signal():
         async def get(self, _model, _pk):
             return template
 
-    contract = await _build_promoted_contract(
+    contract = await TemplateRecheckService.build_promoted_contract(
         _LocalDb(),
         {
             "contract_promotion": {
@@ -427,14 +430,17 @@ async def test_build_promoted_contract_returns_contract_from_signal():
 @pytest.mark.asyncio
 async def test_build_promoted_contract_without_signal_is_none():
     """没有晋升信号 -> 不产出契约(普通放行不该改契约)。"""
-    from backend.tasks.scheduled_tasks import _build_promoted_contract
+    from backend.services.template_recheck_service import TemplateRecheckService
 
     class _LocalDb:
         async def get(self, _model, _pk):
             raise AssertionError("没有晋升信号时不该去取模板")
 
     assert (
-        await _build_promoted_contract(_LocalDb(), {"should_auto_sync": True}) is None
+        await TemplateRecheckService.build_promoted_contract(
+            _LocalDb(), {"should_auto_sync": True}
+        )
+        is None
     )
 
 

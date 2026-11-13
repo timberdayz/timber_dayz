@@ -578,6 +578,22 @@ class FieldMappingTemplate(Base):
     # v4.22.0新增:字段级解析规则(用于metric_date等严格解析)
     field_parse_rules = Column(JSONB, nullable=True, comment="字段解析规则(JSONB数组)")
 
+    # [*] 批次 H(H-1): 格式签名 —— 「这个模板服务的是哪一种文件格式」。
+    #
+    #     取值与变体的「业务形态标识」(``variant_kind``) **同一个口径**
+    #     (见 :func:`backend.services.template_family_service.build_variant_kind`):
+    #     列集合 + 解析方式 + 表头行 + 工作表名模式。
+    #
+    #     作用: 让「同一维度、多种格式并存」成为可能 ——
+    #     唯一键从 (维度) 变成 (维度, 格式签名);
+    #     保存模板时只归档**同签名**的旧模板, 不再连坐别的格式。
+    format_signature = Column(
+        String(64),
+        nullable=True,
+        index=True,
+        comment="格式签名(JSONB数组外的字符串): 列集合+解析方式+表头行+工作表名",
+    )
+
     # 元信息
     template_name = Column(String(256), nullable=True)
     version = Column(Integer, default=1, nullable=False)

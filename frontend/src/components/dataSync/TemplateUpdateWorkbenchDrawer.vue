@@ -91,7 +91,8 @@
           <div>
             <div class="template-update-workbench-drawer__section-title">新增列（确认过就忽略）</div>
             <div class="template-update-workbench-drawer__muted">
-              勾选的列不再计入「新增原始字段」噪音。数据仍完整保留在 raw_data 里，不影响入库。
+              勾选的列不再计入「新增原始字段」噪音，也不再阻断入库（数据仍完整保留在
+              raw_data 里）。未勾选的列会挡住入库，直到模板把它们纳入 —— 否则新列的数据会被静默丢弃。
             </div>
           </div>
         </div>

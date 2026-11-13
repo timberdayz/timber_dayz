@@ -3337,6 +3337,11 @@ async def get_detailed_template_coverage(
                 update_reason = None
                 template_status = "ready"
                 semantic_match = True
+                # [*] 实时判定结论(默认: 样本文件此刻是好的)
+                live_template_status = "ready"
+                live_update_required = False
+                live_governance_status = "ready"
+                live_update_reason = None
 
                 # [*] 获取该组合的一个示例文件。
                 # 优先级: 漂移文件(模板待更新) > pending > failed > ingested。
@@ -3502,6 +3507,7 @@ async def get_detailed_template_coverage(
                                 update_reason = (
                                     f"匹配率{header_changes.get('match_rate', 0):.1f}%"
                                 )
+
                     except Exception as e:
                         if isinstance(e, FileNotFoundError):
                             detailed_coverage_missing_files.append(
@@ -3512,6 +3518,20 @@ async def get_detailed_template_coverage(
                             detailed_coverage_error_types[error_type] = (
                                 detailed_coverage_error_types.get(error_type, 0) + 1
                             )
+
+                    # [*] 实时判定结论(样本文件此刻的处境)。
+                    #
+                    # 漂移快照是「上次检查时的记录」, 而这里算的是「**此刻**用当前
+                    # 已发布模板重判的结果」。两者都要留:
+                    #   * 漂移快照 ⇒ 回答「这个组合还有多少文件卡着」(待办不会凭空消失);
+                    #   * 实时结论 ⇒ 回答「**这个样本文件**现在到底行不行」。
+                    #
+                    # 少了后者, 前端只能按组合粒度判断, 于是会出现
+                    # 「用户刚把这个文件改对, 界面却说它仍未通过治理复核」。
+                    live_template_status = template_status
+                    live_update_required = bool(needs_update)
+                    live_governance_status = combo_info.get("governance_status")
+                    live_update_reason = update_reason
 
                 # [*] 漂移待办优先: 该组合存在被标记为「模板待更新」的文件时,
                 # 待办以漂移快照为准, 不以「用当前模板重新比对」的结果为准。
@@ -3537,6 +3557,21 @@ async def get_detailed_template_coverage(
                     "update_reason": update_reason,
                     "semantic_match": semantic_match,
                     "shadow_compare": shadow_compare,
+                    # [*] 实时判定结论(样本文件此刻的处境)。
+                    #
+                    # ``needs_update`` 是**组合级**的(该组合还有文件卡着),
+                    # 前端拿它判断「这个组合还有没有待办」;
+                    # 而 ``sample_update_required`` 是**文件级**的
+                    # (这个样本文件此刻是否还过不了校验)——
+                    # 用户改完模板后, 两者可能不一致, 提示必须区分。
+                    "sample_template_status": live_template_status,
+                    "sample_update_required": live_update_required,
+                    "sample_governance_status": live_governance_status,
+                    "sample_update_reason": live_update_reason,
+                    # [*] 该组合里还卡着的文件数(来自漂移快照)。
+                    "pending_file_count": (
+                        drift_group.get("file_count") if drift_group else 0
+                    ),
                 }
 
                 # [*] 有已发布模板 ⇒ 计入「已覆盖」总体(与有没有待处理文件无关)

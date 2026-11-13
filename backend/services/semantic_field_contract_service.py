@@ -43,6 +43,15 @@ class SemanticContractResult:
     # [*] 模板里绑定了 optional 语义键、但当前文件没有的原始列名。
     # 这类列的缺失不影响现有入库(例如「预估回款金额」), 属于非阻断漂移。
     optional_removed_raw_fields: list[str] = field(default_factory=list)
+    # [*] 少掉的列里, 绑定到**必填**语义键、且该键**没被解析出来**的那些。
+    # ⇒ 少它就真的少了一个业务维度 ⇒ 阻断。
+    blocking_removed_raw_fields: list[str] = field(default_factory=list)
+    # [*] 少掉的列里, 绑定到**必填**语义键、但该键**被别名救回**的那些。
+    # ⇒ 缺的是列名, 不是数据 ⇒ 不阻断。
+    alias_rescued_removed_raw_fields: list[str] = field(default_factory=list)
+    # [*] 少掉的列里, 没有任何语义绑定的那些。
+    # ⇒ 无法证明它可缺 ⇒ 保守阻断(等人工确认)。
+    unmapped_removed_raw_fields: list[str] = field(default_factory=list)
     # [*] 批次 F-3: 域级下限缺口 —— 域级契约的 required 里, **模板清单还没覆盖**的键。
     # 契约降级为「域级下限护栏」后, 这部分不再运行时阻断, 而是**引导用户去勾**
     # (用户勾了 ⇒ 进模板级 required ⇒ 才阻断)。
@@ -59,6 +68,9 @@ class SemanticContractResult:
             "impact_descriptions": self.impact_descriptions,
             "has_semantic_contract": self.has_contract,
             "optional_removed_raw_fields": self.optional_removed_raw_fields,
+            "blocking_removed_raw_fields": self.blocking_removed_raw_fields,
+            "alias_rescued_removed_raw_fields": self.alias_rescued_removed_raw_fields,
+            "unmapped_removed_raw_fields": self.unmapped_removed_raw_fields,
             "below_domain_floor_keys": self.below_domain_floor_keys,
         }
 
@@ -291,16 +303,51 @@ class SemanticFieldContractService:
             and str(column).strip() not in ignored_columns
         ]
 
-        # [*] 模板里绑定了 optional 语义键、但当前文件没有的原始列名。
-        # 这类列的缺失不阻断入库(例如「预估回款金额」), 属于非阻断漂移。
+        # [*] 少掉的列: 按「能否证明它可缺」分三类(L2 产出, L3 只做汇总)。
+        #
+        # 业务口径: 少一列有两种完全不同的性质 ——
+        #   * 少了一个**必填**维度(订单号、店铺、日期) ⇒ 业务算不出要的数 ⇒ 阻断;
+        #   * 少了一个**辅助**列(预估回款金额之类) ⇒ 不影响主指标 ⇒ 不阻断;
+        #   * 少了一个**说不清是什么**的列 ⇒ 无法证明它可缺 ⇒ 保守阻断。
         optional_semantic_keys = {
             item.semantic_key for item in definitions if item.importance == "optional"
         }
-        optional_removed_raw_fields = [
-            raw_name
-            for raw_name, semantic_key in raw_to_semantic.items()
-            if semantic_key in optional_semantic_keys and raw_name not in current_set
-        ]
+        required_key_set = set(required_keys)
+
+        optional_removed_raw_fields: list[str] = []
+        blocking_removed_raw_fields: list[str] = []
+        alias_rescued_removed_raw_fields: list[str] = []
+        unmapped_removed_raw_fields: list[str] = []
+        for raw_name in list(template_columns or []):
+            text = str(raw_name)
+            if text in current_set:
+                continue
+            semantic_key = raw_to_semantic.get(text)
+            if not semantic_key:
+                unmapped_removed_raw_fields.append(text)
+                continue
+            if semantic_key in optional_semantic_keys:
+                optional_removed_raw_fields.append(text)
+                continue
+            if semantic_key in required_key_set:
+                if semantic_key in resolved_keys:
+                    # 别名救回(文件里还有同义列) ⇒ 缺的是列名, 不是数据。
+                    alias_rescued_removed_raw_fields.append(text)
+                else:
+                    blocking_removed_raw_fields.append(text)
+                continue
+            # 绑定了, 但既不属必填也不属可选 ⇒ 未被契约治理 ⇒ 保守处理。
+            unmapped_removed_raw_fields.append(text)
+
+        # 兼容历史口径: 绑定过的可选列即使不在 template_columns 里, 也算「可选」。
+        for raw_name, semantic_key in raw_to_semantic.items():
+            text = str(raw_name)
+            if (
+                text not in current_set
+                and semantic_key in optional_semantic_keys
+                and text not in optional_removed_raw_fields
+            ):
+                optional_removed_raw_fields.append(text)
 
         status = SEMANTIC_CONTRACT_STATUS_READY
         should_block = False
@@ -355,6 +402,9 @@ class SemanticFieldContractService:
             impact_descriptions=impact_descriptions,
             has_contract=True,
             optional_removed_raw_fields=optional_removed_raw_fields,
+            blocking_removed_raw_fields=blocking_removed_raw_fields,
+            alias_rescued_removed_raw_fields=alias_rescued_removed_raw_fields,
+            unmapped_removed_raw_fields=unmapped_removed_raw_fields,
             below_domain_floor_keys=below_domain_floor_keys,
         )
 

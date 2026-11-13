@@ -16,7 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.deduplication_fields_config import (
     get_default_deduplication_fields,
 )
-from backend.services.template_family_service import _normalize_dimension
+from backend.services.template_family_service import (
+    _normalize_dimension,
+    compute_format_signature,
+    resolve_format_signature,
+)
 from modules.core.db import FieldMappingTemplate
 from modules.core.logger import get_logger
 
@@ -27,6 +31,21 @@ VERSION_SUFFIX_PATTERN = re.compile(r"_v\d+$")
 PROJECTION_STATUS_PROJECTED = "projected"
 PROJECTION_STATUS_FAILED = "failed"
 PROJECTION_STATUS_SKIPPED = "skipped"
+
+
+def _dedupe_templates(
+    templates: List[FieldMappingTemplate],
+) -> List[FieldMappingTemplate]:
+    """按模板行去重(保留第一次出现的顺序)。"""
+    seen: set = set()
+    result: List[FieldMappingTemplate] = []
+    for template in templates:
+        key = template.id if getattr(template, "id", None) is not None else id(template)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(template)
+    return result
 
 
 class TemplateFamilyProjectionError(RuntimeError):
@@ -109,7 +128,7 @@ class FieldMappingTemplateService:
 
             # [*] 同维度可能存在多个 published 模板(历史脏数据)。
             # 用 scalar_one_or_none() 会在这种数据上直接抛 MultipleResultsFound,
-            # 导致「保存模板」接口整体 500; 这里改成全量取出并全部归档。
+            # 导致「保存模板」接口整体 500; 这里改成全量取出。
             existing_result = await self.db.execute(
                 select(FieldMappingTemplate).where(
                     and_(
@@ -123,6 +142,52 @@ class FieldMappingTemplateService:
                 )
             )
             existing_templates = list(existing_result.scalars().all())
+
+            # [*] 批次 H(H-1): 格式签名 —— 「本次保存的是哪一种格式」。
+            #
+            #     口径与变体的「业务形态标识」一致(同一份实现),
+            #     见 :func:`backend.services.template_family_service.compute_format_signature`。
+            new_format_signature = compute_format_signature(
+                header_columns=header_columns,
+                field_parse_rules=field_parse_rules,
+                header_row=header_row,
+                sheet_name=sheet_name,
+            )
+
+            # [*] 归档范围 —— 取决于**保存意图**(批次 H(H-1))。
+            #
+            #   * ``new_version``(更新既有模板)⇒ **替换**语义:
+            #     被编辑的那一版一定要归档(它被这一版取代了);
+            #     没有 ``base_template_id`` 时退回「同维度全部归档」(与从前一致)。
+            #   * ``create``(新建模板 / 创建变体)⇒ **并存**语义:
+            #     只归档**同格式签名**的旧模板 —— 别的格式继续生效。
+            #
+            # 为什么按意图分, 而不是一律按格式
+            # ---------------------------------
+            # 「更新模板」的用户心智是「这一版被替换掉了」;
+            # 「创建变体」的用户心智是「同一种业务的**另一种文件格式**, 要并存」。
+            # 一律按格式 ⇒ 用户给模板加一列就会多出一个 published,
+            # 「更新」这个动作在结果上变成了「新增一种格式」, 与心智不符。
+            same_signature_templates = [
+                existing
+                for existing in existing_templates
+                if self._format_signature_of(existing) == new_format_signature
+            ]
+            if str(save_mode or "create").strip() == "new_version":
+                if base_template_id is not None:
+                    base_targets = [
+                        existing
+                        for existing in existing_templates
+                        if getattr(existing, "id", None) is not None
+                        and str(existing.id) == str(base_template_id)
+                    ]
+                    templates_to_archive = _dedupe_templates(
+                        [*base_targets, *same_signature_templates]
+                    )
+                else:
+                    templates_to_archive = list(existing_templates)
+            else:
+                templates_to_archive = same_signature_templates
 
             new_version = 1
             if existing_templates:
@@ -140,6 +205,22 @@ class FieldMappingTemplateService:
                 version=new_version,
             )
 
+            # [*] 继承来源(批次 H(H-1)): **优先同格式**, 其次同维度最新的一份。
+            #
+            #     为什么优先同格式:
+            #     核心字段清单里的 ``raw_name`` 是**这一种格式的物理列名** ——
+            #     拿另一种格式的清单来继承, 等于把不属于本格式的列名写进 hash 载荷。
+            #
+            #     为什么仍然保留「同维度兜底」:
+            #     用户给模板**加一列**时, 格式签名会变 ⇒ 没有同格式的旧模板可继承;
+            #     此时必须从上一版继承, 否则 hash 口径会从「物理列名」变成「语义键」,
+            #     已入库的行会被当成新数据(离线回放实测 81/488 行受影响)。
+            inherit_candidates = sorted(
+                templates_to_archive or existing_templates,
+                key=lambda item: (item.version or 0, item.id or 0),
+                reverse=True,
+            )
+
             # [*] 批次 E: 核心字段清单 —— 前端没给就**继承被归档模板的清单**,
             #     继承优先于现推, 因为:
             #
@@ -154,7 +235,7 @@ class FieldMappingTemplateService:
             resolved_core_fields = list(core_fields or [])
             if not resolved_core_fields:
                 inherited: List[Dict[str, Any]] = []
-                for existing in existing_templates:
+                for existing in inherit_candidates:
                     if existing.core_fields:
                         inherited = list(existing.core_fields)
                         break
@@ -182,7 +263,7 @@ class FieldMappingTemplateService:
             #     没给 ⇒ 继承被归档模板的(用户可能只改了核心字段)。
             if ignored_extra_fields is None:
                 inherited_ignored: List[str] = []
-                for existing in existing_templates:
+                for existing in inherit_candidates:
                     if existing.ignored_extra_fields:
                         inherited_ignored = list(existing.ignored_extra_fields)
                         break
@@ -206,12 +287,13 @@ class FieldMappingTemplateService:
 
             try:
                 async with self.db.begin():
-                    if existing_templates:
-                        for existing in existing_templates:
+                    # [*] 批次 H(H-1): 只归档**同格式**的旧模板。
+                    if templates_to_archive:
+                        for existing in templates_to_archive:
                             existing.status = "archived"
                             existing.updated_at = current_time
                             self.db.add(existing)
-                        archived_template_id = existing_templates[0].id
+                        archived_template_id = templates_to_archive[0].id
 
                     template = FieldMappingTemplate(
                         platform=platform,
@@ -226,6 +308,8 @@ class FieldMappingTemplateService:
                         deduplication_fields=deduplication_fields,
                         header_bindings=header_bindings,
                         field_parse_rules=field_parse_rules,
+                        # [*] 批次 H(H-1): 落库格式签名 —— 唯一索引与归档范围都靠它。
+                        format_signature=new_format_signature,
                         # [*] 批次 E: 核心字段清单(编辑面; 版本级由投影写入)
                         core_fields=resolved_core_fields,
                         # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单
@@ -365,6 +449,11 @@ class FieldMappingTemplateService:
         if VERSION_SUFFIX_PATTERN.search(template_name):
             return VERSION_SUFFIX_PATTERN.sub(f"_v{version}", template_name)
         return template_name
+
+    @staticmethod
+    def _format_signature_of(template: FieldMappingTemplate) -> str:
+        """取模板的**格式签名**(口径 SSOT 在 :func:`resolve_format_signature`)。"""
+        return resolve_format_signature(template)
 
     async def list_templates(
         self,

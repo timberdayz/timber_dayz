@@ -506,10 +506,32 @@ const canManualUpdateFamily = (family) => {
 }
 
 const getCurrentWorkbenchSampleFileId = () => updateWorkbenchContext.value?.row?.sample_file_id || null
-const isSampleStillInNeedsUpdate = (sampleFileId) =>
-  (detailedCoverage.value?.current_needs_update || detailedCoverage.value?.needs_update || []).some(
-    (row) => row.sample_file_id === sampleFileId
-  )
+
+// [*] 找出覆盖统计里与某个样本文件对应的那一行。
+const findCoverageRowBySampleFile = (sampleFileId) => {
+  const rows = [
+    ...(detailedCoverage.value?.current_needs_update || []),
+    ...(detailedCoverage.value?.needs_update || []),
+  ]
+  return rows.find((row) => row.sample_file_id === sampleFileId) || null
+}
+
+// [*] 这个样本文件**此刻**是否还过不了治理复核。
+//
+// [*] 重要: 覆盖统计里的 `needs_update` 是**组合级**的 —— 它只说明
+// 「这个(平台+数据域+粒度)组合下还有别的文件卡着」, 不能用来判断
+// 「我刚改好的这个文件行不行」。两者会不一致, 提示必须区分。
+//
+// 后端为此单独给了文件级的实时判定结论 `sample_update_required`。
+const isSampleStillInNeedsUpdate = (sampleFileId) => {
+  const row = findCoverageRowBySampleFile(sampleFileId)
+  if (!row) return false
+  if (typeof row.sample_update_required === 'boolean') {
+    return row.sample_update_required
+  }
+  // 后端没给文件级结论时, 退回组合级判断(保守)。
+  return true
+}
 
 const loadAvailablePlatforms = async () => {
   try {
@@ -969,8 +991,26 @@ const handleWorkbenchSave = async ({
     await loadTemplates()
     await loadGovernanceStats()
 
-    if (sampleFileId && isSampleStillInNeedsUpdate(sampleFileId)) {
-      ElMessage.warning('模板已保存，但该样本文件仍未通过治理复核，请继续检查字段差异')
+    // [*] 发布即闭环: 后端在保存模板后**立刻**重检了受影响的文件,
+    //     重检结果随响应回来(recheck)。前端据此给出准确的三态提示,
+    //     不再出现「用户做对了, 界面却说没做对」。
+    const recheck = result?.data?.recheck || result?.recheck || null
+    const released = Number(recheck?.released || 0)
+    const stillBlocked = Number(recheck?.still_blocked || 0)
+    const sampleStillBlocked = sampleFileId ? isSampleStillInNeedsUpdate(sampleFileId) : false
+
+    if (sampleStillBlocked) {
+      // 真的还有字段对不上 —— 保持工作台打开, 让用户接着改。
+      ElMessage.warning('模板已保存，但该文件仍有字段对不上，请继续检查字段差异')
+    } else if (released > 0) {
+      showTemplateGovernanceSummary(result)
+      const suffix = stillBlocked > 0 ? `；另有 ${stillBlocked} 个文件仍需处理` : ''
+      ElMessage.success(`模板已更新，${released} 个文件已通过治理复核并放行入库${suffix}`)
+      isWorkbenchVisible.value = false
+    } else if (stillBlocked > 0) {
+      // 模板已生效, 只是还有别的文件没跟上 —— 下一轮巡检会自动重检。
+      ElMessage.warning(`模板已更新，${stillBlocked} 个文件仍待重检，将在下一轮巡检自动处理`)
+      isWorkbenchVisible.value = false
     } else {
       showTemplateGovernanceSummary(result)
       ElMessage.success(result.message || '模板更新成功，治理已通过')

@@ -17,6 +17,8 @@ Architecture Decision Records document accepted architecture decisions that agen
 - Dashboard runtime is PostgreSQL-first.
 - Production deployment truth is the release tag.
 - New collection component authoring uses `pwcli + playwright skill + agent`.
+- Template drift classification has a single decision entry point (`data_sync_status_semantics.classify_drift`); a template publish is a closed-loop action that re-checks affected files. See [ADR-2026-11-13](2026-11-13-template-drift-classification-ssot.md).
+- A template dimension may host several file formats: `format_signature` is the single business-form signature shared by templates and variants; publish scope follows the save intent (update replaces, create coexists). Ingest refreshes are batched by the refresh queue. See [ADR-2026-11-13 (multi-format & batch refresh)](2026-11-13-template-multi-format-and-batch-refresh.md).
 
 ## Agent Rules
 

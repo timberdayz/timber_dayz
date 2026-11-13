@@ -33,6 +33,9 @@ from backend.services.currency_extractor import (
 from backend.services.semantic_field_contract_service import (
     SemanticFieldContractService,
 )
+from backend.services.data_sync_status_semantics import (
+    classify_drift,
+)
 from backend.services.template_alias_registry import get_header_alias_mapping
 from backend.services.template_parse_rules_service import (
     DATE_ERROR_FORMAT_DRIFT_CODES,
@@ -40,22 +43,6 @@ from backend.services.template_parse_rules_service import (
 )
 
 logger = get_logger(__name__)
-
-
-ORDER_CORE_REQUIRED_FIELDS = {
-    "订单编号",
-    "订单号",
-    "店铺",
-    "下单时间",
-    "销售数量",
-    "买家支付",
-    "实付金额",
-    "利润",
-}
-
-ORDER_OPTIONAL_FIELDS = {
-    "预估回款金额",
-}
 
 
 # ==================== 模板匹配条件构造 (SSOT) ====================
@@ -538,44 +525,28 @@ class TemplateMatcher:
         return [alias_mapping.get(column, column) for column in columns]
 
     @staticmethod
-    def _classify_header_changes(
-        platform: str,
-        data_domain: str,
-        granularity: str,
-        removed_fields: List[str],
-        normalized_removed_fields: List[str],
-        added_fields: List[str],
-    ) -> Dict[str, List[str]]:
-        normalized_platform = str(platform or "").strip().lower()
-        normalized_domain = str(data_domain or "").strip().lower()
-        normalized_granularity = str(granularity or "").strip().lower()
-        if not (
-            normalized_platform == "shopee"
-            and normalized_domain == "orders"
-            and normalized_granularity == "monthly"
-        ):
-            return {
-                "blocking_changes": list(removed_fields) + list(added_fields),
-                "non_blocking_changes": [],
-            }
+    def _optional_raw_fields(core_fields: Any) -> List[str]:
+        """模板核心字段清单里 ``required=false`` 的**原始列名**。
 
-        blocking_changes: List[str] = []
-        non_blocking_changes: List[str] = []
-        for field in normalized_removed_fields:
-            if field in ORDER_CORE_REQUIRED_FIELDS:
-                blocking_changes.append(field)
-            elif field in ORDER_OPTIONAL_FIELDS:
-                non_blocking_changes.append(field)
-            else:
-                blocking_changes.append(field)
+        这是「某列是否可缺」的**模板级声明**(SSOT):
+        用户在工作台勾选「非必填」的列, 少掉它就不阻断入库。
 
-        # New fields are not needed by existing ingestion mappings. Keep them visible
-        # for template review, but do not block the current import.
-        non_blocking_changes.extend(added_fields)
-        return {
-            "blocking_changes": blocking_changes,
-            "non_blocking_changes": non_blocking_changes,
-        }
+        只有**带 raw_name** 的条目才有意义 —— 纯语义键条目(``raw_name=None``)
+        描述的是「这个语义键参与去重/校验」, 而不是「某个具体物理列可缺」。
+
+        ``semantic_key`` 形态的可选性由 L2 语义契约负责(``optional_keys``),
+        两处互补, 不重复。
+        """
+        from backend.services.core_fields_service import normalize_core_fields
+
+        optional: List[str] = []
+        for entry in normalize_core_fields(core_fields):
+            if entry.get("required"):
+                continue
+            raw_name = str(entry.get("raw_name") or "").strip()
+            if raw_name and raw_name not in optional:
+                optional.append(raw_name)
+        return optional
 
     async def find_best_template(
         self,
@@ -631,6 +602,56 @@ class TemplateMatcher:
         except Exception as e:
             logger.error(f"[TemplateMatcher] 查找模板失败: {e}", exc_info=True)
             return None
+
+    async def find_published_template_by_format(
+        self,
+        *,
+        platform: str,
+        data_domain: str,
+        format_signature: str,
+        granularity: Optional[str] = None,
+        sub_domain: Optional[str] = None,
+        account: Optional[str] = None,
+    ) -> Optional[FieldMappingTemplate]:
+        """取「同一维度、同一格式签名」下的当前已发布模板。
+
+        [*] 批次 H(H-1): 同维度多格式并存之后,
+        「当前已发布模板」**不再是**「版本号最高的那个」——
+        那可能是**另一种格式**(平台改过导出格式)。
+
+        判定链路用它回答「我们自己升级过模板没有」,
+        这个对照必须限定在**同格式内**:
+        否则「另一种格式并存」会被误报成「我们升级过模板」。
+
+        降级顺序与 :func:`resolve_template_for_file` 完全一致(同一把尺子)。
+        """
+        if not format_signature:
+            return None
+
+        # [*] 延迟导入: template_family_service 依赖本模块, 顶层互相 import 会成环
+        from backend.services.template_family_service import resolve_format_signature
+
+        levels = build_template_match_levels(
+            platform=platform,
+            data_domain=data_domain,
+            granularity=granularity,
+            sub_domain=sub_domain,
+            account=account,
+        )
+        for _level_name, conditions in levels:
+            stmt = (
+                select(FieldMappingTemplate)
+                .where(*conditions)
+                .order_by(
+                    desc(FieldMappingTemplate.version),
+                    _account_generic_first_order(),
+                )
+            )
+            result = await self.db.execute(stmt)
+            for candidate in result.scalars().all():
+                if resolve_format_signature(candidate) == format_signature:
+                    return candidate
+        return None
 
     async def get_template_config(self, template_id: int) -> Dict[str, Any]:
         """
@@ -974,14 +995,16 @@ class TemplateMatcher:
             normalized_removed_fields = list(
                 semantic_template_set - semantic_current_set
             )
-            change_classification = self._classify_header_changes(
-                template.platform,
-                template.data_domain,
-                template.granularity or "",
-                removed_fields,
-                normalized_removed_fields,
-                added_fields,
-            )
+            # [*] L1 只产出**事实**(列差异 / 顺序 / 值形态), **不下结论**。
+            #
+            # 「什么算漂移、什么算阻断」由 L3 唯一判定入口给:
+            # ``backend/services/data_sync_status_semantics.classify_drift``。
+            #
+            # 历史: 这里曾调用 ``_classify_header_changes`` 自行把列差异分成
+            # blocking / non_blocking, 并且只对 ``shopee/orders/monthly``
+            # 开了「新增列不阻断」的口子(2026-06-17 救火补丁)⇒
+            # TikTok 订单多一列照样被卡住(2026-11-13 实测)。
+            # ⇒ 判定权已整体上移到 L3, 本函数不再有平台特判。
             # [*] 批次 B: 值形态体检(列名没变, 但值的形态变了)。
             #
             # 用样本行试解析模板声明的日期格式 —— 解不出来就是 ``format_drift``。
@@ -1004,6 +1027,12 @@ class TemplateMatcher:
                 for issue in value_shape.get("issues") or []
                 if issue.get("error_code") in DATE_ERROR_FORMAT_DRIFT_CODES
             ]
+            # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单 ——
+            #     用户勾过的列不再算成新增噪音, 也不再阻断
+            #     (用户明说「这列我不要」⇒ 它不落库是用户的选择)。
+            ignored_extra_fields = list(
+                getattr(template, "ignored_extra_fields", None) or []
+            )
             semantic_contract = await SemanticFieldContractService(self.db).evaluate(
                 platform=template.platform,
                 data_domain=template.data_domain,
@@ -1014,87 +1043,11 @@ class TemplateMatcher:
                 template_columns=template_columns,
                 # [*] 批次 E(E-5): 模板级核心字段清单的 required 一并参与阻断判定。
                 core_fields=core_fields,
-                # [*] 批次 F-4(API-6): 「已确认的新列」忽略清单 ——
-                #     用户勾过的列不再算成新增噪音。
-                ignored_extra_fields=getattr(template, "ignored_extra_fields", None)
-                or [],
+                ignored_extra_fields=ignored_extra_fields,
             )
             semantic_summary = semantic_contract.to_dict()
-            if semantic_contract.has_contract:
-                # [*] 语义契约只做「补充」, 不再整体覆写 blocking/non_blocking 分类。
-                #
-                # 覆写会造成两个严重后果:
-                #   1) 真实的新增/删除字段被降级成非阻断 -> 「源文件新增了一列」这种
-                #      最典型的模板漂移永远不会再提示需要更新模板;
-                #   2) 当契约解析不出 required 语义键时(missing_required 恒非空),
-                #      blocking 里塞的是与本次漂移无关的假缺失, 判定结果与真实漂移脱钩
-                #      —— 实测 TikTok 月度流量: 100% 精确匹配仍报「缺 shop_id/visitor_count/page_views」。
-                base_blocking = list(
-                    change_classification.get("blocking_changes") or []
-                )
-                base_non_blocking = list(
-                    change_classification.get("non_blocking_changes") or []
-                )
-                # [*] 模板里绑定了 optional 语义键、但文件没有的列, 缺失不阻断入库
-                # (例如「预估回款金额」), 降级为非阻断漂移。
-                optional_removed = {
-                    item
-                    for item in (semantic_contract.optional_removed_raw_fields or [])
-                    if item in removed_fields
-                }
-                if optional_removed:
-                    base_blocking = [
-                        item for item in base_blocking if item not in optional_removed
-                    ]
-                    base_non_blocking = [
-                        *base_non_blocking,
-                        *[item for item in removed_fields if item in optional_removed],
-                    ]
-                contract_blocking = list(semantic_contract.missing_required_keys or [])
-                contract_non_blocking = [
-                    *(semantic_contract.missing_optional_keys or []),
-                    *(semantic_contract.extra_raw_fields or []),
-                ]
-                blocking_changes = list(
-                    dict.fromkeys([*base_blocking, *contract_blocking])
-                )
-                blocking_set = set(blocking_changes)
-                non_blocking_changes = [
-                    item
-                    for item in dict.fromkeys(
-                        [*base_non_blocking, *contract_non_blocking]
-                    )
-                    if item not in blocking_set
-                ]
-                change_classification = {
-                    "blocking_changes": blocking_changes,
-                    "non_blocking_changes": non_blocking_changes,
-                }
-
-            # [*] 批次 B: 值形态漂移是**阻断**项。
-            #
-            # 列名一模一样、但值的形态变了 ⇒ 这份文件入库必然整份失败
-            # (解析器抛 "failed to parse ...")。所以它必须进 blocking,
-            # 让治理面板在入库前就提示「模板的日期格式要改」。
-            if format_drift:
-                drift_set = set(format_drift_columns)
-                change_classification = {
-                    "blocking_changes": list(
-                        dict.fromkeys(
-                            [
-                                *(change_classification.get("blocking_changes") or []),
-                                *format_drift_columns,
-                            ]
-                        )
-                    ),
-                    "non_blocking_changes": [
-                        item
-                        for item in (
-                            change_classification.get("non_blocking_changes") or []
-                        )
-                        if item not in drift_set
-                    ],
-                }
+            # [*] 判定权上移到 L3(``classify_drift``) —— 这里不再合并
+            #     blocking / non_blocking, 避免同一事实出现第二份定义。
 
             # [*] v4.14.0安全版本:移除相似度匹配逻辑
             # 任何字段名变化都需要用户手动确认
@@ -1124,6 +1077,42 @@ class TemplateMatcher:
             # [WARN] 安全原则:任何变化(新增、删除、顺序变化)都视为变化
             detected = not is_exact_match
 
+            # [*] L3: **唯一**的漂移判定入口。
+            #
+            # 业务口径(见 ``data_sync_status_semantics.classify_drift`` 文档):
+            #   多一列 ⇒ 不阻断(原始数据完整保留, 映射按列名走);
+            #   少了必填字段 / 值形态变了 ⇒ 阻断。
+            #
+            # 这里把 L1(事实) + L2(语义事实)交给 L3, 自己不下结论。
+            drift_decision = classify_drift(
+                added_fields=added_fields,
+                removed_fields=removed_fields,
+                format_drift_columns=format_drift_columns,
+                is_exact_match=is_exact_match,
+                is_semantic_match=is_semantic_match,
+                has_semantic_contract=semantic_contract.has_contract,
+                missing_required_keys=semantic_contract.missing_required_keys,
+                missing_optional_keys=semantic_contract.missing_optional_keys,
+                optional_removed_raw_fields=(
+                    semantic_contract.optional_removed_raw_fields
+                ),
+                blocking_removed_raw_fields=(
+                    semantic_contract.blocking_removed_raw_fields
+                ),
+                unmapped_removed_raw_fields=(
+                    semantic_contract.unmapped_removed_raw_fields
+                ),
+                alias_rescued_removed_raw_fields=(
+                    semantic_contract.alias_rescued_removed_raw_fields
+                ),
+                optional_raw_fields=self._optional_raw_fields(core_fields),
+                confirmed_extra_fields=ignored_extra_fields,
+            )
+            change_classification = {
+                "blocking_changes": list(drift_decision.blocking_changes),
+                "non_blocking_changes": list(drift_decision.non_blocking_changes),
+            }
+
             result_dict = {
                 "detected": detected,
                 "added_fields": added_fields,
@@ -1141,6 +1130,10 @@ class TemplateMatcher:
                 "normalized_removed_fields": normalized_removed_fields,
                 "blocking_changes": change_classification["blocking_changes"],
                 "non_blocking_changes": change_classification["non_blocking_changes"],
+                # [*] L3 判定结论(下游不再自己拼结论, 直接取这里)
+                "drift_decision": drift_decision.to_dict(),
+                # [*] 用户确认过的新列(判定兜底路径要用)
+                "confirmed_extra_fields": list(ignored_extra_fields),
                 # [*] 批次 B: 值形态体检结果
                 "format_drift": format_drift,
                 "value_shape": value_shape,
