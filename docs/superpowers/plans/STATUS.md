@@ -227,12 +227,13 @@ Live deployment verified:
 
 **未清理（受安全策略拦截，需人工执行）**：
 
-- 11 个 testcontainers 遗留的 postgres 匿名悬空卷。`docker volume rm` 被本地安全策略
-  判定为不可逆销毁而拦截，需在 Docker Desktop 里手动清理：
-
-  ```bash
-  docker volume ls -f dangling=true --format '{{.Name}}'   # 逐个核对后删除
-  ```
+- ~~11 个 testcontainers 遗留的 postgres 匿名悬空卷。`docker volume rm` 被本地安全策略
+  判定为不可逆销毁而拦截，需在 Docker Desktop 里手动清理~~ ——
+  **已于 2026-11-13（批次 E-1）清理完毕**：11 个匿名卷全删、0 失败；
+  13 个具名卷（含 `xihong_erp_postgres_data`）完好无损。
+  复发风险已由 E-2（清理接进 pytest 会话收尾 + CI 步骤）与
+  E-3（40 处 testcontainers 收敛成一个会话级容器）从根上消掉。
+  详见下方「批次 E」。
 
 ### 待业务确认（不阻塞实施）
 
@@ -1408,6 +1409,123 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
 | 另一类失败（非缺陷） | 4 条 `test_executor_v2` 失败 = **本地库缺 v7.26.0 那一级迁移**（`current_schema_20261228_...` → `20261229_template_format_signature`）⇒ 跑 `scripts/run_current_schema_migrations.py` 后 27 passed |
 | CI 验收（`341441d6`） | 三线全绿：Validate Data Flow ✓ / CI Pipeline ✓（8 job 全 success）/ Docker Build and Push ✓；**决定性证据**：CI 日志里 `test_ps_env_file_encoding_contract.py` 8 passed（新增守护真的在 CI 上跑），根契约清单在 CI 上 458 passed / 11 skipped |
 
+
+## 批次 E：Docker 残留治理 + testcontainers 收敛（2026-11-13）
+
+**起因（实测，不是推测）**：本机 Docker 攒下 **22 个悬空卷 + 2 个僵尸容器**，
+其中 11 个匿名卷（736 MB）是 testcontainers 的残留。分三步处置，
+每一步都有守护、每一步都写进纸上。
+
+### E-1 清理残留（已完成）
+
+| 项 | 值 |
+|---|---|
+| 匿名卷 | `python scripts/cleanup_test_containers.py --apply` ⇒ **11 个全删、0 失败**（只碰 `com.docker.volume.anonymous` 标签、只删无引用卷、命名卷永不触碰、绝不用 prune） |
+| 僵尸容器 | `docker rm -f -v xh-verify-pg`、`docker rm -f xihong_erp_migrate`、`docker rm -f -v bold_einstein` |
+| 构建缓存 | `docker builder prune -f` ⇒ 回收 **3.182 GB**（清理后 Build Cache 0B） |
+| 边界复核 | 13 个具名卷（含 `xihong_erp_postgres_data`）**全部完好**；匿名卷 0 |
+
+### E-2 清理自动化（提交 `8ad0bba5`）
+
+**先更正一个错误结论**：testcontainers **本身不泄漏** —— 实测正常退出与
+`os._exit()` 硬杀都由 Ryuk 正确回收（0 新卷）。真正成因是
+**「进程被强杀 + 事后没人跑清理脚本」**：`scripts/cleanup_test_containers.py`
+早在 `b716efbb` 就存在（安全边界完好），却除它自己的契约测试外**无任何流程调用**。
+
+| 项 | 值 |
+|---|---|
+| 改动 | `backend/tests/conftest.py` 加 `pytest_sessionfinish` 钩子（best-effort，`check=False`，可用 `XIHONG_SKIP_TESTCONTAINER_CLEANUP=1` 跳过）+ `.github/workflows/ci.yml` 加清理步骤（`|| true`）+ 新增 `backend/tests/test_cleanup_test_containers_wired_contract.py`（6 条守护） |
+| **红侧已验** | 实施前 3 条守护红；把钩子的 subprocess 调用注释掉 ⇒ 守护立刻变红 |
+| 行为级验证 | 手工造无主匿名卷 ⇒ 跑一次 pytest 后该卷消失 |
+| 门禁 | ruff/black 全绿；两份清理守护 14 passed；受影响测试 22 passed / 2 skipped |
+
+### E-3 data_pipeline 的 40 处 testcontainers 收敛（本次）
+
+**实测基线**：`backend/tests/data_pipeline` = **1274 passed / 1 skipped / 124.01 秒**。
+其中 **40 处** `with PostgresContainer("postgres:15") as pg:` 样板（11 个文件），
+每个容器启动 **1.76 秒** ⇒ 一轮回归付 **~70 秒**纯启动开销，还各留一个匿名卷。
+
+**方案（先量后定）**：
+
+| 候选 | 实测 | 判定 |
+|---|---|---|
+| 共用**一个 database** | — | ❌ 会直接红：21 处**裸** `CREATE TABLE`（没有 `IF NOT EXISTS`），其中 3 张表跨文件重名（`core.shop_accounts` 3 文件 / `core.shop_account_aliases` 2 文件 / `semantic.fact_orders_atomic` 2 文件）⇒ 第二个文件报 `relation already exists` |
+| **单 session 容器 + 每用例独立 database** | 容器启动 **1.76 s**；`CREATE DATABASE` **0.063 s**；`DROP DATABASE` **0.076 s** | ✅ 既保住「每用例一个干净空库」的语义，又把 ~70 秒降到 ~7 秒 |
+
+**为什么与原语义等价**：原实现每个用例起**全新容器**（库里只有 `public` schema）
+⇒ 新建 database 与之等价。且 `refresh_runner._OPS_TABLES_READY_SIGNATURE` 是按
+`db_url` 签名的 ⇒ 每个用例的库地址不同 ⇒ 不会被上一个用例的「已就绪」标记跳过建表。
+
+**落地形态**：
+
+- `backend/tests/conftest.py` 新增 `pg_shared_container`（**session 级**，复用会话护栏
+  在 import 期起好的那个容器 ⇒ 整个后端测试会话不再多起容器）与
+  `pg_database`（**函数级**，每用例一个独立库）；
+- 11 个文件 40 处改写成 `async with pg_database() as pg:` —— **用例正文一个字不动**；
+- 守护 `backend/tests/test_testcontainers_consolidation_contract.py`（7 条）**进 CI 根契约清单**。
+
+**红侧与验收**：
+
+| 项 | 值 |
+|---|---|
+| **红侧已验** | 实施前 **6 条守护红**，精确报出 40 处违规与 11 个文件；守护初版误伤 8 个连隔离库的模块（把 `create_async_engine` 当违规）⇒ 收窄为 AST 级判定（只查真实 import 与 `as pg` 的上下文） |
+| **逐用例比对** | 改写前后 JUnit XML **逐用例**比对：**1275 个用例集合完全一致、状态零变化** ⇒ **零新增失败** |
+| 耗时 | **124.01 秒 → 49.60 秒**（-60%） |
+| 残留 | 跑完 **0 个匿名卷、0 个 postgres 残留容器**；13 个具名卷完好 |
+| 守护 | 7 passed；ruff/black 全绿；CI 根契约清单已纳管 |
+
+> ⚠️ **踩过的坑（写下来别再踩）**：第一版改写脚本用**列号算术**在原文件里插参数，
+> 把插入点算到了别的行（把 `from sqlalchemy.exc import ...` 改成了
+> `from spg_databaseqlalchemy.exc import ...`）。
+> ⇒ 教训：**机械改写必须做「逆向还原 + 逐字节比对」**（第二版脚本把每个
+> 行级 edit 的逆变换写死，验完 107 个 edit 全可逆、还原后与原文件逐字节一致），
+> 并且**优先用行级操作，不要用列级算术**。
+
+
+## 账号设备身份 SSOT 收口（2026-11-13）
+
+- 计划：`docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md` — **planned**
+
+**起因（审查读代码得出，非推测）**：「账号设备身份」这一个业务概念同时存在于三处且互相矛盾 ——
+① 上位文档 `COLLECTION_SESSION_AND_FINGERPRINT.md:20-23` 要求「从 DeviceFingerprintManager
+获取或生成该账号的指纹，**注入** new_context」；② 生效文档 `COLLECTION_SESSION_LIFECYCLE.md`
+R8 要求 profile 模式「**不注入**，沿用 profile 原生环境」；③ 磁盘上 `data/device_fingerprints/`
+躺着 26 个**全部作废**的指纹文件（19 个孤儿，含 1 个编码乱码 `Tiktok 1µê`）。
+
+**已核对为「对的，不要重复改」**：
+
+| 项 | 判定 |
+|---|---|
+| R1 真相源唯一 / R2 登录即持久 / R3 人工确认即成立 / R4 读取即信任 | ✅ |
+| R5 并行扇出用内存快照 / R6 账号级串行 / R7 正常关闭才落盘 | ✅ |
+| **R8 顺序路径**（`runtime_session.py:687` normalize） | ✅ |
+| **R8 并行路径**（`executor_v2.py:6231-6241` 复用同一 normalize） | ✅ |
+
+⇒ **验收项 H（顺序与并行指纹口径一致）在主采集链路上已通过**，排查时不要重复改这里。
+
+**待收口（本文计划的批次）**：
+
+| 批次 | 内容 | 性质 |
+|---|---|---|
+| 1 | 消除双真相源（改上位文档）+ 清 `data/device_fingerprints/` + 新增账号前置检查脚本 | 零生产代码改动 |
+| 2 | 设备档案（决策点 A1）：profile 内记录设备档案，人工巡店写入 ⇒ 三条路径同一台设备 | P0 |
+| 3 | 指纹机制在 profile 模式下彻底下线（**保留** `DeviceFingerprintManager` 供录制/组件测试等非 profile 路径） | P0 |
+| 4 | 新增账号接入体验（面板轮询刷新、白名单前置提示、首登状态可见、清理 2 个测试残留账号） | P1 |
+| 5 | 采集跑 profile 副本 / 代理降级为可选 | **记账到 V2**，本次不做 |
+
+**两个待拍板决策点**：
+
+- **决策点 A（并行采集的「分身」）**：R5（并行只开一次 profile）⟹ 并行 context 不挂载 profile ⟹
+  R8「沿用 profile 原生环境」在并行路径上**无法完全实现** ⇒ 规范内部存在张力。
+  推荐 **A1**：在 `profiles/<平台>/<账号>/.device.json` 记录设备档案（人工巡店时按 CDP 实测写入），
+  三条路径共用同一套值 ⇒ 既不改 R5/R6，也不违反 R8 的**理由**（整套一起注入、彼此自洽）。
+- **决策点 B（代理/IP 隔离）**：当前业务为国内卖家端直连，规范 D7/P1 的 IP 隔离已成额外复杂度，
+  且「代理配坏必须显式失败」给每个新账号增加概念负担。推荐 **B1**：保留能力，但「没配」= 正常直连，
+  只对「配了但坏了」显式失败。
+
+**新增账号即时自查**（不等开发）：ID 只用小写字母/数字/下划线；对照现有 6 个 profile 目录确认不撞
+（尤其别写成 `shopeeKR` / `Tiktok1店` / `hongxikejimain`）；ID 不可改；platform 必须在白名单内；
+店铺 `platform_shop_id` 必填；首次采集前先人工巡店一次。
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
 - Parallel/specialized tracks should keep their own plan documents and be referenced from here when they are merged.
