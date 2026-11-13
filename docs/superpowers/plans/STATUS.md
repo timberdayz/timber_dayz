@@ -1399,12 +1399,14 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
 
 | 项 | 值 |
 |---|---|
+| 批次 D 提交 | `341441d6`（脚本 + 守护 + CI 纳管 + 书面真源）、`529060e3`（发布清单补「流水线绿 ≠ 验收」实例） |
 | 脚本修复 | 去 BOM；`⚠️` → `NOTE:`（信息不丢，SSH 访问真源的引用保留） |
 | 守护补强 | 新增 `test_watchdog_script_is_pure_ascii`；原有「.ps1 无 BOM」用例已覆盖 BOM 回归 |
 | **红侧已验** | 修复前两条守护**都红**：BOM 用例红 + 纯 ASCII 用例红（抓到 `0x8f/0x9a/0xa0/0xb8/0xbb/0xbf/0xe2/0xef`） |
 | CI 纳管 | `tests/test_ps_env_file_encoding_contract.py` 进 CI 根契约清单（CI 口径下 8 passed，不碰数据库） |
 | 书面真源 | `docs/superpowers/plans/2026-11-11-shop-identity-guard-activation.md` 补上守护指向与「不要改用补 BOM」的理由 |
 | 另一类失败（非缺陷） | 4 条 `test_executor_v2` 失败 = **本地库缺 v7.26.0 那一级迁移**（`current_schema_20261228_...` → `20261229_template_format_signature`）⇒ 跑 `scripts/run_current_schema_migrations.py` 后 27 passed |
+| CI 验收（`341441d6`） | 三线全绿：Validate Data Flow ✓ / CI Pipeline ✓（8 job 全 success）/ Docker Build and Push ✓；**决定性证据**：CI 日志里 `test_ps_env_file_encoding_contract.py` 8 passed（新增守护真的在 CI 上跑），根契约清单在 CI 上 458 passed / 11 skipped |
 
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
