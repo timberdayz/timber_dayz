@@ -6,7 +6,6 @@ from urllib.parse import urlparse, urlunparse
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from testcontainers.postgres import PostgresContainer
 
 from backend.services.data_pipeline.refresh_runner import execute_sql_target
 from backend.utils.text_normalization import normalize_alias_key
@@ -169,8 +168,10 @@ async def _create_orders_b_class_tables(session) -> None:
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_monthly_atomic_metric_date_prefers_order_time_over_metric_date_column():
-    with PostgresContainer("postgres:15") as pg:
+async def test_orders_monthly_atomic_metric_date_prefers_order_time_over_metric_date_column(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -233,8 +234,10 @@ async def test_orders_monthly_atomic_metric_date_prefers_order_time_over_metric_
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_monthly_atomic_prefers_rmb_paid_amount_over_local_paid_amount():
-    with PostgresContainer("postgres:15") as pg:
+async def test_orders_monthly_atomic_prefers_rmb_paid_amount_over_local_paid_amount(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -312,8 +315,8 @@ async def test_orders_monthly_atomic_prefers_rmb_paid_amount_over_local_paid_amo
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_atomic_prefers_rmb_profit_over_local_profit():
-    with PostgresContainer("postgres:15") as pg:
+async def test_orders_atomic_prefers_rmb_profit_over_local_profit(pg_database):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -375,8 +378,8 @@ async def test_orders_atomic_prefers_rmb_profit_over_local_profit():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_atomic_resolves_shop_alias_via_shop_account_alias():
-    with PostgresContainer("postgres:15") as pg:
+async def test_orders_atomic_resolves_shop_alias_via_shop_account_alias(pg_database):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -468,8 +471,10 @@ async def test_orders_atomic_resolves_shop_alias_via_shop_account_alias():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_atomic_resolves_prefixed_store_label_via_normalized_alias():
-    with PostgresContainer("postgres:15") as pg:
+async def test_orders_atomic_resolves_prefixed_store_label_via_normalized_alias(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -555,8 +560,10 @@ async def test_orders_atomic_resolves_prefixed_store_label_via_normalized_alias(
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_atomic_marks_account_level_shop_id_without_alias_as_unknown():
-    with PostgresContainer("postgres:15") as pg:
+async def test_orders_atomic_marks_account_level_shop_id_without_alias_as_unknown(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -618,8 +625,10 @@ async def test_orders_atomic_marks_account_level_shop_id_without_alias_as_unknow
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_atomic_resolves_shop_alias_via_shop_account_store_name_fallback():
-    with PostgresContainer("postgres:15") as pg:
+async def test_orders_atomic_resolves_shop_alias_via_shop_account_store_name_fallback(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -693,8 +702,10 @@ async def test_orders_atomic_resolves_shop_alias_via_shop_account_store_name_fal
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_monthly_atomic_resolves_tiktok_alias_to_canonical_shop_id():
-    with PostgresContainer("postgres:15") as pg:
+async def test_orders_monthly_atomic_resolves_tiktok_alias_to_canonical_shop_id(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -781,8 +792,10 @@ async def test_orders_monthly_atomic_resolves_tiktok_alias_to_canonical_shop_id(
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_monthly_atomic_uses_account_authority_over_generic_source_shop_id():
-    with PostgresContainer("postgres:15") as pg:
+async def test_orders_monthly_atomic_uses_account_authority_over_generic_source_shop_id(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -886,8 +899,10 @@ async def test_orders_monthly_atomic_uses_account_authority_over_generic_source_
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_shop_month_kpi_aligns_orders_alias_and_traffic_platform_shop_id():
-    with PostgresContainer("postgres:15") as pg:
+async def test_shop_month_kpi_aligns_orders_alias_and_traffic_platform_shop_id(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)

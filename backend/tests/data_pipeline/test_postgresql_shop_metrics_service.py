@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from testcontainers.postgres import PostgresContainer
 from urllib.parse import urlparse, urlunparse
 
 
@@ -25,7 +24,9 @@ async def test_load_shop_monthly_metrics_recovers_missing_shop_racing_view(monke
     db = AsyncMock()
     db.execute = AsyncMock(
         side_effect=[
-            Exception('UndefinedTableError: relation "api.business_overview_shop_racing_module" does not exist'),
+            Exception(
+                'UndefinedTableError: relation "api.business_overview_shop_racing_module" does not exist'
+            ),
             _MappingResult(
                 [
                     {
@@ -49,7 +50,10 @@ async def test_load_shop_monthly_metrics_recovers_missing_shop_racing_view(monke
     metrics = await service.load_shop_monthly_metrics(db, "2026-03")
 
     execute_sql_target.assert_awaited_once()
-    assert execute_sql_target.await_args.kwargs["target"] == "api.business_overview_shop_racing_module"
+    assert (
+        execute_sql_target.await_args.kwargs["target"]
+        == "api.business_overview_shop_racing_module"
+    )
     assert execute_sql_target.await_args.kwargs["resolve_dependencies"] is True
     db.rollback.assert_awaited_once()
     assert metrics["shopee|shop-a"]["monthly_profit"] == 321.0
@@ -57,10 +61,14 @@ async def test_load_shop_monthly_metrics_recovers_missing_shop_racing_view(monke
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_load_shop_monthly_metrics_reads_postgresql_shop_racing_module():
-    from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
+async def test_load_shop_monthly_metrics_reads_postgresql_shop_racing_module(
+    pg_database,
+):
+    from backend.services.postgresql_shop_metrics_service import (
+        load_shop_monthly_metrics,
+    )
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -103,10 +111,14 @@ async def test_load_shop_monthly_metrics_reads_postgresql_shop_racing_module():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_load_shop_monthly_target_achievement_uses_postgresql_shop_racing_module():
-    from backend.services.postgresql_shop_metrics_service import load_shop_monthly_target_achievement
+async def test_load_shop_monthly_target_achievement_uses_postgresql_shop_racing_module(
+    pg_database,
+):
+    from backend.services.postgresql_shop_metrics_service import (
+        load_shop_monthly_target_achievement,
+    )
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)

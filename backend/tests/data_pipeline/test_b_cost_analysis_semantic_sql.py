@@ -4,7 +4,6 @@ from urllib.parse import urlparse, urlunparse
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from testcontainers.postgres import PostgresContainer
 
 from backend.services.data_pipeline.refresh_runner import execute_sql_target
 
@@ -233,8 +232,10 @@ async def _create_orders_b_class_tables(session) -> None:
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
-    with PostgresContainer("postgres:15") as pg:
+async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -398,8 +399,10 @@ async def test_orders_atomic_parses_b_cost_fields_from_chinese_raw_data_keys():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_atomic_keeps_view_queryable_when_b_cost_amount_strings_are_malformed():
-    with PostgresContainer("postgres:15") as pg:
+async def test_orders_atomic_keeps_view_queryable_when_b_cost_amount_strings_are_malformed(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -492,8 +495,10 @@ async def test_orders_atomic_keeps_view_queryable_when_b_cost_amount_strings_are
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_orders_atomic_treats_blank_alias_value_as_missing_not_fallback():
-    with PostgresContainer("postgres:15") as pg:
+async def test_orders_atomic_treats_blank_alias_value_as_missing_not_fallback(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)

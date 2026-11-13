@@ -6,15 +6,14 @@ from sqlalchemy import text
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_data_pipeline_status_route_reads_latest_runs():
+async def test_data_pipeline_status_route_reads_latest_runs(pg_database):
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.routers.data_pipeline import get_pipeline_status
     from backend.services.data_pipeline.refresh_runner import execute_sql_target
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -42,12 +41,16 @@ async def test_data_pipeline_status_route_reads_latest_runs():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_data_pipeline_freshness_and_lineage_routes_read_rows(tmp_path):
+async def test_data_pipeline_freshness_and_lineage_routes_read_rows(
+    tmp_path, pg_database
+):
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
-    from backend.routers.data_pipeline import get_pipeline_freshness, get_pipeline_lineage
+    from backend.routers.data_pipeline import (
+        get_pipeline_freshness,
+        get_pipeline_lineage,
+    )
     from backend.services.data_pipeline import refresh_registry
     from backend.services.data_pipeline.refresh_runner import execute_sql_target
 
@@ -59,7 +62,7 @@ async def test_data_pipeline_freshness_and_lineage_routes_read_rows(tmp_path):
     )
     target_name = "semantic.router_target"
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -69,7 +72,9 @@ async def test_data_pipeline_freshness_and_lineage_routes_read_rows(tmp_path):
         original_paths = dict(refresh_registry.SQL_TARGET_PATHS)
         original_dependencies = dict(refresh_registry.PIPELINE_DEPENDENCIES)
         refresh_registry.SQL_TARGET_PATHS[target_name] = str(sql_path)
-        refresh_registry.PIPELINE_DEPENDENCIES[target_name] = ["semantic.fact_orders_atomic"]
+        refresh_registry.PIPELINE_DEPENDENCIES[target_name] = [
+            "semantic.fact_orders_atomic"
+        ]
 
         try:
             async with session_factory() as session:
@@ -84,14 +89,19 @@ async def test_data_pipeline_freshness_and_lineage_routes_read_rows(tmp_path):
                 freshness_response = await get_pipeline_freshness(db=session)
                 freshness_body = json.loads(freshness_response.body.decode("utf-8"))
                 assert freshness_body["success"] is True
-                assert freshness_body["data"]["targets"][0]["target_name"] == target_name
+                assert (
+                    freshness_body["data"]["targets"][0]["target_name"] == target_name
+                )
                 assert freshness_body["data"]["targets"][0]["status"] == "success"
 
                 lineage_response = await get_pipeline_lineage(db=session)
                 lineage_body = json.loads(lineage_response.body.decode("utf-8"))
                 assert lineage_body["success"] is True
                 assert lineage_body["data"]["edges"][0]["target_name"] == target_name
-                assert lineage_body["data"]["edges"][0]["source_name"] == "semantic.fact_orders_atomic"
+                assert (
+                    lineage_body["data"]["edges"][0]["source_name"]
+                    == "semantic.fact_orders_atomic"
+                )
         finally:
             refresh_registry.SQL_TARGET_PATHS.clear()
             refresh_registry.SQL_TARGET_PATHS.update(original_paths)

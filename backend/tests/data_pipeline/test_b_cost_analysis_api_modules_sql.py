@@ -5,7 +5,6 @@ import re
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from testcontainers.postgres import PostgresContainer
 
 from backend.services.data_pipeline.refresh_runner import execute_sql_text
 
@@ -190,8 +189,8 @@ def test_b_cost_analysis_order_detail_module_sql_asset():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_b_cost_views_are_queryable_with_currency_and_detail_columns():
-    with PostgresContainer("postgres:15") as pg:
+async def test_b_cost_views_are_queryable_with_currency_and_detail_columns(pg_database):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)

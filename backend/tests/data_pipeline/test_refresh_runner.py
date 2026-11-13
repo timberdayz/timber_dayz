@@ -387,13 +387,12 @@ async def test_ensure_ops_tables_skips_bootstrap_when_required_tables_exist(
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_execute_sql_target_creates_ops_tables():
+async def test_execute_sql_target_creates_ops_tables(pg_database):
     from backend.services.data_pipeline.refresh_runner import execute_sql_target
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -432,9 +431,8 @@ async def test_execute_sql_target_creates_ops_tables():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_execute_sql_target_records_pipeline_metadata(tmp_path):
+async def test_execute_sql_target_records_pipeline_metadata(tmp_path, pg_database):
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.services.data_pipeline.refresh_runner import execute_sql_target
@@ -449,7 +447,7 @@ async def test_execute_sql_target_records_pipeline_metadata(tmp_path):
 
     target_name = f"semantic.fake_target_{uuid.uuid4().hex[:8]}"
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -544,9 +542,10 @@ async def test_execute_sql_target_records_pipeline_metadata(tmp_path):
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_execute_refresh_plan_runs_multiple_targets_with_single_run_log(tmp_path):
+async def test_execute_refresh_plan_runs_multiple_targets_with_single_run_log(
+    tmp_path, pg_database
+):
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.services.data_pipeline.refresh_runner import execute_refresh_plan
@@ -568,7 +567,7 @@ async def test_execute_refresh_plan_runs_multiple_targets_with_single_run_log(tm
     source_target = f"semantic.batch_source_{uuid.uuid4().hex[:8]}"
     api_target = f"api.batch_view_{uuid.uuid4().hex[:8]}"
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -634,9 +633,10 @@ async def test_execute_refresh_plan_runs_multiple_targets_with_single_run_log(tm
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_execute_sql_target_retries_and_recovers(monkeypatch, tmp_path):
+async def test_execute_sql_target_retries_and_recovers(
+    monkeypatch, tmp_path, pg_database
+):
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.services.data_pipeline import refresh_registry
@@ -650,7 +650,7 @@ async def test_execute_sql_target_retries_and_recovers(monkeypatch, tmp_path):
     )
     target_name = f"semantic.retry_target_{uuid.uuid4().hex[:8]}"
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -725,9 +725,10 @@ async def test_execute_sql_target_retries_and_recovers(monkeypatch, tmp_path):
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_execute_refresh_plan_marks_partial_failed_and_skips_downstream(tmp_path):
+async def test_execute_refresh_plan_marks_partial_failed_and_skips_downstream(
+    tmp_path, pg_database
+):
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.services.data_pipeline import refresh_registry
@@ -752,7 +753,7 @@ async def test_execute_refresh_plan_marks_partial_failed_and_skips_downstream(tm
     bad_target = f"semantic.bad_target_{uuid.uuid4().hex[:8]}"
     downstream_target = f"api.downstream_target_{uuid.uuid4().hex[:8]}"
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)

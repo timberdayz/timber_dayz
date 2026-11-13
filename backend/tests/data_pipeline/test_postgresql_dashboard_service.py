@@ -1474,15 +1474,15 @@ async def test_postgresql_dashboard_service_shop_racing_platform_group_sums_prof
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_time_targets_without_duplicates(
     monkeypatch,
+    pg_database,
 ):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.services.data_pipeline.refresh_runner import execute_sql_target
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -2101,13 +2101,13 @@ async def test_postgresql_dashboard_service_inventory_backlog_reads_from_api_mod
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_comparison_loads_total_month_target_when_rows_have_none(
     monkeypatch,
+    pg_database,
 ):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -2207,13 +2207,13 @@ async def test_postgresql_dashboard_service_comparison_loads_total_month_target_
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_operational_metrics_loads_total_targets_and_costs(
     monkeypatch,
+    pg_database,
 ):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -2340,14 +2340,14 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_operational_metrics_respects_soft_deleted_expenses(
     monkeypatch,
+    pg_database,
 ):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
     from datetime import datetime, timezone
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -2522,14 +2522,14 @@ async def test_postgresql_dashboard_service_operational_metrics_respects_soft_de
 @pytest.mark.asyncio
 async def test_load_target_summary_daily_without_platform_avoids_null_platform_sql_error(
     monkeypatch,
+    pg_database,
 ):
     from datetime import date
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -2621,14 +2621,14 @@ async def test_load_target_summary_daily_without_platform_avoids_null_platform_s
 @pytest.mark.asyncio
 async def test_load_target_summary_monthly_platform_prefers_period_scoped_shop_rows(
     monkeypatch,
+    pg_database,
 ):
     from datetime import date
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -2990,15 +2990,15 @@ async def test_postgresql_dashboard_service_traffic_ranking_account_group_uses_s
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_daily(
     monkeypatch,
+    pg_database,
 ):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.services.data_pipeline.refresh_runner import execute_sql_target
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -3291,15 +3291,15 @@ async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_d
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate(
     monkeypatch,
+    pg_database,
 ):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.services.data_pipeline.refresh_runner import execute_sql_target
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -3479,15 +3479,14 @@ async def test_postgresql_dashboard_service_monthly_kpi_keeps_pv_and_uv_separate
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_business_overview_kpi_module_exposes_pv_uv_conversion_rates():
+async def test_business_overview_kpi_module_exposes_pv_uv_conversion_rates(pg_database):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.services.data_pipeline.refresh_runner import execute_sql_target
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -3644,15 +3643,16 @@ async def test_business_overview_kpi_module_exposes_pv_uv_conversion_rates():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypatch):
+async def test_postgresql_dashboard_service_reads_real_inventory_chain(
+    monkeypatch, pg_database
+):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.services.data_pipeline.refresh_runner import execute_sql_target
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)

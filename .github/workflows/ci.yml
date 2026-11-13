@@ -305,6 +305,14 @@ jobs:
           #     「进程被强杀 + 事后没人跑清理脚本」—— 脚本早就存在，却只有它自己的
           #     契约测试引用它。⇒ **没人调用的守护不是守护**：守护本身也要进 CI。
           #
+          # 2026-11-13 第六轮扩：补 1 个 testcontainers 收敛契约文件（纯源码，不碰数据库）：
+          #   test_testcontainers_consolidation_contract.py —— **集成测试不许自己起容器**
+          #     为什么要补：2026-11-13 实测，backend/tests/data_pipeline/ 里有 40 处
+          #     `with PostgresContainer("postgres:15") as pg:` 样板（11 个文件），
+          #     每个容器启动 1.76 秒 ⇒ 一轮回归付 ~70 秒纯启动开销、还各留一个匿名卷。
+          #     已收敛为「一个会话级容器 + 每用例一个独立 database」（CREATE DATABASE
+          #     实测 0.063 秒）。⇒ 容器唯一真源在 conftest；守护把它锁住。
+          #
           # 2026-11-10 第三轮扩：又补进 30 个文件。怎么确认它们不碰数据库的 ——
           # 把 TEST_DB_PORT 指向不可达端口 1、同时把 DATABASE_URL 指向不可达地址
           # （db_test_config 走前者、迁移器走后者）⇒ 任何真连库的行为都会立刻失败。
@@ -352,6 +360,7 @@ jobs:
             tests/test_ps_env_file_encoding_contract.py \
             backend/tests/test_cleanup_test_containers_wired_contract.py \
             backend/tests/test_cleanup_test_containers_contract.py \
+            backend/tests/test_testcontainers_consolidation_contract.py \
             tests/test_rebuild_views_materialized_self_heal.py \
             tests/test_reliability_services.py \
             tests/test_run_local_port_selection.py \

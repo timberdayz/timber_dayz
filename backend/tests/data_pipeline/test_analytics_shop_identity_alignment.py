@@ -3,15 +3,16 @@ from urllib.parse import urlparse, urlunparse
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from testcontainers.postgres import PostgresContainer
 
 from backend.services.data_pipeline.refresh_runner import execute_sql_target
 
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_analytics_monthly_atomic_resolves_shop_account_identity_to_canonical_shop_id():
-    with PostgresContainer("postgres:15") as pg:
+async def test_analytics_monthly_atomic_resolves_shop_account_identity_to_canonical_shop_id(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -138,8 +139,10 @@ async def test_analytics_monthly_atomic_resolves_shop_account_identity_to_canoni
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_analytics_monthly_atomic_treats_dash_placeholders_as_null_metrics():
-    with PostgresContainer("postgres:15") as pg:
+async def test_analytics_monthly_atomic_treats_dash_placeholders_as_null_metrics(
+    pg_database,
+):
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)

@@ -9,11 +9,14 @@
 
 import asyncio
 import atexit
+import hashlib
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
-from typing import AsyncGenerator, Generator
+from typing import AsyncGenerator, Callable, Generator
+from urllib.parse import urlparse, urlunparse
 
 import pytest
 import pytest_asyncio
@@ -426,6 +429,177 @@ async def pg_session(pg_engine) -> AsyncGenerator[AsyncSession, None]:
         await session.begin()
         yield session
         await session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# 共享 postgres 容器 + 每用例独立 database（批次 E-3）
+# ---------------------------------------------------------------------------
+#
+# 背景（2026-11-13 实测）
+# ----------------------
+# ``backend/tests/data_pipeline/`` 里有 **40** 处复制粘贴的容器样板
+# （11 个文件），每处自己起一个容器:
+#
+#     with PostgresContainer("postgres:15") as pg:
+#         sync_url = pg.get_connection_url()
+#         ...
+#         await engine.dispose()
+#
+# 代价:
+#
+# * 容器启动 **1.76 秒/个** ⇒ 一轮 data_pipeline 回归要付 **~70 秒**纯启动开销;
+# * 每个容器自带一个匿名卷 ⇒ 进程被强杀就留下残卷。
+#
+# 目标形态
+# --------
+# **一个会话级容器 + 每个用例一个独立 database**:
+#
+# * 容器: 复用会话护栏（``_start_isolated_postgres``）在 import 期起好的那一个
+#   ⇒ 整个后端测试会话**不再多起容器**（真源只有一个，就在上面那段护栏里）;
+# * 库: 每个用例 ``CREATE DATABASE``（实测 **0.063 秒**）→ 用完 ``DROP DATABASE``
+#   （实测 **0.076 秒**）⇒ 40 个用例总共多花 ~6 秒，而不是 ~70 秒。
+#
+# 为什么不能简单地"共用一个 database"
+# ----------------------------------
+# 这些用例里有 21 处是**裸** ``CREATE TABLE``（没有 ``IF NOT EXISTS``），
+# 其中 3 张表跨文件重名:
+#
+# * ``core.shop_accounts``            —— 3 个文件都建
+# * ``core.shop_account_aliases``     —— 2 个文件都建
+# * ``semantic.fact_orders_atomic``   —— 2 个文件都建
+#
+# 第二个文件建同名表就会报 ``relation already exists``。
+#
+# 为什么"每用例独立库"与原来"每用例独立容器"等价
+# --------------------------------------------
+# 原实现每个用例起的是**全新容器**（库里只有 ``public`` schema）⇒ 新建 database
+# 与之等价。且 ``refresh_runner._OPS_TABLES_READY_SIGNATURE`` 是按 ``db_url``
+# 签名的 ⇒ 每个用例的库地址不同 ⇒ 不会被上一个用例的"已就绪"标记跳过建表。
+#
+# 用例怎么用（与原来的 ``PostgresContainer`` **同形**，正文一个字不用改）:
+#
+#     async def test_xxx(pg_database):
+#         async with pg_database() as pg:
+#             sync_url = pg.get_connection_url()
+#             ...
+
+#: 临时库名前缀（便于在容器里一眼认出是测试库）。
+_PG_TEST_DB_PREFIX = "xihong_test_"
+
+
+class _SharedPostgresContainer:
+    """会话级共享 postgres 容器的句柄。"""
+
+    def __init__(self, sync_url: str, admin_engine) -> None:
+        self.sync_url = sync_url
+        self.admin_engine = admin_engine
+
+    def url_for_database(self, db_name: str) -> str:
+        """某个 database 的同步连接串。"""
+        parsed = urlparse(self.sync_url)
+        return urlunparse(parsed._replace(path="/" + db_name))
+
+
+class _PerTestDatabase:
+    """单个用例独占的 database（异步上下文管理器）。
+
+    刻意做成和 ``PostgresContainer`` **同形**: 只需要 ``get_connection_url()``。
+    """
+
+    def __init__(self, container: _SharedPostgresContainer, db_name: str) -> None:
+        self._container = container
+        self._db_name = db_name
+        self._url = container.url_for_database(db_name)
+
+    async def __aenter__(self) -> "_PerTestDatabase":
+        await self._create_database()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        await self._drop_database()
+        return False
+
+    def get_connection_url(self) -> str:
+        """与 ``PostgresContainer.get_connection_url()`` 同名同义。"""
+        return self._url
+
+    async def _create_database(self) -> None:
+        from sqlalchemy import text
+
+        async with self._container.admin_engine.connect() as conn:
+            await conn.execute(text('CREATE DATABASE "{0}"'.format(self._db_name)))
+
+    async def _drop_database(self) -> None:
+        from sqlalchemy import text
+
+        try:
+            async with self._container.admin_engine.connect() as conn:
+                # WITH (FORCE): 用例中途失败时可能还有连接挂着，先踢掉再删。
+                await conn.execute(
+                    text(
+                        'DROP DATABASE IF EXISTS "{0}" WITH (FORCE)'.format(
+                            self._db_name
+                        )
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001 —— 清理失败不得影响测试结论
+            print(
+                "[测试护栏] 丢弃临时库 {0} 失败(已忽略): {1}".format(self._db_name, exc)
+            )
+
+
+@pytest_asyncio.fixture(scope="session")
+async def pg_shared_container() -> AsyncGenerator[_SharedPostgresContainer, None]:
+    """会话级共享 postgres 容器 —— 整个后端测试会话只有这一个。
+
+    复用会话护栏在 import 期起好的那个容器（``_start_isolated_postgres``），
+    所以集成测试**不再额外起容器**。
+
+    ⚠️ 这里刻意**不是**"每个用例一个容器": 40 个用例各起一个要付 ~70 秒
+    纯启动开销（实测每个 1.76 秒），还会各留一个匿名卷。
+    """
+    sync_url = os.environ.get(TEST_DATABASE_URL_VAR, "")
+    if not sync_url:
+        pytest.fail(
+            "共享容器地址缺失: {0} 为空 —— 测试护栏未生效".format(TEST_DATABASE_URL_VAR)
+        )
+
+    admin_async_url = urlunparse(
+        urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+    )
+    # AUTOCOMMIT: CREATE/DROP DATABASE 不能跑在事务块里。
+    admin_engine = create_async_engine(
+        admin_async_url, echo=False, isolation_level="AUTOCOMMIT"
+    )
+    try:
+        yield _SharedPostgresContainer(sync_url=sync_url, admin_engine=admin_engine)
+    finally:
+        await admin_engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def pg_database(
+    pg_shared_container: _SharedPostgresContainer, request
+) -> AsyncGenerator[Callable[[], _PerTestDatabase], None]:
+    """每个用例一个独立 database 的工厂（容器共享、库不共享）。
+
+    用法::
+
+        async def test_xxx(pg_database):
+            async with pg_database() as pg:
+                url = pg.get_connection_url()
+
+    ⚠️ 这个 fixture **必须**是函数级: 库共享会让用例之间串数据，也会撞上
+    跨文件重名的表（``core.shop_accounts`` 等 21 处裸 ``CREATE TABLE``）。
+    """
+    node_id = getattr(request.node, "nodeid", "")
+    tag = hashlib.sha1(node_id.encode("utf-8")).hexdigest()[:8]
+
+    def _factory() -> _PerTestDatabase:
+        db_name = "{0}{1}_{2}".format(_PG_TEST_DB_PREFIX, tag, uuid.uuid4().hex[:8])
+        return _PerTestDatabase(pg_shared_container, db_name)
+
+    yield _factory
 
 
 @pytest_asyncio.fixture

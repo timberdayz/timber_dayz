@@ -61,14 +61,13 @@ def test_platform_month_kpi_does_not_force_missing_rollups_to_zero():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
+async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback(pg_database):
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.services.data_pipeline.refresh_runner import execute_sql_target
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)
@@ -312,14 +311,13 @@ async def test_shop_month_kpi_uses_monthly_only_without_daily_fallback():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_shop_day_kpi_keeps_missing_traffic_as_null():
+async def test_shop_day_kpi_keeps_missing_traffic_as_null(pg_database):
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.services.data_pipeline.refresh_runner import execute_sql_target
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)

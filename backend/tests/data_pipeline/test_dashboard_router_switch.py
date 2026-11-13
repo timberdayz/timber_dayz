@@ -151,15 +151,16 @@ def test_main_contains_explicit_dashboard_router_source_log():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch):
+async def test_switched_app_serves_real_postgresql_dashboard_routes(
+    monkeypatch, pg_database
+):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from testcontainers.postgres import PostgresContainer
     from urllib.parse import urlparse, urlunparse
 
     from backend.models.database import get_async_db
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         sync_url = pg.get_connection_url()
         parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
         async_url = urlunparse(parsed)

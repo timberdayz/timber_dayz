@@ -100,11 +100,10 @@ async def _build_views(session):
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_latest_view_does_not_double_count_same_day_batches():
+async def test_latest_view_does_not_double_count_same_day_batches(pg_database):
     """同一天两批采集 → latest 视图只能有一行，且是最新那批的库存。"""
-    from testcontainers.postgres import PostgresContainer
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         async_url = urlunparse(
             urlparse(pg.get_connection_url())._replace(scheme="postgresql+asyncpg")
         )
@@ -146,11 +145,10 @@ async def test_latest_view_does_not_double_count_same_day_batches():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_change_view_does_not_double_count_same_day_batches():
+async def test_change_view_does_not_double_count_same_day_batches(pg_database):
     """change 视图同理：stock_delta 不能被同日多批放大。"""
-    from testcontainers.postgres import PostgresContainer
 
-    with PostgresContainer("postgres:15") as pg:
+    async with pg_database() as pg:
         async_url = urlunparse(
             urlparse(pg.get_connection_url())._replace(scheme="postgresql+asyncpg")
         )
