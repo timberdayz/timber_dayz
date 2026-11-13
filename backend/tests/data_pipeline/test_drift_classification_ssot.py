@@ -70,9 +70,9 @@ def test_classify_drift_has_exactly_one_definition():
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 if node.name == "classify_drift":
                     definitions.append(path)
-    assert definitions == [STATUS_SEMANTICS], (
-        f"classify_drift 必须只有一个定义, 实际: {definitions}"
-    )
+    assert definitions == [
+        STATUS_SEMANTICS
+    ], f"classify_drift 必须只有一个定义, 实际: {definitions}"
 
 
 def test_matcher_no_longer_defines_its_own_drift_classifier():
@@ -94,17 +94,13 @@ def test_matcher_has_no_platform_specific_drift_special_case():
     source = TEMPLATE_MATCHER.read_text(encoding="utf-8")
     assert "ORDER_CORE_REQUIRED_FIELDS" not in source
     assert "ORDER_OPTIONAL_FIELDS" not in source
-    assert '== "shopee"' not in source, (
-        "匹配器里不应再出现按平台分叉的漂移判定"
-    )
+    assert '== "shopee"' not in source, "匹配器里不应再出现按平台分叉的漂移判定"
 
 
 def test_status_service_consumes_l3_decision():
     """编排层必须消费 L3 的结论, 而不是自己拼状态树。"""
     source = STATUS_SERVICE.read_text(encoding="utf-8")
-    assert "drift_decision" in source, (
-        "编排层应读取 header_changes['drift_decision']"
-    )
+    assert "drift_decision" in source, "编排层应读取 header_changes['drift_decision']"
     assert "classify_drift" in source, "编排层应 import L3 的判定入口(兜底路径)"
 
 
@@ -264,9 +260,9 @@ def test_recheck_service_exists_and_is_the_single_implementation():
     scheduled = (REPO_ROOT / "backend" / "tasks" / "scheduled_tasks.py").read_text(
         encoding="utf-8"
     )
-    assert "TemplateRecheckService" in scheduled, (
-        "定时巡检必须调用共享的重检服务, 不允许再自带一份"
-    )
+    assert (
+        "TemplateRecheckService" in scheduled
+    ), "定时巡检必须调用共享的重检服务, 不允许再自带一份"
 
 
 def test_apply_recheck_releases_file_and_moves_drift_snapshot_to_history():

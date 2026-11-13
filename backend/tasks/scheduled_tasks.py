@@ -444,7 +444,6 @@ def _recover_template_update_required_files(
         return {"checked": 0, "recovered": 0, "still_blocked": 0}
 
     readiness_by_id = run_async_task(lambda: _load_readiness(file_ids))
-    now = datetime.now(timezone.utc)
     recovered = 0
     still_blocked = 0
 

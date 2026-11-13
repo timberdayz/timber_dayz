@@ -221,9 +221,7 @@ def apply_upgrade(bind) -> dict:
     stats["duplicates_archived"] = int(result.rowcount or 0)
 
     # 4) 旧索引(按维度唯一)退场
-    bind.execute(
-        sa.text(f"DROP INDEX IF EXISTS {_SCHEMA}.{OLD_INDEX_NAME}")
-    )
+    bind.execute(sa.text(f"DROP INDEX IF EXISTS {_SCHEMA}.{OLD_INDEX_NAME}"))
     stats["old_index_dropped"] = 1
 
     # 5) 新索引(按维度 + 格式签名唯一)
@@ -254,9 +252,7 @@ def apply_downgrade(bind) -> dict:
     }
 
     # 1) 新索引退场
-    bind.execute(
-        sa.text(f"DROP INDEX IF EXISTS {_SCHEMA}.{NEW_INDEX_NAME}")
-    )
+    bind.execute(sa.text(f"DROP INDEX IF EXISTS {_SCHEMA}.{NEW_INDEX_NAME}"))
     stats["new_index_dropped"] = 1
 
     # 2) 还原旧索引前, 必须先把同维度的多个 published 归档到只剩一个

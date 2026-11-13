@@ -435,14 +435,10 @@ def classify_drift(
     optional_set = {
         str(column) for column in optional_removed_raw_fields if str(column)
     }
-    optional_set.update(
-        str(column) for column in optional_raw_fields if str(column)
-    )
+    optional_set.update(str(column) for column in optional_raw_fields if str(column))
     optional_set.update(OPTIONAL_RAW_FIELD_NAMES)
 
-    confirmed_set = {
-        str(column) for column in confirmed_extra_fields if str(column)
-    }
+    confirmed_set = {str(column) for column in confirmed_extra_fields if str(column)}
 
     alias_rescued = {
         str(column) for column in alias_rescued_removed_raw_fields if str(column)

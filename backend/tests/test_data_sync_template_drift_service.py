@@ -412,7 +412,13 @@ async def test_analytics_replaced_column_is_still_blocking(drift_session_factory
         status = await DataSyncTemplateStatusService(session).evaluate_catalog_file(
             catalog_file,
             template=template,
-            current_columns=["日期", "商品访客数", "页面浏览次数", "退款金额", "商品卡 GMV"],
+            current_columns=[
+                "日期",
+                "商品访客数",
+                "页面浏览次数",
+                "退款金额",
+                "商品卡 GMV",
+            ],
         )
 
     assert status["template_status"] == "update_required"
@@ -437,7 +443,9 @@ def test_alias_registry_account_scope_overrides_generic_mapping():
 
 
 @pytest.mark.asyncio
-async def test_find_best_template_prefers_account_scoped_template(drift_session_factory):
+async def test_find_best_template_prefers_account_scoped_template(
+    drift_session_factory,
+):
     from backend.services.template_matcher import TemplateMatcher
 
     now = _now()

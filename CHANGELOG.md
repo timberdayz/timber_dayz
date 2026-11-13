@@ -1,5 +1,127 @@
 # Changelog - 西虹 ERP 系统
 
+## [v7.26.0] - 2026-11-13 - 模板治理闭环：「模板已保存，但该样本文件仍未通过治理复核」是句假话
+
+> **本版本含数据库迁移**：`current_schema_20261229_template_format_signature`
+> —— 加列 `core.field_mapping_templates.format_signature` → 回填 → 换 published 唯一索引。
+> 部署脚本自带**只读 preflight + 迁移前备份 + schema gate**，迁移失败会回滚容器，不会带着半套 schema 上线。
+>
+> 判定口径与模板数据在**生产（云端）**和**采集机**两个环境里各有一份；
+> 代码统一走 git，模板数据另走 `scripts/sync_templates_to_cloud.ps1`（**本次未改其口径**）。
+
+### 一、用户看到的那句提示是假的
+
+**现象**：用户在治理面板更新模板并保存后，界面仍提示
+「模板已保存，但该样本文件仍未通过治理复核」——**保存其实成功了**。
+
+**三层根因叠在一起**：
+
+| # | 根因 | 位置 | 表现 |
+|---|---|---|---|
+| 1 | 「什么算阻断漂移」有**三份**定义 | `template_matcher._classify_header_changes` / `semantic_field_contract_service.evaluate` / `data_sync_status_semantics` | 各域行为不一致；业务口径只能靠 `if` 打补丁（`shopee/orders/monthly` 单开豁免），TikTok 订单接进来时没人想到要一起打 |
+| 2 | 面板读的是**漂移快照**，不是实时判定 | 治理覆盖统计 + 前端文案 | 做对了却看不到效果 —— 快照里的 `breaking_drift` 在重检通过前一直保留 |
+| 3 | 保存模板**不触发重检** | 定时巡检 15 分钟轮询 | 用户改完模板要等下一轮才可能看到结果 |
+
+顺带清掉一条自相矛盾的状态：**纯列顺序变化**曾被判「阻断漂移」，同时面板显示「匹配率 100.0%」。
+
+### 二、判定权三层分离（判定口径 SSOT）
+
+- 新增 **L3 唯一判定入口** `data_sync_status_semantics.classify_drift`：
+  L1 事实（`template_matcher`）→ L2 语义（`semantic_field_contract_service`）→ **L3 结论（`classify_drift`）**；
+  编排层（`data_sync_template_status_service`）**只消费不定义**。
+- 删掉 `shopee/orders/monthly` 平台特判（它原本会造成新列被静默丢弃）；
+  `预估回款金额` 保留在 L3 存量兼容名单，以免行为回归。
+
+### 三、模板发布即闭环
+
+- 新增 `backend/services/template_recheck_service.py`：模板保存成功后**立刻**重检同维度待更新文件，
+  能过的当场放行（并完成契约晋升与快照搬移）；
+- 定时巡检**复用同一份**逻辑，两处不再各写一套；
+- 判定复用 `DataSyncService.get_file_sync_readiness`（与入库前置校验同一条链路），
+  避免「面板说过了、入库说没过」。
+
+### 四、面板与文案
+
+- 治理覆盖统计同时给**组合级**与**文件级**结论：漂移快照保待办不消失，
+  实时判定回答「这个样本文件此刻行不行」；
+- 前端按**三态**提示：放行 / 仍待重检 / 仍有字段对不上；
+- 文案不再说「仍未通过治理复核」这种把成功说成失败的句子。
+
+### 五、语义契约升级为业务可用性判据
+
+- 少列按**能否证明它可缺**分三种归宿：已证明可选 / 别名救回 / 其余阻断；
+- **该域没有语义契约时保守阻断**（把「没有结论」与「结论是可选」区分开）。
+
+### 六、同维度多格式并存（`format_signature`）
+
+- 模板表加 `format_signature`，取值与变体 `variant_kind` **同一份实现**（列集合 + 解析方式 + 表头行 + 工作表名）；
+- published 唯一键从「维度」改为 **(维度, 格式签名)**；
+- 归档范围按**保存意图**分：`new_version`（更新既有模板）= **替换**；`create`（新建 / 创建变体）= **并存**；
+- 「当前已发布模板」限定在**同格式内**：两种格式并存时不把「并存」误报成「我们升级过模板」；
+  但基准那一版**已被归档**时，仍用「当前已发布模板」做对照 —— 升级信号照常成立。
+
+### 七、入库批量刷新
+
+- 刷新队列的合并范围从「pending」扩到 **pending + running**：正在跑的那条吸收后来到的事件并打 `rerun_requested`；
+- 它跑完看到标记 ⇒ 重新排回 pending ⇒ **再刷一轮收口**；
+- ⇒ 一轮入库至多「跑中的那一轮 + 收口的那一轮」，而不是「每个文件一轮」。
+
+### 八、口径变更（业务需知晓）
+
+| 变更 | 以前 | 现在 | 理由 |
+|---|---|---|---|
+| 多一列 | 平台特判放行(shopee) / 其它域阻断 | **一律阻断**（除非用户已确认） | 模板没声明的列**不会写进事实表** ⇒ 放行等于**静默丢数据** |
+| 少一列 | 语义层自己判 | 无契约域**保守阻断** | 「没有结论」≠「结论是可选」 |
+| 列顺序变化 | 报阻断漂移 | **不阻断** | 匹配率 100% 却报阻断是自相矛盾 |
+| 「更新模板」 | 同维度全部 published 归档 | 只替换被编辑的那一版；**其它格式继续生效** | 更新 ≠ 新增一种格式 |
+| 「创建变体」 | 同上 | 同格式的才替换，**别的格式并存** | 变体 = 同业务的另一种文件格式 |
+
+### 九、验证口径
+
+| 检查 | 结果 |
+|---|---|
+| 判定口径守护 `test_drift_classification_ssot.py` | **21 passed** |
+| 多格式守护 `test_template_format_signature_guardrails.py` | **13 passed**（含**迁移回填 SQL 与 Python 逐字一致**的真库校验） |
+| 批量刷新守护 `test_refresh_queue_batch_coalescing.py` | **5 passed** |
+| 宽回归（判定/模板/契约/治理/入库） | **1532 passed / 3 skipped / 0 failed** |
+| 全量 pytest（改动后） | 6599 passed / 3 failed / 13 skipped |
+| 全量 pytest（stash 后基线） | 6559 passed / **同样 3 failed** / 13 skipped |
+| **失败集 diff** `scripts/diff_pytest_junit.py` | **NEW failures = 0**；COMMON = 3；ADDED cases = 41；exit 0 |
+| 架构 SSOT `verify_architecture_ssot.py` | 4/4 PASSED |
+| UTF-8 卫生 / 规则完整性 | PASS / PASS |
+| `vue-tsc --noEmit` / `vite build` | exit 0 / built in 34.46s |
+| 迁移链 `alembic heads` | **单 head**：`current_schema_20261229_template_format_signature` |
+| 采集机本地库 | 已升级到新 head；唯一键无重复 |
+
+### 十、上线前置与实测清单
+
+1. **代码与库必须同时到位**：ORM 已在读 `core.field_mapping_templates.format_signature`，
+   而库若还没这一列 ⇒ 任何走真实库的链路（采集登记 → 模板匹配）都会报
+   `column field_mapping_templates.format_signature does not exist`，事务被 abort ⇒ 文件登记失败。
+   顺序是「**先跑迁移，再上新代码**」。
+   采集机已执行 `python output/run_current_migrations_local.py --with-backup`
+   （备份 + 漂移检查 + advisory lock 的 fail-closed 入口）。
+2. **上线后必须实测一遍闭环**（本机没有 `template_update_required` 的真实文件，端到端只能用夹具验证）：
+   改一个模板 → 面板应立刻给出「已放行 / 仍待重检 / 仍有字段对不上」三态之一。
+3. **上线后自查同维度多 published 行**：
+   `select platform, data_domain, count(*) from core.field_mapping_templates where status='published' group by 1,2;`
+   ⇒ 允许同一维度出现多行（那是多格式并存），但**同一 (维度, format_signature) 不能有两行**。
+
+### 十一、遗留（留给 V2，不在本版）
+
+1. 治理面板的「维度行」还没按格式拆分展示（**判定**已按格式，展示仍是「最新一版」）；
+2. 物化视图仍是全量 `REFRESH MATERIALIZED VIEW`，没改成增量刷新；
+3. 本机 20 个文件全是 `ingested` ⇒ 端到端闭环只能在云端实测；
+4. 全量 pytest 的既有基线污染（`test_project_env.py` 泄漏 `DEPLOYMENT_ROLE=local`）按仓库规则属非阻塞 V2 债，
+   本次用**失败集 diff** 证明无新增失败。
+
+### 十二、本版提交与文档
+
+- `2839cad5` —— 模板治理闭环（判定口径 SSOT、发布即重检、多格式并存与批量刷新；24 files）
+- `bfd976f8` —— 复盘报告 `docs/reports/2026-11-13-template-governance-closure.md`
+- ADR：`docs/adr/2026-11-13-template-drift-classification-ssot.md`、
+  `docs/adr/2026-11-13-template-multi-format-and-batch-refresh.md`
+
 ## [v7.25.0] - 2026-11-13 - 商品中心 SPU 缺陷收口 + 接口去重挂载 + 密钥门禁补强
 
 > **本版本不含数据库迁移**（无新迁移、无存量数据改动）、**无接口契约变更**

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Watchdog for the cloud-sync SSH tunnel - keeps "is the tunnel still up?"
     a machine-checked fact instead of something a human has to remember.

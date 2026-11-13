@@ -75,7 +75,9 @@ async def test_running_task_absorbs_events_that_arrive_while_it_runs(batch_sessi
 
 
 @pytest.mark.asyncio
-async def test_completed_task_is_requeued_when_new_data_arrived_during_the_run(batch_session):
+async def test_completed_task_is_requeued_when_new_data_arrived_during_the_run(
+    batch_session,
+):
     """跑完发现有新数据 ⇒ 不落 completed, 而是重新排回 pending 收口。"""
     from backend.services.data_pipeline.refresh_queue_service import (
         RERUN_REQUESTED_FLAG,

@@ -60,7 +60,10 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MIGRATION_PATH = (
-    REPO_ROOT / "current_migrations" / "versions" / "20261229_template_format_signature.py"
+    REPO_ROOT
+    / "current_migrations"
+    / "versions"
+    / "20261229_template_format_signature.py"
 )
 
 
@@ -362,9 +365,7 @@ async def test_update_mode_replaces_the_edited_template(format_session_factory):
 
         rows = (
             await session.execute(
-                text(
-                    "select id, status from core.field_mapping_templates order by id"
-                )
+                text("select id, status from core.field_mapping_templates order by id")
             )
         ).fetchall()
 
@@ -383,9 +384,7 @@ async def test_create_mode_keeps_other_formats_alive(format_session_factory):
 
         rows = (
             await session.execute(
-                text(
-                    "select status from core.field_mapping_templates order by id"
-                )
+                text("select status from core.field_mapping_templates order by id")
             )
         ).fetchall()
 
@@ -398,7 +397,9 @@ async def test_create_mode_keeps_other_formats_alive(format_session_factory):
 # 5. 家族投影: 每个 published 模板一个变体
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_projection_creates_one_variant_per_published_format(format_session_factory):
+async def test_projection_creates_one_variant_per_published_format(
+    format_session_factory,
+):
     """两种格式 ⇒ 一个族、激活版本下两个变体(各自带自己的列集合)。"""
     import json
 
@@ -429,7 +430,9 @@ async def test_projection_creates_one_variant_per_published_format(format_sessio
 # ---------------------------------------------------------------------------
 # 5. 判定按格式: 旧格式的文件仍由旧格式的模板解释
 # ---------------------------------------------------------------------------
-async def test_same_format_published_tells_coexistence_from_upgrade(format_session_factory):
+async def test_same_format_published_tells_coexistence_from_upgrade(
+    format_session_factory,
+):
     """**并存 ≠ 升级** —— 这两种情形必须分开判。
 
     * 并存: 基准那一版仍然 published ⇒「当前模板」就是它自己
@@ -447,9 +450,7 @@ async def test_same_format_published_tells_coexistence_from_upgrade(format_sessi
 
         rows = (
             await session.execute(
-                text(
-                    "select id from core.field_mapping_templates order by version asc"
-                )
+                text("select id from core.field_mapping_templates order by version asc")
             )
         ).fetchall()
         template_a_id, template_b_id = rows[0][0], rows[1][0]
@@ -492,7 +493,9 @@ async def test_same_format_published_tells_coexistence_from_upgrade(format_sessi
 
 
 @pytest.mark.asyncio
-async def test_baseline_picks_the_template_of_the_files_own_format(format_session_factory):
+async def test_baseline_picks_the_template_of_the_files_own_format(
+    format_session_factory,
+):
     """**核心验收**: 维度里最新的一版是格式 B, 但文件是格式 A
     ⇒ 基准必须落到格式 A 的模板上。
 
@@ -540,7 +543,7 @@ async def test_baseline_picks_the_template_of_the_files_own_format(format_sessio
         )
 
     assert baseline["baseline_template"] is not None
-    assert baseline["baseline_template"].id == oldest_id, (
-        "文件是格式 A ⇒ 基准必须是格式 A 的模板, 而不是维度里最新的那一版"
-    )
+    assert (
+        baseline["baseline_template"].id == oldest_id
+    ), "文件是格式 A ⇒ 基准必须是格式 A 的模板, 而不是维度里最新的那一版"
     assert baseline["baseline_template"].id != newest_id

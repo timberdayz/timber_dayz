@@ -448,9 +448,7 @@ async def _async_process_refresh_queue_task() -> dict:
             completed_task = await queue_service.mark_completed(task.id)
             # [*] 批次 H(H-2): 跑的过程中又有文件入库 ⇒ 这条被重新排回 pending,
             #     下一次轮询会再刷一轮收口。这里如实上报, 便于观测。
-            rerun_scheduled = (
-                getattr(completed_task, "status", None) == "pending"
-            )
+            rerun_scheduled = getattr(completed_task, "status", None) == "pending"
             if rerun_scheduled:
                 logger.info(
                     "[RefreshQueue] 刷新期间有新数据入库, 已排入收口轮: job_id=%s domain=%s",
