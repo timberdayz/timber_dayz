@@ -339,6 +339,7 @@ jobs:
             backend/tests/test_cleanup_test_containers_contract.py \
             backend/tests/test_testcontainers_consolidation_contract.py \
             backend/tests/test_ci_weight_reduction_contract.py \
+            backend/tests/test_status_index_slim_contract.py \
             tests/test_rebuild_views_materialized_self_heal.py \
             tests/test_reliability_services.py \
             tests/test_run_local_port_selection.py \
