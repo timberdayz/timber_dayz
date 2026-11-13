@@ -170,6 +170,29 @@ Walter 澄清后的业务目标是：
 （尤其别写成 `shopeeKR` / `Tiktok1店` / `hongxikejimain`）；ID 不可改；platform 必须在白名单内；
 店铺 `platform_shop_id` 必填；首次采集前先人工巡店一次。
 
+### 发布证据（v7.27.0，2026-11-14）
+
+| 项 | 证据 |
+|---|---|
+| tag | `v7.27.0`（附注标签，对象 `fa99bf48`）→ 提交 `cc523a97`；**双镜像 tag 对象一致**（`git ls-remote --tags`） |
+| main | `e9a8eecc`；**双镜像 main SHA 一致** |
+| 部署流水线 | `Deploy to Production` run 43484496122 —— Tag Release 13m50s，全部步骤 ✓ |
+| CI 流水线 | run 43487329740 **success**（中间两次红：43484395368 black+bandit、43485663421 根契约事件循环污染，均已修） |
+| 生产镜像 | `xihong_erp_backend_api` / `frontend` / `celery_worker` / `celery_beat` 全部 **v7.27.0** 且 healthy |
+| 版本号 | `GET /healthz/ready` → `{"status":"ready","version":"v7.27.0","database":"connected","dashboard":"ready"}` |
+| 公网 | `http://www.xihong.site` 200；`/healthz/ready` 200 且 version=v7.27.0 |
+| 迁移 | 迁移前备份已建并校验（pg_restore --list）；`Current-schema migration action completed: upgrade`；**schema gate 通过**（`up_to_date`，current == head == `current_schema_20261229_template_format_signature`，缺表/缺列均为空） |
+| 视图重建 | 成功 39 个 / 失败 0 个，自愈重建物化视图 1 个 |
+| nginx | 部署后 error log 仅 restart notice/warn，**无 5xx** |
+| 生产库 | postgres / redis 容器未重启（Up 4 days）⇒ 本次**无生产写操作** |
+
+> ⚠️ **tag 未移动**：v7.27.0 指向 `cc523a97`（含 black/bandit 未修的原始提交），
+> 后两个提交 `a077f7cf`（black+bandit）与 `e9a8eecc`（根契约清单）是**主干**上的修复。
+> 按双镜像纪律，已发布的 tag 永不回填/重写；
+> 两次提交都只改排版与测试文件组织方式，**运行时行为完全相同**
+> （MD5/SHA1 摘要值不变 ⇒ 已分配的设备画像与线上完全一致，无画像漂移）。
+
+
 ---
 
 ## 批次 F：减重批（2026-11-13）
