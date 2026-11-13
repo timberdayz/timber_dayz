@@ -1,5 +1,150 @@
 # Changelog - 西虹 ERP 系统
 
+## [v7.25.0] - 2026-11-13 - 商品中心 SPU 缺陷收口 + 接口去重挂载 + 密钥门禁补强
+
+> **本版本不含数据库迁移**（无新迁移、无存量数据改动）、**无接口契约变更**
+> （端点集合、路径、方法均未变）、**无依赖变更**。
+> 改动落在四处：① 商品中心「SKU 资料」页的 SPU 值域（前端消费方式 + 排序 + 空态文案）；
+> ② 账号类 router 的挂载点去重；③ 公开仓库的密钥/账号密文取消跟踪 + 密钥门禁补强；
+> ④ SSH 访问真源文档与守护测试。
+>
+> 方案与实施记录：`docs/superpowers/plans/2026-11-13-product-center-sku-spu-ui-defect-fix.md` §7
+> 状态索引：`docs/superpowers/plans/STATUS.md`
+
+### 一、商品中心「SKU 资料」页的 SPU 筛选**完全失效**（根因在前端，不在后端）
+
+**现象**（Walter 实际使用中发现）：筛选框里写着 `XH-FASHION-005`，表格里却全是
+`XH-TOYS-MYTK` 的货；下拉框是空的；行内换款下拉也打不开。
+
+**根因**：值域工厂 `createSpuSearch` 返回的是**普通对象 + 嵌套 ref**，
+而 Vue **只拆包最外层的 ref** ⇒ 模板拿到的不是名单，而是"装着名单的盒子"：
+
+| # | 症状 | 机制 |
+|---|---|---|
+| 1 | **下拉框是空的** | `:loading="spuBrowse.loading"` 传的是 ref 对象（**恒为真**）⇒ Element Plus 的规则是"选项列表 `vShow = options.size > 0` **且** `!loading`" ⇒ 选项列表**永不渲染** |
+| 2 | **一个款也选不中** | `v-for="item in spuBrowse.options"` 迭代的是 ref 的 5 个内部属性（`dep` / `__v_isRef` / `__v_isShallow` / `_rawValue` / `_value`）⇒ 5 个 **value=undefined 的空白项** |
+| 3 | **表格永远不按款筛选** | 选不中 ⇒ `skuSpuFilter` 永远是空 ⇒ 请求**从不带 `spu=`** ⇒ 后端只能返回全量第一页 |
+
+**修法**：改**值域工厂**让它返回 **reactive** 对象（`options` / `loading` 是普通值），
+而不是改调用方 ⇒ **一处改动、两个下拉同时生效**；模板不用改；**后端零改动**
+（`/api/skus?spu=` 的筛选逻辑本来就正确，生产访问日志已证实）。
+
+**证据链**：生产 `/api/spus/options?keyword=XH-FASHION-005` → 200 有数据（后端没问题）；
+`/api/skus` 请求**从头到尾没有一次带 `spu=`**；生产库 `XH-FASHION-005` 当前挂货 **0**
+（若筛效应是空表，实际显示 20 行 ⇒ 没筛）；1119 条当前归属**无一货挂两个款**（数据层干净）。
+
+**为什么「平台 SKU 利润测算」页没事**：那一页的候选来自 `operatingDimensions`
+（**reactive 数组**）⇒ 正常拆包、参数真发出（日志实证 `...&spu=XH-FASHION-006`）。
+两者是**两个业务问题**（主数据筛选 vs 定价测算），**不该合并**。
+
+**守护**（新增 `frontend/tests/productCenterSpuOptionsRender.test.mjs`）：
+用 `vue/server-renderer` **真渲染一次**，断言款编码出现在 HTML 里、且没有空白项；
+另加"工厂必须 `reactive` 且不许再 import `ref`"、"组件不许对值域对象取 `.value`"
+两条结构性门禁 ⇒ 把"能 work / 不能 work"两种写法收敛成一种。
+**TDD 红侧已验证**：用旧写法实跑 ⇒ `Array.isArray(options)` = false、
+`typeof loading === "boolean"` = false ⇒ 断言必红。
+
+**连带修复**（提交 `1f7cb413`）：批次 A 把局部状态容器命名成了 `api` ⇒ `api.search(query)`
+被前端 API 契约门禁的正则 `(?:this\.)?api\.(\w+)\s*\(` 判成"调用了不存在的后端方法"
+⇒ **Validate Data Flow 流水线红**。修法是**改名**（`valueDomain`）而不是弱化门禁。
+**教训**：那道门禁**本来就存在**（既有契约用例断言全量扫描 `missing_calls == 0`），
+是推送前没跑后端全量才漏出去 ⇒ **推 main 前必须跑完根 `tests/` + 后端全量**。
+
+### 二、值域默认候选：先给"真正在经营的款"
+
+**问题（生产实测）**：`dim_spu` 有 284 个在售款，按编码排序取前 50 个是
+`XH-BABY-MC` ~ `XH-FASHION-695` ⇒ **`XH-TOYS-MYTK` 排第 277 位** ⇒
+玩具类几乎永远不在默认候选里（运营不输入关键词就选不到那些款）。
+
+**修法**：新增 `_spu_option_order()`，按**当前挂货数降序 + 编码升序**排；
+浏览口径与可绑定口径**共用同一份**排序 ⇒ 不会一个按编码、一个按挂货数。
+改后头部就是真正在经营的款（实测 `XH-ELEC-GF` 38、`XH-TOYS-YSC` 37、`XH-ELEC-DM` 28…）。
+
+**口径纪律**：排序**不是口径**（哪些款可选仍由各自端点的过滤条件决定）；
+"当前有效归属"的判定**引用真源** `current_binding_condition()`
+（`binding_status='active' AND effective_to IS NULL`）⇒ 不手抄；
+用**相关子查询**而非 join+group_by ⇒ 不改 SELECT 形状，也不引入"非聚合列"的分组问题。
+
+**TDD 红侧已验证**：把排序临时改回"按编码排" ⇒ **4 条新用例全红**。
+
+### 三、空结果说清原因与下一步
+
+**问题**：选中一个当前挂货 0 条的款（实测 `XH-FASHION-005`），表格只显示笼统的
+"暂无数据" ⇒ 运营以为系统坏了；下拉搜不到也只显示"无数据" ⇒ 运营以为根本没有款。
+
+**修法**：SKU 表格接 `:empty-text="skuEmptyText"` —— 按款筛时显示
+**「款 X 当前没有挂货」**，没在按款筛时沿用默认文案；两个下拉各接一套 `no-data-text`：
+浏览口径提示"换个关键词"，可绑定口径提示"先去「SPU 管理」新建款"
+—— 两者的下一步动作不一样。
+
+### 四、同一组接口被**挂载两次**（律 1「真源只能一个」）
+
+**实测**：development / collector 模式各有 **24 条 (路径, 方法) 重复注册、涉及 17 条路径**；
+production 模式 0 条（**production 根本不注册 collection 域**）。
+FastAPI 生成 OpenAPI 时为每条重复路由打 `UserWarning: Duplicate Operation ID`
+—— 这是重复挂载**唯一可观测**的信号（schema 里同一 (路径, 方法) 会被后一次注册覆盖）。
+
+**修法**：账号类 router（主账号 / 店铺账号 / 店铺别名 / 平台店铺ID发现 / 仓名别名）的
+**唯一挂载点**定在 **platform 域**，删掉 collection 侧那 5 条 include。
+⚠️ **不能反过来删 platform 侧的**：production 模式不注册 collection 域
+⇒ 账号类接口在生产上只由 platform 提供 ⇒ 反过来删会**删掉生产接口**。
+改后四种模式的重复条目**全部归零**（759 → 735、409 → 385）。
+
+**守护**（新增 `backend/tests/test_router_unique_mount_points.py`）：
+四种运行模式逐个断言没有重复注册；production / development 下账号类接口依然存在
+（防"去重复"变成"删接口"）；这 5 组端点函数各自只注册一次；
+生成 OpenAPI 时不许出现 `Duplicate Operation ID` 警告。
+
+### 五、公开仓库跟踪着生产密钥与**店铺账号密文**（安全）
+
+**取证**（只读、全程 SHA-256 比对、不打印任何值）：
+
+- **现役密钥未泄露** —— 生产 `.env` 与 4 个容器生效环境变量的 5 个敏感值，
+  与仓库被跟踪文件里的旧值**逐项全不同**；泄露的旧密钥也**解不开**生产库里
+  `core.shop_accounts` 的账号密码（实测 `InvalidToken`）。
+- **但公开的是已废弃的旧密钥**，而且 —— ⚠️ **密文与解密密钥同时公开**：
+  仓库里同时跟踪着 `accounts.enc`（Fernet 密文）与 `.env.cleaned`（带
+  `ACCOUNT_ENCRYPTION_KEY`）⇒ **实测可用公开仓库里的密钥直接解开 `accounts.enc`**，
+  解出 **15 个店铺账号**（Amazon / Shopee / Tiktok / 妙手ERP / miaoshou），
+  **每个都有非空密码**，还带邮箱账号密码、手机号与代理配置。
+  ⇒ 这不是"旧密钥泄露"，是**店铺账号密码公开**。
+
+**本版处置**：
+
+1. **取消跟踪**（`git rm --cached`，本地文件保留）：
+   `.env.production.passwords.txt`、`.env.cleaned`、`accounts.enc`、
+   `frontend/.env.development`（Mock 开关已从代码删除，是死文件）。
+2. **`.gitignore`**：`.env.*`（含 `!.env.example` / `!.env.template` / `!.env.limiter`）
+   + `*.passwords.txt` + `*.enc`。
+   ⚠️ `.env.limiter` 必须**继续**入库 —— 限流器直接读它，且要求纯 ASCII。
+3. **补门禁** `scripts/check_precommit_secrets.py` 的 `is_blocked()`：
+   从"只拦文件名**恰好**是 `.env` 与 `.key`/`.enc` 后缀"改成**按规则**拦
+   （`.env` 家族 / 疑似敏感名 + 数据类扩展名 / 加密文件与密钥证书后缀）。
+   敏感名规则**不误伤**文档与脚本（`scripts/reset_passwords.py` 这类是正常的）
+   —— 门禁太宽比没有门禁更糟：大家会开始习惯性 `--no-verify`。
+4. **守护测试**（新增 `tests/test_secret_files_not_tracked.py`，并进 CI 根契约清单）：
+   这些文件不在 `git ls-files` 里；**全仓扫**确认没有任何被跟踪文件会被门禁拦下；
+   门禁对泄露文件判拦、且不误伤模板/文档/脚本；`.gitignore` 真的挡住。
+5. **真源文档** `docs/guides/ENV_FILE_CONTRACT.md` 增「Repository Tracking Policy」。
+
+**历史不可撤回** —— `git filter-repo` 会作废全部已发布 tag（含 `v7.24.0`），
+**本版明确不做**。**仍需拍板**：轮换那 15 个店铺账号的密码、删除生产机上的旧密钥副本、
+确认旧密钥在已下线环境里是否还活着 —— 已写进 `docs/superpowers/plans/STATUS.md`。
+
+### 六、SSH 访问真源文档 + 守护测试（随本版首次发版）
+
+`docs/guides/SSH_ACCESS.md` 把四条通道（GitHub 代码 / 生产运维 / 云端隧道 / 生产部署）
+的账号、钥匙、用途写成真源，并配 12 例守护测试（文档 ↔ 脚本一致性、
+脚本不得把 `root@` 当登录目标、禁 `sshpass`…）。
+起因是一次真实的误判：把"本机没有生产私钥"当成了事实，据此写下"部署类核验无法登机"。
+真相是：交互式生产身份是 `deploy@` + `~/.ssh/github_actions_deploy`，
+`root@` 只属流水线（私钥在 GitHub Actions Secret）——**本机登不上 root 是设计，不是缺私钥**。
+
+### 七、发布与部署后验收
+
+（发布后补：流水线 run 号、`/api/healthz/ready` 报出的版本与数据库状态、
+本次发布实际验证到的路由文件数。）
+
 ## [v7.24.0] - 2026-11-13 - API 契约门禁：它至今没看过一行真实路由代码
 
 > **本版本不含数据库迁移**（无新迁移、无存量数据改动、无接口变更）。
