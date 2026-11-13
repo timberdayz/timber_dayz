@@ -1085,8 +1085,44 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
 | 74 个带 BOM 的路由文件 | 单独一批清理（本批已用 `utf-8-sig` 兜住，不阻塞） |
 | **`backend/tests/data_pipeline/` 不在 CI 覆盖内** | 130 个文件只在「本次改动到它们」时才跑 ⇒ 口径漂移可能长期潜伏（同 `tests/unit` 曾经的情况，2026-11-10 实测）。本地实测 **1235 passed / 1 skipped / 0 failed**（130 文件全量），但**CI 守不住** |
 | **同一组接口被挂载两次** | `collection/routes.py` 与 `platform/routes.py` 都 include 同一批 5 个 router ⇒ **17 个路径 / 24 个条目双注册**。今天无功能故障，但 OpenAPI 重复 `operation_id`，且门禁查不出来 ⇒ 建议加「router 唯一挂载点」守护用例 |
+| **公开仓库里的「生产密码」文件** | `.env.production.passwords.txt` 被 git 跟踪、且 GitHub 仓库是 **PUBLIC**（值已被取代，但公开不可撤回）；仓库自带的密钥门禁也漏了它 ⇒ 需「轮换 + 取消跟踪 + 补门禁」三步，另排批次（详见下节） |
 | fail-closed（计数失败即拒删） | 需先定义「引用数未知」状态，**建议随 M5.2 硬删一起做** |
 | 款 → 货的层级视图（IA） | **产品演进**，需先定 IA 再动手（见 V2 债文档 §4） |
+
+## 安全发现：公开仓库里跟踪着一份「生产密码」文件（2026-11-13 补跑时发现）
+
+- **对象**：`.env.production.passwords.txt`（599 字节）——`git ls-files` 确认**被 git 跟踪**
+  （blob `a414d428`），自初始提交 `634a90ef` 起入库，2026-01-09 经 `372365eb`「docker容器优化」又改过一次。
+- **仓库可见性**：GitHub `timberdayz/timber_dayz` = **PUBLIC**
+  ⇒ 这份文件里的值**从入库那一刻起就是公开的**，而且**公开仓库的历史不可撤回**。
+- **内容**：5 个密钥形状的值（`POSTGRES_PASSWORD` / `REDIS_PASSWORD` / `SECRET_KEY` /
+  `JWT_SECRET_KEY` / `ACCOUNT_ENCRYPTION_KEY`），**不是占位符**（长度 15~44，随机形状）。
+- **是否等于线上真值**：**不等于**。与本地 `.env.production` 逐项做 SHA-256 比对，
+  **5 项全部不同** ⇒ 这是 2025-01 那批已被取代的旧值。
+- **有没有现行密钥泄露**：**没有**。把 `.env.production` 里全部敏感类值
+  （`SECRET_KEY` / `JWT_SECRET` / `JWT_SECRET_KEY` / `POSTGRES_PASSWORD` /
+  `REDIS_PASSWORD` / `ACCOUNT_ENCRYPTION_KEY`）逐个与所有被跟踪的疑似密钥文件比对
+  （`.env.cleaned` / `.env.limiter` / `.env.example` / `config/production.example.env` /
+  `frontend/.env.development` + 3 个相关 md）⇒ **0 命中**
+  （`config/production.example.env` 命中的只有 `POSTGRES_USER` / `POSTGRES_DB`，
+  是用户名和库名，不是密钥）。
+- **真正的问题有三条**：
+  1. 一份**名为「生产密码」的文件躺在公开仓库里**，从初始提交起就公开了；
+  2. 只要有任何环境（某台开发机 / 测试机 / 旧服务器）当年照着它生成过密钥，
+     那套密钥**现在应视为已泄露**；
+  3. **仓库自带的密钥门禁看不见它**：`scripts/check_precommit_secrets.py` 的
+     `is_blocked()` 只拦「文件名恰好是 `.env`」和「后缀是 `.key` / `.enc`」，
+     ⇒ `.env.production.passwords.txt`（后缀 `.txt`）、`.env.cleaned`、`.env.limiter`
+     **全部绕过**。**这道门禁本该在初始提交时就拦住它，实际没有。**
+- **建议处置**（另排批次，**需拍板**；本轮只记录，未动代码）：
+  1. **先轮换**：确认是否还有环境在用这 5 个值；在用就轮换（公开仓库 ⇒ 视为已泄露）。
+  2. **再取消跟踪**：`git rm --cached .env.production.passwords.txt` + 写进 `.gitignore`；
+     内容移出仓库，改由部署时从 Secret 注入（与律 1 一致：口令的真源不能是仓库里的文本文件）。
+  3. **历史清理（可选、成本高）**：`git filter-repo` 重写历史会**作废全部已发布 tag**
+     （含 `v7.24.0` 与所有历史版本）⇒ 必须与双镜像 + tag 策略一起规划，**不能顺手做**。
+  4. **补门禁**：`scripts/check_precommit_secrets.py` 的 `is_blocked()` 扩展到
+     「以 `.env` 开头」/「文件名含 `password` / `secret` / `credential`」，
+     并加守护测试钉死（律 1：门禁的判定口径必须写在测试里）。
 
 ## Notes
 
