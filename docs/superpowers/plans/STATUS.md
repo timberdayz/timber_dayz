@@ -1473,6 +1473,8 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
 | 耗时 | **124.01 秒 → 49.60 秒**（-60%） |
 | 残留 | 跑完 **0 个匿名卷、0 个 postgres 残留容器**；13 个具名卷完好 |
 | 守护 | 7 passed；ruff/black 全绿；CI 根契约清单已纳管 |
+| CI 验收（`82c1aff8` / `463239df`） | 三线全绿（CI Pipeline 8 job 全 success / Validate Data Flow ✓ / Docker Build and Push ✓）；**决定性证据**：CI 上「Run pytest」**129 passed**（改写后的 11 个 data_pipeline 文件 + 新守护**真的在跑**，7 条守护逐条 PASSED）、根契约清单 **481 passed / 11 skipped**；CI 同版本组合（Python 3.11 + pytest 7.4.3 + pytest-asyncio 0.21.1）下同样全绿 |
+| 采集组件 lint | CI 的 "Collection component lint"（告警模式 `--fail-on none`，未让流水线红）报出守护函数 62 行超 50 行上限 ⇒ 拆成两个 helper 后 **error 0 / warning 0**（提交 `463239df`）。仓库里既有的 23 处长函数告警（`test_postgresql_dashboard_service.py`）**不是这批引入的**，不在本次范围内动 |
 
 > ⚠️ **踩过的坑（写下来别再踩）**：第一版改写脚本用**列号算术**在原文件里插参数，
 > 把插入点算到了别的行（把 `from sqlalchemy.exc import ...` 改成了
