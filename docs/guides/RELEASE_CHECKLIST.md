@@ -682,6 +682,32 @@ After the deploy, log in independently (read-only) and check:
 
 A green pipeline only proves the pipeline's own steps ran.
 
+#### 5.0 A guard that is not in the CI list is **not** a guard (measured 2026-11-13)
+
+The pipeline can be green while a written convention is being broken, when the
+test that enforces that convention is simply **absent from the CI list**.
+
+Measured case: `scripts/watch_cloud_sync_tunnel.ps1` was given a UTF-8 BOM in
+the v7.26.0 release commit (`05a359a1`), with the stated reason "the repo's
+existing cases all carry a BOM" — the opposite of the fact (26 of 27 tracked
+`.ps1` have no BOM). The real source was v7.25.0 (`e2103f46`) adding one `⚠️`
+to a script that the 2026-11-11 plan requires to stay **pure ASCII**.
+
+⇒ Why CI stayed green: `tests/test_ps_env_file_encoding_contract.py` was
+**not in the CI root-contract list**, so that guard never ran on CI.
+Two consecutive releases broke a convention written on paper, and no gate saw it.
+
+⇒ Two rules that follow:
+
+1. **A written convention without a test is a wish.** When a plan states a rule
+   ("this script stays pure ASCII"), a test must assert it, and the test must
+   be **added to the CI list** in the same commit — otherwise the convention
+   silently decays.
+2. **A CI list entry only covers what it names.** After syncing a new release,
+   run the **full** local root `tests/` suite, not just the CI subset: the CI
+   subset is a curated list of no-DB files, and anything missing from it can be
+   red locally while CI is green.
+
 ### 5. A readiness probe must connect **the way the workload will connect**
 
 The official `postgres` image first starts a **socket-only** temporary server for
