@@ -64,22 +64,30 @@ export function createSpuSearch(loadOptions, { pageSize = 50, debounceMs = 300 }
   let timer = null;
 
   // ⚠️ 状态直接挂在 reactive 对象上 ⇒ 模板与脚本拿到的都是**普通值**。
-  const api = reactive({
+  //
+  // ⚠️⚠️ 这个局部对象**不能叫 `api`**（2026-11-13 实测踩坑）：
+  //   前端 API 契约门禁 ``scripts/validate_frontend_api_methods.py`` 用正则
+  //   ``(?:this\.)?api\.(\w+)\s*\(`` 扫描 ``frontend/src``（不含 api 封装层），
+  //   把**任何** ``api.xxx(...)`` 都当成后端接口调用来校验 ⇒
+  //   局部对象一旦叫 `api`，它的 ``api.search(...)`` 就会被判成
+  //   「调用了不存在的后端方法 search」⇒ **发版流水线红**。
+  //   ⇒ 局部状态容器统一叫 `valueDomain`。
+  const valueDomain = reactive({
     /** @type {Array<{value: string, label: string, name: string}>} */
     options: [],
     loading: false,
 
     async search(query = "") {
-      api.loading = true;
+      valueDomain.loading = true;
       try {
         const res = await loadOptions({ keyword: query, limit: pageSize });
-        api.options = buildSpuOptions(res && res.data);
+        valueDomain.options = buildSpuOptions(res && res.data);
       } catch {
         // 失败时**清空**候选：留着上一次的候选会让运营以为「这些款都搜不到」，
         // 而真正的原因是查询挂了。
-        api.options = [];
+        valueDomain.options = [];
       } finally {
-        api.loading = false;
+        valueDomain.loading = false;
       }
     },
 
@@ -88,10 +96,10 @@ export function createSpuSearch(loadOptions, { pageSize = 50, debounceMs = 300 }
       //    ⇒ 自己防抖，否则一次输入会打十几次后端。
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        void api.search(query);
+        void valueDomain.search(query);
       }, debounceMs);
     },
   });
 
-  return api;
+  return valueDomain;
 }
