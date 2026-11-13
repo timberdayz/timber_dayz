@@ -1214,7 +1214,10 @@ async def _count_sku_business_references(
                 )
             ).scalar() or 0
             refs[f"{sch}.{tbl}"] = int(c)
-        except Exception:
+        except Exception as exc:
+            logger.error(
+                "SKU 业务引用计数失败 %s.%s (sku_id=%s): %s", sch, tbl, sku_id, exc
+            )
             await db.rollback()
             refs[f"{sch}.{tbl}"] = 0
     # platform_sku 字段的表(用 sku_key 查)
@@ -1240,7 +1243,14 @@ async def _count_sku_business_references(
                     )
                 ).scalar() or 0
                 refs[f"{sch}.{tbl}"] = int(c)
-            except Exception:
+            except Exception as exc:
+                logger.error(
+                    "SKU 业务引用计数失败 %s.%s (sku_key=%s): %s",
+                    sch,
+                    tbl,
+                    sku_key,
+                    exc,
+                )
                 await db.rollback()
                 refs[f"{sch}.{tbl}"] = 0
     return refs

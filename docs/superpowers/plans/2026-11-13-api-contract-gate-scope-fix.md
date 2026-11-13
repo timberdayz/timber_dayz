@@ -172,6 +172,9 @@ backend/routers/*.py                   ← 旧门牌号（76 个文件）= 兼�
 
 ⇒ 旧口径噪音比 **518 : 50 ≈ 10 : 1**。
 
+> 📌 **本节数字是第二批之前的状态**。第二批（§12.5）给 3 个守卫失效块补了失败原因日志
+> ⇒ 真静默 **50 → 47 处 / 29 → 27 个文件**。守护测试现在钉的是 **47**。
+
 #### 2.6.1 六桶的**互斥优先级**（实施时必须照此，否则计数会漂移）
 
 六桶相加 = **886**，恰好等于 except 块总数
@@ -526,7 +529,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Sync -
 
 ### 9.2 50 处真静默是否连做？（**建议：不连做，只先修 2 处 fail-open**）
 
-跨 4 个域 32 个文件 ⇒ pre-launch 规则「跨 3 个以上模块要拆分」**要求拆开**。
+跨 4 个域 29 个文件 ⇒ pre-launch 规则「跨 3 个以上模块要拆分」**要求拆开**。
 且本批的定位是「修守护」，不是「改业务」。→ **建议**：
 
 - 本批**不做** 50 处清理；
@@ -534,11 +537,32 @@ powershell -ExecutionPolicy Bypass -File .\scripts\sync_main_mirrors.ps1 -Sync -
 
 | 位置 | 风险 |
 |---|---|
-| `backend/domains/business/routers/product_center.py` 的 `_count_sku_references` | 引用计数失败就报 0 ⇒ **删除守卫放行**（既有代码 `855f8a8a4` / 2026-09-16，非 v7.23.0 引入） |
+| `backend/domains/business/routers/product_center.py` 的 `_count_sku_business_references`（L1217 / L1243） | 引用计数失败就报 0 ⇒ **删除守卫放行**（既有代码 `855f8a8a4` / 2026-09-16，非 v7.23.0 引入） |
 | `backend/domains/collection/routers/collection_schedule.py:548` `health_check()` | 吞异常 ⇒ **健康检查会说谎** |
 
 → **需要 Walter 点头的是**：这 2 处是「跟本批一起做」还是「单独一个 PR」？
 （我建议单独 PR：它是行为变更，不属于守护改造，混在一起会让本批的 diff 说不清。）
+
+#### 9.2.1 ⚠️ 实施时的更正：这 2 处的实际影响比原先判断的小
+
+实施时去核对了代码，**原先的描述有两处不准**，在此更正（避免按错的风险描述做决策）：
+
+| 位置 | 原描述 | **更正后** |
+|---|---|---|
+| `product_center.py` | 「删除守卫放行」 | **函数名是 `_count_sku_business_references`**（不是 `_count_sku_references`）；而且下游 `_check_sku_deletion_blockers` 的文档字符串明写「**业务引用计数不阻断软删**，只用于提示与未来硬删门槛」⇒ **当前的软删流程不受影响**，真正会放行的是**尚未实现的 M5.2 硬删门槛** |
+| `collection_schedule.py:548` | 「健康检查会说谎」 | 它**诚实地**把 `db_status` 设成了 `"error"`，没有说谎；真正的问题是**没记下失败原因**（异常被完全丢弃） |
+
+⇒ **两处的最小安全修法都是「补日志、零行为变更」**：
+计数失败 / 探测失败时 `logger.error` 记录原因，然后**保持现有返回与状态不变**。
+门禁随即不再报这两处（因为不再「什么都不做」），而业务行为**一个字节都不变**。
+
+> **实测更正**：这两处实际是 **3 个 except 块** —— `product_center.py` 里有**两处**
+> 一样的 `refs[f"{sch}.{tbl}"] = 0`（L1217 与 L1243，分别统计 `sku_id` 与 `sku_key`
+> 两轮表），加上 `collection_schedule.py` 那一处。
+> ⇒ 补完日志后真静默是 **50 → 47**，不是 50 → 48。
+
+⇒ 若要进一步把 fail-open 改成 fail-closed（计数失败即拒绝删除），那是**业务决策**：
+需要先定义「引用数未知」这个状态，且硬删 M5.2 落地时才谈得上。建议**随 M5.2 一起做**，不单独动。
 
 ### 9.3 74 个带 BOM 的文件是否清？（**建议：清，但单独一批**）
 
@@ -637,6 +661,25 @@ Walter 在「瘦身版 / 完整版 / 再砍一点」三者中选定 **完整版*
 ### 12.4 回归
 
 后端全量 pytest、ruff、black、mypy、UTF-8 卫生、架构 SSOT（4/4 = 100%）、规则完整性、API 契约一致性 —— 全绿。
+
+### 12.5 第二批：2 处守卫失效补失败原因日志（Walter 已授权的「单独 PR」）
+
+**独立提交，与第一批分开**（pre-launch「不混架构清理与业务改动」）。
+
+| 文件 | 改动 | 行为变更 |
+|---|---|---|
+| `backend/domains/business/routers/product_center.py` | `_count_sku_business_references` 的 2 个 except 块（L1217 / L1243）加 `logger.error` 记录表名、SKU 键与异常 | **无** —— 仍回滚事务、仍报 0 |
+| `backend/domains/collection/routers/collection_schedule.py` | `health_check()` 的 DB 探测 except 加 `logger.error` 记录原因 | **无** —— 仍设 `db_status = "error"` |
+
+**TDD**：先把守护测试改成「这 3 个块必须已记日志、不许再被报成真静默」⇒ 2 红 15 绿
+（失败原因精确指向 `product_center.py:1217 仍被报成真静默`）⇒ 补日志 ⇒ 转绿。
+
+**过程中被守护测试抓到的自己的错**：我原以为只有 2 个 except 块、算出 50 → 48，
+测试直接报 `assert 47 == 48` ⇒ 实际是 **3 个**块 ⇒ **50 → 47**。
+（这正是「把数字钉进守护测试」的价值：算错立刻现形，不会变成下一个「518」。）
+
+**结果**：真静默 **50 → 47 处 / 29 → 27 个文件**；门禁 error 仍为 0、退出码仍为 0；
+受影响业务测试 184 例全绿。
 
 ---
 

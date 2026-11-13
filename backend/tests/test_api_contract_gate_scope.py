@@ -207,22 +207,26 @@ def test_absolute_path_is_normalized(validator):
 # ---------------------------------------------------------------------------
 
 
-def test_silent_exception_bucket_is_pinned_to_50(validator):
-    """真静默必须回到 50 —— 口径漂移会让这个数字变成第二个「518」。
+def test_silent_exception_bucket_is_pinned_to_47(validator):
+    """真静默必须回到 47 —— 口径漂移会让这个数字变成第二个「518」。
 
     历史上旧脚本用正则 + 缩进猜测，报出「518 条缺错误日志」；
-    AST 重算后真正的静默只有 50 处。50 是**核准数字**，
+    AST 重算后真正的静默只剩 47 处。47 是**核准数字**，
     任何偏离都说明判定规则实现有偏差。
 
     为什么不是上一轮口头说的 58：那一轮统计用的临时脚本**没有入库**，
     口径不可复现（已穷举 8 组谓词变体，无一命中 58）。
-    现在的 50 是「except 块里只要有任何控制流决策就不算静默」这条最简口径
+    为什么不是 50：第二批给守卫失效补了失败原因日志（零行为变更）——
+    实际是 **3 个** except 块（``product_center.py`` 有两处同样的
+    ``refs[...] = 0``，加上 ``collection_schedule.py`` 那一处）⇒ 真静默 50 → 47。
+
+    现在的 47 是「except 块里只要有任何控制流决策就不算静默」这条最简口径
     下的核准值 —— **口径写在脚本里，数字由守护测试钉住**。
     """
     analysis = validator.analyze_all_router_files()
 
-    assert analysis["bucket_counts"]["F"] == 50, (
-        f"真静默 F 桶 = {analysis['bucket_counts']['F']}，应为 50；"
+    assert analysis["bucket_counts"]["F"] == 47, (
+        f"真静默 F 桶 = {analysis['bucket_counts']['F']}，应为 47；"
         "判定规则与核准口径不一致"
     )
 
@@ -257,15 +261,15 @@ def test_reviewed_degradation_blocks_are_not_counted_as_silent(validator):
             )
 
 
-def test_guard_fail_open_blocks_are_still_reported_as_silent(validator):
-    """两处「守卫失效」必须仍在真静默桶里 —— 那是第二批要修的目标。
+def test_guard_fail_open_blocks_now_record_their_reason(validator):
+    """两处「守卫失效」必须已经记下失败原因 —— 不许再静默。
 
-    * ``product_center.py`` 的 ``_count_sku_references``：引用计数失败就报 0
-      ⇒ **删除守卫放行**；
-    * ``collection_schedule.py`` 的 ``health_check``：吞异常且不留原因。
+    * ``product_center.py`` 的 ``_count_sku_business_references``：引用计数失败
+      曾直接报 0（硬删门槛 M5.2 会因此放行；软删不受影响）；
+    * ``collection_schedule.py`` 的 ``health_check``：DB 探测失败曾把原因整个丢掉。
 
-    它们都「不记、不抛、不返回」，所以必须被判成真静默。
-    若哪天口径把它们放过了，这两处守卫失效就会被门禁漏掉。
+    修法是**补日志、零行为变更**（返回与状态都不动），
+    所以它们**不再**该被报成真静默 —— 但必须真的记了日志。
     """
     for relative, needle in (
         (
@@ -285,9 +289,19 @@ def test_guard_fail_open_blocks_are_still_reported_as_silent(validator):
         silent_lines = {item["line"] for item in analysis["silent"]}
 
         for line in lines:
-            assert line in silent_lines, (
-                f"{relative}:{line} 没被报成真静默 —— " "这处守卫失效会被门禁漏掉"
-            )
+            assert (
+                line not in silent_lines
+            ), f"{relative}:{line} 仍被报成真静默 —— 失败原因还没被记下来"
+
+        # 必须真的记了日志，不能只是「不再匹配口径」
+        source = (ROOT / relative).read_text(encoding="utf-8-sig")
+        tree = ast.parse(source, filename=str(relative))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ExceptHandler) and node.lineno in lines:
+                segment = ast.get_source_segment(source, node) or ""
+                assert (
+                    "logger.error" in segment or "logger.exception" in segment
+                ), f"{relative}:{line} 没有记录失败原因 —— 守卫失效会被门禁放过"
 
 
 def test_buckets_are_mutually_exclusive_and_cover_every_except_block(validator):

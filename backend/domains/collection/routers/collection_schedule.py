@@ -545,7 +545,8 @@ async def health_check(
     db_status = "ok"
     try:
         await db.execute(text("SELECT 1"))
-    except Exception:
+    except Exception as exc:
+        logger.error("采集计划健康检查的数据库探测失败: %s", exc)
         db_status = "error"
     runtime_health = await _resolve_collection_runtime_health(request)
     checks = runtime_health.get("checks") or {}
