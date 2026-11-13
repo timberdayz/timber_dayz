@@ -47,8 +47,10 @@ CLOUD_SYNC_REMOTE_DB_HOST=127.0.0.1
 CLOUD_SYNC_REMOTE_DB_PORT=15435
 ```
 
-私钥路径走环境变量 `CLOUD_SYNC_SSH_KEY`，默认值是 `%USERPROFILE%\.ssh\github_actions_deploy`。
-**路径随机器不同，文件名才是契约** ⇒ 所以脚本里不许把绝对路径写死（守护测试会拦）。
+私钥路径走环境变量 `CLOUD_SYNC_SSH_KEY`；脚本里的兜底默认值是
+`$env:USERPROFILE\.ssh\github_actions_deploy`（跟着当前用户走，换机器不用改代码）。
+⚠️ **路径随机器不同，文件名才是契约** ⇒ 不许把某台机器的**绝对路径**写进脚本
+（守护测试会拦）；也不许把私钥**内容**写进任何文件。
 
 两个真源脚本（默认值必须一致，否则「一个跑一个跳」）：
 
