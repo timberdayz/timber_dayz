@@ -117,14 +117,10 @@ def test_no_endpoint_is_registered_twice(monkeypatch, runtime_mode, deployment_r
     ⚠️ 逐个运行模式都查 —— 重复只出现在**注册了 collection 域**的模式里，
        只查 production 会漏掉（production 根本不注册 collection）。
     """
-    module = _reload_main(
-        monkeypatch, runtime_mode, deployment_role=deployment_role
-    )
+    module = _reload_main(monkeypatch, runtime_mode, deployment_role=deployment_role)
     index = _endpoint_index(module.app)
     duplicates = {
-        key: endpoints
-        for key, endpoints in index.items()
-        if len(endpoints) > 1
+        key: endpoints for key, endpoints in index.items() if len(endpoints) > 1
     }
 
     assert not duplicates, (
@@ -212,9 +208,7 @@ def test_account_router_endpoints_are_mounted_exactly_once(
        但**挂载点**在 platform 域 —— 所以这里数的是"注册了几次"，
        不是"在哪个域挂的"。
     """
-    module = _reload_main(
-        monkeypatch, runtime_mode, deployment_role=deployment_role
-    )
+    module = _reload_main(monkeypatch, runtime_mode, deployment_role=deployment_role)
     counts: dict[tuple[str, str], int] = defaultdict(int)
     for route in module.app.routes:
         endpoint = getattr(route, "endpoint", None)
@@ -231,6 +225,6 @@ def test_account_router_endpoints_are_mounted_exactly_once(
         for key, count in counts.items()
         if count > 1 and key[0] in ACCOUNT_ROUTER_MODULES
     }
-    assert not repeated, (
-        f"{runtime_mode} 模式下这些端点被注册了多次：{sorted(repeated)}"
-    )
+    assert (
+        not repeated
+    ), f"{runtime_mode} 模式下这些端点被注册了多次：{sorted(repeated)}"

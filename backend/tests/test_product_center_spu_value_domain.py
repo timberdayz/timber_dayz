@@ -272,9 +272,7 @@ async def _seed_spus_and_bindings(session, spus, bindings):
     from modules.core.db import BridgeSpuSku, DimSpu
 
     for spu in spus:
-        session.add(
-            DimSpu(spu=spu, spu_name=spu, biz_status="candidate", active=True)
-        )
+        session.add(DimSpu(spu=spu, spu_name=spu, biz_status="candidate", active=True))
     await session.flush()
     for spu, sku_id, binding_status in bindings:
         session.add(
