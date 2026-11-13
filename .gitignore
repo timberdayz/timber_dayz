@@ -27,11 +27,20 @@ security/
 !security/__init__.py
 !security/*.py
 
-# 环境变量文件
+# 环境变量文件 —— 除模板/样例外，.env 家族一律不入库
+# ⚠️ 2026-11-13（批次 C2）：公开仓库曾长期跟踪着这两个文件 ——
+#   * .env.production.passwords.txt —— 生产密钥备份（5 个密钥）；
+#   * .env.cleaned —— 部署临时产物，里面带着能解开 accounts.enc 的
+#     ACCOUNT_ENCRYPTION_KEY ⇒ 密文 + 密钥同时公开 = 店铺账号密码公开。
+#   ⇒ 现在 .env 家族（除 .example / .template）一律不再跟踪。
 .env
-.env.local
-.env.collection.local
-.env.production
+.env.*
+!.env.example
+!.env.template
+# ⚠️ .env.limiter 是限流器的运行期配置（纯 ASCII、只有一个开关、无口令），
+#    backend/middleware/rate_limiter.py 直接读它 ⇒ 保持入库。
+!.env.limiter
+*.passwords.txt
 
 # 数据库全量导出（大文件，含数据）
 docker_pg_full.dump
@@ -142,6 +151,9 @@ output/playwright/
 *.pfx
 account_key.key
 encrypted_fingerprints.key
+# 加密的凭证档案 —— 密文本身也是敏感资产（2026-11-13 批次 C2：accounts.enc
+# 曾与解密它的密钥一起躺在公开仓库里）
+*.enc
 
 # 媒体文件
 *.png

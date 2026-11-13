@@ -1124,6 +1124,10 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
      「以 `.env` 开头」/「文件名含 `password` / `secret` / `credential`」，
      并加守护测试钉死（律 1：门禁的判定口径必须写在测试里）。
 
+> **2026-11-13 更新：批次 C2 已实施**（取消跟踪 + `.gitignore` + 门禁补强 + 守护测试），
+> 且**取证结论比原先严重**：公开仓库里不只有密钥，还有**店铺账号密文 + 能解开它的密钥**。
+> 详见下面「批次 C2：公开仓库的密钥与账号密文」一节。
+
 ## SSH 访问真源文档 + 守护测试（2026-11-13）
 
 - **起因是一次真实的误判**：agent 用 `root@134.175.222.171` 试连，两次
@@ -1177,7 +1181,134 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
 - **SSOT 判定**：**符合** —— 不新增口径、不合并口径，只是把"前端怎么读后端真源"
   从两种写法收敛成一种，并把"界面真的能用"钉进运行时测试。
 
-## Notes
+## 批次 A / B / C 全部实施完成（2026-11-13，本会话）
+
+> 方案文档：`docs/superpowers/plans/2026-11-13-product-center-sku-spu-ui-defect-fix.md`
+> （§7 实施记录同步更新）。Walter 拍板：**三个批次在本会话做完，不留给其他会话**。
+
+### 批次 A：商品中心 SKU 资料页的 SPU 下拉/筛选（提交 `f0f95721`）
+
+- **修法**：改**值域工厂** `createSpuSearch` 让它返回 **reactive** 对象
+  （`options` / `loading` 是普通值），不是改调用方 ⇒ 一处改动两处下拉同时生效；
+  `ProductCenter.vue` L1280 的 `.value` 跟着改；模板不动；**后端零改动**。
+- **守护**：`frontend/tests/productCenterSpuOptionsRender.test.mjs`（5 例）——
+  ① `Array.isArray(options)`；② `typeof loading === "boolean"`；
+  ③ 用 `vue/server-renderer` **真渲染一次**，断言款编码出现在 HTML 里且无空白项；
+  ④ 搜索失败清空候选；⑤ 工厂必须 `reactive` 且不许再 import `ref`；⑥ 组件不许取 `.value`。
+- **TDD 红侧已验证**：用**旧写法**实跑 ⇒ `Array.isArray` = false、
+  `typeof loading` ≠ boolean ⇒ 断言会红；渲染崩在 `this.spu.options.map is not a function`。
+- **验证**：前端 **200 passed / 0 failed**；`npm run build` ✓。
+
+### 批次 A 回归修复：值域工厂改名（提交 `1f7cb413`）
+
+- **事故**：批次 A 把局部状态容器命名成了 `api` ⇒ `api.search(query)` 被前端 API 契约门禁
+  （`scripts/validate_frontend_api_methods.py`，正则 `(?:this\.)?api\.(\w+)\s*\(`）
+  判成「调用了不存在的后端方法 search」⇒ **Validate Data Flow 流水线红**（run `43387187814`）。
+- **修法**：局部容器改名 `valueDomain`，注释写明为什么不能叫 `api` ⇒ **不弱化门禁**。
+- **教训**：门禁**已存在**（`backend/tests/test_validate_frontend_api_methods_contract.py`
+  断言全量扫描 `missing_calls == 0`）—— 是我没在推送前跑后端全量才漏出去。
+  ⇒ **推 main 前必须跑完根 `tests/` + 后端全量**。
+
+### 批次 B1：值域默认候选按「当前挂货数」排序（提交 `f8c44012`）
+
+- **问题（生产实测）**：284 个在售款按编码排序时前 50 个是 `XH-BABY-MC` ~ `XH-FASHION-695`，
+  `XH-TOYS-MYTK` 排**第 277 位** ⇒ 玩具类几乎永远不在默认候选里。
+- **修法**：新增 `_spu_option_order()`（当前挂货数 desc + 编码 asc），
+  浏览口径与可绑定口径**共用同一份**排序 ⇒ 不会一个按编码、一个按挂货数。
+- **口径纪律**：排序**不是口径**（哪些款可选仍由各自端点的过滤条件决定）；
+  挂货数判定引用真源 `current_binding_condition()`；用相关子查询而非 join+group_by。
+- **TDD 红侧已验证**：把 `_spu_option_order` 临时改回「按编码排」⇒ **4 条新用例全红**。
+- **测试基建**：新增本地 fixture —— SQLite `ATTACH ':memory:' AS core` 后只建
+  `dim_spu` / `bridge_spu_sku`（生产表挂在 PostgreSQL 的 `core` schema 下，
+  仓库既有 `sqlite_session` fixture 会报 `unknown database core`）。
+
+### 批次 B2：空结果说清原因与下一步（提交 `c121c3f3`）
+
+- **问题**：选中一个当前挂货 0 条的款（生产实测 `XH-FASHION-005`），表格只显示
+  笼统的「暂无数据」⇒ 运营以为系统坏了；下拉搜不到也只显示「无数据」。
+- **修法**：SKU 表格接 `:empty-text="skuEmptyText"`（按款筛时显示「款 X 当前没有挂货」）；
+  两个下拉各接一套 `no-data-text`（浏览口径提示「换个关键词」，可绑定口径提示「先去建款」）。
+- **TDD 红侧已验证**：临时拆掉接线 ⇒ **2 条接线用例红**。
+- **B3「口径可见标注」取消**：实测浏览口径与可绑定口径的**集合完全相同**
+  （生产 284 = 284，差集 0）⇒ 无适用对象，不为不存在的情况写界面；
+  且加 `biz_status` 会破坏既有契约 `set(payload) == {"spu","spu_name"}`。
+
+### 批次 C1：同一组接口被挂载两次（提交 `db57034d`）
+
+- **实测（改前）**：development / collector 模式各有 **24 条 (路径, 方法) 重复注册，
+  涉及 17 条路径**；production 模式 0 条（**production 根本不注册 collection 域**）。
+  FastAPI 生成 OpenAPI 时为每条重复路由打 `UserWarning: Duplicate Operation ID`。
+- **修法**：账号类 router（主账号 / 店铺账号 / 店铺别名 / 平台店铺ID发现 / 仓名别名）
+  的**唯一挂载点**定在 **platform 域**，删掉 collection 侧那 5 条 include。
+  ⚠️ 之所以**不能**反过来删 platform 侧的：production 模式不注册 collection 域
+  ⇒ 账号类接口在生产上只由 platform 提供 ⇒ 反过来删会**删掉生产接口**。
+- **改后实测**：四种模式（development / collector / collector+local / production）
+  重复条目**全部归零**（759 → 735、409 → 385）。
+- **守护**（新建 `backend/tests/test_router_unique_mount_points.py`）：
+  ① 四种模式都不许有重复 (路径, 方法)；② production/dev 下账号类接口依然存在
+  （防「去重复」变「删接口」）；③ 这 5 组端点函数各自只注册一次；
+  ④ 生成 OpenAPI 时不许出现 `Duplicate Operation ID` 警告
+  —— 这一条才是重复挂载**唯一可观测**的信号（schema 里 operation_id 反而唯一，
+  只断言 schema 会得到一条「写完就绿」的假测试）。
+- **TDD 红侧已验证**：把 5 条 include 临时放回 ⇒ **6 条守护用例红**。
+
+### 批次 C2：公开仓库的密钥与账号密文（提交见本节末）
+
+- **原发现**：`.env.production.passwords.txt`（599 字节，5 个密钥）自初始提交起公开。
+- **本会话取证结论（只读，SHA-256 比对，不打印任何值）**：
+  - **现役密钥未泄露**：生产 `/opt/xihong_erp/.env` 与 4 个容器生效环境变量的
+    5 个敏感值，与仓库被跟踪文件里的旧值**逐项全不同** ⇒ 生产现役密钥安全。
+  - **但泄露的是「已废弃的旧密钥」**：仓库里 `.env.production.passwords.txt` 的 5 个值
+    （2025-01 那批）与生产现役值**全部不同**；生产机上还留着一份同名文件
+    （部署产物，2026-04-07），内容与仓库里那份**逐字节同源**。
+  - **⚠️ 严重升级：密文 + 解密密钥同时公开**。仓库里同时跟踪着
+    `accounts.enc`（12,964 字节，Fernet 密文）与 `.env.cleaned`（其中带着
+    `ACCOUNT_ENCRYPTION_KEY`）⇒ **实测可用公开仓库里的密钥直接解开 `accounts.enc`**：
+    解出 **15 个店铺账号**（Amazon 2 / Shopee 5 / Tiktok 4 / 妙手ERP 2 /
+    miaoshou 1 / 验证码测试账号 1），**每个都有非空密码**（长度 8~23），
+    还带 `Email account` / `Email password` / `phone` / `proxy_region` 等字段。
+    ⇒ 这不是「旧密钥泄露」，而是**店铺账号密码公开**。
+  - **生产库未受影响**：生产 `core.shop_accounts` 的密码用**现役** `ACCOUNT_ENCRYPTION_KEY`
+    加密，泄露的旧密钥**解不开**（实测 `InvalidToken`）。
+- **本批已做（代码侧）**：
+  1. **取消跟踪**（`git rm --cached`，本地文件保留）：
+     `.env.production.passwords.txt`、`.env.cleaned`、`accounts.enc`、
+     `frontend/.env.development`（Mock 开关已从代码里删除，该文件是死文件）。
+  2. **`.gitignore`**：`.env.*`（含 `!.env.example` / `!.env.template` / `!.env.limiter`）
+     + `*.passwords.txt` + `*.enc`。
+  3. **补门禁** `scripts/check_precommit_secrets.py` 的 `is_blocked()`：
+     按**规则**拦（`.env` 家族 / 疑似敏感名 + 数据类扩展名 / 加密与密钥后缀），
+     不再逐个文件名补；`ALLOWED_BASENAMES` 显式放行 `.env.limiter`
+     （限流器运行期配置、纯 ASCII、只有一个开关、**无口令**）。
+  4. **守护测试**（新建 `tests/test_secret_files_not_tracked.py`，并进 CI 根契约清单）：
+     ① 这 4 个文件不在 `git ls-files` 里；② **全仓扫**：被跟踪文件里没有任何一个
+     会被门禁拦下；③ 门禁对泄露文件判拦、**且不误伤**模板/文档/脚本；
+     ④ `.gitignore` 真的挡住（`git check-ignore`）。
+  5. **真源文档** `docs/guides/ENV_FILE_CONTRACT.md` 增「Repository Tracking Policy」。
+- **TDD 红侧已验证**：旧版 `is_blocked()` 对 6 个泄露文件**漏放行 5 个**；
+  `HEAD` 里那 4 个文件仍在跟踪 ⇒ 新守护在旧状态下必红。
+- **仍需 Walter 拍板（agent 无权也不应自行执行）**：
+  1. **轮换那 15 个店铺账号的密码**（公开 ⇒ 必须视为已泄露），
+     并同步更新生产库 `core.shop_accounts` 与采集机账号库；
+  2. **历史清理**（`git filter-repo`）—— 会作废全部已发布 tag（含 `v7.24.0`），
+     **本会话明确不做**；
+  3. **删除生产机上的 `/opt/xihong_erp/.env.production.passwords.txt`**（旧密钥副本）——
+     属生产写操作，须走发版流程或人工执行；
+  4. 确认 `.env.cleaned` 里的旧 `SECRET_KEY` / `JWT_SECRET_KEY` / `METABASE_API_KEY`
+     在**任何**环境都还活着 —— 本次只比对了生产与本机，**未覆盖**已下线的旧环境。
+
+### 本会话的仓库级回归结果
+
+| 范围 | 结果 |
+|---|---|
+| 根 `tests/` | **758 passed / 5 skipped / 0 failed**（本批新增 35 例密钥守护 ⇒ 793） |
+| 后端全量 `backend/tests` | **4593 passed / 7 skipped / 0 failed**（基线 4579 + 14） |
+| 前端 `frontend/tests` | **207 passed / 0 failed**（原 195 + 批次 A 5 + 批次 B2 7） |
+| API 契约门禁 | 0 错 / 65 警告（真静默 47，与基线一致） |
+| 前端 API 方法门禁 | **0 缺失**（批次 A 回归后恢复） |
+| UTF-8 卫生 / 规则完整性 / 架构 SSOT | 全绿（SSOT 100%） |
+
+
 
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
 - Parallel/specialized tracks should keep their own plan documents and be referenced from here when they are merged.
