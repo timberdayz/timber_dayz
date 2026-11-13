@@ -1598,7 +1598,60 @@ R8 要求 profile 模式「**不注入**，沿用 profile 原生环境」；③ 
 （尤其别写成 `shopeeKR` / `Tiktok1店` / `hongxikejimain`）；ID 不可改；platform 必须在白名单内；
 店铺 `platform_shop_id` 必填；首次采集前先人工巡店一次。
 
-- The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
+## 批次 F：减重批（2026-11-13）
+
+**方向（Walter 拍板）**：做减重批 —— 关告警门禁 + 台账瘦身 + 守护分类。
+**本批只做减法**：不擅自把只告警步骤升成硬门禁（升门禁属加固方向，另记待办由 Walter 决定）。
+
+**起因**：Walter 问「我们是不是越做越重了」。实测下来确实如此 —— CI 的 `test` job 里有
+45 个硬门禁 + 14 个「只告警」步骤（`continue-on-error: true` 或命令自带 `|| true` / `|| echo`
+⇒ **无论成败都不改变流水线结果**）；守卫/契约类测试文件 258 个（占测试文件 30%、39,166 行）；
+本台账 1,606 行、26 个章节。
+
+### F-1：关掉 6 个纯噪音步骤 + 收窄采集组件 lint（已落地）
+
+逐个**实测**过的处置依据（不是推断）：
+
+| 被移除的只告警步骤 | 实测结论 |
+|---|---|
+| `Type checking (critical modules only)` | `mypy modules/core/` 实测 440 errors / 13 个文件，全部是动态 ORM 基类误报（`Invalid base class Base`）；命令自带 `\|\| true`，从不让流水线红 |
+| `Database Design Rules Validation` | `scripts/validate_code_compliance.py` 是空壳：只打印一段说明文字，退出码 0，不做任何实际检查 |
+| `Run contract tests` | legacy `contract_tests.py` 三选一循环：`web_interface_manager` 持续失败（依赖已不存在的 `frontend_streamlit`），失败被 `\|\| echo` 吞掉 |
+| `Run unified health check` | 自报「健康检查失败的应用: `['web_interface_manager']`」却仍然报通过 —— 既不挡错，又制造「检查过了」的错觉 |
+| `Check for known vulnerabilities` | `safety check` 上游已废弃（CI 自己的注释就写着 deprecated），输出被 `continue-on-error` 吞掉 |
+| `Check for large files` | 命中的 65 个大文件全在本地产物目录（`backups/` `temp/` `docker_volume_backup/` `.playwright-mcp/`），**不在 git 跟踪范围** ⇒ CI 上必然 0 命中；且 `find` 的输出被 `while` 吞成 echo，退出码恒为 0 |
+
+**明确保留**（减重 ≠ 放松）：
+
+- 真硬门禁：`Check for secrets in code` / `Safety diff gate (PR only, fail on new vulns)` /
+  `Check project structure` / `Run Bandit security scan`
+- 故意保留的只告警步骤：`Clean up leftover test containers`（批次 E-2 设计决定：清理失败不得掩盖真实失败）/
+  `Install Playwright browsers` / `Validate configurations`
+
+**收窄（不是删）**：`Collection component lint` 之前把「本次改动的全部 Python 文件」喂给
+采集组件规则 ⇒ backend/ tests/ 里的普通业务代码被套上采集组件规则，全仓报出 454 行告警，
+而那些告警既不属于规则本意范围、也从不改变结果。现在改为 `--scope platforms`
+（只扫 `modules/platforms/**`，路径真源在 `scripts/lint_collection_components.py`，不在 workflow 里另写一份）。
+**门禁强度不变**：仍是 `--fail-on none` 告警模式。
+
+**守护**：`backend/tests/test_ci_weight_reduction_contract.py`（已进 CI 根契约清单）
+—— 锁住「6 个噪音步骤不许再回来」「真硬门禁不许被顺手删」「lint 范围必须收窄且强度不变」
+「书面记录必须逐条齐全」「这份守护自己必须在 CI 清单里」。
+
+### F-1 顺带揭露的真实缺陷（不再被 `|| echo` 吞掉）
+
+`modules/apps/web_interface_manager` 的健康检查**持续失败** —— 它依赖的
+`frontend_streamlit` 目录**不存在**。原先这个失败被 CI 的 `|| echo` 吞掉，
+现在浮出水面。⇒ **待修**（不在本批范围，未擅自改业务代码）。
+
+### F-1 留下的待办（加固方向，待 Walter 拍板）
+
+- `mypy` 类型检查目前**没有任何门禁**（440 条误报需要先分层/豁免才可能升门禁）。
+- 采集组件 lint 仍是告警模式（`--fail-on none`），范围已收窄但**强度未提升**。
+- legacy `modules/apps/{account_manager,collection_center}/contract_tests.py` 不再由 CI 执行
+  （其断言与 pytest 套件部分重叠）；若要保留这层覆盖，需把断言迁进 pytest。
+
+
 - Parallel/specialized tracks should keep their own plan documents and be referenced from here when they are merged.
 
 ## Audit

@@ -8,9 +8,20 @@
 
     python scripts/lint_collection_components.py
     python scripts/lint_collection_components.py --paths "a.py b.py" --fail-on none
+    python scripts/lint_collection_components.py --scope platforms --fail-on none
     python scripts/lint_collection_components.py --format json --severity error
 
 退出码：0 = 通过；1 = 命中 error 级问题；2 = 执行异常（配置或依赖问题）。
+
+扫描范围（--scope）：
+    ``all``（默认）= ``--paths`` 给什么就扫什么（本地按需排查用）。
+    ``platforms`` = 只保留 ``modules/platforms/**``（规则本意范围），范围外文件被过滤。
+
+    为什么需要 ``platforms``：2026-11-13 实测，CI 把「本次改动的全部 Python 文件」
+    喂给本脚本，于是 backend/ tests/ modules/ 下的普通业务代码也被套上「采集组件」
+    规则，全仓报出 454 行告警 —— 既不属于该规则的本意范围，也从不改变流水线结果。
+    规则本意范围的真源就在本文件（:data:`DEFAULT_SCOPE_DIR`），CI 通过
+    ``--scope platforms`` 复用它，不在 workflow 里另写一份路径。
 """
 
 from __future__ import annotations
@@ -63,6 +74,11 @@ DEFAULT_SCOPE_DIR = PROJECT_ROOT / "modules" / "platforms"
 ARCHIVE_DIR_NAME = "archive"
 REPO_LEVEL_RULES = ("missing_stable_component_record", "stable_points_to_archived_file")
 
+#: --scope 的取值。``platforms`` = 规则本意范围（modules/platforms/**）。
+SCOPE_ALL = "all"
+SCOPE_PLATFORMS = "platforms"
+SCOPE_CHOICES = (SCOPE_ALL, SCOPE_PLATFORMS)
+
 RecordLoader = Callable[[], Sequence[StableComponentRecord]]
 
 
@@ -104,6 +120,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["error", "none"],
         default="error",
         help="命中 error 时是否以非 0 退出码结束，默认 error",
+    )
+    parser.add_argument(
+        "--scope",
+        choices=list(SCOPE_CHOICES),
+        default=SCOPE_ALL,
+        help=(
+            "扫描范围：all = --paths 给什么扫什么（默认）；"
+            "platforms = 只扫 modules/platforms/**（规则本意范围）"
+        ),
     )
     return parser
 
@@ -156,6 +181,34 @@ def resolve_candidate_files(raw_paths: Sequence[str] | None) -> list[Path]:
                 seen.add(key)
                 files.append(target)
     return files
+
+
+def is_in_scope(path: Path, scope: str = SCOPE_ALL) -> bool:
+    """该文件是否落在给定扫描范围内。
+
+    ``SCOPE_ALL``：在范围内（不做任何过滤）。
+    ``SCOPE_PLATFORMS``：必须位于 ``modules/platforms/**`` 且不在 ``archive/`` 下
+    （与 :func:`iter_default_scope` 的默认范围保持同一口径）。
+    """
+    if scope == SCOPE_ALL:
+        return True
+    try:
+        relative = path.resolve().relative_to(PROJECT_ROOT.resolve())
+    except ValueError:
+        return False
+    parts = relative.parts
+    if len(parts) < 3:
+        return False
+    if parts[0] != "modules" or parts[1] != "platforms":
+        return False
+    return ARCHIVE_DIR_NAME not in parts
+
+
+def filter_by_scope(paths: Sequence[Path], scope: str = SCOPE_ALL) -> list[Path]:
+    """按扫描范围过滤文件列表。"""
+    if scope == SCOPE_ALL:
+        return list(paths)
+    return [path for path in paths if is_in_scope(path, scope)]
 
 
 def collect_changed_files(base: str) -> list[str]:
@@ -222,6 +275,8 @@ def render_text(
     summary: dict,
     scanned: int,
     skip_reason: str | None,
+    scope: str = SCOPE_ALL,
+    filtered_out: int = 0,
 ) -> str:
     """文本格式报告。"""
     lines: list[str] = []
@@ -237,6 +292,7 @@ def render_text(
         )
     lines.append("--- 汇总 ---")
     lines.append(f"扫描文件数: {scanned}")
+    lines.append(f"扫描范围: {scope}（范围外文件 {filtered_out} 个已过滤）")
     lines.append(
         f"error: {summary['errors']}（{summary['error_occurrences']} 处）"
         f" / warning: {summary['warnings']}（{summary['warning_occurrences']} 处）"
@@ -263,10 +319,14 @@ def render_json(
     summary: dict,
     scanned: int,
     skip_reason: str | None,
+    scope: str = SCOPE_ALL,
+    filtered_out: int = 0,
 ) -> str:
     """JSON 格式报告。"""
     payload = {
         "scanned_files": scanned,
+        "scope": scope,
+        "filtered_out": filtered_out,
         "summary": summary,
         "errors": list(errors),
         "warnings": list(warnings),
@@ -320,21 +380,43 @@ def main(
     args = parser.parse_args(argv)
 
     try:
-        targets = resolve_candidate_files(args.paths)
+        candidates = resolve_candidate_files(args.paths)
         if args.changed_only:
-            targets = filter_changed_files(targets, args.base)
+            candidates = filter_changed_files(candidates, args.base)
+        targets = filter_by_scope(candidates, args.scope)
     except Exception as exc:
         print(f"[ERROR] 解析检查目标失败：{exc}", file=sys.stderr)
         return EXIT_EXEC_ERROR
 
+    filtered_out = len(candidates) - len(targets)
     errors, warnings, skip_reason = _run_quiet(targets, loader=loader)
     errors, warnings = filter_by_severity(errors, warnings, args.severity)
     summary = build_summary(errors, warnings)
 
     if args.format == "json":
-        print(render_json(errors, warnings, summary, len(targets), skip_reason))
+        print(
+            render_json(
+                errors,
+                warnings,
+                summary,
+                len(targets),
+                skip_reason,
+                args.scope,
+                filtered_out,
+            )
+        )
     else:
-        print(render_text(errors, warnings, summary, len(targets), skip_reason))
+        print(
+            render_text(
+                errors,
+                warnings,
+                summary,
+                len(targets),
+                skip_reason,
+                args.scope,
+                filtered_out,
+            )
+        )
 
     if args.fail_on == "error" and errors:
         return EXIT_HAS_ERROR

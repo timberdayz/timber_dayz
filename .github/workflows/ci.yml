@@ -183,51 +183,28 @@ jobs:
           fi
 
       - name: Collection component lint
+        # 批次 F-1（减重批）：本步骤的扫描范围已收窄到 modules/platforms/**
+        # （采集组件规则的本意范围，路径真源在 scripts/lint_collection_components.py）。
+        # 收窄之前，CI 把「本次改动的全部 Python 文件」喂进来 ⇒ backend/ tests/ 里的
+        # 普通业务代码也被套上采集组件规则，全仓报出 454 行告警，而那些告警
+        # 既不属于规则本意范围、也从不改变流水线结果。
+        # 门禁强度**不变**：仍是 `--fail-on none` 告警模式；升成硬门禁属加固方向，
+        # 另记待办由业务负责人拍板。
+        #
+        # 批次 F-1 一并移除了 6 个「只告警、从不改变结果」的噪音步骤。每一项的
+        # 实测理由、替代覆盖、以及「哪一步替它兜底」，全部写在书面记录里：
+        # docs/superpowers/plans/STATUS.md 的「批次 F」节。
+        # 守护：backend/tests/test_ci_weight_reduction_contract.py
         run: |
           if [ -n "${{ steps.changed-python.outputs.files }}" ]; then
-            python scripts/lint_collection_components.py --paths "${{ steps.changed-python.outputs.files }}" --fail-on none
+            python scripts/lint_collection_components.py --paths "${{ steps.changed-python.outputs.files }}" --scope platforms --fail-on none
           else
             echo "No changed Python files for collection component lint"
           fi
 
-      - name: Type checking (critical modules only)
-        if: matrix.python-version == '3.11'
-        run: |
-          mypy modules/core/ --ignore-missing-imports || true
-
       - name: Validate configurations
         run: |
           python scripts/validate_configs.py --ci || echo "Configuration validation completed"
-        continue-on-error: true
-
-      - name: Database Design Rules Validation
-        run: |
-          echo "Validating database design rules..."
-          python scripts/validate_code_compliance.py || echo "Validation completed with warnings"
-          echo "Database design rules validation completed"
-        continue-on-error: true
-
-      - name: Run contract tests
-        run: |
-          # 检查并运行存在的契约测试
-          for script in modules/apps/account_manager/contract_tests.py \
-                       modules/apps/collection_center/contract_tests.py \
-                       modules/apps/web_interface_manager/contract_tests.py; do
-            if [ -f "$script" ]; then
-              python "$script" || echo "$(basename $script) completed"
-            else
-              echo "$(basename $script) not found, skipping"
-            fi
-          done
-        continue-on-error: true
-
-      - name: Run unified health check
-        run: |
-          if [ -f tests/test_unified_health_check.py ]; then
-            python tests/test_unified_health_check.py || echo "Unified health check completed"
-          else
-            echo "test_unified_health_check.py not found, skipping"
-          fi
         continue-on-error: true
 
       - name: Run pytest (if test files exist)
@@ -361,6 +338,7 @@ jobs:
             backend/tests/test_cleanup_test_containers_wired_contract.py \
             backend/tests/test_cleanup_test_containers_contract.py \
             backend/tests/test_testcontainers_consolidation_contract.py \
+            backend/tests/test_ci_weight_reduction_contract.py \
             tests/test_rebuild_views_materialized_self_heal.py \
             tests/test_reliability_services.py \
             tests/test_run_local_port_selection.py \
@@ -479,22 +457,6 @@ jobs:
           path: bandit-report.json
           if-no-files-found: ignore
 
-      - name: Check for known vulnerabilities
-        continue-on-error: true
-        run: |
-          FILE_ARGS=""
-          for f in requirements.lock.txt requirements.txt requirements-dev.txt; do
-            if [ -f "$f" ]; then
-              FILE_ARGS="$FILE_ARGS -r $f"
-            fi
-          done
-          if [ -n "${FILE_ARGS}" ]; then
-            # `safety check` is deprecated upstream, but still used here for compatibility.
-            safety check --json --policy-file .safety-policy.yml --save-json safety-report-head.json ${FILE_ARGS}
-          else
-            echo "No requirements files found, skipping safety"
-          fi
-
       - name: Safety diff gate (PR only, fail on new vulns)
         if: steps.base-sha.outputs.sha != ''
         run: |
@@ -566,14 +528,6 @@ jobs:
           # env.template 是标准文件名
           test -f env.template || test -f .env.template || echo "Note: env template file not found (optional)"
           echo "Project structure check passed"
-
-      - name: Check for large files
-        run: |
-          # 检查是否有大文件被意外提交
-          find . -type f -size +10M -not -path "./.git/*" | while read file; do
-            echo "Warning: Large file found: $file"
-          done || true
-          echo "Large file check completed"
 
       - name: Validate configuration files
         run: |
