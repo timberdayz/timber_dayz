@@ -802,6 +802,128 @@ def start_proxy_auth_keeper(
     return thread
 
 
+def prepare_account_device_identity(
+    profile_dir: Path,
+    *,
+    platform: str,
+    account_id: str,
+) -> dict[str, Any] | None:
+    """为账号准备「设备身份」：分配设备画像 + 隔离 machine_id。
+
+    业务目标：让平台**无法把这批账号关联成同一台电脑**。
+    两件事：
+
+    1. **设备画像**（``profiles/<平台>/<账号>/.device_profile.json``）——
+       一套自洽的 UA / 屏幕 / 时区 / 语言 / Accept-Language / platform_id。
+    2. **machine_id 隔离** —— Chromium 的 machine_id 来自 Windows MachineGuid，
+       **同一台机器上所有 profile 必然相同** ⇒ 不处理 = 一眼关联。
+       这里改写成按 account_id 确定性派生的专属值（实测 Chromium 持久接受）。
+
+    失败**不阻断**巡店：设备隔离是增强项，不该让「打开浏览器」失败。
+    """
+    try:
+        from modules.utils.sessions.account_device_profile import (
+            assign_device_profile,
+            ensure_profile_machine_id,
+        )
+    except Exception as exc:  # pragma: no cover - 导入失败不应阻断巡店
+        print(f"Warning: device identity module unavailable: {exc}", file=sys.stderr)
+        return None
+
+    payload: dict[str, Any] | None = None
+    try:
+        _, payload = assign_device_profile(
+            REPO_ROOT / "profiles",
+            profile_dir,
+            platform=platform,
+            account_id=account_id,
+        )
+    except Exception as exc:
+        print(f"Warning: device profile assignment failed: {exc}", file=sys.stderr)
+
+    try:
+        ensure_profile_machine_id(
+            profile_dir,
+            platform=platform,
+            account_id=account_id,
+        )
+    except Exception as exc:
+        print(f"Warning: machine_id isolation failed: {exc}", file=sys.stderr)
+
+    return payload
+
+
+def apply_device_profile_to_context(
+    context: Any,
+    page: Any,
+    device_payload: dict[str, Any] | None,
+) -> None:
+    """把设备画像注入到**裸 Chromium**（巡店窗口）—— 走 CDP ``Emulation.*``。
+
+    巡店是 Chromium 子进程 + CDP，不是 Playwright context ⇒ 不能用 context 参数，
+    必须用 ``Emulation.setUserAgentOverride`` / ``setTimezoneOverride`` /
+    ``setLocaleOverride`` / ``setDeviceMetricsOverride``。
+
+    必须在**首次导航之前**调用 ⇒ 否则首个请求已经带旧 UA 发出去了。
+    """
+    if not device_payload:
+        return
+
+    try:
+        from modules.utils.sessions.account_device_profile import (
+            device_cdp_overrides,
+        )
+    except Exception as exc:  # pragma: no cover
+        print(f"Warning: device profile module unavailable: {exc}", file=sys.stderr)
+        return
+
+    overrides = device_cdp_overrides(device_payload)
+    if not overrides:
+        return
+
+    device = device_payload.get("device") or {}
+    viewport = overrides.get("viewport") or {}
+    scale_factor = float(device.get("device_scale_factor") or 1.0)
+
+    try:
+        cdp = context.new_cdp_session(page)
+    except Exception as exc:
+        print(f"Warning: CDP session unavailable for device profile: {exc}", file=sys.stderr)
+        return
+
+    try:
+        ua_overrides = {
+            key: overrides[key]
+            for key in ("userAgent", "platform", "acceptLanguage")
+            if key in overrides
+        }
+        if ua_overrides:
+            cdp.send("Emulation.setUserAgentOverride", ua_overrides)
+
+        if overrides.get("locale"):
+            cdp.send("Emulation.setLocaleOverride", {"locale": overrides["locale"]})
+
+        if overrides.get("timezoneId"):
+            cdp.send(
+                "Emulation.setTimezoneOverride",
+                {"timezoneId": overrides["timezoneId"]},
+            )
+
+        if viewport:
+            cdp.send(
+                "Emulation.setDeviceMetricsOverride",
+                {
+                    "width": int(viewport.get("width") or 1920),
+                    "height": int(viewport.get("height") or 1080),
+                    "deviceScaleFactor": scale_factor,
+                    "mobile": False,
+                },
+            )
+    except Exception as exc:
+        # 注入失败**不阻断**：浏览器仍然可用，只是设备特征未对齐
+        print(f"Warning: device profile injection failed: {exc}", file=sys.stderr)
+
+
 def launch_browser(
     session: str,
     url: str | None,
@@ -819,6 +941,17 @@ def launch_browser(
     if user_data_dir.exists() and not profile_explicit:
         shutil.rmtree(user_data_dir, ignore_errors=True)
     user_data_dir.mkdir(parents=True, exist_ok=True)
+
+    # 设备身份准备（画像分配 + machine_id 隔离）—— 必须在 Chromium **启动前**完成：
+    # machine_id 要改写 ``Local State``，启动后再改就晚了一轮。
+    device_payload: dict[str, Any] | None = None
+    if account_id:
+        platform = resolve_session_platform(session) or ""
+        device_payload = prepare_account_device_identity(
+            user_data_dir,
+            platform=platform,
+            account_id=account_id,
+        )
 
     port = allocate_port()
     executable_path = bundled_chromium_path()
@@ -871,6 +1004,8 @@ def launch_browser(
         page = ensure_page(context, metadata)
         install_console_buffer(context, page)
         maybe_load_default_storage_state(context, metadata)
+        # 设备画像注入必须在**首次导航之前** ⇒ 否则首个请求已经带旧 UA 发出去了。
+        apply_device_profile_to_context(context, page, device_payload)
         if url:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
         save_default_storage_state_from_context(metadata, context)

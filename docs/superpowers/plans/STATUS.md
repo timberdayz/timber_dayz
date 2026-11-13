@@ -19,7 +19,7 @@
 | 1 | 生产机 `/opt/xihong_erp/.env.production.passwords.txt` 旧密钥副本待删 | 生产写操作 | 待拍板：须走发版流程或人工执行 | 归档文件「安全发现」节 |
 | 2 | 旧 `SECRET_KEY` / `JWT_SECRET_KEY` / `METABASE_API_KEY` 在**已下线旧环境**是否还活着 | 需业务确认 | 待确认（本次只比对了生产与本机） | 归档文件「安全发现」节 |
 | 3 | 5 项业务口径待拍板：`3c店` 冲突取舍 / 两个 disabled 主账号是否启用 / TikTok 三店改名归属（含疑似历史误录 `TK新加坡1店`）/ `platform='验证码测试账号'` 脏行处理 / 10 个文件命中已停用账号 `shopee_sg_chenewei666_local` 是否回填 | 业务口径 | 待拍板 | 归档文件「批次 A / B / C」节 |
-| 4 | 账号设备身份 SSOT 收口：决策点 A（并行采集的「分身」，推荐 A1）与 B（代理/IP 隔离，推荐 B1） | 业务口径 | 待拍板（该计划文件目前**仍是未跟踪文件**，归属待确认） | `docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md` |
+| 4 | 账号设备身份 SSOT 收口：**代码与规范已落地**（方向修订后 9 张卡全部完成）；**剩资源缺口 G1**（库里代理 0 条 ⇒ 账号仍共用出口 IP） | 资源缺口 | 待采购代理资源并写入主账号 `extra_config['proxy']`；G2–G8 见本文件「已知缺口」表 | `docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md` + `...-closure-execution.md` |
 | 5 | `modules/apps/web_interface_manager` 健康检查持续失败（依赖的 `frontend_streamlit` 目录不存在） | 真实缺陷 | 批次 F-1 揭露；待修（本批未擅自改业务代码） | 本文件「批次 F」节 |
 | 6 | `mypy` 目前**没有任何门禁**（440 条动态 ORM 基类误报需先分层/豁免才可能升门禁） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
 | 7 | 采集组件 lint 仍是告警模式（范围已收窄，强度未提升） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
@@ -103,46 +103,62 @@
 
 ---
 
-## 账号设备身份 SSOT 收口（2026-11-13）
+## 账号设备身份 SSOT 收口（2026-11-13 起 / 2026-11-14 方向修订后落地）
 
-- 计划：`docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md` — **planned**
+- 计划：`docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md` — **done**
+- 执行规格：`docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure-execution.md` — **done**
+  （9 张执行卡：新1 画像模块 / 新2 machine_id 隔离 / 新3 顺序注入 / 新4 并行注入 /
+  新5 巡店 CDP 注入 / 新6 主账号级代理位 / 新7 规范修订 / 新8 前置体检脚本 / 新9 面板就绪可见）
+- 规范真源：`docs/guides/COLLECTION_SESSION_LIFECYCLE.md` 的 **R8 及其小节**（R8.0–R8.4）
 
-**起因（审查读代码得出，非推测）**：「账号设备身份」这一个业务概念同时存在于三处且互相矛盾 ——
-① 上位文档 `COLLECTION_SESSION_AND_FINGERPRINT.md:20-23` 要求「从 DeviceFingerprintManager
-获取或生成该账号的指纹，**注入** new_context」；② 生效文档 `COLLECTION_SESSION_LIFECYCLE.md`
-R8 要求 profile 模式「**不注入**，沿用 profile 原生环境」；③ 磁盘上 `data/device_fingerprints/`
-躺着 26 个**全部作废**的指纹文件（19 个孤儿，含 1 个编码乱码 `Tiktok 1µê`）。
+### 方向修订（重要，勿回滚成旧口径）
 
-**已核对为「对的，不要重复改」**：
+**原方向是错的**（2026-11-13 计划写的「让所有账号像**同一台电脑**的多个店」）。
+Walter 澄清后的业务目标是：
 
-| 项 | 判定 |
-|---|---|
-| R1 真相源唯一 / R2 登录即持久 / R3 人工确认即成立 / R4 读取即信任 | ✅ |
-| R5 并行扇出用内存快照 / R6 账号级串行 / R7 正常关闭才落盘 | ✅ |
-| **R8 顺序路径**（`runtime_session.py:687` normalize） | ✅ |
-| **R8 并行路径**（`executor_v2.py:6231-6241` 复用同一 normalize） | ✅ |
+> **不同账号 = 不同浏览器指纹 + 不同出口 IP，
+> 目的就是不让电商平台发现"一台电脑管理多个账号"。**
 
-⇒ **验收项 H（顺序与并行指纹口径一致）在主采集链路上已通过**，排查时不要重复改这里。
+⇒ 任何"让所有账号像同一台电脑"的方案都是**错方向**。
+原方向产出的 6 个文件改动已全部 `git checkout --` 回滚，
+方向错误时新建的 `modules/utils/sessions/device_profile_manifest.py` 已**可恢复删除**。
+详见执行文档「回滚记录（方向纠偏）」节。
 
-**待收口（本文计划的批次）**：
+### 已落地（业务语言）
 
-| 批次 | 内容 | 性质 |
+| 能力 | 落地物 | 真源 |
 |---|---|---|
-| 1 | 消除双真相源（改上位文档）+ 清 `data/device_fingerprints/` + 新增账号前置检查脚本 | 零生产代码改动 |
-| 2 | 设备档案（决策点 A1）：profile 内记录设备档案，人工巡店写入 ⇒ 三条路径同一台设备 | P0 |
-| 3 | 指纹机制在 profile 模式下彻底下线（**保留** `DeviceFingerprintManager` 供录制/组件测试等非 profile 路径） | P0 |
-| 4 | 新增账号接入体验（面板轮询刷新、白名单前置提示、首登状态可见、清理 2 个测试残留账号） | P1 |
-| 5 | 采集跑 profile 副本 / 代理降级为可选 | **记账到 V2**，本次不做 |
+| 每个主账号一套**自洽**设备画像（浏览器/版本/视口/时区/语言互相匹配），账号间必然不同、账号内永久稳定；**OS 与地区锁宿主**（Playwright 改不了 `navigator.platform`，且地区必须与出口 IP 一致） | `modules/utils/sessions/account_device_profile.py`（462 行） | R8.0 / R8.2 |
+| `machine_id` 按 account_id 确定性隔离（同机 6 个 profile 原本**全部相同** `11608241`） | 同上模块 `derive_machine_id` / `ensure_profile_machine_id` | R8.1 |
+| 人工巡店 / 顺序采集 / 并行采集**三条路径同一套画像**；并行路径缺画像**必须 WARN** | `pwcli_native.py` / `runtime_session.py` / `executor_v2.py` | R8.3 |
+| 代理权威位上移**主账号级**，巡店与采集同源；配置坏了**显式失败**不静默直连 | 3 个 loader + `pwcli_account_inventory.py` | R8.4 |
+| 新增账号**前置体检**（7 项，只读） | `scripts/check_account_readiness.py`（353 行） | — |
+| 巡店面板**就绪可见**：15 秒轮询、就绪徽标、白名单排除账号**显式列出并写明原因** | `modules/utils/sessions/account_readiness.py` + 面板 `/api/accounts/readiness` + 前端 | — |
 
-**两个待拍板决策点**：
+### 验收（实测）
 
-- **决策点 A（并行采集的「分身」）**：R5（并行只开一次 profile）⟹ 并行 context 不挂载 profile ⟹
-  R8「沿用 profile 原生环境」在并行路径上**无法完全实现** ⇒ 规范内部存在张力。
-  推荐 **A1**：在 `profiles/<平台>/<账号>/.device.json` 记录设备档案（人工巡店时按 CDP 实测写入），
-  三条路径共用同一套值 ⇒ 既不改 R5/R6，也不违反 R8 的**理由**（整套一起注入、彼此自洽）。
-- **决策点 B（代理/IP 隔离）**：当前业务为国内卖家端直连，规范 D7/P1 的 IP 隔离已成额外复杂度，
-  且「代理配坏必须显式失败」给每个新账号增加概念负担。推荐 **B1**：保留能力，但「没配」= 正常直连，
-  只对「配了但坏了」显式失败。
+| 范围 | 结果 |
+|---|---|
+| `tests/test_account_device_isolation_contract.py` | **23 passed** |
+| `tests/test_account_readiness_contract.py` | **11 passed** |
+| 采集相关 5 个测试文件 | **174 passed** |
+| 面板与运行时回归 | **76 passed** |
+
+两条新守护**已进 CI 根契约清单**（`ci.yml` 根契约条目 57 → **59**），
+`scripts/audit_guard_tests.py` 分类确认均为 **A 类（CI 硬门禁）**。
+
+### 已知缺口（**未结，必须留档**）
+
+| # | 缺口 | 性质 | 解除条件 |
+|---|---|---|---|
+| G1 | **IP 层无资源**：库里代理配置 **0 条** ⇒ 所有账号仍共用宿主出口 IP，平台仍可用"同一出口多账号"做关联；**且画像的 locale/时区因此锁在宿主地区**（出口即宿主 IP ⇒ 地区必须跟着出口走，否则自己制造"中国 IP + 德国时区"三重矛盾） | **资源缺口**（当前最大缺口） | 采购代理资源并写入主账号 `extra_config['proxy']`；到位后再按账号放开地区维度 |
+| G2 | **深度指纹未覆盖**（canvas / WebGL / 字体 / GPU / 音频栈） | 技术债 | V2 专项评估 |
+| G3 | 同一主账号下多店铺**共享画像与出口** | **刻意折中**（业务已确认接受） | 写进文档，不隐藏 |
+| G4 | 存量 9 个主账号 `machine_id` 仍是 `11608241` | 生效延迟 | 下次巡店/采集自动改写（幂等） |
+| G5 | `profile_color_seed` 6 个相同 | 技术债 | 与 G2 一并 |
+| G6 | 存量账号 ID 不合规（`hongxikeji:main` / `shopee KR` / `Tiktok 1店` / `chenzeweinbnb@163.com` / 含全角括号） | 历史事实 | 体检脚本记为 **WARN**；**不主动改名**（改名会换 profile 目录 ⇒ 换登录态） |
+| G7 | 测试残留账号 `accept_main_1775126941575`、`验证码测试账号` | 数据脏 | 待业务拍板（见「当前未结」#3） |
+| G8 | 旧指纹机制与 `data/device_fingerprints/` 26 文件仍在 | 已决策 | 保留给非 profile 路径，暂不清理 |
 
 **新增账号即时自查**（不等开发）：ID 只用小写字母/数字/下划线；对照现有 6 个 profile 目录确认不撞
 （尤其别写成 `shopeeKR` / `Tiktok1店` / `hongxikejimain`）；ID 不可改；platform 必须在白名单内；

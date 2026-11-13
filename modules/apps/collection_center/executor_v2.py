@@ -6209,36 +6209,57 @@ class CollectionExecutorV2:
             cleaned = cleaned.strip("._-") or "unknown"
             return cleaned[:120]
 
-        domain_context_options: Optional[Dict[str, Any]] = None
-        if use_account_session_fingerprint and session_owner_id:
+        # 并行扇出走 ``browser.new_context(storage_state=内存快照)`` ⇒ **不挂载 profile**，
+        # 拿不到 profile 原生环境（R5 与「沿用原生」在这里天然冲突）。
+        # 因此设备身份由**账号设备画像**显式提供 —— 与顺序路径**同一套**，
+        # 保证同一账号在「人工巡店 / 顺序采集 / 并行采集」三处呈现为同一台设备。
+        from modules.apps.collection_center.browser_config_helper import (
+            get_browser_context_args,
+        )
+        from modules.utils.sessions.account_device_profile import (
+            device_context_options,
+            read_device_profile,
+        )
+        from modules.utils.sessions.session_manager import SessionManager
+
+        domain_context_options: Dict[str, Any] = get_browser_context_args()
+        # 代理必须显式带上：``get_browser_context_args()`` 按设计不含 proxy，
+        # 漏掉就是静默直连（账号从宿主 IP 出现，IP 隔离形同虚设）。
+        if proxy:
+            domain_context_options["proxy"] = proxy
+        domain_context_options.setdefault("accept_downloads", True)
+
+        device_payload: Optional[Dict[str, Any]] = None
+        if session_owner_id:
             try:
-                fp_opts = await _get_fingerprint_context_options_async(
-                    platform, session_owner_id, account, proxy=proxy
-                )
-                domain_context_options = (
-                    _build_playwright_context_options_from_fingerprint(fp_opts)
+                device_payload = read_device_profile(
+                    SessionManager().get_persistent_profile_path(
+                        platform, session_owner_id
+                    )
                 )
             except Exception:
-                domain_context_options = None
-        if domain_context_options is None:
-            from modules.apps.collection_center.browser_config_helper import (
-                get_browser_context_args,
-            )
+                device_payload = None
 
-            domain_context_options = get_browser_context_args()
-        domain_context_options = dict(domain_context_options)
-        domain_context_options.setdefault("accept_downloads", True)
-        # [Task 4.2 / R8] 并行扇出与顺序路径**同一套指纹口径**：
-        # 都不注入 user_agent / locale / timezone_id 等运行时覆盖项
-        # （以 profile 原生环境为准）。顺序路径已经由
-        # ``normalize_persistent_profile_context_options`` 剥离，这里复用**同一个**
-        # 函数 → 两条路径不会各走各的。
-        domain_context_options = (
-            runtime_session.normalize_persistent_profile_context_options(
-                platform=platform,
-                context_options=domain_context_options,
+        if device_payload:
+            domain_context_options = {
+                **domain_context_options,
+                **device_context_options(device_payload),
+            }
+        else:
+            logger.warning(
+                "PARALLEL_COLLECTION_NO_DEVICE_PROFILE platform=%s account=%s: "
+                "并行路径不挂载 profile，拿不到原生环境；未注入设备画像 ⇒ "
+                "该账号在平台侧会呈现为采集专用环境，与人工巡店环境不一致。"
+                "请先通过巡店面板为该账号人工巡店一次以生成设备画像。",
+                platform,
+                session_owner_id,
             )
-        )
+            domain_context_options = (
+                runtime_session.normalize_persistent_profile_context_options(
+                    platform=platform,
+                    context_options=domain_context_options,
+                )
+            )
 
         semaphore = asyncio.Semaphore(max(1, int(max_parallel or 1)))
         total_domains = len(data_domains)

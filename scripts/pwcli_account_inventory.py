@@ -45,9 +45,14 @@ PLATFORM_HELPERS = {
 
 #: 账号清单 SQL。
 #:
-#: 代理在 ``core.shop_accounts.extra_config["proxy"]``，而巡店账号的主表是
-#: ``core.main_accounts``（没有 proxy 字段）-> 必须 LEFT JOIN 店铺账号表。
-#: 一个主账号可能挂多个店铺账号，这里取**第一个启用的、带代理配置的店铺账号**
+#: 代理在 ``core.main_accounts.extra_config["proxy"]``（**主账号级**，权威位）
+#: 与 ``core.shop_accounts.extra_config["proxy"]``（历史位，回退）。
+#: 巡店账号清单的主表是 ``core.main_accounts``（没有 proxy 列）⇒ 两个都要取。
+#:
+#: **主账号级优先**：出口绑在**登录身份**上 —— 一个登录身份 = 一个设备 = 一个出口。
+#: 店铺级只在主账号没配时回退（历史数据仍在店铺侧）。
+#:
+#: 一个主账号可能挂多个店铺账号，店铺级回退取**第一个启用的、带代理配置的店铺账号**
 #: （按 id 排序，保证结果确定）。
 ACCOUNT_QUERY = """
 select
@@ -55,6 +60,7 @@ select
     m.main_account_id,
     coalesce(m.main_account_name, '') as main_account_name,
     coalesce(m.username, '') as username,
+    m.extra_config as main_extra_config,
     s.extra_config as shop_extra_config
 from core.main_accounts m
 left join lateral (
@@ -157,7 +163,12 @@ def load_accounts() -> list[MainAccountRow]:
 
     accounts: list[MainAccountRow] = []
     for row in rows:
-        proxy = extract_proxy_fields(row.shop_extra_config)
+        # 代理来源：主账号级优先，店铺级回退（与采集侧
+        # ``AccountLoaderService`` / ``ShopAccountLoaderService`` 同一口径 ⇒
+        # 巡店与采集用**同一个出口**，登录 IP 与采集 IP 不会不一致）。
+        proxy = extract_proxy_fields(row.main_extra_config)
+        if not proxy.get("proxy_enabled"):
+            proxy = extract_proxy_fields(row.shop_extra_config)
         accounts.append(
             MainAccountRow(
                 platform=str(row.platform or "").strip().lower(),
@@ -213,6 +224,42 @@ def build_inspection_accounts_with_proxy(
         account["proxy_username"] = row.proxy_username
         account["proxy_password"] = row.proxy_password
     return accounts, skipped
+
+
+#: 巡店面板支持的平台（白名单）—— 与 ``PLATFORM_HELPERS`` 同源。
+INSPECTION_PLATFORMS: tuple[str, ...] = tuple(sorted(PLATFORM_HELPERS))
+
+#: 不在白名单时的跳过原因（写给人看）。
+SKIP_REASON_UNSUPPORTED_PLATFORM = (
+    "平台不在巡店白名单（本地巡店只支持 {supported}）"
+)
+
+
+def build_skipped_account_details(
+    rows: list[MainAccountRow],
+) -> list[dict[str, Any]]:
+    """被巡店白名单排除掉的账号（**结构化**，含原因）。
+
+    以前这些账号是**静默跳过**的：面板里看不到、CLI 只往 stderr 打一行，
+    运维只会以为「这个账号不存在」。这里把「为什么看不到」显式化。
+
+    ⚠️ 不含任何凭据（响应会进浏览器 DOM）。
+    """
+    supported = ", ".join(INSPECTION_PLATFORMS)
+    details: list[dict[str, Any]] = []
+    for row in rows:
+        platform = str(row.platform or "").strip().lower()
+        if platform in PLATFORM_HELPERS:
+            continue
+        details.append(
+            {
+                "platform": platform,
+                "account_id": str(row.main_account_id or ""),
+                "display_name": display_name(row),
+                "reason": SKIP_REASON_UNSUPPORTED_PLATFORM.format(supported=supported),
+            }
+        )
+    return details
 
 
 def _cli_work_tag(platform: str, account_id: str) -> int:

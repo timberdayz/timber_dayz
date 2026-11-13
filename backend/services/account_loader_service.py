@@ -48,9 +48,10 @@ class AccountLoaderService:
     ) -> Optional[Dict]:
         """组装运行时账号 dict。
 
-        代理相关键来自 ``core.shop_accounts.extra_config["proxy"]``，解析规则见
-        ``backend/services/account_proxy_config.py``（AccountLoaderService 与
-        ShopAccountLoaderService 共用的单一定义源）。
+        代理相关键来自**主账号级** ``core.main_accounts.extra_config["proxy"]``
+        （店铺级 ``core.shop_accounts.extra_config["proxy"]`` 仅作回退），
+        解析规则见 ``backend/services/account_proxy_config.py``
+        （AccountLoaderService 与 ShopAccountLoaderService 共用的单一定义源）。
 
         其中 ``proxy_region`` 是**自由地区标识**（例如 ``"sg"``），与遗留
         ``AccountConfig.proxy_region`` 用的"地区池 key"词汇表
@@ -61,8 +62,19 @@ class AccountLoaderService:
             return None
 
         legacy = self._extract_legacy_shop_extra(shop_account)
-        # 与 legacy 路径保持一致的写法：extra_config 是 ShopAccount 的既有字段
-        proxy = extract_proxy_config(shop_account.extra_config)
+        # 代理来源：**主账号级优先**，店铺级作为回退。
+        #
+        # 为什么主账号级优先
+        # ----------------
+        # 业务上是「一个登录身份 = 一个设备 = 一个出口」。IP 隔离的目的就是让平台
+        # 无法把这些账号关联成「同一个出口的账号矩阵」⇒ 出口必须绑在**登录身份**上。
+        # 主账号级 extra_config['proxy'] 是权威位；店铺级仅作回退（历史数据仍在店铺侧）。
+        #
+        # 巡店与采集**必须用同一个来源** —— 登录时 IP 与采集时 IP 不一致，
+        # 平台立刻判定「环境突变」，比没有隔离更糟。
+        proxy = extract_proxy_config(getattr(main_account, "extra_config", None))
+        if not proxy.get("proxy_enabled"):
+            proxy = extract_proxy_config(getattr(shop_account, "extra_config", None))
         return {
             "account_id": shop_account.shop_account_id,
             "main_account_id": main_account.main_account_id,

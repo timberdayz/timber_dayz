@@ -21,6 +21,10 @@ from modules.apps.collection_center.transition_gates import (
     evaluate_login_ready,
 )
 from modules.core.logger import get_logger
+from modules.utils.sessions.account_device_profile import (
+    device_context_options,
+    read_device_profile,
+)
 
 logger = get_logger(__name__)
 
@@ -385,14 +389,13 @@ def _profile_contains_state(profile_path: Path) -> bool:
     实测（本机 18 个真实 profile vs 7 个空 profile）：有登录态的 profile 一律有
     ``Default/Network/Cookies``（Chromium 110+），空 profile 连 ``Default/`` 都没有。
     旧版 Chromium 用 ``Default/Cookies`` → 两条路径都查。
+
+    ⚠️ 判据本体在 ``modules/utils/sessions/account_readiness.py`` —— 巡店面板的
+    就绪接口与 CLI 体检脚本共用同一份 ⇒ 三处口径不会漂移。
     """
-    try:
-        for relative in ("Default/Network/Cookies", "Default/Cookies"):
-            if (profile_path / relative).exists():
-                return True
-        return False
-    except Exception:
-        return False
+    from modules.utils.sessions.account_readiness import profile_contains_state
+
+    return profile_contains_state(profile_path)
 
 
 def runtime_profile_exists(platform: str, session_owner_id: str) -> bool:
@@ -553,9 +556,28 @@ async def build_runtime_context_options(
     proxy: Optional[Dict[str, Any]] = None,
     accept_downloads: bool = True,
     headless: Optional[bool] = None,
+    use_device_fingerprint: bool = True,
 ) -> Dict[str, Any]:
+    """构建 browser context 选项。
+
+    ``use_device_fingerprint=False`` ⇒ **不加载**旧的 ``DeviceFingerprintManager`` 指纹。
+
+    为什么 profile 模式要关掉它
+    --------------------------
+    profile 模式的设备身份由**账号设备画像**
+    （``modules/utils/sessions/account_device_profile.py``）提供：每个账号一套
+    自洽的 UA / 屏幕 / 时区 / 语言 / Accept-Language，落在 profile 目录内，
+    与登录态同生共死。
+
+    旧的 ``DeviceFingerprintManager`` 是**另一套**人造指纹（``data/device_fingerprints/``），
+    池子小（UA 20 / 屏幕 12 ⇒ 组合上限 60）、实测已有账号撞车，且注入的 UA 与
+    profile 内生标识（machine_id / 字体 / GPU）**头身不符** ⇒ 反而更容易被关联。
+
+    非 profile 模式（录制 / 组件录制 / PersistentBrowserManager）**没有 profile 目录**
+    可放画像 ⇒ 仍走旧指纹，保持 ``use_device_fingerprint=True``。
+    """
     context_options: Dict[str, Any]
-    if session_owner_id:
+    if session_owner_id and use_device_fingerprint:
         try:
             fingerprint_options = await _get_fingerprint_context_options_async(
                 platform,
@@ -683,12 +705,23 @@ async def open_persistent_runtime_bundle(
         proxy=proxy,
         accept_downloads=True,
         headless=bool((launch_kwargs or {}).get("headless", True)),
+        # profile 模式不用旧的人造指纹：设备身份由**账号设备画像**提供。
+        use_device_fingerprint=False,
     )
-    context_options = normalize_persistent_profile_context_options(
-        platform=platform,
-        context_options=context_options,
-        headless=bool((launch_kwargs or {}).get("headless", True)),
-    )
+    # 账号设备画像（账号间不可关联的第一层）。
+    # 画像缺失（账号从未人工巡店过）⇒ 沿用 profile 原生环境，不注入任何覆盖项。
+    device_payload = read_device_profile(profile_path)
+    if device_payload:
+        context_options = {
+            **context_options,
+            **device_context_options(device_payload),
+        }
+    else:
+        context_options = normalize_persistent_profile_context_options(
+            platform=platform,
+            context_options=context_options,
+            headless=bool((launch_kwargs or {}).get("headless", True)),
+        )
     launch_options = enforce_official_playwright_browser(dict(launch_kwargs or {}))
     # profile 模式下 proxy 是**浏览器进程级**参数（launch_persistent_context 的 proxy），
     # 与 context 级 proxy 不同义；context_options 里若也带了 proxy，重复传同一个 key

@@ -3,7 +3,7 @@
 ## 0. 本文档定位
 
 - **规范性文档**：本文定义「采集会话 / 账号身份」这套业务概念的**唯一权威语义**。代码实现、巡店面板、采集执行器都必须以此为准。
-- **上位文档**：[`COLLECTION_SESSION_AND_FINGERPRINT.md`](COLLECTION_SESSION_AND_FINGERPRINT.md) 定义账号级指纹与存储路径。本文定义**会话载体、保存语义、并发与 IP 隔离**。
+- **上位文档**：[`COLLECTION_SESSION_AND_FINGERPRINT.md`](COLLECTION_SESSION_AND_FINGERPRINT.md) 定义存储路径与设备画像策略。本文定义**会话载体、保存语义、并发、设备身份与 IP 隔离**。「账号设备身份」的语义真源**只有本文 R8 一处**。
 - **冲突处理**：本文与仓库其他文档冲突时以本文为准，并在同一任务内同步更新冲突文档。
 - **状态**：**生效版 v3.1**（2026-11-03 实现回填）。
 - **版本沿革**：v1/v2 确立了「会话文件覆盖写入」语义；v3 按业务决策改为**单一载体（profile）+ IP 隔离**，会话文件废除；v3.1 是**实现回填** —— 把 v3 已定稿的业务语义对应到已落地的代码与文件位置，**业务语义未变**。
@@ -40,6 +40,8 @@
 | **profile** | `profiles/<platform>/<main_account_id>/`，Chromium 用户目录 | **唯一的登录态载体** |
 | **登录态** | profile 内 Chromium 维护的 cookie / localStorage / IndexedDB | 由 Chromium 自己读写，不需要应用层"保存" |
 | **快照** | 从 profile context 导出的 `storage_state`（cookie + localStorage） | **仅内存**，用于并行扇出；不是权威登录态 |
+| **设备画像** | `profiles/<平台>/<账号>/.device_profile.json`：UA / 屏幕 / 时区 / 语言 / Accept-Language / `navigator.platform` | **账号间不可关联**的设备侧载体；与登录态同生共死（R8） |
+| **机器标识** | profile 内 `Local State` → `user_experience_metrics.machine_id` | 必须按账号隔离，否则同机多账号一眼关联（R8.1） |
 
 ---
 
@@ -57,7 +59,9 @@
 | 设备真实性 | 只有 cookie + localStorage，**缺 IndexedDB** | 完整浏览器环境 |
 | 可移植性 | 明文 JSON，可跨机搬运 | 绑定本机（Chromium 加密存储） |
 
-**为什么 profile 更接近真实环境**：主流风控（Akamai / DataDome / PerimeterX / Cloudflare）用 **localStorage + IndexedDB 组合**生成持久设备标识。同一份 cookie 出现在「IndexedDB 为空的新 context」上，会被判定为「cookie 被复制 / 异地使用」→ 风险分上升 → 验证码变多。仓库自己的代码也已承认这一点（`runtime_session.py:702-704`：profile 模式下刻意不覆盖 UA / locale / 时区，让 Chromium 复用 profile 原生环境）。
+**为什么 profile 更接近真实环境**：主流风控（Akamai / DataDome / PerimeterX / Cloudflare）用 **localStorage + IndexedDB 组合**生成持久设备标识。同一份 cookie 出现在「IndexedDB 为空的新 context」上，会被判定为「cookie 被复制 / 异地使用」→ 风险分上升 → 验证码变多。⇒ profile 模式必须**挂载 profile**（保住 localStorage / IndexedDB / cookie），不能用一份 storage_state 快照冒充。
+
+⚠️ 但这**不等于**「可以沿用宿主机原生环境」：宿主机原生环境意味着所有账号共享同一个 `machine_id`、同一套 UA / 字体 / GPU ⇒ 平台一眼看出同机多账号。**设备侧的隔离由 R8 的「账号设备画像」承担**，不是由「不注入」承担。
 
 **平台与路径**：
 
@@ -122,13 +126,73 @@ Chromium 的 cookie / localStorage 写入 profile 是**异步刷盘**的，发�
 - 采集结束、巡店窗口关闭，必须**正常关闭 context / 浏览器**，不能 `kill` 进程；
 - 异常退出后 profile 可能停留在旧状态 → 表现为"登录了但没记住"，重跑一次即可自愈。
 
-### R8 — 指纹沿用 profile 原生环境
+### R8 — 账号设备画像（账号间**不可关联**）
 
-profile 模式下**不注入** `user_agent` / `locale` / `timezone_id` 等运行时覆盖项，沿用 Chromium 从 profile 读到的原生环境（与 `normalize_persistent_profile_context_options` 现有行为一致）。
+> **2026-11-14 修订**。本节结论从「沿用 profile 原生环境」改为「注入账号设备画像」——
+> 业务目标变了：**不是**让账号看起来像"同一台电脑上的多个店"，
+> 而是**让平台无法把这些账号关联成「同一台电脑 + 同一个出口的账号矩阵」**。
+> 保留的是原 R8 的正确内核：**必须整套自洽**，只改一个字段反而更露馅。
 
-理由：profile 模式下 UA、语言、时区、字体、屏幕、IndexedDB 全部来自同一台"电脑"，**内部自洽**；强行注入反而会让 UA 与 Accept-Language / 时区对不上，比原生更露馅。
+**业务目标**：电商平台靠「IP + 设备指纹」关联账号矩阵。我们要做到：
 
-**推论**：顺序采集路径与并行采集路径的指纹行为必须**一致**（都以 profile 原生环境为准）。
+| 信号 | 处置 |
+|---|---|
+| 出口 IP | 每个主账号一个独立出口（见 §5 P1 与 R8.3） |
+| `machine_id` | 每个 profile 一个独立值（见 R8.1） |
+| UA / 屏幕 / 时区 / 语言 | 每个主账号一套**自洽**画像（见 R8.2） |
+| profile 内生标识（`client_id2` / `ablation_seed` / cookie / localStorage） | 天然按 profile 目录隔离 ✅ |
+
+**R8.0 — 画像载体**
+
+`profiles/<平台>/<账号>/.device_profile.json`，与登录态**同生共死**
+（删账号删目录、拷账号拷目录），由 `modules/utils/sessions/account_device_profile.py` 读写。
+
+**R8.1 — 机器标识隔离**
+
+每个 profile 的 `Local State` → `user_experience_metrics.machine_id` 必须**按 account_id
+确定性改写**成独立值。Chromium 的 `machine_id` 来自 Windows MachineGuid ——
+**同一台机器上所有 profile 必然相同** ⇒ 不处理就是告诉平台"这些账号在同一台机器上"。
+
+> 实测（2026-11-14，本机 Windows）：改写后的值被 Chromium **持久接受**
+> （headed / headless 均不会重新生成），因此只写一次、之后不再动。
+
+**R8.2 — 画像三条硬规则**
+
+1. **账号间必须不同**：画像按 account_id **确定性**派生；分配时做**占用校验**，
+   目标槽位已被别的账号占用则顺延 ⇒ 账号变多也不撞车。
+2. **账号内必须稳定**：一次分配**终身不变**，**不随代码版本变**
+   （否则代码升级当天全量账号的设备特征同时改变 ⇒ 平台判定为异常）。
+3. **必须整套自洽**：UA 的操作系统 / 浏览器，必须与 `navigator.platform`、
+   `devicePixelRatio`、locale、时区、Accept-Language **互相匹配**。
+   只改 UA 而不改时区 / 语言 / 平台 = 头身不符，比不伪装更露馅。
+4. **必须与出口一致**：画像的 **OS / locale / 时区**必须与**宿主实际环境**一致
+   （Playwright 路径改不了 `navigator.platform`；浏览器时区 / 语言会被平台与
+   **出口 IP 所在国家**交叉比对）。
+   ⇒ 画像的 OS **只取宿主 OS**；locale / 时区 **只取宿主地区**。
+   账号之间的差异靠 **浏览器 / 版本 / 视口 / `machine_id` / 出口 IP** ——
+   **不靠假装换操作系统或换国家**。
+   地区维度要放开的前提是**每个账号有自己的出口**（R8.4 的代理资源到位）。
+
+**R8.3 — 三条路径同一套设备**
+
+人工巡店 / 顺序采集 / 并行采集必须使用**同一份**画像 ⇒ 同一账号在平台侧是同一台设备。
+
+| 路径 | 注入方式 | 注意 |
+|---|---|---|
+| 人工巡店 | 裸 Chromium + CDP `Emulation.*` | **必须在首次导航之前**注入，否则首个请求已带旧 UA 发出 |
+| 顺序采集 | `launch_persistent_context` 的 context 参数 | 画像缺失 ⇒ 沿用 profile 原生环境，不注入任何覆盖项 |
+| 并行采集 | `browser.new_context` 的 context 参数 | 并行路径**不挂载 profile** ⇒ 拿不到原生环境，**必须**显式注入画像；画像缺失**必须告警**，不得静默 |
+
+**R8.4 — 出口同源**
+
+代理权威位在**主账号** `core.main_accounts.extra_config['proxy']`（店铺级仅作回退）。
+人工巡店与采集必须用**同一个来源** —— 登录时 IP 与采集时 IP 不一致，
+平台立刻判定「环境突变」，**比没有隔离更糟**。
+
+**已下线**：旧的「注入人造指纹」机制（`data/device_fingerprints/**`）在 profile 模式下
+不再使用（池子小：UA 20 × 屏幕 12 ⇒ 组合上限 60，实测已有账号撞车；
+且注入的 UA 与 profile 内生标识头身不符）。它**仅**保留给**不挂载 profile** 的路径
+（录制 / 组件录制 / `PersistentBrowserManager`）。
 
 ---
 
@@ -288,7 +352,7 @@ R5 的内存快照由 profile context 派生，而 profile context 用的就是�
 | E. `data/sessions/` | 不再产生新的会话文件；目录可整体删除 |
 | F. 账号级串行 | 同一 `main_account_id` 的两个任务不重叠（跨进程也成立） |
 | G. IP 隔离 | 账号 A 的任务出站 IP = 账号 A 配置的代理；账号 B 不同；登录与使用同 IP |
-| H. 指纹一致 | 顺序与并行路径的 UA / locale / 时区都来自 profile 原生环境，不再被运行时注入覆盖 |
+| H. 设备画像一致 | 人工巡店 / 顺序采集 / 并行采集三处的 UA / locale / 时区 / 视口**完全相同**（同一份账号设备画像）；且**各账号之间**画像互不相同、`machine_id` 互不相同 |
 | I. 异常退出 | 强杀浏览器后重跑，登录态自愈（Chromium 重新拿 cookie） |
 
 ### 10.1 验收实测记录（2026-11-03，main `180b2f6c`，本机 Windows）

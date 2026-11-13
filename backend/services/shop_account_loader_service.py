@@ -61,9 +61,16 @@ class ShopAccountLoaderService:
             identity_from_shop_account_row(shop_account)
         )
         # 账号级代理：与 AccountLoaderService 共用同一套解析规则（单一来源），
-        # 数据来自 core.shop_accounts.extra_config["proxy"]（不加列、不写迁移）。
+        # 数据来自 core.main_accounts.extra_config["proxy"]（主账号级，权威位，
+        # 不加列、不写迁移）；店铺级 core.shop_accounts.extra_config["proxy"] 仅作回退。
         # getattr 兜底与本方法里 email/phone 的写法一致：字段缺失时按"没配代理"处理。
-        proxy = extract_proxy_config(getattr(shop_account, "extra_config", None))
+        #
+        # 主账号级优先（2026-11-14）：出口绑在**登录身份**上 —— 一个登录身份 = 一个设备
+        # = 一个出口。店铺级仅作回退（历史数据仍在店铺侧）。
+        # 巡店与采集必须用同一个来源：登录时 IP 与采集时 IP 不一致会被判定环境突变。
+        proxy = extract_proxy_config(getattr(main_account, "extra_config", None))
+        if not proxy.get("proxy_enabled"):
+            proxy = extract_proxy_config(getattr(shop_account, "extra_config", None))
         compat_account = {
             "account_id": shop_account.shop_account_id,
             "main_account_id": main_account.main_account_id,

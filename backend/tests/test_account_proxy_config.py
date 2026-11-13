@@ -1,11 +1,20 @@
 """账号级代理配置解析契约。
 
-代理配置存在 ``core.shop_accounts.extra_config["proxy"]``（不加列、不写迁移），
+代理配置的**权威位**在 ``core.main_accounts.extra_config["proxy"]``（主账号级），
+``core.shop_accounts.extra_config["proxy"]``（店铺级）仅作**回退**（历史数据仍在店铺侧）。
+
+为什么是主账号级
+----------------
+业务上是「一个登录身份 = 一个设备 = 一个出口」。IP 隔离的目的就是让平台无法把这些
+账号关联成「同一个出口的账号矩阵」⇒ 出口必须绑在**登录身份**上，而不是绑在某一个店上。
+
+巡店与采集**必须用同一个来源** —— 登录时 IP 与采集时 IP 不一致，平台立刻判定「环境突变」。
+
 解析规则集中在 ``backend/services/account_proxy_config.py``：
 AccountLoaderService 与 ShopAccountLoaderService 共用同一套规则，
 测试直接打在这套共享纯函数上。
 
-规范：docs/guides/COLLECTION_SESSION_LIFECYCLE.md P1~P4
+规范：docs/guides/COLLECTION_SESSION_LIFECYCLE.md P1~P4 与 R8.4
 """
 
 from types import SimpleNamespace
@@ -53,7 +62,7 @@ def _make_service() -> AccountLoaderService:
     return service
 
 
-def _make_main_account() -> SimpleNamespace:
+def _make_main_account(extra_config=None) -> SimpleNamespace:
     return SimpleNamespace(
         id=1,
         platform="shopee",
@@ -65,6 +74,7 @@ def _make_main_account() -> SimpleNamespace:
         phone="",
         enabled=True,
         notes="",
+        extra_config=extra_config,
     )
 
 
@@ -107,6 +117,64 @@ def test_account_loader_exposes_proxy_config():
     assert account["proxy_enabled"] is True
     assert account["proxy_server"] == "http://10.0.0.9:8080"
     assert account["proxy_region"] == "sg"
+
+
+def test_main_account_level_proxy_is_used():
+    """R8.4：代理权威位在**主账号**级 —— 出口绑在登录身份上。"""
+    service = _make_service()
+
+    account = service._build_account_dict(
+        _make_main_account(
+            {
+                "proxy": {
+                    "enabled": True,
+                    "server": "http://10.0.0.1:8080",
+                    "region": "sg",
+                }
+            }
+        ),
+        _make_shop_account(None),
+        {"orders": True},
+    )
+
+    assert account is not None
+    assert account["proxy_enabled"] is True
+    assert account["proxy_server"] == "http://10.0.0.1:8080"
+    assert account["proxy_region"] == "sg"
+
+
+def test_main_account_level_proxy_takes_priority_over_shop_level():
+    """两级都配了 ⇒ **主账号级赢**（一个登录身份只能有一个出口）。"""
+    service = _make_service()
+
+    account = service._build_account_dict(
+        _make_main_account(
+            {"proxy": {"enabled": True, "server": "http://10.0.0.1:8080"}}
+        ),
+        _make_shop_account(
+            {"proxy": {"enabled": True, "server": "http://10.0.0.9:8080"}}
+        ),
+        {"orders": True},
+    )
+
+    assert account is not None
+    assert account["proxy_server"] == "http://10.0.0.1:8080"
+
+
+def test_shop_level_proxy_is_used_as_fallback():
+    """主账号级没配 ⇒ 回退到店铺级（历史数据仍在店铺侧）。"""
+    service = _make_service()
+
+    account = service._build_account_dict(
+        _make_main_account(None),
+        _make_shop_account(
+            {"proxy": {"enabled": True, "server": "http://10.0.0.9:8080"}}
+        ),
+        {"orders": True},
+    )
+
+    assert account is not None
+    assert account["proxy_server"] == "http://10.0.0.9:8080"
 
 
 def test_account_loader_tolerates_missing_proxy_config():

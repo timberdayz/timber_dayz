@@ -160,6 +160,75 @@
       margin: 12px 0 14px;
     }
 
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .badge {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      background: #f3f5f0;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .badge.ok {
+      background: var(--soft);
+      border-color: #b9d6c4;
+      color: var(--accent);
+    }
+
+    .badge.warn {
+      background: var(--warn);
+      border-color: #e8d5a8;
+      color: #8a6a12;
+    }
+
+    .badge.detail {
+      background: #fff;
+      font-weight: 600;
+    }
+
+    .skipped {
+      margin-top: 20px;
+      border: 1px solid #e8d5a8;
+      background: var(--warn);
+      border-radius: 8px;
+      padding: 14px 16px;
+      color: #5f4d1e;
+    }
+
+    .skipped h2 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .skipped ul {
+      margin: 0;
+      padding-left: 20px;
+      display: grid;
+      gap: 5px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .skipped[hidden] {
+      display: none;
+    }
+
+    .autorefresh {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: right;
+    }
+
     code {
       color: var(--ink);
       background: #f3f5f0;
@@ -199,7 +268,10 @@
         <h1>PWCLI 本地巡店面板</h1>
         <p class="subtitle">通过按钮打开账号浏览器，人工登录并巡店后直接关闭浏览器即可；登录态由浏览器 profile 自动保存。本页面只连接本机服务，不会自动点击页面、关闭弹窗或处理验证码。</p>
       </div>
-      <button id="refreshButton" class="secondary">刷新账号</button>
+      <div>
+        <button id="refreshButton" class="secondary">刷新账号</button>
+        <div id="autoRefreshLabel" class="autorefresh">正在加载…</div>
+      </div>
     </header>
 
     <section class="toolbar" aria-label="账号筛选">
@@ -221,6 +293,12 @@
 
     <section class="notice">
       打开账号浏览器后人工登录并巡店；登录完成后直接关闭浏览器窗口，登录态会由浏览器 profile 自动保存。如果停留在登录页、验证码页、报错页或异常页，请点击“跳过”。
+      卡片上的徽标显示该账号的<b>就绪状态</b>：是否已人工首登、设备画像是否已分配、machine_id 是否已与其它账号隔离、是否已配出口 IP（页面每 <span id="pollSeconds">15</span> 秒自动刷新一次）。
+    </section>
+
+    <section id="skippedSection" class="skipped" hidden>
+      <h2>以下账号未出现在巡店面板</h2>
+      <ul id="skippedList"></ul>
     </section>
 
     <section id="accountGrid" class="grid" aria-live="polite"></section>
@@ -230,13 +308,27 @@
   <script>
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token') || '';
+    // 自动刷新间隔（毫秒）。就绪状态会随「人工首登 / 巡店分配画像」变化，
+    // 静态页面不刷新就永远看不到 —— 所以定时拉一次。
+    const POLL_INTERVAL_MS = 15000;
     let accounts = [];
+    // key = `${platform}::${account_id}`
+    let readinessMap = new Map();
+    let skippedAccounts = [];
+    let pollTimer = null;
 
     const platformFilter = document.querySelector('#platformFilter');
     const searchInput = document.querySelector('#searchInput');
     const accountGrid = document.querySelector('#accountGrid');
     const countLabel = document.querySelector('#countLabel');
     const log = document.querySelector('#log');
+    const autoRefreshLabel = document.querySelector('#autoRefreshLabel');
+    const skippedSection = document.querySelector('#skippedSection');
+    const skippedList = document.querySelector('#skippedList');
+
+    function accountKey(platform, accountId) {
+      return `${platform}::${accountId}`;
+    }
 
     function addLog(message) {
       const row = document.createElement('div');
@@ -266,6 +358,55 @@
       });
     }
 
+    function makeBadge(text, variant) {
+      const badge = document.createElement('span');
+      badge.className = variant ? `badge ${variant}` : 'badge';
+      badge.textContent = text;
+      return badge;
+    }
+
+    function renderReadinessBadges(container, account) {
+      const state = readinessMap.get(accountKey(account.platform, account.account_id));
+      if (!state) {
+        container.appendChild(makeBadge('就绪状态未知', 'warn'));
+        return;
+      }
+      container.appendChild(makeBadge(state.logged_in ? '已首登' : '未首登', state.logged_in ? 'ok' : 'warn'));
+      container.appendChild(makeBadge(
+        state.has_device_profile ? '画像已分配' : '画像未分配',
+        state.has_device_profile ? 'ok' : 'warn',
+      ));
+      container.appendChild(makeBadge(
+        state.machine_id_isolated ? 'machine_id 已隔离' : 'machine_id 未隔离',
+        state.machine_id_isolated ? 'ok' : 'warn',
+      ));
+      container.appendChild(makeBadge(
+        state.proxy_enabled ? '出口已配' : '出口未配',
+        state.proxy_enabled ? 'ok' : 'warn',
+      ));
+      if (state.device) {
+        const viewport = state.device.viewport || {};
+        container.appendChild(makeBadge(
+          `${state.device.os}/${state.device.browser} ${viewport.width || '?'}x${viewport.height || '?'}`,
+          'detail',
+        ));
+      }
+    }
+
+    function renderSkipped() {
+      if (!skippedAccounts.length) {
+        skippedSection.hidden = true;
+        return;
+      }
+      skippedSection.hidden = false;
+      skippedList.innerHTML = '';
+      for (const item of skippedAccounts) {
+        const row = document.createElement('li');
+        row.textContent = `${item.platform} / ${item.display_name}（${item.account_id}）—— ${item.reason}`;
+        skippedList.appendChild(row);
+      }
+    }
+
     function render() {
       const visible = filteredAccounts();
       countLabel.textContent = `${visible.length} 个账号`;
@@ -284,6 +425,7 @@
           <div class="meta">
             <div>AccountId <code></code></div>
             <div>WorkTag <code></code></div>
+            <div class="badges"></div>
           </div>
           <div class="actions">
             <button class="open">打开巡店</button>
@@ -294,16 +436,32 @@
         const codeNodes = card.querySelectorAll('code');
         codeNodes[0].textContent = account.account_id;
         codeNodes[1].textContent = account.work_tag;
+        renderReadinessBadges(card.querySelector('.badges'), account);
         card.querySelector('.open').addEventListener('click', () => runAction('open', account));
         card.querySelector('.skip').addEventListener('click', () => runAction('skip', account));
         accountGrid.appendChild(card);
       }
+      renderSkipped();
+    }
+
+    async function loadReadiness() {
+      const payload = await api('/api/accounts/readiness');
+      readinessMap = new Map();
+      for (const item of payload.accounts || []) {
+        readinessMap.set(accountKey(item.platform, item.account_id), item);
+      }
+      skippedAccounts = payload.skipped || [];
+      autoRefreshLabel.textContent = `上次刷新 ${new Date().toLocaleTimeString()}（每 ${Math.round(POLL_INTERVAL_MS / 1000)} 秒自动刷新）`;
     }
 
     async function loadAccounts() {
       accounts = await api('/api/accounts');
+    }
+
+    async function refreshAll({ logMessage } = {}) {
+      await Promise.all([loadAccounts(), loadReadiness()]);
       render();
-      addLog('账号列表已刷新');
+      if (logMessage) addLog(logMessage);
     }
 
     async function runAction(action, account) {
@@ -316,15 +474,27 @@
         if (index >= 0) accounts[index] = result;
         render();
         addLog(`${account.display_name} ${action} -> ${result.status}` + (result.message ? `\n${result.message}` : ''));
+        // 巡店会分配设备画像 / 隔离 machine_id ⇒ 动作后立刻刷一次就绪状态
+        loadReadiness().then(render).catch((error) => addLog(error.message));
       } catch (error) {
         addLog(`${account.display_name} ${action} -> error\n${(error && error.message) || '未知错误'}`);
       }
     }
 
-    document.querySelector('#refreshButton').addEventListener('click', loadAccounts);
+    document.querySelector('#refreshButton').addEventListener('click', () => {
+      refreshAll({ logMessage: '账号列表已刷新' }).catch((error) => addLog(error.message));
+    });
     platformFilter.addEventListener('change', render);
     searchInput.addEventListener('input', render);
-    loadAccounts().catch((error) => addLog(error.message));
+
+    refreshAll({ logMessage: '账号列表已刷新' })
+      .then(() => {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(() => {
+          refreshAll().catch((error) => addLog(`自动刷新失败: ${error.message}`));
+        }, POLL_INTERVAL_MS);
+      })
+      .catch((error) => addLog(error.message));
   </script>
 </body>
 </html>

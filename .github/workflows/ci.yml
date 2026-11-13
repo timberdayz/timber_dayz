@@ -290,6 +290,31 @@ jobs:
           #     已收敛为「一个会话级容器 + 每用例一个独立 database」（CREATE DATABASE
           #     实测 0.063 秒）。⇒ 容器唯一真源在 conftest；守护把它锁住。
           #
+          # 2026-11-13 第七轮扩：补 1 个账号设备画像契约文件（纯源码，不碰数据库）：
+          #   test_account_device_isolation_contract.py —— 账号间**不可关联**的设备身份契约
+          #     （画像按 account_id 确定性派生、账号间不同/账号内稳定、整套自洽；
+          #       machine_id 按账号隔离；注入项走白名单；巡店/采集/并行三条路径同源；
+          #       规范文档口径与代码一致）
+          # 为什么要补：这个守护此前**根本不在 CI 里跑** ⇒ 「账号间不可关联」这条
+          #   业务底线只写在代码里，任何一次改动都能悄悄把它改坏而流水线照样全绿。
+          #   典型的「流水线绿 ≠ 验收」。
+          #
+          # 2026-11-13 第八轮扩：补 1 个账号就绪状态契约文件（纯源码，不碰数据库）：
+          #   test_account_readiness_contract.py —— 巡店就绪状态的**判据唯一**与**可见性**
+          #     （登录态判据在采集侧 / CLI 体检 / 巡店面板三处同源；
+          #       machine_id 隔离可判；被白名单排除的账号必须显式列出并带原因；
+          #       前端必须轮询并渲染就绪徽标）
+          # 为什么要补：巡店面板此前对「为什么这个账号不出现」「这个账号登录过没有」
+          #   **零提示** —— 运维只能靠猜。加了提示就得保证提示不会骗人：
+          #   三处判定必须是同一份实现，否则会出现「面板说已首登、采集说没登录」。
+          #
+          # 2026-11-13 第九轮扩：补 1 个账号级代理契约文件（纯源码，不碰数据库）：
+          #   test_account_proxy_config.py —— 代理**权威位在主账号级**、店铺级仅回退
+          #     （出口绑在登录身份上 ⇒ 一个登录身份只有一个出口 ⇒ 平台无法把账号
+          #       关联成「同一个出口的账号矩阵」；巡店与采集必须用同一个来源）
+          # 为什么要补：代理权威位刚上移到主账号级（v7.27.0），**此前没有任何用例
+          #   覆盖这个优先级** ⇒ 有人把它改回店铺级，流水线照样全绿。
+          #
           # 2026-11-10 第三轮扩：又补进 30 个文件。怎么确认它们不碰数据库的 ——
           # 把 TEST_DB_PORT 指向不可达端口 1、同时把 DATABASE_URL 指向不可达地址
           # （db_test_config 走前者、迁移器走后者）⇒ 任何真连库的行为都会立刻失败。
@@ -352,7 +377,10 @@ jobs:
             tests/test_verify_cloud_sync_local.py \
             tests/test_verify_release_local.py \
             tests/test_verify_release_tag_generation.py \
-            tests/test_verify_remote_deploy_contracts.py
+            tests/test_verify_remote_deploy_contracts.py \
+            tests/test_account_device_isolation_contract.py \
+            tests/test_account_readiness_contract.py \
+            backend/tests/test_account_proxy_config.py
 
       - name: Run performance regression entry
         if: matrix.python-version == '3.11'

@@ -28,8 +28,10 @@ from backend.services.main_account_session_lock import (
     MainAccountSessionLockUnavailableError,
 )
 from scripts.pwcli_account_inventory import (
+    INSPECTION_PLATFORMS,
     account_proxy_config,
     build_inspection_accounts,
+    build_skipped_account_details,
     load_accounts,
     quote_ps,
 )
@@ -149,6 +151,53 @@ class PanelState:
             key = (account["platform"], account["account_id"])
             result.append({**account, "status": self.statuses.get(key, "idle")})
         return result
+
+    def readiness(self) -> dict[str, Any]:
+        """账号就绪状态（**只读**）。
+
+        给面板回答三个问题：
+
+        1. 这个账号**人工首登过**吗？（profile 里有没有 Chromium cookie 库）
+        2. 它的**设备身份隔离**到位吗？（设备画像 / machine_id）
+        3. 它的**出口 IP** 配了吗？（巡店与采集必须同源）
+
+        判据真源在 ``modules/utils/sessions/account_readiness.py`` ——
+        与 CLI 体检脚本 ``scripts/check_account_readiness.py``、采集侧
+        ``runtime_profile_exists`` 共用同一份 ⇒ 三处不会各说各话。
+
+        ⚠️ **不含任何凭据**（响应会进浏览器 DOM）。
+        """
+        from modules.utils.sessions.account_readiness import build_account_readiness
+
+        rows = self.account_rows_loader()
+        accounts, _skipped = build_inspection_accounts(rows)
+
+        proxy_by_key: dict[tuple[str, str], bool] = {}
+        for row in rows:
+            proxy_by_key[(str(row.platform), str(row.main_account_id))] = bool(
+                getattr(row, "proxy_enabled", False)
+                and str(getattr(row, "proxy_server", "") or "").strip()
+            )
+
+        profiles_root = self.repo_root / "profiles"
+        readiness_rows: list[dict[str, Any]] = []
+        for account in accounts:
+            key = (account["platform"], account["account_id"])
+            readiness_rows.append(
+                build_account_readiness(
+                    account["platform"],
+                    account["account_id"],
+                    profiles_root=profiles_root,
+                    proxy_enabled=proxy_by_key.get(key, False),
+                    display_name=account["display_name"],
+                )
+            )
+
+        return {
+            "accounts": readiness_rows,
+            "skipped": build_skipped_account_details(rows),
+            "inspection_platforms": list(INSPECTION_PLATFORMS),
+        }
 
     def find_account(self, platform: str, account_id: str) -> dict[str, Any]:
         for account in self.accounts():
@@ -351,6 +400,16 @@ def build_app(state: PanelState) -> FastAPI:
     @app.get("/api/accounts", dependencies=[Depends(require_token)])
     def accounts() -> list[dict[str, Any]]:
         return state.accounts()
+
+    @app.get("/api/accounts/readiness", dependencies=[Depends(require_token)])
+    def accounts_readiness() -> dict[str, Any]:
+        """账号就绪状态（只读）：首登 / 设备画像 / machine_id 隔离 / 出口 IP。
+
+        与 ``/api/accounts`` **分开**：账号清单的响应形状是既有契约
+        （``tests/test_pwcli_inspection_panel.py`` 逐字段断言），
+        就绪信息走独立端点，不污染那份契约。
+        """
+        return state.readiness()
 
     async def run_action(action: str, request: AccountRequest) -> dict[str, Any]:
         account = state.find_account(request.platform, request.account_id)
