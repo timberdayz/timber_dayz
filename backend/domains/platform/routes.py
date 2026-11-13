@@ -25,6 +25,20 @@ from backend.domains.collection.routers import (
 
 
 def register_platform_routes(app) -> None:
+    # ⚠️ 下面这 5 组账号类 router 是它们的**唯一挂载点**（2026-11-13，批次 C1）。
+    #
+    #   它们虽住在 ``backend/domains/collection/routers/`` 目录下，
+    #   但业务上属于**平台运营主数据**（路径都在 ``/api/`` 下，tags 也是
+    #   「主账号管理」「店铺账号管理」「店铺别名管理」「平台店铺ID发现」
+    #   「仓名别名管理」），归 platform 域。
+    #
+    #   为什么唯一挂载点必须是这边：``backend/app/runtime.py`` 的
+    #   ``register_mode_routes`` 里，common（含 platform）**所有模式都注册**，
+    #   而 **production 模式不注册 collection 域** ⇒
+    #   账号类接口在生产上只由 platform 提供 ⇒ 不能反过来从这边删。
+    #
+    #   守护用例：``backend/tests/test_router_unique_mount_points.py``
+    #   （按运行模式逐个断言没有重复的 (路径, 方法) 注册）。
     app.include_router(system_monitoring.router, prefix="/api", tags=["系统监控"])
     app.include_router(auth.router, prefix="/api", tags=["认证管理"])
     app.include_router(users.router, prefix="/api", tags=["用户管理"])
