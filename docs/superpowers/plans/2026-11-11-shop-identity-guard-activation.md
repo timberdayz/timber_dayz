@@ -116,6 +116,13 @@
 > ⚠️ 实现约束：仓库 42 个 `.ps1` **全部无 BOM**，而 PowerShell 5.1 读无 BOM 脚本时
 > 用系统 ANSI 代码页解码 ⇒ 中文注释会被误解码，甚至**破坏语法**。
 > ⇒ 看门狗脚本**刻意保持纯 ASCII**（注释与输出都是英文），这是本仓库 `.ps1` 的安全写法。
+>
+> **守护**：`tests/test_ps_env_file_encoding_contract.py`
+> （`.ps1` 无 BOM + 看门狗纯 ASCII + 两处 `Import-EnvFile` 显式 UTF8 且写法同步），
+> 2026-11-13 起进入 CI 根契约清单。
+> ⇒ 「无 BOM + 纯 ASCII」是这一对约定，**不要**改用"补 BOM 走 UTF-8 分支"：
+> 那会让 27 个 `.ps1` 出现两种约定，且 `Import-EnvFile` 读 env 文件时
+> 仍按无 BOM UTF-8 解析，两套编码规则混用更容易出事。
 
 ### 已注册的计划任务
 

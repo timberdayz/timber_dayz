@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Watchdog for the cloud-sync SSH tunnel - keeps "is the tunnel still up?"
     a machine-checked fact instead of something a human has to remember.
@@ -12,7 +12,7 @@
 
     The account, the key, the defaults, and the read-only production
     verification commands are defined in docs/guides/SSH_ACCESS.md (SSOT).
-    ⚠️ `deploy@` is the ONLY interactive production identity; `root@` belongs
+    NOTE: `deploy@` is the ONLY interactive production identity; `root@` belongs
        to the deployment pipeline and its key is intentionally absent locally.
        A `root@` failure is NOT evidence that this machine has no key.
 

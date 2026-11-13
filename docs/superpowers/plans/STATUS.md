@@ -1361,6 +1361,52 @@ F 真静默（不记、不抛、不返回、不跳过）: 47   ← 需要人看
 
 
 
+## 本地同步云端 v7.26.0 + 双镜像一致性收尾（2026-11-13）
+
+> 云端已推 `v7.26.0`（「模板治理闭环」）；本地原为纯落后 4 个提交、0 领先（无分叉）。
+
+| 项 | 值 |
+|---|---|
+| 本地 `main` | 快进到 `1083427d`（= `origin/main`），`VERSION` = `v7.26.0` |
+| CNB 收尾 | `main` 由 `d908fa96` 快进到 `1083427d`；补 tag `v7.26.0`（**同一已存在对象** `009a2867`，未重建） |
+| 双镜像核对（`git ls-remote`） | GitHub 与 CNB 的 `main` / `v7.25.0` / `v7.26.0` **全部同 SHA 同对象** |
+| `sync_main_mirrors.ps1 -Sync` | `XIHONG_GIT_MIRROR_SYNCED=1083427d`（此前因两镜像 SHA 不等被 fail-closed 拦下，收尾后守卫通过） |
+| 部署是否被触发 | **否** —— 仓库无 `.cnb.yml`，推 CNB tag 为惰性操作；GitHub 侧部署 run 仍是 `43402306171`（v7.26.0 那次） |
+| 生产只读核对 | `/api/healthz/ready` → HTTP 200，`version=v7.26.0`，`database=connected`，`dashboard=ready` |
+
+### 本地回归（v7.26.0 代码）
+
+| 范围 | 结果 |
+|---|---|
+| 后端全量 `backend/tests` | **4594 passed / 7 skipped / 0 failed** |
+| 前端 `frontend/tests` | **207 passed / 0 failed** |
+| 根 `tests/` | 初次 **5 failed / 793 passed / 5 skipped** ⇒ 定性后全部归零（见批次 D） |
+| CI 三线（`1083427d`） | Validate Data Flow ✓ / CI Pipeline ✓ / Docker Build and Push ✓ |
+
+## 批次 D：`.ps1` 编码约定被 v7.25.0 / v7.26.0 两批打破（2026-11-13）
+
+**根因（读代码得出，不是猜）**：
+
+- `scripts/watch_cloud_sync_tunnel.ps1` 在 `05a359a1`（v7.26.0 发版提交）被**补了 UTF-8 BOM**，
+  理由写的是「仓库既有用例全带 BOM」—— **与事实相反**：实测 27 个受跟踪 `.ps1` 里 **26 个无 BOM**；
+- 真正的源头是 `e2103f46`（v7.25.0）给它加了一个 `⚠️`（非 ASCII），
+  而 2026-11-11 方案明写「看门狗脚本**刻意保持纯 ASCII**」⇒ v7.26.0 用「补 BOM」去兜，
+  变成**双重违约**（既非纯 ASCII，又破了「.ps1 全部无 BOM」）；
+- **CI 为什么全绿**：`tests/test_ps_env_file_encoding_contract.py` **根本不在 CI 的根契约清单里**
+  ⇒ 这份守护从未在 CI 上跑过 ⇒ 典型的「流水线绿 ≠ 验收」。
+
+**处置**：
+
+| 项 | 值 |
+|---|---|
+| 脚本修复 | 去 BOM；`⚠️` → `NOTE:`（信息不丢，SSH 访问真源的引用保留） |
+| 守护补强 | 新增 `test_watchdog_script_is_pure_ascii`；原有「.ps1 无 BOM」用例已覆盖 BOM 回归 |
+| **红侧已验** | 修复前两条守护**都红**：BOM 用例红 + 纯 ASCII 用例红（抓到 `0x8f/0x9a/0xa0/0xb8/0xbb/0xbf/0xe2/0xef`） |
+| CI 纳管 | `tests/test_ps_env_file_encoding_contract.py` 进 CI 根契约清单（CI 口径下 8 passed，不碰数据库） |
+| 书面真源 | `docs/superpowers/plans/2026-11-11-shop-identity-guard-activation.md` 补上守护指向与「不要改用补 BOM」的理由 |
+| 另一类失败（非缺陷） | 4 条 `test_executor_v2` 失败 = **本地库缺 v7.26.0 那一级迁移**（`current_schema_20261228_...` → `20261229_template_format_signature`）⇒ 跑 `scripts/run_current_schema_migrations.py` 后 27 passed |
+
+
 - The completion state above reflects the work merged into `main` (latest closure commit around 2026-05-06).
 - Parallel/specialized tracks should keep their own plan documents and be referenced from here when they are merged.
 
