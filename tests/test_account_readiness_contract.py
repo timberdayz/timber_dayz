@@ -2,19 +2,22 @@
 
 守的是三条线：
 
-1. **判据唯一**：「有没有人工首登」「machine_id 隔没隔离」这些判定，
-   在采集侧、CLI 体检脚本、巡店面板三处**必须是同一份** ——
-   否则会出现「面板说已首登、采集说没登录」这种最难查的漂移。
+1. **判据唯一**：「有没有人工首登」这个判定，在采集侧、CLI 体检脚本、
+   巡店面板三处**必须是同一份** —— 否则会出现「面板说已首登、采集说没登录」
+   这种最难查的漂移。
 2. **巡店面板必须能看见问题**：被白名单排除的账号要**显式列出并写明原因**，
    就绪状态要能查到；不能继续静默跳过。
 3. **前端必须轮询**：就绪状态会随人工首登变化，静态页面不刷新就永远看不到。
 
-依据：``docs/guides/COLLECTION_SESSION_LIFECYCLE.md``（R8 及其设备画像小节）。
+另外锁一条**减法**守护：就绪状态里**不得**再出现「设备画像 / machine_id 隔离」
+这类判据（2026-11-14 方向修订：平台读不到 machine_id，硬件指纹同型号机器
+大量重复 ⇒ 检查它们没有意义，只会让面板显示"没隔离 = 有风险"的假警报）。
+
+依据：``docs/guides/COLLECTION_SESSION_LIFECYCLE.md``（R8）。
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -78,26 +81,20 @@ def test_profile_contains_state_only_accepts_cookie_store(tmp_path: Path) -> Non
     assert profile_contains_state(tmp_path / "missing") is False
 
 
-def test_build_profile_state_detects_machine_id_isolation(tmp_path: Path) -> None:
-    """machine_id 未隔离 ⇒ 仍与同机其它账号共享 ⇒ 平台一眼关联。"""
-    from modules.utils.sessions.account_device_profile import derive_machine_id
+def test_build_profile_state_only_reports_login_state() -> None:
+    """就绪快照只剩「有没有首登」，不再有画像 / machine_id 判据。
 
-    profile_dir = tmp_path / "shopee" / "acc"
-    profile_dir.mkdir(parents=True)
+    为什么锁这一条：平台读不到 ``machine_id``，硬件指纹在同型号机器上大量重复
+    ⇒ 检查它们既没有意义，又会在面板上显示成"没隔离 = 有风险"的假警报。
+    """
+    profile_dir = Path("unused-but-must-not-be-read")
+    state = build_profile_state(profile_dir)
 
-    shared = build_profile_state(profile_dir, platform="shopee", account_id="acc")
-    assert shared["machine_id_isolated"] is False
-    assert shared["expected_machine_id"] == derive_machine_id("shopee", "acc")
-
-    (profile_dir / "Local State").write_text(
-        json.dumps(
-            {"user_experience_metrics": {"machine_id": shared["expected_machine_id"]}}
-        ),
-        encoding="utf-8",
-    )
-    isolated = build_profile_state(profile_dir, platform="shopee", account_id="acc")
-    assert isolated["machine_id_isolated"] is True
-    assert isolated["machine_id"] == shared["expected_machine_id"]
+    assert set(state.keys()) == {"profile_exists", "logged_in"}
+    assert "machine_id" not in state
+    assert "machine_id_isolated" not in state
+    assert "has_device_profile" not in state
+    assert "device" not in state
 
 
 def test_build_account_readiness_uses_session_manager_naming_rule(
@@ -191,8 +188,6 @@ def test_readiness_endpoint_reports_account_state_and_skipped_accounts(
     assert accounts[0]["platform"] == "shopee"
     assert accounts[0]["account_id"] == "hongxikeji:main"
     assert accounts[0]["logged_in"] is False
-    assert accounts[0]["has_device_profile"] is False
-    assert accounts[0]["machine_id_isolated"] is False
     assert accounts[0]["proxy_enabled"] is False
 
     skipped = payload["skipped"]
@@ -270,10 +265,37 @@ def test_panel_html_polls_readiness_and_renders_badges() -> None:
     assert "/api/accounts/readiness" in text, "前端未拉取就绪状态"
     assert "setInterval" in text, "前端未做定时刷新"
     assert "POLL_INTERVAL_MS" in text
-    assert "machine_id_isolated" in text, "前端未渲染 machine_id 隔离状态"
-    assert "has_device_profile" in text, "前端未渲染设备画像状态"
     assert "logged_in" in text, "前端未渲染首登状态"
     assert "proxy_enabled" in text, "前端未渲染出口 IP 状态"
+
+
+def test_panel_html_does_not_render_removed_fingerprint_badges() -> None:
+    """**减法守护**：前端不得再渲染画像 / machine_id 徽标。
+
+    这类徽标会让运维误以为"没隔离 = 有风险"，而实际上平台根本读不到
+    ``machine_id``，同型号机器的硬件指纹本来就大量重复 ⇒ 显示它只会制造假警报。
+    """
+    text = PANEL_HTML.read_text(encoding="utf-8")
+
+    assert "machine_id_isolated" not in text
+    assert "has_device_profile" not in text
+    assert "state.device" not in text
+
+
+def test_panel_status_is_reset_when_browser_exits() -> None:
+    """**关掉窗口就必须不再显示 OPEN**。
+
+    真实状态由**浏览器进程**决定，不是内存里那句话。此前 watcher 检测到
+    进程消失只放锁、不改 status ⇒ 面板永远显示 OPEN。
+    """
+    source = (REPO_ROOT / "scripts" / "pwcli_inspection_panel.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'self.statuses[key] = "idle"' in source
+    watcher_at = source.index("async def _watch_browser_process")
+    reset_at = source.index('self.statuses[key] = "idle"', watcher_at)
+    assert reset_at > watcher_at, "状态回写必须发生在浏览器进程监控里"
 
 
 def test_panel_html_renders_skipped_accounts() -> None:

@@ -6210,17 +6210,18 @@ class CollectionExecutorV2:
             return cleaned[:120]
 
         # 并行扇出走 ``browser.new_context(storage_state=内存快照)`` ⇒ **不挂载 profile**，
-        # 拿不到 profile 原生环境（R5 与「沿用原生」在这里天然冲突）。
-        # 因此设备身份由**账号设备画像**显式提供 —— 与顺序路径**同一套**，
-        # 保证同一账号在「人工巡店 / 顺序采集 / 并行采集」三处呈现为同一台设备。
+        # 拿不到 profile 原生环境 ⇒ 显式注入「与出口自洽」的环境参数：
+        #   ① UA 去掉 ``HeadlessChrome``（headless 不改会被一眼认出自动化）；
+        #   ② locale / 时区 / Accept-Language 只在**明确给出出口国家**时注入
+        #      （现在出口 = 宿主 ⇒ 浏览器原生语言 / 时区已经与出口一致，不重复覆盖）。
+        # 视口统一用标准视口 ⇒ 与顺序路径一致，且**不做账号间差异化**
+        # （屏幕尺寸是宿主级事实，差异化会造出「分布外」的异常特征）。
         from modules.apps.collection_center.browser_config_helper import (
             get_browser_context_args,
         )
-        from modules.utils.sessions.account_device_profile import (
-            device_context_options,
-            read_device_profile,
+        from modules.utils.sessions.account_browser_identity import (
+            browser_context_options,
         )
-        from modules.utils.sessions.session_manager import SessionManager
 
         domain_context_options: Dict[str, Any] = get_browser_context_args()
         # 代理必须显式带上：``get_browser_context_args()`` 按设计不含 proxy，
@@ -6229,37 +6230,23 @@ class CollectionExecutorV2:
             domain_context_options["proxy"] = proxy
         domain_context_options.setdefault("accept_downloads", True)
 
-        device_payload: Optional[Dict[str, Any]] = None
-        if session_owner_id:
-            try:
-                device_payload = read_device_profile(
-                    SessionManager().get_persistent_profile_path(
-                        platform, session_owner_id
-                    )
-                )
-            except Exception:
-                device_payload = None
-
-        if device_payload:
-            domain_context_options = {
-                **domain_context_options,
-                **device_context_options(device_payload),
-            }
-        else:
-            logger.warning(
-                "PARALLEL_COLLECTION_NO_DEVICE_PROFILE platform=%s account=%s: "
-                "并行路径不挂载 profile，拿不到原生环境；未注入设备画像 ⇒ "
-                "该账号在平台侧会呈现为采集专用环境，与人工巡店环境不一致。"
-                "请先通过巡店面板为该账号人工巡店一次以生成设备画像。",
-                platform,
-                session_owner_id,
+        fanout_headless = bool(
+            self._build_runtime_launch_kwargs(debug_mode=debug_mode).get(
+                "headless", True
             )
-            domain_context_options = (
-                runtime_session.normalize_persistent_profile_context_options(
-                    platform=platform,
-                    context_options=domain_context_options,
-                )
-            )
+        )
+        # 与**顺序路径同一口径**：不叠加 locale / 时区 / Accept-Language 覆盖
+        # （现在出口 = 宿主 ⇒ 浏览器原生语言 / 时区已经与出口一致；且顺序路径
+        #  走 ``normalize_persistent_profile_context_options`` 会剥掉它们）。
+        # ⚠️ 这里**不**复用那个函数 —— 它还会剥 ``permissions``，而并行扇出
+        #   需要保留它（与顺序路径的差别只在这三项）。
+        for key in ("locale", "timezone_id", "extra_http_headers"):
+            domain_context_options.pop(key, None)
+        domain_context_options = {
+            **domain_context_options,
+            **browser_context_options(headless=fanout_headless),
+            "viewport": dict(runtime_session.STANDARD_HEADLESS_VIEWPORT),
+        }
 
         semaphore = asyncio.Semaphore(max(1, int(max_parallel or 1)))
         total_domains = len(data_domains)

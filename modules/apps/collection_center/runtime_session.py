@@ -21,9 +21,9 @@ from modules.apps.collection_center.transition_gates import (
     evaluate_login_ready,
 )
 from modules.core.logger import get_logger
-from modules.utils.sessions.account_device_profile import (
-    device_context_options,
-    read_device_profile,
+from modules.utils.sessions.account_browser_identity import (
+    browser_context_options,
+    region_profile,
 )
 
 logger = get_logger(__name__)
@@ -564,17 +564,16 @@ async def build_runtime_context_options(
 
     为什么 profile 模式要关掉它
     --------------------------
-    profile 模式的设备身份由**账号设备画像**
-    （``modules/utils/sessions/account_device_profile.py``）提供：每个账号一套
-    自洽的 UA / 屏幕 / 时区 / 语言 / Accept-Language，落在 profile 目录内，
-    与登录态同生共死。
+    profile 模式的浏览器环境由**账号浏览器运行环境**
+    （``modules/utils/sessions/account_browser_identity.py``）负责，且**不按账号派生**：
+    只把 UA 里的 ``HeadlessChrome`` 去掉、并让 locale/时区**跟随出口 IP**。
 
     旧的 ``DeviceFingerprintManager`` 是**另一套**人造指纹（``data/device_fingerprints/``），
     池子小（UA 20 / 屏幕 12 ⇒ 组合上限 60）、实测已有账号撞车，且注入的 UA 与
-    profile 内生标识（machine_id / 字体 / GPU）**头身不符** ⇒ 反而更容易被关联。
+    profile 内生标识（字体 / GPU）**头身不符** ⇒ 反而更容易被关联。
 
     非 profile 模式（录制 / 组件录制 / PersistentBrowserManager）**没有 profile 目录**
-    可放画像 ⇒ 仍走旧指纹，保持 ``use_device_fingerprint=True``。
+    可沿用 ⇒ 仍走旧指纹，保持 ``use_device_fingerprint=True``。
     """
     context_options: Dict[str, Any]
     if session_owner_id and use_device_fingerprint:
@@ -613,7 +612,8 @@ async def build_runtime_context_options(
     if str(platform or "").strip().lower() == "tiktok":
         context_options.pop("permissions", None)
     if "locale" not in context_options:
-        context_options["locale"] = "zh-CN"
+        # locale 跟随**出口 IP** 所在地区（现在出口 = 宿主 IP ⇒ 宿主地区）。
+        context_options["locale"] = region_profile()["locale"]
     # Runtime viewport is a shared baseline and should not inherit oversized
     # account-fingerprint viewport values.
     context_options = _apply_runtime_viewport_policy(
@@ -708,20 +708,26 @@ async def open_persistent_runtime_bundle(
         # profile 模式不用旧的人造指纹：设备身份由**账号设备画像**提供。
         use_device_fingerprint=False,
     )
-    # 账号设备画像（账号间不可关联的第一层）。
-    # 画像缺失（账号从未人工巡店过）⇒ 沿用 profile 原生环境，不注入任何覆盖项。
-    device_payload = read_device_profile(profile_path)
-    if device_payload:
-        context_options = {
-            **context_options,
-            **device_context_options(device_payload),
-        }
-    else:
-        context_options = normalize_persistent_profile_context_options(
+    # 浏览器环境：**沿用 profile 原生环境**（剥离 runtime 覆盖），
+    # 只补两样「不露馅」的东西 ——
+    #   ① headless 时 UA 去掉 ``HeadlessChrome``（采集跑 headless，不改会被一眼
+    #      认出自动化）；headful 时浏览器自己的 UA 本来就正常 ⇒ 不碰；
+    #   ② locale / 时区 / Accept-Language **只在明确给出出口国家时**注入
+    #      （现在出口 = 宿主 ⇒ 原生语言 / 时区已经与出口一致，不重复覆盖；
+    #        代理到位后由调用方传入出口国家）。
+    # ⚠️ **不再按账号派生任何指纹**：同型号机器本来就大量撞指纹，主动差异化
+    # 只会造出「分布外」的异常特征，收益接近零（详见
+    # ``modules/utils/sessions/account_browser_identity.py`` 的模块文档）。
+    context_options = {
+        **normalize_persistent_profile_context_options(
             platform=platform,
             context_options=context_options,
             headless=bool((launch_kwargs or {}).get("headless", True)),
-        )
+        ),
+        **browser_context_options(
+            headless=bool((launch_kwargs or {}).get("headless", True))
+        ),
+    }
     launch_options = enforce_official_playwright_browser(dict(launch_kwargs or {}))
     # profile 模式下 proxy 是**浏览器进程级**参数（launch_persistent_context 的 proxy），
     # 与 context 级 proxy 不同义；context_options 里若也带了 proxy，重复传同一个 key

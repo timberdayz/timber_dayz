@@ -112,9 +112,9 @@ async def test_executor_open_runtime_bundle_auto_always_prefers_persistent_profi
     from modules.apps.collection_center import runtime_session as runtime_session_module
 
     # 会话文件体系废除后，顺序路径**没有**会话候选读入口可调。
-    assert not hasattr(runtime_session_module, "load_runtime_session_candidate"), (
-        "顺序路径不得再有会话候选读入口"
-    )
+    assert not hasattr(
+        runtime_session_module, "load_runtime_session_candidate"
+    ), "顺序路径不得再有会话候选读入口"
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
         lambda platform, session_owner_id: True,
@@ -378,7 +378,12 @@ async def test_shared_login_phase_does_not_probe_runtime_gate_before_login_compo
         context=type(
             "Ctx",
             (),
-            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+            {
+                "current_component_index": 0,
+                "completed_domains": [],
+                "failed_domains": [],
+                "collected_files": [],
+            },
         )(),
         browser=object(),
         play_context=object(),
@@ -424,12 +429,20 @@ async def test_shared_login_phase_primes_page_before_login_component(
     await executor._execute_shared_login_phase(
         task_id="task-1",
         platform="shopee",
-        account={"account_id": "acc-1", "login_url": "https://seller.shopee.cn/account/signin"},
+        account={
+            "account_id": "acc-1",
+            "login_url": "https://seller.shopee.cn/account/signin",
+        },
         params={"_runtime_session_mode": "persistent_profile"},
         context=type(
             "Ctx",
             (),
-            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+            {
+                "current_component_index": 0,
+                "completed_domains": [],
+                "failed_domains": [],
+                "collected_files": [],
+            },
         )(),
         browser=object(),
         play_context=object(),
@@ -472,17 +485,30 @@ async def test_shared_login_phase_applies_interaction_viewport_after_login_gate_
         order.append("viewport")
 
     monkeypatch.setattr(executor, "_prime_runtime_page_for_login_gate", _prime)
-    monkeypatch.setattr(executor, "_apply_runtime_interaction_viewport", _apply_viewport)
+    monkeypatch.setattr(
+        executor, "_apply_runtime_interaction_viewport", _apply_viewport
+    )
 
     await executor._execute_shared_login_phase(
         task_id="task-1",
         platform="shopee",
-        account={"account_id": "acc-1", "login_url": "https://seller.shopee.cn/account/signin"},
-        params={"_runtime_session_mode": "persistent_profile", "_actual_execution_mode": "headless"},
+        account={
+            "account_id": "acc-1",
+            "login_url": "https://seller.shopee.cn/account/signin",
+        },
+        params={
+            "_runtime_session_mode": "persistent_profile",
+            "_actual_execution_mode": "headless",
+        },
         context=type(
             "Ctx",
             (),
-            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+            {
+                "current_component_index": 0,
+                "completed_domains": [],
+                "failed_domains": [],
+                "collected_files": [],
+            },
         )(),
         browser=object(),
         play_context=object(),
@@ -525,17 +551,30 @@ async def test_shared_login_phase_applies_interaction_viewport_in_headed_mode(
         order.append("viewport")
 
     monkeypatch.setattr(executor, "_prime_runtime_page_for_login_gate", _prime)
-    monkeypatch.setattr(executor, "_apply_runtime_interaction_viewport", _apply_viewport)
+    monkeypatch.setattr(
+        executor, "_apply_runtime_interaction_viewport", _apply_viewport
+    )
 
     await executor._execute_shared_login_phase(
         task_id="task-1",
         platform="shopee",
-        account={"account_id": "acc-1", "login_url": "https://seller.shopee.cn/account/signin"},
-        params={"_runtime_session_mode": "persistent_profile", "_actual_execution_mode": "headed"},
+        account={
+            "account_id": "acc-1",
+            "login_url": "https://seller.shopee.cn/account/signin",
+        },
+        params={
+            "_runtime_session_mode": "persistent_profile",
+            "_actual_execution_mode": "headed",
+        },
         context=type(
             "Ctx",
             (),
-            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+            {
+                "current_component_index": 0,
+                "completed_domains": [],
+                "failed_domains": [],
+                "collected_files": [],
+            },
         )(),
         browser=object(),
         play_context=object(),
@@ -552,7 +591,9 @@ async def test_shared_login_phase_applies_interaction_viewport_in_headed_mode(
 
 
 @pytest.mark.asyncio
-async def test_apply_runtime_interaction_viewport_applies_standard_size_in_headed_mode() -> None:
+async def test_apply_runtime_interaction_viewport_applies_standard_size_in_headed_mode() -> (
+    None
+):
     page = type(
         "Page",
         (),
@@ -564,14 +605,19 @@ async def test_apply_runtime_interaction_viewport_applies_standard_size_in_heade
 
     await CollectionExecutorV2._apply_runtime_interaction_viewport(
         page,
-        {"_runtime_session_mode": "persistent_profile", "_actual_execution_mode": "headed"},
+        {
+            "_runtime_session_mode": "persistent_profile",
+            "_actual_execution_mode": "headed",
+        },
     )
 
     page.set_viewport_size.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_apply_runtime_interaction_viewport_applies_standard_size_in_headless_mode() -> None:
+async def test_apply_runtime_interaction_viewport_applies_standard_size_in_headless_mode() -> (
+    None
+):
     page = type(
         "Page",
         (),
@@ -582,7 +628,10 @@ async def test_apply_runtime_interaction_viewport_applies_standard_size_in_headl
 
     await CollectionExecutorV2._apply_runtime_interaction_viewport(
         page,
-        {"_runtime_session_mode": "persistent_profile", "_actual_execution_mode": "headless"},
+        {
+            "_runtime_session_mode": "persistent_profile",
+            "_actual_execution_mode": "headless",
+        },
     )
 
     page.set_viewport_size.assert_awaited_once()
@@ -613,7 +662,12 @@ async def test_shared_login_phase_does_not_probe_storage_state_runtime_gate_befo
         context=type(
             "Ctx",
             (),
-            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+            {
+                "current_component_index": 0,
+                "completed_domains": [],
+                "failed_domains": [],
+                "collected_files": [],
+            },
         )(),
         browser=object(),
         play_context=object(),
@@ -663,7 +717,8 @@ async def test_shared_login_phase_does_not_write_session_file_after_login(
         )
     )
 
-    saved = AsyncMock(return_value=True)
+    # ⚠️ 这个 `saved` 从未被使用（2026-11-14 顺带清掉）：留着会让
+    # ``ruff check`` 在 CI 的「改动文件 lint」步骤上红（改动即触发）。
     monkeypatch.setattr(
         executor,
         "_wait_and_capture_high_quality_tiktok_session",
@@ -692,7 +747,11 @@ async def test_shared_login_phase_does_not_write_session_file_after_login(
             "context": type(
                 "CtxObj",
                 (),
-                {"storage_state": AsyncMock(return_value={"cookies": ["fresh"], "origins": []})},
+                {
+                    "storage_state": AsyncMock(
+                        return_value={"cookies": ["fresh"], "origins": []}
+                    )
+                },
             )(),
         },
     )()
@@ -705,7 +764,12 @@ async def test_shared_login_phase_does_not_write_session_file_after_login(
         context=type(
             "Ctx",
             (),
-            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+            {
+                "current_component_index": 0,
+                "completed_domains": [],
+                "failed_domains": [],
+                "collected_files": [],
+            },
         )(),
         browser=object(),
         play_context=object(),
@@ -749,18 +813,31 @@ async def test_shared_login_phase_skips_blocking_tiktok_session_persist_for_reus
         )
     )
 
-    wait_capture = AsyncMock(side_effect=AssertionError("should not block on session persist"))
-    monkeypatch.setattr(executor, "_wait_and_capture_high_quality_tiktok_session", wait_capture)
+    wait_capture = AsyncMock(
+        side_effect=AssertionError("should not block on session persist")
+    )
+    monkeypatch.setattr(
+        executor, "_wait_and_capture_high_quality_tiktok_session", wait_capture
+    )
     monkeypatch.setattr(
         "modules.apps.collection_center.executor_v2._record_platform_shop_discovery_async",
         AsyncMock(),
     )
 
-    page = type("Page", (), {"url": "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY"})()
+    page = type(
+        "Page",
+        (),
+        {"url": "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY"},
+    )()
     context = type(
         "Ctx",
         (),
-        {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+        {
+            "current_component_index": 0,
+            "completed_domains": [],
+            "failed_domains": [],
+            "collected_files": [],
+        },
     )()
     params = {
         "reused_session": True,
@@ -771,7 +848,10 @@ async def test_shared_login_phase_skips_blocking_tiktok_session_persist_for_reus
     _, _, result = await executor._execute_shared_login_phase(
         task_id="task-1",
         platform="tiktok",
-        account={"account_id": "acc-1", "login_url": "https://seller.tiktokshopglobalselling.com/account/login"},
+        account={
+            "account_id": "acc-1",
+            "login_url": "https://seller.tiktokshopglobalselling.com/account/login",
+        },
         params=params,
         context=context,
         browser=object(),
@@ -826,17 +906,28 @@ async def test_shared_login_phase_does_not_write_session_file_for_manual_tiktok_
     )
 
     wait_capture = AsyncMock(return_value={"cookies": ["fresh"], "origins": []})
-    monkeypatch.setattr(executor, "_wait_and_capture_high_quality_tiktok_session", wait_capture)
+    monkeypatch.setattr(
+        executor, "_wait_and_capture_high_quality_tiktok_session", wait_capture
+    )
     monkeypatch.setattr(
         "modules.apps.collection_center.executor_v2._record_platform_shop_discovery_async",
         AsyncMock(),
     )
 
-    page = type("Page", (), {"url": "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY"})()
+    page = type(
+        "Page",
+        (),
+        {"url": "https://seller.tiktokshopglobalselling.com/homepage?shop_region=MY"},
+    )()
     context = type(
         "Ctx",
         (),
-        {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+        {
+            "current_component_index": 0,
+            "completed_domains": [],
+            "failed_domains": [],
+            "collected_files": [],
+        },
     )()
     params = {
         "reused_session": True,
@@ -848,7 +939,10 @@ async def test_shared_login_phase_does_not_write_session_file_for_manual_tiktok_
     await executor._execute_shared_login_phase(
         task_id="task-1",
         platform="tiktok",
-        account={"account_id": "acc-1", "login_url": "https://seller.tiktokshopglobalselling.com/account/login"},
+        account={
+            "account_id": "acc-1",
+            "login_url": "https://seller.tiktokshopglobalselling.com/account/login",
+        },
         params=params,
         context=context,
         browser=object(),
@@ -876,21 +970,74 @@ async def test_wait_and_capture_high_quality_tiktok_session_waits_for_stable_qua
     executor = CollectionExecutorV2()
 
     states = [
-        {"cookies": [{"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"}], "origins": []},
         {
             "cookies": [
-                {"name": "sessionid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                {"name": "sid_tt", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                {"name": "passport_csrf_token", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                {"name": "user_oec_info", "domain": "seller.us.tiktokshopglobalselling.com", "path": "/"},
-                {"name": "global_seller_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                {"name": "app_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                {"name": "oec_seller_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                {"name": "i18next", "domain": "seller.us.tiktokshopglobalselling.com", "path": "/"},
-                {"name": "ATLAS_LANG", "domain": "seller.us.tiktokshopglobalselling.com", "path": "/"},
-                {"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                {"name": "msToken", "domain": "seller.us.tiktokshopglobalselling.com", "path": "/"},
-                {"name": "passport_auth_status", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                {"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"}
+            ],
+            "origins": [],
+        },
+        {
+            "cookies": [
+                {
+                    "name": "sessionid",
+                    "domain": ".tiktokshopglobalselling.com",
+                    "path": "/",
+                },
+                {
+                    "name": "sid_tt",
+                    "domain": ".tiktokshopglobalselling.com",
+                    "path": "/",
+                },
+                {
+                    "name": "passport_csrf_token",
+                    "domain": ".tiktokshopglobalselling.com",
+                    "path": "/",
+                },
+                {
+                    "name": "user_oec_info",
+                    "domain": "seller.us.tiktokshopglobalselling.com",
+                    "path": "/",
+                },
+                {
+                    "name": "global_seller_id_unified_seller_env",
+                    "domain": ".tiktokshopglobalselling.com",
+                    "path": "/",
+                },
+                {
+                    "name": "app_id_unified_seller_env",
+                    "domain": ".tiktokshopglobalselling.com",
+                    "path": "/",
+                },
+                {
+                    "name": "oec_seller_id_unified_seller_env",
+                    "domain": ".tiktokshopglobalselling.com",
+                    "path": "/",
+                },
+                {
+                    "name": "i18next",
+                    "domain": "seller.us.tiktokshopglobalselling.com",
+                    "path": "/",
+                },
+                {
+                    "name": "ATLAS_LANG",
+                    "domain": "seller.us.tiktokshopglobalselling.com",
+                    "path": "/",
+                },
+                {
+                    "name": "ttwid",
+                    "domain": ".tiktokshopglobalselling.com",
+                    "path": "/",
+                },
+                {
+                    "name": "msToken",
+                    "domain": "seller.us.tiktokshopglobalselling.com",
+                    "path": "/",
+                },
+                {
+                    "name": "passport_auth_status",
+                    "domain": ".tiktokshopglobalselling.com",
+                    "path": "/",
+                },
             ],
             "origins": [],
         },
@@ -907,12 +1054,36 @@ async def test_wait_and_capture_high_quality_tiktok_session_waits_for_stable_qua
 
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.check_login_gate_ready",
-        AsyncMock(side_effect=[
-            (False, GateResult(stage="login_gate", status=GateStatus.FAILED, reason="bootstrapping")),
-            (True, GateResult(stage="login_gate", status=GateStatus.READY, reason="ready")),
-            (True, GateResult(stage="login_gate", status=GateStatus.READY, reason="ready")),
-            (True, GateResult(stage="login_gate", status=GateStatus.READY, reason="ready")),
-        ]),
+        AsyncMock(
+            side_effect=[
+                (
+                    False,
+                    GateResult(
+                        stage="login_gate",
+                        status=GateStatus.FAILED,
+                        reason="bootstrapping",
+                    ),
+                ),
+                (
+                    True,
+                    GateResult(
+                        stage="login_gate", status=GateStatus.READY, reason="ready"
+                    ),
+                ),
+                (
+                    True,
+                    GateResult(
+                        stage="login_gate", status=GateStatus.READY, reason="ready"
+                    ),
+                ),
+                (
+                    True,
+                    GateResult(
+                        stage="login_gate", status=GateStatus.READY, reason="ready"
+                    ),
+                ),
+            ]
+        ),
     )
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.read_context_storage_state",
@@ -951,9 +1122,9 @@ async def test_executor_open_runtime_bundle_auto_uses_persistent_profile_without
     from modules.apps.collection_center import runtime_session as runtime_session_module
 
     # 会话文件体系废除后，「bootstrap 一份会话出来」这个入口**本身不存在**。
-    assert not hasattr(runtime_session_module, "load_or_bootstrap_runtime_storage_state"), (
-        "顺序路径不得再有会话 bootstrap 入口"
-    )
+    assert not hasattr(
+        runtime_session_module, "load_or_bootstrap_runtime_storage_state"
+    ), "顺序路径不得再有会话 bootstrap 入口"
     monkeypatch.setattr(
         "modules.apps.collection_center.runtime_session.runtime_profile_exists",
         lambda platform, session_owner_id: True,
@@ -985,7 +1156,9 @@ async def test_execute_auto_mode_does_not_launch_extra_browser_in_profile_mode(
     多一份内存，退出顺序还容易和 profile 独占锁打架）。
     """
     executor = CollectionExecutorV2()
-    browser_type = type("BrowserType", (), {"launch": AsyncMock(return_value=object())})()
+    browser_type = type(
+        "BrowserType", (), {"launch": AsyncMock(return_value=object())}
+    )()
 
     monkeypatch.setattr(
         executor,
@@ -1044,7 +1217,12 @@ async def test_execute_auto_mode_does_not_launch_extra_browser_in_profile_mode(
         task_id="task-1",
         platform="miaoshou",
         account_id="acc-1",
-        account={"username": "u", "password": "p", "main_account_id": "main-1", "shop_account_id": "acc-1"},
+        account={
+            "username": "u",
+            "password": "p",
+            "main_account_id": "main-1",
+            "shop_account_id": "acc-1",
+        },
         data_domains=["orders"],
         date_range={"start": "2025-01-01", "end": "2025-01-31"},
         granularity="daily",
@@ -1086,7 +1264,10 @@ async def test_start_browser_uses_standard_viewport_in_headed_mode(
             "Chromium",
             (),
             {
-                "launch": AsyncMock(side_effect=lambda **kwargs: captured_launch.update(kwargs) or _FakeBrowser())
+                "launch": AsyncMock(
+                    side_effect=lambda **kwargs: captured_launch.update(kwargs)
+                    or _FakeBrowser()
+                )
             },
         )()
 
@@ -1099,7 +1280,14 @@ async def test_start_browser_uses_standard_viewport_in_headed_mode(
 
     monkeypatch.setattr(
         "backend.utils.config.get_settings",
-        lambda: type("Settings", (), {"ENVIRONMENT": "development", "browser_config": {"headless": False, "args": []}})(),
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "ENVIRONMENT": "development",
+                "browser_config": {"headless": False, "args": []},
+            },
+        )(),
     )
     monkeypatch.setattr(
         "playwright.async_api.async_playwright",
@@ -1175,16 +1363,18 @@ async def test_parallel_fanout_fingerprint_policy_matches_sequential_profile_pat
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    """R8：顺序路径与并行扇出**同一套指纹口径** —— 都不注入运行时覆盖项。
+    """R8：顺序路径与并行扇出**同一套浏览器环境口径**。
 
     顺序路径（profile）由 ``normalize_persistent_profile_context_options`` 剥离
-    user_agent / locale / timezone_id；并行扇出必须复用**同一个**函数，
-    否则两条路径的指纹行为不一致（R8 的推论：以 profile 原生环境为准）。
+    user_agent / locale / timezone_id，再补上「UA 去掉 HeadlessChrome」；
+    并行扇出必须给出**同一份**环境参数，否则两条路径行为不一致
+    （R8.3：同一账号在三处必须呈现为同一台设备）。
     """
     from backend.services.main_account_session_coordinator import (
         MainAccountSessionCoordinator,
     )
     from modules.apps.collection_center import runtime_session
+    from modules.utils.sessions.account_browser_identity import browser_context_options
 
     executor = CollectionExecutorV2(
         main_account_session_coordinator=MainAccountSessionCoordinator()
@@ -1303,26 +1493,36 @@ async def test_parallel_fanout_fingerprint_policy_matches_sequential_profile_pat
         runtime_manifests={"login": {}, "exports_by_domain": {"orders": {}}},
     )
 
-    # 顺序路径的基准：profile 模式下同样不注入这些覆盖项。
-    sequential_options = runtime_session.normalize_persistent_profile_context_options(
-        platform="shopee",
-        context_options={
-            "user_agent": "Fake-UA",
-            "locale": "zh-CN",
-            "timezone_id": "Asia/Shanghai",
-            "extra_http_headers": {"Accept-Language": "zh-CN"},
-            "accept_downloads": True,
-        },
-    )
-    assert "user_agent" not in sequential_options
+    # 顺序路径的基准：profile 模式下同样只补「UA 去 HeadlessChrome」，
+    # 不叠加 locale / timezone_id / Accept-Language 覆盖（沿用原生环境）。
+    sequential_options = {
+        **runtime_session.normalize_persistent_profile_context_options(
+            platform="shopee",
+            context_options={
+                "user_agent": "Fake-UA",
+                "locale": "zh-CN",
+                "timezone_id": "Asia/Shanghai",
+                "extra_http_headers": {"Accept-Language": "zh-CN"},
+                "accept_downloads": True,
+            },
+        ),
+        **browser_context_options(headless=True),
+    }
     assert "locale" not in sequential_options
     assert "timezone_id" not in sequential_options
+    # R8（2026-11-14 修订）：headless 时 UA 必须去掉 HeadlessChrome ——
+    # 否则平台一眼认出自动化，比撞同型号指纹严重得多。
+    assert "HeadlessChrome" not in sequential_options["user_agent"]
 
     assert captured_context_kwargs, "并行扇出必须创建 context"
     for kwargs in captured_context_kwargs:
-        assert "user_agent" not in kwargs, "并行扇出与顺序路径的指纹口径不一致"
-        assert "locale" not in kwargs, "并行扇出与顺序路径的指纹口径不一致"
-        assert "timezone_id" not in kwargs, "并行扇出与顺序路径的指纹口径不一致"
+        # 并行扇出与顺序路径**同一口径**（R8.3）
+        assert (
+            kwargs["user_agent"] == sequential_options["user_agent"]
+        ), "并行扇出与顺序路径的浏览器环境口径不一致"
+        assert "HeadlessChrome" not in kwargs["user_agent"]
+        assert "locale" not in kwargs, "并行扇出与顺序路径的浏览器环境口径不一致"
+        assert "timezone_id" not in kwargs, "并行扇出与顺序路径的浏览器环境口径不一致"
 
 
 @pytest.mark.asyncio
@@ -1374,7 +1574,11 @@ async def test_execute_parallel_domains_uses_auto_runtime_strategy_for_shared_lo
             (),
             {
                 "reused_session": False,
-                "context": type("Ctx", (), {"close": AsyncMock(), "cookies": AsyncMock(return_value=[])})(),
+                "context": type(
+                    "Ctx",
+                    (),
+                    {"close": AsyncMock(), "cookies": AsyncMock(return_value=[])},
+                )(),
                 "page": type("Page", (), {"close": AsyncMock()})(),
                 "mode": "storage_state_fanout",
             },
@@ -1401,18 +1605,66 @@ async def test_execute_parallel_domains_uses_auto_runtime_strategy_for_shared_lo
         AsyncMock(
             return_value={
                 "cookies": [
-                    {"name": "sessionid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                    {"name": "sid_tt", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                    {"name": "passport_csrf_token", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                    {"name": "user_oec_info", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
-                    {"name": "global_seller_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                    {"name": "app_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                    {"name": "oec_seller_id_unified_seller_env", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                    {"name": "ttwid", "domain": ".tiktokshopglobalselling.com", "path": "/"},
-                    {"name": "ATLAS_LANG", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
-                    {"name": "i18next", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
-                    {"name": "msToken", "domain": "seller.tiktokshopglobalselling.com", "path": "/"},
-                    {"name": "passport_auth_status", "domain": ".tiktokshopglobalselling.com", "path": "/"},
+                    {
+                        "name": "sessionid",
+                        "domain": ".tiktokshopglobalselling.com",
+                        "path": "/",
+                    },
+                    {
+                        "name": "sid_tt",
+                        "domain": ".tiktokshopglobalselling.com",
+                        "path": "/",
+                    },
+                    {
+                        "name": "passport_csrf_token",
+                        "domain": ".tiktokshopglobalselling.com",
+                        "path": "/",
+                    },
+                    {
+                        "name": "user_oec_info",
+                        "domain": "seller.tiktokshopglobalselling.com",
+                        "path": "/",
+                    },
+                    {
+                        "name": "global_seller_id_unified_seller_env",
+                        "domain": ".tiktokshopglobalselling.com",
+                        "path": "/",
+                    },
+                    {
+                        "name": "app_id_unified_seller_env",
+                        "domain": ".tiktokshopglobalselling.com",
+                        "path": "/",
+                    },
+                    {
+                        "name": "oec_seller_id_unified_seller_env",
+                        "domain": ".tiktokshopglobalselling.com",
+                        "path": "/",
+                    },
+                    {
+                        "name": "ttwid",
+                        "domain": ".tiktokshopglobalselling.com",
+                        "path": "/",
+                    },
+                    {
+                        "name": "ATLAS_LANG",
+                        "domain": "seller.tiktokshopglobalselling.com",
+                        "path": "/",
+                    },
+                    {
+                        "name": "i18next",
+                        "domain": "seller.tiktokshopglobalselling.com",
+                        "path": "/",
+                    },
+                    {
+                        "name": "msToken",
+                        "domain": "seller.tiktokshopglobalselling.com",
+                        "path": "/",
+                    },
+                    {
+                        "name": "passport_auth_status",
+                        "domain": ".tiktokshopglobalselling.com",
+                        "path": "/",
+                    },
                 ],
                 "origins": [],
             }
@@ -1506,9 +1758,9 @@ def test_session_metadata_resolution_is_gone() -> None:
     人工保存 / 受保护的」—— 那是**第二份载体**才需要的问题。profile 是唯一
     载体之后，这个问题不存在，入口随之删除。
     """
-    assert not hasattr(CollectionExecutorV2, "_resolve_session_metadata"), (
-        "会话元数据解析入口仍存在"
-    )
+    assert not hasattr(
+        CollectionExecutorV2, "_resolve_session_metadata"
+    ), "会话元数据解析入口仍存在"
 
 
 def test_runtime_session_diagnostics_has_no_legacy_quality_fields() -> None:
@@ -1674,7 +1926,9 @@ async def test_parallel_domains_fails_when_storage_state_snapshot_is_missing(
             {
                 "reused_session": False,
                 "context": type(
-                    "Ctx", (), {"close": AsyncMock(), "cookies": AsyncMock(return_value=[])}
+                    "Ctx",
+                    (),
+                    {"close": AsyncMock(), "cookies": AsyncMock(return_value=[])},
                 )(),
                 "page": type("Page", (), {"close": AsyncMock()})(),
                 "mode": "persistent_profile",
@@ -1778,7 +2032,9 @@ async def test_parallel_domains_fans_out_memory_snapshot_without_writing_session
             {
                 "reused_session": False,
                 "context": type(
-                    "Ctx", (), {"close": AsyncMock(), "cookies": AsyncMock(return_value=[])}
+                    "Ctx",
+                    (),
+                    {"close": AsyncMock(), "cookies": AsyncMock(return_value=[])},
                 )(),
                 "page": type("Page", (), {"close": AsyncMock()})(),
                 "mode": "persistent_profile",
@@ -1808,7 +2064,9 @@ async def test_parallel_domains_fans_out_memory_snapshot_without_writing_session
         AsyncMock(),
     )
     monkeypatch.setattr(
-        executor, "_execute_single_domain_parallel", _fake_execute_single_domain_parallel
+        executor,
+        "_execute_single_domain_parallel",
+        _fake_execute_single_domain_parallel,
     )
 
     await executor.execute_parallel_domains(
@@ -1858,9 +2116,9 @@ def test_session_file_read_path_is_gone(
 
     assert not hasattr(manager, "load_session"), "会话文件读入口仍存在"
     assert not hasattr(manager, "get_session_path"), "会话文件路径入口仍存在"
-    assert not (repo_root / "data" / "sessions").exists(), (
-        "SessionManager 初始化不得再创建 data/sessions 目录"
-    )
+    assert not (
+        repo_root / "data" / "sessions"
+    ).exists(), "SessionManager 初始化不得再创建 data/sessions 目录"
 
 
 class _BlankFallbackPage:
@@ -1911,12 +2169,20 @@ async def test_shared_login_phase_navigates_blank_page_returned_by_headful_fallb
     await executor._execute_shared_login_phase(
         task_id="task-1",
         platform="shopee",
-        account={"account_id": "acc-1", "login_url": "https://seller.shopee.cn/account/signin"},
+        account={
+            "account_id": "acc-1",
+            "login_url": "https://seller.shopee.cn/account/signin",
+        },
         params={"_runtime_session_mode": "persistent_profile"},
         context=type(
             "Ctx",
             (),
-            {"current_component_index": 0, "completed_domains": [], "failed_domains": [], "collected_files": []},
+            {
+                "current_component_index": 0,
+                "completed_domains": [],
+                "failed_domains": [],
+                "collected_files": [],
+            },
         )(),
         browser=object(),
         play_context=object(),

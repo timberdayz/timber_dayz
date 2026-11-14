@@ -18,10 +18,13 @@
 | 1 | 主账号 ID 规范 | 只允许小写字母 / 数字 / 下划线；不含空格、冒号、邮箱、中文、括号 |
 | 2 | profile 目录**不撞车** | 目录名 = ID 净化结果；撞车 ⇒ 两个账号共用一份登录态 |
 | 3 | 平台在巡店白名单 | `{miaoshou, shopee, tiktok}`；否则巡店面板**静默跳过** |
-| 4 | 设备画像已分配 | `profiles/<平台>/<账号>/.device_profile.json` |
-| 5 | `machine_id` 已隔离 | profile 内 `Local State` 的 `user_experience_metrics.machine_id` |
-| 6 | 已人工首登 | profile 内存在 Chromium 的 cookie 库（与采集侧同一判据） |
-| 7 | 出口 IP 已配置 | 主账号级 `extra_config['proxy']` 优先（**提示项**，当前未强制） |
+| 4 | 已人工首登 | profile 内存在 Chromium 的 cookie 库（与采集侧同一判据） |
+| 5 | 出口 IP 已配置 | 主账号级 `extra_config['proxy']` 优先（**提示项**，当前未强制） |
+
+⚠️ 2026-11-14 起**不再检查「设备画像 / machine_id 隔离」**：平台读不到
+``machine_id``，而硬件指纹在同型号机器上大量重复 ⇒ 检查它们没有意义。
+账号之间真正要分开的是**状态层**（cookie / localStorage / 登录态），
+那由「一个账号一个独立 profile 目录」保证 ⇒ 落在第 2 项（目录不撞车）。
 
 用法
 ----
@@ -184,56 +187,7 @@ def _profile_state(platform: str, account_id: str) -> dict:
     """
     from modules.utils.sessions.account_readiness import build_profile_state
 
-    return build_profile_state(
-        _profile_dir(platform, account_id), platform=platform, account_id=account_id
-    )
-
-
-def check_device_profile(platform: str, account_id: str) -> Check:
-    state = _profile_state(platform, account_id)
-    if not state["has_device_profile"]:
-        return Check(
-            WARN,
-            "设备画像已分配",
-            "尚无 .device_profile.json ⇒ 采集路径**不注入画像**（走 profile 原生环境，"
-            "与其它账号撞指纹）；首次**巡店**启动时会自动分配（账号内稳定、账号间不同）",
-        )
-    device = state.get("device") or {}
-    viewport = device.get("viewport") or {}
-    return Check(
-        OK,
-        "设备画像已分配",
-        f"{device.get('os')}/{device.get('browser')} {device.get('browser_version')} · "
-        f"{device.get('locale')} · {device.get('timezone_id')} · "
-        f"{viewport.get('width')}x{viewport.get('height')}",
-    )
-
-
-def check_machine_id(platform: str, account_id: str) -> Check:
-    state = _profile_state(platform, account_id)
-    current = str(state.get("machine_id") or "")
-    expected = str(state.get("expected_machine_id") or "")
-
-    if state["machine_id_isolated"]:
-        return Check(OK, "machine_id 已隔离", current)
-    if not state["profile_exists"]:
-        return Check(
-            WARN,
-            "machine_id 已隔离",
-            "profile 目录还不存在 ⇒ 首次巡店/采集时会自动隔离",
-        )
-    if not current:
-        return Check(
-            WARN,
-            "machine_id 已隔离",
-            "Local State 里没有 machine_id ⇒ 首次巡店/采集时会写入账号专属值",
-        )
-    return Check(
-        WARN,
-        "machine_id 已隔离",
-        f"当前 {current} ≠ 账号专属值 {expected} ⇒ 下次巡店/采集会自动改写。"
-        f"注意：改写前该 profile 与其它同机账号共享 machine_id",
-    )
+    return build_profile_state(_profile_dir(platform, account_id))
 
 
 def check_login_state(platform: str, account_id: str) -> Check:
@@ -302,8 +256,6 @@ def run_checks(
         checks.append(
             check_profile_collision(database_url, platform, account_id, existing=True)
         )
-        checks.append(check_device_profile(platform, account_id))
-        checks.append(check_machine_id(platform, account_id))
         checks.append(check_login_state(platform, account_id))
         checks.append(check_proxy(database_url, platform, account_id))
     return checks

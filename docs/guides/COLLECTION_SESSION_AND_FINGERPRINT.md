@@ -1,14 +1,29 @@
 # 数据采集：按账号持久化会话与指纹
 
 > 会话的**生命周期与载体语义**（profile 单一载体、禁止人工覆盖、禁止打开即回写）以
-> [`COLLECTION_SESSION_LIFECYCLE.md`](COLLECTION_SESSION_LIFECYCLE.md) 为准；本文只定义存储路径与设备画像策略。
+> [`COLLECTION_SESSION_LIFECYCLE.md`](COLLECTION_SESSION_LIFECYCLE.md) 为准；本文只定义存储路径与指纹策略。
 > **冲突处理**：本文与 `COLLECTION_SESSION_LIFECYCLE.md` 冲突时**一律以后者为准**。
-> 「账号设备身份」的语义真源**只有 R8 一处**（2026-11-14 修订：结论由「注入固定指纹」改为
-> 「注入**账号设备画像**」，并新增 `machine_id` 隔离要求）。
+> 「账号浏览器运行环境」的语义真源**只有 R8 一处**（2026-11-14 二次修订：结论由
+> 「注入**账号设备画像** + `machine_id` 隔离」改为「**不造账号差异**，
+> 只做 *去 `HeadlessChrome`* 与 *locale/时区跟出口*」）。
 
 ## 概述
 
-主采集执行器（executor_v2）按**账号**持久化/复用浏览器会话，并按**账号**使用**固定设备画像**，与业界「一账号一设备身份、会话复用」一致，用于降低登录与验证码频率、避免多账号被平台关联成同一台电脑。
+主采集执行器（executor_v2）按**账号**持久化/复用浏览器会话 —— 这与业界
+「一账号一浏览器环境、会话复用」一致，用于降低登录与验证码频率。
+
+⚠️ 注意口径：**账号之间分开的是「状态层」**（cookie / localStorage / IndexedDB /
+缓存 / 平台自己的设备令牌），由「**一个账号一个独立 profile 目录**」天然隔开；
+**不是**靠"每个账号造一套不同的浏览器指纹"。原因（实测，2026-11-14）：
+
+* 同一台机器上两个**独立 profile** 的 14 项指纹（canvas / WebGL 像素 / 字体集合 /
+  UA / platform / 核数 / 屏幕 / 时区 / 语言 …）**完全相同** ⇒ profile 不产生指纹隔离；
+* 同型号同配置的电脑硬件指纹**大量重复**（全球几百万台）⇒ 平台不会拿"指纹相同"
+  判"同一台电脑"；
+* Chromium 的 `machine_id` **网页读不到** ⇒ 平台看不到它。
+
+⇒ 按账号派生指纹（每人一个分辨率 / 浏览器版本 / 语言）**没有关联收益**，
+反而造出「分布外」的异常特征。详见 R8。
 
 ## 会话持久化
 
@@ -20,31 +35,30 @@
   - 并行采集走**内存快照扇出**：主 profile 打开一次，快照只在内存中分发，**不落盘**。
 - **安全**：`profiles` 目录不进入 VCS、仅后端节点访问、权限按现有规范管理。profile 内直接存放认证 cookie，访问控制要求与会话文件时代同级。
 
-## 按账号固定设备画像
+## 浏览器运行环境（不落盘、不按账号派生）
 
 > 语义真源：[`COLLECTION_SESSION_LIFECYCLE.md`](COLLECTION_SESSION_LIFECYCLE.md) 的 **R8**。
-> 本节只说「存在哪、怎么落盘、谁负责」。
+> 本节只说「有哪些参数、谁负责、从哪来」。
 
-- **载体**：`profiles/<platform>/<main_account_id>/.device_profile.json`
-  —— 与登录态**同生共死**（删账号删目录、拷账号拷目录）。
-- **内容**：一套**自洽**的 UA / 视口 / locale / 时区 / Accept-Language / `navigator.platform`。
-  自洽是硬要求：UA 的操作系统与浏览器必须与 `navigator.platform`、`devicePixelRatio`、
-  locale、时区、Accept-Language **互相匹配** —— 只改 UA 而不改其它字段 = 头身不符，
-  比不伪装更露馅。
-- **归属**：绑在**主账号**上（一个登录身份 = 一个设备 = 一套画像），其下的店铺账号继承。
-- **分配**：按 `account_id` **确定性**派生；落盘时做**占用校验**（目标槽位已被别的账号
-  占用则顺延）⇒ 账号变多也不撞车。**同一账号永远同一套画像**，不随代码版本变。
-- **机器标识**：`Local State` → `user_experience_metrics.machine_id` 必须按账号隔离
-  （R8.1）—— Chromium 的 machine_id 来自 Windows MachineGuid，同机所有 profile 相同。
-- **消费方**：人工巡店（CDP `Emulation.*`）、顺序采集、并行扇出**共用同一份画像** ⇒
-  同一账号在平台侧是同一台设备（R8.3）。
+- **不落盘**：**没有** `.device_profile.json` 这类文件。浏览器运行环境是**运行时参数**，
+  由 `modules/utils/sessions/account_browser_identity.py` 统一产出，**与账号无关**。
+- **内容**：只有三项 ——
+  1. **UA**：真实二进制版本 + 真实宿主 OS token，**去掉 `HeadlessChrome`**
+     （采集跑 headless，带这个标记会被一眼认出自动化）；版本与 OS token **一字不动**。
+  2. **locale / timezone_id / Accept-Language**：**跟随出口 IP 所在地区**。
+     现在出口就是宿主 IP ⇒ 地区取宿主；代理资源到位后按账号各自的出口查。
+  3. **不注入屏幕尺寸**：屏幕是**宿主级**事实（真人管多个店，显示器只有一台），
+     按账号差异化会造出「分布外」的异常特征。
+- **归属**：**不绑账号**。所有账号拿到**完全相同**的一份 —— 这正是我们要的：
+  同机多账号在指纹层本来就该一样（我们改不动），差异只体现在状态层与出口。
+- **消费方**：人工巡店（CDP `Emulation.setLocaleOverride` / `setTimezoneOverride`）、
+  顺序采集、并行扇出**共用同一份**环境参数（R8.3）。
 - **非 profile 模式**（录制 / 组件录制 / `PersistentBrowserManager`）：不挂载 profile，
-  没有画像目录可放 ⇒ 仍使用 `DeviceFingerprintManager` 生成显式设备人格。
-- **回退**：若 account_id 缺失或无法规范为字符串，则记录告警并回退到全局默认设备画像与完整登录。
+  仍使用 `DeviceFingerprintManager` 生成显式设备人格（这条路径没有 profile 原生环境可沿用）。
 
 ## 执行器统一建 context
 
-- 浏览器进程由上层（如 collection router）启动（launch），仅将 `browser` 与任务参数传入执行器；**顺序与并行两种模式**均由执行器内部创建带指纹与可选会话的 browser context，不依赖上层预先创建的 context。
+- 浏览器进程由上层（如 collection router）启动（launch），仅将 `browser` 与任务参数传入执行器；**顺序与并行两种模式**均由执行器内部创建带**浏览器运行环境**（UA 去 Headless + locale/时区跟出口）与可选会话的 browser context，不依赖上层预先创建的 context。
 
 ## 登录组件契约
 

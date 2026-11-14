@@ -293,7 +293,7 @@
 
     <section class="notice">
       打开账号浏览器后人工登录并巡店；登录完成后直接关闭浏览器窗口，登录态会由浏览器 profile 自动保存。如果停留在登录页、验证码页、报错页或异常页，请点击“跳过”。
-      卡片上的徽标显示该账号的<b>就绪状态</b>：是否已人工首登、设备画像是否已分配、machine_id 是否已与其它账号隔离、是否已配出口 IP（页面每 <span id="pollSeconds">15</span> 秒自动刷新一次）。
+      卡片上的徽标显示该账号的<b>就绪状态</b>：是否已人工首登、是否已配出口 IP（页面每 <span id="pollSeconds">15</span> 秒自动刷新一次）。
     </section>
 
     <section id="skippedSection" class="skipped" hidden>
@@ -308,7 +308,7 @@
   <script>
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token') || '';
-    // 自动刷新间隔（毫秒）。就绪状态会随「人工首登 / 巡店分配画像」变化，
+    // 自动刷新间隔（毫秒）。就绪状态会随「人工首登」变化，
     // 静态页面不刷新就永远看不到 —— 所以定时拉一次。
     const POLL_INTERVAL_MS = 15000;
     let accounts = [];
@@ -371,26 +371,14 @@
         container.appendChild(makeBadge('就绪状态未知', 'warn'));
         return;
       }
+      // 只回答两个问题：这个账号能不能用（首登过吗）、出口有没有分开。
+      // 设备指纹类徽标已移除 —— 平台读不到机器标识，而硬件指纹同型号机器
+      // 大量重复，显示出来只会让人误以为"没隔离 = 有风险"。
       container.appendChild(makeBadge(state.logged_in ? '已首登' : '未首登', state.logged_in ? 'ok' : 'warn'));
-      container.appendChild(makeBadge(
-        state.has_device_profile ? '画像已分配' : '画像未分配',
-        state.has_device_profile ? 'ok' : 'warn',
-      ));
-      container.appendChild(makeBadge(
-        state.machine_id_isolated ? 'machine_id 已隔离' : 'machine_id 未隔离',
-        state.machine_id_isolated ? 'ok' : 'warn',
-      ));
       container.appendChild(makeBadge(
         state.proxy_enabled ? '出口已配' : '出口未配',
         state.proxy_enabled ? 'ok' : 'warn',
       ));
-      if (state.device) {
-        const viewport = state.device.viewport || {};
-        container.appendChild(makeBadge(
-          `${state.device.os}/${state.device.browser} ${viewport.width || '?'}x${viewport.height || '?'}`,
-          'detail',
-        ));
-      }
     }
 
     function renderSkipped() {
@@ -474,7 +462,7 @@
         if (index >= 0) accounts[index] = result;
         render();
         addLog(`${account.display_name} ${action} -> ${result.status}` + (result.message ? `\n${result.message}` : ''));
-        // 巡店会分配设备画像 / 隔离 machine_id ⇒ 动作后立刻刷一次就绪状态
+        // 动作后立刻刷一次就绪状态（首登态可能刚变）
         loadReadiness().then(render).catch((error) => addLog(error.message));
       } catch (error) {
         addLog(`${account.display_name} ${action} -> error\n${(error && error.message) || '未知错误'}`);

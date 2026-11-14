@@ -290,19 +290,26 @@ jobs:
           #     已收敛为「一个会话级容器 + 每用例一个独立 database」（CREATE DATABASE
           #     实测 0.063 秒）。⇒ 容器唯一真源在 conftest；守护把它锁住。
           #
-          # 2026-11-13 第七轮扩：补 1 个账号设备画像契约文件（纯源码，不碰数据库）：
-          #   test_account_device_isolation_contract.py —— 账号间**不可关联**的设备身份契约
-          #     （画像按 account_id 确定性派生、账号间不同/账号内稳定、整套自洽；
-          #       machine_id 按账号隔离；注入项走白名单；巡店/采集/并行三条路径同源；
-          #       规范文档口径与代码一致）
+          # 2026-11-13 第七轮扩：补 1 个账号浏览器环境契约文件（纯源码，不碰数据库）：
+          #   test_account_browser_identity_contract.py —— 账号**只隔离状态、不造指纹差异**的契约
+          #     （浏览器环境参数与账号无关；UA 不含 HeadlessChrome；locale/时区跟随出口 IP；
+          #       不注入屏幕尺寸；旧的「按账号派生画像 + machine_id 隔离」整套已移除；
+          #       巡店/顺序采集/并行采集三条路径同源）
           # 为什么要补：这个守护此前**根本不在 CI 里跑** ⇒ 「账号间不可关联」这条
           #   业务底线只写在代码里，任何一次改动都能悄悄把它改坏而流水线照样全绿。
           #   典型的「流水线绿 ≠ 验收」。
           #
+          #   ⚠️ 2026-11-14 方向修订后重写：实测表明**同机多账号的硬件指纹完全相同**
+          #   （独立 profile 的 canvas/WebGL/字体/核数 14 项全同），且平台**读不到**
+          #   machine_id ⇒ 「按账号派生指纹」既无关联收益、又会造出「分布外」的异常特征。
+          #   真正能分开账号的是**状态层**（独立 profile 目录）+ **出口 IP**。
+          #
           # 2026-11-13 第八轮扩：补 1 个账号就绪状态契约文件（纯源码，不碰数据库）：
           #   test_account_readiness_contract.py —— 巡店就绪状态的**判据唯一**与**可见性**
           #     （登录态判据在采集侧 / CLI 体检 / 巡店面板三处同源；
-          #       machine_id 隔离可判；被白名单排除的账号必须显式列出并带原因；
+          #       就绪快照只剩「已首登 + 已配出口」两项；
+          #       浏览器进程退出后面板状态必须回写（关窗口就不能再显示 OPEN）；
+          #       被白名单排除的账号必须显式列出并带原因；
           #       前端必须轮询并渲染就绪徽标）
           # 为什么要补：巡店面板此前对「为什么这个账号不出现」「这个账号登录过没有」
           #   **零提示** —— 运维只能靠猜。加了提示就得保证提示不会骗人：
@@ -387,7 +394,7 @@ jobs:
             tests/test_verify_release_local.py \
             tests/test_verify_release_tag_generation.py \
             tests/test_verify_remote_deploy_contracts.py \
-            tests/test_account_device_isolation_contract.py \
+            tests/test_account_browser_identity_contract.py \
             tests/test_account_readiness_contract.py \
             tests/test_account_proxy_source_contract.py
 

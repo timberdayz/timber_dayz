@@ -18,8 +18,8 @@
 |---|---|---|---|---|
 | 1 | 生产机 `/opt/xihong_erp/.env.production.passwords.txt` 旧密钥副本待删 | 生产写操作 | 待拍板：须走发版流程或人工执行 | 归档文件「安全发现」节 |
 | 2 | 旧 `SECRET_KEY` / `JWT_SECRET_KEY` / `METABASE_API_KEY` 在**已下线旧环境**是否还活着 | 需业务确认 | 待确认（本次只比对了生产与本机） | 归档文件「安全发现」节 |
-| 3 | 5 项业务口径待拍板：`3c店` 冲突取舍 / 两个 disabled 主账号是否启用 / TikTok 三店改名归属（含疑似历史误录 `TK新加坡1店`）/ `platform='验证码测试账号'` 脏行处理 / 10 个文件命中已停用账号 `shopee_sg_chenewei666_local` 是否回填 | 业务口径 | 待拍板 | 归档文件「批次 A / B / C」节 |
-| 4 | 账号设备身份 SSOT 收口：**代码与规范已落地**（方向修订后 9 张卡全部完成）；**剩资源缺口 G1**（库里代理 0 条 ⇒ 账号仍共用出口 IP） | 资源缺口 | 待采购代理资源并写入主账号 `extra_config['proxy']`；G2–G8 见本文件「已知缺口」表 | `docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md` + `...-closure-execution.md` |
+| 3 | 4 项业务口径待拍板：`3c店` 冲突取舍 / 两个 disabled 主账号是否启用 / TikTok 三店改名归属（含疑似历史误录 `TK新加坡1店`）/ 10 个文件命中已停用账号 `shopee_sg_chenewei666_local` 是否回填 | 业务口径 | 待拍板（**原 5 项里的 `platform='验证码测试账号'` 脏行已于 2026-11-14 随迁移删除**） | 归档文件「批次 A / B / C」节 |
+| 4 | 账号浏览器环境 SSOT 收口：**代码与规范已落地**（2026-11-14 二次方向修订：不造账号差异 + 去 `HeadlessChrome` + locale/时区跟出口）；**剩资源缺口 G1**（库里代理 0 条 ⇒ 账号仍共用出口 IP） | 资源缺口 | 待采购代理资源并写入主账号 `extra_config['proxy']`；G2–G8 见本文件「已知缺口」表 | `docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md` + `...-closure-execution.md` |
 | 5 | `modules/apps/web_interface_manager` 健康检查持续失败（依赖的 `frontend_streamlit` 目录不存在） | 真实缺陷 | 批次 F-1 揭露；待修（本批未擅自改业务代码） | 本文件「批次 F」节 |
 | 6 | `mypy` 目前**没有任何门禁**（440 条动态 ORM 基类误报需先分层/豁免才可能升门禁） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
 | 7 | 采集组件 lint 仍是告警模式（范围已收窄，强度未提升） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
@@ -124,27 +124,53 @@ Walter 澄清后的业务目标是：
 方向错误时新建的 `modules/utils/sessions/device_profile_manifest.py` 已**可恢复删除**。
 详见执行文档「回滚记录（方向纠偏）」节。
 
+### 二次方向修订（2026-11-14，**实测证伪了"按账号派生指纹"**）
+
+Walter 实际用了巡店面板后追问："既然硬件指纹改不了，那其他修改是不是都没必要了？"
+本机实测给出三个结论，**直接推翻了"每个账号一套指纹"的实现路径**：
+
+| 实测 | 结论 |
+|---|---|
+| 同一台机器开两个**独立 profile**，14 项指纹（canvas / WebGL 像素 / 字体集合 / UA / platform / 核数 / 内存 / 屏幕 / 时区 / 语言 / 插件 …）**完全相同**；同一 profile 重开则稳定 | **独立 profile 不产生任何指纹隔离** —— 它隔开的是**账号状态层**（cookie / localStorage / 缓存 / 登录态 / 平台设备令牌） |
+| 同型号同配置的电脑，硬件指纹**大量重复**（全球几百万台） | 硬件指纹是**群体特征**不是个体特征 ⇒ 平台**不会**拿"指纹相同"判"同一台电脑"（否则误杀几百万正常卖家） |
+| 网页 JS 读得到 UA / platform / 核数 / 内存 / 语言 / 屏幕 / 时区 / WebGL 渲染器 / 插件，但**读不到** `machine_id` / `client_id` / `guid` | `machine_id` **平台看不见** ⇒ 改它对电商平台零价值；且 `Local State` 由 Chromium **首次启动时**创建 ⇒ 每个账号第一次巡店必然漏改 |
+
+⇒ 修订后的口径：**账号之间只隔离「状态」，不造「指纹差异」。**
+真正能分开账号的是 **① 每个账号独立 profile（状态层）** + **② 不同出口 IP**；
+软件层只负责**不露馅**（去 `HeadlessChrome`）与**跟出口自洽**（locale / 时区）。
+主动差异化（每人一个分辨率 / 浏览器版本 / 语言）**没有关联收益**，反而造出
+「分布外」的异常特征（真实用户不会 12 个账号 12 个不重复分辨率）。
+
 ### 已落地（业务语言）
 
 | 能力 | 落地物 | 真源 |
 |---|---|---|
-| 每个主账号一套**自洽**设备画像（浏览器/版本/视口/时区/语言互相匹配），账号间必然不同、账号内永久稳定；**OS 与地区锁宿主**（Playwright 改不了 `navigator.platform`，且地区必须与出口 IP 一致） | `modules/utils/sessions/account_device_profile.py`（462 行） | R8.0 / R8.2 |
-| `machine_id` 按 account_id 确定性隔离（同机 6 个 profile 原本**全部相同** `11608241`） | 同上模块 `derive_machine_id` / `ensure_profile_machine_id` | R8.1 |
-| 人工巡店 / 顺序采集 / 并行采集**三条路径同一套画像**；并行路径缺画像**必须 WARN** | `pwcli_native.py` / `runtime_session.py` / `executor_v2.py` | R8.3 |
+| 浏览器运行环境**不按账号派生**：同一台机器上所有账号拿到**完全相同**的 UA / locale / 时区 | `modules/utils/sessions/account_browser_identity.py` | R8.0 |
+| **不露馅**：UA 去掉 `HeadlessChrome`（采集跑 headless），版本号与 OS token 取自真实二进制、一字不动 | 同上 `browser_user_agent` / `strip_headless_marker` | R8.1 |
+| **跟出口自洽**：locale / 时区 / Accept-Language 跟随出口 IP 所在地区（现在 = 宿主；代理到位后按账号查） | 同上 `region_profile` | R8.2 |
+| 人工巡店 / 顺序采集 / 并行采集**三条路径同一套环境**；顺序路径沿用 profile 原生环境，并行路径视口统一 | `pwcli_native.py` / `runtime_session.py` / `executor_v2.py` | R8.3 |
 | 代理权威位上移**主账号级**，巡店与采集同源；配置坏了**显式失败**不静默直连 | 3 个 loader + `pwcli_account_inventory.py` | R8.4 |
-| 新增账号**前置体检**（7 项，只读） | `scripts/check_account_readiness.py`（353 行） | — |
-| 巡店面板**就绪可见**：15 秒轮询、就绪徽标、白名单排除账号**显式列出并写明原因** | `modules/utils/sessions/account_readiness.py` + 面板 `/api/accounts/readiness` + 前端 | — |
+| 新增账号**前置体检**（5 项，只读：ID 规范 / 目录不撞车 / 平台白名单 / 已首登 / 已配出口） | `scripts/check_account_readiness.py` | — |
+| 巡店面板**就绪可见**：15 秒轮询、**2 个**徽标（已首登 / 出口）、白名单排除账号**显式列出并写明原因** | `modules/utils/sessions/account_readiness.py` + 面板 `/api/accounts/readiness` + 前端 | — |
+| 面板**状态真源是浏览器进程**：窗口一关，状态立刻回写（此前只放锁、不改状态 ⇒ 永远显示 OPEN） | `scripts/pwcli_inspection_panel.py` `_watch_browser_process` | — |
+| **测试残留账号已删除**（主账号 9 → 7），走迁移、生产可执行 | `current_migrations/versions/20261230_drop_residual_test_accounts.py` | — |
+
+### 已下线
+
+- `modules/utils/sessions/account_device_profile.py`（按账号派生画像 + `machine_id` 隔离）—— **可恢复删除**。
+- `.device_profile.json` 载体与"占用校验 / 槽位顺延"机制 —— 一并不再生成（存量文件留在磁盘上，不影响运行）。
+- 面板上的「画像已分配 / machine_id 已隔离 / 画像明细」三个徽标 —— 减法项，避免"没隔离 = 有风险"的假警报。
 
 ### 验收（实测）
 
 | 范围 | 结果 |
 |---|---|
-| `tests/test_account_device_isolation_contract.py` | **23 passed** |
-| `tests/test_account_readiness_contract.py` | **11 passed** |
-| 采集相关 5 个测试文件 | **174 passed** |
-| 面板与运行时回归 | **76 passed** |
+| `tests/test_account_browser_identity_contract.py`（原 `..._device_isolation_...`，已重写） | **19 passed** |
+| `tests/test_account_readiness_contract.py`（已重写） | **15 passed** |
+| `tests/test_account_proxy_source_contract.py` | **4 passed** |
+| 浏览器环境实测（独立 profile 指纹对比 / headless UA / viewport 与 screen 关系） | 见计划文档「设备指纹实测」 |
 
-三份新守护**已进 CI 根契约清单**（`ci.yml` 根契约条目 57 → **60**），
+三份守护**在 CI 根契约清单**（`ci.yml` 根契约条目 57 → **60**，本轮只改名不改条目数），
 `scripts/audit_guard_tests.py` 分类确认均为 **A 类（CI 硬门禁）**。
 
 ⚠️ 代理契约**刻意做成纯同步文件**（`tests/test_account_proxy_source_contract.py`）：
@@ -157,13 +183,13 @@ Walter 澄清后的业务目标是：
 
 | # | 缺口 | 性质 | 解除条件 |
 |---|---|---|---|
-| G1 | **IP 层无资源**：库里代理配置 **0 条** ⇒ 所有账号仍共用宿主出口 IP，平台仍可用"同一出口多账号"做关联；**且画像的 locale/时区因此锁在宿主地区**（出口即宿主 IP ⇒ 地区必须跟着出口走，否则自己制造"中国 IP + 德国时区"三重矛盾） | **资源缺口**（当前最大缺口） | 采购代理资源并写入主账号 `extra_config['proxy']`；到位后再按账号放开地区维度 |
-| G2 | **深度指纹未覆盖**（canvas / WebGL / 字体 / GPU / 音频栈） | 技术债 | V2 专项评估 |
-| G3 | 同一主账号下多店铺**共享画像与出口** | **刻意折中**（业务已确认接受） | 写进文档，不隐藏 |
-| G4 | 存量 9 个主账号 `machine_id` 仍是 `11608241` | 生效延迟 | 下次巡店/采集自动改写（幂等） |
-| G5 | `profile_color_seed` 6 个相同 | 技术债 | 与 G2 一并 |
+| G1 | **IP 层无资源**：库里代理配置 **0 条** ⇒ 所有账号仍共用宿主出口 IP，平台仍可用"同一出口多账号"做关联；**且浏览器环境的 locale/时区因此锁在宿主地区**（出口即宿主 IP ⇒ 地区必须跟着出口走，否则自己制造"中国 IP + 德国时区"三重矛盾） | **资源缺口**（当前最大缺口） | 采购代理资源并写入主账号 `extra_config['proxy']`；到位后再按账号放开地区维度 |
+| G2 | **深度指纹不覆盖**（canvas / WebGL / 字体 / GPU / 音频栈） | **刻意不做**（2026-11-14 修订） | 实测：同型号同配置机器这些值**本就完全相同**（全球几百万台）⇒ 平台不会拿它判同机；主动注入噪声反而露馅 |
+| G3 | 同一主账号下多店铺**共享出口**（不再有"共享画像"这层） | **刻意折中**（业务已确认接受） | 写进文档，不隐藏 |
+| G4 | `machine_id` 隔离**已整体撤销** | **已关闭**（2026-11-14） | 实测：网页读不到 `machine_id`（平台看不到）；且 `Local State` 由 Chromium 首次启动时创建 ⇒ 首次巡店必然漏改。**不再列为缺口** |
+| G5 | `profile_color_seed` 6 个相同 | 技术债（属旧指纹机制） | 与 G2 一并 |
 | G6 | 存量账号 ID 不合规（`hongxikeji:main` / `shopee KR` / `Tiktok 1店` / `chenzeweinbnb@163.com` / 含全角括号） | 历史事实 | 体检脚本记为 **WARN**；**不主动改名**（改名会换 profile 目录 ⇒ 换登录态） |
-| G7 | 测试残留账号 `accept_main_1775126941575`、`验证码测试账号` | 数据脏 | 待业务拍板（见「当前未结」#3） |
+| G7 | 测试残留账号 `accept_main_1775126941575`、`验证码测试账号` | **已关闭**（2026-11-14） | 业务确认删除，已由迁移 `current_schema_20261230_drop_residual_test_accounts` 删除（主账号 9 → 7） |
 | G8 | 旧指纹机制与 `data/device_fingerprints/` 26 文件仍在 | 已决策 | 保留给非 profile 路径，暂不清理 |
 
 **新增账号即时自查**（不等开发）：ID 只用小写字母/数字/下划线；对照现有 6 个 profile 目录确认不撞

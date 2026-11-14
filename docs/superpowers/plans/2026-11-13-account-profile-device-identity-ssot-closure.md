@@ -130,8 +130,8 @@
 
 守护入口：
 
-- `tests/test_account_device_isolation_contract.py`（25 条）—— 画像与隔离
-- `tests/test_account_readiness_contract.py`（11 条）—— 就绪判据同源与可见性
+- `tests/test_account_browser_identity_contract.py`（19 条）—— 浏览器环境（不造差异 / 不露馅 / 跟出口）
+- `tests/test_account_readiness_contract.py`（15 条）—— 就绪判据同源与可见性
 - `tests/test_account_proxy_source_contract.py`（4 条）—— 代理权威位在主账号级
 
 三者**已进 CI 根契约清单**（`ci.yml` 的 "Run root contract tests (no DB)" 步骤，57 → 60 条）。
@@ -141,3 +141,31 @@
 > 在 CI 钉的 `pytest==7.4.3` / `pytest-asyncio==0.21.1` 下混进根契约清单会拿到**已关闭**的
 > session 事件循环（`RuntimeError: Event loop is closed`）⇒ 断言移进纯同步新文件，
 > 异步用例留在原文件由全量回归覆盖；根因记账到 V2（见 `STATUS.md`「当前未结」#8）。
+
+---
+
+## 8. 二次方向修订（2026-11-14，v7.28.0）—— 本计划的核心结论被**实测证伪**
+
+> ⚠️ 上面第 1–7 节是 **2026-11-13 计划**的原文，**历史记录保留不改**。
+> 但它的核心结论（"按 account_id 派生画像 + 隔离 `machine_id`"）在 2026-11-14
+> 被本机实测推翻 ⇒ 整体下线，改为：
+>
+> > **账号之间只隔离「状态」，不造「指纹差异」。**
+>
+> 决定性证据（三条，全部实测）：
+>
+> 1. 同一台机器开两个**独立 profile**，14 项指纹**完全相同** ⇒
+>    **独立 profile 不产生任何指纹隔离**，它隔开的是**账号状态层**；
+> 2. 同型号同配置的电脑硬件指纹**大量重复** ⇒ 平台不会拿「指纹相同」判「同一台电脑」；
+> 3. 网页**读不到** `machine_id` ⇒ 改它对电商平台零价值。
+>
+> ⇒ 真正能分开账号的是 **① 每个账号独立 profile（状态层）** + **② 不同出口 IP**；
+> 软件层只负责**不露馅**（去 `HeadlessChrome`）与**跟出口自洽**（locale / 时区）。
+>
+> 另：**屏幕尺寸是改得动的**（实测 Playwright `viewport` 会连带改 `screen`），
+> 所以不做差异化**不是因为做不到，而是因为做了更糟**（真实用户分辨率就那么几档，
+> 给每个账号派一个不重复分辨率 = 落在真实分布之外 = "批量养号"的特征）。
+>
+> 本轮改动清单与逐条实测见
+> [`...-closure-execution.md`](2026-11-13-account-profile-device-identity-ssot-closure-execution.md)
+> 的「二次方向修订」节；规范真源见 `docs/guides/COLLECTION_SESSION_LIFECYCLE.md` 的 **R8**。

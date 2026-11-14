@@ -155,11 +155,10 @@ class PanelState:
     def readiness(self) -> dict[str, Any]:
         """账号就绪状态（**只读**）。
 
-        给面板回答三个问题：
+        给面板回答两个问题：
 
         1. 这个账号**人工首登过**吗？（profile 里有没有 Chromium cookie 库）
-        2. 它的**设备身份隔离**到位吗？（设备画像 / machine_id）
-        3. 它的**出口 IP** 配了吗？（巡店与采集必须同源）
+        2. 它的**出口 IP** 配了吗？（巡店与采集必须同源）
 
         判据真源在 ``modules/utils/sessions/account_readiness.py`` ——
         与 CLI 体检脚本 ``scripts/check_account_readiness.py``、采集侧
@@ -317,6 +316,12 @@ class PanelState:
             if holding is not None and holding.pid == pid:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await self.release_account_lock(key)
+            # 浏览器进程已经没了 ⇒ **状态必须回写**。
+            # 否则这里只放锁、不改 status ⇒ 面板永远显示「OPEN」，
+            # 而用户明明已经把窗口关了（真实状态由浏览器进程决定，不是内存里
+            # 那句字符串）。前端每 15 秒轮询一次 ⇒ 最迟一个轮询周期就恢复。
+            if self.statuses.get(key) == "opened":
+                self.statuses[key] = "idle"
 
     # -- 浏览器 pid -------------------------------------------------------
 
@@ -468,9 +473,22 @@ def build_app(state: PanelState) -> FastAPI:
         else:
             # 读不到 pid -> 判断不了浏览器何时退出 -> 立即放锁
             # （宁可少保护，也不要永久占着账号锁让采集排队）
+            # ⚠️ 这时状态**没人回写**（没有 watcher）—— 属边缘情况
+            # （open 成功但会话文件还没落盘），记一条日志说明状态不会自动恢复。
             await state.release_account_lock(key)
+            state.record(
+                action,
+                account,
+                "opened",
+                "提示：读不到浏览器 pid，无法跟踪窗口状态；"
+                "关闭窗口后本卡片仍会显示 opened，刷新页面即可。",
+            )
 
-        return {**account, "status": "opened", "message": combined_output}
+        return {
+            **account,
+            "status": state.statuses.get(key, "idle"),
+            "message": combined_output,
+        }
 
     @app.post("/api/accounts/open", dependencies=[Depends(require_token)])
     async def open_account(request: AccountRequest) -> dict[str, Any]:

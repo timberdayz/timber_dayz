@@ -1,51 +1,51 @@
 """账号巡店就绪状态（**只读**）。
 
 为什么要有这一份
-----------------
-「这个账号现在能不能巡店 / 会不会撞车」有**两处**要看：
+-----------------
+
+「这个账号现在能不能巡店」有**两处**要看：
 
 1. CLI 体检脚本 ``scripts/check_account_readiness.py``
 2. 巡店面板只读接口 ``GET /api/accounts/readiness``
 
-两处各写一套判定 ⇒ 必然漂移（面板说"已首登"、体检说"未首登"，
-或者面板漏了 machine_id 隔离这一项）。
+两处各写一套判定 ⇒ 必然漂移（面板说"已首登"、体检说"未首登"）。
 所以**判据只此一份**，两边都从这里取。
 
-本模块**不写库、不写盘**：只读 profile 目录与画像文件。
+本模块**不写库、不写盘**：只读 profile 目录。
 
 判定项
 ------
 ==================  ==========================================================
 项                  判据
 ==================  ==========================================================
+``profile_exists``  profile 目录存在（登录态的载体）
 ``logged_in``       profile 内存在 Chromium cookie 库
                     （``Default/Network/Cookies`` 或旧版 ``Default/Cookies``）
-``has_device_profile``  ``<profile>/.device_profile.json`` 存在且版本可识别
-``machine_id``      profile 的 ``Local State`` 里的
-                    ``user_experience_metrics.machine_id``
-``machine_id_isolated`` 上述值 == 按 account_id 确定性派生的账号专属值
 ``proxy_enabled``   出口 IP 是否已配（**提示项**，当前不强制）
 ==================  ==========================================================
 
-为什么 machine_id 单独成项
---------------------------
-Chromium 的 ``machine_id`` 来自 Windows MachineGuid ⇒ **同一台机器上所有 profile
-必然相同** ⇒ 不隔离的话，平台一眼就能把这批账号认成"同一台电脑"。
-这是「账号间不可关联」最容易漏、也最致命的一项。
+为什么只有这三项
+----------------
 
-依据：``docs/guides/COLLECTION_SESSION_LIFECYCLE.md``（R8 及其设备画像小节）。
+2026-11-14 方向修订后，**不再检查「设备指纹隔离」**，理由（实测见计划文档）：
+
+* 平台做账号关联看的是**账号状态层**（cookie / localStorage / 缓存 / 登录态 /
+  平台自己的设备令牌）—— 这层由「每个账号一个独立 profile 目录」天然隔开；
+* **设备指纹层**（GPU/渲染器、CPU 核数、字体、canvas）同机必然相同，且
+  **同型号同配置的机器大量重复** ⇒ 平台不可能拿它当"同一台电脑"的判据；
+* Chromium 的 ``machine_id`` **网页读不到** ⇒ 平台看不到它，检查它没有意义。
+
+⇒ 账号之间真正要分开的是**状态层**，而这一层不由「画像」保证，而由
+「**一个账号一个 profile 目录**」保证 —— 那在建号时检查（目录不撞车），
+不在运行时检查。
+
+依据：``docs/guides/COLLECTION_SESSION_LIFECYCLE.md``（R8）。
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Dict, Optional
-
-from modules.utils.sessions.account_device_profile import (
-    derive_machine_id,
-    read_device_profile,
-)
 
 
 #: Chromium cookie 库的可能路径（新版 / 旧版）。
@@ -70,63 +70,18 @@ def profile_contains_state(profile_path: Path | str) -> bool:
         return False
 
 
-def read_profile_machine_id(profile_dir: Path | str) -> str:
-    """读 profile 的 ``machine_id``（读不到 ⇒ 空串）。
-
-    Chromium 把机器级标识写在 ``Local State`` 的
-    ``user_experience_metrics.machine_id``。
-    """
-    path = Path(profile_dir) / "Local State"
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-    except (OSError, TypeError, ValueError):
-        return ""
-    if not isinstance(payload, dict):
-        return ""
-    metrics = payload.get("user_experience_metrics")
-    if not isinstance(metrics, dict):
-        return ""
-    return str(metrics.get("machine_id") or "").strip()
-
-
 def build_profile_state(
     profile_dir: Path | str,
-    *,
-    platform: str,
-    account_id: str,
 ) -> Dict[str, Any]:
     """profile 目录的只读快照。
 
     Returns:
-        ``logged_in`` / ``has_device_profile`` / ``machine_id`` /
-        ``machine_id_isolated`` / ``device``（画像摘要，没有则 ``None``）/
-        ``profile_exists``。
+        ``profile_exists`` / ``logged_in``。
     """
     root = Path(profile_dir)
-    device_payload = read_device_profile(root)
-    machine_id = read_profile_machine_id(root)
-    expected_machine_id = derive_machine_id(platform, account_id)
-
-    device_summary: Optional[Dict[str, Any]] = None
-    if device_payload:
-        device = device_payload.get("device") or {}
-        device_summary = {
-            "os": device.get("os"),
-            "browser": device.get("browser"),
-            "browser_version": device.get("browser_version"),
-            "locale": device.get("locale"),
-            "timezone_id": device.get("timezone_id"),
-            "viewport": device.get("viewport"),
-        }
-
     return {
         "profile_exists": root.exists(),
         "logged_in": profile_contains_state(root),
-        "has_device_profile": device_payload is not None,
-        "machine_id": machine_id,
-        "machine_id_isolated": bool(machine_id) and machine_id == expected_machine_id,
-        "expected_machine_id": expected_machine_id,
-        "device": device_summary,
     }
 
 
@@ -163,7 +118,7 @@ def build_account_readiness(
         relative = default_dir.relative_to(manager.persistent_profiles_path)
         profile_dir = Path(profiles_root) / relative
 
-    state = build_profile_state(profile_dir, platform=platform, account_id=account_id)
+    state = build_profile_state(profile_dir)
 
     return {
         "platform": platform,
@@ -179,11 +134,5 @@ def readiness_summary(payload: Dict[str, Any]) -> str:
     """一行话摘要（给日志 / CLI 用）。"""
     bits: list[str] = []
     bits.append("已首登" if payload.get("logged_in") else "未首登")
-    bits.append("画像已分配" if payload.get("has_device_profile") else "画像未分配")
-    bits.append(
-        "machine_id 已隔离"
-        if payload.get("machine_id_isolated")
-        else "machine_id 未隔离"
-    )
     bits.append("已配出口" if payload.get("proxy_enabled") else "未配出口")
     return " · ".join(bits)

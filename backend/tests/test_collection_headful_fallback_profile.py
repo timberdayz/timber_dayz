@@ -131,7 +131,9 @@ class _FakeBrowserType:
         (profile_dir / "Cookies").write_text("[]", encoding="utf-8")
         close_error = None
         if self._fail_close_on_launch == len(self.launch_calls) - 1:
-            close_error = RuntimeError("Target page, context or browser has been closed")
+            close_error = RuntimeError(
+                "Target page, context or browser has been closed"
+            )
         context = _FakePersistentContext(
             user_data_dir,
             self.events,
@@ -351,7 +353,9 @@ async def _run_profile_fallback(
         proxy=proxy,
         browser_type=browser_type,
         profile_path=str(profile_dir),
-        launch_kwargs=launch_kwargs if launch_kwargs is not None else {"headless": True},
+        launch_kwargs=(
+            launch_kwargs if launch_kwargs is not None else {"headless": True}
+        ),
     )
 
 
@@ -394,7 +398,9 @@ async def test_headful_fallback_opens_headed_persistent_context_on_profile_dir(
 
 
 @pytest.mark.asyncio
-async def test_headful_fallback_returns_persistent_context(monkeypatch, profile_runtime):
+async def test_headful_fallback_returns_persistent_context(
+    monkeypatch, profile_runtime
+):
     """回退返回的新 context 必须仍是持久 context（修 H1）。"""
     executor = _build_executor(monkeypatch)
     events: list[str] = []
@@ -450,7 +456,13 @@ async def test_headful_fallback_context_options_have_no_fingerprint_overrides(
     monkeypatch,
     profile_runtime,
 ):
-    """R8：profile 路径不得注入 user_agent / locale / timezone_id（修 H2）。"""
+    """R8（2026-11-14 修订）：profile 路径**不叠加** locale / timezone_id 覆盖；
+    UA 只在 **headless** 那一次注入（去掉 ``HeadlessChrome``）。
+
+    这条回退路径开两次浏览器：① **有头**人工验证码（UA 本来就正常 ⇒ 不碰）；
+    ② 人工登录完成后**按原参数重开**（headless ⇒ 必须去掉 ``HeadlessChrome``，
+    否则平台一眼认出自动化）。
+    """
     executor = _build_executor(monkeypatch)
     events: list[str] = []
     browser_type = _FakeBrowserType(events)
@@ -463,8 +475,16 @@ async def test_headful_fallback_context_options_have_no_fingerprint_overrides(
         browser=_ForbiddenBrowser(),
     )
 
+    assert browser_type.launch_calls, "回退必须至少开一次浏览器"
     for call in browser_type.launch_calls:
-        assert "user_agent" not in call
+        if call.get("headless"):
+            # headless ⇒ UA 去掉 HeadlessChrome（版本与 OS token 取自真实浏览器）
+            assert "HeadlessChrome" not in call["user_agent"]
+            assert call["user_agent"].startswith("Mozilla/5.0 (")
+        else:
+            # headful ⇒ UA 本来就正常 ⇒ 不覆盖
+            assert "user_agent" not in call
+        # locale / 时区不覆盖（沿用 profile 原生环境）
         assert "locale" not in call
         assert "timezone_id" not in call
         # viewport 仍然保留（不是指纹覆盖项）
@@ -628,8 +648,7 @@ async def test_headful_fallback_page_navigation_failure_does_not_crash_fallback(
     assert login_success is True
     assert outcome == "success"
     assert any(
-        "导航到平台入口失败" in message
-        for message in recording_logger.warning_messages
+        "导航到平台入口失败" in message for message in recording_logger.warning_messages
     )
 
 
