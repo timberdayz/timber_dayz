@@ -65,6 +65,29 @@ COPY scripts/local_migration_backup.py /app/scripts/local_migration_backup.py
 COPY scripts/bootstrap_seed_manifest.py /app/scripts/bootstrap_seed_manifest.py
 COPY scripts/bootstrap_fresh_environment.py /app/scripts/bootstrap_fresh_environment.py
 COPY scripts/migrate_profit_basis_to_v2.py /app/scripts/migrate_profit_basis_to_v2.py
+# [OPS] 模板治理 v2（2026-11-14，批次 3/4）：模板**决策资产**进 Git
+#
+#   templates/definitions/*.json —— 「这个维度该长什么样」的声明式定义；
+#   scripts/template_definitions.py —— 定义格式的 SSOT（字段清单 / 目录解析）；
+#   scripts/apply_template_definitions.py —— 差异守卫与投影工具（--check / --apply）；
+#   scripts/export_template_definitions.py —— 从库里反向导出（单向）；
+#   scripts/replay_drift_caliber.py —— 只读回放两套漂移口径；
+#   scripts/template_release_sla_metric.py —— 「发布后多久完成重估」闭环指标。
+#
+#   [*] 为什么要显式写这一段：本文件对 scripts/ 采用**白名单式 COPY**
+#       （逐个 COPY，避免整体复制导致镜像膨胀）。
+#       ⇒ 新加的运维脚本如果忘了在这里登记，**生产镜像里根本没有这个文件**：
+#       业务代码不受影响，部署也照样成功，但守卫**静默失效**——
+#       线上以为「决策资产守卫已经上线」，其实连脚本都没进镜像。
+#       2026-11-14 v7.29.0 上线时就是这样漏掉的（templates/ 与 5 个新脚本全缺）。
+#       ⇒ 守护见 backend/tests/data_pipeline/test_template_definitions_guardrails.py
+#         ::test_backend_image_ships_template_decision_assets
+COPY templates /app/templates
+COPY scripts/template_definitions.py /app/scripts/template_definitions.py
+COPY scripts/apply_template_definitions.py /app/scripts/apply_template_definitions.py
+COPY scripts/export_template_definitions.py /app/scripts/export_template_definitions.py
+COPY scripts/replay_drift_caliber.py /app/scripts/replay_drift_caliber.py
+COPY scripts/template_release_sla_metric.py /app/scripts/template_release_sla_metric.py
 COPY sql/api_modules /app/sql/api_modules
 COPY sql/mart /app/sql/mart
 COPY sql/ops /app/sql/ops

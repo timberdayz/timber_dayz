@@ -325,3 +325,68 @@ def test_ci_workflow_actually_validates_template_definitions():
         "apply_template_definitions.py" in text
     ), "CI 里没有校验模板决策资产 —— 定义文件会悄悄腐化"
     assert "--validate-only" in text, "CI 里的校验必须是离线的 --validate-only"
+
+
+# ---------------------------------------------------------------------------
+# 9. 生产镜像必须真的带上决策资产与工具（2026-11-14 v7.29.1 补的洞）
+# ---------------------------------------------------------------------------
+def test_backend_image_ships_template_decision_assets():
+    """镜像里必须有 ``templates/`` 与治理脚本。
+
+    为什么必须有这条
+    ----------------
+    ``Dockerfile.backend`` 对 ``scripts/`` 用的是**白名单式 COPY**
+    （逐个 ``COPY scripts/xxx.py``，避免整体复制让镜像膨胀）。
+    ⇒ 新加的运维脚本**忘了登记就等于没上线**：
+    镜像构建成功、部署成功、业务不受影响，
+    但「决策资产差异守卫」在生产**根本跑不起来**，
+    而线上会以为「守卫已经上线了」—— 这比没有守卫更危险。
+
+    实测：v7.29.0 上线时 ``templates/`` 与 5 个新脚本全部漏登记，
+    生产镜像里 ``ls /app/templates`` ⇒ ``No such file or directory``。
+
+    ⇒ 这条用例把「加了脚本就得同步改 Dockerfile」变成**流水线里会红的事实**。
+    """
+    dockerfile = REPO_ROOT / "Dockerfile.backend"
+    assert dockerfile.is_file(), "缺少 Dockerfile.backend"
+    text = dockerfile.read_text(encoding="utf-8")
+
+    assert "COPY templates /app/templates" in text, (
+        "Dockerfile.backend 没有把 templates/ 复制进镜像 —— "
+        "生产侧的模板决策资产守卫跑不起来"
+    )
+    for script in (
+        "template_definitions.py",
+        "apply_template_definitions.py",
+        "export_template_definitions.py",
+        "replay_drift_caliber.py",
+        "template_release_sla_metric.py",
+    ):
+        assert f"COPY scripts/{script} /app/scripts/{script}" in text, (
+            f"Dockerfile.backend 没有登记 scripts/{script} —— "
+            f"生产镜像里不存在这个脚本"
+        )
+
+
+def test_dockerignore_does_not_exclude_template_definitions():
+    """``.dockerignore`` 不能把决策资产挡在镜像外。
+
+    ``*.md`` 排掉 README 是对的（文档不进镜像）,
+    但 ``templates/definitions/*.json`` 必须在。
+    """
+    dockerignore = REPO_ROOT / ".dockerignore"
+    assert dockerignore.is_file(), "缺少 .dockerignore"
+    patterns = [
+        line.strip()
+        for line in dockerignore.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    for pattern in patterns:
+        negated = pattern.startswith("!")
+        bare = pattern.lstrip("!").strip().rstrip("/")
+        if negated:
+            continue
+        if bare in {"templates", "templates/definitions"}:
+            pytest.fail(f".dockerignore 把 {bare} 排除在镜像外了")
+        if bare.endswith("*.json") and "templates" in bare:
+            pytest.fail(f".dockerignore 的 {bare} 会连模板决策资产一起挡掉")
