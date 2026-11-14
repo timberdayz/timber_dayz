@@ -74,7 +74,9 @@ def test_browser_environment_has_no_per_account_knob() -> None:
 def test_browser_context_options_are_identical_across_calls() -> None:
     """两次调用必须给出**完全相同**的环境参数（没有随机、没有账号维度）。"""
     assert browser_context_options() == browser_context_options()
-    assert browser_context_options(headless=True) == browser_context_options(headless=True)
+    assert browser_context_options(headless=True) == browser_context_options(
+        headless=True
+    )
 
 
 def test_context_options_only_contain_whitelisted_keys() -> None:
