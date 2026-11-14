@@ -44,32 +44,7 @@
     "*规格",
     "仓库"
   ],
-  "core_fields": [
-    {
-      "in_hash": true,
-      "raw_name": "*商品SKU",
-      "required": false,
-      "semantic_key": null
-    },
-    {
-      "in_hash": true,
-      "raw_name": "*商品名称",
-      "required": false,
-      "semantic_key": null
-    },
-    {
-      "in_hash": true,
-      "raw_name": "*规格",
-      "required": false,
-      "semantic_key": null
-    },
-    {
-      "in_hash": true,
-      "raw_name": "仓库",
-      "required": false,
-      "semantic_key": null
-    }
-  ],
+  "core_fields": [],
   "ignored_extra_fields": [],
   "header_bindings": [
     {

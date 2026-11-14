@@ -9,7 +9,7 @@
   "sheet_name": null,
   "encoding": "utf-8",
   "header_columns": [
-    "订单编号",
+    "订单号",
     "订单状态",
     "售后状态",
     "产品ID",
@@ -35,11 +35,13 @@
     "利润",
     "成本利润率",
     "销售利润率",
+    "预估回款金额(RMB)",
+    "预估回款金额",
     "已结算金额(RMB)",
     "已结算金额",
     "结算时间",
-    "买家支付(RMB)",
-    "买家支付",
+    "实付金额(RMB)",
+    "实付金额",
     "订单原始金额(RMB)",
     "订单原始金额",
     "产品原价(RMB)",
@@ -58,16 +60,16 @@
     "买家支付运费",
     "卖家支付运费(RMB)",
     "卖家支付运费",
-    "shopee运费补贴(RMB)",
-    "shopee运费补贴",
+    "虾皮运费补贴(RMB)",
+    "虾皮运费补贴",
     "退货运费(RMB)",
     "退货运费",
     "联盟佣金(RMB)",
     "联盟佣金",
     "Shopee平台佣金(RMB)",
     "Shopee平台佣金",
-    "海外免退服务费(RMB)",
-    "海外免退服务费",
+    "物流+:海外免退服务费(RMB)",
+    "物流+:海外免退服务费",
     "服务费(RMB)",
     "服务费",
     "交易手续费(RMB)",
@@ -141,15 +143,13 @@
         "order id"
       ],
       "position": 0,
-      "raw_name": "订单编号",
+      "raw_name": "订单号",
       "required": true,
       "sample_type": "string",
-      "display_name": "订单编号",
+      "display_name": "订单号",
       "semantic_key": "order_id",
       "semantic_role": null,
-      "hash_participates": true,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "confirmed_semantic"
+      "hash_participates": true
     },
     {
       "aliases": [],
@@ -160,9 +160,7 @@
       "display_name": "订单状态",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
@@ -173,17 +171,13 @@
       "display_name": "售后状态",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [
         "product_id",
         "产品id",
         "商品id",
-        "产品ID",
-        "商品ID",
         "product id"
       ],
       "position": 3,
@@ -193,9 +187,7 @@
       "display_name": "产品ID",
       "semantic_key": "product_id",
       "semantic_role": null,
-      "hash_participates": true,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "confirmed_semantic"
+      "hash_participates": true
     },
     {
       "aliases": [
@@ -203,8 +195,7 @@
         "平台sku",
         "平台 sku",
         "product_sku",
-        "产品sku",
-        "商品sku"
+        "产品sku"
       ],
       "position": 4,
       "raw_name": "平台SKU",
@@ -213,16 +204,13 @@
       "display_name": "平台SKU",
       "semantic_key": "platform_sku",
       "semantic_role": null,
-      "hash_participates": true,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "confirmed_semantic"
+      "hash_participates": true
     },
     {
       "aliases": [
         "sku_id",
         "sku id",
-        "SKU ID",
-        "SKU编号"
+        "sku编号"
       ],
       "position": 5,
       "raw_name": "SKU ID",
@@ -231,9 +219,7 @@
       "display_name": "SKU ID",
       "semantic_key": "sku_id",
       "semantic_role": null,
-      "hash_participates": true,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "confirmed_semantic"
+      "hash_participates": true
     },
     {
       "aliases": [],
@@ -244,9 +230,7 @@
       "display_name": "平台产品标题",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
@@ -257,31 +241,18 @@
       "display_name": "规格",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
-      "aliases": [
-        "product_name",
-        "item_name",
-        "product name",
-        "item name",
-        "商品",
-        "商品名",
-        "商品名称",
-        "产品名称"
-      ],
+      "aliases": [],
       "position": 8,
       "raw_name": "商品名称",
       "required": false,
       "sample_type": "string",
       "display_name": "商品名称",
-      "semantic_key": "product_name",
+      "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "confirmed_semantic"
+      "hash_participates": false
     },
     {
       "aliases": [],
@@ -292,9 +263,7 @@
       "display_name": "商品SKU",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "user",
-      "semantic_review_status": "confirmed_non_semantic"
+      "hash_participates": false
     },
     {
       "aliases": [],
@@ -305,9 +274,7 @@
       "display_name": "商品类型",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
@@ -318,22 +285,18 @@
       "display_name": "出库仓库",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
       "position": 12,
       "raw_name": "出库数量",
       "required": false,
-      "sample_type": "number",
+      "sample_type": "string",
       "display_name": "出库数量",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
@@ -344,9 +307,7 @@
       "display_name": "采购单号",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
@@ -357,9 +318,7 @@
       "display_name": "采购平台",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
@@ -370,9 +329,7 @@
       "display_name": "采购时间",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
@@ -383,34 +340,24 @@
       "display_name": "采购账号",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
-      "aliases": [
-        "sales_volume",
-        "sales volume",
-        "units sold",
-        "销量",
-        "销售数量"
-      ],
+      "aliases": [],
       "position": 17,
       "raw_name": "销售数量",
       "required": false,
-      "sample_type": "number",
+      "sample_type": "date",
       "display_name": "销售数量",
-      "semantic_key": "sales_volume",
+      "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "confirmed_semantic"
+      "hash_participates": false
     },
     {
       "aliases": [
         "shop_id",
         "店铺",
-        "店铺ID",
+        "店铺id",
         "shop id"
       ],
       "position": 18,
@@ -420,9 +367,7 @@
       "display_name": "店铺",
       "semantic_key": "shop_id",
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "confirmed_semantic"
+      "hash_participates": true
     },
     {
       "aliases": [
@@ -438,22 +383,18 @@
       "display_name": "下单时间",
       "semantic_key": "order_date",
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "confirmed_semantic"
+      "hash_participates": true
     },
     {
       "aliases": [],
       "position": 20,
       "raw_name": "付款时间",
       "required": false,
-      "sample_type": "date",
+      "sample_type": "string",
       "display_name": "付款时间",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
@@ -464,38 +405,29 @@
       "display_name": "发货时间",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
       "position": 22,
       "raw_name": "利润(RMB)",
       "required": false,
-      "sample_type": "number",
+      "sample_type": "date",
       "display_name": "利润(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
-      "aliases": [
-        "profit",
-        "利润"
-      ],
+      "aliases": [],
       "position": 23,
       "raw_name": "利润",
       "required": false,
       "sample_type": "number",
       "display_name": "利润",
-      "semantic_key": "profit",
+      "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "confirmed_semantic"
+      "hash_participates": false
     },
     {
       "aliases": [],
@@ -506,9 +438,7 @@
       "display_name": "成本利润率",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
@@ -519,828 +449,722 @@
       "display_name": "销售利润率",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
       "position": 26,
+      "raw_name": "预估回款金额(RMB)",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "预估回款金额(RMB)",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 27,
+      "raw_name": "预估回款金额",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "预估回款金额",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 28,
       "raw_name": "已结算金额(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "已结算金额(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 27,
+      "position": 29,
       "raw_name": "已结算金额",
       "required": false,
       "sample_type": "number",
       "display_name": "已结算金额",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 28,
+      "position": 30,
       "raw_name": "结算时间",
       "required": false,
       "sample_type": "string",
       "display_name": "结算时间",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
-    },
-    {
-      "aliases": [],
-      "position": 29,
-      "raw_name": "买家支付(RMB)",
-      "required": false,
-      "sample_type": "number",
-      "display_name": "买家支付(RMB)",
-      "semantic_key": null,
-      "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
-    },
-    {
-      "aliases": [],
-      "position": 30,
-      "raw_name": "买家支付",
-      "required": false,
-      "sample_type": "number",
-      "display_name": "买家支付",
-      "semantic_key": null,
-      "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
       "position": 31,
-      "raw_name": "订单原始金额(RMB)",
+      "raw_name": "实付金额(RMB)",
       "required": false,
-      "sample_type": "number",
-      "display_name": "订单原始金额(RMB)",
+      "sample_type": "date",
+      "display_name": "实付金额(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
       "position": 32,
+      "raw_name": "实付金额",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "实付金额",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 33,
+      "raw_name": "订单原始金额(RMB)",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "订单原始金额(RMB)",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 34,
       "raw_name": "订单原始金额",
       "required": false,
       "sample_type": "number",
       "display_name": "订单原始金额",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 33,
+      "position": 35,
       "raw_name": "产品原价(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "产品原价(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 34,
+      "position": 36,
       "raw_name": "产品原价",
       "required": false,
       "sample_type": "number",
       "display_name": "产品原价",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 35,
+      "position": 37,
       "raw_name": "卖家产品折扣(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "卖家产品折扣(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 36,
+      "position": 38,
       "raw_name": "卖家产品折扣",
       "required": false,
       "sample_type": "number",
       "display_name": "卖家产品折扣",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 37,
+      "position": 39,
       "raw_name": "Shopee产品折扣(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "Shopee产品折扣(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 38,
+      "position": 40,
       "raw_name": "Shopee产品折扣",
       "required": false,
       "sample_type": "number",
       "display_name": "Shopee产品折扣",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 39,
+      "position": 41,
       "raw_name": "Shopee币抵扣(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "Shopee币抵扣(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 40,
+      "position": 42,
       "raw_name": "Shopee币抵扣",
       "required": false,
       "sample_type": "number",
       "display_name": "Shopee币抵扣",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 41,
+      "position": 43,
       "raw_name": "卖家voucher(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "卖家voucher(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 42,
+      "position": 44,
       "raw_name": "卖家voucher",
       "required": false,
       "sample_type": "number",
       "display_name": "卖家voucher",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 43,
+      "position": 45,
       "raw_name": "Shopee voucher(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "Shopee voucher(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 44,
+      "position": 46,
       "raw_name": "Shopee voucher",
       "required": false,
       "sample_type": "number",
       "display_name": "Shopee voucher",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 45,
+      "position": 47,
       "raw_name": "买家支付运费(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "买家支付运费(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 46,
+      "position": 48,
       "raw_name": "买家支付运费",
       "required": false,
       "sample_type": "number",
       "display_name": "买家支付运费",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 47,
+      "position": 49,
       "raw_name": "卖家支付运费(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "卖家支付运费(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 48,
+      "position": 50,
       "raw_name": "卖家支付运费",
       "required": false,
       "sample_type": "number",
       "display_name": "卖家支付运费",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
-    },
-    {
-      "aliases": [],
-      "position": 49,
-      "raw_name": "shopee运费补贴(RMB)",
-      "required": false,
-      "sample_type": "number",
-      "display_name": "shopee运费补贴(RMB)",
-      "semantic_key": null,
-      "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
-    },
-    {
-      "aliases": [],
-      "position": 50,
-      "raw_name": "shopee运费补贴",
-      "required": false,
-      "sample_type": "number",
-      "display_name": "shopee运费补贴",
-      "semantic_key": null,
-      "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
       "position": 51,
+      "raw_name": "虾皮运费补贴(RMB)",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "虾皮运费补贴(RMB)",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 52,
+      "raw_name": "虾皮运费补贴",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "虾皮运费补贴",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 53,
       "raw_name": "退货运费(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "退货运费(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 52,
+      "position": 54,
       "raw_name": "退货运费",
       "required": false,
       "sample_type": "number",
       "display_name": "退货运费",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 53,
+      "position": 55,
       "raw_name": "联盟佣金(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "联盟佣金(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 54,
+      "position": 56,
       "raw_name": "联盟佣金",
       "required": false,
       "sample_type": "number",
       "display_name": "联盟佣金",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 55,
+      "position": 57,
       "raw_name": "Shopee平台佣金(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "Shopee平台佣金(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 56,
+      "position": 58,
       "raw_name": "Shopee平台佣金",
       "required": false,
       "sample_type": "number",
       "display_name": "Shopee平台佣金",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
-    },
-    {
-      "aliases": [],
-      "position": 57,
-      "raw_name": "海外免退服务费(RMB)",
-      "required": false,
-      "sample_type": "number",
-      "display_name": "海外免退服务费(RMB)",
-      "semantic_key": null,
-      "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
-    },
-    {
-      "aliases": [],
-      "position": 58,
-      "raw_name": "海外免退服务费",
-      "required": false,
-      "sample_type": "number",
-      "display_name": "海外免退服务费",
-      "semantic_key": null,
-      "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
       "position": 59,
+      "raw_name": "物流+:海外免退服务费(RMB)",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "物流+:海外免退服务费(RMB)",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 60,
+      "raw_name": "物流+:海外免退服务费",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "物流+:海外免退服务费",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 61,
       "raw_name": "服务费(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "服务费(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 60,
+      "position": 62,
       "raw_name": "服务费",
       "required": false,
       "sample_type": "number",
       "display_name": "服务费",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 61,
+      "position": 63,
       "raw_name": "交易手续费(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "交易手续费(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 62,
+      "position": 64,
       "raw_name": "交易手续费",
       "required": false,
       "sample_type": "number",
       "display_name": "交易手续费",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 63,
+      "position": 65,
       "raw_name": "跨境税(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "跨境税(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 64,
+      "position": 66,
       "raw_name": "跨境税",
       "required": false,
       "sample_type": "number",
       "display_name": "跨境税",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 65,
+      "position": 67,
       "raw_name": "增值税(VAT)(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "增值税(VAT)(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 66,
+      "position": 68,
       "raw_name": "增值税(VAT)",
       "required": false,
       "sample_type": "number",
       "display_name": "增值税(VAT)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 67,
+      "position": 69,
       "raw_name": "预扣税(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "预扣税(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 68,
+      "position": 70,
       "raw_name": "预扣税",
       "required": false,
       "sample_type": "number",
       "display_name": "预扣税",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 69,
+      "position": 71,
       "raw_name": "3pl运费折扣(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "3pl运费折扣(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 70,
+      "position": 72,
       "raw_name": "3pl运费折扣",
       "required": false,
       "sample_type": "number",
       "display_name": "3pl运费折扣",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 71,
+      "position": 73,
       "raw_name": "包裹损失赔偿(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "包裹损失赔偿(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 72,
+      "position": 74,
       "raw_name": "包裹损失赔偿",
       "required": false,
       "sample_type": "number",
       "display_name": "包裹损失赔偿",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 73,
+      "position": 75,
       "raw_name": "卖家运费折扣(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "卖家运费折扣(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 74,
+      "position": 76,
       "raw_name": "卖家运费折扣",
       "required": false,
       "sample_type": "number",
       "display_name": "卖家运费折扣",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 75,
+      "position": 77,
       "raw_name": "退款金额(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "退款金额(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 76,
+      "position": 78,
       "raw_name": "退款金额",
       "required": false,
       "sample_type": "number",
       "display_name": "退款金额",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 77,
+      "position": 79,
       "raw_name": "采购成本(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "采购成本(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 78,
+      "position": 80,
       "raw_name": "采购成本",
       "required": false,
       "sample_type": "number",
       "display_name": "采购成本",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 79,
+      "position": 81,
       "raw_name": "运费成本(RMB)",
       "required": false,
       "sample_type": "number",
       "display_name": "运费成本(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 80,
+      "position": 82,
       "raw_name": "运费成本",
       "required": false,
       "sample_type": "number",
       "display_name": "运费成本",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
-    },
-    {
-      "aliases": [],
-      "position": 81,
-      "raw_name": "仓库操作费(RMB)",
-      "required": false,
-      "sample_type": "number",
-      "display_name": "仓库操作费(RMB)",
-      "semantic_key": null,
-      "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
-    },
-    {
-      "aliases": [],
-      "position": 82,
-      "raw_name": "仓库操作费",
-      "required": false,
-      "sample_type": "number",
-      "display_name": "仓库操作费",
-      "semantic_key": null,
-      "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
       "position": 83,
-      "raw_name": "广告成本(RMB)",
+      "raw_name": "仓库操作费(RMB)",
       "required": false,
-      "sample_type": "number",
-      "display_name": "广告成本(RMB)",
+      "sample_type": "string",
+      "display_name": "仓库操作费(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
       "position": 84,
+      "raw_name": "仓库操作费",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "仓库操作费",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 85,
+      "raw_name": "广告成本(RMB)",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "广告成本(RMB)",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 86,
       "raw_name": "广告成本",
       "required": false,
       "sample_type": "number",
       "display_name": "广告成本",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 85,
+      "position": 87,
       "raw_name": "运营成本(RMB)",
       "required": false,
       "sample_type": "string",
       "display_name": "运营成本(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 86,
+      "position": 88,
       "raw_name": "运营成本",
       "required": false,
       "sample_type": "string",
       "display_name": "运营成本",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 87,
+      "position": 89,
       "raw_name": "其他成本(RMB)",
       "required": false,
       "sample_type": "string",
       "display_name": "其他成本(RMB)",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     },
     {
       "aliases": [],
-      "position": 88,
+      "position": 90,
       "raw_name": "其他成本",
       "required": false,
       "sample_type": "string",
       "display_name": "其他成本",
       "semantic_key": null,
       "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_source": "inferred",
-      "semantic_review_status": "pending"
+      "hash_participates": false
     }
   ],
   "field_parse_rules": [
@@ -1351,13 +1175,7 @@
       "source_label": "下单时间",
       "target_field": "metric_date",
       "source_column": "下单时间",
-      "source_aliases": [
-        "order_date",
-        "下单日期",
-        "订单日期",
-        "下单时间"
-      ],
-      "format_candidates": []
+      "source_aliases": []
     }
   ],
   "notes": "DSS架构重构(v4.6.0)+ 核心字段去重(v4.14.0)"

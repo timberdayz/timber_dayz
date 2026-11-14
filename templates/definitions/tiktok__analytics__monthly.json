@@ -14,7 +14,7 @@
     "订单数",
     "客户数",
     "商品成交件数",
-    "退款金额",
+    "已退款的商品件数",
     "SKU 订单数",
     "总成交额",
     "页面浏览次数",
@@ -31,7 +31,6 @@
     "绑定账号直播归因 GMV",
     "商家直播 GMV",
     "商家直播间接 GMV",
-    "商品卡 GMV",
     "联盟视频归因 GMV",
     "达人视频 GMV",
     "达人视频间接 GMV",
@@ -71,37 +70,28 @@
       "semantic_review_status": "confirmed_semantic"
     },
     {
-      "aliases": [
-        "gmv",
-        "GMV"
-      ],
+      "aliases": [],
       "position": 1,
       "raw_name": "GMV",
       "required": false,
       "sample_type": "number",
       "display_name": "GMV",
-      "semantic_key": "gmv",
+      "semantic_key": null,
       "semantic_role": null,
       "hash_participates": false,
-      "semantic_review_status": "confirmed_semantic"
+      "semantic_review_status": "pending"
     },
     {
-      "aliases": [
-        "order_count",
-        "订单量",
-        "订单数",
-        "order count",
-        "orders"
-      ],
+      "aliases": [],
       "position": 2,
       "raw_name": "订单数",
       "required": false,
       "sample_type": "number",
       "display_name": "订单数",
-      "semantic_key": "order_count",
+      "semantic_key": null,
       "semantic_role": null,
       "hash_participates": false,
-      "semantic_review_status": "confirmed_semantic"
+      "semantic_review_status": "pending"
     },
     {
       "aliases": [],
@@ -130,10 +120,10 @@
     {
       "aliases": [],
       "position": 5,
-      "raw_name": "退款金额",
+      "raw_name": "已退款的商品件数",
       "required": false,
-      "sample_type": "number",
-      "display_name": "退款金额",
+      "sample_type": "string",
+      "display_name": "已退款的商品件数",
       "semantic_key": null,
       "semantic_role": null,
       "hash_participates": false,
@@ -176,39 +166,28 @@
       "semantic_review_status": "pending"
     },
     {
-      "aliases": [
-        "visitor_count",
-        "访客数",
-        "visitors",
-        "visitor count",
-        "商品访客数"
-      ],
+      "aliases": [],
       "position": 9,
       "raw_name": "商品访客数",
       "required": false,
       "sample_type": "number",
       "display_name": "商品访客数",
-      "semantic_key": "visitor_count",
+      "semantic_key": null,
       "semantic_role": null,
       "hash_participates": false,
-      "semantic_review_status": "confirmed_semantic"
+      "semantic_review_status": "pending"
     },
     {
-      "aliases": [
-        "conversion_rate",
-        "转化率",
-        "conversion rate",
-        "cvr"
-      ],
+      "aliases": [],
       "position": 10,
       "raw_name": "转化率",
       "required": false,
       "sample_type": "number",
       "display_name": "转化率",
-      "semantic_key": "conversion_rate",
+      "semantic_key": null,
       "semantic_role": null,
       "hash_participates": false,
-      "semantic_review_status": "confirmed_semantic"
+      "semantic_review_status": "pending"
     },
     {
       "aliases": [],
@@ -319,46 +298,12 @@
       "semantic_review_status": "pending"
     },
     {
-      "aliases": [
-        "live_gmv",
-        "商家直播 GMV",
-        "直播GMV",
-        "live gmv"
-      ],
+      "aliases": [],
       "position": 20,
       "raw_name": "商家直播 GMV",
       "required": false,
       "sample_type": "number",
       "display_name": "商家直播 GMV",
-      "semantic_key": "live_gmv",
-      "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_status": "confirmed_semantic"
-    },
-    {
-      "aliases": [
-        "live_indirect_gmv",
-        "商家直播间接 GMV",
-        "直播间接GMV",
-        "live indirect gmv"
-      ],
-      "position": 21,
-      "raw_name": "商家直播间接 GMV",
-      "required": false,
-      "sample_type": "number",
-      "display_name": "商家直播间接 GMV",
-      "semantic_key": "live_indirect_gmv",
-      "semantic_role": null,
-      "hash_participates": false,
-      "semantic_review_status": "confirmed_semantic"
-    },
-    {
-      "aliases": [],
-      "position": 22,
-      "raw_name": "商品卡 GMV",
-      "required": false,
-      "sample_type": "number",
-      "display_name": "商品卡 GMV",
       "semantic_key": null,
       "semantic_role": null,
       "hash_participates": false,
@@ -366,7 +311,19 @@
     },
     {
       "aliases": [],
-      "position": 23,
+      "position": 21,
+      "raw_name": "商家直播间接 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "商家直播间接 GMV",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 22,
       "raw_name": "联盟视频归因 GMV",
       "required": false,
       "sample_type": "number",
@@ -378,7 +335,7 @@
     },
     {
       "aliases": [],
-      "position": 24,
+      "position": 23,
       "raw_name": "达人视频 GMV",
       "required": false,
       "sample_type": "number",
@@ -390,7 +347,7 @@
     },
     {
       "aliases": [],
-      "position": 25,
+      "position": 24,
       "raw_name": "达人视频间接 GMV",
       "required": false,
       "sample_type": "number",
@@ -402,7 +359,7 @@
     },
     {
       "aliases": [],
-      "position": 26,
+      "position": 25,
       "raw_name": "绑定账号视频归因 GMV",
       "required": false,
       "sample_type": "number",
@@ -413,38 +370,28 @@
       "semantic_review_status": "pending"
     },
     {
-      "aliases": [
-        "video_gmv",
-        "商家视频 GMV",
-        "视频GMV",
-        "video gmv"
-      ],
-      "position": 27,
+      "aliases": [],
+      "position": 26,
       "raw_name": "商家视频 GMV",
       "required": false,
       "sample_type": "number",
       "display_name": "商家视频 GMV",
-      "semantic_key": "video_gmv",
+      "semantic_key": null,
       "semantic_role": null,
       "hash_participates": false,
-      "semantic_review_status": "confirmed_semantic"
+      "semantic_review_status": "pending"
     },
     {
-      "aliases": [
-        "video_indirect_gmv",
-        "商家视频间接 GMV",
-        "视频间接GMV",
-        "video indirect gmv"
-      ],
-      "position": 28,
+      "aliases": [],
+      "position": 27,
       "raw_name": "商家视频间接 GMV",
       "required": false,
       "sample_type": "number",
       "display_name": "商家视频间接 GMV",
-      "semantic_key": "video_indirect_gmv",
+      "semantic_key": null,
       "semantic_role": null,
       "hash_participates": false,
-      "semantic_review_status": "confirmed_semantic"
+      "semantic_review_status": "pending"
     }
   ],
   "field_parse_rules": [],

@@ -198,7 +198,8 @@
     "product_id",
     "platform_sku",
     "sku_id",
-    "order_id"
+    "order_id",
+    "订单状态"
   ],
   "core_fields": [
     {
@@ -224,6 +225,12 @@
       "raw_name": null,
       "required": false,
       "semantic_key": "order_id"
+    },
+    {
+      "in_hash": true,
+      "raw_name": "订单状态",
+      "required": false,
+      "semantic_key": null
     }
   ],
   "ignored_extra_fields": [],
