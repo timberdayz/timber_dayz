@@ -259,6 +259,18 @@ v7.26.0 的论证原文（`data_sync_status_semantics.py:271-282`）：
 | 定义差异守卫 | `apply_template_definitions.py --check` → **27/27 完全一致，0 差异，退出码 0**；**负向验证**：人为翻转 `core_fields[0].required` + 截断 `header_columns` → 精确检出两类差异并返回退出码 1，恢复后回到 0 |
 | 投影前置路径 | `apply_template_definitions.py --apply --dry-run` → 「仓库定义与库内实例一致, 无需投影」，退出码 0 |
 
+> [!IMPORTANT]
+> **后续修正（v7.29.2，2026-11-14 晚）**：上面两行的「27/27 完全一致」是在
+> **本机开发库**上测的 —— 批次 3 的定义基线是从开发库导出的。
+> 守卫真正装进生产镜像后（v7.29.1）第一次运行就报 **6 个维度不一致**：
+> 开发库与生产库本来就不一样，而且开发库的 `tiktok/orders/monthly` 是
+> §6 说的**诊断产物**（186 列 / `ignored_extra_fields=['商家成长服务费']`），
+> 生产真实文件与生产模板都只有 184 列。
+> ⇒ **基线已改从生产库重新导出**（6 份替换，其余 21 份字节级一致），
+> 上线后生产 `--check` ⇒ 27/27 一致、退出码 0。
+> ⇒ 本机开发库与仓库定义**继续不一致**（正常），不要拿开发库的 `--check` 当生产结论。
+> 详见 `CHANGELOG.md` v7.29.2 与 `docs/guides/TEMPLATE_GOVERNANCE_V2_RUNBOOK.md` §4.5.3。
+
 ### 7.3 口径回退与契约拆分的影响面（离线回放）
 
 回放脚本：`scripts/replay_drift_caliber.py`（**只读**，同一批文件、同一批表头，两套口径各跑一遍）。
