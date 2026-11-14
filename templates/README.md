@@ -156,6 +156,31 @@ python scripts/rebuild_inventory_snapshot_hash.py --verify           # 复核
 它的四道闸: 默认只读 / 逐行认领历史口径(认不出来就中止) /
 用**应用自身**的 hash 函数算(不手写哈希算法) / 写库前先备份。
 
+### 执行顺序: **先重建, 后投影**（别弄反）
+
+> [!IMPORTANT]
+> 顺序反了会**直接中止**, 不是「数据写坏」。
+
+重建脚本认领历史行时, 用的是**库里已发布模板**的 `deduplication_fields`
+(那才是历史行当初算 hash 用的字段集)。而新字段集取自**仓库里的定义文件**。
+
+⇒ 若**先投影模板**(库内模板的去重字段已改成新的), 再跑重建:
+历史行用新字段集认领 ⇒ **认不出来** ⇒ 脚本判定「口径没搞清楚」⇒ 中止, 一行不写。
+
+⇒ 正确顺序:
+
+| 步骤 | 命令 | 说明 |
+|---|---|---|
+| 1 | `rebuild_inventory_snapshot_hash.py --apply --backup-dir …` | 先重建: 此时库内模板还是旧口径, 历史行才认领得到 |
+| 2 | `apply_template_definitions.py --apply` | 再投影: 让库里模板与仓库定义一致 |
+| 3 | `rebuild_inventory_state_from_snapshots.py --full-rebuild` | 重刷状态层(mart), 让下游跟上 |
+
+两步之间尽量**没有采集入库**(否则采集按旧模板算 hash, 又会插新行)。
+实测生产 `ENABLE_COLLECTION=false`、窗口期内 `ingest_timestamp` 不变 ⇒ 安全。
+
+> 投影之后再重建, 脚本会走**幂等分支**: 认出「库里已全部是新口径」⇒ 报
+> 「无需重建」并退出 0, 不做任何写入 ⇒ 重复执行是安全的。
+
 ## 环境差异(overlay)
 
 基线定义覆盖所有环境。个别环境需要**少量**差异时, 用 overlay:
