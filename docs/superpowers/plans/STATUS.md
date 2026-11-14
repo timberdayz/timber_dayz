@@ -203,7 +203,7 @@ Walter 实际用了巡店面板后追问："既然硬件指纹改不了，那其
 | 项 | 证据 |
 |---|---|
 | tag | `v7.28.0`（附注标签，对象 `22b12f15`）→ 提交 `2613878d`；**双镜像 tag 对象一致**（GitHub 与 CNB 的 `git ls-remote --tags` 同为 `22b12f15` + `^{}` → `2613878d`） |
-| main | `2613878d`；**双镜像 main SHA 一致** |
+| main | 发版提交 `2613878d`；发布证据回填提交 `de6211fb`（**只在 main**，tag 不回填）；**双镜像 main SHA 一致** |
 | 部署流水线 | `Deploy to Production` run **43561988306** —— Tag Release **14m05s**，全部步骤 ✓（`Build and Push Images (Release Tag)` 8m44s） |
 | CI 流水线 | `CI Pipeline` 43561390999 **success**；`Validate Data Flow` 43561391000 success；`Docker Build and Push` 43561391013 success。中间一次红：43560913385 —— black 门禁（`tests/test_account_browser_identity_contract.py` 单行断言 91 列 > 88）⇒ 已由 `2613878d` 修 |
 | 生产镜像 | `backend_api` / `celery_worker` / `celery_beat` 全部 **v7.28.0** 且 healthy；`frontend` **v7.28.0** healthy；`nginx` healthy |
