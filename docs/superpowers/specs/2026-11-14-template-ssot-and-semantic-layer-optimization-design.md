@@ -3,7 +3,7 @@
 > 日期：2026-11-14
 > 触发：v7.29.3 ~ v7.29.5 上线后，对库存维度「模板更新后仍提示需要更新 + 仍有字段对不上」
 > 问题的复盘，顺带审出的一批存量债。
-> 状态：待评审。实施顺序见 §9。
+> 状态：待评审（等业务确认）。实施顺序见 §6。
 
 ---
 
@@ -11,23 +11,24 @@
 
 本方案是**一次存量债清理**，不是新功能。分两大部分：
 
-- **A 部分（SSOT 收敛）**：把「同一件事有两个说了算的地方」收敛掉，把「配置一漏就静默出错」的路堵死。
-  共 5 个动作，全部**不动生产数据**，代码与文档级改动。
-- **B 部分（性能治理）**：语义层原子视图里的**逐行标量函数调用（N+1）**。
+- **A 部分（性能治理）**：语义层原子视图里的**逐行标量函数调用（N+1）**。
   实测库存语义视图读一次 **197 ms**，底层表只要 **4.4 ms** ⇒ **45 倍**浪费。
-  这是本轮**最高价值**的一项。
+  这是本轮**最高价值**的一项。主方案 = **物化副本**（照搬仓库既有 3 个先例，口径零变化）。
+- **B 部分（SSOT 收敛）**：把「同一件事有两个说了算的地方」收敛掉，把「配置一漏就静默出错」的路堵死。
+  共 6 个动作（B1~B6），全部**不动生产数据**，代码与文档级改动。
 
 | # | 动作 | 性质 | 预估收益 | 风险 |
 |---|---|---|---|---|
-| A1 | 语义层视图消除逐行函数调用 | 性能 | 库存视图 197ms → 61ms（①②，已实测）→ ≤15ms（③④） | 中（需逐字等价验证） |
+| A1 | 语义层库存视图**物化副本**（照搬仓库既有 3 个先例，口径零变化） | 性能 | 库存取数 197ms → **毫秒级**；一次解决 4 处逐行结构 | 中（刷新顺序 + 判据要跟着改） |
+| A2 | 物化视图的**刷新路径**优化（集合函数，降级为可选） | 性能 | REFRESH 成本再降；当前 197ms 不痛 | 低 |
 | B1 | 删掉域默认去重字段表（死代码） | SSOT | 堵死「漏配 ⇒ 算出错身份」静默路 | 低 |
 | B2 | 清单 `in_hash` == 去重字段表，一致性检查推广到 27 维度 | SSOT | 防两处声明漂移 | 极低 |
 | B3 | `SYNC_CORE_FIELDS_HASH_ENABLED` 加前置门禁 | 防呆 | 堵死「一键切口径」 | 低 |
 | B4 | 规格 §3.1 表述修正 | 文档 | 防「照规格改实现」⇒ 又一次全量重建 | 极低 |
 | B5 | 语义契约 consumer 补登记 | 可查性 | 让「改了字段影响谁」查得到 | 低 |
-| B6 | 物理列通路去留（待定） | 待决策 | 少一份数据源 | 中（涉生产数据） |
+| B6 | 物理列通路**宣告弃用**（业务已拍板：无外部系统直查） | SSOT | 业务字段不再双份存储 | 低（只关新写入，不删列） |
 
-**明确不做**（理由见 §10）：lint/格式全量清理、`VERSION` 文件同步、命名体系统一。
+**明确不做**（理由见 §10）：lint/格式全量清理、`VERSION` 文件同步、命名体系统一、**改写语义层视图正文**（物化副本已把它挤出请求路径）。
 
 ---
 
@@ -126,6 +127,46 @@ upsert 互相覆盖 ⇒ **一天只剩一行**，而且不报错。
 `analytics_monthly_atomic_mv`(27) / `products_atomic`(13) / `metabase_orders_model`(198) 等
 **全部原子层视图** ⇒ 654 万次扫描的根源在这里。
 
+**F12b — 仓库已经有 3 个「同构先例」：普通视图 + 物化副本。**
+`refresh_registry.py` 的注释原文：
+
+> 原子层的物化副本：正文与普通视图完全一致（`SELECT *`），只把「每行跑一次店铺别名解析」
+> 从请求路径搬到刷新路径。口径零变化。
+>
+> 商品原子层的物化副本（2026-11-05）：商品日 KPI 读普通视图时每次请求都要重做
+> 「多表 UNION + 逐行 JSON 解析 + 逐行身份解析」（**生产实测 14.1 秒**），
+> 物化后请求侧毫秒级。正文 = 普通视图正文（`SELECT *`）⇒ 口径零变化。
+
+已有三对：
+
+| 普通视图（正本） | 物化副本 | 下游读谁 |
+|---|---|---|
+| `semantic.fact_orders_atomic` | `semantic.fact_orders_atomic_mv` | `mart.platform_day_kpi` 等直接读 `_mv` |
+| `semantic.fact_analytics_atomic` | `semantic.fact_analytics_atomic_mv` | 同上 |
+| `semantic.fact_products_atomic` | `semantic.fact_products_atomic_mv` | `mart.product_day_kpi` |
+
+⇒ **库存是同一类问题的第 4 个**，解法已被验证过（14.1 秒 → 毫秒级）。
+
+**F12c — 物化视图的刷新基础设施已齐备，不需要从零搭。**
+`backend/services/data_pipeline/refresh_runner.py::_refresh_materialized_view()`：
+- 目标名匹配 `_mv` ⇒ 自动走 `REFRESH MATERIALIZED VIEW`（**不执行**资产文件里的 `DROP ... CASCADE`）
+- `pg_try_advisory_xact_lock` 刷新互斥锁（并发刷新安全）
+- 语句超时临时抬到 **10 分钟**（因为 REFRESH 全量重算；生产实测订单 MV 刷一次 115 秒）
+- REFRESH 后自动补齐资产文件里的 `CREATE INDEX IF NOT EXISTS`
+- MV 不存在时**回落**去跑资产文件（资产自带「存在则 REFRESH / 不存在则 CREATE」的自愈）
+- `refresh_registry.PIPELINE_DEPENDENCIES` 管刷新顺序，`ASSET_PREREQUISITES` 管建对象前置
+
+**F12d — 物化化会牵动两处「容易漏」的判据。**
+1. `backend/tasks/refresh_queue_tasks.py:136`
+   ```python
+   INVENTORY_FACT_TARGET = "semantic.fact_inventory_snapshot"
+   ```
+   这是「本次刷新有没有动库存事实 ⇒ 状态层要不要跟着重算」的**判据**。
+   ⇒ 下游改读物化副本后，这个判据必须跟着指向 `_mv`，否则**状态层不会被触发刷新**
+   ⇒ 库龄不推进、滞销榜不更新（且不报错）。
+2. `refresh_queue_tasks.py:387-397` 的顺序必须保证
+   `物化副本 REFRESH` → `InventoryStateRefreshService.refresh()` → `InventoryAgeRefreshService.refresh()`。
+
 **F13 — `SYNC_CORE_FIELDS_HASH_ENABLED` 的真实语义**（与我先前的担心不同）：
 打开后**不改变 hash 的字段集合**（集合仍由 `deduplication_fields` 决定，
 `deduplication_service.py:365` 的 docstring 明写「绝不自己重建集合」），
@@ -153,7 +194,7 @@ upsert 互相覆盖 ⇒ **一天只剩一行**，而且不报错。
 
 1. **一条规则，一个说了算的地方。** 同一件事不得在两处独立声明。
 2. **静默出错的路必须堵死。** 「拿不到值就悄悄算个别的」比「明确报错」危险得多。
-3. **行为不变的优化优先。** 视图改写必须**输出逐字相同**；先证明等价，再谈提速。
+3. **口径零变化优先。** 物化副本正文 = 正本正文（`SELECT *`）⇒ 天然逐字相同；任何**改写正本表达式**的提速方案，都要逐字等价验证才准入。
 4. **预发布期不做大范围重构。** 只做能独立验证、能独立回滚的改动。
 5. **保留「半迁移库能建起来」的兜底语义**，直到有替代方案（见 A1 的取舍）。
 
@@ -163,7 +204,10 @@ upsert 互相覆盖 ⇒ **一天只剩一行**，而且不报错。
 
 ### 3.1 目标
 
-消除语义层原子视图里的 **N+1 逐行调用**：把「每行查一次小表」改成「一次算好集合 + 行级内存判断」。
+把「每次请求都重算一遍标准化」变成「刷新时算一次、请求时读快照」。
+
+- **主方案：物化副本** —— 照搬仓库既有的 3 个先例（见 F12b），**口径零变化**
+- **A2（可选）：改写表达式** —— 把逐行函数改成集合判断，降级为「刷新路径」的优化
 
 ### 3.2 涉及的四个逐行结构（库存视图实测）
 
@@ -177,124 +221,149 @@ upsert 互相覆盖 ⇒ **一天只剩一行**，而且不报错。
 ①② 的单次代价实测：`is_collection_source_identifier` 54.3 ms / 3855 次；
 `resolve_warehouse_code` 52.4 ms / 3855 次。
 
-### 3.3 改法
+### 3.3 主方案：物化副本（口径零变化）
 
-**A1-①② —— 一次性取集合，行级做内存判断。**
-
-新增两个「返回集合」的函数（沿用现有函数的 `to_regclass` 兜底写法，
-保证迁移未跑的环境仍能建视图、行为不变）：
+照搬 `sql/semantic/analytics_atomic_mv.sql` 的既有写法：
 
 ```sql
--- 采集方代号集合（替代逐行 is_collection_source_identifier）
-CREATE OR REPLACE FUNCTION semantic.collection_source_identifier_set()
-RETURNS TEXT[] LANGUAGE plpgsql STABLE AS $$
+-- sql/semantic/inventory_snapshot_mv.sql
+CREATE SCHEMA IF NOT EXISTS semantic;
+
+DO $$
 BEGIN
-    IF to_regclass('core.collection_source_identifiers') IS NULL THEN
-        RETURN ARRAY[]::TEXT[];
+    IF to_regclass('semantic.fact_inventory_snapshot_mv') IS NULL THEN
+        EXECUTE 'CREATE MATERIALIZED VIEW semantic.fact_inventory_snapshot_mv
+                 AS SELECT * FROM semantic.fact_inventory_snapshot';
+    ELSE
+        EXECUTE 'REFRESH MATERIALIZED VIEW semantic.fact_inventory_snapshot_mv';
     END IF;
-    RETURN ARRAY(SELECT csi.identifier FROM core.collection_source_identifiers csi
-                  WHERE csi.is_active);
-END;
+END
 $$;
 
--- 仓名 -> 仓码 映射（替代逐行 resolve_warehouse_code）
-CREATE OR REPLACE FUNCTION semantic.warehouse_code_map()
-RETURNS JSONB LANGUAGE plpgsql STABLE AS $$
-BEGIN
-    IF to_regclass('core.dim_warehouse_name_aliases') IS NULL THEN
-        RETURN '{}'::JSONB;
-    END IF;
-    RETURN COALESCE((
-        SELECT jsonb_object_agg(a.source_warehouse_name, a.warehouse_code)
-          FROM core.dim_warehouse_name_aliases a), '{}'::JSONB);
-END;
-$$;
+CREATE INDEX IF NOT EXISTS ix_fact_inventory_snapshot_mv_gran_date
+    ON semantic.fact_inventory_snapshot_mv (granularity, metric_date, platform_code);
+CREATE INDEX IF NOT EXISTS ix_fact_inventory_snapshot_mv_hash
+    ON semantic.fact_inventory_snapshot_mv (platform_code, shop_id, data_hash);
 ```
 
-视图里改成：
+**为什么物化副本优于改写表达式**
 
-```sql
--- CTE 顶部一次算好
-lookup AS (
-    SELECT semantic.collection_source_identifier_set() AS csi_ids,
-           semantic.warehouse_code_map() AS wh_map
-),
-...
--- 行级判断（原逐行函数调用 → 内存判断）
-WHEN LOWER(COALESCE(...)) = ANY((SELECT csi_ids FROM lookup))
-THEN 'unknown'
-...
-COALESCE(warehouse_code, (SELECT wh_map ->> warehouse_name FROM lookup))
-```
-
-**要点**：
-- 兜底语义**逐字保留**（表不存在 ⇒ 空集合/空 map ⇒ 行为与现在完全一致）
-- 函数体内仍是 plpgsql + `to_regclass`，**不引入动态 SQL**（遵守 SQL 资产约定）
-- ⚠️ **CTE 必须写 `MATERIALIZED`** —— Postgres 会把只引用一次的非递归 CTE **内联展开**，
-  内联后「一次算好集合」就退化成「每行调一次函数」，等于没改。**实测见下。**
-
-**A1-①② 已实测验证（开发库，3855 行，2026-11-14）**
-
-| 写法 | 耗时 |
-|---|---|
-| A. 现状：逐行调 `is_collection_source_identifier` | **90.3 ms** |
-| B. CTE **不加** `MATERIALIZED`（被内联） | 13.0 ms |
-| C. CTE **加** `MATERIALIZED`（只求值一次） | **2.4 ms** |
-| D. 现状：逐行调 `resolve_warehouse_code` | **56.8 ms** |
-| E. `warehouse_code_map` 一次取 + 内存查 | **8.4 ms** |
-
-- **等价性校验**：逐行判定命中 3855 行 = 集合判定命中 3855 行 ⇒ **逐字一致**
-- **集合函数返回值抽查**：
-  `collection_source_identifier_set()` = `['xihong','miaoshou_real_001','unknown','none','']`；
-  `warehouse_code_map()` = 5 个仓名 → 仓码
-- **收益**：两个函数合计 147.1 ms → 10.8 ms ⇒ **省 136 ms**
-- ⇒ 库存视图 197 ms → **约 61 ms**（只做 ①②）；做完 ③④ 才有望进 15 ms
-
-⇒ 这也印证了 §3.2 的判断：**MATERIALIZED 是这个改法的成败关键，不是可选项。**
-
-**A1-③④ —— 候选池物化 + scoped CTE 外提。**
-
-- ③：把 `shop_identity_resolution_candidates_v2_mv` 的引用从「逐行标量相关子查询」
-  改成「视图顶部一次取候选集合」
-- ④：`scoped` CTE 从相关子查询里提到外层，做成一次性物化的候选集合
-- ⚠️ 这两项触及身份候选池的口径 ⇒ **必须单独一批**，且要有逐字等价测试
-
-**A2 —— 索引补齐（便宜的先做）**
-
-| 表 | 现状 | 建议 |
+| | 改写表达式（原 A1） | 物化副本（主方案） |
 |---|---|---|
-| `core.collection_source_identifiers` | 只有 `identifier` 唯一索引 | 加 `(is_active, identifier)` 或确认 pkey 足够 |
-| `core.dim_warehouse_name_aliases` | `source_warehouse_name` 唯一索引 ✓ | 无需加 |
-| `semantic.semantic_field_aliases` | `(data_domain, standard_field, status)` ✓ | `resolve_alias` 还按 platform/granularity 过滤 ⇒ 评估补 `(data_domain, standard_field, status, platform_code, granularity)` |
+| 读性能 | 197 → 61 ms（还要再处理 ③④） | **毫秒级**（③④ 一并消失：整个计算被搬到刷新时） |
+| 口径风险 | 要逐字改写表达式 ⇒ 必须逐字等价验证 | **零**（正文 `SELECT *`，口径一个字不动） |
+| 数据新鲜度 | 实时 | 快照 ⇒ 靠刷新队列保证 |
+| 改动面 | 1 个视图 + 2 个函数（**要动正本**） | 1 个新资产 + 几处登记（**正本不动**） |
+| 仓库先例 | 无 | **3 个**（orders / analytics / products） |
+
+⇒ 物化副本在「口径零变化」这点上明显更安全，性能也更好 ⇒ **选它**。
+
+**必须配套的改动（漏任何一处都会静默出错）**
+
+1. **新增资产** `sql/semantic/inventory_snapshot_mv.sql`（内容见上）
+2. **`backend/services/data_pipeline/refresh_registry.py`**（**四处登记，缺一处就静默失配**）
+   - `SQL_TARGET_PATHS` 增加
+     `"semantic.fact_inventory_snapshot_mv": "sql/semantic/inventory_snapshot_mv.sql"`
+   - `PIPELINE_DEPENDENCIES` 增加
+     `"semantic.fact_inventory_snapshot_mv": ["semantic.fact_inventory_snapshot"]`
+     （正本先刷、副本再刷）
+   - `ASSET_PREREQUISITES` 增加
+     `"semantic.fact_inventory_snapshot_mv": ["semantic.fact_inventory_snapshot"]`
+     （副本的建对象前置 = 正本）
+   - 下游依赖改指副本：
+     `"mart.inventory_snapshot_history": ["semantic.fact_inventory_snapshot_mv"]`、
+     `"mart.inventory_current": ["semantic.fact_inventory_snapshot_mv"]`、
+     `"mart.inventory_state": ["semantic.fact_inventory_snapshot_mv"]`
+   - ⚠️ **`_base_targets_for_refresh_domain()` 的 inventory 分支**（`refresh_registry.py:448-449`）
+     现在只返回 `["semantic.fact_inventory_snapshot"]`
+     ⇒ **刷新计划里根本不会出现副本** ⇒ 副本永远不被 REFRESH ⇒ 读的是上一次快照。
+     照搬 orders/products 分支的写法（那两个分支的注释原文就是
+     「物化副本必须显式列出来……副本不在链上 ⇒ 页面会永远读着一份旧快照」）：
+     ```python
+     if domain == "inventory":
+         return [
+             "semantic.fact_inventory_snapshot",
+             "semantic.fact_inventory_snapshot_mv",
+         ]
+     ```
+3. **下游视图正文改读物化副本**
+   `sql/mart/inventory_snapshot_history.sql` 与 `sql/mart/inventory_current.sql` 的
+   `FROM semantic.fact_inventory_snapshot` → `FROM semantic.fact_inventory_snapshot_mv`
+   （`mart.inventory_state` 是**表**：资产文件建表 + `InventoryStateRefreshService` upsert，
+   不是视图，不改它的正文）
+4. ⚠️ **`backend/tasks/refresh_queue_tasks.py:136` 的判据**
+   ```python
+   # 现在: INVENTORY_FACT_TARGET = "semantic.fact_inventory_snapshot"
+   # 改成: 正本或副本，命中任一即算「动了库存事实」
+   INVENTORY_FACT_TARGETS = {
+       "semantic.fact_inventory_snapshot",
+       "semantic.fact_inventory_snapshot_mv",
+   }
+   ```
+   这是「本次刷新有没有动库存事实 ⇒ 状态层要不要跟着重算」的**判据**。
+   **漏改 ⇒ 状态层不再被触发刷新 ⇒ 库龄不推进、滞销榜不更新，而且不报错。**
+   ⇒ 判据取「**任一命中**」而不是「直接改成副本」：刷新计划里两者都可能出现，
+   只认一个 ⇒ 另一种触发方式就会漏。
+5. ⚠️ **刷新顺序**：`refresh_queue_tasks.py:387-397` 必须保证
+   `物化副本 REFRESH` → `sync_inventory_skus` → `InventoryStateRefreshService.refresh()`
+   → `InventoryAgeRefreshService.refresh()`。
+
+**为什么第 4、5 步特别危险**：它们**不报错**。状态层没被刷新时，页面照常显示旧数据，
+没有任何告警 ⇒ 只能靠守护测试锁住（见 3.4）。
+
+**刷新基础设施已齐备（F12c）**，不需要新造轮子：
+`refresh_runner._refresh_materialized_view()` 已实现「识别 `_mv` 目标 → REFRESH（不跑
+资产文件的 DROP CASCADE）→ advisory lock → 超时抬到 10 分钟 → 补索引 → 不存在时回落
+跑资产文件自愈」。
 
 ### 3.4 验收标准
 
-1. **逐字等价**：改写前后，语义层视图的**全量输出**（所有列、所有行、按 `data_hash` 排序）
-   必须逐字节相同 ⇒ 用一条比对 SQL 做守护测试
-2. **性能**（分两档，因为 ①② 与 ③④ 是两步）：
-   - 只做 ①②（批次 1a）：库存视图 `count(*)` 从 197 ms 降到 **≤70 ms**
-   - 做完 ③④（批次 1b）：降到 **≤15 ms**
-3. **兜底不变**：在「`core.collection_source_identifiers` 不存在」的库上，视图仍能建起来，
-   且输出与改写前一致
-4. **回归**：data_pipeline 全量测试通过；`backend/tests/data_pipeline/test_inventory_warehouse_identity_ssot.py`
-   与 `test_identity_candidates_materialization.py` 通过
+1. **行数一致**：物化副本行数 == 正本行数（生产 3855）
+2. **下游不受影响**：`mart.inventory_snapshot_history` / `mart.inventory_current` /
+   `mart.inventory_state` 行数与改前一致（3855 / 1122 / 1232）
+3. **性能**：
+   - 读物化副本：`EXPLAIN ANALYZE` **≤5 ms**
+   - `REFRESH MATERIALIZED VIEW` 耗时 **≤1 秒**（当前全量重算 197 ms）
+4. **刷新链路通**（**最关键的一项**）：
+   - 造一行新事实 → 触发刷新 → 物化副本能见到 ⇒ 刷新没有断
+   - 触发一次库存域刷新 ⇒ `_should_refresh_inventory_layers` 返回 `True`
+     ⇒ 状态层确实跟着重算了（**这条专门盯第 4 步的判据**）
+5. **守护测试**（扩展既有 `backend/tests/data_pipeline/test_atomic_materialized_views.py`，不新起炉灶）：
+   - 把库存这一对加进既有清单 `MATERIALIZED_VIEW_ASSETS`（三元组 `(副本, 正本, 资产文件)`）
+     ⇒ 自动继承既有断言：「已登记到 `SQL_TARGET_PATHS`」「`PIPELINE_DEPENDENCIES[副本] == [正本]`」
+     「正文必须是 `SELECT * FROM <正本>`」「刷新计划里副本排在消费方之前」
+   - 新增：`_base_targets_for_refresh_domain("inventory")` 必须包含副本
+   - 新增：判据必须**同时**认正本与副本（任一命中即触发状态层刷新）
+   - 新增：所有读 `semantic.fact_inventory_snapshot` 的下游 mart / api 资产都改读 `_mv`
+6. **回归**：data_pipeline 全量测试通过；
+   `test_inventory_warehouse_identity_ssot.py` / `test_identity_candidates_materialization.py` 通过
 
 ### 3.5 风险与回滚
 
-| 风险 | 应对 |
-|---|---|
-| 改写后输出与原来不一致（静默） | **逐字等价测试是硬门禁**，不通过就不合 |
-| 集合语义与逐行语义有细微差别（如 NULL、大小写、空白） | 改写时**逐字复用现有表达式**；空值/空白/大小写各有专门断言 |
-| 候选池口径改动影响身份判定 | ③④ 单独一批，先只做性能不改口径；口径改动另立任务 |
+| 风险 | 等级 | 应对 |
+|---|---|---|
+| **判据漏改** ⇒ 状态层不再刷新，库龄/滞销变陈旧且不报错 | **高** | 守护测试锁住判据「正本+副本都认」；上线后手动验证一次刷新链路 |
+| **刷新目标里没有副本** ⇒ 副本永远不 REFRESH，页面读旧快照 | **高** | 守护测试锁住 `_base_targets_for_refresh_domain` 必须含副本；验收第 4 项实测 |
+| **刷新顺序断了** ⇒ 状态层读到上一版物化副本 | **高** | 守护测试锁住 `PIPELINE_DEPENDENCIES` 顺序；验收第 4 项实测 |
+| 物化副本与正本口径漂移 | 低 | 正文是 `SELECT *` ⇒ 口径**不可能**漂移；反倒是正本改了会跟着变 |
+| `REFRESH` 全量重算持锁 | 低 | 3855 行 ≈ 197 ms；refresh_runner 已有 advisory lock 与 10 分钟超时预算 |
+| 物化副本占存储 | 低 | 与正本同量级（3855 行），可接受 |
+| 采集恢复后陈旧窗口 | 低 | 当前 `ENABLE_COLLECTION=false` ⇒ 此刻陈旧风险为零；采集恢复后由刷新队列覆盖（验收第 4 项覆盖） |
 
-**回滚**：视图是 `CREATE OR REPLACE` 资产 ⇒ 回滚 = 还原 SQL 文件 + 重新执行资产。
-无数据变更、无 schema 变更 ⇒ 回滚零风险。
+**回滚**：物化副本是**新增**资产 ⇒ 回滚 = 删副本 + 下游改回读正本 + 撤登记。
+正本视图一个字没动 ⇒ 回滚不影响口径、不影响数据。
 
-### 3.6 推广路径
+### 3.6 A2（可选）：把「集合函数」改写用在刷新路径上
 
-库存视图是试点（最简单、已有 13 项清单、有明确对照）。
-①②③④ 的改法可复用到 `orders_atomic` / `analytics_atomic` / `products_atomic`
-（`resolve_alias` 的 654 万次扫描在那一侧，见 F12）。
+**为什么降级**：物化副本成立后，**读侧**不再需要改写表达式（读的是快照）。
+而**刷新侧**的成本是 197 ms（3855 行全量重算）⇒ 并不痛。
+
+⇒ 原方案里的「集合函数 + `MATERIALIZED` CTE」改写，**收益几乎归零**：
+它能省的是 REFRESH 的 197 ms ⇒ 只有当库存数据量涨一个量级、REFRESH 变成秒级时才值得做。
+
+**保留它的唯一理由**：A1 落地后若 REFRESH 变慢，或要推广到
+`orders_atomic` / `analytics_atomic` / `products_atomic`（那里有 654 万次 `resolve_alias` 扫描），
+这套改写就是「降低刷新成本」的手段。
 
 ⚠️ **`resolve_alias` 的推广另立任务**：它的优先级排序逻辑（platform 匹配 > granularity 匹配 >
 confidence > source 类型 > id）复制到 SQL 里有「第二份口径」风险 ⇒ 必须先把口径抽成
@@ -394,29 +463,55 @@ inventory 域只有 6 条，`importance` 全 `optional`，`consumer` 只有 `bus
 
 **风险**：低（纯数据，可回滚）。
 
-### B6 — 物理列通路的去留（**待决策，不在本次范围**）
+### B6 — 物理列通路：**宣告弃用**（业务已拍板 2026-11-14）
 
-**问题**（F8、F9）：26 个业务物理列全 NULL；3 个表头列没有物理列；1 个重复列 `商品`；
-而**没有任何代码或 SQL 读这些列**。数据都在 `raw_data` 里，语义层/状态层/接口全部走 `raw_data`。
+**业务结论**：**没有外部系统直查**（Metabase 是历史遗留、不在活跃运行时；仓库内静态搜索零命中）
+⇒ 库存维度**不再建业务物理列**，业务字段只存 `raw_data`（JSONB）。
 
-**两条出路**
+**事实**（F8、F9）：26 个业务物理列全部 NULL；表头 28 列里 3 列（次品库存/暂存库存/备注）
+**没有物理列**，另多出一个重复列 `商品`（与 `商品SKU` 同语义）；
+而语义层/状态层/接口**全部走 `raw_data`** ⇒ 那 26 个空列是**一条没人走的通路的遗留物**。
 
-| 方案 | 动作 | 代价 | 适合什么时候 |
-|---|---|---|---|
-| **甲：宣告弃用** | 库存维度不再建业务物理列；把 `core_fields` 的 `raw_name` 声明改成「仅声明需求、不落列」；现存 26 个空列标注为历史遗留 | 极低（文档 + 一处开关） | 确认没有外部系统在直查这些列 |
-| **乙：保留并回填** | 用应用自身 `resolve_target_column` 算列名，把 `raw_data` 的 13 项值回填进物理列；补 3 个缺失列；清掉重复的 `商品` 列 | 中（新脚本 + 生产写库 + 备份） | 确认有 BI/外部系统在直查 |
+**⚠️ 一个容易搞反的技术点**（此处更正早前的口头口径）：`SYNC_CORE_FIELDS_CORE_COLUMNS_ENABLED`
+（`core_fields_service.py:586-607`）是**「收窄」开关，不是「要不要存物理列」开关**：
 
-**决策所需事实**：有没有外部系统（BI、ERP 对接、Excel 导出）直查
-`b_class.fact_miaoshou_inventory_snapshot` 的业务列？
-⇒ AGENTS.md 说 Metabase 是历史遗留、不在活跃运行时 ⇒ 仓库内已确认为「无」。
-⇒ **但仓库外（运营手工导数、外部 BI）查不到 ⇒ 这一条需要业务确认。**
+| 开关值 | 实际行为 |
+|---|---|
+| 默认（开） | 只为**清单里的核心字段**建物理列（其余只进 `raw_data`） |
+| 关 | **旧行为：所有表头列都建列** —— 建得**更多**，不是更少 |
 
-**如果选甲**，还需配套：
-- 核心字段清单的 `raw_name` 语义要重新定义（当前它同时驱动「落列」和「阻断」）
-- `core_field_storage_column_names()` 的调用方要能区分「落列」与「不落列」
+⇒ 「把默认改成关」会让物理列**变多**，方向正好相反。
+真正要表达「不存业务物理列」，得让入库侧传**空清单**而不是 `None`：
+`core_columns=[]` ⇒ `dynamic_column_manager.ensure_columns_exist()` 里
+`core_column_set` 为空集 ⇒ **一列都不建**；而 `None` ⇒ 全建。
 
-⇒ **建议：先只做诊断（产出一份「谁在读这些列」的清单，含仓库内 + 部署后的访问统计），
-再在甲/乙之间拍。** 本方案不预设结论。
+**改法**
+
+1. **新增开关** `SYNC_CORE_FIELDS_PHYSICAL_COLUMNS_ENABLED`（默认**关**）：
+   - 关 ⇒ 入库侧传 `core_columns=[]` ⇒ 不建任何业务物理列，只写 `raw_data`
+   - 开 ⇒ 恢复现状（只为核心字段建列）
+   ⇒ 默认值即弃用语义，且保留一键回退
+2. **把「存不存列」与「缺列要不要阻断」解耦**：
+   - 阻断判定走的是 `template_matcher._required_raw_fields()` →
+     `classify_drift(required_core_fields=...)`，它比对的是**上传文件的表头 vs 清单**
+     ⇒ 与「库里有没有这列」**本来就没有耦合**。
+   - 要做的是**把这个事实锁住**：新增守护测试断言「物理列关掉后，缺必填列仍然阻断」
+     ⇒ 防止后人把两件事重新绑在一起。
+3. **现存 26 个空列：保留 + 标注废弃，不删列**
+   （删列不可逆；留着零成本；`raw_data` 里 3855/3855 行全有值，数据没丢）
+4. **文档同步**：`templates/README.md` 与本方案写明「库存维度物理列已废弃，
+   业务字段只在 `raw_data` 里」；表头 28 列与物理列的差异（3 列缺失 / 1 列重复）
+   记入 §10 存量债，**不在本次修**（改表结构要迁移 + 生产写库，收益为零）。
+
+**验收**
+
+- 开关关 ⇒ 新入库的行**不新增任何业务物理列**（比对 `pg_attribute` 列数不变）
+- 开关关 ⇒ 缺必填列**仍然阻断**（守护测试覆盖）
+- 开关开 ⇒ 行为与今天**逐字一致**（回归）
+- 语义层 / 状态层 / 接口输出**不变**（3855 / 1122 / 1232 行数与内容一致）
+
+**风险**：低。理由：① 无人读这些列；② 数据在 `raw_data` 里没丢；
+③ 存量列不删、不改；④ 开关可一键回退。
 
 ---
 
@@ -429,19 +524,25 @@ inventory 域只有 6 条，`importance` 全 `optional`，`consumer` 只有 `bus
 | 命名体系全局统一（原始表头 ↔ 语义键对照表） | V2 大工程（27 维度 × 字段语义判定），预发布期不做。**但要立项**：它才是「清单只能声明语义键 / 只能声明原始名」的根因 |
 | 让 `in_hash` 真正决定 hash 字段集合 | 会让 27 个维度的 hash 口径全变 ⇒ 又一次全量重建。**不做**；改为「一致性声明 + B2 检查」 |
 | `resolve_alias` 优先级口径搬到 SQL | 会制造第二份口径 ⇒ 违反 SSOT。需先把口径抽成单一表达式，另立任务 |
+| **改写语义层视图正文**（集合函数 + `MATERIALIZED` CTE） | 物化副本成立后，④ 类结构已被整段搬出请求路径；改写正本表达式会引入口径风险、收益归零。降级为 A2 可选项（见 §3.6） |
+| **删掉现存 26 个空物理列** | 删列不可逆；无人读、零成本、数据在 `raw_data` 里。保留 + 标注废弃即可 |
 
 ---
 
 ## 6. 执行批次
 
-### 批次 1a（性能，最高价值，先做）
-1. A1-①②：两个「集合函数」 + 库存语义层视图改写（**CTE 必须 `MATERIALIZED`**）+ 逐字等价守护测试
-2. A2：索引补齐评估与实施
-3. **验收**：库存视图 197ms → ≤70ms；视图输出逐字相同；data_pipeline 全量通过
-
-### 批次 1b（性能续做）
-1. A1-③④：候选池物化 + `scoped` CTE 外提（口径不动）
-2. **验收**：库存视图 → ≤15ms；身份候选池相关守护测试全过
+### 批次 1（性能，最高价值，先做）
+1. **A1：库存语义视图物化副本**
+   - 新增资产 `sql/semantic/inventory_snapshot_mv.sql`（照搬 `sql/semantic/analytics_atomic_mv.sql`）
+   - `refresh_registry.py` **四处登记**：`SQL_TARGET_PATHS` / `PIPELINE_DEPENDENCIES` /
+     `ASSET_PREREQUISITES` / `_base_targets_for_refresh_domain` 的 inventory 分支
+   - 下游改读副本：`sql/mart/inventory_snapshot_history.sql`、`sql/mart/inventory_current.sql`
+   - 判据 `refresh_queue_tasks.py:136` 改成「正本或副本命中任一」
+   - 守护测试：把库存这一对加进 `test_atomic_materialized_views.py` 的既有清单 + 3 条新断言
+2. **验收**：读副本 ≤5 ms；副本行数 = 3855 = 正本行数；
+   下游 3855 / 1122 / 1232 行数不变；**刷新链路实测通**（造数据 → 副本见到 → 判据为真 → 状态层重算）；
+   data_pipeline 全量通过
+3. **A2（可选，不阻塞）**：刷新路径上的集合函数改写 —— 只在 REFRESH 变慢时才做
 
 ### 批次 2（SSOT，不碰生产数据）
 1. B1：删域默认 + 显式失败 + 守护测试
@@ -450,13 +551,18 @@ inventory 域只有 6 条，`importance` 全 `optional`，`consumer` 只有 `bus
 4. B4：规格 §3.1 表述修正
 5. **验收**：库存维度「故意清空 dedup ⇒ 明确报错」；27/27 一致性检查通过；开关门禁两条路径都测到
 
-### 批次 3（可查性 + 决策材料）
-1. B5：consumer 补登记（先核真实标识）
-2. B6 诊断：产出一份「谁在读业务物理列」的清单（仓库内静态搜索 + 生产访问统计 + 待业务确认项）
-3. **验收**：治理看板可查库存影响面；B6 决策材料齐备
+### 批次 3（物理列弃用 + 可查性）
+1. **B6**：新增 `SYNC_CORE_FIELDS_PHYSICAL_COLUMNS_ENABLED`（默认关）
+   + 「存列 / 阻断」解耦守护测试 + 26 个空列标注废弃（**不删列、不改表结构**）
+2. B5：consumer 补登记（先核真实标识）
+3. **验收**：开关关 ⇒ 新入库不再新增业务物理列；缺必填列仍阻断；
+   治理看板可查库存影响面（4 个 consumer）
 
-### 批次 4（决策后执行）
-按 B6 的甲/乙结论执行；涉及生产写库的按「只读预演 → 备份 → 执行 → 逐项核对 → 守卫复验」走。
+### 批次 4（部署与复验）
+1. 按发布流程打附注 tag 部署（两端同一 tag 对象，不回填）
+2. 生产复验：副本行数 / 下游行数 / 刷新链路 / 守卫 / 业务清单（滞销、库龄、告警）
+3. **回滚预案**：批次 1 = 删副本 + 下游改回正本 + 撤登记（**正本一个字没动** ⇒ 不影响口径、不影响数据）；
+   批次 3 = 把开关打开即回到今天的行为
 
 ---
 
@@ -464,18 +570,21 @@ inventory 域只有 6 条，`importance` 全 `optional`，`consumer` 只有 `bus
 
 | # | 验收项 | 方法 | 通过标准 |
 |---|---|---|---|
-| 1 | 视图输出等价 | 改写前后全量输出按 `data_hash` 排序比对 | 逐字节相同 |
-| 2 | 性能 | `EXPLAIN ANALYZE` | 批次 1a ≤70ms；批次 1b ≤15ms |
-| 2b | 集合判定等价 | 逐行判定 vs 集合判定命中数比对 | 3855 = 3855（已实测通过） |
-| 2c | CTE 未被内联 | `EXPLAIN` 中 CTE 节点 `loops=1` | 必须为 1 |
-| 3 | 半迁移库兜底 | 隐藏 `core.collection_source_identifiers` 的环境建视图 | 能建、输出一致 |
-| 4 | 域默认已删 | 全仓搜 `DEFAULT_DEDUPLICATION_FIELDS` | 零引用 |
-| 5 | 漏配显式失败 | 清空库存模板 dedup 后入库 | 明确报错，非静默 hash |
-| 6 | 一致性检查 | 守护测试 | 27/27 通过，改坏即红 |
-| 7 | 开关门禁 | 守护测试 | 无回放引用 ⇒ 拒绝启用 |
-| 8 | 规格一致 | 人工检查 | 无「清单决定 hash 字段集合」表述 |
-| 9 | consumer 登记 | SQL 查询 | inventory 域 4 个 consumer |
-| 10 | 全量回归 | `pytest backend/tests` | 无新增失败 |
+| 1 | **副本 = 正本** | 副本与正本全量输出按 `data_hash` 排序比对 | 逐字相同（正文是 `SELECT *` ⇒ 天然成立） |
+| 2 | 行数 | 副本 / 正本 / `mart.inventory_snapshot_history` / `mart.inventory_current` / `mart.inventory_state` | 3855 / 3855 / 3855 / 1122 / 1232 |
+| 3 | 读性能 | `EXPLAIN ANALYZE` 读副本 | **≤5 ms**（现在 197 ms） |
+| 4 | 刷新成本 | `REFRESH MATERIALIZED VIEW` 计时 | ≤1 秒（当前全量重算 197 ms） |
+| 5 | **刷新链路通**（最关键） | 造一行新事实 → 触发刷新 → 看副本；再触发一次库存域刷新看判据 | 副本见到新行；判据返回 `True`；状态层跟着重算 |
+| 6 | 刷新登记 | 守护测试（扩展 `test_atomic_materialized_views.py`） | 四处登记齐全；副本排在消费方之前；判据认正本 + 副本 |
+| 7 | 半迁移库兜底 | 隐藏 `core.collection_source_identifiers` 的环境建视图 | 能建、输出一致（**正本一个字没动 ⇒ 天然成立**） |
+| 8 | 域默认已删 | 全仓搜 `DEFAULT_DEDUPLICATION_FIELDS` | 零引用 |
+| 9 | 漏配显式失败 | 清空库存模板 dedup 后入库 | 明确报错，非静默 hash |
+| 10 | 一致性检查 | 守护测试 | 27/27 通过，改坏即红 |
+| 11 | hash 开关门禁 | 守护测试 | 无回放引用 ⇒ 拒绝启用 |
+| 12 | 规格一致 | 人工检查 | 无「清单决定 hash 字段集合」表述 |
+| 13 | consumer 登记 | SQL 查询 | inventory 域 4 个 consumer |
+| 14 | **物理列弃用生效** | 开关关 → 新入库 → 比对 `pg_attribute` 列数 | 列数不增；缺必填列仍阻断；开关开时行为与今天一致 |
+| 15 | 全量回归 | `pytest backend/tests` | 无新增失败 |
 
 ---
 
@@ -483,10 +592,13 @@ inventory 域只有 6 条，`importance` 全 `optional`，`consumer` 只有 `bus
 
 | 风险 | 等级 | 缓解 |
 |---|---|---|
-| 视图改写引入静默口径偏差 | 高 | 逐字等价测试作硬门禁；不通过不合 |
-| 候选池口径改动影响身份判定 | 中 | ③④ 单独批次，先只做性能 |
+| **副本没被刷新** ⇒ 页面读旧快照，且不报错 | 高 | 守护测试锁住四处登记 + 判据认「正本 + 副本」；上线后实测刷新链路 |
+| **状态层不再被触发刷新** ⇒ 库龄不推进、滞销榜陈旧，且不报错 | 高 | 同上；验收第 5 项专门盯这条 |
+| 副本与正本口径漂移 | 低 | 正文是 `SELECT *` ⇒ **不可能**漂移；正本改了会跟着变 |
+| 副本数据陈旧（采集恢复后） | 低 | 当前 `ENABLE_COLLECTION=false` ⇒ 陈旧窗口为零；采集恢复后由刷新队列覆盖（验收第 5 项覆盖） |
 | 删域默认暴露未纳管维度 | 中 | 先跑 27 维度 dry-run；错误信息指明配置路径 |
-| 开关门禁挡住正常使用 | 低 | 回放引用可用环境变量指向；错误信息给出命令 |
+| hash 开关门禁挡住正常使用 | 低 | 回放引用可用环境变量指向；错误信息给出命令 |
+| 物理列弃用后有人真的要读那些列 | 低 | 业务已确认无人直查；存量列不删；开关一键回退 |
 | 批次 1~3 不做生产数据变更 | — | 全部是代码/文档/测试级改动 |
 
 ---
@@ -496,12 +608,20 @@ inventory 域只有 6 条，`importance` 全 `optional`，`consumer` 只有 `bus
 | 已有资产 | 关系 |
 |---|---|
 | `docs/superpowers/specs/2026-11-14-template-governance-v2-design.md` | 本文是它的**延续与修正**（B4 直接改它的 §3.1 表述） |
-| `templates/README.md` | B2/B4 的结论要同步写进「改去重口径 ⇒ 先重建后投影」那一节 |
+| `templates/README.md` | B2/B4 的结论要同步写进「改去重口径 ⇒ 先重建后投影」那一节；B6 的「物理列已废弃」也写进去 |
 | `scripts/rebuild_inventory_snapshot_hash.py` | 本方案不动它；B1 删域默认后，它的 `_build_hash_fields` 路径不变（模板字段照常优先） |
 | `backend/tests/data_pipeline/test_inventory_snapshot_hash_rebuild.py` | B2 把其中一条断言提升为通用版 |
-| `sql/semantic/inventory_snapshot.sql` | A1-①② 的改写目标 |
-| `sql/semantic/shop_identity_resolution_candidates.sql` | A1-③④ 的改写目标（口径不动） |
-| `sql/semantic/semantic_alias_registry.sql` | A1-②③ 的推广目标（另立任务） |
+| `backend/tests/data_pipeline/test_atomic_materialized_views.py` | **A1 直接扩展它**（加一对三元组 + 3 条新断言），不新起炉灶 |
+| `sql/semantic/analytics_atomic_mv.sql` | **A1 的照搬模板**（`DO $$ … CREATE/REFRESH … $$` + `CREATE INDEX IF NOT EXISTS`） |
+| `sql/semantic/inventory_snapshot.sql` | **正本，一个字不动**（口径零变化的保证） |
+| `sql/semantic/inventory_snapshot_mv.sql` | **A1 新增**（正文 = `SELECT * FROM semantic.fact_inventory_snapshot`） |
+| `sql/mart/inventory_snapshot_history.sql` / `inventory_current.sql` | A1 的下游，改读副本 |
+| `sql/mart/inventory_state.sql` | 表（非视图）：资产文件建表 + `InventoryStateRefreshService` upsert |
+| `backend/services/data_pipeline/refresh_registry.py` | A1 的四处登记 + 下游依赖改指副本 |
+| `backend/tasks/refresh_queue_tasks.py` | A1 的判据（`:136`）与刷新顺序（`:387-397`） |
+| `backend/services/core_fields_service.py` / `data_ingestion_service.py` / `dynamic_column_manager.py` | B6 的落点（新增开关 + `core_columns=[]` 语义） |
+| `sql/semantic/shop_identity_resolution_candidates.sql` | 本方案**不动**（A2 可选项才涉及） |
+| `sql/semantic/semantic_alias_registry.sql` | `resolve_alias` 推广目标（另立任务，见 §10） |
 
 ---
 
@@ -513,4 +633,4 @@ inventory 域只有 6 条，`importance` 全 `optional`，`consumer` 只有 `bus
 | `VERSION` 文件 | 停在 v7.28.0 | 划掉 |
 | 命名体系统一 | 清单两种形态并存 | **立项**：建「原始表头 ↔ 标准语义键」对照表 |
 | `resolve_alias` 优先级口径 | 654 万次扫描 | **立项**：先抽单一表达式，再提速 |
-| 物理列通路 | 26 列全 NULL / 3 列缺失 / 1 列重复 | 决策后执行（B6） |
+| 物理列通路 | 26 列全 NULL / 3 列缺失 / 1 列重复 | **已拍板弃用**（B6）：关新写入、留存量列、标注废弃；表结构差异（3 列缺失 / 1 列重复）不在本次修 |
