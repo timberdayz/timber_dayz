@@ -355,8 +355,8 @@ def _update_sql(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 async def run(args) -> int:
     from sqlalchemy import text
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+    from backend.models.database import AsyncSessionLocal
     from backend.services.deduplication_service import DeduplicationService
 
     definition = _load_definition()
@@ -366,113 +366,64 @@ async def run(args) -> int:
     granularity = str(definition["granularity"])
     sub_domain = definition.get("sub_domain")
 
-    engine = create_async_engine(_database_url(), echo=False)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
+    # ⚠️ 用**应用自己的** session 工厂, 不自己拼连接串。
+    #    生产容器里没有 DATABASE_URL(应用是用 DB_HOST/DB_PORT/DB_USER… 拼的),
+    #    也没有 .env 文件 ⇒ 自己建 engine 一定连不上。
+    #    与 scripts/apply_template_definitions.py 同一套取法。
     service = DeduplicationService(db=None)
     _patch_hash_lookup_caches()
 
-    try:
-        async with factory() as session:
-            template = await _load_current_template(session)
-            rows = await _fetch_rows(session)
+    async with AsyncSessionLocal() as session:
+        template = await _load_current_template(session)
+        rows = await _fetch_rows(session)
 
-            old_fields = _build_hash_fields(
-                template_fields=list(template.get("deduplication_fields") or []),
-                rules=list(template.get("field_parse_rules") or []),
-                data_domain=data_domain,
-                sub_domain=sub_domain,
+        old_fields = _build_hash_fields(
+            template_fields=list(template.get("deduplication_fields") or []),
+            rules=list(template.get("field_parse_rules") or []),
+            data_domain=data_domain,
+            sub_domain=sub_domain,
+        )
+        new_fields = _build_hash_fields(
+            template_fields=new_template_fields,
+            rules=new_rules,
+            data_domain=data_domain,
+            sub_domain=sub_domain,
+        )
+
+        print("=" * 78)
+        print("库存快照事实表 · data_hash 重建")
+        print("=" * 78)
+        print(f"目标表          : {TARGET_TABLE}")
+        print(f"行数            : {len(rows)}")
+        print(f"当前库内去重字段: {old_fields}")
+        print(f"新去重字段      : {new_fields}")
+        print(f"当前模板        : id={template['id']} v{template['version']}")
+        print(f"目标口径        : {TARGET_CALIBER}")
+
+        # ── 守卫: 表里的行必须真的是这个维度的 ──────────────────────
+        mismatched = [
+            row["id"]
+            for row in rows
+            if str(row.get("platform_code")) != str(definition["platform"])
+            or str(row.get("data_domain")) != data_domain
+            or str(row.get("granularity")) != granularity
+        ]
+        if mismatched:
+            print(
+                f"\n[中止] 表里有 {len(mismatched)} 行不属于 "
+                f"{definition['platform']}/{data_domain}/{granularity} "
+                f"(前 20: {mismatched[:20]}) ⇒ 不许写库。"
             )
-            new_fields = _build_hash_fields(
-                template_fields=new_template_fields,
-                rules=new_rules,
-                data_domain=data_domain,
-                sub_domain=sub_domain,
-            )
+            return 2
 
-            print("=" * 78)
-            print("库存快照事实表 · data_hash 重建")
-            print("=" * 78)
-            print(f"目标表          : {TARGET_TABLE}")
-            print(f"行数            : {len(rows)}")
-            print(f"当前库内去重字段: {old_fields}")
-            print(f"新去重字段      : {new_fields}")
-            print(f"当前模板        : id={template['id']} v{template['version']}")
-            print(f"目标口径        : {TARGET_CALIBER}")
-
-            # ── 守卫: 表里的行必须真的是这个维度的 ──────────────────────
-            mismatched = [
-                row["id"]
-                for row in rows
-                if str(row.get("platform_code")) != str(definition["platform"])
-                or str(row.get("data_domain")) != data_domain
-                or str(row.get("granularity")) != granularity
-            ]
-            if mismatched:
-                print(
-                    f"\n[中止] 表里有 {len(mismatched)} 行不属于 "
-                    f"{definition['platform']}/{data_domain}/{granularity} "
-                    f"(前 20: {mismatched[:20]}) ⇒ 不许写库。"
-                )
-                return 2
-
-            # ── 复核模式: 库里应当已全部命中**新**口径 ──────────────────
-            if args.verify:
-                target_caliber = CALIBERS[TARGET_CALIBER]
-                ok = 0
-                bad: List[int] = []
-                for row in rows:
-                    hash_row, _changed = _row_for_hash(row, target_caliber)
-                    computed = service.calculate_data_hash(
-                        hash_row,
-                        deduplication_fields=list(new_fields),
-                        header_bindings=None,
-                        scope_values=_scope_values(row, target_caliber),
-                        identity_values=_identity_values(
-                            row, with_metric_date=target_caliber["metric_date"]
-                        ),
-                    )
-                    if computed == row["data_hash"]:
-                        ok += 1
-                    else:
-                        bad.append(row["id"])
-                print()
-                print(f"[复核] 新口径命中 {ok} / {len(rows)} 行")
-                if bad:
-                    print(f"  未命中 id(前 20): {bad[:20]}")
-                print(f"[复核] 库里已全部命中新口径: {not bad}")
-                return 0 if not bad else 1
-
-            # ── 自检: 逐行认领口径 ───────────────────────────────────────
-            caliber_hits: Dict[str, int] = {name: 0 for name in CALIBERS}
-            unmatched: List[int] = []
-            for row in rows:
-                for name, caliber in CALIBERS.items():
-                    if (
-                        _compute(service, row, fields=old_fields, caliber=caliber)
-                        == row["data_hash"]
-                    ):
-                        caliber_hits[name] += 1
-                        break
-                else:
-                    unmatched.append(row["id"])
-
-            print()
-            print("【自检一】存量 hash 分别属于哪种口径:")
-            for name, count in caliber_hits.items():
-                print(f"  {name:<28} {count} 行")
-            print(f"  {'认不出来的行':<28} {len(unmatched)} 行")
-            if unmatched:
-                print(f"  异常行 id(前 20): {unmatched[:20]}")
-                print("\n[中止] 有行既不属于任何已知口径 ⇒ 口径没搞清楚, 不许写库。")
-                return 2
-
-            # ── 自检二: 新口径重算 ───────────────────────────────────────
+        # ── 复核模式: 库里应当已全部命中**新**口径 ──────────────────
+        if args.verify:
             target_caliber = CALIBERS[TARGET_CALIBER]
-            groups: Dict[str, List[Dict[str, Any]]] = {}
-            raw_changed: List[Dict[str, Any]] = []
+            ok = 0
+            bad: List[int] = []
             for row in rows:
-                hash_row, changed = _row_for_hash(row, target_caliber)
-                row["new_hash"] = service.calculate_data_hash(
+                hash_row, _changed = _row_for_hash(row, target_caliber)
+                computed = service.calculate_data_hash(
                     hash_row,
                     deduplication_fields=list(new_fields),
                     header_bindings=None,
@@ -481,71 +432,162 @@ async def run(args) -> int:
                         row, with_metric_date=target_caliber["metric_date"]
                     ),
                 )
-                row["_raw_changed"] = changed
-                if changed:
-                    raw_changed.append(row)
-                groups.setdefault(row["new_hash"], []).append(row)
-
-            duplicate_groups = {k: v for k, v in groups.items() if len(v) > 1}
-            to_delete: List[Dict[str, Any]] = []
-            to_update: List[Dict[str, Any]] = []
-            for members in groups.values():
-                keeper = _keep_row(members)
-                to_update.append(keeper)
-                for member in members:
-                    if member["id"] != keeper["id"]:
-                        to_delete.append(member)
-
+                if computed == row["data_hash"]:
+                    ok += 1
+                else:
+                    bad.append(row["id"])
             print()
-            print("【自检二】按新口径重算:")
-            print(f"  新 hash 去重后行数 : {len(groups)}")
-            print(f"  需要删除的行       : {len(to_delete)}")
-            print(f"  需要改 hash 的行   : {len(to_update)}")
-            print(
-                f"  其中 hash 确实变了 : {sum(1 for r in to_update if r['new_hash'] != r['data_hash'])}"
-            )
-            print(f"  行内 shop_id 需归一 : {len(raw_changed)}")
+            print(f"[复核] 新口径命中 {ok} / {len(rows)} 行")
+            if bad:
+                print(f"  未命中 id(前 20): {bad[:20]}")
+            print(f"[复核] 库里已全部命中新口径: {not bad}")
+            return 0 if not bad else 1
 
-            if not args.apply:
-                print()
-                print("[只读模式] 以上是计划; 加 --apply 才会写库。")
-                if duplicate_groups:
-                    sample = next(iter(duplicate_groups.values()))[0]
-                    print(
-                        "  样例重复组: "
-                        f"sku={sample['raw_data'].get('*商品SKU')} "
-                        f"仓={sample['raw_data'].get('仓库')} "
-                        f"日={sample['metric_date']} "
-                        f"入库={sample['ingest_timestamp']}"
+        # ── 自检: 逐行认领口径 ───────────────────────────────────────
+        caliber_hits: Dict[str, int] = {name: 0 for name in CALIBERS}
+        unmatched: List[int] = []
+        already_new = 0
+        for row in rows:
+            for name, caliber in CALIBERS.items():
+                if (
+                    _compute(service, row, fields=old_fields, caliber=caliber)
+                    == row["data_hash"]
+                ):
+                    caliber_hits[name] += 1
+                    break
+            else:
+                # 不是任何历史口径 ⇒ 也许已经是**新口径**(重建做过了) ⇒ 再试一次
+                target_caliber = CALIBERS[TARGET_CALIBER]
+                hash_row, _changed = _row_for_hash(row, target_caliber)
+                if (
+                    service.calculate_data_hash(
+                        hash_row,
+                        deduplication_fields=list(new_fields),
+                        header_bindings=None,
+                        scope_values=_scope_values(row, target_caliber),
+                        identity_values=_identity_values(
+                            row, with_metric_date=target_caliber["metric_date"]
+                        ),
                     )
-                return 0
+                    == row["data_hash"]
+                ):
+                    already_new += 1
+                else:
+                    unmatched.append(row["id"])
 
-            # ── 备份 ────────────────────────────────────────────────────
-            backup_path: Optional[Path] = None
-            if args.backup_dir:
-                backup_dir = Path(args.backup_dir)
-                backup_dir.mkdir(parents=True, exist_ok=True)
-                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                backup_path = backup_dir / f"inv_hash_backup_{stamp}.tsv"
-                with backup_path.open("w", encoding="utf-8", newline="") as handle:
-                    writer = csv.writer(handle, delimiter="\t")
+        print()
+        print("【自检一】存量 hash 分别属于哪种口径:")
+        for name, count in caliber_hits.items():
+            print(f"  {name:<28} {count} 行")
+        print(f"  {'已是新口径(重建已完成)':<28} {already_new} 行")
+        print(f"  {'认不出来的行':<28} {len(unmatched)} 行")
+        if already_new == len(rows) and rows:
+            print(
+                "\n[无需重建] 库里已全部是新口径 ⇒ 之前重建过了, " "本次不做任何写入。"
+            )
+            return 0
+        if unmatched:
+            print(f"  异常行 id(前 20): {unmatched[:20]}")
+            print("\n[中止] 有行既不属于任何已知口径 ⇒ 口径没搞清楚, 不许写库。")
+            return 2
+
+        # ── 自检二: 新口径重算 ───────────────────────────────────────
+        target_caliber = CALIBERS[TARGET_CALIBER]
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        raw_changed: List[Dict[str, Any]] = []
+        for row in rows:
+            hash_row, changed = _row_for_hash(row, target_caliber)
+            row["new_hash"] = service.calculate_data_hash(
+                hash_row,
+                deduplication_fields=list(new_fields),
+                header_bindings=None,
+                scope_values=_scope_values(row, target_caliber),
+                identity_values=_identity_values(
+                    row, with_metric_date=target_caliber["metric_date"]
+                ),
+            )
+            row["_raw_changed"] = changed
+            if changed:
+                raw_changed.append(row)
+            groups.setdefault(row["new_hash"], []).append(row)
+
+        duplicate_groups = {k: v for k, v in groups.items() if len(v) > 1}
+        to_delete: List[Dict[str, Any]] = []
+        to_update: List[Dict[str, Any]] = []
+        for members in groups.values():
+            keeper = _keep_row(members)
+            to_update.append(keeper)
+            for member in members:
+                if member["id"] != keeper["id"]:
+                    to_delete.append(member)
+
+        print()
+        print("【自检二】按新口径重算:")
+        print(f"  新 hash 去重后行数 : {len(groups)}")
+        print(f"  需要删除的行       : {len(to_delete)}")
+        print(f"  需要改 hash 的行   : {len(to_update)}")
+        print(
+            f"  其中 hash 确实变了 : {sum(1 for r in to_update if r['new_hash'] != r['data_hash'])}"
+        )
+        print(f"  行内 shop_id 需归一 : {len(raw_changed)}")
+
+        if not args.apply:
+            print()
+            print("[只读模式] 以上是计划; 加 --apply 才会写库。")
+            if duplicate_groups:
+                sample = next(iter(duplicate_groups.values()))[0]
+                print(
+                    "  样例重复组: "
+                    f"sku={sample['raw_data'].get('*商品SKU')} "
+                    f"仓={sample['raw_data'].get('仓库')} "
+                    f"日={sample['metric_date']} "
+                    f"入库={sample['ingest_timestamp']}"
+                )
+            return 0
+
+        # ── 备份 ────────────────────────────────────────────────────
+        backup_path: Optional[Path] = None
+        if args.backup_dir:
+            backup_dir = Path(args.backup_dir)
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            backup_path = backup_dir / f"inv_hash_backup_{stamp}.tsv"
+            with backup_path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle, delimiter="\t")
+                writer.writerow(
+                    [
+                        "id",
+                        "action",
+                        "old_data_hash",
+                        "new_data_hash",
+                        "ingest_timestamp",
+                        "metric_date",
+                        "old_raw_shop_id",
+                        "new_raw_shop_id",
+                    ]
+                )
+                for member in to_delete:
                     writer.writerow(
                         [
-                            "id",
-                            "action",
-                            "old_data_hash",
-                            "new_data_hash",
-                            "ingest_timestamp",
-                            "metric_date",
-                            "old_raw_shop_id",
-                            "new_raw_shop_id",
+                            member["id"],
+                            "delete",
+                            member["data_hash"],
+                            member["new_hash"],
+                            member["ingest_timestamp"],
+                            member["metric_date"],
+                            member["raw_data"].get("shop_id"),
+                            member["raw_data"].get("shop_account_id"),
                         ]
                     )
-                    for member in to_delete:
+                for member in to_update:
+                    if (
+                        member["new_hash"] != member["data_hash"]
+                        or member["_raw_changed"]
+                    ):
                         writer.writerow(
                             [
                                 member["id"],
-                                "delete",
+                                "update",
                                 member["data_hash"],
                                 member["new_hash"],
                                 member["ingest_timestamp"],
@@ -554,54 +596,35 @@ async def run(args) -> int:
                                 member["raw_data"].get("shop_account_id"),
                             ]
                         )
-                    for member in to_update:
-                        if (
-                            member["new_hash"] != member["data_hash"]
-                            or member["_raw_changed"]
-                        ):
-                            writer.writerow(
-                                [
-                                    member["id"],
-                                    "update",
-                                    member["data_hash"],
-                                    member["new_hash"],
-                                    member["ingest_timestamp"],
-                                    member["metric_date"],
-                                    member["raw_data"].get("shop_id"),
-                                    member["raw_data"].get("shop_account_id"),
-                                ]
-                            )
-                print(f"\n[备份] {backup_path}")
+            print(f"\n[备份] {backup_path}")
 
-            # ── 写库 ────────────────────────────────────────────────────
-            # ⚠️ 前面已经做过 SELECT ⇒ session 上已有隐式事务,
-            #    这里**不能**再 `async with session.begin()`(会抛
-            #    "a transaction is already begun") ⇒ 直接执行 + 显式 commit。
-            if to_delete:
-                await session.execute(
-                    text(f"DELETE FROM {TARGET_TABLE} WHERE id = ANY(:ids)"),
-                    {"ids": [member["id"] for member in to_delete]},
-                )
-            # 行内 shop_id 归一(与今天的采集口径一致)
-            if raw_changed:
-                raw_update = _raw_update_params(raw_changed)
-                await session.execute(raw_update["sql"], raw_update["params"])
-            changed_rows = [r for r in to_update if r["new_hash"] != r["data_hash"]]
-            if changed_rows:
-                update = _update_sql(changed_rows)
-                await session.execute(update["sql"], update["params"])
-            await session.commit()
-
-            print(
-                f"[完成] 删除 {len(to_delete)} 行, "
-                f"更新 {len(changed_rows)} 行 hash, "
-                f"归一 {len(raw_changed)} 行行内 shop_id"
+        # ── 写库 ────────────────────────────────────────────────────
+        # ⚠️ 前面已经做过 SELECT ⇒ session 上已有隐式事务,
+        #    这里**不能**再 `async with session.begin()`(会抛
+        #    "a transaction is already begun") ⇒ 直接执行 + 显式 commit。
+        if to_delete:
+            await session.execute(
+                text(f"DELETE FROM {TARGET_TABLE} WHERE id = ANY(:ids)"),
+                {"ids": [member["id"] for member in to_delete]},
             )
-            if backup_path:
-                print(f"[回滚依据] {backup_path}")
-            return 0
-    finally:
-        await engine.dispose()
+        # 行内 shop_id 归一(与今天的采集口径一致)
+        if raw_changed:
+            raw_update = _raw_update_params(raw_changed)
+            await session.execute(raw_update["sql"], raw_update["params"])
+        changed_rows = [r for r in to_update if r["new_hash"] != r["data_hash"]]
+        if changed_rows:
+            update = _update_sql(changed_rows)
+            await session.execute(update["sql"], update["params"])
+        await session.commit()
+
+        print(
+            f"[完成] 删除 {len(to_delete)} 行, "
+            f"更新 {len(changed_rows)} 行 hash, "
+            f"归一 {len(raw_changed)} 行行内 shop_id"
+        )
+        if backup_path:
+            print(f"[回滚依据] {backup_path}")
+        return 0
 
 
 def _raw_update_params(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
