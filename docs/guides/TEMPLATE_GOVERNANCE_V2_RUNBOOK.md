@@ -99,6 +99,10 @@ python scripts/apply_template_definitions.py --check
 期望：`完全一致: 27`，退出码 **0**。
 （若非 0，说明生产库与仓库定义已漂移 —— 查清后再决定是否 `--apply` 投影。）
 
+> ⚠️ **这条在 v7.29.0 上跑不了**：镜像里既没有 `templates/` 也没有
+> `scripts/apply_template_definitions.py`（`Dockerfile.backend` 用白名单式 COPY，
+> 新脚本没登记 ⇒ 静默缺席）。已在 **v7.29.1** 补齐，见 §4.5。
+
 ### 4.3 闭环真 bug（本次事故的正面战场，**必须人工点一次**）
 
 1. 造一个**多一列**的文件（平台导出比模板多一列）放入采集目录；
@@ -122,6 +126,62 @@ python scripts/template_release_sla_metric.py --window-minutes 15
 
 期望：出现**至少一个**发布事件有重估记录，且比例非空。
 若仍显示「无数据」，说明 §4.3 没真正触发重检（埋点没写进去）——**这本身是故障信号**。
+
+### 4.5 v7.29.1 补丁与本次实测结果（2026-11-14）
+
+#### 4.5.1 v7.29.1 为什么存在
+
+v7.29.0 上线后逐条核查 §4.1–§4.4 时发现：`Dockerfile.backend` 对 `scripts/` 用的是
+**白名单式 COPY**，v7.29.0 新增的 5 个脚本与 `templates/` 目录**全都没登记**
+⇒ 生产镜像里 `ls /app/templates` 返回 `No such file or directory`。
+
+- **业务不受影响**（判定逻辑都在 `backend/` 里）；
+- 但 §4.2 的差异守卫与 §4.4 的闭环指标**在生产根本跑不起来**。
+
+⇒ v7.29.1 只改 `Dockerfile.backend`（补 `COPY templates /app/templates` + 5 个脚本），
+**无业务代码、无数据库变更、无迁移**；并新增 2 条守护测试把这条变成流水线里会红的事实。
+
+#### 4.5.2 实测结果
+
+**生产（只读，241 个 catalog 文件）**
+
+| 项 | 结果 |
+|---|---|
+| `status='template_update_required'` 的文件 | **0** |
+| `template_status` 分布 | `file_missing` 231（原始文件已被清理，存量）/ `ready` 9 / `alias_only` 1 |
+| 多列文件被阻断数 | **0** |
+| 少列文件被阻断数 | **0** |
+| 判定口径 | `drift_caliber=current`，`legacy_caliber_enabled=False` |
+| 镜像内新代码 | `DRIFT_CALIBER_ENV` ×2、`legacy_caliber_enabled` ×3、`normalize_dimension_placeholder` ×2、`last_recheck_template_id` ×1、`template_contract_current` ×3 |
+
+> `file_missing` 是**存量**：原始文件早被清理、`catalog_files` 行还在。
+> 该状态**不阻断**，与本次发布无关。
+
+**口径 A/B 对照（同一文件、同一次判定）**
+
+| 口径 | `template_status` | `governance_status` | 阻断 | 结论 |
+|---|---|---|---|---|
+| `current`（v7.29.0 起） | `alias_only` | `non_breaking_drift` | **否** | 「只多了 1 列, 不影响入库」 |
+| `legacy`（回退开关） | `update_required` | `breaking_drift` | **是** | 「新增1个字段, 删除0个字段 (匹配率: 99.2%)」 |
+
+⇒ 这就是事故的正面战场：**旧口径下 TikTok 文件多一列就被判「需要更新模板」**，
+运营改完模板仍看到「仍有字段对不上」。
+
+**端到端（真实 HTTP `POST /api/field-mapping/templates/save`）**
+
+```text
+HTTP 200
+response.data.recheck = {"checked": 1, "released": 1, "still_blocked": 0, "file_ids": [3061]}
+文件行：status = pending（由 template_update_required 放行）
+        auto_ingest.last_recheck_at = 2026-11-14T10:28:49Z
+        auto_ingest.last_recheck_template_id = 382
+        auto_ingest.last_status = readiness_recovered
+日志：  [TemplateRecheck] 维度重检完成 platform=tiktok domain=orders granularity=monthly: checked=1 released=1 still_blocked=0
+```
+
+⇒ 面板三态命中第 1 态「模板已更新，N 个文件已通过治理复核并放行入库」；
+`recheck` 字段**确实出现在响应里**（历史事故根因：`TemplateSaveData` 未声明该字段 ⇒
+Pydantic 静默丢弃 ⇒ 前端 `result.data.recheck` 恒为 `undefined` ⇒ 只能「按列表猜」）。
 
 ---
 

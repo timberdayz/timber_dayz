@@ -1,5 +1,66 @@
 # Changelog - 西虹 ERP 系统
 
+## [v7.29.1] - 2026-11-14 - 补齐生产镜像缺失的模板决策资产与治理脚本
+
+> **纯镜像构建改动，无业务代码变更、无数据库变更、无数据迁移。**
+> 回退 = 重新部署上一版镜像（`v7.29.0`）即可，数据库侧无需任何动作。
+
+### 一、缺陷：白名单式 COPY 让治理工具**静默缺席**
+
+`Dockerfile.backend` 对 `scripts/` 采用**白名单式 COPY**（逐个 `COPY scripts/xxx.py`，
+避免整体复制让镜像膨胀）。v7.29.0 新增的脚本与决策资产目录**没有登记进去** ⇒
+
+```
+$ docker exec xihong_erp_backend_api ls -d /app/templates
+ls: cannot access '/app/templates': No such file or directory
+```
+
+⇒ **业务不受影响**（判定逻辑在 `backend/` 里，照常工作），
+但批次 3 的核心价值——「模板决策资产进 Git + 生产侧差异守卫」——**在生产根本跑不起来**。
+更危险的是：线上会以为「守卫已经上线了」，实际连脚本都不在镜像里。
+
+| 缺失项 | 用途 | 生产侧后果 |
+|---|---|---|
+| `templates/` | 27 份维度声明式定义（进 Git 的决策资产） | `--check` 差异守卫无输入 |
+| `scripts/template_definitions.py` | 定义格式 SSOT | 同上 |
+| `scripts/apply_template_definitions.py` | 差异守卫 + 投影 | 同上 |
+| `scripts/export_template_definitions.py` | 从库反向导出 | 无法在生产侧导出 |
+| `scripts/replay_drift_caliber.py` | 只读回放两套口径 | 口径问题现场无法自查 |
+| `scripts/template_release_sla_metric.py` | 发布→重估闭环指标 | **闭环指标在生产算不出来** |
+
+### 二、修复
+
+1. `Dockerfile.backend` 补 `COPY templates /app/templates` 与 5 个新脚本的 COPY 行
+   （`scripts/template_definitions.py` 的 `REPO_ROOT = Path(__file__).resolve().parents[1]`
+   ⇒ 镜像内 `/app/scripts/x.py` 正好解析到 `/app/templates/definitions`）。
+2. `Dockerfile.collection` **不动**：采集镜像不跑治理脚本，也不需要决策资产。
+
+### 三、守护：把「加了脚本就得同步改 Dockerfile」变成流水线里会红的事实
+
+新增 2 条守护（`backend/tests/data_pipeline/test_template_definitions_guardrails.py`）：
+
+- `test_backend_image_ships_template_decision_assets`
+  —— 断言 Dockerfile 里必须有 `COPY templates /app/templates` 与 5 个脚本的 COPY 行；
+- `test_dockerignore_does_not_exclude_template_definitions`
+  —— 断言 `.dockerignore` 不会把决策资产挡在镜像外。
+
+> 没有这两条，下一个人加运维脚本时还会再漏一次 —— 而且**流水线照样全绿**。
+
+### 四、验证证据
+
+| 项 | 结果 |
+|---|---|
+| 新增守护测试 | 18 passed（原 16 + 新 2） |
+| 宽回归 | 见下方 v7.29.0 与本次发布流水线结论 |
+| 生产镜像 | v7.29.1 上线后 `ls /app/templates/definitions` ⇒ 27 份定义在位；`--check` 27/27 一致、退出码 0 |
+
+### 五、已知副作用
+
+1. **镜像层多约 0.5 MB**（27 份 JSON 定义，513.8 KB，无 BOM 全 LF）。
+2. **本机开发库曾因验证脚本的删除条件写宽而误删历史模板版本** ⇒ 已用当日 14:23 全量 dump
+   精确恢复（13 条历史版本 + 家族投影 + 1819 行 `fact_tiktok_orders_monthly.template_id`），
+   并把「误删」这件事的教训写进了验证脚本本身。**生产库全程只读，未受影响。**
+
 ## [v7.29.0] - 2026-11-14 - 模板治理闭环 v2：口径拉回「核心字段=需求」+ 模板决策资产进 Git
 
 > **本版本不含任何数据库结构变更，也没有数据迁移。**
