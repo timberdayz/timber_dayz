@@ -4,7 +4,8 @@
 >
 > - 已完结批次的实施记录已整体归档到
 >   `docs/superpowers/plans/archive/STATUS-2026-11-13-full-history.md`
->   （1,659 行 / 27 个章节，**逐字节保留、零删改**）。
+>   （原始 1,659 行 / 27 个章节，**逐字节保留、零删改**；此后完结批次的发布证据
+>   也按批次追加进同一份归档，STATUS.md 只留**最新一次**发布）。
 > - 本文件只保留三样东西：**当前未结表**、**仍被外部引用因而必须留着的章节**、
 >   **进行中的批次**。
 > - 瘦身规则与守护见文末「台账瘦身约定」节；
@@ -169,6 +170,7 @@ Walter 实际用了巡店面板后追问："既然硬件指纹改不了，那其
 | `tests/test_account_readiness_contract.py`（已重写） | **15 passed** |
 | `tests/test_account_proxy_source_contract.py` | **4 passed** |
 | 浏览器环境实测（独立 profile 指纹对比 / headless UA / viewport 与 screen 关系） | 见计划文档「设备指纹实测」 |
+| 生产上线 | **v7.28.0 已发布并验收**（见本文件「发布证据（v7.28.0，2026-11-14）」） |
 
 三份守护**在 CI 根契约清单**（`ci.yml` 根契约条目 57 → **60**，本轮只改名不改条目数），
 `scripts/audit_guard_tests.py` 分类确认均为 **A 类（CI 硬门禁）**。
@@ -196,27 +198,28 @@ Walter 实际用了巡店面板后追问："既然硬件指纹改不了，那其
 （尤其别写成 `shopeeKR` / `Tiktok1店` / `hongxikejimain`）；ID 不可改；platform 必须在白名单内；
 店铺 `platform_shop_id` 必填；首次采集前先人工巡店一次。
 
-### 发布证据（v7.27.0，2026-11-14）
+### 发布证据（v7.28.0，2026-11-14）
 
 | 项 | 证据 |
 |---|---|
-| tag | `v7.27.0`（附注标签，对象 `fa99bf48`）→ 提交 `cc523a97`；**双镜像 tag 对象一致**（`git ls-remote --tags`） |
-| main | `e9a8eecc`；**双镜像 main SHA 一致** |
-| 部署流水线 | `Deploy to Production` run 43484496122 —— Tag Release 13m50s，全部步骤 ✓ |
-| CI 流水线 | run 43487329740 **success**（中间两次红：43484395368 black+bandit、43485663421 根契约事件循环污染，均已修） |
-| 生产镜像 | `xihong_erp_backend_api` / `frontend` / `celery_worker` / `celery_beat` 全部 **v7.27.0** 且 healthy |
-| 版本号 | `GET /healthz/ready` → `{"status":"ready","version":"v7.27.0","database":"connected","dashboard":"ready"}` |
-| 公网 | `http://www.xihong.site` 200；`/healthz/ready` 200 且 version=v7.27.0 |
-| 迁移 | 迁移前备份已建并校验（pg_restore --list）；`Current-schema migration action completed: upgrade`；**schema gate 通过**（`up_to_date`，current == head == `current_schema_20261229_template_format_signature`，缺表/缺列均为空） |
+| tag | `v7.28.0`（附注标签，对象 `22b12f15`）→ 提交 `2613878d`；**双镜像 tag 对象一致**（GitHub 与 CNB 的 `git ls-remote --tags` 同为 `22b12f15` + `^{}` → `2613878d`） |
+| main | `2613878d`；**双镜像 main SHA 一致** |
+| 部署流水线 | `Deploy to Production` run **43561988306** —— Tag Release **14m05s**，全部步骤 ✓（`Build and Push Images (Release Tag)` 8m44s） |
+| CI 流水线 | `CI Pipeline` 43561390999 **success**；`Validate Data Flow` 43561391000 success；`Docker Build and Push` 43561391013 success。中间一次红：43560913385 —— black 门禁（`tests/test_account_browser_identity_contract.py` 单行断言 91 列 > 88）⇒ 已由 `2613878d` 修 |
+| 生产镜像 | `backend_api` / `celery_worker` / `celery_beat` 全部 **v7.28.0** 且 healthy；`frontend` **v7.28.0** healthy；`nginx` healthy |
+| 版本号 | `GET /healthz/ready` → `{"status":"ready","version":"v7.28.0","database":"connected","dashboard":"ready"}` |
+| 公网 | `http://www.xihong.site` 200；`/healthz/ready` 200 且 version=v7.28.0 |
+| 迁移 | 迁移前备份已建并校验：`pre_deploy_20261114_134343/backup_20261114T054346Z/xihong_erp-20261114T054346Z.dump`（39,226,179 B，非空）+ `migration_state.json`（迁移前 revision=`current_schema_20261229_template_format_signature`）；只读 preflight 通过；`Current-schema migration action completed: upgrade`；**schema gate 通过**（`up_to_date`，current == head == `current_schema_20261230_drop_residual_test_accounts`，缺表/缺列均为空） |
+| 残留账号删除 | 生产 `core.main_accounts` **9 → 7**，两条残留账号**残留 0 行**；级联删掉 1 条 `shop_accounts`（52 → 51，该行每个字段都填 `验证码测试账号`）；**采集配置 14 / 模板 13 / 发现 22 一行未动** |
 | 视图重建 | 成功 39 个 / 失败 0 个，自愈重建物化视图 1 个 |
+| 数据管道 | `GET /api/data-pipeline/freshness` → `missing_targets: []`；`mart.inventory_state` 的 `last_succeeded_at`=05:56:14Z（**新于**部署开始 05:43Z）；`inventory-backlog` 的 `unknown_restock_row_count`=0 < `total_row_count`=518 |
 | nginx | 部署后 error log 仅 restart notice/warn，**无 5xx** |
-| 生产库 | postgres / redis 容器未重启（Up 4 days）⇒ 本次**无生产写操作** |
+| 生产库 | postgres / redis 容器未重启（Up 4 days）；DB 连接数 **18**（与 v7.27.0 基线一致） |
+| 部署批次 | `deploy-logs` 只有**一个新批次** `20261114_134419`（v7.27.0 的 `20261114_024750` 之后没有第二个 ⇒ CNB 镜像**未**触发第二次部署） |
 
-> ⚠️ **tag 未移动**：v7.27.0 指向 `cc523a97`（含 black/bandit 未修的原始提交），
-> 后两个提交 `a077f7cf`（black+bandit）与 `e9a8eecc`（根契约清单）是**主干**上的修复。
-> 按双镜像纪律，已发布的 tag 永不回填/重写；
-> 两次提交都只改排版与测试文件组织方式，**运行时行为完全相同**
-> （MD5/SHA1 摘要值不变 ⇒ 已分配的设备画像与线上完全一致，无画像漂移）。
+> v7.27.0 的发布证据已按「台账瘦身约定」移入
+> `docs/superpowers/plans/archive/STATUS-2026-11-13-full-history.md`。
+> v7.28.0 的 tag **指向已含 black 修复的 `2613878d`**，不存在 v7.27.0 那种「tag 未移动」的情况。
 
 
 ---
