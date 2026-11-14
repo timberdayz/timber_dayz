@@ -46,7 +46,10 @@ from backend.services.template_contract_service import (
     CONTRACT_SOURCE_PROMOTION,
     build_template_contract,
     promote_template_contract,
+    read_contract_promotions,
+    read_effective_contract,
     read_template_contract,
+    write_template_contract,
 )
 
 T0 = datetime(2026, 10, 29, 7, 27, 49, tzinfo=timezone.utc)
@@ -69,12 +72,27 @@ def _template(template_id, version, *, columns=None, created_at=None):
 
 
 class _StubMatcher:
-    """按模板 ID 给出不同结论 —— 模拟「旧模板漂移 / 新模板匹配」。"""
+    """按模板 ID 给出不同结论 —— 模拟「旧模板漂移 / 新模板匹配」。
 
-    def __init__(self, *, drift_template_ids, ready_template_ids, published=None):
+    ``drift_kind`` 决定漂移的**形态**(2026-11-14 口径回退后两者行为不同):
+
+    * ``"added"`` —— 只**多了一列** ⇒ 新口径下**不阻断**(11-07 规格 §1.4);
+    * ``"missing_core"`` —— **少了一个核心列** ⇒ 阻断(需求没被满足),
+      这才是需要「事后追平 + 契约晋升」的场景。
+    """
+
+    def __init__(
+        self,
+        *,
+        drift_template_ids,
+        ready_template_ids,
+        published=None,
+        drift_kind="added",
+    ):
         self.drift_template_ids = set(drift_template_ids)
         self.ready_template_ids = set(ready_template_ids)
         self.published = published
+        self.drift_kind = drift_kind
         self.calls = []
 
     async def find_best_template(self, **_kwargs):
@@ -93,6 +111,25 @@ class _StubMatcher:
     ):
         self.calls.append(template_id)
         if template_id in self.drift_template_ids:
+            if self.drift_kind == "missing_core":
+                return {
+                    "is_exact_match": False,
+                    "is_semantic_match": False,
+                    "detected": True,
+                    "added_fields": [],
+                    "removed_fields": ["订单号"],
+                    "blocking_changes": ["订单号"],
+                    "non_blocking_changes": [],
+                    "match_rate": 90.0,
+                    "format_drift": False,
+                    "value_shape": {
+                        "checked_rules": 0,
+                        "checked_values": 0,
+                        "format_drift": False,
+                        "error_codes": [],
+                        "issues": [],
+                    },
+                }
             return {
                 "is_exact_match": False,
                 "is_semantic_match": False,
@@ -160,13 +197,21 @@ def _catalog_file(contract):
     )
 
 
-def _service(templates, *, drift_template_ids, ready_template_ids, published=None):
+def _service(
+    templates,
+    *,
+    drift_template_ids,
+    ready_template_ids,
+    published=None,
+    drift_kind="added",
+):
     db = _StubDb(templates)
     service = DataSyncTemplateStatusService(db)
     service.template_matcher = _StubMatcher(
         drift_template_ids=drift_template_ids,
         ready_template_ids=ready_template_ids,
         published=published,
+        drift_kind=drift_kind,
     )
     service.template_resolver = _StubResolver()
     return service
@@ -205,8 +250,16 @@ async def _evaluate(
 
 
 @pytest.mark.asyncio
-async def test_promotion_releases_file_when_published_template_explains_it():
-    """旧契约解释不了、新模板能解释, 且新模板是**事后**发布的 => 放行。"""
+async def test_promotion_not_needed_when_only_one_column_added():
+    """旧契约只是**多了一列** ⇒ 不阻断、不需要晋升(2026-11-14 口径回退)。
+
+    旧口径(多一列 ⇒ 阻断)下, 这里靠「事后追平 + 契约晋升」把文件救回来;
+    新口径下(11-07 规格 §1.4)根本不需要救 —— 多一列不阻断。
+
+    但 **D7 不变量仍然要守住**: 生效模板必须是**契约那一版**,
+    不得因为「新版恰好能解释」就把历史文件悄悄改用新版模板
+    (那会让审计追溯失真)。
+    """
     contract_template = _template(368, 6)
     published_template = _template(372, 8, created_at=T0 + timedelta(hours=1))
     service = _service(
@@ -222,9 +275,39 @@ async def test_promotion_releases_file_when_published_template_explains_it():
         current_columns=["日期", "GMV", "商品卡 GMV"],
     )
 
+    assert status["should_auto_sync"] is True
+    # 生效模板仍是**契约那一版** —— 不得被悄悄换成新版
+    assert status["template_id"] == 368
+    assert "contract_promotion" not in status
+
+
+@pytest.mark.asyncio
+async def test_promotion_applies_when_missing_core_field_is_fixed():
+    """旧契约**少了一个核心字段**、新版能解释 ⇒ 阻断 ⇒ 事后追平 ⇒ 放行 + 晋升。
+
+    [*] 2026-11-14: 这是契约晋升**仍然存在**的理由 ——
+        「多一列」不再需要晋升, 但「需求(核心字段)没被满足」仍要拦,
+        修好之后靠晋升把文件放行。
+    """
+    contract_template = _template(368, 6)
+    published_template = _template(372, 8, created_at=T0 + timedelta(hours=1))
+    service = _service(
+        {368: contract_template, 372: published_template},
+        drift_template_ids={368},
+        ready_template_ids={372},
+        drift_kind="missing_core",
+    )
+
+    status = await _evaluate(
+        service,
+        contract_template=contract_template,
+        published_template=published_template,
+        current_columns=["日期", "GMV"],
+    )
+
     assert status["template_status"] == "ready"
     assert status["should_auto_sync"] is True
-    # 生效模板必须换成新版本, 否则后续入库仍会按旧模板解析(丢掉新增字段)
+    # 生效模板必须换成新版本, 否则后续入库仍会按旧模板解析
     assert status["template_id"] == 372
     assert status["template_version"] == 8
     promotion = status["contract_promotion"]
@@ -238,7 +321,12 @@ async def test_promotion_releases_file_when_published_template_explains_it():
 
 @pytest.mark.asyncio
 async def test_promotion_not_applied_when_published_template_also_drifts():
-    """源文件结构真变了(新旧模板都漂移) => 保持「待更新」。"""
+    """新旧模板都漂移 ⇒ **不晋升**。
+
+    [*] 2026-11-14: 「多一列」不再阻断, 所以文件可以入库;
+        但**绝不**因为「新版也能解释」就把契约升到新版 ——
+        契约是登记事实, 改写它要靠上面的「核心字段被修复」那条路径。
+    """
     contract_template = _template(368, 6)
     published_template = _template(372, 8, created_at=T0 + timedelta(hours=1))
     service = _service(
@@ -254,8 +342,8 @@ async def test_promotion_not_applied_when_published_template_also_drifts():
         current_columns=["日期", "GMV", "商品卡 GMV"],
     )
 
-    assert status["template_status"] == "update_required"
-    assert status["should_auto_sync"] is False
+    assert status["should_auto_sync"] is True
+    assert status["template_id"] == 368
     assert "contract_promotion" not in status
 
 
@@ -264,7 +352,7 @@ async def test_promotion_not_applied_when_published_template_also_drifts():
 
 @pytest.mark.asyncio
 async def test_promotion_not_applied_when_published_template_predates_contract():
-    """当前已发布模板**早于**契约采集时刻 => 它就是登记时那一版 => 仍阻断。
+    """当前已发布模板**早于**契约采集时刻 ⇒ 它就是登记时那一版 ⇒ 不晋升。
 
     这是 D7「模板升级不自动让历史文件改用新版」的边界:
     我们自己升级模板时碰巧能解释这个文件, 不等于用户为这个文件追平了模板。
@@ -284,8 +372,8 @@ async def test_promotion_not_applied_when_published_template_predates_contract()
         current_columns=["日期", "GMV", "商品卡 GMV"],
     )
 
-    assert status["template_status"] == "update_required"
-    assert status["should_auto_sync"] is False
+    assert status["should_auto_sync"] is True
+    assert status["template_id"] == 368
     assert "contract_promotion" not in status
 
 
@@ -346,11 +434,21 @@ async def test_promotion_skipped_for_non_contract_baseline():
 # ── 契约写库 ─────────────────────────────────────────────────────────
 
 
-def test_promote_template_contract_rewrites_contract_to_new_template():
-    """晋升后契约指向新模板, 且留痕来源。"""
-    catalog_file = SimpleNamespace(file_metadata={})
-    template = _template(372, 8, columns=["日期", "GMV", "商品卡 GMV"])
+def test_promote_template_contract_moves_baseline_without_rewriting_registration():
+    """晋升改的是**当前基准**; 登记事实原样保留, 并留下晋升历史。
 
+    [*] 2026-11-14(批次 4-1): 登记事实是**历史事实** ——
+         「这个文件当年是按哪一版模板解释的」。
+         契约晋升只是「拿哪一版做比较基准」的修正, 不是重新采集,
+         所以它**不许**改写登记事实 ——
+         否则事后没人能回答「当年到底用的哪一版」,
+         而 D7「事后追平」判据正是靠这个问题支撑的。
+    """
+    catalog_file = SimpleNamespace(file_metadata={})
+    registration = build_template_contract(_template(368, 6, columns=["日期", "GMV"]))
+    write_template_contract(catalog_file, registration)
+
+    template = _template(372, 8, columns=["日期", "GMV", "商品卡 GMV"])
     contract = promote_template_contract(catalog_file, template)
 
     assert contract is not None
@@ -359,8 +457,48 @@ def test_promote_template_contract_rewrites_contract_to_new_template():
     assert contract["source"] == CONTRACT_SOURCE_PROMOTION
     assert contract["column_count"] == 3
 
+    # 登记事实**没被动过**
+    stored_registration = read_template_contract(catalog_file)
+    assert stored_registration["template_id"] == 368
+    assert stored_registration["template_version"] == 6
+
+    # 当前基准指向新模板
+    effective = read_effective_contract(catalog_file)
+    assert effective["template_id"] == 372
+    assert effective["template_version"] == 8
+
+    # 晋升历史留痕(谁被追平了、追到了哪一版)
+    history = read_contract_promotions(catalog_file)
+    assert len(history) == 1
+    assert history[0]["template_id"] == 372
+    assert history[0]["template_version"] == 8
+    assert history[0]["source"] == CONTRACT_SOURCE_PROMOTION
+
+
+def test_registration_contract_cannot_be_overwritten_by_accident():
+    """写入层强制「登记事实不可变」—— 光在文档里写「不许改」没有用。"""
+    catalog_file = SimpleNamespace(file_metadata={})
+    first = build_template_contract(_template(368, 6, columns=["日期", "GMV"]))
+    write_template_contract(catalog_file, first)
+
+    second = build_template_contract(
+        _template(372, 8, columns=["日期", "GMV", "商品卡 GMV"])
+    )
+    result = write_template_contract(catalog_file, second)
+
+    assert result == {}, "登记事实已存在时不该写入"
     stored = read_template_contract(catalog_file)
-    assert stored["template_id"] == 372
+    assert stored["template_id"] == 368, "登记事实被改写了"
+
+
+def test_effective_contract_falls_back_to_registration_when_current_missing():
+    """没有当前基准时, 判定基准回退登记事实(兼容批次 4-1 之前的老数据)。"""
+    catalog_file = SimpleNamespace(file_metadata={})
+    registration = build_template_contract(_template(368, 6, columns=["日期", "GMV"]))
+    write_template_contract(catalog_file, registration)
+
+    effective = read_effective_contract(catalog_file)
+    assert effective["template_id"] == 368
 
 
 def test_promote_template_contract_without_template_is_noop():
@@ -368,6 +506,7 @@ def test_promote_template_contract_without_template_is_noop():
     catalog_file = SimpleNamespace(file_metadata={})
     assert promote_template_contract(catalog_file, None) is None
     assert read_template_contract(catalog_file) is None
+    assert read_effective_contract(catalog_file) is None
 
 
 def test_build_template_contract_keeps_source_and_columns_hash():

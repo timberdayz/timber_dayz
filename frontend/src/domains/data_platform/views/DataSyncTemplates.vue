@@ -508,10 +508,14 @@ const canManualUpdateFamily = (family) => {
 const getCurrentWorkbenchSampleFileId = () => updateWorkbenchContext.value?.row?.sample_file_id || null
 
 // [*] 找出覆盖统计里与某个样本文件对应的那一行。
+//
+// [*] 2026-11-14: 查找范围补上「已覆盖」列表 ——
+//     文件被放行后会从「需要更新」挪到「已覆盖」, 那里的行同样带
+//     文件级结论; 只在「需要更新」里找会找不到 ⇒ 拿不到最新结论。
 const findCoverageRowBySampleFile = (sampleFileId) => {
   const rows = [
-    ...(detailedCoverage.value?.current_needs_update || []),
-    ...(detailedCoverage.value?.needs_update || []),
+    ...(detailedCoverage.value?.current_needs_update || detailedCoverage.value?.needs_update || []),
+    ...(detailedCoverage.value?.current_covered || detailedCoverage.value?.covered || []),
   ]
   return rows.find((row) => row.sample_file_id === sampleFileId) || null
 }
@@ -529,8 +533,11 @@ const isSampleStillInNeedsUpdate = (sampleFileId) => {
   if (typeof row.sample_update_required === 'boolean') {
     return row.sample_update_required
   }
-  // 后端没给文件级结论时, 退回组合级判断(保守)。
-  return true
+  // [*] 2026-11-14: 后端没给文件级结论时**不能**断言「还有字段对不上」。
+  //     旧实现在这里保守 `return true`, 于是把「系统还没核对」
+  //     说成「用户还没改对」—— 事实并非如此, 却把用户往错误方向引导。
+  //     现在没有结论就不下阻断性断言, 交给重检结果(见 handleWorkbenchSave)说话。
+  return false
 }
 
 const loadAvailablePlatforms = async () => {
@@ -999,18 +1006,26 @@ const handleWorkbenchSave = async ({
     const stillBlocked = Number(recheck?.still_blocked || 0)
     const sampleStillBlocked = sampleFileId ? isSampleStillInNeedsUpdate(sampleFileId) : false
 
-    if (sampleStillBlocked) {
-      // 真的还有字段对不上 —— 保持工作台打开, 让用户接着改。
-      ElMessage.warning('模板已保存，但该文件仍有字段对不上，请继续检查字段差异')
-    } else if (released > 0) {
+    // [*] 2026-11-14 判断顺序修正:
+    //     「已放行 / 待重检」是**系统**的结论, 优先于「还有字段对不上」。
+    //     过去先判 sampleStillBlocked, 于是只要文件还卡着(哪怕只是
+    //     系统还没核对完), 一律弹「仍有字段对不上」⇒ 把系统欠的活
+    //     说成用户的错。
+    if (released > 0) {
       showTemplateGovernanceSummary(result)
       const suffix = stillBlocked > 0 ? `；另有 ${stillBlocked} 个文件仍需处理` : ''
       ElMessage.success(`模板已更新，${released} 个文件已通过治理复核并放行入库${suffix}`)
       isWorkbenchVisible.value = false
     } else if (stillBlocked > 0) {
       // 模板已生效, 只是还有别的文件没跟上 —— 下一轮巡检会自动重检。
-      ElMessage.warning(`模板已更新，${stillBlocked} 个文件仍待重检，将在下一轮巡检自动处理`)
+      ElMessage.warning(`模板已更新，仍有 ${stillBlocked} 个文件正在重新核对，通过后会自动放行`)
       isWorkbenchVisible.value = false
+    } else if (sampleStillBlocked) {
+      // [*] 2026-11-14 文案对齐新口径:
+      //     阻断的**唯一**理由是「核心字段(需求)没满足」(含该维度尚未定义清单),
+      //     已经不是「列对不上」—— 多一列/少一列现在都不阻断。
+      //     保持工作台打开, 让用户接着补齐必需字段。
+      ElMessage.warning('模板已保存，但该文件仍缺少必需字段，请继续检查字段差异')
     } else {
       showTemplateGovernanceSummary(result)
       ElMessage.success(result.message || '模板更新成功，治理已通过')

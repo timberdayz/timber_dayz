@@ -115,23 +115,43 @@ def _classify(**kwargs):
     return classify_drift(**kwargs)
 
 
-def test_added_column_blocks_until_template_catches_up():
-    """多一列 ⇒ 阻断。
+def test_added_column_never_blocks():
+    """多一列 ⇒ **不阻断**(2026-11-14 口径回退, 对齐 11-07 规格 §1.4)。
 
-    理由: 模板没声明的列**不会写进事实表**。放行 ⇒ 新列的数据被静默丢弃,
-    而且没人收到提示(面板不提示、已入库的行不重算)。
-    ⇒ 「多一列」必须先拦一道, 把「模板落后于源文件」变成一个待办。
+    旧口径(2026-11-13 v7.26.0)曾断言「多一列 ⇒ 阻断」, 理由是
+    「模板没声明的列不会写进事实表 ⇒ 放行等于静默丢数据」。
+    **该前提在批次 E/F 之后已不成立**:
+    非核心列的完整内容留在 ``raw_data`` JSONB 里(落库列收窄),
+    下游语义视图也从 ``raw_data`` 取值 ⇒ **数据不丢**。
+
+    ⇒ 2026-11-14 实测事故(TikTok 订单月报多一列)正是这条旧规则的代价:
+    整个维度被卡住, 直到用户手动确认才放行。
     """
     decision = _classify(added_fields=["平台新增辅助字段"])
 
-    assert decision.is_blocking is True
-    assert decision.template_status == "update_required"
-    assert decision.governance_status == "breaking_drift"
-    assert "平台新增辅助字段" in decision.blocking_changes
+    assert decision.is_blocking is False
+    assert decision.template_status == "alias_only"
+    assert decision.governance_status == "non_breaking_drift"
+    assert "平台新增辅助字段" in decision.non_blocking_changes
+
+
+def test_added_column_never_blocks_even_without_core_fields():
+    """多一列的结论**与清单是否配置无关** —— 它从来就不是需求问题。"""
+    decision = _classify(
+        added_fields=["平台新增辅助字段"],
+        core_fields_configured=False,
+    )
+
+    assert decision.is_blocking is False
+    assert decision.template_status == "alias_only"
 
 
 def test_confirmed_extra_column_never_blocks():
-    """用户确认过的新列 ⇒ 不阻断(用户明说不要它)。"""
+    """用户确认过的新列 ⇒ 不阻断。
+
+    2026-11-14 起它的作用**降级为「已阅标记」**(面板去噪),
+    不再参与阻断判定 —— 但结论不变, 仍然不阻断。
+    """
     decision = _classify(
         added_fields=["平台新增辅助字段"],
         confirmed_extra_fields=["平台新增辅助字段"],
@@ -151,11 +171,73 @@ def test_missing_required_semantic_key_blocks():
     assert decision.template_status == "update_required"
 
 
-def test_removed_unprovable_column_blocks():
-    """少了一列且说不清它是什么 ⇒ 保守阻断。"""
+def test_removed_column_outside_configured_core_fields_never_blocks():
+    """少了一列, 但它**不在**核心字段清单里 ⇒ 不阻断(它不是需求)。"""
     decision = _classify(
         removed_fields=["订单号"],
         unmapped_removed_raw_fields=["订单号"],
+        core_fields_configured=True,
+    )
+
+    assert decision.is_blocking is False
+    assert decision.template_status == "alias_only"
+
+
+def test_removed_column_blocks_when_core_fields_not_configured():
+    """清单为空 ⇒ 该维度还没定义过「我要哪些数据」⇒ 阻断(配置缺口, B1)。
+
+    这与「数据不满足需求」是**两回事**: 一个是配置没做, 一个是数据有问题。
+    界面必须能区分 ⇒ 文案里要出现「核心字段清单」。
+    """
+    decision = _classify(
+        removed_fields=["订单号"],
+        unmapped_removed_raw_fields=["订单号"],
+        core_fields_configured=False,
+    )
+
+    assert decision.is_blocking is True
+    assert decision.template_status == "update_required"
+    assert "核心字段清单" in decision.reason
+
+
+def test_removed_required_core_field_blocks():
+    """核心字段清单里 ``required=true`` 的列缺失 ⇒ **阻断**(需求没被满足)。
+
+    规格 §3.1: 「漂移阻断 ← ``core_fields`` 中 ``required=true`` ∪ 域级契约 required」。
+    这条是口径回退的**兜底**: 放宽了「少一列」, 但绝不能放宽「核心需求缺失」。
+    """
+    decision = _classify(
+        removed_fields=["订单号"],
+        required_core_fields=["订单号"],
+        core_fields_configured=True,
+    )
+
+    assert decision.is_blocking is True
+    assert decision.template_status == "update_required"
+
+
+def test_removed_optional_core_field_never_blocks():
+    """清单里 ``required=false`` 的列缺失 ⇒ 不阻断。"""
+    decision = _classify(
+        removed_fields=["预估回款金额"],
+        optional_raw_fields=["预估回款金额"],
+        required_core_fields=["订单号"],
+        core_fields_configured=True,
+    )
+
+    assert decision.is_blocking is False
+    assert decision.template_status == "alias_only"
+
+
+def test_removed_required_column_blocks_even_with_configured_core_fields():
+    """少的是**绑定必填语义键**的列 ⇒ 永远阻断(哪怕清单已配置)。
+
+    业务上少一个订单号维度 ⇒ 算不出要的业务数字 ⇒ 不能放行。
+    """
+    decision = _classify(
+        removed_fields=["订单号"],
+        blocking_removed_raw_fields=["订单号"],
+        core_fields_configured=True,
     )
 
     assert decision.is_blocking is True
@@ -184,18 +266,24 @@ def test_removed_column_rescued_by_alias_never_blocks():
     assert decision.template_status == "alias_only"
 
 
-def test_no_contract_domain_is_conservative_on_removed_columns():
-    """该域没有语义契约 ⇒ L2 给不出结论 ⇒ 少列一律保守阻断。
+def test_unconfigured_dimension_blocks_on_removed_columns():
+    """该维度还没定义核心字段清单 ⇒ 少列阻断(配置缺口)。
 
-    「L2 没有结论」必须与「L2 说它可选」区分开, 否则会误放行。
+    2026-11-14 起归因从「没有语义契约」改成「没有核心字段清单」
+    (业务拍板 B1): 判断依据是**用户有没有定义过需求**,
+    而不是「系统有没有契约表」。
+
+    「配置没做」必须与「配置做了但数据不满足」区分开, 否则会误放行。
     """
     decision = _classify(
         removed_fields=["退款金额"],
         has_semantic_contract=False,
+        core_fields_configured=False,
     )
 
     assert decision.is_blocking is True
     assert decision.template_status == "update_required"
+    assert "核心字段清单" in decision.reason
 
 
 def test_column_order_change_never_blocks():
@@ -335,6 +423,11 @@ def test_governance_coverage_row_exposes_file_level_live_verdict():
 
     少了文件级结论, 前端只能按组合粒度判断 ⇒ 会出现
     「用户刚把这个文件改对, 界面却说它仍未通过治理复核」。
+
+    [*] 2026-11-14 加强: 光断言字符串存在是不够的 ——
+    过去文件级结论**只写在「已覆盖」行**, 而前端是在「需要更新」行里
+    找这个文件的 ⇒ 拿到了 undefined ⇒ 保守当成「还对不上」⇒ 误报。
+    ⇒ 这里必须校验它**真的出现在前端读取的那两个列表**里。
     """
     router = (
         REPO_ROOT / "backend" / "domains" / "data_platform" / "routers" / "data_sync.py"
@@ -343,6 +436,21 @@ def test_governance_coverage_row_exposes_file_level_live_verdict():
     assert "sample_update_required" in router
     assert "sample_template_status" in router
     assert "live_update_required" in router
+
+    # 「需要更新」行也必须带文件级结论(前端在这里找样本文件)
+    needs_update_block = router.split("needs_update_list.append(", 1)[1]
+    needs_update_block = needs_update_block[
+        : needs_update_block.find("\n            )")
+    ]
+    for field in (
+        "sample_template_status",
+        "sample_update_required",
+        "sample_governance_status",
+        "sample_update_reason",
+    ):
+        assert (
+            f'"{field}"' in needs_update_block
+        ), f"「需要更新」行缺少 {field} ⇒ 前端拿不到文件级结论 ⇒ 会误报"
 
 
 def test_template_save_response_carries_recheck_summary():
@@ -370,3 +478,75 @@ def test_semantic_contract_service_reports_removed_column_verdicts():
         "unmapped_removed_raw_fields",
     ):
         assert attribute in source, f"L2 缺少 {attribute}"
+
+
+# ---------------------------------------------------------------------------
+# 紧急回退保险: 口径开关
+# ---------------------------------------------------------------------------
+def test_legacy_caliber_switch_reintroduces_added_column_blocking(monkeypatch):
+    """``TEMPLATE_DRIFT_CALIBER=legacy`` ⇒ 多一列重新阻断。
+
+    为什么要有这个开关
+    ------------------
+    2026-11-14 的口径回退是本次**唯一的业务口径变更**。万一上线后
+    发现判断与预期不符, 运维需要一条**不改代码、不重新构建镜像**的
+    回退路径: 改环境变量 + 重启容器。
+
+    ⇒ 开关只挂在「多一列」这一条规则上, 其余规则两套口径完全一致。
+    """
+    from backend.services.data_sync_status_semantics import (
+        DRIFT_CALIBER_ENV,
+        classify_drift,
+        legacy_caliber_enabled,
+    )
+
+    monkeypatch.delenv(DRIFT_CALIBER_ENV, raising=False)
+    assert legacy_caliber_enabled() is False
+    current = classify_drift(added_fields=["新列"])
+    assert current.is_blocking is False
+    assert current.non_blocking_changes == ["新列"]
+
+    monkeypatch.setenv(DRIFT_CALIBER_ENV, "legacy")
+    assert legacy_caliber_enabled() is True
+    legacy = classify_drift(added_fields=["新列"])
+    assert legacy.is_blocking is True
+    assert legacy.blocking_changes == ["新列"]
+
+
+def test_legacy_caliber_still_honors_confirmed_extra_fields(monkeypatch):
+    """旧口径下, 用户确认过的新列**仍然**不阻断(旧行为不能丢)。"""
+    from backend.services.data_sync_status_semantics import (
+        DRIFT_CALIBER_ENV,
+        classify_drift,
+    )
+
+    monkeypatch.setenv(DRIFT_CALIBER_ENV, "legacy")
+    decision = classify_drift(
+        added_fields=["新列"],
+        confirmed_extra_fields=["新列"],
+    )
+    assert decision.is_blocking is False
+    assert decision.blocking_changes == []
+
+
+def test_legacy_caliber_does_not_change_core_field_blocking(monkeypatch):
+    """开关**只**影响「多一列」; 核心字段缺失在两套口径下都阻断。"""
+    from backend.services.data_sync_status_semantics import (
+        DRIFT_CALIBER_ENV,
+        classify_drift,
+    )
+
+    for value in ("", "legacy"):
+        if value:
+            monkeypatch.setenv(DRIFT_CALIBER_ENV, value)
+        else:
+            monkeypatch.delenv(DRIFT_CALIBER_ENV, raising=False)
+        decision = classify_drift(
+            removed_fields=["核心列"],
+            required_core_fields=["核心列"],
+            core_fields_configured=True,
+        )
+        assert (
+            decision.is_blocking is True
+        ), f"口径={value or 'current'} 时核心字段缺失未阻断"
+        assert "核心列" in decision.blocking_changes

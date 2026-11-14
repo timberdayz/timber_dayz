@@ -69,6 +69,36 @@ def normalize_dimension_value(value: Optional[str]) -> Optional[str]:
     return value or None
 
 
+def normalize_dimension_placeholder(value: Optional[str]) -> Optional[str]:
+    """维度**占位符**归一: ``"N/A"`` / ``"NA"`` / ``"None"`` / ``"null"`` ⇒ ``None``。
+
+    为什么需要它(2026-11-14)
+    -----------------------
+    治理面板接口把「没有子类型」渲染成字符串 ``"N/A"`` 返回给前端
+    (见 ``backend/domains/data_platform/routers/data_sync.py`` 的
+    ``"sub_domain": sub_domain or "N/A"``),
+    而前端保存模板时把这个**显示占位符原样回传**
+    (见 ``frontend/src/domains/data_platform/views/DataSyncTemplates.vue``)。
+
+    ⇒ 任何拿它当 SQL 条件去查文件表的代码都会**永远匹配不到**
+    (文件表的 ``sub_domain`` 是 ``NULL``) ⇒ 重检静默 0 命中。
+    实测: 2026-11-14 TikTok 订单月报保存模板后, 文件又等了 15 分钟
+    才被定时巡检放行。
+
+    与 :func:`normalize_dimension_value` 的区别
+    -----------------------------------------
+    * ``normalize_dimension_value``: 只把**空字符串**当空(那是合法空维度);
+    * ``normalize_dimension_placeholder``: 额外把**占位符字面量**当空
+      (那不是合法维度值, 只是给人看的渲染结果)。
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.lower() in {"n/a", "na", "none", "null"}:
+        return None
+    return text or None
+
+
 def match_dimension_condition(column, value: Optional[str]):
     """构造维度匹配条件。
 
@@ -523,6 +553,28 @@ class TemplateMatcher:
         if not alias_mapping:
             return list(columns)
         return [alias_mapping.get(column, column) for column in columns]
+
+    @staticmethod
+    def _required_raw_fields(core_fields: Any) -> List[str]:
+        """模板核心字段清单里 ``required=true`` 的**原始列名**。
+
+        这是「某列是不是需求」的**模板级声明**(SSOT):
+        用户在工作台把它勾成必填 ⇒ 少掉它就**阻断**入库
+        (规格 §3.1: 漂移阻断 ← ``core_fields`` 中 ``required=true``)。
+
+        与 :meth:`_optional_raw_fields` 是一对: 可选的少掉不阻断,
+        必填的少掉必阻断 —— 两条合起来才是「核心字段 = 需求」的完整表达。
+        """
+        from backend.services.core_fields_service import normalize_core_fields
+
+        required: List[str] = []
+        for entry in normalize_core_fields(core_fields):
+            if not entry.get("required"):
+                continue
+            raw_name = str(entry.get("raw_name") or "").strip()
+            if raw_name and raw_name not in required:
+                required.append(raw_name)
+        return required
 
     @staticmethod
     def _optional_raw_fields(core_fields: Any) -> List[str]:
@@ -1033,6 +1085,22 @@ class TemplateMatcher:
             ignored_extra_fields = list(
                 getattr(template, "ignored_extra_fields", None) or []
             )
+            # [*] 核心字段清单: 入参优先, 缺省回退**模板自身**那一份。
+            #
+            # 为什么必须回退(2026-11-14):
+            #     入库前置校验(``data_sync_service``)会传 ``core_fields``,
+            #     但治理面板的判定链路(``data_sync_template_status_service``)
+            #     **不传** ⇒ 若不回退, L2 拿不到模板级 required,
+            #     且「清单是否已配置」会被误判成「未配置」
+            #     ⇒ B1 口径(清单为空 ⇒ 阻断)会误伤**已配置**的模板。
+            #     ⇒ 两条链路必须拿到**同一份**清单。
+            from backend.services.core_fields_service import normalize_core_fields
+
+            effective_core_fields = core_fields
+            if effective_core_fields is None:
+                effective_core_fields = getattr(template, "core_fields", None)
+            core_fields_configured = bool(normalize_core_fields(effective_core_fields))
+
             semantic_contract = await SemanticFieldContractService(self.db).evaluate(
                 platform=template.platform,
                 data_domain=template.data_domain,
@@ -1042,7 +1110,7 @@ class TemplateMatcher:
                 current_columns=current_columns,
                 template_columns=template_columns,
                 # [*] 批次 E(E-5): 模板级核心字段清单的 required 一并参与阻断判定。
-                core_fields=core_fields,
+                core_fields=effective_core_fields,
                 ignored_extra_fields=ignored_extra_fields,
             )
             semantic_summary = semantic_contract.to_dict()
@@ -1105,8 +1173,13 @@ class TemplateMatcher:
                 alias_rescued_removed_raw_fields=(
                     semantic_contract.alias_rescued_removed_raw_fields
                 ),
-                optional_raw_fields=self._optional_raw_fields(core_fields),
+                optional_raw_fields=self._optional_raw_fields(effective_core_fields),
+                required_core_fields=self._required_raw_fields(effective_core_fields),
                 confirmed_extra_fields=ignored_extra_fields,
+                # [*] 2026-11-14: 清单是否已配置(业务拍板 B1)
+                #     ⇒ 清单外的列不是需求 ⇒ 少它们不阻断;
+                #     清单为空 ⇒ 配置缺口 ⇒ 阻断并提示去配置。
+                core_fields_configured=core_fields_configured,
             )
             change_classification = {
                 "blocking_changes": list(drift_decision.blocking_changes),

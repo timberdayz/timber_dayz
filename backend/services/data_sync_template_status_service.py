@@ -11,6 +11,7 @@ from backend.services.template_contract_service import (
     describe_contract_baseline,
     is_contract_baseline_valid,
     parse_contract_captured_at,
+    read_effective_contract,
     read_template_contract,
 )
 from backend.services.template_family_service import get_template_resolver
@@ -248,14 +249,23 @@ class DataSyncTemplateStatusService:
         # 而且无法区分「源文件变了」与「我们自己升级了模板」。
         #
         # 有契约时: 基准 = 契约指向的那一版模板(采集当时生效的版本)。
-        contract = read_template_contract(catalog_file)
+        #
+        # [*] 批次 4-1: 契约拆成**两份**, 用途不同, 不能混:
+        #     registration_contract —— **登记事实**(当年按哪一版采集)。
+        #         只用于追溯展示(template_outdated / 「我们升级过模板」),
+        #         永远不被改写。
+        #     effective_contract —— **当前基准**(现在该按哪一版解释)。
+        #         判定链路只认它; 契约晋升后它会指向新版本。
+        #     以前两者共用一个字段 ⇒ 「追溯当年」和「判定现在」互相迁就。
+        registration_contract = read_template_contract(catalog_file)
+        effective_contract = read_effective_contract(catalog_file)
         baseline_template = None
         baseline_kind = TEMPLATE_BASELINE_CURRENT
         current_template = template
         # [*] 契约状态(第 3 批 3.3): valid / invalid / missing 三者互不重叠
         contract_status, contract_invalid_reason = (
-            await self._evaluate_contract_status(contract)
-            if contract
+            await self._evaluate_contract_status(effective_contract)
+            if effective_contract
             else (CONTRACT_STATUS_MISSING, None)
         )
 
@@ -313,8 +323,8 @@ class DataSyncTemplateStatusService:
                 )
                 if published_template is not None:
                     current_template = published_template
-        elif contract:
-            candidate = await self._resolve_contract_candidate(contract)
+        elif effective_contract:
+            candidate = await self._resolve_contract_candidate(effective_contract)
             if candidate is not None and contract_status == CONTRACT_STATUS_VALID:
                 baseline_template = candidate
                 baseline_kind = TEMPLATE_BASELINE_CONTRACT
@@ -347,7 +357,12 @@ class DataSyncTemplateStatusService:
                 baseline_template = takeover_template
                 baseline_kind = TEMPLATE_BASELINE_CROSS_FAMILY_VARIANT
 
-        baseline_info = describe_contract_baseline(contract, current_template)
+        # [*] 批次 4-1: ``template_outdated`` 问的是
+        #     「这个文件当年按哪一版采集, 现在发布的是哪一版」——
+        #     那是**登记事实**与当前发布版的对比, 所以用登记事实。
+        baseline_info = describe_contract_baseline(
+            registration_contract, current_template
+        )
 
         # [D7] 比较基准: 契约 > 跨 family 接管 > 当前已发布模板
         comparison_template = baseline_template or template
@@ -355,7 +370,9 @@ class DataSyncTemplateStatusService:
         # [*] 契约是否已过时: 契约存在, 但实际解释这个文件的基准不是它 ——
         #     说明采集登记时按粒度选错了模板(导出格式不跟着粒度走), 需要修正。
         contract_stale = bool(
-            contract and baseline_kind and baseline_kind != TEMPLATE_BASELINE_CONTRACT
+            effective_contract
+            and baseline_kind
+            and baseline_kind != TEMPLATE_BASELINE_CONTRACT
         )
 
         # [*] 契约信号(第 3 批 3.3): 契约失效必须**显式**留痕, 不允许无声回退
@@ -508,6 +525,11 @@ class DataSyncTemplateStatusService:
                 confirmed_extra_fields=(
                     header_changes.get("confirmed_extra_fields") or []
                 ),
+                # [*] 2026-11-14: 兜底重算也要带清单状态,
+                #     否则「已配置清单」会被误判成「未配置」(B1 口径会误伤)。
+                core_fields_configured=bool(
+                    getattr(comparison_template, "core_fields", None)
+                ),
             ).to_dict()
 
         status = str(decision.get("template_status") or TEMPLATE_STATUS_READY)
@@ -521,18 +543,25 @@ class DataSyncTemplateStatusService:
         format_drift = status == TEMPLATE_STATUS_FORMAT_DRIFT
 
         # [*] 漂移来源: 回答「为什么对不上」
-        if update_required:
-            drift_origin = (
-                DRIFT_ORIGIN_SOURCE_CHANGE
-                if (baseline_template is not None or contract)
-                else DRIFT_ORIGIN_UNKNOWN
-            )
+        #
+        # [*] 2026-11-14: 判定**不再依赖是否阻断** ——
+        #     「多一列」不再阻断(对齐 11-07 规格 §1.4), 但它相对**契约基准**
+        #     仍然是**源侧结构变化** ⇒ drift_origin 必须照实说,
+        #     否则会把「平台改了导出」说成「我们升级了模板」——
+        #     那会让追溯(D7「事后追平」判据)失去依据。
+        source_side_change = bool(
+            header_changes.get("added_fields")
+            or header_changes.get("removed_fields")
+            or header_changes.get("format_drift")
+        )
+        if source_side_change and (baseline_template is not None or effective_contract):
+            drift_origin = DRIFT_ORIGIN_SOURCE_CHANGE
+        elif baseline_info.get("template_outdated"):
+            drift_origin = DRIFT_ORIGIN_TEMPLATE_UPGRADE
+        elif update_required:
+            drift_origin = DRIFT_ORIGIN_UNKNOWN
         else:
-            drift_origin = (
-                DRIFT_ORIGIN_TEMPLATE_UPGRADE
-                if baseline_info.get("template_outdated")
-                else None
-            )
+            drift_origin = None
 
         # [*] 契约失效: 契约基准已经解释不了这个文件, 而当前已发布模板可以。
         #
@@ -575,7 +604,12 @@ class DataSyncTemplateStatusService:
             and getattr(published_template, "id", None)
             != getattr(baseline_template, "id", None)
         ):
-            contract_captured_at = parse_contract_captured_at(contract)
+            # [*] 批次 4-1: 用**登记事实**的采集时刻, 不是当前基准的 ——
+            #     「事后追平」问的是「这个文件是**什么时候**采集的,
+            #     而当前模板是**什么时候**发布的」⇒ 必须是登记那一刻的时间。
+            #     契约晋升会改写当前基准(它的 captured_at 是晋升时刻),
+            #     拿它来比会把「晋升」误当成「当年就在用新版」。
+            contract_captured_at = parse_contract_captured_at(registration_contract)
             published_created_at = getattr(published_template, "created_at", None)
             if published_created_at is not None and published_created_at.tzinfo is None:
                 # SQLite / naive datetime 统一按 UTC 处理 —— 只比较相对先后

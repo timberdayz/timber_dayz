@@ -3594,6 +3594,18 @@ async def get_detailed_template_coverage(
                             "template_status": template_status,
                             "update_reason": update_reason,
                             "shadow_compare": shadow_compare,
+                            # [*] 实时判定结论(样本文件此刻的处境)(2026-11-14)。
+                            #
+                            # 过去这些字段**只写在「已覆盖」行**上, 而前端
+                            # ``DataSyncTemplates.vue`` 是在「需要更新」行里
+                            # 找这个文件的 ⇒ 它拿到 ``undefined``
+                            # ⇒ 保守当成「还对不上」⇒ 误报。
+                            #
+                            # ⇒ 这里在「需要更新」行也带上同一组文件级结论。
+                            "sample_template_status": live_template_status,
+                            "sample_update_required": live_update_required,
+                            "sample_governance_status": live_governance_status,
+                            "sample_update_reason": live_update_reason,
                             # [*] 漂移快照: 供前端展示「漂移发生时」的模板版本与表头差异
                             "drift_snapshot": (drift_group or {}).get("drift_snapshot"),
                             "drift_file_count": (drift_group or {}).get(

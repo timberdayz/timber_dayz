@@ -50,8 +50,9 @@ from backend.services.data_sync_template_drift_service import (
 from backend.services.template_contract_service import (
     CONTRACT_SOURCE_PROMOTION,
     build_template_contract,
-    write_template_contract,
+    write_current_template_contract,
 )
+from backend.services.template_matcher import normalize_dimension_placeholder
 
 logger = get_logger(__name__)
 
@@ -183,6 +184,26 @@ class TemplateRecheckService:
     # 落库
     # ------------------------------------------------------------------
     @staticmethod
+    def _promotion_note(readiness: Dict[str, Any]) -> Dict[str, Any]:
+        """从 ``contract_promotion`` 信号里取出「从哪一版追到哪一版」。
+
+        [*] 批次 4-1: 晋升历史要能回答「这个文件被追平过几次、每次从哪版到哪版」。
+        """
+        promotion = (readiness or {}).get("contract_promotion")
+        if not isinstance(promotion, dict):
+            return {}
+        note: Dict[str, Any] = {}
+        for key in (
+            "from_template_id",
+            "from_template_version",
+            "to_template_id",
+            "to_template_version",
+        ):
+            if promotion.get(key) is not None:
+                note[key] = promotion[key]
+        return note
+
+    @staticmethod
     def apply_recheck(file_record: Any, readiness: Dict[str, Any]) -> bool:
         """把重检结论落到文件行上(调用方负责 commit)。
 
@@ -196,6 +217,21 @@ class TemplateRecheckService:
         now = datetime.now(timezone.utc)
         meta = dict(getattr(file_record, "file_metadata", None) or {})
         auto_meta = dict(meta.get("auto_ingest") or {})
+
+        # [*] 批次 4-2: 闭环埋点 —— 「这次重检发生在什么时候、针对哪一次模板发布」。
+        #
+        #     模板行的 id 就是**发布事件 id**: 保存模板 = 「归档旧版本 + 插入新版本」,
+        #     新行的 id 自增 ⇒ 任何一个模板行都唯一对应一次发布。
+        #     ⇒ 记下「本次重检时生效的模板 id」, 就能算出
+        #     「某次模板发布后 T 分钟内, 受它影响的文件有多少比例完成了重估」。
+        #
+        #     没有这行埋点, 那个指标只能靠猜 —— 实测 2026-11-14:
+        #     全库 497 个文件里只有 25 个有重检时间戳, 且没有一个能说清
+        #     「它是针对哪次发布重检的」⇒ 闭环比例根本算不出来。
+        recheck_template_id = (readiness or {}).get("template_id")
+        auto_meta["last_recheck_at"] = now.isoformat()
+        if recheck_template_id is not None:
+            auto_meta["last_recheck_template_id"] = recheck_template_id
 
         if (readiness or {}).get("should_auto_sync") is True:
             auto_meta["last_status"] = "readiness_recovered"
@@ -223,11 +259,23 @@ class TemplateRecheckService:
             file_record.file_metadata = meta
 
             # 契约晋升落库: 契约基准已解释不了这个文件, 当前已发布模板可以 ——
-            # 把契约改写成当前版本, 否则契约会继续把文件钉在旧模板上,
+            # 把**当前基准**改指到当前版本, 否则契约会继续把文件钉在旧模板上,
             # 下一轮重检又被打回(而且入库会按旧模板解析, 丢掉新增字段)。
+            #
+            # [*] 批次 4-1: 写的是「当前基准」位, **登记事实不动** ——
+            #     登记事实回答的是「当年按哪一版采集」, 那是历史事实,
+            #     被晋升改写之后就再也答不出来了(D7「事后追平」判据靠它支撑)。
             promoted_contract = (readiness or {}).get("promoted_contract")
             if promoted_contract:
-                write_template_contract(file_record, promoted_contract)
+                # [*] 注意: ``apply_recheck`` 是 ``@staticmethod`` —— 这里必须用
+                #     类名调用。写成 ``self._promotion_note(...)`` 只在**真的发生
+                #     契约晋升**时才求值, 于是平时跑不出来, 等到晋升路径第一次
+                #     触发就是 AttributeError(潜伏 bug)。
+                write_current_template_contract(
+                    file_record,
+                    promoted_contract,
+                    promotion_note=TemplateRecheckService._promotion_note(readiness),
+                )
 
             file_record.status = "pending"
             file_record.error_message = None
@@ -304,18 +352,31 @@ class TemplateRecheckService:
         Returns:
             ``{"checked": int, "released": int, "still_blocked": int, "file_ids": [...]}``
         """
+        # [*] 维度归一(2026-11-14):
+        #     治理面板接口把「没有子类型」渲染成字符串 ``"N/A"`` 给前端,
+        #     前端保存模板时把它**原样回传** ⇒ 这里拿到的 ``sub_domain``
+        #     可能是 ``"N/A"`` 而不是 ``None``。
+        #     直接拿它当 SQL 条件查文件表(文件表的 sub_domain 是 NULL)
+        #     ⇒ **永远匹配不到** ⇒ 重检静默 0 命中、且一行日志都不打
+        #     ⇒ 文件要等下一轮定时巡检(15 分钟)才被放行。
+        #     实测: 2026-11-14 14:32 三次保存模板后, 文件 3059 直到
+        #     14:45 的巡检轮才放行。
+        normalized_sub_domain = normalize_dimension_placeholder(sub_domain)
+        normalized_account = normalize_dimension_placeholder(account)
+        normalized_granularity = normalize_dimension_placeholder(granularity)
+
         try:
             stmt = select(CatalogFile).where(
                 CatalogFile.status == TEMPLATE_UPDATE_REQUIRED_STATUS,
                 CatalogFile.platform_code == platform,
                 CatalogFile.data_domain == data_domain,
             )
-            if granularity:
-                stmt = stmt.where(CatalogFile.granularity == granularity)
-            if sub_domain:
-                stmt = stmt.where(CatalogFile.sub_domain == sub_domain)
-            if account:
-                stmt = stmt.where(CatalogFile.account == account)
+            if normalized_granularity:
+                stmt = stmt.where(CatalogFile.granularity == normalized_granularity)
+            if normalized_sub_domain:
+                stmt = stmt.where(CatalogFile.sub_domain == normalized_sub_domain)
+            if normalized_account:
+                stmt = stmt.where(CatalogFile.account == normalized_account)
             stmt = stmt.order_by(CatalogFile.first_seen_at.asc()).limit(
                 max(1, int(limit))
             )
@@ -331,6 +392,18 @@ class TemplateRecheckService:
             return {"checked": 0, "released": 0, "still_blocked": 0, "file_ids": []}
 
         if not files:
+            # [*] 0 命中也要留痕(2026-11-14):
+            #     过去这里静默返回, 于是「漏检」与「本来就没有待更新文件」
+            #     在日志上长得一模一样 ⇒ 现场毫无痕迹, 只能靠猜。
+            logger.info(
+                "[TemplateRecheck] 维度重检无待更新文件 platform=%s domain=%s "
+                "granularity=%s sub_domain=%s account=%s",
+                platform,
+                data_domain,
+                normalized_granularity,
+                normalized_sub_domain,
+                normalized_account,
+            )
             return {"checked": 0, "released": 0, "still_blocked": 0, "file_ids": []}
 
         file_ids = [

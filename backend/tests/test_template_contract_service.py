@@ -11,15 +11,16 @@ D1 采集落库记录模板契约
 
 D1 判定采用文件自带基准
   6. 我们升级了模板(v5 -> v6), 按 v5 采集的文件**不再**被判成结构漂移
-  7. 源文件真的变了(与契约基准不符) -> 仍然阻断, 且漂移来源是 source_change
-  8. 没有契约的历史文件 -> 维持「与当前已发布模板比对」的旧口径
+  7. 源文件多了一列 -> 不阻断(需求没被违反), 但漂移来源仍是 source_change
+  8. 源文件少了一列 -> 仍然阻断, 且漂移来源是 source_change
+  9. 没有契约的历史文件 -> 维持「与当前已发布模板比对」的旧口径
 
 D5 统一缓存键
-  9. 就绪缓存键与治理行级缓存键包含同样的失效要素(last_modified / 模板版本)
+  10. 就绪缓存键与治理行级缓存键包含同样的失效要素(last_modified / 模板版本)
 
 D2 状态枚举
-  10. ORM CHECK 约束与状态枚举 SSOT 一致
-  11. 迁移脚本里的合法状态集合与 SSOT 一致
+  11. ORM CHECK 约束与状态枚举 SSOT 一致
+  12. 迁移脚本里的合法状态集合与 SSOT 一致
 """
 
 from datetime import datetime, timezone
@@ -364,7 +365,11 @@ def test_register_single_file_captures_template_contract(tmp_path, monkeypatch):
         lambda _session: type(
             "_NoopTableManager",
             (),
-            {"ensure_table_exists": staticmethod(lambda **_kwargs: "fact_tiktok_products_monthly")},
+            {
+                "ensure_table_exists": staticmethod(
+                    lambda **_kwargs: "fact_tiktok_products_monthly"
+                )
+            },
         )(),
     )
     monkeypatch.delenv("ALLOW_DEV_CATALOG_REGISTRATION", raising=False)
@@ -499,10 +504,20 @@ async def test_template_upgrade_does_not_flag_file_collected_with_old_template(
 
 
 @pytest.mark.asyncio
-async def test_source_change_against_contract_baseline_still_blocks(
+async def test_extra_column_against_contract_baseline_does_not_block(
     contract_session_factory,
 ):
-    """源文件结构真的变了 -> 仍然阻断, 并且能说清是源侧变化。"""
+    """源文件比契约基准**多**一列 -> 不阻断, 但漂移来源仍说清是源侧变化。
+
+    [*] 2026-11-14 口径回退: 「多一列」不再阻断 ——
+         核心字段一个都没少 ⇒ **需求没被违反** ⇒ 没有理由拦下整个维度;
+         新列的完整内容留在 ``raw_data`` 里 ⇒ 数据也不丢。
+         但「相对契约基准发生了结构变化」这件事必须**照实说** ——
+         否则会把「平台改了导出」说成「我们升级了模板」,
+         事后追溯(D7「事后追平」判据)就失去依据。
+         ⇒ ``drift_origin`` 与「是否阻断」**解耦**: 阻断与否看需求,
+           漂移来源照实说。
+    """
     from backend.services.data_sync_template_status_service import (
         DRIFT_ORIGIN_SOURCE_CHANGE,
         DataSyncTemplateStatusService,
@@ -521,6 +536,44 @@ async def test_source_change_against_contract_baseline_still_blocks(
         status = await DataSyncTemplateStatusService(session).evaluate_catalog_file(
             catalog_file,
             current_columns=["商品ID", "商品名称", "退款金额"],
+        )
+
+    # 多一列不阻断
+    assert status["template_status"] == "alias_only"
+    assert status["template_update_required"] is False
+    assert status["should_auto_sync"] is True
+    # 但漂移来源仍然照实说: 相对契约基准多了一列 = 源侧结构变化
+    assert status["drift_origin"] == DRIFT_ORIGIN_SOURCE_CHANGE
+
+
+@pytest.mark.asyncio
+async def test_missing_column_against_contract_baseline_still_blocks(
+    contract_session_factory,
+):
+    """源文件比契约基准**少**了一列 -> 仍然阻断, 并且能说清是源侧变化。
+
+    这条守住「口径回退没有把闸门整个拆掉」:
+    少列 = 可能少了要的数据 ⇒ 核心字段清单未配置时无从判定可缺
+    ⇒ 阻断并提示去配置清单(业务拍板 B1)。
+    """
+    from backend.services.data_sync_template_status_service import (
+        DRIFT_ORIGIN_SOURCE_CHANGE,
+        DataSyncTemplateStatusService,
+    )
+    from backend.services.template_contract_service import build_template_contract
+
+    now = _now()
+    async with contract_session_factory() as session:
+        old_template, _new_template = await _seed_templates(session, now)
+        contract = build_template_contract(old_template)
+
+        catalog_file = _catalog_file(contract)
+        session.add(catalog_file)
+        await session.commit()
+
+        status = await DataSyncTemplateStatusService(session).evaluate_catalog_file(
+            catalog_file,
+            current_columns=["商品ID"],
         )
 
     assert status["template_status"] == "update_required"

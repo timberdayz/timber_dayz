@@ -286,6 +286,20 @@ class TemplateSaveData(BaseModel):
         default_factory=list,
         description="家族历史版本(archived)的 hash 口径差异, 仅提示不阻断",
     )
+    # [*] 模板发布后的受影响文件重检结果(2026-11-14)
+    #
+    # 历史上 router 在保存成功后写了 ``save_result["recheck"]``,
+    # 但本模型**没有声明该字段** ⇒ Pydantic 静默丢弃
+    # ⇒ 前端 ``result.data.recheck`` 恒为 undefined
+    # ⇒ 三态提示拿不到 ``released`` / ``still_blocked``,
+    #   只能退回「按列表猜」⇒ 用户做对了也被提示「仍有字段对不上」。
+    recheck: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "模板发布后的受影响文件重检结果: "
+            "checked / released / still_blocked / file_ids"
+        ),
+    )
 
 
 class TemplateSaveResponse(BaseModel):

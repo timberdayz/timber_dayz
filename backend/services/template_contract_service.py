@@ -45,8 +45,24 @@ from sqlalchemy import select
 
 from modules.core.db import FieldMappingTemplate
 
-# file_metadata 中存放模板契约的顶层键
+# file_metadata 中存放**登记事实**的顶层键
+#:
+#: [*] 2026-11-14(批次 4-1): 登记事实**只写一次, 之后不可变**。
+#:     它回答的是「这个文件当年是按哪一版模板解释的」——
+#:     这是一个**历史事实**, 被改写之后就没有人能回答「当年到底用的哪一版」了。
 TEMPLATE_CONTRACT_KEY = "template_contract"
+
+# file_metadata 中存放**当前基准**的顶层键
+#:
+#: [*] 2026-11-14(批次 4-1): 契约晋升(源文件结构先于模板变化时,
+#:     把基准改指到「当前能解释这个文件的那一版模板」)以前是**直接改写**
+#:     ``template_contract`` ⇒ 登记事实被抹掉, 且无法回答
+#:     「这个文件是被谁追平的、追平了几次」。
+#:     现在改成**另开一位**: 登记事实不动, 当前基准单独存, 晋升历史另存。
+TEMPLATE_CONTRACT_CURRENT_KEY = "template_contract_current"
+
+# file_metadata 中存放**晋升历史**的顶层键(数组, 每次晋升追加一条)。
+TEMPLATE_CONTRACT_PROMOTIONS_KEY = "template_contract_promotions"
 
 # 契约来源: 采集落库登记
 CONTRACT_SOURCE_COLLECTION = "collection_registration"
@@ -133,7 +149,11 @@ def build_template_contract(
 
 
 def read_template_contract(catalog_file: Any) -> Optional[Dict[str, Any]]:
-    """读取文件上已保存的模板契约; 没有或格式不对返回 None。"""
+    """读取文件的**登记事实**(当年按哪一版模板解释)。
+
+    [*] 2026-11-14(批次 4-1): 本函数**不再**返回「当前基准」。
+        要判定基准请用 :func:`read_effective_contract`。
+    """
     if catalog_file is None:
         return None
     metadata = getattr(catalog_file, "file_metadata", None) or {}
@@ -147,13 +167,109 @@ def read_template_contract(catalog_file: Any) -> Optional[Dict[str, Any]]:
     return contract
 
 
-def write_template_contract(catalog_file: Any, contract: Dict[str, Any]) -> Dict[str, Any]:
-    """把模板契约写入 ``file_metadata``(不落盘, 由调用方决定 commit 时机)。"""
+def read_effective_contract(catalog_file: Any) -> Optional[Dict[str, Any]]:
+    """读取文件**当前生效**的契约(判定基准)。
+
+    口径: 优先 ``template_contract_current``(契约晋升后写入的当前基准),
+    没有就回退登记事实 ``template_contract``。
+
+    [*] 2026-11-14(批次 4-1): 这是**判定链路唯一应该用**的读取入口 ——
+        「拿哪一版模板做比较基准」问的是「现在该按哪一版解释」,
+        不是「当年按哪一版采集」。两个问题曾经共用一个字段, 于是
+        「追溯当年」和「判定现在」必须互相迁就, 最后谁都不准。
+    """
+    if catalog_file is None:
+        return None
+    metadata = getattr(catalog_file, "file_metadata", None) or {}
+    if not isinstance(metadata, dict):
+        return None
+    for key in (TEMPLATE_CONTRACT_CURRENT_KEY, TEMPLATE_CONTRACT_KEY):
+        contract = metadata.get(key)
+        if not isinstance(contract, dict):
+            continue
+        if contract.get("template_id") is None:
+            continue
+        return contract
+    return None
+
+
+def read_contract_promotions(catalog_file: Any) -> List[Dict[str, Any]]:
+    """读取契约晋升历史(没有则空列表)。"""
+    if catalog_file is None:
+        return []
+    metadata = getattr(catalog_file, "file_metadata", None) or {}
+    if not isinstance(metadata, dict):
+        return []
+    history = metadata.get(TEMPLATE_CONTRACT_PROMOTIONS_KEY)
+    if not isinstance(history, list):
+        return []
+    return [item for item in history if isinstance(item, dict)]
+
+
+def write_template_contract(
+    catalog_file: Any,
+    contract: Dict[str, Any],
+    *,
+    overwrite: bool = False,
+) -> Dict[str, Any]:
+    """把**登记事实**写入 ``file_metadata``(不落盘, 由调用方决定 commit 时机)。
+
+    Args:
+        overwrite: 默认 **False** —— 登记事实已存在时**拒绝覆盖**。
+            这是「登记事实不可变」在**写入层**的强制点:
+            光在文档里写「不许改」没有用, 必须让改不动。
+
+    Returns:
+        实际写入的契约; 因不可变而**没有**写入时返回空字典。
+    """
     if catalog_file is None or not contract:
         return {}
     metadata = getattr(catalog_file, "file_metadata", None)
     metadata = dict(metadata) if isinstance(metadata, dict) else {}
+    if not overwrite and isinstance(metadata.get(TEMPLATE_CONTRACT_KEY), dict):
+        # 登记事实已经在了 —— 不覆盖(要改请写「当前基准」位)。
+        return {}
     metadata[TEMPLATE_CONTRACT_KEY] = contract
+    catalog_file.file_metadata = metadata
+    return contract
+
+
+def write_current_template_contract(
+    catalog_file: Any,
+    contract: Dict[str, Any],
+    *,
+    promotion_note: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """把**当前基准**写入 ``file_metadata``, 并追加一条晋升历史。
+
+    [*] 2026-11-14(批次 4-1): 契约晋升**不再**改写登记事实 ——
+        登记事实是历史事实, 改掉它之后就再也答不出「当年按哪一版采集」,
+        而 D7「事后追平」判据正是靠这个回答支撑的。
+
+    Args:
+        promotion_note: 这次晋升的补充说明(从哪一版追到哪一版等),
+            会并入晋升历史条目。
+    """
+    if catalog_file is None or not contract:
+        return {}
+    metadata = getattr(catalog_file, "file_metadata", None)
+    metadata = dict(metadata) if isinstance(metadata, dict) else {}
+    metadata[TEMPLATE_CONTRACT_CURRENT_KEY] = contract
+
+    history = metadata.get(TEMPLATE_CONTRACT_PROMOTIONS_KEY)
+    history = list(history) if isinstance(history, list) else []
+    entry: Dict[str, Any] = {
+        "promoted_at": contract.get("captured_at") or _utc_now_iso(),
+        "template_id": contract.get("template_id"),
+        "template_version": contract.get("template_version"),
+        "template_name": contract.get("template_name"),
+        "source": contract.get("source"),
+    }
+    if isinstance(promotion_note, dict):
+        entry.update(promotion_note)
+    history.append(entry)
+    metadata[TEMPLATE_CONTRACT_PROMOTIONS_KEY] = history
+
     catalog_file.file_metadata = metadata
     return contract
 
@@ -202,7 +318,7 @@ def promote_template_contract(
     source: str = CONTRACT_SOURCE_PROMOTION,
     takeover: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """把文件的契约晋升为「当前能解释它的那一版模板」。
+    """把文件的**当前基准**晋升为「当前能解释它的那一版模板」。
 
     为什么需要
     ----------
@@ -217,7 +333,11 @@ def promote_template_contract(
     实测(tiktok/analytics/monthly, 2026-10-29): 文件 29 列(含「商品卡 GMV」),
     契约指向 v6(28 列) ⇒ 永久漂移; 用户发布 v8(29 列)后仍漂移 —— 因为契约没变。
 
-    晋升把契约改写成新版本, 让基准重新稳定, 且留痕 ``source`` 以便事后追溯。
+    晋升把**当前基准**改指到新版本, 让基准重新稳定, 且留痕 ``source`` 以便事后追溯。
+
+    [*] 2026-11-14(批次 4-1): 晋升**不再改写登记事实** ——
+        写的是「当前基准」位(``template_contract_current``), 登记事实原样保留,
+        每次晋升另存一条历史。详见 :func:`write_current_template_contract`。
 
     Returns:
         写入的契约; 模板为空时返回 ``None``。
@@ -232,7 +352,7 @@ def promote_template_contract(
     )
     if not contract:
         return None
-    return write_template_contract(catalog_file, contract)
+    return write_current_template_contract(catalog_file, contract)
 
 
 async def resolve_contract_template(db, contract: Optional[Dict[str, Any]]):
@@ -250,7 +370,9 @@ async def resolve_contract_template(db, contract: Optional[Dict[str, Any]]):
     return result.scalars().first()
 
 
-def is_contract_baseline_valid(contract: Optional[Dict[str, Any]], template: Any) -> bool:
+def is_contract_baseline_valid(
+    contract: Optional[Dict[str, Any]], template: Any
+) -> bool:
     """校验契约基准是否仍然可信。
 
     模板行被原地改写(列清单变了但版本号没变)时, 指纹会不一致,
@@ -267,15 +389,18 @@ def is_contract_baseline_valid(contract: Optional[Dict[str, Any]], template: Any
 
 
 async def resolve_valid_contract_template(db, catalog_file: Any):
-    """取出「文件契约指向且仍然可信」的模板行。
+    """取出「文件当前基准指向且仍然可信」的模板行。
 
     契约缺失 / 模板行已被删除 / 模板行被原地改写时返回 ``None``,
     由调用方回退到「当前已发布模板」或跨 family 接管。
 
     这是契约读取的**唯一入口** —— 判定链路与治理路由都走这里,
     避免两处对「契约还有效吗」给出不同结论。
+
+    [*] 2026-11-14(批次 4-1): 读的是**当前基准**(晋升后的那一位),
+        缺失时回退登记事实。
     """
-    contract = read_template_contract(catalog_file)
+    contract = read_effective_contract(catalog_file)
     if not contract:
         return None
     try:
@@ -314,25 +439,29 @@ def describe_contract_baseline(
 
     baseline_template_id = contract_template_id(contract)
     baseline_version = contract.get("template_version")
-    current_template_id = getattr(template, "id", None) if template is not None else None
-    current_version = getattr(template, "version", None) if template is not None else None
+    current_template_id = (
+        getattr(template, "id", None) if template is not None else None
+    )
+    current_version = (
+        getattr(template, "version", None) if template is not None else None
+    )
 
-    baseline_valid = is_contract_baseline_valid(contract, template) if template is not None else False
+    baseline_valid = (
+        is_contract_baseline_valid(contract, template)
+        if template is not None
+        else False
+    )
 
     template_outdated = False
     outdated_reason = None
     if baseline_template_id is not None and current_template_id is not None:
         if int(baseline_template_id) != int(current_template_id):
             template_outdated = True
-            outdated_reason = (
-                f"文件按模板 v{baseline_version} 采集, 当前已发布模板为 v{current_version}"
-            )
+            outdated_reason = f"文件按模板 v{baseline_version} 采集, 当前已发布模板为 v{current_version}"
         elif baseline_version is not None and current_version is not None:
             if int(baseline_version) != int(current_version):
                 template_outdated = True
-                outdated_reason = (
-                    f"文件按模板 v{baseline_version} 采集, 当前模板已升级到 v{current_version}"
-                )
+                outdated_reason = f"文件按模板 v{baseline_version} 采集, 当前模板已升级到 v{current_version}"
 
     return {
         "has_contract": True,

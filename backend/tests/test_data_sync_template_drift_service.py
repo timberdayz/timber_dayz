@@ -306,16 +306,16 @@ async def test_analytics_contract_is_ready_on_exact_header_match(drift_session_f
 
 
 @pytest.mark.asyncio
-async def test_analytics_pure_added_column_is_still_blocking(drift_session_factory):
-    """纯新增一列 ⇒ 仍然阻断(2026-11-13 口径澄清)。
+async def test_analytics_pure_added_column_is_not_blocking(drift_session_factory):
+    """纯新增一列 ⇒ **不阻断**(2026-11-14 口径回退, 对齐 11-07 规格 §1.4)。
 
-    理由(此前没人写下来): 模板没声明的列**不会写进事实表**。
-    放行 ⇒ 新列的数据被静默丢弃, 且没有任何提示(面板不提示、已入库的行不重算)。
-    ⇒ 「多一列」必须先拦一道, 把「模板落后于源文件」变成一个待办;
-      等运营更新模板(新版本纳入该列)⇒ 契约晋升 ⇒ 文件按新模板解释
-      ⇒ **新列的数据这才真正落库**。
+    旧口径(2026-11-13)曾断言「纯新增一列 ⇒ 仍然阻断」, 理由是
+    「模板没声明的列不会写进事实表 ⇒ 放行等于静默丢数据」。
+    **该前提在批次 E/F 之后已不成立**: 非核心列的完整内容留在
+    ``raw_data`` JSONB 里, 下游语义视图也从 ``raw_data`` 取值 ⇒ 数据不丢。
 
-    与下一个用例配套: 列**被替换**时同样阻断。
+    ⇒ 新列先原样存着, 等有空再决定它是什么(规格原话)。
+    真实代价: 新列的**语义接入会滞后**(业务已于 2026-11-14 确认接受)。
     """
     from backend.services.data_sync_template_status_service import (
         DataSyncTemplateStatusService,
@@ -333,6 +333,15 @@ async def test_analytics_pure_added_column_is_still_blocking(drift_session_facto
             status="published",
             header_row=8,
             header_columns=["日期", "商品访客数", "页面浏览次数"],
+            # [*] 已配置核心字段清单(生产 27/27 模板都有)⇒ 清单外的列不是需求。
+            core_fields=[
+                {
+                    "semantic_key": "metric_date",
+                    "raw_name": "日期",
+                    "required": True,
+                    "in_hash": True,
+                }
+            ],
             created_at=now,
             updated_at=now,
         )
@@ -359,10 +368,12 @@ async def test_analytics_pure_added_column_is_still_blocking(drift_session_facto
             current_columns=["日期", "商品访客数", "页面浏览次数", "新增指标列"],
         )
 
-    assert status["template_status"] == "update_required"
-    assert status["template_update_required"] is True
-    assert status["governance_status"] == "breaking_drift"
+    assert status["template_status"] == "alias_only"
+    assert status["template_update_required"] is False
+    assert status["should_auto_sync"] is True
     assert "新增指标列" in status["header_changes"]["added_fields"]
+    # 新列要出现在「非阻断」清单里, 供后续语义接入时消费
+    assert "新增指标列" in status["header_changes"]["non_blocking_changes"]
 
 
 @pytest.mark.asyncio
@@ -372,6 +383,11 @@ async def test_analytics_replaced_column_is_still_blocking(drift_session_factory
     这正是 tiktok/analytics 2026-10-29 的真实漂移:
     「已退款的商品件数」换成「退款金额」(单位从件变元) + 新增「商品卡 GMV」。
     ⇒ 指标口径真的变了, 必须让人重新确认模板。
+
+    [*] 2026-11-14 口径回退后, 阻断的理由**变了**:
+        多一列不再阻断(新列先原样存着), 但少掉的「已退款的商品件数」
+        是**核心字段**(清单里 required=true) ⇒ **需求没被满足** ⇒ 阻断。
+        ⇒ 守护的不变量没变: 核心指标口径变了必须让人确认。
     """
     from backend.services.data_sync_template_status_service import (
         DataSyncTemplateStatusService,
@@ -389,6 +405,21 @@ async def test_analytics_replaced_column_is_still_blocking(drift_session_factory
             status="published",
             header_row=8,
             header_columns=["日期", "商品访客数", "页面浏览次数", "已退款的商品件数"],
+            # [*] 「已退款的商品件数」是核心字段(必填) ⇒ 少它必须阻断。
+            core_fields=[
+                {
+                    "semantic_key": "metric_date",
+                    "raw_name": "日期",
+                    "required": True,
+                    "in_hash": True,
+                },
+                {
+                    "semantic_key": "refund_count",
+                    "raw_name": "已退款的商品件数",
+                    "required": True,
+                    "in_hash": False,
+                },
+            ],
             created_at=now,
             updated_at=now,
         )

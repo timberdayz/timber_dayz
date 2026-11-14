@@ -12,7 +12,7 @@ from backend.services.data_sync_file_state_service import (
     resolve_template_blocked_catalog_status,
 )
 from backend.services.spreadsheet_header_reader import get_spreadsheet_header_reader
-from backend.services.template_contract_service import read_template_contract
+from backend.services.template_contract_service import read_effective_contract
 from modules.core.db import (
     CatalogFile,
     CloudBClassSyncTask,
@@ -229,7 +229,9 @@ class CloudSyncAutoRecoveryService:
         """
         # 1) 契约模板: 文件自带「采集当时生效的那一版模板」,
         #    即使当前没有模板族也能解释这个文件
-        if read_template_contract(file_record):
+        # [*] 批次 4-1: 用**当前基准**(晋升后那一版)判断「这个文件有没有
+        #     自带的契约基准」—— 那是真正用来解释文件的那一版。
+        if read_effective_contract(file_record):
             return True, None
         # 2) 同域还有模板族 -> 可能有同粒度族, 也可能被同域其它族接管
         if self._domain_has_template_family(file_record):
@@ -348,9 +350,10 @@ class CloudSyncAutoRecoveryService:
         idle_seconds: int = 300,
         terminate: bool = True,
     ) -> dict[str, Any]:
-        rows = self.db.execute(
-            text(
-                """
+        rows = (
+            self.db.execute(
+                text(
+                    """
                 SELECT
                     a.pid,
                     EXTRACT(EPOCH FROM (now() - COALESCE(a.state_change, a.query_start)))::int
@@ -369,9 +372,12 @@ class CloudSyncAutoRecoveryService:
                   AND a.state = 'idle'
                   AND EXTRACT(EPOCH FROM (now() - COALESCE(a.state_change, a.query_start))) >= :idle_seconds
                 """
-            ),
-            {"lock_key": lock_key, "idle_seconds": idle_seconds},
-        ).mappings().all()
+                ),
+                {"lock_key": lock_key, "idle_seconds": idle_seconds},
+            )
+            .mappings()
+            .all()
+        )
         orphaned = [
             dict(row)
             for row in rows

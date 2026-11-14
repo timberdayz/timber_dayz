@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
@@ -166,7 +167,9 @@ BLOCKING_GOVERNANCE_STATUSES = frozenset(
 TEMPLATE_STATUS_LABELS: Dict[str, str] = {
     TEMPLATE_STATUS_READY: "模板匹配",
     TEMPLATE_STATUS_ALIAS_ONLY: "别名可匹配",
-    TEMPLATE_STATUS_UPDATE_REQUIRED: "模板待更新",
+    # [*] 2026-11-14: 阻断的唯一理由是「核心字段(需求)没满足」,
+    #     不再是「列对不上」—— 多一列/少一列现在都不阻断。
+    TEMPLATE_STATUS_UPDATE_REQUIRED: "核心字段待补齐",
     TEMPLATE_STATUS_MISSING: "缺少模板",
     TEMPLATE_STATUS_MISSING_VARIANT: "缺少模板变体",
     TEMPLATE_STATUS_SEMANTIC_INVALID: "语义异常",
@@ -177,8 +180,10 @@ TEMPLATE_STATUS_LABELS: Dict[str, str] = {
 
 GOVERNANCE_STATUS_LABELS: Dict[str, str] = {
     GOVERNANCE_STATUS_READY: "就绪",
-    GOVERNANCE_STATUS_NON_BREAKING_DRIFT: "非阻断漂移",
-    GOVERNANCE_STATUS_BREAKING_DRIFT: "阻断漂移",
+    # [*] 2026-11-14: 非阻断漂移 = 「多了新列 / 少了非核心列」⇒ 不影响入库。
+    GOVERNANCE_STATUS_NON_BREAKING_DRIFT: "列有变化(不影响入库)",
+    # [*] 2026-11-14: 阻断漂移 = 核心字段(需求)没满足。
+    GOVERNANCE_STATUS_BREAKING_DRIFT: "核心字段缺失",
     GOVERNANCE_STATUS_MISSING_FAMILY: "缺少模板族",
     GOVERNANCE_STATUS_MISSING_VARIANT: "缺少模板变体",
     GOVERNANCE_STATUS_SEMANTIC_INVALID: "语义异常",
@@ -266,69 +271,112 @@ def status_semantics_snapshot() -> Dict[str, object]:
 #
 # 业务口径(本模块是它的唯一实现)
 # -------------------------------
-# **多一列, 算问题 —— 直到模板把它纳入为止。**
+# **核心字段 = 需求。** 只有「需求没被满足」才阻断。
 #
-# 为什么「多一列」要拦(而不是像直觉那样直接放行)
-# ------------------------------------------------
-# 直觉是「多一列无害」—— 对**看板上那个数**而言确实无害。但文件入库是**按模板
-# 映射**的: 模板没声明的列**不会被写进事实表**。
+# | 情形 | 判定 |
+# |---|---|
+# | 核心字段(``required=true``)缺失 | **阻断** |
+# | 域级契约的必填语义键缺失 | **阻断** |
+# | 值形态漂移(列名没变、值形态变了) | **阻断** |
+# | 多了新列 | **不阻断**, 原样入 ``raw_data`` |
+# | 少了一列, 但它**不在**核心字段清单里 | **不阻断** |
+# | 少了一列, 清单里 ``required=false`` | **不阻断** |
+# | 少了一列, 缺的是列名(别名救回) | **不阻断** |
 #
-# ⇒ 若放行, 新列的数据会被**静默丢弃**, 而且没有任何人收到提示:
-#   * 治理面板不会提示「需要更新模板」(它不是阻断漂移);
-#   * 文件已经被入库, 模板再更新也**不会回头重算**已入库的行。
+# 为什么「多一列」**不**阻断(2026-11-14 口径回退)
+# ---------------------------------------------------
+# 2026-11-13(v7.26.0)曾把「多一列 ⇒ 阻断」写成硬规则, 理由是:
+#   「模板没声明的列**不会写进事实表** ⇒ 放行等于**静默丢数据**」。
 #
-# ⇒ 所以「多一列」必须先拦一道, 把「模板落后于源文件」这件事变成一个**待办**;
-#   等运营更新模板(新版本把这列纳入)⇒ 契约晋升 ⇒ 文件重新按新模板解释 ⇒
-#   **新列的数据这才真正落库**。
+# **该前提在批次 E/F 之后已经不成立**:
+#   * 非核心列的完整内容留在 ``raw_data`` JSONB 里
+#     (``backend/services/raw_data_importer.py``: ``"raw_data": row``);
+#   * 只为核心字段建物理列, 其余不建(批次 F「落库列收窄」);
+#   * 下游语义视图**全部**从 ``raw_data->>'某列'`` 取值
+#     (``sql/semantic/*.sql``; 护栏 ``test_core_fields_storage_guardrails.py``)。
 #
-# 唯一的例外是**用户明确确认过不要的列**(`ignored_extra_fields`):
-# 用户说「这列我知道了, 忽略它」⇒ 不阻断, 但它也不会落库(是用户的选择)。
+# ⇒ 新列的数据**不会丢**, 它原样躺在 ``raw_data`` 里, 等语义层接入。
+# ⇒ 这正是 2026-11-07 规格的原话
+#   (``docs/superpowers/plans/2026-11-07-semantic-core-field-spec.md`` §1.4):
+#   「核心字段没变, 只是**多了新列** ⇒ **不阻断, 照常入库**;
+#     新列先原样存着, 等有空再决定它是什么」。
 #
-# 风险是**有方向**的
-# ----------------
-# 平台加列是**单向**的 ⇒ 「文件比模板多」是常态、要跟进;
-# 而「文件比模板少」是异常、要立刻处理。两条方向不能一样处理。
+# 代价(业务已于 2026-11-14 确认接受):
+#   * 新列的**语义接入会滞后** —— 数据在 ``raw_data`` 里, 下游语义视图要人再接一次;
+#   * **已入库的历史行不会**因为后来模板纳入该列而自动补列。
 #
-# 阻断条件(任一成立即阻断)
-# ------------------------
-# 1. ``format_drift_columns`` —— 列名没变但值的形态变了(这份文件入库必失败);
-# 2. ``missing_required_keys`` —— 必填语义键解析不出来(算不出要的数字);
-# 3. ``removed_fields`` 中**无法证明可选**的那些(见下);
-# 4. ``added_fields`` 中**用户没有确认过**的那些(模板落后于源文件)。
+# 「核心字段清单还没配置」的域(2026-11-14 业务拍板 B1)
+# --------------------------------------------------
+# 没有清单 = 还没有定义过「我要哪些数据」⇒ 无从判定少列是否可缺。
+# ⇒ 阻断一次并明确提示「该维度尚未定义核心字段清单」
+#   (这是**配置缺口**, 不是数据问题), 而不是逐列阻断, 也不是静默放行
+#   (那等于放弃校验; 规格 §7: 「不引入系统自动猜一个语义键然后静默使用
+#   —— 定不了就报警」)。
+# 实测: 当前 **27 个 published 模板全部已配置**清单 ⇒ 该口径当前不误伤任何模板。
 #
-# 少列的三种归宿
-# --------------
-# * 声明为可选(核心字段清单 ``required=false`` / 语义契约 optional / 兼容名单)
-#   ⇒ **不阻断**;
-# * 绑定到必填语义键、且该键**没被解析出来** ⇒ 阻断(已由 ``missing_required_keys`` 覆盖);
-# * 绑定到必填语义键、但该键**被别名救回**(文件里还有同义列)
-#   ⇒ **不阻断**(缺的是列名, 不是数据);
-# * 根本没有语义绑定 ⇒ **阻断**(无法证明它可缺 ⇒ 保守处理)。
-#
-# 无语义契约的域
-# --------------
-# 该域没有契约 ⇒ L2 给不出任何语义事实 ⇒ 少列一律按「无法证明可选」处理(阻断),
-# 多列仍然阻断。**保守方向永远是「拦下来让人看一眼」。**
+# ``ignored_extra_fields`` 的新语义(2026-11-14)
+# -----------------------------------------
+# 它曾经是「多列阻断的唯一豁免」; 现在多列已经不阻断 ⇒
+# 它的作用**降级为已阅标记**(让面板不再把它当噪音反复报出来),
+# **不再参与阻断判定**。
 #
 # 历史包袱(已清理)
 # ----------------
 # 旧实现对 ``shopee/orders/monthly`` 单开了一个口子:「新增列不阻断」。
 # 那是 2026-06-17 的救火补丁(提交 ``e1c7cfca``), 后果是
 # **shopee 订单月报的新列会被静默丢弃** —— 与其它所有域不一致, 且丢数据。
-# ⇒ 该例外已取消: 「新增列」的判定现在只有一条规则, 对所有域一致。
+# ⇒ 2026-11-14 起该平台特判与全局口径**一致**: 多列一律不阻断,
+#   且新列完整留在 ``raw_data``(不再丢数据)。
 #
 
 #: 漂移规则编号(便于守护测试与接口自省逐条引用)。
 DRIFT_RULE_IDS = (
     "format_drift_blocks",
     "missing_required_key_blocks",
-    "removed_unprovable_column_blocks",
-    "added_column_blocks_until_template_catches_up",
-    "confirmed_extra_column_never_blocks",
+    "removed_required_column_blocks",
+    "removed_unconfigured_dimension_blocks",
+    "added_column_never_blocks",
     "optional_column_never_blocks",
     "column_order_change_never_blocks",
-    "no_contract_domain_conservative",
+    "added_column_blocks_under_legacy_caliber",
 )
+
+
+# ── 漂移口径开关(紧急回退保险) ────────────────────────────────────────
+#
+#: 环境变量名。取值 ``legacy`` ⇒ 回到 2026-11-13 的旧口径。
+DRIFT_CALIBER_ENV = "TEMPLATE_DRIFT_CALIBER"
+
+#: 当前口径(默认): 核心字段 = 需求 ⇒ 多一列不阻断。
+DRIFT_CALIBER_CURRENT = "current"
+
+#: 旧口径(2026-11-13 / v7.26.0): 多一列 ⇒ 阻断。
+DRIFT_CALIBER_LEGACY = "legacy"
+
+
+def drift_caliber() -> str:
+    """当前生效的漂移判定口径。
+
+    为什么要有这个开关
+    ------------------
+    2026-11-14 的口径回退是本次**唯一的业务口径变更**
+    (其余都是 bug 修复与工具链)。万一上线后发现判断与预期不符,
+    运维需要一条**不需要改代码、不需要重新构建镜像**的回退路径:
+    改一个环境变量 + 重启容器即可。
+
+    ⇒ 开关只挂在「多一列」这一条规则上, 其余规则(核心字段缺失阻断、
+      值形态漂移阻断、清单未配置阻断)两套口径完全一致, 不受开关影响。
+    """
+    raw = str(os.getenv(DRIFT_CALIBER_ENV, "") or "").strip().lower()
+    if raw == DRIFT_CALIBER_LEGACY:
+        return DRIFT_CALIBER_LEGACY
+    return DRIFT_CALIBER_CURRENT
+
+
+def legacy_caliber_enabled() -> bool:
+    """是否运行在旧口径(紧急回退)下。"""
+    return drift_caliber() == DRIFT_CALIBER_LEGACY
+
 
 #: 兼容存量口径的「可选列名」名单(SSOT)。
 #:
@@ -398,7 +446,9 @@ def classify_drift(
     alias_rescued_removed_raw_fields: Iterable[str] = (),
     unmapped_removed_raw_fields: Iterable[str] = (),
     optional_raw_fields: Iterable[str] = (),
+    required_core_fields: Iterable[str] = (),
     confirmed_extra_fields: Iterable[str] = (),
+    core_fields_configured: bool = False,
 ) -> DriftDecision:
     """把「事实 + 语义」判成「阻断与否 / 什么状态 / 为什么」。
 
@@ -420,8 +470,17 @@ def classify_drift(
             (缺的是列名, 不是数据 ⇒ 不阻断)。
         unmapped_removed_raw_fields: 少掉的列里, 没有任何语义绑定的(保守阻断)。
         optional_raw_fields: 声明为可选的原始列名(核心字段清单 ``required=false``)。
-        confirmed_extra_fields: 用户在「已确认的新列」清单里确认过的列
-            ⇒ 这些列不再阻断(用户明说不要它们)。
+        required_core_fields: 核心字段清单里 ``required=true`` 的**原始列名**
+            ⇒ 少掉它就是**需求没被满足** ⇒ **阻断**
+            (规格 §3.1: 漂移阻断 ← ``core_fields`` 中 ``required=true``)。
+        confirmed_extra_fields: 用户在「已确认的新列」清单里确认过的列。
+            **默认口径下不参与阻断判定**(多列已一律不阻断),
+            只作为「已阅标记」用于面板去噪;
+            **仅在旧口径**(:func:`legacy_caliber_enabled`)下才重新生效 ——
+            那时它是「多列阻断」的唯一豁免。
+        core_fields_configured: 该模板**是否已定义核心字段清单**。
+            True ⇒ 清单外的列都不是需求 ⇒ 少它们**不阻断**;
+            False ⇒ 该维度还没定义过需求 ⇒ 少列阻断(配置缺口, 业务拍板 B1)。
 
     Returns:
         :class:`DriftDecision`
@@ -438,11 +497,23 @@ def classify_drift(
     optional_set.update(str(column) for column in optional_raw_fields if str(column))
     optional_set.update(OPTIONAL_RAW_FIELD_NAMES)
 
-    confirmed_set = {str(column) for column in confirmed_extra_fields if str(column)}
+    # [*] ``confirmed_extra_fields`` 不再参与阻断判定(2026-11-14):
+    #     多列已一律不阻断, 「已确认的新列」只剩「已阅标记」的作用
+    #     (面板去噪), 判定链路不再消费它。
 
     alias_rescued = {
         str(column) for column in alias_rescued_removed_raw_fields if str(column)
     }
+
+    #: 少掉的列里, 绑定到**必填语义键**且该键**没被解析出来**的那些
+    #: ⇒ 少它就真的少了一个业务维度 ⇒ **永远阻断**。
+    binding_required = {
+        str(column) for column in blocking_removed_raw_fields if str(column)
+    }
+
+    #: 核心字段清单里 ``required=true`` 的原始列名
+    #: ⇒ 少它 = **需求没被满足** ⇒ **阻断**(规格 §3.1)。
+    required_core = {str(column) for column in required_core_fields if str(column)}
 
     blocking: List[str] = []
     non_blocking: List[str] = []
@@ -453,25 +524,48 @@ def classify_drift(
     # 规则 2: 必填语义键解析不出来 —— 业务上算不出要的那几个数。
     blocking.extend(missing_required)
 
-    # 规则 3: 少列 —— 能证明它可选就不阻断, 否则保守阻断。
+    # 规则 3: 少列 —— 「能不能证明它可缺」由**核心字段清单**说了算。
     for column in removed:
         if column in optional_set:
+            # 清单里 required=false / 语义契约 optional / 兼容名单
             non_blocking.append(column)
         elif column in alias_rescued:
             # 绑定到必填语义键、但被别名救回 ⇒ 缺的是列名, 不是数据。
             non_blocking.append(column)
-        else:
-            # 其余两种: L2 明确判为「无法证明它可缺」, 或者 L2 **没有给出任何结论**
-            # (例如该域没有语义契约)⇒ 一律保守阻断。
+        elif column in binding_required:
+            # 绑定到必填语义键、且该键没被解析出来 ⇒ 阻断。
             blocking.append(column)
-
-    # 规则 4: 多列 —— 默认阻断(模板落后于源文件 ⇒ 新列的数据会丢),
-    # 用户已确认要忽略的列除外。
-    for column in added:
-        if column in confirmed_set:
+        elif column in required_core:
+            # [*] 2026-11-14: 核心字段清单里 ``required=true`` 的列缺失
+            #     ⇒ **需求没被满足** ⇒ 阻断(规格 §3.1)。
+            blocking.append(column)
+        elif core_fields_configured:
+            # [*] 2026-11-14: 清单已配置 ⇒ 这列**不在需求里** ⇒ 少它不阻断。
             non_blocking.append(column)
         else:
+            # [*] 2026-11-14 (业务拍板 B1): 清单为空 ⇒ 该维度还没定义过
+            #     「我要哪些数据」⇒ 无从判定少列是否可缺 ⇒ 阻断一次并提示去配置。
             blocking.append(column)
+
+    # 规则 4: 多一列 —— **不阻断**(2026-11-14 口径回退, 对齐 11-07 规格 §1.4)。
+    #
+    # 新列的完整内容留在 ``raw_data`` 里 ⇒ 数据不丢 ⇒ 没有理由拦下整个维度。
+    # 用户在「已确认的新列」里勾过的列**同样不阻断**(它们只是「已阅」标记)。
+    #
+    # [*] 紧急回退保险: ``TEMPLATE_DRIFT_CALIBER=legacy`` ⇒ 回到 2026-11-13
+    #     的旧口径(多一列 ⇒ 阻断, 用户确认过的除外)。
+    #     只需要改环境变量并重启容器, 不必改代码、不必重新构建镜像。
+    if legacy_caliber_enabled():
+        confirmed_set = {
+            str(column) for column in confirmed_extra_fields if str(column)
+        }
+        for column in added:
+            if column in confirmed_set:
+                non_blocking.append(column)
+            else:
+                blocking.append(column)
+    else:
+        non_blocking.extend(added)
 
     # 规则 5: 可选语义键缺失 —— 不阻断。
     non_blocking.extend(missing_optional)
@@ -492,12 +586,14 @@ def classify_drift(
         reason = "语义完全等价(别名命中), 列名差异不影响入库"
     elif blocking:
         template_status = TEMPLATE_STATUS_UPDATE_REQUIRED
-        reason = f"有 {len(blocking)} 项阻断漂移"
+        if not core_fields_configured and removed:
+            # [*] 配置缺口(不是数据问题): 该维度还没定义过「我要哪些数据」。
+            reason = "该维度尚未定义核心字段清单，无法判定哪些列是必需的"
+        else:
+            reason = f"有 {len(blocking)} 项阻断漂移(缺少必需字段)"
     else:
         template_status = TEMPLATE_STATUS_ALIAS_ONLY
-        if not has_semantic_contract and removed:
-            reason = "该域没有语义契约, 少掉的列按保守口径处理"
-        elif added:
+        if added:
             reason = f"只多了 {len(added)} 列, 不影响入库"
         else:
             reason = "存在非阻断漂移"
