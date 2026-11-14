@@ -1,0 +1,239 @@
+{
+  "$schema_version": 1,
+  "platform": "tiktok",
+  "data_domain": "analytics",
+  "granularity": "daily",
+  "sub_domain": null,
+  "account": null,
+  "header_row": 7,
+  "sheet_name": null,
+  "encoding": "utf-8",
+  "header_columns": [
+    "Unnamed: 0",
+    "GMV",
+    "订单数",
+    "客户数",
+    "商品成交件数",
+    "已退款的商品件数",
+    "SKU 订单数",
+    "总成交额",
+    "页面浏览次数",
+    "商品访客数",
+    "转化率",
+    "商品曝光次数",
+    "去重商品曝光次数",
+    "商品点击量",
+    "去重点击次数",
+    "平均订单金额",
+    "达人直播归因 GMV",
+    "达人直播 GMV",
+    "达人直播间接 GMV",
+    "绑定账号直播归因 GMV",
+    "商家直播 GMV",
+    "商家直播间接 GMV",
+    "联盟视频归因 GMV",
+    "达人视频 GMV",
+    "达人视频间接 GMV",
+    "绑定账号视频归因 GMV",
+    "商家视频 GMV",
+    "商家视频间接 GMV"
+  ],
+  "deduplication_fields": [
+    "metric_date"
+  ],
+  "core_fields": [
+    {
+      "in_hash": true,
+      "raw_name": null,
+      "required": true,
+      "semantic_key": "metric_date"
+    }
+  ],
+  "ignored_extra_fields": [],
+  "header_bindings": [
+    {
+      "aliases": [
+        "日期",
+        "统计日期",
+        "metric_date",
+        "date",
+        "data_date"
+      ],
+      "position": 0,
+      "raw_name": "Unnamed: 0",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "日期",
+      "semantic_key": "metric_date",
+      "semantic_role": "metric_date",
+      "hash_participates": true
+    },
+    {
+      "aliases": [],
+      "position": 1,
+      "raw_name": "GMV",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "GMV",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 2,
+      "raw_name": "订单数",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "订单数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 3,
+      "raw_name": "客户数",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "客户数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 4,
+      "raw_name": "商品成交件数",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "商品成交件数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 5,
+      "raw_name": "已退款的商品件数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "已退款的商品件数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 6,
+      "raw_name": "SKU 订单数",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "SKU 订单数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 7,
+      "raw_name": "总成交额",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "总成交额",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 8,
+      "raw_name": "页面浏览次数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "页面浏览次数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 9,
+      "raw_name": "商品访客数",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "商品访客数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 10,
+      "raw_name": "转化率",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "转化率",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 11,
+      "raw_name": "商品曝光次数",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "商品曝光次数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 12,
+      "raw_name": "去重商品曝光次数",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "去重商品曝光次数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 13,
+      "raw_name": "商品点击量",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "商品点击量",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 14,
+      "raw_name": "去重点击次数",
+      "required": false,
+      "sample_type": "date",
+      "display_name": "去重点击次数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 15,
+      "raw_name": "平均订单金额",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "平均订单金额",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    }
+  ],
+  "field_parse_rules": [],
+  "notes": "Created from 2026-06-08 TikTok analytics daily 28-column export; preserves v8 parsing policy."
+}

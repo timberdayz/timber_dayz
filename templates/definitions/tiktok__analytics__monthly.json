@@ -1,0 +1,452 @@
+{
+  "$schema_version": 1,
+  "platform": "tiktok",
+  "data_domain": "analytics",
+  "granularity": "monthly",
+  "sub_domain": null,
+  "account": null,
+  "header_row": 8,
+  "sheet_name": null,
+  "encoding": "utf-8",
+  "header_columns": [
+    "日期",
+    "GMV",
+    "订单数",
+    "客户数",
+    "商品成交件数",
+    "退款金额",
+    "SKU 订单数",
+    "总成交额",
+    "页面浏览次数",
+    "商品访客数",
+    "转化率",
+    "商品曝光次数",
+    "去重商品曝光次数",
+    "商品点击量",
+    "去重点击次数",
+    "平均订单金额",
+    "达人直播归因 GMV",
+    "达人直播 GMV",
+    "达人直播间接 GMV",
+    "绑定账号直播归因 GMV",
+    "商家直播 GMV",
+    "商家直播间接 GMV",
+    "商品卡 GMV",
+    "联盟视频归因 GMV",
+    "达人视频 GMV",
+    "达人视频间接 GMV",
+    "绑定账号视频归因 GMV",
+    "商家视频 GMV",
+    "商家视频间接 GMV"
+  ],
+  "deduplication_fields": [
+    "metric_date"
+  ],
+  "core_fields": [
+    {
+      "in_hash": true,
+      "raw_name": null,
+      "required": true,
+      "semantic_key": "metric_date"
+    }
+  ],
+  "ignored_extra_fields": [],
+  "header_bindings": [
+    {
+      "aliases": [
+        "metric_date",
+        "日期",
+        "统计日期",
+        "data_date",
+        "date"
+      ],
+      "position": 0,
+      "raw_name": "日期",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "日期",
+      "semantic_key": "metric_date",
+      "semantic_role": null,
+      "hash_participates": true,
+      "semantic_review_status": "confirmed_semantic"
+    },
+    {
+      "aliases": [
+        "gmv",
+        "GMV"
+      ],
+      "position": 1,
+      "raw_name": "GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "GMV",
+      "semantic_key": "gmv",
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "confirmed_semantic"
+    },
+    {
+      "aliases": [
+        "order_count",
+        "订单量",
+        "订单数",
+        "order count",
+        "orders"
+      ],
+      "position": 2,
+      "raw_name": "订单数",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "订单数",
+      "semantic_key": "order_count",
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "confirmed_semantic"
+    },
+    {
+      "aliases": [],
+      "position": 3,
+      "raw_name": "客户数",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "客户数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 4,
+      "raw_name": "商品成交件数",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "商品成交件数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 5,
+      "raw_name": "退款金额",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "退款金额",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 6,
+      "raw_name": "SKU 订单数",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "SKU 订单数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 7,
+      "raw_name": "总成交额",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "总成交额",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 8,
+      "raw_name": "页面浏览次数",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "页面浏览次数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [
+        "visitor_count",
+        "访客数",
+        "visitors",
+        "visitor count",
+        "商品访客数"
+      ],
+      "position": 9,
+      "raw_name": "商品访客数",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "商品访客数",
+      "semantic_key": "visitor_count",
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "confirmed_semantic"
+    },
+    {
+      "aliases": [
+        "conversion_rate",
+        "转化率",
+        "conversion rate",
+        "cvr"
+      ],
+      "position": 10,
+      "raw_name": "转化率",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "转化率",
+      "semantic_key": "conversion_rate",
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "confirmed_semantic"
+    },
+    {
+      "aliases": [],
+      "position": 11,
+      "raw_name": "商品曝光次数",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "商品曝光次数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 12,
+      "raw_name": "去重商品曝光次数",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "去重商品曝光次数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 13,
+      "raw_name": "商品点击量",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "商品点击量",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 14,
+      "raw_name": "去重点击次数",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "去重点击次数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 15,
+      "raw_name": "平均订单金额",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "平均订单金额",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 16,
+      "raw_name": "达人直播归因 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "达人直播归因 GMV",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 17,
+      "raw_name": "达人直播 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "达人直播 GMV",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 18,
+      "raw_name": "达人直播间接 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "达人直播间接 GMV",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 19,
+      "raw_name": "绑定账号直播归因 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "绑定账号直播归因 GMV",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [
+        "live_gmv",
+        "商家直播 GMV",
+        "直播GMV",
+        "live gmv"
+      ],
+      "position": 20,
+      "raw_name": "商家直播 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "商家直播 GMV",
+      "semantic_key": "live_gmv",
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "confirmed_semantic"
+    },
+    {
+      "aliases": [
+        "live_indirect_gmv",
+        "商家直播间接 GMV",
+        "直播间接GMV",
+        "live indirect gmv"
+      ],
+      "position": 21,
+      "raw_name": "商家直播间接 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "商家直播间接 GMV",
+      "semantic_key": "live_indirect_gmv",
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "confirmed_semantic"
+    },
+    {
+      "aliases": [],
+      "position": 22,
+      "raw_name": "商品卡 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "商品卡 GMV",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 23,
+      "raw_name": "联盟视频归因 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "联盟视频归因 GMV",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 24,
+      "raw_name": "达人视频 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "达人视频 GMV",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 25,
+      "raw_name": "达人视频间接 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "达人视频间接 GMV",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [],
+      "position": 26,
+      "raw_name": "绑定账号视频归因 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "绑定账号视频归因 GMV",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "pending"
+    },
+    {
+      "aliases": [
+        "video_gmv",
+        "商家视频 GMV",
+        "视频GMV",
+        "video gmv"
+      ],
+      "position": 27,
+      "raw_name": "商家视频 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "商家视频 GMV",
+      "semantic_key": "video_gmv",
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "confirmed_semantic"
+    },
+    {
+      "aliases": [
+        "video_indirect_gmv",
+        "商家视频间接 GMV",
+        "视频间接GMV",
+        "video indirect gmv"
+      ],
+      "position": 28,
+      "raw_name": "商家视频间接 GMV",
+      "required": false,
+      "sample_type": "number",
+      "display_name": "商家视频间接 GMV",
+      "semantic_key": "video_indirect_gmv",
+      "semantic_role": null,
+      "hash_participates": false,
+      "semantic_review_status": "confirmed_semantic"
+    }
+  ],
+  "field_parse_rules": [],
+  "notes": "DSS架构重构(v4.6.0)+ 核心字段去重(v4.14.0)"
+}

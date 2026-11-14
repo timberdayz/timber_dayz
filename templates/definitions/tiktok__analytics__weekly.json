@@ -1,0 +1,175 @@
+{
+  "$schema_version": 1,
+  "platform": "tiktok",
+  "data_domain": "analytics",
+  "granularity": "weekly",
+  "sub_domain": null,
+  "account": null,
+  "header_row": 4,
+  "sheet_name": null,
+  "encoding": "utf-8",
+  "header_columns": [
+    "日期",
+    "商品交易总额",
+    "退款金额",
+    "总成交额（含平台商品补贴）明细",
+    "商品成交件数",
+    "客户数",
+    "页面浏览次数",
+    "店铺页面访问量",
+    "SKU 订单数",
+    "订单数",
+    "转化率"
+  ],
+  "deduplication_fields": [
+    "metric_date"
+  ],
+  "core_fields": [
+    {
+      "in_hash": true,
+      "raw_name": null,
+      "required": false,
+      "semantic_key": "metric_date"
+    }
+  ],
+  "ignored_extra_fields": [],
+  "header_bindings": [
+    {
+      "aliases": [
+        "metric_date",
+        "日期",
+        "统计日期",
+        "data_date",
+        "date"
+      ],
+      "position": 0,
+      "raw_name": "日期",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "日期",
+      "semantic_key": "metric_date",
+      "semantic_role": null,
+      "hash_participates": true
+    },
+    {
+      "aliases": [],
+      "position": 1,
+      "raw_name": "商品交易总额",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "商品交易总额",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 2,
+      "raw_name": "退款金额",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "退款金额",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 3,
+      "raw_name": "总成交额（含平台商品补贴）明细",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "总成交额（含平台商品补贴）明细",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 4,
+      "raw_name": "商品成交件数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "商品成交件数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 5,
+      "raw_name": "客户数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "客户数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 6,
+      "raw_name": "页面浏览次数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "页面浏览次数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 7,
+      "raw_name": "店铺页面访问量",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "店铺页面访问量",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 8,
+      "raw_name": "SKU 订单数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "SKU 订单数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 9,
+      "raw_name": "订单数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "订单数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 10,
+      "raw_name": "转化率",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "转化率",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    }
+  ],
+  "field_parse_rules": [
+    {
+      "strict": true,
+      "value_kind": "single_date",
+      "date_format": "yyyy-mm-dd",
+      "target_field": "metric_date",
+      "source_column": "日期"
+    }
+  ],
+  "notes": "DSS架构重构（v4.6.0）+ 核心字段去重（v4.14.0）"
+}

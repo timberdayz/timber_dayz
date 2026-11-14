@@ -1,0 +1,187 @@
+{
+  "$schema_version": 1,
+  "platform": "shopee",
+  "data_domain": "services",
+  "granularity": "daily",
+  "sub_domain": "ai_assistant",
+  "account": null,
+  "header_row": 0,
+  "sheet_name": null,
+  "encoding": "utf-8",
+  "header_columns": [
+    "日期",
+    "服务的访客",
+    "同时服务的访客数",
+    "平均服务的访客人数",
+    "已回答的问题",
+    "转交给卖家的问题",
+    "回答问题率",
+    "相等于卖家工作时间",
+    "好评",
+    "平均评价",
+    "差评",
+    "好评比例"
+  ],
+  "deduplication_fields": [
+    "metric_date"
+  ],
+  "core_fields": [
+    {
+      "in_hash": true,
+      "raw_name": null,
+      "required": false,
+      "semantic_key": "metric_date"
+    }
+  ],
+  "ignored_extra_fields": [],
+  "header_bindings": [
+    {
+      "aliases": [
+        "metric_date",
+        "日期",
+        "统计日期",
+        "data_date",
+        "date"
+      ],
+      "position": 0,
+      "raw_name": "日期",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "日期",
+      "semantic_key": "metric_date",
+      "semantic_role": null,
+      "hash_participates": true
+    },
+    {
+      "aliases": [],
+      "position": 1,
+      "raw_name": "服务的访客",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "服务的访客",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 2,
+      "raw_name": "同时服务的访客数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "同时服务的访客数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 3,
+      "raw_name": "平均服务的访客人数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "平均服务的访客人数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 4,
+      "raw_name": "已回答的问题",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "已回答的问题",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 5,
+      "raw_name": "转交给卖家的问题",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "转交给卖家的问题",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 6,
+      "raw_name": "回答问题率",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "回答问题率",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 7,
+      "raw_name": "相等于卖家工作时间",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "相等于卖家工作时间",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 8,
+      "raw_name": "好评",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "好评",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 9,
+      "raw_name": "平均评价",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "平均评价",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 10,
+      "raw_name": "差评",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "差评",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 11,
+      "raw_name": "好评比例",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "好评比例",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    }
+  ],
+  "field_parse_rules": [
+    {
+      "strict": true,
+      "value_kind": "single_date",
+      "date_format": "dd-mm-yyyy",
+      "target_field": "metric_date",
+      "source_column": "日期"
+    }
+  ],
+  "notes": "DSS架构重构（v4.6.0）+ 核心字段去重（v4.14.0）"
+}

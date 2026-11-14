@@ -81,6 +81,20 @@ jobs:
         run: |
           python scripts/verify_sql_asset_hygiene.py
 
+      - name: Verify template decision definitions
+        run: |
+          # 模板「决策资产」进 Git(templates/definitions/*.json)之后,
+          # 定义文件本身就是一份契约:
+          #   * 不许混进运行时状态字段(版本号/命中次数/审计字段…);
+          #   * 维度键必须唯一, 文件名必须与内容一致;
+          #   * 派生值(confidence)不许进 Git;
+          #   * 不许混入凭据(仓库是公开的)。
+          #
+          # 用 --validate-only: 纯离线校验, **不连数据库**
+          # (CI runner 上没有业务库; 「仓库定义 ↔ 库内实例」的差异检查
+          #  由 scripts/apply_template_definitions.py --check 在有库的环境执行)。
+          python scripts/apply_template_definitions.py --validate-only
+
       - name: Guard against async/sync session mismatch
         run: |
           # async 上下文不得使用同步 ORM Query API(db.query)。

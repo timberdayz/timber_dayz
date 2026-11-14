@@ -1,0 +1,203 @@
+{
+  "$schema_version": 1,
+  "platform": "tiktok",
+  "data_domain": "services",
+  "granularity": "daily",
+  "sub_domain": "agent",
+  "account": null,
+  "header_row": 2,
+  "sheet_name": null,
+  "encoding": "utf-8",
+  "header_columns": [
+    "客服ID",
+    "客服昵称",
+    "日期",
+    "被分配会话数",
+    "需要人工响应会话数",
+    "12 小时人工客服响应聊天数",
+    "12 小时人工客服响应率",
+    "超时响应会话数",
+    "未响应会话数",
+    "满意度",
+    "平均响应时长"
+  ],
+  "deduplication_fields": [
+    "客服ID",
+    "客服昵称",
+    "metric_date",
+    "被分配会话数",
+    "满意度"
+  ],
+  "core_fields": [
+    {
+      "in_hash": true,
+      "raw_name": "客服ID",
+      "required": false,
+      "semantic_key": null
+    },
+    {
+      "in_hash": true,
+      "raw_name": "客服昵称",
+      "required": false,
+      "semantic_key": null
+    },
+    {
+      "in_hash": true,
+      "raw_name": null,
+      "required": false,
+      "semantic_key": "metric_date"
+    },
+    {
+      "in_hash": true,
+      "raw_name": "被分配会话数",
+      "required": false,
+      "semantic_key": null
+    },
+    {
+      "in_hash": true,
+      "raw_name": "满意度",
+      "required": false,
+      "semantic_key": null
+    }
+  ],
+  "ignored_extra_fields": [],
+  "header_bindings": [
+    {
+      "aliases": [],
+      "position": 0,
+      "raw_name": "客服ID",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "客服ID",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 1,
+      "raw_name": "客服昵称",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "客服昵称",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [
+        "metric_date",
+        "日期",
+        "统计日期",
+        "data_date",
+        "date"
+      ],
+      "position": 2,
+      "raw_name": "日期",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "日期",
+      "semantic_key": "metric_date",
+      "semantic_role": null,
+      "hash_participates": true
+    },
+    {
+      "aliases": [],
+      "position": 3,
+      "raw_name": "被分配会话数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "被分配会话数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 4,
+      "raw_name": "需要人工响应会话数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "需要人工响应会话数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 5,
+      "raw_name": "12 小时人工客服响应聊天数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "12 小时人工客服响应聊天数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 6,
+      "raw_name": "12 小时人工客服响应率",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "12 小时人工客服响应率",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 7,
+      "raw_name": "超时响应会话数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "超时响应会话数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 8,
+      "raw_name": "未响应会话数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "未响应会话数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 9,
+      "raw_name": "满意度",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "满意度",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 10,
+      "raw_name": "平均响应时长",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "平均响应时长",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    }
+  ],
+  "field_parse_rules": [
+    {
+      "strict": true,
+      "value_kind": "single_date",
+      "date_format": "yyyy-mm-dd",
+      "target_field": "metric_date",
+      "source_column": "日期"
+    }
+  ],
+  "notes": "DSS架构重构（v4.6.0）+ 核心字段去重（v4.14.0）"
+}

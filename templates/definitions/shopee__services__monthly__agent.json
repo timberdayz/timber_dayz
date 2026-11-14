@@ -1,0 +1,246 @@
+{
+  "$schema_version": 1,
+  "platform": "shopee",
+  "data_domain": "services",
+  "granularity": "monthly",
+  "sub_domain": "agent",
+  "account": null,
+  "header_row": 0,
+  "sheet_name": null,
+  "encoding": "utf-8",
+  "header_columns": [
+    "日期期间",
+    "访客数",
+    "聊天询问",
+    "访客询问",
+    "询问率",
+    "已回复的聊天",
+    "未回复的聊天",
+    "平均回应速度",
+    "用户满意度%",
+    "首次回应速度",
+    "转化率（询问至回复）",
+    "买家数",
+    "订单",
+    "件数",
+    "销售",
+    "转化率（回复至下单）"
+  ],
+  "deduplication_fields": [
+    "日期期间"
+  ],
+  "core_fields": [
+    {
+      "in_hash": true,
+      "raw_name": "日期期间",
+      "required": false,
+      "semantic_key": null
+    }
+  ],
+  "ignored_extra_fields": [],
+  "header_bindings": [
+    {
+      "aliases": [],
+      "position": 0,
+      "raw_name": "日期期间",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "日期期间",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 1,
+      "raw_name": "访客数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "访客数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 2,
+      "raw_name": "聊天询问",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "聊天询问",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 3,
+      "raw_name": "访客询问",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "访客询问",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 4,
+      "raw_name": "询问率",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "询问率",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 5,
+      "raw_name": "已回复的聊天",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "已回复的聊天",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 6,
+      "raw_name": "未回复的聊天",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "未回复的聊天",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 7,
+      "raw_name": "平均回应速度",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "平均回应速度",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 8,
+      "raw_name": "用户满意度%",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "用户满意度%",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 9,
+      "raw_name": "首次回应速度",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "首次回应速度",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 10,
+      "raw_name": "转化率（询问至回复）",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "转化率（询问至回复）",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 11,
+      "raw_name": "买家数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "买家数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 12,
+      "raw_name": "订单",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "订单",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 13,
+      "raw_name": "件数",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "件数",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 14,
+      "raw_name": "销售",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "销售",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 15,
+      "raw_name": "转化率（回复至下单）",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "转化率（回复至下单）",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    }
+  ],
+  "field_parse_rules": [
+    {
+      "strict": true,
+      "range_pick": "start",
+      "value_kind": "date_range",
+      "date_format": "dd/mm/yyyy-dd/mm/yyyy",
+      "target_field": "metric_date",
+      "source_column": "日期期间"
+    },
+    {
+      "strict": true,
+      "range_pick": "start",
+      "value_kind": "date_range",
+      "date_format": "dd/mm/yyyy-dd/mm/yyyy",
+      "target_field": "period_start_date",
+      "source_column": "日期期间"
+    },
+    {
+      "strict": true,
+      "range_pick": "end",
+      "value_kind": "date_range",
+      "date_format": "dd/mm/yyyy-dd/mm/yyyy",
+      "target_field": "period_end_date",
+      "source_column": "日期期间"
+    }
+  ],
+  "notes": "DSS架构重构（v4.6.0）+ 核心字段去重（v4.14.0） | slash date support"
+}

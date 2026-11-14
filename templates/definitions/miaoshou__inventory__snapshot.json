@@ -1,0 +1,394 @@
+{
+  "$schema_version": 1,
+  "platform": "miaoshou",
+  "data_domain": "inventory",
+  "granularity": "snapshot",
+  "sub_domain": null,
+  "account": null,
+  "header_row": 0,
+  "sheet_name": null,
+  "encoding": "utf-8",
+  "header_columns": [
+    "*商品SKU",
+    "商品图片",
+    "*商品名称",
+    "*规格",
+    "商品分组",
+    "*单价\n（元）",
+    "*总价\n（元）",
+    "库存总量",
+    "可用库存",
+    "预占库存",
+    "次品库存",
+    "暂存库存",
+    "活动预留库存",
+    "在途库存",
+    "计划库存",
+    "安全库存",
+    "仓库",
+    "仓位1",
+    "库存数量\n可用库存\n预占库存",
+    "近7天销量数据",
+    "近30天销量数据",
+    "近60天销量数据",
+    "近90天销量数据",
+    "备注",
+    "创建时间",
+    "更新时间",
+    "创建人员",
+    "更新人员"
+  ],
+  "deduplication_fields": [
+    "*商品SKU",
+    "*商品名称",
+    "*规格",
+    "仓库"
+  ],
+  "core_fields": [
+    {
+      "in_hash": true,
+      "raw_name": "*商品SKU",
+      "required": false,
+      "semantic_key": null
+    },
+    {
+      "in_hash": true,
+      "raw_name": "*商品名称",
+      "required": false,
+      "semantic_key": null
+    },
+    {
+      "in_hash": true,
+      "raw_name": "*规格",
+      "required": false,
+      "semantic_key": null
+    },
+    {
+      "in_hash": true,
+      "raw_name": "仓库",
+      "required": false,
+      "semantic_key": null
+    }
+  ],
+  "ignored_extra_fields": [],
+  "header_bindings": [
+    {
+      "aliases": [],
+      "position": 0,
+      "raw_name": "*商品SKU",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "*商品SKU",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 1,
+      "raw_name": "商品图片",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "商品图片",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 2,
+      "raw_name": "*商品名称",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "*商品名称",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 3,
+      "raw_name": "*规格",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "*规格",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 4,
+      "raw_name": "商品分组",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "商品分组",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 5,
+      "raw_name": "*单价\n（元）",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "*单价\n（元）",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 6,
+      "raw_name": "*总价\n（元）",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "*总价\n（元）",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 7,
+      "raw_name": "库存总量",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "库存总量",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 8,
+      "raw_name": "可用库存",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "可用库存",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 9,
+      "raw_name": "预占库存",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "预占库存",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 10,
+      "raw_name": "次品库存",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "次品库存",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 11,
+      "raw_name": "暂存库存",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "暂存库存",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 12,
+      "raw_name": "活动预留库存",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "活动预留库存",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 13,
+      "raw_name": "在途库存",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "在途库存",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 14,
+      "raw_name": "计划库存",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "计划库存",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 15,
+      "raw_name": "安全库存",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "安全库存",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 16,
+      "raw_name": "仓库",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "仓库",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 17,
+      "raw_name": "仓位1",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "仓位1",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 18,
+      "raw_name": "库存数量\n可用库存\n预占库存",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "库存数量\n可用库存\n预占库存",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 19,
+      "raw_name": "近7天销量数据",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "近7天销量数据",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 20,
+      "raw_name": "近30天销量数据",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "近30天销量数据",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 21,
+      "raw_name": "近60天销量数据",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "近60天销量数据",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 22,
+      "raw_name": "近90天销量数据",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "近90天销量数据",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 23,
+      "raw_name": "备注",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "备注",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 24,
+      "raw_name": "创建时间",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "创建时间",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 25,
+      "raw_name": "更新时间",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "更新时间",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 26,
+      "raw_name": "创建人员",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "创建人员",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    },
+    {
+      "aliases": [],
+      "position": 27,
+      "raw_name": "更新人员",
+      "required": false,
+      "sample_type": "string",
+      "display_name": "更新人员",
+      "semantic_key": null,
+      "semantic_role": null,
+      "hash_participates": false
+    }
+  ],
+  "field_parse_rules": [
+    {
+      "strict": true,
+      "value_kind": "single_date",
+      "date_format": "yyyy-mm-dd",
+      "target_field": "metric_date",
+      "source_column": "__file_date_from__"
+    }
+  ],
+  "notes": "2026-09 妙手导出新增 次品库存/暂存库存/备注,补齐到 28 列"
+}
