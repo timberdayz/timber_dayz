@@ -1485,15 +1485,16 @@ async def save_mapping_template(
         deduplication_fields = request.deduplication_fields
         if deduplication_fields is None:
             from backend.services.deduplication_fields_config import (
-                get_default_deduplication_fields,
+                get_recommended_deduplication_fields,
             )
 
-            deduplication_fields = get_default_deduplication_fields(
+            # 2026-11-14：这里填的是**推荐值**（用户没勾选时的建议），
+            # 不是回落 —— 权威永远是模板里勾选的字段。
+            deduplication_fields = get_recommended_deduplication_fields(
                 data_domain=request.data_domain,
-                sub_domain=request.sub_domain,
             )
             logger.warning(
-                f"[Template] [WARN] 保存模板时未提供deduplication_fields, 使用默认配置: {deduplication_fields}"
+                f"[Template] [WARN] 保存模板时未提供deduplication_fields, 使用推荐值: {deduplication_fields}"
             )
         elif not isinstance(deduplication_fields, list):
             raise ValueError(
@@ -1760,25 +1761,31 @@ async def save_mapping_template(
     "/templates/default-deduplication-fields",
     response_model=DefaultDeduplicationFieldsResponse,
 )
-async def get_default_deduplication_fields(
+async def get_recommended_deduplication_fields_endpoint(
     data_domain: str = Query(..., description="数据域(如:orders, products, inventory)"),
     sub_domain: Optional[str] = Query(None, description="子类型(可选,如:ai_assistant)"),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """获取默认核心字段推荐。"""
+    """获取核心字段**推荐值**（给用户的建议，不是权威、也不是回落）。
+
+    ⚠️ 2026-11-14（B1）：函数名与文案里的「默认」都改成了「推荐」——
+    域默认表已被删除（B1），这里返回的**只是建议值**：
+    模板没配去重字段时，入库**显式失败**，**不会**回落到这份建议。
+    HTTP 路径 ``/templates/default-deduplication-fields`` **不变**（前端契约）。
+    """
     try:
         from backend.services.deduplication_fields_config import (
-            get_default_deduplication_fields as get_default_deduplication_fields_config,
+            get_recommended_deduplication_fields,
         )
 
-        fields = get_default_deduplication_fields_config(data_domain, sub_domain)
+        fields = get_recommended_deduplication_fields(data_domain)
         descriptions = {
-            "orders": "订单数据的默认核心字段",
-            "products": "产品数据的默认核心字段",
-            "inventory": "库存数据的默认核心字段",
-            "traffic": "流量数据的默认核心字段",
-            "services": "服务数据的默认核心字段",
-            "analytics": "分析数据的默认核心字段",
+            "orders": "订单数据的推荐核心字段",
+            "products": "产品数据的推荐核心字段",
+            "inventory": "库存数据的推荐核心字段",
+            "traffic": "流量数据的推荐核心字段",
+            "services": "服务数据的推荐核心字段",
+            "analytics": "分析数据的推荐核心字段",
         }
         reasons = {
             "orders": "这些字段能够唯一标识订单级数据",
@@ -1789,7 +1796,7 @@ async def get_default_deduplication_fields(
             "analytics": "这些字段能够唯一标识分析级数据",
         }
 
-        description = descriptions.get(data_domain, f"{data_domain}数据的默认核心字段")
+        description = descriptions.get(data_domain, f"{data_domain}数据的推荐核心字段")
         if sub_domain:
             description = f"{sub_domain}子类型的{description}"
 
@@ -1800,13 +1807,13 @@ async def get_default_deduplication_fields(
                 description=description,
                 reason=reasons.get(data_domain, "这些字段能够唯一标识每行数据"),
             ),
-            message="获取默认核心字段推荐成功",
+            message="获取推荐核心字段成功",
         )
     except Exception as exc:
-        logger.error(f"获取默认核心字段推荐失败: {exc}", exc_info=True)
+        logger.error(f"获取推荐核心字段失败: {exc}", exc_info=True)
         return error_response(
             code=ErrorCode.INTERNAL_SERVER_ERROR,
-            message=f"获取默认核心字段推荐失败: {str(exc)}",
+            message=f"获取推荐核心字段失败: {str(exc)}",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(exc),
             recovery_suggestion="请检查数据域参数是否正确",
@@ -1830,7 +1837,7 @@ async def get_template_update_context(
 ):
     """Return template update context for the dedicated update workbench."""
     from backend.services.deduplication_fields_config import (
-        get_default_deduplication_fields as get_default_deduplication_fields_config,
+        get_recommended_deduplication_fields,
     )
     from backend.services.template_matcher import get_template_matcher
 
@@ -1923,10 +1930,7 @@ async def get_template_update_context(
             "recommended_save_mode": "new_version",
         }
 
-        default_fields = get_default_deduplication_fields_config(
-            template.data_domain,
-            template.sub_domain,
-        )
+        default_fields = get_recommended_deduplication_fields(template.data_domain)
 
         if mode == "with-sample" and file_id is None:
             raise ValueError("file_id is required when mode is with-sample")

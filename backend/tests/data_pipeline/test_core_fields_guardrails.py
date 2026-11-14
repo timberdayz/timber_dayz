@@ -515,11 +515,55 @@ def test_core_fields_hash_switch_defaults_to_off(monkeypatch):
     monkeypatch.delenv("SYNC_CORE_FIELDS_HASH_ENABLED", raising=False)
     assert core_fields_hash_enabled() is False
 
-    monkeypatch.setenv("SYNC_CORE_FIELDS_HASH_ENABLED", "1")
-    assert core_fields_hash_enabled() is True
-
     monkeypatch.setenv("SYNC_CORE_FIELDS_HASH_ENABLED", "off")
     assert core_fields_hash_enabled() is False
+
+
+def test_core_fields_hash_switch_requires_a_fresh_replay_reference(
+    monkeypatch, tmp_path
+):
+    """开关打开 ⇒ 必须有**新鲜的**离线回放凭证(2026-11-14 加的门禁)。
+
+    为什么必须有
+    ------------
+    打开开关**不改变** hash 的字段集合, 只改变**取值方式**
+    ⇒ 部分行的 hash 值会变 ⇒ 已入库的行被当成新数据 ⇒ 事实表膨胀
+    ⇒ 与 v7.29.3 修掉的 256 组重复行是同一类病。
+    规格 §6.1 写了「打开前必须先离线回放」, 但代码里原本**没有任何强制**。
+    """
+    from backend.services.core_fields_service import (
+        CORE_FIELDS_HASH_REPLAY_REF_ENV_KEY,
+        CoreFieldsHashReplayRequiredError,
+    )
+
+    monkeypatch.setenv("SYNC_CORE_FIELDS_HASH_ENABLED", "1")
+
+    # 没给凭证 ⇒ 拒绝启用。
+    monkeypatch.delenv(CORE_FIELDS_HASH_REPLAY_REF_ENV_KEY, raising=False)
+    with pytest.raises(CoreFieldsHashReplayRequiredError):
+        core_fields_hash_enabled()
+
+    # 凭证指向的文件不存在 ⇒ 拒绝启用。
+    monkeypatch.setenv(
+        CORE_FIELDS_HASH_REPLAY_REF_ENV_KEY, str(tmp_path / "not_there.txt")
+    )
+    with pytest.raises(CoreFieldsHashReplayRequiredError):
+        core_fields_hash_enabled()
+
+    # 凭证存在但比口径相关源文件旧 ⇒ 已过期 ⇒ 拒绝启用。
+    stale_report = tmp_path / "stale.txt"
+    stale_report.write_text("old replay", encoding="utf-8")
+    old = 1.0  # 1970-01-01 ⇒ 必定比任何源文件旧
+    os.utime(stale_report, (old, old))
+    monkeypatch.setenv(CORE_FIELDS_HASH_REPLAY_REF_ENV_KEY, str(stale_report))
+    with pytest.raises(CoreFieldsHashReplayRequiredError):
+        core_fields_hash_enabled()
+
+    # 凭证存在且新鲜 ⇒ 允许启用。
+    fresh_report = tmp_path / "fresh.txt"
+    fresh_report.write_text("fresh replay", encoding="utf-8")
+    monkeypatch.setenv(CORE_FIELDS_HASH_REPLAY_REF_ENV_KEY, str(fresh_report))
+    assert core_fields_hash_enabled() is True
 
 
 # ---------------------------------------------------------------------------

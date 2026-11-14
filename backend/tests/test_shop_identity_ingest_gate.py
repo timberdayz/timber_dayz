@@ -301,6 +301,9 @@ async def test_ingest_data_stamps_rows_with_shop_account_id(monkeypatch, tmp_pat
         header_row=0,
         template_id=328,
         extract_images=False,
+        # [*] 2026-11-14：模板配了去重字段才能算行身份(data_hash)；
+        #     没配 ⇒ 显式失败（不许回落到域默认表）。
+        deduplication_fields=["日期"],
     )
 
     assert result["success"] is True

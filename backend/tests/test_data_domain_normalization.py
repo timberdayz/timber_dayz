@@ -102,7 +102,11 @@ def test_data_standardizer_domain_tables_have_no_traffic_entry():
         NUMERIC_FIELDS_BY_DOMAIN,
     )
 
-    for table in (DATE_FIELDS_BY_DOMAIN, DATETIME_FIELDS_BY_DOMAIN, NUMERIC_FIELDS_BY_DOMAIN):
+    for table in (
+        DATE_FIELDS_BY_DOMAIN,
+        DATETIME_FIELDS_BY_DOMAIN,
+        NUMERIC_FIELDS_BY_DOMAIN,
+    ):
         assert "traffic" not in table
 
     # 原 traffic 的数值字段并入 analytics(同一业务域,取并集)
@@ -115,7 +119,9 @@ def test_data_standardizer_domain_tables_have_no_traffic_entry():
 def test_data_standardizer_normalizes_domain_before_lookup():
     from backend.services.data_standardizer import standardize_row
 
-    row = standardize_row({"metric_date": "2025-09-25", "page_views": "1,234"}, "traffic")
+    row = standardize_row(
+        {"metric_date": "2025-09-25", "page_views": "1,234"}, "traffic"
+    )
     # traffic 别名归一到 analytics, 因此 page_views 走数值标准化
     assert row["page_views"] == 1234.0
 
@@ -129,21 +135,25 @@ def test_event_listeners_pipeline_targets_have_no_traffic_entry():
 
 def test_deduplication_config_has_no_traffic_entry_and_alias_queries_match():
     from backend.services.deduplication_fields_config import (
-        DEFAULT_DEDUPLICATION_FIELDS,
         DEDUPLICATION_STRATEGY,
+        RECOMMENDED_DEDUPLICATION_FIELDS,
         UPSERT_UPDATE_FIELDS,
-        get_default_deduplication_fields,
         get_deduplication_strategy,
+        get_recommended_deduplication_fields,
         get_upsert_update_fields,
     )
 
     assert "traffic" not in DEDUPLICATION_STRATEGY
     assert "traffic" not in UPSERT_UPDATE_FIELDS
-    assert "traffic" not in DEFAULT_DEDUPLICATION_FIELDS
+    assert "traffic" not in RECOMMENDED_DEDUPLICATION_FIELDS
 
     # 用别名查,结果必须与 canonical 域完全一致
-    assert get_default_deduplication_fields("traffic") == get_default_deduplication_fields("analytics")
-    assert get_deduplication_strategy("traffic") == get_deduplication_strategy("analytics")
+    assert get_recommended_deduplication_fields(
+        "traffic"
+    ) == get_recommended_deduplication_fields("analytics")
+    assert get_deduplication_strategy("traffic") == get_deduplication_strategy(
+        "analytics"
+    )
     assert get_upsert_update_fields("traffic") == get_upsert_update_fields("analytics")
 
 
@@ -157,7 +167,15 @@ def test_whitelists_only_contain_canonical_domains():
     assert "traffic" not in VALID_DATA_DOMAINS
     assert "traffic" not in StandardFileName.KNOWN_DATA_DOMAINS
     # canonical 域仍然全部在白名单里
-    for domain in ("analytics", "products", "orders", "services", "inventory", "purchase", "finance"):
+    for domain in (
+        "analytics",
+        "products",
+        "orders",
+        "services",
+        "inventory",
+        "purchase",
+        "finance",
+    ):
         assert domain in VALID_DATA_DOMAINS
 
 
@@ -178,7 +196,9 @@ def test_standard_file_name_parse_normalizes_legacy_traffic():
     assert meta["source_platform"] == "shopee"
     assert meta["granularity"] == "monthly"
     # 白名单收紧后,历史 traffic 文件仍要能通过 validate
-    assert StandardFileName.validate("shopee_traffic_monthly_20250925_100234.xlsx") is True
+    assert (
+        StandardFileName.validate("shopee_traffic_monthly_20250925_100234.xlsx") is True
+    )
 
     # 其它域的解析不受影响
     meta2 = StandardFileName.parse("tiktok_services_agent_daily_20250925_001033.xlsx")
@@ -189,13 +209,18 @@ def test_standard_file_name_parse_normalizes_legacy_traffic():
 def test_standard_file_name_generate_never_emits_traffic():
     from modules.core.file_naming import StandardFileName
 
-    name = StandardFileName.generate("shopee", "traffic", "monthly", timestamp="20250925_100234")
+    name = StandardFileName.generate(
+        "shopee", "traffic", "monthly", timestamp="20250925_100234"
+    )
     assert "traffic" not in name
     assert "analytics" in name
 
 
 def test_catalog_scanner_normalizes_legacy_traffic_paths():
-    from modules.services.catalog_scanner import KNOWN_DATA_DOMAINS, _infer_domain_from_path
+    from modules.services.catalog_scanner import (
+        KNOWN_DATA_DOMAINS,
+        _infer_domain_from_path,
+    )
 
     assert "traffic" not in KNOWN_DATA_DOMAINS
     assert _infer_domain_from_path(Path("downloads/shopee/traffic/x")) == "analytics"
@@ -275,9 +300,17 @@ def test_ingestion_worker_dataframe_fallback_normalizes_traffic():
 def test_refresh_registry_fallback_maps_traffic_to_analytics():
     from backend.services.data_pipeline.refresh_registry import _infer_refresh_domain
 
-    assert _infer_refresh_domain(source_table_name="x", data_domain="traffic") == "analytics"
-    assert _infer_refresh_domain(source_table_name="x", data_domain="analytics") == "analytics"
-    assert _infer_refresh_domain(source_table_name="x", data_domain="orders") == "orders"
+    assert (
+        _infer_refresh_domain(source_table_name="x", data_domain="traffic")
+        == "analytics"
+    )
+    assert (
+        _infer_refresh_domain(source_table_name="x", data_domain="analytics")
+        == "analytics"
+    )
+    assert (
+        _infer_refresh_domain(source_table_name="x", data_domain="orders") == "orders"
+    )
     assert _infer_refresh_domain(source_table_name="x", data_domain="") is None
     # 历史 traffic 表名仍然要能推断出 analytics
     assert (

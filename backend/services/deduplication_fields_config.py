@@ -87,8 +87,30 @@ UPSERT_UPDATE_FIELDS: Dict[str, List[str]] = {
     ],
 }
 
-# 默认核心字段配置(data_domain -> [核心字段列表])
-DEFAULT_DEDUPLICATION_FIELDS: Dict[str, List[str]] = {
+# 推荐核心字段配置(data_domain -> [核心字段列表])
+#
+# ⚠️ 这是**推荐值**，不是权威，更**不是回落**（2026-11-14 起）。
+#
+# 权威 = 模板的去重字段表（``core.field_mapping_templates.deduplication_fields``）。
+# 本表只有两个用途：
+#   1. 工作台给用户的**建议**（用户可以改，也可以全不采纳）；
+#   2. 模板保存时用户没勾选时的**填充建议**。
+#
+# 为什么不能拿它当回落（历史教训）
+# --------------------------------
+# 它曾经是 ``get_deduplication_fields`` 的回落分支：模板没配去重字段时，
+# 静默用本表算指纹。而本表的内容是**标准字段键**
+# （``platform_sku`` / ``product_id`` / ``warehouse_name``），
+# 妙手的中文表头里根本没有这些名字 ⇒ 一个都取不到
+# ⇒ 实测 3 个不同 SKU 算出**完全相同**的指纹 ⇒ 同一天所有行互相覆盖
+# ⇒ **一天只剩一行，而且全程不报错**。
+#
+# ⇒ 现在模板没配去重字段**直接报错**（见
+#   :class:`DeduplicationFieldsNotConfiguredError`），不再有静默回落。
+#   27 个维度的模板全部配了去重字段（``backend/tests/data_pipeline/
+#   test_core_fields_hash_consistency.py`` 守护），生产 27 个 published
+#   模板也全部非空 ⇒ 这条报错只在**真的漏配**时触发。
+RECOMMENDED_DEDUPLICATION_FIELDS: Dict[str, List[str]] = {
     "orders": ["order_id"],
     "products": ["platform_sku", "product_id", "metric_date"],
     "inventory": ["platform_sku", "product_id", "warehouse_name", "metric_date"],
@@ -106,11 +128,16 @@ AUTO_DATE_IDENTITY_FIELD_ORDER = [
 ]
 AUTO_DATE_IDENTITY_FIELDS = set(AUTO_DATE_IDENTITY_FIELD_ORDER)
 
-# 子类型特定配置(sub_domain -> [核心字段列表])
-SUB_DOMAIN_DEDUPLICATION_FIELDS: Dict[str, List[str]] = {
-    # 可以添加子类型特定的配置
-    # 例如:'ai_assistant': ['assistant_id', 'date', 'platform_code', 'shop_id'],
-}
+
+class DeduplicationFieldsNotConfiguredError(ValueError):
+    """该维度没有配置去重字段 —— 必须先配置模板，**不许静默算错身份**。
+
+    为什么必须报错而不是回落
+    ------------------------
+    回落到域默认表 = 用**标准字段键**去原始数据里取值
+    ⇒ 中文表头一个都取不到 ⇒ 所有行算出同一个指纹 ⇒ 同一天互相覆盖
+    ⇒ 一天只剩一行，**而且不报错**（2026-11-14 开发库实测）。
+    """
 
 
 def _append_required_identity_fields(
@@ -140,39 +167,25 @@ def _append_required_identity_fields(
     return merged
 
 
-def get_default_deduplication_fields(
-    data_domain: str, sub_domain: Optional[str] = None
-) -> List[str]:
-    """
-    获取默认核心字段配置
+def get_recommended_deduplication_fields(data_domain: str) -> List[str]:
+    """获取**推荐**核心字段（工作台建议用，不是权威，也不是回落）。
 
     Args:
         data_domain: 数据域(如 'orders', 'products')
-        sub_domain: 子类型(可选,如 'ai_assistant')
 
     Returns:
-        核心字段列表
+        推荐字段列表；该数据域没有推荐值时返回空列表
+        （**空列表不代表可以回落** —— 见
+        :func:`get_deduplication_fields` 的报错语义）。
     """
-    # 优先使用子类型特定配置
-    if sub_domain and sub_domain in SUB_DOMAIN_DEDUPLICATION_FIELDS:
-        fields = SUB_DOMAIN_DEDUPLICATION_FIELDS[sub_domain]
-        logger.debug(f"[DedupFields] 使用子类型配置: {sub_domain} -> {fields}")
-        return fields
-
-    # 使用数据域默认配置
     # [D8] 归一数据域(traffic -> analytics),避免别名落到"未找到配置"分支
     data_domain = normalize_data_domain(data_domain)
-    if data_domain in DEFAULT_DEDUPLICATION_FIELDS:
-        fields = DEFAULT_DEDUPLICATION_FIELDS[data_domain]
-        logger.debug(f"[DedupFields] 使用数据域默认配置: {data_domain} -> {fields}")
-        return fields
-
-    # 如果没有配置,返回空列表(将使用所有业务字段)
-    logger.warning(
-        f"[DedupFields] 未找到数据域 {data_domain} 的默认配置,"
-        f"将使用所有业务字段计算data_hash"
-    )
-    return []
+    fields = RECOMMENDED_DEDUPLICATION_FIELDS.get(data_domain) or []
+    if fields:
+        logger.debug(f"[DedupFields] 数据域 {data_domain} 的推荐核心字段: {fields}")
+    else:
+        logger.debug(f"[DedupFields] 数据域 {data_domain} 没有推荐核心字段")
+    return list(fields)
 
 
 def get_deduplication_fields(
@@ -181,49 +194,48 @@ def get_deduplication_fields(
     sub_domain: Optional[str] = None,
     header_bindings: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
-    """
-    获取核心字段(优先级:模板配置 > 默认配置 > 所有字段)
+    """获取核心字段（**唯一路径 = 模板配置**）。
 
     Args:
         data_domain: 数据域
-        template_fields: 模板配置的核心字段(可选)
-        sub_domain: 子类型(可选)
+        template_fields: 模板配置的核心字段（**权威**）
+        sub_domain: 子类型
+        header_bindings: 表头绑定（预留）
 
     Returns:
         核心字段列表
+
+    Raises:
+        DeduplicationFieldsNotConfiguredError: 模板没有配置去重字段。
+            **这是刻意的 fail-closed**：见该异常类的说明 ——
+            静默回落会算出「所有行同一个指纹」，一天只剩一行且不报错。
     """
-    # 1. 优先使用模板配置
-    if template_fields:
-        normalized_template_fields: List[str] = []
-        for field in template_fields:
-            if is_canonical_semantic_key(field):
-                normalized_template_fields.append(
-                    normalize_semantic_key(field) or str(field).strip()
-                )
-            else:
-                normalized_template_fields.append(str(field).strip())
-        merged_fields = _append_required_identity_fields(
-            normalized_template_fields,
-            data_domain=data_domain,
-            sub_domain=sub_domain,
+    if not template_fields:
+        raise DeduplicationFieldsNotConfiguredError(
+            "数据域 {domain}{sub}没有配置去重字段，无法计算行身份（data_hash）。"
+            "请先在模板工作台配置该维度的去重字段（核心字段清单里勾选参与去重的列）。"
+            "系统**不会**回落到域默认配置 —— 那会让所有行算出同一个指纹、"
+            "同一天互相覆盖，而且不报错。".format(
+                domain=data_domain,
+                sub="/{0}".format(sub_domain) if sub_domain else "",
+            )
         )
-        logger.debug(f"[DedupFields] 使用模板配置的核心字段: {merged_fields}")
-        return merged_fields
 
-    # 2. 使用默认配置
-    default_fields = get_default_deduplication_fields(data_domain, sub_domain)
-    if default_fields:
-        merged_fields = _append_required_identity_fields(
-            default_fields,
-            data_domain=data_domain,
-            sub_domain=sub_domain,
-        )
-        logger.debug(f"[DedupFields] 使用默认配置的核心字段: {merged_fields}")
-        return merged_fields
-
-    # 3. 如果没有配置,返回空列表(表示使用所有业务字段)
-    logger.debug(f"[DedupFields] 未配置核心字段,将使用所有业务字段计算data_hash")
-    return []
+    normalized_template_fields: List[str] = []
+    for field in template_fields:
+        if is_canonical_semantic_key(field):
+            normalized_template_fields.append(
+                normalize_semantic_key(field) or str(field).strip()
+            )
+        else:
+            normalized_template_fields.append(str(field).strip())
+    merged_fields = _append_required_identity_fields(
+        normalized_template_fields,
+        data_domain=data_domain,
+        sub_domain=sub_domain,
+    )
+    logger.debug(f"[DedupFields] 使用模板配置的核心字段: {merged_fields}")
+    return merged_fields
 
 
 def append_auto_date_identity_fields(

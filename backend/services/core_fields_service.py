@@ -58,6 +58,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from backend.services.semantic_field_registry import (
@@ -76,17 +77,110 @@ CORE_FIELD_KEYS = ("semantic_key", "raw_name", "required", "in_hash")
 #: 默认**关闭** —— 旧口径是当前生产口径, 开关打开前不影响任何一行数据。
 CORE_FIELDS_HASH_ENV_KEY = "SYNC_CORE_FIELDS_HASH_ENABLED"
 
+#: 口径切换的**前置凭证**(环境变量): 指向离线回放报告文件。
+#:
+#: 规格 §6.1 要求「打开前必须先离线回放」, 但代码里原本**没有任何强制** ⇒
+#: 打开开关就会静默改掉部分行的 hash ⇒ 已入库的行被当成新数据 ⇒ 事实表膨胀
+#: (与 v7.29.3 修掉的 256 组重复行是同一类病)。
+#:
+#: 用法:
+#:   python scripts/replay_core_fields_hash.py > reports/core_fields_hash_replay.txt
+#:   export SYNC_CORE_FIELDS_HASH_REPLAY_REF=reports/core_fields_hash_replay.txt
+CORE_FIELDS_HASH_REPLAY_REF_ENV_KEY = "SYNC_CORE_FIELDS_HASH_REPLAY_REF"
+
+#: 口径相关的源文件 —— 回放报告必须比它们**新**, 否则结论已过期。
+_CORE_FIELDS_CALIBER_SOURCES = (
+    "core_fields_service.py",
+    "deduplication_service.py",
+    "semantic_field_registry.py",
+)
+
 _TRUTHY = {"1", "true", "yes", "on"}
+
+
+class CoreFieldsHashReplayRequiredError(RuntimeError):
+    """打开口径切换开关前必须先做离线回放(规格 §6.1)。
+
+    为什么必须拦住
+    --------------
+    打开开关**不改变** hash 的字段集合(集合仍由 ``deduplication_fields`` 决定),
+    只改变**取值方式**(逐字优先 + 语义兜底) ⇒ 部分行的 hash 值会变
+    ⇒ 已入库的行被当成新数据 ⇒ 事实表膨胀。
+    ⇒ 没有回放凭证就不许打开 —— 让这一步从「靠自觉」变成「靠机器」。
+    """
+
+
+def _replay_reference_path() -> Optional[Path]:
+    """回放凭证指向的文件路径(没配就是 None)。"""
+    raw = str(os.getenv(CORE_FIELDS_HASH_REPLAY_REF_ENV_KEY, "")).strip()
+    return Path(raw) if raw else None
+
+
+def _replay_report_stale_reason(report_path: Path) -> Optional[str]:
+    """回放报告是否已过期(比口径相关源文件旧)。过期返回原因, 否则 None。"""
+    try:
+        report_mtime = report_path.stat().st_mtime
+    except OSError:
+        return None
+
+    newest_mtime: Optional[float] = None
+    newest_name = ""
+    for name in _CORE_FIELDS_CALIBER_SOURCES:
+        candidate = Path(__file__).resolve().parent / name
+        try:
+            mtime = candidate.stat().st_mtime
+        except OSError:
+            continue
+        if newest_mtime is None or mtime > newest_mtime:
+            newest_mtime = mtime
+            newest_name = name
+    if newest_mtime is None:
+        return None
+    if report_mtime < newest_mtime:
+        return "回放报告比口径相关源文件({0})旧".format(newest_name)
+    return None
 
 
 def core_fields_hash_enabled() -> bool:
     """是否启用「按核心字段清单算 hash」的新口径。
 
     规格 §6.1 的硬要求: 口径切换是**显式开关**, 出问题一键回退。
-    默认关闭 ⇒ 新旧口径并存期内零风险; 打开前必须先看离线回放报告
-    (``scripts/replay_core_fields_hash.py``)。
+    默认关闭 ⇒ 新旧口径并存期内零风险。
+
+    **2026-11-14 加了前置门禁**: 开关打开时必须同时提供**新鲜的**离线回放凭证
+    (:envvar:`SYNC_CORE_FIELDS_HASH_REPLAY_REF` 指向回放报告文件),
+    否则抛 :class:`CoreFieldsHashReplayRequiredError`。
+    理由见该异常类说明: 打开开关会改掉部分行的 hash ⇒ 事实表膨胀。
     """
-    return str(os.getenv(CORE_FIELDS_HASH_ENV_KEY, "")).strip().lower() in _TRUTHY
+    raw = str(os.getenv(CORE_FIELDS_HASH_ENV_KEY, "")).strip().lower()
+    if raw not in _TRUTHY:
+        return False
+
+    reference = _replay_reference_path()
+    if reference is None:
+        raise CoreFieldsHashReplayRequiredError(
+            "已开启 SYNC_CORE_FIELDS_HASH_ENABLED, 但没有提供离线回放凭证。"
+            "请先执行 `python scripts/replay_core_fields_hash.py > <报告文件>`, "
+            "再设置环境变量 {env} 指向该报告文件, 然后重试。".format(
+                env=CORE_FIELDS_HASH_REPLAY_REF_ENV_KEY
+            )
+        )
+    if not reference.is_file():
+        raise CoreFieldsHashReplayRequiredError(
+            "已开启 SYNC_CORE_FIELDS_HASH_ENABLED, 但回放凭证不存在: {path}。"
+            "请先执行 `python scripts/replay_core_fields_hash.py > <报告文件>` "
+            "生成回放报告。".format(path=reference)
+        )
+
+    stale_reason = _replay_report_stale_reason(reference)
+    if stale_reason:
+        raise CoreFieldsHashReplayRequiredError(
+            "已开启 SYNC_CORE_FIELDS_HASH_ENABLED, 但回放凭证已过期({reason}): {path}。"
+            "口径相关代码在回放之后改过 ⇒ 回放结论不再成立, 请重新回放。".format(
+                reason=stale_reason, path=reference
+            )
+        )
+    return True
 
 
 def _is_user_confirmed_binding(binding: Dict[str, Any]) -> bool:
@@ -639,6 +733,80 @@ def core_field_storage_column_names(core_fields: Any) -> List[str]:
         seen.add(raw_name)
         names.append(raw_name)
     return names
+
+
+#: 业务物理列存储开关(环境变量) —— 2026-11-14 新增。
+#:
+#: 业务拍板：**没有外部系统直查**（Metabase 是历史遗留、不在活跃运行时；
+#: 仓库内静态搜索零命中）⇒ 库存维度**宣告弃用**业务物理列。
+#:
+#: 默认**关闭** = 弃用语义（业务字段只存 ``raw_data``），
+#: 保留开关是为了**一键回退**（不用发版）。
+CORE_FIELDS_PHYSICAL_COLUMNS_ENV_KEY = "SYNC_CORE_FIELDS_PHYSICAL_COLUMNS_ENABLED"
+
+#: 业务物理列存储开关的**默认状态**：关 = 不建任何业务物理列。
+CORE_FIELDS_PHYSICAL_COLUMNS_DEFAULT_ENABLED = False
+
+
+def core_fields_physical_columns_enabled() -> bool:
+    """是否建业务物理列（默认**关** = 物理列通路已废弃）。
+
+    为什么默认关
+    ------------
+    2026-11-14 实测：库存事实表的业务物理列**全部 NULL**，
+    而**没有任何代码或 SQL 读它们** —— 语义层 / 状态层 / 接口全部走
+    ``raw_data``（JSONB）⇒ 这条通路**没人走** ⇒ 留着只是同一业务字段存两份。
+
+    ⚠️ 与 :envvar:`SYNC_CORE_FIELDS_CORE_COLUMNS_ENABLED` 的区别（别搞反）
+    --------------------------------------------------------------------
+    * ``SYNC_CORE_FIELDS_CORE_COLUMNS_ENABLED`` = **收窄**开关：
+      开 = 只给清单里的核心字段建列；关 = **所有表头列都建**（建得**更多**）。
+    * 本开关 = **要不要建业务物理列**：关 = **一列都不建**。
+
+    ⇒ 「物理列通路废弃」由**本开关**表达，**不是**把收窄开关关掉
+    （那样会让物理列变多，方向正好相反）。
+    """
+    raw = str(os.getenv(CORE_FIELDS_PHYSICAL_COLUMNS_ENV_KEY, "")).strip().lower()
+    if not raw:
+        return CORE_FIELDS_PHYSICAL_COLUMNS_DEFAULT_ENABLED
+    if raw in _TRUTHY:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return CORE_FIELDS_PHYSICAL_COLUMNS_DEFAULT_ENABLED
+
+
+def effective_storage_columns(core_fields: Any) -> Optional[List[str]]:
+    """入库时**真正要建的业务物理列**（唯一决策点）。
+
+    Returns:
+        * ``None`` ⇒ 旧行为：所有表头列都建；
+        * ``[]`` ⇒ **一列都不建**（业务字段只存 ``raw_data``）；
+        * ``[...]`` ⇒ 只给这些列建列。
+
+    ⚠️ ``None`` 与 ``[]`` 的语义**完全不同**，别混：
+    * ``None`` ⇒ ``ensure_columns_exist(core_columns=None)``
+      ⇒ 把**所有表头列**都建出来；
+    * ``[]`` ⇒ ``core_column_set`` 为空集 ⇒ **一列都不建、也不写值**。
+
+    「存不存列」与「缺列要不要阻断」是**两件事**：
+    阻断判定读的是**上传文件的表头 vs 清单**
+    （``template_matcher._required_raw_fields`` → ``classify_drift``），
+    与库里有没有这列**无关** ⇒ 本函数返回什么都不会影响阻断口径。
+    """
+    if not core_fields:
+        return None
+    if not core_fields_physical_columns_enabled():
+        # 物理列通路已废弃 ⇒ 一列都不建（注意：不能返回 None，那是「全建」）。
+        return []
+    storage_columns = core_field_storage_column_names(core_fields)
+    if not storage_columns:
+        # 清单里没有可落列的原始列名 ⇒ 保持旧行为（避免空配置丢数据）。
+        return None
+    if not core_fields_columns_enabled():
+        # 收窄开关关闭 ⇒ 旧行为（所有表头列都建）。
+        return None
+    return storage_columns
 
 
 def core_field_required_semantic_keys(core_fields: Any) -> List[str]:

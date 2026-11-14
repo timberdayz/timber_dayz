@@ -106,6 +106,9 @@ async def test_ingest_data_returns_root_cause_and_does_not_mark_file_ingested_on
         domain="orders",
         mappings=None,
         header_row=0,
+        # [*] 2026-11-14：模板配了去重字段才能算行身份(data_hash)；
+        #     没配 ⇒ 显式失败（不许回落到域默认表）。
+        deduplication_fields=["订单编号"],
     )
 
     assert result["success"] is False

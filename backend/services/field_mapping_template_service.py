@@ -14,7 +14,7 @@ from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.deduplication_fields_config import (
-    get_default_deduplication_fields,
+    get_recommended_deduplication_fields,
 )
 from backend.services.template_family_service import (
     _normalize_dimension,
@@ -117,10 +117,9 @@ class FieldMappingTemplateService:
                 )
 
             if deduplication_fields is None:
-                deduplication_fields = get_default_deduplication_fields(
-                    data_domain, sub_domain
-                )
-                logger.debug(f"[Template] 使用默认核心字段配置: {deduplication_fields}")
+                # 2026-11-14：填的是**推荐值**（用户没勾选时的建议），不是回落。
+                deduplication_fields = get_recommended_deduplication_fields(data_domain)
+                logger.debug(f"[Template] 使用推荐核心字段: {deduplication_fields}")
             elif not isinstance(deduplication_fields, list):
                 raise ValueError(
                     f"deduplication_fields必须是列表, 当前值: {deduplication_fields}"

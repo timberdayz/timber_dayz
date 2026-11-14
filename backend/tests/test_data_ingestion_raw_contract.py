@@ -153,6 +153,9 @@ async def test_template_recognized_columns_are_passed_through_to_raw_importer(
         header_columns=["日期", "订单数", "SKU 订单数"],
         header_row=8,
         template_id=328,
+        # [*] 2026-11-14：模板配了去重字段才能算行身份(data_hash)；
+        #     没配 ⇒ 显式失败（不许回落到域默认表）。
+        deduplication_fields=["日期"],
     )
 
     assert result["success"] is True
@@ -270,6 +273,8 @@ async def test_ingest_data_passes_file_date_range_to_raw_importer(
         header_columns=["日期", "订单数"],
         header_row=8,
         template_id=328,
+        # [*] 2026-11-14：模板配了去重字段才能算行身份(data_hash)。
+        deduplication_fields=["日期"],
     )
 
     assert result["success"] is True

@@ -3836,6 +3836,25 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(
             await session.commit()
 
         async with session_factory() as session:
+            # 库存快照族已改读物化副本（2026-11-14）⇒ 副本必须先在。
+            #
+            # 这里**直接建副本**，不走 ``execute_sql_target``：
+            # 副本在 refresh registry 里登记了「建对象前置 = 正本」，而本临时库里的
+            # ``semantic.fact_inventory_snapshot`` 是一张**表**（不是视图）
+            # ⇒ 前置会被当成「正本不存在」而执行正本资产
+            # （``CREATE OR REPLACE VIEW``）⇒ 与表冲突报错。
+            # 生产里正本就是视图，前置会被跳过（普通视图不参与刷新重建）⇒ 无此问题。
+            await session.execute(
+                text(
+                    """
+                    CREATE MATERIALIZED VIEW semantic.fact_inventory_snapshot_mv
+                    AS SELECT * FROM semantic.fact_inventory_snapshot
+                    """
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
             for target in (
                 # 商品日 KPI 现在读物化副本（2026-11-11）⇒ 必须先把副本建出来。
                 # 生产里这一步由迁移完成（迁移先建 MV 再重建消费方视图）。

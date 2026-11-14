@@ -111,8 +111,11 @@ class _ExecutorManagerStub:
 
 
 class _TemplateResolverStub:
-    def __init__(self, template_id):
+    def __init__(self, template_id, select_variant: bool = True):
         self.template_id = template_id
+        # select_variant=False ⇒ 不让 resolver 选 legacy 模板（模板仍走 matcher），
+        # 用于「与模板选择无关」的用例（状态流转契约等）。
+        self.select_variant = select_variant
 
     async def resolve(self, **_kwargs):
         return {
@@ -120,9 +123,15 @@ class _TemplateResolverStub:
             "governance_status": "ready",
             "family": None,
             "active_version": None,
-            "variant": {
-                "source_legacy_template_id": self.template_id,
-            },
+            # [*] 2026-11-14：去重字段的**权威来源**是 resolver 的顶层输出
+            # （变体接管 legacy 模板时，resolver 会用 legacy 模板行的字段覆盖版本值）。
+            # 模板没配去重字段 ⇒ 入库必须**显式失败**，不许回落到域默认表。
+            "deduplication_fields": ["订单编号"],
+            "variant": (
+                {"source_legacy_template_id": self.template_id}
+                if self.select_variant
+                else None
+            ),
             "shadow_compare": {"is_consistent": True},
         }
 
@@ -212,6 +221,11 @@ async def test_failed_sync_updates_catalog_file_status_and_error_message(
     monkeypatch.setattr(
         service, "template_status_service", _TemplateStatusServiceStub()
     )
+    # [*] 2026-11-14：模板必须配了去重字段 —— 没配就**显式失败**（不许回落域默认表）。
+    #     select_variant=False ⇒ 模板仍走 matcher（本用例与模板选择无关）。
+    monkeypatch.setattr(
+        service, "template_resolver", _TemplateResolverStub(888, select_variant=False)
+    )
     monkeypatch.setattr(
         "backend.services.data_sync_service.get_executor_manager",
         lambda: _ExecutorManagerStub(),
@@ -268,6 +282,11 @@ async def test_successful_sync_clears_stale_error_and_updates_last_processed_at(
     monkeypatch.setattr(service, "template_matcher", _TemplateMatcherStub())
     monkeypatch.setattr(
         service, "template_status_service", _TemplateStatusServiceStub()
+    )
+    # [*] 2026-11-14：模板必须配了去重字段 —— 没配就**显式失败**（不许回落域默认表）。
+    #     select_variant=False ⇒ 模板仍走 matcher（本用例与模板选择无关）。
+    monkeypatch.setattr(
+        service, "template_resolver", _TemplateResolverStub(888, select_variant=False)
     )
     monkeypatch.setattr(
         "backend.services.data_sync_service.get_executor_manager",

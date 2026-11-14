@@ -1146,8 +1146,14 @@ class DataSyncService:
             # 6. [*] v4.14.0安全版本:检测表头变化,任何变化都阻止同步
             # 如果有模板,检测表头是否完全匹配;否则使用从文件读取的columns
             sample_rows = self._build_sample_rows(df)
+            # ⚠️ 取**顶层**的 ``deduplication_fields``（resolver 的最终权威输出），
+            #    不要只读 ``active_version`` 里的：
+            #    变体接管 legacy 模板时，resolver 会用 legacy 模板行的字段**覆盖**
+            #    版本上的值（template_family_service._resolve_payload），
+            #    只读 active_version 就会拿到旧值/空值。
             resolved_deduplication_fields = list(
-                ((resolve_result or {}).get("active_version") or {}).get(
+                (resolve_result or {}).get("deduplication_fields")
+                or ((resolve_result or {}).get("active_version") or {}).get(
                     "deduplication_fields"
                 )
                 or []
@@ -1192,7 +1198,8 @@ class DataSyncService:
                 template = preview_template
                 resolve_result = preview_resolve_result
                 resolved_deduplication_fields = list(
-                    ((resolve_result or {}).get("active_version") or {}).get(
+                    (resolve_result or {}).get("deduplication_fields")
+                    or ((resolve_result or {}).get("active_version") or {}).get(
                         "deduplication_fields"
                     )
                     or []
@@ -1351,6 +1358,11 @@ class DataSyncService:
                 )
 
             # [*] v4.14.0新增:从模板读取核心去重字段(deduplication_fields)
+            #
+            # 2026-11-14：模板没配去重字段 ⇒ **直接报错**，不再回落到域默认表。
+            # 回落的后果（开发库实测）：用标准字段键去中文表头里取值，一个都取不到
+            # ⇒ 所有行算出**同一个**指纹 ⇒ 同一天互相覆盖 ⇒ 一天只剩一行，
+            # 而且**全程不报错**。
             deduplication_fields = None
             if resolved_deduplication_fields:
                 deduplication_fields = resolved_deduplication_fields
@@ -1358,27 +1370,23 @@ class DataSyncService:
                     f"[DataSync] [v4.14.0] 使用模板的核心去重字段: {deduplication_fields}"
                 )
             else:
-                # [*] v4.17.0修复:如果没有模板或模板没有配置核心字段,使用默认配置
-                # 确保同一数据域+子类型的文件使用相同的核心字段配置
                 from backend.services.deduplication_fields_config import (
-                    get_default_deduplication_fields,
+                    DeduplicationFieldsNotConfiguredError,
                 )
 
-                default_fields = get_default_deduplication_fields(
-                    data_domain=catalog_file.data_domain or "",
-                    sub_domain=normalized_sub_domain,
+                raise DeduplicationFieldsNotConfiguredError(
+                    "文件 {file} 所属的数据域 {domain}{sub} 没有可用的去重字段配置"
+                    "（模板缺失或模板未配置核心字段）⇒ 无法计算行身份(data_hash)。"
+                    "请先在模板工作台配置该维度的去重字段。".format(
+                        file=catalog_file.file_name,
+                        domain=catalog_file.data_domain or "",
+                        sub=(
+                            "/{0}".format(normalized_sub_domain)
+                            if normalized_sub_domain
+                            else ""
+                        ),
+                    )
                 )
-                if default_fields:
-                    deduplication_fields = default_fields
-                    logger.info(
-                        f"[DataSync] [v4.17.0] 模板未配置核心字段,使用默认配置: {deduplication_fields} "
-                        f"(data_domain={catalog_file.data_domain}, sub_domain={normalized_sub_domain})"
-                    )
-                else:
-                    logger.warning(
-                        f"[DataSync] [v4.17.0] [WARN] 未找到数据域 {catalog_file.data_domain} 的默认核心字段配置,"
-                        f"将使用所有业务字段计算data_hash(可能导致去重失败)"
-                    )
 
             # [*] v4.17.0增强:记录使用的核心字段配置,便于排查data_hash计算一致性问题
             logger.info(

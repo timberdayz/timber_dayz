@@ -28,8 +28,11 @@ import pytest
 
 from backend.services.core_fields_service import (
     CORE_FIELDS_COLUMNS_ENV_KEY,
+    CORE_FIELDS_PHYSICAL_COLUMNS_ENV_KEY,
     core_field_storage_column_names,
     core_fields_columns_enabled,
+    core_fields_physical_columns_enabled,
+    effective_storage_columns,
     normalize_core_fields,
 )
 from backend.services.dynamic_column_manager import DynamicColumnManager
@@ -332,7 +335,8 @@ def test_ingestion_passes_core_columns_down_to_importer():
     source = _read("backend/services/data_ingestion_service.py")
 
     assert "core_columns=effective_core_columns" in source
-    assert "core_field_storage_column_names" in source
+    # 2026-11-14：建列决策集中到 core_fields_service.effective_storage_columns()
+    assert "effective_storage_columns(core_fields)" in source
     # 空清单 ⇒ 不收窄(避免空配置丢数据)
     assert "保持旧行为(不收窄建列)" in source
 
@@ -431,3 +435,115 @@ def test_storage_column_names_ignore_duplicate_semantic_entries():
     ]
 
     assert core_field_storage_column_names(core_fields) == ["商品编号"]
+
+
+# ---------------------------------------------------------------------------
+# 6) 业务物理列通路废弃（2026-11-14，业务拍板：没有外部系统直查）
+# ---------------------------------------------------------------------------
+
+
+def test_physical_columns_switch_defaults_to_off(monkeypatch):
+    """业务物理列通路**默认废弃** ⇒ 不建任何业务物理列。
+
+    与「收窄开关」默认开是两件事（别搞反）：
+    * 收窄开关开 = 只给清单里的核心字段建列；
+    * 物理列开关关 = **一列都不建**。
+    """
+    monkeypatch.delenv(CORE_FIELDS_PHYSICAL_COLUMNS_ENV_KEY, raising=False)
+    assert core_fields_physical_columns_enabled() is False
+
+    monkeypatch.setenv(CORE_FIELDS_PHYSICAL_COLUMNS_ENV_KEY, "1")
+    assert core_fields_physical_columns_enabled() is True
+
+    monkeypatch.setenv(CORE_FIELDS_PHYSICAL_COLUMNS_ENV_KEY, "off")
+    assert core_fields_physical_columns_enabled() is False
+
+
+def test_effective_storage_columns_returns_empty_list_when_deprecated(monkeypatch):
+    """弃用时必须返回**空清单**，不是 None。
+
+    ``None`` = 旧行为 = **所有表头列都建**（方向正好相反）；
+    ``[]`` = ``core_column_set`` 为空集 = **一列都不建、也不写值**。
+    """
+    monkeypatch.delenv(CORE_FIELDS_PHYSICAL_COLUMNS_ENV_KEY, raising=False)
+    core_fields: List[Dict[str, Any]] = [
+        {
+            "semantic_key": None,
+            "raw_name": "可用库存",
+            "required": True,
+            "in_hash": False,
+        },
+    ]
+
+    assert effective_storage_columns(core_fields) == []
+
+
+def test_effective_storage_columns_restores_old_behaviour_when_switch_on(monkeypatch):
+    """开关打开 ⇒ 恢复「只为核心字段建列」，可一键回退。"""
+    monkeypatch.setenv(CORE_FIELDS_PHYSICAL_COLUMNS_ENV_KEY, "1")
+    monkeypatch.delenv(CORE_FIELDS_COLUMNS_ENV_KEY, raising=False)
+    core_fields: List[Dict[str, Any]] = [
+        {
+            "semantic_key": None,
+            "raw_name": "可用库存",
+            "required": True,
+            "in_hash": False,
+        },
+    ]
+
+    assert effective_storage_columns(core_fields) == ["可用库存"]
+
+    # 收窄开关关闭 ⇒ 旧行为（所有表头列都建）
+    monkeypatch.setenv(CORE_FIELDS_COLUMNS_ENV_KEY, "off")
+    assert effective_storage_columns(core_fields) is None
+
+    # 清单里没有可落列的原始列名 ⇒ 旧行为（避免空配置丢数据）
+    monkeypatch.setenv(CORE_FIELDS_COLUMNS_ENV_KEY, "1")
+    assert effective_storage_columns([{"semantic_key": "metric_date"}]) is None
+
+
+def test_missing_required_column_still_blocks_when_physical_columns_disabled(
+    monkeypatch,
+):
+    """「存不存列」与「缺列要不要阻断」必须**解耦**。
+
+    阻断判定比对的是**上传文件的表头 vs 清单**
+    （``template_matcher._required_raw_fields`` → ``classify_drift``），
+    与库里有没有这列**无关** ⇒ 物理列关掉后，缺必填列仍然必须阻断。
+    """
+    from backend.services.data_sync_status_semantics import classify_drift
+    from backend.services.template_matcher import TemplateMatcher
+
+    monkeypatch.delenv(CORE_FIELDS_PHYSICAL_COLUMNS_ENV_KEY, raising=False)
+
+    core_fields: List[Dict[str, Any]] = [
+        {
+            "semantic_key": None,
+            "raw_name": "可用库存",
+            "required": True,
+            "in_hash": False,
+        },
+        {
+            "semantic_key": None,
+            "raw_name": "仓库",
+            "required": True,
+            "in_hash": False,
+        },
+    ]
+    required = TemplateMatcher._required_raw_fields(core_fields)
+    assert required == ["可用库存", "仓库"]
+
+    decision = classify_drift(
+        removed_fields=["可用库存"],
+        required_core_fields=required,
+        core_fields_configured=True,
+    )
+    assert decision.is_blocking is True
+
+    # 可选列少了不阻断（口径不变）
+    optional_decision = classify_drift(
+        removed_fields=["商品名称"],
+        required_core_fields=required,
+        core_fields_configured=True,
+    )
+    assert optional_decision.is_blocking is False

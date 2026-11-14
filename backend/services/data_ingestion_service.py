@@ -851,30 +851,32 @@ class DataIngestionService:
                     #     与批次 E 的 hash 开关**相互独立**: hash 管「指纹怎么算」,
                     #     这里管「落哪些物理列」。
                     #
+                    # 2026-11-14: 业务物理列通路**宣告弃用**(没有外部系统直查)
+                    #     ⇒ 默认**不建任何业务物理列**, 业务字段只存 raw_data。
+                    #     决策集中在 core_fields_service.effective_storage_columns()
+                    #     (None=旧行为全建 / []=一列都不建 / [...] = 只建这些列)。
+                    #
                     #     清单为空 ⇒ 不收窄(保持旧行为), 避免空配置把数据搞丢。
                     effective_core_columns = None
                     if core_fields:
                         from backend.services.core_fields_service import (
-                            core_field_storage_column_names,
-                            core_fields_columns_enabled,
+                            effective_storage_columns,
                         )
 
-                        storage_columns = core_field_storage_column_names(core_fields)
-                        if not storage_columns:
-                            logger.warning(
-                                "[Ingest] [*] 批次F: 核心字段清单没有可落列的原始列名, "
-                                "保持旧行为(不收窄建列), 避免空配置丢数据"
-                            )
-                        elif core_fields_columns_enabled():
-                            effective_core_columns = storage_columns
+                        effective_core_columns = effective_storage_columns(core_fields)
+                        if effective_core_columns == []:
                             logger.info(
-                                "[Ingest] [*] 批次F: 只为核心字段建物理列 "
-                                f"(核心列数={len(effective_core_columns)})"
+                                "[Ingest] [*] 物理列通路已废弃: 业务字段只存 raw_data, "
+                                "不建任何业务物理列"
+                            )
+                        elif effective_core_columns is None:
+                            logger.warning(
+                                "[Ingest] [*] 批次F: 保持旧行为(不收窄建列), 避免空配置丢数据"
                             )
                         else:
                             logger.info(
-                                "[Ingest] [*] 批次F: 落库列收窄开关未打开"
-                                "(SYNC_CORE_FIELDS_CORE_COLUMNS_ENABLED), 保持旧行为"
+                                "[Ingest] [*] 批次F: 只为核心字段建物理列 "
+                                f"(核心列数={len(effective_core_columns)})"
                             )
                     logger.info(
                         f"[Ingest] [DSS] data_hash计算完成: {len(data_hashes)}个哈希"

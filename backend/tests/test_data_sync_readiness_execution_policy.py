@@ -87,6 +87,26 @@ class _ExecutorManagerStub:
         return func(*args, **kwargs)
 
 
+class _TemplateResolverStub:
+    """resolver 的权威输出。
+
+    [*] 2026-11-14：去重字段的权威来源是 resolver 的**顶层**输出；
+    模板没配去重字段 ⇒ 入库**显式失败**，不许回落到域默认表。
+    这里只给出去重字段，模板选择仍走 template_matcher（variant=None）。
+    """
+
+    async def resolve(self, **_kwargs):
+        return {
+            "matched": True,
+            "governance_status": "ready",
+            "family": None,
+            "active_version": None,
+            "deduplication_fields": ["order_id"],
+            "variant": None,
+            "shadow_compare": {"is_consistent": True},
+        }
+
+
 @pytest.mark.asyncio
 async def test_sync_single_file_allows_header_drift_when_readiness_auto_syncs(
     monkeypatch,
@@ -126,7 +146,11 @@ async def test_sync_single_file_allows_header_drift_when_readiness_auto_syncs(
 
     monkeypatch.setattr(service, "_safe_resolve_path", lambda _path: str(file_path))
     monkeypatch.setattr(service, "template_matcher", _HeaderDriftTemplateMatcherStub())
-    monkeypatch.setattr(service, "template_status_service", _NonBreakingDriftStatusServiceStub())
+    monkeypatch.setattr(
+        service, "template_status_service", _NonBreakingDriftStatusServiceStub()
+    )
+    # [*] 2026-11-14：模板配了去重字段才能算行身份(data_hash)。
+    monkeypatch.setattr(service, "template_resolver", _TemplateResolverStub())
     monkeypatch.setattr(
         "backend.services.data_sync_service.get_executor_manager",
         lambda: _ExecutorManagerStub(),

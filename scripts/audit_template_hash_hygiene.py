@@ -80,7 +80,7 @@ from backend.domains.data_platform.routers.field_mapping_templates import (  # n
 )
 from backend.models.database import AsyncSessionLocal  # noqa: E402
 from backend.services.deduplication_fields_config import (  # noqa: E402
-    get_default_deduplication_fields,
+    get_recommended_deduplication_fields,
 )
 from backend.services.semantic_field_registry import (  # noqa: E402
     SEMANTIC_FIELD_META,
@@ -272,7 +272,7 @@ def classify_template(
         sub_domain=sub_domain,
     )
     recommended_fields = _recommended_deduplication_fields(
-        get_default_deduplication_fields(data_domain, sub_domain),
+        get_recommended_deduplication_fields(data_domain),
         columns,
         effective_bindings,
     )
