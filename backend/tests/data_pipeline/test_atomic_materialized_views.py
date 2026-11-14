@@ -23,6 +23,7 @@ from pathlib import Path
 from backend.services.data_pipeline.refresh_registry import (
     PIPELINE_DEPENDENCIES,
     SQL_TARGET_PATHS,
+    _base_targets_for_refresh_domain,
     expand_downstream_targets,
     topologically_sort_targets,
 )
@@ -46,6 +47,13 @@ MATERIALIZED_VIEW_ASSETS = (
         "semantic.fact_analytics_atomic_mv",
         "semantic.fact_analytics_atomic",
         "sql/semantic/analytics_atomic_mv.sql",
+    ),
+    (
+        # 库存语义层（2026-11-14）：正本每行都跑一次查表函数 ⇒ 读一次 197 ms。
+        # 物化副本正文 = 正本正文 ⇒ 口径零变化。
+        "semantic.fact_inventory_snapshot_mv",
+        "semantic.fact_inventory_snapshot",
+        "sql/semantic/inventory_snapshot_mv.sql",
     ),
 )
 
@@ -242,3 +250,94 @@ def test_operational_metrics_module_declares_day_kpi_dependency():
     assert "mart.shop_day_kpi" in deps
     sql_text = _read("sql/api_modules/business_overview_operational_metrics_module.sql")
     assert "mart.shop_day_kpi" in sql_text
+
+
+# ---------------------------------------------------------------------------
+# 库存语义层物化副本（2026-11-14）
+# ---------------------------------------------------------------------------
+
+
+def test_inventory_domain_refresh_chain_lists_the_materialized_copy():
+    """副本必须**显式**出现在库存域的刷新目标里。
+
+    漏了 ⇒ 副本永远不被 REFRESH ⇒ 页面永远读着一份旧快照，
+    而且**不报错**（products 域已经踩过同一个坑，注释写在 refresh_registry
+    的同款分支里）。
+    """
+    targets = _base_targets_for_refresh_domain("inventory")
+    assert "semantic.fact_inventory_snapshot" in targets
+    assert "semantic.fact_inventory_snapshot_mv" in targets
+    assert targets.index("semantic.fact_inventory_snapshot") < targets.index(
+        "semantic.fact_inventory_snapshot_mv"
+    )
+
+
+def test_inventory_consumers_read_the_materialized_copy():
+    """快照族 + 状态层必须读副本，且不得再直读正本。
+
+    直读正本 = 每次查询都重算一遍标准化（生产实测 197 ms）
+    ⇒ 这次改造等于没做。
+    """
+    for asset_path in (
+        "sql/mart/inventory_snapshot_history.sql",
+        "sql/mart/inventory_current.sql",
+    ):
+        sql_text = _read(asset_path)
+        assert (
+            "semantic.fact_inventory_snapshot_mv" in sql_text
+        ), "{0} 必须读物化副本".format(asset_path)
+        assert (
+            "FROM semantic.fact_inventory_snapshot\n" not in sql_text
+        ), "{0} 仍在直读普通视图".format(asset_path)
+
+    # 状态层（库龄 / 距上次进货天数）的两条取数 SQL 同样读副本。
+    service_text = _read(
+        "backend/services/data_pipeline/inventory_state_refresh_service.py"
+    )
+    assert service_text.count("FROM semantic.fact_inventory_snapshot_mv") == 2
+    assert "FROM semantic.fact_inventory_snapshot\n" not in service_text
+
+
+def test_inventory_copy_guards_against_silent_shape_drift():
+    """正本用 ``CREATE OR REPLACE VIEW`` ⇒ 加列时副本**不会**被连带删掉，
+    而 ``REFRESH MATERIALIZED VIEW`` **不会新增列** ⇒ 副本会静默少一列。
+
+    ⇒ 资产文件必须在刷新前比一次列集，不一致就报错停下（fail-closed），
+    而不是带着旧形状继续刷。
+    """
+    sql_text = _read("sql/semantic/inventory_snapshot_mv.sql")
+    assert "IS DISTINCT FROM" in sql_text
+    assert "RAISE EXCEPTION" in sql_text
+    # ⚠️ 列集必须用 ``pg_attribute`` 取：**不能用** ``information_schema.columns``。
+    #    information_schema 只列 relkind ∈ {r,v,f,p}，**不含物化视图(relkind='m')**
+    #    ⇒ 副本的列集永远取不到(NULL) ⇒ 守卫会把「一致」也判成「不一致」，
+    #    副本从此刷不动。（2026-11-14 开发库实跑踩到）
+    #    判据看的是 **FROM 后面跟什么**（注释里提到这个名字不算）。
+    assert "FROM pg_attribute" in sql_text
+    assert "FROM information_schema.columns" not in sql_text
+
+
+def test_refresh_path_enforces_shape_guard_before_referencing():
+    """数据刷新路径必须**真的**执行这道守卫。
+
+    刷新计划对「已存在的物化视图」走的是**直接 REFRESH**（不执行资产文件，
+    原因见 refresh_runner._refresh_materialized_view 的注释）⇒
+    只把守卫写在资产文件里 = 守卫平时根本不生效 ⇒ 正本加列后副本静默少列，
+    而且**全程不报错**。
+
+    ⇒ 刷新路径在 REFRESH 之前必须自己比一次列集（源视图从资产文件解析，
+    资产文件是 SSOT，不另立一份声明）。
+    """
+    runner_text = _read("backend/services/data_pipeline/refresh_runner.py")
+    assert "_assert_materialized_view_shape" in runner_text
+    assert "_materialized_view_source" in runner_text
+    # 守卫必须**在** REFRESH 之前（顺序反了就等于没有）。
+    guard_at = runner_text.index(
+        "_assert_materialized_view_shape(db, target, source_view)"
+    )
+    refresh_at = runner_text.index("REFRESH MATERIALIZED VIEW {target}")
+    assert guard_at < refresh_at, "形状守卫必须排在 REFRESH 之前"
+
+    # 列集比较同样不能用 information_schema（不含物化视图）。
+    assert "FROM pg_attribute" in runner_text
+    assert "FROM information_schema.columns" not in runner_text

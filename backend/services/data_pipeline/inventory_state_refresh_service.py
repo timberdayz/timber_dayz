@@ -45,6 +45,10 @@ from backend.services.data_pipeline.refresh_registry import topologically_sort_t
 
 INVENTORY_STATE_UPSTREAM_TARGETS = [
     "semantic.fact_inventory_snapshot",
+    # 物化副本（2026-11-14）：本服务下面两条 SQL 读的是副本 ⇒ 副本必须先被刷新。
+    # 不带上它 ⇒ 状态层读的是「上一次刷新的快照」，而快照族读的是「本次刷新」，
+    # 两层就会错位（库龄与状态对不上）。
+    "semantic.fact_inventory_snapshot_mv",
     "mart.inventory_snapshot_history",
 ]
 
@@ -81,7 +85,8 @@ _RESTOCK_ANCHOR_FRAMES_SQL = """
             metric_date AS snapshot_date,
             on_hand_stock,
             ingest_timestamp AS last_ingest_timestamp
-        FROM semantic.fact_inventory_snapshot
+        -- 2026-11-14：读物化副本（口径零变化：副本正文 = 正本正文）。
+        FROM semantic.fact_inventory_snapshot_mv
     ) AS source_rows
     WHERE source_rows.sku_key IS NOT NULL
     ORDER BY snapshot_date ASC, last_ingest_timestamp ASC
@@ -257,7 +262,8 @@ class InventoryStateRefreshService:
                         metric_date,
                         file_id AS source_file_id,
                         ingest_timestamp
-                    FROM semantic.fact_inventory_snapshot
+                    -- 2026-11-14：读物化副本（口径零变化：副本正文 = 正本正文）。
+                    FROM semantic.fact_inventory_snapshot_mv
                 ) AS source_rows
                 WHERE source_rows.sku_key IS NOT NULL
                 """

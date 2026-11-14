@@ -36,7 +36,9 @@ WITH ranked_inventory AS (
             PARTITION BY platform_code, COALESCE(shop_id, ''), COALESCE(platform_sku, ''), COALESCE(product_sku, '')
             ORDER BY observed_at DESC NULLS LAST, ingest_timestamp DESC
         ) AS rn
-    FROM semantic.fact_inventory_snapshot
+    -- 2026-11-14：改读物化副本 `semantic.fact_inventory_snapshot_mv`
+    -- （口径零变化：副本正文 = 正本正文 `SELECT *`）。
+    FROM semantic.fact_inventory_snapshot_mv
 )
 SELECT
     snapshot_date,

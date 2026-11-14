@@ -116,6 +116,11 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
         "semantic.shop_identity_resolver",
         "semantic.warehouse_resolver",
     ],
+    # 库存原子层的**物化副本**（2026-11-14）：正文 = 正本正文（SELECT *）⇒ 口径零变化。
+    # 存在的理由：正本是普通视图，每行都跑一次查表函数（两张小对照表被扫 650 万次）
+    # ⇒ 生产实测读一次 197 ms，而底层三张 b_class 表只要 4.4 ms。
+    # 下游（快照族 / 状态层）一律改读副本 ⇒ 请求路径不再逐行重算。
+    "semantic.fact_inventory_snapshot_mv": ["semantic.fact_inventory_snapshot"],
     "semantic.fact_services_atomic": ["semantic.shop_identity_resolver"],
     "semantic.shop_month_other_operating_cost": [],
     "mart.shop_day_kpi": [
@@ -140,14 +145,17 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     ],
     "mart.platform_month_kpi": ["mart.shop_month_kpi"],
     "mart.product_day_kpi": ["semantic.fact_products_atomic_mv"],
-    "mart.inventory_snapshot_history": ["semantic.fact_inventory_snapshot"],
+    # 快照族与状态层改读物化副本（2026-11-14）。
+    # ⚠️ 这三条依赖必须指向副本：正本是普通视图，每次查询都重算一遍标准化（197 ms），
+    #    副本是刷新时算好的快照（毫秒级）。口径零变化 ⇒ 只是「什么时候算」变了。
+    "mart.inventory_snapshot_history": ["semantic.fact_inventory_snapshot_mv"],
     "mart.inventory_snapshot_latest": ["mart.inventory_snapshot_history"],
     "mart.inventory_snapshot_change": ["mart.inventory_snapshot_history"],
     "mart.inventory_snapshot_company_daily": ["mart.inventory_snapshot_history"],
     "mart.inventory_age_history": ["mart.inventory_snapshot_company_daily"],
     "mart.inventory_age_current": ["mart.inventory_age_history"],
-    "mart.inventory_current": ["semantic.fact_inventory_snapshot"],
-    "mart.inventory_state": ["semantic.fact_inventory_snapshot"],
+    "mart.inventory_current": ["semantic.fact_inventory_snapshot_mv"],
+    "mart.inventory_state": ["semantic.fact_inventory_snapshot_mv"],
     "mart.inventory_backlog_base": [
         "mart.inventory_snapshot_latest",
         "mart.inventory_state",
@@ -222,6 +230,7 @@ SQL_TARGET_PATHS: dict[str, str] = {
     "semantic.fact_products_atomic": "sql/semantic/products_atomic.sql",
     "semantic.fact_products_atomic_mv": "sql/semantic/products_atomic_mv.sql",
     "semantic.fact_inventory_snapshot": "sql/semantic/inventory_snapshot.sql",
+    "semantic.fact_inventory_snapshot_mv": "sql/semantic/inventory_snapshot_mv.sql",
     "semantic.fact_services_atomic": "sql/semantic/services_atomic.sql",
     "semantic.shop_month_other_operating_cost": "sql/semantic/shop_month_other_operating_cost.sql",
     "mart.shop_day_kpi": "sql/mart/shop_day_kpi.sql",
@@ -327,6 +336,8 @@ ASSET_PREREQUISITES: dict[str, list[str]] = {
         "semantic.warehouse_resolver",
         "semantic.shop_identity_resolution_candidates",
     ],
+    # 物化副本的建对象前置 = 正本（正本不存在时副本**建不出来**）。
+    "semantic.fact_inventory_snapshot_mv": ["semantic.fact_inventory_snapshot"],
 }
 
 
@@ -446,7 +457,13 @@ def _base_targets_for_refresh_domain(domain: str) -> list[str]:
             "semantic.fact_products_atomic_mv",
         ]
     if domain == "inventory":
-        return ["semantic.fact_inventory_snapshot"]
+        # 物化副本必须显式列出来（2026-11-14，与 orders / products 域同款）：
+        # 库存域的刷新链是「普通视图 → 物化副本 → 快照族 → 状态层」，
+        # 副本不在链上 ⇒ 副本永远不刷新 ⇒ 页面会永远读着一份建库时的旧快照。
+        return [
+            "semantic.fact_inventory_snapshot",
+            "semantic.fact_inventory_snapshot_mv",
+        ]
     if domain == "services":
         return ["semantic.fact_services_atomic"]
     return []

@@ -42,6 +42,14 @@ _CREATE_INDEX_PATTERN = re.compile(
 )
 _LINE_COMMENT_PATTERN = re.compile(r"--[^\n]*")
 
+#: 物化视图资产正文里「``AS SELECT * FROM <源视图>``」的形状。
+#: 只有这种写法的副本才与源视图**严格同构**（列集一致）⇒ 形状守卫才有意义；
+#: 正文带列裁剪的资产解析不到 ⇒ 不做守卫（不会误报）。
+_MV_SELECT_STAR_SOURCE_PATTERN = re.compile(
+    r"AS\s+SELECT\s+\*\s+FROM\s+([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+
 #: 物化视图刷新的**语句超时预算**（毫秒）。
 #:
 #: 为什么需要
@@ -502,6 +510,70 @@ async def _set_local_statement_timeout(db: AsyncSession, value: str | int) -> No
     )
 
 
+def _materialized_view_source(asset_text: str) -> Optional[str]:
+    """从物化视图资产文件里解析出源视图（正文 = ``SELECT * FROM <源>``）。
+
+    解析不到 ⇒ 返回 ``None`` = 不做形状检查（正文带列裁剪、或用了
+    ``DROP ... CASCADE`` 写法的资产）—— 只对**严格同构**的副本做守卫。
+
+    匹配前先剥掉行注释：注释里写一句 ``AS SELECT * FROM x`` 不该被当成定义。
+    """
+    without_comments = _LINE_COMMENT_PATTERN.sub("", asset_text)
+    match = _MV_SELECT_STAR_SOURCE_PATTERN.search(without_comments)
+    if not match:
+        return None
+    return match.group(1)
+
+
+async def _relation_columns(db: AsyncSession, relation_name: str) -> Optional[str]:
+    """取一个关系的列名序列（按列序），关系不存在时返回 ``None``。
+
+    必须用 ``pg_attribute``：**``information_schema.columns`` 不含物化视图**
+    （relkind='m' 不在它的范围内）⇒ 用它查副本永远得到 NULL。
+    """
+    result = await db.execute(
+        text(
+            """
+            SELECT string_agg(a.attname, ',' ORDER BY a.attnum)
+              FROM pg_attribute a
+             WHERE a.attrelid = to_regclass(:name)
+               AND a.attnum > 0
+               AND NOT a.attisdropped
+            """
+        ),
+        {"name": relation_name},
+    )
+    return result.scalar_one_or_none()
+
+
+async def _assert_materialized_view_shape(
+    db: AsyncSession, target: str, source: str
+) -> None:
+    """副本与源视图的列集必须一致，否则 ``REFRESH`` 会**静默丢列**。
+
+    为什么需要这道守卫
+    ------------------
+    源视图是普通视图（``CREATE OR REPLACE VIEW``）⇒ 加列时**不会**连带删掉下游；
+    而 ``REFRESH MATERIALIZED VIEW`` **不会新增列** ⇒ 副本会静默少一列，
+    后面所有读副本的查询都缺那一列，而且**全程不报错**。
+
+    fail-closed：列集不一致就报错停下（修法：手工删掉副本后重跑刷新计划）。
+    """
+    target_columns = await _relation_columns(db, target)
+    source_columns = await _relation_columns(db, source)
+    if target_columns is None or source_columns is None:
+        # 有一侧不存在 ⇒ 不比较（创建/自愈路径由资产文件自己处理）。
+        return
+    if target_columns != source_columns:
+        raise RuntimeError(
+            "物化视图 {target} 的列集与源视图 {source} 不一致："
+            "REFRESH MATERIALIZED VIEW 不会新增列，继续刷新会静默丢列。"
+            "请手工删除该物化视图（连带删掉的下游视图由刷新计划重建）后重跑刷新计划。".format(
+                target=target, source=source
+            )
+        )
+
+
 async def _refresh_materialized_view(
     db: AsyncSession, target: str, sql_path: str | Path
 ) -> bool:
@@ -558,6 +630,12 @@ async def _refresh_materialized_view(
             "[refresh_runner] target=%s 跳过刷新（另一条刷新道正在刷它）", target
         )
         return False
+    # 形状守卫：副本与源视图的列集必须一致（不一致 ⇒ REFRESH 会静默丢列）。
+    # 源视图从资产文件解析（资产文件是 SSOT，不另立一份声明）。
+    asset_text = load_sql_text(sql_path)
+    source_view = _materialized_view_source(asset_text)
+    if source_view:
+        await _assert_materialized_view_shape(db, target, source_view)
     # 临时抬高语句超时预算：REFRESH 要全量重算，生产实测最慢 115 秒，
     # 而连接池默认 120 秒 —— 差 5 秒就被掐断。
     baseline_timeout = await _current_statement_timeout(db)
@@ -571,7 +649,7 @@ async def _refresh_materialized_view(
             await _set_local_statement_timeout(db, baseline_timeout)
         except Exception:  # noqa: BLE001
             pass
-    for statement in split_sql_statements(load_sql_text(sql_path)):
+    for statement in split_sql_statements(asset_text):
         without_comments = _LINE_COMMENT_PATTERN.sub("", statement)
         if _CREATE_INDEX_PATTERN.match(without_comments):
             await db.execute(text(statement))

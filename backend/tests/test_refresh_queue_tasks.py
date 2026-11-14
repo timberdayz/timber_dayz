@@ -905,6 +905,41 @@ def test_inventory_layer_refresh_trigger_follows_targets_not_event_fields():
     assert task_module._should_refresh_inventory_layers([], None) is False
 
 
+def test_inventory_layer_refresh_judge_accepts_plain_view_and_copy():
+    """库存语义层有正本 + 物化副本两个对象 ⇒ 判据**两个都要认**。
+
+    2026-11-14：下游改读物化副本后，刷新目标里可能出现的是副本；
+    只认正本 ⇒ 另一种触发方式就会漏 ⇒ 状态层不刷新 ⇒
+    库龄不推进、滞销榜陈旧，**而且不报错**。
+    """
+    from backend.tasks import refresh_queue_tasks as task_module
+
+    assert "semantic.fact_inventory_snapshot" in task_module.INVENTORY_FACT_TARGETS
+    assert "semantic.fact_inventory_snapshot_mv" in task_module.INVENTORY_FACT_TARGETS
+
+    # 只给正本 ⇒ 刷。
+    assert (
+        task_module._should_refresh_inventory_layers(
+            ["semantic.fact_inventory_snapshot"], {}
+        )
+        is True
+    )
+    # 只给副本 ⇒ 也刷。
+    assert (
+        task_module._should_refresh_inventory_layers(
+            ["semantic.fact_inventory_snapshot_mv"], {}
+        )
+        is True
+    )
+    # 与库存无关 ⇒ 不刷。
+    assert (
+        task_module._should_refresh_inventory_layers(
+            ["semantic.fact_products_atomic_mv"], {}
+        )
+        is False
+    )
+
+
 @pytest.mark.asyncio
 async def test_process_refresh_queue_task_refreshes_state_when_targets_cover_inventory_facts(
     monkeypatch,

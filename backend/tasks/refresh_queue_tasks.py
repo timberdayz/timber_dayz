@@ -133,7 +133,18 @@ def is_retryable_exception(exc: BaseException) -> bool:
 #:
 #: 新判据看的是「这次刷新到底动了哪些资产」，**与谁触发的无关**：
 #: 只要刷新计划重建了库存事实，状态层就必须跟着重算，否则两者会脱节。
-INVENTORY_FACT_TARGET = "semantic.fact_inventory_snapshot"
+#:
+#: 2026-11-14：库存语义层有**正本 + 物化副本**两个对象
+#: （``semantic.fact_inventory_snapshot`` 与 ``semantic.fact_inventory_snapshot_mv``），
+#: 下游一律读副本 ⇒ 判据**两个都认**，命中任一即算「动了库存事实」。
+#: 只认一个 ⇒ 另一种触发方式就会漏 ⇒ 状态层不刷新 ⇒ 库龄不推进、滞销榜陈旧，
+#: 而且**不报错**。
+INVENTORY_FACT_TARGETS = frozenset(
+    {
+        "semantic.fact_inventory_snapshot",
+        "semantic.fact_inventory_snapshot_mv",
+    }
+)
 
 
 def _should_refresh_inventory_layers(
@@ -144,12 +155,12 @@ def _should_refresh_inventory_layers(
     判据是「库存事实有没有被重建」，不是「事件有没有声明 domain」：
     orders 域的刷新闭包里同样含库存事实
     （`api.business_overview_inventory_backlog_module` → `mart.inventory_backlog_base`
-    → `mart.inventory_state` → `semantic.fact_inventory_snapshot`），
+    → `mart.inventory_state` → `semantic.fact_inventory_snapshot_mv`），
     所以订单采集也会顺带把状态层刷对 —— 这正是生产需要的自愈能力。
     """
     if (context or {}).get("data_domain") == "inventory":
         return True
-    return INVENTORY_FACT_TARGET in (targets or [])
+    return bool(INVENTORY_FACT_TARGETS.intersection(targets or []))
 
 
 def _modules_for_targets(targets: list[str]) -> list[str]:
