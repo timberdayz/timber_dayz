@@ -88,6 +88,13 @@ COPY scripts/apply_template_definitions.py /app/scripts/apply_template_definitio
 COPY scripts/export_template_definitions.py /app/scripts/export_template_definitions.py
 COPY scripts/replay_drift_caliber.py /app/scripts/replay_drift_caliber.py
 COPY scripts/template_release_sla_metric.py /app/scripts/template_release_sla_metric.py
+# [OPS] 库存快照 data_hash 重建（2026-11-14）
+#
+#   scripts/rebuild_inventory_snapshot_hash.py —— 按「当前口径」重算
+#   b_class.fact_miaoshou_inventory_snapshot 的 data_hash（data_hash 是行身份，
+#   口径一变就必须同口径重建），并把塌成同一身份键的重复行合并掉。
+#   默认只读；--apply 才写库，写库前先备份。
+COPY scripts/rebuild_inventory_snapshot_hash.py /app/scripts/rebuild_inventory_snapshot_hash.py
 COPY sql/api_modules /app/sql/api_modules
 COPY sql/mart /app/sql/mart
 COPY sql/ops /app/sql/ops

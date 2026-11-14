@@ -129,6 +129,33 @@ python scripts/apply_template_definitions.py --apply             # 真投影
 
 `--apply` 会**发布新版本**, 属于会改变线上行为的人工决策 —— 先跑 `--dry-run` 看清差异。
 
+### 改 `deduplication_fields` 必须**同口径重建存量 data_hash**
+
+> [!WARNING]
+> `data_hash` 是事实表的**行身份**(唯一键 + `ON CONFLICT DO UPDATE`),
+> 不是内容摘要。⇒ 改了 `deduplication_fields`(或作用域里的身份键)之后,
+> **已入库行的 hash 与新算出的 hash 不同** ⇒ 同一份快照再采一次不会命中旧行
+> ⇒ **被当成新数据插入** ⇒ 事实表按快照次数膨胀。
+>
+> ⇒ 「改去重口径」与「重建存量 hash」是**一件事的两半**, 必须同时做。
+
+库存维度就是踩过这个坑: 2026-11-03 前后作用域身份键从 `shop_id` 换成了
+`shop_account_id`(代码里 `backend/services/catalog_files_identity_backfill.py`
+早就记着「口径切换会让所有 hash 失效 ⇒ 要求一次全量重建」),
+同一份快照在切换前后各入库一次 ⇒ 4111 行里多出 **256 组**同 SKU×仓×日期的重复行。
+
+重建脚本: `scripts/rebuild_inventory_snapshot_hash.py`
+
+```bash
+python scripts/rebuild_inventory_snapshot_hash.py                    # 只读: 看口径分布与计划
+python scripts/rebuild_inventory_snapshot_hash.py --apply \
+    --backup-dir /tmp/inv_rebuild                                    # 真执行(先备份)
+python scripts/rebuild_inventory_snapshot_hash.py --verify           # 复核
+```
+
+它的四道闸: 默认只读 / 逐行认领历史口径(认不出来就中止) /
+用**应用自身**的 hash 函数算(不手写哈希算法) / 写库前先备份。
+
 ## 环境差异(overlay)
 
 基线定义覆盖所有环境。个别环境需要**少量**差异时, 用 overlay:
