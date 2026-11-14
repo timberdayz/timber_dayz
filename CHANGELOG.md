@@ -1,5 +1,55 @@
 # Changelog - 西虹 ERP 系统
 
+## [v7.29.5] - 2026-11-14 - 投影时把 `notes` 一起写进库（守卫差一项就红）
+
+> **只改 `scripts/apply_template_definitions.py` + `scripts/template_definitions.py`
+> + 一个新守护测试文件**。无业务代码变更、无数据库变更、无数据迁移。
+
+### 一、发现
+
+v7.29.4 投影库存维度模板（发布 v4）之后，定义守卫 `--check` **仍然报差异**，
+而且**只差 `notes` 一项**：
+
+```
+[DIFF] miaoshou/inventory/snapshot/-/-
+        - notes: 定义="... 2026-11-14 业务拍板: ..."  库内="DSS架构重构(v4.6.0)+ 核心字段去重(v4.14.0)"
+```
+
+⇒ 26/27 一致 ⇒ **闭环断在最后一步**：库存维度投影成功了（去重字段表 + 13 项清单
+都已进库），但说明文字没进去。
+
+### 二、根因
+
+`FieldMappingTemplateService.save_template` **不写 `notes` 列** ——
+它的参数里压根没有 `notes` ⇒ 投影完库里的 notes 仍是旧版本的内容。
+
+而 `notes` 在 `scripts/template_definitions.DECISION_FIELDS` 里**参与比对**
+⇒ 设计意图就是「notes 也要镜像」，只是发布服务漏了这个参数。
+
+### 三、这次改了什么
+
+- `scripts/apply_template_definitions.py`
+  - 新增 `_sync_notes()`：投影后用一条独立 UPDATE 把定义里的 `notes` 写进库。
+    **刻意不改 `save_template`** —— 那是**界面发布路径**也在用的服务
+    （归档旧版本 + 插入新版本 + 家族投影，同一个事务），给它加参数会牵动
+    界面发布的行为与事务边界；而 `notes` 只是**决策说明文字**，不参与任何
+    运行时口径（hash / 清单 / 漂移判定都不读它）。
+  - 差异**只有** `notes` 时 ⇒ **原地补 notes，不发布新版本**
+    （否则版本号会无意义地膨胀：改个说明文字发一版）。
+  - 定义里没写 `notes` ⇒ 不动库里的 notes（不抹掉运维备注），交给守卫报出来。
+- `scripts/template_definitions.py`
+  - 新增 `changed_decision_fields()`：返回**有差异的字段名**（而不是描述文本），
+    调用方不必去解析字符串。
+- `backend/tests/data_pipeline/test_template_definition_notes_sync.py`（新增，8 个用例）
+
+### 四、影响面
+
+| 项 | 变化 |
+|---|---|
+| 业务代码 | 无 |
+| 数据库 | 无（脚本改动，需人工执行 `--apply` 才落库） |
+| 模板版本号 | 不因 notes 变化而自增 |
+
 ## [v7.29.4] - 2026-11-14 - 重建脚本在生产容器里能跑起来（v7.29.3 镜像里的脚本连不上库）
 
 > **只改 `scripts/rebuild_inventory_snapshot_hash.py` 一个文件**，无业务代码变更、

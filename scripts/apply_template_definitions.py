@@ -58,6 +58,7 @@ try:
         DECISION_FIELDS,
         OVERLAYS_DIR,
         TemplateDefinitionError,
+        changed_decision_fields,
         decision_payload,
         diff_decision_payload,
         dimension_key,
@@ -229,6 +230,48 @@ async def _check(overlay_names: List[str]) -> int:
     return 1
 
 
+async def _sync_notes(db: Any, template_id: int, notes: Optional[str]) -> None:
+    """把定义文件里的 ``notes`` 同步到库里(投影后单独补一步)。
+
+    为什么需要单独一步
+    ------------------
+    :meth:`FieldMappingTemplateService.save_template` **不写 ``notes`` 列**
+    (它的参数里压根没有 ``notes``) ⇒ 投影完库里的 notes 仍是旧版本的内容
+    ⇒ 定义守卫 ``--check`` 永远报 notes 差异 ⇒ 守卫永远不绿。
+
+    而 ``notes`` 在 :data:`scripts.template_definitions.DECISION_FIELDS` 里
+    **参与比对** ⇒ 设计意图就是「notes 也要镜像」, 只是发布服务漏了这个参数。
+
+    为什么不改 ``save_template``
+    --------------------------
+    那个服务是**界面发布路径**也在用的(归档旧版本 + 插入新版本 + 家族投影,
+    同一个事务)。给它加参数会牵动界面发布的行为与事务边界。
+    notes 只是**决策说明文字**, 不参与任何运行时口径
+    (hash / 清单 / 漂移判定都不读它) ⇒ 用一条独立 UPDATE 补齐, 风险最小。
+
+    只在定义里有 notes 时才写
+    --------------------------
+    定义里没写 notes ⇒ 可能是漏写, 不该顺手把库里的运维备注抹掉
+    ⇒ 这种情况保持库内原值, 由差异守卫报出来交给人决定。
+
+    调用时机
+    ---------
+    * 发布了新版本 ⇒ 跟着补新版本的 notes;
+    * 差异**只有** notes ⇒ 原地补当前 published 模板的 notes, 不发新版本
+      (见 :func:`_apply`)。
+    """
+    if notes is None:
+        return
+
+    from sqlalchemy import text
+
+    await db.execute(
+        text("UPDATE core.field_mapping_templates SET notes = :notes WHERE id = :id"),
+        {"notes": notes, "id": template_id},
+    )
+    await db.commit()
+
+
 async def _apply(overlay_names: List[str], dry_run: bool) -> int:
     """把定义投影到数据库(发布新版本)。"""
     from backend.models.database import AsyncSessionLocal
@@ -278,6 +321,18 @@ async def _apply(overlay_names: List[str], dry_run: bool) -> int:
         service = FieldMappingTemplateService(db)
         for key, payload, row in plans:
             label = dimension_key_text(key)
+            if row is not None and changed_decision_fields(
+                payload, decision_payload(row)
+            ) == ["notes"]:
+                # 只差「说明文字」⇒ 原地补 notes, **不发布新版本**。
+                # notes 不参与任何运行时口径(hash / 清单 / 漂移判定都不读它),
+                # 为它发一个新版本只会让版本号无意义地膨胀。
+                await _sync_notes(db, int(row.id), payload.get("notes"))
+                print(
+                    f"[OK] 已同步 notes: {label} "
+                    f"(库内 id={row.id} v={row.version}, 未发布新版本)"
+                )
+                continue
             result = await service.save_template(
                 platform=payload["platform"],
                 data_domain=payload["data_domain"],
@@ -299,6 +354,7 @@ async def _apply(overlay_names: List[str], dry_run: bool) -> int:
                 base_template_id=getattr(row, "id", None),
             )
             print(f"[OK] 已投影 {label}: {result}")
+            await _sync_notes(db, int(result["template_id"]), payload.get("notes"))
 
     print("\n投影完成。可以用 --check 复验。")
     return 0

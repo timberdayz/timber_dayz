@@ -299,6 +299,25 @@ def diff_decision_payload(
     return differences
 
 
+def changed_decision_fields(
+    expected: Dict[str, Any],
+    actual: Dict[str, Any],
+) -> List[str]:
+    """返回「仓库定义」与「库内实例」之间**有差异的决策字段名**。
+
+    与 :func:`diff_decision_payload` 同源, 但给的是**字段名**而不是描述文本
+    ⇒ 调用方可以判断「差异是不是只在某个字段上」(例如只有 ``notes`` 不同),
+    而不必去解析描述字符串。
+    """
+    changed: List[str] = []
+    for name in DECISION_FIELDS:
+        left = _normalize_for_compare(expected.get(name))
+        right = _normalize_for_compare(actual.get(name))
+        if left != right:
+            changed.append(name)
+    return changed
+
+
 def validate_definition(payload: Dict[str, Any], *, source: str = "<memory>") -> None:
     """校验一份定义文件是否合法。非法就抛 :class:`TemplateDefinitionError`。"""
     if not isinstance(payload, dict):
