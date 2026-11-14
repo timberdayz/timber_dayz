@@ -20,6 +20,17 @@
 | 3 | 平台在巡店白名单 | `{miaoshou, shopee, tiktok}`；否则巡店面板**静默跳过** |
 | 4 | 已人工首登 | profile 内存在 Chromium 的 cookie 库（与采集侧同一判据） |
 | 5 | 出口 IP 已配置 | 主账号级 `extra_config['proxy']` 优先（**提示项**，当前未强制） |
+| 6 | 主账号启用状态 | `enabled=false` ⇒ **不参与巡店与采集**，首登 / 出口两项不适用 |
+
+**停用账号为什么不算**：口径与巡店面板一致（`where m.enabled = true`）。
+停用账号不巡店、不采集，也就永远不会被打开 —— 对它报「请先首登」是假警报
+（2026-11-14 实测：`虾皮巴西（东朗照明主体）` 已停用，却每次体检都报警）。
+`--all` 直接不列停用账号；显式 `--account-id` 点名一个停用账号时，
+输出「已停用 ⇒ 首登 / 出口两项不适用」。
+
+⚠️ 但**目录撞车检查仍把停用账号算进去**（`list_platform_accounts` 不过滤）：
+停用账号的 profile 目录还留在磁盘上，新账号用同样的净化名建号照样会
+共用同一份登录态。把停用账号从参照集合里拿掉，等于把这个隐患藏起来。
 
 ⚠️ 2026-11-14 起**不再检查「设备画像 / machine_id 隔离」**：平台读不到
 ``machine_id``，而硬件指纹在同型号机器上大量重复 ⇒ 检查它们没有意义。
@@ -35,7 +46,7 @@ python scripts/check_account_readiness.py --platform shopee --account-id hongxik
 # 检查一个**还没建**的候选 ID（只查 1/2/3 项）
 python scripts/check_account_readiness.py --candidate-id my_new_acc --platform shopee
 
-# 体检全部主账号
+# 体检全部主账号（**只含启用中的**）
 python scripts/check_account_readiness.py --all
 ```
 
@@ -241,6 +252,35 @@ def check_proxy(database_url: str, platform: str, account_id: str) -> Check:
     )
 
 
+def account_enabled(
+    database_url: str, platform: str, account_id: str
+) -> Optional[bool]:
+    """主账号的启用状态。查不到该账号时返回 ``None``。
+
+    口径与巡店面板一致（``scripts/pwcli_account_inventory.py`` 的
+    ``ACCOUNT_QUERY`` 里 ``where m.enabled = true``）：**停用账号不参与巡店、
+    不参与采集**，所以也不该参与就绪体检 —— 对一个永远不会打开的账号说
+    「请先首登」是假警报。
+    """
+    import sqlalchemy as sa
+
+    engine = sa.create_engine(database_url)
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.text(
+                """
+                select enabled
+                from core.main_accounts
+                where platform = :platform and main_account_id = :account_id
+                """
+            ),
+            {"platform": platform, "account_id": account_id},
+        ).fetchone()
+    if row is None:
+        return None
+    return bool(row[0])
+
+
 def run_checks(
     database_url: str,
     platform: str,
@@ -252,6 +292,24 @@ def run_checks(
         check_id_format(account_id, existing=True),
         check_platform(platform),
     ]
+
+    enabled = account_enabled(database_url, platform, account_id)
+    if enabled is None:
+        checks.append(Check(WARN, "主账号启用状态", "库里查不到该主账号"))
+        return checks
+    if not enabled:
+        # 停用账号：不参与巡店与采集 ⇒ 首登 / 出口两项**不适用**，
+        # 报「请先首登」是假警报（2026-11-14 实测：虾皮巴西账号停用却一直报警）。
+        checks.append(
+            Check(
+                WARN,
+                "主账号启用状态",
+                "已停用（enabled=false）⇒ 不参与巡店与采集；首登 / 出口两项不适用",
+            )
+        )
+        return checks
+    checks.append(Check(OK, "主账号启用状态", "已启用"))
+
     if include_runtime:
         checks.append(
             check_profile_collision(database_url, platform, account_id, existing=True)
@@ -273,6 +331,13 @@ def _print_checks(title: str, checks: List[Check]) -> bool:
 
 
 def list_all_accounts(database_url: str) -> List[Tuple[str, str]]:
+    """参与体检的主账号 —— **只含启用中的**。
+
+    口径与巡店面板一致（``scripts/pwcli_account_inventory.py``：
+    ``where m.enabled = true``）：停用账号不参与巡店、不参与采集，
+    所以也不该出现在体检清单里 —— 否则每次体检都对一个永远不会再打开的
+    账号报「请先首登」（2026-11-14 实测的假警报）。
+    """
     import sqlalchemy as sa
 
     engine = sa.create_engine(database_url)
@@ -282,6 +347,7 @@ def list_all_accounts(database_url: str) -> List[Tuple[str, str]]:
                 """
                 select platform, main_account_id
                 from core.main_accounts
+                where enabled = true
                 order by platform, main_account_id
                 """
             )
@@ -290,7 +356,14 @@ def list_all_accounts(database_url: str) -> List[Tuple[str, str]]:
 
 
 def list_platform_accounts(database_url: str, platform: str) -> List[str]:
-    """同平台其它主账号 ID —— 用于检测**真实目录撞车**。"""
+    """同平台其它主账号 ID —— 用于检测**真实目录撞车**。
+
+    ⚠️ 这里**故意不过滤** ``enabled``：撞车检查问的是「这个目录名已经被谁
+    占用了」，而不是「谁在运营」。停用账号的 profile 目录仍留在磁盘上
+    （Chromium profile 不随停用删除），新账号一旦用同样的净化名建号，
+    就会**共用同一份登录态** —— 哪怕那个账号现在是停用的、以后重新启用
+    也照样撞。把停用账号从参照集合里拿掉，等于把这个隐患藏起来。
+    """
     import sqlalchemy as sa
 
     engine = sa.create_engine(database_url)

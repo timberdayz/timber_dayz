@@ -19,7 +19,7 @@
 |---|---|---|---|---|
 | 1 | 生产机 `/opt/xihong_erp/.env.production.passwords.txt` 旧密钥副本待删 | 生产写操作 | 待拍板：须走发版流程或人工执行 | 归档文件「安全发现」节 |
 | 2 | 旧 `SECRET_KEY` / `JWT_SECRET_KEY` / `METABASE_API_KEY` 在**已下线旧环境**是否还活着 | 需业务确认 | 待确认（本次只比对了生产与本机） | 归档文件「安全发现」节 |
-| 3 | 4 项业务口径待拍板：`3c店` 冲突取舍 / 两个 disabled 主账号是否启用 / TikTok 三店改名归属（含疑似历史误录 `TK新加坡1店`）/ 10 个文件命中已停用账号 `shopee_sg_chenewei666_local` 是否回填 | 业务口径 | 待拍板（**原 5 项里的 `platform='验证码测试账号'` 脏行已于 2026-11-14 随迁移删除**） | 归档文件「批次 A / B / C」节 |
+| 3 | 4 项业务口径待拍板：`3c店` 冲突取舍 / **一个** disabled 主账号（`虾皮巴西（东朗照明主体）`，`enabled=false`）是否启用 / TikTok 三店改名归属（含疑似历史误录 `TK新加坡1店`）/ 10 个文件命中已停用账号 `shopee_sg_chenewei666_local` 是否回填 | 业务口径 | 待拍板（**原 5 项里的 `platform='验证码测试账号'` 脏行已于 2026-11-14 随迁移删除**）；**另记**：生产有 **26 条 `enabled=false` 的店铺行**挂在 3 个**启用中**的主账号下（越南 / 智利 / 秘鲁 / 泰国等站点）—— 采集侧两层都按 `enabled` 过滤 ⇒ 不会被采，但历史事实需留档 | 归档文件「批次 A / B / C」节 |
 | 4 | 账号浏览器环境 SSOT 收口：**代码与规范已落地**（2026-11-14 二次方向修订：不造账号差异 + 去 `HeadlessChrome` + locale/时区跟出口）；**剩资源缺口 G1**（库里代理 0 条 ⇒ 账号仍共用出口 IP） | 资源缺口 | 待采购代理资源并写入主账号 `extra_config['proxy']`；G2–G8 见本文件「已知缺口」表 | `docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md` + `...-closure-execution.md` |
 | 5 | `modules/apps/web_interface_manager` 健康检查持续失败（依赖的 `frontend_streamlit` 目录不存在） | 真实缺陷 | 批次 F-1 揭露；待修（本批未擅自改业务代码） | 本文件「批次 F」节 |
 | 6 | `mypy` 目前**没有任何门禁**（440 条动态 ORM 基类误报需先分层/豁免才可能升门禁） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
@@ -151,7 +151,8 @@ Walter 实际用了巡店面板后追问："既然硬件指纹改不了，那其
 | **跟出口自洽**：locale / 时区 / Accept-Language 跟随出口 IP 所在地区（现在 = 宿主；代理到位后按账号查） | 同上 `region_profile` | R8.2 |
 | 人工巡店 / 顺序采集 / 并行采集**三条路径同一套环境**；顺序路径沿用 profile 原生环境，并行路径视口统一 | `pwcli_native.py` / `runtime_session.py` / `executor_v2.py` | R8.3 |
 | 代理权威位上移**主账号级**，巡店与采集同源；配置坏了**显式失败**不静默直连 | 3 个 loader + `pwcli_account_inventory.py` | R8.4 |
-| 新增账号**前置体检**（5 项，只读：ID 规范 / 目录不撞车 / 平台白名单 / 已首登 / 已配出口） | `scripts/check_account_readiness.py` | — |
+| 新增账号**前置体检**（6 项，只读：ID 规范 / 目录不撞车 / 平台白名单 / 已首登 / 已配出口 / 主账号启用状态） | `scripts/check_account_readiness.py` | — |
+| 体检脚本与巡店面板**取同一批账号**（都只含启用中的）：**停用账号不再被报「请先首登」**（假警报）；但**目录撞车检查仍保留停用账号**（它的 profile 目录还在磁盘上，新号撞上照样共用登录态） | `scripts/check_account_readiness.py` + 3 条守护 | R8.4 |
 | 巡店面板**就绪可见**：15 秒轮询、**2 个**徽标（已首登 / 出口）、白名单排除账号**显式列出并写明原因** | `modules/utils/sessions/account_readiness.py` + 面板 `/api/accounts/readiness` + 前端 | — |
 | 面板**状态真源是浏览器进程**：窗口一关，状态立刻回写（此前只放锁、不改状态 ⇒ 永远显示 OPEN） | `scripts/pwcli_inspection_panel.py` `_watch_browser_process` | — |
 | **测试残留账号已删除**（主账号 9 → 7），走迁移、生产可执行 | `current_migrations/versions/20261230_drop_residual_test_accounts.py` | — |
@@ -167,7 +168,7 @@ Walter 实际用了巡店面板后追问："既然硬件指纹改不了，那其
 | 范围 | 结果 |
 |---|---|
 | `tests/test_account_browser_identity_contract.py`（原 `..._device_isolation_...`，已重写） | **19 passed** |
-| `tests/test_account_readiness_contract.py`（已重写） | **15 passed** |
+| `tests/test_account_readiness_contract.py`（已重写；2026-11-14 补停用账号口径 3 条守护） | **16 passed** |
 | `tests/test_account_proxy_source_contract.py` | **4 passed** |
 | 浏览器环境实测（独立 profile 指纹对比 / headless UA / viewport 与 screen 关系） | 见计划文档「设备指纹实测」 |
 | 生产上线 | **v7.28.0 已发布并验收**（见本文件「发布证据（v7.28.0，2026-11-14）」） |

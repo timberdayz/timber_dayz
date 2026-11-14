@@ -13,11 +13,17 @@
 这类判据（2026-11-14 方向修订：平台读不到 machine_id，硬件指纹同型号机器
 大量重复 ⇒ 检查它们没有意义，只会让面板显示"没隔离 = 有风险"的假警报）。
 
+再锁一条**口径对齐**守护（2026-11-14）：体检清单与巡店面板必须取**同一批**
+账号（都只含启用中的）—— 停用账号不参与巡店、不参与采集，对它报「请先首登」
+是假警报；但**目录撞车检查仍要保留停用账号**（profile 目录还在磁盘上）。
+
 依据：``docs/guides/COLLECTION_SESSION_LIFECYCLE.md``（R8）。
 """
 
 from __future__ import annotations
 
+import inspect
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -28,7 +34,7 @@ from modules.utils.sessions.account_readiness import (
     build_profile_state,
     profile_contains_state,
 )
-from scripts.pwcli_account_inventory import MainAccountRow
+from scripts.pwcli_account_inventory import ACCOUNT_QUERY, MainAccountRow
 from scripts.pwcli_inspection_panel import PanelState, build_app
 
 
@@ -149,6 +155,83 @@ def test_cli_readiness_script_and_panel_share_the_same_snapshot_builder() -> Non
         "from modules.utils.sessions.account_readiness import build_account_readiness"
         in panel_source
     )
+
+
+# ---------------------------------------------------------------------------
+# 停用账号的取数口径（2026-11-14 修假警报时补上）
+# ---------------------------------------------------------------------------
+
+
+def _cli_function_source(name: str) -> str:
+    """体检脚本里某个函数的源码 —— 避免用整文件字符串匹配做脆弱断言。"""
+    import scripts.check_account_readiness as cli
+
+    return inspect.getsource(getattr(cli, name))
+
+
+def _cli_sql_of(name: str) -> str:
+    """体检脚本里某个函数内的 SQL 字面量（小写）。
+
+    只看 SQL 本身、**不看 docstring** —— 否则注释里提一句 ``enabled``
+    就会被"源码里没有 enabled"这种断言误伤。
+    """
+    match = re.search(r'sa\.text\(\s*"""(.*?)"""', _cli_function_source(name), re.S)
+    assert match is not None, "{0} 里找不到 SQL 字面量".format(name)
+    return match.group(1).lower()
+
+
+def test_cli_and_panel_use_the_same_enabled_filter() -> None:
+    """体检清单与巡店面板必须**取同一批账号**（都只含启用中的）。
+
+    口径漂移的后果很具体：面板只列启用账号、体检却把停用账号也拉进来，
+    就会对着一个永远不会再打开的账号报「profile 目录还不存在 ⇒ 请先首登」
+    —— 2026-11-14 实测的假警报（``虾皮巴西（东朗照明主体）`` 已停用却一直报警）。
+    """
+    panel_sql = ACCOUNT_QUERY.lower()
+    cli_sql = _cli_sql_of("list_all_accounts")
+
+    assert "enabled = true" in panel_sql, "巡店面板的取数 SQL 应当只含启用账号"
+    assert "enabled = true" in cli_sql, "体检清单的取数 SQL 应当只含启用账号"
+
+
+def test_cli_collision_reference_keeps_disabled_accounts() -> None:
+    """**减法守护的反面**：目录撞车检查**必须**保留停用账号。
+
+    停用账号的 profile 目录还留在磁盘上（Chromium profile 不随停用删除），
+    新账号用同样的净化名建号照样会共用同一份登录态 —— 哪怕那个账号现在
+    是停用的、以后重新启用也照样撞。把停用账号从参照集合里拿掉，
+    等于把这个隐患藏起来。
+
+    ⇒ 「体检清单过滤停用」与「撞车参照保留停用」是**两件事**，不能一起过滤。
+    """
+    collision_sql = _cli_sql_of("list_platform_accounts")
+
+    assert (
+        "enabled" not in collision_sql
+    ), "撞车参照集合过滤掉了停用账号 ⇒ 新号与停用账号共用目录时不会被拦下"
+
+
+def test_cli_does_not_ask_a_disabled_account_to_log_in(monkeypatch) -> None:
+    """停用账号不得再报「请先首登」—— 首登 / 出口两项对它**不适用**。"""
+    import scripts.check_account_readiness as cli
+
+    monkeypatch.setattr(cli, "account_enabled", lambda *args, **kwargs: False)
+
+    def _must_not_be_called(*args, **kwargs):
+        raise AssertionError("停用账号不该再查首登 / 出口 / 目录撞车")
+
+    monkeypatch.setattr(cli, "check_login_state", _must_not_be_called)
+    monkeypatch.setattr(cli, "check_proxy", _must_not_be_called)
+    monkeypatch.setattr(cli, "check_profile_collision", _must_not_be_called)
+
+    checks = cli.run_checks(
+        "postgresql://unused/unused", "shopee", "虾皮巴西（东朗照明主体）"
+    )
+    titles = [check.title for check in checks]
+
+    assert "已人工首登" not in titles, "停用账号不该被要求首登"
+    assert "出口 IP 已配置" not in titles, "停用账号不参与采集，出口项不适用"
+    assert "主账号启用状态" in titles, "应当明确说明该账号已停用"
 
 
 # ---------------------------------------------------------------------------
