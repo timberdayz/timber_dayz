@@ -529,6 +529,8 @@ inventory 域只有 6 条，`importance` 全 `optional`，`consumer` 只有 `bus
 
 **验收**：`SELECT DISTINCT consumer FROM core.semantic_field_contracts WHERE data_domain='inventory'`
 返回 4 个；治理看板能查到库存的影响面。
+（⚠️ 实查：**本仓库没有任何按 consumer 查询契约表的看板** ⇒ 后半句改为
+「`scripts/query_semantic_contract_impact.py` 能查到库存的影响面」，详见 §11.4。）
 
 **风险**：低（纯数据，可回滚）。
 
@@ -660,6 +662,23 @@ inventory 域只有 6 条，`importance` 全 `optional`，`consumer` 只有 `bus
 | 15 | 全量回归 | `pytest backend/tests` | 无新增失败 |
 | 16 | **SSOT 达成度**（体检收口） | 人工检查 + 守护测试 | 身份字段集合声明处 **3 → 1**（域默认表零引用）；指纹口径声明处 **2 → 1**（规格无漂移表述）；27/27 维度有机器检查；版本化 / 指纹 / 守护测试 / 定义资产 / 翻译层**一项未动**（§1.4） |
 
+### 7.1 实测结果（2026-11-15，开发库 3855 行）
+
+| # | 实测 | 结论 |
+|---|---|---|
+| 1 | 副本 vs 正本：`EXCEPT ALL` 双向差集 | **0 / 0** ⇒ 逐字一致 |
+| 2 | 行数：正本 / 副本 / `mart.inventory_snapshot_history` / `mart.inventory_current` / `mart.inventory_state` | **3855 / 3855 / 3855 / 1122 / 1232**（与目标完全一致） |
+| 3 | 读副本 vs 读正本 | **0.87 ms vs 217 ms**（约 250 倍；目标 ≤5 ms） |
+| 4 | `REFRESH MATERIALIZED VIEW` 计时 | **1.05 ~ 1.27 秒**（目标 ≤1 秒，**略超 5%~30%**）⇒ 见下注 |
+| 5 | 刷新链路 | 刷新计划 `status=success`、`failed_targets` 为空；副本行数与正本一致；状态层全量重算 `state_key_count=1232` |
+| 6 | 形状守卫 | 列集漂移 ⇒ **报错停下**（探针 schema 实跑）；列集一致 ⇒ 放行 |
+| 13 | consumer 登记 | inventory 域 **4 个 consumer × 6 键 = 24 行**；其中 `required` **0** 条（不新增阻断） |
+
+**关于第 4 项（刷新成本）**：REFRESH 要全量重算正本（每行跑查表函数）+ 写物化存储 + 重建索引，
+比「只读」重一个量级。1 秒出头**不影响业务**（刷新是采集后的离线动作，读路径才是毫秒级），
+但确实高于原定的「≤1 秒」目标 ⇒ §6 的 **A2（集合函数改写）** 从「可选」升级为
+「下次优化时优先」，**本次不做**（预发布期不做大范围改写）。
+
 ---
 
 ## 8. 风险登记
@@ -713,3 +732,72 @@ inventory 域只有 6 条，`importance` 全 `optional`，`consumer` 只有 `bus
 | 命名体系统一 | 清单两种形态并存 | **立项**：建「原始表头 ↔ 标准语义键」对照表 |
 | `resolve_alias` 优先级口径 | 654 万次扫描；SQL 取值与 Python 推断**各一套规则**（口径 7） | **立项**：先抽单一表达式，再提速；顺带补一条「两套规则不许漂移」的守护 |
 | 物理列通路 | 26 列全 NULL / 3 列缺失 / 1 列重复 | **已拍板弃用**（B6）：关新写入、留存量列、标注废弃；表结构差异（3 列缺失 / 1 列重复）不在本次修 |
+
+---
+
+## 11. 实施后修正（2026-11-15 开发库实跑）
+
+本节记录**实施过程中与上文设计不一致的地方**及原因。文档必须与实现一致，
+否则下一次「照规格改实现」会再踩一遍同样的坑（这正是 B4 要修的病）。
+
+### 11.1 迁移**不**重建消费方视图；视图切换交给既有机制
+
+**上文写法**：迁移里用 `sql/` 下的资产文件重建两个消费方视图（照抄 `20261110` 先例）。
+
+**为什么改**：资产文件里的 `mart.inventory_snapshot_history` 会 select
+`observed_at` / `checklist_sales_*`，而这些列**不在迁移链里** ——
+基线 `current_schema_20260805` 是 2026-08-05 的静态快照，它们只在生产/开发库上
+由部署期的视图重建落地。
+⇒ 迁移里执行**当前**资产文件时，正本视图的列集可能还是旧的 ⇒
+`column "observed_at" does not exist` ⇒ **整条迁移失败**（空库预演实测复现）。
+
+**改成**：迁移只做「建物化视图 + 2 个索引」；视图切换交给既有机制
+（部署期 `scripts/rebuild_views.py --all-plain-views` —— 清单 = refresh registry
+∩ 库里已存在的普通视图 ⇒ 必然包含这两个视图；以及刷新计划的依赖顺序）。
+迁移因此**不依赖任何视图的当前列集** ⇒ 空库预演与生产都能过。
+
+### 11.2 形状守卫必须用 `pg_attribute`，且必须挂在**刷新路径**上
+
+**上文写法**：资产文件里用 `information_schema.columns` 比列集。
+
+**两个坑**（都是实跑踩出来的）：
+
+1. `information_schema.columns` **不含物化视图**（relkind='m' 不在它的范围内）
+   ⇒ 副本的列集永远取不到（NULL）⇒ 守卫会把「一致」也判成「不一致」
+   ⇒ 副本从此刷不动。**改用 `pg_attribute`**（`attnum > 0 AND NOT attisdropped`，
+   两侧口径一致）。
+2. 刷新计划对**已存在**的物化视图走的是**直接 `REFRESH`**（不执行资产文件，
+   理由见 `refresh_runner._refresh_materialized_view` 的注释：其它 MV 资产带
+   `DROP ... CASCADE`，每次刷新都执行会连带删下游、长时间持锁）
+   ⇒ **只把守卫写在资产文件里 = 守卫平时根本不生效**。
+   **改**：在 `refresh_runner` 的 REFRESH **之前**比一次列集，源视图从资产文件解析
+   （`AS SELECT * FROM <源>` ⇒ 严格同构才守卫；列裁剪型 MV 不匹配 ⇒ 不误伤）。
+   开发库实测：`products` / `analytics` / `orders` / `inventory` 四对副本与源视图
+   列集全部一致 ⇒ 守卫放行，不误伤。
+
+### 11.3 `data_sync` 读的是 resolver **顶层**的 `deduplication_fields`
+
+resolver（`template_family_service._resolve_payload`）返回的
+`active_version.deduplication_fields` **不是**最终权威值：变体接管 legacy 模板时，
+它会用 **legacy 模板行**的字段覆盖版本上的值，并放在**顶层** `deduplication_fields`。
+
+⇒ 只读 `active_version` 会拿到旧值/空值 ⇒ 在 B1「漏配即显式失败」的新语义下，
+会把**本来配好了**的模板误判成漏配 ⇒ 生产入库被拦。
+**改**：优先读顶层，缺失时回落到 `active_version`（兼容旧调用方）。
+
+### 11.4 B5 的「治理看板」不存在 ⇒ 交付为**只读查询脚本**
+
+上文验收写的是「治理看板能查到库存的影响面」。实查：**全仓没有任何按 consumer
+查询契约表的看板或接口** —— `semantic_field_contract_service._load_contracts_from_db`
+只服务于**判定链**（按 consumer 过滤），而判定链全仓只传 `business_overview`。
+
+⇒ 补登记的 3 个 consumer 是**惰性登记**（无人查询 ⇒ 零功能影响）。
+⇒ 「影响面可查」这条验收改由 `scripts/query_semantic_contract_impact.py` 承担
+（只读脚本，按域/语义键/consumer 查，并打印代码锚点）。
+
+### 11.5 其它实跑修正
+
+| 项 | 问题 | 修正 |
+|---|---|---|
+| alembic `revision` id | `version_num` 列是 `String(64)` ⇒ 67 字符的 revision id 在 upgrade 时报 `StringDataRightTruncation` | 缩到 45 字符（仓库最长先例正好 64） |
+| 既有 9 个测试 | B1「漏配即失败」让**夹具没配去重字段**的既有测试炸了（它们测的是别的行为） | 补齐夹具的「模板配了去重字段」前提，**断言未改**；新语义由 `test_deduplication_fields_ssot.py` 单独守住 |
