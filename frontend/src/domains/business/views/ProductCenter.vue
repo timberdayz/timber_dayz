@@ -535,16 +535,6 @@
               </div></template
           ></el-table-column
           >
-          <el-table-column label="优惠券（商家承担）" width="110" class-name="seg-input" label-class-name="seg-input"
-            ><template #default="{ row }"
-              ><el-input-number
-                v-model="row.seller_coupon_amount"
-                :min="0"
-                :controls="false"
-                size="small"
-                @input="scheduleOperatingPreview(row)" /></template
-          ></el-table-column
-          >
           <el-table-column label="目标ROI" width="135" class-name="seg-input" label-class-name="seg-input"
             ><template #default="{ row }"
               ><div class="rate-cell"
@@ -558,6 +548,9 @@
               >
               <el-tag v-if="targetRoiBelowBreakEven(row)" size="small" type="danger"
                 >低于保本线</el-tag
+              >
+              <el-tag v-if="targetRoiAboveCeiling(row)" size="small" type="warning"
+                >超平台上限</el-tag
               >
               <el-tooltip placement="top" :content="targetRoiTooltip(row)">
                 <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
@@ -576,6 +569,9 @@
               >
               <el-tag v-if="roiVerdict(row)" size="small" :type="roiVerdict(row).type">{{
                 roiVerdict(row).label
+              }}</el-tag>
+              <el-tag v-if="attributionWarning(row)" size="small" type="warning">{{
+                attributionWarning(row)
               }}</el-tag>
               <el-tooltip placement="top" :content="roiVerdictTooltip(row)">
                 <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
@@ -601,7 +597,7 @@
               }}</span>
               <el-tooltip
                 placement="top"
-                content="扣掉采购、物流、仓储、贴单、平台佣金、达人佣金、货损、退货后的占比。分母是商家实收（售价−优惠券），与平台 GMV 同一口径"
+                content="扣掉采购、物流、仓储、贴单、平台佣金、达人佣金、货损、退货后的占比。分母是商家实收（= 测算售价），与平台 GMV 同一口径"
               >
                 <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
               </el-tooltip></template
@@ -676,14 +672,14 @@
           ></el-table-column>
           <el-table-column label="平台佣金率" width="100" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
           <el-table-column label="平台佣金" width="105" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
-          <el-table-column label="达人佣金" width="120" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }"><div class="rate-cell"><span>{{ percent(row.preview?.expected?.creator_commission_rate) }}</span></div>{{ money(row.preview?.expected?.creator_commission) }}</template></el-table-column>
+          <el-table-column label="达人佣金" width="120" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }"><div class="rate-cell"><span>{{ percent(row.preview?.expected?.creator_commission_rate) }}</span></div>{{ money(row.preview?.expected?.creator_commission) }}<div v-if="creatorCommissionHint(row)" class="price-floor-hint">{{ creatorCommissionHint(row) }}</div></template></el-table-column>
           <el-table-column label="预计广告费用" width="105" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ money(row.preview?.expected?.ad_cost) }}</template></el-table-column>
           <el-table-column label="物流货损率（SPU）" width="110" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
           <el-table-column label="退货损失率（SPU）" width="130" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.return_loss_rate) }}</template></el-table-column>
           <el-table-column label="参考成本利润" width="120" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }">{{
               money(row.preview?.expected?.profit)
-            }}</template></el-table-column
+            }}<div v-if="adCostMissingHint(row)" class="price-floor-hint">{{ adCostMissingHint(row) }}</div></template></el-table-column
           >
           <el-table-column label="利润率" width="100" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }">{{
@@ -2240,7 +2236,6 @@ const loadOperatingProfiles = async () => {
     operatingProfiles.value = (response.data || []).map((row) => ({
       ...row,
       expected_selling_price: row.expected_selling_price ?? row.reference_selling_price,
-      seller_coupon_amount: row.seller_coupon_amount ?? 0,
       expected_ad_rate_pct: toPercent(row.expected_ad_rate ?? 0),
       // 目标 ROI 预填：它是运营的**当前意图**，存在经营档案里 ⇒ 上一轮填的值继续带着。
       // ⚠️ 平台报告 ROI **不预填**：它是"某一次投放"的历史事实，预填了再存进新一版
@@ -2319,8 +2314,12 @@ const operatingPayload = (row) => ({
   transport_type: operatingQuery.transport_type,
   competitor_price: row.competitor_price ?? null,
   expected_selling_price: row.expected_selling_price ?? null,
-  seller_coupon_amount: row.seller_coupon_amount ?? 0,
-  expected_ad_rate: fromPercent(row.expected_ad_rate_pct, 0),
+  // 批次 2 P2：主口径下**不把广告分成率发上去**。
+  // ⚠️ 发 0 会被后端当成「这个品不投广告」⇒ 广告费 0 ⇒ 利润看着很美，
+  //    用的却不是运营刚做的这次决策（静默换口径）。
+  //    发 null 才会让系统如实说「广告费不可算 ⇒ 利润空白」。
+  //    老口径只在运营**主动打开逃生口**（广告分成率）时才用。
+  expected_ad_rate: row.adRateEscapeUsed ? fromPercent(row.expected_ad_rate_pct, 0) : null,
   // --- ROI 投放输入（阶段 2.2）---
   // 目标 ROI：运营打算投到多少。留空 = 不参与保本 ROI 护栏。
   target_roi: row.target_roi ?? null,
@@ -2337,7 +2336,7 @@ const handleOperatingSpuChange = () => {
   clearOperatingSkuOutsideSpu();
   resetOperatingPage();
 };
-// 测算售价 / 优惠券 / 广告分成率一改，下面的利润就该跟着变。
+// 测算售价 / 广告分成率一改，下面的利润就该跟着变。
 // el-input-number 的 change 事件要等失焦或回车才触发，
 // 运营在格子里打完价直接看下一行的利润，就会看到**上一次的旧利润**。
 // 用 input 事件 + 每行 400ms 防抖：边打边更新，又不会每个键都打一次接口。
@@ -3113,6 +3112,32 @@ const targetRoiBelowBreakEven = (row) => {
   if (row.target_roi == null || breakEven == null) return false;
   return Number(row.target_roi) < Number(breakEven);
 };
+// 批次 2 P1：目标 ROI 超平台可填上限（TikTok 20 / Shopee 50）。
+// 平台后台根本不让填更大的数 ⇒ 保存时会被后端拦下来，表格里要**提前**标红。
+const targetRoiAboveCeiling = (row) => {
+  const ceiling = row.target_roi_ceiling;
+  if (row.target_roi == null || ceiling == null) return false;
+  return Number(row.target_roi) > Number(ceiling);
+};
+// 批次 2 P6：三色判定里的「达标」很可能是**归因虚高** ——
+// 平台归因窗口把自然流量和达人带货也算进归因 GMV。
+// ⚠️ 这条警示必须**看得见**，不能只藏在 tooltip 里（藏起来 = 没人看见）。
+const attributionWarning = (row) => {
+  const verdict = roiVerdict(row);
+  if (!verdict || verdict.level !== "green") return "";
+  return "含自然/达人归因";
+};
+// 批次 2 P2/P3：广告费算不出来时，利润空白必须说清为什么空白。
+const adCostMissingHint = (row) => {
+  const reasons = row.preview?.expected?.ad_cost_missing_reasons || [];
+  if (!reasons.length) return "";
+  if (reasons.includes("missing_operating_profile")) return "未配置经营档案";
+  if (reasons.includes("missing_target_roi")) return "未填目标 ROI，广告费不可算";
+  return "广告费不可算";
+};
+// 批次 2 P5：达人佣金率没配 ⇒ 按 0 计 ⇒ 利润被高估，必须标出来。
+const creatorCommissionHint = (row) =>
+  row.creator_commission_source === "assumed_zero" ? "未配置，按 0 计" : "";
 // --- 广告分成率（高级逃生口）与目标 ROI 的口径切换（阶段 3）---
 //
 // 两个口径说的是同一件事：广告费用占多少。
@@ -3139,8 +3164,12 @@ const onTargetRoiInput = (row) => {
 const targetRoiTooltip = (row) => {
   const lines = ["运营打算投到的 ROI（商家实收 ÷ 广告费，与平台后台同一把标尺）"];
   const breakEven = row.preview?.expected?.break_even_roi;
+  if (row.target_roi_ceiling != null) {
+    lines.push(`平台可填上限 ${row.target_roi_ceiling}（超了平台后台不让填，保存会被拦）`);
+  }
   if (row.target_roi == null) {
     lines.push("留空 = 不参与保本 ROI 护栏");
+    lines.push("留空时广告费**不可算**（不会退回广告分成率口径），利润会空白");
     return lines.join("\n");
   }
   if (breakEven == null) {

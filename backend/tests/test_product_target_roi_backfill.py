@@ -37,7 +37,6 @@ def _inputs(**overrides):
     base = dict(
         expected_selling_price=Decimal("100"),
         competitor_price=None,
-        seller_coupon_amount=Decimal("0"),
         purchase_cost=Decimal("30"),
         expected_logistics_cost=Decimal("20"),
         expected_storage_cost=Decimal("10"),

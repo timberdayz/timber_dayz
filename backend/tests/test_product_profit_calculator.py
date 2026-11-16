@@ -58,7 +58,6 @@ def test_bill_confirmation_requires_sku_line_costs_to_match_header_total():
 def test_baseline_profit_prefers_confirmed_logistics_cost_over_assumption():
     result = build_baseline_profit(
         selling_price=Decimal("100"),
-        coupon_amount=Decimal("10"),
         default_purchase_cost=Decimal("20"),
         confirmed_logistics_cost=Decimal("15"),
         assumption_logistics_cost=Decimal("30"),
@@ -70,7 +69,9 @@ def test_baseline_profit_prefers_confirmed_logistics_cost_over_assumption():
     assert result["logistics_cost"] == Decimal("15.00")
     assert result["logistics_cost_source"] == "confirmed_logistics_bill"
     assert result["purchase_cost_source"] == "sku_default_purchase_cost"
-    assert result["estimated_contribution_profit"] == Decimal("34.70")
+    # 商家实收 = 售价（不再二次扣券）：100 − (20 + 15 + 5 + 10 平台费 + 5 退货 + 2 货损) = 43
+    assert result["net_revenue"] == Decimal("100.00")
+    assert result["estimated_contribution_profit"] == Decimal("43.00")
 
 
 def test_sku_create_accepts_default_purchase_cost_fields():
@@ -103,7 +104,6 @@ def _preview(**overrides):
     payload = {
         "expected_selling_price": Decimal("70"),
         "competitor_price": None,
-        "seller_coupon_amount": Decimal("2"),
         "purchase_cost": Decimal("23"),
         "expected_logistics_cost": Decimal("0.38"),
         "expected_storage_cost": Decimal("0"),

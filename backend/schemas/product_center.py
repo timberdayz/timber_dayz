@@ -1024,7 +1024,6 @@ class ProfitPreviewRequest(BaseModel):
     sku_id: int = Field(gt=0)
     platform_code: Optional[str] = Field(default=None, max_length=32)
     selling_price: float = Field(ge=0)
-    coupon_amount: float = Field(default=0, ge=0)
     warehouse_code: Optional[str] = None
     transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
 
@@ -1036,7 +1035,6 @@ class SkuOperatingProfileCreateRequest(BaseModel):
     warehouse_name: Optional[str] = Field(default=None, max_length=256)
     transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     selling_price: Optional[float] = Field(default=None, ge=0)
-    default_coupon_amount: Optional[float] = Field(default=None, ge=0)
     expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
     status: str = Field(default="active", pattern=r"^(active|inactive)$")
@@ -1048,7 +1046,6 @@ class SkuOperatingProfileUpdateRequest(BaseModel):
     warehouse_name: Optional[str] = Field(default=None, max_length=256)
     transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     selling_price: Optional[float] = Field(default=None, ge=0)
-    default_coupon_amount: Optional[float] = Field(default=None, ge=0)
     expected_logistics_cost: Optional[float] = Field(default=None, ge=0)
     expected_storage_cost: Optional[float] = Field(default=None, ge=0)
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
@@ -1092,7 +1089,6 @@ class SkuOperatingProfileResponse(SkuOperatingProfileCreateRequest):
 
 class SkuOperatingProfitRequest(BaseModel):
     selling_price: Optional[float] = Field(default=None, ge=0)
-    coupon_amount: Optional[float] = Field(default=None, ge=0)
     warehouse_code: Optional[str] = None
     transport_type: Optional[str] = Field(default=None, pattern=r"^(sea|air|rail)$")
     assumption_version: Optional[str] = Field(default=None, min_length=1, max_length=64)
@@ -1166,8 +1162,10 @@ class PlatformSkuProfitPreviewRequest(BaseModel):
     transport_type: str = Field(pattern=r"^(sea|air|rail)$")
     competitor_price: Optional[float] = Field(default=None, ge=0)
     expected_selling_price: Optional[float] = Field(default=None, gt=0)
-    seller_coupon_amount: float = Field(default=0, ge=0)
-    expected_ad_rate: float = Field(default=0, ge=0, le=1)
+    # 广告分成率（老口径逃生口）：**默认 None，不是 0**。
+    # ⚠️ 0 会被当成「这个品不投广告」⇒ 广告费 0 ⇒ 利润看着很美；
+    #    None 才会让系统如实说「广告费不可算，利润空白」（批次 2 P2）。
+    expected_ad_rate: Optional[float] = Field(default=None, ge=0, le=1)
     # --- ROI 投放输入（阶段 2.2）---
     # 目标 ROI：运营打算投到多少。> 0 才有效；不填 = 不参与保本 ROI 护栏。
     target_roi: Optional[float] = Field(default=None, gt=0)
@@ -1201,7 +1199,6 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     # 测算售价来源（阶段 1）：'user_input' / 'sku_reference' / 'profile'
     expected_selling_price_source: Optional[str] = None
     competitor_price: Optional[float] = None
-    seller_coupon_amount: Optional[float] = None
     expected_ad_rate: Optional[float] = None
     # --- ROI 投放输入（阶段 2.2）---
     # 目标 ROI：运营的当前意图，存经营档案 ⇒ 列表回带供前端预填。
@@ -1235,6 +1232,14 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     reference_cost_missing_reasons: list[str] = Field(default_factory=list)
     reference_logistics_missing_reasons: list[str] = Field(default_factory=list)
     reference_storage_missing_reasons: list[str] = Field(default_factory=list)
+    # --- 批次 2：输入缺失清单（P2 / P3 / P5）---
+    # 「缺哪些**输入**」与上面的「缺哪些**成本规则**」是两回事，分开列：
+    #   missing_operating_profile      没有经营档案（这一行还没配过）
+    #   missing_target_roi             没填目标 ROI ⇒ 广告费不可算 ⇒ 利润空白
+    #   missing_creator_commission_rate 达人佣金率没配（按 0 计，利润偏乐观）
+    missing_input_reasons: list[str] = Field(default_factory=list)
+    # 达人佣金率的来源：'sku' / 'platform_default' / 'assumed_zero'（按 0 计）
+    creator_commission_source: Optional[str] = None
     preview: Optional[dict] = None
     currency: str = "CNY"
     # --- SKU 定价底线 ---
@@ -1306,7 +1311,6 @@ class ProfitEstimateCreateRequest(BaseModel):
     assumption_version: str = Field(min_length=1, max_length=64)
     scenario: str = Field(default="base", pattern=r"^base$")
     selling_price: Optional[float] = Field(default=None, ge=0)
-    coupon_amount: Optional[float] = Field(default=None, ge=0)
     purchase_cost: Optional[float] = Field(default=None, ge=0)
     logistics_cost: Optional[float] = Field(default=None, ge=0)
     storage_cost: Optional[float] = Field(default=None, ge=0)

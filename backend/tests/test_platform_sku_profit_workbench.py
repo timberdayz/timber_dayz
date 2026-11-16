@@ -17,12 +17,15 @@ def test_workbench_models_store_reference_price_measurement_and_dual_basis():
         "selling_price_source",
         "selling_price_confirmed_at",
     } <= sku_columns
+    # 经营档案存的是「这个品在这个平台这个仓怎么卖」的场景值。
+    # ⚠️ ``seller_coupon_amount`` 是 2026-11-16 口径归一前的遗留列：数据库里保留
+    #    （不动历史数据），但商品中心链路**不再读写它**，也不参与任何计算。
     assert {
         "competitor_price",
         "expected_selling_price",
-        "seller_coupon_amount",
         "expected_ad_rate",
     } <= profile_columns
+    assert "seller_coupon_amount" in profile_columns  # 遗留列：保留但已废弃
     assert {
         "calculation_basis",
         "expected_ad_cost",
@@ -36,7 +39,6 @@ def test_expected_profit_uses_ad_rate_and_ignores_competitor_price():
     result = build_platform_profit_preview(
         expected_selling_price=Decimal("100"),
         competitor_price=Decimal("80"),
-        seller_coupon_amount=Decimal("10"),
         purchase_cost=Decimal("30"),
         expected_logistics_cost=Decimal("8"),
         expected_storage_cost=Decimal("2"),
@@ -48,13 +50,12 @@ def test_expected_profit_uses_ad_rate_and_ignores_competitor_price():
         damage_rate=Decimal("0.02"),
     )
 
-    # expected_ad_rate 的分母是**广告前利润**，不是收入（与 ERP docstring / 命名层契约 §3.6 一致）
-    #   revenue   = 100 - 10 = 90
-    #   pre_ad    = 90 - (30 采购 + 8 物流 + 2 仓储 + 0 贴单 + 9 平台费 + 0 达人佣金 + 2.70 退货 + 1.80 货损) = 36.50
-    #   ad_cost   = 36.50 × 0.10 = 3.65
-    #   profit    = 36.50 - 3.65 = 32.85
-    assert result["expected"]["ad_cost"] == Decimal("3.65")
-    assert result["expected"]["profit"] == Decimal("32.85")
+    # 商家实收 = 测算售价 = 100（2026-11-16 口径归一：不再二次扣券）
+    #   pre_ad    = 100 - (30 采购 + 8 物流 + 2 仓储 + 0 贴单 + 10 平台费 + 0 达人佣金 + 3 退货 + 2 货损) = 45.00
+    #   ad_cost   = 45.00 × 0.10 = 4.50
+    #   profit    = 45.00 - 4.50 = 40.50
+    assert result["expected"]["ad_cost"] == Decimal("4.50")
+    assert result["expected"]["profit"] == Decimal("40.50")
     assert result["expected"]["competitor_price_difference"] == Decimal("20.00")
 
 
@@ -67,7 +68,6 @@ def test_label_fee_absent_is_treated_as_zero_not_as_missing_input():
     result = build_platform_profit_preview(
         expected_selling_price=Decimal("100"),
         competitor_price=None,
-        seller_coupon_amount=Decimal("10"),
         purchase_cost=Decimal("30"),
         expected_logistics_cost=Decimal("8"),
         expected_storage_cost=Decimal("2"),
@@ -81,7 +81,7 @@ def test_label_fee_absent_is_treated_as_zero_not_as_missing_input():
     )
 
     assert result["expected"]["profit"] is not None
-    assert result["expected"]["profit"] == Decimal("32.85")
+    assert result["expected"]["profit"] == Decimal("40.50")
     assert result["actual_recost"]["completeness"] == "estimated"
     # 原始值保持 None（前端可据此显示"贴单费未配置"），并显式标出"按 0 计"这个假设
     assert result["expected"]["label_fee"] is None
@@ -93,7 +93,6 @@ def test_label_fee_configured_is_deducted_from_pre_ad_profit():
     result = build_platform_profit_preview(
         expected_selling_price=Decimal("100"),
         competitor_price=None,
-        seller_coupon_amount=Decimal("10"),
         purchase_cost=Decimal("30"),
         expected_logistics_cost=Decimal("8"),
         expected_storage_cost=Decimal("2"),
@@ -106,17 +105,16 @@ def test_label_fee_configured_is_deducted_from_pre_ad_profit():
         damage_rate=Decimal("0.02"),
     )
 
-    # pre_ad = 36.50 - 2 = 34.50 ; ad = 3.45 ; profit = 31.05
+    # pre_ad = 45.00 - 2 = 43.00 ; ad = 4.30 ; profit = 38.70
     assert result["expected"]["label_fee"] == Decimal("2.00")
     assert result["expected"]["label_fee_source"] == "warehouse_rule"
-    assert result["expected"]["profit"] == Decimal("31.05")
+    assert result["expected"]["profit"] == Decimal("38.70")
 
 
 def test_actual_recost_falls_back_to_expected_storage_and_is_mixed():
     result = build_platform_profit_preview(
         expected_selling_price=Decimal("100"),
         competitor_price=None,
-        seller_coupon_amount=Decimal("10"),
         purchase_cost=Decimal("30"),
         expected_logistics_cost=Decimal("8"),
         expected_storage_cost=Decimal("2"),
@@ -140,7 +138,6 @@ def test_recost_without_any_actual_cost_has_no_cost_variance():
     result = build_platform_profit_preview(
         expected_selling_price=100,
         competitor_price=None,
-        seller_coupon_amount=0,
         purchase_cost=30,
         expected_logistics_cost=8,
         expected_storage_cost=2,
@@ -160,7 +157,6 @@ def test_missing_reference_cost_does_not_become_zero_profit_input():
     result = build_platform_profit_preview(
         expected_selling_price=100,
         competitor_price=None,
-        seller_coupon_amount=0,
         purchase_cost=30,
         expected_logistics_cost=None,
         expected_storage_cost=2,
@@ -206,7 +202,6 @@ def test_preview_exposes_pre_ad_profit_and_roi_metrics():
     result = build_platform_profit_preview(
         expected_selling_price=Decimal("100"),
         competitor_price=None,
-        seller_coupon_amount=Decimal("10"),
         purchase_cost=Decimal("30"),
         expected_logistics_cost=Decimal("8"),
         expected_storage_cost=Decimal("2"),
@@ -219,16 +214,16 @@ def test_preview_exposes_pre_ad_profit_and_roi_metrics():
     )
 
     expected = result["expected"]
-    # revenue = 90；pre_ad = 90 − (30+8+2+0+9+0+2.70+1.80) = 36.50
-    assert expected["net_revenue"] == Decimal("90")
-    assert expected["pre_ad_profit"] == Decimal("36.50")
-    assert expected["break_even_roi"] == Decimal("90") / Decimal("36.50")
+    # revenue = 100（商家实收 = 测算售价）；pre_ad = 100 − (30+8+2+0+10+0+3+2) = 45.00
+    assert expected["net_revenue"] == Decimal("100")
+    assert expected["pre_ad_profit"] == Decimal("45.00")
+    assert expected["break_even_roi"] == Decimal("100") / Decimal("45.00")
     assert expected["suggested_roi"] == expected["break_even_roi"] * Decimal("1.20")
     assert expected["suggested_roi_clamped"] is not None
     assert expected["roi_missing_reasons"] == []
     assert expected["roi_anomalies"] == []
     # 实际成本口径那一段也要有自己的一份
-    assert result["actual_recost"]["pre_ad_profit"] == Decimal("36.50")
+    assert result["actual_recost"]["pre_ad_profit"] == Decimal("45.00")
     assert result["actual_recost"]["break_even_roi"] == expected["break_even_roi"]
 
 
@@ -240,7 +235,6 @@ def test_roi_is_not_computed_when_a_reference_cost_is_missing():
     result = build_platform_profit_preview(
         expected_selling_price=Decimal("100"),
         competitor_price=None,
-        seller_coupon_amount=Decimal("0"),
         purchase_cost=Decimal("30"),
         expected_logistics_cost=None,
         expected_storage_cost=Decimal("2"),
@@ -266,7 +260,6 @@ def test_platform_roi_config_is_passed_into_the_preview():
     result = build_platform_profit_preview(
         expected_selling_price=Decimal("100"),
         competitor_price=None,
-        seller_coupon_amount=Decimal("0"),
         purchase_cost=Decimal("30"),
         expected_logistics_cost=Decimal("8"),
         expected_storage_cost=Decimal("2"),

@@ -904,6 +904,9 @@ async def test_estimate_above_floor_saves_successfully(
 
     这条同时是 **seed 完整性的探针**：如果 seed 缺物流规则 / 仓储规则 / 平台费率，
     这里会拿到 `cannot_save_profit_version` 而不是 201。
+
+    ⚠️ 批次 2 P2：保存利润版本**必须**给一个广告费口径（目标 ROI 或显式的广告分成率）——
+    「广告费不可算 ⇒ 利润空白」的利润版本没有意义，存下来只会误导事后复盘。
     """
     await pricing_seed()
 
@@ -916,10 +919,38 @@ async def test_estimate_above_floor_saves_successfully(
             "warehouse_code": "MY-01",
             "transport_type": "sea",
             "expected_selling_price": 35,
+            "target_roi": 3,
         },
     )
     assert ok.status_code == 201, ok.text
     assert ok.json()["estimate_ids"]
+
+
+@pytest.mark.asyncio
+async def test_estimate_without_ad_cost_input_is_rejected(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    """没给目标 ROI 也没给广告分成率 ⇒ 广告费不可算 ⇒ 不许存利润版本（批次 2 P2）。
+
+    老行为是把「没填」当成广告费 0 ⇒ 利润看着很美 ⇒ 存下来的版本会误导复盘。
+    """
+    await pricing_seed()
+
+    resp = await pg_async_client.post(
+        "/api/platform-sku-profit/estimates",
+        headers=pricing_auth_headers,
+        json={
+            "sku_id": 9001,
+            "platform_code": "tiktok",
+            "warehouse_code": "MY-01",
+            "transport_type": "sea",
+            "expected_selling_price": 35,
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body["error"]["detail"]["code"] == "cannot_save_profit_version"
+    assert "完整预计利润口径" in body["error"]["detail"]["missing_fields"]
 
 
 @pytest.mark.asyncio
@@ -964,7 +995,6 @@ def test_creator_commission_is_deducted_from_profit():
     common = dict(
         expected_selling_price=Decimal("100"),
         competitor_price=None,
-        seller_coupon_amount=None,
         purchase_cost=Decimal("10"),
         expected_logistics_cost=Decimal("5"),
         expected_storage_cost=Decimal("5"),
@@ -997,7 +1027,6 @@ def test_creator_commission_none_does_not_block_profit():
     result = build_platform_profit_preview(
         expected_selling_price=Decimal("50"),
         competitor_price=None,
-        seller_coupon_amount=None,
         purchase_cost=Decimal("10"),
         expected_logistics_cost=Decimal("0"),
         expected_storage_cost=Decimal("0"),

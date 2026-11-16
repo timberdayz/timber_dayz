@@ -451,13 +451,12 @@ test("利润测算页给出广告前贡献毛利率 / 保本ROI / 建议ROI 三�
 test("ROI 四列拆开：目标/平台报告属决策输入，保本/建议属定价结果", () => {
   // 阶段 6 之前：三列结果（毛利率/保本/建议）必须排在「测算售价」之前。
   // 阶段 6 起列重排，四段式把 ROI 拆成两段：
-  //   决策输入段 = 测算售价 → 优惠券 → 目标ROI → 平台报告ROI（运营要填的）
+  //   决策输入段 = 测算售价 → 目标ROI → 平台报告ROI（运营要填的）
   //   定价结果段 = 当前让利上限 → 清货让利上限 → 最低售价 → 广告前贡献毛利率
   //                 → 保本ROI → 建议ROI（系统算出来的）
   // ⚠️ 两段之间的相对序是业务约束，不能因为重排弄丢：
   //   运营先填输入、再读结果；结果段内部的 ROI 相对序也不变。
   const price = operatingSection.indexOf('label="测算售价"');
-  const coupon = operatingSection.indexOf('label="优惠券（商家承担）"');
   const target = operatingSection.indexOf('label="目标ROI"');
   const reported = operatingSection.indexOf('label="平台报告ROI"');
   const discount = operatingSection.indexOf('label="当前让利上限"');
@@ -466,9 +465,10 @@ test("ROI 四列拆开：目标/平台报告属决策输入，保本/建议属�
   const breakEven = operatingSection.indexOf('label="保本ROI"');
   const suggested = operatingSection.indexOf('label="建议ROI"');
   // 决策输入段
-  assert.ok(price >= 0 && coupon > price, "优惠券必须紧跟测算售价");
-  assert.ok(target > coupon, "目标ROI 必须在优惠券之后");
+  assert.ok(price >= 0 && target > price, "目标ROI 必须紧跟测算售价");
   assert.ok(reported > target, "平台报告ROI 必须在目标ROI 之后");
+  // 优惠券列已移除（2026-11-16 口径归一：商家实收 = 测算售价，不再二次扣券）
+  assert.doesNotMatch(operatingSection, /优惠券/);
   // 输入段整体在结果段之前
   assert.ok(discount > reported, "决策输入段必须排在定价结果段之前");
   assert.ok(floor > discount, "最低售价必须在当前让利上限之后");
@@ -742,8 +742,8 @@ test("阶段 3 的列改名全部落地，旧名一个都不剩", () => {
       `旧名必须消失：${old}`,
     );
   }
-  // 「优惠券」补上限定语：是谁承担的
-  assert.match(source, /优惠券（商家承担）/);
+  // 优惠券列整体移除（2026-11-16 口径归一：商家实收 = 测算售价）
+  assert.doesNotMatch(source, /优惠券（商家承担）/);
 });
 
 test("利润测算页不再有重复的「物流方式」列", () => {

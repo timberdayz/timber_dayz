@@ -71,15 +71,13 @@ def test_non_positive_cost_denominator_returns_none_with_a_reason():
 
 
 def test_roi_denominator_is_merchant_net_revenue_not_goods_amount():
-    """用例 7：分母口径是**商家实收**（售价 − 卖家券），不是商品金额。
+    """口径：分母是**商家实收 = 测算售价**（2026-11-16 归一后不再扣券）。
 
-    换成商品金额 P 会得到另一个数 —— 这两个数都能"算得出来"，
-    但只有商家实收与平台后台同一把标尺（设计稿 §2.5⑦）。
+    商品中心只有一个收入口径：运营填的测算售价（= 折后到手价 = 平台 GMV）。
     """
     preview = build_platform_profit_preview(
         expected_selling_price=Decimal("70"),
         competitor_price=None,
-        seller_coupon_amount=Decimal("2"),
         purchase_cost=Decimal("23"),
         expected_logistics_cost=Decimal("0.38"),
         expected_storage_cost=Decimal("0"),
@@ -93,21 +91,20 @@ def test_roi_denominator_is_merchant_net_revenue_not_goods_amount():
         creator_commission_rate=None,
     )
     expected = preview["expected"]
-    assert expected["net_revenue"] == Decimal("68")
-    assert expected["break_even_roi"] == Decimal("68") / expected["pre_ad_profit"]
-    assert expected["break_even_roi"] != Decimal("70") / expected["pre_ad_profit"]
+    assert expected["net_revenue"] == Decimal("70")
+    assert expected["break_even_roi"] == Decimal("70") / expected["pre_ad_profit"]
 
 
 def test_net_revenue_matches_the_platform_gmv_scale():
-    """用例 8：商家实收 G = P − c = B + d（买家实付 + 平台补贴）= TikTok GMV。"""
-    price = Decimal("70")
-    seller_coupon = Decimal("2")
+    """口径：运营填的测算售价 = 买家实付 + 平台补贴 = 商家到手 = 平台 GMV。
+
+    运营填的就是到手价（平台补贴回补已经含在里面），所以系统不再二次扣券。
+    """
     buyer_paid = Decimal("60")
     platform_subsidy = Decimal("8")
+    measured_selling_price = buyer_paid + platform_subsidy
 
-    net_revenue = price - seller_coupon
-    assert net_revenue == Decimal("68")
-    assert net_revenue == buyer_paid + platform_subsidy
+    assert measured_selling_price == Decimal("68")
 
 
 def test_ad_rate_and_platform_reported_roi_are_inverse():

@@ -115,7 +115,6 @@ async def backfill_target_roi_from_legacy_ad_rate(
             "transport_type": profile.transport_type,
             "competitor_price": profile.competitor_price,
             "expected_selling_price": profile.expected_selling_price,
-            "seller_coupon_amount": profile.seller_coupon_amount or 0,
             "expected_ad_rate": profile.expected_ad_rate,
         }
         identity = {

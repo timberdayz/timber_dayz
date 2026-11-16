@@ -901,7 +901,6 @@ class ProductFinanceService:
         )
         result = build_baseline_profit(
             selling_price=data["selling_price"],
-            coupon_amount=data.get("coupon_amount"),
             default_purchase_cost=(
                 purchase_cost
                 if purchase_cost is not None
@@ -1028,11 +1027,6 @@ class ProductFinanceService:
                 if data.get("selling_price") is not None
                 else profile.selling_price
             ),
-            "coupon_amount": (
-                data.get("coupon_amount")
-                if data.get("coupon_amount") is not None
-                else profile.default_coupon_amount
-            ),
             "platform_code": profile.platform_code,
             "transport_type": data.get("transport_type") or profile.transport_type,
             "warehouse_code": profile.warehouse_code,
@@ -1108,7 +1102,6 @@ class ProductFinanceService:
         result = build_platform_profit_preview(
             expected_selling_price=expected_selling_price,
             competitor_price=data.get("competitor_price"),
-            seller_coupon_amount=data.get("seller_coupon_amount"),
             purchase_cost=(
                 purchase_cost
                 if purchase_cost is not None
@@ -1180,8 +1173,6 @@ class ProductFinanceService:
         preview = await self.preview_operating_profit(profile_id, data)
         if data.get("selling_price") is not None:
             profile.selling_price = data["selling_price"]
-        if data.get("coupon_amount") is not None:
-            profile.default_coupon_amount = data["coupon_amount"]
         if data.get("transport_type") is not None:
             profile.transport_type = data["transport_type"]
         row = SkuProfitEstimate(
@@ -1192,15 +1183,8 @@ class ProductFinanceService:
             assumption_version=data.get("assumption_version")
             or preview["assumption_version"],
             scenario="base",
-            selling_price=preview["net_revenue"]
-            + Decimal(
-                str(data.get("coupon_amount") or profile.default_coupon_amount or 0)
-            ),
-            coupon_amount=(
-                data.get("coupon_amount")
-                if data.get("coupon_amount") is not None
-                else profile.default_coupon_amount or 0
-            ),
+            # 商家实收 = 售价（2026-11-16 口径归一）：不再"反推标价 = 实收 + 券"。
+            selling_price=preview["net_revenue"],
             purchase_cost=preview["purchase_cost"],
             purchase_cost_source=preview["purchase_cost_source"],
             logistics_cost=preview["logistics_cost"],
@@ -1228,7 +1212,6 @@ class ProductFinanceService:
             or preview["assumption_version"],
             scenario="base",
             selling_price=data["selling_price"],
-            coupon_amount=data.get("coupon_amount", 0),
             purchase_cost=preview["purchase_cost"],
             purchase_cost_source=preview["purchase_cost_source"],
             logistics_cost=preview["logistics_cost"],

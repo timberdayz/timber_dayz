@@ -546,9 +546,10 @@ class FeishuProjectionService:
                 if profile.expected_selling_price is not None
                 else None
             ),
-            "优惠券": (
-                float(profile.seller_coupon_amount)
-                if profile.seller_coupon_amount is not None
+            # 商家实收 = 测算售价（2026-11-16 口径归一）：券已从商品中心口径里移除。
+            "商家实收": (
+                float(profile.expected_selling_price)
+                if profile.expected_selling_price is not None
                 else None
             ),
             "采购成本": (
@@ -958,7 +959,7 @@ def _platform_sku_profit_table_fields() -> list[dict[str, Any]]:
         _number("参考售价"),
         _number("竞品价格"),
         _number("预计售价"),
-        _number("优惠券"),
+        _number("商家实收"),
         _number("采购成本"),
         _number("预计物流成本", 4),
         _number("预计仓储成本", 4),

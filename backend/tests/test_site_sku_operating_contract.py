@@ -67,14 +67,12 @@ def test_operating_profile_requires_complete_business_key():
 def test_operating_profile_update_allows_cost_and_selling_fields_only():
     request = SkuOperatingProfileUpdateRequest(
         selling_price=120,
-        default_coupon_amount=5,
         expected_logistics_cost=10,
         expected_storage_cost=2,
         platform_fee_rate=0.1,
     )
     assert request.model_dump(exclude_unset=True) == {
         "selling_price": 120,
-        "default_coupon_amount": 5,
         "expected_logistics_cost": 10,
         "expected_storage_cost": 2,
     }
@@ -208,7 +206,7 @@ def test_confirmed_logistics_cost_uses_exists_for_warehouse_filter_without_grn_m
     assert "LogisticsBillLine.warehouse_code == warehouse_code" in source
 
 
-def test_saving_site_profit_persists_current_price_and_coupon_and_refreshes_projection():
+def test_saving_site_profit_persists_current_price_and_refreshes_projection():
     finance_source = Path("backend/services/product_finance_service.py").read_text(
         encoding="utf-8"
     )
@@ -217,6 +215,7 @@ def test_saving_site_profit_persists_current_price_and_coupon_and_refreshes_proj
     ).read_text(encoding="utf-8")
 
     assert 'profile.selling_price = data["selling_price"]' in finance_source
-    assert 'profile.default_coupon_amount = data["coupon_amount"]' in finance_source
+    # 券已从口径里移除（2026-11-16）：经营档案不再存"默认券额"。
+    assert "default_coupon_amount" not in finance_source
     assert "site_profiles =" in router_source
     assert "await _enqueue_platform_sku_profit_projection(db, profile)" in router_source

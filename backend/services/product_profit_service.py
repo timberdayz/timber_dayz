@@ -111,7 +111,6 @@ def validate_bill_total(
 def build_baseline_profit(
     *,
     selling_price: Decimal | int | float,
-    coupon_amount: Decimal | int | float | None,
     default_purchase_cost: Decimal | int | float | None,
     confirmed_logistics_cost: Decimal | int | float | None,
     assumption_logistics_cost: Decimal | int | float | None,
@@ -120,7 +119,12 @@ def build_baseline_profit(
     return_rate: Decimal | int | float | None,
     damage_rate: Decimal | int | float | None,
 ) -> dict[str, Decimal | str]:
-    revenue = _money(_money(selling_price) - _money(coupon_amount))
+    """商家实收 = 售价。
+
+    ⚠️ 口径（2026-11-16 归一）：运营填的售价就是**折后到手价**，不再二次扣券。
+    以前这里是 ``selling_price − 卖家优惠券``，导致收入被少算、平台佣金少扣。
+    """
+    revenue = _money(selling_price)
     purchase_cost = _money(default_purchase_cost)
     if confirmed_logistics_cost is not None:
         logistics_cost = _money(confirmed_logistics_cost)
@@ -165,7 +169,6 @@ def build_platform_profit_preview(
     *,
     expected_selling_price: Decimal | int | float | None,
     competitor_price: Decimal | int | float | None,
-    seller_coupon_amount: Decimal | int | float | None,
     purchase_cost: Decimal | int | float | None,
     expected_logistics_cost: Decimal | int | float | None,
     expected_storage_cost: Decimal | int | float | None,
@@ -220,8 +223,11 @@ def build_platform_profit_preview(
         return _money(revenue_value - sum(costs, Decimal("0")))
 
     selling_price = optional_money(expected_selling_price)
-    coupon = _money(seller_coupon_amount)
-    revenue = _money(selling_price - coupon) if selling_price is not None else None
+    # ⚠️ 口径（2026-11-16 归一）：**商家实收 = 测算售价**。
+    # 运营填的就是折后到手价，老口径再扣一次卖家券 ⇒ 收入少算 ⇒ ROI 偏乐观、
+    # 平台佣金少扣。老口径还有一个更隐蔽的问题：最低售价底线里根本没扣券，
+    # 于是「底线承诺的价」和「利润试算用的价」不是同一个数。
+    revenue = selling_price
     purchase = optional_money(purchase_cost)
     expected_logistics = optional_money(expected_logistics_cost)
     expected_storage = optional_money(expected_storage_cost)
@@ -297,8 +303,14 @@ def build_platform_profit_preview(
 
     def _ad_cost_and_profit(
         use_actual: bool,
-    ) -> tuple[Decimal | None, Decimal | None, Decimal | None, Decimal | None]:
-        """返回 ``(ad_cost, profit, pre_ad_profit, effective_ad_rate)``。
+    ) -> tuple[
+        Decimal | None,
+        Decimal | None,
+        Decimal | None,
+        Decimal | None,
+        list[str],
+    ]:
+        """返回 ``(ad_cost, profit, pre_ad_profit, effective_ad_rate, ad_cost_missing_reasons)``。
 
         ``pre_ad_profit`` 是**广告前利润**（扣完采购/物流/仓储/贴单/平台佣金/达人佣金/
         货损/退货，但**没扣广告费**）。它是 ROI 计算的分母，必须暴露出去 ——
@@ -321,13 +333,18 @@ def build_platform_profit_preview(
         ``effective_ad_rate`` 是**实际生效**的广告分成率（口径换算后的那个数），
         喂给 ROI 计算用；这样 ``equivalent_target_roi`` 在两种口径下都对得上：
         目标 ROI 口径 ⇒ 等效目标 ROI 恰好等于运营填的那个数。
+
+        ⚠️ **两个口径都没有 ⇒ 广告费不可算（None），不是 0**（批次 2 P2/P3）。
+        旧行为把「没填广告费率」当成 0 ⇒ 广告费 0 ⇒ 利润看着很美，其实是
+        「根本没算广告」。缺输入宁可留白，不可乐观。
         """
         components = _pre_ad_components(use_actual)
         if revenue is None or any(c is None for c in components):
-            return None, None, None, None
+            return None, None, None, None, []
         pre_ad_profit = revenue - sum(components, Decimal("0"))
         ad = None
         effective_ad_rate = None
+        ad_cost_missing_reasons: list[str] = []
         if target_roi is not None and Decimal(str(target_roi)) > 0:
             ad = _money(revenue / Decimal(str(target_roi)))
             # 反算成"广告分成率"口径，好让 equivalent_target_roi 恰好等于 target_roi。
@@ -353,15 +370,26 @@ def build_platform_profit_preview(
                 else Decimal("0")
             )
             effective_ad_rate = Decimal(str(expected_ad_rate))
+        else:
+            # 两个口径都没给 ⇒ 广告费**不可算**。
+            ad_cost_missing_reasons.append("missing_target_roi")
         profit = _money(pre_ad_profit - ad) if ad is not None else None
-        return ad, profit, pre_ad_profit, effective_ad_rate
+        return ad, profit, pre_ad_profit, effective_ad_rate, ad_cost_missing_reasons
 
-    ad_cost, expected_profit, expected_pre_ad_profit, expected_ad_rate_effective = (
-        _ad_cost_and_profit(use_actual=False)
-    )
-    _, actual_profit, actual_pre_ad_profit, actual_ad_rate_effective = (
-        _ad_cost_and_profit(use_actual=True)
-    )
+    (
+        ad_cost,
+        expected_profit,
+        expected_pre_ad_profit,
+        expected_ad_rate_effective,
+        expected_ad_cost_missing_reasons,
+    ) = _ad_cost_and_profit(use_actual=False)
+    (
+        _,
+        actual_profit,
+        actual_pre_ad_profit,
+        actual_ad_rate_effective,
+        actual_ad_cost_missing_reasons,
+    ) = _ad_cost_and_profit(use_actual=True)
 
     def _roi_payload(metrics: dict) -> dict:
         """把 ROI 计算结果铺进 preview 段。
@@ -467,6 +495,8 @@ def build_platform_profit_preview(
                 if target_roi is not None and Decimal(str(target_roi)) > 0
                 else ("legacy_ad_rate" if expected_ad_rate is not None else None)
             ),
+            # 广告费算不出来的原因（批次 2 P2/P3）：目标 ROI 没填 ⇒ 不可算，不是 0。
+            "ad_cost_missing_reasons": list(expected_ad_cost_missing_reasons),
             "return_loss": return_loss,
             "damage_loss": damage_loss,
             "profit": expected_profit,
@@ -520,6 +550,7 @@ def build_platform_profit_preview(
                 if target_roi is not None and Decimal(str(target_roi)) > 0
                 else ("legacy_ad_rate" if expected_ad_rate is not None else None)
             ),
+            "ad_cost_missing_reasons": list(actual_ad_cost_missing_reasons),
             **_roi_payload(actual_roi),
             # 同上：实际成本口径的保本 ROI 下界。
             "break_even_roi_lower_bound": actual_roi_lower_bound.get(

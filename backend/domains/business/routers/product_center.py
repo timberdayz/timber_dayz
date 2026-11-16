@@ -4149,7 +4149,6 @@ def _serialize_operating_profile(
         "transport_type": row.transport_type,
         "warehouse_name": row.warehouse_name,
         "selling_price": row.selling_price,
-        "default_coupon_amount": row.default_coupon_amount,
         "platform_fee_rate": row.platform_fee_rate,
         "expected_logistics_cost": row.expected_logistics_cost,
         "expected_storage_cost": row.expected_storage_cost,
@@ -4443,8 +4442,31 @@ async def list_platform_sku_profit_candidates(
         expected_selling_price = (
             profile.expected_selling_price if profile else row.reference_selling_price
         )
-        seller_coupon_amount = profile.seller_coupon_amount if profile else 0
-        expected_ad_rate = profile.expected_ad_rate if profile else 0
+        # ⚠️ 批次 2 P3：没有经营档案 ⇒ 广告费率传 **None**（不是 0）。
+        #    传 0 等于说「这个品不投广告」⇒ 广告费 0 ⇒ 利润看着很美，其实是根本没算。
+        #    None ⇒ 广告费不可算 ⇒ 利润空白 + 缺失清单里点名「没有经营档案」。
+        expected_ad_rate = profile.expected_ad_rate if profile else None
+        # 达人佣金率：SKU 自己设的值优先，否则用所选平台的默认兜底。
+        # ⚠️ 批次 2 P5：两个都没有 ⇒ 按 0 计（利润偏乐观），但**必须标出来**。
+        if row.creator_commission_rate is not None:
+            creator_commission_rate = row.creator_commission_rate
+            creator_commission_source = "sku"
+        elif platform.default_creator_commission_rate is not None:
+            creator_commission_rate = platform.default_creator_commission_rate
+            creator_commission_source = "platform_default"
+        else:
+            creator_commission_rate = None
+            creator_commission_source = "assumed_zero"
+        # 批次 2：输入缺失清单（P2 / P3 / P5）—— 与「缺成本规则」分开列。
+        missing_input_reasons: list[str] = []
+        if profile is None:
+            missing_input_reasons.append("missing_operating_profile")
+        if profile is None or (
+            profile.target_roi is None and profile.expected_ad_rate is None
+        ):
+            missing_input_reasons.append("missing_target_roi")
+        if creator_commission_source == "assumed_zero":
+            missing_input_reasons.append("missing_creator_commission_rate")
         missing_reasons: list[str] = []
         if reference_logistics is None:
             if cost_inputs["reference_logistics_ambiguous"]:
@@ -4471,7 +4493,6 @@ async def list_platform_sku_profit_candidates(
         preview = build_platform_profit_preview(
             expected_selling_price=expected_selling_price,
             competitor_price=profile.competitor_price if profile else None,
-            seller_coupon_amount=seller_coupon_amount,
             purchase_cost=purchase_cost,
             expected_logistics_cost=reference_logistics,
             expected_storage_cost=reference_storage,
@@ -4486,11 +4507,7 @@ async def list_platform_sku_profit_candidates(
             return_rate=assigned.return_loss_rate if assigned else None,
             damage_rate=assigned.logistics_damage_rate if assigned else None,
             # 达人佣金：SKU 自己设的值优先，否则用所选平台的默认兜底
-            creator_commission_rate=(
-                row.creator_commission_rate
-                if row.creator_commission_rate is not None
-                else platform.default_creator_commission_rate
-            ),
+            creator_commission_rate=creator_commission_rate,
             # 平台级 ROI 配置（阶段 1）：安全边际 + 平台可填上限
             roi_safety_margin=platform.roi_safety_margin,
             target_roi_ceiling=platform.target_roi_ceiling,
@@ -4524,7 +4541,6 @@ async def list_platform_sku_profit_candidates(
                     )
                 ),
                 "competitor_price": profile.competitor_price if profile else None,
-                "seller_coupon_amount": seller_coupon_amount,
                 "expected_ad_rate": expected_ad_rate,
                 # 目标 ROI（阶段 2.2）：运营的**当前意图**，存在经营档案里 ⇒ 列表要回带，
                 # 前端才能把上一轮填的值预填进输入框（与测算售价/广告费率同一套预填口径）。
@@ -4555,6 +4571,10 @@ async def list_platform_sku_profit_candidates(
                     "ready" if not missing_reasons else "incomplete"
                 ),
                 "reference_cost_missing_reasons": list(dict.fromkeys(missing_reasons)),
+                # 批次 2：输入缺失清单（P2 / P3 / P5）—— 利润空白时要能说清为什么空白。
+                "missing_input_reasons": list(dict.fromkeys(missing_input_reasons)),
+                # 达人佣金来源：sku / platform_default / assumed_zero（按 0 计）
+                "creator_commission_source": creator_commission_source,
                 "reference_logistics_missing_reasons": [
                     reason
                     for reason in missing_reasons
@@ -4729,11 +4749,15 @@ def _evaluate_roi_guard(values: dict, preview: dict, missing_fields: list[str]) 
     1. **目标 ROI 没填 ⇒ 不参与护栏**。
        平台报告 ROI（``actual_roi``）是**事实记录**，永远不拦 ——
        拦了就等于不许记录亏损投放（真实亏过的投放恰恰要留痕）。
-    2. **成本齐全** ⇒ 保本 ROI 可算：
+    2. **超平台可填上限 ⇒ 拦**（批次 2 P1）。
+       TikTok 目标 ROI 上限 20、Shopee 50。平台后台根本不让填更大的数，
+       系统再收下来只会让广告费趋近 0、利润虚高 —— 护栏形同虚设。
+       平台没配上限（``None``）⇒ 不拦（不能凭空造一个上限来卡人）。
+    3. **成本齐全** ⇒ 保本 ROI 可算：
        - ``target_roi < break_even_roi`` ⇒ ``below_break_even_roi``（拦）
        - 建议 ROI 超过平台可填上限 ⇒ ``roi_out_of_platform_range``
          （**提示，不拦** —— 广告空间不足是客观限制，不是操作错误）
-    3. **成本不全** ⇒ 保本 ROI 算不出来：
+    4. **成本不全** ⇒ 保本 ROI 算不出来：
        - 用保本 ROI 的**下界**（未知成本一律当 0）去**证明**：
          ``target_roi < 下界`` ⇒ ``below_break_even_roi``（拦 —— 已经能确定必亏）
        - 证不出来 ⇒ ``roi_cost_incomplete``（拦 —— 成本不全 ⇒ 保本 ROI 不可信，
@@ -4756,6 +4780,26 @@ def _evaluate_roi_guard(values: dict, preview: dict, missing_fields: list[str]) 
     expected = preview.get("expected") or {}
     break_even_roi = expected.get("break_even_roi")
     lower_bound = expected.get("break_even_roi_lower_bound")
+
+    # 批次 2 P1：超平台可填上限 ⇒ 拦。
+    # ⚠️ 必须在保本线判定**之前**：平台不让填这个数 ⇒ 先说这个，
+    #    别让运营以为只是"亏一点"，他改了上限以外的东西也没用。
+    target_roi_ceiling = preview.get("target_roi_ceiling")
+    if target_roi_ceiling is not None and target > Decimal(str(target_roi_ceiling)):
+        return {
+            "error": {
+                "code": "target_roi_above_platform_ceiling",
+                "message": (
+                    f"目标 ROI {target} 超过平台可填上限 {target_roi_ceiling}，"
+                    "平台后台不允许填这个数"
+                ),
+                "target_roi": float(target),
+                "target_roi_ceiling": float(target_roi_ceiling),
+                "sku_id": values.get("sku_id"),
+                "platform_code": values.get("platform_code"),
+            },
+            "warnings": warnings,
+        }
 
     def _detail(code: str, basis: str, threshold) -> dict:
         if basis == "exact":
@@ -4787,8 +4831,8 @@ def _evaluate_roi_guard(values: dict, preview: dict, missing_fields: list[str]) 
         # ⚠️ 用 ROI 服务算好的 ``suggestion_note``，因为它用的是**生效**上限
         #    （平台没配上限时用模块默认值 50），不要在这里自己比一个可能为 None 的上限。
         if expected.get("suggestion_note") == "above_platform_ceiling":
-            # ⚠️ 先取出来再判空 —— ``preview.get(...)`` 调两次时 mypy 无法缩窄类型。
-            target_roi_ceiling = preview.get("target_roi_ceiling")
+            # ⚠️ 上限取本函数开头读到的那个（平台没配上限时为 None），
+            #    不要在这里自己比一个可能为 None 的上限。
             warnings.append(
                 {
                     "code": "roi_out_of_platform_range",
@@ -4860,7 +4904,6 @@ async def save_platform_sku_profit_draft(
         "transport_type",
         "competitor_price",
         "expected_selling_price",
-        "seller_coupon_amount",
         "expected_ad_rate",
         "target_roi",
     ):
@@ -4997,7 +5040,6 @@ async def save_platform_sku_profit_estimates(
         "transport_type",
         "competitor_price",
         "expected_selling_price",
-        "seller_coupon_amount",
         "expected_ad_rate",
         "target_roi",
     ):
@@ -5048,7 +5090,8 @@ async def save_platform_sku_profit_estimates(
                 if values.get("expected_selling_price") is not None
                 else profile.reference_selling_price
             ),
-            coupon_amount=values.get("seller_coupon_amount", 0),
+            # 券已从口径里移除（2026-11-16）：这一列恒为 None —— 商家实收 = 测算售价。
+            coupon_amount=None,
             expected_selling_price=(
                 values["expected_selling_price"]
                 if values.get("expected_selling_price") is not None
@@ -5421,7 +5464,6 @@ async def list_sku_operating_profiles(
                             "warehouse_name": warehouse.warehouse_name,
                             "transport_type": "sea",
                             "selling_price": None,
-                            "default_coupon_amount": 0,
                             "platform_fee_rate": platform.default_fee_rate,
                             "expected_logistics_cost": None,
                             "expected_storage_cost": None,
@@ -5784,9 +5826,6 @@ async def list_profit_estimates(
             "selling_price": (
                 float(row.selling_price) if row.selling_price is not None else None
             ),
-            "coupon_amount": (
-                float(row.coupon_amount) if row.coupon_amount is not None else None
-            ),
             "estimated_contribution_profit": (
                 float(row.estimated_contribution_profit)
                 if row.estimated_contribution_profit is not None
@@ -5813,7 +5852,8 @@ async def create_profit_estimate(
     if await db.get(DimErpSku, body.sku_id) is None:
         raise HTTPException(status_code=404, detail="SKU not found")
     values = body.model_dump()
-    revenue = (values.get("selling_price") or 0) - (values.get("coupon_amount") or 0)
+    # 商家实收 = 售价（2026-11-16 口径归一）：不再二次扣券。
+    revenue = values.get("selling_price") or 0
     costs = sum(
         values.get(key) or 0
         for key in (
