@@ -50,6 +50,9 @@ def _inputs(**overrides):
         creator_commission_rate=Decimal("0.05"),
         roi_safety_margin=Decimal("0.20"),
         target_roi_ceiling=Decimal("50"),
+        # ⚠️ 批次 4：尾程配送费**算不出来 ⇒ 利润链算不出来**（不是按 0 计）。
+        #    这组用例验的是广告费口径，与尾程无关 ⇒ 显式给 0（= 没有尾程）。
+        delivery_cost=Decimal("0"),
     )
     base.update(overrides)
     return base

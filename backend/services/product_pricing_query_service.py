@@ -308,6 +308,7 @@ def compute_pricing_state(
     linked_spu,
     platform_code: Optional[str] = None,
     reference_selling_price=_UNSET,
+    delivery_cost=None,
 ) -> dict:
     """算出一个 SKU 在**某个平台**上的定价状态（含命中的档位）。
 
@@ -329,6 +330,14 @@ def compute_pricing_state(
     传了就用传进来的值算纪律线（可以是 None = 预览「清空基准售价」）。
     预览**必须**走这个函数而不是另写一套算法 —— 否则「预览说涨到 63」而
     「保存后实际变成 58」，运营会以为系统坏了。
+
+    ⚠️ `delivery_cost`（批次 4）是这个 SKU 在**本次算底线的那个平台**上的
+    **单件尾程配送费**。它与**平台级**的 ``delivery_cost_rate``（尾程占收入比，
+    拆分基准）**成对生效**才进成本底线 —— 详见
+    `product_pricing_service.compute_cost_floor`。
+
+    ⚠️ 这里**不做跨平台回落**：尾程是「平台 × 仓」粒度的量，
+    拿别的平台的尾程套过来就是算错。
     """
     policies = context["policies"]
     platform = resolve_pricing_platform(context, platform_code)
@@ -370,6 +379,12 @@ def compute_pricing_state(
         deepest_policy=deepest,
         min_selling_price_override=override,
         days_since_restock=days_since_restock,
+        # 尾程配送费（批次 4）：单件尾程 + 平台级尾程占比拆分基准。
+        # ⚠️ 两者成对生效才进成本底线（缺一半就都不进，绝不重复扣）。
+        # ⚠️ 尾程是**平台 × 仓**的量（费率表就是这么维的），所以必须由调用方
+        #    按**本次算底线的那个平台**传进来 —— 这里不做任何跨平台的回落。
+        delivery_cost=delivery_cost,
+        delivery_cost_rate=platform.delivery_cost_rate if platform else None,
     )
     return {
         "pricing": pricing,
@@ -385,17 +400,21 @@ def compute_pricing_for_sku(
     sku_row,
     linked_spu,
     platform_code: Optional[str] = None,
+    delivery_cost=None,
 ) -> dict:
     """只要定价字段本身（页面用）。
 
     是 `compute_pricing_state` 的薄封装——**同一个**计算函数，
     不存在"页面走一条、通知走另一条"的可能。
+
+    `delivery_cost`（批次 4）见 `compute_pricing_state` 的说明。
     """
     return compute_pricing_state(
         context=context,
         sku_row=sku_row,
         linked_spu=linked_spu,
         platform_code=platform_code,
+        delivery_cost=delivery_cost,
     )["pricing"]
 
 

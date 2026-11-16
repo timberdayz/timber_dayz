@@ -322,7 +322,11 @@ def test_sku_pricing_happy_path_matches_spec_example():
     assert out["pricing_tier_label"] == "日常"
     assert out["pricing_tier_source"] == "fallback_no_restock_days"
     assert out["pricing_days_since_restock"] is None
-    assert out["min_selling_price_missing_reasons"] == []
+    # ⚠️ 批次 4：spec 的 28.23 是**不含尾程**的底线（尾程没配 ⇒ 尾程不进底线，
+    #    免得同一笔尾程既进分子又留在 other_cost_rate 残差里被扣两次）。
+    #    但底线因此是**不完整**的 ⇒ 必须点名缺了什么。
+    assert out["min_selling_price_missing_reasons"] == ["missing_delivery_cost"]
+    assert out["delivery_cost_in_cost_floor"] is False
 
 
 def test_sku_pricing_missing_purchase_cost_degrades_to_discount_guard():
@@ -665,7 +669,9 @@ async def test_list_skus_injects_pricing_payload(
     resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
     assert resp.status_code == 200, resp.text
     row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
-    # 成本线 10/0.3542 = 28.23 > 纪律线 30*0.9 = 27.00
+    # ⚠️ 批次 4：**没传仓** ⇒ 尾程算不出来（尾程是「平台 × 仓」粒度的量，不能猜）
+    #    ⇒ 尾程不进底线 ⇒ 底线仍是旧口径 10/0.3542 = 28.23（> 纪律线 30*0.9 = 27.00）
+    #    但底线因此不完整 ⇒ 必须点名缺了什么。
     assert row["min_selling_price"] == pytest.approx(28.23, abs=0.01)
     assert row["min_selling_price_source"] == "cost_floor"
     assert row["min_selling_price_is_override"] is False
@@ -675,10 +681,38 @@ async def test_list_skus_injects_pricing_payload(
     # 测试库没有 mart 表 -> 回落日常档
     assert row["pricing_tier_source"] == "fallback_no_restock_days"
     assert row["pricing_days_since_restock"] is None
-    assert row["min_selling_price_missing_reasons"] == []
+    assert row["min_selling_price_missing_reasons"] == ["missing_delivery_cost"]
+    assert row["delivery_cost_in_cost_floor"] is False
     # SKU 没单独设佣金 -> 返回 None（前端输入框留空），兜底值单独给
     assert row["creator_commission_rate"] is None
     assert row["creator_commission_rate_fallback"] == pytest.approx(0.0606)
+
+
+@pytest.mark.asyncio
+async def test_list_skus_with_warehouse_includes_delivery_cost_in_floor(
+    pg_async_client, pricing_auth_headers, pg_session, pricing_seed
+):
+    """批次 4 · 仓维度统一：传了仓 ⇒ 底线**含尾程**。
+
+    尾程是「平台 × 仓 × 重量」粒度的量，所以同一个 SKU 在不同仓的底线可以不同 ——
+    这正是按件计费尾程的意义（重货不该和轻货共用一条底线）。
+    """
+    await pricing_seed()
+
+    resp = await pg_async_client.get(
+        "/api/skus",
+        headers=pricing_auth_headers,
+        params={"platform_code": "tiktok", "warehouse_code": "MY-01"},
+    )
+    assert resp.status_code == 200, resp.text
+    row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
+    # 分子 = 采购 10 + 尾程 5（0kg 起不封顶，SKU 重 0.5kg）
+    # 分母 = 1 − 0.2727 + 0.10(尾程拆分) − 0.0606 − 0.0467 − 0.0158 − 0.25 = 0.4542
+    assert row["min_selling_price"] == pytest.approx(33.03, abs=0.01)
+    assert row["delivery_cost_in_cost_floor"] is True
+    assert row["cost_floor_delivery_cost"] == pytest.approx(5.0)
+    assert row["cost_floor_delivery_cost_rate"] == pytest.approx(0.10)
+    assert row["min_selling_price_missing_reasons"] == []
 
 
 @pytest.mark.asyncio
@@ -858,8 +892,8 @@ async def test_estimate_below_floor_is_rejected_but_draft_is_not(
     row = rows[0]
     assert "min_selling_price" in row
     assert row["min_selling_price"] is not None
-    # seed 的期望数值：成本线 10/0.3542 = 28.23 > 纪律线 30*0.9 = 27.00
-    assert row["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+    # seed 的期望数值：成本线 (采购 10 + 尾程 5) ÷ 0.4542 = 33.03 > 纪律线 30*0.9 = 27.00
+    assert row["min_selling_price"] == pytest.approx(33.03, abs=0.01)
     assert row["min_selling_price_source"] == "cost_floor"
     # 库龄表在测试库不存在 -> 回落「日常」档
     assert row["pricing_tier_source"] == "fallback_no_restock_days"
@@ -907,6 +941,9 @@ async def test_estimate_above_floor_saves_successfully(
 
     ⚠️ 批次 2 P2：保存利润版本**必须**给一个广告费口径（目标 ROI 或显式的广告分成率）——
     「广告费不可算 ⇒ 利润空白」的利润版本没有意义，存下来只会误导事后复盘。
+
+    ⚠️ 批次 4：尾程进利润后保本 ROI 从 2.19 抬到 3.66 ⇒ 目标 ROI 必须跟着抬，
+    否则会被「低于保本线」拦下（这正是尾程该起的作用）。
     """
     await pricing_seed()
 
@@ -919,7 +956,7 @@ async def test_estimate_above_floor_saves_successfully(
             "warehouse_code": "MY-01",
             "transport_type": "sea",
             "expected_selling_price": 35,
-            "target_roi": 3,
+            "target_roi": 4,
         },
     )
     assert ok.status_code == 201, ok.text
@@ -1005,6 +1042,9 @@ def test_creator_commission_is_deducted_from_profit():
         expected_ad_rate=Decimal("0"),
         return_rate=Decimal("0"),
         damage_rate=Decimal("0"),
+        # 尾程配送费（批次 4）：本用例只测达人佣金，尾程按 0 传入（显式给 0 = 尾程免费），
+        # 让被测口径（佣金扣减）不受尾程影响。
+        delivery_cost=Decimal("0"),
     )
     without = build_platform_profit_preview(**common)
     with_commission = build_platform_profit_preview(
@@ -1037,6 +1077,8 @@ def test_creator_commission_none_does_not_block_profit():
         expected_ad_rate=Decimal("0"),
         return_rate=Decimal("0"),
         damage_rate=Decimal("0"),
+        # 尾程配送费（批次 4）：本用例只测「佣金缺失不阻断利润」，尾程按 0 传入。
+        delivery_cost=Decimal("0"),
     )
     assert result["expected"]["profit"] == Decimal("40.00")
     assert result["expected"]["creator_commission"] == Decimal("0")

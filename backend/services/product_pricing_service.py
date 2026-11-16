@@ -44,14 +44,44 @@ def compute_cost_floor(
     spu_return_loss_rate,
     spu_damage_rate,
     target_margin_rate,
+    delivery_cost=None,
+    delivery_cost_rate=None,
 ) -> Optional[Decimal]:
-    """采购成本反解出的保价底线；分母非正时返回 None。"""
+    """采购成本反解出的保价底线；分母非正时返回 None。
+
+    尾程配送费（批次 4）
+    ------------------
+    ``other_cost_rate`` 是**残差桶**（从实测净利率反推），桶里**已经含运费** ——
+    平台的利润列扣过实际运费（生产库实测：TikTok ``总费用`` 内含 ``实际运费``，
+    Shopee ``卖家支付运费`` 直接从结算里扣）。
+
+    批次 4 起尾程按 SKU 重量单件计价，要把它放进底线的分子。若分母里那份
+    「按收入摊的尾程」不同时剔掉 ⇒ **同一笔尾程扣两次**，底线被抬高。
+
+    所以尾程**成对生效**：``delivery_cost``（元/件）与 ``delivery_cost_rate``
+    （尾程占收入比）**必须同时有值**才进底线：
+
+    - 分子 = 采购成本 + 尾程配送费
+    - 分母 = 1 − other_cost_rate **+ delivery_cost_rate** − 达人 − 货损 − 退货 − 目标利润率
+
+    缺任何一个 ⇒ **尾程不进底线**（宁可不算，也不重复扣），由调用方把
+    缺失原因报出去（``missing_delivery_cost`` / ``missing_delivery_cost_rate_split``）。
+    """
     cost = _decimal(purchase_cost)
     if cost is None:
         return None
+    delivery_applied = delivery_cost is not None and delivery_cost_rate is not None
+    numerator = cost + (
+        (_decimal(delivery_cost) or Decimal("0")) if delivery_applied else Decimal("0")
+    )
     denominator = (
         Decimal("1")
         - (_decimal(other_cost_rate) or Decimal("0"))
+        + (
+            (_decimal(delivery_cost_rate) or Decimal("0"))
+            if delivery_applied
+            else Decimal("0")
+        )
         - (_decimal(creator_commission_rate) or Decimal("0"))
         - (_decimal(spu_return_loss_rate) or Decimal("0"))
         - (_decimal(spu_damage_rate) or Decimal("0"))
@@ -59,7 +89,7 @@ def compute_cost_floor(
     )
     if denominator <= 0:
         return None
-    return _money(cost / denominator)
+    return _money(numerator / denominator)
 
 
 def compute_discount_guard(
@@ -135,6 +165,8 @@ def compute_sku_pricing(
     deepest_policy,
     min_selling_price_override,
     days_since_restock=None,
+    delivery_cost=None,
+    delivery_cost_rate=None,
 ) -> dict:
     """单个 SKU 的完整定价字段。**纯函数**：无 ORM、无 DB、无 I/O。
 
@@ -148,6 +180,11 @@ def compute_sku_pricing(
 
     `spu_bound` 与两个 SPU 率分开传，是为了区分两种缺料：
     没绑 SPU -> `missing_spu_binding`；绑了但率没维护 -> `missing_spu_rates`。
+
+    尾程配送费（批次 4）：`delivery_cost` 是这个 SKU 的**单件尾程**（元），
+    `delivery_cost_rate` 是**平台级**的尾程占收入比（拆分基准）。
+    两者**成对生效**才进成本底线（见 `compute_cost_floor` 的口径说明）：
+    只有一个 ⇒ 尾程不进底线，并把缺的那一半报进 `missing_reasons`。
     """
     missing_reasons: list[str] = []
     cost_floor = None
@@ -156,6 +193,13 @@ def compute_sku_pricing(
     creator_rate = _decimal(creator_commission_rate)
     if creator_rate is None:
         creator_rate = _decimal(platform_creator_commission_rate)
+
+    # 尾程成对生效判定（与 compute_cost_floor 内部同一套规则，不允许两处各判一次）
+    delivery_applied = delivery_cost is not None and delivery_cost_rate is not None
+    if delivery_cost is None:
+        missing_reasons.append("missing_delivery_cost")
+    elif delivery_cost_rate is None:
+        missing_reasons.append("missing_delivery_cost_rate_split")
 
     if policy is None:
         missing_reasons.append("missing_pricing_policy")
@@ -192,6 +236,8 @@ def compute_sku_pricing(
                 spu_return_loss_rate=return_loss_rate,
                 spu_damage_rate=damage_rate,
                 target_margin_rate=policy["target_margin_rate"],
+                delivery_cost=delivery_cost if delivery_applied else None,
+                delivery_cost_rate=delivery_cost_rate if delivery_applied else None,
             )
             if cost_floor is None:
                 missing_reasons.append("non_positive_cost_denominator")
@@ -234,6 +280,16 @@ def compute_sku_pricing(
         "min_selling_price_is_override": pricing["is_override"],
         "min_selling_price_override": float(override) if override is not None else None,
         "min_selling_price_missing_reasons": all_reasons,
+        # 尾程配送费（批次 4）是否进了成本底线。
+        # ⚠️ 必须是「成对」才为 True：分子加了尾程，分母也剔掉了残差里的那份。
+        #    只有一边有值时为 False —— 此时尾程**没有**进底线（缺的那半边在 missing_reasons 里）。
+        "delivery_cost_in_cost_floor": delivery_applied,
+        "cost_floor_delivery_cost": (
+            float(_decimal(delivery_cost)) if delivery_applied else None
+        ),
+        "cost_floor_delivery_cost_rate": (
+            float(_decimal(delivery_cost_rate)) if delivery_applied else None
+        ),
         "pricing_tier_label": policy["tier_label"] if policy else None,
         # 档位的**身份** = 库龄起点（阶段 3）。
         # ⚠️ 为什么要有它：``tier_label`` 是**显示名**，是可以改的

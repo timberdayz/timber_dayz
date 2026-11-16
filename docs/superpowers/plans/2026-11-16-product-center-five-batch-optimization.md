@@ -115,7 +115,75 @@ upgrade → upgrade → downgrade → upgrade）。
 **批次 4 落地**：尾程进广告前利润；尾程进成本底线 `(采购+尾程)÷D`；拆
 `other_cost_rate` 里的运费；仓维度全线统一 4 处。
 
-**已知缺口**：费率**维护 UI** 未做（当前走 API / SQL 导入）；其余两类规则
+**批次 4 已落地（2026-11-16）**：
+
+| 项 | 内容 |
+|---|---|
+| 尾程进利润 | `build_platform_profit_preview` 新增 `delivery_cost` 参数 ⇒ 扣进广告前利润。**尾程算不出来 ⇒ 利润算不出来**（不是按 0 计：尾程不免费，按 0 计等于凭空多一笔利润） |
+| 尾程进底线 | `compute_cost_floor` 新增 `delivery_cost` + `delivery_cost_rate` ⇒ 分子加尾程、分母加回尾程占比 |
+| 拆分基准 | 新增 `core.dim_platforms.delivery_cost_rate`（尾程占收入比）+ 迁移 `20261234_delivery_cost_rate_split` + 「定价设置」可维护 |
+| 仓维度 | `/api/skus` 新增可选 `warehouse_code`；前端 SKU 资料页传当前仓 ⇒ 两页底线同口径 |
+| 费率维护 UI | 「物流仓储管理」新增「尾程费率」tab（平台 × 仓 × 重量段 → 单件价，可增删改） |
+| 守护 | `backend/tests/test_product_delivery_cost_floor.py`（13 条）+ 前端 4 条 |
+
+### 批次 4 的关键判定：尾程**在** `other_cost_rate` 残差桶里（生产库实测）
+
+`other_cost_rate` 是**恒等式反推的残差桶**：
+
+```
+other_cost_rate = 1 − 实测采购成本率 − 实测净利率 − 平均 SPU 退货损失率 − 平均 SPU 货损率 − 默认达人佣金率
+```
+
+「实测净利率」来自平台订单事实表的 `利润` 列，而平台的 `利润` **已经扣过运费**。
+生产库 2026-11-16 只读实测（`b_class.fact_tiktok_orders_monthly` / `fact_shopee_orders_monthly`）：
+
+- TikTok：`总费用 = −298,780.69`，其中 `|实际运费| 178,848.23 + |交易手续费| 27,557.05 + |达人佣金| 64,344.13 + |联盟佣金| 3,332.43 = 274,081.84`，
+  残差 `24,698.85` 正好是平台佣金 ⇒ **`实际运费` 确实在「总费用」里** ⇒ 已从利润扣除 ⇒ 在残差桶内。
+- Shopee：`卖家支付运费 = −1,121,042.21`（卖家从结算里扣的那笔）⇒ 同样在利润侧。
+
+⇒ **尾程进底线的分子时，必须同时把残差里按收入摊的那份尾程剔出去，否则同一笔尾程扣两次。**
+
+### 成对生效（钉死的硬规则）
+
+```
+分子 = 采购成本 + 尾程配送费
+分母 = 1 − 平台其他成本率 + 尾程占收入比 − 达人佣金率 − 货损率 − 退货率 − 目标利润率
+```
+
+`delivery_cost` 与 `delivery_cost_rate` **必须同时有值**才生效：
+
+| 情况 | 分子 | 分母 | 结果 |
+|---|---|---|---|
+| 两个都有 | +尾程 | +尾程占比 | 尾程进底线（不重复扣） |
+| 只有尾程 | 不加 | 不加 | 尾程不进底线（缺 `missing_delivery_cost_rate_split`） |
+| 只有占比 | 不加 | 不加 | 尾程不进底线（缺 `missing_delivery_cost`） |
+
+少任何一半都**不进底线**（宁可不算，也不重复扣），并在 `min_selling_price_missing_reasons` 里点名缺了什么。
+
+### 为什么 `delivery_cost_rate` **不预置种子值**
+
+尾程占比的权威口径是「**我们自己的费率表**算出来的平台尾程均值 ÷ 平台平均售价」
+（费率表是尾程的唯一真源，分子里的尾程也出自它 ⇒ 两边天然配对）。
+
+而批次 3 刚建的 `finance.delivery_rate_rules` **目前没有任何费率数据**；
+用平台订单事实表反推的运费占比又**混着头程**（平台的运费线 = 国内派送 + 国际头程），
+拿它当尾程拆分会把头程也从残差里一并剔掉 ⇒ 底线偏低 ⇒ 危险。
+
+⇒ **列先建好、语义定死、留空**：业务维护好尾程费率后，在「定价设置」里填这个平台级拆分比例，
+尾程即进入成本底线。留空时**尾程不进成本底线**，界面上明确标「未计入底线」。
+
+### 仓维度统一 4 处（批次 4 实际完成 2 处，另 2 处并入批次 5）
+
+| # | 项 | 状态 |
+|---|---|---|
+| 1 | `list_skus` 加仓参数 | 批次 4：`warehouse_code` 可选参数；**不传仓就不取尾程档位**（不同仓的价不同，不能猜一个仓的价） |
+| 2 | `ops.price_adjust_baselines` 主键加 `warehouse_code` | 并入批次 5（属调价通知链，需要改主键 + 迁移） |
+| 3 | `price_adjust_notify_service` 按 (平台×仓) 循环、只对有库存的仓发 | 并入批次 5（同上） |
+| 4 | 人工覆盖表 `sku_platform_pricing` **不下沉**到仓 | 批次 4 确认保持现状（人工覆盖是「SKU × 平台」的量；仓维度由底线口径承担） |
+
+**已知缺口**：费率维护 UI 批次 4 已补（「物流仓储管理」→「尾程费率」tab）。
+
+**已知缺口**：费率维护 UI 批次 4 已补（「物流仓储管理」→「尾程费率」tab）；其余两类规则
 （物流服务商规则、仓储规则）在「物流仓储管理」tab 里有表格可维护。
 
 ---
@@ -127,16 +195,76 @@ upgrade → upgrade → downgrade → upgrade）。
 - `cost_completeness` 两套值域（`complete/partial/incomplete` vs `incomplete/estimated/mixed/actual`）统一
 - `last_mile_cost` 标签改名：它是头程账单内的分段（港→仓），**不是买家快递**；UI 标签改「头程末端派送」，新概念叫「尾程配送费」
 
+**批次 5 已落地（2026-11-16）**：
+
+| 项 | 内容 |
+|---|---|
+| 老链路 revenue | 批次 1 已做完：`build_baseline_profit` 的 `revenue = 售价`，不再二次扣券；`preview_operating_profit` 走 `preview_profit` ⇒ 自动同口径 |
+| 第三份 profit 实现 | 新增纯函数 `product_profit_service.build_profit_from_components`（收入 − 6 项成本 = 利润，利润率 = 利润 ÷ 收入）；`build_baseline_profit`（费率口径）与 `POST /api/product-profit-estimates`（金额口径）**都收口到它**，路由不再自己写一遍加减法 |
+| 完整度值域 | **不用改代码**：`cost_completeness`（complete/partial/incomplete）与 `actual_recost_completeness`（incomplete/estimated/mixed/actual）是**两个独立列，各有 CHECK**（迁移 `20261114_add_sku_roi_columns.py`，约束名 `ck_sku_profit_estimate_cost_completeness` / `ck_sku_profit_estimate_actual_completeness`）。它们量的是两件不同的事，混进一列才是 bug |
+| `last_mile_cost` 标签 | 物流账单明细页「尾程」→「**头程末端派送**」，并在表头写清它是头程账单内的分段（港→仓），与商品中心的新概念「尾程配送费」（仓→买家）区分开 |
+| 调价通知仓维度 | 见下表 |
+
+### 调价通知链下沉到仓维度（批次 5 落地）
+
+底线拆到仓之后，通知链必须跟着走，否则 A 仓的底线变化会被记成所有仓的变化。
+
+| 位置 | 改动 |
+|---|---|
+| `ops.price_adjust_baselines` 主键 | `(sku_id, platform_code)` → `(sku_id, platform_code, warehouse_code)`；迁移 `20261235_price_adjust_baseline_warehouse`，老行回填**空串** |
+| `collect_pricing_states` | 键改 3 元组；按「平台 × **有库存的仓**」循环；每个仓用**自己的库龄**算档位；尾程按「平台 × 仓 × 重量段」算 |
+| `load_baselines` / `detect_changes` / `advance_baselines` / `advance_baseline_for_sku` | 全部按 3 元组键读写 |
+| 归因快照 | 新增 `warehouse_code` / `delivery_cost` / `delivery_cost_rate` |
+| 飞书「调价记录表」 | 去重键带仓（`sku:platform:warehouse`）；payload 带仓；行里写进「备注」=「仓库：XXX」（表里没有「仓库」列 —— 那是外部 Base 的固定结构，不能擅自加列） |
+
+**老基线自动失效，而且这是有意的**：老行 `warehouse_code = ''`，与任何真实仓都对不上 ⇒ 不会被拿来和新状态比较
+⇒ **不会误报一批「底线变了」**。代价是上线后第一轮只重建基线、不通知 —— 安全的方向（宁可少报，不可错报）。
+
+**仓维度数据整体缺失时**（状态层不可用 / 库存表为空）退回「SKU × 平台」口径（空串仓），
+行为与批次 4 之前逐字一致 —— 宁可少一个维度，也不能什么都不通知。
+
+### 顺手修掉的既有缺陷：通知去重闸把「第二次变化」吞掉了
+
+去重闸原来只看 `business_key`（且把 `completed` 也算进「在途」）。同一个 SKU × 平台的底线会**反复变**
+（今天涨、明天跌），于是第一次通知之后，这个键**永远**不会再通知 ⇒ 通知表退化成一次性快照，后续真实变化全被静默吞掉。
+
+真正的「重复」是**同一次变化** —— 它的 payload 逐字相同 ⇒ 哈希相同。所以判据改成
+**「去重键 + 载荷哈希」双因子**（`ops.feishu_projection_tasks` 的唯一约束本来就是
+`uq_feishu_projection_task_payload (entity_type, business_key, payload_hash)`，闸与约束对齐）。
+
+### 批次 4/5 引起的既有测试调整（不是改断言口径，是补输入）
+
+「尾程算不出来 ⇒ 利润链算不出来」这条规则会让**所有**没传 `delivery_cost` 的
+`build_platform_profit_preview` 调用返回 `None`。下面这些用例验的是**别的口径**
+（广告费 / 贴单费 / 完整度 / ROI 分母），与尾程无关 ⇒ 显式给 `delivery_cost=0`（= 没有尾程）：
+
+| 文件 | 调整 |
+|---|---|
+| `test_product_target_roi_backfill.py` | `_inputs()` 补 `delivery_cost=Decimal("0")` |
+| `test_product_roi_guardrails_v2.py` / `test_product_revenue_caliber.py` | 同上（批次 4 已做） |
+| `test_platform_sku_profit_workbench.py` | 9 处直接调用补 `delivery_cost` |
+| `test_product_profit_calculator.py` / `test_sku_roi_guard.py` | `_preview` / `_preview_inputs` 补 `delivery_cost` |
+| `test_product_roi_service.py` | 1 处直接调用补 `delivery_cost` |
+| `test_sku_selling_price_tools.py` / `test_sku_operating_dimensions.py` | 假平台补 `delivery_cost_rate=None` 字段 |
+
+仓维度引起的调整：
+
+| 文件 | 调整 |
+|---|---|
+| `test_price_adjust_notification.py` | 2 元组键 → 3 元组键；SQLite fixture 补 `finance.delivery_rate_rules` |
+| `test_sku_platform_pricing.py` | 状态/基线键改 3 元组；**历史迁移测试**按仓库既有范式「自己摆出迁移前的样子」（`_restore_pre_migration_baseline_shape`），因为隔离库已经是 head |
+| `test_sku_platform_pricing_override.py` | 依赖上面那个测试把隔离库复原到 head |
+
 ---
 
 ## 6. 已知阻塞与软依赖
 
 | 项 | 影响 | 处理 |
 |---|---|---|
-| 生产库 `other_cost_rate` 运费占比未实测 | 批次 4 拆运费的依据 | 需生产库执行倒推 SQL（开发库订单表 0 行，测不了） |
 | 1125 个 SKU 权重 0% | 尾程进底线后大量降级为 `estimated` | 需业务补录重量（批次 3 把重量改必填 + 表头改黑，为补录做准备） |
 | `VERSION` 文件 v7.28.0 vs 最新 tag v7.30.0 | 发布版本号 | 发布前核对真源，与 tag 同提交 bump |
 | `alembic.ini` 指向只读历史链 | 迁移命令跑错链 | **既有问题，批次外记录**，不趁机改 |
+| 飞书 SKU 镜像表列名「尾程单位成本 RMB」 | 它指的是**头程账单内**的末端派送分段，与商品中心新概念「尾程配送费」同名不同义 | **不动**（外部 Base 的固定列，改名会直接让投影写入失败）；只在 ERP 代码注释里写清区别 |
 
 ---
 

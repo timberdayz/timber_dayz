@@ -48,6 +48,9 @@ def _inputs(**overrides):
         creator_commission_rate=Decimal("0.05"),
         roi_safety_margin=Decimal("0.20"),
         target_roi_ceiling=Decimal("50"),
+        # 尾程配送费（批次 4）：本文件只守护 ROI/广告费口径，尾程按 0 传入
+        # （显式给 0 = 尾程免费，避免它把利润链算成不可算、遮住被测口径）。
+        delivery_cost=Decimal("0"),
     )
     base.update(overrides)
     return base

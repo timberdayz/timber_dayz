@@ -583,6 +583,12 @@ class SkuItem(BaseModel):
     min_selling_price_is_override: Optional[bool] = None
     min_selling_price_override: Optional[float] = None
     min_selling_price_missing_reasons: list[str] = Field(default_factory=list)
+    # --- 尾程配送费是否进了成本底线（批次 4）---
+    # ⚠️ 必须「成对」才为 True：分子加了尾程，分母也剔掉了 other_cost_rate 里那份。
+    #    只有一边有值时为 False —— 尾程**没有**进底线（缺的那半边在 missing_reasons 里）。
+    delivery_cost_in_cost_floor: Optional[bool] = None
+    cost_floor_delivery_cost: Optional[float] = None
+    cost_floor_delivery_cost_rate: Optional[float] = None
     pricing_tier_label: Optional[str] = None
     pricing_days_since_restock: Optional[int] = None
     pricing_tier_source: Optional[str] = None
@@ -697,6 +703,9 @@ class PlatformFeeRateUpdateRequest(BaseModel):
     # 平台成本率：底线计算的成本基数来源
     default_creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
     other_cost_rate: Optional[float] = Field(default=None, ge=0, lt=1)
+    # 尾程配送费占收入比（批次 4）：把尾程从 other_cost_rate 残差桶里剔出去的**拆分基准**。
+    # 留空 ⇒ 尾程**不进成本底线**（宁可不算，也不重复扣）。
+    delivery_cost_rate: Optional[float] = Field(default=None, ge=0, lt=1)
 
 
 class PlatformFeeRateResponse(BaseModel):
@@ -712,6 +721,8 @@ class PlatformFeeRateResponse(BaseModel):
     default_fee_rate: Optional[float] = None
     default_creator_commission_rate: Optional[float] = None
     other_cost_rate: Optional[float] = None
+    # 尾程配送费占收入比（批次 4）：尾程进成本底线的拆分基准。
+    delivery_cost_rate: Optional[float] = None
     fee_rate_effective_from: Optional[date] = None
     fee_rate_source: Optional[str] = None
     fee_rate_version: Optional[str] = None
@@ -1342,6 +1353,12 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     min_selling_price_is_override: Optional[bool] = None
     min_selling_price_override: Optional[float] = None
     min_selling_price_missing_reasons: list[str] = Field(default_factory=list)
+    # --- 尾程配送费是否进了成本底线（批次 4）---
+    # ⚠️ 必须「成对」才为 True：分子加了尾程，分母也剔掉了 other_cost_rate 里那份。
+    #    只有一边有值时为 False —— 尾程**没有**进底线（缺的那半边在 missing_reasons 里）。
+    delivery_cost_in_cost_floor: Optional[bool] = None
+    cost_floor_delivery_cost: Optional[float] = None
+    cost_floor_delivery_cost_rate: Optional[float] = None
     pricing_tier_label: Optional[str] = None
     pricing_days_since_restock: Optional[int] = None
     pricing_tier_source: Optional[str] = None

@@ -115,6 +115,9 @@ def _preview(**overrides):
         "return_rate": Decimal("0"),
         "damage_rate": Decimal("0"),
         "creator_commission_rate": None,
+        # 批次 4：尾程算不出来 ⇒ 利润链算不出来（不是按 0 计）。
+        # 这组用例验的是完整度口径，与尾程无关 ⇒ 显式给 0。
+        "delivery_cost": Decimal("0"),
     }
     payload.update(overrides)
     return build_platform_profit_preview(**payload)

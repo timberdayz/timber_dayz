@@ -127,6 +127,7 @@ from backend.services.product_finance_service import (
 )
 from backend.services.product_profit_service import (
     build_platform_profit_preview,
+    build_profit_from_components,
     reference_storage_days,
 )
 from backend.services.product_pricing_service import (
@@ -1692,7 +1693,12 @@ async def bulk_save_spus(
 # 口径一致是**结构性保证**（同一个函数被两边调用），不是靠一条容易跳过的 DB 测试。
 
 
-def _pricing_by_platform(context: dict, sku_row, linked_spu) -> dict[str, dict]:
+def _pricing_by_platform(
+    context: dict,
+    sku_row,
+    linked_spu,
+    delivery_costs: dict | None = None,
+) -> dict[str, dict]:
     """**各可定价平台**各自的底线与人工覆盖（阶段 2.1b）。
 
     前端要「按平台分行」展示与编辑人工覆盖，就必须一次拿到所有可定价平台的数 ——
@@ -1700,6 +1706,9 @@ def _pricing_by_platform(context: dict, sku_row, linked_spu) -> dict[str, dict]:
 
     这里走的是**同一个**计算函数（``compute_pricing_state``），
     所以每一行的数字与「按该平台单独查一次」必然一致 —— 不存在第二份口径。
+
+    ⚠️ ``delivery_costs``（批次 4）是**按平台**给的单件尾程：
+    尾程费率是「平台 × 仓」粒度的，TikTok 的尾程不能套到 Shopee 上。
     """
     out: dict[str, dict] = {}
     for code in context.get("priceable_platform_codes") or []:
@@ -1708,6 +1717,7 @@ def _pricing_by_platform(context: dict, sku_row, linked_spu) -> dict[str, dict]:
             sku_row=sku_row,
             linked_spu=linked_spu,
             platform_code=code,
+            delivery_cost=(delivery_costs or {}).get(code),
         )["pricing"]
         out[code] = {
             "min_selling_price": pricing.get("min_selling_price"),
@@ -1716,6 +1726,7 @@ def _pricing_by_platform(context: dict, sku_row, linked_spu) -> dict[str, dict]:
             "min_selling_price_is_override": pricing.get(
                 "min_selling_price_is_override"
             ),
+            "delivery_cost_in_cost_floor": pricing.get("delivery_cost_in_cost_floor"),
         }
     return out
 
@@ -1767,6 +1778,13 @@ async def list_skus(
     platform_code: str | None = Query(
         None,
         description="按哪个平台算定价底线（底线是 SKU × 平台的量）；不传则回落到历史 basis 平台",
+    ),
+    warehouse_code: str | None = Query(
+        None,
+        description=(
+            "按哪个仓算尾程配送费（批次 4：底线是 SKU × 平台 × 仓的量，尾程按仓定价）。"
+            "不传 ⇒ 尾程算不出来 ⇒ 尾程不进底线（缺失原因会点名）"
+        ),
     ),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -1867,8 +1885,38 @@ async def list_skus(
     # ⚠️ 底线是「SKU × 平台」的量 ⇒ 费率按传入的平台取；
     #    不传平台时回落到历史 basis 平台（前端应始终传平台）。
     pricing_context = await _pricing_context(
-        db, [row.sku_id for row in rows], [platform_code] if platform_code else None
+        db,
+        [row.sku_id for row in rows],
+        [platform_code] if platform_code else None,
+        warehouse_code,
     )
+    # 尾程配送费（批次 4）：底线含尾程 ⇒ 尾程也按「平台 × 仓 × 重量」算。
+    # ⚠️ 费率表是**平台 × 仓**粒度的 ⇒ 每个可定价平台各取一份档位，
+    #    绝不能拿 TikTok 的尾程套到 Shopee 的底线上。
+    # ⚠️ 不传仓 ⇒ 尾程算不出来（不同仓的尾程价不同，不能猜）⇒ 尾程不进底线，
+    #    缺失原因 `missing_delivery_cost` 会点名，界面据此提示。
+    effective_platform = _pricing_platform_code(pricing_context, platform_code)
+    platform_codes_for_delivery = sorted(
+        set(pricing_context.get("priceable_platform_codes") or [])
+        | ({effective_platform} if effective_platform else set())
+    )
+    finance = ProductFinanceService(db)
+    delivery_tiers_by_platform: dict[str, list] = {}
+    delivery_fallback_by_platform: dict[str, list] = {}
+    if warehouse_code:
+        # ⚠️ **不传仓就不取档位**：费率表是「平台 × 仓」粒度的，
+        #    不指定仓却拿某个仓的价 = 偷用了一个运营没选的仓（可能还偏便宜）。
+        #    宁可不算尾程（缺失原因会点名），也不能给一个没来由的价。
+        for code in platform_codes_for_delivery:
+            delivery_tiers_by_platform[code] = await finance.find_delivery_rate_tiers(
+                code, warehouse_code
+            )
+        if not any(row.weight_kg is not None for row in rows):
+            # 整页都缺重量 ⇒ 缺重量降级要用「最贵仓」，这时才去取该平台所有仓的档位。
+            for code in platform_codes_for_delivery:
+                delivery_fallback_by_platform[code] = (
+                    await finance.find_delivery_rate_tiers(code)
+                )
     items = []
     for row in rows:
         payload = SkuItem.model_validate(row).model_dump()
@@ -1910,21 +1958,30 @@ async def list_skus(
                 ),
             }
         )
+        delivery_by_platform = {
+            code: compute_delivery_cost(
+                tiers,
+                row.weight_kg,
+                fallback_tiers=delivery_fallback_by_platform.get(code) or (),
+            ).amount
+            for code, tiers in delivery_tiers_by_platform.items()
+        }
         payload.update(
             _compute_pricing_for_sku(
                 context=pricing_context,
                 sku_row=row,
                 linked_spu=linked_spu,
                 platform_code=platform_code,
+                # 尾程配送费（批次 4）：进成本底线分子。
+                # ⚠️ 与平台级尾程占比拆分基准**成对生效**才进底线（缺一半就都不进）。
+                delivery_cost=delivery_by_platform.get(effective_platform),
             )
         )
         # 这条底线是按哪个平台的成本率算的（前端要显示，别让人误以为是 SKU 级的数）
-        payload["min_selling_price_platform"] = _pricing_platform_code(
-            pricing_context, platform_code
-        )
+        payload["min_selling_price_platform"] = effective_platform
         # 各可定价平台各自的底线与人工覆盖（阶段 2.1b：前端按平台分行）
         payload["min_selling_price_by_platform"] = _pricing_by_platform(
-            pricing_context, row, linked_spu
+            pricing_context, row, linked_spu, delivery_costs=delivery_by_platform
         )
         # 阶段 4 工具 4 · 过期巡检：基准售价多久没确认了。
         # 纯计算，不查订单数据 ⇒ 列表接口零额外开销。
@@ -3954,6 +4011,8 @@ async def update_platform_fee_rate(
         "default_fee_rate": row.default_fee_rate,
         "default_creator_commission_rate": row.default_creator_commission_rate,
         "other_cost_rate": row.other_cost_rate,
+        # 尾程配送费占收入比（批次 4）：尾程进成本底线的拆分基准
+        "delivery_cost_rate": row.delivery_cost_rate,
         "fee_rate_effective_from": row.fee_rate_effective_from,
         "fee_rate_source": row.fee_rate_source,
         "fee_rate_version": row.fee_rate_version,
@@ -4491,6 +4550,8 @@ async def list_sku_operating_dimensions(db: AsyncSession = Depends(get_async_db)
                 # 定价抽屉的「成本率合计 / 底线基数」要用的两个成本率
                 "default_creator_commission_rate": row.default_creator_commission_rate,
                 "other_cost_rate": row.other_cost_rate,
+                # 尾程配送费占收入比（批次 4）：尾程进成本底线的拆分基准
+                "delivery_cost_rate": row.delivery_cost_rate,
             }
             for row in platforms
         ],
@@ -4758,6 +4819,10 @@ async def list_platform_sku_profit_candidates(
             damage_rate=assigned.logistics_damage_rate if assigned else None,
             # 达人佣金：SKU 自己设的值优先，否则用所选平台的默认兜底
             creator_commission_rate=creator_commission_rate,
+            # 尾程配送费（批次 4）：按 SKU 重量 + 当前仓费率算出来的**单件**尾程。
+            # ⚠️ 算不出来（没配费率 / 重量档位歧义）时传 None ⇒ 广告前利润/利润算不出来，
+            #    **不是 0** —— 尾程不免费，按 0 计等于凭空多一笔利润。
+            delivery_cost=delivery_result.amount,
             # 平台级 ROI 配置（阶段 1）：安全边际 + 平台可填上限
             roi_safety_margin=platform.roi_safety_margin,
             target_roi_ceiling=platform.target_roi_ceiling,
@@ -4863,6 +4928,9 @@ async def list_platform_sku_profit_candidates(
             sku_row=row,
             linked_spu=assigned,
             platform_code=platform_code,
+            # 尾程配送费（批次 4）：进成本底线分子。
+            # ⚠️ 与平台级尾程占比拆分基准**成对生效**才进底线（缺一半就都不进）。
+            delivery_cost=delivery_result.amount,
         )
         pricing_payload["min_selling_price_platform"] = platform_code
         floor = pricing_payload["min_selling_price"]
@@ -6115,21 +6183,24 @@ async def create_profit_estimate(
         raise HTTPException(status_code=404, detail="SKU not found")
     values = body.model_dump()
     # 商家实收 = 售价（2026-11-16 口径归一）：不再二次扣券。
-    revenue = values.get("selling_price") or 0
-    costs = sum(
-        values.get(key) or 0
-        for key in (
-            "purchase_cost",
-            "logistics_cost",
-            "storage_cost",
-            "platform_fee",
-            "expected_return_loss",
-            "expected_damage_loss",
-        )
+    # ⚠️ 算术收口到 `build_profit_from_components`（批次 5）：
+    #    这里以前自己写了一遍「收入减成本」，与 `build_baseline_profit` 各算各的，
+    #    口径一改就得改两处。
+    profit = build_profit_from_components(
+        revenue=values.get("selling_price"),
+        purchase_cost=values.get("purchase_cost"),
+        logistics_cost=values.get("logistics_cost"),
+        storage_cost=values.get("storage_cost"),
+        platform_fee=values.get("platform_fee"),
+        return_loss=values.get("expected_return_loss"),
+        damage_loss=values.get("expected_damage_loss"),
     )
-    values["estimated_contribution_profit"] = revenue - costs
+    values["estimated_contribution_profit"] = profit["estimated_contribution_profit"]
+    # 收入 ≤ 0 ⇒ 利润率算不出来（None），不是 0。
     values["estimated_margin_rate"] = (
-        (revenue - costs) / revenue if revenue > 0 else None
+        profit["estimated_margin_rate"]
+        if (values.get("selling_price") or 0) > 0
+        else None
     )
     row = SkuProfitEstimate(**values)
     db.add(row)

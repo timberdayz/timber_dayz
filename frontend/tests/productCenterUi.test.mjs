@@ -1032,3 +1032,56 @@ test("「仅有库存」筛选默认打开，且在后端做", () => {
     /only_in_stock: operatingQuery\.only_in_stock/,
   );
 });
+// ---------------------------------------------------------------------------
+// 批次 4 · 尾程配送费（2026-11-16）
+// ---------------------------------------------------------------------------
+
+test("尾程费率可维护：平台 × 仓 × 重量段 → 单件尾程费", () => {
+  // 尾程是必付成本：没有可维护的入口，业务就没法把费率录进来
+  // ⇒ 尾程算不出来 ⇒ 利润链整条算不出来（不是按 0 计）。
+  assert.match(api, /listDeliveryRateRules/);
+  assert.match(api, /createDeliveryRateRule/);
+  assert.match(api, /updateDeliveryRateRule/);
+  assert.match(api, /deleteDeliveryRateRule/);
+  assert.match(source, /新增尾程费率/);
+  assert.match(source, /尾程配送费/);
+});
+
+test("定价设置里能维护尾程占收入比（尾程进底线的拆分基准）", () => {
+  assert.match(source, /delivery_cost_rate_pct/);
+  assert.match(source, /delivery_cost_rate: fromPercent/);
+  // 口径说明必须写在界面上：为什么留空就不进底线
+  assert.match(source, /尾程占收入比/);
+});
+
+test("测算页说清尾程有没有进成本底线", () => {
+  // 尾程进底线必须成对（分子加尾程 ⇔ 分母剔残差里那份），
+  // 只进一边就是重复扣 —— 界面必须让运营看得见当前是哪种状态。
+  assert.match(source, /已计入底线/);
+  assert.match(source, /未计入底线/);
+  assert.match(source, /delivery_cost_in_cost_floor/);
+});
+
+test("SKU 资料页的底线与测算页同口径：按当前仓算尾程", () => {
+  assert.match(source, /warehouse_code: operatingQuery\.warehouse_code \|\| undefined/);
+});
+
+// ---------------------------------------------------------------------------
+// 批次 5 遗留收口：头程账单内的分段改名（2026-11-16）
+// ---------------------------------------------------------------------------
+
+test("头程账单里的 last_mile_cost 改名成「头程末端派送」，不再叫「尾程」", () => {
+  // ⚠️ 它是**头程账单内**的分段（港 → 仓），**不是买家快递**。
+  //    商品中心的新概念「尾程配送费」= 仓 → 买家那段快递费。
+  //    同一个界面里两个都叫「尾程」⇒ 运营会把两笔不同的钱当成同一笔。
+  assert.match(source, /label="头程末端派送"/);
+  assert.match(source, /v-model="row\.last_mile_cost"/);
+  // 旧的「尾程」列名必须已经消失（注意：不能误伤「尾程配送费」）
+  assert.doesNotMatch(source, /label="尾程"/);
+});
+
+test("改名后仍能看出头程账单三段与尾程配送费的区别", () => {
+  // 界面上必须写清区别，否则改名等于没改
+  assert.match(source, /头程末端派送/);
+  assert.match(source, /尾程配送费/);
+});

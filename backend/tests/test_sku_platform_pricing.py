@@ -116,6 +116,8 @@ async def pricing_sqlite_session():
         "core.bridge_spu_sku",
         "finance.sku_pricing_policies",
         "finance.sku_platform_pricing",
+        # 批次 4：通知侧要按「平台 × 仓 × 重量段」取尾程费率
+        "finance.delivery_rate_rules",
         "ops.price_adjust_baselines",
     )
     engine = create_async_engine("sqlite+aiosqlite://")
@@ -472,8 +474,14 @@ async def test_override_is_flagged_as_manual_override(pricing_sqlite_session):
 
 
 @pytest.mark.asyncio
-async def test_baselines_are_keyed_by_sku_and_platform(pricing_sqlite_session):
-    """状态与基线都按 ``(sku_id, platform_code)`` 归位。"""
+async def test_baselines_are_keyed_by_sku_platform_and_warehouse(
+    pricing_sqlite_session,
+):
+    """状态与基线都按 ``(sku_id, platform_code, warehouse_code)`` 归位。
+
+    ⚠️ 批次 4 仓维度统一：底线是「SKU × 平台 × 仓」的量（尾程按仓计价）。
+    SQLite 上没有 mart 库龄表 ⇒ 仓维度数据整体缺失 ⇒ 退回空串仓口径。
+    """
     from modules.core.db import PriceAdjustBaseline
 
     session = pricing_sqlite_session
@@ -481,7 +489,7 @@ async def test_baselines_are_keyed_by_sku_and_platform(pricing_sqlite_session):
 
     service = PriceAdjustNotifyService(session)
     states = await service.collect_pricing_states()
-    assert set(states) == {(sku_id, "tiktok"), (sku_id, "shopee")}
+    assert set(states) == {(sku_id, "tiktok", ""), (sku_id, "shopee", "")}
 
     notify, silent = await service.detect_changes()
     assert notify == []
@@ -490,16 +498,16 @@ async def test_baselines_are_keyed_by_sku_and_platform(pricing_sqlite_session):
     await service.advance_baselines(silent)
 
     baselines = await service.load_baselines()
-    assert set(baselines) == {(sku_id, "tiktok"), (sku_id, "shopee")}
-    assert baselines[(sku_id, "tiktok")]["min_selling_price"] == TIKTOK_FLOOR
-    assert baselines[(sku_id, "shopee")]["min_selling_price"] == SHOPEE_FLOOR
+    assert set(baselines) == {(sku_id, "tiktok", ""), (sku_id, "shopee", "")}
+    assert baselines[(sku_id, "tiktok", "")]["min_selling_price"] == TIKTOK_FLOOR
+    assert baselines[(sku_id, "shopee", "")]["min_selling_price"] == SHOPEE_FLOOR
 
     # 库里也必须是两行（复合主键），不是一行
     rows = (await session.execute(select(PriceAdjustBaseline))).scalars().all()
     assert len(rows) == 2
-    assert {(row.sku_id, row.platform_code) for row in rows} == {
-        (sku_id, "tiktok"),
-        (sku_id, "shopee"),
+    assert {(row.sku_id, row.platform_code, row.warehouse_code) for row in rows} == {
+        (sku_id, "tiktok", ""),
+        (sku_id, "shopee", ""),
     }
 
 
@@ -549,8 +557,8 @@ async def test_platform_is_recorded_in_the_attribution_context(pricing_sqlite_se
     service = PriceAdjustNotifyService(session)
     states = await service.collect_pricing_states()
 
-    assert states[(sku_id, "tiktok")]["context"]["platform_code"] == "tiktok"
-    assert states[(sku_id, "shopee")]["context"]["platform_code"] == "shopee"
+    assert states[(sku_id, "tiktok", "")]["context"]["platform_code"] == "tiktok"
+    assert states[(sku_id, "shopee", "")]["context"]["platform_code"] == "shopee"
 
 
 # ---------------------------------------------------------------------------
@@ -569,6 +577,60 @@ def _load_migration_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _load_warehouse_migration_module():
+    """批次 5 的仓维度迁移（基线表主键加 warehouse_code）。"""
+    spec = importlib.util.spec_from_file_location(
+        "_contract_price_adjust_baseline_warehouse",
+        Path("current_migrations/versions/20261235_price_adjust_baseline_warehouse.py"),
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _restore_pre_migration_baseline_shape(engine) -> None:
+    """把隔离库的基线表摆成 20261115 之前的样子：只有 sku_id 主键，没有平台维度。
+
+    ⚠️ 隔离库已经是 head（批次 5 给基线表加了**仓维度**主键）⇒ 不自己摆一次，
+    测的就不是「迁移」，而是「迁移对已经改好的库做什么」——
+    这条范式见 ``test_sku_platform_pricing_override._restore_pre_migration_shape``。
+    """
+    with engine.begin() as conn:
+        for name in ("price_adjust_baselines_pkey", "pk_price_adjust_baselines"):
+            conn.execute(
+                text(
+                    "ALTER TABLE ops.price_adjust_baselines "
+                    f"DROP CONSTRAINT IF EXISTS {name}"
+                )
+            )
+        # 先去重，否则加单列主键会撞「同一个 sku 多行」
+        conn.execute(
+            text(
+                "DELETE FROM ops.price_adjust_baselines a "
+                "USING ops.price_adjust_baselines b "
+                "WHERE a.ctid < b.ctid AND a.sku_id = b.sku_id"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE ops.price_adjust_baselines "
+                "DROP COLUMN IF EXISTS platform_code"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE ops.price_adjust_baselines "
+                "DROP COLUMN IF EXISTS warehouse_code"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE ops.price_adjust_baselines "
+                "ADD CONSTRAINT price_adjust_baselines_pkey PRIMARY KEY (sku_id)"
+            )
+        )
 
 
 def test_migration_is_chained_on_the_current_head():
@@ -619,6 +681,8 @@ def test_migration_is_repeatable_and_rolls_back_cleanly(isolated_engine):
     重复执行必须无害（部署脚本会重跑）；downgrade 必须能把新表与复合主键都撤掉。
     """
     module = _load_migration_module()
+    # ⚠️ 先摆成迁移前的样子（隔离库已经是 head，见 _restore_pre_migration_baseline_shape）
+    _restore_pre_migration_baseline_shape(isolated_engine)
 
     # 1) 幂等：跑两次不报错
     _run_migration(isolated_engine, module, "upgrade")
@@ -675,6 +739,15 @@ def test_migration_is_repeatable_and_rolls_back_cleanly(isolated_engine):
     )
     assert baseline_pk == ["sku_id", "platform_code"]
 
+    # 4) 复原到 head（把批次 5 的仓维度加回去，隔离库是跨用例共用的）
+    _run_migration(isolated_engine, _load_warehouse_migration_module(), "upgrade")
+    baseline_pk = list(
+        inspect(isolated_engine).get_pk_constraint(
+            "price_adjust_baselines", schema="ops"
+        )["constrained_columns"]
+    )
+    assert baseline_pk == ["sku_id", "platform_code", "warehouse_code"]
+
 
 def test_migration_backfills_the_baseline_platform(isolated_engine):
     """老基线行按该 SKU 的经营档案回填平台；没有档案的落规则表 basis 平台。"""
@@ -683,7 +756,9 @@ def test_migration_backfills_the_baseline_platform(isolated_engine):
     module = _load_migration_module()
 
     # 先回到"老结构"：单列主键 + 没有 platform_code
-    _run_migration(isolated_engine, module, "downgrade")
+    # ⚠️ 用自己的摆法而不是跑 20261115 的 downgrade（隔离库已经是 head，
+    #    那个 downgrade 在 head 上已经退不回去了）
+    _restore_pre_migration_baseline_shape(isolated_engine)
 
     with isolated_engine.begin() as connection:
         connection.execute(
@@ -708,6 +783,9 @@ def test_migration_backfills_the_baseline_platform(isolated_engine):
         connection.execute(
             text("DELETE FROM ops.price_adjust_baselines WHERE sku_id = 987654")
         )
+
+    # 复原到 head（隔离库是跨用例共用的）
+    _run_migration(isolated_engine, _load_warehouse_migration_module(), "upgrade")
 
 
 # ---------------------------------------------------------------------------
@@ -747,9 +825,12 @@ async def test_guardrail_uses_the_floor_of_the_requested_platform(
         "warehouse_code": "MY-01",
         "transport_type": "sea",
         "expected_selling_price": 35,
+        # ⚠️ 批次 2 P2：保存利润版本必须给一个广告费口径，否则广告费不可算 ⇒ 利润空白。
+        # ⚠️ 批次 4：尾程进利润后 TikTok 的保本 ROI 抬到 3.66 ⇒ 目标 ROI 给 4。
+        "target_roi": 4,
     }
 
-    # TikTok：seed 的成本线 10 ÷ 0.3542 = 28.23，35 高于它 ⇒ 放行
+    # TikTok：seed 的成本线 (采购 10 + 尾程 5) ÷ 0.4542 = 33.03，35 高于它 ⇒ 放行
     tiktok = await pg_async_client.post(
         "/api/platform-sku-profit/estimates",
         headers=pricing_auth_headers,
@@ -812,7 +893,8 @@ async def test_candidate_list_reports_the_floor_of_the_selected_platform(
         assert row["min_selling_price_platform"] == platform_code
         floors[platform_code] = row["min_selling_price"]
 
-    # 10 ÷ 0.3542 = 28.23（TikTok） vs 10 ÷ 0.2599 = 38.48（Shopee）
-    assert floors["tiktok"] == pytest.approx(28.23, abs=0.01)
+    # (采购 10 + 尾程 5) ÷ 0.4542 = 33.03（TikTok） vs 10 ÷ 0.2599 = 38.48（Shopee）
+    # ⚠️ Shopee 没配尾程费率 ⇒ 尾程算不出来 ⇒ 尾程不进底线 ⇒ 底线仍是旧口径 38.48
+    assert floors["tiktok"] == pytest.approx(33.03, abs=0.01)
     assert floors["shopee"] == pytest.approx(38.48, abs=0.01)
     assert floors["shopee"] > floors["tiktok"]

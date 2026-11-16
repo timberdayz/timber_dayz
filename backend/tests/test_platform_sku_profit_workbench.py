@@ -5,6 +5,10 @@ from modules.core.db import DimErpSku, SkuOperatingProfile, SkuProfitEstimate
 from sqlalchemy import inspect
 from pathlib import Path
 
+# ⚠️ 批次 4：尾程配送费**算不出来 ⇒ 利润链算不出来**（不是按 0 计：尾程不免费）。
+#    下面这些用例验的是广告费 / 贴单费 / 完整度 / ROI 等别的口径，与尾程无关，
+#    所以一律显式给 ``delivery_cost=0``（= 没有尾程），避免把断言挂在尾程上。
+
 
 def test_workbench_models_store_reference_price_measurement_and_dual_basis():
     sku_columns = {column.name for column in inspect(DimErpSku).columns}
@@ -48,6 +52,7 @@ def test_expected_profit_uses_ad_rate_and_ignores_competitor_price():
         expected_ad_rate=Decimal("0.10"),
         return_rate=Decimal("0.03"),
         damage_rate=Decimal("0.02"),
+        delivery_cost=Decimal("0"),
     )
 
     # 商家实收 = 测算售价 = 100（2026-11-16 口径归一：不再二次扣券）
@@ -78,6 +83,7 @@ def test_label_fee_absent_is_treated_as_zero_not_as_missing_input():
         expected_ad_rate=Decimal("0.10"),
         return_rate=Decimal("0.03"),
         damage_rate=Decimal("0.02"),
+        delivery_cost=Decimal("0"),
     )
 
     assert result["expected"]["profit"] is not None
@@ -103,6 +109,7 @@ def test_label_fee_configured_is_deducted_from_pre_ad_profit():
         expected_ad_rate=Decimal("0.10"),
         return_rate=Decimal("0.03"),
         damage_rate=Decimal("0.02"),
+        delivery_cost=Decimal("0"),
     )
 
     # pre_ad = 45.00 - 2 = 43.00 ; ad = 4.30 ; profit = 38.70
@@ -124,6 +131,7 @@ def test_actual_recost_falls_back_to_expected_storage_and_is_mixed():
         expected_ad_rate=Decimal("0.10"),
         return_rate=Decimal("0.03"),
         damage_rate=Decimal("0.02"),
+        delivery_cost=Decimal("0"),
     )
 
     assert result["actual_recost"]["logistics_cost"] == Decimal("9.00")
@@ -147,6 +155,7 @@ def test_recost_without_any_actual_cost_has_no_cost_variance():
         expected_ad_rate=0,
         return_rate=0,
         damage_rate=0,
+        delivery_cost=0,
     )
 
     assert result["actual_recost"]["completeness"] == "estimated"
@@ -166,6 +175,7 @@ def test_missing_reference_cost_does_not_become_zero_profit_input():
         expected_ad_rate=0,
         return_rate=0,
         damage_rate=0,
+        delivery_cost=0,
     )
 
     assert result["expected"]["logistics_cost"] is None
@@ -211,6 +221,7 @@ def test_preview_exposes_pre_ad_profit_and_roi_metrics():
         expected_ad_rate=Decimal("0.10"),
         return_rate=Decimal("0.03"),
         damage_rate=Decimal("0.02"),
+        delivery_cost=Decimal("0"),
     )
 
     expected = result["expected"]
@@ -244,6 +255,7 @@ def test_roi_is_not_computed_when_a_reference_cost_is_missing():
         expected_ad_rate=Decimal("0"),
         return_rate=Decimal("0"),
         damage_rate=Decimal("0"),
+        delivery_cost=Decimal("0"),
     )
 
     expected = result["expected"]
@@ -269,6 +281,7 @@ def test_platform_roi_config_is_passed_into_the_preview():
         expected_ad_rate=Decimal("0"),
         return_rate=Decimal("0"),
         damage_rate=Decimal("0"),
+        delivery_cost=Decimal("0"),
         roi_safety_margin=Decimal("0.50"),
         target_roi_ceiling=Decimal("2"),
     )

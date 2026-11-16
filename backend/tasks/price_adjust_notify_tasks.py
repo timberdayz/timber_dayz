@@ -22,7 +22,10 @@ from backend.utils.async_task_runner import run_async_task
 from backend.models.database import (
     AsyncSessionLocal,
 )
-from backend.services.feishu_projection_service import FeishuProjectionService
+from backend.services.feishu_projection_service import (
+    FeishuProjectionService,
+    projection_payload_hash,
+)
 from backend.services.price_adjust_notify_service import PriceAdjustNotifyService
 from modules.core.db import FeishuProjectionTask
 from modules.core.logger import get_logger
@@ -30,39 +33,58 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 
-async def _existing_price_adjust_business_keys(db, keys: list[str]) -> set[str]:
-    """这些「SKU × 平台」是否已经有在途的价格调整任务。
+async def _existing_price_adjust_tasks(
+    db, pairs: list[tuple[str, str]]
+) -> set[tuple[str, str]]:
+    """这些「(去重键, 载荷哈希)」是否已经有任务行。
 
     同一次变化如果上一轮投递失败，基线不会推进，下一轮又会检测到差异。
     若不加这道闸，会为同一次变化反复建任务 → payload 哈希相同撞唯一约束，
     或者产生重复通知行。
 
-    ⚠️ 去重键是 ``sku_id:platform_code``（阶段 2.1）：底线是「SKU × 平台」的量，
-    同一件商品在 TikTok 和 Shopee 上是**两次独立的变化** ——
-    只按 sku_id 去重会把第二个平台的变更吞掉。
+    ⚠️ **去重键是 ``sku_id:platform_code[:warehouse_code]``**（批次 4 仓维度统一）：
+    底线是「SKU × 平台 × 仓」的量，同一件商品在 TikTok 和 Shopee 上是
+    **两次独立的变化**；批次 4 起同一件商品在马来仓与新加坡仓也是两次独立的变化。
+
+    ⚠️ **判据必须是「去重键 + 载荷哈希」，不能只看去重键**：
+    同一个 SKU × 平台 × 仓的底线会**反复变**（今天涨、明天跌、后天又涨）。
+    只按去重键去重 ⇒ 第一次通知之后，这个组合**永远**不会再通知
+    （历史任务的状态是 completed，也在过滤条件里）⇒ 通知表退化成一次性快照，
+    后续真实变化全部被静默吞掉。
+    真正的「重复」是**同一次变化**——它的 payload 逐字相同 ⇒ 哈希相同。
     """
-    if not keys:
+    if not pairs:
         return set()
+    business_keys = [pair[0] for pair in pairs]
+    payload_hashes = [pair[1] for pair in pairs]
     rows = (
         await db.execute(
             select(
                 FeishuProjectionTask.business_key,
+                FeishuProjectionTask.payload_hash,
                 FeishuProjectionTask.status,
             ).where(
                 FeishuProjectionTask.entity_type == "price_adjust",
-                FeishuProjectionTask.business_key.in_(keys),
+                FeishuProjectionTask.business_key.in_(business_keys),
+                FeishuProjectionTask.payload_hash.in_(payload_hashes),
                 FeishuProjectionTask.status.in_(
                     ("pending", "running", "failed", "completed")
                 ),
             )
         )
     ).all()
-    return {row.business_key for row in rows}
+    return {(row.business_key, row.payload_hash) for row in rows}
 
 
 def _business_key(change: dict) -> str:
-    """「SKU × 平台」的去重键。"""
-    return f"{change['sku_id']}:{change.get('platform_code') or 'tiktok'}"
+    """「SKU × 平台 × 仓」的去重键。
+
+    ⚠️ 仓是**可选后缀**：没有仓维度时（仓维度数据整体缺失的回落口径）
+    键退回 ``sku_id:platform_code``，与批次 4 之前的历史键一致。
+    """
+    key = f"{change['sku_id']}:{change.get('platform_code') or 'tiktok'}"
+    warehouse_code = change.get("warehouse_code") or ""
+    return f"{key}:{warehouse_code}" if warehouse_code else key
 
 
 def _build_payload(change: dict) -> dict:
@@ -75,6 +97,9 @@ def _build_payload(change: dict) -> dict:
     return {
         "sku_id": change["sku_id"],
         "platform_code": change.get("platform_code"),
+        # 仓维度（批次 4）：底线是「SKU × 平台 × 仓」的量，
+        # 不带仓就分不清这次变的是哪个仓的底线。
+        "warehouse_code": change.get("warehouse_code") or "",
         "sku_key": change["sku_key"],
         "spu": change["spu"],
         "sku_name": change["sku_name"],
@@ -105,18 +130,24 @@ async def _async_detect_and_enqueue_price_adjustments() -> dict:
         skipped = 0
         if notify:
             projection = FeishuProjectionService(db)
-            existing = await _existing_price_adjust_business_keys(
-                db, [_business_key(change) for change in notify]
+            payloads = [_build_payload(change) for change in notify]
+            existing = await _existing_price_adjust_tasks(
+                db,
+                [
+                    (_business_key(change), projection_payload_hash(payload))
+                    for change, payload in zip(notify, payloads)
+                ],
             )
-            for change in notify:
+            for change, payload in zip(notify, payloads):
                 business_key = _business_key(change)
-                if business_key in existing:
+                payload_hash = projection_payload_hash(payload)
+                if (business_key, payload_hash) in existing:
                     skipped += 1
                     continue
                 await projection.enqueue(
                     "price_adjust",
                     business_key,
-                    _build_payload(change),
+                    payload,
                 )
                 enqueued += 1
         await db.commit()

@@ -2,7 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.domains.business.routers.product_center import list_sku_operating_dimensions
+from backend.domains.business.routers.product_center import (
+    list_sku_operating_dimensions,
+)
 
 
 class _ScalarResult:
@@ -28,23 +30,40 @@ class _DimensionsDb:
     def __init__(self):
         self.executed = []
         self._results = [
-            _ScalarResult([SimpleNamespace(
-                platform_code="shopee",
-                name="Shopee",
-                default_fee_rate=None,
-                fee_rate_effective_from=None,
-                fee_rate_source=None,
-                fee_rate_version=None,
-                # 定价抽屉的「成本率合计 / 底线基数」要用到的两个成本率
-                default_creator_commission_rate=None,
-                other_cost_rate=None,
-            )]),
-            _ScalarResult([SimpleNamespace(warehouse_code="US-WH", warehouse_name="US Warehouse", country_code="US", country_name="United States")]),
+            _ScalarResult(
+                [
+                    SimpleNamespace(
+                        platform_code="shopee",
+                        name="Shopee",
+                        default_fee_rate=None,
+                        fee_rate_effective_from=None,
+                        fee_rate_source=None,
+                        fee_rate_version=None,
+                        # 定价抽屉的「成本率合计 / 底线基数」要用到的两个成本率
+                        default_creator_commission_rate=None,
+                        other_cost_rate=None,
+                        # 尾程配送费占收入比（批次 4）
+                        delivery_cost_rate=None,
+                    )
+                ]
+            ),
+            _ScalarResult(
+                [
+                    SimpleNamespace(
+                        warehouse_code="US-WH",
+                        warehouse_name="US Warehouse",
+                        country_code="US",
+                        country_name="United States",
+                    )
+                ]
+            ),
             _ScalarResult(["SPU-A"]),
-            _RowsResult([
-                SimpleNamespace(sku_id=1, sku_key="SKU-1", sku_name="Bound SKU"),
-                SimpleNamespace(sku_id=2, sku_key="SKU-2", sku_name="Unbound SKU"),
-            ]),
+            _RowsResult(
+                [
+                    SimpleNamespace(sku_id=1, sku_key="SKU-1", sku_name="Bound SKU"),
+                    SimpleNamespace(sku_id=2, sku_key="SKU-2", sku_name="Unbound SKU"),
+                ]
+            ),
             _ScalarResult([SimpleNamespace(sku_id=1, spu="SPU-A")]),
         ]
 

@@ -2,7 +2,9 @@
 
 > 状态：**设计稿（待评审）** —— 2026-11-06 修订：Q1–Q9 已决并回写，新增 §2.5⑦⑧⑨⑩⑪（分母口径 / 归因虚高 / 可填上限封顶 / 广告费率与目标ROI互换 / 利润分配诉求承接）、§6.0.1 业务侧视角
 > **2026-11-16 修订（口径归一）**：**商家实收 = 测算售价**，商品中心不再二次扣券（详见 §2.4 修订说明）。
-> 日期：2026-11-06（2026-11-16 口径归一修订）
+> **2026-11-16 修订（批次 4/5）**：尾程配送费进利润与底线（成对生效）、底线与调价通知下沉到仓维度、
+> 利润算术收口到一处、`last_mile_cost` 改名「头程末端派送」（详见 §2.4 修订说明）。
+> 日期：2026-11-06（2026-11-16 口径归一 / 批次 4-5 修订）
 > 范围：`backend/domains/business/routers/product_center.py`、`backend/schemas/product_center.py`、`backend/services/product_pricing_service.py`、`backend/services/product_pricing_query_service.py`、`backend/services/product_profit_service.py`、`backend/services/product_finance_service.py`、`backend/services/sku_pricing_policy_service.py`、`frontend/src/domains/business/views/ProductCenter.vue`、`frontend/src/api/productCenter.js`、`modules/core/db/schema_parts/{dimensions,business}.py`
 > 关联：`2026-10-20-sku-pricing-guardrails-design.md`（最低售价与定价纪律，本次的前置设计）、`2026-10-24-dos-metric-naming-and-caliber-design.md`（口径与命名决策的体例参照）、`2026-10-23-min-price-change-notification-design.md`（最低售价变更通知）、`docs/team-skills/sea-metrics-language/`（指标口径治理）
 
@@ -177,6 +179,58 @@
 > 实现落点：`build_platform_profit_preview` / `build_baseline_profit` 不再有券参数；
 > 测算页删除优惠券列；API 契约删除 `seller_coupon_amount` / `default_coupon_amount` /
 > `coupon_amount`。数据库遗留列保留（不动历史数据），但链路不再读写。
+
+> **2026-11-16 修订（尾程配送费进利润与底线，批次 4）**：
+>
+> **尾程 = 仓 → 买家那段快递费，每卖一件必付**（头程是已付库存成本，一次性的）。
+> 费率粒度 = 平台 × 仓 × 重量段，单件计价（`finance.delivery_rate_rules`）。
+>
+> 1. **尾程进广告前利润**：`pre_ad_profit = 净收入 − (采购 + 头程 + 仓储 + 贴单 + 尾程 + 平台佣金 + 达人佣金 + 货损 + 退货)`。
+>    尾程**算不出来 ⇒ 整条利润链返回 None**（不是按 0 计：尾程不免费，按 0 计等于凭空多一笔利润）。
+> 2. **尾程进成本底线，但必须「成对生效」**：
+>
+>    ```
+>    分子 = 采购成本 + 尾程配送费
+>    分母 = 1 − 平台其他成本率 + 尾程占收入比 − 达人佣金率 − 货损率 − 退货率 − 目标利润率
+>    ```
+>
+>    `other_cost_rate` 是从实测净利率反推的**残差桶**，桶里**含运费**（平台利润已扣过实际运费，
+>    生产库 2026-11-16 实测：TikTok「总费用」含 `实际运费`；Shopee `卖家支付运费` 直接从结算里扣）。
+>    所以尾程进分子时**必须**把残差里按收入摊的那份尾程剔掉，否则**同一笔尾程扣两次**。
+>    尾程与尾程占收入比**缺任何一半 ⇒ 尾程不进底线**（宁可不算，也不重复扣）。
+> 3. **尾程占比拆分基准 = 平台尾程均值 ÷ 平台平均售价**（`core.dim_platforms.delivery_cost_rate`），
+>    在「定价设置」按平台维护；**留空 ⇒ 尾程不进底线**，界面标「未计入底线」。
+> 4. **仓维度**：尾程是「平台 × 仓 × 重量」粒度的量 ⇒ 底线也是「SKU × 平台 × 仓」的量。
+>    不传仓就不取尾程档位（不同仓的价不同，不能猜一个仓的价）。
+>
+> 实现落点：`product_pricing_service.compute_cost_floor` / `compute_sku_pricing`、
+> `product_profit_service.build_platform_profit_preview`、`product_pricing_query_service.compute_pricing_state`、
+> `core.dim_platforms.delivery_cost_rate`（+ 迁移 `20261234_delivery_cost_rate_split`）、
+> `GET/POST/PATCH/DELETE /api/delivery-rate-rules`、测算页「尾程配送费」列（已计入/未计入底线）。
+
+> **2026-11-16 修订（收口遗留，批次 5）**：
+>
+> 1. **底线拆到仓 ⇒ 调价通知链跟着拆到仓**。
+>    底线是「SKU × 平台 × 仓」的量，所以基线 `ops.price_adjust_baselines` 的主键是
+>    `(sku_id, platform_code, warehouse_code)`；通知侧只对**有库存的仓**建状态，
+>    每个仓用**自己的库龄**算档位、**自己的**尾程算底线。
+>    老基线行回填**空串** ⇒ 自动失效 ⇒ 上线后第一轮只重建基线、不通知
+>    （**宁可少报，不可错报**）。仓维度数据整体缺失时退回「SKU × 平台」口径。
+> 2. **利润算术只有一处**：`product_profit_service.build_profit_from_components`
+>    （收入 − 6 项成本 = 利润；利润率 = 利润 ÷ 收入，收入为 0 ⇒ None）。
+>    费率口径（`build_baseline_profit`）与金额口径（SKU 利润估算落库）都收口到它。
+> 3. **`last_mile_cost` 是头程账单内的分段（港→仓），不是买家快递**：
+>    UI 标签改「**头程末端派送**」；商品中心的新概念叫「**尾程配送费**」（仓→买家）。
+>    飞书 SKU 镜像表的列名「尾程单位成本 RMB」**不改**（外部 Base 的固定列，
+>    改名会直接让投影写入失败），只在 ERP 侧注释里写清区别。
+> 4. **完整度两套值域不是冲突，是两个量**：
+>    `cost_completeness`（complete/partial/incomplete）量「预估成本输入齐不齐」，
+>    `actual_recost_completeness`（incomplete/estimated/mixed/actual）量「实际成本重算到了哪一步」。
+>    两个独立列、各有 CHECK 约束（迁移 `20261114_add_sku_roi_columns.py`）——**不需要合并**。
+> 5. **通知去重判据 = 去重键 + 载荷哈希**（修既有缺陷）：
+>    只看去重键会把同一个 SKU × 平台 × 仓的**第二次**变化吞掉
+>    （底线会反复变，第一次通知之后这个键就永远不再通知）。
+>    真正的重复是「同一次变化」—— 载荷逐字相同 ⇒ 哈希相同。
 
 | 概念 | 定义 |
 |---|---|

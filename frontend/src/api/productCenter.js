@@ -227,6 +227,21 @@ export default {
   deleteWarehouseStorageRule(ruleId) {
     return api._delete(`/warehouse-storage-rules/${ruleId}`);
   },
+  // 尾程配送费费率（批次 3/4）：平台 × 仓 × 重量段。
+  // ⚠️ 尾程是**必付成本**：这个表没有数据 ⇒ 尾程算不出来 ⇒ 利润链算不出来
+  //    （不是按 0 计），所以这里必须能维护。
+  listDeliveryRateRules(params = {}) {
+    return api._get("/delivery-rate-rules", { params });
+  },
+  createDeliveryRateRule(payload) {
+    return api._post("/delivery-rate-rules", payload);
+  },
+  updateDeliveryRateRule(ruleId, payload) {
+    return api._patch(`/delivery-rate-rules/${ruleId}`, payload);
+  },
+  deleteDeliveryRateRule(ruleId) {
+    return api._delete(`/delivery-rate-rules/${ruleId}`);
+  },
   updatePlatformFeeRate(platformCode, payload) {
     return api._patch(`/platforms/${encodeURIComponent(platformCode)}/fee-rate`, payload);
   },

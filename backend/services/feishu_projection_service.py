@@ -669,6 +669,13 @@ class FeishuProjectionService:
             fields["变动方向"] = [payload["direction"]]
         if payload.get("reason"):
             fields["变动原因"] = [payload["reason"]]
+        # 仓维度（批次 4）：底线是「SKU × 平台 × 仓」的量，同一个 SKU 会有多行
+        # （每个仓一行）。表里没有「仓库」字段（那是外部 Base 的结构，不能擅自加列），
+        # 所以写进「备注」——它是自由文本，机器人不读它，操作员能看懂。
+        # ⚠️ 留空就不写：空串会被过滤掉，不会污染没有仓维度的历史行。
+        warehouse_code = payload.get("warehouse_code") or ""
+        if warehouse_code:
+            fields["备注"] = f"仓库：{warehouse_code}"
         # 「当前售价」不写：目前没有可靠数据源（平台 SKU 档案靠人工维护，覆盖率未知），
         # 填一个可能错的数比留空更危险
         return {key: value for key, value in fields.items() if value is not None}
@@ -695,6 +702,7 @@ class FeishuProjectionService:
             payload.get("new_min_selling_price"),
             context,
             payload.get("platform_code"),
+            payload.get("warehouse_code"),
         )
 
     async def _process_price_adjust_tasks(

@@ -89,6 +89,9 @@ def test_roi_denominator_is_merchant_net_revenue_not_goods_amount():
         return_rate=Decimal("0"),
         damage_rate=Decimal("0"),
         creator_commission_rate=None,
+        # 批次 4：尾程算不出来 ⇒ 利润链算不出来（不是按 0 计）。
+        # 这条用例验的是 ROI 分母口径，与尾程无关 ⇒ 显式给 0。
+        delivery_cost=Decimal("0"),
     )
     expected = preview["expected"]
     assert expected["net_revenue"] == Decimal("70")

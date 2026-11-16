@@ -704,6 +704,8 @@ PRICING_SEED_CLEANUP_SQL = (
     "DELETE FROM finance.sku_pricing_policies",
     "DELETE FROM finance.logistics_provider_rules WHERE logistics_provider = 'TEST-LOG'",
     "DELETE FROM finance.warehouse_storage_rules WHERE warehouse_code = 'MY-01'",
+    # 尾程费率（批次 4）：不删的话，下一个用例会读到上一轮留下的费率行
+    "DELETE FROM finance.delivery_rate_rules WHERE platform_code = 'tiktok'",
     "DELETE FROM core.bridge_spu_sku WHERE sku_id = 9001",
     # 平台级人工覆盖（阶段 2.1b）：这行一旦留着，下一个用例算出来的底线
     # 就是被覆盖过的值（20.00 而不是成本线）⇒ 断言会莫名其妙地挂。
@@ -737,6 +739,7 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
 
     from modules.core.db import (
         BridgeSpuSku,
+        DeliveryRateRule,
         DimErpSku,
         DimPlatform,
         DimSpu,
@@ -768,6 +771,10 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
             default_fee_rate=0.0737,
             default_creator_commission_rate=0.0606,
             other_cost_rate=0.2727,
+            # 尾程配送费占收入比（批次 4）：尾程进成本底线的**拆分基准**。
+            # ⚠️ 必须与尾程费率成对存在：分子加尾程 ⇔ 分母加回这一项，
+            #    否则同一笔尾程既进分子又留在 other_cost_rate 残差里 ⇒ 扣两次。
+            delivery_cost_rate=0.10,
             # 刻意给一个**非今日**的生效日期：用来验证「部分更新」不会把它刷成当天
             fee_rate_effective_from=date(2026, 9, 1),
             fee_rate_source="test_seed",
@@ -875,6 +882,23 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
                 label_fee=0.5,
                 status="active",
                 effective_from=effective_from,
+            )
+        )
+        # 尾程配送费费率（批次 4）：平台 × 仓 × 重量段，0kg 起不封顶 ⇒ 单价 5 元/件。
+        # ⚠️ 尾程是**必付成本**：不配费率 ⇒ 尾程算不出来 ⇒ 利润链算不出来
+        #    （不是按 0 计），所以种子必须带这一条。
+        pg_session.add(
+            DeliveryRateRule(
+                platform_code="tiktok",
+                warehouse_code="MY-01",
+                min_weight_kg=0,
+                max_weight_kg=None,
+                unit_price=5,
+                currency="CNY",
+                effective_from=effective_from,
+                status="active",
+                source="test_seed",
+                version="v1",
             )
         )
         await pg_session.flush()

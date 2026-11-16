@@ -108,6 +108,53 @@ def validate_bill_total(
         )
 
 
+def build_profit_from_components(
+    *,
+    revenue: Decimal | int | float | None,
+    purchase_cost: Decimal | int | float | None = None,
+    logistics_cost: Decimal | int | float | None = None,
+    storage_cost: Decimal | int | float | None = None,
+    platform_fee: Decimal | int | float | None = None,
+    return_loss: Decimal | int | float | None = None,
+    damage_loss: Decimal | int | float | None = None,
+) -> dict[str, Decimal | None]:
+    """**唯一的**利润算术：收入 − 各项成本 = 利润；利润率 = 利润 ÷ 收入。
+
+    批次 5 收口：以前有**两份**利润算术 ——
+    费率口径在 `build_baseline_profit`、金额口径在 SKU 利润估算的落库路由里，
+    两份各写一遍「收入减成本」。口径一改（例如批次 1 把商家实收改成 = 售价）
+    就得改两处，漏一处就对不上。
+
+    现在两条链都收口到这里：**费率口径**先把费率换算成金额再进来，
+    **金额口径**直接进来。
+
+    ⚠️ 缺项按 **0** 计：这是**金额**口径 —— 缺项就是没有这笔钱。
+    「缺输入」在费率口径那一侧已经被翻译成 0 费率了。
+
+    ⚠️ 收入 = 0 ⇒ 利润率 **None**（算不出来，不是 0）。
+    """
+    net_revenue = _money(revenue)
+    components = {
+        "purchase_cost": _money(purchase_cost),
+        "logistics_cost": _money(logistics_cost),
+        "storage_cost": _money(storage_cost),
+        "platform_fee": _money(platform_fee),
+        "expected_return_loss": _money(return_loss),
+        "expected_damage_loss": _money(damage_loss),
+    }
+    profit = _money(net_revenue - sum(components.values(), Decimal("0.00")))
+    return {
+        "net_revenue": net_revenue,
+        **components,
+        "estimated_contribution_profit": profit,
+        "estimated_margin_rate": (
+            (profit / net_revenue).quantize(Decimal("0.00000001"))
+            if net_revenue != 0
+            else None
+        ),
+    }
+
+
 def build_baseline_profit(
     *,
     selling_price: Decimal | int | float,
@@ -123,6 +170,9 @@ def build_baseline_profit(
 
     ⚠️ 口径（2026-11-16 归一）：运营填的售价就是**折后到手价**，不再二次扣券。
     以前这里是 ``selling_price − 卖家优惠券``，导致收入被少算、平台佣金少扣。
+
+    算术本身在 `build_profit_from_components`（批次 5 收口到一处），
+    这里只负责**把费率换算成金额**。
     """
     revenue = _money(selling_price)
     purchase_cost = _money(default_purchase_cost)
@@ -136,31 +186,23 @@ def build_baseline_profit(
     platform_fee = _money(revenue * Decimal(str(platform_fee_rate or 0)))
     return_loss = _money(revenue * Decimal(str(return_rate or 0)))
     damage_loss = _money(revenue * Decimal(str(damage_rate or 0)))
-    profit = _money(
-        revenue
-        - purchase_cost
-        - logistics_cost
-        - storage
-        - platform_fee
-        - return_loss
-        - damage_loss
+    result = build_profit_from_components(
+        revenue=revenue,
+        purchase_cost=purchase_cost,
+        logistics_cost=logistics_cost,
+        storage_cost=storage,
+        platform_fee=platform_fee,
+        return_loss=return_loss,
+        damage_loss=damage_loss,
     )
     return {
-        "net_revenue": revenue,
-        "purchase_cost": purchase_cost,
+        **result,
         "purchase_cost_source": "sku_default_purchase_cost",
-        "logistics_cost": logistics_cost,
         "logistics_cost_source": logistics_cost_source,
-        "storage_cost": storage,
         "storage_cost_source": "cost_assumption_profile",
-        "platform_fee": platform_fee,
-        "expected_return_loss": return_loss,
-        "expected_damage_loss": damage_loss,
-        "estimated_contribution_profit": profit,
+        # ⚠️ 收入为 0 时利润率仍是 **0**（不是 None）—— 老口径如此，下游照旧。
         "estimated_margin_rate": (
-            (profit / revenue).quantize(Decimal("0.00000001"))
-            if revenue
-            else Decimal("0")
+            result["estimated_margin_rate"] if revenue else Decimal("0")
         ),
     }
 
@@ -183,6 +225,7 @@ def build_platform_profit_preview(
     creator_commission_rate: Decimal | int | float | None = None,
     roi_safety_margin: Decimal | int | float | None = None,
     target_roi_ceiling: Decimal | int | float | None = None,
+    delivery_cost: Decimal | int | float | None = None,
 ) -> dict[str, dict[str, Decimal | str | list[str] | None]]:
     """Build side-by-side expected and actual-cost recost profit results.
 
@@ -211,6 +254,15 @@ def build_platform_profit_preview(
     （安全边际 0.20、上限 50）。
     ROI 在**这里**算而不是在路由里算：候选列表和单 SKU 试算走的是同一个函数，
     两边必须给出同一个数 —— 分头算必然漂移（设计稿 §2.5「实现时只写一处」）。
+
+    ``delivery_cost`` 是**单件尾程配送费**（批次 4）：仓 → 买家那段快递费，
+    每卖一件必付。它是**真实成本**，必须从广告前利润里扣掉，
+    否则利润会被系统性高估（高估幅度 = 尾程 × 销量）。
+
+    ⚠️ 传 None 表示**尾程算不出来**（没配费率 / 重量档位歧义），
+    与 ``creator_commission_rate`` 的「按 0 计」**刻意不同**：
+    尾程不免费，按 0 计等于凭空多出一笔利润。宁可利润留白，
+    也不能让运营以为「这个品不用发快递」。
     """
 
     def optional_money(value: Decimal | int | float | None) -> Decimal | None:
@@ -232,6 +284,10 @@ def build_platform_profit_preview(
     expected_logistics = optional_money(expected_logistics_cost)
     expected_storage = optional_money(expected_storage_cost)
     expected_label_fee = optional_money(expected_label_fee)
+    # 尾程配送费（批次 4）：None = **算不出来**（不是 0）。
+    # ⚠️ 尾程不免费：按 0 计等于凭空多一笔利润 ⇒ 利润会系统性偏高。
+    #    与「贴单费按 0 计」的处理刻意不同（贴单费是可选项，尾程是必付项）。
+    delivery = optional_money(delivery_cost)
     # 贴单费是**可选**的每件费用：收货仓的 active 仓储规则没配就是 0，不是"缺输入"。
     # ⚠️ 别把它当缺输入 —— 那会让 pre_ad_profit 变 None，整条利润链算不出来（利润空白）。
     label_fee_for_calc = (
@@ -277,6 +333,7 @@ def build_platform_profit_preview(
             logistics,
             storage,
             label_fee_for_calc,
+            delivery,
             platform_fee,
             creator_commission,
             return_loss,
@@ -482,6 +539,12 @@ def build_platform_profit_preview(
             "storage_cost": expected_storage,
             "label_fee": expected_label_fee,
             "label_fee_source": label_fee_source,
+            # 尾程配送费（批次 4）：单件尾程，已从广告前利润里扣掉。
+            # None = 算不出来（没配费率/重量档位歧义），**不是 0**。
+            "delivery_cost": delivery,
+            "delivery_cost_missing_reasons": (
+                [] if delivery is not None else ["missing_delivery_cost"]
+            ),
             "platform_fee": platform_fee,
             "creator_commission": creator_commission,
             "creator_commission_rate": creator_commission_rate,
@@ -535,6 +598,11 @@ def build_platform_profit_preview(
             "storage_cost": actual_storage,
             "label_fee": expected_label_fee,
             "label_fee_source": label_fee_source,
+            # 尾程配送费（批次 4）：与预估段同一份（尾程按 SKU 重量算，不分预估/实际）。
+            "delivery_cost": delivery,
+            "delivery_cost_missing_reasons": (
+                [] if delivery is not None else ["missing_delivery_cost"]
+            ),
             "creator_commission": creator_commission,
             "creator_commission_rate": creator_commission_rate,
             "storage_cost_source": (

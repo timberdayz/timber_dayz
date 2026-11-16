@@ -44,6 +44,9 @@ def _preview(**overrides):
         "expected_ad_rate": Decimal("0.10"),
         "return_rate": Decimal("0.03"),
         "damage_rate": Decimal("0.02"),
+        # 尾程配送费（批次 4）：本文件只守护「商家实收」口径，尾程按 0 传入
+        # （显式给 0 = 尾程免费，避免它把利润链算成不可算、遮住被测口径）。
+        "delivery_cost": Decimal("0"),
     }
     payload.update(overrides)
     return build_platform_profit_preview(**payload)

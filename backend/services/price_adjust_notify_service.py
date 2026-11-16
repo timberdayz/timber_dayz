@@ -45,6 +45,8 @@ from modules.core.db import BridgeSpuSku, DimErpSku, DimSpu, PriceAdjustBaseline
 # SKU ↔ SPU 归属关系的「当前有效」判定只从真源取（律 1）。
 from backend.services.product_spu_binding import current_binding_condition
 
+from .product_delivery_cost_service import compute_delivery_cost
+from .product_finance_service import ProductFinanceService
 from .product_pricing_query_service import (
     compute_pricing_state,
     load_pricing_context,
@@ -84,6 +86,9 @@ CONTEXT_NUMERIC_KEYS = (
     "spu_damage_rate",
     "reference_selling_price",
     "min_selling_price",
+    # 尾程配送费（批次 4）：单件尾程 + 平台级尾程占收入比（拆分基准）
+    "delivery_cost",
+    "delivery_cost_rate",
 )
 
 
@@ -228,6 +233,9 @@ def is_delisting_jump(prev: dict, cur: dict) -> bool:
         "spu_return_loss_rate",
         "spu_damage_rate",
         "reference_selling_price",
+        # 尾程配送费（批次 4）也是定价输入：它变了 ⇒ 这次跳高不只是"下架"造成的
+        # ⇒ 仍然要通知（宁可多报，不可把真实变化静默吞掉）。
+        "delivery_cost",
     ):
         if _numeric_changed(prev.get(key), cur.get(key)):
             return False
@@ -251,16 +259,27 @@ def build_context(
     spu_damage_rate: Any,
     reference_selling_price: Any,
     platform_code: Optional[str] = None,
+    warehouse_code: Optional[str] = None,
+    delivery_cost: Any = None,
+    delivery_cost_rate: Any = None,
 ) -> dict:
     """组装归因上下文快照。
 
     存的是**归因需要的全部输入**，这样下一次变化时能准确说出"为什么变"。
 
-    ⚠️ `platform_code` 也要存进去：底线是「SKU × 平台」的量，
-    归因时得知道这次变的是哪个平台的底线。
+    ⚠️ `platform_code` 也要存进去：底线是「SKU × 平台 × 仓」的量，
+    归因时得知道这次变的是哪个平台、哪个仓的底线。
+
+    ⚠️ `warehouse_code`（批次 4）：底线拆到仓之后，**仓是归因的一部分**——
+    同一个 SKU 在马来仓与新加坡仓的底线可以不同，不记仓就分不清是"哪边变了"。
+
+    ⚠️ `delivery_cost` / `delivery_cost_rate`（批次 4）：尾程进底线要**成对生效**
+    （单件尾程 + 平台级尾程占收入比），两个值都存进快照，
+    下次才能说清"这次变是因为尾程费率调整"还是"因为单件尾程变了"。
     """
     return {
         "platform_code": platform_code,
+        "warehouse_code": warehouse_code,
         "min_selling_price": pricing.get("min_selling_price"),
         "min_selling_price_source": pricing.get("min_selling_price_source"),
         "min_selling_price_is_override": bool(
@@ -280,6 +299,8 @@ def build_context(
         "spu_return_loss_rate": _decimal_to_str(spu_return_loss_rate),
         "spu_damage_rate": _decimal_to_str(spu_damage_rate),
         "reference_selling_price": _decimal_to_str(reference_selling_price),
+        "delivery_cost": _decimal_to_str(delivery_cost),
+        "delivery_cost_rate": _decimal_to_str(delivery_cost_rate),
         "missing_reasons": list(pricing.get("min_selling_price_missing_reasons") or []),
     }
 
@@ -332,17 +353,24 @@ class PriceAdjustNotifyService:
         spu_map = {row.spu: row for row in spu_rows}
         return {sku_id: spu_map.get(spu_by_sku.get(sku_id)) for sku_id in sku_ids}
 
-    async def collect_pricing_states(self) -> dict[tuple[int, str], dict]:
-        """全量重算所有 active SKU 在**每个可定价平台**上的最低售价与归因上下文。
+    async def collect_pricing_states(self) -> dict[tuple[int, str, str], dict]:
+        """全量重算所有 active SKU 在**每个可定价平台 × 每个有库存的仓**上的最低售价与归因上下文。
 
         与商品中心走**同一个**计算函数、**同一份**库龄取数
         （`backend/services/product_pricing_query_service.py`），
         所以「页面显示的最低售价」和「通知里说的最低售价」必然一致。
 
-        ⚠️ **键是 (sku_id, platform_code)**（阶段 2.1）：底线是「SKU × 平台」的量
-        （平台其他成本率 TikTok 27.27% vs Shopee 41.65%），
-        同一件商品在两个平台的底线不同 —— 基线也必须按平台分开记。
-        以前键只有 sku_id，于是 Shopee 的底线动了会被记成「TikTok 的底线也动了」。
+        ⚠️ **键是 (sku_id, platform_code, warehouse_code)**（批次 4 仓维度统一）：
+        底线是「SKU × 平台 × 仓」的量 —— 尾程配送费按「平台 × 仓 × 重量段」计价，
+        同一件商品在不同仓的底线不同 ⇒ 基线也必须按仓分开记。
+
+        ⚠️ **只对有库存的仓建状态**：一个仓里没有这个货，它的底线没有业务含义
+        （那个仓的库龄档位也不存在）。状态层按 ``available_stock > 0`` 过滤，
+        正好就是"这个仓还在卖这个品"。
+
+        ⚠️ **仓维度数据整体取不到时**（状态层不可用 / 库存表为空），
+        退回「SKU × 平台」口径（warehouse_code 用空串），
+        行为与批次 4 之前逐字一致 —— 宁可少一个维度，也不能什么都不通知。
         """
         sku_rows = (
             (
@@ -361,65 +389,128 @@ class PriceAdjustNotifyService:
         spu_by_sku = await self._load_spu_by_sku(sku_ids)
         platform_codes = list(context.get("priceable_platform_codes") or [])
         restock_rows = context["restock_rows"]
+        warehouse_restocks = context.get("warehouse_restocks") or {}
 
-        states: dict[tuple[int, str], dict] = {}
+        # 有库存的仓（状态层按 available_stock > 0 过滤 ⇒ 正好是"还在卖的仓"）。
+        warehouse_codes = sorted(
+            {
+                code
+                for per_sku in warehouse_restocks.values()
+                for code in per_sku.keys()
+                if code
+            }
+        )
+        # ⚠️ 仓维度数据整体缺失 ⇒ 退回 SKU × 平台口径（空串仓）。
+        if not warehouse_codes:
+            warehouse_codes = [""]
+        finance = ProductFinanceService(self.db)
+
+        states: dict[tuple[int, str, str], dict] = {}
         for platform_code in platform_codes:
             platform = context["platforms"].get(platform_code)
             other_cost_rate = platform.other_cost_rate if platform else None
-            for row in sku_rows:
-                linked_spu = spu_by_sku.get(row.sku_id)
-                state = compute_pricing_state(
-                    context=context,
-                    sku_row=row,
-                    linked_spu=linked_spu,
-                    platform_code=platform_code,
-                )
-                pricing = state["pricing"]
-                policy = state["policy"]
-                days_since_restock = state["days_since_restock"]
-                restock_row = restock_rows.get(row.sku_id)
+            # 尾程费率（批次 4）：按仓定价 ⇒ 一次取该平台**所有仓**的档位，
+            # 内存里按仓分组（避免逐仓查库）。
+            all_tiers = await finance.find_delivery_rate_tiers(platform_code)
+            tiers_by_warehouse: dict[str, list] = {}
+            for tier in all_tiers:
+                tiers_by_warehouse.setdefault(tier.warehouse_code, []).append(tier)
+            for warehouse_code in warehouse_codes:
+                # 每个仓用**自己的库龄**算档位（阶段 6 的仓维度口径）。
+                warehouse_context = context
+                if warehouse_code:
+                    warehouse_context = {
+                        **context,
+                        "days_since_restock": {
+                            sku_id: (
+                                (warehouse_restocks.get(sku_id) or {}).get(
+                                    warehouse_code
+                                )
+                                or {}
+                            ).get("days_since_restock")
+                            for sku_id in context["days_since_restock"]
+                        },
+                    }
+                for row in sku_rows:
+                    if warehouse_code and warehouse_code not in (
+                        warehouse_restocks.get(row.sku_id) or {}
+                    ):
+                        # 这个仓没有这个货 ⇒ 不建状态（底线没有业务含义）。
+                        continue
+                    linked_spu = spu_by_sku.get(row.sku_id)
+                    # 尾程配送费（批次 4）：按「平台 × 仓 × 重量」算。
+                    delivery_result = compute_delivery_cost(
+                        tiers_by_warehouse.get(warehouse_code, []),
+                        row.weight_kg,
+                        fallback_tiers=all_tiers,
+                    )
+                    state = compute_pricing_state(
+                        context=warehouse_context,
+                        sku_row=row,
+                        linked_spu=linked_spu,
+                        platform_code=platform_code,
+                        delivery_cost=delivery_result.amount,
+                    )
+                    pricing = state["pricing"]
+                    policy = state["policy"]
+                    days_since_restock = state["days_since_restock"]
+                    restock_row = (
+                        (warehouse_restocks.get(row.sku_id) or {}).get(warehouse_code)
+                        if warehouse_code
+                        else restock_rows.get(row.sku_id)
+                    )
 
-                snapshot = build_context(
-                    pricing=pricing,
-                    age_days=days_since_restock,
-                    target_margin_rate=policy["target_margin_rate"] if policy else None,
-                    discount_rate=policy["discount_rate"] if policy else None,
-                    purchase_cost=row.default_purchase_cost,
-                    other_cost_rate=other_cost_rate,
-                    creator_commission_rate=resolve_effective_creator_rate(
-                        context=context, sku_row=row, platform_code=platform_code
-                    ),
-                    spu_return_loss_rate=(
-                        linked_spu.return_loss_rate if linked_spu else None
-                    ),
-                    spu_damage_rate=(
-                        linked_spu.logistics_damage_rate if linked_spu else None
-                    ),
-                    reference_selling_price=row.reference_selling_price,
-                    platform_code=platform_code,
-                )
+                    snapshot = build_context(
+                        pricing=pricing,
+                        age_days=days_since_restock,
+                        target_margin_rate=(
+                            policy["target_margin_rate"] if policy else None
+                        ),
+                        discount_rate=(policy["discount_rate"] if policy else None),
+                        purchase_cost=row.default_purchase_cost,
+                        other_cost_rate=other_cost_rate,
+                        creator_commission_rate=resolve_effective_creator_rate(
+                            context=context,
+                            sku_row=row,
+                            platform_code=platform_code,
+                        ),
+                        spu_return_loss_rate=(
+                            linked_spu.return_loss_rate if linked_spu else None
+                        ),
+                        spu_damage_rate=(
+                            linked_spu.logistics_damage_rate if linked_spu else None
+                        ),
+                        reference_selling_price=row.reference_selling_price,
+                        platform_code=platform_code,
+                        warehouse_code=warehouse_code,
+                        delivery_cost=delivery_result.amount,
+                        delivery_cost_rate=(
+                            platform.delivery_cost_rate if platform else None
+                        ),
+                    )
 
-                states[(row.sku_id, platform_code)] = {
-                    "sku_id": row.sku_id,
-                    "platform_code": platform_code,
-                    "sku_key": row.sku_key,
-                    "spu": linked_spu.spu if linked_spu else None,
-                    "sku_name": row.sku_name,
-                    "specification": row.specification,
-                    "min_selling_price": pricing.get("min_selling_price"),
-                    "context": snapshot,
-                    "age_days": days_since_restock,
-                    "current_qty": (
-                        restock_row.get("current_qty") if restock_row else None
-                    ),
-                    "inventory_value": (
-                        restock_row.get("inventory_value") if restock_row else None
-                    ),
-                }
+                    states[(row.sku_id, platform_code, warehouse_code)] = {
+                        "sku_id": row.sku_id,
+                        "platform_code": platform_code,
+                        "warehouse_code": warehouse_code,
+                        "sku_key": row.sku_key,
+                        "spu": linked_spu.spu if linked_spu else None,
+                        "sku_name": row.sku_name,
+                        "specification": row.specification,
+                        "min_selling_price": pricing.get("min_selling_price"),
+                        "context": snapshot,
+                        "age_days": days_since_restock,
+                        "current_qty": (
+                            restock_row.get("current_qty") if restock_row else None
+                        ),
+                        "inventory_value": (
+                            restock_row.get("inventory_value") if restock_row else None
+                        ),
+                    }
         return states
 
-    async def load_baselines(self) -> dict[tuple[int, str], dict]:
-        """已建基线的 SKU × 平台：``{(sku_id, platform_code): {"min_selling_price", "context"}}``。
+    async def load_baselines(self) -> dict[tuple[int, str, str], dict]:
+        """已建基线的 SKU × 平台 × 仓：``{(sku_id, platform_code, warehouse_code): {...}}``。
 
         基线住在 ``ops.price_adjust_baselines``（**不参与商品中心同步**）：
         ``core.dim_erp_sku`` 会被「采集机 → 云端」同步做 TRUNCATE + 全量重灌，
@@ -438,14 +529,15 @@ class PriceAdjustNotifyService:
                 select(
                     PriceAdjustBaseline.sku_id,
                     PriceAdjustBaseline.platform_code,
+                    PriceAdjustBaseline.warehouse_code,
                     PriceAdjustBaseline.last_notified_min_price,
                     PriceAdjustBaseline.last_notified_context,
                 )
             )
         ).all()
-        baselines: dict[tuple[int, str], dict] = {}
+        baselines: dict[tuple[int, str, str], dict] = {}
         for row in rows:
-            baselines[(row.sku_id, row.platform_code)] = {
+            baselines[(row.sku_id, row.platform_code, row.warehouse_code)] = {
                 "min_selling_price": row.last_notified_min_price,
                 "context": dict(row.last_notified_context or {}),
             }
@@ -471,8 +563,8 @@ class PriceAdjustNotifyService:
         notify: list[dict] = []
         silent: list[dict] = []
 
-        for (sku_id, platform_code), cur in states.items():
-            prev = baselines.get((sku_id, platform_code))
+        for (sku_id, platform_code, warehouse_code), cur in states.items():
+            prev = baselines.get((sku_id, platform_code, warehouse_code))
             new_price = cur["min_selling_price"]
 
             if prev is None:
@@ -481,6 +573,7 @@ class PriceAdjustNotifyService:
                     {
                         "sku_id": sku_id,
                         "platform_code": platform_code,
+                        "warehouse_code": warehouse_code,
                         "min_selling_price": new_price,
                         "context": cur["context"],
                     }
@@ -505,6 +598,7 @@ class PriceAdjustNotifyService:
                     {
                         "sku_id": sku_id,
                         "platform_code": platform_code,
+                        "warehouse_code": warehouse_code,
                         "min_selling_price": new_price,
                         "context": cur_context,
                     }
@@ -515,6 +609,7 @@ class PriceAdjustNotifyService:
                 {
                     "sku_id": sku_id,
                     "platform_code": platform_code,
+                    "warehouse_code": warehouse_code,
                     "sku_key": cur["sku_key"],
                     "spu": cur["spu"],
                     "sku_name": cur["sku_name"],
@@ -553,7 +648,7 @@ class PriceAdjustNotifyService:
         sku_ids = {entry["sku_id"] for entry in entries}
         platform_codes = {entry["platform_code"] for entry in entries}
         existing = {
-            (row.sku_id, row.platform_code): row
+            (row.sku_id, row.platform_code, row.warehouse_code): row
             for row in (
                 await self.db.execute(
                     select(PriceAdjustBaseline).where(
@@ -569,14 +664,18 @@ class PriceAdjustNotifyService:
         for entry in entries:
             sku_id = entry["sku_id"]
             platform_code = entry["platform_code"]
+            # ⚠️ 仓维度（批次 4）：主键是 (sku_id, platform_code, warehouse_code)。
+            #    空串 = 「没有仓维度」的回落口径（仓维度数据整体缺失时用）。
+            warehouse_code = entry.get("warehouse_code") or ""
             price = entry["min_selling_price"]
             context = entry["context"]
-            row = existing.get((sku_id, platform_code))
+            row = existing.get((sku_id, platform_code, warehouse_code))
             if row is None:
                 self.db.add(
                     PriceAdjustBaseline(
                         sku_id=sku_id,
                         platform_code=platform_code,
+                        warehouse_code=warehouse_code,
                         last_notified_min_price=_to_decimal(price),
                         last_notified_context=context,
                     )
@@ -588,9 +687,14 @@ class PriceAdjustNotifyService:
         return len(entries)
 
     async def advance_baseline_for_sku(
-        self, sku_id: int, price: Any, context: dict, platform_code: str | None = None
+        self,
+        sku_id: int,
+        price: Any,
+        context: dict,
+        platform_code: str | None = None,
+        warehouse_code: str | None = None,
     ) -> None:
-        """推进单个 SKU 在某平台的基线——**投递成功后**调用。
+        """推进单个 SKU 在某平台某仓的基线——**投递成功后**调用。
 
         写入 ``ops.price_adjust_baselines``，不碰 ``core.dim_erp_sku``——
         后者会被商品中心同步 TRUNCATE 掉。
@@ -601,13 +705,22 @@ class PriceAdjustNotifyService:
 
         ⚠️ `platform_code` 不传时回落到历史 basis 平台，
         只为兼容老调用方；新代码必须显式传平台。
+
+        ⚠️ `warehouse_code` 不传时回落到快照里的仓，再回落到空串
+        （= 没有仓维度的回落口径）。新代码必须显式传仓。
         """
         platform_code = platform_code or context.get("platform_code") or "tiktok"
+        warehouse_code = (
+            warehouse_code
+            if warehouse_code is not None
+            else (context.get("warehouse_code") or "")
+        )
         row = (
             await self.db.execute(
                 select(PriceAdjustBaseline).where(
                     PriceAdjustBaseline.sku_id == sku_id,
                     PriceAdjustBaseline.platform_code == platform_code,
+                    PriceAdjustBaseline.warehouse_code == warehouse_code,
                 )
             )
         ).scalar_one_or_none()
@@ -616,6 +729,7 @@ class PriceAdjustNotifyService:
                 PriceAdjustBaseline(
                     sku_id=sku_id,
                     platform_code=platform_code,
+                    warehouse_code=warehouse_code,
                     last_notified_min_price=_to_decimal(price),
                     last_notified_context=context,
                 )

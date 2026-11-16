@@ -1137,6 +1137,12 @@ class ProductFinanceService:
         reference_label_fee = await self.find_reference_label_fee(
             data["warehouse_code"]
         )
+        # 尾程配送费（批次 4）：按 SKU 重量 + 当前仓费率表算出来的**单件**尾程。
+        # ⚠️ 算不出来时 amount 为 None ⇒ 传进利润链就是「不可算」，
+        #    利润会留白并标缺失原因（**不是 0** —— 尾程不免费）。
+        delivery_result = await self.find_delivery_cost(
+            data["platform_code"], data["warehouse_code"], sku.weight_kg
+        )
         binding = (
             (
                 await self.db.execute(
@@ -1190,6 +1196,8 @@ class ProductFinanceService:
             # 平台级 ROI 配置（阶段 1）
             roi_safety_margin=platform.roi_safety_margin,
             target_roi_ceiling=platform.target_roi_ceiling,
+            # 尾程配送费（批次 4）：进广告前利润。None = 算不出来 ⇒ 利润留白。
+            delivery_cost=delivery_result.amount,
         )
         result.update(
             {
@@ -1217,6 +1225,18 @@ class ProductFinanceService:
                 ),
                 "reference_label_fee": reference_label_fee,
                 "reference_storage_days": reference_storage_days(sku.turnover_class),
+                # 尾程配送费（批次 4）：单件尾程 + 来源/是否估算/缺失原因
+                "delivery_cost": (
+                    float(delivery_result.amount)
+                    if delivery_result.amount is not None
+                    else None
+                ),
+                "delivery_cost_source": delivery_result.source,
+                "delivery_cost_estimated": delivery_result.estimated,
+                "delivery_cost_missing_reasons": list(delivery_result.missing_reasons),
+                "delivery_cost_weight_kg": (
+                    float(sku.weight_kg) if sku.weight_kg is not None else None
+                ),
                 "currency": "CNY",
                 "actual_logistics_cost": actual_logistics,
                 "cost_completeness": (

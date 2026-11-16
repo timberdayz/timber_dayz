@@ -1348,10 +1348,15 @@ class PriceAdjustBaseline(Base):
     算不出最低售价的 SKU（缺采购成本 / 缺 SPU 率）它的基线价格本来就是 NULL，
     但它同样被处理过、同样有上下文。
 
-    **主键是 (sku_id, platform_code)**（阶段 2.1）：底线是「SKU × 平台」的量
-    （平台其他成本率 TikTok 27.27% vs Shopee 41.65%），所以"底线有没有变"
-    也必须按平台判定 —— Shopee 的底线动了**不是** TikTok 的底线动了。
-    以前主键只有 sku_id，于是一个平台的变化会被记成所有平台的变化。
+    **主键是 (sku_id, platform_code, warehouse_code)**（批次 4 仓维度统一）：
+    底线是「SKU × 平台 × 仓」的量（阶段 2.1 拆到平台，批次 4 拆到仓 ——
+    尾程配送费按「平台 × 仓 × 重量段」计价，同一件商品在不同仓的底线可以不同）。
+    以前主键只有 sku_id（阶段 2.1 之前），于是一个平台的变化会被记成所有平台的变化；
+    现在少一个仓维度，同理会把 A 仓的底线变化记成所有仓的变化。
+
+    ⚠️ **仓维度加上以后，老基线行自动失效**（老行的 warehouse_code 是空串，
+    与任何真实仓都对不上 ⇒ 不会被拿来和新状态比较 ⇒ **不会误报一批"底线变了"**）。
+    代价是上线后第一轮变更不通知（那轮只重建基线），这是安全的方向。
     """
 
     __tablename__ = "price_adjust_baselines"
@@ -1359,6 +1364,10 @@ class PriceAdjustBaseline(Base):
     sku_id = Column(Integer, primary_key=True, autoincrement=False)
     # 底线所属平台。与 sku_id 一起构成主键（底线是 SKU × 平台的量）。
     platform_code = Column(String(32), primary_key=True, autoincrement=False)
+    # 底线所属仓（批次 4）。与上面两列一起构成主键（底线是 SKU × 平台 × 仓的量）。
+    # ⚠️ 老基线行回填成空串（见迁移）：老口径的底线没有仓维度，
+    #    空串与任何真实仓都对不上 ⇒ 老基线不会被误当成新仓的基线。
+    warehouse_code = Column(String(32), primary_key=True, autoincrement=False)
     # 上一次已处理的最低售价；NULL = 当时算不出底线（本身就是一个有效的基线状态）
     last_notified_min_price = Column(Numeric(18, 2), nullable=True)
     # 上一次已处理的定价输入快照（档位 / 库龄 / 成本 / 费率 / 参考售价 / 来源标记），

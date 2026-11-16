@@ -99,6 +99,8 @@ def _pricing_context(*, with_override: Decimal | None = None) -> dict:
         other_cost_rate=OTHER_COST_RATE,
         default_creator_commission_rate=CREATOR_RATE,
         platform_role="sales",
+        # 尾程配送费占收入比（批次 4）：拆分基准，留空 = 尾程不进底线
+        delivery_cost_rate=None,
     )
     overrides = {}
     if with_override is not None:
