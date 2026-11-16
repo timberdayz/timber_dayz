@@ -290,6 +290,10 @@
                 size="small"
                 @change="markDirty('sku', row)" /></template></el-table-column
           ><el-table-column label="重量 kg" width="105"
+            ><template #header
+              ><span class="sku-required-label"
+                >重量 kg<em class="sku-required-mark">*</em></span
+              ></template
             ><template #default="{ row }"
               ><el-input-number
                 v-model="row.weight_kg"
@@ -639,6 +643,17 @@
           <el-table-column label="预估物流成本" width="150" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
           <el-table-column label="预估仓储成本" width="150" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceCostDisplay(row, "storage") }}</template></el-table-column>
           <el-table-column label="贴单费" width="115" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceLabelFeeDisplay(row) }}</template></el-table-column>
+          <!--
+            尾程配送费（批次 3：**只读展示**）：仓 → 买家那段快递费，每卖一件必付。
+            批次 3 只显示（还没进利润与成本底线），批次 4 才扣。
+            ⚠️ 标「估算」是因为缺重量时只能保守估（该仓最轻档 vs 最贵仓，取更贵的）。
+          -->
+          <el-table-column label="尾程配送费" width="150" class-name="seg-cost" label-class-name="seg-cost"
+            ><template #default="{ row }"
+              ><div>{{ money(row.delivery_cost) }}</div>
+              <el-tag v-if="row.delivery_cost_estimated" size="small" type="warning">估算</el-tag>
+              <div v-if="deliveryCostHint(row)" class="price-floor-hint">{{ deliveryCostHint(row) }}</div></template
+          ></el-table-column>
           <el-table-column label="广告分成率" width="225" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }"
               ><!--
@@ -1249,7 +1264,10 @@ const loadingBills = ref(false);
 // SKU 资料 tab 中视觉标记为可填项的列名（仅改表头颜色，不动字段必填校验）
 // ⚠️ 「基准售价」2026-10-21 起移出本列表：蓝色表头在数据表里读起来像可点击链接，
 // 而它其实是「这列可以不填」的标记，容易被误读。按要求改为与其他列一致的黑色。
-const skuOptionalColumnLabels = ["规格", "重量 kg", "箱规（件/箱）", "基准售价来源"];
+// ⚠️ 「重量 kg」2026-11-16 起移出本列表：**重量是必填项**（尾程配送费按重量段计费，
+//    缺重量 ⇒ 尾程费只能保守估算 ⇒ 最低售价底线偏松）。
+//    蓝色 = 「这列可以不填」，必填的列必须黑色（与「单件体积 m³」一致）。
+const skuOptionalColumnLabels = ["规格", "箱规（件/箱）", "基准售价来源"];
 const skuHeaderCellStyle = ({ column }) => {
   if (skuOptionalColumnLabels.includes(column.label)) {
     return { color: "#79bbff", fontWeight: "normal" };
@@ -2509,6 +2527,10 @@ const saveSkuRows = async () => {
   try {
     for (const row of skuDirty.value) {
       if (!row.sku_key || !row.spu) throw new Error("SKU 和所属 SPU 不能为空");
+      // 重量是**必填项**（2026-11-16）：尾程配送费按重量段计费，
+      // 缺重量 ⇒ 尾程费只能保守估算 ⇒ 最低售价底线偏松 ⇒ 守不住。
+      if (row.weight_kg == null || Number(row.weight_kg) <= 0)
+        throw new Error(`${row.sku_key}：重量 kg 是必填项（尾程配送费按重量段计费）`);
     }
     await productCenterApi.bulkSaveSkus({
       items: skuDirty.value.map(payloadSku),
@@ -3138,6 +3160,15 @@ const adCostMissingHint = (row) => {
 // 批次 2 P5：达人佣金率没配 ⇒ 按 0 计 ⇒ 利润被高估，必须标出来。
 const creatorCommissionHint = (row) =>
   row.creator_commission_source === "assumed_zero" ? "未配置，按 0 计" : "";
+// 尾程配送费（批次 3 只读）：算不出来 / 是估的，都要说清。
+const deliveryCostHint = (row) => {
+  const reasons = row.delivery_cost_missing_reasons || [];
+  if (reasons.includes("missing_delivery_rate")) return "未配尾程费率";
+  if (reasons.includes("ambiguous_delivery_tier")) return "费率重量段重叠，无法判定";
+  if (reasons.includes("missing_weight")) return "缺重量，按最轻档保守估算";
+  if (reasons.includes("weight_above_top_tier")) return "超出最高重量段，按最高档估算";
+  return "";
+};
 // --- 广告分成率（高级逃生口）与目标 ROI 的口径切换（阶段 3）---
 //
 // 两个口径说的是同一件事：广告费用占多少。
@@ -3463,6 +3494,16 @@ onMounted(async () => {
   font-size: 13px;
   color: var(--el-text-color-secondary);
   cursor: help;
+}
+/* 必填标记：重量 kg（尾程配送费按重量段计费，缺重量 ⇒ 底线只能估）。 */
+.sku-required-label {
+  display: inline-flex;
+  align-items: baseline;
+}
+.sku-required-mark {
+  color: var(--el-color-danger);
+  font-style: normal;
+  margin-left: 2px;
 }
 /* 输入框有未保存的覆盖值：只读值那一行标成「待生效」 */
 .readonly-cell.pending-override {

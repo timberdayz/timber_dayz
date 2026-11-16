@@ -756,6 +756,84 @@ class WarehouseStorageRuleUpdateRequest(BaseModel):
         return self
 
 
+class DeliveryRateRuleCreateRequest(BaseModel):
+    """尾程配送费费率（平台 × 仓 × 重量段）。
+
+    ⚠️ **重量段区间不许重叠** —— 重叠会让选档变成歧义（系统宁可算不出来，
+    也不猜一个档位）。区间左闭右闭，``max_weight_kg`` 留空 = 往上不封顶。
+    """
+
+    platform_code: str = Field(min_length=1, max_length=32)
+    warehouse_code: str = Field(min_length=1, max_length=128)
+    min_weight_kg: float = Field(ge=0)
+    max_weight_kg: Optional[float] = Field(default=None, ge=0)
+    unit_price: float = Field(ge=0)
+    currency: str = Field(default="CNY", min_length=3, max_length=8)
+    effective_from: date
+    effective_to: Optional[date] = None
+    status: str = Field(default="active", pattern=r"^(active|inactive)$")
+    source: Optional[str] = Field(default=None, max_length=128)
+    version: Optional[str] = Field(default=None, max_length=64)
+    notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def weight_window_is_valid(self):
+        if self.max_weight_kg is not None and self.max_weight_kg <= self.min_weight_kg:
+            raise ValueError("max_weight_kg must be greater than min_weight_kg")
+        if self.effective_to is not None and self.effective_to < self.effective_from:
+            raise ValueError("effective_to must not be earlier than effective_from")
+        return self
+
+
+class DeliveryRateRuleUpdateRequest(BaseModel):
+    min_weight_kg: Optional[float] = Field(default=None, ge=0)
+    max_weight_kg: Optional[float] = Field(default=None, ge=0)
+    unit_price: Optional[float] = Field(default=None, ge=0)
+    currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
+    source: Optional[str] = Field(default=None, max_length=128)
+    version: Optional[str] = Field(default=None, max_length=64)
+    notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def weight_window_is_valid(self):
+        if (
+            self.min_weight_kg is not None
+            and self.max_weight_kg is not None
+            and self.max_weight_kg <= self.min_weight_kg
+        ):
+            raise ValueError("max_weight_kg must be greater than min_weight_kg")
+        if (
+            self.effective_from is not None
+            and self.effective_to is not None
+            and self.effective_to < self.effective_from
+        ):
+            raise ValueError("effective_to must not be earlier than effective_from")
+        return self
+
+
+class DeliveryRateRuleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    rule_id: int
+    platform_code: str
+    warehouse_code: str
+    min_weight_kg: float
+    max_weight_kg: Optional[float] = None
+    unit_price: float
+    currency: str = "CNY"
+    effective_from: date
+    effective_to: Optional[date] = None
+    status: str = "active"
+    source: Optional[str] = None
+    version: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 class CostAssumptionCreateRequest(BaseModel):
     profile_name: str = Field(min_length=1, max_length=128)
     destination: Optional[str] = None
@@ -1240,6 +1318,13 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     missing_input_reasons: list[str] = Field(default_factory=list)
     # 达人佣金率的来源：'sku' / 'platform_default' / 'assumed_zero'（按 0 计）
     creator_commission_source: Optional[str] = None
+    # --- 尾程配送费（批次 3 只读展示；批次 4 才进利润与成本底线）---
+    delivery_cost: Optional[float] = None
+    # rate_table（按费率表） / estimated（保守估算） / unavailable（算不出来）
+    delivery_cost_source: Optional[str] = None
+    delivery_cost_estimated: bool = False
+    delivery_cost_missing_reasons: list[str] = Field(default_factory=list)
+    delivery_cost_weight_kg: Optional[float] = None
     preview: Optional[dict] = None
     currency: str = "CNY"
     # --- SKU 定价底线 ---

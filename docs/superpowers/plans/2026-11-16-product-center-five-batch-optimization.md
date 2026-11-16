@@ -90,23 +90,33 @@ D = 1 − other_cost_rate_ex_shipping − 达人佣金率 − 货损率 − 退�
 
 **新表**：`finance.delivery_rate_rules`
 列：`rule_id / platform_code / warehouse_code / min_weight_kg / max_weight_kg / unit_price /
-currency / effective_from / effective_to / status / source / notes`
+currency / effective_from / effective_to / status / source / version / notes`
 当期唯一：`(platform_code, warehouse_code, min_weight_kg) WHERE status='active' AND effective_to IS NULL`
-**刻意不建 FK 到 `dim_platforms`**（商品中心同步会 TRUNCATE 该表）。
+**刻意不建任何外键**（`core.dim_platforms` / `core.dim_warehouses` 会被同步
+`TRUNCATE ... CASCADE` ⇒ 建了外键会把费率规则一起删掉，静默失效）。
+重量段区间是**左闭右开** `[min, max)`：`max_weight_kg IS NULL` = 往上不封顶；
+相邻两档不重叠，边界归下一档。
 
 **纯函数模块**：`backend/services/product_delivery_cost_service.py`
-`select_delivery_tier(...)` / `compute_delivery_cost(...)` —— 无 ORM 无 DB；区间重叠返回 `None`
-（歧义不猜）。
+`match_delivery_tiers` / `select_delivery_tier` / `compute_delivery_cost` —— 无 ORM 无 DB。
+三条硬规则：区间重叠 ⇒ **歧义不猜**（算不出来）；没配费率 ⇒ **不是 0**（尾程不免费）；
+缺重量 ⇒ 保守估算（该仓最轻档 vs 同平台最贵仓的最轻档，取更贵的）+ `estimated=True`。
 
-**缺重量降级**：按该仓最轻档 + 最贵仓保守估算并标 `estimated` —— 不让底线算不出来。
+**取数层**：`ProductFinanceService.find_delivery_rate_tiers` / `find_delivery_cost`。
 
-**两条落点**：① 利润测算（广告前利润要扣尾程）；② 成本底线 `(采购+尾程)÷D`。
+**端点**：`GET/POST/PATCH/DELETE /api/delivery-rate-rules`（同档位换价 = 旧行闭区间 +
+新行今天起生效；重量段重叠 ⇒ 409）。
 
-**仓维度全线统一的 4 处连带**：
-1. `list_skus` 加仓参数
-2. `ops.price_adjust_baselines` 主键加 `warehouse_code`
-3. `price_adjust_notify_service` 按 (平台×仓) 循环且只对有库存的仓发
-4. 人工覆盖表 `sku_platform_pricing` **不下沉**（保持 SKU×平台）
+**批次 3 已落地**：表 + 迁移 + 纯函数 + 取数 + 端点 + 测算页「尾程配送费」**只读列**
+（批次 4 才进利润与底线）+ 重量 kg 必填（表头去蓝 + 红星 + 保存校验）。
+守护：`backend/tests/test_product_delivery_cost.py`（18 条，含真实 PG 上
+upgrade → upgrade → downgrade → upgrade）。
+
+**批次 4 落地**：尾程进广告前利润；尾程进成本底线 `(采购+尾程)÷D`；拆
+`other_cost_rate` 里的运费；仓维度全线统一 4 处。
+
+**已知缺口**：费率**维护 UI** 未做（当前走 API / SQL 导入）；其余两类规则
+（物流服务商规则、仓储规则）在「物流仓储管理」tab 里有表格可维护。
 
 ---
 

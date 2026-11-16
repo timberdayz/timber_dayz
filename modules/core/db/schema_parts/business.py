@@ -891,6 +891,86 @@ class WarehouseStorageRule(Base):
     )
 
 
+class DeliveryRateRule(Base):
+    """尾程配送费费率（平台 × 仓 × 重量段），版本化只进不退。
+
+    业务概念
+    --------
+    尾程 = 仓 → 买家那段快递费。**每卖一件必付**（头程是已付库存成本，一次）。
+    「这个平台 × 这个仓我们包邮」= 这个维度配了尾程费率 ⇒ 这笔成本由商家承担。
+
+    为什么**没有任何外键**
+    --------------------
+    ``core.dim_platforms`` / ``core.dim_warehouses`` 会被「采集机 → 云端」同步
+    ``TRUNCATE ... CASCADE``（``scripts/sync_product_center_to_cloud.py``）。
+    这张表**不在**该清单里 ⇒ 若建了外键，TRUNCATE 父表时 CASCADE 会把**费率规则
+    一起删掉**（静默失效：底线突然算不出来）。所以 ``platform_code`` /
+    ``warehouse_code`` 都是普通字符串，由服务层校验存在性。
+
+    粒度
+    ----
+    ``(platform_code, warehouse_code, min_weight_kg)`` 唯一（当期有效行）。
+    重量段区间为 ``[min_weight_kg, max_weight_kg]``，``max_weight_kg IS NULL``
+    表示「往上不封顶」。
+    """
+
+    __tablename__ = "delivery_rate_rules"
+
+    rule_id = Column(Integer, primary_key=True, autoincrement=True)
+    platform_code = Column(String(32), nullable=False)
+    warehouse_code = Column(String(128), nullable=False)
+    min_weight_kg = Column(Numeric(12, 3), nullable=False)
+    max_weight_kg = Column(Numeric(12, 3), nullable=True)
+    unit_price = Column(Numeric(18, 2), nullable=False)
+    currency = Column(String(8), nullable=False, default="CNY")
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    status = Column(String(16), nullable=False, default="active")
+    source = Column(String(128), nullable=True)
+    version = Column(String(64), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint("min_weight_kg >= 0", name="ck_delivery_rate_rules_min_weight"),
+        CheckConstraint(
+            "max_weight_kg IS NULL OR max_weight_kg > min_weight_kg",
+            name="ck_delivery_rate_rules_weight_window",
+        ),
+        CheckConstraint("unit_price >= 0", name="ck_delivery_rate_rules_price"),
+        CheckConstraint(
+            "effective_to IS NULL OR effective_to >= effective_from",
+            name="ck_delivery_rate_rules_window",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'inactive')", name="ck_delivery_rate_rules_status"
+        ),
+        Index(
+            "uq_delivery_rate_rules_current",
+            "platform_code",
+            "warehouse_code",
+            "min_weight_kg",
+            unique=True,
+            postgresql_where=text("status = 'active' AND effective_to IS NULL"),
+        ),
+        Index(
+            "ix_delivery_rate_rules_lookup",
+            "platform_code",
+            "warehouse_code",
+            "effective_from",
+        ),
+        {"schema": "finance"},
+    )
+
+
 class LogisticsBillPurchaseOrder(Base):
     """Many-to-many association between a logistics batch and purchase orders."""
 

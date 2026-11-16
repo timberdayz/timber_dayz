@@ -50,6 +50,9 @@ PRODUCT_CENTER_TABLES = [
     ("finance", "product_cost_assumption_profiles"),
     ("finance", "warehouse_storage_rules"),
     ("finance", "logistics_provider_rules"),
+    # 尾程费率（平台 × 仓 × 重量段）：无外键 ⇒ 放在任何位置都安全。
+    # ⚠️ 它**必须**在清单里：漏了 ⇒ 云端没有尾程费率 ⇒ 尾程费算不出来（利润虚高）。
+    ("finance", "delivery_rate_rules"),
     # 档位规则表：公司级库龄档位 → 最低售价的唯一来源（无外键，可放任意位置）
     ("finance", "sku_pricing_policies"),
     ("core", "dim_spu"),

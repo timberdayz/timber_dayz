@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from modules.core.db import (
     BridgeSpuSku,
     BridgeErpSkuKey,
+    DeliveryRateRule,
     DimErpSku,
     DimPlatform,
     DimWarehouse,
@@ -24,6 +25,12 @@ from modules.core.db import (
     WarehouseStorageRule,
     SkuOperatingProfile,
     SkuProfitEstimate,
+)
+
+from .product_delivery_cost_service import (
+    DeliveryCostResult,
+    DeliveryTier,
+    compute_delivery_cost,
 )
 
 from .product_profit_service import (
@@ -609,6 +616,61 @@ class ProductFinanceService:
         if rule is None or rule.label_fee is None:
             return None
         return Decimal(str(rule.label_fee))
+
+    async def find_delivery_rate_tiers(
+        self, platform_code: str, warehouse_code: str | None = None
+    ) -> list[DeliveryTier]:
+        """尾程费率档位（当期有效行）。
+
+        ``warehouse_code=None`` ⇒ 取该平台**所有仓**的档位（缺重量时挑「最贵仓」用）。
+        """
+        statement = (
+            select(DeliveryRateRule)
+            .where(
+                DeliveryRateRule.platform_code == platform_code,
+                DeliveryRateRule.status == "active",
+                DeliveryRateRule.effective_from <= date.today(),
+                (DeliveryRateRule.effective_to.is_(None))
+                | (DeliveryRateRule.effective_to >= date.today()),
+            )
+            .order_by(
+                DeliveryRateRule.warehouse_code,
+                DeliveryRateRule.min_weight_kg,
+            )
+        )
+        if warehouse_code is not None:
+            statement = statement.where(
+                DeliveryRateRule.warehouse_code == warehouse_code
+            )
+        rows = (await self.db.execute(statement)).scalars().all()
+        return [
+            DeliveryTier(
+                min_weight_kg=Decimal(str(row.min_weight_kg)),
+                max_weight_kg=(
+                    Decimal(str(row.max_weight_kg))
+                    if row.max_weight_kg is not None
+                    else None
+                ),
+                unit_price=Decimal(str(row.unit_price)),
+                currency=row.currency or "CNY",
+                warehouse_code=row.warehouse_code,
+            )
+            for row in rows
+        ]
+
+    async def find_delivery_cost(
+        self, platform_code: str, warehouse_code: str, weight_kg: Decimal | None
+    ) -> DeliveryCostResult:
+        """单 SKU 的尾程配送费（平台 × 仓 × 重量段）。
+
+        缺重量 ⇒ 保守估算并标 ``estimated``（口径见
+        ``backend/services/product_delivery_cost_service.py``）。
+        """
+        tiers = await self.find_delivery_rate_tiers(platform_code, warehouse_code)
+        fallback: list[DeliveryTier] = []
+        if weight_kg is None:
+            fallback = await self.find_delivery_rate_tiers(platform_code)
+        return compute_delivery_cost(tiers, weight_kg, fallback_tiers=fallback)
 
     async def find_latest_purchase_cost(self, sku: DimErpSku) -> Decimal | None:
         purchase_cost = case(
