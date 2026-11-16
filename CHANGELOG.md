@@ -75,6 +75,43 @@ Shopee `卖家支付运费` −1,121,042.21 直接从结算里扣）⇒
 | 前端 | 「物流仓储管理」新增「尾程费率」tab；定价设置新增「尾程占收入比」；测算页尾程列带「已计入底线 / 未计入底线」；SKU 资料页按当前仓取底线；重量改必填（表头改黑） |
 | 守护测试 | 新增 26 条（后端 13 + 13，前端 2 + 既有 84） |
 
+### 七、发布与部署后验收（2026-11-16）
+
+**发布物料**
+
+| 项 | 值 |
+|---|---|
+| 版本 | **v7.31.0** |
+| tag 对象（双端同一对象） | `930d15eb`（annotated tag） |
+| tag 指向的提交 | `37ea0484`（**VERSION 与 tag 同提交** —— `VERSION` 纯 7 字节 `v7.31.0`） |
+| 双镜像 main | GitHub SSH-443 与 CNB HTTPS **同为 `37ea0484`**（`git ls-remote` 核对） |
+| 发版流水线 | **run `43933618944` = success**（22m59s，**恰好 1 个 run**） |
+| main 的 CI 三线 | CI Pipeline ✓ / Validate Data Flow ✓ / Docker Build and Push ✓ |
+| 本次改动 | 2 次数据库迁移（加列 + 加主键维度）；API 契约变更 3 处 + 1 个新端点族；前端 4 处 |
+
+**部署后独立验收**（SSH 直连生产 + 公网端点，不依赖流水线自述）
+
+| 项 | 结果 |
+|---|---|
+| 容器版本 | backend-api / celery-worker / celery-beat / frontend **全部 v7.31.0** |
+| 健康端点 | `https://www.xihong.site/api/healthz/ready` → HTTP 200，`version=v7.31.0`，`database=connected`，`dashboard=ready` |
+| 迁移版本 | `current_schema_alembic_version = current_schema_20261235_price_adjust_baseline_warehouse`（= 链头） |
+| 新结构 | `core.dim_platforms.delivery_cost_rate` 存在；`ops.price_adjust_baselines.warehouse_code` 存在且主键已是 `(sku_id, platform_code, warehouse_code)` |
+| 平台拆分基准 | tiktok / shopee 的 `delivery_cost_rate` 均 **NULL** ⇒ 尾程**不进底线** ⇒ 上线不会突然抬高底线 |
+| 尾程费率表 | `finance.delivery_rate_rules` 行数 = 0 ⇒ 尾程算不出来 ⇒ 利润链显示不可算并点名原因（**不按 0 计**） |
+| 老基线 | 2238 行全部 `warehouse_code = ''` ⇒ 自动失效 ⇒ 上线后第一轮只重建基线、不通知（安全方向） |
+| deploy-logs | 只多一个批次 `20261117_030730` |
+
+**发版前被拦下的三处**
+
+1. **迁移里 `get_pk_constraint` 漏了 schema 参数** ⇒ PostgreSQL 去找 `public.price_adjust_baselines` ⇒
+   `NoSuchTableError`，`alembic upgrade head` 直接挂。已在两个 alembic 演练测试里暴露并修掉
+   （`test_schema_cleanup_rehearsal` / `test_dim_shops_public_retirement_rehearsal`）。
+2. **基线表主键名硬编码错了**：建表时叫 `pk_price_adjust_baselines`，但 20261115 那次改复合主键
+   把它重建成了 `price_adjust_baselines_pkey` ⇒ `drop_constraint` 会找不到。改为**从库里读实际名字**。
+3. **`VERSION` 文件落后两个版本**（文件是 v7.28.0，最新 tag 是 v7.30.0）⇒ 本次按发布规范
+   「VERSION 与 tag 同提交 bump」纠正到 v7.31.0。
+
 ## [v7.29.5] - 2026-11-14 - 投影时把 `notes` 一起写进库（守卫差一项就红）
 
 > **只改 `scripts/apply_template_definitions.py` + `scripts/template_definitions.py`

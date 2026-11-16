@@ -270,6 +270,25 @@ other_cost_rate = 1 − 实测采购成本率 − 实测净利率 − 平均 SPU
 
 ## 7. 发布
 
-- 版本号待定（按 `docs/guides/RELEASE_CHECKLIST.md` 流程：VERSION 与 tag 同提交 bump）
+- 版本号：**v7.31.0**（VERSION 纯 7 字节 `v7.31.0`，与 tag 同提交）
 - 推送方式：`git push origin vX.Y.Z`（GitHub SSH-443 触发部署；CNB 仅为镜像，tag 两镜像须同对象）
 - 发布后独立 SSH 验证：`/healthz/ready` 与 `docker compose ps` 的版本号 == tag；`deploy-logs` 只多一个批次
+
+### v7.31.0 发布记录（2026-11-16）
+
+| 项 | 值 |
+|---|---|
+| tag 对象（双端同一对象） | `930d15eb`（annotated tag） |
+| tag 指向的提交 | `37ea0484`（**VERSION 与 tag 同提交**） |
+| 双镜像 main | GitHub SSH-443 与 CNB HTTPS **同为 `37ea0484`**（`git ls-remote` 核对） |
+| 提交 | `c9e1dde4` 批次 4-5 代码 + 文档；`37ea0484` VERSION + CHANGELOG |
+| 发版流水线 | **run `43933618944` = success**（check-config / 发布门禁 / 镜像构建推送 / 远端部署 全 success，22m59s，**恰好 1 个 run**） |
+| main 的 CI 三线 | CI Pipeline ✓ / Validate Data Flow ✓ / Docker Build and Push ✓ |
+| 生产容器 | backend-api / celery-worker / celery-beat / frontend **全部 v7.31.0** |
+| 健康端点 | HTTP 200，`version=v7.31.0`，`database=connected`，`dashboard=ready` |
+| 迁移版本 | `current_schema_alembic_version = current_schema_20261235_price_adjust_baseline_warehouse`（= 链头） |
+| 新结构（只读核查） | `core.dim_platforms.delivery_cost_rate` 存在；`ops.price_adjust_baselines.warehouse_code` 存在且**主键已是** `(sku_id, platform_code, warehouse_code)` |
+| 平台拆分基准 | tiktok / shopee 的 `delivery_cost_rate` 均为 **NULL**（刻意不预置种子）⇒ 尾程**不进底线** ⇒ 上线不会突然抬高底线 |
+| 尾程费率表 | `finance.delivery_rate_rules` 行数 = 0（业务待录）⇒ 尾程算不出来 ⇒ 利润链显示不可算并点名原因，**不按 0 计** |
+| 老基线 | 2238 行全部 `warehouse_code = ''` ⇒ **自动失效** ⇒ 上线后第一轮只重建基线、不通知（安全方向） |
+| deploy-logs | 只多一个批次 `20261117_030730`（`rebuild_views` + `bootstrap_postgresql_dashboard` 一对） |
