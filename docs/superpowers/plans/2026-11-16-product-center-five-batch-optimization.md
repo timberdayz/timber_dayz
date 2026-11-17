@@ -343,3 +343,27 @@ other_cost_rate = 1 − 实测采购成本率 − 实测净利率 − 平均 SPU
   去重键是老格式 `sku:platform`、基线也已按新口径重建；
 - 飞书调价记录表**只增不改**，倒进去删不掉；
 - 作废保留审计痕迹（载荷、投递日志、失败次数都在），新流程从干净基线重新开始。
+
+### 8.4 v7.31.1 发布与部署验收（2026-11-17）
+
+| 项 | 值 |
+|---|---|
+| tag 对象（双端同一对象） | `b04f2c07` |
+| tag 指向的提交 | `48fa88ae`（VERSION 与 tag 同提交，VERSION 纯 7 字节 `v7.31.1`） |
+| 双镜像 main | GitHub SSH-443 与 CNB HTTPS 同为 `48fa88ae` |
+| 提交 | `5f4c10ac` 修复+测试+脚本；`48fa88ae` VERSION+CHANGELOG |
+| 发版流水线 | run `44013238622` **attempt 2 = success**（attempt 1 卡在 CNB 镜像推送 34 分钟 ⇒ 取消后重跑；镜像内容不变，生产只部署 1 次） |
+| main 的 CI 三线 | 全 success |
+| 生产容器 | backend-api / celery-worker / celery-beat / frontend **全部 v7.31.1**、healthy |
+| 公网 `healthz/ready` | HTTP 200，`version=v7.31.1`，`database=connected`，`dashboard=ready` |
+| 迁移版本 | `current_schema_20261235_price_adjust_baseline_warehouse`（无新迁移） |
+| 基线主键 / 行数 | `(sku_id, platform_code, warehouse_code)`；2238 空串仓 + 1022 仓维度 |
+| 积压作废 | 461 条 `failed` → `abandoned`（dry-run 先确认命中范围），失败任务归零 |
+| 飞书真实表 | 仍 174 行、`rev=281` 不变 ⇒ **没有往业务表写任何脏数据** |
+| 生产代码真表写入 | 已部署代码 ⇒ `平台=TikTok` ⇒ 真实 `batch_create` 成功；临时表验证完即删，表数回到 12（零残留） |
+| deploy-logs | 只多一个批次 `20261117_123908` |
+
+> ⚠️ **教训（记给下一次发版）**：`Push backend image to CNB` 这一步**没有超时保护**，
+> 挂住就是无限期挂住（本次 34 分钟无进展，上一版同一步 4 分 17 秒）。
+> ⇒ 下次发版若该步超过 10 分钟无进展，直接 `gh run cancel` + `gh run rerun`（同 tag 同镜像），
+> 不要干等。生产只应部署 1 次 —— 以 deploy-logs 的批次数为准。

@@ -65,6 +65,12 @@ COPY scripts/local_migration_backup.py /app/scripts/local_migration_backup.py
 COPY scripts/bootstrap_seed_manifest.py /app/scripts/bootstrap_seed_manifest.py
 COPY scripts/bootstrap_fresh_environment.py /app/scripts/bootstrap_fresh_environment.py
 COPY scripts/migrate_profit_basis_to_v2.py /app/scripts/migrate_profit_basis_to_v2.py
+# [OPS] 飞书调价通知 outbox 积压作废（2026-11-17，v7.31.1）
+#
+#   scripts/abandon_stale_price_adjust_tasks.py —— 把因飞书单选字段写错而卡死的
+#   旧调价任务标成 abandoned（不删行，留审计痕迹），避免修好之后被一次性重投。
+#   生产上必须能在镜像里直接跑（它要连生产库），所以登记进白名单。
+COPY scripts/abandon_stale_price_adjust_tasks.py /app/scripts/abandon_stale_price_adjust_tasks.py
 # [OPS] 模板治理 v2（2026-11-14，批次 3/4）：模板**决策资产**进 Git
 #
 #   templates/definitions/*.json —— 「这个维度该长什么样」的声明式定义；

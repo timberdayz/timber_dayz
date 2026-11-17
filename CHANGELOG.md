@@ -64,6 +64,32 @@
 - **业务侧三项**（代码定不了）：`finance.delivery_rate_rules` 0 行（尾程算不出来）、
   各平台 `delivery_cost_rate` 未填（尾程不进底线）、1125 个 SKU 重量为 0（尾程只能保守估算）。
 
+### 六、发布与部署验收（2026-11-17）
+
+| 项 | 值 |
+|---|---|
+| tag 对象（双端同一对象） | `b04f2c07`（annotated tag） |
+| tag 指向的提交 | `48fa88ae`（**VERSION 与 tag 同提交**） |
+| 双镜像 main | GitHub SSH-443 与 CNB HTTPS **同为 `48fa88ae`** |
+| 提交 | `5f4c10ac` 修复 + 测试 + 运维脚本；`48fa88ae` VERSION + CHANGELOG |
+| 发版流水线 | run `44013238622` **attempt 2 = success** |
+| main 的 CI 三线 | CI Pipeline ✓ / Validate Data Flow ✓ / Docker Build and Push ✓（44013178635 / 44013178771 / 44013178796） |
+| 生产容器 | backend-api / celery-worker / celery-beat / frontend **全部 v7.31.1**，healthy |
+| 公网健康端点 | HTTP 200，`version=v7.31.1`，`database=connected`，`dashboard=ready` |
+| 迁移版本 | `current_schema_20261235_price_adjust_baseline_warehouse`（**无新迁移**） |
+| 基线主键 | `(sku_id, platform_code, warehouse_code)`（未变） |
+| 基线行 | 2238 行空串仓（老口径，自动失效）+ 1022 行仓维度 |
+| **积压作废** | 461 条 `failed` → **`abandoned`**（载荷与投递日志全部保留）；`price_adjust` 失败任务**归零** |
+| 飞书真实表 | 仍 **174 行**（未写入任何脏数据，`rev=281` 不变） |
+| **生产代码真表写入验证** | 已部署代码组装出 `平台=TikTok` ⇒ 真实 base/v3 `batch_create` **成功**（临时表验证完即删，表数回到 12，**零残留**） |
+| deploy-logs | 只多一个批次 `20261117_123908` |
+
+> ⚠️ **发布过程的一次插曲（基础设施，非代码）**：attempt 1 卡在
+> `Push backend image to CNB`（**34 分钟无进展**；上一版同一步只要 4 分 17 秒），
+> 判定为 CNB registry 侧网络挂死 ⇒ 取消该 run 并 `gh run rerun`，
+> attempt 2 同一 tag 正常通过（镜像内容不变）。**生产只部署了 1 次**，
+> deploy-logs 只多一个批次。
+
 ## [v7.31.0] - 2026-11-16 - 商品中心口径归一 + ROI/广告费护栏 + 尾程配送费进利润与底线（五个批次一次做对）
 
 > **本版本含两次数据库迁移**（`current_schema_20261234_delivery_cost_rate_split`、
