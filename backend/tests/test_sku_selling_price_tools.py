@@ -105,7 +105,11 @@ def _pricing_context(*, with_override: Decimal | None = None) -> dict:
     overrides = {}
     if with_override is not None:
         overrides = {
-            (1, "tiktok"): SimpleNamespace(min_selling_price_override=with_override)
+            (1, "tiktok"): SimpleNamespace(
+                min_selling_price_override=with_override,
+                # 批次 6：覆盖行同时住着**包邮开关**（NULL/False = 不包邮）
+                free_shipping=False,
+            )
         }
     return {
         "policies": [

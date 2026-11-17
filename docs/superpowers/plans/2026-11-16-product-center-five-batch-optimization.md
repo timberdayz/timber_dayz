@@ -367,3 +367,260 @@ other_cost_rate = 1 − 实测采购成本率 − 实测净利率 − 平均 SPU
 > 挂住就是无限期挂住（本次 34 分钟无进展，上一版同一步 4 分 17 秒）。
 > ⇒ 下次发版若该步超过 10 分钟无进展，直接 `gh run cancel` + `gh run rerun`（同 tag 同镜像），
 > 不要干等。生产只应部署 1 次 —— 以 deploy-logs 的批次数为准。
+
+---
+
+## 9. 批次 6 · 重量段化 + 包邮开关（2026-11-17）
+
+### 9.1 业务前提（两条用户拍板）
+
+**① 承运商按「重量段」定价。** Shopee SG / TikTok SG 价目表都是「≤1kg / ≤5kg / ≤10kg …
+一档价」，所以 SKU **不称重**，只报「落在哪一段」；承运商调价时**只改费率表那一行**
+（平台 × 仓 × 重量段），不用回改每一个 SKU。
+
+**② 跨境电商不是默认包邮，而是选择性包邮。** 同一个平台上，有的 listing 包邮、
+有的不包邮 ⇒ 「包不包邮」是 **SKU × 平台** 的经营选择，与费率表（承运商报价）
+**无关**：费率表回答「这一段运费多少钱」，包邮开关回答「这笔钱谁付」。
+
+### 9.2 数据模型
+
+| 变化 | 内容 |
+|---|---|
+| 新表 `core.dim_weight_tiers` | **全局一套**重量段：`tier_code` / `label` / `min_kg` / `max_kg` / `sort_order` / `status`。**不建外键**（会被同步 TRUNCATE CASCADE 连带清掉） |
+| `core.dim_erp_sku` | **删** `weight_kg`；**加** `weight_tier_code` |
+| `finance.delivery_rate_rules` | **删** `min_weight_kg` / `max_weight_kg`；**加** `weight_tier_code`；当期唯一索引改为 `(platform_code, warehouse_code, weight_tier_code)` |
+| `finance.sku_platform_pricing` | **加** `free_shipping`（可空布尔：TRUE=包邮 / FALSE=明确不包邮 / NULL=未设置⇒按不包邮） |
+
+标准档位（T01–T06）：`0-1 / 1-5 / 5-10 / 10-20 / 20-30 / 30 kg 以上`，
+区间**左闭右开** `[min_kg, max_kg)`，`max_kg IS NULL` = 不封顶。
+
+### 9.3 四条钉死的口径
+
+1. **段定义全局一套。** 同一个 SKU 在不同平台卖的是**同一个包裹** —— 重量段是**货的属性**，
+   不是渠道的属性。各平台各一套 ⇒ 运营维护 N 份段表 + 判断「TikTok 的 5kg 段」和
+   「Shopee 的 5kg 段」是不是同一段 ⇒ 口径必然漂移。
+2. **未选段 ⇒ 默认最轻段 + 标 estimated**（`missing_weight_tier`）。⚠️ 最轻段通常是最便宜的
+   一档 ⇒ 这是**偏乐观**口径，界面必须提示「重货务必选段」。
+3. **该段没配价 ≠ 尾程免费**（`missing_delivery_rate_for_tier`）：金额留空，
+   绝不按 0（按 0 = 白送运费 = 利润虚高）。
+4. **不包邮 ⇒ 尾程完全不适用**：不进底线分子、不进分母拆分、**不报**「缺尾程费率」、
+   利润链尾程按 **0** 计（**不是**算不出来）。理由：不包邮的 SKU 压根不需要尾程费率，
+   报缺是噪声，会把真缺料淹掉。
+
+### 9.4 包邮开关怎么进计算链
+
+```
+包邮   ⇒ 尾程（费率表单件价）→ 成本底线分子
+         ＋ 平台尾程占比 delivery_cost_rate → 成本底线分母（与分子**成对生效**）
+         ＋ 利润链扣掉这笔尾程
+不包邮 ⇒ 尾程 0：分子不加、分母不拆、利润链不扣、也不报缺费率
+```
+
+粒度 = **SKU × 平台**（与底线、人工覆盖同一粒度）：包邮是**渠道策略**，不是仓库属性 ⇒
+同一平台的所有仓共用这一个决策。
+
+### 9.5 仍然按重量计费的地方怎么办
+
+SKU 的精确重量退役了，但**头程按重量计费**的规则（`billing_basis='weight'`）还在。
+口径：**用重量段的代表重量 = 段上限**（不封顶段取下限）—— 宁高不低。
+SKU **没选段** ⇒ 头程参考成本**算不出来**（报 `missing_sku_weight_tier`）：
+不知道多重却按重量计费 = 凭空猜成本 ⇒ 宁可不算，也不要算错。
+（生产 3 仓 + 6 条物流商规则**全部**按体积计费 ⇒ 这条分支当前不触发。）
+
+### 9.6 迁移
+
+| 迁移 | 内容 |
+|---|---|
+| `20261236_weight_tiers` | 建 `core.dim_weight_tiers` + 种 6 档；SKU 加段并**按老重量回填**；费率表加段并**按老重量下限回填**；删两处重量列；换当期唯一索引（建索引前先停用同段重复的当期行） |
+| `20261237_free_shipping_flag` | `finance.sku_platform_pricing` 加 `free_shipping`（**不填种子值**：存量一律「未设置」⇒ 按不包邮） |
+
+`core.dim_weight_tiers` 进 `PRODUCT_CENTER_TABLES`（**必须**在 `core.dim_erp_sku` 之前）：
+漏了 ⇒ 云端没有段定义 ⇒ 下拉框空 ⇒ SKU 选不了段。
+
+### 9.7 本地库复验（2026-11-17，真实服务层）
+
+| 场景 | 结果 |
+|---|---|
+| 尾程按段命中（SKU 1768 = T01） | `22.34 CNY`，`rate_table`，`estimated=False` |
+| 未选段 | `22.34`，`estimated=True`，`missing_weight_tier`（默认最轻段） |
+| T06（30kg 以上）未配价 | `None`，`missing_delivery_rate_for_tier`（≠ 免费） |
+| 底线（**包邮**） | **126.19**，尾程进底线 = True，缺料清单空 |
+| 底线（**不包邮**） | **81.74**，尾程进底线 = False，缺料清单空（**不报**缺费率） |
+
+### 9.8 遗留与风险
+
+- **生产 1122 个 SKU 的重量段全空** ⇒ 按新规则全部落到最轻段（尾程立刻可算但偏乐观）
+  ⇒ 运营需按实物批量归类。
+- **生产 `finance.delivery_rate_rules` 仍 0 行** ⇒ 尾程仍算不出来；
+  发版后需用新的「批量新增」按段录费率，并填平台尾程占比。
+- **Shopee 两张价目表并存**：图 1「本地标准配送」（买家 0，2.03/2.87/3.38/5.42/10.00 SGD）
+  与上轮「三方合」（买家 1.99 + 卖家，4.29/5.20/5.78/8.06/13.19 SGD）各对应什么渠道，
+  待业务确认；本地库当前录的是后者。
+- **TikTok SG 尾程价目表**尚未提供 ⇒ 本地无法录 TikTok 档位。
+- **汇率 5.2077** 需业务认可（生产汇率表仍是 2025-11-01 的 5.2）。
+
+### 9.9 全量回归暴露并修复的三类问题（2026-11-17）
+
+批次 6 改完跑 `backend/tests` 全量，暴露 13 条失败，**根因全部在本批改动**，已逐条修掉：
+
+| # | 现象 | 根因 | 处置 |
+|---|---|---|---|
+| 1 | 利润链报 `decimal.InvalidOperation`（`Decimal(str(协程对象))`）、控制台刷「coroutine `_reference_logistics_from_rule` was never awaited」 | 批次 6 把 `_reference_logistics_from_rule` 改成 async（按重量段取代表重量），但**两个调用点漏了 `await`** —— `find_reference_logistics_cost` 与批量预取 `prefetch_platform_sku_profit_inputs` ⇒ 传进利润链的是协程对象 | 两个调用点补 `await`；全仓核对该方法只有这两处调用点 |
+| 2 | `no such table: core.dim_weight_tiers`（SQLite 假库） | 老测试用「只建几张表」的 SQLite 假库，新表不在清单里 | 3 个 fixture 的建表清单补 `core.dim_weight_tiers`（SKU 页 / 通知页 / 平台定价页） |
+| 3 | 底线断言 28.23 ≠ 33.03 | 口径变了：**跨境电商不是默认包邮** ⇒ 种子 SKU 默认「不包邮」⇒ 尾程不进底线 | 共享定价种子**显式**把该 SKU 标成包邮（种子语义 =「商家承担尾程」）；「默认不包邮 ⇒ 尾程不进底线、且不报缺费率」由 `test_free_shipping_switch.py` 覆盖 |
+
+配套两处（同样是「口径改了，守护要跟着改」而不是「把守护改松」）：
+
+- `price_adjust_notify_service` 的**归因快照**改记**实际计入**的尾程：不包邮 ⇒ 记 0、尾程占比记 None。
+  否则归因会说「尾程涨了 5 元所以底线跳高」，而这笔尾程压根没进底线。
+- `test_product_delivery_cost_floor.py` 的源码接线守护改认 `delivery_cost=applied_delivery_cost`
+  （批次 6 起尾程先过包邮闸门，进利润链的是闸门后的值），并额外断言闸门变量存在。
+
+> 教训：**把一个方法从同步改成 async，调用点不会自己报错** —— 漏 `await` 时传下去的是协程对象，
+> 往往要到下游 `Decimal(str(x))` 才炸，而且只在**特定数据分支**上炸。
+> ⇒ 改 async 后必须全仓核一遍调用点（本批用 grep 逐个核对），不能只看编译通过。
+
+修完后的最终结论（2026-11-17）：
+
+| 项 | 结果 |
+|---|---|
+| 后端全量 `backend/tests` | **6213 passed / 8 skipped / 0 failed**（515.63s） |
+| 前端 `node --test frontend/tests/productCenterUi.test.mjs` | **99 / 99 pass** |
+| `npm run build` | 成功（17.25s，ProductCenter chunk 116.49 kB） |
+| black / ruff（本次变更的 27 个 .py） | 全绿 |
+| 架构 SSOT / UTF-8 卫生 / 前端 API 方法 / 数据库字段 | 全绿（4/4、22 files、256 调用 0 缺失、0 警告） |
+| 本地库复验（修 `await` 之后） | 尾程 T01 = **22.34**（rate_table）；T06 未配价 ⇒ 金额留空 + `missing_delivery_rate_for_tier`；底线 包邮 **126.19** / 不包邮 **81.74**；**利润试算的头程成本 = 3.80（真数字，不再是协程对象）** |
+
+## 9.10 批次 7 · 定价设置修复 + 费率按官方牌价校准 + 本地控制台看门狗（2026-11-17）
+
+### 9.10.1 起因：截图里的「定价设置是空的」
+
+现象：SKU 资料页点「定价设置」，「平台成本率」tab 里**平台空、四个费率空、生效日期空、来源空、版本空** ——
+一个纯空壳，运营改不了任何费率。
+
+根因（代码链）：
+
+1. SKU 资料页的按钮走 `openPlatformFeeDrawer('tiers')`（`frontend/src/domains/business/views/ProductCenter.vue:216`）
+   ⇒ **只开「库龄档位规则」tab**；「平台成本率」tab 的表单**只在** `openPlatformFeeDrawer('platform')`
+   分支里被初始化（`:2605-2630`）。
+2. 该分支里的「平台」是一段**只读文本**（`:994`），平台身份靠测算页顶部的筛选条件
+   `operatingQuery.platform_code`（`:442-452`）**隐式**传进来 ⇒ 从 SKU 资料页进抽屉没有平台上下文，
+   表单保持初始空值（`:1455-1471`）⇒ 就是截图里那个空壳。
+3. 更危险：保存时写入目标取的是 `operatingQuery.platform_code`（`:2667-2679`），**不是表单里的平台**；
+   没有平台时 `if (!platformCode) return;` 是**静默返回**（不提示）。
+   ⇒ 运营在这个空壳里填数点保存，会**静默写到别的平台行上**（界面上「平台」那一栏还是空的）。
+
+修复（批次 7-A，纯前端，**不新增后端接口** —— `/api/sku-operating-dimensions` 已经把每个平台的
+全部费率字段带回来了，`product_center.py:4819-4832`）：
+
+- 抽屉**自带平台选择器**（`v-model="pricingDrawer.form.platform_code"`），切换平台即重装表单；
+- 保存目标 = **抽屉里选中的平台**，没有平台就提示「请先选择平台」并禁用保存（不再静默）；
+- 两个入口各叫各的：SKU 资料页 →「库龄档位规则」，测算页 →「平台成本率」（原来两个都叫「定价设置」）。
+
+### 9.10.2 费率对官方牌价（Walter 2026-11-17 拍板）
+
+**履约模式澄清**：我们**没有跨境直邮**，全部是「头程 → 当地本地仓 → 消费者」，本地仓是**自有/三方仓**。
+
+| 项 | 旧值（实测残差 2026-01-07） | 新值（官方牌价） | 依据 |
+|---|---|---|---|
+| Shopee SG 平台佣金 | 14.87% | **16%**（含税） | 官方 2026-01-01 起：跨境直邮(SLS) 与三方仓(3PF) 统一 16%，官方海外仓(FBS) 11%。我们落 3PF 口径 |
+| TikTok SG 平台佣金 | 7.37% | **8.175%**（含 GST） | 官方 2026-04-01 起：一般类目非 BXP 8.175%、BXP 7.085%、电子产品 6.54%/5.45%；另收交易手续费 3.27% |
+| Shopee SG 尾程（5 档） | 4.29/5.20/5.78/8.06/13.19 SGD | **4.02/4.86/5.37/7.41/11.99 SGD** | 官方《3PF 收费标准》「新加坡站点 3PF 尾程费用标准」（2025-03-18 起）：买家 1.99 + 卖家 2.03/2.87/3.38/5.42/10.00 |
+
+**口径澄清（第一轮的口径判断有误，此处更正）**：旧行的 4.29 不是「卖家承担」，
+而是「买家 1.99 + 卖家 2.30（三方合非 SPA）」的**总额** —— 库里那 5 行的 `notes` 写得很清楚。
+而系统里**包邮 = 商家承担尾程**，此时买家那份 1.99 也要商家扛 ⇒ 费率表记的必须是**总额**。
+所以新值 = 1.99 + 卖家承担（2.03/2.87/3.38/5.42/10.00）= 4.02/4.86/5.37/7.41/11.99 SGD
+⇒ 折人民币（5.2077）= **20.93 / 25.31 / 27.97 / 38.59 / 62.44 元**，降幅 **6~9%**（不是一半）。
+
+**本轮明确不动的两个数**（没有重算依据 ⇒ 动了才是错）：
+
+- `other_cost_rate`（残差桶 41.65% / 27.27%）：它是实测恒等式反推值，要用**新实测数据**重算；
+  官方两次调涨后它偏低约 1.1pt（Shopee 16% − 14.87%），记为缺口。
+- `delivery_cost_rate`（尾程占收入比）：权威口径是「**我们自己费率表**算出的尾程均值 ÷ 平台平均售价」
+  （迁移 `20261234` 写明），重算前置条件是 ① SKU 段归类完成（现 1120/1122 段为空）
+  ② 订单级 vs 单件摊的口径钉死。**当前无影响**：`free_shipping` 默认关闭 ⇒ 尾程不进任何底线。
+
+迁移：`current_migrations/versions/20261238_official_platform_fee_rates.py`（幂等 upsert：有则改、无则插 ——
+生产尾程费率 0 行，本地 5 行）。守护：`backend/tests/test_official_platform_fee_rates.py`（6 条）。
+
+### 9.10.3 本地控制台看门狗：只加一条规则
+
+事故复盘（2026-11-17）：后端一直正常响应（业务请求 200），控制台却按「启动超时（超过 600 秒）」
+把**健康的**进程树杀了 —— 探针只有 3 秒预算且**要求 HTTP 200**，后端只是忙（本地采集把 Playwright 跑在
+同一进程里）或健康检查降级返回 503，都会被判成「没启动」。
+
+按「不要防御过重」的原则，**只加一条规则**（`scripts/local_console_processes.py`）：
+
+> **杀进程之前，必须再确认一次「服务端口真的不通」。** TCP 连得上 ⇒ 服务还活着 ⇒ 绝不杀，
+> 只把启动预算窗口重新计时。
+
+实现：新增 `probe_service_liveness()`（只做 TCP 握手，**不看 HTTP 状态码**），
+在启动超时的杀进程分支前先问它；活着 ⇒ 状态回到 `running`、不写失败结论；不通 ⇒ 保留原逻辑
+（终止 + 留审计证据）。**没有**加「连续失败 N 次才计时」、**没有**拆 liveness/readiness 两档探针、
+**没有**加后台巡检线程 —— 一条规则就堵住了事故。
+
+守护：`tests/test_local_console_processes.py` 两条（端口通 ⇒ 不杀；端口不通 ⇒ 仍按启动超时终止并留证）。
+
+**收尾时发现的第二层根因（本地开发环境配置，非代码缺陷）**
+
+17:44 我改迁移文件 `current_migrations/versions/20261238_official_platform_fee_rates.py`，
+本地后端（`logs/backend-local.launch.ps1`）**立刻消失**。查日志与状态文件查清了：
+
+- 后端 **16:46:05** 起来，`Application startup complete`，之后**持续响应 15 万+ 次**
+  `GET /healthz/ready 200 OK`（日志里全是 `200 OK`），一直活到 17:44；
+- `logs/backend-local.err.log` 最后一行：
+  `WARNING: WatchFiles detected changes in 'current_migrations\versions\20261238_official_platform_fee_rates.py'. Reloading...`
+  ⇒ 紧接着日志**戛然而止**，重载后的进程没起来。
+
+根因：启动命令是 `uvicorn ... --reload` 且**没有 `--reload-dir`** ⇒ WatchFiles 默认监听 **CWD（仓库根）**
+⇒ **改任何一个 .py（包括与后端无关的迁移文件）都会触发后端热重载**，而重载窗口里进程可能被
+看门狗判成「启动超时」而杀掉。`logs/local-console/local-console-state.json` 记录的后端
+`last_error` 正是「启动超时（超过 600 秒）」。
+
+⇒ **这不是产品代码缺陷，是本地开发环境配置问题**：要么把 `--reload` 限定到 `backend/`，
+要么本地开发时不起 `--reload`。**本轮不动它**（属于环境脚本调整，不是批次 7 范围），
+仅在此留档，避免下次再被"改个迁移文件后端就没了"绊住。
+
+⚠️ 注意：16:37:53 那次「启动超时杀进程」发生时，控制台进程是 **16:06:19** 启动的，
+加载的仍是**改动前**的旧模块 ⇒ 那次走的是旧逻辑。新的 liveness 规则要等控制台重启后才生效。
+
+### 9.10.4 结果
+
+| 项 | 结果 |
+|---|---|
+| 前端 `node --test frontend/tests/productCenterUi.test.mjs` | **102 / 102 pass**（新增 3 条） |
+| `npm run build` | 成功（17.41s，ProductCenter chunk 117.36 kB） |
+| 后端 `backend/tests/test_official_platform_fee_rates.py` | **6 passed** |
+| 看门狗 `tests/test_local_console_processes.py` + `tests/test_local_console.py` | **34 passed** |
+| 本地库复验（真实服务层，SKU 1768 = T01） | Shopee 底线：包邮 **126.19 → 121.43**（尾程 22.34 → 20.93）、不包邮 **81.74 不变**；TikTok T01 无尾程费率 ⇒ 报 `missing_delivery_cost` |
+| 平台费率（校准后） | Shopee 佣金 0.16 / 达人 0.0111 / 其他 0.4165 / 尾程占比 0.1124；TikTok 佣金 0.08175 / 达人 0.0606 / 其他 0.2727 / 尾程占比 **空** |
+
+**批次 7 收尾复跑（2026-11-17 晚）**
+
+| 项 | 结果 |
+|---|---|
+| 后端全量 `pytest backend/tests` | **6219 passed / 8 skipped / 0 failed**（498.34s；批次 6 的 6213 + 本轮 6 条费率守护） |
+| 根目录全量 `pytest tests` | **845 passed / 5 skipped / 0 failed**（359.33s） |
+| 前端 `node --test frontend/tests/productCenterUi.test.mjs` | **102 / 102 pass** |
+| `npm run build` | 成功（10.28s，ProductCenter chunk 117.36 kB） |
+| black / ruff（本轮变更的 4 个 .py） | 全绿（`scripts/local_console_processes.py` 原有一处缩进被 black 收拢，已复跑 34 条看门狗守护仍全绿） |
+
+**收尾时自查修掉的一个降级缺口（同一批次内闭环）**
+
+迁移 `20261238` 的 `upgrade` 覆盖了平台费率的**生效日期**（`fee_rate_effective_from`），
+但 `downgrade` 只还原了费率本身 ⇒ 降级后会留下一行自相矛盾的数据：
+「费率是 2026-01-07 的实测残差、生效日期却是官方调价日（Shopee 2026-01-01 / TikTok 2026-04-01）」。
+这个字段是产品中心保存费率时写下的生效日（`backend/domains/business/routers/product_center.py:4293`），
+被迁移覆盖后若降级不还原，数据会一直错着。
+
+- **修法**：`PLATFORM_FEE_ROLLBACK` 补上 `fee_rate_effective_from`（回 **2026-01-07**，与旧的
+  `b_class_measured_2026_01_07` 来源对齐），`downgrade` 的 UPDATE 补写该列。
+- **守护**：新增 `test_downgrade_restores_effective_from_too`（先红后绿：缺字段报 `KeyError`）。
+- **实跑验证**（本地库真实 downgrade → upgrade 往返）：
+  - 降级后：Shopee `0.1487` + **2026-01-07**、TikTok `0.0737` + **2026-01-07**、source 回到
+    `b_class_measured_2026_01_07`、version 回到 `v2`；
+  - 再升级后：Shopee `0.16` + 2026-01-01、TikTok `0.08175` + 2026-04-01、version `v3`；
+  - Shopee SG 尾程 5 档全程不变（20.93 / 25.31 / 27.97 / 38.59 / 62.44 元）；
+  - 链头仍为 `current_schema_20261238_official_platform_fee_rates`。
+

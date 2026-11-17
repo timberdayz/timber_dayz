@@ -167,6 +167,7 @@ def compute_sku_pricing(
     days_since_restock=None,
     delivery_cost=None,
     delivery_cost_rate=None,
+    free_shipping=True,
 ) -> dict:
     """单个 SKU 的完整定价字段。**纯函数**：无 ORM、无 DB、无 I/O。
 
@@ -185,6 +186,11 @@ def compute_sku_pricing(
     `delivery_cost_rate` 是**平台级**的尾程占收入比（拆分基准）。
     两者**成对生效**才进成本底线（见 `compute_cost_floor` 的口径说明）：
     只有一个 ⇒ 尾程不进底线，并把缺的那一半报进 `missing_reasons`。
+
+    包邮开关（批次 6，2026-11-17）：`free_shipping=False` ⇒ 这个 SKU **不包邮**
+    ⇒ 买家付运费 ⇒ 商家**不承担**尾程 ⇒ 尾程**完全不适用**：
+    不进底线分子，也不进分母拆分，**并且不报「缺尾程费率」**
+    （不包邮的 SKU 压根不需要尾程费率，报缺是噪声，会把真缺料淹掉）。
     """
     missing_reasons: list[str] = []
     cost_floor = None
@@ -195,11 +201,15 @@ def compute_sku_pricing(
         creator_rate = _decimal(platform_creator_commission_rate)
 
     # 尾程成对生效判定（与 compute_cost_floor 内部同一套规则，不允许两处各判一次）
-    delivery_applied = delivery_cost is not None and delivery_cost_rate is not None
-    if delivery_cost is None:
-        missing_reasons.append("missing_delivery_cost")
-    elif delivery_cost_rate is None:
-        missing_reasons.append("missing_delivery_cost_rate_split")
+    # ⚠️ 不包邮 ⇒ 尾程不适用 ⇒ 分子分母都不动（宁可不扣，也不要重复扣）。
+    delivery_applied = (
+        free_shipping and delivery_cost is not None and delivery_cost_rate is not None
+    )
+    if free_shipping:
+        if delivery_cost is None:
+            missing_reasons.append("missing_delivery_cost")
+        elif delivery_cost_rate is None:
+            missing_reasons.append("missing_delivery_cost_rate_split")
 
     if policy is None:
         missing_reasons.append("missing_pricing_policy")
@@ -284,6 +294,8 @@ def compute_sku_pricing(
         # ⚠️ 必须是「成对」才为 True：分子加了尾程，分母也剔掉了残差里的那份。
         #    只有一边有值时为 False —— 此时尾程**没有**进底线（缺的那半边在 missing_reasons 里）。
         "delivery_cost_in_cost_floor": delivery_applied,
+        # 包邮开关（批次 6）：前端要显示「不包邮 ⇒ 尾程不计入成本底线」。
+        "free_shipping": bool(free_shipping),
         "cost_floor_delivery_cost": (
             float(_decimal(delivery_cost)) if delivery_applied else None
         ),

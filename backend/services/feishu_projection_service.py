@@ -14,6 +14,7 @@ from modules.core.db import (
     DimErpSku,
     DimPlatform,
     DimSpu,
+    DimWeightTier,
     FeishuProjectionConfig,
     FeishuProjectionLog,
     FeishuProjectionTask,
@@ -415,12 +416,29 @@ class FeishuProjectionService:
                 if bill_line and bill_line.unit_last_mile_cost is not None
                 else None
             )
+        # ⚠️ 批次 6：SKU 不再有精确重量（``weight_kg`` 已退役）⇒ 这里填**重量段的
+        #    代表重量**（段上限，不封顶段取下限）—— 宁高不低。
+        #    ⚠️ 飞书表里的列名保持「重量 kg」不变（那张表在生产已经建好，
+        #    改列名会让投影写入失败 ⇒ 需要人工迁移多维表格）。
+        #    语义变成「这个 SKU 所在重量段的最重是多少公斤」。
+        weight_tier = (
+            await self.db.get(DimWeightTier, sku.weight_tier_code)
+            if sku.weight_tier_code
+            else None
+        )
+        representative_weight_kg = None
+        if weight_tier is not None:
+            representative_weight_kg = (
+                float(weight_tier.max_kg)
+                if weight_tier.max_kg is not None
+                else float(weight_tier.min_kg)
+            )
         return {
             "ERP SKU": sku.sku_key,
             "SPU": binding.spu if binding else "",
             "商品名称": sku.sku_name or "",
             "规格": sku.specification or "",
-            "重量 kg": sku.weight_kg,
+            "重量 kg": representative_weight_kg,
             "长 cm": sku.package_length_cm,
             "宽 cm": sku.package_width_cm,
             "高 cm": sku.package_height_cm,

@@ -214,7 +214,7 @@
             v-if="canManagePlatformFee"
             plain
             @click="openPlatformFeeDrawer('tiers')"
-            >定价设置</el-button
+            >库龄档位规则</el-button
           ><el-button
             plain
             :loading="sellingPriceCheck.loading"
@@ -289,19 +289,20 @@
                 v-model="row.specification"
                 size="small"
                 @change="markDirty('sku', row)" /></template></el-table-column
-          ><el-table-column label="重量 kg" width="105"
-            ><template #header
-              ><span class="sku-required-label"
-                >重量 kg<em class="sku-required-mark">*</em></span
-              ></template
+          ><el-table-column label="重量段" width="150"
             ><template #default="{ row }"
-              ><el-input-number
-                v-model="row.weight_kg"
-                :min="0"
-                :precision="3"
-                :controls="false"
+              ><el-select
+                v-model="row.weight_tier_code"
+                placeholder="未选段（按最轻档估）"
+                clearable
                 size="small"
-                @change="markDirty('sku', row)" /></template></el-table-column
+                @change="markDirty('sku', row)"
+                ><el-option
+                  v-for="tier in weightTiers"
+                  :key="tier.tier_code"
+                  :label="tier.label"
+                  :value="tier.tier_code" /></el-select
+              ></template></el-table-column
           ><el-table-column label="单件体积 m³" width="125"
             ><template #default="{ row }"
               ><el-input-number
@@ -463,7 +464,7 @@
           <el-select v-model="operatingQuery.sku_id" clearable filterable placeholder="ERP SKU" @change="resetOperatingPage">
             <el-option v-for="item in filteredOperatingSkus" :key="item.sku_id" :label="item.sku_key" :value="item.sku_id" />
           </el-select>
-          <el-button v-if="canManagePlatformFee" plain @click="openPlatformFeeDrawer('platform')">定价设置</el-button>
+          <el-button v-if="canManagePlatformFee" plain @click="openPlatformFeeDrawer('platform')">平台成本率</el-button>
           <!--
             阶段 7：「仅有库存」默认打开 —— 测算表是"给还在卖的货定价"的表，
             先把**这个仓已经清空的货**藏起来，运营不用在一屏"已清仓"里找活干。
@@ -525,6 +526,23 @@
           -->
           <el-table-column label="库龄（仓）" width="230" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }"><div><span class="readonly-cell">{{ currentWarehouseRestockDays(row) ?? "-" }}</span> 天<span class="pricing-tier-hint">（{{ currentWarehouseLabel(row) }}）</span></div><div v-for="item in otherWarehouseRestocks(row)" :key="item.warehouse_code" class="pricing-tier-hint">{{ item.warehouse_name }}：{{ item.days_since_restock ?? "-" }} 天</div></template></el-table-column>
           <!-- 段二 · 决策输入 -->
+          <!--
+            包邮开关（批次 6，2026-11-17）：跨境电商**不是默认包邮**，而是**选择性包邮**
+            ⇒ 「这个 SKU 在这个平台包不包邮」是经营选择，由运营逐个 SKU 决定。
+            ⚠️ 粒度 = SKU × 平台（与底线、人工覆盖同一粒度）：包邮是渠道策略，不是仓库属性。
+            开关一变，尾程立刻改口径：开 ⇒ 尾程进成本底线、利润扣掉；关 ⇒ 买家付运费，
+            商家不承担 ⇒ 尾程不进底线、利润按 0 计（**不是**算不出来）。
+          -->
+          <el-table-column label="包邮" width="130" class-name="seg-input" label-class-name="seg-input"
+            ><template #default="{ row }"
+              ><el-switch
+                v-model="row.free_shipping"
+                :loading="row.__free_shipping_saving"
+                @change="onFreeShippingChange(row)" />
+              <div class="pricing-tier-hint">
+                {{ row.free_shipping ? "尾程由我们承担" : "买家付运费，尾程不计入底线" }}
+              </div></template
+          ></el-table-column>
           <el-table-column label="测算售价" width="110" class-name="seg-input" label-class-name="seg-input"
             ><template #default="{ row }"
               ><el-input-number
@@ -653,6 +671,7 @@
           <el-table-column label="尾程配送费" width="150" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }"
               ><div>{{ money(row.delivery_cost) }}</div>
+              <el-tag v-if="row.free_shipping === false" size="small" type="info">不包邮</el-tag>
               <el-tag v-if="row.delivery_cost_estimated" size="small" type="warning">估算</el-tag>
               <el-tag v-if="row.delivery_cost != null && !row.delivery_cost_in_cost_floor" size="small" type="info">未计入底线</el-tag>
               <el-tag v-else-if="row.delivery_cost_in_cost_floor" size="small" type="success">已计入底线</el-tag>
@@ -841,23 +860,73 @@
             </el-table></el-tab-pane
           ><el-tab-pane label="尾程费率" name="delivery-rules"
             ><div class="toolbar">
-              <el-button v-if="canManagePlatformFee" type="primary" :icon="Plus" @click="addDeliveryRuleRow">新增尾程费率</el-button>
+              <el-button v-if="canManagePlatformFee" type="primary" :icon="Plus" @click="openDeliveryBatchDialog">批量新增尾程费率</el-button>
+              <el-button v-if="canManagePlatformFee" :icon="Plus" @click="addDeliveryRuleRow">新增一档</el-button>
               <span class="muted">仓 → 买家那段快递费：按「平台 × 仓 × 重量段」计，单件计价</span>
             </div>
-            <el-alert type="warning" :closable="false" title="尾程是每卖一件必付的成本：没有配费率 ⇒ 尾程算不出来 ⇒ 利润与最低售价都算不出来（不会当成 0）。重量段左闭右开，相邻两档不要重叠；「上限留空」表示往上不封顶。" />
+            <el-alert type="warning" :closable="false" title="尾程是每卖一件必付的成本：没有配费率 ⇒ 尾程算不出来 ⇒ 利润与最低售价都算不出来（不会当成 0）。重量段从全局段表里选，不手工填上下限（手填迟早重叠 ⇒ 选档歧义）。" />
+            <el-alert type="info" :closable="false" title="价目表是外币时（Shopee SG 是新币），填「原币单价 + 币种 + 汇率」：系统按折算后的人民币等值入账，原币与汇率写进备注留档。直接照抄外币数字会被当成人民币 ⇒ 尾程少算好几倍 ⇒ 成本底线偏低 ⇒ 漏钱。" />
+            <el-alert v-if="deliveryPlatformSplitHint" type="warning" :closable="false" :title="deliveryPlatformSplitHint" />
             <el-table :data="deliveryRules" v-loading="loadingDeliveryRules" stripe border>
               <el-table-column label="平台" min-width="140"><template #default="{ row }"><el-select v-model="row.platform_code" size="small" filterable :disabled="!row.__new"><el-option v-for="item in operatingDimensions.platforms" :key="item.platform_code" :label="item.name || item.platform_code" :value="item.platform_code" /></el-select></template></el-table-column>
               <el-table-column label="收货仓库" min-width="170"><template #default="{ row }"><el-select v-model="row.warehouse_code" size="small" filterable :disabled="!row.__new"><el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" /></el-select></template></el-table-column>
-              <el-table-column label="重量下限 kg" width="120"><template #default="{ row }"><el-input-number v-model="row.min_weight_kg" :min="0" :step="0.1" :precision="3" :controls="false" size="small" :disabled="!row.__new" /></template></el-table-column>
-              <el-table-column label="重量上限 kg" width="120"><template #default="{ row }"><el-input-number v-model="row.max_weight_kg" :min="0" :step="0.1" :precision="3" :controls="false" size="small" placeholder="不封顶" :disabled="!row.__new" /></template></el-table-column>
-              <el-table-column label="单件尾程费" width="120"><template #default="{ row }"><el-input-number v-model="row.unit_price" :min="0" :precision="2" :controls="false" size="small" /></template></el-table-column>
+              <el-table-column label="重量段" width="150"><template #default="{ row }"><el-select v-model="row.weight_tier_code" size="small" filterable placeholder="选重量段" :disabled="!row.__new"><el-option v-for="tier in weightTiers" :key="tier.tier_code" :label="tier.label" :value="tier.tier_code" /></el-select></template></el-table-column>
+              <el-table-column label="原币单价" width="110"><template #default="{ row }"><el-input-number v-model="row.source_unit_price" :min="0" :precision="2" :controls="false" size="small" /></template></el-table-column>
+              <el-table-column label="币种" width="96"><template #default="{ row }"><el-select v-model="row.source_currency" size="small" filterable><el-option v-for="code in deliveryCurrencyOptions" :key="code" :label="code" :value="code" /></el-select></template></el-table-column>
+              <el-table-column label="汇率→人民币" width="120"><template #default="{ row }"><el-input-number v-model="row.exchange_rate" :min="0.0001" :precision="4" :controls="false" size="small" /></template></el-table-column>
+              <el-table-column label="单件尾程费（CNY）" width="170"><template #default="{ row }"><div>{{ deliveryRuleConvertedCny(row) ?? "—" }}</div><div v-if="deliveryTierDuplicateHint(row)" class="delivery-row-warn">{{ deliveryTierDuplicateHint(row) }}</div></template></el-table-column>
               <el-table-column label="生效日期" width="145"><template #default="{ row }"><el-date-picker v-model="row.effective_from" type="date" value-format="YYYY-MM-DD" size="small" /></template></el-table-column>
               <el-table-column label="状态" width="105"><template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '已停用' }}</el-tag></template></el-table-column>
               <el-table-column label="版本" width="110"><template #default="{ row }"><el-input v-model="row.version" size="small" /></template></el-table-column>
               <el-table-column label="来源" width="120"><template #default="{ row }"><el-input v-model="row.source" size="small" /></template></el-table-column>
               <el-table-column label="备注" min-width="140"><template #default="{ row }"><el-input v-model="row.notes" size="small" /></template></el-table-column>
-              <el-table-column v-if="canManagePlatformFee" label="操作" width="170" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveDeliveryRule(row)">保存</el-button><el-button v-if="!row.__new" link type="danger" @click="removeDeliveryRuleRow(row)">删除</el-button></template></el-table-column>
-            </el-table></el-tab-pane
+              <el-table-column v-if="canManagePlatformFee" label="操作" width="230" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveDeliveryRule(row)">保存</el-button><el-button v-if="!row.__new && row.status === 'active'" link type="warning" @click="toggleDeliveryRuleStatus(row)">停用</el-button><el-button v-if="!row.__new && row.status !== 'active'" link type="success" @click="toggleDeliveryRuleStatus(row)">启用</el-button><el-button v-if="!row.__new" link type="danger" @click="removeDeliveryRuleRow(row)">删除</el-button></template></el-table-column>
+            </el-table>
+            <el-dialog v-model="deliveryBatchVisible" title="批量新增尾程费率（照着一张价目表录）" width="880px">
+              <el-form label-width="110px">
+                <el-form-item label="平台">
+                  <el-select v-model="deliveryBatchForm.platform_code" filterable placeholder="选平台">
+                    <el-option v-for="item in operatingDimensions.platforms" :key="item.platform_code" :label="item.name || item.platform_code" :value="item.platform_code" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="收货仓库">
+                  <el-select v-model="deliveryBatchForm.warehouse_code" filterable placeholder="选收货仓">
+                    <el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="币种 / 汇率">
+                  <el-select v-model="deliveryBatchForm.source_currency" style="width: 110px" filterable>
+                    <el-option v-for="code in deliveryCurrencyOptions" :key="code" :label="code" :value="code" />
+                  </el-select>
+                  <el-input-number v-model="deliveryBatchForm.exchange_rate" :min="0.0001" :precision="4" :controls="false" style="width: 150px; margin-left: 8px" />
+                  <span class="muted" style="margin-left: 8px">1 {{ deliveryBatchForm.source_currency }} = ? 元人民币</span>
+                </el-form-item>
+                <el-form-item label="生效日期">
+                  <el-date-picker v-model="deliveryBatchForm.effective_from" type="date" value-format="YYYY-MM-DD" />
+                </el-form-item>
+                <el-form-item label="来源 / 版本">
+                  <el-input v-model="deliveryBatchForm.source" placeholder="如 shopee_sg_ratecard_2026" style="width: 240px" />
+                  <el-input v-model="deliveryBatchForm.version" style="width: 100px; margin-left: 8px" />
+                </el-form-item>
+                <el-form-item label="备注">
+                  <el-input v-model="deliveryBatchForm.notes" placeholder="如：买家承担 1.99 + 卖家承担三方合 2.30" />
+                </el-form-item>
+              </el-form>
+              <el-table :data="deliveryBatchRows" border size="small">
+                <el-table-column label="重量段" width="150"><template #default="{ row }"><el-select v-model="row.weight_tier_code" size="small" filterable placeholder="选重量段"><el-option v-for="tier in weightTiers" :key="tier.tier_code" :label="tier.label" :value="tier.tier_code" /></el-select></template></el-table-column>
+                <el-table-column label="原币单价" width="130"><template #default="{ row }"><el-input-number v-model="row.source_unit_price" :min="0" :precision="2" :controls="false" size="small" /></template></el-table-column>
+                <el-table-column label="折算 CNY" width="120"><template #default="{ row }">{{ deliveryBatchConvertedCny(row) ?? "—" }}</template></el-table-column>
+                <el-table-column label="操作" width="90"><template #default="{ $index }"><el-button link type="danger" @click="deliveryBatchRows.splice($index, 1)">移除</el-button></template></el-table-column>
+              </el-table>
+              <div class="toolbar" style="margin-top: 8px">
+                <el-button :icon="Plus" @click="addDeliveryBatchRow">再加一档</el-button>
+                <span class="muted">重量段是全局一套：SKU 与尾程费率共用同一把尺子，改段定义要去重量段维护。</span>
+              </div>
+              <template #footer>
+                <el-button @click="deliveryBatchVisible = false">取消</el-button>
+                <el-button type="primary" :loading="savingDeliveryBatch" @click="submitDeliveryBatch">保存这些档位</el-button>
+              </template>
+            </el-dialog></el-tab-pane
           ><el-tab-pane label="物流批次" name="batches"
             ><div class="toolbar">
               <el-select
@@ -922,7 +991,29 @@
         <el-tab-pane label="平台成本率" name="platform">
           <el-alert type="info" :closable="false" title="平台成本率用于最低售价底线计算，仅管理员、主管和财务可维护。" />
           <el-form :model="pricingDrawer.form" label-width="150px" class="drawer-form">
-            <el-form-item label="平台"><span>{{ pricingDrawer.label }}</span></el-form-item>
+            <el-form-item label="平台">
+              <!--
+                平台成本率是**每个平台一本账**：这里改哪个平台，就只影响哪个平台的底线。
+                ⚠️ 平台身份必须由**抽屉自己**决定 —— 以前它靠测算页的筛选条件隐式传进来，
+                于是从 SKU 资料页进抽屉时是一个空壳（费率全空），而保存还会把值
+                写到别的平台行上（静默写错平台）。所以这里自带平台选择器。
+              -->
+              <el-select
+                v-model="pricingDrawer.form.platform_code"
+                filterable
+                placeholder="选平台"
+                style="width: 240px"
+                @change="applyPlatformFeeForm">
+                <el-option
+                  v-for="item in operatingDimensions.platforms || []"
+                  :key="item.platform_code"
+                  :label="item.name || item.platform_code"
+                  :value="item.platform_code" />
+              </el-select>
+              <div class="pricing-tier-hint">
+                平台成本率是每个平台一本账：这里改哪个平台，就只影响哪个平台的最低售价底线。
+              </div>
+            </el-form-item>
             <el-form-item label="平台佣金率">
               <div class="rate-cell"><el-input-number v-model="pricingDrawer.form.default_fee_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></div>
             </el-form-item>
@@ -989,7 +1080,7 @@
       </el-tabs>
       <template #footer>
         <el-button @click="pricingDrawer.visible = false">取消</el-button>
-        <el-button v-if="pricingDrawer.tab === 'platform'" type="primary" :loading="saving" @click="savePlatformFeeRate">保存</el-button>
+        <el-button v-if="pricingDrawer.tab === 'platform'" type="primary" :disabled="!pricingDrawer.form.platform_code" :loading="saving" @click="savePlatformFeeRate">保存</el-button>
         <el-button v-else type="primary" :loading="saving" @click="savePricingPolicies">保存</el-button>
       </template>
     </el-drawer>
@@ -1304,7 +1395,7 @@ const loadingBills = ref(false);
 // ⚠️ 「重量 kg」2026-11-16 起移出本列表：**重量是必填项**（尾程配送费按重量段计费，
 //    缺重量 ⇒ 尾程费只能保守估算 ⇒ 最低售价底线偏松）。
 //    蓝色 = 「这列可以不填」，必填的列必须黑色（与「单件体积 m³」一致）。
-const skuOptionalColumnLabels = ["规格", "箱规（件/箱）", "基准售价来源"];
+const skuOptionalColumnLabels = ["规格", "箱规（件/箱）", "基准售价来源", "重量段"];
 const skuHeaderCellStyle = ({ column }) => {
   if (skuOptionalColumnLabels.includes(column.label)) {
     return { color: "#79bbff", fontWeight: "normal" };
@@ -1361,6 +1452,9 @@ const loadingDeliveryRules = ref(false);
 // 尾程配送费费率（批次 3/4）：平台 × 仓 × 重量段。
 // ⚠️ 尾程是**必付成本**：这个表没数据 ⇒ 尾程算不出来 ⇒ 利润链算不出来（不是按 0 计）。
 const deliveryRules = ref([]);
+// 重量段（批次 6）：**全局一套**（所有平台共用同一把尺子）。
+// SKU 资料页与尾程费率页的下拉框都读这一份。
+const weightTiers = ref([]);
 const spuTotal = ref(0);
 const skuTotal = ref(0);
 const operatingTotal = ref(0);
@@ -1383,8 +1477,11 @@ const operatingQuery = reactive({
 const pricingDrawer = reactive({
   visible: false,
   tab: "platform",
-  label: "",
   form: {
+    // ⚠️ 平台身份**由抽屉自己**持有（批次 7-A）。
+    // 以前它靠测算页的 operatingQuery.platform_code 隐式传进来 ⇒
+    // 从 SKU 资料页进抽屉时表单是个空壳，而保存会把值写到别的平台行上。
+    platform_code: "",
     default_fee_rate_pct: null,
     default_creator_commission_rate_pct: null,
     other_cost_rate_pct: null,
@@ -1529,7 +1626,7 @@ const blankSku = () => ({
   sku_name: "",
   specification: "",
   spu: "",
-  weight_kg: null,
+  weight_tier_code: null,
   package_length_cm: null,
   package_width_cm: null,
   package_height_cm: null,
@@ -2067,12 +2164,108 @@ const loadStorageRules = async () => {
     loadingStorageRules.value = false;
   }
 };
+// 尾程费率可选币种（平台价目表常见币种）。
+// ⚠️ **入库一律折成人民币等值** —— 尾程计算链不读汇率，照抄外币数字会被当成人民币。
+const deliveryCurrencyOptions = ["CNY", "SGD", "MYR", "USD", "PHP", "THB", "IDR", "VND"];
+// 原币折算说明写进备注的固定前缀（保存时按前缀**替换**，避免每次保存重复追加）。
+const DELIVERY_FX_NOTE_PREFIX = "原币折算：";
+const deliveryBatchVisible = ref(false);
+const savingDeliveryBatch = ref(false);
+const deliveryBatchForm = reactive({
+  platform_code: "",
+  warehouse_code: "",
+  source_currency: "CNY",
+  exchange_rate: 1,
+  effective_from: new Date().toISOString().slice(0, 10),
+  source: "manual",
+  version: "v1",
+  notes: "",
+});
+const deliveryBatchRows = ref([]);
+
+// 原币单价 → 人民币等值（两位小数）。
+// ⚠️ 尾程计算链**不读汇率** ⇒ 费率表必须存人民币等值。
+//    照抄外币数字当人民币 = 尾程少算好几倍 ⇒ 成本底线偏低 ⇒ 漏钱。
+const deliveryRuleConvertedCny = (row) => {
+  const price = Number(row?.source_unit_price);
+  const rate = Number(row?.exchange_rate);
+  if (!Number.isFinite(price) || !Number.isFinite(rate) || rate <= 0) return null;
+  return Math.round(price * rate * 100) / 100;
+};
+const deliveryBatchConvertedCny = (row) =>
+  deliveryRuleConvertedCny({
+    source_unit_price: row.source_unit_price,
+    exchange_rate: deliveryBatchForm.exchange_rate,
+  });
+
+// 同一「平台 × 仓 × 重量段」已经有当期行 ⇒ 重复了。
+// ⚠️ 批次 6 起**不再有「重量段重叠」检查**：重量段是**全局一套**的
+//    （core.dim_weight_tiers），段与段之间由段表保证不重叠；
+//    各平台/仓各填「这一段多少钱」是**正常业务**，不是冲突。
+//    真正要拦的是「同一个平台 × 仓 × 段填了两行当期」—— 选档会歧义。
+const deliveryTierDuplicateHint = (row) => {
+  if (!row?.platform_code || !row?.warehouse_code || !row?.weight_tier_code) return "";
+  const hit = deliveryRules.value.find((other) => {
+    if (other === row) return false;
+    if (other.platform_code !== row.platform_code) return false;
+    if (other.warehouse_code !== row.warehouse_code) return false;
+    if (other.weight_tier_code !== row.weight_tier_code) return false;
+    return other.status !== "inactive";
+  });
+  if (!hit) return "";
+  const tier = weightTiers.value.find(
+    (item) => item.tier_code === row.weight_tier_code,
+  );
+  const label = tier ? tier.label : row.weight_tier_code;
+  return `该「平台 × 仓 × ${label}」已有档位 —— 同段填两行会让选档变成歧义，系统会算不出来`;
+};
+
+// 平台没配「尾程占收入比」⇒ 尾程**不进成本底线** ⇒ 录费率的人要知道。
+const deliveryPlatformSplitHint = computed(() => {
+  const codes = [
+    ...new Set(deliveryRules.value.map((row) => row.platform_code).filter(Boolean)),
+  ];
+  const missing = codes.filter((code) => {
+    const platform = operatingDimensions.platforms.find(
+      (item) => item.platform_code === code,
+    );
+    return (platform?.delivery_cost_rate ?? null) === null;
+  });
+  if (!missing.length) return "";
+  const names = missing.map((code) => {
+    const platform = operatingDimensions.platforms.find(
+      (item) => item.platform_code === code,
+    );
+    return platform?.name || code;
+  });
+  return `平台「${names.join("、")}」还没填「尾程占收入比」（定价设置）⇒ 这几档尾程暂不进成本底线（宁可不算，也不重复扣）`;
+});
+
+// 重量段（批次 6）：**全局一套**的段定义。
+// ⚠️ 段表是唯一真源 —— SKU 与尾程费率都只存段编码，
+//    页面上**不许**手工填重量上下限（填出来的区间迟早重叠 ⇒ 选档歧义）。
+const loadWeightTiers = async () => {
+  try {
+    weightTiers.value = await productCenterApi.listWeightTiers();
+  } catch (error) {
+    weightTiers.value = [];
+    ElMessage.error(error.message || "加载重量段失败");
+  }
+};
 const loadDeliveryRules = async () => {
   loadingDeliveryRules.value = true;
   try {
-    deliveryRules.value = await productCenterApi.listDeliveryRateRules({
+    const rows = await productCenterApi.listDeliveryRateRules({
       include_inactive: true,
     });
+    // 库里存的是**人民币等值** ⇒ 展示成「原币单价 = 人民币值、币种 CNY、汇率 1」，
+    // 运营改行时看到的仍是自己录的那一档，不会被折算吓一跳。
+    deliveryRules.value = rows.map((row) => ({
+      ...row,
+      source_unit_price: row.unit_price,
+      source_currency: row.currency || "CNY",
+      exchange_rate: 1,
+    }));
   } catch (error) {
     deliveryRules.value = [];
     ElMessage.error(error.message || "加载尾程费率失败");
@@ -2080,58 +2273,221 @@ const loadDeliveryRules = async () => {
     loadingDeliveryRules.value = false;
   }
 };
-const addDeliveryRuleRow = () =>
+const addDeliveryRuleRow = () => {
+  // 重量段从**全局段表**里选（不再手工填上下限）。
+  const used = new Set(
+    deliveryRules.value
+      .filter(
+        (row) =>
+          row.platform_code === (operatingQuery.platform_code || "") &&
+          row.warehouse_code === (operatingQuery.warehouse_code || ""),
+      )
+      .map((row) => row.weight_tier_code),
+  );
+  const nextTier = weightTiers.value.find((tier) => !used.has(tier.tier_code));
   deliveryRules.value.unshift({
     __new: true,
     platform_code: operatingQuery.platform_code || "",
     warehouse_code: operatingQuery.warehouse_code || "",
-    min_weight_kg: 0,
-    max_weight_kg: null,
+    weight_tier_code: nextTier ? nextTier.tier_code : "",
     unit_price: null,
+    source_unit_price: null,
+    source_currency: "CNY",
+    exchange_rate: 1,
     effective_from: new Date().toISOString().slice(0, 10),
     status: "active",
     source: "manual",
     version: "v1",
     notes: "",
   });
-// 尾程费率载荷：平台 / 仓 / 重量段是这一行的**身份**，
-// 改身份等于换了一档费率（那种情况要「新开一行」，旧行自动闭区间）。
-const deliveryRulePayload = (row) => {
-  const { __new, rule_id, ...payload } = row;
-  if (!__new) {
-    delete payload.platform_code;
-    delete payload.warehouse_code;
-    delete payload.min_weight_kg;
-    delete payload.max_weight_kg;
-  }
-  if (payload.max_weight_kg === "" || payload.max_weight_kg === undefined) {
-    payload.max_weight_kg = null;
-  }
-  return payload;
 };
+// 备注里留原币与汇率（按固定前缀替换，不重复追加）。
+const deliveryRuleNotes = (row) => {
+  const raw = String(row.notes ?? "");
+  const kept = raw
+    .split("\n")
+    .filter((line) => !line.startsWith(DELIVERY_FX_NOTE_PREFIX))
+    .join("\n")
+    .trim();
+  const currency = row.source_currency || "CNY";
+  const rate = Number(row.exchange_rate) || 1;
+  const price = Number(row.source_unit_price);
+  const cny = deliveryRuleConvertedCny(row);
+  const fxLine =
+    currency !== "CNY"
+      ? `${DELIVERY_FX_NOTE_PREFIX}${price} ${currency} × ${rate} = ${cny} CNY`
+      : "";
+  return [kept, fxLine].filter(Boolean).join("\n");
+};
+// 新建一档（POST）：平台 / 仓 / 重量段 / 单价都在这里。
+// ⚠️ 单价一律发**人民币等值**（后端只收 CNY）。
+const deliveryRuleCreatePayload = (row) => ({
+  platform_code: row.platform_code,
+  warehouse_code: row.warehouse_code,
+  weight_tier_code: row.weight_tier_code,
+  unit_price: deliveryRuleConvertedCny(row),
+  currency: "CNY",
+  effective_from: row.effective_from,
+  effective_to: row.effective_to ?? null,
+  status: row.status || "active",
+  source: row.source || "manual",
+  version: row.version || "v1",
+  notes: deliveryRuleNotes(row),
+});
+// 改一档（PATCH）：**只允许改备注 / 生效日 / 版本 / 来源 / 状态**。
+// 单价与身份字段后端不收（改价要走 POST 新版本，见 saveDeliveryRule）。
+const deliveryRuleUpdatePayload = (row) => ({
+  effective_from: row.effective_from,
+  effective_to: row.effective_to ?? null,
+  status: row.status || "active",
+  source: row.source || "manual",
+  version: row.version || "v1",
+  notes: deliveryRuleNotes(row),
+});
 const saveDeliveryRule = async (row) => {
   try {
-    if (
-      !row.platform_code ||
-      !row.warehouse_code ||
-      row.min_weight_kg === null ||
-      row.min_weight_kg === undefined ||
-      row.unit_price === null ||
-      row.unit_price === undefined ||
-      !row.effective_from
-    ) {
-      throw new Error("请填写平台、收货仓库、重量段、单件尾程费和生效日期");
+    const cny = deliveryRuleConvertedCny(row);
+    if (!row.platform_code || !row.warehouse_code) {
+      throw new Error("请填写平台与收货仓库");
     }
+    if (!row.weight_tier_code) {
+      throw new Error("请选择重量段");
+    }
+    if (cny === null) {
+      throw new Error("请填写原币单价与汇率");
+    }
+    if (!row.effective_from) {
+      throw new Error("请填写生效日期");
+    }
+    const duplicate = deliveryTierDuplicateHint(row);
+    if (duplicate) {
+      throw new Error(duplicate);
+    }
+    let message = "尾程费率已保存";
     if (row.__new) {
-      await productCenterApi.createDeliveryRateRule(deliveryRulePayload(row));
+      await productCenterApi.createDeliveryRateRule(deliveryRuleCreatePayload(row));
+    } else if (Number(row.unit_price) !== Number(cny)) {
+      // 改价 ⇒ **新开一档**（后端把旧行闭区间、新行今天起生效）。
+      // ⚠️ 不能 PATCH 改单价 —— 那是直接覆盖历史行，事后对不上「当时按多少钱算的」。
+      await productCenterApi.createDeliveryRateRule(deliveryRuleCreatePayload(row));
+      message = "已按新价开新版本（旧档位自动闭区间，历史留痕）";
     } else {
-      await productCenterApi.updateDeliveryRateRule(row.rule_id, deliveryRulePayload(row));
+      await productCenterApi.updateDeliveryRateRule(
+        row.rule_id,
+        deliveryRuleUpdatePayload(row),
+      );
     }
     await loadDeliveryRules();
-    ElMessage.success("尾程费率已保存");
+    ElMessage.success(message);
   } catch (error) {
     ElMessage.error(error.message || "保存尾程费率失败");
   }
+};
+// 停用 / 启用：停用比删除安全（费率有生效日期，硬删会丢历史）。
+const toggleDeliveryRuleStatus = async (row) => {
+  const next = row.status === "active" ? "inactive" : "active";
+  try {
+    await productCenterApi.updateDeliveryRateRule(row.rule_id, {
+      status: next,
+      effective_from: row.effective_from,
+      effective_to: next === "active" ? null : new Date().toISOString().slice(0, 10),
+      source: row.source,
+      version: row.version,
+      notes: row.notes,
+    });
+    await loadDeliveryRules();
+    ElMessage.success(
+      next === "active" ? "已启用该档尾程费率" : "已停用该档尾程费率（历史留痕，可再启用）",
+    );
+  } catch (error) {
+    ElMessage.error(error.message || "切换尾程费率状态失败");
+  }
+};
+// 批量新增：照着一张价目表一次录完（省得点 5 次「新增」再填 5 遍平台与仓）。
+const openDeliveryBatchDialog = () => {
+  deliveryBatchForm.platform_code = operatingQuery.platform_code || "";
+  deliveryBatchForm.warehouse_code = operatingQuery.warehouse_code || "";
+  deliveryBatchForm.source_currency = "CNY";
+  deliveryBatchForm.exchange_rate = 1;
+  deliveryBatchForm.effective_from = new Date().toISOString().slice(0, 10);
+  deliveryBatchForm.source = "manual";
+  deliveryBatchForm.version = "v1";
+  deliveryBatchForm.notes = "";
+  // 默认 5 档（价目表通常 5 段），下限 0/1/5/10/20，上限 1/5/10/20/30。
+  deliveryBatchRows.value = weightTiers.value
+    .slice(0, 5)
+    .map((tier) => ({
+      weight_tier_code: tier.tier_code,
+      source_unit_price: null,
+    }));
+  deliveryBatchVisible.value = true;
+};
+const addDeliveryBatchRow = () => {
+  const used = new Set(deliveryBatchRows.value.map((row) => row.weight_tier_code));
+  const nextTier = weightTiers.value.find((tier) => !used.has(tier.tier_code));
+  deliveryBatchRows.value.push({
+    weight_tier_code: nextTier ? nextTier.tier_code : '',
+    source_unit_price: null,
+  });
+};
+const submitDeliveryBatch = async () => {
+  const form = deliveryBatchForm;
+  if (!form.platform_code || !form.warehouse_code) {
+    ElMessage.error("请先选平台与收货仓库");
+    return;
+  }
+  if (!form.effective_from) {
+    ElMessage.error("请填写生效日期");
+    return;
+  }
+  const rows = deliveryBatchRows.value.filter(
+    (row) =>
+      row.source_unit_price !== null &&
+      row.source_unit_price !== undefined &&
+      row.source_unit_price !== "",
+  );
+  if (!rows.length) {
+    ElMessage.error("至少填一档原币单价");
+    return;
+  }
+  savingDeliveryBatch.value = true;
+  let saved = 0;
+  const failed = [];
+  for (const row of rows) {
+    try {
+      await productCenterApi.createDeliveryRateRule({
+        platform_code: form.platform_code,
+        warehouse_code: form.warehouse_code,
+        weight_tier_code: row.weight_tier_code,
+        unit_price: deliveryBatchConvertedCny(row),
+        currency: "CNY",
+        effective_from: form.effective_from,
+        effective_to: null,
+        status: "active",
+        source: form.source || "manual",
+        version: form.version || "v1",
+        notes: deliveryRuleNotes({
+          notes: form.notes,
+          source_currency: form.source_currency,
+          source_unit_price: row.source_unit_price,
+          exchange_rate: form.exchange_rate,
+        }),
+      });
+      saved += 1;
+    } catch (error) {
+      failed.push(
+        `[${row.weight_tier_code}：${error.message || "保存失败"}]`,
+      );
+    }
+  }
+  savingDeliveryBatch.value = false;
+  await loadDeliveryRules();
+  if (failed.length) {
+    ElMessage.error(`已保存 ${saved} 档，失败 ${failed.length} 档：${failed.join("；")}`);
+    return;
+  }
+  ElMessage.success(`已保存 ${saved} 档尾程费率`);
+  deliveryBatchVisible.value = false;
 };
 const removeDeliveryRuleRow = async (row) => {
   try {
@@ -2271,6 +2627,43 @@ const readApiErrorDetail = (error) => {
     error?.response?.data?.detail;
   return raw && typeof raw === "object" ? raw : null;
 };
+// 把某个平台的费率装进表单（批次 7-A）。
+// ⚠️ 为什么要有这个函数：平台成本率是**平台级**的量，一个平台一本账。
+// 以前抽屉里的「平台」是一段只读文字，平台身份靠测算页的筛选条件隐式传进来 ⇒
+// 从 SKU 资料页进抽屉时表单永远是初始空壳（费率全空、来源全空、日期全空），
+// 而保存又按那个筛选条件写库 ⇒ 运营在这个空壳里填数，会静默写到**别的平台**行上。
+// 现在平台由抽屉自己的下拉决定，切换就重新装表单，保存也只写表单里的平台。
+const applyPlatformFeeForm = (platformCode) => {
+  const platform = (operatingDimensions.platforms || []).find(
+    (item) => item.platform_code === platformCode,
+  );
+  if (!platform) {
+    // 平台没配费率（或列表还没加载）：表单留空，但**平台编码照样保留**，
+    // 这样运营知道自己正在编辑谁（空值 = 这个平台还没维护费率）。
+    pricingDrawer.form = {
+      platform_code: platformCode || "",
+      default_fee_rate_pct: null,
+      default_creator_commission_rate_pct: null,
+      other_cost_rate_pct: null,
+      delivery_cost_rate_pct: null,
+      fee_rate_effective_from: "",
+      fee_rate_source: "",
+      fee_rate_version: "",
+    };
+    return;
+  }
+  pricingDrawer.form = {
+    platform_code: platform.platform_code,
+    default_fee_rate_pct: toPercent(platform.default_fee_rate),
+    default_creator_commission_rate_pct: toPercent(platform.default_creator_commission_rate),
+    other_cost_rate_pct: toPercent(platform.other_cost_rate),
+    delivery_cost_rate_pct: toPercent(platform.delivery_cost_rate),
+    fee_rate_effective_from:
+      platform.fee_rate_effective_from || new Date().toISOString().slice(0, 10),
+    fee_rate_source: platform.fee_rate_source || "manual",
+    fee_rate_version: platform.fee_rate_version || "v1",
+  };
+};
 const openPlatformFeeDrawer = async (tab = "platform") => {
   pricingDrawer.tab = tab;
   if (tab === "tiers") {
@@ -2278,23 +2671,12 @@ const openPlatformFeeDrawer = async (tab = "platform") => {
     pricingDrawer.visible = true;
     return;
   }
-  const platform = operatingDimensions.platforms.find(
+  // 默认选中平台：优先沿用测算页当前筛选的平台，没有就退回第一个销售平台。
+  const platforms = operatingDimensions.platforms || [];
+  const preferred = platforms.find(
     (item) => item.platform_code === operatingQuery.platform_code,
   );
-  if (!platform) {
-    ElMessage.warning("请先选择销售平台");
-    return;
-  }
-  pricingDrawer.label = platform.name || platform.platform_code;
-  pricingDrawer.form = {
-    default_fee_rate_pct: toPercent(platform.default_fee_rate),
-    default_creator_commission_rate_pct: toPercent(platform.default_creator_commission_rate),
-    other_cost_rate_pct: toPercent(platform.other_cost_rate),
-    delivery_cost_rate_pct: toPercent(platform.delivery_cost_rate),
-    fee_rate_effective_from: platform.fee_rate_effective_from || new Date().toISOString().slice(0, 10),
-    fee_rate_source: platform.fee_rate_source || "manual",
-    fee_rate_version: platform.fee_rate_version || "v1",
-  };
+  applyPlatformFeeForm((preferred || platforms[0])?.platform_code || "");
   pricingDrawer.visible = true;
 };
 const loadPricingPolicies = async () => {
@@ -2334,11 +2716,17 @@ const savePricingPolicies = async () => {
   }
 };
 const savePlatformFeeRate = async () => {
-  const platformCode = operatingQuery.platform_code;
-  if (!platformCode) return;
+  // 写入目标 = **抽屉里选中的平台**，不是页面上的任何筛选条件。
+  const platformCode = pricingDrawer.form.platform_code;
+  if (!platformCode) {
+    ElMessage.warning("请先选择平台");
+    return;
+  }
   saving.value = true;
   try {
     const {
+      // 平台编码只用于**选写入目标**，不进请求体（它是主键，不能被 setattr）。
+      platform_code: _platformCode,
       default_fee_rate_pct,
       default_creator_commission_rate_pct,
       other_cost_rate_pct,
@@ -2663,8 +3051,9 @@ const saveSkuRows = async () => {
       if (!row.sku_key || !row.spu) throw new Error("SKU 和所属 SPU 不能为空");
       // 重量是**必填项**（2026-11-16）：尾程配送费按重量段计费，
       // 缺重量 ⇒ 尾程费只能保守估算 ⇒ 最低售价底线偏松 ⇒ 守不住。
-      if (row.weight_kg == null || Number(row.weight_kg) <= 0)
-        throw new Error(`${row.sku_key}：重量 kg 是必填项（尾程配送费按重量段计费）`);
+      // 重量段是**可选**的（批次 6）：承运商按重量段定价 ⇒ SKU 不称重、只选段。
+      // ⚠️ 不拦保存：没选段时尾程按**最轻段**估算并标 estimated（用户 2026-11-17 拍板）。
+      //    拦着不让保存 ⇒ 存量 SKU 全部补完段才能动 —— 运营根本推不动。
     }
     await productCenterApi.bulkSaveSkus({
       items: skuDirty.value.map(payloadSku),
@@ -3130,7 +3519,7 @@ const generateBatchLinesFromPurchaseOrders = async (orders) => {
           ],
           shipped_qty: shippedQty,
           actual_total_volume_cbm: unitVolume * shippedQty,
-          actual_total_weight_kg: Number(sku.weight_kg || 0) * shippedQty,
+          actual_total_weight_kg: skuRepresentativeWeightKg(sku) * shippedQty,
           billing_basis: "volume",
           billing_unit: "CNY/CBM",
           billing_unit_rate: null,
@@ -3185,7 +3574,7 @@ const volumeMissing = (row) =>
 // 缺资料原因 → 中文话术。ROI 守卫和参考成本列共用一份，别各写各的。
 const MISSING_REASON_LABELS = {
   missing_sku_volume: "待补 SKU 体积",
-  missing_sku_weight: "待补 SKU 重量",
+  missing_sku_weight_tier: "待选重量段",
   missing_turnover_class: "待设置周转类型",
   missing_logistics_rule: "待配置参考物流规则",
   missing_storage_rule: "待配置仓储规则",
@@ -3214,7 +3603,10 @@ const roiGuardTooltip = (row) => {
   const logistics = (row.reference_logistics_missing_reasons || []).map(missingReasonLabel);
   const storage = (row.reference_storage_missing_reasons || []).map(missingReasonLabel);
   const volume = (row.reference_cost_missing_reasons || [])
-    .filter((reason) => reason === "missing_sku_volume" || reason === "missing_sku_weight")
+    .filter(
+      (reason) =>
+        reason === "missing_sku_volume" || reason === "missing_sku_weight_tier",
+    )
     .map(missingReasonLabel);
   if (logistics.length) lines.push(`缺物流规则：${logistics.join("、")}`);
   if (storage.length) lines.push(`缺仓储规则：${storage.join("、")}`);
@@ -3294,13 +3686,53 @@ const adCostMissingHint = (row) => {
 // 批次 2 P5：达人佣金率没配 ⇒ 按 0 计 ⇒ 利润被高估，必须标出来。
 const creatorCommissionHint = (row) =>
   row.creator_commission_source === "assumed_zero" ? "未配置，按 0 计" : "";
+// SKU 的**代表重量**（批次 6）：SKU 不再有精确重量 ⇒ 用重量段的代表重量
+// （段上限，不封顶段取下限）—— 宁高不低。
+const skuRepresentativeWeightKg = (sku) => {
+  const tier = weightTiers.value.find(
+    (item) => item.tier_code === (sku?.weight_tier_code || ""),
+  );
+  if (!tier) return 0;
+  return Number(tier.max_kg ?? tier.min_kg ?? 0);
+};
+// 包邮开关（批次 6，2026-11-17）：跨境电商**不是默认包邮**，而是**选择性包邮**
+// ⇒ 「这个 SKU 在这个平台包不包邮」是经营选择，粒度 = SKU × 平台。
+// ⚠️ 切了要立刻重算：尾程进不进成本底线、利润扣不扣这笔，全看这个开关。
+const onFreeShippingChange = async (row) => {
+  const platform = operatingQuery.platform_code;
+  if (!platform) {
+    ElMessage.error("请先选择平台");
+    row.free_shipping = !row.free_shipping;
+    return;
+  }
+  row.__free_shipping_saving = true;
+  try {
+    await productCenterApi.setSkuFreeShipping(row.sku_id, {
+      platform_code: platform,
+      free_shipping: !!row.free_shipping,
+    });
+    ElMessage.success(
+      row.free_shipping
+        ? "已开启包邮：尾程由我们承担，计入成本底线与利润"
+        : "已关闭包邮：买家付运费，尾程不计入成本底线",
+    );
+    await loadOperatingProfiles();
+  } catch (error) {
+    ElMessage.error(error.message || "保存包邮开关失败");
+    row.free_shipping = !row.free_shipping;
+  } finally {
+    row.__free_shipping_saving = false;
+  }
+};
 // 尾程配送费（批次 3 只读 → 批次 4 进底线）：算不出来 / 是估的 / 没进底线，都要说清。
 const deliveryCostHint = (row) => {
   const reasons = row.delivery_cost_missing_reasons || [];
+  // ⚠️ 批次 6：不包邮 ⇒ 尾程**不适用** ⇒ 不报任何缺失原因（报缺是噪声）。
+  if (row.free_shipping === false) return "";
   if (reasons.includes("missing_delivery_rate")) return "未配尾程费率";
-  if (reasons.includes("ambiguous_delivery_tier")) return "费率重量段重叠，无法判定";
-  if (reasons.includes("missing_weight")) return "缺重量，按最轻档保守估算";
-  if (reasons.includes("weight_above_top_tier")) return "超出最高重量段，按最高档估算";
+  if (reasons.includes("missing_delivery_rate_for_tier")) return "该重量段未配尾程费率";
+  if (reasons.includes("ambiguous_delivery_tier")) return "同一重量段配了两行费率，无法判定";
+  if (reasons.includes("missing_weight_tier")) return "未选重量段，按最轻段保守估算";
   // 批次 4：尾程算得出来但**没进成本底线** —— 平台没配拆分基准。
   if (
     row.delivery_cost != null &&
@@ -3411,6 +3843,7 @@ onMounted(async () => {
     loadRules(),
     loadStorageRules(),
     loadDeliveryRules(),
+    loadWeightTiers(),
     loadPurchaseOrders(),
     loadBatches(),
     loadOperatingDimensions(),
@@ -3785,5 +4218,12 @@ onMounted(async () => {
 }
 .bill-lines :deep(.el-input-number) {
   width: 100%;
+}
+/* 尾程费率行的即时告警（重量段重叠 ⇒ 选档歧义 ⇒ 系统算不出来）。 */
+.delivery-row-warn {
+  color: #e6a23c;
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 2px;
 }
 </style>

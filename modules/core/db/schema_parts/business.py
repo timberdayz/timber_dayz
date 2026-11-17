@@ -909,9 +909,9 @@ class DeliveryRateRule(Base):
 
     粒度
     ----
-    ``(platform_code, warehouse_code, min_weight_kg)`` 唯一（当期有效行）。
-    重量段区间为 ``[min_weight_kg, max_weight_kg]``，``max_weight_kg IS NULL``
-    表示「往上不封顶」。
+    ``(platform_code, warehouse_code, weight_tier_code)`` 唯一（当期有效行）。
+    重量段是**全局一套**（``core.dim_weight_tiers``）⇒ 这里只存段编码引用，
+    不再存重量上下限（批次 6，2026-11-17：SKU 改报重量段，费率表跟着改按段）。
     """
 
     __tablename__ = "delivery_rate_rules"
@@ -919,8 +919,10 @@ class DeliveryRateRule(Base):
     rule_id = Column(Integer, primary_key=True, autoincrement=True)
     platform_code = Column(String(32), nullable=False)
     warehouse_code = Column(String(128), nullable=False)
-    min_weight_kg = Column(Numeric(12, 3), nullable=False)
-    max_weight_kg = Column(Numeric(12, 3), nullable=True)
+    # ⚠️ 重量段编码（引用 ``core.dim_weight_tiers.tier_code``，**刻意不建外键**）。
+    #    段的边界（上下限、名称）是**全局**的：同一个段在所有平台含义相同，
+    #    各平台只负责填「这一段多少钱」。
+    weight_tier_code = Column(String(32), nullable=False)
     unit_price = Column(Numeric(18, 2), nullable=False)
     currency = Column(String(8), nullable=False, default="CNY")
     effective_from = Column(Date, nullable=False)
@@ -940,11 +942,6 @@ class DeliveryRateRule(Base):
     )
 
     __table_args__ = (
-        CheckConstraint("min_weight_kg >= 0", name="ck_delivery_rate_rules_min_weight"),
-        CheckConstraint(
-            "max_weight_kg IS NULL OR max_weight_kg > min_weight_kg",
-            name="ck_delivery_rate_rules_weight_window",
-        ),
         CheckConstraint("unit_price >= 0", name="ck_delivery_rate_rules_price"),
         CheckConstraint(
             "effective_to IS NULL OR effective_to >= effective_from",
@@ -957,7 +954,7 @@ class DeliveryRateRule(Base):
             "uq_delivery_rate_rules_current",
             "platform_code",
             "warehouse_code",
-            "min_weight_kg",
+            "weight_tier_code",
             unique=True,
             postgresql_where=text("status = 'active' AND effective_to IS NULL"),
         ),
@@ -1390,6 +1387,22 @@ class SkuPlatformPricing(Base):
     pricing_tier_label = Column(String(32), nullable=True)
     pricing_days_since_restock = Column(Integer, nullable=True)
     pricing_tier_source = Column(String(32), nullable=True)
+    # ⚠️ **包邮开关**（批次 6，2026-11-17）：该 SKU 在该平台上**要不要包邮**。
+    #
+    # 业务前提：跨境电商**不是默认包邮**，而是**选择性包邮** ——
+    # 同一个平台上，有的listing包邮、有的不包邮。所以「包不包邮」是
+    # **SKU × 平台** 的经营选择，不是平台属性，也不是仓属性。
+    #
+    # 取值：
+    #   TRUE  = 包邮 ⇒ **商家承担尾程**（仓→买家那段快递费）
+    #           ⇒ 尾程进成本底线分子，平台尾程占比进分母（成对生效），利润链扣尾程
+    #   FALSE = 明确不包邮 ⇒ 买家付运费 ⇒ 商家不承担尾程
+    #           ⇒ 尾程**不进**底线、不报「缺尾程费率」，利润链尾程按 0 计
+    #   NULL  = 未设置 ⇒ **按不包邮处理**（默认关闭，符合行业现状）
+    #
+    # ⚠️ 为什么默认关闭：默认包邮 ⇒ 每个 SKU 的底线都被塞进一笔并不存在的尾程
+    # ⇒ 底线系统性偏高 ⇒ 定价过高 ⇒ 丢单。默认不包邮与行业现状一致。
+    free_shipping = Column(Boolean, nullable=True)
     created_by = Column(Integer, nullable=True)
     updated_by = Column(Integer, nullable=True)
     created_at = Column(

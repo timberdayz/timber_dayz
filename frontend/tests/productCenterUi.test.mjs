@@ -114,7 +114,16 @@ test("SKU 资料按 CNY 维护采购成本、周转类型和参考仓储天数",
   assert.match(source, /fast.*30|30.*fast/);
   assert.match(source, /normal.*60|60.*normal/);
   assert.match(source, /slow.*90|90.*slow/);
-  assert.doesNotMatch(source, /label="币种"/);
+  // ⚠️ 「不许有币种入口」只针对 **SKU 资料** tab（采购成本一律按 CNY 维护）。
+  //    尾程费率 tab 里的「币种」列是**另一回事**：平台价目表常是外币
+  //    （Shopee SG = SGD），那里必须能填币种 + 汇率 ——
+  //    否则照抄新币数字会被当成人民币 ⇒ 尾程少算好几倍 ⇒ 成本底线偏低 ⇒ 漏钱。
+  const skuSection = source.slice(
+    source.indexOf('label="SKU 资料"'),
+    source.indexOf('label="平台 SKU 利润测算"'),
+  );
+  assert.ok(skuSection.length > 0, "没定位到 SKU 资料 tab");
+  assert.doesNotMatch(skuSection, /label="币种"/);
 });
 
 test("平台 SKU 利润测算按平台、仓库和运输方式自动计算参考成本", () => {
@@ -309,7 +318,7 @@ test("9 个可编辑字段都会标脏，改动不会在保存时丢失", () => 
     ["owner_user_id", "spu"],
     ["sku_name", "sku"],
     ["specification", "sku"],
-    ["weight_kg", "sku"],
+    ["weight_tier_code", "sku"],
     ["units_per_carton", "sku"],
   ];
   for (const [field, kind] of cases) {
@@ -1067,6 +1076,59 @@ test("SKU 资料页的底线与测算页同口径：按当前仓算尾程", () =
 });
 
 // ---------------------------------------------------------------------------
+// 尾程费率的录入体验 + 币种护栏（2026-11-17）
+// ---------------------------------------------------------------------------
+
+test("尾程费率能照外币价目表录入：原币单价 + 币种 + 汇率 ⇒ 折算成人民币入账", () => {
+  // 平台价目表常是外币（Shopee SG = SGD），而尾程计算链**不读汇率** ——
+  // 照抄新币数字当人民币 = 尾程少算 5 倍 ⇒ 成本底线偏低 ⇒ 直接漏钱。
+  assert.match(source, /label="原币单价"/);
+  assert.match(source, /label="币种"/);
+  assert.match(source, /label="汇率→人民币"/);
+  assert.match(source, /deliveryRuleConvertedCny/);
+  // 折算结果只读展示（不让运营同时维护两个数）
+  assert.match(source, /label="单件尾程费（CNY）"/);
+  // 入库一律人民币等值
+  assert.match(source, /currency: "CNY"/);
+});
+
+test("尾程费率支持批量新增：照一张价目表一次录完", () => {
+  assert.match(source, /批量新增尾程费率/);
+  assert.match(source, /deliveryBatchRows/);
+  assert.match(source, /submitDeliveryBatch/);
+});
+
+test("尾程费率按重量段录：同一「平台 × 仓 × 段」不许填两行", () => {
+  // 批次 6：重量段是**全局一套**的，段与段之间不会重叠 ⇒ 不再有「区间重叠」问题；
+  // 真正要拦的是「同一个平台 × 仓 × 段填了两行当期」⇒ 选档歧义 ⇒ 系统算不出来。
+  assert.match(source, /deliveryTierDuplicateHint/);
+  assert.doesNotMatch(source, /deliveryIntervalsOverlap/);
+  // 重量段从全局段表里选，不手工填上下限。
+  assert.match(source, /listWeightTiers/);
+  assert.doesNotMatch(source, /label="重量下限 kg"/);
+  assert.doesNotMatch(source, /label="重量上限 kg"/);
+});
+
+test("尾程费率可停用/启用：停用比删除安全（历史留痕）", () => {
+  assert.match(source, /toggleDeliveryRuleStatus/);
+  assert.match(source, /停用/);
+  assert.match(source, /启用/);
+});
+
+test("尾程费率改价走新版本（POST），不覆盖历史行", () => {
+  // 费率版本化只进不退：改价 = 旧行闭区间 + 新行今天起生效。
+  // 若走 PATCH 直接改单价 ⇒ 历史行被覆盖 ⇒ 事后对不上「当时按多少钱算的」。
+  assert.match(source, /deliveryRuleCreatePayload/);
+  assert.match(source, /deliveryRuleUpdatePayload/);
+  assert.match(source, /已按新价开新版本/);
+});
+
+test("平台没配尾程占收入比时，费率页要提醒尾程不进底线", () => {
+  assert.match(source, /deliveryPlatformSplitHint/);
+  assert.match(source, /尾程占收入比/);
+});
+
+// ---------------------------------------------------------------------------
 // 批次 5 遗留收口：头程账单内的分段改名（2026-11-16）
 // ---------------------------------------------------------------------------
 
@@ -1084,4 +1146,72 @@ test("改名后仍能看出头程账单三段与尾程配送费的区别", () =>
   // 界面上必须写清区别，否则改名等于没改
   assert.match(source, /头程末端派送/);
   assert.match(source, /尾程配送费/);
+});
+
+// ---------------------------------------------------------------------------
+// 批次 6：重量段化 + 包邮开关（2026-11-17）
+// ---------------------------------------------------------------------------
+
+test("SKU 资料页按重量段选，不填精确重量", () => {
+  // 承运商按重量段定价 ⇒ SKU 不称重、只报「落在哪一段」。
+  const skuSection = source.slice(
+    source.indexOf('label="SKU 资料"'),
+    source.indexOf('label="平台 SKU 利润测算"'),
+  );
+  assert.match(skuSection, /label="重量段"/);
+  assert.match(skuSection, /v-model="row.weight_tier_code"/);
+  assert.doesNotMatch(skuSection, /label="重量 kg"/);
+  assert.doesNotMatch(skuSection, /row.weight_kg/);
+});
+
+test("重量段定义全局一套：SKU 页与费率页读同一份段表", () => {
+  assert.match(source, /listWeightTiers/);
+  assert.match(source, /weightTiers/);
+  // 段表是唯一真源 ⇒ 页面上不许手工填重量上下限。
+  assert.doesNotMatch(source, /label="重量下限 kg"/);
+  assert.doesNotMatch(source, /label="重量上限 kg"/);
+});
+
+test("测算页逐个 SKU 切换包邮（跨境电商不是默认包邮）", () => {
+  // ⚠️ 这是**经营选择**：同一平台上有的 listing 包邮、有的不包邮。
+  assert.match(source, /onFreeShippingChange/);
+  assert.match(source, /setSkuFreeShipping/);
+  assert.match(source, /label="包邮"/);
+  assert.match(source, /v-model="row.free_shipping"/);
+});
+
+test("不包邮时界面要说清尾程不计入成本底线", () => {
+  assert.match(source, /买家付运费/);
+  assert.match(source, /不包邮/);
+});
+
+test("缺失原因换成重量段口径", () => {
+  assert.match(source, /missing_weight_tier/);
+  assert.match(source, /missing_delivery_rate_for_tier/);
+});
+
+test("定价设置抽屉自带平台选择器，平台身份不再靠外部筛选条件", () => {
+  // ⚠️ 这是「定价设置是空的」的根因：平台成本率 tab 的「平台」原来是只读文本，
+  // 平台身份靠测算页的 operatingQuery.platform_code 隐式传递 ⇒
+  // 从 SKU 资料页进抽屉时永远是一个空壳（费率全空、来源全空），
+  // 而保存又会把值写到**别的**平台行上（静默写错平台）。
+  assert.match(source, /v-model="pricingDrawer\.form\.platform_code"/);
+  assert.match(source, /pricingDrawer\.form\.platform_code/);
+  assert.doesNotMatch(source, /label="平台"><span>/);
+});
+
+test("保存平台成本率只写抽屉里选中的平台，没选平台就提示", () => {
+  // 写入目标必须来自**抽屉表单**，不是页面上任何一个筛选条件。
+  assert.match(source, /const platformCode = pricingDrawer\.form\.platform_code/);
+  assert.match(source, /updatePlatformFeeRate\(platformCode/);
+  assert.doesNotMatch(source, /updatePlatformFeeRate\(operatingQuery\.platform_code/);
+  // 没有平台必须提示，不许静默 return（静默 = 运营以为存上了，其实没存）。
+  assert.match(source, /请先选择平台/);
+});
+
+test("两个入口各叫各的：库龄档位规则 / 平台成本率", () => {
+  assert.match(source, />库龄档位规则</);
+  assert.match(source, />平台成本率</);
+  // 抽屉标题保留「定价设置」（它是两个子页的容器），但按钮不再都叫它。
+  assert.doesNotMatch(source, />定价设置</);
 });

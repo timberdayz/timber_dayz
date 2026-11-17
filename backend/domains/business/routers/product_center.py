@@ -39,6 +39,8 @@ from backend.schemas.product_center import (
     SkuItem,
     SpuListResponse,
     SkuListResponse,
+    SkuFreeShippingRequest,
+    SkuFreeShippingResponse,
     SkuPricingOverrideRequest,
     SkuPricingOverrideResponse,
     SkuSellingPricePreviewRequest,
@@ -56,6 +58,9 @@ from backend.schemas.product_center import (
     PlatformSkuProfitPreviewRequest,
     WarehouseStorageRuleCreateRequest,
     WarehouseStorageRuleUpdateRequest,
+    WeightTierCreateRequest,
+    WeightTierResponse,
+    WeightTierUpdateRequest,
     SkuCreateRequest,
     SkuUpdateRequest,
     SkuOperatingDimensionsResponse,
@@ -102,6 +107,7 @@ from modules.core.db import (
     DeliveryRateRule,
     DimErpSku,
     DimSpu,
+    DimWeightTier,
     ProductCostAssumptionProfile,
     SkuProfitEstimate,
     LogisticsBill,
@@ -139,6 +145,7 @@ from backend.services.product_pricing_query_service import (
     compute_pricing_for_sku as _compute_pricing_for_sku,
     compute_pricing_state as _compute_pricing_state,
     load_pricing_context as _pricing_context,
+    resolve_free_shipping,
     resolve_pricing_platform_code as _pricing_platform_code,
 )
 from backend.services.inventory.warehouse_divergence_service import (
@@ -151,6 +158,7 @@ from backend.services.inventory.inventory_warehouse_stock_query_service import (
 )
 from backend.services.product_pricing_override_service import (
     clear_platform_override,
+    set_free_shipping,
     set_platform_override,
 )
 from backend.services.product_selling_price_service import (
@@ -548,7 +556,7 @@ async def _enqueue_sku_projection(db: AsyncSession, row: DimErpSku) -> None:
             "sku_key": row.sku_key,
             "sku_name": row.sku_name,
             "specification": row.specification,
-            "weight_kg": row.weight_kg,
+            "weight_tier_code": row.weight_tier_code,
             "package_length_cm": row.package_length_cm,
             "package_width_cm": row.package_width_cm,
             "package_height_cm": row.package_height_cm,
@@ -1911,15 +1919,22 @@ async def list_skus(
             delivery_tiers_by_platform[code] = await finance.find_delivery_rate_tiers(
                 code, warehouse_code
             )
-        if not any(row.weight_kg is not None for row in rows):
-            # 整页都缺重量 ⇒ 缺重量降级要用「最贵仓」，这时才去取该平台所有仓的档位。
+        if not any(row.weight_tier_code for row in rows):
+            # 整页都缺重量段 ⇒ 未选段降级要用「最贵仓」，这时才去取该平台所有仓的档位。
             for code in platform_codes_for_delivery:
                 delivery_fallback_by_platform[code] = (
                     await finance.find_delivery_rate_tiers(code)
                 )
     items = []
+    # 重量段（全局一套）⇒ 一次读进内存，把段的显示名投影到每一行。
+    tier_map = await _weight_tier_map(db)
     for row in rows:
         payload = SkuItem.model_validate(row).model_dump()
+        payload["weight_tier_label"] = (
+            tier_map[row.weight_tier_code].label
+            if row.weight_tier_code in tier_map
+            else row.weight_tier_code
+        )
         binding = binding_by_sku.get(row.sku_id)
         # 归属投影只从真源取（律 1）：spu + 归属生效日一起给出。
         # ⚠️ 少了「生效日」就等于把一段有时效的关联压扁成了一个字段 ——
@@ -1961,7 +1976,7 @@ async def list_skus(
         delivery_by_platform = {
             code: compute_delivery_cost(
                 tiers,
-                row.weight_kg,
+                row.weight_tier_code,
                 fallback_tiers=delivery_fallback_by_platform.get(code) or (),
             ).amount
             for code, tiers in delivery_tiers_by_platform.items()
@@ -2000,6 +2015,22 @@ async def list_skus(
     )
 
 
+async def _validate_weight_tier_code(db: AsyncSession, tier_code: str | None) -> None:
+    """重量段必须真实存在（批次 6）。
+
+    ⚠️ 为什么在这里拦：段引用的是**全局段表**（``core.dim_weight_tiers``），
+    而这段表刻意**不建外键**（会被同步 TRUNCATE CASCADE 连带清掉）。
+    没有外键兜底 ⇒ 写入端必须自己校验：引用一个不存在的段 ⇒
+    这个 SKU 的尾程永远选不中 ⇒ 费率等于没配（**静默失效**）。
+    """
+    if not tier_code:
+        return
+    if await db.get(DimWeightTier, tier_code) is None:
+        raise HTTPException(
+            status_code=422, detail=f"weight tier not found: {tier_code}"
+        )
+
+
 @router.post("/api/skus", response_model=SkuItem, status_code=201)
 async def create_sku(
     body: SkuCreateRequest,
@@ -2007,6 +2038,7 @@ async def create_sku(
     _user=Depends(_require_editor),
 ):
     values = body.model_dump()
+    await _validate_weight_tier_code(db, values.get("weight_tier_code"))
     # 阶段 4 工具 2：新建时填了基准售价 ⇒ 确认日期自动写当天。
     # ⚠️ `values` 是完整 dump（`selling_price_confirmed_at` 一定在里面，值为 None），
     #    所以「运营有没有显式给过确认日期」不能靠字典推断，要看 `exclude_unset` 的那份。
@@ -2050,6 +2082,7 @@ async def update_sku(
     if row is None:
         raise HTTPException(status_code=404, detail="SKU not found")
     values = body.model_dump(exclude_unset=True)
+    await _validate_weight_tier_code(db, values.get("weight_tier_code"))
     # 阶段 4 工具 2：基准售价变了 ⇒ 确认日期自动跟着走（清空则一并清空）。
     apply_selling_price_confirmation(
         values,
@@ -2289,6 +2322,61 @@ async def set_sku_pricing_override(
     )
 
 
+@router.put("/api/skus/{sku_id}/free-shipping", response_model=SkuFreeShippingResponse)
+async def set_sku_free_shipping(
+    sku_id: int,
+    body: SkuFreeShippingRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_editor),
+):
+    """设置某 SKU 在某平台的**包邮开关**（批次 6，2026-11-17）。
+
+    业务前提：跨境电商**不是默认包邮**，而是**选择性包邮** ——
+    同一个平台上，有的 listing 包邮、有的不包邮。
+
+    效果：
+
+    - **包邮** ⇒ 商家承担尾程（仓→买家那段快递费）⇒ 尾程按「平台 × 仓 × 重量段」
+      的费率算出来 ⇒ **进成本底线分子**，平台尾程占比**进分母**（成对生效），
+      利润链**扣掉**这笔尾程。
+    - **不包邮** ⇒ 买家付运费 ⇒ 商家**不承担**尾程 ⇒ 尾程**不进**底线，
+      利润链尾程按 **0** 计，**也不报**「缺尾程费率」（不包邮压根不需要尾程费率）。
+
+    ⚠️ 粒度是 **SKU × 平台**（与底线、人工覆盖同一粒度）：
+    包邮是渠道策略，不是仓库属性 ⇒ 同一平台的所有仓共用这一个决策。
+    """
+    sku = await db.get(DimErpSku, sku_id)
+    if sku is None:
+        raise HTTPException(status_code=404, detail="sku not found")
+    platform = await db.get(DimPlatform, body.platform_code)
+    if platform is None:
+        raise HTTPException(status_code=422, detail="platform not found")
+    row = await set_free_shipping(
+        db,
+        sku_id=sku_id,
+        platform_code=body.platform_code,
+        free_shipping=body.free_shipping,
+        user_id=_user.id if hasattr(_user, "id") else None,
+    )
+    await _write_product_center_audit(
+        db,
+        _user,
+        action_type="update",
+        resource_type="sku_free_shipping",
+        resource_id=f"{sku_id}:{body.platform_code}",
+        changes={
+            "free_shipping": bool(row.free_shipping),
+            "platform_code": body.platform_code,
+        },
+    )
+    await db.commit()
+    return SkuFreeShippingResponse(
+        sku_id=sku_id,
+        platform_code=body.platform_code,
+        free_shipping=bool(row.free_shipping),
+    )
+
+
 def _assert_spu_assignable(spu_row: DimSpu) -> None:
     """「这个 SPU 现在还能不能挂新 SKU」—— 口径来自真源，不在这里重写一遍。
 
@@ -2385,6 +2473,7 @@ async def bulk_save_skus(
     try:
         for item in body.items:
             values = item.model_dump(exclude_unset=True)
+            await _validate_weight_tier_code(db, values.get("weight_tier_code"))
             sku_id = values.pop("sku_id", None)
             spu = values.pop("spu", None)
             effective_from = values.pop("effective_from", None)
@@ -3471,15 +3560,71 @@ async def delete_warehouse_storage_rule(
 # 尾程配送费费率（平台 × 仓 × 重量段）
 # ---------------------------------------------------------------------------
 
+#: ``PATCH /api/delivery-rate-rules/{rule_id}`` **只允许改这些字段**。
+#:
+#: ⚠️ **不含单价**：费率版本化只进不退 —— 改价必须 POST 新建一档
+#: （后端把旧行闭区间、新行今天起生效），否则历史行被直接覆盖，
+#: 事后对不上「当时按多少钱算的」。
+#:
+#: ⚠️ **不含身份字段**（平台 / 仓 / 重量段）：改了等于换了一档费率
+#: —— 那种情况请「新开一行」。
+_DELIVERY_RATE_UPDATABLE_FIELDS = (
+    "effective_from",
+    "effective_to",
+    "status",
+    "source",
+    "version",
+    "notes",
+)
 
-def _serialize_delivery_rate_rule(row: DeliveryRateRule) -> dict:
+
+async def _weight_tier_map(db: AsyncSession) -> dict[str, DimWeightTier]:
+    """全局重量段表（``core.dim_weight_tiers``）⇒ ``{tier_code: 行}``。
+
+    段表很小（6 档左右）⇒ 一次读进内存，序列化时直接投影段的名称与上下限。
+    """
+    rows = (await db.execute(select(DimWeightTier))).scalars().all()
+    return {row.tier_code: row for row in rows}
+
+
+def _weight_tier_windows_overlap(
+    left_min: Decimal | float,
+    left_max: Decimal | float | None,
+    right_min: Decimal | float,
+    right_max: Decimal | float | None,
+) -> bool:
+    """两个重量段的区间是否重叠。
+
+    区间是**左闭右开** ``[min, max)``（上不封顶 = 视作 +∞）：
+    相邻两段 ``[0, 1)`` / ``[1, 5)`` **不重叠**，段才能连续铺开。
+
+    ⚠️ 重叠 ⇒ 同一个重量可能落进两段 ⇒ 选档歧义 ⇒ 系统算不出来
+    （宁可不算，也不要算错）⇒ 建段时直接拒绝。
+    """
+    if left_max is not None and Decimal(str(left_max)) <= Decimal(str(right_min)):
+        return False
+    if right_max is not None and Decimal(str(right_max)) <= Decimal(str(left_min)):
+        return False
+    return True
+
+
+def _serialize_delivery_rate_rule(
+    row: DeliveryRateRule, tier_map: dict[str, DimWeightTier]
+) -> dict:
+    tier = tier_map.get(row.weight_tier_code)
     return {
         "rule_id": row.rule_id,
         "platform_code": row.platform_code,
         "warehouse_code": row.warehouse_code,
-        "min_weight_kg": float(row.min_weight_kg),
+        "weight_tier_code": row.weight_tier_code,
+        # ⚠️ 段名与上下限是**投影**（段定义全局唯一，在 ``core.dim_weight_tiers``），
+        #    不是这一行的身份 —— 费率行的身份是 ``(平台, 仓, 重量段)``。
+        "weight_tier_label": tier.label if tier is not None else row.weight_tier_code,
+        "min_weight_kg": (
+            float(tier.min_kg) if tier is not None and tier.min_kg is not None else None
+        ),
         "max_weight_kg": (
-            float(row.max_weight_kg) if row.max_weight_kg is not None else None
+            float(tier.max_kg) if tier is not None and tier.max_kg is not None else None
         ),
         "unit_price": float(row.unit_price),
         "currency": row.currency or "CNY",
@@ -3492,27 +3637,6 @@ def _serialize_delivery_rate_rule(row: DeliveryRateRule) -> dict:
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
-
-
-def _delivery_rate_weight_overlaps(
-    left_min: Decimal,
-    left_max: Decimal | None,
-    right_min: Decimal,
-    right_max: Decimal | None,
-) -> bool:
-    """两个重量段是否重叠。
-
-    区间是**左闭右开** ``[min, max)``（上不封顶 = 视作 +∞）：
-    相邻两档 ``[0, 0.5)`` / ``[0.5, ∞)`` **不重叠**，重量段才能连续铺开。
-    """
-    left_end = left_max
-    right_end = right_max
-    # 左档结束早于右档开始 ⇒ 不重叠
-    if left_end is not None and left_end <= right_min:
-        return False
-    if right_end is not None and right_end <= left_min:
-        return False
-    return True
 
 
 @router.get("/api/delivery-rate-rules", response_model=list[DeliveryRateRuleResponse])
@@ -3533,11 +3657,16 @@ async def list_delivery_rate_rules(
         (
             await db.execute(
                 select(DeliveryRateRule)
+                .outerjoin(
+                    DimWeightTier,
+                    DimWeightTier.tier_code == DeliveryRateRule.weight_tier_code,
+                )
                 .where(*filters)
                 .order_by(
                     DeliveryRateRule.platform_code,
                     DeliveryRateRule.warehouse_code,
-                    DeliveryRateRule.min_weight_kg,
+                    DimWeightTier.sort_order,
+                    DeliveryRateRule.weight_tier_code,
                     DeliveryRateRule.effective_from.desc(),
                 )
             )
@@ -3545,7 +3674,8 @@ async def list_delivery_rate_rules(
         .scalars()
         .all()
     )
-    return [_serialize_delivery_rate_rule(row) for row in rows]
+    tier_map = await _weight_tier_map(db)
+    return [_serialize_delivery_rate_rule(row, tier_map) for row in rows]
 
 
 @router.post("/api/delivery-rate-rules", status_code=201)
@@ -3556,8 +3686,11 @@ async def create_delivery_rate_rule(
 ):
     """新建一档尾程费率（版本化只进不退）。
 
-    同一 ``(平台 × 仓 × 重量下限)`` 已有当期行 ⇒ 旧的**闭区间**（不是删除），
+    同一 ``(平台 × 仓 × 重量段)`` 已有当期行 ⇒ 旧的**闭区间**（不是删除），
     新行从今天起生效 —— 历史可追溯。
+
+    ⚠️ **重量段必须存在**（``core.dim_weight_tiers``）：段是全局唯一的，
+    引用一个不存在的段 ⇒ 这一行永远选不中 ⇒ 费率等于没配（静默失效）。
     """
     platform = await db.get(DimPlatform, body.platform_code)
     if platform is None:
@@ -3565,6 +3698,17 @@ async def create_delivery_rate_rule(
     warehouse = await db.get(DimWarehouse, body.warehouse_code)
     if warehouse is None:
         raise HTTPException(status_code=422, detail="warehouse not found")
+    tier = await db.get(DimWeightTier, body.weight_tier_code)
+    if tier is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"weight tier not found: {body.weight_tier_code}",
+        )
+    if tier.status != "active":
+        raise HTTPException(
+            status_code=422,
+            detail=f"weight tier is inactive: {body.weight_tier_code}",
+        )
 
     current_rows = (
         (
@@ -3582,29 +3726,14 @@ async def create_delivery_rate_rule(
         .scalars()
         .all()
     )
-    new_min = Decimal(str(body.min_weight_kg))
-    new_max = (
-        Decimal(str(body.max_weight_kg)) if body.max_weight_kg is not None else None
-    )
+    # ⚠️ 批次 6：**不再有「重量段重叠」检查** —— 重量段是**全局一套**的
+    #    （``core.dim_weight_tiers``），段与段之间由段表保证不重叠；
+    #    各平台只填「这一段多少钱」⇒ 同一段在不同平台/仓各有一行价格，
+    #    这是**正常业务**，不是配置冲突。
+    #
+    # 同档位（平台 × 仓 × 重量段）换价 ⇒ 旧的闭区间，新行今天起生效。
     for existing in current_rows:
-        existing_min = Decimal(str(existing.min_weight_kg))
-        existing_max = (
-            Decimal(str(existing.max_weight_kg))
-            if existing.max_weight_kg is not None
-            else None
-        )
-        # ⚠️ 重量段**不许重叠**：重叠 ⇒ 选档歧义 ⇒ 系统算不出来（宁可不算，不猜）。
-        if _delivery_rate_weight_overlaps(new_min, new_max, existing_min, existing_max):
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "delivery rate weight tier overlaps an active rule: "
-                    f"{float(existing_min)}-{existing_max if existing_max is not None else '∞'} kg"
-                ),
-            )
-    # 同档位（平台 × 仓 × 重量下限）换价 ⇒ 旧的闭区间，新行今天起生效。
-    for existing in current_rows:
-        if Decimal(str(existing.min_weight_kg)) == new_min:
+        if existing.weight_tier_code == body.weight_tier_code:
             existing.effective_to = body.effective_from - timedelta(days=1)
             existing.status = "inactive"
     row = DeliveryRateRule(**body.model_dump())
@@ -3626,7 +3755,7 @@ async def create_delivery_rate_rule(
         raise HTTPException(
             status_code=409, detail="active delivery rate rule already exists"
         ) from exc
-    return _serialize_delivery_rate_rule(row)
+    return _serialize_delivery_rate_rule(row, await _weight_tier_map(db))
 
 
 @router.patch("/api/delivery-rate-rules/{rule_id}")
@@ -3638,24 +3767,55 @@ async def update_delivery_rate_rule(
 ):
     """改一档尾程费率。
 
-    ⚠️ **只允许改单价 / 备注 / 生效日**：平台、仓、重量段是这行的身份，
-    改了等于换了一档费率 —— 那种情况请「新开一行」（旧行会被闭区间）。
+    ⚠️ **只允许改备注 / 生效日 / 版本 / 来源 / 状态**（见 ``_DELIVERY_RATE_UPDATABLE_FIELDS``）：
+    平台、仓、重量段是这行的身份，改了等于换了一档费率 —— 那种情况请「新开一行」。
+
+    ⚠️ **单价也不在这里改**：费率版本化只进不退，改价请走 POST
+    （后端把旧行闭区间、新行今天起生效）—— 否则历史行被覆盖，事后对不上
+    「当时按多少钱算的」。
+
+    **停用 / 启用**：停用 = 保留这一行但退出当期（历史留痕，比删除安全）；
+    启用 = 回到当期（若同档位已有当期行 ⇒ 409，不允许两个当期行并存）。
     """
     row = await db.get(DeliveryRateRule, rule_id)
     if row is None:
         raise HTTPException(status_code=404, detail="delivery rate rule not found")
     values = body.model_dump(exclude_unset=True)
-    for key in ("min_weight_kg", "max_weight_kg"):
-        if key in values and values[key] is not None:
-            values[key] = Decimal(str(values[key]))
-    if "min_weight_kg" in values and "max_weight_kg" in values:
-        if values["max_weight_kg"] is not None and Decimal(
-            str(values["max_weight_kg"])
-        ) <= Decimal(str(values["min_weight_kg"])):
-            raise HTTPException(
-                status_code=422,
-                detail="max_weight_kg must be greater than min_weight_kg",
+    forbidden = set(values) - set(_DELIVERY_RATE_UPDATABLE_FIELDS)
+    if forbidden:
+        raise HTTPException(
+            status_code=422,
+            detail="只允许修改 " + "、".join(sorted(_DELIVERY_RATE_UPDATABLE_FIELDS)),
+        )
+
+    if values.get("status") == "active" and row.status != "active":
+        # 启用：同 (平台 × 仓 × 重量段) 已有当期行 ⇒ 不能并存。
+        conflict = (
+            (
+                await db.execute(
+                    select(DeliveryRateRule).where(
+                        DeliveryRateRule.platform_code == row.platform_code,
+                        DeliveryRateRule.warehouse_code == row.warehouse_code,
+                        DeliveryRateRule.weight_tier_code == row.weight_tier_code,
+                        DeliveryRateRule.status == "active",
+                        DeliveryRateRule.effective_to.is_(None),
+                        DeliveryRateRule.rule_id != row.rule_id,
+                    )
+                )
             )
+            .scalars()
+            .first()
+        )
+        if conflict is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "same weight tier already has an active rule "
+                    f"(rule_id={conflict.rule_id})"
+                ),
+            )
+        row.effective_to = None
+
     for key, value in values.items():
         setattr(row, key, value)
     await _write_product_center_audit(
@@ -3666,9 +3826,126 @@ async def update_delivery_rate_rule(
         resource_id=str(row.rule_id),
         changes=values,
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409, detail="active delivery rate rule already exists"
+        ) from exc
     await db.refresh(row)
-    return _serialize_delivery_rate_rule(row)
+    return _serialize_delivery_rate_rule(row, await _weight_tier_map(db))
+
+
+@router.get("/api/weight-tiers", response_model=list[WeightTierResponse])
+async def list_weight_tiers(
+    include_inactive: bool = Query(False),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """全局重量段定义（``core.dim_weight_tiers``）。
+
+    ⚠️ **全局一套**（批次 6，2026-11-17）：所有平台、所有仓共用同一把尺子
+    ⇒ SKU 资料页与尾程费率页的下拉框都读这一份。
+    """
+    statement = select(DimWeightTier)
+    if not include_inactive:
+        statement = statement.where(DimWeightTier.status == "active")
+    rows = (
+        (await db.execute(statement.order_by(DimWeightTier.sort_order))).scalars().all()
+    )
+    return rows
+
+
+@router.post("/api/weight-tiers", status_code=201)
+async def create_weight_tier(
+    body: WeightTierCreateRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_platform_fee_editor),
+):
+    """新建一个重量段。
+
+    ⚠️ 段编码是**身份**：建完就不该再改（所有 SKU 与费率行都引用它）。
+    ⚠️ 段的区间**不许与现有段重叠** —— 重叠 ⇒ 同一个重量可能落进两段
+    ⇒ 选档歧义 ⇒ 系统算不出来（宁可不算，也不要算错）。
+    """
+    if await db.get(DimWeightTier, body.tier_code) is not None:
+        raise HTTPException(
+            status_code=409, detail=f"weight tier already exists: {body.tier_code}"
+        )
+    existing = (await db.execute(select(DimWeightTier))).scalars().all()
+    for tier in existing:
+        if tier.status != "active":
+            continue
+        if _weight_tier_windows_overlap(
+            body.min_kg, body.max_kg, tier.min_kg, tier.max_kg
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "weight tier window overlaps an active tier: "
+                    f"{tier.tier_code} ({tier.min_kg}-{tier.max_kg or '∞'} kg)"
+                ),
+            )
+    row = DimWeightTier(**body.model_dump())
+    db.add(row)
+    try:
+        await db.flush()
+        await _write_product_center_audit(
+            db,
+            _user,
+            action_type="create",
+            resource_type="weight_tier",
+            resource_id=body.tier_code,
+            changes=body.model_dump(mode="json"),
+        )
+        await db.commit()
+        await db.refresh(row)
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409, detail=f"weight tier already exists: {body.tier_code}"
+        ) from exc
+    return row
+
+
+@router.patch("/api/weight-tiers/{tier_code}")
+async def update_weight_tier(
+    tier_code: str,
+    body: WeightTierUpdateRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _user=Depends(_require_platform_fee_editor),
+):
+    """改重量段：**只允许改显示名 / 顺序 / 状态**。
+
+    ⚠️ **区间不能改**（契约层已挡）：段是全局唯一的，改区间会让所有引用它的
+    SKU 与费率行含义漂移、历史费率对不上号。要改区间请**新建一段**并迁移费率。
+    """
+    row = await db.get(DimWeightTier, tier_code)
+    if row is None:
+        raise HTTPException(status_code=404, detail="weight tier not found")
+    values = body.model_dump(exclude_unset=True)
+    for key, value in values.items():
+        if value is None:
+            continue
+        setattr(row, key, value)
+    try:
+        await db.flush()
+        await _write_product_center_audit(
+            db,
+            _user,
+            action_type="update",
+            resource_type="weight_tier",
+            resource_id=tier_code,
+            changes=body.model_dump(mode="json"),
+        )
+        await db.commit()
+        await db.refresh(row)
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409, detail="weight tier update failed"
+        ) from exc
+    return row
 
 
 @router.delete("/api/delivery-rate-rules/{rule_id}", status_code=204)
@@ -3689,7 +3966,7 @@ async def delete_delivery_rate_rule(
         changes={
             "platform_code": row.platform_code,
             "warehouse_code": row.warehouse_code,
-            "min_weight_kg": float(row.min_weight_kg),
+            "weight_tier_code": row.weight_tier_code,
             "unit_price": float(row.unit_price),
             "version": row.version,
         },
@@ -4714,8 +4991,8 @@ async def list_platform_sku_profit_candidates(
         platform_code, warehouse_code
     )
     delivery_fallback_tiers: list = []
-    if not any(row.weight_kg is not None for row in sku_rows):
-        # 整页都缺重量 ⇒ 缺重量降级要用「最贵仓」，这时才去取该平台所有仓的档位。
+    if not any(row.weight_tier_code for row in sku_rows):
+        # 整页都缺重量段 ⇒ 未选段降级要用「最贵仓」，这时才去取该平台所有仓的档位。
         delivery_fallback_tiers = await finance.find_delivery_rate_tiers(platform_code)
     cost_inputs_by_sku = await finance.prefetch_platform_sku_profit_inputs(
         sku_rows, warehouse_code, transport_type
@@ -4729,12 +5006,20 @@ async def list_platform_sku_profit_candidates(
     pricing_context = await _pricing_context(
         db, [row.sku_id for row in sku_rows], [platform_code], warehouse_code
     )
+    # 重量段定义（全局一套）⇒ 一次读进内存，逐行投影段的显示名。
+    tier_map = await _weight_tier_map(db)
     items = []
     for row in sku_rows:
         profile = profile_by_sku.get(row.sku_id)
         assigned_spu = binding_by_sku.get(row.sku_id)
         assigned = spu_by_code.get(assigned_spu) if assigned_spu else None
         cost_inputs = cost_inputs_by_sku[row.sku_id]
+        # ⚠️ **包邮开关**（批次 6）：跨境电商不是默认包邮，而是**选择性包邮**
+        #    ⇒ 「这个 SKU 在这个平台包不包邮」是经营选择，粒度 = SKU × 平台。
+        #    不包邮 ⇒ 买家付运费 ⇒ 商家**不承担**尾程 ⇒ 尾程不进底线、利润按 0 计。
+        free_shipping = resolve_free_shipping(
+            pricing_context, row.sku_id, platform_code
+        )
         purchase_cost = (
             cost_inputs["purchase_cost"]
             if cost_inputs["purchase_cost"] is not None
@@ -4775,7 +5060,7 @@ async def list_platform_sku_profit_candidates(
         # 尾程配送费（批次 3：**只读展示**，批次 4 才进利润与底线）
         delivery_result = compute_delivery_cost(
             delivery_tiers,
-            row.weight_kg,
+            row.weight_tier_code,
             fallback_tiers=delivery_fallback_tiers,
         )
         missing_reasons: list[str] = []
@@ -4789,9 +5074,9 @@ async def list_platform_sku_profit_candidates(
                 missing_reasons.append("missing_logistics_rule")
             elif (
                 cost_inputs["reference_logistics_rule"].billing_basis == "weight"
-                and row.weight_kg is None
+                and row.weight_tier_code is None
             ):
-                missing_reasons.append("missing_sku_weight")
+                missing_reasons.append("missing_sku_weight_tier")
             else:
                 missing_reasons.append("missing_sku_volume")
         if reference_storage is None:
@@ -4801,6 +5086,12 @@ async def list_platform_sku_profit_candidates(
                 missing_reasons.append("missing_turnover_class")
             else:
                 missing_reasons.append("missing_sku_volume")
+        # 尾程**实际计入成本**的金额（批次 6）：
+        #   包邮   ⇒ 按费率表的单件尾程（算不出来 ⇒ None ⇒ 利润链不可算）
+        #   不包邮 ⇒ 0（商家不承担；利润链照算）
+        applied_delivery_cost = (
+            delivery_result.amount if free_shipping else Decimal("0")
+        )
         preview = build_platform_profit_preview(
             expected_selling_price=expected_selling_price,
             competitor_price=profile.competitor_price if profile else None,
@@ -4819,10 +5110,13 @@ async def list_platform_sku_profit_candidates(
             damage_rate=assigned.logistics_damage_rate if assigned else None,
             # 达人佣金：SKU 自己设的值优先，否则用所选平台的默认兜底
             creator_commission_rate=creator_commission_rate,
-            # 尾程配送费（批次 4）：按 SKU 重量 + 当前仓费率算出来的**单件**尾程。
-            # ⚠️ 算不出来（没配费率 / 重量档位歧义）时传 None ⇒ 广告前利润/利润算不出来，
+            # 尾程配送费（批次 4）：按 SKU 重量段 + 当前仓费率算出来的**单件**尾程。
+            # ⚠️ 算不出来（没配费率 / 段歧义）时传 None ⇒ 广告前利润/利润算不出来，
             #    **不是 0** —— 尾程不免费，按 0 计等于凭空多一笔利润。
-            delivery_cost=delivery_result.amount,
+            # ⚠️ **不包邮**（批次 6）⇒ 买家付运费 ⇒ 商家**不承担**尾程 ⇒ 传 0
+            #    （**不是 None**）：不包邮的 SKU 本来就没有尾程成本，利润**应该**
+            #    算得出来；传 None 会让整条利润链留白，反而是错的。
+            delivery_cost=applied_delivery_cost,
             # 平台级 ROI 配置（阶段 1）：安全边际 + 平台可填上限
             roi_safety_margin=platform.roi_safety_margin,
             target_roi_ceiling=platform.target_roi_ceiling,
@@ -4892,15 +5186,29 @@ async def list_platform_sku_profit_candidates(
                 "creator_commission_source": creator_commission_source,
                 # 尾程配送费（批次 3 只读；批次 4 才进利润与成本底线）
                 "delivery_cost": (
-                    float(delivery_result.amount)
-                    if delivery_result.amount is not None
+                    float(applied_delivery_cost)
+                    if applied_delivery_cost is not None
                     else None
                 ),
-                "delivery_cost_source": delivery_result.source,
-                "delivery_cost_estimated": delivery_result.estimated,
-                "delivery_cost_missing_reasons": list(delivery_result.missing_reasons),
-                "delivery_cost_weight_kg": (
-                    float(row.weight_kg) if row.weight_kg is not None else None
+                # 包邮开关（批次 6）：False ⇒ 买家付运费 ⇒ 商家不承担尾程。
+                "free_shipping": free_shipping,
+                "delivery_cost_source": (
+                    delivery_result.source if free_shipping else "not_applicable"
+                ),
+                "delivery_cost_estimated": bool(
+                    delivery_result.estimated if free_shipping else False
+                ),
+                # ⚠️ 不包邮 ⇒ 尾程**不适用** ⇒ 不报「缺尾程费率」
+                #    （不包邮的 SKU 压根不需要尾程费率，报缺是噪声，会把真缺料淹掉）。
+                "delivery_cost_missing_reasons": (
+                    list(delivery_result.missing_reasons) if free_shipping else []
+                ),
+                # 重量段（批次 6）：SKU 落在哪一段 + 这一段的显示名。
+                "delivery_cost_weight_tier_code": row.weight_tier_code,
+                "delivery_cost_weight_tier_label": (
+                    tier_map[row.weight_tier_code].label
+                    if row.weight_tier_code in tier_map
+                    else row.weight_tier_code
                 ),
                 "reference_logistics_missing_reasons": [
                     reason
@@ -4908,7 +5216,7 @@ async def list_platform_sku_profit_candidates(
                     if reason
                     in {
                         "missing_logistics_rule",
-                        "missing_sku_weight",
+                        "missing_sku_weight_tier",
                         "ambiguous_logistics_rule",
                     }
                     or (reason == "missing_sku_volume" and reference_logistics is None)
@@ -5019,9 +5327,9 @@ async def _platform_profit_missing_fields(
         if (
             logistics_rule is not None
             and logistics_rule.billing_basis == "weight"
-            and sku.weight_kg is None
+            and sku.weight_tier_code is None
         ):
-            missing.append("重量 kg")
+            missing.append("重量段")
         elif (
             logistics_rule is not None
             and logistics_rule.billing_basis == "volume"

@@ -26,7 +26,7 @@
 | 7 | 采集组件 lint 仍是告警模式（范围已收窄，强度未提升） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
 | 8 | 覆盖缺口两项：① legacy `modules/apps/{account_manager,collection_center}/contract_tests.py` 不再由 CI 执行；② **`backend/tests/` 下的 async 用例不能混进 CI 根契约清单**（CI 钉 `pytest==7.4.3` / `pytest-asyncio==0.21.1`，而 `backend/tests/conftest.py` 覆盖了 session 级 `event_loop`（1.x 忽略它）⇒ 混跑时排在 `test_celery_dispatch_event_loop_isolation.py` 之后的 async 用例拿到**已关闭**的循环，报 `RuntimeError: Event loop is closed`） | 覆盖缺口 | ①待决定是否把断言迁进 pytest；②本轮**已规避**（契约断言放进纯同步的 `tests/test_account_proxy_source_contract.py`），**根因未修** ⇒ 记账到 V2（统一事件循环策略，或 CI 升 pytest-asyncio 1.x 并同步改 conftest） | 本文件「批次 F」节 + `tests/test_account_proxy_source_contract.py` 文件头 |
 | 9 | **221 个守护从不主动执行**（C 类：不在任何 CI 清单、也没有被别的文件引用 ⇒ 只在有人恰好改了该文件时才跑） | 覆盖缺口 | 待拍板是否分批提升进 CI 清单（会拉长流水线，属加固方向） | 本文件「批次 F」节 |
-| 10 | **v7.31.0 / v7.31.1 发版遗留 4 项（都要业务侧或配置侧动手）**：① 飞书三张状态镜像表 `table_id` 全为 NULL，且生产 `FEISHU_PRODUCT_BASE_TOKEN` 未设 ⇒ 商品镜像投影投不出去（8 条长期 pending）；② `finance.delivery_rate_rules` 空 ⇒ 尾程算不出来（利润链显示不可算）；③ 各平台 `delivery_cost_rate` 未填 ⇒ 尾程不进成本底线；④ 1125 个 SKU 重量为 0 ⇒ 尾程只能保守估算并标 `estimated` | 业务录数 / 配置 | 待业务录数：① 在飞书后台建好三张镜像表并回填配置，②③ 在「定价设置」维护，④ 补录重量（批次 3 已把重量改必填、表头改黑） | `CHANGELOG.md` v7.31.1 节 + `docs/superpowers/plans/2026-11-16-product-center-five-batch-optimization.md` §8.3 |
+| 10 | **商品中心录数缺口（v7.31.x 遗留 + 批次 6/7 新口径）**：① 飞书三张状态镜像表 `table_id` 全 NULL，且生产 `FEISHU_PRODUCT_BASE_TOKEN` 未设 ⇒ 商品镜像投影投不出去（8 条长期 pending）；② 生产 `finance.delivery_rate_rules` **0 行**（批次 7 迁移会把官方 3PF 尾程 5 档写进生产库，随发版生效）；③ 生产各平台 `delivery_cost_rate` 仍空 ⇒ 尾程不进成本底线（重算前置：SKU 段归类 + 订单级/单件摊口径钉死）；④ 生产 1122 个 SKU 重量段全空（**批次 6 已删除 `weight_kg`**）⇒ 发版后尾程落最轻档并标 `estimated`；⑤ 批次 6 的**包邮开关**需业务逐 SKU 勾选（默认不包邮）；⑥ 汇率 5.2077 待业务认可（生产汇率表仍是 5.2）；⑦ **残差桶**（`other_cost_rate`）仍是 1 月实测值 ⇒ 官方 2026-01/04 两次调涨后偏低约 1.1pt，待新实测重算；⑧ TikTok SG 尾程价目表未提供（现仅 1 档 T02） | 业务录数 / 配置 | 待业务录数：① 飞书后台建好三张镜像表并回填配置；②⑤ 在「定价设置」/「平台 SKU 利润测算」维护；④ 按实物批量归类重量段；⑥ 汇率更新授权；⑦ 提供 TikTok 价目表 | `CHANGELOG.md` v7.31.1 节 + 计划文档 §8.3、§9、§9.10 |
 
 **已关闭、不再是未结项**（留一行指针，避免又被当成待办）：
 
@@ -39,6 +39,42 @@
 
 - **v7.31.0**（11-16）商品中心五批次收官；**v7.31.1**（11-17）修好飞书「平台」单选字段 —— 该缺陷让调价通知自 11-08 起 11 天 0 投递。
 - 生产：容器全部 `v7.31.1`、`healthz/ready` = 200 / v7.31.1、迁移在链头；461 条积压任务已作废。完整验收见 `CHANGELOG.md` v7.31.1 节与计划文档 §8.4。
+
+- **当前未发版**：批次 6（重量段化 + 包邮开关）已落地待提交/发版，见下节「进行中：批次 6」。
+
+## 进行中：批次 6 + 批次 7 · 商品中心（2026-11-17，已落地未发版）
+
+- **批次 6 · 重量段化 + 选择性包邮**（Walter 拍板：承运商按**重量段**定价 ⇒ SKU 不称重只选段；
+  跨境电商**选择性包邮** ⇒ 逐 SKU 自选）。四条钉死的口径：重量段**全局一套**（`core.dim_weight_tiers`
+  T01–T06 = 0-1/1-5/5-10/10-20/20-30/30kg 以上），老 `weight_kg` **直接删除**；未选段 ⇒ 落**最轻档** +
+  `estimated` + `missing_weight_tier`；该段没配价 ≠ 免费 ⇒ 报 `missing_delivery_rate_for_tier`、金额留空；
+  包邮开关在 `finance.sku_platform_pricing.free_shipping`（SKU × 平台，**默认不包邮**）：不包邮 ⇒ 尾程不进底线、
+  不计利润、不报缺费率；包邮 ⇒ 尾程进底线 + 平台尾程占比进分母（成对生效）。
+- **批次 7 · 定价设置修复 + 费率按官方校准 + 看门狗**：「定价设置」原来**没有自己的平台选择器**
+  （平台身份靠测算页筛选条件隐式传递 ⇒ 从 SKU 资料页进抽屉是空表单，保存还可能**写错平台**）⇒ 抽屉自带
+  平台下拉、保存只写抽屉里的平台、两个入口各叫各的；费率按官方牌价校准（Walter 拍板：自有/三方仓 3PF 口径、
+  官方 3PF 尾程标准、TikTok 非 BXP 档）⇒ Shopee 佣金 → **16%**、TikTok → **8.175%**、Shopee SG 尾程 5 档 →
+  官方《3PF 收费标准》（商家包邮总额）20.93/25.31/27.97/38.59/62.44 元；看门狗**杀进程前必须再确认「服务端口
+  真的不通」**（探针失败 ≠ 服务死了 —— 2026-11-17 误杀事故的根因）。
+- **落地物**：迁移 `20261236_weight_tiers` / `20261237_free_shipping_flag` / `20261238_official_platform_fee_rates`；
+  服务层 `product_delivery_cost_service.py`、`product_finance_service.py`、`product_pricing_service.py`、
+  `product_pricing_query_service.py`；路由 `product_center.py`；前端 `ProductCenter.vue`；看门狗
+  `scripts/local_console_processes.py`。
+- **守护**：`test_weight_tier_guard.py`（29）、`test_free_shipping_switch.py`（14）、
+  `test_official_platform_fee_rates.py`（7）、`test_product_delivery_cost.py`、`test_delivery_rate_currency_guard.py`、
+  看门狗 2 条；前端 `frontend/tests/productCenterUi.test.mjs` **102/102**。
+- **全量回归**（批次 7 收尾复跑）：后端 **6219 passed / 8 skipped / 0 failed**（498.34s，批次 6 的 6213
+  + 本轮 6 条费率守护）；根目录 `tests` **845 passed / 5 skipped / 0 failed**（359.33s）；前端 102/102；
+  构建 10.28s（ProductCenter 117.36 kB）；black / ruff 全绿。**本轮自查修掉的降级缺口**：迁移 20261238
+  覆盖了平台费率**生效日期**但 `downgrade` 只还原费率 ⇒ 会留下"费率是 1 月实测、日期却是官方调价日"的
+  矛盾行 ⇒ 已补还原（回 2026-01-07）+ 守护，并实跑 downgrade → upgrade 往返验证通过。（批次 6 首轮 13 条
+  失败的根因与修复见计划文档 §9.9。）
+- **本地库复验**（真实服务层）：批次 6 后底线 包邮 126.19 / 不包邮 81.74；**批次 7 校准后** Shopee 包邮
+  **121.43**（尾程 22.34 → 20.93）、不包邮 **81.74** 不变；TikTok T01 缺尾程费率被正确报出。
+- **未完成**：提交与发版**未获授权**；生产 1122 个 SKU 重量段全空、尾程费率 0 行、平台尾程占比全 NULL
+  ⇒ 发版后需业务录数（见「当前未结」#10）；汇率 5.2077 待业务认可；TikTok SG 价目表未提供。
+  **本地环境坑**：`uvicorn --reload` 没带 `--reload-dir` ⇒ 改任何 .py 都会热重载后端（详见 §9.10.3，未改）。
+- **完整口径与证据**：计划文档 `2026-11-16-product-center-five-batch-optimization.md` §9 / §9.10。
 
 ## 已知未落地项
 
@@ -340,43 +376,8 @@ Walter 实际用了巡店面板后追问："既然硬件指纹改不了，那其
 
 ### F-4：验收（CI 三线全绿 + 双镜像一致 + 生产未受影响）
 
-**本地全量回归**
-
-| 范围 | 结果 |
-|---|---|
-| 后端（排除 data_pipeline / archive） | **4697 passed / 7 skipped**（247.60s） |
-| `backend/tests/data_pipeline` | **1274 passed / 1 skipped**（53.91s） |
-| 根 `tests/` | **801 passed / 5 skipped** |
-| 前端 `node --test` | **207 passed** |
-| 5 个新守护文件合计 | **119 passed** |
-| ruff / black / UTF-8 卫生 / 规则完整性 / 架构 SSOT | 全绿 |
-
-**CI 三线全绿**（`974901d9`）：CI Pipeline `43467986461`（**8 个 job 全 success**）/
-Validate Data Flow `43467986640` / Docker Build and Push `43467986403`。
-
-**CI 上的决定性证据**
-
-- 根契约清单：**593 passed / 11 skipped**（上一批是 481 passed ⇒ **+112**，
-  正好等于本次新增的 4 个守护文件：23 + 57 + 7 + 25）
-- 「Run pytest (if test files exist)」：**119 passed**（本次改动的 5 个测试文件）
-- 采集组件 lint：**「扫描范围: platforms（范围外文件 7 个已过滤）」+ error 0 / warning 0**
-  ⇒ 收窄真实生效，且**没有把任何真问题过滤掉**
-- `test (3.11)` 的步骤列表里**已看不到**被移除的 6 个步骤 ⇒ 移除确实落地
-
-**双镜像**：`git ls-remote` 权威核对 —— GitHub(SSH-443) / CNB(HTTPS) / 本地
-**三处同为 `974901d9`**；`v7.26.0` tag 两端仍是同一对象 `009a2867` → commit `05a359a1`，
-**未被回填**。
-
-**生产未受影响**：本批是测试/工具层改动，**不打 tag、不发版** ⇒ 不触发部署。
-`/api/healthz/ready` → HTTP 200、`version=v7.26.0`、`database=connected`、
-`dashboard=ready`、`runtime_mode=production`（与部署前一致）。
-
-**一处如实说明**：`scripts/sync_main_mirrors.ps1` 的「工作树必须干净」守卫**跑不起来** ——
-工作树里有**另一条工作流**的未跟踪文件
-（`docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md`，
-不是本批产物，**未动**）。已手工复核该脚本要检查的每一项，全部通过：
-分支 = `main`；无 `MERGE_HEAD`；**无任何已跟踪文件改动**（唯一脏项是那个未跟踪文件）；
-本地 `main` 与两端同 SHA、无分叉。
+F-4 的实施与验收记录已整体移入 `docs/superpowers/plans/archive/STATUS-2026-11-13-full-history.md`
+（逐字节保留、零删改）⇒ 本节只留指针。
 
 ---
 

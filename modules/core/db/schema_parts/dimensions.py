@@ -438,6 +438,69 @@ class DimSpu(Base):
     )
 
 
+class DimWeightTier(Base):
+    """全局重量段定义（**全局一套**，所有平台共用同一把尺子）。
+
+    业务概念
+    --------
+    承运商按**重量段**定价（Shopee SG / TikTok SG 价目表都是「≤1kg / ≤5kg / … 一档价」），
+    所以 SKU **不用称重**，只选「落在哪一段」；承运商调价只改费率表的那一行。
+
+    为什么是**全局一套**，而不是每个平台一套
+    --------------------------------------
+    同一个 SKU 在不同平台卖的是**同一个包裹** —— 重量段是**货的属性**，
+    不是渠道的属性。各平台各一套 ⇒ 运营要维护 N 份段表，还要判断
+    「TikTok 的 5kg 段」和「Shopee 的 5kg 段」是不是同一段 ⇒ 口径必然漂移。
+
+    段区间
+    ------
+    ``[min_kg, max_kg)`` **左闭右开**：相邻两段不重叠（边界归下一段），
+    ``max_kg IS NULL`` = 往上不封顶。
+
+    代表重量
+    --------
+    仍按重量计费的规则（头程按重量）用**段上限**当代表重量（不封顶段取下限）——
+    宁高不低。SKU 没选段 ⇒ **算不出来**（宁可不算，也不要算错）。
+
+    为什么**没有任何外键**
+    --------------------
+    同 ``DeliveryRateRule``：这张表会被「采集机 → 云端」同步 ``TRUNCATE ... CASCADE``
+    （``scripts/sync_product_center_to_cloud.py``）。建了外键 ⇒ 父表被清空时，
+    引用它的 SKU / 费率规则一起没了（**静默失效**）。所以 ``weight_tier_code``
+    一律是普通字符串，由服务层校验存在性。
+    """
+
+    __tablename__ = "dim_weight_tiers"
+
+    tier_code = Column(String(32), primary_key=True)
+    label = Column(String(64), nullable=False)
+    min_kg = Column(Numeric(12, 3), nullable=False)
+    max_kg = Column(Numeric(12, 3), nullable=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    status = Column(String(16), nullable=False, default="active")
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint("min_kg >= 0", name="ck_dim_weight_tiers_min_kg"),
+        CheckConstraint(
+            "max_kg IS NULL OR max_kg > min_kg", name="ck_dim_weight_tiers_window"
+        ),
+        CheckConstraint(
+            "status IN ('active', 'inactive')", name="ck_dim_weight_tiers_status"
+        ),
+        Index("ix_dim_weight_tiers_sort_order", "sort_order"),
+        {"schema": "core"},
+    )
+
+
 class DimErpSku(Base):
     """Canonical ERP SKU identity independent of platform and shop."""
 
@@ -448,7 +511,10 @@ class DimErpSku(Base):
     erp_record_id = Column(String(255), nullable=True)
     sku_name = Column(String(512), nullable=True)
     specification = Column(String(512), nullable=True)
-    weight_kg = Column(Float, nullable=True)
+    # ⚠️ 这里**不再有** `weight_kg`（批次 6，2026-11-17）：承运商按**重量段**定价，
+    #    货不称重、只报「落在哪一段」⇒ 老的精确重量字段直接退役。
+    #    仍然按重量计费的规则（头程按重量）改用**重量段的代表重量**（段上限）。
+    weight_tier_code = Column(String(32), nullable=True)
     package_length_cm = Column(Float, nullable=True)
     package_width_cm = Column(Float, nullable=True)
     package_height_cm = Column(Float, nullable=True)

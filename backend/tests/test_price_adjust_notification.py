@@ -508,6 +508,8 @@ async def core_sqlite_session():
         "core.dim_spu",
         "core.dim_erp_sku",
         "core.bridge_spu_sku",
+        # 批次 6：重量段是**全局一套**，取尾程费率时要 LEFT JOIN 它
+        "core.dim_weight_tiers",
         "ops.price_adjust_baselines",
     )
     engine = create_async_engine("sqlite+aiosqlite://")

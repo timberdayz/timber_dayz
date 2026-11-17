@@ -133,7 +133,7 @@ class SkuBulkItem(BaseModel):
     erp_record_id: Optional[str] = None
     sku_name: Optional[str] = None
     specification: Optional[str] = None
-    weight_kg: Optional[float] = Field(default=None, ge=0)
+    weight_tier_code: Optional[str] = Field(default=None, max_length=32)
     package_length_cm: Optional[float] = Field(default=None, ge=0)
     package_width_cm: Optional[float] = Field(default=None, ge=0)
     package_height_cm: Optional[float] = Field(default=None, ge=0)
@@ -244,7 +244,7 @@ class SkuCreateRequest(BaseModel):
     erp_record_id: Optional[str] = None
     sku_name: Optional[str] = None
     specification: Optional[str] = None
-    weight_kg: Optional[float] = Field(default=None, ge=0)
+    weight_tier_code: Optional[str] = Field(default=None, max_length=32)
     package_length_cm: Optional[float] = Field(default=None, ge=0)
     package_width_cm: Optional[float] = Field(default=None, ge=0)
     package_height_cm: Optional[float] = Field(default=None, ge=0)
@@ -279,7 +279,7 @@ class SkuCreateRequest(BaseModel):
 class SkuUpdateRequest(BaseModel):
     sku_name: Optional[str] = None
     specification: Optional[str] = None
-    weight_kg: Optional[float] = Field(default=None, ge=0)
+    weight_tier_code: Optional[str] = Field(default=None, max_length=32)
     package_length_cm: Optional[float] = Field(default=None, ge=0)
     package_width_cm: Optional[float] = Field(default=None, ge=0)
     package_height_cm: Optional[float] = Field(default=None, ge=0)
@@ -535,7 +535,12 @@ class SkuItem(BaseModel):
     #: 没有当前归属 ⇒ None（**不是**今天）。
     spu_effective_from: Optional[date] = None
     # --- 物理与包装 ---
-    weight_kg: Optional[float] = None
+    #: 重量段编码（引用 ``core.dim_weight_tiers.tier_code``，**刻意不建外键**）。
+    #: ⚠️ 批次 6 起**不再有** ``weight_kg``：承运商按重量段定价 ⇒ SKU 不称重，
+    #:    只报「落在哪一段」。没有段 ⇒ 按最轻段估算（尾程标记为 estimated）。
+    weight_tier_code: Optional[str] = None
+    #: 重量段显示名（从段表投影下来），前端直接显示，省一次查询。
+    weight_tier_label: Optional[str] = None
     package_length_cm: Optional[float] = None
     package_width_cm: Optional[float] = None
     package_height_cm: Optional[float] = None
@@ -770,14 +775,15 @@ class WarehouseStorageRuleUpdateRequest(BaseModel):
 class DeliveryRateRuleCreateRequest(BaseModel):
     """尾程配送费费率（平台 × 仓 × 重量段）。
 
-    ⚠️ **重量段区间不许重叠** —— 重叠会让选档变成歧义（系统宁可算不出来，
-    也不猜一个档位）。区间左闭右闭，``max_weight_kg`` 留空 = 往上不封顶。
+    ⚠️ **重量段是全局一套**（批次 6，2026-11-17）：``weight_tier_code`` 引用
+    ``core.dim_weight_tiers`` 里的段 ⇒ 同一个段在所有平台、所有仓含义相同。
+    段的上下限**不在这里填** —— 手工填上下限迟早填出重叠段（选档歧义），
+    而段表是唯一真源。
     """
 
     platform_code: str = Field(min_length=1, max_length=32)
     warehouse_code: str = Field(min_length=1, max_length=128)
-    min_weight_kg: float = Field(ge=0)
-    max_weight_kg: Optional[float] = Field(default=None, ge=0)
+    weight_tier_code: str = Field(min_length=1, max_length=32)
     unit_price: float = Field(ge=0)
     currency: str = Field(default="CNY", min_length=3, max_length=8)
     effective_from: date
@@ -788,19 +794,48 @@ class DeliveryRateRuleCreateRequest(BaseModel):
     notes: Optional[str] = None
 
     @model_validator(mode="after")
-    def weight_window_is_valid(self):
-        if self.max_weight_kg is not None and self.max_weight_kg <= self.min_weight_kg:
-            raise ValueError("max_weight_kg must be greater than min_weight_kg")
+    def effective_window_is_valid(self):
         if self.effective_to is not None and self.effective_to < self.effective_from:
             raise ValueError("effective_to must not be earlier than effective_from")
         return self
 
+    @model_validator(mode="after")
+    def cny_only(self):
+        """尾程单价**只认人民币等值**。
+
+        ⚠️ 为什么这么严：平台价目表常是新币/马币（Shopee SG = SGD），
+        而尾程计算链**不读汇率**（``currency`` 列存了但计算层没用它换算）。
+        照抄新币数字当人民币存进去 ⇒ 尾程少算好几倍 ⇒ **成本底线偏低 ⇒ 直接漏钱**。
+
+        外币请先按汇率折算成人民币等值再录，原币金额与汇率写进 ``notes`` 留档。
+        """
+        if (self.currency or "CNY").upper() != "CNY":
+            raise ValueError(
+                "尾程单价必须按人民币等值录入（外币请先按汇率折算，原币与汇率写进备注）"
+            )
+        self.currency = "CNY"
+        return self
+
 
 class DeliveryRateRuleUpdateRequest(BaseModel):
-    min_weight_kg: Optional[float] = Field(default=None, ge=0)
-    max_weight_kg: Optional[float] = Field(default=None, ge=0)
+    """改一档尾程费率：**只允许改备注 / 生效日 / 版本 / 来源 / 状态**。
+
+    ⚠️ **单价不能在这里改**：费率是**版本化只进不退**的 ——
+    改价必须走 ``POST /api/delivery-rate-rules``（后端会把旧行**闭区间**、
+    新行从今天起生效），历史才留得住痕。在这里改价 = 直接覆盖历史行
+    ⇒ 事后对不上「当时按多少钱算的」。
+
+    ⚠️ **身份字段（平台 / 仓 / 重量段）不能改**：改了等于换了一档费率
+    —— 那种情况请「新开一行」。
+    """
+
+    # 下面这几个字段**只用于把「误用」的请求挡下来并说清为什么不行**。
     unit_price: Optional[float] = Field(default=None, ge=0)
     currency: Optional[str] = Field(default=None, min_length=3, max_length=8)
+    platform_code: Optional[str] = Field(default=None, max_length=32)
+    warehouse_code: Optional[str] = Field(default=None, max_length=128)
+    weight_tier_code: Optional[str] = Field(default=None, max_length=32)
+
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
     status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
@@ -809,13 +844,28 @@ class DeliveryRateRuleUpdateRequest(BaseModel):
     notes: Optional[str] = None
 
     @model_validator(mode="after")
-    def weight_window_is_valid(self):
-        if (
-            self.min_weight_kg is not None
-            and self.max_weight_kg is not None
-            and self.max_weight_kg <= self.min_weight_kg
-        ):
-            raise ValueError("max_weight_kg must be greater than min_weight_kg")
+    def reject_forbidden_updates(self):
+        forbidden = [
+            key
+            for key in (
+                "unit_price",
+                "currency",
+                "platform_code",
+                "warehouse_code",
+                "weight_tier_code",
+            )
+            if getattr(self, key) is not None
+        ]
+        if forbidden:
+            raise ValueError(
+                "不能修改 " + "、".join(forbidden) + "：费率版本化只进不退 —— "
+                "改价请 POST 新建一档（旧行自动闭区间、新行今天起生效），"
+                "平台/仓/重量段是这一行的身份，改身份也要新开一行。"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def effective_window_is_valid(self):
         if (
             self.effective_from is not None
             and self.effective_to is not None
@@ -831,7 +881,11 @@ class DeliveryRateRuleResponse(BaseModel):
     rule_id: int
     platform_code: str
     warehouse_code: str
-    min_weight_kg: float
+    weight_tier_code: str
+    #: 重量段显示名 + 上下限（从 ``core.dim_weight_tiers`` 投影下来）。
+    #: ⚠️ 是**投影**，不是这一行的身份 —— 段的定义全局唯一。
+    weight_tier_label: Optional[str] = None
+    min_weight_kg: Optional[float] = None
     max_weight_kg: Optional[float] = None
     unit_price: float
     currency: str = "CNY"
@@ -843,6 +897,99 @@ class DeliveryRateRuleResponse(BaseModel):
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+# ==================== 批次 6 · 重量段（全局一套） ====================
+
+
+class WeightTierResponse(BaseModel):
+    """重量段行（``core.dim_weight_tiers``）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    tier_code: str
+    label: str
+    #: 段下限（含）。区间左闭右开 ``[min_kg, max_kg)``。
+    min_kg: float
+    #: 段上限（不含）；None = 往上不封顶。
+    max_kg: Optional[float] = None
+    #: 轻 → 重 的顺序。
+    sort_order: int = 0
+    status: str = "active"
+
+
+class WeightTierCreateRequest(BaseModel):
+    """新建一个重量段。"""
+
+    tier_code: str = Field(min_length=1, max_length=32)
+    label: str = Field(min_length=1, max_length=64)
+    min_kg: float = Field(ge=0)
+    max_kg: Optional[float] = Field(default=None, ge=0)
+    sort_order: int = Field(default=0, ge=0)
+    status: str = Field(default="active", pattern=r"^(active|inactive)$")
+
+    @model_validator(mode="after")
+    def weight_window_is_valid(self):
+        if self.max_kg is not None and self.max_kg <= self.min_kg:
+            raise ValueError("max_kg must be greater than min_kg")
+        return self
+
+
+class WeightTierUpdateRequest(BaseModel):
+    """改重量段：**只允许改显示名 / 顺序 / 状态**。
+
+    ⚠️ **上下限不能改**：段是全局唯一的，它的区间一旦改了，
+    所有引用它的 SKU 与费率行的含义都会漂移（且历史费率对不上号）。
+    要改区间请**新建一段**并把费率迁过去。
+    """
+
+    label: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    sort_order: Optional[int] = Field(default=None, ge=0)
+    status: Optional[str] = Field(default=None, pattern=r"^(active|inactive)$")
+    # 下面这两个只用于把误用挡下来并说清为什么不行。
+    min_kg: Optional[float] = Field(default=None, ge=0)
+    max_kg: Optional[float] = Field(default=None, ge=0)
+    tier_code: Optional[str] = Field(default=None, max_length=32)
+
+    @model_validator(mode="after")
+    def reject_forbidden_updates(self):
+        forbidden = [
+            key
+            for key in ("min_kg", "max_kg", "tier_code")
+            if getattr(self, key) is not None
+        ]
+        if forbidden:
+            raise ValueError(
+                "不能修改 " + "、".join(forbidden) + "：重量段是全局唯一的，"
+                "改区间会让所有引用它的 SKU 与费率行含义漂移 —— 请新建一段并迁移费率。"
+            )
+        return self
+
+
+# ==================== 批次 6 · 包邮开关（SKU × 平台） ====================
+
+
+class SkuFreeShippingRequest(BaseModel):
+    """设置某 SKU 在某平台的**包邮开关**（批次 6，2026-11-17）。
+
+    业务前提：跨境电商**不是默认包邮**，而是**选择性包邮** ⇒
+    「包不包邮」是 SKU × 平台的经营选择。
+
+    - ``free_shipping=true`` ⇒ 商家承担尾程 ⇒ 尾程进成本底线、利润链扣尾程；
+    - ``free_shipping=false`` ⇒ 买家付运费 ⇒ 商家不承担尾程
+      ⇒ 尾程**不进**底线、也不报「缺尾程费率」、利润链尾程按 0 计。
+    """
+
+    platform_code: str = Field(min_length=1, max_length=32)
+    free_shipping: bool
+
+
+class SkuFreeShippingResponse(BaseModel):
+    """包邮开关的写后回执。"""
+
+    sku_id: int
+    platform_code: str
+    free_shipping: bool
 
 
 class CostAssumptionCreateRequest(BaseModel):
@@ -1335,7 +1482,12 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     delivery_cost_source: Optional[str] = None
     delivery_cost_estimated: bool = False
     delivery_cost_missing_reasons: list[str] = Field(default_factory=list)
-    delivery_cost_weight_kg: Optional[float] = None
+    # 重量段（批次 6）：SKU 落在哪一段 + 这一段的显示名。
+    delivery_cost_weight_tier_code: Optional[str] = None
+    delivery_cost_weight_tier_label: Optional[str] = None
+    # ⚠️ **包邮开关**（批次 6，2026-11-17）：这个 SKU 在该平台上要不要包邮。
+    #    False（默认）⇒ 买家付运费 ⇒ 商家不承担尾程 ⇒ 尾程不计入成本底线。
+    free_shipping: bool = False
     preview: Optional[dict] = None
     currency: str = "CNY"
     # --- SKU 定价底线 ---

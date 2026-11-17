@@ -438,10 +438,12 @@ class PriceAdjustNotifyService:
                         # 这个仓没有这个货 ⇒ 不建状态（底线没有业务含义）。
                         continue
                     linked_spu = spu_by_sku.get(row.sku_id)
-                    # 尾程配送费（批次 4）：按「平台 × 仓 × 重量」算。
+                    # 尾程配送费（批次 4）：按「平台 × 仓 × 重量段」算。
+                    # ⚠️ 包邮开关由 ``compute_pricing_state`` 内部按 SKU × 平台判定
+                    #    （不包邮 ⇒ 尾程不进底线，也不报缺费率）。
                     delivery_result = compute_delivery_cost(
                         tiers_by_warehouse.get(warehouse_code, []),
-                        row.weight_kg,
+                        row.weight_tier_code,
                         fallback_tiers=all_tiers,
                     )
                     state = compute_pricing_state(
@@ -454,6 +456,14 @@ class PriceAdjustNotifyService:
                     pricing = state["pricing"]
                     policy = state["policy"]
                     days_since_restock = state["days_since_restock"]
+                    # ⚠️ **包邮开关**（批次 6）：快照里记的必须是**实际计入**的尾程。
+                    #    不包邮 ⇒ 商家不承担 ⇒ 记 0；否则归因会说"尾程涨了 5 元所以底线跳高"，
+                    #    而这笔尾程压根没进底线（会误导排查）。
+                    applied_delivery_cost = (
+                        delivery_result.amount
+                        if state.get("free_shipping")
+                        else Decimal("0")
+                    )
                     restock_row = (
                         (warehouse_restocks.get(row.sku_id) or {}).get(warehouse_code)
                         if warehouse_code
@@ -483,9 +493,12 @@ class PriceAdjustNotifyService:
                         reference_selling_price=row.reference_selling_price,
                         platform_code=platform_code,
                         warehouse_code=warehouse_code,
-                        delivery_cost=delivery_result.amount,
+                        delivery_cost=applied_delivery_cost,
                         delivery_cost_rate=(
-                            platform.delivery_cost_rate if platform else None
+                            # ⚠️ 成对生效：不包邮 ⇒ 尾程与它的拆分基准都**不适用** ⇒ 记 None
+                            platform.delivery_cost_rate
+                            if platform and state.get("free_shipping")
+                            else None
                         ),
                     )
 

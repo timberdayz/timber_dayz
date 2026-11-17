@@ -114,6 +114,8 @@ async def pricing_sqlite_session():
         "core.dim_spu",
         "core.dim_erp_sku",
         "core.bridge_spu_sku",
+        # 批次 6：重量段是**全局一套**，取尾程费率时要 LEFT JOIN 它
+        "core.dim_weight_tiers",
         "finance.sku_pricing_policies",
         "finance.sku_platform_pricing",
         # 批次 4：通知侧要按「平台 × 仓 × 重量段」取尾程费率

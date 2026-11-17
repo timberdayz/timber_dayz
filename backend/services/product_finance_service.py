@@ -14,6 +14,7 @@ from modules.core.db import (
     DimPlatform,
     DimWarehouse,
     DimSpu,
+    DimWeightTier,
     LogisticsBill,
     LogisticsBillLine,
     LogisticsBillLineAllocation,
@@ -24,6 +25,7 @@ from modules.core.db import (
     LogisticsProviderRule,
     WarehouseStorageRule,
     SkuOperatingProfile,
+    SkuPlatformPricing,
     SkuProfitEstimate,
 )
 
@@ -76,6 +78,20 @@ def _reference_unit_volume_cbm(sku: DimErpSku) -> Decimal | None:
     if any(value is None for value in dimensions):
         return None
     return _unit_volume_cbm(sku)
+
+
+def _tier_representative_weight_kg(tier: DimWeightTier | None) -> Decimal:
+    """重量段的**代表重量** = 段上限（不封顶段取下限）—— 宁高不低。
+
+    批次 6 起 SKU 不再存精确重量（``weight_kg`` 已退役），但仍有按重量计费的规则
+    （头程按重量、账单按重量分摊）。它们没有精确重量可用 ⇒ 用**段上限**当代表值：
+    比真实重量大 ⇒ 成本估高 ⇒ 底线偏保守（宁高不低）。
+    """
+    if tier is None:
+        return Decimal("0")
+    if tier.max_kg is not None:
+        return Decimal(str(tier.max_kg))
+    return Decimal(str(tier.min_kg))
 
 
 class ProductFinanceService:
@@ -142,6 +158,8 @@ class ProductFinanceService:
         skus = {sku.sku_id: sku for sku in sku_rows}
         if len(skus) != len(sku_ids):
             raise ValueError("one or more SKUs do not exist")
+        # 重量段（全局一套，很小）⇒ 一次读进内存，按段代表重量算账单重量。
+        tier_map = await self._weight_tier_map()
 
         await self.db.execute(
             delete(LogisticsBillLine).where(LogisticsBillLine.bill_id == bill.bill_id)
@@ -169,7 +187,9 @@ class ProductFinanceService:
             )
             calculated_weight = sum(
                 (
-                    Decimal(str(skus[item["sku_id"]].weight_kg or 0))
+                    _tier_representative_weight_kg(
+                        tier_map.get(skus[item["sku_id"]].weight_tier_code)
+                    )
                     * Decimal(str(item["shipped_qty"]))
                     for item in allocation_specs
                 ),
@@ -291,7 +311,10 @@ class ProductFinanceService:
                         "po_id": spec.get("po_id"),
                         "quantity": quantity,
                         "volume_cbm": _unit_volume_cbm(item_sku) * quantity,
-                        "weight_kg": Decimal(str(item_sku.weight_kg or 0)) * quantity,
+                        "weight_kg": _tier_representative_weight_kg(
+                            tier_map.get(item_sku.weight_tier_code)
+                        )
+                        * quantity,
                     }
                 )
             allocations = allocate_bill_line(
@@ -520,7 +543,7 @@ class ProductFinanceService:
         )
         if rule is None:
             return None, None
-        return self._reference_logistics_from_rule(sku, rule), rule
+        return await self._reference_logistics_from_rule(sku, rule), rule
 
     @staticmethod
     def _select_reference_logistics_rule(
@@ -544,9 +567,47 @@ class ProductFinanceService:
         default_rules = [rule for rule in best_rules if rule.is_default]
         return default_rules[0] if len(default_rules) == 1 else None
 
-    @staticmethod
-    def _reference_logistics_from_rule(
-        sku: DimErpSku, rule: LogisticsProviderRule
+    async def _weight_tier_map(self) -> dict[str, DimWeightTier]:
+        """全局重量段表（很小，6 档左右）⇒ 一次读进内存。
+
+        段定义是**全局一套**（``core.dim_weight_tiers``）⇒ 所有 SKU、所有平台
+        共用同一把尺子 ⇒ 缓存它是安全的。
+        """
+        rows = (await self.db.execute(select(DimWeightTier))).scalars().all()
+        return {row.tier_code: row for row in rows}
+
+    async def _weight_tier(self, tier_code: str | None) -> DimWeightTier | None:
+        """取某个重量段；``tier_code`` 为空 / 段不存在 ⇒ None。"""
+        if not tier_code:
+            return None
+        return await self.db.get(DimWeightTier, tier_code)
+
+    async def _resolve_free_shipping(self, sku_id: int, platform_code: str) -> bool:
+        """该 SKU 在该平台**包不包邮**；没设置 ⇒ False（默认不包邮）。
+
+        ⚠️ 口径与 ``product_pricing_query_service.resolve_free_shipping`` 一致
+        （同一张表 ``finance.sku_platform_pricing``、同一默认值）。
+        这里单独查一次，是为了让**单 SKU 试算**这条链也能拿到包邮状态 ——
+        那条链不走批量取数（只算一个 SKU），不值得为它拉整张覆盖表。
+        """
+        row = (
+            (
+                await self.db.execute(
+                    select(SkuPlatformPricing).where(
+                        SkuPlatformPricing.sku_id == sku_id,
+                        SkuPlatformPricing.platform_code == platform_code,
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if row is None:
+            return False
+        return bool(row.free_shipping)
+
+    async def _reference_logistics_from_rule(
+        self, sku: DimErpSku, rule: LogisticsProviderRule
     ) -> Decimal | None:
         if rule.freight_unit_rate is None:
             return None
@@ -555,9 +616,13 @@ class ProductFinanceService:
             if measure is None:
                 return None
         elif rule.billing_basis == "weight":
-            if sku.weight_kg is None:
+            # 批次 6：SKU 不再有精确重量 ⇒ 用**重量段的代表重量**（段上限，宁高不低）。
+            # ⚠️ SKU 没选段 ⇒ 算不出来（返回 None ⇒ 报 ``missing_sku_weight_tier``）：
+            #    不知道多重却按重量计费 = 凭空猜一个成本 ⇒ 宁可不算，也不要算错。
+            tier = await self._weight_tier(sku.weight_tier_code)
+            if tier is None:
                 return None
-            measure = Decimal(str(sku.weight_kg))
+            measure = _tier_representative_weight_kg(tier)
         elif rule.billing_basis in {"quantity", "fixed"}:
             measure = Decimal("1")
         else:
@@ -622,55 +687,76 @@ class ProductFinanceService:
     ) -> list[DeliveryTier]:
         """尾程费率档位（当期有效行）。
 
-        ``warehouse_code=None`` ⇒ 取该平台**所有仓**的档位（缺重量时挑「最贵仓」用）。
+        ``warehouse_code=None`` ⇒ 取该平台**所有仓**的档位（未选段时挑「最贵仓」用）。
+
+        ⚠️ **只取人民币等值的行**（``currency='CNY'``）：
+        尾程计算链**不读汇率** —— 外币数字会被直接当成人民币用
+        （Shopee SG 价目表是新币，照抄 4.29 存进去 = 尾程少算 5 倍
+        ⇒ 成本底线偏低 ⇒ 直接漏钱）。
+        遇到遗留的外币行：**宁可算不出来，也不要算错** ——
+        它不参与取数 ⇒ 界面显示「未配尾程费率」⇒ 运营去把折算补上。
+
+        重量段本身在 ``core.dim_weight_tiers``（**全局一套**）⇒ 这里 LEFT JOIN
+        带上段的名称与上下限；段表里没有的段**不丢行**（价格仍然对），
+        只是显示不出段名。
         """
         statement = (
-            select(DeliveryRateRule)
+            select(DeliveryRateRule, DimWeightTier)
+            .outerjoin(
+                DimWeightTier,
+                DimWeightTier.tier_code == DeliveryRateRule.weight_tier_code,
+            )
             .where(
                 DeliveryRateRule.platform_code == platform_code,
                 DeliveryRateRule.status == "active",
+                # ⚠️ 只认人民币等值（外币行不参与计算 —— 宁可不算，不算错）。
+                func.coalesce(DeliveryRateRule.currency, "CNY") == "CNY",
                 DeliveryRateRule.effective_from <= date.today(),
                 (DeliveryRateRule.effective_to.is_(None))
                 | (DeliveryRateRule.effective_to >= date.today()),
             )
             .order_by(
                 DeliveryRateRule.warehouse_code,
-                DeliveryRateRule.min_weight_kg,
+                DimWeightTier.sort_order,
+                DeliveryRateRule.weight_tier_code,
             )
         )
         if warehouse_code is not None:
             statement = statement.where(
                 DeliveryRateRule.warehouse_code == warehouse_code
             )
-        rows = (await self.db.execute(statement)).scalars().all()
+        rows = (await self.db.execute(statement)).all()
         return [
             DeliveryTier(
-                min_weight_kg=Decimal(str(row.min_weight_kg)),
+                tier_code=row.weight_tier_code,
+                label=(tier.label or row.weight_tier_code),
+                min_weight_kg=(
+                    Decimal(str(tier.min_kg)) if tier.min_kg is not None else None
+                ),
                 max_weight_kg=(
-                    Decimal(str(row.max_weight_kg))
-                    if row.max_weight_kg is not None
-                    else None
+                    Decimal(str(tier.max_kg)) if tier.max_kg is not None else None
                 ),
                 unit_price=Decimal(str(row.unit_price)),
                 currency=row.currency or "CNY",
                 warehouse_code=row.warehouse_code,
+                sort_order=int(tier.sort_order or 0),
             )
-            for row in rows
+            for row, tier in rows
         ]
 
     async def find_delivery_cost(
-        self, platform_code: str, warehouse_code: str, weight_kg: Decimal | None
+        self, platform_code: str, warehouse_code: str, tier_code: str | None
     ) -> DeliveryCostResult:
         """单 SKU 的尾程配送费（平台 × 仓 × 重量段）。
 
-        缺重量 ⇒ 保守估算并标 ``estimated``（口径见
-        ``backend/services/product_delivery_cost_service.py``）。
+        ``tier_code=None`` ⇒ SKU 未选段 ⇒ 按**最轻段**估算并标 ``estimated``
+        （口径见 ``backend/services/product_delivery_cost_service.py``）。
         """
         tiers = await self.find_delivery_rate_tiers(platform_code, warehouse_code)
         fallback: list[DeliveryTier] = []
-        if weight_kg is None:
+        if tier_code is None:
             fallback = await self.find_delivery_rate_tiers(platform_code)
-        return compute_delivery_cost(tiers, weight_kg, fallback_tiers=fallback)
+        return compute_delivery_cost(tiers, tier_code, fallback_tiers=fallback)
 
     async def find_latest_purchase_cost(self, sku: DimErpSku) -> Decimal | None:
         purchase_cost = case(
@@ -901,7 +987,7 @@ class ProductFinanceService:
         inputs: dict[int, dict[str, object]] = {}
         for item_sku_id, sku in sku_by_id.items():
             reference_logistics = (
-                self._reference_logistics_from_rule(sku, logistics_rule)
+                await self._reference_logistics_from_rule(sku, logistics_rule)
                 if logistics_rule is not None
                 else None
             )
@@ -1137,11 +1223,20 @@ class ProductFinanceService:
         reference_label_fee = await self.find_reference_label_fee(
             data["warehouse_code"]
         )
-        # 尾程配送费（批次 4）：按 SKU 重量 + 当前仓费率表算出来的**单件**尾程。
+        # 尾程配送费（批次 4）：按 SKU 重量段 + 当前仓费率表算出来的**单件**尾程。
         # ⚠️ 算不出来时 amount 为 None ⇒ 传进利润链就是「不可算」，
         #    利润会留白并标缺失原因（**不是 0** —— 尾程不免费）。
         delivery_result = await self.find_delivery_cost(
-            data["platform_code"], data["warehouse_code"], sku.weight_kg
+            data["platform_code"], data["warehouse_code"], sku.weight_tier_code
+        )
+        # ⚠️ **包邮开关**（批次 6，2026-11-17）：跨境电商不是默认包邮，而是选择性包邮
+        #    ⇒ 不包邮 ⇒ 买家付运费 ⇒ 商家**不承担**尾程 ⇒ 尾程按 0 计
+        #    （**不是 None**：不包邮的 SKU 本来就没有尾程成本，利润应该算得出来）。
+        free_shipping = await self._resolve_free_shipping(
+            sku.sku_id, data["platform_code"]
+        )
+        applied_delivery_cost = (
+            delivery_result.amount if free_shipping else Decimal("0")
         )
         binding = (
             (
@@ -1197,7 +1292,8 @@ class ProductFinanceService:
             roi_safety_margin=platform.roi_safety_margin,
             target_roi_ceiling=platform.target_roi_ceiling,
             # 尾程配送费（批次 4）：进广告前利润。None = 算不出来 ⇒ 利润留白。
-            delivery_cost=delivery_result.amount,
+            # ⚠️ 不包邮 ⇒ 尾程按 0（商家不承担），利润**照算**。
+            delivery_cost=applied_delivery_cost,
         )
         result.update(
             {
@@ -1227,16 +1323,23 @@ class ProductFinanceService:
                 "reference_storage_days": reference_storage_days(sku.turnover_class),
                 # 尾程配送费（批次 4）：单件尾程 + 来源/是否估算/缺失原因
                 "delivery_cost": (
-                    float(delivery_result.amount)
-                    if delivery_result.amount is not None
+                    float(applied_delivery_cost)
+                    if applied_delivery_cost is not None
                     else None
                 ),
-                "delivery_cost_source": delivery_result.source,
-                "delivery_cost_estimated": delivery_result.estimated,
-                "delivery_cost_missing_reasons": list(delivery_result.missing_reasons),
-                "delivery_cost_weight_kg": (
-                    float(sku.weight_kg) if sku.weight_kg is not None else None
+                # ⚠️ 包邮开关（批次 6）：False ⇒ 买家付运费 ⇒ 商家不承担尾程。
+                "free_shipping": free_shipping,
+                "delivery_cost_source": (
+                    delivery_result.source if free_shipping else "not_applicable"
                 ),
+                "delivery_cost_estimated": bool(
+                    delivery_result.estimated if free_shipping else False
+                ),
+                "delivery_cost_missing_reasons": (
+                    list(delivery_result.missing_reasons) if free_shipping else []
+                ),
+                "delivery_cost_weight_tier_code": sku.weight_tier_code,
+                "delivery_cost_weight_tier_label": delivery_result.tier_label,
                 "currency": "CNY",
                 "actual_logistics_cost": actual_logistics,
                 "cost_completeness": (

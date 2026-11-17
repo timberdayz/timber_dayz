@@ -4,10 +4,12 @@ import json
 import locale
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 import webbrowser
 from dataclasses import asdict, dataclass
@@ -201,6 +203,31 @@ def probe_service_readiness(service_id: str) -> bool:
     return False
 
 
+def probe_service_liveness(service_id: str) -> bool:
+    """服务端口还通吗（**只做 TCP 握手，不看 HTTP 状态码**）。
+
+    ⚠️ 为什么必须单独有一个"活着没有"的判断：
+        就绪探针失败 **≠ 服务死了**。探针只有 3 秒预算、且**要求 HTTP 200**，
+        后端只是忙（本地采集把 Playwright 跑在同一个进程里）、或健康检查降级
+        返回 503，都会被判成"没启动" ⇒ 启动预算耗尽后控制台会把**健康**的
+        进程树整棵杀掉（2026-11-17 事故：后端一直正常响应，却被探针超时误杀）。
+
+    ⇒ TCP 连得上 ⇒ 服务还在提供服务 ⇒ **绝不许杀**。
+    """
+    if service_id != LOCAL_COLLECTION:
+        return False
+    for url in READY_URLS:
+        parsed = urllib.parse.urlsplit(url)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 80
+        try:
+            with socket.create_connection((host, port), timeout=1.0):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 class LocalProcessSupervisor:
     def __init__(
         self,
@@ -213,6 +240,7 @@ class LocalProcessSupervisor:
         process_resolver: Callable[[int], Any] = psutil.Process,
         process_iterator: Callable[[], Iterable[Any]] | None = None,
         readiness_probe: Callable[[str], bool] = probe_service_readiness,
+        liveness_probe: Callable[[str], bool] = probe_service_liveness,
         wait_for_processes: Callable[..., Any] = psutil.wait_procs,
         url_opener: Callable[[str], Any] = webbrowser.open,
         time_provider: Callable[[], float] = time.time,
@@ -228,6 +256,7 @@ class LocalProcessSupervisor:
         self._process_resolver = process_resolver
         self._process_iterator = process_iterator or self._default_process_iterator
         self._readiness_probe = readiness_probe
+        self._liveness_probe = liveness_probe
         self._wait_for_processes = wait_for_processes
         self._url_opener = url_opener
         self._time_provider = time_provider
@@ -458,16 +487,26 @@ class LocalProcessSupervisor:
                             record.state = "starting"
                             record.started_at = self._time_provider()
                     elif record.state == "starting" and startup_budget_exhausted:
-                        # 从未就绪过 + 超预算 ⇒ 真启动失败：终止并留证。
-                        record.state = "failed"
-                        record.last_error = (
-                            f"启动超时（超过 {int(self._startup_timeout_seconds)} 秒）"
-                        )
-                        record.failure_code = "startup_timeout"
-                        record.last_failure_summary = record.last_error
-                        self._terminate_owned_process(service_id, process)
-                        self._handles.pop(service_id, None)
-                        self._append_startup_audit(service_id, record)
+                        # [*] **杀之前必须再确认一次「服务端口真的不通」**。
+                        # 探针失败 ≠ 服务死了：探针有 3 秒预算且要求 HTTP 200，
+                        # 后端只是忙（采集跑在同一进程里）或健康检查降级返回 503，
+                        # 都会被判成"没启动" ⇒ 预算耗尽后把**健康**的进程树整棵杀掉
+                        # （2026-11-17 事故）。
+                        # 端口还通 ⇒ 服务还活着 ⇒ 绝不杀，只把预算窗口重新计时。
+                        if self._liveness_probe(service_id):
+                            record.consecutive_readiness_failures = 0
+                            record.started_at = self._time_provider()
+                            record.state = "running"
+                            record.last_error = None
+                        else:
+                            # 从未就绪过 + 超预算 + 端口不通 ⇒ 真启动失败：终止并留证。
+                            record.state = "failed"
+                            record.last_error = f"启动超时（超过 {int(self._startup_timeout_seconds)} 秒）"
+                            record.failure_code = "startup_timeout"
+                            record.last_failure_summary = record.last_error
+                            self._terminate_owned_process(service_id, process)
+                            self._handles.pop(service_id, None)
+                            self._append_startup_audit(service_id, record)
                     elif record.state not in {"stopping", "failed"}:
                         record.state = "starting"
                 self._save_state()

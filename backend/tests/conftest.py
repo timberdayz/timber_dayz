@@ -706,6 +706,8 @@ PRICING_SEED_CLEANUP_SQL = (
     "DELETE FROM finance.warehouse_storage_rules WHERE warehouse_code = 'MY-01'",
     # 尾程费率（批次 4）：不删的话，下一个用例会读到上一轮留下的费率行
     "DELETE FROM finance.delivery_rate_rules WHERE platform_code = 'tiktok'",
+    # 重量段（批次 6）：全局一套，种子行也要清（否则第二个用例种同一段会撞主键）
+    "DELETE FROM core.dim_weight_tiers WHERE tier_code IN ('T01','T02','T03','T04','T05','T06')",
     "DELETE FROM core.bridge_spu_sku WHERE sku_id = 9001",
     # 平台级人工覆盖（阶段 2.1b）：这行一旦留着，下一个用例算出来的底线
     # 就是被覆盖过的值（20.00 而不是成本线）⇒ 断言会莫名其妙地挂。
@@ -745,8 +747,10 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
         DimSpu,
         DimUser,
         DimWarehouse,
+        DimWeightTier,
         LogisticsProviderRule,
         SkuPricingPolicy,
+        SkuPlatformPricing,
         WarehouseStorageRule,
     )
 
@@ -814,7 +818,7 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
             reference_selling_price=30,
             # 阶段 4 工具 2：有基准售价就必须有确认日期（DB 约束 ck_dim_erp_sku_selling_price_confirmed）
             selling_price_confirmed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-            weight_kg=0.5,
+            weight_tier_code="T01",
             unit_volume_cbm=0.01,
             turnover_class="slow",
         )
@@ -884,21 +888,54 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
                 effective_from=effective_from,
             )
         )
-        # 尾程配送费费率（批次 4）：平台 × 仓 × 重量段，0kg 起不封顶 ⇒ 单价 5 元/件。
+        # 尾程配送费费率（批次 4/6）：平台 × 仓 × 重量段，单价 5 元/件。
         # ⚠️ 尾程是**必付成本**：不配费率 ⇒ 尾程算不出来 ⇒ 利润链算不出来
         #    （不是按 0 计），所以种子必须带这一条。
+        # ⚠️ 重量段是**全局一套**（core.dim_weight_tiers）⇒ 种子也要先把段种出来。
+        for tier_code, label, min_kg, max_kg, sort_order in (
+            ("T01", "0-1 kg", 0, 1, 1),
+            ("T02", "1-5 kg", 1, 5, 2),
+            ("T03", "5-10 kg", 5, 10, 3),
+            ("T04", "10-20 kg", 10, 20, 4),
+            ("T05", "20-30 kg", 20, 30, 5),
+            ("T06", "30 kg 以上", 30, None, 6),
+        ):
+            pg_session.add(
+                DimWeightTier(
+                    tier_code=tier_code,
+                    label=label,
+                    min_kg=min_kg,
+                    max_kg=max_kg,
+                    sort_order=sort_order,
+                    status="active",
+                )
+            )
+        await pg_session.flush()
         pg_session.add(
             DeliveryRateRule(
                 platform_code="tiktok",
                 warehouse_code="MY-01",
-                min_weight_kg=0,
-                max_weight_kg=None,
+                weight_tier_code="T01",
                 unit_price=5,
                 currency="CNY",
                 effective_from=effective_from,
                 status="active",
                 source="test_seed",
                 version="v1",
+            )
+        )
+        await pg_session.flush()
+        # ⚠️ **包邮开关**（批次 6，2026-11-17）：跨境电商**不是默认包邮**，
+        #    而是**选择性包邮** ⇒ 「这个 SKU 的尾程进不进底线」由这个开关决定。
+        #    这套种子的语义是「商家承担尾程」⇒ 显式打开包邮，
+        #    这样「尾程进底线」那条断言（分子加 5 元）才有意义；
+        #    「默认不包邮 ⇒ 尾程不进底线 / 不报缺费率」由
+        #    `backend/tests/test_free_shipping_switch.py` 覆盖。
+        pg_session.add(
+            SkuPlatformPricing(
+                sku_id=9001,
+                platform_code="tiktok",
+                free_shipping=True,
             )
         )
         await pg_session.flush()

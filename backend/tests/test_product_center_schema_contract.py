@@ -31,7 +31,7 @@ def test_product_center_models_have_expected_tables_and_columns():
             "sku_id",
             "sku_key",
             "erp_record_id",
-            "weight_kg",
+            "weight_tier_code",
             "package_length_cm",
             "package_width_cm",
             "package_height_cm",

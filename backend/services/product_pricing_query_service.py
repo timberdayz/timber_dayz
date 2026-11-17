@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import DimPlatform, SkuPlatformPricing
@@ -232,10 +232,13 @@ async def load_platform_pricing_overrides(
     sku_ids: list[int],
     platforms: dict[str, DimPlatform],
 ) -> dict[tuple[int, str], SkuPlatformPricing]:
-    """平台级人工覆盖：``{(sku_id, platform_code): SkuPlatformPricing}``。
+    """平台级人工覆盖 + **包邮开关**：``{(sku_id, platform_code): SkuPlatformPricing}``。
 
-    只读**有覆盖值**的行 —— 没有人工覆盖的 SKU 不占内存，
-    底线的来源标记仍然是 ``cost_floor`` / ``discount_guard``。
+    只读**有值的行** —— 人工覆盖非 NULL **或** 包邮开关非 NULL：
+
+    - 没有人工覆盖的 SKU 不占内存，底线的来源标记仍然是 ``cost_floor`` / ``discount_guard``；
+    - 包邮开关住在同一张表（``finance.sku_platform_pricing``，粒度同为 **SKU × 平台**）
+      ⇒ 一次查询把两件事都带回来，不额外打一次库。
     """
     if not sku_ids or not platforms:
         return {}
@@ -245,7 +248,10 @@ async def load_platform_pricing_overrides(
                 select(SkuPlatformPricing).where(
                     SkuPlatformPricing.sku_id.in_(sku_ids),
                     SkuPlatformPricing.platform_code.in_(list(platforms)),
-                    SkuPlatformPricing.min_selling_price_override.is_not(None),
+                    or_(
+                        SkuPlatformPricing.min_selling_price_override.is_not(None),
+                        SkuPlatformPricing.free_shipping.is_not(None),
+                    ),
                 )
             )
         )
@@ -299,6 +305,32 @@ def resolve_pricing_override(context: dict, sku_id: int, platform_code: Optional
         return None
     row = overrides.get((sku_id, platform_code))
     return row.min_selling_price_override if row is not None else None
+
+
+def resolve_free_shipping(
+    context: dict, sku_id: int, platform_code: Optional[str]
+) -> bool:
+    """取某 SKU 在某平台的**包邮开关**；没设置 ⇒ **False（不包邮）**。
+
+    业务前提（批次 6，2026-11-17）：跨境电商**不是默认包邮**，而是**选择性包邮**
+    ⇒ 「包不包邮」是 **SKU × 平台** 的经营选择，住 ``finance.sku_platform_pricing``。
+
+    ⚠️ **默认关闭**：
+    - 默认包邮 ⇒ 每个 SKU 的底线都被塞进一笔并不存在的尾程 ⇒ 底线系统性偏高
+      ⇒ 定价过高 ⇒ 丢单；
+    - 默认不包邮与行业现状一致（大多数 listing 买家自己付运费）。
+
+    ⚠️ 必须用**实际生效的平台代码**查（与人工覆盖同一套理由）：
+    调用方不传平台时，费率走的是回落后的 basis 平台 —— 用原始值查会找不到
+    ⇒ **包邮开关被静默忽略** ⇒ 包邮的 SKU 被当成不包邮 ⇒ 尾程漏进成本 ⇒ 漏钱。
+    """
+    overrides = context.get("overrides") or {}
+    if not platform_code:
+        return False
+    row = overrides.get((sku_id, platform_code))
+    if row is None:
+        return False
+    return bool(row.free_shipping)
 
 
 def compute_pricing_state(
@@ -359,6 +391,11 @@ def compute_pricing_state(
     override = resolve_pricing_override(
         context, sku_row.sku_id, effective_platform_code
     )
+    # 包邮开关（批次 6）：同样按**实际生效的平台**查。
+    # ⚠️ 默认不包邮 ⇒ 尾程不适用于这个 SKU（买家付运费 ⇒ 商家不承担）。
+    free_shipping = resolve_free_shipping(
+        context, sku_row.sku_id, effective_platform_code
+    )
 
     pricing = compute_sku_pricing(
         purchase_cost=sku_row.default_purchase_cost,
@@ -385,12 +422,15 @@ def compute_pricing_state(
         #    按**本次算底线的那个平台**传进来 —— 这里不做任何跨平台的回落。
         delivery_cost=delivery_cost,
         delivery_cost_rate=platform.delivery_cost_rate if platform else None,
+        # 包邮开关（批次 6）：不包邮 ⇒ 尾程**不适用**（不进底线，也不报缺费率）。
+        free_shipping=free_shipping,
     )
     return {
         "pricing": pricing,
         "policy": policy,
         "days_since_restock": days_since_restock,
         "platform_code": platform_code,
+        "free_shipping": free_shipping,
     }
 
 

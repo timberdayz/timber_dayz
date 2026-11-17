@@ -681,6 +681,8 @@ async def test_list_skus_injects_pricing_payload(
     # 测试库没有 mart 表 -> 回落日常档
     assert row["pricing_tier_source"] == "fallback_no_restock_days"
     assert row["pricing_days_since_restock"] is None
+    # ⚠️ 批次 6：这个种子 SKU 是**包邮**的（商家承担尾程）⇒ 没传仓 ⇒ 尾程算不出来
+    #    ⇒ 尾程不进底线，但底线因此不完整 ⇒ 必须点名缺了什么。
     assert row["min_selling_price_missing_reasons"] == ["missing_delivery_cost"]
     assert row["delivery_cost_in_cost_floor"] is False
     # SKU 没单独设佣金 -> 返回 None（前端输入框留空），兜底值单独给
@@ -706,7 +708,7 @@ async def test_list_skus_with_warehouse_includes_delivery_cost_in_floor(
     )
     assert resp.status_code == 200, resp.text
     row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
-    # 分子 = 采购 10 + 尾程 5（0kg 起不封顶，SKU 重 0.5kg）
+    # 分子 = 采购 10 + 尾程 5（SKU 落 T01 段，费率 5 元/件）
     # 分母 = 1 − 0.2727 + 0.10(尾程拆分) − 0.0606 − 0.0467 − 0.0158 − 0.25 = 0.4542
     assert row["min_selling_price"] == pytest.approx(33.03, abs=0.01)
     assert row["delivery_cost_in_cost_floor"] is True

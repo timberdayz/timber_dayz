@@ -340,6 +340,7 @@ def test_external_process_is_reported_but_cannot_be_stopped(
 def test_startup_timeout_stops_owned_process_and_keeps_failure_visible(
     tmp_path: Path, runtime: FakeRuntime
 ):
+    """启动超时 + **服务端口也不通** ⇒ 真启动失败，终止并留证。"""
     now = [10.0]
     supervisor = LocalProcessSupervisor(
         repo_root=tmp_path,
@@ -349,6 +350,7 @@ def test_startup_timeout_stops_owned_process_and_keeps_failure_visible(
         process_resolver=runtime.resolve,
         process_iterator=runtime.iter_processes,
         readiness_probe=lambda _service: False,
+        liveness_probe=lambda _service: False,
         wait_for_processes=lambda _processes, _timeout: ([], []),
         time_provider=lambda: now[0],
         startup_timeout_seconds=20,
@@ -363,6 +365,43 @@ def test_startup_timeout_stops_owned_process_and_keeps_failure_visible(
     assert first["state"] == "failed"
     assert second["state"] == "failed"
     assert "启动超时" in first["last_error"]
+
+
+def test_live_service_port_is_never_killed_on_startup_timeout(
+    tmp_path: Path, runtime: FakeRuntime
+):
+    """[*] 端口还通 ⇒ 服务活着 ⇒ **绝不许杀**（2026-11-17 误杀事故的根因）。
+
+    就绪探针失败 ≠ 服务死了：探针只有 3 秒预算且**要求 HTTP 200**，
+    后端只是忙（本地采集把 Playwright 跑在同一进程里）、或健康检查降级返回 503，
+    都会被判成"没启动" ⇒ 600 秒后控制台把**健康**的进程树整棵杀掉。
+
+    ⇒ 杀进程之前必须再确认一次「服务端口真的不通」。
+    """
+    now = [10.0]
+    supervisor = LocalProcessSupervisor(
+        repo_root=tmp_path,
+        state_path=tmp_path / "state.json",
+        log_dir=tmp_path / "logs",
+        popen_factory=runtime.popen,
+        process_resolver=runtime.resolve,
+        process_iterator=runtime.iter_processes,
+        readiness_probe=lambda _service: False,
+        liveness_probe=lambda _service: True,
+        wait_for_processes=lambda _processes, _timeout: ([], []),
+        time_provider=lambda: now[0],
+        startup_timeout_seconds=20,
+    )
+    started = supervisor.start(LOCAL_COLLECTION)
+    now[0] = 31.0
+
+    status = supervisor.status(LOCAL_COLLECTION)
+
+    assert runtime.by_pid[started["pid"]].terminated is False
+    assert status["state"] == "running"
+    # 不许写失败结论（那会让控制台显示"启动失败"并引导用户重启）。
+    assert status["failure_code"] is None
+    assert "启动超时" not in (status["last_error"] or "")
 
 
 def test_early_process_exit_failure_persists_until_the_next_start(

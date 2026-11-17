@@ -253,9 +253,15 @@ def test_router_passes_delivery_cost_into_cost_floor():
 
 
 def test_finance_service_fetches_delivery_cost():
-    """单 SKU 试算链路（preview_platform_sku_profit）必须取尾程。"""
+    """单 SKU 试算链路（preview_platform_sku_profit）必须取尾程。
+
+    ⚠️ 批次 6 起尾程要先过**包邮开关**：不包邮 ⇒ 买家付运费 ⇒ 商家不承担尾程
+    ⇒ 进利润链的是 ``applied_delivery_cost``（不包邮时按 0），
+    不是 ``delivery_result.amount`` 本身。
+    """
     assert "find_delivery_cost" in FINANCE_SOURCE
-    assert "delivery_cost=delivery_result.amount" in FINANCE_SOURCE
+    assert "applied_delivery_cost" in FINANCE_SOURCE
+    assert "delivery_cost=applied_delivery_cost" in FINANCE_SOURCE
 
 
 def test_platform_split_field_exists_in_orm():

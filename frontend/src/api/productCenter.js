@@ -242,6 +242,23 @@ export default {
   deleteDeliveryRateRule(ruleId) {
     return api._delete(`/delivery-rate-rules/${ruleId}`);
   },
+  // 重量段（批次 6）：**全局一套**，所有平台共用同一把尺子。
+  // SKU 资料页与尾程费率页的下拉框都读这一份。
+  listWeightTiers(params = {}) {
+    return api._get("/weight-tiers", { params });
+  },
+  createWeightTier(payload) {
+    return api._post("/weight-tiers", payload);
+  },
+  updateWeightTier(tierCode, payload) {
+    return api._patch(`/weight-tiers/${encodeURIComponent(tierCode)}`, payload);
+  },
+  // 包邮开关（批次 6）：粒度 = SKU × 平台。
+  // ⚠️ 跨境电商不是默认包邮，而是**选择性包邮** ⇒ 这一列由运营逐个 SKU 决定。
+  //    不包邮 ⇒ 买家付运费 ⇒ 商家不承担尾程 ⇒ 尾程不进成本底线。
+  setSkuFreeShipping(skuId, payload) {
+    return api._put(`/skus/${skuId}/free-shipping`, payload);
+  },
   updatePlatformFeeRate(platformCode, payload) {
     return api._patch(`/platforms/${encodeURIComponent(platformCode)}/fee-rate`, payload);
   },

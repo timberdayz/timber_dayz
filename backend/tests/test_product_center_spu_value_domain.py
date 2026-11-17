@@ -127,7 +127,7 @@ def _sku():
         sku_key="SKU-7",
         sku_name="Test SKU",
         specification=None,
-        weight_kg=None,
+        weight_tier_code=None,
         package_length_cm=None,
         package_width_cm=None,
         package_height_cm=None,

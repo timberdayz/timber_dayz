@@ -1715,3 +1715,52 @@ R8 要求 profile 模式「**不注入**，沿用 profile 原生环境」；③ 
 | 生产代码真表写入 | 已部署代码组装出 `平台=TikTok` ⇒ 真实 `batch_create` **成功**；临时表验证完即删，表数回到 12（**零残留**） |
 | deploy-logs | 只多一个批次 `20261117_123908` |
 | 本地开发库 | 2026-11-17 升到链头（此前落后 3 个版本，缺 `finance.delivery_rate_rules` 表 / `dim_platforms.delivery_cost_rate` 列 / `price_adjust_baselines.warehouse_code` 列） |
+
+---
+
+## 批次 F：减重批（2026-11-13）· F-4 验收记录
+
+> 从 `docs/superpowers/plans/STATUS.md` 归档（2026-11-17，批次 6 落地时）。
+> 该节已完结 ⇒ 按「台账瘦身约定」移入归档；STATUS.md 的「批次 F」节只保留 F-1
+> （CI 减重契约守护 `backend/tests/test_ci_weight_reduction_contract.py` 依赖该节里
+> 6 条「被移除的只告警步骤」记录）＋ 本段指针。
+
+### F-4：验收（CI 三线全绿 + 双镜像一致 + 生产未受影响）
+
+**本地全量回归**
+
+| 范围 | 结果 |
+|---|---|
+| 后端（排除 data_pipeline / archive） | **4697 passed / 7 skipped**（247.60s） |
+| `backend/tests/data_pipeline` | **1274 passed / 1 skipped**（53.91s） |
+| 根 `tests/` | **801 passed / 5 skipped** |
+| 前端 `node --test` | **207 passed** |
+| 5 个新守护文件合计 | **119 passed** |
+| ruff / black / UTF-8 卫生 / 规则完整性 / 架构 SSOT | 全绿 |
+
+**CI 三线全绿**（`974901d9`）：CI Pipeline `43467986461`（**8 个 job 全 success**）/
+Validate Data Flow `43467986640` / Docker Build and Push `43467986403`。
+
+**CI 上的决定性证据**
+
+- 根契约清单：**593 passed / 11 skipped**（上一批是 481 passed ⇒ **+112**，
+  正好等于本次新增的 4 个守护文件：23 + 57 + 7 + 25）
+- 「Run pytest (if test files exist)」：**119 passed**（本次改动的 5 个测试文件）
+- 采集组件 lint：**「扫描范围: platforms（范围外文件 7 个已过滤）」+ error 0 / warning 0**
+  ⇒ 收窄真实生效，且**没有把任何真问题过滤掉**
+- `test (3.11)` 的步骤列表里**已看不到**被移除的 6 个步骤 ⇒ 移除确实落地
+
+**双镜像**：`git ls-remote` 权威核对 —— GitHub(SSH-443) / CNB(HTTPS) / 本地
+**三处同为 `974901d9`**；`v7.26.0` tag 两端仍是同一对象 `009a2867` → commit `05a359a1`，
+**未被回填**。
+
+**生产未受影响**：本批是测试/工具层改动，**不打 tag、不发版** ⇒ 不触发部署。
+`/api/healthz/ready` → HTTP 200、`version=v7.26.0`、`database=connected`、
+`dashboard=ready`、`runtime_mode=production`（与部署前一致）。
+
+**一处如实说明**：`scripts/sync_main_mirrors.ps1` 的「工作树必须干净」守卫**跑不起来** ——
+工作树里有**另一条工作流**的未跟踪文件
+（`docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md`，
+不是本批产物，**未动**）。已手工复核该脚本要检查的每一项，全部通过：
+分支 = `main`；无 `MERGE_HEAD`；**无任何已跟踪文件改动**（唯一脏项是那个未跟踪文件）；
+本地 `main` 与两端同 SHA、无分叉。

@@ -47,6 +47,11 @@ PRODUCT_CENTER_TABLES = [
     ("core", "dim_platforms"),
     ("core", "dim_warehouses"),
     ("core", "dim_product_categories"),
+    # 重量段（全局一套，批次 6）：SKU 与尾程费率都只存段编码引用它。
+    # ⚠️ 它**必须**在清单里：漏了 ⇒ 云端没有段定义 ⇒ 段下拉框空 ⇒ SKU 选不了段，
+    #    尾程费率也就无从录入（段引用不到 ⇒ 费率静默失效）。
+    # ⚠️ 插入顺序必须在 ``core.dim_erp_sku`` **之前**（SKU 行带着 weight_tier_code）。
+    ("core", "dim_weight_tiers"),
     ("finance", "product_cost_assumption_profiles"),
     ("finance", "warehouse_storage_rules"),
     ("finance", "logistics_provider_rules"),

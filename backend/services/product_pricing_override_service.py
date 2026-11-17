@@ -145,3 +145,51 @@ async def clear_platform_override(
     row.min_selling_price_source = None
     await db.flush()
     return True
+
+
+async def set_free_shipping(
+    db: AsyncSession,
+    *,
+    sku_id: int,
+    platform_code: str,
+    free_shipping: bool,
+    user_id: Optional[int] = None,
+) -> SkuPlatformPricing:
+    """设置某 SKU 在某平台的**包邮开关**（批次 6，2026-11-17）。
+
+    业务前提：跨境电商**不是默认包邮**，而是**选择性包邮** ⇒
+    「包不包邮」是 **SKU × 平台** 的经营选择。
+
+    - 已有行 ⇒ 只改包邮开关，**不动**人工覆盖值（两件事互不相干）；
+    - 没有行 ⇒ 新建一行（只带包邮开关）。
+
+    ⚠️ 这里**不删行、也不置 NULL**：包邮开关与人工覆盖共住一张表，但语义不同 ——
+    人工覆盖置 NULL 表示「回到自动值」，包邮置 NULL 只会让「没设置」和
+    「明确不包邮」混成一团。明确写 FALSE 才能表达「这个品确定不包邮」。
+    """
+    row = (
+        (
+            await db.execute(
+                select(SkuPlatformPricing).where(
+                    SkuPlatformPricing.sku_id == sku_id,
+                    SkuPlatformPricing.platform_code == platform_code,
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if row is None:
+        row = SkuPlatformPricing(
+            sku_id=sku_id,
+            platform_code=platform_code,
+            free_shipping=bool(free_shipping),
+            created_by=user_id,
+            updated_by=user_id,
+        )
+        db.add(row)
+    else:
+        row.free_shipping = bool(free_shipping)
+        row.updated_by = user_id
+    await db.flush()
+    return row
