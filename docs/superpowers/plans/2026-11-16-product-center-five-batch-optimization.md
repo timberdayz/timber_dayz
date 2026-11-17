@@ -658,4 +658,105 @@ SKU **没选段** ⇒ 头程参考成本**算不出来**（报 `missing_sku_weig
 `sku_weight_tier_set = 0` ⇒ **1122 个 SKU 重量段全空** ⇒ 尾程一律落最轻档并标 `estimated`
 ⇒ **成本底线偏低** ⇒ 需按实物批量归类重量段；包邮开关需逐 SKU 勾选（默认不包邮）。
 
+## 9.11 批次 8 · 尾程费率「去汇率层 + 卡片式维护」（2026-11-17）
 
+### 9.11.1 起因：Walter 2026-11-17 拍板的三条口径
+
+> 1. 填入的就应该是**人民币**，系统不做汇率换算（给图片只是要帮忙折成人民币）；
+> 2. 应该是一张**卡片**，用户只改「对应平台 + 仓库 + KG 段」的运费，
+>    不要一条一条加（人工每条都要找平台和仓，很麻烦）；批量新增完之后要方便人工查看和修改；
+> 3. **暂不补录数**（录数是人工的事），把系统本身做好交付人工使用。
+
+### 9.11.2 口径一：去掉汇率录入层 —— **后端契约不动、迁移不写**
+
+- **后端本来就只收人民币等值**：`backend/schemas/product_center.py:775-817`
+  `DeliveryRateRuleCreateRequest.cny_only` —— `currency` 非 CNY 直接 `ValidationError`。
+  ⇒ 那层「原币单价 / 币种 / 汇率→人民币」是**前端自己加的有害壳**：
+  它制造了「照抄外币数字」的机会，而尾程计算链**不读汇率**
+  （`backend/services/product_finance_service.py` 取数端过滤
+  `func.coalesce(DeliveryRateRule.currency, "CNY") == "CNY"`）
+  ⇒ 照抄 SGD 4.02 当人民币 ⇒ 尾程少算 5 倍 ⇒ **成本底线偏低 ⇒ 直接漏钱**。
+- ⇒ **批次 8 只删前端汇率层**（`ProductCenter.vue` 里的 `deliveryCurrencyOptions` /
+  `DELIVERY_FX_NOTE_PREFIX` / `deliveryRuleConvertedCny` / `deliveryBatchConvertedCny` /
+  `deliveryRuleNotes` 全部删除），表格与批量弹窗都只留一列「单件尾程费（元）」。
+- 外币的处理：**运营自行折算后填人民币**，原币与汇率写进**备注**（自由文本，不参与计算）。
+
+### 9.11.3 口径二：卡片式维护 —— 一个「平台 × 仓」= 一张卡
+
+- **卡内按全局段表固定顺序列全部 6 段**（不让人挑段 ⇒ 不会漏段、不会选错段）；
+  缺价的段在卡上**看得见**（「未配置 ⇒ 该段尾程算不出来」）。
+- 卡头两个选择器：平台 + 收货仓（候选项来自 `operatingDimensions`，
+  **不是**只列已有费率的组合 ⇒ 任何平台×仓都能开新卡）。
+- 原表格保留在 `el-collapse` 里作「全部档位明细」⇒ 跨平台对照、看历史与停用行。
+- **批量新增只是铺价手段**：铺完自动把卡片定位到对应「平台 × 仓」。
+
+### 9.11.4 口径三：改价只进不退 —— **本轮实测发现的硬伤（409）**
+
+**症状**（真实本地栈复现，非推断）：卡片里改一个**已存在**档位的价 ⇒
+`POST /api/delivery-rate-rules` 直接返回 **409「active delivery rate rule already exists」**
+⇒ 用户最核心的动作（改对应平台/仓/段的运费）**不可用**。
+
+**根因**：
+
+1. 改价时前端把**原行的生效日**（生产里 Shopee SG 五档都是 `2026-01-01`）一起发出去；
+2. 后端据此把旧行闭区间到 `生效日 - 1 天` = `2025-12-31`；
+3. 旧行的区间**倒挂**（`effective_to < effective_from`）⇒ 撞数据库检查约束
+   `ck_delivery_rate_rules_window`（`effective_to IS NULL OR effective_to >= effective_from`）
+   ⇒ `IntegrityError` ⇒ 被兜底成 409「重复行」；
+4. 就算没有那个约束，历史也会被**抹掉**（2026-01-01 起就算新价）
+   ⇒ 事后对不上「当时按多少钱算的」—— 恰好是版本化要防的那件事。
+
+**修法（口径收口到后端一处，符合 SSOT）**：
+
+| 场景 | 新行 `effective_from` | 旧行 `effective_to` / `status` |
+|---|---|---|
+| 该档位**已有当期行**（= 改价） | `max(调用方给值, 今天)` | `新行生效日 - 1 天` / 今天起生效则置 `inactive` |
+| 该档位**没有当期行**（= 首次录价） | 调用方给的值（可回填整张价目表的历史起点） | —— |
+| 调用方给的是**未来日期**（官方价目表说明年生效） | 未来日期 | 未来日期 - 1 天 / **旧价继续当期**（避免空窗期 ⇒ 尾程算不出来） |
+
+落地：`backend/domains/business/routers/product_center.py`
+`create_delivery_rate_rule`（`payload["effective_from"] = effective_from`）。
+前端同步改成**改价发「今天」**（`deliveryToday()`），并在卡片上只显示
+**今天真正生效**的那一档（未来才生效的价不冒充当前价）。
+
+### 9.11.5 落地物与守护
+
+- **落地物**：`frontend/src/domains/business/views/ProductCenter.vue`、
+  `backend/domains/business/routers/product_center.py`。**无迁移**（表结构未变）。
+- **新增守护** `backend/tests/test_delivery_rate_card_save_flow.py`（6 条）：
+  **真跑路由**（`ASGITransport` + 真实 `pg_database` 隔离库，每用例独立 database，
+  用完 DROP ⇒ 不碰本地开发库、更不碰生产库）：
+  改价新版本从今天起 / 回填的生效日被忽略（历史不被抹）/ 当期行仍只有一条 /
+  只改备注不新建行 / 非 CNY 被拒 / 首次录价保留调用方给的生效日。
+- **改写守护** `backend/tests/test_delivery_rate_currency_guard.py`（23 → 24 条）：
+  删掉钉死「必须有原币单价/币种/汇率」的 2 条旧守护（口径已归一），
+  换成 5 条钉新契约的守护 + 1 条「改价生效日由后端说了算」；
+  `test_same_tier_price_change_is_not_rejected_as_overlap` 的字面量跟着新写法走，
+  并**加严**（钉住 `max(body.effective_from, today)`，并断言旧写法不许回来）。
+- **前端守护** `frontend/tests/productCenterUi.test.mjs` **107/107**（新增 2 条：
+  改价发「今天」、卡片只显示今天生效的那一档）。
+
+### 9.11.6 真实栈复验与本地库还原
+
+本地后端（8001）实跑：
+
+| 动作 | 结果 |
+|---|---|
+| 卡片改价（20.93 → 25.00，沿用原生效日 2026-01-01） | **201**；新行 `effective_from = 2026-11-17`（今天）；旧行 `effective_to = 2026-11-16` + `status = inactive` |
+| 只改备注（PATCH） | **200**；行数 2 → 2（不新建行），单价不变 |
+
+⚠️ 验完**已把本地库完整还原**：`finance.delivery_rate_rules` 回到 6 行，
+rule_id=1 的价格 / 生效日 / 状态 / 来源 / 版本 / 备注**逐字段与原状一致**。
+
+⚠️ 本地环境坑（**未改**，属环境脚本非产品缺陷）：实际在跑的本地后端是
+`logs/backend-local.noreload.launch.ps1` 起的（**不带 `--reload`**）
+⇒ 改了后端代码不会热生效，**必须重启进程**才能验到新代码。
+（`logs/backend-local.launch.ps1` 那份带 `--reload` 的，脚本自己注明
+watchfiles 会把 `temp/` 下的临时脚本也当变更来源 ⇒ 落盘就重启、端口会消失。）
+
+### 9.11.7 未完成
+
+- **提交 / 发版待授权**（v7.32.0 的授权只覆盖批次 6+7）。
+- TikTok SG 尾程价目表仍缺 T01 / T03–T06；本地那档 T02 = 14.84 元的官方出处待确认。
+- 生产 1122 个 SKU 重量段全空、平台 `delivery_cost_rate` 全 NULL、残差桶待重算、
+  汇率 5.2077 待认可 —— 属**业务录数**，见 `docs/superpowers/plans/STATUS.md`「当前未结」#10。

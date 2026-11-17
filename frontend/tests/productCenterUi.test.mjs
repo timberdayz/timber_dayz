@@ -114,10 +114,9 @@ test("SKU 资料按 CNY 维护采购成本、周转类型和参考仓储天数",
   assert.match(source, /fast.*30|30.*fast/);
   assert.match(source, /normal.*60|60.*normal/);
   assert.match(source, /slow.*90|90.*slow/);
-  // ⚠️ 「不许有币种入口」只针对 **SKU 资料** tab（采购成本一律按 CNY 维护）。
-  //    尾程费率 tab 里的「币种」列是**另一回事**：平台价目表常是外币
-  //    （Shopee SG = SGD），那里必须能填币种 + 汇率 ——
-  //    否则照抄新币数字会被当成人民币 ⇒ 尾程少算好几倍 ⇒ 成本底线偏低 ⇒ 漏钱。
+  // ⚠️ 「不许有币种入口」针对**全站**：采购成本一律按 CNY 维护；
+  //    尾程费率（口径 2026-11-17 归一）也**只填人民币等值** ——
+  //    照抄新币数字会被当成人民币 ⇒ 尾程少算好几倍 ⇒ 成本底线偏低 ⇒ 漏钱。
   const skuSection = source.slice(
     source.indexOf('label="SKU 资料"'),
     source.indexOf('label="平台 SKU 利润测算"'),
@@ -1079,17 +1078,17 @@ test("SKU 资料页的底线与测算页同口径：按当前仓算尾程", () =
 // 尾程费率的录入体验 + 币种护栏（2026-11-17）
 // ---------------------------------------------------------------------------
 
-test("尾程费率能照外币价目表录入：原币单价 + 币种 + 汇率 ⇒ 折算成人民币入账", () => {
+test("尾程费率按人民币等值入账（口径 2026-11-17 归一：人工填的就是人民币）", () => {
   // 平台价目表常是外币（Shopee SG = SGD），而尾程计算链**不读汇率** ——
   // 照抄新币数字当人民币 = 尾程少算 5 倍 ⇒ 成本底线偏低 ⇒ 直接漏钱。
-  assert.match(source, /label="原币单价"/);
-  assert.match(source, /label="币种"/);
-  assert.match(source, /label="汇率→人民币"/);
-  assert.match(source, /deliveryRuleConvertedCny/);
-  // 折算结果只读展示（不让运营同时维护两个数）
-  assert.match(source, /label="单件尾程费（CNY）"/);
+  // ⇒ 录入界面**只让人填人民币等值**（外币自行折算，原币写备注留档）；
+  //    界面不再有汇率层 —— 那层壳反而制造「照抄外币」的机会。
+  assert.match(source, /label="单件尾程费（元）"/);
+  assert.doesNotMatch(source, /label="原币单价"/);
+  assert.doesNotMatch(source, /label="汇率→人民币"/);
   // 入库一律人民币等值
   assert.match(source, /currency: "CNY"/);
+  assert.match(source, /unit_price: row\.unit_price/);
 });
 
 test("尾程费率支持批量新增：照一张价目表一次录完", () => {
@@ -1214,4 +1213,59 @@ test("两个入口各叫各的：库龄档位规则 / 平台成本率", () => {
   assert.match(source, />平台成本率</);
   // 抽屉标题保留「定价设置」（它是两个子页的容器），但按钮不再都叫它。
   assert.doesNotMatch(source, />定价设置</);
+});
+
+test("尾程费率录入只填人民币，不再让运营填原币与汇率", () => {
+  // 库里存的是人民币等值，界面也只让人填人民币 ——
+  // 照抄外币价目表（SGD 2.87）会被当成 2.87 元人民币 ⇒ 尾程少算 5 倍 ⇒ 漏钱。
+  assert.match(source, /label="单件尾程费（元）"/);
+  assert.doesNotMatch(source, /label="原币单价"/);
+  assert.doesNotMatch(source, /label="币种"/);
+  assert.doesNotMatch(source, /label="汇率→人民币"/);
+  // 前端不再做任何折算（后端契约本来就只收 CNY）。
+  assert.doesNotMatch(source, /exchange_rate/);
+  assert.doesNotMatch(source, /deliveryRuleConvertedCny/);
+});
+
+test("尾程费率按「平台 × 仓」卡片式维护，卡内列出全局段表的全部段", () => {
+  // 业务理由：一行一条的表格里改一档价要先用眼睛找那一行（平台/仓/段三列并排），
+  // 且平台与仓在存量行上是禁用的 ⇒ 找错行、改错行风险高。
+  assert.match(source, /deliveryCardForm/);
+  assert.match(source, /deliveryCardRows/);
+  assert.match(source, /deliveryCardTiers/);
+  // 卡片定位：平台 + 仓两个选择器，切换即换整卡。
+  assert.match(source, /deliveryCardForm\.platform_code/);
+  assert.match(source, /deliveryCardForm\.warehouse_code/);
+  // 缺价的段在卡上看得见（不必等系统报错才知道缺料）。
+  assert.match(source, /deliveryCardTierMissing/);
+  // 一次保存整张卡。
+  assert.match(source, /saveDeliveryCard/);
+});
+
+test("批量铺完尾程费率后回到卡片视图，方便核对与微调", () => {
+  // 批量只是铺价的手段，不是终点 —— 铺完不回卡片，后续修改仍然困难。
+  assert.match(source, /批量新增尾程费率/);
+  assert.match(source, /deliveryCardForm\.platform_code = /);
+  assert.match(source, /deliveryCardForm\.warehouse_code = /);
+  assert.match(source, /refreshDeliveryCards/);
+});
+
+test("尾程改价发的是「今天」而不是原行的生效日（否则旧价区间倒挂 ⇒ 409）", () => {
+  // 2026-11-17 实测：卡片改价对**已存在**的档位直接 409「already exists」。
+  // 根因：改价时把原行生效日（2026-01-01）一起发出去 ⇒ 旧行被闭区间到
+  // 2025-12-31 ⇒ effective_to < effective_from ⇒ 撞检查约束 ⇒ 409；
+  // 就算没撞，历史也被抹掉（2026-01-01 起就算新价）。
+  // ⇒ 口径：**改价 ⇒ 新价今天起生效，旧价闭区间到昨天**。
+  assert.match(source, /const deliveryToday = \(\) => new Date\(\)\.toISOString\(\)\.slice\(0, 10\)/);
+  // 卡片改价
+  assert.match(source, /effective_from: deliveryToday\(\)/);
+  // 明细表改价
+  assert.match(source, /deliveryRuleCreatePayload\(row, deliveryToday\(\)\)/);
+});
+
+test("卡片只显示今天真正生效的那一档（未来才生效的价不冒充当前价）", () => {
+  // 官方价目表说明年生效时，同一段会同时存在「旧价（还在当期）+ 新价（还没生效）」。
+  // 取错行 ⇒ 卡片显示一个还没生效的价 ⇒ 运营照着改 ⇒ 改错。
+  assert.match(source, /const inEffect = candidates\.find\(/);
+  assert.match(source, /row\.effective_to >= today/);
 });

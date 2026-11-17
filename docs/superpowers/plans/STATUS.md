@@ -26,7 +26,7 @@
 | 7 | 采集组件 lint 仍是告警模式（范围已收窄，强度未提升） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
 | 8 | 覆盖缺口两项：① legacy `modules/apps/{account_manager,collection_center}/contract_tests.py` 不再由 CI 执行；② **`backend/tests/` 下的 async 用例不能混进 CI 根契约清单**（CI 钉 `pytest==7.4.3` / `pytest-asyncio==0.21.1`，而 `backend/tests/conftest.py` 覆盖了 session 级 `event_loop`（1.x 忽略它）⇒ 混跑时排在 `test_celery_dispatch_event_loop_isolation.py` 之后的 async 用例拿到**已关闭**的循环，报 `RuntimeError: Event loop is closed`） | 覆盖缺口 | ①待决定是否把断言迁进 pytest；②本轮**已规避**（契约断言放进纯同步的 `tests/test_account_proxy_source_contract.py`），**根因未修** ⇒ 记账到 V2（统一事件循环策略，或 CI 升 pytest-asyncio 1.x 并同步改 conftest） | 本文件「批次 F」节 + `tests/test_account_proxy_source_contract.py` 文件头 |
 | 9 | **221 个守护从不主动执行**（C 类：不在任何 CI 清单、也没有被别的文件引用 ⇒ 只在有人恰好改了该文件时才跑） | 覆盖缺口 | 待拍板是否分批提升进 CI 清单（会拉长流水线，属加固方向） | 本文件「批次 F」节 |
-| 10 | **商品中心录数缺口（v7.31.x 遗留 + 批次 6/7 新口径）**：① 飞书三张状态镜像表 `table_id` 全 NULL，且生产 `FEISHU_PRODUCT_BASE_TOKEN` 未设 ⇒ 商品镜像投影投不出去（8 条长期 pending）；② 生产 `finance.delivery_rate_rules` **0 行**（批次 7 迁移会把官方 3PF 尾程 5 档写进生产库，随发版生效）；③ 生产各平台 `delivery_cost_rate` 仍空 ⇒ 尾程不进成本底线（重算前置：SKU 段归类 + 订单级/单件摊口径钉死）；④ 生产 1122 个 SKU 重量段全空（**批次 6 已删除 `weight_kg`**）⇒ 发版后尾程落最轻档并标 `estimated`；⑤ 批次 6 的**包邮开关**需业务逐 SKU 勾选（默认不包邮）；⑥ 汇率 5.2077 待业务认可（生产汇率表仍是 5.2）；⑦ **残差桶**（`other_cost_rate`）仍是 1 月实测值 ⇒ 官方 2026-01/04 两次调涨后偏低约 1.1pt，待新实测重算；⑧ TikTok SG 尾程价目表未提供（现仅 1 档 T02） | 业务录数 / 配置 | 待业务录数：① 飞书后台建好三张镜像表并回填配置；②⑤ 在「定价设置」/「平台 SKU 利润测算」维护；④ 按实物批量归类重量段；⑥ 汇率更新授权；⑦ 提供 TikTok 价目表 | `CHANGELOG.md` v7.31.1 节 + 计划文档 §8.3、§9、§9.10 |
+| 10 | **商品中心录数缺口（v7.31.x 遗留 + 批次 6/7/8 新口径）**：① 飞书三张状态镜像表 `table_id` 全 NULL，且生产 `FEISHU_PRODUCT_BASE_TOKEN` 未设 ⇒ 商品镜像投影投不出去（8 条长期 pending）；② ~~生产 `finance.delivery_rate_rules` 0 行~~ ⇒ **已由批次 7 的迁移 `20261238` 解决**（生产 5 行 = shopee/SG-01/T01–T05，20.93/25.31/27.97/38.59/62.44 元，链头 `20261238`），**但 TikTok SG 仍只有 T02 一档**（生产 0 行 ⇒ 本地那档 14.84 元的官方出处也待确认）；③ 生产各平台 `delivery_cost_rate` 仍空 ⇒ 尾程不进成本底线（重算前置：SKU 段归类 + 订单级/单件摊口径钉死）；④ 生产 1122 个 SKU 重量段全空（**批次 6 已删除 `weight_kg`**）⇒ 发版后尾程落最轻档并标 `estimated`；⑤ 批次 6 的**包邮开关**需业务逐 SKU 勾选（默认不包邮）；⑥ 汇率 5.2077 待业务认可（生产汇率表仍是 5.2）；⑦ **残差桶**（`other_cost_rate`）仍是 1 月实测值 ⇒ 官方 2026-01/04 两次调涨后偏低约 1.1pt，待新实测重算；⑧ TikTok SG 尾程价目表未提供（现仅 1 档 T02） | 业务录数 / 配置 | 待业务录数：① 飞书后台建好三张镜像表并回填配置；②⑤ 在「定价设置」/「平台 SKU 利润测算」维护；④ 按实物批量归类重量段；⑥ 汇率更新授权；⑦ 提供 TikTok 价目表 | `CHANGELOG.md` v7.31.1 节 + 计划文档 §8.3、§9、§9.10 |
 
 **已关闭、不再是未结项**（留一行指针，避免又被当成待办）：
 
@@ -35,46 +35,31 @@
 
 ---
 
-## 最新发布：v7.31.1（2026-11-17）
+## 最新发布：v7.32.0（2026-11-17，批次 6 + 批次 7）
 
-- **v7.31.0**（11-16）商品中心五批次收官；**v7.31.1**（11-17）修好飞书「平台」单选字段 —— 该缺陷让调价通知自 11-08 起 11 天 0 投递。
-- 生产：容器全部 `v7.31.1`、`healthz/ready` = 200 / v7.31.1、迁移在链头；461 条积压任务已作废。完整验收见 `CHANGELOG.md` v7.31.1 节与计划文档 §8.4。
+- 商品中心**重量段化 + 选择性包邮 + 费率按官方牌价校准**：生产 7 容器 healthy、
+  `healthz/ready` = 200 / v7.32.0、迁移链头 `20261238`、Shopee SG 尾程 5 档 =
+  20.93/25.31/27.97/38.59/62.44 元。完整发布证据见归档「发布证据（v7.32.0，2026-11-17）· 批次 6 + 批次 7」。
+- **当前未发版**：批次 8（尾程费率去汇率层 + 卡片式）已落地待提交/发版，见下节「进行中：批次 8」。
 
-- **当前未发版**：批次 6（重量段化 + 包邮开关）已落地待提交/发版，见下节「进行中：批次 6」。
+## 进行中：批次 8 · 尾程费率「去汇率层 + 卡片式维护」（2026-11-17，**待提交/发版**）
 
-## 进行中：批次 6 + 批次 7 · 商品中心（2026-11-17，**v7.32.0 已发版并部署生产**）
-
-- **批次 6 · 重量段化 + 选择性包邮**（Walter 拍板：承运商按**重量段**定价 ⇒ SKU 不称重只选段；
-  跨境电商**选择性包邮** ⇒ 逐 SKU 自选）。四条钉死的口径：重量段**全局一套**（`core.dim_weight_tiers`
-  T01–T06 = 0-1/1-5/5-10/10-20/20-30/30kg 以上），老 `weight_kg` **直接删除**；未选段 ⇒ 落**最轻档** +
-  `estimated` + `missing_weight_tier`；该段没配价 ≠ 免费 ⇒ 报 `missing_delivery_rate_for_tier`、金额留空；
-  包邮开关在 `finance.sku_platform_pricing.free_shipping`（SKU × 平台，**默认不包邮**）：不包邮 ⇒ 尾程不进底线、
-  不计利润、不报缺费率；包邮 ⇒ 尾程进底线 + 平台尾程占比进分母（成对生效）。
-- **批次 7 · 定价设置修复 + 费率按官方校准 + 看门狗**：「定价设置」原来**没有自己的平台选择器**
-  （平台身份靠测算页筛选条件隐式传递 ⇒ 从 SKU 资料页进抽屉是空表单，保存还可能**写错平台**）⇒ 抽屉自带
-  平台下拉、保存只写抽屉里的平台、两个入口各叫各的；费率按官方牌价校准（Walter 拍板：自有/三方仓 3PF 口径、
-  官方 3PF 尾程标准、TikTok 非 BXP 档）⇒ Shopee 佣金 → **16%**、TikTok → **8.175%**、Shopee SG 尾程 5 档 →
-  官方《3PF 收费标准》（商家包邮总额）20.93/25.31/27.97/38.59/62.44 元；看门狗**杀进程前必须再确认「服务端口
-  真的不通」**（探针失败 ≠ 服务死了 —— 2026-11-17 误杀事故的根因）。
-- **落地物**：迁移 `20261236_weight_tiers` / `20261237_free_shipping_flag` / `20261238_official_platform_fee_rates`；
-  服务层 `product_delivery_cost_service.py`、`product_finance_service.py`、`product_pricing_service.py`、
-  `product_pricing_query_service.py`；路由 `product_center.py`；前端 `ProductCenter.vue`；看门狗
-  `scripts/local_console_processes.py`。
-- **守护**：`test_weight_tier_guard.py`（29）、`test_free_shipping_switch.py`（14）、
-  `test_official_platform_fee_rates.py`（7）、`test_product_delivery_cost.py`、`test_delivery_rate_currency_guard.py`、
-  看门狗 2 条；前端 `frontend/tests/productCenterUi.test.mjs` **102/102**。
-- **全量回归**（批次 7 收尾复跑）：后端 **6219 passed / 8 skipped / 0 failed**（498.34s，批次 6 的 6213
-  + 本轮 6 条费率守护）；根目录 `tests` **845 passed / 5 skipped / 0 failed**（359.33s）；前端 102/102；
-  构建 10.28s（ProductCenter 117.36 kB）；black / ruff 全绿。**本轮自查修掉的降级缺口**：迁移 20261238
-  覆盖了平台费率**生效日期**但 `downgrade` 只还原费率 ⇒ 会留下"费率是 1 月实测、日期却是官方调价日"的
-  矛盾行 ⇒ 已补还原（回 2026-01-07）+ 守护，并实跑 downgrade → upgrade 往返验证通过。（批次 6 首轮 13 条
-  失败的根因与修复见计划文档 §9.9。）**本地库复验**（真实服务层）：Shopee 底线 包邮 126.19 → **121.43**
-  （尾程 22.34 → 20.93）、不包邮 **81.74** 不变；TikTok T01 缺尾程费率被正确报出。
-- **未完成**：**发版已完成**（v7.32.0，流水线 success，生产 7 容器 healthy、API 200、链头 20261238）；
-  生产 1122 个 SKU 重量段全空、平台尾程占比全 NULL ⇒ 发版后需业务录数（见「当前未结」#10）；
-  汇率 5.2077 待业务认可；TikTok SG 价目表未提供。
-  **本地环境坑**：`uvicorn --reload` 没带 `--reload-dir` ⇒ 改任何 .py 都会热重载后端（详见 §9.10.3，未改）。
-- **完整口径与证据**：计划文档 `2026-11-16-product-center-five-batch-optimization.md` §9 / §9.10。
+- **三条口径（Walter 拍板）**：① 人工填进去的就是**人民币**，系统不做汇率换算
+  （后端契约本来就只收 CNY ⇒ 那层汇率壳是前端自己加的有害壳，本批**只删前端**，
+  迁移不写）；② 一个「平台 × 仓」= **一张卡**，卡内按全局段表固定顺序列全部 6 段
+  （不让人挑段 ⇒ 不会漏段/选错段），缺价段在卡上看得见；③ **改价只进不退**
+  （变了价 ⇒ POST 新版本，只改备注 ⇒ PATCH），批量新增只是铺价手段、铺完自动回卡片。
+- **本轮实测发现并修掉的硬伤**：卡片改价对**已存在**档位直接 **409「重复行」** ⇒
+  核心动作不可用。根因：改价时把**原行生效日**一起发出去 ⇒ 旧行闭区间到
+  生效日前一天 ⇒ **区间倒挂** ⇒ 撞检查约束 `ck_delivery_rate_rules_window`；
+  且历史会被抹掉。⇒ 口径收口到**后端一处（SSOT）**：改价 ⇒ `effective_from =
+  max(调用方给值, 今天)`、旧行闭区间到前一天；首次录价仍可用调用方给的生效日回填历史。
+- **落地物**：`ProductCenter.vue`、`product_center.py`（`create_delivery_rate_rule`）。**无迁移**。
+- **守护**：新增 `backend/tests/test_delivery_rate_card_save_flow.py`（6 条，**真跑路由** +
+  隔离库每用例独立 database）；`test_delivery_rate_currency_guard.py` 24 条；前端 107/107。
+- **真实栈复验**：本地 8001 实跑「改价 ⇒ 201，新行今天起生效、旧行闭区间到 2026-11-16
+  并退出当期」「只改备注 ⇒ PATCH，行数不变」，验完**本地库已完整还原**。
+- **完整口径与证据**：计划文档 `2026-11-16-product-center-five-batch-optimization.md` §9.11。
 
 ## 已知未落地项
 

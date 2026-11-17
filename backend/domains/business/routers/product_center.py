@@ -3731,12 +3731,41 @@ async def create_delivery_rate_rule(
     #    各平台只填「这一段多少钱」⇒ 同一段在不同平台/仓各有一行价格，
     #    这是**正常业务**，不是配置冲突。
     #
-    # 同档位（平台 × 仓 × 重量段）换价 ⇒ 旧的闭区间，新行今天起生效。
+    # ---------------------------------------------------------------------------
+    # 同档位（平台 × 仓 × 重量段）换价 ⇒ 旧的闭区间，新行**今天**起生效
+    # ---------------------------------------------------------------------------
+    # ⚠️ **生效日由这里说了算，不听调用方的**（2026-11-17 修）：
+    #
+    # 改价时调用方（卡片 / 明细表）往往把**原行的生效日**一起发过来
+    # （如 2026-01-01）。若照用，旧行会被闭区间到 ``2026-01-01 - 1 天``
+    # = 2025-12-31 ⇒ 两个后果：
+    #
+    #   1. 旧行区间**倒挂**（``effective_to < effective_from``）⇒ 撞数据库检查
+    #      约束 ``ck_delivery_rate_rules_window`` ⇒ IntegrityError ⇒ 被当成
+    #      「重复行」报 409「active delivery rate rule already exists」
+    #      （2026-11-17 实测：卡片改价对已存在档位**直接 409，功能不可用**）；
+    #   2. 就算没有那个约束，历史也被**抹掉**（2026-01-01 起就算新价了）
+    #      ⇒ 事后对不上「当时按多少钱算的」—— 恰好是版本化要防的那件事。
+    #
+    # 所以口径钉死为：**改价 ⇒ 新价从今天起生效，旧价闭区间到昨天。**
+    # 未来生效日仍然尊重（官方价目表说明年生效）：那时新行那天起生效，
+    # 旧价**继续当期**（提前退出就会出现空窗期 ⇒ 尾程算不出来）。
+    today = date.today()
+    payload = body.model_dump()
     for existing in current_rows:
-        if existing.weight_tier_code == body.weight_tier_code:
-            existing.effective_to = body.effective_from - timedelta(days=1)
+        if existing.weight_tier_code != body.weight_tier_code:
+            continue
+        if (body.status or "active") != "active":
+            # 新行本身就是停用的 ⇒ **不动旧行**（否则当期就没有费率了
+            # ⇒ 尾程算不出来 ⇒ 利润链整条算不出来）。
+            continue
+        effective_from = max(body.effective_from, today)
+        payload["effective_from"] = effective_from
+        payload["effective_to"] = None
+        existing.effective_to = effective_from - timedelta(days=1)
+        if effective_from <= today:
             existing.status = "inactive"
-    row = DeliveryRateRule(**body.model_dump())
+    row = DeliveryRateRule(**payload)
     db.add(row)
     try:
         await db.flush()
@@ -3746,7 +3775,7 @@ async def create_delivery_rate_rule(
             action_type="create",
             resource_type="delivery_rate_rule",
             resource_id=str(row.rule_id),
-            changes=body.model_dump(mode="json"),
+            changes=payload,
         )
         await db.commit()
         await db.refresh(row)

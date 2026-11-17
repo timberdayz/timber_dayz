@@ -1764,3 +1764,44 @@ Validate Data Flow `43467986640` / Docker Build and Push `43467986403`。
 不是本批产物，**未动**）。已手工复核该脚本要检查的每一项，全部通过：
 分支 = `main`；无 `MERGE_HEAD`；**无任何已跟踪文件改动**（唯一脏项是那个未跟踪文件）；
 本地 `main` 与两端同 SHA、无分叉。
+
+---
+
+## 发布证据（v7.32.0，2026-11-17）· 批次 6 + 批次 7
+
+> 从 `docs/superpowers/plans/STATUS.md` 归档（2026-11-17，批次 8 落地时）。
+> 该节已完结（v7.32.0 已发版、已部署生产、部署后验收通过）⇒ 按「台账瘦身约定」
+> 移入归档，STATUS.md 只保留最新一次发布。完整口径与证据见计划文档 §9 / §9.10。
+
+
+- **批次 6 · 重量段化 + 选择性包邮**（Walter 拍板：承运商按**重量段**定价 ⇒ SKU 不称重只选段；
+  跨境电商**选择性包邮** ⇒ 逐 SKU 自选）。四条钉死的口径：重量段**全局一套**（`core.dim_weight_tiers`
+  T01–T06 = 0-1/1-5/5-10/10-20/20-30/30kg 以上），老 `weight_kg` **直接删除**；未选段 ⇒ 落**最轻档** +
+  `estimated` + `missing_weight_tier`；该段没配价 ≠ 免费 ⇒ 报 `missing_delivery_rate_for_tier`、金额留空；
+  包邮开关在 `finance.sku_platform_pricing.free_shipping`（SKU × 平台，**默认不包邮**）：不包邮 ⇒ 尾程不进底线、
+  不计利润、不报缺费率；包邮 ⇒ 尾程进底线 + 平台尾程占比进分母（成对生效）。
+- **批次 7 · 定价设置修复 + 费率按官方校准 + 看门狗**：「定价设置」原来**没有自己的平台选择器**
+  （平台身份靠测算页筛选条件隐式传递 ⇒ 从 SKU 资料页进抽屉是空表单，保存还可能**写错平台**）⇒ 抽屉自带
+  平台下拉、保存只写抽屉里的平台、两个入口各叫各的；费率按官方牌价校准（Walter 拍板：自有/三方仓 3PF 口径、
+  官方 3PF 尾程标准、TikTok 非 BXP 档）⇒ Shopee 佣金 → **16%**、TikTok → **8.175%**、Shopee SG 尾程 5 档 →
+  官方《3PF 收费标准》（商家包邮总额）20.93/25.31/27.97/38.59/62.44 元；看门狗**杀进程前必须再确认「服务端口
+  真的不通」**（探针失败 ≠ 服务死了 —— 2026-11-17 误杀事故的根因）。
+- **落地物**：迁移 `20261236_weight_tiers` / `20261237_free_shipping_flag` / `20261238_official_platform_fee_rates`；
+  服务层 `product_delivery_cost_service.py`、`product_finance_service.py`、`product_pricing_service.py`、
+  `product_pricing_query_service.py`；路由 `product_center.py`；前端 `ProductCenter.vue`；看门狗
+  `scripts/local_console_processes.py`。
+- **守护**：`test_weight_tier_guard.py`（29）、`test_free_shipping_switch.py`（14）、
+  `test_official_platform_fee_rates.py`（7）、`test_product_delivery_cost.py`、`test_delivery_rate_currency_guard.py`、
+  看门狗 2 条；前端 `frontend/tests/productCenterUi.test.mjs` **102/102**。
+- **全量回归**（批次 7 收尾复跑）：后端 **6219 passed / 8 skipped / 0 failed**（498.34s，批次 6 的 6213
+  + 本轮 6 条费率守护）；根目录 `tests` **845 passed / 5 skipped / 0 failed**（359.33s）；前端 102/102；
+  构建 10.28s（ProductCenter 117.36 kB）；black / ruff 全绿。**本轮自查修掉的降级缺口**：迁移 20261238
+  覆盖了平台费率**生效日期**但 `downgrade` 只还原费率 ⇒ 会留下"费率是 1 月实测、日期却是官方调价日"的
+  矛盾行 ⇒ 已补还原（回 2026-01-07）+ 守护，并实跑 downgrade → upgrade 往返验证通过。（批次 6 首轮 13 条
+  失败的根因与修复见计划文档 §9.9。）**本地库复验**（真实服务层）：Shopee 底线 包邮 126.19 → **121.43**
+  （尾程 22.34 → 20.93）、不包邮 **81.74** 不变；TikTok T01 缺尾程费率被正确报出。
+- **未完成**：**发版已完成**（v7.32.0，流水线 success，生产 7 容器 healthy、API 200、链头 20261238）；
+  生产 1122 个 SKU 重量段全空、平台尾程占比全 NULL ⇒ 发版后需业务录数（见「当前未结」#10）；
+  汇率 5.2077 待业务认可；TikTok SG 价目表未提供。
+  **本地环境坑**：`uvicorn --reload` 没带 `--reload-dir` ⇒ 改任何 .py 都会热重载后端（详见 §9.10.3，未改）。
+- **完整口径与证据**：计划文档 `2026-11-16-product-center-five-batch-optimization.md` §9 / §9.10。

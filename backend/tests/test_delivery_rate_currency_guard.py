@@ -132,32 +132,93 @@ def test_router_update_endpoint_supports_disable_and_enable():
     assert '"active"' in source
 
 
+def test_router_owns_the_effective_date_on_reprice():
+    """**改价的生效日由后端说了算**（SSOT，2026-11-17 修）。
+
+    改价时调用方（卡片 / 明细表）往往把**原行的生效日**一起发过来。
+    照用 ⇒ 旧行被闭区间到「原生效日 - 1 天」⇒ 区间倒挂 ⇒ 撞数据库检查约束
+    ⇒ 报 409「already exists」（实测卡片改价直接不可用）；就算没撞，
+    历史也被抹掉 ⇒ 对不上「当时按多少钱算的」。
+
+    ⇒ 口径钉死：**改价 ⇒ 新价今天起生效，旧价闭区间到昨天。**
+    """
+    source = ROUTER_PATH.read_text(encoding="utf-8")
+    assert "effective_from = max(body.effective_from, today)" in source
+    assert "existing.effective_to = effective_from - timedelta(days=1)" in source
+
+
 # ---------------------------------------------------------------------------
 # 3 · 前端：录入要方便、错配要看得见
 # ---------------------------------------------------------------------------
 
 
-def test_frontend_has_foreign_currency_columns():
-    """价目表是新币 ⇒ 录入时必须能填「原币单价 + 币种 + 汇率」。"""
+def test_frontend_records_cny_price_directly():
+    """录入**只填人民币等值**（Walter 2026-11-17 拍板：人工填的就是人民币）。
+
+    ⚠️ 旧设计要求前端填「原币单价 + 币种 + 汇率」再折算 ——
+    那层壳**反而制造了漏钱风险**：库里存的是人民币，界面却让人填外币，
+    运营照抄官方新币价目表（SGD 2.87）就会被当成 2.87 元人民币存进去
+    ⇒ 尾程少算 5 倍多 ⇒ 成本底线偏低 ⇒ 漏钱。
+    ⇒ 汇率层从录入界面**整体去掉**：只留一列人民币单价，
+    外币痕迹由运营写在**备注**里（自由文本，不参与计算）。
+    """
     source = FRONTEND_PATH.read_text(encoding="utf-8")
-    assert 'label="原币单价"' in source
-    assert 'label="币种"' in source
-    assert 'label="汇率→人民币"' in source
+    # 不再有汇率录入列
+    assert 'label="原币单价"' not in source
+    assert 'label="币种"' not in source
+    assert 'label="汇率→人民币"' not in source
+    # 只剩人民币单价一列
+    assert 'label="单件尾程费（元）"' in source
+    # 前端不再做折算（后端契约本来就只收 CNY）
+    assert "exchange_rate" not in source
+    assert "deliveryRuleConvertedCny" not in source
+    assert "deliveryCurrencyOptions" not in source
 
 
-def test_frontend_converts_foreign_price_to_cny_on_save():
-    """保存时要折算成人民币等值（原币数字**不能**直接当成人民币发出去）。"""
+def test_frontend_sends_cny_price_unconverted():
+    """保存时发出去的就是运营填的那个数字（原样，不做任何乘法）。"""
     source = FRONTEND_PATH.read_text(encoding="utf-8")
-    assert "source_unit_price" in source
-    assert "exchange_rate" in source
-    assert "deliveryRuleConvertedCny" in source
+    assert "unit_price: row.unit_price" in source
+    assert 'currency: "CNY"' in source
 
 
-def test_frontend_batch_adds_rate_tiers():
-    """一张价目表 5 档 ⇒ 不该点 5 次「新增」。"""
+def test_frontend_has_card_view_for_platform_warehouse():
+    """费率维护是**卡片式**：一个「平台 × 仓」一张卡，卡内按全局段表顺序列全部重量段。
+
+    业务理由（Walter 2026-11-17）：一行一条的表格里，运营改一档价要先在多行中
+    **用眼睛找**那一行（平台/仓/段三列并排），且平台与仓在存量行上是禁用的
+    ⇒ 找错行、改错行的风险高。卡片把「一个平台在一个仓的全部档位」收在一起，
+    切换平台/仓即切换整卡。
+    """
+    source = FRONTEND_PATH.read_text(encoding="utf-8")
+    # 卡片由「平台 + 仓」两个选择器定位，卡内是全局段表的全部段
+    assert "deliveryCardForm" in source
+    assert "deliveryCardRows" in source
+    # 卡片由「平台 + 仓」两个选择器定位
+    assert "deliveryCardForm.platform_code" in source
+    assert "deliveryCardForm.warehouse_code" in source
+    # 卡内按全局段表顺序渲染全部段（不让人挑段 ⇒ 不会漏段、不会选错）
+    assert "deliveryCardTiers" in source
+
+
+def test_frontend_marks_missing_tier_in_card():
+    """某段没配价 ⇒ 卡上要**看得见**（否则要等系统报错才知道缺料）。"""
+    source = FRONTEND_PATH.read_text(encoding="utf-8")
+    assert "deliveryCardTierMissing" in source
+
+
+def test_frontend_batch_add_lands_back_on_card():
+    """批量新增完成后**回到卡片视图**（批量只是铺价的手段，不是终点）。
+
+    业务理由（Walter 2026-11-17）：批量录完如果还停在批量弹窗里，
+    运营无法一眼核对/微调每一档 ⇒ 后续修改仍然困难。
+    """
     source = FRONTEND_PATH.read_text(encoding="utf-8")
     assert "批量新增尾程费率" in source
     assert "deliveryBatchRows" in source
+    # 批量保存后要定位到对应的卡片
+    assert "deliveryCardForm.platform_code = " in source
+    assert "deliveryCardForm.warehouse_code = " in source
 
 
 def test_frontend_warns_on_duplicated_weight_tiers():
@@ -204,10 +265,26 @@ def test_same_tier_price_change_is_not_rejected_as_overlap():
     ⚠️ 批次 6 起重量段是**全局一套**的 ⇒ 不再有「区间重叠」这回事
     （段与段不重叠由段表保证）；但「同一个平台 × 仓 × 段填两行当期」仍然要拦
     ⇒ 换价时必须把旧行闭区间，而不是报 409。
+
+    ⚠️ 2026-11-17：闭区间的终点按**今天**算，不能按调用方传来的原生效日 ——
+    照原生效日算会把旧价闭成倒挂区间（``effective_to < effective_from``）
+    ⇒ 撞检查约束 ⇒ 报 409「already exists」（实测卡片改价直接不可用），
+    而且历史被抹掉 ⇒ 对不上「当时按多少钱算的」。
     """
     source = ROUTER_PATH.read_text(encoding="utf-8")
-    assert "existing.weight_tier_code == body.weight_tier_code" in source
-    assert "existing.effective_to = body.effective_from - timedelta(days=1)" in source
+    # 同段判定仍在（写法二选一：等于 / 不等于则跳过）
+    assert (
+        "weight_tier_code == body.weight_tier_code" in source
+        or "weight_tier_code != body.weight_tier_code" in source
+    )
+    # 闭区间终点 = 新行生效日 - 1 天
+    assert "existing.effective_to = effective_from - timedelta(days=1)" in source
+    # 新行生效日从今天起算
+    assert "effective_from = max(body.effective_from, today)" in source
+    # 旧写法（照调用方的原生效日闭区间）不许再回来
+    assert (
+        "existing.effective_to = body.effective_from - timedelta(days=1)" not in source
+    )
 
 
 # ---------------------------------------------------------------------------

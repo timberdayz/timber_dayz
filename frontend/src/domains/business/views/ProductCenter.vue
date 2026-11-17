@@ -865,23 +865,61 @@
               <span class="muted">仓 → 买家那段快递费：按「平台 × 仓 × 重量段」计，单件计价</span>
             </div>
             <el-alert type="warning" :closable="false" title="尾程是每卖一件必付的成本：没有配费率 ⇒ 尾程算不出来 ⇒ 利润与最低售价都算不出来（不会当成 0）。重量段从全局段表里选，不手工填上下限（手填迟早重叠 ⇒ 选档歧义）。" />
-            <el-alert type="info" :closable="false" title="价目表是外币时（Shopee SG 是新币），填「原币单价 + 币种 + 汇率」：系统按折算后的人民币等值入账，原币与汇率写进备注留档。直接照抄外币数字会被当成人民币 ⇒ 尾程少算好几倍 ⇒ 成本底线偏低 ⇒ 漏钱。" />
+            <el-alert type="info" :closable="false" title="单价一律填**人民币等值**（系统不换算汇率）：官方价目表若是外币（Shopee SG 是新币），请自行折算后填人民币，并把原币与汇率写在备注里留档。直接照抄外币数字会被当成人民币 ⇒ 尾程少算好几倍 ⇒ 成本底线偏低 ⇒ 漏钱。" />
             <el-alert v-if="deliveryPlatformSplitHint" type="warning" :closable="false" :title="deliveryPlatformSplitHint" />
-            <el-table :data="deliveryRules" v-loading="loadingDeliveryRules" stripe border>
+            <!-- 卡片式维护：一个「平台 × 仓」一张卡，卡内是全局段表的全部段 -->
+            <div class="delivery-card-bar">
+              <el-select v-model="deliveryCardForm.platform_code" placeholder="选平台" style="width: 160px" filterable @change="onDeliveryCardTargetChange">
+                <el-option v-for="item in operatingDimensions.platforms" :key="item.platform_code" :label="item.name || item.platform_code" :value="item.platform_code" />
+              </el-select>
+              <el-select v-model="deliveryCardForm.warehouse_code" placeholder="选收货仓" style="width: 220px" filterable @change="onDeliveryCardTargetChange">
+                <el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" />
+              </el-select>
+              <span v-if="deliveryCardTargetLabel" class="muted">{{ deliveryCardTargetLabel }}</span>
+              <el-button v-if="canManagePlatformFee" type="primary" :loading="savingDeliveryCard" @click="saveDeliveryCard">保存这张卡</el-button>
+              <el-button v-if="canManagePlatformFee" :icon="Plus" @click="openDeliveryBatchDialog">批量新增尾程费率</el-button>
+              <span class="muted">批量铺完会自动回到这张卡，方便一眼核对与微调</span>
+            </div>
+            <div v-loading="loadingDeliveryRules" class="delivery-card-wrap">
+              <el-card v-if="deliveryCardForm.platform_code && deliveryCardForm.warehouse_code" shadow="never" class="delivery-card">
+                <template #header>
+                  <div class="delivery-card-head">
+                    <span class="delivery-card-title">{{ deliveryCardTargetLabel }}</span>
+                    <span class="muted">单件尾程费（元）· 重量段全局一套</span>
+                  </div>
+                </template>
+                <div class="delivery-card-grid">
+                  <div v-for="row in deliveryCardRows" :key="row.weight_tier_code" class="delivery-card-tier" :class="{ 'delivery-card-tier--missing': deliveryCardTierMissing(row) }">
+                    <div class="delivery-card-tier-label">{{ row.tier_label }}</div>
+                    <el-input-number v-model="row.unit_price" :min="0" :precision="2" :controls="false" size="small" placeholder="未配置" :disabled="!canManagePlatformFee" />
+                    <div class="delivery-card-tier-note">
+                      <template v-if="deliveryCardTierMissing(row)"><span class="delivery-card-tier-warn">未配置 ⇒ 该段尾程算不出来</span></template>
+                      <template v-else><el-input v-model="row.notes" size="small" placeholder="备注（可写原币与汇率）" /></template>
+                    </div>
+                  </div>
+                </div>
+                <template #footer>
+                  <span class="muted">改价会自动开新版本（旧档位闭区间，历史留痕）；只改备注则直接改在原档位上。</span>
+                </template>
+              </el-card>
+              <el-empty v-else description="先选平台与收货仓库，就看到那张卡的全部重量段" />
+            </div>
+            <el-collapse class="delivery-detail">
+              <el-collapse-item title="全部档位明细（跨平台对照 / 看历史与停用行）" name="detail">
+                <el-table :data="deliveryRules" v-loading="loadingDeliveryRules" stripe border>
               <el-table-column label="平台" min-width="140"><template #default="{ row }"><el-select v-model="row.platform_code" size="small" filterable :disabled="!row.__new"><el-option v-for="item in operatingDimensions.platforms" :key="item.platform_code" :label="item.name || item.platform_code" :value="item.platform_code" /></el-select></template></el-table-column>
               <el-table-column label="收货仓库" min-width="170"><template #default="{ row }"><el-select v-model="row.warehouse_code" size="small" filterable :disabled="!row.__new"><el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" /></el-select></template></el-table-column>
               <el-table-column label="重量段" width="150"><template #default="{ row }"><el-select v-model="row.weight_tier_code" size="small" filterable placeholder="选重量段" :disabled="!row.__new"><el-option v-for="tier in weightTiers" :key="tier.tier_code" :label="tier.label" :value="tier.tier_code" /></el-select></template></el-table-column>
-              <el-table-column label="原币单价" width="110"><template #default="{ row }"><el-input-number v-model="row.source_unit_price" :min="0" :precision="2" :controls="false" size="small" /></template></el-table-column>
-              <el-table-column label="币种" width="96"><template #default="{ row }"><el-select v-model="row.source_currency" size="small" filterable><el-option v-for="code in deliveryCurrencyOptions" :key="code" :label="code" :value="code" /></el-select></template></el-table-column>
-              <el-table-column label="汇率→人民币" width="120"><template #default="{ row }"><el-input-number v-model="row.exchange_rate" :min="0.0001" :precision="4" :controls="false" size="small" /></template></el-table-column>
-              <el-table-column label="单件尾程费（CNY）" width="170"><template #default="{ row }"><div>{{ deliveryRuleConvertedCny(row) ?? "—" }}</div><div v-if="deliveryTierDuplicateHint(row)" class="delivery-row-warn">{{ deliveryTierDuplicateHint(row) }}</div></template></el-table-column>
+              <el-table-column label="单件尾程费（元）" width="150"><template #default="{ row }"><el-input-number v-model="row.unit_price" :min="0" :precision="2" :controls="false" size="small" /><div v-if="deliveryTierDuplicateHint(row)" class="delivery-row-warn">{{ deliveryTierDuplicateHint(row) }}</div></template></el-table-column>
               <el-table-column label="生效日期" width="145"><template #default="{ row }"><el-date-picker v-model="row.effective_from" type="date" value-format="YYYY-MM-DD" size="small" /></template></el-table-column>
-              <el-table-column label="状态" width="105"><template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '已停用' }}</el-tag></template></el-table-column>
+              <el-table-column label="状态" width="105"><template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === "active" ? "启用" : "已停用" }}</el-tag></template></el-table-column>
               <el-table-column label="版本" width="110"><template #default="{ row }"><el-input v-model="row.version" size="small" /></template></el-table-column>
               <el-table-column label="来源" width="120"><template #default="{ row }"><el-input v-model="row.source" size="small" /></template></el-table-column>
               <el-table-column label="备注" min-width="140"><template #default="{ row }"><el-input v-model="row.notes" size="small" /></template></el-table-column>
               <el-table-column v-if="canManagePlatformFee" label="操作" width="230" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveDeliveryRule(row)">保存</el-button><el-button v-if="!row.__new && row.status === 'active'" link type="warning" @click="toggleDeliveryRuleStatus(row)">停用</el-button><el-button v-if="!row.__new && row.status !== 'active'" link type="success" @click="toggleDeliveryRuleStatus(row)">启用</el-button><el-button v-if="!row.__new" link type="danger" @click="removeDeliveryRuleRow(row)">删除</el-button></template></el-table-column>
             </el-table>
+              </el-collapse-item>
+            </el-collapse>
             <el-dialog v-model="deliveryBatchVisible" title="批量新增尾程费率（照着一张价目表录）" width="880px">
               <el-form label-width="110px">
                 <el-form-item label="平台">
@@ -893,13 +931,6 @@
                   <el-select v-model="deliveryBatchForm.warehouse_code" filterable placeholder="选收货仓">
                     <el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" />
                   </el-select>
-                </el-form-item>
-                <el-form-item label="币种 / 汇率">
-                  <el-select v-model="deliveryBatchForm.source_currency" style="width: 110px" filterable>
-                    <el-option v-for="code in deliveryCurrencyOptions" :key="code" :label="code" :value="code" />
-                  </el-select>
-                  <el-input-number v-model="deliveryBatchForm.exchange_rate" :min="0.0001" :precision="4" :controls="false" style="width: 150px; margin-left: 8px" />
-                  <span class="muted" style="margin-left: 8px">1 {{ deliveryBatchForm.source_currency }} = ? 元人民币</span>
                 </el-form-item>
                 <el-form-item label="生效日期">
                   <el-date-picker v-model="deliveryBatchForm.effective_from" type="date" value-format="YYYY-MM-DD" />
@@ -914,8 +945,7 @@
               </el-form>
               <el-table :data="deliveryBatchRows" border size="small">
                 <el-table-column label="重量段" width="150"><template #default="{ row }"><el-select v-model="row.weight_tier_code" size="small" filterable placeholder="选重量段"><el-option v-for="tier in weightTiers" :key="tier.tier_code" :label="tier.label" :value="tier.tier_code" /></el-select></template></el-table-column>
-                <el-table-column label="原币单价" width="130"><template #default="{ row }"><el-input-number v-model="row.source_unit_price" :min="0" :precision="2" :controls="false" size="small" /></template></el-table-column>
-                <el-table-column label="折算 CNY" width="120"><template #default="{ row }">{{ deliveryBatchConvertedCny(row) ?? "—" }}</template></el-table-column>
+                <el-table-column label="单件尾程费（元）" width="150"><template #default="{ row }"><el-input-number v-model="row.unit_price" :min="0" :precision="2" :controls="false" size="small" /></template></el-table-column>
                 <el-table-column label="操作" width="90"><template #default="{ $index }"><el-button link type="danger" @click="deliveryBatchRows.splice($index, 1)">移除</el-button></template></el-table-column>
               </el-table>
               <div class="toolbar" style="margin-top: 8px">
@@ -1449,6 +1479,8 @@ const operatingDimensions = reactive({
 const loadingOperating = ref(false);
 const loadingStorageRules = ref(false);
 const loadingDeliveryRules = ref(false);
+// 保存整张「平台 × 仓」卡（批次 8 卡片式）时的忙碌态。
+const savingDeliveryCard = ref(false);
 // 尾程配送费费率（批次 3/4）：平台 × 仓 × 重量段。
 // ⚠️ 尾程是**必付成本**：这个表没数据 ⇒ 尾程算不出来 ⇒ 利润链算不出来（不是按 0 计）。
 const deliveryRules = ref([]);
@@ -2164,39 +2196,22 @@ const loadStorageRules = async () => {
     loadingStorageRules.value = false;
   }
 };
-// 尾程费率可选币种（平台价目表常见币种）。
-// ⚠️ **入库一律折成人民币等值** —— 尾程计算链不读汇率，照抄外币数字会被当成人民币。
-const deliveryCurrencyOptions = ["CNY", "SGD", "MYR", "USD", "PHP", "THB", "IDR", "VND"];
-// 原币折算说明写进备注的固定前缀（保存时按前缀**替换**，避免每次保存重复追加）。
-const DELIVERY_FX_NOTE_PREFIX = "原币折算：";
+// ⚠️ **单价一律填人民币等值**（Walter 2026-11-17 拍板：人工填的就是人民币）。
+//    旧设计让运营填「原币 + 币种 + 汇率」再折算 —— 那层壳反而制造漏钱风险：
+//    库里存人民币、界面让人填外币 ⇒ 照抄官方新币价目表会被当成人民币
+//    ⇒ 尾程少算 5 倍多 ⇒ 成本底线偏低 ⇒ 漏钱。
+//    ⇒ 汇率层整体去掉；外币痕迹由运营写在**备注**里（自由文本，不参与计算）。
 const deliveryBatchVisible = ref(false);
 const savingDeliveryBatch = ref(false);
 const deliveryBatchForm = reactive({
   platform_code: "",
   warehouse_code: "",
-  source_currency: "CNY",
-  exchange_rate: 1,
   effective_from: new Date().toISOString().slice(0, 10),
   source: "manual",
   version: "v1",
   notes: "",
 });
 const deliveryBatchRows = ref([]);
-
-// 原币单价 → 人民币等值（两位小数）。
-// ⚠️ 尾程计算链**不读汇率** ⇒ 费率表必须存人民币等值。
-//    照抄外币数字当人民币 = 尾程少算好几倍 ⇒ 成本底线偏低 ⇒ 漏钱。
-const deliveryRuleConvertedCny = (row) => {
-  const price = Number(row?.source_unit_price);
-  const rate = Number(row?.exchange_rate);
-  if (!Number.isFinite(price) || !Number.isFinite(rate) || rate <= 0) return null;
-  return Math.round(price * rate * 100) / 100;
-};
-const deliveryBatchConvertedCny = (row) =>
-  deliveryRuleConvertedCny({
-    source_unit_price: row.source_unit_price,
-    exchange_rate: deliveryBatchForm.exchange_rate,
-  });
 
 // 同一「平台 × 仓 × 重量段」已经有当期行 ⇒ 重复了。
 // ⚠️ 批次 6 起**不再有「重量段重叠」检查**：重量段是**全局一套**的
@@ -2258,13 +2273,13 @@ const loadDeliveryRules = async () => {
     const rows = await productCenterApi.listDeliveryRateRules({
       include_inactive: true,
     });
-    // 库里存的是**人民币等值** ⇒ 展示成「原币单价 = 人民币值、币种 CNY、汇率 1」，
-    // 运营改行时看到的仍是自己录的那一档，不会被折算吓一跳。
+    // 库里存的就是**人民币等值** ⇒ 直接展示，不做任何折算包装。
+    // ⚠️ `__original_unit_price` 记下**加载时的原值** ——
+    //    卡片/表格里改的是同一份 `unit_price`，没有原值就分不清
+    //    「改了价（要 POST 新版本）」还是「只改了备注（PATCH 即可）」。
     deliveryRules.value = rows.map((row) => ({
       ...row,
-      source_unit_price: row.unit_price,
-      source_currency: row.currency || "CNY",
-      exchange_rate: 1,
+      __original_unit_price: row.unit_price,
     }));
   } catch (error) {
     deliveryRules.value = [];
@@ -2273,6 +2288,202 @@ const loadDeliveryRules = async () => {
     loadingDeliveryRules.value = false;
   }
 };
+// ---------------------------------------------------------------------------
+// 卡片式维护（Walter 2026-11-17）
+//
+// 业务问题：一行一条的表格里，运营改一档价要先在多行中**用眼睛找**那一行
+// （平台 / 仓 / 重量段 三列并排），且平台与仓在存量行上是禁用的 ⇒ 找错行、
+// 改错行的风险高；改完还要回到列表里再找一遍。
+//
+// 业务概念：**一个「平台 × 仓」= 一张卡**，卡内是全局段表的**全部**段
+// （固定顺序，不让人挑 ⇒ 不会漏段、不会选错段）。
+// 切换平台/仓 ⇒ 整卡切换；缺价的段在卡上**看得见**。
+// ---------------------------------------------------------------------------
+
+// 卡片定位器：平台 + 仓（两个选择器）。
+const deliveryCardForm = reactive({
+  platform_code: "",
+  warehouse_code: "",
+  effective_from: new Date().toISOString().slice(0, 10),
+  source: "manual",
+  version: "v1",
+  notes: "",
+});
+// 当前卡片的编辑缓冲（改价 = 改这里的值，保存时按「变了价 ⇒ POST 新版本」处理）。
+const deliveryCardRows = ref([]);
+
+// 全局段表顺序 ⇒ 卡片内每段一行。
+const deliveryCardTiers = computed(() => weightTiers.value);
+
+// 某段缺价 ⇒ 卡上要看得见（否则要等系统报错才知道缺料）。
+const deliveryCardTierMissing = (row) =>
+  row?.unit_price === null || row?.unit_price === undefined || row?.unit_price === "";
+
+// 卡片标题：平台名 + 仓库名（人话，不给 code）。
+const deliveryCardTargetLabel = computed(() => {
+  const platform = operatingDimensions.platforms.find(
+    (item) => item.platform_code === deliveryCardForm.platform_code,
+  );
+  const warehouse = operatingDimensions.warehouses.find(
+    (item) => item.warehouse_code === deliveryCardForm.warehouse_code,
+  );
+  if (!platform && !warehouse) return "";
+  const platformName = platform?.name || deliveryCardForm.platform_code || "未选平台";
+  const warehouseName = warehouse
+    ? `${warehouse.warehouse_name} (${warehouse.country_name})`
+    : deliveryCardForm.warehouse_code || "未选仓";
+  return `${platformName} · ${warehouseName}`;
+});
+
+// 切换卡片的目标（平台 / 仓）⇒ 重新装配卡内各段。
+const onDeliveryCardTargetChange = async () => {
+  await loadDeliveryRules();
+  buildDeliveryCardRows();
+};
+
+// 尾程费率的「今天」（服务端时区为准，这里只作请求里的显式意图）。
+const deliveryToday = () => new Date().toISOString().slice(0, 10);
+
+// 由「平台 × 仓」装配卡片内容：每段一行，取**今天真正生效**的费率行。
+//
+// ⚠️ 为什么不能简单取「第一条 active」：官方价目表说明年生效时，会同时存在
+//    「旧价（还在当期）+ 新价（还没生效）」两行；取错行 ⇒ 卡片显示一个
+//    还没生效的价 ⇒ 运营照着改 ⇒ 改错。
+const buildDeliveryCardRows = () => {
+  const platform = deliveryCardForm.platform_code;
+  const warehouse = deliveryCardForm.warehouse_code;
+  const today = deliveryToday();
+  deliveryCardRows.value = deliveryCardTiers.value.map((tier) => {
+    const candidates = deliveryRules.value.filter(
+      (row) =>
+        row.platform_code === platform &&
+        row.warehouse_code === warehouse &&
+        row.weight_tier_code === tier.tier_code &&
+        row.status !== "inactive",
+    );
+    const inEffect = candidates.find(
+      (row) =>
+        (row.effective_from ?? "") <= today &&
+        (!row.effective_to || row.effective_to >= today),
+    );
+    const hit = inEffect ?? candidates[0] ?? null;
+    return {
+      __new: !hit,
+      rule_id: hit?.rule_id ?? null,
+      platform_code: platform,
+      warehouse_code: warehouse,
+      weight_tier_code: tier.tier_code,
+      tier_label: tier.label,
+      unit_price: hit ? hit.unit_price : null,
+      __original_unit_price: hit ? hit.unit_price : null,
+      effective_from: hit?.effective_from ?? deliveryCardForm.effective_from,
+      effective_to: hit?.effective_to ?? null,
+      status: hit?.status ?? "active",
+      source: hit?.source ?? deliveryCardForm.source,
+      version: hit?.version ?? deliveryCardForm.version,
+      notes: hit?.notes ?? "",
+    };
+  });
+};
+
+// 刷新卡片（费率数据变化后调用）。
+const refreshDeliveryCards = async () => {
+  await loadDeliveryRules();
+  buildDeliveryCardRows();
+};
+
+// 保存整张卡：逐档判断「变了价 / 只改备注」——
+// 变了价 ⇒ POST 新版本（旧行闭区间，历史留痕）；只改备注 ⇒ PATCH。
+const saveDeliveryCard = async () => {
+  const platform = deliveryCardForm.platform_code;
+  const warehouse = deliveryCardForm.warehouse_code;
+  if (!platform || !warehouse) {
+    ElMessage.error("请先选平台与收货仓库");
+    return;
+  }
+  const rows = deliveryCardRows.value.filter(
+    (row) => !deliveryCardTierMissing(row),
+  );
+  if (!rows.length) {
+    ElMessage.error("这张卡还没有填任何一档尾程费");
+    return;
+  }
+  savingDeliveryCard.value = true;
+  let saved = 0;
+  let versioned = 0;
+  const failed = [];
+  for (const row of rows) {
+    try {
+      if (row.__new) {
+        await productCenterApi.createDeliveryRateRule({
+          platform_code: platform,
+          warehouse_code: warehouse,
+          weight_tier_code: row.weight_tier_code,
+          unit_price: row.unit_price,
+          currency: "CNY",
+          effective_from: row.effective_from || deliveryCardForm.effective_from,
+          effective_to: null,
+          status: "active",
+          source: row.source || deliveryCardForm.source || "manual",
+          version: row.version || deliveryCardForm.version || "v1",
+          notes: row.notes ?? deliveryCardForm.notes ?? "",
+        });
+        saved += 1;
+        continue;
+      }
+      const priceChanged =
+        Number(row.unit_price) !== Number(row.__original_unit_price);
+      if (priceChanged) {
+        // 改价 ⇒ 新开一档：**新价从今天起生效**，旧价闭区间到昨天（历史留痕）。
+        // ⚠️ 生效日必须发「今天」，不能发原行的生效日（2026-01-01 那种）——
+        //    那样会把旧价的生效区间倒挂（撞数据库检查约束 ⇒ 409「重复行」），
+        //    而且历史被抹掉。服务端也会按这条口径兜底，这里写明白是为了请求自洽。
+        await productCenterApi.createDeliveryRateRule({
+          platform_code: platform,
+          warehouse_code: warehouse,
+          weight_tier_code: row.weight_tier_code,
+          unit_price: row.unit_price,
+          currency: "CNY",
+          effective_from: deliveryToday(),
+          effective_to: null,
+          status: "active",
+          source: row.source || deliveryCardForm.source || "manual",
+          version: row.version || deliveryCardForm.version || "v1",
+          notes: row.notes ?? deliveryCardForm.notes ?? "",
+        });
+        versioned += 1;
+      } else {
+        await productCenterApi.updateDeliveryRateRule(row.rule_id, {
+          effective_from: row.effective_from,
+          effective_to: row.effective_to ?? null,
+          status: row.status || "active",
+          source: row.source || "manual",
+          version: row.version || "v1",
+          notes: row.notes ?? "",
+        });
+      }
+      saved += 1;
+    } catch (error) {
+      failed.push(
+        `[${row.tier_label || row.weight_tier_code}：${error.message || "保存失败"}]`,
+      );
+    }
+  }
+  savingDeliveryCard.value = false;
+  await refreshDeliveryCards();
+  if (failed.length) {
+    ElMessage.error(
+      `已保存 ${saved} 档，失败 ${failed.length} 档：${failed.join("；")}`,
+    );
+    return;
+  }
+  ElMessage.success(
+    versioned
+      ? `已保存 ${saved} 档（其中 ${versioned} 档改价 → 自动开新版本，历史留痕）`
+      : `已保存 ${saved} 档尾程费率`,
+  );
+};
+
 const addDeliveryRuleRow = () => {
   // 重量段从**全局段表**里选（不再手工填上下限）。
   const used = new Set(
@@ -2291,9 +2502,6 @@ const addDeliveryRuleRow = () => {
     warehouse_code: operatingQuery.warehouse_code || "",
     weight_tier_code: nextTier ? nextTier.tier_code : "",
     unit_price: null,
-    source_unit_price: null,
-    source_currency: "CNY",
-    exchange_rate: 1,
     effective_from: new Date().toISOString().slice(0, 10),
     status: "active",
     source: "manual",
@@ -2301,38 +2509,21 @@ const addDeliveryRuleRow = () => {
     notes: "",
   });
 };
-// 备注里留原币与汇率（按固定前缀替换，不重复追加）。
-const deliveryRuleNotes = (row) => {
-  const raw = String(row.notes ?? "");
-  const kept = raw
-    .split("\n")
-    .filter((line) => !line.startsWith(DELIVERY_FX_NOTE_PREFIX))
-    .join("\n")
-    .trim();
-  const currency = row.source_currency || "CNY";
-  const rate = Number(row.exchange_rate) || 1;
-  const price = Number(row.source_unit_price);
-  const cny = deliveryRuleConvertedCny(row);
-  const fxLine =
-    currency !== "CNY"
-      ? `${DELIVERY_FX_NOTE_PREFIX}${price} ${currency} × ${rate} = ${cny} CNY`
-      : "";
-  return [kept, fxLine].filter(Boolean).join("\n");
-};
 // 新建一档（POST）：平台 / 仓 / 重量段 / 单价都在这里。
-// ⚠️ 单价一律发**人民币等值**（后端只收 CNY）。
-const deliveryRuleCreatePayload = (row) => ({
+// ⚠️ 单价就是运营填的**人民币等值**，原样发出去（后端只收 CNY）。
+// ⚠️ ``effectiveFrom`` 允许覆盖：改价时必须传**今天**（见 saveDeliveryRule）。
+const deliveryRuleCreatePayload = (row, effectiveFrom = undefined) => ({
   platform_code: row.platform_code,
   warehouse_code: row.warehouse_code,
   weight_tier_code: row.weight_tier_code,
-  unit_price: deliveryRuleConvertedCny(row),
+  unit_price: row.unit_price,
   currency: "CNY",
-  effective_from: row.effective_from,
+  effective_from: effectiveFrom ?? row.effective_from,
   effective_to: row.effective_to ?? null,
   status: row.status || "active",
   source: row.source || "manual",
   version: row.version || "v1",
-  notes: deliveryRuleNotes(row),
+  notes: row.notes ?? "",
 });
 // 改一档（PATCH）：**只允许改备注 / 生效日 / 版本 / 来源 / 状态**。
 // 单价与身份字段后端不收（改价要走 POST 新版本，见 saveDeliveryRule）。
@@ -2342,19 +2533,18 @@ const deliveryRuleUpdatePayload = (row) => ({
   status: row.status || "active",
   source: row.source || "manual",
   version: row.version || "v1",
-  notes: deliveryRuleNotes(row),
+  notes: row.notes ?? "",
 });
 const saveDeliveryRule = async (row) => {
   try {
-    const cny = deliveryRuleConvertedCny(row);
     if (!row.platform_code || !row.warehouse_code) {
       throw new Error("请填写平台与收货仓库");
     }
     if (!row.weight_tier_code) {
       throw new Error("请选择重量段");
     }
-    if (cny === null) {
-      throw new Error("请填写原币单价与汇率");
+    if (row.unit_price === null || row.unit_price === undefined || row.unit_price === "") {
+      throw new Error("请填写单件尾程费（人民币）");
     }
     if (!row.effective_from) {
       throw new Error("请填写生效日期");
@@ -2366,10 +2556,13 @@ const saveDeliveryRule = async (row) => {
     let message = "尾程费率已保存";
     if (row.__new) {
       await productCenterApi.createDeliveryRateRule(deliveryRuleCreatePayload(row));
-    } else if (Number(row.unit_price) !== Number(cny)) {
+    } else if (Number(row.unit_price) !== Number(row.__original_unit_price)) {
       // 改价 ⇒ **新开一档**（后端把旧行闭区间、新行今天起生效）。
       // ⚠️ 不能 PATCH 改单价 —— 那是直接覆盖历史行，事后对不上「当时按多少钱算的」。
-      await productCenterApi.createDeliveryRateRule(deliveryRuleCreatePayload(row));
+      // ⚠️ 生效日发「今天」，不能发原行的生效日（那会让旧价区间倒挂 ⇒ 409）。
+      await productCenterApi.createDeliveryRateRule(
+        deliveryRuleCreatePayload(row, deliveryToday()),
+      );
       message = "已按新价开新版本（旧档位自动闭区间，历史留痕）";
     } else {
       await productCenterApi.updateDeliveryRateRule(
@@ -2407,8 +2600,6 @@ const toggleDeliveryRuleStatus = async (row) => {
 const openDeliveryBatchDialog = () => {
   deliveryBatchForm.platform_code = operatingQuery.platform_code || "";
   deliveryBatchForm.warehouse_code = operatingQuery.warehouse_code || "";
-  deliveryBatchForm.source_currency = "CNY";
-  deliveryBatchForm.exchange_rate = 1;
   deliveryBatchForm.effective_from = new Date().toISOString().slice(0, 10);
   deliveryBatchForm.source = "manual";
   deliveryBatchForm.version = "v1";
@@ -2418,7 +2609,7 @@ const openDeliveryBatchDialog = () => {
     .slice(0, 5)
     .map((tier) => ({
       weight_tier_code: tier.tier_code,
-      source_unit_price: null,
+      unit_price: null,
     }));
   deliveryBatchVisible.value = true;
 };
@@ -2427,7 +2618,7 @@ const addDeliveryBatchRow = () => {
   const nextTier = weightTiers.value.find((tier) => !used.has(tier.tier_code));
   deliveryBatchRows.value.push({
     weight_tier_code: nextTier ? nextTier.tier_code : '',
-    source_unit_price: null,
+    unit_price: null,
   });
 };
 const submitDeliveryBatch = async () => {
@@ -2442,12 +2633,12 @@ const submitDeliveryBatch = async () => {
   }
   const rows = deliveryBatchRows.value.filter(
     (row) =>
-      row.source_unit_price !== null &&
-      row.source_unit_price !== undefined &&
-      row.source_unit_price !== "",
+      row.unit_price !== null &&
+      row.unit_price !== undefined &&
+      row.unit_price !== "",
   );
   if (!rows.length) {
-    ElMessage.error("至少填一档原币单价");
+    ElMessage.error("至少填一档单件尾程费");
     return;
   }
   savingDeliveryBatch.value = true;
@@ -2459,19 +2650,14 @@ const submitDeliveryBatch = async () => {
         platform_code: form.platform_code,
         warehouse_code: form.warehouse_code,
         weight_tier_code: row.weight_tier_code,
-        unit_price: deliveryBatchConvertedCny(row),
+        unit_price: row.unit_price,
         currency: "CNY",
         effective_from: form.effective_from,
         effective_to: null,
         status: "active",
         source: form.source || "manual",
         version: form.version || "v1",
-        notes: deliveryRuleNotes({
-          notes: form.notes,
-          source_currency: form.source_currency,
-          source_unit_price: row.source_unit_price,
-          exchange_rate: form.exchange_rate,
-        }),
+        notes: form.notes ?? "",
       });
       saved += 1;
     } catch (error) {
@@ -2488,6 +2674,11 @@ const submitDeliveryBatch = async () => {
   }
   ElMessage.success(`已保存 ${saved} 档尾程费率`);
   deliveryBatchVisible.value = false;
+  // 批量只是**铺价的手段**，不是终点 ⇒ 铺完回到那张卡片，
+  // 运营一眼能核对/微调每一档（否则后续修改仍然困难）。
+  deliveryCardForm.platform_code = form.platform_code;
+  deliveryCardForm.warehouse_code = form.warehouse_code;
+  await refreshDeliveryCards();
 };
 const removeDeliveryRuleRow = async (row) => {
   try {
@@ -4225,5 +4416,63 @@ onMounted(async () => {
   font-size: 12px;
   line-height: 1.4;
   margin-top: 2px;
+}
+/* ---- 尾程费率卡片式维护（批次 8）----
+   一个「平台 × 仓」一张卡，卡内是全局段表的全部段；
+   缺价的段在卡上看得见（不必等系统报错才知道缺料）。 */
+.delivery-card-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.delivery-card-wrap {
+  min-height: 120px;
+}
+.delivery-card {
+  margin-bottom: 12px;
+}
+.delivery-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.delivery-card-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+.delivery-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.delivery-card-tier {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--el-fill-color-blank);
+}
+.delivery-card-tier--missing {
+  border-color: var(--el-color-warning-light-5);
+  background: var(--el-color-warning-light-9);
+}
+.delivery-card-tier-label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.delivery-card-tier-note {
+  margin-top: 6px;
+  min-height: 24px;
+}
+.delivery-card-tier-warn {
+  color: var(--el-color-warning);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.delivery-detail {
+  margin-top: 8px;
 }
 </style>
