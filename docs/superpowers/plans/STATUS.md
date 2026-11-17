@@ -26,18 +26,19 @@
 | 7 | 采集组件 lint 仍是告警模式（范围已收窄，强度未提升） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
 | 8 | 覆盖缺口两项：① legacy `modules/apps/{account_manager,collection_center}/contract_tests.py` 不再由 CI 执行；② **`backend/tests/` 下的 async 用例不能混进 CI 根契约清单**（CI 钉 `pytest==7.4.3` / `pytest-asyncio==0.21.1`，而 `backend/tests/conftest.py` 覆盖了 session 级 `event_loop`（1.x 忽略它）⇒ 混跑时排在 `test_celery_dispatch_event_loop_isolation.py` 之后的 async 用例拿到**已关闭**的循环，报 `RuntimeError: Event loop is closed`） | 覆盖缺口 | ①待决定是否把断言迁进 pytest；②本轮**已规避**（契约断言放进纯同步的 `tests/test_account_proxy_source_contract.py`），**根因未修** ⇒ 记账到 V2（统一事件循环策略，或 CI 升 pytest-asyncio 1.x 并同步改 conftest） | 本文件「批次 F」节 + `tests/test_account_proxy_source_contract.py` 文件头 |
 | 9 | **221 个守护从不主动执行**（C 类：不在任何 CI 清单、也没有被别的文件引用 ⇒ 只在有人恰好改了该文件时才跑） | 覆盖缺口 | 待拍板是否分批提升进 CI 清单（会拉长流水线，属加固方向） | 本文件「批次 F」节 |
-| 10 | `CHANGELOG.md:952` 写「新增三个 CI 坑」，原标题写「两个」（内容确实是 3 条） | 文档不一致 | 已在本文件修正标题；**已发布的 CHANGELOG 不改** | 本文件「新增三个 CI 坑」节 |
+| 10 | **v7.31.0 / v7.31.1 发版遗留 4 项（都要业务侧或配置侧动手）**：① 飞书三张状态镜像表 `table_id` 全为 NULL，且生产 `FEISHU_PRODUCT_BASE_TOKEN` 未设 ⇒ 商品镜像投影投不出去（8 条长期 pending）；② `finance.delivery_rate_rules` 空 ⇒ 尾程算不出来（利润链显示不可算）；③ 各平台 `delivery_cost_rate` 未填 ⇒ 尾程不进成本底线；④ 1125 个 SKU 重量为 0 ⇒ 尾程只能保守估算并标 `estimated` | 业务录数 / 配置 | 待业务录数：① 在飞书后台建好三张镜像表并回填配置，②③ 在「定价设置」维护，④ 补录重量（批次 3 已把重量改必填、表头改黑） | `CHANGELOG.md` v7.31.1 节 + `docs/superpowers/plans/2026-11-16-product-center-five-batch-optimization.md` §8.3 |
 
 **已关闭、不再是未结项**（留一行指针，避免又被当成待办）：
 
-- 店铺账号密码轮换 —— Walter 决定**不轮换**（取证结论不变，但是否轮换是业务负责人的决定）⇒ 关闭。
-- `git filter-repo` 历史清理 —— 按约定**不做**（会作废全部已发布 tag，含 `v7.24.0`）。
+- 店铺账号密码轮换 —— Walter 决定**不轮换**；`git filter-repo` 历史清理 —— 按约定**不做**（会作废全部已发布 tag，含 `v7.24.0`）⇒ 均关闭。
+- `CHANGELOG.md:952`「新增三个 CI 坑」标题笔误 —— 已在本文件修正标题（**已发布的 CHANGELOG 不改**）⇒ 关闭。
 
 ---
 
-## 进行中：商品中心五批次优化（2026-11-16 起）
+## 最新发布：v7.31.1（2026-11-17）
 
-- 计划：`docs/superpowers/plans/2026-11-16-product-center-five-batch-optimization.md` — **进行中**（批次 1 已完成，2–5 待做；硬顺序：护栏(2) 先于尾程进底线(4)）
+- **v7.31.0**（11-16）商品中心五批次收官；**v7.31.1**（11-17）修好飞书「平台」单选字段 —— 该缺陷让调价通知自 11-08 起 11 天 0 投递。
+- 生产：容器全部 `v7.31.1`、`healthz/ready` = 200 / v7.31.1、迁移在链头；461 条积压任务已作废。完整验收见 `CHANGELOG.md` v7.31.1 节与计划文档 §8.4。
 
 ## 已知未落地项
 

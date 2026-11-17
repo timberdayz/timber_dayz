@@ -1696,3 +1696,22 @@ R8 要求 profile 模式「**不注入**，沿用 profile 原生环境」；③ 
 > 按双镜像纪律，已发布的 tag 永不回填/重写；
 > 两次提交都只改排版与测试文件组织方式，**运行时行为完全相同**
 > （MD5/SHA1 摘要值不变 ⇒ 已分配的设备画像与线上完全一致，无画像漂移）。
+
+## 发布证据（v7.31.0 + v7.31.1，2026-11-16 ~ 11-17）
+
+> 从 `docs/superpowers/plans/STATUS.md` 归档（2026-11-17，v7.31.1 发版时）。
+> 该节已完结，且无外部引用 ⇒ 按「台账瘦身约定」移入归档，STATUS.md 只保留最新一次发布。
+
+| 项 | 证据 |
+|---|---|
+| tag | `v7.31.0`（对象 `930d15eb`）→ 提交 `37ea0484`；`v7.31.1`（对象 `b04f2c07`）→ 提交 `48fa88ae`；**双镜像 tag 对象一致** |
+| main | `ad37f419`；**双镜像 main SHA 一致** |
+| 部署流水线 | run `44013238622` **attempt 2 = success**（attempt 1 卡在 CNB 镜像推送 34 分钟 ⇒ 取消后重跑；镜像内容不变，**生产只部署 1 次**） |
+| CI 流水线 | main 的三线全 success（44013178635 / 44013178771 / 44013178796） |
+| 生产镜像 | `xihong_erp_backend_api` / `frontend` / `celery_worker` / `celery_beat` 全部 **v7.31.1** 且 healthy |
+| 版本号 | `GET /healthz/ready` → `{"status":"ready","version":"v7.31.1","database":"connected","dashboard":"ready"}` |
+| 迁移 | `current_schema_20261235_price_adjust_baseline_warehouse`（= 链头；v7.31.1 **无新迁移**）；基线主键已是 `(sku_id, platform_code, warehouse_code)` |
+| 调价通知积压 | 461 条 `failed` → `abandoned`（载荷与投递日志全留），`price_adjust` 失败任务归零；飞书调价记录表仍 **174 行**、`rev=281` 不变（没写脏数据） |
+| 生产代码真表写入 | 已部署代码组装出 `平台=TikTok` ⇒ 真实 `batch_create` **成功**；临时表验证完即删，表数回到 12（**零残留**） |
+| deploy-logs | 只多一个批次 `20261117_123908` |
+| 本地开发库 | 2026-11-17 升到链头（此前落后 3 个版本，缺 `finance.delivery_rate_rules` 表 / `dim_platforms.delivery_cost_rate` 列 / `price_adjust_baselines.warehouse_code` 列） |
