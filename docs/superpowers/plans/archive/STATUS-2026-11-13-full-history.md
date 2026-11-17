@@ -1805,3 +1805,53 @@ Validate Data Flow `43467986640` / Docker Build and Push `43467986403`。
   汇率 5.2077 待业务认可；TikTok SG 价目表未提供。
   **本地环境坑**：`uvicorn --reload` 没带 `--reload-dir` ⇒ 改任何 .py 都会热重载后端（详见 §9.10.3，未改）。
 - **完整口径与证据**：计划文档 `2026-11-16-product-center-five-batch-optimization.md` §9 / §9.10。
+
+---
+
+## 发布证据（v7.33.0，2026-11-18）· 批次 8
+
+> 来自 `docs/superpowers/plans/STATUS.md` 台账（2026-11-18，批次 8 已完结）。
+> 本节已完结（v7.33.0 已发版、已部署生产、部署后验收通过），按「台账瘦身约定」移入归档；
+> STATUS.md 只保留最新一次发布（指针见「最新发布：v7.33.0」）。
+> 完整口径与证据见计划文档 §9.11。
+
+- **批次 8 · 尾程费率「去汇率层 + 卡片式维护」+ 修好改价 409**（Walter 拍板三条口径）：① 人工填进去的
+  就是**人民币**，系统不做汇率换算（后端契约本来就只收 CNY ⇒ 那层汇率壳是前端自己加的有害壳，本批
+  **只删前端**，迁移不写）；② 一个「平台 × 仓」= **一张卡**，卡内按全局段表固定顺序列全部 6 段
+  （不让人挑段 ⇒ 不会漏段/选错段），缺价段在卡上看得见；③ **改价只进不退**（变了价 ⇒ POST 新版本，
+  只改备注 ⇒ PATCH），批量新增只是铺价手段、铺完自动回卡片。
+- **实测发现并修掉的硬伤**：卡片改价对**已存在**档位直接 **409「重复行」** ⇒ 核心动作不可用。根因：
+  改价时把**原行生效日**一起发出去 ⇒ 旧行闭区间到生效日前一天 ⇒ **区间倒挂** ⇒ 撞检查约束
+  `ck_delivery_rate_rules_window`；且历史会被抹掉。⇒ 口径收口到**后端一处（SSOT）**：改价 ⇒
+  `effective_from = max(调用方给值, 今天)`、旧行闭区间到前一天；首次录价仍可用调用方给的生效日回填历史；
+  新行本身非 active 时不动旧行（避免当期没费率 ⇒ 尾程算不出来）。
+- **落地物**：`ProductCenter.vue`、`product_center.py`（`create_delivery_rate_rule`）。**无迁移**。
+- **守护**：`backend/tests/test_delivery_rate_card_save_flow.py`（6 条，**真跑路由** + 隔离库每用例独立
+  database）、`test_delivery_rate_currency_guard.py`（24 条）、前端 `productCenterUi.test.mjs` **107/107**。
+- **全量回归**：后端 **6231 passed / 8 skipped / 0 failed**（446s）；前端 107/107；构建 10.54s
+  （ProductCenter 121.33 kB）；black / ruff 全绿。
+- **真实栈复验**：本地 8001 实跑「改价 ⇒ 201，新行今天起生效、旧行闭区间到 2026-11-16 并退出当期」
+  「只改备注 ⇒ PATCH，行数不变」，验完**本地库已完整还原**（费率 6 行逐字段与原状一致）。
+- **发版动作（双镜像纪律）**：提交 `d2e93b78`（功能）/ `b3dee10d`（发版记录）；双镜像 main SHA 一致
+  （`b3dee10d74e4f7e6691b380ae0c58c1f95d605c9`，GitHub / CNB / 本地三方一致）；tag `v7.33.0`
+  （注解对象 `9e27d89940ace1b47476ac1bfbc1985eb8ccd31d` → commit `b3dee10d`，两端 tag 对象一致）；
+  **先推 CNB**（确认未触发部署：最新 run 仍 v7.32.0、deploy-logs 无新批次）→ **再推 GitHub**（触发部署）。
+- **发版前置**：`scripts/verify_rules_completeness.py` PASS；`scripts/verify_release_local.py --skip-build`
+  **FINAL_EXIT=0**。期间修了一个**本地环境遗留**：云同步 verify 临时库是 v7.20.1 之前的旧脚手架 ⇒ 删库重建后
+  EXIT=0（与本批无关，本批 diff 未碰任何 cloud/sync 文件）。
+- **流水线**：run **44129043025** —— `check-config` ✔ / `Validate Data Flow (Release Gate)` ✔ /
+  `Build and Push Images` ✔（含依赖 pin 门禁、容器启动冒烟）/ `Deploy to Production (Tag Release)` ✔
+  11m6s ⇒ **全 success**。API 契约门禁「本次验证: 1 个文件（定义路由的 1 个）」、「F 真静默 0」、前端文件数 1。
+- **生产部署后验收（只读实测，2026-11-18 00:5x）**：7 容器全 healthy（backend / frontend / celery×2 镜像均
+  `v7.33.0`）；新部署批次 `20261118_005332`；`/healthz/ready` → 200 `version: v7.33.0`
+  `runtime_mode: production`；`/api/docs` → 200；前端新资源 `ProductCenter-dfe6a6b9.js`。
+- **迁移链头**：`current_schema_20261238_official_platform_fee_rates`（**未变**，本批无迁移）。
+- **生产库只读核对**：`finance.delivery_rate_rules` **5 行** = Shopee SG T01–T05 = 20.93/25.31/27.97/38.59/62.44
+  （`effective_from` 2026-11-17）；平台成本率**未动**（shopee 0.16 / 2026-01-01 / v3、creator 0.0111、
+  other 0.4165、delivery NULL；tiktok 0.08175 / 2026-04-01 / v3、creator 0.0606、other 0.2727、delivery NULL）；
+  `core.dim_weight_tiers` 6 档；`core.dim_erp_sku` 1122 行、重量段 **0** 填充；`finance.sku_platform_pricing`
+  **0 行**（默认全不包邮）；`finance.fx_rates` **0 行**（生产汇率表是空的）。
+- **上线后仍需业务录数**（不阻塞本批）：TikTok SG 尾程价目表缺 T01/T03–T06；本地那档 T02 = 14.84 元的官方
+  出处待确认；残差桶 `other_cost_rate` 与 `delivery_cost_rate` 待重算；汇率 5.2077 待业务认可；生产 1122 个
+  SKU 重量段全空、包邮开关默认全不包邮。
+- **完整口径与证据**：计划文档 `2026-11-16-product-center-five-batch-optimization.md` §9.11。

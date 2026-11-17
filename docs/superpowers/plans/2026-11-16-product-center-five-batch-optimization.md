@@ -756,7 +756,36 @@ watchfiles 会把 `temp/` 下的临时脚本也当变更来源 ⇒ 落盘就重�
 
 ### 9.11.7 未完成
 
-- **提交 / 发版待授权**（v7.32.0 的授权只覆盖批次 6+7）。
+- ~~提交 / 发版待授权~~ ⇒ **已发版 v7.33.0**（2026-11-18），部署后验收通过，见 §9.11.8。
 - TikTok SG 尾程价目表仍缺 T01 / T03–T06；本地那档 T02 = 14.84 元的官方出处待确认。
 - 生产 1122 个 SKU 重量段全空、平台 `delivery_cost_rate` 全 NULL、残差桶待重算、
   汇率 5.2077 待认可 —— 属**业务录数**，见 `docs/superpowers/plans/STATUS.md`「当前未结」#10。
+
+### 9.11.8 发版与部署后验收（v7.33.0，2026-11-18）
+
+**发版动作（双镜像纪律）**：提交 `d2e93b78`（功能）/ `b3dee10d`（发版记录）；双镜像 main SHA 一致
+（`b3dee10d74e4f7e6691b380ae0c58c1f95d605c9`，GitHub / CNB / 本地三方一致）；tag `v7.33.0`
+（注解对象 `9e27d89940ace1b47476ac1bfbc1985eb8ccd31d` → commit `b3dee10d`，两端 tag 对象一致）；
+**先推 CNB**（确认未触发部署：最新 run 仍 v7.32.0、deploy-logs 无新批次）→ **再推 GitHub**（触发部署）。
+
+**发版前置**：`scripts/verify_rules_completeness.py` PASS；`scripts/verify_release_local.py --skip-build`
+**FINAL_EXIT=0**。（期间修了一个**本地环境遗留**：云同步 verify 临时库是 v7.20.1 之前的旧脚手架 ⇒
+删库重建后 EXIT=0；与本批无关，本批 diff 未碰任何 cloud/sync 文件。）
+
+**流水线**：run **44129043025** —— `check-config` ✔ / `Validate Data Flow (Release Gate)` ✔ /
+`Build and Push Images` ✔ / `Deploy to Production (Tag Release)` ✔ 11m6s ⇒ **全 success**。
+API 契约门禁「本次验证: 1 个文件（定义路由的 1 个）」、「F 真静默 0」、前端文件数 1。
+
+**生产部署后验收（只读实测）**：7 容器全 healthy（backend / frontend / celery×2 镜像均 `v7.33.0`）；
+新部署批次 `20261118_005332`；`/healthz/ready` → 200 `version: v7.33.0` `runtime_mode: production`；
+`/api/docs` → 200；前端新资源 `ProductCenter-dfe6a6b9.js`；迁移链头仍
+`current_schema_20261238_official_platform_fee_rates`（**本批无迁移**）。
+
+**生产库只读核对**：`finance.delivery_rate_rules` 5 行 = Shopee SG T01–T05 = 20.93/25.31/27.97/38.59/62.44
+（`effective_from` 2026-11-17）；平台成本率**未动**（shopee 0.16 / 2026-01-01 / v3、creator 0.0111、
+other 0.4165、delivery NULL；tiktok 0.08175 / 2026-04-01 / v3、creator 0.0606、other 0.2727、delivery NULL）；
+`core.dim_weight_tiers` 6 档；`core.dim_erp_sku` 1122 行、重量段 0 填充；`finance.sku_platform_pricing` 0 行；
+`finance.fx_rates` 0 行。
+
+**发布证据归档**：`docs/superpowers/plans/archive/STATUS-2026-11-13-full-history.md`
+「发布证据（v7.33.0，2026-11-18）· 批次 8」。
