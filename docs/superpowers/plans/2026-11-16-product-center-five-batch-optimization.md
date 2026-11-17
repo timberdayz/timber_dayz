@@ -624,3 +624,38 @@ SKU **没选段** ⇒ 头程参考成本**算不出来**（报 `missing_sku_weig
   - Shopee SG 尾程 5 档全程不变（20.93 / 25.31 / 27.97 / 38.59 / 62.44 元）；
   - 链头仍为 `current_schema_20261238_official_platform_fee_rates`。
 
+### 9.10.5 发布与部署后验收（v7.32.0，2026-11-17）
+
+**发版动作**（按 `docs/guides/RELEASE_CHECKLIST.md` 的双镜像纪律）：
+
+| 步骤 | 结果 |
+|---|---|
+| 提交（功能 + 发版记录两条） | `b25bfe55` feat(product-center) / `76efdc00` chore(release) |
+| 同步 main 到双镜像 | `XIHONG_GIT_MIRROR_SYNCED=76efdc00`；独立核对 GitHub / CNB / 本地三方 SHA 一致 |
+| 打标签 | `v7.32.0`（注解对象 `87afad00` → 提交 `76efdc00`） |
+| **先推 CNB**（镜像，惰性） | tag 对象 `87afad00` 一致；生产**无新部署批次** ⇒ 确认推 CNB 不触发部署 |
+| **再推 GitHub**（触发部署） | `* [new tag] v7.32.0`；流水线 run `44072174180` |
+| 流水线 | **completed / success**（check-config → 发布门禁 → 构建推送 → 部署 全部 completed） |
+
+**生产部署后验收**（只读通道实查，非推断）：
+
+| 项 | 实测结果 |
+|---|---|
+| 容器 | 7 个全部 **healthy**（nginx / frontend / backend_api / celery_worker / celery_beat / postgres / redis） |
+| API | `/healthz/ready` → **200**，`version: v7.32.0`，`runtime_mode: production`，数据库 connected |
+| `/api/docs` | **200** |
+| 迁移链头 | `current_schema_20261238_official_platform_fee_rates`（三条迁移全上） |
+| `core.dim_weight_tiers` | 已建，**6 档** |
+| `core.dim_erp_sku.weight_kg` | **已删除**（`weight_kg_still_exists = 0`） |
+| `finance.delivery_rate_rules` | **5 行**（迁移写入官方 3PF 尾程） |
+| Shopee 佣金 | **0.16**，生效 2026-01-01，source `official_3pf_commission_2026_01_01 + …`，version `v3` |
+| TikTok 佣金 | **0.08175**，生效 2026-04-01，source `official_sg_2026_04_01 + …`，version `v3` |
+| Shopee SG 尾程 5 档 | 20.93 / 25.31 / 27.97 / 38.59 / 62.44 元，source `shopee_sg_3pf_standard_2025_03_18` |
+| 残差桶 `other_cost_rate` | **未动**（Shopee 0.4165 / TikTok 0.2727）✅ 与设计一致 |
+| 前端资源 | 新 hash `ProductCenter-5b88fe02.js` 已上线，含平台选择器代码 |
+
+⚠️ **上线后仍需业务录数**（与 §9.10.4 预判一致，生产实测已确认）：
+`sku_weight_tier_set = 0` ⇒ **1122 个 SKU 重量段全空** ⇒ 尾程一律落最轻档并标 `estimated`
+⇒ **成本底线偏低** ⇒ 需按实物批量归类重量段；包邮开关需逐 SKU 勾选（默认不包邮）。
+
+
