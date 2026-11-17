@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Mapping
 
 import asyncio
 from sqlalchemy import func, select, text, update
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from modules.core.db import (
     BridgeSpuSku,
     DimErpSku,
+    DimPlatform,
     DimSpu,
     FeishuProjectionConfig,
     FeishuProjectionLog,
@@ -22,6 +23,7 @@ from modules.core.db import (
     SkuProfitEstimate,
     SkuOperatingProfile,
 )
+from modules.core.logger import get_logger
 
 # SKU ↔ SPU 归属关系的「当前有效」判定只从真源取（律 1）。
 from backend.services.product_spu_binding import current_binding_condition
@@ -36,6 +38,39 @@ from .feishu_projection_client import (
 # 飞书批量新增单次 500 条 → 这个上限对应 4 批。一次性全量铺开会让单次事务
 # 过长，且失败时整批回滚代价大。
 PRICE_ADJUST_DELIVERY_LIMIT = 2000
+
+# 飞书「调价记录表」的「平台」单选字段**现有**的选项名。
+#
+# ⚠️ 这是**外部 Base 的固定结构**（与本模块里那些中文字段名「ERP SKU」「备注」
+#    同一性质），**不是** ERP 侧的平台字典 —— 平台显示名的真源是
+#    ``core.dim_platforms.name``（ORM）。
+#
+# ⚠️ 为什么必须白名单：base/v3 的批量新增遇到**匹配不上任何选项**的单选值
+#    会**整批拒绝**（``not_found``），一行写错就拖垮整批 200 行。
+#    2026-11-08 ~ 11-17 生产上 461 条调价记录就是这么全灭的：
+#    载荷里写的是 ERP 的小写 code（``tiktok``），而选项名是 ``TikTok``。
+#    飞书那边改了选项名，这里要**显式**跟着改（配套守护测试会提醒）。
+FEISHU_PRICE_ADJUST_PLATFORM_OPTIONS = ("TikTok", "Shopee", "Amazon")
+
+# 飞书「调价记录表」的「变动原因」「变动方向」两个单选字段的现有选项名。
+#
+# ⚠️ 同一类风险：「变动原因」在 ERP 侧是**新增常量的集合**
+#    （``backend/services/price_adjust_notify_service.py`` 的 ``REASON_*``），
+#    飞书那边的选项却是**手工维护**的 —— 两边一旦不同步，
+#    整批记录又会被拒（not_found）。所以这里同样按白名单校验：
+#    认不出的值**不写这一格**，并告警。
+FEISHU_PRICE_ADJUST_REASON_OPTIONS = (
+    "库龄档位变化",
+    "采购成本变化",
+    "平台费率变化",
+    "规则调整",
+    "参考售价补齐",
+    "数据缺失",
+    "人工覆盖",
+)
+FEISHU_PRICE_ADJUST_DIRECTION_OPTIONS = ("下降", "上升", "保护失效")
+
+logger = get_logger(__name__)
 
 
 def _to_float(value: Any) -> float | None:
@@ -638,12 +673,35 @@ class FeishuProjectionService:
             "更新时间": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-    def _price_adjust_payload(self, task: FeishuProjectionTask) -> dict[str, Any]:
+    async def _platform_display_names(self) -> dict[str, str]:
+        """平台 code → 飞书「平台」单选字段的**选项名**。
+
+        真源是 ``core.dim_platforms.name``（ORM）—— ERP 侧的平台显示名
+        （``tiktok`` → ``TikTok``）。⚠️ **不能拿平台 code 填飞书单选**：
+        飞书那张表的选项名是 ``TikTok`` / ``Shopee`` / ``Amazon``，
+        小写 code 匹配不上任何选项 ⇒ base/v3 整批拒绝（``not_found``），
+        一行写错就拖垮整批 200 行。
+        """
+        rows = (
+            await self.db.execute(select(DimPlatform.platform_code, DimPlatform.name))
+        ).all()
+        return {code: name for code, name in rows}
+
+    def _price_adjust_payload(
+        self,
+        task: FeishuProjectionTask,
+        platform_names: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
         """把 outbox payload 组装成飞书「调价记录表」的行字段。
 
         ⚠️ **「变动时间」不来自 payload**，而是取 outbox 任务的 `created_at`：
         payload 的哈希是去重依据，若把每次都变的时间戳塞进 payload，
         同一次变化重跑时哈希就不同，去重会失效。
+
+        ⚠️ **「平台」写的是飞书选项名**（``TikTok``），不是 ERP 的平台 code
+        （``tiktok``）：飞书单选字段匹配不上选项会**整批拒绝**（``not_found``）。
+        ``platform_names`` 由调用方从 ``core.dim_platforms.name`` 取；
+        认不出选项名时**不写这一格**（宁可空着，也不能让整批被拒）。
         """
         payload = dict(task.payload_json or {})
         changed_at = task.created_at or datetime.now(timezone.utc)
@@ -651,8 +709,6 @@ class FeishuProjectionService:
         fields: dict[str, Any] = {
             "ERP SKU": payload.get("sku_key"),
             "SPU": payload.get("spu") or "",
-            # 平台：底线是「SKU × 平台」的量（阶段 2.1），不写平台根本不知道这次变的是哪边
-            "平台": payload.get("platform_code") or "",
             "商品名称": payload.get("sku_name") or "",
             "规格": payload.get("specification") or "",
             "上次最低售价": _to_float(payload.get("old_min_selling_price")),
@@ -664,11 +720,29 @@ class FeishuProjectionService:
             "库存金额": _to_float(payload.get("inventory_value")),
             "变动时间": changed_at.isoformat(),
         }
-        # 单选字段在飞书 API 里是字符串数组
+        # 平台：底线是「SKU × 平台」的量（阶段 2.1），不写平台根本不知道这次变的是哪边。
+        # ⚠️ 写的是**飞书选项名**；匹配不上现有选项就**不写**（整批被拒的代价太大）。
+        platform_code = payload.get("platform_code") or ""
+        platform_label = (platform_names or {}).get(platform_code) or ""
+        if platform_label in FEISHU_PRICE_ADJUST_PLATFORM_OPTIONS:
+            fields["平台"] = platform_label
+        elif platform_code:
+            self._warn_unmapped_platform(platform_code, platform_label)
+        # 单选字段在飞书 API 里是字符串数组。
+        # ⚠️ 值必须是飞书那张表**现有的选项名** —— 匹配不上会整批被拒（not_found），
+        #    所以认不出的值宁可**不写这一格**（并告警），也不拖垮整批。
         if payload.get("direction"):
-            fields["变动方向"] = [payload["direction"]]
+            direction = payload["direction"]
+            if direction in FEISHU_PRICE_ADJUST_DIRECTION_OPTIONS:
+                fields["变动方向"] = [direction]
+            else:
+                self._warn_unmapped_option("变动方向", direction)
         if payload.get("reason"):
-            fields["变动原因"] = [payload["reason"]]
+            reason = payload["reason"]
+            if reason in FEISHU_PRICE_ADJUST_REASON_OPTIONS:
+                fields["变动原因"] = [reason]
+            else:
+                self._warn_unmapped_option("变动原因", reason)
         # 仓维度（批次 4）：底线是「SKU × 平台 × 仓」的量，同一个 SKU 会有多行
         # （每个仓一行）。表里没有「仓库」字段（那是外部 Base 的结构，不能擅自加列），
         # 所以写进「备注」——它是自由文本，机器人不读它，操作员能看懂。
@@ -679,6 +753,40 @@ class FeishuProjectionService:
         # 「当前售价」不写：目前没有可靠数据源（平台 SKU 档案靠人工维护，覆盖率未知），
         # 填一个可能错的数比留空更危险
         return {key: value for key, value in fields.items() if value is not None}
+
+    def _warn_unmapped_platform(self, platform_code: str, platform_label: str) -> None:
+        """平台显示名认不出飞书选项时告警（每个平台每轮只提醒一次）。"""
+        warned = getattr(self, "_warned_unmapped_platforms", None)
+        if warned is None:
+            warned = set()
+            self._warned_unmapped_platforms = warned
+        if platform_code in warned:
+            return
+        warned.add(platform_code)
+        logger.warning(
+            "[FeishuProjection] 平台 %s 的显示名 %r 不在飞书「调价记录表」"
+            "「平台」选项 %s 里，这一格留空（写匹配不上的值会让整批被拒）",
+            platform_code,
+            platform_label,
+            list(FEISHU_PRICE_ADJUST_PLATFORM_OPTIONS),
+        )
+
+    def _warn_unmapped_option(self, field_name: str, value: Any) -> None:
+        """单选值认不出飞书选项时告警（每个字段值每轮只提醒一次）。"""
+        warned = getattr(self, "_warned_unmapped_options", None)
+        if warned is None:
+            warned = set()
+            self._warned_unmapped_options = warned
+        key = (field_name, str(value))
+        if key in warned:
+            return
+        warned.add(key)
+        logger.warning(
+            "[FeishuProjection] %s 的值 %r 不在飞书「调价记录表」的现有选项里，"
+            "这一格留空（写匹配不上的值会让整批被拒）",
+            field_name,
+            value,
+        )
 
     async def _advance_price_adjust_baseline(self, task: FeishuProjectionTask) -> None:
         """价格调整记录**投递成功后**推进基线。
@@ -744,6 +852,8 @@ class FeishuProjectionService:
         completed = 0
         # 调价记录表可能不在默认 base 里（它通常与三张状态镜像表分属不同多维表格）
         target_base = config.price_adjust_base_token or client.base_token
+        # 「平台」单选字段要写**飞书选项名** ⇒ 先从 ORM 取平台显示名（真源）。
+        platform_names = await self._platform_display_names()
         # 按飞书单次上限分块，**每块独立成败**。
         # ⚠️ 不能"整批一次调用、失败就把所有任务标 failed"：
         # 第 3 块失败时，第 1、2 块其实已经写进飞书了，
@@ -751,7 +861,10 @@ class FeishuProjectionService:
         # 调价记录表是**只增不改**的，重复行不会被覆盖，只会一直堆着。
         for offset in range(0, len(tasks), FEISHU_BATCH_CREATE_LIMIT):
             chunk_tasks = tasks[offset : offset + FEISHU_BATCH_CREATE_LIMIT]
-            chunk_payloads = [self._price_adjust_payload(task) for task in chunk_tasks]
+            chunk_payloads = [
+                self._price_adjust_payload(task, platform_names=platform_names)
+                for task in chunk_tasks
+            ]
             try:
                 await client.batch_create_records(
                     config.price_adjust_table_id, chunk_payloads, target_base

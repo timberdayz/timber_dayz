@@ -754,6 +754,7 @@ class _ChunkedFailingClient:
         self.fail_at_call = fail_at_call
         self.calls: list[int] = []
         self.base_tokens: list[str | None] = []
+        self.records: list[dict] = []
         self.base_token = "bascn_default"
 
     async def batch_create_records(
@@ -764,6 +765,7 @@ class _ChunkedFailingClient:
     ) -> int:
         self.calls.append(len(records))
         self.base_tokens.append(base_token)
+        self.records.extend(records)
         if len(self.calls) == self.fail_at_call:
             raise RuntimeError("Feishu batch create failed: write conflict")
         return len(records)
@@ -852,6 +854,44 @@ async def test_price_adjust_uses_its_own_base_token_when_configured(
     assert client.base_tokens == ["bascn_price_adjust"]
 
 
+@pytest.mark.asyncio
+async def test_delivery_writes_feishu_option_label_for_platform(
+    outbox_sqlite_session,
+):
+    """投递出去的行，「平台」必须写**飞书选项名**（``TikTok``）。
+
+    ⚠️ 这是 2026-11-08 ~ 11-17 生产上 461 条调价记录全部投递失败的根因：
+    载荷里是小写平台 code（``tiktok``），而飞书那张表的选项名是
+    ``TikTok`` / ``Shopee`` / ``Amazon`` ⇒ base/v3 **整批拒绝**（not_found），
+    一行写错拖垮整批 200 行。
+    """
+    from backend.services.feishu_projection_service import FeishuProjectionService
+    from modules.core.db import FeishuProjectionConfig
+
+    session = outbox_sqlite_session
+    await _seed_outbox(session, 1)
+
+    config = FeishuProjectionConfig(
+        provider_code="feishu",
+        spu_table_id="tbl-spu",
+        sku_table_id="tbl-sku",
+        platform_sku_profit_table_id="tbl-profit",
+        price_adjust_table_id="tbl-price",
+        status="ready",
+    )
+    session.add(config)
+    await session.flush()
+
+    service = FeishuProjectionService(session)
+    client = _ChunkedFailingClient(fail_at_call=99)
+    completed = await service._process_price_adjust_tasks(config, client)
+
+    assert completed == 1
+    assert len(client.records) == 1
+    assert client.records[0]["平台"] == "TikTok"
+    assert client.records[0]["平台"] != "tiktok"
+
+
 @pytest_asyncio.fixture
 async def outbox_sqlite_session():
     """建 outbox 需要的 4 张表的 SQLite 会话。"""
@@ -865,6 +905,8 @@ async def outbox_sqlite_session():
         "ops.feishu_projection_logs",
         "ops.price_adjust_baselines",
         "core.dim_erp_sku",
+        # 投递时要按平台显示名填飞书「平台」单选字段（选项名 ≠ 平台 code）
+        "core.dim_platforms",
     )
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.connect() as conn:
@@ -879,7 +921,11 @@ async def outbox_sqlite_session():
 
 async def _seed_outbox(session, count: int) -> None:
     """种 count 条待投递的价格调整任务。"""
-    from modules.core.db import FeishuProjectionTask
+    from modules.core.db import DimPlatform, FeishuProjectionTask
+
+    # 平台显示名的真源（ORM）：飞书「平台」单选字段要写的是**选项名**（TikTok），
+    # 不是 ERP 的平台 code（tiktok）—— 写 code 会让整批被飞书拒掉。
+    session.add(DimPlatform(platform_code="tiktok", name="TikTok"))
 
     for index in range(count):
         session.add(
@@ -891,6 +937,7 @@ async def _seed_outbox(session, count: int) -> None:
                     "sku_id": index + 1,
                     "sku_key": f"SKU-{index}",
                     "spu": "SPU-1",
+                    "platform_code": "tiktok",
                     "sku_name": f"商品 {index}",
                     "specification": "1 件",
                     "old_min_selling_price": "100.00",

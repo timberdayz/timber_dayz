@@ -292,3 +292,54 @@ other_cost_rate = 1 − 实测采购成本率 − 实测净利率 − 平均 SPU
 | 尾程费率表 | `finance.delivery_rate_rules` 行数 = 0（业务待录）⇒ 尾程算不出来 ⇒ 利润链显示不可算并点名原因，**不按 0 计** |
 | 老基线 | 2238 行全部 `warehouse_code = ''` ⇒ **自动失效** ⇒ 上线后第一轮只重建基线、不通知（安全方向） |
 | deploy-logs | 只多一个批次 `20261117_030730`（`rebuild_views` + `bootstrap_postgresql_dashboard` 一对） |
+
+---
+
+## 8. 上线后复核发现的既有缺陷：飞书「平台」单选字段（v7.31.1 补丁）
+
+> 发现时间：2026-11-17 上午（v7.31.0 上线后的独立复核）。
+> **不属于五个批次的范围** —— 它引入于 2026-11-07 的「底线下沉到 SKU × 平台」，
+> v7.31.0 只是把它暴露出来。
+
+### 8.1 症状与根因
+
+| 项 | 实测 |
+|---|---|
+| 飞书「📠调价记录表」行数 | **174**（全部 2026-10-28 / 11-01 写的） |
+| 失败任务 | **461 条** `price_adjust` 任务 100% failed，错误 `Feishu batch create failed: not_found: not_found` |
+| 失败起点 | **2026-11-08**（`f51ceb46` 引入 `platform_code` 之后的第一轮） |
+| 重试 | 无次数上限（退避封顶 1 小时）⇒ 每天约 461 条失败日志 |
+| 权限 / 表结构 | **正常**（容器内用 ERP 应用凭据探测：`base/v3` 列表 `code=0`，19 个字段齐全） |
+
+根因：`_price_adjust_payload` 把载荷里的**平台 code**（`tiktok`）直接写进飞书「平台」**单选**字段，
+而该字段的选项名是 `TikTok` / `Shopee` / `Amazon` ⇒ 匹配不上 ⇒ base/v3 **整批拒绝**
+（`not_found`），**一行写错拖垮整批 200 行**。
+
+真表对照实验（临时表，验证完即删、零残留）：
+
+| 写入的「平台」值 | 结果 |
+|---|---|
+| `tiktok` | `code 800030005 not_found`（被拒） |
+| `TikTok` | `code 0`（成功） |
+
+### 8.2 v7.31.1 改了什么
+
+- `backend/services/feishu_projection_service.py`
+  - 「平台」改写**飞书选项名**，选项名取自 `core.dim_platforms.name`（ORM 真源，不硬编码）；
+  - 认不出选项名 ⇒ **不写这一格** + 告警（宁可空着，也不让整批被拒）；
+  - 同族加固：「变动原因」「变动方向」也加选项白名单（ERP 侧是新增常量集合，
+    飞书选项是手工维护的，两边不同步会重演同一故障）；
+- `backend/tests/test_feishu_price_adjust_platform_option.py`（新增，9 个用例）
+- `backend/tests/test_price_adjust_notification.py`：outbox SQLite fixture 补
+  `core.dim_platforms`、载荷补 `platform_code`、假客户端记录实际行内容，
+  并加一条端到端用例（投递出去的行「平台」= `TikTok`）；
+- `scripts/abandon_stale_price_adjust_tasks.py`（新增，dry-run 默认 + `--apply`）：
+  把 461 条旧任务标成 `abandoned`（**不删行**）——否则修好之后它们会被一次性重投，
+  把 461 行旧口径记录倒进只增不改的飞书表。
+
+### 8.3 为什么选择「作废」而不是「重投」
+
+- 这些任务是 **11-08 ~ 11-15** 的旧口径：无仓维度（批次 4 之前）、
+  去重键是老格式 `sku:platform`、基线也已按新口径重建；
+- 飞书调价记录表**只增不改**，倒进去删不掉；
+- 作废保留审计痕迹（载荷、投递日志、失败次数都在），新流程从干净基线重新开始。
