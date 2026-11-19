@@ -1899,3 +1899,36 @@ Validate Data Flow `43467986640` / Docker Build and Push `43467986403`。
 - **发版前置**：`scripts/verify_rules_completeness.py` **PASS**（EXIT=0）；
   `scripts/verify_release_local.py --skip-build` **FINAL_EXIT=0**。
 - **完整口径与证据**：计划文档 `2026-11-19-product-center-cost-floor-caliber-closure.md`。
+
+### 部署后验收（生产只读实测，2026-11-19 23:16 CST）
+
+| 项 | 证据 |
+|---|---|
+| 部署流水线 | run **44548833142**（`Deploy to Production`，事件 `push` / tag `v7.34.0`）—— `check-config` ✔ / `Validate Data Flow (Release Gate)` ✔（13 项门禁全绿）/ `Build and Push Images (Release Tag)` ✔ / `Deploy to Production (Tag Release)` ✔ ⇒ **全 success** |
+| 镜像推送（本次） | GHCR backend 2m49s（14:56:28→14:59:17）；**CNB backend 仅 20 秒**（15:04:23→15:04:43）、CNB frontend 8 秒 |
+| 生产容器 | **7 个全 healthy**：nginx / frontend / backend_api / celery_worker / celery_beat（应用镜像均 `v7.34.0`）+ postgres / redis（Up 9 days，本次**无生产写操作**重启） |
+| 版本自报 | `GET /healthz/ready` → `{"status":"ready","version":"v7.34.0","runtime_mode":"production","checks":{"database":"connected","dashboard":"ready"}}`；容器内 `APP_VERSION=v7.34.0` / `APP_ENV=production`；`GET /api/docs` → **200** |
+| 前端 | `GET https://127.0.0.1/` → **200**（838 bytes，nginx 301 强制跳 HTTPS）；新产物 **`ProductCenter-60021ab0.js`**（`assets/js` 共 114 个 chunk） |
+| 迁移链头 | **`current_schema_20261239_cost_floor_caliber_closure`**（= 本批次 head）；`core.dim_platforms` **已无 `delivery_cost_rate` 列**（退役列确认删除） |
+| 费率实测 | shopee 桶 `0.0358`（**3.58%**）/ 佣金 `0.16` / 达人 `0.0111`，`fee_rate_source` = `official_3pf_commission_2026_01_01 + manual_2026_11_19_settlement_ledger_service_fee`；tiktok 桶 `0.0311`（**3.11%**）/ 佣金 `0.08175` / 达人 `0.0606`，`fee_rate_source` = `official_sg_2026_04_01 + manual_2026_11_19_settlement_ledger_transaction_fee`；两者 `fee_rate_version` = **`v4`**；amazon / miaoshou 仍全空（按预期仍属缺料） |
+| 残留清理 | 上一轮失败遗留的 5 个 `__predeploy_2825110_1795099298` 容器（Exited、v7.33.0）已 `docker rm` 清空 ⇒ 残留 0；本次部署自身的 staged 容器已由 `discard_staged_application_containers`（脚本 `:181-189`）正常回收 |
+
+### ⚠️ 一次发布事故（已完结，写下来别再踩）
+
+**经过**：首发 run 44538689286 的部署脚本**本来正在正常执行**（`Deploy to production server` 14:41:35→14:49:44），
+被我用 `gh run cancel` **误杀** —— 起因是我把「CNB 首次推送 backend 1.16GB 用了 36 分钟」误判成「卡死」。
+因 `trap handle_deploy_exit EXIT` **只在脚本进程正常退出时触发**，被 SIGKILL/SIGHUP 杀掉时**不会回滚** ⇒
+老容器停在 `__predeploy_*`（Exited）、新容器未接管 ⇒ **生产停机约 27 分钟**。
+
+**两条硬教训**：
+
+1. **不凭「步骤耗时远超历史基准」判死**。取消前必须先取完整 step 时间线 + 日志，确认**确实无进展**。
+   本次的决定性对照：同一 tag 的**第二次**推送，CNB backend **只用 20 秒**（≈ v7.33.0 基准 22 秒）
+   ⇒ 上次 36 分钟是 **CNB registry 首次接收全新大镜像时的上游吞吐慢**，既不是网络断开也不是卡死。
+2. **迁移一旦在生产执行，回滚老版本就不再可行**。本批迁移已在生产库落地（`delivery_cost_rate` 列已删），
+   而 v7.33.0 的 ORM 仍映射该列 ⇒ 老容器起手即 `UndefinedColumn` ⇒ 当时**唯一的出路是把 v7.34.0 部署上去**，
+   而不是回滚。（⇒ 迁移类发版前应把「回滚可行性」当成显式验收项。）
+
+**重新部署的方式（标准流程，未走手动旁路）**：tag `v7.34.0` 的两端对象本就一致（`aa515a12` → 提交 `b784dbbc`），
+已发布 tag 不重写 ⇒ 采用「**删掉 GitHub 上的 tag ref → 重推同一个 annotated tag 对象**」重新触发标准流水线
+（`on: push: tags` 收到 create 事件）⇒ 两端 tag 对象**始终保持同一对象**，CNB 端无需任何改动。

@@ -781,7 +781,11 @@ Shopee / SKU 920（包邮）：分母 0.5140 → 0.5431，底线 **125.34 → 11
 - [x] 全量回归 0 failed；`black` / `ruff` 全绿
       （后端 **4907 passed / 0 failed**；前端 **578/578**；`vue-tsc` EXIT=0；ESLint 无新增规则类型）
 - [x] 发版前置：`verify_rules_completeness` PASS、`verify_release_local --skip-build` EXIT=0
-- [ ] 部署后验收：7 容器 healthy、版本自报正确、迁移链头正确、费率表数据符合预期
+- [x] 部署后验收：7 容器 healthy、版本自报正确、迁移链头正确、费率表数据符合预期
+      （生产实测 2026-11-19 23:16 CST：部署流水线 run **44548833142** 全 success；
+      7 容器全 healthy、应用镜像均 v7.34.0；`/healthz/ready` → `version: v7.34.0` / `runtime_mode: production`；
+      迁移链头 `current_schema_20261239_cost_floor_caliber_closure`；
+      桶 shopee `0.0358` / tiktok `0.0311`、`fee_rate_version` v4、`delivery_cost_rate` 列已不存在）
 - [x] CHANGELOG 写清"业务概念变了什么 + 上线后需业务录数什么"；归档发布证据
       （`CHANGELOG.md` v7.34.0 段；归档见 `archive/STATUS-2026-11-13-full-history.md`）
 
