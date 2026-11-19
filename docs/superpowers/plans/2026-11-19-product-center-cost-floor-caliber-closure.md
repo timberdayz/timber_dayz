@@ -754,21 +754,36 @@ Shopee / SKU 920（包邮）：分母 0.5140 → 0.5431，底线 **125.34 → 11
 
 ## 10. 验收清单（P1）
 
-- [ ] 桶新值**人工确认**并写进迁移；`fee_rate_source`/`version` 正确；`downgrade` 可还原
-- [ ] 后端：`compute_cost_floor` 新分母（佣金单独进分母）；缺平台佣金 ⇒ `missing_platform_fee_rate` 且不算底线
-- [ ] 后端：**SPU 两率折进分子**（× `(1 + 退货率 + 货损率)`），分母不再扣这两个率；两率缺失 ⇒ `missing_spu_rates` 且不算底线
-- [ ] 后端：尾程直接进分子，"成对生效"与 `delivery_cost_rate` 参数/字段**全部退役**
-- [ ] 后端：利润链**扣桶**且两率按成本折；在底线上算利润 ⇒ 利润率 = 目标利润率（守护钉死）
-- [ ] 后端：利润链缺平台佣金率/桶 ⇒ 整条留白 **且点名**（`platform_rate_missing_reasons`，与底线链同一套词）；桶入参无默认值（§3.6）
-- [ ] 后端：调价通知字段含新口径
-- [ ] 后端：**P2 履约成本进分子**（头程 / 仓储 / 贴单）；缺体积 ⇒ `missing_unit_volume` + **仍然出底线**
-- [ ] 后端：**护栏收口** —— estimates 底价护栏用带仓底线（与商品中心页面同一条，§3.7）
-- [ ] 前端：术语全部对齐（对照表逐条）+ 路径图 + 空白显示修复 + 删「尾程占收入比」
-- [ ] 守护：后端新增/改写测试全绿；前端守护同步（**不许改松**）
-- [ ] 全量回归 0 failed；`black` / `ruff` 全绿
-- [ ] 发版前置：`verify_rules_completeness` PASS、`verify_release_local --skip-build` EXIT=0
+> ✅ = 已通过（括号里是**证据**）；⬜ = 待生产部署后验收
+
+- [x] 桶新值**人工确认**并写进迁移；`fee_rate_source`/`version` 正确；`downgrade` 可还原
+      （Walter 已批 §6；迁移往返演练 `test_batch9_migration_roundtrip.py` **1 passed**）
+- [x] 后端：`compute_cost_floor` 新分母（佣金单独进分母）；缺平台佣金 ⇒ `missing_platform_fee_rate` 且不算底线
+      （`test_cost_floor_platform_fee_split.py`）
+- [x] 后端：**SPU 两率折进分子**（× `(1 + 退货率 + 货损率)`），分母不再扣这两个率；两率缺失 ⇒ `missing_spu_rates` 且不算底线
+      （`test_spu_loss_rate_cost_multiplier.py` 13 条）
+- [x] 后端：尾程直接进分子，"成对生效"与 `delivery_cost_rate` 参数/字段**全部退役**
+      （`test_product_delivery_cost_floor.py` 整篇重写）
+- [x] 后端：利润链**扣桶**且两率按成本折；在底线上算利润 ⇒ 利润率 = 目标利润率（守护钉死）
+      （`test_cost_floor_platform_fee_split.py` 两链同价用例：利润率 0.25，容差 1e-6）
+- [x] 后端：利润链缺平台佣金率/桶 ⇒ 整条留白 **且点名**（`platform_rate_missing_reasons`，与底线链同一套词）；桶入参无默认值（§3.6）
+      （`test_profit_chain_required_rates.py` 7 条）
+- [x] 后端：调价通知字段含新口径
+      （`test_price_adjust_notify_warehouse_dimension.py`）
+- [x] 后端：**P2 履约成本进分子**（头程 / 仓储 / 贴单）；缺体积 ⇒ `missing_unit_volume` + **仍然出底线**
+      （新增 `product_fulfillment_cost_service.py`；自洽验算 SKU 920 四场景全对）
+- [x] 后端：**护栏收口** —— estimates 底价护栏用带仓底线（与商品中心页面同一条，§3.7）
+      （TikTok 30.98 → **57.46**）
+- [x] 前端：术语全部对齐（对照表逐条）+ 路径图 + 空白显示修复 + 删「尾程占收入比」
+      （`productCenterUi.test.mjs` **113/113**）
+- [x] 守护：后端新增/改写测试全绿；前端守护同步（**不许改松**）
+      （新增 4 个测试文件、改写 8 个既有守护）
+- [x] 全量回归 0 failed；`black` / `ruff` 全绿
+      （后端 **4907 passed / 0 failed**；前端 **578/578**；`vue-tsc` EXIT=0；ESLint 无新增规则类型）
+- [x] 发版前置：`verify_rules_completeness` PASS、`verify_release_local --skip-build` EXIT=0
 - [ ] 部署后验收：7 容器 healthy、版本自报正确、迁移链头正确、费率表数据符合预期
-- [ ] CHANGELOG 写清"业务概念变了什么 + 上线后需业务录数什么"；STATUS 台账同步；归档发布证据
+- [x] CHANGELOG 写清"业务概念变了什么 + 上线后需业务录数什么"；归档发布证据
+      （`CHANGELOG.md` v7.34.0 段；归档见 `archive/STATUS-2026-11-13-full-history.md`）
 
 ---
 

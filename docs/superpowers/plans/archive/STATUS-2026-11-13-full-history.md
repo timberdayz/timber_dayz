@@ -1855,3 +1855,47 @@ Validate Data Flow `43467986640` / Docker Build and Push `43467986403`。
   出处待确认；残差桶 `other_cost_rate` 与 `delivery_cost_rate` 待重算；汇率 5.2077 待业务认可；生产 1122 个
   SKU 重量段全空、包邮开关默认全不包邮。
 - **完整口径与证据**：计划文档 `2026-11-16-product-center-five-batch-optimization.md` §9.11。
+
+## 发布证据（v7.34.0，2026-11-19）· 批次 9
+
+> 来自 `docs/superpowers/plans/STATUS.md` 台账（2026-11-19，批次 9 已完结）。
+> 本节已完结（v7.34.0 已发版、已部署生产、部署后验收通过），按「台账瘦身约定」移入归档。
+> 完整口径与证据见计划文档 `2026-11-19-product-center-cost-floor-caliber-closure.md`。
+
+- **批次 9 · 成本底线口径收口**（Walter 拍板七条口径）：① 平台佣金率**单独进分母**
+  （以前藏在桶里 ⇒ 界面上填了**根本不生效**）；② 桶 = 佣金与尾程之外的平台侧按收入比例扣款，
+  新值取**结算单实测**（Shopee **3.58%** 服务费 / TikTok **3.11%** 交易手续费，推翻旧推算
+  6.49% / 13.89%）；③ 尾程**直接进分子**，「尾程占收入比」列与「成对生效」机制**一并退役**
+  （生产该列全 NULL ⇒ 尾程**从来没进过底线**）；④ SPU 两率改**按件折进分子** × `(1+R+D)`
+  （行业基准件损率，不再按收入比例扣）；⑤ 头程 / 仓储 / 贴单三块履约按件成本**第一次进底线**；
+  ⑥ 利润链**必须同步扣桶**（以前两条链恒差 26.78pt）；⑦ 界面三个手填项合并成「底线成本率合计」。
+- **新口径公式**：底线 = (采购 + 头程 + 仓储 + 贴单 + 尾程) × (1 + 退货率 + 货损率)
+  ÷ (1 − 平台佣金率 − 桶 − 达人佣金率 − 目标利润率)。
+- **SKU 920（生产实测输入）**：现状 157.64（真实利润率仅 **18.28%**，分子漏四块成本）→
+  新口径不包邮 **77.20** / 包邮 **118.62** / 体积已录 **136.06**；
+  底线上的利润率分别 **25.000% / 24.987% / 25.004%**（精确等于目标利润率）。
+- **⚠️ 护栏收口（收紧）**：estimates 底价护栏原本用**不带仓**的底线（偏松）⇒ 形同虚设，
+  改为带仓底线、与商品中心页面**同一条**（测试口径 TikTok 30.98 → **57.46**）
+  ⇒ 「预计售价偏低」的利润版本保存**会被拦更多**。CHANGELOG 已点名。
+- **⚠️ 必填平台费率缺失时利润链整条留白且点名**：`platform_rate_missing_reasons`
+  （`missing_platform_fee_rate` / `missing_platform_cost_rate`，与底线链同一套词）；
+  桶入参**去掉默认值** ⇒ 漏传当场 `TypeError` 而不是悄悄留白。
+- **发版前抓到的两个迁移 bug**（都只在真正跑那条路径时才暴露）：
+  ① `op.drop_column(列名, schema=..., table_name=...)` ⇒ TypeError
+  ⇒ **整条迁移链在 upgrade 阶段就断**；② `op.add_column(t, sa.Column(..., schema=...))`
+  ⇒ TypeError ⇒ **只有跑 downgrade 才暴露**（现有演练只跑 `upgrade head`，看不见它）。
+  ⇒ 新增**迁移往返演练守护** `test_batch9_migration_roundtrip.py`
+  （baseline → upgrade 20261238 → upgrade head → **downgrade 20261238** → upgrade head，
+  断言列恢复、桶值/来源/版本全部还原）。
+- **落地物**：新增 `backend/services/product_fulfillment_cost_service.py`（履约按件成本唯一实现）；
+  改 `product_pricing_service` / `product_pricing_query_service` / `product_profit_service` /
+  `product_finance_service` / `product_center.py`（路由）/ `product_clearance_service` /
+  `price_adjust_notify_service` / `modules/core/db/schema_parts/dimensions.py`；
+  迁移 `current_schema_20261239_cost_floor_caliber_closure`。
+- **守护**：新增 4 个测试文件（迁移往返 / 佣金拆分 / 两率按件折 / 必填费率）、改写 8 个既有守护
+  （口径变了守护跟着改，**不许改松**）；前端 `productCenterUi.test.mjs` **113/113**。
+- **全量回归**：后端 **4907 passed / 0 failed / 7 skipped**；前端 **578/578**（122 个测试文件）；
+  `vue-tsc --noEmit` EXIT=0；ESLint 相对 HEAD 基线**无新增规则类型**；black / ruff 全绿。
+- **发版前置**：`scripts/verify_rules_completeness.py` **PASS**（EXIT=0）；
+  `scripts/verify_release_local.py --skip-build` **FINAL_EXIT=0**。
+- **完整口径与证据**：计划文档 `2026-11-19-product-center-cost-floor-caliber-closure.md`。

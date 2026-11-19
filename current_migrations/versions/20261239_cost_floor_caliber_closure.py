@@ -188,6 +188,7 @@ def upgrade() -> None:
         #    注意：``op.add_column`` 的签名相反，是 ``(table_name, column, schema=...)``。
         op.drop_column(PLATFORM_TABLE, RETIRED_COLUMN, schema=SCHEMA)
 
+
 def downgrade() -> None:
     bind = op.get_bind()
 

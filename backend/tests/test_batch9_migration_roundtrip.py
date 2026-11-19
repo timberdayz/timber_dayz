@@ -187,7 +187,9 @@ def roundtrip_db():
     engine = create_engine(temp_url, future=True)
     try:
         with admin_engine.connect() as conn:
-            conn.execute(text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)'))
+            conn.execute(
+                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
+            )
             conn.execute(text(f'CREATE DATABASE "{database_name}"'))
         _run_alembic(["upgrade", BASELINE_REVISION], env)
         _seed(engine)
@@ -196,7 +198,9 @@ def roundtrip_db():
     finally:
         engine.dispose()
         with admin_engine.connect() as conn:
-            conn.execute(text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)'))
+            conn.execute(
+                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
+            )
         admin_engine.dispose()
 
 
