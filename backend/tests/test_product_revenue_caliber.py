@@ -41,6 +41,10 @@ def _preview(**overrides):
         "actual_logistics_cost": None,
         "actual_storage_cost": None,
         "platform_fee_rate": Decimal("0.10"),
+        # 批次 9：桶（平台其他成本率）是利润链的**必填**成本项 ——
+        # 不传 ⇒ 整条利润链算不出来（不是静默按 0 计）。
+        # 本文件只守护「商家实收」口径 ⇒ 显式给 0。
+        "other_cost_rate": Decimal("0"),
         "expected_ad_rate": Decimal("0.10"),
         "return_rate": Decimal("0.03"),
         "damage_rate": Decimal("0.02"),
@@ -64,11 +68,13 @@ def test_platform_profit_preview_revenue_equals_measured_selling_price():
     assert result["expected"]["net_revenue"] == Decimal("100.00")
     # 平台佣金 = 商家实收 × 平台费率 = 100 × 10% = 10
     assert result["expected"]["platform_fee"] == Decimal("10.00")
-    # 退货损失 = 100 × 3% = 3；货损 = 100 × 2% = 2
-    assert result["expected"]["return_loss"] == Decimal("3.00")
-    assert result["expected"]["damage_loss"] == Decimal("2.00")
-    # 广告前利润 = 100 − (30 + 8 + 2 + 0 贴单 + 10 平台佣金 + 0 达人佣金 + 3 + 2) = 45
-    assert result["expected"]["pre_ad_profit"] == Decimal("45.00")
+    # 批次 9：两率**按件折**（行业基准件损率 ⇒ 多摊出来的货钱），不再按收入比例扣。
+    # 按件成本合计 = 30 采购 + 8 头程 + 2 仓储 + 0 贴单 + 0 尾程 = 40
+    #   退货损失 = 40 × 3% = 1.20；货损 = 40 × 2% = 0.80
+    assert result["expected"]["return_loss"] == Decimal("1.20")
+    assert result["expected"]["damage_loss"] == Decimal("0.80")
+    # 广告前利润 = 100 − (40 + 10 平台佣金 + 0 达人佣金 + 0 桶 + 1.20 + 0.80) = 48
+    assert result["expected"]["pre_ad_profit"] == Decimal("48.00")
 
 
 def test_platform_profit_preview_has_no_coupon_parameter():
@@ -84,6 +90,7 @@ def test_platform_profit_preview_has_no_coupon_parameter():
             actual_logistics_cost=None,
             actual_storage_cost=None,
             platform_fee_rate=Decimal("0.10"),
+            other_cost_rate=Decimal("0"),
             expected_ad_rate=Decimal("0.10"),
             return_rate=Decimal("0.03"),
             damage_rate=Decimal("0.02"),
@@ -103,8 +110,10 @@ def test_baseline_profit_revenue_equals_selling_price():
         damage_rate=Decimal("0.02"),
     )
     assert result["net_revenue"] == Decimal("100.00")
-    # 100 − (20 + 15 + 5 + 10 平台费 + 5 退货 + 2 货损) = 43
-    assert result["estimated_contribution_profit"] == Decimal("43.00")
+    # 批次 9：两率**按件折** —— 基准 = 采购 20 + 物流 15（已确认账单优先）+ 仓储 5 = 40
+    #   退货 = 40 × 5% = 2.00；货损 = 40 × 2% = 0.80
+    # 100 − (20 + 15 + 5 + 10 平台费 + 2.00 + 0.80) = 47.20
+    assert result["estimated_contribution_profit"] == Decimal("47.20")
 
 
 def test_baseline_profit_has_no_coupon_parameter():

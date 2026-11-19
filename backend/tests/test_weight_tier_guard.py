@@ -350,8 +350,10 @@ def test_sku_page_uses_weight_tier_dropdown():
 
 def test_delivery_rate_page_is_driven_by_weight_tier():
     source = FRONTEND_PATH.read_text(encoding="utf-8")
+    # ⚠️ 批次 9 术语统一：「物流批次」改叫「头程批次」
+    #    （物流 = 头程 + 尾程两段，混叫会让运营以为这是同一笔钱的两种叫法）。
     section = source[
-        source.index('label="尾程费率"') : source.index('label="物流批次"')
+        source.index('label="尾程费率"') : source.index('label="头程批次"')
     ]
     assert 'label="重量段"' in section
     assert "row.weight_tier_code" in section

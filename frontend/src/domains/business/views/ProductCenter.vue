@@ -87,7 +87,7 @@
                   :value="
                     categoryCode(cat)
                   " /></el-select></template></el-table-column
-          ><el-table-column label="物流货损率" width="120"
+          ><el-table-column label="运输货损率" width="180"
             ><template #default="{ row }"
               ><div class="rate-cell"
                 ><el-input-number
@@ -97,8 +97,19 @@
                   :step="0.1"
                   @update:model-value="row.logistics_damage_rate = fromPercent($event); markDirty('spu', row)"
                   :controls="false"
-                  size="small" /><span class="rate-suffix">%</span></div></template></el-table-column
-          ><el-table-column label="退货损失率" width="120"
+                  size="small" /><span class="rate-suffix">%</span></div>
+              <!--
+                批次 9（口径归一）：SPU 两率 = **行业基准的件损率**
+                （"这个款在行业主流数据下，发 100 件里坏/退几件"），
+                现在**按件折进成本**（分子 × (1 + 退货率 + 货损率)），不再按收入比例扣。
+                ⚠️ 人工维护 ⇒ 界面上必须说清「这是基准值，不是实测值」。
+              -->
+              <div class="pricing-tier-hint">
+                行业基准件损率：这个款在行业主流数据下，发 100 件里坏几件<br />
+                现在按件折进成本（每件按件成本 × (1 + 退货率 + 货损率)），不是按收入比例扣<br />
+                人工维护，当前无实测校准
+              </div></template></el-table-column
+          ><el-table-column label="退货损失率" width="180"
             ><template #default="{ row }"
               ><div class="rate-cell"
                 ><el-input-number
@@ -108,7 +119,12 @@
                   :step="0.1"
                   @update:model-value="row.return_loss_rate = fromPercent($event); markDirty('spu', row)"
                   :controls="false"
-                  size="small" /><span class="rate-suffix">%</span></div></template></el-table-column
+                  size="small" /><span class="rate-suffix">%</span></div>
+              <div class="pricing-tier-hint">
+                行业基准件损率：这个款在行业主流数据下，发 100 件里退几件<br />
+                现在按件折进成本（每件按件成本 × (1 + 退货率 + 货损率)），不是按收入比例扣<br />
+                人工维护，当前无实测校准
+              </div></template></el-table-column
           ><el-table-column label="状态" width="110"
             ><template #default="{ row }"
               ><el-select v-model="row.biz_status" size="small" @change="markDirty('spu', row)"
@@ -389,6 +405,7 @@
                 <div class="pricing-tier-hint">{{ row.pricing_tier_label || "-" }}<template v-if="row.pricing_days_since_restock != null">（库龄 {{ row.pricing_days_since_restock }} 天）</template><el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag></div>
                 <div class="pricing-tier-hint">底线按 {{ skuPricingPlatform || '默认平台' }} 的成本率计算</div>
                 <div class="pricing-tier-hint">人工覆盖按平台生效，各平台底线互相独立</div>
+                <div v-if="fulfillmentNotCountedHint(row)" class="pricing-tier-hint">{{ fulfillmentNotCountedHint(row) }}</div>
               </div></template
             ></el-table-column
           ><el-table-column label="达人佣金率" width="145"><template #header><el-tooltip content="留空表示不单独设置，按平台默认计算" placement="top"><span class="pricing-header">达人佣金率<el-icon class="pricing-header-help"><QuestionFilled /></el-icon></span></el-tooltip></template><template #default="{ row }"><div class="rate-cell"><el-input-number :model-value="toPercent(row.creator_commission_rate)" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" :placeholder="row.creator_commission_rate_fallback != null ? percent(row.creator_commission_rate_fallback) : '按平台默认'" @update:model-value="row.creator_commission_rate = fromPercent($event, null); markDirty('sku', row)" /><span class="rate-suffix">%</span></div></template></el-table-column
@@ -453,7 +470,7 @@
           <el-select v-model="operatingQuery.warehouse_code" clearable filterable placeholder="收货仓库" @change="resetOperatingPage">
             <el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="item.warehouse_name || item.warehouse_code" :value="item.warehouse_code" />
           </el-select>
-          <el-select v-model="operatingQuery.transport_type" clearable placeholder="物流方式" @change="resetOperatingPage">
+          <el-select v-model="operatingQuery.transport_type" clearable placeholder="运输方式（海运/空运）" @change="resetOperatingPage">
             <el-option label="海运" value="sea" />
             <el-option label="空运" value="air" />
             <el-option label="铁路运输" value="rail" />
@@ -476,7 +493,7 @@
             高级：按广告分成率口径（默认用目标ROI）
           </el-checkbox>
         </div>
-        <el-alert v-if="!operatingQuery.platform_code || !operatingQuery.warehouse_code || !operatingQuery.transport_type" type="info" :closable="false" title="请选择平台、收货仓库和物流方式后加载 SKU 测算数据" />
+        <el-alert v-if="!operatingQuery.platform_code || !operatingQuery.warehouse_code || !operatingQuery.transport_type" type="info" :closable="false" title="请选择平台、收货仓库和运输方式后加载 SKU 测算数据" />
         <div class="roi-disclaimer">
           <div>① 本表不预测销量：提价会不会掉量看不到（缺历史投放数据，做不了销量预测）。</div>
           <div>② 平台报告 ROI 含自然流量/达人归因，达标 ≠ 赚钱；投多少不亏以本表「保本ROI」为准。</div>
@@ -530,7 +547,7 @@
             包邮开关（批次 6，2026-11-17）：跨境电商**不是默认包邮**，而是**选择性包邮**
             ⇒ 「这个 SKU 在这个平台包不包邮」是经营选择，由运营逐个 SKU 决定。
             ⚠️ 粒度 = SKU × 平台（与底线、人工覆盖同一粒度）：包邮是渠道策略，不是仓库属性。
-            开关一变，尾程立刻改口径：开 ⇒ 尾程进成本底线、利润扣掉；关 ⇒ 买家付运费，
+            开关一变，尾程立刻改口径：开 ⇒ 尾程进成本底线、利润扣掉；关 ⇒ 买家付尾程运费，
             商家不承担 ⇒ 尾程不进底线、利润按 0 计（**不是**算不出来）。
           -->
           <el-table-column label="包邮" width="130" class-name="seg-input" label-class-name="seg-input"
@@ -540,7 +557,7 @@
                 :loading="row.__free_shipping_saving"
                 @change="onFreeShippingChange(row)" />
               <div class="pricing-tier-hint">
-                {{ row.free_shipping ? "尾程由我们承担" : "买家付运费，尾程不计入底线" }}
+                {{ row.free_shipping ? "尾程由我们承担" : "买家付尾程运费，尾程不计入底线" }}
               </div></template
           ></el-table-column>
           <el-table-column label="测算售价" width="110" class-name="seg-input" label-class-name="seg-input"
@@ -619,7 +636,7 @@
               }}</span>
               <el-tooltip
                 placement="top"
-                content="扣掉采购、物流、仓储、贴单、平台佣金、达人佣金、货损、退货后的占比。分母是商家实收（= 测算售价），与平台 GMV 同一口径"
+                content="扣掉采购、头程、仓储、贴单、尾程、平台佣金、达人佣金、货损、退货后的占比。分母是商家实收（= 测算售价），与平台 GMV 同一口径"
               >
                 <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
               </el-tooltip></template
@@ -658,15 +675,14 @@
           -->
           <el-table-column label="跨仓提示" width="280" class-name="seg-result" label-class-name="seg-result"><template #default="{ row }"><template v-if="row.warehouse_divergence"><el-tag size="small" type="warning">跨仓库龄差异</el-tag><div class="warehouse-divergence-hint">{{ row.warehouse_divergence.suggestion }}</div></template><span v-else class="muted">-</span></template></el-table-column>
           <!-- 段四 · 成本明细与利润 -->
-          <el-table-column label="预估物流成本" width="150" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
+          <el-table-column label="预估头程运费" width="150" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
           <el-table-column label="预估仓储成本" width="150" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceCostDisplay(row, "storage") }}</template></el-table-column>
           <el-table-column label="贴单费" width="115" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceLabelFeeDisplay(row) }}</template></el-table-column>
           <!--
-            尾程配送费（批次 3 只读展示 → 批次 4 进利润与成本底线）：仓 → 买家那段快递费，每卖一件必付。
+            尾程配送费（批次 3 只读展示 → 批次 4 进利润与成本底线 → 批次 9 直接进成本分子）：仓 → 买家那段快递费，每卖一件必付。
             ⚠️ 标「估算」是因为缺重量时只能保守估（该仓最轻档 vs 最贵仓，取更贵的）。
-            ⚠️ 标「未计入底线」是因为**平台没配尾程占收入比的拆分基准**：
-               尾程进底线必须成对（分子加尾程 ⇔ 分母把残差里那份剔掉），
-               少一半就都别进 —— 否则同一笔尾程被扣两次。
+            ⚠️ 标「未计入底线」现在只有一种可能：**这个 SKU 不包邮**（买家付尾程运费 ⇒ 商家不承担尾程）。
+               平台侧那条「尾程按收入占比拆分」的旧机制已退役，尾程**直接进成本底线的分子**（不再成对生效）。
           -->
           <el-table-column label="尾程配送费" width="150" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }"
@@ -712,12 +728,12 @@
           <el-table-column label="平台佣金" width="105" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
           <el-table-column label="达人佣金" width="120" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }"><div class="rate-cell"><span>{{ percent(row.preview?.expected?.creator_commission_rate) }}</span></div>{{ money(row.preview?.expected?.creator_commission) }}<div v-if="creatorCommissionHint(row)" class="price-floor-hint">{{ creatorCommissionHint(row) }}</div></template></el-table-column>
           <el-table-column label="预计广告费用" width="105" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ money(row.preview?.expected?.ad_cost) }}</template></el-table-column>
-          <el-table-column label="物流货损率（SPU）" width="110" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
+          <el-table-column label="运输货损率（SPU）" width="110" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
           <el-table-column label="退货损失率（SPU）" width="130" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.return_loss_rate) }}</template></el-table-column>
           <el-table-column label="参考成本利润" width="120" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }">{{
               money(row.preview?.expected?.profit)
-            }}<div v-if="adCostMissingHint(row)" class="price-floor-hint">{{ adCostMissingHint(row) }}</div></template></el-table-column
+            }}<div v-if="platformRateMissingHint(row)" class="price-floor-hint">{{ platformRateMissingHint(row) }}</div><div v-if="adCostMissingHint(row)" class="price-floor-hint">{{ adCostMissingHint(row) }}</div></template></el-table-column
           >
           <el-table-column label="利润率" width="100" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }">{{
@@ -729,7 +745,7 @@
               >{{ money(row.preview?.actual_recost?.profit) }}
               <el-tooltip
                 placement="top"
-                :content="`物流 ${money(row.actual_logistics_cost)}（真实账单）｜仓储 ${money(row.preview?.actual_recost?.storage_cost)}（规则预估——系统里没有仓储费账单）`"
+                :content="`头程 ${money(row.actual_logistics_cost)}（真实账单）｜仓储 ${money(row.preview?.actual_recost?.storage_cost)}（规则预估——系统里没有仓储费账单）`"
               >
                 <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
               </el-tooltip></template
@@ -764,9 +780,9 @@
           @size-change="loadOperatingProfiles"
         />
       </el-tab-pane>
-      <el-tab-pane label="物流仓储管理" name="logistics"
+      <el-tab-pane label="头程与仓储管理" name="logistics"
         ><el-tabs v-model="costTab" class="cost-tabs"
-          ><el-tab-pane label="物流服务商规则" name="rules"
+          ><el-tab-pane label="头程服务商规则" name="rules"
             ><div class="toolbar">
               <el-button type="primary" :icon="Plus" @click="addRuleRow"
                 >新增规则</el-button
@@ -777,7 +793,7 @@
                 >保存规则</el-button
               >
             </div>
-            <el-table :data="rules" v-loading="loadingRules" stripe border empty-text="暂无物流规则"
+            <el-table :data="rules" v-loading="loadingRules" stripe border empty-text="暂无头程规则"
               ><el-table-column label="服务商"
                 ><template #default="{ row }"
                   ><el-input
@@ -866,7 +882,6 @@
             </div>
             <el-alert type="warning" :closable="false" title="尾程是每卖一件必付的成本：没有配费率 ⇒ 尾程算不出来 ⇒ 利润与最低售价都算不出来（不会当成 0）。重量段从全局段表里选，不手工填上下限（手填迟早重叠 ⇒ 选档歧义）。" />
             <el-alert type="info" :closable="false" title="单价一律填**人民币等值**（系统不换算汇率）：官方价目表若是外币（Shopee SG 是新币），请自行折算后填人民币，并把原币与汇率写在备注里留档。直接照抄外币数字会被当成人民币 ⇒ 尾程少算好几倍 ⇒ 成本底线偏低 ⇒ 漏钱。" />
-            <el-alert v-if="deliveryPlatformSplitHint" type="warning" :closable="false" :title="deliveryPlatformSplitHint" />
             <!-- 卡片式维护：一个「平台 × 仓」一张卡，卡内是全局段表的全部段 -->
             <div class="delivery-card-bar">
               <el-select v-model="deliveryCardForm.platform_code" placeholder="选平台" style="width: 160px" filterable @change="onDeliveryCardTargetChange">
@@ -957,7 +972,7 @@
                 <el-button type="primary" :loading="savingDeliveryBatch" @click="submitDeliveryBatch">保存这些档位</el-button>
               </template>
             </el-dialog></el-tab-pane
-          ><el-tab-pane label="物流批次" name="batches"
+          ><el-tab-pane label="头程批次" name="batches"
             ><div class="toolbar">
               <el-select
                 v-model="billStatus"
@@ -970,7 +985,7 @@
                   label="已作废"
                   value="voided" /></el-select
               ><el-button type="primary" :icon="Plus" @click="openBatchCreate"
-                >新增物流批次</el-button
+                >新增头程批次</el-button
               >
             </div>
             <el-table
@@ -980,7 +995,7 @@
               border
               ><el-table-column prop="bill_no" label="批次号" /><el-table-column
                 prop="logistics_provider"
-                label="物流服务商"
+                label="头程服务商（货代）"
               /><el-table-column
                 prop="bill_date"
                 label="账单日期"
@@ -1020,6 +1035,18 @@
       <el-tabs v-model="pricingDrawer.tab">
         <el-tab-pane label="平台成本率" name="platform">
           <el-alert type="info" :closable="false" title="平台成本率用于最低售价底线计算，仅管理员、主管和财务可维护。" />
+          <!--
+            运输四段路径（批次 9）：把「钱在哪一段被扣掉」摆出来 ⇒ 术语不会再混。
+            头程 = 国内工厂 → 目的国本地仓；仓储 = 本地仓 → 出仓；尾程 = 出仓 → 买家。
+            ⚠️ 头程 ≠ 尾程：头程账单里的「头程末端派送」是港 → 仓那一段，不是买家快递。
+          -->
+          <div class="transport-path">
+            <div class="transport-path-line">国内工厂 ──【头程】──→ 目的国本地仓 ──【仓储】──→ 出仓 ──【尾程】──→ 买家</div>
+            <div class="transport-path-scale">按体积 CBM     按体积 CBM/月  每件贴单费   按重量段</div>
+            <div class="pricing-tier-hint">
+              不在路径上的（平台侧）：平台佣金、平台其他成本率、达人佣金（按收入 %）；退货、货损（行业基准件损率 ⇒ 折成钱进成本）。
+            </div>
+          </div>
           <el-form :model="pricingDrawer.form" label-width="150px" class="drawer-form">
             <el-form-item label="平台">
               <!--
@@ -1046,6 +1073,9 @@
             </el-form-item>
             <el-form-item label="平台佣金率">
               <div class="rate-cell"><el-input-number v-model="pricingDrawer.form.default_fee_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></div>
+              <div class="pricing-tier-hint">
+                平台佣金率<strong>单独进分母</strong>，不含在「平台其他成本率」内。
+              </div>
             </el-form-item>
             <el-form-item label="默认达人佣金率">
               <div class="rate-cell"><el-input-number v-model="pricingDrawer.form.default_creator_commission_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></div>
@@ -1053,24 +1083,15 @@
             </el-form-item>
             <el-form-item label="平台其他成本率">
               <div class="rate-cell"><el-input-number v-model="pricingDrawer.form.other_cost_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></div>
-            </el-form-item>
-            <el-form-item label="尾程占收入比">
-              <div class="rate-cell"><el-input-number v-model="pricingDrawer.form.delivery_cost_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" placeholder="留空=不拆分" /><span class="rate-suffix">%</span></div>
               <div class="pricing-tier-hint">
-                尾程（仓 → 买家那段快递费）按 SKU 重量单件计价，进最低售价底线时要把
-                「平台其他成本率」里按收入摊的那份尾程剔出去，<strong>否则同一笔尾程会被扣两次</strong>。<br />
-                口径 = 平台尾程均值 ÷ 平台平均售价。<strong>留空 ⇒ 尾程不进成本底线</strong>（宁可不算，也不重复扣）。
+                <strong>不含平台佣金、不含尾程</strong>（尾程按件进成本）。这里填平台侧按收入比例扣的其它款项（人工维护）。
               </div>
             </el-form-item>
-            <el-form-item label="成本率合计">
-              <span>{{ pricingDrawer.costRateTotalPct }}%</span>
-              <div class="pricing-tier-hint">仅作成本结构展示，不是底线基数</div>
-            </el-form-item>
-            <el-form-item label="默认底线基数">
-              <span>{{ pricingDrawer.baseRatePct }}%</span>
+            <el-form-item label="底线成本率合计">
+              <span>{{ costRateTotalPct }}%</span>
               <div class="pricing-tier-hint">
-                默认达人佣金率 + 平台其他成本率（平台佣金率已含在「平台其他成本率」内，不重复计入）。<br />
-                <strong>仅在 SKU 未单独设置达人佣金率时成立</strong>；SKU 单独设置后，底线基数 = 平台其他成本率 + 该 SKU 的达人佣金率。
+                底线成本率合计 = 平台佣金率 + 平台其他成本率 + 默认达人佣金率（平台级，不含 SPU 两率）。<br />
+                这三项都按收入比例扣 ⇒ 一起进底线的<strong>分母</strong>：1 − 平台佣金率 − 平台其他成本率 − 达人佣金率 − 目标利润率。
               </div>
             </el-form-item>
             <el-form-item label="生效日期"><el-date-picker v-model="pricingDrawer.form.fee_rate_effective_from" type="date" value-format="YYYY-MM-DD" /></el-form-item>
@@ -1116,7 +1137,7 @@
     </el-drawer>
     <el-drawer
       v-model="batchDrawer.visible"
-      title="物流批次"
+      title="头程批次"
       size="92%"
       destroy-on-close
       ><el-form
@@ -1126,7 +1147,7 @@
         class="batch-form"
         ><el-form-item label="批次号"
           ><el-input v-model="batchDrawer.form.bill_no" /></el-form-item
-        ><el-form-item label="物流服务商"
+        ><el-form-item label="头程服务商（货代）"
           ><el-input
             v-model="batchDrawer.form.logistics_provider" /></el-form-item
         ><el-form-item label="账单日期"
@@ -1281,7 +1302,7 @@
         type="warning"
         :closable="false"
         show-icon
-        title="以下采购单 SKU 待映射，无法生成物流账单行"
+        title="以下采购单 SKU 待映射，无法生成头程账单行"
         :description="unmappedPurchaseSkus.join('；')"
       />
       <el-alert
@@ -1517,27 +1538,16 @@ const pricingDrawer = reactive({
     default_fee_rate_pct: null,
     default_creator_commission_rate_pct: null,
     other_cost_rate_pct: null,
-    // 尾程占收入比（批次 4）：把尾程从「平台其他成本率」里剔出去的拆分基准。
-    // ⚠️ 留空 ⇒ 尾程**不进成本底线**（宁可不算，也不重复扣）。
-    delivery_cost_rate_pct: null,
     fee_rate_effective_from: "",
     fee_rate_source: "",
     fee_rate_version: "",
   },
   policies: [],
 });
-// 成本率合计 = 平台佣金率 + 默认达人佣金率 + 平台其他成本率（仅作成本结构展示）
+// 底线成本率合计 = 平台佣金率 + 平台其他成本率 + 默认达人佣金率（平台级，不含 SPU 两率）
 const costRateTotalPct = computed(() => {
   const form = pricingDrawer.form;
   const total = [form.default_fee_rate_pct, form.default_creator_commission_rate_pct, form.other_cost_rate_pct]
-    .map((value) => Number(value) || 0)
-    .reduce((sum, value) => sum + value, 0);
-  return total.toFixed(2);
-});
-// 默认底线基数 = 默认达人佣金率 + 平台其他成本率（平台佣金率已含在 other_cost_rate 内）
-const baseRatePct = computed(() => {
-  const form = pricingDrawer.form;
-  const total = [form.default_creator_commission_rate_pct, form.other_cost_rate_pct]
     .map((value) => Number(value) || 0)
     .reduce((sum, value) => sum + value, 0);
   return total.toFixed(2);
@@ -2171,7 +2181,7 @@ const loadRules = async () => {
       document.cookie || "<none>",
     );
     rules.value = [];
-    ElMessage.error(error.message || "加载物流规则失败");
+    ElMessage.error(error.message || "加载头程服务商规则失败");
   } finally {
     loadingRules.value = false;
   }
@@ -2234,27 +2244,6 @@ const deliveryTierDuplicateHint = (row) => {
   const label = tier ? tier.label : row.weight_tier_code;
   return `该「平台 × 仓 × ${label}」已有档位 —— 同段填两行会让选档变成歧义，系统会算不出来`;
 };
-
-// 平台没配「尾程占收入比」⇒ 尾程**不进成本底线** ⇒ 录费率的人要知道。
-const deliveryPlatformSplitHint = computed(() => {
-  const codes = [
-    ...new Set(deliveryRules.value.map((row) => row.platform_code).filter(Boolean)),
-  ];
-  const missing = codes.filter((code) => {
-    const platform = operatingDimensions.platforms.find(
-      (item) => item.platform_code === code,
-    );
-    return (platform?.delivery_cost_rate ?? null) === null;
-  });
-  if (!missing.length) return "";
-  const names = missing.map((code) => {
-    const platform = operatingDimensions.platforms.find(
-      (item) => item.platform_code === code,
-    );
-    return platform?.name || code;
-  });
-  return `平台「${names.join("、")}」还没填「尾程占收入比」（定价设置）⇒ 这几档尾程暂不进成本底线（宁可不算，也不重复扣）`;
-});
 
 // 重量段（批次 6）：**全局一套**的段定义。
 // ⚠️ 段表是唯一真源 —— SKU 与尾程费率都只存段编码，
@@ -2836,7 +2825,6 @@ const applyPlatformFeeForm = (platformCode) => {
       default_fee_rate_pct: null,
       default_creator_commission_rate_pct: null,
       other_cost_rate_pct: null,
-      delivery_cost_rate_pct: null,
       fee_rate_effective_from: "",
       fee_rate_source: "",
       fee_rate_version: "",
@@ -2848,7 +2836,6 @@ const applyPlatformFeeForm = (platformCode) => {
     default_fee_rate_pct: toPercent(platform.default_fee_rate),
     default_creator_commission_rate_pct: toPercent(platform.default_creator_commission_rate),
     other_cost_rate_pct: toPercent(platform.other_cost_rate),
-    delivery_cost_rate_pct: toPercent(platform.delivery_cost_rate),
     fee_rate_effective_from:
       platform.fee_rate_effective_from || new Date().toISOString().slice(0, 10),
     fee_rate_source: platform.fee_rate_source || "manual",
@@ -2921,7 +2908,6 @@ const savePlatformFeeRate = async () => {
       default_fee_rate_pct,
       default_creator_commission_rate_pct,
       other_cost_rate_pct,
-      delivery_cost_rate_pct,
       ...feePayload
     } = pricingDrawer.form;
     await productCenterApi.updatePlatformFeeRate(platformCode, {
@@ -2929,8 +2915,6 @@ const savePlatformFeeRate = async () => {
       default_fee_rate: fromPercent(default_fee_rate_pct, null),
       default_creator_commission_rate: fromPercent(default_creator_commission_rate_pct, null),
       other_cost_rate: fromPercent(other_cost_rate_pct, null),
-      // 尾程占收入比（批次 4）：留空 = 不拆分 ⇒ 尾程不进成本底线
-      delivery_cost_rate: fromPercent(delivery_cost_rate_pct, null),
     });
     pricingDrawer.visible = false;
     await loadOperatingDimensions();
@@ -3126,7 +3110,7 @@ const saveOperatingEstimate = async (row) => {
     }
     // --- ROI 投放护栏（阶段 2.2）---
     // ⚠️ 护栏错误排在「资料未完整」**之前** ⇒ 运营看到的第一个原因是 ROI，
-    //    不是"去补物流规则"（补完可能还是亏）。
+    //    不是"去补头程规则"（补完可能还是亏）。
     if (detail?.code === "below_break_even_roi") {
       // basis=lower_bound 表示成本不全、只能给出保本线的**下界**：
       // 下界只可能偏松，所以"低于下界"是**已经能确定**亏，不是估计。
@@ -3202,6 +3186,18 @@ const payloadSku = (row) => {
   delete payload.selling_price_stale;
   delete payload.selling_price_source_cleaned_at;
   delete payload.selling_price_confirmed_at;
+  // ⚠️ 批次 9：成本底线的**只读分解字段**也要剔除 ——
+  //   cost_floor_delivery_cost / delivery_cost_in_cost_floor（尾程那笔）
+  //   cost_floor_logistics_cost / cost_floor_storage_cost / cost_floor_label_fee
+  //   （头程 / 仓储 / 贴单三笔履约按件成本）
+  // 它们全是服务端算出来的**结果**，不是运营填的值：
+  // 回提交上去等于把「服务端刚算的底线分解」当成「运营填的成本」再写回去，
+  // 而且它们在 SkuUpdateRequest 里**根本不存在** ⇒ 属于纯噪声字段。
+  delete payload.cost_floor_delivery_cost;
+  delete payload.delivery_cost_in_cost_floor;
+  delete payload.cost_floor_logistics_cost;
+  delete payload.cost_floor_storage_cost;
+  delete payload.cost_floor_label_fee;
   // creator_commission_rate 必须**保留**：它是可写字段（单独谈的达人佣金率）。
   // 清空要显式传 null，不是删掉这个键。
   payload.purchase_cost_currency = "CNY";
@@ -3287,24 +3283,24 @@ const saveRuleRows = async () => {
     }
     await loadRules();
     dirtyRuleRows.value.clear();
-    ElMessage.success("物流规则已保存");
+    ElMessage.success("头程服务商规则已保存");
   } catch (error) {
-    ElMessage.error(error.message || "保存物流规则失败");
+    ElMessage.error(error.message || "保存头程服务商规则失败");
   }
 };
 const removeProviderRule = async (row) => {
   try {
     await ElMessageBox.confirm(
-      "删除后该规则不再用于新的物流账单测算。已落账的物流批次不受影响。",
-      "删除物流服务商规则",
+      "删除后该规则不再用于新的头程账单测算。已落账的头程批次不受影响。",
+      "删除头程服务商规则",
       { type: "warning" },
     );
     await productCenterApi.deleteProviderRule(row.rule_id);
     rules.value = rules.value.filter((item) => item.rule_id !== row.rule_id);
     dirtyRuleRows.value.delete(row.rule_id);
-    ElMessage.success("物流规则已删除");
+    ElMessage.success("头程服务商规则已删除");
   } catch (error) {
-    if (error !== "cancel") ElMessage.error(error.message || "删除物流规则失败");
+    if (error !== "cancel") ElMessage.error(error.message || "删除头程服务商规则失败");
   }
 };
 const showBindings = async (row) => {
@@ -3563,7 +3559,7 @@ const editBatch = async (row) => {
     unmappedPurchaseSkus.value = [];
     missingVolumeSkus.value = [];
   } catch (error) {
-    ElMessage.error(error.message || "加载物流批次失败");
+    ElMessage.error(error.message || "加载头程批次失败");
   }
 };
 const lineTotal = (row) => {
@@ -3613,21 +3609,21 @@ const saveBatch = async () => {
     });
     batchDrawer.visible = false;
     await loadBatches();
-    ElMessage.success("物流批次草稿已保存");
+    ElMessage.success("头程批次草稿已保存");
   } catch (error) {
-    ElMessage.error(error.message || "保存物流批次失败");
+    ElMessage.error(error.message || "保存头程批次失败");
   }
 };
 const confirmBatch = async (row) => {
   try {
     await ElMessageBox.confirm(
       "确认后账单行不可编辑，只能作废重建。",
-      "确认物流批次",
+      "确认头程批次",
       { type: "warning" },
     );
     await productCenterApi.confirmLogisticsBatch(row.bill_id || row.batch_id);
     await loadBatches();
-    ElMessage.success("物流批次已确认");
+    ElMessage.success("头程批次已确认");
   } catch (error) {
     if (error !== "cancel") ElMessage.error(error.message || "确认失败");
   }
@@ -3752,7 +3748,7 @@ const fromPercent = (value, fallback = 0) =>
 const money = (value) => (value == null ? "-" : `¥${Number(value).toFixed(2)}`);
 const percent = (value) =>
   value == null ? "-" : `${(Number(value) * 100).toFixed(1)}%`;
-// SKU 单件体积（m³）。物流/仓储账单按体积计费，行体积 = 单件体积 × 发货数量。
+// SKU 单件体积（m³）。头程/仓储账单按体积计费，行体积 = 单件体积 × 发货数量。
 // ⚠️ 体积未填时返回 0 —— 账单金额会偏低但**不报错**，所以调用方必须能区分
 // 「体积是 0」和「体积没填」，见 generateBatchLinesFromPurchaseOrders 的 missing_volume 归集。
 const formatVolume = (sku) => {
@@ -3767,9 +3763,9 @@ const MISSING_REASON_LABELS = {
   missing_sku_volume: "待补 SKU 体积",
   missing_sku_weight_tier: "待选重量段",
   missing_turnover_class: "待设置周转类型",
-  missing_logistics_rule: "待配置参考物流规则",
+  missing_logistics_rule: "待配置参考头程规则",
   missing_storage_rule: "待配置仓储规则",
-  ambiguous_logistics_rule: "参考物流规则待指定默认",
+  ambiguous_logistics_rule: "参考头程规则待指定默认",
 };
 const missingReasonLabel = (reason) => MISSING_REASON_LABELS[reason] || "待补资料";
 const referenceCostDisplay = (row, kind) => {
@@ -3785,7 +3781,7 @@ const roiDisplay = (value) => (value == null ? "-" : Number(value).toFixed(2));
 // 成本完整度守卫（阶段 1 硬前提）：成本不全 → pre_ad_profit 高估 → 保本ROI 偏松
 // → 看着宽松 → 运营真投广告 → 亏损。缺输入宁可不算不可乐观：三个 ROI 一律置灰。
 const roiGuarded = (row) => row.reference_cost_status !== "ready";
-// 缺失原因按三份清单分列（缺物流 / 缺仓储 / 缺体积），别混成一坨看不清缺什么
+// 缺失原因按三份清单分列（缺头程 / 缺仓储 / 缺体积），别混成一坨看不清缺什么
 const roiGuardTooltip = (row) => {
   if (!roiGuarded(row)) {
     return "低于这个 ROI，广告就是亏的（财务口径）。分母为商家实收，与平台 GMV 同一把标尺";
@@ -3799,7 +3795,7 @@ const roiGuardTooltip = (row) => {
         reason === "missing_sku_volume" || reason === "missing_sku_weight_tier",
     )
     .map(missingReasonLabel);
-  if (logistics.length) lines.push(`缺物流规则：${logistics.join("、")}`);
+  if (logistics.length) lines.push(`缺头程规则：${logistics.join("、")}`);
   if (storage.length) lines.push(`缺仓储规则：${storage.join("、")}`);
   if (volume.length) lines.push(`缺 SKU 体积/重量：${volume.join("、")}`);
   return lines.join("\n");
@@ -3874,6 +3870,19 @@ const adCostMissingHint = (row) => {
   if (reasons.includes("missing_target_roi")) return "未填目标 ROI，广告费不可算";
   return "广告费不可算";
 };
+// 批次 9：平台佣金率与「平台其他成本率」（桶）是利润链的**必填费率** ——
+// 缺任一项 ⇒ 整条利润链留白（不是按 0 计）。
+// ⚠️ 批次 9 之前利润链不扣桶 ⇒ 桶没配不会留白；批次 9 把桶加进扣项后**新增**了这条路，
+//    运营看到的是一片空白 ⇒ 必须点名，否则不知道该去补哪个费率。
+const platformRateMissingHint = (row) => {
+  const reasons = row.preview?.expected?.platform_rate_missing_reasons || [];
+  if (!reasons.length) return "";
+  if (reasons.includes("missing_platform_fee_rate") && reasons.includes("missing_platform_cost_rate"))
+    return "未配平台佣金率与平台其他成本率，利润不可算";
+  if (reasons.includes("missing_platform_fee_rate")) return "未配平台佣金率，利润不可算";
+  if (reasons.includes("missing_platform_cost_rate")) return "未配平台其他成本率，利润不可算";
+  return "平台费率不全，利润不可算";
+};
 // 批次 2 P5：达人佣金率没配 ⇒ 按 0 计 ⇒ 利润被高估，必须标出来。
 const creatorCommissionHint = (row) =>
   row.creator_commission_source === "assumed_zero" ? "未配置，按 0 计" : "";
@@ -3905,7 +3914,7 @@ const onFreeShippingChange = async (row) => {
     ElMessage.success(
       row.free_shipping
         ? "已开启包邮：尾程由我们承担，计入成本底线与利润"
-        : "已关闭包邮：买家付运费，尾程不计入成本底线",
+        : "已关闭包邮：买家付尾程运费，尾程不计入成本底线",
     );
     await loadOperatingProfiles();
   } catch (error) {
@@ -3924,17 +3933,22 @@ const deliveryCostHint = (row) => {
   if (reasons.includes("missing_delivery_rate_for_tier")) return "该重量段未配尾程费率";
   if (reasons.includes("ambiguous_delivery_tier")) return "同一重量段配了两行费率，无法判定";
   if (reasons.includes("missing_weight_tier")) return "未选重量段，按最轻段保守估算";
-  // 批次 4：尾程算得出来但**没进成本底线** —— 平台没配拆分基准。
-  if (
-    row.delivery_cost != null &&
-    !row.delivery_cost_in_cost_floor &&
-    (row.min_selling_price_missing_reasons || []).includes(
-      "missing_delivery_cost_rate_split",
-    )
-  ) {
-    return "平台未配尾程占比拆分，尾程未计入底线";
-  }
   return "";
+};
+// 履约按件成本（批次 9 P2）：头程 / 仓储 / 贴单是**逐步补齐型**成本 ——
+// 缺一项 ⇒ 该项**未计入**底线（**不是 0 成本**），但**底线照样出**。
+//
+// ⚠️ 为什么界面必须说出来：生产上 1122 个 SKU 只有 18 个录了体积，
+// 若不提示，运营会把「偏松的底线」当成「算全了的底线」⇒ 按它定价 ⇒ 漏钱。
+// 缺体积 ⇒ 头程与仓储都算不出来（它们按体积计费）；贴单费不依赖体积，
+// 只有「该仓根本没配仓储规则」时才算不出来。
+const fulfillmentNotCountedHint = (row) => {
+  const missing = [];
+  if (row.cost_floor_logistics_cost == null) missing.push("头程");
+  if (row.cost_floor_storage_cost == null) missing.push("仓储");
+  if (row.cost_floor_label_fee == null) missing.push("贴单");
+  if (!missing.length) return "";
+  return `未计入${missing.join("/")}（缺 SKU 体积或仓规则）—— 这条底线还没算全`;
 };
 // --- 广告分成率（高级逃生口）与目标 ROI 的口径切换（阶段 3）---
 //
@@ -4200,6 +4214,24 @@ onMounted(async () => {
   line-height: 1.5;
   color: var(--el-text-color-secondary);
 }
+/* 批次 9：运输四段路径图（头程 / 仓储 / 贴单 / 尾程）——
+   纯文本 + div，不引新依赖；两行等宽排版，让四段与下面的计量口径对得上。 */
+.transport-path {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-lighter);
+  border-radius: 4px;
+}
+.transport-path-line {
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+}
+.transport-path-scale {
+  white-space: pre-wrap;
+}
 /* --- 阶段 4：基准售价即时影响预览 --- */
 .selling-price-preview {
   margin-top: 4px;
@@ -4371,7 +4403,7 @@ onMounted(async () => {
   background-color: var(--el-fill-color-light);
   opacity: 0.75;
 }
-/* 物流批次：单件体积未填 → 行体积为 0 → 金额偏低，标红提示 */
+/* 头程批次：单件体积未填 → 行体积为 0 → 金额偏低，标红提示 */
 .volume-missing :deep(.el-input__inner) {
   border-color: var(--el-color-warning);
   box-shadow: 0 0 0 1px var(--el-color-warning) inset;

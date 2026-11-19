@@ -66,18 +66,15 @@ class DimPlatform(Base):
     fee_rate_version = Column(String(64), nullable=True)
     # 默认达人佣金率：SKU 未单独设置 creator_commission_rate 时的兜底值
     default_creator_commission_rate = Column(Numeric(12, 8), nullable=True)
-    # 平台其他成本率：恒等式反推值，**已含平台佣金率**，不重复计入底线分母
+    # 平台其他成本率（批次 9）：**只装「佣金与尾程之外」的平台侧按收入比例扣款**，
+    # 人工维护（平台政策变了就改），不再是从净利率反推的残差桶。
+    #
+    # ⚠️ 口径（批次 9 拍板）：
+    #   分子 = (采购 + 头程 + 仓储 + 贴单 + 尾程) × (1 + SPU退货率 + SPU货损率)
+    #   分母 = 1 − 平台佣金率 − 本列 − 达人佣金率 − 目标利润率
+    #   ⇒ 平台佣金率（default_fee_rate）**单独进分母**，本列**不含佣金**；
+    #     尾程按 SKU 重量单件计价**直接进分子**，本列**不含尾程**。
     other_cost_rate = Column(Numeric(12, 8), nullable=True)
-    # 尾程配送费占收入比（批次 4）：**把尾程从 other_cost_rate 残差桶里剔出去**的拆分基准。
-    #
-    # ⚠️ 为什么需要它：`other_cost_rate` 是从实测净利率反推的残差桶
-    #    （1 − 采购成本率 − 净利率 − SPU退货/货损 − 达人佣金），
-    #    桶里**含运费**（平台利润里扣过的实际运费）。批次 4 起尾程按 SKU 重量单件计价，
-    #    若既把尾程加进底线分子、又不从分母里剔掉 ⇒ **同一笔尾程扣两次**。
-    #    所以进底线必须**成对**：分子加尾程 ⇔ 分母加回 delivery_cost_rate。
-    #
-    # 为空 ⇒ 尾程**不进成本底线**（宁可不算，也不重复扣）。
-    delivery_cost_rate = Column(Numeric(12, 8), nullable=True)
     # --- ROI 广告投放配置（阶段 1）---
     # 安全边际：建议 ROI = 保本ROI × (1 + roi_safety_margin)。
     # 业界实测 12%–25%，取下沿 20% 做保守默认（设计稿 §2.5⑨）。
@@ -123,10 +120,6 @@ class DimPlatform(Base):
         CheckConstraint(
             "other_cost_rate IS NULL OR (other_cost_rate >= 0 AND other_cost_rate < 1)",
             name="ck_dim_platforms_other_cost_rate_range",
-        ),
-        CheckConstraint(
-            "delivery_cost_rate IS NULL OR (delivery_cost_rate >= 0 AND delivery_cost_rate < 1)",
-            name="ck_dim_platforms_delivery_cost_rate_range",
         ),
         CheckConstraint(
             "roi_safety_margin >= 0 AND roi_safety_margin < 1",

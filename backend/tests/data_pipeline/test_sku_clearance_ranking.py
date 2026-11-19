@@ -46,7 +46,7 @@ POLICY_ROWS = [
 
 
 def _fake_platform():
-    """假平台：带 other_cost_rate / default_creator_commission_rate。
+    """假平台：带平台佣金率 / other_cost_rate / default_creator_commission_rate。
 
     没有平台成本率时 `compute_sku_pricing` 会记 `missing_platform_cost_rate`
     并拒绝计算成本线（这是设计如此，不是 bug）。
@@ -54,6 +54,9 @@ def _fake_platform():
     `platform_role` 是阶段 2.1b 加的：覆盖值按**销售平台**取
     （`_load_platform_overrides` 只查 platform_role='sales' 的行），
     缺这个属性会让取覆盖值的分支直接抛 AttributeError。
+
+    ⚠️ 批次 9：费率是**生产实测新口径** ——
+    平台佣金率单独进分母，桶只装「佣金与尾程之外」的扣款。
     """
     return type(
         "FakePlatform",
@@ -61,7 +64,9 @@ def _fake_platform():
         {
             "platform_code": "tiktok",
             "platform_role": "sales",
-            "other_cost_rate": Decimal("0.06"),
+            # 平台佣金率（批次 9：单独进分母）
+            "default_fee_rate": Decimal("0.08175"),
+            "other_cost_rate": Decimal("0.0311"),
             "default_creator_commission_rate": Decimal("0.0606"),
         },
     )()
@@ -330,8 +335,11 @@ async def test_row_platform_falls_back_to_company_rates_for_inventory_source_row
     result = await service.get_sku_clearance_ranking(min_restock_days=0)
 
     item = result.items[0]
-    # 底线必须还在：46.5 ÷ (1 − 0.06 − 0.0606 − 0.02 − 0.01 − 0.25) = 77.58
-    assert item.min_selling_price == pytest.approx(77.58, abs=0.01)
+    # 底线必须还在（批次 9 新口径）：
+    #   分子 = 46.5 × (1 + 0.02 退货 + 0.01 货损) = 47.895
+    #   分母 = 1 − 0.08175(佣金) − 0.0311(桶) − 0.0606(达人) − 0.25(目标) = 0.57655
+    #   底线 = 47.895 ÷ 0.57655 = 83.0717… → 83.07
+    assert item.min_selling_price == pytest.approx(83.07, abs=0.01)
     assert item.min_selling_price_source == "cost_floor"
 
 
@@ -344,7 +352,9 @@ async def test_row_platform_uses_its_own_rates_when_it_is_a_sales_platform(monke
         {
             "platform_code": "shopee",
             "platform_role": "sales",
-            "other_cost_rate": Decimal("0.4165"),
+            # 批次 9：生产实测新口径（佣金单独进分母；桶不含佣金、不含尾程）
+            "default_fee_rate": Decimal("0.16"),
+            "other_cost_rate": Decimal("0.0358"),
             "default_creator_commission_rate": Decimal("0.0111"),
         },
     )()
@@ -366,8 +376,11 @@ async def test_row_platform_uses_its_own_rates_when_it_is_a_sales_platform(monke
     result = await service.get_sku_clearance_ranking(min_restock_days=0)
 
     item = result.items[0]
-    # 46.5 ÷ (1 − 0.4165 − 0.0111 − 0.02 − 0.01 − 0.25) = 159.03
-    assert item.min_selling_price == pytest.approx(159.03, abs=0.01)
+    # 批次 9 新口径：
+    #   分子 = 46.5 × 1.03 = 47.895
+    #   分母 = 1 − 0.16(佣金) − 0.0358(桶) − 0.0111(达人) − 0.25(目标) = 0.5431
+    #   底线 = 47.895 ÷ 0.5431 = 88.1881… → 88.19
+    assert item.min_selling_price == pytest.approx(88.19, abs=0.01)
     assert item.min_selling_price_source == "cost_floor"
 
 

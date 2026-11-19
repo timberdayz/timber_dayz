@@ -69,9 +69,12 @@ def test_baseline_profit_prefers_confirmed_logistics_cost_over_assumption():
     assert result["logistics_cost"] == Decimal("15.00")
     assert result["logistics_cost_source"] == "confirmed_logistics_bill"
     assert result["purchase_cost_source"] == "sku_default_purchase_cost"
-    # 商家实收 = 售价（不再二次扣券）：100 − (20 + 15 + 5 + 10 平台费 + 5 退货 + 2 货损) = 43
+    # 商家实收 = 售价（不再二次扣券）
+    # 批次 9：两率**按件折** —— 基准 = 采购 20 + 物流 15（已确认账单优先）+ 仓储 5 = 40
+    #   退货 = 40 × 5% = 2.00；货损 = 40 × 2% = 0.80
+    # 100 − (20 + 15 + 5 + 10 平台费 + 2.00 + 0.80) = 47.20
     assert result["net_revenue"] == Decimal("100.00")
-    assert result["estimated_contribution_profit"] == Decimal("43.00")
+    assert result["estimated_contribution_profit"] == Decimal("47.20")
 
 
 def test_sku_create_accepts_default_purchase_cost_fields():
@@ -111,6 +114,10 @@ def _preview(**overrides):
         "actual_logistics_cost": None,
         "actual_storage_cost": None,
         "platform_fee_rate": Decimal("0.0737"),
+        # 批次 9：桶（平台其他成本率）是利润链的**必填**成本项 ——
+        # 不传 ⇒ 整条利润链算不出来（不是静默按 0 计）。
+        # 本组用例只守护完整度口径 ⇒ 显式给 0。
+        "other_cost_rate": Decimal("0"),
         "expected_ad_rate": Decimal("0.02"),
         "return_rate": Decimal("0"),
         "damage_rate": Decimal("0"),

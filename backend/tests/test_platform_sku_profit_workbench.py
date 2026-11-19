@@ -49,6 +49,7 @@ def test_expected_profit_uses_ad_rate_and_ignores_competitor_price():
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0.10"),
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=Decimal("0.10"),
         return_rate=Decimal("0.03"),
         damage_rate=Decimal("0.02"),
@@ -56,11 +57,14 @@ def test_expected_profit_uses_ad_rate_and_ignores_competitor_price():
     )
 
     # 商家实收 = 测算售价 = 100（2026-11-16 口径归一：不再二次扣券）
-    #   pre_ad    = 100 - (30 采购 + 8 物流 + 2 仓储 + 0 贴单 + 10 平台费 + 0 达人佣金 + 3 退货 + 2 货损) = 45.00
-    #   ad_cost   = 45.00 × 0.10 = 4.50
-    #   profit    = 45.00 - 4.50 = 40.50
-    assert result["expected"]["ad_cost"] == Decimal("4.50")
-    assert result["expected"]["profit"] == Decimal("40.50")
+    #   按件成本合计 = 30 采购 + 8 头程 + 2 仓储 + 0 贴单 + 0 尾程 = 40
+    #   批次 9：两率**按件折**（行业基准件损率 ⇒ 多摊出来的货钱），不再按收入比例扣：
+    #     退货 = 40 × 3% = 1.20；货损 = 40 × 2% = 0.80
+    #   pre_ad    = 100 - (40 + 10 平台费 + 0 达人佣金 + 0 桶 + 1.20 + 0.80) = 48.00
+    #   ad_cost   = 48.00 × 0.10 = 4.80
+    #   profit    = 48.00 - 4.80 = 43.20
+    assert result["expected"]["ad_cost"] == Decimal("4.80")
+    assert result["expected"]["profit"] == Decimal("43.20")
     assert result["expected"]["competitor_price_difference"] == Decimal("20.00")
 
 
@@ -80,6 +84,7 @@ def test_label_fee_absent_is_treated_as_zero_not_as_missing_input():
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0.10"),
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=Decimal("0.10"),
         return_rate=Decimal("0.03"),
         damage_rate=Decimal("0.02"),
@@ -87,7 +92,10 @@ def test_label_fee_absent_is_treated_as_zero_not_as_missing_input():
     )
 
     assert result["expected"]["profit"] is not None
-    assert result["expected"]["profit"] == Decimal("40.50")
+    # 按件成本合计 = 30 + 8 + 2 + 0（贴单按 0）+ 0 = 40
+    # 退货 = 40 × 3% = 1.20；货损 = 40 × 2% = 0.80
+    # pre_ad = 100 − (40 + 10 + 1.20 + 0.80) = 48.00；ad = 4.80；profit = 43.20
+    assert result["expected"]["profit"] == Decimal("43.20")
     assert result["actual_recost"]["completeness"] == "estimated"
     # 原始值保持 None（前端可据此显示"贴单费未配置"），并显式标出"按 0 计"这个假设
     assert result["expected"]["label_fee"] is None
@@ -106,16 +114,19 @@ def test_label_fee_configured_is_deducted_from_pre_ad_profit():
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0.10"),
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=Decimal("0.10"),
         return_rate=Decimal("0.03"),
         damage_rate=Decimal("0.02"),
         delivery_cost=Decimal("0"),
     )
 
-    # pre_ad = 45.00 - 2 = 43.00 ; ad = 4.30 ; profit = 38.70
+    # 按件成本合计 = 30 + 8 + 2 + 2（贴单）+ 0（尾程）= 42
+    # 批次 9：两率按件折 ⇒ 退货 = 42 × 3% = 1.26；货损 = 42 × 2% = 0.84
+    # pre_ad = 100 − (42 + 10 + 1.26 + 0.84) = 45.90；ad = 4.59；profit = 41.31
     assert result["expected"]["label_fee"] == Decimal("2.00")
     assert result["expected"]["label_fee_source"] == "warehouse_rule"
-    assert result["expected"]["profit"] == Decimal("38.70")
+    assert result["expected"]["profit"] == Decimal("41.31")
 
 
 def test_actual_recost_falls_back_to_expected_storage_and_is_mixed():
@@ -128,6 +139,7 @@ def test_actual_recost_falls_back_to_expected_storage_and_is_mixed():
         actual_logistics_cost=Decimal("9"),
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0.10"),
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=Decimal("0.10"),
         return_rate=Decimal("0.03"),
         damage_rate=Decimal("0.02"),
@@ -152,6 +164,7 @@ def test_recost_without_any_actual_cost_has_no_cost_variance():
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=0,
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=0,
         return_rate=0,
         damage_rate=0,
@@ -172,6 +185,7 @@ def test_missing_reference_cost_does_not_become_zero_profit_input():
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=0,
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=0,
         return_rate=0,
         damage_rate=0,
@@ -218,6 +232,7 @@ def test_preview_exposes_pre_ad_profit_and_roi_metrics():
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0.10"),
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=Decimal("0.10"),
         return_rate=Decimal("0.03"),
         damage_rate=Decimal("0.02"),
@@ -225,16 +240,18 @@ def test_preview_exposes_pre_ad_profit_and_roi_metrics():
     )
 
     expected = result["expected"]
-    # revenue = 100（商家实收 = 测算售价）；pre_ad = 100 − (30+8+2+0+10+0+3+2) = 45.00
+    # revenue = 100（商家实收 = 测算售价）
+    # 按件成本合计 = 30 + 8 + 2 + 0 + 0 = 40；批次 9 两率按件折 ⇒ 1.20 + 0.80
+    # pre_ad = 100 − (40 + 10 + 1.20 + 0.80) = 48.00
     assert expected["net_revenue"] == Decimal("100")
-    assert expected["pre_ad_profit"] == Decimal("45.00")
-    assert expected["break_even_roi"] == Decimal("100") / Decimal("45.00")
+    assert expected["pre_ad_profit"] == Decimal("48.00")
+    assert expected["break_even_roi"] == Decimal("100") / Decimal("48.00")
     assert expected["suggested_roi"] == expected["break_even_roi"] * Decimal("1.20")
     assert expected["suggested_roi_clamped"] is not None
     assert expected["roi_missing_reasons"] == []
     assert expected["roi_anomalies"] == []
     # 实际成本口径那一段也要有自己的一份
-    assert result["actual_recost"]["pre_ad_profit"] == Decimal("45.00")
+    assert result["actual_recost"]["pre_ad_profit"] == Decimal("48.00")
     assert result["actual_recost"]["break_even_roi"] == expected["break_even_roi"]
 
 
@@ -252,6 +269,7 @@ def test_roi_is_not_computed_when_a_reference_cost_is_missing():
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0"),
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=Decimal("0"),
         return_rate=Decimal("0"),
         damage_rate=Decimal("0"),
@@ -278,6 +296,7 @@ def test_platform_roi_config_is_passed_into_the_preview():
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0"),
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=Decimal("0"),
         return_rate=Decimal("0"),
         damage_rate=Decimal("0"),

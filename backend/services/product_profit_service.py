@@ -184,8 +184,12 @@ def build_baseline_profit(
         logistics_cost_source = "cost_assumption_profile"
     storage = _money(storage_cost)
     platform_fee = _money(revenue * Decimal(str(platform_fee_rate or 0)))
-    return_loss = _money(revenue * Decimal(str(return_rate or 0)))
-    damage_loss = _money(revenue * Decimal(str(damage_rate or 0)))
+    # ⚠️ 批次 9：SPU 退货率 / 货损率是**行业基准的件损率** ⇒ **按件折进成本**，
+    #    不再按收入比例扣（与底线链、平台利润试算链同口径）。
+    #    这条链没有尾程/贴单，按件成本合计 = 采购 + 物流 + 仓储。
+    _loss_base = purchase_cost + logistics_cost + storage
+    return_loss = _money(_loss_base * Decimal(str(return_rate or 0)))
+    damage_loss = _money(_loss_base * Decimal(str(damage_rate or 0)))
     result = build_profit_from_components(
         revenue=revenue,
         purchase_cost=purchase_cost,
@@ -218,6 +222,7 @@ def build_platform_profit_preview(
     actual_logistics_cost: Decimal | int | float | None,
     actual_storage_cost: Decimal | int | float | None,
     platform_fee_rate: Decimal | int | float | None,
+    other_cost_rate: Decimal | int | float | None,
     expected_ad_rate: Decimal | int | float | None,
     target_roi: Decimal | int | float | None = None,
     return_rate: Decimal | int | float | None,
@@ -306,14 +311,65 @@ def build_platform_profit_preview(
         if revenue is not None and creator_commission_rate is not None
         else Decimal("0")
     )
+    # 平台其他成本率（批次 9「桶」）：**佣金与尾程之外**的平台侧按收入比例扣款。
+    # ⚠️ 以前利润链**完全不扣桶** ⇒ 底线链与利润链永远差一个桶（生产实测 26.78pt）。
+    #    现在两条链同源：桶在两边都扣。
+    other_cost = (
+        _money(revenue * Decimal(str(other_cost_rate)))
+        if revenue is not None and other_cost_rate is not None
+        else None
+    )
+    # ⚠️ 批次 9：桶与平台佣金率是利润链的**必填平台费率** ——
+    #    缺任何一个 ⇒ 整条链算不出来（**不是按 0 计**：按 0 计等于凭空多一笔利润）。
+    #
+    #    为什么必须点名（这是批次 9 新引入的失败路径）：
+    #    批次 9 之前利润链压根不扣桶 ⇒ 桶为 NULL 不会让利润链留白；
+    #    批次 9 把桶加进扣项之后，**新增了「桶没配 ⇒ 利润空白」这条路**，
+    #    而运营看到的是一片空白、系统给的是「完整预计利润口径」这种没法定位的兜底话
+    #    ⇒ 运营根本不知道该去补**哪个**费率。
+    #
+    #    原因码与**底线链**同一套词（`product_pricing_service` 里就是这两个键）——
+    #    同一种缺失，两条链不能一个叫这个、一个叫那个。
+    platform_rate_missing_reasons: list[str] = []
+    if platform_fee_rate is None:
+        platform_rate_missing_reasons.append("missing_platform_fee_rate")
+    if other_cost_rate is None:
+        platform_rate_missing_reasons.append("missing_platform_cost_rate")
+    # ⚠️ 批次 9：SPU 退货率 / 货损率是**行业基准的件损率**（发 100 件坏/退几件），
+    #    **按件折进成本**，不再按收入比例扣。
+    #    口径与底线链一致（`product_pricing_service.compute_cost_floor`）：
+    #        按件成本合计 × (1 + 退货率 + 货损率)
+    #    ⇒ 这里算的是「多备出来的那部分货的钱」。
+    #    按件成本合计用**预估口径**（expected_*）而不是实际账单口径 ——
+    #    底线链用的是预估口径，两边必须同一个数，否则自洽检验过不了。
+    _loss_base = (
+        purchase,
+        expected_logistics,
+        expected_storage,
+        delivery,
+    )
+    per_piece_cost = (
+        sum(
+            (
+                purchase,
+                expected_logistics,
+                expected_storage,
+                label_fee_for_calc,
+                delivery,
+            ),
+            Decimal("0"),
+        )
+        if all(value is not None for value in _loss_base)
+        else None
+    )
     return_loss = (
-        _money(revenue * Decimal(str(return_rate)))
-        if revenue is not None and return_rate is not None
+        _money(per_piece_cost * Decimal(str(return_rate)))
+        if per_piece_cost is not None and return_rate is not None
         else None
     )
     damage_loss = (
-        _money(revenue * Decimal(str(damage_rate)))
-        if revenue is not None and damage_rate is not None
+        _money(per_piece_cost * Decimal(str(damage_rate)))
+        if per_piece_cost is not None and damage_rate is not None
         else None
     )
 
@@ -336,6 +392,7 @@ def build_platform_profit_preview(
             delivery,
             platform_fee,
             creator_commission,
+            other_cost,
             return_loss,
             damage_loss,
         ]
@@ -547,6 +604,12 @@ def build_platform_profit_preview(
             ),
             "platform_fee": platform_fee,
             "creator_commission": creator_commission,
+            # 平台其他成本率（桶，批次 9）：利润链现在**扣**它了 ⇒ 与底线链同源。
+            "other_cost": other_cost,
+            # ⚠️ 批次 9：必填平台费率（平台佣金率 / 桶）缺失的原因码。
+            #    缺任一项 ⇒ 整条利润链留白（不是按 0 计）⇒ 必须点名，
+            #    否则运营只看到空白，不知道该去补哪个费率。
+            "platform_rate_missing_reasons": list(platform_rate_missing_reasons),
             "creator_commission_rate": creator_commission_rate,
             "ad_cost": ad_cost,
             # 实际生效的广告分成率（阶段 3）：口径换算后的那个数。
@@ -604,6 +667,9 @@ def build_platform_profit_preview(
                 [] if delivery is not None else ["missing_delivery_cost"]
             ),
             "creator_commission": creator_commission,
+            # ⚠️ 批次 9：桶与实际成本口径一起进「实际」段 ⇒ 缺料原因两段同源。
+            "other_cost": other_cost,
+            "platform_rate_missing_reasons": list(platform_rate_missing_reasons),
             "creator_commission_rate": creator_commission_rate,
             "storage_cost_source": (
                 "actual_storage" if has_actual_storage else "expected_fallback"

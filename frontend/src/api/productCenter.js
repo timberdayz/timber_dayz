@@ -230,6 +230,8 @@ export default {
   // 尾程配送费费率（批次 3/4）：平台 × 仓 × 重量段。
   // ⚠️ 尾程是**必付成本**：这个表没有数据 ⇒ 尾程算不出来 ⇒ 利润链算不出来
   //    （不是按 0 计），所以这里必须能维护。
+  // ⚠️ 尾程 ≠ 头程：尾程 = 目的国仓 → 买家（这段快递费）；
+  //    头程 = 国内工厂 → 目的国仓（头程账单里的「头程末端派送」也是港 → 仓那一段）。
   listDeliveryRateRules(params = {}) {
     return api._get("/delivery-rate-rules", { params });
   },
@@ -255,7 +257,7 @@ export default {
   },
   // 包邮开关（批次 6）：粒度 = SKU × 平台。
   // ⚠️ 跨境电商不是默认包邮，而是**选择性包邮** ⇒ 这一列由运营逐个 SKU 决定。
-  //    不包邮 ⇒ 买家付运费 ⇒ 商家不承担尾程 ⇒ 尾程不进成本底线。
+  //    不包邮 ⇒ 买家付尾程运费 ⇒ 商家不承担尾程 ⇒ 尾程不进成本底线。
   setSkuFreeShipping(skuId, payload) {
     return api._put(`/skus/${skuId}/free-shipping`, payload);
   },

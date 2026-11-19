@@ -775,10 +775,10 @@ async def _seed_pricing_fixtures(pg_session, *, with_cost_rules: bool = True):
             default_fee_rate=0.0737,
             default_creator_commission_rate=0.0606,
             other_cost_rate=0.2727,
-            # 尾程配送费占收入比（批次 4）：尾程进成本底线的**拆分基准**。
-            # ⚠️ 必须与尾程费率成对存在：分子加尾程 ⇔ 分母加回这一项，
-            #    否则同一笔尾程既进分子又留在 other_cost_rate 残差里 ⇒ 扣两次。
-            delivery_cost_rate=0.10,
+            # ⚠️ 批次 9：「尾程占收入比」（delivery_cost_rate）**已退役** —— 列已删。
+            #    尾程现在**直接进分子**（按 SKU 重量段单件计价），
+            #    平台佣金率**单独进分母**，桶（other_cost_rate）只装
+            #    「佣金与尾程之外」的平台侧按收入比例扣款。
             # 刻意给一个**非今日**的生效日期：用来验证「部分更新」不会把它刷成当天
             fee_rate_effective_from=date(2026, 9, 1),
             fee_rate_source="test_seed",

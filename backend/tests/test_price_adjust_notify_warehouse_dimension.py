@@ -96,12 +96,13 @@ def _context(**overrides):
         "age_days": 10,
         "purchase_cost": "20.00",
         "other_cost_rate": "0.2727",
+        # 批次 9：平台佣金率**单独进分母** ⇒ 它变了必须能归因出来
+        "platform_fee_rate": "0.0737",
         "creator_commission_rate": "0.0606",
         "spu_return_loss_rate": "0.0467",
         "spu_damage_rate": "0.0158",
         "reference_selling_price": None,
         "delivery_cost": "5.00",
-        "delivery_cost_rate": "0.10",
         "missing_reasons": [],
     }
     base.update(overrides)
@@ -190,10 +191,14 @@ async def test_legacy_baseline_with_empty_warehouse_does_not_match_real_warehous
 
 
 def test_context_snapshot_carries_warehouse_and_delivery_inputs():
-    """快照必须记仓 + 单件尾程 + 平台尾程占比，否则下次变化说不清原因。"""
+    """快照必须记仓 + 单件尾程 + **平台佣金率**，否则下次变化说不清原因。
+
+    ⚠️ 批次 9：「尾程占收入比」已退役（列已删、机制已退役）⇒ 快照里换成
+    ``platform_fee_rate``（它现在**单独进分母** ⇒ 变了必须归因出来）。
+    """
     snapshot = build_context(
         pricing={
-            "min_selling_price": 33.03,
+            "min_selling_price": 57.46,
             "min_selling_price_source": "cost_floor",
             "min_selling_price_is_override": False,
             "pricing_tier_source": "restock_days",
@@ -206,6 +211,7 @@ def test_context_snapshot_carries_warehouse_and_delivery_inputs():
         discount_rate=Decimal("0.10"),
         purchase_cost=Decimal("10"),
         other_cost_rate=Decimal("0.2727"),
+        platform_fee_rate=Decimal("0.0737"),
         creator_commission_rate=Decimal("0.0606"),
         spu_return_loss_rate=Decimal("0.0467"),
         spu_damage_rate=Decimal("0.0158"),
@@ -213,12 +219,37 @@ def test_context_snapshot_carries_warehouse_and_delivery_inputs():
         platform_code="tiktok",
         warehouse_code="MY-01",
         delivery_cost=Decimal("5"),
-        delivery_cost_rate=Decimal("0.10"),
     )
 
     assert snapshot["warehouse_code"] == "MY-01"
     assert snapshot["delivery_cost"] == "5"
-    assert snapshot["delivery_cost_rate"] == "0.10"
+    assert snapshot["platform_fee_rate"] == "0.0737"
+    # ⚠️ 已退役的字段不得再出现在快照里（否则下次归因会拿一个没人读的数说事）
+    assert "delivery_cost_rate" not in snapshot
+
+
+def test_platform_fee_rate_change_is_attributed_to_the_platform_rate():
+    """平台佣金率变了 ⇒ 归因必须是「平台费率变了」（批次 9）。
+
+    ⚠️ 以前佣金藏在桶里、界面上填了不生效 ⇒ 归因也就无从谈起；
+    现在佣金**单独进分母** ⇒ 改了它底线就会变 ⇒ 必须能归因出来。
+    """
+    from backend.services.price_adjust_notify_service import (
+        REASON_PLATFORM_RATE,
+        classify_change_reason,
+    )
+
+    prev = _context(platform_fee_rate="0.0737")
+    cur = _context(platform_fee_rate="0.08175")
+
+    assert classify_change_reason(prev, cur) == REASON_PLATFORM_RATE
+    # 桶变了同样是「平台费率变了」
+    assert (
+        classify_change_reason(
+            _context(other_cost_rate="0.2727"), _context(other_cost_rate="0.0311")
+        )
+        == REASON_PLATFORM_RATE
+    )
 
 
 def test_delisting_jump_is_not_excluded_when_delivery_cost_changed():
@@ -400,7 +431,14 @@ def test_feishu_row_writes_warehouse_into_note():
 
 
 def test_profit_arithmetic_lives_in_one_place():
-    """费率口径与金额口径共用 `build_profit_from_components`。"""
+    """费率口径与金额口径共用 `build_profit_from_components`。
+
+    ⚠️ 批次 9：SPU 退货率 / 货损率改成**按件成本 × 率**（行业基准的件损率
+    ⇒ 折成钱进成本），不再按收入比例扣 ⇒ 费率口径算出来的两笔金额也变了：
+    按件成本合计 = 采购 20 + 物流 15 + 仓储 5 = 40
+    ⇒ 退货 40 × 5% = 2.00、货损 40 × 2% = 0.80
+    ⇒ 利润 = 100 − (20 + 15 + 5 + 10 + 2 + 0.8) = 47.20
+    """
     from backend.services.product_profit_service import (
         build_baseline_profit,
         build_profit_from_components,
@@ -412,12 +450,12 @@ def test_profit_arithmetic_lives_in_one_place():
         logistics_cost=Decimal("15"),
         storage_cost=Decimal("5"),
         platform_fee=Decimal("10"),
-        return_loss=Decimal("5"),
-        damage_loss=Decimal("2"),
+        return_loss=Decimal("2"),
+        damage_loss=Decimal("0.80"),
     )
-    # 100 − (20 + 15 + 5 + 10 + 5 + 2) = 43
-    assert result["estimated_contribution_profit"] == Decimal("43.00")
-    assert result["estimated_margin_rate"] == Decimal("0.43000000")
+    # 100 − (20 + 15 + 5 + 10 + 2 + 0.8) = 47.2
+    assert result["estimated_contribution_profit"] == Decimal("47.20")
+    assert result["estimated_margin_rate"] == Decimal("0.47200000")
 
     # 费率口径走同一个算术 ⇒ 同样的数
     baseline = build_baseline_profit(
@@ -430,8 +468,11 @@ def test_profit_arithmetic_lives_in_one_place():
         return_rate=Decimal("0.05"),
         damage_rate=Decimal("0.02"),
     )
-    assert baseline["estimated_contribution_profit"] == Decimal("43.00")
+    assert baseline["estimated_contribution_profit"] == Decimal("47.20")
     assert baseline["estimated_margin_rate"] == result["estimated_margin_rate"]
+    # 两笔损失确实是**按件成本**折出来的（不是按收入 100 折）
+    assert baseline["expected_return_loss"] == Decimal("2.00")
+    assert baseline["expected_damage_loss"] == Decimal("0.80")
 
 
 def test_profit_margin_is_none_when_revenue_is_zero():

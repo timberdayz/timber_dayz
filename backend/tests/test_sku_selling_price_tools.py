@@ -63,8 +63,12 @@ SOURCE_ENUM_MIGRATION = VERSIONS_DIR / "20261121_selling_price_source_enum.py"
 # 测试用的口径参数（全部是能手算的数）
 # ---------------------------------------------------------------------------
 
-#: 平台费率：other 25% + 达人 5% + SPU 退货 2% + SPU 货损 1% + 目标利润率 25%
-#: ⇒ 成本线分母 = 1 − 0.25 − 0.05 − 0.02 − 0.01 − 0.25 = 0.42
+#: 平台费率（批次 9 口径）：
+#: 平台佣金率 5% + 平台其他成本率(桶) 25% + 达人 5% + 目标利润率 25%
+#: ⇒ 成本线分母 = 1 − 0.05 − 0.25 − 0.05 − 0.25 = 0.40
+#: ⚠️ SPU 退货 2% / 货损 1% **不再进分母**（批次 9：两率是行业基准的件损率
+#:    ⇒ 折成钱进**分子**：按件成本合计 × (1 + 0.02 + 0.01)）。
+PLATFORM_FEE_RATE = Decimal("0.05")
 OTHER_COST_RATE = Decimal("0.25")
 CREATOR_RATE = Decimal("0.05")
 SPU_RETURN_LOSS_RATE = Decimal("0.02")
@@ -72,9 +76,9 @@ SPU_DAMAGE_RATE = Decimal("0.01")
 TARGET_MARGIN_RATE = Decimal("0.25")
 DISCOUNT_RATE = Decimal("0.10")
 
-#: 采购成本 11.8566 ÷ 0.42 = 28.23 ⇒ 成本线正好 28.23（方案 §6.1 工具 3 的例子）
+#: 采购成本 11.8566 × (1 + 0.02 + 0.01) = 12.212298 ÷ 0.40 = 30.5307… ⇒ 成本线 30.53
 PURCHASE_COST = Decimal("11.8566")
-COST_FLOOR = Decimal("28.23")
+COST_FLOOR = Decimal("30.53")
 #: 纪律线 = 基准售价 × (1 − 让利率 10%) = 70 × 0.9 = 63.00
 DISCIPLINE_LINE_AT_70 = Decimal("63.00")
 
@@ -92,15 +96,17 @@ def _pricing_context(*, with_override: Decimal | None = None) -> dict:
     """构造一个不依赖数据库的定价上下文。
 
     口径全部按上面的常量来，所以期望值能手算：
-    成本线 = 11.8566 ÷ 0.42 = 28.23；纪律线 = 基准售价 × 0.9。
+    成本线 = 11.8566 × 1.03 ÷ 0.40 = 30.53；纪律线 = 基准售价 × 0.9。
     """
     platform = SimpleNamespace(
         platform_code="tiktok",
         other_cost_rate=OTHER_COST_RATE,
         default_creator_commission_rate=CREATOR_RATE,
+        # 批次 9：平台佣金率**单独进分母**（以前藏在桶里，界面上填了不生效）
+        default_fee_rate=PLATFORM_FEE_RATE,
         platform_role="sales",
-        # 尾程配送费占收入比（批次 4）：拆分基准，留空 = 尾程不进底线
-        delivery_cost_rate=None,
+        # ⚠️ 批次 9：「尾程占收入比」已退役 ⇒ 这张表里**不再有**这一列
+        #    （尾程直接进成本底线的分子，不再需要拆分基准）。
     )
     overrides = {}
     if with_override is not None:
@@ -341,7 +347,7 @@ def test_deviation_within_threshold_is_not_flagged():
 
 
 def test_preview_shows_the_discipline_line_raising_the_floor():
-    """方案 §6.1 工具 3 的例子：成本线 28.23 / 基准售价 70 ⇒ 最低售价 63.00（+123%）。"""
+    """批次 9 口径：成本线 30.53 / 基准售价 70 ⇒ 最低售价 63.00（+106%）。"""
     preview = build_selling_price_preview(
         context=_pricing_context(),
         sku_row=_sku_row(reference_selling_price=Decimal("20")),
@@ -353,8 +359,8 @@ def test_preview_shows_the_discipline_line_raising_the_floor():
     assert item["platform_code"] == "tiktok"
     assert Decimal(str(item["min_selling_price_current"])) == COST_FLOOR
     assert Decimal(str(item["min_selling_price_preview"])) == DISCIPLINE_LINE_AT_70
-    assert Decimal(str(item["change"])) == Decimal("34.77")
-    assert item["change_pct"] == pytest.approx(123.2, abs=0.1)
+    assert Decimal(str(item["change"])) == Decimal("32.47")
+    assert item["change_pct"] == pytest.approx(106.4, abs=0.1)
     assert item["source_current"] == "cost_floor"
     assert item["source_preview"] == "discount_guard"
     assert preview["warnings"], "抬高超过 20% 必须给出整体提示"
@@ -473,6 +479,8 @@ async def _seed_sku(session) -> int:
                 name="TikTok",
                 default_creator_commission_rate=CREATOR_RATE,
                 other_cost_rate=OTHER_COST_RATE,
+                # 批次 9：平台佣金率单独进分母 ⇒ 必须配，否则算不出成本线
+                default_fee_rate=PLATFORM_FEE_RATE,
                 platform_role="sales",
                 is_active=True,
             ),

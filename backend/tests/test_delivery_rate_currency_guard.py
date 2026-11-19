@@ -248,10 +248,26 @@ def test_frontend_price_change_opens_a_new_version():
 
 
 def test_frontend_warns_when_platform_has_no_delivery_cost_rate():
-    """平台没配「尾程占收入比」⇒ 尾程不进成本底线 ⇒ 录入费率的人要知道。"""
+    """尾程算不出来 ⇒ 录入费率的人要知道。
+
+    ⚠️ 批次 9 B 路线：「尾程占收入比」这个**平台级拆分基准**已退役
+    （尾程现在直接进成本底线的分子，不再需要「按收入占比拆回来」这个概念）。
+    ⇒ 前端**不得再有**这个概念（留着 = 界面还能让人填一个没人读的数）；
+    ⇒ 替换成的是「尾程费率缺料提示」：没配费率 / 该重量段没配价 / 选段有歧义，
+    都要在 SKU 行上说清楚，否则运营会把「没算尾程的底线」当成「算全了的底线」。
+    """
     source = FRONTEND_PATH.read_text(encoding="utf-8")
-    assert "尾程占收入比" in source
-    assert "deliveryPlatformSplitHint" in source
+    # 退役概念不得再出现
+    assert "尾程占收入比" not in source
+    assert "deliveryPlatformSplitHint" not in source
+    # 新提示必须在：缺料原因 → 人话
+    assert "deliveryCostHint" in source
+    for reason_text in (
+        "未配尾程费率",
+        "该重量段未配尾程费率",
+        "同一重量段配了两行费率",
+    ):
+        assert reason_text in source
 
 
 # ---------------------------------------------------------------------------

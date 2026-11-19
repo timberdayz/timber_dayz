@@ -1,16 +1,34 @@
 """商品中心 SKU 定价底线的纯计算逻辑。
 
-设计约束（来自 docs/superpowers/specs/2026-10-20-sku-pricing-guardrails-design.md）：
+设计约束（来自 docs/superpowers/specs/2026-10-20-sku-pricing-guardrails-design.md
+与 docs/superpowers/plans/2026-11-19-product-center-cost-floor-caliber-closure.md）：
 - 所有金额用 Decimal；费率只做 Decimal(str(x)) 转换，**不得量化**
-- 平台佣金率已包含在 other_cost_rate 内，不得单独进入分母
+- **平台佣金率单独进分母**（批次 9）：`other_cost_rate` 只装「佣金与尾程之外」的平台侧扣款
 - 达人佣金率优先用 SKU 值，NULL 时由调用方传入平台默认值
 - 档位由当前库龄决定；库龄缺失回落 min_restock_days 最小的一行
+
+**成本底线口径（批次 9，2026-11-19 拍板）**
+
+```
+分子 = (采购成本 + 履约按件成本 + 尾程配送费) × (1 + SPU退货率 + SPU货损率)
+分母 = 1 − 平台佣金率 − 平台其他成本率(桶) − 达人佣金率 − 目标利润率
+```
+
+- **按件的钱进分子**：采购、头程、仓储、贴单、尾程。
+- **按比例的钱进分母**：平台佣金、平台其他成本率(桶)、达人佣金。
+- **风险折成钱也进分子**：SPU 退货率 / 货损率是**行业基准的件损率**
+  （"这个款在行业主流数据下，发 100 件坏/退几件"）⇒ 发 100 件只卖出 (1−R−D) 件
+  ⇒ 每卖 1 件要多摊 (1+R+D) 倍的按件成本。
+  ⚠️ 旧口径把它们当**收入比例**扣（分母减 R/D），那是"少收钱"的意思，
+  与件损率**不是一回事** ⇒ 批次 9 改成按件折进分子。
+- **尾程直接进分子**（批次 9 B 路线）：旧的「尾程占收入比」字段与「成对生效」补丁一并退役
+  —— 桶里的运费既然拆不出来，就不跟它对冲，直接按 SKU 重量段算好的单件尾程进分子。
 
 本模块**不持有任何平台参数**——费率由调用方从 dim_platforms 读出后传入，
 避免平台口径变化时服务里的常量悄悄过期。
 
 **本模块不 import ORM、不碰 DB**：所有函数都是纯函数，
-因此降级链的 7 种 `missing_reasons`、分母 ≤ 0、折扣纪律兜底都能写成无 DB 单测。
+因此降级链的 `missing_reasons`、分母 ≤ 0、折扣纪律兜底都能写成无 DB 单测。
 ORM 行 → 标量的适配在路由侧（`backend/domains/business/routers/product_center.py`
 的 `_compute_pricing_for_sku`），业务判断只有这一处（spec §5.1「实现时只写一处」）。
 """
@@ -39,52 +57,55 @@ def _money(value: Decimal) -> Decimal:
 def compute_cost_floor(
     *,
     purchase_cost,
+    platform_fee_rate,
     other_cost_rate,
     creator_commission_rate,
     spu_return_loss_rate,
     spu_damage_rate,
     target_margin_rate,
     delivery_cost=None,
-    delivery_cost_rate=None,
+    logistics_cost=None,
+    storage_cost=None,
+    label_fee=None,
 ) -> Optional[Decimal]:
     """采购成本反解出的保价底线；分母非正时返回 None。
 
-    尾程配送费（批次 4）
+    口径（批次 9）
     ------------------
-    ``other_cost_rate`` 是**残差桶**（从实测净利率反推），桶里**已经含运费** ——
-    平台的利润列扣过实际运费（生产库实测：TikTok ``总费用`` 内含 ``实际运费``，
-    Shopee ``卖家支付运费`` 直接从结算里扣）。
+    ``分子 = (采购成本 + 头程 + 仓储 + 贴单 + 尾程) × (1 + 退货率 + 货损率)``
+    ``分母 = 1 − 平台佣金率 − 平台其他成本率(桶) − 达人佣金率 − 目标利润率``
 
-    批次 4 起尾程按 SKU 重量单件计价，要把它放进底线的分子。若分母里那份
-    「按收入摊的尾程」不同时剔掉 ⇒ **同一笔尾程扣两次**，底线被抬高。
+    - **平台佣金率单独进分母**（``platform_fee_rate``）：批次 9 之前它藏在
+      ``other_cost_rate`` 里，界面上填了也不生效。现在「各扣各的，填的都生效」。
+    - **``other_cost_rate`` 只装「佣金与尾程之外」的平台侧扣款**（人工填）。
+    - **SPU 两率按件折进分子**：它们是行业基准的**件损率**（发 100 件坏/退几件），
+      所以每卖 1 件要多摊 (1 + 退货率 + 货损率) 倍的按件成本。
+    - **尾程直接进分子**（``delivery_cost``，元/件）：旧的「尾程占收入比」字段
+      与「成对生效」补丁已退役（桶里的运费拆不出来，对冲永远无解）。
 
-    所以尾程**成对生效**：``delivery_cost``（元/件）与 ``delivery_cost_rate``
-    （尾程占收入比）**必须同时有值**才进底线：
-
-    - 分子 = 采购成本 + 尾程配送费
-    - 分母 = 1 − other_cost_rate **+ delivery_cost_rate** − 达人 − 货损 − 退货 − 目标利润率
-
-    缺任何一个 ⇒ **尾程不进底线**（宁可不算，也不重复扣），由调用方把
-    缺失原因报出去（``missing_delivery_cost`` / ``missing_delivery_cost_rate_split``）。
+    ``logistics_cost``（头程）/ ``storage_cost``（仓储）/ ``label_fee``（贴单）
+    是批次 9 P2 的履约按件成本：**缺一项就少算那一项**，但**不因此不算底线**
+    —— 它们是「逐步补齐型」成本（等业务录 SKU 体积），与采购成本 / SPU 两率
+    这类「不可省略型」缺料不同；缺料原因由取数层报进 ``missing_reasons``，
+    界面明示「未计入」。
     """
     cost = _decimal(purchase_cost)
     if cost is None:
         return None
-    delivery_applied = delivery_cost is not None and delivery_cost_rate is not None
-    numerator = cost + (
-        (_decimal(delivery_cost) or Decimal("0")) if delivery_applied else Decimal("0")
+    per_piece_cost = cost
+    for extra in (logistics_cost, storage_cost, label_fee, delivery_cost):
+        per_piece_cost += _decimal(extra) or Decimal("0")
+    loss_multiplier = (
+        Decimal("1")
+        + (_decimal(spu_return_loss_rate) or Decimal("0"))
+        + (_decimal(spu_damage_rate) or Decimal("0"))
     )
+    numerator = per_piece_cost * loss_multiplier
     denominator = (
         Decimal("1")
+        - (_decimal(platform_fee_rate) or Decimal("0"))
         - (_decimal(other_cost_rate) or Decimal("0"))
-        + (
-            (_decimal(delivery_cost_rate) or Decimal("0"))
-            if delivery_applied
-            else Decimal("0")
-        )
         - (_decimal(creator_commission_rate) or Decimal("0"))
-        - (_decimal(spu_return_loss_rate) or Decimal("0"))
-        - (_decimal(spu_damage_rate) or Decimal("0"))
         - (_decimal(target_margin_rate) or Decimal("0"))
     )
     if denominator <= 0:
@@ -157,6 +178,7 @@ def compute_sku_pricing(
     reference_selling_price,
     creator_commission_rate,
     platform_creator_commission_rate,
+    platform_fee_rate,
     other_cost_rate,
     spu_bound,
     spu_return_loss_rate,
@@ -166,13 +188,16 @@ def compute_sku_pricing(
     min_selling_price_override,
     days_since_restock=None,
     delivery_cost=None,
-    delivery_cost_rate=None,
+    logistics_cost=None,
+    storage_cost=None,
+    label_fee=None,
+    fulfillment_missing_reasons: Iterable[str] = (),
     free_shipping=True,
 ) -> dict:
     """单个 SKU 的完整定价字段。**纯函数**：无 ORM、无 DB、无 I/O。
 
     参数全是标量/字典，ORM 适配放在路由侧（`_compute_pricing_for_sku`）。
-    这样降级链的 7 种 `missing_reasons`、分母 ≤ 0、折扣纪律的兜底
+    这样降级链的 `missing_reasons`、分母 ≤ 0、折扣纪律的兜底
     都能写成**无 DB 单测**（spec §5.1「实现时只写一处」的要求）。
 
     `creator_commission_rate` 是 **SKU 自己的值**（可能为 None = 未单独设置）；
@@ -182,15 +207,18 @@ def compute_sku_pricing(
     `spu_bound` 与两个 SPU 率分开传，是为了区分两种缺料：
     没绑 SPU -> `missing_spu_binding`；绑了但率没维护 -> `missing_spu_rates`。
 
-    尾程配送费（批次 4）：`delivery_cost` 是这个 SKU 的**单件尾程**（元），
-    `delivery_cost_rate` 是**平台级**的尾程占收入比（拆分基准）。
-    两者**成对生效**才进成本底线（见 `compute_cost_floor` 的口径说明）：
-    只有一个 ⇒ 尾程不进底线，并把缺的那一半报进 `missing_reasons`。
+    平台佣金率（批次 9）：`platform_fee_rate` **单独进分母**，
+    缺它 ⇒ `missing_platform_fee_rate` 且**不算底线**（不可省略型成本项）。
 
-    包邮开关（批次 6，2026-11-17）：`free_shipping=False` ⇒ 这个 SKU **不包邮**
-    ⇒ 买家付运费 ⇒ 商家**不承担**尾程 ⇒ 尾程**完全不适用**：
-    不进底线分子，也不进分母拆分，**并且不报「缺尾程费率」**
-    （不包邮的 SKU 压根不需要尾程费率，报缺是噪声，会把真缺料淹掉）。
+    尾程配送费（批次 9 B 路线）：`delivery_cost` 是这个 SKU 的**单件尾程**（元），
+    **直接进分子**；旧的「尾程占收入比」与「成对生效」机制已退役。
+    ⚠️ 不包邮 ⇒ 买家付运费 ⇒ 商家不承担尾程 ⇒ 尾程**完全不适用**：
+    不进底线分子，**并且不报「缺尾程费率」**（不包邮的 SKU 压根不需要尾程费率，
+    报缺是噪声，会把真缺料淹掉）。
+
+    履约按件成本（批次 9 P2）：`logistics_cost`（头程）/ `storage_cost`（仓储）/
+    `label_fee`（贴单）。**缺项不阻止计算**（逐步补齐型，等业务录 SKU 体积），
+    缺料原因由取数层通过 `fulfillment_missing_reasons` 带进来。
     """
     missing_reasons: list[str] = []
     cost_floor = None
@@ -200,24 +228,24 @@ def compute_sku_pricing(
     if creator_rate is None:
         creator_rate = _decimal(platform_creator_commission_rate)
 
-    # 尾程成对生效判定（与 compute_cost_floor 内部同一套规则，不允许两处各判一次）
-    # ⚠️ 不包邮 ⇒ 尾程不适用 ⇒ 分子分母都不动（宁可不扣，也不要重复扣）。
-    delivery_applied = (
-        free_shipping and delivery_cost is not None and delivery_cost_rate is not None
-    )
-    if free_shipping:
-        if delivery_cost is None:
-            missing_reasons.append("missing_delivery_cost")
-        elif delivery_cost_rate is None:
-            missing_reasons.append("missing_delivery_cost_rate_split")
+    # 尾程（批次 9 B 路线）：直接进分子，不再有「成对生效」。
+    # ⚠️ 不包邮 ⇒ 尾程不适用 ⇒ 分子不动（宁可不扣，也不要重复扣）。
+    delivery_applied = bool(free_shipping) and delivery_cost is not None
+    if free_shipping and delivery_cost is None:
+        missing_reasons.append("missing_delivery_cost")
+
+    missing_reasons.extend(fulfillment_missing_reasons)
 
     if policy is None:
         missing_reasons.append("missing_pricing_policy")
     else:
+        fee_rate = _decimal(platform_fee_rate)
         other_rate = _decimal(other_cost_rate)
         return_loss_rate = _decimal(spu_return_loss_rate)
         damage_rate = _decimal(spu_damage_rate)
         purchase = _decimal(purchase_cost)
+        if fee_rate is None:
+            missing_reasons.append("missing_platform_fee_rate")
         if other_rate is None:
             missing_reasons.append("missing_platform_cost_rate")
         if creator_rate is None:
@@ -233,6 +261,7 @@ def compute_sku_pricing(
         # 而不是把 None 当 0 代入分母算出偏乐观的结果
         if (
             purchase is not None
+            and fee_rate is not None
             and other_rate is not None
             and creator_rate is not None
             and spu_bound
@@ -241,13 +270,16 @@ def compute_sku_pricing(
         ):
             cost_floor = compute_cost_floor(
                 purchase_cost=purchase,
+                platform_fee_rate=fee_rate,
                 other_cost_rate=other_rate,
                 creator_commission_rate=creator_rate,
                 spu_return_loss_rate=return_loss_rate,
                 spu_damage_rate=damage_rate,
                 target_margin_rate=policy["target_margin_rate"],
                 delivery_cost=delivery_cost if delivery_applied else None,
-                delivery_cost_rate=delivery_cost_rate if delivery_applied else None,
+                logistics_cost=logistics_cost,
+                storage_cost=storage_cost,
+                label_fee=label_fee,
             )
             if cost_floor is None:
                 missing_reasons.append("non_positive_cost_denominator")
@@ -290,17 +322,25 @@ def compute_sku_pricing(
         "min_selling_price_is_override": pricing["is_override"],
         "min_selling_price_override": float(override) if override is not None else None,
         "min_selling_price_missing_reasons": all_reasons,
-        # 尾程配送费（批次 4）是否进了成本底线。
-        # ⚠️ 必须是「成对」才为 True：分子加了尾程，分母也剔掉了残差里的那份。
-        #    只有一边有值时为 False —— 此时尾程**没有**进底线（缺的那半边在 missing_reasons 里）。
+        # 尾程配送费（批次 9 B 路线）是否进了成本底线。
+        # ⚠️ 现在**不再成对**：尾程只要有值（且该 SKU 包邮）就直接进分子。
         "delivery_cost_in_cost_floor": delivery_applied,
         # 包邮开关（批次 6）：前端要显示「不包邮 ⇒ 尾程不计入成本底线」。
         "free_shipping": bool(free_shipping),
         "cost_floor_delivery_cost": (
             float(_decimal(delivery_cost)) if delivery_applied else None
         ),
-        "cost_floor_delivery_cost_rate": (
-            float(_decimal(delivery_cost_rate)) if delivery_applied else None
+        # 履约按件成本（批次 9 P2）：头程 / 仓储 / 贴单。
+        # ⚠️ None = 该项**未计入**（缺 SKU 体积或缺仓规则），不是「这项不要钱」。
+        #    前端据此明示「未计入」，避免把偏松的底线当成算全了的数。
+        "cost_floor_logistics_cost": (
+            float(_decimal(logistics_cost)) if logistics_cost is not None else None
+        ),
+        "cost_floor_storage_cost": (
+            float(_decimal(storage_cost)) if storage_cost is not None else None
+        ),
+        "cost_floor_label_fee": (
+            float(_decimal(label_fee)) if label_fee is not None else None
         ),
         "pricing_tier_label": policy["tier_label"] if policy else None,
         # 档位的**身份** = 库龄起点（阶段 3）。

@@ -68,7 +68,7 @@ test("历史不可选品类在商品中心可读但不能用于新的 SPU 分配
 
 test("商品中心将平台 SKU 利润作为利润唯一工作入口", () => {
   assert.match(source, /平台 SKU 利润/);
-  assert.match(source, /物流仓储管理/);
+  assert.match(source, /头程与仓储管理/);
   assert.doesNotMatch(source, /SKU 成本资料/);
   assert.doesNotMatch(source, /基准预计利润/);
   assert.match(source, /operatingProfiles/);
@@ -127,8 +127,9 @@ test("SKU 资料按 CNY 维护采购成本、周转类型和参考仓储天数",
 
 test("平台 SKU 利润测算按平台、仓库和运输方式自动计算参考成本", () => {
   assert.match(source, /v-model="operatingQuery\.transport_type"/);
-  assert.match(source, /参考物流/);
-  assert.match(source, /参考仓储/);
+  // 批次 9：参考成本两列按四段命名 —— 头程（国内工厂 → 目的国仓）/ 仓储
+  assert.match(source, /预估头程运费/);
+  assert.match(source, /预估仓储成本/);
   // 「实际仓储」列已删除：它恒为 null（系统里没有仓储费账单，只有规则预估），
   // 展示一个恒空列只会误导。回退信息折进「混合成本利润」的 tooltip。
   assert.doesNotMatch(source, /label="实际仓储"/);
@@ -167,11 +168,17 @@ test("抽屉保存失败时读结构化错误原因而不是带错误码前缀�
   assert.match(source, /detail\?\.reason/);
 });
 
-test("定价设置抽屉区分「成本率合计」与「底线基数」", () => {
-  // 成本率合计（40.70%）只是成本结构展示，底线基数是 33.33%（默认达人佣金 + 平台其他成本）
-  assert.match(source, /成本率合计/);
-  assert.match(source, /底线基数/);
-  // 必须带上「SKU 未单独设置达人佣金率时」这个限定语
+test("定价设置抽屉把三项费率合并成「底线成本率合计」", () => {
+  // 批次 9（口径归一）：平台佣金率 + 平台其他成本率 + 默认达人佣金率 = 底线成本率合计
+  // （平台佣金率**单独进分母**，不再藏在「平台其他成本率」里）。
+  assert.match(source, /底线成本率合计/);
+  // 「默认底线基数」表达的是同一件事，且它的说明句在新口径下完全错了 ⇒ 整行删掉
+  assert.doesNotMatch(source, /默认底线基数/);
+  assert.doesNotMatch(source, /平台佣金率已含在/);
+  // 三个手填项的口径说明必须在（运营要知道每个率管什么）
+  assert.match(source, /单独进分母/);
+  assert.match(source, /不含平台佣金、不含尾程/);
+  // 默认达人佣金率仍只作「SKU 未单独设置时的兜底值」⇒ 这个限定语不许丢
   assert.match(source, /未单独设置/);
 });
 
@@ -204,7 +211,42 @@ test("SKU 保存剔除只读计算字段与已拆出的平台级覆盖值", () =
   assert.match(section, /delete payload\.min_selling_price_override/);
   // 分平台底线数据是后端下发的只读结果，也不能回提交
   assert.match(section, /delete payload\.min_selling_price_by_platform/);
+  // 批次 9：成本底线的只读分解字段（尾程那笔 + 头程/仓储/贴单三笔）
+  // 同样是服务端算出来的结果 ⇒ 不能回提交成「运营填的成本」。
+  assert.match(section, /delete payload\.cost_floor_delivery_cost/);
+  assert.match(section, /delete payload\.delivery_cost_in_cost_floor/);
+  assert.match(section, /delete payload\.cost_floor_logistics_cost/);
+  assert.match(section, /delete payload\.cost_floor_storage_cost/);
+  assert.match(section, /delete payload\.cost_floor_label_fee/);
   assert.doesNotMatch(section, /delete payload\.creator_commission_rate;/);
+});
+
+test("底线的履约成本缺口必须说出来：头程/仓储/贴单没算全就不能当算全了的底线用", () => {
+  // ⚠️ 批次 9 P2「逐步补齐型」纪律：缺体积 ⇒ 头程/仓储**未计入**但底线照样出。
+  //    生产上 1122 个 SKU 只有 18 个录了体积 ⇒ 不提示的话，
+  //    运营会把「偏松的底线」当成「算全了的底线」⇒ 按它定价 ⇒ 漏钱。
+  assert.match(source, /fulfillmentNotCountedHint/);
+  assert.match(source, /cost_floor_logistics_cost/);
+  assert.match(source, /cost_floor_storage_cost/);
+  assert.match(source, /cost_floor_label_fee/);
+  // 三项都齐了 ⇒ 不提示（噪声）；缺哪项说哪项
+  assert.match(source, /if \(!missing\.length\) return ""/);
+  assert.match(source, /未计入/);
+  assert.match(source, /这条底线还没算全/);
+});
+
+test("必填平台费率缺失时利润空白必须点名：佣金率 / 平台其他成本率", () => {
+  // ⚠️ 批次 9：平台佣金率与桶是利润链的**必填费率** ——
+  //    缺任一项 ⇒ 整条利润链留白（不是按 0 计）。
+  //    批次 9 之前利润链不扣桶 ⇒ 桶没配不会留白；
+  //    批次 9 把桶加进扣项后**新增**了这条失败路径，
+  //    运营看到的是一片空白 ⇒ 必须点名，否则不知道该去补哪个费率。
+  assert.match(source, /platformRateMissingHint/);
+  assert.match(source, /platform_rate_missing_reasons/);
+  assert.match(source, /missing_platform_fee_rate/);
+  assert.match(source, /missing_platform_cost_rate/);
+  // 提示挂在利润列上（运营第一眼看的就是这一列）
+  assert.match(source, /platformRateMissingHint\(row\)/);
 });
 
 test("最低售价在覆盖值未保存时提示「保存后生效」", () => {
@@ -248,7 +290,7 @@ test("平台 SKU 利润测算保留候选接口预览并支持分页", () => {
   // 那是有意义的错误语义，不能删。
   const operatingSection = source.slice(
     source.indexOf('label="平台 SKU 利润测算"'),
-    source.indexOf('label="物流仓储管理"'),
+    source.indexOf('label="头程与仓储管理"'),
   );
   assert.doesNotMatch(operatingSection, /preview:\s*null/);
   assert.match(source, /page:\s*1/);
@@ -440,7 +482,7 @@ test("完整度列不再拿 configuration_status 兜底", () => {
 // 断言必须限定在「平台 SKU 利润测算」区域 —— SKU 资料页也有「最低售价」列
 const operatingSection = source.slice(
   source.indexOf('label="平台 SKU 利润测算"'),
-  source.indexOf('label="物流仓储管理"'),
+  source.indexOf('label="头程与仓储管理"'),
 );
 
 test("利润测算页给出广告前贡献毛利率 / 保本ROI / 建议ROI 三个只读列", () => {
@@ -495,8 +537,8 @@ test("成本不全时 ROI 一律置灰并提示保本ROI 偏乐观", () => {
   );
   assert.match(operatingSection, /'roi-guarded': roiGuarded\(row\)/);
   assert.match(source, /成本不全，保本ROI 偏乐观/);
-  // 缺失原因按三份清单分列（缺物流 / 缺仓储 / 缺体积）
-  assert.match(source, /缺物流规则/);
+  // 缺失原因按三份清单分列（缺头程 / 缺仓储 / 缺体积）
+  assert.match(source, /缺头程规则/);
   assert.match(source, /缺仓储规则/);
   assert.match(source, /缺 SKU 体积\/重量/);
 });
@@ -733,22 +775,26 @@ test("阶段 3 的列改名全部落地，旧名一个都不剩", () => {
     ["label=\"广告分成率\"", "label=\"广告费率\""],
     ["label=\"平台佣金率\"", "label=\"平台费率\""],
     ["label=\"平台佣金\"", "label=\"平台费用\""],
-    ["label=\"预估物流成本\"", "label=\"参考物流\""],
+    // 批次 9：四段命名（头程 / 仓储 / 贴单 / 尾程）。
+    // 「预估物流成本」里的"物流"指的是**头程**（国内工厂 → 目的国仓）⇒ 改名。
+    ["label=\"预估头程运费\"", "label=\"预估物流成本\"", "label=\"参考物流\""],
     ["label=\"预估仓储成本\"", "label=\"参考仓储\""],
     ["label=\"贴单费\"", "label=\"参考贴单费\""],
-    ["label=\"物流货损率（SPU）\"", "label=\"继承货损率\""],
+    ["label=\"运输货损率（SPU）\"", "label=\"物流货损率（SPU）\"", "label=\"继承货损率\""],
     ["label=\"退货损失率（SPU）\"", "label=\"继承退货损失率\""],
     ["label=\"当前让利上限\"", "label=\"当前可优惠\""],
     ["label=\"清货让利上限\"", "label=\"清货极限\""],
     ["label=\"清货让利上限\"", "label=\"滞销可优惠\""],
   ];
-  for (const [label, old] of renames) {
+  for (const [label, ...olds] of renames) {
     assert.match(source, new RegExp(label.replace(/"/g, '\\"')), `新名必须出现：${label}`);
-    assert.doesNotMatch(
-      source,
-      new RegExp(old.replace(/"/g, '\\"')),
-      `旧名必须消失：${old}`,
-    );
+    for (const old of olds) {
+      assert.doesNotMatch(
+        source,
+        new RegExp(old.replace(/"/g, '\\"')),
+        `旧名必须消失：${old}`,
+      );
+    }
   }
   // 优惠券列整体移除（2026-11-16 口径归一：商家实收 = 测算售价）
   assert.doesNotMatch(source, /优惠券（商家承担）/);
@@ -1055,11 +1101,15 @@ test("尾程费率可维护：平台 × 仓 × 重量段 → 单件尾程费", (
   assert.match(source, /尾程配送费/);
 });
 
-test("定价设置里能维护尾程占收入比（尾程进底线的拆分基准）", () => {
-  assert.match(source, /delivery_cost_rate_pct/);
-  assert.match(source, /delivery_cost_rate: fromPercent/);
-  // 口径说明必须写在界面上：为什么留空就不进底线
-  assert.match(source, /尾程占收入比/);
+test("尾程占收入比整体退役：尾程直接进成本底线的分子", () => {
+  // 批次 9：平台侧那条「尾程按收入占比拆分」的机制退役（后端列已删）⇒
+  // 尾程直接进成本底线的分子（按 SKU 重量段的单件尾程）。
+  // 界面/表单里留着这个字段 = 运营会去填一个已经不起作用的数 ⇒ 必须整体消失。
+  assert.doesNotMatch(source, /尾程占收入比/);
+  assert.doesNotMatch(source, /delivery_cost_rate/);
+  // 退役后的口径仍然说清楚：尾程进底线；只有「不包邮」才不计入。
+  assert.match(source, /直接进成本底线的分子/);
+  assert.match(source, /不包邮/);
 });
 
 test("测算页说清尾程有没有进成本底线", () => {
@@ -1122,9 +1172,12 @@ test("尾程费率改价走新版本（POST），不覆盖历史行", () => {
   assert.match(source, /已按新价开新版本/);
 });
 
-test("平台没配尾程占收入比时，费率页要提醒尾程不进底线", () => {
-  assert.match(source, /deliveryPlatformSplitHint/);
-  assert.match(source, /尾程占收入比/);
+test("平台没配尾程拆分基准的提醒已下线（尾程现在直接进底线）", () => {
+  // 提醒的触发条件（平台没填拆分基准）本身不存在了 ⇒ 提醒与它的 computed 一起删掉。
+  assert.doesNotMatch(source, /deliveryPlatformSplitHint/);
+  assert.doesNotMatch(source, /尾程占收入比/);
+  // 尾程费率页仍在维护「平台 × 仓 × 重量段」的费率（尾程本身没退役）
+  assert.match(source, /批量新增尾程费率/);
 });
 
 // ---------------------------------------------------------------------------
@@ -1180,7 +1233,7 @@ test("测算页逐个 SKU 切换包邮（跨境电商不是默认包邮）", () 
 });
 
 test("不包邮时界面要说清尾程不计入成本底线", () => {
-  assert.match(source, /买家付运费/);
+  assert.match(source, /买家付尾程运费/);
   assert.match(source, /不包邮/);
 });
 
@@ -1268,4 +1321,58 @@ test("卡片只显示今天真正生效的那一档（未来才生效的价不�
   // 取错行 ⇒ 卡片显示一个还没生效的价 ⇒ 运营照着改 ⇒ 改错。
   assert.match(source, /const inEffect = candidates\.find\(/);
   assert.match(source, /row\.effective_to >= today/);
+});
+
+// ---------------------------------------------------------------------------
+// 批次 9 · 成本底线口径归一（2026-11-19，前端部分）
+// 上游设计稿：docs/superpowers/plans/2026-11-19-product-center-cost-floor-caliber-closure.md §7
+// ---------------------------------------------------------------------------
+
+test("底线成本率合计显示的是顶层 computed，不再是空白", () => {
+  // ⚠️ 回归钉子：以前模板绑的是 pricingDrawer.costRateTotalPct，
+  // 但这两个 computed 是**顶层变量**（不在 pricingDrawer 这个 reactive 对象里）
+  // ⇒ 取到 undefined ⇒ 界面上是空白。绑法改回顶层变量。
+  assert.match(source, /\{\{ costRateTotalPct \}\}%/);
+  assert.doesNotMatch(source, /pricingDrawer\.costRateTotalPct/);
+  assert.doesNotMatch(source, /pricingDrawer\.baseRatePct/);
+  assert.doesNotMatch(source, /baseRatePct/);
+});
+
+test("运输四段路径图存在：头程 / 仓储 / 贴单 / 尾程 各说各的计量口径", () => {
+  assert.match(source, /国内工厂/);
+  assert.match(source, /目的国本地仓/);
+  assert.match(source, /【头程】/);
+  assert.match(source, /【仓储】/);
+  assert.match(source, /【尾程】/);
+  assert.match(source, /按体积 CBM/);
+  assert.match(source, /按体积 CBM\/月/);
+  assert.match(source, /每件贴单费/);
+  assert.match(source, /按重量段/);
+  // 路径之外的两类扣款也要写清：平台侧按收入 % + 风险按件折钱
+  assert.match(source, /不在路径上的（平台侧）/);
+  assert.match(source, /平台佣金、平台其他成本率、达人佣金（按收入 %）/);
+  assert.match(source, /行业基准件损率/);
+});
+
+test("「物流」不再用作列标签：四段命名统一到头程 / 仓储 / 贴单 / 尾程", () => {
+  // ⚠️ "物流"在商品中心同时指头程、货损、运输方式三件事 ⇒ 列标签一律不许再用它。
+  assert.doesNotMatch(source, /label="物流/);
+  assert.match(source, /label="头程与仓储管理"/);
+  assert.match(source, /label="头程服务商规则"/);
+  assert.match(source, /label="头程批次"/);
+  assert.match(source, /label="头程服务商（货代）"/);
+  assert.match(source, /label="预估头程运费"/);
+  assert.match(source, /label="运输货损率（SPU）"/);
+  // 运输方式（海运/空运）也不再叫「物流方式」
+  assert.match(source, /运输方式（海运\/空运）/);
+  assert.doesNotMatch(source, /placeholder="物流方式"/);
+});
+
+test("SPU 两率标注为行业基准件损率，并说明按件折进成本", () => {
+  // 口径变了必须写在界面上：这两个率不再是「按收入比例扣」，
+  // 而是行业基准的**件损率**，按件折进成本（分子 × (1 + 退货率 + 货损率)）。
+  assert.match(source, /行业基准件损率/);
+  assert.match(source, /按件折进成本/);
+  assert.match(source, /\(1 \+ 退货率 \+ 货损率\)/);
+  assert.match(source, /人工维护，当前无实测校准/);
 });

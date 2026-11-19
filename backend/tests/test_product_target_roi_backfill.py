@@ -44,6 +44,9 @@ def _inputs(**overrides):
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0.10"),
+        # 批次 9：桶是利润链**必填**项（不传 ⇒ 整条链算不出来）。
+        # 本组用例只守护广告费口径 ⇒ 显式给 0。
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=Decimal("0"),
         return_rate=Decimal("0.02"),
         damage_rate=Decimal("0.01"),
@@ -65,19 +68,21 @@ def test_ad_cost_uses_target_roi_when_given():
     # 商家实收 100 ÷ 2.5 = 40
     assert expected["ad_cost"] == Decimal("40.00")
     assert expected["ad_cost_source"] == "target_roi"
-    # 广告前利润 = 100 − 30 − 20 − 10 − 10(平台佣金) − 5(达人) − 2(退货) − 1(货损) = 22
-    assert expected["profit"] == Decimal("22.00") - Decimal("40.00")
-    # 保本 ROI = 100 ÷ 22 = 4.5454…
-    assert expected["break_even_roi"] == Decimal("100") / Decimal("22")
+    # 批次 9：两率**按件折** —— 按件成本合计 = 30 采购 + 20 头程 + 10 仓储 + 0 贴单 + 0 尾程 = 60
+    #   退货 = 60 × 2% = 1.20；货损 = 60 × 1% = 0.60
+    # 广告前利润 = 100 − (60 + 10 平台佣金 + 5 达人 + 0 桶 + 1.20 + 0.60) = 23.20
+    assert expected["profit"] == Decimal("23.20") - Decimal("40.00")
+    # 保本 ROI = 100 ÷ 23.20 = 4.3103…
+    assert expected["break_even_roi"] == Decimal("100") / Decimal("23.20")
 
 
 def test_ad_cost_falls_back_to_legacy_ad_rate_without_target_roi():
     preview = build_platform_profit_preview(**_inputs(expected_ad_rate=Decimal("0.15")))
     expected = preview["expected"]
-    # 老口径：广告费 = 广告前利润 × 分成率 = 22 × 0.15 = 3.30
-    assert expected["ad_cost"] == Decimal("3.30")
+    # 老口径：广告费 = 广告前利润 × 分成率 = 23.20 × 0.15 = 3.48
+    assert expected["ad_cost"] == Decimal("3.48")
     assert expected["ad_cost_source"] == "legacy_ad_rate"
-    assert expected["profit"] == Decimal("18.70")
+    assert expected["profit"] == Decimal("19.72")
 
 
 def test_equivalent_target_roi_equals_the_entered_target_roi():

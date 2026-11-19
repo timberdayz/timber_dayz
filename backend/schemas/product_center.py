@@ -588,12 +588,15 @@ class SkuItem(BaseModel):
     min_selling_price_is_override: Optional[bool] = None
     min_selling_price_override: Optional[float] = None
     min_selling_price_missing_reasons: list[str] = Field(default_factory=list)
-    # --- 尾程配送费是否进了成本底线（批次 4）---
-    # ⚠️ 必须「成对」才为 True：分子加了尾程，分母也剔掉了 other_cost_rate 里那份。
-    #    只有一边有值时为 False —— 尾程**没有**进底线（缺的那半边在 missing_reasons 里）。
+    # --- 尾程配送费是否进了成本底线（批次 9 B 路线）---
+    # ⚠️ 现在**不再成对**：尾程只要有值（且该 SKU 包邮）就直接进分子。
     delivery_cost_in_cost_floor: Optional[bool] = None
     cost_floor_delivery_cost: Optional[float] = None
-    cost_floor_delivery_cost_rate: Optional[float] = None
+    # --- 履约按件成本（批次 9 P2）：头程 / 仓储 / 贴单 ---
+    # ⚠️ None = 该项**未计入**（缺 SKU 体积或缺仓规则），不是「这项不要钱」。
+    cost_floor_logistics_cost: Optional[float] = None
+    cost_floor_storage_cost: Optional[float] = None
+    cost_floor_label_fee: Optional[float] = None
     pricing_tier_label: Optional[str] = None
     pricing_days_since_restock: Optional[int] = None
     pricing_tier_source: Optional[str] = None
@@ -707,10 +710,9 @@ class PlatformFeeRateUpdateRequest(BaseModel):
     fee_rate_version: Optional[str] = Field(default=None, max_length=64)
     # 平台成本率：底线计算的成本基数来源
     default_creator_commission_rate: Optional[float] = Field(default=None, ge=0, le=1)
+    # 平台其他成本率（批次 9）：**只装「佣金与尾程之外」的平台侧按收入比例扣款**。
+    # 平台佣金率（default_fee_rate）**单独进分母**；尾程按重量段单件计价**直接进分子**。
     other_cost_rate: Optional[float] = Field(default=None, ge=0, lt=1)
-    # 尾程配送费占收入比（批次 4）：把尾程从 other_cost_rate 残差桶里剔出去的**拆分基准**。
-    # 留空 ⇒ 尾程**不进成本底线**（宁可不算，也不重复扣）。
-    delivery_cost_rate: Optional[float] = Field(default=None, ge=0, lt=1)
 
 
 class PlatformFeeRateResponse(BaseModel):
@@ -726,8 +728,6 @@ class PlatformFeeRateResponse(BaseModel):
     default_fee_rate: Optional[float] = None
     default_creator_commission_rate: Optional[float] = None
     other_cost_rate: Optional[float] = None
-    # 尾程配送费占收入比（批次 4）：尾程进成本底线的拆分基准。
-    delivery_cost_rate: Optional[float] = None
     fee_rate_effective_from: Optional[date] = None
     fee_rate_source: Optional[str] = None
     fee_rate_version: Optional[str] = None
@@ -1505,12 +1505,15 @@ class PlatformSkuProfitCandidateResponse(BaseModel):
     min_selling_price_is_override: Optional[bool] = None
     min_selling_price_override: Optional[float] = None
     min_selling_price_missing_reasons: list[str] = Field(default_factory=list)
-    # --- 尾程配送费是否进了成本底线（批次 4）---
-    # ⚠️ 必须「成对」才为 True：分子加了尾程，分母也剔掉了 other_cost_rate 里那份。
-    #    只有一边有值时为 False —— 尾程**没有**进底线（缺的那半边在 missing_reasons 里）。
+    # --- 尾程配送费是否进了成本底线（批次 9 B 路线）---
+    # ⚠️ 现在**不再成对**：尾程只要有值（且该 SKU 包邮）就直接进分子。
     delivery_cost_in_cost_floor: Optional[bool] = None
     cost_floor_delivery_cost: Optional[float] = None
-    cost_floor_delivery_cost_rate: Optional[float] = None
+    # --- 履约按件成本（批次 9 P2）：头程 / 仓储 / 贴单 ---
+    # ⚠️ None = 该项**未计入**（缺 SKU 体积或缺仓规则），不是「这项不要钱」。
+    cost_floor_logistics_cost: Optional[float] = None
+    cost_floor_storage_cost: Optional[float] = None
+    cost_floor_label_fee: Optional[float] = None
     pricing_tier_label: Optional[str] = None
     pricing_days_since_restock: Optional[int] = None
     pricing_tier_source: Optional[str] = None

@@ -15,10 +15,24 @@ from backend.services.product_pricing_service import (
 )
 
 # tiktok 基准值（实测，见 spec §2.3 / §1.2）
+# ⚠️ 批次 9（2026-11-19）口径：
+#   分子 = (采购 + 头程 + 仓储 + 贴单 + 尾程) × (1 + SPU退货率 + SPU货损率)
+#   分母 = 1 − 平台佣金率 − 平台其他成本率(桶) − 达人佣金率 − 目标利润率
+# 平台佣金率**单独进分母**（以前藏在桶里，界面上填了不生效）；
+# 桶只装「佣金与尾程之外」的平台侧按收入比例扣款。
+PLATFORM_FEE_RATE = Decimal("0.0737")
 OTHER_COST_RATE = Decimal("0.2727")
 CREATOR_COMMISSION_RATE = Decimal("0.0606")
 RETURN_LOSS_RATE = Decimal("0.0467")
 DAMAGE_RATE = Decimal("0.0158")
+TARGET_MARGIN_RATE = Decimal("0.25")
+
+#: 分母 = 1 − 0.0737 − 0.2727 − 0.0606 − 0.25 = 0.343
+COST_FLOOR_DENOMINATOR = Decimal("0.343")
+#: 分子 = 10 × (1 + 0.0467 + 0.0158) = 10.625
+COST_FLOOR_NUMERATOR = Decimal("10.625")
+#: 底线 = 10.625 / 0.343 = 30.9778… ⇒ 30.98
+COST_FLOOR = Decimal("30.98")
 
 
 def _policy(min_restock_days, label, discount_rate, target_margin_rate):
@@ -31,67 +45,112 @@ def _policy(min_restock_days, label, discount_rate, target_margin_rate):
 
 
 def test_cost_floor_matches_spec_example():
+    """成本底线 = (采购 + 履约按件成本) × (1 + 退货率 + 货损率) ÷ 新分母。
+
+    批次 9 口径：分子 10 × (1 + 0.0467 + 0.0158) = 10.625，
+    分母 1 − 0.0737 − 0.2727 − 0.0606 − 0.25 = 0.343
+    ⇒ 10.625 / 0.343 = 30.9778… ⇒ 30.98
+    """
     floor = compute_cost_floor(
         purchase_cost=Decimal("10"),
+        platform_fee_rate=PLATFORM_FEE_RATE,
         other_cost_rate=OTHER_COST_RATE,
         creator_commission_rate=CREATOR_COMMISSION_RATE,
         spu_return_loss_rate=RETURN_LOSS_RATE,
         spu_damage_rate=DAMAGE_RATE,
-        target_margin_rate=Decimal("0.25"),
+        target_margin_rate=TARGET_MARGIN_RATE,
     )
-    assert floor == Decimal("28.23")
+    assert floor == COST_FLOOR
 
 
-def test_cost_floor_does_not_double_count_platform_commission():
-    """平台佣金率已含在 other_cost_rate 内，误加会让底线偏高 26%。"""
+def test_cost_floor_subtracts_platform_commission_exactly_once():
+    """平台佣金率**单独进分母**，且**只扣一次**。
+
+    ⚠️ 批次 9 之前，模块头明写「平台佣金率已包含在 other_cost_rate 内，
+    不得单独进入分母」⇒ 界面上填的佣金率**根本没进计算**。
+    现在佣金要单独进分母，所以这条守护反过来写：
+    **分母里必须有它，而且只扣一次**（重复扣 ⇒ 底线被抬高）。
+    """
+    denominator = (
+        Decimal("1")
+        - PLATFORM_FEE_RATE
+        - OTHER_COST_RATE
+        - CREATOR_COMMISSION_RATE
+        - TARGET_MARGIN_RATE
+    )
+    assert denominator == COST_FLOOR_DENOMINATOR
+
     floor = compute_cost_floor(
         purchase_cost=Decimal("10"),
+        platform_fee_rate=PLATFORM_FEE_RATE,
         other_cost_rate=OTHER_COST_RATE,
         creator_commission_rate=CREATOR_COMMISSION_RATE,
         spu_return_loss_rate=RETURN_LOSS_RATE,
         spu_damage_rate=DAMAGE_RATE,
-        target_margin_rate=Decimal("0.25"),
+        target_margin_rate=TARGET_MARGIN_RATE,
     )
-    # 若误加平台佣金 0.0737，分母变 0.2805，底线会变成 35.65
-    assert floor != Decimal("35.65")
+    assert floor == (COST_FLOOR_NUMERATOR / denominator).quantize(Decimal("0.01"))
+    # 佣金率从 0.0737 抬到 0.18：分母 0.343 → 0.2367，底线 10.625 / 0.2367 = 44.89
+    raised = compute_cost_floor(
+        purchase_cost=Decimal("10"),
+        platform_fee_rate=Decimal("0.18"),
+        other_cost_rate=OTHER_COST_RATE,
+        creator_commission_rate=CREATOR_COMMISSION_RATE,
+        spu_return_loss_rate=RETURN_LOSS_RATE,
+        spu_damage_rate=DAMAGE_RATE,
+        target_margin_rate=TARGET_MARGIN_RATE,
+    )
+    assert raised == Decimal("44.89")
+    assert raised != floor, "平台佣金率必须真的进分母（以前它藏在桶里，改了没反应）"
 
 
 def test_cost_floor_uses_sku_creator_commission_rate_when_provided():
     floor = compute_cost_floor(
         purchase_cost=Decimal("10"),
+        platform_fee_rate=PLATFORM_FEE_RATE,
         other_cost_rate=OTHER_COST_RATE,
         creator_commission_rate=Decimal("0.15"),
         spu_return_loss_rate=RETURN_LOSS_RATE,
         spu_damage_rate=DAMAGE_RATE,
-        target_margin_rate=Decimal("0.25"),
+        target_margin_rate=TARGET_MARGIN_RATE,
     )
-    assert floor == Decimal("37.76")
+    # 分母 = 1 − 0.0737 − 0.2727 − 0.15 − 0.25 = 0.2536 ⇒ 10.625 / 0.2536 = 41.90
+    assert floor == Decimal("41.90")
 
 
 def test_rates_are_not_quantized():
-    """费率不得过 _money 量化：0.2727 -> 0.27 会让底线从 28.23 变 28.02。"""
+    """费率不得过 _money 量化：0.2727 -> 0.27 会让底线从 30.98 变 30.74。"""
     floor = compute_cost_floor(
         purchase_cost=Decimal("10"),
+        platform_fee_rate=Decimal("0.0737"),
         other_cost_rate=Decimal("0.2727"),
         creator_commission_rate=Decimal("0.0606"),
         spu_return_loss_rate=Decimal("0.0467"),
         spu_damage_rate=Decimal("0.0158"),
         target_margin_rate=Decimal("0.25"),
     )
-    assert floor == Decimal("28.23")
+    assert floor == COST_FLOOR
 
 
 def test_self_consistency_identity():
-    """目标利润率 = 实测净利率时，分母必须还原实测采购成本率 0.4261。"""
+    """自洽恒等式：分子与分母都要还原成新口径的那两行。
+
+    ⚠️ 批次 9：分母**不再**扣 SPU 两率（两率改成乘进分子），
+    分子**必须**乘 (1 + 退货率 + 货损率) —— 分子分母各归各的。
+    """
     denominator = (
         Decimal("1")
+        - PLATFORM_FEE_RATE
         - OTHER_COST_RATE
         - CREATOR_COMMISSION_RATE
-        - RETURN_LOSS_RATE
-        - DAMAGE_RATE
-        - Decimal("0.1781")
+        - TARGET_MARGIN_RATE
     )
-    assert denominator == Decimal("0.4261")
+    assert denominator == COST_FLOOR_DENOMINATOR
+
+    numerator = Decimal("10") * (Decimal("1") + RETURN_LOSS_RATE + DAMAGE_RATE)
+    assert numerator == COST_FLOOR_NUMERATOR
+    # 底线 = 分子 ÷ 分母 ⇒ 在底线上卖，利润率恰好是目标利润率
+    assert (numerator / denominator).quantize(Decimal("0.01")) == COST_FLOOR
 
 
 def test_discount_guard_uses_current_tier_rate():
@@ -300,11 +359,12 @@ def _pricing(**overrides):
         "reference_selling_price": Decimal("30"),
         "creator_commission_rate": None,
         "platform_creator_commission_rate": CREATOR_COMMISSION_RATE,
+        "platform_fee_rate": PLATFORM_FEE_RATE,
         "other_cost_rate": OTHER_COST_RATE,
         "spu_bound": True,
         "spu_return_loss_rate": RETURN_LOSS_RATE,
         "spu_damage_rate": DAMAGE_RATE,
-        "policy": _policy(0, "日常", 0.10, 0.25),
+        "policy": _policy(0, "日常", 0.10, TARGET_MARGIN_RATE),
         "deepest_policy": _policy(120, "滞销60天以上", 0.30, 0.10),
         "min_selling_price_override": None,
         "days_since_restock": None,
@@ -315,18 +375,32 @@ def _pricing(**overrides):
 
 def test_sku_pricing_happy_path_matches_spec_example():
     out = _pricing()
-    assert out["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+    assert out["min_selling_price"] == pytest.approx(30.98, abs=0.01)
     assert out["min_selling_price_source"] == "cost_floor"
     assert out["current_discount_rate"] == pytest.approx(0.10)
     assert out["clearance_max_discount_rate"] == pytest.approx(0.30)
     assert out["pricing_tier_label"] == "日常"
     assert out["pricing_tier_source"] == "fallback_no_restock_days"
     assert out["pricing_days_since_restock"] is None
-    # ⚠️ 批次 4：spec 的 28.23 是**不含尾程**的底线（尾程没配 ⇒ 尾程不进底线，
-    #    免得同一笔尾程既进分子又留在 other_cost_rate 残差里被扣两次）。
-    #    但底线因此是**不完整**的 ⇒ 必须点名缺了什么。
+    # ⚠️ 批次 9：底线 30.98 = 分子 10.625（采购 10 × 件损乘数 1.0625）÷ 分母 0.343。
+    #    没配尾程 ⇒ 尾程不进底线（**不再**有「成对生效」那套拆分基准），
+    #    但底线因此不完整 ⇒ 必须点名缺了什么。
     assert out["min_selling_price_missing_reasons"] == ["missing_delivery_cost"]
     assert out["delivery_cost_in_cost_floor"] is False
+    # 批次 9：退役字段不再出现，履约按件成本改为三个独立字段
+    assert "cost_floor_delivery_cost_rate" not in out
+    assert out["cost_floor_logistics_cost"] is None
+    assert out["cost_floor_storage_cost"] is None
+    assert out["cost_floor_label_fee"] is None
+
+
+def test_sku_pricing_missing_platform_fee_rate_reports_reason():
+    """缺平台佣金率 ⇒ `missing_platform_fee_rate`，且**不算底线**（批次 9）。"""
+    out = _pricing(platform_fee_rate=None)
+    assert "missing_platform_fee_rate" in out["min_selling_price_missing_reasons"]
+    # 成本线算不出，但纪律线仍可算
+    assert out["min_selling_price_source"] == "discount_guard"
+    assert out["min_selling_price"] == pytest.approx(27.00, abs=0.01)
 
 
 def test_sku_pricing_missing_purchase_cost_degrades_to_discount_guard():
@@ -387,7 +461,7 @@ def test_sku_pricing_returns_sku_creator_commission_rate_untouched():
     out = _pricing(creator_commission_rate=None)
     assert out["creator_commission_rate"] is None
     # 但底线计算用的是平台兜底值
-    assert out["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+    assert out["min_selling_price"] == pytest.approx(30.98, abs=0.01)
 
 
 def test_sku_pricing_manual_override_wins_and_is_flagged():
@@ -669,10 +743,11 @@ async def test_list_skus_injects_pricing_payload(
     resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
     assert resp.status_code == 200, resp.text
     row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
-    # ⚠️ 批次 4：**没传仓** ⇒ 尾程算不出来（尾程是「平台 × 仓」粒度的量，不能猜）
-    #    ⇒ 尾程不进底线 ⇒ 底线仍是旧口径 10/0.3542 = 28.23（> 纪律线 30*0.9 = 27.00）
+    # ⚠️ 批次 9：**没传仓** ⇒ 尾程算不出来（尾程是「平台 × 仓」粒度的量，不能猜）
+    #    ⇒ 尾程不进底线 ⇒ 底线 = 分子 10.625（采购 10 × 件损乘数 1.0625）÷ 分母 0.343
+    #    = 30.98（> 纪律线 30*0.9 = 27.00）
     #    但底线因此不完整 ⇒ 必须点名缺了什么。
-    assert row["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+    assert row["min_selling_price"] == pytest.approx(30.98, abs=0.01)
     assert row["min_selling_price_source"] == "cost_floor"
     assert row["min_selling_price_is_override"] is False
     assert row["current_discount_rate"] == pytest.approx(0.10)
@@ -683,7 +758,11 @@ async def test_list_skus_injects_pricing_payload(
     assert row["pricing_days_since_restock"] is None
     # ⚠️ 批次 6：这个种子 SKU 是**包邮**的（商家承担尾程）⇒ 没传仓 ⇒ 尾程算不出来
     #    ⇒ 尾程不进底线，但底线因此不完整 ⇒ 必须点名缺了什么。
-    assert row["min_selling_price_missing_reasons"] == ["missing_delivery_cost"]
+    # ⚠️ 批次 9 P2：没传仓 ⇒ 履约按件成本（头程/仓储/贴单）也算不出来 ⇒ 同样要点名。
+    assert row["min_selling_price_missing_reasons"] == [
+        "missing_delivery_cost",
+        "missing_warehouse_for_fulfillment",
+    ]
     assert row["delivery_cost_in_cost_floor"] is False
     # SKU 没单独设佣金 -> 返回 None（前端输入框留空），兜底值单独给
     assert row["creator_commission_rate"] is None
@@ -698,6 +777,12 @@ async def test_list_skus_with_warehouse_includes_delivery_cost_in_floor(
 
     尾程是「平台 × 仓 × 重量」粒度的量，所以同一个 SKU 在不同仓的底线可以不同 ——
     这正是按件计费尾程的意义（重货不该和轻货共用一条底线）。
+
+    ⚠️ 批次 9：尾程**直接进分子**（不再有「成对生效」那套拆分基准），
+    且履约按件成本（头程/仓储/贴单）也进分子：
+    分子 = (采购 10 + 头程 0.05 + 仓储 3.00 + 贴单 0.50 + 尾程 5) × 1.0625 = 19.709375
+    分母 = 1 − 0.0737(平台佣金) − 0.2727(桶) − 0.0606(达人) − 0.25(目标利润) = 0.343
+    ⇒ 19.709375 / 0.343 = 57.4617… ⇒ 57.46
     """
     await pricing_seed()
 
@@ -708,12 +793,9 @@ async def test_list_skus_with_warehouse_includes_delivery_cost_in_floor(
     )
     assert resp.status_code == 200, resp.text
     row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
-    # 分子 = 采购 10 + 尾程 5（SKU 落 T01 段，费率 5 元/件）
-    # 分母 = 1 − 0.2727 + 0.10(尾程拆分) − 0.0606 − 0.0467 − 0.0158 − 0.25 = 0.4542
-    assert row["min_selling_price"] == pytest.approx(33.03, abs=0.01)
+    assert row["min_selling_price"] == pytest.approx(57.46, abs=0.01)
     assert row["delivery_cost_in_cost_floor"] is True
     assert row["cost_floor_delivery_cost"] == pytest.approx(5.0)
-    assert row["cost_floor_delivery_cost_rate"] == pytest.approx(0.10)
     assert row["min_selling_price_missing_reasons"] == []
 
 
@@ -733,8 +815,8 @@ async def test_list_skus_reflects_manual_override_and_creator_commission(
 
     resp = await pg_async_client.get("/api/skus", headers=pricing_auth_headers)
     row = next(item for item in resp.json()["data"] if item["sku_id"] == 9001)
-    # 10 / (1 - 0.2727 - 0.15 - 0.0467 - 0.0158 - 0.25) = 10 / 0.2648 = 37.76
-    assert row["min_selling_price"] == pytest.approx(37.76, abs=0.01)
+    # 分子 10.625 ÷ (1 - 0.0737 - 0.2727 - 0.15 - 0.25) = 10.625 / 0.2536 = 41.90
+    assert row["min_selling_price"] == pytest.approx(41.90, abs=0.01)
     assert row["min_selling_price_source"] == "cost_floor"
     assert row["creator_commission_rate"] == pytest.approx(0.15)
     # 兜底值仍是平台默认，不受 SKU 值影响
@@ -894,8 +976,10 @@ async def test_estimate_below_floor_is_rejected_but_draft_is_not(
     row = rows[0]
     assert "min_selling_price" in row
     assert row["min_selling_price"] is not None
-    # seed 的期望数值：成本线 (采购 10 + 尾程 5) ÷ 0.4542 = 33.03 > 纪律线 30*0.9 = 27.00
-    assert row["min_selling_price"] == pytest.approx(33.03, abs=0.01)
+    # seed 的期望数值（批次 9 口径）：
+    # 成本线 = (采购 10 + 头程 0.05 + 仓储 3.00 + 贴单 0.50 + 尾程 5) × 1.0625 ÷ 0.343
+    #        = 19.709375 / 0.343 = 57.4617… ⇒ 57.46（> 纪律线 30*0.9 = 27.00）
+    assert row["min_selling_price"] == pytest.approx(57.46, abs=0.01)
     assert row["min_selling_price_source"] == "cost_floor"
     # 库龄表在测试库不存在 -> 回落「日常」档
     assert row["pricing_tier_source"] == "fallback_no_restock_days"
@@ -919,8 +1003,11 @@ async def test_estimate_below_floor_is_rejected_but_draft_is_not(
     #   拍平成字符串，所以必须走 APIException 路线才能保住 dict 结构。）
     assert body["success"] is False
     assert body["error"]["detail"]["code"] == "below_min_selling_price"
+    # ⚠️ 批次 9 口径收口：护栏的底线现在**带仓**（与商品中心页面同口径）⇒
+    # 分子 = (采购 10 + 头程 0.05 + 仓储 3.00 + 贴单 0.50 + 尾程 5) × 1.0625 = 19.709375
+    # 分母 = 0.343 ⇒ 57.4617… ⇒ 57.46
     assert body["error"]["detail"]["min_selling_price"] == pytest.approx(
-        28.23, abs=0.01
+        57.46, abs=0.01
     )
     assert body["error"]["detail"]["expected_selling_price"] == pytest.approx(
         0.01, abs=0.01
@@ -946,6 +1033,11 @@ async def test_estimate_above_floor_saves_successfully(
 
     ⚠️ 批次 4：尾程进利润后保本 ROI 从 2.19 抬到 3.66 ⇒ 目标 ROI 必须跟着抬，
     否则会被「低于保本线」拦下（这正是尾程该起的作用）。
+
+    ⚠️ 批次 9：利润链**开始扣桶**（0.2727）⇒ 同样的售价下保本 ROI 又抬了一截
+    （售价 35 时保本 ROI ≈ 33.33）⇒ 目标 ROI 4 已经够不着保本线。
+    所以这里把**售价**抬到 60（仍高于底线 30.98），
+    售价 60 时保本 ROI ≈ 3.78 < 目标 ROI 4 ⇒ 放行。
     """
     await pricing_seed()
 
@@ -957,7 +1049,7 @@ async def test_estimate_above_floor_saves_successfully(
             "platform_code": "tiktok",
             "warehouse_code": "MY-01",
             "transport_type": "sea",
-            "expected_selling_price": 35,
+            "expected_selling_price": 60,
             "target_roi": 4,
         },
     )
@@ -972,6 +1064,9 @@ async def test_estimate_without_ad_cost_input_is_rejected(
     """没给目标 ROI 也没给广告分成率 ⇒ 广告费不可算 ⇒ 不许存利润版本（批次 2 P2）。
 
     老行为是把「没填」当成广告费 0 ⇒ 利润看着很美 ⇒ 存下来的版本会误导复盘。
+
+    ⚠️ 批次 9：护栏的底线**带仓**了（57.46）⇒ 售价必须高于它，
+    否则会先撞「低于最低售价」，压根走不到「广告费口径缺失」这条校验。
     """
     await pricing_seed()
 
@@ -983,7 +1078,7 @@ async def test_estimate_without_ad_cost_input_is_rejected(
             "platform_code": "tiktok",
             "warehouse_code": "MY-01",
             "transport_type": "sea",
-            "expected_selling_price": 35,
+            "expected_selling_price": 60,
         },
     )
     assert resp.status_code == 422, resp.text
@@ -1019,8 +1114,11 @@ async def test_guardrail_precedes_missing_fields_check(
     body = estimate.json()
     # 不能是 cannot_save_profit_version（缺物流规则 / 缺仓储规则）
     assert body["error"]["detail"]["code"] == "below_min_selling_price"
+    # ⚠️ 这条用的是 **with_cost_rules=False** 的种子：没有物流/仓储规则、没有尾程费率
+    #    ⇒ 尾程与履约按件成本都**算不出来**（不进分子）⇒ 底线只剩采购成本：
+    #    分子 10 × 1.0625 = 10.625 ÷ 分母 0.343 = 30.9778… ⇒ 30.98
     assert body["error"]["detail"]["min_selling_price"] == pytest.approx(
-        28.23, abs=0.01
+        30.98, abs=0.01
     )
 
 
@@ -1041,6 +1139,9 @@ def test_creator_commission_is_deducted_from_profit():
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0.0737"),
+        # 批次 9：桶（平台其他成本率）是利润链的**必填**成本项（缺它整条链算不出来）。
+        # 本用例只测达人佣金 ⇒ 桶显式给 0，让被测口径（佣金扣减）不受桶影响。
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=Decimal("0"),
         return_rate=Decimal("0"),
         damage_rate=Decimal("0"),
@@ -1076,6 +1177,8 @@ def test_creator_commission_none_does_not_block_profit():
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0"),
+        # 批次 9：桶是必填项（见上一个用例的说明）⇒ 显式给 0。
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=Decimal("0"),
         return_rate=Decimal("0"),
         damage_rate=Decimal("0"),

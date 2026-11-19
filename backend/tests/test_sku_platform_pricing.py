@@ -55,18 +55,30 @@ PLATFORM_PRICING_MIGRATION = VERSIONS_DIR / "20261115_add_sku_platform_pricing.p
 # ---------------------------------------------------------------------------
 # 固定输入（生产库实测的费率 + 手算的底线）
 #
-# 底线公式：cost_floor = 采购成本 ÷ (1 − 平台其他成本率 − 达人佣金率
-#                                  − SPU退货损失率 − SPU货损率 − 目标利润率)
+# 底线公式（批次 9，2026-11-19 拍板）：
+#     分子 = (采购成本 + 履约按件成本 + 尾程) × (1 + SPU退货率 + SPU货损率)
+#     分母 = 1 − 平台佣金率 − 平台其他成本率(桶) − 达人佣金率 − 目标利润率
 # 纪律线：discount_guard = 参考售价 × (1 − 当前档折扣率)
 # 底线 = max(cost_floor, discount_guard, 人工覆盖)
+#
+# ⚠️ **平台佣金率单独进分母**（批次 9）：以前它藏在 ``other_cost_rate`` 里，
+#    界面上填了也不生效。现在佣金与桶**各扣各的**。
+# ⚠️ **SPU 两率按件折进分子**（批次 9）：它们是行业基准的**件损率**
+#    （发 100 件坏/退几件），不是「少收钱」⇒ 不能再从分母里扣。
+#
+# 桶值（``other_cost_rate``）= 佣金与尾程之外的平台侧扣款，**人工维护**，
+# 新值来自**结算单实测**（2026-11-19）：Shopee 服务费 3.58% / TikTok 交易手续费 3.11%。
+# 旧值 41.65% / 27.27% 是**旧口径下用减法凑出来的残差桶**，已被实测推翻。
 #
 # 这些期望值是**手算**出来的，不依赖被测代码的输出 ——
 # 否则测试只是在"验证代码等于它自己"。
 # ---------------------------------------------------------------------------
 
-TIKTOK_OTHER_COST_RATE = Decimal("0.2727")
+TIKTOK_FEE_RATE = Decimal("0.08175")
+TIKTOK_OTHER_COST_RATE = Decimal("0.0311")
 TIKTOK_CREATOR_RATE = Decimal("0.0606")
-SHOPEE_OTHER_COST_RATE = Decimal("0.4165")
+SHOPEE_FEE_RATE = Decimal("0.16")
+SHOPEE_OTHER_COST_RATE = Decimal("0.0358")
 SHOPEE_CREATOR_RATE = Decimal("0.0111")
 
 PURCHASE_COST = Decimal("45.20")
@@ -76,10 +88,13 @@ TARGET_MARGIN_RATE = Decimal("0.25")
 DISCOUNT_RATE = Decimal("0.10")
 REFERENCE_SELLING_PRICE = Decimal("30.00")
 
-# 45.20 ÷ (1 − 0.2727 − 0.0606 − 0.0467 − 0.0158 − 0.25) = 127.6115… → 127.61
-TIKTOK_FLOOR = Decimal("127.61")
-# 45.20 ÷ (1 − 0.4165 − 0.0111 − 0.0467 − 0.0158 − 0.25) = 173.9130… → 173.91
-SHOPEE_FLOOR = Decimal("173.91")
+# 分子：45.20 × (1 + 0.0467 + 0.0158) = 45.20 × 1.0625 = 48.025
+# TikTok：48.025 ÷ (1 − 0.08175 − 0.0311 − 0.0606 − 0.25) = 48.025 ÷ 0.57655
+#          = 83.297198… → 83.30
+TIKTOK_FLOOR = Decimal("83.30")
+# Shopee：48.025 ÷ (1 − 0.16 − 0.0358 − 0.0111 − 0.25) = 48.025 ÷ 0.5431
+#          = 88.427545… → 88.43
+SHOPEE_FLOOR = Decimal("88.43")
 # 纪律线：30.00 × (1 − 0.10) = 27.00 —— 比两条成本线都低，所以不参与取最大
 DISCOUNT_GUARD = Decimal("27.00")
 
@@ -152,6 +167,8 @@ async def _seed_two_platforms(session) -> int:
             DimPlatform(
                 platform_code="tiktok",
                 name="TikTok",
+                # 批次 9：平台佣金率**单独**进分母（以前藏在桶里，填了也不生效）。
+                default_fee_rate=TIKTOK_FEE_RATE,
                 default_creator_commission_rate=TIKTOK_CREATOR_RATE,
                 other_cost_rate=TIKTOK_OTHER_COST_RATE,
                 platform_role="sales",
@@ -160,6 +177,7 @@ async def _seed_two_platforms(session) -> int:
             DimPlatform(
                 platform_code="shopee",
                 name="Shopee",
+                default_fee_rate=SHOPEE_FEE_RATE,
                 default_creator_commission_rate=SHOPEE_CREATOR_RATE,
                 other_cost_rate=SHOPEE_OTHER_COST_RATE,
                 platform_role="sales",
@@ -254,8 +272,28 @@ async def test_same_sku_has_one_floor_per_platform(pricing_sqlite_session):
     assert floors["shopee"] == SHOPEE_FLOOR
     # 核心断言：两个平台**不再**共用一条底线
     assert floors["shopee"] > floors["tiktok"]
-    # 偏差量级对得上生产库实测（Shopee 费率更高 ⇒ 底线更高）
-    assert (floors["shopee"] / floors["tiktok"]) > Decimal("1.3")
+    # 偏差量级对得上生产库实测（Shopee 费率更高 ⇒ 底线更高）。
+    #
+    # ⚠️ **倍率门槛随口径收紧而变**（批次 9）：旧门槛 1.3x 建立在**旧桶值**上
+    #    （TikTok 27.27% vs Shopee 41.65%）—— 那两个数是旧口径下用减法凑出来的
+    #    **残差桶**，已被结算单实测推翻（真实服务费 3.58% / 交易手续费 3.11%）。
+    #    桶拉平 ⇒ 两平台成本结构的差异主要来自**平台佣金率**（16% vs 8.175%）
+    #    ⇒ 倍率降到 1.06x。**门槛跟着实测走，不是跟着旧结论走。**
+    assert (floors["shopee"] / floors["tiktok"]) > Decimal("1.05")
+    # ⚠️ 上面那条只守「大小」，守不住「**按谁的费率算的**」。
+    #    这条才守得住：把两个平台的费率**调成完全一样** ⇒ 两条底线必须**一模一样**
+    #    —— 说明底线的差异**确实**来自平台费率，而不是来自别的什么东西。
+    from modules.core.db import DimPlatform
+
+    for code, fee in (("tiktok", SHOPEE_FEE_RATE), ("shopee", SHOPEE_FEE_RATE)):
+        platform = await session.get(DimPlatform, code)
+        platform.default_fee_rate = fee
+        platform.other_cost_rate = SHOPEE_OTHER_COST_RATE
+        platform.default_creator_commission_rate = SHOPEE_CREATOR_RATE
+    await session.flush()
+
+    same_rate_floors = await _floors_by_platform(session, sku_id)
+    assert same_rate_floors["tiktok"] == same_rate_floors["shopee"]
 
 
 @pytest.mark.asyncio
@@ -274,17 +312,28 @@ async def test_each_platform_uses_its_own_rate(pricing_sqlite_session):
     sku_row = await session.get(DimErpSku, sku_id)
     linked_spu = await session.get(DimSpu, "SPU-1")
 
-    for platform_code, other_rate, creator_rate, expected in (
-        ("tiktok", TIKTOK_OTHER_COST_RATE, TIKTOK_CREATOR_RATE, TIKTOK_FLOOR),
-        ("shopee", SHOPEE_OTHER_COST_RATE, SHOPEE_CREATOR_RATE, SHOPEE_FLOOR),
+    for platform_code, fee_rate, other_rate, creator_rate, expected in (
+        (
+            "tiktok",
+            TIKTOK_FEE_RATE,
+            TIKTOK_OTHER_COST_RATE,
+            TIKTOK_CREATOR_RATE,
+            TIKTOK_FLOOR,
+        ),
+        (
+            "shopee",
+            SHOPEE_FEE_RATE,
+            SHOPEE_OTHER_COST_RATE,
+            SHOPEE_CREATOR_RATE,
+            SHOPEE_FLOOR,
+        ),
     ):
+        # 批次 9 新口径：两率**进分子**（件损率），佣金/桶/达人/目标**进分母**。
+        numerator = PURCHASE_COST * (
+            Decimal("1") + SPU_RETURN_LOSS_RATE + SPU_DAMAGE_RATE
+        )
         denominator = (
-            Decimal("1")
-            - other_rate
-            - creator_rate
-            - SPU_RETURN_LOSS_RATE
-            - SPU_DAMAGE_RATE
-            - TARGET_MARGIN_RATE
+            Decimal("1") - fee_rate - other_rate - creator_rate - TARGET_MARGIN_RATE
         )
         state = compute_pricing_state(
             context=context,
@@ -294,6 +343,8 @@ async def test_each_platform_uses_its_own_rate(pricing_sqlite_session):
         )
         pricing = state["pricing"]
         assert _floor(pricing) == expected, platform_code
+        # 手算复核：期望值本身也由公式推出来，不是抄出来的
+        assert (numerator / denominator).quantize(Decimal("0.01")) == expected
         # 成本线是这两条底线里更高的一条（纪律线只有 27.00）
         assert pricing["min_selling_price_source"] == "cost_floor"
         assert denominator > 0
@@ -532,7 +583,7 @@ async def test_price_change_on_one_platform_does_not_notify_the_other(
     assert notify == []
     await service.advance_baselines(silent)
 
-    # Shopee 的平台其他成本率 41.65% → 45%
+    # Shopee 的平台其他成本率 3.58% → 45%
     shopee = await session.get(DimPlatform, "shopee")
     shopee.other_cost_rate = Decimal("0.45")
     await session.flush()
@@ -545,8 +596,9 @@ async def test_price_change_on_one_platform_does_not_notify_the_other(
     assert change["sku_id"] == sku_id
     assert change["direction"] == "上升"
     assert change["old_min_selling_price"] == str(SHOPEE_FLOOR)
-    # 45.20 ÷ (1 − 0.45 − 0.0111 − 0.0467 − 0.0158 − 0.25) = 199.646… → 199.65
-    assert change["new_min_selling_price"] == "199.65"
+    # 批次 9 新口径：48.025 ÷ (1 − 0.16 − 0.45 − 0.0111 − 0.25)
+    #                = 48.025 ÷ 0.1289 = 372.575640… → 372.58
+    assert change["new_min_selling_price"] == "372.58"
     assert silent == []
 
 
@@ -826,13 +878,19 @@ async def test_guardrail_uses_the_floor_of_the_requested_platform(
         "sku_id": 9001,
         "warehouse_code": "MY-01",
         "transport_type": "sea",
-        "expected_selling_price": 35,
+        # ⚠️ 批次 9 新口径下两条底线的位置变了，售价必须落在**两条底线之间**，
+        #    测试才能验出「TikTok 放行、Shopee 拦下」：
+        #      TikTok 底线 57.46（分子含尾程 5 与履约 3.55，分母 0.3430）
+        #      Shopee 底线 82.88（不包邮 ⇒ 尾程不进分子；分母 0.1737）
+        #    70 在两者之间 ⇒ 同一价格，TikTok 放行、Shopee 拦下。
+        "expected_selling_price": 70,
         # ⚠️ 批次 2 P2：保存利润版本必须给一个广告费口径，否则广告费不可算 ⇒ 利润空白。
-        # ⚠️ 批次 4：尾程进利润后 TikTok 的保本 ROI 抬到 3.66 ⇒ 目标 ROI 给 4。
-        "target_roi": 4,
+        # ⚠️ 目标 ROI 必须**高于保本线**（售价 70 下 TikTok 保本 ROI ≈ 4.59），
+        #    否则会被 ROI 护栏先拦掉，压根走不到「按平台底线」的判定。
+        "target_roi": 6,
     }
 
-    # TikTok：seed 的成本线 (采购 10 + 尾程 5) ÷ 0.4542 = 33.03，35 高于它 ⇒ 放行
+    # TikTok：底线 57.46，70 高于它 ⇒ 放行
     tiktok = await pg_async_client.post(
         "/api/platform-sku-profit/estimates",
         headers=pricing_auth_headers,
@@ -840,7 +898,7 @@ async def test_guardrail_uses_the_floor_of_the_requested_platform(
     )
     assert tiktok.status_code == 201, tiktok.text
 
-    # Shopee：成本线 10 ÷ 0.2599 = 38.48，35 低于它 ⇒ 必须拦下
+    # Shopee：底线 82.88，70 低于它 ⇒ 必须拦下
     shopee = await pg_async_client.post(
         "/api/platform-sku-profit/estimates",
         headers=pricing_auth_headers,
@@ -851,7 +909,7 @@ async def test_guardrail_uses_the_floor_of_the_requested_platform(
     assert body["success"] is False
     assert body["error"]["detail"]["code"] == "below_min_selling_price"
     assert body["error"]["detail"]["min_selling_price"] == pytest.approx(
-        38.48, abs=0.01
+        82.88, abs=0.01
     )
 
 
@@ -895,8 +953,14 @@ async def test_candidate_list_reports_the_floor_of_the_selected_platform(
         assert row["min_selling_price_platform"] == platform_code
         floors[platform_code] = row["min_selling_price"]
 
-    # (采购 10 + 尾程 5) ÷ 0.4542 = 33.03（TikTok） vs 10 ÷ 0.2599 = 38.48（Shopee）
-    # ⚠️ Shopee 没配尾程费率 ⇒ 尾程算不出来 ⇒ 尾程不进底线 ⇒ 底线仍是旧口径 38.48
-    assert floors["tiktok"] == pytest.approx(33.03, abs=0.01)
-    assert floors["shopee"] == pytest.approx(38.48, abs=0.01)
+    # 批次 9 新口径（seed 费率）：
+    #   TikTok 分母 = 1 − 0.0737 − 0.2727 − 0.0606 − 0.25 = 0.3430
+    #     分子 = (采购 10 + 头程 0.05 + 仓储 3.00 + 贴单 0.50 + 尾程 5) × 1.0625
+    #           = 19.709375 ⇒ 57.4617… → 57.46
+    #   Shopee 分母 = 1 − 0.1487 − 0.4165 − 0.0111 − 0.25 = 0.1737
+    #     分子 = (10 + 0.05 + 3.00 + 0.50) × 1.0625 = 14.396875
+    #     ⚠️ Shopee 不包邮（没有包邮开关行 ⇒ 默认不包邮）⇒ 尾程**不进**分子。
+    #           ⇒ 82.8835… → 82.88
+    assert floors["tiktok"] == pytest.approx(57.46, abs=0.01)
+    assert floors["shopee"] == pytest.approx(82.88, abs=0.01)
     assert floors["shopee"] > floors["tiktok"]

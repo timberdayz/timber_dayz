@@ -85,6 +85,7 @@ def test_roi_denominator_is_merchant_net_revenue_not_goods_amount():
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0.0737"),
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=Decimal("0.02"),
         return_rate=Decimal("0"),
         damage_rate=Decimal("0"),

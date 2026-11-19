@@ -85,16 +85,22 @@ def test_delivery_tiers_follow_official_3pf_card():
     ]
 
 
-def test_migration_does_not_touch_residual_bucket_or_delivery_ratio():
-    """残差桶与尾程占收入比**不动** —— 这轮没有重算它们的依据。"""
+def test_migration_does_not_touch_residual_bucket_or_retired_split():
+    """残差桶**不动** —— 这轮没有重算它的依据。
+
+    ⚠️ 批次 9：「尾程占收入比」列（``delivery_cost_rate``）已随
+    ``core.dim_platforms`` 退役 ⇒ 这份迁移的 SQL 里**连提都不该提它**
+    （列都没了，提了就是对着空气写 SQL）。
+    """
     source = MIGRATION_PATH.read_text(encoding="utf-8")
     update_section = source.split("def upgrade")[1].split("def downgrade")[0]
     for column in (
         "other_cost_rate",
-        "delivery_cost_rate",
         "default_creator_commission_rate",
     ):
         assert column not in update_section, f"迁移不该改 {column}"
+    # 已退役的列：迁移里连提都不该提
+    assert "delivery_cost_rate" not in update_section
 
 
 def test_tail_rate_upsert_is_idempotent():

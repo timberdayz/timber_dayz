@@ -46,6 +46,7 @@ from .inventory.inventory_restock_query_service import (
     probe_inventory_state_available,
 )
 from .product_pricing_service import compute_sku_pricing, select_restock_tier
+from .product_fulfillment_cost_service import load_fulfillment_costs
 from .sku_pricing_policy_service import load_current_policies, to_policy_rows
 
 
@@ -101,6 +102,7 @@ async def load_pricing_context(
     sku_ids: list[int],
     platform_codes: Iterable[str] | None = None,
     warehouse_code: Optional[str] = None,
+    sku_rows: Iterable[Any] | None = None,
 ) -> dict:
     """一次性把规则表、平台成本率、库龄、平台级人工覆盖读出来，供批量计算。
 
@@ -116,6 +118,10 @@ async def load_pricing_context(
       通知侧要写库存数量/库存金额时用这一份
     - ``warehouse_restocks``（阶段 6）：``{sku_id: {warehouse_key: {...}}}`` —— **每个仓各自**的库龄，
       用于「这个 SKU 在 A 仓滞销、B 仓不滞销」的判断
+    - ``fulfillment_costs``（批次 9 P2）：``{sku_id: {"logistics_cost", "storage_cost",
+      "label_fee", "missing_reasons"}}`` —— 履约按件成本（头程 / 仓储 / 贴单）。
+      ⚠️ 只有**同时传了** ``sku_rows`` **和** ``warehouse_code`` 才有值；
+      没传 ``sku_rows`` ⇒ 不查库（老调用方零负担），没传仓 ⇒ 三项全部「未计入」。
 
     ⚠️ **「距上次进货天数」才是业务上的库龄**（西虹卖完不补货，货进来才重新开始计时）。
     档位表的门槛（0/60/90/120）与折扣率**不动**，只是喂进去的量换了。
@@ -186,6 +192,13 @@ async def load_pricing_context(
         }
 
     overrides = await load_platform_pricing_overrides(db, sku_ids, platforms)
+    # 履约按件成本（批次 9 P2）：头程 / 仓储 / 贴单。
+    # ⚠️ 只有调用方**同时给了 SKU 行和仓**才有值 ——
+    #    头程与仓储是「仓级规则 × SKU 体积」，没 SKU 行就没体积、没仓就没规则。
+    #    老调用方不传 ⇒ 这三项不计入底线（与批次 9 之前的口径逐字一致）。
+    fulfillment_costs: dict[int, dict] = {}
+    if sku_rows is not None:
+        fulfillment_costs = await load_fulfillment_costs(db, sku_rows, warehouse_code)
     # 「可定价平台」= 有平台其他成本率的销售平台。
     # 没有 other_cost_rate 的平台算不出底线（成本线分母里缺这一项），
     # 建了基线也是一列 NULL —— 不如不跟踪，等它配了费率再进来。
@@ -205,6 +218,8 @@ async def load_pricing_context(
         "restock_source": restock_source,
         "warehouse_code": warehouse_code,
         "warehouse_restocks": warehouse_restocks,
+        # 履约按件成本（批次 9 P2）：``{sku_id: {...}}``；没传 SKU 行时是空字典。
+        "fulfillment_costs": fulfillment_costs,
         # 向后兼容别名：老下游按 age_days / age_rows 取值，指向的是同一份新数据
         "age_days": days_since_restock,
         "age_rows": restock_rows,
@@ -341,6 +356,10 @@ def compute_pricing_state(
     platform_code: Optional[str] = None,
     reference_selling_price=_UNSET,
     delivery_cost=None,
+    logistics_cost=_UNSET,
+    storage_cost=_UNSET,
+    label_fee=_UNSET,
+    fulfillment_missing_reasons=_UNSET,
 ) -> dict:
     """算出一个 SKU 在**某个平台**上的定价状态（含命中的档位）。
 
@@ -363,13 +382,18 @@ def compute_pricing_state(
     预览**必须**走这个函数而不是另写一套算法 —— 否则「预览说涨到 63」而
     「保存后实际变成 58」，运营会以为系统坏了。
 
-    ⚠️ `delivery_cost`（批次 4）是这个 SKU 在**本次算底线的那个平台**上的
-    **单件尾程配送费**。它与**平台级**的 ``delivery_cost_rate``（尾程占收入比，
-    拆分基准）**成对生效**才进成本底线 —— 详见
-    `product_pricing_service.compute_cost_floor`。
+    ⚠️ `delivery_cost`（批次 9 B 路线）是这个 SKU 在**本次算底线的那个平台**上的
+    **单件尾程配送费**，**直接进成本底线分子**。
+    旧的「尾程占收入比」字段与「成对生效」机制已退役 —— 桶里的运费既然拆不出来，
+    就不跟它对冲（详见 `product_pricing_service.compute_cost_floor`）。
 
     ⚠️ 这里**不做跨平台回落**：尾程是「平台 × 仓」粒度的量，
     拿别的平台的尾程套过来就是算错。
+
+    ⚠️ 履约按件成本（批次 9 P2：`logistics_cost` 头程 / `storage_cost` 仓储 /
+    `label_fee` 贴单）**不传就从 context 的 ``fulfillment_costs`` 里取**
+    （那是这条链的**唯一**取数处 ⇒ 商品中心页面与最低售价变更通知必然同数）；
+    显式传值（哪怕是 ``None``）⇒ 覆盖 context，用于「这条链刻意不算履约成本」。
     """
     policies = context["policies"]
     platform = resolve_pricing_platform(context, platform_code)
@@ -397,6 +421,20 @@ def compute_pricing_state(
         context, sku_row.sku_id, effective_platform_code
     )
 
+    # 履约按件成本（批次 9 P2）：头程 / 仓储 / 贴单。
+    # ⚠️ **不传 ⇒ 从 context 取**（context 是这条链的**唯一**取数处，
+    #    商品中心页面与最低售价变更通知共用它 ⇒ 两边必然同数）。
+    #    显式传值（哪怕是 None）⇒ 覆盖 context，用于「这条链刻意不算履约成本」。
+    fulfillment = (context.get("fulfillment_costs") or {}).get(sku_row.sku_id) or {}
+    if logistics_cost is _UNSET:
+        logistics_cost = fulfillment.get("logistics_cost")
+    if storage_cost is _UNSET:
+        storage_cost = fulfillment.get("storage_cost")
+    if label_fee is _UNSET:
+        label_fee = fulfillment.get("label_fee")
+    if fulfillment_missing_reasons is _UNSET:
+        fulfillment_missing_reasons = fulfillment.get("missing_reasons") or ()
+
     pricing = compute_sku_pricing(
         purchase_cost=sku_row.default_purchase_cost,
         reference_selling_price=(
@@ -408,6 +446,9 @@ def compute_pricing_state(
         platform_creator_commission_rate=(
             platform.default_creator_commission_rate if platform else None
         ),
+        # 平台佣金率（批次 9）：**单独进分母**。以前它藏在 other_cost_rate 里，
+        # 界面上填了也不生效（见 product_pricing_service 模块头）。
+        platform_fee_rate=platform.default_fee_rate if platform else None,
         other_cost_rate=platform.other_cost_rate if platform else None,
         spu_bound=linked_spu is not None,
         spu_return_loss_rate=linked_spu.return_loss_rate if linked_spu else None,
@@ -416,12 +457,15 @@ def compute_pricing_state(
         deepest_policy=deepest,
         min_selling_price_override=override,
         days_since_restock=days_since_restock,
-        # 尾程配送费（批次 4）：单件尾程 + 平台级尾程占比拆分基准。
-        # ⚠️ 两者成对生效才进成本底线（缺一半就都不进，绝不重复扣）。
+        # 尾程配送费（批次 9 B 路线）：单件尾程**直接进分子**。
         # ⚠️ 尾程是**平台 × 仓**的量（费率表就是这么维的），所以必须由调用方
         #    按**本次算底线的那个平台**传进来 —— 这里不做任何跨平台的回落。
         delivery_cost=delivery_cost,
-        delivery_cost_rate=platform.delivery_cost_rate if platform else None,
+        # 履约按件成本（批次 9 P2）：头程 / 仓储 / 贴单。
+        logistics_cost=logistics_cost,
+        storage_cost=storage_cost,
+        label_fee=label_fee,
+        fulfillment_missing_reasons=fulfillment_missing_reasons,
         # 包邮开关（批次 6）：不包邮 ⇒ 尾程**不适用**（不进底线，也不报缺费率）。
         free_shipping=free_shipping,
     )
@@ -441,13 +485,17 @@ def compute_pricing_for_sku(
     linked_spu,
     platform_code: Optional[str] = None,
     delivery_cost=None,
+    logistics_cost=_UNSET,
+    storage_cost=_UNSET,
+    label_fee=_UNSET,
+    fulfillment_missing_reasons=_UNSET,
 ) -> dict:
     """只要定价字段本身（页面用）。
 
     是 `compute_pricing_state` 的薄封装——**同一个**计算函数，
     不存在"页面走一条、通知走另一条"的可能。
 
-    `delivery_cost`（批次 4）见 `compute_pricing_state` 的说明。
+    `delivery_cost`（批次 9 B 路线）见 `compute_pricing_state` 的说明。
     """
     return compute_pricing_state(
         context=context,
@@ -455,6 +503,10 @@ def compute_pricing_for_sku(
         linked_spu=linked_spu,
         platform_code=platform_code,
         delivery_cost=delivery_cost,
+        logistics_cost=logistics_cost,
+        storage_cost=storage_cost,
+        label_fee=label_fee,
+        fulfillment_missing_reasons=fulfillment_missing_reasons,
     )["pricing"]
 
 

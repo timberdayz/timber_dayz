@@ -45,9 +45,16 @@ from backend.utils.project_env import isolated_database_url
 VERSIONS_DIR = Path("current_migrations/versions")
 SINK_MIGRATION = VERSIONS_DIR / "20261118_sink_manual_override_to_platform.py"
 
-TIKTOK_OTHER_COST_RATE = Decimal("0.2727")
+# 批次 9（2026-11-19 拍板）新口径：
+#     分子 = (采购成本 + 履约按件成本 + 尾程) × (1 + SPU退货率 + SPU货损率)
+#     分母 = 1 − 平台佣金率 − 平台其他成本率(桶) − 达人佣金率 − 目标利润率
+# 平台佣金率**单独**进分母（以前藏在桶里）；SPU 两率**按件折**进分子。
+# 桶值来自结算单实测：Shopee 服务费 3.58% / TikTok 交易手续费 3.11%。
+TIKTOK_FEE_RATE = Decimal("0.08175")
+TIKTOK_OTHER_COST_RATE = Decimal("0.0311")
 TIKTOK_CREATOR_RATE = Decimal("0.0606")
-SHOPEE_OTHER_COST_RATE = Decimal("0.4165")
+SHOPEE_FEE_RATE = Decimal("0.16")
+SHOPEE_OTHER_COST_RATE = Decimal("0.0358")
 SHOPEE_CREATOR_RATE = Decimal("0.0111")
 
 PURCHASE_COST = Decimal("45.20")
@@ -57,8 +64,11 @@ TARGET_MARGIN_RATE = Decimal("0.25")
 DISCOUNT_RATE = Decimal("0.10")
 REFERENCE_SELLING_PRICE = Decimal("30.00")
 
-TIKTOK_FLOOR = Decimal("127.61")
-SHOPEE_FLOOR = Decimal("173.91")
+# 分子：45.20 × (1 + 0.0467 + 0.0158) = 48.025
+# TikTok：48.025 ÷ (1 − 0.08175 − 0.0311 − 0.0606 − 0.25) = 48.025 ÷ 0.57655 → 83.30
+TIKTOK_FLOOR = Decimal("83.30")
+# Shopee：48.025 ÷ (1 − 0.16 − 0.0358 − 0.0111 − 0.25) = 48.025 ÷ 0.5431 → 88.43
+SHOPEE_FLOOR = Decimal("88.43")
 DISCOUNT_GUARD = Decimal("27.00")
 
 
@@ -120,6 +130,8 @@ async def _seed_two_platforms(session) -> int:
             DimPlatform(
                 platform_code="tiktok",
                 name="TikTok",
+                # 批次 9：平台佣金率**单独**进分母。
+                default_fee_rate=TIKTOK_FEE_RATE,
                 default_creator_commission_rate=TIKTOK_CREATOR_RATE,
                 other_cost_rate=TIKTOK_OTHER_COST_RATE,
                 platform_role="sales",
@@ -128,6 +140,7 @@ async def _seed_two_platforms(session) -> int:
             DimPlatform(
                 platform_code="shopee",
                 name="Shopee",
+                default_fee_rate=SHOPEE_FEE_RATE,
                 default_creator_commission_rate=SHOPEE_CREATOR_RATE,
                 other_cost_rate=SHOPEE_OTHER_COST_RATE,
                 platform_role="sales",

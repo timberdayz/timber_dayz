@@ -41,6 +41,10 @@ def _inputs(**overrides):
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0.10"),
+        # 批次 9：桶（平台其他成本率）是利润链的**必填**成本项 ——
+        # 不传 ⇒ 整条利润链算不出来（不是静默按 0 计）。
+        # 本组用例只守护 ROI/广告费口径 ⇒ 显式给 0，让「桶必填」这条纪律由别的用例守住。
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=None,
         target_roi=None,
         return_rate=Decimal("0.02"),

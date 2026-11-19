@@ -42,8 +42,8 @@ class _DimensionsDb:
                         # 定价抽屉的「成本率合计 / 底线基数」要用到的两个成本率
                         default_creator_commission_rate=None,
                         other_cost_rate=None,
-                        # 尾程配送费占收入比（批次 4）
-                        delivery_cost_rate=None,
+                        # 批次 9：平台级「尾程占收入比」这一列已退役
+                        # （尾程直接进成本底线的分子，不再需要拆分基准）。
                     )
                 ]
             ),

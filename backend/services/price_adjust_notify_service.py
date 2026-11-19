@@ -52,6 +52,7 @@ from .product_pricing_query_service import (
     load_pricing_context,
     resolve_effective_creator_rate,
 )
+from .product_fulfillment_cost_service import load_fulfillment_costs
 
 # ---------------------------------------------------------------------------
 # 常量：变动原因 / 变动方向
@@ -81,14 +82,16 @@ CONTEXT_NUMERIC_KEYS = (
     "discount_rate",
     "purchase_cost",
     "other_cost_rate",
+    # 平台佣金率（批次 9）：它现在**单独进分母** ⇒ 变它必须能归因出来。
+    "platform_fee_rate",
     "creator_commission_rate",
     "spu_return_loss_rate",
     "spu_damage_rate",
     "reference_selling_price",
     "min_selling_price",
-    # 尾程配送费（批次 4）：单件尾程 + 平台级尾程占收入比（拆分基准）
+    # 尾程配送费（批次 9 B 路线）：单件尾程，**直接进分子**。
+    # ⚠️ 旧的「尾程占收入比」字段已随 core.dim_platforms.delivery_cost_rate 退役。
     "delivery_cost",
-    "delivery_cost_rate",
 )
 
 
@@ -173,10 +176,14 @@ def classify_change_reason(prev: dict, cur: dict) -> str:
     if _numeric_changed(prev.get("purchase_cost"), cur.get("purchase_cost")):
         return REASON_PURCHASE_COST
 
-    # 4) 平台费率（平台其他成本率 / 达人佣金率）
-    if _numeric_changed(prev.get("other_cost_rate"), cur.get("other_cost_rate")) or (
-        _numeric_changed(
-            prev.get("creator_commission_rate"), cur.get("creator_commission_rate")
+    # 4) 平台费率（平台佣金率 / 平台其他成本率 / 达人佣金率）
+    if (
+        _numeric_changed(prev.get("platform_fee_rate"), cur.get("platform_fee_rate"))
+        or _numeric_changed(prev.get("other_cost_rate"), cur.get("other_cost_rate"))
+        or (
+            _numeric_changed(
+                prev.get("creator_commission_rate"), cur.get("creator_commission_rate")
+            )
         )
     ):
         return REASON_PLATFORM_RATE
@@ -229,11 +236,12 @@ def is_delisting_jump(prev: dict, cur: dict) -> bool:
     for key in (
         "purchase_cost",
         "other_cost_rate",
+        "platform_fee_rate",
         "creator_commission_rate",
         "spu_return_loss_rate",
         "spu_damage_rate",
         "reference_selling_price",
-        # 尾程配送费（批次 4）也是定价输入：它变了 ⇒ 这次跳高不只是"下架"造成的
+        # 尾程配送费（批次 9 B 路线）也是定价输入：它变了 ⇒ 这次跳高不只是"下架"造成的
         # ⇒ 仍然要通知（宁可多报，不可把真实变化静默吞掉）。
         "delivery_cost",
     ):
@@ -260,8 +268,8 @@ def build_context(
     reference_selling_price: Any,
     platform_code: Optional[str] = None,
     warehouse_code: Optional[str] = None,
+    platform_fee_rate: Any = None,
     delivery_cost: Any = None,
-    delivery_cost_rate: Any = None,
 ) -> dict:
     """组装归因上下文快照。
 
@@ -273,9 +281,10 @@ def build_context(
     ⚠️ `warehouse_code`（批次 4）：底线拆到仓之后，**仓是归因的一部分**——
     同一个 SKU 在马来仓与新加坡仓的底线可以不同，不记仓就分不清是"哪边变了"。
 
-    ⚠️ `delivery_cost` / `delivery_cost_rate`（批次 4）：尾程进底线要**成对生效**
-    （单件尾程 + 平台级尾程占收入比），两个值都存进快照，
-    下次才能说清"这次变是因为尾程费率调整"还是"因为单件尾程变了"。
+    ⚠️ `platform_fee_rate`（批次 9）：平台佣金率现在**单独进分母** ⇒ 它是定价输入，
+    变了必须归因出来。旧的 `delivery_cost_rate`（尾程占收入比）已随
+    `core.dim_platforms.delivery_cost_rate` 退役 —— 尾程改成**直接进分子**，
+    快照里只留单件 `delivery_cost` 就够说清"这次变是因为尾程费率调整"。
     """
     return {
         "platform_code": platform_code,
@@ -295,12 +304,12 @@ def build_context(
         "age_days": age_days,
         "purchase_cost": _decimal_to_str(purchase_cost),
         "other_cost_rate": _decimal_to_str(other_cost_rate),
+        "platform_fee_rate": _decimal_to_str(platform_fee_rate),
         "creator_commission_rate": _decimal_to_str(creator_commission_rate),
         "spu_return_loss_rate": _decimal_to_str(spu_return_loss_rate),
         "spu_damage_rate": _decimal_to_str(spu_damage_rate),
         "reference_selling_price": _decimal_to_str(reference_selling_price),
         "delivery_cost": _decimal_to_str(delivery_cost),
-        "delivery_cost_rate": _decimal_to_str(delivery_cost_rate),
         "missing_reasons": list(pricing.get("min_selling_price_missing_reasons") or []),
     }
 
@@ -405,6 +414,16 @@ class PriceAdjustNotifyService:
             warehouse_codes = [""]
         finance = ProductFinanceService(self.db)
 
+        # 履约按件成本（批次 9 P2）：头程 / 仓储 / 贴单是**仓级规则 × SKU 体积**。
+        # ⚠️ 这里按**每个仓各取一份**（仓不一样 ⇒ 规则不一样 ⇒ 成本不一样），
+        #    再注入各自的 context —— 与商品中心页面「按当前选中的仓算」同口径，
+        #    两边算出来的底线必然一致（否则通知会误报「底线变了」）。
+        fulfillment_by_warehouse: dict[str, dict[int, dict]] = {}
+        for code in warehouse_codes:
+            fulfillment_by_warehouse[code] = await load_fulfillment_costs(
+                self.db, sku_rows, code or None
+            )
+
         states: dict[tuple[int, str, str], dict] = {}
         for platform_code in platform_codes:
             platform = context["platforms"].get(platform_code)
@@ -417,10 +436,16 @@ class PriceAdjustNotifyService:
                 tiers_by_warehouse.setdefault(tier.warehouse_code, []).append(tier)
             for warehouse_code in warehouse_codes:
                 # 每个仓用**自己的库龄**算档位（阶段 6 的仓维度口径）。
-                warehouse_context = context
+                # 履约按件成本（批次 9 P2）也按仓注入 —— 与页面的仓口径一致。
+                warehouse_context = {
+                    **context,
+                    "fulfillment_costs": fulfillment_by_warehouse.get(
+                        warehouse_code, {}
+                    ),
+                }
                 if warehouse_code:
                     warehouse_context = {
-                        **context,
+                        **warehouse_context,
                         "days_since_restock": {
                             sku_id: (
                                 (warehouse_restocks.get(sku_id) or {}).get(
@@ -494,11 +519,8 @@ class PriceAdjustNotifyService:
                         platform_code=platform_code,
                         warehouse_code=warehouse_code,
                         delivery_cost=applied_delivery_cost,
-                        delivery_cost_rate=(
-                            # ⚠️ 成对生效：不包邮 ⇒ 尾程与它的拆分基准都**不适用** ⇒ 记 None
-                            platform.delivery_cost_rate
-                            if platform and state.get("free_shipping")
-                            else None
+                        platform_fee_rate=(
+                            platform.default_fee_rate if platform else None
                         ),
                     )
 

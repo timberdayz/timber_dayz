@@ -125,6 +125,8 @@ def _resolve_pricing(
         platform_creator_commission_rate=(
             platform.default_creator_commission_rate if platform else None
         ),
+        # 平台佣金率（批次 9）：**单独进分母**。
+        platform_fee_rate=platform.default_fee_rate if platform else None,
         other_cost_rate=platform.other_cost_rate if platform else None,
         spu_bound=bool(inputs.get("spu_bound")),
         spu_return_loss_rate=inputs.get("spu_return_loss_rate"),

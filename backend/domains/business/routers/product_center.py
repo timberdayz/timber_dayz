@@ -1740,12 +1740,23 @@ def _pricing_by_platform(
 
 
 async def _compute_sku_min_selling_price(
-    db: AsyncSession, sku_id: int, platform_code: str | None = None
+    db: AsyncSession,
+    sku_id: int,
+    platform_code: str | None = None,
+    warehouse_code: str | None = None,
 ) -> Decimal | None:
     """单 SKU 在**指定平台**上的最低售价，供利润测算保存拦截复用。
 
     ⚠️ `platform_code` 决定用哪个平台的费率算底线 —— 不传就回落到历史 basis 平台，
     那会让 Shopee 拿 TikTok 的费率算底线（偏低三到七成）。
+
+    ⚠️ **仓维度**（批次 9 口径收口，2026-11-19）：底线是「SKU × 平台 × **仓**」的量 ——
+    尾程（平台 × 仓 × 重量段）与履约按件成本（头程 / 仓储 / 贴单，都是仓级规则）都按仓定价。
+    以前这里**不传仓** ⇒ 护栏拿的是一条**偏松**的底线（少了尾程与履约成本），
+    而商品中心页面显示的是带仓的底线 ⇒ **同一个 SKU 在两个地方两个底线数**，
+    护栏形同虚设（页面说"低于最低售价别卖"，护栏却放行）。
+    现在与页面**同口径**：传了仓 ⇒ 尾程与履约成本都进分子；没传仓 ⇒ 两项都不进
+    （与页面在无仓时逐字一致）。
     """
     sku_row = await db.get(DimErpSku, sku_id)
     if sku_row is None:
@@ -1763,14 +1774,36 @@ async def _compute_sku_min_selling_price(
         .first()
     )
     linked_spu = await db.get(DimSpu, binding.spu) if binding else None
+    # 尾程（批次 9 B 路线）：按「平台 × 仓 × 重量段」算 —— 与商品中心页面同一份取数。
+    # ⚠️ 包邮开关由 ``compute_sku_pricing`` 内部按 SKU × 平台判定
+    #    （不包邮 ⇒ 尾程不进底线，也不报缺费率）。
+    delivery_cost = None
+    if warehouse_code and platform_code:
+        finance = ProductFinanceService(db)
+        tiers = await finance.find_delivery_rate_tiers(platform_code, warehouse_code)
+        fallback_tiers: list = []
+        if not sku_row.weight_tier_code:
+            # SKU 没选重量段 ⇒ 落最轻段并按「最贵仓」保守估值 ⇒ 需要该平台所有仓的档位。
+            fallback_tiers = await finance.find_delivery_rate_tiers(platform_code)
+        delivery_cost = compute_delivery_cost(
+            tiers,
+            sku_row.weight_tier_code,
+            fallback_tiers=fallback_tiers,
+        ).amount
     context = await _pricing_context(
-        db, [sku_id], [platform_code] if platform_code else None
+        db,
+        [sku_id],
+        [platform_code] if platform_code else None,
+        warehouse_code,
+        # 履约按件成本（批次 9 P2）要 SKU 体积 ⇒ 把 SKU 行带进取数层。
+        [sku_row],
     )
     payload = _compute_pricing_for_sku(
         context=context,
         sku_row=sku_row,
         linked_spu=linked_spu,
         platform_code=platform_code,
+        delivery_cost=delivery_cost,
     )
     value = payload["min_selling_price"]
     return Decimal(str(value)) if value is not None else None
@@ -1897,6 +1930,8 @@ async def list_skus(
         [row.sku_id for row in rows],
         [platform_code] if platform_code else None,
         warehouse_code,
+        # 履约按件成本（批次 9 P2）：头程 / 仓储 / 贴单要 SKU 体积 ⇒ 得把 SKU 行带进来。
+        rows,
     )
     # 尾程配送费（批次 4）：底线含尾程 ⇒ 尾程也按「平台 × 仓 × 重量」算。
     # ⚠️ 费率表是**平台 × 仓**粒度的 ⇒ 每个可定价平台各取一份档位，
@@ -1987,9 +2022,12 @@ async def list_skus(
                 sku_row=row,
                 linked_spu=linked_spu,
                 platform_code=platform_code,
-                # 尾程配送费（批次 4）：进成本底线分子。
-                # ⚠️ 与平台级尾程占比拆分基准**成对生效**才进底线（缺一半就都不进）。
+                # 尾程配送费（批次 9 B 路线）：单件尾程**直接进分子**。
+                # ⚠️ 尾程是「平台 × 仓」粒度的量 ⇒ 必须按**本次算底线的那个平台**给。
                 delivery_cost=delivery_by_platform.get(effective_platform),
+                # 履约按件成本（批次 9 P2）：头程 / 仓储 / 贴单**不在这里传** ——
+                # 它们是「仓级规则 × SKU 体积」，由 ``pricing_context`` 统一取，
+                # 页面与最低售价变更通知共用同一份取数 ⇒ 两边必然同数。
             )
         )
         # 这条底线是按哪个平台的成本率算的（前端要显示，别让人误以为是 SKU 级的数）
@@ -4317,8 +4355,6 @@ async def update_platform_fee_rate(
         "default_fee_rate": row.default_fee_rate,
         "default_creator_commission_rate": row.default_creator_commission_rate,
         "other_cost_rate": row.other_cost_rate,
-        # 尾程配送费占收入比（批次 4）：尾程进成本底线的拆分基准
-        "delivery_cost_rate": row.delivery_cost_rate,
         "fee_rate_effective_from": row.fee_rate_effective_from,
         "fee_rate_source": row.fee_rate_source,
         "fee_rate_version": row.fee_rate_version,
@@ -4853,11 +4889,10 @@ async def list_sku_operating_dimensions(db: AsyncSession = Depends(get_async_db)
                 "fee_rate_effective_from": row.fee_rate_effective_from,
                 "fee_rate_source": row.fee_rate_source,
                 "fee_rate_version": row.fee_rate_version,
-                # 定价抽屉的「成本率合计 / 底线基数」要用的两个成本率
+                # 定价抽屉的「底线成本率合计」要用的三个成本率
+                # （批次 9：平台佣金率 / 默认达人佣金率 / 平台其他成本率）
                 "default_creator_commission_rate": row.default_creator_commission_rate,
                 "other_cost_rate": row.other_cost_rate,
-                # 尾程配送费占收入比（批次 4）：尾程进成本底线的拆分基准
-                "delivery_cost_rate": row.delivery_cost_rate,
             }
             for row in platforms
         ],
@@ -5033,7 +5068,12 @@ async def list_platform_sku_profit_candidates(
     #    马来仓滞销 120 天，不该把新加坡仓的底线也压到滞销档。
     #    不传仓的老调用方仍走「各仓取最长」，行为与改造前逐字一致。
     pricing_context = await _pricing_context(
-        db, [row.sku_id for row in sku_rows], [platform_code], warehouse_code
+        db,
+        [row.sku_id for row in sku_rows],
+        [platform_code],
+        warehouse_code,
+        # 履约按件成本（批次 9 P2）：头程 / 仓储 / 贴单要 SKU 体积 ⇒ 得把 SKU 行带进来。
+        sku_rows,
     )
     # 重量段定义（全局一套）⇒ 一次读进内存，逐行投影段的显示名。
     tier_map = await _weight_tier_map(db)
@@ -5086,6 +5126,16 @@ async def list_platform_sku_profit_candidates(
             missing_input_reasons.append("missing_target_roi")
         if creator_commission_source == "assumed_zero":
             missing_input_reasons.append("missing_creator_commission_rate")
+        # ⚠️ 批次 9：平台佣金率与桶是利润链的**必填平台费率** ——
+        #    缺任一项 ⇒ 整条利润链留白（不是按 0 计）。
+        #    批次 9 之前利润链不扣桶 ⇒ 桶为 NULL 不会留白；
+        #    批次 9 把桶加进扣项后**新增**了这条失败路径 ⇒ 必须点名，
+        #    否则运营只看到空白，系统给的是「完整预计利润口径」这种没法定位的兜底话。
+        #    原因码与底线链同一套词（`product_pricing_service` 里就是这两个键）。
+        if platform.default_fee_rate is None:
+            missing_input_reasons.append("missing_platform_fee_rate")
+        if platform.other_cost_rate is None:
+            missing_input_reasons.append("missing_platform_cost_rate")
         # 尾程配送费（批次 3：**只读展示**，批次 4 才进利润与底线）
         delivery_result = compute_delivery_cost(
             delivery_tiers,
@@ -5131,6 +5181,8 @@ async def list_platform_sku_profit_candidates(
             actual_logistics_cost=actual_logistics,
             actual_storage_cost=None,
             platform_fee_rate=platform.default_fee_rate,
+            # 平台其他成本率（桶，批次 9）：利润链**必须扣**它 ⇒ 与底线链同源。
+            other_cost_rate=platform.other_cost_rate,
             expected_ad_rate=expected_ad_rate,
             # 目标 ROI（阶段 3）：广告费用的主输入口径。
             # 候选列表直接用经营档案里存的那一个（运营的当前意图）。
@@ -5265,8 +5317,8 @@ async def list_platform_sku_profit_candidates(
             sku_row=row,
             linked_spu=assigned,
             platform_code=platform_code,
-            # 尾程配送费（批次 4）：进成本底线分子。
-            # ⚠️ 与平台级尾程占比拆分基准**成对生效**才进底线（缺一半就都不进）。
+            # 尾程配送费（批次 9 B 路线）：单件尾程**直接进分子**。
+            # 履约按件成本（批次 9 P2）不在这里传 —— 由 ``pricing_context`` 统一取。
             delivery_cost=delivery_result.amount,
         )
         pricing_payload["min_selling_price_platform"] = platform_code
@@ -5632,11 +5684,15 @@ async def save_platform_sku_profit_estimates(
     # 护栏：**排在「资料完整性」校验之前**。
     # 若排在后面，缺物流/仓储规则时会先撞 cannot_save_profit_version（缺资料），
     # 用户永远看不到「低于最低售价」这个更可执行的原因。
-    # 护栏的输入（采购成本 + **该平台**的成本率 + 参考售价 + 规则表）不依赖物流/仓储规则，
-    # 底线算不出来时 floor 为 None，护栏自动跳过，交给后面的缺资料校验。
-    # ⚠️ 底线是「SKU × 平台」的量 ⇒ 必须按**请求里的平台**算，不能用 SKU 级底线。
+    # ⚠️ 底线算不出来时 floor 为 None，护栏自动跳过，交给后面的缺资料校验。
+    # ⚠️ 底线是「SKU × 平台 × **仓**」的量 ⇒ 必须按**请求里的平台和仓**算：
+    #    平台错了 ⇒ 拿别的平台的费率算（偏低三到七成）；
+    #    仓错了 ⇒ 少了尾程与履约成本 ⇒ 护栏拿偏松的底线放行本该拦住的品。
     floor = await _compute_sku_min_selling_price(
-        db, values["sku_id"], values["platform_code"]
+        db,
+        values["sku_id"],
+        values["platform_code"],
+        values.get("warehouse_code"),
     )
     if floor is not None and values.get("expected_selling_price") is not None:
         if Decimal(str(values["expected_selling_price"])) < floor:

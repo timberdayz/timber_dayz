@@ -45,6 +45,11 @@ from .product_profit_service import (
     reference_storage_days,
 )
 from .product_logistics_service import allocate_bill_line
+from .product_fulfillment_cost_service import (
+    select_logistics_rule,
+    tier_representative_weight_kg,
+    unit_volume_cbm,
+)
 
 # SKU ↔ SPU 归属关系的「当前有效」判定只从真源取（律 1）。
 from backend.services.product_spu_binding import current_binding_condition
@@ -71,13 +76,13 @@ def _unit_volume_cbm(sku: DimErpSku) -> Decimal:
 
 
 def _reference_unit_volume_cbm(sku: DimErpSku) -> Decimal | None:
-    """Return a maintained volume first, then the legacy dimension fallback."""
-    if sku.unit_volume_cbm is not None:
-        return Decimal(str(sku.unit_volume_cbm))
-    dimensions = (sku.package_length_cm, sku.package_width_cm, sku.package_height_cm)
-    if any(value is None for value in dimensions):
-        return None
-    return _unit_volume_cbm(sku)
+    """Return a maintained volume first, then the legacy dimension fallback.
+
+    ⚠️ 实现搬到了 ``product_fulfillment_cost_service.unit_volume_cbm``
+    （批次 9 P2：成本底线链与利润链共用同一份体积口径），
+    这里保留旧名字只是**向后兼容**已引用的测试与调用方。
+    """
+    return unit_volume_cbm(sku)
 
 
 def _tier_representative_weight_kg(tier: DimWeightTier | None) -> Decimal:
@@ -86,12 +91,11 @@ def _tier_representative_weight_kg(tier: DimWeightTier | None) -> Decimal:
     批次 6 起 SKU 不再存精确重量（``weight_kg`` 已退役），但仍有按重量计费的规则
     （头程按重量、账单按重量分摊）。它们没有精确重量可用 ⇒ 用**段上限**当代表值：
     比真实重量大 ⇒ 成本估高 ⇒ 底线偏保守（宁高不低）。
+
+    ⚠️ 实现搬到了 ``product_fulfillment_cost_service.tier_representative_weight_kg``，
+    这里保留旧名字只是**向后兼容**。
     """
-    if tier is None:
-        return Decimal("0")
-    if tier.max_kg is not None:
-        return Decimal(str(tier.max_kg))
-    return Decimal(str(tier.min_kg))
+    return tier_representative_weight_kg(tier)
 
 
 class ProductFinanceService:
@@ -549,23 +553,13 @@ class ProductFinanceService:
     def _select_reference_logistics_rule(
         rules: list[LogisticsProviderRule], warehouse_code: str, transport_type: str
     ) -> LogisticsProviderRule | None:
-        """Select one unambiguous current rule; never choose a tariff arbitrarily."""
-        if not rules:
-            return None
+        """Select one unambiguous current rule; never choose a tariff arbitrarily.
 
-        def specificity(rule: LogisticsProviderRule) -> int:
-            return int(rule.warehouse_code == warehouse_code) + int(
-                rule.transport_type == transport_type
-            )
-
-        highest_specificity = max(specificity(rule) for rule in rules)
-        best_rules = [
-            rule for rule in rules if specificity(rule) == highest_specificity
-        ]
-        if len(best_rules) == 1:
-            return best_rules[0]
-        default_rules = [rule for rule in best_rules if rule.is_default]
-        return default_rules[0] if len(default_rules) == 1 else None
+        ⚠️ 实现搬到了 ``product_fulfillment_cost_service.select_logistics_rule``
+        （批次 9 P2：底线链按「不限运输方式」选规则时也走这一份，
+        两边不能各选各的 ⇒ 选出来的规则会漂）。
+        """
+        return select_logistics_rule(rules, warehouse_code, transport_type)
 
     async def _weight_tier_map(self) -> dict[str, DimWeightTier]:
         """全局重量段表（很小，6 档左右）⇒ 一次读进内存。
@@ -1276,6 +1270,9 @@ class ProductFinanceService:
             actual_logistics_cost=actual_logistics,
             actual_storage_cost=None,
             platform_fee_rate=platform.default_fee_rate,
+            # 平台其他成本率（桶，批次 9）：利润链**必须扣**它 ⇒ 与底线链同源
+            # （以前利润链不扣桶 ⇒ 两条链恒差一个桶，生产实测 26.78pt）。
+            other_cost_rate=platform.other_cost_rate,
             expected_ad_rate=data.get("expected_ad_rate"),
             # 目标 ROI（阶段 3）：主输入。给了它就按平台口径算广告费用。
             target_roi=data.get("target_roi"),

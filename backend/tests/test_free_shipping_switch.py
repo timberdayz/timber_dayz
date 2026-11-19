@@ -11,10 +11,10 @@
 
 三条口径
 --------
-1. **包邮** ⇒ 商家承担尾程 ⇒ 尾程进成本底线分子 + 平台尾程占比进分母
-   （成对生效）+ 利润链扣掉这笔尾程。
+1. **包邮** ⇒ 商家承担尾程 ⇒ 尾程进成本底线**分子**（批次 9 B 路线：
+   尾程直接进分子，不再有「成对生效」那套拆分基准）+ 利润链扣掉这笔尾程。
 2. **不包邮** ⇒ 买家付运费 ⇒ 商家不承担 ⇒ 尾程**完全不适用**：
-   不进底线、**不报**「缺尾程费率」、利润链尾程按 **0** 计（**不是**算不出来）。
+   不进底线、**不报**「缺尾程」、利润链尾程按 **0** 计（**不是**算不出来）。
 3. **默认关闭**（未设置 = 不包邮）：默认包邮 ⇒ 每个 SKU 的底线都被塞进一笔
    并不存在的尾程 ⇒ 底线系统性偏高 ⇒ 定价过高 ⇒ 丢单。
 """
@@ -97,6 +97,8 @@ def _pricing(**overrides):
         "reference_selling_price": 30.0,
         "creator_commission_rate": 0.1,
         "platform_creator_commission_rate": 0.1,
+        # 批次 9：平台佣金率**单独进分母**
+        "platform_fee_rate": 0.0737,
         "other_cost_rate": 0.4,
         "spu_bound": True,
         "spu_return_loss_rate": 0.03,
@@ -115,7 +117,6 @@ def _pricing(**overrides):
         },
         "min_selling_price_override": None,
         "delivery_cost": 22.31,
-        "delivery_cost_rate": 0.1124,
     }
     payload.update(overrides)
     return compute_sku_pricing(**payload)
@@ -126,6 +127,10 @@ def test_free_shipping_delivery_enters_the_cost_floor():
     assert result["delivery_cost_in_cost_floor"] is True
     assert result["cost_floor_delivery_cost"] == 22.31
     assert result["free_shipping"] is True
+    # 批次 9：尾程直接进分子 ⇒ 底线比「不包邮」高
+    # 分母 = 1 − 0.0737 − 0.4 − 0.1 − 0.25 = 0.1763
+    # 分子（包邮）= (10 + 22.31) × 1.04 = 33.6024 ⇒ 33.6024 / 0.1763 = 190.60
+    assert result["min_selling_price"] == pytest.approx(190.60, abs=0.01)
 
 
 def test_not_free_shipping_keeps_delivery_out_of_the_cost_floor():
@@ -133,16 +138,23 @@ def test_not_free_shipping_keeps_delivery_out_of_the_cost_floor():
     result = _pricing(free_shipping=False)
     assert result["delivery_cost_in_cost_floor"] is False
     assert result["cost_floor_delivery_cost"] is None
-    assert result["cost_floor_delivery_cost_rate"] is None
+    # ⚠️ 批次 9：「尾程占收入比」字段已退役 ⇒ 返回值里**不得再有**它
+    assert "cost_floor_delivery_cost_rate" not in result
+    # 分子只剩采购成本：10 × 1.04 = 10.40 ⇒ 10.40 / 0.1763 = 58.99
+    assert result["min_selling_price"] == pytest.approx(58.99, abs=0.01)
+    # 与包邮相比，尾程确实没进底线
+    assert (
+        result["min_selling_price"] < _pricing(free_shipping=True)["min_selling_price"]
+    )
 
 
-def test_not_free_shipping_does_not_report_missing_delivery_rate():
-    """⚠️ 不包邮的 SKU 压根不需要尾程费率 ⇒ 报缺是噪声，会把真缺料淹掉。"""
+def test_not_free_shipping_does_not_report_missing_delivery_cost():
+    """⚠️ 不包邮的 SKU 压根不需要尾程 ⇒ 报缺是噪声，会把真缺料淹掉。"""
     result = _pricing(free_shipping=False, delivery_cost=None)
     assert "missing_delivery_cost" not in result["min_selling_price_missing_reasons"]
 
 
-def test_free_shipping_with_missing_rate_still_reports_it():
+def test_free_shipping_with_missing_delivery_cost_still_reports_it():
     """包邮 ⇒ 尾程必需 ⇒ 算不出来必须报出来。"""
     result = _pricing(free_shipping=True, delivery_cost=None)
     assert "missing_delivery_cost" in result["min_selling_price_missing_reasons"]
@@ -187,9 +199,15 @@ def test_frontend_api_calls_free_shipping_endpoint():
 
 
 def test_frontend_tells_operator_that_not_free_shipping_excludes_delivery():
+    """界面必须告诉运营：不包邮 ⇒ 尾程不计入成本底线。
+
+    ⚠️ 批次 9 前端术语统一（头程/尾程/仓储/贴单）⇒ 文案从「买家付运费」改成了
+    「买家付尾程运费」⇒ 这里钉**两个语义点**（"不包邮" + "尾程不计入成本底线"），
+    不再钉某一句文案 —— 文案会变，口径不能变。
+    """
     source = FRONTEND_PATH.read_text(encoding="utf-8")
-    assert "买家付运费" in source
     assert "不包邮" in source
+    assert "尾程不计入成本底线" in source
 
 
 if __name__ == "__main__":  # pragma: no cover

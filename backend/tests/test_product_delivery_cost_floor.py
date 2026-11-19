@@ -1,22 +1,23 @@
-"""尾程配送费进成本底线（批次 4，2026-11-16）守护测试。
+"""尾程配送费进成本底线（批次 9 B 路线，2026-11-19）守护测试。
 
-这一批修的是「尾程这笔钱会不会被算两遍 / 会不会被漏掉」：
+这一批改的是「尾程这笔钱进不进底线、扣几遍」：
 
-- **漏掉**：尾程是每卖一件必付的成本。老口径里 `other_cost_rate` 是从实测净利率反推的
-  **残差桶**（生产库实测：TikTok 的「总费用」里恰好含 `实际运费`，Shopee 的
-  `卖家支付运费` 直接从结算里扣），所以桶里**已经含了按收入摊的那份尾程**。
-  尾程按 SKU 重量单件计价后，只加分子不剔残差 ⇒ **同一笔尾程扣两次**（底线偏高）。
-- **算两遍**：反过来，只剔残差不加分子 ⇒ 尾程被白送（底线偏低，更危险）。
+- **旧机制（批次 4）**：尾程成对生效 —— 分子加尾程 ⇔ 分母加回「尾程占收入比」，
+  两者必须同时有值才生效，否则同一笔尾程要么被扣两次、要么被白送。
+  批次 9 拍板 **B 路线**：桶是黑箱，里面那笔运费**拆不出来** ⇒ 对冲永远无解
+  ⇒ 「尾程占收入比」字段与「成对生效」机制**一并退役**，尾程**直接进分子**。
+- **新口径**：
 
-所以本文件把「**成对生效**」钉死：
+      分子 = (采购成本 + 头程 + 仓储 + 贴单 + 尾程) × (1 + SPU退货率 + SPU货损率)
+      分母 = 1 − 平台佣金率 − 平台其他成本率(桶) − 达人佣金率 − 目标利润率
 
-    分子 = 采购成本 + 尾程配送费
-    分母 = 1 − 平台其他成本率 + 尾程占收入比 − 达人 − 货损 − 退货 − 目标利润率
+所以本文件把「**尾程直接进分子**」钉死：
 
-    尾程与尾程占收入比**必须同时有值**才生效；缺任何一半 ⇒ 尾程**不进底线**
-    （宁可不算，也不重复扣），并在缺失原因里点名缺了什么。
+- 给了尾程 ⇒ 尾程进分子（底线变高），**不需要**任何拆分基准；
+- 没给尾程 ⇒ 尾程不进分子，但必须报 `missing_delivery_cost`；
+- 利润链里尾程仍是**必付成本**（算不出来 ⇒ 利润算不出来，不是按 0 计）。
 
-另有一条硬规则：**尾程算不出来 ⇒ 利润算不出来**（不是按 0 计）。
+另有一条硬规则没变：**尾程算不出来 ⇒ 利润算不出来**（不是按 0 计）。
 尾程不免费，按 0 计等于凭空多出一笔利润。
 """
 
@@ -38,14 +39,20 @@ FINANCE_SOURCE = Path("backend/services/product_finance_service.py").read_text(
     encoding="utf-8"
 )
 
+PLATFORM_FEE_RATE = Decimal("0.0737")
 OTHER_COST_RATE = Decimal("0.2727")
 CREATOR_RATE = Decimal("0.0606")
 RETURN_LOSS_RATE = Decimal("0.0467")
 DAMAGE_RATE = Decimal("0.0158")
 TARGET_MARGIN = Decimal("0.25")
 
-#: 批次 4 的拆分基准（尾程占收入比）。
-DELIVERY_RATE = Decimal("0.10")
+#: 分母 = 1 − 0.0737 − 0.2727 − 0.0606 − 0.25 = 0.343
+DENOMINATOR = Decimal("0.343")
+#: 分子（无尾程）= 10 × (1 + 0.0467 + 0.0158) = 10.625 ⇒ 底线 30.9778… ⇒ 30.98
+COST_FLOOR = Decimal("30.98")
+#: 分子（有尾程 5）= 15 × 1.0625 = 15.9375 ⇒ 底线 46.4650… ⇒ 46.47
+COST_FLOOR_WITH_DELIVERY = Decimal("46.47")
+
 #: 这个 SKU 的单件尾程（按重量档算出来的）。
 DELIVERY_COST = Decimal("5")
 
@@ -65,6 +72,7 @@ def _pricing(**overrides):
         "reference_selling_price": Decimal("30"),
         "creator_commission_rate": None,
         "platform_creator_commission_rate": CREATOR_RATE,
+        "platform_fee_rate": PLATFORM_FEE_RATE,
         "other_cost_rate": OTHER_COST_RATE,
         "spu_bound": True,
         "spu_return_loss_rate": RETURN_LOSS_RATE,
@@ -73,6 +81,8 @@ def _pricing(**overrides):
         "deepest_policy": _policy(),
         "min_selling_price_override": None,
         "days_since_restock": None,
+        "delivery_cost": None,
+        "free_shipping": True,
     }
     payload.update(overrides)
     return compute_sku_pricing(**payload)
@@ -89,6 +99,8 @@ def _preview(**overrides):
         "actual_logistics_cost": None,
         "actual_storage_cost": None,
         "platform_fee_rate": Decimal("0.10"),
+        # 批次 9：桶是利润链的必填项（缺它整条链算不出来）
+        "other_cost_rate": Decimal("0"),
         "expected_ad_rate": Decimal("0.10"),
         "target_roi": None,
         "return_rate": Decimal("0.03"),
@@ -99,114 +111,96 @@ def _preview(**overrides):
 
 
 # ---------------------------------------------------------------------------
-# 1. 成对生效：底线公式
+# 1. 尾程直接进分子（不再「成对生效」）
 # ---------------------------------------------------------------------------
 
 
-def test_cost_floor_with_delivery_uses_paired_formula():
-    """尾程 + 拆分基准同时有值 ⇒ 分子加尾程、分母加回尾程占比。"""
+def test_cost_floor_with_delivery_adds_it_to_the_numerator():
+    """给了尾程 ⇒ 尾程进分子（**不需要**任何拆分基准）。"""
     floor = compute_cost_floor(
         purchase_cost=Decimal("10"),
+        platform_fee_rate=PLATFORM_FEE_RATE,
         other_cost_rate=OTHER_COST_RATE,
         creator_commission_rate=CREATOR_RATE,
         spu_return_loss_rate=RETURN_LOSS_RATE,
         spu_damage_rate=DAMAGE_RATE,
         target_margin_rate=TARGET_MARGIN,
         delivery_cost=DELIVERY_COST,
-        delivery_cost_rate=DELIVERY_RATE,
     )
-    denominator = (
-        Decimal("1")
-        - OTHER_COST_RATE
-        + DELIVERY_RATE
-        - CREATOR_RATE
-        - RETURN_LOSS_RATE
-        - DAMAGE_RATE
-        - TARGET_MARGIN
-    )
-    assert denominator == Decimal("0.4542")
-    assert floor == (Decimal("15") / denominator).quantize(Decimal("0.01"))
+    assert floor == COST_FLOOR_WITH_DELIVERY
+    # 分子 = (采购 10 + 尾程 5) × 1.0625 = 15.9375；分母 = 0.343
+    assert floor == (
+        (Decimal("10") + DELIVERY_COST)
+        * (Decimal("1") + RETURN_LOSS_RATE + DAMAGE_RATE)
+        / DENOMINATOR
+    ).quantize(Decimal("0.01"))
 
 
-def test_cost_floor_without_delivery_keeps_legacy_caliber():
-    """没有尾程 ⇒ 底线就是老口径（残差桶原样用）。"""
+def test_cost_floor_without_delivery_keeps_the_purchase_only_caliber():
+    """没有尾程 ⇒ 底线就是「只有采购成本」的口径。"""
     floor = compute_cost_floor(
         purchase_cost=Decimal("10"),
+        platform_fee_rate=PLATFORM_FEE_RATE,
         other_cost_rate=OTHER_COST_RATE,
         creator_commission_rate=CREATOR_RATE,
         spu_return_loss_rate=RETURN_LOSS_RATE,
         spu_damage_rate=DAMAGE_RATE,
         target_margin_rate=TARGET_MARGIN,
     )
-    assert floor == Decimal("28.23")
+    assert floor == COST_FLOOR
 
 
-def test_cost_floor_without_delivery_rate_does_not_add_delivery_cost():
-    """**只给尾程、不给拆分基准 ⇒ 尾程不进底线**。
+def test_delivery_cost_rate_parameter_is_retired():
+    """「尾程占收入比」入参**已退役** —— 传进去必须报错，不能被静默忽略。
 
-    这是本批最关键的一条：分子加了尾程而分母没把残差里的那份剔掉 ⇒
-    同一笔尾程扣两次 ⇒ 底线被抬高（看起来更保守，实际是错的）。
+    ⚠️ 静默忽略最危险：调用方以为尾程配了 ⇒ 底线算得偏低 ⇒ 定价偏低 ⇒ 亏本。
     """
-    floor = compute_cost_floor(
-        purchase_cost=Decimal("10"),
-        other_cost_rate=OTHER_COST_RATE,
-        creator_commission_rate=CREATOR_RATE,
-        spu_return_loss_rate=RETURN_LOSS_RATE,
-        spu_damage_rate=DAMAGE_RATE,
-        target_margin_rate=TARGET_MARGIN,
-        delivery_cost=DELIVERY_COST,
-        delivery_cost_rate=None,
-    )
-    assert floor == Decimal("28.23")
-
-
-def test_cost_floor_without_delivery_cost_does_not_remove_residual_share():
-    """**只给拆分基准、不给尾程 ⇒ 尾程也不进底线**。
-
-    反向同样危险：分母里把尾程剔了、分子却没加 ⇒ 尾程被白送（底线偏低）。
-    """
-    floor = compute_cost_floor(
-        purchase_cost=Decimal("10"),
-        other_cost_rate=OTHER_COST_RATE,
-        creator_commission_rate=CREATOR_RATE,
-        spu_return_loss_rate=RETURN_LOSS_RATE,
-        spu_damage_rate=DAMAGE_RATE,
-        target_margin_rate=TARGET_MARGIN,
-        delivery_cost=None,
-        delivery_cost_rate=DELIVERY_RATE,
-    )
-    assert floor == Decimal("28.23")
+    with pytest.raises(TypeError):
+        compute_cost_floor(
+            purchase_cost=Decimal("10"),
+            platform_fee_rate=PLATFORM_FEE_RATE,
+            other_cost_rate=OTHER_COST_RATE,
+            creator_commission_rate=CREATOR_RATE,
+            spu_return_loss_rate=RETURN_LOSS_RATE,
+            spu_damage_rate=DAMAGE_RATE,
+            target_margin_rate=TARGET_MARGIN,
+            delivery_cost=DELIVERY_COST,
+            delivery_cost_rate=Decimal("0.10"),
+        )
 
 
 # ---------------------------------------------------------------------------
-# 2. SKU 定价：成对生效的标记与缺失原因
+# 2. SKU 定价：尾程的标记与缺失原因
 # ---------------------------------------------------------------------------
 
 
-def test_sku_pricing_marks_delivery_in_cost_floor_when_paired():
-    out = _pricing(delivery_cost=DELIVERY_COST, delivery_cost_rate=DELIVERY_RATE)
+def test_sku_pricing_marks_delivery_in_cost_floor_when_present():
+    out = _pricing(delivery_cost=DELIVERY_COST)
     assert out["delivery_cost_in_cost_floor"] is True
     assert out["cost_floor_delivery_cost"] == pytest.approx(5.0)
-    assert out["cost_floor_delivery_cost_rate"] == pytest.approx(0.10)
     assert out["min_selling_price_missing_reasons"] == []
-    # 底线确实比老口径高（尾程进了分子）
-    assert out["min_selling_price"] > Decimal("28.23")
+    # 底线确实比「没有尾程」高（尾程进了分子）
+    assert out["min_selling_price"] > COST_FLOOR
+    assert out["min_selling_price"] == pytest.approx(46.47, abs=0.01)
 
 
 def test_sku_pricing_reports_missing_delivery_cost():
     out = _pricing()
     assert out["delivery_cost_in_cost_floor"] is False
     assert "missing_delivery_cost" in out["min_selling_price_missing_reasons"]
+    # 尾程算不出来 ⇒ 底线退回「只有采购成本」的口径（30.98）
+    assert out["min_selling_price"] == pytest.approx(30.98, abs=0.01)
 
 
-def test_sku_pricing_reports_missing_delivery_cost_rate_split():
-    out = _pricing(delivery_cost=DELIVERY_COST, delivery_cost_rate=None)
-    assert out["delivery_cost_in_cost_floor"] is False
+def test_retired_delivery_rate_split_reason_is_gone():
+    """「成对生效」那条缺料原因已退役 ⇒ 不得再出现。"""
+    out = _pricing(delivery_cost=DELIVERY_COST)
     assert (
-        "missing_delivery_cost_rate_split" in out["min_selling_price_missing_reasons"]
+        "missing_delivery_cost_rate_split"
+        not in out["min_selling_price_missing_reasons"]
     )
-    # 没配拆分基准 ⇒ 底线仍是老口径（不重复扣）
-    assert out["min_selling_price"] == pytest.approx(28.23, abs=0.01)
+    # 返回值里那个退役字段也不该再有
+    assert "cost_floor_delivery_cost_rate" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -215,13 +209,22 @@ def test_sku_pricing_reports_missing_delivery_cost_rate_split():
 
 
 def test_delivery_cost_is_deducted_from_pre_ad_profit():
-    """尾程必须从广告前利润里扣掉，否则利润被系统性高估。"""
+    """尾程必须从广告前利润里扣掉，否则利润被系统性高估。
+
+    ⚠️ 批次 9：尾程进了**按件成本合计** ⇒ 件损率（退货 + 货损 = 5%）会把它**再乘一次**
+    ⇒ 尾程 12 元带来的总扣减 = 12.00（尾程本身）+ 0.60（件损折算 12 × 5%）= **12.60**。
+    （旧口径按收入比例扣退货/货损 ⇒ 尾程不影响那两项 ⇒ 差额只有 12.00。）
+    """
     without = _preview(delivery_cost=Decimal("0"))
     with_delivery = _preview(delivery_cost=Decimal("12"))
     assert without["expected"]["pre_ad_profit"] - with_delivery["expected"][
         "pre_ad_profit"
-    ] == Decimal("12.00")
+    ] == Decimal("12.60")
     assert with_delivery["expected"]["delivery_cost"] == Decimal("12.00")
+    # 尾程本身那 12 元必须原样出现在成本项里
+    assert with_delivery["expected"]["pre_ad_profit"] == without["expected"][
+        "pre_ad_profit"
+    ] - Decimal("12.00") - Decimal("0.60")
 
 
 def test_delivery_cost_missing_makes_profit_not_computable():
@@ -264,8 +267,12 @@ def test_finance_service_fetches_delivery_cost():
     assert "delivery_cost=applied_delivery_cost" in FINANCE_SOURCE
 
 
-def test_platform_split_field_exists_in_orm():
-    """平台级拆分基准必须是 ORM 的一等字段（不是散落在别处的常量）。"""
+def test_retired_platform_split_field_is_gone_from_the_orm():
+    """平台级「尾程占收入比」字段已退役 ⇒ ORM 里**不得再有**这一列。
+
+    ⚠️ 留着这一列 = 界面还能填一个"看起来在生效、实际没人读"的输入框
+    （批次 4 那个「填了不生效」的病，尾程占收入比重演一遍）。
+    """
     from modules.core.db import DimPlatform
 
-    assert "delivery_cost_rate" in DimPlatform.__table__.columns
+    assert "delivery_cost_rate" not in DimPlatform.__table__.columns

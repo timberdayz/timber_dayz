@@ -142,6 +142,9 @@ def _preview_inputs(**overrides):
         actual_logistics_cost=None,
         actual_storage_cost=None,
         platform_fee_rate=Decimal("0.10"),
+        # 批次 9：桶是利润链**必填**项（不传 ⇒ 整条链算不出来）。
+        # 本组用例只守护 ROI 下界 ⇒ 显式给 0。
+        other_cost_rate=Decimal("0"),
         expected_ad_rate=Decimal("0"),
         return_rate=Decimal("0.02"),
         damage_rate=Decimal("0.01"),
@@ -164,8 +167,13 @@ def test_preview_exposes_break_even_roi_lower_bound_when_cost_is_missing():
     expected = preview["expected"]
     assert expected["break_even_roi"] is None
     assert expected["break_even_roi_lower_bound"] is not None
-    # 未知成本当 0 ⇒ 上界 = 100 − 30 − 10(仓储) − 10(平台佣金) − 5(达人) − 2(退货) − 1(货损)
-    assert expected["break_even_roi_lower_bound"] == Decimal("100") / Decimal("42")
+    # 未知成本当 0 ⇒ 上界 = 100 − 30(采购) − 10(仓储) − 10(平台佣金) − 5(达人) = 45
+    #
+    # ⚠️ 批次 9：两率改成**按件折**后，件损金额依赖「按件成本合计」，
+    #    而按件成本里有缺的那项（物流）⇒ 两项损耗在下界里也算不出来 ⇒ 当 0。
+    #    这仍然**是上界**（真值 ≥ 0 ⇒ 真实广告前利润 ≤ 45.00），
+    #    所以「只能证死、不能证活」的性质不变 —— 只是下界更松（42 → 45）。
+    assert expected["break_even_roi_lower_bound"] == Decimal("100") / Decimal("45")
 
 
 def test_preview_break_even_roi_lower_bound_matches_exact_value_when_cost_complete():
