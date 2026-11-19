@@ -88,7 +88,7 @@
     <el-dialog
       v-model="approveDialogVisible"
       title="批准用户"
-      width="500px"
+      width="560px"
     >
       <el-form :model="approveForm" label-width="100px">
         <el-form-item label="用户名">
@@ -113,6 +113,66 @@
             />
           </el-select>
         </el-form-item>
+
+        <el-divider content-position="left">用工信息</el-divider>
+        <el-form-item label="员工档案">
+          <el-checkbox v-model="approveForm.createEmployee">
+            同时建立员工档案
+          </el-checkbox>
+          <div class="field-hint">
+            勾选后会在批准事务里同时建立员工档案并绑定当前账号，新员工当天即可进入人力链路。
+          </div>
+        </el-form-item>
+        <template v-if="approveForm.createEmployee">
+          <el-form-item label="部门">
+            <el-select
+              v-model="approveForm.employeeDepartmentId"
+              placeholder="选择部门"
+              clearable
+              style="width: 100%"
+              :loading="hrOptionsLoading"
+            >
+              <el-option
+                v-for="dept in departmentOptions"
+                :key="dept.id"
+                :label="dept.department_name"
+                :value="dept.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="职位">
+            <el-select
+              v-model="approveForm.employeePositionId"
+              placeholder="选择职位"
+              clearable
+              style="width: 100%"
+              :loading="hrOptionsLoading"
+            >
+              <el-option
+                v-for="pos in positionOptions"
+                :key="pos.id"
+                :label="pos.position_name"
+                :value="pos.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="入职日期">
+            <el-date-picker
+              v-model="approveForm.employeeHireDate"
+              type="date"
+              placeholder="选择入职日期"
+              value-format="YYYY-MM-DD"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="在职状态">
+            <el-select v-model="approveForm.employeeStatus" style="width: 100%">
+              <el-option label="试用期" value="probation" />
+              <el-option label="在职" value="active" />
+            </el-select>
+          </el-form-item>
+        </template>
+
         <el-form-item label="审批备注">
           <el-input
             v-model="approveForm.notes"
@@ -167,6 +227,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import usersApi from '@/api/users'
 import rolesApi from '@/api/roles'
+import api from '@/api'
 import PageHeader from '@/components/common/PageHeader.vue'
 
 const loading = ref(false)
@@ -183,7 +244,13 @@ const approveForm = reactive({
   username: '',
   email: '',
   roleIds: [],
-  notes: ''
+  notes: '',
+  // 用工信息：默认勾选「同时建立员工档案」（审批即建档）
+  createEmployee: true,
+  employeeDepartmentId: null,
+  employeePositionId: null,
+  employeeHireDate: '',
+  employeeStatus: 'probation'
 })
 
 // 拒绝对话框
@@ -201,6 +268,32 @@ const selectedUserIds = ref([])
 // 角色相关
 const rolesLoading = ref(false)
 const availableRoles = ref([])
+
+// 用工信息相关（部门 / 职位）
+const hrOptionsLoading = ref(false)
+const departmentOptions = ref([])
+const positionOptions = ref([])
+
+// 加载部门与职位选项
+const loadHrOptions = async () => {
+  hrOptionsLoading.value = true
+  try {
+    const [deptRes, posRes] = await Promise.all([
+      api.getHrDepartments({ status: 'active' }),
+      api.getHrPositions({ status: 'active' })
+    ])
+    const deptList = deptRes?.data ?? deptRes ?? []
+    const posList = posRes?.data ?? posRes ?? []
+    departmentOptions.value = Array.isArray(deptList) ? deptList : []
+    positionOptions.value = Array.isArray(posList) ? posList : []
+  } catch (error) {
+    console.error('加载部门/职位选项失败:', error)
+    departmentOptions.value = []
+    positionOptions.value = []
+  } finally {
+    hrOptionsLoading.value = false
+  }
+}
 
 // 加载待审批用户列表
 const loadPendingUsers = async () => {
@@ -256,6 +349,11 @@ const handleApprove = (user) => {
   approveForm.email = user.email
   approveForm.roleIds = []
   approveForm.notes = ''
+  approveForm.createEmployee = true
+  approveForm.employeeDepartmentId = null
+  approveForm.employeePositionId = null
+  approveForm.employeeHireDate = ''
+  approveForm.employeeStatus = 'probation'
   approveDialogVisible.value = true
 }
 
@@ -263,10 +361,20 @@ const handleApprove = (user) => {
 const confirmApprove = async () => {
   approving.value = true
   try {
-    const result = await usersApi.approveUser(approveForm.userId, {
+    const payload = {
       role_ids: approveForm.roleIds.length > 0 ? approveForm.roleIds : undefined,
       notes: approveForm.notes || undefined
-    })
+    }
+    // 审批即建档：用工信息与角色一起提交，后端在同一事务里建档并绑定账号
+    if (approveForm.createEmployee) {
+      payload.create_employee = true
+      payload.employee_department_id = approveForm.employeeDepartmentId ?? null
+      payload.employee_position_id = approveForm.employeePositionId ?? null
+      payload.employee_hire_date = approveForm.employeeHireDate || null
+      payload.employee_status = approveForm.employeeStatus || 'probation'
+    }
+
+    const result = await usersApi.approveUser(approveForm.userId, payload)
 
     // [*] 校验后端返回的审批结果，避免出现“前端提示成功但实际未生效”
     const approvedStatus = result?.status ?? result?.data?.status
@@ -380,6 +488,7 @@ const formatDateTime = (dateTime) => {
 onMounted(() => {
   loadPendingUsers()
   loadRoles()
+  loadHrOptions()
 })
 </script>
 
@@ -415,5 +524,12 @@ onMounted(() => {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+}
+
+.field-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
 }
 </style>

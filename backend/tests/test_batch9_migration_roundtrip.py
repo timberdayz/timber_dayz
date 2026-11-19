@@ -50,7 +50,41 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CURRENT_CHAIN_CONFIG = "alembic-current.ini"
 BASELINE_REVISION = "current_schema_20260805"
 PREV_REVISION = "current_schema_20261238_official_platform_fee_rates"
-HEAD_REVISION = "current_schema_20261239_cost_floor_caliber_closure"
+
+
+def _resolve_head_revision(env: dict[str, str]) -> str:
+    """从当前迁移链解析**唯一**的 head。
+
+    ⚠️ 为什么不再写死 head 字符串：
+    每加一个迁移，写死的 head 就会红一次（2026-11-20 加 ``20261240`` 时就红了一次），
+    而这个红跟被测的迁移**毫无关系** —— 它只说明「链头又前移了」。
+    ⇒ 改为从链上解析，并**顺带断言链上只有一个 head**（分叉必须当场发现）。
+    """
+    completed = subprocess.run(
+        [sys.executable, "-m", "alembic", "-c", CURRENT_CHAIN_CONFIG, "heads"],
+        cwd=str(PROJECT_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=180,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"alembic heads failed\n"
+            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
+        )
+    heads = []
+    for line in completed.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # ``alembic heads`` 的输出形如 ``<revision> (head)`` ⇒ 只取 revision 本身
+        heads.append(line.split()[0])
+    assert len(heads) == 1, "当前迁移链必须只有一个 head（实际：{0}）".format(heads)
+    return heads[0]
+
 
 #: 当前链里 ``20261116_add_tiktok_export_store_name_aliases`` 是**数据依赖**迁移：
 #: 它要求库里已有这 6 个 TikTok 店铺账号，缺一个就 fail-closed 拒绝升级。
@@ -247,4 +281,4 @@ def test_downgrade_restores_the_dropped_column_and_the_legacy_bucket(roundtrip_d
         revision = conn.execute(
             text("SELECT version_num FROM public.current_schema_alembic_version")
         ).scalar()
-    assert revision == HEAD_REVISION
+    assert revision == _resolve_head_revision(env)

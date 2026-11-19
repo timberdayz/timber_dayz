@@ -52,7 +52,11 @@ export default {
    */
   async getUnlinkedUsers() {
     const res = await api._get('/users/unlinked')
-    return res?.data ?? res ?? []
+    // ⚠️ 后端在 ``data`` 之外还有一个顶层键 ``occupied_by_departed_employee``
+    // （被已离职员工占着的账号清单）。只取 ``data`` 会把这个键丢掉 ⇒
+    // 前端拿不到「哪些号要处理」的清单。所以这里原样返回整个响应体，
+    // 由调用方取 ``data`` 渲染列表、取 ``occupied_by_departed_employee`` 提示。
+    return res ?? []
   },
 
   /**

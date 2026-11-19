@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.schemas.common import SuccessResponse
+from backend.services.hr_employee_lifecycle import EMPLOYEE_IDENTITY_VOCABULARY
 
 
 # ================================================================
@@ -314,6 +315,63 @@ class EmployeeUpdate(BaseModel):
     user_id: Optional[int] = Field(None, description="关联登录账号 dim_users.user_id")
 
 
+class EmployeeOffboardRequest(BaseModel):
+    """办理离职：写离职日期 + **最后可结算的工资月**（发钱边界）。
+
+    ``last_payroll_month`` 离职后**只结算到该月为止**；它是必填的，
+    因为「离职后还能发几个月的钱」是业务决定，不能靠系统猜。
+    """
+
+    leave_date: date = Field(..., description="离职日期")
+    last_payroll_month: str = Field(
+        ...,
+        pattern=r"^\d{4}-\d{2}$",
+        description="最后可结算的工资月 YYYY-MM（离职后只结算到该月为止）",
+    )
+    leave_reason: Optional[str] = Field(None, description="离职原因")
+
+
+class EmployeeRegularizeRequest(BaseModel):
+    """转正：试用期（probation）→ 在职（active）。"""
+
+    regularization_date: date = Field(..., description="转正日期")
+    probation_end_date: Optional[date] = Field(
+        None, description="试用期结束日期（传了则一并更新）"
+    )
+
+
+class EmployeeVisitorPromotionRequest(BaseModel):
+    """访客转正：访客身份（visitor）→ 正式员工（employee）。"""
+
+    department_id: Optional[int] = Field(None, description="部门ID")
+    position_id: Optional[int] = Field(None, description="职位ID")
+    hire_date: Optional[date] = Field(None, description="入职日期")
+    employee_identity_type: str = Field(
+        "employee", description="用工身份:employee/visitor"
+    )
+
+    @field_validator("employee_identity_type", mode="before")
+    @classmethod
+    def only_employee_or_visitor(cls, v):
+        """用工身份只允许 employee / visitor（词表见 hr_employee_lifecycle SSOT）。"""
+        if v is None or (isinstance(v, str) and v.strip() == ""):
+            return "employee"
+        value = str(v).strip()
+        if value not in EMPLOYEE_IDENTITY_VOCABULARY:
+            raise ValueError(
+                f"用工身份只允许 {'/'.join(EMPLOYEE_IDENTITY_VOCABULARY)}，收到: {value}"
+            )
+        return value
+
+
+class EmployeeMergeRequest(BaseModel):
+    """合并访客档案：把访客（source）的信息并进正式员工（target）。"""
+
+    source_employee_code: str = Field(
+        ..., description="被合并的访客工号", min_length=1, max_length=64
+    )
+
+
 class EmployeeResponse(BaseModel):
     id: int
     employee_code: str
@@ -329,6 +387,7 @@ class EmployeeResponse(BaseModel):
     emergency_contact: Optional[str]
     emergency_phone: Optional[str]
     department_id: Optional[int]
+    department_name: Optional[str] = None
     position_id: Optional[int]
     position_code: Optional[str] = None
     position_name: Optional[str] = None
@@ -337,6 +396,10 @@ class EmployeeResponse(BaseModel):
     probation_end_date: Optional[date]
     regularization_date: Optional[date] = None
     leave_date: Optional[date] = None
+    #: 最后可结算的工资月（YYYY-MM）——发钱边界；为空 = 无上限 / 无可结算月份。
+    last_payroll_month: Optional[str] = None
+    #: 离职原因。
+    leave_reason: Optional[str] = None
     contract_type: Optional[str] = None
     contract_start_date: Optional[date] = None
     contract_end_date: Optional[date] = None
@@ -348,8 +411,33 @@ class EmployeeResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @field_validator("status", mode="before")
+    @classmethod
+    def default_status(cls, v):
+        """在职状态归一：空值按「在职」处理（与 ``EmployeeCreate.default_status`` 同口径）。
+
+        ⚠️ 字段类型保持 ``str``（不改成枚举）—— 现有调用方按字符串读它，
+        改成枚举会把它们的比较逻辑全部打破。
+        """
+        if v is None or (isinstance(v, str) and v.strip() == ""):
+            return "active"
+        return v
+
     class Config:
         from_attributes = True
+
+
+class EmployeeOffboardResponse(EmployeeResponse):
+    """离职结果 = 员工最新档案 + 待处理工资单提醒。
+
+    ``pending_payroll_months`` 是**提醒，不是拦截**：离职当月及之前的草稿工资单
+    仍需人工确认（可能补录加班费/奖金），但它**不阻断**离职办理 ——
+    离职结算是生命线，不能因为有一张草稿单把人卡在职。
+    """
+
+    pending_payroll_months: List[str] = Field(
+        default_factory=list, description="待确认的草稿工资单月份（YYYY-MM）"
+    )
 
 
 # ================================================================
@@ -646,11 +734,39 @@ class PayrollRecordResponse(BaseModel):
     remark: Optional[str]
     backfill_source_month: Optional[str] = None
     backfill_note: Optional[str] = None
+    # 作废留痕（status='void' 时有值；撤销作废后清空）。
+    # ⚠️ 一人一月只有一张工资单（(employee_code, year_month) 唯一索引），
+    #    所以作废单**占着坑位** ⇒ 作废必须可撤销，见 ``PayrollRecordUnvoidRequest``。
+    void_reason: Optional[str] = None
+    voided_at: Optional[datetime] = None
+    voided_by: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class PayrollRecordVoidRequest(BaseModel):
+    """工资单作废请求。"""
+
+    reason: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="作废原因（必填，用于留痕）",
+    )
+
+
+class PayrollRecordUnvoidRequest(BaseModel):
+    """撤销作废请求（把已作废的工资单恢复成草稿）。"""
+
+    reason: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="撤销作废原因（必填，用于留痕）",
+    )
 
 
 class PayrollRecordManualUpdate(BaseModel):

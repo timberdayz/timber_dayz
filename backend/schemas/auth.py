@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -196,8 +196,48 @@ class RegisterResponse(BaseModel):
 
 
 class ApproveUserRequest(BaseModel):
-    role_ids: List[int] = Field(default_factory=list, max_length=10, description="审批分配的角色 ID 列表")
+    """审批通过请求。
+
+    ``create_employee=True`` 时**审批即建档**：在同一个事务里激活账号 + 建立员工档案
+    + 绑定账号，新员工入职不必再走「先建员工档案、再绑账号」两步。
+
+    员工档案的在职状态口径见 ``backend/services/hr_employee_lifecycle.py``：
+    新入职默认试用（``probation``，**试用期不发薪**），转正后再改为 ``active``。
+    """
+
+    role_ids: List[int] = Field(
+        default_factory=list, max_length=10, description="审批分配的角色 ID 列表"
+    )
     notes: Optional[str] = Field(None, max_length=500, description="审批备注")
+    create_employee: bool = Field(
+        False, description="审批通过时是否同时建立员工档案（审批即建档）"
+    )
+    employee_department_id: Optional[int] = Field(
+        None, description="员工档案-部门 ID（create_employee=True 时生效）"
+    )
+    employee_position_id: Optional[int] = Field(
+        None, description="员工档案-职位 ID（create_employee=True 时生效）"
+    )
+    employee_hire_date: Optional[date] = Field(
+        None, description="员工档案-入职日期（create_employee=True 时生效）"
+    )
+    employee_status: Optional[str] = Field(
+        "probation",
+        description="员工档案-在职状态：probation（试用，默认）/ active（在职）",
+    )
+
+    @field_validator("employee_status")
+    @classmethod
+    def validate_employee_status(cls, value: Optional[str]) -> Optional[str]:
+        """在职状态只允许词表内的两个取值（试用期 / 在职）。"""
+        if value is None:
+            return None
+        normalized = value.strip()
+        if normalized not in ("probation", "active"):
+            raise ValueError(
+                "employee_status 只能是 probation（试用期）或 active（在职）"
+            )
+        return normalized
 
 
 class RejectUserRequest(BaseModel):
@@ -205,7 +245,9 @@ class RejectUserRequest(BaseModel):
 
 
 class UserIdBatchRequest(BaseModel):
-    user_ids: List[int] = Field(..., min_length=1, max_length=200, description="用户 ID 列表")
+    user_ids: List[int] = Field(
+        ..., min_length=1, max_length=200, description="用户 ID 列表"
+    )
     reason: Optional[str] = Field(None, max_length=500, description="原因或备注")
 
 
@@ -237,14 +279,18 @@ class PendingUserResponse(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    new_password: Optional[str] = Field(None, min_length=8, description="新密码，留空则生成临时密码")
+    new_password: Optional[str] = Field(
+        None, min_length=8, description="新密码，留空则生成临时密码"
+    )
     generate_temp_password: bool = Field(False, description="是否生成临时密码")
 
 
 class ResetPasswordResponse(BaseModel):
     user_id: int
     username: str
-    temp_password: Optional[str] = Field(None, description="临时密码，仅生成临时密码时返回")
+    temp_password: Optional[str] = Field(
+        None, description="临时密码，仅生成临时密码时返回"
+    )
     message: str
 
 

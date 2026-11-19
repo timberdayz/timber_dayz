@@ -1,14 +1,20 @@
 <template>
-  <div class="employee-salary-page">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">员工薪资</h1>
-        <p class="page-subtitle">统一维护固定薪资、月度录入和工资单结果。</p>
-      </div>
-      <el-button type="primary" @click="refreshCurrentView" :loading="pageLoading">
-        刷新
-      </el-button>
-    </div>
+  <div class="employee-salary-page erp-page-container">
+    <PageHeader
+      title="员工薪资"
+      subtitle="统一维护固定薪资、月度录入和工资单结果。"
+      family="admin"
+    >
+      <template #actions>
+        <el-button type="primary" @click="refreshCurrentView" :loading="pageLoading">
+          刷新
+        </el-button>
+      </template>
+    </PageHeader>
+
+    <p class="page-note">
+      提成与绩效以后端结算预览为准，本页不自己算钱；工资单状态为已确认/已发放后不可修改。
+    </p>
 
     <el-alert
       v-if="laborCostPolicy"
@@ -51,6 +57,13 @@
           />
         </el-select>
 
+        <div class="list-switch">
+          <el-switch
+            v-model="showInactiveEmployees"
+            active-text="显示离职员工"
+          />
+        </div>
+
         <div class="employee-list" v-loading="loadingEmployees">
           <button
             v-for="employee in filteredEmployees"
@@ -62,8 +75,8 @@
           >
             <div class="employee-name-row">
               <span class="employee-name">{{ employee.name || employee.employee_code }}</span>
-              <el-tag size="small" :type="employee.status === 'active' ? 'success' : 'info'">
-                {{ employee.status || 'unknown' }}
+              <el-tag size="small" :type="employeeStatusTagType(employee.status)">
+                {{ employeeStatusLabel(employee.status) }}
               </el-tag>
             </div>
             <div class="employee-meta">{{ employee.employee_code }}</div>
@@ -86,12 +99,21 @@
         />
 
         <template v-else>
+          <el-alert
+            v-if="isInactiveEmployee"
+            :title="inactiveEmployeeNotice"
+            type="info"
+            :closable="false"
+            show-icon
+            style="margin-bottom: 16px;"
+          />
+
           <el-card class="section-card" shadow="hover">
             <template #header>
               <div class="section-header">
                 <span>固定薪资</span>
                 <div class="section-actions">
-                  <el-button size="small" @click="openNewVersionFromCurrent" :disabled="!selectedEmployee">
+                  <el-button size="small" @click="openNewVersionFromCurrent" :disabled="!selectedEmployee || isInactiveEmployee">
                     新建生效版本
                   </el-button>
                   <el-button
@@ -99,7 +121,7 @@
                     type="primary"
                     @click="saveFixedSalary(false)"
                     :loading="savingSalaryStructure"
-                    :disabled="!selectedEmployee"
+                    :disabled="!selectedEmployee || isInactiveEmployee"
                   >
                     保存固定薪资
                   </el-button>
@@ -243,7 +265,7 @@
                   <el-button size="small" type="warning" @click="handleBatchRefreshPayroll" :loading="batchRefreshingPayroll" :disabled="!selectedMonth">
                     按月份批量刷新全部工资单
                   </el-button>
-                  <el-button size="small" type="primary" @click="saveMonthlyDraft" :loading="savingPayroll" :disabled="!selectedEmployee || isLockedPayroll">
+                  <el-button size="small" type="primary" @click="saveMonthlyDraft" :loading="savingPayroll" :disabled="!selectedEmployee || isLockedPayroll || isInactiveEmployee">
                     保存月度人工录入
                   </el-button>
                 </div>
@@ -270,12 +292,12 @@
               <el-row :gutter="16">
                 <el-col :span="12">
                   <el-form-item label="月度奖金">
-                    <el-input-number v-model="payrollForm.bonus" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll" />
+                    <el-input-number v-model="payrollForm.bonus" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll || isInactiveEmployee" />
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
                   <el-form-item label="加班费">
-                    <el-input-number v-model="payrollForm.overtime_pay" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll" />
+                    <el-input-number v-model="payrollForm.overtime_pay" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll || isInactiveEmployee" />
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -283,14 +305,14 @@
               <el-row :gutter="16">
                 <el-col :span="12">
                   <el-form-item label="补录来源月份">
-                    <el-select v-model="payrollForm.backfill_source_month" clearable :disabled="isLockedPayroll" style="width: 100%;">
+                    <el-select v-model="payrollForm.backfill_source_month" clearable :disabled="isLockedPayroll || isInactiveEmployee" style="width: 100%;">
                       <el-option v-for="month in recentMonths" :key="month" :label="month" :value="month" />
                     </el-select>
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
                   <el-form-item label="补录说明">
-                    <el-input v-model="payrollForm.backfill_note" maxlength="512" show-word-limit :disabled="isLockedPayroll" />
+                    <el-input v-model="payrollForm.backfill_note" maxlength="512" show-word-limit :disabled="isLockedPayroll || isInactiveEmployee" />
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -298,12 +320,12 @@
               <el-row :gutter="16">
                 <el-col :span="12">
                   <el-form-item label="个人社保">
-                    <el-input-number v-model="payrollForm.social_insurance_personal" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll" />
+                    <el-input-number v-model="payrollForm.social_insurance_personal" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll || isInactiveEmployee" />
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
                   <el-form-item label="个人公积金">
-                    <el-input-number v-model="payrollForm.housing_fund_personal" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll" />
+                    <el-input-number v-model="payrollForm.housing_fund_personal" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll || isInactiveEmployee" />
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -311,12 +333,12 @@
               <el-row :gutter="16">
                 <el-col :span="12">
                   <el-form-item label="个税">
-                    <el-input-number v-model="payrollForm.income_tax" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll" />
+                    <el-input-number v-model="payrollForm.income_tax" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll || isInactiveEmployee" />
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
                   <el-form-item label="其他扣款">
-                    <el-input-number v-model="payrollForm.other_deductions" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll" />
+                    <el-input-number v-model="payrollForm.other_deductions" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll || isInactiveEmployee" />
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -324,12 +346,12 @@
               <el-row :gutter="16">
                 <el-col :span="12">
                   <el-form-item label="公司社保">
-                    <el-input-number v-model="payrollForm.social_insurance_company" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll" />
+                    <el-input-number v-model="payrollForm.social_insurance_company" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll || isInactiveEmployee" />
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
                   <el-form-item label="公司公积金">
-                    <el-input-number v-model="payrollForm.housing_fund_company" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll" />
+                    <el-input-number v-model="payrollForm.housing_fund_company" :min="0" :step="100" style="width: 100%;" :disabled="isLockedPayroll || isInactiveEmployee" />
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -343,13 +365,13 @@
                       value-format="YYYY-MM-DD"
                       placeholder="选择日期"
                       style="width: 100%;"
-                      :disabled="isLockedPayroll"
+                      :disabled="isLockedPayroll || isInactiveEmployee"
                     />
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
                   <el-form-item label="备注">
-                    <el-input v-model="payrollForm.remark" :disabled="isLockedPayroll" />
+                    <el-input v-model="payrollForm.remark" :disabled="isLockedPayroll || isInactiveEmployee" />
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -361,9 +383,12 @@
               <div class="section-header">
                 <span>工资单结果</span>
                 <div class="section-actions">
-                  <el-tag v-if="payrollRecord" :type="payrollStatusTagType">{{ payrollRecord.status }}</el-tag>
+                  <el-tag v-if="payrollRecord" :type="payrollStatusTagType(payrollRecord.status)">
+                    {{ payrollStatusLabel(payrollRecord.status) }}
+                  </el-tag>
                   <el-tag v-else type="info">尚未生成</el-tag>
                   <el-tag v-if="payrollRecord?.status === 'draft'" type="info">提成预览，未锁定</el-tag>
+                  <el-tag v-else-if="payrollRecord?.status === 'void'" type="danger">已作废，不再计入发放</el-tag>
                   <el-tag v-else-if="payrollRecord" type="warning">成本与提成已锁定</el-tag>
                   <el-tag v-if="payrollRecord?.is_stale_against_latest_calc" type="warning">结果已过期</el-tag>
                   <el-button size="small" type="success" @click="confirmPayroll" :disabled="!payrollRecord || payrollRecord.status !== 'draft'">
@@ -385,6 +410,12 @@
                   <el-button size="small" type="primary" @click="markPayrollPaid" :disabled="!canMarkPaid">
                     标记已发放
                   </el-button>
+                  <el-button size="small" type="danger" plain @click="voidPayroll" :disabled="!payrollRecord || payrollRecord.status !== 'draft'">
+                    作废工资单
+                  </el-button>
+                  <el-button size="small" type="warning" plain @click="unvoidPayroll" :disabled="!payrollRecord || payrollRecord.status !== 'void'">
+                    撤销作废
+                  </el-button>
                 </div>
               </div>
             </template>
@@ -394,6 +425,13 @@
               title="尚未生成工资单，请先完成月度计算"
               type="info"
               :closable="false"
+            />
+            <el-alert
+              v-else-if="payrollRecord.status === 'void'"
+              title="该工资单已作废：不可确认、不可发放，也不计入任何金额汇总。如属误操作，可点“撤销作废”恢复为草稿。"
+              type="warning"
+              :closable="false"
+              style="margin-bottom: 16px;"
             />
             <el-row v-else :gutter="16" class="result-grid">
               <el-col :span="8"><div class="result-item"><span>提成</span><strong>{{ formatMoney(payrollRecord?.commission) }}</strong></div></el-col>
@@ -407,6 +445,15 @@
             <el-alert
               v-if="lockedConflicts.length > 0"
               title="当前工资单存在锁定冲突，需先退回草稿再接受重算结果。"
+              type="warning"
+              :closable="false"
+              style="margin-top: 16px;"
+            />
+
+            <!-- 已作废的工资单：刷新不会改写它，也不会新建替代单 -->
+            <el-alert
+              v-if="voidConflicts.length > 0"
+              :title="`有 ${voidConflicts.length} 份工资单已作废，本次未重新生成：${voidConflictNames}。如需补发，请先在对应月份点“撤销作废”。`"
               type="warning"
               :closable="false"
               style="margin-top: 16px;"
@@ -471,8 +518,16 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/api'
 import { formatPayrollLockedConflictSummary } from '@/utils/payrollConflict'
+import PageHeader from '@/components/common/PageHeader.vue'
 import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 import { formatBasisVersion } from './settlementDisplayRules'
+import {
+  employeeStatusLabel,
+  employeeStatusTagType,
+  isInactiveEmployeeStatus,
+  payrollStatusLabel,
+  payrollStatusTagType
+} from '@/constants/hr'
 import {
   extractBatchConfirmIssues,
   extractBatchConfirmSuccessCount,
@@ -498,11 +553,15 @@ const employeeKeyword = ref('')
 const employeeDepartment = ref('')
 const selectedEmployee = ref(null)
 const selectedMonth = ref('')
+// 左侧名单默认只看在职；打开开关后可查看离职员工的工资单历史
+const showInactiveEmployees = ref(false)
 
 const salaryStructureEmpty = ref(true)
 const salaryHistory = ref([])
 const payrollRecord = ref(null)
 const lockedConflicts = ref([])
+/** 已作废、被刷新跳过的工资单（作废单是冻结的历史留痕，不被重算改写）。 */
+const voidConflicts = ref([])
 const laborAllocations = ref([])
 const laborCostPolicy = ref({
   // 口径由后端下发，前端不补默认值（历史口径 A_ONLY_V1 / A_PRE_COMMISSION_LABOR_V2
@@ -560,22 +619,38 @@ const recentMonths = computed(() => {
 })
 
 const filteredEmployees = computed(() => {
-  return employees.value.filter((employee) => {
+  return (employees.value || []).filter((employee) => {
     const matchesIdentity = employee.employee_identity_type === 'employee'
     const keyword = employeeKeyword.value.trim().toLowerCase()
     const matchesKeyword = !keyword || `${employee.name || ''}${employee.employee_code || ''}`.toLowerCase().includes(keyword)
     const matchesDepartment = !employeeDepartment.value || employee.department_id === employeeDepartment.value
-    return matchesIdentity && matchesKeyword && matchesDepartment
+    const matchesStatus = showInactiveEmployees.value || !isInactiveEmployeeStatus(employee.status)
+    return matchesIdentity && matchesKeyword && matchesDepartment && matchesStatus
   })
 })
 
-const isLockedPayroll = computed(() => ['confirmed', 'paid'].includes(payrollRecord.value?.status))
-const payrollStatusTagType = computed(() => {
-  const status = payrollRecord.value?.status
-  if (status === 'paid') return 'success'
-  if (status === 'confirmed') return 'warning'
-  return 'info'
+// 离职员工：可以查账、可以结算到最后一期，但不能改固定薪资与月度人工录入
+const isInactiveEmployee = computed(() =>
+  isInactiveEmployeeStatus(selectedEmployee.value?.status)
+)
+
+const inactiveEmployeeNotice = computed(() => {
+  const lastMonth = selectedEmployee.value?.last_payroll_month || '（未设定）'
+  return `该员工已离职，仅可结算至最后发薪月 ${lastMonth}`
 })
+
+const isLockedPayroll = computed(() => ['confirmed', 'paid'].includes(payrollRecord.value?.status))
+
+/** 已作废被跳过的工资单，渲染成「员工 工号 月份」的短名单。 */
+const voidConflictNames = computed(() =>
+  (voidConflicts.value || [])
+    .map((item) => {
+      const code = item?.employee_code || '未知员工'
+      const month = item?.year_month || '未知月份'
+      return `${code}（${month}）`
+    })
+    .join('、')
+)
 const canMarkPaid = computed(() => {
   const user = authStore.user
   if (!user) return false
@@ -708,7 +783,7 @@ const loadBaseData = async () => {
   loadingEmployees.value = true
   try {
     const [employeeData, departmentData, positionData] = await Promise.all([
-      api.getHrEmployees({ page: 1, page_size: 200 }),
+      api.getHrEmployees({ page: 1, page_size: 500 }),
       api.getHrDepartments({ status: 'active' }),
       api.getHrPositions({ status: 'active' })
     ])
@@ -718,8 +793,12 @@ const loadBaseData = async () => {
     if (!selectedMonth.value) {
       selectedMonth.value = recentMonths.value[0]
     }
-    if (!selectedEmployee.value && employees.value.length > 0) {
-      await selectEmployee(employees.value[0])
+    if (!selectedEmployee.value) {
+      // 默认选第一个「在职 + 正式员工」，与左侧默认名单口径一致
+      const firstEmployee = filteredEmployees.value[0]
+      if (firstEmployee) {
+        await selectEmployee(firstEmployee)
+      }
     }
   } catch (error) {
     console.error('加载员工薪资基础数据失败:', error)
@@ -776,6 +855,7 @@ const loadSalaryHistory = async () => {
 const loadPayrollRecord = async () => {
   if (!selectedEmployee.value || !selectedMonth.value) return
   lockedConflicts.value = []
+  voidConflicts.value = []
   try {
     const response = await api.getHrPayrollRecord(selectedEmployee.value.employee_code, selectedMonth.value)
     applyPayrollRecord(response?.data || response)
@@ -884,6 +964,7 @@ const refreshPayrollResult = async () => {
     const response = await api.refreshHrPayrollRecord(selectedEmployee.value.employee_code, selectedMonth.value)
     const record = response?.data || response || null
     lockedConflicts.value = response?.locked_conflict_details || response?.lockedConflicts || []
+    voidConflicts.value = response?.void_conflict_details || response?.voidConflicts || []
     applyPayrollRecord(record)
     await loadLaborAllocations()
     ElMessage.success('工资单结果已刷新')
@@ -913,6 +994,8 @@ const handleBatchRefreshPayroll = async () => {
     const response = await api.refreshAllHrPayrollRecords(selectedMonth.value)
     const lockedConflictCount = response?.locked_conflicts || 0
     const conflictDetails = response?.locked_conflict_details || []
+    const voidConflictCount = response?.void_conflicts || 0
+    const voidConflictDetails = response?.void_conflict_details || []
     if (selectedEmployee.value) {
       await loadPayrollRecord()
       await loadLaborAllocations()
@@ -924,6 +1007,16 @@ const handleBatchRefreshPayroll = async () => {
       await ElMessageBox.alert(
         formatPayrollLockedConflictSummary(conflictDetails, lockedConflictCount),
         `有 ${lockedConflictCount} 份已锁定工资单未覆盖`,
+        { type: 'warning' }
+      )
+    }
+    if (voidConflictCount > 0) {
+      const names = (voidConflictDetails || [])
+        .map((item) => `${item?.employee_code || '未知员工'}（${item?.year_month || '未知月份'}）`)
+        .join('、')
+      await ElMessageBox.alert(
+        `以下工资单已作废，本次未重新生成：${names}。如需补发，请先在对应月份点“撤销作废”。`,
+        `有 ${voidConflictCount} 份已作废工资单未生成`,
         { type: 'warning' }
       )
     }
@@ -1102,6 +1195,59 @@ const markPayrollPaid = async () => {
   }
 }
 
+/**
+ * 作废工资单（草稿 → 已作废）。
+ * 作废是「留痕」不是「删数据」：行保留、记原因与操作人，不再计入任何金额汇总。
+ */
+const voidPayroll = async () => {
+  if (!payrollRecord.value?.id) return
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '作废后该工资单不再计入发放，也不能确认或发放。请填写作废原因（必填）。',
+      '作废工资单',
+      {
+        type: 'warning',
+        inputPlaceholder: '例如：测试数据，业务作废',
+        inputValidator: (text) =>
+          text && String(text).trim() ? true : '作废原因不能为空'
+      }
+    )
+    await api.voidHrPayrollRecord(payrollRecord.value.id, String(value).trim())
+    ElMessage.success('工资单已作废')
+    await loadPayrollRecord()
+  } catch (error) {
+    if (error === 'cancel') return
+    ElMessage.error(error.response?.data?.message || error.message || '作废工资单失败')
+  }
+}
+
+/**
+ * 撤销作废（已作废 → 草稿）。
+ * ⚠️ 为什么必须有这个按钮：一人一月只有一张工资单，作废单**占着坑位**，
+ * 所以作废若不可逆，一次误操作就会让这个人那个月永远发不出钱。
+ */
+const unvoidPayroll = async () => {
+  if (!payrollRecord.value?.id) return
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '撤销作废后工资单恢复为草稿，可重新确认与发放。请填写撤销原因（必填）。',
+      '撤销作废',
+      {
+        type: 'warning',
+        inputPlaceholder: '例如：误作废，恢复原单',
+        inputValidator: (text) =>
+          text && String(text).trim() ? true : '撤销作废原因不能为空'
+      }
+    )
+    await api.unvoidHrPayrollRecord(payrollRecord.value.id, String(value).trim())
+    ElMessage.success('已撤销作废，工资单恢复为草稿')
+    await loadPayrollRecord()
+  } catch (error) {
+    if (error === 'cancel') return
+    ElMessage.error(error.response?.data?.message || error.message || '撤销作废失败')
+  }
+}
+
 onMounted(async () => {
   selectedMonth.value = recentMonths.value[0]
   await Promise.all([loadBaseData(), loadLaborCostPolicy()])
@@ -1113,22 +1259,14 @@ onMounted(async () => {
   padding: 20px;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 16px;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 700;
-}
-
-.page-subtitle {
-  margin: 6px 0 0;
+.page-note {
+  margin: 0 0 16px 0;
   color: #606266;
+  line-height: 1.6;
+}
+
+.list-switch {
+  margin-bottom: 12px;
 }
 
 .page-layout {

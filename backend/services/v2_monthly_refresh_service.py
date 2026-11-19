@@ -94,9 +94,11 @@ class V2MonthlyRefreshService:
             "locked_conflict_details": payroll_result.get(
                 "locked_conflict_details", []
             ),
-            "labor_cost_allocation_upserts": labor_result.get(
-                "allocation_upserts", 0
-            ),
+            # 已作废的工资单被跳过（冻结的历史留痕，不被整月刷新改写）。
+            # ⚠️ 作废**不锁月** ⇒ 同月其他人照常重算、照常确认发放。
+            "void_conflicts": payroll_result.get("void_conflicts", 0),
+            "void_conflict_details": payroll_result.get("void_conflict_details", []),
+            "labor_cost_allocation_upserts": labor_result.get("allocation_upserts", 0),
             "profit_basis_shop_count": basis_result.get("shop_count", 0),
             "calculation_passes": 2,
         }

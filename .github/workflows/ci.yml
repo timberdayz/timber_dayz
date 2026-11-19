@@ -410,7 +410,10 @@ jobs:
             tests/test_verify_remote_deploy_contracts.py \
             tests/test_account_browser_identity_contract.py \
             tests/test_account_readiness_contract.py \
-            tests/test_account_proxy_source_contract.py
+            tests/test_account_proxy_source_contract.py \
+            backend/tests/test_hr_lifecycle_contract.py \
+            backend/tests/test_hr_employee_lifecycle.py \
+            backend/tests/test_hr_binding_and_payroll_boundary.py
 
       - name: Run performance regression entry
         if: matrix.python-version == '3.11'

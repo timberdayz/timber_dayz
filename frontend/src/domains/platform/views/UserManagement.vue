@@ -268,10 +268,13 @@
             <el-option
               v-for="emp in employeeOptions"
               :key="emp.id"
-              :label="`${emp.name} (${emp.employee_code})`"
+              :label="formatEmployeeOption(emp)"
               :value="emp.id"
             />
           </el-select>
+          <div class="field-hint">
+            仅显示在职员工；已离职员工不参与账号绑定。
+          </div>
         </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="editForm.is_active" />
@@ -346,6 +349,7 @@ import { useRolesStore } from '@/stores/roles'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/api'
 import PageHeader from '@/components/common/PageHeader.vue'
+import { employeeIdentityLabel, isInactiveEmployeeStatus } from '@/constants/hr'
 
 const usersStore = useUsersStore()
 const rolesStore = useRolesStore()
@@ -366,6 +370,7 @@ const currentUserId = computed(() => authStore.user?.id)
 const selectedActiveRows = ref([])
 const availableRoles = ref([])
 const employeeOptions = ref([])
+const departmentOptions = ref([])
 const creating = ref(false)
 const editing = ref(false)
 const resetting = ref(false)
@@ -544,15 +549,46 @@ const editUser = async (user) => {
     employee_id: user.employee_id ?? null,
   }
 
-  try {
-    const res = await api.getHrEmployees({ page: 1, page_size: 500 })
-    employeeOptions.value = res?.data ?? res ?? []
-  } catch {
-    employeeOptions.value = []
-    ElMessage.warning('员工列表加载失败，员工关联字段暂时不可用')
-  }
+  await loadEmployeeOptions()
 
   showEditDialog.value = true
+}
+
+/**
+ * 加载可关联的员工与部门：
+ * - 已离职员工不进入关联下拉（账号不应再绑定离职档案）
+ * - 选项上带「身份 + 部门」辅助信息，方便管理员认人
+ */
+const loadEmployeeOptions = async () => {
+  try {
+    const [empRes, deptRes] = await Promise.all([
+      api.getHrEmployees({ page: 1, page_size: 500 }),
+      api.getHrDepartments({ status: 'active' })
+    ])
+    const empList = empRes?.data ?? empRes ?? []
+    const deptList = deptRes?.data ?? deptRes ?? []
+    employeeOptions.value = (Array.isArray(empList) ? empList : []).filter(
+      (emp) => !isInactiveEmployeeStatus(emp?.status)
+    )
+    departmentOptions.value = Array.isArray(deptList) ? deptList : []
+  } catch {
+    employeeOptions.value = []
+    departmentOptions.value = []
+    ElMessage.warning('员工列表加载失败，员工关联字段暂时不可用')
+  }
+}
+
+const getDepartmentName = (departmentId) => {
+  if (!departmentId) return '无部门'
+  const dept = (departmentOptions.value || []).find((item) => item.id === departmentId)
+  return dept?.department_name || '无部门'
+}
+
+const formatEmployeeOption = (emp) => {
+  if (!emp) return ''
+  const identity = employeeIdentityLabel(emp.employee_identity_type)
+  const department = getDepartmentName(emp.department_id)
+  return `${emp.name || '未命名'} (${emp.employee_code || '-'}) · ${identity} · ${department}`
 }
 
 const deleteUser = async (user) => {
@@ -682,7 +718,8 @@ const submitEdit = async () => {
     await refreshUsers()
   } catch (error) {
     if (error !== false) {
-      ElMessage.error(`更新用户失败: ${error.message}`)
+      // 绑定冲突等业务错误由后端给出可直接展示的文案（包含账号占用者信息）
+      ElMessage.error(extractErrorMessage(error, '更新用户失败'))
     }
   } finally {
     editing.value = false
@@ -711,6 +748,25 @@ const submitReset = async () => {
 }
 
 const formatDateTime = (value) => (value ? new Date(value).toLocaleString('zh-CN') : '-')
+
+/**
+ * 提取后端可展示的错误文案：
+ * 409 绑定冲突的后端文案里带占用者信息，必须原样展示，不能被通用前缀覆盖。
+ */
+const extractErrorMessage = (error, fallback = '操作失败') => {
+  const data = error?.response?.data
+  if (typeof data?.message === 'string' && data.message) return data.message
+  if (typeof data?.detail === 'string' && data.detail) return data.detail
+  if (Array.isArray(data?.detail)) {
+    const details = data.detail
+      .map((item) => item?.msg || item?.message)
+      .filter(Boolean)
+      .join('；')
+    if (details) return details
+  }
+  if (typeof error?.message === 'string' && error.message) return error.message
+  return fallback
+}
 
 const formatEmployee = (row) => {
   return row.employee_code && row.employee_name ? `${row.employee_name} (${row.employee_code})` : '未关联'
@@ -780,6 +836,13 @@ watch(searchKeyword, () => {
 
 .search-input {
   width: 300px;
+}
+
+.field-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
 }
 
 @media (max-width: 768px) {

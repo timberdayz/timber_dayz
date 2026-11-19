@@ -4,10 +4,15 @@
 包含: CRUD、恢复、密码重置、解锁、审批、拒绝、待审批列表、未关联用户、已删除用户
 """
 
+# ⚠️ 本文件**故意不加** ``from __future__ import annotations``：
+#    ``role_based_rate_limit`` 的装饰器会把路由函数包在**别的模块**里，
+#    延迟求值的注解字符串会在那个模块的 globals 里找不到 ``UserIdBatchRequest``
+#    ⇒ FastAPI 退化成「query 参数」⇒ 带 body 的路由直接 422。
 from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -27,8 +32,10 @@ from backend.schemas.auth import (
     UserUpdate,
 )
 from backend.services.audit_service import audit_service
+from backend.services.hr_employee_lifecycle import employee_status
 from backend.utils.api_response import (
     error_response,
+    get_timestamp,
     pagination_response,
     success_response,
 )
@@ -60,6 +67,18 @@ async def _clear_employee_user_id(db: AsyncSession, user_id: int) -> None:
     await db.execute(
         update(Employee).where(Employee.user_id == user_id).values(user_id=None)
     )
+
+
+async def _describe_account_occupant(db: AsyncSession, user_id: int) -> str:
+    """描述占用某个员工档案的账号：``用户名（用户ID N）``。
+
+    账号行可能已被物理删除（脏数据），此时只给出用户 ID，不臆造用户名。
+    """
+    result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))
+    occupant = result.scalar_one_or_none()
+    if occupant is None:
+        return f"（用户ID {user_id}）"
+    return f"{occupant.username}（用户ID {user_id}）"
 
 
 @router.post("/", response_model=UserResponse)
@@ -222,21 +241,73 @@ async def get_unlinked_users(
     current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """获取尚未关联员工的用户列表(is_active=true)。"""
+    """获取账号池：尚未关联员工档案的账号 + 已被已离职员工占用的账号。
+
+    返回结构（在原有结构上**新增字段**，不破坏既有契约）：
+
+    * ``data`` —— 账号池里的账号，每项为 ``{id, username, email, blocked_by_employee}``。
+      ``blocked_by_employee`` 为 ``None`` 表示「没有员工档案占用」；
+      非空则说明这个号**被一个已离职员工占着**（管理员需要先解绑或换人）。
+    * ``occupied_by_departed_employee`` —— 只含被已离职员工占用的账号，
+      便于前端单独展示「这些号要处理」。
+
+    ⚠️ 「已离职」口径来自 ``backend/services/hr_employee_lifecycle.py``（在职状态词表）。
+    """
     from sqlalchemy import and_
 
     result = await db.execute(
         select(DimUser).where(and_(DimUser.is_active, DimUser.status != "deleted"))
     )
     users = result.scalars().all()
-    unlinked = []
+    unlinked: list[dict] = []
+    occupied: list[dict] = []
     for u in users:
         r = await db.execute(select(Employee).where(Employee.user_id == u.user_id))
-        if r.scalar_one_or_none() is None:
+        emp = r.scalar_one_or_none()
+        if emp is None:
             unlinked.append(
-                {"id": u.user_id, "username": u.username, "email": u.email or ""}
+                {
+                    "id": u.user_id,
+                    "username": u.username,
+                    "email": u.email or "",
+                    "blocked_by_employee": None,
+                }
             )
-    return success_response(data=unlinked)
+            continue
+        if employee_status(emp) != "inactive":
+            # 关联着在职员工 ⇒ 不在「账号池」里（正常占用）
+            continue
+        unlinked.append(
+            {
+                "id": u.user_id,
+                "username": u.username,
+                "email": u.email or "",
+                "blocked_by_employee": {
+                    "employee_code": emp.employee_code,
+                    "employee_name": emp.name,
+                    "employee_status": employee_status(emp),
+                },
+            }
+        )
+        occupied.append(
+            {
+                "id": u.user_id,
+                "username": u.username,
+                "email": u.email or "",
+                "employee_code": emp.employee_code,
+                "employee_name": emp.name,
+            }
+        )
+    # ⚠️ ``success_response`` 不支持额外的顶层键 ⇒ 这里手工组装统一响应信封。
+    return JSONResponse(
+        status_code=200,
+        content={
+            "success": True,
+            "data": unlinked,
+            "occupied_by_departed_employee": occupied,
+            "timestamp": get_timestamp(),
+        },
+    )
 
 
 @router.get("/deleted")
@@ -410,6 +481,17 @@ async def update_user(
                 user.roles.append(role)
 
     if user_update.employee_id is not None:
+        # --- 账号 ↔ 员工绑定：与员工侧（PUT /api/hr/employees/{code}）同一套校验 ---
+        # ⚠️ 绝不静默覆盖：员工已被别的账号绑定时报错点名占用者，
+        #    否则旧账号侧毫无提示地「被抢走」员工。
+        if user.status != "active" or not user.is_active:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="只能关联已审批且启用的账号",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请先审批该账号并启用,再关联员工",
+                status_code=400,
+            )
         result = await db.execute(
             select(Employee).where(Employee.id == user_update.employee_id)
         )
@@ -422,9 +504,28 @@ async def update_user(
                 recovery_suggestion="请选择有效的员工",
                 status_code=404,
             )
+        emp_status = employee_status(emp)
+        if emp_status not in ("active", "probation"):
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="该员工已离职，不可关联账号",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion=f"员工编号 {emp.employee_code} 当前状态为 {emp_status},不可再关联新账号",
+                status_code=400,
+            )
+        if emp.user_id is not None and int(emp.user_id) != int(user.user_id):
+            occupant = await _describe_account_occupant(db, emp.user_id)
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message=f"该员工已关联账号 {occupant}，请先解除关联或从该账号侧解除",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请先在原账号侧解除关联,再把员工关联到本账号",
+                status_code=400,
+            )
         await _clear_employee_user_id(db, user.user_id)
         emp.user_id = user.user_id
     elif "employee_id" in user_update.model_fields_set:
+        # 解除关联：**解绑总是允许的**（员工是否已离职都不拦截）。
         await _clear_employee_user_id(db, user.user_id)
 
     if user_update.is_active is False and was_active:
@@ -606,7 +707,11 @@ async def delete_users_batch(
     success_count = sum(1 for item in results if item["ok"])
     failed_count = len(results) - success_count
     payload = {
-        "summary": {"total": len(results), "success": success_count, "failed": failed_count},
+        "summary": {
+            "total": len(results),
+            "success": success_count,
+            "failed": failed_count,
+        },
         "results": results,
     }
     return success_response(data=payload, message="Batch deletion completed")
@@ -845,7 +950,11 @@ async def approve_user(
     current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """审批用户(将pending状态改为active)"""
+    """审批用户(将pending状态改为active)
+
+    ``request_body.create_employee=True`` 时**审批即建档**：同一事务内完成
+    激活账号 → 建立员工档案 → 绑定账号；该账号已有关联档案时**幂等跳过建档**。
+    """
     result = await db.execute(
         select(DimUser)
         .where(DimUser.user_id == user_id)
@@ -916,6 +1025,38 @@ async def approve_user(
     await db.flush()
     await db.refresh(user, ["roles"])
 
+    # --- 审批即建档（create_employee=True）：同一事务内激活账号 + 建档 + 绑定 ---
+    employee_created = False
+    employee_code: Optional[str] = None
+    if request_body.create_employee:
+        # ⚠️ 复用人力侧的工号生成规则（EMP + 年月 + 4 位序号），不另写一份。
+        #    放在函数内导入：避免 platform 域 → business 域的模块级导入环。
+        from backend.domains.business.routers.hr_employee import (
+            _generate_employee_code,
+        )
+
+        emp_result = await db.execute(
+            select(Employee).where(Employee.user_id == user.user_id)
+        )
+        existing_employee = emp_result.scalar_one_or_none()
+        if existing_employee is not None:
+            # 幂等：该账号已有关联档案 ⇒ 复用它，不重复建档、不报错。
+            employee_code = existing_employee.employee_code
+        else:
+            employee_code = await _generate_employee_code(db)
+            employee = Employee(
+                employee_code=employee_code,
+                name=user.full_name or user.username,
+                employee_identity_type="employee",
+                status=request_body.employee_status or "probation",
+                department_id=request_body.employee_department_id,
+                position_id=request_body.employee_position_id,
+                hire_date=request_body.employee_hire_date,
+                user_id=user.user_id,
+            )
+            db.add(employee)
+            employee_created = True
+
     approval_log = UserApprovalLog(
         user_id=user.user_id,
         action="approve",
@@ -940,11 +1081,15 @@ async def approve_user(
                 request_body.role_ids if request_body.role_ids else ["operator"]
             ),
             "notes": request_body.notes,
+            "employee_created": employee_created,
+            "employee_code": employee_code,
         },
     )
 
     try:
-        from backend.services.approval_center_service import sync_user_registration_approval_decision
+        from backend.services.approval_center_service import (
+            sync_user_registration_approval_decision,
+        )
 
         await sync_user_registration_approval_decision(
             db=db,
@@ -954,7 +1099,9 @@ async def approve_user(
             comment=request_body.notes,
         )
     except Exception as exc:
-        logger.warning(f"[approval-center] failed to sync user approval decision: {exc}")
+        logger.warning(
+            f"[approval-center] failed to sync user approval decision: {exc}"
+        )
 
     from backend.domains.platform.compat.notifications import notify_user_approved
 
@@ -970,6 +1117,8 @@ async def approve_user(
             "user_id": user.user_id,
             "username": user.username,
             "status": user.status,
+            "employee_created": employee_created,
+            "employee_code": employee_code,
         },
         message="用户审批成功",
     )
@@ -1040,7 +1189,9 @@ async def reject_user(
     )
 
     try:
-        from backend.services.approval_center_service import sync_user_registration_approval_decision
+        from backend.services.approval_center_service import (
+            sync_user_registration_approval_decision,
+        )
 
         await sync_user_registration_approval_decision(
             db=db,
@@ -1050,7 +1201,9 @@ async def reject_user(
             comment=normalized_reason,
         )
     except Exception as exc:
-        logger.warning(f"[approval-center] failed to sync user rejection decision: {exc}")
+        logger.warning(
+            f"[approval-center] failed to sync user rejection decision: {exc}"
+        )
 
     from backend.domains.platform.compat.notifications import notify_user_rejected
 
@@ -1094,7 +1247,9 @@ async def reject_users_batch(
             if not user:
                 raise ValueError("User not found")
             if user.status != "pending":
-                raise ValueError(f"Only pending users can be rejected (current={user.status})")
+                raise ValueError(
+                    f"Only pending users can be rejected (current={user.status})"
+                )
 
             user.status = "rejected"
             user.is_active = False
@@ -1128,7 +1283,9 @@ async def reject_users_batch(
             )
 
             try:
-                from backend.services.approval_center_service import sync_user_registration_approval_decision
+                from backend.services.approval_center_service import (
+                    sync_user_registration_approval_decision,
+                )
 
                 await sync_user_registration_approval_decision(
                     db=db,
@@ -1138,9 +1295,13 @@ async def reject_users_batch(
                     comment=normalized_reason,
                 )
             except Exception as exc:
-                logger.warning(f"[approval-center] failed to sync user rejection decision: {exc}")
+                logger.warning(
+                    f"[approval-center] failed to sync user rejection decision: {exc}"
+                )
 
-            from backend.domains.platform.compat.notifications import notify_user_rejected
+            from backend.domains.platform.compat.notifications import (
+                notify_user_rejected,
+            )
 
             await notify_user_rejected(
                 db=db,
@@ -1158,7 +1319,11 @@ async def reject_users_batch(
     success_count = sum(1 for item in results if item["ok"])
     failed_count = len(results) - success_count
     payload = {
-        "summary": {"total": len(results), "success": success_count, "failed": failed_count},
+        "summary": {
+            "total": len(results),
+            "success": success_count,
+            "failed": failed_count,
+        },
         "results": results,
     }
     return success_response(data=payload, message="Batch rejection completed")

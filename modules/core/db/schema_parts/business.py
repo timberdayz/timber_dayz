@@ -4038,6 +4038,14 @@ class Employee(Base):
         server_default=text("'employee'"),
     )
 
+    # === 生命周期（HR 员工生命周期，见 backend/services/hr_employee_lifecycle.py）===
+    #: 最后可结算的工资月（YYYY-MM）——**发钱边界**。
+    #: 在职(active) 时不用它（无上限）；离职(inactive) 时它决定「还能结算到哪个月」；
+    #: 为空 = 没有可结算的月份（任何月份都不生成工资单）。
+    last_payroll_month = Column(String(7), nullable=True)
+    #: 离职原因（离职时写入，供审计与人事留痕）。
+    leave_reason = Column(String(255), nullable=True)
+
     # === 用户关联（add-link-user-employee-management）===
     user_id = Column(
         BigInteger, nullable=True
@@ -4641,11 +4649,19 @@ class PayrollRecord(Base):
     # === 状态 ===
     status = Column(
         String(32), nullable=False, default="draft"
-    )  # 状态:draft/confirmed/paid
+    )  # 状态:draft/confirmed/paid/void
     pay_date = Column(Date, nullable=True)  # 发薪日期
     remark = Column(Text, nullable=True)  # 备注
     backfill_source_month = Column(String(7), nullable=True)  # 补录来源月份
     backfill_note = Column(Text, nullable=True)  # 补录说明
+
+    # === 作废留痕（工资单作废：行保留、不可再发放）===
+    #: 作废原因（如「测试数据，业务确认作废」）。
+    void_reason = Column(String(255), nullable=True)
+    #: 作废时间。
+    voided_at = Column(DateTime(timezone=True), nullable=True)
+    #: 作废操作人（dim_users.user_id）。
+    voided_by = Column(BigInteger, nullable=True)
 
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

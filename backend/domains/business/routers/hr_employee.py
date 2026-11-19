@@ -21,9 +21,20 @@ logger = get_logger(__name__)
 from backend.schemas import MyIncomeResponse, IncomeCalculationResponse
 from backend.schemas.hr import (
     EmployeeCreate,
+    EmployeeMergeRequest,
+    EmployeeOffboardRequest,
+    EmployeeOffboardResponse,
+    EmployeeRegularizeRequest,
     EmployeeResponse,
     EmployeeUpdate,
+    EmployeeVisitorPromotionRequest,
     MeProfileUpdate,
+)
+from backend.services.audit_service import audit_service
+from backend.services.hr_employee_lifecycle import (
+    EMPLOYEE_IDENTITY_VOCABULARY,
+    employee_identity,
+    employee_status,
 )
 from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from backend.services.base_service import provide_service
@@ -32,6 +43,7 @@ from backend.services.payroll_period_lock_service import PAYROLL_LOCKED_STATUSES
 from backend.utils.year_month_utils import year_month_to_first_day
 from modules.core.db import (
     Employee,
+    Department,
     DimUser,
     MonthlyProfitPayrollSnapshot,
     MonthlyProfitSettlement,
@@ -172,6 +184,72 @@ async def _username_for_user_id(
     result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))
     user = result.scalar_one_or_none()
     return user.username if user else None
+
+
+async def _department_name_map(
+    db: AsyncSession, department_ids: List[Optional[int]]
+) -> Dict[int, str]:
+    """批量取部门名（``a_class.departments.department_name``）。
+
+    ⚠️ **一次查询批量取**，不逐行查（N+1）。
+    """
+    ids = {int(item) for item in department_ids if item is not None}
+    if not ids:
+        return {}
+    result = await db.execute(
+        select(Department.id, Department.department_name).where(Department.id.in_(ids))
+    )
+    return {row[0]: row[1] for row in result.all()}
+
+
+def _validated_identity_filter(identity_type: Any) -> Optional[str]:
+    """校验 ``identity_type`` 查询参数（``employee`` / ``visitor``；不传 = 全部）。
+
+    ⚠️ 直接以 Python 函数方式调用（不走 FastAPI）时，``Query(None, ...)`` 的
+    默认值是 ``params.Query`` 对象而不是 ``None`` ⇒ 这里一律按「未传」处理。
+    """
+    if identity_type is None or not isinstance(identity_type, str):
+        return None
+    value = str(identity_type).strip()
+    if not value:
+        return None
+    if value not in EMPLOYEE_IDENTITY_VOCABULARY:
+        raise ValueError(
+            f"用工身份只允许 {'/'.join(EMPLOYEE_IDENTITY_VOCABULARY)}，收到: {value}"
+        )
+    return value
+
+
+#: 访客档案合并到正式员工时，可以搬运的联系方式字段。
+MERGEABLE_CONTACT_FIELDS = (
+    "phone",
+    "email",
+    "address",
+    "emergency_contact",
+    "emergency_phone",
+)
+
+
+def _merge_employee_contact_fields(target: Any, source: Any) -> List[str]:
+    """把访客（source）的联系方式并进正式员工（target）。
+
+    ⚠️ **仅当 target 对应字段为空时才搬** —— 绝不覆盖 target 已有的值。
+    （访客档案常常只填了手机号；正式员工的邮箱/地址是 HR 维护的，
+    覆盖掉就是拿脏数据盖掉真数据。）
+
+    返回实际搬运了的字段名列表（便于审计留痕）。
+    """
+    moved: List[str] = []
+    for field in MERGEABLE_CONTACT_FIELDS:
+        target_value = getattr(target, field, None)
+        source_value = getattr(source, field, None)
+        if source_value is None or str(source_value).strip() == "":
+            continue
+        if target_value is not None and str(target_value).strip() != "":
+            continue
+        setattr(target, field, source_value)
+        moved.append(field)
+    return moved
 
 
 @router.get("/me/profile", response_model=EmployeeResponse)
@@ -867,12 +945,23 @@ async def list_employees(
     status: Optional[str] = Query(
         None, description="状态筛选(active/inactive/probation/leave)"
     ),
+    identity_type: Optional[str] = Query(
+        None, description="用工身份筛选(employee/visitor)，不传=全部"
+    ),
     keyword: Optional[str] = Query(None, description="关键字搜索(姓名/工号)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=500, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
 ):
     """获取员工列表(分页、筛选)"""
+    try:
+        identity_type = _validated_identity_filter(identity_type)
+    except ValueError as e:
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+        )
     try:
         query = select(
             Employee, Position.position_code, Position.position_name
@@ -888,6 +977,8 @@ async def list_employees(
             conditions.append(Employee.position_id == position_id)
         if status:
             conditions.append(Employee.status == status)
+        if identity_type:
+            conditions.append(Employee.employee_identity_type == identity_type)
         if keyword:
             conditions.append(
                 or_(
@@ -904,6 +995,10 @@ async def list_employees(
 
         result = await db.execute(query)
         employee_rows = result.all()
+        # 部门名一次批量取（不逐行查）
+        department_names = await _department_name_map(
+            db, [getattr(emp, "department_id", None) for emp, _, _ in employee_rows]
+        )
         out = []
         for emp, position_code, position_name in employee_rows:
             resp = EmployeeResponse.model_validate(emp)
@@ -912,6 +1007,9 @@ async def list_employees(
                     "username": await _username_for_user_id(db, emp.user_id),
                     "position_code": position_code,
                     "position_name": position_name,
+                    "department_name": department_names.get(
+                        getattr(emp, "department_id", None)
+                    ),
                 }
             )
             out.append(resp)
@@ -928,14 +1026,27 @@ async def list_employees(
 @router.get("/employees/count")
 async def count_employees(
     status: Optional[str] = Query(None, description="状态筛选"),
+    identity_type: Optional[str] = Query(
+        None, description="用工身份筛选(employee/visitor)，不传=全部"
+    ),
     db: AsyncSession = Depends(get_async_db),
 ):
     """获取员工总数（用于人效计算等）"""
+    try:
+        identity_type = _validated_identity_filter(identity_type)
+    except ValueError as e:
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+        )
     try:
         query = select(func.count(Employee.id))
 
         if status:
             query = query.where(Employee.status == status)
+        if identity_type:
+            query = query.where(Employee.employee_identity_type == identity_type)
 
         result = await db.execute(query)
         count = result.scalar()
@@ -966,8 +1077,18 @@ async def get_employee(employee_code: str, db: AsyncSession = Depends(get_async_
                 status_code=404,
             )
         username = await _username_for_user_id(db, employee.user_id)
+        department_names = await _department_name_map(
+            db, [getattr(employee, "department_id", None)]
+        )
         resp = EmployeeResponse.model_validate(employee)
-        return resp.model_copy(update={"username": username})
+        return resp.model_copy(
+            update={
+                "username": username,
+                "department_name": department_names.get(
+                    getattr(employee, "department_id", None)
+                ),
+            }
+        )
     except Exception as e:
         logger.error(f"获取员工详情失败: {e}", exc_info=True)
         return error_response(
@@ -1096,7 +1217,17 @@ async def update_employee(
 
 @router.delete("/employees/{employee_code}", status_code=204)
 async def delete_employee(employee_code: str, db: AsyncSession = Depends(get_async_db)):
-    """删除员工(软删除:设置status为inactive)"""
+    """删除员工(软删除:设置status为inactive)。
+
+    ⚠️ **本端点是 legacy 路径**。新的离职流程请用
+    ``POST /api/hr/employees/{employee_code}/offboard`` —— 只有它才会
+    写离职日期、最后发薪月、解除账号关联、失效未来归属。
+
+    守卫改造（2026-11-20）：旧守卫是「该员工**有任何**归属记录就拦」
+    （不分月份、不分状态）⇒ 历史归属永远删不掉员工。
+    现在**只拦「当前月之后仍有 ``status='active'`` 的归属」** ——
+    历史归属不再阻断（历史归属要保留给审计与往月重算）。
+    """
     try:
         result = await db.execute(
             select(Employee).where(Employee.employee_code == employee_code)
@@ -1109,15 +1240,19 @@ async def delete_employee(employee_code: str, db: AsyncSession = Depends(get_asy
                 f"员工不存在: {employee_code}",
                 status_code=404,
             )
+        current_month = datetime.now(timezone.utc).strftime("%Y-%m")
         assign_result = await db.execute(
             select(EmployeeShopAssignment).where(
-                EmployeeShopAssignment.employee_code == employee_code
+                EmployeeShopAssignment.employee_code == employee_code,
+                EmployeeShopAssignment.year_month > current_month,
+                EmployeeShopAssignment.status == "active",
             )
         )
         if assign_result.scalars().first():
             return error_response(
                 ErrorCode.DATA_INTEGRITY_VIOLATION,
-                "请先解除该员工的店铺归属",
+                "该员工在当前月之后仍有生效中的店铺归属，请先解除未来的归属"
+                "（或改用 POST /api/hr/employees/{employee_code}/offboard 办理离职）",
                 status_code=400,
             )
         employee.status = "inactive"
@@ -1130,6 +1265,401 @@ async def delete_employee(employee_code: str, db: AsyncSession = Depends(get_asy
         logger.error(f"删除员工失败: {e}", exc_info=True)
         return error_response(
             ErrorCode.INTERNAL_SERVER_ERROR, f"删除员工失败: {str(e)}", status_code=500
+        )
+
+
+# ============================================================================
+# 员工生命周期端点（离职 / 转正 / 访客转正 / 访客合并）
+# ============================================================================
+
+
+@router.post(
+    "/employees/{employee_code}/offboard", response_model=EmployeeOffboardResponse
+)
+async def offboard_employee(
+    employee_code: str,
+    body: EmployeeOffboardRequest,
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """办理离职：一次事务完成「置离职 + 解除账号关联 + 失效未来归属」。
+
+    * ``status = 'inactive'``，写 ``leave_date`` / ``last_payroll_month`` /
+      ``leave_reason`` / ``updated_at``
+    * **解除账号关联**：``user_id`` 置空 ⇒ 账号归还账号池（离职员工不该还能登录）
+    * **失效未来归属**：``a_class.employee_shop_assignments`` 中
+      ``year_month > last_payroll_month`` 且 ``status='active'`` 的行置为
+      ``inactive``（**只改状态、不删行** —— 归属行是往月重算与审计的依据）
+    * 记一条审计日志（resource = ``employee/offboard``）
+
+    ⚠️ **不阻断草稿工资单**：离职当月及之前若还有 ``status='draft'`` 的工资单，
+    只在响应里带 ``pending_payroll_months`` 提醒前端（离职结算是生命线，
+    不能因为一张草稿单把人卡在职）。
+    """
+    try:
+        result = await db.execute(
+            select(Employee).where(Employee.employee_code == employee_code)
+        )
+        employee = result.scalar_one_or_none()
+        if not employee:
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"员工不存在: {employee_code}",
+                status_code=404,
+            )
+        # ⚠️ 在职状态判定走 SSOT（backend/services/hr_employee_lifecycle.py），
+        #    不允许在这里自己写 ``status == 'inactive'``。
+        if employee_status(employee) == "inactive":
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "该员工已是离职状态，不可重复办理离职",
+                status_code=400,
+            )
+
+        # 待确认的草稿工资单（提醒，不阻断）
+        pending_result = await db.execute(
+            select(PayrollRecord).where(
+                PayrollRecord.employee_code == employee_code,
+                PayrollRecord.status == "draft",
+                PayrollRecord.year_month <= body.last_payroll_month,
+            )
+        )
+        pending_payroll_months = sorted(
+            {row.year_month for row in pending_result.scalars().all()}
+        )
+
+        # 1) 员工本体
+        employee.status = "inactive"
+        employee.leave_date = body.leave_date
+        employee.last_payroll_month = body.last_payroll_month
+        employee.leave_reason = body.leave_reason
+        employee.updated_at = datetime.now(timezone.utc)
+
+        # 2) 解除账号关联（账号归还账号池）
+        released_user_id = getattr(employee, "user_id", None)
+        released_username = await _username_for_user_id(db, released_user_id)
+        employee.user_id = None
+
+        # 3) 失效未来归属（只改状态、不删行，保留审计）
+        future_result = await db.execute(
+            select(EmployeeShopAssignment).where(
+                EmployeeShopAssignment.employee_code == employee_code,
+                EmployeeShopAssignment.year_month > body.last_payroll_month,
+                EmployeeShopAssignment.status == "active",
+            )
+        )
+        future_assignments = future_result.scalars().all()
+        for assignment in future_assignments:
+            assignment.status = "inactive"
+
+        # 4) 业务变更一次提交
+        await db.commit()
+        await db.refresh(employee)
+
+        # 5) 审计（沿用仓库既有模式：业务提交之后再写审计）
+        await audit_service.log_action(
+            user_id=getattr(current_user, "user_id", None),
+            action="offboard",
+            resource="employee/offboard",
+            resource_id=employee_code,
+            ip_address="system",
+            user_agent="hr_employee_router",
+            details={
+                "result_status": "offboarded",
+                "employee_code": employee_code,
+                "leave_date": body.leave_date.isoformat(),
+                "last_payroll_month": body.last_payroll_month,
+                "leave_reason": body.leave_reason,
+                "released_user_id": released_user_id,
+                "released_username": released_username,
+                "deactivated_assignments": len(future_assignments),
+                "pending_payroll_months": pending_payroll_months,
+            },
+            db=db,
+        )
+
+        resp = EmployeeOffboardResponse.model_validate(employee)
+        return resp.model_copy(
+            update={"pending_payroll_months": pending_payroll_months}
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"办理员工离职失败: {e}", exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"办理员工离职失败: {str(e)}",
+            status_code=500,
+        )
+
+
+@router.post("/employees/{employee_code}/regularize", response_model=EmployeeResponse)
+async def regularize_employee(
+    employee_code: str,
+    body: EmployeeRegularizeRequest,
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """转正：试用期（``probation``）→ 在职（``active``）。
+
+    只有试用期员工可转正；其它状态一律 400（避免把离职员工"转正"回来）。
+    """
+    try:
+        result = await db.execute(
+            select(Employee).where(Employee.employee_code == employee_code)
+        )
+        employee = result.scalar_one_or_none()
+        if not employee:
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"员工不存在: {employee_code}",
+                status_code=404,
+            )
+        if employee_status(employee) != "probation":
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                f"只有试用期员工可转正，当前状态: {employee_status(employee)}",
+                status_code=400,
+            )
+
+        employee.status = "active"
+        employee.regularization_date = body.regularization_date
+        if body.probation_end_date is not None:
+            employee.probation_end_date = body.probation_end_date
+        employee.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(employee)
+
+        await audit_service.log_action(
+            user_id=getattr(current_user, "user_id", None),
+            action="regularize",
+            resource="employee/regularize",
+            resource_id=employee_code,
+            ip_address="system",
+            user_agent="hr_employee_router",
+            details={
+                "result_status": "regularized",
+                "employee_code": employee_code,
+                "regularization_date": body.regularization_date.isoformat(),
+                "probation_end_date": (
+                    body.probation_end_date.isoformat()
+                    if body.probation_end_date
+                    else None
+                ),
+            },
+            db=db,
+        )
+
+        resp = EmployeeResponse.model_validate(employee)
+        return resp.model_copy(
+            update={"username": await _username_for_user_id(db, employee.user_id)}
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"员工转正失败: {e}", exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"员工转正失败: {str(e)}",
+            status_code=500,
+        )
+
+
+@router.post(
+    "/employees/{employee_code}/promote-visitor", response_model=EmployeeResponse
+)
+async def promote_visitor_employee(
+    employee_code: str,
+    body: EmployeeVisitorPromotionRequest,
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """访客转正：``employee_identity_type`` 由 ``visitor`` 改为 ``employee``。
+
+    可选地补 ``hire_date`` / ``department_id`` / ``position_id``。
+    """
+    try:
+        result = await db.execute(
+            select(Employee).where(Employee.employee_code == employee_code)
+        )
+        employee = result.scalar_one_or_none()
+        if not employee:
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"员工不存在: {employee_code}",
+                status_code=404,
+            )
+        # ⚠️ 用工身份判定走 SSOT
+        if employee_identity(employee) != "visitor":
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                f"只有访客档案可转正，当前用工身份: {employee_identity(employee)}",
+                status_code=400,
+            )
+
+        employee.employee_identity_type = body.employee_identity_type
+        if body.hire_date is not None:
+            employee.hire_date = body.hire_date
+        if body.department_id is not None:
+            employee.department_id = body.department_id
+        if body.position_id is not None:
+            employee.position_id = body.position_id
+        employee.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(employee)
+
+        await audit_service.log_action(
+            user_id=getattr(current_user, "user_id", None),
+            action="promote_visitor",
+            resource="employee/promote-visitor",
+            resource_id=employee_code,
+            ip_address="system",
+            user_agent="hr_employee_router",
+            details={
+                "result_status": "promoted",
+                "employee_code": employee_code,
+                "employee_identity_type": body.employee_identity_type,
+                "department_id": body.department_id,
+                "position_id": body.position_id,
+                "hire_date": body.hire_date.isoformat() if body.hire_date else None,
+            },
+            db=db,
+        )
+
+        resp = EmployeeResponse.model_validate(employee)
+        return resp.model_copy(
+            update={"username": await _username_for_user_id(db, employee.user_id)}
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"访客转正失败: {e}", exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"访客转正失败: {str(e)}",
+            status_code=500,
+        )
+
+
+@router.post(
+    "/employees/{employee_code}/merge-visitor", response_model=EmployeeResponse
+)
+async def merge_visitor_employee(
+    employee_code: str,
+    body: EmployeeMergeRequest,
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """合并访客档案：把访客（``source``）并进正式员工（``target``）。
+
+    一次事务完成：
+
+    * 联系方式（``phone`` / ``email`` / ``address`` / ``emergency_contact`` /
+      ``emergency_phone``）**仅当 target 对应字段为空时**才搬（不覆盖已有值）
+    * target 没有 ``user_id`` 而 source 有 ⇒ 把 ``user_id`` 搬过去
+    * **删除 source 这条员工档案**（真删 —— 它是访客副产品，不是业务记录）
+    * 记审计日志
+    """
+    try:
+        source_code = body.source_employee_code.strip()
+        if source_code == employee_code:
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "源访客档案与目标员工不能是同一条记录",
+                status_code=400,
+            )
+
+        target_result = await db.execute(
+            select(Employee).where(Employee.employee_code == employee_code)
+        )
+        target = target_result.scalar_one_or_none()
+        if not target:
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"目标员工不存在: {employee_code}",
+                status_code=404,
+            )
+
+        source_result = await db.execute(
+            select(Employee).where(Employee.employee_code == source_code)
+        )
+        source = source_result.scalar_one_or_none()
+        if not source:
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                f"源访客档案不存在: {source_code}",
+                status_code=404,
+            )
+        # ⚠️ 用工身份判定走 SSOT
+        if employee_identity(source) != "visitor":
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                f"只有访客档案可以被合并，{source_code} 的用工身份为 "
+                f"{employee_identity(source)}",
+                status_code=400,
+            )
+
+        # 源账号不能已被别的员工占用（否则把 user_id 搬过去会造成一号两人）
+        source_user_id = getattr(source, "user_id", None)
+        released_user_id = None
+        if source_user_id:
+            occupied_result = await db.execute(
+                select(Employee).where(
+                    Employee.user_id == source_user_id,
+                    Employee.id != source.id,
+                )
+            )
+            for occupied in occupied_result.scalars().all():
+                if occupied.id == target.id:
+                    continue
+                return error_response(
+                    ErrorCode.DATA_ALREADY_EXISTS,
+                    f"访客 {source_code} 绑定的账号已被员工 "
+                    f"{occupied.employee_code} 占用，无法合并",
+                    status_code=400,
+                )
+            released_user_id = source_user_id
+
+        # 1) 联系方式：仅当 target 对应字段为空时才搬
+        moved_fields = _merge_employee_contact_fields(target, source)
+
+        # 2) 账号：target 没有才搬
+        if getattr(target, "user_id", None) is None and released_user_id is not None:
+            target.user_id = released_user_id
+            moved_fields = moved_fields + ["user_id"]
+
+        target.updated_at = datetime.now(timezone.utc)
+
+        # 3) 删除访客档案（真删）
+        await db.delete(source)
+
+        await db.commit()
+        await db.refresh(target)
+
+        await audit_service.log_action(
+            user_id=getattr(current_user, "user_id", None),
+            action="merge_visitor",
+            resource="employee/merge-visitor",
+            resource_id=employee_code,
+            ip_address="system",
+            user_agent="hr_employee_router",
+            details={
+                "result_status": "merged",
+                "target_employee_code": employee_code,
+                "source_employee_code": source_code,
+                "moved_fields": moved_fields,
+            },
+            db=db,
+        )
+
+        resp = EmployeeResponse.model_validate(target)
+        return resp.model_copy(
+            update={"username": await _username_for_user_id(db, target.user_id)}
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"合并访客档案失败: {e}", exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"合并访客档案失败: {str(e)}",
+            status_code=500,
         )
 
 

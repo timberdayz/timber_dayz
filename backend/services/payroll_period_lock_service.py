@@ -6,22 +6,21 @@ from typing import Any
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.hr_employee_lifecycle import PAYROLL_LOCKED_STATUSES
 from modules.core.db import EmployeeShopAssignment, PayrollRecord
 
 
-# 工资单「已锁定」的**唯一定义源**。
+# 工资单「已锁定」集合由 ``backend/services/hr_employee_lifecycle.py`` 统一持有
+# （在职状态 / 发钱边界 / 工资单状态词表的 SSOT）。本模块只做**转发**，
+# 保证历史导入路径 ``from backend.services.payroll_period_lock_service import
+# PAYROLL_LOCKED_STATUSES`` 继续可用（**对外导入路径不变**）。
 #
-# 历史上这里有三份各说各话的集合：
-#   - 锁定服务   (confirmed, paid)
-#   - 工资单路由 (confirmed, paid, approved)
-#   - 我的收入路由 (confirmed, paid, approved)
-#   - 工资单生成 (confirmed, paid)
-# 后果：状态为 ``approved`` 的工资单在界面上显示「已锁定」，
-# 但锁定服务并不认为它被锁 ⇒ 整月重算会**静默改掉**用户以为已经锁住的工资单。
-#
-# 现在统一成一份：``approved`` / ``confirmed`` / ``paid`` 三种状态都视为锁定。
 # 判断「锁了没有」的任何地方都必须引用本常量，不要就地写字面量。
-PAYROLL_LOCKED_STATUSES: tuple[str, ...] = ("approved", "confirmed", "paid")
+__all__ = [
+    "PAYROLL_LOCKED_STATUSES",
+    "PayrollPeriodLockedError",
+    "PayrollPeriodLockService",
+]
 
 
 class PayrollPeriodLockedError(ValueError):

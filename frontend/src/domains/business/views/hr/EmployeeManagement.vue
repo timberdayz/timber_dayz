@@ -25,7 +25,11 @@
         <el-descriptions-item label="部门">{{ getDepartmentName(profile.department_id) }}</el-descriptions-item>
         <el-descriptions-item label="职位">{{ getPositionName(profile.position_id) }}</el-descriptions-item>
         <el-descriptions-item label="入职日期">{{ profile.hire_date || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ profile.status }}</el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <el-tag :type="employeeStatusTagType(profile.status)" size="small">
+            {{ employeeStatusLabel(profile.status) }}
+          </el-tag>
+        </el-descriptions-item>
       </el-descriptions>
 
       <el-divider content-position="left">可自助修改的联系方式</el-divider>
@@ -61,6 +65,7 @@
 import { ref, onMounted } from 'vue'
 import api from '@/api'
 import { ElMessage } from 'element-plus'
+import { employeeStatusLabel, employeeStatusTagType } from '@/constants/hr'
 
 const loading = ref(true)
 const saving = ref(false)

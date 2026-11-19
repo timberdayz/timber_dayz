@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +29,8 @@ from backend.schemas.hr import (
     PayrollManualInputUpdate,
     PayrollManualInputResponse,
     PayrollRecordResponse,
+    PayrollRecordUnvoidRequest,
+    PayrollRecordVoidRequest,
     SalaryStructureCreate,
     SalaryStructureUpdate,
     SalaryStructureResponse,
@@ -48,6 +51,15 @@ from backend.services.payroll_period_lock_service import (
     PAYROLL_LOCKED_STATUSES,
     PayrollPeriodLockedError,
     PayrollPeriodLockService,
+)
+from backend.services.hr_employee_lifecycle import (
+    PAYROLL_VOIDED_STATUSES,
+    assert_payroll_month_allowed,
+    employee_identity,
+    is_payroll_month_allowed,
+    is_payroll_voided,
+    is_salary_employee,
+    payroll_month_rejection_reason,
 )
 from backend.services.profit_basis_service import ProfitBasisService
 from backend.services.v2_monthly_refresh_service import V2MonthlyRefreshService
@@ -193,11 +205,30 @@ async def _compute_payroll_stale_flags(
 
 
 def _employee_identity_allows_salary(employee: Employee | None) -> bool:
-    if employee is None:
-        return True
-    status = getattr(employee, "status", "active")
-    identity = getattr(employee, "employee_identity_type", "employee")
-    return status == "active" and identity == "employee"
+    """能否进入薪资链路（在职 + 正式身份）——**兼容包装**。
+
+    判定口径的唯一来源是 ``backend.services.hr_employee_lifecycle.is_salary_employee``
+    （在职状态 / 用工身份词表的 SSOT）。本函数只保留名字与签名，
+    让历史引用路径继续可用；**不要在这里自己写 ``status == 'active'``**。
+    """
+    return is_salary_employee(employee)
+
+
+def _payroll_chain_rejection_reason(employee: Any, year_month: str) -> Optional[str]:
+    """薪资链路准入判定：用工身份 + **发钱月份边界**。
+
+    返回人话版的拒绝原因；``None`` 表示允许。
+    口径来源：``backend/services/hr_employee_lifecycle.py``（发钱边界 SSOT）：
+
+    * 在职(active)      → 允许，无月份上限
+    * 试用期/停薪留职   → 不允许（试用期不发薪）
+    * 已离职(inactive)  → 只允许结算到 ``last_payroll_month`` 为止
+    """
+    if employee_identity(employee) != "employee":
+        return "当前身份为访客，不进入薪资链路"
+    if not is_payroll_month_allowed(employee, year_month):
+        return payroll_month_rejection_reason(employee, year_month)
+    return None
 
 
 def _extract_optional_employee(result: Any) -> Employee | None:
@@ -235,10 +266,16 @@ def _extract_optional_record(result: Any) -> Any | None:
     return value
 
 
-def _salary_identity_rejection():
+def _salary_identity_rejection(
+    message: str = "当前员工身份不允许进入薪资链路",
+):
+    """固定薪资（SalaryStructure）的准入拒绝。
+
+    固定薪资**只允许在职时维护**，离职后冻结（离职结算改走月度人工录入）。
+    """
     return error_response(
         ErrorCode.PARAMETER_INVALID,
-        "当前员工身份不允许进入薪资链路",
+        message,
         status_code=409,
     )
 
@@ -344,10 +381,10 @@ async def list_salary_structure_history(
         rows = await _load_salary_structure_versions(db, employee_code)
         return [SalaryStructureResponse.model_validate(row) for row in rows]
     except Exception as e:
-        logger.error("鑾峰彇钖祫缁撴瀯鍘嗗彶澶辫触: %s", e, exc_info=True)
+        logger.error("获取薪资结构历史失败: %s", e, exc_info=True)
         return error_response(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"鑾峰彇钖祫缁撴瀯鍘嗗彶澶辫触: {str(e)}",
+            f"获取薪资结构历史失败: {str(e)}",
             status_code=500,
         )
 
@@ -371,8 +408,10 @@ async def create_salary_structure(
                 status_code=400,
             )
 
-        if not _employee_identity_allows_salary(employee):
-            return _salary_identity_rejection()
+        if not is_salary_employee(employee):
+            return _salary_identity_rejection(
+                "仅在职员工可维护固定薪资，离职后请通过月度人工录入处理结算"
+            )
 
         existing = await db.execute(
             select(SalaryStructure).where(
@@ -427,18 +466,20 @@ async def update_salary_structure(
         if not employee:
             return error_response(
                 ErrorCode.DATA_NOT_FOUND,
-                f"鍛樺伐涓嶅瓨鍦? {employee_code}",
+                f"员工不存在: {employee_code}",
                 status_code=404,
             )
-        if not _employee_identity_allows_salary(employee):
-            return _salary_identity_rejection()
+        if not is_salary_employee(employee):
+            return _salary_identity_rejection(
+                "仅在职员工可维护固定薪资，离职后请通过月度人工录入处理结算"
+            )
 
         rows = await _load_salary_structure_versions(db, employee_code)
         record = _pick_current_salary_structure(rows)
         if not record:
             return error_response(
                 ErrorCode.DATA_NOT_FOUND,
-                f"钖祫缁撴瀯涓嶅瓨鍦? {employee_code}",
+                f"薪资结构不存在: {employee_code}",
                 status_code=404,
             )
         await PayrollPeriodLockService(db).assert_salary_effective_date_mutable(
@@ -455,10 +496,10 @@ async def update_salary_structure(
         return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
         await db.rollback()
-        logger.error("鏇存柊钖祫缁撴瀯澶辫触: %s", e, exc_info=True)
+        logger.error("更新薪资结构失败: %s", e, exc_info=True)
         return error_response(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"鏇存柊钖祫缁撴瀯澶辫触: {str(e)}",
+            f"更新薪资结构失败: {str(e)}",
             status_code=500,
         )
 
@@ -547,8 +588,15 @@ async def upsert_payroll_manual_input(
                 f"员工不存在: {employee_code}",
                 status_code=404,
             )
-        if not _employee_identity_allows_salary(employee):
-            return _salary_identity_rejection()
+        # 发钱边界判定（唯一口径在 hr_employee_lifecycle）：
+        # 离职员工只允许结算到 last_payroll_month 为止；试用期/停薪留职不发薪。
+        rejection_reason = _payroll_chain_rejection_reason(employee, year_month)
+        if rejection_reason:
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                rejection_reason,
+                status_code=409,
+            )
 
         await PayrollPeriodLockService(db).assert_employee_month_mutable(
             employee_code=employee_code,
@@ -568,6 +616,14 @@ async def upsert_payroll_manual_input(
             return error_response(
                 ErrorCode.PARAMETER_INVALID,
                 "已确认或已发放工资单不可修改月度人工录入",
+                status_code=409,
+            )
+        if payroll is not None and is_payroll_voided(payroll):
+            # 已作废的工资单是冻结的历史留痕：这次录入不会落到任何有效工资单上
+            # （坑位被作废单占着），所以必须先撤销作废，不能让用户白录一遍。
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "该员工该月工资单已作废，请先撤销作废后再录入月度人工数据",
                 status_code=409,
             )
 
@@ -634,11 +690,17 @@ async def refresh_payroll_record(
         if not employee:
             return error_response(
                 ErrorCode.DATA_NOT_FOUND,
-                f"鍛樺伐涓嶅瓨鍦? {employee_code}",
+                f"员工不存在: {employee_code}",
                 status_code=404,
             )
-        if not _employee_identity_allows_salary(employee):
-            return _salary_identity_rejection()
+        # 发钱边界判定：访客不进薪资链路；离职员工只允许结算到 last_payroll_month 为止。
+        rejection_reason = _payroll_chain_rejection_reason(employee, year_month)
+        if rejection_reason:
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                rejection_reason,
+                status_code=409,
+            )
 
         await PayrollPeriodLockService(db).assert_employee_month_mutable(
             employee_code=employee_code,
@@ -671,6 +733,9 @@ async def refresh_payroll_record(
             "payroll_upserts": result.get("payroll_upserts", 0),
             "locked_conflicts": result.get("locked_conflicts", 0),
             "locked_conflict_details": result.get("locked_conflict_details", []),
+            # 已作废的工资单被跳过（冻结的历史留痕）。作废**不锁月**。
+            "void_conflicts": result.get("void_conflicts", 0),
+            "void_conflict_details": result.get("void_conflict_details", []),
             "is_locked": stale_flags["is_locked"],
             "is_stale_against_latest_calc": stale_flags["is_stale_against_latest_calc"],
             "latest_calculated_at": stale_flags["latest_calculated_at"],
@@ -683,10 +748,10 @@ async def refresh_payroll_record(
     except PayrollPeriodLockedError as exc:
         return error_response(ErrorCode.PARAMETER_INVALID, str(exc), status_code=409)
     except Exception as e:
-        logger.error("鍒锋柊鍛樺伐鏈堝害宸ヨ祫鍗曞け璐? %s", e, exc_info=True)
+        logger.error("刷新员工月度工资单失败: %s", e, exc_info=True)
         return error_response(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"鍒锋柊鍛樺伐鏈堝害宸ヨ祫鍗曞け璐? {str(e)}",
+            f"刷新员工月度工资单失败: {str(e)}",
             status_code=500,
         )
 
@@ -854,10 +919,29 @@ async def update_payroll_record(
             return error_response(
                 ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404
             )
+        if is_payroll_voided(record):
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "已作废的工资单不可编辑",
+                status_code=409,
+            )
         if record.status != "draft":
             return error_response(
                 ErrorCode.PARAMETER_INVALID,
                 "非 draft 工资单不允许编辑",
+                status_code=409,
+            )
+        # ⚠️ 补上员工侧的发钱边界校验：否则可以绕过「月度人工录入」的月份限制，
+        #    去改一个已经超出离职结算边界的草稿工资单。
+        employee_result = await db.execute(
+            select(Employee).where(Employee.employee_code == record.employee_code)
+        )
+        employee = _extract_optional_employee(employee_result)
+        rejection_reason = _payroll_chain_rejection_reason(employee, record.year_month)
+        if rejection_reason:
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                rejection_reason,
                 status_code=409,
             )
         values = body.model_dump(exclude_unset=True)
@@ -902,7 +986,19 @@ async def confirm_payroll_record(
     record_id: int,
     db: AsyncSession = Depends(get_async_db),
 ):
+    """确认工资单。
+
+    ⚠️ **不加在职限制** —— 离职结算是生命线，任何在职状态都允许确认。
+    唯一拦截：**已作废（void）的工资单不可确认**。
+    """
     try:
+        voided_record = await db.get(PayrollRecord, record_id)
+        if is_payroll_voided(voided_record):
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "已作废的工资单不可确认",
+                status_code=409,
+            )
         record = await PayrollConfirmationService(db).confirm_record(record_id)
         return _payroll_success(record)
     except (PayrollPeriodLockedError, PayrollConfirmationError, ValueError) as exc:
@@ -1004,7 +1100,7 @@ async def reopen_payroll_record(
                 await db.execute(
                     select(PayrollRecord).where(
                         PayrollRecord.year_month == record.year_month,
-                        PayrollRecord.status.in_(("confirmed", "paid")),
+                        PayrollRecord.status.in_(PAYROLL_LOCKED_STATUSES),
                     )
                 )
             )
@@ -1062,6 +1158,11 @@ async def mark_payroll_record_paid(
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(get_current_user),
 ):
+    """标记工资单为已发放。
+
+    ⚠️ **不加在职限制** —— 离职结算是生命线，任何在职状态都允许发放。
+    唯一拦截：**已作废（void）的工资单不可发放**。
+    """
     try:
         if not is_admin_user(current_user):
             return error_response(
@@ -1076,6 +1177,12 @@ async def mark_payroll_record_paid(
         if not record:
             return error_response(
                 ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404
+            )
+        if is_payroll_voided(record):
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "已作废的工资单不可标记为已发放",
+                status_code=409,
             )
         if record.status != "confirmed":
             return error_response(
@@ -1112,6 +1219,186 @@ async def mark_payroll_record_paid(
         return error_response(
             ErrorCode.INTERNAL_SERVER_ERROR,
             f"标记工资单已发放失败: {str(e)}",
+            status_code=500,
+        )
+
+
+@router.post("/payroll-records/{record_id}/void")
+async def void_payroll_record(
+    record_id: int,
+    body: PayrollRecordVoidRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    """作废工资单（**草稿专用**）。
+
+    语义：**行保留、不可再发放**（作废是留痕，不是删数据）。
+
+    * 记录不存在 → 404
+    * 已确认 / 已发放 → 409（不可作废）
+    * 已作废 → 409（不可重复作废）
+    * 作废后：不可编辑、不可确认、不可标记已发放
+    """
+    try:
+        if not is_admin_user(current_user):
+            return error_response(
+                ErrorCode.PERMISSION_DENIED,
+                "需要管理员权限才能作废工资单",
+                status_code=403,
+            )
+        reason = (body.reason or "").strip()
+        if not reason:
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "作废原因不能为空",
+                status_code=400,
+            )
+        result = await db.execute(
+            select(PayrollRecord).where(PayrollRecord.id == record_id)
+        )
+        record = result.scalar_one_or_none()
+        if not record:
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404
+            )
+        if is_payroll_voided(record):
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "该工资单已作废，不可重复作废",
+                status_code=409,
+            )
+        if record.status != "draft":
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "仅草稿工资单可作废，已确认或已发放的工资单不可作废",
+                status_code=409,
+            )
+        record.status = "void"
+        record.void_reason = reason
+        record.voided_at = datetime.now(timezone.utc)
+        record.voided_by = current_user.user_id
+        await db.commit()
+        await db.refresh(record)
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            action="void_payroll_record",
+            resource="payroll_record",
+            resource_id=str(record_id),
+            ip_address="system",
+            user_agent="hr_salary_router",
+            details={
+                "result_status": "void",
+                "employee_code": record.employee_code,
+                "year_month": record.year_month,
+                "void_reason": reason,
+                "voided_at": record.voided_at.isoformat() if record.voided_at else None,
+                "voided_by": record.voided_by,
+            },
+            db=db,
+        )
+        payload = _payroll_success(record)
+        return payload
+    except Exception as e:
+        await db.rollback()
+        logger.error("作废工资单失败: %s", e, exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"作废工资单失败: {str(e)}",
+            status_code=500,
+        )
+
+
+@router.post("/payroll-records/{record_id}/unvoid")
+async def unvoid_payroll_record(
+    record_id: int,
+    body: PayrollRecordUnvoidRequest,
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """撤销作废：把已作废的工资单恢复成**草稿**。
+
+    为什么必须有这条通道
+    ------------------
+    「一人一月只有一张工资单」是硬约束（``payroll_records`` 上有
+    ``(employee_code, year_month)`` 唯一索引）。所以作废单**占着坑位**：
+    一旦作废，那个员工那个月就再也建不出第二张有效工资单。
+
+    ⇒ 若作废是「不可逆」的，一次误操作就会让这个人那个月**永远发不出钱**，
+    而界面只说「已作废」，用户完全不知道这里是个死胡同。
+    ⇒ 所以作废必须可撤销：恢复成草稿后照常走确认 / 发放。
+
+    规则：
+
+    * 需要管理员权限
+    * 记录不存在 → 404
+    * 不是作废状态 → 409（只有作废单需要撤销）
+    * 恢复后清空作废留痕，但审计日志保留完整的作废 + 撤销作废两条痕迹
+    """
+    try:
+        if not is_admin_user(current_user):
+            return error_response(
+                ErrorCode.PERMISSION_DENIED,
+                "需要管理员权限才能撤销作废",
+                status_code=403,
+            )
+        reason = (body.reason or "").strip()
+        if not reason:
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "撤销作废原因不能为空",
+                status_code=400,
+            )
+        result = await db.execute(
+            select(PayrollRecord).where(PayrollRecord.id == record_id)
+        )
+        record = result.scalar_one_or_none()
+        if not record:
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND, "工资单不存在", status_code=404
+            )
+        if not is_payroll_voided(record):
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "该工资单不是作废状态，无需撤销作废",
+                status_code=409,
+            )
+        previous_reason = record.void_reason
+        previous_voided_at = record.voided_at
+        previous_voided_by = record.voided_by
+        record.status = "draft"
+        record.void_reason = None
+        record.voided_at = None
+        record.voided_by = None
+        await db.commit()
+        await db.refresh(record)
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            action="unvoid_payroll_record",
+            resource="payroll_record",
+            resource_id=str(record_id),
+            ip_address="system",
+            user_agent="hr_salary_router",
+            details={
+                "result_status": "draft",
+                "employee_code": record.employee_code,
+                "year_month": record.year_month,
+                "unvoid_reason": reason,
+                "previous_void_reason": previous_reason,
+                "previous_voided_at": (
+                    previous_voided_at.isoformat() if previous_voided_at else None
+                ),
+                "previous_voided_by": previous_voided_by,
+            },
+            db=db,
+        )
+        payload = _payroll_success(record)
+        return payload
+    except Exception as e:
+        await db.rollback()
+        logger.error("撤销作废工资单失败: %s", e, exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"撤销作废工资单失败: {str(e)}",
             status_code=500,
         )
 

@@ -2095,6 +2095,22 @@ export default {
   async deleteHrEmployee(employeeCode) {
     return await this._delete(`/hr/employees/${employeeCode}`)
   },
+  // 办理离职：写状态 + 离职日期 + 最后发薪月 + 离职原因（不删档案）
+  async offboardHrEmployee(employeeCode, payload) {
+    return await this._post(`/hr/employees/${employeeCode}/offboard`, payload)
+  },
+  // 转正：试用期 → 在职
+  async regularizeHrEmployee(employeeCode, payload) {
+    return await this._post(`/hr/employees/${employeeCode}/regularize`, payload)
+  },
+  // 访客升级为正式员工
+  async promoteHrVisitor(employeeCode, payload) {
+    return await this._post(`/hr/employees/${employeeCode}/promote-visitor`, payload)
+  },
+  // 访客档案合并到当前员工
+  async mergeHrVisitor(employeeCode, payload) {
+    return await this._post(`/hr/employees/${employeeCode}/merge-visitor`, payload)
+  },
 
   // === 排班班次 ===
   async getHrWorkShifts(params = {}) {
@@ -2194,6 +2210,15 @@ export default {
   },
   async markHrPayrollRecordPaid(recordId) {
     return await this._post(`/hr/payroll-records/${recordId}/pay`)
+  },
+  // 作废工资单：保留行与审计，记录原因与操作人
+  async voidHrPayrollRecord(recordId, reason) {
+    return await this._post(`/hr/payroll-records/${recordId}/void`, { reason })
+  },
+  // 撤销作废：把已作废的工资单恢复成草稿
+  // （一人一月只有一张工资单，作废单占着坑位 ⇒ 作废必须可回退）
+  async unvoidHrPayrollRecord(recordId, reason) {
+    return await this._post(`/hr/payroll-records/${recordId}/unvoid`, { reason })
   },
   async getHrLaborCostAllocations(params = {}) {
     return await this._get('/hr/labor-cost-allocations', { params })

@@ -1,15 +1,12 @@
 <template>
-  <div class="human-resources">
+  <div class="human-resources erp-page-container">
     <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <h1 class="page-title">
-          <el-icon><UserFilled /></el-icon>
-          人力管理
-        </h1>
-        <p class="page-subtitle">提升团队效率，优化人力资源配置</p>
-      </div>
-      <div class="header-actions">
+    <PageHeader
+      title="人力管理"
+      subtitle="提升团队效率，优化人力资源配置"
+      family="admin"
+    >
+      <template #actions>
         <el-button plain @click="handleOpenPayrollRunbook">
           工资单运行手册
         </el-button>
@@ -17,247 +14,23 @@
           <el-icon><Refresh /></el-icon>
           刷新数据
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
+
+    <p class="page-note">
+      员工档案默认只看正式员工与在职状态，访客档案可用「身份」筛选单独查看；
+      员工离职请在员工管理页使用「办理离职」，系统不做物理删除，工资单、绩效、提成与店铺归属记录全部保留。
+    </p>
 
     <!-- 功能导航区域 -->
     <div class="function-nav">
       <el-tabs v-model="activeTab" @tab-change="handleTabChange">
         <!-- 员工管理 Tab -->
         <el-tab-pane label="员工管理" name="employees">
-          <div class="employees-content">
-            <el-card class="analysis-card" shadow="hover">
-              <template #header>
-                <div class="card-header">
-                  <span>员工信息管理</span>
-                  <div class="header-actions">
-                    <el-button type="primary" @click="showEmployeeDialog()">
-                      <el-icon><Plus /></el-icon>
-                      添加员工
-                    </el-button>
-                  </div>
-                </div>
-              </template>
-              <div class="employee-management">
-                <!-- 搜索和筛选 -->
-                <div class="search-filters">
-                  <el-row :gutter="20">
-                    <el-col :span="6">
-                      <el-input
-                        v-model="searchKeyword"
-                        placeholder="搜索员工姓名/工号"
-                        clearable
-                        @keyup.enter="loadEmployees"
-                      >
-                        <template #prefix>
-                          <el-icon><Search /></el-icon>
-                        </template>
-                      </el-input>
-                    </el-col>
-                    <el-col :span="4">
-                      <el-select
-                        v-model="departmentFilter"
-                        placeholder="选择部门"
-                        clearable
-                        @change="loadEmployees"
-                      >
-                        <el-option label="全部部门" value=""></el-option>
-                        <el-option
-                          v-for="dept in departments"
-                          :key="dept.id"
-                          :label="dept.department_name"
-                          :value="dept.id"
-                        />
-                      </el-select>
-                    </el-col>
-                    <el-col :span="4">
-                      <el-select
-                        v-model="statusFilter"
-                        placeholder="选择状态"
-                        clearable
-                        @change="loadEmployees"
-                      >
-                        <el-option label="全部状态" value=""></el-option>
-                        <el-option label="在职" value="active"></el-option>
-                        <el-option label="离职" value="inactive"></el-option>
-                        <el-option label="试用期" value="probation"></el-option>
-                      </el-select>
-                    </el-col>
-                    <el-col :span="4">
-                      <el-button type="primary" @click="loadEmployees"
-                        >搜索</el-button
-                      >
-                      <el-button @click="resetFilters">重置</el-button>
-                    </el-col>
-                  </el-row>
-                </div>
-
-                <!-- 员工统计 -->
-                <div class="employee-stats">
-                  <el-row :gutter="16">
-                    <el-col :span="6">
-                      <div class="stat-card">
-                        <div class="stat-icon active">
-                          <el-icon><User /></el-icon>
-                        </div>
-                        <div class="stat-info">
-                          <div class="stat-value">
-                            {{ employeeStats.active }}
-                          </div>
-                          <div class="stat-label">在职员工</div>
-                        </div>
-                      </div>
-                    </el-col>
-                    <el-col :span="6">
-                      <div class="stat-card">
-                        <div class="stat-icon probation">
-                          <el-icon><Clock /></el-icon>
-                        </div>
-                        <div class="stat-info">
-                          <div class="stat-value">
-                            {{ employeeStats.probation }}
-                          </div>
-                          <div class="stat-label">试用期</div>
-                        </div>
-                      </div>
-                    </el-col>
-                    <el-col :span="6">
-                      <div class="stat-card">
-                        <div class="stat-icon inactive">
-                          <el-icon><CircleClose /></el-icon>
-                        </div>
-                        <div class="stat-info">
-                          <div class="stat-value">
-                            {{ employeeStats.inactive }}
-                          </div>
-                          <div class="stat-label">已离职</div>
-                        </div>
-                      </div>
-                    </el-col>
-                    <el-col :span="6">
-                      <div class="stat-card">
-                        <div class="stat-icon total">
-                          <el-icon><DataLine /></el-icon>
-                        </div>
-                        <div class="stat-info">
-                          <div class="stat-value">
-                            {{ employeeStats.total }}
-                          </div>
-                          <div class="stat-label">员工总数</div>
-                        </div>
-                      </div>
-                    </el-col>
-                  </el-row>
-                </div>
-
-                <!-- 员工表格 -->
-                <el-table
-                  :data="employees"
-                  style="width: 100%; margin-top: 20px"
-                  v-loading="loadingEmployees"
-                  stripe
-                >
-                  <el-table-column prop="avatar_url" label="头像" width="70">
-                    <template #default="scope">
-                      <el-avatar :size="40" :src="scope.row.avatar_url">
-                        {{ scope.row.name?.charAt(0) || "?" }}
-                      </el-avatar>
-                    </template>
-                  </el-table-column>
-                  <el-table-column
-                    prop="employee_code"
-                    label="工号"
-                    width="100"
-                  ></el-table-column>
-                  <el-table-column
-                    prop="name"
-                    label="姓名"
-                    width="100"
-                  ></el-table-column>
-                  <el-table-column label="登录账号" width="120">
-                    <template #default="scope">
-                      {{ scope.row.username || '—' }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="部门" width="120">
-                    <template #default="scope">
-                      {{ getDepartmentName(scope.row.department_id) }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="职位" width="120">
-                    <template #default="scope">
-                      {{ getPositionName(scope.row.position_id) }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column
-                    prop="phone"
-                    label="电话"
-                    width="130"
-                  ></el-table-column>
-                  <el-table-column
-                    prop="email"
-                    label="邮箱"
-                    width="180"
-                    show-overflow-tooltip
-                  ></el-table-column>
-                  <el-table-column
-                    prop="hire_date"
-                    label="入职日期"
-                    width="110"
-                  ></el-table-column>
-                  <el-table-column prop="status" label="状态" width="90">
-                    <template #default="scope">
-                      <el-tag
-                        :type="getStatusType(scope.row.status)"
-                        size="small"
-                      >
-                        {{ getStatusLabel(scope.row.status) }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="180" fixed="right">
-                    <template #default="scope">
-                      <el-button
-                        type="primary"
-                        size="small"
-                        @click="showEmployeeDialog(scope.row)"
-                      >
-                        编辑
-                      </el-button>
-                      <el-button
-                        type="info"
-                        size="small"
-                        @click="viewEmployeeDetail(scope.row)"
-                      >
-                        详情
-                      </el-button>
-                      <el-popconfirm
-                        title="确定要删除该员工吗？"
-                        @confirm="deleteEmployee(scope.row)"
-                      >
-                        <template #reference>
-                          <el-button type="danger" size="small">删除</el-button>
-                        </template>
-                      </el-popconfirm>
-                    </template>
-                  </el-table-column>
-                </el-table>
-
-                <!-- 分页 -->
-                <div class="pagination-wrapper">
-                  <el-pagination
-                    v-model:current-page="pagination.page"
-                    v-model:page-size="pagination.pageSize"
-                    :page-sizes="[10, 20, 50, 100]"
-                    :total="pagination.total"
-                    layout="total, sizes, prev, pager, next, jumper"
-                    @size-change="loadEmployees"
-                    @current-change="loadEmployees"
-                  />
-                </div>
-              </div>
-            </el-card>
-          </div>
+          <EmployeeTab
+            ref="employeeTabRef"
+            :offboard-handler="handleOffboardEmployee"
+          />
         </el-tab-pane>
 
         <!-- 部门管理 Tab -->
@@ -662,10 +435,10 @@
                 <el-table-column prop="status" label="状态" width="80">
                   <template #default="scope">
                     <el-tag
-                      :type="getPayrollStatusType(scope.row.status)"
+                      :type="payrollStatusTagType(scope.row.status)"
                       size="small"
                     >
-                      {{ getPayrollStatusLabel(scope.row.status) }}
+                      {{ payrollStatusLabel(scope.row.status) }}
                     </el-tag>
                   </template>
                 </el-table-column>
@@ -711,214 +484,6 @@
         </el-tab-pane>
       </el-tabs>
     </div>
-
-    <!-- 员工表单弹窗 -->
-    <el-dialog
-      v-model="employeeDialogVisible"
-      :title="editingEmployee ? '编辑员工' : '添加员工'"
-      width="700px"
-      destroy-on-close
-    >
-      <el-form
-        ref="employeeFormRef"
-        :model="employeeForm"
-        :rules="employeeRules"
-        label-width="100px"
-      >
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="员工编号" prop="employee_code">
-              <el-input
-                v-model="employeeForm.employee_code"
-                :disabled="true"
-                :placeholder="editingEmployee ? '' : '保存时自动生成'"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="姓名" prop="name">
-              <el-input v-model="employeeForm.name" placeholder="请输入姓名" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="性别" prop="gender">
-              <el-select
-                v-model="employeeForm.gender"
-                placeholder="选择性别"
-                style="width: 100%"
-              >
-                <el-option label="男" value="male" />
-                <el-option label="女" value="female" />
-                <el-option label="其他" value="other" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="出生日期" prop="birth_date">
-              <el-date-picker
-                v-model="employeeForm.birth_date"
-                type="date"
-                placeholder="选择日期"
-                style="width: 100%"
-                value-format="YYYY-MM-DD"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="手机号码" prop="phone">
-              <el-input
-                v-model="employeeForm.phone"
-                placeholder="请输入手机号"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="邮箱" prop="email">
-              <el-input v-model="employeeForm.email" placeholder="请输入邮箱" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="部门" prop="department_id">
-              <el-select
-                v-model="employeeForm.department_id"
-                placeholder="选择部门"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="dept in departments"
-                  :key="dept.id"
-                  :label="dept.department_name"
-                  :value="dept.id"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="职位" prop="position_id">
-              <el-select
-                v-model="employeeForm.position_id"
-                placeholder="选择职位"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="pos in positions"
-                  :key="pos.id"
-                  :label="pos.position_name"
-                  :value="pos.id"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="入职日期" prop="hire_date">
-              <el-date-picker
-                v-model="employeeForm.hire_date"
-                type="date"
-                placeholder="选择日期"
-                style="width: 100%"
-                value-format="YYYY-MM-DD"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="状态" prop="status">
-              <el-select
-                v-model="employeeForm.status"
-                placeholder="选择状态"
-                style="width: 100%"
-              >
-                <el-option label="在职" value="active" />
-                <el-option label="试用期" value="probation" />
-                <el-option label="已离职" value="inactive" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item label="关联登录账号">
-          <el-select
-            v-model="employeeForm.user_id"
-            placeholder="请选择关联登录账号（可清空解除关联）"
-            clearable
-            filterable
-            style="width: 100%"
-          >
-            <el-option
-              v-for="u in linkedUserOptions"
-              :key="u.id"
-              :label="`${u.username}${u.email ? ' (' + u.email + ')' : ''}`"
-              :value="u.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="证件号码" prop="id_number">
-              <el-input
-                v-model="employeeForm.id_number"
-                placeholder="身份证号码"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="合同类型" prop="contract_type">
-              <el-select
-                v-model="employeeForm.contract_type"
-                placeholder="选择合同类型"
-                style="width: 100%"
-              >
-                <el-option label="固定期限" value="fixed_term" />
-                <el-option label="无固定期限" value="indefinite" />
-                <el-option label="实习" value="internship" />
-                <el-option label="兼职" value="part_time" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item label="现居地址" prop="address">
-          <el-input
-            v-model="employeeForm.address"
-            type="textarea"
-            :rows="2"
-            placeholder="请输入地址"
-          />
-        </el-form-item>
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="紧急联系人" prop="emergency_contact">
-              <el-input
-                v-model="employeeForm.emergency_contact"
-                placeholder="紧急联系人姓名"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="紧急电话" prop="emergency_phone">
-              <el-input
-                v-model="employeeForm.emergency_phone"
-                placeholder="紧急联系人电话"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-      <template #footer>
-        <el-button @click="employeeDialogVisible = false">取消</el-button>
-        <el-button
-          type="primary"
-          @click="saveEmployee"
-          :loading="savingEmployee"
-          >保存</el-button
-        >
-      </template>
-    </el-dialog>
 
     <!-- 部门表单弹窗 -->
     <el-dialog
@@ -1076,58 +641,6 @@
       </template>
     </el-dialog>
 
-    <!-- 员工详情弹窗 -->
-    <el-dialog v-model="employeeDetailVisible" title="员工详情" width="600px">
-      <el-descriptions :column="2" border v-if="selectedEmployee">
-        <el-descriptions-item label="员工编号">{{
-          selectedEmployee.employee_code
-        }}</el-descriptions-item>
-        <el-descriptions-item label="姓名">{{
-          selectedEmployee.name
-        }}</el-descriptions-item>
-        <el-descriptions-item label="性别">{{
-          getGenderLabel(selectedEmployee.gender)
-        }}</el-descriptions-item>
-        <el-descriptions-item label="出生日期">{{
-          selectedEmployee.birth_date || "-"
-        }}</el-descriptions-item>
-        <el-descriptions-item label="手机号码">{{
-          selectedEmployee.phone || "-"
-        }}</el-descriptions-item>
-        <el-descriptions-item label="邮箱">{{
-          selectedEmployee.email || "-"
-        }}</el-descriptions-item>
-        <el-descriptions-item label="部门">{{
-          getDepartmentName(selectedEmployee.department_id)
-        }}</el-descriptions-item>
-        <el-descriptions-item label="职位">{{
-          getPositionName(selectedEmployee.position_id)
-        }}</el-descriptions-item>
-        <el-descriptions-item label="入职日期">{{
-          selectedEmployee.hire_date || "-"
-        }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="getStatusType(selectedEmployee.status)" size="small">
-            {{ getStatusLabel(selectedEmployee.status) }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="合同类型">{{
-          getContractTypeLabel(selectedEmployee.contract_type)
-        }}</el-descriptions-item>
-        <el-descriptions-item label="证件号码">{{
-          selectedEmployee.id_number || "-"
-        }}</el-descriptions-item>
-        <el-descriptions-item label="现居地址" :span="2">{{
-          selectedEmployee.address || "-"
-        }}</el-descriptions-item>
-        <el-descriptions-item label="紧急联系人">{{
-          selectedEmployee.emergency_contact || "-"
-        }}</el-descriptions-item>
-        <el-descriptions-item label="紧急电话">{{
-          selectedEmployee.emergency_phone || "-"
-        }}</el-descriptions-item>
-      </el-descriptions>
-    </el-dialog>
     <el-dialog
       v-model="payrollDialogVisible"
       title="编辑工资单草稿"
@@ -1199,21 +712,15 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, reactive } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
-import {
-  UserFilled,
-  Refresh,
-  Plus,
-  Search,
-  User,
-  Clock,
-  CircleClose,
-  DataLine
-} from '@element-plus/icons-vue'
+import { Plus, Refresh } from '@element-plus/icons-vue'
 import api from '@/api'
+import PageHeader from '@/components/common/PageHeader.vue'
+import EmployeeTab from '@/domains/business/views/hr/EmployeeTab.vue'
+import { payrollStatusLabel, payrollStatusTagType } from '@/constants/hr'
 
 // ============================================================================
 // 响应式数据
@@ -1228,23 +735,12 @@ const activeTab = ref(
   validTabs.includes(route.query.tab) ? route.query.tab : 'employees'
 )
 
-// 员工数据
+// 员工 Tab 组件引用：办理离职后由页面统一刷新员工列表
+const employeeTabRef = ref(null)
+
+// 员工姓名映射：考勤 / 工资单 Tab 需要显示员工姓名。
+// 员工列表本身由 EmployeeTab 自己持有，这里只做名称解析，避免跨文件隐式依赖。
 const employees = ref([])
-const loadingEmployees = ref(false)
-const searchKeyword = ref('')
-const departmentFilter = ref('')
-const statusFilter = ref('')
-const pagination = reactive({
-  page: 1,
-  pageSize: 20,
-  total: 0
-})
-const employeeStats = reactive({
-  active: 0,
-  probation: 0,
-  inactive: 0,
-  total: 0
-})
 
 // 部门数据
 const departments = ref([])
@@ -1291,39 +787,12 @@ const isPayrollAdmin = computed(() => {
 })
 
 // 弹窗控制
-const employeeDialogVisible = ref(false)
 const departmentDialogVisible = ref(false)
 const positionDialogVisible = ref(false)
-const employeeDetailVisible = ref(false)
 
 // 编辑状态
-const editingEmployee = ref(null)
 const editingDepartment = ref(null)
 const editingPosition = ref(null)
-const selectedEmployee = ref(null)
-
-// 表单数据
-const employeeForm = reactive({
-  employee_code: '',
-  name: '',
-  gender: '',
-  birth_date: '',
-  phone: '',
-  email: '',
-  department_id: null,
-  position_id: null,
-  hire_date: '',
-  status: 'active',
-  user_id: null,
-  id_number: '',
-  contract_type: '',
-  address: '',
-  emergency_contact: '',
-  emergency_phone: ''
-})
-
-// 关联登录账号下拉选项（未关联用户 + 当前已关联用户）
-const linkedUserOptions = ref([])
 
 const departmentForm = reactive({
   department_code: '',
@@ -1344,24 +813,14 @@ const positionForm = reactive({
 })
 
 // 保存状态
-const savingEmployee = ref(false)
 const savingDepartment = ref(false)
 const savingPosition = ref(false)
 
 // 表单引用
-const employeeFormRef = ref(null)
 const departmentFormRef = ref(null)
 const positionFormRef = ref(null)
 
 // 表单验证规则
-const employeeRules = {
-  employee_code: [
-    { required: false }
-  ],
-  name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
-  status: [{ required: true, message: '请选择状态', trigger: 'change' }]
-}
-
 const departmentRules = {
   department_code: [
     { required: true, message: '请输入部门编码', trigger: 'blur' }
@@ -1409,7 +868,12 @@ onMounted(async () => {
 const loadInitialData = async () => {
   loading.value = true
   try {
-    await Promise.all([loadDepartments(), loadPositions(), loadEmployees()])
+    await Promise.all([
+      loadDepartments(),
+      loadPositions(),
+      loadEmployeeNames(),
+      loadEmployees()
+    ])
   } catch (error) {
     console.error('加载初始数据失败:', error)
     ElMessage.error('加载数据失败，请刷新重试')
@@ -1467,46 +931,14 @@ const loadPositions = async () => {
   }
 }
 
-// 加载员工列表
-const loadEmployees = async () => {
-  loadingEmployees.value = true
+// 加载员工姓名映射（考勤 / 工资单 Tab 用）
+const loadEmployeeNames = async () => {
   try {
-    const params = {
-      page: pagination.page,
-      page_size: pagination.pageSize
-    }
-    if (searchKeyword.value) params.keyword = searchKeyword.value
-    if (departmentFilter.value) params.department_id = departmentFilter.value
-    if (statusFilter.value) params.status = statusFilter.value
-
-    const data = await api.getHrEmployees(params)
+    const data = await api.getHrEmployees({ page: 1, page_size: 500 })
     employees.value = data || []
-
-    // 加载员工统计
-    await loadEmployeeStats()
   } catch (error) {
-    console.error('加载员工列表失败:', error)
+    console.error('加载员工姓名失败:', error)
     employees.value = []
-  } finally {
-    loadingEmployees.value = false
-  }
-}
-
-// 加载员工统计
-const loadEmployeeStats = async () => {
-  try {
-    const [activeRes, probationRes, inactiveRes] = await Promise.all([
-      api.getHrEmployeeCount('active'),
-      api.getHrEmployeeCount('probation'),
-      api.getHrEmployeeCount('inactive')
-    ])
-    employeeStats.active = activeRes?.count || 0
-    employeeStats.probation = probationRes?.count || 0
-    employeeStats.inactive = inactiveRes?.count || 0
-    employeeStats.total =
-      employeeStats.active + employeeStats.probation + employeeStats.inactive
-  } catch (error) {
-    console.error('加载员工统计失败:', error)
   }
 }
 
@@ -1639,133 +1071,22 @@ const markPayrollPaid = async (record) => {
 const showPayrollPayAction = (record) =>
   record?.status === 'confirmed' && isPayrollAdmin.value
 
-const showEmployeeDialog = async (employee = null) => {
-  editingEmployee.value = employee
-  if (employee) {
-    Object.assign(employeeForm, {
-      employee_code: employee.employee_code,
-      name: employee.name,
-      gender: employee.gender || '',
-      birth_date: employee.birth_date || '',
-      phone: employee.phone || '',
-      email: employee.email || '',
-      department_id: employee.department_id,
-      position_id: employee.position_id,
-      hire_date: employee.hire_date || '',
-      status: employee.status,
-      user_id: employee.user_id ?? null,
-      id_number: employee.id_number || '',
-      contract_type: employee.contract_type || '',
-      address: employee.address || '',
-      emergency_contact: employee.emergency_contact || '',
-      emergency_phone: employee.emergency_phone || ''
-    })
-  } else {
-    Object.assign(employeeForm, {
-      employee_code: '',
-      name: '',
-      gender: '',
-      birth_date: '',
-      phone: '',
-      email: '',
-      department_id: null,
-      position_id: null,
-      hire_date: '',
-      status: 'active',
-      user_id: null,
-      id_number: '',
-      contract_type: '',
-      address: '',
-      emergency_contact: '',
-      emergency_phone: ''
-    })
+/**
+ * 办理离职：页面级统一执行（成功提示 + 刷新员工列表都在这里），
+ * 员工 Tab 只负责收集离职日期 / 最后发薪月 / 离职原因。
+ */
+const handleOffboardEmployee = async ({ employeeCode, payload }) => {
+  const response = await api.offboardHrEmployee(employeeCode, payload)
+  ElMessage.success('已办理离职')
+  const pendingMonths =
+    response?.pending_payroll_months || response?.data?.pending_payroll_months || []
+  if (pendingMonths.length > 0) {
+    ElMessage.warning(
+      `还有草稿工资单未结算：${pendingMonths.join('、')}，请到员工薪资页确认或发放`
+    )
   }
-  try {
-    const res = await usersApi.getUnlinkedUsers()
-    const list = res?.data ?? res
-    const arr = Array.isArray(list) ? list : (list ?? [])
-    linkedUserOptions.value = [...arr]
-    if (employee?.user_id && employee?.username) {
-      const has = linkedUserOptions.value.some((u) => u.id === employee.user_id)
-      if (!has) {
-        linkedUserOptions.value = [{ id: employee.user_id, username: employee.username, email: '' }, ...linkedUserOptions.value]
-      }
-    }
-  } catch (e) {
-    linkedUserOptions.value = []
-    if (employee?.user_id && employee?.username) {
-      linkedUserOptions.value = [{ id: employee.user_id, username: employee.username, email: '' }]
-    }
-  }
-  employeeDialogVisible.value = true
-}
-
-/** 提交前清洗：空字符串转 null，避免后端 422；创建时不传员工编号由后端自动生成 */
-function cleanEmployeePayload(isCreate) {
-  const raw = { ...employeeForm }
-  const cleaned = {}
-  for (const [k, v] of Object.entries(raw)) {
-    if (v === '' || v === undefined) {
-      cleaned[k] = null
-    } else if (typeof v === 'string' && v.trim() === '') {
-      cleaned[k] = null
-    } else {
-      cleaned[k] = v
-    }
-  }
-  if (isCreate) {
-    cleaned.employee_code = null
-  }
-  return cleaned
-}
-
-const saveEmployee = async () => {
-  if (!employeeFormRef.value) return
-  await employeeFormRef.value.validate()
-
-  savingEmployee.value = true
-  try {
-    if (editingEmployee.value) {
-      const payload = cleanEmployeePayload(false)
-      await api.updateHrEmployee(payload.employee_code, payload)
-      ElMessage.success('员工信息已更新')
-    } else {
-      const payload = cleanEmployeePayload(true)
-      await api.createHrEmployee(payload)
-      ElMessage.success('员工已添加')
-    }
-    employeeDialogVisible.value = false
-    await loadEmployees()
-  } catch (error) {
-    console.error('保存员工失败:', error)
-    ElMessage.error(error.response?.data?.detail || error.message || '保存失败')
-  } finally {
-    savingEmployee.value = false
-  }
-}
-
-const deleteEmployee = async (employee) => {
-  try {
-    await api.deleteHrEmployee(employee.employee_code)
-    ElMessage.success('员工已删除')
-    await loadEmployees()
-  } catch (error) {
-    console.error('删除员工失败:', error)
-    ElMessage.error(error.message || '删除失败')
-  }
-}
-
-const viewEmployeeDetail = (employee) => {
-  selectedEmployee.value = employee
-  employeeDetailVisible.value = true
-}
-
-const resetFilters = () => {
-  searchKeyword.value = ''
-  departmentFilter.value = ''
-  statusFilter.value = ''
-  pagination.page = 1
-  loadEmployees()
+  await employeeTabRef.value?.reload()
+  await loadEmployeeNames()
 }
 
 // ============================================================================
@@ -1904,46 +1225,9 @@ const showAttendanceDialog = () => {
 // 辅助方法
 // ============================================================================
 
-const getDepartmentName = (departmentId) => {
-  if (!departmentId) return '-'
-  const dept = departments.value.find((d) => d.id === departmentId)
-  return dept?.department_name || '-'
-}
-
-const getPositionName = (positionId) => {
-  if (!positionId) return '-'
-  const pos = positions.value.find((p) => p.id === positionId)
-  return pos?.position_name || '-'
-}
-
 const getEmployeeName = (employeeCode) => {
-  const emp = employees.value.find((e) => e.employee_code === employeeCode)
+  const emp = (employees.value || []).find((e) => e.employee_code === employeeCode)
   return emp?.name || employeeCode
-}
-
-const getStatusType = (status) => {
-  const map = { active: 'success', inactive: 'danger', probation: 'warning' }
-  return map[status] || 'info'
-}
-
-const getStatusLabel = (status) => {
-  const map = { active: '在职', inactive: '已离职', probation: '试用期' }
-  return map[status] || status
-}
-
-const getGenderLabel = (gender) => {
-  const map = { male: '男', female: '女', other: '其他' }
-  return map[gender] || '-'
-}
-
-const getContractTypeLabel = (type) => {
-  const map = {
-    fixed_term: '固定期限',
-    indefinite: '无固定期限',
-    internship: '实习',
-    part_time: '兼职'
-  }
-  return map[type] || '-'
 }
 
 const getAttendanceStatusType = (status) => {
@@ -1965,16 +1249,6 @@ const getAttendanceStatusLabel = (status) => {
     absent: '缺勤',
     leave: '请假'
   }
-  return map[status] || status
-}
-
-const getPayrollStatusType = (status) => {
-  const map = { draft: 'info', confirmed: 'warning', paid: 'success' }
-  return map[status] || 'info'
-}
-
-const getPayrollStatusLabel = (status) => {
-  const map = { draft: '草稿', confirmed: '已确认', paid: '已发放' }
   return map[status] || status
 }
 
@@ -2024,8 +1298,7 @@ const getPayrollSummary = (param) => {
 
 <style scoped>
 .human-resources {
-  padding: 20px;
-  background-color: #f5f7fa;
+  background: #f5f7fa;
   min-height: 100vh;
 }
 
@@ -2036,36 +1309,10 @@ const getPayrollSummary = (param) => {
   display: none;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-  padding: 24px;
-  background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-  border-radius: 12px;
-  color: white;
-}
-
-.header-content .page-title {
-  font-size: 28px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.header-content .page-subtitle {
-  font-size: 16px;
-  opacity: 0.9;
-  margin: 0;
-}
-
-.header-actions {
-  display: flex;
-  gap: 12px;
-  align-items: center;
+.page-note {
+  color: #909399;
+  margin: 0 0 16px 0;
+  line-height: 1.6;
 }
 
 .function-nav {
@@ -2080,68 +1327,10 @@ const getPayrollSummary = (param) => {
   align-items: center;
 }
 
-.search-filters {
-  margin-bottom: 16px;
-}
-
-.employee-stats {
-  margin: 20px 0;
-}
-
-.stat-card {
+.header-actions {
   display: flex;
+  gap: 12px;
   align-items: center;
-  padding: 16px;
-  background: #f8f9fa;
-  border-radius: 8px;
-}
-
-.stat-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 16px;
-  font-size: 24px;
-}
-
-.stat-icon.active {
-  background: #e6f7e6;
-  color: #52c41a;
-}
-
-.stat-icon.probation {
-  background: #fff7e6;
-  color: #faad14;
-}
-
-.stat-icon.inactive {
-  background: #fff1f0;
-  color: #ff4d4f;
-}
-
-.stat-icon.total {
-  background: #e6f7ff;
-  color: #1890ff;
-}
-
-.stat-info .stat-value {
-  font-size: 24px;
-  font-weight: 600;
-  color: #333;
-}
-
-.stat-info .stat-label {
-  font-size: 14px;
-  color: #666;
-}
-
-.pagination-wrapper {
-  margin-top: 20px;
-  display: flex;
-  justify-content: flex-end;
 }
 
 .text-primary {

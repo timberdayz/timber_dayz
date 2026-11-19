@@ -19,6 +19,7 @@ from modules.core.db import (
     SalaryStructure,
 )
 from modules.core.logger import get_logger
+from backend.services.hr_employee_lifecycle import is_payroll_voided
 from backend.services.payroll_period_lock_service import PAYROLL_LOCKED_STATUSES
 from backend.services.performance_readiness_service import PerformanceReadinessService
 
@@ -380,6 +381,23 @@ class PayrollGenerationService:
             ),
         }
 
+    @classmethod
+    def _void_conflict_detail(cls, existing: Any) -> Dict[str, Any]:
+        """已作废工资单的跳过说明（人话版，直接给前端展示）。"""
+        return {
+            "employee_code": getattr(existing, "employee_code", ""),
+            "year_month": getattr(existing, "year_month", ""),
+            "payroll_status": getattr(existing, "status", None),
+            "void_reason": getattr(existing, "void_reason", None),
+            "voided_at": (
+                existing.voided_at.isoformat()
+                if getattr(existing, "voided_at", None) is not None
+                else None
+            ),
+            "voided_by": getattr(existing, "voided_by", None),
+            "message": "该员工该月工资单已作废，本次未重新生成；如需补发请先撤销作废",
+        }
+
     async def generate_employee_month(
         self, employee_code: str, year_month: str
     ) -> Dict[str, Any]:
@@ -473,6 +491,8 @@ class PayrollGenerationService:
                     "locked_conflict_details": [
                         self._locked_conflict_detail(existing, payload)
                     ],
+                    "void_conflicts": 0,
+                    "void_conflict_details": [],
                     "payroll_record": existing,
                 }
             return {
@@ -481,6 +501,24 @@ class PayrollGenerationService:
                 "payroll_upserts": 0,
                 "locked_conflicts": 0,
                 "locked_conflict_details": [],
+                "void_conflicts": 0,
+                "void_conflict_details": [],
+                "payroll_record": existing,
+            }
+
+        if is_payroll_voided(existing):
+            # 已作废的工资单是**冻结的历史留痕**：不可被刷新改写金额。
+            # 也不新建替代单 —— 一人一月只有一张工资单（唯一索引），
+            # 坑位已被这张作废单占住；要重新发这个月的工资，
+            # 必须先显式「撤销作废」，把作废单恢复成草稿。
+            return {
+                "employee_code": employee_code,
+                "year_month": year_month,
+                "payroll_upserts": 0,
+                "locked_conflicts": 0,
+                "locked_conflict_details": [],
+                "void_conflicts": 1,
+                "void_conflict_details": [self._void_conflict_detail(existing)],
                 "payroll_record": existing,
             }
 
@@ -500,6 +538,8 @@ class PayrollGenerationService:
             "payroll_upserts": 1,
             "locked_conflicts": 0,
             "locked_conflict_details": [],
+            "void_conflicts": 0,
+            "void_conflict_details": [],
             "payroll_record": record,
         }
 
@@ -605,6 +645,8 @@ class PayrollGenerationService:
         payroll_upserts = 0
         locked_conflicts = 0
         locked_conflict_details = []
+        void_conflicts = 0
+        void_conflict_details = []
         for employee_code in employee_codes:
             salary = self._pick_salary_structure_for_month(
                 salary_rows_by_employee.get(employee_code, []),
@@ -632,6 +674,16 @@ class PayrollGenerationService:
                     )
                 continue
 
+            if is_payroll_voided(existing):
+                # 已作废的工资单是冻结的历史留痕：整月刷新也不许改写它，
+                # 且不新建替代单（坑位被这张作废单占着）。
+                # ⚠️ 注意这里**不能**把 void 当成「锁定」：
+                # 作废只冻结这一张单，不该把整个月钉死 ——
+                # 同月其他人的工资单照常重算、照常确认发放。
+                void_conflicts += 1
+                void_conflict_details.append(self._void_conflict_detail(existing))
+                continue
+
             if existing:
                 for key, value in payload.items():
                     setattr(existing, key, value)
@@ -648,4 +700,6 @@ class PayrollGenerationService:
             "payroll_upserts": payroll_upserts,
             "locked_conflicts": locked_conflicts,
             "locked_conflict_details": locked_conflict_details,
+            "void_conflicts": void_conflicts,
+            "void_conflict_details": void_conflict_details,
         }
