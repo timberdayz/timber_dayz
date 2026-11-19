@@ -600,4 +600,56 @@
 2. 验证要**用生产真实数据回放**，而不是「按本地形状造数据」；
 3. 反向用例（**证明不了就停下**）和正向用例同等重要 —— 这次的防误伤保证就靠它。
 
+## 12. v7.35.1 部署后验收（2026-11-20 02:43 CST，生产只读实测）
+
+### 12.1 流水线与镜像
+
+- 部署流水线 run **44587344542**（`Deploy to Production`，事件 `push` / tag `v7.35.1`，耗时 **17m56s**）
+  ⇒ `check-config` ✔ / `Validate Data Flow (Release Gate)` ✔（13 项门禁全绿）/
+  `Build and Push Images (Release Tag)` ✔ / `Deploy to Production (Tag Release)` ✔ ⇒ **全 success**；
+- 配套流水线：`CI Pipeline` **44587008983** ✔ / `Validate Data Flow` **44587008891** ✔ /
+  `Docker Build and Push` **44587008948** ✔ / `Outputs Directory Health Check` **44587343593** ✔ ⇒ **全 success**；
+- 双镜像：`main` 同步 SHA = **`e9c12059`**（`XIHONG_GIT_MIRROR_SYNCED`）；tag `v7.35.1` 两端
+  **同一对象** = `518f9312`。
+
+### 12.2 生产终态
+
+- **7 个容器全 healthy**：nginx / frontend / backend_api / celery_worker / celery_beat
+  （应用镜像均 `v7.35.1`）+ postgres / redis（Up 10 days，本次未重启）；
+- `GET /healthz/ready` → `{"status":"ready","version":"v7.35.1",...,"database":"connected","dashboard":"ready"}`；
+  `GET /api/docs` → **200**；`GET /` → **200**；
+- 前端产物：`HumanResources-2bb1e85d.js` / `EmployeeManagement-de005182.js` / `EmployeeSalary-a395a9c7.js`。
+
+### 12.3 迁移生效与业务口径落地
+
+| 验收项 | 实测 |
+|---|---|
+| 迁移链头 | **`current_schema_20261240_hr_employee_lifecycle`**（= 本批次 head） |
+| 账号清理 | `core.dim_user_purge_log` **347 条 / 347 个不同 user_id**（3~389）；**四条判据仍全中的残留 = 0**；现存账号 44 个（active 12 + deleted 32） |
+| 误伤 | 16 个真实员工账号**一个没动** |
+| 审批链 | 五张表**孤儿行全 0**（实例 / 动作日志 / 步骤 / 待办 / 会话） |
+| 李四 4 张工资单 | id 8 / 22 / 33 / 26（2026-03 / 04 / 06 / 07）**`status='void'`** + `void_reason` + `voided_at`（**行保留**） |
+| 发钱边界 | 李四 `last_payroll_month` = **2026-07**；张三 = **NULL**（不猜） |
+| 试用状态 | 曾维剑 / 文鹏 = **probation**；全库 active 7 / probation 2 / inactive 2 |
+| 状态词表 | 约束 `ck_employees_status_lifecycle` 已建：`status ∈ {active, probation, leave, inactive}` |
+| 工资单状态分布 | confirmed 1 / draft 19 / paid 7 / **void 4** |
+
+### 12.4 新端点上线（零写入验证：查生产 OpenAPI 契约）
+
+生产 OpenAPI 共 **521 条路径**，本批 6 个新端点**全部注册**：
+
+- `POST /api/hr/employees/{employee_code}/offboard`、`/regularize`、`/promote-visitor`、`/merge-visitor`；
+- `POST /api/hr/payroll-records/{record_id}/void`、`/unvoid`；
+- 只读端点 `/api/hr/employees`（get+post）、`/api/hr/payroll-records`（get）、`/api/users/unlinked`（get）均在线。
+
+> ⚠️ 验证口径说明：写端点**一律不在生产上试调**。用「OpenAPI 契约里有没有这条路径」证明**已上线**，
+> 用只读 SQL 证明**数据已按新口径落库** —— 两条证据都不产生生产写入。
+
+### 12.5 仍未结（业务侧要补，代码闭环不了）
+
+- **人员店铺归属 0 行** / **人力成本分摊 0 行** ⇒ 工资单确认链路仍会 409 ⇒ 须在「人员店铺归属」页面
+  重配或灌入**确认过的历史数据**；
+- 11 名员工**入职日期**、2 名离职员工**离职日期**、张三**最后发薪月**需人工补录；
+- 迁移已执行的 347 个账号**不可逆**（downgrade 明确写「只能从备份恢复」）。
+
 
