@@ -412,8 +412,17 @@ jobs:
             tests/test_account_readiness_contract.py \
             tests/test_account_proxy_source_contract.py \
             backend/tests/test_hr_lifecycle_contract.py \
-            backend/tests/test_hr_employee_lifecycle.py \
-            backend/tests/test_hr_binding_and_payroll_boundary.py
+            backend/tests/test_hr_employee_lifecycle.py
+            # ⚠️ 2026-11-20：**不**把 backend/tests/test_hr_binding_and_payroll_boundary.py
+            # 放进本清单 —— 与上面 test_account_proxy_config.py 同一个坑：
+            # 那个文件有 22 个 **async** 用例，而 backend/tests/conftest.py 用
+            # `@pytest.fixture(scope="session")` 覆盖了 event_loop —— 在 CI 钉的
+            # pytest==7.4.3 / pytest-asyncio==0.21.1 下这个覆盖**会生效**
+            # （1.x 忽略它）⇒ 混跑时它会拿到**已关闭**的 session 事件循环，
+            # 22 个用例报 `RuntimeError: Event loop is closed`
+            # （2026-11-20 实测，CI run 44580189720）。
+            # ⇒ 契约断言放在**纯同步**的 test_hr_lifecycle_contract.py 里（已进本清单），
+            #    异步用例留在原文件，由「本次改动到的测试文件」通道 + 全量回归覆盖。
 
       - name: Run performance regression entry
         if: matrix.python-version == '3.11'
