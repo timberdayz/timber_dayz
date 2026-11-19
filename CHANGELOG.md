@@ -1,4 +1,66 @@
 # Changelog - 西虹 ERP 系统
+## [v7.35.1] - 2026-11-20 - 人力 + 用户管理发版修正：清理残留测试账号时补齐「注册审批链」痕迹
+
+> **这是 v7.35.0 的发版修正**（补丁号）。v7.35.0 的**生产部署被迁移的前置检查挡住**，
+> 失败关闭、生产零影响（见下）。本版修的只是**迁移里那一处遗漏**，
+> 功能口径与 v7.35.0 完全一致。
+
+### 一、v7.35.0 部署失败经过（写下来别再踩）
+
+- 部署流水线 run **44580353110**：`Build and Push Images (Release Tag)` ✔ → **`Deploy to Production (Tag Release)` ✘**。
+- 失败原因：迁移 `current_schema_20261240_hr_employee_lifecycle` 在删 347 个残留测试账号**之前**的
+  前置检查报错停下：
+  > 残留测试账号仍被业务表引用，拒绝删除（避免误删业务数据）：
+  > `core.employee_task_logs.actor_user_id`（16 行）；`core.employee_tasks.created_by`（16 行）；
+  > `public.approval_action_logs.actor_user_id`（16 行）；`public.approval_instances.applicant_user_id`（16 行）
+- **这正是那道保护该做的事**：迁移没有默默删业务数据，而是停下来报清是哪张表、还剩多少行。
+- **生产零影响**：迁移整体回滚（`public.current_schema_alembic_version` 仍是
+  `current_schema_20261239_cost_floor_caliber_closure`），部署脚本回滚到原容器，
+  生产全程运行 **v7.34.0**（7 个容器 healthy，`/healthz/ready` → `version: v7.34.0`）。
+
+### 二、根因：痕迹清单少算了一层「注册审批链」
+
+生产只读核对查清了：那 16 个账号（`user_id` 371~390，全是 `ratelimit_test_` / `approval_workflow_` /
+`approve_test_` / `reject_test_` / `pending_login_` / `lock_test_` 这类）**走过注册审批流程**，
+于是留下五张表上的痕迹：
+
+| 表 | 行 | 性质 |
+|---|---|---|
+| `public.approval_instances` | 该账号自己的注册审批实例（`template_code='user_registration_approval'`、`business_key='user:<id>'`、`status='rejected'`） | 账号级痕迹 |
+| `public.approval_action_logs` | 该审批实例上的动作（它自己的 `submit` + **管理员的 `reject`**） | 账号级痕迹 |
+| `public.approval_steps` | 该审批实例的步骤（审批人是管理员） | 账号级痕迹 |
+| `core.employee_tasks` | 自动生成的「待审批」待办（`task_id='approval-task:approval:user_registration_approval:user:<id>:<ts>:1'`） | 账号级痕迹 |
+| `core.employee_task_logs` | 该待办的创建日志 | 账号级痕迹 |
+
+⇒ 原迁移只清了「审批日志 / 审计痕迹 / 会话 / 角色绑定」四张表，**漏了这一层** ⇒ 撞外键 ⇒ 停下。
+
+### 三、本版改了什么（只改这一处）
+
+- 迁移补上「注册审批链」这层痕迹的清理（**先子后父**：动作日志 → 步骤 → 审批实例 → 待办日志 → 待办参与人 → 待办）；
+- ⚠️ 删除条件**精确限定在候选账号自己的注册审批上**（按 `approval_pk` / `task_pk` 限定，
+  不按「谁点的」一刀切）—— 管理员在别人审批上的动作**不许**被删；
+- 删之前**逐行核对**（新增 `_assert_registration_traces_are_account_own`）：
+  审批实例必须是 `user_registration_approval` 且 `business_key` 与申请人对得上；
+  待办必须是「它自己的注册审批待办」；候选账号若是**别人**审批的审批人 ⇒ **报错停下**；
+- 删账号本体**之前再查一遍**（`skip_tables=set()` ⇒ 一张表都不放过）：此刻还不该有任何残留引用，
+  有就停下，绝不硬删。
+
+### 四、验证（生产真实数据回放）
+
+- **隔离临时库 + 生产真实数据回放**：把生产 `core.dim_users`（391 行）、`public.approval_instances`（28）、
+  `public.approval_action_logs`（50）、`public.approval_steps`（28）、`core.employee_tasks`（38）、
+  `core.employee_task_logs`（38）、`public.user_sessions`（956）**原样灌进本地临时库**再跑本迁移 ⇒
+  **退出码 0**：清理 **347** 个账号（与业务侧批准的数量**完全一致**）、留痕表 347 条；
+  审批链 28→12 实例 / 50→18 动作日志 / 28→12 步骤 / 38→22 待办 / 38→22 待办日志
+  ⇒ 删掉的**正好是测试账号自己那部分**；
+- **真实员工账号一个没动**：`admin` / `xihong` / `zhangsan` / `youke` / `lisi` / `yehaichuan` /
+  `qaadmin` / `WEI` / `HJJ` / `DY11_` / `18976425991` / `user_XiaoZeng` / `Debug_Fate` /
+  `perf_load_admin` / `playwright_smoke_admin` / `codex_admin_temp` **全部保留**；
+  另有 28 个「命中前缀但不满足另外三条判据」的账号也**全部保留**（判据是四条全中才清）；
+- **反向演练（防误伤）**：给测试账号造一个**不属于它自己注册审批**的业务待办 ⇒
+  迁移**报错停下**、且**数据库原样未变**（失败关闭）；
+- 新增守护 `backend/tests/test_hr_purge_registration_traces.py`（2 个用例，跑在隔离临时库上）。
+
 ## [v7.35.0] - 2026-11-20 - 人力资源 + 用户管理：状态三概念拆分 + 最后发薪月发钱边界 + 访客转正通道 + 工资单「已作废」第四态
 
 > **有数据库迁移**（`current_schema_20261240_hr_employee_lifecycle`）：

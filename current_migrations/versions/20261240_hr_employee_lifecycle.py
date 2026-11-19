@@ -167,6 +167,42 @@ ACCOUNT_TRACE_TABLES = (
     (PUBLIC_SCHEMA, "user_roles", "user_id"),  # 角色绑定
 )
 
+#: 注册审批模板码 —— 候选账号的注册审批**必须**是这个模板。
+REGISTRATION_APPROVAL_TEMPLATE = "user_registration_approval"
+
+#: 「注册审批链」痕迹表 —— 账号注册流程会为每个账号留下这一串记录，
+#: 它们指向 ``core.dim_users`` ⇒ 不一起清就会撞外键。
+#:
+#: ⚠️ **实测（生产 2026-11-20，v7.35.0 首次部署被这条挡住）**：
+#: 347 个候选里有 **16 个**（user_id 371~390，全是 ``flow_test_`` /
+#: ``approval_workflow_`` / ``ratelimit_test_`` / ``approve_test_`` / ``reject_test_`` /
+#: ``pending_login_`` / ``rejected_login_`` / ``lock_test_`` / ``pwd_test_`` /
+#: ``dup_user_`` / ``dup_email_`` / ``test_user_`` / ``reset_test_``）**走过注册审批**，
+#: 于是留下：
+#:
+#: * ``public.approval_instances`` —— 该账号自己的注册审批实例
+#:   （``template_code='user_registration_approval'``、``business_key='user:<id>'``、
+#:   ``status='rejected'``）
+#: * ``public.approval_action_logs`` —— 该审批实例上的动作
+#:   （它自己的 ``submit`` + **管理员的 ``reject``**；管理员不是候选账号，
+#:   但这行挂在候选账号的审批实例上 ⇒ 只按 actor 删会漏）
+#: * ``public.approval_steps`` —— 该审批实例的步骤（审批人是管理员）
+#: * ``core.employee_tasks`` —— 自动生成的「待审批」待办
+#:   （``task_id='approval-task:approval:user_registration_approval:user:<id>:<ts>:1'``，
+#:   ``owner_user_id`` = 管理员）
+#: * ``core.employee_task_logs`` —— 该待办的创建日志
+#:
+#: ⇒ 这些行**只**记录「这个账号存在过、注册过、被拒过」，不是业务记录 ⇒ 与账号一起清。
+#: ⇒ 但删除必须**精确限定在候选账号自己的注册审批上** ⇒ 删之前逐行核对（见
+#:    :func:`_assert_registration_traces_are_account_own`），有任何一行对不上就停下。
+REGISTRATION_TRACE_TABLES = (
+    (PUBLIC_SCHEMA, "approval_action_logs", "actor_user_id"),
+    (PUBLIC_SCHEMA, "approval_instances", "applicant_user_id"),
+    (PUBLIC_SCHEMA, "approval_steps", "approver_user_id"),
+    (CORE_SCHEMA, "employee_task_logs", "actor_user_id"),
+    (CORE_SCHEMA, "employee_tasks", "created_by"),
+)
+
 
 def _has_table(schema: str, table: str) -> bool:
     """表是否已存在（幂等迁移的前提）。"""
@@ -249,17 +285,28 @@ def _blocking_foreign_key_tables(bind: sa.Connection) -> list[tuple[str, str, st
     return [(str(row[0]), str(row[1]), str(row[2])) for row in rows]
 
 
-def _assert_no_unexpected_references(bind: sa.Connection, user_ids: list[int]) -> None:
+def _assert_no_unexpected_references(
+    bind: sa.Connection,
+    user_ids: list[int],
+    skip_tables: set[tuple[str, str]] | None = None,
+) -> None:
     """删账号前的前置检查：确认没有**业务表**还在引用这些账号。
 
-    ⚠️ 账号级痕迹表（:data:`ACCOUNT_TRACE_TABLES`）会被本迁移一起清掉；
+    ⚠️ 账号级痕迹表（:data:`ACCOUNT_TRACE_TABLES`）与注册审批链痕迹表
+    （:data:`REGISTRATION_TRACE_TABLES`）会被本迁移一起清掉；
     其它表（业务表）如果还引用着 ⇒ **报错停下**，而不是默默删掉业务数据。
 
     报清楚是哪张表、还剩多少行 ⇒ 运维能直接处理，不用去猜。
+
+    ``skip_tables`` 传 ``set()`` 时**不跳过任何表** ⇒ 用于「清理完成、准备删账号本体」
+    那一刻的终检：那一刻还不该有任何残留引用。
     """
     if not user_ids:
         return
     trace_tables = {(schema, table) for schema, table, _ in ACCOUNT_TRACE_TABLES}
+    trace_tables |= {(schema, table) for schema, table, _ in REGISTRATION_TRACE_TABLES}
+    if skip_tables is not None:
+        trace_tables = set(skip_tables)
     id_list = ", ".join(str(user_id) for user_id in user_ids)
     blockers = []
     for schema, table, column in _blocking_foreign_key_tables(bind):
@@ -278,6 +325,155 @@ def _assert_no_unexpected_references(bind: sa.Connection, user_ids: list[int]) -
             "残留测试账号仍被业务表引用，拒绝删除（避免误删业务数据）："
             + "；".join(blockers)
         )
+
+
+def _assert_registration_traces_are_account_own(
+    bind: sa.Connection, user_ids: list[int]
+) -> None:
+    """确认「注册审批链」里的行确实**只是候选账号自己的注册痕迹**。
+
+    逐行核对，任何一行对不上 ⇒ **直接报错停下**（不猜、不删）：
+
+    * ``public.approval_instances``：``template_code`` 必须是
+      ``user_registration_approval``、``business_key`` 必须是 ``user:<该账号 id>``；
+    * ``core.employee_tasks``：``task_id`` 必须是
+      ``approval-task:approval:user_registration_approval:user:<该账号 id>:<时间戳>:1``。
+
+    ⇒ 这一步是「不误伤业务数据」的**最后一道证明**：证明不了就不删。
+    """
+    if not user_ids:
+        return
+    id_list = ", ".join(str(user_id) for user_id in user_ids)
+
+    for row in bind.execute(
+        sa.text(
+            f"SELECT id, applicant_user_id, template_code, business_key "
+            f"FROM {PUBLIC_SCHEMA}.approval_instances "
+            f"WHERE applicant_user_id IN ({id_list})"
+        )
+    ).fetchall():
+        instance_id, applicant_user_id, template_code, business_key = row
+        if template_code != REGISTRATION_APPROVAL_TEMPLATE:
+            raise RuntimeError(
+                "注册审批链痕迹核对失败：该账号的审批实例不是「用户注册审批」，"
+                f"拒绝删除（实例 id={instance_id}，template_code={template_code}）"
+            )
+        expected_key = "user:{0}".format(applicant_user_id)
+        if business_key != expected_key:
+            raise RuntimeError(
+                "注册审批链痕迹核对失败：该审批实例的业务键与申请人不匹配，"
+                f"拒绝删除（实例 id={instance_id}，business_key={business_key}，"
+                f"期望 {expected_key}）"
+            )
+
+    for row in bind.execute(
+        sa.text(
+            f"SELECT task_id, created_by FROM {CORE_SCHEMA}.employee_tasks "
+            f"WHERE created_by IN ({id_list})"
+        )
+    ).fetchall():
+        task_id, created_by = row
+        expected_prefix = "approval-task:approval:{0}:user:{1}:".format(
+            REGISTRATION_APPROVAL_TEMPLATE, created_by
+        )
+        if not str(task_id).startswith(expected_prefix):
+            raise RuntimeError(
+                "注册审批链痕迹核对失败：该账号创建的待办不是「它自己的注册审批待办」，"
+                f"拒绝删除（task_id={task_id}）"
+            )
+
+    # ⚠️ 候选账号若是某个审批的**审批人**（approver_user_id），那一步也是指向它的外键。
+    #    只有当这一步属于「它自己的注册审批」时才是痕迹；否则是**别人的业务审批** ⇒ 停下。
+    own_instance_ids = {
+        int(row[0])
+        for row in bind.execute(
+            sa.text(
+                f"SELECT id FROM {PUBLIC_SCHEMA}.approval_instances "
+                f"WHERE applicant_user_id IN ({id_list})"
+            )
+        ).fetchall()
+    }
+    for row in bind.execute(
+        sa.text(
+            f"SELECT id, approver_user_id, approval_pk FROM {PUBLIC_SCHEMA}.approval_steps "
+            f"WHERE approver_user_id IN ({id_list})"
+        )
+    ).fetchall():
+        step_id, approver_user_id, approval_pk = row
+        if int(approval_pk) not in own_instance_ids:
+            raise RuntimeError(
+                "注册审批链痕迹核对失败：该账号是**别人**审批的审批人，"
+                f"那一步是业务数据，拒绝删除（step id={step_id}，"
+                f"approval_pk={approval_pk}）"
+            )
+
+
+def _purge_registration_traces(bind: sa.Connection, user_ids: list[int]) -> None:
+    """清掉候选账号**自己的**注册审批链痕迹（按外键依赖顺序，先子后父）。
+
+    顺序（踩错就撞外键）：
+
+    ① ``approval_action_logs``（审批实例上的动作：它自己的 submit + 管理员的 reject）
+    ② ``approval_steps``（审批实例的步骤）
+    ③ ``approval_instances``（审批实例本体）
+    ④ ``employee_task_logs``（待办的日志）
+    ⑤ ``employee_task_participants``（待办的参与人，生产实测 0 行，防御性清理）
+    ⑥ ``employee_tasks``（待办本体）
+
+    ⚠️ 删除条件都**带上两把钥匙**（actor/created_by 与 approval_pk/task_pk），
+    避免「同一行的两个引用键只清了一个」留下残留引用。
+    """
+    if not user_ids:
+        return
+    id_list = ", ".join(str(user_id) for user_id in user_ids)
+
+    instance_ids = (
+        f"(SELECT id FROM {PUBLIC_SCHEMA}.approval_instances "
+        f"WHERE applicant_user_id IN ({id_list}))"
+    )
+    task_ids = (
+        f"(SELECT id FROM {CORE_SCHEMA}.employee_tasks "
+        f"WHERE created_by IN ({id_list}))"
+    )
+
+    bind.execute(
+        sa.text(
+            f"DELETE FROM {PUBLIC_SCHEMA}.approval_action_logs "
+            f"WHERE approval_pk IN {instance_ids} "
+            f"OR actor_user_id IN ({id_list})"
+        )
+    )
+    bind.execute(
+        sa.text(
+            f"DELETE FROM {PUBLIC_SCHEMA}.approval_steps "
+            f"WHERE approval_pk IN {instance_ids}"
+        )
+    )
+    bind.execute(
+        sa.text(
+            f"DELETE FROM {PUBLIC_SCHEMA}.approval_instances "
+            f"WHERE applicant_user_id IN ({id_list})"
+        )
+    )
+    bind.execute(
+        sa.text(
+            f"DELETE FROM {CORE_SCHEMA}.employee_task_logs "
+            f"WHERE task_pk IN {task_ids} "
+            f"OR actor_user_id IN ({id_list})"
+        )
+    )
+    bind.execute(
+        sa.text(
+            f"DELETE FROM {CORE_SCHEMA}.employee_task_participants "
+            f"WHERE task_pk IN {task_ids}"
+        )
+    )
+    bind.execute(
+        sa.text(
+            f"DELETE FROM {CORE_SCHEMA}.employee_tasks "
+            f"WHERE created_by IN ({id_list})"
+        )
+    )
 
 
 def upgrade() -> None:
@@ -405,12 +601,16 @@ def upgrade() -> None:
 
     # --- 5) 清理残留测试账号（347 个）----------------------------------------
     condition = _residual_test_account_condition()
-
-    # 5.1) 前置检查：业务表若还引用着这些账号 ⇒ 报错停下（不默默删业务数据）
     candidate_ids = _candidate_user_ids(bind, condition)
+
+    # 5.1) 前置检查 A：注册审批链里的行必须是候选账号**自己**的注册痕迹。
+    #      ⚠️ 证明不了 ⇒ 直接停下（不删任何东西）。
+    _assert_registration_traces_are_account_own(bind, candidate_ids)
+
+    # 5.2) 前置检查 B：业务表若还引用着这些账号 ⇒ 报错停下（不默默删业务数据）
     _assert_no_unexpected_references(bind, candidate_ids)
 
-    # 5.2) 先留痕（万一后面失败，也知道清到哪儿了）
+    # 5.3) 先留痕（万一后面失败，也知道清到哪儿了）
     bind.execute(
         sa.text(
             f"INSERT INTO {CORE_SCHEMA}.{PURGE_LOG_TABLE} "
@@ -421,7 +621,10 @@ def upgrade() -> None:
         {"reason": PURGE_REASON},
     )
 
-    # 5.3) 再删账号级痕迹（它们的 user_id 外键指向 dim_users ⇒ 不先删会撞外键）
+    # 5.4) 清「注册审批链」痕迹（先子后父，见 _purge_registration_traces）
+    _purge_registration_traces(bind, candidate_ids)
+
+    # 5.5) 再删其余账号级痕迹（它们的 user_id 外键指向 dim_users ⇒ 不先删会撞外键）
     for schema, table, column in ACCOUNT_TRACE_TABLES:
         bind.execute(
             sa.text(
@@ -431,7 +634,11 @@ def upgrade() -> None:
             )
         )
 
-    # 5.4) 最后删账号本体
+    # 5.6) 删账号本体**之前再查一遍**：此刻不该有任何残留引用
+    #      （skip_tables=set() ⇒ 一张表都不放过）⇒ 有残留就停下，绝不硬删。
+    _assert_no_unexpected_references(bind, candidate_ids, skip_tables=set())
+
+    # 5.7) 最后删账号本体
     bind.execute(sa.text(f"DELETE FROM {CORE_SCHEMA}.dim_users AS u WHERE {condition}"))
 
 

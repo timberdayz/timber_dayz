@@ -415,21 +415,33 @@
 
 ## 6. 防回归守护测试（随每批一起提交）
 
-| 测试 | 守住什么 |
-|---|---|
-| `test_employee_status_vocabulary.py` | 后端状态取值只在词表内；DB CHECK 约束生效；前端 `constants/hr.js` 与后端词表一致 |
-| `test_employee_offboard_flow.py` | 办理离职事务完整性：五个动作全做或全不做 |
-| `test_last_payroll_month_boundary.py` | 月份边界两侧的行为：≤ 可录可确认、> 不可生成不可录；**试用期与停薪留职一律不发薪** |
-| `test_payroll_confirm_after_offboard.py` | **离职后最后一张工资单仍可确认与发放**（防误伤的看门狗） |
-| `test_payroll_void_flow.py` | 作废：draft→void 成功；confirmed/paid 不可作废；已 void 不可重复作废、不可编辑、不可确认、不可发放；作废单不参与汇总 |
-| `test_employee_regularization.py` | 转正：probation→active、写转正日期；非 probation 不可转正 |
-| `test_visitor_to_employee_upgrade.py` | 访客三路径：审批即建档 / 显式转正 / 补齐自动升级；合并只填空白不覆盖 |
-| `test_employee_user_binding_consistency.py` | 双向绑定校验一致；冲突不静默覆盖；一号一人；离职员工不可被新账号绑定 |
-| `test_employee_delete_guard_scope.py` | 删除守卫只看未来归属，不看历史 |
-| `test_hr_status_label_consistency.py` | 所有前端 HR 页面不再出现裸英文状态值 |
-| `test_hr_ssot_single_judgement_point.py` | **SSOT 看门狗**：后端薪资相关代码里不得出现裸写的 `status == "active"`（必须经 `hr_employee_lifecycle` 判定） |
+> ⚠️ **落地形态与初稿不同**：初稿按「一个守护一个文件」列了 11 个文件；
+> 实际落地时发现同一份规则散成 11 个文件，正是这个仓库 2026-11-13 清理过的老毛病
+> （"同一份规则维护两遍"）。所以**合并成 3 个文件**，覆盖范围不变、入口更少。
+
+| 计划中的守护 | 实际落地（3 个文件） | 守住什么 |
+|---|---|---|
+| `test_employee_status_vocabulary.py` | `test_hr_lifecycle_contract.py`（前后端词表逐值一致）+ `test_hr_employee_lifecycle.py`（迁移加 CHECK、词表、边界判定） | 后端状态取值只在词表内；DB CHECK 约束生效；前端 `constants/hr.js` 与后端词表一致 |
+| `test_employee_offboard_flow.py` | `test_hr_employee_lifecycle.py::test_offboard_performs_all_lifecycle_actions_in_one_transaction` | 办理离职事务完整性：六个动作全做或全不做 |
+| `test_last_payroll_month_boundary.py` | `test_hr_employee_lifecycle.py`（边界两侧 6 个情形）+ `test_hr_binding_and_payroll_boundary.py`（人工录入 409） | 月份边界两侧的行为：≤ 可录可确认、> 不可生成不可录；**试用期与停薪留职一律不发薪** |
+| `test_payroll_confirm_after_offboard.py` | `test_hr_binding_and_payroll_boundary.py::test_confirm_payroll_record_allows_departed_employee_final_payroll` 等两条 | **离职后最后一张工资单仍可确认与发放**（防误伤的看门狗） |
+| `test_payroll_void_flow.py` | `test_hr_binding_and_payroll_boundary.py`（作废 4 条）+ `test_hr_lifecycle_contract.py`（作废不锁月 / 可撤销 / 不被刷新改写） | 作废：draft→void 成功；confirmed/paid 不可作废；已 void 不可重复作废、不可编辑、不可确认、不可发放；作废单不参与汇总 |
+| `test_employee_regularization.py` | `test_hr_employee_lifecycle.py::test_regularize_*` | 转正：probation→active、写转正日期；非 probation 不可转正 |
+| `test_visitor_to_employee_upgrade.py` | `test_hr_employee_lifecycle.py::test_promote_visitor_*` / `test_merge_visitor_*` / `test_hr_binding_and_payroll_boundary.py::test_approve_user_creates_employee_profile_and_binds_account` | 访客三路径：审批即建档 / 显式转正 / 补齐自动升级；合并只填空白不覆盖 |
+| `test_employee_user_binding_consistency.py` | `test_hr_binding_and_payroll_boundary.py`（绑定 5 条）+ `test_hr_lifecycle_contract.py`（冲突点名占用者） | 双向绑定校验一致；冲突不静默覆盖；一号一人；离职员工不可被新账号绑定 |
+| `test_employee_delete_guard_scope.py` | `test_hr_lifecycle_contract.py::test_delete_employee_guard_only_blocks_future_active_assignments` | 删除守卫只看未来归属，不看历史 |
+| `test_hr_status_label_consistency.py` | `frontend/scripts/hrUserManagementUi.test.mjs`（前端 11 条）+ `test_hr_lifecycle_contract.py::test_no_page_hardcodes_its_own_status_mapping` | 所有前端 HR 页面不再出现裸英文状态值 |
+| `test_hr_ssot_single_judgement_point.py` | `test_hr_lifecycle_contract.py::test_ssot_module_is_the_single_source_for_the_vocabularies` | **SSOT 看门狗**：三套词表只在 `hr_employee_lifecycle.py` 定义一次；薪资路由不许硬编码锁定集合字面量 |
 
 > 现有 `test_hr_employee_identity.py::test_me_profile_auto_created_record_defaults_to_visitor` 需同步更新：方案 A 落地后，访客自动建档不再是主路径，但**边缘路径仍需保留**，该测试的意图（保留 visitor 兜底）不变，只需补充说明。
+
+> ⚠️ **CI 入册的两处坑（2026-11-20 实测）**：
+> ① 根契约清单（no DB）里**只放纯同步用例** —— `test_hr_binding_and_payroll_boundary.py` 的 22 个
+> async 用例被误收进去，CI 钉的 pytest-asyncio 0.21.1 会拿到**已关闭**的 session 事件循环
+> ⇒ 22 个用例报 `RuntimeError: Event loop is closed`（CI run 44580189720），
+> 已移出清单（改由「本次改动到的测试文件」通道 + 全量回归覆盖）；
+> ② 迁移往返演练里的 **head 不得写死** —— 每加一个迁移就红一次，
+> 且红的跟被测迁移毫无关系 ⇒ 改为从链上解析并断言「只有一个 head」。
 
 ---
 
@@ -523,4 +535,69 @@
 但**仍按锁定处理** —— 宁可多锁，不可漏锁：漏掉它会让某个环境残留的历史工资单被整月重算
 **静默改掉**（2026-11-05 那次「界面显示已锁定、后台却允许整月重算」事故的同款后果）。
 它同时留在工资单词表里（只读展示），前端 `constants/hr.js` 与后端词表**逐值一致**。
+
+---
+
+## 11. v7.35.0 首次部署被挡住（2026-11-20）—— 保护生效，修完发 v7.35.1
+
+### 11.1 发生了什么
+
+部署流水线 run **44580353110**：镜像构建推送全绿 → `Deploy to Production (Tag Release)` **失败**。
+
+失败点：迁移 `current_schema_20261240_hr_employee_lifecycle` 在删 347 个残留测试账号**之前**的
+前置检查报错停下：
+
+> 残留测试账号仍被业务表引用，拒绝删除（避免误删业务数据）：
+> `core.employee_task_logs.actor_user_id`（16 行）；`core.employee_tasks.created_by`（16 行）；
+> `public.approval_action_logs.actor_user_id`（16 行）；`public.approval_instances.applicant_user_id`（16 行）
+
+**这正是那道保护该做的事** —— 迁移没有默默删业务数据，而是停下来报清是哪张表、还剩多少行。
+生产零影响：迁移整体回滚（版本表仍是 `current_schema_20261239_cost_floor_caliber_closure`），
+部署脚本回滚到原容器，生产全程运行 **v7.34.0**。
+
+### 11.2 根因：痕迹清单少算了一层「注册审批链」
+
+生产只读核对查清：那 16 个账号（`user_id` 371~390，全是 `ratelimit_test_` / `approval_workflow_` /
+`approve_test_` / `reject_test_` / `pending_login_` / `lock_test_` 这类）**走过注册审批流程**，
+于是留下五张表上的痕迹：注册审批实例、审批动作日志（它自己的 `submit` + **管理员的 `reject`**）、
+审批步骤、自动生成的「待审批」待办、待办日志。
+
+⇒ 原迁移只清了「审批日志 / 审计痕迹 / 会话 / 角色绑定」四张表，**漏了这一层** ⇒ 撞外键 ⇒ 停下。
+
+### 11.3 修法（v7.35.1）
+
+- 补上这层痕迹的清理，**先子后父**：动作日志 → 步骤 → 审批实例 → 待办日志 → 待办参与人 → 待办；
+- 删除条件**精确限定在候选账号自己的注册审批上**（按 `approval_pk` / `task_pk` 限定，
+  不按「谁点的」一刀切）—— 管理员在**别人**审批上的动作不许被删；
+- 删之前**逐行核对**：审批实例必须是 `user_registration_approval` 且 `business_key` 与申请人对得上；
+  待办必须是「它自己的注册审批待办」；候选账号若是**别人**审批的审批人 ⇒ 报错停下；
+- 删账号本体**之前再查一遍**（一张表都不放过）：此刻还不该有任何残留引用，有就停下，绝不硬删。
+
+### 11.4 验证（生产真实数据回放）
+
+把生产 `core.dim_users`（391）、`public.approval_instances`（28）、`public.approval_action_logs`（50）、
+`public.approval_steps`（28）、`core.employee_tasks`（38）、`core.employee_task_logs`（38）、
+`public.user_sessions`（956）**原样灌进本地隔离临时库**再跑本迁移：
+
+- 退出码 **0**；清理 **347** 个账号（与业务侧批准的数量**完全一致**）、留痕表 347 条；
+- 审批链 28→12 实例 / 50→18 动作日志 / 28→12 步骤 / 38→22 待办 / 38→22 待办日志
+  ⇒ 删掉的**正好是测试账号自己那部分**；
+- **真实员工账号一个没动**：`admin` / `xihong` / `zhangsan` / `youke` / `lisi` / `yehaichuan` /
+  `qaadmin` / `WEI` / `HJJ` / `DY11_` / `18976425991` / `user_XiaoZeng` / `Debug_Fate` /
+  `perf_load_admin` / `playwright_smoke_admin` / `codex_admin_temp` 全部保留；
+  另有 28 个「命中前缀但不满足另外三条判据」的账号也全部保留（判据是**四条全中**才清）；
+- **反向演练（防误伤）**：给测试账号造一个**不属于它自己注册审批**的业务待办
+  ⇒ 迁移**报错停下**、且**数据库原样未变**（失败关闭）。
+
+### 11.5 方法论：为什么这次失败是「对」的
+
+第一次部署就撞上「生产里有本地库没有的数据形状」（本地库那 347 个候选账号**没有任何审批痕迹**，
+所以本地往返演练全绿）。⇒ **本地绿 ≠ 生产绿**，只有把生产真实数据回放到隔离库才看得见。
+
+三条可复用的做法：
+
+1. 清理类迁移的前置检查要**报出表名与行数**（这次正是靠它才定位到少算了一层）；
+2. 验证要**用生产真实数据回放**，而不是「按本地形状造数据」；
+3. 反向用例（**证明不了就停下**）和正向用例同等重要 —— 这次的防误伤保证就靠它。
+
 
