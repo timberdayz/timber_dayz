@@ -20,15 +20,12 @@ def test_financial_management_page_exposes_monthly_profit_settlement_center():
     assert "审批通过" in text
     assert "回退草稿" in text
     assert "调整原因" in text
-    assert "投资人ID" in text
-    assert "结算ID" in text
 
 
 def test_financial_management_page_displays_budget_inputs_as_percentages():
     text = _read_settlement_sources()
 
     assert "人员成本预算(%)" in text
-    assert "跟投收益预算(%)" in text
     assert "公司留存预算(%)" in text
     assert ':formatter="formatRatioInput"' in text
     assert ':parser="parseRatioInput"' in text
@@ -53,9 +50,3 @@ def test_finance_settlement_store_exposes_monthly_profit_settlement_state_and_ac
     assert "updateMonthlyProfitSettlementTargets" in text
     assert "approveMonthlyProfitSettlement" in text
     assert "reopenMonthlyProfitSettlement" in text
-
-
-def test_financial_management_page_queries_follow_investments_with_period_month():
-    text = Path("frontend/src/domains/business/views/FinancialManagement.vue").read_text(encoding="utf-8")
-
-    assert "period_month: selectedMonth.value" in text

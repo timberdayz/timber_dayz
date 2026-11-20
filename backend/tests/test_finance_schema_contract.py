@@ -7,9 +7,6 @@ from modules.core.db import (
     EmployeeLaborCostAllocation,
     FactExpensesAllocated,
     FactExpensesMonth,
-    FollowInvestment,
-    FollowInvestmentDetail,
-    FollowInvestmentSettlement,
     FxRate,
     GLAccount,
     GRNHeader,
@@ -35,7 +32,6 @@ from modules.core.db import (
 
 MonthlyProfitSettlement = getattr(core_db, "MonthlyProfitSettlement", None)
 MonthlyProfitPersonnelDetail = getattr(core_db, "MonthlyProfitPersonnelDetail", None)
-MonthlyProfitFollowDetail = getattr(core_db, "MonthlyProfitFollowDetail", None)
 MonthlyProfitAdjustment = getattr(core_db, "MonthlyProfitAdjustment", None)
 MonthlyProfitShopBasisSnapshot = getattr(core_db, "MonthlyProfitShopBasisSnapshot", None)
 MonthlyProfitEmployeeCommissionSnapshot = getattr(core_db, "MonthlyProfitEmployeeCommissionSnapshot", None)
@@ -51,9 +47,6 @@ MonthlyProfitPayrollSnapshot = getattr(core_db, "MonthlyProfitPayrollSnapshot", 
         (EmployeeLaborCostAllocation, "employee_labor_cost_allocations"),
         (FactExpensesAllocated, "fact_expenses_allocated_day_shop_sku"),
         (FactExpensesMonth, "fact_expenses_month"),
-        (FollowInvestment, "follow_investments"),
-        (FollowInvestmentSettlement, "follow_investment_settlements"),
-        (FollowInvestmentDetail, "follow_investment_details"),
         (FxRate, "fx_rates"),
         (GLAccount, "gl_accounts"),
         (GRNHeader, "grn_headers"),
@@ -89,7 +82,6 @@ def test_finance_tables_bind_explicitly_to_finance_schema(model, table_name):
     [
         ("MonthlyProfitSettlement", MonthlyProfitSettlement, "monthly_profit_settlements"),
         ("MonthlyProfitPersonnelDetail", MonthlyProfitPersonnelDetail, "monthly_profit_personnel_details"),
-        ("MonthlyProfitFollowDetail", MonthlyProfitFollowDetail, "monthly_profit_follow_details"),
         ("MonthlyProfitAdjustment", MonthlyProfitAdjustment, "monthly_profit_adjustments"),
         ("MonthlyProfitShopBasisSnapshot", MonthlyProfitShopBasisSnapshot, "monthly_profit_shop_basis_snapshots"),
         ("MonthlyProfitEmployeeCommissionSnapshot", MonthlyProfitEmployeeCommissionSnapshot, "monthly_profit_employee_commission_snapshots"),
@@ -115,17 +107,13 @@ def test_finance_internal_foreign_keys_target_finance_tables():
     journal_line_targets = {fk.target_fullname for fk in JournalEntryLine.__table__.foreign_keys}
     logistics_cost_targets = {fk.target_fullname for fk in LogisticsCost.__table__.foreign_keys}
     tax_voucher_targets = {fk.target_fullname for fk in TaxVoucher.__table__.foreign_keys}
-    follow_investment_settlement_targets = {fk.target_fullname for fk in FollowInvestmentSettlement.__table__.foreign_keys}
-    follow_investment_detail_targets = {fk.target_fullname for fk in FollowInvestmentDetail.__table__.foreign_keys}
     assert MonthlyProfitPersonnelDetail is not None, "MonthlyProfitPersonnelDetail model is missing from modules.core.db"
-    assert MonthlyProfitFollowDetail is not None, "MonthlyProfitFollowDetail model is missing from modules.core.db"
     assert MonthlyProfitAdjustment is not None, "MonthlyProfitAdjustment model is missing from modules.core.db"
     assert MonthlyProfitShopBasisSnapshot is not None, "MonthlyProfitShopBasisSnapshot model is missing from modules.core.db"
     assert MonthlyProfitEmployeeCommissionSnapshot is not None, "MonthlyProfitEmployeeCommissionSnapshot model is missing from modules.core.db"
     assert MonthlyProfitEmployeePerformanceSnapshot is not None, "MonthlyProfitEmployeePerformanceSnapshot model is missing from modules.core.db"
     assert MonthlyProfitPayrollSnapshot is not None, "MonthlyProfitPayrollSnapshot model is missing from modules.core.db"
     monthly_profit_personnel_detail_targets = {fk.target_fullname for fk in MonthlyProfitPersonnelDetail.__table__.foreign_keys}
-    monthly_profit_follow_detail_targets = {fk.target_fullname for fk in MonthlyProfitFollowDetail.__table__.foreign_keys}
     monthly_profit_adjustment_targets = {fk.target_fullname for fk in MonthlyProfitAdjustment.__table__.foreign_keys}
     monthly_profit_shop_basis_snapshot_targets = {fk.target_fullname for fk in MonthlyProfitShopBasisSnapshot.__table__.foreign_keys}
     monthly_profit_employee_commission_snapshot_targets = {fk.target_fullname for fk in MonthlyProfitEmployeeCommissionSnapshot.__table__.foreign_keys}
@@ -145,11 +133,7 @@ def test_finance_internal_foreign_keys_target_finance_tables():
     assert "finance.grn_headers.grn_id" in logistics_cost_targets
     assert "finance.invoice_headers.invoice_id" in logistics_cost_targets
     assert "finance.invoice_headers.invoice_id" in tax_voucher_targets
-    assert "finance.shop_profit_basis.id" in follow_investment_settlement_targets
-    assert "finance.follow_investment_settlements.id" in follow_investment_detail_targets
     assert "finance.monthly_profit_settlements.id" in monthly_profit_personnel_detail_targets
-    assert "finance.monthly_profit_settlements.id" in monthly_profit_follow_detail_targets
-    assert "finance.follow_investment_settlements.id" in monthly_profit_follow_detail_targets
     assert "finance.monthly_profit_settlements.id" in monthly_profit_adjustment_targets
     assert "finance.monthly_profit_settlements.id" in monthly_profit_shop_basis_snapshot_targets
     assert "finance.monthly_profit_settlements.id" in monthly_profit_employee_commission_snapshot_targets
@@ -163,7 +147,6 @@ def test_finance_external_foreign_keys_keep_core_targets():
     tax_report_targets = {fk.target_fullname for fk in TaxReport.__table__.foreign_keys}
     tax_voucher_targets = {fk.target_fullname for fk in TaxVoucher.__table__.foreign_keys}
     journal_entry_targets = {fk.target_fullname for fk in JournalEntry.__table__.foreign_keys}
-    follow_investment_targets = {fk.target_fullname for fk in FollowInvestment.__table__.foreign_keys}
     shop_profit_basis_targets = {fk.target_fullname for fk in ShopProfitBasis.__table__.foreign_keys}
 
     assert "core.dim_vendors.vendor_code" in po_header_targets
@@ -171,7 +154,6 @@ def test_finance_external_foreign_keys_keep_core_targets():
     assert "core.dim_fiscal_calendar.period_code" in tax_report_targets
     assert "core.dim_fiscal_calendar.period_code" in tax_voucher_targets
     assert "core.dim_fiscal_calendar.period_code" in journal_entry_targets
-    assert "core.dim_users.user_id" in follow_investment_targets
     assert "core.dim_fiscal_calendar.period_code" in shop_profit_basis_targets
 
 

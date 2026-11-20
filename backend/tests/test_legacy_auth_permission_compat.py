@@ -14,12 +14,9 @@ def test_legacy_has_permission_uses_explicit_permissions_payload_first():
 
 def test_legacy_has_permission_falls_back_to_current_system_role_defaults():
     manager = {"role": "manager"}
-    investor = {"role": "investor"}
 
     assert has_permission(manager, "order-management") is True
     assert has_permission(manager, "sales-detail") is False
-    assert has_permission(investor, "my-follow-investment-income") is True
-    assert has_permission(investor, "personal-settings") is False
 
 
 def test_legacy_has_permission_keeps_admin_override():

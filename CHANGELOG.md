@@ -1,4 +1,32 @@
 # Changelog - 西虹 ERP 系统
+## [Unreleased] - 2026-11-21 - 跟投模块整体下线（前端 + 测试 + 文档）
+
+业务确认无真实投资人，跟投收益模块整体下线，财务结算中心后续改造为只读「月度利润看板」。
+本条只记录**前端 + 测试 + 文档**侧的下线（后端下线另行记录）。
+
+### 前端下线
+
+- 删除跟投页面 `frontend/src/domains/business/views/hr/MyFollowInvestmentIncome.vue`；
+- 摘除路由 `/my-follow-investment-income`（含标题「我的跟投收益」）与菜单项/显示名；
+- 摘除 `investor` 角色定义、`'投资人': 'investor'` 映射，以及 admin/manager/operator/finance
+  四个角色里已失效的 `my-follow-investment-income` 权限点；
+- 删除 `frontend/src/api/finance.js` 的 10 个跟投 API 方法；
+- 删除 `frontend/src/stores/financeSettlement.js` 的 4 个跟投切片
+  （`followInvestmentSettlement` / `followInvestments` / `followInvestmentSettlements` /
+  `followInvestmentSettlementDetails`）与 9 个跟投 action，并清理 `monthlyProfitSettlement.data.follow_details`；
+- 摘除结算中心内的跟投子视图（跟投收益试算 / 跟投记录 / 结算台账）及依赖跟投数据的
+  店铺状态判定（`hasFollowInvestment` / `hasSettlement` / `canSettle` / `pendingData` / `hasException`）。
+
+### 测试与文档
+
+- 删除 7 个跟投专属测试文件（5 个后端专属 + `tests/test_follow_investment_finance_schema_contract.py`
+  + `frontend/scripts/myFollowInvestmentIncomeView.test.mjs`）与 `test_investor_role_frontend_contract.py`；
+- 改写 8 个含跟投引用的测试（路由注册、财务 schema 契约、结算中心页面契约、月结前端契约、
+  遗留鉴权兼容、系统角色服务、角色菜单快照、领域桥接清单）；
+- `docs/guides/APPROVAL_CENTER_RUNBOOK.md` 摘除跟投审批模板登记；
+  `docs/guides/ENGINEERING_STATUS.md` 登记模块下线；
+  `docs/guides/FOLLOW_INVESTMENT_AND_SETTLEMENT_ACCEPTANCE_CHECKLIST_2026-05-30.md` 整份标注作废。
+
 ## [v7.35.1] - 2026-11-20 - 人力 + 用户管理发版修正：清理残留测试账号时补齐「注册审批链」痕迹
 
 > **这是 v7.35.0 的发版修正**（补丁号）。v7.35.0 的**生产部署被迁移的前置检查挡住**，

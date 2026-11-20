@@ -123,6 +123,21 @@ Key files:
     (`template_id` 指向已删除的模板); 主表 254 行只有 199 个不同 `template_name`
     (模板族按版本并存) ⇒ 任何按 id 或按模板名做的跨库比对都会失真, **必须用业务键**。
 
+## Retired Modules
+
+- **跟投模块 (follow investment) — 已下线 (2026-11-21)**
+  - 业务确认无真实投资人，跟投收益试算 / 跟投记录 / 结算台账整体下线。
+  - 前端已摘除：`MyFollowInvestmentIncome.vue` 页面、路由 `/my-follow-investment-income`、
+    对应菜单项与显示名、`frontend/src/api/finance.js` 的 10 个跟投 API、
+    `frontend/src/stores/financeSettlement.js` 的 4 个跟投切片与 9 个跟投 action；
+    `investor` 角色、`'投资人': 'investor'` 映射与 `my-follow-investment-income` 权限点同步摘除。
+  - 结算中心（`/financial-management`）内的跟投子视图一并摘除；该页面后续将改造为
+    只读「月度利润看板」，设计见
+    [`2026-11-21-finance-profit-dashboard-design.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/superpowers/specs/2026-11-21-finance-profit-dashboard-design.md)。
+  - 验收清单
+    [`FOLLOW_INVESTMENT_AND_SETTLEMENT_ACCEPTANCE_CHECKLIST_2026-05-30.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/FOLLOW_INVESTMENT_AND_SETTLEMENT_ACCEPTANCE_CHECKLIST_2026-05-30.md)
+    已整份标注作废。
+
 ## Practical Guidance
 
 1. Do not revert default CI back to full-repository lint/test scanning

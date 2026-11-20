@@ -70,7 +70,7 @@ test('visible menu snapshot stays stable for current non-admin roles', () => {
     { title: '销售与分析', items: ['/sales-dashboard-v3', '/sales/order-management'] },
     { title: '商品中心', items: ['/product-center'] },
     { title: '财务管理', items: ['/financial-management', '/expense-management', '/b-cost-analysis'] },
-    { title: '人力资源', items: ['/employee-management', '/my-follow-investment-income'] },
+    { title: '人力资源', items: ['/employee-management'] },
     { title: '审批中心', items: ['/my-tasks', '/my-requests', '/approval-history'] },
     { title: '消息中心', items: ['/system-notifications', '/alerts', '/message-settings'] },
     { title: '系统管理', items: ['/personal-settings'] },
@@ -82,7 +82,7 @@ test('visible menu snapshot stays stable for current non-admin roles', () => {
     { title: '工作台', items: ['/business-overview'] },
     { title: '销售与分析', items: ['/sales-dashboard-v3', '/sales/order-management'] },
     { title: '商品中心', items: ['/product-center'] },
-    { title: '人力资源', items: ['/employee-management', '/my-follow-investment-income'] },
+    { title: '人力资源', items: ['/employee-management'] },
     { title: '审批中心', items: ['/my-tasks', '/my-requests', '/approval-history'] },
     { title: '消息中心', items: ['/system-notifications', '/alerts', '/message-settings'] },
     { title: '系统管理', items: ['/personal-settings'] },
@@ -95,18 +95,12 @@ test('visible menu snapshot stays stable for current non-admin roles', () => {
     { title: '销售与分析', items: ['/sales-dashboard-v3', '/sales/order-management'] },
     { title: '商品中心', items: ['/product-center'] },
     { title: '财务管理', items: ['/financial-management', '/expense-management', '/b-cost-analysis'] },
-    { title: '人力资源', items: ['/employee-management', '/my-follow-investment-income'] },
+    { title: '人力资源', items: ['/employee-management'] },
     { title: '审批中心', items: ['/my-tasks', '/my-requests', '/approval-history'] },
     { title: '消息中心', items: ['/system-notifications', '/alerts', '/message-settings'] },
     { title: '系统管理', items: ['/personal-settings'] },
     { title: '帮助中心', items: ['/user-guide', '/video-tutorials', '/faq'] },
     { title: '培训管理', items: ['/my-training'] },
-  ])
-
-  assert.deepEqual(getVisibleMenuSnapshot('investor'), [
-    { title: '工作台', items: ['/business-overview'] },
-    { title: '人力资源', items: ['/my-follow-investment-income'] },
-    { title: '帮助中心', items: ['/user-guide', '/video-tutorials', '/faq'] },
   ])
 
   assert.deepEqual(getVisibleMenuSnapshot('tourist'), [

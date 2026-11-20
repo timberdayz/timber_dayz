@@ -28,19 +28,18 @@
    - 结算重建成功后自动提交审批实例
    - 财务 / 管理员在结算页面批准时回写审批中心
 
-3. 跟投结算审批
-   - 结算计算成功且返回 settlement id 后自动提交审批实例
-   - 财务 / 管理员在结算页面批准时回写审批中心
-
 ## 当前模板列表
 
 审批模板当前至少包含：
 
 - `user_registration_approval`
 - `monthly_profit_settlement_approval`
-- `follow_investment_settlement_approval`
 
 其他模板会随着后续业务接入继续扩展。
+
+> ⚠️ **跟投结算审批已下线**（2026-11-21）：跟投模块整体下线，`follow_investment_settlement_approval` 模板与
+> `follow_investment_settlement` 审批类型不再登记。月度利润结算审批（`monthly_profit_settlement_approval`）仍保留，
+> 随看板化改造在后续批次处理。
 
 ## 当前已知限制
 
@@ -90,7 +89,7 @@
 后端：
 
 ```powershell
-python -m pytest backend/tests/test_approval_center_schema.py backend/tests/test_approval_center_service.py backend/tests/test_approval_center_routes.py backend/tests/test_user_registration_api.py backend/tests/test_monthly_profit_settlement_routes.py backend/tests/test_follow_investment_routes.py -q
+python -m pytest backend/tests/test_approval_center_schema.py backend/tests/test_approval_center_service.py backend/tests/test_approval_center_routes.py backend/tests/test_user_registration_api.py backend/tests/test_monthly_profit_settlement_routes.py -q
 ```
 
 前端：
