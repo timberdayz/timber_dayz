@@ -21,12 +21,20 @@ DEFAULT_TESTS = [
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run production migration contract tests")
+    parser = argparse.ArgumentParser(
+        description="Run production migration contract tests"
+    )
     parser.add_argument("--db-host", default=os.getenv("TEST_DB_HOST", "127.0.0.1"))
     parser.add_argument("--db-port", default=os.getenv("TEST_DB_PORT", "5432"))
-    parser.add_argument("--db-user", default=os.getenv("TEST_DB_USER", "migration_test_user"))
-    parser.add_argument("--db-password", default=os.getenv("TEST_DB_PASSWORD", "migration_test_pass"))
-    parser.add_argument("--db-name", default=os.getenv("TEST_DB_NAME", "migration_test_db"))
+    parser.add_argument(
+        "--db-user", default=os.getenv("TEST_DB_USER", "migration_test_user")
+    )
+    parser.add_argument(
+        "--db-password", default=os.getenv("TEST_DB_PASSWORD", "migration_test_pass")
+    )
+    parser.add_argument(
+        "--db-name", default=os.getenv("TEST_DB_NAME", "migration_test_db")
+    )
     parser.add_argument("--timeout-seconds", type=int, default=30)
     return parser.parse_args(argv)
 
@@ -34,7 +42,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _run_command(command: list[str], *, env: dict[str, str] | None = None) -> None:
     completed = subprocess.run(command, env=env, check=False)
     if completed.returncode != 0:
-        raise RuntimeError(f"Command failed ({completed.returncode}): {' '.join(command)}")
+        raise RuntimeError(
+            f"Command failed ({completed.returncode}): {' '.join(command)}"
+        )
 
 
 def postgres_ready_with_sqlalchemy(
@@ -45,9 +55,7 @@ def postgres_ready_with_sqlalchemy(
     db_password: str,
     db_name: str,
 ) -> bool:
-    database_url = (
-        f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-    )
+    database_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
     engine = create_engine(database_url)
     try:
         with engine.connect() as conn:

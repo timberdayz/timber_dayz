@@ -56,9 +56,15 @@ async def test_get_monthly_profit_settlement_route_returns_service_payload(monke
     app.include_router(module.router)
     app.dependency_overrides[get_current_user] = lambda: _make_user("finance")
     app.dependency_overrides[get_async_db] = _override_db
-    monkeypatch.setattr(module.domain_module, "MonthlyProfitSettlementService", lambda db: _ServiceStub())
+    monkeypatch.setattr(
+        module.domain_module,
+        "MonthlyProfitSettlementService",
+        lambda db: _ServiceStub(),
+    )
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
         response = await client.get(
             "/api/finance/monthly-profit-settlement",
             params={"period_month": "2026-04"},

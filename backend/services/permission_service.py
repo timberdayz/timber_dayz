@@ -457,9 +457,13 @@ class PermissionService:
         return SYSTEM_PERMISSIONS.copy()
 
     @staticmethod
-    def get_permissions_by_category(category: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_permissions_by_category(
+        category: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         if category:
-            return [item for item in SYSTEM_PERMISSIONS if item.get("category") == category]
+            return [
+                item for item in SYSTEM_PERMISSIONS if item.get("category") == category
+            ]
         return SYSTEM_PERMISSIONS.copy()
 
     @staticmethod

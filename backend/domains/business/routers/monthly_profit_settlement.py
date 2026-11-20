@@ -18,7 +18,9 @@ from backend.services.monthly_profit_settlement_service import (
 )
 from backend.utils.api_response import success_response
 
-router = APIRouter(prefix="/api/finance/monthly-profit-settlement", tags=["monthly-profit-settlement"])
+router = APIRouter(
+    prefix="/api/finance/monthly-profit-settlement", tags=["monthly-profit-settlement"]
+)
 _ALLOWED_ROLES = {"admin", "manager", "finance"}
 
 

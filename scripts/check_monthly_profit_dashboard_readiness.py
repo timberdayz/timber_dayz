@@ -95,7 +95,9 @@ LEGACY_BASIS_VERSIONS = tuple(
 # --------------------------------------------------------------------------
 
 
-def _fetch(conn: sa.Connection, sql: str, params: dict[str, Any] | None = None) -> list[Any]:
+def _fetch(
+    conn: sa.Connection, sql: str, params: dict[str, Any] | None = None
+) -> list[Any]:
     return list(conn.execute(sa.text(sql), params or {}))
 
 
@@ -219,9 +221,7 @@ def collect_monthly_amounts(
         params["month"] = month
     sql += " group by a.period_month order by a.period_month"
 
-    allocation_rows = [
-        dict(row._mapping) for row in _fetch_in(conn, sql, params)
-    ]
+    allocation_rows = [dict(row._mapping) for row in _fetch_in(conn, sql, params)]
 
     # 工资单 total_cost（旧审批落库口径：快照取的就是它，且**不看工资单状态**）
     payroll_sql = """
@@ -277,9 +277,7 @@ def collect_monthly_amounts(
         | set(locked_payroll_rows)
     )
 
-    allocation_by_month = {
-        str(item["period_month"]): item for item in allocation_rows
-    }
+    allocation_by_month = {str(item["period_month"]): item for item in allocation_rows}
 
     result: list[dict[str, Any]] = []
     for period in months:
@@ -292,9 +290,7 @@ def collect_monthly_amounts(
         allocation_old = float(
             allocation.get("allocation_without_version_filter") or 0.0
         )
-        allocation_new = float(
-            allocation.get("allocation_with_version_filter") or 0.0
-        )
+        allocation_new = float(allocation.get("allocation_with_version_filter") or 0.0)
         payroll_total_cost = float(payroll.get("payroll_total_cost") or 0.0)
 
         # 旧口径：净利润 = Σ利润基数 − 公司池二次扣减
@@ -314,7 +310,9 @@ def collect_monthly_amounts(
                 "allocation_version_filter_delta": allocation_old - allocation_new,
                 "payroll_rows": int(payroll.get("payroll_rows") or 0),
                 "payroll_total_cost": payroll_total_cost,
-                "locked_payroll_rows": int(locked_payroll.get("locked_payroll_rows") or 0),
+                "locked_payroll_rows": int(
+                    locked_payroll.get("locked_payroll_rows") or 0
+                ),
                 "locked_payroll_total_cost": float(
                     locked_payroll.get("locked_payroll_total_cost") or 0.0
                 ),
@@ -399,9 +397,7 @@ def render_report(
         for item in basis_distribution
     ]
     lines.append(
-        _table(
-            ["月份", "basis_version", "行数", "店铺数", "利润基数合计"], rows
-        )
+        _table(["月份", "basis_version", "行数", "店铺数", "利润基数合计"], rows)
     )
 
     lines.append("\n## B · 人力成本分摊表的计算版本分布\n")
@@ -511,9 +507,7 @@ def render_report(
         item for item in monthly if abs(item["company_pool_double_deducted"]) > 0.005
     ]
     months_with_version_mix = [
-        item
-        for item in monthly
-        if abs(item["allocation_version_filter_delta"]) > 0.005
+        item for item in monthly if abs(item["allocation_version_filter_delta"]) > 0.005
     ]
     months_with_snapshot_gap = [
         item
@@ -550,9 +544,7 @@ def render_report(
         "- **快照口径重复扣减**：{0}\n".format(
             (
                 "涉及 {0} 个月 —— 工资单 total_cost 与「绩效工资+提成」不等，"
-                "差额部分在利润基数里已经扣过一次".format(
-                    len(months_with_snapshot_gap)
-                )
+                "差额部分在利润基数里已经扣过一次".format(len(months_with_snapshot_gap))
             )
             if months_with_snapshot_gap
             else "**没有月份命中**"
@@ -560,9 +552,7 @@ def render_report(
     )
 
     months_negative_old = [
-        item
-        for item in monthly
-        if item["company_retained_old_snapshot"] < -0.005
+        item for item in monthly if item["company_retained_old_snapshot"] < -0.005
     ]
     months_negative_new = [
         item for item in monthly if item["company_retained_new"] < -0.005
@@ -639,7 +629,10 @@ def main(argv: list[str] | None = None) -> int:
         help="报告输出路径（默认写到 docs/reports/ 下带日期的文件）",
     )
     parser.add_argument(
-        "--print", dest="print_report", action="store_true", help="同时把报告打到 stdout"
+        "--print",
+        dest="print_report",
+        action="store_true",
+        help="同时把报告打到 stdout",
     )
     args = parser.parse_args(argv)
 

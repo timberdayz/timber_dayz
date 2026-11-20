@@ -29,8 +29,12 @@ def _sha256(path: Path) -> str:
 def main() -> int:
     problems: list[str] = []
     for left, right in PAIRS:
-        left_files = {p.relative_to(left).as_posix() for p in left.rglob("*") if p.is_file()}
-        right_files = {p.relative_to(right).as_posix() for p in right.rglob("*") if p.is_file()}
+        left_files = {
+            p.relative_to(left).as_posix() for p in left.rglob("*") if p.is_file()
+        }
+        right_files = {
+            p.relative_to(right).as_posix() for p in right.rglob("*") if p.is_file()
+        }
         for missing in sorted(left_files - right_files):
             problems.append(f"missing in {right}: {missing}")
         for missing in sorted(right_files - left_files):

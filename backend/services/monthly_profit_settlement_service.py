@@ -211,9 +211,7 @@ class MonthlyProfitSettlementService:
             }
 
         for row in allocation_rows:
-            performance_amount = self._to_float(
-                getattr(row, "performance_amount", 0)
-            )
+            performance_amount = self._to_float(getattr(row, "performance_amount", 0))
             commission_amount = self._to_float(getattr(row, "commission_amount", 0))
             performance_total += performance_amount
             commission_total += commission_amount
@@ -290,7 +288,9 @@ class MonthlyProfitSettlementService:
             )
         ).scalar_one_or_none()
 
-    async def _load_adjustments_by_month(self, period_month: str) -> list[dict[str, Any]]:
+    async def _load_adjustments_by_month(
+        self, period_month: str
+    ) -> list[dict[str, Any]]:
         """按月取人工调整项。
 
         ⚠️ MonthlyProfitAdjustment 没有 period_month 字段（只有 settlement_id 外键），
@@ -407,9 +407,7 @@ class MonthlyProfitSettlementService:
 
         summary = self.build_summary(
             period_month=period_month,
-            net_profit_amount=self._to_float(
-                getattr(record, "net_profit_amount", 0.0)
-            ),
+            net_profit_amount=self._to_float(getattr(record, "net_profit_amount", 0.0)),
             personnel_actual_amount=self._to_float(
                 getattr(record, "personnel_actual_amount", 0.0)
             ),

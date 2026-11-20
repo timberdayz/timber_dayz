@@ -69,8 +69,7 @@ async def test_personnel_payload_filters_by_calculation_version():
     assert statements, "应当查询人力成本分摊表"
     where_sql = str(statements[0].whereclause).lower()
     assert "calculation_version" in where_sql, (
-        "WHERE 子句必须过滤 calculation_version；"
-        f"当前 WHERE = {where_sql}"
+        "WHERE 子句必须过滤 calculation_version；" f"当前 WHERE = {where_sql}"
     )
 
 

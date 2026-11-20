@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from backend.services.system_role_service import DEFAULT_SYSTEM_ROLES, ensure_system_roles
+from backend.services.system_role_service import (
+    DEFAULT_SYSTEM_ROLES,
+    ensure_system_roles,
+)
 
 
 class _ScalarResult:

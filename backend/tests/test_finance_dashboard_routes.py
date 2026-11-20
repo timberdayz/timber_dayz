@@ -72,7 +72,9 @@ async def test_create_adjustment_returns_service_payload(monkeypatch):
         module, "MonthlyProfitSettlementService", lambda db: _ServiceStub()
     )
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
         response = await client.post(
             "/api/finance/monthly-profit-settlement/adjustments",
             json={
@@ -105,7 +107,9 @@ async def test_create_adjustment_rejects_blank_reason(monkeypatch):
         module, "MonthlyProfitSettlementService", lambda db: _ServiceStub()
     )
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
         response = await client.post(
             "/api/finance/monthly-profit-settlement/adjustments",
             json={
