@@ -4,7 +4,7 @@
 
 ## 1. 目的
 
-本文说明“月度利润结算中心”的实际使用方式，用于把当月店铺结算利润、人员成本、跟投收益与公司留存统一汇总为公司级月结结果。
+本文说明“月度利润看板”的实际使用方式，用于把当月店铺结算利润、员工侧分配额、人工调整额与公司留存统一汇总为公司级月结结果。
 
 适用角色：
 
@@ -36,75 +36,101 @@ profit_basis_amount = orders_profit_amount - a_class_cost_amount
 company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 ```
 
-### 2.3 月结总公式
+### 2.3 月度利润看板总公式
 
-月结中心采用如下总公式：
+> 2026-11 口径变更：看板改为只读聚合后，总公式不再含「跟投收益」，
+> 「人员成本总额」改为**员工侧分配额**（只取提成后金额）。
+> 详见第 17 节「业务口径变更签字记录」。
+
+月度利润看板采用如下总公式：
 
 ```text
-公司月度净利润 = 人员成本总额 + 跟投收益总额 + 公司留存总额 + 调整项
+公司留存总额 = 公司月度净利润 - 员工侧分配额 - 人工调整额
 ```
 
 等价地：
 
 ```text
-公司留存总额 = 公司月度净利润 - 人员成本总额 - 跟投收益总额 - 调整项
+公司月度净利润 = 员工侧分配额 + 人工调整额 + 公司留存总额
 ```
+
+其中：
+
+- **公司月度净利润** = `SUM(shop_profit_basis.profit_basis_amount)`（见 2.2）
+- **员工侧分配额** = 人力成本分摊表的 `Σ(performance_amount + commission_amount)`（见第 7 节）
+- **人工调整额** = 人工调整项表金额合计（正数减少公司留存）
+
+### 2.4 看板如何读取上游利润基数（2026-11 追加说明）
+
+> 本节只说明**看板怎么读**，**不改动上游公式**。
+> 上游口径的 SSOT 是 `backend/services/labor_cost_policy_service.py` 的
+> `LaborCostPolicyService`。
+
+- 看板读 `finance.shop_profit_basis`，**只取非 legacy `A_ONLY_V1` 口径行**
+  （当前口径 `SETTLEMENT_BASIS_V1`；历史口径行保留以保审计可追溯，但不参与看板计算）。
+- 看板**不重算**利润基数，也**不回写**该表。
+- `b_class_cost_amount`（B 类成本）当前仍不计入正式月结，与 2.1 一致。
 
 ## 3. 当前系统来源模块
 
-月结中心本身不是利润计算源，而是汇总与审批入口。
+月度利润看板本身不是利润计算源，而是只读汇总与展示入口。
 
 上游来源如下：
 
 - 店铺结算利润：
   - `finance.shop_profit_basis`
-- 工资和人工成本：
+- 员工侧分配额（绩效工资 + 提成）：
+  - `finance.employee_labor_cost_allocations`
+  - 按 `calculation_version` 严格等值过滤（当前口径 `LABOR_COST_ALLOC_V1`）
+- 人工调整项：
+  - `finance.monthly_profit_adjustments`
+- 工资单（**不再**作为人员成本结算口径）：
   - `a_class.payroll_records`
+  - 工资单 `total_cost` 含提成前人力成本，该部分已在利润基数里扣过，见第 7 节
 - 提成中间结果：
   - `c_class.employee_commissions`
-  - 该表用于生成工资单中的 `commission` 字段，不应在月结人员成本中与工资单总成本重复汇总
-- 跟投收益：
-  - `finance.follow_investment_settlements`
-  - `finance.follow_investment_details`
+  - 该表用于生成工资单中的 `commission` 字段，是中间层，不单独汇总
 
 ### 3.1 冻结事实源
 
 当前结算链路中，以下对象视为冻结事实源，结算模块只能读取，不能反向改写：
 
 - `PayrollRecord`
-- `MonthlyProfitPayrollSnapshot`
 - `EmployeeCommission`
 - `EmployeePerformance`
 - `ShopProfitBasis`
+- `EmployeeLaborCostAllocation`
 
-## 4. 当前 Phase 1 范围
+> ⚠️ 2026-11-21：原名单里的 `MonthlyProfitPayrollSnapshot`（月结工资单快照）**已随
+> 迁移 `current_schema_20261242_drop_monthly_profit_snapshots` 删除** ——
+> 快照机制随看板改造整体下线，不再是任何口径的冻结事实源。
+
+## 4. 当前范围
+
+> 2026-11：本模块正由「月度利润结算中心」改造为只读的「月度利润看板」。
+> **口径已定版**（见第 2、7 节与第 17 节）；**流程细节**（重建 / 目标比例 / 审批 / 回退草稿）
+> 随看板改造逐步下线，以看板聚合层的只读结果为准。
 
 本阶段已经实现：
 
 - 公司级月结主表
-- 人员成本明细表
-- 跟投收益明细表
 - 调整项表
 - 月结查询
-- 月结重建
-- 目标比例更新
-- 审批
-- 回退草稿
-- 前端财务页中的月结中心入口
+- 前端财务页中的月度利润看板入口
 
 本阶段尚未完全落地：
 
-- 差异阈值自动拦截审批
-- 调整项细粒度录入界面
-- 工资成本按店铺回摊
-- 绩效系数治理
-- 跟投 `approved` / `paid` 最终业务口径定版
+- 调整项细粒度录入界面（看板只提供人工调整项的录入与列表）
+- 员工侧分配额的店铺 / 人级下钻展示
+- 绩效系数治理（提成用逐店 min、绩效工资用加权平均，两套系数尚未收敛；
+  收敛方案见 `docs/superpowers/plans/2026-11-21-finance-dashboard-post-launch-v2.md`）
+- 跟投 `approved` / `paid` 最终业务口径定版 —— 跟投模块已下线，本条作废
 
 ## 5. 页面入口
 
 前端入口：
 
-- `财务管理 -> 利润分配基准 -> 月度利润结算中心`
+- `财务管理 -> 利润分配基准 -> 月度利润看板`
 
 对应页面：
 
@@ -120,12 +146,16 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 后端接口：
 
 - `GET /api/finance/monthly-profit-settlement`
-- `POST /api/finance/monthly-profit-settlement/rebuild`
-- `PUT /api/finance/monthly-profit-settlement/{id}/targets`
-- `POST /api/finance/monthly-profit-settlement/{id}/approve`
-- `POST /api/finance/monthly-profit-settlement/{id}/reopen`
+
+> 写操作端点（`rebuild` / `targets` / `approve` / `reopen`）随看板改造下线；
+> 人工调整项改为看板内的独立写入口。改造完成后以实际路由为准。
 
 ## 6. 推荐月结顺序
+
+> ⚠️ **2026-11 口径变更**：看板改为只读后，本节 Step 6 ~ Step 10 的
+> 「重建 / 目标比例 / 审批 / 回退草稿」是**旧结算流程**，随看板改造下线。
+> 看板时代的实际顺序是：**确认上游口径 → 只读查看结果 → 必要时录人工调整项**。
+> 下面的 Step 1 ~ Step 5 仍是**有效的前置核对**，继续按它执行。
 
 以 `2026-05-10` 处理 `2026-04` 月结为例，建议顺序如下。
 
@@ -175,19 +205,17 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 
 ### Step 5. 确认跟投收益
 
-确认当月跟投结算已完成审批。
+> ⚠️ 跟投模块已于 2026-11 下线，本步**作废**，不再需要执行。
 
-当前 Phase 1 实现中，月结中心按 `approved` 状态的跟投收益明细计入实际值。
+### Step 6. 重建月结（旧流程，已下线）
 
-### Step 6. 重建月结
-
-在月结中心选择月份，点击“重建月结”。
+> 看板改为只读后不再「重建」，直接按当月数据实时汇总。保留本节仅作历史参考。
 
 系统会自动汇总：
 
 - 公司月度净利润
-- 人员成本
-- 跟投收益
+- 员工侧分配额
+- 人工调整额
 - 公司留存
 
 ### Step 7. 调整目标比例
@@ -238,38 +266,67 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 
 ## 6.1 当前页面内的推荐操作顺序
 
-当前财务结算中心页面已经显式提示推荐顺序：
+当前月度利润看板页面显式提示推荐顺序：
 
 1. 先查或重算利润口径
-2. 再处理跟投记录和跟投试算
-3. 再查看或审批结算台账
-4. 最后回到公司月结核对总账
+2. 再查看各店分配分布
+3. 再录入 / 核对人工调整项
+4. 最后回到公司层核对总账
 
-如果店铺台账已经 `approved`，页面会提示必须先回退审批，再重新试算或重建。
+## 7. 当前员工侧分配额组成
 
-## 7. 当前人员成本组成
+> ⚠️ **2026-11 口径变更**：**推翻**原「月结人员成本以工资单为最终结算口径」。
+>
+> 现口径：**以人力成本分摊表的「绩效工资 + 提成」为准。**
+>
+> 作废原因：工资单 `total_cost` 已包含提成前人力成本（底薪等），
+> 而这部分在利润基数里**已经扣过一次**，再作为人员成本扣除就是同一笔钱扣两次。
 
-当前代码实现中，月结人员成本以工资单为最终结算口径，不再单独叠加 `employee_commissions`。
+看板的员工侧分配额**只取提成后金额**（绩效工资 + 提成）。
 
-### 7.1 工资总成本
+### 7.1 员工侧分配额
 
 来源：
 
-- `a_class.payroll_records.total_cost`
+- `finance.employee_labor_cost_allocations`
 
-在月结明细中表现为：
+过滤条件：
 
-- `detail_type = payroll_total_cost`
+- `calculation_version` **严格等值**过滤（当前口径 `LABOR_COST_ALLOC_V1`）
+- `allocation_scope` 同时含 `shop`（有店铺归属）与 `company`（总部等无店铺归属）两种范围，**两者都要计入**
+
+公式：
+
+```text
+员工侧分配额 = Σ(performance_amount + commission_amount)
+```
 
 说明：
 
-- `payroll_records.total_cost` 已包含工资单中的底薪、绩效、提成、补贴、奖金，以及公司承担社保、公积金
-- `employee_commissions` 只是工资单生成的中间层，提成会先写入工资单 `commission`，再随 `total_cost` 进入月结
-- 因此月结人员成本不应再单独汇总 `c_class.employee_commissions`，否则会重复计算提成
-- 当前是公司级总成本直接入账
-- 尚未回摊到店铺
+- **只取提成后金额**（`performance_amount` 绩效工资 + `commission_amount` 提成）
+- **不含提成前人力成本**（底薪、岗位工资、津贴、加班费、奖金、公司承担社保、公司承担公积金）
+  —— 这部分已在 `profit_basis_amount` 里扣过，见 2.1
+- 因此**不得**再把 `a_class.payroll_records.total_cost` 当作月结人员成本扣除
+- `c_class.employee_commissions` 是工资单生成的中间层，成品已落在分摊表的 `commission_amount`，
+  不单独汇总
+- 看板层**不重算**分摊，直接读分摊表既有结果
+
+### 7.2 旧口径（已作废）
+
+原口径（2026-11 作废）：
+
+```text
+月结人员成本 = a_class.payroll_records.total_cost
+```
+
+在月结明细中曾表现为 `detail_type = payroll_total_cost`。
+
+作废原因见本节顶部说明与第 17 节签字记录。
 
 ## 8. 当前跟投收益口径
+
+> ⚠️ 跟投模块已于 2026-11 下线，本节**作废**，仅作历史参考。
+> 看板的总公式（2.3）已不含跟投收益。
 
 当前 Phase 1 中，跟投收益来自：
 
@@ -285,6 +342,10 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 
 ## 9. 状态语义
 
+> ⚠️ `draft` / `approved` 是**旧结算流程**的状态，随看板改造下线。
+> 看板时代不再有「审批锁定」这一层，只保留「人工调整项」这一处写入。
+> 本节保留仅作历史参考。
+
 ### `draft`
 
 - 允许重建
@@ -299,7 +360,7 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 
 ## 10. 常见问题
 
-### Q1：为什么月结中心看不到数据？
+### Q1：为什么月度利润看板看不到数据？
 
 先检查：
 
@@ -309,7 +370,9 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 
 ### Q2：为什么跟投收益是 0？
 
-先检查：
+> ⚠️ 跟投模块已下线，本问**作废**。
+
+历史排查步骤：
 
 - 该月份是否存在跟投结算
 - 结算状态是否为 `approved`
@@ -317,51 +380,55 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 
 ### Q3：为什么审批后不能再改？
 
-这是当前设计要求。
+> ⚠️ 旧结算流程的设计要求，随看板改造下线。
+> 看板时代没有「审批锁定」，人工调整项可随时增删（每次改动留痕）。
 
-审批后的月结默认视为锁定状态，若需修改必须先执行回退草稿。
-
-### Q4：为什么人员成本和预期不一致？
+### Q4：为什么员工侧分配额和预期不一致？
 
 先检查：
 
 - 店铺提成配置是否正确
 - 个人提成是否已先重算并正确写入工资单 `commission`
 - 工资单是否已重算并确认月度人工字段
-- 是否把公司承担社保、公积金计入工资总成本
+- `finance.employee_labor_cost_allocations` 是否已按当前 `calculation_version`
+  （`LABOR_COST_ALLOC_V1`）刷新 —— 历史口径行不参与计算
+
+> ⚠️ 别再拿 `payroll_records.total_cost` 去对：它含提成前人力成本，
+> 比看板口径大得多，且那部分在利润基数里已经扣过。
 
 ## 11. 当前已知限制
 
-- 差异阈值尚未强制拦截审批
 - 调整项只有基础能力，前端未做完整明细录入
-- 工资总成本尚未按店铺回摊
-- 绩效系数仍沿用现有系统，不在本轮月结中心内重新定义
-- 跟投是否按 `paid` 计入，尚待业务最终确认
+- 员工侧分配额直接读人力成本分摊表既有结果，不在看板层重算分摊
+- 绩效系数仍沿用现有系统（提成用逐店 min、绩效工资用加权平均，两套系数数值可不同），
+  不在本轮看板内重新定义；收敛方案见
+  `docs/superpowers/plans/2026-11-21-finance-dashboard-post-launch-v2.md`
+- 跟投是否按 `paid` 计入 —— 跟投模块已下线，本条作废
 
 ## 12. 操作建议
 
 当前建议的使用方式是：
 
-- 先把月结中心当作“总账核对中心”
-- 不要跳过上游核对直接审批
-- 审批前重点看“目标 / 实际”差异
-- 若差异大，优先回查提成、工资单、跟投审批，而不是直接靠调整项抹平
+- 先把月度利润看板当作“总账核对中心”
+- 不要跳过上游核对直接下结论
+- 重点看「净利润 → 员工侧分配额 → 人工调整额 → 公司留存」的拆解
+- 若差异大，优先回查提成、工资单与人力成本分摊表，而不是直接靠调整项抹平
 
 ## 13. Performance Racing And Warning Supplement (2026-04-11)
 
-- 月结中心继续只汇总上游结果，不重新定义绩效赛马规则。
-- 当前上游绩效已引入全公司店铺赛马机制，月结读取到的人员提成金额已经包含赛马奖惩结果。
+- 月度利润看板继续只汇总上游结果，不重新定义绩效赛马规则。
+- 当前上游绩效已引入全公司店铺赛马机制，看板读取到的员工侧分配额（提成部分）已经包含赛马奖惩结果。
 - 当前赛马补充规则如下：
   - 经营天数少于 15 天只生成数据覆盖风险提示，不影响正式排名系数；月度数据完整性决定正式资格。
   - 正式赛马池中的店铺会按公司总榜排名生成绩效系数，并叠加绝对分数底线。
   - 绩效低于 70 分生成黄牌预警。
   - 绩效低于 60 分生成红牌预警。
   - 连续两个月历史红牌且本月继续红牌时，系统生成淘汰评估预警。
-- 上述预警写入 `c_class.shop_alerts`，但不改变月结中心“总账汇总层”的定位。
+- 上述预警写入 `c_class.shop_alerts`，但不改变月度利润看板“总账汇总层”的定位。
 
 ## 14. Frontend Shop Status Rules (2026-04-11)
 
-财务结算中心页面当前使用以下前端固化口径，供人工联调时对照：
+月度利润看板页面当前使用以下前端固化口径，供人工联调时对照：
 
 - `已具备结算信号`
   - 同时存在当月跟投记录与当月结算台账
@@ -392,16 +459,25 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
   - 汇总当前筛选后平台店铺数、可继续结算店铺、有跟投记录店铺、有结算台账店铺、待补经营数据店铺
 
 说明：
-- 这套规则当前是财务结算中心页面的正式前端口径，主要用于联调和人工核对
-- 如果后续业务确认需要把“可月结 / 异常”上升为后端统一规则，应再同步到后端接口或月结聚合服务
+- 这套规则当前是月度利润看板页面的正式前端口径，主要用于联调和人工核对
+- 如果后续业务确认需要把“可月结 / 异常”上升为后端统一规则，应再同步到后端接口或看板聚合服务
 
 ## 15. Snapshot Read Rules (2026-05-29)
+
+> ⚠️ 快照读取规则属**旧结算流程**，随看板改造下线。
+> 看板时代直接按当月运行态数据聚合，不再区分 `draft` / `approved` 两套读路径。
 
 - 已批准月份的月结详情优先读取冻结 snapshot，不再直接回读运行态工资单或中间结果。
 - `reopen` 会使当前 active snapshot 失效；重新批准后会生成新的 snapshot 版本。
 - `draft` 继续读取运行态聚合结果；`approved` 一律优先看 snapshot。
 
 ## 16. 标准真实回归样例（2026-05-30）
+
+> ⚠️ 本样例含跟投项，跟投模块已下线，跟投相关的两行结论不再可复现；
+> 其余结论保留作历史回归基线。
+> ⚠️ 2026-11-21：快照机制整体下线后，`/api/hr/me/income` 的 payroll 数据源
+> **恒为 `payroll_record`**（快照表已删除，且该标签原本就与事实不符 ——
+> 数据一直来自工资单）。下面两行快照相关结论**已作废**。
 
 当前推荐的标准真实回归样例如下：
 
@@ -414,7 +490,48 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 当前已验证结论：
 
 - 李四 `我的收入` 为 `5946.53`
-- 李四 `我的跟投收益` approved 值为 `938.5`
-- 月结 `approved` 后，`/api/hr/me/income` 读取 `payroll_snapshot`
-- 月结 `reopen` 后，`/api/hr/me/income` 回退为 `payroll_record`
-- 再次 `rebuild -> approve` 后，会生成新的 active snapshot，并保留 superseded 历史版本
+- 李四 `我的跟投收益` approved 值为 `938.5`（跟投已下线，此行仅作历史记录）
+- ~~月结 `approved` 后，`/api/hr/me/income` 读取 `payroll_snapshot`~~ → **已作废**：恒为 `payroll_record`
+- ~~月结 `reopen` 后，`/api/hr/me/income` 回退为 `payroll_record`~~ → **已作废**：reopen/approve 流程已下线
+- ~~再次 `rebuild -> approve` 后，会生成新的 active snapshot，并保留 superseded 历史版本~~ → **已作废**：快照机制整体下线
+
+## 17. 业务口径变更签字记录
+
+> 本节记录**看板口径的生效与作废**，用于回溯「某个数为什么和以前不一样」。
+> 引用看板金额时，若跨过下面的生效日期，必须同时说明口径。
+
+### 17.1 人员成本口径变更（2026-11 生效）
+
+| 项 | 内容 |
+|---|---|
+| 变更对象 | 月结「人员成本」的结算口径 |
+| 原口径（**作废**） | `a_class.payroll_records.total_cost`（工资单总成本） |
+| 新口径（**生效**） | `finance.employee_labor_cost_allocations` 的 `Σ(performance_amount + commission_amount)`（绩效工资 + 提成） |
+| 作废原因 | `payroll_records.total_cost` **已包含提成前人力成本**（底薪、岗位工资、津贴、加班费、奖金、公司承担社保、公司公积金），而这部分在 `profit_basis_amount`（店铺利润基数）里**已经扣过一次**；再作为人员成本扣除等于同一笔钱扣两次，会把公司留存系统性低估 |
+| 生效范围 | **月度利润看板**（`GET /api/finance/monthly-profit-settlement` 及其人工调整项写入口） |
+| 不影响 | 上游利润基数口径（2.1 / 2.2 不变）、`finance.shop_profit_basis` 的写入逻辑、工资单本身的金额构成 |
+| 关联指标 | `employee_allocation_amount`（员工侧分配额）、`company_retained_amount`（公司留存）、`allocation_ratio`（分配占比） |
+
+### 17.2 指标登记
+
+本次变更同时把看板的 6 个核心指标登记进指标词典（系统统一口径）：
+
+- `profit_basis_amount`（店铺利润基数）
+- `employee_allocation_amount`（员工侧分配额）
+- `manual_adjustment_amount`（人工调整额）
+- `company_retained_amount`（公司留存）
+- `allocation_ratio`（分配占比）
+- `over_allocation_flag`（超额分配标记）
+
+登记位置：
+
+- `docs/team-skills/sea-metrics-language/references/metrics-dictionary.md`（正本）
+- `docs/team-skills/sea-metrics-language/references/metric-status.md`（状态表，6 项均为 `stable`）
+- 副本 `team-skills-bundle/sea-metrics-language/` 由 `python scripts/verify_team_skills_sync.py` 保证字节一致
+
+### 17.3 跨期对比提示
+
+- 2026-11 之前的历史月份若按旧口径（工资单 `total_cost`）出过人侧分配额，
+  与看板新口径**不可直接比较**；对比时必须先按新口径重算。
+- 人工调整额带符号（正数减少公司留存），引用时必须带符号说明。
+

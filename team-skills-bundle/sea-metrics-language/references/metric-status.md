@@ -29,3 +29,14 @@
 | mer | blocked | no | 尚未形成统一系统口径 | marketing |
 | repurchase_rate | blocked | no | 尚未形成统一系统口径 | crm |
 | hero_sku_ratio | blocked | no | 尚未形成统一系统口径 | founder |
+| break_even_roi | observe | conditional | 成本不全时**算不出来**（缺输入不给乐观值）；平台后台没有这个口径 | finance |
+| suggested_roi | observe | conditional | 保本ROI × (1+安全边际20%) 并按平台可填上限封顶；依赖保本ROI，成本不全时同样不可用 | finance |
+| advertising_contribution_margin_rate | observe | conditional | 广告前利润 ÷ 商家实收；与平台报表毛利率口径不同，横向比较必须说明来源 | finance |
+| target_roi | observe | conditional | **手填**的平台投放目标，无自动采集；它是意图不是实测 | marketing |
+| platform_reported_roi | observe | conditional | **手抄**的平台实测 ROI，含自然/达人归因 ⇒「达标」≠「赚钱」；归因放大系数拿不到，只提示不给数字 | marketing |
+| profit_basis_amount | stable | yes | 店铺利润基数：订单利润 −（其他经营成本 + 提成前人力成本）；已扣提成前人力成本，绩效工资与提成不在内 | finance |
+| employee_allocation_amount | stable | yes | 只取提成后金额（绩效工资 + 提成）；**不含提成前人力成本**（已在利润基数扣过），口径为人力成本分摊表 | finance |
+| manual_adjustment_amount | stable | yes | 人工调整项表汇总，带符号（正数减少公司留存） | finance |
+| company_retained_amount | stable | yes | 看板聚合层只读汇总：净利润 − 员工侧分配额 − 人工调整额 | finance |
+| allocation_ratio | stable | yes | 看板聚合层：(员工侧分配额 + 人工调整额) ÷ 净利润；净利润 ≤ 0 时无意义 | finance |
+| over_allocation_flag | stable | yes | 看板聚合层告警标记：公司留存 < 0 或分配占比 > 1；只读提示，不阻断流程 | finance |

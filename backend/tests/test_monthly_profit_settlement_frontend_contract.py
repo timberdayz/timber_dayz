@@ -1,61 +1,83 @@
+"""月度利润看板前端契约：API 封装、专用 store 与调整项写入口。
+
+⚠️ 旧版断言（rebuild / targets / approve / reopen 与旧 store）随看板制下线。
+"""
+
 from pathlib import Path
 
 
-def _read_settlement_sources() -> str:
-    files = [
-        "frontend/src/domains/business/views/FinancialManagement.vue",
-        "frontend/src/domains/business/views/finance-settlement/MonthlySettlementPanel.vue",
-        "frontend/src/domains/business/views/finance-settlement/SettlementWorkspacePanel.vue",
-    ]
-    return "\n".join(Path(file).read_text(encoding="utf-8") for file in files)
+def _read_dashboard_store() -> str:
+    return Path("frontend/src/stores/financeDashboard.js").read_text(encoding="utf-8")
 
 
-def test_financial_management_page_exposes_monthly_profit_settlement_center():
-    text = _read_settlement_sources()
-
-    assert "月度利润结算中心" in text
-    assert "公司月结" in text
-    assert "查询月结" in text
-    assert "重建月结" in text
-    assert "审批通过" in text
-    assert "回退草稿" in text
-    assert "调整原因" in text
-    assert "投资人ID" in text
-    assert "结算ID" in text
+def _read_dashboard_view() -> str:
+    return Path(
+        "frontend/src/domains/business/views/finance-dashboard/FinanceDashboardView.vue"
+    ).read_text(encoding="utf-8")
 
 
-def test_financial_management_page_displays_budget_inputs_as_percentages():
-    text = _read_settlement_sources()
-
-    assert "人员成本预算(%)" in text
-    assert "跟投收益预算(%)" in text
-    assert "公司留存预算(%)" in text
-    assert ':formatter="formatRatioInput"' in text
-    assert ':parser="parseRatioInput"' in text
+def _read_adjustment_panel() -> str:
+    return Path(
+        "frontend/src/domains/business/views/finance-dashboard/AdjustmentPanel.vue"
+    ).read_text(encoding="utf-8")
 
 
-def test_finance_api_exposes_monthly_profit_settlement_endpoints():
+def test_finance_api_exposes_monthly_profit_dashboard_endpoints():
     text = Path("frontend/src/api/finance.js").read_text(encoding="utf-8")
 
-    assert "getMonthlyProfitSettlement" in text
-    assert "rebuildMonthlyProfitSettlement" in text
-    assert "updateMonthlyProfitSettlementTargets" in text
-    assert "approveMonthlyProfitSettlement" in text
-    assert "reopenMonthlyProfitSettlement" in text
+    assert "getFinanceDashboard" in text
+    assert "createFinanceAdjustment" in text
+    assert "deleteFinanceAdjustment" in text
+    assert "/finance/monthly-profit-settlement" in text
 
 
-def test_finance_settlement_store_exposes_monthly_profit_settlement_state_and_actions():
-    text = Path("frontend/src/stores/financeSettlement.js").read_text(encoding="utf-8")
+def test_finance_api_drops_retired_settlement_workflow_endpoints():
+    text = Path("frontend/src/api/finance.js").read_text(encoding="utf-8")
 
-    assert "monthlyProfitSettlement" in text
-    assert "fetchMonthlyProfitSettlement" in text
-    assert "rebuildMonthlyProfitSettlement" in text
-    assert "updateMonthlyProfitSettlementTargets" in text
-    assert "approveMonthlyProfitSettlement" in text
-    assert "reopenMonthlyProfitSettlement" in text
+    assert "rebuildMonthlyProfitSettlement" not in text
+    assert "updateMonthlyProfitSettlementTargets" not in text
+    assert "approveMonthlyProfitSettlement" not in text
+    assert "reopenMonthlyProfitSettlement" not in text
 
 
-def test_financial_management_page_queries_follow_investments_with_period_month():
-    text = Path("frontend/src/domains/business/views/FinancialManagement.vue").read_text(encoding="utf-8")
+def test_finance_dashboard_store_exposes_read_and_adjustment_actions():
+    text = _read_dashboard_store()
 
-    assert "period_month: selectedMonth.value" in text
+    assert "fetchDashboard" in text
+    assert "addAdjustment" in text
+    assert "removeAdjustment" in text
+    assert "follow" not in text
+
+
+def test_finance_dashboard_store_writes_failures_into_visible_error_state():
+    text = _read_dashboard_store()
+
+    assert "this.error =" in text
+    assert "this.actionError =" in text
+    assert "catch (error)" in text
+    assert "detail" in text
+
+
+def test_finance_dashboard_view_renders_states_and_sections():
+    text = _read_dashboard_view()
+
+    assert "<el-alert" in text
+    assert "store.error" in text
+    assert "store.loading" in text
+    assert "ProfitOverviewCards" in text
+    assert "ShopAllocationTable" in text
+    assert "AdjustmentPanel" in text
+
+
+def test_finance_dashboard_adjustment_panel_covers_all_adjustment_types():
+    text = _read_adjustment_panel()
+
+    for adjustment_type in (
+        "manual_adjustment",
+        "cross_period_expense",
+        "one_off_gain_loss",
+        "correction",
+    ):
+        assert adjustment_type in text, f"调整类型必须覆盖：{adjustment_type}"
+
+    assert "请写明调整原因" in text

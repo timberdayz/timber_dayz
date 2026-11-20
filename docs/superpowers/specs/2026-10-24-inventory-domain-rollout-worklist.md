@@ -133,6 +133,7 @@
    - 禁用：`quick_dos` / `platform_dos_*`（与 `platform_code` 语义冲突）/ `dos_30d`（会被读成档位）
 5. **指标词典登记**——`references/metrics-dictionary.md` + `references/metric-status.md` + `references/platform-mapping.md`；⚠️ 该 skill 有**两份副本**：正本 `team-skills-bundle/`、副本 `docs/team-skills/`。
    2026-10-24 实测两份此前**并不一致**（`metrics-dictionary.md` 与 `platform-mapping.md` 分叉，副本还缺 `agents/openai.yaml`），已按正本对齐，现 **7/7 文件 SHA256 一致**。改这个 skill 一律**改正本再同步副本**
+   > ⚠️ **2026-11-21 更正：本条写的正/副本方向反了**。实测 `docs/team-skills/` 那份内容更全（481 行，多出整节「投放 ROI 边界（商品中心，2026-11 起登记）」），而 `team-skills-bundle/` 只有 360 行 ⇒ **正本 = `docs/team-skills/`，副本 = `team-skills-bundle/`**。已按正确方向单向同步 222 行，并新建 `scripts/verify_team_skills_sync.py` 机器校验两份字节一致（不再靠人读文档判断正本）。改这个 skill 一律**改正本 `docs/team-skills/` 再同步副本 `team-skills-bundle/`**。
 6. **新鲜度契约**（2026-10-24 晚间新增）——DOS **只认全量批次**；输出增加 `dos_as_of`（数据时点）
    与 `dos_stale`（超期标记）；取数服务必须按批次类型过滤；前端必须显示数据截止时间；
    指标词典条目必须写明「只认全量批次」与「能证明什么 / 不能证明什么」

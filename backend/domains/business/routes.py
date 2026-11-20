@@ -21,7 +21,7 @@ from backend.domains.business.routers import (
     training,
     product_center,
 )
-from backend.domains.business.routers import employee_tasks, follow_investment
+from backend.domains.business.routers import employee_tasks
 
 
 def register_business_routes(app) -> None:
@@ -31,7 +31,6 @@ def register_business_routes(app) -> None:
     app.include_router(inventory_domain.router, tags=["库存管理"])
     app.include_router(inventory_overview.router, tags=["库存总览"])
     app.include_router(profit_basis.router, tags=["利润结算基准"])
-    app.include_router(follow_investment.router, tags=["跟投收益"])
     app.include_router(monthly_profit_settlement.router, tags=["月度利润结算中心"])
     app.include_router(training.router, prefix="/api", tags=["培训管理"])
     app.include_router(product_center.router)

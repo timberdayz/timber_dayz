@@ -23,8 +23,6 @@ ROLE_NAME_TO_CODE = {
     "finance": "finance",
     "游客": "tourist",
     "tourist": "tourist",
-    "投资人": "investor",
-    "investor": "investor",
 }
 
 
@@ -34,7 +32,9 @@ def normalize_role_code(value: Any) -> str:
     text = str(value).strip()
     if not text:
         return ""
-    return ROLE_NAME_TO_CODE.get(text, ROLE_NAME_TO_CODE.get(text.lower(), text.lower()))
+    return ROLE_NAME_TO_CODE.get(
+        text, ROLE_NAME_TO_CODE.get(text.lower(), text.lower())
+    )
 
 
 def parse_permission_ids(raw_permissions: Any) -> list[str]:
@@ -95,14 +95,20 @@ class RBACService:
                 normalized = str(permission_id).strip()
                 if normalized == "*":
                     return ["*"]
-                if normalized and normalized in known_permission_ids and normalized not in granted:
+                if (
+                    normalized
+                    and normalized in known_permission_ids
+                    and normalized not in granted
+                ):
                     granted.append(normalized)
         return granted
 
     def build_auth_payload(self, user: Any) -> dict[str, Any]:
         return {
             "roles": self.get_user_role_codes(user),
-            "permissions": self.resolve_permissions_from_roles(getattr(user, "roles", [])),
+            "permissions": self.resolve_permissions_from_roles(
+                getattr(user, "roles", [])
+            ),
             "is_admin": self.is_admin(user),
         }
 

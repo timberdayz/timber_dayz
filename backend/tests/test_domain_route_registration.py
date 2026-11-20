@@ -49,7 +49,6 @@ def test_business_domain_registration_exposes_business_routes():
 
     paths = _paths_for(app)
     assert "/api/dashboard/business-overview/kpi" in paths
-    assert "/api/finance/follow-investments" in paths
 
 
 def test_platform_domain_registration_exposes_platform_routes():

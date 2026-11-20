@@ -1,7 +1,6 @@
 from backend.tests.test_add_performance_income_acceptance import (
     test_my_income_linked_uses_payroll_net_salary_only_and_skips_fallback,
     test_my_income_linked_without_payroll_returns_empty_income_state,
-    test_my_income_prefers_payroll_snapshot_for_approved_month,
 )
 
 import asyncio
@@ -15,7 +14,6 @@ from backend.domains.business.routers.hr_employee import get_my_income
 __all__ = [
     "test_my_income_linked_uses_payroll_net_salary_only_and_skips_fallback",
     "test_my_income_linked_without_payroll_returns_empty_income_state",
-    "test_my_income_prefers_payroll_snapshot_for_approved_month",
     "test_my_income_marks_locked_payroll_as_stale_when_latest_calc_is_newer",
 ]
 
@@ -36,7 +34,9 @@ def test_my_income_marks_locked_payroll_as_stale_when_latest_calc_is_newer(monke
             return self._rows
 
     db = AsyncMock()
-    employee = SimpleNamespace(employee_code="EMP099", employee_identity_type="employee")
+    employee = SimpleNamespace(
+        employee_code="EMP099", employee_identity_type="employee"
+    )
     payroll = SimpleNamespace(
         employee_code="EMP099",
         year_month="2025-01",
@@ -69,12 +69,10 @@ def test_my_income_marks_locked_payroll_as_stale_when_latest_calc_is_newer(monke
         if n == 1:
             return _ResultOne(employee)
         if n == 2:
-            return _ResultOne(None)
-        if n == 3:
             return _ResultOne(payroll)
-        if n == 4:
+        if n == 3:
             return _RowsResult([("2025-02-01T10:00:00+00:00",)])
-        if n == 5:
+        if n == 4:
             return _RowsResult([])
         raise AssertionError(f"unexpected execute call #{n}")
 
@@ -83,7 +81,9 @@ def test_my_income_marks_locked_payroll_as_stale_when_latest_calc_is_newer(monke
     async def _fake_log(*args, **kwargs):
         return None
 
-    monkeypatch.setattr("backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log)
+    monkeypatch.setattr(
+        "backend.domains.business.routers.hr_employee._log_me_income_access", _fake_log
+    )
 
     request = Request(
         {

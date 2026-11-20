@@ -10,6 +10,10 @@ description: Use when defining, comparing, or discussing Southeast Asia cross-bo
 This is the source of truth for team metric language.  
 When another team skill uses a metric, it must follow this skill.
 
+> **副本规则**：本 skill 在仓库有两份副本。正本为 `docs/team-skills/sea-metrics-language/`，
+> 副本为 `team-skills-bundle/sea-metrics-language/`。两份必须字节一致，
+> 由 `python scripts/verify_team_skills_sync.py` 校验。改动一律改正本，再同步副本。
+
 ## Core Rule
 
 先区分三层口径，再讨论结论：

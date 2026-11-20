@@ -74,7 +74,7 @@ const routes = [
       title: '业务概览',
       icon: 'DataBoard',
       permission: 'business-overview',
-      roles: ['admin', 'manager', 'operator', 'finance', 'tourist', 'investor']
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
     }
   },
   {
@@ -126,7 +126,7 @@ const routes = [
     name: 'FinancialManagement',
     component: () => import('@/domains/business/views/FinancialManagement.vue'),
     meta: {
-      title: '财务管理',
+      title: '月度利润看板',
       icon: 'Money',
       permission: 'financial-management',
       roles: ['admin', 'manager', 'finance']
@@ -304,7 +304,7 @@ const routes = [
     name: 'FinancialOverview',
     redirect: '/financial-management',
     meta: {
-      title: '??????',
+      title: '财务概览',
       icon: 'Money',
       permission: 'financial-management',
       roles: ['admin', 'manager', 'finance']
@@ -605,17 +605,6 @@ const routes = [
       icon: 'Money',
       permission: 'my-income',
       roles: ['admin', 'manager', 'operator', 'finance']
-    }
-  },
-  {
-    path: '/my-follow-investment-income',
-    name: 'MyFollowInvestmentIncome',
-    component: () => import('@/domains/business/views/hr/MyFollowInvestmentIncome.vue'),
-    meta: {
-      title: '我的跟投收益',
-      icon: 'Money',
-      permission: 'my-follow-investment-income',
-      roles: ['admin', 'manager', 'operator', 'finance', 'investor']
     }
   },
   {
@@ -928,7 +917,7 @@ const routes = [
       title: '操作指南',
       icon: 'Reading',
       permission: null,
-      roles: ['admin', 'manager', 'operator', 'finance', 'tourist', 'investor']
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
     }
   },
   {
@@ -939,7 +928,7 @@ const routes = [
       title: '视频教程',
       icon: 'VideoPlay',
       permission: null,
-      roles: ['admin', 'manager', 'operator', 'finance', 'tourist', 'investor']
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
     }
   },
   {
@@ -950,7 +939,7 @@ const routes = [
       title: '常见问题',
       icon: 'QuestionFilled',
       permission: null,
-      roles: ['admin', 'manager', 'operator', 'finance', 'tourist', 'investor']
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
     }
   },
   

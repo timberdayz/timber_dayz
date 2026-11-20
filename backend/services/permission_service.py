@@ -267,14 +267,6 @@ SYSTEM_PERMISSIONS = [
         "category": "人力资源",
     },
     {
-        "id": "my-follow-investment-income",
-        "name": "我的跟投收益",
-        "description": "查看个人跟投收益",
-        "resource": "hr",
-        "action": "read",
-        "category": "人力资源",
-    },
-    {
         "id": "performance:read",
         "name": "绩效查看",
         "description": "查看绩效信息",
@@ -465,9 +457,13 @@ class PermissionService:
         return SYSTEM_PERMISSIONS.copy()
 
     @staticmethod
-    def get_permissions_by_category(category: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_permissions_by_category(
+        category: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         if category:
-            return [item for item in SYSTEM_PERMISSIONS if item.get("category") == category]
+            return [
+                item for item in SYSTEM_PERMISSIONS if item.get("category") == category
+            ]
         return SYSTEM_PERMISSIONS.copy()
 
     @staticmethod

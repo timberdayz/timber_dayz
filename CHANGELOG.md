@@ -1,4 +1,121 @@
 # Changelog - 西虹 ERP 系统
+## [Unreleased] - 2026-11-21 - 跟投模块整体下线 + 财务结算中心改造为只读「月度利润看板」
+
+业务确认无真实投资人，跟投收益模块整体下线；「财务结算中心」同步改造为**只读看板**
+—— 不再自算金额、不再审批、不再冻结快照，只回答一句话：
+**这个月赚了多少、分给员工多少、人工调整多少、留下多少。**
+
+### 一、跟投模块整体下线
+
+#### 后端 + 数据库
+
+- 删除 4 个跟投 ORM 类与 `modules/core/db/schema.py` 的对应 import / `_BUSINESS_EXPORTS`；
+- 删除 `backend/services/follow_investment_service.py`、两个 router、schema；
+- 摘除审批中心的跟投模板与提交/同步逻辑；摘除权限点与 `investor` 角色
+  （后端 `system_role_service` / `rbac_service` 与前端 `rolePermissions.js` 同改）；
+- 新建迁移 `current_schema_20261241_drop_follow_investment`：drop 4 张跟投表
+  （含被其外键卡住的 `monthly_profit_follow_details`），并清理**库内残留数据行**
+  （`core.dim_roles` 的 investor 角色 + `public.user_roles` 授权行 + 两个审批模板）
+  —— 这些行是「只增不删」写入的，代码删掉后不会自己消失。
+
+#### 前端下线
+
+- 删除跟投页面 `frontend/src/domains/business/views/hr/MyFollowInvestmentIncome.vue`；
+- 摘除路由 `/my-follow-investment-income`（含标题「我的跟投收益」）与菜单项/显示名；
+- 摘除 `investor` 角色定义、`'投资人': 'investor'` 映射，以及 admin/manager/operator/finance
+  四个角色里已失效的 `my-follow-investment-income` 权限点；
+- 删除 `frontend/src/api/finance.js` 的 10 个跟投 API 方法；
+- 删除 `frontend/src/stores/financeSettlement.js` 的 4 个跟投切片
+  （`followInvestmentSettlement` / `followInvestments` / `followInvestmentSettlements` /
+  `followInvestmentSettlementDetails`）与 9 个跟投 action，并清理 `monthlyProfitSettlement.data.follow_details`；
+- 摘除结算中心内的跟投子视图（跟投收益试算 / 跟投记录 / 结算台账）及依赖跟投数据的
+  店铺状态判定（`hasFollowInvestment` / `hasSettlement` / `canSettle` / `pendingData` / `hasException`）。
+
+### 测试与文档
+
+- 删除 7 个跟投专属测试文件（5 个后端专属 + `tests/test_follow_investment_finance_schema_contract.py`
+  + `frontend/scripts/myFollowInvestmentIncomeView.test.mjs`）与 `test_investor_role_frontend_contract.py`；
+- 改写 8 个含跟投引用的测试（路由注册、财务 schema 契约、结算中心页面契约、月结前端契约、
+  遗留鉴权兼容、系统角色服务、角色菜单快照、领域桥接清单）；
+- `docs/guides/APPROVAL_CENTER_RUNBOOK.md` 摘除跟投审批模板登记；
+  `docs/guides/ENGINEERING_STATUS.md` 登记模块下线；
+  `docs/guides/FOLLOW_INVESTMENT_AND_SETTLEMENT_ACCEPTANCE_CHECKLIST_2026-05-30.md` 整份标注作废。
+
+### 二、财务结算中心 → 只读「月度利润看板」
+
+#### ⚠️ 先看这条：历史月份的「公司留存」数字**都会变**（是修正，不是回归）
+
+看板口径修正了三处金额缺陷。**切换后所有历史月份的公司留存数字都会变化** ———
+这是修正重复扣减的结果，**不是数据坏了**。上线说明必须向管理层讲清楚。
+
+| 缺陷 | 旧口径 | 新口径 |
+|---|---|---|
+| 人员成本被重复扣减 | 审批落库按工资单 `total_cost` 扣，而 `total_cost = 提成前人力成本 + 绩效工资 + 提成`，提成前人力成本在利润基数里已扣过一次（底薪被扣两遍） | 只扣「绩效工资 + 提成」（提成后金额） |
+| 公司人力成本池二次扣减 | 算完各店利润基数又减一次 company scope 整池 | 不再扣（公司池已在各店利润基数里摊过） |
+| 人员成本查询缺版本过滤 | 分摊表查询不过滤 `calculation_version`，同月两版并存时人力成本虚高一倍 | 严格等值过滤 `LABOR_COST_ALLOC_V1` |
+
+实测（本地库，2026-11-21）：**旧口径下 7 个月的公司留存是负数**（2026-01 / 04 / 05 / 06 / 07 / 08 / 10），
+新口径下只剩 1 个月（2026-08，且该月利润本身为负）。
+
+#### 口径与接口
+
+- 看板只允许三条算术，全部收在 `backend/services/monthly_profit_settlement_service.py` 一处：
+  **净利润 = Σ各店利润基数**；**员工侧分配额 = Σ(绩效工资 + 提成)**（含 company scope，
+  `pre_commission_amount` 一律不取）；**公司留存 = 净利润 − 员工侧分配额 − 人工调整额**；
+- 每店维度的**唯一合法来源**是 `finance.employee_labor_cost_allocations`
+  （`c_class.employee_commissions` 与 `a_class.payroll_records` 都没有店铺维度）；
+- 利润基数去重复用既有 `is_legacy_a_only_basis_version` 规则，不另写一套版本判定；
+- 接口收敛为 3 个：`GET /api/finance/monthly-profit-settlement?period_month=YYYY-MM`、
+  `POST .../adjustments`、`DELETE .../adjustments/{id}`；
+  **删除** `/rebuild`、`PUT /{id}/targets`、`POST /{id}/approve`、`POST /{id}/reopen`；
+- **看板唯一写入口 = 人工调整项**：`reason` 必填（服务端 default 兜底已拆），
+  `created_by` 服务端写入不接受前端传值；
+- 后端**不重命名**（受上线前规则约束），重命名降级为 post-launch V2 治理项
+  （`docs/superpowers/plans/2026-11-21-finance-profit-dashboard-post-launch-v2.md`）。
+
+#### 前端
+
+- 新建 `frontend/src/domains/business/views/finance-dashboard/`（主视图 + 结果卡 + 店铺分布表 +
+  调整面板）与专用 store `frontend/src/stores/financeDashboard.js`；
+  删除旧的 `finance-settlement/` 两个组件与混域的 `stores/financeSettlement.js`；
+  `FinancialManagement.vue` 由 541 行改 13 行薄壳；
+- 设计纪律：**只渲染后端数值不重算**；**负数显红不截断**；**超额只渲染后端 flag + 一句中性提示**；
+  **加载/空态/错误一律进 `el-alert`**；**金额千分位 + 币种符号**；**有调整就挂「含 N 笔人工调整」角标**；
+- 菜单与路由显示名改为「月度利润看板」，并修掉 `/financial-overview` 的乱码标题。
+
+#### 旧结构清理
+
+- 新建迁移 `current_schema_20261242_drop_monthly_profit_snapshots`：drop 5 张停写快照表
+  （人员明细 / 工资单快照 / 店铺利润基数快照 / 员工提成快照 / 员工绩效快照）
+  + `monthly_profit_settlements` 表上 9 个废弃列（3 个目标比例 + 3 个目标额 + 2 个差异 + 跟投实际额）；
+  同步清理 ORM、`modules/core/db/schema.py` 与基线迁移；
+- 摘除审批中心的月结审批（模板 + 提交 + 回写）与 `hr_employee.py` 里读月结快照的死分支；
+- 迁移的残留清理加了**存在性保护**：涉及的表不存在就跳过，不会因缺表打断整次部署。
+
+#### 指标与文档
+
+- 6 个新指标登记进指标词典 `docs/team-skills/sea-metrics-language/`（正本）：
+  `profit_basis_amount` / `employee_allocation_amount` / `manual_adjustment_amount` /
+  `company_retained_amount` / `allocation_ratio` / `over_allocation_flag`；
+- **词典正本方向更正**：原写「正本 `team-skills-bundle/`」是反的 —— 实测 `docs/team-skills/`
+  内容更全（481 行 vs 360 行，多出整节 2026-11 投放 ROI 指标）。
+  已以 `docs/team-skills/` 为正本单向同步，并新建 `scripts/verify_team_skills_sync.py` 机器校验；
+- 新建 `scripts/check_monthly_profit_dashboard_readiness.py`（**只读**）：产出「口径切换前后同月对比」，
+  报告落 `docs/reports/monthly-profit-dashboard-readiness-all-months.md`；
+- `docs/guides/MONTHLY_PROFIT_SETTLEMENT_RUNBOOK.md` 改写三处过时口径并新增 §17 业务签字记录；
+  `docs/guides/APPROVAL_CENTER_RUNBOOK.md`、`docs/guides/ENGINEERING_STATUS.md`、
+  `docs/deployment/LOCAL_DOCKER_TO_CLOUD_POSTGRESQL_REBUILD_RUNBOOK.md` 同步到现状。
+
+### 三、验收证据
+
+- **后端全量**：7182 用例，失败 4 条 —— 与改动前的干净基线**逐条完全一致**
+  （基线快照见 `docs/superpowers/plans/2026-11-21-finance-profit-dashboard-baseline.txt`），**零新增失败**；
+- **前端全量**：`node --test "scripts/*.test.mjs"` 364/364 通过；`vite build` 成功；
+- **迁移**：两条新迁移的 upgrade / downgrade 在隔离库上单独验证通过（downgrade 重建空表结构，
+  数据不可逆 —— 迁移前有自动备份兜底）；
+- **看板实跑**（真实 PostgreSQL）：2026-10 净利 22,337.41 / 员工侧分配 2,829.93 / 留存 19,507.48，
+  各店分布利润基数合计与净利润**对账相等**，亏损店被正确标记「分过头」。
+
 ## [v7.35.1] - 2026-11-20 - 人力 + 用户管理发版修正：清理残留测试账号时补齐「注册审批链」痕迹
 
 > **这是 v7.35.0 的发版修正**（补丁号）。v7.35.0 的**生产部署被迁移的前置检查挡住**，

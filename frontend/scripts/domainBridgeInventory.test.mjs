@@ -10,9 +10,9 @@ const routerPath = path.join(frontendRoot, 'src/router/index.js')
 
 const EXPECTED_ROUTE_WRAPPER_COUNT = 0
 const EXPECTED_UNIQUE_WRAPPER_COUNT = 0
-const EXPECTED_DIRECT_DOMAIN_ROUTE_COUNT = 82
+const EXPECTED_DIRECT_DOMAIN_ROUTE_COUNT = 81
 const EXPECTED_DIRECT_DOMAIN_COUNTS = {
-  business: 29,
+  business: 28,
   collection: 6,
   data_platform: 9,
   platform: 38,
@@ -70,7 +70,6 @@ const EXPECTED_ROUTE_SPECIFIERS = [
   '@/domains/business/views/finance/BCostAnalysis.vue',
   '@/domains/business/views/hr/EmployeeManagement.vue',
   '@/domains/business/views/hr/MyIncome.vue',
-  '@/domains/business/views/hr/MyFollowInvestmentIncome.vue',
   '@/domains/business/views/hr/EmployeeSalary.vue',
   '@/domains/business/views/hr/IncomeAudit.vue',
   '@/domains/business/views/hr/PerformanceManagementShop.vue',

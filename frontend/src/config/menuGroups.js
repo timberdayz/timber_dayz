@@ -79,7 +79,7 @@ export const menuGroups = [
     order: 6,
     defaultExpanded: true,
     items: [
-      '/financial-management',   // 财务结算中心
+      '/financial-management',   // 月度利润看板
       '/expense-management',     // 费用管理
       '/b-cost-analysis'         // B类成本分析
     ]
@@ -107,7 +107,6 @@ export const menuGroups = [
       '/employee-salary',            // 员工薪资（固定薪资 + 月度录入 + 工资单状态）
       '/hr-income-audit',            // 员工收入审计
       '/my-income',              // 我的收入
-      '/my-follow-investment-income', // 我的跟投收益
       '/hr-performance-management/shop',  // 店铺绩效管理（仅管理员）
       '/hr-performance-management/person',  // 个人绩效管理（仅管理员）
       '/hr-performance-display/shop',     // 店铺绩效公示（全员可见）
@@ -233,8 +232,7 @@ export const routeDisplayNames = {
   '/inventory/grns': '入库单管理',
   '/inventory/alerts': '库存预警',
   '/inventory/reconciliation': '库存对账',
-  '/financial-management': '财务结算中心',
-  '/my-follow-investment-income': '我的跟投收益',
+  '/financial-management': '月度利润看板',
   // ⭐ v4.6.0新增：数据同步路由显示名称
   '/data-sync/files': '文件列表',
   '/data-sync/tasks': '同步任务',

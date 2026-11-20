@@ -1346,7 +1346,6 @@ _LEGACY_ROUTE_REGISTRATION_SNIPPET_DOC = (
 # Bootstrap registration markers retained for source-contract tests:
 # app.include_router(field_mapping_templates.router, prefix="/api/field-mapping", tags=["字段映射模板"])
 # app.include_router(profit_basis.router, tags=["利润结算基准"])
-# app.include_router(follow_investment.router, tags=["跟投收益"])
 
 create_app()
 
