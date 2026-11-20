@@ -67,16 +67,6 @@ async def test_rebuild_monthly_profit_settlement_aggregates_company_totals(monke
             ],
         }
 
-    async def fake_load_follow_payload(period_month):
-        assert period_month == "2026-04"
-        return {
-            "actual_amount": 18000.0,
-            "details": [
-                {"investor_user_id": 101, "amount": 10000.0},
-                {"investor_user_id": 102, "amount": 8000.0},
-            ],
-        }
-
     captured = {}
 
     async def fake_upsert(period_month, payload):
@@ -86,7 +76,6 @@ async def test_rebuild_monthly_profit_settlement_aggregates_company_totals(monke
 
     monkeypatch.setattr(service, "_load_net_profit_amount", fake_load_net_profit_amount)
     monkeypatch.setattr(service, "_load_personnel_payload", fake_load_personnel_payload)
-    monkeypatch.setattr(service, "_load_follow_payload", fake_load_follow_payload)
     monkeypatch.setattr(service, "_upsert_settlement", fake_upsert)
 
     payload = await service.rebuild_month(
@@ -100,8 +89,9 @@ async def test_rebuild_monthly_profit_settlement_aggregates_company_totals(monke
     assert captured["period_month"] == "2026-04"
     assert payload["summary"]["net_profit_amount"] == pytest.approx(100000.0)
     assert payload["summary"]["personnel_actual_amount"] == pytest.approx(32000.0)
-    assert payload["summary"]["follow_actual_amount"] == pytest.approx(18000.0)
-    assert payload["summary"]["company_actual_amount"] == pytest.approx(50000.0)
+    # 跟投收益模块已下线 ⇒ 跟投实际发生额恒为 0。
+    assert payload["summary"]["follow_actual_amount"] == pytest.approx(0.0)
+    assert payload["summary"]["company_actual_amount"] == pytest.approx(68000.0)
     assert payload["summary"]["personnel_target_amount"] == pytest.approx(30000.0)
     assert payload["summary"]["follow_target_amount"] == pytest.approx(20000.0)
     assert payload["summary"]["company_target_amount"] == pytest.approx(50000.0)
@@ -125,11 +115,6 @@ async def test_rebuild_monthly_profit_settlement_uses_adjustments_in_company_act
     )
     monkeypatch.setattr(
         service,
-        "_load_follow_payload",
-        AsyncMock(return_value={"actual_amount": 15000.0, "details": []}),
-    )
-    monkeypatch.setattr(
-        service,
         "_upsert_settlement",
         AsyncMock(side_effect=lambda period_month, payload: {**payload, "id": 9}),
     )
@@ -143,8 +128,8 @@ async def test_rebuild_monthly_profit_settlement_uses_adjustments_in_company_act
         adjustment_reason="manual correction",
     )
 
-    assert payload["summary"]["company_actual_amount"] == pytest.approx(40000.0)
-    assert payload["summary"]["difference_amount"] == pytest.approx(2500.0)
+    assert payload["summary"]["company_actual_amount"] == pytest.approx(55000.0)
+    assert payload["summary"]["difference_amount"] == pytest.approx(-12500.0)
     assert payload["adjustments"][0]["reason"] == "manual correction"
 
 
@@ -204,7 +189,6 @@ async def test_get_monthly_profit_settlement_returns_existing_record(monkeypatch
         service, "_load_settlement_record", AsyncMock(return_value=record)
     )
     monkeypatch.setattr(service, "_load_personnel_details", AsyncMock(return_value=[]))
-    monkeypatch.setattr(service, "_load_follow_details", AsyncMock(return_value=[]))
     monkeypatch.setattr(service, "_load_adjustments", AsyncMock(return_value=[]))
 
     payload = await service.get_month("2026-04")
@@ -303,7 +287,6 @@ async def test_snapshot_view_rebuilds_personnel_actual_from_snapshot_rows(monkey
             ]
         ),
     )
-    monkeypatch.setattr(service, "_load_follow_details", AsyncMock(return_value=[]))
     monkeypatch.setattr(service, "_load_adjustments", AsyncMock(return_value=[]))
 
     payload = await service.load_snapshot_settlement_view(record)
@@ -311,74 +294,6 @@ async def test_snapshot_view_rebuilds_personnel_actual_from_snapshot_rows(monkey
     assert payload["summary"]["personnel_actual_amount"] == pytest.approx(32000.0)
     assert payload["summary"]["company_actual_amount"] == pytest.approx(68000.0)
     assert payload["personnel_details"][0]["source_module"] == "payroll_snapshot"
-
-
-@pytest.mark.asyncio
-async def test_load_follow_payload_expands_investor_level_details():
-    module = _load_service_module()
-    db = _make_db()
-    service = module.MonthlyProfitSettlementService(db)
-
-    detail_rows = [
-        SimpleNamespace(
-            investor_user_id=101,
-            source_settlement_id=5,
-            approved_income=6000.0,
-            estimated_income=6500.0,
-            status="approved",
-        ),
-        SimpleNamespace(
-            investor_user_id=102,
-            source_settlement_id=5,
-            approved_income=4000.0,
-            estimated_income=4500.0,
-            status="approved",
-        ),
-    ]
-    db.execute = AsyncMock(return_value=_ScalarResult(detail_rows))
-
-    payload = await service._load_follow_payload("2026-04")
-
-    assert payload["actual_amount"] == pytest.approx(10000.0)
-    assert payload["details"] == [
-        {
-            "investor_user_id": 101,
-            "source_settlement_id": 5,
-            "amount": 6000.0,
-            "status": "approved",
-            "remark": None,
-        },
-        {
-            "investor_user_id": 102,
-            "source_settlement_id": 5,
-            "amount": 4000.0,
-            "status": "approved",
-            "remark": None,
-        },
-    ]
-
-
-@pytest.mark.asyncio
-async def test_load_follow_payload_preserves_zero_approved_income():
-    module = _load_service_module()
-    db = _make_db()
-    service = module.MonthlyProfitSettlementService(db)
-
-    detail_rows = [
-        SimpleNamespace(
-            investor_user_id=101,
-            source_settlement_id=5,
-            approved_income=0.0,
-            estimated_income=6500.0,
-            status="approved",
-        ),
-    ]
-    db.execute = AsyncMock(return_value=_ScalarResult(detail_rows))
-
-    payload = await service._load_follow_payload("2026-04")
-
-    assert payload["actual_amount"] == pytest.approx(0.0)
-    assert payload["details"][0]["amount"] == pytest.approx(0.0)
 
 
 @pytest.mark.asyncio
@@ -663,7 +578,6 @@ async def test_update_targets_persists_adjustment_reason(monkeypatch):
     added = []
     db.add = lambda row: added.append(row)
     monkeypatch.setattr(service, "_load_personnel_details", AsyncMock(return_value=[]))
-    monkeypatch.setattr(service, "_load_follow_details", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         service,
         "_load_adjustments",

@@ -10,12 +10,9 @@ from modules.core.db import (
     EmployeeCommission,
     EmployeeLaborCostAllocation,
     EmployeePerformance,
-    FollowInvestmentDetail,
-    FollowInvestmentSettlement,
     MonthlyProfitAdjustment,
     MonthlyProfitEmployeeCommissionSnapshot,
     MonthlyProfitEmployeePerformanceSnapshot,
-    MonthlyProfitFollowDetail,
     MonthlyProfitPayrollSnapshot,
     MonthlyProfitPersonnelDetail,
     MonthlyProfitShopBasisSnapshot,
@@ -221,47 +218,6 @@ class MonthlyProfitSettlementService:
 
         return {"actual_amount": total, "details": details}
 
-    async def _load_follow_payload(self, period_month: str) -> dict[str, Any]:
-        rows = (
-            (
-                await self.db.execute(
-                    select(FollowInvestmentDetail)
-                    .join(
-                        FollowInvestmentSettlement,
-                        FollowInvestmentDetail.settlement_id
-                        == FollowInvestmentSettlement.id,
-                    )
-                    .where(
-                        FollowInvestmentSettlement.period_month == period_month,
-                        FollowInvestmentSettlement.status == "approved",
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-
-        details: list[dict[str, Any]] = []
-        total = 0.0
-        for row in rows:
-            approved_income = getattr(row, "approved_income", None)
-            estimated_income = getattr(row, "estimated_income", 0)
-            amount = self._to_float(
-                approved_income if approved_income is not None else estimated_income
-            )
-            total += amount
-            details.append(
-                {
-                    "investor_user_id": getattr(row, "investor_user_id", None),
-                    "source_settlement_id": getattr(row, "settlement_id", None)
-                    or getattr(row, "source_settlement_id", None),
-                    "amount": amount,
-                    "status": "approved",
-                    "remark": None,
-                }
-            )
-        return {"actual_amount": total, "details": details}
-
     async def _load_settlement_record(
         self, period_month: str
     ) -> MonthlyProfitSettlement | None:
@@ -294,29 +250,6 @@ class MonthlyProfitSettlementService:
                 "shop_id": row.shop_id,
                 "source_module": row.source_module,
                 "source_record_id": row.source_record_id,
-                "remark": row.remark,
-            }
-            for row in rows
-        ]
-
-    async def _load_follow_details(self, settlement_id: int) -> list[dict[str, Any]]:
-        rows = (
-            (
-                await self.db.execute(
-                    select(MonthlyProfitFollowDetail).where(
-                        MonthlyProfitFollowDetail.settlement_id == settlement_id
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        return [
-            {
-                "investor_user_id": row.investor_user_id,
-                "source_settlement_id": row.source_settlement_id,
-                "amount": self._to_float(row.amount),
-                "status": row.status,
                 "remark": row.remark,
             }
             for row in rows
@@ -400,14 +333,12 @@ class MonthlyProfitSettlementService:
             if snapshot_version is not None
             else []
         )
-        follow_details = await self._load_follow_details(settlement_id)
+        follow_details: list[dict[str, Any]] = []
         adjustments = await self._load_adjustments(settlement_id)
         personnel_actual_amount = sum(
             self._to_float(detail.get("amount")) for detail in personnel_details
         )
-        follow_actual_amount = sum(
-            self._to_float(detail.get("amount")) for detail in follow_details
-        )
+        follow_actual_amount = 0.0
         adjustment_amount = sum(
             self._to_float(detail.get("amount")) for detail in adjustments
         )
@@ -703,7 +634,6 @@ class MonthlyProfitSettlementService:
         )
         net_profit_amount = await self._load_net_profit_amount(period_month)
         personnel_payload = await self._load_personnel_payload(period_month)
-        follow_payload = await self._load_follow_payload(period_month)
 
         summary = self.build_summary(
             period_month=period_month,
@@ -711,7 +641,7 @@ class MonthlyProfitSettlementService:
             personnel_actual_amount=self._to_float(
                 personnel_payload.get("actual_amount")
             ),
-            follow_actual_amount=self._to_float(follow_payload.get("actual_amount")),
+            follow_actual_amount=0.0,
             adjustment_amount=adjustment_amount,
             personnel_target_ratio=personnel_target_ratio,
             follow_target_ratio=follow_target_ratio,
@@ -723,11 +653,6 @@ class MonthlyProfitSettlementService:
         await self.db.execute(
             delete(MonthlyProfitPersonnelDetail).where(
                 MonthlyProfitPersonnelDetail.settlement_id == settlement_id
-            )
-        )
-        await self.db.execute(
-            delete(MonthlyProfitFollowDetail).where(
-                MonthlyProfitFollowDetail.settlement_id == settlement_id
             )
         )
         await self.db.execute(
@@ -752,18 +677,6 @@ class MonthlyProfitSettlementService:
                 )
             )
 
-        for detail in follow_payload.get("details", []):
-            self.db.add(
-                MonthlyProfitFollowDetail(
-                    settlement_id=settlement_id,
-                    investor_user_id=detail.get("investor_user_id"),
-                    source_settlement_id=detail.get("source_settlement_id"),
-                    amount=self._to_float(detail.get("amount")),
-                    status=detail.get("status") or "approved",
-                    remark=detail.get("remark"),
-                )
-            )
-
         if adjustment_amount:
             self.db.add(
                 MonthlyProfitAdjustment(
@@ -779,7 +692,7 @@ class MonthlyProfitSettlementService:
         return {
             "summary": summary,
             "personnel_details": personnel_payload.get("details", []),
-            "follow_details": follow_payload.get("details", []),
+            "follow_details": [],
             "adjustments": (
                 [
                     {
@@ -857,7 +770,7 @@ class MonthlyProfitSettlementService:
         return {
             "summary": summary,
             "personnel_details": await self._load_personnel_details(settlement_id),
-            "follow_details": await self._load_follow_details(settlement_id),
+            "follow_details": [],
             "adjustments": await self._load_adjustments(settlement_id),
         }
 
@@ -918,7 +831,7 @@ class MonthlyProfitSettlementService:
         return {
             "summary": summary,
             "personnel_details": await self._load_personnel_details(settlement_id),
-            "follow_details": await self._load_follow_details(settlement_id),
+            "follow_details": [],
             "adjustments": await self._load_adjustments(settlement_id),
         }
 

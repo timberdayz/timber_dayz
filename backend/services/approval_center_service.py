@@ -12,7 +12,6 @@ from modules.core.db import DimRole, DimUser, user_roles
 
 USER_REGISTRATION_TEMPLATE_CODE = "user_registration_approval"
 MONTHLY_PROFIT_SETTLEMENT_TEMPLATE_CODE = "monthly_profit_settlement_approval"
-FOLLOW_INVESTMENT_SETTLEMENT_TEMPLATE_CODE = "follow_investment_settlement_approval"
 
 
 async def _ensure_template(
@@ -59,17 +58,6 @@ async def _ensure_monthly_profit_settlement_template(db: AsyncSession) -> None:
         business_type="monthly_profit_settlement",
         target_route="/financial-management",
         form_schema={"fields": ["settlement_id", "period_month"]},
-    )
-
-
-async def _ensure_follow_investment_settlement_template(db: AsyncSession) -> None:
-    await _ensure_template(
-        db,
-        template_code=FOLLOW_INVESTMENT_SETTLEMENT_TEMPLATE_CODE,
-        template_name="Follow Investment Settlement Approval",
-        business_type="follow_investment_settlement",
-        target_route="/financial-management",
-        form_schema={"fields": ["settlement_id", "period_month", "platform_code", "shop_id"]},
     )
 
 
@@ -198,77 +186,6 @@ async def sync_monthly_profit_settlement_approval_decision(
             actor_is_admin=True,
         )
     raise ValueError(f"Unsupported monthly profit settlement approval action: {action}")
-
-
-async def submit_follow_investment_settlement_approval(
-    *,
-    db: AsyncSession,
-    applicant_user_id: int,
-    settlement_id: int,
-    period_month: str,
-    platform_code: str,
-    shop_id: str,
-) -> dict:
-    await _ensure_follow_investment_settlement_template(db)
-    service = ApprovalCenterService(db)
-    business_key = f"settlement:{settlement_id}"
-    existing = await service.repository.get_latest_instance_by_template_and_business_key(
-        template_code=FOLLOW_INVESTMENT_SETTLEMENT_TEMPLATE_CODE,
-        business_key=business_key,
-    )
-    if existing is not None and existing.status in {"submitted", "in_review"}:
-        return await service.get_approval_detail(existing.approval_id)
-
-    approver_user_id = await _resolve_admin_approver_user_id(db)
-    approval_id = (
-        f"approval:{FOLLOW_INVESTMENT_SETTLEMENT_TEMPLATE_CODE}:{business_key}:"
-        f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
-    )
-    return await service.submit_approval(
-        approval_id=approval_id,
-        template_code=FOLLOW_INVESTMENT_SETTLEMENT_TEMPLATE_CODE,
-        applicant_user_id=applicant_user_id,
-        business_key=business_key,
-        form_payload={
-            "settlement_id": settlement_id,
-            "period_month": period_month,
-            "platform_code": platform_code,
-            "shop_id": shop_id,
-        },
-        approver_user_id=approver_user_id,
-    )
-
-
-async def sync_follow_investment_settlement_approval_decision(
-    *,
-    db: AsyncSession,
-    settlement_id: int,
-    actor_user_id: int,
-    action: str,
-    comment: str | None = None,
-) -> dict | None:
-    service = ApprovalCenterService(db)
-    instance = await service.repository.get_latest_instance_by_template_and_business_key(
-        template_code=FOLLOW_INVESTMENT_SETTLEMENT_TEMPLATE_CODE,
-        business_key=f"settlement:{settlement_id}",
-    )
-    if instance is None:
-        return None
-    if action == "approve":
-        return await service.approve_step(
-            instance.approval_id,
-            actor_user_id=actor_user_id,
-            comment=comment,
-            actor_is_admin=True,
-        )
-    if action == "reject":
-        return await service.reject_step(
-            instance.approval_id,
-            actor_user_id=actor_user_id,
-            comment=comment,
-            actor_is_admin=True,
-        )
-    raise ValueError(f"Unsupported follow investment settlement approval action: {action}")
 
 
 async def sync_user_registration_approval_decision(

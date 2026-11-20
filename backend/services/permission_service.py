@@ -267,14 +267,6 @@ SYSTEM_PERMISSIONS = [
         "category": "人力资源",
     },
     {
-        "id": "my-follow-investment-income",
-        "name": "我的跟投收益",
-        "description": "查看个人跟投收益",
-        "resource": "hr",
-        "action": "read",
-        "category": "人力资源",
-    },
-    {
         "id": "performance:read",
         "name": "绩效查看",
         "description": "查看绩效信息",

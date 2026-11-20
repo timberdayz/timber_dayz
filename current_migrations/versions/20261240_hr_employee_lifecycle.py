@@ -68,7 +68,7 @@
 
 ⚠️ **业务表不被自动清理**：删账号前会扫一遍所有指向 ``core.dim_users`` 的
 ``NO ACTION`` 外键（``pg_catalog`` 动态取，不靠硬编码清单）；若**业务表**
-（如 ``core.employee_tasks`` / ``finance.follow_investments``）还引用着这些
+（如 ``core.employee_tasks``）还引用着这些
 账号 ⇒ **直接报错停下**，并在报错里写清楚是哪张表、还剩多少行 ——
 宁可停下来让人判断，也不默默删掉业务数据。
 

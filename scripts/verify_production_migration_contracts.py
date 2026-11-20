@@ -17,7 +17,6 @@ from sqlalchemy import create_engine, text
 DEFAULT_TESTS = [
     "tests/test_alembic_version_table_contract.py",
     "tests/test_collection_config_core_schema_migration_contract.py",
-    "tests/test_follow_investment_finance_schema_contract.py",
 ]
 
 
