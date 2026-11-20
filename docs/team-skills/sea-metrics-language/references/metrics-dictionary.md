@@ -479,3 +479,155 @@
   - 与 TikTok 的数直接和 Shopee 的数横向比较（归因窗口与分母口径都不同）
 - 配套指标：`break_even_roi`、`suggested_roi`、`target_roi`
 - 当前状态：`observe`
+
+---
+
+# 月度利润看板口径（财务结算中心，2026-11 起登记）
+
+这一组指标来自「月度利润看板」（原「月度利润结算中心」）。看板只回答一句话：
+**这个月赚了多少、分给员工多少、人工调整多少、留下多少**。
+
+⚠️ **三层口径**：本节**全部是系统统一口径**。
+
+- 平台原生口径：平台后台的「利润」「人力成本」各自算法不同，本节**不引用、不混用**。
+- 系统统一口径：**本节定义的口径**，来源表与公式全部写死，见各条「系统统一口径」。
+- 会议决策口径：尚未定版，**不得**与本节混用。
+
+⚠️ **命名纪律**（本组指标的硬约束）：
+
+- **「人员成本」是禁用词**。仓库里它至少指三种东西：工资单总成本、提成前人力成本、提成后人力成本。
+  一律写全称：**提成前人力成本** / **提成后人力成本**。
+- **「毛利率」不是本组指标**，禁止出现（仓库里「毛利率」指代不唯一）。
+- 「利润基数」一律写全称「**店铺利润基数**」（`profit_basis_amount`）——
+  它**已经扣过一次提成前人力成本**，这是本组指标最容易重复扣减的地方。
+- 「分配额」一律写全称「**员工侧分配额**」（`employee_allocation_amount`）——
+  它**只含提成后**金额（绩效工资 + 提成）。
+
+## profit-basis-amount
+
+- 中文名：店铺利润基数
+- 标准键：`profit_basis_amount`
+- 层级：老板层 / 经营层
+- 业务定义：**一家店铺当月扣完成本之后、还能拿去分钱的那个数**。
+  它已经扣掉「其他经营成本」和「提成前人力成本」，但**没有**扣绩效工资和提成
+  —— 提成基数是「提成**前**利润」，把提成本身算进成本等于同一笔钱扣两次。
+- 系统统一口径：`finance.shop_profit_basis`（店铺利润基数快照表），
+  **只取非 legacy `A_ONLY_V1` 口径行**（当前口径 `SETTLEMENT_BASIS_V1`；
+  历史口径 `A_ONLY_V1` / `A_PRE_COMMISSION_LABOR_V2` 由
+  `LaborCostPolicyService.is_legacy_a_only_basis_version` 判定并排除）。
+  口径 SSOT 在 `backend/services/labor_cost_policy_service.py`。
+- 公式：`店铺订单利润 − (其他经营成本 + 提成前人力成本)`
+  - **提成前人力成本** = 底薪 + 岗位工资 + 津贴 + 加班费 + 奖金 + 公司承担社保 + 公司承担公积金
+    （字段清单 SSOT：`backend/services/labor_cost_projection_service.py` 的 `PRE_COMMISSION_FIELDS`）
+  - **不含**绩效工资（`performance_salary`）与提成本身（`commission`）
+- 粒度：平台 × 店铺 × 月
+- 适用：判断「这家店这个月真正剩多少可分」；作为员工侧分配额与公司留存的计算起点
+- 不适用：
+  - 判断单个员工的收入（那是 `employee_allocation_amount`）
+  - 与平台后台的「利润」横向比较（平台口径不扣人力成本）
+  - 直接当公司留存用（必须先汇总到公司级，见 `company_retained_amount`）
+- 配套指标：`employee_allocation_amount`、`company_retained_amount`、`allocation_ratio`
+- 当前状态：`stable`
+
+## employee-allocation-amount
+
+- 中文名：员工侧分配额
+- 标准键：`employee_allocation_amount`
+- 层级：老板层 / 经营层
+- 业务定义：**当月从利润里分给员工侧的钱**（绩效工资 + 提成），即「利润分出去的那部分」。
+- 系统统一口径：`finance.employee_labor_cost_allocations`（人力成本分摊表），
+  **按 `calculation_version` 严格等值过滤**（当前口径 `LABOR_COST_ALLOC_V1`；
+  口径名 SSOT 在 `backend/services/labor_cost_projection_service.py` 的
+  `LABOR_COST_CALCULATION_VERSION`）。
+  `allocation_scope` 同时含 `shop`（有店铺归属）与 `company`（总部等无店铺归属）两种范围，
+  **两者都要计入**。
+- 公式：`Σ(performance_amount + commission_amount)`
+- ⚠️ **只取提成后金额**（绩效工资 + 提成）。
+  **不含提成前人力成本**（底薪、岗位工资、津贴、加班费、奖金、公司承担社保、公司承担公积金）
+  —— 这部分**已经在 `profit_basis_amount` 里扣过一次**，再扣一次就是重复扣减。
+- ⚠️ 引用时**必须写全称**「员工侧分配额」或「提成后人力成本」；
+  单独的「人员成本」是禁用词（会被读成含底薪的总额）。
+- 粒度：月（可下钻到店 / 人）
+- 适用：判断「这个月分给员工多少」「利润分出去多少」；做分摊结果核对
+- 不适用：
+  - 当作公司全部人力成本（那会漏掉提成前人力成本，那部分在利润基数里）
+  - 当作某个员工的实发工资（实发还要看工资单，含个税等代扣项）
+  - 判断「分得对不对」——金额只说明分了多少，不说明比例是否合理（比例配置是另一件事）
+- 配套指标：`profit_basis_amount`、`company_retained_amount`、`allocation_ratio`
+- 当前状态：`stable`
+
+## manual-adjustment-amount
+
+- 中文名：人工调整额
+- 标准键：`manual_adjustment_amount`
+- 层级：老板层 / 经营层
+- 业务定义：**经人工确认后，在利润分账之外额外加减的一笔钱**（一次性补贴、跨月纠错、坏账核销等）。
+- 系统统一口径：`finance.monthly_profit_adjustments`（人工调整项表），
+  按 `settlement_id` 归属到当月结算单；调整类型见 `adjustment_type`，原因见 `reason`。
+- 公式：`Σ 调整行金额`
+- ⚠️ **符号约定**：正数 = **减少公司留存**（从利润里再减一笔），负数 = 增加公司留存。
+  引用时必须带符号说明，否则「调整 5 万」读不出方向。
+- 粒度：月
+- 适用：解释「算出来的留存和实际对不上」的差额；核对一次性事项
+- 不适用：
+  - 当作常规人力成本或利润项（它是人工加的，不是算出来的）
+  - 用来抹平差异（差异应回上游查，见 `docs/guides/MONTHLY_PROFIT_SETTLEMENT_RUNBOOK.md`
+    的「业务口径变更签字记录」）
+  - 单独判断经营质量（金额大小不代表经营好坏）
+- 配套指标：`company_retained_amount`、`allocation_ratio`
+- 当前状态：`stable`
+
+## company-retained-amount
+
+- 中文名：公司留存
+- 标准键：`company_retained_amount`
+- 层级：老板层
+- 业务定义：**当月利润分完员工、扣完人工调整之后，真正留在公司的钱**。
+- 系统统一口径：看板聚合层（在 `finance.shop_profit_basis` 与
+  `finance.employee_labor_cost_allocations` 之上做只读汇总，**不落新表**）。
+- 公式：`净利润 − 员工侧分配额 − 人工调整额`
+  - **净利润** = `Σ 店铺利润基数`（公司级汇总）
+- 粒度：月
+- 适用：老板层「这个月公司留下多少」；与目标留存对比
+- 不适用：
+  - 判断单店经营好坏（必须下钻到 `profit_basis_amount` 的店铺粒度）
+  - 当作利润（它已经扣了员工分配和人工调整，与利润基数不是一回事）
+  - 与历史留存直接比较而不说明口径变更（人员成本口径改过一次，见运行手册签字记录）
+- 配套指标：`profit_basis_amount`、`employee_allocation_amount`、`allocation_ratio`、`over_allocation_flag`
+- 当前状态：`stable`
+
+## allocation-ratio
+
+- 中文名：分配占比
+- 标准键：`allocation_ratio`
+- 层级：老板层 / 经营层
+- 业务定义：**当月利润里分出去的比例**（员工侧分配额 + 人工调整额占净利润的比例）。
+- 系统统一口径：看板聚合层（同 `company_retained_amount`，只读汇总）。
+- 公式：`(员工侧分配额 + 人工调整额) ÷ 净利润`
+- ⚠️ **分母是净利润**（公司级 `Σ 店铺利润基数`）；
+  净利润 ≤ 0 时本指标**无意义**，此时不得给出比例。
+- 粒度：月
+- 适用：判断「分出去多少」「留存比例是否异常」
+- 不适用：
+  - 单独判断某个人拿多了（比例是公司级；人级要下钻 `employee_allocation_amount`）
+  - 净利润为负或为零时使用（此时比例无意义）
+  - 当作提成比例（提成比例是配置项，是另一个东西）
+- 配套指标：`company_retained_amount`、`over_allocation_flag`、`employee_allocation_amount`
+- 当前状态：`stable`
+
+## over-allocation-flag
+
+- 中文名：超额分配标记
+- 标准键：`over_allocation_flag`
+- 层级：老板层
+- 业务定义：**本月利润被分超了的告警标记**——公司留存为负，或分出去的比例超过 100%。
+- 系统统一口径：看板聚合层（由 `company_retained_amount` 与 `allocation_ratio` 判定）。
+- 公式：`公司留存 < 0 或 分配占比 > 1`
+- 粒度：月
+- 适用：让老板一眼看到「这个月分超了」，触发复盘
+- 不适用：
+  - 当作原因判断（它只说「超了」，不说「为什么超」——可能是比例配置错，也可能是成本录错）
+  - 当作自动拦截（看板是只读的，标记只提示，不阻断流程）
+  - 逐店判断（它是公司级标记；逐店要下钻）
+- 配套指标：`company_retained_amount`、`allocation_ratio`
+- 当前状态：`stable`
