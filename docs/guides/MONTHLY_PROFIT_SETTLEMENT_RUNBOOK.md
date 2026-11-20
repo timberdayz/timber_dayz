@@ -96,11 +96,14 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 当前结算链路中，以下对象视为冻结事实源，结算模块只能读取，不能反向改写：
 
 - `PayrollRecord`
-- `MonthlyProfitPayrollSnapshot`
 - `EmployeeCommission`
 - `EmployeePerformance`
 - `ShopProfitBasis`
 - `EmployeeLaborCostAllocation`
+
+> ⚠️ 2026-11-21：原名单里的 `MonthlyProfitPayrollSnapshot`（月结工资单快照）**已随
+> 迁移 `current_schema_20261242_drop_monthly_profit_snapshots` 删除** ——
+> 快照机制随看板改造整体下线，不再是任何口径的冻结事实源。
 
 ## 4. 当前范围
 
@@ -472,6 +475,9 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 
 > ⚠️ 本样例含跟投项，跟投模块已下线，跟投相关的两行结论不再可复现；
 > 其余结论保留作历史回归基线。
+> ⚠️ 2026-11-21：快照机制整体下线后，`/api/hr/me/income` 的 payroll 数据源
+> **恒为 `payroll_record`**（快照表已删除，且该标签原本就与事实不符 ——
+> 数据一直来自工资单）。下面两行快照相关结论**已作废**。
 
 当前推荐的标准真实回归样例如下：
 
@@ -484,10 +490,10 @@ company_net_profit = SUM(shop_profit_basis.profit_basis_amount)
 当前已验证结论：
 
 - 李四 `我的收入` 为 `5946.53`
-- 李四 `我的跟投收益` approved 值为 `938.5`
-- 月结 `approved` 后，`/api/hr/me/income` 读取 `payroll_snapshot`
-- 月结 `reopen` 后，`/api/hr/me/income` 回退为 `payroll_record`
-- 再次 `rebuild -> approve` 后，会生成新的 active snapshot，并保留 superseded 历史版本
+- 李四 `我的跟投收益` approved 值为 `938.5`（跟投已下线，此行仅作历史记录）
+- ~~月结 `approved` 后，`/api/hr/me/income` 读取 `payroll_snapshot`~~ → **已作废**：恒为 `payroll_record`
+- ~~月结 `reopen` 后，`/api/hr/me/income` 回退为 `payroll_record`~~ → **已作废**：reopen/approve 流程已下线
+- ~~再次 `rebuild -> approve` 后，会生成新的 active snapshot，并保留 superseded 历史版本~~ → **已作废**：快照机制整体下线
 
 ## 17. 业务口径变更签字记录
 

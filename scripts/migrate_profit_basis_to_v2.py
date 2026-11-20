@@ -520,12 +520,23 @@ def _reopen_protected_history(
             .all()
         )
         if settlement_ids:
+            # ⚠️ 2026-11-21：月结改为只读看板后，快照机制整体下线 —— 这 4 张表
+            # 已随迁移 current_schema_20261242_drop_monthly_profit_snapshots 删除。
+            # 这里的「置 superseded」已经没有对象了 ⇒ **表不存在就跳过**，
+            # 不能让「relation does not exist」把整条审计路径打断。
+            # 表还在（老库）时行为不变：把活动快照置为 superseded。
             for table_name in (
                 "monthly_profit_shop_basis_snapshots",
                 "monthly_profit_employee_commission_snapshots",
                 "monthly_profit_employee_performance_snapshots",
                 "monthly_profit_payroll_snapshots",
             ):
+                table_exists = connection.execute(
+                    text("SELECT to_regclass(:qualified) IS NOT NULL"),
+                    {"qualified": "finance.{0}".format(table_name)},
+                ).scalar_one()
+                if not table_exists:
+                    continue
                 connection.execute(
                     text(
                         f"UPDATE finance.{table_name} SET snapshot_status = 'superseded' "

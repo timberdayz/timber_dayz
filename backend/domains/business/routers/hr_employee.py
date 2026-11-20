@@ -764,11 +764,11 @@ async def _build_employee_income_audit(
                 and latest_dt > payroll_updated_at
             ),
             "latest_calculated_at": latest_dt.isoformat() if latest_dt else None,
-            "data_source": (
-                "payroll_snapshot"
-                if settlement and getattr(settlement, "status", None) == "approved"
-                else "payroll_record"
-            ),
+            # ⚠️ 2026-11-21：这里原本在「月结 approved」时标 `payroll_snapshot`，
+            # 但该值**从来不是从快照表读的**（快照表已随 current_schema_20261242
+            # 一并删除），数据一直来自工资单 ⇒ 标签与事实不符。
+            # 快照机制下线后恒为 `payroll_record`。
+            "data_source": "payroll_record",
         }
 
     return {

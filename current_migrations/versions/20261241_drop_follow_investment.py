@@ -75,18 +75,35 @@ FINANCE_SCHEMA = "finance"
 #:
 #: ⚠️ ``core.dim_roles`` 与 ``public.user_roles`` 之间是外键且**没有 ondelete**
 #: ⇒ 必须先删授权行、再删角色行，否则直接撞约束。
+#:
+#: 每条语句都带「涉及表存在」的前置判断（见 ``_table_exists``）：这些表都是
+#: 长期存在的公共表，正常都在；但**缺表不是错误** —— 想删的东西本来就不存在，
+#: 让它把整次部署打断是更糟的结果。真正要防的是「删错别的表」，那由
+#: 「表名写死在这里」保证，不靠存在性判断。
 RESIDUAL_DATA_DELETES = (
     # 投资人角色的授权行（先删子行）
-    "DELETE FROM public.user_roles WHERE role_id IN ("
-    "SELECT role_id FROM core.dim_roles WHERE role_code = 'investor')",
+    (
+        (("public", "user_roles"), ("core", "dim_roles")),
+        "DELETE FROM public.user_roles WHERE role_id IN ("
+        "SELECT role_id FROM core.dim_roles WHERE role_code = 'investor')",
+    ),
     # 投资人角色本身
-    "DELETE FROM core.dim_roles WHERE role_code = 'investor'",
+    (
+        (("core", "dim_roles"),),
+        "DELETE FROM core.dim_roles WHERE role_code = 'investor'",
+    ),
     # 跟投审批模板
-    "DELETE FROM public.approval_templates "
-    "WHERE template_code = 'follow_investment_settlement_approval'",
+    (
+        (("public", "approval_templates"),),
+        "DELETE FROM public.approval_templates "
+        "WHERE template_code = 'follow_investment_settlement_approval'",
+    ),
     # 月结审批模板（月结已改为只读看板，审批流下线）
-    "DELETE FROM public.approval_templates "
-    "WHERE template_code = 'monthly_profit_settlement_approval'",
+    (
+        (("public", "approval_templates"),),
+        "DELETE FROM public.approval_templates "
+        "WHERE template_code = 'monthly_profit_settlement_approval'",
+    ),
 )
 
 #: 被删除的表 —— **按删除顺序排列**（子表在前、父表在后）。
@@ -255,7 +272,10 @@ def upgrade() -> None:
     for table in DROPPED_TABLES:
         # ⚠️ 不用 CASCADE：万一还有意料之外的引用，宁可报错停下，也不静默删掉别的表。
         bind.execute(sa.text(f"DROP TABLE IF EXISTS {FINANCE_SCHEMA}.{table}"))
-    for statement in RESIDUAL_DATA_DELETES:
+    for required_tables, statement in RESIDUAL_DATA_DELETES:
+        # 涉及的表不存在 ⇒ 想删的行本来就不存在 ⇒ 跳过（不是错误）。
+        if not all(_has_table(schema, table) for schema, table in required_tables):
+            continue
         bind.execute(sa.text(statement))
 
 
