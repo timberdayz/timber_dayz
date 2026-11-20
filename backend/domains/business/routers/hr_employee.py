@@ -45,7 +45,6 @@ from modules.core.db import (
     Employee,
     Department,
     DimUser,
-    MonthlyProfitPayrollSnapshot,
     MonthlyProfitSettlement,
     PayrollRecord,
     EmployeeCommission,
@@ -373,37 +372,18 @@ async def get_my_income(
     # performance_score=None / achievement_rate=None / breakdown={...} ——
     # 这四个初始值从头到尾没被读过，留着只会让人以为它们参与计算。
     commission_amount = 0.0
-    settlement_result = await db.execute(
-        select(MonthlyProfitSettlement).where(
-            MonthlyProfitSettlement.period_month == period
+    # ⚠️ 这里原来还会查「已批准的月结」并回读月结工资单快照
+    # （finance.monthly_profit_payroll_snapshots），快照优先级高于工资单。
+    # 月结已改为只读看板、审批制下线、快照表随 current_schema_20261242 一并删除
+    # ⇒ 这条分支是死代码，口径统一走工资单（PayrollRecord）。
+    payroll_data_source = "payroll_record"
+    pr_result = await db.execute(
+        select(PayrollRecord).where(
+            PayrollRecord.employee_code == employee_code,
+            PayrollRecord.year_month == period,
         )
     )
-    settlement = settlement_result.scalar_one_or_none()
-
-    pr = None
-    payroll_data_source = "payroll_record"
-    if settlement and getattr(settlement, "status", None) == "approved":
-        snapshot_result = await db.execute(
-            select(MonthlyProfitPayrollSnapshot).where(
-                MonthlyProfitPayrollSnapshot.settlement_id
-                == getattr(settlement, "id", None),
-                MonthlyProfitPayrollSnapshot.employee_code == employee_code,
-                MonthlyProfitPayrollSnapshot.snapshot_status == "active",
-            )
-        )
-        snapshot_rows = snapshot_result.scalars().all()
-        pr = snapshot_rows[0] if snapshot_rows else None
-        if pr is not None:
-            payroll_data_source = "payroll_snapshot"
-
-    if pr is None:
-        pr_result = await db.execute(
-            select(PayrollRecord).where(
-                PayrollRecord.employee_code == employee_code,
-                PayrollRecord.year_month == period,
-            )
-        )
-        pr = pr_result.scalar_one_or_none()
+    pr = pr_result.scalar_one_or_none()
     if not pr:
         await _log_me_income_access(
             request, current_user_id, period, "payroll_missing", db
