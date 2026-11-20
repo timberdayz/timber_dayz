@@ -33,6 +33,15 @@
 - 店铺账号密码轮换 —— Walter 决定**不轮换**；`git filter-repo` 历史清理 —— 按约定**不做**（会作废全部已发布 tag，含 `v7.24.0`）⇒ 均关闭。
 - `CHANGELOG.md:952`「新增三个 CI 坑」标题笔误 —— 已在本文件修正标题（**已发布的 CHANGELOG 不改**）⇒ 关闭。
 
+## 进行中：月度利润看板重构（2026-11-21）
+
+- 计划：`docs/superpowers/plans/2026-11-21-finance-profit-dashboard.md`；设计：`docs/superpowers/specs/2026-11-21-finance-profit-dashboard-design.md`
+- 做什么：把「财务结算中心」从**会自己算钱的审批表单**改成**只读事实看板**（赚多少 / 分给员工多少 / 人工调整多少 / 留下多少）；跟投模块整体下线。
+- 后端**不重命名**（受上线前规则约束）⇒ 重命名降级为 post-launch V2 治理项（`docs/superpowers/plans/2026-11-21-finance-profit-dashboard-post-launch-v2.md`）。
+- 口径写死在 `docs/team-skills/sea-metrics-language/`（正本；`team-skills-bundle/` 为副本，由 `scripts/verify_team_skills_sync.py` 机器校验）。
+- 看板只有**唯一写入口**：人工调整项（原因必填，服务端 default 兜底已拆）。
+- ⚠️ **上线必须附「口径切换前后同月对比」**：本批修正了重复扣减与公司池双扣 ⇒ **所有历史月份的公司留存数字都会变化**（是修正，不是回归），须提前向管理层说明。
+
 ---
 
 ## 最新发布：v7.33.0（2026-11-18，批次 8）
