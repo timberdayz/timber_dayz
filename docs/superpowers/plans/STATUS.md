@@ -33,40 +33,28 @@
 - 店铺账号密码轮换 —— Walter 决定**不轮换**；`git filter-repo` 历史清理 —— 按约定**不做**（会作废全部已发布 tag，含 `v7.24.0`）⇒ 均关闭。
 - `CHANGELOG.md:952`「新增三个 CI 坑」标题笔误 —— 已在本文件修正标题（**已发布的 CHANGELOG 不改**）⇒ 关闭。
 
-## 进行中：月度利润看板重构（2026-11-21）
+## 已完成：月度利润看板重构（2026-11-21，**v7.36.0 已发版并部署生产**）
 
 - 计划：`docs/superpowers/plans/2026-11-21-finance-profit-dashboard.md`；设计：`docs/superpowers/specs/2026-11-21-finance-profit-dashboard-design.md`
-- 做什么：把「财务结算中心」从**会自己算钱的审批表单**改成**只读事实看板**（赚多少 / 分给员工多少 / 人工调整多少 / 留下多少）；跟投模块整体下线。
-- 后端**不重命名**（受上线前规则约束）⇒ 重命名降级为 post-launch V2 治理项（`docs/superpowers/plans/2026-11-21-finance-profit-dashboard-post-launch-v2.md`）。
+- 做了什么：把「财务结算中心」从**会自己算钱的审批表单**改成**只读事实看板**（赚多少 / 分给员工多少 / 人工调整多少 / 留下多少）；跟投模块整体下线。
+- 后端**不重命名**（受上线前规则约束）⇒ 重命名降级为 post-launch V2 治理项（`docs/superpowers/plans/2026-11-21-finance-dashboard-post-launch-v2.md`）。
 - 口径写死在 `docs/team-skills/sea-metrics-language/`（正本；`team-skills-bundle/` 为副本，由 `scripts/verify_team_skills_sync.py` 机器校验）。
 - 看板只有**唯一写入口**：人工调整项（原因必填，服务端 default 兜底已拆）。
 - ⚠️ **上线必须附「口径切换前后同月对比」**：本批修正了重复扣减与公司池双扣 ⇒ **所有历史月份的公司留存数字都会变化**（是修正，不是回归），须提前向管理层说明。
+  对比表见 `docs/reports/monthly-profit-dashboard-readiness-all-months.md`（旧口径 7 个月留存为负，新口径只剩 2026-08 一个月）。
+- **发布证据**：见 CHANGELOG `v7.36.0` §四（部署流水线 run 44792152462 全绿；生产 `Backend/Frontend = v7.36.0`；
+  迁移链头 `current_schema_20261242_drop_monthly_profit_snapshots`，`missing_tables/columns` 均为空）。
 
 ---
 
-## 最新发布：v7.33.0（2026-11-18，批次 8）
+## 最新发布：v7.36.0（2026-11-21）
 
-- 商品中心**尾程费率去汇率层 + 卡片式维护 + 修好改价 409**：生产 7 容器 healthy、
-  `healthz/ready` = 200 / v7.33.0 / runtime_mode=production、本批**无迁移**（链头仍 `20261238`）、
-  Shopee SG 尾程 5 档 = 20.93/25.31/27.97/38.59/62.44 元（**未动**）。完整发布证据见归档
-  「发布证据（v7.33.0，2026-11-18）· 批次 8」。
-- **上一版**：v7.32.0（批次 6 + 批次 7）—— 证据见归档「发布证据（v7.32.0，2026-11-17）· 批次 6 + 批次 7」。
-
-## 已完成：批次 8 · 尾程费率「去汇率层 + 卡片式维护」（2026-11-18，**v7.33.0 已发版并部署生产**）
-
-- **三条口径（Walter 拍板）**：① 人工填进去的就是**人民币**，系统不做汇率换算
-  （后端契约本来就只收 CNY ⇒ 那层汇率壳是前端自己加的有害壳，本批**只删前端**，迁移不写）；
-  ② 一个「平台 × 仓」= **一张卡**，卡内固定顺序列全部 6 段（不会漏段/选错段），缺价段看得见；
-  ③ **改价只进不退**（变了价 ⇒ POST 新版本，只改备注 ⇒ PATCH）。
-- **实测发现并修掉的硬伤**：卡片改价对**已存在**档位直接 **409「重复行」** ⇒ 核心动作不可用。
-  根因：改价时把**原行生效日**一起发出去 ⇒ 旧行闭区间到生效日前一天 ⇒ **区间倒挂** ⇒ 撞
-  `ck_delivery_rate_rules_window`；且历史会被抹掉。⇒ 口径收口到**后端一处（SSOT）**：
-  改价 ⇒ `effective_from = max(调用方给值, 今天)`、旧行闭区间到前一天；首次录价仍可回填历史。
-- **落地物**：`ProductCenter.vue`、`product_center.py`（`create_delivery_rate_rule`）。**无迁移**。
-- **守护**：`test_delivery_rate_card_save_flow.py`（6 条，真跑路由）、
-  `test_delivery_rate_currency_guard.py`（24 条）、前端 107/107；后端全量 **6231 passed / 8 skipped**。
-- **完整口径与证据**：计划文档 `2026-11-16-product-center-five-batch-optimization.md` §9.11；
-  发布证据见归档「发布证据（v7.33.0，2026-11-18）· 批次 8」。
+- **财务结算中心 → 只读「月度利润看板」+ 跟投模块整体下线**：生产 7 容器 healthy、
+  `healthz/ready` = 200 / **v7.36.0** / runtime_mode=production、
+  迁移链头 `current_schema_20261242_drop_monthly_profit_snapshots`（`missing_tables/columns` 均为空）、
+  路由总数 521 → 510（跟投路由 9 → 0，结算接口收敛为 3 条）。
+  完整发布证据见 CHANGELOG `v7.36.0` §四。
+- **上一版**：v7.35.1（2026-11-20）—— 注册审批链痕迹清理的发版修正。
 
 ## 已知未落地项
 

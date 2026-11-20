@@ -1,5 +1,5 @@
 # Changelog - 西虹 ERP 系统
-## [Unreleased] - 2026-11-21 - 跟投模块整体下线 + 财务结算中心改造为只读「月度利润看板」
+## [v7.36.0] - 2026-11-21 - 跟投模块整体下线 + 财务结算中心改造为只读「月度利润看板」
 
 业务确认无真实投资人，跟投收益模块整体下线；「财务结算中心」同步改造为**只读看板**
 —— 不再自算金额、不再审批、不再冻结快照，只回答一句话：
@@ -71,7 +71,7 @@
 - **看板唯一写入口 = 人工调整项**：`reason` 必填（服务端 default 兜底已拆），
   `created_by` 服务端写入不接受前端传值；
 - 后端**不重命名**（受上线前规则约束），重命名降级为 post-launch V2 治理项
-  （`docs/superpowers/plans/2026-11-21-finance-profit-dashboard-post-launch-v2.md`）。
+  （`docs/superpowers/plans/2026-11-21-finance-dashboard-post-launch-v2.md`）。
 
 #### 前端
 
@@ -108,13 +108,61 @@
 
 ### 三、验收证据
 
-- **后端全量**：7182 用例，失败 4 条 —— 与改动前的干净基线**逐条完全一致**
-  （基线快照见 `docs/superpowers/plans/2026-11-21-finance-profit-dashboard-baseline.txt`），**零新增失败**；
+- **后端全量**：改动后收集 **7163** 条用例，`4 failed / 7146 passed / 13 skipped`；
+  与改动前的干净基线（收集 7199 条、失败 4 条）**逐条完全一致**
+  （基线快照见 `docs/superpowers/plans/2026-11-21-finance-profit-dashboard-baseline.txt`），
+  用 `scripts/diff_pytest_junit.py` 比对结果为 **NEW failures = 0 / FIXED failures = 0 / COMMON = 4**；
+  用例总数 -36 全部来自随跟投与快照下线而删除的 82 条旧用例，同期新增 46 条看板用例；
 - **前端全量**：`node --test "scripts/*.test.mjs"` 364/364 通过；`vite build` 成功；
 - **迁移**：两条新迁移的 upgrade / downgrade 在隔离库上单独验证通过（downgrade 重建空表结构，
   数据不可逆 —— 迁移前有自动备份兜底）；
 - **看板实跑**（真实 PostgreSQL）：2026-10 净利 22,337.41 / 员工侧分配 2,829.93 / 留存 19,507.48，
-  各店分布利润基数合计与净利润**对账相等**，亏损店被正确标记「分过头」。
+  各店分布利润基数合计与净利润**对账相等**，亏损店被正确标记「分过头」；
+- **发布门禁**：6 个脚本全过（`test_migration_foreign_keys` /
+  `verify_production_migration_contracts` 2 passed / `validate_api_contracts` 0 错误 /
+  `validate_frontend_api_methods` 0 缺失 / `validate_database_fields` /
+  `verify_remote_deploy_contracts`）；5 个校验脚本全过（`verify_team_skills_sync` /
+  `verify_architecture_ssot` 100.0% / `verify_rules_completeness` /
+  `verify_root_md_whitelist` / `verify_utf8_source_hygiene`）；
+- **CI 独立复验**：PR #28 的 `test (3.11)` 作业**全绿**（含 black 格式检查与 ruff Linting）。
+
+### 四、生产部署与验收（2026-11-21 实测）
+
+- **流水线**：GitHub Actions `deploy-production.yml` run **44792152462** ——
+  `check-config` ✔ → 发布门禁 ✔ → 镜像构建推送 ✔（backend / backend-full / frontend 三镜像 +
+  容器启动冒烟 ✔）→ **生产部署 ✔（10m41s）**；
+- **镜像**：生产 **`Backend=v7.36.0`、`Frontend=v7.36.0`**（旧 `v7.35.0` 前端镜像已清理）；
+- **迁移**：`migration_status = up_to_date`，
+  `current_revision = head_revision = current_schema_20261242_drop_monthly_profit_snapshots`，
+  `missing_tables = []`、`missing_columns = []`、`all_tables_exist = true`、
+  `all_critical_columns_exist = true`；
+- **备份兜底**：迁移前已完成**可恢复性验证**的备份
+  （`backups/pre_deploy_20261121_023207/backup_20261120T183210Z/xihong_erp-20261120T183210Z.dump`，
+  `pg_restore --list` 通过）⇒ 被 drop 的 5 张快照表与跟投表历史数据仍可从备份取回；
+- **健康端点**：`https://www.xihong.site/api/healthz/ready` → HTTP 200，
+  `version = v7.36.0`、`runtime_mode = production`、`database = connected`、`dashboard = ready`；
+- **路由实测**（部署前 → 部署后）：总路径 **521 → 510**；
+  跟投路由 **9 → 0**（`/api/finance/follow-investments*` 全部 404）；
+  结算接口只剩 3 条 —— `GET /api/finance/monthly-profit-settlement`、
+  `POST /api/finance/monthly-profit-settlement/adjustments`、
+  `DELETE /api/finance/monthly-profit-settlement/adjustments/{adjustment_id}`；
+  旧的 `rebuild` / `{id}/targets` / `{id}/approve` / `{id}/reopen` 全部 404；
+  **差集逐条核对，零意外删除**；
+- **前端**：`/financial-management` → 200、`/api/docs` → 200、首页 → 200；
+  线上 chunk 含 `MonthlySettlement`（看板页）与 `settlementDisplayRules`（看板口径规则），
+  跟投 chunk 已不存在；
+- **双镜像**：main SHA 三方一致（GitHub / CNB / 本地 = `23e15069`）；
+  tag `v7.36.0` 两端为同一 tag 对象（`9a38bae3`）⇒ 先推 CNB（确认未触发部署）再推 GitHub（触发部署）。
+
+> ⚠️ **两个既有红灯（非本次引入，不阻塞发布）**：
+> ① `security-scan` 作业红 —— `ci.yml` 的 safety 步骤只在 base commit 上生成 `safety-report-base.json`，
+> 却直接消费从未生成的 `safety-report-head.json`；该步骤只在 PR 事件下触发（push 到 main 时被 `if` 跳过），
+> **属流程 bug**，且本次**零 requirements 改动** ⇒ 不可能引入新漏洞；
+> ② `Dashboard Assets Check` 红 —— `semantic.fact_inventory_snapshot_mv` 的列集与正本
+> `semantic.fact_inventory_snapshot` 不一致（库存语义层 fail-closed 护栏）。正本视图最后一次改动是
+> `df2b25e2`（2026-11-10）、物化副本创建于 `bfda652d`（2026-11-15），**两者都在本 PR 分支点之前就已进入 main**
+> ⇒ 属主干存量漂移；本次 diff 未触及 `sql/` 任何文件，生产只重建正本视图且不启用看板资产自举。
+
 
 ## [v7.35.1] - 2026-11-20 - 人力 + 用户管理发版修正：清理残留测试账号时补齐「注册审批链」痕迹
 

@@ -39,21 +39,31 @@
 
 ### 1.1 问题描述
 
-「月度利润结算中心」被改造成只读的「月度利润看板」之后，**代码里的名字全都没动**：
-service、schema、router、URL、前端目录、前端 store 全部还叫 `settlement`。
-后果是：新人搜「dashboard」找不到看板，看板代码里却全是「结算 / settlement」；
+「月度利润结算中心」被改造成只读的「月度利润看板」之后，**后端代码里的名字全都没动**：
+service、schema、router、URL 仍叫 `settlement`。
+后果是：新人搜「dashboard」找不到看板，看板后端代码里却全是「结算 / settlement」；
 文档与代码名长期不一致，二次交接成本高。
+
+> **本轮改造后的消解情况**：**前端**那部分已经顺手做掉了 —— 目录改成
+> `frontend/src/domains/business/views/finance-dashboard/`（4 个新组件），
+> store 改成 `frontend/src/stores/financeDashboard.js`，
+> 旧的 `finance-settlement/` 与 `financeSettlement.js` 已删除。
+> ⇒ **V2-01 现在只剩「后端 3 个文件 + URL 前缀」这一项**（见 §1.2 表末两行）。
 
 ### 1.2 证据路径（带行号）
 
 | 现状路径 | 目标路径 | 证据 |
 |---|---|---|
-| `backend/services/monthly_profit_settlement_service.py`（970 行） | `backend/services/finance_dashboard_service.py` | 文件存在，970 行 |
-| `backend/schemas/monthly_profit_settlement.py`（97 行） | `backend/schemas/finance_dashboard.py` | 文件存在，97 行 |
-| `backend/domains/business/routers/monthly_profit_settlement.py`（160 行） | `backend/domains/business/routers/finance_dashboard.py` | `:23` `APIRouter(prefix="/api/finance/monthly-profit-settlement", tags=["monthly-profit-settlement"])` |
-| URL `/api/finance/monthly-profit-settlement` | `/api/finance/dashboard` | 同上 `:23` |
-| `frontend/src/domains/business/views/finance-settlement/` | `frontend/src/domains/business/views/finance-dashboard/` | 含 `MonthlySettlementPanel.vue`、`SettlementWorkspacePanel.vue` |
-| `frontend/src/stores/financeSettlement.js` | `frontend/src/stores/financeDashboard.js` | 文件存在 |
+| `backend/services/monthly_profit_settlement_service.py`（559 行） | `backend/services/finance_dashboard_service.py` | 文件存在，559 行 |
+| `backend/schemas/monthly_profit_settlement.py`（109 行） | `backend/schemas/finance_dashboard.py` | 文件存在，109 行 |
+| `backend/domains/business/routers/monthly_profit_settlement.py`（95 行） | `backend/domains/business/routers/finance_dashboard.py` | `:21-22` `APIRouter(prefix="/api/finance/monthly-profit-settlement", tags=["monthly-profit-settlement"])` |
+| URL `/api/finance/monthly-profit-settlement` | `/api/finance/dashboard` | 同上 `:21-22` |
+| `frontend/src/domains/business/views/finance-dashboard/` | `frontend/src/domains/business/views/finance-dashboard/`（**已改名，V2-01 只剩后端与 URL 改名**） | 现含 `FinanceDashboardView.vue`、`ProfitOverviewCards.vue`、`ShopAllocationTable.vue`、`AdjustmentPanel.vue`（旧 `finance-settlement/` 与 `MonthlySettlementPanel.vue` / `SettlementWorkspacePanel.vue` 已随看板化删除） |
+| `frontend/src/stores/financeDashboard.js` | `frontend/src/stores/financeDashboard.js`（**已改名，V2-01 前端项已消解**） | 文件存在（旧 `financeSettlement.js` 已随看板化删除并由本文件替代） |
+
+> ⚠️ **行数/行号口径**：上表行数与行号是 **2026-11-21 实测快照**（行数按 UTF-8 换行计）。
+> 本轮改造做过 ORM 清理与 `black` 格式化，**行号已随之漂移** —— 执行 V2 前请以代码为准重新定位，
+> 不要直接拿本表行号当锚点。
 
 ### 1.3 影响面
 
@@ -67,7 +77,8 @@ service、schema、router、URL、前端目录、前端 store 全部还叫 `sett
 
 ### 1.4 预估范围
 
-3 个后端文件 + 1 个前端目录 + 1 个 store + API / 菜单 / 路由 / 权限点核对 + 相关测试改名与回归。
+3 个后端文件 + 1 个 URL 前缀 + API / 菜单 / 路由 / 权限点核对 + 相关测试改名与回归
+（**前端目录与 store 已在本轮完成改名，不在 V2-01 范围内**）。
 **约 1 个迭代**，且必须安排**旧 URL 的过渡期**（保留旧路由一段时间并转发/告警），否则会打断在用页面。
 
 ### 1.5 与其他条目的关系
@@ -244,9 +255,13 @@ modules/core/db/schema_parts/business.py:4660-4664
 而绩效工资侧实际消费的是**员工级销售额加权平均**。注释与两处实现都对不上。
 
 > ⚠️ **与任务描述的偏差**：任务描述把这条注释定位在
-> `modules/core/db/schema_parts/business.py:4827`。实测 `:4827` 是
+> `modules/core/db/schema_parts/business.py:4827`。初稿实测 `:4827` 是
 > `user_notification_preferences.user_id` 列（`UserNotificationPreference` 表），
-> 与系数无关。本条按代码更正为 `:4660-4664`。
+> 与系数无关。本条先更正为 `:4660-4664`；**2026-11-21 改造后（ORM 清理 + `black` 格式化）
+> 该行号再次漂移** ⇒ 实测当前正确位置为 `:4426-4430`
+> （`EmployeePerformance` 表 / `employee_performance` 的 `performance_coefficient` 列，
+> 注释 `Unified settlement coefficient = min(rank band, score band)`）。
+> 执行本条前请以代码为准重新定位。
 
 ### 3.3 影响面
 
