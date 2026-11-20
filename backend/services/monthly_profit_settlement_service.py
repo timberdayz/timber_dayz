@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
@@ -162,22 +162,9 @@ class MonthlyProfitSettlementService:
         shop_profit_amount = sum(
             self._to_float(row.profit_basis_amount) for row in basis_by_shop.values()
         )
-        public_labor_result = await self.db.execute(
-            select(
-                func.coalesce(
-                    func.sum(EmployeeLaborCostAllocation.pre_commission_amount),
-                    0,
-                )
-            ).where(
-                EmployeeLaborCostAllocation.period_month == period_month,
-                EmployeeLaborCostAllocation.allocation_scope == "company",
-                # 只认 V2 口径：历史 V1 行与同月 V2 行并存时会把人力成本算两遍
-                EmployeeLaborCostAllocation.calculation_version
-                == LABOR_COST_CALCULATION_VERSION,
-            )
-        )
-        public_labor_amount = self._to_float(public_labor_result.scalar_one_or_none())
-        return shop_profit_amount - public_labor_amount
+        # ⚠️ 不再扣公司人力成本池：它已经在各店利润基数里摊派过（见 labor_cost_projection_service），
+        #    在这里再减一次就是重复扣减。
+        return shop_profit_amount
 
     async def _load_personnel_payload(self, period_month: str) -> dict[str, Any]:
         allocation_rows = (
@@ -188,6 +175,9 @@ class MonthlyProfitSettlementService:
                         EmployeeLaborCostAllocation.source_payroll_status.in_(
                             PAYROLL_LOCKED_STATUSES
                         ),
+                        # 只认当前口径：历史版本行与同月当前版本行并存时会把人力成本算两遍
+                        EmployeeLaborCostAllocation.calculation_version
+                        == LABOR_COST_CALCULATION_VERSION,
                     )
                 )
             )
@@ -196,13 +186,18 @@ class MonthlyProfitSettlementService:
         )
 
         details: list[dict[str, Any]] = []
-        total = 0.0
+        performance_total = 0.0
+        commission_total = 0.0
+        shop_breakdown: dict[tuple[str, str], dict[str, Any]] = {}
 
         for row in allocation_rows:
-            amount = self._to_float(
+            performance_amount = self._to_float(
                 getattr(row, "performance_amount", 0)
-            ) + self._to_float(getattr(row, "commission_amount", 0))
-            total += amount
+            )
+            commission_amount = self._to_float(getattr(row, "commission_amount", 0))
+            performance_total += performance_amount
+            commission_total += commission_amount
+            amount = performance_amount + commission_amount
             details.append(
                 {
                     "detail_type": "post_commission_labor_cost",
@@ -216,7 +211,34 @@ class MonthlyProfitSettlementService:
                 }
             )
 
-        return {"actual_amount": total, "details": details}
+            # 每店分布只收 shop scope：公司 scope 是总部员工，不落在任何一家店里
+            if str(getattr(row, "allocation_scope", "") or "") != "shop":
+                continue
+            platform_code = getattr(row, "platform_code", None)
+            shop_id = getattr(row, "shop_id", None)
+            key = (str(platform_code or ""), str(shop_id or ""))
+            bucket = shop_breakdown.get(key)
+            if bucket is None:
+                bucket = {
+                    "platform_code": platform_code,
+                    "shop_id": shop_id,
+                    "performance_amount": 0.0,
+                    "commission_amount": 0.0,
+                    "allocation_amount": 0.0,
+                }
+                shop_breakdown[key] = bucket
+            bucket["performance_amount"] += performance_amount
+            bucket["commission_amount"] += commission_amount
+            bucket["allocation_amount"] += amount
+
+        return {
+            # 只取提成后金额：pre_commission_amount 已在各店利润基数里扣过一次
+            "actual_amount": performance_total + commission_total,
+            "performance_salary_amount": performance_total,
+            "commission_amount": commission_total,
+            "details": details,
+            "shop_breakdown": list(shop_breakdown.values()),
+        }
 
     async def _load_settlement_record(
         self, period_month: str
