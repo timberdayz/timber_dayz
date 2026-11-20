@@ -442,7 +442,7 @@
 | 看板聚合唯一实现 | ✅ | 三条算术只在 `monthly_profit_settlement_service.py`，前端不复刻 |
 | 删除重复口径 | ✅ | `_load_snapshot_personnel_details`（快照口径）与 `build_summary` 的目标额/差异算法双双删除 |
 | 每店 breakdown 有合法来源 | ✅ | 唯一来源是人力成本分摊表（`business.py:1853-1922`），已写入 §4.2 |
-| 机器可验证 | ✅ | 对账断言：**看板员工侧分配额 == Σ分摊表(performance_amount + commission_amount) == 看板各店 breakdown 分配额之和**。⚠️ 注意 `c_class.employee_commissions` 是员工粒度唯一键（`business.py:4878-4880`），**无法按店汇总**，只能做员工维度总额交叉校验 |
+| 机器可验证 | ✅ | 对账断言：**看板各店 breakdown 的 `profit_basis_amount` 之和 == `net_profit_amount`**（每店利润基数与净利润取自同一份去重后的利润基数行）。员工侧分配额 == Σ分摊表(`performance_amount + commission_amount`)，**含 `company` scope**；而 breakdown **只收 `shop` scope** ⇒ breakdown 的分配额之和 **≤** 员工侧分配额，差额即总部/仓库人员分走的那部分（不可按店归属）。⚠️ 注意 `c_class.employee_commissions` 是员工粒度唯一键（`business.py:4878-4880`），**无法按店汇总**，只能做员工维度总额交叉校验 |
 
 **结论：满足。**
 
