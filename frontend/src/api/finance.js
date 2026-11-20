@@ -177,24 +177,36 @@ export default {
     return await api._post('/finance/profit-basis/rebuild', data)
   },
 
-  async getMonthlyProfitSettlement(params = {}) {
+  /**
+   * 获取月度利润看板数据（只读）
+   * @param {Object} params - 查询参数
+   * @param {string} params.period_month - 月份（YYYY-MM）
+   * @returns {Promise} 看板聚合数据（结果区 + 店铺分布 + 调整项）
+   */
+  async getFinanceDashboard(params = {}) {
     return await api._get('/finance/monthly-profit-settlement', { params })
   },
 
-  async rebuildMonthlyProfitSettlement(data) {
-    return await api._post('/finance/monthly-profit-settlement/rebuild', data)
+  /**
+   * 新增一条人工调整项（看板唯一写入口，原因必填）
+   * @param {Object} data - 调整项数据
+   * @param {string} data.period_month - 月份（YYYY-MM）
+   * @param {string} data.adjustment_type - 调整类型
+   * @param {number} data.amount - 调整金额（有符号）
+   * @param {string} data.reason - 调整原因（必填）
+   * @returns {Promise} 新建的调整项
+   */
+  async createFinanceAdjustment(data) {
+    return await api._post('/finance/monthly-profit-settlement/adjustments', data)
   },
 
-  async updateMonthlyProfitSettlementTargets(id, data) {
-    return await api._put(`/finance/monthly-profit-settlement/${id}/targets`, data)
-  },
-
-  async approveMonthlyProfitSettlement(id) {
-    return await api._post(`/finance/monthly-profit-settlement/${id}/approve`, {})
-  },
-
-  async reopenMonthlyProfitSettlement(id) {
-    return await api._post(`/finance/monthly-profit-settlement/${id}/reopen`, {})
+  /**
+   * 删除一条人工调整项
+   * @param {number} adjustmentId - 调整项ID
+   * @returns {Promise} 删除结果
+   */
+  async deleteFinanceAdjustment(adjustmentId) {
+    return await api._delete(`/finance/monthly-profit-settlement/adjustments/${adjustmentId}`)
   }
 }
 

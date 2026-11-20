@@ -126,7 +126,7 @@ const routes = [
     name: 'FinancialManagement',
     component: () => import('@/domains/business/views/FinancialManagement.vue'),
     meta: {
-      title: '财务管理',
+      title: '月度利润看板',
       icon: 'Money',
       permission: 'financial-management',
       roles: ['admin', 'manager', 'finance']
@@ -304,7 +304,7 @@ const routes = [
     name: 'FinancialOverview',
     redirect: '/financial-management',
     meta: {
-      title: '??????',
+      title: '财务概览',
       icon: 'Money',
       permission: 'financial-management',
       roles: ['admin', 'manager', 'finance']

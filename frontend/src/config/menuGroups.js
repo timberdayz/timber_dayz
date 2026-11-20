@@ -79,7 +79,7 @@ export const menuGroups = [
     order: 6,
     defaultExpanded: true,
     items: [
-      '/financial-management',   // 财务结算中心
+      '/financial-management',   // 月度利润看板
       '/expense-management',     // 费用管理
       '/b-cost-analysis'         // B类成本分析
     ]
@@ -232,7 +232,7 @@ export const routeDisplayNames = {
   '/inventory/grns': '入库单管理',
   '/inventory/alerts': '库存预警',
   '/inventory/reconciliation': '库存对账',
-  '/financial-management': '财务结算中心',
+  '/financial-management': '月度利润看板',
   // ⭐ v4.6.0新增：数据同步路由显示名称
   '/data-sync/files': '文件列表',
   '/data-sync/tasks': '同步任务',
