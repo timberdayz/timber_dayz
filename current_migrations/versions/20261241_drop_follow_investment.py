@@ -37,6 +37,24 @@ follow_investment_settlements`` 这一条带 ``ON DELETE CASCADE`` 的外键 ⇒
 drop 掉的表与其中的样本数据**无法**通过 downgrade 找回：downgrade 只重建
 **空表结构**（保证 schema 可回滚、后续迁移仍能跑通），不重建样本数据
 （把样本行塞回库里比留着空表更糟）。此做法沿用 ``20261240`` 的处理方式。
+
+数据残留清理（同批追加）
+--------------------
+代码下线了「跟投」与「月结审批」，但库里还留着对应的**数据行** ——
+角色与审批模板都是「只增不删」写入的（``ensure_system_roles`` /
+``_ensure_template``），代码删掉后那几行不会自己消失：
+
+* ``core.dim_roles`` 里 ``role_code = 'investor'`` 的投资人角色
+  （连带 ``public.user_roles`` 里指向它的授权行 —— 外键没有 ondelete，
+  不先删子行会直接撞约束）
+* ``public.approval_templates`` 里 ``template_code =
+  'follow_investment_settlement_approval'`` 的跟投审批模板
+* ``public.approval_templates`` 里 ``template_code =
+  'monthly_profit_settlement_approval'`` 的月结审批模板（月结已改为只读看板）
+
+表名与列名取自本地库 2026-11-21 实测（``information_schema`` 查询），
+不是推测。这些 DELETE 同样**不可逆**：downgrade 不恢复它们 —— 代码一旦回退，
+``ensure_system_roles`` / ``_ensure_template`` 会重新写入对应的行。
 """
 
 from __future__ import annotations
@@ -52,6 +70,24 @@ depends_on = None
 
 
 FINANCE_SCHEMA = "finance"
+
+#: 代码下线后残留的数据行 —— **按执行顺序排列**（先子表、后父表）。
+#:
+#: ⚠️ ``core.dim_roles`` 与 ``public.user_roles`` 之间是外键且**没有 ondelete**
+#: ⇒ 必须先删授权行、再删角色行，否则直接撞约束。
+RESIDUAL_DATA_DELETES = (
+    # 投资人角色的授权行（先删子行）
+    "DELETE FROM public.user_roles WHERE role_id IN ("
+    "SELECT role_id FROM core.dim_roles WHERE role_code = 'investor')",
+    # 投资人角色本身
+    "DELETE FROM core.dim_roles WHERE role_code = 'investor'",
+    # 跟投审批模板
+    "DELETE FROM public.approval_templates "
+    "WHERE template_code = 'follow_investment_settlement_approval'",
+    # 月结审批模板（月结已改为只读看板，审批流下线）
+    "DELETE FROM public.approval_templates "
+    "WHERE template_code = 'monthly_profit_settlement_approval'",
+)
 
 #: 被删除的表 —— **按删除顺序排列**（子表在前、父表在后）。
 #:
@@ -214,11 +250,13 @@ def _has_table(schema: str, table: str) -> bool:
 
 
 def upgrade() -> None:
-    """删除跟投模块的 4 张表（子表在前、父表在后，避免撞外键）。"""
+    """删除跟投模块的 4 张表（子表在前、父表在后，避免撞外键），并清理数据残留。"""
     bind = op.get_bind()
     for table in DROPPED_TABLES:
         # ⚠️ 不用 CASCADE：万一还有意料之外的引用，宁可报错停下，也不静默删掉别的表。
         bind.execute(sa.text(f"DROP TABLE IF EXISTS {FINANCE_SCHEMA}.{table}"))
+    for statement in RESIDUAL_DATA_DELETES:
+        bind.execute(sa.text(statement))
 
 
 def downgrade() -> None:

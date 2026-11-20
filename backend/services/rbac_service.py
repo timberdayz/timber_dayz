@@ -23,8 +23,6 @@ ROLE_NAME_TO_CODE = {
     "finance": "finance",
     "游客": "tourist",
     "tourist": "tourist",
-    "投资人": "investor",
-    "investor": "investor",
 }
 
 
