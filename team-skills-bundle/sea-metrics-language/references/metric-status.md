@@ -29,3 +29,8 @@
 | mer | blocked | no | 尚未形成统一系统口径 | marketing |
 | repurchase_rate | blocked | no | 尚未形成统一系统口径 | crm |
 | hero_sku_ratio | blocked | no | 尚未形成统一系统口径 | founder |
+| break_even_roi | observe | conditional | 成本不全时**算不出来**（缺输入不给乐观值）；平台后台没有这个口径 | finance |
+| suggested_roi | observe | conditional | 保本ROI × (1+安全边际20%) 并按平台可填上限封顶；依赖保本ROI，成本不全时同样不可用 | finance |
+| advertising_contribution_margin_rate | observe | conditional | 广告前利润 ÷ 商家实收；与平台报表毛利率口径不同，横向比较必须说明来源 | finance |
+| target_roi | observe | conditional | **手填**的平台投放目标，无自动采集；它是意图不是实测 | marketing |
+| platform_reported_roi | observe | conditional | **手抄**的平台实测 ROI，含自然/达人归因 ⇒「达标」≠「赚钱」；归因放大系数拿不到，只提示不给数字 | marketing |
