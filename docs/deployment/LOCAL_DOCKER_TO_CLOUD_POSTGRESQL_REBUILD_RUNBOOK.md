@@ -88,15 +88,19 @@ Run on cloud server:
 ```bash
 docker exec xihong_erp_postgres psql -U erp_user -d xihong_erp -Atc "show search_path; select version_num from core.alembic_version;"
 docker exec xihong_erp_postgres psql -U erp_user -d xihong_erp -Atc "select count(*) from core.collection_configs;"
-docker exec xihong_erp_postgres psql -U erp_user -d xihong_erp -Atc "select table_schema||'.'||table_name from information_schema.tables where table_schema='finance' and table_name in ('shop_profit_basis','follow_investments','follow_investment_settlements','follow_investment_details') order by 1;"
+docker exec xihong_erp_postgres psql -U erp_user -d xihong_erp -Atc "select table_schema||'.'||table_name from information_schema.tables where table_schema='finance' and table_name in ('shop_profit_basis','employee_labor_cost_allocations','monthly_profit_settlements','monthly_profit_adjustments') order by 1;"
 ```
+
+> ⚠️ 2026-11-21：跟投三表（`follow_investments` / `follow_investment_settlements` /
+> `follow_investment_details`）随跟投模块整体下线**已从库里删除**，此处不再校验它们；
+> 改为校验「月度利润看板」的四张真源/台账表。
 
 Recommended parity checks:
 - row counts for `core.collection_configs`
 - row counts for `core.collection_config_shop_scopes`
 - row counts for `core.shop_accounts`
 - row counts for `core.main_accounts`
-- row counts for `finance.follow_investments` and `finance.shop_profit_basis`
+- row counts for `finance.shop_profit_basis` 和 `finance.employee_labor_cost_allocations`
 
 If any critical count is off, stop and investigate before reopening traffic.
 

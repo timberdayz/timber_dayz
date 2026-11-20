@@ -131,12 +131,27 @@ Key files:
     对应菜单项与显示名、`frontend/src/api/finance.js` 的 10 个跟投 API、
     `frontend/src/stores/financeSettlement.js` 的 4 个跟投切片与 9 个跟投 action；
     `investor` 角色、`'投资人': 'investor'` 映射与 `my-follow-investment-income` 权限点同步摘除。
-  - 结算中心（`/financial-management`）内的跟投子视图一并摘除；该页面后续将改造为
-    只读「月度利润看板」，设计见
+  - 结算中心（`/financial-management`）内的跟投子视图一并摘除；该页面**已改造完成**为
+    只读「月度利润看板」（2026-11-21，见下条），设计与实施计划见
     [`2026-11-21-finance-profit-dashboard-design.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/superpowers/specs/2026-11-21-finance-profit-dashboard-design.md)。
   - 验收清单
     [`FOLLOW_INVESTMENT_AND_SETTLEMENT_ACCEPTANCE_CHECKLIST_2026-05-30.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/FOLLOW_INVESTMENT_AND_SETTLEMENT_ACCEPTANCE_CHECKLIST_2026-05-30.md)
     已整份标注作废。
+
+- **月度利润结算中心 → 只读「月度利润看板」(2026-11-21，同批改造)**
+  - 模块**保留但彻底瘦身**：从「会自己算钱的审批表单」改成「只呈现已发生事实的只读看板」。
+    看板只回答一句话 —— 这个月赚了多少、分给员工多少、人工调整多少、留下多少。
+  - **不再生产金额**：预算制（3 个目标比例 + 3 个目标额 + 差异告警）、审批制、快照冻结
+    全部下线；后端**不重命名**（受上线前规则约束），重命名降级为 post-launch V2 治理项。
+  - **口径修正三处**：① 人员成本重复扣减（`total_cost` 减掉了利润基数里已扣的固定工资）；
+    ② 公司人力成本池二次扣减；③ 人员成本查询缺 `calculation_version` 版本过滤。
+    ⇒ **切换后所有历史月份的公司留存数字都会变化（是修正，不是回归）**，
+    上线说明必须附「口径切换前后同月对比」。
+  - **看板唯一写入口 = 人工调整项**（原因必填，服务端 default 兜底已拆）；每店维度的唯一
+    合法来源是 `finance.employee_labor_cost_allocations`。
+  - 口径真源：指标词典 `docs/team-skills/sea-metrics-language/`（正本）+
+    `scripts/verify_team_skills_sync.py` 机器校验；上线前只读体检脚本
+    `scripts/check_monthly_profit_dashboard_readiness.py`。
 
 ## Practical Guidance
 

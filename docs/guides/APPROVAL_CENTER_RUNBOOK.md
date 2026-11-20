@@ -24,22 +24,23 @@
    - 注册创建 `pending` 用户时自动提交审批实例
    - 管理员在用户管理里审批通过 / 拒绝时回写审批中心
 
-2. 月度利润结算审批
-   - 结算重建成功后自动提交审批实例
-   - 财务 / 管理员在结算页面批准时回写审批中心
-
 ## 当前模板列表
 
 审批模板当前至少包含：
 
 - `user_registration_approval`
-- `monthly_profit_settlement_approval`
 
 其他模板会随着后续业务接入继续扩展。
 
 > ⚠️ **跟投结算审批已下线**（2026-11-21）：跟投模块整体下线，`follow_investment_settlement_approval` 模板与
-> `follow_investment_settlement` 审批类型不再登记。月度利润结算审批（`monthly_profit_settlement_approval`）仍保留，
-> 随看板化改造在后续批次处理。
+> `follow_investment_settlement` 审批类型不再登记。
+>
+> ⚠️ **月度利润结算审批已下线**（2026-11-21）：「财务结算中心」改造成**只读的月度利润看板**——
+> 不再自算金额、不再审批、不再冻结快照。`monthly_profit_settlement_approval` 模板与
+> `submit_monthly_profit_settlement_approval` / `sync_monthly_profit_settlement_approval_decision`
+> 两条回写逻辑一并移除（代码见 `backend/services/approval_center_service.py`；模板行由迁移
+> `20261241_drop_follow_investment` 从 `public.approval_templates` 清掉）。
+> 看板唯一的写入口是**人工调整项**（原因必填），不经过审批中心。
 
 ## 当前已知限制
 
@@ -48,7 +49,7 @@
    - 还未开放多级条件分支编排
 
 2. 当前审批人解析规则仍然偏轻量
-   - 用户注册 / 财务结算审批默认解析到首个活跃 admin / superuser
+   - 用户注册审批默认解析到首个活跃 admin / superuser
    - 后续应逐步迁移到显式流程配置
 
 3. HR 请假 / 加班审批尚未正式接入
@@ -62,7 +63,7 @@
 1. HR 请假审批接入审批中心
 2. HR 加班审批接入审批中心
 3. 流程配置从只读模板页升级为可编辑配置页
-4. 将注册 / 结算审批的审批人解析从轻量 admin fallback 升级为显式模板规则
+4. 将注册审批的审批人解析从轻量 admin fallback 升级为显式模板规则
 5. 增加独立审批详情页，而不是只依赖列表 drawer
 6. 优化统一待办中的审批任务展示和跳转体验
 
