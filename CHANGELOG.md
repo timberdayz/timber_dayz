@@ -1,4 +1,52 @@
 # Changelog - 西虹 ERP 系统
+## [v7.37.1] - 2026-11-22 - 补丁：补齐试算接口响应契约（零业务行为变化）
+
+### 一、为什么发这个补丁
+
+v7.37.0 上线后的复核发现一处**本次改动自己带进来的缺口**：
+
+`backend/schemas/hr.py` 里的 `CommissionEstimateRowResponse` / `CommissionEstimateResponse`
+只存在于 schema 定义与 `backend/schemas/__init__.py` 的导出列表里，
+**没有任何路由引用它们** ⇒ 生产 OpenAPI 里查不到试算接口到底返回什么
+⇒ 「schema 声称描述响应，实际不生效」——等于留了一份**从不生效的第二口径**。
+
+接口本身功能完全正常（前端早已按实际返回接好、且有守护覆盖），
+缺的只是**契约文档化**：后端与前端没有一份可对照的「这个接口返回什么」。
+
+### 二、改了什么
+
+- `backend/schemas/hr.py`：新增 `CommissionEstimateApiResponse`
+  ——统一响应格式的外壳（`success` + `data`），`data` 指向原有的
+  `CommissionEstimateResponse`；
+- `backend/schemas/__init__.py`：导出新模型；
+- `backend/domains/business/routers/hr_commission.py`：
+  `POST /api/hr/commissions/settlement-preview/estimate` 挂
+  `response_model=CommissionEstimateApiResponse`；
+- `backend/tests/test_commission_estimate_preview.py`：新增守护
+  `test_estimate_response_contract_is_declared_and_visible` ——
+  锁住 4 件事：① `response_model` 存在；② 外壳字段就是 `success` + `data`；
+  ③ **行字段与 service 实际产出完全一致**（多一个会被 `response_model`
+  静默丢弃，少一个会校验失败变成 500）；④ 三份 schema 在 OpenAPI 的
+  `components.schemas` 里查得到。
+
+### 三、影响面：**零业务行为变化**
+
+- 响应体的键与值与改动前**逐字段一致**（行字段已逐条比对后才加的 `response_model`）；
+- 错误路径返回 `JSONResponse`，FastAPI 不走 `response_model` 校验，行为不变；
+- 后端全量回归与基线 diff：**NEW failures = 0**（7254 passed / 13 skipped，
+  4 项为基线既有失败，与改动前完全一致）；
+- 5 个发布门禁脚本 + `verify_release_local --skip-build` 全过，
+  `ruff` / `black` 干净。
+
+### 四、随本次一并补记的文档
+
+- `CHANGELOG.md`：v7.37.0 段新增「九、生产部署与验收（2026-11-21 实测）」——
+  部署 run `44915030103` 全绿、生产 7 容器 healthy / `v7.37.0`、
+  迁移链头 `current_schema_20261243_drop_legacy_profit_basis`、
+  39 行 legacy 利润基数已删净（只剩 2026-11 的 `SETTLEMENT_BASIS_V1`）、
+  路由实测与 OpenAPI 510 条路径；
+- `docs/superpowers/plans/STATUS.md`：补记本批次发布证据。
+
 ## [v7.37.0] - 2026-11-21 - 提成与绩效工资口径归一（零系数提成 + 纯个人绩效系数）
 
 ### 一、业务已定并已落地的口径
@@ -150,13 +198,13 @@
 - **双镜像**：`main` SHA 三方一致（GitHub / CNB / 本地）；
   tag `v7.37.0` 两端为同一 tag 对象 ⇒ 先推 CNB（确认未触发部署）再推 GitHub（触发部署）。
 
-> ⚠️ **一处「仓库已修、生产未修」的差异（如实留档）**：
+> ⚠️ **一处「发布后才发现的缺口」（已由 v7.37.1 补齐）**：
 > 本次发布后复核发现 `CommissionEstimateRowResponse` / `CommissionEstimateResponse`
-> **从未被任何路由引用** ⇒ 生产 OpenAPI 里查不到试算接口的响应结构
+> **从未被任何路由引用** ⇒ v7.37.0 的生产 OpenAPI 里查不到试算接口的响应结构
 > （悬空 schema，接口本身功能正常、只缺契约文档化）。
-> 仓库侧已修（新增 `CommissionEstimateApiResponse` 外壳模型 + 路由挂 `response_model`
-> + 新增守护 `test_estimate_response_contract_is_declared_and_visible`），
-> **该修复随下一个版本发布**，当前生产仍是 v7.37.0 的行为。
+> 修复已在 **v7.37.1** 落地（新增 `CommissionEstimateApiResponse` 外壳模型 +
+> 路由挂 `response_model` + 新增守护 `test_estimate_response_contract_is_declared_and_visible`），
+> **零业务行为变化**。
 
 ## [v7.36.0] - 2026-11-21 - 跟投模块整体下线 + 财务结算中心改造为只读「月度利润看板」
 
