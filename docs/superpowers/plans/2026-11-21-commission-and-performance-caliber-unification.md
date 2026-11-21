@@ -462,6 +462,21 @@ def calculate_employee_performance_salary(package_amount, performance_score) -> 
 
 > 全部守护必须进 CI 根契约清单（`ci.yml`），否则等于没有。
 
+**挂载方式必须区分（`ci.yml` 的两条 pytest 步骤不是一锅端）**：
+
+| 挂载点 | 位置 | 适合 | 禁忌 |
+|---|---|---|---|
+| **根契约清单**（无 DB） | `ci.yml` 的 "Run root contract tests (no DB)" 步骤 | 纯函数单测、**源码扫描类**守护 | **不得放 async 用例** |
+| **改动触发的 pytest** | "Run pytest (if test files exist)" | 依赖 DB / 多服务的集成型守护 | 漏改文件时不跑 |
+| **PG 服务容器 job** | `ci.yml` 里带 `db_test_config` 的 job | 真 PG 断言（历史重算、库内行数） | 需要 PG 可达 |
+
+⚠️ **已知坑（`ci.yml` 注释已记录，务必照抄那条约束）**：
+CI 钉 `pytest==7.4.3` / `pytest-asyncio==0.21.1`，而 `backend/tests/conftest.py` 覆盖了
+session 级 `event_loop`（1.x 会忽略它）⇒ **凡是被放进根契约清单的文件若有 async 用例，
+会拿到已关闭的事件循环并报 `RuntimeError: Event loop is closed`**。
+本批 9 条守护中，`test_commission_conservation.py` 与 `test_profit_basis_single_version.py`
+**必须写成同步断言**（或改挂 PG job），否则会把流水线打红。
+
 ---
 
 ## 8. 明确不做的事（防误伤清单）
