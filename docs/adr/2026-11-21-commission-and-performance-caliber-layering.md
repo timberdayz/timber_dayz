@@ -131,6 +131,9 @@ allocation_amount = max(profit_basis_amount, 0) * alloc_rate * ratio * settlemen
   （该月生效系数仅 0.5 / 0.8，均 ≤ 1.0）。
   但**历史月份存在 1.2 档系数，其员工在新口径下会少拿钱** ⇒ 影响面必须以生产库
   `--dry-run` 逐人留档后交业务确认，不可仅凭本地单月数据承诺"只会增加"。
+- **赛马压低收入是双向的**：含店铺排名的绩效工资加权平均系数
+  （2026-10：0.7655 / 0.7853 / 0.7791 / 0.5）**均 ≤ 同月纯个人分数档位系数**
+  （0.8 / 0.8 / 0.8 / 0.5）⇒ 赛马参与金额时，只会**压低**员工收入，不会抬高。
 - 口径变更属行为变更，必须用失败集 diff 证明无回归（`scripts/diff_pytest_junit.py`）。
 - 档位表变更必须改 `performance_coefficient.py`，并同步更新守护测试
   （`test_commission_single_source.py` / `test_no_settlement_coefficient_in_payroll.py`
