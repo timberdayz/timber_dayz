@@ -192,8 +192,12 @@
         <el-table-column prop="rank" label="排名" width="80" align="center" sortable>
           <template #default="{ row }">{{ row.rank != null ? `第${row.rank}名` : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" prop="performance_coefficient" label="绩效系数" width="100" align="right" sortable>
-          <template #default="{ row }">{{ row.performance_coefficient != null ? Number(row.performance_coefficient).toFixed(2) : '—' }}</template>
+        <el-table-column v-if="filters.groupBy === 'shop'" prop="performance_coefficient" label="赛马评级（不参与提成计算）" width="210" align="right" sortable>
+          <template #default="{ row }">
+            <el-tooltip content="店铺赛马评级：只用于考核、预警与排名展示，不参与任何金额计算（提成零系数，绩效工资只看个人分数档位）。" placement="top">
+              <span>{{ row.performance_coefficient != null ? Number(row.performance_coefficient).toFixed(2) : '—' }}</span>
+            </el-tooltip>
+          </template>
         </el-table-column>
         <el-table-column v-if="filters.groupBy === 'shop'" label="赛马池" width="100" align="center">
           <template #default="{ row }">{{ rankingPoolText(row) }}</template>
@@ -357,7 +361,7 @@
               {{ performanceDetail.data.rank != null ? `第${performanceDetail.data.rank}名` : '未参与正式赛马' }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="绩效系数">
+          <el-descriptions-item label="赛马评级（不参与提成计算）">
             <el-tag :type="performanceDetail.data.performance_coefficient != null ? (performanceDetail.data.performance_coefficient >= 1.2 ? 'success' : performanceDetail.data.performance_coefficient >= 1.0 ? 'warning' : 'danger') : 'info'" size="small">
               {{ performanceDetail.data.performance_coefficient != null ? performanceDetail.data.performance_coefficient.toFixed(2) : '未完成' }}
             </el-tag>
@@ -737,7 +741,7 @@ const currentGroupPolicyText = computed(() => {
       ? '个人绩效以店铺继承基础分为主，按 80 分折算；个人运营目标自动计分，最高贡献 20 分。'
       : '人员绩效优先来源于个人绩效输入项；人工调整和考勤扣分继续叠加。若当月未配置个人输入项，系统才回退到挂店店铺绩效聚合。'
   }
-  return '店铺总分由销售、毛利和运营三项组成；重点产品当前不纳入正式口径。正式池店铺按公司总榜排名并叠加分数底线生成赛马系数。'
+  return '店铺总分由销售、毛利和运营三项组成；重点产品当前不纳入正式口径。正式池店铺按公司总榜排名并叠加分数底线生成赛马评级。赛马评级只用于考核、预警与排名展示，不参与任何金额计算：提成 = 可分配利润 × 归属提成比（零系数），绩效工资 = 绩效包 × 个人分数档位系数。'
 })
 
 // 表单验证规则

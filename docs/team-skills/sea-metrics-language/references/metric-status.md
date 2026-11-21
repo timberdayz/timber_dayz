@@ -40,3 +40,7 @@
 | company_retained_amount | stable | yes | 看板聚合层只读汇总：净利润 − 员工侧分配额 − 人工调整额 | finance |
 | allocation_ratio | stable | yes | 看板聚合层：(员工侧分配额 + 人工调整额) ÷ 净利润；净利润 ≤ 0 时无意义 | finance |
 | over_allocation_flag | stable | yes | 看板聚合层告警标记：公司留存 < 0 或分配占比 > 1；只读提示，不阻断流程 | finance |
+| commission_amount | stable | yes | 员工提成 = max(店铺可分配利润, 0) × 归属提成比；**零系数**（赛马评级与绩效分数都不参与提成金额） | finance |
+| performance_salary_amount | stable | yes | 绩效工资 = 绩效包金额 × 绩效分数档位系数；**纯个人**，与店铺排名无关 | finance |
+| performance_score_coefficient | stable | yes | 绩效分数档位系数（≥90→1.2 / ≥80→1.0 / ≥70→0.9 / ≥60→0.8 / <60→0.5）；只影响绩效工资 | finance |
+| ranking_coefficient | stable | yes | 赛马评级系数（店铺名次档位）；**不参与任何金额**，只做考核、预警与展示 | finance |

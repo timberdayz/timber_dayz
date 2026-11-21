@@ -35,12 +35,12 @@ export function buildMyIncomeExplanations() {
     {
       key: 'commission_source',
       title: '提成来源',
-      body: '提成来自店铺利润分配结果，口径为店铺利润基数 × 可分配利润率 × 个人提成比例 × 店铺绩效系数。'
+      body: '提成来自店铺利润分配结果，口径为店铺可分配利润 × 个人提成比例（零系数）。赛马排名与绩效分数都不参与提成金额。'
     },
     {
       key: 'performance_salary_source',
       title: '绩效工资来源',
-      body: '绩效工资来自独立绩效包 × 个人绩效系数，不再使用底薪或岗位工资去参与绩效乘法。'
+      body: '绩效工资来自独立绩效包 × 个人绩效分数档位系数（纯个人，与店铺排名无关），不再使用底薪或岗位工资去参与绩效乘法。'
     },
     {
       key: 'performance_score_source',

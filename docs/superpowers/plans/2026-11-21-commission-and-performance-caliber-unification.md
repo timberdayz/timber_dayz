@@ -1,11 +1,13 @@
 # 提成与绩效工资口径归一计划（V2 重建批次）
 
-> 起草：2026-11-21 ｜ 状态：**待执行计划**
+> 起草：2026-11-21 ｜ 状态：**已执行完毕（批次 1~7）**
 > 上游：看板化改造已上线生产（v7.36.0，2026-11-21）⇒ 本批进入 **V2 Rebuild Phase**
 > 阶段依据：`docs/guides/CHANGE_CONTROL.md` §V2 Rebuild Phase
 > 关联文档：`docs/superpowers/plans/2026-11-21-finance-dashboard-post-launch-v2.md`（V2 治理清单）
 > 关联 ADR：`docs/adr/2026-11-21-commission-and-performance-caliber-layering.md`
 > 业务确认：Walter 2026-11-21 ——「提成分多少给多少，只有绩效工资乘绩效系数」；**历史数据可删除或重算，历史数据不重要**
+> ⚠️ **实施中改判**：历史数据最终选**删除 legacy 行 + 接受历史空白**（见 §5.2 与 §6 批次 4），
+> 原方案「删除后按现行口径重算」实测不可行。
 
 ---
 
@@ -16,13 +18,13 @@
 **赛马排名彻底不参与任何金额**、只做考核与预警信号。
 
 结果：提成回到业务方记忆中的样子（**分多少，给多少**）；绩效工资保留激励；
-每个数字只剩**一个真源**；同一句公式不再被抄 5 遍。
+每个数字只剩**一个真源**；同一句公式不再被抄 4 遍（实现处从 4 处收敛到 1 处）。
 
 ---
 
 ## 1. 现状核对（全部为本地库/代码实测，非转述）
 
-### 1.1 同一句提成公式被独立实现 5 处
+### 1.1 同一句提成公式被独立实现 4 处（第 5 处是加载器口径不一致）
 
 SSOT 公式（工资单实发口径，`backend/services/hr_income_calculation_service.py:1657-1662`）：
 
@@ -30,7 +32,7 @@ SSOT 公式（工资单实发口径，`backend/services/hr_income_calculation_se
 allocation_amount = max(profit_basis_amount, 0.0) * alloc_rate * ratio * settlement_coefficient
 ```
 
-5 处实现及其偏差：
+4 处公式实现 + 1 处加载器口径不一致，及其偏差：
 
 | # | 位置 | 偏差 | 是否有页面在用 |
 |---|---|---|---|
@@ -39,6 +41,12 @@ allocation_amount = max(profit_basis_amount, 0.0) * alloc_rate * ratio * settlem
 | 3 | `backend/services/monthly_settlement_service.py:239-255` | 自称「不做任何二次计算」，却自行再算一次 min 并重算提成 | **有**（`frontend/src/domains/business/views/hr/MonthlySettlement.vue`） |
 | 4 | `backend/services/payroll_confirmation_service.py:110-117` | 「按店聚合归属提成比合计」独立实现 | **有**（工资单确认链路） |
 | 5 | 两个「利润基数加载器」口径不一致 | 一个要求 `is_locked=True`、缺行现算；一个不要求、缺行报错 | **有** |
+
+> 📌 计数更正（实施中查实）：第 5 处**不是又抄了一遍公式**，而是两个加载器
+> （`_load_profit_basis_map` / `_load_profit_basis_by_shop`）行为不一致 ——
+> 同样属于必须统一的 SSOT 问题，但形态不同。
+> ⇒ 实现处从 **4 处**收敛到 1 处；加载器口径不一致**一并统一**
+> （legacy 判定统一走 `LaborCostPolicyService.is_legacy_basis_version`）。
 
 > 第 3 处的算法与第 1 处**数学等价**（都是 `min(店铺系数, 个人分数系数)`），
 > 所以月度结算单页当前**没有算错**，只是「同一件事写了两遍」⇒ 属**收敛对象**，不是 bug 修复对象。
@@ -310,12 +318,26 @@ def calculate_employee_performance_salary(package_amount, performance_score) -> 
 
 | 对象 | 现状 | 处置 | 不可逆 |
 |---|---|---|---|
-| `finance.shop_profit_basis` 中 `A_ONLY_V1` / `A_PRE_COMMISSION_LABOR_V2` 行 | 2026-03~09 共 58 行 | **删除后按现行口径重算** | 是（有备份兜底） |
-| `a_class.employee_performance.performance_coefficient` | 2026-07 为 NULL（老口径回退）、2026-10 为加权平均 | **统一重算为纯个人分数档位系数** | 是 |
-| `a_class.payroll_records`（2026-03~11） | 提成含系数、绩效工资口径不一 | **重算**（提成去系数 + 绩效工资换系数） | 是 |
-| `finance.employee_labor_cost_allocations` | 由旧工资单派生 | **随工资单重算后重建** | 是 |
-| `c_class.performance_scores.performance_coefficient` | 店铺赛马评级 | **保留**（仍用于考核展示） | 否 |
-| 2025-09 的 0.2 系数 | 旧档位遗留（现行档位表 0.5~1.2 没有 0.2） | 重算时按现行档位重新评级；若该月无正式数据则标记为「不参与考核」 | 是 |
+| `finance.shop_profit_basis` 中 `A_ONLY_V1` / `A_PRE_COMMISSION_LABOR_V2` 行 | 2026-03~09 共 58 行 | ✅ **删除**（迁移 `20261243`）——⚠️ **不重算**，见下方说明 | 是（有备份兜底） |
+| `a_class.employee_performance.performance_coefficient` | 2026-07 为 NULL（老口径回退）、2026-10 为加权平均 | ✅ 落库语义改为**纯个人分数档位系数**（代码侧已改）；历史行**不改写** | 是 |
+| `a_class.payroll_records`（2026-03~11） | 提成含系数、绩效工资口径不一 | ⚠️ **暂不改写**：重算需先解除工资单锁定（业务动作）。脚本已就绪（默认 dry-run、幂等），`--apply` 需单独授权 | 是 |
+| `finance.employee_labor_cost_allocations` | 由旧工资单派生 | ⚠️ 随工资单重算而重建；未重算的月份保持原样 | 是 |
+| `c_class.performance_scores.performance_coefficient` | 店铺赛马评级 | ✅ **保留**（仍用于考核展示，页面改名「赛马评级（不参与提成计算）」） | 否 |
+| 2025-09 的 0.2 系数 | 旧档位遗留（现行档位表 0.5~1.2 没有 0.2） | 随口径归一不再参与金额；重新评级留待后续批次 | 是 |
+
+> ✅ **最终决策（Walter，2026-11-21，实施中拍板）：删除所有 legacy 行，接受历史空白。**
+>
+> 原方案是「删除后按现行口径重算」，但**实测不可行**：
+> `finance.employee_labor_cost_allocations` 只有 2026-07 与 2026-10 两个月有数据，
+> 2026-03~06、08~09、11~12 **完全没有** ⇒ 现行口径算不出那些月的利润基数
+> （`_require_complete_profit_basis` fail-closed 抛
+> `missing labor allocation for V2 profit basis`）。
+>
+> 取舍理由：**口径统一优先于历史可比**。
+> 留着两套口径的数字并存，看板上同一个月的数字会有两种解释 —— 比空白更难解释。
+>
+> 连带的可解释性要求：看板接口新增 `data_status`（`ready` / `no_profit_basis`）
+> 与 `data_status_note`，让「空白属预期」有一句话说明，而不是看起来像 bug。
 
 ### 5.3 重算脚本设计
 
@@ -346,6 +368,8 @@ def calculate_employee_performance_salary(package_amount, performance_score) -> 
 
 ### 批次 1 · 零风险清理与安全网（不改任何金额）
 
+> **状态**：✅ 已完成（随提交 `1bdb4852` 落地）。
+
 **做什么**
 1. 删僵尸接口 `GET /hr/commissions/shop`：后端 router 函数 + `ShopCommissionResponse` +
    前端 `api/index.js` 的 `getHrShopCommissions` 方法；
@@ -360,15 +384,21 @@ def calculate_employee_performance_salary(package_amount, performance_score) -> 
 
 ### 批次 2 · 提成计算收敛（改金额，但只改这一项）
 
+> **状态**：✅ 已完成（随提交 `1bdb4852` 落地）。
+> ⚠️ 实际是 **4 处公式调用点**（不是 5 处）——第 5 处是加载器口径不一致，
+> 已一并统一（legacy 判定统一走 `is_legacy_basis_version`）。
+
 **做什么**
-1. `commission_caliber.py` 接管 **5 处调用点**：
+1. `commission_caliber.py` 接管 **4 处公式调用点 + 统一利润基数加载器**：
    - `hr_income_calculation_service` 提成循环（**权威实现**）
    - `hr_commission.py` 的 `shop-profit-statistics`（删掉"不含系数"那一套口径与并列字段）
    - `monthly_settlement_service`（删掉自行重算，改为调用真源）
    - `payroll_confirmation_service` 的按店聚合（改用真源）
-   - 统一「利润基数加载器」：两处合并为一处，**且加上 `_is_formal_store_performance` 过滤**
+   - 统一「利润基数加载器」：legacy 判定统一 + 加上 `_is_formal_store_performance` 过滤
 2. **提成去掉 `settlement_coefficient`**；
-3. 结算预览接口（`/hr/commissions/settlement-preview`）同步去系数。
+3. 结算预览接口（`/hr/commissions/settlement-preview`）同步去系数；
+4. ✅ 顺带修掉既有缺陷：考勤兜底 SQL 误用中文列名，把「拿不到考勤」升级成
+   **打断整条提成链路的硬失败**。
 
 **验收**
 - 单元测试：同一输入在 5 条路径产出**完全相同**的金额；
@@ -377,6 +407,8 @@ def calculate_employee_performance_salary(package_amount, performance_score) -> 
   （本地 2026-10：提成 +355.13、绩效工资 +70.07、员工侧分配额 +425.20）。
 
 ### 批次 3 · 绩效工资口径归一（改金额）
+
+> **状态**：✅ 已完成（随提交 `1bdb4852` 落地）。
 
 **做什么**
 1. `payroll_generation_service` 的绩效工资系数改为**纯个人分数档位系数**，
@@ -393,12 +425,16 @@ def calculate_employee_performance_salary(package_amount, performance_score) -> 
 
 ### 批次 4 · 历史数据重算
 
+> **状态**：✅ 代码侧已完成（迁移 `20261243` + 重算脚本）。
+> ⚠️ **改判**：不重算，只删除 legacy 行并接受历史空白（理由见 §5.2）；
+> 重算脚本保留（默认 dry-run、幂等），生产 `--apply` 需**单独授权**。
+
 **做什么**
-1. 迁移：删除 legacy `basis_version` 的利润基数行（**走 Alembic**，schema 变更的 SSOT 是迁移脚本）；
-2. `scripts/recalibrate_commission_history.py` 重算 2026-03 ~ 2026-11：
-   利润基数 → 工资单（提成 + 绩效工资）→ 人力成本分摊表；
-3. 2025-09 的 0.2 旧系数按现行档位重新评级，或标记「不参与考核」；
-4. 产出《历史口径归一说明》（放 `docs/guides/`，随发版归档）。
+1. ✅ 迁移：删除 legacy `basis_version` 的利润基数行（**走 Alembic**），
+   删除前按月打印待删行数供生产核验；
+2. ✅ `scripts/recalibrate_commission_history.py`（默认 dry-run、幂等、逐人对照）；
+3. ⚠️ 2025-09 的 0.2 旧系数：随口径归一不再参与金额，重新评级留待后续批次；
+4. ⚠️ 《历史口径归一说明》随 CHANGELOG §六 归档（未单独出文档）。
 
 **验收**
 - **【前置关卡，不可跳过】** 在**生产库**跑 `scripts/recalibrate_commission_history.py --dry-run`，
@@ -411,28 +447,44 @@ def calculate_employee_performance_salary(package_amount, performance_score) -> 
 
 ### 批次 5 · 页面收敛
 
+> **状态**：✅ 已完成。
+
 **做什么**
 1. 「人员店铺归属和提成比」页：
    - 「主管提成（未含结算系数）」+「操作员提成（未含结算系数）」+「预计提成（结算口径）」
      **三列合并为一列**「预计提成（实发口径）」；
    - 「结算系数」列**改名**为「绩效系数（仅影响绩效工资）」，取员工个人分数档位系数；
-   - 移除前端本地试算公式，改为调用后端预览；
+   - ✅ **移除前端本地试算公式**，改为调用后端试算接口
+     `POST /api/hr/commissions/settlement-preview/estimate`
+     （前端只送「待保存的输入」，金额由后端按唯一口径算）；
 2. 「店铺绩效管理」页：「绩效系数」列改名为「赛马评级（不参与提成计算）」，
-   并在口径说明里写明赛马只用于考核与预警；
-3. 「月度结算单」页：只读真源，删除自行计算。
+   并在口径说明里写明赛马只用于考核与预警
+   （绩效展示页、收入审计页、月度结算单页同步改名与改口径说明）；
+3. 「月度结算单」页：只读真源，删除自行计算（提成构成说明去掉系数因子）；
+4. ✅ 看板新增 `data_status` / `data_status_note`，
+   让「该月没有现行口径数据 ⇒ 空白属预期」有一句话说明。
 
-**验收**：前端 364/364；`vite build` 成功；新增前端契约守护测试。
+**验收**：前端 **611/611**（计划里写的 364 是旧计数）；`vite build` 成功；
+新增前端契约守护测试 `frontend/tests/commissionFrontendNoRecompute.test.mjs`。
 
 ### 批次 6 · 词典与文档同步
 
+> **状态**：✅ 已完成。
+
 **做什么**
-1. 指标词典（正本 + 副本单向同步）登记新口径与两个系数的区分；
-2. `docs/guides/MONTHLY_PROFIT_SETTLEMENT_RUNBOOK.md` 更新提成/绩效口径；
-3. `docs/guides/ENGINEERING_STATUS.md` 登记；
-4. `docs/adr/2026-11-21-commission-and-performance-caliber-layering.md` 落地 ADR；
+1. 指标词典（正本 + 副本单向同步）登记新口径与两个系数的区分：
+   `commission_amount` / `performance_salary_amount` /
+   `performance_score_coefficient` / `ranking_coefficient`；
+2. `docs/guides/MONTHLY_PROFIT_SETTLEMENT_RUNBOOK.md` 新增 §2.5 口径章节，
+   并更正 §13 赛马补充说明（原文「员工侧分配额（提成部分）已经包含赛马奖惩结果」**已作废**）；
+3. `docs/guides/ENGINEERING_STATUS.md` 登记真源位置；
+4. `docs/adr/2026-11-21-commission-and-performance-caliber-layering.md` 落地 ADR
+   （补「实施结果」章节 + 历史数据改判）；
 5. `docs/superpowers/plans/STATUS.md` 登记本批次。
 
 ### 批次 7 · 发布与验收
+
+> **状态**：进行中。
 
 走既有发布链路：PR → CI → 合并 main → 双镜像同步 → tag → 部署 → 生产验收。
 生产验收清单：
@@ -441,23 +493,30 @@ def calculate_employee_performance_salary(package_amount, performance_score) -> 
 - 迁移链头正确、`missing_tables=[]`、`missing_columns=[]`；
 - 生产 OpenAPI：提成/绩效相关路由与方法符合新契约；
 - 迁移前备份已通过 `pg_restore --list`；
-- 看板页可访问，「员工侧分配额」与重算后预期一致；
+- 看板页可访问，历史月份显示「空白属预期」说明；
 - 抽查若干员工：新提成 == 可分配利润 × 提成比（逐人核对）。
 
 ---
 
 ## 7. 防回归守护测试（随每批一起提交）
 
-| 守护 | 断言 | 批次 |
-|---|---|---|
-| `backend/tests/test_commission_caliber.py` | 纯函数：三个因子相乘、负利润归零、比例边界 | 1 |
-| `backend/tests/test_commission_single_source.py` | 源码扫描：提成公式字面量只允许出现在 `commission_caliber.py` | 2 |
-| `backend/tests/test_commission_path_parity.py` | 同一组输入，5 条路径产出相同金额 | 2 |
-| `backend/tests/test_commission_conservation.py` | **V2-04**：Σ(人维度) == Σ(店维度) == 员工提成总额 | 2 |
-| `backend/tests/test_performance_salary_caliber.py` | 绩效工资 == 绩效包 × 个人分数档位系数（多店员工也成立） | 3 |
-| `backend/tests/test_no_settlement_coefficient_in_payroll.py` | 源码扫描：工资单/提成路径不得出现 `settlement_coefficient` | 3 |
-| `backend/tests/test_profit_basis_single_version.py` | 利润基数只允许现行 `basis_version`；legacy 行必须为 0 | 4 |
-| `frontend/tests/commissionFrontendNoRecompute.test.mjs` | 前端源码不得出现提成/绩效公式字面量 | 5 |
+| 守护 | 断言 | 批次 | 挂载 |
+|---|---|---|---|
+| `backend/tests/test_commission_caliber.py` | 纯函数：三个因子相乘、负利润归零、比例边界 | 1 | CI 根契约清单 |
+| `backend/tests/test_commission_single_source.py` | 源码扫描：提成公式字面量只允许出现在 `commission_caliber.py` | 2 | CI 根契约清单 |
+| `backend/tests/test_commission_path_parity.py` | 同一组输入，多条路径产出相同金额 | 2 | CI 根契约清单 |
+| `backend/tests/test_commission_conservation.py` | **V2-04**：Σ(人维度) == Σ(店维度) == 员工提成总额 | 2 | CI 根契约清单 |
+| `backend/tests/test_commission_estimate_preview.py` | 前端试算走后端接口；零系数；只读不写库 | 5 | CI 根契约清单 |
+| `backend/tests/test_performance_salary_caliber.py` | 绩效工资 == 绩效包 × 个人分数档位系数（多店员工也成立） | 3 | CI 根契约清单 |
+| `backend/tests/test_racing_coefficient_not_in_payroll.py` | 赛马评级字段不得进入任何金额计算路径 | 5 | CI 根契约清单 |
+| `backend/tests/test_profit_basis_single_version.py` | 利润基数只允许现行 `basis_version`；legacy 行必须为 0 | 4 | CI 根契约清单 |
+| `frontend/tests/commissionFrontendNoRecompute.test.mjs` | 前端源码不得出现提成/绩效公式字面量 | 5 | 前端静默测试门禁（自动收录 `tests/**/*.test.mjs`） |
+
+> ✅ 8 个后端守护**全部是同步用例**（DB 用 `AsyncMock` + `asyncio.run`，
+> 不走 pytest-asyncio）⇒ 放进根契约清单不会踩「Event loop is closed」那个坑。
+> ⚠️ 计划里原写的 `test_no_settlement_coefficient_in_payroll.py`
+> 已被 `test_commission_single_source.py` 里的同名断言覆盖，不再单列文件
+> （避免同一份规则维护两遍）。
 | `backend/tests/test_racing_coefficient_not_in_payroll.py` | 赛马评级字段不得进入任何金额计算路径 | 5 |
 
 > 全部守护必须进 CI 根契约清单（`ci.yml`），否则等于没有。
@@ -522,7 +581,8 @@ session 级 `event_loop`（1.x 会忽略它）⇒ **凡是被放进根契约清�
 ## 10. 业务侧已确认的结论（2026-11-21）
 
 1. **提成 = 对应店铺分多少给多少，不乘任何系数**；只有绩效工资（绩效包）乘绩效系数。
-2. **历史数据不重要**，可删除或重算 ⇒ 选重算（保留可比性）。
+2. **历史数据不重要**，可删除或重算 ⇒ **实施中改判为「删除 legacy 行 + 接受历史空白」**
+   （原选「重算」；实测重算不可行，理由见 §5.2）。
 3. **方案按"赛马不参与任何金额、只做考核与预警"落地**（本计划采纳；
    早先讨论的"赛马上移到可分配利润率层"因违反 SSOT 未采用，理由见 §3.3）。
 
@@ -544,12 +604,17 @@ session 级 `event_loop`（1.x 会忽略它）⇒ **凡是被放进根契约清�
 ## 12. 验收总口径（发布前必须全部满足）
 
 1. 后端全量：**零新增失败**（`scripts/diff_pytest_junit.py` 对基线）；
-2. 前端：`node --test "scripts/*.test.mjs"` **全绿** + `vite build` 成功；
+2. 前端：`node --test "scripts/**/*.test.mjs" "tests/**/*.test.mjs"` **全绿** + `vite build` 成功；
 3. §7 全部守护进 CI 根契约清单并通过；
-4. 5 个校验脚本 + 6 个发布门禁脚本全过；
+4. 发布门禁脚本全过（`verify_rules_completeness.py` / `verify_root_md_whitelist.py` /
+   `verify_utf8_source_hygiene.py` / `verify_team_skills_sync.py` /
+   `validate_frontend_api_methods.py` / `verify_release_local.py`）；
 5. 提成公式字面量在仓库中**只出现在 `commission_caliber.py`**；
 6. 利润基数只存在现行 `basis_version`；
 7. 赛马评级不进入任何金额计算路径；
-8. 看板「员工侧分配额」与重算后的工资单实发一致（抽样逐人核对）；
+8. 看板「员工侧分配额」与工资单实发一致（抽样逐人核对）；
 9. 变更已记入 ADR 与 `STATUS.md`；
-10. **历史重算前**：生产库 `--dry-run` 逐人新旧对照表**已交业务确认签字**（不可逆操作的前置关卡）。
+10. ⚠️ **历史重算（`--apply`）前**：生产库 `--dry-run` 逐人新旧对照表
+    **已交业务确认签字**（不可逆操作的前置关卡）。
+    ⇒ 本次发布**不执行**生产 `--apply`：改判后删除 legacy 行即可，
+    重算留待业务补齐数据后单独授权。

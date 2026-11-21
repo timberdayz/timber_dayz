@@ -2378,6 +2378,11 @@ export default {
   async getHrCommissionSettlementPreview(params = {}) {
     return await this._get('/hr/commissions/settlement-preview', { params })
   },
+  // 提成试算：把「改了还没保存」的归属提成比 / 可分配率交给后端算一遍。
+  // 前端不自己乘 —— 提成公式的唯一实现在 backend/services/commission_caliber。
+  async postHrCommissionSettlementEstimate(data) {
+    return await this._post('/hr/commissions/settlement-preview/estimate', data)
+  },
   async putHrShopCommissionConfig(platformCode, shopId, data) {
     return await this._put(
       `/hr/shop-commission-config/${platformCode}/${shopId}`,

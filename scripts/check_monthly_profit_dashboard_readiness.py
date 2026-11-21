@@ -30,7 +30,10 @@
 
 * ``LABOR_COST_CALCULATION_VERSION`` —— ``backend/services/labor_cost_projection_service.py``
 * ``PAYROLL_LOCKED_STATUSES`` —— ``backend/services/hr_employee_lifecycle.py``
-* ``LaborCostPolicyService.is_legacy_a_only_basis_version`` —— ``backend/services/labor_cost_policy_service.py``
+* ``LaborCostPolicyService.LEGACY_BASIS_VERSIONS`` /
+  ``is_legacy_basis_version`` —— ``backend/services/labor_cost_policy_service.py``
+  （⚠️ 判「是不是历史口径」用 ``is_legacy_basis_version``；
+  ``is_legacy_a_only_basis_version`` 判的是**成本构成**，只认 ``A_ONLY_V1``）
 
 安全性
 ------
@@ -83,11 +86,15 @@ DEFAULT_REPORT_DIR = ROOT / "docs" / "reports"
 
 #: 旧口径的利润基数去重规则 —— 与重构前的
 #: ``_load_net_profit_amount`` 完全一致（真源同源，不是另抄一份）。
-LEGACY_BASIS_VERSIONS = tuple(
-    version
-    for version in LaborCostPolicyService.LEGACY_BASIS_VERSIONS
-    if LaborCostPolicyService.is_legacy_a_only_basis_version(version)
-)
+#:
+#: ⚠️ 2026-11-21 修正：这里原先写成
+#: ``tuple(v for v in LEGACY_BASIS_VERSIONS if is_legacy_a_only_basis_version(v))``，
+#: 而 ``is_legacy_a_only_basis_version`` 只认 ``A_ONLY_V1``（它判的是**成本构成**，
+#: 不是「是不是历史口径」）⇒ 过滤后只剩 ``A_ONLY_V1``，
+#: ``A_PRE_COMMISSION_LABOR_V2`` 的行会被当成**现行口径**统计，
+#: 于是「这个月有没有现行口径的结算数据」被答错。
+#: 现在直接用策略服务里的 legacy 清单，并用 ``is_legacy_basis_version`` 判口径。
+LEGACY_BASIS_VERSIONS = tuple(LaborCostPolicyService.LEGACY_BASIS_VERSIONS)
 
 
 # --------------------------------------------------------------------------
@@ -133,10 +140,10 @@ def collect_basis_rows(conn: sa.Connection, month: str | None) -> list[dict[str,
         )
         current = basis_by_shop.get(key)
         if current is None or (
-            not LaborCostPolicyService.is_legacy_a_only_basis_version(
+            not LaborCostPolicyService.is_legacy_basis_version(
                 mapping.get("basis_version") or ""
             )
-            and LaborCostPolicyService.is_legacy_a_only_basis_version(
+            and LaborCostPolicyService.is_legacy_basis_version(
                 current.get("basis_version") or ""
             )
         ):

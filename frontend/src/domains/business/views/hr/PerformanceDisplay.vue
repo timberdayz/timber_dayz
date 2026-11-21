@@ -241,8 +241,12 @@
         <el-table-column prop="rank" label="排名" width="80" align="center" sortable>
           <template #default="{ row }">{{ row.rank != null ? `第${row.rank}名` : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="filters.groupBy === 'shop'" prop="performance_coefficient" label="绩效系数" width="100" align="right" sortable>
-          <template #default="{ row }">{{ coefficientText(row.performance_coefficient) }}</template>
+        <el-table-column v-if="filters.groupBy === 'shop'" prop="performance_coefficient" label="赛马评级（不参与提成计算）" width="210" align="right" sortable>
+          <template #default="{ row }">
+            <el-tooltip content="店铺赛马评级：只用于考核、预警与排名展示，不参与任何金额计算（提成零系数，绩效工资只看个人分数档位）。" placement="top">
+              <span>{{ coefficientText(row.performance_coefficient) }}</span>
+            </el-tooltip>
+          </template>
         </el-table-column>
         <el-table-column v-if="filters.groupBy === 'shop'" label="赛马池" width="100" align="center">
           <template #default="{ row }">{{ rankingPoolText(row) }}</template>
@@ -294,7 +298,7 @@
           <el-descriptions-item label="排名">
             <el-tag size="small">{{ performanceDetail.data.rank != null ? `第${performanceDetail.data.rank}名` : '未参与正式赛马' }}</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="绩效系数">
+          <el-descriptions-item label="赛马评级（不参与提成计算）">
             <el-tag size="small">{{ coefficientText(performanceDetail.data.performance_coefficient) }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="赛马池">{{ rankingPoolText(performanceDetail.data) }}</el-descriptions-item>
@@ -453,7 +457,7 @@ const currentGroupPolicyText = computed(() => {
   if (filters.groupBy === 'person') {
     return '人员绩效优先由个人绩效输入项驱动；人工调整和考勤扣分继续叠加。只有未配置个人输入项时，系统才回退到挂店店铺绩效聚合。'
   }
-  return '店铺总分由销售、毛利和运营三项组成；重点产品当前不纳入正式口径。正式池店铺按公司总榜排名并叠加分数底线生成赛马系数。'
+  return '店铺总分由销售、毛利和运营三项组成；重点产品当前不纳入正式口径。正式池店铺按公司总榜排名并叠加分数底线生成赛马评级。赛马评级只用于考核、预警与排名展示，不参与任何金额计算：提成 = 可分配利润 × 归属提成比（零系数），绩效工资 = 绩效包 × 个人分数档位系数。'
 })
 
 const filteredPerformanceData = computed(() => {

@@ -1,12 +1,11 @@
 # Changelog - 西虹 ERP 系统
-## [未发布] - 提成与绩效工资口径归一（计划与 ADR，**尚未开工**）
+## [未发布] - 提成与绩效工资口径归一（**代码侧全部落地**）
 
-### 一、业务已定的口径
+### 一、业务已定并已落地的口径
 
-- **提成** = 可分配利润 × 归属提成比 —— **零系数**，「分多少给多少」；
+- **提成** = 可分配利润 × 归属提成比 —— **零系数**，「分多少，给多少」；
 - **绩效工资** = 绩效包 × **纯个人**绩效分数档位系数（与店铺排名无关）；
-- **店铺赛马排名不参与任何金额**，只做考核、预警与展示；
-- 历史数据可删可重算 ⇒ 选**重算**（保留看板历史可比性）。
+- **店铺赛马排名不参与任何金额**，只做考核、预警与展示。
 
 ### 二、否决的备选方案（记入 ADR）
 
@@ -14,9 +13,11 @@
 出现「人工配置」与「赛马推导」两个来源，**违反 SSOT** ⇒ 不采用。
 若日后确需赛马影响提成，须另开独立列并写死优先级，不得复用该字段。
 
-### 三、现状核对结论
+### 三、现状核对结论（实施中更正）
 
-- 同一句提成公式被**独立实现 5 处**（含 1 处漏乘系数、1 处少 formal 店铺过滤）；
+- 同一句提成公式被**独立实现 4 处**（含 1 处漏乘系数、1 处少 formal 店铺过滤）；
+  第 5 处是**两个利润基数加载器口径不一致**（一个要求 locked + 按 basis_version 过滤，
+  一个不要求 locked + 跳过 legacy）—— 形态不是「又抄了一遍公式」，但同样必须统一；
 - 三个系数（赛马排名档位 / 个人分数档位 / 结算系数 min）混用，同时作用于提成与绩效工资；
 - 绩效工资口径在历史月份之间**已漂移过一次**（2026-07 纯个人 ÷100 vs 2026-10 逐店加权平均）；
 - `finance.shop_profit_basis` 2026-03~09 共 58 行为旧口径版本 ⇒ 仅 2026-10 可完整复算。
@@ -37,13 +38,85 @@
 补充：含店铺排名的绩效工资加权平均系数（0.7655 / 0.7853 / 0.7791 / 0.5）
 **均 ≤ 同月纯个人分数档位系数**（0.8 / 0.8 / 0.8 / 0.5）⇒ 赛马参与金额时只压低收入、不抬高。
 
-### 五、交付物
+### 五、落地清单（批次 1~7）
 
-- 计划：`docs/superpowers/plans/2026-11-21-commission-and-performance-caliber-unification.md`（7 个改造批次 + 9 条守护测试）
+#### 批次 1 · 真源与安全网
+
+- 新建 `backend/services/commission_caliber.py`：纯函数、无 DB 依赖、入参即全部输入，
+  是提成与绩效工资公式的**唯一实现处**；
+- 下线僵尸接口 `GET /hr/commissions/shop`（无页面调用，且漏乘系数），
+  同步摘除前端 `getHrShopCommissions` 与 schema 导出；
+- 新增 5 个守护测试文件。
+
+#### 批次 2 · 提成收敛去系数
+
+- 权威实现、结算预览、月度结算单、统计接口 **4 处调用点**全部改为调用真源；
+- 新增 `test_commission_single_source.py`（源码扫描：公式字面量只允许出现在真源模块）
+  —— **当场抓出并修掉 2 处真实遗漏**（`hr_income_calculation_service.py:1286`、
+  `hr_commission.py:2473`）；
+- 顺带修掉既有缺陷：考勤兜底 SQL 误用中文列名，把「拿不到考勤」升级成**打断整条提成链路的硬失败**。
+
+#### 批次 3 · 绩效工资口径归一
+
+- `payroll_generation_service` 的系数改为**从绩效分数算纯个人档位**（不再读历史
+  `performance_coefficient`，>2÷100 的旧归一逻辑删除）；
+- `EmployeePerformance.performance_coefficient` 的语义由「逐店加权平均结算系数」
+  改为「绩效分数档位系数」，加权平均写法删除。
+
+#### 批次 4 · 历史数据
+
+- 新增迁移 `current_migrations/versions/20261243_drop_legacy_profit_basis.py`：
+  删除 `A_ONLY_V1` / `A_PRE_COMMISSION_LABOR_V2` 行，删除前**按月打印待删行数**供生产核验；
+- 新增 `scripts/recalibrate_commission_history.py`：默认 `--dry-run`、`--apply` 才写库、
+  逐人对照、幂等。
+
+#### 批次 5 · 页面收敛
+
+- 归属页：「主管提成（未含结算系数）」+「操作员提成（未含结算系数）」+「预计提成（结算口径）」
+  **三列合一**为「预计提成（实发口径）」；「结算系数」改名「绩效系数（仅影响绩效工资）」；
+- **前端本地试算公式删除**，改为调用后端试算接口
+  `POST /api/hr/commissions/settlement-preview/estimate`（前端只送输入，金额由后端算）；
+- 绩效管理页 / 绩效展示页 / 收入审计页：赛马相关列统一改名
+  「赛马评级（不参与提成计算）」；
+- 月度结算单页：提成构成说明去掉系数因子，页面只读后端真源；
+- 月度利润看板：新增 `data_status` / `data_status_note`，
+  让「历史月份空白属预期」有明确解释，而不是看起来像故障。
+
+#### 批次 6 · 词典与文档同步
+
+- 指标词典（正本 + `team-skills-bundle/` 副本单向同步）登记 4 个指标：
+  `commission_amount` / `performance_salary_amount` /
+  `performance_score_coefficient` / `ranking_coefficient`；
+- 「结算系数」在词典与页面文案中**禁用**（它曾同时影响提成与绩效工资，现已完全分开）；
+- `MONTHLY_PROFIT_SETTLEMENT_RUNBOOK.md` 新增 §2.5 口径章节，更正 §13 赛马补充说明
+  （原文「员工侧分配额（提成部分）已经包含赛马奖惩结果」**已作废**）；
+- ADR 补「实施结果」章节；`ENGINEERING_STATUS.md` 登记真源位置；`STATUS.md` 登记本批次。
+
+### 六、历史数据最终决策（实施中改判）
+
+原方案「删除 legacy 行后按现行口径重算」**实测不可行**：
+`finance.employee_labor_cost_allocations` 只有 2026-07 与 2026-10 两个月有数据，
+2026-03~06、08~09、11~12 **完全没有** ⇒ 现行口径算不出那些月的利润基数。
+
+⇒ **最终决策（业务拍板）：删除所有 legacy 行，接受历史空白。**
+口径统一优先于历史可比 —— 留着两套口径的数字并存，
+看板上同一个月的数字会有两种解释，比空白更难解释。
+
+### 七、防回归守护（随批提交，进 CI 根契约清单）
+
+- `backend/tests/test_commission_caliber.py`（纯函数）
+- `backend/tests/test_commission_single_source.py`（源码扫描：公式只在真源）
+- `backend/tests/test_commission_path_parity.py`（多路径产出同额）
+- `backend/tests/test_performance_salary_caliber.py`（绩效工资 = 绩效包 × 个人档位）
+- `backend/tests/test_racing_coefficient_not_in_payroll.py`（赛马不入金额）
+- `backend/tests/test_commission_estimate_preview.py`（试算走后端、零系数、只读）
+- `frontend/tests/commissionFrontendNoRecompute.test.mjs`（前端不复刻公式）
+
+### 八、交付物
+
+- 计划：`docs/superpowers/plans/2026-11-21-commission-and-performance-caliber-unification.md`（7 个改造批次）
 - ADR：`docs/adr/2026-11-21-commission-and-performance-caliber-layering.md`
 - 台账：`docs/superpowers/plans/STATUS.md`
-
-> 本次**只提交计划与 ADR，未改动任何业务代码**，不构成发版。
 
 ## [v7.36.0] - 2026-11-21 - 跟投模块整体下线 + 财务结算中心改造为只读「月度利润看板」
 

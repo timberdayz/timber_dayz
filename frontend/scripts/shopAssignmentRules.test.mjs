@@ -3,8 +3,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import {
-  calculateTrialCommission,
+  collectEstimateOverrides,
+  estimateKey,
   exceedsCommissionRatioLimit,
+  indexEstimateRows,
   inferAssignmentRole,
   isAssignmentDirty,
   readBackendAllocatableProfit,
@@ -69,28 +71,47 @@ test('inferAssignmentRole maps supervisor-like positions and defaults to operato
   assert.equal(inferAssignmentRole(null), 'operator')
 })
 
-test('calculateTrialCommission uses backend profit basis, rate, ratio and settlement coefficient', () => {
-  assert.equal(
-    calculateTrialCommission({
-      profit_basis_amount: 480,
-      allocatable_profit_rate: 0.25,
-      commission_ratio: 0.5,
-      settlement_coefficient: 1
-    }),
-    60
-  )
+test('前端不再自己算提成：试算只把输入交给后端', () => {
+  const row = {
+    _shop: {
+      platform_code: 'shopee',
+      shop_id: 'S1',
+      allocatable_profit_rate: 0.3,
+      _backend_allocatable_profit_rate: 0.25
+    },
+    _person: {
+      employee_code: 'E001',
+      commission_ratio: 0.2,
+      _backend_commission_ratio: 0.5
+    }
+  }
+
+  const overrides = collectEstimateOverrides([row])
+  assert.equal(overrides.length, 1)
+  assert.deepEqual(overrides[0], {
+    employee_code: 'E001',
+    platform_code: 'shopee',
+    shop_id: 'S1',
+    commission_ratio: 0.2,
+    allocatable_profit_rate: 0.3
+  })
+  // 金额必须由后端算，前端不产金额
+  assert.equal('estimated_commission' in overrides[0], false)
 })
 
-test('calculateTrialCommission floors negative profit basis at zero', () => {
-  assert.equal(
-    calculateTrialCommission({
-      profit_basis_amount: -480,
-      allocatable_profit_rate: 0.25,
-      commission_ratio: 0.5,
-      settlement_coefficient: 1
-    }),
-    0
-  )
+test('后端试算结果按「员工 × 店铺」对齐，平台大小写不敏感', () => {
+  const rows = [
+    { employee_code: 'E001', platform_code: 'shopee', shop_id: 'S1', estimated_commission: 28.8 }
+  ]
+  const index = indexEstimateRows(rows)
+  assert.equal(index.get(estimateKey(rows[0])).estimated_commission, 28.8)
+  assert.equal(estimateKey({ employee_code: 'E001', platform_code: 'ShopEE', shop_id: 'S1' }), 'E001|shopee|S1')
+})
+
+test('有试算金额用试算金额，否则用后端结算预览的金额', () => {
+  assert.equal(resolveEstimatedCommission({ backendEstimatedCommission: 60, estimateAmount: 28.8 }), 28.8)
+  assert.equal(resolveEstimatedCommission({ backendEstimatedCommission: 60, estimateAmount: null }), 60)
+  assert.equal(resolveEstimatedCommission({ backendEstimatedCommission: null, estimateAmount: null }), null)
 })
 
 test('summarizeEmployeeCommissions reads backend expected_commission instead of recomputing', () => {

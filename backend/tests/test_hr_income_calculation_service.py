@@ -667,7 +667,7 @@ def test_calculate_month_falls_back_to_salary_structure_commission_ratio_when_as
     assert commission.commission_rate == pytest.approx(0.5)
 
 
-def test_load_profit_basis_by_shop_reads_v2_snapshot_during_draft_recalculation(
+def test_load_profit_basis_by_shop_reads_current_snapshot_during_draft_recalculation(
     monkeypatch,
 ):
     db = AsyncMock()
@@ -677,7 +677,9 @@ def test_load_profit_basis_by_shop_reads_v2_snapshot_during_draft_recalculation(
         platform_code="shopee",
         shop_id="S1",
         profit_basis_amount=1800.0,
-        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        # ⚠️ 2026-11-21 口径归一：现行口径只有 SETTLEMENT_BASIS_V1。
+        # 历史版本（A_ONLY_V1 / A_PRE_COMMISSION_LABOR_V2）一律跳过。
+        basis_version="SETTLEMENT_BASIS_V1",
         cost_status="projected",
         is_locked=False,
     )
@@ -718,8 +720,10 @@ def test_load_profit_basis_by_shop_reads_v2_snapshot_during_draft_recalculation(
     }
 
 
+@pytest.mark.parametrize("legacy_version", ["A_ONLY_V1", "A_PRE_COMMISSION_LABOR_V2"])
 def test_load_profit_basis_by_shop_excludes_non_v2_snapshots(
     monkeypatch,
+    legacy_version,
 ):
     db = AsyncMock()
 
@@ -728,7 +732,7 @@ def test_load_profit_basis_by_shop_excludes_non_v2_snapshots(
         platform_code="shopee",
         shop_id="S1",
         profit_basis_amount=0.0,
-        basis_version="A_ONLY_V1",
+        basis_version=legacy_version,
         cost_status="missing_labor_allocation",
         is_locked=False,
     )
@@ -767,14 +771,14 @@ def test_profit_basis_guard_rejects_missing_labor_allocation():
         )
 
 
-def test_loaded_v2_snapshot_preserves_missing_labor_status_for_income_guard():
+def test_loaded_current_snapshot_preserves_missing_labor_status_for_income_guard():
     db = AsyncMock()
     snapshot_row = SimpleNamespace(
         period_month="2026-08",
         platform_code="shopee",
         shop_id="s1",
         profit_basis_amount=1000.0,
-        basis_version="A_PRE_COMMISSION_LABOR_V2",
+        basis_version="SETTLEMENT_BASIS_V1",
         cost_status="missing_labor_allocation",
     )
     assignment = SimpleNamespace(platform_code="shopee", shop_id="s1")

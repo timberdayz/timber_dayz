@@ -55,7 +55,9 @@ async def _seed_shop_account(session):
 
 
 @pytest.mark.asyncio
-async def test_ensure_dim_shop_exists_autosyncs_from_shop_account(hr_shop_assignment_session):
+async def test_ensure_dim_shop_exists_autosyncs_from_shop_account(
+    hr_shop_assignment_session,
+):
     await _seed_shop_account(hr_shop_assignment_session)
 
     shop = await _ensure_dim_shop_exists(
@@ -79,7 +81,9 @@ async def test_ensure_dim_shop_exists_autosyncs_from_shop_account(hr_shop_assign
 
 
 @pytest.mark.asyncio
-async def test_ensure_dim_shop_exists_rejects_collection_source(hr_shop_assignment_session):
+async def test_ensure_dim_shop_exists_rejects_collection_source(
+    hr_shop_assignment_session,
+):
     await _seed_shop_account(hr_shop_assignment_session)
     account = (
         await hr_shop_assignment_session.execute(
@@ -113,4 +117,9 @@ def test_shop_assignment_allocatable_profit_rate_uses_sync_helper():
     ).read_text(encoding="utf-8")
 
     assert "setShopAllocatableProfitRate" in source
-    assert '@update:model-value="(v) => setShopAllocatableProfitRate(row, v)"' in source
+    # 可分配率的编辑必须走同步辅助函数（它同时更新行对象与来源店铺对象），
+    # 改完还要触发一次后端试算 —— 前端不再自己算钱。
+    assert (
+        '@update:model-value="(v) => { setShopAllocatableProfitRate(row, v); '
+        "scheduleEstimate() }" in source
+    )

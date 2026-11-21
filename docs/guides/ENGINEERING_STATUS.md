@@ -17,6 +17,31 @@
 - Detailed reference:
   - [`docs/DEVELOPMENT_RULES/README.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/DEVELOPMENT_RULES/README.md)
 
+## Commission And Performance Caliber (2026-11-21)
+
+提成与绩效工资的口径已归一，**每个数字只有一个真源**：
+
+| 对象 | 真源 | 说明 |
+|---|---|---|
+| 提成公式 | [`backend/services/commission_caliber.py`](F:/Vscode/python_programme/AI_code/xihong_erp/backend/services/commission_caliber.py) | 纯函数、无 DB 依赖；工资单 / 结算预览 / 店铺统计 / 月度结算单 / 确认校验全部调它 |
+| 档位表 | [`backend/services/performance_coefficient.py`](F:/Vscode/python_programme/AI_code/xihong_erp/backend/services/performance_coefficient.py) | `SCORE_BAND_COEFFICIENTS`（绩效工资唯一入口）/ `RANK_BAND_COEFFICIENTS`（赛马评级，仅展示） |
+| 口径决策 | [`docs/adr/2026-11-21-commission-and-performance-caliber-layering.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/adr/2026-11-21-commission-and-performance-caliber-layering.md) | ADR |
+
+最终口径：
+
+- **提成 = max(可分配利润, 0) × 归属提成比**（零系数：赛马与绩效分数都不参与）；
+- **绩效工资 = 绩效包 × 绩效分数档位系数**（纯个人，与店铺排名无关）。
+
+工程约束：
+
+- 新增任何提成计算**必须**调用 `commission_caliber`，不得就地复刻公式
+  —— `backend/tests/test_commission_single_source.py` 会在绕开时阻断合并；
+- 前端**只渲染**后端下发的金额。归属页的「改了还没保存」试算走
+  `POST /api/hr/commissions/settlement-preview/estimate`，前端不再本地试算
+  —— `frontend/tests/commissionFrontendNoRecompute.test.mjs` 守住这条；
+- 页面文案禁用「结算系数」（它曾同时影响提成与绩效工资，现已完全分开）；
+  赛马相关列名必须写全「赛马评级（不参与提成计算）」。
+
 ## CI Model
 
 - Default GitHub `CI Pipeline` is change-scoped, not full-repository regression

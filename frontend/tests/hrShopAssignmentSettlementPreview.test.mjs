@@ -4,7 +4,9 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import {
-  calculateTrialCommission,
+  collectEstimateOverrides,
+  estimateKey,
+  indexEstimateRows,
   isAssignmentDirty,
   readBackendAllocatableProfit,
   resolveEstimatedCommission,
@@ -77,74 +79,95 @@ test('员工角色来自归属配置，预览接口不返回角色', () => {
   assert.equal(fallback[0].role, 'operator')
 })
 
-test('未保存编辑的试算 = 利润基数 × 可分配率 × 提成比 × 结算系数', () => {
-  // 480 × 0.25 × 0.5 × 1.0 = 60
-  assert.equal(
-    calculateTrialCommission({
-      profit_basis_amount: 480,
-      allocatable_profit_rate: 0.25,
-      commission_ratio: 0.5,
-      settlement_coefficient: 1
-    }),
-    60
-  )
-
-  // 结算系数压档后金额同步下调：480 × 0.25 × 0.5 × 0.8 = 48
-  assert.equal(
-    calculateTrialCommission({
-      profit_basis_amount: 480,
-      allocatable_profit_rate: 0.25,
-      commission_ratio: 0.5,
-      settlement_coefficient: 0.8
-    }),
-    48
-  )
-})
-
-test('试算不会把负的利润基数算成负提成', () => {
-  assert.equal(
-    calculateTrialCommission({
-      profit_basis_amount: -480,
-      allocatable_profit_rate: 0.25,
-      commission_ratio: 0.5,
-      settlement_coefficient: 1
-    }),
-    0
-  )
-})
-
-test('没改过就显示后端值，改了还没保存才走前端试算', () => {
-  const trial = {
-    profit_basis_amount: 480,
-    allocatable_profit_rate: 0.25,
-    commission_ratio: 0.5,
-    settlement_coefficient: 1
+test('前端不再自己算提成：试算改为把输入交给后端', () => {
+  const row = {
+    _shop: {
+      platform_code: 'shopee',
+      shop_id: '1407964586',
+      allocatable_profit_rate: 0.3,
+      _backend_allocatable_profit_rate: 0.25
+    },
+    _person: {
+      employee_code: 'EMP260001',
+      commission_ratio: 0.2,
+      _backend_commission_ratio: 0.5
+    }
   }
 
-  assert.equal(
-    resolveEstimatedCommission({ backendEstimatedCommission: 60, dirty: false, trial }),
-    60
-  )
-  assert.equal(
-    resolveEstimatedCommission({ backendEstimatedCommission: 60, dirty: true, trial }),
-    60
-  )
+  const overrides = collectEstimateOverrides([row])
+  assert.equal(overrides.length, 1)
+  // 只搬输入：提成比、可分配率。不含任何金额。
+  assert.deepEqual(overrides[0], {
+    employee_code: 'EMP260001',
+    platform_code: 'shopee',
+    shop_id: '1407964586',
+    commission_ratio: 0.2,
+    allocatable_profit_rate: 0.3
+  })
+  assert.equal('estimated_commission' in overrides[0], false)
+  assert.equal('allocatable_profit_amount' in overrides[0], false)
+})
 
-  // 改了提成比：0.5 -> 0.2，480 × 0.25 × 0.2 × 1 = 24
-  assert.equal(
-    resolveEstimatedCommission({
-      backendEstimatedCommission: 60,
-      dirty: true,
-      trial: { ...trial, commission_ratio: 0.2 }
-    }),
-    24
-  )
+test('试算只送「改了还没保存」的行', () => {
+  const dirtyRow = {
+    _shop: {
+      platform_code: 'shopee',
+      shop_id: '1407964586',
+      allocatable_profit_rate: 0.3,
+      _backend_allocatable_profit_rate: 0.25
+    },
+    _person: {
+      employee_code: 'EMP260001',
+      commission_ratio: 0.5,
+      _backend_commission_ratio: 0.5
+    }
+  }
+  const cleanRow = {
+    _shop: {
+      platform_code: 'shopee',
+      shop_id: '1407964586',
+      allocatable_profit_rate: 0.25,
+      _backend_allocatable_profit_rate: 0.25
+    },
+    _person: {
+      employee_code: 'EMP260002',
+      commission_ratio: 0.5,
+      _backend_commission_ratio: 0.5
+    }
+  }
 
-  // 后端没有这条（例如刚新增还没保存）时只能试算
-  assert.equal(
-    resolveEstimatedCommission({ backendEstimatedCommission: null, dirty: false, trial }),
-    60
+  const overrides = collectEstimateOverrides([dirtyRow, cleanRow], (row) =>
+    isAssignmentDirty(row._shop, row._person)
   )
+  assert.equal(overrides.length, 1)
+  assert.equal(overrides[0].employee_code, 'EMP260001')
+})
+
+test('后端返回的试算行按「员工 × 店铺」建索引', () => {
+  const rows = [
+    {
+      employee_code: 'EMP260001',
+      platform_code: 'shopee',
+      shop_id: '1407964586',
+      estimated_commission: 28.8
+    }
+  ]
+  const index = indexEstimateRows(rows)
+  assert.equal(index.get(estimateKey(rows[0])).estimated_commission, 28.8)
+  // 平台大小写不同也要对上
+  assert.equal(
+    estimateKey({ employee_code: 'EMP260001', platform_code: 'ShopEE', shop_id: '1407964586' }),
+    'EMP260001|shopee|1407964586'
+  )
+})
+
+test('有试算结果用试算结果，否则用后端结算预览的金额', () => {
+  assert.equal(
+    resolveEstimatedCommission({ backendEstimatedCommission: 60, estimateAmount: 28.8 }),
+    28.8
+  )
+  assert.equal(resolveEstimatedCommission({ backendEstimatedCommission: 60, estimateAmount: null }), 60)
+  assert.equal(resolveEstimatedCommission({ backendEstimatedCommission: null, estimateAmount: null }), null)
 })
 
 test('能否识别「改了还没保存」', () => {
@@ -170,15 +193,22 @@ test('可分配利润直接读后端算好的值', () => {
   assert.equal(readBackendAllocatableProfit(null), null)
 })
 
-test('前端不再自己实现后端的可分配利润 / 提成公式', () => {
+test('前端源码里不得再出现提成/绩效金额公式', () => {
+  // 提成公式的真源在 backend/services/commission_caliber.py，前端只能调后端。
   assert.equal(rulesSource.includes('export function calculateAllocatableProfit'), false)
   assert.equal(rulesSource.includes('export function calculateAssignmentCommission'), false)
-  // 试算只允许这一条乘法链
-  assert.match(rulesSource, /Math\.max\(profitBasisAmount, 0\) \* allocatableProfitRate \* commissionRatio \* coefficient/)
+  assert.equal(rulesSource.includes('export function calculateTrialCommission'), false)
+  assert.doesNotMatch(
+    rulesSource,
+    /profitBasisAmount[\s\S]{0,80}\*\s*allocatableProfitRate[\s\S]{0,80}\*\s*commissionRatio/
+  )
+  assert.doesNotMatch(rulesSource, /settlement_coefficient\s*\*/)
+  assert.doesNotMatch(rulesSource, /score_coefficient\s*\*/)
 })
 
-test('店铺归属页消费后端结算预览，不再前端拼历史口径默认值', () => {
+test('店铺归属页消费后端结算预览与后端试算，不再前端拼历史口径默认值', () => {
   assert.match(shopAssignmentSource, /api\.getHrCommissionSettlementPreview\(\{\s*year_month:\s*configMonth\.value\s*\}\)/)
+  assert.match(shopAssignmentSource, /api\.postHrCommissionSettlementEstimate\(/)
   assert.equal(shopAssignmentSource.includes('A_PRE_COMMISSION_LABOR_V2'), false)
   assert.equal(shopAssignmentSource.includes("cost_status: 'missing_labor_allocation'"), false)
   assert.match(shopAssignmentSource, /formatBasisVersion\(row\.basis_version\)/)
@@ -189,4 +219,10 @@ test('店铺归属页消费后端结算预览，不再前端拼历史口径默�
 test('店铺归属页区分「没配可分配率」和「配成 0」', () => {
   assert.match(shopAssignmentSource, /is_allocatable_rate_configured/)
   assert.match(shopAssignmentSource, /allocatableRateTag/)
+})
+
+test('页面不再并列展示「未含结算系数」的两套口径', () => {
+  assert.equal(shopAssignmentSource.includes('未含结算系数'), false)
+  assert.equal(shopAssignmentSource.includes('预计提成（结算口径）'), false)
+  assert.match(shopAssignmentSource, /预计提成（实发口径）/)
 })

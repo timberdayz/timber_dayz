@@ -112,8 +112,12 @@ class MonthlyProfitSettlementService:
     ) -> dict[tuple[str, str], Any]:
         """按店去重后的利润基数行。
 
-        去重规则沿用既有实现：同店多行时**非 legacy A_ONLY 行优先**
-        （``LaborCostPolicyService.is_legacy_a_only_basis_version``）。
+        ⚠️ 口径归一（ADR-2026-11-21）：**只呈现现行口径的行**。
+        历史口径行（``A_ONLY_V1`` / ``A_PRE_COMMISSION_LABOR_V2``）已由迁移
+        ``20261243`` 删除；即使在迁移前，看板也不该把它们当成现行数据 ——
+        同一个月的两种口径数字并存，比空白更难解释。
+
+        去重规则：同店多行时**现行口径优先**；没有现行口径行则取第一条。
         key 与既有实现一致：``(platform_code.lower(), shop_id)``（shop_id 可能为空串）。
         """
         rows = (
@@ -129,16 +133,20 @@ class MonthlyProfitSettlementService:
         )
         basis_by_shop: dict[tuple[str, str], Any] = {}
         for row in rows:
+            if LaborCostPolicyService.is_legacy_basis_version(
+                getattr(row, "basis_version", "")
+            ):
+                continue
             key = (
                 str(getattr(row, "platform_code", "") or "").lower(),
                 str(getattr(row, "shop_id", "") or ""),
             )
             current = basis_by_shop.get(key)
             if current is None or (
-                not LaborCostPolicyService.is_legacy_a_only_basis_version(
+                LaborCostPolicyService.is_current_basis_version(
                     getattr(row, "basis_version", "")
                 )
-                and LaborCostPolicyService.is_legacy_a_only_basis_version(
+                and not LaborCostPolicyService.is_current_basis_version(
                     getattr(current, "basis_version", "")
                 )
             ):
@@ -326,10 +334,45 @@ class MonthlyProfitSettlementService:
     async def get_dashboard(self, period_month: str) -> dict[str, Any]:
         """只读聚合：唯一口径实现处。前端不得复刻。"""
         basis_by_shop = await self._load_shop_profit_basis(period_month)
-        net_profit = self._sum_profit_basis(basis_by_shop)
-        personnel = await self._load_personnel_payload(period_month, basis_by_shop)
         adjustments = await self._load_adjustments_by_month(period_month)
         adjustment_total = sum(a["amount"] for a in adjustments)
+
+        # ⚠️ 数据状态说明（2026-11-21 口径归一后新增）。
+        # legacy 口径的利润基数已由迁移 20261243 删除 ⇒ 历史月份（2026-03~09）
+        # **没有**现行口径的利润基数 ⇒ 看板上是空白。
+        # 这不是「系统坏了」，而是「该月没有可用的结算数据」——
+        # 必须让页面能说清楚，否则运营会以为看板出错。
+        #
+        # 该月没有现行口径的利润基数时，**整张卡留白**：
+        # 净利润为 0、分配额为 0、留存为 0。
+        # 否则会出现「净利润 0、员工侧分配额 5,722、公司留存 -5,722」这种
+        # 自相矛盾的数字（分配额来自旧工资单，利润基数已经没了），
+        # 比空白更容易误导人。人工调整项照常展示与可写 —— 它是独立事实。
+        if not basis_by_shop:
+            return {
+                "period_month": period_month,
+                "as_of": datetime.now(timezone.utc).isoformat(),
+                "net_profit_amount": 0.0,
+                "performance_salary_amount": 0.0,
+                "commission_amount": 0.0,
+                "employee_allocation_amount": 0.0,
+                "manual_adjustment_amount": adjustment_total,
+                "manual_adjustment_count": len(adjustments),
+                "company_retained_amount": 0.0,
+                "allocation_ratio": 0.0,
+                "over_allocation_flag": False,
+                "shop_breakdown": [],
+                "adjustments": adjustments,
+                "data_status": "no_profit_basis",
+                "data_status_note": (
+                    "该月没有现行口径的结算数据（历史月份缺人力成本分摊，"
+                    "已随口径归一清空旧口径），看板显示为空白属预期。"
+                ),
+                "basis_version": LaborCostPolicyService.CURRENT_BASIS_VERSION,
+            }
+
+        net_profit = self._sum_profit_basis(basis_by_shop)
+        personnel = await self._load_personnel_payload(period_month, basis_by_shop)
         employee_allocation = self._to_float(personnel.get("actual_amount"))
         company_retained = net_profit - employee_allocation - adjustment_total
         allocation_ratio = (
@@ -351,6 +394,10 @@ class MonthlyProfitSettlementService:
             "over_allocation_flag": company_retained < 0 or allocation_ratio > 1,
             "shop_breakdown": personnel.get("shop_breakdown", []),
             "adjustments": adjustments,
+            # 数据状态（前端据此给出说明，不要复刻口径判断）
+            "data_status": "ready",
+            "data_status_note": "",
+            "basis_version": LaborCostPolicyService.CURRENT_BASIS_VERSION,
         }
 
     async def get_month(self, period_month: str) -> dict[str, Any]:

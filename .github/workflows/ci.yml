@@ -414,7 +414,32 @@ jobs:
             tests/test_account_readiness_contract.py \
             tests/test_account_proxy_source_contract.py \
             backend/tests/test_hr_lifecycle_contract.py \
-            backend/tests/test_hr_employee_lifecycle.py
+            backend/tests/test_hr_employee_lifecycle.py \
+            backend/tests/test_commission_caliber.py \
+            backend/tests/test_commission_single_source.py \
+            backend/tests/test_commission_path_parity.py \
+            backend/tests/test_commission_conservation.py \
+            backend/tests/test_commission_estimate_preview.py \
+            backend/tests/test_performance_salary_caliber.py \
+            backend/tests/test_racing_coefficient_not_in_payroll.py \
+            backend/tests/test_profit_basis_single_version.py \
+            # ⚠️ 2026-11-21：上面 6 个文件是「提成与绩效工资口径归一」批次的守护。
+            #   口径归一后，每个数字必须只有一个真源：
+            #     backend/services/commission_caliber.py（提成 / 绩效工资公式唯一实现处）
+            #     backend/services/performance_coefficient.py（档位表唯一真源）
+            #   守护清单与分工：
+            #     test_commission_caliber.py        —— 纯函数：三个因子相乘、负利润归零、比例边界
+            #     test_commission_single_source.py  —— 源码扫描：公式字面量只允许出现在真源模块
+            #     test_commission_path_parity.py    —— 同一组输入，多条路径产出相同金额
+            #     test_commission_conservation.py   —— V2-04：Σ(人维度) == Σ(店维度) == 提成总额
+            #     test_commission_estimate_preview.py —— 前端试算走后端接口；零系数；只读
+            #     test_performance_salary_caliber.py —— 绩效工资 == 绩效包 × 个人分数档位系数
+            #     test_racing_coefficient_not_in_payroll.py —— 赛马评级不得进入任何金额路径
+            #     test_profit_basis_single_version.py —— 利润基数只允许现行口径；历史口径行必须为 0
+            #   为什么必须进本清单：守护不挂 CI 就等于没写 ——
+            #   口径漂回去时，只有真正执行过的断言才能拦住合并。
+            #   ⚠️ 这 8 个文件**全是同步用例**（DB 用 AsyncMock + asyncio.run，不走
+            #   pytest-asyncio），所以放进根契约清单不会踩「Event loop is closed」那个坑。
             # ⚠️ 2026-11-20：**不**把 backend/tests/test_hr_binding_and_payroll_boundary.py
             # 放进本清单 —— 与上面 test_account_proxy_config.py 同一个坑：
             # 那个文件有 22 个 **async** 用例，而 backend/tests/conftest.py 用

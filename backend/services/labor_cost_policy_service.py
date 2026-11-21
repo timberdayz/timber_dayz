@@ -160,9 +160,35 @@ class LaborCostPolicyService:
     def is_legacy_a_only_basis_version(cls, basis_version: Optional[str]) -> bool:
         """是否是历史「仅 A 类成本」口径。
 
+        ⚠️ 注意与 :meth:`is_legacy_basis_version` 的区别：
+        这里判的是**成本构成**（只算 A 类成本），
+        所以只有 ``A_ONLY_V1`` 命中 ——
+        ``A_PRE_COMMISSION_LABOR_V2`` 的成本构成与现行口径一致，
+        不能按「仅 A 类成本」处理，否则重建快照时成本会算少。
+
         这条分支只为**复现历史快照**保留：新写入的行一律走当前口径。
         """
         return str(basis_version or "").strip() == "A_ONLY_V1"
+
+    @classmethod
+    def is_legacy_basis_version(cls, basis_version: Optional[str]) -> bool:
+        """是否是**任意一个**历史口径版本。
+
+        口径归一（ADR-2026-11-21）之后，系统里只应存在
+        :data:`CURRENT_BASIS_VERSION` 一个口径版本；
+        读利润基数时遇到历史版本必须跳过，
+        否则会把两套口径的数字混进同一个月的看板。
+
+        与 :meth:`is_legacy_a_only_basis_version` 的分工：
+        **判定「是不是历史口径」用本方法**；
+        只有「按哪种成本构成重建快照」才用那个只认 A_ONLY 的方法。
+        """
+        return str(basis_version or "").strip() in cls.LEGACY_BASIS_VERSIONS
+
+    @classmethod
+    def is_current_basis_version(cls, basis_version: Optional[str]) -> bool:
+        """是否是现行口径版本（``SETTLEMENT_BASIS_V1``）。"""
+        return str(basis_version or "").strip() == cls.CURRENT_BASIS_VERSION
 
     async def is_manual_labor_cost_allowed(self, year_month: str) -> bool:
         await self.get_profit_basis_version(year_month)

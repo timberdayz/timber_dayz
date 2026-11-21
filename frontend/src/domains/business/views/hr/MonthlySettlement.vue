@@ -195,7 +195,7 @@
               <el-tooltip :content="shopBreakHint(row)" placement="top">
                 <span class="cell-stack">
                   <span class="cell-stack__main">{{ shopBreakSummary(row) }}</span>
-                  <span class="cell-stack__sub">按店各算各的结算系数</span>
+                  <span class="cell-stack__sub">按店逐店计算（零系数）</span>
                 </span>
               </el-tooltip>
             </template>
@@ -258,7 +258,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="店铺结算系数" width="130" align="right">
+          <el-table-column label="赛马评级（不参与提成计算）" width="210" align="right">
             <template #default="{ row }">
               <el-tooltip :content="COEFFICIENT_TOOLTIP" placement="top">
                 <span>{{ formatCoefficient(row.shop_coefficient) }}</span>
@@ -347,15 +347,16 @@ const settlement = ref(null)
 const yearMonth = ref(currentYearMonth())
 
 const COEFFICIENT_TOOLTIP =
-  '该店当月的结算系数 = min(该店排名档位系数, 该店分数档位系数)。这家店的提成按它算。'
+  '该店当月的赛马评级（min(该店排名档位系数, 该店分数档位系数)）。' +
+  '它只用于考核、预警与排名展示，不参与任何金额计算。'
 
 const SCORE_COEFFICIENT_TOOLTIP =
   '个人分数档位系数（≥90→1.2，80→1.0，70→0.9，60→0.8，<60→0.5）。' +
-  '提成分店计算时，再与该店结算系数取低的那个。'
+  '它是绩效工资的唯一系数：绩效工资 = 绩效包 × 这个系数（纯个人，与店铺排名无关）。'
 
 const PERFORMANCE_SALARY_COEFFICIENT_TOOLTIP =
   '绩效工资 = 绩效包 × 这个系数。这是绩效工资用的月度系数；' +
-  '提成不是用它算的，而是每家店各用各的结算系数逐店计算（见「提成构成」列）。'
+  '提成不用任何系数 —— 提成 = 可分配利润 × 归属提成比（零系数）。'
 
 const PERFORMANCE_SOURCE_LABELS = {
   shop_inherited: '店铺继承',
@@ -448,21 +449,20 @@ function shopBreakSummary(row) {
   const breaks = Array.isArray(row?.shop_breaks) ? row.shop_breaks : []
   if (!breaks.length) return '—'
   return breaks
-    .map((item) => `${shopLabel(item.shop_key)} ×${formatCoefficient(item.settlement_coefficient)} ${formatMoney(item.commission_amount)}`)
+    .map((item) => `${shopLabel(item.shop_key)} ${formatMoney(item.commission_amount)}`)
     .join('  +  ')
 }
 
-/** 提成构成明细：每家店把系数从哪来写清楚。 */
+/** 提成构成明细：每家店把金额从哪来写清楚（零系数，不乘任何系数）。 */
 function shopBreakHint(row) {
   const breaks = Array.isArray(row?.shop_breaks) ? row.shop_breaks : []
   if (!breaks.length) return '本月没有产生提成的店铺'
   const lines = breaks.map((item) => {
-    const limited = item.limited_by === 'personal_score' ? '（被个人分数档位压低）' : '（按店铺结算系数）'
     return (
       `${shopLabel(item.shop_key)}：` +
       `基数 ${formatMoney(item.profit_basis_amount)} × 可分配率 ${(Number(item.allocatable_profit_rate || 0) * 100).toFixed(0)}%` +
-      ` × 提成比 ${(Number(item.commission_ratio || 0) * 100).toFixed(0)}% × 结算系数 ${formatCoefficient(item.settlement_coefficient)}` +
-      ` = ${formatMoney(item.commission_amount)} ${limited}`
+      ` × 提成比 ${(Number(item.commission_ratio || 0) * 100).toFixed(0)}%` +
+      ` = ${formatMoney(item.commission_amount)}`
     )
   })
   return lines.join('\n')

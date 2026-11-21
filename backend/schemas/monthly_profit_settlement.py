@@ -65,6 +65,13 @@ class MonthlyProfitDashboardResponse(BaseModel):
     over_allocation_flag: bool
     shop_breakdown: list[MonthlyProfitShopBreakdownItemResponse]
     adjustments: list[MonthlyProfitDashboardAdjustmentResponse]
+    #: 数据状态：``ready`` = 该月有现行口径结算数据；
+    #: ``no_profit_basis`` = 该月没有（历史月份口径归一后清空）⇒ 看板空白属预期。
+    data_status: str = "ready"
+    #: 给运营看的一句话说明（前端直接渲染，不要自己判断口径）。
+    data_status_note: str = ""
+    #: 本月使用的利润基数口径（唯一口径）。
+    basis_version: str = "SETTLEMENT_BASIS_V1"
 
 
 class MonthlyProfitDashboardEnvelopeResponse(BaseModel):

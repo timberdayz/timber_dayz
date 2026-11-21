@@ -534,7 +534,10 @@ class HRIncomeCalculationService:
         for row in snapshot_rows:
             # 只认「结算基数口径」的快照（当前口径 + 历史同口径版本）；
             # 「仅 A 类成本」的历史快照不参与工资与提成计算。
-            if LaborCostPolicyService.is_legacy_a_only_basis_version(
+            # ⚠️ 2026-11-21 口径归一：**任意**历史口径版本都要跳过
+            # （不只是 A_ONLY_V1）—— 否则 A_PRE_COMMISSION_LABOR_V2 的行
+            # 会被当成现行口径读进来，让同一个月的看板出现两套数字。
+            if LaborCostPolicyService.is_legacy_basis_version(
                 getattr(row, "basis_version", None)
             ):
                 continue
@@ -1324,6 +1327,123 @@ class HRIncomeCalculationService:
             ),
             "coefficient_display_only": True,
         }
+
+    async def build_commission_estimate(
+        self,
+        year_month: str,
+        overrides: list[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """试算预览：把「改了还没保存」的归属配置交给后端算一遍。
+
+        **只读，不写库。**
+
+        为什么需要这个接口
+        ----------------
+        页面上的可分配率与归属提成比是人工配置，运营改了但还没保存时，
+        库里读不到新值。以前前端会自己乘一遍「利润基数 × 可分配率 × 提成比 × 系数」
+        来显示试算值 —— 这就是**第二套口径**，页面上的数和工资单上的数会对不上。
+
+        现在前端只把**待保存的输入**（可分配率、归属提成比）传上来，
+        金额一律由 :mod:`backend.services.commission_caliber` 算 ——
+        提成公式在系统里只有一份实现。
+
+        参数
+        ----
+        year_month:
+            目标月份 ``YYYY-MM``。
+        overrides:
+            待试算的配置行，每项含 ``employee_code`` / ``platform_code`` /
+            ``shop_id`` / ``commission_ratio`` / ``allocatable_profit_rate``。
+
+        返回
+        ----
+        ``{"year_month": ..., "rows": [...]}``，每行含利润基数、可分配利润、
+        预计提成与零提成原因。
+        """
+        rows: list[Dict[str, Any]] = []
+        if not overrides:
+            return {"year_month": year_month, "rows": rows}
+
+        # 只取与试算相关的店铺，去重后一次性读利润基数。
+        shop_keys: Dict[str, tuple[str, str]] = {}
+        for item in overrides:
+            platform_code = str(item.get("platform_code") or "").lower()
+            shop_id = str(item.get("shop_id") or "")
+            if not platform_code or not shop_id:
+                continue
+            shop_keys[self._shop_key(platform_code, shop_id)] = (platform_code, shop_id)
+
+        basis_by_shop = await self._load_profit_basis_by_shop(
+            year_month,
+            [
+                SimpleNamespace(platform_code=platform_code, shop_id=shop_id)
+                for platform_code, shop_id in shop_keys.values()
+            ],
+        )
+
+        # 哪些店配过可分配率（区分「忘了配」与「决定本月不分」）。
+        configured_shop_keys = {
+            self._shop_key(row.platform_code, row.shop_id)
+            for row in (
+                (
+                    await self.db.execute(
+                        select(ShopCommissionConfig).where(
+                            ShopCommissionConfig.year_month == year_month
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        }
+
+        for item in overrides:
+            employee_code = str(item.get("employee_code") or "").strip()
+            platform_code = str(item.get("platform_code") or "").lower()
+            shop_id = str(item.get("shop_id") or "")
+            if not employee_code or not platform_code or not shop_id:
+                continue
+            shop_key = self._shop_key(platform_code, shop_id)
+            basis = basis_by_shop.get(shop_key, {})
+            profit_basis_amount = self._to_float(basis.get("profit_basis_amount"), 0.0)
+            cost_status = str(basis.get("cost_status") or "missing_labor_allocation")
+            alloc_rate = self._to_float(item.get("allocatable_profit_rate"), 0.0)
+            ratio = self._to_float(item.get("commission_ratio"), 0.0)
+
+            # ⚠️ 提成公式的唯一实现处是 backend/services/commission_caliber.py。
+            allocatable_profit = calculate_shop_allocatable_profit(
+                profit_basis_amount=profit_basis_amount,
+                allocatable_profit_rate=alloc_rate,
+            )
+            estimated_commission = calculate_employee_commission(
+                profit_basis_amount=profit_basis_amount,
+                allocatable_profit_rate=alloc_rate,
+                commission_ratio=ratio,
+            )
+            rows.append(
+                {
+                    "employee_code": employee_code,
+                    "platform_code": platform_code,
+                    "shop_id": shop_id,
+                    "profit_basis_amount": round(profit_basis_amount, 2),
+                    "allocatable_profit_rate": round(alloc_rate, 6),
+                    "commission_ratio": round(ratio, 6),
+                    "allocatable_profit_amount": round(float(allocatable_profit), 2),
+                    "estimated_commission": round(float(estimated_commission), 2),
+                    "cost_status": cost_status,
+                    "commission_zero_reason": commission_zero_reason(
+                        is_rate_configured=shop_key in configured_shop_keys,
+                        allocatable_rate=alloc_rate,
+                        profit_basis_amount=profit_basis_amount,
+                        estimated_total_commission=float(estimated_commission),
+                        has_assignment=True,
+                        cost_status=cost_status,
+                        commission_ratio=ratio,
+                    ),
+                }
+            )
+
+        return {"year_month": year_month, "rows": rows}
 
     async def calculate_month(
         self,

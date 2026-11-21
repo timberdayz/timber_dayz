@@ -112,8 +112,8 @@ test('api/index.js 同时保留结算预览方法与月度结算单方法', () =
   assert.match(apiSource, /async getHrMonthlySettlement\s*\(/)
 })
 
-test('三种系数分开显示：分数档位 / 绩效工资 / 店铺结算，不再混成「结算系数」一列', () => {
-  // 员工行：分数档位系数（提成与绩效工资共同的约束项）
+test('三种系数分开显示：分数档位 / 绩效工资 / 店铺赛马评级，不再混成「结算系数」一列', () => {
+  // 员工行：分数档位系数（纯个人，只影响绩效工资）
   assert.match(viewSource, /label="分数档位系数"/)
   assert.match(viewSource, /formatCoefficient\(row\.score_coefficient\)/)
   // 员工行：绩效工资系数（只用于绩效工资）
@@ -121,8 +121,9 @@ test('三种系数分开显示：分数档位 / 绩效工资 / 店铺结算，�
   assert.match(viewSource, /formatCoefficient\(row\.performance_salary_coefficient\)/)
   // 旧的含糊列名不能再出现
   assert.doesNotMatch(viewSource, /label="结算系数"/)
-  // 店铺行仍然是「店铺结算系数」
-  assert.match(viewSource, /label="店铺结算系数"/)
+  // 店铺行：赛马评级 —— 只做考核与预警展示，不参与提成金额
+  assert.match(viewSource, /label="赛马评级（不参与提成计算）"/)
+  assert.doesNotMatch(viewSource, /label="店铺结算系数"/)
 })
 
 test('提成构成逐店列出，能自己把提成金额加出来', () => {

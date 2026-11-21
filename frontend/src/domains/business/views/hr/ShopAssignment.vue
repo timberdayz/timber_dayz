@@ -1,7 +1,7 @@
 <template>
   <div class="shop-assignment-page erp-page-container">
     <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">人员店铺归属和提成比</h1>
-    <p style="color: #909399; margin-bottom: 20px;">配置员工负责的店铺及提成比例，用于后续提成计算。本模块仅管理员可见。<strong>预计提成直接取自后端结算预览</strong>（利润基数 × 可分配率 × 归属提成比 × 结算系数），前端不再自己算钱；只有「改了还没保存」的临时编辑才在本地试算。配置保存至数据库表 <code>a_class.employee_shop_assignments</code>。</p>
+    <p style="color: #909399; margin-bottom: 20px;">配置员工负责的店铺及提成比例，用于后续提成计算。本模块仅管理员可见。<strong>页面上的钱一律由后端算</strong>（提成 = 可分配利润 × 归属提成比，零系数；绩效系数只影响绩效工资，不参与提成），前端不再自己算钱；「改了还没保存」的临时编辑会调后端试算接口取数。配置保存至数据库表 <code>a_class.employee_shop_assignments</code>。</p>
 
     <!-- Tab 切换 -->
     <el-tabs v-model="activeTab" style="margin-bottom: 20px;">
@@ -45,7 +45,7 @@
         </el-button>
       </div>
       <div v-if="employeeCommissionSummary.length > 0" class="commission-summary-strip">
-        <div class="commission-summary-title">员工月度预计提成（后端结算口径）</div>
+        <div class="commission-summary-title">员工月度预计提成（实发口径）</div>
         <div class="commission-summary-items">
           <div v-for="item in employeeCommissionSummary" :key="item.employee_code" class="commission-summary-item">
             <span class="commission-summary-name">{{ item.employee_name || item.employee_code }}</span>
@@ -58,7 +58,7 @@
               {{ employeeStatusTag(item.calculation_status).label }}
             </el-tag>
             <span class="commission-summary-amount">¥{{ formatNumber(item.estimated_commission) }}</span>
-            <span class="commission-summary-shops">{{ item.shop_count }}店 · 结算系数 {{ formatCoefficient(item.settlement_coefficient) }}</span>
+            <span class="commission-summary-shops">{{ item.shop_count }}店 · 绩效系数 {{ formatCoefficient(item.score_coefficient) }}</span>
           </div>
         </div>
       </div>
@@ -125,7 +125,7 @@
               <span v-if="row._isFirst" class="allocatable-rate-wrap">
                 <el-input-number
                   :model-value="(row.allocatable_profit_rate ?? 0) * 100"
-                  @update:model-value="(v) => setShopAllocatableProfitRate(row, v)"
+                  @update:model-value="(v) => { setShopAllocatableProfitRate(row, v); scheduleEstimate() }"
                   :min="0"
                   :max="100"
                   :step="0.01"
@@ -175,7 +175,7 @@
               <span v-if="row._person" class="allocatable-rate-wrap">
                 <el-input-number
                   :model-value="((row._person && row._person.commission_ratio) ?? 0) * 100"
-                  @update:model-value="(v) => { if (row._person) row._person.commission_ratio = v != null ? Number(v) / 100 : 0 }"
+                  @update:model-value="(v) => { if (row._person) row._person.commission_ratio = v != null ? Number(v) / 100 : 0; scheduleEstimate() }"
                   :min="0"
                   :max="100"
                   :step="0.01"
@@ -189,19 +189,21 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="结算系数" width="100" align="right">
+          <el-table-column label="绩效系数（仅影响绩效工资）" width="200" align="right">
             <template #default="{ row }">
-              <span v-if="row._person">{{ formatCoefficient(settlementCoefficientOf(row)) }}</span>
+              <el-tooltip content="该员工的个人绩效分数档位系数。它只影响绩效工资，不参与提成金额。" placement="top">
+                <span v-if="row._person">{{ formatCoefficient(performanceCoefficientOf(row)) }}</span>
+              </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="预计提成" width="190" align="right">
+          <el-table-column label="预计提成（实发口径）" width="210" align="right">
             <template #default="{ row }">
               <span v-if="row._person">
                 <el-tooltip v-if="zeroReasonOf(row)" :content="zeroReasonOf(row)" placement="top">
                   <span class="commission-amount">¥{{ formatNumber(getRowEstimatedCommission(row)) }}</span>
                 </el-tooltip>
                 <span v-else class="commission-amount">¥{{ formatNumber(getRowEstimatedCommission(row)) }}</span>
-                <el-tag v-if="isRowDirty(row)" size="small" type="warning" style="margin-left: 4px;">试算</el-tag>
+                <el-tag v-if="estimateTagOf(row)" size="small" :type="estimateTagOf(row).type" style="margin-left: 4px;">{{ estimateTagOf(row).label }}</el-tag>
               </span>
             </template>
           </el-table-column>
@@ -298,24 +300,11 @@
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="主管提成（未含结算系数）" width="180" align="right">
+          <el-table-column label="预计提成（实发口径）" width="190" align="right">
             <template #default="{ row }">
-              <el-tooltip content="可分配利润按归属比例分摊的金额，未含结算系数；实发口径请看「预计提成（结算口径）」" placement="top">
-                <span>¥{{ formatNumber(row.supervisor_profit) }}</span>
+              <el-tooltip content="该店当月实发提成合计 = 可分配利润 × 归属提成比（零系数）。店铺赛马评级与个人绩效分数都不参与提成金额。" placement="top">
+                <span>¥{{ formatNumber(row.settlement_commission_amount) }}</span>
               </el-tooltip>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作员提成（未含结算系数）" width="190" align="right">
-            <template #default="{ row }">
-              <el-tooltip content="可分配利润按归属比例分摊的金额，未含结算系数；实发口径请看「预计提成（结算口径）」" placement="top">
-                <span>¥{{ formatNumber(row.operator_profit) }}</span>
-              </el-tooltip>
-            </template>
-          </el-table-column>
-          <el-table-column label="预计提成（结算口径）" width="170" align="right">
-            <template #default="{ row }">
-              <span v-if="row.settlement_commission_total != null">¥{{ formatNumber(row.settlement_commission_total) }}</span>
-              <span v-else class="fallback-text">—</span>
             </template>
           </el-table-column>
           <el-table-column label="状态" width="200" align="center">
@@ -483,8 +472,10 @@ import { Setting, DataAnalysis, Calendar } from '@element-plus/icons-vue'
 import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  collectEstimateOverrides,
   exceedsCommissionRatioLimit,
   inferAssignmentRole,
+  indexEstimateRows,
   isAssignmentDirty,
   readBackendAllocatableProfit,
   resolveEstimatedCommission,
@@ -515,6 +506,11 @@ const statsRows = ref([])
 const statsLoading = ref(false)
 // 后端结算预览（GET /hr/commissions/settlement-preview）：页面上的钱以它为准。
 const settlementPreviewEmployees = ref([])
+// 后端试算结果（改了还没保存时，后端按同一套口径算出来的钱）。
+// ⚠️ 前端**不自己算钱**：只把「待保存的输入」发给后端，页面渲染返回的金额。
+const estimateRows = ref(new Map())
+const estimateLoading = ref(false)
+let estimateTimer = null
 
 const annualYear = ref(new Date().getFullYear().toString())
 const annualGroupBy = ref('employee')
@@ -631,21 +627,37 @@ function getRowAllocatableProfit(row) {
   return readBackendAllocatableProfit(row?._shop || row)
 }
 
-// 预计提成：没改过就显示后端值；改了还没保存才用前端唯一允许的乘法链试算。
+// 预计提成：两条路径都是**后端算的**。
+//   * 没改过        → 后端结算预览返回的金额；
+//   * 改了还没保存  → 后端试算接口按同一套口径算出的金额。
+// 前端不做任何乘法。
 function getRowEstimatedCommission(row) {
   if (!row?._person) return 0
-  const shop = row?._shop || row
   const preview = row._person._preview || null
+  const estimate = estimateAmountOf(row)
   return resolveEstimatedCommission({
     backendEstimatedCommission: preview?.estimated_commission ?? null,
-    dirty: isRowDirty(row),
-    trial: {
-      profit_basis_amount: preview?.profit_basis_amount ?? shop?.profit_basis_amount ?? 0,
-      allocatable_profit_rate: shop?.allocatable_profit_rate ?? 0,
-      commission_ratio: row._person.commission_ratio ?? 0,
-      settlement_coefficient: preview?.settlement_coefficient ?? 1
-    }
+    estimateAmount: estimate
   })
+}
+
+// 这一行的后端试算金额（没有试算结果时返回 null）。
+function estimateAmountOf(row) {
+  if (!row?._person) return null
+  const person = row._person
+  const shop = row?._shop || row
+  const key = `${String(person.employee_code ?? '').trim()}|${String(shop?.platform_code ?? '').trim().toLowerCase()}|${String(shop?.shop_id ?? '').trim()}`
+  const hit = estimateRows.value.get(key)
+  return hit ? hit.estimated_commission : null
+}
+
+// 「试算」标签：只有真的拿到后端试算金额才标「试算」，
+// 否则区分「还在算」和「还没算出来」。
+function estimateTagOf(row) {
+  if (!isRowDirty(row)) return null
+  if (estimateAmountOf(row) != null) return { label: '试算', type: 'warning' }
+  if (estimateLoading.value) return { label: '计算中', type: 'info' }
+  return { label: '待试算', type: 'info' }
 }
 
 // 可分配率是否被改过（还没保存）。
@@ -662,9 +674,48 @@ function isRowDirty(row) {
   return isShopRateDirty(row) || isAssignmentDirty(row?._shop || row, row?._person)
 }
 
-// 结算系数（后端下发，缺失显示「—」而不是 0）。
-function settlementCoefficientOf(row) {
-  return row?._person?._preview?.settlement_coefficient ?? null
+// 把「改了还没保存」的输入交给后端试算。
+// ⚠️ 前端只传**输入**（可分配率、归属提成比），金额一律由后端算。
+async function refreshEstimate() {
+  const dirty = configTableRows.value.filter((row) => row?._person && isRowDirty(row))
+  if (dirty.length === 0) {
+    estimateRows.value = new Map()
+    return
+  }
+  const overrides = collectEstimateOverrides(dirty, (row) => isRowDirty(row))
+  if (overrides.length === 0) {
+    estimateRows.value = new Map()
+    return
+  }
+  estimateLoading.value = true
+  try {
+    const res = await api.postHrCommissionSettlementEstimate({
+      year_month: configMonth.value,
+      overrides
+    })
+    const payload = res?.data ?? {}
+    estimateRows.value = indexEstimateRows(payload?.rows ?? [])
+  } catch (e) {
+    estimateRows.value = new Map()
+    ElMessage.warning(e?.response?.data?.detail || e?.message || '试算失败，请稍后重试')
+  } finally {
+    estimateLoading.value = false
+  }
+}
+
+// 连续输入时防抖，避免每敲一个数字都打一次后端。
+function scheduleEstimate() {
+  if (estimateTimer) clearTimeout(estimateTimer)
+  estimateTimer = setTimeout(() => {
+    estimateTimer = null
+    refreshEstimate()
+  }, 300)
+}
+
+// 绩效系数（后端下发的个人分数档位系数，缺失显示「—」而不是 0）。
+// ⚠️ 它只影响绩效工资，**不参与提成金额**（提成零系数）。
+function performanceCoefficientOf(row) {
+  return row?._person?._preview?.score_coefficient ?? null
 }
 
 // 提成为 0 的业务原因（后端下发），让「0」变成一句能行动的话。
@@ -909,6 +960,8 @@ function toRateNumber(value) {
 async function loadConfigData() {
   if (!configMonth.value) return
   configLoading.value = true
+  // 重新加载 = 回到后端已保存的状态 ⇒ 之前的试算结果作废。
+  estimateRows.value = new Map()
   try {
     const [assignmentsRes, shopsRes, statsRes, configRes, previewRes] = await Promise.all([
       api.getHrEmployeeShopAssignments({ year_month: configMonth.value, page: 1, page_size: 1000 }),
@@ -1058,32 +1111,15 @@ async function loadStatsData() {
   if (!statsMonth.value) return
   statsLoading.value = true
   try {
-    const [res, previewRes] = await Promise.all([
-      api.getHrShopProfitStatistics({ month: statsMonth.value }),
-      api.getHrCommissionSettlementPreview({ year_month: statsMonth.value }).catch(() => ({ data: [] }))
-    ])
+    const res = await api.getHrShopProfitStatistics({ month: statsMonth.value })
     const data = res?.data ?? res ?? []
     const items = Array.isArray(data) ? data : (data?.data ?? data ?? [])
-    // 店铺维度的「结算口径预计提成」来自后端结算预览（含结算系数），
-    // 不用统计接口里未含结算系数的分摊额，避免页面上的钱和实发对不上。
-    const settlementTotalByShop = new Map()
-    for (const employee of extractPreviewEmployees(previewRes)) {
-      for (const previewShop of employee?.shops || []) {
-        const key = `${String(previewShop.platform_code || '').toLowerCase()}|${previewShop.shop_id}`
-        const next = (settlementTotalByShop.get(key) || 0) + toRateNumber(previewShop.estimated_commission)
-        settlementTotalByShop.set(key, Math.round(next * 100) / 100)
-      }
-    }
-    statsRows.value = items.map((row) => {
-      const decorated = decorateShopEntity(normalizeProfitBasisFields(row), shopAccountLookup)
-      const key = `${String(decorated.platform_code || '').toLowerCase()}|${decorated.shop_id}`
-      return {
-        ...decorated,
-        settlement_commission_total: settlementTotalByShop.has(key)
-          ? settlementTotalByShop.get(key)
-          : null
-      }
-    })
+    // 店铺维度的「实发口径预计提成」由后端直接给出
+    // （settlement_commission_amount：按结算预览逐人汇总到店）。
+    // 前端不再自己拼口径，也不再自己累加成另一套数字。
+    statsRows.value = items.map((row) =>
+      decorateShopEntity(normalizeProfitBasisFields(row), shopAccountLookup)
+    )
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '加载失败')
     statsRows.value = []

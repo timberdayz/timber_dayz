@@ -22,8 +22,10 @@ test('ShopAssignment page shows order profit and settlement basis as a reference
 
 test('ShopAssignment page uses net-profit wording for allocation and payout labels', () => {
   assert.equal(source.includes('可分配净利润率'), true)
-  assert.equal(source.includes('主管提成'), true)
-  assert.equal(source.includes('操作员提成'), true)
+  // 提成口径已归一：三列合并为一列「预计提成（实发口径）」，
+  // 不再并列展示「主管/操作员提成（未含结算系数）」这种旧口径。
+  assert.equal(source.includes('预计提成（实发口径）'), true)
+  assert.equal(source.includes('未含结算系数'), false)
 })
 
 test('Employee salary page distinguishes draft previews from locked payrolls', () => {

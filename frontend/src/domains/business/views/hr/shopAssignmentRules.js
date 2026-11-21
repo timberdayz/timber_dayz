@@ -1,21 +1,21 @@
 /**
  * 人员店铺归属页的纯计算 / 汇总辅助。
  *
- * 【口径归属：钱由后端算，前端只做乘法】
+ * 【口径归属：钱由后端算，前端只渲染】
  *
- * 月度结算链路唯一的金额口径在服务端：
- *   预计提成 = max(利润基数, 0) × 可分配率 × 归属提成比 × 结算系数
- * 其中：
- *   * 利润基数 profit_basis_amount  —— 后端下发（结算口径已收敛为唯一的「结算基数」）；
- *   * 结算系数 settlement_coefficient —— 后端下发，
- *     定义为 min(店铺结算系数, 个人分数档位系数)，绩效工资和提成都用它；
- *   * 可分配率、归属提成比 —— 运营在页面上改的配置。
+ * 月度结算链路唯一的金额口径在服务端（`backend/services/commission_caliber`）：
  *
- * 所以前端**不再自己复刻后端公式**：
- *   * 已保存的配置：预计提成直接展示后端返回的
- *     shops[].estimated_commission / employees[].expected_commission；
- *   * 用户改了还没保存：只允许用上面那**一条乘法链**做试算，
- *     并且利润基数和结算系数必须取后端值 —— 前端不自己定义口径。
+ *   可分配利润 = max(利润基数, 0) × 可分配率
+ *   某员工从某店分到的提成 = 可分配利润 × 归属提成比      # 零系数
+ *
+ * 所以前端**不再复刻任何公式**：
+ *
+ *   * 已保存的配置：预计提成直接展示后端结算预览返回的 `estimated_commission`；
+ *   * 改了还没保存：前端只把**待保存的输入**（可分配率、归属提成比）交给
+ *     后端试算接口 `POST /hr/commissions/settlement-preview/estimate`，
+ *     由后端按同一套口径算钱，页面只渲染返回的金额。
+ *
+ * 换句话说：这个文件里**不允许**出现「利润基数 × 系数 × 提成比」这类乘法。
  */
 
 function toFiniteNumber(value, fallback = 0) {
@@ -72,37 +72,6 @@ export function inferAssignmentRole(employee) {
 }
 
 /**
- * 前端唯一允许的金额计算：未保存编辑的试算。
- *
- *   预计提成 = max(利润基数, 0) × 可分配率 × 归属提成比 × 结算系数
- *
- * 重要约束：
- *   * 利润基数（profit_basis_amount）来自后端；
- *   * 结算系数（settlement_coefficient）来自后端；
- *   * 前端只做这条乘法，不自己定义口径、不自己推导系数、不兜底猜测业务规则。
- *
- * @param {Object} input
- * @param {number} input.profit_basis_amount 后端下发的利润基数
- * @param {number} input.allocatable_profit_rate 当前可分配率（可能是用户刚改的）
- * @param {number} input.commission_ratio 当前归属提成比（可能是用户刚改的）
- * @param {number} input.settlement_coefficient 后端下发的结算系数
- * @returns {number} 试算出的预计提成，保留 2 位小数
- */
-export function calculateTrialCommission({
-  profit_basis_amount,
-  allocatable_profit_rate,
-  commission_ratio,
-  settlement_coefficient
-} = {}) {
-  const profitBasisAmount = toFiniteNumber(profit_basis_amount, 0)
-  const allocatableProfitRate = toFiniteNumber(allocatable_profit_rate, 0)
-  const commissionRatio = toFiniteNumber(commission_ratio, 0)
-  const coefficient = toFiniteNumber(settlement_coefficient, 1)
-  const amount = Math.max(profitBasisAmount, 0) * allocatableProfitRate * commissionRatio * coefficient
-  return Math.round(amount * 100) / 100
-}
-
-/**
  * 读取后端算好的可分配利润。
  * 后端已经按 2 位小数舍入，前端直接用，不自己再算一遍。
  */
@@ -131,19 +100,71 @@ export function isAssignmentDirty(shop, assignment) {
 }
 
 /**
+ * 「员工 × 店铺」的稳定键：后端返回的试算行与页面行按这个键对齐。
+ */
+export function estimateKey({ employee_code, platform_code, shop_id } = {}) {
+  const employee = String(employee_code ?? '').trim()
+  const platform = String(platform_code ?? '').trim().toLowerCase()
+  const shop = String(shop_id ?? '').trim()
+  return `${employee}|${platform}|${shop}`
+}
+
+/**
+ * 收集「改了还没保存」的行，整理成后端试算接口要的**输入**。
+ *
+ * ⚠️ 这里只搬运**输入**（可分配率、归属提成比），**不含任何金额**。
+ * 金额由后端按唯一口径算 —— 前端不自己乘。
+ *
+ * @param {Array} rows 配置表的扁平行（含 `_shop` / `_person`）
+ * @param {(row: Object) => boolean} [isDirty] 判断某行是否被改过
+ * @returns {Array} 后端试算接口的 overrides 数组
+ */
+export function collectEstimateOverrides(rows = [], isDirty = null) {
+  const list = Array.isArray(rows) ? rows : []
+  const overrides = []
+  for (const row of list) {
+    const person = row?._person
+    if (!person?.employee_code) continue
+    if (typeof isDirty === 'function' && !isDirty(row)) continue
+    const shop = row?._shop || row
+    overrides.push({
+      employee_code: String(person.employee_code),
+      platform_code: String(shop?.platform_code ?? '').trim().toLowerCase(),
+      shop_id: String(shop?.shop_id ?? ''),
+      commission_ratio: toFiniteNumber(person.commission_ratio, 0),
+      allocatable_profit_rate: toFiniteNumber(shop?.allocatable_profit_rate, 0)
+    })
+  }
+  return overrides
+}
+
+/**
+ * 把后端返回的试算行建成索引，页面按「员工 × 店铺」取用。
+ */
+export function indexEstimateRows(rows = []) {
+  const map = new Map()
+  for (const row of Array.isArray(rows) ? rows : []) {
+    map.set(estimateKey(row), row)
+  }
+  return map
+}
+
+/**
  * 预计提成的展示值：
- *   * 没改过（保存过的配置）→ 直接用后端的 estimated_commission；
- *   * 改了还没保存        → 用前端唯一允许的乘法链试算。
+ *   * 有试算结果（改了还没保存）→ 用后端试算返回的金额；
+ *   * 否则                      → 用后端结算预览返回的金额。
+ *
+ * 两条路径都是后端算的，前端不做任何乘法。
  */
 export function resolveEstimatedCommission({
   backendEstimatedCommission = null,
-  dirty = false,
-  trial = null
+  estimateAmount = null
 } = {}) {
-  if (!dirty && backendEstimatedCommission !== null && backendEstimatedCommission !== undefined) {
+  if (estimateAmount !== null && estimateAmount !== undefined) return estimateAmount
+  if (backendEstimatedCommission !== null && backendEstimatedCommission !== undefined) {
     return backendEstimatedCommission
   }
-  return calculateTrialCommission(trial)
+  return null
 }
 
 /**

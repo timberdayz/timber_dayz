@@ -631,3 +631,107 @@
   - 逐店判断（它是公司级标记；逐店要下钻）
 - 配套指标：`company_retained_amount`、`allocation_ratio`
 - 当前状态：`stable`
+
+# 提成与绩效工资口径（2026-11-21 口径归一后登记）
+
+这一组指标来自「提成 / 绩效工资」链路。口径归一后只有**两条轴**：
+
+- **提成**：零系数，分多少给多少；
+- **绩效工资**：纯个人分数档位，与店铺排名无关。
+
+⚠️ **命名纪律**（本组指标的硬约束）：
+
+- **「结算系数」是禁用词**。它曾同时影响提成与绩效工资，现在两个口径完全分开，
+  再用这个词会让人以为「店铺排名会压低提成」。一律写全称：
+  **绩效分数档位系数**（影响绩效工资）/ **赛马评级**（只做考核展示）。
+- **「赛马评级」不是金额指标**。禁止出现在任何「×系数 = 金额」的表述里。
+- **「绩效系数」** 指 **绩效分数档位系数**（纯个人），不要用来指赛马评级。
+
+## commission-amount
+
+- 中文名：员工提成
+- 标准键：`commission_amount`
+- 层级：经营层 / 员工层
+- 业务定义：**某员工从某家店分到的提成**。
+- 系统统一口径：真源模块 `backend/services/commission_caliber.py`（**唯一实现处**）。
+  工资单计算、结算预览、店铺维度统计、月度结算单、确认校验全部调它，
+  前端**只渲染**后端下发的金额，不复刻公式。
+- 公式：`max(店铺可分配利润, 0) × 该员工的归属提成比`
+  - 店铺可分配利润 = `max(店铺利润基数, 0) × 店铺可分配利润率`
+  - 归属提成比 = `a_class.employee_shop_assignments.commission_ratio`（人工配置，唯一来源）
+  - 店铺可分配利润率 = `a_class.shop_commission_config.allocatable_profit_rate`（人工配置，唯一来源）
+- ⚠️ **零系数**：店铺赛马评级、个人绩效分数档位**都不参与提成金额**。
+  「分多少，给多少」——提成分摊只看利润基数、可分配率、归属提成比三个因子。
+- ⚠️ **亏损按 0 处理**：店铺利润基数为负时该店可分配利润为 0，提成为 0
+  （不是负提成）。
+- 粒度：员工 × 店铺 × 月
+- 适用：判断「这个人在这个店这个月分到多少」
+- 不适用：
+  - 当作「可分配利润」（可分配利润是店铺级中间量）
+  - 与「含系数旧口径」的历史数字直接比较（口径已变更，见 ADR-2026-11-21）
+  - 单独用它判断门店盈利能力（门店盈利能力看 `profit_basis_amount`）
+- 配套指标：`performance-salary-amount`、`performance-score-coefficient`、`ranking-coefficient`
+- 当前状态：`stable`
+
+## performance-salary-amount
+
+- 中文名：绩效工资
+- 标准键：`performance_salary_amount`
+- 层级：经营层 / 员工层
+- 业务定义：**员工因个人绩效拿到的工资部分**。
+- 系统统一口径：真源模块 `backend/services/commission_caliber.py`
+  的 `calculate_employee_performance_salary`。
+- 公式：`绩效包金额 × 绩效分数档位系数`
+  - 绩效包金额 = `a_class.salary_structures.performance_package_amount`（人工配置，唯一来源）
+  - 绩效分数档位系数 = `performance-score-coefficient`（纯个人）
+- ⚠️ **纯个人**：绩效工资**只看本人的绩效分数档位**，与店铺排名、逐店结算系数**无关**。
+  一个人管几家店，绩效工资只按他本人的分数算一次。
+- 粒度：员工 × 月
+- 适用：判断「这个人的绩效工资是多少」「绩效分数怎么影响收入」
+- 不适用：
+  - 当作提成（提成看 `commission-amount`）
+  - 当作「绩效包」（绩效包是配置项，是另一个东西）
+  - 当作实发工资（实发还要看工资单，含个税等代扣项）
+- 配套指标：`performance-score-coefficient`、`ranking-coefficient`、`commission-amount`
+- 当前状态：`stable`
+
+## performance-score-coefficient
+
+- 中文名：绩效分数档位系数
+- 标准键：`performance_score_coefficient`
+- 层级：经营层 / 员工层
+- 业务定义：**按个人绩效分数落档得到的系数**——绩效工资乘的就是它。
+- 系统统一口径：档位表 SSOT 在 `backend/services/performance_coefficient.py`
+  的 `SCORE_BAND_COEFFICIENTS`。
+- 档位：`≥90 → 1.2`、`≥80 → 1.0`、`≥70 → 0.9`、`≥60 → 0.8`、`<60 → 0.5`
+- 公式：`绩效工资 = 绩效包金额 × 本系数`
+- ⚠️ **纯个人**：与店铺排名无关。同一个人在几家店任职，系数都是同一个。
+- ⚠️ 只有**绩效工资**用它。它**不参与提成**。
+- 粒度：员工 × 月
+- 适用：解释「为什么这个人的绩效工资是这个数」
+- 不适用：
+  - 当作赛马评级（赛马评级是 `ranking-coefficient`，另一个东西）
+  - 当作提成系数（提成零系数，没有这回事）
+  - 跨人横向比较「谁打绩效更狠」（档位是阶梯，差距会被压缩）
+- 配套指标：`performance-salary-amount`、`ranking-coefficient`
+- 当前状态：`stable`
+
+## ranking-coefficient
+
+- 中文名：赛马评级系数
+- 标准键：`ranking_coefficient`
+- 层级：经营层
+- 业务定义：**店铺当月在赛马排名池里的名次档位系数**——只做考核、预警与排名展示。
+- 系统统一口径：档位表 SSOT 在 `backend/services/performance_coefficient.py`
+  的 `RANK_BAND_COEFFICIENTS`；落库字段 `c_class.performance_scores.performance_coefficient`。
+- 档位：前 20% → 1.2、前 50% → 1.0、前 80% → 0.9、其余 → 0.8
+- ⚠️ **不参与任何金额**：不乘提成、不乘绩效工资。
+  页面上的列名必须写全「赛马评级（不参与提成计算）」，避免运营误以为它会压低收入。
+- 粒度：店铺 × 月
+- 适用：判断「这家店这个月排第几」「要不要预警」
+- 不适用：
+  - 当作任何金额的因子（这是本条最重要的一条）
+  - 当作个人绩效档位（个人看 `performance-score-coefficient`）
+  - 跨月直接比较名次（每月池子构成不同）
+- 配套指标：`performance-score-coefficient`
+- 当前状态：`stable`

@@ -63,7 +63,7 @@
           <template #default="{ row }">{{ formatMoney(row.profit_basis_amount) }}</template>
         </el-table-column>
         <el-table-column label="店铺绩效分" width="110" align="right"><template #default="{ row }">{{ formatPerformanceScore(row.shop_performance_score) }}</template></el-table-column>
-        <el-table-column prop="shop_performance_coefficient" label="店铺绩效系数" width="120" align="right" />
+        <el-table-column prop="shop_performance_coefficient" label="店铺赛马评级（不参与提成计算）" width="230" align="right" />
         <el-table-column prop="shop_performance_status" label="绩效状态" width="100" />
         <el-table-column label="待补维度" min-width="180">
           <template #default="{ row }">{{ (row.shop_performance_pending_dimensions || []).join(' / ') || '—' }}</template>

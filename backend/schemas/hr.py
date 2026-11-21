@@ -1078,6 +1078,62 @@ class ShopCommissionConfigUpdate(BaseModel):
     )
 
 
+class CommissionEstimateOverride(BaseModel):
+    """试算覆盖项：一条「员工 × 店铺」的**待保存**配置。
+
+    页面上的可分配率与归属提成比是人工配置（唯一真源在
+    ``a_class.shop_commission_config`` / ``a_class.employee_shop_assignments``）。
+    运营改了还没保存时，后端读不到新值，所以由页面把**待保存的值**传上来，
+    由后端按唯一口径算钱。
+
+    ⚠️ 这里只传**输入**，不含金额 —— 金额一律由后端
+    (:mod:`backend.services.commission_caliber`) 算，前端不得自己乘。
+    """
+
+    employee_code: str = Field(..., min_length=1, max_length=64)
+    platform_code: str = Field(..., min_length=1, max_length=32)
+    shop_id: str = Field(..., min_length=1, max_length=256)
+    commission_ratio: float = Field(
+        ..., ge=0, le=1, description="该员工在该店的归属提成比 0-1"
+    )
+    allocatable_profit_rate: float = Field(
+        ..., ge=0, le=1, description="该店的可分配利润率 0-1（页面上还没保存的值）"
+    )
+
+
+class CommissionEstimateRequest(BaseModel):
+    """试算请求：把「改了还没保存」的归属配置交给后端算一遍。"""
+
+    year_month: str = Field(
+        ..., pattern=r"^\d{4}-\d{2}$", description="目标月份 YYYY-MM"
+    )
+    overrides: list[CommissionEstimateOverride] = Field(
+        default_factory=list, description="待试算的归属配置行"
+    )
+
+
+class CommissionEstimateRowResponse(BaseModel):
+    """试算结果行：后端算出来的钱（前端只渲染，不复刻）。"""
+
+    employee_code: str
+    platform_code: str
+    shop_id: str
+    profit_basis_amount: float = 0.0
+    allocatable_profit_rate: float = 0.0
+    commission_ratio: float = 0.0
+    allocatable_profit_amount: float = 0.0
+    estimated_commission: float = 0.0
+    cost_status: str = ""
+    commission_zero_reason: Optional[str] = None
+
+
+class CommissionEstimateResponse(BaseModel):
+    """试算结果。"""
+
+    year_month: str
+    rows: list[CommissionEstimateRowResponse] = Field(default_factory=list)
+
+
 class EmployeePerformanceAdjustmentCreate(BaseModel):
     year_month: str = Field(
         ..., pattern=r"^\d{4}-\d{2}$", description="适用月份 YYYY-MM"

@@ -151,6 +151,10 @@ from backend.schemas.hr import (
     EmployeeShopAssignmentResponse,
     CopyFromPrevMonthBody,
     ShopCommissionConfigUpdate,
+    CommissionEstimateOverride,
+    CommissionEstimateRequest,
+    CommissionEstimateRowResponse,
+    CommissionEstimateResponse,
     MeProfileUpdate,
 )
 

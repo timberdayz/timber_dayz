@@ -50,6 +50,7 @@ from backend.schemas.hr import (
     EmployeeShopAssignmentUpdate,
     ShopCommissionConfigUpdate,
     CopyFromPrevMonthBody,
+    CommissionEstimateRequest,
 )
 from modules.core.db import (
     ShopAccount,
@@ -1465,6 +1466,45 @@ async def get_commission_settlement_preview(
         return error_response(
             ErrorCode.INTERNAL_SERVER_ERROR,
             f"获取结算预览失败: {str(e)}",
+            status_code=500,
+        )
+
+
+@router.post("/commissions/settlement-preview/estimate")
+async def post_commission_settlement_estimate(
+    payload: CommissionEstimateRequest,
+    _current_user: DimUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """试算预览：把「改了还没保存」的归属配置交给后端算一遍。
+
+    **只读，不写库。**
+
+    页面上的可分配率与归属提成比是人工配置，运营改了还没保存时，库里读不到新值。
+    以前前端自己乘一遍来显示试算值 —— 那是**第二套口径**，
+    页面上的数会和工资单上的数对不上。
+
+    现在前端只传**待保存的输入**（可分配率、归属提成比），
+    金额由后端按唯一口径算（:mod:`backend.services.commission_caliber`）。
+    """
+    try:
+        try:
+            year_month_to_first_day(payload.year_month)
+        except (ValueError, IndexError):
+            return error_response(
+                ErrorCode.PARAMETER_INVALID, "月份格式应为 YYYY-MM", status_code=400
+            )
+
+        result = await HRIncomeCalculationService(db).build_commission_estimate(
+            payload.year_month,
+            [item.model_dump() for item in payload.overrides],
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        logger.error(f"计算提成试算失败: {e}", exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"计算提成试算失败: {str(e)}",
             status_code=500,
         )
 

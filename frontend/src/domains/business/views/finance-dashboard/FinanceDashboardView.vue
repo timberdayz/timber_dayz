@@ -60,6 +60,14 @@
       title="当前月份暂无月度利润数据，可切换月份或直接新增人工调整项。"
       class="section-alert"
     />
+    <el-alert
+      v-if="store.dashboard && store.dashboard.data_status && store.dashboard.data_status !== 'ready'"
+      type="info"
+      :closable="false"
+      show-icon
+      :title="store.dashboard.data_status_note || '该月没有现行口径的结算数据，看板显示为空白属预期。'"
+      class="section-alert"
+    />
 
     <ProfitOverviewCards v-if="store.dashboard" :dashboard="store.dashboard" />
     <ShopAllocationTable
