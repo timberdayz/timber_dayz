@@ -1134,6 +1134,22 @@ class CommissionEstimateResponse(BaseModel):
     rows: list[CommissionEstimateRowResponse] = Field(default_factory=list)
 
 
+class CommissionEstimateApiResponse(BaseModel):
+    """试算接口的 **HTTP 响应外壳**（``success`` + ``data``）。
+
+    为什么单独一层
+    ------------
+    路由返回的是统一响应格式 ``{"success": true, "data": {...}}``，
+    而 :class:`CommissionEstimateResponse` 描述的是 ``data`` 的内容。
+    两者缺一不可：只有 ``data`` 那一层时，接口在 OpenAPI 里**没有响应契约**
+    （``CommissionEstimate*Response`` 会变成从不生效的悬空定义），
+    前端与后端就没有一份可对照的「这个接口到底返回什么」。
+    """
+
+    success: bool = True
+    data: CommissionEstimateResponse
+
+
 class EmployeePerformanceAdjustmentCreate(BaseModel):
     year_month: str = Field(
         ..., pattern=r"^\d{4}-\d{2}$", description="适用月份 YYYY-MM"

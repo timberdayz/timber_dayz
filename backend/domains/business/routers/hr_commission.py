@@ -51,6 +51,7 @@ from backend.schemas.hr import (
     ShopCommissionConfigUpdate,
     CopyFromPrevMonthBody,
     CommissionEstimateRequest,
+    CommissionEstimateApiResponse,
 )
 from modules.core.db import (
     ShopAccount,
@@ -1470,7 +1471,10 @@ async def get_commission_settlement_preview(
         )
 
 
-@router.post("/commissions/settlement-preview/estimate")
+@router.post(
+    "/commissions/settlement-preview/estimate",
+    response_model=CommissionEstimateApiResponse,
+)
 async def post_commission_settlement_estimate(
     payload: CommissionEstimateRequest,
     _current_user: DimUser = Depends(require_admin),

@@ -222,3 +222,74 @@ def test_estimate_request_schema_rejects_invalid_ratio():
                 }
             ],
         )
+
+
+def test_estimate_response_contract_is_declared_and_visible():
+    """试算接口必须有**生效**的响应契约，不许留悬空 schema。
+
+    背景：``CommissionEstimateRowResponse`` / ``CommissionEstimateResponse``
+    一度只存在于 ``backend/schemas/hr.py`` 与导出列表里，**没有任何路由引用**它们
+    ⇒ OpenAPI 里查不到这个接口返回什么，前端与后端没有一份可对照的契约
+    ⇒ 等于「schema 声称描述响应，实际不生效」。
+
+    这里锁住三件事：
+    1. 路由挂了 ``response_model``；
+    2. 响应模型描述的是**统一响应格式**（``success`` + ``data``），
+       与路由实际返回的键一致 —— 否则加了 ``response_model`` 就会校验失败变 500；
+    3. 该响应模型能在 OpenAPI 的 ``components.schemas`` 里查到。
+    """
+    from backend.domains.business.routers import hr_commission as module
+    from backend.schemas.hr import (
+        CommissionEstimateApiResponse,
+        CommissionEstimateResponse,
+    )
+
+    routes = {
+        getattr(route, "path", ""): route
+        for route in module.router.routes
+        if getattr(route, "path", "").startswith("/api/hr/commissions")
+    }
+    route = routes["/api/hr/commissions/settlement-preview/estimate"]
+
+    response_model = getattr(route, "response_model", None)
+    assert (
+        response_model is not None
+    ), "试算接口必须挂 response_model，否则响应契约无从对照"
+    assert response_model is CommissionEstimateApiResponse
+
+    # 外壳字段：success + data
+    outer = CommissionEstimateApiResponse.model_fields
+    assert set(outer) == {"success", "data"}, f"响应外壳字段不对：{sorted(outer)}"
+    assert outer["data"].annotation is CommissionEstimateResponse
+
+    # data 里的行字段必须与 service 实际产出的字段完全一致
+    # （多一个字段会被 response_model 静默丢弃，少一个则校验失败）
+    row_fields = set(
+        CommissionEstimateResponse.model_fields["rows"]
+        .annotation.__args__[0]
+        .model_fields
+    )
+    service_row_fields = {
+        "employee_code",
+        "platform_code",
+        "shop_id",
+        "profit_basis_amount",
+        "allocatable_profit_rate",
+        "commission_ratio",
+        "allocatable_profit_amount",
+        "estimated_commission",
+        "cost_status",
+        "commission_zero_reason",
+    }
+    assert row_fields == service_row_fields, (
+        "试算行的 schema 字段与后端实际产出不一致："
+        f"缺 {sorted(service_row_fields - row_fields)}，多 {sorted(row_fields - service_row_fields)}"
+    )
+
+    # OpenAPI 里必须能查到这份契约
+    from backend.main import app
+
+    schemas = app.openapi()["components"]["schemas"]
+    assert "CommissionEstimateApiResponse" in schemas
+    assert "CommissionEstimateResponse" in schemas
+    assert "CommissionEstimateRowResponse" in schemas

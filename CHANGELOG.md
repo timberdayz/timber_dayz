@@ -118,6 +118,46 @@
 - ADR：`docs/adr/2026-11-21-commission-and-performance-caliber-layering.md`
 - 台账：`docs/superpowers/plans/STATUS.md`
 
+### 九、生产部署与验收（2026-11-21 实测）
+
+- **流水线**：GitHub Actions `deploy-production.yml` run **44915030103** ——
+  `check-config` ✔ → 发布门禁（7 项 Release Gate）✔ → 镜像构建推送 ✔
+  （backend / backend-full / frontend 三镜像 + 容器启动冒烟 ✔ + CNB 双镜像推送 ✔）
+  → **生产部署 ✔**（`Deploy to Production (Tag Release)` 全绿）。
+  ⚠️ 本次「推 CNB 镜像」单步耗时约 **40 分钟**（v7.36.0 仅 20 秒 —— 那次层可复用，
+  本次是首次真实上传新层）；属**慢**不是**失败**，未触发回滚。
+- **镜像**：生产 7 个容器全 healthy，
+  `Backend / Celery / Frontend = v7.37.0`（`nginx` / `postgres` / `redis` 沿用原镜像）；
+- **迁移**：`public.current_schema_alembic_version` =
+  `current_schema_20261243_drop_legacy_profit_basis`（上版为 `..._20261242_...`）；
+  `core.alembic_version` 仍是 `20260805_payroll_backfill_audit` —— 它是**基线出处标记**，
+  按设计不随 `current_migrations` 链推进（见 `current_migrations/README.md`）；
+- **历史数据处置落地**：`finance.shop_profit_basis` 的 **39 行 legacy 已删净**
+  （`A_ONLY_V1` 37 行 + `A_PRE_COMMISSION_LABOR_V2` 2 行），
+  只剩 2026-11 的 `SETTLEMENT_BASIS_V1` **1 行**（5,946.38）
+  ⇒ **2026-03~2026-10 全部月份按决策「留白」**，看板上这些月份显示
+  `data_status = no_profit_basis` + 说明文字，而不是看起来像故障的 0。
+  ⚠️ 生产 `finance.employee_labor_cost_allocations` 实为 **0 行**（比本地「只有 2026-07/2026-10」
+  更彻底地印证「无可重算」）⇒ 「删 legacy 行、接受历史空白」是唯一可行路径，已落地；
+- **健康端点**：内外网 `/api/healthz/ready` 均 HTTP 200 ——
+  `version = v7.37.0`、`runtime_mode = production`、`database = connected`、`dashboard = ready`；
+- **路由实测**：新试算端点 `POST /api/hr/commissions/settlement-preview/estimate`
+  已注册（无 token → **401**，证明已挂 `require_admin`）；
+  僵尸端点 `/api/hr/commissions/shop` → **404**；
+  `/api/hr/commissions/employee` 保留（→ 200）；
+  OpenAPI **510 条路径**，与 v7.36.0 同数 ——「删 1 条僵尸 + 加 1 条试算」净变化为 0；
+  看板响应 schema 已带 `data_status` / `data_status_note`；
+- **双镜像**：`main` SHA 三方一致（GitHub / CNB / 本地）；
+  tag `v7.37.0` 两端为同一 tag 对象 ⇒ 先推 CNB（确认未触发部署）再推 GitHub（触发部署）。
+
+> ⚠️ **一处「仓库已修、生产未修」的差异（如实留档）**：
+> 本次发布后复核发现 `CommissionEstimateRowResponse` / `CommissionEstimateResponse`
+> **从未被任何路由引用** ⇒ 生产 OpenAPI 里查不到试算接口的响应结构
+> （悬空 schema，接口本身功能正常、只缺契约文档化）。
+> 仓库侧已修（新增 `CommissionEstimateApiResponse` 外壳模型 + 路由挂 `response_model`
+> + 新增守护 `test_estimate_response_contract_is_declared_and_visible`），
+> **该修复随下一个版本发布**，当前生产仍是 v7.37.0 的行为。
+
 ## [v7.36.0] - 2026-11-21 - 跟投模块整体下线 + 财务结算中心改造为只读「月度利润看板」
 
 业务确认无真实投资人，跟投收益模块整体下线；「财务结算中心」同步改造为**只读看板**
