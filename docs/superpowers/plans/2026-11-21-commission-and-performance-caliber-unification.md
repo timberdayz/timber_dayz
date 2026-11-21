@@ -487,13 +487,17 @@ def calculate_employee_performance_salary(package_amount, performance_score) -> 
    ↓ 理由：这是本批的主目标；先单独一步，改动面最小、可独立验收
 批次3（绩效工资口径归一）
    ↓ 理由：依赖批次2 的真源模块已就位
-批次4（历史数据重算）
-   ↓ 理由：必须等 2、3 的计算口径定稿，否则要重算两遍
+批次4（历史数据重算）—— **先生产 dry-run 逐人对照表 → 业务确认 → 才 apply**
+   ↓ 理由：必须等 2、3 的计算口径定稿，否则要重算两遍；且不可逆，必须有业务确认这一关
 批次5（页面收敛）
    ↓ 理由：页面消费的是新口径，必须在口径定稿后做
-批次6（词典/文档/ADR）
+批次6（词典/文档同步）
 批次7（发布与验收）
 ```
+
+> 批次 6 中的 **ADR 与台账登记已随本计划提前落地**
+> （`docs/adr/2026-11-21-commission-and-performance-caliber-layering.md`、
+> `docs/superpowers/plans/STATUS.md`），批次 6 剩下的是指标词典与运行手册同步。
 
 **若要更快**：批次 1、2、3 可合并为一次 PR（它们共享同一个纯函数模块），
 但批次 4（历史重算）**必须独立** —— 不可逆数据操作要与代码改动分开，便于定位问题与回滚。
@@ -532,4 +536,5 @@ def calculate_employee_performance_salary(package_amount, performance_score) -> 
 6. 利润基数只存在现行 `basis_version`；
 7. 赛马评级不进入任何金额计算路径；
 8. 看板「员工侧分配额」与重算后的工资单实发一致（抽样逐人核对）；
-9. 变更已记入 ADR 与 `STATUS.md`。
+9. 变更已记入 ADR 与 `STATUS.md`；
+10. **历史重算前**：生产库 `--dry-run` 逐人新旧对照表**已交业务确认签字**（不可逆操作的前置关卡）。
