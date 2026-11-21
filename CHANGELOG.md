@@ -47,6 +47,32 @@ v7.37.0 上线后的复核发现一处**本次改动自己带进来的缺口**�
   路由实测与 OpenAPI 510 条路径；
 - `docs/superpowers/plans/STATUS.md`：补记本批次发布证据。
 
+### 五、生产部署与验收（2026-11-22 实测）
+
+- **流水线**：GitHub Actions `deploy-production.yml` run **44924230375** —— 全绿
+  （`check-config` ✔ → 7 项 Release Gate ✔ → 三镜像构建 + 容器启动冒烟 ✔
+  → CNB 双镜像推送 ✔ → **生产部署 ✔**）；
+- **镜像**：生产 7 个容器全 healthy，`Backend / Celery / Frontend = v7.37.1`；
+- **迁移**：**无新迁移**，链头仍是 `current_schema_20261243_drop_legacy_profit_basis`，
+  `finance.shop_profit_basis` 仍是 `SETTLEMENT_BASIS_V1` 1 行、legacy 行 0 行
+  ⇒ **v7.37.0 的历史数据处置结果原样保持**；
+- **健康端点**：内外网 `/api/healthz/ready` 均 HTTP 200 ——
+  `version = v7.37.1`、`runtime_mode = production`、`database = connected`、`dashboard = ready`；
+- **路由实测**：试算端点无 token → **401**（已注册且挂 `require_admin`）；
+  僵尸端点 `/api/hr/commissions/shop` → **404**；`/api/hr/commissions/employee` → 200；
+- **⭐ 本次发布的核心验收**：生产 OpenAPI 里试算端点的 200 响应已指向
+  `{"$ref": "#/components/schemas/CommissionEstimateApiResponse"}`
+  ⇒ 5 份 `CommissionEstimate*` schema **全部可见**
+  （`ApiResponse` / `Override` / `Request` / `Response` / `RowResponse`），
+  悬空 schema **收口**；路径总数仍为 **510**（`response_model` 不改路径）；
+  看板响应 schema 仍带 `data_status` / `data_status_note`；
+- **双镜像**：`main` SHA 三方一致；tag `v7.37.1` 两端为同一 tag 对象
+  （`41473cc7`，peeled → `80bf7be0`）⇒ 先推 CNB（确认未触发部署）再推 GitHub（触发部署）。
+
+> 📌 **发版耗时记录**：v7.37.0 推 CNB 镜像单步耗时约 **40 分钟**（首次真实上传新层），
+> v7.37.1 只改应用层 ⇒ 同一步仅约 **4 分钟**。⇒ 后续发版若只动应用代码，
+> CNB 推送不再是瓶颈。
+
 ## [v7.37.0] - 2026-11-21 - 提成与绩效工资口径归一（零系数提成 + 纯个人绩效系数）
 
 ### 一、业务已定并已落地的口径
