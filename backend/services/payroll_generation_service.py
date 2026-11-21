@@ -22,6 +22,8 @@ from modules.core.logger import get_logger
 from backend.services.hr_employee_lifecycle import is_payroll_voided
 from backend.services.payroll_period_lock_service import PAYROLL_LOCKED_STATUSES
 from backend.services.performance_readiness_service import PerformanceReadinessService
+from backend.services.commission_caliber import calculate_employee_performance_salary
+from backend.services.performance_coefficient import calculate_score_coefficient
 
 logger = get_logger(__name__)
 
@@ -210,21 +212,32 @@ class PayrollGenerationService:
 
     @classmethod
     def _normalize_performance_coefficient(cls, performance: Any | None) -> Decimal:
+        """绩效工资用的系数 —— **纯个人的绩效分数档位系数**。
+
+        口径（ADR-2026-11-21）：
+
+            绩效工资 = 绩效包金额 × 绩效分数档位系数(该员工的绩效分数)
+
+        ⚠️ 这里**不再**读 ``EmployeePerformance.performance_coefficient``
+        （那个字段原先存的是「逐店结算系数的销售额加权平均」，含店铺赛马排名）
+        —— 绩效工资必须是**纯个人**的，与店铺排名无关。
+
+        档位表的唯一真源是
+        :data:`backend.services.performance_coefficient.SCORE_BAND_COEFFICIENTS`
+        （经 ``calculate_score_coefficient(绩效分数)`` 得出）。
+
+        「未完成考核」的口径保持不变：系数为 0 ⇒ 绩效工资为 0。
+        """
         if (
             getattr(performance, "performance_source_type", None)
             == "controlled_targets_v1"
             and getattr(performance, "calculation_status", None) != "complete"
         ):
             return Decimal("0")
-        raw_value = getattr(performance, "performance_coefficient", None)
-        if raw_value is None:
-            raw_value = getattr(performance, "performance_score", 0)
-        coefficient = cls._to_decimal(raw_value)
-        if coefficient > Decimal("2"):
-            coefficient = coefficient / Decimal("100")
-        if coefficient < Decimal("0"):
-            coefficient = Decimal("0")
-        return coefficient
+        performance_score = getattr(performance, "performance_score", None)
+        if performance_score is None:
+            return Decimal("0")
+        return cls._to_decimal(calculate_score_coefficient(performance_score))
 
     @classmethod
     def _recalculate_totals(cls, record: Any) -> None:
@@ -285,8 +298,10 @@ class PayrollGenerationService:
             getattr(salary, "performance_package_amount", 0)
         )
         performance_coefficient = cls._normalize_performance_coefficient(performance)
-        performance_salary = (
-            performance_package_amount * performance_coefficient
+        # ⚠️ 绩效工资公式的唯一实现处是 backend/services/commission_caliber.py。
+        performance_salary = calculate_employee_performance_salary(
+            performance_package_amount=performance_package_amount,
+            performance_score_coefficient=performance_coefficient,
         ).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
         payload: Dict[str, Any] = {

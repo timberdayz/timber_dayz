@@ -90,11 +90,14 @@ def test_generate_month_creates_draft_payroll_from_salary_commission_and_perform
     assert result["locked_conflicts"] == 0
     created = next(x for x in added if isinstance(x, PayrollRecord))
     assert float(created.commission) == 300.0
-    assert float(created.performance_salary) == 240.0
+    # 绩效工资 = 绩效包 × **纯个人分数档位系数**（ADR-2026-11-21）
+    # 分数 80 → 档位系数 1.0 ⇒ 300 × 1.0 = 300
+    # （旧口径是「分数 ÷ 100」= 0.8 ⇒ 240）
+    assert float(created.performance_salary) == 300.0
     assert float(created.allowances) == 100.0
-    assert float(created.gross_salary) == 2140.0
-    assert float(created.net_salary) == 2140.0
-    assert float(created.total_cost) == 2140.0
+    assert float(created.gross_salary) == 2200.0
+    assert float(created.net_salary) == 2200.0
+    assert float(created.total_cost) == 2200.0
     assert created.status == "draft"
 
 
@@ -115,7 +118,9 @@ def test_generate_month_prefers_independent_manual_input_values():
         performance_ratio=0.0,
         status="active",
     )
-    commission = SimpleNamespace(employee_code="EMP_MANUAL", commission_amount=Decimal("0"))
+    commission = SimpleNamespace(
+        employee_code="EMP_MANUAL", commission_amount=Decimal("0")
+    )
     performance = SimpleNamespace(
         employee_code="EMP_MANUAL",
         performance_score=100.0,
@@ -140,7 +145,11 @@ def test_generate_month_prefers_independent_manual_input_values():
     )
 
     async def execute(stmt, *_args, **_kwargs):
-        entity = stmt.column_descriptions[0].get("entity") if hasattr(stmt, "column_descriptions") else None
+        entity = (
+            stmt.column_descriptions[0].get("entity")
+            if hasattr(stmt, "column_descriptions")
+            else None
+        )
         if entity is SalaryStructure:
             return _MockResult(rows=[salary])
         if entity is EmployeeCommission:
@@ -155,13 +164,17 @@ def test_generate_month_prefers_independent_manual_input_values():
 
     db.execute = AsyncMock(side_effect=execute)
     db.add = lambda obj: added.append(obj)
-    result = asyncio.run(service_cls(db=db).generate_month("2026-08", allow_pending_performance=True))
+    result = asyncio.run(
+        service_cls(db=db).generate_month("2026-08", allow_pending_performance=True)
+    )
 
     assert result["payroll_upserts"] == 1
     created = next(x for x in added if isinstance(x, PayrollRecord))
     assert float(created.bonus) == 80.0
     assert float(created.overtime_pay) == 20.0
-    assert float(created.net_salary) == 1380.0
+    # 分数 100 → 档位系数 1.2 ⇒ 绩效工资 300 × 1.2 = 360
+    # （旧口径「分数 ÷ 100」= 1.0 ⇒ 300 ⇒ 净额 1380）
+    assert float(created.net_salary) == 1440.0
 
 
 def test_generate_month_limits_writes_to_formal_employee_codes():
@@ -197,8 +210,12 @@ def test_generate_month_limits_writes_to_formal_employee_codes():
         ),
     ]
     performance_rows = [
-        SimpleNamespace(employee_code="EMP_FORMAL", year_month="2025-01", performance_score=80),
-        SimpleNamespace(employee_code="EMP_PARTIAL", year_month="2025-01", performance_score=None),
+        SimpleNamespace(
+            employee_code="EMP_FORMAL", year_month="2025-01", performance_score=80
+        ),
+        SimpleNamespace(
+            employee_code="EMP_PARTIAL", year_month="2025-01", performance_score=None
+        ),
     ]
 
     async def _execute(stmt, params=None):
@@ -225,9 +242,9 @@ def test_generate_month_limits_writes_to_formal_employee_codes():
     )
 
     assert result["employee_count"] == 1
-    assert [item.employee_code for item in added if isinstance(item, PayrollRecord)] == [
-        "EMP_FORMAL"
-    ]
+    assert [
+        item.employee_code for item in added if isinstance(item, PayrollRecord)
+    ] == ["EMP_FORMAL"]
 
 
 def test_generate_month_uses_performance_package_amount_and_normalized_score():
@@ -275,7 +292,9 @@ def test_generate_month_uses_performance_package_amount_and_normalized_score():
 
     assert result["payroll_upserts"] == 1
     created = next(x for x in added if isinstance(x, PayrollRecord))
-    assert float(created.performance_salary) == 680.0
+    # 分数 85 → 档位系数 1.0 ⇒ 绩效工资 800 × 1.0 = 800
+    # （旧口径「分数 ÷ 100」= 0.85 ⇒ 680）
+    assert float(created.performance_salary) == 800.0
     assert float(created.base_salary) == 5000.0
     assert float(created.position_salary) == 2000.0
 
@@ -345,10 +364,12 @@ def test_generate_month_preserves_manual_fields_on_existing_draft():
     assert float(existing.overtime_pay) == 50.0
     assert float(existing.bonus) == 80.0
     assert float(existing.total_deductions) == 75.0
-    assert float(existing.performance_salary) == 135.0
-    assert float(existing.gross_salary) == 1965.0
-    assert float(existing.net_salary) == 1890.0
-    assert float(existing.total_cost) == 2185.0
+    # 分数 90 → 档位系数 1.2 ⇒ 绩效工资 150 × 1.2 = 180
+    # （旧口径「分数 ÷ 100」= 0.9 ⇒ 135）
+    assert float(existing.performance_salary) == 180.0
+    assert float(existing.gross_salary) == 2010.0
+    assert float(existing.net_salary) == 1935.0
+    assert float(existing.total_cost) == 2230.0
 
 
 def test_generate_month_reports_locked_conflict_for_confirmed_payroll():
@@ -438,7 +459,10 @@ def test_generate_month_reports_locked_conflict_for_confirmed_payroll():
                 "total_cost",
             ],
             "current_net_salary": 1000.0,
-            "recalculated_net_salary": 2400.0,
+            # 分数 100 → 档位系数 1.2 ⇒ 绩效工资 360
+            # ⇒ 重算净额 = 1000 + 500 + 360 + 600 = 2460
+            # （旧口径绩效工资 300 ⇒ 2400）
+            "recalculated_net_salary": 2460.0,
         }
     ]
     assert added == []
@@ -513,9 +537,11 @@ def test_generate_employee_month_updates_single_draft_record():
     assert result["payroll_record"] is existing
     assert float(existing.bonus) == 120.0
     assert float(existing.overtime_pay) == 88.0
-    assert float(existing.performance_salary) == 375.0
+    # 分数 75 → 档位系数 0.9 ⇒ 绩效工资 500 × 0.9 = 450
+    # （旧口径「分数 ÷ 100」= 0.75 ⇒ 375）
+    assert float(existing.performance_salary) == 450.0
     assert float(existing.allowances) == 100.0
-    assert float(existing.net_salary) == 3383.0
+    assert float(existing.net_salary) == 3458.0
 
 
 def test_generate_employee_month_reports_locked_record():
@@ -629,11 +655,19 @@ def test_generate_employee_month_reads_english_c_class_columns():
         if hasattr(stmt, "column_descriptions"):
             entity = stmt.column_descriptions[0].get("entity")
             if entity is Employee:
-                return _MockResult(scalar_value=SimpleNamespace(employee_code="EMP020", status="active", employee_identity_type="employee"))
+                return _MockResult(
+                    scalar_value=SimpleNamespace(
+                        employee_code="EMP020",
+                        status="active",
+                        employee_identity_type="employee",
+                    )
+                )
             if entity is SalaryStructure:
                 return _MockResult(rows=[salary])
             if entity is EmployeeCommission:
-                return _MockResult(scalar_value=SimpleNamespace(commission_amount=300.0))
+                return _MockResult(
+                    scalar_value=SimpleNamespace(commission_amount=300.0)
+                )
             if entity is EmployeePerformance:
                 return _MockResult(scalar_value=SimpleNamespace(performance_score=75.0))
             if entity is PayrollRecord:
@@ -650,7 +684,8 @@ def test_generate_employee_month_reads_english_c_class_columns():
     assert result["payroll_upserts"] == 1
     created = next(x for x in added if isinstance(x, PayrollRecord))
     assert float(created.commission) == 300.0
-    assert float(created.performance_salary) == 375.0
+    # 分数 75 → 档位系数 0.9 ⇒ 绩效工资 500 × 0.9 = 450
+    assert float(created.performance_salary) == 450.0
 
 
 def test_generate_month_reads_english_c_class_columns():
@@ -686,13 +721,27 @@ def test_generate_month_reads_english_c_class_columns():
         if hasattr(stmt, "column_descriptions"):
             entity = stmt.column_descriptions[0].get("entity")
             if entity is Employee:
-                return _MockResult(scalar_value=SimpleNamespace(employee_code="EMP021", status="active", employee_identity_type="employee"))
+                return _MockResult(
+                    scalar_value=SimpleNamespace(
+                        employee_code="EMP021",
+                        status="active",
+                        employee_identity_type="employee",
+                    )
+                )
             if entity is SalaryStructure:
                 return _MockResult(rows=[salary])
             if entity is EmployeeCommission:
-                return _MockResult(rows=[SimpleNamespace(employee_code="EMP021", commission_amount=300.0)])
+                return _MockResult(
+                    rows=[
+                        SimpleNamespace(employee_code="EMP021", commission_amount=300.0)
+                    ]
+                )
             if entity is EmployeePerformance:
-                return _MockResult(rows=[SimpleNamespace(employee_code="EMP021", performance_score=80.0)])
+                return _MockResult(
+                    rows=[
+                        SimpleNamespace(employee_code="EMP021", performance_score=80.0)
+                    ]
+                )
             if entity is PayrollRecord:
                 return _MockResult(rows=[])
         return _MockResult(rows=[])
@@ -706,7 +755,8 @@ def test_generate_month_reads_english_c_class_columns():
     assert result["payroll_upserts"] == 1
     created = next(x for x in added if isinstance(x, PayrollRecord))
     assert float(created.commission) == 300.0
-    assert float(created.performance_salary) == 240.0
+    # 分数 80 → 档位系数 1.0 ⇒ 绩效工资 300 × 1.0 = 300
+    assert float(created.performance_salary) == 300.0
 
 
 def test_generate_employee_month_uses_latest_salary_version_effective_for_year_month():
@@ -753,11 +803,19 @@ def test_generate_employee_month_uses_latest_salary_version_effective_for_year_m
         if hasattr(stmt, "column_descriptions"):
             entity = stmt.column_descriptions[0].get("entity")
             if entity is Employee:
-                return _MockResult(scalar_value=SimpleNamespace(employee_code="EMP030", status="active", employee_identity_type="employee"))
+                return _MockResult(
+                    scalar_value=SimpleNamespace(
+                        employee_code="EMP030",
+                        status="active",
+                        employee_identity_type="employee",
+                    )
+                )
             if entity is SalaryStructure:
                 return _MockResult(rows=salary_rows)
             if entity is EmployeeCommission:
-                return _MockResult(scalar_value=SimpleNamespace(commission_amount=Decimal("300")))
+                return _MockResult(
+                    scalar_value=SimpleNamespace(commission_amount=Decimal("300"))
+                )
             if entity is EmployeePerformance:
                 return _MockResult(scalar_value=SimpleNamespace(performance_score=80.0))
             if entity is PayrollRecord:
@@ -774,7 +832,9 @@ def test_generate_employee_month_uses_latest_salary_version_effective_for_year_m
     created = next(x for x in added if isinstance(x, PayrollRecord))
     assert float(created.base_salary) == 1000.0
     assert float(created.position_salary) == 500.0
-    assert float(created.performance_salary) == 120.0
+    # 分数 80 → 档位系数 1.0 ⇒ 绩效工资 150 × 1.0 = 150
+    # （旧口径「分数 ÷ 100」= 0.8 ⇒ 120）
+    assert float(created.performance_salary) == 150.0
 
 
 def test_generate_month_uses_salary_version_effective_for_target_month():
@@ -821,13 +881,29 @@ def test_generate_month_uses_salary_version_effective_for_target_month():
         if hasattr(stmt, "column_descriptions"):
             entity = stmt.column_descriptions[0].get("entity")
             if entity is Employee:
-                return _MockResult(scalar_value=SimpleNamespace(employee_code="EMP031", status="active", employee_identity_type="employee"))
+                return _MockResult(
+                    scalar_value=SimpleNamespace(
+                        employee_code="EMP031",
+                        status="active",
+                        employee_identity_type="employee",
+                    )
+                )
             if entity is SalaryStructure:
                 return _MockResult(rows=salary_rows)
             if entity is EmployeeCommission:
-                return _MockResult(rows=[SimpleNamespace(employee_code="EMP031", commission_amount=Decimal("250"))])
+                return _MockResult(
+                    rows=[
+                        SimpleNamespace(
+                            employee_code="EMP031", commission_amount=Decimal("250")
+                        )
+                    ]
+                )
             if entity is EmployeePerformance:
-                return _MockResult(rows=[SimpleNamespace(employee_code="EMP031", performance_score=80.0)])
+                return _MockResult(
+                    rows=[
+                        SimpleNamespace(employee_code="EMP031", performance_score=80.0)
+                    ]
+                )
             if entity is PayrollRecord:
                 return _MockResult(rows=[])
         return _MockResult(rows=[])
@@ -842,4 +918,6 @@ def test_generate_month_uses_salary_version_effective_for_target_month():
     created = next(x for x in added if isinstance(x, PayrollRecord))
     assert float(created.base_salary) == 2000.0
     assert float(created.position_salary) == 500.0
-    assert float(created.performance_salary) == 200.0
+    # 分数 80 → 档位系数 1.0 ⇒ 绩效工资 250 × 1.0 = 250
+    # （旧口径「分数 ÷ 100」= 0.8 ⇒ 200）
+    assert float(created.performance_salary) == 250.0

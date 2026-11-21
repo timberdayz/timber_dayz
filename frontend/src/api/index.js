@@ -2352,9 +2352,9 @@ export default {
   async getHrEmployeeCommissions(params = {}) {
     return await this._get('/hr/commissions/employee', { params })
   },
-  async getHrShopCommissions(params = {}) {
-    return await this._get('/hr/commissions/shop', { params })
-  },
+  // 注：店铺维度提成接口 GET /hr/commissions/shop 已于 2026-11-21 下线
+  //（僵尸接口：无页面调用，且漏乘结算系数）。店铺维度口径改看
+  // GET /hr/shop-profit-statistics 的「预计提成（实发口径）」列。
 
   // === 员工店铺归属与提成比（add-employee-shop-assignment-page）===
   async getHrEmployeeShopAssignments(params = {}) {

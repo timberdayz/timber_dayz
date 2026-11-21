@@ -1,28 +1,25 @@
-"""统一结算系数（SSOT）。
+"""绩效档位表（SSOT）。
 
-业务口径：**一个系数，同时决定「绩效工资」和「提成」**。
+⚠️ **口径变更（ADR-2026-11-21）**：本文件不再是「一个系数同时决定绩效工资和提成」。
 
-    月度结算系数 = min( 排名档位系数 , 分数档位系数 )
+现在的职责划分：
+
+* **绩效分数档位系数**（:data:`SCORE_BAND_COEFFICIENTS`）
+  —— 唯一作用于**绩效工资**的系数：``绩效工资 = 绩效包金额 × 本档位系数``。
+  纯个人，与店铺排名无关。
+* **排名档位系数**（:data:`RANK_BAND_COEFFICIENTS`）
+  —— 店铺赛马评级，**不参与任何金额**，只做考核、预警与展示。
+* **结算系数**（``calculate_settlement_coefficient`` / ``describe_settlement_coefficient``）
+  —— 上面两者的 ``min``。**已从金额链路移除**，仅保留用于**展示拆解**
+  （让页面能说明「赛马评级多少、个人档位多少」，不参与计算结果）。
+
+提成口径见 :mod:`backend.services.commission_caliber`：
+``提成 = max(可分配利润, 0) × 归属提成比`` —— **零系数**。
 
 两条轴，各有且只有一张档位表（见下方常量），任何模块都不得再自定义档位：
 
 * **排名档位系数**：店铺当月在正式排名池里的名次档位。
 * **分数档位系数**：绩效分数的分数档位。
-
-派生关系：
-
-    店铺结算系数 = min(该店排名档位系数, 该店分数档位系数)
-    员工结算系数 = min(该店结算系数, 员工分数档位系数)
-
-改造前这两件事是分开的：
-
-* 提成乘「店铺排名系数」（0.5 ~ 1.2，来自 ``calculate_score_cap_coefficient``）
-* 绩效工资乘「绩效分数 ÷ 100」（0 ~ 1，来自 ``PayrollGenerationService``）
-
-于是同一个人同一个月有两套系数，页面显示的和工资单实发对不上
-（2026-10 实测：页面 1002.56 / 后端统计 1002.55 / 实发 979.46）。
-
-现在统一成一条链路：**页面看到的系数，就是工资单拿到的系数**。
 """
 
 from __future__ import annotations
@@ -31,7 +28,7 @@ from typing import Any, Iterable
 
 
 # ------------------------------------------------------------------ 档位表（SSOT）
-# 排名档位：正式排名池里的名次占比 -> 系数
+# 排名档位：正式排名池里的名次占比 -> 系数（**仅考核展示，不参与金额**）
 RANK_BAND_COEFFICIENTS = (
     (0.20, 1.2),
     (0.50, 1.0),
@@ -40,7 +37,7 @@ RANK_BAND_COEFFICIENTS = (
 # 排名落在 80% 之后的系数
 RANK_BAND_FLOOR = 0.8
 
-# 分数档位：绩效分数 -> 系数
+# 分数档位：绩效分数 -> 系数（**绩效工资唯一入口**）
 SCORE_BAND_COEFFICIENTS = (
     (90.0, 1.2),
     (80.0, 1.0),
@@ -93,6 +90,9 @@ def calculate_ranked_performance_coefficient(
 def calculate_settlement_coefficient(*coefficients: Any) -> float:
     """月度结算系数 = 所有约束项里最低的那个。
 
+    ⚠️ **已从金额链路移除（ADR-2026-11-21）**：提成零系数、绩效工资用纯个人档位，
+    这个函数**不再影响任何金额**，仅保留用于**展示拆解**。
+
     ``None`` 表示「这一项不构成约束」，会被忽略；一个约束都没有时返回 1.0。
     """
     values = [float(item) for item in coefficients if item is not None]
@@ -105,7 +105,15 @@ def describe_settlement_coefficient(
     shop_coefficient: Any = None,
     score_coefficient: Any = None,
 ) -> dict[str, Any]:
-    """给接口/页面用的可解释拆解：哪个约束把系数压下来了。"""
+    """给接口/页面用的可解释拆解：赛马评级与个人档位各是多少。
+
+    ⚠️ **仅展示，不参与任何金额**（ADR-2026-11-21）。
+
+    ``shop_coefficient``  = 店铺赛马评级（来自 ``c_class.performance_scores``）
+    ``score_coefficient`` = 员工个人绩效分数档位系数
+
+    ``limited_by`` 保留原语义（哪一项更低），但它现在**只用于展示**。
+    """
     shop_value = None if shop_coefficient is None else float(shop_coefficient)
     score_value = None if score_coefficient is None else float(score_coefficient)
     final = calculate_settlement_coefficient(shop_value, score_value)

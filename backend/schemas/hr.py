@@ -934,11 +934,12 @@ class EmployeeCommissionResponse(BaseModel):
 
 
 class ShopCommissionResponse(BaseModel):
-    """店铺维度提成。
+    """店铺维度提成 —— **已废弃**（2026-11-21 随僵尸接口下线）。
 
-    数据源已从影子表 ``c_class.shop_commissions``（已由迁移 20261212 删除）
-    切换到真 SSOT：销售额来自月度店铺赛马模块，
-    提成金额 = 结算利润基数 × 可分配率 × 该店归属提成比合计。
+    该接口全仓无页面调用，且漏乘结算系数、与工资单实发对不上。
+    保留类定义只为不让历史 import 立刻炸；**新代码不要用它**。
+    店铺维度的提成口径请用
+    :func:`backend.services.commission_caliber.calculate_employee_commission`。
     """
 
     platform_code: str

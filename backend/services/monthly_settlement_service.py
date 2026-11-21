@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.commission_reason_service import commission_zero_reason
+from backend.services.commission_caliber import calculate_employee_commission
 from backend.services.performance_readiness_service import PerformanceReadinessService
 from modules.core.db import (
     Employee,
@@ -218,10 +219,6 @@ class MonthlySettlementService:
         #: 店铺维度的「归属提成比合计」——用来判断是不是「没人配提成比」
         ratio_sum_by_shop: Dict[str, float] = {}
         for employee_code, rows in assignments_by_employee.items():
-            perf = performance_by_employee.get(employee_code)
-            score_coefficient = _score_coefficient(
-                getattr(perf, "performance_score", None)
-            )
             for row in rows:
                 key = _shop_key(row.platform_code, row.shop_id)
                 basis = basis_by_shop.get(key)
@@ -230,28 +227,19 @@ class MonthlySettlementService:
                 )
                 cfg = cfg_by_shop.get(key)
                 alloc_rate = _to_float(getattr(cfg, "allocatable_profit_rate", 0), 0.0)
-                score = score_by_shop.get(key)
-                shop_coefficient = _to_float(
-                    getattr(score, "performance_coefficient", None), 1.0
-                )
-                if getattr(score, "performance_coefficient", None) is None:
-                    shop_coefficient = 1.0
-                settlement_coefficient = min(
-                    shop_coefficient,
-                    (
-                        score_coefficient
-                        if score_coefficient is not None
-                        else shop_coefficient
-                    ),
-                )
                 ratio = _to_float(getattr(row, "commission_ratio", 0), 0.0)
                 ratio_sum_by_shop[key] = ratio_sum_by_shop.get(key, 0.0) + ratio
-                expected_commission_by_shop[key] = (
-                    expected_commission_by_shop.get(key, 0.0)
-                    + max(profit_basis_amount, 0.0)
-                    * alloc_rate
-                    * ratio
-                    * settlement_coefficient
+                # ⚠️ 提成公式的唯一实现处是 backend/services/commission_caliber.py。
+                # 这里**不再自行重算系数**：提成零系数，
+                # 店铺赛马排名与个人分数档位都不参与提成金额。
+                expected_commission_by_shop[key] = expected_commission_by_shop.get(
+                    key, 0.0
+                ) + float(
+                    calculate_employee_commission(
+                        profit_basis_amount=profit_basis_amount,
+                        allocatable_profit_rate=alloc_rate,
+                        commission_ratio=ratio,
+                    )
                 )
 
         shops: List[Dict[str, Any]] = []

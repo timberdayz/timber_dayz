@@ -908,20 +908,23 @@ def test_calculate_month_employee_performance_uses_store_total_score():
     assert result["employee_count"] == 1
     commission = next(x for x in added if isinstance(x, EmployeeCommission))
     perf = next(x for x in added if isinstance(x, EmployeePerformance))
-    # 结算系数 = min(店铺结算系数, 个人分数档位系数)
-    #   S1: min(1.2, 分数档位(90.8)=1.2) = 1.2 → 1000 × 1.0 × 0.1 × 1.2 = 120
-    #   S2: min(0.9, 1.2)                    = 0.9 →  500 × 1.0 × 0.1 × 0.9 =  45
-    # 改造前是把两店的系数加权平均（1.15）后统一乘上去（172.5），
-    # 等于让低排名的 S2 拿到了 S1 的高系数 —— 现在各店各算各的。
-    assert commission.commission_amount == pytest.approx(165.0)
-    assert commission.commission_rate == pytest.approx(1.375)
+    # 提成口径（ADR-2026-11-21）：**零系数** —— 可分配利润 × 归属提成比。
+    #   S1: 1000 × 1.0 × 0.1 = 100
+    #   S2:  500 × 1.0 × 0.1 =  50
+    # 店铺赛马排名（1.2 / 0.9）与个人分数档位**都不参与提成金额**。
+    # 改造前这里乘的是各店结算系数（120 + 45 = 165）。
+    assert commission.commission_amount == pytest.approx(150.0)
+    # commission_rate 的分母是「按提成比折算后的销售额」= 1200 × 0.1 = 120
+    assert commission.commission_rate == pytest.approx(1.25)
     assert perf.actual_sales == pytest.approx(1200.0)
     assert perf.achievement_rate == pytest.approx(
         (60.0 * 1000.0 + 50.0 * 200.0) / 1200.0 / 100.0
     )
     assert perf.performance_score == pytest.approx(90.8)
-    # 员工结算系数 = 各店结算系数按销售额加权（绩效工资与提成共用同一口径）
-    assert perf.performance_coefficient == pytest.approx(1.15)
+    # 绩效工资的系数 = **纯个人的绩效分数档位系数**（90.8 → 1.2）。
+    # ⚠️ 语义变更：原先存的是「各店结算系数按销售额加权平均」（1.15），
+    # 那含店铺赛马排名，与绩效工资口径不符。
+    assert perf.performance_coefficient == pytest.approx(1.2)
 
 
 def test_load_store_performance_requires_canonical_formal_ready_state():

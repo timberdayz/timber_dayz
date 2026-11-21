@@ -46,8 +46,13 @@ from backend.services.payroll_generation_service import PayrollGenerationService
 from backend.services.commission_reason_service import commission_zero_reason
 from backend.services.performance_coefficient import (
     calculate_score_coefficient,
-    calculate_settlement_coefficient,
     describe_settlement_coefficient,
+)
+from backend.services.commission_caliber import (
+    calculate_employee_commission,
+    calculate_employee_performance_salary,
+    calculate_employee_shop_commission,
+    calculate_shop_allocatable_profit,
 )
 
 logger = get_logger(__name__)
@@ -668,30 +673,48 @@ class HRIncomeCalculationService:
                         .all()
                     )
         except Exception:
-            rows = (
-                (
-                    await self.db.execute(
-                        text(
-                            """
+            # ⚠️ 兜底查询必须与 ORM 用**同一套列名**。
+            # 历史版本这里写的是中文列名（"员工编号" / "状态" / "考勤日期"），
+            # 而 ``a_class.attendance_records`` 的真实列名是英文
+            # （employee_code / status / attendance_date）⇒ 兜底自己也会报错，
+            # 把一个「拿不到考勤」的软失败升级成**打断整条提成链路**的硬失败。
+            #
+            # 2026-11-21 实测：SAVEPOINT 在外层事务已处于失败态时会抛异常，
+            # 于是每次重算都走这里、每次都在这里炸 —— 历史重算根本跑不动。
+            try:
+                rows = (
+                    (
+                        await self.db.execute(
+                            text(
+                                """
                         select
-                          "员工编号" as employee_code,
-                          "状态" as status
+                          employee_code,
+                          status
                         from a_class.attendance_records
-                        where "员工编号" = any(:employee_codes)
-                          and "考勤日期" >= :period_start
-                          and "考勤日期" < :next_month
+                        where employee_code = any(:employee_codes)
+                          and attendance_date >= :period_start
+                          and attendance_date < :next_month
                         """
-                        ),
-                        {
-                            "employee_codes": employee_codes,
-                            "period_start": period_start,
-                            "next_month": next_month,
-                        },
+                            ),
+                            {
+                                "employee_codes": employee_codes,
+                                "period_start": period_start,
+                                "next_month": next_month,
+                            },
+                        )
                     )
+                    .mappings()
+                    .all()
                 )
-                .mappings()
-                .all()
-            )
+            except Exception:  # noqa: BLE001
+                # 考勤只是**扣减项**（缺勤按状态扣钱），拿不到就按「无扣减」处理，
+                # 不能因此让整条提成/绩效链路失败。
+                logger.warning(
+                    "考勤数据读取失败，按无考勤扣减处理：month=%s",
+                    year_month,
+                    exc_info=True,
+                )
+                rows = []
 
         adjustment_by_employee: Dict[str, float] = {}
         for row in rows:
@@ -976,15 +999,23 @@ class HRIncomeCalculationService:
         }
 
     async def build_settlement_preview(self, year_month: str) -> Dict[str, Any]:
-        """结算预览：谁在哪家店、系数多少、预计拿到多少钱。
+        """结算预览：谁在哪家店、预计拿到多少钱。
 
         **只读，不写库。** 页面上的钱一律以这里为准 ——
-        前端不再自己算「可分配利润 × 提成比例 × 系数」。
+        前端不再自己算「可分配利润 × 提成比例」。
+
+        口径（ADR-2026-11-21）：
+
+        * **提成 = max(可分配利润, 0) × 归属提成比** —— **零系数**。
+          店铺赛马排名与个人分数档位**都不参与提成金额**。
+        * 页面里的 ``shop_coefficient`` / ``settlement_coefficient`` /
+          ``score_coefficient`` 现在是**纯考核展示**（赛马评级 + 个人档位），
+          **不参与任何金额**，前端须显式标注这一点。
 
         数据来源与 :meth:`calculate_month` 完全一致：
 
         * 已算好的个人绩效（``c_class.employee_performance``）→ 个人分数档位系数
-        * 已算好的店铺绩效（``c_class.performance_scores``）→ 店铺结算系数
+        * 已算好的店铺绩效（``c_class.performance_scores``）→ 店铺赛马评级（仅展示）
         * 利润基数（``finance.shop_profit_basis``）+ 可分配率配置 → 可分配利润
         * 归属关系（``a_class.employee_shop_assignments``）→ 归属提成比
 
@@ -1165,7 +1196,12 @@ class HRIncomeCalculationService:
             # 「可分配利润」展示值保留 2 位小数，但**计算提成用未舍入的值** ——
             # 后端算提成时中间步骤不舍入，只在最后对合计舍入。
             # 中间多舍一次，页面就会比工资单多 1 分钱。
-            allocatable_profit_exact = max(profit_basis_amount, 0.0) * alloc_rate
+            allocatable_profit_exact = float(
+                calculate_shop_allocatable_profit(
+                    profit_basis_amount=profit_basis_amount,
+                    allocatable_profit_rate=alloc_rate,
+                )
+            )
             allocatable_profit_amount = round(allocatable_profit_exact, 2)
             shop_coefficient = self._to_float(
                 performance_by_shop.get(shop_key, {}).get("performance_coefficient"),
@@ -1184,8 +1220,17 @@ class HRIncomeCalculationService:
                 score_coefficient=score_coefficient,
             )
             settlement_coefficient = settlement["settlement_coefficient"]
+            # ⚠️ 提成公式的唯一实现处是 backend/services/commission_caliber.py。
+            # 提成**零系数**：店铺赛马排名与个人分数档位都不参与提成金额。
             estimated_commission = round(
-                allocatable_profit_exact * ratio * settlement_coefficient, 2
+                float(
+                    calculate_employee_commission(
+                        profit_basis_amount=profit_basis_amount,
+                        allocatable_profit_rate=alloc_rate,
+                        commission_ratio=ratio,
+                    )
+                ),
+                2,
             )
 
             entry = by_employee.setdefault(
@@ -1253,9 +1298,15 @@ class HRIncomeCalculationService:
             )
             # 合计要「先累加未舍入值、最后舍入一次」，与后端一致。
             # 每家店都 round 一次再累加，会和工资单差 1 分钱。
-            entry["expected_commission_raw"] = (
-                self._to_float(entry.get("expected_commission_raw"), 0.0)
-                + allocatable_profit_exact * ratio * settlement_coefficient
+            # ⚠️ 提成零系数 —— 累加的也是「可分配利润 × 归属提成比」，
+            # 通过真源模块计算，避免在别处复刻公式。
+            entry["expected_commission_raw"] = self._to_float(
+                entry.get("expected_commission_raw"), 0.0
+            ) + float(
+                calculate_employee_shop_commission(
+                    allocatable_profit=allocatable_profit_exact,
+                    commission_ratio=ratio,
+                )
             )
 
         employees = sorted(by_employee.values(), key=lambda item: item["employee_code"])
@@ -1263,7 +1314,16 @@ class HRIncomeCalculationService:
             entry["expected_commission"] = round(
                 self._to_float(entry.pop("expected_commission_raw", 0.0), 0.0), 2
             )
-        return {"year_month": year_month, "employees": employees}
+        return {
+            "year_month": year_month,
+            "employees": employees,
+            # 口径说明：前端直接渲染，避免运营以为系数会影响提成。
+            "caliber_note": (
+                "预计提成 = 可分配利润 × 归属提成比（零系数）；"
+                "赛马评级与绩效分数仅用于考核展示，不参与提成金额"
+            ),
+            "coefficient_display_only": True,
+        }
 
     async def calculate_month(
         self,
@@ -1459,7 +1519,13 @@ class HRIncomeCalculationService:
             )
             profit_basis_amount = self._to_float(basis.get("profit_basis_amount"), 0.0)
             alloc_rate = self._to_float(allocatable_by_shop.get(shop_key, 0.0), 0.0)
-            alloc_profit = max(profit_basis_amount, 0.0) * alloc_rate
+            # ⚠️ 可分配利润的唯一实现处是 backend/services/commission_caliber.py。
+            alloc_profit = float(
+                calculate_shop_allocatable_profit(
+                    profit_basis_amount=profit_basis_amount,
+                    allocatable_profit_rate=alloc_rate,
+                )
+            )
 
             # Performance aggregation: assignment means full responsibility for the shop.
             perf_rec = performance_agg.setdefault(
@@ -1506,7 +1572,13 @@ class HRIncomeCalculationService:
                 comm_rec["ratio_sources"].add(ratio_source)
             sales_share = monthly_sales * ratio
             comm_rec["sales_amount"] += sales_share
-            comm_rec["commission_amount"] += alloc_profit * ratio
+            # ⚠️ 提成公式的唯一实现处是 backend/services/commission_caliber.py。
+            comm_rec["commission_amount"] += float(
+                calculate_employee_shop_commission(
+                    allocatable_profit=alloc_profit,
+                    commission_ratio=ratio,
+                )
+            )
             comm_rec["weighted_rate_num"] += achievement_rate * sales_share
             comm_rec["weighted_rate_den"] += sales_share
 
@@ -1602,7 +1674,9 @@ class HRIncomeCalculationService:
                 )
             )
 
-        # 员工结算系数（按店铺销售额加权）+ 每店系数拆解，供审计与页面复用。
+        # 员工的**纯个人**绩效分数档位系数 + 每店系数拆解，供审计与页面复用。
+        # ⚠️ 不再有「按店取 min 后加权」的结算系数 —— 提成已零系数，
+        # 绩效工资只用纯个人档位系数（ADR-2026-11-21）。
         employee_settlement_coefficient: Dict[str, float] = {}
         employee_settlement_details: Dict[str, Dict[str, Any]] = {}
 
@@ -1613,8 +1687,6 @@ class HRIncomeCalculationService:
             profile = employee_profiles.get(employee_code, {})
             employee_score_coefficient = profile.get("score_coefficient")
             commission_amount = 0.0
-            coefficient_num = 0.0
-            coefficient_den = 0.0
             shop_coefficients: list[Dict[str, Any]] = []
             for row in assignments:
                 if (row.employee_code or "").strip() != employee_code:
@@ -1627,12 +1699,10 @@ class HRIncomeCalculationService:
                 if ratio <= 0:
                     continue
                 shop_key = self._shop_key(row.platform_code, row.shop_id)
-                metric = metrics_by_shop.get(shop_key, {})
-                monthly_sales = self._to_float(metric.get("monthly_sales"), 0.0)
-                sales_share = monthly_sales * ratio
 
                 # 结算系数 = min(店铺结算系数, 个人分数档位系数)
                 # 店铺结算系数 = min(该店排名档位, 该店分数档位)，由店铺绩效模块写入。
+                # ⚠️ 仅用于**审计与展示**：提成已零系数，不再乘它。
                 shop_coefficient = self._to_float(
                     performance_by_shop.get(shop_key, {}).get(
                         "performance_coefficient"
@@ -1654,15 +1724,19 @@ class HRIncomeCalculationService:
                     allocatable_by_shop.get(shop_key, 0.0),
                     0.0,
                 )
-                allocation_amount = (
-                    max(profit_basis_amount, 0.0)
-                    * alloc_rate
-                    * ratio
-                    * settlement_coefficient
+                # ⚠️ 提成公式的唯一实现处是 backend/services/commission_caliber.py。
+                # 这里**不再乘任何系数** —— 店铺赛马排名与个人分数档位都不参与提成金额。
+                # 口径：某员工从某店分到的提成 = max(可分配利润, 0) × 归属提成比。
+                allocation_amount = float(
+                    calculate_employee_commission(
+                        profit_basis_amount=profit_basis_amount,
+                        allocatable_profit_rate=alloc_rate,
+                        commission_ratio=ratio,
+                    )
                 )
                 commission_amount += allocation_amount
-                coefficient_num += settlement_coefficient * sales_share
-                coefficient_den += sales_share
+                # 系数拆解仍然保留：它是**审计与展示**用的（谁把系数压下来了），
+                # 但**不再参与提成金额**（提成已零系数）。
                 shop_coefficients.append(
                     {
                         "shop_key": shop_key,
@@ -1695,10 +1769,11 @@ class HRIncomeCalculationService:
             # 「页面上的逐店明细加起来 == 页面上的提成总额 == 工资单实发」。
             _absorb_commission_rounding_residue(shop_coefficients, commission_amount)
 
+            # 员工级系数 = **纯个人的绩效分数档位系数**（不再是逐店加权平均）。
             employee_settlement_coefficient[employee_code] = (
-                coefficient_num / coefficient_den
-                if coefficient_den > 0
-                else calculate_settlement_coefficient(employee_score_coefficient)
+                float(employee_score_coefficient)
+                if employee_score_coefficient is not None
+                else 1.0
             )
             employee_settlement_details[employee_code] = {
                 "settlement_coefficient": round(
@@ -1807,15 +1882,13 @@ class HRIncomeCalculationService:
             if performance_score is not None and calculation_status == "complete":
                 formal_employee_codes.add(employee_code)
 
+            # 绩效工资的系数 = **纯个人的绩效分数档位系数**（不含店铺排名）。
+            # ⚠️ 语义变更（ADR-2026-11-21）：本字段原先存的是「逐店结算系数的
+            # 销售额加权平均」，含店铺赛马排名 ⇒ 与绩效工资口径不符，已废弃。
+            # 提成已零系数，不再需要「按店取 min 后加权」。
             settlement_coefficient = None
             if calculation_status == "complete" and performance_score is not None:
-                settlement_coefficient = employee_settlement_coefficient.get(
-                    employee_code
-                )
-                if settlement_coefficient is None:
-                    settlement_coefficient = calculate_settlement_coefficient(
-                        profile.get("score_coefficient")
-                    )
+                settlement_coefficient = profile.get("score_coefficient")
 
             perf = (
                 await self.db.execute(
@@ -1877,17 +1950,10 @@ class HRIncomeCalculationService:
                     result.get("calculation_status") == "complete"
                     and result.get("performance_score") is not None
                 ):
-                    controlled_settlement_coefficient = (
-                        employee_settlement_coefficient.get(employee_code)
+                    # 同样是**纯个人**的绩效分数档位系数（见上方语义变更说明）。
+                    controlled_settlement_coefficient = calculate_score_coefficient(
+                        result.get("performance_score")
                     )
-                    if controlled_settlement_coefficient is None:
-                        controlled_settlement_coefficient = (
-                            calculate_settlement_coefficient(
-                                (employee_profiles.get(employee_code) or {}).get(
-                                    "score_coefficient"
-                                )
-                            )
-                        )
                 perf = (
                     await self.db.execute(
                         select(EmployeePerformance).where(
