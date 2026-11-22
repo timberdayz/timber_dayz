@@ -23,7 +23,8 @@
     "test:performance-route-split": "node --test scripts/performanceRouteSplit.test.mjs",
     "test:performance-payroll-lock": "node --test scripts/performancePayrollLock.test.mjs",
     "test:collection-task-errors": "node --test scripts/collectionTaskErrors.test.mjs",
-    "test:shop-display": "node --test scripts/shopDisplay.test.mjs"
+    "test:shop-display": "node --test scripts/shopDisplay.test.mjs",
+    "test:product-center-field-help": "node --test scripts/productCenterFieldHelp.test.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.1.0",

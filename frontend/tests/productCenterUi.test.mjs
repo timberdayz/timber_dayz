@@ -10,6 +10,38 @@ const source = readFileSync(
 );
 const api = readFileSync(resolve(root, "src/api/productCenter.js"), "utf8");
 
+// 字段口径说明的**唯一真源**是注册表 productCenterFieldHelp.js，
+// 页面上的呈现入口是表头小问号（FieldHelpTip）。
+// ⚠️ 2026-11-22 之前，口径说明写在 ProductCenter.vue 的行模板里
+//    （每行重复一遍 ⇒ 表格被撑爆）。搬家之后，下面这些守护如果还只断言
+//    「文字在 .vue 里」，就会**误报**；但如果只改成断言「文字在注册表里」，
+//    又会**变弱** —— 注册表里的文案可能没有任何入口渲染它，运营根本看不到。
+// ⇒ 必须**两头都断言**：注册表里有该条目，且页面把它接到了小问号上。
+const fieldHelpSource = readFileSync(
+  resolve(root, "src/domains/business/views/productCenterFieldHelp.js"),
+  "utf8",
+);
+
+const assertHelpTipWired = (key) => {
+  const escaped = key.replace(/\./g, "\\.");
+  assert.match(
+    fieldHelpSource,
+    new RegExp(`'${escaped}'\\s*:`),
+    `口径注册表缺少条目：${key}`,
+  );
+  const computedMatch = source.match(
+    new RegExp(
+      `const\\s+(\\w+)\\s*=\\s*computed\\(\\(\\)\\s*=>\\s*helpSections\\(\\s*['"]${escaped}['"]`,
+    ),
+  );
+  assert.ok(computedMatch, `页面没有为 ${key} 建立口径分区`);
+  assert.match(
+    source,
+    new RegExp(`:sections="${computedMatch[1]}"`),
+    `口径分区 ${computedMatch[1]} 没有挂到小问号上`,
+  );
+};
+
 test("商品中心使用公司中文品类级联并移除成本假设入口", () => {
   assert.match(source, /一级品类/);
   assert.match(source, /二级品类/);
@@ -176,10 +208,15 @@ test("定价设置抽屉把三项费率合并成「底线成本率合计」", ()
   assert.doesNotMatch(source, /默认底线基数/);
   assert.doesNotMatch(source, /平台佣金率已含在/);
   // 三个手填项的口径说明必须在（运营要知道每个率管什么）
-  assert.match(source, /单独进分母/);
-  assert.match(source, /不含平台佣金、不含尾程/);
+  // ⚠️ 说明已收进表头小问号 ⇒ 真源是口径注册表，且必须接得上小问号，
+  //    否则运营在抽屉里根本看不到这句话。
+  assertHelpTipWired("fee.platform_fee_rate");
+  assertHelpTipWired("fee.default_creator_commission_rate");
+  assertHelpTipWired("fee.other_cost_rate");
+  assert.match(fieldHelpSource, /单独进分母/);
+  assert.match(fieldHelpSource, /不含平台佣金、不含尾程/);
   // 默认达人佣金率仍只作「SKU 未单独设置时的兜底值」⇒ 这个限定语不许丢
-  assert.match(source, /未单独设置/);
+  assert.match(fieldHelpSource, /未单独设置/);
 });
 
 test("SKU 资料页展示定价底线四列", () => {
@@ -266,9 +303,9 @@ test("达人佣金率带 % 后缀且说明只放在表头", () => {
   assert.match(commission, /rate-suffix/);
   // 「留空表示不单独设置」不该每行重复一遍
   assert.doesNotMatch(commission, /pricing-tier-hint/);
-  // 改成表头问号提示
-  assert.match(source, /pricing-header/);
-  assert.match(source, /留空表示不单独设置，按平台默认计算/);
+  // 改成表头问号提示：说明的真源是口径注册表，且必须接在表头小问号上
+  assertHelpTipWired("sku.creator_commission_rate");
+  assert.match(fieldHelpSource, /留空表示不单独设置，按平台默认计算/);
 });
 
 test("利润测算页展示最低售价并拦截低于底线的预计售价", () => {
@@ -580,17 +617,24 @@ test("SKU 列表按所选平台取底线", () => {
 
 test("SKU 资料页说清底线口径与人工覆盖的作用域", () => {
   // ① 这条底线是按哪个平台的费率算的
-  assert.match(source, /底线按 \{\{ skuPricingPlatform \|\| '默认平台' \}\} 的成本率计算/);
+  // ⚠️ 说明句已收进表头小问号 ⇒ 真源是口径注册表（{platform} 是占位符），
+  //    但「占位符按哪个平台的当前值填」这件事仍然在页面里 ⇒ 两头都要断言。
+  assertHelpTipWired("sku.min_selling_price");
+  assert.match(fieldHelpSource, /底线按 \{platform\} 的成本率计算/);
+  assert.match(source, /skuPricingPlatform\.value \|\| "默认平台"/);
   // ② 人工覆盖是 SKU × 平台的量 —— 阶段 2.1b 之后不再说「公司级、对所有平台生效」
-  assert.match(source, /人工覆盖按平台生效/);
-  assert.doesNotMatch(source, /人工覆盖是公司级的/);
+  assert.match(fieldHelpSource, /人工覆盖按平台生效/);
+  assert.doesNotMatch(fieldHelpSource, /人工覆盖是公司级的/);
 });
 
 test("利润测算页的最低售价说明按平台口径，不再说公司统一口径", () => {
   // 旧文案「公司统一口径，不随平台/仓库变化」在本阶段已经不成立 ——
   // 底线就是按平台算的，留着会直接误导运营。
   assert.doesNotMatch(source, /公司统一口径，不随平台\/仓库变化/);
-  assert.match(operatingSection, /平台成本率计算，不同平台底线不同/);
+  assert.doesNotMatch(fieldHelpSource, /公司统一口径，不随平台\/仓库变化/);
+  // ⚠️ 说明已收进表头小问号 ⇒ 真源是口径注册表，且必须接得上小问号
+  assertHelpTipWired("operating.min_selling_price");
+  assert.match(fieldHelpSource, /平台成本率计算，不同平台底线不同/);
 });
 
 // ---------------------------------------------------------------------------
@@ -1031,8 +1075,14 @@ test("事实段的顺序是采购成本 → 基准售价 → 竞品价格（用�
 test("测算表给出仓级库龄列：当前所选仓的库龄 + 其它仓的库龄", () => {
   assert.match(operatingSection, /label="库龄（仓）"/);
   assert.match(source, /const currentWarehouseRestockDays = \(row\)/);
-  assert.match(source, /const currentWarehouseLabel = \(row\)/);
   assert.match(source, /const otherWarehouseRestocks = \(row\)/);
+  // ⚠️ 「当前是哪个仓」原先靠一个单独的仓名标签显示；现在收进表头问号，
+  //    仓名由「当前选中的这个仓」这句 + 按当前筛选填进去的仓名共同承担。
+  //    ⇒ 守护要同时断言：仓名换算函数在、问号接得上、占位符按当前仓填。
+  assert.match(source, /const currentOperatingWarehouseLabel = \(\)/);
+  assertHelpTipWired("operating.warehouse_restock");
+  assert.match(source, /warehouse: currentOperatingWarehouseLabel\(\)/);
+  assert.match(fieldHelpSource, /当前选中的这个仓/);
   // 页面显示的库龄必须与底线依据的库龄同源 —— 数字对不上运营会以为系统坏了
   assert.match(source, /pricing_days_since_restock/);
   // 其它仓按库龄倒序：老的排前面，先看到最该处理的
@@ -1371,8 +1421,14 @@ test("「物流」不再用作列标签：四段命名统一到头程 / 仓储 /
 test("SPU 两率标注为行业基准件损率，并说明按件折进成本", () => {
   // 口径变了必须写在界面上：这两个率不再是「按收入比例扣」，
   // 而是行业基准的**件损率**，按件折进成本（分子 × (1 + 退货率 + 货损率)）。
-  assert.match(source, /行业基准件损率/);
-  assert.match(source, /按件折进成本/);
-  assert.match(source, /\(1 \+ 退货率 \+ 货损率\)/);
-  assert.match(source, /人工维护，当前无实测校准/);
+  // ⚠️ 说明已收进表头小问号 ⇒ 真源是口径注册表，且必须接得上小问号，
+  //    且「人工维护」这个状态必须在**表头可见**（不能只藏在悬浮里）。
+  assertHelpTipWired("spu.logistics_damage_rate");
+  assertHelpTipWired("spu.return_loss_rate");
+  assert.match(fieldHelpSource, /行业基准件损率/);
+  assert.match(fieldHelpSource, /按件折进成本/);
+  assert.match(fieldHelpSource, /\(1 \+ 退货率 \+ 货损率\)/);
+  assert.match(fieldHelpSource, /人工维护，当前无实测校准/);
+  // 表头必须有可见的「人工维护」状态标签
+  assert.match(source, /人工维护<\/el-tag/);
 });

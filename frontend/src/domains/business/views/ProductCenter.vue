@@ -43,21 +43,26 @@
           class="flat-table"
           :row-class-name="spuRowClass"
           @selection-change="onSpuSelectionChange"
-          ><el-table-column type="selection" width="48" :selectable="(row) => !row.__new && row.active !== false"
-          /><el-table-column label="SPU" min-width="150"
+          ><el-table-column type="selection" width="44" :selectable="(row) => !row.__new && row.active !== false"
+          /><el-table-column label="SPU" width="150"
             ><template #default="{ row }"
               ><el-input
                 v-if="row.__new"
                 v-model="row.spu"
                 size="small"
                 placeholder="HOME-0001" /><span v-else class="readonly-cell">{{ row.spu || "-" }}</span></template></el-table-column
-          ><el-table-column label="商品名称" min-width="190"
+          ><!--
+            商品名称是这张表里**唯一**保留 min-width 的列 ⇒ el-table 的 fit 机制
+            会把剩余宽度全部给它，而不会平摊给 SPU 编码列（之前两列都是 min-width，
+            结果 SPU 编码列被撑到 400px，一行只有一个短编码 ⇒ 大片空白）。
+          -->
+          <el-table-column label="商品名称" min-width="240"
             ><template #default="{ row }"
               ><el-input
                 v-model="row.spu_name"
                 size="small"
                 @change="markDirty('spu', row)" /></template></el-table-column
-          ><el-table-column label="一级品类" width="150"
+          ><el-table-column label="一级品类" width="130"
             ><template #default="{ row }"
               ><el-select
                 v-model="row.category_l1_code"
@@ -72,7 +77,7 @@
                   :value="
                     categoryCode(cat)
                   " /></el-select></template></el-table-column
-          ><el-table-column label="二级品类" width="170"
+          ><el-table-column label="二级品类" width="150"
             ><template #default="{ row }"
               ><el-select
                 v-model="row.category_l2_code"
@@ -87,7 +92,22 @@
                   :value="
                     categoryCode(cat)
                   " /></el-select></template></el-table-column
-          ><el-table-column label="运输货损率" width="180"
+          ><!--
+            批次 9（口径归一）：SPU 两率 = **行业基准的件损率**
+            （"这个款在行业主流数据下，发 100 件里坏/退几件"），
+            现在**按件折进成本**（分子 × (1 + 退货率 + 货损率)），不再按收入比例扣。
+            ⚠️ 人工维护 ⇒ 界面上必须说清「这是基准值，不是实测值」。
+            ⇒ 口径说明是**列级**的，只在表头说一次（小问号），不再每行重复三行字；
+               「人工维护」用表头标签显式标出，状态不丢。
+          -->
+          <el-table-column label="运输货损率" width="165"
+            ><template #header
+              ><span class="pc-col-head"
+                ><span class="pc-col-head__label">运输货损率</span
+                ><el-tag size="small" type="warning" effect="plain" class="pc-col-head__tag"
+                  >人工维护</el-tag
+                ><FieldHelpTip title="运输货损率" status="manual" :sections="spuDamageRateHelp" /></span
+            ></template
             ><template #default="{ row }"
               ><div class="rate-cell"
                 ><el-input-number
@@ -97,19 +117,15 @@
                   :step="0.1"
                   @update:model-value="row.logistics_damage_rate = fromPercent($event); markDirty('spu', row)"
                   :controls="false"
-                  size="small" /><span class="rate-suffix">%</span></div>
-              <!--
-                批次 9（口径归一）：SPU 两率 = **行业基准的件损率**
-                （"这个款在行业主流数据下，发 100 件里坏/退几件"），
-                现在**按件折进成本**（分子 × (1 + 退货率 + 货损率)），不再按收入比例扣。
-                ⚠️ 人工维护 ⇒ 界面上必须说清「这是基准值，不是实测值」。
-              -->
-              <div class="pricing-tier-hint">
-                行业基准件损率：这个款在行业主流数据下，发 100 件里坏几件<br />
-                现在按件折进成本（每件按件成本 × (1 + 退货率 + 货损率)），不是按收入比例扣<br />
-                人工维护，当前无实测校准
-              </div></template></el-table-column
-          ><el-table-column label="退货损失率" width="180"
+                  size="small" /><span class="rate-suffix">%</span></div></template></el-table-column
+          ><el-table-column label="退货损失率" width="165"
+            ><template #header
+              ><span class="pc-col-head"
+                ><span class="pc-col-head__label">退货损失率</span
+                ><el-tag size="small" type="warning" effect="plain" class="pc-col-head__tag"
+                  >人工维护</el-tag
+                ><FieldHelpTip title="退货损失率" status="manual" :sections="spuReturnRateHelp" /></span
+            ></template
             ><template #default="{ row }"
               ><div class="rate-cell"
                 ><el-input-number
@@ -119,13 +135,8 @@
                   :step="0.1"
                   @update:model-value="row.return_loss_rate = fromPercent($event); markDirty('spu', row)"
                   :controls="false"
-                  size="small" /><span class="rate-suffix">%</span></div>
-              <div class="pricing-tier-hint">
-                行业基准件损率：这个款在行业主流数据下，发 100 件里退几件<br />
-                现在按件折进成本（每件按件成本 × (1 + 退货率 + 货损率)），不是按收入比例扣<br />
-                人工维护，当前无实测校准
-              </div></template></el-table-column
-          ><el-table-column label="状态" width="110"
+                  size="small" /><span class="rate-suffix">%</span></div></template></el-table-column
+          ><el-table-column label="状态" width="100"
             ><template #default="{ row }"
               ><el-select v-model="row.biz_status" size="small" @change="markDirty('spu', row)"
                 ><el-option label="候选" value="candidate" /><el-option
@@ -135,7 +146,7 @@
                   value="promoted" /><el-option
                   label="淘汰"
                   value="retired" /></el-select></template></el-table-column
-          ><el-table-column label="负责人" width="110"
+          ><el-table-column label="负责人" width="100"
             ><template #default="{ row }"
               ><el-input-number
                 v-model="row.owner_user_id"
@@ -143,7 +154,7 @@
                 :controls="false"
                 size="small"
                 @change="markDirty('spu', row)" /></template></el-table-column
-          ><el-table-column label="操作" width="220" fixed="right"
+          ><el-table-column label="操作" width="180" fixed="right"
             ><template #default="{ row }"
               ><el-button link type="primary" @click="showBindings(row)"
                 >SKU 归属</el-button
@@ -246,60 +257,114 @@
           class="flat-table sku-table"
           :empty-text="skuEmptyText"
           :header-cell-style="skuHeaderCellStyle"
-          ><el-table-column label="SPU" width="190"
+          ><el-table-column label="SPU" width="170"
+            ><template #header
+              ><span class="pc-col-head"
+                ><span class="pc-col-head__label">所属 SPU</span
+                ><FieldHelpTip
+                  title="所属 SPU（归属关系）"
+                  status="stable"
+                  :sections="skuSpuBindingHelp" /></span
+            ></template
             ><template #default="{ row }"
               ><!--
-                存量行的 SPU 单元格**可编辑** —— 归属关系必须双向可达：
-                以前只能从「SPU 管理」tab 的「SKU 归属」抽屉单向改，
-                运营要改一个货的归属，得先知道它挂在哪个款下、再跨 tab 找过去。
+                存量行的 SPU 单元格**默认只读** —— 归属是低频但高影响的操作：
+                每行都摆一个可编辑下拉框，「这一格是货号档案」和「这一格能改」
+                看起来就一模一样，运营批量录入时特别容易误触、误改归属。
+                现在默认显示归属编码（只读样式），点「换款」才展开编辑。
                 ⚠️ 候选集用**可绑定口径**（assignable）：赋值是外键，不能造出挂不上的款；
                 ⚠️ 存量行**不给 clearable**：后端不支持解绑（清空只会静默无效）。
               -->
               <div class="spu-cell">
-                <el-select
-                  v-model="row.spu"
-                  filterable
-                  :clearable="row.__new"
-                  remote
-                  remote-show-suffix
-                  :remote-method="spuAssignable.remoteMethod"
-                  :loading="spuAssignable.loading"
-                  :no-data-text="SPU_OPTION_EMPTY_TEXT.assignable"
-                  size="small"
-                  :placeholder="row.__new ? '选择 SPU' : '换款'"
-                  @change="onSkuSpuChange(row)"
-                  ><el-option
-                    v-for="item in spuAssignableOptions"
-                    :key="item.value"
-                    :label="item.label"
-                    :value="item.value"
-                    ><span class="spu-option-code">{{ item.value }}</span
-                    ><span class="spu-option-name">{{ item.name }}</span></el-option
-                  ></el-select
-                >
+                <div class="spu-cell-head">
+                  <!-- 只读态：存量行且未展开换款 -->
+                  <span
+                    v-if="!row.__new && !isSpuSwitchEditing(row)"
+                    class="readonly-cell"
+                    :title="row.spu_name ? `${row.spu} ${row.spu_name}` : row.spu"
+                    >{{ row.spu || "-" }}</span
+                  >
+                  <!-- 编辑态：新增行（SPU 必填）或存量行展开换款 -->
+                  <el-select
+                    v-else
+                    v-model="row.spu"
+                    class="spu-switch-select"
+                    filterable
+                    :clearable="row.__new"
+                    remote
+                    remote-show-suffix
+                    :remote-method="spuAssignable.remoteMethod"
+                    :loading="spuAssignable.loading"
+                    :no-data-text="SPU_OPTION_EMPTY_TEXT.assignable"
+                    size="small"
+                    placeholder="选择 SPU"
+                    @change="onSkuSpuChange(row)"
+                    ><el-option
+                      v-for="item in spuAssignableOptions"
+                      :key="item.value"
+                      :label="item.label"
+                      :value="item.value"
+                      ><span class="spu-option-code">{{ item.value }}</span
+                      ><span class="spu-option-name">{{ item.name }}</span></el-option
+                    ></el-select
+                  >
+                  <el-button
+                    v-if="!row.__new && !isSpuSwitchEditing(row)"
+                    link
+                    type="primary"
+                    size="small"
+                    @click="startSpuEdit(row)"
+                    >换款</el-button
+                  ><el-button
+                    v-else-if="!row.__new"
+                    link
+                    type="primary"
+                    size="small"
+                    @click="cancelSpuEdit(row)"
+                    >{{ spuSwitchPending(row) ? "取消" : "收起" }}</el-button
+                  >
+                </div>
                 <!--
                   归属生效日：这个货是**从哪天起**挂到这个款上的。
                   SPU 归属是一段有时效的关联，不是一个字段 ——
                   只显示编码，运营就看不到「什么时候挂上来的」「换过几次款」。
+                  ⚠️ 待保存时**不能**继续显示旧生效日：那是上一段归属的日期，
+                     会让人以为新归属已经生效了 ⇒ 换成「保存当日生效」的提示。
                 -->
-                <small v-if="!row.__new && row.spu_effective_from" class="spu-binding-since"
-                  >自 {{ row.spu_effective_from }}</small
+                <div
+                  v-if="
+                    spuSwitchPending(row) ||
+                    (!row.__new && row.spu_effective_from)
+                  "
+                  class="spu-cell-meta"
                 >
+                  <el-tag
+                    v-if="spuSwitchPending(row)"
+                    size="small"
+                    type="warning"
+                    effect="plain"
+                    >待保存</el-tag
+                  ><small v-if="spuSwitchPending(row)" class="spu-binding-pending"
+                    >保存当日生效</small
+                  ><small v-else class="spu-binding-since"
+                    >自 {{ row.spu_effective_from }}</small
+                  >
+                </div>
               </div></template></el-table-column
-          ><el-table-column label="SKU" width="160"
+          ><el-table-column label="SKU" width="150"
             ><template #default="{ row }"
               ><el-input
                 v-if="row.__new"
                 v-model="row.sku_key"
                 size="small"
                 placeholder="SKU-0001" /><span v-else class="readonly-cell">{{ row.sku_key || "-" }}</span></template></el-table-column
-          ><el-table-column label="名称" min-width="180"
+          ><el-table-column label="名称" min-width="220"
             ><template #default="{ row }"
               ><el-input
                 v-model="row.sku_name"
                 size="small"
                 @change="markDirty('sku', row)" /></template></el-table-column
-          ><el-table-column label="规格" width="140"
+          ><el-table-column label="规格" width="120"
             ><template #default="{ row }"
               ><el-input
                 v-model="row.specification"
@@ -319,7 +384,7 @@
                   :label="tier.label"
                   :value="tier.tier_code" /></el-select
               ></template></el-table-column
-          ><el-table-column label="单件体积 m³" width="125"
+          ><el-table-column label="单件体积 m³" width="110"
             ><template #default="{ row }"
               ><el-input-number
                 v-model="row.unit_volume_cbm"
@@ -329,7 +394,7 @@
                 :controls="false"
                 size="small"
                 @change="markDirty('sku', row)" /></template></el-table-column
-          ><el-table-column label="箱规（件/箱）" width="110"
+          ><el-table-column label="箱规（件/箱）" width="100"
             ><template #default="{ row }"
               ><el-input-number
                 v-model="row.units_per_carton"
@@ -337,16 +402,26 @@
                 :controls="false"
                 size="small"
                 @change="markDirty('sku', row)" /></template></el-table-column
-          ><el-table-column label="采购成本" width="115"><template #default="{ row }"><el-input-number v-model="row.default_purchase_cost" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
-          ><el-table-column label="采购成本来源" width="120"><template #default="{ row }">{{ row.purchase_cost_source || "待补充" }}</template></el-table-column
-          ><el-table-column label="采购成本确认时间" width="145"><template #default="{ row }">{{ row.purchase_cost_confirmed_at || "-" }}</template></el-table-column
-          ><el-table-column label="基准售价" width="260"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :precision="2" :controls="false" size="small" @input="scheduleSellingPricePreview(row)" @change="markDirty('sku', row); scheduleSellingPricePreview(row)" /><div v-if="sellingPricePreviewState(row)" class="selling-price-preview"><div class="selling-price-preview-title">最低售价会怎么变（保存后生效）</div><div v-for="item in sellingPricePreviewState(row).platforms" :key="item.platform_code" class="selling-price-preview-line"><template v-if="item.locked"><el-tag size="small" type="warning">{{ item.lockedText }}</el-tag></template><template v-else><span class="selling-price-preview-platform">{{ item.platformName }}</span><span class="selling-price-preview-change">{{ item.changeText }}<template v-if="item.pctText">（{{ item.pctText }}）</template></span><el-tag v-if="item.sourceLabel" size="small" :type="item.sourceTagType">{{ item.sourceLabel }}</el-tag><el-tag v-if="item.warn" size="small" type="danger">抬价超 20%</el-tag></template></div><div v-for="warning in sellingPricePreviewState(row).warnings" :key="warning" class="selling-price-preview-warning">{{ warning }}</div><div v-if="sellingPricePreviewState(row).loading" class="selling-price-preview-hint">正在计算…</div><div v-if="sellingPricePreviewState(row).error" class="selling-price-preview-hint">{{ sellingPricePreviewState(row).error }}</div></div></template></el-table-column
-          ><el-table-column label="确认日期" width="130"><template #default="{ row }"><span class="readonly-cell" :class="{ 'stale-date': row.selling_price_stale }">{{ formatConfirmedAt(row.selling_price_confirmed_at) }}</span></template></el-table-column
-          ><el-table-column label="售价账龄(天)" width="115"><template #default="{ row }"><span>{{ row.selling_price_age_days ?? "-" }}</span><div v-if="row.selling_price_stale" class="pricing-tier-hint stale-hint">基准售价已 {{ row.selling_price_age_days }} 天未确认，纪律线可能失真</div><div v-else-if="row.reference_selling_price != null && row.selling_price_age_days == null" class="pricing-tier-hint">基准售价从未确认</div></template></el-table-column
-          ><el-table-column label="是否过期" width="100"><template #default="{ row }"><el-tag size="small" :type="row.selling_price_stale ? 'danger' : 'success'">{{ row.selling_price_stale ? "已过期" : "正常" }}</el-tag></template></el-table-column
-          ><el-table-column label="当前让利上限" width="110"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column
-          ><el-table-column label="清货让利上限" width="110"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column
-          ><el-table-column label="最低售价" width="340"
+          ><el-table-column label="采购成本" width="105"><template #default="{ row }"><el-input-number v-model="row.default_purchase_cost" :min="0" :precision="2" :controls="false" size="small" @change="markDirty('sku', row)" /></template></el-table-column
+          ><el-table-column label="采购成本来源" width="100"><template #default="{ row }">{{ row.purchase_cost_source || "待补充" }}</template></el-table-column
+          ><el-table-column label="采购成本确认时间" width="115"><template #default="{ row }">{{ formatConfirmedAt(row.purchase_cost_confirmed_at) }}</template></el-table-column
+          ><el-table-column label="基准售价" width="180"><template #default="{ row }"><el-input-number v-model="row.reference_selling_price" :min="0" :precision="2" :controls="false" size="small" @input="scheduleSellingPricePreview(row)" @change="markDirty('sku', row); scheduleSellingPricePreview(row)" /><div v-if="sellingPricePreviewState(row)" class="selling-price-preview"><div class="selling-price-preview-title">最低售价会怎么变（保存后生效）</div><div v-for="item in sellingPricePreviewState(row).platforms" :key="item.platform_code" class="selling-price-preview-line"><template v-if="item.locked"><el-tag size="small" type="warning">{{ item.lockedText }}</el-tag></template><template v-else><span class="selling-price-preview-platform">{{ item.platformName }}</span><span class="selling-price-preview-change">{{ item.changeText }}<template v-if="item.pctText">（{{ item.pctText }}）</template></span><el-tag v-if="item.sourceLabel" size="small" :type="item.sourceTagType">{{ item.sourceLabel }}</el-tag><el-tag v-if="item.warn" size="small" type="danger">抬价超 20%</el-tag></template></div><div v-for="warning in sellingPricePreviewState(row).warnings" :key="warning" class="selling-price-preview-warning">{{ warning }}</div><div v-if="sellingPricePreviewState(row).loading" class="selling-price-preview-hint">正在计算…</div><div v-if="sellingPricePreviewState(row).error" class="selling-price-preview-hint">{{ sellingPricePreviewState(row).error }}</div></div></template></el-table-column
+          ><el-table-column label="确认日期" width="110"><template #default="{ row }"><span class="readonly-cell" :class="{ 'stale-date': row.selling_price_stale }">{{ formatConfirmedAt(row.selling_price_confirmed_at) }}</span></template></el-table-column
+          ><el-table-column label="售价账龄(天)" width="100"><template #default="{ row }"><span>{{ row.selling_price_age_days ?? "-" }}</span><div v-if="row.selling_price_stale" class="pricing-tier-hint stale-hint">基准售价已 {{ row.selling_price_age_days }} 天未确认，纪律线可能失真</div><div v-else-if="row.reference_selling_price != null && row.selling_price_age_days == null" class="pricing-tier-hint">基准售价从未确认</div></template></el-table-column
+          ><el-table-column label="是否过期" width="90"><template #default="{ row }"><el-tag size="small" :type="row.selling_price_stale ? 'danger' : 'success'">{{ row.selling_price_stale ? "已过期" : "正常" }}</el-tag></template></el-table-column
+          ><el-table-column label="当前让利上限" width="95"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column
+          ><el-table-column label="清货让利上限" width="95"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column
+          ><!--
+            最低售价：口径说明（底线按哪个平台算、人工覆盖按平台生效）是**列级**的，
+            只在表头说一次（小问号）；行内只留**行相关**的事实与告警
+            （库龄档位、兜底标记、以及「这条底线还没算全」）。
+          -->
+          <el-table-column label="最低售价" width="320"
+            ><template #header
+              ><span class="pc-col-head"
+                ><span class="pc-col-head__label">最低售价</span
+                ><FieldHelpTip title="最低售价" status="stable" :sections="skuMinPriceHelp" /></span
+            ></template
             ><template #default="{ row }"
               ><div class="pricing-cell">
                 <!-- 每个可定价平台一行：底线是 SKU × 平台的量，TikTok 与 Shopee 的平台成本率不同
@@ -368,8 +443,30 @@
                       :title="PRICING_SOURCE_TOOLTIPS[item.min_selling_price_source]"
                       >{{ pricingSourceLabel(item.min_selling_price_source) }}</el-tag
                     >
+                    <!--
+                      人工覆盖的编辑区**默认收起**：两个平台各摊两行 ⇒ 单行高度被顶到 ~190px，
+                      左边十几列短列全被撑成大片空白。
+                      常态只留「平台名 + 生效金额 + 来源」，点「调整」才展开输入框。
+                    -->
+                    <el-button
+                      v-if="!isOverrideEditing(row, item)"
+                      size="small"
+                      link
+                      type="primary"
+                      :disabled="!row.sku_id"
+                      @click="toggleOverrideEditing(row, item)"
+                      >调整</el-button
+                    >
+                    <el-button
+                      v-else
+                      size="small"
+                      link
+                      type="info"
+                      @click="toggleOverrideEditing(row, item)"
+                      >收起</el-button
+                    >
                   </div>
-                  <div class="pricing-override-row">
+                  <div v-if="isOverrideEditing(row, item)" class="pricing-override-row">
                     <el-input-number
                       :model-value="platformOverrideDraft(row, item)"
                       :min="0.01"
@@ -394,7 +491,7 @@
                       type="warning"
                       :disabled="!row.sku_id"
                       @click="resetPlatformOverride(row, item)"
-                      >重置为自动值</el-button
+                      >重置</el-button
                     >
                   </div>
                 </div>
@@ -403,20 +500,19 @@
                   class="pricing-tier-hint"
                 >暂无可定价平台，无法计算底线</div>
                 <div class="pricing-tier-hint">{{ row.pricing_tier_label || "-" }}<template v-if="row.pricing_days_since_restock != null">（库龄 {{ row.pricing_days_since_restock }} 天）</template><el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag></div>
-                <div class="pricing-tier-hint">底线按 {{ skuPricingPlatform || '默认平台' }} 的成本率计算</div>
-                <div class="pricing-tier-hint">人工覆盖按平台生效，各平台底线互相独立</div>
+                <!-- 行内只留**行相关**的告警：这条底线还差哪些成本没算全 -->
                 <div v-if="fulfillmentNotCountedHint(row)" class="pricing-tier-hint">{{ fulfillmentNotCountedHint(row) }}</div>
               </div></template
             ></el-table-column
-          ><el-table-column label="达人佣金率" width="145"><template #header><el-tooltip content="留空表示不单独设置，按平台默认计算" placement="top"><span class="pricing-header">达人佣金率<el-icon class="pricing-header-help"><QuestionFilled /></el-icon></span></el-tooltip></template><template #default="{ row }"><div class="rate-cell"><el-input-number :model-value="toPercent(row.creator_commission_rate)" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" :placeholder="row.creator_commission_rate_fallback != null ? percent(row.creator_commission_rate_fallback) : '按平台默认'" @update:model-value="row.creator_commission_rate = fromPercent($event, null); markDirty('sku', row)" /><span class="rate-suffix">%</span></div></template></el-table-column
-          ><el-table-column label="基准售价来源" width="140"><template #default="{ row }"><el-select v-model="row.selling_price_source" size="small" placeholder="选择来源" @change="markDirty('sku', row)"><el-option v-for="option in SELLING_PRICE_SOURCE_OPTIONS" :key="option.value" :label="option.label" :value="option.value" /></el-select></template></el-table-column
-          ><el-table-column label="周转类型" width="120"><template #default="{ row }"><el-select v-model="row.turnover_class" size="small" placeholder="选择" @change="markDirty('sku', row)"><el-option label="快销商品（30天）" value="fast" /><el-option label="普通商品（60天）" value="normal" /><el-option label="慢销商品（90天）" value="slow" /></el-select></template></el-table-column
-          ><el-table-column label="参考仓储天数" width="120"><template #default="{ row }">{{ referenceStorageDays(row.turnover_class) || "待设置" }}</template></el-table-column
+          ><el-table-column label="达人佣金率" width="130"><template #header><span class="pc-col-head"><span class="pc-col-head__label">达人佣金率</span><FieldHelpTip title="达人佣金率" status="stable" :sections="skuCreatorCommissionHelp" /></span></template><template #default="{ row }"><div class="rate-cell"><el-input-number :model-value="toPercent(row.creator_commission_rate)" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" size="small" :placeholder="row.creator_commission_rate_fallback != null ? percent(row.creator_commission_rate_fallback) : '按平台默认'" @update:model-value="row.creator_commission_rate = fromPercent($event, null); markDirty('sku', row)" /><span class="rate-suffix">%</span></div></template></el-table-column
+          ><el-table-column label="基准售价来源" width="120"><template #default="{ row }"><el-select v-model="row.selling_price_source" size="small" placeholder="选择来源" @change="markDirty('sku', row)"><el-option v-for="option in SELLING_PRICE_SOURCE_OPTIONS" :key="option.value" :label="option.label" :value="option.value" /></el-select></template></el-table-column
+          ><el-table-column label="周转类型" width="110"><template #default="{ row }"><el-select v-model="row.turnover_class" size="small" placeholder="选择" @change="markDirty('sku', row)"><el-option label="快销商品（30天）" value="fast" /><el-option label="普通商品（60天）" value="normal" /><el-option label="慢销商品（90天）" value="slow" /></el-select></template></el-table-column
+          ><el-table-column label="参考仓储天数" width="100"><template #default="{ row }">{{ referenceStorageDays(row.turnover_class) || "待设置" }}</template></el-table-column
           ><el-table-column
             label="来源文件"
             prop="source_file_id"
             width="100"
-          /><el-table-column label="资料完整度" width="110"
+          /><el-table-column label="资料完整度" width="100"
             ><template #default="{ row }"
               ><el-tag
                 :type="
@@ -426,7 +522,7 @@
                 >{{ row.data_completeness || "待补充" }}</el-tag
               ></template
             ></el-table-column
-          ><el-table-column label="操作" width="160" fixed="right"
+          ><el-table-column label="操作" width="120" fixed="right"
             ><template #default="{ row }"
               ><el-button
                 v-if="row.status !== 'inactive' && !row.__new"
@@ -519,29 +615,38 @@
             左侧固定三列（阶段 6）：标识与事实。
             运营横向滚动看后面的成本与利润时，「这是哪个 SKU」必须一直在眼前。
           -->
-          <el-table-column prop="spu" label="SPU" width="160" fixed="left" />
-          <el-table-column prop="sku_key" label="ERP SKU" width="155" fixed="left" />
-          <el-table-column prop="sku_name" label="商品名称" min-width="200" show-overflow-tooltip fixed="left" />
+          <el-table-column prop="spu" label="SPU" width="130" fixed="left" />
+          <el-table-column prop="sku_key" label="ERP SKU" width="130" fixed="left" />
+          <el-table-column prop="sku_name" label="商品名称" min-width="180" show-overflow-tooltip fixed="left" />
           <!-- 段一 · 标识与事实 -->
-          <el-table-column label="采购成本" width="110" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }">{{
+          <el-table-column label="采购成本" width="100" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }">{{
             money(row.purchase_cost)
           }}</template></el-table-column
           >
-          <el-table-column label="基准售价" width="105" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }">{{ money(row.reference_selling_price) }}</template></el-table-column>
-          <el-table-column label="竞品价格" width="110" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }"><el-input-number v-model="row.competitor_price" :min="0" :controls="false" size="small" /></template></el-table-column>
+          <el-table-column label="基准售价" width="95" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }">{{ money(row.reference_selling_price) }}</template></el-table-column>
+          <el-table-column label="竞品价格" width="100" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }"><el-input-number v-model="row.competitor_price" :min="0" :controls="false" size="small" /></template></el-table-column>
           <!--
             当前仓库存（阶段 7）：**这个仓现在还剩多少货**。
             ⚠️ 与「库龄（仓）」是两件事：库龄是"压了多久"（只算还有货的仓），
             这里是"还有多少货"（**零也要列出来**）—— 零 = 这个仓清过这货，
             是一条事实。所以显式标「已清仓」，不让运营把它误读成缺数据。
           -->
-          <el-table-column label="当前仓库存" width="120" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }"><el-tag v-if="row.current_warehouse_stock_status === 'cleared'" size="small" type="info">已清仓</el-tag><span v-else :class="{ muted: row.current_warehouse_stock_status !== 'in_stock' }">{{ currentWarehouseStockLabel(row) }}</span></template></el-table-column>
+          <el-table-column label="当前仓库存" width="100" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }"><el-tag v-if="row.current_warehouse_stock_status === 'cleared'" size="small" type="info">已清仓</el-tag><span v-else :class="{ muted: row.current_warehouse_stock_status !== 'in_stock' }">{{ currentWarehouseStockLabel(row) }}</span></template></el-table-column>
           <!--
             库龄（仓）：阶段 6 —— 库龄不再是「这个 SKU 最老的那一仓」，
             而是**当前选中的这个仓自己**的库龄；下面再列其它仓的库龄，
             运营一眼能看出「我这仓新鲜、别的仓压着」。
+            ⚠️ 「（当前仓名）」是**列级**信息（跟着筛选条件走）⇒ 收进表头问号，
+               行内只留**行相关**的其它仓库龄。
           -->
-          <el-table-column label="库龄（仓）" width="230" class-name="seg-fact" label-class-name="seg-fact"><template #default="{ row }"><div><span class="readonly-cell">{{ currentWarehouseRestockDays(row) ?? "-" }}</span> 天<span class="pricing-tier-hint">（{{ currentWarehouseLabel(row) }}）</span></div><div v-for="item in otherWarehouseRestocks(row)" :key="item.warehouse_code" class="pricing-tier-hint">{{ item.warehouse_name }}：{{ item.days_since_restock ?? "-" }} 天</div></template></el-table-column>
+          <el-table-column label="库龄（仓）" width="180" class-name="seg-fact" label-class-name="seg-fact"
+            ><template #header
+              ><span class="pc-col-head"
+                ><span class="pc-col-head__label">库龄（仓）</span
+                ><FieldHelpTip title="库龄（仓）" status="stable" :sections="operatingWarehouseAgeHelp" /></span
+            ></template
+            ><template #default="{ row }"><div><span class="readonly-cell">{{ currentWarehouseRestockDays(row) ?? "-" }}</span> 天</div><div v-for="item in otherWarehouseRestocks(row)" :key="item.warehouse_code" class="pricing-tier-hint">{{ item.warehouse_name }}：{{ item.days_since_restock ?? "-" }} 天</div></template></el-table-column
+          >
           <!-- 段二 · 决策输入 -->
           <!--
             包邮开关（批次 6，2026-11-17）：跨境电商**不是默认包邮**，而是**选择性包邮**
@@ -549,18 +654,25 @@
             ⚠️ 粒度 = SKU × 平台（与底线、人工覆盖同一粒度）：包邮是渠道策略，不是仓库属性。
             开关一变，尾程立刻改口径：开 ⇒ 尾程进成本底线、利润扣掉；关 ⇒ 买家付尾程运费，
             商家不承担 ⇒ 尾程不进底线、利润按 0 计（**不是**算不出来）。
+            ⇒ 口径说明是**列级**的 ⇒ 收进表头问号；行内不再重复写字，
+               当前状态挂在开关的 tooltip 上（悬浮开关就能看到，不用占行高）。
           -->
-          <el-table-column label="包邮" width="130" class-name="seg-input" label-class-name="seg-input"
+          <el-table-column label="包邮" width="90" class-name="seg-input" label-class-name="seg-input"
+            ><template #header
+              ><span class="pc-col-head"
+                ><span class="pc-col-head__label">包邮</span
+                ><FieldHelpTip title="包邮" status="stable" :sections="operatingFreeShippingHelp" /></span
+            ></template
             ><template #default="{ row }"
-              ><el-switch
-                v-model="row.free_shipping"
-                :loading="row.__free_shipping_saving"
-                @change="onFreeShippingChange(row)" />
-              <div class="pricing-tier-hint">
-                {{ row.free_shipping ? "尾程由我们承担" : "买家付尾程运费，尾程不计入底线" }}
-              </div></template
+              ><el-tooltip placement="top" :content="freeShippingStateHint(row)"
+                ><span class="free-shipping-switch"
+                  ><el-switch
+                    v-model="row.free_shipping"
+                    :loading="row.__free_shipping_saving"
+                    @change="onFreeShippingChange(row)" /></span
+              ></el-tooltip></template
           ></el-table-column>
-          <el-table-column label="测算售价" width="110" class-name="seg-input" label-class-name="seg-input"
+          <el-table-column label="测算售价" width="100" class-name="seg-input" label-class-name="seg-input"
             ><template #default="{ row }"
               ><el-input-number
                 v-model="row.expected_selling_price"
@@ -574,7 +686,7 @@
               </div></template
           ></el-table-column
           >
-          <el-table-column label="目标ROI" width="135" class-name="seg-input" label-class-name="seg-input"
+          <el-table-column label="目标ROI" width="120" class-name="seg-input" label-class-name="seg-input"
             ><template #default="{ row }"
               ><div class="rate-cell"
                 ><el-input-number
@@ -591,12 +703,10 @@
               <el-tag v-if="targetRoiAboveCeiling(row)" size="small" type="warning"
                 >超平台上限</el-tag
               >
-              <el-tooltip placement="top" :content="targetRoiTooltip(row)">
-                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
-              </el-tooltip></template
+              <FieldHelpTip title="目标 ROI" :content="targetRoiTooltip(row)" /></template
           ></el-table-column
           >
-          <el-table-column label="平台报告ROI" width="175" class-name="seg-input" label-class-name="seg-input"
+          <el-table-column label="平台报告ROI" width="150" class-name="seg-input" label-class-name="seg-input"
             ><template #default="{ row }"
               ><div class="rate-cell"
                 ><el-input-number
@@ -612,48 +722,51 @@
               <el-tag v-if="attributionWarning(row)" size="small" type="warning">{{
                 attributionWarning(row)
               }}</el-tag>
-              <el-tooltip placement="top" :content="roiVerdictTooltip(row)">
-                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
-              </el-tooltip></template
+              <FieldHelpTip title="平台报告 ROI" :content="roiVerdictTooltip(row)" /></template
           ></el-table-column
           >
           <!-- 段三 · 定价结果 -->
-          <el-table-column label="当前让利上限" width="100" class-name="seg-result" label-class-name="seg-result"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column>
-          <el-table-column label="清货让利上限" width="100" class-name="seg-result" label-class-name="seg-result"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column>
-          <el-table-column label="最低售价" width="120" class-name="seg-result" label-class-name="seg-result"
+          <el-table-column label="当前让利上限" width="90" class-name="seg-result" label-class-name="seg-result"><template #default="{ row }"><el-tag size="small" type="info">{{ percent(row.current_discount_rate) }}</el-tag></template></el-table-column>
+          <el-table-column label="清货让利上限" width="90" class-name="seg-result" label-class-name="seg-result"><template #default="{ row }"><el-tag size="small" type="warning">{{ percent(row.clearance_max_discount_rate) }}</el-tag></template></el-table-column>
+          <!--
+            最低售价：口径说明（按哪个平台成本率算）是**列级**的 ⇒ 收进表头问号；
+            行内只留**行相关**的库龄档位与兜底标记。
+          -->
+          <el-table-column label="最低售价" width="110" class-name="seg-result" label-class-name="seg-result"
+            ><template #header
+              ><span class="pc-col-head"
+                ><span class="pc-col-head__label">最低售价</span
+                ><FieldHelpTip title="最低售价" status="stable" :sections="operatingMinPriceHelp" /></span
+            ></template
             ><template #default="{ row }"
               ><span class="readonly-cell">{{ money(row.min_selling_price) }}</span>
               <div class="pricing-tier-hint">
                 {{ row.pricing_tier_label || "-" }}
                 <el-tag v-if="row.pricing_tier_source === 'fallback_no_restock_days'" size="small" type="info">兜底</el-tag>
-              </div>
-              <div class="pricing-tier-hint">按 {{ row.platform_code }} 平台成本率计算，不同平台底线不同</div></template
+              </div></template
           ></el-table-column>
           <el-table-column label="广告前贡献毛利率" width="140" class-name="seg-result" label-class-name="seg-result"
+            ><template #header
+              ><span class="pc-col-head"
+                ><span class="pc-col-head__label">广告前贡献毛利率</span
+                ><FieldHelpTip title="广告前贡献毛利率" status="stable" :sections="operatingAdMarginHelp" /></span
+            ></template
             ><template #default="{ row }"
               ><span :class="{ 'roi-guarded': roiGuarded(row) }">{{
                 percent(row.preview?.expected?.advertising_contribution_margin_rate)
-              }}</span>
-              <el-tooltip
-                placement="top"
-                content="扣掉采购、头程、仓储、贴单、尾程、平台佣金、达人佣金、货损、退货后的占比。分母是商家实收（= 测算售价），与平台 GMV 同一口径"
-              >
-                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
-              </el-tooltip></template
+              }}</span></template
           ></el-table-column>
-          <el-table-column label="保本ROI" width="150" class-name="seg-result" label-class-name="seg-result"
+          <el-table-column label="保本ROI" width="130" class-name="seg-result" label-class-name="seg-result"
             ><template #default="{ row }"
               ><span :class="{ 'roi-guarded': roiGuarded(row) }">{{
                 roiDisplay(row.preview?.expected?.break_even_roi)
               }}</span>
-              <el-tooltip placement="top" :content="roiGuardTooltip(row)">
-                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
-              </el-tooltip>
+              <FieldHelpTip title="保本 ROI" :content="roiGuardTooltip(row)" />
               <div v-if="roiGuarded(row)" class="roi-guard-hint">
                 成本不全，保本ROI 偏乐观
               </div></template
           ></el-table-column>
-          <el-table-column label="建议ROI" width="150" class-name="seg-result" label-class-name="seg-result"
+          <el-table-column label="建议ROI" width="130" class-name="seg-result" label-class-name="seg-result"
             ><template #default="{ row }"
               ><span :class="{ 'roi-guarded': roiGuarded(row) }">{{
                 roiDisplay(row.preview?.expected?.suggested_roi_clamped)
@@ -664,27 +777,25 @@
                 type="warning"
                 >广告空间不足</el-tag
               >
-              <el-tooltip placement="top" :content="roiSuggestionTooltip(row)">
-                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
-              </el-tooltip></template
+              <FieldHelpTip title="建议 ROI" :content="roiSuggestionTooltip(row)" /></template
           ></el-table-column>
           <!--
             跨仓提示（阶段 6）：同一个 ERP SKU 在别的仓滞销、这个仓不滞销时，
             提示「优先调拨，而不是压低全站点底线」。
             **只提示，不改价** —— 调拨是运营决策，系统不越权。
           -->
-          <el-table-column label="跨仓提示" width="280" class-name="seg-result" label-class-name="seg-result"><template #default="{ row }"><template v-if="row.warehouse_divergence"><el-tag size="small" type="warning">跨仓库龄差异</el-tag><div class="warehouse-divergence-hint">{{ row.warehouse_divergence.suggestion }}</div></template><span v-else class="muted">-</span></template></el-table-column>
+          <el-table-column label="跨仓提示" width="190" class-name="seg-result" label-class-name="seg-result"><template #default="{ row }"><template v-if="row.warehouse_divergence"><el-tag size="small" type="warning">跨仓库龄差异</el-tag><div class="warehouse-divergence-hint">{{ row.warehouse_divergence.suggestion }}</div></template><span v-else class="muted">-</span></template></el-table-column>
           <!-- 段四 · 成本明细与利润 -->
-          <el-table-column label="预估头程运费" width="150" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
-          <el-table-column label="预估仓储成本" width="150" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceCostDisplay(row, "storage") }}</template></el-table-column>
-          <el-table-column label="贴单费" width="115" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceLabelFeeDisplay(row) }}</template></el-table-column>
+          <el-table-column label="预估头程运费" width="130" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceCostDisplay(row, "logistics") }}</template></el-table-column>
+          <el-table-column label="预估仓储成本" width="130" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceCostDisplay(row, "storage") }}</template></el-table-column>
+          <el-table-column label="贴单费" width="105" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ referenceLabelFeeDisplay(row) }}</template></el-table-column>
           <!--
             尾程配送费（批次 3 只读展示 → 批次 4 进利润与成本底线 → 批次 9 直接进成本分子）：仓 → 买家那段快递费，每卖一件必付。
             ⚠️ 标「估算」是因为缺重量时只能保守估（该仓最轻档 vs 最贵仓，取更贵的）。
             ⚠️ 标「未计入底线」现在只有一种可能：**这个 SKU 不包邮**（买家付尾程运费 ⇒ 商家不承担尾程）。
                平台侧那条「尾程按收入占比拆分」的旧机制已退役，尾程**直接进成本底线的分子**（不再成对生效）。
           -->
-          <el-table-column label="尾程配送费" width="150" class-name="seg-cost" label-class-name="seg-cost"
+          <el-table-column label="尾程配送费" width="130" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }"
               ><div>{{ money(row.delivery_cost) }}</div>
               <el-tag v-if="row.free_shipping === false" size="small" type="info">不包邮</el-tag>
@@ -693,7 +804,12 @@
               <el-tag v-else-if="row.delivery_cost_in_cost_floor" size="small" type="success">已计入底线</el-tag>
               <div v-if="deliveryCostHint(row)" class="price-floor-hint">{{ deliveryCostHint(row) }}</div></template
           ></el-table-column>
-          <el-table-column label="广告分成率" width="225" class-name="seg-cost" label-class-name="seg-cost"
+          <el-table-column label="广告分成率" width="185" class-name="seg-cost" label-class-name="seg-cost"
+            ><template #header
+              ><span class="pc-col-head"
+                ><span class="pc-col-head__label">广告分成率</span
+                ><FieldHelpTip title="广告分成率" status="observe" :sections="operatingAdRateHelp" /></span
+            ></template
             ><template #default="{ row }"
               ><!--
                 广告分成率是**高级逃生口**（阶段 3）：主输入是「目标 ROI」
@@ -724,45 +840,43 @@
                 已改用广告分成率口径（目标ROI 已清空）
               </div></template
           ></el-table-column>
-          <el-table-column label="平台佣金率" width="100" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
-          <el-table-column label="平台佣金" width="105" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
-          <el-table-column label="达人佣金" width="120" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }"><div class="rate-cell"><span>{{ percent(row.preview?.expected?.creator_commission_rate) }}</span></div>{{ money(row.preview?.expected?.creator_commission) }}<div v-if="creatorCommissionHint(row)" class="price-floor-hint">{{ creatorCommissionHint(row) }}</div></template></el-table-column>
-          <el-table-column label="预计广告费用" width="105" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ money(row.preview?.expected?.ad_cost) }}</template></el-table-column>
-          <el-table-column label="运输货损率（SPU）" width="110" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
-          <el-table-column label="退货损失率（SPU）" width="130" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.return_loss_rate) }}</template></el-table-column>
-          <el-table-column label="参考成本利润" width="120" class-name="seg-cost" label-class-name="seg-cost"
+          <el-table-column label="平台佣金率" width="90" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.platform_fee_rate) }}</template></el-table-column>
+          <el-table-column label="平台佣金" width="95" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ money(row.preview?.expected?.platform_fee) }}</template></el-table-column>
+          <el-table-column label="达人佣金" width="110" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }"><div class="rate-cell"><span>{{ percent(row.preview?.expected?.creator_commission_rate) }}</span></div>{{ money(row.preview?.expected?.creator_commission) }}<div v-if="creatorCommissionHint(row)" class="price-floor-hint">{{ creatorCommissionHint(row) }}</div></template></el-table-column>
+          <el-table-column label="预计广告费用" width="95" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ money(row.preview?.expected?.ad_cost) }}</template></el-table-column>
+          <el-table-column label="运输货损率（SPU）" width="100" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.logistics_damage_rate) }}</template></el-table-column>
+          <el-table-column label="退货损失率（SPU）" width="110" class-name="seg-cost" label-class-name="seg-cost"><template #default="{ row }">{{ percent(row.return_loss_rate) }}</template></el-table-column>
+          <el-table-column label="参考成本利润" width="110" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }">{{
               money(row.preview?.expected?.profit)
             }}<div v-if="platformRateMissingHint(row)" class="price-floor-hint">{{ platformRateMissingHint(row) }}</div><div v-if="adCostMissingHint(row)" class="price-floor-hint">{{ adCostMissingHint(row) }}</div></template></el-table-column
           >
-          <el-table-column label="利润率" width="100" class-name="seg-cost" label-class-name="seg-cost"
+          <el-table-column label="利润率" width="90" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }">{{
               percent(row.preview?.expected?.margin_rate)
             }}</template></el-table-column
           >
-          <el-table-column label="混合成本利润" width="120" class-name="seg-cost" label-class-name="seg-cost"
+          <el-table-column label="混合成本利润" width="110" class-name="seg-cost" label-class-name="seg-cost"
             ><template #default="{ row }"
               >{{ money(row.preview?.actual_recost?.profit) }}
-              <el-tooltip
-                placement="top"
+              <FieldHelpTip
+                title="混合成本利润"
                 :content="`头程 ${money(row.actual_logistics_cost)}（真实账单）｜仓储 ${money(row.preview?.actual_recost?.storage_cost)}（规则预估——系统里没有仓储费账单）`"
-              >
-                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
-              </el-tooltip></template
+              /></template
             ></el-table-column
           >
-          <el-table-column label="混合成本完整度" width="120" class-name="seg-cost" label-class-name="seg-cost"
+          <!-- 完整度是**列级**口径（四个取值各是什么意思）⇒ 收进表头问号 -->
+          <el-table-column label="混合成本完整度" width="130" class-name="seg-cost" label-class-name="seg-cost"
+            ><template #header
+              ><span class="pc-col-head"
+                ><span class="pc-col-head__label">混合成本完整度</span
+                ><FieldHelpTip title="混合成本完整度" status="stable" :sections="operatingRecostHelp" /></span
+            ></template
             ><template #default="{ row }"
-              >{{ row.preview?.actual_recost?.completeness || "-" }}
-              <el-tooltip
-                placement="top"
-                content="这一版用了多少真实成本：incomplete=没算出来 / estimated=全预估 / mixed=一半真实 / actual=全真实"
-              >
-                <el-icon class="pricing-header-help"><QuestionFilled /></el-icon>
-              </el-tooltip></template
+              >{{ row.preview?.actual_recost?.completeness || "-" }}</template
             ></el-table-column
           >
-          <el-table-column label="操作" width="180" fixed="right"
+          <el-table-column label="操作" width="160" fixed="right"
             ><template #default="{ row }"
               ><el-button link type="primary" @click="previewOperatingRow(row)">试算</el-button
               ><el-button link @click="saveOperatingDraft(row)">保存测算草稿</el-button
@@ -814,7 +928,7 @@
                     ><el-option label="普通货" value="normal" /><el-option
                       label="敏感货 M"
                       value="sensitive" /></el-select></template></el-table-column
-              ><el-table-column label="默认规则" width="95"
+              ><el-table-column label="默认规则" width="80"
                 ><template #default="{ row }"
                   ><el-switch
                     v-model="row.is_default"
@@ -862,16 +976,16 @@
               <span class="muted">固定按体积计费：CNY/CBM/月</span>
             </div>
             <el-table :data="storageRules" v-loading="loadingStorageRules" stripe border>
-              <el-table-column label="收货仓库" min-width="180"><template #default="{ row }"><el-select v-model="row.warehouse_code" size="small" filterable :disabled="!row.__new"><el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" /></el-select></template></el-table-column>
-              <el-table-column label="计费方式" width="110"><template #default>按体积</template></el-table-column>
-              <el-table-column label="计费单位" width="130"><template #default>CNY/CBM/月</template></el-table-column>
-              <el-table-column label="仓储单价" width="120"><template #default="{ row }"><el-input-number v-model="row.unit_rate_cny" :min="0" :precision="4" :controls="false" size="small" /></template></el-table-column>
-              <el-table-column label="贴单费" width="110"><template #default="{ row }"><el-input-number v-model="row.label_fee" :min="0" :precision="2" :controls="false" size="small" placeholder="可选" /></template></el-table-column>
-              <el-table-column label="生效日期" width="145"><template #default="{ row }"><el-date-picker v-model="row.effective_from" type="date" value-format="YYYY-MM-DD" size="small" /></template></el-table-column>
-              <el-table-column label="状态" width="105"><template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '已停用' }}</el-tag></template></el-table-column>
-              <el-table-column label="版本" width="120"><template #default="{ row }"><el-input v-model="row.version" size="small" /></template></el-table-column>
-              <el-table-column label="来源" width="130"><template #default="{ row }"><el-input v-model="row.source" size="small" /></template></el-table-column>
-              <el-table-column label="备注" min-width="150"><template #default="{ row }"><el-input v-model="row.notes" size="small" /></template></el-table-column>
+              <el-table-column label="收货仓库" min-width="160"><template #default="{ row }"><el-select v-model="row.warehouse_code" size="small" filterable :disabled="!row.__new"><el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" /></el-select></template></el-table-column>
+              <el-table-column label="计费方式" width="100"><template #default>按体积</template></el-table-column>
+              <el-table-column label="计费单位" width="120"><template #default>CNY/CBM/月</template></el-table-column>
+              <el-table-column label="仓储单价" width="110"><template #default="{ row }"><el-input-number v-model="row.unit_rate_cny" :min="0" :precision="4" :controls="false" size="small" /></template></el-table-column>
+              <el-table-column label="贴单费" width="100"><template #default="{ row }"><el-input-number v-model="row.label_fee" :min="0" :precision="2" :controls="false" size="small" placeholder="可选" /></template></el-table-column>
+              <el-table-column label="生效日期" width="130"><template #default="{ row }"><el-date-picker v-model="row.effective_from" type="date" value-format="YYYY-MM-DD" size="small" /></template></el-table-column>
+              <el-table-column label="状态" width="95"><template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === 'active' ? '启用' : '已停用' }}</el-tag></template></el-table-column>
+              <el-table-column label="版本" width="105"><template #default="{ row }"><el-input v-model="row.version" size="small" /></template></el-table-column>
+              <el-table-column label="来源" width="115"><template #default="{ row }"><el-input v-model="row.source" size="small" /></template></el-table-column>
+              <el-table-column label="备注" min-width="140"><template #default="{ row }"><el-input v-model="row.notes" size="small" /></template></el-table-column>
               <el-table-column v-if="canManagePlatformFee" label="操作" width="240" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveStorageRule(row)">保存（自动新版本）</el-button><el-button v-if="!row.__new && row.status === 'active'" link type="danger" @click="disableStorageRule(row)">停用</el-button><el-button v-if="!row.__new && row.status !== 'active'" link type="success" @click="enableStorageRule(row)">启用</el-button><el-button v-if="!row.__new" link type="danger" @click="removeStorageRuleRow(row)">删除</el-button></template></el-table-column>
             </el-table></el-tab-pane
           ><el-tab-pane label="尾程费率" name="delivery-rules"
@@ -922,16 +1036,16 @@
             <el-collapse class="delivery-detail">
               <el-collapse-item title="全部档位明细（跨平台对照 / 看历史与停用行）" name="detail">
                 <el-table :data="deliveryRules" v-loading="loadingDeliveryRules" stripe border>
-              <el-table-column label="平台" min-width="140"><template #default="{ row }"><el-select v-model="row.platform_code" size="small" filterable :disabled="!row.__new"><el-option v-for="item in operatingDimensions.platforms" :key="item.platform_code" :label="item.name || item.platform_code" :value="item.platform_code" /></el-select></template></el-table-column>
-              <el-table-column label="收货仓库" min-width="170"><template #default="{ row }"><el-select v-model="row.warehouse_code" size="small" filterable :disabled="!row.__new"><el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" /></el-select></template></el-table-column>
-              <el-table-column label="重量段" width="150"><template #default="{ row }"><el-select v-model="row.weight_tier_code" size="small" filterable placeholder="选重量段" :disabled="!row.__new"><el-option v-for="tier in weightTiers" :key="tier.tier_code" :label="tier.label" :value="tier.tier_code" /></el-select></template></el-table-column>
-              <el-table-column label="单件尾程费（元）" width="150"><template #default="{ row }"><el-input-number v-model="row.unit_price" :min="0" :precision="2" :controls="false" size="small" /><div v-if="deliveryTierDuplicateHint(row)" class="delivery-row-warn">{{ deliveryTierDuplicateHint(row) }}</div></template></el-table-column>
-              <el-table-column label="生效日期" width="145"><template #default="{ row }"><el-date-picker v-model="row.effective_from" type="date" value-format="YYYY-MM-DD" size="small" /></template></el-table-column>
-              <el-table-column label="状态" width="105"><template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === "active" ? "启用" : "已停用" }}</el-tag></template></el-table-column>
-              <el-table-column label="版本" width="110"><template #default="{ row }"><el-input v-model="row.version" size="small" /></template></el-table-column>
-              <el-table-column label="来源" width="120"><template #default="{ row }"><el-input v-model="row.source" size="small" /></template></el-table-column>
-              <el-table-column label="备注" min-width="140"><template #default="{ row }"><el-input v-model="row.notes" size="small" /></template></el-table-column>
-              <el-table-column v-if="canManagePlatformFee" label="操作" width="230" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveDeliveryRule(row)">保存</el-button><el-button v-if="!row.__new && row.status === 'active'" link type="warning" @click="toggleDeliveryRuleStatus(row)">停用</el-button><el-button v-if="!row.__new && row.status !== 'active'" link type="success" @click="toggleDeliveryRuleStatus(row)">启用</el-button><el-button v-if="!row.__new" link type="danger" @click="removeDeliveryRuleRow(row)">删除</el-button></template></el-table-column>
+              <el-table-column label="平台" min-width="130"><template #default="{ row }"><el-select v-model="row.platform_code" size="small" filterable :disabled="!row.__new"><el-option v-for="item in operatingDimensions.platforms" :key="item.platform_code" :label="item.name || item.platform_code" :value="item.platform_code" /></el-select></template></el-table-column>
+              <el-table-column label="收货仓库" min-width="160"><template #default="{ row }"><el-select v-model="row.warehouse_code" size="small" filterable :disabled="!row.__new"><el-option v-for="item in operatingDimensions.warehouses" :key="item.warehouse_code" :label="`${item.warehouse_name} (${item.country_name})`" :value="item.warehouse_code" /></el-select></template></el-table-column>
+              <el-table-column label="重量段" width="140"><template #default="{ row }"><el-select v-model="row.weight_tier_code" size="small" filterable placeholder="选重量段" :disabled="!row.__new"><el-option v-for="tier in weightTiers" :key="tier.tier_code" :label="tier.label" :value="tier.tier_code" /></el-select></template></el-table-column>
+              <el-table-column label="单件尾程费（元）" width="140"><template #default="{ row }"><el-input-number v-model="row.unit_price" :min="0" :precision="2" :controls="false" size="small" /><div v-if="deliveryTierDuplicateHint(row)" class="delivery-row-warn">{{ deliveryTierDuplicateHint(row) }}</div></template></el-table-column>
+              <el-table-column label="生效日期" width="130"><template #default="{ row }"><el-date-picker v-model="row.effective_from" type="date" value-format="YYYY-MM-DD" size="small" /></template></el-table-column>
+              <el-table-column label="状态" width="95"><template #default="{ row }"><el-tag :type="row.status === 'active' ? 'success' : 'info'">{{ row.status === "active" ? "启用" : "已停用" }}</el-tag></template></el-table-column>
+              <el-table-column label="版本" width="100"><template #default="{ row }"><el-input v-model="row.version" size="small" /></template></el-table-column>
+              <el-table-column label="来源" width="110"><template #default="{ row }"><el-input v-model="row.source" size="small" /></template></el-table-column>
+              <el-table-column label="备注" min-width="130"><template #default="{ row }"><el-input v-model="row.notes" size="small" /></template></el-table-column>
+              <el-table-column v-if="canManagePlatformFee" label="操作" width="200" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="saveDeliveryRule(row)">保存</el-button><el-button v-if="!row.__new && row.status === 'active'" link type="warning" @click="toggleDeliveryRuleStatus(row)">停用</el-button><el-button v-if="!row.__new && row.status !== 'active'" link type="success" @click="toggleDeliveryRuleStatus(row)">启用</el-button><el-button v-if="!row.__new" link type="danger" @click="removeDeliveryRuleRow(row)">删除</el-button></template></el-table-column>
             </el-table>
               </el-collapse-item>
             </el-collapse>
@@ -960,7 +1074,7 @@
               </el-form>
               <el-table :data="deliveryBatchRows" border size="small">
                 <el-table-column label="重量段" width="150"><template #default="{ row }"><el-select v-model="row.weight_tier_code" size="small" filterable placeholder="选重量段"><el-option v-for="tier in weightTiers" :key="tier.tier_code" :label="tier.label" :value="tier.tier_code" /></el-select></template></el-table-column>
-                <el-table-column label="单件尾程费（元）" width="150"><template #default="{ row }"><el-input-number v-model="row.unit_price" :min="0" :precision="2" :controls="false" size="small" /></template></el-table-column>
+                <el-table-column label="单件尾程费（元）" width="140"><template #default="{ row }"><el-input-number v-model="row.unit_price" :min="0" :precision="2" :controls="false" size="small" /></template></el-table-column>
                 <el-table-column label="操作" width="90"><template #default="{ $index }"><el-button link type="danger" @click="deliveryBatchRows.splice($index, 1)">移除</el-button></template></el-table-column>
               </el-table>
               <div class="toolbar" style="margin-top: 8px">
@@ -1048,7 +1162,16 @@
             </div>
           </div>
           <el-form :model="pricingDrawer.form" label-width="150px" class="drawer-form">
-            <el-form-item label="平台">
+            <!--
+              字段口径说明统一收进 label 右侧的小问号：
+              表单项的口径是**字段级**的，写在输入框下面会占掉大半个抽屉高度。
+            -->
+            <el-form-item>
+              <template #label
+                ><span class="pc-field-label"
+                  >平台<FieldHelpTip title="平台" status="stable" :sections="feePlatformHelp" /></span
+                ></template
+              >
               <!--
                 平台成本率是**每个平台一本账**：这里改哪个平台，就只影响哪个平台的底线。
                 ⚠️ 平台身份必须由**抽屉自己**决定 —— 以前它靠测算页的筛选条件隐式传进来，
@@ -1067,32 +1190,38 @@
                   :label="item.name || item.platform_code"
                   :value="item.platform_code" />
               </el-select>
-              <div class="pricing-tier-hint">
-                平台成本率是每个平台一本账：这里改哪个平台，就只影响哪个平台的最低售价底线。
-              </div>
             </el-form-item>
-            <el-form-item label="平台佣金率">
+            <el-form-item>
+              <template #label
+                ><span class="pc-field-label"
+                  >平台佣金率<FieldHelpTip title="平台佣金率" status="manual" :sections="feePlatformFeeHelp" /></span
+                ></template
+              >
               <div class="rate-cell"><el-input-number v-model="pricingDrawer.form.default_fee_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></div>
-              <div class="pricing-tier-hint">
-                平台佣金率<strong>单独进分母</strong>，不含在「平台其他成本率」内。
-              </div>
             </el-form-item>
-            <el-form-item label="默认达人佣金率">
+            <el-form-item>
+              <template #label
+                ><span class="pc-field-label"
+                  >默认达人佣金率<FieldHelpTip title="默认达人佣金率" status="manual" :sections="feeCreatorCommissionHelp" /></span
+                ></template
+              >
               <div class="rate-cell"><el-input-number v-model="pricingDrawer.form.default_creator_commission_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></div>
-              <div class="pricing-tier-hint">SKU 未单独设置时的兜底值</div>
             </el-form-item>
-            <el-form-item label="平台其他成本率">
+            <el-form-item>
+              <template #label
+                ><span class="pc-field-label"
+                  >平台其他成本率<FieldHelpTip title="平台其他成本率" status="manual" :sections="feeOtherCostHelp" /></span
+                ></template
+              >
               <div class="rate-cell"><el-input-number v-model="pricingDrawer.form.other_cost_rate_pct" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /><span class="rate-suffix">%</span></div>
-              <div class="pricing-tier-hint">
-                <strong>不含平台佣金、不含尾程</strong>（尾程按件进成本）。这里填平台侧按收入比例扣的其它款项（人工维护）。
-              </div>
             </el-form-item>
-            <el-form-item label="底线成本率合计">
+            <el-form-item>
+              <template #label
+                ><span class="pc-field-label"
+                  >底线成本率合计<FieldHelpTip title="底线成本率合计" status="stable" :sections="feeCostRateTotalHelp" /></span
+                ></template
+              >
               <span>{{ costRateTotalPct }}%</span>
-              <div class="pricing-tier-hint">
-                底线成本率合计 = 平台佣金率 + 平台其他成本率 + 默认达人佣金率（平台级，不含 SPU 两率）。<br />
-                这三项都按收入比例扣 ⇒ 一起进底线的<strong>分母</strong>：1 − 平台佣金率 − 平台其他成本率 − 达人佣金率 − 目标利润率。
-              </div>
             </el-form-item>
             <el-form-item label="生效日期"><el-date-picker v-model="pricingDrawer.form.fee_rate_effective_from" type="date" value-format="YYYY-MM-DD" /></el-form-item>
             <el-form-item label="来源"><el-input v-model="pricingDrawer.form.fee_rate_source" /></el-form-item>
@@ -1425,10 +1554,12 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Check, Plus, QuestionFilled } from "@element-plus/icons-vue";
+import { Check, Plus } from "@element-plus/icons-vue";
 import productCenterApi from "@/api/productCenter";
 import { createSpuSearch, SPU_OPTION_EMPTY_TEXT, buildSkuEmptyText } from "./productCenterSpuOptions";
 import { useUserStore } from "@/stores/user";
+import FieldHelpTip from "@/components/common/FieldHelpTip.vue";
+import { getFieldHelp, toHelpSections } from "./productCenterFieldHelp";
 
 const userStore = useUserStore();
 const activeTab = ref("spu");
@@ -1559,6 +1690,31 @@ const unmappedPurchaseSkus = ref([]);
 const missingVolumeSkus = ref([]);
 const dirtyRows = ref(new Set());
 const dirtyRuleRows = ref(new Set());
+// --- 换款（SKU ↔ SPU 归属）交互状态 ---------------------------------------
+// 存量行的 SPU 单元格**默认只读**，点「换款」才展开下拉。
+// 为什么不是每行都摆一个可编辑下拉框：
+//   * 归属是**低频但高影响**的操作（换一次款，这个货的成本基准就变了）；
+//     每行一个可编辑下拉框，会让「这一格是货号档案」和「这一格能改」长得一样，
+//     运营批量录入时特别容易误触、误改归属。
+//   * 默认只读 = 归属是**档案**不是表单；要改必须先点一个明确的动作。
+// ⚠️ 编辑态与原值放在**独立的表**里，不能挂在 row 上 ——
+//    loadSkus() 之后 row 会被整体替换，挂在 row 上的草稿就丢了
+//    （与 pricingOverrideDrafts 同理）。
+const spuSwitchEditing = reactive({});
+const spuSwitchOriginals = reactive({});
+// ⚠️ 换款的「待保存」单独记一份：dirtyRows 是**整行粒度**的，
+//    取消换款时不能把这一行其它字段的改动标记一起清掉。
+const spuSwitchDirty = ref(new Set());
+const spuSwitchKey = (row) => row.sku_id || row.sku_key || "__new__";
+const isSpuSwitchEditing = (row) => spuSwitchEditing[spuSwitchKey(row)] === true;
+const spuSwitchPending = (row) => spuSwitchDirty.value.has(spuSwitchKey(row));
+// 保存成功后调用：归属已经落库 ⇒ 编辑态与原值快照全部作废，
+// 所有行回到「只读 + 换款」的默认形态。
+const resetSpuSwitchState = () => {
+  for (const key of Object.keys(spuSwitchEditing)) delete spuSwitchEditing[key];
+  for (const key of Object.keys(spuSwitchOriginals)) delete spuSwitchOriginals[key];
+  spuSwitchDirty.value.clear();
+};
 const spuQuery = reactive({
   keyword: "",
   biz_status: "",
@@ -1569,6 +1725,75 @@ const skuQuery = reactive({ keyword: "", status: "", page: 1, page_size: 20 });
 // SKU 资料页的定价底线按**平台**算（阶段 2.1）：平台成本率不同，底线就不同。
 // 不选平台时后端回落到历史 basis 平台，界面要能看出来用的是哪套口径。
 const skuPricingPlatform = ref("");
+// --- 字段口径说明（小问号面板内容）--------------------------------------
+// 口径说明是**字段级**的：以前写在行模板里，每行重复一遍 ⇒ 表格被撑爆。
+// 现在统一收进表头的小问号，说明只说一次；这里负责把注册表里的文案
+// 按当前筛选条件填好占位符（{platform} / {warehouse}）。
+const helpSections = (key, params) => toHelpSections(getFieldHelp(key, params));
+const currentOperatingWarehouseLabel = () => {
+  const known = (operatingDimensions.warehouses || []).find(
+    (item) => item.warehouse_code === operatingQuery.warehouse_code,
+  );
+  return (
+    known?.warehouse_name ||
+    known?.warehouse_code ||
+    operatingQuery.warehouse_code ||
+    "当前仓"
+  );
+};
+const spuDamageRateHelp = computed(() =>
+  helpSections("spu.logistics_damage_rate"),
+);
+const spuReturnRateHelp = computed(() =>
+  helpSections("spu.return_loss_rate"),
+);
+const skuMinPriceHelp = computed(() =>
+  helpSections("sku.min_selling_price", {
+    platform: skuPricingPlatform.value || "默认平台",
+  }),
+);
+const skuSpuBindingHelp = computed(() => helpSections("sku.spu_binding"));
+const skuCreatorCommissionHelp = computed(() =>
+  helpSections("sku.creator_commission_rate"),
+);
+const operatingFreeShippingHelp = computed(() =>
+  helpSections("operating.free_shipping"),
+);
+const operatingMinPriceHelp = computed(() =>
+  helpSections("operating.min_selling_price", {
+    platform: operatingQuery.platform_code || "当前平台",
+  }),
+);
+const operatingWarehouseAgeHelp = computed(() =>
+  helpSections("operating.warehouse_restock", {
+    warehouse: currentOperatingWarehouseLabel(),
+  }),
+);
+const operatingAdMarginHelp = computed(() =>
+  helpSections("operating.ad_contribution_margin_rate"),
+);
+const operatingAdRateHelp = computed(() =>
+  helpSections("operating.ad_rate"),
+);
+const operatingRecostHelp = computed(() =>
+  helpSections("operating.actual_recost_completeness"),
+);
+const feePlatformHelp = computed(() => helpSections("fee.platform"));
+const feePlatformFeeHelp = computed(() =>
+  helpSections("fee.platform_fee_rate"),
+);
+const feeCreatorCommissionHelp = computed(() =>
+  helpSections("fee.default_creator_commission_rate"),
+);
+const feeOtherCostHelp = computed(() => helpSections("fee.other_cost_rate"));
+const feeCostRateTotalHelp = computed(() =>
+  helpSections("fee.cost_rate_total"),
+);
+// 包邮开关的当前状态说明：以前是每行一行文字（撑高行），现在挂在开关的悬浮提示上。
+const freeShippingStateHint = (row) =>
+  row.free_shipping
+    ? "尾程由我们承担：计入成本底线与利润"
+    : "买家付尾程运费：尾程不计入底线、利润按 0 计";
 const batchDrawer = reactive({
   visible: false,
   editing: false,
@@ -1620,7 +1845,9 @@ const spuDirty = computed(() =>
 const skuDirty = computed(() =>
   skus.value.filter(
     (row) =>
-      row.__new || dirtyRows.value.has(`sku:${row.sku_id || row.sku_key}`),
+      row.__new ||
+      dirtyRows.value.has(`sku:${row.sku_id || row.sku_key}`) ||
+      spuSwitchDirty.value.has(spuSwitchKey(row)),
   ),
 );
 const ruleDirty = computed(() =>
@@ -1644,9 +1871,47 @@ const onSpuL1CategoryChange = (row) => {
 // 另写一条必然漏掉其中一半。
 // ⚠️ 换款后旧的生效日不再适用 —— 新归属从**保存那天**起算，
 //    所以先把它清掉，别让运营看到「自 2026-09-14」配着一个刚换的款。
+// ⚠️ 但**改回原值**不算换款 ⇒ 原来的生效日继续有效，不能一并清掉。
 const onSkuSpuChange = (row) => {
+  if (row.__new) {
+    markDirty("sku", row);
+    return;
+  }
+  const key = spuSwitchKey(row);
+  const original = spuSwitchOriginals[key];
+  if (original && (original.spu || "") === (row.spu || "")) {
+    // 改回原值 ⇒ 本次换款撤销 ⇒ 生效日恢复，「待保存」标记撤掉
+    row.spu_effective_from = original.spu_effective_from;
+    spuSwitchDirty.value.delete(key);
+    return;
+  }
   row.spu_effective_from = null;
-  markDirty("sku", row);
+  spuSwitchDirty.value.add(key);
+};
+// 展开换款编辑：先把原值与原生效日**快照**下来（取消时要还原）。
+const startSpuEdit = (row) => {
+  const key = spuSwitchKey(row);
+  if (!spuSwitchOriginals[key]) {
+    spuSwitchOriginals[key] = {
+      spu: row.spu || "",
+      spu_effective_from: row.spu_effective_from ?? null,
+    };
+  }
+  spuSwitchEditing[key] = true;
+};
+// 收起 / 取消换款：还原原值与原生效日，撤掉「待保存」。
+// ⚠️ 只清 spuSwitchDirty，**不动 dirtyRows** —— dirtyRows 是整行粒度的，
+//    这一行如果还有别的字段改动（名称、重量段…），不能被这次取消连带清掉。
+const cancelSpuEdit = (row) => {
+  const key = spuSwitchKey(row);
+  const original = spuSwitchOriginals[key];
+  if (original) {
+    row.spu = original.spu;
+    row.spu_effective_from = original.spu_effective_from;
+  }
+  delete spuSwitchEditing[key];
+  delete spuSwitchOriginals[key];
+  spuSwitchDirty.value.delete(key);
 };
 // 已软删的 SPU 灰显 —— 让运营一眼看出这行「已删除但可恢复」，避免误当成在售品编辑
 const spuRowClass = ({ row }) => (row.active === false ? "spu-inactive-row" : "");
@@ -1957,6 +2222,19 @@ const pendingPlatformOverride = (row, item) => {
 };
 const savingOverrideKey = ref("");
 const overrideSavingKey = (row, item) => pricingOverrideKey(row, item.platform_code);
+// 人工覆盖的编辑区默认收起（紧凑化）：两个平台各摊两行 ⇒ 单行高度被顶到 ~190px，
+// 左边十几列短列全被撑成大片空白。常态只留「平台名 + 生效金额 + 来源」，点「调整」才展开。
+// ⚠️ 展开状态挂在独立表里，不挂 row —— row 会在重新拉取后被整体替换（同 pricingOverrideDrafts 的理由）。
+const pricingOverrideEditing = reactive({});
+const isOverrideEditing = (row, item) =>
+  !!pricingOverrideEditing[pricingOverrideKey(row, item.platform_code)];
+const toggleOverrideEditing = (row, item) => {
+  const key = pricingOverrideKey(row, item.platform_code);
+  pricingOverrideEditing[key] = !pricingOverrideEditing[key];
+};
+const closeOverrideEditing = (row, item) => {
+  delete pricingOverrideEditing[pricingOverrideKey(row, item.platform_code)];
+};
 // 平台级覆盖值的报错文案：后端走统一错误信封，结构化业务码在 error.detail.code。
 const pricingOverrideErrorText = (error) => {
   const detail = readApiErrorDetail(error);
@@ -1989,6 +2267,7 @@ const savePlatformOverride = async (row, item) => {
       min_selling_price_override: Number(value),
     });
     delete pricingOverrideDrafts[pricingOverrideKey(row, item.platform_code)];
+    closeOverrideEditing(row, item);
     await refreshSkuPricingRow(row);
     ElMessage.success(`${item.name} 的最低售价底线已保存`);
   } catch (error) {
@@ -2010,6 +2289,7 @@ const resetPlatformOverride = async (row, item) => {
       min_selling_price_override: null,
     });
     delete pricingOverrideDrafts[pricingOverrideKey(row, item.platform_code)];
+    closeOverrideEditing(row, item);
     await refreshSkuPricingRow(row);
     ElMessage.success(`${item.name} 已重置为自动值`);
   } catch (error) {
@@ -2984,16 +3264,8 @@ const currentWarehouseRestockDays = (row) => {
   if (current) return current.days_since_restock ?? null;
   return row.pricing_days_since_restock ?? null;
 };
-const currentWarehouseLabel = (row) => {
-  const current = currentWarehouseRestock(row);
-  if (current) return current.warehouse_name || current.warehouse_code || "";
-  const known = (operatingDimensions.warehouses || []).find(
-    (item) => item.warehouse_code === operatingQuery.warehouse_code,
-  );
-  return (
-    known?.warehouse_name || known?.warehouse_code || operatingQuery.warehouse_code || "当前仓"
-  );
-};
+// ⚠️ 原来这里还有一个 currentWarehouseLabel(row)：它只是把「当前仓名」拼在库龄数字后面，
+//    属于**列级**信息（跟着筛选条件走，每行都一样）⇒ 已收进表头小问号，这里随之删除。
 // 其它仓的库龄：**老的排前面** —— 先看到最该处理的。
 const otherWarehouseRestocks = (row) => {
   const items = row.warehouse_restocks || [];
@@ -3247,6 +3519,9 @@ const saveSkuRows = async () => {
     });
     await loadSkus();
     dirtyRows.value.clear();
+    // 归属已落库 ⇒ 换款的编辑态 / 原值快照 / 待保存标记全部作废，
+    // 所有行回到「只读 + 换款」的默认形态。
+    resetSpuSwitchState();
     ElMessage.success("SKU 变更已保存");
   } catch (error) {
     ElMessage.error(error.message || "保存 SKU 失败");
@@ -4074,8 +4349,8 @@ onMounted(async () => {
 .toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: 8px;
+  margin-bottom: 10px;
   align-items: center;
 }
 .toolbar .el-input {
@@ -4084,8 +4359,52 @@ onMounted(async () => {
 .toolbar .el-select {
   width: 170px;
 }
+/* --- 页面留白：商品中心是宽表页，四周留 20px 太奢侈，收到 14/16 --- */
+.product-center.erp-page-container {
+  padding: 14px 16px;
+}
+/* --- 三张主表的紧凑度统一 ---------------------------------------------
+   ⚠️ 之前三张表各写各的（SKU 表 6px 4px、另两张走默认 8px 12px），
+   同一页里行高不一致、单元格左右留白也过大。
+   .cell 的 12px → 8px：一行 23 列的表，一屏能多看两列。 */
+.flat-table :deep(.el-table__cell) {
+  padding: 5px 0;
+}
+.flat-table :deep(th.el-table__cell) {
+  padding: 6px 0;
+}
+.flat-table :deep(.cell) {
+  padding: 0 8px;
+  line-height: 1.4;
+}
 .flat-table :deep(.el-input-number) {
   width: 100%;
+}
+/* --- 表头小问号组：标签 + 状态标签 + 问号 -------------------------------- */
+.pc-col-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+.pc-col-head__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pc-col-head__tag {
+  flex: 0 0 auto;
+}
+/* 表单项 label 旁的小问号 */
+.pc-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* 包邮开关：外面包一层 span 才能挂 tooltip（el-switch 不接受 hover 指令） */
+.free-shipping-switch {
+  display: inline-flex;
+  align-items: center;
 }
 .rate-cell {
   display: flex;
@@ -4120,9 +4439,6 @@ onMounted(async () => {
   margin-left: 12px;
   color: var(--el-text-color-secondary);
 }
-.sku-table :deep(.el-table__cell) {
-  padding: 6px 4px;
-}
 /* SPU 值域下拉：编码 + 名称一行展示。
    ⚠️ option 的 label 仍然只放编码（allow-create 要靠它判断「是否已存在」），
       名称只在这里渲染 —— 看得见，但不参与匹配判定。 */
@@ -4143,12 +4459,54 @@ onMounted(async () => {
   font-size: 11px;
   line-height: 14px;
 }
-/* SKU 行的 SPU 单元格：下拉框 + 生效日小字，竖着排。 */
+/* 待保存提示：换了款但还没保存 —— 必须**看得见**，不能只藏在 tooltip 里。 */
+.spu-binding-pending {
+  display: block;
+  color: var(--el-color-warning);
+  font-size: 11px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+/* SKU 行的 SPU 单元格：只读态 / 编辑态 + 生效日小字，竖着排。 */
 .spu-cell {
   display: flex;
   flex-direction: column;
   gap: 2px;
   width: 100%;
+}
+/* 一行：左边是归属编码（只读）或下拉（编辑），右边是「换款 / 收起」入口。 */
+.spu-cell-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+/* ⚠️ 只读态的编码块在 flex 里必须**可收缩**：
+   .readonly-cell 默认 width:100%，不收缩就会把「换款」按钮挤出列宽。
+   ⚠️ 编码可能很长（XH-TOYS-22776403074）⇒ 单行省略号，
+   完整编码 + 名称在 title 里（悬停可见），换款下拉里也能看到完整候选。 */
+.spu-cell-head .readonly-cell {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  /* 与 el-select size="small"（24px）对齐，避免两种状态高度不一致 */
+  line-height: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 编辑态的下拉同理，必须能收缩，否则按钮被挤出列宽。 */
+.spu-switch-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* 生效日 / 待保存标记那一行。 */
+.spu-cell-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 .readonly-cell {
   display: inline-block;
@@ -4207,7 +4565,7 @@ onMounted(async () => {
   gap: 6px;
 }
 .pricing-override-row :deep(.el-input-number) {
-  width: 120px;
+  width: 100px;
 }
 .pricing-tier-hint {
   font-size: 12px;
@@ -4285,17 +4643,6 @@ onMounted(async () => {
   margin-bottom: 6px;
   font-weight: 600;
 }
-/* 表头的问号提示：说明只说一次，不用每行重复 */
-.pricing-header {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-.pricing-header-help {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-  cursor: help;
-}
 /* 必填标记：重量 kg（尾程配送费按重量段计费，缺重量 ⇒ 底线只能估）。 */
 .sku-required-label {
   display: inline-flex;
@@ -4325,10 +4672,10 @@ onMounted(async () => {
 }
 /* ROI 免责提示：两条必须一直挂在表头上 */
 .roi-disclaimer {
-  margin-bottom: 10px;
-  padding: 8px 12px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
   font-size: 12px;
-  line-height: 1.7;
+  line-height: 1.6;
   color: var(--el-text-color-secondary);
   background: var(--el-fill-color-lighter);
   border-radius: 4px;
@@ -4357,8 +4704,8 @@ onMounted(async () => {
 .segment-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
-  margin-bottom: 8px;
+  gap: 14px;
+  margin-bottom: 6px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
@@ -4424,7 +4771,7 @@ onMounted(async () => {
   color: var(--el-text-color-secondary);
 }
 .el-pagination {
-  margin-top: 14px;
+  margin-top: 10px;
   justify-content: flex-end;
 }
 .batch-form {

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="business-overview erp-page-container erp-page--dashboard">
     <PageHeader
       title="业务概览"
@@ -3503,12 +3503,9 @@ watch(
   color: #909399;
 }
 
-:deep(.kpi-help-popover.el-popover) {
-  padding: 14px 16px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 12px;
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
-}
+/* ⚠️ 这一条必须放在**非 scoped** 样式块里（见文件末尾）：
+      el-popover 默认 teleport 到 body，scoped 的 :deep() 需要一个带
+      [data-v-xxx] 的祖先才匹配得到 ⇒ 写在 scoped 里是**失效**的。 */
 
 .kpi-help-panel {
   color: #334155;
@@ -3979,5 +3976,17 @@ watch(
     flex-direction: column;
     gap: 8px;
   }
+}
+</style>
+
+<style>
+/* KPI 小问号弹层的外框样式。
+   ⚠️ 必须是非 scoped：el-popover 默认 teleport 到 body，
+      scoped 的 :deep() 需要一个带 [data-v-xxx] 的祖先才匹配得到 ⇒ 写在 scoped 里会失效。 */
+.kpi-help-popover.el-popover {
+  padding: 14px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
 }
 </style>
