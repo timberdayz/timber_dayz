@@ -544,7 +544,7 @@ async def test_baselines_are_keyed_by_sku_platform_and_warehouse(
     states = await service.collect_pricing_states()
     assert set(states) == {(sku_id, "tiktok", ""), (sku_id, "shopee", "")}
 
-    notify, silent = await service.detect_changes()
+    notify, silent, suppressed = await service.detect_changes()
     assert notify == []
     assert len(silent) == 2
 
@@ -579,7 +579,7 @@ async def test_price_change_on_one_platform_does_not_notify_the_other(
     sku_id = await _seed_two_platforms(session)
 
     service = PriceAdjustNotifyService(session)
-    notify, silent = await service.detect_changes()
+    notify, silent, suppressed = await service.detect_changes()
     assert notify == []
     await service.advance_baselines(silent)
 
@@ -588,10 +588,13 @@ async def test_price_change_on_one_platform_does_not_notify_the_other(
     shopee.other_cost_rate = Decimal("0.45")
     await session.flush()
 
-    notify, silent = await service.detect_changes()
+    notify, silent, suppressed = await service.detect_changes()
 
-    assert len(notify) == 1
-    change = notify[0]
+    # ⚠️ 2026-11-22 新口径：费率变化**不是库龄跨档** ⇒ 不推飞书，
+    #    但要留痕（静默桶），且**只**落在 Shopee 上 —— TikTok 一声不吭。
+    assert notify == []
+    assert len(suppressed) == 1
+    change = suppressed[0]
     assert change["platform_code"] == "shopee"
     assert change["sku_id"] == sku_id
     assert change["direction"] == "上升"
@@ -599,7 +602,9 @@ async def test_price_change_on_one_platform_does_not_notify_the_other(
     # 批次 9 新口径：48.025 ÷ (1 − 0.16 − 0.45 − 0.0111 − 0.25)
     #                = 48.025 ÷ 0.1289 = 372.575640… → 372.58
     assert change["new_min_selling_price"] == "372.58"
-    assert silent == []
+    # TikTok 的底线没动 ⇒ 不通知、不留痕，只刷新基线上下文
+    assert len(silent) == 1
+    assert silent[0]["platform_code"] == "tiktok"
 
 
 @pytest.mark.asyncio

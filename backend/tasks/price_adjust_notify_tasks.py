@@ -3,7 +3,9 @@
 流程（两段，刻意分成两个事务）：
 
 1. **检测**：全量重算所有 active SKU 的最低售价 → 与基线比对 → 产出变更集
-   → 静默推进基线（首次建基线 / 下架造成的跳高）→ 为需要通知的变更创建 outbox 任务
+   → 静默推进基线（首次建基线 / 底线没变 / 下架造成的跳高）
+   → 为需要通知的变更创建 outbox 任务（**只有库龄跨档**）
+   → 为被静默的变更**留痕**（写 outbox，`status='suppressed'`，不投递）
    → **提交**
 2. **投递**：把 outbox 任务批量新增到飞书「调价记录表」→ 投递成功后回写基线 → 提交
 
@@ -11,6 +13,8 @@
 而且投递失败时任务必须**留在 outbox 里**等重试，不能连同检测结果一起回滚。
 
 **基线推进的顺序不能反**——见 `price_adjust_notify_service` 的模块说明。
+
+**通知口径（2026-11-22）**：只有「库龄跨档」推飞书，其余变化静默但留痕。
 """
 
 from __future__ import annotations
@@ -26,7 +30,10 @@ from backend.services.feishu_projection_service import (
     FeishuProjectionService,
     projection_payload_hash,
 )
-from backend.services.price_adjust_notify_service import PriceAdjustNotifyService
+from backend.services.price_adjust_notify_service import (
+    SUPPRESSED_REASON_NOT_TIER,
+    PriceAdjustNotifyService,
+)
 from modules.core.db import FeishuProjectionTask
 from modules.core.logger import get_logger
 
@@ -118,13 +125,43 @@ def _build_payload(change: dict) -> dict:
     }
 
 
+def _build_suppressed_payload(change: dict) -> dict:
+    """组装「被静默的调价变化」的留痕载荷。
+
+    与通知载荷同构，**额外**带上静默标记与静默原因 ⇒ 日后能回答
+    「这个 SKU 那天因为什么变了、为什么没有通知」。
+
+    ⚠️ 这份载荷**不会**被写进飞书——静默行只留在 ERP 的 outbox 里。
+    """
+    payload = _build_payload(change)
+    payload["suppressed"] = True
+    payload["suppression_reason"] = (
+        change.get("suppression_reason") or SUPPRESSED_REASON_NOT_TIER
+    )
+    return payload
+
+
 async def _async_detect_and_enqueue_price_adjustments() -> dict:
     # ---------- 第一段：检测 + 建任务 ----------
     async with AsyncSessionLocal() as db:
         service = PriceAdjustNotifyService(db)
-        notify, silent = await service.detect_changes()
+        notify, silent, suppressed = await service.detect_changes()
 
-        advanced = await service.advance_baselines(silent)
+        # ⚠️ **基线推进必须覆盖被静默的那些**（2026-11-22 新口径）：
+        #    静默只是"不通知"，不是"不处理"。不推进基线 ⇒ 明天还会把同一次
+        #    变化再判定一遍 ⇒ 后面真实的库龄跨档也被这坨重复噪音挡住。
+        advanced = await service.advance_baselines(silent + suppressed)
+
+        # ---------- 留痕：被静默的变更写进 outbox，但**永不投递** ----------
+        traced = 0
+        if suppressed:
+            projection = FeishuProjectionService(db)
+            traced = await projection.enqueue_suppressed(
+                [
+                    (_business_key(change), _build_suppressed_payload(change))
+                    for change in suppressed
+                ]
+            )
 
         enqueued = 0
         skipped = 0
@@ -154,9 +191,11 @@ async def _async_detect_and_enqueue_price_adjustments() -> dict:
 
     logger.info(
         "[PriceAdjustNotify] detection done: changed=%s notified=%s "
-        "baseline_advanced=%s skipped_inflight=%s",
-        len(notify),
+        "suppressed=%s traced=%s baseline_advanced=%s skipped_inflight=%s",
+        len(notify) + len(suppressed),
         enqueued,
+        len(suppressed),
+        traced,
         advanced,
         skipped,
     )
@@ -177,7 +216,10 @@ async def _async_detect_and_enqueue_price_adjustments() -> dict:
             )
 
     return {
-        "changed": len(notify),
+        "changed": len(notify) + len(suppressed),
+        "notified": enqueued,
+        "suppressed": len(suppressed),
+        "traced": traced,
         "baseline_advanced": advanced,
         "enqueued": enqueued,
         "skipped_inflight": skipped,

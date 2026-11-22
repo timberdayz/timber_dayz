@@ -128,10 +128,20 @@ def _state(sku_id, price, context, warehouse_code=""):
 
 @pytest.mark.asyncio
 async def test_two_warehouses_have_independent_baselines():
-    """同一个 SKU 在两个仓：基线互相独立，A 仓变了不牵连 B 仓。"""
+    """同一个 SKU 在两个仓：基线互相独立，A 仓变了不牵连 B 仓。
+
+    ⚠️ 2026-11-22 新口径：只有「库龄跨档」才通知 ⇒ 这里让 MY-01 真的跨档
+    （档位身份从 0 变成 60），否则它只是一次被静默的变化，测不到"按仓比对"。
+    """
     prev_my = _context(warehouse_code="MY-01", min_selling_price="100.00")
     prev_sg = _context(warehouse_code="SG-01", min_selling_price="100.00")
-    cur_my = _context(warehouse_code="MY-01", min_selling_price="110.00")
+    cur_my = _context(
+        warehouse_code="MY-01",
+        min_selling_price="110.00",
+        pricing_tier_label="滞销30天",
+        pricing_tier_min_restock_days=60,
+        age_days=70,
+    )
     cur_sg = _context(warehouse_code="SG-01", min_selling_price="100.00")
 
     service = _FakeService(
@@ -151,12 +161,15 @@ async def test_two_warehouses_have_independent_baselines():
         },
     )
 
-    notify, silent = await service.detect_changes()
+    notify, silent, suppressed = await service.detect_changes()
 
     assert len(notify) == 1, "只有 MY-01 的底线变了 ⇒ 只通知 MY-01"
     assert notify[0]["warehouse_code"] == "MY-01"
     assert notify[0]["direction"] == "上升"
-    assert silent == []
+    assert suppressed == []
+    # SG-01 底线没变 ⇒ 不通知、不留痕，但基线上下文照样刷新
+    assert len(silent) == 1
+    assert silent[0]["warehouse_code"] == "SG-01"
 
 
 @pytest.mark.asyncio
@@ -178,9 +191,10 @@ async def test_legacy_baseline_with_empty_warehouse_does_not_match_real_warehous
         },
     )
 
-    notify, silent = await service.detect_changes()
+    notify, silent, suppressed = await service.detect_changes()
 
     assert notify == [], "老基线与真实仓对不上 ⇒ 不该报变化"
+    assert suppressed == []
     assert len(silent) == 1, "应该只重建这个仓的基线"
     assert silent[0]["warehouse_code"] == "MY-01"
 

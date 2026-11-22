@@ -10,6 +10,26 @@
 ERP 侧**不做 update、不删除行、不管行归档到哪**。所以这里没有 search、没有
 record_id 管理，只有一件事：算出「变了」并写进去。
 
+**通知口径（2026-11-22 业务决定）：只通知「库龄跨档」**
+
+原设计是「凡是底线变了的 SKU 全部通知」。现在**收紧**成「只有库龄跨档才通知」。
+
+业务原话：*平台费率还在实践阶段，会经常调整* ⇒ 费率一动底线就动 ⇒ 通知表
+被费率类变化刷屏，运营看不过来。采购成本、规则调整、参考售价补齐、数据缺失
+（保护失效）、人工覆盖是同一类问题：它们变的是**定价输入**，不是**库龄档位**。
+
+| 这次变化 | 现在怎么做 |
+|---|---|
+| 库龄跨档（档位身份真的变了） | **通知**（推飞书「调价记录表」） |
+| 平台费率 / 采购成本 / 规则 / 参考售价补齐 / 数据缺失 / 人工覆盖 | **不通知**，但**留痕**（写进 outbox，`status='suppressed'`），日后可回溯 |
+
+⚠️ **静默 ≠ 不管**：被静默的变化照样**推进基线**。否则明天还会被判定成同一次
+变化，永远卡在同一天；后面真实的跨档也会被这坨噪音挡住。
+
+⚠️ **静默要留痕**：被静默的变化照样写一行 outbox（`entity_type='price_adjust_suppressed'`、
+`status='suppressed'`），保留归因上下文，供日后查「哪天因为什么变过」——
+但**永不投递**到飞书。
+
 **为什么需要基线**：自动算出来的最低售价**不落库**（见
 `product_pricing_service.compute_sku_pricing` 的设计决策），库里只有一个静态的
 人工覆盖值。系统能回答"现在最低卖多少钱"，但从来没有回答过"比上次是高了还是低了"。
@@ -70,6 +90,12 @@ REASON_MANUAL_OVERRIDE = "人工覆盖"
 DIRECTION_DOWN = "下降"
 DIRECTION_UP = "上升"
 DIRECTION_PROTECTION_LOST = "保护失效"
+
+# 被静默的调价变化在 outbox 里的标注（**留痕用**，不进飞书）。
+#
+# 2026-11-22 新口径：只有「库龄跨档」才通知；其余变化静默但留痕，
+# 方便日后查「哪天因为什么变过」。
+SUPPRESSED_REASON_NOT_TIER = "非库龄跨档"
 
 # 库龄来源标记（来自 product_pricing_service.compute_sku_pricing）
 TIER_SOURCE_AGE = "restock_days"
@@ -193,15 +219,7 @@ def classify_change_reason(prev: dict, cur: dict) -> str:
     #    显示名是可以改的（阶段 3 就把「滞销30天」改成「库龄≥60天」），
     #    拿显示名当身份 ⇒ 改一次名字，全库 SKU 都看起来"跨了档"
     #    ⇒ 最低售价变更通知会误报成「库龄跨档」⇒ 通知风暴。
-    prev_tier_key = prev.get("pricing_tier_min_restock_days")
-    cur_tier_key = cur.get("pricing_tier_min_restock_days")
-    if prev_tier_key is not None and cur_tier_key is not None:
-        tier_changed = prev_tier_key != cur_tier_key
-    else:
-        # 老快照还没有身份字段（改名之前存下来的）⇒ 退回比显示名。
-        # 只影响该行**第一次**通知的归因，之后的新快照就带身份了。
-        tier_changed = prev.get("pricing_tier_label") != cur.get("pricing_tier_label")
-    if tier_changed:
+    if tier_identity_changed(prev, cur):
         return REASON_TIER_CHANGE
 
     # 6) 档位没变但折扣率变了 = 规则表在同一档上改了参数
@@ -252,6 +270,48 @@ def is_delisting_jump(prev: dict, cur: dict) -> bool:
     ):
         return False
     return True
+
+
+def tier_identity_changed(prev: dict, cur: dict) -> bool:
+    """库龄档位（**身份**）是否变了。
+
+    ⚠️ 比的是**身份**（库龄起点 `pricing_tier_min_restock_days`），不是显示名 ——
+    显示名是可以改的（阶段 3 就把「滞销30天」改成「库龄≥60天」），
+    拿显示名当身份 ⇒ 改一次名字，全库 SKU 都看起来"跨了档" ⇒ 通知风暴。
+
+    老快照（身份字段上线之前存下来的）没有身份字段 ⇒ 退回比显示名。
+    """
+    prev_key = prev.get("pricing_tier_min_restock_days")
+    cur_key = cur.get("pricing_tier_min_restock_days")
+    if prev_key is not None and cur_key is not None:
+        return prev_key != cur_key
+    return prev.get("pricing_tier_label") != cur.get("pricing_tier_label")
+
+
+def is_tier_crossing(prev: dict, cur: dict) -> bool:
+    """这次底线变化是不是「库龄跨档」造成的——**唯一会被通知的那一类**。
+
+    判据（三条全中才算跨档）：
+
+    1. **两次快照都有库龄数据**（`age_days` 都不是 None）
+       ——没有库龄就没有"跨档"这回事：那是缺料（算不出底线）或下架。
+    2. **两次快照都有档位身份**
+       ——身份字段是后加的，老快照没有 ⇒ 无法判断，宁可**不通知**
+       （也不用显示名硬猜：改一次档位显示名就会全库误报）。
+    3. **身份真的不同**。
+
+    ⚠️ 为什么把「有库龄数据」和「有档位身份」都设成硬条件：
+    现在的通知口径是"只推库龄跨档"，所以判据必须**只认库龄**这一件事。
+    缺料导致的档位塌陷、下架导致的回落档，都不是库龄调整，静默掉；
+    老快照靠显示名硬猜，会在改档位显示名那天炸出一次通知风暴。
+    """
+    if prev.get("age_days") is None or cur.get("age_days") is None:
+        return False
+    prev_key = prev.get("pricing_tier_min_restock_days")
+    cur_key = cur.get("pricing_tier_min_restock_days")
+    if prev_key is None or cur_key is None:
+        return False
+    return prev_key != cur_key
 
 
 def build_context(
@@ -582,21 +642,29 @@ class PriceAdjustNotifyService:
     # 比对
     # ------------------------------------------------------------------
 
-    async def detect_changes(self) -> tuple[list[dict], list[dict]]:
+    async def detect_changes(self) -> tuple[list[dict], list[dict], list[dict]]:
         """比对当前状态与基线。
 
-        返回 ``(需要通知的变更, 需要静默推进基线的条目)``。
+        返回 ``(需要通知的变更, 需要静默推进基线的条目, 被静默但留痕的变更)``。
 
-        静默推进的两类：
-        1. 首次建基线（此前没有基线）——不通知，但要有基线，否则明天会误判成"变了"
-        2. 「下架造成的跳高」——语义上不成立的变更，不通知，但基线必须跟上，
-           否则明天还会重复判定为同一次跳高
+        **通知口径（2026-11-22）**：只有「库龄跨档」才通知（见模块说明）。
+
+        - **需要通知**：库龄跨档 ⇒ 底线变了，且变的原因是档位真的挪了。
+        - **静默推进基线**（不通知、不留痕）：
+          1. 首次建基线（此前没有基线）——不通知，但要有基线，否则明天会误判成"变了"
+          2. 底线没变（只是库龄在档内前进）——顺手把基线上下文刷新成当前状态
+          3. 「下架造成的跳高」——语义上不成立的变更，不通知，但基线必须跟上，
+             否则明天还会重复判定为同一次跳高
+        - **静默但留痕**：底线变了，但不是库龄跨档（费率 / 采购成本 / 规则 /
+          参考售价补齐 / 数据缺失 / 人工覆盖）——写进 outbox 供回溯，**不推飞书**。
+          基线照样推进（否则明天还会重复判定为同一次变化）。
         """
         states = await self.collect_pricing_states()
         baselines = await self.load_baselines()
 
         notify: list[dict] = []
         silent: list[dict] = []
+        suppressed: list[dict] = []
 
         for (sku_id, platform_code, warehouse_code), cur in states.items():
             prev = baselines.get((sku_id, platform_code, warehouse_code))
@@ -618,12 +686,23 @@ class PriceAdjustNotifyService:
             old_price = prev["min_selling_price"]
             direction = classify_direction(old_price, new_price)
             if direction is None:
-                # 底线没变 → 不是一次需要通知的变更，基线保持不动
+                # 底线没变 → 不是一次变更。
+                # ⚠️ 但**要把基线上下文刷新成当前状态**：老快照可能压根没有档位身份
+                #    （身份字段上线之前存下来的），不刷新的话后面真的跨档也判不出来；
+                #    而且上下文过期会让下一次变化被归因到错误的原因上。
+                silent.append(
+                    {
+                        "sku_id": sku_id,
+                        "platform_code": platform_code,
+                        "warehouse_code": warehouse_code,
+                        "min_selling_price": new_price,
+                        "context": cur["context"],
+                    }
+                )
                 continue
 
             prev_context = prev["context"]
             cur_context = cur["context"]
-            reason = classify_change_reason(prev_context, cur_context)
 
             if direction == DIRECTION_UP and is_delisting_jump(
                 prev_context, cur_context
@@ -640,29 +719,42 @@ class PriceAdjustNotifyService:
                 )
                 continue
 
-            notify.append(
-                {
-                    "sku_id": sku_id,
-                    "platform_code": platform_code,
-                    "warehouse_code": warehouse_code,
-                    "sku_key": cur["sku_key"],
-                    "spu": cur["spu"],
-                    "sku_name": cur["sku_name"],
-                    "specification": cur["specification"],
-                    "old_min_selling_price": _decimal_to_str(old_price),
-                    "new_min_selling_price": _decimal_to_str(new_price),
-                    "change_rate": compute_change_rate(old_price, new_price),
-                    "direction": direction,
-                    "reason": reason,
-                    "pricing_tier_label": cur_context.get("pricing_tier_label"),
-                    "age_days": cur.get("age_days"),
-                    "current_qty": cur.get("current_qty"),
-                    "inventory_value": cur.get("inventory_value"),
-                    "context": cur_context,
-                }
-            )
+            change = {
+                "sku_id": sku_id,
+                "platform_code": platform_code,
+                "warehouse_code": warehouse_code,
+                "sku_key": cur["sku_key"],
+                "spu": cur["spu"],
+                "sku_name": cur["sku_name"],
+                "specification": cur["specification"],
+                # 基线推进要用的是**原始数值**（`_decimal_to_str` 出来的是字符串）。
+                "min_selling_price": new_price,
+                "old_min_selling_price": _decimal_to_str(old_price),
+                "new_min_selling_price": _decimal_to_str(new_price),
+                "change_rate": compute_change_rate(old_price, new_price),
+                "direction": direction,
+                "pricing_tier_label": cur_context.get("pricing_tier_label"),
+                "age_days": cur.get("age_days"),
+                "current_qty": cur.get("current_qty"),
+                "inventory_value": cur.get("inventory_value"),
+                "context": cur_context,
+            }
 
-        return notify, silent
+            if is_tier_crossing(prev_context, cur_context):
+                # 库龄跨档 —— **唯一会被通知的那一类**。
+                # 「变动原因」固定写「库龄档位变化」：这一列在飞书表里是单选，
+                # 写别的值只会让运营看到"库龄跨档的行却写着平台费率变化"。
+                change["reason"] = REASON_TIER_CHANGE
+                notify.append(change)
+                continue
+
+            # 不是库龄跨档 → 不推送，但**留痕**（归因写清楚，静默原因也写清楚）。
+            change["reason"] = classify_change_reason(prev_context, cur_context)
+            change["suppressed"] = True
+            change["suppression_reason"] = SUPPRESSED_REASON_NOT_TIER
+            suppressed.append(change)
+
+        return notify, silent, suppressed
 
     # ------------------------------------------------------------------
     # 基线推进

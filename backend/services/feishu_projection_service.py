@@ -40,6 +40,19 @@ from .feishu_projection_client import (
 # 过长，且失败时整批回滚代价大。
 PRICE_ADJUST_DELIVERY_LIMIT = 2000
 
+# 「被静默的调价变化」在 outbox 里的**实体类型**与**状态**。
+#
+# 2026-11-22 新口径：只有「库龄跨档」才推飞书；其余变化（平台费率 / 采购成本 /
+# 规则 / 参考售价补齐 / 数据缺失 / 人工覆盖）静默，但**留痕**。
+#
+# ⚠️ 为什么用**独立的 entity_type**而不是复用 `price_adjust`：
+#    - 投递查询按 entity_type 取任务 ⇒ 这一类**永远不会被投递**到飞书；
+#    - 唯一约束 `(entity_type, business_key, payload_hash)` 分开 ⇒
+#      留痕行与通知行互不撞约束；
+#    - 想查"哪天因为什么变过"时，按 entity_type 一筛就是全部静默记录。
+PRICE_ADJUST_SUPPRESSED_ENTITY_TYPE = "price_adjust_suppressed"
+PRICE_ADJUST_SUPPRESSED_STATUS = "suppressed"
+
 # 飞书「调价记录表」的「平台」单选字段**现有**的选项名。
 #
 # ⚠️ 这是**外部 Base 的固定结构**（与本模块里那些中文字段名「ERP SKU」「备注」
@@ -126,6 +139,62 @@ class FeishuProjectionService:
         self.db.add(task)
         await self.db.flush()
         return task
+
+    async def enqueue_suppressed(self, items: list[tuple[str, dict[str, Any]]]) -> int:
+        """批量留痕「被静默的调价变化」——写进 outbox，但**永不投递**到飞书。
+
+        2026-11-22 新口径：只有「库龄跨档」才通知。其余底线变化（平台费率 /
+        采购成本 / 规则 / 参考售价补齐 / 数据缺失 / 人工覆盖）不推送，但要在
+        ERP 侧留一条记录，方便日后回溯「哪天因为什么变过」。
+
+        ⚠️ **状态直接落 `suppressed`**，不走 `enqueue` 的 `pending`：
+           投递查询只捞 `pending` 与「到期的 `failed`」，这一类状态两头都不沾
+           ⇒ 不可能被任何投递路径捞走 ⇒ 不可能混进飞书调价记录表。
+
+        ⚠️ 去重判据是「业务键 + 载荷哈希」：同一次变化重跑时载荷逐字相同 ⇒
+           哈希相同 ⇒ 不重复留痕。不同次变化（哪怕同一个 SKU）哈希不同 ⇒ 都留。
+
+        返回新建的行数。
+        """
+        if not items:
+            return 0
+        hashed = [
+            (business_key, projection_payload_hash(payload))
+            for business_key, payload in items
+        ]
+        rows = (
+            await self.db.execute(
+                select(
+                    FeishuProjectionTask.business_key,
+                    FeishuProjectionTask.payload_hash,
+                ).where(
+                    FeishuProjectionTask.entity_type
+                    == PRICE_ADJUST_SUPPRESSED_ENTITY_TYPE,
+                    FeishuProjectionTask.business_key.in_([key for key, _ in hashed]),
+                    FeishuProjectionTask.payload_hash.in_(
+                        [digest for _, digest in hashed]
+                    ),
+                )
+            )
+        ).all()
+        existing = {(row.business_key, row.payload_hash) for row in rows}
+
+        created = 0
+        for (business_key, payload_hash), (_, payload) in zip(hashed, items):
+            if (business_key, payload_hash) in existing:
+                continue
+            self.db.add(
+                FeishuProjectionTask(
+                    entity_type=PRICE_ADJUST_SUPPRESSED_ENTITY_TYPE,
+                    business_key=business_key,
+                    payload_hash=payload_hash,
+                    payload_json=payload,
+                    status=PRICE_ADJUST_SUPPRESSED_STATUS,
+                )
+            )
+            created += 1
+        await self.db.flush()
+        return created
 
     async def enqueue_full_refresh(self, reason: str) -> int:
         count = 0
@@ -259,6 +328,63 @@ class FeishuProjectionService:
             price_adjust_table_id,
             price_adjust_base_token,
         )
+
+    async def list_suppressed(
+        self, days: int = 30, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """列出被静默的调价变化（留痕记录）。
+
+        2026-11-22 新口径：只有「库龄跨档」才推飞书，其余变化静默但留痕。
+        这个方法把留痕**变成可查的**——回答「哪天因为什么变过、为什么没通知」。
+
+        ⚠️ 只读：不会碰飞书，也不会改基线。
+        """
+        since = datetime.now(timezone.utc) - timedelta(days=max(1, min(int(days), 365)))
+        rows = (
+            (
+                await self.db.execute(
+                    select(FeishuProjectionTask)
+                    .where(
+                        FeishuProjectionTask.entity_type
+                        == PRICE_ADJUST_SUPPRESSED_ENTITY_TYPE,
+                        FeishuProjectionTask.created_at >= since,
+                    )
+                    .order_by(FeishuProjectionTask.created_at.desc())
+                    .limit(max(1, min(int(limit), 500)))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        records: list[dict[str, Any]] = []
+        for row in rows:
+            payload = dict(row.payload_json or {})
+            records.append(
+                {
+                    "business_key": row.business_key,
+                    "sku_key": payload.get("sku_key"),
+                    "spu": payload.get("spu"),
+                    "sku_name": payload.get("sku_name"),
+                    "platform_code": payload.get("platform_code"),
+                    "warehouse_code": payload.get("warehouse_code"),
+                    "direction": payload.get("direction"),
+                    "reason": payload.get("reason"),
+                    "suppression_reason": payload.get("suppression_reason"),
+                    "old_min_selling_price": _to_float(
+                        payload.get("old_min_selling_price")
+                    ),
+                    "new_min_selling_price": _to_float(
+                        payload.get("new_min_selling_price")
+                    ),
+                    "change_rate": payload.get("change_rate"),
+                    "pricing_tier_label": payload.get("pricing_tier_label"),
+                    "age_days": payload.get("age_days"),
+                    "changed_at": (
+                        row.created_at.isoformat() if row.created_at else None
+                    ),
+                }
+            )
+        return records
 
     async def status(self) -> dict[str, Any]:
         config = await self.get_config()

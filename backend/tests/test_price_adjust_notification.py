@@ -35,12 +35,14 @@ from backend.services.price_adjust_notify_service import (
     REASON_PURCHASE_COST,
     REASON_REFERENCE_PRICE,
     REASON_TIER_CHANGE,
+    SUPPRESSED_REASON_NOT_TIER,
     PriceAdjustNotifyService,
     build_context,
     classify_change_reason,
     classify_direction,
     compute_change_rate,
     is_delisting_jump,
+    is_tier_crossing,
 )
 
 
@@ -52,6 +54,10 @@ def _context(**overrides) -> dict:
         "min_selling_price_is_override": False,
         "pricing_tier_source": "restock_days",
         "pricing_tier_label": "日常",
+        # 档位**身份**（库龄起点）：显示名可以改，身份不会。
+        # ⚠️ 2026-11-22 新口径下「是不是库龄跨档」**只看身份**，
+        #    所以每个跨档的用例都必须同时改身份，否则判不出来。
+        "pricing_tier_min_restock_days": 0,
         "target_margin_rate": "0.25",
         "discount_rate": "0.10",
         "age_days": 10,
@@ -129,10 +135,16 @@ def test_compute_change_rate_none_when_old_price_missing_or_zero():
 
 def test_reason_tier_change_when_tier_label_moved():
     prev = _context(
-        pricing_tier_label="日常", target_margin_rate="0.25", discount_rate="0.10"
+        pricing_tier_label="日常",
+        pricing_tier_min_restock_days=0,
+        target_margin_rate="0.25",
+        discount_rate="0.10",
     )
     cur = _context(
-        pricing_tier_label="滞销60天", target_margin_rate="0.18", discount_rate="0.20"
+        pricing_tier_label="滞销60天",
+        pricing_tier_min_restock_days=60,
+        target_margin_rate="0.18",
+        discount_rate="0.20",
     )
     assert classify_change_reason(prev, cur) == REASON_TIER_CHANGE
 
@@ -341,9 +353,10 @@ async def test_first_run_only_builds_baseline_without_notifying():
     否则第一天就会把全量 SKU 当成"变了"推一遍。
     """
     service = _FakeService({(1, "tiktok", ""): _state(1, 128.56, _context())}, {})
-    notify, silent = await service.detect_changes()
+    notify, silent, suppressed = await service.detect_changes()
 
     assert notify == []
+    assert suppressed == []
     assert len(silent) == 1
     assert silent[0]["sku_id"] == 1
     assert silent[0]["min_selling_price"] == 128.56
@@ -360,22 +373,29 @@ async def test_unchanged_floor_produces_no_change():
             }
         },
     )
-    notify, silent = await service.detect_changes()
+    notify, silent, suppressed = await service.detect_changes()
 
     assert notify == []
-    assert silent == []
+    assert suppressed == []
+    # 底线没变 ⇒ 不是一次变更；但基线上下文要**刷新**成当前状态，
+    # 否则老快照可能一直缺档位身份（身份字段上线前存下来的），
+    # 后面真的跨档也判不出来。
+    assert len(silent) == 1
+    assert silent[0]["sku_id"] == 1
 
 
 @pytest.mark.asyncio
 async def test_dropped_floor_produces_a_downward_notification():
     prev = _context(
         pricing_tier_label="滞销60天",
+        pricing_tier_min_restock_days=60,
         target_margin_rate="0.18",
         discount_rate="0.20",
         age_days=95,
     )
     cur = _context(
         pricing_tier_label="滞销60天以上",
+        pricing_tier_min_restock_days=90,
         target_margin_rate="0.10",
         discount_rate="0.30",
         age_days=125,
@@ -384,9 +404,10 @@ async def test_dropped_floor_produces_a_downward_notification():
         {(1, "tiktok", ""): _state(1, 90.82, cur)},
         {(1, "tiktok", ""): {"min_selling_price": Decimal("128.56"), "context": prev}},
     )
-    notify, silent = await service.detect_changes()
+    notify, silent, suppressed = await service.detect_changes()
 
     assert silent == []
+    assert suppressed == []
     assert len(notify) == 1
     change = notify[0]
     assert change["direction"] == DIRECTION_DOWN
@@ -421,16 +442,23 @@ async def test_delisting_jump_is_excluded_but_baseline_still_advances():
         {(1, "tiktok", ""): _state(1, 128.56, cur)},
         {(1, "tiktok", ""): {"min_selling_price": Decimal("90.82"), "context": prev}},
     )
-    notify, silent = await service.detect_changes()
+    notify, silent, suppressed = await service.detect_changes()
 
     assert notify == []
+    assert suppressed == []
     assert len(silent) == 1
     assert silent[0]["min_selling_price"] == 128.56
     assert silent[0]["context"]["pricing_tier_source"] == "fallback_no_restock_days"
 
 
 @pytest.mark.asyncio
-async def test_protection_loss_produces_a_notification():
+async def test_protection_loss_is_not_notified_but_traced():
+    """保护失效（算不出底线）现在**不通知**，但要**留痕**。
+
+    2026-11-22 业务决定：通知只保留「库龄跨档」这一类，
+    保护失效属于「数据缺失」，不是库龄调整 ⇒ 不推飞书，
+    但照样写进 outbox 供回溯（归因写「数据缺失」）。
+    """
     prev = _context()
     cur = _context(
         min_selling_price=None,
@@ -441,23 +469,28 @@ async def test_protection_loss_produces_a_notification():
         {(1, "tiktok", ""): _state(1, None, cur)},
         {(1, "tiktok", ""): {"min_selling_price": Decimal("128.56"), "context": prev}},
     )
-    notify, silent = await service.detect_changes()
+    notify, silent, suppressed = await service.detect_changes()
 
+    assert notify == []
     assert silent == []
-    assert len(notify) == 1
-    assert notify[0]["direction"] == DIRECTION_PROTECTION_LOST
-    assert notify[0]["reason"] == REASON_DATA_MISSING
-    assert notify[0]["change_rate"] is None
+    assert len(suppressed) == 1
+    assert suppressed[0]["direction"] == DIRECTION_PROTECTION_LOST
+    assert suppressed[0]["reason"] == REASON_DATA_MISSING
+    assert suppressed[0]["change_rate"] is None
+    assert suppressed[0]["suppressed"] is True
 
 
 @pytest.mark.asyncio
-async def test_protection_recovery_produces_a_notification():
-    """底线从「算不出」变成「算得出」= 保护恢复了，必须通知。
+async def test_protection_recovery_is_not_notified_but_traced():
+    """底线从「算不出」变成「算得出」= 保护恢复。
 
     ⚠️ 这条曾经**永远发不出去**：算不出时基线价格是 NULL，
     而基线判据若用 `last_notified_min_price IS NOT NULL`，这个 SKU 就一直被当成
-    "从未处理过" → 每次都静默重建基线 → 等它算出来了也仍然不通知。
+    "从未处理过" → 每次都静默重建基线 → 等它算出来了也仍然不处理。
     （2026-10-23 用真实库跑出来才发现：1122 个 SKU 里有 39 个一直在重复建基线。）
+
+    现在（新口径）：不推飞书，但**留痕**，且基线照常推进
+    —— 否则它会永远被当成"从未处理过"。
     """
     prev = _context(
         min_selling_price=None,
@@ -469,14 +502,310 @@ async def test_protection_recovery_produces_a_notification():
         {(1, "tiktok", ""): _state(1, 128.56, cur)},
         {(1, "tiktok", ""): {"min_selling_price": None, "context": prev}},
     )
-    notify, silent = await service.detect_changes()
+    notify, silent, suppressed = await service.detect_changes()
 
+    assert notify == []
     assert silent == []
+    assert len(suppressed) == 1
+    assert suppressed[0]["direction"] == DIRECTION_UP
+    assert suppressed[0]["reason"] == REASON_DATA_MISSING
+    assert suppressed[0]["old_min_selling_price"] is None
+    assert suppressed[0]["new_min_selling_price"] == "128.56"
+
+
+# ---------------------------------------------------------------------------
+# 通知口径（2026-11-22）：只有「库龄跨档」才通知
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_platform_rate_change_is_not_notified_but_traced():
+    """平台费率变了 ⇒ **不通知**，但留痕。
+
+    业务原话：平台费率还在实践阶段，会经常调整 ⇒ 每次都推 = 通知表刷屏。
+    """
+    prev = _context(other_cost_rate="0.2727")
+    cur = _context(other_cost_rate="0.3000")
+    service = _FakeService(
+        {(1, "tiktok", ""): _state(1, 140.59, cur)},
+        {(1, "tiktok", ""): {"min_selling_price": Decimal("128.56"), "context": prev}},
+    )
+    notify, silent, suppressed = await service.detect_changes()
+
+    assert notify == [], "费率变化不是库龄跨档 ⇒ 不推飞书"
+    assert silent == []
+    assert len(suppressed) == 1
+    assert suppressed[0]["reason"] == REASON_PLATFORM_RATE
+    assert suppressed[0]["suppressed"] is True
+    assert suppressed[0]["suppression_reason"] == SUPPRESSED_REASON_NOT_TIER
+
+
+@pytest.mark.asyncio
+async def test_purchase_cost_change_is_not_notified_but_traced():
+    """采购成本变化同样只留痕、不通知（口径里只保留库龄跨档）。"""
+    prev = _context(purchase_cost="45.20")
+    cur = _context(purchase_cost="51.00")
+    service = _FakeService(
+        {(1, "tiktok", ""): _state(1, 140.59, cur)},
+        {(1, "tiktok", ""): {"min_selling_price": Decimal("128.56"), "context": prev}},
+    )
+    notify, silent, suppressed = await service.detect_changes()
+
+    assert notify == []
+    assert len(suppressed) == 1
+    assert suppressed[0]["reason"] == REASON_PURCHASE_COST
+
+
+@pytest.mark.asyncio
+async def test_tier_crossing_is_notified_even_when_another_input_also_changed():
+    """跨档了 ⇒ 通知；哪怕同一天费率也调了（跨档才是要人动手的那件事）。"""
+    prev = _context(
+        pricing_tier_label="日常",
+        pricing_tier_min_restock_days=0,
+        age_days=10,
+        other_cost_rate="0.2727",
+    )
+    cur = _context(
+        pricing_tier_label="滞销60天",
+        pricing_tier_min_restock_days=60,
+        age_days=70,
+        other_cost_rate="0.3000",
+    )
+    service = _FakeService(
+        {(1, "tiktok", ""): _state(1, 118.15, cur)},
+        {(1, "tiktok", ""): {"min_selling_price": Decimal("128.56"), "context": prev}},
+    )
+    notify, silent, suppressed = await service.detect_changes()
+
     assert len(notify) == 1
-    assert notify[0]["direction"] == DIRECTION_UP
-    assert notify[0]["reason"] == REASON_DATA_MISSING
-    assert notify[0]["old_min_selling_price"] is None
-    assert notify[0]["new_min_selling_price"] == "128.56"
+    assert (
+        notify[0]["reason"] == REASON_TIER_CHANGE
+    ), "通知行的变动原因固定写库龄档位变化"
+    assert suppressed == []
+
+
+@pytest.mark.asyncio
+async def test_tier_change_without_age_data_is_not_a_crossing():
+    """档位变了但**没有库龄数据** ⇒ 不是库龄调整（是缺料/下架）⇒ 不通知。"""
+    prev = _context(
+        pricing_tier_label="滞销60天",
+        pricing_tier_min_restock_days=60,
+        age_days=95,
+    )
+    cur = _context(
+        pricing_tier_label="日常",
+        pricing_tier_min_restock_days=0,
+        age_days=None,
+        missing_reasons=["missing_unit_volume"],
+    )
+    service = _FakeService(
+        {(1, "tiktok", ""): _state(1, 140.59, cur)},
+        {(1, "tiktok", ""): {"min_selling_price": Decimal("128.56"), "context": prev}},
+    )
+    notify, silent, suppressed = await service.detect_changes()
+
+    assert notify == []
+    assert len(suppressed) == 1
+
+
+@pytest.mark.asyncio
+async def test_legacy_snapshot_without_tier_identity_is_not_notified():
+    """老快照没有档位身份 ⇒ 判不出是不是跨档 ⇒ 静默，不拿显示名硬猜。
+
+    拿显示名硬猜的后果：改一次档位显示名就会全库误报成"跨档" ⇒ 通知风暴。
+    """
+    prev = _context(pricing_tier_min_restock_days=None, age_days=95)
+    cur = _context(
+        pricing_tier_label="滞销60天",
+        pricing_tier_min_restock_days=60,
+        age_days=125,
+    )
+    service = _FakeService(
+        {(1, "tiktok", ""): _state(1, 90.82, cur)},
+        {(1, "tiktok", ""): {"min_selling_price": Decimal("128.56"), "context": prev}},
+    )
+    notify, silent, suppressed = await service.detect_changes()
+
+    assert notify == []
+    assert len(suppressed) == 1, "判不出跨档 ⇒ 静默但留痕，并让基线刷新出新身份"
+
+
+def test_is_tier_crossing_requires_age_and_identity_on_both_sides():
+    """纯函数：三条硬条件（都有库龄 / 都有身份 / 身份不同）。"""
+    base = _context(age_days=10, pricing_tier_min_restock_days=0)
+
+    assert is_tier_crossing(
+        base, _context(age_days=70, pricing_tier_min_restock_days=60)
+    )
+    assert not is_tier_crossing(base, base)
+    # 一边没有库龄 ⇒ 不是跨档
+    assert not is_tier_crossing(
+        base, _context(age_days=None, pricing_tier_min_restock_days=60)
+    )
+    # 一边没有身份 ⇒ 判不出来 ⇒ 不通知
+    assert not is_tier_crossing(
+        base, _context(age_days=70, pricing_tier_min_restock_days=None)
+    )
+
+
+@pytest.mark.asyncio
+async def test_suppressed_changes_are_traced_but_never_delivered(outbox_sqlite_session):
+    """静默的变化：**写进 outbox 留痕，但永远不会被投递到飞书**。
+
+    钉死两件事：
+    1. 留痕行落在**独立的 entity_type + `suppressed` 状态**上
+       ⇒ 投递查询（只捞 `pending` / 到期的 `failed`）永远捞不到它；
+    2. 同一次变化重跑时不重复留痕（去重键 + 载荷哈希双因子）。
+    """
+    from backend.services.feishu_projection_service import (
+        PRICE_ADJUST_SUPPRESSED_ENTITY_TYPE,
+        PRICE_ADJUST_SUPPRESSED_STATUS,
+        FeishuProjectionService,
+    )
+    from backend.tasks.price_adjust_notify_tasks import (
+        _business_key,
+        _build_suppressed_payload,
+    )
+    from modules.core.db import FeishuProjectionTask
+
+    change = {
+        "sku_id": 1,
+        "platform_code": "tiktok",
+        "warehouse_code": "",
+        "sku_key": "SKU-1",
+        "spu": "SPU-1",
+        "sku_name": "商品1",
+        "specification": "黑色",
+        "old_min_selling_price": "128.56",
+        "new_min_selling_price": "140.59",
+        "change_rate": 0.0936,
+        "direction": DIRECTION_UP,
+        "reason": REASON_PLATFORM_RATE,
+        "suppressed": True,
+        "suppression_reason": SUPPRESSED_REASON_NOT_TIER,
+        "pricing_tier_label": "日常",
+        "age_days": 10,
+        "current_qty": 100,
+        "inventory_value": 1000.0,
+        "context": _context(),
+    }
+    payload = _build_suppressed_payload(change)
+    service = FeishuProjectionService(outbox_sqlite_session)
+
+    created = await service.enqueue_suppressed([(_business_key(change), payload)])
+    assert created == 1
+
+    row = (
+        (
+            await outbox_sqlite_session.execute(
+                select(FeishuProjectionTask).where(
+                    FeishuProjectionTask.entity_type
+                    == PRICE_ADJUST_SUPPRESSED_ENTITY_TYPE
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert row is not None
+    assert row.status == PRICE_ADJUST_SUPPRESSED_STATUS
+    assert row.payload_json["suppressed"] is True
+    assert row.payload_json["reason"] == REASON_PLATFORM_RATE
+
+    # 同一次变化重跑 ⇒ 不重复留痕
+    assert await service.enqueue_suppressed([(_business_key(change), payload)]) == 0
+
+
+@pytest.mark.asyncio
+async def test_suppressed_rows_are_not_picked_up_by_delivery(outbox_sqlite_session):
+    """投递路径**看不见**静默行：只捞 `pending` 与「到期的 `failed`」。"""
+    from backend.services.feishu_projection_service import (
+        PRICE_ADJUST_SUPPRESSED_ENTITY_TYPE,
+        PRICE_ADJUST_SUPPRESSED_STATUS,
+        FeishuProjectionService,
+    )
+    from modules.core.db import FeishuProjectionTask
+
+    outbox_sqlite_session.add(
+        FeishuProjectionTask(
+            entity_type=PRICE_ADJUST_SUPPRESSED_ENTITY_TYPE,
+            business_key="1:tiktok",
+            payload_hash="hash-suppressed",
+            payload_json={"suppressed": True},
+            status=PRICE_ADJUST_SUPPRESSED_STATUS,
+        )
+    )
+    await outbox_sqlite_session.flush()
+
+    picked = (
+        (
+            await outbox_sqlite_session.execute(
+                select(FeishuProjectionTask).where(
+                    FeishuProjectionTask.status == "pending"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert picked == [], "静默行绝不能落进待投递队列"
+    assert FeishuProjectionService(outbox_sqlite_session) is not None
+
+
+@pytest.mark.asyncio
+async def test_suppressed_records_are_queryable(outbox_sqlite_session):
+    """留痕要**查得到**：能列出「哪天因为什么变过、为什么没通知」。"""
+    from backend.services.feishu_projection_service import FeishuProjectionService
+    from backend.tasks.price_adjust_notify_tasks import (
+        _business_key,
+        _build_suppressed_payload,
+    )
+
+    change = {
+        "sku_id": 1,
+        "platform_code": "tiktok",
+        "warehouse_code": "MY-01",
+        "sku_key": "SKU-1",
+        "spu": "SPU-1",
+        "sku_name": "商品1",
+        "specification": "黑色",
+        "old_min_selling_price": "128.56",
+        "new_min_selling_price": "140.59",
+        "change_rate": 0.0936,
+        "direction": DIRECTION_UP,
+        "reason": REASON_PLATFORM_RATE,
+        "suppressed": True,
+        "suppression_reason": SUPPRESSED_REASON_NOT_TIER,
+        "pricing_tier_label": "日常",
+        "age_days": 10,
+        "current_qty": 100,
+        "inventory_value": 1000.0,
+        "context": _context(),
+    }
+    service = FeishuProjectionService(outbox_sqlite_session)
+    await service.enqueue_suppressed(
+        [(_business_key(change), _build_suppressed_payload(change))]
+    )
+
+    records = await service.list_suppressed(days=30, limit=10)
+    assert len(records) == 1
+    record = records[0]
+    assert record["business_key"] == "1:tiktok:MY-01"
+    assert record["sku_key"] == "SKU-1"
+    assert record["reason"] == REASON_PLATFORM_RATE
+    assert record["suppression_reason"] == SUPPRESSED_REASON_NOT_TIER
+    assert record["direction"] == DIRECTION_UP
+    assert record["old_min_selling_price"] == 128.56
+    assert record["new_min_selling_price"] == 140.59
+    assert record["changed_at"] is not None
+
+
+def test_suppressed_endpoint_is_registered():
+    """留痕的查询入口必须真的挂上路由（否则就是"只有代码没有入口"）。"""
+    from backend.domains.business.routers.product_center import router
+
+    paths = {route.path for route in router.routes}
+    assert "/api/feishu-projection/suppressed" in paths
 
 
 # ---------------------------------------------------------------------------
@@ -672,8 +1001,9 @@ async def test_router_and_detection_share_one_pricing_implementation(
     assert router_payload["pricing_tier_source"] == "fallback_no_restock_days"
 
     # 首次跑：只建基线，不通知
-    notify, silent = await service.detect_changes()
+    notify, silent, suppressed = await service.detect_changes()
     assert notify == []
+    assert suppressed == []
     assert len(silent) == 1
     assert silent[0]["sku_id"] == sku_id
     assert silent[0]["min_selling_price"] == detected

@@ -1563,6 +1563,37 @@ class FeishuProjectionInitializeRequest(BaseModel):
     )
 
 
+class PriceAdjustSuppressedRecordResponse(BaseModel):
+    """一条「被静默的调价变化」的留痕记录。
+
+    2026-11-22 新口径：只有「库龄跨档」才推飞书；其余变化静默但留痕。
+    这条记录就是留痕的对外形态——回答「哪天因为什么变过、为什么没通知」。
+    """
+
+    business_key: str = Field(description="SKU × 平台 × 仓 的去重键")
+    sku_key: Optional[str] = None
+    spu: Optional[str] = None
+    sku_name: Optional[str] = None
+    platform_code: Optional[str] = None
+    warehouse_code: Optional[str] = None
+    direction: Optional[str] = Field(default=None, description="上升 / 下降 / 保护失效")
+    reason: Optional[str] = Field(default=None, description="变动原因（归因）")
+    suppression_reason: Optional[str] = Field(default=None, description="静默原因")
+    old_min_selling_price: Optional[float] = None
+    new_min_selling_price: Optional[float] = None
+    change_rate: Optional[float] = None
+    pricing_tier_label: Optional[str] = None
+    age_days: Optional[int] = None
+    changed_at: Optional[str] = Field(default=None, description="这次变化被判定的时间")
+
+
+class PriceAdjustSuppressedListResponse(BaseModel):
+    """被静默的调价变化（留痕）列表。"""
+
+    data: list[PriceAdjustSuppressedRecordResponse]
+    count: int = Field(description="本次返回的条数")
+
+
 class ProfitEstimateCreateRequest(BaseModel):
     sku_id: int = Field(gt=0)
     assumption_version: str = Field(min_length=1, max_length=64)

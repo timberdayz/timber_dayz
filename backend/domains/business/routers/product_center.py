@@ -21,6 +21,7 @@ from backend.schemas.product_center import (
     DeliveryRateRuleResponse,
     DeliveryRateRuleUpdateRequest,
     FeishuProjectionInitializeRequest,
+    PriceAdjustSuppressedListResponse,
     LogisticsBillCreateRequest,
     LogisticsBillLinesReplaceRequest,
     LogisticsBillPurchaseOrdersReplaceRequest,
@@ -6725,6 +6726,25 @@ async def initialize_feishu_projection(
 @router.get("/api/feishu-projection/status")
 async def get_feishu_projection_status(db: AsyncSession = Depends(get_async_db)):
     return await FeishuProjectionService(db).status()
+
+
+@router.get(
+    "/api/feishu-projection/suppressed",
+    response_model=PriceAdjustSuppressedListResponse,
+)
+async def list_suppressed_price_adjustments(
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """被静默的调价变化（留痕）：回答「哪天因为什么变过、为什么没通知」。
+
+    2026-11-22 新口径：只有「库龄跨档」会推飞书调价记录表；
+    其余变化（平台费率 / 采购成本 / 规则 / 参考售价补齐 / 数据缺失 / 人工覆盖）
+    静默但留痕，这里就能查到。
+    """
+    records = await FeishuProjectionService(db).list_suppressed(days=days, limit=limit)
+    return {"data": records, "count": len(records)}
 
 
 @router.post("/api/feishu-projection/retry-failed")

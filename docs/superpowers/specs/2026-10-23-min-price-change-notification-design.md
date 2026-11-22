@@ -2,6 +2,16 @@
 
 **状态**: 已实现
 **日期**: 2026-10-23
+
+> ⚠️ **口径变更（2026-11-22，v7.38.0）**：本文 §2.1「零遗漏：凡是最低售价变了的
+> SKU 全部通知」**已不再成立**。现在的口径是**只通知「库龄跨档」**，
+> 其余变化（平台费率 / 采购成本 / 规则调整 / 参考售价补齐 / 数据缺失 /
+> 人工覆盖）**静默但留痕**（写进 outbox，`entity_type='price_adjust_suppressed'`、
+> `status='suppressed'`，**不进飞书表**）。业务理由：平台费率还在实践阶段、
+> 会经常调整，一动就推等于每天刷屏。
+> 本文其余章节（数据模型、飞书侧结构、API 硬约束、基线顺序）**仍然有效**。
+> 详见 `CHANGELOG.md` 的 v7.38.0 段。
+
 **范围**: 商品中心定价链路（`backend/domains/business/routers/product_center.py`、`backend/services/product_pricing_service.py`、`backend/services/sku_pricing_policy_service.py`）、新增共享取数层（`backend/services/product_pricing_query_service.py`、`backend/services/inventory/inventory_age_query_service.py`）、新增检测服务（`backend/services/price_adjust_notify_service.py`）、新增每日任务（`backend/tasks/price_adjust_notify_tasks.py`）、飞书投影（`backend/services/feishu_projection_service.py`、`backend/services/feishu_projection_client.py`）、schema（`modules/core/db/schema_parts/dimensions.py`、`modules/core/db/schema_parts/collection.py`）、迁移（`current_migrations/versions/20261023_price_adjust_notification.py`）、调度（`backend/celery_app.py`）。
 
 **非范围**:
