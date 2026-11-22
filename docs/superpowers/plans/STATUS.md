@@ -26,7 +26,7 @@
 | 7 | 采集组件 lint 仍是告警模式（范围已收窄，强度未提升） | 加固方向 | 待拍板 | 本文件「批次 F」节 |
 | 8 | 覆盖缺口两项：① legacy `modules/apps/{account_manager,collection_center}/contract_tests.py` 不再由 CI 执行；② **`backend/tests/` 下的 async 用例不能混进 CI 根契约清单**（CI 钉 `pytest==7.4.3` / `pytest-asyncio==0.21.1`，而 `backend/tests/conftest.py` 覆盖了 session 级 `event_loop`（1.x 忽略它）⇒ 混跑时排在 `test_celery_dispatch_event_loop_isolation.py` 之后的 async 用例拿到**已关闭**的循环，报 `RuntimeError: Event loop is closed`） | 覆盖缺口 | ①待决定是否把断言迁进 pytest；②本轮**已规避**（契约断言放进纯同步的 `tests/test_account_proxy_source_contract.py`），**根因未修** ⇒ 记账到 V2（统一事件循环策略，或 CI 升 pytest-asyncio 1.x 并同步改 conftest） | 本文件「批次 F」节 + `tests/test_account_proxy_source_contract.py` 文件头 |
 | 9 | **221 个守护从不主动执行**（C 类：不在任何 CI 清单、也没有被别的文件引用 ⇒ 只在有人恰好改了该文件时才跑） | 覆盖缺口 | 待拍板是否分批提升进 CI 清单（会拉长流水线，属加固方向） | 本文件「批次 F」节 |
-| 10 | **商品中心录数缺口（v7.31.x 遗留 + 批次 6/7/8 新口径）**：① 飞书三张状态镜像表 `table_id` 全 NULL，且生产 `FEISHU_PRODUCT_BASE_TOKEN` 未设 ⇒ 商品镜像投影投不出去（8 条长期 pending）；② ~~生产 `finance.delivery_rate_rules` 0 行~~ ⇒ **已由批次 7 的迁移 `20261238` 解决**（生产 5 行 = shopee/SG-01/T01–T05，20.93/25.31/27.97/38.59/62.44 元，链头 `20261238`），**但 TikTok SG 仍只有 T02 一档**（生产 0 行 ⇒ 本地那档 14.84 元的官方出处也待确认）；③ 生产各平台 `delivery_cost_rate` 仍空 ⇒ 尾程不进成本底线（重算前置：SKU 段归类 + 订单级/单件摊口径钉死）；④ 生产 1122 个 SKU 重量段全空（**批次 6 已删除 `weight_kg`**）⇒ 发版后尾程落最轻档并标 `estimated`；⑤ 批次 6 的**包邮开关**需业务逐 SKU 勾选（默认不包邮）；⑥ 汇率 5.2077 待业务认可（生产汇率表仍是 5.2）；⑦ **残差桶**（`other_cost_rate`）仍是 1 月实测值 ⇒ 官方 2026-01/04 两次调涨后偏低约 1.1pt，待新实测重算；⑧ TikTok SG 尾程价目表未提供（现仅 1 档 T02） | 业务录数 / 配置 | 待业务录数：① 飞书后台建好三张镜像表并回填配置；②⑤ 在「定价设置」/「平台 SKU 利润测算」维护；④ 按实物批量归类重量段；⑥ 汇率更新授权；⑦ 提供 TikTok 价目表 | `CHANGELOG.md` v7.31.1 节 + 计划文档 §8.3、§9、§9.10 |
+| 10 | **商品中心录数缺口（v7.31.x 遗留 + 批次 6/7/8 新口径）**：① 飞书三张状态镜像表 `table_id` 全 NULL，且生产 `FEISHU_PRODUCT_BASE_TOKEN` 未设 ⇒ 商品镜像投影投不出去（**2026-11-22 实测 112 条长期 pending**，最早可追到 2026-09-17、`attempt_count` 全为 0 ⇒ 从未投递）；② ~~生产 `finance.delivery_rate_rules` 0 行~~ ⇒ **已由批次 7 的迁移 `20261238` 解决**（生产 5 行 = shopee/SG-01/T01–T05，20.93/25.31/27.97/38.59/62.44 元，链头 `20261238`），**但 TikTok SG 仍只有 T02 一档**（生产 0 行 ⇒ 本地那档 14.84 元的官方出处也待确认）；③ 生产各平台 `delivery_cost_rate` 仍空 ⇒ 尾程不进成本底线（重算前置：SKU 段归类 + 订单级/单件摊口径钉死）；④ 生产 1122 个 SKU 重量段全空（**批次 6 已删除 `weight_kg`**）⇒ 发版后尾程落最轻档并标 `estimated`；⑤ 批次 6 的**包邮开关**需业务逐 SKU 勾选（默认不包邮）；⑥ 汇率 5.2077 待业务认可（生产汇率表仍是 5.2）；⑦ **残差桶**（`other_cost_rate`）仍是 1 月实测值 ⇒ 官方 2026-01/04 两次调涨后偏低约 1.1pt，待新实测重算；⑧ TikTok SG 尾程价目表未提供（现仅 1 档 T02） | 业务录数 / 配置 | 待业务录数：① 飞书后台建好三张镜像表并回填配置；②⑤ 在「定价设置」/「平台 SKU 利润测算」维护；④ 按实物批量归类重量段；⑥ 汇率更新授权；⑦ 提供 TikTok 价目表 | `CHANGELOG.md` v7.31.1 节 + 计划文档 §8.3、§9、§9.10 |
 
 **已关闭、不再是未结项**（留一行指针，避免又被当成待办）：
 
@@ -59,6 +59,26 @@
 - **发布证据**（2026-11-21 实测）：部署流水线 run `44915030103` 全绿（镜像构建+容器启动冒烟✔、CNB 双镜像推送✔、远程部署✔）；生产 7 容器全 healthy、`Backend/Frontend = v7.37.0`、内外网 `/api/healthz/ready` 均 `version=v7.37.0` / `database=connected` / `dashboard=ready`；迁移链头 `current_schema_20261243_drop_legacy_profit_basis`（`core.alembic_version` 出处标记按设计不动）；`finance.shop_profit_basis` 的 **39 行 legacy 已删净**，只剩 2026-11 的 `SETTLEMENT_BASIS_V1` 1 行（5,946.38）⇒ 2026-03~2026-10 按决策「留白」（生产 `employee_labor_cost_allocations` 实为 0 行，比本地更彻底地印证「无可重算」）；路由实测：新试算端点已注册（无 token → 401）、僵尸端点 `/hr/commissions/shop` → 404、`/hr/commissions/employee` 保留；OpenAPI **510 条路径**（与 v7.36.0 同数：「删 1 条 + 加 1 条」净变化为 0）。**补丁 v7.37.1**（run `44924230375`，2026-11-22 实测）：同样全绿、生产 7 容器 healthy、`Backend/Frontend = v7.37.1`、迁移链头不变（无新迁移）、legacy 行仍为 0；**试算端点的 200 响应已指向 `CommissionEstimateApiResponse`**（`{"$ref": "#/components/schemas/CommissionEstimateApiResponse"}`）⇒ 5 份 `CommissionEstimate*` schema 全部在生产 OpenAPI 可见，悬空 schema 收口、零业务行为变化。
 
 ---
+
+## 已完成：调价通知口径收紧（2026-11-22，**v7.38.0**）
+
+- **业务已定（Walter 拍板）**：调价通知**只保留「库龄跨档」**这一类；其余底线变化
+  （平台费率 / 采购成本 / 规则调整 / 参考售价补齐 / 数据缺失-保护失效 / 人工覆盖）
+  **不推送但留痕**。理由：平台费率还在**实践阶段**、会经常调整，一动就推等于每天刷屏。
+- **落地物**：`price_adjust_notify_service` 新增 `is_tier_crossing`（三条硬条件：两次快照
+  都有库龄 → 都有档位身份 → 身份真不同）；`detect_changes` 改三桶分流
+  （通知 / 静默推进基线 / 静默留痕）；静默行走**独立实体类型** `price_adjust_suppressed`
+  + 状态 `suppressed`（投递查询只捞 `pending` / 到期 `failed` ⇒ **物理上投不出去**）；
+  留痕查询接口 `GET /api/feishu-projection/suppressed`；**底线没变也刷新基线上下文**
+  （实测旧基线的库龄还停在 11-20，比实时快照落后 2 天）。
+- **复核发现（生产只读核查，1246 条历史投递）**：噪音的真实来源**不是平台费率**
+  （历史上仅 1 条，2026-10-28），而是「参考售价补齐 51 + 人工覆盖 2」（日常噪音）与
+  「数据缺失 1019」（11-19/11-20 **仓维度库龄口径上线**导致的一次性全量重算，已过去）；
+  回测证实那 53 条日常噪音**档位身份都没变** ⇒ 新口径 100% 静默。
+- **影响**：飞书「📠调价记录表」由「底线变化全量台账」变成「库龄跨档待办清单」；
+  **保护失效不再通知**（需另设主动巡检兜底）；库龄成簇 ⇒ 跨档成波
+  （约 8 天后 ≈498 行、21 天后 ≈402 行、39 天后 ≈116 行，其余日 ≈0）。
+- **发布证据**：见 CHANGELOG `v7.38.0` 段。
 
 ## 最新发布：v7.36.0（2026-11-21）
 
