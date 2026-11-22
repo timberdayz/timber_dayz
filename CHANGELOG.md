@@ -123,7 +123,21 @@ Element Plus 会把剩余宽度按比例平摊给所有 `min-width` 列，不这
 （按钮合计 200 + 按钮间距 24 = 224 > 可用 215，差 9px）⇒ 换行是**既有状态**，不是本次收窄造成的。
 已把该列恢复为 240px（不制造新的回归），守护原样保留。
 
-### 五、已知未修（记录为技术债，不在本次修）
+### 五、生产部署与验收（2026-11-22 实测）
+
+| 项 | 实测结果 |
+| --- | --- |
+| 部署批次 | `20261122_234810`（**唯一一批**；上一批 `20261122_183414` = v7.38.0 ⇒ CNB 镜像未触发第二次部署） |
+| 容器 | 7 个全 healthy；backend-api / celery-worker / celery-beat / frontend 全部跑 **`v7.39.0`** |
+| `/healthz/ready` | `status=ready` / **`version=v7.39.0`** / `database=connected` / `dashboard=ready` |
+| `/api/health` | `healthy` / `version=v7.39.0` / `database=connected` / `dashboard=ready` / `routes.total=635` |
+| 数据库迁移 | **无新迁移** —— 链头仍 `current_schema_20261243_drop_legacy_profit_basis`（与 v7.38.0 一致） |
+| 生产前端产物 | `ProductCenter-59a6e313.js` 内含 `pc-field-help-popover`（新小问号）与 `spu-switch-select`（换款编辑）；旧的行内说明样式 `pricing-header` 计数 **0** |
+| 双镜像 `main` | 同一 SHA（`f190e7b7`） |
+| 标签对象 | 双镜像一致：tag 对象 `e2be8266` → 提交 `f190e7b7` |
+| 流水线 | Release Gate / 镜像构建推送 / 远端部署 全部 success（远端部署 10m46s） |
+
+### 六、已知未修（记录为技术债，不在本次修）
 
 - `tests/test_local_console_processes.py::test_startup_timeout_records_structured_audit_evidence`
   —— 根目录全量套件里唯一一条红灯，**与本次改动无关**（改动全在 `frontend/`），
