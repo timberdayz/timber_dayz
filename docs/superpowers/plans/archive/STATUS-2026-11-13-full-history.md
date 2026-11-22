@@ -2036,3 +2036,54 @@ Validate Data Flow `43467986640` / Docker Build and Push `43467986403`。
   `test_delivery_rate_currency_guard.py`（24 条）、前端 107/107；后端全量 **6231 passed / 8 skipped**。
 - **完整口径与证据**：计划文档 `2026-11-16-product-center-five-batch-optimization.md` §9.11；
   发布证据见归档「发布证据（v7.33.0，2026-11-18）· 批次 8」。
+---
+
+## 归档：发布证据（v7.38.0，2026-11-22）· 批次 11
+
+> 来自 `docs/superpowers/plans/STATUS.md` 台账（2026-11-22，批次 11 已完结）。
+> 本节已完结（v7.38.0 已发版、已部署生产、部署后验收通过），按「台账瘦身约定」移入归档。
+> 完整口径见设计文档 `docs/superpowers/specs/2026-10-23-min-price-change-notification-design.md`
+> 与 `CHANGELOG.md` `v7.38.0` §九。
+
+### 已完成：调价通知口径收紧（2026-11-22，**v7.38.0**）
+
+- **业务已定（Walter 拍板）**：调价通知**只保留「库龄跨档」**这一类；其余底线变化
+  （平台费率 / 采购成本 / 规则调整 / 参考售价补齐 / 数据缺失-保护失效 / 人工覆盖）
+  **不推送但留痕**。理由：平台费率还在**实践阶段**、会经常调整，一动就推等于每天刷屏。
+- **落地物**：`price_adjust_notify_service` 新增 `is_tier_crossing`（三条硬条件：两次快照
+  都有库龄 → 都有档位身份 → 身份真不同）；`detect_changes` 改三桶分流
+  （通知 / 静默推进基线 / 静默留痕）；静默行走**独立实体类型** `price_adjust_suppressed`
+  + 状态 `suppressed`（投递查询只捞 `pending` / 到期的 `failed` ⇒ **物理上投不出去**）；
+  留痕查询接口 `GET /api/feishu-projection/suppressed`；**底线没变也刷新基线上下文**
+  （实测旧基线的库龄还停在 11-20，比实时快照落后 2 天）。
+- **复核发现（生产只读核查，1246 条历史投递）**：噪音的真实来源**不是平台费率**
+  （历史上仅 1 条，2026-10-28），而是「参考售价补齐 51 + 人工覆盖 2」（日常噪音）与
+  「数据缺失 1019」（11-19/11-20 **仓维度库龄口径上线**导致的一次性全量重算，已过去）；
+  回测证实那 53 条日常噪音**档位身份都没变** ⇒ 新口径 100% 静默。
+- **影响**：飞书「📠调价记录表」由「底线变化全量台账」变成「库龄跨档待办清单」；
+  **保护失效不再通知**（需另设主动巡检兜底）；库龄成簇 ⇒ 跨档成波
+  （约 8 天后 ≈498 行、21 天后 ≈402 行、39 天后 ≈116 行，其余日 ≈0）。
+
+### 部署后验收（生产只读实测，2026-11-22）
+
+| 项 | 证据 |
+|---|---|
+| 双镜像一致性 | main SHA 三方一致（本地 / GitHub / CNB = `729eb2cf`）；tag `v7.38.0` 两端**同一 tag 对象** `d9f457cd` ⇒ **先推 CNB（惰性、未触发部署）再推 GitHub（触发部署）** |
+| 部署批次 | `20261122_183414` |
+| 生产容器 | **7 个全 healthy**；backend-api / celery-worker / celery-beat = `backend:v7.38.0`、frontend = `frontend:v7.38.0` |
+| 健康端点 | `/healthz/ready` → HTTP 200，`version = v7.38.0`、`runtime_mode = production`、`database = connected`、`dashboard = ready` |
+| 迁移链头 | **无新迁移**，仍是 `current_schema_20261243_drop_legacy_profit_basis` |
+| 新接口 | `/api/feishu-projection/suppressed` 已注册（无 token → **401**，证明已挂鉴权）；生产 OpenAPI **511 条路径**（510 → 511）；其 200 响应指向 `PriceAdjustSuppressedListResponse` |
+| 新代码在位 | 生产容器内 `is_tier_crossing` ×2、`price_adjust_suppressed` ×1、`SUPPRESSED_REASON_NOT_TIER = "非库龄跨档"`（UTF-8 无损） |
+| 飞书配置 | `price_adjust_table_id=tblRDvcTUjfOLkBH`、`price_adjust_base_token=UCRbbZSy2a3iXvsS7O8cxyBJnnb`、`status=ready` —— **逐字未变** |
+| 数据面 | 基线 **3260 行**（含 1022 行仓维度）未变；outbox 尚无 `price_adjust_suppressed` 行 ⇒ **新口径首轮在 2026-11-23 10:00** |
+| 本地全量回归 | `backend/tests` **6424 passed / 8 skipped / 0 failed**；根目录 `tests` **844 passed / 5 skipped / 0 failed**；ruff / black 全绿 |
+
+### 本批次待观察项（代码闭环不了，等首轮跑完才有数）
+
+- **首轮口径验证**：2026-11-23 10:00 第一轮走新口径 —— 因当天 10:00 刚推进过基线，
+  状态与基线一致 ⇒ **预期通知 0 条**；那天的日志会第一次给出
+  `notified` / `suppressed` / `traced` 三个数，可据此核对「只推库龄跨档」是否生效。
+- **保护失效不再通知**（属「数据缺失」）⇒ 若要兜底，须另设主动巡检（本次未做）。
+- **飞书三张镜像表 `table_id` 全 NULL** ⇒ 商品镜像投影仍投不出去（112 条长期 pending）；
+  本批只把「当前未结」第 10 条的条数从 8 更新为 112，未动该缺口。

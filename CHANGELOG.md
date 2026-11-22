@@ -126,6 +126,25 @@
 - 守护：静默行用**独立 entity_type + `suppressed` 状态** ⇒ 投递查询
   （只捞 `pending` / 到期的 `failed`）永远捞不到它 ⇒ 不可能混进飞书表。
 
+### 九、生产部署与验收（2026-11-22 实测）
+
+| 项 | 结果 |
+|---|---|
+| 双镜像 | main SHA 三方一致（本地 / GitHub / CNB = `729eb2cf`）；tag `v7.38.0` 两端同一 tag 对象 `d9f457cd` ⇒ **先推 CNB（确认未触发部署）再推 GitHub（触发部署）** |
+| 部署批次 | `20261122_183414`（`bootstrap_postgresql_dashboard_20261122_183414.log` + `rebuild_views_20261122_183414.log`） |
+| 容器 | 7 个全 healthy；backend-api / celery-worker / celery-beat = `backend:v7.38.0`、frontend = `frontend:v7.38.0` |
+| 健康端点 | 容器内 `/healthz/ready` → HTTP 200，`version = v7.38.0`、`runtime_mode = production`、`database = connected`、`dashboard = ready` |
+| 迁移 | **无新迁移**，链头仍是 `current_schema_20261243_drop_legacy_profit_basis` |
+| 新接口 | `/api/feishu-projection/suppressed` 已注册（无 token → **401**，证明已挂鉴权）；生产 OpenAPI **511 条路径**（510 → 511，净 +1）；其 200 响应指向 `PriceAdjustSuppressedListResponse` ⇒ 2 份新 schema 全部可见 |
+| 新代码在位 | 生产容器内 `is_tier_crossing` ×2、`price_adjust_suppressed` ×1、`SUPPRESSED_REASON_NOT_TIER = "非库龄跨档"`（UTF-8 无损） |
+| 飞书配置 | `price_adjust_table_id=tblRDvcTUjfOLkBH`、`price_adjust_base_token=UCRbbZSy2a3iXvsS7O8cxyBJnnb`、`status=ready` —— **逐字未变** |
+| 数据面 | 基线 **3260 行**（含 1022 行仓维度）未变；outbox 尚无 `price_adjust_suppressed` 行 ⇒ **新口径首轮在 2026-11-23 10:00** |
+| 已知既有项（本次未动） | 镜像表 `sku` 111 条 + `spu` 1 条长期 pending（三张镜像表 `table_id` 未配）⇒ 已把「当前未结」第 10 条的条数从 8 更新为 **112** |
+
+> 📌 **首轮预期**：2026-11-23 10:00 第一轮走新口径 —— 因今天 10:00 刚推进过基线，
+> 状态与基线完全一致 ⇒ **通知 0 条**；那一天的日志会第一次给出
+> `notified` / `suppressed` / `traced` 三个数，可据此核对「只推库龄跨档」是否生效。
+
 ## [v7.37.1] - 2026-11-22 - 补丁：补齐试算接口响应契约（零业务行为变化）
 
 ### 一、为什么发这个补丁
