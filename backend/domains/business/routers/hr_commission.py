@@ -48,11 +48,18 @@ from backend.schemas.hr import (
     EmployeeShopAssignmentCreate,
     EmployeeShopAssignmentResponse,
     EmployeeShopAssignmentUpdate,
+    EmployeeShopAssignmentBatchData,
+    EmployeeShopAssignmentBatchFailedItem,
+    EmployeeShopAssignmentBatchItem,
+    EmployeeShopAssignmentBatchRequest,
+    EmployeeShopAssignmentBatchSucceededItem,
+    EmployeeShopAssignmentBatchSummary,
     ShopCommissionConfigUpdate,
     CopyFromPrevMonthBody,
     CommissionEstimateRequest,
     CommissionEstimateApiResponse,
 )
+from backend.schemas.common import SuccessResponse
 from modules.core.db import (
     ShopAccount,
     Employee,
@@ -1587,7 +1594,6 @@ async def list_employee_shop_assignments(
                     commission_ratio=r.commission_ratio,
                     target_allocation_ratio=r.target_allocation_ratio,
                     target_allocation_ratio_source=r.target_allocation_ratio_source,
-                    role=r.role,
                     effective_from=r.effective_from,
                     effective_to=r.effective_to,
                     status=r.status,
@@ -1687,7 +1693,6 @@ async def create_employee_shop_assignment(
             commission_ratio=body.commission_ratio,
             target_allocation_ratio=1.0,
             target_allocation_ratio_source="manual",
-            role=body.role,
             effective_from=body.effective_from,
             effective_to=body.effective_to,
         )
@@ -1831,6 +1836,482 @@ async def delete_employee_shop_assignment(
         return error_response(
             ErrorCode.INTERNAL_SERVER_ERROR, f"删除归属失败: {str(e)}", status_code=500
         )
+
+
+# ================================================================
+# 员工店铺归属 · 批量操作
+# ================================================================
+#
+# 批量只是「同一个动作重复多次」的加速器，**不改变业务模型**：
+# 一行仍然是人 × 平台 × 店 × 月 × 提成比，仍然没有「角色」。
+
+
+class _BatchItemError(ValueError):
+    """批量单项失败：只跳过该项并写进 ``failed``，**不回滚整批**。"""
+
+    def __init__(self, reason: str, *, target: str | None = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.target = target
+
+
+def _batch_target_label(
+    *, employee_code: str | None, platform_code: str | None, shop_id: str | None
+) -> str:
+    """批量结果里的「可读标识」：平台/店铺 + 员工。"""
+    shop_part = "/".join(
+        part
+        for part in (str(platform_code or "").strip(), str(shop_id or "").strip())
+        if part
+    )
+    employee_part = str(employee_code or "").strip()
+    if shop_part and employee_part:
+        return f"{shop_part} · {employee_part}"
+    return shop_part or employee_part or "未知归属"
+
+
+async def _batch_create_assignment(
+    db: AsyncSession,
+    *,
+    body: EmployeeShopAssignmentBatchRequest,
+    item: EmployeeShopAssignmentBatchItem,
+) -> EmployeeShopAssignmentBatchSucceededItem:
+    """批量新建归属：校验口径与单条 create **完全一致**。"""
+    employee_code = (item.employee_code or "").strip()
+    platform_code = (item.platform_code or "").strip().lower()
+    shop_id = (item.shop_id or "").strip()
+    if not employee_code or not platform_code or not shop_id:
+        raise _BatchItemError("员工 / 平台 / 店铺不能为空")
+
+    employee = (
+        await db.execute(
+            select(Employee).where(Employee.employee_code == employee_code)
+        )
+    ).scalar_one_or_none()
+    if not employee:
+        raise _BatchItemError(f"员工不存在: {employee_code}")
+
+    await PayrollPeriodLockService(db).assert_employee_month_mutable(
+        employee_code=employee_code,
+        year_month=body.year_month,
+    )
+
+    shop = await _ensure_dim_shop_exists(
+        db,
+        platform_code=platform_code,
+        shop_id=shop_id,
+    )
+    if not shop:
+        raise _BatchItemError("该店铺尚未同步至系统，请先在账号管理中同步")
+
+    dup = (
+        await db.execute(
+            select(EmployeeShopAssignment.id).where(
+                EmployeeShopAssignment.employee_code == employee_code,
+                EmployeeShopAssignment.platform_code == platform_code,
+                EmployeeShopAssignment.shop_id == shop_id,
+                EmployeeShopAssignment.year_month == body.year_month,
+            )
+        )
+    ).scalar_one_or_none()
+    if dup is not None:
+        raise _BatchItemError("该员工在该月已关联该店铺")
+
+    same_shop_rows = (
+        (
+            await db.execute(
+                select(EmployeeShopAssignment).where(
+                    EmployeeShopAssignment.year_month == body.year_month,
+                    EmployeeShopAssignment.platform_code == platform_code,
+                    EmployeeShopAssignment.shop_id == shop_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    validation_error = _validate_shop_assignment_ratio_limit(
+        existing_rows=same_shop_rows,
+        employee_code=employee_code,
+        commission_ratio=item.commission_ratio,
+        current_assignment_id=None,
+    )
+    if validation_error:
+        raise _BatchItemError(validation_error)
+
+    rec = EmployeeShopAssignment(
+        year_month=body.year_month,
+        employee_code=employee_code,
+        platform_code=platform_code,
+        shop_id=shop_id,
+        commission_ratio=item.commission_ratio,
+        target_allocation_ratio=1.0,
+        target_allocation_ratio_source="manual",
+    )
+    db.add(rec)
+    await db.flush()
+    await db.refresh(rec)
+    return EmployeeShopAssignmentBatchSucceededItem(
+        id=rec.id,
+        action="create",
+        year_month=rec.year_month,
+        employee_code=rec.employee_code,
+        employee_name=getattr(employee, "name", None),
+        platform_code=rec.platform_code,
+        shop_id=rec.shop_id,
+        shop_name=getattr(shop, "shop_name", None),
+        commission_ratio=rec.commission_ratio,
+        status=rec.status,
+    )
+
+
+def _match_batch_update_item(
+    *,
+    items: List[EmployeeShopAssignmentBatchItem],
+    index: int,
+    assignment_count: int,
+    record: EmployeeShopAssignment,
+) -> EmployeeShopAssignmentBatchItem | None:
+    """挑出与第 ``index`` 条归属记录对应的更新内容。
+
+    * ``items`` 与 ``assignment_ids`` **等长** ⇒ 按下标一一对应
+      （前端多选后按选中顺序提交的场景）；
+    * 不等长 ⇒ 按「员工 + 平台 + 店铺」匹配
+      （前端把整张表都传上来、只勾了一部分）。
+
+    匹配不上就返回 ``None`` ⇒ 该项按「缺少更新内容」失败，**不会改错人**。
+    """
+    if len(items) == assignment_count:
+        return items[index] if index < len(items) else None
+    matched = [
+        item
+        for item in items
+        if (item.employee_code or "").strip() == (record.employee_code or "").strip()
+        and (item.platform_code or "").strip().lower()
+        == (record.platform_code or "").lower()
+        and (item.shop_id or "").strip() == (record.shop_id or "")
+    ]
+    return matched[0] if len(matched) == 1 else None
+
+
+async def _batch_update_assignment(
+    db: AsyncSession,
+    *,
+    body: EmployeeShopAssignmentBatchRequest,
+    assignment_id: int,
+    index: int,
+) -> EmployeeShopAssignmentBatchSucceededItem:
+    """批量改提成比例：校验口径与单条 update **完全一致**。"""
+    rec = (
+        await db.execute(
+            select(EmployeeShopAssignment).where(
+                EmployeeShopAssignment.id == assignment_id
+            )
+        )
+    ).scalar_one_or_none()
+    if not rec:
+        raise _BatchItemError(f"归属记录不存在: {assignment_id}")
+
+    target = _batch_target_label(
+        employee_code=rec.employee_code,
+        platform_code=rec.platform_code,
+        shop_id=rec.shop_id,
+    )
+    if rec.year_month != body.year_month:
+        raise _BatchItemError(
+            f"归属记录不属于 {body.year_month}（记录月份 {rec.year_month}）",
+            target=target,
+        )
+
+    item = _match_batch_update_item(
+        items=body.items,
+        index=index,
+        assignment_count=len(body.assignment_ids),
+        record=rec,
+    )
+    if item is None:
+        raise _BatchItemError("未找到与该归属记录唯一对应的更新内容", target=target)
+
+    employee_code = (item.employee_code or "").strip()
+    platform_code = (item.platform_code or "").strip().lower()
+    shop_id = (item.shop_id or "").strip()
+    if (
+        employee_code != (rec.employee_code or "").strip()
+        or platform_code != (rec.platform_code or "").lower()
+        or shop_id != (rec.shop_id or "")
+    ):
+        raise _BatchItemError(
+            "更新内容与归属记录不匹配（员工 / 平台 / 店铺不一致）", target=target
+        )
+
+    await PayrollPeriodLockService(db).assert_employee_month_mutable(
+        employee_code=rec.employee_code,
+        year_month=rec.year_month,
+    )
+
+    next_commission_ratio = (
+        item.commission_ratio
+        if item.commission_ratio is not None
+        else rec.commission_ratio
+    )
+    same_shop_rows = (
+        (
+            await db.execute(
+                select(EmployeeShopAssignment).where(
+                    EmployeeShopAssignment.year_month == rec.year_month,
+                    EmployeeShopAssignment.platform_code == rec.platform_code,
+                    EmployeeShopAssignment.shop_id == rec.shop_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    validation_error = _validate_shop_assignment_ratio_limit(
+        existing_rows=same_shop_rows,
+        employee_code=rec.employee_code,
+        commission_ratio=next_commission_ratio,
+        current_assignment_id=rec.id,
+    )
+    if validation_error:
+        raise _BatchItemError(validation_error, target=target)
+
+    rec.commission_ratio = next_commission_ratio
+    await db.flush()
+    await db.refresh(rec)
+    employee = (
+        await db.execute(
+            select(Employee.name).where(Employee.employee_code == rec.employee_code)
+        )
+    ).scalar_one_or_none()
+    return EmployeeShopAssignmentBatchSucceededItem(
+        id=rec.id,
+        action="update",
+        year_month=rec.year_month,
+        employee_code=rec.employee_code,
+        employee_name=employee,
+        platform_code=rec.platform_code,
+        shop_id=rec.shop_id,
+        commission_ratio=rec.commission_ratio,
+        status=rec.status,
+    )
+
+
+async def _batch_delete_assignment(
+    db: AsyncSession,
+    *,
+    body: EmployeeShopAssignmentBatchRequest,
+    assignment_id: int,
+) -> EmployeeShopAssignmentBatchSucceededItem:
+    """批量删归属：语义与单条 delete 一致（沿用现有的物理删除）。"""
+    rec = (
+        await db.execute(
+            select(EmployeeShopAssignment).where(
+                EmployeeShopAssignment.id == assignment_id
+            )
+        )
+    ).scalar_one_or_none()
+    if not rec:
+        raise _BatchItemError(f"归属记录不存在: {assignment_id}")
+
+    target = _batch_target_label(
+        employee_code=rec.employee_code,
+        platform_code=rec.platform_code,
+        shop_id=rec.shop_id,
+    )
+    if rec.year_month != body.year_month:
+        raise _BatchItemError(
+            f"归属记录不属于 {body.year_month}（记录月份 {rec.year_month}）",
+            target=target,
+        )
+
+    await PayrollPeriodLockService(db).assert_employee_month_mutable(
+        employee_code=rec.employee_code,
+        year_month=rec.year_month,
+    )
+    employee = (
+        await db.execute(
+            select(Employee.name).where(Employee.employee_code == rec.employee_code)
+        )
+    ).scalar_one_or_none()
+    payload = EmployeeShopAssignmentBatchSucceededItem(
+        id=rec.id,
+        action="delete",
+        year_month=rec.year_month,
+        employee_code=rec.employee_code,
+        employee_name=employee,
+        platform_code=rec.platform_code,
+        shop_id=rec.shop_id,
+        commission_ratio=rec.commission_ratio,
+        status=rec.status,
+    )
+    await db.delete(rec)
+    await db.flush()
+    return payload
+
+
+async def _run_batch_item(
+    db: AsyncSession,
+    *,
+    succeeded: List[EmployeeShopAssignmentBatchSucceededItem],
+    failed: List[EmployeeShopAssignmentBatchFailedItem],
+    target: str,
+    handler,
+) -> None:
+    """跑一个批量单元。
+
+    每项跑在**保存点（SAVEPOINT）**里：该项失败只回滚它自己，
+    **不会把整批拖下水** —— 其余项照常成功。
+    """
+    try:
+        async with db.begin_nested():
+            payload = await handler()
+        succeeded.append(payload)
+    except _BatchItemError as exc:
+        failed.append(
+            EmployeeShopAssignmentBatchFailedItem(
+                target=exc.target or target, reason=exc.reason
+            )
+        )
+    except PayrollPeriodLockedError as exc:
+        failed.append(
+            EmployeeShopAssignmentBatchFailedItem(target=target, reason=str(exc))
+        )
+    except Exception as exc:  # noqa: BLE001 —— 单项异常不得拖垮整批
+        logger.warning(f"批量归属单项失败({target}): {exc}", exc_info=True)
+        failed.append(
+            EmployeeShopAssignmentBatchFailedItem(
+                target=target, reason=f"写入失败: {exc}"
+            )
+        )
+
+
+@router.post(
+    "/employee-shop-assignments/batch",
+    response_model=SuccessResponse[EmployeeShopAssignmentBatchData],
+)
+async def batch_employee_shop_assignments(
+    body: EmployeeShopAssignmentBatchRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _current_user: DimUser = Depends(require_admin),
+):
+    """批量挂靠 / 批量改提成比例 / 批量删归属。
+
+    事务口径
+    --------
+    * 整批**一个事务**：所有成功项一起提交；
+    * **单项失败只跳过该项**（保存点回滚该子事务），写进 ``failed`` 并说明原因，
+      其余项照常成功；
+    * 校验口径与单条接口完全一致：员工存在 / 店铺已在 ``core.dim_shops`` /
+      不重复挂靠 / 店铺当月人员提成比例合计 ≤ 100% / 工资月锁。
+    """
+    try:
+        if body.mode == "create" and not body.items:
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "批量新建归属需要至少一条 items",
+                status_code=400,
+            )
+        if body.mode in {"update", "delete"} and not body.assignment_ids:
+            return error_response(
+                ErrorCode.PARAMETER_INVALID,
+                "批量操作需要至少一个 assignment_ids",
+                status_code=400,
+            )
+
+        # 月锁是**事务级**的：拿一次就覆盖整批（同月同锁）。
+        await PayrollPeriodLockService(db).acquire_month_transaction_lock(
+            year_month=body.year_month
+        )
+
+        succeeded: List[EmployeeShopAssignmentBatchSucceededItem] = []
+        failed: List[EmployeeShopAssignmentBatchFailedItem] = []
+
+        if body.mode == "create":
+            for item in body.items:
+                await _run_batch_item(
+                    db,
+                    succeeded=succeeded,
+                    failed=failed,
+                    target=_batch_target_label(
+                        employee_code=item.employee_code,
+                        platform_code=item.platform_code,
+                        shop_id=item.shop_id,
+                    ),
+                    handler=_make_batch_create_handler(db=db, body=body, item=item),
+                )
+        elif body.mode == "update":
+            for index, assignment_id in enumerate(body.assignment_ids):
+                await _run_batch_item(
+                    db,
+                    succeeded=succeeded,
+                    failed=failed,
+                    target=f"归属记录 {assignment_id}",
+                    handler=_make_batch_update_handler(
+                        db=db,
+                        body=body,
+                        assignment_id=assignment_id,
+                        index=index,
+                    ),
+                )
+        else:  # delete
+            for assignment_id in body.assignment_ids:
+                await _run_batch_item(
+                    db,
+                    succeeded=succeeded,
+                    failed=failed,
+                    target=f"归属记录 {assignment_id}",
+                    handler=_make_batch_delete_handler(
+                        db=db, body=body, assignment_id=assignment_id
+                    ),
+                )
+
+        await db.commit()
+        return {
+            "success": True,
+            "data": EmployeeShopAssignmentBatchData(
+                succeeded=succeeded,
+                failed=failed,
+                summary=EmployeeShopAssignmentBatchSummary(
+                    total=len(succeeded) + len(failed),
+                    succeeded=len(succeeded),
+                    failed=len(failed),
+                ),
+            ),
+        }
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"批量归属操作失败: {e}", exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"批量归属操作失败: {str(e)}",
+            status_code=500,
+        )
+
+
+def _make_batch_create_handler(*, db, body, item):
+    async def _handler():
+        return await _batch_create_assignment(db, body=body, item=item)
+
+    return _handler
+
+
+def _make_batch_update_handler(*, db, body, assignment_id, index):
+    async def _handler():
+        return await _batch_update_assignment(
+            db, body=body, assignment_id=assignment_id, index=index
+        )
+
+    return _handler
+
+
+def _make_batch_delete_handler(*, db, body, assignment_id):
+    async def _handler():
+        return await _batch_delete_assignment(
+            db, body=body, assignment_id=assignment_id
+        )
+
+    return _handler
 
 
 @router.get("/shop-commission-config")
@@ -2035,7 +2516,6 @@ async def copy_employee_shop_assignments_from_prev_month(
             else:
                 updated += 1
             existing.commission_ratio = r.commission_ratio
-            existing.role = r.role
             existing.effective_from = r.effective_from
             existing.effective_to = r.effective_to
 
@@ -2145,7 +2625,7 @@ async def get_shop_profit_statistics(
             )
             for c in config_rows
         }
-        # 4. 获取归属配置（用于计算主管/操作员利润）：仅取该月的配置
+        # 4. 获取归属配置（用于计算店铺/人员的提成分摊）：仅取该月的配置
         assign_query = (
             select(EmployeeShopAssignment)
             .where(EmployeeShopAssignment.status == "active")
@@ -2220,19 +2700,19 @@ async def get_shop_profit_statistics(
                 "message": str(summary.get("message") or ""),
             }
 
-        # 按店铺分组：supervisors 和 operators，各自 commission_ratio 列表
-        assign_by_shop: Dict[str, Dict] = {}
+        # 按店铺聚合归属提成比。
+        # 归属**不再有「角色」**：一行只回答「谁在这家店分多少提成」，
+        # 所以这里只统计「该店当月归属提成比合计」与「有几行归属」。
+        assign_ratio_by_shop: Dict[str, float] = {}
+        assign_count_by_shop: Dict[str, int] = {}
         for a in assign_rows:
             key = f"{(a.platform_code or '').lower()}|{str(a.shop_id or '').lower()}"
-            if key not in assign_by_shop:
-                assign_by_shop[key] = {"supervisors": [], "operators": []}
-            cr = float(a.commission_ratio or 0)
-            if a.role == "supervisor":
-                assign_by_shop[key]["supervisors"].append(cr)
-            else:
-                assign_by_shop[key]["operators"].append(cr)
+            assign_ratio_by_shop[key] = assign_ratio_by_shop.get(key, 0.0) + float(
+                a.commission_ratio or 0
+            )
+            assign_count_by_shop[key] = assign_count_by_shop.get(key, 0) + 1
 
-        # 5. 合并：店铺列表 + 销售/利润 + 主管/操作员利润
+        # 5. 合并：店铺列表 + 销售/利润 + 归属提成比合计
         items = []
         for s in shop_list:
             key = _shop_key(s["platform_code"], s["shop_id"])
@@ -2265,16 +2745,18 @@ async def get_shop_profit_statistics(
                     allocatable_profit_rate=allocatable_rate,
                 )
             )
-            ass = assign_by_shop.get(key, {})
-            sup_ratios = ass.get("supervisors", [])
-            op_ratios = ass.get("operators", [])
-            # 主管 / 操作员的分摊额 = 可分配利润 × 各自身份的归属提成比合计。
-            # 这是「按角色看分摊」的**视角拆分**，与员工维度合计恒等（Σ分摊 == 店铺提成）。
-            supervisor_profit = (
-                allocatable_profit * sum(sup_ratios) if sup_ratios else 0
+            ass_ratio_sum = assign_ratio_by_shop.get(key, 0.0)
+            ass_count = assign_count_by_shop.get(key, 0)
+            # 店铺的**归属提成合计** = 可分配利润 × 该店当月归属提成比合计。
+            # 这与员工维度合计恒等（Σ分摊 == 店铺提成），金额口径不变。
+            # ⚠️ 提成公式的唯一实现处是 backend/services/commission_caliber.py，
+            #    这里只搬运输入（可分配利润 × 合计提成比），不得就地复刻公式。
+            estimated_total_commission = float(
+                calculate_employee_shop_commission(
+                    allocatable_profit=allocatable_profit,
+                    commission_ratio=ass_ratio_sum,
+                )
             )
-            operator_profit = allocatable_profit * sum(op_ratios) if op_ratios else 0
-            estimated_total_commission = supervisor_profit + operator_profit
             items.append(
                 {
                     "platform_code": s["platform_code"],
@@ -2295,8 +2777,6 @@ async def get_shop_profit_statistics(
                     "is_allocatable_rate_configured": is_rate_configured,
                     "allocatable_profit_amount": allocatable_profit,
                     "achievement_rate": achievement_rate,
-                    "supervisor_profit": supervisor_profit,
-                    "operator_profit": operator_profit,
                     "estimated_total_commission": estimated_total_commission,
                     "settlement_commission_amount": settlement_commission_by_shop.get(
                         key, 0.0
@@ -2304,7 +2784,7 @@ async def get_shop_profit_statistics(
                     "settlement_commission_note": (
                         "实发口径：可分配利润 × 归属提成比（零系数）。"
                         "店铺赛马排名与绩效分数均不参与提成金额；"
-                        "上面主管/操作员分摊额与之恒等（合计即店铺提成）"
+                        "上面的店铺提成合计与之恒等"
                     ),
                     "shop_calculation_status": shop_status_by_key.get(key, {}).get(
                         "calculation_status", ""
@@ -2325,8 +2805,8 @@ async def get_shop_profit_statistics(
                         # 有提成就不报「提成为 0」：传实际算出来的金额，
                         # 并用「归属提成比合计」区分「没配比例」和「利润为 0」。
                         estimated_total_commission=estimated_total_commission,
-                        has_assignment=bool(sup_ratios or op_ratios),
-                        commission_ratio_sum=sum(sup_ratios) + sum(op_ratios),
+                        has_assignment=ass_count > 0,
+                        commission_ratio_sum=ass_ratio_sum,
                         cost_status=basis.get("cost_status")
                         or "missing_labor_allocation",
                     ),
@@ -2456,21 +2936,16 @@ async def get_annual_profit_statistics(
                 for r in assign_result
             ]
 
-            # 按店铺：主管/操作员 (employee_code, ratio) 列表，用于计算每人利润
-            assign_by_shop: Dict[str, Dict[str, List[tuple]]] = {}
+            # 按店铺：归属人员 (employee_code, ratio) 列表，用于计算每人利润。
+            # 归属**不再有「角色」**，所以这里只按店铺聚合，不再分主管/操作员。
+            assign_by_shop: Dict[str, List[tuple]] = {}
             for a in assign_rows:
                 _platform = getattr(a, "platform_code", None) or ""
                 _shop_id = getattr(a, "shop_id", None) or ""
                 _emp_code = (getattr(a, "employee_code", None) or "").strip()
-                _role = getattr(a, "role", None) or ""
                 _cr = float(getattr(a, "commission_ratio", None) or 0)
                 key = f"{(_platform or '').lower()}|{_shop_id}"
-                if key not in assign_by_shop:
-                    assign_by_shop[key] = {"supervisors": [], "operators": []}
-                if _role == "supervisor":
-                    assign_by_shop[key]["supervisors"].append((_emp_code, _cr))
-                else:
-                    assign_by_shop[key]["operators"].append((_emp_code, _cr))
+                assign_by_shop.setdefault(key, []).append((_emp_code, _cr))
 
             month_key = f"{month_num:02d}"
 
@@ -2495,19 +2970,21 @@ async def get_annual_profit_statistics(
                         allocatable_profit_rate=allocatable_rate,
                     )
                 )
-                ass = assign_by_shop.get(key, {})
-                sup_list = ass.get("supervisors", [])
-                op_list = ass.get("operators", [])
-                supervisor_profit = allocatable_profit * sum(r for _, r in sup_list)
-                operator_profit = allocatable_profit * sum(r for _, r in op_list)
+                emp_assignments = assign_by_shop.get(key, [])
+                ratio_sum = sum(r for _, r in emp_assignments)
+                estimated_total_commission = float(
+                    calculate_employee_shop_commission(
+                        allocatable_profit=allocatable_profit,
+                        commission_ratio=ratio_sum,
+                    )
+                )
 
                 by_shop[key]["months"][month_key] = {
                     "monthly_sales": monthly_sales,
                     "monthly_profit": monthly_profit,
                     "profit_basis_amount": profit_basis_amount,
                     "achievement_rate": achievement_rate,
-                    "supervisor_profit": supervisor_profit,
-                    "operator_profit": operator_profit,
+                    "estimated_total_commission": estimated_total_commission,
                 }
                 by_shop[key]["year_total_sales"] += monthly_sales
                 by_shop[key]["year_total_profit"] += monthly_profit
@@ -2516,7 +2993,7 @@ async def get_annual_profit_statistics(
                     + profit_basis_amount
                 )
 
-                for emp_code, ratio in sup_list + op_list:
+                for emp_code, ratio in emp_assignments:
                     if not emp_code:
                         continue
                     if emp_code not in by_employee:

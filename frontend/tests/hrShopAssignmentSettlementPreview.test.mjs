@@ -71,12 +71,13 @@ test('预计提成取后端 expected_commission，前端不再自己累加', () 
   assert.equal(summary[0].settlement_coefficient, 1)
 })
 
-test('员工角色来自归属配置，预览接口不返回角色', () => {
-  const summary = summarizeEmployeeCommissions([PREVIEW_EMPLOYEE], { EMP260001: 'supervisor' })
-  assert.equal(summary[0].role, 'supervisor')
+test('层级只展示员工档案的职位名，不再有角色概念', () => {
+  const summary = summarizeEmployeeCommissions([PREVIEW_EMPLOYEE], { EMP260001: '总经理' })
+  assert.equal(summary[0].position_name, '总经理')
+  assert.equal('role' in summary[0], false)
 
   const fallback = summarizeEmployeeCommissions([PREVIEW_EMPLOYEE])
-  assert.equal(fallback[0].role, 'operator')
+  assert.equal(fallback[0].position_name, '（未设岗位）')
 })
 
 test('前端不再自己算提成：试算改为把输入交给后端', () => {

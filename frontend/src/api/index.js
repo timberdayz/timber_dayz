@@ -133,7 +133,7 @@ function redirectToLogin() {
 
 // ⭐ v6.0.0新增：CSRF Token 名称（Phase 3: CSRF 保护）
 function clearAuthArtifacts() {
-  ;[
+  [
     'token',
     'access_token',
     'refresh_token',
@@ -1040,13 +1040,13 @@ export default {
       field_parse_rules: fieldParseRules,
       ...(Array.isArray(coreFields) && coreFields.length > 0
         ? {
-            core_fields: coreFields.map((item) => ({
-              semantic_key: item.semantic_key ?? null,
-              raw_name: item.raw_name ?? null,
-              required: Boolean(item.required),
-              in_hash: item.in_hash !== false
-            }))
-          }
+          core_fields: coreFields.map((item) => ({
+            semantic_key: item.semantic_key ?? null,
+            raw_name: item.raw_name ?? null,
+            required: Boolean(item.required),
+            in_hash: item.in_hash !== false
+          }))
+        }
         : {}),
       // [*] 批次 F-4(API-6): 「已确认的新列」忽略清单
       ...(Array.isArray(ignoredExtraFields)
@@ -1425,18 +1425,6 @@ export default {
   async getGovernanceOverview(platform = null) {
     const params = platform ? `?platform=${platform}` : ''
     return await this._get(`/field-mapping/governance/overview${params}`)
-  },
-
-  /**
-   * 获取缺少模板的域×粒度清单
-   * @param {string} platform - 平台代码（可选）
-   * @returns {Promise} [{domain, granularity, file_count}]
-   */
-  async getMissingTemplates(platform = null) {
-    const params = platform ? `?platform=${platform}` : ''
-    return await this._get(
-      `/field-mapping/governance/missing-templates${params}`
-    )
   },
 
   /**
@@ -2166,13 +2154,13 @@ export default {
     return await this._get(`/hr/salary-structures/${employeeCode}`)
   },
   async getHrSalaryStructureHistory(employeeCode) {
-    return await this._get(`/hr/salary-structures/${employeeCode}/history`);
+    return await this._get(`/hr/salary-structures/${employeeCode}/history`)
   },
   async createHrSalaryStructure(data) {
     return await this._post('/hr/salary-structures', data)
   },
   async updateHrSalaryStructure(employeeCode, data) {
-    return await this._put(`/hr/salary-structures/${employeeCode}`, data);
+    return await this._put(`/hr/salary-structures/${employeeCode}`, data)
   },
 
   // === 工资单 ===
@@ -2192,10 +2180,10 @@ export default {
     return await this._put(`/hr/payroll-records/${recordId}`, data)
   },
   async refreshHrPayrollRecord(employeeCode, yearMonth) {
-    return await this._post(`/hr/payroll-records/${employeeCode}/${yearMonth}/refresh`);
+    return await this._post(`/hr/payroll-records/${employeeCode}/${yearMonth}/refresh`)
   },
   async refreshAllHrPayrollRecords(yearMonth) {
-    return await this._post(`/hr/payroll-records/${yearMonth}/refresh-all`);
+    return await this._post(`/hr/payroll-records/${yearMonth}/refresh-all`)
   },
   async confirmHrPayrollRecord(recordId) {
     return await this._post(`/hr/payroll-records/${recordId}/confirm`)
@@ -2368,6 +2356,11 @@ export default {
   },
   async deleteHrEmployeeShopAssignment(id) {
     return await this._delete(`/hr/employee-shop-assignments/${id}`)
+  },
+  // 批量归属：一次提交多行（mode=create 新增 / mode=update 改比例 / mode=delete 移除）。
+  // 后端逐项返回成功与失败，失败项不阻断其余项。
+  async batchHrEmployeeShopAssignments(data) {
+    return await this._post('/hr/employee-shop-assignments/batch', data)
   },
   async getHrShopProfitStatistics(params = {}) {
     return await this._get('/hr/shop-profit-statistics', { params })

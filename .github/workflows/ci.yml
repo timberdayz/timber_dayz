@@ -423,6 +423,9 @@ jobs:
             backend/tests/test_performance_salary_caliber.py \
             backend/tests/test_racing_coefficient_not_in_payroll.py \
             backend/tests/test_profit_basis_single_version.py \
+            tests/test_ci_frontend_quality_gate_contract.py \
+            tests/test_access_permission_roles_untouched_contract.py \
+            backend/tests/test_monthly_cost_task_retired.py \
             # ⚠️ 2026-11-21：上面 6 个文件是「提成与绩效工资口径归一」批次的守护。
             #   口径归一后，每个数字必须只有一个真源：
             #     backend/services/commission_caliber.py（提成 / 绩效工资公式唯一实现处）
@@ -499,6 +502,28 @@ jobs:
 
       - name: Guard against silent frontend tests
         run: python3 scripts/ci_frontend_test_silence_gate.py
+
+      - name: Frontend lint gate (no-undef on HR domain)
+        # 人力管理页曾出现「调用了不存在的函数」的运行时缺陷：父容器
+        # HumanResources.vue 里留着一次对 loadEmployees 的调用，而该函数已被
+        # 拆到子组件 EmployeeTab.vue ⇒ 运行时 ReferenceError ⇒ 页面顶部弹
+        # 「加载数据失败，请刷新重试」，但员工数据其实全部加载成功（假报错）。
+        #
+        # Vue SFC 的 ESLint **默认关闭 no-undef** ⇒ 构建期不报、npm run build 也不报；
+        # 前端守护是 node --test（纯源码断言，不挂载组件运行时）⇒ 测试期同样不报。
+        # ⇒ 这里显式打开 no-undef，对人力域（本次修复范围 + 缺陷高发区）执行。
+        # 范围外的历史格式问题（ProductCenter.vue 等）不阻断本门禁，后续逐域扩范围。
+        working-directory: frontend
+        run: >
+          npx eslint src/domains/business/views/HumanResources.vue
+          src/domains/business/views/hr --ext .vue,.js
+          --rule '{"no-undef":"error"}'
+
+      - name: Run frontend guard tests
+        # 前端守护测试此前**从未在 CI 里执行过**（该 job 只跑「哑测试检测」）
+        # ⇒ 前端守护形同虚设，缺陷只在本机发现。这里真的跑一遍。
+        working-directory: frontend
+        run: node --test "tests/**/*.test.mjs"
 
   security-scan:
     runs-on: ubuntu-latest

@@ -69,7 +69,6 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
         platform_code="shopee",
         shop_id="s1",
         commission_ratio=0.1,
-        role="supervisor",
         status="active",
         year_month="2026-04",
     )
@@ -145,8 +144,6 @@ def test_shop_profit_statistics_uses_profit_basis_amount_for_person_income():
     assert row["cost_status"] == "projected"
     assert row["allocatable_profit_amount"] == 1200.0
     assert row["estimated_total_commission"] == 120.0
-    assert row["supervisor_profit"] == 120.0
-    assert row["operator_profit"] == 0
 
 
 def test_shop_profit_statistics_uses_active_operating_stores_and_preserves_month_assignments():
@@ -187,7 +184,6 @@ def test_shop_profit_statistics_floors_negative_profit_basis_for_estimated_commi
         platform_code="shopee",
         shop_id="s_neg",
         commission_ratio=0.25,
-        role="supervisor",
         status="active",
         year_month="2026-04",
     )
@@ -253,7 +249,6 @@ def test_shop_profit_statistics_floors_negative_profit_basis_for_estimated_commi
     assert row["profit_basis_amount"] == -1000.0
     assert row["allocatable_profit_amount"] == 0.0
     assert row["estimated_total_commission"] == 0.0
-    assert row["supervisor_profit"] == 0.0
 
 
 def test_load_profit_basis_map_rebuilds_unlocked_snapshot_for_statistics():

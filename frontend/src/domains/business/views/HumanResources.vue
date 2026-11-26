@@ -714,7 +714,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import api from '@/api'
@@ -871,8 +871,7 @@ const loadInitialData = async () => {
     await Promise.all([
       loadDepartments(),
       loadPositions(),
-      loadEmployeeNames(),
-      loadEmployees()
+      loadEmployeeNames()
     ])
   } catch (error) {
     console.error('加载初始数据失败:', error)
@@ -981,21 +980,6 @@ const loadPayroll = async () => {
 // 员工操作方法
 // ============================================================================
 
-const showPayrollDialog = (record) => {
-  editingPayroll.value = record
-  payrollForm.overtime_pay = Number(record.overtime_pay || 0)
-  payrollForm.bonus = Number(record.bonus || 0)
-  payrollForm.social_insurance_personal = Number(record.social_insurance_personal || 0)
-  payrollForm.housing_fund_personal = Number(record.housing_fund_personal || 0)
-  payrollForm.income_tax = Number(record.income_tax || 0)
-  payrollForm.other_deductions = Number(record.other_deductions || 0)
-  payrollForm.social_insurance_company = Number(record.social_insurance_company || 0)
-  payrollForm.housing_fund_company = Number(record.housing_fund_company || 0)
-  payrollForm.pay_date = record.pay_date || ''
-  payrollForm.remark = record.remark || ''
-  payrollDialogVisible.value = true
-}
-
 const savePayroll = async () => {
   if (!editingPayroll.value) return
   savingPayroll.value = true
@@ -1020,51 +1004,6 @@ const savePayroll = async () => {
     ElMessage.error(error.response?.data?.message || error.message || '更新工资单失败')
   } finally {
     savingPayroll.value = false
-  }
-}
-
-const confirmPayroll = async (record) => {
-  try {
-    await ElMessageBox.confirm('确认后系统不会再自动覆盖该工资单，是否继续？', '确认工资单', {
-      type: 'warning'
-    })
-    await api.confirmHrPayrollRecord(record.id)
-    ElMessage.success('工资单已确认')
-    await loadPayroll()
-  } catch (error) {
-    if (error === 'cancel') return
-    console.error('确认工资单失败:', error)
-    ElMessage.error(error.response?.data?.message || error.message || '确认工资单失败')
-  }
-}
-
-const reopenPayroll = async (record) => {
-  try {
-    await ElMessageBox.confirm('退回草稿后，后续绩效重算可以再次覆盖自动计算字段，是否继续？', '退回草稿', {
-      type: 'warning'
-    })
-    await api.reopenHrPayrollRecord(record.id)
-    ElMessage.success('工资单已退回草稿')
-    await loadPayroll()
-  } catch (error) {
-    if (error === 'cancel') return
-    console.error('退回工资单失败:', error)
-    ElMessage.error(error.response?.data?.message || error.message || '退回工资单失败')
-  }
-}
-
-const markPayrollPaid = async (record) => {
-  try {
-    await ElMessageBox.confirm('标记已发放后，该工资单将进入只读状态，是否继续？', '发放工资', {
-      type: 'warning'
-    })
-    await api.markHrPayrollRecordPaid(record.id)
-    ElMessage.success('工资单已标记为已发放')
-    await loadPayroll()
-  } catch (error) {
-    if (error === 'cancel') return
-    console.error('标记已发放失败:', error)
-    ElMessage.error(error.response?.data?.message || error.message || '标记已发放失败')
   }
 }
 

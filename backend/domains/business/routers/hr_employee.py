@@ -554,7 +554,6 @@ async def _build_employee_income_audit(
                 platform_code=snapshot.platform_code,
                 shop_id=snapshot.shop_id,
                 commission_ratio=snapshot.assignment_ratio_snapshot,
-                role=snapshot.role_snapshot,
                 sales_target_amount=snapshot.sales_target_amount_snapshot,
             )
             for snapshot in snapshots
@@ -630,7 +629,6 @@ async def _build_employee_income_audit(
                 "commission_ratio": float(
                     getattr(assignment, "commission_ratio", 0) or 0
                 ),
-                "role": getattr(assignment, "role", None),
                 "sales_target_amount": (
                     float(getattr(assignment, "sales_target_amount", 0) or 0)
                     if getattr(assignment, "sales_target_amount", None) is not None

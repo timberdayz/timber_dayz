@@ -1,16 +1,14 @@
 import pytest
 
 
-def test_execution_task_policy_allows_expected_actions():
-    from backend.services.employee_task_policy import get_task_type_policy
+def test_execution_task_policy_is_retired_with_monthly_cost_entry():
+    """「每月成本录入任务」整条链路下线 ⇒ execution 类策略条目不再存在。"""
+    from backend.services.employee_task_policy import TASK_TYPE_POLICIES
 
-    policy = get_task_type_policy("monthly_cost_entry")
-
-    assert policy["target_route"] == "/expense-management"
-    assert policy["required_permission"] == "expense-management"
-    assert "submit_result" in policy["owner_actions"]
-    assert "append_comment" in policy["collaborator_actions"]
-    assert "submit_result" not in policy["collaborator_actions"]
+    assert "monthly_cost_entry" not in TASK_TYPE_POLICIES
+    assert all(
+        policy["task_category"] != "execution" for policy in TASK_TYPE_POLICIES.values()
+    )
 
 
 def test_confirmation_task_policy_maps_public_page_permission():
@@ -32,31 +30,57 @@ def test_unknown_task_type_policy_raises():
 def test_initiator_close_only_allowed_for_pending_tasks():
     from backend.services.employee_task_policy import can_user_perform_task_action
 
-    assert can_user_perform_task_action("execution", "pending", "initiator", "close_unstarted_task") is True
-    assert can_user_perform_task_action("execution", "in_progress", "initiator", "close_unstarted_task") is False
+    assert (
+        can_user_perform_task_action(
+            "execution", "pending", "initiator", "close_unstarted_task"
+        )
+        is True
+    )
+    assert (
+        can_user_perform_task_action(
+            "execution", "in_progress", "initiator", "close_unstarted_task"
+        )
+        is False
+    )
 
 
 def test_admin_has_override_actions():
     from backend.services.employee_task_policy import can_user_perform_task_action
 
-    assert can_user_perform_task_action("execution", "pending", "admin", "reassign_task") is True
-    assert can_user_perform_task_action("execution", "in_progress", "admin", "takeover_task") is True
-    assert can_user_perform_task_action("execution", "pending_confirmation", "admin", "force_close_task") is True
+    assert (
+        can_user_perform_task_action("execution", "pending", "admin", "reassign_task")
+        is True
+    )
+    assert (
+        can_user_perform_task_action(
+            "execution", "in_progress", "admin", "takeover_task"
+        )
+        is True
+    )
+    assert (
+        can_user_perform_task_action(
+            "execution", "pending_confirmation", "admin", "force_close_task"
+        )
+        is True
+    )
 
 
-def test_validate_task_target_permission_for_monthly_cost_entry():
+def test_validate_task_target_permission_rejects_retired_monthly_cost_entry():
+    """已下线的任务类型不允许再被派发。"""
     from backend.services.employee_task_policy import validate_task_target_permission
 
-    validate_task_target_permission("monthly_cost_entry", {"expense-management", "my-tasks"})
-
-    with pytest.raises(ValueError, match="permission"):
-        validate_task_target_permission("monthly_cost_entry", {"my-tasks"})
+    with pytest.raises(ValueError, match="Unknown task type"):
+        validate_task_target_permission("monthly_cost_entry", {"expense-management"})
 
 
 def test_validate_task_target_permission_for_performance_confirmation():
     from backend.services.employee_task_policy import validate_task_target_permission
 
-    validate_task_target_permission("performance_confirmation", {"performance:read", "my-tasks"})
+    validate_task_target_permission(
+        "performance_confirmation", {"performance:read", "my-tasks"}
+    )
 
     with pytest.raises(ValueError, match="permission"):
-        validate_task_target_permission("performance_confirmation", {"expense-management"})
+        validate_task_target_permission(
+            "performance_confirmation", {"expense-management"}
+        )

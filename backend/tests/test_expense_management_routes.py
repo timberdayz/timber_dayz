@@ -91,11 +91,6 @@ async def test_expense_create_accepts_missing_platform_code_when_lookup_succeeds
         "_resolve_shop_platform_code",
         lambda db, shop_id: __import__("asyncio").sleep(0, result="shopee"),
     )
-    monkeypatch.setattr(
-        module,
-        "sync_monthly_cost_entry_task",
-        lambda *args, **kwargs: __import__("asyncio").sleep(0),
-    )
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"

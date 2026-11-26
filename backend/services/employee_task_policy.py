@@ -2,23 +2,19 @@ from __future__ import annotations
 
 
 TASK_TYPE_POLICIES = {
-    "monthly_cost_entry": {
-        "task_category": "execution",
-        "target_route": "/expense-management",
-        "required_permission": "expense-management",
-        "allowed_roles": {"admin", "manager", "finance"},
-        "owner_actions": {"start_task", "submit_result"},
-        "collaborator_actions": {"append_comment", "append_evidence", "append_structured_data"},
-        "initiator_actions": {"close_unstarted_task", "request_cancel"},
-        "admin_actions": {"reassign_task", "takeover_task", "force_close_task"},
-    },
+    # ⚠️ 「每月成本录入」协同任务已于 2026-11-26 整条下线：
+    # 它依赖已退休的归属「角色」，且生产上自 2026-06-18 起已停摆。
     "performance_confirmation": {
         "task_category": "confirmation",
         "target_route": "/hr-performance-display",
         "required_permission": "performance:read",
         "allowed_roles": {"admin", "manager", "operator", "finance"},
         "owner_actions": {"submit_result"},
-        "collaborator_actions": {"append_comment", "append_evidence", "append_structured_data"},
+        "collaborator_actions": {
+            "append_comment",
+            "append_evidence",
+            "append_structured_data",
+        },
         "initiator_actions": {"close_unstarted_task", "request_cancel"},
         "admin_actions": {"reassign_task", "takeover_task", "force_close_task"},
     },
@@ -60,4 +56,6 @@ def validate_task_target_permission(task_type: str, user_permissions: set[str]) 
     policy = get_task_type_policy(task_type)
     required_permission = policy["required_permission"]
     if required_permission not in user_permissions:
-        raise ValueError(f"User lacks required permission for task target: {required_permission}")
+        raise ValueError(
+            f"User lacks required permission for task target: {required_permission}"
+        )

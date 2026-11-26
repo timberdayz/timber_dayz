@@ -3,14 +3,15 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import {
+  buildPositionNameMap,
   collectEstimateOverrides,
   estimateKey,
   exceedsCommissionRatioLimit,
   indexEstimateRows,
-  inferAssignmentRole,
   isAssignmentDirty,
   readBackendAllocatableProfit,
   resolveEstimatedCommission,
+  resolvePositionName,
   setShopAllocatableProfitRate,
   summarizeEmployeeCommissions,
   sumCommissionRatio
@@ -63,12 +64,14 @@ test('setShopAllocatableProfitRate syncs table row and source shop object', () =
   assert.equal(shop.allocatable_profit_rate, 0.45)
 })
 
-test('inferAssignmentRole maps supervisor-like positions and defaults to operator', () => {
-  assert.equal(inferAssignmentRole({ position_name: '店铺主管' }), 'supervisor')
-  assert.equal(inferAssignmentRole({ position_code: 'SUPV' }), 'supervisor')
-  assert.equal(inferAssignmentRole({ position_name: 'Operations Manager' }), 'supervisor')
-  assert.equal(inferAssignmentRole({ position_name: '' }), 'operator')
-  assert.equal(inferAssignmentRole(null), 'operator')
+test('职位名索引只取员工档案里的职位，取不到显示「（未设岗位）」', () => {
+  const map = buildPositionNameMap([
+    { employee_code: 'E001', position_name: '主管' },
+    { employee_code: 'E002', position_name: null }
+  ])
+  assert.equal(map.E001, '主管')
+  assert.equal('E002' in map, false)
+  assert.equal(resolvePositionName('E002', map), '（未设岗位）')
 })
 
 test('前端不再自己算提成：试算只把输入交给后端', () => {
@@ -130,11 +133,11 @@ test('summarizeEmployeeCommissions reads backend expected_commission instead of 
     }
   ]
 
-  assert.deepEqual(summarizeEmployeeCommissions(previewEmployees, { E001: 'supervisor' }), [
+  assert.deepEqual(summarizeEmployeeCommissions(previewEmployees, { E001: '主管' }), [
     {
       employee_code: 'E001',
       employee_name: 'Alice',
-      role: 'supervisor',
+      position_name: '主管',
       shop_count: 2,
       estimated_commission: 279.15,
       calculation_status: 'complete',
@@ -167,7 +170,7 @@ test('summarizeEmployeeCommissions sorts employees by backend expected_commissio
     }
   ]
 
-  const summary = summarizeEmployeeCommissions(previewEmployees, { E001: 'supervisor', E002: 'operator' })
+  const summary = summarizeEmployeeCommissions(previewEmployees, { E001: '主管', E002: '专员' })
   assert.deepEqual(summary.map((item) => item.employee_code), ['E001', 'E002', 'E003'])
   assert.deepEqual(summary.map((item) => item.estimated_commission), [250, 90, 0])
   assert.deepEqual(summary.map((item) => item.shop_count), [2, 1, 0])

@@ -49,7 +49,7 @@
         <div class="commission-summary-items">
           <div v-for="item in employeeCommissionSummary" :key="item.employee_code" class="commission-summary-item">
             <span class="commission-summary-name">{{ item.employee_name || item.employee_code }}</span>
-            <span class="commission-summary-role">{{ item.role === 'supervisor' ? '主管' : '操作员' }}</span>
+            <span class="commission-summary-position">{{ item.position_name }}</span>
             <el-tag
               v-if="employeeStatusTag(item.calculation_status)"
               size="small"
@@ -62,15 +62,25 @@
           </div>
         </div>
       </div>
+      <div v-if="selectedShops.length > 0" class="batch-toolbar">
+        <span class="batch-toolbar-count">已选 {{ selectedShops.length }} 家店铺</span>
+        <el-button size="small" type="primary" @click="openBatchAttachDialog">批量挂靠</el-button>
+        <el-button size="small" type="warning" @click="openBatchRatioDialog">批量调整比例</el-button>
+        <el-button size="small" type="danger" @click="handleBatchRemove">批量移除</el-button>
+        <el-button size="small" @click="clearShopSelection">清空选择</el-button>
+      </div>
       <el-card>
         <el-table
+          ref="configTableRef"
           :data="configTableRows"
           stripe
           v-loading="configLoading"
           class="erp-table"
           border
           :span-method="configSpanMethod"
+          @selection-change="handleSelectionChange"
         >
+          <el-table-column type="selection" width="46" fixed="left" :selectable="isShopFirstRow" />
           <el-table-column label="平台" width="100" fixed="left" show-overflow-tooltip>
             <template #default="{ row }">
               <span v-if="row._isFirst">{{ row.platform_code }}</span>
@@ -152,6 +162,11 @@
             </template>
           </el-table-column>
           <el-table-column label="人员" width="180" min-width="160">
+            <template #header>
+              <el-tooltip content="层级取自员工档案的职位名（只读、不落库），未设岗位显示「（未设岗位）」" placement="top">
+                <span>人员</span>
+              </el-tooltip>
+            </template>
             <template #default="{ row }">
               <template v-if="row._isAddRow">
                 <el-button size="small" link type="primary" @click="openAddForShop(row._shop)">+ 添加</el-button>
@@ -163,7 +178,7 @@
                   </el-tag>
                   {{ (row._person && (row._person.employee_name || row._person.employee_code)) || '' }}
                   <el-tag v-if="row._person" size="small" type="info" style="margin-left: 4px;">
-                    {{ row._person.role === 'supervisor' ? '主管' : '操作员' }}
+                    {{ positionNameOf(row._person.employee_code) }}
                   </el-tag>
                   <el-button v-if="row._person" size="small" link type="danger" @click="removePersonLocal(row._shop, row._person)">×</el-button>
                 </span>
@@ -402,20 +417,14 @@
     </div>
 
     <!-- 新增/编辑归属弹窗 -->
-    <el-dialog v-model="dialogVisible" :title="addForShopRow ? '添加主管/操作员' : '新增归属'" width="500px" @close="resetForm">
+    <el-dialog v-model="dialogVisible" :title="addForShopRow ? '添加人员' : '新增归属'" width="500px" @close="resetForm">
       <el-form :model="form" label-width="100px">
         <el-form-item v-if="addForShopRow" label="店铺">
           <el-input :value="addForShopRow.shop_name || addForShopRow.shop_id" disabled />
           <div v-if="addForShopRow.secondary_name" class="shop-display-secondary dialog-shop-secondary">{{ addForShopRow.secondary_name }}</div>
         </el-form-item>
-        <el-form-item label="角色" required>
-          <el-select v-model="form.role" placeholder="选择角色" style="width: 100%;">
-            <el-option label="主管" value="supervisor" />
-            <el-option label="操作员" value="operator" />
-          </el-select>
-        </el-form-item>
         <el-form-item label="员工" required>
-          <el-select v-model="form.employee_code" placeholder="选择员工" filterable style="width: 100%;" @change="handleEmployeeChange">
+          <el-select v-model="form.employee_code" placeholder="选择员工" filterable style="width: 100%;">
             <el-option
               v-for="e in employeesActive"
               :key="e.employee_code"
@@ -463,6 +472,111 @@
         <el-button type="primary" :loading="submitLoading" @click="submitForm">{{ addForShopRow ? '添加' : '新增' }}</el-button>
       </template>
     </el-dialog>
+
+    <!-- 批量挂靠人员：选中的店铺 + 1 名员工 + 统一提成比例 -->
+    <el-dialog v-model="batchAttachVisible" title="批量挂靠人员" width="520px">
+      <el-form label-width="100px">
+        <el-form-item label="店铺">
+          <span>已选 {{ selectedShops.length }} 家店铺</span>
+          <div class="batch-shop-preview">
+            <div v-for="shop in selectedShops.slice(0, 6)" :key="shopKeyOf(shop)">
+              {{ shop.shop_name || shop.shop_id }}
+            </div>
+            <div v-if="selectedShops.length > 6">等 {{ selectedShops.length }} 家店铺</div>
+          </div>
+        </el-form-item>
+        <el-form-item label="员工" required>
+          <el-select v-model="batchForm.employee_code" placeholder="选择员工" filterable style="width: 100%;">
+            <el-option
+              v-for="e in employeesActive"
+              :key="e.employee_code"
+              :label="`${e.name} (${e.employee_code}${e.position_name ? ' / ' + e.position_name : ''})`"
+              :value="e.employee_code"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="提成比例" required>
+          <span class="allocatable-rate-wrap">
+            <el-input-number
+              :model-value="(batchForm.commission_ratio ?? 0) * 100"
+              @update:model-value="(v) => { batchForm.commission_ratio = v != null ? Number(v) / 100 : 0 }"
+              :min="0"
+              :max="100"
+              :step="0.01"
+              :precision="2"
+              :controls="false"
+              placeholder="0-100%"
+              style="width: 100%;"
+            />
+            <span class="allocatable-rate-suffix">%</span>
+          </span>
+        </el-form-item>
+        <el-form-item v-if="batchAttachOverflowShops.length > 0" label="超限预检">
+          <el-alert
+            type="warning"
+            :closable="false"
+            :title="`以下 ${batchAttachOverflowShops.length} 家店铺加上该比例后会超过 100%，提交后由后端逐店判定`"
+          />
+          <div class="batch-overflow-list">
+            <div v-for="shop in batchAttachOverflowShops" :key="shopKeyOf(shop)">
+              {{ shop.shop_name || shop.shop_id }}
+            </div>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchAttachVisible = false">取消</el-button>
+        <el-button type="primary" :loading="batchSubmitting" @click="submitBatchAttach">确认提交</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 批量调整提成比例：选中店铺里已配置的人员行统一设比例 -->
+    <el-dialog v-model="batchRatioVisible" title="批量调整提成比例" width="520px">
+      <el-form label-width="100px">
+        <el-form-item label="影响范围">
+          <span>已选 {{ selectedShops.length }} 家店铺，共 {{ batchTargetRows.length }} 条人员归属</span>
+        </el-form-item>
+        <el-form-item v-if="batchUnsavedRows.length > 0" label="未保存行">
+          <el-alert
+            type="info"
+            :closable="false"
+            :title="`有 ${batchUnsavedRows.length} 条人员是本地新增、还没保存，批量改比例只作用于已保存的归属`"
+          />
+        </el-form-item>
+        <el-form-item label="提成比例" required>
+          <span class="allocatable-rate-wrap">
+            <el-input-number
+              :model-value="(batchForm.commission_ratio ?? 0) * 100"
+              @update:model-value="(v) => { batchForm.commission_ratio = v != null ? Number(v) / 100 : 0 }"
+              :min="0"
+              :max="100"
+              :step="0.01"
+              :precision="2"
+              :controls="false"
+              placeholder="0-100%"
+              style="width: 100%;"
+            />
+            <span class="allocatable-rate-suffix">%</span>
+          </span>
+        </el-form-item>
+        <el-form-item v-if="batchRatioOverflowShops.length > 0" label="超限预检">
+          <el-alert
+            type="warning"
+            :closable="false"
+            :title="`以下 ${batchRatioOverflowShops.length} 家店铺按新比例合计会超过 100%，提交后由后端逐店判定`"
+          />
+          <div class="batch-overflow-list">
+            <div v-for="shop in batchRatioOverflowShops" :key="shopKeyOf(shop)">
+              {{ shop.shop_name || shop.shop_id }}
+            </div>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchRatioVisible = false">取消</el-button>
+        <el-button type="primary" :loading="batchSubmitting" @click="submitBatchRatio">确认提交</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -472,13 +586,17 @@ import { Setting, DataAnalysis, Calendar } from '@element-plus/icons-vue'
 import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  buildBatchCreateItems,
+  buildBatchUpdatePayload,
+  buildPositionNameMap,
+  collectAssignmentIds,
   collectEstimateOverrides,
   exceedsCommissionRatioLimit,
-  inferAssignmentRole,
   indexEstimateRows,
   isAssignmentDirty,
   readBackendAllocatableProfit,
   resolveEstimatedCommission,
+  resolvePositionName,
   setShopAllocatableProfitRate,
   summarizeEmployeeCommissions,
   sumCommissionRatio
@@ -533,33 +651,30 @@ const form = ref({
   employee_code: '',
   platform_code: '',
   shop_id: '',
-  commission_ratio: 0.05,
-  role: 'supervisor'
+  commission_ratio: 0.05
 })
+
+// 批量操作：选中的店铺（表格多选）、批量弹窗与提交状态。
+const configTableRef = ref(null)
+const selectedShops = ref([])
+const batchAttachVisible = ref(false)
+const batchRatioVisible = ref(false)
+const batchSubmitting = ref(false)
+const batchForm = ref({ employee_code: '', commission_ratio: 0.05 })
 
 const shopsFiltered = computed(() => {
   const pc = form.value.platform_code
   if (!pc) return shops.value
   return shops.value.filter((s) => (s.platform_code || '').toLowerCase() === (pc || '').toLowerCase())
 })
-// 员工角色来自归属配置（后端结算预览不返回角色）。
-const roleByEmployee = computed(() => {
-  const map = {}
-  for (const shop of shopRows.value) {
-    for (const assignment of shop.assignments || []) {
-      if (!assignment?.employee_code) continue
-      if (assignment.role === 'supervisor') {
-        map[assignment.employee_code] = 'supervisor'
-      } else if (!map[assignment.employee_code]) {
-        map[assignment.employee_code] = 'operator'
-      }
-    }
-  }
-  return map
-})
+// 层级只是展示：职位名来自员工档案（不落库、不需要用户勾选）。
+// ⚠️ 这里必须用**全量**员工名单，而不是在职名单：离职员工的归属行是历史事实
+// （工资单、绩效、提成审计都还指向他），若只取在职名单，他会在归属行里
+// 被误显示成「（未设岗位）」。下拉选人仍然只给在职员工（employeesActive）。
+const positionByEmployee = computed(() => buildPositionNameMap(employees.value))
 
 // 员工月度预计提成：金额直接读后端 expected_commission，前端不再自己累加。
-const employeeCommissionSummary = computed(() => summarizeEmployeeCommissions(settlementPreviewEmployees.value, roleByEmployee.value))
+const employeeCommissionSummary = computed(() => summarizeEmployeeCommissions(settlementPreviewEmployees.value, positionByEmployee.value))
 
 // 配置表 flattened 行：一店多人，每行一个人员或“添加”占位
 const configTableRows = computed(() => {
@@ -743,13 +858,13 @@ function onPlatformChange() {
   form.value.shop_id = ''
 }
 
-function handleEmployeeChange(employeeCode) {
-  const emp = employeesActive.value.find((e) => e.employee_code === employeeCode)
-  form.value.role = inferAssignmentRole(emp)
+// 员工的职位名（层级只是展示，来自员工档案）。
+function positionNameOf(employeeCode) {
+  return resolvePositionName(employeeCode, positionByEmployee.value)
 }
 
 function resetForm() {
-  form.value = { employee_code: '', platform_code: '', shop_id: '', commission_ratio: 0.05, role: 'operator' }
+  form.value = { employee_code: '', platform_code: '', shop_id: '', commission_ratio: 0.05 }
   editId.value = null
   isEdit.value = false
   addForShopRow.value = null
@@ -817,49 +932,65 @@ async function handleSaveRow(row) {
   }
   shop.saving = true
   try {
-    const targetAssignments = (shop.assignments || []).map((p) => ({
-      id: p.id,
-      employee_code: p.employee_code,
-      role: p.role === 'supervisor' ? 'supervisor' : 'operator',
-      commission_ratio: p.commission_ratio ?? 0
-    }))
-    const assRes = await api.getHrEmployeeShopAssignments({ year_month: configMonth.value, platform_code: shop.platform_code, shop_id: shop.shop_id, page: 1, page_size: 100 })
-    const assData = assRes?.data ?? assRes ?? {}
-    const items = (assData?.items ?? (Array.isArray(assData) ? assData : [])) || []
-    for (const a of items) {
-      const ar = a.role || 'operator'
-      const found = targetAssignments.find((t) => t.employee_code === a.employee_code && ((t.role || 'operator') === ar))
-      if (found) {
-        if (Math.abs((a.commission_ratio ?? 0) - (found.commission_ratio ?? 0)) > 0.001) {
-          await api.updateHrEmployeeShopAssignment(a.id, {
-            commission_ratio: found.commission_ratio
-          })
-        }
-      } else {
-        await api.deleteHrEmployeeShopAssignment(a.id)
-      }
-    }
-    for (const p of targetAssignments) {
-      const pr = p.role || 'operator'
-      const exists = items.find((a) => a.employee_code === p.employee_code && ((a.role || 'operator') === pr))
-      if (!exists) {
-        await api.createHrEmployeeShopAssignment({ year_month: configMonth.value, employee_code: p.employee_code, platform_code: shop.platform_code, shop_id: shop.shop_id, commission_ratio: p.commission_ratio, role: p.role })
-      }
-    }
-    // 保存可分配利润率
-    const rate = Number(shop.allocatable_profit_rate)
-    if (!Number.isNaN(rate) && rate >= 0 && rate <= 1) {
-      await api.putHrShopCommissionConfig(shop.platform_code, shop.shop_id, {
-        year_month: configMonth.value,
-        allocatable_profit_rate: rate
-      })
-    }
+    await saveShopRow(shop)
     ElMessage.success('已保存')
     await loadConfigData()
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '保存失败')
   } finally {
     shop.saving = false
+  }
+}
+
+/**
+ * 保存单个店铺的归属（不刷新页面）。
+ *
+ * 匹配键只有 employee_code：同一个人在同一店就是同一行。
+ * 批量保存复用它，并行提交、逐行汇总，失败不中断其余行。
+ */
+async function saveShopRow(shop) {
+  if (!validateShopAssignmentRatio(shop)) {
+    throw new Error('该店铺该月份人员提成比例总和不能超过100%')
+  }
+  const targetAssignments = (shop.assignments || []).map((p) => ({
+    id: p.id,
+    employee_code: p.employee_code,
+    commission_ratio: p.commission_ratio ?? 0
+  }))
+  const assRes = await api.getHrEmployeeShopAssignments({ year_month: configMonth.value, platform_code: shop.platform_code, shop_id: shop.shop_id, page: 1, page_size: 100 })
+  const assData = assRes?.data ?? assRes ?? {}
+  const items = (assData?.items ?? (Array.isArray(assData) ? assData : [])) || []
+  for (const a of items) {
+    const found = targetAssignments.find((t) => t.employee_code === a.employee_code)
+    if (found) {
+      if (Math.abs((a.commission_ratio ?? 0) - (found.commission_ratio ?? 0)) > 0.001) {
+        await api.updateHrEmployeeShopAssignment(a.id, {
+          commission_ratio: found.commission_ratio
+        })
+      }
+    } else {
+      await api.deleteHrEmployeeShopAssignment(a.id)
+    }
+  }
+  for (const p of targetAssignments) {
+    const exists = items.find((a) => a.employee_code === p.employee_code)
+    if (!exists) {
+      await api.createHrEmployeeShopAssignment({
+        year_month: configMonth.value,
+        employee_code: p.employee_code,
+        platform_code: shop.platform_code,
+        shop_id: shop.shop_id,
+        commission_ratio: p.commission_ratio
+      })
+    }
+  }
+  // 保存可分配利润率
+  const rate = Number(shop.allocatable_profit_rate)
+  if (!Number.isNaN(rate) && rate >= 0 && rate <= 1) {
+    await api.putHrShopCommissionConfig(shop.platform_code, shop.shop_id, {
+      year_month: configMonth.value,
+      allocatable_profit_rate: rate
+    })
   }
 }
 
@@ -888,26 +1019,291 @@ async function handleDeleteRow(row) {
   }
 }
 
+/**
+ * 批量保存：并行提交所有已配置的店铺，逐行汇总结果。
+ * 失败不中断其余行（用 Promise.allSettled 而不是串行 for + await）。
+ */
 async function handleBatchSave() {
   if (!configMonth.value) {
     ElMessage.warning('请先选择月份')
     return
   }
+  const toSave = shopRows.value.filter((r) => hasConfig(r))
+  if (toSave.length === 0) {
+    ElMessage.warning('没有需要保存的店铺')
+    return
+  }
   batchSaving.value = true
   try {
-    const toSave = shopRows.value.filter((r) => hasConfig(r))
-    for (const row of toSave) await handleSaveRow(row)
-    ElMessage.success(`已批量保存 ${toSave.length} 行`)
-  } catch (e) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '批量保存失败')
+    const results = await Promise.allSettled(toSave.map((shop) => saveShopRow(shop)))
+    const failed = []
+    let succeeded = 0
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        succeeded += 1
+        return
+      }
+      failed.push({
+        target: {
+          shop_name: toSave[index]?.shop_name,
+          shop_id: toSave[index]?.shop_id
+        },
+        reason: result.reason?.response?.data?.detail || result.reason?.detail || result.reason?.message || String(result.reason)
+      })
+    })
+    if (failed.length === 0) {
+      ElMessage.success(`批量保存完成：成功 ${succeeded} 行 / 失败 0 行`)
+    } else {
+      ElMessage.warning(`批量保存完成：成功 ${succeeded} 行 / 失败 ${failed.length} 行`)
+      showBatchFailureList('批量保存', failed)
+    }
+    await loadConfigData()
   } finally {
     batchSaving.value = false
   }
 }
 
+// 表格多选：只有每家店的第一行可以勾选，勾选结果按店铺去重。
+function isShopFirstRow(row) {
+  return Boolean(row?._isFirst)
+}
+
+function handleSelectionChange(rows) {
+  selectedShops.value = (rows || [])
+    .filter((row) => row?._isFirst && row?._shop)
+    .map((row) => row._shop)
+}
+
+function clearShopSelection() {
+  selectedShops.value = []
+  configTableRef.value?.clearSelection()
+}
+
+function shopKeyOf(shop) {
+  return `${shop?.platform_code ?? ''}|${shop?.shop_id ?? ''}`
+}
+
+// 选中店铺里已配置的人员行（批量改比例的作用对象）。
+const batchTargetRows = computed(() => {
+  const rows = []
+  for (const shop of selectedShops.value) {
+    for (const assignment of shop.assignments || []) {
+      rows.push({
+        ...assignment,
+        platform_code: shop.platform_code,
+        shop_id: shop.shop_id
+      })
+    }
+  }
+  return rows
+})
+
+// 本地刚加、还没保存的人员行：批量端点只改已落库的归属，这些行不参与。
+const batchUnsavedRows = computed(() =>
+  batchTargetRows.value.filter((row) => row.id === null || row.id === undefined)
+)
+
+// 超限预检：口径与页面的 validateShopAssignmentRatio 一致（按店铺合计 ≤ 100%）。
+const batchAttachOverflowShops = computed(() => {
+  if (!batchAttachVisible.value) return []
+  const ratio = batchForm.value.commission_ratio ?? 0
+  return selectedShops.value.filter((shop) => !validateShopAssignmentRatio(shop, { commission_ratio: ratio }))
+})
+
+const batchRatioOverflowShops = computed(() => {
+  if (!batchRatioVisible.value) return []
+  const ratio = batchForm.value.commission_ratio ?? 0
+  return selectedShops.value.filter((shop) => {
+    const rows = shop.assignments || []
+    if (rows.length === 0) return false
+    const excluded = new Set(rows)
+    return !validateShopAssignmentRatio(
+      shop,
+      { commission_ratio: ratio * rows.length },
+      (assignment) => excluded.has(assignment)
+    )
+  })
+})
+
+// 从后端批量端点的响应里取出逐项结果。
+function extractBatchResult(response) {
+  const payload = response?.data ?? response ?? {}
+  const inner = payload?.data ?? payload
+  return {
+    succeeded: Array.isArray(inner?.succeeded) ? inner.succeeded : [],
+    failed: Array.isArray(inner?.failed) ? inner.failed : [],
+    summary: inner?.summary ?? null
+  }
+}
+
+function describeBatchTarget(target) {
+  if (target === null || target === undefined) return '未知对象'
+  if (typeof target === 'string') return target
+  if (typeof target !== 'object') return String(target)
+  const parts = []
+  const shopLabel = target.shop_name || target.shop_id
+  if (shopLabel) parts.push(String(shopLabel))
+  const employeeLabel = target.employee_name || target.employee_code
+  if (employeeLabel) parts.push(String(employeeLabel))
+  if (parts.length === 0) {
+    try {
+      return JSON.stringify(target)
+    } catch (_) {
+      return '未知对象'
+    }
+  }
+  return parts.join(' / ')
+}
+
+function showBatchFailureList(label, failed) {
+  const lines = (failed || []).map((item, index) => {
+    const reason = item?.reason || '未知原因'
+    return `${index + 1}. ${describeBatchTarget(item?.target)} —— ${reason}`
+  })
+  if (lines.length === 0) return
+  ElMessageBox.alert(lines.join('\n'), `${label}失败清单`, {
+    type: 'warning',
+    confirmButtonText: '知道了',
+    customClass: 'batch-failure-summary'
+  }).catch(() => {})
+}
+
+// 批量结果的统一播报：成功 N 家 / 跳过 M 家，失败原因逐条列出。
+function reportBatchResult(label, result) {
+  const succeeded = result.succeeded.length
+  const failed = result.failed.length
+  if (failed === 0) {
+    ElMessage.success(`${label}成功 ${succeeded} 家 / 跳过 0 家`)
+    return
+  }
+  ElMessage.warning(`${label}成功 ${succeeded} 家 / 跳过 ${failed} 家`)
+  showBatchFailureList(label, result.failed)
+}
+
+function openBatchAttachDialog() {
+  if (selectedShops.value.length === 0) {
+    ElMessage.warning('请先勾选店铺')
+    return
+  }
+  batchForm.value = { employee_code: '', commission_ratio: 0.05 }
+  batchAttachVisible.value = true
+}
+
+async function submitBatchAttach() {
+  const employeeCode = String(batchForm.value.employee_code || '').trim()
+  if (!employeeCode) {
+    ElMessage.warning('请选择员工')
+    return
+  }
+  const items = buildBatchCreateItems(
+    selectedShops.value,
+    employeeCode,
+    batchForm.value.commission_ratio ?? 0
+  )
+  if (items.length === 0) {
+    ElMessage.warning('没有可提交的店铺')
+    return
+  }
+  batchSubmitting.value = true
+  try {
+    const res = await api.batchHrEmployeeShopAssignments({
+      year_month: configMonth.value,
+      mode: 'create',
+      items
+    })
+    reportBatchResult('批量挂靠', extractBatchResult(res))
+    batchAttachVisible.value = false
+    await loadConfigData()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || e?.detail || e?.message || '批量挂靠失败')
+  } finally {
+    batchSubmitting.value = false
+  }
+}
+
+function openBatchRatioDialog() {
+  if (selectedShops.value.length === 0) {
+    ElMessage.warning('请先勾选店铺')
+    return
+  }
+  if (batchTargetRows.value.length === 0) {
+    ElMessage.warning('选中的店铺还没有配置人员，无法调整比例')
+    return
+  }
+  batchForm.value = { employee_code: '', commission_ratio: 0.05 }
+  batchRatioVisible.value = true
+}
+
+async function submitBatchRatio() {
+  const rows = batchTargetRows.value
+  if (rows.length === 0) {
+    ElMessage.warning('没有可调整的人员归属')
+    return
+  }
+  const { items, assignment_ids } = buildBatchUpdatePayload(
+    rows,
+    batchForm.value.commission_ratio ?? 0
+  )
+  if (items.length === 0) {
+    ElMessage.warning('选中的归属都还没保存，请先保存后再批量调整比例')
+    return
+  }
+  batchSubmitting.value = true
+  try {
+    const res = await api.batchHrEmployeeShopAssignments({
+      year_month: configMonth.value,
+      mode: 'update',
+      items,
+      assignment_ids
+    })
+    reportBatchResult('批量调整比例', extractBatchResult(res))
+    batchRatioVisible.value = false
+    await loadConfigData()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || e?.detail || e?.message || '批量调整比例失败')
+  } finally {
+    batchSubmitting.value = false
+  }
+}
+
+async function handleBatchRemove() {
+  if (selectedShops.value.length === 0) {
+    ElMessage.warning('请先勾选店铺')
+    return
+  }
+  const assignmentIds = collectAssignmentIds(selectedShops.value)
+  if (assignmentIds.length === 0) {
+    ElMessage.warning('选中的店铺还没有人员归属，无需移除')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将移除已选 ${selectedShops.value.length} 家店铺下的全部人员归属（共 ${assignmentIds.length} 条），是否继续？`,
+      '确认批量移除',
+      { type: 'warning', confirmButtonText: '确认移除', cancelButtonText: '取消' }
+    )
+  } catch (_) {
+    return
+  }
+  batchSubmitting.value = true
+  try {
+    const res = await api.batchHrEmployeeShopAssignments({
+      year_month: configMonth.value,
+      mode: 'delete',
+      items: [],
+      assignment_ids: assignmentIds
+    })
+    reportBatchResult('批量移除', extractBatchResult(res))
+    await loadConfigData()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || e?.detail || e?.message || '批量移除失败')
+  } finally {
+    batchSubmitting.value = false
+  }
+}
+
 function removePersonLocal(shop, p) {
-  const r1 = p.role || 'operator'
-  shop.assignments = (shop.assignments || []).filter((x) => !(x.employee_code === p.employee_code && ((x.role || 'operator') === r1)))
+  shop.assignments = (shop.assignments || []).filter((x) => x.employee_code !== p.employee_code)
 }
 
 async function loadEmployees() {
@@ -923,7 +1319,7 @@ async function loadShops() {
   try {
     const [targetShopsResult, shopDirectoryResult] = await Promise.allSettled([
       api.getTargetShops(),
-      api.getShopDirectory({ enabled: true }),
+      api.getShopDirectory({ enabled: true })
     ])
     if (targetShopsResult.status !== 'fulfilled') {
       throw targetShopsResult.reason
@@ -1079,7 +1475,6 @@ async function loadConfigData() {
         id: a.id,
         employee_code: a.employee_code,
         employee_name: a.employee_name,
-        role: a.role === 'supervisor' ? 'supervisor' : 'operator',
         commission_ratio: a.commission_ratio ?? 0
       }
       const matched = previewShopIndex.get(previewShopKey(a.employee_code, a.platform_code, a.shop_id))
@@ -1098,6 +1493,8 @@ async function loadConfigData() {
       }
     }
     shopRows.value = Object.values(byShop).sort((a, b) => (a.platform_code + a.shop_id).localeCompare(b.platform_code + b.shop_id))
+    // 重新加载后行对象已换新，旧的勾选作废。
+    clearShopSelection()
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '加载失败')
     shopRows.value = []
@@ -1149,19 +1546,12 @@ async function loadAnnualData() {
   }
 }
 
-function openAdd() {
-  resetForm()
-  isEdit.value = false
-  dialogVisible.value = true
-}
-
 function openAddForShop(shop) {
   resetForm()
   isEdit.value = false
   addForShopRow.value = shop
   form.value.platform_code = shop.platform_code
   form.value.shop_id = shop.shop_id
-  form.value.role = 'operator'
   form.value.commission_ratio = 0.05
   dialogVisible.value = true
 }
@@ -1177,10 +1567,9 @@ async function submitForm() {
     const p = {
       employee_code: form.value.employee_code,
       employee_name: emp?.name,
-      role: form.value.role || 'operator',
       commission_ratio: form.value.commission_ratio ?? 0
     }
-    if ((shop.assignments || []).some((x) => x.employee_code === p.employee_code && x.role === p.role)) {
+    if ((shop.assignments || []).some((x) => x.employee_code === p.employee_code)) {
       ElMessage.warning('该人员已添加')
       return
     }
@@ -1199,8 +1588,7 @@ async function submitForm() {
         employee_code: form.value.employee_code,
         platform_code: form.value.platform_code,
         shop_id: form.value.shop_id,
-        commission_ratio: form.value.commission_ratio ?? 0,
-        role: form.value.role || 'operator'
+        commission_ratio: form.value.commission_ratio ?? 0
       })
       ElMessage.success('已新增')
       dialogVisible.value = false
@@ -1268,7 +1656,7 @@ onMounted(async () => {
 .commission-summary-name {
   font-weight: 600;
 }
-.commission-summary-role,
+.commission-summary-position,
 .commission-summary-shops {
   color: #909399;
   font-size: 12px;
@@ -1331,5 +1719,40 @@ onMounted(async () => {
 .commission-amount {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
+}
+.batch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  background: #f5f7fa;
+}
+.batch-toolbar-count {
+  color: #606266;
+  font-weight: 600;
+}
+.batch-shop-preview,
+.batch-overflow-list {
+  margin-top: 4px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.55;
+  max-height: 120px;
+  overflow-y: auto;
+}
+</style>
+
+<!-- 批量失败清单需要换行展示（消息框挂在 body 上，不能用 scoped 样式）。 -->
+<style>
+.batch-failure-summary .el-message-box__message {
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-align: left;
+  max-height: 50vh;
+  overflow-y: auto;
 }
 </style>

@@ -59,16 +59,38 @@ export function setShopAllocatableProfitRate(row, value) {
   return normalizedValue
 }
 
-export function inferAssignmentRole(employee) {
-  const positionText = `${employee?.position_code ?? ''} ${employee?.position_name ?? ''}`.toLowerCase()
-  if (
-    positionText.includes('主管') ||
-    positionText.includes('supv') ||
-    positionText.includes('manager')
-  ) {
-    return 'supervisor'
+/**
+ * 员工没挂职位时的展示文案。
+ */
+export const POSITION_UNSET_LABEL = '（未设岗位）'
+
+/**
+ * 「员工工号 → 职位名」索引。
+ *
+ * 层级只是**展示**：职位名来自员工档案，不落库、不需要用户勾选。
+ *
+ * @param {Array} employees 员工档案列表（含 employee_code / position_name）
+ * @returns {Object} { [employee_code]: position_name }
+ */
+export function buildPositionNameMap(employees = []) {
+  const map = {}
+  for (const employee of Array.isArray(employees) ? employees : []) {
+    const code = String(employee?.employee_code ?? '').trim()
+    if (!code) continue
+    const positionName = String(employee?.position_name ?? '').trim()
+    if (!positionName) continue
+    map[code] = positionName
   }
-  return 'operator'
+  return map
+}
+
+/**
+ * 取员工的职位名；取不到时显示「（未设岗位）」，不让页面出现空白。
+ */
+export function resolvePositionName(employeeCode, positionByEmployee = {}) {
+  const code = String(employeeCode ?? '').trim()
+  const positionName = String(positionByEmployee?.[code] ?? '').trim()
+  return positionName || POSITION_UNSET_LABEL
 }
 
 /**
@@ -173,17 +195,19 @@ export function resolveEstimatedCommission({
  * 输入是后端 settlement-preview 返回的 employees 数组，
  * 金额直接读 employees[].expected_commission —— 前端不再自己累加。
  *
+ * 层级只展示员工档案里的**职位名**（没有角色概念，也不落库）。
+ *
  * @param {Array} previewEmployees 后端 employees 数组
- * @param {Object} roleByEmployee 员工角色映射（预览接口不返回角色，页面的归属数据里有）
+ * @param {Object} positionByEmployee 员工工号 → 职位名 映射
  */
-export function summarizeEmployeeCommissions(previewEmployees = [], roleByEmployee = {}) {
+export function summarizeEmployeeCommissions(previewEmployees = [], positionByEmployee = {}) {
   const list = Array.isArray(previewEmployees) ? previewEmployees : []
   return list
     .filter((employee) => Boolean(employee?.employee_code))
     .map((employee) => ({
       employee_code: employee.employee_code,
       employee_name: employee.employee_name || employee.employee_code,
-      role: roleByEmployee?.[employee.employee_code] === 'supervisor' ? 'supervisor' : 'operator',
+      position_name: resolvePositionName(employee.employee_code, positionByEmployee),
       shop_count: Array.isArray(employee?.shops) ? employee.shops.length : 0,
       estimated_commission: toFiniteNumber(employee?.expected_commission, 0),
       calculation_status: String(employee?.calculation_status ?? ''),
@@ -196,4 +220,79 @@ export function summarizeEmployeeCommissions(previewEmployees = [], roleByEmploy
       if (Math.abs(commissionDelta) > 1e-9) return commissionDelta
       return String(a.employee_code).localeCompare(String(b.employee_code))
     })
+}
+
+/**
+ * 批量挂靠：把「选中的店铺 + 1 名员工 + 统一比例」整理成批量端点的 items。
+ *
+ * 只搬**输入**（定位键 + 提成比例），不含任何金额。
+ *
+ * @param {Array} shops 选中的店铺
+ * @param {String} employeeCode 员工工号
+ * @param {Number} commissionRatio 提成比例（0-1 之间的小数）
+ * @returns {Array} 批量端点的 items
+ */
+export function buildBatchCreateItems(shops = [], employeeCode = '', commissionRatio = 0) {
+  const list = Array.isArray(shops) ? shops : []
+  const code = String(employeeCode ?? '').trim()
+  const ratio = toFiniteNumber(commissionRatio, 0)
+  const items = []
+  if (!code) return items
+  for (const shop of list) {
+    items.push({
+      employee_code: code,
+      platform_code: String(shop?.platform_code ?? '').trim().toLowerCase(),
+      shop_id: String(shop?.shop_id ?? ''),
+      commission_ratio: ratio
+    })
+  }
+  return items
+}
+
+/**
+ * 批量改比例：对选中店铺里已配置的人员行统一设比例。
+ *
+ * items 与 assignment_ids 一一对应（同一顺序、同一长度），后端按定位键或按 id 都能对上。
+ * 没有 id 的行（本地刚加、还没保存的新增行）不参与批量提交 —— 批量端点只改已落库的归属。
+ *
+ * @param {Array} rows 人员行（含 employee_code / platform_code / shop_id / id）
+ * @param {Number} commissionRatio 新的提成比例
+ * @returns {{ items: Array, assignment_ids: Array }}
+ */
+export function buildBatchUpdatePayload(rows = [], commissionRatio = 0) {
+  const list = Array.isArray(rows) ? rows : []
+  const ratio = toFiniteNumber(commissionRatio, 0)
+  const items = []
+  const assignmentIds = []
+  for (const row of list) {
+    const employeeCode = String(row?.employee_code ?? '').trim()
+    if (!employeeCode) continue
+    if (row?.id === null || row?.id === undefined) continue
+    items.push({
+      employee_code: employeeCode,
+      platform_code: String(row?.platform_code ?? '').trim().toLowerCase(),
+      shop_id: String(row?.shop_id ?? ''),
+      commission_ratio: ratio
+    })
+    assignmentIds.push(row.id)
+  }
+  return { items, assignment_ids: assignmentIds }
+}
+
+/**
+ * 批量移除：收集选中店铺下全部归属行的 id。
+ *
+ * @param {Array} shops 选中的店铺
+ * @returns {Array} 归属行 id 列表
+ */
+export function collectAssignmentIds(shops = []) {
+  const list = Array.isArray(shops) ? shops : []
+  const ids = []
+  for (const shop of list) {
+    for (const assignment of shop?.assignments || []) {
+      if (assignment?.id === null || assignment?.id === undefined) continue
+      ids.push(assignment.id)
+    }
+  }
+  return ids
 }

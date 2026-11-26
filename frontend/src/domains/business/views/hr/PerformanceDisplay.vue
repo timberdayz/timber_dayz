@@ -530,7 +530,7 @@ const hasPermission = (permission) =>
   hasScopedActionPermission({
     roles: userStore.roles || [],
     activeRole: localStorage.getItem('activeRole') || '',
-    permission,
+    permission
   })
 
 function formatCell(v) {
@@ -786,9 +786,9 @@ const handleRecalculate = async () => {
     if (lockedConflicts > 0) {
       const summary = conflictDetails.length
         ? conflictDetails.map((item) => {
-            const fields = Array.isArray(item.changed_fields) ? item.changed_fields.join(', ') : ''
-            return `${item.employee_code} (${item.payroll_status}) -> ${fields}`
-          }).join('\n')
+          const fields = Array.isArray(item.changed_fields) ? item.changed_fields.join(', ') : ''
+          return `${item.employee_code} (${item.payroll_status}) -> ${fields}`
+        }).join('\n')
         : `共有 ${lockedConflicts} 份已锁定工资单未被覆盖`
       await ElMessageBox.alert(summary, '工资单锁定冲突', {
         type: 'warning',

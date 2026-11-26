@@ -2657,7 +2657,6 @@ class PersonalPerformanceAssignmentSnapshot(Base):
     platform_code = Column(String(32), nullable=False)
     shop_id = Column(String(256), nullable=False)
     assignment_ratio_snapshot = Column(Float, nullable=False)
-    role_snapshot = Column(String(32), nullable=True)
     sales_target_breakdown_id_snapshot = Column(Integer, nullable=False)
     sales_target_amount_snapshot = Column(Float, nullable=False)
     created_at = Column(
@@ -3736,7 +3735,6 @@ class EmployeeShopAssignment(Base):
     target_allocation_ratio_source = Column(
         String(64), nullable=False, default="manual", server_default="manual"
     )
-    role = Column(String(32), nullable=True)  # 角色：supervisor/operator
     effective_from = Column(Date, nullable=True)  # 保留，可选
     effective_to = Column(Date, nullable=True)  # 保留，可选
     status = Column(String(32), nullable=False, default="active")  # active/inactive
@@ -3777,7 +3775,7 @@ class ShopCommissionConfig(Base):
     """
     A类数据表:店铺可分配利润率配置（按月）
 
-    店铺利润的百分之多少用于主管+操作员分配。按 year_month 月度更新，与 employee_shop_assignments 一致。
+    店铺利润的百分之多少用于该店人员提成分配。按 year_month 月度更新，与 employee_shop_assignments 一致。
     add-employee-shop-assignment-page Phase 2, 方案B 按月维度
     """
 

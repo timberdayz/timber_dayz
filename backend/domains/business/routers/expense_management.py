@@ -50,7 +50,6 @@ from backend.schemas.expense import (
     ExpenseSummaryResponse,
 )
 from backend.dependencies.auth import get_current_user
-from backend.services.employee_task_sources import sync_monthly_cost_entry_task
 from backend.services.labor_cost_policy_service import LaborCostPolicyService
 from backend.services.labor_cost_projection_service import (
     LABOR_COST_CALCULATION_VERSION,
@@ -1080,17 +1079,9 @@ async def create_or_update_expense(
         if not row:
             raise Exception("Upsert操作未返回数据")
 
-        try:
-            if platform_code:
-                await sync_monthly_cost_entry_task(
-                    db,
-                    year_month=request.year_month,
-                    platform_code=platform_code,
-                    shop_id=request.shop_id,
-                    created_by=getattr(current_user, "user_id", None),
-                )
-        except Exception as task_err:
-            logger.warning(f"[ExpenseManagement] employee task sync failed: {task_err}")
+        # ⚠️ 这里**不再**派发「每月成本录入」协同任务（2026-11-26 整条链路下线）：
+        # 那条任务依赖已退休的归属「角色」，且生产上自 2026-06-18 起已停摆。
+        # 成本录入本身照常成功（200），只是不再生成没人收到的任务。
 
         rent = float(row.rent or 0)
         marketing_fee = float(row.marketing_fee or 0)

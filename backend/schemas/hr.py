@@ -12,9 +12,9 @@ HR 人力资源管理 API 契约 (Contract-First)
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.schemas.common import SuccessResponse
 from backend.services.hr_employee_lifecycle import EMPLOYEE_IDENTITY_VOCABULARY
@@ -975,7 +975,15 @@ class MeProfileUpdate(BaseModel):
 
 
 class EmployeeShopAssignmentCreate(BaseModel):
-    """新增归属（按月份）"""
+    """新增归属（按月份）
+
+    ⚠️ 不再有「角色」：一行 = 人 × 平台 × 店 × 月 × 提成比，
+    只回答「谁在这家店分多少提成」。
+    ``extra="ignore"`` 是**兼容旧页面**的刻意选择：旧页面仍会带归属角色字段，
+    必须被忽略而不是报错。
+    """
+
+    model_config = ConfigDict(extra="ignore")
 
     year_month: str = Field(
         ..., pattern=r"^\d{4}-\d{2}$", description="适用月份 YYYY-MM"
@@ -985,7 +993,6 @@ class EmployeeShopAssignmentCreate(BaseModel):
     shop_id: str = Field(..., min_length=1, max_length=256)
     commission_ratio: Optional[float] = Field(None, ge=0, le=1)
     target_allocation_ratio: float = Field(1.0, ge=0, le=1)
-    role: Optional[str] = Field(None, max_length=32)
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
 
@@ -1006,11 +1013,15 @@ class EmployeeShopAssignmentCreate(BaseModel):
 
 
 class EmployeeShopAssignmentUpdate(BaseModel):
-    """更新归属"""
+    """更新归属
+
+    同 ``EmployeeShopAssignmentCreate``：旧页面带归属角色字段时忽略而不是报错。
+    """
+
+    model_config = ConfigDict(extra="ignore")
 
     commission_ratio: Optional[float] = Field(None, ge=0, le=1)
     target_allocation_ratio: Optional[float] = Field(None, ge=0, le=1)
-    role: Optional[str] = Field(None, max_length=32)
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
     status: Optional[str] = Field(None, pattern="^(active|inactive)$")
@@ -1044,7 +1055,6 @@ class EmployeeShopAssignmentResponse(BaseModel):
     commission_ratio: Optional[float] = None
     target_allocation_ratio: float = 1.0
     target_allocation_ratio_source: str = "manual"
-    role: Optional[str] = None
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
     status: str
@@ -1053,6 +1063,91 @@ class EmployeeShopAssignmentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ================================================================
+# 员工店铺归属 · 批量操作
+# ================================================================
+#
+# 批量只是「同一个动作重复多次」的加速器，**不改变业务模型**：
+# 一行仍然是人 × 平台 × 店 × 月 × 提成比，仍然没有「角色」。
+
+
+class EmployeeShopAssignmentBatchItem(BaseModel):
+    """批量条目：人 × 平台 × 店 × 提成比。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    employee_code: str = Field(..., min_length=1, max_length=64)
+    platform_code: str = Field(..., min_length=1, max_length=32)
+    shop_id: str = Field(..., min_length=1, max_length=256)
+    commission_ratio: Optional[float] = Field(
+        None, ge=0, le=1, description="该店该员工的提成比例（NULL = 不参与分配）"
+    )
+
+
+class EmployeeShopAssignmentBatchRequest(BaseModel):
+    """批量归属请求。
+
+    ``mode``：
+
+    * ``create`` —— ``items`` 是待新建的归属（``assignment_ids`` 忽略）；
+    * ``update`` —— ``assignment_ids`` 是要改的归属，``items`` 给新的提成比例；
+    * ``delete`` —— ``assignment_ids`` 是要删的归属（``items`` 忽略）。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    year_month: str = Field(
+        ..., pattern=r"^\d{4}-\d{2}$", description="适用月份 YYYY-MM"
+    )
+    mode: Literal["create", "update", "delete"] = Field(..., description="批量动作")
+    items: List[EmployeeShopAssignmentBatchItem] = Field(
+        default_factory=list, description="待新建 / 待更新的归属条目"
+    )
+    assignment_ids: List[int] = Field(
+        default_factory=list, description="待更新 / 待删除的归属记录 ID"
+    )
+
+
+class EmployeeShopAssignmentBatchSucceededItem(BaseModel):
+    """批量成功项：回填 ``id`` 与实际写入值。"""
+
+    id: Optional[int] = Field(None, description="归属记录 ID（删除项也是删除前的 ID）")
+    action: str = Field(..., description="本次动作：create/update/delete")
+    year_month: str
+    employee_code: str
+    employee_name: Optional[str] = None
+    platform_code: str
+    shop_id: str
+    shop_name: Optional[str] = None
+    commission_ratio: Optional[float] = None
+    status: Optional[str] = None
+
+
+class EmployeeShopAssignmentBatchFailedItem(BaseModel):
+    """批量失败项：可读标识 + 失败原因。"""
+
+    target: str = Field(..., description="店铺/员工的可读标识")
+    reason: str = Field(..., description="失败原因")
+
+
+class EmployeeShopAssignmentBatchSummary(BaseModel):
+    """批量结果计数。"""
+
+    total: int = Field(..., description="本次处理的条目总数")
+    succeeded: int = Field(..., description="成功条数")
+    failed: int = Field(..., description="失败条数")
+
+
+class EmployeeShopAssignmentBatchData(BaseModel):
+    """批量归属结果。"""
+
+    succeeded: List[EmployeeShopAssignmentBatchSucceededItem] = Field(
+        default_factory=list
+    )
+    failed: List[EmployeeShopAssignmentBatchFailedItem] = Field(default_factory=list)
+    summary: EmployeeShopAssignmentBatchSummary
 
 
 class CopyFromPrevMonthBody(BaseModel):

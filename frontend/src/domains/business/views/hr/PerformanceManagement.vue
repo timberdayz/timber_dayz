@@ -545,7 +545,7 @@ import { useUserStore } from '@/stores/user'
 import { useRoute } from 'vue-router'
 import api from '@/api'
 import { handleApiError } from '@/utils/errorHandler'
-import { formatCurrency, formatNumber, formatPercent, formatInteger } from '@/utils/dataFormatter'
+import { formatCurrency, formatPercent } from '@/utils/dataFormatter'
 import { formatPayrollLockedConflictSummary } from '@/utils/payrollConflict'
 import { hasScopedActionPermission } from '@/utils/actionPermissions'
 import { buildShopAccountLookup, decorateShopEntity } from '@/utils/shopDisplay'
@@ -590,7 +590,7 @@ const hasPermission = (permission) =>
   hasScopedActionPermission({
     roles: userStore.roles || [],
     activeRole: localStorage.getItem('activeRole') || '',
-    permission,
+    permission
   })
 
 // 绩效列表数据
@@ -897,7 +897,7 @@ const detailMetricCards = computed(() => {
       successThreshold: 27,
       warningThreshold: 24,
       targetType: 'currency',
-      achievedType: 'currency',
+      achievedType: 'currency'
     },
     {
       key: 'profit_score',
@@ -907,7 +907,7 @@ const detailMetricCards = computed(() => {
       successThreshold: 22.5,
       warningThreshold: 20,
       targetType: 'currency',
-      achievedType: 'currency',
+      achievedType: 'currency'
     },
     {
       key: 'operation_score',
@@ -917,8 +917,8 @@ const detailMetricCards = computed(() => {
       successThreshold: 18,
       warningThreshold: 16,
       targetType: 'text',
-      achievedType: 'text',
-    },
+      achievedType: 'text'
+    }
   ]
 })
 
@@ -1101,40 +1101,6 @@ const handlePeriodChange = async () => {
   await handleRefreshAll()
 }
 
-const resetAdjustmentForm = () => {
-  adjustmentForm.id = null
-  adjustmentForm.year_month = typeof filters.period === 'string' ? filters.period : ''
-  adjustmentForm.employee_code = ''
-  adjustmentForm.adjustment_type = 'exam_score'
-  adjustmentForm.score_delta = 0
-  adjustmentForm.source = ''
-  adjustmentForm.reason = ''
-}
-
-const resetInputForm = () => {
-  inputForm.id = null
-  inputForm.year_month = typeof filters.period === 'string' ? filters.period : ''
-  inputForm.employee_code = ''
-  inputForm.metric_code = ''
-  inputForm.metric_name = ''
-  inputForm.metric_direction = 'up'
-  inputForm.target_value = 0
-  inputForm.achieved_value = 0
-  inputForm.max_score = 20
-  inputForm.manual_score_enabled = false
-  inputForm.manual_score_value = null
-  inputForm.source = ''
-  inputForm.reason = ''
-}
-
-const resetTemplateForm = () => {
-  templateForm.employee_code = ''
-  templateForm.year_month = typeof filters.period === 'string' ? filters.period : ''
-  templateForm.template_code = ''
-  templateForm.overwrite = false
-  templateOptions.value = []
-}
-
 const loadTemplateOptions = async () => {
   if (!templateForm.employee_code) {
     templateOptions.value = []
@@ -1153,11 +1119,6 @@ const loadTemplateOptions = async () => {
     templateForm.template_code = ''
     handleApiError(error, { showMessage: true, logError: true })
   }
-}
-
-const openApplyTemplate = async () => {
-  resetTemplateForm()
-  templateDialogVisible.value = true
 }
 
 const handleApplyTemplate = async () => {
@@ -1182,30 +1143,6 @@ const handleApplyTemplate = async () => {
   } finally {
     templateSubmitting.value = false
   }
-}
-
-const openCreateInput = () => {
-  inputMode.value = 'create'
-  resetInputForm()
-  inputDialogVisible.value = true
-}
-
-const openEditInput = (row) => {
-  inputMode.value = 'edit'
-  inputForm.id = row.id
-  inputForm.year_month = row.year_month
-  inputForm.employee_code = row.employee_code
-  inputForm.metric_code = row.metric_code
-  inputForm.metric_name = row.metric_name || row.metric_code
-  inputForm.metric_direction = row.metric_direction || 'up'
-  inputForm.target_value = Number(row.target_value || 0)
-  inputForm.achieved_value = Number(row.achieved_value || 0)
-  inputForm.max_score = Number(row.max_score || 0)
-  inputForm.manual_score_enabled = Boolean(row.manual_score_enabled)
-  inputForm.manual_score_value = row.manual_score_value != null ? Number(row.manual_score_value) : null
-  inputForm.source = row.source || ''
-  inputForm.reason = row.reason || ''
-  inputDialogVisible.value = true
 }
 
 const handleSubmitInput = async () => {
@@ -1252,41 +1189,6 @@ const handleSubmitInput = async () => {
   }
 }
 
-const handleDeleteInput = async (row) => {
-  try {
-    await ElMessageBox.confirm('确认停用该个人绩效输入项吗？', '确认停用', {
-      type: 'warning',
-      confirmButtonText: '确定',
-      cancelButtonText: '取消'
-    })
-    await api.deleteHrPerformanceInput(row.id)
-    ElMessage.success('已停用该输入项')
-    await loadInputList()
-  } catch (error) {
-    if (error !== 'cancel') {
-      handleApiError(error, { showMessage: true, logError: true })
-    }
-  }
-}
-
-const openCreateAdjustment = () => {
-  adjustmentMode.value = 'create'
-  resetAdjustmentForm()
-  adjustmentDialogVisible.value = true
-}
-
-const openEditAdjustment = (row) => {
-  adjustmentMode.value = 'edit'
-  adjustmentForm.id = row.id
-  adjustmentForm.year_month = row.year_month
-  adjustmentForm.employee_code = row.employee_code
-  adjustmentForm.adjustment_type = row.adjustment_type
-  adjustmentForm.score_delta = Number(row.score_delta || 0)
-  adjustmentForm.source = row.source || ''
-  adjustmentForm.reason = row.reason || ''
-  adjustmentDialogVisible.value = true
-}
-
 const handleSubmitAdjustment = async () => {
   if (!adjustmentForm.year_month) {
     ElMessage.warning('请选择月份')
@@ -1318,23 +1220,6 @@ const handleSubmitAdjustment = async () => {
     handleApiError(error, { showMessage: true, logError: true })
   } finally {
     adjustmentSubmitting.value = false
-  }
-}
-
-const handleDeleteAdjustment = async (row) => {
-  try {
-    await ElMessageBox.confirm('确认停用该个人绩效调整项吗？', '确认停用', {
-      type: 'warning',
-      confirmButtonText: '确定',
-      cancelButtonText: '取消'
-    })
-    await api.deleteHrPerformanceAdjustment(row.id)
-    ElMessage.success('已停用该调整项')
-    await loadAdjustmentList()
-  } catch (error) {
-    if (error !== 'cancel') {
-      handleApiError(error, { showMessage: true, logError: true })
-    }
   }
 }
 

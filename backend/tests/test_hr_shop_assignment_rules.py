@@ -12,7 +12,6 @@ def test_validate_shop_assignment_ratio_limit_rejects_total_above_one():
             employee_code="E001",
             commission_ratio=0.6,
             status="active",
-            role="supervisor",
         )
     ]
 
@@ -26,14 +25,14 @@ def test_validate_shop_assignment_ratio_limit_rejects_total_above_one():
     assert error is not None
 
 
-def test_validate_shop_assignment_ratio_limit_allows_multiple_supervisors_within_limit():
+def test_validate_shop_assignment_ratio_limit_allows_multiple_people_within_limit():
+    """归属不再分角色：一店多人各分一份，合计 ≤ 100% 即合法。"""
     existing_rows = [
         SimpleNamespace(
             id=1,
             employee_code="E001",
             commission_ratio=0.4,
             status="active",
-            role="supervisor",
         )
     ]
 
@@ -54,14 +53,12 @@ def test_validate_shop_assignment_ratio_limit_excludes_current_record_on_update(
             employee_code="E001",
             commission_ratio=0.7,
             status="active",
-            role="supervisor",
         ),
         SimpleNamespace(
             id=2,
             employee_code="E002",
             commission_ratio=0.2,
             status="active",
-            role="operator",
         ),
     ]
 
