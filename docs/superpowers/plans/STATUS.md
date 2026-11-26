@@ -81,6 +81,14 @@
   - **口径零改动**：提成仍是「可分配利润 × 归属提成比」零系数，**工资单金额不受影响**。
   - 计划与实施记录：`docs/superpowers/plans/2026-11-26-hr-assignment-role-retirement-and-batch-operations.md`。
   - ⚠️ **仍需业务侧补录**：11 名员工仅 1 人有岗位 ⇒ 需给负责人挂 SUPV 主管岗位（职位表现成 10 个职位够用）。
+  - **已发版并部署生产**（2026-11-26）：流水线 run `45832287245` 全绿（数据流发布门禁 ✓ 1m28s /
+    镜像构建推送 ✓ 5m14s / 生产部署 ✓ 11m7s）；tag `v7.40.0` 双镜像同对象 `b854ea31`（未回填）。
+    生产实测：应用容器全部 **v7.40.0**、7 容器 healthy（批次 `20261126_215446`）；
+    外网 `/api/healthz/ready` = ready / **v7.40.0** / database=connected / dashboard=ready；
+    **迁移已应用**（归属表 `role` 列已不存在）；生产镜像内部确认 schema 无 `role`、两个派发函数已不存在、
+    任务策略只剩 `performance_confirmation`、批量路由已注册；生产前端产物 `loadEmployees` / `supervisor`
+    **零命中**；归属表 0 行、`monthly_cost_entry` 任务未新增；部署后 nginx 最近 3000 条日志 **0 个 5xx**。
+    ⚠️ 未做浏览器登录态验收（需业务账号）：业务侧登录后确认人力管理页不再弹「加载数据失败」，并重配归属。
 
 ## 上一发布：v7.39.0（2026-11-23）
 

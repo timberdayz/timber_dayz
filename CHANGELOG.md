@@ -100,6 +100,28 @@
 2. **按新形态重配归属**：一行一人一比例，店铺当月合计 ≤100%。
 3. 知悉一条能力下线：录成本不再自动生成「每月成本录入」协同任务（该任务 2026-06-18 起已静默停摆）。
 
+### 七、部署与验收证据（2026-11-26 实测）
+
+- **部署流水线 run `45832287245` 全绿**：check-config ✓ / Validate Data Flow (Release Gate) ✓ 1m28s /
+  Build and Push Images ✓ 5m14s / Deploy to Production (Tag Release) ✓ 11m7s。
+- **双镜像一致**：tag `v7.40.0` 在 GitHub 与 CNB 是同一 tag 对象（`b854ea31`，**未回填任何历史 tag**）；
+  `main` 双镜像同一 commit（`d0e5fa44`）。
+- **生产实测（全部只读）**：
+  - 应用容器全部 **v7.40.0**（frontend / backend_api / celery_worker / celery_beat），
+    7 容器 **healthy**；部署批次 `20261126_215446`。
+  - 外网 `/api/healthz/ready` =
+    `{"status":"ready","version":"v7.40.0","database":"connected","dashboard":"ready"}`。
+  - **迁移已应用**：`a_class.employee_shop_assignments` 的 `role` 列已不存在（表结构实测）。
+  - **生产镜像内部验证**：`EmployeeShopAssignmentResponse` 已无 `role` 字段；
+    `sync_monthly_cost_entry_task` 与 `resolve_shop_supervisor_user_id` 均不存在；
+    任务策略只剩 `performance_confirmation`；批量路由 `/api/hr/employee-shop-assignments/batch` 已注册。
+  - **生产前端产物零残留**：`HumanResources-7bd6815c.js` 内 `loadEmployees` **0 命中**；
+    `ShopAssignment-25257d18.js` 内 `supervisor` **0 命中**。
+  - 归属表 0 行；`monthly_cost_entry` 任务仍是历史 2 条（**未新增**，符合"链路已下线"的预期）。
+  - 部署后 nginx 最近 3000 条访问日志 **0 个 5xx**（200×2581 / 301×72 / 400×7 / 403×288 / 404×32 / 405×12）。
+- ⚠️ **未做浏览器登录态验收**（需要业务账号）：建议业务侧登录后确认「人力管理」页不再弹「加载数据失败」，
+  并按新形态（一行一人一比例）重配归属。
+
 ## [v7.39.0] - 2026-11-23 - 商品中心前端优化：口径说明收进表头小问号 + 表格紧凑化 + SPU 归属默认只读
 
 > **纯前端改动**：无数据库变更、无迁移、无后端接口改动、无依赖变更。
