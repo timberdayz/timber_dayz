@@ -1,10 +1,17 @@
 <template>
   <div class="shop-assignment-page erp-page-container">
-    <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">人员店铺归属和提成比</h1>
-    <p style="color: #909399; margin-bottom: 20px;">配置员工负责的店铺及提成比例，用于后续提成计算。本模块仅管理员可见。<strong>页面上的钱一律由后端算</strong>（提成 = 可分配利润 × 归属提成比，零系数；绩效系数只影响绩效工资，不参与提成），前端不再自己算钱；「改了还没保存」的临时编辑会调后端试算接口取数。配置保存至数据库表 <code>a_class.employee_shop_assignments</code>。</p>
+    <PageHeader
+      title="人员店铺归属和提成比"
+      family="admin"
+      compact
+    >
+      <template #subtitle>
+        配置员工负责的店铺及提成比例，用于后续提成计算。本模块仅管理员可见。<strong>页面上的钱一律由后端算</strong>（提成 = 可分配利润 × 归属提成比，零系数；绩效系数只影响绩效工资，不参与提成），前端不再自己算钱；「改了还没保存」的临时编辑会调后端试算接口取数。配置保存至数据库表 <code>a_class.employee_shop_assignments</code>。
+      </template>
+    </PageHeader>
 
     <!-- Tab 切换 -->
-    <el-tabs v-model="activeTab" style="margin-bottom: 20px;">
+    <el-tabs v-model="activeTab" class="assignment-tabs">
       <el-tab-pane label="人员店铺归属和提成比配置" name="config">
         <template #label>
           <span><el-icon><Setting /></el-icon> 配置</span>
@@ -24,23 +31,23 @@
 
     <!-- 配置子页：以店铺为行，直接显示可用店铺，行内编辑 -->
     <div v-if="activeTab === 'config'">
-      <div class="action-bar" style="margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+      <div class="action-bar">
         <el-date-picker
           v-model="configMonth"
           type="month"
           placeholder="选择月份"
           value-format="YYYY-MM"
           size="default"
-          style="width: 180px"
+          class="erp-w-180"
           @change="handleConfigMonthChange"
         />
         <el-button type="warning" @click="handleCopyFromPrevMonth" :loading="copyLoading" :disabled="!configMonth">
           复制上月配置
         </el-button>
-        <el-button type="success" @click="handleBatchSave" :loading="batchSaving" style="margin-left: 10px;">
+        <el-button type="success" @click="handleBatchSave" :loading="batchSaving">
           批量保存
         </el-button>
-        <el-button @click="loadConfigData" style="margin-left: 10px;">
+        <el-button @click="loadConfigData">
           刷新
         </el-button>
       </div>
@@ -75,7 +82,7 @@
           :data="configTableRows"
           stripe
           v-loading="configLoading"
-          class="erp-table"
+          class="erp-table erp-compact"
           border
           :span-method="configSpanMethod"
           @selection-change="handleSelectionChange"
@@ -114,14 +121,33 @@
               <span v-if="row._isFirst">¥{{ formatNumber(row.profit_basis_amount) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="成本明细" width="220" align="right">
+          <el-table-column label="成本明细" width="180" align="right">
             <template #default="{ row }">
-              <div v-if="row._isFirst" class="v2-cost-breakdown">
-                <div>其他经营成本 ¥{{ formatNumber(row.other_a_class_cost_amount) }}</div>
-                <div>提成前人力成本 ¥{{ formatNumber(row.pre_commission_labor_cost_amount) }}</div>
-                <div>A类成本 ¥{{ formatNumber(row.a_class_cost_amount) }}</div>
-                <el-tag size="small" type="info">{{ formatBasisVersion(row.basis_version) }}</el-tag>
-                <el-tag v-if="isLaborAllocationMissing(row)" size="small" type="danger">缺少人力成本分摊</el-tag>
+              <div v-if="row._isFirst" class="cost-summary-cell">
+                <el-tooltip placement="top" :show-after="150">
+                  <template #content>
+                    <div class="cost-tooltip">
+                      <div>其他经营成本 ¥{{ formatNumber(row.other_a_class_cost_amount) }}</div>
+                      <div>提成前人力成本 ¥{{ formatNumber(row.pre_commission_labor_cost_amount) }}</div>
+                      <div>A类成本 ¥{{ formatNumber(row.a_class_cost_amount) }}</div>
+                      <div class="cost-tooltip-tags">
+                        <el-tag size="small" type="info">{{ formatBasisVersion(row.basis_version) }}</el-tag>
+                        <el-tag v-if="isLaborAllocationMissing(row)" size="small" type="danger">缺少人力成本分摊</el-tag>
+                      </div>
+                    </div>
+                  </template>
+                  <span class="cost-summary-text">
+                    ¥{{ formatNumber(row.other_a_class_cost_amount) }} / ¥{{ formatNumber(row.pre_commission_labor_cost_amount) }} / ¥{{ formatNumber(row.a_class_cost_amount) }}
+                  </span>
+                </el-tooltip>
+                <el-tag
+                  v-if="isLaborAllocationMissing(row)"
+                  size="small"
+                  type="danger"
+                  class="cost-summary-alert"
+                >
+                  缺分摊
+                </el-tag>
               </div>
             </template>
           </el-table-column>
@@ -173,11 +199,24 @@
               </template>
               <template v-else>
                 <span class="person-cell">
-                  <el-tag v-if="row._person" size="small" type="info" style="margin-right: 6px;">
-                    共同承接店铺目标
-                  </el-tag>
-                  {{ (row._person && (row._person.employee_name || row._person.employee_code)) || '' }}
-                  <el-tag v-if="row._person" size="small" type="info" style="margin-left: 4px;">
+                  <el-tooltip
+                    v-if="row._person"
+                    content="共同承接店铺目标"
+                    placement="top"
+                  >
+                    <el-tag size="small" type="info" class="person-cell-tag">
+                      共担目标
+                    </el-tag>
+                  </el-tooltip>
+                  <span class="person-cell-name">
+                    {{ (row._person && (row._person.employee_name || row._person.employee_code)) || '' }}
+                  </span>
+                  <el-tag
+                    v-if="row._person"
+                    size="small"
+                    type="info"
+                    class="person-cell-position"
+                  >
                     {{ positionNameOf(row._person.employee_code) }}
                   </el-tag>
                   <el-button v-if="row._person" size="small" link type="danger" @click="removePersonLocal(row._shop, row._person)">×</el-button>
@@ -257,20 +296,20 @@
 
     <!-- 统计子页：按月份展示 -->
     <div v-if="activeTab === 'stats'">
-      <div class="action-bar" style="margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+      <div class="action-bar">
         <el-date-picker
           v-model="statsMonth"
           type="month"
           placeholder="选择月份"
           value-format="YYYY-MM"
           size="default"
-          style="width: 180px"
+          class="erp-w-180"
           @change="loadStatsData"
         />
         <el-button size="small" @click="loadStatsData">刷新</el-button>
       </div>
       <el-card>
-        <el-table :data="statsRows" stripe v-loading="statsLoading" class="erp-table" border>
+        <el-table :data="statsRows" stripe v-loading="statsLoading" class="erp-table erp-compact" border>
           <el-table-column prop="platform_code" label="平台" width="100" fixed="left" />
           <el-table-column prop="shop_name" label="店铺" width="200" fixed="left" show-overflow-tooltip>
             <template #default="{ row }">
@@ -294,14 +333,33 @@
             </template>
             <template #default="{ row }">¥{{ formatNumber(row.profit_basis_amount) }}</template>
           </el-table-column>
-          <el-table-column label="成本明细" width="220" align="right">
+          <el-table-column label="成本明细" width="180" align="right">
             <template #default="{ row }">
-              <div class="v2-cost-breakdown">
-                <div>其他经营成本 ¥{{ formatNumber(row.other_a_class_cost_amount) }}</div>
-                <div>提成前人力成本 ¥{{ formatNumber(row.pre_commission_labor_cost_amount) }}</div>
-                <div>A类成本 ¥{{ formatNumber(row.a_class_cost_amount) }}</div>
-                <el-tag size="small" type="info">{{ formatBasisVersion(row.basis_version) }}</el-tag>
-                <el-tag v-if="isLaborAllocationMissing(row)" size="small" type="danger">缺少人力成本分摊</el-tag>
+              <div class="cost-summary-cell">
+                <el-tooltip placement="top" :show-after="150">
+                  <template #content>
+                    <div class="cost-tooltip">
+                      <div>其他经营成本 ¥{{ formatNumber(row.other_a_class_cost_amount) }}</div>
+                      <div>提成前人力成本 ¥{{ formatNumber(row.pre_commission_labor_cost_amount) }}</div>
+                      <div>A类成本 ¥{{ formatNumber(row.a_class_cost_amount) }}</div>
+                      <div class="cost-tooltip-tags">
+                        <el-tag size="small" type="info">{{ formatBasisVersion(row.basis_version) }}</el-tag>
+                        <el-tag v-if="isLaborAllocationMissing(row)" size="small" type="danger">缺少人力成本分摊</el-tag>
+                      </div>
+                    </div>
+                  </template>
+                  <span class="cost-summary-text">
+                    ¥{{ formatNumber(row.other_a_class_cost_amount) }} / ¥{{ formatNumber(row.pre_commission_labor_cost_amount) }} / ¥{{ formatNumber(row.a_class_cost_amount) }}
+                  </span>
+                </el-tooltip>
+                <el-tag
+                  v-if="isLaborAllocationMissing(row)"
+                  size="small"
+                  type="danger"
+                  class="cost-summary-alert"
+                >
+                  缺分摊
+                </el-tag>
               </div>
             </template>
           </el-table-column>
@@ -343,14 +401,14 @@
 
     <!-- 年度统计子页：按人员 / 按店铺 -->
     <div v-if="activeTab === 'annual'">
-      <div class="action-bar" style="margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+      <div class="action-bar">
         <el-date-picker
           v-model="annualYear"
           type="year"
           placeholder="选择年份"
           value-format="YYYY"
           size="default"
-          style="width: 140px"
+          class="erp-w-150"
           @change="loadAnnualData"
         />
         <el-radio-group v-model="annualGroupBy" size="default">
@@ -366,7 +424,7 @@
           :data="annualByEmployee"
           stripe
           v-loading="annualLoading"
-          class="erp-table"
+          class="erp-table erp-compact"
           border
         >
           <el-table-column prop="employee_code" label="员工工号" width="120" fixed="left" />
@@ -386,7 +444,7 @@
           :data="annualByShop"
           stripe
           v-loading="annualLoading"
-          class="erp-table"
+          class="erp-table erp-compact"
           border
         >
           <el-table-column prop="platform_code" label="平台" width="100" fixed="left" />
@@ -583,6 +641,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { Setting, DataAnalysis, Calendar } from '@element-plus/icons-vue'
+import PageHeader from '@/components/common/PageHeader.vue'
 import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -1615,9 +1674,25 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.shop-assignment-page {
-  padding: 20px;
+/*
+ * 页面容器：内边距由 .erp-page-container 提供（20px）。
+ * 这里**不要**再叠一层 padding —— 原来 .shop-assignment-page 的 20px 与工具类的
+ * 20px 叠加成 40px，是页面四周留白偏大的直接原因。
+ */
+
+/* 操作栏：间距统一由 gap 控制，不再靠逐个按钮的 margin-left */
+.action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
 }
+
+.assignment-tabs {
+  margin-bottom: 12px;
+}
+
 .person-list {
   display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
 }
@@ -1676,8 +1751,17 @@ onMounted(async () => {
 .person-cell {
   display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 4px;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.person-cell-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.person-cell-tag,
+.person-cell-position {
+  flex: 0 0 auto;
 }
 .shop-display-cell {
   line-height: 1.4;
@@ -1694,6 +1778,47 @@ onMounted(async () => {
 .v2-cost-breakdown .el-tag {
   margin-top: 3px;
   margin-left: 4px;
+}
+
+/*
+ * 成本明细摘要（2026-11-28 密度改造）
+ * -----------------------------------
+ * 原来这一列是「3 行金额 + 2 个标签」，行高被撑到 ~110px。
+ * 现在：单元格内只留**一行**摘要（三个金额用 / 分隔），完整明细进 tooltip；
+ * 「缺少人力成本分摊」的红色警示在摘要行里仍可见（缩成「缺分摊」），
+ * tooltip 里给出完整文案。
+ */
+.cost-summary-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.cost-summary-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #606266;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-summary-alert {
+  flex: 0 0 auto;
+}
+
+.cost-tooltip {
+  white-space: nowrap;
+  line-height: 1.7;
+  font-size: 12px;
+}
+
+.cost-tooltip-tags {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
 }
 .dialog-shop-secondary {
   margin-top: 4px;

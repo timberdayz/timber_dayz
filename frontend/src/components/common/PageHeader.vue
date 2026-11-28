@@ -7,7 +7,14 @@
         </el-icon>
         <h1 class="erp-page-header__title">{{ title }}</h1>
       </div>
-      <p v-if="subtitle" class="erp-page-header__subtitle">{{ subtitle }}</p>
+      <p v-if="$slots.subtitle || subtitle" class="erp-page-header__subtitle">
+        <!--
+          副标题允许两种写法：
+          * subtitle 属性（纯文本，走插值 ⇒ 会被转义）
+          * #subtitle 插槽（富文本：<strong>/<code> 等）
+        -->
+        <slot name="subtitle">{{ subtitle }}</slot>
+      </p>
     </div>
 
     <div v-if="$slots.actions" class="erp-page-header__actions">
