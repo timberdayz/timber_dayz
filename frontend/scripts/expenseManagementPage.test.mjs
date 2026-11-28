@@ -54,3 +54,67 @@ test('按店铺视图默认选店且有空状态提示', () => {
   assert.ok(pageSource.includes('暂无费用记录'))
   assert.ok(pageSource.includes('handleShopSelectChange'))
 })
+
+// ---------------------------------------------------------------------------
+// 以下是**防回归**断言：它们守的是「一旦回退就会出错」的具体约束，
+// 而不只是「某个字符串还在不在」。
+// ---------------------------------------------------------------------------
+
+test('旧口径残留不得复活：availableShops / 本地同名函数', () => {
+  // availableShops 是被 allShops + operatingShops 取代的旧集合名，
+  // 一旦复活就会丢掉「在营 vs 全部」的区别（停用店会重新拿到空白行）。
+  assert.ok(
+    !pageSource.includes('availableShops'),
+    'availableShops 已被 allShops/operatingShops 取代，不得残留'
+  )
+  // view-model 已经导出同名函数，组件里再声明一次会造成重复声明，构建直接失败。
+  assert.ok(
+    !/const buildExpenseRowKey\s*=/.test(pageSource),
+    'buildExpenseRowKey 必须来自 @/utils/expenseViewModel.js，组件内不得重复声明'
+  )
+  assert.ok(
+    !/const distributeEvenly\s*=/.test(pageSource),
+    'distributeEvenly 必须来自 @/utils/expenseViewModel.js，组件内不得重复声明'
+  )
+})
+
+test('年度店铺记录集合必须在早退之前刷新（否则停用店进不了下拉）', () => {
+  const loadShopExpenses = pageSource.slice(
+    pageSource.indexOf('const loadShopExpenses = async () => {')
+  )
+  const refreshAt = loadShopExpenses.indexOf('await loadShopViewRecordedShops(')
+  const earlyReturnAt = loadShopExpenses.indexOf('if (!selectedShopId.value)')
+
+  assert.ok(refreshAt >= 0, 'loadShopExpenses 必须刷新年度有记录的店铺集合')
+  assert.ok(earlyReturnAt >= 0, 'loadShopExpenses 必须保留未选店铺的早退分支')
+  assert.ok(
+    refreshAt < earlyReturnAt,
+    '年度记录集合必须在早退分支之前刷新，否则停用店永远进不了下拉（鸡生蛋死循环）'
+  )
+})
+
+test('拆分店铺数与实际分摊必须同源', () => {
+  assert.ok(
+    pageSource.includes('countSplitTargets(visibleMonthlyRows'),
+    '界面计数必须读可见行 + 同一个 scope'
+  )
+  assert.ok(
+    pageSource.includes('resolveQuickSplitTargets(visibleMonthlyRows'),
+    '实际分摊目标必须读可见行 + 同一个 scope'
+  )
+})
+
+test('停用店铺不参与分摊：分摊集合口径由 view-model 保证', () => {
+  // 组件不得自己再实现一套「在营」判定，否则两套口径会漂移。
+  const applySplit = pageSource.slice(
+    pageSource.indexOf('const handleApplyQuickSplit = async () => {')
+  )
+  assert.ok(
+    applySplit.includes('resolveQuickSplitTargets'),
+    '快速拆分必须走 view-model 的目标集合解析'
+  )
+  assert.ok(
+    !/enabled\s*===\s*true[\s\S]{0,200}\.(filter|forEach)\(/.test(applySplit),
+    '不得在拆分里另写一套启用状态过滤'
+  )
+})
