@@ -1,0 +1,84 @@
+/**
+ * ERP 数据表格密度 —— 三档 SSOT（唯一出处）
+ * ----------------------------------------
+ * 本文件是「表格密度」的唯一规范来源，**由 main.js 全局引入**。
+ * 之前密度规则寄居在 assets/erp-layout.css 里，而那个文件从未被任何入口引入，
+ * 导致 .erp-compact 只是一枚挂上去的类名、实际一条规则都命中不了
+ * （实测 td padding 仍是 Element Plus 默认 8px，行高 41px）。
+ * ⇒ 密度必须独立成文件并真正进入构建，否则「规范」只是文本。
+ *
+ * 三档：
+ *   .erp-compact    紧凑档（录入表格 / 数据浏览器）—— 目标单行 ~33px
+ *   .erp-comfortable 舒适档（默认档）—— 目标单行 ~50px
+ *   .erp-spacious   宽松档（表单）—— 目标单行 ~60px
+ *
+ * 用法：``<el-table class="erp-table erp-compact">``，
+ *      行内控件一律 ``size="small"``（24px，与本档行高匹配）。
+ *
+ * ⚠️ 选择器必须同时写两种形态：Element Plus 的 ``el-table`` **根节点就是
+ *    ``.el-table`` 本身**，只写后代选择器 ``.erp-compact .el-table`` 时，
+ *    把类挂在表格根节点上会**一条规则都命中不了**；
+ *    挂在祖先容器上才生效。
+ *    ⇒ 这里同时给出「祖先」与「表格自身」两种写法，两者等价。
+ *
+ * ⚠️ 字号定 13px 而不用 Element Plus 原生 ``el-table--small`` 的 12px ——
+ *    12px 下中文表格数字与标签已开始发虚，13px 是密而不糊的下限。
+ *
+ * ⚠️ 本文件全部规则都被这三个密度类闸住；未声明密度类的表格与页面
+ *    不受任何影响（新增密度档不得写出无闸门的全局选择器）。
+ */
+
+/* ========================================
+   紧凑模式（录入表格 / 数据浏览器）
+   ======================================== */
+.erp-compact .el-table,
+.erp-compact.el-table {
+  font-size: 13px;
+}
+
+.erp-compact .el-table th.el-table__cell,
+.erp-compact.el-table th.el-table__cell {
+  padding: 6px 0;
+  font-weight: 600;
+  color: #606266;
+}
+
+.erp-compact .el-table td.el-table__cell,
+.erp-compact.el-table td.el-table__cell {
+  padding: 4px 0;
+}
+
+.erp-compact .el-table .cell,
+.erp-compact.el-table .cell {
+  padding: 0 8px;
+  line-height: 20px;
+}
+
+/* 紧凑档里的标签与徽标同步收小，否则一个 tag 就能把行撑到 32px 以上 */
+.erp-compact .el-table .el-tag,
+.erp-compact.el-table .el-tag {
+  height: 20px;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* ========================================
+   舒适模式（默认）
+   ======================================== */
+.erp-comfortable .el-table td.el-table__cell,
+.erp-comfortable.el-table td.el-table__cell,
+.erp-comfortable .el-table th.el-table__cell,
+.erp-comfortable.el-table th.el-table__cell {
+  padding: 12px 0;
+}
+
+/* ========================================
+   宽松模式（表单）
+   ======================================== */
+.erp-spacious .el-table td.el-table__cell,
+.erp-spacious.el-table td.el-table__cell,
+.erp-spacious .el-table th.el-table__cell,
+.erp-spacious.el-table th.el-table__cell {
+  padding: 16px 0;
+}

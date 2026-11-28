@@ -158,25 +158,33 @@
           </el-table-column>
           <el-table-column label="可分配净利润率" width="180" align="right">
             <template #default="{ row }">
-              <span v-if="row._isFirst" class="allocatable-rate-wrap">
-                <el-input-number
-                  :model-value="(row.allocatable_profit_rate ?? 0) * 100"
-                  @update:model-value="(v) => { setShopAllocatableProfitRate(row, v); scheduleEstimate() }"
-                  :min="0"
-                  :max="100"
-                  :step="0.01"
-                  :precision="2"
-                  :controls="false"
-                  placeholder="0-100%"
-                  size="small"
-                  class="allocatable-rate-input"
-                />
-                <span class="allocatable-rate-suffix">%</span>
+              <!--
+                密度改造（2026-11-28）：输入框与状态标签**同行**。
+                原先 .allocatable-rate-wrap 是 width:100% 的 inline-flex，
+                会把状态标签挤到第二行 —— 单元格高度 48px，整行被撑到 57px。
+                标签是「未配置 / 待保存」这类必须可见的状态，不能挪进 tooltip。
+              -->
+              <span v-if="row._isFirst" class="allocatable-rate-cell">
+                <span class="allocatable-rate-wrap">
+                  <el-input-number
+                    :model-value="(row.allocatable_profit_rate ?? 0) * 100"
+                    @update:model-value="(v) => { setShopAllocatableProfitRate(row, v); scheduleEstimate() }"
+                    :min="0"
+                    :max="100"
+                    :step="0.01"
+                    :precision="2"
+                    :controls="false"
+                    placeholder="0-100%"
+                    size="small"
+                    class="allocatable-rate-input"
+                  />
+                  <span class="allocatable-rate-suffix">%</span>
+                </span>
+                <span class="rate-status-cell">
+                  <el-tag size="small" :type="allocatableRateTag(row).type">{{ allocatableRateTag(row).label }}</el-tag>
+                  <el-tag v-if="isShopRateDirty(row)" size="small" type="warning">待保存</el-tag>
+                </span>
               </span>
-              <div v-if="row._isFirst" class="rate-status-cell">
-                <el-tag size="small" :type="allocatableRateTag(row).type">{{ allocatableRateTag(row).label }}</el-tag>
-                <el-tag v-if="isShopRateDirty(row)" size="small" type="warning">待保存</el-tag>
-              </div>
             </template>
           </el-table-column>
           <el-table-column label="可分配利润" width="140" align="right">
@@ -1748,6 +1756,26 @@ onMounted(async () => {
 }
 .allocatable-rate-wrap .allocatable-rate-input { flex: 1; min-width: 0; }
 .allocatable-rate-wrap .allocatable-rate-suffix { margin-left: 4px; color: #909399; }
+/*
+ * 密度改造（2026-11-28）：表格行内的「可分配净利润率」输入 + 状态标签同行，
+ * 输入框可压缩、标签不可压缩（状态必须可见）。
+ */
+.allocatable-rate-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 100%;
+}
+.allocatable-rate-cell .allocatable-rate-wrap {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 56px;
+}
+.allocatable-rate-cell .rate-status-cell {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
 .person-cell {
   display: inline-flex;
   align-items: center;

@@ -85,3 +85,21 @@ test('行内控件用小尺寸（与紧凑行高匹配）', () => {
     `小尺寸控件偏少（当前 ${smallCount} 处），紧凑行的行高压不下来`
   )
 })
+
+test('「可分配净利润率」的输入与状态标签同行（否则整行被撑到 57px）', () => {
+  // 真机实测：.allocatable-rate-wrap 是 width:100% 的 inline-flex，
+  // 会把「未配置 / 待保存」标签挤到第二行 ⇒ 单元格 48px ⇒ 整行 57px。
+  // 标签是必须可见的状态，不能挪进 tooltip，只能压到同一行。
+  assert.ok(
+    pageSource.includes('allocatable-rate-cell'),
+    '必须用 .allocatable-rate-cell 把输入框与状态标签收进同一行'
+  )
+  assert.ok(
+    /\.allocatable-rate-cell\s+\.allocatable-rate-wrap\s*\{[^}]*width:\s*auto/.test(pageSource),
+    '.allocatable-rate-cell 内的输入框必须让出宽度（width:auto），否则标签仍会被挤到第二行'
+  )
+  assert.ok(
+    /\.allocatable-rate-cell\s+\.rate-status-cell\s*\{[^}]*flex:\s*0 0 auto/.test(pageSource),
+    '状态标签不可压缩 —— 「未配置 / 待保存」必须始终可见'
+  )
+})

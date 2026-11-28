@@ -10,6 +10,8 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 
 import './assets/styles/variables.css'
 import './assets/styles/base.css'
+// 表格密度三档 SSOT：必须全局引入，否则 .erp-compact 只是挂上去的类名
+import './assets/erp-density.css'
 
 import App from './App.vue'
 import router from './router'
