@@ -96,9 +96,37 @@
           <el-table-column label="店铺" width="200" fixed="left" show-overflow-tooltip>
             <template #default="{ row }">
               <div v-if="row._isFirst" class="shop-display-cell">
-                <div>{{ row.shop_name }}</div>
+                <div class="shop-display-head">
+                  <span class="shop-display-name">{{ row.shop_name }}</span>
+                  <!--
+                    「+ 添加人员」放在**固定左侧**的店铺列（2026-11-28 密度改造）：
+                    人员列在横向滚动区之外（表宽 2446px > 视口），按钮原先落在
+                    滚动区里，整行看起来是空的 —— 现在任何屏宽下都能看见入口。
+                    与店铺名同行，避免把行撑成三行。
+                  -->
+                  <el-button
+                    v-if="row._isAddRow"
+                    size="small"
+                    link
+                    type="primary"
+                    class="add-person-button"
+                    @click="openAddForShop(row._shop)"
+                  >
+                    + 添加人员
+                  </el-button>
+                </div>
                 <div v-if="row.secondary_name" class="shop-display-secondary">{{ row.secondary_name }}</div>
               </div>
+              <el-button
+                v-else-if="row._isAddRow"
+                size="small"
+                link
+                type="primary"
+                class="add-person-button"
+                @click="openAddForShop(row._shop)"
+              >
+                + 添加人员
+              </el-button>
             </template>
           </el-table-column>
           <el-table-column label="当月销售额" width="120" align="right">
@@ -202,10 +230,7 @@
               </el-tooltip>
             </template>
             <template #default="{ row }">
-              <template v-if="row._isAddRow">
-                <el-button size="small" link type="primary" @click="openAddForShop(row._shop)">+ 添加</el-button>
-              </template>
-              <template v-else>
+              <template v-if="!row._isAddRow">
                 <span class="person-cell">
                   <el-tooltip
                     v-if="row._person"
@@ -1783,6 +1808,11 @@ onMounted(async () => {
   max-width: 100%;
   white-space: nowrap;
 }
+/* 「+ 添加人员」入口放在固定左侧的店铺列，缩进对齐店铺名 */
+.add-person-button {
+  margin-left: 4px;
+  padding: 0;
+}
 .person-cell-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1793,6 +1823,18 @@ onMounted(async () => {
 }
 .shop-display-cell {
   line-height: 1.4;
+}
+/* 店铺名与「+ 添加人员」同行：名字过长时省略号截断，不把行撑成三行 */
+.shop-display-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.shop-display-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .shop-display-secondary {
   font-size: 12px;

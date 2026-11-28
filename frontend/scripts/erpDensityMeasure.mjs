@@ -188,6 +188,21 @@ const measure = async (route, label) => {
         computedPadding: td ? getComputedStyle(td).padding : null
       }
     })()
+    // 行类型探针：区分「人员行 / 添加行 / 空行」，定位看着空的行到底是什么
+    const rowTypes = [...document.querySelectorAll('.el-table__body-wrapper tbody tr.el-table__row')]
+      .filter((r) => r.getBoundingClientRect().height > 0)
+      .slice(0, 24)
+      .map((r) => {
+        const tds = [...r.querySelectorAll('td.el-table__cell')]
+        const shopCell = tds[2]
+        return {
+          h: Math.round(r.getBoundingClientRect().height),
+          shop: (shopCell?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 28),
+          addBtn: Boolean(r.querySelector('.add-person-button')),
+          addBtnText: (r.querySelector('.add-person-button')?.innerText || '').trim(),
+          person: (tds[10]?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 20)
+        }
+      })
     const tables = [...document.querySelectorAll('.el-table')].map((t) => ({
       compact: t.classList.contains('erp-compact') || Boolean(t.closest('.erp-compact')),
       width: Math.round(t.getBoundingClientRect().width),
@@ -231,7 +246,7 @@ const measure = async (route, label) => {
         (th.innerText || '').includes('备注')
       ),
       tables,
-      diagnostics: { rowStyleProbe, styleProbe, rowBreakdown, costCells }
+      diagnostics: { rowStyleProbe, styleProbe, rowBreakdown, costCells, rowTypes }
     }
   })
 

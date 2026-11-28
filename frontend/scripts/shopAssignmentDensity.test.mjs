@@ -86,6 +86,31 @@ test('行内控件用小尺寸（与紧凑行高匹配）', () => {
   )
 })
 
+test('「+ 添加人员」入口放在固定左侧的店铺列（否则按钮落在横向滚动区外）', () => {
+  // 表宽 2446px > 视口 ~1268px，人员列在滚动区之外；
+  // 入口原先挂在人员列 ⇒ 未横向滚动时整行看起来是空的。
+  const shopColumn = pageSource.slice(
+    pageSource.indexOf('<el-table-column label="店铺"'),
+    pageSource.indexOf('<el-table-column label="当月销售额"')
+  )
+  assert.ok(
+    shopColumn.includes('add-person-button'),
+    '「+ 添加人员」必须在固定左侧的店铺列里'
+  )
+  assert.ok(
+    shopColumn.includes('openAddForShop'),
+    '按钮必须仍然调用 openAddForShop'
+  )
+  const personColumn = pageSource.slice(
+    pageSource.indexOf('<el-table-column label="人员"'),
+    pageSource.indexOf('<el-table-column label="提成比例"')
+  )
+  assert.ok(
+    !personColumn.includes('openAddForShop'),
+    '人员列不再承载添加入口（同一入口不出现两次）'
+  )
+})
+
 test('「可分配净利润率」的输入与状态标签同行（否则整行被撑到 57px）', () => {
   // 真机实测：.allocatable-rate-wrap 是 width:100% 的 inline-flex，
   // 会把「未配置 / 待保存」标签挤到第二行 ⇒ 单元格 48px ⇒ 整行 57px。
