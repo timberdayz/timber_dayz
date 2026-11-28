@@ -76,84 +76,66 @@
         <div class="erp-flex-spacer"></div>
       </div>
 
-      <!-- 统计卡片（月度 + 年度） -->
-      <el-row :gutter="20" class="erp-mb-lg">
-        <el-col :span="4">
-          <el-card class="stat-card monthly">
-            <div class="stat-item">
-              <div class="stat-label">本月总费用</div>
-              <div class="stat-value primary">
-                {{ formatNumber(monthlySummary.total_amount) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="4">
-          <el-card class="stat-card yearly">
-            <div class="stat-item">
-              <div class="stat-label">
-                年度累计<span class="stat-label-hint">（全部平台）</span>
-              </div>
-              <div class="stat-value warning">
-                {{ formatNumber(yearlySummary.total_amount) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="4">
-          <el-card>
-            <div class="stat-item">
-              <div class="stat-label">本月租金</div>
-              <div class="stat-value">
-                {{ formatNumber(monthlySummary.total_rent) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="4">
-          <el-card>
-            <div class="stat-item">
-              <div class="stat-label">本月营销费用</div>
-              <div class="stat-value">
-                {{ formatNumber(monthlySummary.total_marketing_fee) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="4">
-          <el-card>
-            <div class="stat-item">
-              <div class="stat-label">本月水电</div>
-              <div class="stat-value">
-                {{ formatNumber(monthlySummary.total_utilities) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="4">
-          <el-card>
-            <div class="stat-item">
-              <div class="stat-label">本月人力费用</div>
-              <div class="stat-value">
-                {{ formatNumber(monthlySummary.total_labor_cost) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="4">
-          <el-card>
-            <div class="stat-item">
-              <div class="stat-label">本月其他</div>
-              <div class="stat-value">
-                {{ formatNumber(monthlySummary.total_other) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-      </el-row>
+      <!--
+        统计指标条（月度 + 年度）
+        7 个指标一行排完：原来的 el-row/el-col 栅格一行只放得下 6 个，
+        第 7 个「本月其他」换行并在右侧留一整块空白；卡片本身还有 20px 内边距。
+        这里改成 flex 指标条：等宽铺满一行，无换行、无空列，高度 ≈44px。
+      -->
+      <div class="stat-metrics erp-mb-md">
+        <div class="stat-metric stat-metric--monthly">
+          <div class="stat-label">本月总费用</div>
+          <div class="stat-value primary">
+            {{ formatNumber(monthlySummary.total_amount) }}
+          </div>
+        </div>
+        <div class="stat-metric stat-metric--yearly">
+          <div class="stat-label">
+            年度累计<span class="stat-label-hint">（全部平台）</span>
+          </div>
+          <div class="stat-value warning">
+            {{ formatNumber(yearlySummary.total_amount) }}
+          </div>
+        </div>
+        <div class="stat-metric">
+          <div class="stat-label">本月租金</div>
+          <div class="stat-value">
+            {{ formatNumber(monthlySummary.total_rent) }}
+          </div>
+        </div>
+        <div class="stat-metric">
+          <div class="stat-label">本月营销费用</div>
+          <div class="stat-value">
+            {{ formatNumber(monthlySummary.total_marketing_fee) }}
+          </div>
+        </div>
+        <div class="stat-metric">
+          <div class="stat-label">本月水电</div>
+          <div class="stat-value">
+            {{ formatNumber(monthlySummary.total_utilities) }}
+          </div>
+        </div>
+        <div class="stat-metric">
+          <div class="stat-label">本月人力费用</div>
+          <div class="stat-value">
+            {{ formatNumber(monthlySummary.total_labor_cost) }}
+          </div>
+        </div>
+        <div class="stat-metric">
+          <div class="stat-label">本月其他</div>
+          <div class="stat-value">
+            {{ formatNumber(monthlySummary.total_other) }}
+          </div>
+        </div>
+      </div>
 
       <!-- 月度费用表格 -->
-      <el-card>
+      <!--
+        紧凑档：密度 SSOT 的选择器是后代选择器 `.erp-compact .el-table`，
+        class 必须落在 .el-table 的**祖先**上才会真正命中；
+        这里卡片（祖先）与表格根节点都声明 erp-compact。
+      -->
+      <el-card class="erp-compact">
         <!-- 错误状态显示 -->
         <div v-if="monthlyError && !loading" class="error-state">
           <el-result icon="error" :title="monthlyError.message">
@@ -172,56 +154,70 @@
           :data="visibleMonthlyRows"
           stripe
           v-loading="loading"
-          class="erp-table"
+          class="erp-table erp-compact"
           border
         >
           <el-table-column
             prop="shop_name"
             label="店铺"
-            width="200"
+            width="240"
             fixed="left"
           >
             <template #default="{ row }">
-              <el-select
-                v-model="row.shop_key"
-                placeholder="选择店铺"
-                class="erp-w-full"
-                :disabled="!!row.id"
-                @change="handleShopChange(row)"
-              >
-                <el-option
-                  v-for="shop in allShops"
-                  :key="`${shop.platform_code}|${shop.shop_id}`"
-                  :label="shop.option_label || shop.shop_name"
-                  :value="buildExpenseRowKey(shop)"
-                >
-                  <div>{{ shop.shop_name }}</div>
-                  <div v-if="shop.secondary_name" class="shop-option-secondary">{{ shop.secondary_name }}</div>
-                </el-option>
-              </el-select>
-              <div v-if="row.main_account_name || row.main_account_id" class="shop-option-secondary">
-                租户：{{ row.main_account_name || row.main_account_id }}
-              </div>
-              <el-tag v-if="row.enabled === false" type="info" size="small">
-                已停用
-              </el-tag>
-              <el-tag v-else-if="row.enabled === null" type="warning" size="small">
-                状态未知
-              </el-tag>
               <!--
-                孤儿行（shop_enabled === null）：店铺账号已不存在，下拉里没有对应项，
-                el-select 只会显示占位符「选择店铺」。这里补出原始店铺 ID，
-                否则用户根本看不出这一行属于哪家店。
+                店铺列压成一行：下拉 + 租户 + 状态标签横排。
+                原来三行堆叠会把行高撑到 ~50px，紧凑档目标行高是 ~34px。
               -->
-              <div v-if="row.enabled === null" class="shop-option-secondary">
-                原始店铺ID：{{ row.shop_id }}
+              <div class="shop-cell">
+                <div class="shop-cell-main">
+                  <el-select
+                    v-model="row.shop_key"
+                    placeholder="选择店铺"
+                    size="small"
+                    class="shop-cell-select"
+                    :disabled="!!row.id"
+                    @change="handleShopChange(row)"
+                  >
+                    <el-option
+                      v-for="shop in allShops"
+                      :key="`${shop.platform_code}|${shop.shop_id}`"
+                      :label="shop.option_label || shop.shop_name"
+                      :value="buildExpenseRowKey(shop)"
+                    >
+                      <div>{{ shop.shop_name }}</div>
+                      <div v-if="shop.secondary_name" class="shop-option-secondary">{{ shop.secondary_name }}</div>
+                    </el-option>
+                  </el-select>
+                  <span
+                    v-if="row.main_account_name || row.main_account_id"
+                    class="shop-cell-tenant"
+                    :title="row.main_account_name || row.main_account_id"
+                  >
+                    租户：{{ row.main_account_name || row.main_account_id }}
+                  </span>
+                  <el-tag v-if="row.enabled === false" type="info" size="small">
+                    已停用
+                  </el-tag>
+                  <el-tag v-else-if="row.enabled === null" type="warning" size="small">
+                    状态未知
+                  </el-tag>
+                </div>
+                <!--
+                  孤儿行（shop_enabled === null）：店铺账号已不存在，下拉里没有对应项，
+                  el-select 只会显示占位符「选择店铺」。这里补出原始店铺 ID，
+                  否则用户根本看不出这一行属于哪家店。
+                  宽度放不下时退回下一行小字（只影响孤儿行，不影响其它行的行高）。
+                -->
+                <div v-if="row.enabled === null" class="shop-cell-orphan">
+                  原始店铺ID：{{ row.shop_id }}
+                </div>
               </div>
             </template>
           </el-table-column>
           <el-table-column
             prop="rent"
             label="租金"
-            width="130"
+            width="110"
             align="right"
           >
             <template #default="{ row }">
@@ -230,6 +226,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
+                size="small"
                 class="erp-w-full"
                 @change="updateRowTotal(row)"
               />
@@ -238,7 +235,7 @@
           <el-table-column
             prop="marketing_fee"
             label="营销费用"
-            width="130"
+            width="110"
             align="right"
           >
             <template #default="{ row }">
@@ -247,6 +244,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
+                size="small"
                 class="erp-w-full"
                 @change="updateRowTotal(row)"
               />
@@ -255,7 +253,7 @@
           <el-table-column
             prop="utilities"
             label="水电费"
-            width="130"
+            width="100"
             align="right"
           >
             <template #default="{ row }">
@@ -264,6 +262,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
+                size="small"
                 class="erp-w-full"
                 @change="updateRowTotal(row)"
               />
@@ -272,7 +271,7 @@
           <el-table-column
             prop="ai_token_cost"
             label="AI Token费用"
-            width="140"
+            width="120"
             align="right"
           >
             <template #default="{ row }">
@@ -281,6 +280,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
+                size="small"
                 class="erp-w-full"
                 @change="updateRowTotal(row)"
               />
@@ -289,7 +289,7 @@
           <el-table-column
             prop="labor_cost"
             label="系统人力成本"
-            width="130"
+            width="120"
             align="right"
           >
             <template #default="{ row }">
@@ -299,7 +299,7 @@
           <el-table-column
             prop="other_costs"
             label="其他费用"
-            width="130"
+            width="100"
             align="right"
           >
             <template #default="{ row }">
@@ -308,40 +308,29 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
+                size="small"
                 class="erp-w-full"
                 @change="updateRowTotal(row)"
-              />
-            </template>
-          </el-table-column>
-          <el-table-column prop="note" label="备注" min-width="220">
-            <template #default="{ row }">
-              <el-input
-                v-model="row.note"
-                type="textarea"
-                :rows="1"
-                autosize
-                placeholder="可选"
-                @change="() => {}"
               />
             </template>
           </el-table-column>
           <el-table-column
             prop="total_cost"
             label="成本合计"
-            width="120"
+            width="100"
             align="right"
           >
             <template #default="{ row }">
               <strong>{{ formatNumber(row.total_cost ?? row.total) }}</strong>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="80" align="center">
+          <el-table-column label="状态" width="70" align="center">
             <template #default="{ row }">
               <el-tag v-if="row.id" type="success" size="small">已保存</el-tag>
               <el-tag v-else type="info" size="small">新增</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="210" fixed="right">
+          <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
               <el-button
                 size="small"
@@ -411,6 +400,7 @@
             <el-select
               v-model="quickSplitScope.platform_code"
               placeholder="全部在营店铺"
+              size="small"
               class="erp-w-full"
               @change="handleQuickSplitScopeChange"
             >
@@ -424,6 +414,7 @@
               v-model="quickSplitScope.main_account_id"
               placeholder="该平台全部租户"
               clearable
+              size="small"
               class="erp-w-full"
             >
               <el-option
@@ -440,6 +431,7 @@
               :min="0"
               :precision="2"
               :controls="false"
+              size="small"
               class="erp-w-full"
             />
           </el-form-item>
@@ -449,6 +441,7 @@
               :min="0"
               :precision="2"
               :controls="false"
+              size="small"
               class="erp-w-full"
             />
           </el-form-item>
@@ -458,6 +451,7 @@
               :min="0"
               :precision="2"
               :controls="false"
+              size="small"
               class="erp-w-full"
             />
           </el-form-item>
@@ -467,6 +461,7 @@
               :min="0"
               :precision="2"
               :controls="false"
+              size="small"
               class="erp-w-full"
             />
           </el-form-item>
@@ -476,6 +471,7 @@
               :min="0"
               :precision="2"
               :controls="false"
+              size="small"
               class="erp-w-full"
             />
           </el-form-item>
@@ -494,6 +490,7 @@
         <el-select
           v-model="selectedShopKey"
           placeholder="选择店铺"
+          size="small"
           class="erp-w-250"
           @change="handleShopSelectChange"
           filterable
@@ -528,88 +525,68 @@
         <div class="erp-flex-spacer"></div>
       </div>
 
-      <!-- 店铺年度汇总卡片 -->
-      <el-row :gutter="20" class="erp-mb-lg">
-        <el-col :span="4">
-          <el-card class="stat-card yearly">
-            <div class="stat-item">
-              <div class="stat-label">年度总费用</div>
-              <div class="stat-value primary">
-                {{ formatNumber(shopSummary.total_amount) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="4">
-          <el-card>
-            <div class="stat-item">
-              <div class="stat-label">月均费用</div>
-              <div class="stat-value">
-                {{
-                  formatNumber(
-                    shopSummary.month_count > 0
-                      ? shopSummary.total_amount / shopSummary.month_count
-                      : 0,
-                  )
-                }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="4">
-          <el-card>
-            <div class="stat-item">
-              <div class="stat-label">年度租金</div>
-              <div class="stat-value">
-                {{ formatNumber(shopSummary.total_rent) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="4">
-          <el-card>
-            <div class="stat-item">
-              <div class="stat-label">年度营销费用</div>
-              <div class="stat-value">
-                {{ formatNumber(shopSummary.total_marketing_fee) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="4">
-          <el-card>
-            <div class="stat-item">
-              <div class="stat-label">年度水电</div>
-              <div class="stat-value">
-                {{ formatNumber(shopSummary.total_utilities) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="4">
-          <el-card>
-            <div class="stat-item">
-              <div class="stat-label">年度人力费用</div>
-              <div class="stat-value">
-                {{ formatNumber(shopSummary.total_labor_cost) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="4">
-          <el-card>
-            <div class="stat-item">
-              <div class="stat-label">年度其他</div>
-              <div class="stat-value">
-                {{ formatNumber(shopSummary.total_other_costs) }}
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-      </el-row>
+      <!--
+        店铺年度汇总指标条
+        同月度指标条：7 个指标一行排完，不再用栅格卡片（第 7 个换行会留一整块空白）。
+      -->
+      <div class="stat-metrics erp-mb-md">
+        <div class="stat-metric stat-metric--yearly">
+          <div class="stat-label">年度总费用</div>
+          <div class="stat-value primary">
+            {{ formatNumber(shopSummary.total_amount) }}
+          </div>
+        </div>
+        <div class="stat-metric">
+          <div class="stat-label">月均费用</div>
+          <div class="stat-value">
+            {{
+              formatNumber(
+                shopSummary.month_count > 0
+                  ? shopSummary.total_amount / shopSummary.month_count
+                  : 0,
+              )
+            }}
+          </div>
+        </div>
+        <div class="stat-metric">
+          <div class="stat-label">年度租金</div>
+          <div class="stat-value">
+            {{ formatNumber(shopSummary.total_rent) }}
+          </div>
+        </div>
+        <div class="stat-metric">
+          <div class="stat-label">年度营销费用</div>
+          <div class="stat-value">
+            {{ formatNumber(shopSummary.total_marketing_fee) }}
+          </div>
+        </div>
+        <div class="stat-metric">
+          <div class="stat-label">年度水电</div>
+          <div class="stat-value">
+            {{ formatNumber(shopSummary.total_utilities) }}
+          </div>
+        </div>
+        <div class="stat-metric">
+          <div class="stat-label">年度人力费用</div>
+          <div class="stat-value">
+            {{ formatNumber(shopSummary.total_labor_cost) }}
+          </div>
+        </div>
+        <div class="stat-metric">
+          <div class="stat-label">年度其他</div>
+          <div class="stat-value">
+            {{ formatNumber(shopSummary.total_other_costs) }}
+          </div>
+        </div>
+      </div>
 
       <!-- 店铺费用表格（按月份） -->
-      <el-card>
+      <!--
+        紧凑档：密度 SSOT 的选择器是后代选择器 `.erp-compact .el-table`，
+        class 必须落在 .el-table 的**祖先**上才会真正命中；
+        这里卡片（祖先）与表格根节点都声明 erp-compact。
+      -->
+      <el-card class="erp-compact">
         <el-empty
           v-if="!selectedShopId"
           description="请先选择店铺"
@@ -620,17 +597,17 @@
           empty-text="该店铺该年度暂无费用记录"
           stripe
           v-loading="loading"
-          class="erp-table"
+          class="erp-table erp-compact"
           border
         >
           <el-table-column
             prop="year_month"
             label="月份"
-            width="120"
+            width="110"
             fixed="left"
           >
             <template #default="{ row }">
-              <el-tag v-if="row.id" type="primary">{{ row.year_month }}</el-tag>
+              <el-tag v-if="row.id" type="primary" size="small">{{ row.year_month }}</el-tag>
               <el-date-picker
                 v-else
                 v-model="row.year_month"
@@ -645,7 +622,7 @@
           <el-table-column
             prop="rent"
             label="租金"
-            width="130"
+            width="110"
             align="right"
           >
             <template #default="{ row }">
@@ -654,6 +631,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
+                size="small"
                 class="erp-w-full"
                 @change="updateShopRowTotal(row)"
               />
@@ -662,7 +640,7 @@
           <el-table-column
             prop="marketing_fee"
             label="营销费用"
-            width="130"
+            width="110"
             align="right"
           >
             <template #default="{ row }">
@@ -671,6 +649,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
+                size="small"
                 class="erp-w-full"
                 @change="updateShopRowTotal(row)"
               />
@@ -679,7 +658,7 @@
           <el-table-column
             prop="utilities"
             label="水电费"
-            width="130"
+            width="100"
             align="right"
           >
             <template #default="{ row }">
@@ -688,6 +667,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
+                size="small"
                 class="erp-w-full"
                 @change="updateShopRowTotal(row)"
               />
@@ -696,7 +676,7 @@
           <el-table-column
             prop="ai_token_cost"
             label="AI Token费用"
-            width="140"
+            width="120"
             align="right"
           >
             <template #default="{ row }">
@@ -705,6 +685,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
+                size="small"
                 class="erp-w-full"
                 @change="updateShopRowTotal(row)"
               />
@@ -713,7 +694,7 @@
           <el-table-column
             prop="labor_cost"
             label="系统人力成本"
-            width="130"
+            width="120"
             align="right"
           >
             <template #default="{ row }">
@@ -723,7 +704,7 @@
           <el-table-column
             prop="other_costs"
             label="其他费用"
-            width="130"
+            width="100"
             align="right"
           >
             <template #default="{ row }">
@@ -732,40 +713,29 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
+                size="small"
                 class="erp-w-full"
                 @change="updateShopRowTotal(row)"
-              />
-            </template>
-          </el-table-column>
-          <el-table-column prop="note" label="备注" min-width="220">
-            <template #default="{ row }">
-              <el-input
-                v-model="row.note"
-                type="textarea"
-                :rows="1"
-                autosize
-                placeholder="可选"
-                @change="() => {}"
               />
             </template>
           </el-table-column>
           <el-table-column
             prop="total_cost"
             label="成本合计"
-            width="120"
+            width="100"
             align="right"
           >
             <template #default="{ row }">
               <strong>{{ formatNumber(row.total_cost ?? row.total) }}</strong>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="80" align="center">
+          <el-table-column label="状态" width="70" align="center">
             <template #default="{ row }">
               <el-tag v-if="row.id" type="success" size="small">已保存</el-tag>
               <el-tag v-else type="info" size="small">新增</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="210" fixed="right">
+          <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row, $index }">
               <el-button
                 size="small"
@@ -996,7 +966,6 @@ const normalizeExpenseRow = (item = {}) => {
     marketing_fee: marketingFee,
     ai_token_cost: aiTokenCost,
     labor_cost: laborCost,
-    note: item.note ?? '',
     total_cost: Number(item.total_cost ?? item.total) || 0,
     shop_name: displayMeta.display_name,
     secondary_name: displayMeta.secondary_name,
@@ -1006,18 +975,17 @@ const normalizeExpenseRow = (item = {}) => {
   }
 }
 
+// 一行费用是否「有意义」：只看六项金额。
+// 用户侧自由文本字段已退役（DB 的 remark 收窄为系统所有），
+// 附件 UI 也早已不存在，所以这两项都不再参与判定。
 const isMeaningfulExpenseRow = (row = {}) => {
-  const note = String(row.note || '').trim()
-  const attachments = Array.isArray(row.attachments) ? row.attachments : []
   return (
     (Number(row.rent) || 0) > 0 ||
     (Number(row.marketing_fee) || 0) > 0 ||
     (Number(row.utilities) || 0) > 0 ||
     (Number(row.ai_token_cost) || 0) > 0 ||
     (Number(row.labor_cost) || 0) > 0 ||
-    (Number(row.other_costs) || 0) > 0 ||
-    note.length > 0 ||
-    attachments.length > 0
+    (Number(row.other_costs) || 0) > 0
   )
 }
 
@@ -1151,8 +1119,6 @@ const loadMonthlyExpenses = async () => {
         other_costs: 0,
         total_cost: 0,
         total: 0,
-        note: '',
-        attachments: [],
         saving: false
       }))
 
@@ -1410,6 +1376,7 @@ const handleSaveRow = async (row) => {
 
   row.saving = true
   try {
+    // payload 不再带 note：remark 归后端系统所有，客户端不改写
     const payload = {
       platform_code: row.platform_code,
       shop_id: row.shop_id,
@@ -1419,8 +1386,7 @@ const handleSaveRow = async (row) => {
       utilities: Number(row.utilities) || 0,
       ai_token_cost: Number(row.ai_token_cost) || 0,
       labor_cost: laborCostForPayload(row),
-      other_costs: Number(row.other_costs) || 0,
-      note: row.note || null
+      other_costs: Number(row.other_costs) || 0
     }
 
     await api.post('/expenses', payload)
@@ -1481,8 +1447,7 @@ const handleBatchSave = async () => {
         row.utilities > 0 ||
         row.ai_token_cost > 0 ||
         laborCostForPayload(row) > 0 ||
-        row.other_costs > 0 ||
-        (row.note && String(row.note).trim().length > 0))
+        row.other_costs > 0)
   )
 
   if (rowsToSave.length === 0) {
@@ -1509,6 +1474,7 @@ const handleBatchSave = async () => {
 
     for (const row of rowsToSave) {
       try {
+        // payload 不再带 note：remark 归后端系统所有，客户端不改写
         const payload = {
           platform_code: row.platform_code,
           shop_id: row.shop_id,
@@ -1518,8 +1484,7 @@ const handleBatchSave = async () => {
           utilities: Number(row.utilities) || 0,
           ai_token_cost: Number(row.ai_token_cost) || 0,
           labor_cost: laborCostForPayload(row),
-          other_costs: Number(row.other_costs) || 0,
-          note: row.note || null
+          other_costs: Number(row.other_costs) || 0
         }
 
         await api.post('/expenses', payload)
@@ -1659,7 +1624,7 @@ const handleRestoreRow = async (row) => {
   if (!row.id) return
   try {
     await ElMessageBox.confirm(
-      '恢复该费用记录？若这是占位行批次（备注以「[占位行清理」开头），恢复后会重新计入成本口径。',
+      '恢复该费用记录？若这是占位行批次（系统标记以「[占位行清理」开头），恢复后会重新计入成本口径。',
       '确认恢复',
       { type: 'warning' }
     )
@@ -1714,8 +1679,6 @@ const handleAddMonthRow = () => {
     other_costs: 0,
     total_cost: 0,
     total: 0,
-    note: '',
-    attachments: [],
     saving: false
   })
 }
@@ -1733,6 +1696,7 @@ const handleSaveShopRow = async (row) => {
 
   row.saving = true
   try {
+    // payload 不再带 note：remark 归后端系统所有，客户端不改写
     const payload = {
       platform_code: row.platform_code,
       shop_id: selectedShopId.value,
@@ -1742,8 +1706,7 @@ const handleSaveShopRow = async (row) => {
       utilities: Number(row.utilities) || 0,
       ai_token_cost: Number(row.ai_token_cost) || 0,
       labor_cost: laborCostForPayload(row),
-      other_costs: Number(row.other_costs) || 0,
-      note: row.note || null
+      other_costs: Number(row.other_costs) || 0
     }
 
     await api.post('/expenses', payload)
@@ -1787,7 +1750,7 @@ const handleRestoreShopRow = async (row) => {
   if (!row.id) return
   try {
     await ElMessageBox.confirm(
-      '恢复该费用记录？若这是占位行批次（备注以「[占位行清理」开头），恢复后会重新计入成本口径。',
+      '恢复该费用记录？若这是占位行批次（系统标记以「[占位行清理」开头），恢复后会重新计入成本口径。',
       '确认恢复',
       { type: 'warning' }
     )
@@ -1842,14 +1805,38 @@ onMounted(async () => {
   align-items: center;
 }
 
-.stat-item {
-  text-align: center;
+/* 统计指标条：7 个指标一行排完（等宽铺满），高度 ≈44px */
+.stat-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stat-metric {
+  flex: 1 1 0;
+  min-width: 108px;
+  padding: 3px 10px;
+  border-left: 3px solid #dcdfe6;
+  background: #f5f7fa;
+  border-radius: 4px;
+}
+
+/* 月度 / 年度配色区分（与原来的卡片左边框一致） */
+.stat-metric--monthly {
+  border-left-color: #409eff;
+}
+
+.stat-metric--yearly {
+  border-left-color: #e6a23c;
 }
 
 .stat-label {
-  font-size: 14px;
+  font-size: 12px;
   color: #909399;
-  margin-bottom: 8px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stat-label-hint {
@@ -1859,9 +1846,10 @@ onMounted(async () => {
 }
 
 .stat-value {
-  font-size: 22px;
-  font-weight: bold;
+  font-size: 16px;
+  font-weight: 600;
   color: #303133;
+  line-height: 22px;
 }
 
 .stat-value.primary {
@@ -1872,12 +1860,45 @@ onMounted(async () => {
   color: #e6a23c;
 }
 
-.stat-card.monthly {
-  border-left: 4px solid #409eff;
+/* 店铺列：下拉 + 租户 + 状态标签横排，压成一行 */
+.shop-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
-.stat-card.yearly {
-  border-left: 4px solid #e6a23c;
+.shop-cell-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.shop-cell-select {
+  flex: 0 0 96px;
+  width: 96px;
+  min-width: 0;
+}
+
+.shop-cell-tenant {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: #909399;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 孤儿行的原始店铺 ID：宽度放不下时退回下一行小字 */
+.shop-cell-orphan {
+  font-size: 12px;
+  color: #909399;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 :deep(.el-input-number) {
