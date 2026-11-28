@@ -1,5 +1,5 @@
 <template>
-  <section class="erp-page-header" :class="familyClass">
+  <section class="erp-page-header" :class="[familyClass, { 'erp-page-header--compact': compact }]">
     <div class="erp-page-header__main">
       <div class="erp-page-header__title-row">
         <el-icon v-if="icon" class="erp-page-header__icon">
@@ -37,6 +37,10 @@ const props = defineProps({
   family: {
     type: String,
     default: 'admin'
+  },
+  compact: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -92,6 +96,26 @@ const familyClass = computed(() => getPageFamilyClass(props.family))
   gap: var(--spacing-sm);
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+/*
+ * 紧凑档（2026-11-28）：录入型/台账型页面用。
+ * 默认档的页头块高约 120px，在「一屏看更多行」的场景里占比过高。
+ * 紧凑档把内边距与标题字号各收一档，其余（结构、样式变量、栅格）完全一致。
+ */
+.erp-page-header--compact {
+  margin-bottom: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-base);
+}
+
+.erp-page-header--compact .erp-page-header__title {
+  font-size: var(--font-size-xl);
+}
+
+.erp-page-header--compact .erp-page-header__subtitle {
+  margin-top: 2px;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
 }
 
 .erp-page--dashboard {

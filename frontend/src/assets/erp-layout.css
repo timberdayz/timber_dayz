@@ -357,30 +357,41 @@
  * 用法：``<el-table class="erp-table erp-compact">``，
  *      行内控件一律 ``size="small"``（24px，与本档行高匹配）。
  *
+ * ⚠️ 选择器必须同时写两种形态：Element Plus 的 ``el-table`` **根节点就是
+ *    ``.el-table`` 本身**，只写后代选择器 ``.erp-compact .el-table`` 时，
+ *    把类挂在表格根节点上会**一条规则都命中不了**（实测行高 42px、字号 14px）；
+ *    挂在祖先容器上才生效（实测行高 33px、字号 13px）。
+ *    ⇒ 这里同时给出「祖先」与「表格自身」两种写法，两者等价。
+ *
  * ⚠️ 字号定 13px 而不用 Element Plus 原生 ``el-table--small`` 的 12px ——
  *    12px 下中文表格数字与标签已开始发虚，13px 是密而不糊的下限。
  */
-.erp-compact .el-table {
+.erp-compact .el-table,
+.erp-compact.el-table {
   font-size: 13px;
 }
 
-.erp-compact .el-table th.el-table__cell {
+.erp-compact .el-table th.el-table__cell,
+.erp-compact.el-table th.el-table__cell {
   padding: 6px 0;
   font-weight: 600;
   color: #606266;
 }
 
-.erp-compact .el-table td.el-table__cell {
+.erp-compact .el-table td.el-table__cell,
+.erp-compact.el-table td.el-table__cell {
   padding: 4px 0;
 }
 
-.erp-compact .el-table .cell {
+.erp-compact .el-table .cell,
+.erp-compact.el-table .cell {
   padding: 0 8px;
   line-height: 20px;
 }
 
 /* 紧凑档里的标签与徽标同步收小，否则一个 tag 就能把行撑到 32px 以上 */
-.erp-compact .el-table .el-tag {
+.erp-compact .el-table .el-tag,
+.erp-compact.el-table .el-tag {
   height: 20px;
   padding: 0 6px;
   font-size: 12px;

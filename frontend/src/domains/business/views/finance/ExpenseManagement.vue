@@ -4,6 +4,7 @@
       title="费用管理"
       subtitle="按月份或按店铺维护经营成本。人力费用为店铺成本分摊，不作为员工工资单录入入口。"
       family="admin"
+      compact
     />
 
     <!-- 模式切换 Tab -->
@@ -131,9 +132,9 @@
 
       <!-- 月度费用表格 -->
       <!--
-        紧凑档：密度 SSOT 的选择器是后代选择器 `.erp-compact .el-table`，
-        class 必须落在 .el-table 的**祖先**上才会真正命中；
-        这里卡片（祖先）与表格根节点都声明 erp-compact。
+        紧凑档：密度 SSOT（erp-layout.css）同时支持「祖先」与「表格自身」两种写法，
+        这里卡片（祖先）与表格根节点都声明 erp-compact —— 祖先那份让卡片内所有
+        表格（含后续新增的子表）自动落到紧凑档。
       -->
       <el-card class="erp-compact">
         <!-- 错误状态显示 -->
@@ -582,8 +583,7 @@
 
       <!-- 店铺费用表格（按月份） -->
       <!--
-        紧凑档：密度 SSOT 的选择器是后代选择器 `.erp-compact .el-table`，
-        class 必须落在 .el-table 的**祖先**上才会真正命中；
+        紧凑档：密度 SSOT（erp-layout.css）同时支持「祖先」与「表格自身」两种写法，
         这里卡片（祖先）与表格根节点都声明 erp-compact。
       -->
       <el-card class="erp-compact">
