@@ -48,10 +48,16 @@ import sqlalchemy as sa
 
 
 revision = "current_schema_20261246_cleanup_expense_placeholder_rows"
-# ⚠️ 本迁移接在**在途迁移** current_schema_20261245_drop_b_cost_analysis_views 之后。
-# 该在途文件目前只存在于主工作区（未跟踪），worktree 内没有 —— 迁移链在 worktree 内
-# 仍呈现单头，但**迁移只在 main 的完整链上执行**（发版流程）。
-down_revision = "current_schema_20261245_drop_b_cost_analysis_views"
+# 本迁移接在 current_schema_20261244_drop_employee_shop_assignment_role 之后，
+# 使本分支自身**自洽单头**（worktree 内 alembic heads 可正常解析，既有迁移测试全绿）。
+#
+# ⚠️ 合并衔接：main 上另有一条在途迁移 current_schema_20261245_drop_b_cost_analysis_views
+# （BCost 下线，归属另一工作线）。若它已带 down_revision=20261244 合入，两条迁移会认领
+# 同一个父 ⇒ **真双头**，``alembic upgrade head`` 会失败。
+# ⇒ 合并时必须让那条迁移改接在本迁移之后（down_revision=current_schema_20261246_...），
+# 或由本迁移改接在它之后。仓库的契约测试
+# ``test_migration_chain_has_no_fork_and_single_head`` 会把这种分叉直接抓红。
+down_revision = "current_schema_20261244_drop_employee_shop_assignment_role"
 branch_labels = None
 depends_on = None
 

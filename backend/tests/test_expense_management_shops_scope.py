@@ -1,6 +1,7 @@
 """费用接口的店铺范围契约。"""
 
 import pytest
+from sqlalchemy import String, column
 
 from backend.dependencies.auth import get_current_user
 from backend.models.database import get_async_db
@@ -27,15 +28,34 @@ class _ScalarRows:
     def all(self):
         return self._rows
 
+    def fetchall(self):
+        return self._rows
+
 
 class _DB:
-    def __init__(self, rows):
+    def __init__(self, rows, tenants=None):
         self.rows = rows
+        self.tenants = tenants or []
         self.executed = []
 
     async def execute(self, query, params=None):
-        self.executed.append((str(query), params))
+        sql = str(query)
+        self.executed.append((sql, params))
+        if "main_account_name" in sql:
+            return _ScalarRows(self.tenants)
         return _ScalarRows(self.rows)
+
+
+class _MainAccount:
+    """租户维度的最小桩：让 ``_load_main_account_names`` 真的查出租户名。
+
+    ⚠️ 必须用 ``column()`` 显式声明：SQLAlchemy 2.0 对裸字符串属性做 select 会直接
+    抛 "Textual column expression ... should be explicitly declared with text()"，
+    租户名会静默退化成空串，断言就变成假绿。
+    """
+
+    main_account_id = column("main_account_id", String)
+    main_account_name = column("main_account_name", String)
 
 
 def _shop(**kwargs):
@@ -63,14 +83,22 @@ async def test_shops_default_excludes_disabled(monkeypatch):
 
     db = _DB([_shop()])
     monkeypatch.setattr(module, "get_async_db", lambda: db)
-    monkeypatch.setattr(module, "MainAccount", _shop)
+    monkeypatch.setattr(module, "MainAccount", _MainAccount)
 
-    result = await module.list_expense_shops(db=db, current_user=_make_user())
+    # ⚠️ 必须显式传 include_disabled=False：路由签名里的默认值是 FastAPI 的 Query 对象，
+    # 直接当普通函数调用时它是真值，``not include_disabled`` 恒为 False，过滤条件不会进 SQL。
+    result = await module.list_expense_shops(
+        include_disabled=False, db=db, current_user=_make_user()
+    )
 
     # SQLAlchemy 把枚举值渲染成绑定参数，SQL 文本里是 business_role 而非 operating_store
     shop_sql = [sql for sql, _ in db.executed if "business_role" in sql]
     assert shop_sql, "必须查询运营店铺（business_role = operating_store）"
-    assert "enabled" in shop_sql[0], "默认路径必须过滤 enabled"
+    # ⚠️ 不能只断言 "enabled" in sql —— SELECT 列表里本来就有 enabled，恒真。
+    # 必须断言**过滤条件**本身存在。
+    assert (
+        "core.shop_accounts.enabled IS true" in shop_sql[0]
+    ), "默认路径必须带 enabled IS true 过滤；include_disabled=true 才放行停用店"
     assert result["success"] is True
 
 
@@ -88,17 +116,9 @@ async def test_shops_include_disabled_returns_status_fields(monkeypatch):
         enabled=False,
     )
 
-    class _DB:
-        def __init__(self):
-            self.executed = []
-
-        async def execute(self, query, params=None):
-            self.executed.append((str(query), params))
-            return _ScalarRows([disabled])
-
-    db = _DB()
+    db = _DB([disabled], tenants=[("main-1", "租户一")])
     monkeypatch.setattr(module, "get_async_db", lambda: db)
-    monkeypatch.setattr(module, "MainAccount", _shop)
+    monkeypatch.setattr(module, "MainAccount", _MainAccount)
 
     result = await module.list_expense_shops(
         include_disabled=True, db=db, current_user=_make_user()
@@ -110,8 +130,9 @@ async def test_shops_include_disabled_returns_status_fields(monkeypatch):
     assert item["enabled"] is False
     assert item["internal_code"] == "ETERNALBLOOM_SG"
     assert item["main_account_id"] == "main-1"
-    assert "platform_shop_id" in item
-    assert "shop_account_id" in item
+    assert item["main_account_name"] == "租户一", "租户名必须真的从主账号表查出来"
+    assert item["platform_shop_id"] == "1292370001"
+    assert item["shop_account_id"] == "shopee_sg_eternalbloom_local"
 
 
 def test_expense_list_sql_joins_shop_accounts_with_dual_key():
