@@ -33,34 +33,7 @@
 - 店铺账号密码轮换 —— Walter 决定**不轮换**；`git filter-repo` 历史清理 —— 按约定**不做**（会作废全部已发布 tag，含 `v7.24.0`）⇒ 均关闭。
 - `CHANGELOG.md:952`「新增三个 CI 坑」标题笔误 —— 已在本文件修正标题（**已发布的 CHANGELOG 不改**）⇒ 关闭。
 
-## 已完成：月度利润看板重构（2026-11-21，**v7.36.0 已发版并部署生产**）
-
-- 计划：`docs/superpowers/plans/2026-11-21-finance-profit-dashboard.md`；设计：`docs/superpowers/specs/2026-11-21-finance-profit-dashboard-design.md`
-- 做了什么：把「财务结算中心」从**会自己算钱的审批表单**改成**只读事实看板**（赚多少 / 分给员工多少 / 人工调整多少 / 留下多少）；跟投模块整体下线。
-- 后端**不重命名**（受上线前规则约束）⇒ 重命名降级为 post-launch V2 治理项（`docs/superpowers/plans/2026-11-21-finance-dashboard-post-launch-v2.md`）。
-- 口径写死在 `docs/team-skills/sea-metrics-language/`（正本；`team-skills-bundle/` 为副本，由 `scripts/verify_team_skills_sync.py` 机器校验）。
-- 看板只有**唯一写入口**：人工调整项（原因必填，服务端 default 兜底已拆）。
-- ⚠️ **上线必须附「口径切换前后同月对比」**：本批修正了重复扣减与公司池双扣 ⇒ **所有历史月份的公司留存数字都会变化**（是修正，不是回归），须提前向管理层说明。
-  对比表见 `docs/reports/monthly-profit-dashboard-readiness-all-months.md`（旧口径 7 个月留存为负，新口径只剩 2026-08 一个月）。
-- **发布证据**：见 CHANGELOG `v7.36.0` §四（部署流水线 run 44792152462 全绿；生产 `Backend/Frontend = v7.36.0`；
-  迁移链头 `current_schema_20261242_drop_monthly_profit_snapshots`，`missing_tables/columns` 均为空）。
-
----
-
-## 已完成：提成与绩效工资口径归一（2026-11-21，**代码侧全部落地**）
-
-- Plan：`docs/superpowers/plans/2026-11-21-commission-and-performance-caliber-unification.md`；ADR：`docs/adr/2026-11-21-commission-and-performance-caliber-layering.md`
-- **业务已定**：① 提成 = 可分配利润 × 归属提成比（**零系数**，「分多少给多少」）；② 绩效工资 = 绩效包 × **纯个人**分数档位系数；③ **赛马排名不参与任何金额**，只做考核与预警。
-- **落地物**：真源 `backend/services/commission_caliber.py`（4 处调用点全部收敛 + 单源守护）；绩效工资改纯个人档位（删加权平均）；迁移 `20261243_drop_legacy_profit_basis`；重算脚本 `scripts/recalibrate_commission_history.py`（默认 dry-run、幂等）；页面收敛（归属页三列合一 + 本地试算改调后端 `POST /hr/commissions/settlement-preview/estimate`、赛马列改名「不参与提成计算」、看板新增 `data_status`）；指标词典登记 4 个新指标。
-- **否决的备选**：「赛马上移到可分配利润率层」—— 会让 `allocatable_profit_rate` 出现人工配置 + 赛马推导两个来源，违反 SSOT。
-- **历史数据最终决策（实施中改判，Walter 拍板）**：**删除所有 legacy 行，接受历史空白**。原方案「删除后重算」实测不可行（`finance.employee_labor_cost_allocations` 只有 2026-07 / 2026-10 有数据，现行口径算不出其余月份）。口径统一优先于历史可比。
-- **实算影响面**（本地库，已按生产公式校准：重算 875.94 vs 工资单实存 875.95，尾差 0.01）：2026-10 提成 +355.13、绩效工资 +70.07、看板员工侧分配额 +425.20（4 人**全部为增**，该月生效系数仅 0.5/0.8）。⚠️ 历史月存在 1.2 档系数 ⇒ 其员工会**少拿钱**，须以生产库 `--dry-run` 逐人留档后再确认。
-- **守护**：5 个后端守护文件 + 1 个前端守护（`frontend/tests/commissionFrontendNoRecompute.test.mjs`），全部进 CI 根契约清单。
-- **发布证据**（2026-11-21 实测）：部署流水线 run `44915030103` 全绿（镜像构建+容器启动冒烟✔、CNB 双镜像推送✔、远程部署✔）；生产 7 容器全 healthy、`Backend/Frontend = v7.37.0`、内外网 `/api/healthz/ready` 均 `version=v7.37.0` / `database=connected` / `dashboard=ready`；迁移链头 `current_schema_20261243_drop_legacy_profit_basis`（`core.alembic_version` 出处标记按设计不动）；`finance.shop_profit_basis` 的 **39 行 legacy 已删净**，只剩 2026-11 的 `SETTLEMENT_BASIS_V1` 1 行（5,946.38）⇒ 2026-03~2026-10 按决策「留白」（生产 `employee_labor_cost_allocations` 实为 0 行，比本地更彻底地印证「无可重算」）；路由实测：新试算端点已注册（无 token → 401）、僵尸端点 `/hr/commissions/shop` → 404、`/hr/commissions/employee` 保留；OpenAPI **510 条路径**（与 v7.36.0 同数：「删 1 条 + 加 1 条」净变化为 0）。**补丁 v7.37.1**（run `44924230375`，2026-11-22 实测）：同样全绿、生产 7 容器 healthy、`Backend/Frontend = v7.37.1`、迁移链头不变（无新迁移）、legacy 行仍为 0；**试算端点的 200 响应已指向 `CommissionEstimateApiResponse`**（`{"$ref": "#/components/schemas/CommissionEstimateApiResponse"}`）⇒ 5 份 `CommissionEstimate*` schema 全部在生产 OpenAPI 可见，悬空 schema 收口、零业务行为变化。
-
----
-
-## 最新发布：v7.40.0（2026-11-26）
+## 上一发布：v7.40.0（2026-11-26）
 
 - **人力管理页假报错修复 + 归属「角色」退休 + 批量能力**。
   - 假报错根因：2026-11-20 的重构（`dd04894e`，员工管理拆独立组件）把 `loadEmployees`
@@ -90,13 +63,30 @@
     **零命中**；归属表 0 行、`monthly_cost_entry` 任务未新增；部署后 nginx 最近 3000 条日志 **0 个 5xx**。
     ⚠️ 未做浏览器登录态验收（需业务账号）：业务侧登录后确认人力管理页不再弹「加载数据失败」，并重配归属。
 
-## 上一发布：v7.39.0（2026-11-23）
+## 最新发布：v7.41.0（2026-11-29）
 
-- **商品中心前端优化：口径说明收进表头小问号 + 表格紧凑化 + SPU 归属默认只读**。**纯前端改动**（无迁移 / 无接口改动，回滚 = 重部署上一个 tag）。实测行高 SPU 管理 150 → **37px**（一屏 7 → 20 行）、SKU 资料 197 → **141px**、成本率抽屉 600+ → **382px**；列宽合计 -15% / -18% / -12%。
-- **生产已发版并验收**：批次 `20261122_234810`（唯一一批）、7 容器全 healthy、应用容器全跑 **v7.39.0**、`healthz/ready` = ready / **v7.39.0** / database=connected / dashboard=ready、routes=635、**无新迁移**（链头仍 `current_schema_20261243_drop_legacy_profit_basis`）、生产前端产物 `ProductCenter-59a6e313.js` 内含 `pc-field-help-popover` 与 `spu-switch-select`。
-- **SPU 归属列**：存量行默认只读 +「换款」点开编辑；改款后行内可见「待保存」+「保存当日生效」（不写死日期）；改回原值恢复原生效日；「取消」只清换款自己的脏标记，不误清同行其它改动。
-- **验证**：前端 CI 门禁 0 失败、守护 113/113 + 16/16、`verify_release_local.py` exit 0、后端归属契约 34 passed、Playwright 交互 24/24 + 落库端到端 16/16 + 验收 16/16，控制台 0 报错。**证据**：CHANGELOG `v7.39.0`。
-
+- **费用管理页 + 人员店铺归属页数据密度改造**（用户侧「备注」字段同时退役）。
+  - **密度 SSOT 真正进构建**：密度三档规则原寄居 `frontend/src/assets/erp-layout.css`，
+    而该文件**从未被任何入口 import** ⇒ 页面写上 `erp-compact` 也只是挂了个类名，
+    实测 td 内边距仍是默认 8px、行高 41px、字号 14px ⇒ **一条密度规则都没命中**。
+    现独立成 `frontend/src/assets/erp-density.css` 并由 `main.js` 全局引入；
+    规则全部被三个密度类闸住，未声明密度类的页面**零影响**（抽查库存/目标/用户页均 `compact:false`）。
+  - **真机实测行高**：费用页 33–44px（均值 38，原 ~50）、表头 33px、7 张指标卡一行排完；
+    归属页 34–44px（均值 38，原 ~110）、表头 38px、成本明细压成一行摘要 + tooltip。
+  - **「+ 添加人员」入口移到固定左侧的店铺列**：人员列在横向滚动区之外（表宽 2446px > 视口），
+    入口原先落在滚动区里，整行看起来是空的。
+  - **用户侧「备注」字段退役**：`operating_costs.remark` 实测 233 行里 113 行有值、**全是批次标记**、
+    人工录入 0 条、附件 0 行 ⇒ UI 列删除、DB 列保留转系统所有（后端不再用客户端 `note` 覆盖它）；
+    普通保存命中软删行返回 400（复活只走 `/restore`）。
+  - **费用口径优化（同批合并）**：店铺范围口径 + 分摊维度接口化；
+    占位行软删迁移 `current_schema_20261246_cleanup_expense_placeholder_rows`（113 行，可降级）。
+  - **门禁补强**：新增 `erpDensityContract.test.mjs`（10 例）+ `shopAssignmentDensity.test.mjs`（7 例），
+    其中「密度文件必须被 main.js 引入」「规则只有一份出处」两条专门挡「规范进不了构建」；
+    新增真机测量脚本 `frontend/scripts/erpDensityMeasure.mjs`（会话在 httpOnly cookie 里）。
+  - **台账瘦身**：本次把已完结段落整体归档，STATUS.md 回到 400 行上限内
+    （CI 根契约清单里那条守护此前是红的）。
+  - **回滚** = 重新部署上一个 tag（v7.40.0）+ 执行降级迁移；
+    费用数据的软删按批次标记精确还原。
 ## 已知未落地项
 
 （2026-11-11 复核新增，**必须留档** —— `CHANGELOG.md` 有两处引用本章节）
@@ -174,6 +164,7 @@
 
 ## 账号设备身份 SSOT 收口（2026-11-13 起 / 2026-11-14 方向修订后落地）
 
+
 - 计划：`docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure.md` — **done**
 - 执行规格：`docs/superpowers/plans/2026-11-13-account-profile-device-identity-ssot-closure-execution.md` — **done**
   （9 张执行卡：新1 画像模块 / 新2 machine_id 隔离 / 新3 顺序注入 / 新4 并行注入 /
@@ -231,25 +222,6 @@ Walter 实际用了巡店面板后追问："既然硬件指纹改不了，那其
 - `.device_profile.json` 载体与"占用校验 / 槽位顺延"机制 —— 一并不再生成（存量文件留在磁盘上，不影响运行）。
 - 面板上的「画像已分配 / machine_id 已隔离 / 画像明细」三个徽标 —— 减法项，避免"没隔离 = 有风险"的假警报。
 
-### 验收（实测）
-
-| 范围 | 结果 |
-|---|---|
-| `tests/test_account_browser_identity_contract.py`（原 `..._device_isolation_...`，已重写） | **19 passed** |
-| `tests/test_account_readiness_contract.py`（已重写；2026-11-14 补停用账号口径 3 条守护） | **16 passed** |
-| `tests/test_account_proxy_source_contract.py` | **4 passed** |
-| 浏览器环境实测（独立 profile 指纹对比 / headless UA / viewport 与 screen 关系） | 见计划文档「设备指纹实测」 |
-| 生产上线 | **v7.28.0 已发布并验收**（见本文件「发布证据（v7.28.0，2026-11-14）」） |
-
-三份守护**在 CI 根契约清单**（`ci.yml` 根契约条目 57 → **60**，本轮只改名不改条目数），
-`scripts/audit_guard_tests.py` 分类确认均为 **A 类（CI 硬门禁）**。
-
-⚠️ 代理契约**刻意做成纯同步文件**（`tests/test_account_proxy_source_contract.py`）：
-`backend/tests/test_account_proxy_config.py` 含 9 个 async 用例，在 CI 钉的
-`pytest==7.4.3` / `pytest-asyncio==0.21.1` 下混进根契约清单会拿到**已关闭**的 session
-事件循环（`RuntimeError: Event loop is closed`，2026-11-14 实测 CI run 43485663421）。
-根因未修，已并入「当前未结」#8 记账到 V2。
-
 ### 已知缺口（**未结，必须留档**）
 
 | # | 缺口 | 性质 | 解除条件 |
@@ -266,32 +238,6 @@ Walter 实际用了巡店面板后追问："既然硬件指纹改不了，那其
 **新增账号即时自查**（不等开发）：ID 只用小写字母/数字/下划线；对照现有 6 个 profile 目录确认不撞
 （尤其别写成 `shopeeKR` / `Tiktok1店` / `hongxikejimain`）；ID 不可改；platform 必须在白名单内；
 店铺 `platform_shop_id` 必填；首次采集前先人工巡店一次。
-
-### 发布证据（v7.28.0，2026-11-14）
-
-| 项 | 证据 |
-|---|---|
-| tag | `v7.28.0`（附注标签，对象 `22b12f15`）→ 提交 `2613878d`；**双镜像 tag 对象一致**（GitHub 与 CNB 的 `git ls-remote --tags` 同为 `22b12f15` + `^{}` → `2613878d`） |
-| main | 发版提交 `2613878d`；发布证据回填提交 `de6211fb`（**只在 main**，tag 不回填）；**双镜像 main SHA 一致** |
-| 部署流水线 | `Deploy to Production` run **43561988306** —— Tag Release **14m05s**，全部步骤 ✓（`Build and Push Images (Release Tag)` 8m44s） |
-| CI 流水线 | `CI Pipeline` 43561390999 **success**；`Validate Data Flow` 43561391000 success；`Docker Build and Push` 43561391013 success。中间一次红：43560913385 —— black 门禁（`tests/test_account_browser_identity_contract.py` 单行断言 91 列 > 88）⇒ 已由 `2613878d` 修 |
-| 生产镜像 | `backend_api` / `celery_worker` / `celery_beat` 全部 **v7.28.0** 且 healthy；`frontend` **v7.28.0** healthy；`nginx` healthy |
-| 版本号 | `GET /healthz/ready` → `{"status":"ready","version":"v7.28.0","database":"connected","dashboard":"ready"}` |
-| 公网 | `http://www.xihong.site` 200；`/healthz/ready` 200 且 version=v7.28.0 |
-| 迁移 | 迁移前备份已建并校验：`pre_deploy_20261114_134343/backup_20261114T054346Z/xihong_erp-20261114T054346Z.dump`（39,226,179 B，非空）+ `migration_state.json`（迁移前 revision=`current_schema_20261229_template_format_signature`）；只读 preflight 通过；`Current-schema migration action completed: upgrade`；**schema gate 通过**（`up_to_date`，current == head == `current_schema_20261230_drop_residual_test_accounts`，缺表/缺列均为空） |
-| 残留账号删除 | 生产 `core.main_accounts` **9 → 7**，两条残留账号**残留 0 行**；级联删掉 1 条 `shop_accounts`（52 → 51，该行每个字段都填 `验证码测试账号`）；**采集配置 14 / 模板 13 / 发现 22 一行未动** |
-| 视图重建 | 成功 39 个 / 失败 0 个，自愈重建物化视图 1 个 |
-| 数据管道 | `GET /api/data-pipeline/freshness` → `missing_targets: []`；`mart.inventory_state` 的 `last_succeeded_at`=05:56:14Z（**新于**部署开始 05:43Z）；`inventory-backlog` 的 `unknown_restock_row_count`=0 < `total_row_count`=518 |
-| nginx | 部署后 error log 仅 restart notice/warn，**无 5xx** |
-| 生产库 | postgres / redis 容器未重启（Up 4 days）；DB 连接数 **18**（与 v7.27.0 基线一致） |
-| 部署批次 | `deploy-logs` 只有**一个新批次** `20261114_134419`（v7.27.0 的 `20261114_024750` 之后没有第二个 ⇒ CNB 镜像**未**触发第二次部署） |
-
-> v7.27.0 的发布证据已按「台账瘦身约定」移入
-> `docs/superpowers/plans/archive/STATUS-2026-11-13-full-history.md`。
-> v7.28.0 的 tag **指向已含 black 修复的 `2613878d`**，不存在 v7.27.0 那种「tag 未移动」的情况。
-
-
----
 
 ## 批次 F：减重批（2026-11-13）
 
