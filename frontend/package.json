@@ -24,6 +24,8 @@
     "test:performance-payroll-lock": "node --test scripts/performancePayrollLock.test.mjs",
     "test:collection-task-errors": "node --test scripts/collectionTaskErrors.test.mjs",
     "test:shop-display": "node --test scripts/shopDisplay.test.mjs",
+    "test:expense-view-model": "node --test scripts/expenseViewModel.test.mjs",
+    "test:expense-management-page": "node --test scripts/expenseManagementPage.test.mjs",
     "test:product-center-field-help": "node --test scripts/productCenterFieldHelp.test.mjs"
   },
   "dependencies": {
