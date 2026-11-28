@@ -278,6 +278,10 @@ async def test_expense_upsert_succeeds_without_dispatching_any_task(monkeypatch)
             executed_sql.append(sql)
             if "SELECT COALESCE(is_locked, false)" in sql:
                 return _Result(None)
+            if "SELECT deleted_at" in sql and "a_class.operating_costs" in sql:
+                # 2026-11-28：普通保存前会探测同键**软删行**，命中才报 400
+                # （复活只走 /restore）。本用例没有软删行 ⇒ 放行。
+                return _Result(None)
             if "INSERT INTO a_class.operating_costs" in sql:
                 return _Result(
                     SimpleNamespace(
