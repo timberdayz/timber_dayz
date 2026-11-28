@@ -208,6 +208,14 @@
               <el-tag v-else-if="row.enabled === null" type="warning" size="small">
                 状态未知
               </el-tag>
+              <!--
+                孤儿行（shop_enabled === null）：店铺账号已不存在，下拉里没有对应项，
+                el-select 只会显示占位符「选择店铺」。这里补出原始店铺 ID，
+                否则用户根本看不出这一行属于哪家店。
+              -->
+              <div v-if="row.enabled === null" class="shop-option-secondary">
+                原始店铺ID：{{ row.shop_id }}
+              </div>
             </template>
           </el-table-column>
           <el-table-column
@@ -851,7 +859,7 @@ const operatingShops = ref([]) // 在营店铺：空白行生成、分摊范围
 const platformScope = ref('all') // 'all' | 'shopee' | 'tiktok'
 const loading = ref(false)
 const monthlyError = ref(null) // 月度数据加载错误状态
-const shopError = ref(null) // 店铺数据加载错误状态
+// （原 shopError 全文件无引用，店铺视图错误走 ElMessage 提示；删除以通过 eslint）
 
 // ==================== 按月份查看模式 ====================
 const selectedMonth = ref(null)
@@ -882,14 +890,23 @@ const visibleMonthlyRows = computed(() => {
 // 租户选项（按当前分段内的在营店铺去重，并按分摊范围收窄）
 const tenantOptions = computed(() => {
   const platform = quickSplitScope.platform_code
-  const ids = [...new Set(
-    visibleMonthlyRows.value
-      .filter((row) => row.enabled === true)
-      .filter((row) => !platform || row.platform_code === platform)
-      .map((row) => row.main_account_id)
-      .filter(Boolean)
-  )]
-  return ids.map((id) => ({ main_account_id: id, label: id }))
+  const rows = visibleMonthlyRows.value
+    .filter((row) => row.enabled === true)
+    .filter((row) => !platform || row.platform_code === platform)
+    .filter((row) => row.main_account_id)
+  // label 优先用租户显示名：主账号表里 main_account_id 与 main_account_name
+  // 本来就可能是两套说法（如 id='shopee KR' / name='Leslieshop:main'），
+  // 只显示裸 id 会让用户认不出这是哪个租户。
+  const byId = new Map()
+  rows.forEach((row) => {
+    if (!byId.has(row.main_account_id)) {
+      byId.set(row.main_account_id, row.main_account_name || '')
+    }
+  })
+  return [...byId.entries()].map(([id, name]) => ({
+    main_account_id: id,
+    label: name || id
+  }))
 })
 
 // 月度汇总
@@ -924,13 +941,22 @@ const deletedMonthlyData = ref([])
 const deletedShopData = ref([])
 
 // 某年有费用记录的店铺集合：用于「按店铺」下拉把停用店也列出来
+// 两套键都留：
+// * 复合键（平台 + 店铺账号 ID）——与全站行键口径一致；
+// * 裸 shop_id ——费用行的 shop_id 存的就是平台店铺 ID（Shopee）或账号 ID（TikTok），
+//   当费用行没能连上店铺账号时，只有裸 ID 这条路能把停用店捞回下拉。
 const shopViewRecordedIds = ref(new Set())
+const shopViewRecordedKeys = ref(new Set())
 
 // 「按店铺查看」下拉选项：在营店 ＋ 当年有记录的停用店
 const shopViewOptions = computed(() => {
   const recorded = shopViewRecordedIds.value
+  const recordedKeys = shopViewRecordedKeys.value
   return allShops.value.filter(
-    (shop) => shop.enabled === true || recorded.has(shop.shop_id)
+    (shop) =>
+      shop.enabled === true ||
+      recorded.has(shop.shop_id) ||
+      recordedKeys.has(buildExpenseRowKey(shop))
   )
 })
 
@@ -1216,7 +1242,8 @@ const calculateMonthlySummary = () => {
 }
 
 // 更新行合计
-const updateRowTotal = (row) => {
+// 只重算行合计（不触发月度汇总）—— 批量改多行时用，汇总在循环结束后算一次
+const recalcRowTotal = (row) => {
   row.total_cost =
     (Number(row.rent) || 0) +
     (Number(row.marketing_fee) || 0) +
@@ -1225,6 +1252,10 @@ const updateRowTotal = (row) => {
     (Number(row.labor_cost) || 0) +
     (Number(row.other_costs) || 0)
   row.total = row.total_cost
+}
+
+const updateRowTotal = (row) => {
+  recalcRowTotal(row)
   calculateMonthlySummary()
 }
 
@@ -1315,8 +1346,11 @@ const handleApplyQuickSplit = async () => {
     return
   }
 
+  const tenantLabel = tenantOptions.value.find(
+    (tenant) => tenant.main_account_id === quickSplitScope.main_account_id
+  )?.label
   const scopeLabel = quickSplitScope.main_account_id
-    ? `租户 ${quickSplitScope.main_account_id}`
+    ? `租户 ${tenantLabel || quickSplitScope.main_account_id}`
     : quickSplitScope.platform_code === 'shopee'
       ? '仅 Shopee'
       : quickSplitScope.platform_code === 'tiktok'
@@ -1349,8 +1383,10 @@ const handleApplyQuickSplit = async () => {
     row.utilities = utilityAllocations[index]
     row.ai_token_cost = aiTokenAllocations[index]
     row.other_costs = otherAllocations[index]
-    updateRowTotal(row)
+    recalcRowTotal(row)
   })
+  // 汇总统一在循环后算一次（逐行算会把汇总重算 N 遍）
+  calculateMonthlySummary()
 
   quickSplitDialogVisible.value = false
   ElMessage.success(`快速拆分已应用到 ${targets.length} 家店铺，可继续逐店修改后保存`)
@@ -1455,8 +1491,14 @@ const handleBatchSave = async () => {
   }
 
   try {
+    // 保存源是**全量**行（含当前平台分段之外的行）：切分段后已编辑但被隐藏的行不能丢。
+    // 提示里如实说明条数口径，避免「表格 12 行、却提示保存 19 条」的困惑。
+    const hiddenCount = rowsToSave.filter(
+      (row) => !visibleMonthlyRows.value.includes(row)
+    ).length
+    const scopeHint = hiddenCount > 0 ? `（含当前分段之外的 ${hiddenCount} 条）` : ''
     await ElMessageBox.confirm(
-      `确定要批量保存 ${rowsToSave.length} 条费用记录吗？`,
+      `确定要批量保存 ${rowsToSave.length} 条费用记录吗${scopeHint}？`,
       '确认批量保存',
       { type: 'info' }
     )
@@ -1527,16 +1569,20 @@ const handleShopSelectChange = (key) => {
 const loadShopViewRecordedShops = async (year) => {
   if (!year) {
     shopViewRecordedIds.value = new Set()
+    shopViewRecordedKeys.value = new Set()
     return
   }
   try {
     const res = await api.get('/expenses', {
       params: { year, page_size: 1000 }
     })
-    shopViewRecordedIds.value = new Set((res.items || []).map((item) => item.shop_id))
+    const items = res.items || []
+    shopViewRecordedIds.value = new Set(items.map((item) => item.shop_id))
+    shopViewRecordedKeys.value = new Set(items.map((item) => buildExpenseRowKey(item)))
   } catch (error) {
     console.error('加载年度店铺费用记录失败:', error)
     shopViewRecordedIds.value = new Set()
+    shopViewRecordedKeys.value = new Set()
   }
 }
 

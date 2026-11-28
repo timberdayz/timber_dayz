@@ -118,3 +118,26 @@ test('停用店铺不参与分摊：分摊集合口径由 view-model 保证', ()
     '不得在拆分里另写一套启用状态过滤'
   )
 })
+
+test('月度表格数据源必须是分段过滤后的行', () => {
+  assert.ok(
+    pageSource.includes(':data="visibleMonthlyRows"'),
+    '月度表格必须渲染 visibleMonthlyRows，否则平台分段完全不生效'
+  )
+})
+
+test('空白行只由在营店铺生成', () => {
+  assert.ok(
+    /const newRows = operatingShops\.value/.test(pageSource),
+    '空白行源必须是 operatingShops（在营店）；用 allShops 会让停用店重新拿到空白行'
+  )
+})
+
+test('删除行必须按行对象定位，不能用过滤后下标', () => {
+  // 表格数据源是 visibleMonthlyRows（分段过滤后），$index 是过滤后下标，
+  // 拿它去 splice 全量数据会删错行。
+  assert.ok(
+    pageSource.includes('monthlyTableData.value.indexOf(row)'),
+    '删除行必须按行对象在全量数据中定位'
+  )
+})
