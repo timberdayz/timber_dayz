@@ -41,6 +41,16 @@
           class="erp-w-180"
           @change="handleMonthChange"
         />
+        <el-radio-group
+          v-model="platformScope"
+          size="default"
+          class="erp-ml-sm"
+          @change="handlePlatformScopeChange"
+        >
+          <el-radio-button value="all">全部</el-radio-button>
+          <el-radio-button value="shopee">Shopee</el-radio-button>
+          <el-radio-button value="tiktok">TikTok</el-radio-button>
+        </el-radio-group>
         <el-button
           type="primary"
           @click="openQuickSplitDialog"
@@ -81,7 +91,9 @@
         <el-col :span="4">
           <el-card class="stat-card yearly">
             <div class="stat-item">
-              <div class="stat-label">年度累计</div>
+              <div class="stat-label">
+                年度累计<span class="stat-label-hint">（全部平台）</span>
+              </div>
               <div class="stat-value warning">
                 {{ formatNumber(yearlySummary.total_amount) }}
               </div>
@@ -157,7 +169,7 @@
         <!-- 正常表格（无错误时显示） -->
         <el-table
           v-if="!monthlyError"
-          :data="monthlyTableData"
+          :data="visibleMonthlyRows"
           stripe
           v-loading="loading"
           class="erp-table"
@@ -171,22 +183,31 @@
           >
             <template #default="{ row }">
               <el-select
-                v-model="row.shop_id"
+                v-model="row.shop_key"
                 placeholder="选择店铺"
                 class="erp-w-full"
                 :disabled="!!row.id"
                 @change="handleShopChange(row)"
               >
                 <el-option
-                  v-for="shop in availableShops"
-                  :key="shop.shop_id"
+                  v-for="shop in allShops"
+                  :key="`${shop.platform_code}|${shop.shop_id}`"
                   :label="shop.option_label || shop.shop_name"
-                  :value="shop.shop_id"
+                  :value="buildExpenseRowKey(shop)"
                 >
                   <div>{{ shop.shop_name }}</div>
                   <div v-if="shop.secondary_name" class="shop-option-secondary">{{ shop.secondary_name }}</div>
                 </el-option>
               </el-select>
+              <div v-if="row.main_account_name || row.main_account_id" class="shop-option-secondary">
+                租户：{{ row.main_account_name || row.main_account_id }}
+              </div>
+              <el-tag v-if="row.enabled === false" type="info" size="small">
+                已停用
+              </el-tag>
+              <el-tag v-else-if="row.enabled === null" type="warning" size="small">
+                状态未知
+              </el-tag>
             </template>
           </el-table-column>
           <el-table-column
@@ -313,7 +334,7 @@
             </template>
           </el-table-column>
           <el-table-column label="操作" width="210" fixed="right">
-            <template #default="{ row, $index }">
+            <template #default="{ row }">
               <el-button
                 size="small"
                 type="primary"
@@ -325,7 +346,7 @@
               <el-button
                 size="small"
                 type="danger"
-                @click="handleDeleteRow(row, $index)"
+                @click="handleDeleteRow(row)"
                 :disabled="!row.id"
               >
                 删除
@@ -373,11 +394,38 @@
         width="520px"
       >
         <div class="quick-split-tip">
-          平均分摊到当前全部店铺。应用后会覆盖当前页面现有金额，保存前仍可逐店修改。
+          按所选范围分摊到在营店铺。会覆盖这些店铺的现有金额，保存前仍可逐店修改。
         </div>
         <div class="quick-split-meta">当前月份：{{ selectedMonth || '-' }}</div>
-        <div class="quick-split-meta">拆分店铺数：{{ monthlyTableData.length }}</div>
+        <div class="quick-split-meta">拆分店铺数：{{ countSplitTargets(visibleMonthlyRows, quickSplitScope) }}</div>
         <el-form label-position="top" class="quick-split-form">
+          <el-form-item label="分摊范围">
+            <el-select
+              v-model="quickSplitScope.platform_code"
+              placeholder="全部在营店铺"
+              class="erp-w-full"
+              @change="handleQuickSplitScopeChange"
+            >
+              <el-option label="全部在营店铺" value="" />
+              <el-option label="仅 Shopee" value="shopee" />
+              <el-option label="仅 TikTok" value="tiktok" />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="quickSplitScope.platform_code" label="按租户收窄（可选）">
+            <el-select
+              v-model="quickSplitScope.main_account_id"
+              placeholder="该平台全部租户"
+              clearable
+              class="erp-w-full"
+            >
+              <el-option
+                v-for="tenant in tenantOptions"
+                :key="tenant.main_account_id"
+                :label="tenant.label"
+                :value="tenant.main_account_id"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="总租金">
             <el-input-number
               v-model="quickSplitForm.rent"
@@ -436,20 +484,21 @@
       <!-- 操作栏 -->
       <div class="action-bar erp-mb-lg">
         <el-select
-          v-model="selectedShopId"
+          v-model="selectedShopKey"
           placeholder="选择店铺"
           class="erp-w-250"
           @change="handleShopSelectChange"
           filterable
         >
           <el-option
-            v-for="shop in availableShops"
-            :key="shop.shop_id"
+            v-for="shop in shopViewOptions"
+            :key="`${shop.platform_code}|${shop.shop_id}`"
             :label="shop.option_label || shop.shop_name"
-            :value="shop.shop_id"
+            :value="buildExpenseRowKey(shop)"
           >
             <div>{{ shop.shop_name }}</div>
             <div v-if="shop.secondary_name" class="shop-option-secondary">{{ shop.secondary_name }}</div>
+            <el-tag v-if="shop.enabled === false" type="info" size="small">已停用</el-tag>
           </el-option>
         </el-select>
         <el-date-picker
@@ -553,8 +602,14 @@
 
       <!-- 店铺费用表格（按月份） -->
       <el-card>
+        <el-empty
+          v-if="!selectedShopId"
+          description="请先选择店铺"
+        />
         <el-table
+          v-else
           :data="shopTableData"
+          empty-text="该店铺该年度暂无费用记录"
           stripe
           v-loading="loading"
           class="erp-table"
@@ -768,7 +823,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Calendar, Shop } from '@element-plus/icons-vue'
@@ -776,6 +831,14 @@ import api from '@/api'
 import PageHeader from '@/components/common/PageHeader.vue'
 import employeeTasksApi from '@/api/employeeTasks.js'
 import { buildShopAccountLookup, resolveShopDisplay } from '@/utils/shopDisplay'
+import {
+  buildExpenseRowKey,
+  countSplitTargets,
+  distributeEvenly,
+  resolveQuickSplitTargets,
+  sortExpenseRows,
+  splitShopsByAvailability
+} from '@/utils/expenseViewModel.js'
 import ShopDisplayText from '@/components/common/ShopDisplayText.vue'
 
 const route = useRoute()
@@ -783,7 +846,9 @@ let shopAccountLookup = new Map()
 
 // ==================== 公共状态 ====================
 const viewMode = ref('monthly') // monthly | shop
-const availableShops = ref([])
+const allShops = ref([]) // 全部运营店铺（含停用）：标注、按店铺下拉、查 platform_code
+const operatingShops = ref([]) // 在营店铺：空白行生成、分摊范围
+const platformScope = ref('all') // 'all' | 'shopee' | 'tiktok'
 const loading = ref(false)
 const monthlyError = ref(null) // 月度数据加载错误状态
 const shopError = ref(null) // 店铺数据加载错误状态
@@ -799,6 +864,32 @@ const quickSplitForm = reactive({
   utilities: 0,
   ai_token_cost: 0,
   other_costs: 0
+})
+
+// 快速拆分的分摊范围：**唯一**的范围来源（界面计数与实际应用都读它）
+const quickSplitScope = reactive({
+  platform_code: '',
+  main_account_id: ''
+})
+
+// 当前平台分段下的可见行（表格与月度汇总都用它）
+const visibleMonthlyRows = computed(() => {
+  const rows = monthlyTableData.value
+  if (platformScope.value === 'all') return rows
+  return rows.filter((row) => row.platform_code === platformScope.value)
+})
+
+// 租户选项（按当前分段内的在营店铺去重，并按分摊范围收窄）
+const tenantOptions = computed(() => {
+  const platform = quickSplitScope.platform_code
+  const ids = [...new Set(
+    visibleMonthlyRows.value
+      .filter((row) => row.enabled === true)
+      .filter((row) => !platform || row.platform_code === platform)
+      .map((row) => row.main_account_id)
+      .filter(Boolean)
+  )]
+  return ids.map((id) => ({ main_account_id: id, label: id }))
 })
 
 // 月度汇总
@@ -825,10 +916,23 @@ const yearlySummary = reactive({
 
 // ==================== 按店铺查看模式 ====================
 const selectedShopId = ref(null)
+const selectedShopKey = ref('') // 复合键（平台 + 店铺账号 ID），跨平台不撞车
+const selectedShopPlatform = ref('')
 const selectedYear = ref(null)
 const shopTableData = ref([])
 const deletedMonthlyData = ref([])
 const deletedShopData = ref([])
+
+// 某年有费用记录的店铺集合：用于「按店铺」下拉把停用店也列出来
+const shopViewRecordedIds = ref(new Set())
+
+// 「按店铺查看」下拉选项：在营店 ＋ 当年有记录的停用店
+const shopViewOptions = computed(() => {
+  const recorded = shopViewRecordedIds.value
+  return allShops.value.filter(
+    (shop) => shop.enabled === true || recorded.has(shop.shop_id)
+  )
+})
 
 // 店铺汇总
 const shopSummary = reactive({
@@ -876,9 +980,6 @@ const normalizeExpenseRow = (item = {}) => {
   }
 }
 
-const buildExpenseRowKey = (row = {}) =>
-  `${row.platform_code || ''}|${row.shop_id || ''}`
-
 const isMeaningfulExpenseRow = (row = {}) => {
   const note = String(row.note || '').trim()
   const attachments = Array.isArray(row.attachments) ? row.attachments : []
@@ -923,11 +1024,11 @@ const tryCompleteTaskFromExpenseRow = async (row, yearMonthOverride = '') => {
   })
 }
 
-// 加载店铺列表
+// 加载店铺列表（含已停用：用于「已停用」标注与按店铺查历史）
 const loadShops = async () => {
   try {
     const [expenseShopsResult, shopDirectoryResult] = await Promise.allSettled([
-      api.get('/expenses/shops'),
+      api.get('/expenses/shops', { params: { include_disabled: true } }),
       api.getShopDirectory({ enabled: true })
     ])
     if (expenseShopsResult.status !== 'fulfilled') {
@@ -939,7 +1040,8 @@ const loadShops = async () => {
     const rawShops = Array.isArray(expenseShops)
       ? expenseShops
       : (expenseShops?.data ?? expenseShops ?? [])
-    availableShops.value = rawShops.map((shop) => {
+
+    const decorated = rawShops.map((shop) => {
       const displayMeta = resolveShopDisplay(shop, shopAccountLookup)
       return {
         ...shop,
@@ -950,10 +1052,16 @@ const loadShops = async () => {
         search_text: displayMeta.search_text
       }
     })
+
+    // 店铺集合按启用状态拆分：全部（含停用）vs 在营
+    const split = splitShopsByAvailability(decorated)
+    allShops.value = split.all
+    operatingShops.value = split.operating
   } catch (error) {
     console.error('加载店铺列表失败:', error)
     ElMessage.error(error.message || '加载店铺列表失败')
-    availableShops.value = []
+    allShops.value = []
+    operatingShops.value = []
   }
 }
 
@@ -995,14 +1103,19 @@ const loadMonthlyExpenses = async () => {
     const existingData = monthlyRes.items || []
     const shopKeySet = new Set(existingData.map((item) => buildExpenseRowKey(item)))
 
-    // 为没有数据的店铺创建空白行
-    const newRows = availableShops.value
+    // 为没有数据的**在营**店铺创建空白行（停用店不生成空白行）
+    const newRows = operatingShops.value
       .filter((shop) => !shopKeySet.has(buildExpenseRowKey(shop)))
       .map((shop) => ({
         id: null,
         platform_code: shop.platform_code,
         shop_id: shop.shop_id,
+        shop_key: buildExpenseRowKey(shop),
+        shop_account_id: shop.shop_account_id ?? null,
         shop_name: shop.shop_name,
+        main_account_id: shop.main_account_id,
+        main_account_name: shop.main_account_name,
+        enabled: shop.enabled,
         year_month: selectedMonth.value,
         rent: 0,
         marketing_fee: 0,
@@ -1017,19 +1130,32 @@ const loadMonthlyExpenses = async () => {
         saving: false
       }))
 
-    // 合并现有数据和空白行，只保留当月数据
-    monthlyTableData.value = [
+    // 合并现有数据和空白行，只保留当月数据；平台/租户/店铺排序
+    const merged = [
       ...existingData
         .filter((item) => item.year_month === selectedMonth.value)
-        .map((item) => ({
-          ...normalizeExpenseRow(item),
-          shop_name:
-            availableShops.value.find((s) => buildExpenseRowKey(s) === buildExpenseRowKey(item))
-              ?.shop_name || item.shop_id,
-          saving: false
-        })),
+        .map((item) => {
+          const matched = allShops.value.find(
+            (s) => buildExpenseRowKey(s) === buildExpenseRowKey(item)
+          )
+          // shop_enabled 为 null = 店铺账号已不存在（历史孤儿行）：
+          // 显示原始 ID，不丢弃该行
+          const isOrphan = item.shop_enabled === null
+          return {
+            ...normalizeExpenseRow(item),
+            shop_name: matched?.shop_name || item.shop_id,
+            shop_account_id: matched?.shop_account_id ?? item.shop_shop_account_id ?? null,
+            shop_key: isOrphan ? String(item.shop_id || '') : buildExpenseRowKey(item),
+            main_account_id: item.shop_main_account_id || matched?.main_account_id || '',
+            main_account_name: item.shop_main_account_name || matched?.main_account_name || '',
+            enabled: item.shop_enabled,
+            saving: false
+          }
+        }),
       ...newRows
     ]
+
+    monthlyTableData.value = sortExpenseRows(merged)
 
     // 计算月度汇总（只计算已保存的数据）
     calculateMonthlySummary()
@@ -1070,7 +1196,7 @@ const calculateMonthlySummary = () => {
   monthlySummary.total_labor_cost = 0
   monthlySummary.total_other = 0
 
-  monthlyTableData.value
+  visibleMonthlyRows.value
     .forEach((item) => {
       const rent = Number(item.rent) || 0
       const marketingFee = Number(item.marketing_fee) || 0
@@ -1104,11 +1230,39 @@ const updateRowTotal = (row) => {
 
 // 店铺选择变化
 const handleShopChange = (row) => {
-  const shop = availableShops.value.find((s) => s.shop_id === row.shop_id)
+  // 目录条目：用 view-model 的行键口径匹配（平台 + 店铺账号 ID），
+  // 不用裸 shop_id —— 跨平台同 id 会撞车
+  const shop = allShops.value.find(
+    (s) => buildExpenseRowKey(s) === row.shop_key
+  )
   if (shop) {
     row.platform_code = shop.platform_code
+    row.shop_id = shop.shop_id
+    row.shop_account_id = shop.shop_account_id ?? null
     row.shop_name = shop.shop_name
+    row.main_account_id = shop.main_account_id
+    row.main_account_name = shop.main_account_name
+    row.enabled = shop.enabled
   }
+}
+
+// 平台分段切换
+const handlePlatformScopeChange = () => {
+  // 分段只影响展示与拆分范围，不改数据；分摊范围跟随分段（唯一来源 quickSplitScope）
+  quickSplitScope.platform_code = platformScope.value === 'all' ? '' : platformScope.value
+  const stillValid = tenantOptions.value.some(
+    (tenant) => tenant.main_account_id === quickSplitScope.main_account_id
+  )
+  if (quickSplitScope.main_account_id && !stillValid) {
+    quickSplitScope.main_account_id = ''
+  }
+  calculateMonthlySummary()
+}
+
+// 快速拆分的平台范围切换
+const handleQuickSplitScopeChange = () => {
+  // 平台变了，租户收窄要重新选（旧租户可能不在新平台里）
+  quickSplitScope.main_account_id = ''
 }
 
 // 月份变化
@@ -1127,6 +1281,9 @@ const resetQuickSplitForm = () => {
   quickSplitForm.utilities = 0
   quickSplitForm.ai_token_cost = 0
   quickSplitForm.other_costs = 0
+  // 分摊范围跟随平台分段（唯一来源 quickSplitScope）
+  quickSplitScope.platform_code = platformScope.value === 'all' ? '' : platformScope.value
+  quickSplitScope.main_account_id = ''
 }
 
 const openQuickSplitDialog = () => {
@@ -1135,7 +1292,7 @@ const openQuickSplitDialog = () => {
     return
   }
 
-  if (monthlyTableData.value.length === 0) {
+  if (visibleMonthlyRows.value.length === 0) {
     ElMessage.warning('当前月份没有可拆分的店铺')
     return
   }
@@ -1144,33 +1301,31 @@ const openQuickSplitDialog = () => {
   quickSplitDialogVisible.value = true
 }
 
-const distributeEvenly = (totalAmount, count) => {
-  const totalCents = Math.round((Number(totalAmount) || 0) * 100)
-  const base = Math.floor(totalCents / count)
-  let remainder = totalCents - (base * count)
-
-  return Array.from({ length: count }, () => {
-    const extra = remainder > 0 ? 1 : 0
-    remainder -= extra
-    return (base + extra) / 100
-  })
-}
-
 const handleApplyQuickSplit = async () => {
   if (!selectedMonth.value) {
     ElMessage.warning('请先选择月份')
     return
   }
 
-  const rowCount = monthlyTableData.value.length
-  if (rowCount === 0) {
-    ElMessage.warning('当前月份没有可拆分的店铺')
+  // 行源与界面计数完全一致（同一 scope + 同一行源），杜绝「显示 N 家、实际改 M 家」
+  const targets = resolveQuickSplitTargets(visibleMonthlyRows.value, quickSplitScope)
+
+  if (targets.length === 0) {
+    ElMessage.warning('当前范围没有可拆分的在营店铺')
     return
   }
 
+  const scopeLabel = quickSplitScope.main_account_id
+    ? `租户 ${quickSplitScope.main_account_id}`
+    : quickSplitScope.platform_code === 'shopee'
+      ? '仅 Shopee'
+      : quickSplitScope.platform_code === 'tiktok'
+        ? '仅 TikTok'
+        : '全部在营店铺'
+
   try {
     await ElMessageBox.confirm(
-      `将按 ${rowCount} 个店铺平均拆分，并覆盖当前页面已有金额。是否继续？`,
+      `将按「${scopeLabel}」共 ${targets.length} 家在营店铺平均拆分，并覆盖这些店铺的现有金额。是否继续？`,
       '确认快速拆分',
       { type: 'warning' }
     )
@@ -1181,13 +1336,14 @@ const handleApplyQuickSplit = async () => {
     throw error
   }
 
-  const rentAllocations = distributeEvenly(quickSplitForm.rent, rowCount)
-  const marketingAllocations = distributeEvenly(quickSplitForm.marketing_fee, rowCount)
-  const utilityAllocations = distributeEvenly(quickSplitForm.utilities, rowCount)
-  const aiTokenAllocations = distributeEvenly(quickSplitForm.ai_token_cost, rowCount)
-  const otherAllocations = distributeEvenly(quickSplitForm.other_costs, rowCount)
+  const rentAllocations = distributeEvenly(quickSplitForm.rent, targets.length)
+  const marketingAllocations = distributeEvenly(quickSplitForm.marketing_fee, targets.length)
+  const utilityAllocations = distributeEvenly(quickSplitForm.utilities, targets.length)
+  const aiTokenAllocations = distributeEvenly(quickSplitForm.ai_token_cost, targets.length)
+  const otherAllocations = distributeEvenly(quickSplitForm.other_costs, targets.length)
 
-  monthlyTableData.value.forEach((row, index) => {
+  // ⚠️ 只覆盖目标集合的行；范围外的既有金额保持不变
+  targets.forEach((row, index) => {
     row.rent = rentAllocations[index]
     row.marketing_fee = marketingAllocations[index]
     row.utilities = utilityAllocations[index]
@@ -1197,7 +1353,7 @@ const handleApplyQuickSplit = async () => {
   })
 
   quickSplitDialogVisible.value = false
-  ElMessage.success('快速拆分已应用，当前页面金额已覆盖，可继续逐店修改后保存')
+  ElMessage.success(`快速拆分已应用到 ${targets.length} 家店铺，可继续逐店修改后保存`)
 }
 
 // 保存单行
@@ -1244,9 +1400,14 @@ const handleSaveRow = async (row) => {
 }
 
 // 删除单行
-const handleDeleteRow = async (row, index) => {
+const handleDeleteRow = async (row) => {
   if (!row.id) {
-    monthlyTableData.value.splice(index, 1)
+    // 表格数据源是 visibleMonthlyRows（平台分段过滤后），$index 是过滤后的下标，
+    // 不能直接拿来删全量数据 —— 按行对象定位。
+    const targetIndex = monthlyTableData.value.indexOf(row)
+    if (targetIndex >= 0) {
+      monthlyTableData.value.splice(targetIndex, 1)
+    }
     calculateMonthlySummary()
     return
   }
@@ -1348,7 +1509,11 @@ const handleBatchSave = async () => {
 // ==================== 按店铺模式方法 ====================
 
 // 店铺选择变化
-const handleShopSelectChange = () => {
+const handleShopSelectChange = (key) => {
+  // 目录条目：用 view-model 的行键口径匹配（平台 + 店铺账号 ID），跨平台同 id 不会撞车
+  const shop = allShops.value.find((s) => buildExpenseRowKey(s) === key)
+  selectedShopId.value = shop?.shop_id ?? null
+  selectedShopPlatform.value = shop?.platform_code ?? ''
   if (selectedShopId.value) {
     loadShopExpenses()
   } else {
@@ -1357,8 +1522,28 @@ const handleShopSelectChange = () => {
   }
 }
 
+// 某年有费用记录的店铺集合：用于「按店铺」下拉把停用店也列出来
+// ⚠️ 不能用 shopTableData 推导 —— 它只有当前选中店的行，会让停用店永远进不了下拉
+const loadShopViewRecordedShops = async (year) => {
+  if (!year) {
+    shopViewRecordedIds.value = new Set()
+    return
+  }
+  try {
+    const res = await api.get('/expenses', {
+      params: { year, page_size: 1000 }
+    })
+    shopViewRecordedIds.value = new Set((res.items || []).map((item) => item.shop_id))
+  } catch (error) {
+    console.error('加载年度店铺费用记录失败:', error)
+    shopViewRecordedIds.value = new Set()
+  }
+}
+
 // 加载店铺费用
 const loadShopExpenses = async () => {
+  // ⚠️ 必须在早退之前刷新年度记录集合，否则停用店永远进不了下拉
+  await loadShopViewRecordedShops(selectedYear.value)
   if (!selectedShopId.value) {
     ElMessage.warning('请先选择店铺')
     return
@@ -1366,7 +1551,14 @@ const loadShopExpenses = async () => {
 
   loading.value = true
   try {
+    // 目录条目：用行键口径匹配（平台 + 店铺账号 ID）
+    const selectedShop = allShops.value.find(
+      (s) => buildExpenseRowKey(s) === selectedShopKey.value
+    )
     const params = { shop_id: selectedShopId.value }
+    if (selectedShop?.platform_code) {
+      params.platform_code = selectedShop.platform_code
+    }
     if (selectedYear.value) {
       params.year = selectedYear.value
     }
@@ -1420,6 +1612,16 @@ const resetShopSummary = () => {
 const handleRestoreRow = async (row) => {
   if (!row.id) return
   try {
+    await ElMessageBox.confirm(
+      '恢复该费用记录？若这是占位行批次（备注以「[占位行清理」开头），恢复后会重新计入成本口径。',
+      '确认恢复',
+      { type: 'warning' }
+    )
+  } catch (error) {
+    if (error === 'cancel') return
+    throw error
+  }
+  try {
     await api.post(`/expenses/${row.id}/restore`)
     ElMessage.success('恢复成功')
     await loadMonthlyExpenses()
@@ -1448,10 +1650,14 @@ const handleAddMonthRow = () => {
     return
   }
 
+  // 目录条目：用行键口径匹配（平台 + 店铺账号 ID）取回 platform_code
+  const shop = allShops.value.find(
+    (s) => buildExpenseRowKey(s) === selectedShopKey.value
+  )
+
   shopTableData.value.push({
     id: null,
-    platform_code:
-      availableShops.value.find((shop) => shop.shop_id === selectedShopId.value)?.platform_code || null,
+    platform_code: shop?.platform_code || selectedShopPlatform.value || null,
     shop_id: selectedShopId.value,
     year_month: '',
     rent: 0,
@@ -1534,6 +1740,16 @@ const handleDeleteShopRow = async (row, index) => {
 const handleRestoreShopRow = async (row) => {
   if (!row.id) return
   try {
+    await ElMessageBox.confirm(
+      '恢复该费用记录？若这是占位行批次（备注以「[占位行清理」开头），恢复后会重新计入成本口径。',
+      '确认恢复',
+      { type: 'warning' }
+    )
+  } catch (error) {
+    if (error === 'cancel') return
+    throw error
+  }
+  try {
     await api.post(`/expenses/${row.id}/restore`)
     ElMessage.success('恢复成功')
     await loadShopExpenses()
@@ -1544,16 +1760,29 @@ const handleRestoreShopRow = async (row) => {
 }
 
 // ==================== 生命周期 ====================
-onMounted(() => {
+onMounted(async () => {
   initTaskContext()
-  loadShops()
   // 默认选择当前月份和年份
   const now = new Date()
   if (!selectedMonth.value) {
     selectedMonth.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   }
   selectedYear.value = `${now.getFullYear()}`
-  loadMonthlyExpenses()
+  // 必须先等店铺列表就绪，否则空白行不生成（首屏会少一整批店铺）
+  await loadShops()
+  // 默认选中第一家在营店（「按店铺查看」首屏不再空白）
+  if (!selectedShopKey.value) {
+    const firstShop = operatingShops.value[0]
+    if (firstShop) {
+      selectedShopKey.value = buildExpenseRowKey(firstShop)
+      selectedShopId.value = firstShop.shop_id
+      selectedShopPlatform.value = firstShop.platform_code || ''
+    }
+  }
+  if (selectedShopId.value) {
+    await loadShopExpenses()
+  }
+  await loadMonthlyExpenses()
 })
 </script>
 
@@ -1575,6 +1804,12 @@ onMounted(() => {
   font-size: 14px;
   color: #909399;
   margin-bottom: 8px;
+}
+
+.stat-label-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-left: 4px;
 }
 
 .stat-value {
