@@ -2165,5 +2165,24 @@ Validate Data Flow `43467986640` / Docker Build and Push `43467986403`。
 > `docs/superpowers/plans/archive/STATUS-2026-11-13-full-history.md`。
 > v7.28.0 的 tag **指向已含 black 修复的 `2613878d`**，不存在 v7.27.0 那种「tag 未移动」的情况。
 
+### 发布证据（v7.41.0，2026-11-29）
+
+| 项 | 证据 |
+|---|---|
+| tag | `v7.41.0`（附注标签，对象 `b1d1e823`，指向提交 `acd2e402`）；GitHub 与 CNB 的 `git ls-remote --tags` 均为 `b1d1e823` + `^{}` → `acd2e402`，**双镜像 tag 对象一致** |
+| main | 发版提交 `acd2e402`（`test(backend): 归属页无角色用例补软删探测桩`），其上为 `bdd3a4ad`（black 格式修复）、`c443589d`（发版准备）；**双镜像 main SHA 一致** |
+| 部署流水线 | `Deploy to Production` run **46182193782** —— Tag Release **20m21s**（19:38:04Z → 19:58:25Z），全步骤 ✅ |
+| CI 流水线 | `CI Pipeline` 46181365834 success、`Validate Data Flow` 46181365839 success、`Docker Build and Push` 46181365881 success（均基于 `acd2e402`） |
+| CI 红灯修复 | 中间一跑 `46179702442` **failure**：Code formatting check（`backend/tests/test_expense_remark_ownership_contract.py` 不符 black）⇒ 已由 `bdd3a4ad` 修复，下一跑全绿 |
+| 生产镜像 | 7 容器全 healthy：`backend_api` / `celery_worker` / `celery_beat` = `ghcr.io/timberdayz/timber_dayz/backend:v7.41.0`，`frontend` = `.../frontend:v7.41.0`，`nginx` healthy，`postgres` / `redis` 未重启 |
+| 版本口 | `GET /api/health` → `{"status":"healthy","version":"v7.41.0","database":"connected","dashboard":"ready","routes":{"total":633}}`；`/healthz/live` 与 `/healthz/ready` 均报 `version=v7.41.0`、`runtime_mode=production`，执行器 healthy |
+| 前端产物 | 生产 `frontend` 容器 `/usr/share/nginx/html/assets` 内 `index-*.css` 与 `ExpenseManagement-*.js`、`ShopAssignment-*.js` **均含 `erp-compact`** ⇒ 密度规则真的进了构建（本次修复的核心） |
+| 费用接口 | `GET /api/expenses` 未认证返 **401**（路由在、非 500）；容器内 `expense_management.py` 确认 remark 已转**系统所有**（UPSERT 冲突更新不碰 remark、PUT 不写 remark、restore 按批次前缀处理） |
+| 迁移 | `public.current_schema_alembic_version` = `current_schema_20261245_drop_b_cost_analysis_views`（= head；链号 44 → **46 → 45** 是刻意顺序，避开真双头）；`core.alembic_version` 仍 `20260805_payroll_backfill_audit`（未变） |
+| ⚠️ 软删口径 | 生产实际命中 **95 行**（2026-06 / 09 / 10 / 11 / 12 各 19 店，labor 合计 100,000.00 = 19 店 × 5 月 × 1052.63），全部带批次标记 `[占位行清理 2026-11-28]`；另有 5 条历史软删（remark NULL，labor 合计 4,210.65）。**迁移 docstring 与 CHANGELOG 写的「113 行 / 118,947.37」是开发库口径** ⇒ 连带看板影响也不同（生产 **10 月**也会变 `--`，**08 月不变**）。迁移行为正确（只软删纯占位行），差的是文档数字；已发布 CHANGELOG 与**已应用**迁移文件不改，口径以本行为准 |
+| 后端日志 | 部署后 12 分钟内 `docker logs xihong_erp_backend_api` 无 traceback / error / exception / critical |
+| 本次修复引入的回归 | `backend/tests/test_hr_assignment_no_role.py::test_expense_upsert_succeeds_without_dispatching_any_task` 曾因费用软删探测 SQL 变红（假 DB 未识别新查询）⇒ 已补 `SELECT deleted_at` 探测桩（`acd2e402`），13 passed + black 干净 |
+| 既有红灯（V2） | ① `test_api_contract_gate_scope.py::test_silent_exception_bucket_is_pinned_to_47` —— 静默 except 桶已漂到 49（漂移早于 v7.40.0；散布在 config_management / hr_commission / mv / raw_layer / data_sync / field_mapping_* / platform 多个 router，与费用无关）⇒ 根因未查清前不重钉（重钉会掩盖守护本意）；② `test_hr_performance_adjustment_frontend_contract.py::test_hr_performance_management_view_exposes_adjustment_panel` —— 断言已退休的 `openCreateAdjustment`；③ `test_hr_shop_assignment_dim_shop_autosync.py::test_shop_assignment_dialog_role_is_not_disabled` —— 断言已退休的 `v-model="form.role"`（v7.40.0 角色退休遗留）；④ 根目录 `tests/test_local_console_processes.py::test_startup_timeout_records_structured_audit_evidence` —— 已用 v7.40.0 worktree 实证为既有红灯。四条**均不在 CI 根契约清单** ⇒ 不阻塞发布 |
+| 收尾清理 | 遗留 worktree（`wt_f2`，v7.40.0 基线对比用）已 `git worktree remove --force`；2 个 pytest 遗留测试库容器（`admiring_ellis` / `brave_mclean`）已删；`%TEMP%` 一次性脚本（`probe_token.ps1` / `slim_status.py`）已不存在；本地 dev server（5173）与后端（8001）保留运行 |
 
 ---
