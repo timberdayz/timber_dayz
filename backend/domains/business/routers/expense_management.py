@@ -40,6 +40,7 @@ from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import (
     DimUser,
+    MainAccount,
     ShopAccount,
 )
 from modules.core.logger import get_logger
@@ -57,6 +58,9 @@ from backend.services.labor_cost_projection_service import (
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/expenses", tags=["费用管理"])
+
+#: 占位行清理批次标记前缀（与迁移 current_schema_20261246_cleanup_expense_placeholder_rows 的 BATCH_MARK 一致）。
+BATCH_MARK_PREFIX = "[占位行清理"
 
 
 def _calc_total_cost(
@@ -216,15 +220,36 @@ async def _ensure_platform_code(
 # ==================== API Endpoints ====================
 
 
+async def _load_main_account_names(db: AsyncSession) -> Dict[str, str]:
+    """租户 ID → 租户名称。取不到就返回空表，不影响主流程。"""
+    try:
+        result = await db.execute(
+            select(MainAccount.main_account_id, MainAccount.main_account_name)
+        )
+        return {
+            str(row[0] or ""): str(row[1] or "") for row in result.fetchall() if row[0]
+        }
+    except Exception as exc:
+        logger.warning(f"[ExpenseManagement] 读取租户名称失败，忽略租户维度: {exc}")
+        return {}
+
+
 @router.get("/shops", response_model=Dict[str, Any])
 async def list_expense_shops(
+    include_disabled: bool = Query(
+        False, description="是否包含已停用店铺（用于标注与历史查询）"
+    ),
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(get_current_user),
 ):
     """
     获取供费用管理使用的店铺列表(复用目标管理的店铺API)
 
-    返回字段: platform_code、shop_id、shop_name
+    返回字段: platform_code、shop_id、shop_name、enabled、internal_code、
+    platform_shop_id、shop_account_id、main_account_id、main_account_name
+
+    默认只返回启用店铺（``core.shop_accounts.enabled``）；传
+    ``include_disabled=true`` 时连同已停用店铺一起返回，供前端打「已停用」标注。
     """
     try:
         logger.info(
@@ -233,14 +258,17 @@ async def list_expense_shops(
 
         query = (
             select(ShopAccount)
-            .where(ShopAccount.enabled.is_(True))
             .where(ShopAccount.business_role == "operating_store")
             .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
+        if not include_disabled:
+            query = query.where(ShopAccount.enabled.is_(True))
 
         logger.debug(f"[ExpenseManagement] 执行查询: {query}")
         rows = (await db.execute(query)).scalars().all()
         logger.info(f"[ExpenseManagement] 查询到 {len(rows)} 条店铺记录")
+
+        main_account_names = await _load_main_account_names(db)
 
         items = []
         for r in rows:
@@ -257,6 +285,14 @@ async def list_expense_shops(
                         or getattr(r, "shop_account_id", None)
                         or getattr(r, "account_id", None)
                         or "",
+                        "enabled": bool(getattr(r, "enabled", False)),
+                        "internal_code": getattr(r, "internal_code", None),
+                        "platform_shop_id": getattr(r, "platform_shop_id", None),
+                        "shop_account_id": getattr(r, "shop_account_id", None),
+                        "main_account_id": getattr(r, "main_account_id", None),
+                        "main_account_name": main_account_names.get(
+                            getattr(r, "main_account_id", None), ""
+                        ),
                     }
                 )
             except Exception as item_err:
@@ -474,6 +510,7 @@ async def get_yearly_expense_summary(
 async def list_expenses_by_shop(
     shop_id: str = Query(..., description="店铺ID"),
     year: Optional[str] = Query(None, description="年份(YYYY)，不传则返回所有数据"),
+    platform_code: Optional[str] = Query(None, description="平台筛选"),
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(get_current_user),
 ):
@@ -486,6 +523,12 @@ async def list_expenses_by_shop(
         # 构建WHERE条件
         where_clause = "shop_id = :shop_id"
         params = {"shop_id": shop_id}
+
+        if platform_code:
+            where_clause += (
+                " AND LOWER(COALESCE(\"platform_code\", '')) = :platform_code"
+            )
+            params["platform_code"] = platform_code.strip().lower()
 
         if year:
             where_clause += " AND year_month LIKE :year_pattern"
@@ -604,6 +647,8 @@ async def list_expenses_by_shop(
 async def list_expenses(
     shop_id: Optional[str] = Query(None, description="店铺ID筛选"),
     year_month: Optional[str] = Query(None, description="年月筛选(YYYY-MM)"),
+    year: Optional[str] = Query(None, description="年份筛选(YYYY)"),
+    platform_code: Optional[str] = Query(None, description="平台筛选"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=1000, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
@@ -625,14 +670,22 @@ async def list_expenses(
         if year_month:
             where_conditions.append("year_month = :year_month")
             params["year_month"] = year_month
+        if platform_code:
+            where_conditions.append(
+                "LOWER(COALESCE(platform_code, '')) = :platform_code"
+            )
+            params["platform_code"] = platform_code.strip().lower()
+        if year:
+            where_conditions.append("year_month LIKE :year_pattern")
+            params["year_pattern"] = f"{year}-%"
 
         where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
 
         # 总数查询
         count_query = text(
             f"""
-            SELECT COUNT(*) 
-            FROM a_class.operating_costs 
+            SELECT COUNT(*)
+            FROM a_class.operating_costs
             WHERE {where_clause}
               AND deleted_at IS NULL
         """
@@ -643,27 +696,39 @@ async def list_expenses(
         offset = (page - 1) * page_size
         data_query = text(
             f"""
-            SELECT 
-                id,
-                shop_id,
-                "platform_code" as platform_code,
-                year_month,
-                rent_amount as rent,
-                marketing_amount as marketing_fee,
-                utility_amount as utilities,
-                ai_token_amount as ai_token_cost,
-                labor_amount as labor_cost,
-                other_amount as other_costs,
-                total_amount as total_cost,
-                remark as note,
-                attachments,
-                is_locked as locked,
-                created_at,
-                updated_at
-            FROM a_class.operating_costs
+            SELECT DISTINCT
+                oc.id,
+                oc.shop_id,
+                oc."platform_code" as platform_code,
+                oc.year_month,
+                oc.rent_amount as rent,
+                oc.marketing_amount as marketing_fee,
+                oc.utility_amount as utilities,
+                oc.ai_token_amount as ai_token_cost,
+                oc.labor_amount as labor_cost,
+                oc.other_amount as other_costs,
+                oc.total_amount as total_cost,
+                oc.remark as note,
+                oc.attachments,
+                oc.is_locked as locked,
+                oc.created_at,
+                oc.updated_at,
+                sa.enabled as shop_enabled,
+                sa.internal_code as shop_internal_code,
+                sa.shop_account_id as shop_shop_account_id,
+                sa.platform_shop_id as shop_platform_shop_id,
+                sa.main_account_id as shop_main_account_id,
+                ma.main_account_name as shop_main_account_name
+            FROM a_class.operating_costs oc
+            LEFT JOIN core.shop_accounts sa
+                   ON sa.platform = oc."platform_code"
+                  AND (sa.platform_shop_id = oc.shop_id
+                       OR sa.shop_account_id = oc.shop_id)
+            LEFT JOIN core.main_accounts ma
+                   ON ma.main_account_id = sa.main_account_id
             WHERE {where_clause}
-              AND deleted_at IS NULL
-            ORDER BY year_month DESC, shop_id
+              AND oc.deleted_at IS NULL
+            ORDER BY oc.year_month DESC, oc.shop_id
             LIMIT :limit OFFSET :offset
         """
         )
@@ -713,6 +778,16 @@ async def list_expenses(
                     "locked": bool(row.locked or False),
                     "created_at": row.created_at,
                     "updated_at": row.updated_at,
+                    "shop_enabled": getattr(row, "shop_enabled", None),
+                    "shop_internal_code": getattr(row, "shop_internal_code", None),
+                    "shop_shop_account_id": getattr(row, "shop_shop_account_id", None),
+                    "shop_platform_shop_id": getattr(
+                        row, "shop_platform_shop_id", None
+                    ),
+                    "shop_main_account_id": getattr(row, "shop_main_account_id", None),
+                    "shop_main_account_name": getattr(
+                        row, "shop_main_account_name", None
+                    ),
                 }
             )
 
@@ -1451,11 +1526,21 @@ async def restore_expense(
             UPDATE a_class.operating_costs
             SET deleted_at = NULL,
                 deleted_by = NULL,
+                remark = CASE
+                            WHEN remark LIKE :batch_prefix THEN ''
+                            ELSE remark
+                          END,
                 updated_at = NOW()
             WHERE id = :expense_id
         """
         )
-        await db.execute(restore_query, {"expense_id": expense_id})
+        await db.execute(
+            restore_query,
+            {
+                "expense_id": expense_id,
+                "batch_prefix": f"{BATCH_MARK_PREFIX}%",
+            },
+        )
         await db.commit()
 
         return {"success": True, "message": "费用记录已恢复"}
