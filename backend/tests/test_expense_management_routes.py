@@ -49,6 +49,9 @@ async def test_expense_create_accepts_missing_platform_code_when_lookup_succeeds
             sql = str(query)
             if "SELECT COALESCE(is_locked, false)" in sql:
                 return _Result(None)
+            # 保存前对同键软删行的探测（命中则 400，不命中则继续 upsert）
+            if "deleted_at IS NOT NULL" in sql:
+                return _Result(None)
             if "INSERT INTO a_class.operating_costs" in sql:
                 executed["params"] = params
                 return _Result(

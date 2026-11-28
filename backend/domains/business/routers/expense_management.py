@@ -1077,6 +1077,39 @@ async def create_or_update_expense(
 
         platform_code = requested_platform_code
 
+        # ⚠️ 软删行不得被普通保存"静默复活"。
+        # ON CONFLICT DO UPDATE 不会重置 deleted_at ⇒ 对已软删行写入会「保存成功但行不可见」，
+        # 数据静默丢失；而这条路径还能绕过「恢复」的二次确认，把占位行偷偷放回成本口径。
+        # ⇒ 命中软删行时明确报错，让「恢复」成为唯一的复活路径。
+        soft_deleted_check = text(
+            """
+            SELECT deleted_at
+            FROM a_class.operating_costs
+            WHERE "platform_code" = :platform_code
+              AND shop_id = :shop_id
+              AND year_month = :year_month
+              AND deleted_at IS NOT NULL
+            """
+        )
+        soft_deleted_row = (
+            await db.execute(
+                soft_deleted_check,
+                {
+                    "platform_code": requested_platform_code,
+                    "shop_id": request.shop_id,
+                    "year_month": request.year_month,
+                },
+            )
+        ).fetchone()
+        if soft_deleted_row is not None:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="该费用记录已被删除，无法直接保存",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请先在「已删除费用记录」区恢复该记录，再保存金额",
+                status_code=400,
+            )
+
         total_cost = _calc_total_cost(
             request.rent,
             request.marketing_fee,
@@ -1095,9 +1128,9 @@ async def create_or_update_expense(
             """
             INSERT INTO a_class.operating_costs 
                 (shop_id, "platform_code", year_month, rent_amount, marketing_amount, utility_amount, ai_token_amount, labor_amount, other_amount, total_amount, remark, attachments, created_at, updated_at)
-            VALUES 
-                (:shop_id, :platform_code, :year_month, :rent, :marketing_fee, :utilities, :ai_token_cost, :labor_cost, :other_costs, :total_cost, :note, CAST(:attachments AS jsonb), NOW(), NOW())
-            ON CONFLICT ("platform_code", shop_id, year_month) 
+            VALUES
+                (:shop_id, :platform_code, :year_month, :rent, :marketing_fee, :utilities, :ai_token_cost, :labor_cost, :other_costs, :total_cost, COALESCE(:note, ''), CAST(:attachments AS jsonb), NOW(), NOW())
+            ON CONFLICT ("platform_code", shop_id, year_month)
             DO UPDATE SET 
                 "platform_code" = EXCLUDED."platform_code",
                 rent_amount = EXCLUDED.rent_amount,
@@ -1107,7 +1140,9 @@ async def create_or_update_expense(
                 labor_amount = EXCLUDED.labor_amount,
                 other_amount = EXCLUDED.other_amount,
                 total_amount = EXCLUDED.total_amount,
-                remark = EXCLUDED.remark,
+                -- ⚠️ remark 是**系统所有**的列：它承载占位行清理的批次标记
+                --    （[占位行清理 2026-11-28]），由迁移与恢复路由写入/清除。
+                --    客户端提交空备注会把它抹掉 ⇒ 冲突更新时**不碰 remark**。
                 attachments = EXCLUDED.attachments,
                 updated_at = NOW()
             RETURNING 
@@ -1319,11 +1354,8 @@ async def update_expense(
         else:
             params["other_costs"] = float(row.other_costs or 0)
 
-        if "note" in update_data:
-            update_fields.append("remark = :note")
-            params["note"] = update_data["note"]
-        else:
-            params["note"] = getattr(row, "note", None)
+        # ⚠️ remark 是系统所有的列（承载占位行清理的批次标记），不由客户端改写。
+        #    用户侧「备注」字段已于 2026-11-28 退役；这里保持原值不动。
 
         if "attachments" in update_data:
             update_fields.append("attachments = CAST(:attachments AS jsonb)")

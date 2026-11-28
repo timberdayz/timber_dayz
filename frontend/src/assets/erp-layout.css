@@ -347,17 +347,44 @@
 }
 
 /* ========================================
-   数据密度控制
+   数据密度控制（三档 SSOT）
    ======================================== */
 
-/* 紧凑模式（数据浏览器）*/
+/*
+ * 紧凑模式（录入表格 / 数据浏览器）
+ * --------------------------------
+ * 目标：单行 ~34px（默认档 ~50px），一屏多看 60% 行。
+ * 用法：``<el-table class="erp-table erp-compact">``，
+ *      行内控件一律 ``size="small"``（24px，与本档行高匹配）。
+ *
+ * ⚠️ 字号定 13px 而不用 Element Plus 原生 ``el-table--small`` 的 12px ——
+ *    12px 下中文表格数字与标签已开始发虚，13px 是密而不糊的下限。
+ */
 .erp-compact .el-table {
   font-size: 13px;
 }
 
-.erp-compact .el-table td,
-.erp-compact .el-table th {
-  padding: 8px 0;
+.erp-compact .el-table th.el-table__cell {
+  padding: 6px 0;
+  font-weight: 600;
+  color: #606266;
+}
+
+.erp-compact .el-table td.el-table__cell {
+  padding: 4px 0;
+}
+
+.erp-compact .el-table .cell {
+  padding: 0 8px;
+  line-height: 20px;
+}
+
+/* 紧凑档里的标签与徽标同步收小，否则一个 tag 就能把行撑到 32px 以上 */
+.erp-compact .el-table .el-tag {
+  height: 20px;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 /* 舒适模式（默认）*/
@@ -368,7 +395,7 @@
 
 /* 宽松模式（表单）*/
 .erp-spacious .el-table td,
-.erp-comfortable .el-table th {
+.erp-spacious .el-table th {
   padding: 16px 0;
 }
 

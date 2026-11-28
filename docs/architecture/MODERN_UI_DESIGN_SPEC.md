@@ -442,6 +442,58 @@
 </style>
 ```
 
+### 4. 数据表格密度（2026-11-28 补齐）
+
+**为什么补这一节**：2026-11-28 复查发现，密度规则其实**早就写在**
+`frontend/src/assets/erp-layout.css` 里（`.erp-compact / .erp-comfortable / .erp-spacious`），
+但**全仓 0 个页面采用** —— 37 处用 `erp-table` 的页面全部落在 Element Plus 默认密度上，
+行高 ~50px，录入型表格一屏只能看 10 行。规则存在、实施缺位，属于典型的
+「规范被架空」：没有守护测试，规范就会被慢慢绕过。
+
+#### 三档密度（唯一真源：`frontend/src/assets/erp-layout.css`）
+
+| 档位 | 类名 | 单元格上下内边距 | 字号 | 典型场景 |
+|---|---|---|---|---|
+| 紧凑 | `.erp-compact` | 4px（表头 6px） | 13px | 录入表格、数据浏览器、按月/按店台账 |
+| 舒适 | `.erp-comfortable` | 12px | 默认 | 常规管理列表 |
+| 宽松 | `.erp-spacious` | 16px | 默认 | 表单型页面 |
+
+#### 用法
+
+```vue
+<!-- 表格 -->
+<el-table class="erp-table erp-compact" :data="rows" stripe border>
+  <el-table-column label="金额" width="110">
+    <template #default="{ row }">
+      <!-- 行内控件一律 small（24px），否则 32px 的控件 + 4px 内边距就把行撑到 40px+ -->
+      <el-input-number v-model="row.amount" size="small" :controls="false" />
+    </template>
+  </el-table-column>
+</el-table>
+```
+
+规则：
+1. 表格加 `erp-table erp-compact` 两个类；`erp-table` 管宽度与溢出，`erp-compact` 管密度。
+2. **行内控件一律 `size="small"`**（24px）。这是紧凑档能否生效的前提 ——
+   默认尺寸控件（32px）比紧凑行高还高，密度就白改了。
+3. 单元格内**多行内容**（成本明细、人员列表、店铺+租户）必须压成**一行摘要**，
+   完整信息进 `el-tooltip`。多行内容是行高失控的第一原因。
+4. 统计卡片不许用 `el-card` 排成多行栅格；指标多时用**一行紧凑指标条**，
+   避免最后一张卡换行留下整块空白。
+5. 页面级间距用 `.erp-mb-sm / .erp-mb-md`；`margin-bottom: 20px` 这类大间距要收敛。
+
+#### 守护
+
+`frontend/scripts/erpDensityContract.test.mjs` 断言：三档都定义、宽松档表头选择器正确、
+紧凑档给出可量化指标、**两个目标页面确实声明了紧凑档**、行内控件用 small、
+用户侧「备注」字段已退役、人员归属页接入 `PageHeader`。
+**没有守护测试的规范等于没有规范** —— 新增或改动密度规则时必须同步这份契约。
+
+#### 页头 SSOT
+
+页头一律用 `frontend/src/components/common/PageHeader.vue`（`title` / `subtitle` / `icon` / `family`），
+不得再写裸 `<h1 style="font-size: 24px; ...">`。页头间距由组件内部控制，页面不另加。
+
 ## 📱 响应式设计
 
 ### 移动端适配
