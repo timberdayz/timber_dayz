@@ -4,6 +4,10 @@ Date: 2026-05-05
 
 This inventory is generated from `frontend/src/router/index.js` and is intended to guide Phase 4 file moves without changing route contracts.
 
+> **状态说明（2026-11-28 更新）**：本清单是 2026-05-05 的历史快照，路由数量已变化
+> （`/b-cost-analysis` 随 B 类成本分析模块下线移除，业务域路由数与总体路由数均减 1）。
+> 表中该行保留仅作历史记录；当前有效路由清单以 `frontend/src/router/index.js` 为准。
+
 ## Domain Counts (by route component)
 
 | domain | routes |

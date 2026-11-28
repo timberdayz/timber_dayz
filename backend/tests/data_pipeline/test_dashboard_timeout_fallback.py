@@ -86,7 +86,6 @@ def _make_request(path: str, cache_service=None):
             "modules": {
                 "business_overview": {"status": "ready", "ready": True},
                 "inventory_backlog": {"status": "ready", "ready": True},
-                "b_cost": {"status": "ready", "ready": True},
             },
         }
     )

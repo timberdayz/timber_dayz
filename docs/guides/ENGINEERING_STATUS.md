@@ -42,6 +42,40 @@
 - 页面文案禁用「结算系数」（它曾同时影响提成与绩效工资，现已完全分开）；
   赛马相关列名必须写全「赛马评级（不参与提成计算）」。
 
+## B 类成本分析模块下线 (2026-11-28)
+
+B 类成本分析（`/b-cost-analysis`）已**整体下线**，不再是系统的一部分。
+
+下线原因（审查结论）：该模块自建成本口径与业务概览的真实利润口径不一致，
+且**零消费方** —— 财务总览 / 月结 / 绩效 / 产品中心均不读它的任何输出。
+
+- 业务概览的利润取妙手「利润(RMB)」黑盒列（`mart.shop_month_kpi.profit` →
+  `finance.shop_profit_basis`），**不拆成本**；
+- 本模块自拼 8 列重算，推算利润**每月虚高 2~4 倍**（如 2026-06：妙手 37,005.32
+  vs 本模块 158,149.56）；
+- `mart.b_cost_shop_month` 只被本模块自己的 3 个 api 视图读，3 个 api 视图只被
+  本模块自己的 3 个端点读，3 个端点只被本模块自己的页面调用。
+
+已移除的对象：
+
+| 层 | 移除内容 |
+|---|---|
+| 前端 | `BCostAnalysis.vue` / `/b-cost-analysis` 路由 / 菜单项 / 3 个 `queryBCostAnalysis*` API 方法 |
+| 权限 | 权限码 `b-cost-analysis`（系统权限目录 + manager / finance 默认角色） |
+| 后端 | 3 个 `/api/dashboard/b-cost-analysis/*` 端点 / 路由前缀白名单项 / 3 个 `get_b_cost_analysis_*` service 方法 |
+| SQL 资产 | `sql/mart/b_cost_shop_month.sql` + `sql/api_modules/b_cost_analysis_*_module.sql`（3 个） |
+| 刷新链路 | `PIPELINE_DEPENDENCIES` 与 `SQL_TARGET_PATHS` 各 4 条登记 |
+| 数据库 | 4 个视图由 `current_migrations/versions/20261245_drop_b_cost_analysis_views.py` DROP（可 downgrade 重建） |
+
+保留：妙手导出侧「B 类成本」的业务定义仍然有效 ——
+见 [`COST_DATA_SOURCES_AND_DEFINITIONS.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/COST_DATA_SOURCES_AND_DEFINITIONS.md) §3。
+
+守卫生效：
+- `backend/tests/data_pipeline/test_refresh_registry_targets.py` 与
+  `backend/tests/data_pipeline/test_atomic_materialized_views.py` 反向断言
+  **b_cost 不在刷新链里**；
+- `frontend/scripts/moduleSunsetUi.test.mjs` 断言路由 / 菜单 / API 层均无 b-cost 残留。
+
 ## CI Model
 
 - Default GitHub `CI Pipeline` is change-scoped, not full-repository regression
@@ -100,10 +134,12 @@ Key files:
     ⇒ 320 通过 / 11 失败。
   - ⚠ 计数是**快照值**, 会随并行开发流变化 —— 记录时工作区正有 HR/结算域的
     改造在推进, 若干失败属于那些改造的中间态。**性质与修法**才是本条的重点。
-  - 分布: `domainBridgeInventory` / `employeeTargetAllocation` / `bCostAnalysisUi` /
+  - 分布: `domainBridgeInventory` / `employeeTargetAllocation` / ~~`bCostAnalysisUi`~~ /
     `collectionApiContract` / `employeeTaskRoutes` / `collectionEntryPointsContract` /
     `collectionTaskVerificationRecoveryUi` / `myFollowInvestmentIncomeView` /
     `shopAssignmentRules`(文件级崩溃)。
+  - ~~`bCostAnalysisUi`~~ 已于 2026-11-28 随 B 类成本分析模块下线一并删除
+    (`frontend/scripts/bCostAnalysisUi.test.mjs`)，不再参与测试套件。
   - 性质: **测试与当前源码不同步**, 不是本轮引入:
     - `shopAssignmentRules.test.mjs`: `src/domains/business/views/hr/shopAssignmentRules.js`
       已不再导出 `calculateAllocatableProfit` ⇒ 源码重构后测试没跟上;

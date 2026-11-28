@@ -567,17 +567,6 @@ const routes = [
       roles: ['admin', 'manager', 'finance']
     }
   },
-  {
-    path: '/b-cost-analysis',
-    name: 'BCostAnalysis',
-    component: () => import('@/domains/business/views/finance/BCostAnalysis.vue'),
-    meta: {
-      title: 'B类成本分析',
-      icon: 'DataAnalysis',
-      permission: 'b-cost-analysis',
-      roles: ['admin', 'manager', 'finance']
-    }
-  },
   // ==================== 报表中心 ====================
 
   // ==================== 人力资源扩展 ====================

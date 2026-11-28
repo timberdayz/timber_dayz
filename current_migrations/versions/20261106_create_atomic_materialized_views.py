@@ -26,18 +26,21 @@
    38,607 行全部唯一，实际生效的是 daily 477 / weekly 1,506 / monthly 36,624
    三种粒度混合累加；换源会让 B 成本金额漂移 → 已否决。）
 
-消费方（6 个，全部改为读物化视图）
+消费方（4 个，全部改为读物化视图）
 --------------------------------
     mart.shop_day_kpi            mart.shop_week_kpi
     mart.platform_day_kpi        mart.platform_week_kpi
-    mart.b_cost_shop_month
-    api.b_cost_analysis_order_detail_module
+
+〔2026-11-28〕原第 5、6 个消费方 ``mart.b_cost_shop_month`` /
+``api.b_cost_analysis_order_detail_module`` 随「B类成本分析」模块下线，
+其 ``sql/`` 资产文件已删除 ⇒ 从本迁移的消费方清单里移除。
+（它们最终由迁移 ``20261245_drop_b_cost_analysis_views`` 从库里删除。）
 
 本迁移做三件事
 --------------
 1. 建 ``semantic.fact_orders_atomic_mv``（物化）+ 2 个索引；
 2. 建 ``semantic.fact_analytics_atomic_mv``（物化）+ 2 个索引；
-3. 用 ``sql/`` 下的**资产文件**重建上面 6 个视图，让它们改读物化视图。
+3. 用 ``sql/`` 下的**资产文件**重建上面 4 个视图，让它们改读物化视图。
 
 关于第 3 步为什么读资产文件而不是把视图定义抄进迁移
 --------------------------------------------------
@@ -47,11 +50,12 @@
 
 物化视图为什么不用 ``DROP MATERIALIZED VIEW ... CASCADE``
 --------------------------------------------------------
-CASCADE 会连带删掉下游。下游里有两个**不是 refresh registry 可重建目标**的对象
-—— ``mart.hr_shop_monthly_profit`` 与 ``mart.inventory_backlog_base_mv``；
-而 ``mart.b_cost_shop_month`` / ``api.b_cost_analysis_order_detail_module``
-也不在 dashboard bootstrap 的 core 计划里。一旦被 CASCADE 删掉就没人重建
-→ B 成本页直接挂。所以物化视图的刷新统一走
+CASCADE 会连带删掉下游。下游里有一个**不是 refresh registry 可重建目标**的对象
+—— ``mart.inventory_backlog_base_mv``；
+（〔2026-11-28〕``mart.b_cost_shop_month`` /
+``api.b_cost_analysis_order_detail_module`` 随「B类成本分析」模块下线，
+已由迁移 ``20261245`` 删除 ⇒ 不再是下游。）
+一旦被 CASCADE 删掉就没人重建所以物化视图的刷新统一走
 ``sql/semantic/orders_atomic_mv.sql`` 里的「存在则 REFRESH（原地刷新）/
 不存在则 CREATE」写法：既不删任何下游，也避开「DROP 与重建之间视图短暂消失」
 的窗口。
@@ -81,16 +85,14 @@ MATERIALIZED_VIEWS = (
 )
 
 #: 需要改读物化视图的消费方 → 对应的 SQL 资产文件（相对仓库根）
+#:
+#: 〔2026-11-28〕B 成本链（``mart.b_cost_shop_month`` /
+#: ``api.b_cost_analysis_order_detail_module``）已下线，资产文件已删除 ⇒ 移除。
 CONSUMER_VIEW_ASSETS = (
     ("mart.shop_day_kpi", "sql/mart/shop_day_kpi.sql"),
     ("mart.shop_week_kpi", "sql/mart/shop_week_kpi.sql"),
     ("mart.platform_day_kpi", "sql/mart/platform_day_kpi.sql"),
     ("mart.platform_week_kpi", "sql/mart/platform_week_kpi.sql"),
-    ("mart.b_cost_shop_month", "sql/mart/b_cost_shop_month.sql"),
-    (
-        "api.b_cost_analysis_order_detail_module",
-        "sql/api_modules/b_cost_analysis_order_detail_module.sql",
-    ),
 )
 
 #: 需要**先重建**的原子层普通视图（它们是物化视图的正文来源）。

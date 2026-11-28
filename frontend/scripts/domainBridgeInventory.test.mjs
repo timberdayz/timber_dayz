@@ -10,9 +10,10 @@ const routerPath = path.join(frontendRoot, 'src/router/index.js')
 
 const EXPECTED_ROUTE_WRAPPER_COUNT = 0
 const EXPECTED_UNIQUE_WRAPPER_COUNT = 0
-const EXPECTED_DIRECT_DOMAIN_ROUTE_COUNT = 81
+// 〔2026-11-28〕「B类成本分析」模块下线 ⇒ 少一条 business 域路由（81 → 80）。
+const EXPECTED_DIRECT_DOMAIN_ROUTE_COUNT = 80
 const EXPECTED_DIRECT_DOMAIN_COUNTS = {
-  business: 28,
+  business: 27,
   collection: 6,
   data_platform: 9,
   platform: 38,
@@ -67,7 +68,6 @@ const EXPECTED_ROUTE_SPECIFIERS = [
   '@/domains/business/views/sales/OrderManagement.vue',
   '@/domains/business/views/sales/CampaignManagement.vue',
   '@/domains/business/views/finance/ExpenseManagement.vue',
-  '@/domains/business/views/finance/BCostAnalysis.vue',
   '@/domains/business/views/hr/EmployeeManagement.vue',
   '@/domains/business/views/hr/MyIncome.vue',
   '@/domains/business/views/hr/EmployeeSalary.vue',

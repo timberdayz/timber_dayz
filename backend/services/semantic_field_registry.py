@@ -1596,8 +1596,12 @@ DOMAIN_CLOSED_ALIAS_DOMAINS: frozenset = frozenset({"orders"})
 #: 口径(与 ``sql/semantic/orders_atomic.sql`` 的出口表达式一一对应):
 #: 运费 + 推广费 + 平台佣金 + 平台扣费 + 平台代金券 + 平台服务费。
 #:
-#: ⚠ 「仓库操作费」**不在**这里 —— 它由下游
-#:   (``mart.b_cost_shop_month.total_cost_b``)单独相加, 放进来会重复计。
+#: ⚠ 「仓库操作费」**不在**这里 —— 它是第三方仓库成本(非平台侧成本)。
+#:   〔2026-11-28〕「B类成本分析」模块已下线(它曾在下游
+#:   ``mart.b_cost_shop_month.total_cost_b`` 里与本组 6 项相加),
+#:   ⇒ 现在**没有任何下游**把这 6 项与仓库操作费相加
+#:   ⇒ 本组常量目前只服务于 ``semantic.fact_orders_atomic`` 的
+#:   ``platform_total_cost_itemized`` 出口列本身。
 #:
 #: ⚠ 「平台扣费」目前**没有对应源列**(见巡检告警) ⇒ 已知项数恒 ≤ 5。
 #:   这不是 bug, 是**如实反映**: 平台成本口径里有一项取不到数。

@@ -4,6 +4,10 @@
 
 This document records the current intended frontend page permission matrix after the page-permission unification work.
 
+> **状态说明（2026-11-28 更新）**：`/b-cost-analysis`（B 类成本分析）已下线，页面与后端端点均已移除，
+> 其权限码 `b-cost-analysis` 已从系统权限目录与默认角色中删除。下表保留该行仅作历史记录，
+> 该路由当前不可访问。
+
 ## Classification Rules
 
 - **View page**: read-only dashboards, analytics, query/list/detail pages
@@ -95,7 +99,7 @@ All collection-management pages are admin-only by product rule.
 | 财务总览 | `/financial-overview` | View | `admin, manager, finance` |
 | 财务管理 | `/financial-management` | View/Business | `admin, manager, finance` |
 | 费用管理 | `/expense-management` | View/Business | `admin, manager, finance` |
-| B 类成本分析 | `/b-cost-analysis` | View | `admin, manager, finance` |
+| B 类成本分析（下线） | `/b-cost-analysis` | View | `admin, manager, finance` |
 | 财务报表 | `/finance-reports` | View | `admin, manager, finance` |
 | 财务报表详情 | `/finance-reports-detail` | View | `admin, finance` |
 | 汇率管理 | `/fx-management` | View/Business | `admin, manager, finance` |

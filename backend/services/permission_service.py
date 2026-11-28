@@ -208,14 +208,6 @@ SYSTEM_PERMISSIONS = [
         "action": "all",
         "category": "财务管理",
     },
-    {
-        "id": "b-cost-analysis",
-        "name": "B类成本分析",
-        "description": "查看B类成本分析",
-        "resource": "finance",
-        "action": "read",
-        "category": "财务管理",
-    },
     # 店铺运营
     {
         "id": "account-management",

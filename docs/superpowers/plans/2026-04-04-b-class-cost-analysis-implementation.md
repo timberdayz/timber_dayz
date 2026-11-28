@@ -2,6 +2,12 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态：已下线（2026-11-28）** —— 本计划描述的 B 类成本分析模块已整体下线（页面、端点、SQL 资产、
+> 刷新登记、4 个数据库视图全部移除）。原因是该模块自建成本口径与业务概览真实利润口径不一致，
+> 且零业务消费方。本文档仅作历史记录保留，其中的文件清单与步骤**不再适用**。
+> 详见 [`docs/guides/ENGINEERING_STATUS.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/ENGINEERING_STATUS.md) 的
+> 「B 类成本分析模块下线 (2026-11-28)」一节。
+
 **Goal:** 新增一个只读的 B 类成本分析页面，让用户能够按月份、平台、店铺查看 B 类成本汇总，并下钻到订单明细核对成本构成。
 
 **Architecture:** 先把 B 类成本字段补齐到 PostgreSQL Dashboard 标准链路 `semantic -> mart -> api -> backend -> frontend`，再新增专用后端接口与前端页面。页面第一期只做店铺月汇总与订单明细抽屉，不做导出、不做编辑、不复用旁路 `annual_cost_aggregate.py` 作为正式数据源。

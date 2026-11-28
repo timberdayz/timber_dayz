@@ -61,7 +61,9 @@ DASHBOARD_MODULE_TARGETS: dict[str, dict[str, list[str]]] = {
             "semantic.fact_analytics_monthly_atomic_mv",
             # 原子层物化副本（2026-11-04）：把「每行跑一次店铺别名解析」
             # 从请求路径搬到刷新路径。口径零变化（正文 = 普通视图正文）。
-            # 日/周粒度 KPI 与 B 成本页读的都是这一层。
+            # 日/周粒度 KPI 读的都是这一层。
+            # 〔2026-11-28〕「B类成本分析」模块已下线，它读的那一层
+            # (``mart.b_cost_shop_month`` / 3 个 api 视图) 随之移除。
             "semantic.fact_orders_atomic_mv",
             "semantic.fact_analytics_atomic_mv",
         ],

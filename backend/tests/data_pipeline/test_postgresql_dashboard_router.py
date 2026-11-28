@@ -47,10 +47,6 @@ def _make_request(path: str):
                         "status": "ready",
                         "ready": True,
                     },
-                    "b_cost": {
-                        "status": "ready",
-                        "ready": True,
-                    },
                 },
             }
         )

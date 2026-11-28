@@ -26,7 +26,7 @@ test('hasAnyRole matches normalized object roles', () => {
 
 test('hasPermissionForRoles grants permissions through configured roles', () => {
   const financeRoles = [{ role_code: 'finance' }]
-  assert.equal(hasPermissionForRoles(financeRoles, 'b-cost-analysis'), true)
+  assert.equal(hasPermissionForRoles(financeRoles, 'expense-management'), true)
   assert.equal(hasPermissionForRoles(financeRoles, 'role-management'), false)
 })
 
@@ -43,7 +43,7 @@ test('operator keeps current sales and hr page permissions, but not removed inve
 })
 
 test('manager keeps current finance and training page permissions, but not admin-only sales detail', () => {
-  assert.equal(hasPermissionForRoles(['manager'], 'b-cost-analysis'), true)
+  assert.equal(hasPermissionForRoles(['manager'], 'expense-management'), true)
   assert.equal(hasPermissionForRoles(['manager'], 'training-management'), true)
   assert.equal(hasPermissionForRoles(['manager'], 'sales-detail'), false)
   assert.equal(hasPermissionForRoles(['manager'], 'inventory:view'), false)
@@ -71,6 +71,4 @@ test('removed procurement and report pages are no longer granted to non-admin ro
   assert.equal(hasPermissionForRoles(['manager'], 'vendor-reports'), false)
   assert.equal(hasPermissionForRoles(['finance'], 'purchase-orders'), false)
   assert.equal(hasPermissionForRoles(['operator'], 'sales-reports'), false)
-  assert.equal(hasPermissionForRoles(['manager'], 'b-cost-analysis'), true)
-  assert.equal(hasPermissionForRoles(['finance'], 'b-cost-analysis'), true)
 })

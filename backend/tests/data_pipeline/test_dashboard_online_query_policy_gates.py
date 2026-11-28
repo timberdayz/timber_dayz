@@ -18,12 +18,6 @@ async def test_dashboard_online_query_policy_forbids_raw_sources(monkeypatch):
         captured.append(str(query))
         query_text = str(query)
 
-        if (
-            "COUNT(1) AS total FROM api.b_cost_analysis_order_detail_module"
-            in query_text
-        ):
-            return [{"total": 0}]
-
         if "FROM api.business_overview_kpi_module" in query_text:
             return [
                 {
@@ -71,21 +65,6 @@ async def test_dashboard_online_query_policy_forbids_raw_sources(monkeypatch):
     )
     await service.get_business_overview_inventory_backlog(
         min_days=45, limit=20, granularity="monthly", target_date="2026-04-01"
-    )
-
-    # Cost analysis
-    await service.get_b_cost_analysis_overview(
-        period_month="2026-04-01", platform=None, shop_id=None
-    )
-    await service.get_b_cost_analysis_shop_month(
-        period_month="2026-04-01", platform=None, shop_id=None
-    )
-    await service.get_b_cost_analysis_order_detail(
-        period_month="2026-04-01",
-        platform=None,
-        shop_id=None,
-        page=1,
-        page_size=20,
     )
 
     forbidden = (

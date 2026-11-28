@@ -1,4 +1,24 @@
-﻿# B类成本分析页面设计
+﻿> ⚠ **本文档描述的模块已于 2026-11-28 下线**（页面前端、3 个后端端点、
+> 4 个 SQL 视图与其刷新登记全部移除；迁移 `20261245_drop_b_cost_analysis_views`
+> 删除库里的视图）。
+>
+> **下线原因**：该模块自行拼 8 个源列重算 B 类成本，与系统真实利润口径
+> （妙手「利润(RMB)」黑盒列）**不一致** —— 实测推算利润是妙手口径的 2~4 倍；
+> 且除本页自身外**无任何消费方**（财务总览 / 月度利润看板 / 年度数据总结 /
+> 绩效 / 产品中心全部不读它的数据）。
+>
+> **仍然有效的部分**：B 类的**业务定义**（下面 §3 与
+> [成本数据来源与口径梳理](</F:/Vscode/python_programme/AI_code/xihong_erp/docs/COST_DATA_SOURCES_AND_DEFINITIONS.md>)
+> §3）仍然有效 —— 它描述的是妙手导出的事实本身，与本模块的实现无关。
+>
+> **当前口径的唯一权威**：利润一律取妙手「利润(RMB)」列
+> （`mart.shop_month_kpi.profit` → `finance.shop_profit_basis`），
+> 见 [成本数据来源与口径梳理](</F:/Vscode/python_programme/AI_code/xihong_erp/docs/COST_DATA_SOURCES_AND_DEFINITIONS.md>)
+> §1 与 [月度利润结算运行手册](</F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/MONTHLY_PROFIT_SETTLEMENT_RUNBOOK.md>)。
+>
+> 下方 §4 起的**页面设计**部分仅作历史留档，不代表现状。
+
+# B类成本分析页面设计（已下线）
 
 ## 1. 背景
 

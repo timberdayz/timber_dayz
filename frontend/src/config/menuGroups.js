@@ -80,8 +80,7 @@ export const menuGroups = [
     defaultExpanded: true,
     items: [
       '/financial-management',   // 月度利润看板
-      '/expense-management',     // 费用管理
-      '/b-cost-analysis'         // B类成本分析
+      '/expense-management'      // 费用管理
     ]
   },
   {

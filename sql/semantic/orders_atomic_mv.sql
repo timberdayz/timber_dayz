@@ -24,12 +24,12 @@ CREATE SCHEMA IF NOT EXISTS semantic;
 --      20 秒级降到毫秒级。
 --
 -- 为什么**不**用 `DROP MATERIALIZED VIEW ... CASCADE`：
---   DROP CASCADE 会连带删掉下游视图。下游里有两个**不是 refresh registry
---   可重建目标**的对象 —— `mart.hr_shop_monthly_profit` 与
---   `mart.inventory_backlog_base_mv` —— 它们只读普通视图，不该被动到；
---   而 `mart.b_cost_shop_month` / `api.b_cost_analysis_order_detail_module`
---   也不在 dashboard bootstrap 的 core 计划里，一旦被 CASCADE 删掉就没人
---   重建 → B 成本页直接挂。
+--   DROP CASCADE 会连带删掉下游视图。下游里有一个**不是 refresh registry
+--   可重建目标**的对象 —— `mart.inventory_backlog_base_mv` —— 它只读普通
+--   视图，不该被动到。
+--   （〔2026-11-28〕`mart.b_cost_shop_month` /
+--   `api.b_cost_analysis_order_detail_module` 随「B类成本分析」模块下线，
+--   已由迁移 20261245 删除 ⇒ 不再是下游。）
 --   「存在则 REFRESH（原地刷新，不删任何东西）/ 不存在则 CREATE」既避开
 --   这个问题，也避开「DROP 与重建之间视图短暂消失」的窗口。
 --   注：`semantic.fact_orders_atomic` 用的是 `CREATE OR REPLACE VIEW`

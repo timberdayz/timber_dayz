@@ -142,7 +142,7 @@ Examples:
 
 - `sql/api_modules/business_overview_*.sql`
 - `sql/api_modules/inventory_*.sql`
-- `sql/api_modules/b_cost_analysis_*.sql`
+- `sql/api_modules/sku_clearance_ranking_module.sql`
 
 Why risky:
 

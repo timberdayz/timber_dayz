@@ -10,23 +10,27 @@ def test_refresh_registry_includes_remaining_dashboard_api_targets():
         "api.business_overview_shop_racing_monthly_module",
         "api.business_overview_traffic_ranking_module",
         "api.business_overview_operational_metrics_module",
-        "api.b_cost_analysis_overview_module",
     }
 
     assert expected_targets.issubset(PIPELINE_DEPENDENCIES.keys())
     assert expected_targets.issubset(SQL_TARGET_PATHS.keys())
 
 
-def test_refresh_registry_includes_b_cost_analysis_targets():
-    expected_targets = {
+def test_refresh_registry_no_longer_registers_sunset_b_cost_analysis_targets():
+    """B类成本分析模块已下线 ⇒ 它的 4 个视图必须从刷新登记里消失。
+
+    〔2026-11-28 下线〕``expand_downstream_targets()`` 会自动展开全部**已登记**
+    下游 ⇒ 登记不删，订单刷新会持续尝试重建已删除的视图。
+    """
+    sunset_targets = {
         "mart.b_cost_shop_month",
         "api.b_cost_analysis_shop_month_module",
         "api.b_cost_analysis_overview_module",
         "api.b_cost_analysis_order_detail_module",
     }
 
-    assert expected_targets.issubset(PIPELINE_DEPENDENCIES.keys())
-    assert expected_targets.issubset(SQL_TARGET_PATHS.keys())
+    assert not (sunset_targets & PIPELINE_DEPENDENCIES.keys())
+    assert not (sunset_targets & SQL_TARGET_PATHS.keys())
 
 
 def test_refresh_registry_includes_labor_cost_dashboard_pipeline():

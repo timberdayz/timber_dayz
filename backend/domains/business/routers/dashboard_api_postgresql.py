@@ -17,11 +17,10 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from backend.dependencies.auth import get_current_user
 from backend.models.database import AsyncSessionLocal
 from backend.services.data_pipeline.dashboard_bootstrap import (
     DASHBOARD_ASSET_AVAILABLE_STATUSES,
@@ -39,7 +38,6 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard-postgresql"])
-_B_COST_ALLOWED_ROLES = {"admin", "manager", "finance"}
 _DASHBOARD_SINGLEFLIGHT_LOCK_TTL = 60
 _DASHBOARD_SINGLEFLIGHT_WAIT_TIMEOUT = 35.0
 
@@ -79,7 +77,6 @@ _BUSINESS_OVERVIEW_LEGACY_QUERY_KEYS = {
 _DASHBOARD_MODULE_ROUTE_PREFIXES = {
     "business_overview": (
         "/api/dashboard/business-overview/",
-        "/api/dashboard/b-cost-analysis/",
     ),
 }
 
@@ -468,17 +465,6 @@ async def _try_attach_business_overview_semantic_readiness(
     return meta
 
 
-def _normalize_period_month_for_cache(period_month: Optional[str]) -> Optional[str]:
-    if period_month is None:
-        return None
-    try:
-        normalized = _normalize_period_start(period_month)
-        month_start = date_cls(normalized.year, normalized.month, 1)
-        return month_start.isoformat()
-    except Exception:
-        return period_month
-
-
 def _snapshot_cache_type(cache_type: str) -> str:
     """按端点分桶的快照缓存类型。"""
     return "{cache_type}:last_success".format(cache_type=cache_type)
@@ -692,35 +678,6 @@ async def _resolve_cached_data(
     ):
         return payload["data"], cache_status
     return payload, cache_status
-
-
-def _extract_user_role_codes(current_user: Any) -> set[str]:
-    role_codes: set[str] = set()
-    for role in getattr(current_user, "roles", []) or []:
-        if isinstance(role, str):
-            role_codes.add(role.lower())
-            continue
-        role_code = getattr(role, "role_code", None)
-        role_name = getattr(role, "role_name", None)
-        if role_code:
-            role_codes.add(str(role_code).lower())
-        if role_name:
-            role_codes.add(str(role_name).lower())
-    return role_codes
-
-
-def _require_b_cost_role(current_user: Any) -> Any:
-    if getattr(current_user, "is_superuser", False):
-        return current_user
-    if _extract_user_role_codes(current_user) & _B_COST_ALLOWED_ROLES:
-        return current_user
-    raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-
-async def _get_b_cost_authorized_user(
-    current_user: Any = Depends(get_current_user),
-) -> Any:
-    return _require_b_cost_role(current_user)
 
 
 @router.get("/business-overview/kpi")
@@ -1376,149 +1333,4 @@ async def get_business_overview_operational_metrics_postgresql(
         )
         return error_response(
             ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500
-        )
-
-
-@router.get("/b-cost-analysis/overview")
-async def get_b_cost_analysis_overview_postgresql(
-    request: Request,
-    period_month: str = Query(..., description="month in YYYY-MM or YYYY-MM-DD"),
-    platform: Optional[str] = Query(None, description="single platform code"),
-    shop_id: Optional[str] = Query(None, description="shop id filter"),
-    _current_user: Any = Depends(_get_b_cost_authorized_user),
-):
-    try:
-        await _require_dashboard_assets_ready(request)
-        cache_params = _normalize_cache_params(
-            {
-                "period_month": _normalize_period_month_for_cache(period_month),
-                "platform": platform,
-                "shop_id": shop_id,
-            }
-        )
-
-        async def _produce_payload():
-            service = get_postgresql_dashboard_service()
-            result = await service.get_b_cost_analysis_overview(
-                period_month=period_month,
-                platform=platform,
-                shop_id=shop_id,
-            )
-            return json.loads(success_response(data=result).body.decode())
-
-        payload, cache_status = await _resolve_cached_payload(
-            request,
-            "b_cost_analysis_overview",
-            cache_params,
-            _produce_payload,
-        )
-        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
-    except ValueError as e:
-        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
-    except Exception as e:
-        logger.error(
-            f"PostgreSQL b cost analysis overview query failed: {e}", exc_info=True
-        )
-        return error_response(
-            ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500
-        )
-
-
-@router.get("/b-cost-analysis/shop-month")
-async def get_b_cost_analysis_shop_month_postgresql(
-    request: Request,
-    period_month: str = Query(..., description="month in YYYY-MM or YYYY-MM-DD"),
-    platform: Optional[str] = Query(None, description="single platform code"),
-    shop_id: Optional[str] = Query(None, description="shop id filter"),
-    _current_user: Any = Depends(_get_b_cost_authorized_user),
-):
-    try:
-        await _require_dashboard_assets_ready(request)
-        cache_params = _normalize_cache_params(
-            {
-                "period_month": _normalize_period_month_for_cache(period_month),
-                "platform": platform,
-                "shop_id": shop_id,
-            }
-        )
-
-        async def _produce_payload():
-            service = get_postgresql_dashboard_service()
-            result = await service.get_b_cost_analysis_shop_month(
-                period_month=period_month,
-                platform=platform,
-                shop_id=shop_id,
-            )
-            return json.loads(success_response(data=result).body.decode())
-
-        payload, cache_status = await _resolve_cached_payload(
-            request,
-            "b_cost_analysis_shop_month",
-            cache_params,
-            _produce_payload,
-        )
-        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
-    except ValueError as e:
-        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
-    except Exception as e:
-        logger.error(
-            f"PostgreSQL b cost analysis shop month query failed: {e}", exc_info=True
-        )
-        return error_response(
-            ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500
-        )
-
-
-@router.get("/b-cost-analysis/order-detail")
-async def get_b_cost_analysis_order_detail_postgresql(
-    request: Request,
-    period_month: str = Query(..., description="month in YYYY-MM or YYYY-MM-DD"),
-    platform: Optional[str] = Query(None, description="single platform code"),
-    shop_id: Optional[str] = Query(None, description="shop id filter"),
-    page: int = Query(1, description="page number"),
-    page_size: int = Query(20, le=200, description="page size"),
-    _current_user: Any = Depends(_get_b_cost_authorized_user),
-):
-    try:
-        await _require_dashboard_assets_ready(request)
-        params = {
-            "period_month": period_month,
-            "platform": platform,
-            "shop_id": shop_id,
-            "page": page,
-            "page_size": page_size,
-        }
-        cache_params = _normalize_cache_params(
-            {
-                **params,
-                "period_month": _normalize_period_month_for_cache(period_month),
-            }
-        )
-
-        async def _produce_payload():
-            service = get_postgresql_dashboard_service()
-            result = await service.get_b_cost_analysis_order_detail(
-                period_month=period_month,
-                platform=platform,
-                shop_id=shop_id,
-                page=page,
-                page_size=page_size,
-            )
-            return json.loads(success_response(data=result).body.decode())
-
-        payload, cache_status = await _resolve_cached_payload(
-            request,
-            "b_cost_analysis_order_detail",
-            cache_params,
-            _produce_payload,
-        )
-        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
-    except ValueError as e:
-        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
-    except Exception as e:
-        logger.error(
-            f"PostgreSQL b cost analysis order detail query failed: {e}", exc_info=True
-        )
-        return error_response(
-            ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500
         )

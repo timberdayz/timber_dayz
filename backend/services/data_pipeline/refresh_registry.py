@@ -161,7 +161,6 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
         "mart.inventory_state",
     ],
     "mart.spu_operating_current": ["mart.inventory_age_current"],
-    "mart.b_cost_shop_month": ["semantic.fact_orders_atomic_mv"],
     "mart.shop_month_labor_cost": [],
     "api.business_overview_kpi_module": ["mart.platform_month_kpi"],
     "api.business_overview_comparison_platform_module": [
@@ -201,9 +200,6 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
         "semantic.shop_month_other_operating_cost",
         "mart.shop_month_labor_cost",
     ],
-    "api.b_cost_analysis_overview_module": ["mart.b_cost_shop_month"],
-    "api.b_cost_analysis_shop_month_module": ["mart.b_cost_shop_month"],
-    "api.b_cost_analysis_order_detail_module": ["semantic.fact_orders_atomic_mv"],
     # SKU 级滞销清单：判据来自状态层（距上次进货天数），ERP 主数据补定价原料。
     # 2026-10-31：不再依赖 semantic.fact_orders_atomic —— 近30天动销改用妙手自带的
     # 窗口销量（状态层里已有），跨系统对账口径恒为 0，且那个视图每行跑一次店铺别名
@@ -250,7 +246,6 @@ SQL_TARGET_PATHS: dict[str, str] = {
     "mart.inventory_state": "sql/mart/inventory_state.sql",
     "mart.inventory_backlog_base": "sql/mart/inventory_backlog_base.sql",
     "mart.spu_operating_current": "sql/mart/spu_operating_current.sql",
-    "mart.b_cost_shop_month": "sql/mart/b_cost_shop_month.sql",
     "mart.shop_month_labor_cost": "sql/mart/shop_month_labor_cost.sql",
     "api.business_overview_kpi_module": "sql/api_modules/business_overview_kpi_module.sql",
     "api.business_overview_comparison_platform_module": "sql/api_modules/business_overview_comparison_platform_module.sql",
@@ -263,9 +258,6 @@ SQL_TARGET_PATHS: dict[str, str] = {
     "api.inventory_age_list_module": "sql/api_modules/inventory_age_list_module.sql",
     "api.inventory_age_summary_module": "sql/api_modules/inventory_age_summary_module.sql",
     "api.business_overview_operational_metrics_module": "sql/api_modules/business_overview_operational_metrics_module.sql",
-    "api.b_cost_analysis_overview_module": "sql/api_modules/b_cost_analysis_overview_module.sql",
-    "api.b_cost_analysis_shop_month_module": "sql/api_modules/b_cost_analysis_shop_month_module.sql",
-    "api.b_cost_analysis_order_detail_module": "sql/api_modules/b_cost_analysis_order_detail_module.sql",
     "api.sku_clearance_ranking_module": "sql/api_modules/sku_clearance_ranking_module.sql",
 }
 

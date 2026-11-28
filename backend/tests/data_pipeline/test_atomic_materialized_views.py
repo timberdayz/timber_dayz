@@ -79,12 +79,6 @@ CONSUMER_VIEW_ASSETS = (
         "semantic.fact_orders_atomic_mv",
         "semantic.fact_analytics_atomic_mv",
     ),
-    ("sql/mart/b_cost_shop_month.sql", "semantic.fact_orders_atomic_mv", None),
-    (
-        "sql/api_modules/b_cost_analysis_order_detail_module.sql",
-        "semantic.fact_orders_atomic_mv",
-        None,
-    ),
 )
 
 
@@ -185,8 +179,7 @@ def test_refresh_plan_orders_materialized_view_before_consumers():
         [
             "semantic.fact_orders_atomic_mv",
             "mart.shop_day_kpi",
-            "mart.b_cost_shop_month",
-            "api.b_cost_analysis_order_detail_module",
+            "mart.platform_day_kpi",
         ]
     )
     assert plan.index("semantic.fact_orders_atomic") < plan.index(
@@ -196,14 +189,11 @@ def test_refresh_plan_orders_materialized_view_before_consumers():
         "mart.shop_day_kpi"
     )
     assert plan.index("semantic.fact_orders_atomic_mv") < plan.index(
-        "mart.b_cost_shop_month"
-    )
-    assert plan.index("semantic.fact_orders_atomic_mv") < plan.index(
-        "api.b_cost_analysis_order_detail_module"
+        "mart.platform_day_kpi"
     )
 
 
-def test_order_domain_refresh_covers_materialized_views_and_b_cost_chain():
+def test_order_domain_refresh_covers_materialized_views_and_kpi_chain():
     targets = expand_downstream_targets(
         [
             "semantic.fact_orders_atomic",
@@ -218,15 +208,42 @@ def test_order_domain_refresh_covers_materialized_views_and_b_cost_chain():
         "mart.shop_week_kpi",
         "mart.platform_day_kpi",
         "mart.platform_week_kpi",
-        "mart.b_cost_shop_month",
-        "api.b_cost_analysis_order_detail_module",
-        "api.b_cost_analysis_overview_module",
-        "api.b_cost_analysis_shop_month_module",
     }
     assert expected.issubset(set(targets))
     assert targets.index("semantic.fact_orders_atomic_mv") < targets.index(
-        "mart.b_cost_shop_month"
+        "mart.shop_day_kpi"
     )
+
+
+def test_order_domain_refresh_no_longer_expands_sunset_b_cost_chain():
+    """B类成本分析模块已下线 ⇒ 订单刷新**不得**再重建它的 4 个视图。
+
+    为什么这条要守住：``expand_downstream_targets()`` 从
+    ``semantic.fact_orders_atomic`` 自动展开全部**已登记**下游 ——
+    登记不删 ⇒ 每次订单刷新仍会尝试重建已删除的视图 ⇒ 刷新任务持续报错。
+
+    〔2026-11-28 下线〕原断言要求这 4 个视图**必须**在展开结果里，
+    现在反过来：它们必须**不在**。
+    """
+    targets = expand_downstream_targets(
+        [
+            "semantic.fact_orders_atomic",
+            "semantic.fact_orders_atomic_mv",
+            "semantic.fact_orders_monthly_atomic_mv",
+        ]
+    )
+    sunset = {
+        "mart.b_cost_shop_month",
+        "api.b_cost_analysis_overview_module",
+        "api.b_cost_analysis_shop_month_module",
+        "api.b_cost_analysis_order_detail_module",
+    }
+    assert not (sunset & set(targets)), (
+        "B 成本链已下线，不应再被订单刷新展开重建"
+    )
+    for target in sunset:
+        assert target not in SQL_TARGET_PATHS
+        assert target not in PIPELINE_DEPENDENCIES
 
 
 def test_dashboard_bootstrap_refreshes_the_materialized_views():

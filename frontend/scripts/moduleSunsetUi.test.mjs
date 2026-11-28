@@ -9,11 +9,13 @@ const menuGroupsPath = path.resolve(__dirname, '../src/config/menuGroups.js')
 const routerPath = path.resolve(__dirname, '../src/router/index.js')
 const businessOverviewPath = path.resolve(__dirname, '../src/domains/business/views/BusinessOverview.vue')
 const dataSyncTemplatesPath = path.resolve(__dirname, '../src/domains/data_platform/views/DataSyncTemplates.vue')
+const dashboardApiPath = path.resolve(__dirname, '../src/api/dashboard.js')
 
 const menuGroupsSource = fs.readFileSync(menuGroupsPath, 'utf8')
 const routerSource = fs.readFileSync(routerPath, 'utf8')
 const businessOverviewSource = fs.readFileSync(businessOverviewPath, 'utf8')
 const dataSyncTemplatesSource = fs.readFileSync(dataSyncTemplatesPath, 'utf8')
+const dashboardApiSource = fs.readFileSync(dashboardApiPath, 'utf8')
 
 test('sunset store and finance placeholder modules are removed from router and sidebar', () => {
   for (const routePath of [
@@ -94,5 +96,39 @@ test('sunset modules are removed from menu groups while inventory dependencies s
     dataSyncTemplatesSource.includes(`if (domain === 'inventory')`),
     true,
     'data sync templates should keep inventory domain template branch'
+  )
+})
+
+// [*] 2026-11-28：B类成本分析模块下线。
+//
+// 为什么下线：该模块自行拼 8 个源列重算 B 类成本，与系统真实利润口径
+// （妙手「利润(RMB)」黑盒列）不一致 —— 实测净利率参考虚高 2~4 倍；
+// 且除本页面外无任何消费方。下线前它的后端权限码挂在 `business_overview`
+// 的路由前缀白名单里，删端点时若漏删前缀，接口会失去权限校验。
+test('sunset b-cost-analysis module is removed from router, sidebar and API layer', () => {
+  assert.equal(
+    routerSource.includes("path: '/b-cost-analysis'"),
+    false,
+    '/b-cost-analysis should be removed from the router'
+  )
+  assert.equal(
+    menuGroupsSource.includes("'/b-cost-analysis'"),
+    false,
+    '/b-cost-analysis should be removed from the sidebar'
+  )
+  assert.equal(
+    routerSource.includes("name: 'BCostAnalysis'"),
+    false,
+    'BCostAnalysis route name should be removed from the router'
+  )
+  assert.equal(
+    dashboardApiSource.includes('queryBCostAnalysis'),
+    false,
+    'dashboard API should not expose queryBCostAnalysis* methods anymore'
+  )
+  assert.equal(
+    dashboardApiSource.includes('/dashboard/b-cost-analysis/'),
+    false,
+    'dashboard API should not call b-cost-analysis endpoints anymore'
   )
 })
