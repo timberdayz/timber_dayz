@@ -46,51 +46,51 @@ def _upsert_sql() -> str:
 def test_upsert_conflict_branch_never_overwrites_remark():
     """冲突更新分支不得改写 remark —— 它是系统所有的列。"""
     upsert = _upsert_sql()
-    assert "remark = EXCLUDED.remark" not in upsert, (
-        "remark 承载占位行清理的批次标记，冲突更新不得用 EXCLUDED 覆盖它"
-    )
+    assert (
+        "remark = EXCLUDED.remark" not in upsert
+    ), "remark 承载占位行清理的批次标记，冲突更新不得用 EXCLUDED 覆盖它"
 
 
 def test_upsert_insert_uses_empty_string_not_null_for_remark():
     """新行写 remark 时用空串，保持与迁移的 ``COALESCE(remark,'')=''`` 判定一致。"""
     upsert = _upsert_sql()
-    assert "COALESCE(:note, '')" in upsert, (
-        "新行 remark 必须落成空串（NULL 会让迁移的占位行判定失准）"
-    )
+    assert (
+        "COALESCE(:note, '')" in upsert
+    ), "新行 remark 必须落成空串（NULL 会让迁移的占位行判定失准）"
 
 
 def test_update_route_does_not_write_remark():
     """PUT 路由同样不得改写系统所有的 remark。"""
     update_block = _slice("async def update_expense(", "@router.delete")
-    assert "remark = :note" not in update_block, (
-        "更新路由不得用客户端的 note 覆盖系统标记"
-    )
+    assert (
+        "remark = :note" not in update_block
+    ), "更新路由不得用客户端的 note 覆盖系统标记"
 
 
 def test_post_detects_soft_deleted_conflict_row():
     """保存前必须探测同键软删行，并给出明确报错。"""
     post_block = _slice("async def create_or_update_expense(", "@router.put")
-    assert "deleted_at IS NOT NULL" in post_block, (
-        "保存前必须探测同 (platform_code, shop_id, year_month) 的软删行"
-    )
+    assert (
+        "deleted_at IS NOT NULL" in post_block
+    ), "保存前必须探测同 (platform_code, shop_id, year_month) 的软删行"
     assert "该费用记录已被删除" in post_block, "命中软删行必须给出可读的报错文案"
 
 
 def test_upsert_does_not_resurrect_soft_deleted_rows():
     """复活只能走恢复路由（带二次确认），普通保存不得自行复活。"""
     upsert = _upsert_sql()
-    assert "deleted_at = NULL" not in upsert, (
-        "UPSERT 不得自行复活软删行 —— 复活只走 /restore（前端有二次确认）"
-    )
+    assert (
+        "deleted_at = NULL" not in upsert
+    ), "UPSERT 不得自行复活软删行 —— 复活只走 /restore（前端有二次确认）"
 
 
 def test_restore_route_still_clears_the_batch_marker():
     """批次标记的清除仍然由恢复路由负责（否则标记会永远留在行上）。"""
     restore_block = SOURCE[SOURCE.index("async def restore_expense(") :]
     assert "remark" in restore_block, "恢复路由必须处理 remark（清批次标记）"
-    assert re.search(r"remark\s*=\s*CASE", restore_block), (
-        "恢复路由必须按批次标记前缀清空 remark"
-    )
+    assert re.search(
+        r"remark\s*=\s*CASE", restore_block
+    ), "恢复路由必须按批次标记前缀清空 remark"
 
 
 # ---------------------------------------------------------------------------
